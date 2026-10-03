@@ -166,7 +166,6 @@ export function createMcpConnectionPool(options: McpConnectionPoolOptions): McpC
     const leased = new Map<string, string>();
     const configuredServers = new Map<string, McpServerConfig>();
     let leaseClosed = false;
-    let sessionStartupReported = false;
 
     const requireEntry = (serverName: string): PoolEntry => {
       const key = leased.get(serverName);
@@ -309,25 +308,6 @@ export function createMcpConnectionPool(options: McpConnectionPoolOptions): McpC
         const status = (await entry.adapter.status())[serverName];
         if (status) statuses[serverName] = status;
         tools.push(...(await entry.adapter.listTools()));
-      }
-      if (sessionId && !sessionStartupReported) {
-        sessionStartupReported = true;
-        const enabledServers = [...configuredServers].filter(
-          ([, config]) => config.enabled !== false,
-        );
-        const connectedCount = enabledServers.filter(
-          ([serverName]) => statuses[serverName]?.status === "connected",
-        ).length;
-        options.telemetry?.recordSessionStartup({
-          configuredCount: enabledServers.length,
-          connectedCount,
-          failedCount: enabledServers.length - connectedCount,
-          processCount: enabledServers.filter(
-            ([serverName, config]) =>
-              config.type === "stdio" && statuses[serverName]?.status === "connected",
-          ).length,
-          sessionId,
-        });
       }
       return { statuses, tools };
     };

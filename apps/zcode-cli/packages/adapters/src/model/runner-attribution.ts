@@ -5,11 +5,8 @@
  * 与 runner-status.ts 的依赖方向：本文件只 `import type` 它的 `ModelStatusContext`，运行时不成环。
  */
 
-import type {
-  ModelRequestSessionType as ModelRequestSessionTypeValue,
-  ResolvedModelApiCallObservation,
-} from "@zcode/contracts";
-import { ModelApiActorKind, ModelApiOperation, ModelRequestSessionType } from "@zcode/contracts";
+import type { ModelRequestSessionType as ModelRequestSessionTypeValue } from "@zcode/contracts";
+import { ModelRequestSessionType } from "@zcode/contracts";
 import { isOpenCodeGoBaseUrl } from "./opencode-session.js";
 import type { ModelStatusContext } from "./runner-status.js";
 
@@ -47,19 +44,10 @@ export function createModelRequestAttributionHeaders(
 
 export function resolveModelRequestSessionType(
   explicitType: unknown,
-  modelCall: Pick<ResolvedModelApiCallObservation, "actorKind" | "operation">,
 ): ModelRequestSessionTypeValue {
-  if (isModelRequestSessionType(explicitType)) return explicitType;
-  if (modelCall.operation !== ModelApiOperation.AgentStep) {
-    return ModelRequestSessionType.Other;
-  }
-  if (modelCall.actorKind === ModelApiActorKind.MainAgent) {
-    return ModelRequestSessionType.Main;
-  }
-  if (modelCall.actorKind === ModelApiActorKind.Subagent) {
-    return ModelRequestSessionType.Subagent;
-  }
-  return ModelRequestSessionType.Other;
+  // 模型 API 调用分类（modelCall）随遥测删除；会话类型现在只由调用方显式声明，
+  // 缺省一律 Other，绝不从 querySource 反推。
+  return isModelRequestSessionType(explicitType) ? explicitType : ModelRequestSessionType.Other;
 }
 
 function isModelRequestSessionType(value: unknown): value is ModelRequestSessionTypeValue {

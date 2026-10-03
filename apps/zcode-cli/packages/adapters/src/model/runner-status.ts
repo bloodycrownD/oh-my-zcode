@@ -1,19 +1,13 @@
 import type {
   Logger,
   ModelNetworkStatusEvent,
-  ModelReasoningCallHint,
   ModelStatusSink,
   ModelTransportKind,
   ModelRequestSessionType as ModelRequestSessionTypeValue,
   QueryId,
-  ResolvedModelApiCallObservation,
   TraceId,
 } from "@zcode/contracts";
-import {
-  ModelFailureReason as ModelFailureReasonValue,
-  createTraceId,
-  resolveModelApiCallObservation,
-} from "@zcode/contracts";
+import { ModelFailureReason as ModelFailureReasonValue, createTraceId } from "@zcode/contracts";
 import { UNBOUNDED_RETRY_MAX_ATTEMPTS } from "./retry-budget.js";
 // 请求归因 header 一族住在 runner-attribution.ts（max-lines 拆分）；公开面仍从本文件导出，
 // 既有 importer 不必改路径。
@@ -46,7 +40,6 @@ export interface ModelStatusContext {
   transport: ModelTransportKind;
   maxAttempts: number;
   streamRecovery?: ModelNetworkStatusEvent["streamRecovery"];
-  modelCall: ResolvedModelApiCallObservation;
 }
 
 export function createStatusContext(input: {
@@ -57,16 +50,12 @@ export function createStatusContext(input: {
 }): ModelStatusContext {
   const metadata = input.request.metadata ?? {};
   const querySource = stringMetadata(metadata.querySource);
-  const resolvedModelCall = resolveModelApiCallObservation(querySource, input.request.modelCall);
   return {
     baseURL: input.resolved.baseURL,
     maxAttempts: input.maxAttempts,
     providerId: input.resolved.providerId,
     modelId: input.resolved.modelId,
-    modelRequestSessionType: resolveModelRequestSessionType(
-      input.request.modelRequestSessionType,
-      resolvedModelCall,
-    ),
+    modelRequestSessionType: resolveModelRequestSessionType(input.request.modelRequestSessionType),
     requestId: stringMetadata(metadata.requestId) ?? crypto.randomUUID(),
     sessionId: (input.request.traceContext?.sessionId ??
       stringMetadata(metadata.sessionId)) as ModelStatusContext["sessionId"],
@@ -91,22 +80,6 @@ export function createStatusContext(input: {
       | ModelStatusContext["parentSessionId"]
       | undefined,
     toolCallId: stringMetadata(metadata.toolCallId),
-    modelCall: {
-      ...resolvedModelCall,
-      agentName: resolvedModelCall.agentName ?? stringMetadata(metadata.agentName),
-      operationId:
-        resolvedModelCall.operationId ??
-        input.request.traceContext?.spanId ??
-        stringMetadata(metadata.spanId),
-      stepIndex:
-        resolvedModelCall.stepIndex ??
-        (typeof metadata.stepIndex === "number"
-          ? metadata.stepIndex
-          : typeof metadata.iteration === "number"
-            ? metadata.iteration
-            : undefined),
-      reasoning: initialReasoningObservation(resolvedModelCall.reasoning, undefined),
-    },
   };
 }
 
@@ -123,26 +96,6 @@ export function createAttemptStatusContext(
     // adapter retry 会发起新的物理 provider 请求；
     // 复用首轮 requestId 会让上游日志和 retry-after 诊断串错请求。
     requestId: crypto.randomUUID(),
-  };
-}
-
-function initialReasoningObservation(
-  hint: ModelReasoningCallHint | undefined,
-  modelVariant: string | undefined,
-): ResolvedModelApiCallObservation["reasoning"] {
-  const explicit = hint?.explicit;
-  return {
-    capability: "unknown",
-    requestedControl: explicit?.controlType ?? "provider_default",
-    requestedState: explicit?.state ?? "provider_default",
-    requestedLevel: hint?.requestedLevel ?? modelVariant,
-    effectiveControl: explicit?.controlType ?? "unknown",
-    effectiveState: explicit?.state ?? "unknown",
-    effectiveLevel:
-      explicit?.effectiveLevel ?? (explicit?.state === "disabled" ? "disabled" : "unknown"),
-    ...(explicit?.effectiveBudgetTokens !== undefined
-      ? { effectiveBudgetTokens: explicit.effectiveBudgetTokens }
-      : {}),
   };
 }
 
@@ -234,36 +187,6 @@ export async function publishModelStatus(
         status: "failed",
       });
     }
-  }
-}
-
-/**
- * Provider 流式里程碑只发给进程级 Telemetry Sink，不写 SessionEvent。
- * requestStatusSink 属于对话产品状态，不能被纯观测事件污染。
- */
-export async function publishModelTelemetryMilestone(
-  event: Extract<
-    ModelNetworkStatusEvent,
-    {
-      type: "model_first_provider_event" | "model_first_content" | "model_first_text";
-    }
-  >,
-  options: {
-    logger?: Logger;
-    statusSink?: ModelStatusSink;
-  },
-): Promise<void> {
-  logStatusEvent(event, options.logger);
-  if (!options.statusSink) return;
-  try {
-    await options.statusSink.publish(event);
-  } catch (error) {
-    options.logger?.warn("Model telemetry milestone sink failed", {
-      ...modelStatusLogContext(event),
-      errorMessage: error instanceof Error ? error.message : String(error),
-      event: "model.telemetry_milestone.failed",
-      status: "failed",
-    });
   }
 }
 
@@ -370,17 +293,6 @@ function logStatusEvent(event: ModelNetworkStatusEvent, logger?: Logger): void {
         status: "waiting",
         statusMessage: event.message,
         timeoutMs: event.timeoutMs,
-      });
-      return;
-
-    case "model_first_provider_event":
-    case "model_first_content":
-    case "model_first_text":
-      logger?.debug("Model telemetry milestone observed", {
-        ...modelStatusLogContext(event),
-        elapsedMs: event.elapsedMs,
-        event: event.type,
-        status: "completed",
       });
       return;
   }

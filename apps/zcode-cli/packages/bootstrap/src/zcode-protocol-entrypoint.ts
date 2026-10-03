@@ -10,7 +10,6 @@ import {
 import {
   zcodeProtocolNotifications,
   type ZCodeMcpResourceSample,
-  type ZCodeMcpTelemetryEvent,
 } from "@zcode/shared";
 import type { SqliteSessionStore } from "@zcode/adapters/storage";
 import { traceContextToLogContext, createRootTraceContext } from "@zcode/contracts";
@@ -47,7 +46,6 @@ import { cleanupProtocolRuntime } from "./zcode-protocol/runtime-cleanup.js";
 import { startProtocolResourceSampler } from "./zcode-protocol/resource-sampler.js";
 import { acquireProtocolStartupResource } from "./zcode-protocol/startup-resource.js";
 import type { ZCodeProcessResourceSampler } from "./process-resource-sampler.js";
-import { prepareZCodeTelemetryEnv, shutdownZCodeTelemetry } from "./telemetry-bootstrap.js";
 
 function applyProtocolPresentationSurface(
   options: Omit<ZCodeAppOptions, "providerRegistry">,
@@ -128,7 +126,6 @@ export async function runZCodeProtocolAgent(
   let mcpPort: McpPort | undefined;
   let mcpTelemetryTracker: McpTelemetryTracker | undefined;
   let mcpResourceSink: ((samples: ZCodeMcpResourceSample[]) => void) | undefined;
-  let mcpTelemetrySink: ((event: ZCodeMcpTelemetryEvent) => void) | undefined;
   let processResourceSampler: ZCodeProcessResourceSampler | undefined;
   let providerRegistryRuntime:
     | Awaited<ReturnType<typeof startProcessProviderRegistryRuntime>>
@@ -167,25 +164,11 @@ export async function runZCodeProtocolAgent(
       module: "bootstrap.zcode_protocol",
       providerCount: providerRegistryRuntime.snapshot.registry.providers.length,
     });
-    const runtimeSurface = resolveProtocolRuntimeSurface(runtimeEnv);
-    const telemetryEnv = await acquireProtocolStartupResource({
-      signal: options.lifecycle?.signal,
-      logger,
-      disposeLate: () => shutdownZCodeTelemetry(),
-      create: () =>
-        prepareZCodeTelemetryEnv(runtimeEnv, {
-          cliVersion: options.version,
-          productVersion: options.env?.ZCODE_APP_VERSION,
-          runtimeSurface,
-        }),
-    });
-    const telemetryDeviceMid = telemetryEnv.ZCODE_TELEMETRY_DEVICE_MID;
     mcpTelemetryTracker =
       configResult.config.features.mcp === false
         ? undefined
         : createMcpTelemetryTracker({
             idSalt: traceContext.traceId,
-            onEvent: (event) => mcpTelemetrySink?.(event),
             onResourceSamples: (samples) => mcpResourceSink?.(samples),
           });
     // 官方 MCP 身份头端口：连接池构造早于 server，故用惰性 holder 回填。
@@ -262,11 +245,7 @@ export async function runZCodeProtocolAgent(
               selectionIssue: view.selectionIssue,
             };
           },
-          env: {
-            ...telemetryEnv,
-            ...appOptions.env,
-            ...(telemetryDeviceMid ? { ZCODE_TELEMETRY_DEVICE_MID: telemetryDeviceMid } : {}),
-          },
+          ...(appOptions.env ? { env: appOptions.env } : {}),
           ...(nodeReplBrowserBroker ? { nodeReplBrowserBroker } : {}),
           ...(mcpConnectionPool
             ? {
@@ -323,14 +302,6 @@ export async function runZCodeProtocolAgent(
         method: zcodeProtocolNotifications.mcpResourceSamples,
         params: samples,
       });
-    mcpTelemetrySink = (event) => {
-      // 五分钟资源通知取代旧内存通知；tracker 内部孤儿事实仍保留原判据。
-      if (event.kind === "memory") return;
-      connection.send({
-        method: zcodeProtocolNotifications.mcpTelemetry,
-        params: event,
-      });
-    };
     connection.start();
     mcpTelemetryTracker?.start();
     processResourceSampler = startProtocolResourceSampler(
@@ -374,13 +345,4 @@ export async function runZCodeProtocolAgent(
       status: "completed",
     });
   }
-}
-
-function resolveProtocolRuntimeSurface(
-  env: NodeJS.ProcessEnv,
-): "desktop_local_host" | "remote_workspace_host" {
-  // Bug 根因：入口曾无条件覆盖 Host 注入值，远程 SSH/WSL/容器 Trace 被归入本地 Desktop。
-  return env.ZCODE_TELEMETRY_RUNTIME_SURFACE?.trim() === "remote_workspace_host"
-    ? "remote_workspace_host"
-    : "desktop_local_host";
 }

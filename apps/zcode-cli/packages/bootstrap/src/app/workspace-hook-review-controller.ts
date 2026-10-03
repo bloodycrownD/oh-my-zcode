@@ -32,7 +32,6 @@ import {
   resolveWorkspaceHookReviewDigests,
   toWorkspaceHookReviewTarget,
 } from "./workspace-hook-review-request.js";
-import { WorkspaceHookReviewTelemetry } from "./workspace-hook-review-telemetry.js";
 import { superviseWorkspaceHookReviewFlow } from "./workspace-hook-review-supervisor.js";
 import { applyWorkspaceHookRevoke } from "./workspace-hook-review-revoke.js";
 
@@ -41,7 +40,6 @@ export class WorkspaceHookReviewController {
   private readonly appVersion?: string;
   private readonly coordinator: WorkspaceHookTrustCoordinator;
   private readonly host: WorkspaceHookReviewHostPort;
-  private readonly telemetry: WorkspaceHookReviewTelemetry;
   private readonly mutation: WorkspaceHookReviewMutationPort;
   private readonly sessionId: string;
   private readonly store: Promise<WorkspaceHookTrustStoreMutationPort>;
@@ -62,10 +60,6 @@ export class WorkspaceHookReviewController {
     this.appVersion = options.appVersion;
     this.coordinator = options.coordinator;
     this.host = options.host;
-    this.telemetry = new WorkspaceHookReviewTelemetry(
-      this.admission,
-      options.logger,
-    );
     this.mutation = options.mutation;
     this.sessionId = options.sessionId;
     this.store = options.store;
@@ -89,7 +83,6 @@ export class WorkspaceHookReviewController {
       host: this.host,
       registry: this.registry,
       sessionId: this.sessionId,
-      telemetry: this.telemetry,
     });
     this.supervisedFlows.set(flow, supervision);
     return supervision;
@@ -153,7 +146,6 @@ export class WorkspaceHookReviewController {
     return this.enqueueMutation(async () => {
       const validation = this.registry.validate(target, decision);
       if (!validation.accepted) {
-        this.telemetry.responseRejected(target, validation.reasonCode);
         return validation;
       }
       const flow = this.registry.getCurrentFlow(this.sessionId);
@@ -173,10 +165,6 @@ export class WorkspaceHookReviewController {
         target.workspaceIdentity !== snapshot.workspaceIdentity ||
         target.bundleDigest !== snapshot.bundleDigest
       ) {
-        this.telemetry.responseRejected(
-          target,
-          "workspace_hooks_snapshot_mismatch",
-        );
         return {
           accepted: false,
           reasonCode: "workspace_hooks_snapshot_mismatch" as const,
@@ -189,46 +177,23 @@ export class WorkspaceHookReviewController {
       if (
         !this.coordinator.canMutatePersistentTrust(snapshot.workspaceIdentity)
       ) {
-        this.telemetry.responseRejected(
-          target,
-          "workspace_hooks_blocked_by_policy",
-        );
         return {
           accepted: false,
           reasonCode: "workspace_hooks_blocked_by_policy" as const,
         };
       }
-      let applied: { grantedRecordCount?: number };
       try {
-        applied = await this.applyPersistentTrust(validation.reviewItemIds);
-      } catch (error) {
+        await this.applyPersistentTrust(validation.reviewItemIds);
+      } catch {
         // applyDecision 可因非存储原因抛错——resolveWorkspaceHookReviewDigests
         // 对未知 reviewItemId、coordinator 内部错误、store 落盘失败等。裸 catch 会把全部
         // 失败一律报成 trust_store_corrupt 且把原始错误彻底丢弃，与 toggle 路径同类。
-        // reasonCode 不变（新增需 contracts 评审），仅把
-        // errorMessage 透传进 telemetry 供回溯。
-        //
-        // 脱敏：WorkspaceHookMutationError 的 message 已在上游脱敏
-        // （见 workspace-hook-review-mutation.ts 使用 workspaceIdentitySummary / digestSummary）。
-        // 对任意 Error 仅取 error.message——上游抛错点必须保证消息不含绝对路径/完整 digest
-        // （禁止上报完整 workspace path / source path）。
-        this.telemetry.trustStoreFailure(
-          target.bundleDigest,
-          error instanceof Error ? error.message : String(error),
-        );
+        // reasonCode 不变（新增需 contracts 评审）。
         return {
           accepted: false,
           reasonCode: "workspace_hooks_trust_store_corrupt" as const,
         };
       }
-      this.telemetry.decisionAccepted(target, decision, {
-        ...(applied.grantedRecordCount === undefined
-          ? {}
-          : { grantedRecordCount: applied.grantedRecordCount }),
-        requestEnabledCount: flow.request.items.filter(
-          (item) => item.configuredEnabled,
-        ).length,
-      });
       const resolved = this.registry.resolve(target, decision);
       // applyDecision 与 registry.resolve 非原子——两者之间若
       // registry 的 deadline timer 恰好触发，flow 变为 timed_out，resolve 返回
@@ -238,10 +203,6 @@ export class WorkspaceHookReviewController {
       // 决策已经生效（持久 Trust 已落盘），故按 accepted 回报并照发
       // Settled，让前端收敛到已决状态；resolve 被拒仅说明 flow 已被别的终态占用，
       // 不代表授权失败。此处只多不错：不会把未授权说成已授权。
-      if (!resolved.accepted) {
-        // 保留观测：flow 已被别的终态占用（通常是 deadline 恰好触发）。
-        this.telemetry.responseRejected(target, resolved.reasonCode);
-      }
       await this.host.emit({
         type: SessionEventType.WorkspaceHookReviewSettled,
         payload: { interactionId: target.interactionId, state: "resolved" },
@@ -302,7 +263,7 @@ export class WorkspaceHookReviewController {
           // 裸 catch 曾把 mutation port 的全部失败一律报成
           // config_write_failed——包括发生在写盘之前的 snapshot mismatch（review 后
           // bundle 已变/discovery 读败）。用户据此重试"写"永远失败，也掩盖真实原因。
-          // 按 WorkspaceHookMutationError.code 透传；telemetry 补 cause 便于定位。
+          // 按 WorkspaceHookMutationError.code 透传。
           const isMutationError =
             error instanceof WorkspaceHookMutationError ||
             (error instanceof Error &&
@@ -311,20 +272,11 @@ export class WorkspaceHookReviewController {
             ? ((error as WorkspaceHookMutationError)
                 .code as WorkspaceHookReasonCode)
             : ("workspace_hooks_config_write_failed" as const);
-          this.telemetry.toggleFailure(
-            target.bundleDigest,
-            mutationCode,
-            error instanceof Error ? error.message : String(error),
-          );
           return {
             accepted: false,
             reasonCode: mutationCode as WorkspaceHookReasonCode,
           };
         }
-        this.telemetry.toggleFailure(
-          target.bundleDigest,
-          "workspace_hooks_config_rebuild_failed",
-        );
         this.registry.fail(target, "workspace_hooks_config_rebuild_failed");
         await this.host.emit({
           type: SessionEventType.WorkspaceHookReviewSettled,
@@ -373,10 +325,6 @@ export class WorkspaceHookReviewController {
         store: this.store,
       });
       if (result.accepted) {
-        this.telemetry.revoked(
-          snapshot.bundleDigest,
-          validation.reviewItemIds.length,
-        );
         await this.refreshPendingFlow(snapshot);
         // 软门禁:revoke 后重新评估 pending 状态
         await this.emitAdmissionUpdatedAfterMutation();
@@ -423,7 +371,6 @@ export class WorkspaceHookReviewController {
         store: this.store,
       });
       if (result.accepted) {
-        this.telemetry.revoked(snapshot.bundleDigest, digests.length);
         await this.refreshPendingFlow(snapshot);
         // 软门禁:revokeCurrent 后重新评估 pending 状态
         await this.emitAdmissionUpdatedAfterMutation();
@@ -453,7 +400,6 @@ export class WorkspaceHookReviewController {
       generation: current.request.generation + 1,
     });
     const nextFlow = this.registry.supersede(target, replacement);
-    this.telemetry.superseded(replacement);
     this.generation = replacement.generation;
     await this.host.emit({
       type: SessionEventType.WorkspaceHookReviewSuperseded,
@@ -462,7 +408,6 @@ export class WorkspaceHookReviewController {
         supersededByInteractionId: replacement.interactionId,
       },
     });
-    this.telemetry.requestCreated(replacement);
     await this.host.emit({
       type: SessionEventType.WorkspaceHookReviewRequested,
       payload: { request: replacement },
@@ -526,7 +471,6 @@ export class WorkspaceHookReviewController {
     });
     this.generation = request.generation;
     const flow = this.registry.open(request);
-    this.telemetry.requestCreated(request);
     await this.host.emit({
       type: SessionEventType.WorkspaceHookReviewRequested,
       payload: { request },

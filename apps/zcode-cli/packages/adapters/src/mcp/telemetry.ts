@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 import { createHmac, randomUUID } from "node:crypto";
-import type { ZCodeMcpTelemetryEvent } from "@zcode/shared";
+import type { ZCodeMcpResourceSample } from "@zcode/shared";
 import {
   createMcpResourceTelemetry,
   type McpResourceTelemetryOptions,
@@ -11,15 +11,16 @@ const BUILTIN_NODE_REPL_SERVER_NAME = "node_repl";
 const MCP_ID_SAFE_CHARACTER_PATTERN = /^[A-Za-z0-9._~-]$/;
 const PLUGIN_MCP_NAMESPACE_PREFIX = "plugin:";
 
-type McpTelemetryEvent = ZCodeMcpTelemetryEvent;
-export type McpTelemetrySource = Extract<
-  ZCodeMcpTelemetryEvent,
-  { kind: "process_start" }
->["mcpSource"];
-export type McpTelemetryIsolation = Extract<
-  ZCodeMcpTelemetryEvent,
-  { kind: "process_start" }
->["mcpIsolation"];
+/**
+ * MCP 来源 / 隔离维度。
+ *
+ * 值域来自 shared 侧保留的资源采样 schema（`zcodeMcpProcessTelemetryBaseShape`），
+ * 与 `zcodeMcpResourceSampleSchema` 使用的 mcpId 正则同源；协议侧随遥测删除的
+ * `ZCodeMcpTelemetryEvent` 不再是它们的类型来源，本地资源管理器仍然产出这些维度。
+ */
+export type McpTelemetrySource = "builtin" | "plugin" | "custom";
+export type McpTelemetryIsolation = "session" | "workspace";
+
 export interface McpProcessTelemetryIdentity {
   mcpId: string;
   mcpInstanceId: string;
@@ -40,13 +41,6 @@ export interface McpTrackedProcess {
 
 export interface McpTelemetryTracker {
   acquireOwner(input: { connectionId: string; ownerId: string; sessionId?: string }): void;
-  recordSessionStartup(input: {
-    configuredCount: number;
-    connectedCount: number;
-    failedCount: number;
-    processCount: number;
-    sessionId: string;
-  }): void;
   recordProcessCrashed(input: {
     connectionId: string;
     exitCode: number | null;
@@ -73,11 +67,10 @@ export interface McpTelemetryTracker {
 }
 
 interface CreateMcpTelemetryTrackerOptions {
-  arch?: ZCodeMcpTelemetryEvent["arch"];
+  arch?: ZCodeMcpResourceSample["arch"];
   idSalt: string;
   now?: () => number;
-  onEvent(event: McpTelemetryEvent): void;
-  platform?: ZCodeMcpTelemetryEvent["platform"];
+  platform?: ZCodeMcpResourceSample["platform"];
   randomId?: () => string;
   onResourceSamples?: McpResourceTelemetryOptions["onResourceSamples"];
   processProbe?: McpResourceTelemetryOptions["processProbe"];
@@ -104,18 +97,11 @@ interface TrackedConnection {
 export function createMcpTelemetryTracker(
   options: CreateMcpTelemetryTrackerOptions,
 ): McpTelemetryTracker {
-  const arch = options.arch ?? (process.arch as ZCodeMcpTelemetryEvent["arch"]);
+  const arch = options.arch ?? (process.arch as ZCodeMcpResourceSample["arch"]);
   const now = options.now ?? Date.now;
-  const platform = options.platform ?? (process.platform as ZCodeMcpTelemetryEvent["platform"]);
+  const platform = options.platform ?? (process.platform as ZCodeMcpResourceSample["platform"]);
   const randomId = options.randomId ?? randomUUID;
   const connections = new Map<string, TrackedConnection>();
-  const emit = (event: McpTelemetryEvent): void => {
-    try {
-      options.onEvent(event);
-    } catch {
-      // 遥测为旁路，下游通知或 IPC 关闭不得改变 MCP 连接、回收或 crash 处理。
-    }
-  };
 
   const resourceTelemetry = createMcpResourceTelemetry({
     ...options,
@@ -133,37 +119,13 @@ export function createMcpTelemetryTracker(
             isCurrent: () =>
               connections.get(connection.connectionId) === connection &&
               connection.process === trackedProcess,
-            observed(samples, sampledAt, memoryScope) {
+            observed(samples) {
               if (!samples) {
                 if (connection.owners.size === 0) {
                   connection.process = undefined;
                   connections.delete(connection.connectionId);
                 }
-                return;
               }
-              const sessionIds = new Set(
-                [...connection.owners.values()].filter((id) => id !== undefined),
-              );
-              const unownedMs =
-                connection.owners.size === 0 && connection.unownedAt !== undefined
-                  ? Math.max(0, sampledAt - connection.unownedAt)
-                  : 0;
-              // 保留 tracker 内部孤儿观测口径；bootstrap 不再把旧 memory 事实发上协议。
-              emit({
-                arch,
-                kind: "memory",
-                mcpId: connection.mcpId,
-                mcpInstanceId: trackedProcess.instanceId,
-                mcpIsolation: connection.isolation,
-                mcpSource: connection.mcpSource,
-                platform,
-                occurredAt: sampledAt,
-                memoryKb: samples.reduce((total, sample) => total + sample.rssKb, 0),
-                memoryScope,
-                orphanSuspected: connection.owners.size === 0 && unownedMs > 60_000,
-                ownerSessionCount: sessionIds.size,
-                unownedSeconds: unownedMs / 1_000,
-              });
             },
           },
         ];
@@ -179,29 +141,8 @@ export function createMcpTelemetryTracker(
     },
     recordProcessCrashed(input) {
       const connection = connections.get(input.connectionId);
-      const trackedProcess = connection?.process;
-      if (!connection || !trackedProcess) return;
+      if (!connection?.process) return;
       connection.process = undefined;
-      const occurredAt = now();
-      const sessionIds = new Set(
-        [...connection.owners.values()].filter(
-          (sessionId): sessionId is string => sessionId !== undefined,
-        ),
-      );
-      emit({
-        affectedSessionCount: sessionIds.size,
-        arch,
-        exitCode: input.exitCode,
-        kind: "process_crash",
-        mcpId: connection.mcpId,
-        mcpInstanceId: trackedProcess.instanceId,
-        mcpIsolation: connection.isolation,
-        mcpSource: connection.mcpSource,
-        occurredAt,
-        platform,
-        signal: input.signal,
-        uptimeMs: Math.max(0, occurredAt - trackedProcess.startedAt),
-      });
     },
     recordProcessClosed(input) {
       const connection = connections.get(input.connectionId);
@@ -220,30 +161,7 @@ export function createMcpTelemetryTracker(
         startedAt: occurredAt,
       };
       if (connection.owners.size === 0) connection.unownedAt ??= occurredAt;
-      emit({
-        arch,
-        kind: "process_start",
-        mcpId: connection.mcpId,
-        mcpInstanceId,
-        mcpIsolation: connection.isolation,
-        mcpSource: connection.mcpSource,
-        occurredAt,
-        platform,
-      });
       return { mcpId: connection.mcpId, mcpInstanceId };
-    },
-    recordSessionStartup(input) {
-      emit({
-        arch,
-        configuredCount: input.configuredCount,
-        connectedCount: input.connectedCount,
-        failedCount: input.failedCount,
-        kind: "session_startup",
-        occurredAt: now(),
-        platform,
-        processCount: input.processCount,
-        sessionId: input.sessionId,
-      });
     },
     releaseOwner(input) {
       const connection = connections.get(input.connectionId);
@@ -251,7 +169,7 @@ export function createMcpTelemetryTracker(
       if (connection.owners.size !== 0) return;
       connection.unownedAt = now();
       // process crash 后最后一个 owner 释放时，pool entry 仍会在 idle grace 内存活。
-      // 此处提前删除 registration 会让同一 workspace entry 被复用后的新进程永久失去遥测。
+      // 此处提前删除 registration 会让同一 workspace entry 被复用后的新进程永久失去资源采样。
       // registration 的终态由 pool closeEntry 显式 unregister，owner 释放只记录无主时间。
     },
     registerConnection(input) {
@@ -318,7 +236,7 @@ function resolveMcpId(serverName: string, source: McpTelemetrySource, idSalt: st
 }
 
 function encodeMcpIdSegment(value: string): string {
-  // 原因：encodeURIComponent 遇到孤立 surrogate 会抛 URIError，遥测编码不能反向阻断 MCP 启动。
+  // 原因：encodeURIComponent 遇到孤立 surrogate 会抛 URIError，mcpId 编码不能反向阻断 MCP 启动。
   // Buffer 的 UTF-8 编码会把畸形序列替换为 U+FFFD，再逐字节转义成协议允许的稳定 `%HH`。
   let encoded = "";
   for (const byte of Buffer.from(value, "utf8")) {

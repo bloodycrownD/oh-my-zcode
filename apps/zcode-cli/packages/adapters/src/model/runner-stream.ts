@@ -67,7 +67,6 @@ import {
   createAttemptStatusContext,
   createStatusContext,
   publishModelStatus,
-  publishModelTelemetryMilestone,
 } from "./runner-status.js";
 import { StreamingToolCallAssembler } from "./streaming-tool-call-assembler.js";
 import type { ResolvedAiSdkModelRetryOptions } from "./retry-policy.js";
@@ -172,9 +171,6 @@ export async function* runStreamText(input: {
     let requestHeaders: Record<string, string> = {};
     let requestHeaderCount = 0;
     let resolved = input.resolved;
-    let timeToFirstProviderEventMs: number | undefined;
-    let timeToFirstContentMs: number | undefined;
-    let timeToFirstTextMs: number | undefined;
     let streamMaxIdleMs = 0;
     let streamStallCount = 0;
     let streamOutputCommitted = false;
@@ -202,37 +198,6 @@ export async function* runStreamText(input: {
         status: "waiting",
       });
       return true;
-    };
-    const publishVisibleMilestones = async (observation: {
-      contentMs?: number;
-      textMs?: number;
-    }): Promise<void> => {
-      if (timeToFirstContentMs === undefined && observation.contentMs !== undefined) {
-        timeToFirstContentMs = observation.contentMs;
-        await publishModelTelemetryMilestone(
-          {
-            ...statusContext,
-            attempt,
-            elapsedMs: observation.contentMs,
-            timestamp: new Date(startedAt + observation.contentMs).toISOString(),
-            type: "model_first_content",
-          },
-          { logger: input.logger, statusSink: input.statusSink },
-        );
-      }
-      if (timeToFirstTextMs === undefined && observation.textMs !== undefined) {
-        timeToFirstTextMs = observation.textMs;
-        await publishModelTelemetryMilestone(
-          {
-            ...statusContext,
-            attempt,
-            elapsedMs: observation.textMs,
-            timestamp: new Date(startedAt + observation.textMs).toISOString(),
-            type: "model_first_text",
-          },
-          { logger: input.logger, statusSink: input.statusSink },
-        );
-      }
     };
 
     // 进程级准入：每次尝试发出前等槽位，
@@ -338,19 +303,6 @@ export async function* runStreamText(input: {
           streamReachedNaturalEnd = true;
           break;
         }
-        if (timeToFirstProviderEventMs === undefined) {
-          timeToFirstProviderEventMs = Date.now() - startedAt;
-          await publishModelTelemetryMilestone(
-            {
-              ...statusContext,
-              attempt,
-              elapsedMs: timeToFirstProviderEventMs,
-              timestamp: new Date(startedAt + timeToFirstProviderEventMs).toISOString(),
-              type: "model_first_provider_event",
-            },
-            { logger: input.logger, statusSink: input.statusSink },
-          );
-        }
 
         let event: Awaited<ReturnType<typeof handleStreamChunk>>;
         try {
@@ -429,7 +381,6 @@ export async function* runStreamText(input: {
         if (event.visibleEvents.length > 0) {
           for (const visibleEvent of event.visibleEvents) {
             const observation = observeVisibleStreamEvent(visibleEvent, Date.now() - startedAt);
-            await publishVisibleMilestones(observation);
             streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
             yield visibleEvent;
           }
@@ -456,7 +407,6 @@ export async function* runStreamText(input: {
       if (flushedEvents.visibleEvents.length > 0) {
         for (const visibleEvent of flushedEvents.visibleEvents) {
           const observation = observeVisibleStreamEvent(visibleEvent, Date.now() - startedAt);
-          await publishVisibleMilestones(observation);
           streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
           yield visibleEvent;
         }
@@ -465,7 +415,6 @@ export async function* runStreamText(input: {
       for (const pendingEvent of pendingRetrySafeEvents.splice(0)) {
         emittedEvent = true;
         const observation = observeVisibleStreamEvent(pendingEvent, Date.now() - startedAt);
-        await publishVisibleMilestones(observation);
         streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
         yield pendingEvent;
       }
@@ -603,9 +552,6 @@ export async function* runStreamText(input: {
             providerRequestId: providerRequestIdFromHeaders(responseHeaders),
             finishReason: diagnostics.finishReason,
             usage: diagnostics.usage,
-            timeToFirstProviderEventMs,
-            timeToFirstContentMs,
-            timeToFirstTextMs,
             streamMaxIdleMs: streamMaxIdleMs || undefined,
             streamStallCount,
             streamOutputCommitted,
