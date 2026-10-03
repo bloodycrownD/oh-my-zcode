@@ -54,10 +54,6 @@ import { resolveStartPlanEntitlementSummary } from "./StartPlanCard.js";
 import { useCodingPlanProducts } from "./useCodingPlanProducts.js";
 import { useEnterpriseCodingPlanProducts } from "./useEnterpriseCodingPlanProducts.js";
 import { useUsageEntitlement } from "@/hooks/useUsageEntitlement.js";
-import {
-  createCodingPlanFunnelContext,
-  resolveCodingPlanEntryPlanState,
-} from "@/lib/codingPlanFunnelTelemetry.js";
 import { useCodingPlanUpgradeDialog } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import type { ProviderSettingsView } from "@zcode/services";
@@ -542,31 +538,10 @@ export function ModelProviderSectionDetail({
         );
         return;
       }
-      const nextFunnelContext = createCodingPlanFunnelContext({
-        providerId: selectedNavItem.presetId,
-        upgradeSource:
-          audience === "team" ? "setting_team_plan_banner" : "setting_personal_plan_banner",
-        eventRegion: "app.setting",
-        eventText:
-          options.eventText ??
-          intl.formatMessage({
-            id:
-              audience === "team"
-                ? "settings.modelProvider.codingPlan.purchaseBanner.teamTitle"
-                : "settings.modelProvider.codingPlan.purchaseBanner.personalTitle",
-          }),
-        entryPlanState: resolveCodingPlanEntryPlanState({
-          displayStatus: statusPanelViewState.displayStatus,
-          providerId: selectedNavItem.presetId,
-          planLevel: selectedNavItem.planLevel,
-        }),
-        purchaseAudience: audience,
-      });
       openCodingPlanUpgrade({
         providerId: selectedNavItem.presetId,
         initialAudience: audience,
         initialTeamPlanKey: options.initialTeamPlanKey,
-        funnelContext: nextFunnelContext,
       });
     };
     const codingPlanFamilyHeader = (
@@ -683,7 +658,6 @@ export function ModelProviderSectionDetail({
             openCodingPlanUpgrade({
               providerId: selectedNavItem.presetId,
               initialAudience: options.initialAudience,
-              funnelContext: options.funnelContext ?? undefined,
             });
           }}
           upgradePlansVisible={upgradePlansVisible}
@@ -803,7 +777,6 @@ export function ModelProviderSectionDetail({
               openCodingPlanUpgrade({
                 providerId: selectedNavItem.presetId,
                 initialAudience: options.initialAudience,
-                funnelContext: options.funnelContext ?? undefined,
               });
             }}
             upgradePlansVisible={upgradePlansVisible}
