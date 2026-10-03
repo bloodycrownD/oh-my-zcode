@@ -1,7 +1,8 @@
 // phase1(s10) 临时门禁：desktop main/preload/renderer/scheduler 四套 tsconfig 的「无新增错误」回归网。
-// 这四套工程历史上不在任何 typecheck 门禁内（由 vite/electron 构建驱动），上游基线本身有
-// 216 个既有错误（见 desktop-typecheck-baseline.txt 快照）；因此门禁判定不是全绿，而是：
+// 这四套工程历史上不在任何 typecheck 门禁内（由 vite/electron 构建驱动），上游基线本身就有
+// 一批既有错误（见 desktop-typecheck-baseline.txt 快照）；因此门禁判定不是全绿，而是：
 // 不允许出现快照之外的新错误——遥测删除只应让错误集缩小。
+// 基线快照为首次采集时的已知态（上游噪音 + 当时的断链），随清理 removed 递增，勿在注释里复制会漂移的数字。
 // 重新生成快照：node scripts/typecheck-desktop-full.mjs --snapshot
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -65,21 +66,6 @@ if (process.argv.includes("--snapshot")) {
 console.log(
   `desktop-full: ${current.size} error kinds (baseline ${baseline.size}, removed ${removed})`,
 );
-// tsc -b 会在 desktop/src 内再生 checked-in 编译产物（schedulerProtocol.*），
-// 门禁本身不自动还原（避免误回退编辑中的文件）——编排层在每轮门禁后须执行还原/清理。
-try {
-  const dirty = execFileSync("git", ["status", "--porcelain", "packages/desktop/src"], {
-    cwd: root,
-    encoding: "utf8",
-  });
-  const lines = dirty.split(/\r?\n/).filter(Boolean);
-  if (lines.length > 0) {
-    console.log("gate side-effect (regenerated artifacts, restore manually):");
-    for (const line of lines) console.log(`  ${line}`);
-  }
-} catch {
-  // git 不可用时静默跳过
-}
 if (fresh.length > 0) {
   console.log("NEW ERRORS:");
   for (const line of fresh) console.log(`  ${line}`);
