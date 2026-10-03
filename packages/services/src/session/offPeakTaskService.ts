@@ -163,14 +163,10 @@ export class OffPeakTaskService implements IOffPeakTaskService {
 
   /** 创建即取号（取号成功才落库）；失败只返回稳定分类，绝不跨 RPC 返回 raw error。 */
   async createTask(params: ZCodeOffPeakTaskCreateParams): Promise<OffPeakTaskCreateResult> {
-    // providerName 曾是埋点维度（安全 hostname）。遥测链路移除后不再解析，
-    // 但保留 wire 字段以维持 OffPeakTaskCreateResult 的判别联合形状。
-    const providerName = "";
     if (!isValidCreateParams(params)) {
       return {
         ok: false,
         ...classifyOffPeakCreateFailure(undefined, "client_validation"),
-        providerName,
       };
     }
     const selection = await this.deps.resolveModelSelection({
@@ -183,7 +179,6 @@ export class OffPeakTaskService implements IOffPeakTaskService {
       return {
         ok: false,
         ...classifyOffPeakCreateFailure(undefined, "client_validation"),
-        providerName,
       };
     }
     const normalizedParams: ZCodeOffPeakTaskCreateParams = {
@@ -202,7 +197,7 @@ export class OffPeakTaskService implements IOffPeakTaskService {
         params.boundSessionId,
       ))
     ) {
-      return { ok: false, ...OFF_PEAK_SESSION_BOUND_FAILURE, providerName };
+      return { ok: false, ...OFF_PEAK_SESSION_BOUND_FAILURE };
     }
     const offPeakTaskId = `offpeak-${randomUUID()}`;
     let ticket;
@@ -212,7 +207,6 @@ export class OffPeakTaskService implements IOffPeakTaskService {
       return {
         ok: false,
         ...classifyOffPeakCreateFailure(error, "ticket_request"),
-        providerName,
       };
     }
     let created: ZCodeOffPeakTask;
@@ -233,12 +227,11 @@ export class OffPeakTaskService implements IOffPeakTaskService {
     } catch (error) {
       if (isOffPeakBoundSessionConflict(error)) {
         // 已取的票随任务作废，服务端按过期回收；不为此加释放接口。
-        return { ok: false, ...OFF_PEAK_SESSION_BOUND_FAILURE, providerName };
+        return { ok: false, ...OFF_PEAK_SESSION_BOUND_FAILURE };
       }
       return {
         ok: false,
         ...classifyOffPeakCreateFailure(error, "local_persist"),
-        providerName,
       };
     }
     this.deps.logger.info(
@@ -258,7 +251,6 @@ export class OffPeakTaskService implements IOffPeakTaskService {
       task: created,
       ticketInitialState: ticket.state,
       ...(ticket.position !== undefined ? { queuePosition: ticket.position } : {}),
-      providerName,
     };
   }
 

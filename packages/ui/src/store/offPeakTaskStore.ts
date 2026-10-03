@@ -301,7 +301,6 @@ export const useOffPeakTaskStore = create<OffPeakTaskState>((set, get) => ({
         failureStage: "ticket_request",
         errorCategory: "network",
         errorCode: "",
-        providerName: "",
       } as const satisfies OffPeakTaskCreateResult;
       set({
         error: result.errorCategory,
