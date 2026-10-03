@@ -287,9 +287,6 @@ async function executeToolCallImpl(
       ),
       preToolHookResult.additionalContexts,
     );
-    if (result.error?.type === CoreErrorType.PermissionDenied) {
-    } else {
-    }
     return result;
   }
   executionInput = permissionResult.executionInput;
@@ -585,9 +582,6 @@ async function executeToolCallImpl(
       },
     );
 
-    if (options?.signal?.aborted || result.error?.type === CoreErrorType.ToolCancelled) {
-    } else {
-    }
     return result;
   } finally {
     unlinkParentAbort();
