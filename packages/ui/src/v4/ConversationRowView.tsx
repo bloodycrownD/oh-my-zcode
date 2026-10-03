@@ -1374,7 +1374,7 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   );
   const handleFork = useCallback(() => {
     if (entityId) {
-      (() => onFork?.({ rowId, entityId }))();
+      onFork?.({ rowId, entityId });
     }
   }, [entityId, onFork, rowId]);
   return (

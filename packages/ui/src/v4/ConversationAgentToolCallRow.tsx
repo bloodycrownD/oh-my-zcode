@@ -51,7 +51,7 @@ export function ConversationAgentToolCallRow({
     childSessionId && context.sessionId && context.onOpenSubagentSession,
   );
   const handleOpenChildSession = useCallback(() => {
-    (() => openSubagentSessionFromSummary({ childSessionId, context, subagentType, title }))();
+    openSubagentSessionFromSummary({ childSessionId, context, subagentType, title });
   }, [childSessionId, context, subagentType, title]);
   const agentSummaryAction = useMemo(
     () =>

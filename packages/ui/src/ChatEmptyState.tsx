@@ -279,7 +279,7 @@ export function ChatEmptyWorkspacePreviewMenu({
             data-testid={TID_COMPOSER_PROJECT_DETACH}
             onClick={(event) => {
               event.stopPropagation();
-              void (() => Promise.resolve(onSelectConversationWorkspace()));
+              void onSelectConversationWorkspace();
             }}
           >
             <X className="size-3.5" />
@@ -354,7 +354,7 @@ export function ChatEmptyWorkspacePreviewMenu({
                   workspaceIdentity,
                 })}
                 onSelect={() => {
-                  (() => onSelectWorkspace(workspaceTab))();
+                  onSelectWorkspace(workspaceTab);
                 }}
               >
                 <WorkspaceIcon className="size-4 text-foreground-subtle" />
@@ -384,7 +384,7 @@ export function ChatEmptyWorkspacePreviewMenu({
                 logger.info(
                   `[ChatEmptyWorkspacePreviewMenu] open remote dialog from workspace menu workspace=${workspacePath}`,
                 );
-                (() => setSshDialogOpen(true))();
+                setSshDialogOpen(true);
               }}
             >
               <Cloud className="size-4 text-foreground-subtle" />
@@ -395,7 +395,7 @@ export function ChatEmptyWorkspacePreviewMenu({
             <DropdownMenuCheckboxItem
               data-testid={TID_COMPOSER_WORK_OUTSIDE_PROJECT}
               checked={isConversationWorkspace}
-              onSelect={() => void (() => Promise.resolve(onSelectConversationWorkspace()))}
+              onSelect={() => void onSelectConversationWorkspace()}
             >
               <MessageCircle className="size-4 text-foreground-subtle" />
               <span>{intl.formatMessage({ id: "chat.empty.workOutsideProject" })}</span>

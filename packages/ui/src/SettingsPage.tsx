@@ -1246,11 +1246,11 @@ export function SettingsPage({
   const handleFooterLocaleChange = useCallback(
     (value: string) => {
       if (value === "system") {
-        (() => setLocalePreference("system"))();
+        setLocalePreference("system");
         return;
       }
       if (value === "zh-CN" || value === "en-US") {
-        (() => setLocalePreference(value as Locale))();
+        setLocalePreference(value as Locale);
       }
     },
     [setLocalePreference],
@@ -1264,7 +1264,7 @@ export function SettingsPage({
         value === "zai-dark" ||
         value === "system"
       ) {
-        (() => setTheme(value as Theme))();
+        setTheme(value as Theme);
       }
     },
     [setTheme],
@@ -1349,12 +1349,10 @@ export function SettingsPage({
                       })}
                       className="m-1 w-[calc(100%-0.5rem)] justify-start gap-2 rounded-xl px-1.5 text-foreground-subtle hover:bg-surface-hover hover:text-foreground max-lg:m-1 max-lg:size-10 max-lg:justify-center max-lg:px-0"
                       onClick={() => {
-                        (() => {
-                          if (pluginNavigationOrigin === "plugin-store") {
-                            requestPluginStoreOpen("user");
-                          }
-                          onBack?.();
-                        })();
+                        if (pluginNavigationOrigin === "plugin-store") {
+                          requestPluginStoreOpen("user");
+                        }
+                        onBack?.();
                       }}
                     >
                       <ArrowLeft className="size-4" />
@@ -1414,11 +1412,9 @@ export function SettingsPage({
                               aria-current={isActive ? "page" : undefined}
                               data-testid={testId(TID_SETTINGS_SECTION_NAV, id)}
                               onClick={() => {
-                                (() => {
-                                  setPluginNavigationOrigin(undefined);
-                                  setSettingsSectionNavigationVersion((version) => version + 1);
-                                  setActiveSettingsSection(id);
-                                })();
+                                setPluginNavigationOrigin(undefined);
+                                setSettingsSectionNavigationVersion((version) => version + 1);
+                                setActiveSettingsSection(id);
                               }}
                             >
                               <span className="truncate text-ui-base text-foreground">{label}</span>

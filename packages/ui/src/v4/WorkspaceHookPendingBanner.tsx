@@ -113,11 +113,9 @@ export const WorkspaceHookPendingBanner = memo(function WorkspaceHookPendingBann
 
   const handleDismiss = useCallback(() => {
     if (admission) {
-      (() => {
-        workspaceHookPendingDismissStore.dismiss(sessionId, admission.bundleDigest);
-        // Bug 原因：模块级 Set 的写入不属于 React 状态，memo 组件不会重渲染。
-        setDismissRevision((revision) => revision + 1);
-      })();
+      workspaceHookPendingDismissStore.dismiss(sessionId, admission.bundleDigest);
+      // Bug 原因：模块级 Set 的写入不属于 React 状态，memo 组件不会重渲染。
+      setDismissRevision((revision) => revision + 1);
     }
   }, [admission, sessionId]);
 

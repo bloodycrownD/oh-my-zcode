@@ -1283,13 +1283,11 @@ export function GitActionMenu({
       return;
     }
 
-    (() => {
-      if (primaryActionId === "push") {
-        openPushDialog();
-        return;
-      }
-      void openCommitDialog();
-    })();
+    if (primaryActionId === "push") {
+      openPushDialog();
+      return;
+    }
+    void openCommitDialog();
   }, [openCommitDialog, openPushDialog, primaryActionId, primaryActionDisabled]);
 
   const handleStatusRowContainerClick = useCallback(() => {

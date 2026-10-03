@@ -247,7 +247,7 @@ export const MemoTaskItem = memo(function TaskListItem({
       id: task.forkedFromTaskId ? "taskList.forkedUntitled" : "taskList.untitled",
     });
   const handleSelect = useCallback(() => {
-    (() => onSelectTask(task.taskId))();
+    onSelectTask(task.taskId);
   }, [onSelectTask, task.taskId]);
   const handleDragStart = useCallback(
     (event: React.DragEvent<HTMLLIElement>) => {
@@ -306,7 +306,7 @@ export const MemoTaskItem = memo(function TaskListItem({
       if (workspaceActionsDisabled) {
         return;
       }
-      (() => onOpenFileTree?.(task))();
+      onOpenFileTree?.(task);
     },
     [onOpenFileTree, task, workspaceActionsDisabled],
   );
@@ -318,7 +318,7 @@ export const MemoTaskItem = memo(function TaskListItem({
         event.stopPropagation();
         return;
       }
-      (() => onArchiveTaskInline(event, task.taskId))();
+      onArchiveTaskInline(event, task.taskId);
     },
     [onArchiveTaskInline, task.taskId, workspaceActionsDisabled],
   );

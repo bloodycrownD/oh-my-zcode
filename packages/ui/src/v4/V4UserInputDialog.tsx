@@ -20,7 +20,7 @@ export function V4UserInputDialog({ model, onSubmit }: V4UserInputDialogProps) {
 
   const handleOption = useCallback(
     (optionId: string) => {
-      (() => onSubmit({ optionId }))();
+      onSubmit({ optionId });
     },
     [onSubmit],
   );

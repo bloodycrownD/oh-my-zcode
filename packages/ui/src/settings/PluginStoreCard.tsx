@@ -209,7 +209,7 @@ export function PluginStoreInstallButton({
       disabled={installing}
       onClick={(event) => {
         event.stopPropagation();
-        (() => actions.onInstall(item))();
+        actions.onInstall(item);
       }}
     >
       {installing ? <Loader2 className="size-3.5 animate-spin" aria-hidden="true" /> : null}
