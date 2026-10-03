@@ -52,7 +52,7 @@ const removed = [...baseline].filter((key) => !current.has(key)).length;
 console.log(
   `desktop-full: ${current.size} error kinds (baseline ${baseline.size}, removed ${removed})`,
 );
-// tsc -b 会在 desktop/src 内再生 checked-in 编译产物（armsRumShared.*、schedulerProtocol.*），
+// tsc -b 会在 desktop/src 内再生 checked-in 编译产物（schedulerProtocol.*），
 // 门禁本身不自动还原（避免误回退编辑中的文件）——编排层在每轮门禁后须执行还原/清理。
 try {
   const dirty = execFileSync("git", ["status", "--porcelain", "packages/desktop/src"], {

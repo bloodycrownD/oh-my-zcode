@@ -13,8 +13,7 @@
     "declarationMap": true,
     "sourceMap": true,
     "composite": true,
-    // 修复原因：rrweb 传递依赖的旧 @types/css-font-loading-module 会和新版 TypeScript 内置 DOM 声明重复。
-    // rpc 没继承根 tsconfig，之前没有跳过第三方声明检查，导致 bootstrap 在依赖类型冲突上失败。
+    // rpc 没继承根 tsconfig，不跳过第三方声明检查时会被依赖侧的 DOM 类型冲突卡住 bootstrap。
     "skipLibCheck": true,
     "lib": ["ES2022", "DOM"]
   },

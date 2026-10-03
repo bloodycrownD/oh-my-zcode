@@ -38,7 +38,7 @@ export interface McpServerConfig {
   personalAccessToken?: string;
   fileId?: string;
   nodeId?: string;
-  // Sentry specific fields
+  // 错误上报平台字段
   organizationName?: string;
   projectName?: string;
   dsn?: string;
