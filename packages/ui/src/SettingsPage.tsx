@@ -1595,10 +1595,10 @@ export function SettingsPage({
                             defaultHomeDir={defaultHomeDir}
                             showIntegratedTerminalShell={hostPlatform === "win32"}
                             setLocalePreference={handleFooterLocaleChange}
-                            setNotificationEnabled={(enabled) => () =>
+                            setNotificationEnabled={(enabled) =>
                               setNotificationEnabled(enabled)
                             }
-                            setNotificationSoundEnabled={(enabled) => () =>
+                            setNotificationSoundEnabled={(enabled) =>
                               setNotificationSoundEnabled(enabled)
                             }
                             taskAutoArchiveEnabled={taskAutoArchiveEnabled}
@@ -1668,7 +1668,7 @@ export function SettingsPage({
                             theme={theme}
                             setTheme={(nextTheme) => handleFooterThemeChange(nextTheme)}
                             uiFontSizePx={uiFontSizePx}
-                            setUiFontSizePx={(fontSizePx) => () => setUiFontSizePx(fontSizePx)}
+                            setUiFontSizePx={(fontSizePx) => setUiFontSizePx(fontSizePx)}
                           />
                         ) : activeSection === "shortcuts" ? (
                           <ShortcutSettingsSection isDesktop={Boolean(isDesktop)} />

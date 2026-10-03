@@ -1357,10 +1357,11 @@ function ConversationComposerImpl({
   const handleEditorChange = useCallback(
     (value: string) => {
       // 正文先进入与 mode/model 相同的内存 Draft；防抖只负责补充最新 Lexical JSON。
+      updateText(value);
       updateComposerContent({ text: value });
       scheduleDraftPersist();
     },
-    [scheduleDraftPersist, updateComposerContent],
+    [scheduleDraftPersist, updateComposerContent, updateText],
   );
 
   const handleEditorFocus = useCallback(() => {
@@ -1855,7 +1856,7 @@ function ConversationComposerImpl({
   const composerUsage = snapshot?.usage ?? null;
   const composerPhase = snapshot?.control.phase ?? null;
   const handleSelectModelTrace = useCallback(
-    (nextProvider: string, nextModel: string, sourceModel: ModelSelectionSource | null) => () =>
+    (nextProvider: string, nextModel: string, sourceModel: ModelSelectionSource | null) =>
       onSelectModel(nextProvider, nextModel, sourceModel),
     [onSelectModel],
   );

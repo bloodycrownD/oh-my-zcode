@@ -72,7 +72,7 @@ export function BrowserToolbar({
   isResponsiveMode: boolean;
 }) {
   return (
-    <form onSubmit={(event) => () => onSubmit(event)} className="flex items-center h-12 px-3 gap-2">
+    <form onSubmit={(event) => onSubmit(event)} className="flex items-center h-12 px-3 gap-2">
       <BrowserIconButton
         icon={<ChevronLeft className="h-4 w-4" />}
         title={formatMessage({ id: "browser.back" })}

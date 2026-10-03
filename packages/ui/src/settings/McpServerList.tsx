@@ -145,7 +145,7 @@ function McpServerItem({
             aria-label={openAuthorizationLabel}
             data-testid={testId(TID_MCP_OPEN_AUTHORIZATION_BUTTON, server.name)}
             title={openAuthorizationLabel}
-            onClick={() => () => onOpenAuthorization?.(server)}
+            onClick={() => onOpenAuthorization?.(server)}
           >
             <ExternalLink className="size-4" aria-hidden="true" />
             <span className="hidden sm:inline">{openAuthorizationLabel}</span>

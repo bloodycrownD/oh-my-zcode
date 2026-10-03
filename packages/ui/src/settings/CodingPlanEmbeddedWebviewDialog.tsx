@@ -460,7 +460,7 @@ export function CodingPlanEmbeddedWebviewDialog({
                   id: "settings.modelProvider.codingPlan.webview.authInjectFailed",
                 })}
               </span>
-              <Button size="sm" variant="outline" onClick={() => void injectAuthRef.current(null)}>
+              <Button size="sm" variant="outline" onClick={() => void injectAuth()}>
                 <RefreshCwIcon className="size-3.5" />
                 {intl.formatMessage({
                   id: "settings.modelProvider.codingPlan.webview.retry",

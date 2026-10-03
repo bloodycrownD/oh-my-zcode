@@ -142,7 +142,7 @@ export function MemorySettingsSection({
   }, [displayWorkspaces, selectedWorkspaceId]);
 
   const handleRefresh = useCallback(async () => {
-    await refreshCatalog;
+    await refreshCatalog();
   }, [refreshCatalog]);
 
   return (
@@ -181,7 +181,7 @@ export function MemorySettingsSection({
           selectedWorkspace={selectedWorkspace}
           workspaces={displayWorkspaces}
           onRefresh={handleRefresh}
-          onScopeKeyChange={(workspaceId) => () => setSelectedWorkspaceId(workspaceId)}
+          onScopeKeyChange={(workspaceId) => setSelectedWorkspaceId(workspaceId)}
         />
       )}
     </div>

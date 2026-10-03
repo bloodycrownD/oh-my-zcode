@@ -214,7 +214,7 @@ const QueueRow = memo(function QueueRow({
           data-testid={testId(TID_V4_QUEUE_ITEM_SEND_NOW, item.queueItemId)}
           data-queue-item-id={item.queueItemId}
           disabled={rowLocked}
-          onClick={() => () => onSendNow(item.queueItemId)}
+          onClick={() => onSendNow(item.queueItemId)}
         >
           <ArrowUpFromLine className="size-3.5" />
           {intl.formatMessage({ id: isCompact ? "chat.queue.runNow" : "chat.queue.sendNow" })}
