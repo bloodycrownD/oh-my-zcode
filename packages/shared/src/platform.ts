@@ -14,11 +14,6 @@ import type {
 } from "./mcp.js";
 import type { OAuthStateRegistration } from "./oauth.js";
 import type { AppSettings, Locale } from "./protocol.js";
-import type { ArmsCustomEventPayload, RendererTelemetryEventPayload } from "./telemetry.js";
-import type {
-  RendererActionTraceBatchV1,
-  RendererActionTraceConfigV1,
-} from "./rendererActionTrace.js";
 import type { RendererHeapSample } from "./validation.js";
 import type {
   CuaAccessibilitySettingsResult,
@@ -44,6 +39,12 @@ export interface TaskNotificationPayload {
   title: string;
   body: string;
 }
+
+/**
+ * 远端 workspace 连接入口：新建 / 重连 / 恢复。
+ * 原先随 remoteUsageTelemetry.ts 整删，这里是纯业务语义（连接生命周期），故就近保留在平台契约里。
+ */
+export type RemoteWorkspaceConnectTrigger = "new" | "reconnect" | "restore";
 
 /** Main 将一次能够定位真实 tab 的 browser-use 操作投递给其 origin renderer。 */
 export interface BrowserViewOperationPayload {
@@ -457,7 +458,7 @@ export interface ConnectRemoteRequest {
   requestId?: string;
   workspacePath?: string;
   workspaceIdentity?: string;
-  connectTrigger?: import("./remoteUsageTelemetry.js").RemoteWorkspaceConnectTrigger;
+  connectTrigger?: RemoteWorkspaceConnectTrigger;
 }
 
 export interface CancelPendingRemoteConnectionRequest {
@@ -586,7 +587,7 @@ export interface IPlatformService {
     context?: {
       workspacePath: string;
       workspaceIdentity?: string;
-      connectTrigger?: import("./remoteUsageTelemetry.js").RemoteWorkspaceConnectTrigger;
+      connectTrigger?: RemoteWorkspaceConnectTrigger;
     },
   ): Promise<{ success: boolean; error?: string; sessionId?: string }>;
 
@@ -693,28 +694,14 @@ export interface IPlatformService {
   /** 通知 main process renderer 已就绪，触发缓存的冷启动 deep link 转发 */
   notifyRendererReady(): void;
 
-  /** 触发任务状态对应的系统通知，由宿主环境决定是否真正展示 */
+/** 触发任务状态对应的系统通知，由宿主环境决定是否真正展示 */
   showTaskNotification(payload: TaskNotificationPayload): void;
 
-  /** 通过宿主环境统一上报 UI 侧 telemetry 事件 */
-  reportTelemetryEvent(payload: RendererTelemetryEventPayload): Promise<void>;
-
-  /** 通过宿主环境上报 ARMS 自定义事件；Web 端当前为空实现 */
-  reportArmsCustomEvent(payload: ArmsCustomEventPayload): Promise<void>;
-
-  /** 读取 Desktop Renderer 用户操作 Trace 的当前灰度配置；Web/手机不实现。 */
-  getRendererActionTraceConfig?(): Promise<RendererActionTraceConfigV1>;
-  /** 订阅 Main 推送的 Renderer 用户操作 Trace 配置；Web/手机不实现。 */
-  onRendererActionTraceConfigChanged?(
-    callback: (config: RendererActionTraceConfigV1) => void,
-  ): () => void;
-  /** Renderer → Main：发送已结束的 ui_action batch；严格旁路、fire-and-forget。 */
-  reportRendererActionTraceBatch?(batch: RendererActionTraceBatchV1): void;
-  reportLocalTtftBatch?(batch: import("./localTtft.js").LocalTtftBatch): void;
-
   /**
-   * Renderer → Main：主窗口 renderer 每 60 秒的 heap 读数，进 `renderer_main` 角色事件。单向 send、fire-and-forget；
+   * Renderer → Main：主窗口 renderer 每 60 秒的 heap 读数，供本地资源管理器的
+   * `renderer_main` 角色聚合 `heap_used_kb_mean/peak`。单向 send、fire-and-forget；
    * Web 端与手机远控没有桥，不实现即 no-op。
+   * 不是遥测出网面，故随 processResourceTelemetry 保留。
    */
   reportRendererHeapSample?(sample: RendererHeapSample): void;
 

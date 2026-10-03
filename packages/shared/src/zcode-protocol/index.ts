@@ -335,7 +335,6 @@ export type ZCodeProtocolMessage = z.infer<typeof zcodeProtocolMessageSchema>;
 export const zcodeProtocolNotifications = {
   storageStartup: "startup/storageState",
   providerRuntimeHeadersCancelled: "interaction/providerRuntimeHeadersCancelled",
-  mcpTelemetry: "process/mcpTelemetry",
   mcpResourceSamples: "process/mcpResourceSamples",
   toolExecResource: "process/toolExecResource",
   pluginOperationProgress: "plugins/operationProgress",
@@ -393,13 +392,6 @@ const zcodeMcpTelemetryArchSchema = z.enum([
   "s390x",
   "x64",
 ]);
-const zcodeMcpTelemetryBaseSchema = z
-  .object({
-    arch: zcodeMcpTelemetryArchSchema,
-    occurredAt: z.number().int().nonnegative(),
-    platform: zcodeMcpTelemetryPlatformSchema,
-  })
-  .strict();
 const zcodeMcpProcessTelemetryBaseShape = {
   mcpId: z
     .string()
@@ -410,47 +402,6 @@ const zcodeMcpProcessTelemetryBaseShape = {
   mcpIsolation: z.enum(["session", "workspace"]),
   mcpSource: z.enum(["builtin", "plugin", "custom"]),
 } as const;
-
-export const zcodeMcpTelemetryEventSchema = z.discriminatedUnion("kind", [
-  zcodeMcpTelemetryBaseSchema
-    .extend({
-      kind: z.literal("process_start"),
-      ...zcodeMcpProcessTelemetryBaseShape,
-    })
-    .strict(),
-  zcodeMcpTelemetryBaseSchema
-    .extend({
-      kind: z.literal("process_crash"),
-      ...zcodeMcpProcessTelemetryBaseShape,
-      affectedSessionCount: z.number().int().nonnegative().max(10_000),
-      exitCode: z.number().int().nullable(),
-      signal: nonEmptyString.nullable(),
-      uptimeMs: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    })
-    .strict(),
-  zcodeMcpTelemetryBaseSchema
-    .extend({
-      kind: z.literal("session_startup"),
-      configuredCount: z.number().int().nonnegative().max(10_000),
-      connectedCount: z.number().int().nonnegative().max(10_000),
-      failedCount: z.number().int().nonnegative().max(10_000),
-      processCount: z.number().int().nonnegative().max(10_000),
-      sessionId: nonEmptyString,
-    })
-    .strict(),
-  zcodeMcpTelemetryBaseSchema
-    .extend({
-      kind: z.literal("memory"),
-      ...zcodeMcpProcessTelemetryBaseShape,
-      memoryKb: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-      memoryScope: z.enum(["process_tree", "direct_process"]),
-      orphanSuspected: z.boolean(),
-      ownerSessionCount: z.number().int().nonnegative().max(10_000),
-      unownedSeconds: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-    })
-    .strict(),
-]);
-export type ZCodeMcpTelemetryEvent = z.infer<typeof zcodeMcpTelemetryEventSchema>;
 
 /** MCP 每五分钟只探测一次，周期由生产者与设备总量过期判据共用。 */
 export const ZCODE_MCP_RESOURCE_SAMPLE_INTERVAL_MS = 5 * 60_000;
@@ -3714,7 +3665,3 @@ export const zcodeStoragePreparationFrameSchema = z.discriminatedUnion("method",
 export const zcodeStoragePathReadySchema = z
   .object({ method: z.literal("startup/storagePathReady"), reuse: z.boolean().optional() })
   .strict();
-export * from "../localTtft.js";
-
-// 桌面本地 TTFT 的严格事实合同；检查点不能替代实际内容帧。
-export { localTtftFactsSchema } from "../localTtft.js";
