@@ -106,15 +106,6 @@ export async function generateWorkspaceText(
   options?: { abortSignal?: AbortSignal; traceContext?: TraceContext },
 ): Promise<WorkspaceGenerateTextResult> {
   assertWorkspaceModelInput(input);
-  return generateWorkspaceTextImpl.call(this, input, options);
-}
-
-async function generateWorkspaceTextImpl(
-  this: AgentRuntimeInternal,
-  input: WorkspaceGenerateTextInput,
-  options?: { abortSignal?: AbortSignal; traceContext?: TraceContext },
-): Promise<WorkspaceGenerateTextResult> {
-  assertWorkspaceModelInput(input);
   const requestedSelection = input.selection;
   const querySource = input.querySource.trim() || "workspace_generate_text";
   const baseModel = createRuntimeModel(this, { selection: requestedSelection });

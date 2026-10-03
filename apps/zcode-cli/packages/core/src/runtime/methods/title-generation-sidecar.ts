@@ -57,18 +57,6 @@ export async function generateTitleCandidate(
     traceContext: TraceContext;
   },
 ): Promise<{ modelSelection: ModelSelection; title: string; traceContext: TraceContext } | null> {
-  return generateTitleCandidateImpl.call(this, input, options);
-}
-
-async function generateTitleCandidateImpl(
-  this: AgentRuntimeInternal,
-  input: string,
-  options: {
-    messageID?: MessageId;
-    querySource: string;
-    traceContext: TraceContext;
-  },
-): Promise<{ modelSelection: ModelSelection; title: string; traceContext: TraceContext } | null> {
   const requestedModelSelection =
     this.config.titleGeneration?.modelSelection ?? this.getSessionModelSelection();
   if (!requestedModelSelection) return null;

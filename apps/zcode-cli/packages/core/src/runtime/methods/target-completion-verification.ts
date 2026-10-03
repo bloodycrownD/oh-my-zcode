@@ -49,42 +49,39 @@ export async function verifyActiveTargetCompletionForContinuation(
   if (!this.sessionStore) return null;
   if (input.target.status !== "active") return null;
 
-  const execute = async (): Promise<TargetCompletionVerificationResult> => {
-    const events: SessionEvent[] = [];
-    const verification = await verifyTargetCompletion.call(this, {
-      abortSignal: input.abortSignal,
-      events,
-      target: input.target,
-      traceContext: input.traceContext,
-    });
+  const events: SessionEvent[] = [];
+  const verification = await verifyTargetCompletion.call(this, {
+    abortSignal: input.abortSignal,
+    events,
+    target: input.target,
+    traceContext: input.traceContext,
+  });
 
-    if (!verification.passed) {
-      return {
-        target: input.target,
-        verification,
-      };
-    }
-
-    const previousTarget = await this.readSessionTargetForContext(input.traceContext);
-    const completedTarget =
-      (await this.sessionStore!.updateTargetStatus({
-        sessionID: this.sessionId,
-        status: "complete",
-      })) ?? input.target;
-    await this.recordTargetChanged({
-      action: "status_updated",
-      previousTarget,
-      source: "runtime",
-      target: completedTarget,
-      traceContext: input.traceContext,
-    });
-
+  if (!verification.passed) {
     return {
-      target: completedTarget,
+      target: input.target,
       verification,
     };
+  }
+
+  const previousTarget = await this.readSessionTargetForContext(input.traceContext);
+  const completedTarget =
+    (await this.sessionStore!.updateTargetStatus({
+      sessionID: this.sessionId,
+      status: "complete",
+    })) ?? input.target;
+  await this.recordTargetChanged({
+    action: "status_updated",
+    previousTarget,
+    source: "runtime",
+    target: completedTarget,
+    traceContext: input.traceContext,
+  });
+
+  return {
+    target: completedTarget,
+    verification,
   };
-  return execute();
 }
 
 async function verifyTargetCompletion(

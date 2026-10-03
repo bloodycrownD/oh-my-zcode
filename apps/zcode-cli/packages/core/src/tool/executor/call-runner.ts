@@ -66,16 +66,6 @@ export async function executeToolCall(
   options?: ToolExecuteOptions,
 ): Promise<ToolExecutionResult> {
   const totalStartedAt = Date.now();
-  return executeToolCallImpl(deps, backgroundTasks, toolCall, totalStartedAt, options);
-}
-
-async function executeToolCallImpl(
-  deps: ToolExecutorDeps,
-  backgroundTasks: BackgroundTaskTracker,
-  toolCall: ExecutableToolCall,
-  totalStartedAt: number,
-  options?: ToolExecuteOptions,
-): Promise<ToolExecutionResult> {
   const parentTraceContext =
     options?.traceContext ??
     getCurrentTraceContext() ??

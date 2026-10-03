@@ -98,23 +98,6 @@ export async function runModelBackedTurnStep(
   },
 ): Promise<ModelStepResult> {
   const assistantMessageId = createMessageId();
-  return runModelBackedTurnStepImpl.call(this, state, options, assistantMessageId);
-}
-
-async function runModelBackedTurnStepImpl(
-  this: AgentRuntimeInternal,
-  state: RegularTurnLoopState,
-  options: {
-    drainedSteerForNextRequest?: DrainedPendingInputDiagnostics;
-    latestRealUserMessageIndex?: number;
-    messages: RunModelTextRequestOptions["messages"];
-    sourceEntries: readonly (RuntimeMessageEntry | undefined)[];
-    recordedMessages: RunModelTextRequestOptions["messages"];
-    requestEntries: readonly RuntimeMessageEntry[];
-    tools: ModelToolContract[];
-  },
-  assistantMessageId: MessageId,
-): Promise<ModelStepResult> {
   const model = state.model;
   const modelStepIndex = state.modelStepCount;
   const modelStartedAt = Date.now();

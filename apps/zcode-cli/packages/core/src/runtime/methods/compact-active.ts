@@ -100,43 +100,6 @@ export async function compactActiveConversation(
   outcome: Extract<CompactAttemptOutcome, "compacted" | "skipped">;
   tokenCount: number;
 }> {
-  return compactActiveConversationImpl.call(
-    this,
-    customInstructions,
-    turnTraceContext,
-    events,
-    options,
-  );
-}
-
-async function compactActiveConversationImpl(
-  this: AgentRuntimeInternal,
-  customInstructions: string | undefined,
-  turnTraceContext: TraceContext,
-  events: SessionEvent[],
-  options: {
-    abortSignal?: AbortSignal;
-    compactContextTelemetry?: {
-      inputTokens: number;
-      policyContextWindowTokens: number;
-      thresholdTokens?: number;
-      tokenSource: "estimate" | "provider_usage";
-    };
-    autoCompactThreshold?: number;
-    compactReason?: CompactReason;
-    initialPromptTooLongCause?: unknown;
-    phase?: CompactPhase;
-    sourceCommandId?: string;
-    trigger?: CompactTrigger;
-    model?: Model;
-    activeEntries?: readonly RuntimeMessageEntry[];
-  } = {},
-): Promise<{
-  displayText: string;
-  entries: readonly RuntimeMessageEntry[];
-  outcome: Extract<CompactAttemptOutcome, "compacted" | "skipped">;
-  tokenCount: number;
-}> {
   throwIfTurnAborted(options.abortSignal);
   const trigger = options.trigger ?? CompactTrigger.Manual;
   const phase = options.phase ?? defaultCompactPhaseForTrigger(trigger);
