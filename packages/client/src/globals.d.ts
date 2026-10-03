@@ -204,8 +204,6 @@ declare global {
       onPaymentCallback(cb: (url: string) => void): () => void;
       /** 通知 main process renderer 已就绪 */
       notifyRendererReady(): void;
-      /** 主窗口 renderer 的 60 秒 heap 读数；单向 send，Main 不回执。 */
-      reportRendererHeapSample?(sample: RendererHeapSample): void;
       /** 触发任务状态对应的系统通知 */
       showTaskNotification(payload: TaskNotificationPayload): void;
       /** 导出日志：打包 ~/.zcode/v2 及外部 agent 日志为 zip 并在 Finder 中显示 */

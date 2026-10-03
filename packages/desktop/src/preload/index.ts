@@ -45,7 +45,6 @@ import type {
   OpenInEditorOptions,
   RemoteTarget,
   TaskNotificationPayload,
-  RendererHeapSample,
   PostUpdateReleaseNotesPayload,
   RemoteSessionClosedEvent,
   BotRemoteWorkspaceReconnectedEvent,
@@ -598,12 +597,6 @@ contextBridge.exposeInMainWorld("zcode", {
   },
   /** 通知 main process renderer 已就绪 */
   notifyRendererReady: () => ipcRenderer.send(PlatformChannels.RendererReady),
-  /**
-   * 主窗口 renderer 的 60 秒 heap 读数。
-   * 只提供单向 send：main 不回执，renderer 也不能靠它反查 main 的进程事实。
-   */
-  reportRendererHeapSample: (sample: RendererHeapSample): void =>
-    ipcRenderer.send(PlatformChannels.ReportRendererHeapSample, sample),
   /** 通过 main process 触发原生任务通知 */
   showTaskNotification: (payload: TaskNotificationPayload) =>
     ipcRenderer.send(PlatformChannels.ShowTaskNotification, payload),

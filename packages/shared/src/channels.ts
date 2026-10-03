@@ -10,10 +10,6 @@ import type {
 import type { OAuthStateRegistration } from "./oauth.js";
 import type { AppSettings, Locale } from "./protocol.js";
 import type { StorageCleanRequest, StorageCleanResult, StorageUsageSnapshot } from "./storage.js";
-// 注意：`ReportRendererHeapSample` 虽与其它 renderer 旁路通道并列，但它的落点是本地资源管理器
-// （`renderer_main` 角色的 heap_used_kb_mean/peak），不是遥测出网面，随 processResourceTelemetry
-// 一并保留。spec Step 6 的「11 个 channel」清单把它算作遥测属口径偏差，此处以防误删清单为准。
-import type { RendererHeapSample } from "./validation.js";
 import type {
   CancelPendingRemoteConnectionRequest,
   BindRemoteWorkspaceSessionContextRequest,
@@ -306,8 +302,6 @@ export const PlatformChannels = {
   OAuthCallbackHandled: "zcode:oauth-callback-handled",
   /** Renderer → Main：renderer 已就绪，可接收缓存的 deep link */
   RendererReady: "zcode:renderer-ready",
-  /** Renderer → Main：主窗口 renderer 每 60 秒的 heap 读数，单向 send，不需要回执。 */
-  ReportRendererHeapSample: "zcode:report-renderer-heap-sample",
   /** Renderer → Main：触发任务完成/失败的系统通知 */
   ShowTaskNotification: "zcode:show-task-notification",
   /** Main → Preload：通知 renderer 播放任务通知提示音 */
@@ -885,11 +879,6 @@ export interface PlatformChannelMap {
   };
   [PlatformChannels.RendererReady]: {
     request: void;
-    response: void;
-  };
-  // 单向 send（不是 invoke）：60 秒一条的本地资源样本，renderer 不等 main 回执。
-  [PlatformChannels.ReportRendererHeapSample]: {
-    request: RendererHeapSample;
     response: void;
   };
   [PlatformChannels.ShowTaskNotification]: {

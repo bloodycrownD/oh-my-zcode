@@ -14,7 +14,6 @@ import type {
 } from "./mcp.js";
 import type { OAuthStateRegistration } from "./oauth.js";
 import type { AppSettings, Locale } from "./protocol.js";
-import type { RendererHeapSample } from "./validation.js";
 import type {
   CuaAccessibilitySettingsResult,
   OpenCuaPermissionOnboardingOptions,
@@ -696,14 +695,6 @@ export interface IPlatformService {
 
 /** 触发任务状态对应的系统通知，由宿主环境决定是否真正展示 */
   showTaskNotification(payload: TaskNotificationPayload): void;
-
-  /**
-   * Renderer → Main：主窗口 renderer 每 60 秒的 heap 读数，供本地资源管理器的
-   * `renderer_main` 角色聚合 `heap_used_kb_mean/peak`。单向 send、fire-and-forget；
-   * Web 端与手机远控没有桥，不实现即 no-op。
-   * 不是遥测出网面，故随 processResourceTelemetry 保留。
-   */
-  reportRendererHeapSample?(sample: RendererHeapSample): void;
 
   /** 同步当前窗口所有 tab 的 workspace 路径到 main 进程（用于跨窗口去重） */
   syncWindowTabs(paths: string[]): void;

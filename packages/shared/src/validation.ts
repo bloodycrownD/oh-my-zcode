@@ -651,19 +651,6 @@ export const nodeSelfResourceSampleSchema = z
   .strict();
 export type NodeSelfResourceSample = z.infer<typeof nodeSelfResourceSampleSchema>;
 
-/**
- * 主窗口 renderer 每 60 秒经 preload 桥送 main 的 heap 读数
- *
- * 只带 heap：renderer 的 CPU 与 RSS 由 main 的 `getAppMetrics()` 负责，
- * renderer 自己也读不到。`strict` 保证 UI 侧不会顺手夹带路径、session 等隐私字段。
- */
-export const rendererHeapSampleSchema = z
-  .object({
-    heapUsedKb: z.number().finite().nonnegative().max(Number.MAX_SAFE_INTEGER),
-  })
-  .strict();
-export type RendererHeapSample = z.infer<typeof rendererHeapSampleSchema>;
-
 export const hostResourceSampleResponseSchema = z
   .object({
     type: z.literal("host-resource-sample"),
