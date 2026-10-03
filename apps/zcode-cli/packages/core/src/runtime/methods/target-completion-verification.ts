@@ -323,9 +323,6 @@ async function generateTargetCompletionVerificationText(
       const invocationContext = {
         metadata: traceContextToLogContext(input.traceContext),
         modelRequestSessionType: resolveModelRequestSessionTypeFromTaskType(this.config.taskType),
-        modelCall: {
-          operation: "goal_completion_verification" as const,
-        },
         statusSink: this.createModelStatusSink(input.traceContext, input.events),
         traceContext: input.traceContext,
         refreshRuntimeHeadersBeforeAttempt: createRefreshRuntimeHeadersBeforeModelAttempt(this, {

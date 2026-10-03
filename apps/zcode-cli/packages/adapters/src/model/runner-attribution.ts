@@ -45,7 +45,7 @@ export function createModelRequestAttributionHeaders(
 export function resolveModelRequestSessionType(
   explicitType: unknown,
 ): ModelRequestSessionTypeValue {
-  // 模型 API 调用分类（modelCall）随遥测删除；会话类型现在只由调用方显式声明，
+  // 模型调用分类字段已随遥测移除；会话类型现在只由调用方显式声明，
   // 缺省一律 Other，绝不从 querySource 反推。
   return isModelRequestSessionType(explicitType) ? explicitType : ModelRequestSessionType.Other;
 }

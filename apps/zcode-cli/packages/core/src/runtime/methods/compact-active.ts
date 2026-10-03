@@ -357,14 +357,6 @@ async function compactActiveConversationImpl(
           messages: projectedRequestMessages,
           metadata: traceContextToLogContext(modelTraceContext),
           modelRequestSessionType: resolveModelRequestSessionTypeFromTaskType(this.config.taskType),
-          modelCall: {
-            attributes: {
-              compactionOuterAttempt: attempt,
-              compactionTrigger: trigger,
-            },
-            operation: "context_compaction" as const,
-            operationId: compactTimeline.operationId,
-          },
           statusSink: this.createModelStatusSink(modelTraceContext, events),
           // compact 的首个真实 provider event 结束 SSE retry 资格；隐藏 partial 在
           // content block 提交前仍可丢弃并 HTTP fallback，block end 后则禁止任何重放。
