@@ -19,10 +19,10 @@ const snapshotPath = resolve(root, "scripts/desktop-typecheck-baseline.txt");
 
 let out = "";
 try {
-  // Windows 下 execFileSync 不解析 .CMD shim，直接用 node 跑 tsc 入口。
+  // tsc -b 的增量缓存不会重报已构建工程的错误，门禁必须 --force 全量。
   out = execFileSync(
     process.execPath,
-    [resolve(root, "node_modules/typescript/bin/tsc"), "-b", "--continue", ...projects],
+    [resolve(root, "node_modules/typescript/bin/tsc"), "-b", "--continue", "--force", ...projects],
     { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
 } catch (error) {
