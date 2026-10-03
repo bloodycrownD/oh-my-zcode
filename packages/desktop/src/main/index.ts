@@ -183,7 +183,6 @@ import {
   snapshotWindowsPackagedResources,
   WINDOWS_UPDATE_LOCK_RELEASE_GRACE_MS,
 } from "./windowsInstallResourceLocks.js";
-import { mainMemoryDiagnosticsRegistry } from "./mainMemoryDiagnostics.js";
 
 registerLocalMediaPreviewScheme(protocol);
 const localMediaPreviewPathRegistry = createLocalMediaPreviewPathRegistry();
@@ -473,17 +472,6 @@ const WINDOWS_AGENT_FORCE_KILL_TIMEOUT_MS = 2_000;
 
 const broadcastHub = new BroadcastHub();
 const taskRealtimeBus = new TaskRealtimeBus({ logger });
-// 内存诊断计数器注册表：本地诊断出口按需 collect 一次写主日志。
-// will-download 监听数用于观察关窗后 defaultSession 是否残留监听。
-mainMemoryDiagnosticsRegistry.register("taskBus", () => taskRealtimeBus.collectMemoryDiagnostics());
-mainMemoryDiagnosticsRegistry.register("broadcast", () => broadcastHub.collectMemoryDiagnostics());
-mainMemoryDiagnosticsRegistry.register("guest", () =>
-  browserGuestManager.collectMemoryDiagnostics(),
-);
-mainMemoryDiagnosticsRegistry.register("app", () => ({
-  windows: BrowserWindow.getAllWindows().filter((win) => !win.isDestroyed()).length,
-  willDownloadListeners: session.defaultSession.listenerCount("will-download"),
-}));
 const hostProcessLocalEnv = loadHostProcessEnvFromLocalFiles();
 interface RuntimeProcessEnvPreparation {
   patchPromise: Promise<Record<string, string>>;
