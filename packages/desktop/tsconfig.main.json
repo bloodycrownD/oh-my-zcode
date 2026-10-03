@@ -7,5 +7,13 @@
   },
   "include": ["src/main"],
   // main 直接依赖 shared 和 services；把引用补齐后，desktop 子工程也能稳定复用上游声明产物。
-  "references": [{ "path": "../shared" }, { "path": "../services" }]
+  // scheduler 也必须列进来：main/desktopCronScheduler.ts 以相对路径 import 了
+  // src/scheduler/schedulerProtocol.ts，该文件不在本工程 include/rootDir 内。没有这条引用时
+  // tsc 报 TS6059/TS6307 后仍会把它当本工程源文件 emit，而 computeOutputPath 对 rootDir 之外的
+  // 文件会退化成「输出 = 源文件绝对路径」，产物直接落回 src/scheduler/（tsc -b 的既有副作用）。
+  "references": [
+    { "path": "../shared" },
+    { "path": "../services" },
+    { "path": "./tsconfig.scheduler.json" }
+  ]
 }
