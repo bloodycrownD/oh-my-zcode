@@ -44,6 +44,21 @@ const baseline = new Set(
 const fresh = errors.filter((line) => !baseline.has(line));
 const removed = [...baseline].filter((line) => !errors.includes(line)).length;
 console.log(`desktop-full: ${errors.length} errors (baseline ${baseline.size}, removed ${removed})`);
+// tsc -b 会在 desktop/src 内再生 checked-in 编译产物（armsRumShared.*、schedulerProtocol.*），
+// 门禁本身不自动还原（避免误回退编辑中的文件）——编排层在每轮门禁后须执行还原/清理。
+try {
+  const dirty = execFileSync("git", ["status", "--porcelain", "packages/desktop/src"], {
+    cwd: root,
+    encoding: "utf8",
+  });
+  const lines = dirty.split(/\r?\n/).filter(Boolean);
+  if (lines.length > 0) {
+    console.log("gate side-effect (regenerated artifacts, restore manually):");
+    for (const line of lines) console.log(`  ${line}`);
+  }
+} catch {
+  // git 不可用时静默跳过
+}
 if (fresh.length > 0) {
   console.log("NEW ERRORS:");
   for (const line of fresh) console.log(`  ${line}`);
