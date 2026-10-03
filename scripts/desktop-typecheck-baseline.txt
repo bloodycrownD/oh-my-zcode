@@ -1,1 +1,705 @@
-
+packages/desktop/src/main/appARMSBootstrap.ts(10,3): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/main/appARMSBootstrap.ts(12,60): error TS6059: File 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/shared/armsRumShared.ts' is not under 'rootDir' 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/main'. 'rootDir' is expected to contain all source files.
+packages/desktop/src/main/appARMSBootstrap.ts(12,60): error TS6307: File 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/shared/armsRumShared.ts' is not listed within the file list of project 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/tsconfig.main.json'. Projects must list all files or use an 'include' pattern.
+packages/desktop/src/main/appARMSBootstrap.ts(7,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_ARMS_RUM_ENDPOINT'.
+packages/desktop/src/main/appARMSBootstrap.ts(9,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_TELEMETRY_ENABLED'.
+packages/desktop/src/main/appTelemetryRuntime.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryRendererContext'.
+packages/desktop/src/main/applicationIcons.ts(83,54): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+packages/desktop/src/main/applicationIcons.ts(92,78): error TS2345: Argument of type 'string | undefined' is not assignable to parameter of type 'string'.
+packages/desktop/src/main/armsEventRedaction.ts(1,10): error TS2305: Module '"@zcode/shared"' has no exported member 'redactTelemetryText'.
+packages/desktop/src/main/armsEventRedaction.ts(1,31): error TS2305: Module '"@zcode/shared"' has no exported member 'redactTelemetryUrl'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(1953,33): error TS18048: 'running' is possibly 'undefined'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2222,25): error TS2339: Property 'x' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2222,57): error TS2339: Property 'y' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2227,19): error TS2339: Property 'x' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2228,19): error TS2339: Property 'y' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2229,20): error TS2339: Property 'button' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2229,46): error TS2339: Property 'button' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2230,20): error TS2339: Property 'doubleClick' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2230,70): error TS2339: Property 'doubleClick' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2232,26): error TS2339: Property 'x' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2233,26): error TS2339: Property 'y' does not exist on type '{ type: "click"; selector?: string | undefined; x?: number | undefined; y?: number | undefined; button?: "left" | "right" | "middle" | undefined; doubleClick?: boolean | undefined; delayAfterMs?: number | undefined; } | { ...; } | { ...; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2628,40): error TS18048: 'tab.guest' is possibly 'undefined'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(2779,5): error TS2322: Type '{ lifecycle?: "closed" | "deliverable" | "handoff" | undefined; active?: true | undefined; tabId: string; url: string; title: string; viewport: { width: number; height: number; }; }' is not assignable to type '{ tabId: string; url: string; title: string; viewport: { width: number; height: number; }; active?: boolean | undefined; lifecycle?: "active" | "deliverable" | "handoff" | undefined; }'.
+packages/desktop/src/main/browserView/browserGuestManager.ts(3855,22): error TS2367: This comparison appears to be unintentional because the types '"active" | "deliverable" | "handoff"' and '"closed"' have no overlap.
+packages/desktop/src/main/browserView/browserGuestManager.ts(3856,11): error TS2367: This comparison appears to be unintentional because the types '"active" | "deliverable" | "handoff"' and '"closed"' have no overlap.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(20,16): error TS7017: Element implicitly has an 'any' type because type 'typeof globalThis' has no index signature.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(21,35): error TS2304: Cannot find name 'Element'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(31,26): error TS2304: Cannot find name 'Element'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(40,34): error TS2304: Cannot find name 'Element'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(42,10): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(44,14): error TS7006: Parameter 'element' implicitly has an 'any' type.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(45,11): error TS7006: Parameter 'element' implicitly has an 'any' type.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(49,21): error TS2304: Cannot find name 'HTMLElement'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(49,67): error TS2304: Cannot find name 'HTMLInputElement'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(66,3): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(68,16): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(71,25): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(73,17): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(77,17): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightExecutor.ts(80,3): error TS2584: Cannot find name 'document'. Do you need to change your target library? Try changing the 'lib' compiler option to include 'dom'.
+packages/desktop/src/main/browserView/browserPlaywrightLocatorExecutor.ts(319,13): error TS2322: Type 'ScrollAlignment | undefined' is not assignable to type 'ScrollAlignment'.
+packages/desktop/src/main/browserView/browserScreenshotSurfaceContracts.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'BrowserViewSurfaceScaleMode'.
+packages/desktop/src/main/browserView/electronBrowserWebmRecorder.ts(384,33): error TS2769: No overload matches this call.
+packages/desktop/src/main/browserView/electronBrowserWebmRecorder.ts(405,47): error TS2769: No overload matches this call.
+packages/desktop/src/main/chromeLocalStorageManager.ts(421,56): error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+packages/desktop/src/main/chromeLocalStorageManager.ts(426,28): error TS2345: Argument of type 'ChildProcessByStdio<null, Readable, Readable>' is not assignable to parameter of type 'ChildProcessWithoutNullStreams'.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(214,13): error TS7006: Parameter '_traceId' implicitly has an 'any' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(214,23): error TS7019: Rest parameter 'args' implicitly has an 'any[]' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(215,12): error TS7006: Parameter '_traceId' implicitly has an 'any' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(215,22): error TS7019: Rest parameter 'args' implicitly has an 'any[]' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(216,12): error TS7006: Parameter '_traceId' implicitly has an 'any' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(216,22): error TS7019: Rest parameter 'args' implicitly has an 'any[]' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(217,13): error TS7006: Parameter '_traceId' implicitly has an 'any' type.
+packages/desktop/src/main/cuaAccessibilitySettings.ts(217,23): error TS7019: Rest parameter 'args' implicitly has an 'any[]' type.
+packages/desktop/src/main/databaseStartupTelemetry.ts(5,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/desktop/src/main/desktopArmsCustomEvent.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/desktop/src/main/desktopArmsCustomEvent.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsRumEnv'.
+packages/desktop/src/main/desktopArmsCustomEvent.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ConfigureFinalArmsCustomEventE2ERequest'.
+packages/desktop/src/main/desktopArmsCustomEvent.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'FinalArmsCustomEventE2EEntry'.
+packages/desktop/src/main/desktopArmsCustomEvent.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'FinalArmsCustomEventPayload'.
+packages/desktop/src/main/desktopCrashCapture.ts(178,24): error TS2345: Argument of type '{ entry: string; path: string; mtimeMs: number; size: number; } | undefined' is not assignable to parameter of type '{ entry: string; path: string; mtimeMs: number; size: number; }'.
+packages/desktop/src/main/desktopCrashCapture.ts(180,18): error TS18048: 'dump' is possibly 'undefined'.
+packages/desktop/src/main/desktopCronScheduler.ts(13,8): error TS6059: File 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/scheduler/schedulerProtocol.ts' is not under 'rootDir' 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/main'. 'rootDir' is expected to contain all source files.
+packages/desktop/src/main/desktopCronScheduler.ts(13,8): error TS6307: File 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/src/scheduler/schedulerProtocol.ts' is not listed within the file list of project 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/tsconfig.main.json'. Projects must list all files or use an 'include' pattern.
+packages/desktop/src/main/desktopHelpConfig.ts(14,82): error TS2345: Argument of type 'string | URL | Request' is not assignable to parameter of type 'string | Request'.
+packages/desktop/src/main/desktopHostProcess.ts(21,8): error TS2305: Module '"@zcode/shared"' has no exported member 'HostMcpTelemetryResponse'.
+packages/desktop/src/main/desktopHostProcess.ts(22,8): error TS2305: Module '"@zcode/shared"' has no exported member 'HostSessionCreateTelemetryResponse'.
+packages/desktop/src/main/desktopHostProcess.ts(321,48): error TS2339: Property 'NetworkTelemetryBatch' does not exist on type '{ readonly DatabaseStartupState: "database-startup-state"; readonly RemoteWorkspaceConnectionLog: "remote-workspace-connection-log"; readonly RemoteWorkspaceConnected: "remote-workspace-connected"; ... 41 more ...; readonly ProviderProvisioningExecutionResult: "provider-provisioning-execution-result"; }'.
+packages/desktop/src/main/desktopHostProcess.ts(322,49): error TS2339: Property 'observations' does not exist on type '{ type: "resource-usage-snapshot-result"; requestId: string; sampledAt: number; processes: { pid: number; name: string; category: "base" | "builtin-plugin" | "community-plugin"; groupKey: string; groupLabel: string; cpuPercent: number; memoryBytes: number; }[]; } | ... 40 more ... | { ...; }'.
+packages/desktop/src/main/desktopHostProcess.ts(361,48): error TS2339: Property 'McpTelemetry' does not exist on type '{ readonly DatabaseStartupState: "database-startup-state"; readonly RemoteWorkspaceConnectionLog: "remote-workspace-connection-log"; readonly RemoteWorkspaceConnected: "remote-workspace-connected"; ... 41 more ...; readonly ProviderProvisioningExecutionResult: "provider-provisioning-execution-result"; }'.
+packages/desktop/src/main/desktopHostProcess.ts(366,48): error TS2339: Property 'SessionCreateTelemetry' does not exist on type '{ readonly DatabaseStartupState: "database-startup-state"; readonly RemoteWorkspaceConnectionLog: "remote-workspace-connection-log"; readonly RemoteWorkspaceConnected: "remote-workspace-connected"; ... 41 more ...; readonly ProviderProvisioningExecutionResult: "provider-provisioning-execution-result"; }'.
+packages/desktop/src/main/desktopMainIpcPlatform.ts(22,8): error TS2305: Module '"@zcode/shared"' has no exported member 'WindowControlsOverlayReadyPayload'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(15,3): error TS2305: Module '"@zcode/shared"' has no exported member 'rendererTelemetryEventPayloadSchema'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(16,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsRumEnv'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(18,8): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryEventPayload'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(245,37): error TS2339: Property 'ReadFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(248,37): error TS2339: Property 'ClearFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(252,24): error TS2339: Property 'ConfigureFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(321,31): error TS2339: Property 'SyncTelemetryContext' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(328,35): error TS2339: Property 'ReportTelemetryEvent' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(341,35): error TS2339: Property 'ReportArmsCustomEvent' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'armsCustomEventPayloadSchema'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'buildRemoteWorkspaceConnectResultTelemetry'.
+packages/desktop/src/main/desktopMainIpcRemote.ts(7,3): error TS2305: Module '"@zcode/shared"' has no exported member 'classifyRemoteUsageError'.
+packages/desktop/src/main/desktopMcpTelemetry.ts(2,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCodeMcpTelemetryEvent'.
+packages/desktop/src/main/desktopMcpTelemetry.ts(47,92): error TS2366: Function lacks ending return statement and return type does not include 'undefined'.
+packages/desktop/src/main/desktopNetworkTelemetry.ts(3,10): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/main/desktopPrintToPdf.ts(26,31): error TS2322: Type 'ArrayBuffer | SharedArrayBuffer' is not assignable to type 'ArrayBuffer | undefined'.
+packages/desktop/src/main/desktopRemoteSessions.ts(105,10): error TS2678: Type '"server"' is not comparable to type '"wsl" | "docker" | "ssh"'.
+packages/desktop/src/main/desktopRemoteSessions.ts(107,9): error TS2367: This comparison appears to be unintentional because the types '"wsl" | "docker" | "ssh"' and '"server"' have no overlap.
+packages/desktop/src/main/desktopRemoteSessions.ts(108,52): error TS2339: Property 'url' does not exist on type 'never'.
+packages/desktop/src/main/desktopRemoteSessions.ts(109,55): error TS2339: Property 'url' does not exist on type 'never'.
+packages/desktop/src/main/desktopRemoteSessions.ts(122,10): error TS2678: Type '"server"' is not comparable to type '"wsl" | "docker" | "ssh"'.
+packages/desktop/src/main/desktopRemoteSessions.ts(123,69): error TS2339: Property 'url' does not exist on type 'never'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsRumEnv'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'FinalArmsCustomEventPayload'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RemoteUsageErrorCategory'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RemoteUsageRemoteKind'.
+packages/desktop/src/main/desktopRemoteUsageArmsTelemetry.ts(7,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RemoteUsageResult'.
+packages/desktop/src/main/desktopResourceTelemetry.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/main/desktopRuntimeEnv.ts(24,3): error TS2305: Module '"@zcode/shared"' has no exported member 'readZCodeAgentTelemetryEnv'.
+packages/desktop/src/main/desktopSaveFile.ts(196,22): error TS18048: 'payload.data' is possibly 'undefined'.
+packages/desktop/src/main/desktopSaveFile.ts(199,22): error TS18048: 'payload.data' is possibly 'undefined'.
+packages/desktop/src/main/desktopSaveFile.ts(216,59): error TS2769: No overload matches this call.
+packages/desktop/src/main/desktopSaveFile.ts(69,5): error TS2739: Type 'LookupAddress[]' is missing the following properties from type 'LookupAddress': address, family
+packages/desktop/src/main/desktopSaveFile.ts(74,15): error TS2339: Property 'length' does not exist on type 'LookupAddress'.
+packages/desktop/src/main/desktopSaveFile.ts(75,15): error TS2339: Property 'some' does not exist on type 'LookupAddress'.
+packages/desktop/src/main/desktopSaveFile.ts(75,23): error TS7031: Binding element 'address' implicitly has an 'any' type.
+packages/desktop/src/main/desktopSaveFile.ts(75,32): error TS7031: Binding element 'family' implicitly has an 'any' type.
+packages/desktop/src/main/desktopSaveFile.ts(93,24): error TS2345: Argument of type 'LookupAddress' is not assignable to parameter of type 'string | LookupAddress[]'.
+packages/desktop/src/main/desktopSaveFile.ts(96,23): error TS7053: Element implicitly has an 'any' type because expression of type '0' can't be used to index type 'LookupAddress'.
+packages/desktop/src/main/desktopStabilityTelemetry.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/main/desktopWindowLifecycle.ts(193,58): error TS2345: Argument of type '{ runtimeProcessEnvPatch: Record<string, string>; agentSpawnFallbackCwd: string; agentWarmupTargets?: StartupWorkspaceWarmupTarget[] | undefined; type: "init-local"; deviceMid: string; workspacePath: string | undefined; workspaceIdentity: string | undefined; }' is not assignable to parameter of type 'HostInitMessage'.
+packages/desktop/src/main/desktopZCodeDataSizeTelemetry.ts(2,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsRumEnv'.
+packages/desktop/src/main/desktopZCodeDataSizeTelemetry.ts(2,27): error TS2305: Module '"@zcode/shared"' has no exported member 'FinalArmsCustomEventPayload'.
+packages/desktop/src/main/index.ts(132,55): error TS7016: Could not find a declaration file for module '../../scripts/desktop-product-identity.mjs'. 'D:/Dev/Js/oh-my-zcode/omz/packages/desktop/scripts/desktop-product-identity.mjs' implicitly has an 'any' type.
+packages/desktop/src/main/index.ts(1852,5): error TS2322: Type '(webContentsId: number) => (BrowserGuestExecutionContext & { tabId: string; }) | null' is not assignable to type '(webContentsId: number) => { workspaceKey: string; remoteSessionId?: string | undefined; sessionId: string; browserId: string; browserGeneration: number; tabId: string; } | undefined'.
+packages/desktop/src/main/index.ts(2156,5): error TS2322: Type '(patch: Partial<AppSettings>) => void' is not assignable to type '(patch: unknown) => void'.
+packages/desktop/src/main/index.ts(2299,20): error TS2345: Argument of type 'string | null' is not assignable to parameter of type 'string'.
+packages/desktop/src/main/index.ts(240,10): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/main/index.ts(733,42): error TS2345: Argument of type 'Net' is not assignable to parameter of type 'DesktopTelemetryFetchSource'.
+packages/desktop/src/main/index.ts(75,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_TELEMETRY_ENABLED'.
+packages/desktop/src/main/index.ts(76,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_ARMS_RUM_ENDPOINT'.
+packages/desktop/src/main/index.ts(81,8): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryEventPayload'.
+packages/desktop/src/main/index.ts(818,29): error TS2339: Property 'ReportLocalTtftBatch' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/localTtftExportDedupe.ts(1,10): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_TTL_MS'.
+packages/desktop/src/main/localTtftExporter.ts(13,10): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_BUCKETS_MS'.
+packages/desktop/src/main/localTtftExporter.ts(13,33): error TS2305: Module '"@zcode/shared"' has no exported member 'localTtftBatchSchema'.
+packages/desktop/src/main/localTtftExporter.ts(13,60): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftBatch'.
+packages/desktop/src/main/localTtftExporter.ts(169,52): error TS7006: Parameter 'interval' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftExporter.ts(186,56): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftSpans.ts(102,36): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftSpans.ts(123,40): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftSpans.ts(4,10): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_STAGES'.
+packages/desktop/src/main/localTtftSpans.ts(4,34): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftRecord'.
+packages/desktop/src/main/localTtftSpans.ts(44,16): error TS7006: Parameter 'stage' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftSpans.ts(44,58): error TS7006: Parameter 'interval' implicitly has an 'any' type.
+packages/desktop/src/main/localTtftSpans.ts(97,30): error TS7006: Parameter 'interval' implicitly has an 'any' type.
+packages/desktop/src/main/manifestUpdateProvider.ts(234,11): error TS2352: Conversion of type 'Record<string, unknown>' to type 'UpdateInfo' may be a mistake because neither type sufficiently overlaps with the other. If this was intentional, convert the expression to 'unknown' first.
+packages/desktop/src/main/processResourceWindowEvent.ts(3,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsRumEnv'.
+packages/desktop/src/main/rendererActionTraceBroker.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RENDERER_ACTION_TRACE_MAX_BATCH_BYTES'.
+packages/desktop/src/main/rendererActionTraceBroker.ts(54,38): error TS7006: Parameter 'span' implicitly has an 'any' type.
+packages/desktop/src/main/rendererActionTraceBroker.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'rendererActionTraceBatchSchema'.
+packages/desktop/src/main/rendererActionTraceBroker.ts(7,8): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceBatchV1'.
+packages/desktop/src/main/rendererActionTraceBroker.ts(8,8): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceSpanV1'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(108,44): error TS2339: Property 'GetRendererActionTraceConfig' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(109,49): error TS2339: Property 'ReportRendererActionTraceBatch' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(2,33): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceConfigV1'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(68,49): error TS2339: Property 'RendererActionTraceConfigChanged' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(75,35): error TS2339: Property 'GetRendererActionTraceConfig' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/rendererActionTraceIpc.ts(76,31): error TS2339: Property 'ReportRendererActionTraceBatch' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/main/rendererActionTraceRollout.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'DISABLED_RENDERER_ACTION_TRACE_CONFIG'.
+packages/desktop/src/main/rendererActionTraceRollout.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'rendererActionTraceConfigSchema'.
+packages/desktop/src/main/rendererActionTraceRollout.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'rendererActionTraceGroupSchema'.
+packages/desktop/src/main/rendererActionTraceRollout.ts(5,8): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceConfigV1'.
+packages/desktop/src/main/resourceManagerStorage.ts(16,8): error TS2305: Module '"@zcode/services/node"' has no exported member 'IStorageService'.
+packages/desktop/src/main/resourceManagerStorage.ts(33,27): error TS7006: Parameter 'snapshot' implicitly has an 'any' type.
+packages/desktop/src/main/storageScanWorker.ts(7,15): error TS2305: Module '"@zcode/services"' has no exported member 'StorageRootSpec'.
+packages/desktop/src/main/storageScanWorkerProtocol.ts(1,15): error TS2305: Module '"@zcode/services"' has no exported member 'StorageRootSpec'.
+packages/desktop/src/main/taskRealtimeBus.ts(251,44): error TS2345: Argument of type '{ eventId: string; workspacePath: string; workspaceKey: string; traceId: string; createdAt: number; reason: "stream_mirror_owner_lost" | "stream_mirror_gap" | "task_created" | "user_message_saved" | ... 9 more ... | "task_deleted"; type: "task_snapshot_invalidated"; taskId: string; workspaceIdentity?: string | undef...' is not assignable to parameter of type 'TaskRealtimeEvent'.
+packages/desktop/src/main/taskRealtimeBus.ts(260,64): error TS2345: Argument of type '{ kind: "user_message"; messageId: string; content: string; timestamp: number; attachments?: ({ kind: "image"; filename: string; mimeType: string; sizeBytes?: number | undefined; dataBase64?: string | undefined; localPath?: string | undefined; } | { ...; } | { ...; } | { ...; } | { ...; })[] | undefined; } | { ...; }' is not assignable to parameter of type 'TaskStreamMirrorPublishOp'.
+packages/desktop/src/main/taskRealtimeBus.ts(599,50): error TS2339: Property 'event' does not exist on type 'TaskStreamMirrorPublishOp'.
+packages/desktop/src/main/windowsChromeAppBoundKey.ts(364,40): error TS2339: Property 'expectedAppVersion' does not exist on type 'ReadAppBoundKeyOptions'.
+packages/desktop/src/main/windowsChromeAppBoundKey.ts(365,41): error TS2339: Property 'expectedBuildCommit' does not exist on type 'ReadAppBoundKeyOptions'.
+packages/desktop/src/preload/index.ts(46,3): error TS2305: Module '"@zcode/shared"' has no exported member 'DesktopZoomState'.
+packages/desktop/src/preload/index.ts(56,3): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryRendererContext'.
+packages/desktop/src/preload/index.ts(57,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceBatchV1'.
+packages/desktop/src/preload/index.ts(58,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceConfigV1'.
+packages/desktop/src/preload/index.ts(633,39): error TS2339: Property 'SyncTelemetryContext' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(645,45): error TS2339: Property 'ReportTelemetryEvent' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(652,45): error TS2339: Property 'ReportArmsCustomEvent' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(655,41): error TS2339: Property 'GetRendererActionTraceConfig' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(661,37): error TS2339: Property 'RendererActionTraceConfigChanged' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(663,51): error TS2339: Property 'RendererActionTraceConfigChanged' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(666,57): error TS2694: Namespace '"D:/Dev/Js/oh-my-zcode/omz/packages/shared/dist/index"' has no exported member 'LocalTtftBatch'.
+packages/desktop/src/preload/index.ts(667,39): error TS2339: Property 'ReportLocalTtftBatch' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(669,39): error TS2339: Property 'ReportRendererActionTraceBatch' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(74,3): error TS2305: Module '"@zcode/shared"' has no exported member 'WindowControlsOverlayMetrics'.
+packages/desktop/src/preload/index.ts(75,3): error TS2305: Module '"@zcode/shared"' has no exported member 'WindowControlsOverlayReadyPayload'.
+packages/desktop/src/preload/index.ts(78,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ConfigureFinalArmsCustomEventE2ERequest'.
+packages/desktop/src/preload/index.ts(79,3): error TS2305: Module '"@zcode/shared"' has no exported member 'FinalArmsCustomEventE2EEntry'.
+packages/desktop/src/preload/index.ts(92,43): error TS2339: Property 'ReadFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(93,69): error TS2339: Property 'ClearFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/preload/index.ts(95,43): error TS2339: Property 'ConfigureFinalArmsCustomEventsE2E' does not exist on type '{ readonly SelectDirectory: "zcode:select-directory"; readonly SelectFile: "zcode:select-file"; readonly SelectFiles: "zcode:select-files"; readonly CreateTempTextAttachment: "zcode:create-temp-text-attachment"; ... 114 more ...; readonly GetDeviceId: "zcode:get-device-id"; }'.
+packages/desktop/src/renderer/appTelemetryBridge.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryRendererContext'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(30,36): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(32,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(34,26): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(34,62): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(35,43): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(36,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(38,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(40,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(41,46): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(42,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(43,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(45,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(48,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(50,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(52,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(54,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(56,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(58,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(60,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(62,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopBrowserPlatformBridge.ts(75,12): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(102,21): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(104,46): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(105,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(106,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(107,52): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(108,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(109,22): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(111,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(112,29): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(114,51): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(116,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(118,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(120,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(121,50): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(122,30): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(124,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(125,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(126,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(127,48): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(129,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(13,35): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(130,34): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(131,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(132,42): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(134,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(137,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(139,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(14,30): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(142,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(144,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(146,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(147,52): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(149,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(15,31): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(150,44): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(151,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(152,39): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(154,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(156,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(157,48): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(158,46): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(16,51): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(160,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(162,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(17,48): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(18,48): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(20,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(22,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(24,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(26,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(28,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(29,49): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(30,37): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(31,34): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(32,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(33,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(34,51): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(35,49): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(36,49): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(37,35): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(38,32): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(39,33): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(40,42): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(41,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(42,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(43,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(45,18): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(48,44): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(50,18): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(53,42): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(54,22): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(56,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(57,43): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(58,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(59,41): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(60,39): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(61,28): error TS7006: Parameter 'payload' implicitly has an 'any' type.
+packages/desktop/src/renderer/src/desktopPlatform.ts(61,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(61,5): error TS2353: Object literal may only specify known properties, and 'reportTelemetryEvent' does not exist in type 'IPlatformService'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(62,29): error TS7006: Parameter 'payload' implicitly has an 'any' type.
+packages/desktop/src/renderer/src/desktopPlatform.ts(64,21): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(66,42): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(67,22): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(69,48): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(70,10): error TS7006: Parameter 'callback' implicitly has an 'any' type.
+packages/desktop/src/renderer/src/desktopPlatform.ts(70,30): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(72,28): error TS7006: Parameter 'batch' implicitly has an 'any' type.
+packages/desktop/src/renderer/src/desktopPlatform.ts(72,45): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(73,44): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(74,10): error TS7006: Parameter 'batch' implicitly has an 'any' type.
+packages/desktop/src/renderer/src/desktopPlatform.ts(74,27): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(76,38): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(77,28): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(79,47): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(80,39): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(81,46): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(82,50): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(83,40): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(84,52): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(85,37): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(86,35): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(88,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(89,43): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(91,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(93,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(95,14): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/desktopPlatform.ts(97,36): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(1,33): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftRecord'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(30,18): error TS2339: Property 'reportLocalTtftBatch' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(47,6): error TS2339: Property 'getRendererActionTraceConfig' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(50,24): error TS2339: Property 'onRendererActionTraceConfigChanged' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(6,17): error TS2339: Property 'reportLocalTtftBatch' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/localTtftBootstrap.ts(6,51): error TS2339: Property 'getRendererActionTraceConfig' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/main.tsx(18,8): error TS2882: Cannot find module or type declarations for side-effect import of '@zcode/ui/styles.css'.
+packages/desktop/src/renderer/src/main.tsx(24,3): error TS2305: Module '"@zcode/shared"' has no exported member 'collectTelemetryRendererContext'.
+packages/desktop/src/renderer/src/main.tsx(313,49): error TS2339: Property 'zcode' does not exist on type 'Window & typeof globalThis'.
+packages/desktop/src/renderer/src/main.tsx(324,29): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'ArmsReporter'.
+packages/desktop/src/renderer/src/resource-manager.tsx(3,8): error TS2882: Cannot find module or type declarations for side-effect import of '@zcode/ui/styles.css'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(15,38): error TS2339: Property 'reportRendererActionTraceBatch' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(16,38): error TS2339: Property 'getRendererActionTraceConfig' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'DISABLED_RENDERER_ACTION_TRACE_CONFIG'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RENDERER_ACTION_TRACE_SERVICE_NAME'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(41,50): error TS2339: Property 'onRendererActionTraceConfigChanged' does not exist on type 'IPlatformService'.
+packages/desktop/src/renderer/src/userActionTraceBootstrap.ts(7,8): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceConfigV1'.
+packages/desktop/src/scheduler/index.ts(252,5): error TS2322: Type '{ providerId: string; modelId: string; options?: { reasoningLevel?: string | undefined; } | undefined; } | undefined' is not assignable to type '{ providerId: string; modelId: string; options?: { reasoningLevel?: string | undefined; } | undefined; }'.
+packages/desktop/src/shared/armsRumShared.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'mapZCodeEnvToArmsRumEnv'.
+packages/desktop/src/shared/armsRumShared.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_ARMS_RUM_ENDPOINT'.
+packages/services/src/node.ts(520,3): error TS2305: Module '"@zcode/shared"' has no exported member 'getCapturedZCodeAgentTelemetryEnv'.
+packages/services/src/telemetry/telemetryCore.ts(10,3): error TS2305: Module '"@zcode/shared"' has no exported member 'sanitizeTelemetryEventDetail'.
+packages/services/src/telemetry/telemetryCore.ts(11,8): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryEventPayload'.
+packages/services/src/telemetry/telemetryCore.ts(12,8): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryRendererContext'.
+packages/services/src/telemetry/telemetryCore.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_TELEMETRY_ENABLED'.
+packages/services/src/telemetry/telemetryCore.ts(7,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCODE_TELEMETRY_REPORT_ENDPOINT'.
+packages/services/src/zcode-agent/zcodeAgent.ts(21,3): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCodeMcpTelemetryEvent'.
+packages/services/src/zcode-agent/zcodeAgent.ts(815,36): error TS2694: Namespace '"D:/Dev/Js/oh-my-zcode/omz/packages/shared/dist/index"' has no exported member 'LocalTtftFacts'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(110,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ZCodeMcpTelemetryEvent'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(1920,59): error TS2339: Property 'mcpTelemetry' does not exist on type '{ readonly storageStartup: "startup/storageState"; readonly providerRuntimeHeadersCancelled: "interaction/providerRuntimeHeadersCancelled"; readonly mcpResourceSamples: "process/mcpResourceSamples"; readonly toolExecResource: "process/toolExecResource"; readonly pluginOperationProgress: "plugins/operationProgress"; ...'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(1926,48): error TS7006: Parameter 'issue' implicitly has an 'any' type.
+packages/services/src/zcode-agent/zcodeAgentService.ts(2005,49): error TS2339: Property 'localTtftFacts' does not exist on type '{ readonly conversationFrame: "v4/conversation/frame"; readonly conversationTelemetryFact: "v4/telemetry/event"; readonly cuaPermissionObservation: "v4/cua/permission-observation"; }'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'localTtftFactsSchema'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(5,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftFacts'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(5080,17): error TS2339: Property 'ttft' does not exist on type '{ commandId: string; clientId: string; sessionId: string | null; type: "compact" | "createSession" | "createSelectionSideSession" | "sendText" | "sendGoalCommand" | "stop" | "forkAssistant" | ... 26 more ... | "discardSharedContext"; payload: unknown; issuedAt: number; baseRevision?: number | undefined; baseLogEpoch...'.
+packages/services/src/zcode-agent/zcodeAgentService.ts(76,3): error TS2305: Module '"@zcode/shared"' has no exported member 'zcodeMcpTelemetryEventSchema'.
+packages/ui/src/Root.tsx(166,27): error TS2345: Argument of type 'IPlatformService | null' is not assignable to parameter of type 'ArmsReporter | null'.
+packages/ui/src/Root.tsx(167,32): error TS2345: Argument of type 'IPlatformService | null' is not assignable to parameter of type 'SessionOpenArmsReporter | null'.
+packages/ui/src/Root.tsx(169,31): error TS2345: Argument of type 'IPlatformService | null' is not assignable to parameter of type 'ArmsReporter | null'.
+packages/ui/src/hooks/useOAuth.ts(12,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveSafeTelemetryHostname'.
+packages/ui/src/hooks/useOAuth.ts(95,11): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'ReportTelemetryPlatform'.
+packages/ui/src/lib/appTelemetry.ts(34,55): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/appTelemetry.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'collectTelemetryRendererContext'.
+packages/ui/src/lib/appTelemetry.ts(63,11): error TS18046: 'platform.reportTelemetryEvent' is of type 'unknown'.
+packages/ui/src/lib/appTelemetry.ts(7,3): error TS2305: Module '"@zcode/shared"' has no exported member 'sanitizeTelemetryEventDetail'.
+packages/ui/src/lib/armsCustomEventObservability.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/automationTelemetry.ts(15,49): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/automationTelemetry.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'sanitizeTelemetryErrorMessage'.
+packages/ui/src/lib/chatErrorBannerTelemetry.ts(173,36): error TS2344: Type '"reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/chatErrorBannerTelemetry.ts(185,11): error TS18046: 'platform.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/chatErrorBannerTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveTelemetryModelId'.
+packages/ui/src/lib/chatErrorBannerTelemetry.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveTelemetryProviderScope'.
+packages/ui/src/lib/chatErrorBannerTelemetry.ts(4,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/codingPlanFunnelTelemetry.ts(46,49): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/offPeakTelemetry.ts(21,49): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/offPeakTelemetry.ts(4,8): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryEventPayload'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(164,26): error TS18046: 'reporter.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveTelemetryModelId'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(211,26): error TS18046: 'reporter.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(24,44): error TS2344: Type '"reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveTelemetryProviderScope'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'sanitizeTelemetryModelValue'.
+packages/ui/src/lib/planUsageArmsTelemetry.ts(5,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/promptTemplateTelemetry.ts(1,33): error TS2305: Module '"@zcode/shared"' has no exported member 'TelemetryEventPayload'.
+packages/ui/src/lib/promptTemplateTelemetry.ts(30,36): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/reactErrorArmsTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'redactTelemetryText'.
+packages/ui/src/lib/reactErrorArmsTelemetry.ts(20,44): error TS2344: Type '"reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/reactErrorArmsTelemetry.ts(3,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/reactErrorArmsTelemetry.ts(86,26): error TS18046: 'armsReporter.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/sendFunnelArmsTelemetry.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/sendFunnelArmsTelemetry.ts(14,44): error TS2344: Type '"reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/sendFunnelArmsTelemetry.ts(40,26): error TS18046: 'armsReporter.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/sessionCreateTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveWorkspaceTelemetryDetail'.
+packages/ui/src/lib/sessionCreateTelemetry.ts(22,38): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/sessionCreateTelemetry.ts(4,8): error TS2305: Module '"@zcode/shared"' has no exported member 'SessionCreateClientKind'.
+packages/ui/src/lib/sessionOpenArmsTelemetry.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/uiPerfArmsTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'sanitizeTelemetryModelValue'.
+packages/ui/src/lib/uiPerfArmsTelemetry.ts(3,8): error TS2305: Module '"@zcode/shared"' has no exported member 'ArmsCustomEventPayload'.
+packages/ui/src/lib/uiPerfArmsTelemetry.ts(33,44): error TS2344: Type '"reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/lib/uiPerfArmsTelemetry.ts(66,26): error TS18046: 'armsReporter.reportArmsCustomEvent' is of type 'unknown'.
+packages/ui/src/lib/userActionTelemetry.ts(10,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RENDERER_ACTION_TRACE_MAX_BATCH_SPANS'.
+packages/ui/src/lib/userActionTelemetry.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceAttributes'.
+packages/ui/src/lib/userActionTelemetry.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceBatchV1'.
+packages/ui/src/lib/userActionTelemetry.ts(4,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceConfigV1'.
+packages/ui/src/lib/userActionTelemetry.ts(5,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceResourceV1'.
+packages/ui/src/lib/userActionTelemetry.ts(6,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceSpanV1'.
+packages/ui/src/lib/userActionTelemetry.ts(9,3): error TS2305: Module '"@zcode/shared"' has no exported member 'RENDERER_ACTION_TRACE_MAX_BATCH_BYTES'.
+packages/ui/src/lib/userActionTraceCatalog.ts(1,15): error TS2305: Module '"@zcode/shared"' has no exported member 'RendererActionTraceGroup'.
+packages/ui/src/onboarding/OccupationOnboarding.tsx(86,5): error TS2741: Property 'reportTelemetryEvent' is missing in type 'IPlatformService' but required in type 'Pick<IPlatformService, "reportTelemetryEvent">'.
+packages/ui/src/onboarding/useOnboardingTelemetry.ts(42,36): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/root/useRootOAuthEffects.ts(260,13): error TS2741: Property 'reportTelemetryEvent' is missing in type 'IPlatformService' but required in type 'Pick<IPlatformService, "reportTelemetryEvent">'.
+packages/ui/src/root/useRootOAuthEffects.ts(34,36): error TS2344: Type '"reportTelemetryEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/root/useRootOAuthEffects.ts(344,11): error TS2741: Property 'reportTelemetryEvent' is missing in type 'IPlatformService' but required in type 'Pick<IPlatformService, "reportTelemetryEvent">'.
+packages/ui/src/root/useRootWorkspaceActions.ts(316,7): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'ReportTelemetryPlatform'.
+packages/ui/src/settings/AutomationsSection.tsx(1044,41): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/AutomationsSection.tsx(1127,40): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/AutomationsSection.tsx(1205,40): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/AutomationsSection.tsx(1309,42): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/AutomationsSection.tsx(1338,46): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/CodingPlanUpgradeDialogProvider.tsx(78,43): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'TelemetryPlatform'.
+packages/ui/src/settings/model-provider-section/oauthActions.ts(12,5): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'ReportTelemetryPlatform'.
+packages/ui/src/v4/ConversationDraftSuggestedPromptsContainer.tsx(537,40): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'Pick<IPlatformService, "reportTelemetryEvent">'.
+packages/ui/src/v4/ConversationRowView.tsx(1381,11): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'ReportTelemetryPlatform'.
+packages/ui/src/v4/SessionPane.tsx(1301,32): error TS2345: Argument of type 'IPlatformService | null' is not assignable to parameter of type 'Pick<IPlatformService, "reportTelemetryEvent"> | null | undefined'.
+packages/ui/src/v4/SessionPane.tsx(1454,20): error TS2339: Property 'ttft' does not exist on type '{ commandId: string; clientId: string; sessionId: string | null; type: "stop" | "compact" | "createSession" | "createSelectionSideSession" | "forkAssistant" | "resolveInteraction" | ... 27 more ... | "discardSharedContext"; payload: unknown; issuedAt: number; baseRevision?: number | undefined; baseLogEpoch?: string ...'.
+packages/ui/src/v4/SessionPane.tsx(989,5): error TS2322: Type 'IPlatformService | null' is not assignable to type 'SessionOpenArmsReporter | null | undefined'.
+packages/ui/src/v4/agentConversationTransport.ts(115,30): error TS2339: Property 'clock' does not exist on type '{ results: { key: { sessionId: string | null; commandId: string; }; result: "unknown" | { commandId: string; status: "failed" | "stale" | "duplicate" | "rejected" | "noop" | "accepted"; ... 5 more ...; result?: { ...; } | ... 7 more ... | undefined; }; }[]; }'.
+packages/ui/src/v4/agentConversationTransport.ts(115,93): error TS2339: Property 'clock' does not exist on type '{ results: { key: { sessionId: string | null; commandId: string; }; result: "unknown" | { commandId: string; status: "failed" | "stale" | "duplicate" | "rejected" | "noop" | "accepted"; ... 5 more ...; result?: { ...; } | ... 7 more ... | undefined; }; }[]; }'.
+packages/ui/src/v4/agentConversationTransport.ts(3,10): error TS2305: Module '"@zcode/shared"' has no exported member 'calibrateLocalTtftClock'.
+packages/ui/src/v4/agentConversationTransport.ts(3,35): error TS2305: Module '"@zcode/shared"' has no exported member 'localTtftNow'.
+packages/ui/src/v4/telemetry/ConversationTelemetryAttachment.tsx(208,47): error TS2345: Argument of type 'IPlatformService' is not assignable to parameter of type 'Pick<IPlatformService, "reportTelemetryEvent" | "reportArmsCustomEvent">'.
+packages/ui/src/v4/telemetry/ConversationTelemetryAttachment.tsx(3,10): error TS2305: Module '"@zcode/shared"' has no exported member 'resolveWorkspaceTelemetryDetail'.
+packages/ui/src/v4/telemetry/ConversationTelemetryAttachment.tsx(74,36): error TS2344: Type '"reportTelemetryEvent" | "reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1001,12): error TS2678: Type '"model.request.status"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1004,18): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1005,60): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1005,77): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1006,38): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1007,37): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1010,12): error TS2678: Type '"usage.delta"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1012,18): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1012,62): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1013,18): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1013,56): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1016,18): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1016,37): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1017,60): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1017,77): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1018,38): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1019,37): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1023,12): error TS2678: Type '"stream.chunk"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1025,12): error TS2678: Type '"tool.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1028,12): error TS2678: Type '"permission.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1029,68): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1030,62): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1031,32): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1031,50): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1032,18): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1056,12): error TS2678: Type '"subagent.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1057,12): error TS2678: Type '"workflow.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1058,12): error TS2678: Type '"compaction.terminal"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1071,14): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1073,17): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1073,42): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1073,66): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1075,67): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1076,67): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1079,21): error TS2339: Property 'runId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1080,31): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1081,31): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1082,32): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1083,30): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1084,23): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1085,36): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1088,32): error TS2339: Property 'memoryEnabled' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1088,72): error TS2339: Property 'memoryEnabled' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1101,63): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1102,58): error TS2339: Property 'runId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1103,25): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1104,41): error TS2339: Property 'runId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1108,24): error TS2339: Property 'occurredAt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1115,54): error TS2339: Property 'runId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1117,42): error TS2339: Property 'runId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1124,25): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1125,25): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1126,20): error TS2339: Property 'errorMessage' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1126,75): error TS2339: Property 'errorMessage' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1198,64): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1199,58): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1200,39): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1201,29): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1201,59): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1203,41): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1205,38): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1211,51): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1223,16): error TS2339: Property 'automationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1223,53): error TS2339: Property 'automationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1397,43): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"permission.lifecycle"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1397,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"tool.lifecycle"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1399,12): error TS2339: Property 'background' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1400,14): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1400,85): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1436,19): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"stream.chunk"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1436,67): error TS2339: Property 'firstChunk' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1519,12): error TS2678: Type '"model.request.status"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1522,18): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1523,45): error TS2339: Property 'reason' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1528,12): error TS2678: Type '"stream.chunk"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1534,22): error TS2339: Property 'channel' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1535,24): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1536,25): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1539,20): error TS2339: Property 'channel' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1539,47): error TS2339: Property 'assistantMessageId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1540,33): error TS2339: Property 'assistantMessageId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1542,20): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1542,63): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1557,26): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1560,29): error TS2339: Property 'assistantMessageId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1561,29): error TS2339: Property 'channel' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1567,12): error TS2678: Type '"tool.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1571,12): error TS2678: Type '"permission.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1572,32): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1572,50): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1573,18): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1577,30): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1590,12): error TS2678: Type '"usage.delta"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1593,26): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1595,27): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1596,53): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1596,70): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1597,31): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1598,30): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1607,18): error TS2339: Property 'workflowResultConsumed' does not exist on type '{ kind: "turn.terminal"; status: "failed" | "interrupted" | "success"; version: 1; eventId: string; eventSeq: number; occurredAt: number; sessionId: string; resultType?: string | undefined; ... 10 more ...; turnId?: string | undefined; }'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1613,12): error TS2678: Type '"compaction.terminal"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1614,12): error TS2678: Type '"workflow.lifecycle"' is not comparable to type '"turn.started" | "turn.terminal"'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1631,12): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1632,63): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1634,26): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1644,62): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1645,43): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1648,20): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1660,30): error TS2339: Property 'automationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1660,67): error TS2339: Property 'automationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1661,29): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1661,59): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1666,49): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1673,57): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1696,14): error TS2339: Property 'errorMessage' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1696,62): error TS2339: Property 'errorMessage' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1698,30): error TS2339: Property 'performance' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1708,22): error TS2339: Property 'toolName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1709,20): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1710,20): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1712,24): error TS2339: Property 'toolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1713,30): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1714,28): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1715,29): error TS2339: Property 'childToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1716,21): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1717,23): error TS2339: Property 'agentType' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1718,44): error TS2339: Property 'durationMs' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1918,31): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1918,54): error TS2339: Property 'operationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1926,25): error TS2339: Property 'operationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1927,20): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1928,21): error TS2339: Property 'trigger' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1930,20): error TS2339: Property 'reason' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1931,30): error TS2339: Property 'summaryMessageId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1932,34): error TS2339: Property 'preCompactTokenCount' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1933,35): error TS2339: Property 'postCompactTokenCount' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1934,39): error TS2339: Property 'truePostCompactTokenCount' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1935,21): error TS2339: Property 'attempt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1936,25): error TS2339: Property 'maxAttempts' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1937,23): error TS2339: Property 'startedAt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1938,21): error TS2339: Property 'endedAt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1943,30): error TS2339: Property 'modelProvider' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1944,25): error TS2339: Property 'modelName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1946,27): error TS2339: Property 'modelProvider' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1954,20): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1955,23): error TS2339: Property 'summaryMessageId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(1955,48): error TS2339: Property 'operationId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(332,18): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(333,19): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(334,14): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(334,48): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(335,14): error TS2339: Property 'queryId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(335,40): error TS2339: Property 'queryId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(336,20): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(337,19): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(338,22): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(339,21): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(340,22): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(341,19): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(342,24): error TS2339: Property 'providerKind' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(343,21): error TS2339: Property 'transport' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(345,19): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(345,54): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(346,23): error TS2339: Property 'querySource' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(347,19): error TS2339: Property 'attempt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(348,23): error TS2339: Property 'maxAttempts' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(349,23): error TS2339: Property 'nextAttempt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(350,21): error TS2339: Property 'retryable' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(351,22): error TS2339: Property 'statusCode' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(352,22): error TS2339: Property 'durationMs' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(353,19): error TS2339: Property 'delayMs' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(354,18): error TS2339: Property 'idleMs' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(355,21): error TS2339: Property 'timeoutMs' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(356,18): error TS2339: Property 'reason' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(418,43): error TS2367: This comparison appears to be unintentional because the types '"failed" | "interrupted"' and '"completed"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(431,10): error TS2339: Property 'skillQualifiedName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(431,37): error TS2339: Property 'skillPluginId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(431,59): error TS2339: Property 'skillSource' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(433,20): error TS2339: Property 'skillQualifiedName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(433,63): error TS2339: Property 'skillQualifiedName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(434,20): error TS2339: Property 'skillPluginId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(434,53): error TS2339: Property 'skillPluginId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(435,20): error TS2339: Property 'skillSource' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(435,49): error TS2339: Property 'skillSource' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(438,33): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(438,63): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(441,20): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(442,21): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(445,29): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(447,22): error TS2339: Property 'toolName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(448,18): error TS2339: Property 'toolName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(456,18): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(457,19): error TS2339: Property 'eventId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(460,27): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(462,12): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(462,55): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(463,20): error TS2339: Property 'toolName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(464,16): error TS2339: Property 'toolName' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(465,17): error TS2339: Property 'errorMessage' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(473,23): error TS2339: Property 'inputTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(474,24): error TS2339: Property 'outputTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(475,23): error TS2339: Property 'totalTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(476,27): error TS2339: Property 'reasoningTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(477,29): error TS2339: Property 'cacheReadTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(478,34): error TS2339: Property 'cacheWriteTokens' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(506,15): error TS2339: Property 'errorCode' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(506,52): error TS2339: Property 'performance' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(67,49): error TS2344: Type '"reportTelemetryEvent" | "reportArmsCustomEvent"' does not satisfy the constraint 'keyof IPlatformService'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(70,39): error TS2694: Namespace '"D:/Dev/Js/oh-my-zcode/omz/packages/shared/dist/index"' has no exported member 'LocalTtftContext'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(799,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"model.request.status"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(802,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"subagent.lifecycle"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(806,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"workflow.lifecycle"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(823,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"compaction.terminal"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(866,14): error TS2339: Property 'phase' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(867,16): error TS2339: Property 'background' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(868,19): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(868,44): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(869,69): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(872,33): error TS2339: Property 'sessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(873,33): error TS2339: Property 'sourceCommandId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(874,34): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(875,32): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(876,25): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(877,38): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(880,34): error TS2339: Property 'memoryEnabled' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(880,74): error TS2339: Property 'memoryEnabled' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(893,65): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(897,26): error TS2339: Property 'occurredAt' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(902,17): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(908,23): error TS2339: Property 'agentId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(910,32): error TS2339: Property 'parentToolCallId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(920,59): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(925,85): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(926,33): error TS2339: Property 'background' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(932,71): error TS2339: Property 'childSessionId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(934,14): error TS2339: Property 'background' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(954,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"model.request.status"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(955,16): error TS2339: Property 'status' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(956,56): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(956,73): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(957,34): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(958,33): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(962,9): error TS2367: This comparison appears to be unintentional because the types '"turn.started" | "turn.terminal"' and '"usage.delta"' have no overlap.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(966,14): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(966,59): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(967,34): error TS2339: Property 'requestId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(971,14): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(971,33): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(972,56): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(972,73): error TS2339: Property 'modelId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(973,34): error TS2339: Property 'providerId' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/conversationTelemetrySupervisor.ts(974,33): error TS2339: Property 'providerHostname' does not exist on type 'never'.
+packages/ui/src/v4/telemetry/localTtftFacts.ts(1,10): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_MAX_DETAILS'.
+packages/ui/src/v4/telemetry/localTtftFacts.ts(1,39): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftFacts'.
+packages/ui/src/v4/telemetry/localTtftFacts.ts(14,48): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/ui/src/v4/telemetry/localTtftFacts.ts(17,19): error TS2339: Property 'end' does not exist on type '{}'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(10,3): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_CLOCK_TTL_MS'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(11,3): error TS2305: Module '"@zcode/shared"' has no exported member 'localTtftNow'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(12,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftContext'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(13,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftCalibration'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(14,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftFacts'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(144,31): error TS2339: Property 'ttftRelated' does not exist on type '{ topic: string; subscriptionId: string; fromSeq: number; toSeq: number; sentAt: number; payload: { kind: "snapshot"; snapshot: { protocolVersion: 1; sessionId: string; logEpoch: string; seq: number; ... 18 more ...; workflowRuns?: { ...; } | undefined; }; } | { ...; }; }'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(145,43): error TS2353: Object literal may only specify known properties, and 'ttft' does not exist in type '{ topic: string; subscriptionId: string; fromSeq: number; toSeq: number; sentAt: number; payload: { kind: "snapshot"; snapshot: { protocolVersion: 1; sessionId: string; logEpoch: string; seq: number; ... 18 more ...; workflowRuns?: { ...; } | undefined; }; } | { ...; }; }'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(15,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftRecord'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(16,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftOutputKind'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(160,23): error TS2339: Property 'ttft' does not exist on type '{ topic: string; subscriptionId: string; fromSeq: number; toSeq: number; sentAt: number; payload: { kind: "snapshot"; snapshot: { protocolVersion: 1; sessionId: string; logEpoch: string; seq: number; ... 18 more ...; workflowRuns?: { ...; } | undefined; }; } | { ...; }; }'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(8,3): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_MAX_PENDING'.
+packages/ui/src/v4/telemetry/localTtftObserver.ts(9,3): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_TTL_MS'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(105,13): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(105,8): error TS7006: Parameter 'sum' implicitly has an 'any' type.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(110,38): error TS7006: Parameter 'detail' implicitly has an 'any' type.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(2,3): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_CLOCK_TTL_MS'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(3,3): error TS2305: Module '"@zcode/shared"' has no exported member 'LOCAL_TTFT_MAX_DETAILS'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(4,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftContext'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(5,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftCalibration'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(6,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftFacts'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(7,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftRecord'.
+packages/ui/src/v4/telemetry/localTtftRecord.ts(8,8): error TS2305: Module '"@zcode/shared"' has no exported member 'LocalTtftOutputKind'.

@@ -19,16 +19,16 @@ const snapshotPath = resolve(root, "scripts/desktop-typecheck-baseline.txt");
 
 let out = "";
 try {
-  // tsc -b 的增量缓存不会重报已构建工程的错误，门禁必须 --force 全量。
+  // TypeScript 6.0.2 的 build 模式已无 --continue 旗标；--force 绕过增量缓存保证错误全量重报。
   out = execFileSync(
     process.execPath,
-    [resolve(root, "node_modules/typescript/bin/tsc"), "-b", "--continue", "--force", ...projects],
+    [resolve(root, "node_modules/typescript/bin/tsc"), "-b", "--force", ...projects],
     { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
 } catch (error) {
   out = String(error.stdout ?? "") + String(error.stderr ?? "");
 }
-const errors = [...new Set(out.split(/\r?\n/).filter((line) => / error TS\d+/.test(line)))].sort();
+const errors = [...new Set(out.split(/\r?\n/).filter((line) => /(?:^|\s)error TS\d+/.test(line)))].sort();
 
 if (process.argv.includes("--snapshot")) {
   writeFileSync(snapshotPath, errors.join("\n") + "\n");
