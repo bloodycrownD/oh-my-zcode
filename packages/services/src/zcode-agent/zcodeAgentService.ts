@@ -5039,15 +5039,6 @@ export function createZCodeAgentService(
         });
       }
       let envelope = await buildConversationCommandEnvelope(params);
-      // TTFT 首版只允许可信桌面本地 continuous，手机/远端透传不能开启本地观测。
-      if (
-        commandClientMode !== "desktop-continuous" ||
-        params.workspaceIdentity?.trim() ||
-        params.remoteSessionId
-      ) {
-        const { ttft: _ttft, ...withoutTtft } = envelope;
-        envelope = withoutTtft;
-      }
       if (envelope.type === "sendText" && envelope.sessionId) {
         const payload = commandPayloadSchemas.sendText.parse(envelope.payload);
         const browserAmbientContext = await collectBrowserAmbientContext(
