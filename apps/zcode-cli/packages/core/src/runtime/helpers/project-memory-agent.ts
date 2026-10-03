@@ -1,5 +1,4 @@
 import type { Model, ModelInputMessage, ModelToolContract, TraceContext } from "../deps.js";
-import type { AgentTelemetryCausation, ModelApiOperation } from "@zcode/contracts";
 import {
   PermissionService,
   createDenyPermissionBroker,
@@ -16,12 +15,12 @@ import { createRefreshRuntimeHeadersBeforeModelAttempt } from "../methods/model-
 import { createRuntimeModel, withModelInvocationContext } from "../methods/runtime-model.js";
 
 export interface ProjectMemoryAgentContext {
-  causation?: AgentTelemetryCausation;
   memoryRoot: string;
   providerEntries: readonly RuntimeMessageEntry[];
   midConversationSystem: AgentRuntimeInternal["config"]["midConversationSystem"];
   model: Model;
-  operation: ModelApiOperation;
+  /** model-io 的 querySource 维度；只用于本地 transcript 元数据。 */
+  operation: "project_memory_extract";
   readFileState: ReadFileStateMap;
   tools: readonly ModelToolContract[];
   traceContext: TraceContext;
@@ -35,7 +34,7 @@ export function captureProjectMemoryAgentContext(
     memoryRoot: string;
     /** Extraction 继承产生该工作的 Turn Model。 */
     model?: Model;
-    operation: ModelApiOperation;
+    operation: "project_memory_extract";
     traceContext: TraceContext;
   },
 ): ProjectMemoryAgentContext {
@@ -53,7 +52,6 @@ export function captureProjectMemoryAgentContext(
       skipTranscript: true,
     },
     modelRequestSessionType: "other",
-    modelCall: { operation: input.operation },
     refreshRuntimeHeadersBeforeAttempt: createRefreshRuntimeHeadersBeforeModelAttempt(runtime, {
       abortSignal: request.abortSignal,
       model,
@@ -62,7 +60,6 @@ export function captureProjectMemoryAgentContext(
     traceContext: input.traceContext,
   }));
   return {
-    causation: runtime.agentTelemetry.captureCausation(),
     memoryRoot: input.memoryRoot,
     // Extraction 会跨异步边界消费这份成员浅快照；它依赖 RuntimeMessageEntry
     // 进入 MessageHistory 后保持不可变。后续只能 append、整体 replace 或 copy-on-write，

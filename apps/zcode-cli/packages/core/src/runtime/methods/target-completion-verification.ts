@@ -25,7 +25,6 @@ import { resolveModelRequestSessionTypeFromTaskType } from "./model-request-sess
 import { createRuntimeModel } from "./runtime-model.js";
 import { isStartPlanBusyStreamRecoveryFailure } from "./streaming-recovery.js";
 import { recordModelUsageFact } from "./usage-observability.js";
-import { runTargetCompletionVerificationWithTelemetry } from "./target-completion-verification-telemetry.js";
 
 export interface TargetCompletionVerificationResult {
   target: SessionGoal;
@@ -85,7 +84,7 @@ export async function verifyActiveTargetCompletionForContinuation(
       verification,
     };
   };
-  return runTargetCompletionVerificationWithTelemetry(this, input, execute);
+  return execute();
 }
 
 async function verifyTargetCompletion(

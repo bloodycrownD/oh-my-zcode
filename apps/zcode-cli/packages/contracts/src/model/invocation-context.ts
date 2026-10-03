@@ -1,6 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { ZCodeProviderAccountAccess } from "@zcode/shared";
-import type { ModelApiCallObservation } from "../telemetry/index.js";
 import type { TraceContext } from "../tracing/tracer.js";
 import type {
   ModelRequestAdmission,
@@ -18,7 +17,6 @@ import type {
  */
 export interface ModelInvocationContext {
   metadata?: Record<string, unknown>;
-  modelCall?: ModelApiCallObservation;
   modelRequestSessionType?: ModelRequestSessionType;
   /** 重试预算档位；runtime 按 taskType 决定，adapter 据此放宽瞬态失败的放弃条件。 */
   modelRetryBudget?: ModelRetryBudget;

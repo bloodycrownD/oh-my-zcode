@@ -323,11 +323,6 @@ async function generateLiteExtraction(input: {
         turnId: input.context.turnId,
       },
       modelRequestSessionType: "other",
-      modelCall: {
-        operation: input.synthesize
-          ? "read_session_context_synthesize"
-          : "read_session_context_extract",
-      },
       traceContext: traceFromContext(input.context),
     },
     () =>

@@ -5,11 +5,6 @@ import type {
   WorkspaceHookSecurityRevision,
 } from "@zcode/contracts";
 import type { WorkspaceHookTrustCoordinator } from "./workspace-hook-trust-coordinator.js";
-import {
-  emitWorkspaceHookTelemetry,
-  type WorkspaceHookTelemetryEvent,
-  type WorkspaceHookTelemetryFields,
-} from "./workspace-hook-telemetry.js";
 import type { WorkspaceHookSnapshotEvaluation } from "./workspace-hook-trust-types.js";
 
 export type WorkspaceHookActivationSource = "startup" | "resume" | "clear" | "compact";
@@ -69,7 +64,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
   private evaluation?: WorkspaceHookSnapshotEvaluation;
   private validatedRevision?: WorkspaceHookSecurityRevision;
   private invalidatedReason?: WorkspaceHookReasonCode;
-  private readonly emittedTelemetry = new Set<string>();
   private activated = false;
   private bootstrapFailed = false;
 
@@ -88,11 +82,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
     if (!this.enabled) {
       if (!this.activated) {
         this.activated = true;
-        this.emitTelemetryOnce("workspace_hook.feature_disabled", {
-          workspaceIdentity: this.snapshot.workspaceIdentity,
-          reasonCode: "workspace_hooks_feature_disabled",
-          source,
-        });
         // 功能关闭时 pendingCount = 0,上报清空状态
         this.emitAdmissionState();
       }
@@ -115,12 +104,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
 
   evaluateDispatch(input: WorkspaceHookDispatchInput): WorkspaceHookDispatchDecision {
     if (!this.matchesSnapshot(input)) {
-      this.emitTelemetryOnce("workspace_hook.snapshot_mismatch", {
-        workspaceIdentity: this.snapshot.workspaceIdentity,
-        reasonCode: "workspace_hooks_snapshot_mismatch",
-        bundleDigest: input.bundleDigest,
-        declarationDigest: input.hookDeclarationDigest,
-      });
       return {
         allowed: false,
         reasonCode: "workspace_hooks_snapshot_mismatch",
@@ -136,10 +119,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
       return { allowed: false, reasonCode: "workspace_hooks_feature_disabled" };
     }
     if (this.bootstrapFailed) {
-      this.emitTelemetryOnce("workspace_hook.trust_store_failure", {
-        workspaceIdentity: this.snapshot.workspaceIdentity,
-        reasonCode: "workspace_hooks_trust_store_corrupt",
-      });
       return {
         allowed: false,
         reasonCode: "workspace_hooks_trust_store_corrupt",
@@ -162,12 +141,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
       (candidate) => candidate.reviewItemId === input.reviewItemId,
     );
     if (!item || item.hookDeclarationDigest !== input.hookDeclarationDigest) {
-      this.emitTelemetryOnce("workspace_hook.snapshot_mismatch", {
-        workspaceIdentity: this.snapshot.workspaceIdentity,
-        bundleDigest: this.snapshot.bundleDigest,
-        declarationDigest: input.hookDeclarationDigest,
-        reasonCode: "workspace_hooks_snapshot_mismatch",
-      });
       return {
         allowed: false,
         reasonCode: "workspace_hooks_snapshot_mismatch",
@@ -175,14 +148,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
     }
     if (item.effectiveRunnable) return { allowed: true };
     const reasonCode = item.reasonCode ?? "workspace_hooks_blocked_untrusted";
-    if (reasonCode === "workspace_hooks_blocked_by_policy") {
-      this.emitTelemetryOnce("workspace_hook.policy_blocked", {
-        workspaceIdentity: this.snapshot.workspaceIdentity,
-        bundleDigest: this.snapshot.bundleDigest,
-        declarationDigest: item.hookDeclarationDigest,
-        reasonCode,
-      });
-    }
     return {
       allowed: false,
       reasonCode,
@@ -252,22 +217,6 @@ export class WorkspaceHookRuntimeAdmission implements WorkspaceHookRuntimeAdmiss
         ? { workspaceIdentity: this.snapshot.workspaceIdentity }
         : {}),
     });
-  }
-
-  private emitTelemetryOnce(
-    event: WorkspaceHookTelemetryEvent,
-    fields: WorkspaceHookTelemetryFields,
-  ): void {
-    const key = [
-      event,
-      fields.reasonCode,
-      fields.bundleDigest,
-      fields.declarationDigest,
-      fields.source,
-    ].join(":");
-    if (this.emittedTelemetry.has(key)) return;
-    this.emittedTelemetry.add(key);
-    emitWorkspaceHookTelemetry(this.logger, event, fields);
   }
 
   private refreshEvaluation(): void {

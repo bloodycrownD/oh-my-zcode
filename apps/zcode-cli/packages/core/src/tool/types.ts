@@ -52,7 +52,6 @@ import type {
   ToolResultBudgetStrategy,
   ToolResultDisplayPayload,
   ToolTimeoutPolicy,
-  ToolExecutionSpanWriter,
   ToolExecutionTelemetry,
 } from "@zcode/contracts";
 import type {
@@ -130,10 +129,6 @@ export interface BackgroundTaskControlPort {
 
 export interface ToolExecutionContext {
   toolCallId: string;
-  /**
-   * 当前 Tool 的实时观测写入器。Handler 只能通过窄接口写事实，不能接触原始 OTel Span。
-   */
-  telemetry?: ToolExecutionSpanWriter;
   /** 当前工具调用是否属于 automation 派发轮；写工具 handler 用它做最终权限校验。 */
   automationTurn?: boolean;
   /** 当前工具调用是否属于闲时任务派发轮；OffPeakCreate handler 用它做最终拒绝。 */

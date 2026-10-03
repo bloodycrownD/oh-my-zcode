@@ -25,7 +25,6 @@ type CompactSummaryModelRequest = {
   abortSignal?: AbortSignal;
   maxOutputTokens?: number;
   messages: Parameters<Model["generateText"]>[0]["messages"];
-  modelCall?: ModelInvocationContext["modelCall"];
   modelRequestSessionType?: ModelInvocationContext["modelRequestSessionType"];
   metadata?: ModelInvocationContext["metadata"];
   preserveProviderStreamBoundaries?: boolean;
@@ -75,18 +74,9 @@ export async function runCompactSummaryModelRequest(
   input: RunCompactSummaryModelRequestInput,
 ): Promise<RuntimeModelTextResult> {
   const state = createCompactSummaryStreamState();
-  const streamingLogicalCallId = crypto.randomUUID();
-  const streamingRequest: CompactSummaryModelRequest = {
-    ...input.request,
-    modelCall: {
-      ...input.request.modelCall,
-      callCause: input.request.modelCall?.callCause ?? "initial",
-      logicalCallId: streamingLogicalCallId,
-    },
-  };
 
   try {
-    for await (const event of compactModelStream(input, streamingRequest)) {
+    for await (const event of compactModelStream(input, input.request)) {
       applyCompactSummaryStreamEvent(state, event, input);
     }
 
@@ -102,7 +92,7 @@ export async function runCompactSummaryModelRequest(
       throw new Error("Compact summary stream ended without a complete provider response");
     }
   } catch (error) {
-    return handleCompactSummaryStreamFailure({ ...input, request: streamingRequest }, state, error);
+    return handleCompactSummaryStreamFailure(input, state, error);
   }
 
   return compactSummaryStreamResult(state, state.finish);
@@ -282,20 +272,8 @@ async function handleCompactSummaryStreamFailure(
     observedPartialOutput: state.sawDelta,
   });
 
-  const fallbackRequest = {
-    ...input.request,
-    modelCall: {
-      ...input.request.modelCall,
-      attributes: {
-        ...input.request.modelCall?.attributes,
-      },
-      callCause: "fallback_replacement" as const,
-      logicalCallId: crypto.randomUUID(),
-      previousLogicalCallId: input.request.modelCall?.logicalCallId,
-    },
-  };
-  return runWithModelInvocationContext(invocationContext(fallbackRequest), () =>
-    input.model.generateText(cleanRequest(fallbackRequest)),
+  return runWithModelInvocationContext(invocationContext(input.request), () =>
+    input.model.generateText(cleanRequest(input.request)),
   );
 }
 
@@ -322,7 +300,6 @@ function cleanRequest(request: CompactSummaryModelRequest) {
 function invocationContext(request: CompactSummaryModelRequest) {
   return {
     metadata: request.metadata,
-    modelCall: request.modelCall,
     modelRequestSessionType: request.modelRequestSessionType,
     statusSink: request.statusSink,
     traceContext: request.traceContext,

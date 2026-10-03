@@ -33,7 +33,7 @@ import type {
 } from "../model/index.js";
 import type { HttpClientEgressInfo } from "../interfaces/http-client.port.js";
 import { createModelUsageSummary } from "../model/index.js";
-import type { ModelApiErrorPhase, ModelFailureExceptionKind } from "../telemetry/index.js";
+import type { ModelApiErrorPhase, ModelFailureExceptionKind } from "../model/index.js";
 import type {
   CompactBoundaryPayload,
   CompactTimelinePayload,

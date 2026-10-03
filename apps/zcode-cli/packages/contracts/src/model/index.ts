@@ -10,15 +10,39 @@ import type {
   ToolResultBudget,
 } from "../tools/contract.js";
 import type { TraceContext } from "../tracing/tracer.js";
-import type {
-  ModelApiCallObservation,
-  ModelApiErrorPhase,
-  ResolvedModelApiCallObservation,
-} from "../telemetry/index.js";
 
 export * from "./image-media.js";
 export * from "./model.js";
 export * from "./invocation-context.js";
+
+/**
+ * 一次模型请求失败所处的阶段。值域必须与
+ * `packages/shared/src/zcode-protocol-v4/snapshot.ts` 的 `errorAttributionSchema.errorPhase`
+ * 逐字一致——协议侧按该枚举校验，多写一个值就会被整条拒收。
+ */
+export type ModelApiErrorPhase =
+  | "prepare"
+  | "configuration"
+  | "connect"
+  | "response"
+  | "stream"
+  | "parse"
+  | "validation"
+  | "unhandled";
+
+/** 失败异常的可聚合低基数分类；值域同样受 `errorAttributionSchema.exceptionKind` 约束。 */
+export const ModelFailureExceptionKind = {
+  ApiCall: "api_call",
+  Generic: "generic",
+  Protocol: "protocol",
+  ProviderBusiness: "provider_business",
+  Transport: "transport",
+  TypeError: "type_error",
+  Validation: "validation",
+} as const;
+
+export type ModelFailureExceptionKind =
+  (typeof ModelFailureExceptionKind)[keyof typeof ModelFailureExceptionKind];
 
 export type JsonSchema = Record<string, unknown>;
 
@@ -177,7 +201,6 @@ interface ModelNetworkStatusBase {
   responseHeaders?: Record<string, string>;
   requestHeaderCount?: number;
   responseHeaderCount?: number;
-  modelCall?: ResolvedModelApiCallObservation;
 }
 
 export interface ModelStreamRecoveryStatus {
@@ -259,14 +282,9 @@ export interface ModelStreamStalledStatusEvent extends ModelNetworkStatusBase {
 }
 
 /**
- * 仅供实时观测 Sink 消费的 Provider 里程碑。它们不进入 SessionEvent/回放协议，
- * 避免为了 Trace 事件扩大产品状态面。
+ * Provider 里程碑（首包/首内容/首文本）已随遥测移除：它们只服务于实时观测 Sink，
+ * 不进 SessionEvent/回放协议，因此没有保留面。
  */
-export interface ModelTelemetryMilestoneStatusEvent extends ModelNetworkStatusBase {
-  type: "model_first_provider_event" | "model_first_content" | "model_first_text";
-  elapsedMs: number;
-}
-
 export type ModelNetworkStatusEvent =
   | ModelRequestQueuedStatusEvent
   | ModelRequestAdmittedStatusEvent
@@ -274,8 +292,7 @@ export type ModelNetworkStatusEvent =
   | ModelRequestCompletedStatusEvent
   | ModelRequestFailedStatusEvent
   | ModelRetryScheduledStatusEvent
-  | ModelStreamStalledStatusEvent
-  | ModelTelemetryMilestoneStatusEvent;
+  | ModelStreamStalledStatusEvent;
 
 export interface ModelStatusSink {
   publish(event: ModelNetworkStatusEvent): void | Promise<void>;
@@ -650,8 +667,6 @@ export interface ModelTextRequest extends ModelRequestSettings {
    * Runtime-only trace context. Serialized requests should pass trace ids through metadata.
    */
   traceContext?: TraceContext;
-  /** Runtime-only、强类型的模型 API 调用分类；不会进入 Provider 请求。 */
-  modelCall?: ModelApiCallObservation;
   /**
    * Runtime-only 的宿主 session 粗分类。Adapter 将它写入受控归因 header；
    * 不允许调用方通过 provider 静态 headers 覆盖。
@@ -672,7 +687,7 @@ export interface ModelTextRequest extends ModelRequestSettings {
    * 每重试一次在 adapter base timeout 上加 30000ms。
    */
   streamIdleTimeoutRetryNumber?: number;
-  /** Runtime-only recovery attribution；只进入 status/telemetry，不发送给 Provider。 */
+  /** Runtime-only recovery attribution；只进入 status 事件，不发送给 Provider。 */
   streamRecovery?: ModelStreamRecoveryStatus;
   /**
    * Runtime-only provider stream 边界开关。compact 隐藏流用它保留首个真实 provider event

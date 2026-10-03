@@ -123,7 +123,6 @@ import { InMemoryRuntimeTaskRegistry, type RuntimeTaskRegistry } from "../runtim
 import type { ChildClientPortsContext, ClientFacingPorts } from "./helpers/child-client-ports.js";
 import type { ProjectMemoryExtractionScheduler } from "./helpers/project-memory-extraction.js";
 import { projectPersistentAgentMemoryTools } from "../subagent/persistent-memory.js";
-import { RuntimeTelemetryFacade } from "../telemetry/runtime-telemetry.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
 import { disposeNodeReplSession } from "../tool/handlers/node-repl.js";
 import { cloneModelSelection } from "./model-selection.js";
@@ -223,7 +222,6 @@ export class AgentRuntime {
   private pendingModelChangeTimeline?: PendingModelChangeTimeline;
   private sessionStartHookRan = false;
   private sessionTitleGenerationAttempted = false;
-  private agentTelemetry: RuntimeTelemetryFacade;
 
   constructor(sessionId: SessionId, config: AgentRuntimeConfig, deps: AgentRuntimeDeps) {
     const runtime = this as unknown as AgentRuntimeInternal;
@@ -235,15 +233,6 @@ export class AgentRuntime {
       modelContextBudgetStrategy: DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
     });
     Object.assign(this.config, resolveExecutionState(config));
-    this.agentTelemetry = new RuntimeTelemetryFacade({
-      agentName: config.agentName,
-      causation: deps.agentTelemetryCausation,
-      causationMode: deps.agentTelemetryCausationMode,
-      parentSessionId: config.parentSessionId,
-      port: deps.agentTelemetry,
-      sessionId,
-      taskType: config.taskType,
-    });
     this.permissionService =
       deps.permissionService ?? new PermissionService(defaultPermissionConfig);
     this.permissionBroker = deps.permissionBroker ?? createDenyPermissionBroker();
