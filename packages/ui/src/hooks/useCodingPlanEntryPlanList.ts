@@ -54,7 +54,7 @@ export function useCodingPlanEntryPlanList(): CodingPlanEntryInventory {
             });
             return { token, products: result.productList };
           } catch (error) {
-            logger.warn("[purchaseTelemetry] 读取团队套餐失败", { family, error });
+            logger.warn("[purchase-entry] 读取团队套餐失败", { family, error });
             return { token, products: null };
           }
         }),

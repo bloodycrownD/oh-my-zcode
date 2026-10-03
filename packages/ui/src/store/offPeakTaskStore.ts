@@ -39,10 +39,6 @@ interface UpdateOffPeakTaskInput {
 export interface OffPeakCreateDraft {
   title?: string;
   prompt?: string;
-  telemetrySource?: {
-    eventRegion: "app.session" | "app.automations";
-    templateId: string;
-  };
 }
 
 /** availability 的请求状态与服务端额度快照分离；只有 ready + canTakeNumber=true 才能放行。 */
