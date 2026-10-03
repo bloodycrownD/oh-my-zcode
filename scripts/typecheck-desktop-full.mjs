@@ -19,11 +19,12 @@ const snapshotPath = resolve(root, "scripts/desktop-typecheck-baseline.txt");
 
 let out = "";
 try {
-  out = execFileSync("tsc", ["-b", "--continue", ...projects], {
-    cwd: root,
-    encoding: "utf8",
-    maxBuffer: 64 * 1024 * 1024,
-  });
+  // Windows 下 execFileSync 不解析 .CMD shim，直接用 node 跑 tsc 入口。
+  out = execFileSync(
+    process.execPath,
+    [resolve(root, "node_modules/typescript/bin/tsc"), "-b", "--continue", ...projects],
+    { cwd: root, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
+  );
 } catch (error) {
   out = String(error.stdout ?? "") + String(error.stderr ?? "");
 }
