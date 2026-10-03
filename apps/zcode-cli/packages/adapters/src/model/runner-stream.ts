@@ -380,8 +380,8 @@ export async function* runStreamText(input: {
         }
         if (event.visibleEvents.length > 0) {
           for (const visibleEvent of event.visibleEvents) {
-            const observation = observeVisibleStreamEvent(visibleEvent, Date.now() - startedAt);
-            streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
+            const observation = observeVisibleStreamEvent(visibleEvent);
+            streamOutputCommitted = streamOutputCommitted || observation;
             yield visibleEvent;
           }
         }
@@ -406,16 +406,16 @@ export async function* runStreamText(input: {
         emittedRetryBoundaryEvent || flushedEvents.emittedRetryBoundaryEvent;
       if (flushedEvents.visibleEvents.length > 0) {
         for (const visibleEvent of flushedEvents.visibleEvents) {
-          const observation = observeVisibleStreamEvent(visibleEvent, Date.now() - startedAt);
-          streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
+          const observation = observeVisibleStreamEvent(visibleEvent);
+          streamOutputCommitted = streamOutputCommitted || observation;
           yield visibleEvent;
         }
       }
 
       for (const pendingEvent of pendingRetrySafeEvents.splice(0)) {
         emittedEvent = true;
-        const observation = observeVisibleStreamEvent(pendingEvent, Date.now() - startedAt);
-        streamOutputCommitted = streamOutputCommitted || observation.outputCommitted;
+        const observation = observeVisibleStreamEvent(pendingEvent);
+        streamOutputCommitted = streamOutputCommitted || observation;
         yield pendingEvent;
       }
 
@@ -1558,34 +1558,25 @@ async function publishRetryScheduledStatus(
   );
 }
 
-function observeVisibleStreamEvent(
-  event: ModelStreamEvent,
-  elapsed: number,
-): { contentMs?: number; textMs?: number; outputCommitted: boolean } {
+// 返回本次事件是否把模型输出提交到可见流（用于失败时可重试性判定）。
+function observeVisibleStreamEvent(event: ModelStreamEvent): boolean {
   switch (event.type) {
     case "text_delta":
-      return {
-        contentMs: elapsed,
-        textMs: event.text ? elapsed : undefined,
-        outputCommitted: true,
-      };
     case "reasoning_delta":
     case "tool_input_delta":
     case "tool_call":
-      return { contentMs: elapsed, outputCommitted: true };
+      return true;
     case "text_start":
     case "reasoning_start":
     case "tool_input_start":
-      return { contentMs: elapsed, outputCommitted: false };
+      return false;
     case "compact_stream_boundary":
-      return {
-        contentMs: event.boundary === "provider_content_block_start" ? elapsed : undefined,
-        outputCommitted:
-          event.boundary === "provider_content_block_stop" ||
-          event.boundary === "inferred_content_block_stop",
-      };
+      return (
+        event.boundary === "provider_content_block_stop" ||
+        event.boundary === "inferred_content_block_stop"
+      );
     default:
-      return { outputCommitted: false };
+      return false;
   }
 }
 
