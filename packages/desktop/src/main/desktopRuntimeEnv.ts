@@ -38,7 +38,7 @@ import {
 import { getElectronAppPath, isElectronAppPackaged } from "./desktopElectronApp.js";
 
 const isLocalDevelopmentRuntime = !isElectronAppPackaged();
-export const desktopRuntimeEnv: ZCodeRuntimeEnv = isLocalDevelopmentRuntime
+const desktopRuntimeEnv: ZCodeRuntimeEnv = isLocalDevelopmentRuntime
   ? "development"
   : "production";
 // 身份看编译期 flavor 而不是 ZCODE_ENV：ZCODE_PREVIEW_IDENTITY=1 的生产后端构建同样是 Preview，
@@ -495,7 +495,7 @@ export function buildHostProcessEnv(hostProcessLocalEnv: Record<string, string>)
             )
           : undefined;
   const windowsAppInstallDir = resolveWindowsAppInstallDirForDataBaseDirGuard();
-  // Desktop 身份由 host 从凭据仓库和本机状态读取后可信注入；外部环境里的 OTLP 凭据
+  // Desktop 身份由 host 从凭据仓库和本机状态读取后可信注入；继承环境里的未知凭据
   // 不再定向透传给 host，sanitizeZCodeRuntimeEnv 已在继承环境里统一剔除。
   const inheritedEnv = applySelectedZCodeEnvLinks({
     ...sanitizeZCodeRuntimeEnv(rawInheritedEnv),
