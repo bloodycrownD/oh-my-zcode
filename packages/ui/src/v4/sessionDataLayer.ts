@@ -87,6 +87,15 @@ export class SessionDataLayer {
       // 订阅失败落在 store.state（status=error + retry()），不在这里抛。
       void store.connect({ rendererPrepareStartedAt: startedAt });
     }
+    logger.lifecycle.info("v4 session data lease acquired", {
+      event: "v4.session_data.acquire",
+      keepWarm: entry.keepWarmTimer !== null,
+      module: "ui.v4.session_data_layer",
+      refCount: entry.refCount,
+      sessionId,
+      status: "completed",
+      topic,
+    });
 
     let released = false;
     return {
