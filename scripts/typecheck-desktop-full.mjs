@@ -38,17 +38,30 @@ const errors = [
 const diffKey = (line) => line.replace(/^([^(]+)\(\d+,\d+\)/, "$1");
 const diffKeySet = (lines) => new Set(lines.map(diffKey));
 
-if (process.argv.includes("--snapshot")) {
-  writeFileSync(snapshotPath, errors.join("\n") + "\n");
-  console.log(`snapshot written: ${errors.length} errors -> ${snapshotPath}`);
-  process.exit(0);
-}
-
 const baselineLines = readFileSync(snapshotPath, "utf8").split(/\r?\n/).filter(Boolean);
 const baseline = diffKeySet(baselineLines);
 const current = diffKeySet(errors);
 const fresh = [...current].filter((key) => !baseline.has(key));
 const removed = [...baseline].filter((key) => !current.has(key)).length;
+
+if (process.argv.includes("--snapshot")) {
+  console.log(
+    `desktop-full snapshot: ${current.size} error kinds (baseline ${baseline.size}, added ${fresh.length}, removed ${removed})`,
+  );
+  for (const line of fresh) console.log(`  + ${line}`);
+  // 快照是「当前已知态」的差分网，静默重生成会把新增错误一并吸收成基线。
+  // 要接受新增错误必须显式加 --accept-new，编排层才不会在无人察觉时放宽门禁。
+  if (fresh.length > 0 && !process.argv.includes("--accept-new")) {
+    console.log(
+      "refusing to write snapshot: new error kinds present; re-run with --snapshot --accept-new to accept them",
+    );
+    process.exit(1);
+  }
+  writeFileSync(snapshotPath, errors.join("\n") + "\n");
+  console.log(`snapshot written: ${errors.length} errors -> ${snapshotPath}`);
+  process.exit(0);
+}
+
 console.log(
   `desktop-full: ${current.size} error kinds (baseline ${baseline.size}, removed ${removed})`,
 );
