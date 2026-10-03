@@ -1243,6 +1243,7 @@ export function SessionPane({
     },
     [
       newlyCreatedSessionIdRef,
+      onSessionCreated,
       promoteComposerDraft,
       promoteGroupedDraftTask,
       workspaceIdentity,
