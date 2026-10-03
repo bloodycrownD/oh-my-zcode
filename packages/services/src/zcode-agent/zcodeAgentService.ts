@@ -1,8 +1,6 @@
 import { requestPluginReferenceCatalog } from "#src/zcode-agent/pluginReferenceCatalogRequest.js";
 import {
-  localTtftFactsSchema,
   sessionDebugSnapshotSchema,
-  type LocalTtftFacts,
 } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
@@ -73,7 +71,6 @@ import {
   zcodeProtocolEmptyResultSchema,
   zcodeProtocolMethods,
   zcodeProtocolNotifications,
-  zcodeMcpTelemetryEventSchema,
   zcodeMcpResourceSamplesSchema,
   zcodeToolExecResourceSchema,
   zcodeProcessResourceSampleSchema,
@@ -107,7 +104,6 @@ import {
   type DynamicWorkflowClientConfig,
   type AgentLaneResourceSample,
   type ProcessResourceCliLane,
-  type ZCodeMcpTelemetryEvent,
   type ZCodeMcpResourceSample,
   type ZCodeToolExecResource,
   type ZCodePluginOperationProgressNotification,
@@ -1125,14 +1121,12 @@ export function createZCodeAgentService(
   const processResourceSampleEmitter = new Emitter<AgentLaneResourceSample>();
   const toolExecResourceEmitter = new Emitter<ZCodeToolExecResource>();
   const mcpResourceSamplesEmitter = new Emitter<ZCodeMcpResourceSample[]>();
-  const mcpTelemetryEmitter = new Emitter<ZCodeMcpTelemetryEvent>();
   const pluginOperationProgressEmitters = new Map<
     string,
     Emitter<ZCodePluginOperationProgressNotification>
   >();
   // v4 conversation 帧 fan-out：workspace 级 emitter，renderer 侧按 topic 自行路由。
   const conversationFrameEmitters = new Map<string, Emitter<ConversationTopicWireCandidate>>();
-  const localTtftFactsEmitter = new Emitter<{ workspaceKey: string; facts: LocalTtftFacts }>();
   const conversationTelemetryFactEmitters = new Map<string, Emitter<ConversationTelemetryFact>>();
   const cuaPermissionObservationEmitter = new Emitter<ZCodeAgentCuaPermissionObservation>();
   // sessions-index 帧 fan-out：与 conversation 同一 conversationFrame 通知，按 topic 前缀分流到此 emitter。
@@ -1917,21 +1911,6 @@ export function createZCodeAgentService(
           return;
         }
 
-        if (message.method === zcodeProtocolNotifications.mcpTelemetry) {
-          const parsed = zcodeMcpTelemetryEventSchema.safeParse(message.params);
-          if (parsed.success) {
-            mcpTelemetryEmitter.fire(parsed.data);
-          } else {
-            logger.debug(undefined, "丢弃无效 ZCode CLI MCP 遥测事件", {
-              issues: parsed.error.issues.map((issue) => ({
-                code: issue.code,
-                path: issue.path.join("."),
-              })),
-            });
-          }
-          return;
-        }
-
         if (message.method === zcodeProtocolNotifications.pluginOperationProgress) {
           const parsed = zcodePluginOperationProgressNotificationSchema.safeParse(message.params);
           if (parsed.success) {
@@ -2002,15 +1981,6 @@ export function createZCodeAgentService(
           return;
         }
 
-        if (message.method === V4_NOTIFICATIONS.localTtftFacts) {
-          const parsed = localTtftFactsSchema.safeParse(message.params);
-          if (parsed.success && !workspace.remoteSessionId && !workspace.workspaceIdentity?.trim())
-            localTtftFactsEmitter.fire({
-              workspaceKey: resolveWorkspaceKey(workspace),
-              facts: parsed.data,
-            });
-          return;
-        }
         if (message.method === V4_NOTIFICATIONS.conversationTelemetryFact) {
           const parsed = conversationTelemetryFactSchema.safeParse(message.params);
           if (parsed.success) {
@@ -3199,7 +3169,6 @@ export function createZCodeAgentService(
     sessionEmitters.clear();
     sessionRuntimePreferencesRequestEmitter.dispose();
     processResourceSampleEmitter.dispose();
-    mcpTelemetryEmitter.dispose();
     toolExecResourceEmitter.dispose();
     mcpResourceSamplesEmitter.dispose();
     for (const emitter of pluginOperationProgressEmitters.values()) {
@@ -3214,7 +3183,6 @@ export function createZCodeAgentService(
       emitter.dispose();
     }
     conversationTelemetryFactEmitters.clear();
-    localTtftFactsEmitter.dispose();
     cuaPermissionObservationEmitter.dispose();
     for (const emitter of workspaceConfigFrameEmitters.values()) {
       emitter.dispose();
@@ -5474,12 +5442,6 @@ export function createZCodeAgentService(
       return getConversationFrameEmitter(params).event;
     },
 
-    onDynamicLocalTtftFacts(params: ZCodeAgentWorkspaceTarget) {
-      return (listener: (facts: LocalTtftFacts) => void) =>
-        localTtftFactsEmitter.event((event) => {
-          if (event.workspaceKey === resolveWorkspaceKey(params)) listener(event.facts);
-        });
-    },
     onDynamicConversationTelemetryFact(params: ZCodeAgentWorkspaceTarget) {
       return getConversationTelemetryFactEmitter(params).event;
     },
@@ -5604,10 +5566,6 @@ export function createZCodeAgentService(
     },
     onDynamicMcpResourceSamples() {
       return mcpResourceSamplesEmitter.event;
-    },
-
-    onDynamicMcpTelemetry() {
-      return mcpTelemetryEmitter.event;
     },
 
     // （CLI 重连重订）：进程换代直通 process manager；v4 订阅方（task-index
