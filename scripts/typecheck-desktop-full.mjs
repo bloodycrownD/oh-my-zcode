@@ -28,7 +28,15 @@ try {
 } catch (error) {
   out = String(error.stdout ?? "") + String(error.stderr ?? "");
 }
-const errors = [...new Set(out.split(/\r?\n/).filter((line) => /(?:^|\s)error TS\d+/.test(line)))].sort();
+const errors = [
+  ...new Set(out.split(/\r?\n/).filter((line) => /(?:^|\s)error TS\d+/.test(line))),
+].sort();
+
+// 差分键去掉 `file(line,col)` 里的行列号，只保留「文件 + 错误码 + 消息」。
+// 快照是基线差分网，任何一次删行/插行都会让同一批既有错误的行号整体平移，
+// 按整行比对会把它们全部误报成「新增」，使门禁在正常删除场景下彻底失效。
+const diffKey = (line) => line.replace(/^([^(]+)\(\d+,\d+\)/, "$1");
+const diffKeySet = (lines) => new Set(lines.map(diffKey));
 
 if (process.argv.includes("--snapshot")) {
   writeFileSync(snapshotPath, errors.join("\n") + "\n");
@@ -36,14 +44,14 @@ if (process.argv.includes("--snapshot")) {
   process.exit(0);
 }
 
-const baseline = new Set(
-  readFileSync(snapshotPath, "utf8")
-    .split(/\r?\n/)
-    .filter(Boolean),
+const baselineLines = readFileSync(snapshotPath, "utf8").split(/\r?\n/).filter(Boolean);
+const baseline = diffKeySet(baselineLines);
+const current = diffKeySet(errors);
+const fresh = [...current].filter((key) => !baseline.has(key));
+const removed = [...baseline].filter((key) => !current.has(key)).length;
+console.log(
+  `desktop-full: ${current.size} error kinds (baseline ${baseline.size}, removed ${removed})`,
 );
-const fresh = errors.filter((line) => !baseline.has(line));
-const removed = [...baseline].filter((line) => !errors.includes(line)).length;
-console.log(`desktop-full: ${errors.length} errors (baseline ${baseline.size}, removed ${removed})`);
 // tsc -b 会在 desktop/src 内再生 checked-in 编译产物（armsRumShared.*、schedulerProtocol.*），
 // 门禁本身不自动还原（避免误回退编辑中的文件）——编排层在每轮门禁后须执行还原/清理。
 try {
