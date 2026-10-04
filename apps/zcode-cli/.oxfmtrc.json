@@ -1,4 +1,7 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
-  "ignorePatterns": []
+  "ignorePatterns": [
+    "packages/magic-context/dist/**",
+    "packages/magic-context/src/core/**"
+  ]
 }

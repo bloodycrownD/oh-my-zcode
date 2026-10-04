@@ -27,6 +27,9 @@
     },
     "apps/zcode-cli/packages/browser-use-plugin": {
       "entry": ["src/browser-client.ts"]
+    },
+    "apps/zcode-cli/packages/magic-context": {
+      "ignore": ["src/core/**"]
     }
   },
   "ignore": [".agents/**", "docs/**", "packages/ui/src/components/**"]
