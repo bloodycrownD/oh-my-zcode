@@ -158,7 +158,7 @@ function decodePromptAttachmentDataUrl(
  * `event-reducer.ts` 的 `shouldModelCompleteUpdateContextUsed` 是同一条，不在这里
  * 另立一套。
  *
- * recorder 缺席（flag off，D-11 默认态）时**原样返回下游 sink**，不产生任何包装；
+ * recorder 缺席（flag off，用户显式关掉）时**原样返回下游 sink**，不产生任何包装；
  * recorder 在场而下游没有 sink 时**仍然造一个**——headless CLI 根本没有下游 sink，
  * 而 usage 是 transform 的压力输入，不是可选的诊断。
  */
@@ -761,7 +761,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     });
     // Step 19b：`features.magicContext` 关闭时，本行连 `import()` 都不发生——于是
     // 既不加载 magic-context 模块图，也不创建 transform / provider 实例，更不会打开
-    // magic-context.db。默认态（D-11）的成本就是这一个三元判空。
+    // magic-context.db。用户显式关掉 flag 时的成本就是这一个三元判空。
     //
     // 打开时先跑装配工厂：它内部第一句就是 `initializeMagicContextHost()`
     // （S15 遗留 #6：setHarness("zcode") + project-dir resolver），且在任何 DB 写
@@ -774,7 +774,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // 不接它等于永久 `percentage=0`：scheduler 一直 defer，drop 与 historian 都不启动。
     //
     // 它与 transform 工厂**同一个动态 import**：flag off 时这段代码根本不求值，
-    // 于是 recorder 的模块也不会被加载（D-11 的成本纪律对新增的缝一视同仁）。
+    // 于是 recorder 的模块也不会被加载（flag off 的成本纪律对新增的缝一视同仁）。
     const magicContextAssembly =
       runtimeConfig.magicContext?.enabled === true
         ? await import("./magic-context-turn-transform.js")

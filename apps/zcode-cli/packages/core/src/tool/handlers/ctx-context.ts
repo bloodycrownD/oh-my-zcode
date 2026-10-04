@@ -12,9 +12,9 @@
 //   3. 声明权限与预算。
 //
 // **包是动态 import 的**，与 `runtime/helpers/magic-context-turn-transform.ts` 同一理由：
-// `features.magicContext === false`（D-11 默认态）时，CLI 启动不该把整棵 magic-context
-// 模块图（zod schema + sqlite chokepoint + 迁移模块）拉进内存。静态 import 会在
-// core 的工具注册那一刻就发生，flag 就再也管不住它了。
+// `features.magicContext === false`（用户显式关闭的退路态，T-M8）时，CLI 启动不该把
+// 整棵 magic-context 模块图（zod schema + sqlite chokepoint + 迁移模块）拉进内存。
+// 静态 import 会在 core 的工具注册那一刻就发生，flag 就再也管不住它了。
 //
 // 幂等语义在包内（`ctx_reduce` 的 `commandIdLedger`，键推导逐字照搬上游）：
 // 同一条 toolCallId 重复调用不会二次入队 pending_ops（T-M11 前半）。

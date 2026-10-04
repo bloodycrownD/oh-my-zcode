@@ -35,7 +35,7 @@
  *                     「runner 未接线、什么都没重建」，并给出重建前的状态。帮助
  *                     文案注明这是简化首版。
  *
- * 包是**动态 import** 的：`features.magicContext` 关闭时（D-11 默认态）不应因为一
+ * 包是**动态 import** 的：用户显式把 `features.magicContext` 关闭时，不应因为一
  * 条 `/ctx-status` 就把整棵 magic-context 模块图拉进内存——而这条命令完全可能在
  * 那个状态下被敲出来。
  */

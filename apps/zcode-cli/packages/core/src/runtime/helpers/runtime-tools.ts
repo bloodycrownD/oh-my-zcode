@@ -83,7 +83,7 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
     // node_repl/browser-use 由 ZCode 官方 browser-use 插件启停推导出的 runtimeFeatures 控制。
     includeNodeRepl: nodeReplEnabled,
     includeBrowserUse: browserUseEnabled,
-    // magic-context 上下文回收面：门是 `features.magicContext`（D-11 默认 false）。
+    // magic-context 上下文回收面：门是 `features.magicContext`（step 28 起默认 true）。
     // ctx handler 是动态 import 包的，所以这道门同时决定了「模型看得见这两个工具吗」
     // 与「整棵 magic-context 模块图进不进内存」——见 handlers/index.ts 的注释。
     includeMagicContextTools: runtime.config.magicContext?.enabled === true,

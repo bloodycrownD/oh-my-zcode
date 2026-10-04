@@ -5,9 +5,9 @@
  * 这个文件**不 import `@zcode/magic-context` 的任何运行时值**，这是刻意的。
  * ============================================================================
  *
- * `features.magicContext === false`（D-11 的默认态）时要求"零行为"——装配层连
- * transform / provider 实例都不创建。如果 turn-loop 经由本模块的某个 helper 直接
- * import 包里的 `projectRuntimeEntries`，那么 CLI 每次启动都会把整棵 magic-context
+ * `features.magicContext === false`（用户显式关闭时的退路态，T-M8 语义）时要求"零行为"
+ * ——装配层连 transform / provider 实例都不创建。如果 turn-loop 经由本模块的某个 helper
+ * 直接 import 包里的 `projectRuntimeEntries`，那么 CLI 每次启动都会把整棵 magic-context
  * 模块图（含 zod schema 与 sqlite chokepoint）拉进内存，而它们一个都不会被用到。
  *
  * 所以分工是：

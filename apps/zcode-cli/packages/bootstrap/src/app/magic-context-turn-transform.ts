@@ -5,7 +5,7 @@
  * 这里是全仓唯一 import `@zcode/magic-context` 运行时值的地方，而且只在
  * `features.magicContext` 打开时才 import（`createZCodeApp` 用动态 import 调本文件
  * 的工厂）。原因见 `core/src/runtime/helpers/magic-context-turn-transform.ts` 的
- * 文件头：flag off 时（D-11 的默认态）CLI 启动不应该把整棵 magic-context 模块图
+ * 文件头：用户显式把 flag 关掉时，CLI 启动不应该把整棵 magic-context 模块图
  * 拉进内存。
  * ============================================================================
  *

@@ -193,7 +193,7 @@ export interface AgentRuntimeConfig {
    * Step 19b：magic-context（`features.magicContext`，S19a 落地的门控）运行时开关。
    * 值来自 `RuntimeConfig.features.magicContext`——bootstrap 的
    * `resolveAppRuntimeConfig` 把它投影到这里。`undefined`/`false` 都表示关闭：
-   * D-11 要求默认态零成本，装配层在关闭时连 transform 实例都不创建。
+   * 用户显式关掉时是零成本退路（T-M8 语义），装配层连 transform 实例都不创建。
    * Step 23 接 ConfigPort 热更新后，运行中改配置必须立刻生效。
    */
   magicContext?: {
@@ -378,8 +378,8 @@ export interface AgentRuntimeDeps {
   memoryRoot?: string;
   /**
    * Step 19b：每请求的 magic-context transform 端口。在场即注册门——装配层在
-   * `features.magicContext === false` 时不构造它，于是默认态下 core 这条路径连
-   * 一次判空之外什么都不做（D-11）。
+   * `features.magicContext === false` 时不构造它，于是关闭态下 core 这条路径连
+   * 一次判空之外什么都不做（T-M8）。
    */
   magicContextTurnTransform?: MagicContextTurnTransform;
 }

@@ -194,10 +194,11 @@ interface RegisterBuiltInToolsOptions {
   /**
    * magic-context 上下文回收面（`ctx_reduce` / `ctx_expand`）是否注册。
    *
-   * **默认关**，理由与 `includeNodeRepl` 同款但更强一层：这两个工具的实现在
-   * `@zcode/magic-context` 里，而 handler 是**动态 import** 它的，所以 flag 关时包
-   * 整棵不会被拉进内存（zod schema + sqlite chokepoint + 迁移模块）。若在这里默认
-   * 开启，「默认态零行为」这条 D-11 不变式就会在一个不起眼的注册点被悄悄破掉。
+   * **跟随 `features.magicContext`**（step 28 起默认开），理由与 `includeNodeRepl`
+   * 同款但更强一层：这两个工具的实现在 `@zcode/magic-context` 里，而 handler 是
+   * **动态 import** 它的，所以 flag 关时包整棵不会被拉进内存（zod schema + sqlite
+   * chokepoint + 迁移模块）——用户显式关掉后，「零行为」这条不变式（今天记作 D-11）
+   * 才仍然成立。
    *
    * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
    */

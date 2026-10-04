@@ -10,8 +10,13 @@
  *   3. contracts RuntimeConfig["features"].magicContext
  *   4. adapters featuresSchema.magicContext
  *   5. adapters ConfigStore.merge() passthrough
- *   6. adapters getAll() default  <-- must be `false`, NOT the neighbours' `?? true`
- *   7. DefaultRuntimeConfig + getDefaultValue() both `false`
+ *   6. adapters getAll() default  <-- now `?? true` again, matching its neighbours
+ *   7. DefaultRuntimeConfig + getDefaultValue() both `true`
+ *
+ * Step 28 flipped 6/7 from `false` to `true` once D-11's gates (MVP acceptance
+ * T-M1..T-M8 plus the compaction-removal full regression) passed. `false` is no
+ * longer the absent-config value; it is the user's explicit opt-out, and the
+ * suites below still cover it as such.
  *
  * Runs on `node:test` (no vitest/jest in this repo), importing the compiled
  * `dist/` — run `pnpm --filter @zcode/adapters build` first.
@@ -69,7 +74,7 @@ process.on("exit", (code) => {
   console.log("");
   console.log(
     passed
-      ? "TEST PASS — features.magicContext gating chain (D-11 default off)"
+      ? "TEST PASS — features.magicContext gating chain (D-11 default on)"
       : `TEST FAIL — features.magicContext gating chain (exit code ${code})`,
   );
 });
@@ -79,57 +84,59 @@ test("mapping 1/3/7: ConfigKey + RuntimeConfig + DefaultRuntimeConfig register m
   assert.equal("magicContext" in DefaultRuntimeConfig.features, true);
 });
 
-test("mapping 7: DefaultRuntimeConfig.features.magicContext defaults to false (D-11)", () => {
-  assert.equal(DefaultRuntimeConfig.features.magicContext, false);
+test("mapping 7: DefaultRuntimeConfig.features.magicContext defaults to true (step 28)", () => {
+  assert.equal(DefaultRuntimeConfig.features.magicContext, true);
 });
 
-test("mapping 4/5/6: empty config merge keeps magicContext off", () => {
+test("mapping 4/5/6: empty config merge keeps magicContext on", () => {
   const config = createConfigPort({});
-  // Empty patch at the highest scope must not resurrect the flag.
+  // Empty patch at the highest scope must not resurrect the flag either way.
   config.merge({}, ConfigScope.Cli);
-  assert.equal(config.getAll().features.magicContext, false);
+  assert.equal(config.getAll().features.magicContext, true);
 });
 
-test("mapping 6: getAll() default is false, unlike its `?? true` neighbours", () => {
+test("mapping 6: getAll() default is true, matching its `?? true` neighbours", () => {
   // `createConfigPort({})` leaves the store empty, so getAll() must take the
   // literal fallback. `createConfigPort()` instead seeds DefaultConfig into the
-  // store and would never reach it — the D-11 trap must be caught here.
+  // store and would never reach it — the fallback must be caught here.
   const features = createConfigPort({}).getAll().features;
-  assert.equal(features.magicContext, false);
-  // Guard the trap: the flag is opt-in while every legacy feature stays opt-out.
+  assert.equal(features.magicContext, true);
+  // Guard the neighbours: magicContext joining them must not have shifted any.
   assert.equal(features.rewind, true);
   assert.equal(features.mcp, true);
   // Same fallback path via the fully-defaulted port.
-  assert.equal(createConfigPort().getAll().features.magicContext, false);
+  assert.equal(createConfigPort().getAll().features.magicContext, true);
 });
 
 test("mapping 2/5: get(ConfigKey.FeatureMagicContext) falls back to the registered default", () => {
   const config = createConfigPort();
-  assert.equal(config.get(ConfigKey.FeatureMagicContext), false);
+  assert.equal(config.get(ConfigKey.FeatureMagicContext), true);
   assert.equal(config.has(ConfigKey.FeatureMagicContext), true);
 });
 
-test("mapping 5: explicit features.magicContext=true overrides the off default", () => {
+test("mapping 5: explicit features.magicContext=false overrides the on default", () => {
   const config = createConfigPort();
-  config.merge({ features: { magicContext: true } }, ConfigScope.User);
-  assert.equal(config.getAll().features.magicContext, true);
-  assert.equal(config.get(ConfigKey.FeatureMagicContext), true);
+  config.merge({ features: { magicContext: false } }, ConfigScope.User);
+  assert.equal(config.getAll().features.magicContext, false);
+  assert.equal(config.get(ConfigKey.FeatureMagicContext), false);
 });
 
 test("mapping 5: explicit magicContext:false survives a merge that omits the key", () => {
-  const config = createConfigPort({ features: { magicContext: true } });
+  const config = createConfigPort({ features: { magicContext: false } });
   config.merge({ features: { rewind: false } }, ConfigScope.Project);
-  assert.equal(config.getAll().features.magicContext, true);
-  config.merge({ features: { magicContext: false } }, ConfigScope.Cli);
   assert.equal(config.getAll().features.magicContext, false);
+  config.merge({ features: { magicContext: true } }, ConfigScope.Cli);
+  assert.equal(config.getAll().features.magicContext, true);
 });
 
 test("mapping 5: merge notifies subscribers of the flag change", () => {
   const config = createConfigPort();
   const seen = [];
   config.observe().subscribe(ConfigKey.FeatureMagicContext, (value) => seen.push(value));
-  config.merge({ features: { magicContext: true } }, ConfigScope.User);
-  assert.deepEqual(seen, [true]);
+  // Merged from the (now `true`) default down to the explicit opt-out, so the
+  // notification carries a value that differs from the absent-config default.
+  config.merge({ features: { magicContext: false } }, ConfigScope.User);
+  assert.deepEqual(seen, [false]);
 });
 
 test("mapping 4: config file schema accepts boolean magicContext and rejects non-boolean", () => {
@@ -154,7 +161,7 @@ test("mapping 4: absent magicContext stays absent so the default wins", () => {
   assert.deepEqual(config.features, {});
   const port = createConfigPort();
   port.merge(config, ConfigScope.System);
-  assert.equal(port.getAll().features.magicContext, false);
+  assert.equal(port.getAll().features.magicContext, true);
 });
 
 test("end-to-end: config file magicContext:true reaches getAll()", () => {

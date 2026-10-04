@@ -292,7 +292,7 @@ export class AgentRuntime {
 
     this.contextBuilder = deps.contextBuilder ?? null;
     // Step 19b：端口在场即注册门。装配层在 `features.magicContext === false` 时
-    // 根本不构造它，于是默认态下 turn-loop 的插入点是纯判空。
+    // 根本不构造它，于是关闭态下 turn-loop 的插入点是纯判空。
     this.magicContextTurnTransform = deps.magicContextTurnTransform;
     if (this.contextBuilder) {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);

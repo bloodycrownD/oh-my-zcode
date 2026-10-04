@@ -343,9 +343,10 @@ export const DefaultRuntimeConfig: RuntimeConfig = {
     memory: true,
     skill: true,
     mcp: true,
-    // D-11：magicContext 默认关闭，直至 MVP 验收（T-M1..T-M8）通过；
-    // 与「压缩移除全量回归」同一变更内翻为 true。默认 true 会让 kill switch 失效。
-    magicContext: false,
+    // D-11 收官：magicContext 随 MVP 验收（T-M1..T-M8）与「压缩移除全量回归」
+    // 一并通过，在 step 28 翻为默认开启。off 现在只表示「transform 直通、无预算
+    // 管理」这条用户显式退路（T-M8 语义），因此与邻居的 `?? true` 一致。
+    magicContext: true,
   },
   memory: {
     use: true,

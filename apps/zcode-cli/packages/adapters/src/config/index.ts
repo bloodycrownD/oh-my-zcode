@@ -293,8 +293,9 @@ export class ConfigPortImpl implements ConfigPort {
         memory: this.store.get(ConfigKey.FeatureMemory) ?? true,
         skill: this.store.get(ConfigKey.FeatureSkill) ?? true,
         mcp: this.store.get(ConfigKey.FeatureMcp) ?? true,
-        // 故意不跟邻居的 `?? true`：D-11 要求默认关闭，照抄会让 kill switch 失效。
-        magicContext: this.store.get(ConfigKey.FeatureMagicContext) ?? false,
+        // D-11 收官：MVP 验收与「压缩移除全量回归」通过后默认开启（step 28），
+        // 于是这里与邻居的 `?? true` 一致；off 是用户的显式退路，不是缺省态。
+        magicContext: this.store.get(ConfigKey.FeatureMagicContext) ?? true,
       },
       memory: {
         use: this.store.get(ConfigKey.MemoryUse) ?? DefaultConfig.memory.use,
