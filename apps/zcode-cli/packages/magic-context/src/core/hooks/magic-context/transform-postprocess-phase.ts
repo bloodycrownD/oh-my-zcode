@@ -1,4 +1,4 @@
-import { compareOpenCodeMessagesByCanonicalOrder } from "../../features/magic-context/compaction-marker.js";
+import { compareOpenCodeMessagesByCanonicalOrder } from "../../deferred/compaction-marker.js";
 import { newestCtxReduceTagNumbers } from "../../features/magic-context/reclaim-protection.js";
 import {
     HYGIENE_PROVIDER_UNITS_VERSION,
@@ -77,26 +77,26 @@ import {
     foldBustsServedPrefix,
     renderConvertedToolSkeletons,
 } from "./apply-operations.js";
-import { runAutoSearchHint } from "./auto-search-runner.js";
+import { runAutoSearchHint } from "../../deferred/auto-search-runner.js";
 import { hasReclaimRide, reclaimRideLabel } from "./cache-busting-signals.js";
 import type { CavemanWordRules } from "./caveman.js";
 import {
     rearmChannel2AfterCoverageAdvancingHardFold,
     rearmChannel2AfterMeasuredCollapse,
-} from "./channel2-cycle.js";
-import { applyDeferredCompactionMarker, MARKER_SUMMARY_TEXT } from "./compaction-marker-manager.js";
-import { getActiveCompartmentRun } from "./compartment-runner.js";
+} from "../../deferred/channel2-cycle.js";
+import { applyDeferredCompactionMarker, MARKER_SUMMARY_TEXT } from "../../deferred/compaction-marker-manager.js";
+import { getActiveCompartmentRun } from "../../deferred/compartment-runner.js";
 import type {
     CtxReduceAvailabilityVerdict,
     ToolAvailabilityVerdict,
-} from "./ctx-reduce-availability.js";
+} from "../../deferred/ctx-reduce-availability.js";
 import {
     cachedToolPermissionDenied,
     hasLoggedCtxReducePermissionDeny,
     markCtxReducePermissionDenyLogged,
     resolveToolPermissionDenied,
     todowritePermissionDenied,
-} from "./ctx-reduce-availability.js";
+} from "../../deferred/ctx-reduce-availability.js";
 import type { Channel1State } from "./ctx-reduce-nudge.js";
 import { dropStaleReduceCalls } from "./drop-stale-reduce-calls.js";
 import {
@@ -123,8 +123,8 @@ import {
     prepareCachedM0M1Replay,
     renderCompartmentInjection,
 } from "./inject-compartments.js";
-import { markNoteNudgeDelivered, peekNoteNudgeText } from "./note-nudger.js";
-import { hasVisibleNoteReadCall } from "./note-visibility.js";
+import { markNoteNudgeDelivered, peekNoteNudgeText } from "../../deferred/note-nudger.js";
+import { hasVisibleNoteReadCall } from "../../deferred/note-nudger.js";
 import type { PassOutcome } from "./pass-outcome.js";
 import {
     postprocessOldestTags,

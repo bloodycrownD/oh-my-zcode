@@ -1,12 +1,12 @@
-import type { DreamTaskProgress } from "../../features/magic-context/dreamer/task-registry.js";
-import type { RecompProgress } from "./compartment-runner-types.js";
+import type { DreamTaskProgress } from "../../deferred/dreamer-task-registry.js";
+import type { RecompProgress } from "../../deferred/compartment-runner-types.js";
 import type { Channel1State } from "./ctx-reduce-nudge.js";
 import type {
     AgentBySession,
     LatestAssistantMessageIdBySession,
     LiveModelBySession,
     VariantBySession,
-} from "./hook-handlers.js";
+} from "../../deferred/hook-handlers.js";
 
 /**
  * Plugin-process-scoped shared state. Lives in `index.ts` and is threaded into

@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { MEMORY_MURAL_BLOCK } from "../../agents/magic-context-prompt.js";
+import { MEMORY_MURAL_BLOCK } from "../../deferred/magic-context-prompt.js";
 import {
     buildCompartmentBlock,
     type Compartment,
@@ -10,20 +10,20 @@ import {
     getLastCompartmentEndMessageId,
     isPartialCompartmentEnd,
     type SessionFact,
-} from "../../features/magic-context/compartment-storage.js";
+} from "../../deferred/compartment-storage.js";
 import {
     CATEGORY_PRIORITY,
     V2_MEMORY_CATEGORIES,
 } from "../../features/magic-context/memory/constants.js";
-import { compareMemorySelectionPriority } from "../../features/magic-context/memory/memory-selection.js";
+import { compareMemorySelectionPriority } from "../../deferred/memory-selection.js";
 import {
     getMaxMemoryIdForProjects,
     getMemoriesByProject,
     getMemoriesByProjects,
-} from "../../features/magic-context/memory/storage-memory.js";
+} from "../../deferred/storage-memory.js";
 import type { Memory } from "../../features/magic-context/memory/types.js";
-import { resolveMuralWire } from "../../features/magic-context/mural/render-trigger.js";
-import type { MuralWireOptions } from "../../features/magic-context/mural/resolve-mural.js";
+import { resolveMuralWire } from "../../deferred/render-trigger.js";
+import type { MuralWireOptions } from "../../deferred/render-trigger.js";
 import { isNoContentCompartment } from "../../features/magic-context/no-content-compartment.js";
 import {
     GLOBAL_USER_PROFILE_PROJECT_PATH,
@@ -40,7 +40,7 @@ import { readProjectDocsCanonical } from "../../features/magic-context/project-d
 import {
     getActiveUserMemories,
     type UserMemory,
-} from "../../features/magic-context/user-memory/storage-user-memory.js";
+} from "../../deferred/storage-user-memory.js";
 import {
     computeWorkspaceEpochFingerprint,
     expandWorkspaceIdentitySetWithAliases,
@@ -58,7 +58,7 @@ import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.j
 import {
     MARKER_SUMMARY_TEXT,
     reconcileForkOrphanedCompactionMarkers,
-} from "./compaction-marker-manager.js";
+} from "../../deferred/compaction-marker-manager.js";
 import {
     COMPARTMENT_RENDER_EPOCH,
     decodeCachedM0UpgradeIdentity,

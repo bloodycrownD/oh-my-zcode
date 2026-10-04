@@ -6,17 +6,21 @@
  * against the user's REAL session store (read-only), storage-dir resolution +
  * the project-dir redirect, and the harness boot contract.
  *
- * HOW IT RUNS. The package is not built and must not be built here (Step 18's
- * B group is mid-flight in `src/core/**`, so a package build would fail for
- * reasons that have nothing to do with this step). Instead the script is run
- * against a THROWAWAY `tsc` emit of just the host closure:
+ * HOW IT RUNS (S18 close-out). Step 17 originally compiled a THROWAWAY emit of
+ * just the host closure, because `src/core/**` was mid-flight and a full package
+ * build would have failed for reasons unrelated to this step:
  *
  *   tsc --outDir <temp>/src <the five host files>
  *
- * Command-line file mode, so only these files and their imports are compiled;
- * the host closure is exactly five files plus `core/shared/{data-path,
- * project-directory-key,harness,test-temp-dir}.ts`. Requires Node >= 24 (the
- * real-store smoke uses `node:sqlite`).
+ * That exemption is over: the package builds clean, so this script now runs
+ * against the real `dist/` exactly like `test-config.mjs` does — the emitted
+ * layout (`dist/host/**`, `dist/core/shared/**`) is what `OUT_ROOT` addresses, so
+ * the only change is where `OUT_ROOT` points. `MC_HOST_TEST_OUT` is still honoured
+ * as an override, which keeps the old throwaway-compile workflow available for
+ * anyone who wants to exercise the host closure in isolation.
+ *
+ * Requires Node >= 24 (the real-store smoke uses `node:sqlite`) and a prior
+ * `pnpm build`.
  *
  * The session store is opened with `readOnly: true` and never written to.
  *
@@ -29,11 +33,16 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { test } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-const OUT_ROOT = process.env.MC_HOST_TEST_OUT;
-if (!OUT_ROOT) {
-  console.error("MC_HOST_TEST_OUT is not set — compile the host closure first.");
+// Default to the package's own build output, relative to this script so the
+// suite works from any cwd.
+const PKG_ROOT = fileURLToPath(new URL("../", import.meta.url));
+const OUT_ROOT = process.env.MC_HOST_TEST_OUT ?? join(PKG_ROOT, "dist");
+if (!existsSync(join(OUT_ROOT, "host", "types.js"))) {
+  console.error(
+    `no compiled host layer at ${OUT_ROOT} — run \`pnpm build\` (or set MC_HOST_TEST_OUT).`,
+  );
   process.exit(1);
 }
 

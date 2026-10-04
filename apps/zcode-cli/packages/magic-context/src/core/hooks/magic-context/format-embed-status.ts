@@ -1,7 +1,7 @@
-import { formatSynapseLaneDescriptor } from "../../features/magic-context/memory/embedding-synapse.js";
-import type { EmbeddingCoverageStatus } from "../../features/magic-context/project-embedding-registry.js";
-import { describeShadowBackfillWriteRefusal } from "../../features/magic-context/shadow-backfill-state.js";
-import type { EmbedDrainUiStatus } from "./embed-session-state.js";
+import { formatSynapseLaneDescriptor } from "../../deferred/embedding-status-tables.js";
+import type { EmbeddingCoverageStatus } from "../../deferred/embedding-status-tables.js";
+import { describeShadowBackfillWriteRefusal } from "../../deferred/embedding-status-tables.js";
+import type { EmbedDrainUiStatus } from "../../deferred/embed-session-state.js";
 
 export function formatEmbedStatusText(
     coverage: EmbeddingCoverageStatus,

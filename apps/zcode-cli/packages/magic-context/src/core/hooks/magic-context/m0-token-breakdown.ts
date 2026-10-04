@@ -1,4 +1,4 @@
-import { getMemoriesByProject } from "../../features/magic-context/memory/storage-memory.js";
+import { getMemoriesByProject } from "../../deferred/storage-memory.js";
 import type { ContextDatabase } from "../../features/magic-context/storage.js";
 import { extractM0Block } from "./decay-render.js";
 import { renderMemoryBlockV2, trimMemoriesToBudgetV2 } from "./inject-compartments.js";

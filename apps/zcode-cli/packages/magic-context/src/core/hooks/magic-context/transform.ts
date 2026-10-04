@@ -1,5 +1,5 @@
 import type { ProtectedTokensTierOverrides } from "../../deferred/project-security.js";
-import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage.js";
+import { getLastCompartmentEndMessage } from "../../deferred/compartment-storage.js";
 import {
     resolveProjectIdentityForSession,
     takeDubiousOwnershipProjectIdentityWarning,
@@ -7,17 +7,17 @@ import {
 import {
     type MessageReconciliationSource,
     scheduleReconciliation,
-} from "../../features/magic-context/message-index-async.js";
+} from "../../deferred/message-index-async.js";
 import { isPrefixBoundThinkingModel } from "../../features/magic-context/overflow-detection.js";
-import { getProtectionWindowForSession } from "../../features/magic-context/protection-window.js";
-import type { Scheduler } from "../../features/magic-context/scheduler.js";
-import { parseCacheTtl } from "../../features/magic-context/scheduler.js";
-import { resolveSessionCacheTtl } from "../../features/magic-context/session-cache-ttl.js";
+import { getProtectionWindowForSession } from "../../deferred/protection-window.js";
+import type { Scheduler } from "../../deferred/scheduler.js";
+import { parseCacheTtl } from "../../deferred/scheduler.js";
+import { resolveSessionCacheTtl } from "../../deferred/session-cache-ttl.js";
 import { sessionDecisionCalibration } from "../../features/magic-context/session-decision-calibration.js";
 import {
     hasRecordedSessionProjectIdentity,
     recordSessionProjectIdentity,
-} from "../../features/magic-context/session-project-storage.js";
+} from "../../deferred/session-project-storage.js";
 import {
     type ContextDatabase,
     deriveTagLoadFloor,
@@ -48,33 +48,33 @@ import {
     resetProtectedTailNoEligibleHead,
     resolveEpochFloorForPass,
 } from "../../features/magic-context/storage-meta-persisted.js";
-import type { CoordinateGeneration } from "../../features/magic-context/store-generation-rebase.js";
+import type { CoordinateGeneration } from "../../deferred/store-generation-rebase.js";
 import {
     readCoordinateGeneration,
     rebaseSessionCoordinatesAsync,
-} from "../../features/magic-context/store-generation-rebase.js";
+} from "../../deferred/store-generation-rebase.js";
 import type { Tagger } from "../../features/magic-context/tagger.js";
 import {
     clearOpenCodePendingTransformDecision,
     normalizeMaterializeReason,
     recordPendingTransformDecision,
-} from "../../features/magic-context/transform-decision-log.js";
+} from "../../deferred/transform-decision-log.js";
 import type { ContextUsage } from "../../features/magic-context/types.js";
 import type { PluginContext } from "../../plugin/types.js";
 import { BoundedSessionMap } from "../../shared/bounded-session-map.js";
 import { getErrorMessage } from "../../shared/error-message.js";
 import { piModelRefToCanonical } from "../../shared/harness-provider-map.js";
 import { sessionLog } from "../../shared/logger.js";
-import type { ModelInput } from "../../shared/model-resolution.js";
+import type { ModelInput } from "../../deferred/model-resolution.js";
 import { getSdkContextLimit } from "../../shared/models-dev-cache.js";
-import type { PromptSurfaceConfig } from "../../shared/prompt-surface.js";
-import type { PromptSurfaceRuntime } from "../../shared/prompt-surface-runtime.js";
+import type { PromptSurfaceConfig } from "../../deferred/prompt-surface.js";
+import type { PromptSurfaceRuntime } from "../../deferred/prompt-surface-runtime.js";
 import { withoutSqliteTransformPass } from "../../shared/sqlite.js";
 import { canConsumeDeferredOnThisPass } from "./cache-busting-signals.js";
 import type { CavemanWordRules } from "./caveman.js";
 import { replayCavemanCompression } from "./caveman-cleanup.js";
-import { commitCompactionModeRecord, reconcileCompactionMode } from "./compaction-off-transition.js";
-import { getActiveCompartmentRun, startCompartmentAgent } from "./compartment-runner.js";
+import { commitCompactionModeRecord, reconcileCompactionMode } from "../../deferred/compaction-off-transition.js";
+import { getActiveCompartmentRun, startCompartmentAgent } from "../../deferred/compartment-runner.js";
 import { buildTriggerInMemoryTail, checkCompartmentTrigger } from "./compartment-trigger.js";
 import {
     type CtxReduceAvailabilityVerdict,
@@ -83,7 +83,7 @@ import {
     resolveTodowriteAvailabilityFromMessages,
     spawnAgentFromMessages,
     type ToolAvailabilityVerdict,
-} from "./ctx-reduce-availability.js";
+} from "../../deferred/ctx-reduce-availability.js";
 import {
     decideChannel1,
     evaluateChannel2,
@@ -100,13 +100,13 @@ import {
     resolveExecuteThreshold,
     resolveModelKey,
     resolveTrustedContextLimit,
-} from "./event-resolvers.js";
+} from "../../deferred/event-resolvers.js";
 import {
     describeFinalWireTail,
     estimateFinalWireInputTokens,
     estimateMessageTokens,
 } from "./final-wire-token-estimate.js";
-import type { LiveModelBySession } from "./hook-handlers.js";
+import type { LiveModelBySession } from "../../deferred/hook-handlers.js";
 import {
     capturePrefixTrimSourceOrder,
     findHostCompactionWindow,
@@ -119,7 +119,7 @@ import {
 import { saveLkgSlotToDb } from "./lkg-persist.js";
 import { captureLkgSlot, createLkgEntryProjector, resolveLkgModelKeys } from "./lkg-replay.js";
 import { beginLkgPass, dropSlot, getInMemorySlot } from "./lkg-slot.js";
-import { onNoteTrigger } from "./note-nudger.js";
+import { onNoteTrigger } from "../../deferred/note-nudger.js";
 import {
     createPassOutcome,
     degradationChangesRequest,
@@ -137,7 +137,7 @@ import {
 import { readRawSessionMessages } from "./read-session-chunk.js";
 import { findLastAssistantModelFromOpenCodeDb } from "./read-session-db.js";
 import { extractInMemoryMessageViews } from "./read-session-raw.js";
-import { sendStatusNotification } from "./send-session-notification.js";
+import { sendStatusNotification } from "../../deferred/send-session-notification.js";
 import { isAnthropicFamilyRoute, modelAcceptsEmptyContent } from "./sentinel.js";
 import {
     replayClearedReasoning,
@@ -209,7 +209,7 @@ function maybeSendProjectIdentityWarning(
     deps: TransformDeps,
     sessionId: string,
     directory: string,
-    notificationParams: import("./send-session-notification.js").NotificationParams,
+    notificationParams: import("../../deferred/send-session-notification.js").NotificationParams,
 ): void {
     if (!deps.client) return;
     const warning = takeDubiousOwnershipProjectIdentityWarning(directory);
@@ -392,14 +392,14 @@ export type HostRefusalNotice = (
     client: PluginContext["client"] | undefined,
     sessionId: string,
     message: string,
-    notificationParams: import("./send-session-notification.js").NotificationParams,
+    notificationParams: import("../../deferred/send-session-notification.js").NotificationParams,
 ) => Promise<void>;
 
 export async function sendEmergencyRefusalNotice(
     client: PluginContext["client"] | undefined,
     sessionId: string,
     message: string,
-    notificationParams: import("./send-session-notification.js").NotificationParams,
+    notificationParams: import("../../deferred/send-session-notification.js").NotificationParams,
 ): Promise<void> {
     if (!client) throw new Error("OpenCode client is unavailable");
     const notification = await sendStatusNotification(
@@ -414,12 +414,12 @@ export async function sendEmergencyRefusalNotice(
 }
 
 export interface TransformDeps {
-    cacheTtlConfig?: import("../../shared/model-cache-ttl.js").CacheTtlConfig;
-    hiddenCompletionExecutor?: import("./compartment-runner-types.js").HiddenCompletionExecutor;
+    cacheTtlConfig?: import("../../deferred/model-cache-ttl.js").CacheTtlConfig;
+    hiddenCompletionExecutor?: import("../../deferred/compartment-runner-types.js").HiddenCompletionExecutor;
     /** Host marker lifecycle; omission preserves OpenCode 1 marker writes and replay. */
     compactionMarkerStrategy?: CompactionMarkerStrategy & {
         setPending?: typeof import("../../features/magic-context/storage.js").setPendingCompactionMarkerState;
-        publish?: typeof import("./compaction-marker-manager.js").updateCompactionMarkerAfterPublication;
+        publish?: typeof import("../../deferred/compaction-marker-manager.js").updateCompactionMarkerAfterPublication;
     };
     /** Host storage and cancellation adapters; omitted callbacks retain OpenCode 1 behavior. */
     hostRawMessages?: (sessionId: string) => ReturnType<typeof readRawSessionMessages>;
@@ -559,7 +559,7 @@ export interface TransformDeps {
     hostCleanupCompactionMarkers?: Parameters<typeof reconcileCompactionMode>[0]["cleanupMarkers"];
     getNotificationParams?: (
         sessionId: string,
-    ) => import("./send-session-notification.js").NotificationParams;
+    ) => import("../../deferred/send-session-notification.js").NotificationParams;
     getModelKey?: (sessionId: string) => string | undefined;
     /**
      * Observed provider-tool-set fingerprint for the session route. This is

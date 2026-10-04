@@ -10,12 +10,26 @@
  *   b2 — budget derivation (`deriveTriggerBudget`, `deriveHistorianChunkTokens`),
  *        the tokenizer calibration table, and the tier-decay curve.
  *
- * The port cannot be exercised from `dist/` here: the sibling `src/host/` layer is
- * still in flight, and a package build would compile it too. Instead this script
- * stages `src/core/**` plus the two upstream files the b1/b2 graph reaches but the
- * fork deliberately does not port (`dropped-input-guard`, `dreamer/token-budget`),
- * compiles just that graph with `tsc` into a temp dir, and runs `node:test`
- * against the emitted JavaScript.
+ * WHY THIS STILL COMPILES ITS OWN TREE (S18 close-out). The obvious move is to
+ * run the assertions against `dist/`, but `dist/` is a whole-package build: it
+ * also contains the `src/host/` layer and every deferred seam, so a failure
+ * there would say nothing about the B group specifically, and a change to an
+ * unrelated group would break this suite. This script therefore still stages
+ * `src/core/**` alone and compiles it with its own `tsc` invocation. What changed
+ * is that the staged tree is now COMPLETE: the b1/b2 graph previously reached two
+ * upstream files the fork did not port (`hooks/magic-context/dropped-input-guard.ts`
+ * and `features/magic-context/dreamer/token-budget.ts`), and this script used to
+ * copy them out of `.reference/` into the staging dir to close the graph. Both
+ * are now real ported package files (`src/core/hooks/magic-context/dropped-input-guard.ts`,
+ * `src/core/features/magic-context/dreamer/token-budget.ts`), so the overlay is
+ * gone and the suite exercises shipped sources only — nothing under test is read
+ * from outside the repository.
+ *
+ * The staging dir stays inside the workspace's `node_modules/.cache` rather than
+ * the OS temp dir: `read-session-formatting.ts` resolves `ai-tokenizer` with
+ * `createRequire(import.meta.url)`, so a build tree that cannot walk up to the
+ * hoisted `node_modules` would silently fall back to character counts and the
+ * tokenizer assertions below would prove nothing.
  *
  * Exits 0 on success, 1 on any failed assertion or build error.
  */
@@ -25,7 +39,6 @@ import {
   cpSync,
   mkdirSync,
   mkdtempSync,
-  readFileSync,
   readdirSync,
   rmSync,
   statSync,
@@ -39,7 +52,6 @@ const REPO = fileURLToPath(new URL("../../../../../", import.meta.url));
 const NODE = process.execPath;
 // magic-context lives at <repo>/apps/zcode-cli/packages/magic-context.
 const TSC = join(REPO, "node_modules", "typescript", "bin", "tsc");
-const REF = "D:/Dev/Js/oh-my-zcode/.reference/magic-context/packages/plugin/src/";
 
 // The b1/b2 modules the assertions below exercise. The whole staged tree is
 // compiled (the A-group storage layer the B group imports has to be emitted too),
@@ -120,11 +132,14 @@ const SUBJECT = [
   "shared/opencode-db-path.ts",
 ];
 
-// Upstream modules the b1/b2 import graph reaches that this fork does not port.
-// `dropped-input-guard` is a dreamer-guard; `dreamer/**` is on the spec's
-// 「明确不搬」list, but the guard itself is a pure predicate and is staged here
-// only so `tool-drop-target` can be loaded. Neither is part of the shipped port.
-const OVERLAY = [
+// S18 close-out: the OVERLAY list is GONE. `dropped-input-guard` and
+// `dreamer/token-budget` used to be copied out of `.reference/` into the staging
+// dir because the fork did not port them; both are now real ported package files,
+// so `src/core/**` alone closes the b1/b2 graph and nothing under test is read
+// from outside the repository. The assertion that would have caught a regression
+// here is `subjectPresence()` below: it fails if either file stops emitting, so a
+// future "un-port it again" cannot silently reintroduce an overlay.
+const OVERLAY_REPLACED = [
   "hooks/magic-context/dropped-input-guard.ts",
   "features/magic-context/dreamer/token-budget.ts",
 ];
@@ -139,19 +154,6 @@ function stage() {
   const root = mkdtempSync(join(REPO, "node_modules", ".cache", "magic-context-s18-"));
   const src = join(root, "src");
   cpSync(join(PKG, "src", "core"), src, { recursive: true });
-  for (const rel of OVERLAY) {
-    let text = readFileSync(join(REF, rel), "utf8").replace(/\r\n/g, "\n");
-    // Same NodeNext `.js` rebase the port driver applies.
-    text = text.replace(
-      /((?:^|[\s;])import\s+(?:type\s+)?(?:[^'";]*?\sfrom\s*)?)['"](\.[^'"]*)['"]/g,
-      (whole, head, spec) => {
-        if (spec.endsWith(".js")) return whole;
-        return head + '"' + spec + '.js"';
-      },
-    );
-    const dest = join(src, rel);
-    writeFileSync(dest, text);
-  }
   return { root, src };
 }
 
@@ -212,6 +214,18 @@ function build({ root, src }) {
   }
   const missing = SUBJECT.filter((rel) => !fileExists(join(outDir, rel.replace(/\.ts$/, ".js"))));
   if (missing.length > 0) throw new Error("tsc did not emit: " + missing.join(", "));
+  // The two files that used to be staged from `.reference/` must now come from
+  // the fork's own `src/core/`. Asserting it here is what makes removing the
+  // overlay safe: if either is deleted (or re-classified as un-ported) the suite
+  // fails loudly instead of quietly testing a graph it no longer owns.
+  const missingOverlay = OVERLAY_REPLACED.filter(
+    (rel) => !fileExists(join(outDir, rel.replace(/\.ts$/, ".js"))),
+  );
+  if (missingOverlay.length > 0)
+    throw new Error(
+      "these used to be staged from .reference/ and must now be real ported files: " +
+        missingOverlay.join(", "),
+    );
   if (process.env.MAGIC_CONTEXT_TEST_VERBOSE) console.log(out);
   return outDir;
 }

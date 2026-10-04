@@ -1,4 +1,4 @@
-import { renderUserFacingFailure } from "../../shared/user-facing-codes.js";
+import { renderUserFacingFailure } from "../../deferred/user-facing-codes.js";
 
 /**
  * How far over the model's context window a session's history has to be

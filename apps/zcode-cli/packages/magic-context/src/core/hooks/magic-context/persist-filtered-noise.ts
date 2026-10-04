@@ -1,7 +1,7 @@
 import {
     appendCompartments,
     getCompartments,
-} from "../../features/magic-context/compartment-storage.js";
+} from "../../deferred/compartment-storage.js";
 import { sessionLog } from "../../shared/logger.js";
 import type { Database } from "../../shared/sqlite.js";
 import type { SessionChunk } from "./read-session-chunk.js";

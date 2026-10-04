@@ -29,7 +29,8 @@
       "entry": ["src/browser-client.ts"]
     },
     "apps/zcode-cli/packages/magic-context": {
-      "ignore": ["src/**"]
+      "ignore": ["src/**"],
+      "ignoreDependencies": ["ai-tokenizer"]
     }
   },
   "ignore": [".agents/**", "docs/**", "packages/ui/src/components/**"]

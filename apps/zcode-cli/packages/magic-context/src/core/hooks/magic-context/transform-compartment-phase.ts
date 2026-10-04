@@ -1,22 +1,22 @@
 import {
     getLastCompartmentEndMessage,
     getLastCompartmentEndMessageId,
-} from "../../features/magic-context/compartment-storage.js";
+} from "../../deferred/compartment-storage.js";
 import { type ContextDatabase, updateSessionMeta } from "../../features/magic-context/storage.js";
 import type { ContextUsage } from "../../features/magic-context/types.js";
 import type { PluginContext } from "../../plugin/types.js";
 import { sessionLog } from "../../shared/logger.js";
-import type { ModelInput } from "../../shared/model-resolution.js";
+import type { ModelInput } from "../../deferred/model-resolution.js";
 import { withoutSqliteTransformPass } from "../../shared/sqlite.js";
 import {
     type ActiveCompartmentRun,
     getActiveCompartmentRun,
     startCompartmentAgent,
-} from "./compartment-runner.js";
+} from "../../deferred/compartment-runner.js";
 import type {
     HiddenCompartmentRunnerDeps,
     HiddenCompletionExecutor,
-} from "./compartment-runner-types.js";
+} from "../../deferred/compartment-runner-types.js";
 import { BLOCK_UNTIL_DONE_PERCENTAGE } from "./compartment-trigger.js";
 import {
     type PreparedCompartmentInjection,
@@ -29,7 +29,7 @@ import {
     resolveOpenCodeProtectedTailBoundary,
 } from "./protected-tail-boundary.js";
 import { primeTailRawMessageCache, withRawSessionMessageCache } from "./read-session-chunk.js";
-import { sendStatusNotification } from "./send-session-notification.js";
+import { sendStatusNotification } from "../../deferred/send-session-notification.js";
 import type { MessageLike } from "./transform-operations.js";
 
 /**
@@ -105,7 +105,7 @@ interface RunCompartmentPhaseArgs {
     ensureProjectRegistered?: (directory: string, db: ContextDatabase) => Promise<void>;
     projectPath?: string;
     injectionBudgetTokens?: number;
-    getNotificationParams?: () => import("./send-session-notification.js").NotificationParams;
+    getNotificationParams?: () => import("../../deferred/send-session-notification.js").NotificationParams;
     /** True when this pass is already safe for background compression to run. */
     safeForBackgroundCompression?: boolean;
     deferredHistoryRefreshSessions: Set<string>;

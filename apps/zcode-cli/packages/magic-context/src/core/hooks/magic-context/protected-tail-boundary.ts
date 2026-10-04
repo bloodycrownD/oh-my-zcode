@@ -1,4 +1,4 @@
-import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage.js";
+import { getLastCompartmentEndMessage } from "../../deferred/compartment-storage.js";
 import { sessionDecisionCalibration } from "../../features/magic-context/session-decision-calibration.js";
 import {
     loadProtectedTailMeta,

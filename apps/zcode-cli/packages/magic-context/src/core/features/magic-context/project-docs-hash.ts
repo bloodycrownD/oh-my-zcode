@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
-import { escapeXmlAttr, escapeXmlContent } from "./compartment-storage.js";
+import { escapeXmlAttr, escapeXmlContent } from "../../deferred/compartment-storage.js";
 
 const PROJECT_DOC_FILES = ["ARCHITECTURE.md", "STRUCTURE.md"] as const;
 const PROJECT_DOCS_DELIMITER = "\n\n---\n\n";

@@ -1,6 +1,6 @@
 import type { ContextDatabase } from "../../features/magic-context/storage.js";
 import { getOverflowState } from "../../features/magic-context/storage-meta-persisted.js";
-import { resolveTrustedContextLimit } from "./event-resolvers.js";
+import { resolveTrustedContextLimit } from "../../deferred/event-resolvers.js";
 import { estimateFinalWireInputTokens, wireContentBytes } from "./final-wire-token-estimate.js";
 import type { MessageLike } from "./transform-operations.js";
 

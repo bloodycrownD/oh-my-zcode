@@ -1,5 +1,5 @@
 import { isTransientSqliteError } from "../../shared/sqlite.js";
-import { renderUserFacingFailure } from "../../shared/user-facing-codes.js";
+import { renderUserFacingFailure } from "../../deferred/user-facing-codes.js";
 
 /**
  * A transform pass failed at a stage whose output the request depends on: the
