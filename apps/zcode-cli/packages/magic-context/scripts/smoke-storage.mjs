@@ -173,6 +173,43 @@ try {
   check("ledger row count unchanged", ledgerRowsSecond, ledgerRowsFirst);
   storageDb.closeDatabase();
 
+  console.log("== schema fence negative (T-M7)");
+  // T-M7 的判据是**双向**的，而正向的那一半（两个常量相等）上面已经断言过了。
+  // 这一段断言的是围栏本身的两条语义——它们都只在负向断言里才暴露：
+  //
+  //   ① 比本 build 更新的库必须被**拒绝**（不是被就地迁移）。把围栏写错成
+  //      `!=` 或 `<` 的实现在这里会「通过」open，于是把一个未知 schema 当成
+  //      自己的写——那正是 T-M7 要防的事故。
+  //   ② 一个**更新的 build** 的围栏必须接受当前库。围栏是单向不等式
+  //      `persisted > supported`，不是相等检查；写成相等会让每一次降级都
+  //      变成「库不可用」。
+  storageDb.closeDatabase();
+  const staleFence = storageDb.openDatabase({
+    latestSupportedVersion: storageDb.LATEST_SUPPORTED_VERSION - 1,
+  });
+  check("a database newer than this build's fence is refused", staleFence, null);
+  const rejection = storageDb.getSchemaFenceRejection();
+  check("fence rejection names the persisted version", rejection?.persistedVersion, firstVersion);
+  check(
+    "fence rejection names this build's ceiling",
+    rejection?.supportedVersion,
+    storageDb.LATEST_SUPPORTED_VERSION - 1,
+  );
+  check("a refused open leaves no migration-on-open refusal behind", storageDb.getMigrationOnOpenRefusal(), null);
+  // The rejected attempt must not have cached a handle: a later, legitimate open
+  // has to be a clean open rather than a cache hit on the refused connection.
+  const newerFence = storageDb.openDatabase({
+    latestSupportedVersion: storageDb.LATEST_SUPPORTED_VERSION + 1,
+  });
+  assert("a newer build's fence accepts this database", newerFence !== null);
+  check(
+    "the newer-fence open did not run any migration",
+    migrations.__getMainThreadMigrationBodyCountForTests(),
+    bodiesAfterFirstOpen,
+  );
+  check("no schema-fence rejection after a legal open", storageDb.getSchemaFenceRejection(), null);
+  storageDb.closeDatabase();
+
   console.log("== module graph / exported function signatures");
   const featuresDir = join(DIST_ROOT, "features", "magic-context");
   const storageModules = readdirSync(featuresDir)

@@ -97,6 +97,10 @@ import { loadPluginAgentProfiles, loadZCodeAgentProfiles } from "../subagents.js
 import { createRuntimeAiSdkModelExecutionConfig } from "../model-config.js";
 import { ApiProviderModelRuntime } from "./provider-registry-model-runtime.js";
 import {
+  completeAuxiliaryRegistryModelSelection,
+  resolveRegistryOwnedSelection,
+} from "./provider-registry-selection.js";
+import {
   completeAppStartup,
   debugRuntimeConfigResolved,
   markConfigurationLoaded,
@@ -736,6 +740,27 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
             workingDirectory,
             sessionStore,
             logger,
+            // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
+            // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
+            // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类
+            // 辅助调用」准备的（它给未带 reasoning 档位的选择补上最低档），所以
+            // 旁路请求与主会话选模型走的是**同一条**校验，而不是这里再抄一份解析。
+            createSidecarModel: (modelId: string) => {
+              const resolved = resolveRegistryOwnedSelection(
+                options.providerRegistry,
+                modelId,
+                undefined,
+                { allowMissingReasoning: true },
+              );
+              if (!resolved) return undefined;
+              return modelFactory({
+                selection: completeAuxiliaryRegistryModelSelection(
+                  options.providerRegistry,
+                  resolved.selection,
+                ),
+              });
+            },
+            traceContext,
           })
         : undefined;
     runtime = new AgentRuntime(sessionId, runtimeConfig, {

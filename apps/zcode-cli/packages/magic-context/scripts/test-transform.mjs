@@ -258,6 +258,8 @@ const deriveBudgets = await load("hooks/magic-context/derive-budgets.js");
 const tokenizerCalibration = await load("hooks/magic-context/tokenizer-calibration.js");
 const decayCurve = await load("hooks/magic-context/decay-curve.js");
 const formatting = await load("hooks/magic-context/read-session-formatting.js");
+const lkgReplay = await load("hooks/magic-context/lkg-replay.js");
+const lkgSlot = await load("hooks/magic-context/lkg-slot.js");
 
 const SECTION = "§"; // § — the ported sources spell it as an escape
 const dropped = (n) => `[dropped ${SECTION}${n}${SECTION}]`;
@@ -571,6 +573,151 @@ test("b2 compactTextForSummary only strips hashes from assistant commits", () =>
   if (asAssistant.commitHashes.length !== 1) throw new Error(JSON.stringify(asAssistant));
   if (asAssistant.commitHashes[0] !== "abc1234def")
     throw new Error(JSON.stringify(asAssistant.commitHashes));
+});
+
+// --- b3: M0 / LKG 字节重放（spec「不变量单测」的第三项，Step 24 补） ----------
+//
+// 契约 1 的落点：一次成功 pass 的输出被冻结成 LKG slot，之后每一 pass 重放的
+// **前缀字节必须完全一致**。这不是优化，是缓存前缀稳定性的前提——只要重放
+// 的字节抖一下，provider 的 prompt cache 就整段作废，而症状（命中率塌方）与
+// 成因（一次字节级重排）离得很远。断言直接比 `JSON.stringify`，不经过任何
+// 归一化，所以「等价但不同序」也会失败。
+
+const LKG_SESSION = "ses_s18_lkg";
+
+/** 一条 OpenCode 形状的 MessageLike（`info` + `parts`），LKG 只读这两处。 */
+function lkgMessage(id, role, text, created) {
+  return {
+    info: { id, role, sessionID: LKG_SESSION, time: { created }, synthetic: false },
+    parts: [{ type: "text", text }],
+  };
+}
+
+/** 成功 pass 的输出：与输入同序，但第一条 user 被打上 §N§ —— 前缀因此与输入不同。 */
+function lkgPass(input) {
+  return input.map((message, index) =>
+    index === 0
+      ? {
+          ...message,
+          parts: [{ type: "text", text: `§1§ ${message.parts[0].text}` }],
+        }
+      : message,
+  );
+}
+
+test("b3 captureLkgSlot freezes the module output prefix, not the raw input", () => {
+  lkgSlot.resetLkgSlotsForTest();
+  const input = [
+    lkgMessage("msg_1", "user", "first question", 1000),
+    lkgMessage("msg_2", "assistant", "an answer", 2000),
+    lkgMessage("msg_3", "user", "second question", 3000),
+  ];
+  const captured = lkgReplay.captureLkgSlot({
+    sessionId: LKG_SESSION,
+    input,
+    output: lkgPass(input),
+    modelKey: "zcode/glm-4.6",
+    providerKey: "zcode",
+    capturedAt: 4000,
+  });
+  if (!captured) throw new Error("captureLkgSlot refused a well-formed pass");
+
+  const slot = lkgSlot.getSlot(LKG_SESSION);
+  if (!slot) throw new Error("no slot was stored");
+  // 冻结的是**模块输出**：`§N§` 打标必须在里面。若这里冻的是原始输入，
+  // 失败时重放就会把打标丢掉——正是打标每 pass 重放要保住的东西。
+  if (!slot.jsonPrefix.includes("§1§ first question")) {
+    throw new Error(`slot did not freeze the tagged output: ${slot.jsonPrefix}`);
+  }
+  if (slot.inputIdSeq.join(",") !== "msg_1,msg_2,msg_3") {
+    throw new Error(`unexpected id seq: ${slot.inputIdSeq.join(",")}`);
+  }
+  if (slot.lastInputMessageId !== "msg_3") throw new Error(`anchor=${slot.lastInputMessageId}`);
+  lkgSlot.resetLkgSlotsForTest();
+});
+
+test("b3 two consecutive replays of the same pass are byte-identical", () => {
+  lkgSlot.resetLkgSlotsForTest();
+  const input = [
+    lkgMessage("msg_1", "user", "first question", 1000),
+    lkgMessage("msg_2", "assistant", "an answer", 2000),
+    lkgMessage("msg_3", "user", "second question", 3000),
+  ];
+  if (
+    !lkgReplay.captureLkgSlot({
+      sessionId: LKG_SESSION,
+      input,
+      output: lkgPass(input),
+      modelKey: "zcode/glm-4.6",
+      providerKey: "zcode",
+      capturedAt: 4000,
+    })
+  ) {
+    throw new Error("captureLkgSlot refused a well-formed pass");
+  }
+
+  // 下一 pass：同一段历史 + 一条更新的 user 轮。
+  const nextPass = [...input, lkgMessage("msg_4", "user", "third question", 5000)];
+  const first = lkgReplay.replayLkg({
+    sessionId: LKG_SESSION,
+    messages: nextPass,
+    modelKey: "zcode/glm-4.6",
+    providerKey: "zcode",
+  });
+  const second = lkgReplay.replayLkg({
+    sessionId: LKG_SESSION,
+    messages: nextPass,
+    modelKey: "zcode/glm-4.6",
+    providerKey: "zcode",
+  });
+  if (!first.ok) throw new Error(`first replay declined: ${first.reason}`);
+  if (!second.ok) throw new Error(`second replay declined: ${second.reason}`);
+
+  const firstBytes = JSON.stringify(first.messages);
+  const secondBytes = JSON.stringify(second.messages);
+  if (firstBytes !== secondBytes) {
+    throw new Error("two consecutive replays produced different bytes");
+  }
+  // 冻住的前缀 + 原样接上的新尾部：打标留在前缀里，msg_4 未被打标。
+  if (first.messages.length !== 4) throw new Error(`length=${first.messages.length}`);
+  if (first.messages[0].parts[0].text !== "§1§ first question") {
+    throw new Error("the frozen prefix lost its §N§ tag");
+  }
+  if (first.messages[3].parts[0].text !== "third question") {
+    throw new Error(`tail was rewritten: ${first.messages[3].parts[0].text}`);
+  }
+  lkgSlot.resetLkgSlotsForTest();
+});
+
+test("b3 a model change drops the slot instead of replaying another model's bytes", () => {
+  lkgSlot.resetLkgSlotsForTest();
+  const input = [
+    lkgMessage("msg_1", "user", "first question", 1000),
+    lkgMessage("msg_2", "assistant", "an answer", 2000),
+    lkgMessage("msg_3", "user", "second question", 3000),
+  ];
+  lkgReplay.captureLkgSlot({
+    sessionId: LKG_SESSION,
+    input,
+    output: lkgPass(input),
+    modelKey: "zcode/glm-4.6",
+    providerKey: "zcode",
+    capturedAt: 4000,
+  });
+  const nextPass = [...input, lkgMessage("msg_4", "user", "third question", 5000)];
+  const result = lkgReplay.replayLkg({
+    sessionId: LKG_SESSION,
+    messages: nextPass,
+    modelKey: "zcode/glm-5.3",
+    providerKey: "zcode",
+  });
+  if (result.ok || result.reason !== "lkg_model_mismatch") {
+    throw new Error(`expected lkg_model_mismatch, got ${JSON.stringify(result.reason)}`);
+  }
+  if (lkgSlot.getSlot(LKG_SESSION) !== undefined) {
+    throw new Error("a model mismatch must drop the slot, not leave it replayable");
+  }
+  lkgSlot.resetLkgSlotsForTest();
 });
 
 // --- run -------------------------------------------------------------------

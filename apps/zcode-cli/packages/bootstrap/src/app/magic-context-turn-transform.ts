@@ -34,8 +34,13 @@
  *   pendingMaterializationSessions
  *   lastHeuristicsTurnId /
  *   commitSeenLastPass
- *   hiddenCompletionExecutor        `undefined` 占位 —— C 组，S20 接
- *   historianRunnable               `false` —— 无 executor 时诚实关闭
+ *   hiddenCompletionExecutor        S24：`createMagicContextHistorianHost` 造的 D-6
+ *                                   sidecar executor；historian 模型缺省/造不出来时
+ *                                   **不装**（见下「已知缺口」）
+ *   historianRunnable               同上：有 executor 才 true
+ *   historianModel /fallbackModels/ two_pass / maxTokens → 同一次装配从 E 组 schema
+ *   historianTimeoutMs /                 读出并原样下发
+ *   getHistorianChunkTokens
  *   client                          不传 —— ZCode 无 PluginContext client
  *                                   （通知缝缺口 S20）
  *   hostRawMessages /               createRawMessageProvider：内存 borrow +
@@ -55,11 +60,15 @@
  *                                   每 pass 用 turn-loop 传入的 model 刷新
  *
  * ── 已知缺口 ────────────────────────────────────────────────────────────────
- *   - historian executor：`undefined` + `historianRunnable:false`；S20 在本文件补。
+ *   - historian executor：`createMagicContextTurnTransformOptions.createSidecarModel`
+ *     缺席、或 `magicContext.historian.model` 没配/此刻造不出 Model 时不装，
+ *     `historianRunnable` 保持 false。这与 S16 的缺省报错文案是同一条语义：
+ *     「报了错」不等于「装配炸掉」。
  *   - 模型窗口几何（`models-dev-cache` / `window-geometry`）：包内模块级单例且没有
  *     注入缝，包外改不了（改包内是 S20 的特权）。S19b 让 transform 走自己的默认/检测
  *     回退，窗口偏小只会让阈值更保守，不会误发超大请求。
- *   - `contextUsageMap` 无生产者。
+ *   - `contextUsageMap` 无生产者。后台 historian pass 因此用 `usage:null`
+ *     （provisional-zero）解 protected-tail 边界——偏保守，不会切进保护尾部。
  *   - 配置面（D-12）已接线：写盘 `updateMagicContextInFileConfig`、内存
  *     `ConfigPort.set`、推送 `ConfigPort.observe` 三段齐备；桌面设置页的调用侧
  *     （Step 29）落地后才有用户可改的入口。
@@ -77,6 +86,7 @@ import type {
   ModelMessageContent,
   ModelMessageContentBlock,
   SessionStorePort,
+  TraceContext,
 } from "@zcode/contracts";
 import { ConfigKey, type ConfigPort } from "@zcode/contracts";
 import {
@@ -113,6 +123,11 @@ import {
   type TransformDeps,
   type ZCodeRuntimeEntry,
 } from "@zcode/magic-context";
+import {
+  createMagicContextHistorianHost,
+  type CreateSidecarModel,
+  type MagicContextHistorianHost,
+} from "./magic-context-historian.js";
 
 /** 包内 `createTransform` 的返回值形状（单测用桩实现替换它）。 */
 export type ZCodeMagicContextTransform = (
@@ -139,6 +154,15 @@ export interface MagicContextTurnTransformOptions {
   /** 读历史的第二数据源；缺席时 raw-message provider 只服务内存历史。 */
   sessionStore?: SessionStorePort;
   logger: Logger;
+  /**
+   * FORK（S24 / D-6）：`"provider/model"` → 一个可发请求的 `Model`。historian 的
+   * sidecar 请求经它发出，缺席时 executor **不装**、`historianRunnable` 保持 false
+   * （见 `createMagicContextHistorianHost`）。生产装配（`create-app.ts`）由
+   * provider Registry + `modelFactory` 提供。
+   */
+  createSidecarModel?: CreateSidecarModel;
+  /** 会话根 trace；sidecar 请求在它下面开子 span。 */
+  traceContext?: TraceContext;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -505,7 +529,7 @@ export async function createMagicContextTurnTransform(
 
   const readiness = findConfigReadinessError(config);
   if (readiness) {
-    // historian 属 S20；S19b 只记诊断，不因此拒绝装配——否则默认配置（无
+    // historian 属 S20/S24；S19b 只记诊断，不因此拒绝装配——否则默认配置（无
     // historian.model）下 flag 一开就完全不可用，而本步交付的是注入链路本身。
     options.logger.warn("Magic context is enabled without a historian model", {
       module: "bootstrap",
@@ -535,7 +559,22 @@ export async function createMagicContextTurnTransform(
   // `deps.cacheTtlConfig` / `deps.executeThresholdPercentage` 等字段，所以这里把
   // 配置字段挂在一个稳定引用上，热生效时原地改写即可；重建 deps 反而会让已经
   // 持有的 transform 继续看旧闭包。
-  const deps = buildTransformDeps(config, db, options);
+  //
+  // historian 装配（S24 / D-6）在这里发生一次：executor + `historianRunnable`
+  // 一起进 deps。后台调度器与 `/ctx-recomp` runner 的注册也发生在同一个工厂里
+  // ——它们必须在任何一条 `/ctx-*` 命令与任何一次 turn 之前就位。
+  const historian = createMagicContextHistorianHost(config, {
+    logger: options.logger,
+    db,
+    sessionId: options.sessionId,
+    workingDirectory: options.workingDirectory,
+    ...(options.createSidecarModel === undefined
+      ? {}
+      : { createSidecarModel: options.createSidecarModel }),
+    ...(options.traceContext === undefined ? {} : { traceContext: options.traceContext }),
+  });
+
+  const deps = buildTransformDeps(config, db, options, historian);
   // ③ 热生效（D-12 第三段）：bridge 订阅 ConfigPort，配置变更即 bump
   // generation/digest 并把新域原地写进 deps。下一个 turn 的第一次 pass 就读到新值
   // ——这就是 spec Step 16 的验收判据（不重启）。
@@ -553,6 +592,17 @@ export async function createMagicContextTurnTransform(
   return createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
     options,
+    ...(historian.historianScheduler === undefined
+      ? {}
+      : {
+          onPassSucceeded: (model: MagicContextTurnTransformInput["model"]) => {
+            // 主模型窗口是后台 protected-tail 边界的输入，而它只有 turn 知道。
+            historian.noteLiveModel(model);
+            // fire-and-forget：本行绝不 await。调度器自己合并同会话的连续触发、
+            // 自己 drain、自己 abort——让 UI 等一个可能跑几十秒的 historian 是错的。
+            historian.historianScheduler?.notifyTurnSuccess({ sessionId: options.sessionId });
+          },
+        }),
   });
 }
 
@@ -617,6 +667,7 @@ function buildTransformDeps(
   config: MagicContextConfig,
   db: ContextDatabase,
   options: MagicContextTurnTransformOptions,
+  historian: MagicContextHistorianHost,
 ): TransformDeps {
   const liveModelBySession = new Map<string, { providerID: string; modelID: string }>();
   const liveModels = liveModelBySession;
@@ -630,10 +681,21 @@ function buildTransformDeps(
     pendingMaterializationSessions: new Set<string>(),
     lastHeuristicsTurnId: new Map<string, string>(),
     commitSeenLastPass: new Map<string, boolean>(),
-    // C 组缝（S20）：没有 executor 就诚实地关掉 historian 侧的 child agent，
-    // 而不是传一个必然 throw 的占位——后者会把「没接」变成「每 pass 报错」。
-    hiddenCompletionExecutor: undefined,
-    historianRunnable: false,
+    // C 组缝（S24 接）：sidecar executor 在场时 transform 的 compartment phase
+    // 才可能 startCompartmentAgent；两者任一缺席都走「诚实关闭」那条分支
+    // （清 `compartmentInProgress`、不起 agent），而不是每 pass 报错。
+    ...(historian.hiddenCompletionExecutor === undefined
+      ? {}
+      : { hiddenCompletionExecutor: historian.hiddenCompletionExecutor }),
+    historianRunnable: historian.historianRunnable,
+    ...(historian.historianModel === undefined ? {} : { historianModel: historian.historianModel }),
+    ...(historian.fallbackModels.length === 0 ? {} : { fallbackModels: historian.fallbackModels }),
+    historianTwoPass: historian.historianTwoPass,
+    historianTimeoutMs: historian.historianTimeoutMs,
+    getHistorianChunkTokens: historian.getHistorianChunkTokens,
+    ...(historian.historianMaxOutputTokens === undefined
+      ? {}
+      : { historianMaxOutputTokens: historian.historianMaxOutputTokens }),
     cacheTtlConfig: config.cache_ttl,
     ...(config.protected_tokens === undefined ? {} : { protectedTokens: config.protected_tokens }),
     smartDrops: config.smart_drops,
@@ -668,6 +730,15 @@ export function createZCodeMagicContextTurnTransformPort(
   port: {
     getConfig: () => MagicContextConfig;
     options: Pick<MagicContextTurnTransformOptions, "sessionId" | "sessionStore" | "logger">;
+    /**
+     * FORK（S24 / D-6）：每 pass 成功后的 historian 后台驱动。**刻意不在 core 的
+     * turn-loop 上挂点**——那要求改 turn-loop 语义（本 fork 的纪律禁区）。本端口
+     * 是装配层自己的回调：一次 transform 成功就意味着这一轮请求已被接受，此时让
+     * historian 去折叠后台历史正是它该做的。
+     *
+     * 缺席（Step 19b 的单测走的就是这条）时端口行为与 S19b 逐行相同。
+     */
+    onPassSucceeded?: (model: MagicContextTurnTransformInput["model"]) => void;
   },
 ): MagicContextTurnTransform {
   const { options } = port;
@@ -757,6 +828,10 @@ export function createZCodeMagicContextTurnTransformPort(
     const unchanged =
       entries.length === input.entries.length &&
       entries.every((entry, index) => entry === input.entries[index]);
+    // historian 后台驱动：**只在 transform 成功时**触发。`fail_open` 那条路径
+    // 意味着这一 pass 什么都没做（放行了未改写的请求），此时驱动 historian 是
+    // 在替一次已经失败的折叠再调度一次——所以严格排除。
+    if (port.onPassSucceeded !== undefined) port.onPassSucceeded(input.model);
     return { entries, outcome: unchanged ? "unchanged" : "applied", syntheticHeadPositions };
   };
 }

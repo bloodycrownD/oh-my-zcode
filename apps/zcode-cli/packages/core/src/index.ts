@@ -183,6 +183,13 @@ export {
   isMagicContextWireDebugEnabled,
   runMagicContextTurnTransform,
 } from "./runtime/helpers/magic-context-turn-transform.js";
+// D-6 的旁路原语（Step 24 接线）：historian 的 sidecar model request 与原生
+// compactor 走**同一条**流消费路径，所以「provider 到底提交了哪个 content block」
+// 由这一份原语判定，而不是在 historian 侧再写一份。
+//
+// `compact-active.ts` 是它今天在仓内的另一个调用者，D-7（Step 26/27）会把那条
+// 压缩路径删掉——但本文件正是它被留下的理由，**不许**跟着删。
+export { runCompactSummaryModelRequest } from "./runtime/methods/compact-summary-model-request.js";
 export type {
   RuntimeAttachmentEntry,
   RuntimeMessageEntry,

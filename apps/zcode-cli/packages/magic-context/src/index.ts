@@ -14,14 +14,13 @@
  *   4. A 组存储的少量入口（openDatabase / tagger）
  *   5. message 转换纯函数（ZCode runtime entry ↔ MessageLike）
  *
- * 【硬约束 — 不 export C 组任何符号】S20（historian）会替换 `src/core/deferred/`
- * 的 deferred 缝，并在 `src/core/features/magic-context/` 落 historian 真身。
- * 本文件因此**不得**出现 compartment-runner / historian / HiddenCompletionExecutor
- * 一类的 C 组符号，否则：
- *   - bootstrap 一 import 本 barrel 就会把 C 组缝拖进 ZCode 的编译闭包，S20 替换
- *     缝时 ZCode 侧跟着炸；且
- *   - transform 的 historian executor 在 S19b 传 `undefined` 占位（S20 接），
- *     barrel 若导出 C 组符号会诱使装配处提前接线。
+ * 【S19b 的硬约束 —— S20 起已解除】本文件在 S19b 期间**不得**出现
+ * compartment-runner / historian / HiddenCompletionExecutor 一类的 C 组符号。
+ * 那条约束的前提是「C 组还是 `src/core/deferred/` 的缝」，于是 barrel 一导出就
+ * 会把缝拖进 ZCode 的编译闭包。S20 把缝换成了真身（`src/core/features/` 与
+ * `src/core/hooks/magic-context/`），前提不再成立；S24 因此开第 3b 节把**接线面**
+ * 导出——注意是接线面（executor 工厂 / 调度器 / agent 启动入口），不是 C 组全量：
+ * 逐字移植的 runner 内部（prompt 组装、校验、发布事务）仍不进 barrel。
  *
  * `src/host/typecheck-seams.ts` 记录 host↔core 的结构契约，不在本文件导出面内。
  *
@@ -174,6 +173,86 @@ export type {
   SessionMeta,
 } from "./core/features/magic-context/types.js";
 
+// ── 3b. C 组 historian 接线面（S20 真身 / S24 接线） ──────────────────────────
+//
+// 只有**装配层真正要调的那几个入口**在这里：sidecar executor 工厂、historian
+// 后台调度器、以及 compartment agent 的启动/查询。逐字移植的 runner 内部
+// （prompt 组装、schema fence 校验、发布事务）不在导出面内——它们由前两个入口
+// 内部调用，装配层不需要也不该直接碰。
+
+/**
+ * D-6 的 sidecar executor 工厂。**装配层唯一的 historian 模型入口**：它把一次
+ * sidecar 请求映射到宿主提供的 `sidecarModelCall`，并强制
+ * `preserveProviderStreamBoundaries: true`（类型层面，见该文件的文件头）。
+ */
+export {
+  DEFAULT_HIDDEN_RUN_TIMEOUT_MS,
+  classifySidecarFailure,
+  createHiddenCompletionExecutor,
+  toTokenTotals,
+  type HiddenCompletionExecutorOptions,
+  type SidecarModelCall,
+  type SidecarModelCallOptions,
+  type SidecarModelCallResult,
+  type SidecarModelRequest,
+} from "./host/hidden-completion-executor.js";
+export {
+  HiddenCompletionRefusal,
+  type HiddenCompletion,
+  type HiddenCompletionExecutor,
+  type HiddenRunHandle,
+  type HiddenRunIdentity,
+} from "./core/hooks/magic-context/compartment-runner-types.js";
+
+/**
+ * historian 后台调度器（fire-and-forget + 合并 + 有界 drain + abort）。装配层在
+ * turn 成功后 `notifyTurnSuccess`，在会话关闭时 `drainHistorianSchedulerWithTimeout`。
+ */
+export {
+  DEFAULT_HISTORIAN_DRAIN_TIMEOUT_MS,
+  createHistorianScheduler,
+  drainHistorianSchedulerWithTimeout,
+  type CreateHistorianSchedulerOptions,
+  type HistorianRunStatus,
+  type HistorianScheduler,
+  type HistorianTurnSuccess,
+} from "./core/features/magic-context/historian-scheduler.js";
+
+/**
+ * compartment agent 的启动/查询入口。transform 内部在触发条件满足时自己调
+ * `startCompartmentAgent`；装配层的调度器与 `/ctx-recomp` runner 走的是同一条路，
+ * 所以这两个入口必须出得来，否则「turn 成功后再跑一次」只能重写一遍启动逻辑。
+ */
+export {
+  getActiveCompartmentRun,
+  markActiveCompartmentRunPublished,
+  registerActiveCompartmentRun,
+  startCompartmentAgent,
+} from "./core/hooks/magic-context/compartment-runner.js";
+export type { HiddenCompartmentRunnerDeps } from "./core/hooks/magic-context/compartment-runner-types.js";
+
+/**
+ * historian chunk 预算的推导（chunk = historian 窗口的一个固定比例）。装配层在
+ * 构造 `HiddenCompartmentRunnerDeps` 时需要它，与 transform 内部用的是同一个函数。
+ */
+export { deriveHistorianChunkTokens } from "./core/hooks/magic-context/derive-budgets.js";
+/**
+ * historian 超时预算的常量。E 组刻意没把这个旋钮搬进配置白名单，所以它的值由配置面
+ * **覆盖不了**——装配层要设超时预算时只能引用这一个常量，不能自己写一个 600000。
+ */
+export { DEFAULT_HISTORIAN_TIMEOUT_MS } from "./core/hooks/magic-context/compartment-runner-historian.js";
+
+/**
+ * protected-tail 边界求解。`resolveOpenCodeProtectedTailBoundary` 是 transform 用的
+ * 那一个（`deps.hostProtectedTailBoundary` 缺席时的默认实现）；装配层的调度器在
+ * 自己发起一次后台 pass 时用 `mode:"incremental-runner"` 走同一份判据。
+ */
+export {
+  hasRunnableCompartmentWindow,
+  resolveOpenCodeProtectedTailBoundary,
+  type ProtectedTailBoundarySnapshot,
+} from "./core/hooks/magic-context/protected-tail-boundary.js";
+
 // ── 4. A 组存储的少量入口 ───────────────────────────────────────────────────
 
 export {
@@ -183,6 +262,12 @@ export {
   type OpenDatabaseOptions,
 } from "./core/features/magic-context/storage-db.js";
 export { createTagger, type Tagger } from "./core/features/magic-context/tagger.js";
+
+/**
+ * compartment 行的只读查询。`/ctx-recomp` 的 runner 要在重算前后各数一次条数，
+ * 而那条计数必须与 `/ctx-status` 读的是同一份查询——两处各写一次 SQL 迟早漂移。
+ */
+export { getCompartments, type Compartment } from "./core/features/magic-context/compartment-storage.js";
 
 // ── 4b. D 组 ctx 工具面 + 状态读取（Step 21） ──────────────────────────────────
 
