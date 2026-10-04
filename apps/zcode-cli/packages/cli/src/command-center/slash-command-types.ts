@@ -7,6 +7,12 @@ export type SlashCommand =
     }
   | {
       args: string;
+      name: "ctx-status" | "ctx-reduce" | "ctx-expand" | "ctx-recomp";
+      rawName: string;
+      type: "known";
+    }
+  | {
+      args: string;
       name: "effort";
       rawName: string;
       type: "known";

@@ -282,6 +282,21 @@ export {
   type ReadMagicContextStatusOptions,
 } from "./host/ctx-status.js";
 
+/**
+ * `/ctx-recomp` 的包侧入口（Step 22）。简化语义：真 runner 由装配层（S24）经
+ * `setMagicContextRecompRunner` 装；没装时 outcome 明确回报 `unavailable`，
+ * 命令据此把边界说清楚，而不是谎称已重建。
+ */
+export {
+  isMagicContextRecompRunnerRegistered,
+  requestMagicContextRecompute,
+  setMagicContextRecompRunner,
+  type MagicContextRecompOutcome,
+  type MagicContextRecompRunner,
+  type MagicContextRecompScope,
+  type RequestMagicContextRecomputeOptions,
+} from "./host/ctx-recomp.js";
+
 // ── 5. message 转换纯函数 ───────────────────────────────────────────────────
 
 export {

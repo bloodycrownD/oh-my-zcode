@@ -197,4 +197,47 @@ export const BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES: readonly BuiltinZCodeSlas
       summary: "Design and launch a dynamic workflow for a task.",
       usage: "/workflow [what the workflow should accomplish]",
     },
+    // ── magic-context 本地控制命令（Step 22） ─────────────────────────────────
+    // 这一组是**本地命令**：它们在 CLI/TUI 里就地执行，直接读 magic-context.db 或
+    // 触发一次排队，**不**发一条模型提示。因此它们不是 bootstrap 展开的 prompt
+    // 命令，也不进 App 的 `/` 面板（见 bootstrap/slash-command-surface.ts 的说明）。
+    {
+      details: [
+        "Prints a text snapshot read straight from magic-context.db: the protected-token floor and last context usage, the compartment count and the last compacted message ordinal, and the active/dropped/compacted tag counts with the pending-operation queue depth.",
+        "Read-only: it never writes, never compacts and never triggers a model turn.",
+        "Shows the Magic Context status is unavailable notice when the store cannot be opened.",
+      ],
+      name: "ctx-status",
+      summary: "Show the Magic Context status snapshot for this session.",
+      usage: "/ctx-status",
+    },
+    {
+      details: [
+        'Queues the given tag numbers for reclaim. Accepts "3-5", "1,2,9" and "1-5,8,12-15".',
+        "Stamping is not a delete: the item stays readable until Magic Context clears stamped items in one sweep, and the newest tags stay protected.",
+        "The same invocation repeated with the same command id is answered from the idempotency ledger and is not queued twice.",
+      ],
+      name: "ctx-reduce",
+      summary: "Queue context tags the work ahead no longer needs.",
+      usage: "/ctx-reduce <tag-ids>",
+    },
+    {
+      details: [
+        "Recovers content that is no longer on the desk. Takes tag=N (a §N§ tag or a [dropped §N§] placeholder) to return one item whole, or message=N / start-end message ordinals to return a range.",
+        "Tag numbers and message ordinals are never interchangeable: an ordinal counts whole messages, a tag counts each text and tool result separately.",
+        "Ranges are capped at about 15K tokens; an oversized range returns the head and says where to continue.",
+      ],
+      name: "ctx-expand",
+      summary: "Recover dropped or compacted context content.",
+      usage: "/ctx-expand [tag=N | message=N | <start>-<end>]",
+    },
+    {
+      details: [
+        "Triggers one compartment recomputation pass for this session. Memories are not changed.",
+        "This is the simplified first version: it schedules the recomputation and reports what the next pass will rebuild, rather than running a synchronous full rebuild.",
+      ],
+      name: "ctx-recomp",
+      summary: "Trigger one compartment recomputation pass (simplified).",
+      usage: "/ctx-recomp [full | <start>-<end>]",
+    },
   ] as const;

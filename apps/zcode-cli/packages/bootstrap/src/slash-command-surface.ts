@@ -22,7 +22,33 @@ export const APP_PROTOCOL_APP_ONLY_BUILTIN_SLASH_COMMANDS = [
   },
 ] as const satisfies readonly ZCodeSlashCommand[];
 
-const EXTRA_RESERVED_SLASH_COMMAND_NAMES = ["compress", "plan"] as const;
+/**
+ * magic-context 的本地控制命令（Step 22）。
+ *
+ * 这四个名字在 `BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES` 里有条目，因此已经被
+ * `RESERVED_SLASH_COMMAND_NAMES` 收进去（用户/插件的同名自定义命令不会漏回来）。
+ * 这里再显式列一份，是为了让「它们是 CLI/TUI 本地命令」这件事在装配面上可见：
+ *
+ *   - 它们**刻意不进** `APP_PROTOCOL_VISIBLE_BUILTIN_SLASH_COMMAND_NAMES`。App 的
+ *     `/` 面板按那份目录展示，而 App composer 的 slash 命令是发给服务端的 prompt
+ *     指令；`/ctx-status` 在 App 里没有对应的服务端派发路径，列出来只会给用户一个
+ *     按下去没有反应的面板项。CLI TUI 侧由 `cli/src/command-center` 就地消费。
+ *   - 保留名的作用仍然必要：没有它，用户在 `.zcode/commands/` 里写一个
+ *     `ctx-status.md` 会抢走这个名字，让 CLI 侧的本地语义静默失效。
+ */
+export const MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES = [
+  "ctx-status",
+  "ctx-reduce",
+  "ctx-expand",
+  "ctx-recomp",
+] as const;
+
+const EXTRA_RESERVED_SLASH_COMMAND_NAMES = [
+  "compress",
+  "plan",
+  // 本地命令不在 App 目录里，但要占住名字（见上方注释）。
+  ...MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES,
+] as const;
 
 const RESERVED_SLASH_COMMAND_NAMES = new Set(
   BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES.flatMap((entry) => [

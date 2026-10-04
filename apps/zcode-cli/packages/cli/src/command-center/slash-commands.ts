@@ -33,6 +33,26 @@ export function parseSlashCommand(input: string): SlashCommand | null {
     };
   }
 
+  // magic-context 的四个本地控制命令（S22）。它们**不**发模型提示，由
+  // `handlers/ctx.ts` 就地执行：/ctx-status 读一份文本快照，/ctx-reduce 与
+  // /ctx-expand 走工具同一条路径，/ctx-recomp 触发一次 compartment 重算。
+  // 上游把这四个名字挂在一个「内部 Effect 返回 204」的哨兵上，由 hook 拦截以阻止
+  // 命令被转发给 LLM；ZCode 侧不需要那套机制——命令在 command-center 里就被消费了，
+  // 根本不会走到 submitPrompt。
+  if (
+    rawName === "ctx-status" ||
+    rawName === "ctx-reduce" ||
+    rawName === "ctx-expand" ||
+    rawName === "ctx-recomp"
+  ) {
+    return {
+      args,
+      name: rawName,
+      rawName,
+      type: "known",
+    };
+  }
+
   if (rawName === "expert") {
     return {
       args,

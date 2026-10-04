@@ -5,6 +5,7 @@ import {
 } from "../command-center-custom.js";
 import { formatNewSessionResult, formatResumeResult } from "./formatters.js";
 import { handleCustomCommand } from "./handlers/custom.js";
+import { handleCtxCommand, type CtxCommandName } from "./handlers/ctx.js";
 import { handleDwfCommand } from "./handlers/dwf.js";
 import { handleEffortCommand } from "./handlers/effort.js";
 import { handleExpertCommand } from "./handlers/expert.js";
@@ -203,6 +204,18 @@ export function createCommandCenter(deps: CommandCenterDeps): TuiSubmitPrompt {
         const app = await deps.getApp();
         const prompt = command.args ? `/compact ${command.args}` : "/compact";
         return attachCurrentSessionMetadata(await app.submitPrompt(prompt, options), deps, app);
+      }
+
+      // magic-context 本地控制命令（S22）。它们就地执行、只回文本，**不**走
+      // submitPrompt——这正是本 fork 替代上游 Effect 204 sentinel 的地方：命令在
+      // command-center 里就被消费，压根不存在「被转发给 LLM」这条路径。
+      if (
+        command.name === "ctx-status" ||
+        command.name === "ctx-reduce" ||
+        command.name === "ctx-expand" ||
+        command.name === "ctx-recomp"
+      ) {
+        return handleCtxCommand(command.name as CtxCommandName, command.args, deps);
       }
 
       if (command.name === "init") {
