@@ -2669,7 +2669,7 @@
     "scripts/license-texts/Apache-2.0.txt": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
     "scripts/native-search-tools-config.mjs": "281d368464f61363fa2d8ab74f416962fe730dd0a0572db5564475f876bb65aa",
     "scripts/remote-native-search-tools-config.mjs": "472322a66f84c7452f96aa9e16e9c4e0600f7c2588a03dc6bc869229161b1cb2",
-    "third-party/copied-components.json": "7c1708069b440684270d62d70353273d4eb1feb5f3572539e73c049691c8daec",
+    "third-party/copied-components.json": "a04d6ba3fe1c097c35f2b06d5e0d82e2b3ed2212bef5396884fb15dd0e4ec635",
     "third-party/embedded-components.json": "9586ccca15897f56d4ca1d703dffe9e02880fedd766c1dff93f7ac1f52ea891a",
     "third-party/native-search/licenses/00373c9bf56a894b2ed67586596bc1e8b0630cabbaf1ab46c75fc754b6bcd1ce.txt": "00373c9bf56a894b2ed67586596bc1e8b0630cabbaf1ab46c75fc754b6bcd1ce",
     "third-party/native-search/licenses/01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f.txt": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
@@ -28648,7 +28648,7 @@
       "roots": [
         "packages/ui/src/lib/builtinSkillI18n.ts"
       ],
-      "scope": "Superpowers-derived skill descriptions and their translations only; unrelated descriptions from other projects in this file are not covered. The former bundled plugin implementation has been removed; only its retained license remains.",
+      "scope": "Superpowers-derived skill descriptions and their translations only; unrelated descriptions from other projects in this file are not covered. The former bundled plugin implementation and its bundled LICENSE file have both been removed; the upstream license is referenced by URL only.",
       "license": "MIT",
       "files": [
         {
