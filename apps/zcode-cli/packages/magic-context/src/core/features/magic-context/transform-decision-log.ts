@@ -1,19 +1,28 @@
-// FORK-DEFERRED(S20): `features/magic-context/transform-decision-log.ts` 的 TransformSchedulerDecision / CanonicalMaterializeReason / PendingTransformDecision / normalizeMaterializeReason / recordPendingTransformDecision / clearOpenCodePendingTransformDecision 摘录，Step 20 移植真身后删除本文件
+// FORK-NOTE(S20): upstream `features/magic-context/transform-decision-log.ts`
+// (527 lines) with the durable writer removed. This file now lives at its
+// upstream path and is the REAL transform-decision module.
 //
-// WHY A SEAM AND NOT THE MODULE. The module also owns the `transform_decisions`
-// telemetry writer (a side-car SQLite connection keyed by message id, plus its
-// retention prune). That writer is C group: it is the historian publish path's
-// attribution log. What the B group reaches is the pure reason-normaliser and
-// the two in-memory pending-decision accessors, all reproduced verbatim.
+// WHAT IS VERBATIM. The pure reason-normaliser
+// (`normalizeMaterializeReason`) and the two in-memory pending-decision
+// accessors (`recordPendingTransformDecision`,
+// `clearOpenCodePendingTransformDecision`), plus the
+// `TransformSchedulerDecision` / `CanonicalMaterializeReason` /
+// `PendingTransformDecision` shapes they thread.
 //
-// The A group does create `transform_decisions`
-// (`migrations.ts`), so nothing here is blocked on schema — the split is
-// ownership, not availability.
+// WHAT IS STILL ABSENT. Upstream also owns the `transform_decisions` durable
+// writer: a side-car SQLite connection keyed by message id, plus its retention
+// prune. Landing the historian did not change this — the historian's own
+// attribution log is `historian_runs` (`storage-historian-runs.ts`, A group),
+// and the `transform_decisions` rows describe the *transform pass's* own
+// materialisation decision, which nothing in the fork writes. The A group does
+// create the `transform_decisions` table (`migrations.ts`), so this is an
+// ownership gap, not a schema one — a host that wants the side-car writer can
+// add it back against a live table.
 //
-// Step 20: delete this file and repoint `transform.ts` back at
-// `../../features/magic-context/transform-decision-log.js`.
+// The re-export below exists so a Step-20+ host can type a decision against the
+// same unions the normaliser produces.
 
-import type { ContextUsage, SchedulerDecision, SessionMeta } from "../features/magic-context/types.js";
+import type { ContextUsage, SchedulerDecision, SessionMeta } from "./types.js";
 
 /** Verbatim: `transform-decision-log.ts:5`. */
 export type TransformDecisionHarness = "opencode" | "pi";

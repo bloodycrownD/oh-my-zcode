@@ -1,32 +1,34 @@
-// FORK-DEFERRED(S20): `features/magic-context/compartment-storage.ts` 的 Compartment/CompartmentInput/SessionFact/CompartmentDateRanges 类型与 escapeXmlAttr/escapeXmlContent/getCompartments/getLastCompartmentEndMessage/getLastCompartmentEndMessageId/isPartialCompartmentEnd/buildCompartmentBlock/appendCompartments 摘录，Step 20 移植真身后删除本文件
+// FORK-NOTE(S20): upstream `features/magic-context/compartment-storage.ts` (893
+// lines) with the unported closure removed. This file now lives at its upstream
+// path and is the REAL compartment store — the historian
+// (`compartment-runner-incremental.ts`) writes through it.
 //
-// WHY A SEAM AND NOT THE MODULE. The C group (Step 20) owns the compartment
-// family. Upstream `compartment-storage.ts` is 893 lines and reaches the
-// historian, the compaction lease, the compression-depth store, the M0 mutation
-// log and the embed-drain state; porting it now would drag the whole historian
-// closure into the package. What the B group (already ported) actually reaches is
-// seven pure/SQL statements over the `compartments` + `session_facts` tables —
-// both of which the A group's `storage-db.ts` already creates (lines 1190 and
-// 1278). Those are reproduced here verbatim so the b3/b4 call sites type-check and
-// behave identically against a real database.
+// WHAT IS VERBATIM. The `Compartment` / `SessionFact` / `CompartmentInput` /
+// `CompartmentDateRanges` types and the `escapeXmlAttr` / `escapeXmlContent` /
+// `getCompartments` / `getLastCompartmentEndMessage` /
+// `getLastCompartmentEndMessageId` / `isPartialCompartmentEnd` /
+// `buildCompartmentBlock` / `getSessionFacts` bodies are upstream's, unchanged,
+// and so is `appendCompartments`' INSERT — including the `start_block_index` /
+// `end_block_index` columns the historian fills from a chunk's partial
+// boundaries.
 //
-// NOT reproduced (each needs C-group machinery and nothing in the fork calls it):
-// replaceAllCompartmentState, replaceSessionFacts, saveRecompStagingPass,
-// getRecompStaging, the `recomp_*` staging tables, and the historian-owned lease
-// and M0 mutation side effects. `appendCompartments` therefore keeps its upstream
-// shape but drops the `queueM0Mutation` / `invalidateAutoEmbedSession` calls that
-// guard the historian's recomp publish path — the fork has no historian, so there
-// is no publish whose mutation log or embed drain could go stale.
+// WHAT IS STILL ABSENT, and why it is still absent now that the historian has
+// landed. Each dropped member reaches a module the fork still does not port:
+//   - `replaceAllCompartmentState` / `replaceSessionFacts` /
+//     `saveRecompStagingPass` / `getRecompStaging` and the `recomp_*` staging
+//     tables belong to the recomp family (`compartment-runner-partial-recomp.ts`
+//     / `compartment-runner-recomp.ts`), i.e. the `/ctx-recomp` surface the spec
+//     rewrites in Step 22 rather than ports.
+//   - the `queueM0Mutation` / `invalidateAutoEmbedSession` tail of
+//     `appendCompartments` — the M0 mutation log is A-group, but the embed drain
+//     is Batch 2 and no historian publish rewrites m[0].
 //
-// Step 20: delete this file and repoint `compartment-trigger.ts`,
-// `inject-compartments.ts`, `persist-filtered-noise.ts`,
-// `protected-tail-boundary.ts`, `project-docs-hash.ts`, `transform.ts` and
-// `transform-compartment-phase.ts` back at
-// `../../features/magic-context/compartment-storage.js`.
+// So `appendCompartments` keeps upstream's signature and statement, minus those
+// two side calls.
 
-import { isNoContentCompartment } from "../features/magic-context/no-content-compartment.js";
-import { getHarness } from "../shared/harness.js";
-import type { Database, Statement as PreparedStatement } from "../shared/sqlite.js";
+import { isNoContentCompartment } from "./no-content-compartment.js";
+import { getHarness } from "../../shared/harness.js";
+import type { Database, Statement as PreparedStatement } from "../../shared/sqlite.js";
 
 const insertCompartmentStatements = new WeakMap<Database, PreparedStatement>();
 const insertFactStatements = new WeakMap<Database, PreparedStatement>();

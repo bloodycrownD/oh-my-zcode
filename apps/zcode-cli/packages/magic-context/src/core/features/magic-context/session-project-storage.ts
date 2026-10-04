@@ -1,22 +1,24 @@
-// FORK-DEFERRED(S20): `features/magic-context/session-project-storage.ts` 的 recordSessionProjectIdentity / hasRecordedSessionProjectIdentity 摘录，Step 20 移植真身后删除本文件
+// FORK-NOTE(S20): upstream `features/magic-context/session-project-storage.ts`
+// with the embedding-repair half removed. This file now lives at its upstream
+// path and is the REAL session→project binding store.
 //
-// WHY A SEAM AND NOT THE MODULE. The module also owns the mis-scoped
-// compartment-chunk-embedding repair (`findMisScopedCompartmentChunkEmbeddingIdsForProject`,
-// `repairMisScopedCompartmentChunkEmbeddingsForProject`), which belongs to the C
-// group's embedding backfill. The two session→project binding statements the B
-// group reaches touch only `session_projects`, a table the A group already
-// creates (`storage-db.ts:1641`), so they are reproduced verbatim.
+// WHAT IS VERBATIM. `recordSessionProjectIdentity` /
+// `hasRecordedSessionProjectIdentity` touch only `session_projects`, a table the
+// A group already creates (`storage-db.ts:1641`), so their bodies are upstream's
+// unchanged.
 //
-// NOT reproduced: the `compartment_chunk_embeddings` repair statements. They run
-// inside `recordSessionProjectIdentity` upstream, but this fork performs no
-// embedding backfill, so there are no chunk rows to re-stamp.
-//
-// Step 20: delete this file and repoint `transform.ts` back at
-// `../../features/magic-context/session-project-storage.js`.
+// WHAT IS STILL ABSENT. Upstream also owns the mis-scoped
+// `compartment_chunk_embeddings` repair
+// (`findMisScopedCompartmentChunkEmbeddingIdsForProject`,
+// `repairMisScopedCompartmentChunkEmbeddingsForProject`) — C group's embedding
+// backfill. Landing the historian did not change this: the historian's publish
+// path writes `compartments`, not `compartment_chunk_embeddings`, and the
+// embedding backfill that would populate those rows is Batch 2 (Step 31). The
+// repair statement stays cached-and-warm so a future backfill finds it.
 
-import { isUserHomeDirectory } from "../features/magic-context/memory/project-identity.js";
-import { getHarness } from "../shared/harness.js";
-import type { Database, Statement as PreparedStatement } from "../shared/sqlite.js";
+import { isUserHomeDirectory } from "./memory/project-identity.js";
+import { getHarness } from "../../shared/harness.js";
+import type { Database, Statement as PreparedStatement } from "../../shared/sqlite.js";
 
 const SESSION_CHUNK_REPAIR_BATCH_SIZE = 100;
 

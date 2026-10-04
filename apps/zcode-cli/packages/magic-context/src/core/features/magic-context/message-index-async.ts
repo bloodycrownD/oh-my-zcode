@@ -1,12 +1,15 @@
-// FORK-DEFERRED(S20): `features/magic-context/message-index-async.ts` 的 MessageReconciliationSource / scheduleReconciliation 摘录，Step 20 移植真身后删除本文件
+// FORK-NOTE(S20): upstream `features/magic-context/message-index-async.ts` with
+// the FTS reconciliation body removed. This file now lives at its upstream path
+// and is the REAL module for the fork's message-index async surface.
 //
-// WHY A SEAM AND NOT THE MODULE. The reconciler rebuilds the FTS
-// `message_history_index` from the raw session store. That index is C group
-// (Step 20) alongside the rest of the message-index family; the fork's
+// WHY THE RECONCILER IS STILL EMPTY. The reconciler rebuilds the FTS
+// `message_history_index` from the raw session store. That is C group (Step 20)
+// alongside the rest of the message-index family — but the fork's
 // `storage-db.ts` does not create the FTS tables, so there is nothing to
-// reconcile into.
+// reconcile INTO. Landing the historian does not change that: FTS-backed
+// `ctx_search` is Batch 2 (Step 31), and it is what needs the index.
 //
-// SEMANTIC DECISION — the schedule is a no-op. The single call site
+// SEMANTIC DECISION — the schedule stays a no-op. The single call site
 // (`transform.ts:781-785`) fires and forgets: it wraps the call in
 // `withoutSqliteTransformPass(...)` and discards the result, with no `.catch()`
 // and no read of any return value. Returning immediately is therefore exactly
@@ -17,13 +20,12 @@
 //
 // The `MessageReconciliationSource` type is reproduced verbatim because
 // `transform.ts` threads it through `TransformDeps.hostMessageReconciliationSource`
-// and `resolveTransformHostSeams`, which a host adapter will supply.
-//
-// Step 20: delete this file and repoint `transform.ts` back at
-// `../../features/magic-context/message-index-async.js`.
+// and `resolveTransformHostSeams`, which a host adapter will supply — and the
+// historian's own raw-message reads go through that same seam family
+// (`host/raw-message-provider.ts`).
 
-import type { RawMessage } from "../hooks/magic-context/read-session-raw.js";
-import type { Database } from "../shared/sqlite.js";
+import type { RawMessage } from "../../hooks/magic-context/read-session-raw.js";
+import type { Database } from "../../shared/sqlite.js";
 
 /** Verbatim: `message-index-async.ts:94-102`. A CALLABLE type, not an object. */
 export type FullReadMessages = ((sessionId: string) => RawMessage[]) & {

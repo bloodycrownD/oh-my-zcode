@@ -1,5 +1,5 @@
 import type { DreamTaskProgress } from "../../deferred/dreamer-task-registry.js";
-import type { RecompProgress } from "../../deferred/compartment-runner-types.js";
+import type { RecompProgress } from "./compartment-runner-types.js";
 import type { Channel1State } from "./ctx-reduce-nudge.js";
 import type {
     AgentBySession,

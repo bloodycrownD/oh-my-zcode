@@ -16,7 +16,7 @@
 // the type import with the local four-member union the renderer already switches
 // on.
 
-import type { RecompProgress } from "./compartment-runner-types.js";
+import type { RecompProgress } from "../hooks/magic-context/compartment-runner-types.js";
 
 /** Verbatim: `embed-session-state.ts:19`. */
 export type EmbedDrainUiStatus = "idle" | "running" | "paused" | "stopped";

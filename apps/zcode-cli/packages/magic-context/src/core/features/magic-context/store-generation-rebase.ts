@@ -1,29 +1,35 @@
-// FORK-DEFERRED(S20): `features/magic-context/store-generation-rebase.ts` 的 CoordinateGeneration / readCoordinateGeneration / rebaseSessionCoordinatesAsync 摘录，Step 20 移植真身后删除本文件
+// FORK-NOTE(S20): upstream `features/magic-context/store-generation-rebase.ts`
+// (1432 lines) with the rebase walk removed. This file now lives at its upstream
+// path and is the REAL coordinate-generation module.
 //
-// WHY A SEAM AND NOT THE MODULE. The rebase re-derives every saved coordinate
+// WHAT IS VERBATIM. `readCoordinateGeneration` — one SELECT over
+// `session_meta.coordinate_generation`, and that column is part of the A group's
+// schema — plus the `CoordinateGeneration` union and the outcome shape.
+//
+// WHAT IS STILL ABSENT, and why. The rebase re-derives every saved coordinate
 // when the host switches message-table projections (`message`/`part` →
-// `session_message`). It is 1433 lines and is C group (Step 20) alongside the
-// message-index family it drives. The B group reaches two things: the
-// `CoordinateGeneration` type it threads through `TransformDeps.storeGeneration`,
-// and the two functions themselves.
+// `session_message`); its `rebaseSteps` walk over compartments, tags and the
+// message index is C-group machinery that drives the FTS reconciler, which the
+// fork still does not have (see `message-index-async.ts`). `recompSteps` and
+// `recoverUnresolvedCompartments` ride on the same walk. Landing the historian
+// did not change this: ZCode serves exactly ONE projection of the session
+// store, so there is nothing to switch between.
 //
-// SEMANTIC DECISION — `readCoordinateGeneration` is verbatim (it is one SELECT
-// over `session_meta.coordinate_generation`, and the column is part of the A
-// group's schema). `rebaseSessionCoordinatesAsync` THROWS. Its single call site
-// (`transform.ts:756-778`) is already guarded by `deps.storeGeneration !==
-// undefined`, wrapped in try/catch, and funnels a throw into
-// `failPass("store-generation-rebase-failure", …)` — i.e. the upstream contract
-// for "the rebase could not run". A ZCode host never sets `storeGeneration`
-// (it serves a single projection), so the branch is dead in the fork; if a host
-// ever does set it, throwing routes the pass through the documented
-// fail-closed path instead of silently serving stale coordinates. Returning a
-// fake `unchanged` outcome would be the one answer that is actively wrong.
-//
-// Step 20: delete this file and repoint `transform.ts` back at
-// `../../features/magic-context/store-generation-rebase.js`.
+// SEMANTIC DECISION — `readCoordinateGeneration` is real, the rebase THROWS.
+// Its single call site (`transform.ts:756-778`) is already guarded by
+// `deps.storeGeneration !== undefined`, wrapped in try/catch, and funnels a
+// throw into `failPass("store-generation-rebase-failure", …)` — i.e. upstream's
+// own contract for "the rebase could not run". A ZCode host never sets
+// `storeGeneration`, so the branch is dead in the fork; if a host ever does set
+// it, throwing routes the pass through the documented fail-closed path instead
+// of silently serving stale coordinates. Returning a fake `unchanged` outcome
+// would be the one answer that is actively wrong. This is the same reason the
+// historian's compartments carry a `rebase_status` column that the fork only
+// ever writes as `ok`: an `unresolved` row is unreachable, and the read paths
+// already exclude it defensively.
 
-import type { Database } from "../shared/sqlite.js";
-import type { RawMessage } from "../hooks/magic-context/read-session-raw.js";
+import type { Database } from "../../shared/sqlite.js";
+import type { RawMessage } from "../../hooks/magic-context/read-session-raw.js";
 
 /**
  * Which projection of the OpenCode store a session's saved coordinates were
@@ -90,5 +96,7 @@ export interface RebaseSessionCoordinatesArgs {
 export async function rebaseSessionCoordinatesAsync(
     _args: RebaseSessionCoordinatesArgs,
 ): Promise<StoreGenerationRebaseOutcome> {
-    throw new Error("FORK-DEFERRED(S20): store-generation-rebase 未接线——宿主投影重基线属 C 组");
+    throw new Error(
+        "FORK-NOTE(S20): store-generation-rebase walk not ported — the ZCode host serves a single message projection",
+    );
 }

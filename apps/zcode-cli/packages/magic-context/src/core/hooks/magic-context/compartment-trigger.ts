@@ -1,7 +1,7 @@
 import {
     getLastCompartmentEndMessage,
     getLastCompartmentEndMessageId,
-} from "../../deferred/compartment-storage.js";
+} from "../../features/magic-context/compartment-storage.js";
 import { sessionDecisionCalibration } from "../../features/magic-context/session-decision-calibration.js";
 import {
     deriveTagLoadFloor,

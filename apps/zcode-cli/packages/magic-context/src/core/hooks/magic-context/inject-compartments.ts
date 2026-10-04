@@ -10,7 +10,7 @@ import {
     getLastCompartmentEndMessageId,
     isPartialCompartmentEnd,
     type SessionFact,
-} from "../../deferred/compartment-storage.js";
+} from "../../features/magic-context/compartment-storage.js";
 import {
     CATEGORY_PRIORITY,
     V2_MEMORY_CATEGORIES,
@@ -58,7 +58,7 @@ import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.j
 import {
     MARKER_SUMMARY_TEXT,
     reconcileForkOrphanedCompactionMarkers,
-} from "../../deferred/compaction-marker-manager.js";
+} from "./compaction-marker-manager.js";
 import {
     COMPARTMENT_RENDER_EPOCH,
     decodeCachedM0UpgradeIdentity,

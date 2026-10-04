@@ -1,8 +1,18 @@
 // FORK: the upstream barrel also re-exported four sibling modules that this fork
-// does not port yet, and they are omitted here rather than stubbed:
+// does not re-export yet, and they are omitted here rather than stubbed:
 //
-//   ./compartment-storage.js    C group (Step 20) — pulls the embedding providers
-//   ./message-index.js          C group (Step 20) — same
+//   ./compartment-storage.js    C group (Step 20) — LANDED at its own path in
+//                                Step 20 (the historian publish path imports it
+//                                directly), but the barrel re-export is still
+//                                withheld: `storage.ts` is A-group surface and
+//                                this step does not own it. Nothing in the fork
+//                                reaches `compartments` through this barrel — the
+//                                historian, `inject-compartments`,
+//                                `protected-tail-boundary` and `transform` all
+//                                import `./compartment-storage.js` directly.
+//   ./message-index.js          C group (Step 20) — the fork has no FTS tables
+//                                to reconcile into; only `message-index-async.ts`
+//                                landed (also reached by its own path).
 //   ./project-docs-hash.js      Batch 2 (Step 31)
 //   ./project-identity.js       Batch 2 (Step 31)
 //

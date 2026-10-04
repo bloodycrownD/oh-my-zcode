@@ -1,7 +1,7 @@
 import {
     getLastCompartmentEndMessage,
     getLastCompartmentEndMessageId,
-} from "../../deferred/compartment-storage.js";
+} from "../../features/magic-context/compartment-storage.js";
 import { type ContextDatabase, updateSessionMeta } from "../../features/magic-context/storage.js";
 import type { ContextUsage } from "../../features/magic-context/types.js";
 import type { PluginContext } from "../../plugin/types.js";
@@ -12,11 +12,11 @@ import {
     type ActiveCompartmentRun,
     getActiveCompartmentRun,
     startCompartmentAgent,
-} from "../../deferred/compartment-runner.js";
+} from "./compartment-runner.js";
 import type {
     HiddenCompartmentRunnerDeps,
     HiddenCompletionExecutor,
-} from "../../deferred/compartment-runner-types.js";
+} from "./compartment-runner-types.js";
 import { BLOCK_UNTIL_DONE_PERCENTAGE } from "./compartment-trigger.js";
 import {
     type PreparedCompartmentInjection,

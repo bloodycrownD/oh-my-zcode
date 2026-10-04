@@ -1,5 +1,5 @@
 import type { ProtectedTokensTierOverrides } from "../../deferred/project-security.js";
-import { getLastCompartmentEndMessage } from "../../deferred/compartment-storage.js";
+import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage.js";
 import {
     resolveProjectIdentityForSession,
     takeDubiousOwnershipProjectIdentityWarning,
@@ -7,7 +7,7 @@ import {
 import {
     type MessageReconciliationSource,
     scheduleReconciliation,
-} from "../../deferred/message-index-async.js";
+} from "../../features/magic-context/message-index-async.js";
 import { isPrefixBoundThinkingModel } from "../../features/magic-context/overflow-detection.js";
 import { getProtectionWindowForSession } from "../../deferred/protection-window.js";
 import type { Scheduler } from "../../deferred/scheduler.js";
@@ -17,7 +17,7 @@ import { sessionDecisionCalibration } from "../../features/magic-context/session
 import {
     hasRecordedSessionProjectIdentity,
     recordSessionProjectIdentity,
-} from "../../deferred/session-project-storage.js";
+} from "../../features/magic-context/session-project-storage.js";
 import {
     type ContextDatabase,
     deriveTagLoadFloor,
@@ -48,17 +48,17 @@ import {
     resetProtectedTailNoEligibleHead,
     resolveEpochFloorForPass,
 } from "../../features/magic-context/storage-meta-persisted.js";
-import type { CoordinateGeneration } from "../../deferred/store-generation-rebase.js";
+import type { CoordinateGeneration } from "../../features/magic-context/store-generation-rebase.js";
 import {
     readCoordinateGeneration,
     rebaseSessionCoordinatesAsync,
-} from "../../deferred/store-generation-rebase.js";
+} from "../../features/magic-context/store-generation-rebase.js";
 import type { Tagger } from "../../features/magic-context/tagger.js";
 import {
     clearOpenCodePendingTransformDecision,
     normalizeMaterializeReason,
     recordPendingTransformDecision,
-} from "../../deferred/transform-decision-log.js";
+} from "../../features/magic-context/transform-decision-log.js";
 import type { ContextUsage } from "../../features/magic-context/types.js";
 import type { PluginContext } from "../../plugin/types.js";
 import { BoundedSessionMap } from "../../shared/bounded-session-map.js";
@@ -74,7 +74,7 @@ import { canConsumeDeferredOnThisPass } from "./cache-busting-signals.js";
 import type { CavemanWordRules } from "./caveman.js";
 import { replayCavemanCompression } from "./caveman-cleanup.js";
 import { commitCompactionModeRecord, reconcileCompactionMode } from "../../deferred/compaction-off-transition.js";
-import { getActiveCompartmentRun, startCompartmentAgent } from "../../deferred/compartment-runner.js";
+import { getActiveCompartmentRun, startCompartmentAgent } from "./compartment-runner.js";
 import { buildTriggerInMemoryTail, checkCompartmentTrigger } from "./compartment-trigger.js";
 import {
     type CtxReduceAvailabilityVerdict,
@@ -415,11 +415,11 @@ export async function sendEmergencyRefusalNotice(
 
 export interface TransformDeps {
     cacheTtlConfig?: import("../../deferred/model-cache-ttl.js").CacheTtlConfig;
-    hiddenCompletionExecutor?: import("../../deferred/compartment-runner-types.js").HiddenCompletionExecutor;
+    hiddenCompletionExecutor?: import("./compartment-runner-types.js").HiddenCompletionExecutor;
     /** Host marker lifecycle; omission preserves OpenCode 1 marker writes and replay. */
     compactionMarkerStrategy?: CompactionMarkerStrategy & {
         setPending?: typeof import("../../features/magic-context/storage.js").setPendingCompactionMarkerState;
-        publish?: typeof import("../../deferred/compaction-marker-manager.js").updateCompactionMarkerAfterPublication;
+        publish?: typeof import("./compaction-marker-manager.js").updateCompactionMarkerAfterPublication;
     };
     /** Host storage and cancellation adapters; omitted callbacks retain OpenCode 1 behavior. */
     hostRawMessages?: (sessionId: string) => ReturnType<typeof readRawSessionMessages>;

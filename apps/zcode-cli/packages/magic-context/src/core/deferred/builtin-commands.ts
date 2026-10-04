@@ -137,8 +137,8 @@ function parseWrapupArgs(raw: string):
 }
 
 /**
- * The dreamer task registry is C group (`deferred/historian-prompt.generated.ts`
- * is its only other consumer), so `isCanonicalDreamTask` cannot be consulted.
+ * The dreamer task registry is Batch 2 (`deferred/dreamer-task-registry.ts`), so
+ * `isCanonicalDreamTask` cannot be consulted.
  * `/ctx-dream <task>` therefore answers `false` — the argument form passes
  * through as prose rather than being dispatched. That is the conservative arm:
  * the alternative (`true` for every argument) would route arbitrary user prose

@@ -1,4 +1,4 @@
-import { compareOpenCodeMessagesByCanonicalOrder } from "../../deferred/compaction-marker.js";
+import { compareOpenCodeMessagesByCanonicalOrder } from "../../features/magic-context/compaction-marker.js";
 import { newestCtxReduceTagNumbers } from "../../features/magic-context/reclaim-protection.js";
 import {
     HYGIENE_PROVIDER_UNITS_VERSION,
@@ -84,8 +84,8 @@ import {
     rearmChannel2AfterCoverageAdvancingHardFold,
     rearmChannel2AfterMeasuredCollapse,
 } from "../../deferred/channel2-cycle.js";
-import { applyDeferredCompactionMarker, MARKER_SUMMARY_TEXT } from "../../deferred/compaction-marker-manager.js";
-import { getActiveCompartmentRun } from "../../deferred/compartment-runner.js";
+import { applyDeferredCompactionMarker, MARKER_SUMMARY_TEXT } from "./compaction-marker-manager.js";
+import { getActiveCompartmentRun } from "./compartment-runner.js";
 import type {
     CtxReduceAvailabilityVerdict,
     ToolAvailabilityVerdict,
