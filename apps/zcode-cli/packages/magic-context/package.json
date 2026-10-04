@@ -19,7 +19,8 @@
     "test:host": "node scripts/test-host.mjs",
     "test:transform": "node scripts/test-transform.mjs",
     "test:historian": "node scripts/test-historian.mjs",
-    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:transform && npm run test:historian",
+    "test:ctx-tools": "node scripts/test-ctx-tools.mjs",
+    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:transform && npm run test:historian && npm run test:ctx-tools",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

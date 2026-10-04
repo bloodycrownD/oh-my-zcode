@@ -94,6 +94,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
+    "test:magic-context-domain": "node scripts/test-magic-context-domain.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

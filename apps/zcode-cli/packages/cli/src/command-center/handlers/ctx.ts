@@ -251,6 +251,10 @@ type ExpandParse =
  * `tag=N` / `message=N` / `<start>-<end>` / 尾随 `verbose`。
  * 也接受裸的 `N`：裸数字先按 ordinal（message）读，因为用户手里最常有的就是一个
  * `<session-history>` 标题里的序号；tag 必须显式写 `tag=`（与工具描述一致）。
+ *
+ * 导出仅供 `scripts/test-ctx-commands.mjs` 直接断言文法；knip 追不到测试的
+ * file-URL 动态 import。
+ * @lintignore
  */
 export function parseExpandArgs(raw: string): ExpandParse {
   const trimmed = raw.trim();
@@ -315,7 +319,12 @@ type RecompParse =
   | { kind: "partial"; end: number; start: number }
   | { error: string };
 
-/** 参数文法与包内那份逐字移植的 `parseRecompArgs` 同款（`full` / `--upgrade` / 区间）。 */
+/**
+ * 参数文法与包内那份逐字移植的 `parseRecompArgs` 同款（`full` / `--upgrade` / 区间）。
+ * 导出仅供 `scripts/test-ctx-commands.mjs` 直接断言文法；knip 追不到测试的
+ * file-URL 动态 import。
+ * @lintignore
+ */
 export function parseRecompArgs(raw: string): RecompParse {
   const trimmed = raw.trim();
   if (trimmed === "" || trimmed === "full" || trimmed === "--upgrade") {

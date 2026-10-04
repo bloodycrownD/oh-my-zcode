@@ -26,7 +26,7 @@
  *
  *   db                              openDatabase(getMagicContextDatabasePath())
  *   tagger                          createTagger()
- *   scheduler                       createZCodeScheduler()：见该函数注释（缺口 S21）
+ *   scheduler                       createZCodeScheduler()：包内真身（S21）+ 键名映射
  *   contextUsageMap                 空 Map —— 无生产者（缺口 S20/S24）
  *   clearReasoningAge               50（源 hook.ts 的 `?? 50`；clear_reasoning_age
  *                                   不在 E 组白名单）
@@ -88,6 +88,7 @@ import {
   UnresolvedHistoryBoundaryError,
   createConfigBridge,
   createRawMessageProvider,
+  createScheduler as createPackageScheduler,
   createTagger,
   createTransform,
   findConfigReadinessError,
@@ -101,7 +102,6 @@ import {
   projectRuntimeEntries,
   projectStoredMessage,
   replayLkg,
-  resolveExecuteThresholdDetail,
   resolveLkgModelKeys,
   snapshotRuntimeEntries,
   withRawMessageProvider,
@@ -394,33 +394,18 @@ function projectMagicContextEntries(
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * 上游 `createScheduler` 随 OpenCode 的 event-resolution 层一起不搬（`deferred/
- * scheduler.ts` 只留下接口与 `parseCacheTtl`）。这里按同一判据实现最小版本：用
- * `resolveExecuteThresholdDetail` 解析本模型的 execute threshold（tokens 模式优先
- * 于 percentage，与 B 组 resolver 一致），再与当前 contextUsage 比较。
- *
- * Step 21 的 `features/magic-context/scheduler.ts` 落地后应整段删除并改指它。
+ * 包内 `features/magic-context/scheduler.ts` 的真身（S21 落地）消费 camelCase 的
+ * `SchedulerConfig`，而本文件持的是 snake_case 的 `MagicContextConfig`——这里只做
+ * 键名映射，判据（brand-new session 跳过、tokens 模式换算 contextLimit 等）全部
+ * 归包内权威实现。原 Step 19b 的最小版 scheduler 已随真身落地删除。
  */
 function createZCodeScheduler(config: MagicContextConfig): Scheduler {
-  return {
-    shouldExecute(sessionMeta, contextUsage, _currentTime, sessionId, modelKey, contextLimit) {
-      void sessionMeta;
-      const detail = resolveExecuteThresholdDetail(
-        config.execute_threshold_percentage,
-        modelKey,
-        65,
-        {
-          tokensConfig: config.execute_threshold_tokens,
-          ...(contextLimit === undefined ? {} : { contextLimit }),
-          ...(sessionId === undefined ? {} : { sessionId }),
-        },
-      );
-      if (detail.mode === "tokens" && detail.absoluteTokens !== undefined) {
-        return contextUsage.inputTokens >= detail.absoluteTokens ? "execute" : "defer";
-      }
-      return contextUsage.percentage >= detail.percentage ? "execute" : "defer";
-    },
-  };
+  return createPackageScheduler({
+    executeThresholdPercentage: config.execute_threshold_percentage,
+    ...(config.execute_threshold_tokens === undefined
+      ? {}
+      : { executeThresholdTokens: config.execute_threshold_tokens }),
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -758,7 +743,14 @@ export function createZCodeMagicContextTurnTransformPort(
         await transform({}, { messages: projected });
       });
     } catch (error) {
-      return handleTransformFailure(error, projected, originals, sessionId, port.getConfig(), options);
+      return handleTransformFailure(
+        error,
+        projected,
+        originals,
+        sessionId,
+        port.getConfig(),
+        options,
+      );
     }
 
     const { entries, syntheticHeadPositions } = projectMagicContextEntries(projected, originals);

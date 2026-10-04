@@ -36,7 +36,7 @@ export const APP_PROTOCOL_APP_ONLY_BUILTIN_SLASH_COMMANDS = [
  *   - 保留名的作用仍然必要：没有它，用户在 `.zcode/commands/` 里写一个
  *     `ctx-status.md` 会抢走这个名字，让 CLI 侧的本地语义静默失效。
  */
-export const MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES = [
+const MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES = [
   "ctx-status",
   "ctx-reduce",
   "ctx-expand",
