@@ -149,6 +149,9 @@ function resolveWorkspaceRootForEnvFiles(): string | null {
 }
 
 export function loadHostProcessEnvFromLocalFiles(): Record<string, string> {
+  // 打包态不读安装目录旁的 .env：环境文件是开发工作流（OAuth 端点等）的配置载体，
+  // 安装包场景的连接配置一律由用户机器的运行时环境提供，避免产物目录成为隐式配置面。
+  if (isElectronAppPackaged()) return {};
   const desktopRoot = resolve(import.meta.dirname, "../..");
   const workspaceRoot = resolveWorkspaceRootForEnvFiles();
   const fileCandidates = [
