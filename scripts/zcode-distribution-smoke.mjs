@@ -13,9 +13,9 @@ import { pathToFileURL } from "node:url";
 const exec = promisify(execFile);
 const archive = process.argv[2];
 assert.ok(archive, "Usage: node scripts/zcode-distribution-smoke.mjs <archive.tar.gz>");
-const directory = await realpath(await mkdtemp(join(tmpdir(), "zcode-release-smoke-")));
-const root = join(directory, "zcode");
-const runner = join(root, "bin/zcode.mjs");
+const directory = await realpath(await mkdtemp(join(tmpdir(), "omz-release-smoke-")));
+const root = join(directory, "oh-my-zcode");
+const runner = join(root, "bin/omz.mjs");
 const workspace = join(directory, "workspace");
 const env = {
   ...process.env,

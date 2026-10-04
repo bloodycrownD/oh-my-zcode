@@ -15,8 +15,8 @@ const agentEntry = join(root, "agent", "zcode.cjs");
 
 function usage() {
   return `Usage:
-  zcode --web [--host <host>] [--port <port>] [--workspace <path>] [--open|--no-open] [--token <token>|--no-token]
-  zcode --version
+  omz --web [--host <host>] [--port <port>] [--workspace <path>] [--open|--no-open] [--token <token>|--no-token]
+  omz --version
 `;
 }
 
@@ -260,7 +260,7 @@ try {
     else await serve(options);
   } else {
     if (argv.length === 1 && ["--help", "-h"].includes(argv[0])) {
-      console.log("Web mode: zcode --web [options] (zcode --web --help for details)\n");
+      console.log("Web mode: omz --web [options] (omz --web --help for details)\n");
     }
     // CLI 自启动子进程依赖 argv[1]；统一指向真正的 Agent 入口，保留 TTY 与所有原始参数。
     process.argv[1] = agentEntry;

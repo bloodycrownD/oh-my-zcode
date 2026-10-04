@@ -86,7 +86,7 @@ export function createWorkspaceHookRuntimeSecurity(input: {
   snapshot?: WorkspaceHookBundleSnapshot;
   userConfigPath: string;
   workingDirectory: string;
-  /** 测试注入临时 HOME；生产不传，Trust store 落在真实 ~/.zcode/security。 */
+  /** 测试注入临时 HOME；生产不传，Trust store 落在真实 ~/.omz/security。 */
   homeDir?: string;
 }): WorkspaceHookRuntimeSecurity | undefined {
   if (!input.snapshot) return undefined;

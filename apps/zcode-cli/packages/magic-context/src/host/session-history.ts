@@ -16,7 +16,7 @@
  *      `DatabaseSync`, so this file imports neither ZCode's adapters nor
  *      `node:sqlite` itself and stays testable against a fake.
  *
- * WHERE THE SCHEMA CAME FROM (read off the real `~/.zcode/cli/db/db.sqlite`):
+ * WHERE THE SCHEMA CAME FROM (read off the real `~/.omz/cli/db/db.sqlite`):
  *
  *   message(id, session_id, time_created, time_updated, data, sequence)
  *   part(id, message_id, session_id, time_created, time_updated, data, sequence)

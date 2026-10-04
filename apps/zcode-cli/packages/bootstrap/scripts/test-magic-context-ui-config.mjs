@@ -1,30 +1,30 @@
 #!/usr/bin/env node
 /**
- * Step 29 / T-U1 ¡ª ÉèÖÃ·ÖÇø ¡ú config.json ÂäÅÌ ¡ú **²»ÖØÆô**ÉúÐ§ µÄÈ«Á´ÑéÖ¤¡£
+ * Step 29 / T-U1 ï¿½ï¿½ ï¿½ï¿½ï¿½Ã·ï¿½ï¿½ï¿½ ï¿½ï¿½ config.json ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ **ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½**ï¿½ï¿½Ð§ ï¿½ï¿½È«ï¿½ï¿½ï¿½ï¿½Ö¤ï¿½ï¿½
  *
- * S23 µÄ `test-magic-context-config-rpc.mjs` ÒÑ¾­¶¤×¡ handler ×ÔÉíµÄÈý¶ÎÊ½Ë³ÐòÓë
- * T-M8 ÃÅ¿Ø£¬µ«Ëü**²»¾­¹ý UI ±íµ¥**£ºÃ»ÓÐ `workspace/readMagicContextConfig`¡¢
- * Ã»ÓÐ¡¸ÕûÓò¸²¸ÇµÄ¶Á-¸Ä-Ð´¡¹¡¢Ò²Ã»ÓÐ¡¸observer ÊÕµ½Í¨Öª ¡ú ÏÂÒ»¸ö turn ¶Áµ½ÐÂÖµ¡¹
- * ÕâÈý¶Î¡£Òò´ËÕâÀï²¹µÄÕýÊÇ UI ½ÓÉÏÖ®ºóÐÂ³öÏÖµÄÄÇ²¿·ÖÊ§Ð§Ãæ£º
+ * S23 ï¿½ï¿½ `test-magic-context-config-rpc.mjs` ï¿½Ñ¾ï¿½ï¿½ï¿½×¡ handler ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê½Ë³ï¿½ï¿½ï¿½ï¿½
+ * T-M8 ï¿½Å¿Ø£ï¿½ï¿½ï¿½ï¿½ï¿½**ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ UI ï¿½ï¿½ï¿½ï¿½**ï¿½ï¿½Ã»ï¿½ï¿½ `workspace/readMagicContextConfig`ï¿½ï¿½
+ * Ã»ï¿½Ð¡ï¿½ï¿½ï¿½ï¿½ò¸²¸ÇµÄ¶ï¿½-ï¿½ï¿½-Ð´ï¿½ï¿½ï¿½ï¿½Ò²Ã»ï¿½Ð¡ï¿½observer ï¿½Õµï¿½Í¨Öª ï¿½ï¿½ ï¿½ï¿½Ò»ï¿½ï¿½ turn ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½
+ * ï¿½ï¿½ï¿½ï¿½ï¿½Î¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï²¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ UI ï¿½ï¿½ï¿½ï¿½Ö®ï¿½ï¿½ï¿½Â³ï¿½ï¿½Öµï¿½ï¿½Ç²ï¿½ï¿½ï¿½Ê§Ð§ï¿½æ£º
  *
- *   A. **¶ÁÂ·¾¶**£º`workspace/readMagicContextConfig` ´Ó ConfigPort ¶Á»Ø effective
- *      Óò£»Ã»ÓÐ»î¶¯ session Ê±ÍË»Ø¶ÁÎÄ¼þ + schema parse£¬Á½ÌõÂ·¾¶¸ø UI µÄÐÎ×´ºã¶¨¡£
- *   B. **ÕûÓò¸²¸ÇµÄ¶Á-¸Ä-Ð´**£ºUI ±íµ¥±ØÐëÏÈ¶ÁÔÙÐ´£¬·ñÔòÒ»´Î±£´æ¾Í»áÄ¨µôÓÃ»§ÊÖÐ´µÄ
- *      ÆäËü×Ö¶Î¡£ÕâÒ»¶ÎÖ±½ÓÅÜ UI µÄ `buildMagicContextConfigFromForm` /
- *      `magicContextSettingsFormFromConfig`£¨packages/ui µÄÕæÊµ²úÎï£¬²»ÊÇ¸´¿Ì£©£¬
- *      ²¢¶ÏÑÔ per-model ¸²¸Ç£¨`execute_threshold_tokens` / `cache_ttl` µÄ¶ÔÏóÐÎÌ¬£©
- *      Óë historian ÔªÊý¾ÝÔ­Ñù´ø»Ø¡£
- *   C. **T-U1 ±¾Ìå**£º¸Ä `execute_threshold_percentage` ¡ú config.json Ô­×ÓÂäÅÌ£¨¶ÁÎÄ¼þ
- *      ¶ÏÑÔÄÚÈÝ£©¡ú `ConfigPort.observe` µÄ¶©ÔÄÕßÊÕµ½Í¨Öª£¨generation bump£©¡ú ÏÂÒ»
- *      turn Ö±½Ó¶Áµ½ÐÂÖµ£¬È«³Ì²»ÖØ½¨ App¡¢²»ÖØÆô½ø³Ì¡£
+ *   A. **ï¿½ï¿½Â·ï¿½ï¿½**ï¿½ï¿½`workspace/readMagicContextConfig` ï¿½ï¿½ ConfigPort ï¿½ï¿½ï¿½ï¿½ effective
+ *      ï¿½ï¿½Ã»ï¿½Ð»î¶¯ session Ê±ï¿½Ë»Ø¶ï¿½ï¿½Ä¼ï¿½ + schema parseï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ UI ï¿½ï¿½ï¿½ï¿½×´ï¿½ã¶¨ï¿½ï¿½
+ *   B. **ï¿½ï¿½ï¿½ò¸²¸ÇµÄ¶ï¿½-ï¿½ï¿½-Ð´**ï¿½ï¿½UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¶ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½Î±ï¿½ï¿½ï¿½Í»ï¿½Ä¨ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½Ð´ï¿½ï¿½
+ *      ï¿½ï¿½ï¿½ï¿½ï¿½Ö¶Î¡ï¿½ï¿½ï¿½Ò»ï¿½ï¿½Ö±ï¿½ï¿½ï¿½ï¿½ UI ï¿½ï¿½ `buildMagicContextConfigFromForm` /
+ *      `magicContextSettingsFormFromConfig`ï¿½ï¿½packages/ui ï¿½ï¿½ï¿½ï¿½Êµï¿½ï¿½ï¿½ï£¬ï¿½ï¿½ï¿½Ç¸ï¿½ï¿½Ì£ï¿½ï¿½ï¿½
+ *      ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ per-model ï¿½ï¿½ï¿½Ç£ï¿½`execute_threshold_tokens` / `cache_ttl` ï¿½Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½Ì¬ï¿½ï¿½
+ *      ï¿½ï¿½ historian Ôªï¿½ï¿½ï¿½ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½Ø¡ï¿½
+ *   C. **T-U1 ï¿½ï¿½ï¿½ï¿½**ï¿½ï¿½ï¿½ï¿½ `execute_threshold_percentage` ï¿½ï¿½ config.json Ô­ï¿½ï¿½ï¿½ï¿½ï¿½Ì£ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½
+ *      ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ý£ï¿½ï¿½ï¿½ `ConfigPort.observe` ï¿½Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Õµï¿½Í¨Öªï¿½ï¿½generation bumpï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½Ò»
+ *      turn Ö±ï¿½Ó¶ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½È«ï¿½Ì²ï¿½ï¿½Ø½ï¿½ Appï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ì¡ï¿½
  *
- * ¸ôÀë£ºËùÓÐÐ´Èë¶¼Ö¸Ïò `mkdtemp` ³öÀ´µÄÁÙÊ±Ä¿Â¼£¬`configPath` ×ßÒÀÀµ×¢ÈëÕ­·ì£¬
- * **¾ø²»´¥ÅöÓÃ»§ÕæÊµµÄ `~/.zcode/cli/config.json`**¡£
+ * ï¿½ï¿½ï¿½ë£ºï¿½ï¿½ï¿½ï¿½Ð´ï¿½ë¶¼Ö¸ï¿½ï¿½ `mkdtemp` ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±Ä¿Â¼ï¿½ï¿½`configPath` ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½×¢ï¿½ï¿½Õ­ï¿½ì£¬
+ * **ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½Êµï¿½ï¿½ `~/.omz/cli/config.json`**ï¿½ï¿½
  *
- * ÒÀÀµÒÑ¹¹½¨µÄ dist£º`@zcode/shared`¡¢`@zcode/model-option-map`¡¢`@zcode/magic-context`¡¢
- * `contracts`¡¢`adapters`¡¢`bootstrap`£¬ÒÔ¼°
- * `packages/ui/dist/settings/magicContextSettingsForm.js`£¨ÓÉ¸ù `pnpm typecheck` µÄ
- * `tsc -b packages/ui` ²ú³ö£©¡£
+ * ï¿½ï¿½ï¿½ï¿½ï¿½Ñ¹ï¿½ï¿½ï¿½ï¿½ï¿½ distï¿½ï¿½`@zcode/shared`ï¿½ï¿½`@zcode/model-option-map`ï¿½ï¿½`@zcode/magic-context`ï¿½ï¿½
+ * `contracts`ï¿½ï¿½`adapters`ï¿½ï¿½`bootstrap`ï¿½ï¿½ï¿½Ô¼ï¿½
+ * `packages/ui/dist/settings/magicContextSettingsForm.js`ï¿½ï¿½ï¿½É¸ï¿½ `pnpm typecheck` ï¿½ï¿½
+ * `tsc -b packages/ui` ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
  */
 
 import assert from "node:assert/strict";
@@ -54,7 +54,7 @@ registerHooks({
           return { url: pathToFileURL(candidate).href, shortCircuit: true };
         }
       }
-      throw new Error(`no compiled dist for "${specifier}" ¡ª build ${packageName} first`);
+      throw new Error(`no compiled dist for "${specifier}" ï¿½ï¿½ build ${packageName} first`);
     }
     return nextResolve(specifier, context);
   },
@@ -69,11 +69,11 @@ const { readMagicContextConfig, updateMagicContextConfig } = await import(
   new URL("../dist/zcode-protocol/magic-context-config.js", import.meta.url).href
 );
 
-// UI µÄ±íµ¥Ó³ÉäÄ£¿é£¨ÕæÊµ²úÎï£¬²»ÊÇ±¾²âÊÔÀïµÄ¸´¿Ì£©¡£
+// UI ï¿½Ä±ï¿½ï¿½ï¿½Ó³ï¿½ï¿½Ä£ï¿½é£¨ï¿½ï¿½Êµï¿½ï¿½ï¿½ï£¬ï¿½ï¿½ï¿½Ç±ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¸ï¿½ï¿½Ì£ï¿½ï¿½ï¿½
 const UI_FORM_DIST = `${REPO_ROOT}packages/ui/dist/settings/magicContextSettingsForm.js`;
 if (!existsSync(UI_FORM_DIST)) {
   throw new Error(
-    `missing ${UI_FORM_DIST} ¡ª run the root \`pnpm typecheck\` (tsc -b packages/ui) first`,
+    `missing ${UI_FORM_DIST} ï¿½ï¿½ run the root \`pnpm typecheck\` (tsc -b packages/ui) first`,
   );
 }
 const { buildMagicContextConfigFromForm, magicContextSettingsFormFromConfig } = await import(
@@ -84,14 +84,14 @@ process.on("exit", (code) => {
   console.log("");
   console.log(
     code === 0
-      ? "TEST PASS ¡ª Step 29 T-U1 settings ¡ú config.json ¡ú hot reload"
-      : `TEST FAIL ¡ª Step 29 T-U1 settings chain (exit code ${code})`,
+      ? "TEST PASS ï¿½ï¿½ Step 29 T-U1 settings ï¿½ï¿½ config.json ï¿½ï¿½ hot reload"
+      : `TEST FAIL ï¿½ï¿½ Step 29 T-U1 settings chain (exit code ${code})`,
   );
 });
 
 const WORKSPACE = { workspacePath: "D:/tmp/project", workspaceKey: "ws_test" };
 const READ_PARAMS = { workspace: WORKSPACE };
-/** Óë `MagicContextConfigSchema.parse({})` µÄ `.default()` Ò»ÖÂ£¬¶ÁÊ§°ÜÊ±ÍË»ØËü¡£ */
+/** ï¿½ï¿½ `MagicContextConfigSchema.parse({})` ï¿½ï¿½ `.default()` Ò»ï¿½Â£ï¿½ï¿½ï¿½Ê§ï¿½ï¿½Ê±ï¿½Ë»ï¿½ï¿½ï¿½ï¿½ï¿½ */
 const UI_FALLBACK_FORM = {
   enabled: true,
   executeThresholdPercentage: 65,
@@ -121,13 +121,13 @@ async function withTempDir(run) {
   }
 }
 
-// ©¤©¤ A: ¶ÁÂ·¾¶ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// ï¿½ï¿½ï¿½ï¿½ A: ï¿½ï¿½Â·ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 test("A1: read returns the ConfigPort's effective domain when a session is resident", async () => {
   await withTempDir(async (dir) => {
     const configPath = join(dir, "config.json");
-    // ´ÅÅÌÉÏÊÇÒ»·Ý**²»Í¬µÄ**Öµ£º¶Á±ØÐëÒÔ ConfigPort Îª×¼£¨Ëü²ÅÊÇÔËÐÐÊ±ÔÚÓÃµÄ£©£¬
-    // ¶ø²»ÊÇÃ¿´Î¶¼È¥¶ÁÅÌ¡ª¡ª·ñÔò±£´æºóÁ¢¿Ì»Ø¶Á»áÄÃµ½ÉÏÒ»ÂÖµÄÖµ¡£
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ò»ï¿½ï¿½**ï¿½ï¿½Í¬ï¿½ï¿½**Öµï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ConfigPort Îª×¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½ï¿½ï¿½ÃµÄ£ï¿½ï¿½ï¿½
+    // ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã¿ï¿½Î¶ï¿½È¥ï¿½ï¿½ï¿½Ì¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ò±£´ï¿½ï¿½ï¿½ï¿½ï¿½Ì»Ø¶ï¿½ï¿½ï¿½ï¿½Ãµï¿½ï¿½ï¿½Ò»ï¿½Öµï¿½Öµï¿½ï¿½
     await writeFile(configPath, JSON.stringify({ magicContext: { protected_tokens: 4000 } }));
     const configPort = createConfigPort({});
     const live = MagicContextConfigSchema.parse({ protected_tokens: 32000 });
@@ -156,7 +156,7 @@ test("A2: read falls back to the file when no session is resident", async () => 
     const result = await readMagicContextConfig(contextWith(), READ_PARAMS, { configPath });
 
     assert.equal(result.config.historian.model, "zcode/glm-4.6");
-    // È±Ï¯×Ö¶Î±ØÐë±» schema µÄ .default() ²¹Æë£¬UI ²ÅÄÜäÖÈ¾Ò»·ÝÍêÕû±íµ¥¡£
+    // È±Ï¯ï¿½Ö¶Î±ï¿½ï¿½ë±» schema ï¿½ï¿½ .default() ï¿½ï¿½ï¿½ë£¬UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È¾Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     assert.equal(result.config.execute_threshold_percentage, 65);
     assert.equal(result.config.cache_ttl, "5m");
   });
@@ -181,7 +181,7 @@ test("A3: a missing or broken config file still yields a complete editable domai
 test("A4: the read envelope is strict and carries no domain field at all", async () => {
   await withTempDir(async (dir) => {
     const configPath = join(dir, "config.json");
-    // È± workspace£¨¶ÁÂ·¾¶²»½ÓÊÜÂã ref£©ÓëÐÅ·âÍâµÄ¶îÍâ¼ü¶¼±ØÐë±»¾Ü¡£
+    // È± workspaceï¿½ï¿½ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ refï¿½ï¿½ï¿½ï¿½ï¿½Å·ï¿½ï¿½ï¿½Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ë±»ï¿½Ü¡ï¿½
     for (const bad of [{ workspaceKey: "k" }, { workspace: WORKSPACE, extra: 1 }]) {
       await assert.rejects(
         () => readMagicContextConfig(contextWith(), bad, { configPath }),
@@ -192,17 +192,17 @@ test("A4: the read envelope is strict and carries no domain field at all", async
         },
       );
     }
-    // ¶ÁÂ·¾¶²»½ÓÊÜ¡¸Ë³±ã¸ÄÒ»ÏÂ¡¹£ºparams Àï³öÏÖ config ×Ö¶Î¾ÍÊÇÔ½È¨£¬Ð´Ö»ÓÐ update Ò»ÌõÂ·¡£
+    // ï¿½ï¿½Â·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ü¡ï¿½Ë³ï¿½ï¿½ï¿½Ò»ï¿½Â¡ï¿½ï¿½ï¿½params ï¿½ï¿½ï¿½ï¿½ï¿½ config ï¿½Ö¶Î¾ï¿½ï¿½ï¿½Ô½È¨ï¿½ï¿½Ð´Ö»ï¿½ï¿½ update Ò»ï¿½ï¿½Â·ï¿½ï¿½
     await assert.rejects(
       () => readMagicContextConfig(contextWith(), { workspace: WORKSPACE, config: {} }, { configPath }),
       (error) => error.code === -32602,
     );
-    // ±»¾ÜµÄÇëÇóÃ»ÓÐÂäÅÌÈÎºÎ¶«Î÷¡£
+    // ï¿½ï¿½ï¿½Üµï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ÎºÎ¶ï¿½ï¿½ï¿½ï¿½ï¿½
     assert.equal(existsSync(configPath), false);
   });
 });
 
-// ©¤©¤ B: UI ±íµ¥µÄÕûÓò¸²¸Ç£¨¶Á-¸Ä-Ð´£© ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// ï¿½ï¿½ï¿½ï¿½ B: UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ò¸²¸Ç£ï¿½ï¿½ï¿½-ï¿½ï¿½-Ð´ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 test("B1: editing one field through the UI form preserves every other key", () => {
   const base = MagicContextConfigSchema.parse({
@@ -228,9 +228,9 @@ test("B1: editing one field through the UI form preserves every other key", () =
     executeThresholdPercentage: 42,
   });
 
-  // ¸ÄµÄÄÇÒ»¸ö×Ö¶ÎÉúÐ§¡£
+  // ï¿½Äµï¿½ï¿½ï¿½Ò»ï¿½ï¿½ï¿½Ö¶ï¿½ï¿½ï¿½Ð§ï¿½ï¿½
   assert.equal(next.execute_threshold_percentage, 42);
-  // Ã»¸ÄµÄ×Ö¶ÎÔ­Ñù´ø»Ø£ºRPC ÊÇÕûÓòÌæ»»£¬´ø²»»Ø¾ÍµÈÓÚÉ¾³ý¡£
+  // Ã»ï¿½Äµï¿½ï¿½Ö¶ï¿½Ô­ï¿½ï¿½ï¿½ï¿½ï¿½Ø£ï¿½RPC ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½æ»»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ø¾Íµï¿½ï¿½ï¿½É¾ï¿½ï¿½ï¿½ï¿½
   assert.equal(next.protected_tokens, 12000);
   assert.equal(next.language, "tr");
   assert.deepEqual(next.historian, base.historian);
@@ -258,7 +258,7 @@ test("B2: per-model overrides survive a UI save (only the default branch is edit
 
   assert.deepEqual(next.execute_threshold_tokens, { default: 55_000, "zcode/big": 90_000 });
   assert.deepEqual(next.cache_ttl, { default: "30m", "zcode/big": "1h" });
-  // Ð´»ØºóÈÔ±ØÐëÄÜ±»Í¬Ò»¸ö schema ½âÎö£¨UI ²»ÄÜ¹¹Ôì³ö·þÎñ¶Ë±ØÈ»¾Ü¾øµÄÓò£©¡£
+  // Ð´ï¿½Øºï¿½ï¿½Ô±ï¿½ï¿½ï¿½ï¿½Ü±ï¿½Í¬Ò»ï¿½ï¿½ schema ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½UI ï¿½ï¿½ï¿½Ü¹ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ë±ï¿½È»ï¿½Ü¾ï¿½ï¿½ï¿½ï¿½ò£©¡ï¿½
   assert.deepEqual(MagicContextConfigSchema.parse(next).cache_ttl, {
     default: "30m",
     "zcode/big": "1h",
@@ -279,15 +279,15 @@ test("B3: clearing optional fields deletes the key instead of writing null or st
   });
 
   assert.equal("protected_tokens" in next, false);
-  // ¿Õ´®²»ÊÇºÏ·¨Öµ£¨z.string().trim().min(1).optional() ¾Ü¾ø¿Õ´®£©£¬±£Áô¾ÉÖµÓÖ»áÈÃ
-  // ¡¸Çå¿Õ¡¹¾²Ä¬Ê§Ð§£¬Òò´Ë±ØÐëÊÇ¡¸¼ü²»´æÔÚ¡¹¡£
+  // ï¿½Õ´ï¿½ï¿½ï¿½ï¿½ÇºÏ·ï¿½Öµï¿½ï¿½z.string().trim().min(1).optional() ï¿½Ü¾ï¿½ï¿½Õ´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½Ö»ï¿½ï¿½ï¿½
+  // ï¿½ï¿½ï¿½ï¿½Õ¡ï¿½ï¿½ï¿½Ä¬Ê§Ð§ï¿½ï¿½ï¿½ï¿½Ë±ï¿½ï¿½ï¿½ï¿½Ç¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú¡ï¿½ï¿½ï¿½
   assert.equal("model" in next.historian, false);
-  // Í¬ historian µÄÆäËüÔªÊý¾ÝÈÔÈ»±£Áô¡£
+  // Í¬ historian ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ôªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½È»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
   assert.equal(next.historian.temperature, 0.3);
   assert.doesNotThrow(() => MagicContextConfigSchema.parse(next));
 });
 
-// ©¤©¤ C: T-U1 ±¾Ìå£¨UI ÐÞ¸Ä ¡ú ÂäÅÌ ¡ú ²»ÖØÆôÉúÐ§£© ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+// ï¿½ï¿½ï¿½ï¿½ C: T-U1 ï¿½ï¿½ï¿½å£¨UI ï¿½Þ¸ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð§ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
 
 test("C (T-U1): a settings save lands on disk, notifies observers, and is read by the next turn", async () => {
   await withTempDir(async (dir) => {
@@ -297,9 +297,9 @@ test("C (T-U1): a settings save lands on disk, notifies observers, and is read b
     const configPort = createConfigPort({});
     configPort.set(ConfigKey.MagicContext, DEFAULT_MAGIC_CONTEXT_CONFIG);
 
-    // Óë bootstrap ×°Åä²ãÍ¬Ò»·Ý¶©ÔÄÓïÒå£ºConfigPort.observe µÄ¶©ÔÄÕßÔÚÃ¿´Î
-    // fan-out Ê±±»µ÷ÓÃ£¬transform ½è´ËÔÚ**ÏÂÒ» turn** ÖØÐÂÈ¡ÅäÖÃ¡£ÕâÀï°ÑËü½¨Ä£³ÉÒ»¸ö
-    // ¡¸Ã¿ turn ¶ÁÒ»´Î¡¹µÄ¶ÁÕß¡ª¡ªËü¶Áµ½µÄ¾ÍÊÇÉúÐ§ÖÐµÄÖµ£¬È«³Ì²»ÖØ½¨ App¡£
+    // ï¿½ï¿½ bootstrap ×°ï¿½ï¿½ï¿½Í¬Ò»ï¿½Ý¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½å£ºConfigPort.observe ï¿½Ä¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ã¿ï¿½ï¿½
+    // fan-out Ê±ï¿½ï¿½ï¿½ï¿½ï¿½Ã£ï¿½transform ï¿½ï¿½ï¿½ï¿½ï¿½**ï¿½ï¿½Ò» turn** ï¿½ï¿½ï¿½ï¿½È¡ï¿½ï¿½ï¿½Ã¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä£ï¿½ï¿½Ò»ï¿½ï¿½
+    // ï¿½ï¿½Ã¿ turn ï¿½ï¿½Ò»ï¿½Î¡ï¿½ï¿½Ä¶ï¿½ï¿½ß¡ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ä¾ï¿½ï¿½ï¿½ï¿½ï¿½Ð§ï¿½Ðµï¿½Öµï¿½ï¿½È«ï¿½Ì²ï¿½ï¿½Ø½ï¿½ Appï¿½ï¿½
     let generation = 0;
     let turnValue = configPort.get(ConfigKey.MagicContext);
     const unsubscribe = configPort.observe().subscribe(ConfigKey.MagicContext, (value) => {
@@ -308,7 +308,7 @@ test("C (T-U1): a settings save lands on disk, notifies observers, and is read b
     });
 
     try {
-      // ©¤©¤ ¢Ù ´ò¿ªÉèÖÃ·ÖÇø£º¶Á»Ø effective Óò×÷Îª±íµ¥³õÖµ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½Ã·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ effective ï¿½ï¿½ï¿½ï¿½Îªï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       const initial = await readMagicContextConfig(
         contextWith(sessionRecord(configPort)),
         READ_PARAMS,
@@ -317,7 +317,7 @@ test("C (T-U1): a settings save lands on disk, notifies observers, and is read b
       const form = magicContextSettingsFormFromConfig(initial.config, UI_FALLBACK_FORM);
       assert.equal(form.executeThresholdPercentage, 65);
 
-      // ©¤©¤ ¢Ú ÓÃ»§¸Ä¼¸¸ö×Ö¶Î£¬µã±£´æ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ã»ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½Ö¶Î£ï¿½ï¿½ã±£ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       const next = buildMagicContextConfigFromForm(initial.config, {
         ...form,
         executeThresholdPercentage: 48,
@@ -331,27 +331,27 @@ test("C (T-U1): a settings save lands on disk, notifies observers, and is read b
       );
       assert.equal(saved.applied, true);
       assert.equal(saved.changed, true);
-      // update »Ø´«µÄÊÇ effective Óò£¬UI ÓÃËü»ØÌî¶ø²»ÊÇ±¾µØ²Ý¸å¡£
+      // update ï¿½Ø´ï¿½ï¿½ï¿½ï¿½ï¿½ effective ï¿½ï¿½UI ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ç±ï¿½ï¿½Ø²Ý¸å¡£
       assert.equal(saved.config.execute_threshold_percentage, 48);
 
-      // ©¤©¤ ¢Û ÂäÅÌ¶ÏÑÔ£ºÄÚÈÝÕæµÄÐ´½øÁËÎÄ¼þ£¬ÇÒÃ»ÓÐÅöÆäËü¶¥²ãÓò ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½ï¿½Ì¶ï¿½ï¿½Ô£ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ð´ï¿½ï¿½ï¿½ï¿½ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       const onDisk = JSON.parse(await readFile(configPath, "utf-8"));
       assert.deepEqual(onDisk.ui, { locale: "en-US" });
       assert.equal(onDisk.magicContext.execute_threshold_percentage, 48);
       assert.equal(onDisk.magicContext.protected_tokens, 16_000);
       assert.equal(onDisk.magicContext.historian.model, "zcode/glm-4.6");
-      // Ã»ÓÐ²ÐÁôÁÙÊ±ÎÄ¼þ£ºatomicWriteJson µÄÁÙÊ±ÎÄ¼þ±ØÐëÒÑ±» rename µô¡£
+      // Ã»ï¿½Ð²ï¿½ï¿½ï¿½ï¿½ï¿½Ê±ï¿½Ä¼ï¿½ï¿½ï¿½atomicWriteJson ï¿½ï¿½ï¿½ï¿½Ê±ï¿½Ä¼ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ñ±ï¿½ rename ï¿½ï¿½ï¿½ï¿½
       assert.deepEqual(await readdir(dir), ["config.json"]);
 
-      // ©¤©¤ ¢Ü observer Í¨Öª£ºfan-out ÖÁÉÙ·¢ÉúÒ»´Î£¬ÇÒ¶Áµ½µÄÊÇÐÂÖµ ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
-      assert.equal(generation, 1, "Ò»´Î±£´æ±ØÐë´¥·¢Ò»´Î ConfigPort fan-out");
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ observer Í¨Öªï¿½ï¿½fan-out ï¿½ï¿½ï¿½Ù·ï¿½ï¿½ï¿½Ò»ï¿½Î£ï¿½ï¿½Ò¶ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
+      assert.equal(generation, 1, "Ò»ï¿½Î±ï¿½ï¿½ï¿½ï¿½ï¿½ë´¥ï¿½ï¿½Ò»ï¿½ï¿½ ConfigPort fan-out");
       assert.equal(turnValue.execute_threshold_percentage, 48);
 
-      // ©¤©¤ ¢Ý ÏÂÒ» turn Ö±½Ó¶Áµ½ÐÂÖµ£ºÍ¬Ò»¸ö Port¡¢Í¬Ò»¸ö½ø³Ì ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½ï¿½Ò» turn Ö±ï¿½Ó¶ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½Í¬Ò»ï¿½ï¿½ Portï¿½ï¿½Í¬Ò»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       assert.equal(configPort.get(ConfigKey.MagicContext).execute_threshold_percentage, 48);
       assert.equal(configPort.get(ConfigKey.MagicContext).historian.model, "zcode/glm-4.6");
 
-      // ©¤©¤ ¢Þ ÃÝµÈÖØÐ´£ºchanged:false£¬µ«ÄÚ´æÈÔÊÕÁ²¡¢fan-out ÈÔ·¢Éú ©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ýµï¿½ï¿½ï¿½Ð´ï¿½ï¿½changed:falseï¿½ï¿½ï¿½ï¿½ï¿½Ú´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½fan-out ï¿½Ô·ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       const again = await updateMagicContextConfig(
         contextWith(sessionRecord(configPort)),
         { workspace: WORKSPACE, config: next },
@@ -364,7 +364,7 @@ test("C (T-U1): a settings save lands on disk, notifies observers, and is read b
         MagicContextConfigSchema.parse(JSON.parse(await readFile(configPath, "utf-8")).magicContext),
       );
 
-      // ©¤©¤ ¢ß ÔÙ´ò¿ªÒ»´ÎÉèÖÃ·ÖÇø£º±íµ¥³õÖµÓëÄÚ´æÒ»ÖÂ£¨»ØÌî±Õ»·£© ©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤©¤
+      // ï¿½ï¿½ï¿½ï¿½ ï¿½ï¿½ ï¿½Ù´ï¿½Ò»ï¿½ï¿½ï¿½ï¿½ï¿½Ã·ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Öµï¿½ï¿½ï¿½Ú´ï¿½Ò»ï¿½Â£ï¿½ï¿½ï¿½ï¿½ï¿½Õ»ï¿½ï¿½ï¿½ ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
       const reread = await readMagicContextConfig(
         contextWith(sessionRecord(configPort)),
         READ_PARAMS,
@@ -386,8 +386,8 @@ test("C: an out-of-range UI value is rejected by the schema and never reaches di
     await writeFile(configPath, JSON.stringify({ magicContext: { protected_tokens: 9000 } }), "utf-8");
     const configPort = createConfigPort({});
 
-    // UI ²àµÄ min/max Ö»ÊÇÌåÑé²ã£»Ô½½çÖµÈÔÈ»±ØÐë±» CLI µÄ schema parse ¾Ü¾ø£¬
-    // ÇÒÔÚ¾Ü¾øµãÉÏ´ÅÅÌÓëÄÚ´æ¶¼Ã»±»Åö¹ý¡£
+    // UI ï¿½ï¿½ï¿½ min/max Ö»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ã£»Ô½ï¿½ï¿½Öµï¿½ï¿½È»ï¿½ï¿½ï¿½ë±» CLI ï¿½ï¿½ schema parse ï¿½Ü¾ï¿½ï¿½ï¿½
+    // ï¿½ï¿½ï¿½Ú¾Ü¾ï¿½ï¿½ï¿½ï¿½Ï´ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½Ú´æ¶¼Ã»ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½ï¿½
     await assert.rejects(
       () =>
         updateMagicContextConfig(

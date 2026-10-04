@@ -1696,7 +1696,7 @@ export function SettingsPage({
                         ) : activeSection === "context" ? (
                           <ServiceProvider services={localHostServices}>
                             {/* magicContext 是用户级参数域：写盘固定落在
-                                ~/.zcode/cli/config.json，workspace 只用于定位本机控制面
+                                ~/.omz/cli/config.json，workspace 只用于定位本机控制面
                                 （读/写都走同一条 read-only lane）。 */}
                             <MagicContextSettingsSection
                               workspacePath={activeWorkspacePath ?? captionWorkspacePath}

@@ -1,5 +1,5 @@
-export const CLI_COMMAND_NAME = "zcode";
-export const CLI_PROCESS_NAME = "zcode-cli";
+export const CLI_COMMAND_NAME = "omz";
+export const CLI_PROCESS_NAME = "omz-cli";
 
 interface ProcessTitleTarget {
   title: string;

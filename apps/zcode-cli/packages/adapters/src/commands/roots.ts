@@ -7,7 +7,10 @@ const COMMANDS_DIR = "commands";
 const GIT_MARKER = ".git";
 const HOME_PREFIX = "~/";
 const PRIORITY_STEP = 10;
-const ZCODE_DIR = ".zcode";
+/** 用户级命令根目录：S32 品牌改名后数据目录是 `~/.omz`（新起，不迁移旧 `~/.zcode`）。 */
+const USER_ZCODE_DIR = ".omz";
+/** 工作区级约定目录，跟随仓库内容，不参与品牌改名。 */
+const WORKSPACE_ZCODE_DIR = ".zcode";
 const AGENTS_DIR = ".agents";
 
 export interface CustomCommandRootResolutionOptions {
@@ -43,13 +46,15 @@ export async function resolveDefaultCustomCommandRoots(
   }
 
   if (includeZcode) {
-    roots.push(...commandRootsForBase(home, "user", nextPriority));
+    roots.push(...commandRootsForBase(home, "user", nextPriority, USER_ZCODE_DIR));
   }
 
   const projectDirectories = await resolveProjectDirectories(resolvedWorkingDirectory);
   for (const directory of projectDirectories) {
     if (includeZcode) {
-      roots.push(...commandRootsForBase(directory, "project", nextPriority));
+      roots.push(
+        ...commandRootsForBase(directory, "project", nextPriority, WORKSPACE_ZCODE_DIR),
+      );
     }
   }
 
@@ -95,11 +100,12 @@ function commandRootsForBase(
   baseDirectory: string,
   scope: CustomCommandRoot["scope"],
   nextPriority: () => number,
+  zcodeDir: string,
 ): CustomCommandRoot[] {
   // 合并而不是 fallback：兼容 `.agents` 命令和原生 `.zcode` 命令需要同时可见。
   // 同一级别 `.zcode` 先扫描，命令同名时仍按“先到先赢”处理。
   return [
-    root(join(baseDirectory, ZCODE_DIR, COMMANDS_DIR), scope, "zcode", nextPriority()),
+    root(join(baseDirectory, zcodeDir, COMMANDS_DIR), scope, "zcode", nextPriority()),
     root(join(baseDirectory, AGENTS_DIR, COMMANDS_DIR), scope, "agents", nextPriority()),
   ];
 }

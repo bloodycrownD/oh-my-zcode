@@ -11,7 +11,7 @@
  *   - the LIVE, in-memory history 鈥?`messageHistory.borrowReadOnlyRuntimeEntries()`,
  *     zero-copy and authoritative for the current request; and
  *   - the PERSISTED history 鈥?the SQLite session store at
- *     `~/.zcode/cli/db/db.sqlite`, which is what a cold start, a background
+ *     `~/.omz/cli/db/db.sqlite`, which is what a cold start, a background
  *     historian run, and every by-id/ordinal lookup need.
  *
  * Both are injected (`RawMessageProviderDeps`) so this file has no ZCode import

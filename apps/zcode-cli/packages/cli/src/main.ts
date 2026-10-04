@@ -63,6 +63,13 @@ async function main(): Promise<void> {
       process.exitCode = await runPluginHostCommand(context, argv.slice(1));
       return;
     }
+    // S32 首启提示：数据根从 `~/.zcode` 换到 `~/.omz`，一次性提示写在数据根自己的
+    // marker 里。协议进程（stdout 是 ZCode Protocol 帧通道）和存储准备模式都不打，
+    // 否则人类可读文本会混进协议流，storage 模式的输出则由调用方解析。
+    if (!isProtocol && !argv.includes("--prepare-storage")) {
+      const { maybeShowDataDirFirstRunNotice } = await import("./data-dir-notice.js");
+      maybeShowDataDirFirstRunNotice({ env: process.env, stderr });
+    }
     if (!argv.includes("--prepare-storage")) {
       const { prepareCliProviderRuntimeEnv } = await import("./provider-runtime-env.js");
       Object.assign(

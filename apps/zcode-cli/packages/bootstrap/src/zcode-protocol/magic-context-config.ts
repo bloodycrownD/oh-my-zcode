@@ -41,7 +41,7 @@ import {
  * 进程。反过来（先写盘成功、再广播）最坏只是「磁盘已改但本次进程未生效」，
  * 重启即追上，属于可恢复方向。
  *
- * 目标路径固定为用户级 `~/.zcode/cli/config.json`（`getDefaultConfigPath()`），
+ * 目标路径固定为用户级 `~/.omz/cli/config.json`（`getDefaultConfigPath()`），
  * 不接受调用方传路径：D-12 的配置真源就是这一个文件，让协议参数带路径等于开一个
  * 「写到任意文件」的入口。workspace 维度只用于定位内存侧的 ConfigPort。
  */

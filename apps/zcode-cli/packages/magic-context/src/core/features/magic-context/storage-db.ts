@@ -281,7 +281,7 @@ export function resolveDatabasePath(dbPathOverride?: string): { dbDir: string; d
     // resolver and every direct caller of that helper are covered by one
     // implementation. See its doc comment for the incident history.
     const dbDir = getMagicContextStorageDir();
-    // FORK (D-5): the fork's store is `~/.zcode/cli/db/magic-context.db`. Upstream
+    // FORK (D-5): the fork's store is `~/.omz/cli/db/magic-context.db`. Upstream
     // named it `context.db` inside a shared cortexkit directory. Every place below
     // that derives the DB name from the resolved dir goes through here or
     // `MAGIC_CONTEXT_DB_FILE_NAME`, so the name stays in one place.

@@ -7,7 +7,10 @@ const GIT_MARKER = ".git";
 const HOME_PREFIX = "~/";
 const PRIORITY_STEP = 10;
 const SKILLS_DIR = "skills";
-const ZCODE_DIR = ".zcode";
+/** 用户级技能根目录：S32 品牌改名后数据目录是 `~/.omz`（新起，不迁移旧 `~/.zcode`）。 */
+const USER_ZCODE_DIR = ".omz";
+/** 工作区级约定目录，跟随仓库内容，不参与品牌改名。 */
+const WORKSPACE_ZCODE_DIR = ".zcode";
 const AGENTS_DIR = ".agents";
 
 export interface SkillRootResolutionOptions {
@@ -43,13 +46,15 @@ export async function resolveDefaultSkillRoots(
   }
 
   if (includeZcode) {
-    roots.push(...skillRootsForBase(home, "user", nextPriority));
+    roots.push(...skillRootsForBase(home, "user", nextPriority, USER_ZCODE_DIR));
   }
 
   const projectDirectories = await resolveProjectSkillDirectories(resolvedWorkingDirectory);
   for (const directory of projectDirectories) {
     if (includeZcode) {
-      roots.push(...skillRootsForBase(directory, "project", nextPriority));
+      roots.push(
+        ...skillRootsForBase(directory, "project", nextPriority, WORKSPACE_ZCODE_DIR),
+      );
     }
   }
 
@@ -95,11 +100,12 @@ function skillRootsForBase(
   baseDirectory: string,
   scope: SkillRoot["scope"],
   nextPriority: () => number,
+  zcodeDir: string,
 ): SkillRoot[] {
   // 合并而不是 fallback：用户可能同时安装原生 `.zcode` skill 和兼容 `.agents` skill。
   // 同一级别仍保持 `.zcode` 优先，后续同名按 root 顺序解析。
   return [
-    root(join(baseDirectory, ZCODE_DIR, SKILLS_DIR), scope, "zcode", nextPriority()),
+    root(join(baseDirectory, zcodeDir, SKILLS_DIR), scope, "zcode", nextPriority()),
     root(join(baseDirectory, AGENTS_DIR, SKILLS_DIR), scope, "agents", nextPriority()),
   ];
 }

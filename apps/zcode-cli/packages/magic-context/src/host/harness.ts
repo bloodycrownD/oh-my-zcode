@@ -62,7 +62,7 @@ export function initializeMagicContextHost(): MagicContextHostSnapshot {
   setHarness(ZCODE_HARNESS_ID);
 
   // S15 leftover #5: retarget the project artifact directory off the user's
-  // project tree. The default resolver is the fork's `~/.zcode` location; a host
+  // project tree. The default resolver is the fork's `~/.omz` location; a host
   // that wants its own calls `setProjectDirResolver` afterwards.
   setProjectDirResolver(getZCodeProjectMagicContextDir);
 

@@ -33,6 +33,10 @@ import {
 
 const SETTINGS_FILE = "settings.json";
 const ZCODE_CONFIG_FILE = "config.json";
+/** 用户级数据目录（S32 品牌改名：`.zcode` → `.omz`，新起不迁移）。 */
+const USER_ZCODE_DIR = ".omz";
+/** 工作区级约定目录，跟随仓库内容，不参与品牌改名。 */
+const WORKSPACE_ZCODE_DIR = ".zcode";
 const HOOK_EVENTS: readonly HookEvent[] = [
   "SessionStart",
   "UserPromptSubmit",
@@ -56,7 +60,9 @@ function resolveUserHomeDir(): string {
 function getRootDir(source: SettingsDirectorySource, workspacePath?: string): string {
   const baseDir = workspacePath ?? resolveUserHomeDir();
   if (source === "zcode") {
-    return workspacePath ? join(baseDir, ".zcode") : join(baseDir, ".zcode", "cli");
+    // 用户级数据目录在 S32 品牌改名后是 `~/.omz`（新起，不迁移旧 `~/.zcode`）；
+    // 工作区级约定目录仍叫 `.zcode`，随仓库走，不受品牌改名影响。
+    return workspacePath ? join(baseDir, WORKSPACE_ZCODE_DIR) : join(baseDir, USER_ZCODE_DIR, "cli");
   }
   return join(baseDir, source === "agents" ? ".agents" : ".claude");
 }
@@ -165,7 +171,7 @@ async function readPersistentWorkspaceHookTrustDigests(
       : isAbsolute(configured)
         ? resolve(configured)
         : resolve(home, configured)
-    : join(home, ".zcode");
+    : join(home, ".omz");
   const trustFilePath = join(storageRoot, "security", "workspace-hook-trust-v1.json");
 
   // 异步读取 + ENOENT 区分：不用 existsSync 预检——同步调用会阻塞服务

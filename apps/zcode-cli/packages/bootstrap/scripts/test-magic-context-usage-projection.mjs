@@ -21,7 +21,7 @@
  *      （这是 T-U2 能自动化的一半；另一半「看起来对不对」留给 manual）。
  *
  * 隔离：所有 db 写入都指向 `mkdtemp` 出来的临时目录，**绝不触碰用户真实的
- * `~/.zcode/magic-context.db`**（`openDatabase` 显式传路径，不走 host 解析器）。
+ * `~/.omz/magic-context.db`**（`openDatabase` 显式传路径，不走 host 解析器）。
  *
  * 依赖已构建的 dist：`@zcode/shared`、`@zcode/magic-context`、`@zcode/bootstrap`，
  * 以及 `packages/ui/dist/chat-input-toolbar/magicContextUsageRows.js`（由根

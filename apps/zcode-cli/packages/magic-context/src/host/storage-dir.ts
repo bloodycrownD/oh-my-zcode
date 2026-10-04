@@ -4,7 +4,7 @@
  * Two jobs, both of them "where does this fork write".
  *
  * (a) THE MAIN DATABASE. Step 15 already retargeted it through
- *     `core/shared/data-path.ts` (`~/.zcode/cli/db/magic-context.db`, honoring
+ *     `core/shared/data-path.ts` (`~/.omz/cli/db/magic-context.db`, honoring
  *     `MAGIC_CONTEXT_DB_DIR` and the test-isolation ladder). This file does NOT
  *     re-derive that: it re-exports the core resolution so callers have ONE
  *     documented entry point, and adds the fork's only override knob
@@ -21,7 +21,7 @@
  *       2. Writing transient historian dumps into a user's repo dirties a tree
  *          they may not even own (the ZCode install is global; the project is
  *          not), and would require mutating the project's `.gitignore`.
- *     The target is `~/.zcode/cli/magic-context/projects/<projectKey>/` where
+ *     The target is `~/.omz/cli/magic-context/projects/<projectKey>/` where
  *     `projectKey` is the SAME key algorithm core's storage already uses for
  *     project-scoped paths — `sha256(projectDirectoryKey(directory))`, the
  *     construction in `core/features/magic-context/memory/project-identity-cache.ts:11-14`.
@@ -89,7 +89,7 @@ export interface MagicContextDatabaseLocation {
  *      processes on one host can never select different stores.
  *   2. `MAGIC_CONTEXT_DB_DIR` + test isolation + `NODE_ENV` backstop, all of which
  *      live in `getMagicContextStorageResolution()`.
- *   3. `~/.zcode/cli/db`.
+ *   3. `~/.omz/cli/db`.
  */
 export function getMagicContextDatabaseLocation(): MagicContextDatabaseLocation {
   const override = process.env.MAGIC_CONTEXT_DB_PATH?.trim();
@@ -129,7 +129,7 @@ export function getProjectKey(directory: string): string {
 
 /** Root of the fork's project-scoped artifact tree. */
 export function getProjectArtifactsRoot(): string {
-  // `~/.zcode/cli/magic-context/projects/` — a sibling of `cli/db/`, not a child:
+  // `~/.omz/cli/magic-context/projects/` — a sibling of `cli/db/`, not a child:
   // `cli/db/` is the SQLite directory (db.sqlite + WAL sidecars), and a per-project
   // tree does not belong inside it.
   return join(getDataDir(), "cli", "magic-context", "projects");
@@ -168,7 +168,7 @@ export function setProjectDirResolver(resolver?: ProjectDirResolver | null): voi
 
 /**
  * The one call every artifact writer must make. Returns whatever resolver is
- * installed — the fork's `~/.zcode` location by default.
+ * installed — the fork's `~/.omz` location by default.
  *
  * This is the S20 wiring point; see the header comment.
  */

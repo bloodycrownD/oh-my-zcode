@@ -40,7 +40,7 @@ export const ConfigKey = {
   // Memory
   MemoryUse: "memory.use",
 
-  // Magic Context 参数域（D-12 配置真源 ~/.zcode/cli/config.json 顶层 `magicContext`）
+  // Magic Context 参数域（D-12 配置真源 ~/.omz/cli/config.json 顶层 `magicContext`）
   MagicContext: "magicContext",
 
   // MCP
@@ -331,8 +331,8 @@ export const DefaultRuntimeConfig: RuntimeConfig = {
     allowMediumRiskInAuto: false,
   },
   storage: {
-    dir: "~/.zcode",
-    sessionDbPath: "~/.zcode/cli/db/db.sqlite",
+    dir: "~/.omz",
+    sessionDbPath: "~/.omz/cli/db/db.sqlite",
   },
   network: {
     timeout: 180000,

@@ -72,7 +72,7 @@ export interface PluginRemovePatchResult {
 }
 
 const DEFAULT_CONFIG_FILE = "config.json";
-const DEFAULT_BASE_DIR = "~/.zcode/cli";
+const DEFAULT_BASE_DIR = "~/.omz/cli";
 
 /**
  * Resolve path with ~ expansion

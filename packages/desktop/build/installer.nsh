@@ -468,11 +468,11 @@
 
     StrCpy $R2 ""
 
-    IfFileExists "$R9\.zcode\*.*" 0 +2
-      StrCpy $R2 "$R9\.zcode"
+    IfFileExists "$R9\.omz\*.*" 0 +2
+      StrCpy $R2 "$R9\.omz"
     StrCmp $R2 "" 0 zcodeFindNestedDataDirDone
-    IfFileExists "$R9\.zcode" 0 zcodeFindNestedDataDirListChildren
-      StrCpy $R2 "$R9\.zcode"
+    IfFileExists "$R9\.omz" 0 zcodeFindNestedDataDirListChildren
+      StrCpy $R2 "$R9\.omz"
     StrCmp $R2 "" 0 zcodeFindNestedDataDirDone
 
     zcodeFindNestedDataDirListChildren:

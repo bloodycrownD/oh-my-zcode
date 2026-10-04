@@ -8,7 +8,7 @@ export function getDataDir(): string {
     // FORK: ZCode's data root. Upstream resolved an XDG data home and hung a
     // `cortexkit/` subtree off it; this fork follows the convention the session
     // store already uses (`adapters/src/storage/session-store/paths.ts`).
-    return path.join(os.homedir(), ".zcode");
+    return path.join(os.homedir(), ".omz");
 }
 
 /**
@@ -182,7 +182,7 @@ export function getOpenCodeStorageDir(): string {
  * absolute so every process on a host selects one store.
  *
  * FORK (D-5). The store is an independent `magic-context.db` under
- * `~/.zcode/cli/db`, beside ZCode's own `db.sqlite`, rather than a
+ * `~/.omz/cli/db`, beside ZCode's own `db.sqlite`, rather than a
  * `cortexkit/magic-context` subtree of an XDG data home. Upstream's precedence
  * ladder was test isolation → `MAGIC_CONTEXT_STORAGE_DIR` → `XDG_DATA_HOME` →
  * platform default; both override layers collapse into the single

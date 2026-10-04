@@ -611,7 +611,7 @@ function withEnv(vars, run) {
   }
 }
 
-await it("storage-dir: the default store is ~/.zcode/cli/db/magic-context.db", () => {
+await it("storage-dir: the default store is ~/.omz/cli/db/magic-context.db", () => {
   withEnv(
     {
       MAGIC_CONTEXT_DB_DIR: undefined,
@@ -621,7 +621,7 @@ await it("storage-dir: the default store is ~/.zcode/cli/db/magic-context.db", (
     () => {
       const location = getMagicContextDatabaseLocation();
       assert.equal(location.source, "ZCode data dir");
-      assert.equal(location.dbDir, join(homedir(), ".zcode", "cli", "db"));
+      assert.equal(location.dbDir, join(homedir(), ".omz", "cli", "db"));
       assert.equal(location.dbPath, join(location.dbDir, MAGIC_CONTEXT_DB_FILE_NAME));
       assert.equal(getMagicContextDatabasePath(), location.dbPath);
       assert.equal(MAGIC_CONTEXT_DB_FILE_NAME, "magic-context.db");
@@ -688,7 +688,7 @@ await it("storage-dir: the project dir is redirected OFF the user's project tree
   const redirected = getZCodeProjectMagicContextDir(project);
   assert.equal(redirected, join(getProjectArtifactsRoot(), getProjectKey(project)));
   assert.ok(
-    redirected.startsWith(join(homedir(), ".zcode", "cli", "magic-context", "projects")),
+    redirected.startsWith(join(homedir(), ".omz", "cli", "magic-context", "projects")),
     "artifacts live under the ZCode home",
   );
   assert.equal(redirected.includes(".cortexkit"), false, "the cortexkit subtree is gone");
@@ -754,7 +754,7 @@ await it("harness: a mid-session harness swap is still refused by core", () => {
 // read-only smoke against the user's real session store
 // ─────────────────────────────────────────────────────────────────────────────
 
-const SESSION_DB = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+const SESSION_DB = join(homedir(), ".omz", "cli", "db", "db.sqlite");
 
 await it("smoke: the real session store opens READ-ONLY and has the expected schema", (t) => {
   if (!existsSync(SESSION_DB)) {
@@ -973,7 +973,7 @@ await it("smoke: the real store was not modified", (t) => {
     db.close();
   }
   assert.equal(existsSync(SESSION_DB), true);
-  assert.equal(dirname(SESSION_DB), join(homedir(), ".zcode", "cli", "db"));
+  assert.equal(dirname(SESSION_DB), join(homedir(), ".omz", "cli", "db"));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

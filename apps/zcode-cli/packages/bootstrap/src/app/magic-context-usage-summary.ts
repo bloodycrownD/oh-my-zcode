@@ -53,7 +53,7 @@ export async function readMagicContextUsageSummary(
 ): Promise<MagicContextUsageSummary> {
   // 显式的 nullish 守卫：包侧 `readMagicContextStatusSnapshot` 的 `options.db ?? …`
   // 在 db 为 null 时会**回退去打开默认存储**（也就是用户真实的
-  // `~/.zcode/magic-context.db`），而这里要的恰恰是「没有库 ⇒ 没有读数」。
+  // `~/.omz/magic-context.db`），而这里要的恰恰是「没有库 ⇒ 没有读数」。
   // 生产路径上 `db` 必非空（`createMagicContextTurnTransform` 打不开库就直接
   // return undefined），所以这条守卫是给未来的调用方与本测试用的护栏。
   if (!db) return { usage: null };

@@ -192,8 +192,8 @@ const pluginsSchema = z.object({
   suppressedBuiltins: z.array(z.string().min(1)).optional(),
 });
 
-export const LEGACY_CUA_PLUGIN_ID = "zcode-cua@zcode-plugins-official";
-export const CANONICAL_CUA_PLUGIN_ID = "computer-use@zcode-plugins-official";
+export const LEGACY_CUA_PLUGIN_ID = "zcode-cua@oh-my-zcode-official";
+export const CANONICAL_CUA_PLUGIN_ID = "computer-use@oh-my-zcode-official";
 
 export function canonicalizePluginId(pluginId: string): string {
   return pluginId === LEGACY_CUA_PLUGIN_ID ? CANONICAL_CUA_PLUGIN_ID : pluginId;

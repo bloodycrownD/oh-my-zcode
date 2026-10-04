@@ -13,20 +13,20 @@ import {
 import { installScriptSource } from "./zcode-distribution/installer.mjs";
 
 const root = resolve(import.meta.dirname, "..");
-const defaultOutDir = resolve(root, "dist", "zcode");
+const defaultOutDir = resolve(root, "dist", "oh-my-zcode");
 const defaultBaseUrl = (await loadEndpointEnv()).ZCODE_DIST_BASE_URL?.trim() || "";
-const packageDirName = "zcode";
+const packageDirName = "oh-my-zcode";
 const usage = `Usage:
   pnpm build:zcode
   node scripts/build-zcode.mjs --skip-build
   node scripts/build-zcode.mjs --version 3.3.3-dev.1
-  node scripts/build-zcode.mjs --out-dir dist/zcode
-  node scripts/build-zcode.mjs --base-url http://host/zcode/deps/zcode/
+  node scripts/build-zcode.mjs --out-dir dist/oh-my-zcode
+  node scripts/build-zcode.mjs --base-url http://host/oh-my-zcode/deps/oh-my-zcode/
 
 Options:
   --skip-build        Reuse existing web/server/agent build outputs.
   --version <text>    Release version. Defaults to root package.json version.
-  --out-dir <path>    Output directory. Defaults to dist/zcode.
+  --out-dir <path>    Output directory. Defaults to dist/oh-my-zcode.
   --base-url <url>    Default install.sh download base URL.
   --help, -h          Show this help.
 `;
@@ -199,7 +199,7 @@ async function stageZCodePackage({ packageRoot, version }) {
   await mkdir(resolve(packageRoot, "bin"), {
     recursive: true,
   });
-  const runner = resolve(packageRoot, "bin", "zcode.mjs");
+  const runner = resolve(packageRoot, "bin", "omz.mjs");
   await cp(resolve(root, "scripts/zcode-distribution/runner.mjs"), runner);
   await chmod(runner, 0o755);
 
@@ -276,7 +276,7 @@ async function main() {
       {
         baseUrl: options.baseUrl,
         createdAt: new Date().toISOString(),
-        name: "zcode",
+        name: "oh-my-zcode",
         sha256,
         tarball: tarballName,
         version,

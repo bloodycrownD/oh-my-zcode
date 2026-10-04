@@ -15,6 +15,8 @@ const SENSITIVE_MEMORY_PATH_SEGMENTS = new Set([
   "objects",
   "refs",
   ".zcode",
+  // S32 品牌改名后的用户级数据目录（`~/.omz`），与工作区级 `.zcode` 同样受保护。
+  ".omz",
   "skills",
   "commands",
   "agents",

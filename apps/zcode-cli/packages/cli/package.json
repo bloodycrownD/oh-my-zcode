@@ -2,9 +2,9 @@
   "name": "@zcode/cli",
   "version": "0.1.0",
   "private": true,
-  "description": "Main CLI application for zcode",
+  "description": "Main CLI application for oh-my-zcode",
   "bin": {
-    "zcode": "./dist/zcode.cjs"
+    "omz": "./dist/zcode.cjs"
   },
   "files": [
     "dist"
