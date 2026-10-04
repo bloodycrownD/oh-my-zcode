@@ -57,6 +57,7 @@ import {
   setMagicContextRecompRunner,
   startCompartmentAgent,
   type ContextDatabase,
+  type ContextUsage,
   type HiddenCompletionExecutor,
   type HiddenCompartmentRunnerDeps,
   type HistorianRunStatus,
@@ -78,6 +79,15 @@ export interface MagicContextHistorianHostDeps {
   workingDirectory: string;
   /** `"provider/model"` → Model。缺席（单测/不装配模型面的 embedder）时 executor 不装。 */
   createSidecarModel?: CreateSidecarModel;
+  /**
+   * S24-fix：本进程已知的真实占用读数（`{percentage, inputTokens}`），供后台 pass
+   * 解 protected-tail 边界。返回 `null` = 「还没量到」，不是「很空」——两个值让
+   * 边界解出的可跑头部宽度不同，混为一谈会切进本该保护的尾巴。
+   *
+   * S24 之前这里恒为 `null`（`usage:null` provisional-zero），因为 `contextUsageMap`
+   * 没有生产者。S24 补上 recorder 之后可以给真读数了。
+   */
+  readLiveUsage?: () => ContextUsage | null;
   /** 会话的根 trace；sidecar 请求在它下面开子 span，于是日志能串回同一轮。 */
   traceContext?: TraceContext;
 }
@@ -261,6 +271,7 @@ export function createMagicContextHistorianHost(
       historianChunkTokens: getHistorianChunkTokens(),
       executeThresholdPercentage,
       mainContextLimit,
+      liveUsage: deps.readLiveUsage?.() ?? null,
       forceDrainQuota,
     });
   };
@@ -344,24 +355,35 @@ async function runOneCompartmentPass(input: {
   historianChunkTokens: number;
   executeThresholdPercentage: number;
   mainContextLimit: number;
+  liveUsage: ContextUsage | null;
   forceDrainQuota: boolean;
 }): Promise<HistorianRunStatus> {
   if (getActiveCompartmentRun(input.sessionId)) return "no-op";
 
-  // 后台 pass 没有「本 pass 的 live usage」——`contextUsageMap` 在 ZCode 侧至今没有
-  // 生产者（S19b 遗留）。于是这里用 `usage:null`（provisional-zero）解边界：
-  // 判据仍然是「尾部按 token 预算圈定、头部留下可跑区间」，只是压力读数取 0。
-  // 结果是**偏保守**：压力低时 protected tail 更宽、可跑头部更窄，因此宁可少跑
-  // 一次也不会切掉本该保护的尾巴。
+  // 边界用**本进程已知的真实读数**（S24-fix）。S24 之前这里恒传 `usage:null`
+  // （provisional-zero），因为 `contextUsageMap` 那时没有生产者；现在 recorder 记下的
+  // 就是上一轮/本轮 provider 真报的占用，于是 protected tail 按真实压力圈定。
+  // 仍然读不到时保持 `null`（偏保守：压力按 0 算 → 保护尾部更宽 → 可跑头部更窄，
+  // 宁可少跑一次也不会切掉本该保护的尾巴）。
   const boundarySnapshot = resolveOpenCodeProtectedTailBoundary({
     db: input.db,
     sessionId: input.sessionId,
     mode: "incremental-runner",
     contextLimit: input.mainContextLimit,
     executeThresholdPercentage: input.executeThresholdPercentage,
-    usage: null,
+    usage: input.liveUsage,
   });
   if (!hasRunnableCompartmentWindow(boundarySnapshot)) return "no-op";
+
+  const resolveBoundary = (): ReturnType<typeof resolveOpenCodeProtectedTailBoundary> =>
+    resolveOpenCodeProtectedTailBoundary({
+      db: input.db,
+      sessionId: input.sessionId,
+      mode: "incremental-runner",
+      contextLimit: input.mainContextLimit,
+      executeThresholdPercentage: input.executeThresholdPercentage,
+      usage: input.liveUsage,
+    });
 
   const runnerDeps: HiddenCompartmentRunnerDeps = {
     client: undefined,
@@ -372,6 +394,14 @@ async function runOneCompartmentPass(input: {
     historianTimeoutMs: input.historianTimeoutMs,
     boundarySnapshot,
     currentContextLimit: boundarySnapshot.contextLimit,
+    // S24-fix：historian 是异步的，从触发到它真的开跑之间会话又落了新消息，于是
+    // ordinal→id 的映射整体后移，快照必然被判 stale。上游为 manual-wrapup 准备的
+    // 这条「run 时重解一次」钩子在这里正是同一件事；不接它，runner 每轮都诚实
+    // no-op（实测日志：`historian no-op: stale protected-tail snapshot (offset
+    // ordinal 1 id changed)`），compartment 永远产不出来。重解用的是同一份判据与
+    // 同一个真实读数，所以 protected-tail 保证不变——重解后的
+    // protectedTailStart/eligibleEnd 是按**当下**的消息算出来的。
+    refreshBoundarySnapshot: () => resolveBoundary(),
     hiddenCompletionExecutor: input.executor,
     getNotificationParams: () => ({}),
     ...(input.historianModel === undefined ? {} : { model: input.historianModel }),

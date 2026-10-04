@@ -285,6 +285,16 @@ export {
 export { updateSessionMeta } from "./core/features/magic-context/storage-meta.js";
 export { loadPersistedUsage } from "./core/features/magic-context/storage-meta-persisted.js";
 
+/**
+ * `"provider/model"` → 包内的模型身份 key（`piModelRefToCanonical` 之后）。
+ *
+ * FORK (S24-fix)：宿主侧的 usage recorder 必须把**同一个**函数算出来的 key 写进
+ * `session_meta.last_observed_model_key` —— transform 的换模型失效判据拿它与
+ * `resolveModelKey(currentOutgoingModel)` 比。宿主自己拼字符串等于抄一份规范化规则，
+ * provider 别名一改就会静默失配。
+ */
+export { resolveModelKey } from "./core/deferred/event-resolvers.js";
+
 // ── 4b. D 组 ctx 工具面 + 状态读取（Step 21） ──────────────────────────────────
 
 /**

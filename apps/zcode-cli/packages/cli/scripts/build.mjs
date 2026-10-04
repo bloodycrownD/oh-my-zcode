@@ -11,7 +11,20 @@ const executableFileMode = 0o755;
 const packageJsonFile = "package.json";
 const rootPackageVersionError = "Root package.json must define a non-empty string version.";
 const desktopAgentBuildFlag = "--desktop-agent";
-export const resolveBuildExternal = () => ["@zcode/tui", "playwright-core", "koffi"];
+// `@zcode/magic-context` (S24-fix) 与 Ink/TUI 同款：它的 SQLite chokepoint
+// (`core/shared/sqlite.ts`) 为同时支持 bun:sqlite / node:sqlite 用了**可变说明符的
+// 动态 import**，于是产物里有模块级 await，而 CLI 打成 CJS —— esbuild 直接报
+// "Top-level await is currently not supported with the cjs output format"。
+// 同一棵图里还有三处 `import.meta.url`（`read-session-formatting` 的
+// `createRequire(import.meta.url)`、`migration-worker-client`），cjs 下会被静默清空成
+// `undefined`——前者会让 tokenizer 静默退化成字符计数，后者会拼出错误的 worker 路径。
+// 与 tui 一样交给 Node 原生加载路径，不内联。
+export const resolveBuildExternal = () => [
+  "@zcode/tui",
+  "@zcode/magic-context",
+  "playwright-core",
+  "koffi",
+];
 
 export const readZodBuildVersion = async () => {
   const sharedPackage = JSON.parse(

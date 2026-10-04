@@ -27,7 +27,13 @@
  *   db                              openDatabase(getMagicContextDatabasePath())
  *   tagger                          createTagger()
  *   scheduler                       createZCodeScheduler()：包内真身（S21）+ 键名映射
- *   contextUsageMap                 空 Map —— 无生产者（缺口 S20/S24）
+ *   contextUsageMap                 S24：宿主 usage recorder 的内存表（装配期 prime
+ *                                   回上一轮落库读数）
+ *   hostProcessLifetime             S24-fix：`"one-process-per-turn"`。ZCode CLI 一轮
+ *                                   prompt 一个进程，所以包内 transform 的「首 pass
+ *                                   usage 重置」必须走累积语义——不声明它，每一轮都
+ *                                   会把上一轮的占用读数清成 0%（T-M2/T-M3/T-M6 的
+ *                                   共同根因，见 MVP 报告 §3）
  *   clearReasoningAge               50（源 hook.ts 的 `?? 50`；clear_reasoning_age
  *                                   不在 E 组白名单）
  *   historyRefreshSessions /        装配层持有的 Set / Map（生产者 S20）
@@ -67,8 +73,10 @@
  *   - 模型窗口几何（`models-dev-cache` / `window-geometry`）：包内模块级单例且没有
  *     注入缝，包外改不了（改包内是 S20 的特权）。S19b 让 transform 走自己的默认/检测
  *     回退，窗口偏小只会让阈值更保守，不会误发超大请求。
- *   - `contextUsageMap` 无生产者。后台 historian pass 因此用 `usage:null`
- *     （provisional-zero）解 protected-tail 边界——偏保守，不会切进保护尾部。
+ *   - `contextUsageMap` 的生产者（S24）在宿主侧：后台 historian pass 因此能读到真实
+ *     占用读数来解 protected-tail 边界（`readUsage`），不再需要 `usage:null` 的
+ *     provisional-zero。真正没有读数时才回 `null`（不知道 ≠ 很空）。
+ *   - 首 pass usage 重置的上游语义由 `hostProcessLifetime` 关掉（见上表）。
  *   - 配置面（D-12）已接线：写盘 `updateMagicContextInFileConfig`、内存
  *     `ConfigPort.set`、推送 `ConfigPort.observe` 三段齐备；桌面设置页的调用侧
  *     （Step 29）落地后才有用户可改的入口。
@@ -116,6 +124,7 @@ import {
   projectStoredMessage,
   replayLkg,
   resolveLkgModelKeys,
+  resolveModelKey,
   snapshotRuntimeEntries,
   updateSessionMeta,
   withRawMessageProvider,
@@ -196,11 +205,16 @@ export interface MagicContextUsageMapEntry {
  *     内存等于每轮从 0 开始——实测那样 scheduler 永远 `defer`，drop 与 historian
  *     一次都不启动。
  *
- * 跨进程那一半由 {@link MagicContextUsageRecorder.prime} 在装配期读回：transform 的
- * 「首 pass 重置」会把落库的百分比清零（上游那条规则假定一个进程 = 一个会话，而
- * ZCode 是一个进程 = 一轮），所以**读数必须已经在内存里**，重置动不了它。换模型
- * 时 transform 自己会 `contextUsageMap.delete(sessionId)`，所以这份读数不会跨模型
- * 生效。
+ * 跨进程那一半由 {@link MagicContextUsageRecorder.prime} 在装配期读回：CLI 每一轮
+ * prompt 都是**一个新进程**，只写内存等于每轮从 0 开始——实测那样 scheduler 永远
+ * `defer`，drop 与 historian 一次都不启动。读回之后本进程的第一 pass 就带着它，
+ * 而 transform 的「首 pass 重置」在 `hostProcessLifetime:"one-process-per-turn"`
+ * 下不再清零（S24-fix，见上面装配表的注与 MVP 报告 §3）。换模型时 transform 自己
+ * 会 `contextUsageMap.delete(sessionId)`，所以这份读数不会跨模型生效。
+ *
+ * 落库时**同一笔**写上 `last_observed_model_key` / `last_usage_context_limit`：那是
+ * 「这条读数在哪个模型、哪个窗口上量的」的凭据，transform 的换模型失效判据只看这两
+ * 列（`lastObservedModelKey`）+ 那两列计出来的占比。
  *
  * 百分比的分母是**本轮真实模型的窗口**——装配期没有 turn，也就还没有这个事实，
  * 所以分母来自 `noteLiveModel`。
@@ -210,10 +224,23 @@ export interface MagicContextUsageRecorder {
   readonly contextUsageMap: Map<string, MagicContextUsageMapEntry>;
   /** 装配期：把上一次落库的读数读回内存，让本进程的第一 pass 就带着它。 */
   prime: (db: ContextDatabase) => void;
-  /** 记住本轮真实模型的窗口，作为百分比分母。 */
-  noteLiveModel: (model: { properties?: { contextWindow?: number } }) => void;
+  /** 记住本轮真实模型的窗口与身份，作为百分比分母 + `last_observed_model_key`。 */
+  noteLiveModel: (model: MagicContextRecorderModel) => void;
   /** 记一次 provider usage。`contextUsed` 缺席（provider 未报）时**不写**。 */
   record: (input: { at?: number; usage: ModelUsage }) => void;
+  /**
+   * S24-fix：本进程当前已知的真实占用读数（内存优先，落库兜底），供后台 historian
+   * pass 解 protected-tail 边界。**没有任何读数时返回 `null`**——「不知道」与「0」
+   * 不是一回事，边界解算对两者的偏袒方向相反。
+   */
+  readUsage: () => MagicContextUsageMapEntry["usage"] | null;
+}
+
+/** `noteLiveModel` 只需要模型的这两处；用 Pick 免得装配层为了传值造一个 Model。 */
+export interface MagicContextRecorderModel {
+  providerId?: string;
+  modelId?: string;
+  properties?: { contextWindow?: number };
 }
 
 export function createMagicContextUsageRecorder(
@@ -222,6 +249,7 @@ export function createMagicContextUsageRecorder(
 ): MagicContextUsageRecorder {
   const contextUsageMap = new Map<string, MagicContextUsageMapEntry>();
   let contextWindow: number | undefined;
+  let modelKey: string | null = null;
   let db: ContextDatabase | undefined;
   const note = (level: "debug" | "info", event: string, detail: Record<string, unknown>): void =>
     logger?.[level]("Magic context usage recorder", {
@@ -255,6 +283,11 @@ export function createMagicContextUsageRecorder(
     noteLiveModel: (model) => {
       const window = model.properties?.contextWindow;
       if (typeof window === "number" && window > 0) contextWindow = window;
+      // S24-fix：`last_observed_model_key` 是 transform 换模型失效判据的**唯一**输入
+      // （`persistedUsageBeforeResets.lastObservedModelKey`）。不写它，「换模型后用旧
+      // 模型的占用去算新模型的阈值」这条路径就永远不触发。这里用包内 `resolveModelKey`
+      // 而不是自己拼字符串——宿主另写一份 key 规范化迟早与包内漂移。
+      modelKey = resolveModelKey(model.providerId, model.modelId) ?? null;
     },
     record: ({ at = Date.now(), usage }) => {
       const inputTokens = getModelUsageContextTokens(usage);
@@ -285,6 +318,12 @@ export function createMagicContextUsageRecorder(
           lastContextPercentage: percentage,
           lastInputTokens: inputTokens,
           lastResponseTime: at,
+          // S24-fix：这两列与前两列必须**同一笔**落库。`last_observed_model_key` /
+          // `last_usage_context_limit` 是「上一次读数是在哪个模型、哪个窗口上量的」
+          // 的凭据；缺了它们，下一个进程读到这条读数时无法判断它属于自己还是上一个
+          // 模型（换模型失效路径静默失效，见 MVP 报告 §6.3）。
+          ...(modelKey === null ? {} : { lastObservedModelKey: modelKey }),
+          lastUsageContextLimit: contextWindow,
         });
       } catch (error) {
         // 落库失败只影响下一个进程的第一 pass，本进程这一轮仍用内存读数。
@@ -293,6 +332,7 @@ export function createMagicContextUsageRecorder(
         });
       }
     },
+    readUsage: () => contextUsageMap.get(sessionId)?.usage ?? null,
   };
 }
 
@@ -699,6 +739,12 @@ export async function createMagicContextTurnTransform(
     db,
     sessionId: options.sessionId,
     workingDirectory: options.workingDirectory,
+    // S24-fix：后台 pass 的 protected-tail 边界改用真实读数（recorder 记的那一份，
+    // 装配期 prime 时是上一轮落库的值）。没有 recorder 时保持 `undefined` → 边界解
+    // 拿 `null`，与 S24 的 provisional-zero 行为逐字相同。
+    ...(options.usageRecorder === undefined
+      ? {}
+      : { readLiveUsage: options.usageRecorder.readUsage }),
     ...(options.createSidecarModel === undefined
       ? {}
       : { createSidecarModel: options.createSidecarModel }),
@@ -815,6 +861,11 @@ function buildTransformDeps(
     scheduler: createZCodeScheduler(config),
     // S19b 留的空表；S24 由宿主侧的 usage recorder 供给（见选项说明）。
     contextUsageMap: options.usageRecorder?.contextUsageMap ?? new Map(),
+    // S24-fix：声明 ZCode CLI 的进程模型，让包内 transform 的「首 pass usage 重置」
+    // 走累积语义而不是上游的清零语义。**这是 T-M2/T-M3/T-M6 三项能跑起来的前提**：
+    // 不声明时每一轮 prompt 的首 pass 都会把上一轮落库的占用读数清成 0%，scheduler
+    // 于是永远 defer，drop 与 historian 一次都不启动（现场见 MVP 报告 §3）。
+    hostProcessLifetime: "one-process-per-turn",
     clearReasoningAge: 50,
     historyRefreshSessions: new Set<string>(),
     pendingMaterializationSessions: new Set<string>(),

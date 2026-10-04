@@ -184,9 +184,61 @@ export async function loadSqliteModule(
     }
 }
 
+/**
+ * FORK (S24-fix)：同步取后端模块，取代上游那条**模块级** `await loadSqliteModule(...)`。
+ *
+ * 为什么必须去掉：模块级 await 让整个包的 ESM 图带上 TLA，于是
+ *   - `require("@zcode/magic-context")`（Node 24 的 CJS 互操作）直接抛
+ *     `ERR_REQUIRE_ASYNC_MODULE`；
+ *   - `apps/zcode-cli` 的 CJS bundle（esbuild）直接报 "Top-level await is
+ *     currently not supported with the cjs output format" —— S19a 把本包挂进
+ *     bootstrap 的 import 图之后 `pnpm --filter @zcode/cli build` 就一直失败。
+ *
+ * 怎么去掉：ZCode 只跑在 Node / Electron / SEA 上（harness 见 `shared/harness.ts`），
+ * 而 `node:sqlite` 是**内置**模块 —— `process.getBuiltinModule()`（Node 22.3+）能同步
+ * 拿到它，且因为说明符是变量，esbuild/bun 都不会在构建期去解析另一个后端。
+ * Bun 路径不再是构建目标：拿不到同步后端就抛 `SqliteRuntimeUnavailableError`，
+ * 而不是悄悄退化成「异步但被 require 的图」。
+ *
+ * `loadSqliteModule`（异步版）保持导出不变 —— 它是上游的公开面，别的调用方与单测
+ * 仍可用；这里只是不再在模块顶层 await 它。
+ */
+function requireSqliteModule(runtime: SqliteRuntime): SqliteModule {
+    const specifier = runtime === "Bun" ? bunSpec : nodeSpec;
+    const getBuiltinModule = (
+        process as unknown as { getBuiltinModule?: (id: string) => unknown }
+    ).getBuiltinModule;
+    if (typeof getBuiltinModule !== "function") {
+        throw new SqliteRuntimeUnavailableError(
+            runtime,
+            specifier,
+            new Error(
+                "this runtime exposes neither process.getBuiltinModule nor a synchronous builtin loader",
+            ),
+        );
+    }
+    let loaded: SqliteModule;
+    try {
+        loaded = getBuiltinModule.call(process, specifier) as SqliteModule;
+    } catch (error) {
+        if (isModuleNotFoundError(error, specifier)) {
+            throw new SqliteRuntimeUnavailableError(runtime, specifier, error);
+        }
+        throw error;
+    }
+    if (loaded.Database === undefined && loaded.DatabaseSync === undefined) {
+        throw new SqliteRuntimeUnavailableError(
+            runtime,
+            specifier,
+            new Error(`${specifier} exposed neither Database nor DatabaseSync`),
+        );
+    }
+    return loaded;
+}
+
 const detectedRuntime = detectSqliteRuntime();
 const isBun = detectedRuntime === "Bun";
-const sqliteModule = await loadSqliteModule(detectedRuntime);
+const sqliteModule = requireSqliteModule(detectedRuntime);
 
 // Different export shapes between the two backends:
 //   - bun:sqlite  → named export `Database` (has its own .transaction, accepts

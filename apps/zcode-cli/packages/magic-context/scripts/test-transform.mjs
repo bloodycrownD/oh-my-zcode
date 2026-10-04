@@ -720,6 +720,161 @@ test("b3 a model change drops the slot instead of replaying another model's byte
   lkgSlot.resetLkgSlotsForTest();
 });
 
+// --- b4: the first-pass usage reset across two processes (S24-fix) ------------
+//
+// Upstream's reset assumes "one process = one session", so the first pass of a
+// process treats the persisted percentage as stale and zeroes it. ZCode CLI is
+// "one process = one prompt": the first pass is EVERY pass, so an unfixed reset
+// wipes the accumulated reading on every turn — scheduler defers forever, and
+// `[dropped §N§]` / the historian never fire (MVP report §3, T-M2/T-M3/T-M6).
+//
+// These cases drive the REAL `createTransform` against a real sqlite store, once
+// per "process", with a real `contextUsageMap` seeded the way the host recorder's
+// `prime()` seeds it. The control case (no `hostProcessLifetime`) proves the
+// assertions below are not vacuous: without the fix, that one still resets.
+
+const b4DbDir = mkdtempSync(join(REPO, "node_modules", ".cache", "magic-context-s24fix-"));
+process.env.MAGIC_CONTEXT_DB_DIR = b4DbDir;
+process.env.MAGIC_CONTEXT_LOG_PATH = join(b4DbDir, "magic-context.log");
+
+const storageDb = await load("features/magic-context/storage-db.js");
+const storageMeta = await load("features/magic-context/storage-meta.js");
+const taggerModule = await load("features/magic-context/tagger.js");
+const schedulerModule = await load("features/magic-context/scheduler.js");
+const transformModule = await load("hooks/magic-context/transform.js");
+
+const b4Db = storageDb.openDatabase();
+if (!b4Db) throw new Error("openDatabase() failed for the b4 store");
+const B4_SESSION = "ses_s24fix_two_processes";
+const B4_PCT = 42.5;
+const B4_TOKENS = 85_000;
+
+/** OpenCode 形状的一轮 messages；只需 `findSessionId` 能认出 session。 */
+function b4Messages(userText) {
+  return [
+    {
+      info: {
+        id: "msg_b4_1",
+        role: "user",
+        sessionID: B4_SESSION,
+        time: { created: 1000 },
+        synthetic: false,
+      },
+      parts: [{ type: "text", text: userText }],
+    },
+  ];
+}
+
+/**
+ * One "process": a fresh `createTransform` (so its `loadedSessions` is empty,
+ * exactly like a new CLI process) plus a `contextUsageMap` primed from the
+ * persisted store the way the host recorder's `prime()` primes it.
+ */
+function b4Process({ hostProcessLifetime }) {
+  const contextUsageMap = new Map();
+  const persisted = storageMeta.loadPersistedUsage(b4Db, B4_SESSION);
+  if (persisted) {
+    contextUsageMap.set(B4_SESSION, {
+      usage: persisted.usage,
+      updatedAt: persisted.updatedAt,
+      lastResponseTime: persisted.updatedAt,
+      hasUsageTokens: true,
+    });
+  }
+  const deps = {
+    db: b4Db,
+    tagger: taggerModule.createTagger(),
+    scheduler: schedulerModule.createScheduler({
+      cacheTtl: schedulerModule.parseCacheTtl("5m"),
+      executeThresholdPercentage: 65,
+    }),
+    contextUsageMap,
+    clearReasoningAge: 50,
+    historyRefreshSessions: new Set(),
+    pendingMaterializationSessions: new Set(),
+    lastHeuristicsTurnId: new Map(),
+    commitSeenLastPass: new Map(),
+    ...(hostProcessLifetime === undefined ? {} : { hostProcessLifetime }),
+  };
+  return { transform: transformModule.createTransform(deps), contextUsageMap };
+}
+
+/** transform 的 pass 在这个最小装配下会在后半段停住；那不影响被断言的那一段。 */
+async function b4RunPass(transform, userText) {
+  const output = { messages: b4Messages(userText) };
+  try {
+    await transform({}, output);
+  } catch {
+    // Deliberate: the assertions are about session_meta / the usage map, both of
+    // which are settled before the later stages this minimal deps graph cannot
+    // serve. A pass that ran to completion is fine too.
+  }
+}
+
+function b4ReadPersistedPct() {
+  const row = b4Db
+    .prepare(
+      "SELECT last_context_percentage AS pct, last_input_tokens AS tokens FROM session_meta WHERE session_id = ?",
+    )
+    .get(B4_SESSION);
+  return row ?? { pct: 0, tokens: 0 };
+}
+
+/** 宿主 recorder 的落库那一半：`model_complete` → `updateSessionMeta`。 */
+function b4HostRecorderWritesUsage(at) {
+  storageMeta.updateSessionMeta(b4Db, B4_SESSION, {
+    lastContextPercentage: B4_PCT,
+    lastInputTokens: B4_TOKENS,
+    lastResponseTime: at,
+    lastObservedModelKey: "zcode/glm-5.3",
+    lastUsageContextLimit: 200_000,
+  });
+}
+
+test("b4 process 2 keeps the persisted usage (one-process-per-turn)", async () => {
+  // ── 进程 1 ────────────────────────────────────────────────────────────────
+  const first = b4Process({ hostProcessLifetime: "one-process-per-turn" });
+  await b4RunPass(first.transform, "turn one");
+  b4HostRecorderWritesUsage(1_800_000_000_000);
+  const seeded = b4ReadPersistedPct();
+  if (seeded.pct !== B4_PCT) {
+    throw new Error(`the host recorder did not persist usage: ${JSON.stringify(seeded)}`);
+  }
+
+  // ── 进程 2（新进程 = 空 loadedSessions，prime 带回上一轮读数）──────────────
+  const second = b4Process({ hostProcessLifetime: "one-process-per-turn" });
+  const primed = second.contextUsageMap.get(B4_SESSION);
+  if (!primed || primed.usage.percentage !== B4_PCT) {
+    throw new Error(`prime() did not carry the reading: ${JSON.stringify(primed)}`);
+  }
+  await b4RunPass(second.transform, "turn two");
+
+  const after = b4ReadPersistedPct();
+  if (after.pct !== B4_PCT || after.tokens !== B4_TOKENS) {
+    throw new Error(
+      `the second process reset the accumulated usage: ${JSON.stringify(after)} ` +
+        `(expected ${B4_PCT}% / ${B4_TOKENS} tokens)`,
+    );
+  }
+  // 内存条目也不能被删：删了它，`loadContextUsage` 就回表读到已被清零的 meta。
+  const live = second.contextUsageMap.get(B4_SESSION);
+  if (!live || live.usage.percentage !== B4_PCT) {
+    throw new Error(`the primed in-memory reading was dropped: ${JSON.stringify(live)}`);
+  }
+});
+
+test("b4 a host that does not declare its process model keeps upstream's reset", async () => {
+  // 对照组：没有 `hostProcessLifetime` 时行为必须与上游逐字相同（清零）。
+  // 少了这一条，上面那条可能因为「压根没跑到那段代码」而空过。
+  b4HostRecorderWritesUsage(1_800_000_000_001);
+  const upstream = b4Process({ hostProcessLifetime: undefined });
+  await b4RunPass(upstream.transform, "turn three");
+  const after = b4ReadPersistedPct();
+  if (after.pct !== 0 || after.tokens !== 0) {
+    throw new Error(`upstream's first-pass reset no longer fires: ${JSON.stringify(after)}`);
+  }
+});
+
 // --- run -------------------------------------------------------------------
 
 let failures = 0;
@@ -734,6 +889,7 @@ for (const [name, fn] of cases) {
 }
 
 rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+rmSync(b4DbDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
 
 console.log("");
 if (failures === 0) {

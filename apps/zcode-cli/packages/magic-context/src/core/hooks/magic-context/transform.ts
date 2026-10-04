@@ -441,6 +441,20 @@ export interface TransformDeps {
     >;
     db: ContextDatabase;
     /**
+     * FORK (S24-fix)：宿主的**进程生命周期**声明，决定首 pass usage 重置的语义。
+     *
+     *   - 缺席 / `"one-process-per-session"`：上游 OpenCode 的模型。长驻进程，
+     *     一个进程确实只对应一个会话，于是进程内第一次见到某 session 时，落库读数
+     *     一律按陈旧处理并清零。
+     *   - `"one-process-per-turn"`：ZCode CLI 的模型。每轮 prompt 一个新进程，于是
+     *     「本进程的首 pass」**每一轮都是**，落库读数是上一轮真实测出来的累积占用，
+     *     清零等于每轮把压力抹成 0%（scheduler 永远 defer，drop 与 historian 永不启动）。
+     *
+     * 缺席时保持上游逐字行为——未声明的宿主不替它做假设。
+     * 现场与证据见 transform 里那段 FORK 注释及 MVP 报告 §3。
+     */
+    hostProcessLifetime?: "one-process-per-session" | "one-process-per-turn";
+    /**
      * Channel 1 (ctx_reduce tool-output nudge) per-session metric baseline,
      * refreshed at the end of each transform pass where ctx_reduce is callable
      * and read in tool.execute.after.
@@ -1204,7 +1218,35 @@ export function createTransform(deps: TransformDeps) {
         const earlyStateSnapshot = loadTransformPassStateSnapshot(db, sessionId);
         const historianFailureState = earlyStateSnapshot.historianFailure;
 
-        if (isFirstTransformPassForSession && sessionMeta) {
+        // FORK (S24-fix；偏离登记见 `docs/.../cache/phase2a-mvp-report.md` §3 与 §6.1)
+        // ── 上游语义 ───────────────────────────────────────────────────────────
+        // 这段「首 pass 重置」逐字来自 OpenCode 插件：进程里第一次见到这个 session 时，
+        // 落库的 `last_context_percentage` 一定是**上一个进程**留下的，而那个进程可能
+        // 停在另一个模型 / 一条被回退的消息 / 另一种会话形状上。清零它，随后的 95%
+        // 阻断与 80% 紧急提示才能按干净状态重新判。
+        // ── ZCode 的差异 ───────────────────────────────────────────────────────
+        // ZCode CLI 是「**一进程 = 一轮 prompt**」：`loadedSessions` 每轮都是空的，
+        // 于是 `isFirstTransformPassForSession` **恒为 true**，落库读数在被读之前就被
+        // 抹掉。实测（Step 24 E2E）：宿主 recorder 已经把 4.06% / 40 602 tokens 写进
+        // `session_meta`，transform 同一轮仍读到 0% → scheduler 永远 `defer` → drop
+        // （`[dropped §N§]`）与 historian 一次都不启动（T-M2 / T-M3 / T-M6 三项全 FAIL，
+        // 见 MVP 报告 §3.2）。在「上一个进程 = 上一轮 prompt」的语义下，那条读数不是
+        // 陈旧状态，**它就是本会话的累积占用**——清掉它没有任何道理。
+        // ── 改法与改动面 ───────────────────────────────────────────────────────
+        // 判据从「本进程没见过这个 session」改成「本进程没见过这个 session **且**宿主的
+        // 进程模型是一个进程一个会话」。新增可选项 `deps.hostProcessLifetime`：
+        // 缺席 = 上游逐字行为（OpenCode 与所有未声明的宿主）；ZCode 装配层传
+        // `"one-process-per-turn"`，首 pass 沿用累积语义——不清 `session_meta`，也不删
+        // recorder `prime()` 进来的内存条目（那一行同时清两处，少一处读数就没了）。
+        // 真正新会话不需要在这里兜底：session id 是新的 → `session_meta` 没有行 →
+        // `lastContextPercentage === 0` → 这段本来就进不来。跨模型的陈旧读数由上面那段
+        // model-change 检测独立负责（它按 `lastObservedModelKey` 判，而 S24-fix 让宿主
+        // recorder 真的写上了这一列），所以这里不必再抄一套换模型判据。
+        if (
+            isFirstTransformPassForSession &&
+            sessionMeta &&
+            deps.hostProcessLifetime !== "one-process-per-turn"
+        ) {
             const persistedPct = sessionMeta.lastContextPercentage ?? 0;
             if (persistedPct > 0) {
                 sessionLog(
