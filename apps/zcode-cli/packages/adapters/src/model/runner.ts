@@ -14,7 +14,6 @@ import type {
   ModelRequestAuth,
   ModelRequestDependencies,
   ModelRequestAuthSourceInput,
-  ModelStatusSink,
   ModelStreamEvent,
   ModelTextResult,
 } from "@zcode/contracts";
@@ -62,7 +61,6 @@ export interface AiSdkModelAdapterOptions {
   debugDir?: string;
   logger?: Logger;
   retry?: AiSdkModelRetryOptions;
-  statusSink?: ModelStatusSink;
   streamIdleTimeoutMs?: number;
   modelIoFullRetentionEnabled?: boolean;
 }
@@ -84,7 +82,6 @@ export class AiSdkModelAdapter {
   private readonly debugDir?: string;
   private readonly logger?: Logger;
   private readonly retry: ResolvedAiSdkModelRetryOptions;
-  private statusSink?: ModelStatusSink;
   private readonly streamIdleTimeoutMs: number;
   private modelIoFullRetentionEnabled: boolean;
 
@@ -104,35 +101,12 @@ export class AiSdkModelAdapter {
     this.debugDir = options.debugDir;
     this.logger = options.logger;
     this.retry = resolveAiSdkModelRetryOptions(options.retry, this.env);
-    this.statusSink = options.statusSink;
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS;
     this.modelIoFullRetentionEnabled = options.modelIoFullRetentionEnabled ?? false;
   }
 
   setModelIoFullRetentionEnabled(enabled: boolean): void {
     this.modelIoFullRetentionEnabled = enabled;
-  }
-
-  addStatusSink(sink: ModelStatusSink): void {
-    const current = this.statusSink;
-    if (!current || current === sink) {
-      this.statusSink = sink;
-      return;
-    }
-    this.statusSink = {
-      async publish(event) {
-        // 多个 sink 必须独立执行：任一 sink 失败不得连带影响其他 sink，
-        // 也不能阻塞原有调用链。
-        const results = await Promise.allSettled([
-          Promise.resolve().then(() => current.publish(event)),
-          Promise.resolve().then(() => sink.publish(event)),
-        ]);
-        const failed = results.find(
-          (result): result is PromiseRejectedResult => result.status === "rejected",
-        );
-        if (failed) throw failed.reason;
-      },
-    };
   }
 
   createModel(options: CreateAiSdkModelOptions): Model {
@@ -286,7 +260,6 @@ export class AiSdkModelAdapter {
       resolved,
       retry: this.retry,
       runtime: this.runtime,
-      statusSink: this.statusSink,
       modelIoFullRetentionEnabled: this.modelIoFullRetentionEnabled,
     });
   }
@@ -306,7 +279,6 @@ export class AiSdkModelAdapter {
       resolved,
       retry: this.retry,
       runtime: this.runtime,
-      statusSink: this.statusSink,
       streamIdleTimeoutMs: this.streamIdleTimeoutMs,
       modelIoFullRetentionEnabled: this.modelIoFullRetentionEnabled,
     });

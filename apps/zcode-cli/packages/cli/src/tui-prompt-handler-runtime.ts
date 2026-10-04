@@ -12,8 +12,9 @@ type ProviderRegistryRuntime = Awaited<
   ReturnType<NonNullable<RunDependencies["startProcessProviderRegistryRuntime"]>>
 >;
 
-// 跨 App 替换（/new、/resume、/fork）复用的进程级句柄：整个 Prompt Handler 生命期只起一份，
-// 只在终态 close 时对称 shutdown。之前是 createTuiSubmitPrompt 里的三个 let 闭包变量。
+// 跨 App 替换（/new、/resume、/fork）复用的常驻运行时句柄：在同一个 Prompt Handler 生命期
+// 只起一份，只在终态 close 时对称 shutdown。此前是 Prompt Handler 内的 let 闭包变量，
+// 拆文件后收敛成这个显式的运行时状态对象。
 interface TuiProcessRuntimeState {
   providerRegistryRuntimePromise: Promise<ProviderRegistryRuntime> | undefined;
 }

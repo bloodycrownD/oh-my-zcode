@@ -533,7 +533,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // 进程级并发治理器：run service 拿它的窄端口给
     // driver（每个 actor runtime 一个请求级准入端口）；主 runtime 挂它的 observer（下面 deps）——
     // 不排队、不看冷却，但计入在飞并喂信号。进程级单例——配额本就在账号上，不按会话分。
-    // 不再经 adapter 级 addStatusSink 喂信号：同一事件只能沿 ticket 喂一次。
+    // 治理器只从准入 ticket 上读状态事件，不另接模型状态 sink：同一事件只能沿 ticket 喂一次。
     const workflowConcurrencyGovernor = getWorkflowConcurrencyGovernor();
     modelAdapter.setModelIoFullRetentionEnabled(options.modelIoFullRetentionEnabled ?? false);
     providerModelRuntime = new ApiProviderModelRuntime({
