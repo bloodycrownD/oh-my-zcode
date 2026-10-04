@@ -41,11 +41,7 @@ export interface McpTrackedProcess {
 
 export interface McpTelemetryTracker {
   acquireOwner(input: { connectionId: string; ownerId: string; sessionId?: string }): void;
-  recordProcessCrashed(input: {
-    connectionId: string;
-    exitCode: number | null;
-    signal: string | null;
-  }): void;
+  recordProcessCrashed(input: { connectionId: string }): void;
   recordProcessClosed(input: { connectionId: string }): void;
   recordProcessStarted(input: {
     connectionId: string;
