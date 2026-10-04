@@ -453,7 +453,6 @@ export interface ZCodeAgentConversationCommandParams extends ZCodeAgentWorkspace
 }
 
 export interface ZCodeAgentCommandsQueryParams extends ZCodeAgentWorkspaceTarget {
-  clock?: true;
   commands: CommandKey[];
 }
 

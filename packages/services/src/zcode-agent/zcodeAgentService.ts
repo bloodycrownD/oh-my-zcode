@@ -5073,7 +5073,6 @@ export function createZCodeAgentService(
       }
       const query = commandsQueryParamsSchema.parse({
         commands: params.commands,
-        ...(params.clock ? { clock: true } : {}),
       });
       const client = await getReadOnlyClient(params);
       return client.request(V4_METHODS.commandsQuery, query, commandsQueryResultSchema);
