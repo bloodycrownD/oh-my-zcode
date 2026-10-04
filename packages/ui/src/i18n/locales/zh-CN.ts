@@ -1861,7 +1861,7 @@ const zhCN: Record<string, string> = {
   "chat.edit.resetConversationAndFiles.noFiles": "本轮没有可安全恢复的文件改动",
   "chat.edit.resetConversationAndFiles.reverted": "本轮文件改动已经撤销",
   "chat.edit.resetConversationAndFiles.running": "请等待当前工作停止",
-  "chat.edit.resetConversationAndFiles.unavailable": "压缩中或有待处理交互时不能重置文件",
+  "chat.edit.resetConversationAndFiles.unavailable": "有待处理交互时不能重置文件",
   "chat.edit.workspaceConflict.title": "文件无法安全重置",
   "chat.edit.workspaceConflict.description":
     "对话尚未裁剪。请检查冲突或忽略的文件，然后仅重置对话并发送，或取消。",

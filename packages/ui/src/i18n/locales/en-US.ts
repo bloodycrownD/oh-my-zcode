@@ -1985,7 +1985,7 @@ const enUS: Record<string, string> = {
   "chat.edit.resetConversationAndFiles.reverted": "This turn's file changes are already undone",
   "chat.edit.resetConversationAndFiles.running": "Wait for the current work to stop",
   "chat.edit.resetConversationAndFiles.unavailable":
-    "File reset is unavailable while compacting or an interaction is pending",
+    "File reset is unavailable while an interaction is pending",
   "chat.edit.workspaceConflict.title": "Files could not be safely reset",
   "chat.edit.workspaceConflict.description":
     "No conversation history was changed. Review the conflicting or ignored files, then reset only the conversation or cancel.",
