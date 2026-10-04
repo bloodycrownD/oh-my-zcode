@@ -21,25 +21,12 @@ export type Message = {
   content: string;
   id?: string;
   parts?: TranscriptPart[];
-  role: "agent" | "system" | "timeline" | "user";
+  role: "agent" | "system" | "user";
   streamProjected?: boolean;
   streaming?: boolean;
-  timeline?: TimelineMessage;
 };
 
 export type TranscriptPart = TextTranscriptPart | ThoughtTranscriptPart | ToolTranscriptPart;
-
-export type TimelineMessage = {
-  attempt?: number;
-  command?: string;
-  maxAttempts?: number;
-  messageId?: string;
-  operationId: string;
-  reason?: string;
-  status: "started" | "retrying" | "skipped" | "completed" | "failed" | "interrupted";
-  trigger?: string;
-  type: "context_compaction";
-};
 
 export type TuiTextFormat = "markdown" | "plain";
 

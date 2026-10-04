@@ -207,9 +207,6 @@ export interface TuiCopy {
     };
   };
   status: {
-    compactFailed: string;
-    compacted: string;
-    compacting: string;
     interruptedStreamDiscarded: string;
     modelCalling: string;
     permissionRequested(toolName: string): string;
@@ -231,15 +228,6 @@ export interface TuiCopy {
     starting: string;
   };
   transcript: {
-    compact: {
-      completed: string;
-      failed: string;
-      interrupted: string;
-      retry(command: string): string;
-      retrying(input: { attempt: number; maxAttempts: number }): string;
-      skipped: string;
-      started: string;
-    };
     roles: {
       agent: string;
       system: string;

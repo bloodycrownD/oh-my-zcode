@@ -56,7 +56,6 @@ Slash Commands:
   /help [command]       显示 slash command 帮助
   /login                使用 Z.AI OAuth 登录
   /logout               删除共享的 Z.AI 登录凭据
-  /compact [instructions]  压缩当前对话
   /expert [status|resume|stop|<task>]  运行或管理 expert workflow
   /dwf [list|cancel|resume]  列出、取消或恢复 dynamic workflow run
   /fork [latest|checkpointId]  从 workspace checkpoint 派生新 session
@@ -263,9 +262,6 @@ Slash Commands:
       },
     },
     status: {
-      compactFailed: "上下文压缩失败。",
-      compacted: "对话已压缩。",
-      compacting: "正在压缩上下文...",
       interruptedStreamDiscarded: "已丢弃中断的模型流。",
       modelCalling: "正在调用模型...",
       permissionRequested: (toolName) => `正在请求 ${toolName} 权限。`,
@@ -287,18 +283,6 @@ Slash Commands:
       requiresInteractive: "TUI 需要交互式终端。",
     },
     transcript: {
-      compact: {
-        completed: "上下文已压缩",
-        failed: "上下文压缩失败",
-        interrupted: "上下文压缩已中断",
-        retry: (command) => `Ctrl-R 重试 ${command}`,
-        retrying: ({ attempt, maxAttempts }) =>
-          maxAttempts > 0
-            ? `正在重试压缩上下文（${attempt}/${maxAttempts}）`
-            : "正在重试压缩上下文",
-        skipped: "上下文已是最新，无需压缩",
-        started: "正在压缩上下文",
-      },
       roles: {
         agent: "Agent",
         system: "System",

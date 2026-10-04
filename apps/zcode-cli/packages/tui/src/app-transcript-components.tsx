@@ -107,9 +107,6 @@ export function MessageRow({
   workflowCardsByToolCallId?: ReadonlyMap<string, TuiWorkflowCard>;
 }): React.ReactElement {
   const parts = message.parts ?? [];
-  if (message.role === "timeline") {
-    return h(CompactTimelineRow, { copy, message, terminalWidth });
-  }
   // speaker labels were visually noisy; only user prompts carry row chrome.
   const isUserMessage = message.role === "user";
   const rowBackground = isUserMessage ? palette.userMessageBackground : palette.background;
@@ -181,74 +178,5 @@ export function MessageRow({
           })
         : h("text", { key: `text-${partIndex}`, style: { fg: plainTextColor } }, part.text);
     }),
-  );
-}
-
-function CompactTimelineRow({
-  copy,
-  message,
-  terminalWidth,
-}: {
-  copy: TuiCopy;
-  message: Message;
-  terminalWidth: number;
-}): React.ReactElement {
-  const timeline = message.timeline;
-  if (!timeline || timeline.type !== "context_compaction") {
-    return h("box", null);
-  }
-  const compactCopy = copy.transcript.compact;
-  const label =
-    timeline.status === "started"
-      ? compactCopy.started
-      : timeline.status === "retrying"
-        ? compactCopy.retrying({
-            attempt: timeline.attempt ?? 0,
-            maxAttempts: timeline.maxAttempts ?? 0,
-          })
-        : timeline.status === "skipped"
-          ? compactCopy.skipped
-          : timeline.status === "failed"
-            ? compactCopy.failed
-            : timeline.status === "interrupted"
-              ? compactCopy.interrupted
-              : compactCopy.completed;
-  const retry =
-    timeline.status === "failed" || timeline.status === "interrupted"
-      ? compactCopy.retry(timeline.command ?? "/compact")
-      : undefined;
-  const center = retry ? ` ${label} | ${retry} ` : ` ${label} `;
-  const sideWidth = Math.max(4, Math.floor((terminalWidth - center.length - 6) / 2));
-  const line = "-".repeat(sideWidth);
-  const color =
-    timeline.status === "failed"
-      ? palette.warning
-      : timeline.status === "started"
-        ? palette.accent
-        : timeline.status === "retrying"
-          ? palette.accent
-          : palette.muted;
-
-  return h(
-    "box",
-    {
-      style: {
-        backgroundColor: palette.background,
-        flexDirection: "column",
-        marginBottom: 1,
-        minHeight: 1,
-        paddingLeft: 1,
-        paddingRight: 1,
-        width: "100%",
-      },
-    },
-    h(
-      "text",
-      {
-        key: "compact-timeline",
-        style: { fg: color },
-      },
-      `${line}${center}${line}`,
-    ),
   );
 }

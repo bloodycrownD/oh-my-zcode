@@ -56,7 +56,6 @@ Slash Commands:
   /help [command]       Show slash command help
   /login                Choose Z.AI or BigModel browser login
   /logout               Remove the shared Z.AI login credentials
-  /compact [instructions]  Compact the current conversation
   /expert [status|resume|stop|<task>]  Run or manage the expert workflow
   /dwf [list|cancel|resume]  List, cancel, or resume dynamic workflow runs
   /fork [latest|checkpointId]  Fork a new session from a workspace checkpoint
@@ -266,9 +265,6 @@ Slash Commands:
       },
     },
     status: {
-      compactFailed: "Context compression failed.",
-      compacted: "Conversation compacted.",
-      compacting: "Compressing context...",
       interruptedStreamDiscarded: "Interrupted model stream discarded.",
       modelCalling: "Calling model...",
       permissionRequested: (toolName) => `Permission requested for ${toolName}.`,
@@ -290,18 +286,6 @@ Slash Commands:
       starting: "Starting ZCode... Ctrl+C to exit",
     },
     transcript: {
-      compact: {
-        completed: "Context compressed",
-        failed: "Context compression failed",
-        interrupted: "Context compression interrupted",
-        retry: (command) => `Ctrl-R to retry ${command}`,
-        retrying: ({ attempt, maxAttempts }) =>
-          maxAttempts > 0
-            ? `Retrying context compression (${attempt}/${maxAttempts})`
-            : "Retrying context compression",
-        skipped: "Context is up to date; no compression needed",
-        started: "Compressing context",
-      },
       roles: {
         agent: "Agent",
         system: "System",

@@ -19,12 +19,6 @@ import {
 import { appendSystemErrorMessage } from "./app-transcript-errors.js";
 import { formatFileDiffDisplay } from "./app-tool-diff-display.js";
 import { buildToolTranscriptProjection } from "./app-tool-transcript.js";
-import {
-  compactCommandFromText,
-  createLocalCompactTimelineMessage,
-  failLatestStartedCompactTimeline,
-  upsertCompactTimelineMessage,
-} from "./app-compact-timeline.js";
 import type {
   TuiOptions,
   TuiRequestPermission,
@@ -143,8 +137,6 @@ export async function submitDuringActiveTurn(input: {
     return;
   }
   input.setDraftValue("");
-  const compactCommand =
-    input.draftAttachments.length === 0 ? compactCommandFromText(input.text) : undefined;
   const localUserMessage = createLocalUserMessage(redactSensitivePromptForTranscript(input.text));
   try {
     input.setStatus("Queueing input...");
@@ -159,15 +151,10 @@ export async function submitDuringActiveTurn(input: {
       },
     );
     if (result.kind === "started_turn" || result.kind === "command_result") {
-      if (!compactCommand) {
-        input.setMessages((current) =>
-          insertLocalUserMessageAt(current, localUserMessage, input.messageInsertIndex),
-        );
-      }
-      input.applyResult(
-        compactCommand ? { ...result.result, response: "" } : result.result,
-        result.kind === "command_result",
+      input.setMessages((current) =>
+        insertLocalUserMessageAt(current, localUserMessage, input.messageInsertIndex),
       );
+      input.applyResult(result.result, result.kind === "command_result");
       return;
     }
     if (result.kind !== "queued") {
@@ -220,8 +207,6 @@ export async function submitIdleTurn(input: {
   turnRef: React.MutableRefObject<AbortController | undefined>;
 }): Promise<void> {
   const promptInput = toPromptInput(input.text, input.draftAttachments, input.modelSelection);
-  const compactCommand =
-    input.draftAttachments.length === 0 ? compactCommandFromText(input.text) : undefined;
   const abortController = new AbortController();
   input.turnRef.current = abortController;
   input.setDraftValue("");
@@ -233,24 +218,10 @@ export async function submitIdleTurn(input: {
   input.setLiveModelText("");
   if (!input.submitOptions?.preserveSelection) input.setSelection(undefined);
   input.setSlashSelection(undefined);
-  if (compactCommand) {
-    // `/compact` 是控制命令，TUI 之前把它渲染成 user row；
-    // app 侧又有专门的 compaction 横条，导致两端语义不一致。这里直接渲染同一类 timeline row。
-    input.setMessages((current) =>
-      upsertCompactTimelineMessage(
-        current,
-        createLocalCompactTimelineMessage({
-          command: compactCommand,
-          status: "started",
-        }),
-      ),
-    );
-  } else {
-    input.setMessages((current) => [
-      ...current,
-      { content: redactSensitivePromptForTranscript(input.text), role: "user" },
-    ]);
-  }
+  input.setMessages((current) => [
+    ...current,
+    { content: redactSensitivePromptForTranscript(input.text), role: "user" },
+  ]);
 
   try {
     const result = await input.options.submitPrompt(promptInput, {
@@ -258,7 +229,7 @@ export async function submitIdleTurn(input: {
       onEvent: input.applySessionEvent,
       requestPermission: input.requestPermission,
     });
-    input.applyResult(compactCommand ? { ...result, response: "" } : result);
+    input.applyResult(result);
   } catch (error) {
     if (abortController.signal.aborted) {
       input.setLastError(undefined);
@@ -268,11 +239,7 @@ export async function submitIdleTurn(input: {
     const message = error instanceof Error ? error.message : String(error);
     input.setLastError(message);
     input.setStatus("Turn failed.");
-    input.setMessages((current) =>
-      compactCommand
-        ? failLatestStartedCompactTimeline(current, message)
-        : appendSystemErrorMessage(current, message),
-    );
+    input.setMessages((current) => appendSystemErrorMessage(current, message));
   } finally {
     input.setBusy(false);
     if (input.turnRef.current === abortController) {

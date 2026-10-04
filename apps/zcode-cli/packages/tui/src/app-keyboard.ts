@@ -38,7 +38,6 @@ import type {
 } from "./app-model.js";
 import type { SidebarSectionId } from "./app-sidebar-layout.js";
 import type { TuiEffortOption, TuiModeOption, TuiModelOption } from "./types.js";
-import { latestRetryableCompactCommand } from "./app-compact-timeline.js";
 
 export {
   CTRL_C_EXIT_CONFIRMATION_WINDOW_MS,
@@ -230,19 +229,6 @@ export function useTuiKeyboardControls({
           consumeKey(key);
           if (!copyCurrentSelection()) setStatus("No selected text to copy.");
           return;
-        }
-
-        if (key.name === "r" && key.ctrl) {
-          const compactRetryCommand = latestRetryableCompactCommand(messages);
-          if (compactRetryCommand) {
-            consumeKey(key);
-            if (busy) {
-              setStatus("Agent is still responding.");
-              return;
-            }
-            void submitValue(compactRetryCommand, { preserveSelection: true });
-            return;
-          }
         }
 
         // Mode switching belongs to the composer, including while @ suggestions
