@@ -36,6 +36,7 @@ export const ConfigKey = {
   FeatureMemory: "features.memory",
   FeatureSkill: "features.skill",
   FeatureMcp: "features.mcp",
+  FeatureMagicContext: "features.magicContext",
 
   // Memory
   MemoryUse: "memory.use",
@@ -109,6 +110,7 @@ export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeou
                   | "features.memory"
                   | "features.skill"
                   | "features.mcp"
+                  | "features.magicContext"
                   | "skills.enabled"
                   | "skills.includeInstructions"
               ? boolean
@@ -225,6 +227,7 @@ export interface RuntimeConfig {
     memory: boolean;
     skill: boolean;
     mcp: boolean;
+    magicContext: boolean;
   };
   memory: {
     use: boolean;
@@ -312,6 +315,9 @@ export const DefaultRuntimeConfig: RuntimeConfig = {
     memory: true,
     skill: true,
     mcp: true,
+    // D-11：magicContext 默认关闭，直至 MVP 验收（T-M1..T-M8）通过；
+    // 与「压缩移除全量回归」同一变更内翻为 true。默认 true 会让 kill switch 失效。
+    magicContext: false,
   },
   memory: {
     use: true,

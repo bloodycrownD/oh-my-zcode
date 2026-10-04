@@ -126,6 +126,8 @@ class ConfigStore {
         this.set(ConfigKey.FeatureSkill, config.features.skill, scope);
       if (config.features.mcp !== undefined)
         this.set(ConfigKey.FeatureMcp, config.features.mcp, scope);
+      if (config.features.magicContext !== undefined)
+        this.set(ConfigKey.FeatureMagicContext, config.features.magicContext, scope);
     }
     if (config.memory) {
       if (config.memory.use !== undefined) this.set(ConfigKey.MemoryUse, config.memory.use, scope);
@@ -287,6 +289,8 @@ export class ConfigPortImpl implements ConfigPort {
         memory: this.store.get(ConfigKey.FeatureMemory) ?? true,
         skill: this.store.get(ConfigKey.FeatureSkill) ?? true,
         mcp: this.store.get(ConfigKey.FeatureMcp) ?? true,
+        // 故意不跟邻居的 `?? true`：D-11 要求默认关闭，照抄会让 kill switch 失效。
+        magicContext: this.store.get(ConfigKey.FeatureMagicContext) ?? false,
       },
       memory: {
         use: this.store.get(ConfigKey.MemoryUse) ?? DefaultConfig.memory.use,
@@ -405,6 +409,8 @@ function getDefaultValue(key: ConfigKey): unknown {
       return defaults.features.skill;
     case ConfigKey.FeatureMcp:
       return defaults.features.mcp;
+    case ConfigKey.FeatureMagicContext:
+      return defaults.features.magicContext;
     case ConfigKey.MemoryUse:
       return defaults.memory.use;
     case ConfigKey.McpServers:
