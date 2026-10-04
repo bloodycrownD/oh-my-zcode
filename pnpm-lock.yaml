@@ -148,6 +148,9 @@ importers:
       '@zcode/dynamic-workflow':
         specifier: workspace:*
         version: link:../dynamic-workflow
+      '@zcode/magic-context':
+        specifier: workspace:*
+        version: link:../magic-context
       '@zcode/model-option-map':
         specifier: workspace:*
         version: link:../../../../packages/model-option-map
@@ -319,6 +322,9 @@ importers:
       '@zcode/i18n':
         specifier: workspace:*
         version: link:../i18n
+      '@zcode/magic-context':
+        specifier: workspace:*
+        version: link:../magic-context
       '@zcode/provider-node':
         specifier: workspace:*
         version: link:../../../../packages/provider-node
@@ -362,6 +368,9 @@ importers:
       '@zcode/dynamic-workflow':
         specifier: workspace:*
         version: link:../dynamic-workflow
+      '@zcode/magic-context':
+        specifier: workspace:*
+        version: link:../magic-context
       '@zcode/shared':
         specifier: workspace:*
         version: link:../../../../packages/shared
