@@ -281,10 +281,6 @@ export interface ModelStreamStalledStatusEvent extends ModelNetworkStatusBase {
   message: string;
 }
 
-/**
- * Provider 里程碑（首包/首内容/首文本）已随遥测移除：它们只服务于实时观测 Sink，
- * 不进 SessionEvent/回放协议，因此没有保留面。
- */
 export type ModelNetworkStatusEvent =
   | ModelRequestQueuedStatusEvent
   | ModelRequestAdmittedStatusEvent

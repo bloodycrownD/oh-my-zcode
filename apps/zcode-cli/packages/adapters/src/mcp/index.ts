@@ -1146,8 +1146,6 @@ class NodeMcpAdapter implements McpPort {
         ) {
           this.telemetry?.recordProcessCrashed({
             connectionId: this.connectionContext.mcpConnectionId,
-            exitCode: processExit?.exitCode ?? null,
-            signal: processExit?.signal ?? null,
           });
         }
       };
