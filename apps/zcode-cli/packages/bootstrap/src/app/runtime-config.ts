@@ -183,6 +183,13 @@ export function resolveAppRuntimeConfig(input: {
       use: options.runtimeConfig?.memory?.use ?? configResult.config.memory.use,
       workspaceIdentity: workspaceIdentity?.trim() || undefined,
     },
+    // Step 19b 门控：`features.magicContext`（S19a 落地的 kill switch，默认 false）
+    // 投影进 runtime config。core 的 turn-loop 只读这一位做二次门控，真正的注册门
+    // 是装配层——它在 false 时连 transform 实例都不构造（D-11 的零成本默认态）。
+    magicContext: {
+      enabled:
+        options.runtimeConfig?.magicContext?.enabled ?? configResult.config.features.magicContext,
+    },
   };
   return {
     configuredMcpServers,

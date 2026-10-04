@@ -48,6 +48,13 @@ export const SYSTEM_REMINDER_PER_REQUEST_SOURCES = [
   "model_anomaly",
   "prompt_attachment",
   "diagnostics",
+  // Step 19b：magic-context transform 在 provider 请求投影之前注入的 m[0]/m[1]
+  // （project-memory / docs 基线 + <session-history> 分舱摘要）。它只活在这一次
+  // 请求里——不进 canonical history、不落 Session、不进 resume 水合——所以归
+  // per-request 组。落点是 attachment 投影，因此没有本登记项时
+  // `renderProjectedEntryToModelMessage` 会 throw「Attachment source ... is not a
+  // system reminder source」，整条请求构建失败。
+  "magic_context",
 ] as const;
 
 export type SystemReminderPrefixSource = (typeof SYSTEM_REMINDER_PREFIX_SOURCES)[number];
@@ -83,6 +90,12 @@ const NON_MID_CONVERSATION_SYSTEM_SOURCES = new Set<SystemReminderSource>([
   "target_continuation",
   "tool_result_warning",
   "goal_completion_verification",
+  // R3：m[0]/m[1] 是**请求前缀**，语义上与 context_prefix 同族。若留在
+  // MID_CONVERSATION 集合里，projectMidConversationSystemEntries 会把它当作
+  // 中途 system 块在 tool-run 边界重新锚定/合并/降级为 legacy_synthetic——
+  // 那正是「m[0]/m[1] 被剔除或产生幻影 user 轮」这条风险的成因。显式排除后
+  // 它只走 reorderAttachmentLikeEntries，前缀位次得以保留。
+  "magic_context",
 ]);
 
 const SYSTEM_REMINDER_DESCRIPTORS: Record<SystemReminderSource, DescriptorShape> = {
@@ -161,6 +174,16 @@ const SYSTEM_REMINDER_DESCRIPTORS: Record<SystemReminderSource, DescriptorShape>
     "sr.shell_environment_change",
   ),
   diagnostics: descriptor("mid_turn_event", "mid_turn_event", true, "sr.diagnostics"),
+  // Step 19b / R3 显式声明：m[0]/m[1] 必须在 wire 上可见（OpenCode 侧它们是
+  // 带 `synthetic: true` part 的真实 user 消息，provider serializer 只过滤
+  // `ignored`，不过滤 `synthetic`）。这里 providerVisibility 是它们能被
+  // `wrapSystemReminderForSource` 渲染的前提——写成 provider_hidden 会让整条
+  // 请求构建 throw，而不是"安静地不注入"。
+  //   channel   = request_prefix：它必须落在本轮所有对话内容之前。
+  //   lifecycle = runtime_local：只活这一次请求，不进 resume 水合。
+  //   isMeta    = true：provider projection 据此把它当 attachment-like 气泡，
+  //               并保证它永远不会被 `origins.hasRealUser` 认成真实用户轮。
+  magic_context: descriptor("request_prefix", "runtime_local", true, "sr.magic_context"),
 };
 
 export const SYSTEM_REMINDER_SOURCES = Object.freeze([

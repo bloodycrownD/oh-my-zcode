@@ -712,6 +712,29 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       registry: options.providerRegistry,
       currentSelection: () => getRuntime().getSessionModelSelection(),
     });
+    // Step 19b：`features.magicContext` 关闭时，本行连 `import()` 都不发生——于是
+    // 既不加载 magic-context 模块图，也不创建 transform / provider 实例，更不会打开
+    // magic-context.db。默认态（D-11）的成本就是这一个三元判空。
+    //
+    // 打开时先跑装配工厂：它内部第一句就是 `initializeMagicContextHost()`
+    // （S15 遗留 #6：setHarness("zcode") + project-dir resolver），且在任何 DB 写
+    // 之前——本行的位置就保证了这一点，因为 ZCode 自己的 session store 早在
+    // `openStartupSessionStore` 就已开完，而 magic-context 的 DB 由工厂自己开。
+    const magicContextTurnTransform =
+      runtimeConfig.magicContext?.enabled === true
+        ? await (
+            await import("./magic-context-turn-transform.js")
+          ).createMagicContextTurnTransform({
+            enabled: true,
+            // Step 23 之前 RuntimeConfig 还没有 `magicContext` 参数域，静态源读到
+            // undefined → config bridge 落到 DEFAULT_MAGIC_CONTEXT_CONFIG。
+            configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
+            sessionId,
+            workingDirectory,
+            sessionStore,
+            logger,
+          })
+        : undefined;
     runtime = new AgentRuntime(sessionId, runtimeConfig, {
       // 主代理的模型请求过治理器的 observer：立即放行，但让治理器看见它的 429 / 成功。
       modelRequestAdmission: workflowConcurrencyGovernor.observer(),
@@ -762,6 +785,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       modelCatalogPort,
       automationPort: options.automationPort,
       offPeakPort: options.offPeakPort,
+      // 端口在场即注册门：缺席（默认）时 turn-loop 的插入点是纯判空。
+      ...(magicContextTurnTransform === undefined ? {} : { magicContextTurnTransform }),
       appVersion,
       traceContext,
     });

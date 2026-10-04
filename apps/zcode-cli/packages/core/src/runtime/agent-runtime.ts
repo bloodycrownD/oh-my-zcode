@@ -122,6 +122,7 @@ import type { AgentRuntimeInternal } from "./internal.js";
 import { InMemoryRuntimeTaskRegistry, type RuntimeTaskRegistry } from "../runtime-task/registry.js";
 import type { ChildClientPortsContext, ClientFacingPorts } from "./helpers/child-client-ports.js";
 import type { ProjectMemoryExtractionScheduler } from "./helpers/project-memory-extraction.js";
+import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
 import { projectPersistentAgentMemoryTools } from "../subagent/persistent-memory.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
 import { disposeNodeReplSession } from "../tool/handlers/node-repl.js";
@@ -164,6 +165,8 @@ export class AgentRuntime {
   private memoryRoot?: string;
   private memoryIndexContent?: string;
   private memoryExtractionScheduler?: ProjectMemoryExtractionScheduler;
+  /** Step 19b：每请求 magic-context transform 端口；装配层 flag off 时不注入。 */
+  private magicContextTurnTransform?: MagicContextTurnTransform;
   private contextSourcePort?: ContextSourcePort;
   private skillPort?: SkillPort;
   private mcpPort?: McpPort;
@@ -289,6 +292,9 @@ export class AgentRuntime {
     this.executor = tooling.executor;
 
     this.contextBuilder = deps.contextBuilder ?? null;
+    // Step 19b：端口在场即注册门。装配层在 `features.magicContext === false` 时
+    // 根本不构造它，于是默认态下 turn-loop 的插入点是纯判空。
+    this.magicContextTurnTransform = deps.magicContextTurnTransform;
     if (this.contextBuilder) {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;

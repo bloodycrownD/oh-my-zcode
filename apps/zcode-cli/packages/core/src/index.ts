@@ -167,6 +167,27 @@ export type {
   WorkspaceRewindResult,
   RuntimeFactory,
 } from "./runtime.js";
+// Step 19b：turn-loop 的 magic-context 插入端口。bootstrap 是唯一的构造方
+// （且只在 `features.magicContext` 打开时构造）；core 这侧只判空。
+export type {
+  MagicContextTurnOutcome,
+  MagicContextTurnTransform,
+  MagicContextTurnTransformInput,
+  MagicContextTurnTransformResult,
+  MagicContextWireDebugSnapshot,
+  MagicContextWireEntryDebug,
+} from "./runtime/helpers/magic-context-turn-transform.js";
+export {
+  MAGIC_CONTEXT_WIRE_DEBUG_ENV,
+  buildMagicContextWireDebugSnapshot,
+  isMagicContextWireDebugEnabled,
+  runMagicContextTurnTransform,
+} from "./runtime/helpers/magic-context-turn-transform.js";
+export type {
+  RuntimeAttachmentEntry,
+  RuntimeMessageEntry,
+  RuntimeMessageMessageEntry,
+} from "./agent/message-history.js";
 
 // Output helpers
 export { color, formatJson, supportsColor } from "./output.js";

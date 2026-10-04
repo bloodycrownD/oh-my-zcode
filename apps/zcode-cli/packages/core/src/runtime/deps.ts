@@ -113,6 +113,7 @@ export type {
   CollaborationMode,
   GoalStatus,
   Logger,
+  LogContext,
   AttachmentStorageMetadata,
   AutomationPort,
   OffPeakPort,

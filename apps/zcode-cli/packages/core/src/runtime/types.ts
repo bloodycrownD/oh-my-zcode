@@ -21,6 +21,7 @@ import type {
 import type { ZCodeProviderAccountAccess } from "@zcode/shared";
 import type { EffectiveModelSelectionResult } from "@zcode/shared/model-selection";
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
+import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
 import type {
   CompactPhase,
   CompactReason,
@@ -193,6 +194,16 @@ export interface AgentRuntimeConfig {
   /** 根 Session runtime 创建时固定；false 只关闭 Bash 的 bfs/ugrep prelude。 */
   nativeSearchEnhancementsEnabled?: boolean;
   memory?: MemoryRuntimeConfig;
+  /**
+   * Step 19b：magic-context（`features.magicContext`，S19a 落地的门控）运行时开关。
+   * 值来自 `RuntimeConfig.features.magicContext`——bootstrap 的
+   * `resolveAppRuntimeConfig` 把它投影到这里。`undefined`/`false` 都表示关闭：
+   * D-11 要求默认态零成本，装配层在关闭时连 transform 实例都不创建。
+   * Step 23 接 ConfigPort 热更新后，运行中改配置必须立刻生效。
+   */
+  magicContext?: {
+    enabled?: boolean;
+  };
   /** 历史恢复允许未绑定；只有完整选择才能创建本轮执行 Model。 */
   modelSelection?: ModelSelection;
   titleGeneration?: {
@@ -370,6 +381,12 @@ export interface AgentRuntimeDeps {
   now?: () => Date;
   isRemoteWorkspace?: () => boolean;
   memoryRoot?: string;
+  /**
+   * Step 19b：每请求的 magic-context transform 端口。在场即注册门——装配层在
+   * `features.magicContext === false` 时不构造它，于是默认态下 core 这条路径连
+   * 一次判空之外什么都不做（D-11）。
+   */
+  magicContextTurnTransform?: MagicContextTurnTransform;
 }
 
 export interface RuntimeModelFactoryInput {

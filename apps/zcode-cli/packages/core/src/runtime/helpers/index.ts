@@ -22,5 +22,6 @@ export * from "./media-observability.js";
 export * from "./provider-request-messages.js";
 export * from "./model-tool-call-validation.js";
 export * from "./runtime-provider-request-messages.js";
+export * from "./magic-context-turn-transform.js";
 export * from "./plan-file-continuity.js";
 export * from "./turn-file-changes.js";

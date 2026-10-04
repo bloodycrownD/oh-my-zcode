@@ -12,6 +12,7 @@ import {
   buildTodoReminderBody,
   buildRuntimeProviderRequestMessages,
   createCompactRapidRefillError,
+  runMagicContextTurnTransform,
   throwIfTurnAborted,
   shouldBuildTodoReminder,
 } from "../helpers/index.js";
@@ -161,7 +162,20 @@ export async function runRegularTurnLoop(
       ]);
     }
     const providerEntries = [...state.turnRequestState.entries];
-    const requestEntries = providerEntries;
+    // Step 19b：magic-context transform 前置到双投影之前——messages 与
+    // recordedMessages 同源于 requestEntries，transform 在投影前跑一次，两条投影
+    // 因此必然看到同一份字节（否则 m[0]/m[1] 与 drop 只进其中一条）。
+    // flag off 时装配层不注入端口，这里是纯判空，行为与 Phase 1 逐行等价。
+    const requestEntries = await runMagicContextTurnTransform(
+      this,
+      {
+        entries: providerEntries,
+        model: state.model,
+        sessionId: this.sessionId,
+        workingDirectory: this.workspaceRoot,
+      },
+      traceContextToLogContext(state.turnTraceContext),
+    );
     // provider-visible user ordering projection 会改变最终 latest user 落点，
     // cache-control 必须在 projection 后统一设置，避免 raw synthetic entry 抢占缓存锚点。
     const providerProjection = buildRuntimeProviderRequestMessages(this, {

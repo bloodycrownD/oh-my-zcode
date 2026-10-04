@@ -18,6 +18,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
+    "test:magic-context": "node --test scripts/test-magic-context-turn-transform.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"
@@ -29,6 +30,7 @@
     "@zcode/dynamic-workflow": "workspace:*",
     "@zcode/dynamic-workflow-runtime": "workspace:*",
     "@zcode/i18n": "workspace:*",
+    "@zcode/magic-context": "workspace:*",
     "@zcode/provider": "workspace:*",
     "@zcode/provider-node": "workspace:*",
     "@zcode/shared": "workspace:*",
