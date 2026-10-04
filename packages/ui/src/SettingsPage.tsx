@@ -1271,7 +1271,7 @@ export function SettingsPage({
   );
   const handleCodePreviewSettingsChange = useCallback(
     (patch: Parameters<typeof setCodePreviewSettings>[0]) => {
-      setCodePreviewSettings(patch);
+      return setCodePreviewSettings(patch);
     },
     [setCodePreviewSettings],
   );
