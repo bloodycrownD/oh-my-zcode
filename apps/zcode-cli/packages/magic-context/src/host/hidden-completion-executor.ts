@@ -5,7 +5,7 @@
  * compartments. Upstream (the OpenCode plugin) got that by SPAWNING A CHILD
  * SESSION and prompting it. This fork must not: D-6 settles that the historian
  * is a **side-car model request** — one in-process call through the same
- * primitive the native compactor used, reusing the `runCompactSummaryModelRequest`
+ * primitive the native compactor used, reusing the `runSidecarModelRequest`
  * / `generateLiteExtraction` paradigm (that file is renamed and kept in Phase 2b
  * precisely so this dependency survives D-7).
  *
@@ -33,12 +33,12 @@
  *   emit `compact_stream_boundary` events (raw `provider_response_start` /
  *   `provider_content_block_*` / `provider_stop_reason` provenance). The sidecar
  *   primitive CONSUMES those events to decide whether a streamed content block was
- *   really committed — see `compact-summary-model-request.ts:112` (the
- *   `compact_stream_boundary` case) and `:190-255` (`applyCompactProviderBoundary`
- *   plus `commitNormalizedContentBlock`). With the flag absent or false, the
- *   adapter stops emitting the provenance, `commitNormalizedContentBlock` falls
- *   back to the normalized end-of-block inference, and a tool call the provider had
- *   already committed can be re-submitted as if the stream died before commit.
+ *   really committed — see `sidecar-model-request.ts`'s `compact_stream_boundary`
+ *   case plus `applySidecarProviderBoundary` / `commitNormalizedContentBlock`.
+ *   With the flag absent or false, the adapter stops emitting the provenance,
+ *   `commitNormalizedContentBlock` falls back to the normalized end-of-block
+ *   inference, and a tool call the provider had already committed can be
+ *   re-submitted as if the stream died before commit.
  *
  *   That failure is SILENT. Nothing throws, no test fails, the run still
  *   completes — the tool-call commit verdict is just wrong. Which is exactly why a
@@ -124,7 +124,7 @@ export interface SidecarModelCallResult {
  * fillable — see `SidecarModelCallOptions`.
  *
  * The ZCode wiring (bootstrap / the turn-loop integration) implements this on top
- * of the renamed `runCompactSummaryModelRequest` primitive, forwarding both
+ * of the renamed `runSidecarModelRequest` primitive, forwarding both
  * arguments through.
  */
 export type SidecarModelCall = (
@@ -136,7 +136,7 @@ export type SidecarModelCall = (
  * Provider-side failures that mean "this configuration can never work", mapped
  * from `ModelErrorCode` (`contracts/src/model/index.ts:119-133`). These are the
  * same codes the sidecar primitive treats as SETUP failures
- * (`COMPACT_SUMMARY_SETUP_ERROR_CODES`) — a second transport must not be tried to
+ * (`SIDECAR_SETUP_ERROR_CODES`) — a second transport must not be tried to
  * paper over them, because the request never reached the provider at all.
  */
 const SETUP_ERROR_CODES: ReadonlySet<string> = new Set([

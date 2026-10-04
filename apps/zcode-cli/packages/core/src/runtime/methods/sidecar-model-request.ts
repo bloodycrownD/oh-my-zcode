@@ -21,7 +21,7 @@ import {
 } from "../helpers/index.js";
 import type { RuntimeModelTextResult } from "../types.js";
 
-type CompactSummaryModelRequest = {
+type SidecarModelRequest = {
   abortSignal?: AbortSignal;
   maxOutputTokens?: number;
   messages: Parameters<Model["generateText"]>[0]["messages"];
@@ -34,17 +34,17 @@ type CompactSummaryModelRequest = {
   refreshRuntimeHeadersBeforeAttempt?: ModelInvocationContext["refreshRuntimeHeadersBeforeAttempt"];
 };
 
-interface CompactSummaryFinish {
+interface SidecarFinish {
   finishReason: string;
   providerMetadata?: Record<string, unknown>;
   usage: ModelUsage;
 }
 
-interface CompactSummaryStreamState {
+interface SidecarStreamState {
   committedText: string;
   committedContentBlock: boolean;
   currentTextBlockId?: string;
-  finish?: CompactSummaryFinish;
+  finish?: SidecarFinish;
   pendingTextById: Map<string | undefined, string>;
   providerContentBlockTypes: Map<number, string>;
   providerMessageProtocolObserved: boolean;
@@ -55,13 +55,13 @@ interface CompactSummaryStreamState {
   toolCalls: ModelToolCall[];
 }
 
-interface RunCompactSummaryModelRequestInput {
+interface RunSidecarModelRequestInput {
   logger?: Logger;
   model: Model;
-  request: CompactSummaryModelRequest;
+  request: SidecarModelRequest;
 }
 
-const COMPACT_SUMMARY_SETUP_ERROR_CODES = new Set<string>([
+const SIDECAR_SETUP_ERROR_CODES = new Set<string>([
   ModelErrorCode.InvalidModelSelection,
   ModelErrorCode.ModelConfigMissing,
   ModelErrorCode.ProviderNotFound,
@@ -70,38 +70,38 @@ const COMPACT_SUMMARY_SETUP_ERROR_CODES = new Set<string>([
   ModelErrorCode.InvalidModelRequest,
 ]);
 
-export async function runCompactSummaryModelRequest(
-  input: RunCompactSummaryModelRequestInput,
+export async function runSidecarModelRequest(
+  input: RunSidecarModelRequestInput,
 ): Promise<RuntimeModelTextResult> {
-  const state = createCompactSummaryStreamState();
+  const state = createSidecarStreamState();
 
   try {
-    for await (const event of compactModelStream(input, input.request)) {
-      applyCompactSummaryStreamEvent(state, event, input);
+    for await (const event of sidecarModelStream(input, input.request)) {
+      applySidecarStreamEvent(state, event, input);
     }
 
     if (!state.finish) {
-      throw new Error("Compact summary stream ended before finish");
+      throw new Error("Sidecar stream ended before finish");
     }
     if (
       (state.providerMessageProtocolObserved && !state.providerResponseStarted) ||
-      (!state.committedContentBlock && !hasCompactSummaryStopReason(state))
+      (!state.committedContentBlock && !hasSidecarStopReason(state))
     ) {
       // AI SDK 会为空 SSE 合成 finish(other)，也会吞掉 message_delta 的真实 stop reason；
       // 只有观察到 response start，且 block stop / truthy stop reason 至少一个成立时才接受该流。
-      throw new Error("Compact summary stream ended without a complete provider response");
+      throw new Error("Sidecar stream ended without a complete provider response");
     }
   } catch (error) {
-    return handleCompactSummaryStreamFailure(input, state, error);
+    return handleSidecarStreamFailure(input, state, error);
   }
 
-  return compactSummaryStreamResult(state, state.finish);
+  return sidecarStreamResult(state, state.finish);
 }
 
-function applyCompactSummaryStreamEvent(
-  state: CompactSummaryStreamState,
+function applySidecarStreamEvent(
+  state: SidecarStreamState,
   event: ModelStreamEvent,
-  input: RunCompactSummaryModelRequestInput,
+  input: RunSidecarModelRequestInput,
 ): void {
   switch (event.type) {
     case "start":
@@ -110,7 +110,7 @@ function applyCompactSummaryStreamEvent(
       return;
 
     case "compact_stream_boundary":
-      applyCompactProviderBoundary(state, event);
+      applySidecarProviderBoundary(state, event);
       return;
 
     case "text_start":
@@ -163,7 +163,7 @@ function applyCompactSummaryStreamEvent(
         normalizeModelToolCallsForRuntime([event.toolCall], {
           logger: input.logger,
           model: modelSelection(input.model),
-          source: "compactStreamText",
+          source: "sidecarStreamText",
           traceContext: input.request.traceContext,
         }) ?? [];
       if (!toolCall || state.toolCallIds.has(toolCall.id)) return;
@@ -187,8 +187,8 @@ function applyCompactSummaryStreamEvent(
   }
 }
 
-function applyCompactProviderBoundary(
-  state: CompactSummaryStreamState,
+function applySidecarProviderBoundary(
+  state: SidecarStreamState,
   event: Extract<ModelStreamEvent, { type: "compact_stream_boundary" }>,
 ): void {
   if (event.boundary === "inferred_content_block_stop") {
@@ -213,7 +213,7 @@ function applyCompactProviderBoundary(
 
     case "provider_content_block_start":
       if (event.index === null || event.blockType === null) {
-        throw new Error("Invalid compact provider content block start");
+        throw new Error("Invalid sidecar provider content block start");
       }
       state.providerContentBlockTypes.set(event.index, event.blockType);
       return;
@@ -225,7 +225,7 @@ function applyCompactProviderBoundary(
         blockType === undefined ||
         !isProviderContentBlockDeltaCompatible(blockType, event.deltaType)
       ) {
-        throw new Error("Invalid compact provider content block delta");
+        throw new Error("Invalid sidecar provider content block delta");
       }
       return;
     }
@@ -238,35 +238,35 @@ function applyCompactProviderBoundary(
       ) {
         // content_block_stop 必须先有 message_start 和同 index block start；orphan stop
         // 立即失败；统一 IteratorClose 会释放 provider reader，fallback gate 再按既有 commit 决定能否重放。
-        throw new Error("Invalid compact provider content block stop");
+        throw new Error("Invalid sidecar provider content block stop");
       }
       state.committedContentBlock = true;
       return;
   }
 }
 
-async function handleCompactSummaryStreamFailure(
-  input: RunCompactSummaryModelRequestInput,
-  state: CompactSummaryStreamState,
+async function handleSidecarStreamFailure(
+  input: RunSidecarModelRequestInput,
+  state: SidecarStreamState,
   error: unknown,
 ): Promise<RuntimeModelTextResult> {
   if (
     isTurnCancellationError(error, input.request.abortSignal) ||
     isModelContextExceededError(error) ||
     isModelMediaTooLargeError(error) ||
-    isCompactSummarySetupFailure(error) ||
+    isSidecarSetupFailure(error) ||
     state.committedContentBlock
   ) {
     throw error;
   }
   const normalizedError = error instanceof Error ? error : normalizeStreamError(error);
 
-  // compact summary 的 stream delta 从未进入 session/UI，在 content block
+  // sidecar 的 stream delta 从未进入 session/UI，在 content block
   // 提交前可以安全丢弃并改走 non-stream；这与普通主请求的可见 streaming 恢复边界不同。
-  input.logger?.warn("Compact summary stream failed; falling back to non-streaming", {
+  input.logger?.warn("Sidecar stream failed; falling back to non-streaming", {
     ...traceContextToLogContext(input.request.traceContext),
     errorMessage: normalizedError.message,
-    event: "compact.summary.stream_to_non_stream_fallback",
+    event: "sidecar.stream_to_non_stream_fallback",
     model: `${input.model.providerId}/${input.model.modelId}`,
     module: "core.runtime",
     observedPartialOutput: state.sawDelta,
@@ -277,16 +277,16 @@ async function handleCompactSummaryStreamFailure(
   );
 }
 
-function compactModelStream(
-  input: RunCompactSummaryModelRequestInput,
-  request: CompactSummaryModelRequest,
+function sidecarModelStream(
+  input: RunSidecarModelRequestInput,
+  request: SidecarModelRequest,
 ): AsyncIterable<ModelStreamEvent> {
   return runWithModelInvocationContext(invocationContext(request), () =>
     input.model.streamText(cleanRequest(request)),
   );
 }
 
-function cleanRequest(request: CompactSummaryModelRequest) {
+function cleanRequest(request: SidecarModelRequest) {
   return {
     messages: request.messages,
     tools: request.tools,
@@ -297,7 +297,7 @@ function cleanRequest(request: CompactSummaryModelRequest) {
   };
 }
 
-function invocationContext(request: CompactSummaryModelRequest) {
+function invocationContext(request: SidecarModelRequest) {
   return {
     metadata: request.metadata,
     modelRequestSessionType: request.modelRequestSessionType,
@@ -308,7 +308,7 @@ function invocationContext(request: CompactSummaryModelRequest) {
   };
 }
 
-function isCompactSummarySetupFailure(error: unknown): boolean {
+function isSidecarSetupFailure(error: unknown): boolean {
   const errorRecord = asRecord(error);
   const context = asRecord(errorRecord?.context);
   const streamFailurePhase = context?.streamFailurePhase;
@@ -323,7 +323,7 @@ function isCompactSummarySetupFailure(error: unknown): boolean {
   }
 
   return (
-    typeof errorRecord?.code === "string" && COMPACT_SUMMARY_SETUP_ERROR_CODES.has(errorRecord.code)
+    typeof errorRecord?.code === "string" && SIDECAR_SETUP_ERROR_CODES.has(errorRecord.code)
   );
 }
 
@@ -333,9 +333,9 @@ function asRecord(value: unknown): Record<string, unknown> | undefined {
     : undefined;
 }
 
-function compactSummaryStreamResult(
-  state: CompactSummaryStreamState,
-  finish: CompactSummaryFinish,
+function sidecarStreamResult(
+  state: SidecarStreamState,
+  finish: SidecarFinish,
 ): RuntimeModelTextResult {
   return {
     finishReason: finish.finishReason,
@@ -350,7 +350,7 @@ function modelSelection(model: Model) {
   return { providerId: model.providerId, modelId: model.modelId };
 }
 
-function commitNormalizedContentBlock(state: CompactSummaryStreamState): void {
+function commitNormalizedContentBlock(state: SidecarStreamState): void {
   // 无 raw message-block provenance 的 provider 继续使用 AI SDK normalized end 推断；
   // 一旦观察到该 provenance，只有 provider content_block_stop 可以固化 commit。
   if (!state.providerMessageProtocolObserved) {
@@ -358,7 +358,7 @@ function commitNormalizedContentBlock(state: CompactSummaryStreamState): void {
   }
 }
 
-function hasCompactSummaryStopReason(state: CompactSummaryStreamState): boolean {
+function hasSidecarStopReason(state: SidecarStreamState): boolean {
   if (state.providerMessageProtocolObserved) {
     return state.providerStopReasonPresent;
   }
@@ -390,7 +390,7 @@ function isProviderContentBlockDeltaCompatible(
   }
 }
 
-function createCompactSummaryStreamState(): CompactSummaryStreamState {
+function createSidecarStreamState(): SidecarStreamState {
   return {
     committedText: "",
     committedContentBlock: false,

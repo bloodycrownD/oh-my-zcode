@@ -189,7 +189,7 @@ export {
 //
 // `compact-active.ts` 是它今天在仓内的另一个调用者，D-7（Step 26/27）会把那条
 // 压缩路径删掉——但本文件正是它被留下的理由，**不许**跟着删。
-export { runCompactSummaryModelRequest } from "./runtime/methods/compact-summary-model-request.js";
+export { runSidecarModelRequest } from "./runtime/methods/sidecar-model-request.js";
 export type {
   RuntimeAttachmentEntry,
   RuntimeMessageEntry,

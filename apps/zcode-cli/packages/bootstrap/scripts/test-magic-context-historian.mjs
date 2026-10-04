@@ -94,7 +94,7 @@ function loggerWithWarnings() {
 
 /**
  * 一个**真的能发请求**的假 Model：streamText 吐出最小可接受的事件序列，
- * 于是旁路原语 `runCompactSummaryModelRequest` 的整条消费路径都被跑到了。
+ * 于是旁路原语 `runSidecarModelRequest` 的整条消费路径都被跑到了。
  *
  * `observedInvocation` 记录请求抵达时的 model invocation context —— 那正是
  * `preserveProviderStreamBoundaries` 在原语里的落点，也是 provider 适配层据以

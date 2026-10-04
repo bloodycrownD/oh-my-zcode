@@ -6,7 +6,7 @@
  * ============================================================================
  *
  *   1. **sidecarModelCall**：把包侧的 {@link SidecarModelRequest} 映射到 core 的
- *      `runCompactSummaryModelRequest`（旁路原语），并把结果映射回
+ *      `runSidecarModelRequest`（旁路原语），并把结果映射回
  *      {@link SidecarModelCallResult}。
  *   2. **executor 装配**：`createHiddenCompletionExecutor({ sidecarModelCall })`。
  *      没有 historian 模型时**不装**，`historianRunnable` 保持 false —— 与 S16 的
@@ -22,7 +22,7 @@
  * `commitNormalizedContentBlock` 判定「provider 真的提交了这个 content block」的
  * 唯一依据；flag 缺席时那条判定会静默退化成「SDK 归一化的块结束位置 suggests 它
  * 提交了」，一个已经提交的工具调用会被当成没提交而重发——**不抛错、不失败、只是
- * 判错**。core 的 `runCompactSummaryModelRequest` 是全仓唯一消费
+ * 判错**。core 的 `runSidecarModelRequest` 是全仓唯一消费
  * `compact_stream_boundary` 事件的地方，所以旁路原语必须经它，不能绕开。
  *
  * ── historian 模型从哪来 ──────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ import {
   type ModelInputMessage,
   type TraceContext,
 } from "@zcode/contracts";
-import { runCompactSummaryModelRequest } from "@zcode/core";
+import { runSidecarModelRequest } from "@zcode/core";
 import {
   createHiddenCompletionExecutor,
   createHistorianScheduler,
@@ -194,9 +194,9 @@ export function createZCodeSidecarModelCall(deps: {
       attributes: { feature: "magic_context", kind: request.run.kind },
     });
 
-    let raw: Awaited<ReturnType<typeof runCompactSummaryModelRequest>>;
+    let raw: Awaited<ReturnType<typeof runSidecarModelRequest>>;
     try {
-      raw = await runCompactSummaryModelRequest({
+      raw = await runSidecarModelRequest({
         logger: deps.logger,
         model,
         request: {

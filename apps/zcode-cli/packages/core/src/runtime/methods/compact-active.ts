@@ -59,7 +59,7 @@ import {
   formatCompactSummaryOrThrow,
   persistCompactTimelineEvent,
 } from "./compact-active-helpers.js";
-import { runCompactSummaryModelRequest } from "./compact-summary-model-request.js";
+import { runSidecarModelRequest } from "./sidecar-model-request.js";
 import { resolveNormalRequestMaxOutputTokens } from "./model-token-limits.js";
 import { createRefreshRuntimeHeadersBeforeModelAttempt } from "./model-runtime-headers.js";
 import { recordModelUsageFact } from "./usage-observability.js";
@@ -334,7 +334,7 @@ export async function compactActiveConversation(
         };
 
         try {
-          result = await runCompactSummaryModelRequest({
+          result = await runSidecarModelRequest({
             logger: this.logger,
             model: compactModel,
             request: compactModelRequest,
