@@ -267,7 +267,23 @@ export { createTagger, type Tagger } from "./core/features/magic-context/tagger.
  * compartment 行的只读查询。`/ctx-recomp` 的 runner 要在重算前后各数一次条数，
  * 而那条计数必须与 `/ctx-status` 读的是同一份查询——两处各写一次 SQL 迟早漂移。
  */
-export { getCompartments, type Compartment } from "./core/features/magic-context/compartment-storage.js";
+export {
+  getCompartments,
+  type Compartment,
+} from "./core/features/magic-context/compartment-storage.js";
+
+/**
+ * session_meta 的 usage 读写面（S24）。
+ *
+ * 上游 OpenCode 的 plugin 由 `message.updated` 事件负责写 `last_*_usage` 三列；
+ * ZCode 没有 plugin 事件通道，宿主只能自己写。于是**写**与**读**必须都出得来，
+ * 而且必须是同一对函数——宿主另写一份 SQL 迟早与包内的列名/语义漂移。
+ *
+ * `updateSessionMeta` 也被 transform 自己用于同样的三列，所以这个出口不会成为
+ * 第二条写路径。
+ */
+export { updateSessionMeta } from "./core/features/magic-context/storage-meta.js";
+export { loadPersistedUsage } from "./core/features/magic-context/storage-meta-persisted.js";
 
 // ── 4b. D 组 ctx 工具面 + 状态读取（Step 21） ──────────────────────────────────
 
@@ -281,21 +297,18 @@ export { getCompartments, type Compartment } from "./core/features/magic-context
  * 工具自身的 `commandIdLedger` 承担，键的推导逻辑逐字保留（T-M11）。
  */
 export { CTX_REDUCE_DESCRIPTION } from "./core/tools/ctx-reduce/constants.js";
-export {
-  createCtxReduceTools,
-  type CtxReduceToolDeps,
-} from "./core/tools/ctx-reduce/tools.js";
+export { createCtxReduceTools, type CtxReduceToolDeps } from "./core/tools/ctx-reduce/tools.js";
 export type { CtxReduceArgs } from "./core/tools/ctx-reduce/types.js";
-export { CTX_EXPAND_DESCRIPTION, CTX_EXPAND_TOKEN_BUDGET } from "./core/tools/ctx-expand/constants.js";
+export {
+  CTX_EXPAND_DESCRIPTION,
+  CTX_EXPAND_TOKEN_BUDGET,
+} from "./core/tools/ctx-expand/constants.js";
 export {
   resolveCtxExpandMode,
   type CtxExpandMode,
   type CtxExpandOrdinalDomain,
 } from "./core/tools/ctx-expand/mode.js";
-export {
-  createCtxExpandTools,
-  type CtxExpandToolDeps,
-} from "./core/tools/ctx-expand/tools.js";
+export { createCtxExpandTools, type CtxExpandToolDeps } from "./core/tools/ctx-expand/tools.js";
 export type { CtxExpandArgs } from "./core/tools/ctx-expand/types.js";
 export type { CtxToolContext, CtxToolDefinition } from "./core/tools/tool-definition.js";
 

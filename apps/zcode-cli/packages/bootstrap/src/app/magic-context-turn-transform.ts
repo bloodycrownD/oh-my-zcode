@@ -82,11 +82,13 @@ import type {
   RuntimeAttachmentEntry,
   RuntimeMessageEntry,
 } from "@zcode/core";
-import type {
-  ModelMessageContent,
-  ModelMessageContentBlock,
-  SessionStorePort,
-  TraceContext,
+import {
+  getModelUsageContextTokens,
+  type ModelMessageContent,
+  type ModelMessageContentBlock,
+  type ModelUsage,
+  type SessionStorePort,
+  type TraceContext,
 } from "@zcode/contracts";
 import { ConfigKey, type ConfigPort } from "@zcode/contracts";
 import {
@@ -107,6 +109,7 @@ import {
   initializeMagicContextHost,
   isFailClosedBlockingError,
   isTransientSqliteError,
+  loadPersistedUsage,
   noteEntry,
   openDatabase,
   projectRuntimeEntries,
@@ -114,6 +117,7 @@ import {
   replayLkg,
   resolveLkgModelKeys,
   snapshotRuntimeEntries,
+  updateSessionMeta,
   withRawMessageProvider,
   type ContextDatabase,
   type MagicContextConfig,
@@ -163,6 +167,133 @@ export interface MagicContextTurnTransformOptions {
   createSidecarModel?: CreateSidecarModel;
   /** 会话根 trace；sidecar 请求在它下面开子 span。 */
   traceContext?: TraceContext;
+  /**
+   * FORK（S24）：provider usage 的记录口。上游 OpenCode 的 plugin 在
+   * `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里由宿主
+   * 从 `model_complete` 事件喂。**不接它等于永久 `percentage=0`**——scheduler 永远
+   * `defer`，drop 与 historian 都不会启动（实测见 E2E 报告 T-M2 的 FAIL 记录）。
+   * 缺席时退回 S19b 的空 Map，行为与那时逐行相同。
+   */
+  usageRecorder?: MagicContextUsageRecorder;
+}
+
+/** `TransformDeps.contextUsageMap` 的值形状（包内 `loadContextUsage` 读的那三个字段）。 */
+export interface MagicContextUsageMapEntry {
+  hasUsageTokens: boolean;
+  lastResponseTime: number;
+  updatedAt: number;
+  usage: { inputTokens: number; percentage: number };
+}
+
+/**
+ * provider usage 记录器（S24）。
+ *
+ * 它是 S19b 留下的 `contextUsageMap` 空表的**唯一生产者**，而且必须**两边都写**：
+ *
+ *   - **内存**：本进程这一轮读数。`loadContextUsage` 的快路径。
+ *   - **session_meta**（`last_context_percentage` / `last_input_tokens` /
+ *     `last_response_time`）：跨进程。CLI 每一轮 prompt 都是**一个新进程**，只写
+ *     内存等于每轮从 0 开始——实测那样 scheduler 永远 `defer`，drop 与 historian
+ *     一次都不启动。
+ *
+ * 跨进程那一半由 {@link MagicContextUsageRecorder.prime} 在装配期读回：transform 的
+ * 「首 pass 重置」会把落库的百分比清零（上游那条规则假定一个进程 = 一个会话，而
+ * ZCode 是一个进程 = 一轮），所以**读数必须已经在内存里**，重置动不了它。换模型
+ * 时 transform 自己会 `contextUsageMap.delete(sessionId)`，所以这份读数不会跨模型
+ * 生效。
+ *
+ * 百分比的分母是**本轮真实模型的窗口**——装配期没有 turn，也就还没有这个事实，
+ * 所以分母来自 `noteLiveModel`。
+ */
+export interface MagicContextUsageRecorder {
+  /** 直接交给 `TransformDeps.contextUsageMap`。 */
+  readonly contextUsageMap: Map<string, MagicContextUsageMapEntry>;
+  /** 装配期：把上一次落库的读数读回内存，让本进程的第一 pass 就带着它。 */
+  prime: (db: ContextDatabase) => void;
+  /** 记住本轮真实模型的窗口，作为百分比分母。 */
+  noteLiveModel: (model: { properties?: { contextWindow?: number } }) => void;
+  /** 记一次 provider usage。`contextUsed` 缺席（provider 未报）时**不写**。 */
+  record: (input: { at?: number; usage: ModelUsage }) => void;
+}
+
+export function createMagicContextUsageRecorder(
+  sessionId: string,
+  logger?: Logger,
+): MagicContextUsageRecorder {
+  const contextUsageMap = new Map<string, MagicContextUsageMapEntry>();
+  let contextWindow: number | undefined;
+  let db: ContextDatabase | undefined;
+  const note = (level: "debug" | "info", event: string, detail: Record<string, unknown>): void =>
+    logger?.[level]("Magic context usage recorder", {
+      module: "bootstrap",
+      event,
+      sessionId,
+      ...detail,
+    });
+  return {
+    contextUsageMap,
+    prime: (handle) => {
+      db = handle;
+      try {
+        const persisted = loadPersistedUsage(handle, sessionId);
+        if (!persisted) return;
+        contextUsageMap.set(sessionId, {
+          usage: persisted.usage,
+          updatedAt: persisted.updatedAt,
+          lastResponseTime: persisted.updatedAt,
+          // true = 这条读数带真 token（上一轮 provider 真的报过），transform 直接
+          // 采信而不回表重算。见 `loadContextUsage` 的快路径。
+          hasUsageTokens: true,
+        });
+        note("debug", "magic_context.usage_primed", { ...persisted.usage });
+      } catch (error) {
+        note("info", "magic_context.usage_prime_failed", {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+    noteLiveModel: (model) => {
+      const window = model.properties?.contextWindow;
+      if (typeof window === "number" && window > 0) contextWindow = window;
+    },
+    record: ({ at = Date.now(), usage }) => {
+      const inputTokens = getModelUsageContextTokens(usage);
+      // provider 没报 input（某些 sidecar/错误路径）时写 0 只会把「不知道」说成
+      // 「很空」，而 0% 会让 scheduler 一直 defer——所以宁可保持上一次的读数。
+      if (inputTokens === undefined || contextWindow === undefined || contextWindow <= 0) {
+        // 「没记上」是异常而不是常态：它意味着 transform 会一直看到 0% 并永远 defer。
+        // 所以这条走 info 而不是 debug——默认日志级别下它必须看得见。
+        note("info", "magic_context.usage_skipped", {
+          inputTokens: inputTokens ?? null,
+          contextWindow: contextWindow ?? null,
+        });
+        return;
+      }
+      const percentage = (inputTokens / contextWindow) * 100;
+      note("debug", "magic_context.usage_recorded", { inputTokens, contextWindow, percentage });
+      contextUsageMap.set(sessionId, {
+        usage: { inputTokens, percentage },
+        updatedAt: at,
+        lastResponseTime: at,
+        // true = 这条读数带真 token，transform 直接采信而不回表重算
+        // （`loadContextUsage` 的快路径）。
+        hasUsageTokens: true,
+      });
+      if (!db) return;
+      try {
+        updateSessionMeta(db, sessionId, {
+          lastContextPercentage: percentage,
+          lastInputTokens: inputTokens,
+          lastResponseTime: at,
+        });
+      } catch (error) {
+        // 落库失败只影响下一个进程的第一 pass，本进程这一轮仍用内存读数。
+        note("info", "magic_context.usage_persist_failed", {
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -574,6 +705,10 @@ export async function createMagicContextTurnTransform(
     ...(options.traceContext === undefined ? {} : { traceContext: options.traceContext }),
   });
 
+  // 装配期把上一次落库的读数读回内存。CLI 一轮 prompt 一个进程，所以这一行是
+  // 「第二轮起 transform 才看得见压力」的全部原因（见 recorder 的文件注释）。
+  options.usageRecorder?.prime(db);
+
   const deps = buildTransformDeps(config, db, options, historian);
   // ③ 热生效（D-12 第三段）：bridge 订阅 ConfigPort，配置变更即 bump
   // generation/digest 并把新域原地写进 deps。下一个 turn 的第一次 pass 就读到新值
@@ -589,20 +724,23 @@ export async function createMagicContextTurnTransform(
   });
 
   const transform = createTransform(deps);
+  const notifyPassSucceeded = (model: MagicContextTurnTransformInput["model"]): void => {
+    // 主模型窗口有两个消费者，都只有 turn 知道：后台 protected-tail 边界的输入，
+    // 以及 usage recorder 的百分比分母（缺了分母，占比就永远算不出来）。
+    historian.noteLiveModel(model);
+    options.usageRecorder?.noteLiveModel(model);
+    // fire-and-forget：本行绝不 await。调度器自己合并同会话的连续触发、自己 drain、
+    // 自己 abort——让 UI 等一个可能跑几十秒的 historian 是错的。
+    historian.historianScheduler?.notifyTurnSuccess({ sessionId: options.sessionId });
+  };
   return createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
     options,
-    ...(historian.historianScheduler === undefined
+    // 两个消费者都不在时**不挂**回调：Step 19b 的单测走的就是这条路径，它必须与
+    // S19b 逐行相同。
+    ...(historian.historianScheduler === undefined && options.usageRecorder === undefined
       ? {}
-      : {
-          onPassSucceeded: (model: MagicContextTurnTransformInput["model"]) => {
-            // 主模型窗口是后台 protected-tail 边界的输入，而它只有 turn 知道。
-            historian.noteLiveModel(model);
-            // fire-and-forget：本行绝不 await。调度器自己合并同会话的连续触发、
-            // 自己 drain、自己 abort——让 UI 等一个可能跑几十秒的 historian 是错的。
-            historian.historianScheduler?.notifyTurnSuccess({ sessionId: options.sessionId });
-          },
-        }),
+      : { onPassSucceeded: notifyPassSucceeded }),
   });
 }
 
@@ -675,7 +813,8 @@ function buildTransformDeps(
     db,
     tagger: createTagger(),
     scheduler: createZCodeScheduler(config),
-    contextUsageMap: new Map(),
+    // S19b 留的空表；S24 由宿主侧的 usage recorder 供给（见选项说明）。
+    contextUsageMap: options.usageRecorder?.contextUsageMap ?? new Map(),
     clearReasoningAge: 50,
     historyRefreshSessions: new Set<string>(),
     pendingMaterializationSessions: new Set<string>(),

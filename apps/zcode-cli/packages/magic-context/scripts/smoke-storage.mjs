@@ -195,7 +195,11 @@ try {
     rejection?.supportedVersion,
     storageDb.LATEST_SUPPORTED_VERSION - 1,
   );
-  check("a refused open leaves no migration-on-open refusal behind", storageDb.getMigrationOnOpenRefusal(), null);
+  check(
+    "a refused open leaves no migration-on-open refusal behind",
+    storageDb.getMigrationOnOpenRefusal(),
+    null,
+  );
   // The rejected attempt must not have cached a handle: a later, legitimate open
   // has to be a clean open rather than a cache hit on the refused connection.
   const newerFence = storageDb.openDatabase({

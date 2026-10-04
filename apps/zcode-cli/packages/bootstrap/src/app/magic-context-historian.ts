@@ -181,7 +181,8 @@ export function createZCodeSidecarModelCall(deps: {
       finishReason,
       // 输出被 cap 截断且一个字都没吐时，historian 必须把它当成一个**不同的失败**
       // （`historianReasoningBudgetDiagnostic`）而不是「空输出」去升级重试。
-      lengthCapped: /length|token.?limit|max.?output/i.test(finishReason) && result.text.length === 0,
+      lengthCapped:
+        /length|token.?limit|max.?output/i.test(finishReason) && result.text.length === 0,
       providerId: model.providerId,
       modelId: model.modelId,
     };

@@ -60,13 +60,11 @@ registerHooks({
   },
 });
 
-const { DEFAULT_MAGIC_CONTEXT_CONFIG, MagicContextConfigSchema } = await import(
-  "@zcode/magic-context"
+const { DEFAULT_MAGIC_CONTEXT_CONFIG, MagicContextConfigSchema } =
+  await import("@zcode/magic-context");
+const { createMagicContextHistorianHost, createZCodeSidecarModelCall } = await import(
+  new URL("../dist/app/magic-context-historian.js", import.meta.url).href
 );
-const {
-  createMagicContextHistorianHost,
-  createZCodeSidecarModelCall,
-} = await import(new URL("../dist/app/magic-context-historian.js", import.meta.url).href);
 
 const SESSION_ID = "ses_test_mc_historian";
 
@@ -220,7 +218,11 @@ test("sidecarModelCall：两段消息（system + user）、usage 与 finishReaso
 
   const controller = new AbortController();
   const result = await call(
-    { run: makeRun(), prompt: "<new_messages>raw history</new_messages>", abortSignal: controller.signal },
+    {
+      run: makeRun(),
+      prompt: "<new_messages>raw history</new_messages>",
+      abortSignal: controller.signal,
+    },
     { preserveProviderStreamBoundaries: true },
   );
 

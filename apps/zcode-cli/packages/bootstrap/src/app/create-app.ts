@@ -27,9 +27,13 @@ import {
 import {
   createRootTraceContext,
   traceContextToLogContext,
+  type ModelUsage,
+  type SessionEvent,
+  type SessionEventSink,
   type TraceContext,
   createSessionId,
   createSessionEvent,
+  SessionEventType,
   type ExecutionShellSelection,
   type MessageId,
 } from "@zcode/contracts";
@@ -142,6 +146,45 @@ function decodePromptAttachmentDataUrl(
     throw new Error("fault.attachment.previewTooLarge");
   }
   return { bytes, mediaType };
+}
+
+/**
+ * FORK（S24）：把 magic-context 的 usage recorder 挂进事件扇出。
+ *
+ * `model_complete` 是主会话每一次 provider 请求的 usage 落点。**只认
+ * `querySource === "main_turn"`**：标题生成、压缩摘要、子代理与工具内部的模型调用
+ * 也发这个事件，而它们不是用户可见的上下文——混进来会把上下文占比算成「一个几百
+ * token 的侧车请求」，transform 于是永远看不到压力。这条判据与
+ * `event-reducer.ts` 的 `shouldModelCompleteUpdateContextUsed` 是同一条，不在这里
+ * 另立一套。
+ *
+ * recorder 缺席（flag off，D-11 默认态）时**原样返回下游 sink**，不产生任何包装；
+ * recorder 在场而下游没有 sink 时**仍然造一个**——headless CLI 根本没有下游 sink，
+ * 而 usage 是 transform 的压力输入，不是可选的诊断。
+ */
+function composeMagicContextUsageSink(
+  sink: SessionEventSink | undefined,
+  recorder: { record: (input: { at?: number; usage: ModelUsage }) => void } | undefined,
+): SessionEventSink | undefined {
+  if (!recorder) return sink;
+  return {
+    async onSessionEvent(event) {
+      try {
+        if (
+          event.type === SessionEventType.ModelComplete &&
+          (event.payload as { querySource?: string } | undefined)?.querySource === "main_turn"
+        ) {
+          recorder.record({
+            at: new Date(event.timestamp).getTime(),
+            usage: (event.payload as { usage?: ModelUsage }).usage as ModelUsage,
+          });
+        }
+      } catch {
+        // 诊断面绝不能把一次已处理的事件变成一次失败投递。
+      }
+      return sink?.onSessionEvent(event);
+    },
+  };
 }
 
 export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp> {
@@ -724,45 +767,61 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // （S15 遗留 #6：setHarness("zcode") + project-dir resolver），且在任何 DB 写
     // 之前——本行的位置就保证了这一点，因为 ZCode 自己的 session store 早在
     // `openStartupSessionStore` 就已开完，而 magic-context 的 DB 由工厂自己开。
-    const magicContextTurnTransform =
+    //
+    // FORK（S24）：`contextUsageMap` 的**唯一生产者**。上游 OpenCode 的 plugin 在
+    // `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里从
+    // `model_complete` 事件喂——它承载的就是主会话这一次请求的 provider usage。
+    // 不接它等于永久 `percentage=0`：scheduler 一直 defer，drop 与 historian 都不启动。
+    //
+    // 它与 transform 工厂**同一个动态 import**：flag off 时这段代码根本不求值，
+    // 于是 recorder 的模块也不会被加载（D-11 的成本纪律对新增的缝一视同仁）。
+    const magicContextAssembly =
       runtimeConfig.magicContext?.enabled === true
-        ? await (
-            await import("./magic-context-turn-transform.js")
-          ).createMagicContextTurnTransform({
-            enabled: true,
-            // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
-            // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
-            // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
-            // 的静态源，生产路径恒有 `configPort`。
-            configPort: configResult.configPort,
-            configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
-            sessionId,
-            workingDirectory,
-            sessionStore,
-            logger,
-            // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
-            // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
-            // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类
-            // 辅助调用」准备的（它给未带 reasoning 档位的选择补上最低档），所以
-            // 旁路请求与主会话选模型走的是**同一条**校验，而不是这里再抄一份解析。
-            createSidecarModel: (modelId: string) => {
-              const resolved = resolveRegistryOwnedSelection(
-                options.providerRegistry,
-                modelId,
-                undefined,
-                { allowMissingReasoning: true },
-              );
-              if (!resolved) return undefined;
-              return modelFactory({
-                selection: completeAuxiliaryRegistryModelSelection(
-                  options.providerRegistry,
-                  resolved.selection,
-                ),
-              });
-            },
-            traceContext,
-          })
+        ? await import("./magic-context-turn-transform.js")
         : undefined;
+    const magicContextUsageRecorder = magicContextAssembly?.createMagicContextUsageRecorder(
+      sessionId,
+      logger,
+    );
+    const magicContextTurnTransform = magicContextAssembly
+      ? await magicContextAssembly.createMagicContextTurnTransform({
+          enabled: true,
+          // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
+          // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
+          // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
+          // 的静态源，生产路径恒有 `configPort`。
+          configPort: configResult.configPort,
+          configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
+          sessionId,
+          workingDirectory,
+          sessionStore,
+          logger,
+          // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
+          // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
+          // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类
+          // 辅助调用」准备的（它给未带 reasoning 档位的选择补上最低档），所以
+          // 旁路请求与主会话选模型走的是**同一条**校验，而不是这里再抄一份解析。
+          createSidecarModel: (modelId: string) => {
+            const resolved = resolveRegistryOwnedSelection(
+              options.providerRegistry,
+              modelId,
+              undefined,
+              { allowMissingReasoning: true },
+            );
+            if (!resolved) return undefined;
+            return modelFactory({
+              selection: completeAuxiliaryRegistryModelSelection(
+                options.providerRegistry,
+                resolved.selection,
+              ),
+            });
+          },
+          traceContext,
+          ...(magicContextUsageRecorder === undefined
+            ? {}
+            : { usageRecorder: magicContextUsageRecorder }),
+        })
+      : undefined;
     runtime = new AgentRuntime(sessionId, runtimeConfig, {
       // 主代理的模型请求过治理器的 observer：立即放行，但让治理器看见它的 429 / 成功。
       modelRequestAdmission: workflowConcurrencyGovernor.observer(),
@@ -798,7 +857,11 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
             }))
           : undefined,
       mcpPort,
-      eventSink: options.eventSink,
+      // FORK（S24）：把 recorder 挂进事件扇出。`model_complete` 是主会话每一次
+      // provider 请求的 usage 落点（`querySource === "main_turn"` 才是主会话；
+      // 标题生成/压缩/子代理的模型调用也会发这个事件，它们不是用户可见的上下文，
+      // 混进来会把占比算成"侧车小请求"——与 event-reducer 的同一条判据）。
+      eventSink: composeMagicContextUsageSink(options.eventSink, magicContextUsageRecorder),
       modelFactory,
       modelIoDir,
       providerRuntimeHeadersPort: options.providerRuntimeHeadersPort,
