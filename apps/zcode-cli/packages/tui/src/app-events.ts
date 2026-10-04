@@ -27,7 +27,6 @@ import { applyTurnCompleteEvent, applyTurnCompleteFallbackResponse } from "./app
 import { applyToolTranscriptEvent } from "./app-tool-transcript.js";
 import { DEFAULT_TUI_COPY } from "./app-locale.js";
 import { removeQueuedInputs, upsertQueuedInput } from "./app-queued-inputs.js";
-import { applyCompactTimelineEvent, applyCompactTurnErrorEvent } from "./app-compact-timeline.js";
 import { applyWorkflowProgressEvent, type WorkflowMirrorSetter } from "./app-workflow-events.js";
 import { asRecord, formatNumber, numberField, stringField } from "./state.js";
 
@@ -77,12 +76,6 @@ export function applySessionEventToState(
       break;
     case SessionEventType.TurnError:
     case SessionEventType.ModelError:
-      if (stringField(payload, "turnPhase") === "compact") {
-        applyCompactTurnErrorEvent(payload, handlers.setLastError, handlers.setMessages);
-        handlers.setStatus(copy.status.compactFailed);
-        handlers.setQueuedInputs?.([]);
-        break;
-      }
       applyTurnErrorEvent(payload, handlers.setLastError, handlers.setMessages);
       handlers.setStatus(copy.status.turnFailed);
       handlers.setQueuedInputs?.([]);
@@ -175,33 +168,6 @@ export function applySessionEventToState(
     case SessionEventType.SessionResumed:
       handlers.setStatus(copy.status.sessionResumed);
       handlers.setQueuedInputs?.([]);
-      break;
-    case SessionEventType.SessionCompacted:
-      handlers.setStatus(copy.status.compacted);
-      break;
-    case SessionEventType.CompactStarted:
-      applyCompactTimelineEvent(payload, handlers.setMessages);
-      handlers.setStatus(
-        stringField(payload, "status") === "retrying"
-          ? copy.transcript.compact.retrying({
-              attempt: numberField(payload, "attempt") ?? 0,
-              maxAttempts: numberField(payload, "maxAttempts") ?? 0,
-            })
-          : copy.status.compacting,
-      );
-      break;
-    case SessionEventType.CompactCompleted:
-      applyCompactTimelineEvent(payload, handlers.setMessages);
-      handlers.setStatus(
-        stringField(payload, "status") === "skipped"
-          ? copy.transcript.compact.skipped
-          : copy.status.compacted,
-      );
-      break;
-    case SessionEventType.CompactFailed:
-      applyCompactTimelineEvent(payload, handlers.setMessages);
-      handlers.setStatus(copy.status.compactFailed);
-      handlers.setLastError(stringField(payload, "reason"));
       break;
     case SessionEventType.TargetChanged:
       handlers.setStatus(copy.status.targetChanged(stringField(payload, "action") ?? "changed"));

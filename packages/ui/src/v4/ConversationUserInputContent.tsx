@@ -44,7 +44,7 @@ function parseV4UserInputGoalQuery(
   const command = parseV4VisibleSlashCommand(text, attachments, {
     contextAttachmentCount,
   });
-  if (!command || command.kind === "compact") return null;
+  if (!command) return null;
 
   const match = GOAL_QUERY_TOKEN_PATTERN.exec(text);
   if (!match) return null;

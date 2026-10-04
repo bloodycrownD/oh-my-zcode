@@ -121,7 +121,6 @@ interface ReadonlyLabels {
   execute: string;
   changes: string;
   artifactPreview: string;
-  markerCompact: string;
   markerModelChange: string;
   unsupportedRows: string;
 }
@@ -129,7 +128,7 @@ interface ReadonlyLabels {
 /**
  * 只读时间线里 marker 的文案。
  *
- * 这里刻意不复刻实时时间线的全部状态细分（compact 的 started/failed/interrupted、
+ * 这里刻意不复刻实时时间线的全部状态细分（
  * modelChange 的 from→to、goalVerify 的迭代序号）：发布会拦掉运行中的 marker，
  * 而 from→to 需要 model-provider store 才能解析显示名，只读历史里价值很低。
  * 识别不了的类型返回 null，由调用方整行不渲染 —— 绝不回退成打印枚举名。
@@ -139,8 +138,6 @@ function resolveReadonlyMarkerLabel(
   labels: ReadonlyLabels,
 ): string | null {
   switch (marker.type) {
-    case "compact":
-      return marker.status === "success" ? labels.markerCompact : null;
     case "modelChange":
       return labels.markerModelChange;
     default:
@@ -1103,7 +1100,6 @@ export function ConversationShareReadonlyTimeline({
           execute: "执行",
           changes: "修改",
           artifactPreview: "下载文件",
-          markerCompact: "上下文已压缩",
           markerModelChange: "模型已切换",
           unsupportedRows: "部分内容需要更新 ZCode 查看",
         }
@@ -1114,7 +1110,6 @@ export function ConversationShareReadonlyTimeline({
           execute: "Execute",
           changes: "Changes",
           artifactPreview: "Download file",
-          markerCompact: "Context compacted",
           markerModelChange: "Model switched",
           unsupportedRows: "Some content requires a newer version of ZCode",
         };

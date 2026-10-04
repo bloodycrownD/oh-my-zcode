@@ -2,7 +2,6 @@
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArchiveIcon,
   ArrowRightLeftIcon,
   CheckIcon,
   CopyIcon,
@@ -1610,12 +1609,6 @@ const TurnHeaderRowView = memo(function TurnHeaderRowView({ row }: { row: TurnHe
 });
 
 /** 分隔线图标（对齐旧版 synthetic-timeline dividers：size-3.5 subtle）。 */
-const MARKER_ARCHIVE_ICON = (
-  <ArchiveIcon
-    aria-hidden="true"
-    className="size-3.5 shrink-0 text-[var(--color-foreground-subtle)]"
-  />
-);
 const MARKER_FORK_ICON = (
   <GitBranchIcon
     aria-hidden="true"
@@ -1728,7 +1721,6 @@ const TimelineMarkerRowView = memo(function TimelineMarkerRowView({
   context: ConversationRowRenderContext;
 }) {
   const { intl } = useZCodeIntl();
-  const isOfficeMode = useIsOfficeMode();
   const marker = row.marker;
   const modelSelectionView = context.modelSelectionView ?? null;
   const view = useMemo((): {
@@ -1737,28 +1729,6 @@ const TimelineMarkerRowView = memo(function TimelineMarkerRowView({
     running: boolean;
   } | null => {
     switch (marker.type) {
-      case "compact": {
-        const running = marker.status === "running";
-        const automaticOptimization = isOfficeMode && marker.origin === "auto";
-        const scope = automaticOptimization ? "chat.contextOptimization" : "chat.contextCompaction";
-        const statusMessage =
-          marker.status === "running"
-            ? "started"
-            : marker.status === "noop"
-              ? "skipped"
-              : marker.status === "cancelled"
-                ? "interrupted"
-                : marker.status === "failed"
-                  ? "failed"
-                  : marker.origin === "auto" && !automaticOptimization
-                    ? "completedAuto"
-                    : "completed";
-        return {
-          icon: MARKER_ARCHIVE_ICON,
-          label: intl.formatMessage({ id: `${scope}.${statusMessage}` }),
-          running,
-        };
-      }
       case "forkNotice":
         return {
           icon: MARKER_FORK_ICON,
@@ -1827,7 +1797,7 @@ const TimelineMarkerRowView = memo(function TimelineMarkerRowView({
       default:
         return null;
     }
-  }, [intl, isOfficeMode, marker, modelSelectionView]);
+  }, [intl, marker, modelSelectionView]);
 
   // fork 跳父会话（Tier 1）：仅 forkNotice 且宿主提供 onNavigateToRow 时可点，
   // 切到 marker.parentSessionId（rowId 预留 Tier 2 精确滚动，当前恒 0 占位）。
@@ -1847,15 +1817,12 @@ const TimelineMarkerRowView = memo(function TimelineMarkerRowView({
       rowId={row.rowId}
       markerType={marker.type}
       markerStatus={
-        marker.type === "compact"
-          ? marker.status
-          : marker.type === "goalVerify"
-            ? marker.outcome
-            : marker.type === "forkNotice"
-              ? "created"
-              : "applied"
+        marker.type === "goalVerify"
+          ? marker.outcome
+          : marker.type === "forkNotice"
+            ? "created"
+            : "applied"
       }
-      markerOrigin={marker.type === "compact" ? marker.origin : undefined}
       markerSourceCommandId={row.sourceCommandId}
       icon={view.icon}
       label={view.label}

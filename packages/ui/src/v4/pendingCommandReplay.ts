@@ -3,7 +3,7 @@ import type { CommandEnvelope } from "@zcode/shared/zcode-protocol-v4";
 export type PendingCommandReplay =
   | {
       kind: "input";
-      type: "sendText" | "sendGoalCommand" | "compact" | "createSession";
+      type: "sendText" | "sendGoalCommand" | "createSession";
       payload: Record<string, unknown>;
       baseRevision?: number;
     }
@@ -18,11 +18,7 @@ export type PendingCommandReplay =
     };
 
 export function pendingCommandReplayFor(envelope: CommandEnvelope): PendingCommandReplay | null {
-  if (
-    envelope.type === "sendText" ||
-    envelope.type === "sendGoalCommand" ||
-    envelope.type === "compact"
-  ) {
+  if (envelope.type === "sendText" || envelope.type === "sendGoalCommand") {
     return {
       kind: "input",
       type: envelope.type,

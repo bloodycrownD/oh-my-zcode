@@ -35,7 +35,7 @@ export interface PendingCommandEntry {
 }
 
 interface PendingCommandReplayRequest {
-  type: "sendText" | "sendGoalCommand" | "compact" | "createSession";
+  type: "sendText" | "sendGoalCommand" | "createSession";
   payload: Record<string, unknown>;
   sessionId: string | null;
   baseRevision?: number;
@@ -238,10 +238,6 @@ class PendingCommandRegistry {
     }
     for (const row of snapshot.rows.window) {
       if (row.kind === "userInput" && row.sourceCommandId) {
-        settled.add(row.sourceCommandId);
-      }
-      if (row.kind === "timelineMarker" && row.marker.type === "compact" && row.sourceCommandId) {
-        // compact 不产生 user row；timeline marker 是该维护命令已开始执行的权威证据。
         settled.add(row.sourceCommandId);
       }
     }

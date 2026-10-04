@@ -131,7 +131,6 @@ const QueueRow = memo(function QueueRow({
 }: QueueRowProps) {
   const dispatchLocked = item.dispatch.state !== "queued";
   const rowLocked = dispatchLocked || editPending;
-  const isCompact = item.kind === "compact";
   const {
     attributes,
     isDragging,
@@ -197,13 +196,10 @@ const QueueRow = memo(function QueueRow({
         </Button>
       </ControlHintTooltip>
       <span
-        className={cn(
-          "flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground",
-          isCompact ? "font-mono" : null,
-        )}
+        className="flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground"
         title={item.text}
       >
-        <span className="truncate">{isCompact ? "/compact" : item.text}</span>
+        <span className="truncate">{item.text}</span>
       </span>
       {onSendNow ? (
         <Button
@@ -217,10 +213,10 @@ const QueueRow = memo(function QueueRow({
           onClick={() => onSendNow(item.queueItemId)}
         >
           <ArrowUpFromLine className="size-3.5" />
-          {intl.formatMessage({ id: isCompact ? "chat.queue.runNow" : "chat.queue.sendNow" })}
+          {intl.formatMessage({ id: "chat.queue.sendNow" })}
         </Button>
       ) : null}
-      {onEditItem && !isCompact ? (
+      {onEditItem ? (
         <ControlHintTooltip title={intl.formatMessage({ id: "chat.queue.edit" })}>
           <Button
             type="button"

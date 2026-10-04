@@ -1,9 +1,5 @@
 export type V4VisibleSlashCommand =
   | {
-      kind: "compact";
-      displayText: string;
-    }
-  | {
       kind: "planShortcut";
       task: string;
       displayText: string;
@@ -76,9 +72,6 @@ export function parseV4VisibleSlashCommand(
     return null;
   }
 
-  if (commandName === "compact" || commandName === "compress") {
-    return { kind: "compact", displayText };
-  }
   if (commandName !== "goal" && commandName !== "target") {
     return null;
   }

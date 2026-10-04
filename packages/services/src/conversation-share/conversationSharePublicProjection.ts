@@ -105,8 +105,8 @@ function assertTerminalAndSafe(rows: ConversationRow[]): void {
     }
     if (
       row.kind === "timelineMarker" &&
-      ((row.marker.type === "compact" && row.marker.status === "running") ||
-        (row.marker.type === "goalVerify" && row.marker.outcome === "running"))
+      row.marker.type === "goalVerify" &&
+      row.marker.outcome === "running"
     ) {
       throwProjectionError("invalid_conversation", "Active timeline operations cannot be shared");
     }
@@ -127,12 +127,6 @@ function assertTerminalAndSafe(rows: ConversationRow[]): void {
         throwProjectionError(
           "invalid_conversation",
           "Timeline references outside the shared projection are not supported",
-        );
-      }
-      if (row.marker.type === "compact" && row.marker.summaryRef !== undefined) {
-        throwProjectionError(
-          "artifact_protocol_not_ready",
-          "Conversation summary references require the artifact row protocol",
         );
       }
     }
@@ -226,14 +220,6 @@ function projectTimelineMarker(
   row: Extract<ConversationRow, { kind: "timelineMarker" }>,
 ): Extract<ConversationRow, { kind: "timelineMarker" }>["marker"] {
   switch (row.marker.type) {
-    case "compact":
-      return {
-        type: "compact",
-        origin: row.marker.origin,
-        status: row.marker.status,
-        ...(row.marker.tokensBefore === undefined ? {} : { tokensBefore: row.marker.tokensBefore }),
-        ...(row.marker.tokensAfter === undefined ? {} : { tokensAfter: row.marker.tokensAfter }),
-      };
     case "modelChange":
       return { ...row.marker };
     case "goalSet":

@@ -436,7 +436,7 @@ function resolveQueuedComposerRestore(
   queueItemId: string,
 ): QueuedComposerRestoreTarget | null {
   const item = snapshot.queue.items.find((candidate) => candidate.queueItemId === queueItemId);
-  if (!item || item.kind === "compact") return null;
+  if (!item) return null;
   const config = {
     ...(item.mode ? { mode: item.mode } : {}),
     ...(typeof item.planEnabled === "boolean" ? { planEnabled: item.planEnabled } : {}),
@@ -2261,17 +2261,9 @@ export function SessionPane({
     ): Promise<boolean | "confirmationRequired"> => {
       let type: CommandType | null = null;
       let payload: Record<string, unknown> = {};
-      // compact 是可排队 input command，不走 CAS；resumeGoal 仍是 CAS。
+      // resumeGoal 仍是 CAS 命令；其余 slash 命令不走 CAS。
       let withBaseRevision = false;
-      const currentRoutingMode = snapshotRef.current?.inputRouting.mode;
-      const compactExpectedToQueue =
-        command.kind === "compact" &&
-        currentRoutingMode !== undefined &&
-        currentRoutingMode !== "startNow";
       switch (command.kind) {
-        case "compact":
-          type = "compact";
-          break;
         case "sendGoalCommand":
           type = "sendGoalCommand";
           // 人工合并曾让 /goal 在准备完成后重新读取 Composer，覆盖点击时已冻结的档位。
@@ -2315,14 +2307,6 @@ export function SessionPane({
         logger.warn(
           `[v4-pane] slash ${command.kind} 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`,
         );
-        if (command.kind === "compact" && ack.reasonCode === "compactOperationLock") {
-          toast(intl.formatMessage({ id: "chat.compact.duplicateBlocked" }));
-        } else if (command.kind === "compact" && ack.reasonCode === "activeTurn") {
-          // 兼容尚未升级的 CLI：旧端仍会返回 activeTurn，不能再次无声清空命令。
-          toast(intl.formatMessage({ id: "chat.compact.runningBlocked" }));
-        }
-      } else if (command.kind === "compact" && compactExpectedToQueue) {
-        toast(intl.formatMessage({ id: "chat.compact.queued" }));
       } else if (heldQueueDisposition === "clearQueueAndSend") {
         settleCurrentQueueInputs(targetSessionId);
       }

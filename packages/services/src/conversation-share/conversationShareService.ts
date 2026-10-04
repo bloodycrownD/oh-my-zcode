@@ -337,8 +337,7 @@ function sanitizeUnsupportedShareStructures(rows: readonly ConversationRow[]): C
       // 运行中的 marker 留着，让 collectShareStructureIssues 照旧阻断——内容尚未定稿。
       // 被阻断的发布不会进入投影，保留该 marker 无副作用。
       const markerRunning =
-        (row.marker.type === "compact" && row.marker.status === "running") ||
-        (row.marker.type === "goalVerify" && row.marker.outcome === "running");
+        row.marker.type === "goalVerify" && row.marker.outcome === "running";
       if (markerRunning) {
         sanitized.push(row);
         continue;
@@ -352,10 +351,7 @@ function sanitizeUnsupportedShareStructures(rows: readonly ConversationRow[]): C
         // 内部时间线结构计入“文件被跳过”或打扰用户。
         continue;
       }
-      // 其余 marker 静默剥掉，不打扰分享者：
-      // - compact（上下文已压缩）纯运行时记账，对只读读者没有价值；而且它的 lane 是
-      //   assistantWork，留在 flow 尾部会顶掉「最终正文」折叠锚点，让整轮过程默认展开
-      //   （conversationTurnWorkSegments.ts 的 assistantHistoryDefaultOpen）——这是它必须走的主因。
+      // 其余 marker 静默剥掉，不打扰分享者。
       // - goalVerify / goalSet / retryNotice 在分享页本来就不渲染，纯占位吃 max_rows 配额。
       // - modelChange 只能显示一句泛化的「模型已切换」，信息量低且暴露内部切模型行为。
       continue;
@@ -443,12 +439,9 @@ function collectShareStructureIssues(
     }
     if (row.kind === "subagent" && row.status === "running") add(row, "active_subagent");
     if (row.kind === "timelineMarker") {
-      // 只有「运行中」的时间线操作仍阻断；fork/checkpoint/compact summaryRef 已由
+      // 只有「运行中」的时间线操作仍阻断；fork/checkpoint 已由
       // sanitizeUnsupportedShareStructures 降级为跳过。
-      if (
-        (row.marker.type === "compact" && row.marker.status === "running") ||
-        (row.marker.type === "goalVerify" && row.marker.outcome === "running")
-      ) {
+      if (row.marker.type === "goalVerify" && row.marker.outcome === "running") {
         add(row, "unsupported_timeline");
       }
     }
