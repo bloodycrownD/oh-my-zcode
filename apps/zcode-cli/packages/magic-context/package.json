@@ -20,10 +20,11 @@
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"
   },
+  "dependencies": {
+    "ai-tokenizer": "^1.0.6",
+    "zod": "4.6.5"
+  },
   "devDependencies": {
     "@types/node": "^24.0.0"
-  },
-  "dependencies": {
-    "zod": "4.6.5"
   }
 }

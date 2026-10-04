@@ -468,6 +468,9 @@ importers:
 
   apps/zcode-cli/packages/magic-context:
     dependencies:
+      ai-tokenizer:
+        specifier: ^1.0.6
+        version: 1.0.7
       zod:
         specifier: 4.6.5
         version: 4.6.5
@@ -5092,6 +5095,14 @@ packages:
   agent-base@9.0.0:
     resolution: {integrity: sha512-TQf59BsZnytt8GdJKLPfUZ54g/iaUL2OWDSFCCvMOhsHduDQxO8xC4PNeyIkVcA5KwL2phPSv0douC0fgWzmnA==}
     engines: {node: '>= 20'}
+
+  ai-tokenizer@1.0.7:
+    resolution: {integrity: sha512-y6nB1HHJPX+Np8B9ITqD5m3fHtJ16oIyOhZs2lxa9QpGOWKXSpG4N1h2MEizl/EcaF0SPHfhcBNvPjg0ukF3+A==}
+    peerDependencies:
+      ai: ^5.0.0
+    peerDependenciesMeta:
+      ai:
+        optional: true
 
   ai@6.0.159:
     resolution: {integrity: sha512-S18ozG7Dkm3Ud1tzOtAK5acczD4vygfml80RkpM9VWMFpvAFwAKSHaGYkATvPQHIE+VpD1tJY9zcTXLZ/zR5cw==}
@@ -13425,6 +13436,8 @@ snapshots:
   agent-base@7.1.4: {}
 
   agent-base@9.0.0: {}
+
+  ai-tokenizer@1.0.7: {}
 
   ai@6.0.159(zod@4.6.5):
     dependencies:
