@@ -12,6 +12,7 @@ import {
   ConfigScope,
   DefaultRuntimeConfig as DefaultConfig,
 } from "@zcode/contracts";
+import { DEFAULT_MAGIC_CONTEXT_CONFIG } from "./schema.js";
 
 type Handler<K extends ConfigKey> = (value: ConfigValue<K>, prev: ConfigValue<K>) => void;
 type AllHandler = (key: ConfigKey, value: unknown, prev: unknown) => void;
@@ -131,6 +132,12 @@ class ConfigStore {
     }
     if (config.memory) {
       if (config.memory.use !== undefined) this.set(ConfigKey.MemoryUse, config.memory.use, scope);
+    }
+    // FORK（S23 / D-12）：参数域整域透传，不做逐字段 merge。写进 ConfigPort 的值
+    // 必然已通过 `MagicContextConfigSchema`（config.json 装载与 RPC handler 两条入口
+    // 都如此），因此永远是完整域——手写一层浅合并只会凭空造出「半配置」中间态。
+    if (config.magicContext !== undefined) {
+      this.set(ConfigKey.MagicContext, config.magicContext, scope);
     }
     if (config.mcp) {
       if (config.mcp.servers !== undefined)
@@ -295,6 +302,9 @@ export class ConfigPortImpl implements ConfigPort {
       memory: {
         use: this.store.get(ConfigKey.MemoryUse) ?? DefaultConfig.memory.use,
       },
+      // FORK（S23 / D-12）：缺席时给全默认域（而非 undefined），让消费侧
+      // （bootstrap 的 config bridge）永远拿到一个可校验的对象，不必自己再兜一层。
+      magicContext: this.store.get(ConfigKey.MagicContext) ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
       mcp: {
         servers: this.store.get(ConfigKey.McpServers) ?? DefaultConfig.mcp.servers,
       },
@@ -413,6 +423,13 @@ function getDefaultValue(key: ConfigKey): unknown {
       return defaults.features.magicContext;
     case ConfigKey.MemoryUse:
       return defaults.memory.use;
+    // FORK（S23 / D-12）：spec Step 23 写的是「若默认值全靠 zod `.default()` 则
+    // 显式声明不登记」。这里选择**登记**，因为不登记会让 `ConfigPortImpl.get`
+    // 抛 `Config key not found`——而这个域永远有值（缺席 = 全默认），
+    // 抛错等于把「没配置」误报成「配置不存在」。登记的不是第二份默认值声明，
+    // 只是把包内 schema 物化出的那个对象引过来。
+    case ConfigKey.MagicContext:
+      return DEFAULT_MAGIC_CONTEXT_CONFIG;
     case ConfigKey.McpServers:
       return defaults.mcp.servers;
     case ConfigKey.PluginsEnabled:
@@ -485,9 +502,17 @@ export {
   type PluginRemovePatchResult,
   type SuppressedBuiltinPatchResult,
   type UiLocalePatchResult,
+  updateMagicContextInFileConfig,
+  type MagicContextPatchResult,
 } from "./file-config.adapter.js";
 export { parseEnvConfig, getToolConcurrencyConfig } from "./env-config.adapter.js";
-export { ZCodeConfigFileSchema, type ZCodeConfigFile } from "./schema.js";
+export {
+  ZCodeConfigFileSchema,
+  MagicContextConfigSchema,
+  DEFAULT_MAGIC_CONTEXT_CONFIG,
+  type ZCodeConfigFile,
+  type MagicContextConfig,
+} from "./schema.js";
 export { mergeConfigs, createPrioritizedConfig, getScopePriority } from "./config-merger.js";
 export {
   createConfig,

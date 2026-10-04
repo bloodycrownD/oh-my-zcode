@@ -41,6 +41,9 @@ export const ConfigKey = {
   // Memory
   MemoryUse: "memory.use",
 
+  // Magic Context 参数域（D-12 配置真源 ~/.zcode/cli/config.json 顶层 `magicContext`）
+  MagicContext: "magicContext",
+
   // MCP
   McpServers: "mcp.servers",
 
@@ -86,6 +89,22 @@ export type ConfigKey = (typeof ConfigKey)[keyof typeof ConfigKey];
 // Config Value Types
 // ============================================================
 
+/**
+ * 每个 key 的值类型；`:153` 的兜底是 `unknown`。
+ *
+ * FORK（S23 / D-12）：`"magicContext"` 分支**显式写出**却仍然解析为 `unknown`。
+ * 这与其它域的写法看起来冗余，但目的是让「本 key 的承载类型是刻意的选择」这件事
+ * 在类型层可 grep——漏写会静默落进同一个 `unknown` 兜底，评审无法区分「有意」与
+ * 「忘了」。
+ *
+ * 为什么是 `unknown` 而不是结构类型：`@zcode/magic-context` 的
+ * `MagicContextConfig` 是 zod 推断出的 ~20 字段子树，contracts 是它所有下游包的
+ * 类型底座。为它加一条 workspace 依赖边会把包图倒过来（包已经依赖 contracts 的
+ * 兄弟），并且把 schema 一旦演化就变成契约破坏。改由**消费侧 narrow**：adapters 的
+ * `ZCodeConfigFileSchema` 与 `workspace/updateMagicContextConfig` handler 都用包内
+ * `MagicContextConfigSchema` 做运行时校验，bootstrap 侧 `import type` 收窄，
+ * 于是「进入 ConfigPort 的值一定已通过 schema」成为运行时不变量而非类型保证。
+ */
 export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeoutMs"
   ? number
   : K extends "permission.mode"
@@ -150,7 +169,9 @@ export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeou
                                                 ? UiLocale
                                                 : K extends "ui.theme"
                                                   ? UiThemePreference
-                                                  : unknown;
+                                                  : K extends "magicContext"
+                                                    ? unknown
+                                                    : unknown;
 
 // ============================================================
 // Config Scope
@@ -232,6 +253,15 @@ export interface RuntimeConfig {
   memory: {
     use: boolean;
   };
+  /**
+   * FORK（S23 / D-12）：magic-context 参数域。承载类型 `unknown` 的理由与
+   * `ConfigValue<"magicContext">` 分支同源（见上方注释）：唯一权威结构是包内
+   * `MagicContextConfig`，这里只声明「这个域存在」。
+   *
+   * 缺席（undefined）表示配置文件没写过这个域，消费侧应回落到
+   * `DEFAULT_MAGIC_CONTEXT_CONFIG`（由 adapters 的 `getDefaultValue()` 登记）。
+   */
+  magicContext?: unknown;
   mcp: {
     servers: Record<string, McpServerConfig>;
   };
@@ -267,6 +297,8 @@ export interface RuntimeConfigPatch {
   network?: Partial<RuntimeConfig["network"]>;
   features?: Partial<RuntimeConfig["features"]>;
   memory?: Partial<RuntimeConfig["memory"]>;
+  /** FORK（S23 / D-12）：见 `RuntimeConfig.magicContext` 的类型承载说明。 */
+  magicContext?: unknown;
   mcp?: Partial<RuntimeConfig["mcp"]>;
   plugins?: Partial<RuntimeConfig["plugins"]>;
   skills?: Partial<RuntimeConfig["skills"]>;

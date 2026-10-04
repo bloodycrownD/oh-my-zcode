@@ -1,6 +1,11 @@
 /* eslint-disable max-lines -- zcode-cli 配置 schema 需要集中维护文件解析和 provider 继承，拆散会让配置语义更难对齐。 */
 import { z } from "zod";
 import type { RuntimeConfigPatch } from "@zcode/contracts";
+import {
+  DEFAULT_MAGIC_CONTEXT_CONFIG,
+  MagicContextConfigSchema,
+  type MagicContextConfig,
+} from "@zcode/magic-context";
 
 const stringRecordSchema = z.record(z.string(), z.string());
 const unknownRecordSchema = z.record(z.string(), z.unknown());
@@ -43,6 +48,22 @@ const featuresSchema = z.object({
 const memorySchema = z.object({
   use: z.boolean().optional(),
 });
+
+/**
+ * FORK（S23 / D-12）：`magicContext` 参数域**直接复用包内 schema**，
+ * 不在本文件复制第二份白名单。权威结构与全部默认值都由
+ * `MagicContextConfigSchema` / `DEFAULT_MAGIC_CONTEXT_CONFIG` 给出
+ * （`@zcode/magic-context/src/host/config/schema.ts`），任何复制都会在字段增删时
+ * 与包内实现漂移，而漂移的方向恰好是「config.json 接受了包运行时不认的字段」——
+ * fail-safe 的方向反了。
+ *
+ * `.optional()` 让缺席保持缺席（`undefined`），由 `ConfigPortImpl.get` 的
+ * `getDefaultValue()` 回落到 `DEFAULT_MAGIC_CONTEXT_CONFIG`；解析出来的值则一定
+ * 是**完整域**（内部 `.default()` 已补齐），因此 `config-merger` 的
+ * `Object.assign` 整域覆盖语义成立——高层来源不会因为只写一个字段而丢掉低层的
+ * 其余字段。
+ */
+const magicContextDomainSchema = MagicContextConfigSchema.optional();
 
 const mcpServerBaseSchema = {
   // 设置页和 MCP adapter 已支持协议选择；配置入口漏掉该字段会因 strict 校验丢弃整个 server。
@@ -293,6 +314,7 @@ export const ZCodeConfigFileSchema = z
     network: networkSchema.optional(),
     features: featuresSchema.optional(),
     memory: memorySchema.optional(),
+    magicContext: magicContextDomainSchema,
     mcp: mcpSchema.optional(),
     plugins: pluginsSchema.optional(),
     skills: skillsSchema.optional(),
@@ -307,6 +329,12 @@ export const ZCodeConfigFileSchema = z
   .passthrough();
 
 export type ZCodeConfigFile = z.infer<typeof ZCodeConfigFileSchema>;
+
+// FORK（S23 / D-12）：参数域的 schema / 默认值 / 类型原样转出，不在 adapters 侧
+// 另立一份声明。`adapters/config` 是 config.json 装载与 `ConfigPort` 读写的唯一入口，
+// 它的调用方（bootstrap 装配层、RPC handler）从这个名字取到的是与包内运行时
+// **同一个对象**——运行时 `instanceof` / schema 身份比较都成立。
+export { DEFAULT_MAGIC_CONTEXT_CONFIG, MagicContextConfigSchema, type MagicContextConfig };
 
 type SkillCommandOverrideMap = Record<string, { enable?: boolean }>;
 
@@ -404,8 +432,9 @@ function parsedConfigFileToRuntimePatch(parsed: ZCodeConfigFile): RuntimeConfigP
   if (parsed.storage) config.storage = parsed.storage;
   if (parsed.network) config.network = parsed.network;
   if (parsed.features) config.features = parsed.features;
-  if (parsed.memory) config.memory = parsed.memory;
-  if (parsed.mcp) config.mcp = parsed.mcp;
+if (parsed.memory) config.memory = parsed.memory;
+if (parsed.magicContext) config.magicContext = parsed.magicContext;
+if (parsed.mcp) config.mcp = parsed.mcp;
   if (parsed.plugins) config.plugins = normalizePluginConfig(parsed.plugins);
   const skillsConfig = parseSkillsRuntimeConfig(parsed.skills);
   if (skillsConfig) config.skills = skillsConfig;

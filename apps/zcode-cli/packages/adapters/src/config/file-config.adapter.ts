@@ -38,6 +38,19 @@ export interface UiLocalePatchResult {
   path: string;
 }
 
+/**
+ * FORK（S23 / D-12）：`magicContext` 参数域写盘的结果。
+ *
+ * 只回报「写到了哪里」——刻意不回显整个域值：它是十几 KB 量级的运行时配置快照，
+ * 把它塞进 JSON-RPC result 会污染协议日志，而调用方要的是「写成功 + 后续从
+ * ConfigPort 读到的就是这个值」这条保证。
+ */
+export interface MagicContextPatchResult {
+  path: string;
+  /** 是否真的改动了文件内容（幂等重写返回 false）。 */
+  changed: boolean;
+}
+
 export interface PluginEnabledPatchResult {
   enabled: boolean;
   path: string;
@@ -232,6 +245,68 @@ export async function updateUiLocaleInFileConfig(
     locale,
     path: resolvedPath,
   };
+}
+
+/**
+ * FORK（S23 / D-12）：把整个 `magicContext` 参数域写进用户级 config.json 顶层。
+ *
+ * 三点与 `updateUiLocaleInFileConfig` 刻意一致：走同一条 `atomicWriteJson`（临时文件
+ * + rename，避免半截文件被下一次 `loadFileConfig` 读成非法 JSON）、读改写保留其余
+ * 顶层键、不做任何项目级/环境级联写入。
+ *
+ * 与 locale 的两点差异：
+ *   1. **整域替换**而非单字段合并。locale 是 6 个标量之一，逐字段 merge 很便宜；
+ *      参数域是 zod 派生的 ~20 字段子树，在写盘层再实现一次 merge 就是把包内
+ *      `MagicContextConfigSchema` 的语义复制成第二份——漂移方向不可接受。调用方
+ *      （`workspace/updateMagicContextConfig` handler）必须先过 schema，schema 的
+ *      `.default()` 保证传进来的是完整域，整域替换因此无损。
+ *   2. **幂等短路**：内容相同就不写盘。参数域写盘发生在每次 UI 保存上，重写一个
+ *      字节没变的文件只会无谓地更新 mtime——而某些同步工具按 mtime 触发扫描。
+ *
+ * 未知键（如参考插件遗留的 `compaction`）随整域替换被清掉：`z.object` 在校验时已
+ * strip 它们，留着只会让「文件里有、运行时不认」持续误导读者。
+ */
+export async function updateMagicContextInFileConfig(
+  filePath: string,
+  config: unknown,
+): Promise<MagicContextPatchResult> {
+  const resolvedPath = resolvePath(filePath);
+  const parsed = await readJsonConfigFileOrEmpty(resolvedPath);
+  const next = patchMagicContext(parsed, config);
+  const changed = !isDeepEqualJson(parsed.magicContext, next.magicContext);
+
+  if (changed) {
+    await atomicWriteJson(resolvedPath, next);
+  }
+  return {
+    path: resolvedPath,
+    changed,
+  };
+}
+
+function patchMagicContext(
+  parsed: Record<string, unknown>,
+  config: unknown,
+): Record<string, unknown> {
+  return {
+    ...parsed,
+    magicContext: config,
+  };
+}
+
+/** 键序无关的 JSON 深比较（配置域都是纯 JSON 值）。 */
+function isDeepEqualJson(left: unknown, right: unknown): boolean {
+  if (left === right) return true;
+  if (!isRecord(left) || !isRecord(right)) {
+    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
+  }
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  if (leftKeys.length !== rightKeys.length) return false;
+  return leftKeys.every(
+    (key, index) =>
+      rightKeys[index] === key && isDeepEqualJson(left[key], right[key]),
+  );
 }
 
 /**
