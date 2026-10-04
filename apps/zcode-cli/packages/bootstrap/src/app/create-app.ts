@@ -726,8 +726,11 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
             await import("./magic-context-turn-transform.js")
           ).createMagicContextTurnTransform({
             enabled: true,
-            // Step 23 之前 RuntimeConfig 还没有 `magicContext` 参数域，静态源读到
-            // undefined → config bridge 落到 DEFAULT_MAGIC_CONTEXT_CONFIG。
+            // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
+            // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
+            // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
+            // 的静态源，生产路径恒有 `configPort`。
+            configPort: configResult.configPort,
             configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
             sessionId,
             workingDirectory,
@@ -1010,6 +1013,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
         workspaceHookRuntimeSecurity?.reloadTrust() ?? Promise.resolve(),
       setModelIoFullRetentionEnabled: (enabled) =>
         modelAdapter.setModelIoFullRetentionEnabled(enabled),
+      // FORK（S23 / D-12）：`workspace/updateMagicContextConfig` 把参数域写进内存
+      // 侧的唯一入口必须是**本 App 正在用的** ConfigPort——magic-context 的 config
+      // bridge 订阅的就是它（见 magic-context-turn-transform.ts）。
+      getConfigPort: () => configResult.configPort,
       readToolResultArtifact: (uri) =>
         artifactStore.readToolResultArtifact({ uri, trace: traceContext }),
       // wire/staging 全程是 decoded chunk；只有完整 checksum commit 后才在

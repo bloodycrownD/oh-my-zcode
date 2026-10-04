@@ -90,6 +90,7 @@ import type {
   WorkflowEvent,
   WorkflowRunListItem,
   ExecutionShellSelection,
+  ConfigPort,
 } from "@zcode/contracts";
 import type { NodeReplBrowserBroker } from "./node-repl-browser-broker.js";
 import type { SessionTranscriptMessage } from "../session-transcript.js";
@@ -612,6 +613,17 @@ export interface ZCodeApp {
     traceId: TraceContext["traceId"];
   }>;
   setModelIoFullRetentionEnabled?(enabled: boolean): void;
+  /**
+   * FORK（S23 / D-12）：本 App 的配置口与用户级 config.json 路径。
+   *
+   * `workspace/updateMagicContextConfig` handler 需要它们来把参数域同时写进磁盘与
+   * 内存——而这两件事都必须作用在**本 App 正在用的那一份** ConfigPort 上，否则
+   * `ConfigPort.observe` 的订阅者（bootstrap 的 magic-context config bridge）看不到
+   * 新值，「不重启生效」就只是文档上的一句话。
+   *
+   * 可选而非必需：测试与轻量 embedder 可以不实现，handler 会跳过这些 App。
+   */
+  getConfigPort?(): ConfigPort;
   setModel(
     modelId: string | ModelSelection,
     options?: {

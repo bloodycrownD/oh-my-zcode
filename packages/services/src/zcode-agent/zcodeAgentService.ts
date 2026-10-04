@@ -94,6 +94,7 @@ import {
   zcodeWorkspaceGenerateTextResultSchema,
   zcodeWorkspaceHookTrustGrantResultSchema,
   zcodeWorkspaceUpdateInteractionPreferencesResultSchema,
+  zcodeWorkspaceUpdateMagicContextConfigResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
   zcodeProviderUpdateAccountConfigResultSchema,
   type ZCodeSessionStateSnapshot,
@@ -149,6 +150,7 @@ import type {
   ZCodeAgentTestModelConnectivityParams,
   ZCodeAgentGoalParams,
   ZCodeAgentGrantWorkspaceHookTrustParams,
+    ZCodeAgentUpdateMagicContextConfigParams,
   ZCodeAgentInitializeResult,
   ZCodeAgentListSessionsParams,
   ZCodeAgentListSessionSubagentsParams,
@@ -3783,6 +3785,47 @@ export function createZCodeAgentService(
         },
         zcodeWorkspaceHookTrustGrantResultSchema,
       );
+    },
+
+    // FORK（S23 / D-12）：magic-context 参数域写盘 + 内存双写。
+    // 走 read-only 控制面（与 `grantWorkspaceHookTrust` 同一条）：设置页在
+    // provider/model 未就绪时也必须可写；而 read-only lane 在已有活动 runtime 时
+    // 复用同一个 client（`getOrStartReadOnlyClient` 先查 activeClientsByWorkspaceKey），
+    // 所以 CLI 侧的 `context.sessions` 与它们的 ConfigPort 就在这条连接上，热生效
+    // 不会因为换了一条 lane 而落空。校验失败由 CLI 以 -32602 结构化返回，这里原样上抛。
+    async updateMagicContextConfig(params: ZCodeAgentUpdateMagicContextConfigParams) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      const startedAt = Date.now();
+      logger.info(undefined, "开始请求 ZCode Protocol workspace/updateMagicContextConfig", {
+        workspaceKey,
+        workspacePath: params.workspacePath,
+      });
+      try {
+        const client = await getReadOnlyClient(params);
+        const result = await client.request(
+          zcodeProtocolMethods.workspaceUpdateMagicContextConfig,
+          {
+            workspace: buildWorkspaceRef(params),
+            config: params.config,
+          },
+          zcodeWorkspaceUpdateMagicContextConfigResultSchema,
+        );
+        logger.info(undefined, "ZCode Protocol workspace/updateMagicContextConfig 完成", {
+          changed: result.changed,
+          durationMs: Date.now() - startedAt,
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        return result;
+      } catch (error) {
+        logger.warn(undefined, "ZCode Protocol workspace/updateMagicContextConfig 失败", {
+          durationMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : String(error),
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        throw error;
+      }
     },
 
     async listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams) {

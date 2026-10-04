@@ -62,6 +62,7 @@ import type {
   ZCodeWorkspaceGenerateTextResult,
   ZCodeWorkspaceGenerateTextParams,
   ZCodeWorkspaceHookTrustGrantResult,
+  ZCodeWorkspaceUpdateMagicContextConfigResult,
   ZCodeAutomationBotDeliveryTarget,
 } from "@zcode/shared";
 import type {
@@ -244,6 +245,17 @@ export interface ZCodeAgentReadSessionEventsParams extends ZCodeAgentSessionTarg
 }
 
 export type ZCodeAgentReadWorkspacePresentationParams = ZCodeAgentWorkspaceTarget;
+
+/**
+ * FORK（S23 / D-12）：写 magic-context 参数域。
+ *
+ * `config` 是**整域**而非 partial：协议侧用包内 schema 解析一次并补齐默认值，
+ * 之后写盘与内存都是整域替换，调用方不需要自己先读回当前值再合并——少一次
+ * read-modify-write 就少一个「读到的和写下去的不一致」的窗口。
+ */
+export interface ZCodeAgentUpdateMagicContextConfigParams extends ZCodeAgentWorkspaceTarget {
+  config: unknown;
+}
 
 export interface ZCodeAgentGrantWorkspaceHookTrustParams extends ZCodeAgentWorkspaceTarget {
   bundleDigest: string;
@@ -602,6 +614,14 @@ export interface IZCodeAgentService {
   grantWorkspaceHookTrust(
     params: ZCodeAgentGrantWorkspaceHookTrustParams,
   ): Promise<ZCodeWorkspaceHookTrustGrantResult>;
+  /**
+   * FORK（S23 / D-12）：把 magic-context 参数域写进用户级 config.json 并同步到
+   * 进程内 ConfigPort（后续由 `ConfigPort.observe` 扇出，运行中即生效）。
+   * 无 provider/model 就绪也能调用——设置页必须可用。
+   */
+  updateMagicContextConfig(
+    params: ZCodeAgentUpdateMagicContextConfigParams,
+  ): Promise<ZCodeWorkspaceUpdateMagicContextConfigResult>;
   listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams): Promise<ZCodeMcpListResult>;
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**

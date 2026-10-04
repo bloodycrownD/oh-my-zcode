@@ -47,8 +47,10 @@
  *                                   v2，跳过坐标 rebase
  *   cacheTtlConfig / protectedTokens / smartDrops / historyBudgetPercentage /
  *   executeThresholdPercentage / executeThresholdTokens
- *                                   config bridge 快照（真实 ConfigPort.observe
- *                                   接线是 Step 23）
+ *                                   config bridge 快照；**S23 起是真配置口**：
+ *                                   bridge 订阅 `ConfigPort.observe(
+ *                                   ConfigKey.MagicContext)`（全仓首个消费者），
+ *                                   配置变更原地改写同一份 deps 对象，下一 pass 即生效
  *   liveModelBySession / getModelKey / getNotificationParams / getToolSetHash
  *                                   每 pass 用 turn-loop 传入的 model 刷新
  *
@@ -58,7 +60,9 @@
  *     注入缝，包外改不了（改包内是 S20 的特权）。S19b 让 transform 走自己的默认/检测
  *     回退，窗口偏小只会让阈值更保守，不会误发超大请求。
  *   - `contextUsageMap` 无生产者。
- *   - 配置源是静态快照（Step 23 接 `ConfigPort.observe`）。
+ *   - 配置面（D-12）已接线：写盘 `updateMagicContextInFileConfig`、内存
+ *     `ConfigPort.set`、推送 `ConfigPort.observe` 三段齐备；桌面设置页的调用侧
+ *     （Step 29）落地后才有用户可改的入口。
  */
 
 import type {
@@ -74,6 +78,7 @@ import type {
   ModelMessageContentBlock,
   SessionStorePort,
 } from "@zcode/contracts";
+import { ConfigKey, type ConfigPort } from "@zcode/contracts";
 import {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   DegradedPassRefusalError,
@@ -118,7 +123,16 @@ export type ZCodeMagicContextTransform = (
 export interface MagicContextTurnTransformOptions {
   /** `RuntimeConfig.features.magicContext`。false → 工厂直接返回 undefined。 */
   enabled: boolean;
-  /** `RuntimeConfig.magicContext` 参数域（Step 23 之前恒为 undefined）。 */
+  /**
+   * FORK（S23 / D-12）：本 App 的配置口。提供时 config bridge 订阅
+   * `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置**下一 turn 即生效**，
+   * 无需重启。
+   *
+   * 缺席时退回 S19b 的静态快照（只读 `configDomain`），保留给单测与不装配配置面的
+   * embedder；生产装配（`create-app.ts`）一定传入。
+   */
+  configPort?: ConfigPort;
+  /** `RuntimeConfig.magicContext` 参数域快照；仅在没有 `configPort` 时作为配置源。 */
   configDomain?: unknown;
   sessionId: string;
   workingDirectory: string;
@@ -482,6 +496,9 @@ function withOrdinal(row: StoredRow): RawMessage {
 export async function createMagicContextTurnTransform(
   options: MagicContextTurnTransformOptions,
 ): Promise<MagicContextTurnTransform | undefined> {
+  // T-M8（Step 19a/23）：门控是**装配层**的判断，且必须是第一句——关着时既不建
+  // bridge、也不 import magic-context 模块图、更不开 DB。这一行之下的一切都与
+  // Phase 1 基线无关，所以关着时行为逐行等价。
   if (!options.enabled) return undefined;
 
   // S15 遗留 #6：`initializeMagicContextHost()` 必须在任何 DB 写之前。装配层把本
@@ -489,10 +506,15 @@ export async function createMagicContextTurnTransform(
   // 都不该发生——那时不存在任何 magic-context DB 写，契约因此自动成立。
   initializeMagicContextHost();
 
-  const bridge = createConfigBridge({
-    // 静态源（S16 语义在 Step 23 前的形态）：读一次 RuntimeConfig 侧的配置快照。
-    read: () => options.configDomain ?? {},
-    subscribe: () => () => {},
+  const bridge = createConfigBridge(createConfigSource(options), {
+    // 写入了一个通不过 schema 的域值时，bridge 保留 last-known-good 并把原因交给
+    // 这里——降级方向是「这次改动没生效」，而不是「功能被关掉」。
+    onReloadFailure: (failure) =>
+      options.logger.warn("Magic context config reload rejected; keeping last known good", {
+        module: "bootstrap",
+        event: "magic_context.config_reload_failed",
+        detail: failure.error,
+      }),
   });
   const config = bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG;
 
@@ -524,8 +546,86 @@ export async function createMagicContextTurnTransform(
     return undefined;
   }
 
-  const transform = createTransform(buildTransformDeps(config, db, options));
-  return createZCodeMagicContextTurnTransformPort(transform, config, options);
+  // deps 必须是**同一个活对象**：包内 transform 每个 pass 都重新读
+  // `deps.cacheTtlConfig` / `deps.executeThresholdPercentage` 等字段，所以这里把
+  // 配置字段挂在一个稳定引用上，热生效时原地改写即可；重建 deps 反而会让已经
+  // 持有的 transform 继续看旧闭包。
+  const deps = buildTransformDeps(config, db, options);
+  // ③ 热生效（D-12 第三段）：bridge 订阅 ConfigPort，配置变更即 bump
+  // generation/digest 并把新域原地写进 deps。下一个 turn 的第一次 pass 就读到新值
+  // ——这就是 spec Step 16 的验收判据（不重启）。
+  bridge.onChange((event) => {
+    applyConfigToDeps(deps, event.snapshot.effective);
+    options.logger.info("Magic context config reloaded", {
+      module: "bootstrap",
+      event: "magic_context.config_reloaded",
+      generation: event.snapshot.generation,
+      changedKeys: event.changedKeys,
+    });
+  });
+
+  const transform = createTransform(deps);
+  return createZCodeMagicContextTurnTransformPort(transform, {
+    getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
+    options,
+  });
+}
+
+/**
+ * D-12 第二段与第三段之间的桥：`ConfigPort` → 包内 `MagicContextConfigSource`。
+ *
+ * 签名对齐的两处细节（实测 `adapters/src/config/index.ts`）：
+ *   - `ConfigPort.observe()` 不接受 key，它返回 `ConfigObserver`，key 在
+ *     `.subscribe(key, handler)` 上。因此这里每次 `read()` 取一次 observer 再订阅，
+ *     而不是 `observe(key, cb)`。
+ *   - `subscribe` 的 handler 是 `(value, prev) => void`，包的 source 只要
+ *     `() => void`（它自己会重新 `read()`），所以用 `() => void` 包一层，
+ *     **不**把回调参数透传过去——那会让 bridge 拿到上一次的快照当新值。
+ *   - `ConfigPort.set` 传的是整域值，`get(key)` 原样返回（无校验），所以
+ *     `read()` 不需要自己拼装 `{}`；域校验是 bridge 的活（失败即保留 last-known-good）。
+ */
+function createConfigSource(options: MagicContextTurnTransformOptions): {
+  read: () => unknown;
+  subscribe: (listener: () => void) => () => void;
+} {
+  const configPort = options.configPort;
+  if (!configPort) {
+    // S19b 遗留的静态源：没有配置口时读一次快照，永不推送。
+    return {
+      read: () => options.configDomain ?? {},
+      subscribe: () => () => {},
+    };
+  }
+  return {
+    read: () => configPort.get(ConfigKey.MagicContext),
+    subscribe: (listener) =>
+      configPort.observe().subscribe(ConfigKey.MagicContext, () => listener()),
+  };
+}
+
+/**
+ * 把一份已校验的配置原地写进 TransformDeps 的配置派生字段。
+ *
+ * 只覆盖包内声明为「配置来源」的那些字段；`db` / `tagger` / `contextUsageMap` 等
+ * 运行期状态不动。`scheduler` 是唯一例外——它在装配时按当时配置闭包捕获了阈值，
+ * 所以换成每 pass 现读配置的版本（见 `createZCodeScheduler`）。
+ */
+function applyConfigToDeps(deps: TransformDeps, config: MagicContextConfig): void {
+  deps.cacheTtlConfig = config.cache_ttl;
+  if (config.protected_tokens === undefined) {
+    delete deps.protectedTokens;
+  } else {
+    deps.protectedTokens = config.protected_tokens;
+  }
+  deps.smartDrops = config.smart_drops;
+  deps.historyBudgetPercentage = config.history_budget_percentage;
+  deps.executeThresholdPercentage = config.execute_threshold_percentage;
+  if (config.execute_threshold_tokens === undefined) {
+    delete deps.executeThresholdTokens;
+  } else {
+    deps.executeThresholdTokens = config.execute_threshold_tokens;
+  }
+  deps.scheduler = createZCodeScheduler(config);
 }
 
 function buildTransformDeps(
@@ -573,12 +673,19 @@ function buildTransformDeps(
  * 端口工厂。导出是因为 Step 19b 的单测要能用一个**桩 transform**驱动整条
  * 投影 → transform → 反投影链路（真实 `createTransform` 需要 magic-context.db 与
  * historian，属 S20/S24 的实跑范围）。
+ *
+ * FORK（S23 / D-12）：配置改为**每次失败分级时现读**（`getConfig`）而不是构造时
+ * 冻结。`fail_closed_blocking` 正是用户在设置页最常改的开关：冻结副本会让用户
+ * 刚点下的「不阻塞」在下一次失败里失效，而那次失败的处理方式恰恰由它决定。
  */
 export function createZCodeMagicContextTurnTransformPort(
   transform: ZCodeMagicContextTransform,
-  config: MagicContextConfig,
-  options: Pick<MagicContextTurnTransformOptions, "sessionId" | "sessionStore" | "logger">,
+  port: {
+    getConfig: () => MagicContextConfig;
+    options: Pick<MagicContextTurnTransformOptions, "sessionId" | "sessionStore" | "logger">;
+  },
 ): MagicContextTurnTransform {
+  const { options } = port;
   // 持久历史快照的缓存键：同一 turn 内 live entries 长度不变，因此整个 turn 只读
   // 一次 session store；跨 turn 长度增长时自然失效。
   let cachedRows: { liveLength: number; rows: StoredRow[] } | undefined;
@@ -651,7 +758,7 @@ export function createZCodeMagicContextTurnTransformPort(
         await transform({}, { messages: projected });
       });
     } catch (error) {
-      return handleTransformFailure(error, projected, originals, sessionId, config, options);
+      return handleTransformFailure(error, projected, originals, sessionId, port.getConfig(), options);
     }
 
     const { entries, syntheticHeadPositions } = projectMagicContextEntries(projected, originals);

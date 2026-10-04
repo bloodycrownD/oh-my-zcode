@@ -2157,6 +2157,47 @@ export type ZCodeWorkspaceUpdateInteractionPreferencesResult = z.infer<
   typeof zcodeWorkspaceUpdateInteractionPreferencesResultSchema
 >;
 
+/**
+ * FORK（S23 / D-12）：`magicContext` 参数域的整域覆盖请求。
+ *
+ * 协议层**不声明**这个域的结构——它的权威 schema 是
+ * `@zcode/magic-context` 的 `MagicContextConfigSchema`，而 `@zcode/shared` 是包的
+ * 下游（包依赖 shared），在这里复制字段表就是第二份真相。信封只保证「是个 JSON
+ * 值」，字段级校验放在 CLI 侧 handler（`magic-context-config.ts`），失败以
+ * `-32602 Invalid params` 结构化返回。
+ *
+ * 传整域而非 partial：schema 的 `.default()` 保证一次 parse 就产出完整域，写盘与
+ * `configPort.set` 因此都是整域替换，不会出现「这次保存只改了阈值，下次读却把
+ * 上次的 historian 抹掉」的部分覆盖。
+ */
+export const zcodeWorkspaceUpdateMagicContextConfigParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    config: z.unknown(),
+  })
+  .strict();
+export type ZCodeWorkspaceUpdateMagicContextConfigParams = z.infer<
+  typeof zcodeWorkspaceUpdateMagicContextConfigParamsSchema
+>;
+
+export const zcodeWorkspaceUpdateMagicContextConfigResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 写盘目标（用户级 config.json）；CLI 单进程多 workspace 时用于 UI 展示。 */
+    path: nonEmptyString,
+    /** 内容是否真的变了（幂等重写为 false）。 */
+    changed: z.boolean(),
+    /**
+     * ConfigPort 已接受的域版本（digest 语义由 CLI 侧定义）。UI 用它确认
+     * 「写盘 → 内存」两段都走完了，而不是只看到 RPC 成功就当生效。
+     */
+    applied: z.literal(true),
+  })
+  .strict();
+export type ZCodeWorkspaceUpdateMagicContextConfigResult = z.infer<
+  typeof zcodeWorkspaceUpdateMagicContextConfigResultSchema
+>;
+
 export const zcodeModelIoPreferencesSchema = z
   .object({
     fullRetentionEnabled: z.boolean(),
@@ -3553,6 +3594,9 @@ export const zcodeProtocolMethods = {
   // 进程级 Account Provider Config 与 workspace 运行目录分离。
   providerUpdateAccountConfig: "provider/updateAccountConfig",
   workspaceUpdateInteractionPreferences: "workspace/updateInteractionPreferences",
+  // FORK（S23 / D-12）：magic-context 参数域。与 interaction-preferences 的关键
+  // 差异是**写盘 + 内存双写**——后者只改进程内 registry，改完即失、不落盘、无推送。
+  workspaceUpdateMagicContextConfig: "workspace/updateMagicContextConfig",
   workspaceUpdateModelIoPreferences: "workspace/updateModelIoPreferences",
   // Off-Peak 工具面门禁是 workspace 级事实（灰度 + 本地/远程），由 host 在 agent 就绪时同步；
   // CLI 对 legacy create/resume 与 v4 冷恢复统一读取。旧 CLI method-not-found → host 降级忽略。
