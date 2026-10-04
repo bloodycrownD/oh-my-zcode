@@ -26,7 +26,10 @@ import type {
   TurnId,
   FileSystemErrorCode,
 } from "@zcode/contracts";
-import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
+import type {
+  ConversationSnapshot,
+  SessionMagicContextUsage,
+} from "@zcode/shared/zcode-protocol-v4";
 import { SessionEventType, isFileSystemPortError } from "@zcode/contracts";
 import type { ZCodeWorkspaceRef } from "@zcode/shared";
 import { extractMarkdownArtifactImageRefs } from "@zcode/shared";
@@ -617,6 +620,25 @@ export class ConversationV4Gateway {
     const publisher = this.publishers.get(sessionId);
     if (!publisher) return;
     publisher.seedSharedContextImport(source);
+    for (const [routeKey, state] of this.flushStates) {
+      if (state.sessionId === sessionId) this.scheduleFlush(routeKey, state, publisher);
+    }
+  }
+
+  /**
+   * magic-context 预算摘要（D-13）side state 入口。
+   *
+   * 与 {@link updateSharedContextImport} 的差别：这条**产 delta**（面板要实时看到
+   * 预算随轮次变化），因此走 publisher 的扇出；`null` = 读不到了，投影层删掉该键。
+   * publisher 缺席（会话还没建立 topic）时静默丢弃——下一轮 pass 会再推一次。
+   */
+  updateMagicContextUsage(
+    sessionId: string,
+    usage: SessionMagicContextUsage | null,
+  ): void {
+    const publisher = this.publishers.get(sessionId);
+    if (!publisher) return;
+    publisher.publishMagicContextUsage(usage);
     for (const [routeKey, state] of this.flushStates) {
       if (state.sessionId === sessionId) this.scheduleFlush(routeKey, state, publisher);
     }

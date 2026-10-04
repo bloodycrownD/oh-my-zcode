@@ -21,6 +21,7 @@
     "test:magic-context": "node --test scripts/test-magic-context-turn-transform.mjs",
     "test:magic-context-historian": "node --test scripts/test-magic-context-historian.mjs",
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
+    "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

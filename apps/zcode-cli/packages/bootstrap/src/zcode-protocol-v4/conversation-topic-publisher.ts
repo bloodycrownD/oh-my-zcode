@@ -21,6 +21,7 @@ import type {
   DeliveryProfile,
   DeliveryProfileName,
   QueueItem,
+  SessionMagicContextUsage,
   SubscribeAck,
   TopicFrameDeliveryKind,
   ToolCallRow,
@@ -571,6 +572,32 @@ export class ConversationTopicPublisher {
       if (evicted) this.floorSeq = evicted.seq;
     }
     if (deltas.length === 0) return;
+    this.fanOutDeltas(deltas);
+  }
+
+  /**
+   * D-13：magic-context 预算摘要的 side state 推送。
+   *
+   * 与 {@link ingest} 的差别只有一处：**没有事件**。这份读数来自 `magic-context.db`
+   * （装配层主动读出来推过来），所以它借用事件 delta 的同一条扇出管线与同一份 delta
+   * 日志——记在**当前 seq** 上，于是 (a) 在线订阅者下一帧就看到，(b) 从更早 base 续流的
+   * 订阅者在重放时也拿得到。它不进 `session.events`，所以冷恢复不重放它（新客户端从
+   * snapshot 起就有，之后第一次 pass 会再推一次）。
+   */
+  publishMagicContextUsage(usage: SessionMagicContextUsage | null): void {
+    const deltas = this.projection.applyMagicContextUsage(usage);
+    if (deltas.length === 0) return;
+    this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
+    this.log.push({ seq: this.currentSeq, deltas });
+    while (this.log.length > this.retention) {
+      const evicted = this.log.shift();
+      if (evicted) this.floorSeq = evicted.seq;
+    }
+    this.fanOutDeltas(deltas);
+  }
+
+  /** delta → 各订阅者 flush buffer。空 delta 直接返回（不打帧）。 */
+  private fanOutDeltas(deltas: ConversationDelta[]): void {
     for (const subscription of this.subscriptions.values()) {
       if (subscription.resyncRequired) continue;
       const filtered = this.encodeDeltasForSubscription(deltas, subscription);

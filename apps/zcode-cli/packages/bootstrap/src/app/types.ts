@@ -22,6 +22,7 @@ import type {
   WorkspaceHookPolicyProvider,
 } from "@zcode/core";
 import type {
+  SessionMagicContextUsage,
   WorkspaceHookReviewDecision,
   WorkspaceHookTrustRevokeTarget,
 } from "@zcode/shared/zcode-protocol-v4";
@@ -178,6 +179,14 @@ export interface ZCodeAppOptions {
   uiDetectedLocale?: string | null;
   uiLocale?: UiLocale;
   onWorkflowEvent?: (event: WorkflowEvent) => void | Promise<void>;
+  /**
+   * FORK（D-13）：magic-context 预算摘要的出口。由协议宿主注入，接到 v4 gateway 的
+   * `updateMagicContextUsage` → `snapshot.usage.magicContext` → 桌面 ChatContextUsage 面板。
+   *
+   * **缺席 = 不推送**（CLI/TUI 前端没有 snapshot 投影层）。传 `null` 表示「这次读不到」，
+   * 投影层据此删掉该键，面板整段收起。
+   */
+  onMagicContextUsage?: (usage: SessionMagicContextUsage | null) => void;
   automationPort?: AutomationPort;
   offPeakPort?: OffPeakPort;
   /** 首次真实用户执行或 cold-resume fallback 时解析一次，之后由 app 生命周期缓存。 */

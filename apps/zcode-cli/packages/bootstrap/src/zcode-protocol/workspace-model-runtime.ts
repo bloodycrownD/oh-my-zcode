@@ -7,6 +7,7 @@ import {
   type ZCodeWorkspaceRef,
 } from "@zcode/shared";
 import type { ZCodeApp, ZCodeAppOptions } from "../app/types.js";
+import type { SessionMagicContextUsage } from "@zcode/shared/zcode-protocol-v4";
 import { listProtocolSlashCommands } from "./slash-commands.js";
 import {
   parseParams,
@@ -73,10 +74,21 @@ export async function createWorkspaceZCodeApp(
 ): Promise<ZCodeApp> {
   const providerRuntimeHeadersPort =
     options.providerRuntimeHeadersPort ?? createProviderRuntimeHeadersPort(context, workspace);
+  const sessionId = options.sessionId;
   return context.deps.createZCodeApp({
     ...options,
     platform: context.deps.platform,
     providerRuntimeHeadersPort,
+    // FORK（D-13）：magic-context 的预算摘要 side state 出口。App 侧每轮 pass /
+    // 每次 provider usage 落库后读一次 `magic-context.db` 并推过来，这里接到 v4
+    // gateway 的投影层。`sessionId` 缺席的临时 App（模型连通性探测）不装这条——
+    // 它没有会话 topic，gateway 侧本就按「publisher 不在就丢弃」处理。
+    ...(sessionId === undefined
+      ? {}
+      : {
+          onMagicContextUsage: (usage: SessionMagicContextUsage | null) =>
+            context.v4Gateway?.updateMagicContextUsage(sessionId, usage),
+        }),
     runtimeConfig: {
       ...options.runtimeConfig,
       // createZCodeApp 会把 workingDirectory 规范化为执行 cwd。把协议入口的

@@ -9,11 +9,13 @@ import {
   type CSSProperties,
 } from "react";
 import {
+  TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT,
   TID_CHAT_CONTEXT_USAGE_TRIGGER,
   type CodingPlanResetType,
   type ZCodeContextUsageBreakdownItem,
   type ZCodeProvider,
 } from "@zcode/shared";
+import type { SessionMagicContextUsage } from "@zcode/shared/zcode-protocol-v4";
 import {
   Context,
   ContextContentBody,
@@ -52,6 +54,7 @@ import {
   type ChatStartPlanBalanceConfig,
 } from "@/chat-input-toolbar/StartPlanContextBalance.js";
 import { runContextPanelActionWithClose } from "@/chat-input-toolbar/contextPanelAction.js";
+import { buildMagicContextUsageRows } from "@/chat-input-toolbar/magicContextUsageRows.js";
 import { coordinateCodingPlanQuotaResetAutoPlay } from "@/chat-input-toolbar/codingPlanQuotaResetAutoPlay.js";
 import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
 import {
@@ -153,6 +156,17 @@ const BREAKDOWN_SOURCE_LABEL_ID: Record<ContextUsageBreakdownSource, string> = {
   mcp_tool_schemas: "chat.contextUsage.breakdown.mcpTools",
 };
 
+/** D-13：面板里的 magic-context 段是「有就说」，字段缺席时整段不渲染。 */
+const MAGIC_CONTEXT_ROW_LABEL_IDS = {
+  budget: "chat.contextUsage.magicContext.budget",
+  cache: "chat.contextUsage.magicContext.cache",
+  cacheHit: "chat.contextUsage.magicContext.cacheHit",
+  cacheMiss: "chat.contextUsage.magicContext.cacheMiss",
+  compartments: "chat.contextUsage.magicContext.compartments",
+  dropped: "chat.contextUsage.magicContext.dropped",
+  used: "chat.contextUsage.magicContext.used",
+} as const;
+
 const BREAKDOWN_SOURCE_ORDER: Record<ContextUsageBreakdownSource, number> = {
   messages: 0,
   system_prompt: 1,
@@ -232,12 +246,14 @@ export function ChatContextUsage({
   codingPlanUsageRemaining,
   startPlanBalance,
   taskUsage,
+  magicContext,
   selectedProvider: _selectedProvider,
   intl,
   locale,
 }: {
   codingPlanUsageRemaining?: ChatCodingPlanUsageRemainingConfig;
   startPlanBalance?: ChatStartPlanBalanceConfig;
+  magicContext?: SessionMagicContextUsage | null;
   taskUsage: {
     used: number;
     size: number;
@@ -808,11 +824,29 @@ export function ChatContextUsage({
       }),
     [locale],
   );
+  const magicContextRows = useMemo(
+    () =>
+      buildMagicContextUsageRows({
+        labels: {
+          budget: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.budget }),
+          cache: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cache }),
+          cacheHit: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheHit }),
+          cacheMiss: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheMiss }),
+          compartments: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.compartments }),
+          dropped: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.dropped }),
+          used: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.used }),
+        },
+        locale,
+        magicContext,
+      }),
+    [intl, locale, magicContext],
+  );
 
   if (
     (!renderableTaskUsage || !contextUsageLabel) &&
     !hasCodingPlanUsageRemaining &&
-    !hasStartPlanBalance
+    !hasStartPlanBalance &&
+    magicContextRows.length === 0
   ) {
     return null;
   }
@@ -977,6 +1011,32 @@ export function ChatContextUsage({
                 </div>
               ) : null}
             </>
+          ) : null}
+          {/* D-13：magic-context 预算摘要。与上面两段不同，它**不依赖**
+              renderableTaskUsage——provider 窗口还没建起来时它照样有话说，而那正是
+              「为什么我的上下文被裁了」最需要被看见的时刻。字段缺席 → 整段不渲染。 */}
+          {magicContextRows.length > 0 ? (
+            <div
+              aria-label={intl.formatMessage({ id: "chat.contextUsage.magicContext.title" })}
+              className={cn(
+                "space-y-1.5",
+                (renderableTaskUsage || hasCodingPlanUsageRemaining || hasStartPlanBalance) &&
+                  "border-t border-border pt-3",
+              )}
+              data-testid={TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT}
+            >
+              <div className="text-ui-sm font-medium text-foreground">
+                {intl.formatMessage({ id: "chat.contextUsage.magicContext.title" })}
+              </div>
+              {magicContextRows.map((row) => (
+                <div className="flex min-w-0 items-center gap-2 text-ui-sm" key={row.id}>
+                  <span className="min-w-0 truncate text-foreground-subtle">{row.label}</span>
+                  <span className="ml-auto min-w-10 shrink-0 text-right font-mono text-ui-sm tabular-nums text-foreground">
+                    {row.value}
+                  </span>
+                </div>
+              ))}
+            </div>
           ) : null}
           {codingPlanUsageRemainingWithClose && hasCodingPlanUsageRemaining ? (
             <ChatCodingPlanUsageRemainingPanel

@@ -183,6 +183,48 @@ export type SessionMetaState = z.infer<typeof sessionMetaStateSchema>;
 export type { SharedContextImportState } from "./shared-context-import.js";
 
 // ── usage。conflation：值未变不下发──
+
+/**
+ * magic-context 的上下文缓存命中（Step 30 / D-13）。
+ *
+ * `cached_m0_bytes` / `cached_m1_bytes` 是 transform 每轮写进 `session_meta` 的
+ * 注入块字节：有值 = 那一块直接来自缓存（未重新物化），NULL = 这一轮重新算过。
+ * 因此这是**逐块布尔**，不是命中率——包侧没有累计计数器，这里也不该编一个。
+ */
+export const sessionMagicContextCacheSchema = z.object({
+  m0: z.boolean(),
+  m1: z.boolean(),
+});
+export type SessionMagicContextCache = z.infer<typeof sessionMagicContextCacheSchema>;
+
+/**
+ * magic-context 预算摘要（Step 30 / D-13，additive 可选）。
+ *
+ * 全字段都是「从 `magic-context.db` 读出来的数」，不含任何解释性文案：
+ *
+ *   - `budgetTokens`   `session_meta.protected_tokens_effective`（受保护预算底线）；
+ *                      `null` = 这条会话从未冻结过底线。
+ *   - `usedTokens` / `usedPercent`  上一次 pass 的真实占用（`last_input_tokens` /
+ *                      `last_context_percentage`）。与 `contextWindow` 是**两把尺子**：
+ *                      那把量 provider 窗口，这把量 magic-context 自己的预算。
+ *   - `compartmentCount` 已压缩的 compartment 条数（`getCompartments()`）。
+ *   - `droppedTagCount` / `droppedTagTokens`  `tags.status='dropped'` 桶的行数与 token。
+ *   - `cache`          本轮 m[0]/m[1] 注入块是否命中上下文缓存；`null` = 读不到该行。
+ *
+ * 缺席（`usage.magicContext === undefined`）= magic-context 关着，或本进程还没拿到
+ * 第一次读数。**不是**「全零」——UI 遇到缺席必须整段不渲染，见 ChatContextUsage。
+ */
+export const sessionMagicContextUsageSchema = z.object({
+  budgetTokens: z.number().int().nonnegative().nullable(),
+  usedTokens: z.number().int().nonnegative(),
+  usedPercent: z.number(),
+  compartmentCount: z.number().int().nonnegative(),
+  droppedTagCount: z.number().int().nonnegative(),
+  droppedTagTokens: z.number().int().nonnegative(),
+  cache: sessionMagicContextCacheSchema.nullable(),
+});
+export type SessionMagicContextUsage = z.infer<typeof sessionMagicContextUsageSchema>;
+
 export const sessionUsageStateSchema = z.object({
   contextWindow: z
     .object({
@@ -198,6 +240,9 @@ export const sessionUsageStateSchema = z.object({
     cacheReadTokens: z.number(),
     cacheWriteTokens: z.number(),
   }),
+  // additive（D-13）：老快照/老客户端没有这个键时一切照旧；off 或无读数时投影层
+  // **不带**这个键（而不是写一个全零对象——那会让 UI 展示一段假的「预算 0」）。
+  magicContext: sessionMagicContextUsageSchema.optional(),
 });
 export type SessionUsageState = z.infer<typeof sessionUsageStateSchema>;
 

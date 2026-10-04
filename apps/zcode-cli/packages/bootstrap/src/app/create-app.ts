@@ -796,6 +796,11 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           workingDirectory,
           sessionStore,
           logger,
+          // FORK（D-13）：把预算摘要交给协议宿主的投影层。缺席（CLI/TUI）时本条
+          // 推送不存在，magic-context 其余行为逐行不变。
+          ...(options.onMagicContextUsage === undefined
+            ? {}
+            : { onMagicContextUsage: options.onMagicContextUsage }),
           // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
           // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
           // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类

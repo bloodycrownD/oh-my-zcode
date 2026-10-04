@@ -994,6 +994,7 @@ function V4ComposerModelControlsImpl({
       <ChatContextUsage
         codingPlanUsageRemaining={codingPlanUsageRemaining}
         taskUsage={taskUsage}
+        magicContext={usage?.magicContext ?? null}
         startPlanBalance={contextStartPlanBalance}
         selectedProvider={displayProvider}
         intl={intl}

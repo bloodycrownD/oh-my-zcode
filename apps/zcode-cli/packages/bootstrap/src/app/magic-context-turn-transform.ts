@@ -99,6 +99,7 @@ import {
   type TraceContext,
 } from "@zcode/contracts";
 import { ConfigKey, type ConfigPort } from "@zcode/contracts";
+import type { SessionMagicContextUsage } from "@zcode/shared/zcode-protocol-v4";
 import {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   DegradedPassRefusalError,
@@ -142,6 +143,7 @@ import {
   type CreateSidecarModel,
   type MagicContextHistorianHost,
 } from "./magic-context-historian.js";
+import { readMagicContextUsageSummary } from "./magic-context-usage-summary.js";
 
 /** 包内 `createTransform` 的返回值形状（单测用桩实现替换它）。 */
 export type ZCodeMagicContextTransform = (
@@ -185,6 +187,16 @@ export interface MagicContextTurnTransformOptions {
    * 缺席时退回 S19b 的空 Map，行为与那时逐行相同。
    */
   usageRecorder?: MagicContextUsageRecorder;
+  /**
+   * FORK（D-13）：预算摘要的出口。装配层（`create-app`）把它接到 v4 gateway 的
+   * `updateMagicContextUsage`，于是 `usage.magicContext` 出现在桌面 ChatContextUsage
+   * 面板上。
+   *
+   * **缺席 = 整条推送不存在**：CLI/TUI 前端没有 snapshot 投影层，不传它；没有它时
+   * 本文件只多两个 `if (!sink) return`，DB 读写一次都不多。传 `null` 表示「读不到」，
+   * 投影层据此删掉该键（面板整段收起），**不是**写一份全零。
+   */
+  onMagicContextUsage?: (usage: SessionMagicContextUsage | null) => void;
 }
 
 /** `TransformDeps.contextUsageMap` 的值形状（包内 `loadContextUsage` 读的那三个字段）。 */
@@ -235,6 +247,15 @@ export interface MagicContextUsageRecorder {
    * 不是一回事，边界解算对两者的偏袒方向相反。
    */
   readUsage: () => MagicContextUsageMapEntry["usage"] | null;
+  /**
+   * FORK（D-13）：登记「本进程刚记下一次 provider usage」的观察者。
+   *
+   * 谁需要这个观察者？只有**把预算摘要推给投影层**的那条链：`last_input_tokens` /
+   * `last_context_percentage` 是在 `record()` 里落库的，transform pass 结束那一刻它们
+   * 还是上一轮的值。于是装配层在这里挂一个「读完就推」的回调，UI 才能在同一轮里看到
+   * 新水位——挂成硬依赖反而会让 S19b 的单测（没有投影层）多出一条路径。
+   */
+  onUsageRecorded: (listener: () => void) => void;
 }
 
 /** `noteLiveModel` 只需要模型的这两处；用 Pick 免得装配层为了传值造一个 Model。 */
@@ -249,6 +270,7 @@ export function createMagicContextUsageRecorder(
   logger?: Logger,
 ): MagicContextUsageRecorder {
   const contextUsageMap = new Map<string, MagicContextUsageMapEntry>();
+  const recordedListeners: Array<() => void> = [];
   let contextWindow: number | undefined;
   let modelKey: string | null = null;
   let db: ContextDatabase | undefined;
@@ -259,8 +281,22 @@ export function createMagicContextUsageRecorder(
       sessionId,
       ...detail,
     });
+  // 观察者异常不许打断记录：`record` 在事件扇出里被调用，一次读数失败已经不该
+  // 让事件投递失败，监听者的失败更不该。
+  const notifyRecorded = (): void => {
+    for (const listener of recordedListeners) {
+      try {
+        listener();
+      } catch {
+        // 纯展示面，吞掉。
+      }
+    }
+  };
   return {
     contextUsageMap,
+    onUsageRecorded: (listener) => {
+      recordedListeners.push(listener);
+    },
     prime: (handle) => {
       db = handle;
       try {
@@ -313,7 +349,10 @@ export function createMagicContextUsageRecorder(
         // （`loadContextUsage` 的快路径）。
         hasUsageTokens: true,
       });
-      if (!db) return;
+      if (!db) {
+        notifyRecorded();
+        return;
+      }
       try {
         updateSessionMeta(db, sessionId, {
           lastContextPercentage: percentage,
@@ -332,6 +371,8 @@ export function createMagicContextUsageRecorder(
           detail: error instanceof Error ? error.message : String(error),
         });
       }
+      // 落库之后才通知：观察者要读的就是刚落库的那几列。
+      notifyRecorded();
     },
     readUsage: () => contextUsageMap.get(sessionId)?.usage ?? null,
   };
@@ -756,6 +797,23 @@ export async function createMagicContextTurnTransform(
   // 「第二轮起 transform 才看得见压力」的全部原因（见 recorder 的文件注释）。
   options.usageRecorder?.prime(db);
 
+  // FORK（D-13）：预算摘要的两个推送时机。这里**不做** await——UI 的用量面板必须
+  // 永远不等一次 sqlite 读；推的是 side state，晚一帧只影响面板的新鲜度。
+  //
+  //   ① pass 成功：compartments / dropped / 上下文缓存命中都在这一轮落定。
+  //   ② provider usage 落库：usedTokens / usedPercent 的新水位在这一刻才写进
+  //      `session_meta`，pass 结束那一刻读到的还是上一轮的数。
+  const publishUsageSummary = (): void => {
+    const sink = options.onMagicContextUsage;
+    if (!sink) return;
+    void readMagicContextUsageSummary(db, options.sessionId)
+      .then((summary) => sink(summary.usage))
+      .catch(() => {
+        // 读不出来就推 null：投影层据此删掉该键，面板整段收起。诊断面不抛。
+      });
+  };
+  options.usageRecorder?.onUsageRecorded(publishUsageSummary);
+
   const deps = buildTransformDeps(config, db, options, historian);
   // ③ 热生效（D-12 第三段）：bridge 订阅 ConfigPort，配置变更即 bump
   // generation/digest 并把新域原地写进 deps。下一个 turn 的第一次 pass 就读到新值
@@ -779,6 +837,8 @@ export async function createMagicContextTurnTransform(
     // fire-and-forget：本行绝不 await。调度器自己合并同会话的连续触发、自己 drain、
     // 自己 abort——让 UI 等一个可能跑几十秒的 historian 是错的。
     historian.historianScheduler?.notifyTurnSuccess({ sessionId: options.sessionId });
+    // D-13 ①：这一 pass 刚改过 compartments / dropped / 缓存块。
+    publishUsageSummary();
   };
   return createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,

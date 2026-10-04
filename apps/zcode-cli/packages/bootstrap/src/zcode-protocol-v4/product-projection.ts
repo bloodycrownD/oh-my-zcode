@@ -94,6 +94,7 @@ import type {
   ToolCallDisplay,
   ToolCallRow,
   SessionUsageState,
+  SessionMagicContextUsage,
   RunningSubagentSummary,
   SubagentProjectionState,
   TurnHeaderRow,
@@ -393,6 +394,33 @@ function nonNegativeInteger(value: number, fallback: number): number {
   return Number.isFinite(value) && value >= 0 ? Math.floor(value) : fallback;
 }
 
+/**
+ * D-13：`usage` 里 magic-context 摘要键的**存在性**投影。
+ *
+ * 用它而不是 `{ magicContext: value }` 的原因是缺席语义：字段缺席 = 「关着/没读数」，
+ * 写一个 `magicContext: undefined` 的键在 JSON 序列化后同样消失，但在**内存**里会让
+ * `usage.magicContext !== undefined` 判据说谎。宁可显式 spread。
+ */
+function magicContextUsageField(
+  usage: SessionMagicContextUsage | undefined,
+): { magicContext?: SessionMagicContextUsage } {
+  return usage === undefined ? {} : { magicContext: usage };
+}
+
+/** D-13 conflation：逐字段相等（含 cache 的两个布尔）才视为「没变」。 */
+function sameMagicContextUsage(left: SessionMagicContextUsage, right: SessionMagicContextUsage) {
+  return (
+    left.budgetTokens === right.budgetTokens &&
+    left.usedTokens === right.usedTokens &&
+    left.usedPercent === right.usedPercent &&
+    left.compartmentCount === right.compartmentCount &&
+    left.droppedTagCount === right.droppedTagCount &&
+    left.droppedTagTokens === right.droppedTagTokens &&
+    left.cache?.m0 === right.cache?.m0 &&
+    left.cache?.m1 === right.cache?.m1
+  );
+}
+
 interface FileToolInputPreviewState {
   lastPublishedAt: number | null;
   pendingAppend: string;
@@ -667,6 +695,8 @@ export class ProductProjection {
               }
             : null,
           cumulative,
+          // 冷恢复种子只管 token 水位，不得顺手抹掉已经下发的 magic-context 摘要（D-13）。
+          ...magicContextUsageField(current.magicContext),
         },
       };
       return;
@@ -689,8 +719,39 @@ export class ProductProjection {
             ? null
             : { ...seededContextWindow, maxTokens: seededContextWindow.maxTokens },
         cumulative,
+        // 同上：另一条种子路径也不许顺手抹掉 magic-context 摘要（D-13）。
+        ...magicContextUsageField(current.magicContext),
       },
     };
+  }
+
+  /**
+   * magic-context 预算摘要（D-13）的 side state 写入口。
+   *
+   * 它**不是**事件：`magic-context.db` 的读数由装配层（`create-app` → transform 端口）
+   * 在每轮 pass / 每次 provider usage 落库之后主动推过来，走 publisher 的 delta 扇出。
+   * 之所以不塞进 `session.events` 的 `model_complete`：那条事件要落事件日志、要参与
+   * 冷恢复重放，而这份摘要**是纯派生态**（关掉 magic-context 就没有，重放一遍也只是把
+   * 同一份库再读一次）。
+   *
+   * 缺席语义：`null`/缺省 ⇒ **移除** `usage.magicContext` 键，而不是写一份全零对象。
+   * 「不知道」和「全是 0」在 UI 上是两件完全不同的事（前者整段不渲染）。
+   *
+   * conflation：逐字段相等时返回 `[]`，不下发空 patch——usage 是本投影里最高频的
+   * 键之一，无变化的下发会把 delta 日志灌满。
+   */
+  applyMagicContextUsage(usage: SessionMagicContextUsage | null | undefined): ConversationDelta[] {
+    const current = this.snapshot.usage.magicContext;
+    if (usage === null || usage === undefined) {
+      if (current === undefined) return [];
+      const { magicContext: _dropped, ...rest } = this.snapshot.usage;
+      this.snapshot = { ...this.snapshot, usage: rest };
+      return [{ op: "state.updated", patch: { usage: rest } }];
+    }
+    if (current !== undefined && sameMagicContextUsage(current, usage)) return [];
+    const next = { ...this.snapshot.usage, magicContext: usage };
+    this.snapshot = { ...this.snapshot, usage: next };
+    return [{ op: "state.updated", patch: { usage: next } }];
   }
 
   /**

@@ -476,6 +476,8 @@ export const TID_CHAT_MODE_SELECT_TRIGGER = "chat-mode-select-trigger";
 export const TID_CHAT_MODE_SELECT_ITEM = "chat-mode-select-item";
 /** 聊天工具栏 context 消耗按钮 */
 export const TID_CHAT_CONTEXT_USAGE_TRIGGER = "chat-context-usage-trigger";
+/** context 面板内的 magic-context 预算段（D-13；字段缺席时该段不渲染，e2e 据此断言） */
+export const TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT = "chat-context-usage-magic-context";
 /** 思考块折叠触发按钮 */
 export const TID_CHAT_REASONING_TRIGGER = "chat-reasoning-trigger";
 /** 思考块折叠内容容器 */

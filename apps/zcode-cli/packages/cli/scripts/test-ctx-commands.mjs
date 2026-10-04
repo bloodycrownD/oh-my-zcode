@@ -57,7 +57,7 @@ const {
 // CLI 侧的纯函数与解析器（TS 源码，经 tsx 装载）。
 const CLI_SRC = fileURLToPath(new URL("../src/command-center/", import.meta.url));
 const { parseSlashCommand } = await import(pathToFileURL(join(CLI_SRC, "slash-commands.ts")).href);
-const { parseExpandArgs, parseRecompArgs } = await import(
+const { parseExpandArgs, parseRecompArgs, formatCtxStatus } = await import(
   pathToFileURL(join(CLI_SRC, "handlers", "ctx.ts")).href
 );
 
@@ -146,6 +146,62 @@ test("formatMagicContextStatusSnapshot says so when the store cannot be opened",
   const text = formatMagicContextStatusSnapshot(null);
   assert.match(text, /Magic Context status is temporarily unavailable\./);
   assert.match(text, /MC-S01/);
+});
+
+// ── Step 30 / D-13：宿主侧排版 ────────────────────────────────────────────────
+//
+// 包侧的 `formatMagicContextStatusSnapshot` 保留不动（它仍是被断言的包内渲染）；命令
+// 真正打给用户的那段文本从 Step 30 起由 CLI 侧的 `formatCtxStatus` 产出。这一节钉住
+// 「同一份快照、同一批数字、只是更好读」，而不是另造一份数据。
+
+test("formatCtxStatus renders the same snapshot in aligned sections", async () => {
+  const snapshot = await readMagicContextStatusSnapshot({ db, sessionId: SESSION });
+  assert.ok(snapshot);
+  const lines = formatCtxStatus(snapshot).split("\n");
+
+  assert.equal(lines[0], "Magic Context status");
+  assert.equal(lines[1], `session  ${SESSION}`);
+  assert.equal(lines[2], "");
+  // 三段标题各占一段，段间恰好一个空行。
+  assert.deepEqual(
+    lines.filter((line) => line === ""),
+    ["", "", ""],
+  );
+  const titles = lines.filter((line) => ["BUDGET", "COMPARTMENTS", "TAGS"].includes(line));
+  assert.deepEqual(titles, ["BUDGET", "COMPARTMENTS", "TAGS"]);
+
+  // 数字与包侧渲染逐条一致，只是加了千分位并按段对齐。
+  assert.ok(lines.includes("  protected floor     4,096"));
+  assert.ok(lines.includes("  last context usage  42%"));
+  assert.ok(lines.includes("  last input tokens   12,345"));
+  assert.ok(lines.includes("  count                   2"));
+  assert.ok(lines.includes("  last compacted message  40"));
+  assert.ok(lines.includes("  pending operations      1"));
+  assert.ok(lines.includes("  active     4 (400 tokens)"));
+  assert.ok(lines.includes("  dropped    2 (1,000 tokens)"));
+  assert.ok(lines.includes("  compacted  0 (0 tokens)"));
+
+  // 同一段里的值列起始位置一致——这正是 Step 30 要的可读性。
+  const valueColumnOf = (line) => line.length - line.trimStart().length + line.trim().search(/\S\S+/);
+  for (const title of ["BUDGET", "COMPARTMENTS", "TAGS"]) {
+    const start = lines.indexOf(title) + 1;
+    const body = lines.slice(start).filter((line) => line.startsWith("  "));
+    const columns = new Set(body.map(valueColumnOf));
+    assert.equal(columns.size, 1, `${title} 段内的值列必须对齐（实际 ${[...columns]}）`);
+  }
+});
+
+test("formatCtxStatus prints an em-dash-style unknown and one line when nothing is readable", async () => {
+  const snapshot = await readMagicContextStatusSnapshot({ db, sessionId: "sess_never_seen" });
+  assert.ok(snapshot);
+  assert.equal(snapshot.protectedTokensFloor, null);
+  const lines = formatCtxStatus(snapshot).split("\n");
+  assert.ok(lines.includes("  protected floor     -"), "未知值统一渲染成 -");
+  assert.ok(lines.includes("  last compacted message  -1"), "从未压缩过的会话是 -1，不是 0");
+
+  const unavailable = formatCtxStatus(null);
+  assert.equal(unavailable, "Magic Context status unavailable for this session.");
+  assert.equal(unavailable.split("\n").length, 1);
 });
 
 // ── /ctx-recomp 简化语义 ─────────────────────────────────────────────────────
