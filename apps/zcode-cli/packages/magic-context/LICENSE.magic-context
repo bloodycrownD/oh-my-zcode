@@ -1,0 +1,49 @@
+Upstream license record for the code ported into this package.
+
+This package (`@zcode/magic-context`) is a fork-local port of:
+
+  upstream package : @cortexkit/opencode-magic-context
+  upstream version : 0.44.4
+  upstream license : MIT
+  upstream copyright: Copyright (c) 2025 Ufuk Altinok
+  snapshot used    : .reference/magic-context (read-only upstream snapshot)
+
+The ported files carry this attribution in their header comment, e.g.
+
+  MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
+
+Files under `src/core/` are, per their own header comments, verbatim or
+near-verbatim ports of the corresponding upstream files; `src/host/` and
+`src/index.ts` are fork-written ZCode adapters that reuse upstream types and
+storage semantics.
+
+The upstream per-file headers were preserved as-is (the upstream sources carry
+no per-file copyright header, so there is nothing per-file to restore). This
+file carries the MIT notice the license requires to travel with copies or
+substantial portions of the upstream Software. The fork's own code remains
+under the repository-root Apache-2.0 LICENSE; MIT permits this combination as
+long as the MIT notice above is retained.
+
+--------------------------------------------------------------------------
+
+MIT License
+
+Copyright (c) 2025 Ufuk Altinok
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.

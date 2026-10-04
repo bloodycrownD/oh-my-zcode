@@ -7,7 +7,7 @@
  * 重写为本地命令语义）；本文件只提供「哪些 `/ctx-*` 名字存在、描述是什么」这份
  * 注册表，`stripped-command.ts` 用它做 allow-list 判定。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import type { BuiltinCommandConfig } from "./types.js";

@@ -12,7 +12,7 @@
  * `UnmanagedOverWindowError`、`single-store-refusal`、`maintenance-authority` …），
  * 编造占位文案会把错误的句子与错误的码发给用户。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 /**

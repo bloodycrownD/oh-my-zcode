@@ -7,7 +7,7 @@
  * 参数形状、passthrough 解析、mode 分派、compartment 边界钳制、verbose 预算截断、
  * 继续提示全部逐字保留。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage.js";

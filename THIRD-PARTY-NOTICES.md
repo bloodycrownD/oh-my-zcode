@@ -730,6 +730,8 @@ Original copyright, license and NOTICE text is retained below. Identical text is
 
 - agent-base@9.0.0 — MIT
 
+- ai-tokenizer@1.0.7 — MIT
+
 - ai@6.0.159 — Apache-2.0
 
 - ai@6.0.193 — Apache-2.0
@@ -6821,6 +6823,62 @@ TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
 SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ````
 
+### Notice 8a68e85e25948a6ce5c44d06ef39f7ef1e2114c9a41ae7fe3a2afa85e915ed38
+
+- ai-tokenizer@1.0.7: LICENSE
+
+
+
+````text
+The MIT License
+
+Copyright (c) 2025 Coder Technologies Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of
+this software and associated documentation files (the "Software"), to deal in
+the Software without restriction, including without limitation the rights to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software is furnished to do so,
+subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS
+FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR
+COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER
+IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
+CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+````
+
+### Notice 5664c680d8430d77e20c55742343ded09ac1f50d72f24eb5bd5e37ce95af1ae0
+
+- ai-tokenizer@1.0.7: README.md (license section)
+
+- ajv@8.18.0: README.md (license section)
+
+- border-beam@1.0.1: README.md (license section)
+
+- fast-png@8.0.0: README.md (license section)
+
+- iobuffer@6.0.1: README.md (license section)
+
+- shiki@3.23.0: README.md (license section)
+
+- shiki@4.0.2: README.md (license section)
+
+- shiki@4.1.0: README.md (license section)
+
+
+
+````text
+## License
+
+[MIT](./LICENSE)
+
+````
+
 ### Notice 9df3bb69929a3b650ed73b3bfa1756725aaff0ac296461605753547004eafeaf
 
 - ajv-formats@3.0.1: LICENSE
@@ -6894,31 +6952,6 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-
-````
-
-### Notice 5664c680d8430d77e20c55742343ded09ac1f50d72f24eb5bd5e37ce95af1ae0
-
-- ajv@8.18.0: README.md (license section)
-
-- border-beam@1.0.1: README.md (license section)
-
-- fast-png@8.0.0: README.md (license section)
-
-- iobuffer@6.0.1: README.md (license section)
-
-- shiki@3.23.0: README.md (license section)
-
-- shiki@4.0.2: README.md (license section)
-
-- shiki@4.1.0: README.md (license section)
-
-
-
-````text
-## License
-
-[MIT](./LICENSE)
 
 ````
 

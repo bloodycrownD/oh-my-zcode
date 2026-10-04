@@ -22,7 +22,7 @@
  * 这就是 SPEC 说的「首版可只做触发一次 compartment 重算的简化语义并在帮助文案
  * 注明」的落点：简化的是**执行**，不是**表述**。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { getCompartments } from "../core/features/magic-context/compartment-storage.js";

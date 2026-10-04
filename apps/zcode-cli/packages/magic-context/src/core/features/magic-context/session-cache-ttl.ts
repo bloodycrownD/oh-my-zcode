@@ -9,7 +9,7 @@
  * 为何值得逐字保真：模型一旦已知就把 provider cache TTL **冻结**进可扩展的 replay
  * 文档里，重启不重算；重新推导出来的 TTL 会击穿缓存。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import {

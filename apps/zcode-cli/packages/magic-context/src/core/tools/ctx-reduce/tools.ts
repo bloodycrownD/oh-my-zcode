@@ -20,7 +20,7 @@
  * 其余逻辑（range 解析、未知 tag、protected window、inert whitespace、compacted
  * 冲突、事务化入队、held/immediate 的措辞分流）逐字保留。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { createHash } from "node:crypto";

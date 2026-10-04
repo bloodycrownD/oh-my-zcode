@@ -9,7 +9,7 @@
  * polling implementation, the jsonc loader, and the `.cortexkit/` path family
  * are not.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { createHash } from "node:crypto";

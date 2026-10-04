@@ -13,7 +13,7 @@
  * 为何值得逐字保真：`parseCacheTtl` 的文档契约（"Strict > matches the Rust
  * scheduler's predicate exactly"）让 `never` 哨兵与裸毫秒读法都是载荷语义。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { resolveExecuteThreshold } from "../../deferred/event-resolvers.js";

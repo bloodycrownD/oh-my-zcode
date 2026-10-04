@@ -28,7 +28,7 @@
  * that renames its host behind the application's back is exactly the bug class
  * this file exists to prevent.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { type HarnessId, getHarness, setHarness } from "../core/shared/harness.js";

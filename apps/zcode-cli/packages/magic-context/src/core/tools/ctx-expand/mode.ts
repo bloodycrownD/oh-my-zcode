@@ -2,7 +2,7 @@
  * 逐字移植自 `.reference/magic-context/packages/plugin/src/tools/ctx-expand/mode.ts`
  * （103 行，import 路径加 `.js` 后缀）。逻辑零改动。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { parseTagInput } from "../../features/magic-context/tag-input.js";

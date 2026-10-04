@@ -38,7 +38,7 @@
  * Every query here is READ-ONLY by contract. The handle is documented as such and
  * the smoke test opens the user's real `db.sqlite` with `readOnly: true`.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import {

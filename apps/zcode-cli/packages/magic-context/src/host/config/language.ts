@@ -10,7 +10,7 @@
  * `Intl.DisplayNames` based resolution that keeps a hardcoded language table out
  * of the fork.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 const ENGLISH_LANGUAGE_NAMES = new Intl.DisplayNames(["en"], {

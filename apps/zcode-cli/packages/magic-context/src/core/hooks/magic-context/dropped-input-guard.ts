@@ -2,7 +2,7 @@ import { refuseBudgetedToolCall } from "../../features/magic-context/dreamer/tok
 import { sessionLog } from "../../shared/logger.js";
 
 // Verbatim port of `hooks/magic-context/dropped-input-guard.ts` (upstream).
-// Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+// MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
 //
 // WHY IT IS IN THE FORK (S18 close-out). The S18 port list marks this module
 // 「→dreamer/token-budget」, i.e. its only cross-group dependency is the dreamer

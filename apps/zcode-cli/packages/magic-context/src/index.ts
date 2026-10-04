@@ -24,7 +24,7 @@
  *
  * `src/host/typecheck-seams.ts` 记录 host↔core 的结构契约，不在本文件导出面内。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 export const MAGIC_CONTEXT_PACKAGE_VERSION = "0.1.0";

@@ -3,7 +3,7 @@
  * reduced-args.ts`（99 行）。`ctx_reduce` 与 `ctx_expand` 在工具边界解一次模型模仿的
  * clamped 参数形状。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 export interface ImitatedReducedArgs {

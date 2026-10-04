@@ -1,7 +1,7 @@
 /**
  * 逐字移植自 `.reference/magic-context/packages/plugin/src/tools/ctx-expand/constants.ts`。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 export const CTX_EXPAND_DESCRIPTION = `Recover original content that is no longer on your desk. It takes two kinds of number, and they are never interchangeable:

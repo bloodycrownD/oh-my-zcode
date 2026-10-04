@@ -13,7 +13,7 @@
  * and the reason is recorded in `getReloadFailure()` — a malformed write
  * degrades to "config change ignored", not to "feature off".
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import {

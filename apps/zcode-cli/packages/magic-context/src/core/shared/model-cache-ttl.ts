@@ -9,7 +9,7 @@
  * 为何值得逐字保真：provider cache-TTL 解析是 provider 文档化的寿命表；行为漂移会让
  * 缓存命中率与实际账单一起漂。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { canonicalModelIdentity, modelRefLookupOrder } from "./harness-provider-map.js";

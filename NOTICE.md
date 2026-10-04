@@ -1,6 +1,18 @@
-# ZCode 相关功能说明与第三方组件声明
+# oh-my-zcode 相关功能说明与第三方组件声明
 
 本声明适用于本仓库公开的源码及其构建产物。各运行形态的功能、权限、存储位置和网络行为不同，不能将其中一种形态的默认设置理解为整个项目的统一设置。
+
+## 零、Fork 声明
+
+本仓库是 ZCode（基线 v3.14.3，Apache-2.0）的 fork，对外分发名为 **oh-my-zcode**。Fork 未改变上游的许可证选择：本仓库第一方代码仍按根 [LICENSE](LICENSE) 以 Apache-2.0 提供，下方第一至第四节的上游条款性声明（执行权限、对外请求、本地数据、第三方许可）同样适用于本 fork。相对上游的主要修改面如下：
+
+- **遥测与崩溃上报整体移除**：摘除 ARMS / OTLP / RUM 上报链、崩溃采集、性能 trace 与转化漏斗归因，以及相应依赖与打包接线；模型输入输出日志只写本地，不向任何运营方回传使用数据。
+- **ZCode 原生上下文压缩移除**：删除上游自带的会话压缩实现，压缩与上下文治理统一由下述 magic-context 承担。
+- **集成 magic-context 并默认启用**：把 magic-context（MIT，Copyright (c) 2025 Ufuk Altinok）移植进 [`apps/zcode-cli/packages/magic-context`](apps/zcode-cli/packages/magic-context)。`src/core/` 是上游逐字或近逐字移植件，文件头保留移植来源与 MIT 归属声明；`src/host/` 是本 fork 编写的 ZCode 侧适配层。上游许可全文见 [magic-context/LICENSE.magic-context](apps/zcode-cli/packages/magic-context/LICENSE.magic-context)。
+- **品牌改名**：可执行名 `zcode` → `omz`，npm 包名 → `oh-my-zcode`，数据目录 `~/.zcode` → `~/.omz`，插件市场 id → `oh-my-zcode-official`（过渡期仍接受官方市场的旧 id 别名）。
+- **apps 目录扁平化**：`apps/zcode-cli` 不再是 Git submodule，作为普通目录随主仓库一起提交；`scripts/bootstrap.mjs` 不再执行 `git submodule update`。
+
+本 fork 与上游的同步、重放与门禁流程见 [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)。
 
 ## 一、AI 输出、执行权限与自动化风险
 

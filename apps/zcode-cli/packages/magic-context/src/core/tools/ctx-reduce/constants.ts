@@ -1,7 +1,7 @@
 /**
  * 逐字移植自 `.reference/magic-context/packages/plugin/src/tools/ctx-reduce/constants.ts`。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 export const CTX_REDUCE_DESCRIPTION = `Stamp an item on your desk as no longer needed for the work ahead. Not a delete: stamping QUEUES it, the item stays fully readable until Magic Context clears stamped items in one sweep, and the newest tags are protected so stamping recent output is harmless. A cleared item goes to the archive — a recent one leaves a \`[dropped §N§]\` placeholder, an older one leaves nothing — and \`ctx_expand(tag=N)\` is the way back. So the question before stamping is not "have I finished reading this?" but "does this need to stay on my desk for what comes next?" — a file you read and will keep editing stays; the grep that found it goes.

@@ -19,7 +19,7 @@
  * `isCanonicalDreamTask` 不可问。参数形因此作为散文透传而不是被派发——这是保守的一臂；
  * 反过来（对每个参数都 `true`）会把任意用户散文送进一个随后只会报解析错的 handler。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import type { MagicContextBuiltinCommandName } from "./commands.js";

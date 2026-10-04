@@ -59,7 +59,7 @@
  * out exactly this mismatch, so this provider implements the complete surface and
  * every fallback stays unreachable.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import {

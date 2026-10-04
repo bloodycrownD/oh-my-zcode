@@ -6,7 +6,7 @@
  * 是 `@opencode-ai/sdk` 的 `Config`——OpenCode SDK 不是 fork 依赖，因此按与被替换的缝
  * 完全相同的做法，本地重声明同形状的结构替身（源里 `satisfies` 的形状不变）。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 /**

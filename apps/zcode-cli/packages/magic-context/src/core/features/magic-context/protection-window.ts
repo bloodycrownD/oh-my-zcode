@@ -9,7 +9,7 @@
  * 为何值得逐字保真：窗口成员喂给 postprocess 的 protected-tag-number 集合，
  * 打桩的窗口会静默改变「哪些行能活过压缩」。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import type { Database } from "../../shared/sqlite.js";

@@ -45,7 +45,7 @@
  *     always initialized before any call. Verified reasoning, not yet executed —
  *     Step 20 must land a smoke test with it.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { createHash } from "node:crypto";

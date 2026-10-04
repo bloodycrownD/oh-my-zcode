@@ -13,7 +13,7 @@
  *   - `execute` 的第二个参数携带调用身份：`sessionID` / `directory` / `callID`
  *     （源同时接受 `callId` 拼写，两者都保留，命令幂等键逐字逻辑依赖这一点）。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import { z } from "zod";

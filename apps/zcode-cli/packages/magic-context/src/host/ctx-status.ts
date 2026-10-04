@@ -25,7 +25,7 @@
  * 每一段都从**只读** SQL / A 组读函数来，不写库、不碰 messageHistory、不触发任何
  * 重活（这是「status 不能有副作用」这条不变式在 fork 侧的落点）。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 import {

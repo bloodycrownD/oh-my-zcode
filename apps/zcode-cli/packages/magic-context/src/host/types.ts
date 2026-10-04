@@ -40,7 +40,7 @@
  * shapes (a structural assignability check); if a ZCode field is added to
  * `RuntimeMessageEntry`, add it here in the same commit.
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 // ─────────────────────────────────────────────────────────────────────────────

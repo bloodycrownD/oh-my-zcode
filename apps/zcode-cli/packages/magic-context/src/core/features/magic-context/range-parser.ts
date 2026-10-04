@@ -2,7 +2,7 @@
  * 逐字移植自 `.reference/magic-context/packages/plugin/src/features/magic-context/
  * range-parser.ts`（86 行）。`ctx_reduce` 的 `drop` 参数解析走它。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 /**

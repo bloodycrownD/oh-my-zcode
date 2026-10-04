@@ -5,7 +5,7 @@
  * 16 行纯函数，`ctx-expand` 的 mode 解析与 `ctx_reduce` 共用；放在源路径下以便
  * 上游 import 逐字成立。
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
 export const TAG_INPUT_ERROR =

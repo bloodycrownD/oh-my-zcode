@@ -1,7 +1,7 @@
 /**
  * Verbatim port of `features/magic-context/dreamer/token-budget.ts` (upstream).
  *
- * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  *
  * WHY IT IS IN THE FORK (S18 close-out). `hooks/magic-context/dropped-input-guard.ts`
  * — the module `tool-drop-target.ts` calls `droppedInputMarker()` from — reaches
