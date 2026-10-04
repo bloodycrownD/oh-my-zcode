@@ -91,7 +91,7 @@ export function OccupationOnboarding({
         logger.warn("[occupation-onboarding] 写入关闭决策失败", { error: String(cause) });
       });
     }
-  }, [intl, onboardingRecord, platform, setRequested]);
+  }, [onboardingRecord, platform, setRequested]);
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {

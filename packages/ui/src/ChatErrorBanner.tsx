@@ -68,10 +68,7 @@ function isModelConfigMissingError(error: Pick<ZCodeUiError, "code" | "message">
   return Boolean(error.code && MODEL_CONFIG_MISSING_CODES.has(error.code));
 }
 
-export function resolveChatErrorBannerDisplayMessage(
-  error: ZCodeUiError,
-  intl: IntlInstance,
-): string {
+function resolveChatErrorBannerDisplayMessage(error: ZCodeUiError, intl: IntlInstance): string {
   if (isModelConfigMissingError(error)) {
     return intl.formatMessage({ id: "chat.error.noAvailableModel" });
   }

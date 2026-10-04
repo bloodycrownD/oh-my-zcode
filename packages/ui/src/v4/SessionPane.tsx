@@ -1218,11 +1218,7 @@ export function SessionPane({
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
   const promoteGroupedDraftTask = useZCodeSessionStore((state) => state.promoteGroupedDraftTask);
   const handleDraftSessionCreated = useCallback(
-    (
-      createdSessionId: string,
-      groupedDraftTask: GroupedDraftTaskState | null | undefined,
-      _createSource?: SessionCreateSource,
-    ) => {
+    (createdSessionId: string, groupedDraftTask: GroupedDraftTaskState | null | undefined) => {
       newlyCreatedSessionIdRef.current = createdSessionId;
       promoteComposerDraft(createdSessionId);
       // 只有 draft create/promote 的 accepted 边界能继承 grouped placement。
@@ -2336,11 +2332,7 @@ export function SessionPane({
   );
 
   const dispatchSendTextAfterConfig = useCallback(
-    async (
-      text: string,
-      options: ConversationComposerSendOptions | undefined,
-      createSourceAtSend: SessionCreateSource,
-    ) => {
+    async (text: string, options: ConversationComposerSendOptions | undefined) => {
       let onAcceptedSelection: (() => void) | undefined;
       const dispatchSubmissionCommand = async (...args: Parameters<typeof dispatchCommand>) => {
         const ack = await dispatchCommand(...args);
@@ -2533,7 +2525,7 @@ export function SessionPane({
           throw new Error("createSession 缺少 sessionId");
         }
         const newSessionId = createResult.sessionId;
-        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend, createSourceAtSend);
+        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend);
         await dispatchSlashCommand(
           draftSlashCommand,
           newSessionId,
@@ -2701,9 +2693,6 @@ export function SessionPane({
 
   const dispatchSendText = useCallback(
     (text: string, options?: ConversationComposerSendOptions) => {
-      const createSource = useZCodeSessionStore
-        .getState()
-        .getWorkspaceState(workspacePath, workspaceIdentity).draftCreateSource;
       const submissionOptions = {
         ...options,
         submission:
@@ -2713,7 +2702,7 @@ export function SessionPane({
       // 依赖“配置命令先到、sendText 后到”的跨命令时序。
       return configCommandBarrier.enqueue(async () => {
         try {
-          return await dispatchSendTextAfterConfig(text, submissionOptions, createSource);
+          return await dispatchSendTextAfterConfig(text, submissionOptions);
         } catch (error) {
           if (sessionId === null && isProviderNotReadyError(error)) {
             // UI 预检查与 Host getClient 之间 registry 仍可能失效。竞态命中时收敛成

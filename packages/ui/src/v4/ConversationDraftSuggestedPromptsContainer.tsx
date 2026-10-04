@@ -22,7 +22,6 @@ import {
 import { ZCODE_OFFICIAL_PLUGIN_MARKETPLACE_ID } from "@zcode/shared";
 import { cn } from "@/components/lib/utils.js";
 import { toast } from "@/components/ui/toast.js";
-import { usePlatform } from "@/hooks/usePlatform.js";
 import { useWorkspaceServicesResolution } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
@@ -84,10 +83,8 @@ export function ConversationDraftSuggestedPromptsContainer({
   workspaceIdentity,
   remoteSessionId,
   onOpenAutomations,
-  isDesktop = false,
 }: Props) {
   const { intl, locale } = useZCodeIntl();
-  const platform = usePlatform();
   const isOfficeMode = useIsOfficeMode();
   const { update } = useSettings();
   const onboardingRecordService = useOnboardingRecordService();
@@ -698,13 +695,11 @@ export function ConversationDraftSuggestedPromptsContainer({
       clearOperationFeedback,
       locale,
       onOpenAutomations,
-      platform,
       replacePlainPrompt,
       replaceWithResolvedPluginAndPrompt,
       resolution.rpcReady,
       resolution.services.pluginManagementService,
       handleMutation,
-      isDesktop,
       showMutationConfirmation,
       showPluginActionPopover,
       targetParams,
