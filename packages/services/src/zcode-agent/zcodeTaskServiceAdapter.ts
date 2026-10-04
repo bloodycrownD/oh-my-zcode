@@ -96,10 +96,8 @@ import {
   type ZCodeSessionSettingsState,
   type ZCodeSessionStateSnapshot,
   type ZCodeStateUpdatedNotification,
-  type ZCodeContextCompactionTimelineMeta,
   type ZCodeTimelineMeta,
   type ZCodeTimelineStatus,
-  type ZCodeTimelineTrigger,
   type ZCodeToolProjectionMemory,
   type ZCodeUserInputRequestParams,
   type ZCodeUserInputResponse,
@@ -3505,10 +3503,6 @@ function mapMessage(
           syntheticTimeline = fromText;
         }
       }
-    } else if (part.type === "compaction" && !syntheticTimeline) {
-      // compact 的模型 summary/timelineText 属于 agent 内部上下文，不能作为正文透出。
-      // 持久化恢复只从结构化字段合成横线，展示文案由 UI/TUI 本地 i18n 决定。
-      syntheticTimeline = synthesizeCompactionTimeline(part);
     }
   }
   for (const part of message.parts) {
@@ -3667,51 +3661,6 @@ function extractSyntheticTimelineFromTextPart(
     ...(typeof ctx["restoredFileCount"] === "number"
       ? { restoredFileCount: ctx["restoredFileCount"] }
       : {}),
-  };
-}
-
-function synthesizeCompactionTimeline(
-  part: Extract<ZCodeMessagePart, { type: "compaction" }>,
-): ZCodeTimelineMeta | undefined {
-  const metadata = asRecord(part.metadata);
-  const operationId = stringValue(metadata.operationId) ?? part.partId;
-  const status = timelineStatusValue(metadata.timelineStatus);
-  if (!status && !part.summaryMessageId) {
-    // compact summary user message 也带 compaction metadata，
-    // 但它是模型上下文，不是 UI timeline；否则 snapshot 恢复会多渲染一条横线。
-    return undefined;
-  }
-  const trigger = timelineTriggerValue(metadata.trigger) ?? (part.auto ? "auto" : "manual");
-  const replace = booleanValue(metadata.replace);
-  const reason = part.reason ?? stringValue(metadata.reason);
-  const boundaryId = stringValue(metadata.boundaryId) ?? part.summaryMessageId;
-  const summaryMessageId = part.summaryMessageId ?? stringValue(metadata.summaryMessageId);
-  const preCompactTokenCount = numberValue(metadata.preCompactTokenCount);
-  const postCompactTokenCount = numberValue(metadata.postCompactTokenCount);
-  const truePostCompactTokenCount = numberValue(metadata.truePostCompactTokenCount);
-  const attempt = numberValue(metadata.attempt);
-  const maxAttempts = numberValue(metadata.maxAttempts);
-  const startedAt = numberValue(metadata.startedAt);
-  const endedAt = numberValue(metadata.endedAt);
-  return {
-    version: 1,
-    kind: "synthetic",
-    type: "context_compaction",
-    operationId,
-    status: status ?? "completed",
-    trigger,
-    display: "separator",
-    ...(replace !== undefined ? { replace } : {}),
-    ...(reason ? { reason } : {}),
-    ...(boundaryId ? { boundaryId } : {}),
-    ...(summaryMessageId ? { summaryMessageId } : {}),
-    ...(preCompactTokenCount !== undefined ? { preCompactTokenCount } : {}),
-    ...(postCompactTokenCount !== undefined ? { postCompactTokenCount } : {}),
-    ...(truePostCompactTokenCount !== undefined ? { truePostCompactTokenCount } : {}),
-    ...(attempt !== undefined ? { attempt } : {}),
-    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
-    ...(startedAt !== undefined ? { startedAt } : {}),
-    ...(endedAt !== undefined ? { endedAt } : {}),
   };
 }
 
@@ -3976,12 +3925,6 @@ function mapSessionEvent(
     return [runStartedEvent];
   }
 
-  const compactTimeline = mapCompactTimelinePayload(params.taskId, traceId, eventInputId, payload);
-  if (compactTimeline) {
-    streamedTurnKeys.add(turnKey);
-    return [compactTimeline];
-  }
-
   const partTimeline = mapSyntheticTimelinePartPayload(
     params.taskId,
     traceId,
@@ -4116,16 +4059,6 @@ function mapSessionEvent(
     toolProjectionMemory?.streamingToolInputById?.clear();
     streamedTurnKeys.delete(turnKey);
     const errorPayload = asRecord(payload.error);
-    if (stringValue(payload.turnPhase) === "compact") {
-      return [
-        compactFailureToTimelineEvent(
-          params.taskId,
-          traceId,
-          eventInputId,
-          stringValue(errorPayload.message) ?? "ZCode compact failed",
-        ),
-      ];
-    }
     const attribution = errorAttributionSchema.safeParse(errorPayload.attribution);
     // dynamic task event 也会写入 task index；只修 snapshot 读路径仍会丢 live 归因。
     return [
@@ -4461,30 +4394,6 @@ function readStreamingToolInputStringField(
   return undefined;
 }
 
-function mapCompactTimelinePayload(
-  taskId: string,
-  traceId: TraceId,
-  inputId: InputId | undefined,
-  payload: Record<string, unknown>,
-): Extract<ZCodeStreamEvent, { type: "agent_message_chunk" }> | null {
-  const timeline = compactTimelineMetaFromPayload(payload, inputId);
-  if (!timeline) {
-    return null;
-  }
-  const messageId = stringValue(payload.messageId);
-  return {
-    type: "agent_message_chunk",
-    taskId,
-    traceId,
-    ...(inputId ? { inputId } : {}),
-    ...(messageId ? { messageId } : {}),
-    // compact lifecycle 是结构化状态事件，不是 assistant 正文。
-    // 即使上游误带 text，也不能把内部 summary/prompt 投影到聊天区。
-    content: "",
-    zcodeTimeline: timeline,
-  };
-}
-
 function mapSyntheticTimelinePartPayload(
   taskId: string,
   traceId: TraceId,
@@ -4512,77 +4421,6 @@ function mapSyntheticTimelinePartPayload(
     // fork notice 是 part.upserted 里的结构化 synthetic text，不是模型正文 delta。
     // 这里提前投成 timeline divider，避免 UI 按普通消息渲染后丢掉横线。
     zcodeTimeline: timeline,
-  };
-}
-
-function compactTimelineMetaFromPayload(
-  payload: Record<string, unknown>,
-  inputId: InputId | undefined,
-): ZCodeContextCompactionTimelineMeta | null {
-  const operationId = stringValue(payload.operationId);
-  const status = timelineStatusValue(payload.status ?? payload.timelineStatus);
-  if (!operationId || !status) {
-    return null;
-  }
-  const trigger = timelineTriggerValue(payload.trigger) ?? "manual";
-  const replace = booleanValue(payload.replace);
-  const reason = stringValue(payload.reason);
-  const boundaryId = stringValue(payload.boundaryId);
-  const summaryMessageId = stringValue(payload.summaryMessageId);
-  const preCompactTokenCount = numberValue(payload.preCompactTokenCount);
-  const postCompactTokenCount = numberValue(payload.postCompactTokenCount);
-  const truePostCompactTokenCount = numberValue(payload.truePostCompactTokenCount);
-  const attempt = numberValue(payload.attempt);
-  const maxAttempts = numberValue(payload.maxAttempts);
-  const startedAt = numberValue(payload.startedAt);
-  const endedAt = numberValue(payload.endedAt);
-  return {
-    version: 1,
-    kind: "synthetic",
-    type: "context_compaction",
-    operationId,
-    status,
-    trigger,
-    display: "separator",
-    ...(inputId ? { inputId } : {}),
-    ...(replace !== undefined ? { replace } : {}),
-    ...(reason ? { reason } : {}),
-    ...(boundaryId ? { boundaryId } : {}),
-    ...(summaryMessageId ? { summaryMessageId } : {}),
-    ...(preCompactTokenCount !== undefined ? { preCompactTokenCount } : {}),
-    ...(postCompactTokenCount !== undefined ? { postCompactTokenCount } : {}),
-    ...(truePostCompactTokenCount !== undefined ? { truePostCompactTokenCount } : {}),
-    ...(attempt !== undefined ? { attempt } : {}),
-    ...(maxAttempts !== undefined ? { maxAttempts } : {}),
-    ...(startedAt !== undefined ? { startedAt } : {}),
-    ...(endedAt !== undefined ? { endedAt } : {}),
-  };
-}
-
-function compactFailureToTimelineEvent(
-  taskId: string,
-  traceId: TraceId,
-  inputId: InputId | undefined,
-  reason: string,
-): Extract<ZCodeStreamEvent, { type: "agent_message_chunk" }> {
-  return {
-    type: "agent_message_chunk",
-    taskId,
-    traceId,
-    ...(inputId ? { inputId } : {}),
-    content: "",
-    zcodeTimeline: {
-      version: 1,
-      kind: "synthetic",
-      type: "context_compaction",
-      operationId: `compact-failed-${inputId ?? traceId}`,
-      status: /abort|cancel|interrupt|stop/i.test(reason) ? "interrupted" : "failed",
-      trigger: "manual",
-      display: "separator",
-      ...(inputId ? { inputId } : {}),
-      reason,
-      endedAt: Date.now(),
-    },
   };
 }
 
@@ -5642,16 +5480,6 @@ function timelineStatusValue(value: unknown): ZCodeTimelineStatus | undefined {
     : undefined;
 }
 
-function timelineTriggerValue(value: unknown): ZCodeTimelineTrigger | undefined {
-  return value === "manual" ||
-    value === "auto" ||
-    value === "reactive" ||
-    value === "partial" ||
-    value === "session_memory"
-    ? value
-    : undefined;
-}
-
 function stringArray(value: unknown): string[] {
   return Array.isArray(value)
     ? value.filter((item): item is string => typeof item === "string")
@@ -5665,7 +5493,7 @@ function turnSteerSourceValue(value: unknown): ZCodeTurnSteerSource | undefined 
 }
 
 function turnSteerCommandKindValue(value: unknown): ZCodeTurnSteerCommandKind | undefined {
-  return value === "sendGoalCommand" || value === "sendText" || value === "compact"
+  return value === "sendGoalCommand" || value === "sendText"
     ? value
     : undefined;
 }

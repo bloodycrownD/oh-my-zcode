@@ -495,45 +495,7 @@ export type ZCodeTimelineStatus =
   | "completed"
   | "failed"
   | "interrupted";
-export type ZCodeTimelineTrigger = "manual" | "auto" | "reactive" | "partial" | "session_memory";
-export type ZCodeContextCompactionTimelinePhase =
-  | "standalone_turn"
-  | "pre_request"
-  | "mid_turn"
-  | "reactive";
-export type ZCodeTimelineMeta =
-  | ZCodeContextCompactionTimelineMeta
-  | ZCodeGoalVerificationTimelineMeta
-  | ZCodeSessionForkTimelineMeta;
-export interface ZCodeContextCompactionTimelineMeta {
-  version: 1;
-  kind: "synthetic";
-  type: "context_compaction";
-  operationId: string;
-  status: ZCodeTimelineStatus;
-  trigger: ZCodeTimelineTrigger;
-  display: "separator";
-  /**
-   * `/compact` 本地会先渲染 optimistic 横条，agent lifecycle 事件稍后才到。
-   * 用 inputId 把两者合并，避免同一次压缩先显示“正在压缩”再额外追加一条“已压缩”。
-   */
-  inputId?: InputId;
-  /** 失败后重试需要保留用户原本输入的 `/compact ...` 指令。 */
-  command?: string;
-  replace?: boolean;
-  reason?: string;
-  boundaryId?: string;
-  summaryMessageId?: string;
-  preCompactTokenCount?: number;
-  postCompactTokenCount?: number;
-  truePostCompactTokenCount?: number;
-  attempt?: number;
-  maxAttempts?: number;
-  /** compact 阶段用于区分 mid_turn / pre_request 等真实压缩边界，避免 UI 和 e2e 只能按文案猜。 */
-  phase?: ZCodeContextCompactionTimelinePhase;
-  startedAt?: number;
-  endedAt?: number;
-}
+export type ZCodeTimelineMeta = ZCodeGoalVerificationTimelineMeta | ZCodeSessionForkTimelineMeta;
 export interface ZCodeSessionForkTimelineMeta {
   version: 1;
   kind: "synthetic";

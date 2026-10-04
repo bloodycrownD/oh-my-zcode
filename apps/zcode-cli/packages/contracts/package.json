@@ -22,10 +22,6 @@
       "types": "./dist/events/index.d.ts",
       "import": "./dist/events/index.js"
     },
-    "./compact": {
-      "types": "./dist/compact/index.d.ts",
-      "import": "./dist/compact/index.js"
-    },
     "./rewind": {
       "types": "./dist/rewind/index.d.ts",
       "import": "./dist/rewind/index.js"

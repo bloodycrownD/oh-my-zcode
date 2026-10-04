@@ -111,60 +111,19 @@ function mapMessagePart(part: MessagePart): ZCodeMessagePart {
       return { ...base, snapshot: part.snapshot, type: "snapshot" };
     case "patch":
       return { ...base, files: part.files, hash: part.hash, type: "patch" };
-    case "compaction":
-      return {
-        ...base,
-        auto: part.auto,
-        metadata: {
-          attempt: part.attempt,
-          boundaryId: part.boundaryId,
-          compactReason: part.compactReason,
-          endedAt: part.time?.end,
-          maxAttempts: part.maxAttempts,
-          operationId: part.operationId,
-          phase: part.phase,
-          postCompactTokenCount: part.postCompactTokenCount,
-          preCompactTokenCount: part.preCompactTokenCount,
-          reason: part.reason,
-          replace: part.replace,
-          startedAt: part.time?.start,
-          summaryMessageId: part.summaryMessageId,
-          timelineStatus: part.timelineStatus,
-          truePostCompactTokenCount: part.truePostCompactTokenCount,
-          trigger: part.trigger,
-        },
-        reason: part.reason,
-        summaryMessageId: part.summaryMessageId,
-        type: "compaction",
-      };
     case "timeline":
       return {
         ...base,
         anchorMessageId: part.anchorMessageId ? String(part.anchorMessageId) : undefined,
         anchorTurnId: part.anchorTurnId ? String(part.anchorTurnId) : undefined,
-        attempt: part.timelineType === "context_compaction" ? part.attempt : undefined,
-        boundaryId: part.timelineType === "context_compaction" ? part.boundaryId : undefined,
-        compactReason: part.timelineType === "context_compaction" ? part.compactReason : undefined,
         display: part.display,
         fromModel: part.timelineType === "model_change" ? part.fromModel : undefined,
         goalIteration: part.timelineType === "goal_verification" ? part.goalIteration : undefined,
-        maxAttempts: part.timelineType === "context_compaction" ? part.maxAttempts : undefined,
-        operationId: part.timelineType === "context_compaction" ? part.operationId : undefined,
         parentSessionId:
           part.timelineType === "session_fork" ? String(part.parentSessionId) : undefined,
-        phase: part.timelineType === "context_compaction" ? part.phase : undefined,
-        postCompactTokenCount:
-          part.timelineType === "context_compaction" ? part.postCompactTokenCount : undefined,
-        preCompactTokenCount:
-          part.timelineType === "context_compaction" ? part.preCompactTokenCount : undefined,
-        reason: part.timelineType === "context_compaction" ? part.reason : undefined,
         restoredFileCount:
           part.timelineType === "session_fork" ? part.restoredFileCount : undefined,
         status: part.status,
-        summaryMessageId:
-          part.timelineType === "context_compaction" && part.summaryMessageId
-            ? String(part.summaryMessageId)
-            : undefined,
         targetCheckpointId:
           part.timelineType === "session_fork" ? part.targetCheckpointId : undefined,
         targetId: part.timelineType === "goal_verification" ? part.targetId : undefined,
@@ -173,9 +132,6 @@ function mapMessagePart(part: MessagePart): ZCodeMessagePart {
         time: part.time,
         timelineType: part.timelineType,
         toModel: part.timelineType === "model_change" ? part.toModel : undefined,
-        trigger: part.timelineType === "context_compaction" ? part.trigger : undefined,
-        truePostCompactTokenCount:
-          part.timelineType === "context_compaction" ? part.truePostCompactTokenCount : undefined,
         type: "timeline",
         verification: part.timelineType === "goal_verification" ? part.verification : undefined,
         verificationId: part.timelineType === "goal_verification" ? part.verificationId : undefined,

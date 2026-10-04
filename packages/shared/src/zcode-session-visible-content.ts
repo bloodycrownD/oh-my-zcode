@@ -64,29 +64,14 @@ export function isZCodeModelOnlySyntheticUserMessage(message: ZCodeMessageWithPa
   return policy === "providerContextOnly" || policy === "hiddenSynthetic";
 }
 
-export function isZCodeCompactSummaryMessage(message: ZCodeMessageWithParts): boolean {
-  return (
-    message.info.role === "user" &&
-    message.parts.some((part) => {
-      if (part.type !== "compaction") {
-        return false;
-      }
-      const timelineStatus = part.metadata?.["timelineStatus"];
-      // compact summary user message 是压缩后的模型上下文，不是用户可见输入。
-      // 真正要渲染成 timeline 的 lifecycle part 会带 timelineStatus，并且由 assistant message 承载。
-      return typeof timelineStatus !== "string";
-    })
-  );
-}
-
 export function getZCodeUserVisibleMessages(
   messages: readonly ZCodeMessageWithParts[],
   _options: { target?: ZCodeSessionGoal | null } = {},
 ): ZCodeMessageWithParts[] {
   const visibleMessages: ZCodeMessageWithParts[] = [];
   for (const message of messages) {
-    if (isZCodeModelOnlySyntheticUserMessage(message) || isZCodeCompactSummaryMessage(message)) {
-      // /goal 续跑、后台任务、子 agent、rewind 通知和 compact summary
+    if (isZCodeModelOnlySyntheticUserMessage(message)) {
+      // /goal 续跑、后台任务、子 agent 和 rewind 通知
       // 都是 runtime 注入给模型继续推理的上下文，不是用户真实 query；可见投影必须过滤，
       // 避免快照/远控恢复时渲染成右侧用户气泡或挤占 timeline 位置。
       continue;

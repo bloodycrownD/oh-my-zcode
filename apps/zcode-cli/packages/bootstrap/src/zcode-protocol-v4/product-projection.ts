@@ -12,7 +12,6 @@ import {
   clearSettledOutputPreviews,
 } from "./product-projection-bash-progress.js";
 import type {
-  CompactLifecyclePayload,
   AssistantFeedbackUpdatedPayload,
   DynamicWorkflowRunProgressPayload,
   HookRunLifecyclePayload,
@@ -122,8 +121,6 @@ import {
 import {
   buildToolOutput,
   buildTurnHeaderRow,
-  mapCompactMarkerOrigin,
-  mapCompactMarkerStatus,
   mapGoalStatus,
   mapTurnResultToHeaderState,
 } from "./projection-rows.js";
@@ -293,15 +290,13 @@ export type StableForkCandidateResolution =
       reasonCode:
         | "guard.forkAssistantOnly"
         | "guard.forkTargetNotStable"
-        | "guard.forkTargetAmbiguous"
-        | "guard.compactOperationLock";
+        | "guard.forkTargetAmbiguous";
     };
 
 export interface ConversationEditTarget {
   entityId: string;
   productTurnId: string;
   transcriptMessageId: string;
-  coveredByStableCompact: boolean;
   intent: {
     kind: "sendText" | "sendGoalCommand";
     text: string;
@@ -448,9 +443,7 @@ export class ProductProjection {
   // transient lookup，刷新/replay 后变化也不会改变 target identity。
   private editTargetByEntityId = new Map<string, ConversationEditTarget>();
   private currentEditableEntityId: string | null = null;
-  private stableCompactCoverageBoundaryRowId: number | null = null;
   private turnHeaderRowIdByTurnId = new Map<string, number>();
-  private compactMarkerRowIdByOperationId = new Map<string, number>();
   // goal verify boundary 身份 = targetId_goalIteration
   // （verificationId 仅 attempt alias——同 iteration 重试携带新 verificationId，
   // 旧实现按 verificationId keying 会长出第二个 marker）。
@@ -893,9 +886,6 @@ export class ProductProjection {
    * orderedMessageIds 由 host 再用 session store 权威顺序补齐并持久化 anchor。
    */
   resolveStableForkCandidate(rowId: number): StableForkCandidateResolution {
-    if (this.snapshot.control.activeWorks.some((work) => work.kind === "compact")) {
-      return { ok: false, reasonCode: "guard.compactOperationLock" };
-    }
     const row = this.findRow(rowId);
     if (row?.kind !== "assistantText") {
       return { ok: false, reasonCode: "guard.forkAssistantOnly" };
@@ -1109,9 +1099,7 @@ export class ProductProjection {
     clone.entityIdByRowId = new Map(this.entityIdByRowId);
     clone.editTargetByEntityId = new Map(this.editTargetByEntityId);
     clone.currentEditableEntityId = this.currentEditableEntityId;
-    clone.stableCompactCoverageBoundaryRowId = this.stableCompactCoverageBoundaryRowId;
     clone.turnHeaderRowIdByTurnId = new Map(this.turnHeaderRowIdByTurnId);
-    clone.compactMarkerRowIdByOperationId = new Map(this.compactMarkerRowIdByOperationId);
     clone.goalVerifyMarkerRowIdByLifecycleKey = new Map(this.goalVerifyMarkerRowIdByLifecycleKey);
     clone.productTurnIdByRuntimeTurnId = new Map(this.productTurnIdByRuntimeTurnId);
     clone.runtimeTurnIdByProductTurnId = new Map(this.runtimeTurnIdByProductTurnId);
@@ -1154,9 +1142,7 @@ export class ProductProjection {
     this.entityIdByRowId = candidate.entityIdByRowId;
     this.editTargetByEntityId = candidate.editTargetByEntityId;
     this.currentEditableEntityId = candidate.currentEditableEntityId;
-    this.stableCompactCoverageBoundaryRowId = candidate.stableCompactCoverageBoundaryRowId;
     this.turnHeaderRowIdByTurnId = candidate.turnHeaderRowIdByTurnId;
-    this.compactMarkerRowIdByOperationId = candidate.compactMarkerRowIdByOperationId;
     this.goalVerifyMarkerRowIdByLifecycleKey = candidate.goalVerifyMarkerRowIdByLifecycleKey;
     this.productTurnIdByRuntimeTurnId = candidate.productTurnIdByRuntimeTurnId;
     this.runtimeTurnIdByProductTurnId = candidate.runtimeTurnIdByProductTurnId;
@@ -1191,18 +1177,12 @@ export class ProductProjection {
         latestAssistantRowIdByTurn.set(row.turnId, row.rowId);
       }
     }
-    const compactActive = prospective.control.activeWorks.some((work) => work.kind === "compact");
     const completionBlockingActive = prospective.control.activeWorks.length > 0;
     let latestEditable: ConversationRow | undefined;
     let latestAssistant: AssistantTextRow | undefined;
     for (let index = rows.length - 1; index >= 0; index -= 1) {
       const row = rows[index]!;
-      if (
-        !latestEditable &&
-        !compactActive &&
-        row.kind === "userInput" &&
-        row.origin === "realUser"
-      ) {
+      if (!latestEditable && row.kind === "userInput" && row.origin === "realUser") {
         latestEditable = row;
       }
       if (!latestAssistant && row.kind === "assistantText") {
@@ -1286,7 +1266,6 @@ export class ProductProjection {
         const headerId = this.turnHeaderRowIdByTurnId.get(row.turnId);
         const header = headerId === undefined ? undefined : rowById.get(headerId);
         const canFork =
-          !compactActive &&
           row.state === "complete" &&
           header?.kind === "turnHeader" &&
           header.state === "completedSuccess" &&
@@ -1414,10 +1393,6 @@ export class ProductProjection {
         return this.onTurnComplete(event);
       case SessionEventType.TurnError:
         return this.onTurnError(event);
-      case SessionEventType.CompactStarted:
-      case SessionEventType.CompactCompleted:
-      case SessionEventType.CompactFailed:
-        return this.onCompactLifecycle(event);
       case SessionEventType.TargetChanged:
         return this.onTargetChanged(event);
       case SessionEventType.TargetCompletionVerification:
@@ -2054,7 +2029,6 @@ export class ProductProjection {
               entityId: fact.entityId,
               productTurnId: fact.productTurnId,
               transcriptMessageId: fact.transcriptMessageId,
-              coveredByStableCompact: false,
               intent: {
                 kind: fact.intentKind,
                 text: fact.intentText,
@@ -3355,11 +3329,9 @@ export class ProductProjection {
     const nextItem: QueueItem = {
       queueItemId,
       kind:
-        payload.intent?.kind === "compact" || payload.commandKind === "compact"
-          ? ("compact" as const)
-          : payload.intent?.kind === "sendGoalCommand" || payload.commandKind === "sendGoalCommand"
-            ? ("sendGoalCommand" as const)
-            : (existing?.kind ?? ("sendText" as const)),
+        payload.intent?.kind === "sendGoalCommand" || payload.commandKind === "sendGoalCommand"
+          ? ("sendGoalCommand" as const)
+          : (existing?.kind ?? ("sendText" as const)),
       text: payload.input,
       sourceCommandId:
         payload.intent?.sourceCommandId ??
@@ -3563,12 +3535,11 @@ export class ProductProjection {
       this.registerCanonicalUserRowTarget(
         row.rowId,
         entityId,
-        messageId && item.intent?.kind !== "compact"
+        messageId
           ? {
               entityId,
               productTurnId,
               transcriptMessageId: messageId,
-              coveredByStableCompact: false,
               intent: {
                 kind: item.intent?.kind === "sendGoalCommand" ? "sendGoalCommand" : "sendText",
                 text: item.intent?.text ?? item.text,
@@ -4460,7 +4431,6 @@ export class ProductProjection {
                         : {
                             usedTokens: this.contextWindowState.usedTokens,
                             maxTokens: contextWindow,
-                            autoCompactThresholdTokens: null,
                           },
                 },
               }
@@ -4534,8 +4504,6 @@ export class ProductProjection {
               : {
                   usedTokens,
                   maxTokens,
-                  autoCompactThresholdTokens:
-                    this.snapshot.usage.contextWindow?.autoCompactThresholdTokens ?? null,
                   ...(payload.cacheHit ? { cache: payload.cacheHit } : {}),
                   ...(payload.contextUsageBreakdown && payload.contextUsageBreakdown.length > 0
                     ? { breakdown: payload.contextUsageBreakdown }
@@ -4552,142 +4520,6 @@ export class ProductProjection {
     });
     // ModelComplete 是缺少 network completed 事件时的成功兜底，不能让重试提示悬挂。
     deltas.push(...retryClearDeltas);
-    return deltas;
-  }
-
-  // ── compact marker（compact 命令效果）──
-  // 同一 operationId 全生命周期占同一 marker row：running → success/failed/noop/cancelled。
-  // 归属：marker 落在事件到达时的行尾，客户端零归属逻辑。
-
-  private onCompactLifecycle(event: SessionEvent): ConversationDelta[] {
-    const payload = event.payload as CompactLifecyclePayload & {
-      anchorMessageId?: string;
-      tailStartMessageId?: string;
-    };
-    const existingRowId = this.compactMarkerRowIdByOperationId.get(payload.operationId);
-    const existingRow = existingRowId !== undefined ? this.findRow(existingRowId) : undefined;
-    const prev =
-      existingRow?.kind === "timelineMarker" && existingRow.marker.type === "compact"
-        ? existingRow.marker
-        : undefined;
-
-    const status = mapCompactMarkerStatus(payload.status);
-    if (status === "success") {
-      const coverageMessageId = payload.tailStartMessageId ?? payload.anchorMessageId;
-      const coverageRowId = coverageMessageId ? this.rowIdForMessageId(coverageMessageId) : null;
-      if (coverageRowId !== null) {
-        this.stableCompactCoverageBoundaryRowId = Math.max(
-          this.stableCompactCoverageBoundaryRowId ?? 0,
-          coverageRowId,
-        );
-        for (const [rowId, entityId] of this.entityIdByRowId) {
-          if (rowId > this.stableCompactCoverageBoundaryRowId) continue;
-          const target = this.editTargetByEntityId.get(entityId);
-          if (target && !target.coveredByStableCompact) {
-            this.editTargetByEntityId.set(entityId, {
-              ...target,
-              coveredByStableCompact: true,
-            });
-          }
-        }
-      }
-    }
-    const tokensAfter =
-      payload.truePostCompactTokenCount ?? payload.postCompactTokenCount ?? prev?.tokensAfter;
-    const marker: TimelineMarkerPayload = {
-      type: "compact",
-      origin: prev?.origin ?? mapCompactMarkerOrigin(payload.trigger),
-      status,
-      // 终态事件才带 token 计数；upsert 时保留已知值（retry 不清零）。
-      ...(payload.preCompactTokenCount !== undefined || prev?.tokensBefore !== undefined
-        ? { tokensBefore: payload.preCompactTokenCount ?? prev?.tokensBefore }
-        : {}),
-      ...(tokensAfter !== undefined ? { tokensAfter } : {}),
-      // summary 全文按 ref 拉（同 toolOutput/get）；以 summaryMessageId 占位。
-      ...(payload.summaryMessageId !== undefined || prev?.summaryRef
-        ? {
-            summaryRef:
-              payload.summaryMessageId !== undefined
-                ? String(payload.summaryMessageId)
-                : prev?.summaryRef,
-          }
-        : {}),
-    };
-
-    const deltas: ConversationDelta[] = [];
-    if (existingRow?.kind === "timelineMarker") {
-      deltas.push({
-        op: "row.upserted",
-        row: {
-          ...existingRow,
-          marker,
-          ...(payload.sourceCommandId ? { sourceCommandId: payload.sourceCommandId } : {}),
-        },
-      });
-    } else {
-      const row: TimelineMarkerRow = {
-        ...this.rowBase(event, this.turnIdOf(event), String(payload.operationId)),
-        kind: "timelineMarker",
-        lane: "assistantWork",
-        marker,
-        ...(payload.sourceCommandId ? { sourceCommandId: payload.sourceCommandId } : {}),
-      };
-      this.compactMarkerRowIdByOperationId.set(payload.operationId, row.rowId);
-      deltas.push({ op: "row.appended", row });
-    }
-
-    // compacting 进出 activeWorks（guard 同源派生：compactOperationLock /
-    // compactingAcceptsFutureInput 由此驱动，与 formal-proof evaluateCompacting 对齐）。
-    const otherWorks = this.snapshot.control.activeWorks.filter((work) => work.kind !== "compact");
-    if (status === "running") {
-      deltas.push({
-        op: "state.updated",
-        patch: this.controlPatch({
-          activeWorks: [...otherWorks, { kind: "compact", startedAt: this.ms(event) }],
-          canStop: true,
-          stopState: "stoppable",
-          stopTargetKind: otherWorks.length > 0 ? "mixed" : "compact",
-        }),
-      });
-    } else {
-      deltas.push({
-        op: "state.updated",
-        patch: this.controlPatch({
-          activeWorks: otherWorks,
-          ...(otherWorks.length === 0
-            ? {
-                canStop: false,
-                stopState: "idle" as const,
-                stopTargetKind: "unknown" as const,
-              }
-            : {}),
-        }),
-      });
-    }
-
-    // compact 成功 → context 水位立即回落（usage.contextWindow 更新）。
-    if (status === "success" && tokensAfter !== undefined) {
-      this.contextWindowState.usedTokens = tokensAfter;
-      const maxTokens =
-        this.snapshot.usage.contextWindow?.maxTokens ?? this.contextWindowState.maxTokens;
-      deltas.push({
-        op: "state.updated",
-        patch: {
-          usage: {
-            ...this.snapshot.usage,
-            contextWindow:
-              maxTokens === null
-                ? null
-                : {
-                    usedTokens: tokensAfter,
-                    maxTokens,
-                    autoCompactThresholdTokens:
-                      this.snapshot.usage.contextWindow?.autoCompactThresholdTokens ?? null,
-                  },
-          },
-        },
-      });
-    }
     return deltas;
   }
 
@@ -5051,7 +4883,7 @@ export class ProductProjection {
       phase: next.phase,
       goalStatus: nextGoal?.status ?? null,
       // compacting 不是独立 phase（封闭枚举），从 activeWorks 派生。
-      compacting: next.activeWorks.some((work) => work.kind === "compact"),
+      compacting: false,
       goalVerifying: next.activeWorks.some((work) => work.kind === "goalVerifier"),
       queueLength: nextQueue.items.length,
       autoDrain: nextQueue.autoDrain,
@@ -5092,7 +4924,7 @@ export class ProductProjection {
     return {
       phase: this.snapshot.control.phase,
       goalStatus: goal?.status ?? null,
-      compacting: this.snapshot.control.activeWorks.some((work) => work.kind === "compact"),
+      compacting: false,
       goalVerifying: this.snapshot.control.activeWorks.some((work) => work.kind === "goalVerifier"),
       queueLength: queue.items.length,
       autoDrain: queue.autoDrain,

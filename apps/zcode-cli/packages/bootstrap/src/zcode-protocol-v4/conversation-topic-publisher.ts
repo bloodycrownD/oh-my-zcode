@@ -381,8 +381,7 @@ export class ConversationTopicPublisher {
       !input ||
       (envelope.type !== "createSession" &&
         envelope.type !== "sendText" &&
-        envelope.type !== "sendGoalCommand" &&
-        envelope.type !== "compact")
+        envelope.type !== "sendGoalCommand")
     ) {
       return null;
     }
@@ -391,18 +390,11 @@ export class ConversationTopicPublisher {
       sourceCommandId: envelope.commandId,
       queueItemId: admission.queueItemId,
       clientId: envelope.clientId || "cli",
-      kind:
-        envelope.type === "compact"
-          ? "compact"
-          : envelope.type === "sendGoalCommand"
-            ? "sendGoalCommand"
-            : "sendText",
+      kind: envelope.type === "sendGoalCommand" ? "sendGoalCommand" : "sendText",
       text:
-        envelope.type === "compact"
-          ? "/compact"
-          : envelope.type === "sendGoalCommand"
-            ? raw.displayText?.trim() || `/goal ${(input.text ?? "").trim()}`
-            : (input.text ?? ""),
+        envelope.type === "sendGoalCommand"
+          ? raw.displayText?.trim() || `/goal ${(input.text ?? "").trim()}`
+          : (input.text ?? ""),
       attachments: input.attachments ?? [],
       delivery: { requested: "queue", admitted: "queue" },
       order: {

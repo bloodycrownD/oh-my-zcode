@@ -738,27 +738,6 @@ function contextUsageFromPersistedMessages(
     if (!message) {
       continue;
     }
-    if (message.info.role === "user" && message.info.summary) {
-      const compactPart = message.parts.find(
-        (part) => part.type === "compaction" && part.compactBoundary,
-      );
-      if (compactPart?.type === "compaction" && compactPart.compactBoundary) {
-        const used = positiveInteger(
-          compactPart.compactBoundary.truePostCompactTokenCount ??
-            compactPart.compactBoundary.postCompactTokenCount,
-        );
-        // 成功 compact 的 usage 持久化在 user summary 的 boundary；
-        // 只扫描 assistant 会越过它并恢复压缩前水位。旧 assistant boundary 和
-        // 不完整历史仍走原有 fallback，且不能把压缩前 cache 重新挂到压缩后水位。
-        if (used !== undefined) {
-          return {
-            cost: null,
-            size: contextWindow,
-            used,
-          };
-        }
-      }
-    }
     if (message.info.role !== "assistant" || message.info.summary) {
       continue;
     }

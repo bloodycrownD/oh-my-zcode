@@ -144,9 +144,6 @@ export const commandPayloadSchemas = {
     // 来自 activeWorks；CLI 用它拒绝会误杀后续无关执行的迟到 Stop。
     expectedForegroundExecutionId: z.string().min(1).optional(),
   }),
-  // compact 是输入型维护命令：idle 时立即执行，busy/held 时进入 FIFO。
-  // 因为 admission 与当前 revision 无关，不走 CAS；sourceCommandId 提供幂等边界。
-  compact: z.object({}),
   // running 时对稳定 assistant row 可用。
   forkAssistant: z.object({ target: conversationRowTargetSchema }),
   applyFileRewind: z.object({ target: conversationRowTargetSchema }),

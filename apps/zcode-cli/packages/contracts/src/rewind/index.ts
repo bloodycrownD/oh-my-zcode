@@ -1,11 +1,9 @@
 // ============================================================
-// Rewind Contracts - checkpoint payloads and compact-aware helpers
+// Rewind Contracts - checkpoint payloads and rewind helpers
 // ============================================================
 
 import { z } from "zod";
 
-import { isCompactBoundaryItem, parseCompactBoundaryPayload } from "../compact/index.js";
-import type { CompactBoundaryPayload, CompactContextItem } from "../compact/index.js";
 import type { MessageId } from "../interfaces/shared.js";
 
 const diffHunkSchema = z
@@ -37,7 +35,6 @@ export type RewindStrategy = (typeof RewindStrategy)[keyof typeof RewindStrategy
 
 export const RewindTargetStatus = {
   ActiveChain: "active_chain",
-  CoveredByCompact: "covered_by_compact",
   Missing: "missing",
 } as const;
 
@@ -53,8 +50,6 @@ export const checkpointCreatedPayloadSchema = z
     snapshotRef: z.string().min(1),
     diffRef: z.string().min(1).optional(),
     fileCount: z.number().int().nonnegative().optional(),
-    compactBoundaryId: z.string().min(1).optional(),
-    coveredByCompact: z.boolean().optional(),
   })
   .strict();
 
@@ -79,7 +74,6 @@ export const rewindTriggeredPayloadSchema = z
     ]),
     targetMessageId: z.string().min(1).optional(),
     targetCheckpointId: z.string().min(1).optional(),
-    compactBoundaryId: z.string().min(1).optional(),
     restoredSnapshotRef: z.string().min(1).optional(),
     branchCutAfterMessageId: z.string().min(1).optional(),
     branchGeneration: z.number().int().nonnegative().optional(),
@@ -125,8 +119,6 @@ export type WorkspaceCheckpointArtifact = z.infer<typeof workspaceCheckpointArti
 
 export interface CheckpointProjectionInfo {
   checkpointId: string;
-  compactBoundaryId?: string;
-  coveredByCompact?: boolean;
   createdAt: Date;
   fileCount?: number;
   messageId: MessageId;
@@ -137,7 +129,6 @@ export interface CheckpointProjectionInfo {
 }
 
 export interface RewindProjectionInfo {
-  compactBoundaryId?: string;
   reason?: string;
   rewindId: string;
   scope: RewindScope;
@@ -149,8 +140,6 @@ export interface RewindProjectionInfo {
 
 export interface RewindTargetEvaluation {
   allowedScopes: RewindScope[];
-  compactBoundary?: CompactBoundaryPayload;
-  compactBoundaryId?: string;
   reason: string;
   strategy: RewindStrategy;
   targetStatus: RewindTargetStatus;
@@ -159,7 +148,6 @@ export interface RewindTargetEvaluation {
 export interface EvaluateRewindTargetInput<T extends { id: string }> {
   checkpointAvailable?: boolean;
   getId?: (item: T) => string;
-  isBoundary?: (item: T) => boolean;
   items: readonly T[];
   scope: RewindScope;
   targetMessageId: MessageId | string;
@@ -231,21 +219,10 @@ export function evaluateRewindTarget<T extends { id: string }>(
 ): RewindTargetEvaluation {
   const getId = input.getId ?? ((item: T) => item.id);
   const targetIndex = input.items.findIndex((item) => getId(item) === input.targetMessageId);
-  const boundaryIndex = input.items.findLastIndex(
-    input.isBoundary ?? ((item) => isCompactBoundaryItem(item as CompactContextItem)),
-  );
-  const compactBoundary =
-    boundaryIndex >= 0
-      ? parseCompactBoundaryPayload(
-          (input.items[boundaryIndex] as CompactContextItem).compactBoundary,
-        )
-      : undefined;
 
   if (targetIndex < 0) {
     return {
       allowedScopes: [],
-      compactBoundary,
-      compactBoundaryId: compactBoundary?.boundaryId,
       reason: "target_not_found",
       strategy: RewindStrategy.Unavailable,
       targetStatus: RewindTargetStatus.Missing,
@@ -253,75 +230,21 @@ export function evaluateRewindTarget<T extends { id: string }>(
   }
 
   const checkpointAvailable = input.checkpointAvailable === true;
-  const coveredByCompact = boundaryIndex >= 0 && targetIndex < boundaryIndex;
-
-  if (!coveredByCompact) {
-    const allowedScopes = activeChainAllowedScopes(checkpointAvailable);
-    if (!isRequestedScopeAllowed(input.scope, allowedScopes)) {
-      return {
-        allowedScopes,
-        compactBoundary,
-        compactBoundaryId: compactBoundary?.boundaryId,
-        reason: "checkpoint_required_for_workspace_rewind",
-        strategy: RewindStrategy.Unavailable,
-        targetStatus: RewindTargetStatus.ActiveChain,
-      };
-    }
-
+  const allowedScopes = activeChainAllowedScopes(checkpointAvailable);
+  if (!isRequestedScopeAllowed(input.scope, allowedScopes)) {
     return {
       allowedScopes,
-      compactBoundary,
-      compactBoundaryId: compactBoundary?.boundaryId,
-      reason: "target_in_active_chain",
-      strategy: RewindStrategy.ActiveChain,
+      reason: "checkpoint_required_for_workspace_rewind",
+      strategy: RewindStrategy.Unavailable,
       targetStatus: RewindTargetStatus.ActiveChain,
     };
   }
 
-  if (input.scope === RewindScope.Workspace && checkpointAvailable) {
-    return {
-      allowedScopes: [RewindScope.Workspace],
-      compactBoundary,
-      compactBoundaryId: compactBoundary?.boundaryId,
-      reason: "target_covered_by_compact_file_only_available",
-      strategy: RewindStrategy.FileOnly,
-      targetStatus: RewindTargetStatus.CoveredByCompact,
-    };
-  }
-
-  if (input.scope === RewindScope.Workspace) {
-    return {
-      allowedScopes: [],
-      compactBoundary,
-      compactBoundaryId: compactBoundary?.boundaryId,
-      reason: "target_covered_by_compact_without_checkpoint",
-      strategy: RewindStrategy.Unavailable,
-      targetStatus: RewindTargetStatus.CoveredByCompact,
-    };
-  }
-
-  const allowedScopes = checkpointAvailable
-    ? [RewindScope.Conversation, RewindScope.Workspace, RewindScope.Both]
-    : [RewindScope.Conversation];
-  if (!isRequestedScopeAllowed(input.scope, allowedScopes)) {
-    return {
-      allowedScopes,
-      compactBoundary,
-      compactBoundaryId: compactBoundary?.boundaryId,
-      reason: "checkpoint_required_for_workspace_rewind",
-      strategy: RewindStrategy.Unavailable,
-      targetStatus: RewindTargetStatus.CoveredByCompact,
-    };
-  }
-  // message/part 是 append-only，compact 只是 active provider history 的派生边界。
-  // conversation rewind 可以先 branch cut 再重建 compact scope，不应再强制创建 child。
   return {
     allowedScopes,
-    compactBoundary,
-    compactBoundaryId: compactBoundary?.boundaryId,
-    reason: "target_covered_by_compact_active_branch_rebuild",
+    reason: "target_in_active_chain",
     strategy: RewindStrategy.ActiveChain,
-    targetStatus: RewindTargetStatus.CoveredByCompact,
+    targetStatus: RewindTargetStatus.ActiveChain,
   };
 }
 

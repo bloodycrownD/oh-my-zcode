@@ -42,8 +42,6 @@ export function formatPartForContext(part: MessagePart): string | null {
       return formatToolPart(part);
     case "patch":
       return `Patch files: ${part.files.join(", ")}`;
-    case "compaction":
-      return part.timelineText ?? part.reason ?? null;
     case "retry":
       return `Retry ${part.attempt}: ${part.error.name}`;
     case "step-finish":

@@ -13,7 +13,6 @@ import type {
   TraceId,
 } from "./shared.js";
 import type { TraceContext } from "../tracing/tracer.js";
-import type { CompactProjectionInfo } from "../compact/index.js";
 import type { CheckpointProjectionInfo, RewindProjectionInfo } from "../rewind/index.js";
 import type {
   StreamRecoveryAnchorProjectionInfo,
@@ -99,7 +98,6 @@ export interface SessionProjection {
   backgroundTasks: BackgroundTaskInfo[];
   currentTurnId?: TurnId;
   lastError?: ErrorInfo;
-  lastCompact?: CompactProjectionInfo;
   lastCheckpoint?: CheckpointProjectionInfo;
   lastStreamRecoveryAnchor?: StreamRecoveryAnchorProjectionInfo;
   lastRewind?: RewindProjectionInfo;

@@ -12,14 +12,6 @@ import type {
   WorkspaceId,
 } from "./shared.js";
 import type {
-  CompactBoundaryPayload,
-  CompactPhase,
-  CompactReason,
-  CompactTimelineDisplay,
-  CompactTimelineStatus,
-  CompactTrigger,
-} from "../compact/index.js";
-import type {
   ModelId,
   ModelProviderId,
   ModelSelection,
@@ -84,7 +76,6 @@ export type MessageSemanticsKind =
   | "rewind_notice"
   | "fork_notice"
   | "timeline_event"
-  | "compact_summary"
   | "shared_context"
   | "assistant_response";
 
@@ -519,37 +510,6 @@ export interface AgentPart {
   };
 }
 
-export interface CompactionPart {
-  id: PartId;
-  sessionID: SessionId;
-  messageID: MessageId;
-  type: "compaction";
-  auto: boolean;
-  trigger?: CompactTrigger;
-  phase?: CompactPhase;
-  compactReason?: CompactReason;
-  overflow?: boolean;
-  tail_start_id?: MessageId;
-  compactBoundary?: CompactBoundaryPayload;
-  operationId?: string;
-  timelineStatus?: CompactTimelineStatus;
-  timelineDisplay?: CompactTimelineDisplay;
-  timelineText?: string;
-  replace?: boolean;
-  reason?: string;
-  boundaryId?: string;
-  summaryMessageId?: MessageId;
-  preCompactTokenCount?: number;
-  postCompactTokenCount?: number;
-  truePostCompactTokenCount?: number;
-  attempt?: number;
-  maxAttempts?: number;
-  time?: {
-    start?: number;
-    end?: number;
-  };
-}
-
 export type TimelinePartDisplay = "separator" | "worklog";
 
 export type TimelinePartStatus =
@@ -587,22 +547,6 @@ export interface TimelinePartBase {
   };
 }
 
-export interface ContextCompactionTimelinePart extends TimelinePartBase {
-  timelineType: "context_compaction";
-  operationId: string;
-  trigger: CompactTrigger;
-  phase?: CompactPhase;
-  compactReason?: CompactReason;
-  boundaryId?: string;
-  summaryMessageId?: MessageId;
-  preCompactTokenCount?: number;
-  postCompactTokenCount?: number;
-  truePostCompactTokenCount?: number;
-  attempt?: number;
-  maxAttempts?: number;
-  reason?: string;
-}
-
 export interface GoalVerificationTimelinePart extends TimelinePartBase {
   timelineType: "goal_verification";
   targetId: string;
@@ -631,7 +575,6 @@ export interface ModelChangeTimelinePart extends TimelinePartBase {
 }
 
 export type TimelinePart =
-  | ContextCompactionTimelinePart
   | GoalVerificationTimelinePart
   | SessionForkTimelinePart
   | ModelChangeTimelinePart;
@@ -730,7 +673,6 @@ export interface ToolStateCompleted {
   time: {
     start: number;
     end: number;
-    compacted?: number;
   };
   attachments?: FilePart[];
 }
@@ -766,7 +708,6 @@ export type MessagePart =
   | ReasoningPart
   | FilePart
   | AgentPart
-  | CompactionPart
   | TimelinePart
   | SubtaskPart
   | RetryPart
@@ -868,7 +809,6 @@ export interface SessionInputRecord {
 
 export type UsageQuerySource =
   | "main_turn"
-  | "compact"
   | "session_title"
   | "goal_completion_verification"
   | "subagent"

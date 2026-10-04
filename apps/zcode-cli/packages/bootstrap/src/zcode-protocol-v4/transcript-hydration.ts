@@ -8,11 +8,10 @@
 // 从而复用整套 ProductProjection 归约逻辑，不必再写一份 message→row 的平行归约器。
 // 合成事件是「视图重建」用途：只需产出与真实事件流「归约等价」的最小序列。
 // v4 冷恢复只能重放 ProductProjection 认识的事件；如果 transcript 里的
-// tool/reasoning/subagent/compact part 不反向合成，重启后历史可见运行态会从快照里消失。
+// tool/reasoning/subagent part 不反向合成，重启后历史可见运行态会从快照里消失。
 import type {
   AssistantErrorInfo,
   BackgroundResultOriginMeta,
-  CompactTimelineStatus as CompactTimelineStatusValue,
   MessagePart,
   MessageWithParts,
   ModelSelection,
@@ -21,8 +20,6 @@ import type {
 } from "@zcode/contracts";
 import type { EventId, SessionEvent, SessionId, TraceId, TurnId } from "@zcode/contracts";
 import {
-  CompactTimelineStatus,
-  CompactTrigger,
   CoreErrorType,
   createSessionId,
   ModelErrorCode,
@@ -250,113 +247,6 @@ function stableToolSchedule(toolCallId: string) {
   return {
     executionOrder: [toolCallId],
     parallelGroups: [[toolCallId]],
-  };
-}
-
-function compactEventType(status: CompactTimelineStatusValue): SessionEventType {
-  if (status === CompactTimelineStatus.Started || status === CompactTimelineStatus.Retrying) {
-    return SessionEventType.CompactStarted;
-  }
-  if (status === CompactTimelineStatus.Completed || status === CompactTimelineStatus.Skipped) {
-    return SessionEventType.CompactCompleted;
-  }
-  return SessionEventType.CompactFailed;
-}
-
-function normalizeCompactTimelineStatus(
-  status: string | undefined,
-): CompactTimelineStatusValue | null {
-  switch (status) {
-    case CompactTimelineStatus.Started:
-    case CompactTimelineStatus.Retrying:
-    case CompactTimelineStatus.Skipped:
-    case CompactTimelineStatus.Completed:
-    case CompactTimelineStatus.Failed:
-    case CompactTimelineStatus.Interrupted:
-      return status;
-    case "cancelled":
-      return CompactTimelineStatus.Interrupted;
-    default:
-      return null;
-  }
-}
-
-function compactTriggerOfPart(part: Extract<MessagePart, { type: "compaction" }>) {
-  return part.trigger ?? (part.auto ? CompactTrigger.Auto : CompactTrigger.Manual);
-}
-
-function compactPayloadFromTimelinePart(part: Extract<MessagePart, { type: "timeline" }>) {
-  if (part.timelineType !== "context_compaction") return null;
-  const status = normalizeCompactTimelineStatus(part.status);
-  if (!status) return null;
-  return {
-    status,
-    payload: {
-      operationId: part.operationId,
-      messageId: String(part.messageID),
-      partId: part.id,
-      status,
-      trigger: part.trigger,
-      display: part.display,
-      ...(part.sourceCommandId ? { sourceCommandId: part.sourceCommandId } : {}),
-      ...(part.anchorMessageId ? { anchorMessageId: part.anchorMessageId } : {}),
-      ...(part.anchorTurnId ? { anchorTurnId: part.anchorTurnId } : {}),
-      ...(part.phase ? { phase: part.phase } : {}),
-      ...(part.compactReason ? { compactReason: part.compactReason } : {}),
-      ...(part.reason ? { reason: part.reason } : {}),
-      ...(part.boundaryId ? { boundaryId: part.boundaryId } : {}),
-      ...(part.summaryMessageId ? { summaryMessageId: part.summaryMessageId } : {}),
-      ...(part.preCompactTokenCount !== undefined
-        ? { preCompactTokenCount: part.preCompactTokenCount }
-        : {}),
-      ...(part.postCompactTokenCount !== undefined
-        ? { postCompactTokenCount: part.postCompactTokenCount }
-        : {}),
-      ...(part.truePostCompactTokenCount !== undefined
-        ? { truePostCompactTokenCount: part.truePostCompactTokenCount }
-        : {}),
-      ...(part.attempt !== undefined ? { attempt: part.attempt } : {}),
-      ...(part.maxAttempts !== undefined ? { maxAttempts: part.maxAttempts } : {}),
-      ...(part.time?.start !== undefined ? { startedAt: part.time.start } : {}),
-      ...(part.time?.end !== undefined ? { endedAt: part.time.end } : {}),
-    },
-  };
-}
-
-function compactPayloadFromLegacyCompactionPart(
-  part: Extract<MessagePart, { type: "compaction" }>,
-) {
-  const status = normalizeCompactTimelineStatus(part.timelineStatus);
-  if (!status) return null;
-  return {
-    status,
-    payload: {
-      operationId: part.operationId ?? part.boundaryId ?? `legacy-compact-${String(part.id)}`,
-      messageId: String(part.messageID),
-      partId: part.id,
-      status,
-      trigger: compactTriggerOfPart(part),
-      display: part.timelineDisplay ?? "separator",
-      ...(part.phase ? { phase: part.phase } : {}),
-      ...(part.compactReason ? { compactReason: part.compactReason } : {}),
-      ...(part.reason ? { reason: part.reason } : {}),
-      ...(part.boundaryId ? { boundaryId: part.boundaryId } : {}),
-      ...(part.summaryMessageId ? { summaryMessageId: part.summaryMessageId } : {}),
-      ...(part.tail_start_id ? { tailStartMessageId: part.tail_start_id } : {}),
-      ...(part.preCompactTokenCount !== undefined
-        ? { preCompactTokenCount: part.preCompactTokenCount }
-        : {}),
-      ...(part.postCompactTokenCount !== undefined
-        ? { postCompactTokenCount: part.postCompactTokenCount }
-        : {}),
-      ...(part.truePostCompactTokenCount !== undefined
-        ? { truePostCompactTokenCount: part.truePostCompactTokenCount }
-        : {}),
-      ...(part.attempt !== undefined ? { attempt: part.attempt } : {}),
-      ...(part.maxAttempts !== undefined ? { maxAttempts: part.maxAttempts } : {}),
-      ...(part.time?.start !== undefined ? { startedAt: part.time.start } : {}),
-      ...(part.time?.end !== undefined ? { endedAt: part.time.end } : {}),
-    },
   };
 }
 
@@ -818,48 +708,10 @@ function synthesizeToolPart(
   return { resultType: "cancelled", toolCallCount: 1 };
 }
 
-function synthesizeCompactPart(
-  part: MessagePart,
-  emittedCompactOperations: Set<string>,
-  durableCompactPartsByOperation: ReadonlyMap<string, Extract<MessagePart, { type: "compaction" }>>,
-  push: PushEvent,
-  turnId: string,
-): boolean {
-  let compact =
-    part.type === "timeline"
-      ? compactPayloadFromTimelinePart(part)
-      : part.type === "compaction"
-        ? compactPayloadFromLegacyCompactionPart(part)
-        : null;
-  if (!compact) return false;
-  const operationId = String(compact.payload.operationId);
-  const durablePart = durableCompactPartsByOperation.get(operationId);
-  if (durablePart) {
-    // 同 operation 的 timeline part 通常排在 durable compaction part 前面。
-    // 旧“先到先得”会丢 tail_start_id；优先采用带 coverage boundary 的 durable payload。
-    const durablePayload = compactPayloadFromLegacyCompactionPart(durablePart);
-    compact = durablePayload ?? {
-      ...compact,
-      payload: {
-        ...compact.payload,
-        ...(durablePart.tail_start_id ? { tailStartMessageId: durablePart.tail_start_id } : {}),
-        ...(durablePart.boundaryId ? { boundaryId: durablePart.boundaryId } : {}),
-        ...(durablePart.summaryMessageId ? { summaryMessageId: durablePart.summaryMessageId } : {}),
-      },
-    };
-  }
-  if (emittedCompactOperations.has(operationId)) return true;
-  emittedCompactOperations.add(operationId);
-  push(compactEventType(compact.status), compact.payload, turnId);
-  return true;
-}
-
 // ── goal verification timeline part──
 // 持久化契约（core events.ts persistDurableSessionEvent）：verifier 每次生命周期变化
 // upsert 同一个 timeline part，身份 targetId_goalIteration，status 为最终生命周期态。
 // 反向合成为 started(+终态) 事件对，复用投影既有 goalVerify marker 状态机。
-// 旧 hydration 只认 context_compaction，goal_verification part 落入无人
-// 消费的分支——每次冷恢复 goalVerify marker 都消失。
 function goalVerificationKeyOfPart(part: Extract<MessagePart, { type: "timeline" }>): string {
   if (part.timelineType !== "goal_verification") return String(part.id);
   return part.goalIteration !== undefined
@@ -1128,12 +980,9 @@ function assistantMessageHasSynthesizableContent(message: MessageWithParts): boo
       case "tool":
         return !shouldHideInvalidToolCallFromProduct(part.tool, part.metadata);
       case "subtask":
-      case "compaction":
         return true;
       case "timeline":
-        return (
-          part.timelineType === "context_compaction" || part.timelineType === "goal_verification"
-        );
+        return part.timelineType === "goal_verification";
       default:
         return false;
     }
@@ -1161,8 +1010,6 @@ function synthesizeSubtaskPart(
 
 function synthesizeAssistantParts(
   message: MessageWithParts,
-  emittedCompactOperations: Set<string>,
-  durableCompactPartsByOperation: ReadonlyMap<string, Extract<MessagePart, { type: "compaction" }>>,
   emittedGoalVerifications: Set<string>,
   push: PushEvent,
   turnId: string,
@@ -1203,25 +1050,7 @@ function synthesizeAssistantParts(
         break;
       }
       case "timeline":
-        if (synthesizeGoalVerificationPart(part, emittedGoalVerifications, push, turnId)) {
-          break;
-        }
-        synthesizeCompactPart(
-          part,
-          emittedCompactOperations,
-          durableCompactPartsByOperation,
-          push,
-          turnId,
-        );
-        break;
-      case "compaction":
-        synthesizeCompactPart(
-          part,
-          emittedCompactOperations,
-          durableCompactPartsByOperation,
-          push,
-          turnId,
-        );
+        synthesizeGoalVerificationPart(part, emittedGoalVerifications, push, turnId);
         break;
       case "subtask":
         synthesizeSubtaskPart(part, push, turnId);
@@ -1245,7 +1074,7 @@ function synthesizeAssistantParts(
 // live 路径的 background wake / goal continuation 以 TurnStarted(inputVisibility=
 // model-only) 开独立轮；冷路径不能把这类 synthetic user 跳过、让其后的 assistant 并进
 // 上一轮——live/cold 必须结构一致。触发 source 由 shared projection policy
-// 唯一维护；compact summary / rewind notice 等非触发型 synthetic context 照旧不开轮。
+// 唯一维护；rewind notice 等非触发型 synthetic context 照旧不开轮。
 
 // ── guide steer 内联──
 // drain 持久化的 user message 带 metadata.turnSteerDelivery：guide=内联当前轮
@@ -1318,24 +1147,6 @@ function parseWorkflowNotificationMeta(
   return parsed.success ? parsed.data : undefined;
 }
 
-function isLegacyCompactMaintenanceInput(
-  message: MessageWithParts,
-  nextMessage: MessageWithParts | undefined,
-): boolean {
-  if (message.info.role !== "user") return false;
-  // 只修复缺 canonical policy 的旧数据；显式 user-visible `/compact` 必须原样下发，
-  // UI 不得再靠文本覆盖 CLI visibility authority。
-  if (message.info.visibility !== undefined || message.info.semantics !== undefined) return false;
-  const text = textOfMessage(message.parts).trim();
-  if (text !== "/compact" && !text.startsWith("/compact ")) return false;
-  if (!nextMessage || nextMessage.info.role !== "assistant") return false;
-  return nextMessage.parts.some(
-    (part) =>
-      part.type === "compaction" ||
-      (part.type === "timeline" && part.timelineType === "context_compaction"),
-  );
-}
-
 interface TurnOutputCollection {
   failure?: {
     type: string;
@@ -1357,8 +1168,6 @@ function collectTurnOutput(options: {
   startIndex: number;
   turnId: string;
   turnStartedAtMs: number;
-  emittedCompactOperations: Set<string>;
-  durableCompactPartsByOperation: ReadonlyMap<string, Extract<MessagePart, { type: "compaction" }>>;
   emittedGoalVerifications: Set<string>;
   goalVerificationsByAnchor: ReadonlyMap<string, GoalVerificationFact[]>;
   onModelChange: (selection: HydratedTimelineModel) => void;
@@ -1470,8 +1279,6 @@ function collectTurnOutput(options: {
     }
     const synthesized = synthesizeAssistantParts(
       message,
-      options.emittedCompactOperations,
-      options.durableCompactPartsByOperation,
       options.emittedGoalVerifications,
       push,
       turnId,
@@ -1571,24 +1378,6 @@ export function synthesizeEventsFromMessages(
 
   let turnNumber = 0;
   let index = 0;
-  const emittedCompactOperations = new Set<string>();
-  const durableCompactPartsByOperation = new Map<
-    string,
-    Extract<MessagePart, { type: "compaction" }>
-  >();
-  for (const message of messages) {
-    for (const part of message.parts) {
-      if (part.type !== "compaction") continue;
-      if (!part.timelineStatus && !part.tail_start_id && !part.compactBoundary) continue;
-      const operationId = String(
-        part.operationId ?? part.boundaryId ?? `legacy-compact-${String(part.id)}`,
-      );
-      const existing = durableCompactPartsByOperation.get(operationId);
-      if (!existing || (!existing.tail_start_id && part.tail_start_id)) {
-        durableCompactPartsByOperation.set(operationId, part);
-      }
-    }
-  }
   const emittedGoalVerifications = new Set<string>();
   let lastTurnId: string | undefined;
 
@@ -1698,12 +1487,6 @@ export function synthesizeEventsFromMessages(
       index += 1;
       continue;
     }
-    if (isLegacyCompactMaintenanceInput(message, messages[index + 1])) {
-      // 旧手动 compact 的 user 宿主只是维护命令，不是 real-user intent；跳过宿主后，
-      // 下一条 assistant compact fact 会走 preface model-only 轮并生成 canonical marker。
-      index += 1;
-      continue;
-    }
     if (isForkTimelineMessage(message)) {
       const forkContext = forkContextOfMessage(message);
       if (forkContext) {
@@ -1761,8 +1544,6 @@ export function synthesizeEventsFromMessages(
         startIndex: index,
         turnId,
         turnStartedAtMs,
-        emittedCompactOperations,
-        durableCompactPartsByOperation,
         emittedGoalVerifications,
         goalVerificationsByAnchor,
         onModelChange: recordTimelineModel,
@@ -1818,8 +1599,6 @@ export function synthesizeEventsFromMessages(
           startIndex: index,
           turnId,
           turnStartedAtMs,
-          emittedCompactOperations,
-          durableCompactPartsByOperation,
           emittedGoalVerifications,
           goalVerificationsByAnchor,
           onModelChange: recordTimelineModel,
@@ -1839,8 +1618,8 @@ export function synthesizeEventsFromMessages(
         continue;
       }
       // assistant-head-skip 修复（「assistant 回复整段消失」冷路径向量）：
-      // 首条真实用户消息之前的消息不能一律跳过——会话头部是 rewind notice /
-      // compact summary 等非真实用户消息时，其后 assistant 回复刷新后会整段消失。
+      // 首条真实用户消息之前的消息不能一律跳过——会话头部是 rewind notice
+      // 等非真实用户消息时，其后 assistant 回复刷新后会整段消失。
       // 因此为头部 assistant 输出合成 preface model-only 轮（无可见 user 气泡，
       // 内容照常渲染）。user 角色的非触发型 synthetic context 仍按设计不可见，照旧跳过。
       if (message.info.role !== "assistant" || !assistantMessageHasSynthesizableContent(message)) {
@@ -1863,8 +1642,6 @@ export function synthesizeEventsFromMessages(
         startIndex: index,
         turnId,
         turnStartedAtMs,
-        emittedCompactOperations,
-        durableCompactPartsByOperation,
         emittedGoalVerifications,
         goalVerificationsByAnchor,
         onModelChange: recordTimelineModel,
@@ -1923,8 +1700,6 @@ export function synthesizeEventsFromMessages(
       startIndex: index,
       turnId,
       turnStartedAtMs,
-      emittedCompactOperations,
-      durableCompactPartsByOperation,
       emittedGoalVerifications,
       goalVerificationsByAnchor,
       onModelChange: recordTimelineModel,

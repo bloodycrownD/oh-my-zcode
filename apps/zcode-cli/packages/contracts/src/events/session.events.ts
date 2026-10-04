@@ -34,11 +34,6 @@ import type {
 import type { HttpClientEgressInfo } from "../interfaces/http-client.port.js";
 import { createModelUsageSummary } from "../model/index.js";
 import type { ModelApiErrorPhase, ModelFailureExceptionKind } from "../model/index.js";
-import type {
-  CompactBoundaryPayload,
-  CompactTimelinePayload,
-  MicrocompactBoundaryPayload,
-} from "../compact/index.js";
 import type { HookRunLifecyclePayload } from "../hooks/index.js";
 import type { CheckpointCreatedPayload, RewindTriggeredPayload } from "../rewind/index.js";
 import type { GoalCompletionVerificationOutput, SessionGoal } from "../tools/target.js";
@@ -84,7 +79,6 @@ export const SessionEventType = {
   SessionCreated: "session_created",
   SessionResumed: "session_resumed",
   SessionForked: "session_forked",
-  SessionCompacted: "session_compacted",
   SessionTitleUpdated: "session_title_updated",
   SessionModeChanged: "session_mode_changed",
   SessionEnded: "session_ended",
@@ -155,11 +149,6 @@ export const SessionEventType = {
   HookRunCompleted: "hook_run_completed",
   HookRunFailed: "hook_run_failed",
   HookRunBlocked: "hook_run_blocked",
-  CompactStarted: "compact_started",
-  CompactCompleted: "compact_completed",
-  CompactFailed: "compact_failed",
-  CompactBoundary: "compact_boundary",
-  MicrocompactBoundary: "microcompact_boundary",
   RewindTriggered: "rewind_triggered",
   CheckpointCreated: "checkpoint_created",
   TargetChanged: "target_changed",
@@ -190,7 +179,6 @@ export interface SessionResumedPayload {
   interruptedToolCount: number;
   messageCount: number;
   partCount: number;
-  recoveredCompactTimelineCount?: number;
   recoveredSteerInputCount?: number;
   resumedTodoCount?: number;
 }
@@ -206,17 +194,6 @@ export interface SessionForkedPayload {
   /** @deprecated Use targetMessageId for message-level forks. */
   forkPoint: number;
 }
-
-export interface SessionCompactedPayload {
-  compactBoundary: CompactBoundaryPayload;
-  summary?: string;
-  preservedEventCount?: number;
-  removedEventCount?: number;
-}
-
-export type CompactLifecyclePayload = CompactTimelinePayload;
-
-export type MicrocompactBoundaryEventPayload = MicrocompactBoundaryPayload;
 
 /**
  * 附件渲染（additive）：用户输入附件的轻量展示元信息，随 TurnStarted 下发，
@@ -626,9 +603,8 @@ export interface AssistantFeedbackUpdatedPayload {
 }
 
 export interface SystemMessagePayload {
-  type: "init" | "compact_boundary" | "interrupted";
+  type: "init" | "interrupted";
   content: string;
-  compactBoundary?: CompactBoundaryPayload;
 }
 
 export interface SessionTitleUpdatedPayload {
@@ -1176,7 +1152,6 @@ export type SessionEventPayload =
   | SessionCreatedPayload
   | SessionResumedPayload
   | SessionForkedPayload
-  | SessionCompactedPayload
   | SessionTitleUpdatedPayload
   | SessionModeChangedPayload
   | TurnStartedPayload
@@ -1231,8 +1206,5 @@ export type SessionEventPayload =
   | WorkspaceHookReviewSupersededPayload
   | WorkspaceHookAdmissionUpdatedPayload
   | HookRunLifecyclePayload
-  | CompactLifecyclePayload
-  | MicrocompactBoundaryEventPayload
   | CheckpointCreatedPayload
-  | RewindTriggeredPayload
-  | CompactBoundaryPayload;
+  | RewindTriggeredPayload;

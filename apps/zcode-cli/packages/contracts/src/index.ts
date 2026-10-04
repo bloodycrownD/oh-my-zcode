@@ -38,9 +38,6 @@ export * from "./events/event-reducer.js";
 export * from "./events/session-event-retention.js";
 export * from "./events/in-memory-session-event-store.js";
 
-// Compact
-export * from "./compact/index.js";
-
 // Rewind
 export * from "./rewind/index.js";
 

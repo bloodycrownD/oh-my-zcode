@@ -15,7 +15,6 @@ interface TaskContextUsageUpdateParams extends TaskUsageKeyParams {
 interface BuildTaskContextUsageUpdateParams {
   currentUsage: TaskUsageState | null | undefined;
   incomingUsage: TaskUsageState;
-  latestUserPrompt?: string | null;
 }
 
 const taskContextUsageUpdateKeys = new Set<string>();
@@ -35,20 +34,10 @@ export function recordTaskContextUsageUpdate(params: TaskContextUsageUpdateParam
   taskContextUsageUpdateKeys.add(buildTaskUsageKey(params));
 }
 
-function isContextCompressionPrompt(prompt: string | null | undefined): boolean {
-  const normalized = prompt?.trim() ?? "";
-  return (
-    normalized === "/compact" ||
-    normalized.startsWith("/compact ") ||
-    normalized === "/compress" ||
-    normalized.startsWith("/compress ")
-  );
-}
-
 export function buildTaskContextUsageFromUsageUpdate(
   params: BuildTaskContextUsageUpdateParams,
 ): TaskUsageState {
-  const { currentUsage, incomingUsage, latestUserPrompt } = params;
+  const { currentUsage, incomingUsage } = params;
   const usageWithRetainedBreakdown =
     !incomingUsage.breakdown &&
     currentUsage?.breakdown &&
@@ -62,8 +51,7 @@ export function buildTaskContextUsageFromUsageUpdate(
     currentUsage.used > 0 &&
     Number.isFinite(currentUsage.size) &&
     currentUsage.size > 0 &&
-    (!Number.isFinite(incomingUsage.used) || incomingUsage.used <= 0) &&
-    !isContextCompressionPrompt(latestUserPrompt)
+    (!Number.isFinite(incomingUsage.used) || incomingUsage.used <= 0)
   ) {
     // Bugfix: Agent 在普通工具调用期间会短暂发出 used=0 的 usage_update，
     // 这不是 context 真的被清空，而是上游 replay/子调用 usage 缺失造成的瞬时假值。

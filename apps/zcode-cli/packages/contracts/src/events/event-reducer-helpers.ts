@@ -2,8 +2,6 @@
 // Event Reducer Helpers - focused projection transforms
 // ============================================================
 
-import type { CompactBoundaryPayload } from "../compact/index.js";
-import { parseCompactBoundaryPayload } from "../compact/index.js";
 import type {
   ActiveToolCall,
   CollaborationMode,
@@ -38,7 +36,6 @@ export const initialSessionProjection = {
   backgroundTasks: [] as SessionProjection["backgroundTasks"],
   currentTurnId: undefined as string | undefined,
   lastError: undefined as SessionProjection["lastError"],
-  lastCompact: undefined as SessionProjection["lastCompact"],
   lastCheckpoint: undefined as SessionProjection["lastCheckpoint"],
   lastStreamRecoveryAnchor: undefined as SessionProjection["lastStreamRecoveryAnchor"],
   lastRewind: undefined as SessionProjection["lastRewind"],
@@ -78,35 +75,6 @@ export function applyStreamRecoveryAnchorCreated(
   return {
     ...projection,
     lastStreamRecoveryAnchor: { ...payload, updatedAt: timestamp },
-    updatedAt: timestamp,
-  };
-}
-
-export function applyCompactBoundary(
-  projection: SessionProjection,
-  payload: unknown,
-  timestamp: Date,
-): SessionProjection {
-  const compactBoundary = parseCompactBoundaryPayload(payload) as CompactBoundaryPayload;
-  return {
-    ...projection,
-    contextUsed:
-      compactBoundary.truePostCompactTokenCount ??
-      compactBoundary.postCompactTokenCount ??
-      projection.contextUsed,
-    lastCompact: {
-      boundaryId: compactBoundary.boundaryId,
-      trigger: compactBoundary.trigger,
-      phase: compactBoundary.phase,
-      compactReason: compactBoundary.compactReason,
-      compactedAt: timestamp,
-      preCompactTokenCount: compactBoundary.preCompactTokenCount,
-      postCompactTokenCount: compactBoundary.postCompactTokenCount,
-      truePostCompactTokenCount: compactBoundary.truePostCompactTokenCount,
-      summarizedMessageCount: compactBoundary.summarizedMessageCount,
-      keptMessageCount: compactBoundary.keptMessageCount,
-      willRetriggerNextTurn: compactBoundary.willRetriggerNextTurn,
-    },
     updatedAt: timestamp,
   };
 }

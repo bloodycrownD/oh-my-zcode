@@ -23,6 +23,5 @@ export type StableForkTargetResolution =
       reasonCode:
         | "guard.forkAssistantOnly"
         | "guard.forkTargetNotStable"
-        | "guard.forkTargetAmbiguous"
-        | "guard.compactOperationLock";
+        | "guard.forkTargetAmbiguous";
     };

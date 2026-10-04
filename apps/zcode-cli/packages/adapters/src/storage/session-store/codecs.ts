@@ -189,7 +189,6 @@ export function decodeTodoRow(row: TodoRow): TodoItem {
 
 export function partCreatedAt(part: MessagePart, fallback: number): number {
   if (part.type === "text" || part.type === "reasoning") return part.time?.start ?? fallback;
-  if (part.type === "compaction") return part.time?.start ?? fallback;
   if (part.type === "timeline") return part.time?.start ?? fallback;
   if (part.type === "tool") {
     if (part.state.status === "running") return part.state.time.start;

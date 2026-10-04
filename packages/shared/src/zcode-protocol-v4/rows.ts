@@ -328,16 +328,7 @@ export const hookInvocationRowSchema = z.object({
 export type HookInvocationRow = z.infer<typeof hookInvocationRowSchema>;
 
 // timelineMarker。
-// compact.status=cancelled 表示 auto compact 被 stop；失败终态为 failed。
 export const timelineMarkerPayloadSchema = z.union([
-  z.object({
-    type: z.literal("compact"),
-    origin: z.enum(["manual", "auto"]),
-    status: z.enum(["running", "success", "failed", "noop", "cancelled"]),
-    tokensBefore: z.number().optional(),
-    tokensAfter: z.number().optional(),
-    summaryRef: z.string().optional(),
-  }),
   // 出现在 child 会话首部（forkTimelineIsBoundary）。
   z.object({
     type: z.literal("forkNotice"),
@@ -395,7 +386,7 @@ export type TimelineMarkerPayload = z.infer<typeof timelineMarkerPayloadSchema>;
 /**
  * marker 泳道：
  * 落位语义由 CLI 投影裁决，UI 只按 lane 装配、不得按 marker type 自行推断。
- * - assistantWork：assistant 工作活动（compact），进「已工作」折叠组；
+ * - assistantWork：assistant 工作活动，进「已工作」折叠组；
  * - turnTailBoundary：轮尾边界（goalVerify/forkNotice），留轮结尾不折叠；
  * - lightBoundary：轮顶轻边界（modelChange），渲染在 user 输入之前。
  * optional = 老 snapshot 兼容（缺省时 UI 按 marker type 回落映射）。

@@ -5,7 +5,6 @@
 import type {
   SessionEvent,
   SessionCreatedPayload,
-  SessionCompactedPayload,
   TurnCompletePayload,
   TurnErrorPayload,
   TurnSteerDiscardedPayload,
@@ -51,7 +50,6 @@ import {
   applyBackgroundTaskCompleted,
   applyBackgroundTaskStarted,
   applyBackgroundTaskUpdated,
-  applyCompactBoundary,
   applyStreamRecoveryAnchorCreated,
   applyStreamingToolLedgerUpdate,
   initialSessionProjection,
@@ -121,11 +119,6 @@ export class EventReducer {
       };
     },
 
-    [EventTypes.SessionCompacted]: (p, e) => {
-      const payload = e.payload as SessionCompactedPayload;
-      return applyCompactBoundary(p, payload.compactBoundary, e.timestamp);
-    },
-
     [EventTypes.SessionModeChanged]: (p, e) => {
       const payload = e.payload as SessionModeChangedPayload;
       return {
@@ -145,18 +138,12 @@ export class EventReducer {
       };
     },
 
-    [EventTypes.CompactBoundary]: (p, e) => {
-      return applyCompactBoundary(p, e.payload, e.timestamp);
-    },
-
     [EventTypes.CheckpointCreated]: (p, e) => {
       const payload = parseCheckpointCreatedPayload(e.payload);
       return {
         ...p,
         lastCheckpoint: {
           checkpointId: payload.checkpointId,
-          compactBoundaryId: payload.compactBoundaryId,
-          coveredByCompact: payload.coveredByCompact,
           createdAt: e.timestamp,
           fileCount: payload.fileCount,
           messageId: payload.messageId,
@@ -174,7 +161,6 @@ export class EventReducer {
       return {
         ...p,
         lastRewind: {
-          compactBoundaryId: payload.compactBoundaryId,
           reason: payload.reason,
           rewindId: payload.rewindId,
           scope: payload.scope,

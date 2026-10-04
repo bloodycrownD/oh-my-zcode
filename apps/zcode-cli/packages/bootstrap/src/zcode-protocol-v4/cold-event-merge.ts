@@ -180,9 +180,6 @@ const TRANSCRIPT_DERIVED_EVENT_TYPES = new Set<string>([
   SessionEventType.ToolCallError,
   SessionEventType.TurnComplete,
   SessionEventType.TurnError,
-  SessionEventType.CompactStarted,
-  SessionEventType.CompactCompleted,
-  SessionEventType.CompactFailed,
   SessionEventType.TargetCompletionVerification,
   SessionEventType.SessionForked,
   SessionEventType.SubagentSpawned,
@@ -223,7 +220,7 @@ function hookInvocationTurnIds(events: readonly SessionEvent[]): Map<string, str
     if (event.type !== SessionEventType.TurnStarted || !event.turnId || pending.size === 0) {
       continue;
     }
-    // model-only 维护 turn（manual /compact、goal continuation）没有资格承载
+    // model-only 维护 turn（goal continuation）没有资格承载
     // SessionStart 摘要；resume SessionStart 必须等下一条 user-visible 真实 turn 归位。
     if (stringField(event.payload, "inputVisibility") === "model-only") continue;
     // resume SessionStart 在 Runtime 中先于下一条真实 TurnStarted；cold merge 必须沿
@@ -431,7 +428,6 @@ function setupModelEventIndexes(
 }
 
 interface DurableBoundaryKeys {
-  compact: Set<string>;
   fork: Set<string>;
   goal: Set<string>;
 }
@@ -449,7 +445,6 @@ function durableBoundaryKeys(
   messages: readonly MessageWithParts[],
   goalEntries: readonly HydratedGoalVerificationEntry[],
 ): DurableBoundaryKeys {
-  const compact = new Set<string>();
   const fork = new Set<string>();
   const goal = new Set<string>();
   for (const entry of goalEntries) {
@@ -462,19 +457,13 @@ function durableBoundaryKeys(
         if (part.timelineType === "goal_verification") {
           const key = goalKey(part);
           if (key) goal.add(key);
-        } else if (part.timelineType === "context_compaction") {
-          compact.add(String(part.operationId));
         } else if (part.timelineType === "session_fork") {
           fork.add(`${String(part.parentSessionId)}\u0000${String(part.targetMessageId)}`);
         }
-        continue;
-      }
-      if (part.type === "compaction") {
-        compact.add(String(part.operationId ?? part.boundaryId ?? `legacy-compact-${part.id}`));
       }
     }
   }
-  return { compact, fork, goal };
+  return { fork, goal };
 }
 
 function durableBoundaryKeyForEvent(
@@ -482,13 +471,6 @@ function durableBoundaryKeyForEvent(
 ): { key: string | null; kind: keyof DurableBoundaryKeys } | null {
   if (event.type === SessionEventType.TargetCompletionVerification) {
     return { kind: "goal", key: goalKey(event.payload) };
-  }
-  if (
-    event.type === SessionEventType.CompactStarted ||
-    event.type === SessionEventType.CompactCompleted ||
-    event.type === SessionEventType.CompactFailed
-  ) {
-    return { kind: "compact", key: stringField(event.payload, "operationId") };
   }
   if (event.type === SessionEventType.SessionForked) {
     const parent = stringField(event.payload, "originalSessionId");
@@ -657,13 +639,6 @@ function boundaryAnchorMessageId(event: SessionEvent): string | null {
       stringField(event.payload, "anchorAssistantMessageId") ??
       stringField(event.payload, "anchorMessageId")
     );
-  }
-  if (
-    event.type === SessionEventType.CompactStarted ||
-    event.type === SessionEventType.CompactCompleted ||
-    event.type === SessionEventType.CompactFailed
-  ) {
-    return stringField(event.payload, "anchorMessageId");
   }
   if (event.type === SessionEventType.SessionForked) {
     return (

@@ -43,7 +43,6 @@ export function createInitialConversationSnapshot(
     availability: computeAvailability({
       phase: "draft",
       goalStatus: null,
-      compacting: false,
       goalVerifying: false,
       queueLength: 0,
       autoDrain: true,
@@ -52,7 +51,6 @@ export function createInitialConversationSnapshot(
       {
         phase: "draft",
         goalStatus: null,
-        compacting: false,
         goalVerifying: false,
         queueLength: 0,
         autoDrain: true,
@@ -100,13 +98,12 @@ function denied(reasonCode: string): ActionAvailability {
   return { allowed: false, reasonCode };
 }
 
-// guard 派生的输入面（与投影同源）。compacting/goalVerifying 不是独立 phase
-// （phase 封闭枚举），从 activeWorks / goal.status 派生后传入。
+// guard 派生的输入面（与投影同源）。goalVerifying 不是独立 phase
+// （phase 封闭枚举），从 goal.status 派生后传入。
 // queueLength/autoDrain 用于 held 派生。
 interface AvailabilityContext {
   phase: SessionControl["phase"];
   goalStatus: GoalState["status"] | null;
-  compacting: boolean;
   goalVerifying: boolean;
   queueLength: number;
   autoDrain: boolean;
@@ -115,31 +112,14 @@ interface AvailabilityContext {
 // 裁决表与 packages/formal-proof/src/model.ts 的 evaluate 逐条对齐
 // （黄金测试 formal-proof-consistency 背书）；reasonCode = product-protocol guard id。
 export function computeAvailability(context: AvailabilityContext): SessionActionAvailability {
-  const { phase, goalStatus, compacting } = context;
+  const { phase, goalStatus } = context;
   const running = phase === "running" || phase === "prewarming";
-  const compact = compacting
-    ? // formal-proof: duplicateCompactRejected —— running/queued compact 操作锁去重。
-      denied("compactOperationLock")
-    : phase === "draft"
-      ? // formal-proof: idleCannotCompact —— 没有可压缩上下文。
-        denied("idleCannotCompact")
-      : // running/goal verifier 时命令进入 typed FIFO，completed 时立即执行或进入 held queue。
-        ALLOWED;
   return {
-    fork: compacting
-      ? denied("compactOperationLock")
-      : phase === "draft"
-        ? denied("forkTargetNotStable")
-        : ALLOWED,
-    compact,
+    fork: phase === "draft" ? denied("forkTargetNotStable") : ALLOWED,
     switchModelConfig: ALLOWED,
     setFollowupMode: ALLOWED,
     queueEdit: ALLOWED,
-    sendQueuedNow: compacting
-      ? denied("compactOperationLock")
-      : running
-        ? ALLOWED
-        : denied("sendQueuedNowRequiresRunning"),
+    sendQueuedNow: running ? ALLOWED : denied("sendQueuedNowRequiresRunning"),
     // 独立 pauseGoal 改变 target 产品态；verifier/notSatisfied 期间底层 target 仍是 active，
     // 因此也允许暂停，不能要求当前一定存在 provider abort controller。
     pauseGoal:
@@ -158,11 +138,6 @@ export function computeInputRouting(
   context: AvailabilityContext,
   followupMode: "queue" | "guide",
 ): InputRouting {
-  // formal-proof: compactingAcceptsFutureInput
-  // —— compact 是维护步骤，输入是未来意图 → 入队，不打断 compact。
-  if (context.compacting) {
-    return { mode: "enqueue", reasonCode: "compactingAcceptsFutureInput" };
-  }
   // goal verifier 是 completion-blocking active work，但不是普通
   // assistant active turn；只看 phase=running 会在 guide 模式下尝试 steer，
   // core 此时没有 steerable activeTurn，导致用户输入既不进 queue 也不进历史。

@@ -41,7 +41,6 @@ export const stopTargetKindSchema = z.enum([
   "assistant",
   "tool",
   "subagent",
-  "compact",
   "goalVerifier",
   "goalContinuation",
   "turnSteer",
@@ -54,7 +53,6 @@ export const activeWorkSummarySchema = z.object({
   kind: z.enum([
     "primaryTurn",
     "foregroundSubagent",
-    "compact",
     "goalVerifier",
     "goalContinuation",
     "turnSteer",
@@ -150,7 +148,6 @@ export type ActionAvailability = z.infer<typeof actionAvailabilitySchema>;
 
 export const sessionActionAvailabilitySchema = z.object({
   fork: actionAvailabilitySchema,
-  compact: actionAvailabilitySchema,
   switchModelConfig: actionAvailabilitySchema,
   setFollowupMode: actionAvailabilitySchema,
   queueEdit: actionAvailabilitySchema,
@@ -191,7 +188,6 @@ export const sessionUsageStateSchema = z.object({
     .object({
       usedTokens: z.number(),
       maxTokens: z.number(),
-      autoCompactThresholdTokens: z.number().nullable(),
       cache: zcodeSessionContextCacheUsageSchema.optional(),
       breakdown: zcodeContextUsageBreakdownSchema.optional(),
     })

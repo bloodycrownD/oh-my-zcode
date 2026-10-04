@@ -82,7 +82,7 @@ export function getConversationMessageProjectionPolicy(
   const parts = message.parts ?? [];
   const semantics = info.semantics;
 
-  if (semantics?.kind === "compact_summary" || info.summary !== undefined) {
+  if (info.summary !== undefined) {
     return "providerContextOnly";
   }
 
@@ -210,12 +210,7 @@ function isTimelineOnlyMessage(
   }
   return parts.some((part) => {
     const metadata = metadataRecord(part.metadata);
-    return (
-      part.type === "timeline" ||
-      hasSessionForkContext(metadata) ||
-      (part.type === "compaction" &&
-        (typeof metadata?.timelineStatus === "string" || typeof part.summaryMessageId === "string"))
-    );
+    return part.type === "timeline" || hasSessionForkContext(metadata);
   });
 }
 

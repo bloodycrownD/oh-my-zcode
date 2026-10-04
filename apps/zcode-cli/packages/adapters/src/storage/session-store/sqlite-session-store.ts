@@ -163,28 +163,7 @@ function assertForkBundleChildLocal(bundle: ForkCommitBundle): void {
       }
       if (part.type === "timeline") {
         assertMessage(part.anchorMessageId, "timeline anchorMessageId");
-        if (part.timelineType === "context_compaction") {
-          assertMessage(part.summaryMessageId, "timeline summaryMessageId");
-        }
         if (part.timelineType === "goal_verification") targetIds.add(part.targetId);
-      }
-      if (part.type === "compaction") {
-        assertMessage(part.tail_start_id, "compaction tail_start_id");
-        assertMessage(part.summaryMessageId, "compaction summaryMessageId");
-        const boundary = part.compactBoundary;
-        assertMessage(boundary?.lastSummarizedMessageId, "compact lastSummarizedMessageId");
-        for (const id of boundary?.summaryMessageIds ?? []) {
-          assertMessage(id, "compact summaryMessageId");
-        }
-        for (const id of boundary?.attachmentMessageIds ?? []) {
-          assertMessage(id, "compact attachmentMessageId");
-        }
-        for (const id of boundary?.hookResultMessageIds ?? []) {
-          assertMessage(id, "compact hookResultMessageId");
-        }
-        assertMessage(boundary?.preservedSegment?.headMessageId, "compact preserved head");
-        assertMessage(boundary?.preservedSegment?.anchorMessageId, "compact preserved anchor");
-        assertMessage(boundary?.preservedSegment?.tailMessageId, "compact preserved tail");
       }
       if (part.type === "tool" && part.state.status === "completed") {
         for (const attachment of part.state.attachments ?? []) {

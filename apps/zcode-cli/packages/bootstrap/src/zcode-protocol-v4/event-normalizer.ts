@@ -168,36 +168,6 @@ export function normalizeConversationEvent(
       openAssistantSegments: context.openAssistantSegments,
     });
   }
-  if (
-    event.type === SessionEventType.CompactStarted ||
-    event.type === SessionEventType.CompactCompleted ||
-    event.type === SessionEventType.CompactFailed
-  ) {
-    const payload = event.payload as Record<string, unknown>;
-    const operationId =
-      typeof payload.operationId === "string" && payload.operationId.length > 0
-        ? payload.operationId
-        : String(event.id);
-    const transcriptMessageId =
-      typeof payload.messageId === "string" && payload.messageId.length > 0
-        ? payload.messageId
-        : null;
-    return {
-      semanticKind: "passthrough",
-      event,
-      entityId: operationId,
-      productTurnId,
-      runtimeTurnId,
-      transcriptMessageId,
-      visibility: "visible",
-      origin: "system",
-      placement: { lane: "assistantWork", relation: "withinProductTurn" },
-      diagnostics: [],
-      ...(typeof payload.sourceCommandId === "string"
-        ? { sourceCommandId: payload.sourceCommandId }
-        : {}),
-    };
-  }
   return {
     semanticKind: "passthrough",
     event,
