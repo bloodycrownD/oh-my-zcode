@@ -43,7 +43,6 @@ const MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES = [
 ] as const;
 
 const EXTRA_RESERVED_SLASH_COMMAND_NAMES = [
-  "compress",
   "plan",
   // 本地命令不在 App 目录里，但要占住名字（见上方注释）。
   ...MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES,

@@ -248,8 +248,7 @@ export const runPrompt = async (
     // 成 Interrupted。能解析成真实自定义命令的必须落到普通 prompt 路径，提交**原文**即可：
     // facade 的 customCommandPromptResolver 会在服务端展开（$ARGUMENTS、skills: 前言、`!`）。
     // 解析不出来的名字继续留在 command-center，拿它的 "Unknown command" 文案；保留名
-    // （`/compress` 是唯一一个 CLI 解析成 unknown 而 facade 又拒绝展开的）同样留在那边，
-    // 判据与 facade 的 gate 共用一个来源，见 isResolvableCustomCommand。
+    // 同样留在那边，判据与 facade 的 gate 共用一个来源，见 isResolvableCustomCommand。
     // `/expert`、`/goal` 走不到 submitPrompt，路由逐字不变。
     if (slashCommand && (await routesToPromptCommandCenter(slashCommand, deps))) {
       return await runPromptCommandCenterCommand(
@@ -446,7 +445,7 @@ async function isResolvableCustomCommand(deps: RunDependencies, name: string): P
   // 保留名先问，再尝试加载——与 facade 那道 gate 的顺序逐字一致
   // （`bootstrap/src/custom-command-prompt.ts:31`）。判据必须是同一个：facade 对保留名
   // 直接返回 undefined、不做展开，所以这里若把一个保留名判成"可解析"，它就会以字面文本
-  // `/compress …` 被当成普通 prompt 提交给模型——静默走错路，没有任何报错。
+  // 被当成普通 prompt 提交给模型——静默走错路，没有任何报错。
   //
   // 探测刻意用「保留名检查 + load」这一对，而不是直接调 resolveZCodeCustomCommandPrompt：
   // 后者会执行 `!` shell expansion，拿它探测等于把用户的 shell 片段跑两遍。

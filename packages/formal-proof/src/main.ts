@@ -84,7 +84,7 @@ app.innerHTML = `
       <div class="brand">
         <h1>Conversation State Space</h1>
         <p class="subtitle">
-          从 GUI 用户视角枚举 compact、fork、goal、消息队列和 query 编辑的组合。每个候选动作先进入笛卡尔积，再由产品 guard 剪枝；未定义路径会保留下来供人工 review，并最终导出为 E2E case。
+          从 GUI 用户视角枚举 fork、goal、消息队列和 query 编辑的组合。每个候选动作先进入笛卡尔积，再由产品 guard 剪枝；未定义路径会保留下来供人工 review，并最终导出为 E2E case。
         </p>
       </div>
 
@@ -801,9 +801,7 @@ function nodeTypeLabel(node: GraphNodeDatum): string {
 function isLongRunningState(node: GraphNodeDatum): boolean {
   return (
     node.kind === "state" &&
-    (node.context.runPhase === "running" ||
-      node.context.runPhase === "compacting" ||
-      node.context.runPhase === "goalVerifying")
+    (node.context.runPhase === "running" || node.context.runPhase === "goalVerifying")
   );
 }
 

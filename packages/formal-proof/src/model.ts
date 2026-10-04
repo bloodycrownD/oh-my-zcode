@@ -1,6 +1,5 @@
-export type RunPhase = "idle" | "running" | "completed" | "compacting" | "goalVerifying";
-export type QueueState = "empty" | "text" | "goal" | "compact" | "mixed";
-export type CompactMemory = "never" | "compactable" | "justCompacted" | "notNeeded";
+export type RunPhase = "idle" | "running" | "completed" | "goalVerifying";
+export type QueueState = "empty" | "text" | "goal" | "mixed";
 export type GoalState = "none" | "active" | "verifying" | "verified" | "failed";
 export type TurnTarget = "latest" | "old" | "none";
 export type CandidateKind = "user" | "system";
@@ -12,8 +11,6 @@ export type NodeKind = "state" | "candidate" | "guard" | "effect" | "case" | "su
 export interface ProductContext {
   readonly runPhase: RunPhase;
   readonly queue: QueueState;
-  readonly compactMemory: CompactMemory;
-  readonly canCompactAgain: boolean;
   readonly goal: GoalState;
   readonly selectedTurn: TurnTarget;
   readonly forked: boolean;
@@ -74,8 +71,6 @@ export const profiles: ModelProfile[] = [
     context: {
       runPhase: "running",
       queue: "empty",
-      compactMemory: "compactable",
-      canCompactAgain: true,
       goal: "active",
       selectedTurn: "latest",
       forked: false,
@@ -87,8 +82,6 @@ export const profiles: ModelProfile[] = [
     context: {
       runPhase: "completed",
       queue: "empty",
-      compactMemory: "compactable",
-      canCompactAgain: true,
       goal: "active",
       selectedTurn: "latest",
       forked: false,
@@ -100,48 +93,7 @@ export const profiles: ModelProfile[] = [
     context: {
       runPhase: "goalVerifying",
       queue: "empty",
-      compactMemory: "compactable",
-      canCompactAgain: true,
       goal: "verifying",
-      selectedTurn: "latest",
-      forked: false,
-    },
-  },
-  {
-    id: "compacting",
-    label: "compacting：正在 compact",
-    context: {
-      runPhase: "compacting",
-      queue: "empty",
-      compactMemory: "compactable",
-      canCompactAgain: true,
-      goal: "active",
-      selectedTurn: "latest",
-      forked: false,
-    },
-  },
-  {
-    id: "just-compacted-noop",
-    label: "justCompacted：刚压缩完，不需要继续压缩",
-    context: {
-      runPhase: "completed",
-      queue: "empty",
-      compactMemory: "justCompacted",
-      canCompactAgain: false,
-      goal: "active",
-      selectedTurn: "latest",
-      forked: false,
-    },
-  },
-  {
-    id: "just-compacted-more",
-    label: "justCompacted：刚压缩完，但还能继续压缩",
-    context: {
-      runPhase: "completed",
-      queue: "empty",
-      compactMemory: "justCompacted",
-      canCompactAgain: true,
-      goal: "active",
       selectedTurn: "latest",
       forked: false,
     },
@@ -150,9 +102,7 @@ export const profiles: ModelProfile[] = [
 
 export const userCandidates: Candidate[] = [
   { id: "sendText", kind: "user", label: "继续发送文字", target: "none", surface: "composer" },
-  { id: "slashCompact", kind: "user", label: "输入 /compact", target: "none", surface: "composer" },
   { id: "setGoal", kind: "user", label: "设置 goal", target: "none", surface: "goal control" },
-  { id: "compact", kind: "user", label: "点击 compact", target: "none", surface: "toolbar" },
   {
     id: "forkLatest",
     kind: "user",
@@ -176,20 +126,6 @@ const systemCandidates: Candidate[] = [
     id: "assistantComplete",
     kind: "system",
     label: "assistant 完成当前 run",
-    target: "none",
-    surface: "runtime event",
-  },
-  {
-    id: "compactComplete",
-    kind: "system",
-    label: "compact 完成",
-    target: "none",
-    surface: "runtime event",
-  },
-  {
-    id: "compactNoop",
-    kind: "system",
-    label: "compact 判断不需要继续",
     target: "none",
     surface: "runtime event",
   },
@@ -228,8 +164,6 @@ export function contextLabel(context: ProductContext): string {
   return [
     `phase=${context.runPhase}`,
     `queue=${context.queue}`,
-    `compact=${context.compactMemory}`,
-    context.canCompactAgain ? "canCompactAgain" : "cannotCompactAgain",
     `goal=${context.goal}`,
     `turn=${context.selectedTurn}`,
     context.forked ? "forked" : "notForked",
@@ -240,8 +174,6 @@ export function contextKey(context: ProductContext): string {
   return [
     context.runPhase,
     context.queue,
-    context.compactMemory,
-    String(context.canCompactAgain),
     context.goal,
     context.selectedTurn,
     String(context.forked),
@@ -481,8 +413,7 @@ function effectTitle(decision: Decision): string {
 }
 
 // 导出为可执行裁决表（02-projection「规则模块下沉」）：
-// CLI 投影的 guard 派生必须与本函数逐条一致，由 bootstrap 的
-// formal-proof-consistency 黄金测试机械背书。
+// CLI 投影的 guard 派生必须与本函数逐条一致。
 export function evaluate(context: ProductContext, candidate: Candidate): Decision {
   if (candidate.kind === "system") {
     return evaluateSystem(context, candidate);
@@ -490,9 +421,6 @@ export function evaluate(context: ProductContext, candidate: Candidate): Decisio
 
   if (context.runPhase === "running") {
     return evaluateRunning(context, candidate);
-  }
-  if (context.runPhase === "compacting") {
-    return evaluateCompacting(context, candidate);
   }
   if (context.runPhase === "goalVerifying") {
     return evaluateGoalVerifying(context, candidate);
@@ -520,14 +448,6 @@ function evaluateRunning(context: ProductContext, candidate: Candidate): Decisio
       "running 时设置 goal 进入消息队列。",
     );
   }
-  if (candidate.id === "slashCompact" || candidate.id === "compact") {
-    return enqueue(
-      context,
-      candidate,
-      "runningCompactQueues",
-      "running 时 compact 作为维护意图进入 FIFO。",
-    );
-  }
   if (candidate.id === "forkLatest" || candidate.id === "forkOld") {
     return reject(context, "runningCannotFork", "运行中不能 fork", "最新轮次和老轮次都不能 fork。");
   }
@@ -542,45 +462,7 @@ function evaluateRunning(context: ProductContext, candidate: Candidate): Decisio
   return undefinedDecision(context, candidate, "runningUnhandled");
 }
 
-function evaluateCompacting(context: ProductContext, candidate: Candidate): Decision {
-  if (candidate.id === "compact" || candidate.id === "slashCompact") {
-    return reject(
-      context,
-      "compactingCannotCompact",
-      "正在 compact，不能再次 compact",
-      "必须去重或禁用入口。",
-    );
-  }
-  // 重裁决（compactingAcceptsFutureInput）：
-  // compact 是维护步骤，用户输入是未来意图 → 入队，不打断 compact。
-  if (candidate.id === "sendText" || candidate.id === "setGoal") {
-    return enqueue(
-      context,
-      candidate,
-      "compactingAcceptsFutureInput",
-      "compacting 时输入追加 queue，不打断 compact。",
-    );
-  }
-  if (candidate.id === "forkLatest" || candidate.id === "forkOld") {
-    return reject(
-      context,
-      "compactingCannotFork",
-      "正在 compact，不能 fork",
-      "避免 fork 到半压缩上下文。",
-    );
-  }
-  return undefinedDecision(context, candidate, "compactingUnhandled");
-}
-
 function evaluateGoalVerifying(context: ProductContext, candidate: Candidate): Decision {
-  if (candidate.id === "compact" || candidate.id === "slashCompact") {
-    return enqueue(
-      context,
-      candidate,
-      "goalVerifierAcceptsFutureInput",
-      "goal verifier 中 compact 追加 queue，不打断验证。",
-    );
-  }
   if (candidate.id === "sendText" || candidate.id === "setGoal") {
     return enqueue(
       context,
@@ -606,29 +488,6 @@ function evaluateCompleted(context: ProductContext, candidate: Candidate): Decis
       ...context,
       forked: true,
       selectedTurn: candidate.target,
-    });
-  }
-  if (candidate.id === "compact" || candidate.id === "slashCompact") {
-    if (context.queue !== "empty") {
-      return enqueue(
-        context,
-        candidate,
-        "heldCompactQueues",
-        "held queue 下 compact 追加队尾，不绕过未来意图。",
-      );
-    }
-    if (context.compactMemory === "justCompacted" && !context.canCompactAgain) {
-      return reject(
-        context,
-        "justCompactedNoNeed",
-        "刚压缩完，不需要压缩",
-        "compact 可以被点击，但模型返回 noop 提示。",
-      );
-    }
-    return allow(context, "completedCanCompact", "完成后可以 compact", {
-      ...context,
-      runPhase: "compacting",
-      compactMemory: "compactable",
     });
   }
   // held 判定：completed 下仍滞留的 queue 只可能是 autoDrain=false 的 held queue
@@ -681,14 +540,6 @@ function evaluateIdle(context: ProductContext, candidate: Candidate): Decision {
       goal: "active",
     });
   }
-  if (candidate.id === "compact" || candidate.id === "slashCompact") {
-    return reject(
-      context,
-      "idleCannotCompact",
-      "没有可压缩上下文",
-      "没有完成消息时 compact 应禁用或提示。",
-    );
-  }
   if (candidate.id === "forkLatest" || candidate.id === "forkOld") {
     return reject(context, "idleCannotFork", "没有可 fork 轮次", "没有完成轮次时 fork 应禁用。");
   }
@@ -711,22 +562,6 @@ function evaluateSystem(context: ProductContext, candidate: Candidate): Decision
       "assistant 完成",
       drainQueueAfterRun(context),
     );
-  }
-  if (candidate.id === "compactComplete") {
-    return systemTransition(context, "compactComplete", "compact 完成", {
-      ...context,
-      runPhase: "completed",
-      compactMemory: "justCompacted",
-      canCompactAgain: true,
-    });
-  }
-  if (candidate.id === "compactNoop") {
-    return systemTransition(context, "compactNoop", "compact 判断无需继续", {
-      ...context,
-      runPhase: "completed",
-      compactMemory: "justCompacted",
-      canCompactAgain: false,
-    });
   }
   if (candidate.id === "goalVerifyStart") {
     return systemTransition(context, "goalVerifyStart", "进入 goal 验证", {
@@ -752,9 +587,6 @@ function evaluateSystem(context: ProductContext, candidate: Candidate): Decision
 function isSystemCandidateApplicable(context: ProductContext, candidate: Candidate): boolean {
   if (candidate.id === "assistantComplete") {
     return context.runPhase === "running";
-  }
-  if (candidate.id === "compactComplete" || candidate.id === "compactNoop") {
-    return context.runPhase === "compacting";
   }
   if (candidate.id === "goalVerifyStart") {
     return context.runPhase === "completed" && context.goal === "active";
@@ -787,27 +619,17 @@ function enqueue(
   ruleId: string,
   reason: string,
 ): Decision {
-  const queued =
-    candidate.id === "setGoal"
-      ? "goal"
-      : candidate.id === "compact" || candidate.id === "slashCompact"
-        ? "compact"
-        : "text";
+  const queued = candidate.id === "setGoal" ? "goal" : "text";
   return {
     kind: "enqueue",
     ruleId,
-    title: queued === "goal" ? "goal 入队" : queued === "compact" ? "compact 入队" : "文字消息入队",
+    title: queued === "goal" ? "goal 入队" : "文字消息入队",
     reason,
     next: {
       ...context,
       queue: mergeQueue(context.queue, queued),
     },
-    assertion:
-      queued === "goal"
-        ? "队列里必须保留 goal 意图。"
-        : queued === "compact"
-          ? "队列里必须保留 compact 维护意图，且不能生成 user row。"
-          : "队列里必须保留用户文字消息。",
+    assertion: queued === "goal" ? "队列里必须保留 goal 意图。" : "队列里必须保留用户文字消息。",
   };
 }
 
@@ -864,7 +686,7 @@ function undefinedDecision(
   };
 }
 
-function mergeQueue(queue: QueueState, item: "text" | "goal" | "compact"): QueueState {
+function mergeQueue(queue: QueueState, item: "text" | "goal"): QueueState {
   if (queue === "empty") {
     return item;
   }
@@ -881,16 +703,12 @@ function drainQueueAfterRun(context: ProductContext): ProductContext {
   if (context.queue === "goal") {
     return { ...context, runPhase: "completed", queue: "empty", goal: "active" };
   }
-  if (context.queue === "compact") {
-    return { ...context, runPhase: "compacting", queue: "empty" };
-  }
   if (context.queue === "mixed") {
     return { ...context, runPhase: "running", queue: "goal" };
   }
   return {
     ...context,
     runPhase: "completed",
-    compactMemory: context.compactMemory === "never" ? "compactable" : context.compactMemory,
   };
 }
 
