@@ -25,7 +25,7 @@ import {
  *
  *   | 段 | interaction-preferences | 本方法 |
  *   |---|---|---|
- *   | 校验 | 协议 schema `.strict()` | 协议信封 `.strict()` + 包内 `MagicContextConfigSchema`（字段级） |
+ *   | 校验 | 协议 schema `.strict()` | 协议信封 `.strict()` + 包内 `MagicContextConfigSchema`（字段级；未知键 strip 而非拒） |
  *   | 写盘 | 无 | `updateMagicContextInFileConfig`（atomicWriteJson，顶层域） |
  *   | 内存 | 直接改 `context.appRuntimePreferences` 对象字段 | `ConfigPort.set(ConfigKey.MagicContext, parsed)` |
  *   | 推送 | 无（消费方主动拉） | 由 `ConfigPort.observe` 的 fan-out 完成，见 bootstrap 装配层 |
@@ -112,8 +112,13 @@ export async function updateMagicContextConfig(
   const params = parseParams(zcodeWorkspaceUpdateMagicContextConfigParamsSchema, rawParams);
 
   // ① 字段级校验。协议层刻意只约束「是个 JSON 值」（见 shared 侧注释），真正的
-  // 白名单在包里；这里用**同一个** schema 对象，因此 CLI 校验、config.json 装载
+  // 字段域在包里；这里用**同一个** schema 对象，因此 CLI 校验、config.json 装载
   // 校验与包内运行时读取三者不可能各说一套。
+  //
+  // 注意 `MagicContextConfigSchema` 是 `z.object({...})` 的默认语义 —— 对白名单外的
+  // 键 **strip 而非 reject**：未知键被静默丢弃（不进 `parsed.data`，因而也不会被写盘
+  // 或推给 ConfigPort），**只有类型/形状错误**才落到下面的 -32602 分支。措辞上
+  // 不能把它读成「未知键会被拒」。
   const parsed = MagicContextConfigSchema.safeParse(params.config ?? {});
   if (!parsed.success) {
     throw new ProtocolRequestError(

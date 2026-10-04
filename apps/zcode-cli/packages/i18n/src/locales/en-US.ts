@@ -67,6 +67,10 @@ Slash Commands:
   /rewind [latest|checkpointId]  Show latest checkpoint or restore workspace files
   /skill [name] [task]  List skills, or force the next prompt to load one
   /goal [action]        Show or set the current session goal
+  /ctx-status           Show the Magic Context status snapshot for this session
+  /ctx-reduce <tags>    Queue context tags the work ahead no longer needs
+  /ctx-expand [range]   Recover dropped or compacted context content
+  /ctx-recomp [range]   Trigger one compartment recomputation pass (simplified)
 `,
   },
   tui: {

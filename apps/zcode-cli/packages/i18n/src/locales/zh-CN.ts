@@ -67,6 +67,10 @@ Slash Commands:
   /rewind [latest|checkpointId]  查看最新 checkpoint 或恢复 workspace 文件
   /skill [name] [task]  列出 skills，或强制下一次 prompt 加载某个 skill
   /goal [action]        查看或设置当前 session goal
+  /ctx-status           查看当前 session 的 Magic Context 状态快照
+  /ctx-reduce <tags>    把后续工作不再需要的上下文 tag 排队回收
+  /ctx-expand [range]   取回已被丢弃或压缩掉的上下文内容
+  /ctx-recomp [range]   触发一次分舱重算（简化版）
 `,
   },
   tui: {
