@@ -21,11 +21,48 @@
  *
  * 依赖已构建的 `dist/`：`pnpm --filter @zcode/magic-context build`、
  * `pnpm --filter @zcode/core build`、`pnpm --filter @zcode/bootstrap build`。
- * 本模块在运行时只 import `@zcode/magic-context`，所以加载代价很小。
+ * 本模块在运行时只 import `@zcode/magic-context` 与 `@zcode/contracts`，所以加载
+ * 代价很小。
+ *
+ * FORK（S23）：本模块多了一个**值** import（`@zcode/contracts` 的 `ConfigKey`），
+ * 于是 `@zcode/contracts` → `@zcode/shared` 这条链第一次在运行时被加载；而
+ * `@zcode/shared` 与 `@zcode/model-option-map` 的包入口发布的是原始 TypeScript
+ * （`exports["."] = "./src/index.ts"`），裸 `node` 既无法把内部 `.js` 说明符改指到
+ * `.ts`，也会在 strip-only 模式下拒绝参数属性。下面的 resolve 钩子把这两个包改指
+ * 到它们同布局的编译产物——与 `adapters/scripts/test-feature-flag.mjs` 同一手法，
+ * 不引入实验性 loader 标志、不桩任何被测代码。
  */
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { registerHooks } from "node:module";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+const TS_SOURCE_PACKAGES = new Set(["@zcode/shared", "@zcode/model-option-map"]);
+
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const segments = specifier.split("/");
+    const packageName = TS_SOURCE_PACKAGES.has(specifier)
+      ? specifier
+      : TS_SOURCE_PACKAGES.has(segments.slice(0, 2).join("/"))
+        ? segments.slice(0, 2).join("/")
+        : null;
+    if (packageName !== null) {
+      const distRoot = `${REPO_ROOT}packages/${packageName.slice("@zcode/".length)}/dist/`;
+      const subpath = specifier === packageName ? "index" : specifier.slice(packageName.length + 1);
+      for (const candidate of [`${distRoot}${subpath}.js`, `${distRoot}${subpath}/index.js`]) {
+        if (existsSync(candidate)) {
+          return { url: pathToFileURL(candidate).href, shortCircuit: true };
+        }
+      }
+      throw new Error(`no compiled dist for "${specifier}" — build ${packageName} first`);
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 import { DEFAULT_MAGIC_CONTEXT_CONFIG, EmergencyFailClosedError } from "@zcode/magic-context";
 
@@ -85,9 +122,15 @@ function sampleEntries() {
 }
 
 function portWith(transform, config = DEFAULT_MAGIC_CONTEXT_CONFIG) {
-  return createZCodeMagicContextTurnTransformPort(transform, config, {
-    sessionId: SESSION_ID,
-    logger: NOOP_LOGGER,
+  // FORK（S23 / D-12）：端口工厂第二参从「冻结的配置」改成「现读配置的 getter」，
+  // 因为 `fail_closed_blocking` 这类字段会在运行中被设置页改；此处仍用一个闭包
+  // 变量模拟「同一个 getter 在两次调用之间返回不同值」的语义。
+  return createZCodeMagicContextTurnTransformPort(transform, {
+    getConfig: () => config,
+    options: {
+      sessionId: SESSION_ID,
+      logger: NOOP_LOGGER,
+    },
   });
 }
 
@@ -258,4 +301,46 @@ test("wire 调试摘要给出 role / source / syntheticHead / cacheControl 落�
   assert.equal(snapshot.entries[2].syntheticHead, false);
   assert.equal(snapshot.entries[2].role, "user");
   assert.equal(snapshot.entries[2].source, "real_user");
+});
+
+// ── FORK（S23 / D-12）：配置按「每次失败分级时现读」生效 ──────────────────────
+//
+// 上面那条 `fail_closed_blocking=false 时 fail-closed 降级为放行` 证明的是「配置值
+// 决定分级」。这里证明的是 D-12 的时间维度：**同一个端口实例**在两次 turn 之间读到
+// 不同的配置——这正是设置页改完开关、不重启就生效的那条路。冻结副本会让第二次
+// turn 继续按旧配置分级，用户看到的现象是「开关没反应」。
+
+test("同一端口在下一次 turn 读到改过的配置（热生效，不需要重建实例）", async () => {
+  const live = { config: DEFAULT_MAGIC_CONTEXT_CONFIG };
+  const port = createZCodeMagicContextTurnTransformPort(
+    async () => {
+      throw new EmergencyFailClosedError("engine down");
+    },
+    {
+      getConfig: () => live.config,
+      options: { sessionId: SESSION_ID, logger: NOOP_LOGGER },
+    },
+  );
+
+  // 第一轮：默认 fail_closed_blocking=true → 重抛。
+  await assert.rejects(
+    () => runPort(port, sampleEntries()),
+    (error) => error instanceof EmergencyFailClosedError,
+  );
+
+  // 用户在设置页把开关关掉（等价于 RPC handler 里的 configPort.set）。
+  live.config = { ...DEFAULT_MAGIC_CONTEXT_CONFIG, fail_closed_blocking: false };
+
+  // 第二轮：**同一个端口实例**降级为放行。
+  const entries = sampleEntries();
+  const result = await runPort(port, entries);
+  assert.equal(result.outcome, "fail_open");
+  result.entries.forEach((entry, index) => assert.equal(entry, entries[index]));
+
+  // 再打开后必须恢复重抛——证明不是一次性的单向降级。
+  live.config = DEFAULT_MAGIC_CONTEXT_CONFIG;
+  await assert.rejects(
+    () => runPort(port, sampleEntries()),
+    (error) => error instanceof EmergencyFailClosedError,
+  );
 });

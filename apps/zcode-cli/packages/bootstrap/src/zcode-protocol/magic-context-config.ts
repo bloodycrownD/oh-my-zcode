@@ -79,7 +79,9 @@ export async function updateMagicContextConfig(
   // 没有活跃 session 时只落盘——下次建 App 时 `createConfig` 会重新读文件。
   let updatedSessionCount = 0;
   for (const record of context.sessions.values()) {
-    const configPort = record.app.getConfigPort?.();
+    // `app` / `getConfigPort` 都是可选的（轻量 embedder 与测试 record 不实现）。
+    // 一个 record 缺能力不能让它后面的 workspace 收不到配置——整轮 fan-out 照常走完。
+    const configPort = record.app?.getConfigPort?.();
     if (!configPort) continue;
     configPort.set(ConfigKey.MagicContext, parsed.data);
     updatedSessionCount += 1;
