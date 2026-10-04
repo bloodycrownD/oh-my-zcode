@@ -5,6 +5,10 @@
 # JSON 清单/配置同样锁定 LF：整文件 CRLF 改写会让 diff 与 license 哈希校验失去意义。
 *.json text eol=lf
 
+# 源码同样锁定 LF：fixspec 波次曾因 Windows 编辑器把 6 个源文件整文件改写为 CRLF（~8200 行噪声 diff）。
+*.ts   text eol=lf
+*.tsx  text eol=lf
+
 # 上游许可原文与生成的声明按字节保存，不能自动转换换行或裁剪空白。
 # 原文中的 License / ======= 是 Markdown 标题，不是合并冲突。
 THIRD-PARTY-NOTICES.md -text -whitespace conflict-marker-size=32 linguist-generated=true

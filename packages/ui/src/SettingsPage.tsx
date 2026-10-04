@@ -1591,9 +1591,7 @@ export function SettingsPage({
                             defaultHomeDir={defaultHomeDir}
                             showIntegratedTerminalShell={hostPlatform === "win32"}
                             setLocalePreference={handleFooterLocaleChange}
-                            setNotificationEnabled={(enabled) =>
-                              setNotificationEnabled(enabled)
-                            }
+                            setNotificationEnabled={(enabled) => setNotificationEnabled(enabled)}
                             setNotificationSoundEnabled={(enabled) =>
                               setNotificationSoundEnabled(enabled)
                             }
