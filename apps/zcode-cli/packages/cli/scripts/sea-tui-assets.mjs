@@ -129,6 +129,27 @@ const runtimePackageNames = async ({ root, target, workspacePackageDirectories }
   if (!tuiDirectory) {
     throw new Error("Missing @zcode/tui workspace package.");
   }
+  // FORK（S35-fix）：`@zcode/magic-context` 与 `@zcode/tui` 一样是 esbuild external
+  // （build.mjs 的 resolveBuildExternal），产物里是运行期 `require("@zcode/magic-context")`。
+  // 它不在 @zcode/tui 的 manifest 依赖闭包里，所以必须显式作为种子入队；漏掉它时
+  // tarball 与 SEA 两条通道装出来都报 `Cannot find module '@zcode/magic-context'`，
+  // 仓库内却因为 pnpm workspace 软链而一切正常。
+  //
+  // **必须排在 TUI 闭包之后**：首轮队列是 BFS，种子排在第 7 位仍会先于 @zcode/tui
+  // 的传递依赖被取出，于是本包的 `zod` 4.6.5 会抢走 `node_modules/zod` 这个根位，
+  // 把 @zcode/contracts 的 Zod 3 挤到嵌套位——TUI 闭包里 `zod-to-json-schema`
+  // （contracts 的 peer=^3）解析到的版本就变了。放进 `deferred`，等首轮队列排空
+  // 再入队，`placeRuntimePackage` 才会把 4.6.5 放到
+  // `node_modules/@zcode/magic-context/node_modules/zod`，与既有放置逐字节一致。
+  //
+  // `fromAssetPath: "node_modules"` 让放置逻辑从资产根起算；随后按 manifest 递归收
+  // 依赖，`ai-tokenizer`（read-session-formatting 的 createRequire 动态加载）落到
+  // `node_modules/ai-tokenizer`，从 `agent/node_modules/@zcode/magic-context/dist/**`
+  // 向上查找即可命中。
+  const magicContextDirectory = workspacePackageDirectories.get("@zcode/magic-context");
+  if (!magicContextDirectory) {
+    throw new Error("Missing @zcode/magic-context workspace package.");
+  }
   const queue = [
     { fromDirectory: tuiDirectory, packageName: "@zcode/tui" },
     { fromDirectory: tuiDirectory, packageName: opentuiCorePackageName },
@@ -137,10 +158,20 @@ const runtimePackageNames = async ({ root, target, workspacePackageDirectories }
     { fromDirectory: tuiDirectory, packageName: "react-devtools-core" },
     { fromDirectory: tuiDirectory, packageName: "ws" },
   ];
+  const deferred = [
+    {
+      fromAssetPath: "node_modules",
+      fromDirectory: magicContextDirectory,
+      packageName: "@zcode/magic-context",
+    },
+  ];
   const placements = new Map();
   const ordered = [];
 
-  while (queue.length > 0) {
+  while (queue.length > 0 || deferred.length > 0) {
+    if (queue.length === 0) {
+      queue.push(...deferred.splice(0, deferred.length));
+    }
     const entry = queue.shift();
     const packageName = entry?.packageName;
     if (!packageName) continue;
