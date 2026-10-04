@@ -428,7 +428,6 @@ export type CommandResult = z.infer<typeof commandResultSchema>;
 export const commandAckSchema = z.object({
   /** 会话创建期采用的 App Memory 开关；旧发送端缺省表示未知。 */
   memoryEnabled: z.boolean().optional(),
-  ttftExcluded: z.literal("capacity").optional(),
   commandId: z.string(),
   // accepted 不承诺跨 CLI 进程存活；最终收口以权威数据（sourceCommandId）为准。
   status: z.enum(["accepted", "rejected", "stale", "duplicate", "noop", "failed"]),
@@ -451,16 +450,9 @@ export const commandKeySchema = z
   .strict();
 export type CommandKey = z.infer<typeof commandKeySchema>;
 
-export const commandsQueryParamsSchema = z
-  .object({
-    commands: z.array(commandKeySchema).min(1).max(64),
-    clock: z.literal(true).optional(),
-  })
-  .strict()
-  .refine(
-    (params) => !params.clock || params.commands.every((key) => key.sessionId === null),
-    "clock probes cannot query session commands",
-  );
+export const commandsQueryParamsSchema = z.object({
+  commands: z.array(commandKeySchema).min(1).max(64),
+});
 export type CommandsQueryParams = z.infer<typeof commandsQueryParamsSchema>;
 
 export const commandQueryItemSchema = z

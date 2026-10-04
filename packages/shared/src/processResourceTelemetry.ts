@@ -37,18 +37,3 @@ export const ZCODE_CLI_RESOURCE_SAMPLE_INTERVAL_MS = 60_000;
 export const PROCESS_RESOURCE_CLI_LANES = ["chat", "plugin", "mcp-status"] as const;
 
 export type ProcessResourceCliLane = (typeof PROCESS_RESOURCE_CLI_LANES)[number];
-
-/**
- * lane → 角色：`chat` 归 `cli_chat`（每 workspace 一个进程），其余两条 lane 合并为 `cli_aux`。
- *
- * 缺省（无 lane）归 `cli_chat`：唯一可能来源是版本落后、还没给样本打 lane 的远端 server，
- * 而远端 workspace 上长期存活并产生资源占用的是 chat lane；归到 cli_chat 比整条样本丢弃更接近事实。
- */
-export function resolveCliProcessResourceRole(
-  lane: ProcessResourceCliLane | undefined,
-): Extract<ProcessResourceRole, "cli_chat" | "cli_aux"> {
-  return lane === undefined || lane === "chat" ? "cli_chat" : "cli_aux";
-}
-
-/** 进程实际运行的位置；远端 CLI / MCP 的样本自带 remote。 */
-export type ProcessResourceRuntimeSurface = "local" | "remote";
