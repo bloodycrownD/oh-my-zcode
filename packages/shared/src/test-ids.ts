@@ -240,10 +240,6 @@ export const TID_CHAT_STOP_BUTTON = "chat-stop-button";
 export const TID_CHAT_LOADING = "chat-loading";
 /** 聊天右上角状态摘要面板 */
 export const TID_CHAT_SUMMARY_PANEL = "chat-summary-panel";
-/** 聊天上下文压缩 timeline 横条（动态后缀为 inputId 或 operationId） */
-export const TID_CHAT_COMPACT_MARKER = "chat-compact-marker";
-/** 聊天上下文压缩失败/中断后的重试按钮（动态后缀为 inputId 或 operationId） */
-export const TID_CHAT_COMPACT_RETRY_BUTTON = "chat-compact-retry-button";
 /** 聊天 goal verification timeline 横条（动态后缀为 targetId:goalIteration 或 verificationId） */
 export const TID_CHAT_GOAL_VERIFICATION_MARKER = "chat-goal-verification-marker";
 /** 聊天队列面板 */

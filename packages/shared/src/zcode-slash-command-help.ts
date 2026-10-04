@@ -35,12 +35,6 @@ export const BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES: readonly BuiltinZCodeSlas
       usage: "/logout",
     },
     {
-      details: ["Runs the core manual compaction path and forwards optional summary instructions."],
-      name: "compact",
-      summary: "Compact the current conversation with optional instructions.",
-      usage: "/compact [instructions]",
-    },
-    {
       details: [
         "Runs a normal agent turn that inspects the current workspace and creates or updates AGENTS.md.",
         "Existing AGENTS.md files should be edited rather than overwritten.",

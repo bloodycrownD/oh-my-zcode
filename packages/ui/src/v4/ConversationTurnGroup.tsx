@@ -1203,8 +1203,8 @@ function ConversationTurnGroupImpl({
     assistantCopyText !== undefined;
   const hasHookActions =
     // Hook action 与 copy/feedback/fork 共用 turn eligibility；
-    // timelineOnly 维护 turn（compact/modelChange marker 轮）即使带历史遗留的
-    // didExecute=true Hook row 也不得露出图标，否则 /compact 轮会凭 SessionStart
+    // timelineOnly 维护 turn（modelChange marker 轮）即使带历史遗留的
+    // didExecute=true Hook row 也不得露出图标，否则该轮会凭 SessionStart
     // Hook 误挂出一个不可解释的操作栏。
     !unit.timelineOnly &&
     !unit.isRunning &&

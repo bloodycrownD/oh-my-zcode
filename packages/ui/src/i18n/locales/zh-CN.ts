@@ -1915,11 +1915,6 @@ const zhCN: Record<string, string> = {
   "settings.interfaceMode.description":
     "办公模式侧重操作摘要与结果；编程模式显示命令、输出和代码变更详情。",
   "chat.toolCall.execute.conciseCompleted": "已运行命令",
-  "chat.contextOptimization.started": "正在优化对话",
-  "chat.contextOptimization.skipped": "无需优化对话",
-  "chat.contextOptimization.interrupted": "已停止优化对话",
-  "chat.contextOptimization.failed": "优化对话失败",
-  "chat.contextOptimization.completed": "已优化对话",
   "settings.themeMode": "界面主题",
   "settings.themeModeDescription": "选择浅色、深色或跟随系统主题。",
   "settings.themeMode.light": "浅色",
@@ -4420,16 +4415,8 @@ const zhCN: Record<string, string> = {
   "developerTools.network.status.failed": "请求失败",
   "developerTools.network.status.retry": "已安排重试",
   "developerTools.network.status.stalled": "流式响应停滞",
-  "chat.contextCompaction.started": "正在压缩上下文",
-  "chat.contextCompaction.retrying": "正在重试压缩上下文（{attempt}/{maxAttempts}）",
-  "chat.contextCompaction.skipped": "上下文已是最新，无需压缩",
-  "chat.contextCompaction.completed": "上下文已压缩",
   "chat.modelChange.switched": "模型已切换 {from} → {to}",
   "chat.modelChange.using": "正在使用 {model}",
-  "chat.contextCompaction.completedAuto": "上下文已自动压缩",
-  "chat.contextCompaction.failed": "上下文压缩失败",
-  "chat.contextCompaction.interrupted": "上下文压缩已中断",
-  "chat.contextCompaction.retry": "重试",
   "chat.goalVerification.checking": "目标校验中",
   "chat.goalVerification.incomplete": "目标未完成，任务继续",
   "chat.goalVerification.complete": "目标已完成，任务结束",
@@ -4516,18 +4503,6 @@ const zhCN: Record<string, string> = {
   "chat.goal.runningBlocked": "请结束任务后设定目标。",
   "chat.goal.planModeBlocked": "Goal 无法在 Plan 模式下使用，请切换模式。",
   "chat.plan.attachmentsBlocked": "首版 /plan 仅支持纯文本，请移除附件或上下文后重试。",
-  "chat.compact.runningBlocked": "运行中不能压缩上下文，请等待当前任务结束。",
-  "chat.compact.queued": "已加入队列，将按顺序压缩上下文。",
-  "chat.compact.duplicateBlocked": "已有压缩任务正在运行或排队。",
-  "chat.modelSwitch.contextWindowGuard.title": "需要压缩上下文后再切换模型",
-  "chat.modelSwitch.contextWindowGuard.description":
-    "当前会话已使用 {used} tokens，已超过目标模型 {modelName} 预留最大输出后的可用上下文 {target} tokens。\n请先使用当前模型压缩上下文。压缩完成且上下文用量小于目标模型可用上下文后，会继续切换模型。",
-  "chat.modelSwitch.contextWindowGuard.compress": "压缩",
-  // guard 比较的是 effectiveContextWindow，运行中 toast 不能继续描述成原始 contextWindow 过小。
-  "chat.modelSwitch.contextWindowGuard.runningBlocked":
-    "当前会话已使用的上下文超过目标模型预留最大输出后的可用上下文，需要先压缩当前会话后才能切换。但当前任务正在运行，无法执行上下文压缩。请等待任务结束后再切换模型。",
-  "chat.modelSwitch.contextWindowGuard.stillTooLarge":
-    "压缩完成后，当前会话已使用的上下文仍大于目标模型预留最大输出后的可用上下文，模型切换已取消。",
   "chat.toolbar.mode.label": "切换模式",
   // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",

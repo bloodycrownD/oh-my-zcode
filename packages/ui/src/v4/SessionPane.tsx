@@ -2358,7 +2358,7 @@ export function SessionPane({
       if (slashCommand?.kind === "planShortcut") {
         // 命令显式指定本次 Submission 的模式，不能靠另一条 CAS 的先后顺序保证。
         effectiveText = slashCommand.task;
-        // 命令只负责配置 shortcut；后续必须走普通 sendText，不能进入 goal/compact command 分支。
+        // 命令只负责配置 shortcut；后续必须走普通 sendText，不能进入 goal command 分支。
         slashCommand = null;
       }
       // create/send ACK 期间用户可能切换任务或创建另一份 draft。
@@ -2404,8 +2404,8 @@ export function SessionPane({
         !heldQueueDisposition &&
         (slashCommand === null || slashCommand.kind === "sendGoalCommand")
       ) {
-        // UI choice 只对普通输入和 /goal <新目标> 生效；/compact 直接追加暂停队列，
-        // resumeGoal 等控制命令也不应被发送消息确认框截获。
+        // UI choice 只对普通输入和 /goal <新目标> 生效；resumeGoal 等控制命令
+        // 也不应被发送消息确认框截获。
         return "confirmationRequired" as const;
       }
       if (slashCommand === null || slashCommand.kind === "sendGoalCommand") {
@@ -2426,7 +2426,7 @@ export function SessionPane({
         await ensureDraftPrewarmConfigBeforeSendRef.current(prewarmTargetBeforeSend);
       }
       // slash 命令优先：已有 session 直接消费；draft 首发 /goal 先建空会话再发命令。
-      // 携带附件或网页元素上下文时不消费为 v4 原生命令（compact/goal 等无附件语义），随 sendText 直发。
+      // 携带附件或网页元素上下文时不消费为 v4 原生命令（goal 等无附件语义），随 sendText 直发。
       if (sessionId && slashCommand) {
         const consumed = await dispatchSlashCommand(
           slashCommand,
@@ -3287,17 +3287,6 @@ export function SessionPane({
     [handleDraftSwitchMode],
   );
 
-  // context usage 面板的压缩入口（命令文本 = "/compact"，复用 slash 解析路径）。
-  const handleSendCompressionCommand = useCallback(
-    (command: string) => {
-      if (!sessionId) return;
-      const parsed = parseV4VisibleSlashCommand(command);
-      if (!parsed) return;
-      void dispatchSlashCommand(parsed, sessionId, snapshotRef.current?.revision, undefined);
-    },
-    [dispatchSlashCommand, sessionId],
-  );
-
   // 误停排障需要区分按钮与 Esc；普通 info 在生产禁用，必须走生命周期日志。
   const handleStop = useCallback(
     (source: "button" | "escape") => {
@@ -4141,7 +4130,6 @@ export function SessionPane({
       // childSessionId 精确回退后的计数，让两个入口共享同一份运行态真值。
       runningSubagentCount={runningAgentCount}
       onRecoverCustomModelSelection={handleRecoverCustomModelSelection}
-      onSendCompressionCommand={handleSendCompressionCommand}
       error={composerError}
       onDismissError={handleDismissComposerError}
       onOpenModelSettings={handleOpenModelSettings}

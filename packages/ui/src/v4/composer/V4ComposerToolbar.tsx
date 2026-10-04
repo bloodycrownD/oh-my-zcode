@@ -354,7 +354,6 @@ export interface V4ComposerToolbarProps {
     value: string,
     sourceModel: ModelSelectionSource | null,
   ) => Promise<void> | void;
-  onSendCompressionCommand?: (command: string) => void;
 }
 
 /** 模型 / 思考深度 / context usage 簇（渲染在发送键左侧，与旧 UI 同位）。 */
@@ -374,7 +373,6 @@ function V4ComposerModelControlsImpl({
   onConfigPickerOpenChange,
   onSelectModel,
   onSelectThought,
-  onSendCompressionCommand,
   onRecoverCustomModelSelection,
 }: V4ComposerToolbarProps) {
   const { intl, locale } = useZCodeIntl();
@@ -1000,8 +998,6 @@ function V4ComposerModelControlsImpl({
         selectedProvider={displayProvider}
         intl={intl}
         locale={locale}
-        onSendCompressionCommand={onSendCompressionCommand}
-        compressionDisabled={disabled || recoveryPending}
       />
       {modelSelectionState.status === "error" && modelSelectionReload ? (
         <Button

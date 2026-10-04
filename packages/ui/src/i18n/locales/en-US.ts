@@ -2041,11 +2041,6 @@ const enUS: Record<string, string> = {
   "settings.interfaceMode.description":
     "Office mode focuses on summaries and results. Coding mode shows commands, output, and code changes.",
   "chat.toolCall.execute.conciseCompleted": "Ran a command",
-  "chat.contextOptimization.started": "Optimizing conversation",
-  "chat.contextOptimization.skipped": "No conversation optimization needed",
-  "chat.contextOptimization.interrupted": "Conversation optimization stopped",
-  "chat.contextOptimization.failed": "Conversation optimization failed",
-  "chat.contextOptimization.completed": "Conversation optimized",
   "settings.themeMode": "App theme",
   "settings.themeModeDescription": "Choose light, dark, or follow the system theme.",
   "settings.themeMode.light": "Light",
@@ -4722,16 +4717,8 @@ const enUS: Record<string, string> = {
   "developerTools.network.status.failed": "Request failed",
   "developerTools.network.status.retry": "Retry scheduled",
   "developerTools.network.status.stalled": "Stream stalled",
-  "chat.contextCompaction.started": "Compressing context",
-  "chat.contextCompaction.retrying": "Retrying context compression ({attempt}/{maxAttempts})",
-  "chat.contextCompaction.skipped": "Context is up to date; no compression needed",
-  "chat.contextCompaction.completed": "Context compressed",
   "chat.modelChange.switched": "Model switched {from} → {to}",
   "chat.modelChange.using": "Using {model}",
-  "chat.contextCompaction.completedAuto": "Context automatically compressed",
-  "chat.contextCompaction.failed": "Context compression failed",
-  "chat.contextCompaction.interrupted": "Context compression interrupted",
-  "chat.contextCompaction.retry": "Retry",
   "chat.goalVerification.checking": "Verifying goal",
   "chat.goalVerification.incomplete": "Goal incomplete, continuing",
   "chat.goalVerification.complete": "Goal complete, ending task",
@@ -4816,17 +4803,6 @@ const enUS: Record<string, string> = {
   "chat.goal.planModeBlocked": "Goal is unavailable in Plan mode. Switch modes to continue.",
   "chat.plan.attachmentsBlocked":
     "The /plan shortcut supports text only for now. Remove attachments or context and try again.",
-  "chat.compact.runningBlocked": "Compact context after the current task finishes.",
-  "chat.compact.queued": "Compaction queued and will run in order.",
-  "chat.compact.duplicateBlocked": "A compaction is already running or queued.",
-  "chat.modelSwitch.contextWindowGuard.title": "Compress context before switching models",
-  "chat.modelSwitch.contextWindowGuard.description":
-    "This conversation has used {used} tokens, which exceeds {modelName}'s available context of {target} tokens after reserving maximum output.\nCompress the current conversation with the current model first. If the compressed context fits, ZCode will continue switching models.",
-  "chat.modelSwitch.contextWindowGuard.compress": "Compress",
-  "chat.modelSwitch.contextWindowGuard.runningBlocked":
-    "This conversation has used more context than the target model's available context after reserving maximum output. The conversation must be compressed before switching models, but the current task is still running and context compression cannot run now. Wait for the task to finish, then switch models again.",
-  "chat.modelSwitch.contextWindowGuard.stillTooLarge":
-    "After compression, the context used by this conversation is still larger than the target model's available context after reserving maximum output. Model switching was canceled.",
   "chat.toolbar.mode.label": "Switch mode",
   // CUA composer entry button
   "chat.toolbar.computerUse.label": "Computer Use",

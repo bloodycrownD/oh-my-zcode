@@ -18,7 +18,6 @@ interface NormalizeZCodeUiErrorOptions {
 const GENERIC_ZCODE_UI_ERROR_MESSAGES = new Set([
   "Internal error",
   "Turn execution failed",
-  "Compact failed",
   "Rewind failed",
   "ZCode session failed",
 ]);

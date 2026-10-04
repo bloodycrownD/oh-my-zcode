@@ -64,7 +64,7 @@ export interface TaskRuntimeState {
   apiRetry: ZCodeApiRetryStatus | null;
   /** Agent 明确上报的后台任务控制项；host 运行期状态，不落盘持久化。 */
   backgroundTaskControls: ZCodeBackgroundTaskControlItem[];
-  /** 当前 session active turn 的类型；用于区分普通生成和 compact 维护态。 */
+  /** 当前 session active turn 的类型；用于区分普通生成和 rewind 维护态。 */
   activeTurnKind?: ZCodeSessionActiveTurnKind;
   activeInputId?: InputId;
   activeInputOwnerClientId?: string;

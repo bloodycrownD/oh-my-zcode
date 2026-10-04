@@ -1,13 +1,5 @@
 import { memo, useState } from "react";
-import {
-  Bot,
-  Cable,
-  GoalIcon,
-  MessagesSquare,
-  ScrollText,
-  SquareSlash,
-  WandSparkles,
-} from "lucide-react";
+import { Bot, Cable, GoalIcon, MessagesSquare, SquareSlash, WandSparkles } from "lucide-react";
 import { cn } from "@/components/lib/utils.js";
 import { FileDisplayInline } from "@/lib/fileDisplay.js";
 import { isTrustedPluginIconSource } from "@/lib/pluginIconSource.js";
@@ -147,8 +139,6 @@ function V4UserInputMention({
     >
       {commandName === "goal" || commandName === "target" ? (
         <GoalIcon aria-hidden="true" className="size-4 shrink-0" />
-      ) : commandName === "compact" ? (
-        <ScrollText aria-hidden="true" className="size-4 shrink-0" />
       ) : (
         <SquareSlash aria-hidden="true" className="size-4 shrink-0" />
       )}

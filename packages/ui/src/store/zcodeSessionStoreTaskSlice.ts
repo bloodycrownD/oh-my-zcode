@@ -220,8 +220,8 @@ export function createTaskSlice(set: SetFn) {
               provider: provider ?? currentTaskRuntime.provider,
               // activeInputId 是当前生成轮次的命令路由标识。
               // 终态/非运行态如果继续保留旧 inputId，移动端只靠快照补齐时会把已结束任务误判成仍在 loading。
-              // activeTurnKind 同样是 session 运行态；compact 完成后必须清掉，
-              // 否则 app 层会继续把同一 task 的发送误判为“压缩中”并吞掉。
+              // activeTurnKind 同样是 session 运行态；终态必须清掉，
+              // 否则 app 层会继续把同一 task 的发送误判为仍在运行而吞掉。
               activeTurnKind: isRunningStatus ? currentTaskRuntime.activeTurnKind : undefined,
               activeInputId: isRunningStatus ? currentTaskRuntime.activeInputId : undefined,
               activeInputOwnerClientId: isRunningStatus

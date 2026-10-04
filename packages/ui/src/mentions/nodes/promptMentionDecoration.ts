@@ -8,7 +8,6 @@ import { resolvePluginIconSource } from "@/lib/pluginIconSource.js";
 import type { MentionCategory, MentionItemData } from "@/mentions/mentionTypes.js";
 import {
   COMMAND_MENTION_ICON_NODE,
-  COMPACT_COMMAND_MENTION_ICON_NODE,
   createMentionSvgIcon,
   GOAL_COMMAND_MENTION_ICON_NODE,
   PLUGIN_MENTION_ICON_NODE,
@@ -95,8 +94,6 @@ export function decoratePromptMention(
               ? GOAL_COMMAND_MENTION_ICON_NODE
               : command === "workflow"
                 ? WORKFLOW_COMMAND_MENTION_ICON_NODE
-                : command === "compact"
-                  ? COMPACT_COMMAND_MENTION_ICON_NODE
-                  : COMMAND_MENTION_ICON_NODE;
+                : COMMAND_MENTION_ICON_NODE;
   setMask(dom, icon);
 }

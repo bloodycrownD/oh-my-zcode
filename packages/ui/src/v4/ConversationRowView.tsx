@@ -1630,14 +1630,13 @@ const MARKER_MODEL_ICON = (
 
 /**
  * 系统标记分隔线壳：两侧细横线 + 居中「图标 + 文案」pill，视觉对齐旧版
- * ChatMessage synthetic-timeline dividers（fork / compaction / goal 同款）。
+ * ChatMessage synthetic-timeline dividers（fork / goal 同款）。
  * running（压缩/校验进行中）隐藏图标、文案走 animated-gradient-text 流光（同旧版）。
  */
 function MarkerDividerRow({
   rowId,
   markerType,
   markerStatus,
-  markerOrigin,
   markerSourceCommandId,
   icon,
   label,
@@ -1647,7 +1646,6 @@ function MarkerDividerRow({
   rowId: number;
   markerType: TimelineMarkerRow["marker"]["type"];
   markerStatus: string;
-  markerOrigin?: string;
   markerSourceCommandId?: string;
   icon: React.ReactNode;
   label: React.ReactNode;
@@ -1681,7 +1679,6 @@ function MarkerDividerRow({
         data-row-kind="timelineMarker"
         data-marker-type={markerType}
         data-status={markerStatus}
-        data-origin={markerOrigin}
         data-source-command-id={markerSourceCommandId}
         data-testid={testId(TID_V4_ROW, String(rowId))}
         onClick={onClick}
@@ -1697,7 +1694,6 @@ function MarkerDividerRow({
       data-row-kind="timelineMarker"
       data-marker-type={markerType}
       data-status={markerStatus}
-      data-origin={markerOrigin}
       data-source-command-id={markerSourceCommandId}
       data-testid={testId(TID_V4_ROW, String(rowId))}
       className={rowClassName}
@@ -1708,7 +1704,7 @@ function MarkerDividerRow({
 }
 
 /**
- * timelineMarker 行渲染：compact / forkNotice / goalVerify / modelChange 画成分隔线。
+ * timelineMarker 行渲染：forkNotice / goalVerify / modelChange 画成分隔线。
  * modelChange 可见化 = 裁决（切换后实际发送出去的轮才落分隔，含
  * model-only 续跑轮）；goalSet/forkCreated 已在投影层停产（隐形行清零），
  * retryNotice·checkpointRestored 无 UI，default 分支兜底不渲染。

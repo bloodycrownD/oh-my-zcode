@@ -1225,7 +1225,6 @@ export const zcodeMessageUpsertedEventPayloadSchema = z
     attachments: z.array(z.unknown()).optional(),
     toolCalls: z.array(z.unknown()).optional(),
     type: z.string().optional(),
-    compactBoundary: z.unknown().optional(),
   })
   .strict();
 export const zcodeMessageRemovedEventPayloadSchema = z

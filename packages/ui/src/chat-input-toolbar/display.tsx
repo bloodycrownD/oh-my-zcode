@@ -43,11 +43,7 @@ import {
 import { ZCODE_MODE_OPTION_DESCRIPTION_IDS, ZCODE_MODE_OPTION_LABEL_IDS } from "./display-help.js";
 import { RollingToolbarLabel } from "@/chat-input-toolbar/RollingToolbarLabel.js";
 
-export {
-  ChatContextUsage,
-  getContextCompressionCommand,
-  getRenderableTaskUsage,
-} from "@/chat-input-toolbar/contextUsage.js";
+export { ChatContextUsage, getRenderableTaskUsage } from "@/chat-input-toolbar/contextUsage.js";
 
 type ConfigSelectTriggerSize = ComponentProps<typeof SelectTrigger>["size"];
 type ConfigSelectTriggerVariant = ComponentProps<typeof SelectTrigger>["variant"];

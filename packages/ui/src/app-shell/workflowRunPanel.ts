@@ -393,7 +393,7 @@ export function workflowRunEventLines(
         // 住在同族的 workflowRunThrottle.ts（max-lines 门）。
         const concurrencyLine = workflowRunConcurrencyEventLine(event, formatMessage);
         if (concurrencyLine !== undefined) return concurrencyLine;
-        // 例如引擎为长上下文压缩预留的 `compaction`（v1 从不发出）。它将来一出现，
+        // 引擎为未建模事件预留的未知类型（v1 从不发出）。它将来一出现，
         // 这里必须仍给出一条有信息量的行，而不是空白。
         const detail = unknownDetail(payload);
         return {
