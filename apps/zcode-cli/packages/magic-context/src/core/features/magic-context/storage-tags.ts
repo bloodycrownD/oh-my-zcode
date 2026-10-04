@@ -1,4 +1,4 @@
-import { resolveToolTier } from "../../deferred/emergency-drop.js";
+import { resolveToolTier } from "../../hooks/magic-context/emergency-drop.js";
 import { getHarness } from "../../shared/harness.js";
 import type { Database, Statement as PreparedStatement } from "../../shared/sqlite.js";
 import { contentTagOwnerMessageId, TEXT_TAG_IDENTITY_MARKER } from "../../shared/tag-owner-id.js";

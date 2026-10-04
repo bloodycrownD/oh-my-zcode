@@ -1,4 +1,4 @@
-import { isReservedLedgerControlEntry } from "../../deferred/tool-sweep-policy.js";
+import { isReservedLedgerControlEntry } from "../../hooks/magic-context/tool-sweep-policy.js";
 import { getHarness } from "../../shared/harness.js";
 import type { Database } from "../../shared/sqlite.js";
 import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.js";
