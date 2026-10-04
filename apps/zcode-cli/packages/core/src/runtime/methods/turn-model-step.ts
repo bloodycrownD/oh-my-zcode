@@ -1,5 +1,4 @@
 import {
-  CompactTrigger,
   CoreErrorType,
   SessionEventType,
   createChildTraceContext,
@@ -17,7 +16,6 @@ import {
 } from "../../agent/message-history.js";
 import {
   createModelContextExceededFinishError,
-  createCompactRapidRefillError,
   objectKeys,
   projectExecutionErrorPayload,
   finalizeSuspiciousEmptyModelResult,
@@ -54,20 +52,13 @@ import {
   isStartPlanBusyStreamRecoveryFailure,
 } from "./streaming-recovery.js";
 import type { RegularTurnLoopState } from "./turn-loop-state.js";
+import { recordModelHistoryRound } from "./turn-loop-state.js";
 import {
-  evaluateRapidRefill,
-  MAX_CONSECUTIVE_RAPID_REFILLS,
-  RAPID_REFILL_TOOL_TURN_THRESHOLD,
-  recordCompactHistoryRound,
-  recordCompactSuccess,
-  recordModelHistoryRound,
-} from "./turn-loop-state.js";
-import {
+  estimateCurrentModelInputTokens,
   querySourceForTask,
   recordMainTurnCacheHitUsage,
   recordMainTurnModelUsage,
 } from "./turn-model-step-usage.js";
-import { estimateCurrentModelInputTokens } from "./compact.js";
 import {
   resolveModelStepMaxOutputTokens,
   resolveNormalRequestMaxOutputTokens,
@@ -378,18 +369,6 @@ export async function runModelBackedTurnStep(
       modelTraceContext,
       model,
     );
-    if (
-      isModelContextExceededError(finalError) &&
-      (await recoverModelStepAfterContextExceeded.call(
-        this,
-        state,
-        finalError,
-        modelStepIndex,
-        options.requestEntries,
-      ))
-    ) {
-      return "continue";
-    }
     throw finalError;
   }
 
@@ -456,22 +435,11 @@ export async function runModelBackedTurnStep(
     isContextExceededFinishReason(result.finishReason, rawFinishReason)
   ) {
     // 超窗 provider 可能返回空内容和 zero usage；必须先识别 overflow，
-    // 否则会被 suspicious empty 包成普通 ModelError，后续 reactive compact 无法触发。
+    // 否则会被 suspicious empty 包成普通 ModelError，上层看不到真实超窗原因。
     const contextError = createModelContextExceededFinishError({
       finishReason: result.finishReason,
       rawFinishReason,
     });
-    if (
-      await recoverModelStepAfterContextExceeded.call(
-        this,
-        state,
-        contextError,
-        modelStepIndex,
-        options.requestEntries,
-      )
-    ) {
-      return "continue";
-    }
     throw contextError;
   }
   if (
@@ -611,7 +579,6 @@ export async function runModelBackedTurnStep(
     if (assistantCommitted) recordModelHistoryRound(state);
     if (outputTokenContinuation === "continue") {
       appendOutputTokenContinuation(state.turnRequestState);
-      state.reactiveCompactAttemptedInCurrentModelStep = false;
       state.turnMachine = new TurnMachineImpl(state.turnMachine.aggregateResults());
       return "output_continuation";
     }
@@ -689,67 +656,4 @@ function buildAutomationCreateLimitFallback(input: string): string {
     return "定时任务已达到 20 个上限，本次未创建。请前往“自动化”手动删除一个已有任务后重试。";
   }
   return "The limit of 20 scheduled tasks has been reached, so no task was created. Manually delete an existing task on the Automations page, then try again.";
-}
-
-async function recoverModelStepAfterContextExceeded(
-  this: AgentRuntimeInternal,
-  state: RegularTurnLoopState,
-  contextError: unknown,
-  modelStepIndex: number,
-  activeEntries: readonly RuntimeMessageEntry[],
-): Promise<boolean> {
-  if (state.reactiveCompactAttemptedInCurrentModelStep) {
-    return false;
-  }
-
-  const rapidRefill = evaluateRapidRefill(state.compactTracking);
-  if (rapidRefill.shouldBlock) {
-    this.logger?.warn("Reactive compact rapid-refill breaker tripped", {
-      ...traceContextToLogContext(state.turnTraceContext),
-      event: "compact.rapid_refill_breaker",
-      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
-      modelStepIndex,
-      module: "core.runtime",
-      status: "failed",
-      toolTurnsSinceCompact: rapidRefill.toolTurnsSinceCompact,
-      trigger: CompactTrigger.Reactive,
-    });
-    throw createCompactRapidRefillError({
-      consecutiveRapidRefills: rapidRefill.consecutiveRapidRefills,
-      maxConsecutiveRapidRefills: MAX_CONSECUTIVE_RAPID_REFILLS,
-      toolTurnThreshold: RAPID_REFILL_TOOL_TURN_THRESHOLD,
-      toolTurnsSinceCompact: rapidRefill.toolTurnsSinceCompact,
-    });
-  }
-
-  state.reactiveCompactAttemptedInCurrentModelStep = true;
-  const compactOutcome = await this.reactiveCompactAfterContextExceeded(
-    contextError,
-    state.turnTraceContext,
-    state.events,
-    state.turnAbortSignal,
-    {
-      activeEntries,
-      modelStepIndex,
-      rapidRefillCount: rapidRefill.consecutiveRapidRefills,
-      model: state.model,
-      turnRequestState: state.turnRequestState,
-    },
-  );
-  if (compactOutcome !== "compacted") {
-    return false;
-  }
-
-  recordCompactSuccess(state, rapidRefill);
-  recordCompactHistoryRound(state);
-  state.turnMachine = new TurnMachineImpl(
-    TurnMachineImpl.create(
-      this.sessionId,
-      this.turnNumber,
-      state.input,
-      state.traceId,
-      state.turnId,
-    ).start(),
-  );
-  return true;
 }

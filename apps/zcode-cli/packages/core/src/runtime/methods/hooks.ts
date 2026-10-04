@@ -15,7 +15,7 @@ const EMPTY_HOOK_RESULT: HookRunResult = {
 const HOOK_CONTEXT_MAX_CHARS = 24_000;
 const HOOK_PREVIEW_MAX_CHARS = 4_000;
 
-type SessionStartSource = "startup" | "resume" | "clear" | "compact";
+type SessionStartSource = "startup" | "resume" | "clear";
 
 export async function runSessionStartHooks(
   this: AgentRuntimeInternal,

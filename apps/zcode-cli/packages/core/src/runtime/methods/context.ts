@@ -137,7 +137,6 @@ export function createContextBuilderFromSnapshot(
     workflowActor: this.config.workflowActor,
     language: this.config.language,
     outputStyle: this.config.outputStyle,
-    compact: this.config.compact,
     guidanceToolNames: this.getTools(options.model).map((tool) => tool.name),
   };
 

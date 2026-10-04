@@ -11,7 +11,6 @@ import type {
   SkillLoadOutcome,
   UserInstructionsOptions,
 } from "@zcode/contracts";
-import type { AutoCompactPolicyConfig } from "../compact/index.js";
 import type { AgentProfile } from "../subagent/profile.js";
 
 export type {
@@ -123,7 +122,6 @@ export interface ContextBuilderConfig {
   workflowActor?: WorkflowActorContext;
   language?: string;
   outputStyle?: OutputStylePromptConfig;
-  compact?: AutoCompactPolicyConfig;
   guidanceToolNames?: readonly string[];
 }
 

@@ -26,10 +26,7 @@ export function getLatestActiveSessionMessageId(
     rewindTargetMessageId?: MessageId;
   } = {},
 ): MessageId | undefined {
-  const activeMessages = activeSessionMessages(messages, {
-    ...options,
-    includeCompactPreservedSegment: false,
-  });
+  const activeMessages = activeSessionMessages(messages, options);
 
   for (let index = activeMessages.length - 1; index >= 0; index--) {
     const message = activeMessages[index]!;

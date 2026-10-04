@@ -41,29 +41,6 @@ export function createModelContextExceededFinishError(input: {
   );
 }
 
-export function createCompactRapidRefillError(input: {
-  consecutiveRapidRefills: number;
-  maxConsecutiveRapidRefills: number;
-  toolTurnThreshold: number;
-  toolTurnsSinceCompact: number;
-}) {
-  return createCoreError(
-    CoreErrorType.ModelContextExceeded,
-    `Autocompact stopped because the context refilled within fewer than ${input.toolTurnThreshold} tool turns after compaction ${input.maxConsecutiveRapidRefills} times in a row. A file or tool output may be too large. Read it in smaller chunks, or start a new session.`,
-    {
-      context: {
-        consecutiveRapidRefills: input.consecutiveRapidRefills,
-        maxConsecutiveRapidRefills: input.maxConsecutiveRapidRefills,
-        reason: "compact_rapid_refill_breaker",
-        toolTurnsSinceCompact: input.toolTurnsSinceCompact,
-        toolTurnThreshold: input.toolTurnThreshold,
-      },
-      recoverable: true,
-      retryable: true,
-    },
-  );
-}
-
 export function isSuspiciousEmptyModelResult(
   finishReason: string | undefined,
   responseLength: number,

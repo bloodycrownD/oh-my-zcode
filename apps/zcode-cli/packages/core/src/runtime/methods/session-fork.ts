@@ -269,7 +269,6 @@ function createForkIdentityMap(options: {
           }
         }
       }
-      if (part.type === "compaction") addTurn(part.compactBoundary?.turnId);
     }
   }
   for (const goal of options.goalSnapshots) {
@@ -867,7 +866,7 @@ export async function createForkedSession(
 
   const forkedSessionId = options.forkedSessionId ?? createSessionId();
   const input = buildForkedSessionInput(runtime, options.parentSession, forkedSessionId);
-  // legacy workspace fork 兼容分支。V4 stable/compact-edit 入口直接构建完整 bundle，
+  // legacy workspace fork 兼容分支。V4 stable 入口直接构建完整 bundle，
   // 不得经过这里的 child-only metadata 原语，否则会重新引入逐条补写窗口。
   if (options.stableForkMetadata) {
     if (!runtime.sessionStore.createForkedSessionWithMetadata) {
@@ -1076,7 +1075,7 @@ export async function forkStableConversationAtMessage(
   });
 }
 
-/** compact-covered edit：复制目标真实用户输入之前的 active conversation prefix。 */
+/** stable edit：复制目标真实用户输入之前的 active conversation prefix。 */
 export async function forkConversationBeforeMessage(
   this: AgentRuntimeInternal,
   options: ConversationBeforeInputForkOptions,
@@ -1395,7 +1394,7 @@ function activeForkTranscriptMessages(
     rewindTargetMessageId?: MessageId;
   } = {},
 ): MessageWithParts[] {
-  // fork 保留完整可见 transcript（不做 compact provider scope 裁剪），但 rewind
+  // fork 保留完整可见 transcript（不做 provider scope 裁剪），但 rewind
   // branch 与 runtime resume / cold projection 必须使用同一纯选择器。
   return selectActiveConversationBranch(messages, options);
 }
@@ -1422,66 +1421,13 @@ export function resolveForkHistoryEndIndex(
   return endIndex;
 }
 
-function isActiveCompactionBoundaryMessage(message: MessageWithParts): boolean {
-  return message.parts.some(
-    (part) => part.type === "compaction" && (Boolean(part.compactBoundary) || !part.timelineStatus),
-  );
-}
-
-function isRealVisibleUserMessage(message: MessageWithParts): boolean {
-  return (
-    message.info.role === "user" &&
-    message.info.synthetic !== true &&
-    message.info.visibility !== "model-only" &&
-    !message.info.source &&
-    !message.info.summary &&
-    !isActiveCompactionBoundaryMessage(message)
-  );
-}
-
-function findCompactedForkParentUserMessage(
-  parentMessages: MessageWithParts[],
-  forkHistoryMessages: MessageWithParts[],
-  target: MessageWithParts | undefined,
-): MessageWithParts | undefined {
-  if (target?.info.role !== "assistant") {
-    return undefined;
-  }
-  const parentMessageId = target.info.parentID;
-  if (
-    !parentMessageId ||
-    forkHistoryMessages.some((message) => message.info.id === parentMessageId)
-  ) {
-    return undefined;
-  }
-  if (!forkHistoryMessages.some(isActiveCompactionBoundaryMessage)) {
-    return undefined;
-  }
-
-  const parentUserMessage = parentMessages.find((message) => message.info.id === parentMessageId);
-  return parentUserMessage && isRealVisibleUserMessage(parentUserMessage)
-    ? parentUserMessage
-    : undefined;
-}
-
 export function buildForkHistoryMessages(
   parentMessages: MessageWithParts[],
   forkSourceMessages: MessageWithParts[],
   targetIndex: number,
   forkHistoryEndIndex: number,
 ): MessageWithParts[] {
-  const forkHistoryMessages = forkSourceMessages.slice(0, forkHistoryEndIndex);
-  const compactedParentUserMessage = findCompactedForkParentUserMessage(
-    parentMessages,
-    forkHistoryMessages,
-    forkSourceMessages[targetIndex],
-  );
-  if (!compactedParentUserMessage) {
-    return forkHistoryMessages;
-  }
-
-  // compact 后 active branch 只剩 summary user + assistant，summary 会被 UI 过滤。
-  // fork 到该 assistant 时仍要把它 parentID 指向的真实用户输入放回 compact boundary 前，
-  // 这样历史可见气泡不丢，同时 resume 仍从最后一个 compact boundary 开始，不改变模型上下文。
-  return [compactedParentUserMessage, ...forkHistoryMessages];
+  void parentMessages;
+  void targetIndex;
+  return forkSourceMessages.slice(0, forkHistoryEndIndex);
 }

@@ -39,11 +39,6 @@ export function traceContextToLogContext(context: ContractTraceContext): Contrac
 }
 
 export {
-  CompactPhase,
-  CompactReason,
-  CompactTrigger,
-  CompactTimelineDisplay,
-  CompactTimelineStatus,
   CoreErrorType,
   EventReducer,
   HookEventName,
@@ -76,7 +71,6 @@ export {
   modelMessageContentToText,
   parseCheckpointCreatedPayload,
   parseRewindTriggeredPayload,
-  parseCompactBoundaryPayload,
   parseWorkspaceCheckpointArtifact,
   evaluateRewindTarget,
   selectActiveConversationBranch,
@@ -121,9 +115,6 @@ export type {
   BackgroundTaskCancelResult,
   BackgroundTaskInfo,
   BackgroundTaskInfoStatus,
-  CompactBoundaryPayload,
-  CompactPreservedSegment,
-  CompactTimelinePayload,
   MessageAnchorOrigin,
   MessageId,
   MessageWithParts,
@@ -284,29 +275,6 @@ export type {
 } from "../context/index.js";
 export { createContextBuilder, estimateTokens } from "../context/index.js";
 export type { EnvInfo, ProjectContext, UserInstructionsOptions } from "../context/index.js";
-export {
-  COMPACT_PROMPT_TOO_LONG_RETRY_MARKER,
-  COMPACT_PROMPT_TOO_LONG_USER_MESSAGE,
-  DEFAULT_COMPACT_CONTEXT_WINDOW,
-  MAX_COMPACT_PROMPT_TOO_LONG_RETRIES,
-  MAX_OUTPUT_TOKENS_FOR_SUMMARY,
-  buildCompactPrompt,
-  buildCompactSummaryMessage,
-  buildManualCompactBoundary,
-  createCompactBoundaryId,
-  estimateMessageTokens,
-  formatCompactSummary,
-  getAutoCompactThreshold,
-  getMessagesToSummarize,
-  getUsageTotalTokens,
-  hasEnoughMessagesToCompact,
-  maybeLocalMicrocompactMessages,
-  shouldAutoCompact,
-  buildDefaultMicrocompactThreshold,
-} from "../compact/index.js";
-export type { AutoCompactPolicyConfig } from "../compact/index.js";
-export type { AutoCompactTokenOverride } from "../compact/index.js";
-export type { LocalMicrocompactPolicyConfig } from "../compact/index.js";
 export {
   EXPLORE_AGENT_ALLOWED_TOOLS,
   EXPLORE_AGENT_TYPE,

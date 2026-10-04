@@ -33,7 +33,6 @@ export async function hydrateReadFileStateFromSession(input: {
   input.readFileState.clear();
   const activeMessages = activeSessionMessages(input.messages, {
     branchCutAfterMessageId: input.branchCutAfterMessageId,
-    includeCompactPreservedSegment: false,
     rewindCreatedMessageId: input.rewindCreatedMessageId,
     rewindKeptMessageIds: input.rewindKeptMessageIds,
     rewindTargetMessageId: input.rewindTargetMessageId,

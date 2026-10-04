@@ -1,16 +1,10 @@
 import type { BackgroundBashOutputResult } from "@zcode/shared";
 import type { RuntimeInputPresentation } from "@zcode/contracts";
 import type {
-  CompactPhase,
-  CompactReason,
-  CompactTimelineStatus,
-  CompactTrigger,
   BackgroundExecutionSnapshot,
   BackgroundTaskCancelResult,
   BackgroundTaskInfo,
   BackgroundTaskInfoStatus,
-  CompactBoundaryPayload,
-  CompactTimelinePayload,
   MessageId,
   MessageWithParts,
   MessagePart,
@@ -45,7 +39,6 @@ import type {
 } from "./deps.js";
 import type {
   ActiveTurnStartReservation,
-  CompactTimelineContext,
   ConversationBeforeInputForkOptions,
   ConversationRewindResult,
   ExecuteToolsOptions,
@@ -71,13 +64,6 @@ import type {
   RuntimeBackgroundStopOptions,
   RuntimeBackgroundStopResult,
 } from "./methods/background.js";
-import type {
-  AutoCompactLoopContext,
-  AutoCompactOutcome,
-  CompactAttemptOutcome,
-  ReactiveCompactLoopContext,
-  TurnRequestState,
-} from "./methods/turn-loop-state.js";
 
 export interface AgentRuntimeTurnMethods {
   admitPrompt(
@@ -95,15 +81,6 @@ export interface AgentRuntimeTurnMethods {
     attachments?: TurnState["attachments"],
     options?: ExecuteTurnOptions,
     startReservation?: ActiveTurnStartReservation,
-  ): Promise<TurnResult>;
-  executeManualCompact(
-    input: string,
-    customInstructions: string | undefined,
-    turnId: TurnId,
-    turnTraceContext: TraceContext,
-    abortSignal?: AbortSignal,
-    inputId?: string,
-    model?: Model,
   ): Promise<TurnResult>;
   executeRewindCommand(
     input: string,
@@ -170,57 +147,6 @@ export interface AgentRuntimeTurnMethods {
   }): Promise<{
     copiedMessageCount: number;
     messageIdMap: Map<MessageId, MessageId>;
-  }>;
-  autoCompactIfNeeded(
-    turnTraceContext: TraceContext,
-    events: SessionEvent[],
-    abortSignal: AbortSignal | undefined,
-    context: AutoCompactLoopContext,
-  ): Promise<AutoCompactOutcome>;
-  microcompactIfNeeded(
-    turnTraceContext: TraceContext,
-    events: SessionEvent[],
-    abortSignal: AbortSignal | undefined,
-    context: {
-      model: Model;
-      modelStepIndex: number;
-      phase: CompactPhase;
-      turnRequestState: TurnRequestState;
-    },
-  ): Promise<void>;
-  reactiveCompactAfterContextExceeded(
-    originalError: unknown,
-    turnTraceContext: TraceContext,
-    events: SessionEvent[],
-    abortSignal: AbortSignal | undefined,
-    context: ReactiveCompactLoopContext,
-  ): Promise<CompactAttemptOutcome>;
-  compactActiveConversation(
-    customInstructions: string | undefined,
-    turnTraceContext: TraceContext,
-    events: SessionEvent[],
-    options?: {
-      abortSignal?: AbortSignal;
-      compactContextTelemetry?: {
-        inputTokens: number;
-        policyContextWindowTokens: number;
-        thresholdTokens?: number;
-        tokenSource: "estimate" | "provider_usage";
-      };
-      autoCompactThreshold?: number;
-      compactReason?: CompactReason;
-      initialPromptTooLongCause?: unknown;
-      phase?: CompactPhase;
-      sourceCommandId?: string;
-      trigger?: CompactTrigger;
-      model?: Model;
-      activeEntries?: readonly RuntimeMessageEntry[];
-    },
-  ): Promise<{
-    displayText: string;
-    entries: readonly RuntimeMessageEntry[];
-    outcome: Extract<CompactAttemptOutcome, "compacted" | "skipped">;
-    tokenCount: number;
   }>;
   scheduleTools(toolCalls: ToolCall[]): Promise<ToolSchedule>;
   executeTools(
@@ -320,51 +246,6 @@ export interface AgentRuntimeTurnMethods {
   appendEvent(event: SessionEvent, traceContext: TraceContext): Promise<void>;
   notifyEventSinks(event: SessionEvent, traceContext: TraceContext): Promise<void>;
   ensureSessionPersisted(input: string, traceContext: TraceContext): Promise<void>;
-  buildCompactTimelinePayload(
-    timeline: CompactTimelineContext,
-    update: {
-      attempt?: number;
-      boundaryId?: string;
-      endedAt?: number;
-      maxAttempts?: number;
-      postCompactTokenCount?: number;
-      reason?: string;
-      replace?: boolean;
-      status: CompactTimelineStatus;
-      summaryMessageId?: MessageId;
-      tailStartMessageId?: MessageId;
-      truePostCompactTokenCount?: number;
-    },
-  ): CompactTimelinePayload;
-  persistCompactTimeline(
-    payload: CompactTimelinePayload,
-    traceContext: TraceContext,
-  ): Promise<void>;
-  finishCompactTimelineFailure(options: {
-    abortSignal?: AbortSignal;
-    attempt?: number;
-    error: unknown;
-    events: SessionEvent[];
-    maxAttempts?: number;
-    timeline: CompactTimelineContext;
-    traceContext: TraceContext;
-  }): Promise<void>;
-  recoverInterruptedCompactTimelines(
-    messages: MessageWithParts[],
-    traceContext: TraceContext,
-  ): Promise<number>;
-  persistCompactSummary(
-    messageID: MessageId,
-    content: string,
-    summary: string,
-    compactBoundary: CompactBoundaryPayload,
-    traceContext: TraceContext,
-    options?: {
-      model?: Model;
-      operationId?: string;
-      postCompactReminderEntries?: readonly RuntimeMessageEntry[];
-    },
-  ): Promise<void>;
   persistUserPrompt(
     messageID: MessageId,
     input: string,

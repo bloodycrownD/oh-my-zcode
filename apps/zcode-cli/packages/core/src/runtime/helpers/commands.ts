@@ -2,18 +2,6 @@ import { RewindScope } from "../deps.js";
 import type { MessageId } from "../deps.js";
 import type { ParsedRewindCommand } from "../types.js";
 
-export function parseCompactCommand(input: string): string | undefined | null {
-  const trimmed = input.trim();
-  if (trimmed === "/compact") {
-    return undefined;
-  }
-  if (trimmed.startsWith("/compact ")) {
-    const instructions = trimmed.slice("/compact ".length).trim();
-    return instructions.length > 0 ? instructions : undefined;
-  }
-  return null;
-}
-
 export function parseRewindCommand(input: string): ParsedRewindCommand | null {
   const trimmed = input.trim();
   if (trimmed === "/fork") {

@@ -38,7 +38,6 @@ import {
   type RuntimeMessageSource,
   type ToolCallInput,
 } from "./message-history.js";
-import { compactActiveSessionMessages, isActiveCompactionBoundaryPart } from "./compact-session.js";
 import { filePartToContentBlock, projectPersistedToolMediaContent } from "./file-part-hydration.js";
 import { selectToolPartsForHistory } from "./tool-part-order.js";
 
@@ -202,57 +201,12 @@ export function activeSessionMessages(
   messages: MessageWithParts[],
   options: {
     branchCutAfterMessageId?: MessageId;
-    includeCompactPreservedSegment?: boolean;
     rewindCreatedMessageId?: MessageId;
     rewindKeptMessageIds?: readonly MessageId[];
     rewindTargetMessageId?: MessageId;
   } = {},
 ): MessageWithParts[] {
-  if (!options.branchCutAfterMessageId) {
-    // 旧数据没有 branch cut，继续使用 compact-first/createdMessageID 兼容语义；不能把
-    // 历史上非法的 compact 前 kept IDs 解释成新式 branch，从而改变既有冷恢复结果。
-    let legacyCompactIndex = -1;
-    for (let index = messages.length - 1; index >= 0; index--) {
-      if (messages[index]!.parts.some(isActiveCompactionBoundaryPart)) {
-        legacyCompactIndex = index;
-        break;
-      }
-    }
-    const compactActiveMessages =
-      legacyCompactIndex >= 0
-        ? compactActiveSessionMessages(
-            messages,
-            legacyCompactIndex,
-            options.includeCompactPreservedSegment !== false,
-          )
-        : messages;
-    if (options.rewindKeptMessageIds && legacyCompactIndex >= 0) {
-      const postCompactIds = new Set(
-        messages.slice(legacyCompactIndex).map((message) => message.info.id),
-      );
-      if (!options.rewindKeptMessageIds.some((messageId) => postCompactIds.has(messageId))) {
-        return compactActiveMessages;
-      }
-    }
-    return selectActiveConversationBranch(compactActiveMessages, options);
-  }
-
-  // 最后一个 compact boundary。顺序相反会让 compact 前 kept prefix 永远无法恢复。
-  const branchActiveMessages = selectActiveConversationBranch(messages, options);
-  let lastCompactionIndex = -1;
-  for (let index = branchActiveMessages.length - 1; index >= 0; index--) {
-    if (branchActiveMessages[index]!.parts.some(isActiveCompactionBoundaryPart)) {
-      lastCompactionIndex = index;
-      break;
-    }
-  }
-  return lastCompactionIndex >= 0
-    ? compactActiveSessionMessages(
-        branchActiveMessages,
-        lastCompactionIndex,
-        options.includeCompactPreservedSegment !== false,
-      )
-    : branchActiveMessages;
+  return selectActiveConversationBranch(messages, options);
 }
 
 function dedupeParts(parts: MessagePart[]): MessagePart[] {

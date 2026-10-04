@@ -6,8 +6,6 @@ export * from "./steering.js";
 export * from "./data.js";
 export * from "./conversation.js";
 export * from "./runtime-reminders.js";
-export * from "./compact.js";
-export * from "./compact-media.js";
 export * from "./tool-result.js";
 export * from "./model-errors.js";
 export * from "./model-anomaly.js";

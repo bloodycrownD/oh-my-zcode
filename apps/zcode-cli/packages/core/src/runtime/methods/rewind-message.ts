@@ -337,7 +337,6 @@ async function rewindWorkspaceToCheckpoints(
       strategy: evaluation.strategy,
       targetMessageId: options.targetMessageId,
       targetCheckpointId: baselineCheckpoint.checkpointId,
-      compactBoundaryId: evaluation.compactBoundaryId,
       restoredSnapshotRef: baselineCheckpoint.snapshotRef,
       createdMessageId,
       reason: evaluation.reason,
@@ -595,7 +594,6 @@ async function applyConversationRewindPlan(
       scope: RewindScope.Conversation,
       strategy: evaluation.strategy,
       targetMessageId: options.targetMessageId,
-      compactBoundaryId: evaluation.compactBoundaryId,
       branchCutAfterMessageId,
       branchGeneration,
       reason: evaluation.reason,
@@ -711,7 +709,6 @@ async function rebuildConversationDerivedState(
   const activeMessages = activeSessionMessages(options.persistedMessages, branchOptions);
   const timelineActiveMessages = activeSessionMessages(options.persistedMessages, {
     ...branchOptions,
-    includeCompactPreservedSegment: false,
   });
   const latestAssistant = [...timelineActiveMessages]
     .reverse()
@@ -732,7 +729,6 @@ async function rebuildConversationDerivedState(
     (message) => message.info.role === "user" && !message.info.summary,
   ).length;
   this.currentTurnFileChanges = new Map();
-  this.autoCompactConsecutiveFailures = 0;
 }
 
 function isRewindableUserPrompt(message: MessageWithParts): boolean {

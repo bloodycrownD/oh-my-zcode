@@ -23,7 +23,6 @@ import type {
   TurnState,
 } from "../deps.js";
 import {
-  parseCompactCommand,
   parseRewindCommand,
   createTurnAbortScope,
   throwIfTurnAborted,
@@ -100,7 +99,6 @@ export async function executeTurnCommand(
   // 这里在任何 await 之前冻结本轮事实；后续配置变化只作用于下一轮。
   const admittedModelSelection = options?.intent?.modelSelection ?? this.getSessionModelSelection();
   const admittedOutputStyle = this.config.outputStyle;
-  const compactInstructions = parseCompactCommand(input);
   const rewindCommand = parseRewindCommand(input);
   const turnId = startReservation?.turnId ?? createTurnId();
   const queryId = options?.queryId ?? (options?.inputId as QueryId | undefined) ?? createQueryId();
@@ -214,24 +212,6 @@ export async function executeTurnCommand(
         sessionStartHookResult.additionalContexts,
       );
 
-      if (compactInstructions !== null) {
-        const compactModel = await applySubmissionExecutionState(
-          this,
-          options?.intent,
-          turnTraceContext,
-          options?.modelExecution,
-          admittedModel,
-        );
-        return this.executeManualCompact(
-          input,
-          compactInstructions,
-          turnId,
-          turnTraceContext,
-          turnAbortSignal,
-          options?.inputId,
-          compactModel,
-        );
-      }
       if (rewindCommand !== null) {
         return this.executeRewindCommand(
           input,
@@ -562,7 +542,6 @@ export async function executeTurnCommand(
             : {}),
           modelStepCount: 0,
           historyRoundCount: 0,
-          reactiveCompactAttemptedInCurrentModelStep: false,
           repeatedToolCallSignature: undefined,
           repeatedToolCallStreakCount: 0,
           stopHookContinuationCount: 0,

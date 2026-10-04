@@ -1,11 +1,5 @@
-import {
-  RewindScope,
-  SessionEventType,
-  parseCheckpointCreatedPayload,
-  parseCompactBoundaryPayload,
-} from "../deps.js";
+import { RewindScope, SessionEventType, parseCheckpointCreatedPayload } from "../deps.js";
 import type {
-  CompactBoundaryPayload,
   MessageId,
   MessageWithParts,
   SessionEvent,
@@ -31,7 +25,6 @@ interface FileMutationCheckpointCandidate {
 }
 
 interface RewindEvaluationItem {
-  compactBoundary?: CompactBoundaryPayload;
   id: string;
 }
 
@@ -169,19 +162,7 @@ export function previewTextFromMessage(message: MessageWithParts): string | unde
 export function buildMessageRewindEvaluationItems(
   messages: readonly MessageWithParts[],
 ): RewindEvaluationItem[] {
-  return messages.map((message) => {
-    const compactionPart = message.parts.find(
-      (part) => part.type === "compaction" && part.compactBoundary,
-    );
-    if (compactionPart?.type !== "compaction" || !compactionPart.compactBoundary) {
-      return { id: message.info.id };
-    }
-
-    return {
-      id: message.info.id,
-      compactBoundary: parseCompactBoundaryPayload(compactionPart.compactBoundary),
-    };
-  });
+  return messages.map((message) => ({ id: message.info.id }));
 }
 
 export function buildRewindEvaluationItems(
@@ -192,15 +173,6 @@ export function buildRewindEvaluationItems(
     if (event.type === SessionEventType.CheckpointCreated) {
       const checkpoint = parseCheckpointCreatedPayload(event.payload);
       items.push({ id: checkpoint.targetMessageId ?? checkpoint.messageId });
-      continue;
-    }
-
-    if (event.type === SessionEventType.CompactBoundary) {
-      const compactBoundary = parseCompactBoundaryPayload(event.payload);
-      items.push({
-        id: `compact_boundary:${compactBoundary.boundaryId}`,
-        compactBoundary,
-      });
     }
   }
   return items;
@@ -306,8 +278,6 @@ export function formatUnavailableRewindResponse(
       return "Workspace rewind is unavailable because file-system access is not configured.";
     case "checkpoint_snapshot_unavailable":
       return `Checkpoint${target} cannot be restored because its snapshot artifact is unavailable.`;
-    case "target_covered_by_compact_requires_fork":
-      return `Message${messageTarget || target} is covered by compact for conversation rewind; create a fork to rewind conversation history.`;
     default:
       return `Workspace rewind is unavailable: ${reason}.`;
   }

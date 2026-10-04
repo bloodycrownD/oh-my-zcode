@@ -126,7 +126,6 @@ export interface AgentRuntimeInternal
   currentTurnFileChanges: RuntimeTurnFileChangeMap;
   lastAssistantCompletedAtMs?: number;
   lastEmittedLocalDate?: string;
-  autoCompactConsecutiveFailures: number;
   runtimeCommandQueue: RuntimeCommandQueue;
   runtimeCommandDrainActive: boolean;
   activeForegroundExecution?: ActiveForegroundExecutionState;

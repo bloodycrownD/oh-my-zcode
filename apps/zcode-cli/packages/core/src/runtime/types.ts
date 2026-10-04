@@ -23,9 +23,6 @@ import type { EffectiveModelSelectionResult } from "@zcode/shared/model-selectio
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
 import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
 import type {
-  CompactPhase,
-  CompactReason,
-  CompactTrigger,
   CollaborationMode,
   EmbeddedSearchBackend,
   Logger,
@@ -100,7 +97,6 @@ import type {
   EnvInfo,
   ProjectContext,
   UserInstructionsOptions,
-  AutoCompactPolicyConfig,
   ModelAnomalyGuardConfig,
   OutputStylePromptConfig,
 } from "./deps.js";
@@ -129,7 +125,6 @@ export interface AgentRuntimeConfig {
   modelContextBudgetStrategy?: "legacy" | "preflight-v1";
   maxTurns?: number;
   permissionTimeoutMs?: number;
-  compact?: AutoCompactPolicyConfig;
   targetCompletionVerification?: { enabled?: boolean };
   midConversationSystem?: {
     mode?: "auto" | "force";
@@ -491,7 +486,7 @@ export type ExecuteTurnOptions = ExecuteTurnOptionsBase &
  * start/queue 的选择由持有该 session 状态的 AgentRuntime 原子完成。
  */
 export type PromptAdmissionOptions = ExecuteTurnOptions & {
-  commandKind?: "sendText" | "sendGoalCommand" | "compact";
+  commandKind?: "sendText" | "sendGoalCommand";
   delivery?: "auto" | "start_turn" | "steer_active_turn";
   expectedTurnId?: TurnId;
   /** busy 时的产品队列语义；附件或不可 steer 时由 Core 回退 queue。 */
@@ -681,8 +676,6 @@ export interface ConversationBeforeInputForkOptions {
 
 export interface WorkspaceCheckpointSummary {
   checkpointId: string;
-  compactBoundaryId?: string;
-  coveredByCompact?: boolean;
   createdAt: Date;
   diffRef?: string;
   fileCount?: number;
@@ -706,23 +699,10 @@ export interface RuntimeTurnFileChangeEntry {
 
 export type RuntimeTurnFileChangeMap = Map<string, RuntimeTurnFileChangeEntry>;
 
-export interface CompactTimelineContext {
-  operationId: string;
-  messageId: MessageId;
-  partId: PartId;
-  trigger: CompactTrigger;
-  phase: CompactPhase;
-  compactReason: CompactReason;
-  sourceCommandId?: string;
-  startedAt: number;
-  preCompactTokenCount?: number;
-}
-
 export interface ResumeSessionResult extends SessionHistoryHydrationResult {
   directory: string;
   /** 当前恢复候选：允许仅有有效模型身份供界面补选档位，不代表 Runtime 已绑定。 */
   modelSelection?: ModelSelection;
-  /** resume 是否写回了当前 materialization 无法完整反映的 compact 修补事实。 */
   persistedMessagesReloadRequired: boolean;
   readFileStateRestoredCount: number;
   readFileStateSkippedRangeReadCount: number;
@@ -753,7 +733,7 @@ export interface ExecuteToolsResult {
   events: SessionEvent[];
 }
 
-export type ActiveTurnKind = "regular" | "compact" | "rewind";
+export type ActiveTurnKind = "regular" | "rewind";
 
 export const INLINE_TEXT_ATTACHMENT_MAX_BYTES = 64 * 1024;
 

@@ -193,10 +193,7 @@ export async function formatRewindStatus(this: AgentRuntimeInternal): Promise<st
     checkpoint.fileCount === undefined
       ? "unknown files"
       : `${checkpoint.fileCount} file${checkpoint.fileCount === 1 ? "" : "s"}`;
-  const compactText = checkpoint.coveredByCompact
-    ? `, covered by compact ${checkpoint.compactBoundaryId ?? "boundary"}`
-    : "";
-  return `Latest checkpoint: ${checkpoint.checkpointId} (${fileText}${compactText}). Run /rewind latest to restore workspace files from it.`;
+  return `Latest checkpoint: ${checkpoint.checkpointId} (${fileText}). Run /rewind latest to restore workspace files from it.`;
 }
 
 export async function rewindWorkspaceToCheckpoint(
@@ -316,7 +313,6 @@ export async function rewindWorkspaceToCheckpoint(
       strategy: evaluation.strategy,
       targetMessageId: checkpoint.targetMessageId ?? checkpoint.messageId,
       targetCheckpointId: checkpoint.checkpointId,
-      compactBoundaryId: evaluation.compactBoundaryId,
       restoredSnapshotRef: checkpoint.snapshotRef,
       createdMessageId,
       reason: evaluation.reason,
@@ -367,7 +363,6 @@ export async function finishUnavailableRewind(
         options.checkpoint?.targetMessageId ??
         options.checkpoint?.messageId,
       targetCheckpointId: options.targetCheckpointId,
-      compactBoundaryId: options.evaluation?.compactBoundaryId,
       restoredSnapshotRef: undefined,
       reason: options.reason,
     },

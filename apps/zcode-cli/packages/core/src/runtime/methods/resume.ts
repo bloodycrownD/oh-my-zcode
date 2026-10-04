@@ -145,10 +145,6 @@ export async function resumeFromStore(
     workspaceRoot: this.workspaceRoot,
   });
   await this.ensureContextInitialized(traceContext);
-  const recoveredCompactTimelineCount = await this.recoverInterruptedCompactTimelines(
-    messages,
-    traceContext,
-  );
   const hydration = await hydrateMessageHistoryFromSession({
     artifactStore: this.artifactStore,
     branchCutAfterMessageId,
@@ -168,19 +164,10 @@ export async function resumeFromStore(
     rewindKeptMessageIds,
     rewindTargetMessageId,
   });
-  // compact preserved segment 会把 compact 前消息插回 provider 上下文，
-  // 但它不是 compact 后时间线的 latest anchor，不能用于后续 compact parentID。
-  const timelineActiveMessages = activeSessionMessages(messages, {
-    branchCutAfterMessageId,
-    includeCompactPreservedSegment: false,
-    rewindCreatedMessageId,
-    rewindKeptMessageIds,
-    rewindTargetMessageId,
-  });
-  const latestAssistant = [...timelineActiveMessages]
+  const latestAssistant = [...activeMessages]
     .reverse()
     .find((message) => message.info.role === "assistant");
-  this.latestConversationMessageId = getLatestActiveSessionMessageId(timelineActiveMessages);
+  this.latestConversationMessageId = getLatestActiveSessionMessageId(activeMessages);
   this.latestAssistantMessageId = latestAssistant?.info.id;
   this.latestAssistantTurnId = latestAssistant?.info.anchor?.turnId as TurnId | undefined;
   this.lastAssistantCompletedAtMs =
@@ -243,7 +230,6 @@ export async function resumeFromStore(
       interruptedToolCount: hydration.interruptedToolCount,
       messageCount: hydration.messageCount,
       partCount: hydration.partCount,
-      recoveredCompactTimelineCount,
       recoveredSteerInputCount,
       resumedTodoCount: resumedTodos.length,
       resumedTarget: resumedTarget?.status,
@@ -271,7 +257,6 @@ export async function resumeFromStore(
       hydrationMessageCount: hydration.messageCount,
       module: "core.runtime",
       persistedMessageCount: messages.length,
-      recoveredCompactTimelineCount,
       rewindCreatedMessageId,
       rewindKeptMessageCount: rewindKeptMessageIds?.length ?? 0,
       sessionId: this.sessionId,
@@ -287,7 +272,6 @@ export async function resumeFromStore(
       hydrationMessageCount: hydration.messageCount,
       module: "core.runtime",
       persistedMessageCount: messages.length,
-      recoveredCompactTimelineCount,
       rewindCreatedMessageId,
       rewindKeptMessageCount: rewindKeptMessageIds?.length ?? 0,
       rewindTargetMessageId,
@@ -307,7 +291,6 @@ export async function resumeFromStore(
     readFileStateRestoredCount: readFileStateHydration.restoredCount,
     readFileStateSkippedRangeReadCount: readFileStateHydration.skippedRangeReadCount,
     readFileStateSkippedUnreadableEditCount: readFileStateHydration.skippedUnreadableEditCount,
-    recoveredCompactTimelineCount,
     resumedTodoCount: resumedTodos.length,
     resumedTargetStatus: resumedTarget?.status,
     sessionId: this.sessionId,
@@ -317,9 +300,7 @@ export async function resumeFromStore(
   return {
     ...hydration,
     directory: session.directory,
-    // 中断 compact 恢复会写回 timeline part；bootstrap 不能继续把恢复前
-    // messages 交给 V4，否则首帧会短暂复活 started/retrying 状态。
-    persistedMessagesReloadRequired: recoveredCompactTimelineCount > 0,
+    persistedMessagesReloadRequired: false,
     readFileStateRestoredCount: readFileStateHydration.restoredCount,
     readFileStateSkippedRangeReadCount: readFileStateHydration.skippedRangeReadCount,
     readFileStateSkippedUnreadableEditCount: readFileStateHydration.skippedUnreadableEditCount,
@@ -394,7 +375,7 @@ export async function readSessionTodosForContext(
   try {
     return await this.sessionStore.readTodos({ sessionID: this.sessionId });
   } catch (error) {
-    // Todo state is continuity context. If the store cannot read it, resume/compact can still
+    // Todo state is continuity context. If the store cannot read it, resume can still
     // proceed from transcript history while surfacing the degradation in structured logs.
     this.logger?.warn("Failed to read session todos for context", {
       ...traceContextToLogContext(traceContext),

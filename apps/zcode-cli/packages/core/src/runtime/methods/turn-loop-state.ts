@@ -1,6 +1,4 @@
 import type {
-  CompactPhase,
-  CompactReason,
   MessageId,
   ModelStreamRecoveryStatus,
   Model,
@@ -18,8 +16,6 @@ import type { RuntimeMessageEntry } from "../../agent/message-history.js";
 
 export type PendingStreamRecoveryRequest = ModelStreamRecoveryStatus;
 
-export const RAPID_REFILL_TOOL_TURN_THRESHOLD = 3;
-export const MAX_CONSECUTIVE_RAPID_REFILLS = 3;
 export const AUTOMATION_MUTATION_TOOL_NAMES = ["CronCreate", "CronUpdate", "CronDelete"] as const;
 const AUTOMATION_QUERY_ID_PREFIX = "automation-";
 /**
@@ -35,38 +31,6 @@ export const OFF_PEAK_MUTATION_TOOL_NAMES = ["OffPeakCreate", "SendMessage", "Wo
 // 闲时派发 init 段 traceId 无固定前缀，只有 resume 段是 `${offPeakTaskId}:resume:*`
 // （offpeak- 开头）；前缀只是 resume 兜底信号，主信号必须是显式 offPeakTaskId。
 const OFF_PEAK_QUERY_ID_PREFIX = "offpeak-";
-
-export interface CompactLoopTracking {
-  consecutiveRapidRefills: number;
-  toolTurnsSinceCompact: number;
-}
-
-export interface RapidRefillDecision {
-  consecutiveRapidRefills: number;
-  shouldBlock: boolean;
-  toolTurnsSinceCompact: number;
-}
-
-export type CompactAttemptOutcome = "skipped" | "compacted" | "failed";
-
-export type AutoCompactOutcome = CompactAttemptOutcome | "rapid_refill_blocked";
-
-export interface AutoCompactLoopContext {
-  compactReason: CompactReason;
-  modelStepIndex: number;
-  phase: CompactPhase;
-  rapidRefill: RapidRefillDecision;
-  model: Model;
-  turnRequestState: TurnRequestState;
-}
-
-export interface ReactiveCompactLoopContext {
-  activeEntries?: readonly RuntimeMessageEntry[];
-  modelStepIndex: number;
-  model: Model;
-  rapidRefillCount: number;
-  turnRequestState: TurnRequestState;
-}
 
 export interface TurnRequestState {
   entries: readonly RuntimeMessageEntry[];
@@ -86,7 +50,6 @@ export interface RegularTurnLoopState {
   backgroundSubagentResultConsumed: boolean;
   /** 本轮是否已消费来源为 workflow（dynamic-workflow run）的后台通知。 */
   workflowResultConsumed: boolean;
-  compactTracking?: CompactLoopTracking;
   currentUserMessageId: MessageId;
   drainedSteerForNextRequest?: DrainedPendingInputDiagnostics;
   events: SessionEvent[];
@@ -99,9 +62,8 @@ export interface RegularTurnLoopState {
   /** Core Server 的前台 child Selection override；优先于 profile 与父模型继承。 */
   subagentModelOverride?: SubagentRunOptions["modelOverride"];
   modelStepCount: number;
-  /** 当前 query 已成功写入 provider 可见持久历史的 assistant/compact 产物数量。 */
+  /** 当前 query 已成功写入 provider 可见持久历史的 assistant 产物数量。 */
   historyRoundCount: number;
-  reactiveCompactAttemptedInCurrentModelStep: boolean;
   repeatedToolCallSignature?: string;
   repeatedToolCallStreakCount: number;
   pendingStreamRecoveryRequest?: PendingStreamRecoveryRequest;
@@ -151,47 +113,8 @@ export function isOffPeakCreateRestrictedTurn(state: RegularTurnLoopState): bool
   return disallowedTools.has(OFF_PEAK_MUTATION_TOOL_NAMES[0]);
 }
 
-export function evaluateRapidRefill(
-  tracking: CompactLoopTracking | undefined,
-): RapidRefillDecision {
-  const toolTurnsSinceCompact = tracking?.toolTurnsSinceCompact ?? 0;
-  const consecutiveRapidRefills =
-    tracking && toolTurnsSinceCompact < RAPID_REFILL_TOOL_TURN_THRESHOLD
-      ? tracking.consecutiveRapidRefills + 1
-      : 0;
-
-  return {
-    consecutiveRapidRefills,
-    shouldBlock: consecutiveRapidRefills >= MAX_CONSECUTIVE_RAPID_REFILLS,
-    toolTurnsSinceCompact,
-  };
-}
-
-export function recordCompactSuccess(
-  state: RegularTurnLoopState,
-  decision: RapidRefillDecision,
-): void {
-  state.compactTracking = {
-    consecutiveRapidRefills: decision.consecutiveRapidRefills,
-    toolTurnsSinceCompact: 0,
-  };
-}
-
-export function recordCompletedToolBatch(state: RegularTurnLoopState): void {
-  // 旧 guard 活在整个用户 turn，完整工具批次结束后仍保持 used，导致后续真实 overflow 无法再次 reactive compact。
-  state.reactiveCompactAttemptedInCurrentModelStep = false;
-  if (state.compactTracking) {
-    state.compactTracking.toolTurnsSinceCompact += 1;
-  }
-}
-
 export function recordModelHistoryRound(state: RegularTurnLoopState): void {
   // toolCallCount 会把并行工具按数量展开，无法表达模型真正写入历史的轮次。
   // 调用点沿用既有 modelStepCount 的提交边界，额外累计历史轮次而不改变 loop 控制语义。
-  state.historyRoundCount += 1;
-}
-
-export function recordCompactHistoryRound(state: RegularTurnLoopState): void {
-  // compact summary 是独立的 provider 可见持久历史，但不是普通模型步骤，单独累计一次。
   state.historyRoundCount += 1;
 }

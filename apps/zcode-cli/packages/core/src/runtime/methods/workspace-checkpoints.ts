@@ -113,8 +113,6 @@ export async function listWorkspaceCheckpoints(
     )
     .map(({ checkpoint, timestamp }) => ({
       checkpointId: checkpoint.checkpointId,
-      compactBoundaryId: checkpoint.compactBoundaryId,
-      coveredByCompact: checkpoint.coveredByCompact,
       createdAt: timestamp,
       diffRef: checkpoint.diffRef,
       fileCount: checkpoint.fileCount,

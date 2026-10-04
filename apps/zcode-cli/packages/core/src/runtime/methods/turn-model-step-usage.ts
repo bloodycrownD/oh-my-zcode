@@ -1,5 +1,14 @@
-import type { MessageId, MessageWithParts, Model, ModelUsage, TraceContext } from "../deps.js";
-import type { MainTurnCacheHitAggregate, RuntimeModelTextResult } from "../types.js";
+import type {
+  MessageId,
+  MessageWithParts,
+  Model,
+  ModelMessageContent,
+  ModelUsage,
+  TraceContext,
+} from "../deps.js";
+import type { MainTurnCacheHitAggregate, RunModelTextRequestOptions, RuntimeModelTextResult } from "../types.js";
+import { ESTIMATED_TOKEN_CHAR_DIVISOR } from "@zcode/shared";
+import { modelMessageContentBlockToText } from "@zcode/contracts";
 import type { AgentRuntimeInternal } from "../internal.js";
 import type { RegularTurnLoopState } from "./turn-loop-state.js";
 import type { RuntimeMessageEntry } from "../../agent/message-history.js";
@@ -61,6 +70,71 @@ export function findLatestCommittedAssistantUsage(
     if (baseline) return { messageIndex, baseline };
   }
   return undefined;
+}
+
+const EMPTY_TOOL_CALL_INPUT_JSON = "{}";
+
+/**
+ * 本轮送进 provider 的输入 token 估算。优先用最近一次已提交 assistant 的
+ * provider 口径 usage 作基线，只对基线之后的增量做字符估算——比纯估算准得多。
+ */
+export function estimateCurrentModelInputTokens(
+  messages: RunModelTextRequestOptions["messages"],
+  sourceEntries: readonly (RuntimeMessageEntry | undefined)[] = [],
+): number {
+  const latestUsage = findLatestCommittedAssistantUsage(sourceEntries);
+  if (latestUsage && latestUsage.messageIndex < messages.length) {
+    const { baseline, messageIndex } = latestUsage;
+    const incrementalStartIndex =
+      baseline.contextUsageTokens === undefined ? messageIndex : messageIndex + 1;
+    // usage 归属于已提交的 assistant，反向遍历可见 history replacement 自增游标，
+    // 不再依赖可能失效的绝对 message cursor。若 output 是否存在已被历史归一化打平，
+    // 则 provider input 只取最后 assistant 之前的请求；assistant 本身仍进入本地体量。
+    const providerBaseTokenCount = baseline.contextUsageTokens ?? baseline.inputTokens;
+    return (
+      providerBaseTokenCount +
+      estimateModelMessagesTokens(messages.slice(incrementalStartIndex))
+    );
+  }
+  return estimateModelMessagesTokens(messages);
+}
+
+function estimateModelMessagesTokens(
+  messages: RunModelTextRequestOptions["messages"],
+): number {
+  return messages.reduce((total, message) => {
+    let estimatedCharacterCount = modelMessageContentToTokenEstimateText(message.content).length;
+    // assistant toolCalls 独立保存于 content 之外，估算不能只读 content；
+    // 大型工具入参会完整交给 provider，否则会严重低估本轮体积。
+    for (const toolCall of message.toolCalls ?? []) {
+      estimatedCharacterCount += (
+        toolCall.name + stringifyToolCallInputForTokenEstimate(toolCall.input)
+      ).length;
+    }
+    return total + Math.ceil(estimatedCharacterCount / ESTIMATED_TOKEN_CHAR_DIVISOR);
+  }, 0);
+}
+
+function stringifyToolCallInputForTokenEstimate(input: unknown): string {
+  try {
+    return JSON.stringify(input ?? {}) ?? EMPTY_TOOL_CALL_INPUT_JSON;
+  } catch {
+    // tool_use 解析失败时降级为空对象的 JSON 表示，供 estimator 估算。
+    // ZCode 的模型输入仍可能包含未知内容，异常输入不能让本地体量估算抛错。
+    return EMPTY_TOOL_CALL_INPUT_JSON;
+  }
+}
+
+function modelMessageContentToTokenEstimateText(content: ModelMessageContent): string {
+  if (typeof content === "string") return content;
+
+  // token 估算使用独立投影，避免改变正文。memory、错误文本等没有消费者的行被丢弃。
+  return content
+    .map((block) =>
+      block.type === "reasoning" ? block.text : modelMessageContentBlockToText(block),
+    )
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export function mainTurnCacheHitAggregateFromMessages(input: {

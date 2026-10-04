@@ -34,7 +34,6 @@ import type { RegularTurnLoopState } from "./turn-loop-state.js";
 import {
   isAutomationMutationRestrictedTurn,
   isOffPeakCreateRestrictedTurn,
-  recordCompletedToolBatch,
 } from "./turn-loop-state.js";
 import { recordToolUsageFromResult } from "./turn-tool-usage.js";
 import { recordBrowserTurnToolResult } from "../../repl/browser-turn-state.js";
@@ -428,7 +427,6 @@ export async function executeToolCallsForModelStep(
       // 上限错误只能由用户手动释放名额。把普通 error 继续交给模型，
       // 导致模型循环 List/Delete/Create，甚至尝试 Bash 绕过。当前 turn 只保留一次文本收口。
       state.automationCreateLimitReached = true;
-      recordCompletedToolBatch(state);
       this.logger?.info("Automation create limit switched turn to text-only response", {
         event: "automation.create_limit.text_only_continuation",
         module: "core.runtime",
@@ -468,11 +466,8 @@ export async function executeToolCallsForModelStep(
   });
   await persistToolModelStepFinish(this, state, options);
   await drainInlineGuideForNextRequest(this, state);
-  recordCompletedToolBatch(state);
   this.logger?.debug("After inject, message count", {
-    compactToolTurnsSinceLastCompact: state.compactTracking?.toolTurnsSinceCompact,
     count: this.messageHistory.getMessageCount(),
-    reactiveCompactAttemptedInCurrentModelStep: state.reactiveCompactAttemptedInCurrentModelStep,
   });
   return "continue";
 }

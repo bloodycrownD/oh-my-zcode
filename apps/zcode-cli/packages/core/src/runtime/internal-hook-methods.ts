@@ -6,7 +6,7 @@ import type { RuntimeMessageEntry } from "../agent/message-history.js";
 // 400 行边界（runtime-module-boundary 测试），hooks 一组方法自成一段，单独成文件。
 export interface AgentRuntimeHookMethods {
   runSessionStartHooks(
-    source: "startup" | "resume" | "clear" | "compact",
+    source: "startup" | "resume" | "clear",
     traceContext: TraceContext,
     signal?: AbortSignal,
     model?: Pick<Model, "providerId" | "modelId">,
