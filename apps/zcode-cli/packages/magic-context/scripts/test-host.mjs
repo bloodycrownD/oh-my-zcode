@@ -360,7 +360,7 @@ await it("provider: readMessages projects the live history into raw messages", (
   assert.equal(messages[3].role, "user");
 });
 
-await it("provider: readMessagePage pages the store and falls back to the live tail", () => {
+await it("provider: readMessagePage pages the single ordinal authority of the read", () => {
   const stored = storedMessageFixtures();
   const provider = createRawMessageProvider({
     sessionId: "sess_1",
@@ -368,10 +368,12 @@ await it("provider: readMessagePage pages the store and falls back to the live t
     ...fakeStore(stored),
   });
 
+  // FORK (S24-fix2): the live borrow is non-empty, so it IS the ordinal space for
+  // the whole read — the store's `m*` ids must not appear next to `mc*` ones.
   const first = provider.readMessagePage(0, 2, 3);
   assert.deepEqual(
     first.map((message) => message.id),
-    ["m1", "m2"],
+    ["mc1", "mc2"],
   );
   assert.deepEqual(
     first.map((message) => message.ordinal),
@@ -381,16 +383,35 @@ await it("provider: readMessagePage pages the store and falls back to the live t
   const second = provider.readMessagePage(2, 2, 3);
   assert.deepEqual(
     second.map((message) => message.id),
-    ["m3"],
+    ["mc3"],
   );
 
-  // The store is shorter than the live history: ordinals past the store must
-  // still resolve from the borrowed entries rather than reporting a short session.
-  const past = provider.readMessagePage(3, 5, 100);
-  assert.equal(past.length, 2);
+  // Past the watermark the page is empty — the live half, not the store, defines
+  // the session length.
+  assert.deepEqual(provider.readMessagePage(5, 5, 100), []);
+});
+
+await it("provider: an empty borrow hands the whole read to the persisted store", () => {
+  const provider = createRawMessageProvider({
+    sessionId: "sess_1",
+    borrowRuntimeEntries: () => [],
+    ...fakeStore(storedMessageFixtures()),
+  });
+
+  const first = provider.readMessagePage(0, 2, 3);
   assert.deepEqual(
-    past.map((message) => message.ordinal),
-    [4, 5],
+    first.map((message) => message.id),
+    ["m1", "m2"],
+  );
+  assert.deepEqual(
+    provider.readMessagePage(3, 5, 100),
+    [],
+    "a short store reports a short session; there is no live tail to fall back to",
+  );
+  assert.equal(provider.getMessageCount(), 3);
+  assert.deepEqual(
+    provider.readMessages().map((message) => message.id),
+    ["m1", "m2", "m3"],
   );
 });
 
@@ -411,30 +432,34 @@ await it("provider: range iteration is bounded and ordered", () => {
   assert.deepEqual([...provider.iterateMessageRange(3, 2)], []);
 });
 
-await it("provider: by-id lookups answer from the live history and then the store", () => {
+await it("provider: by-id lookups answer from the read's single authority", () => {
   const provider = createRawMessageProvider({
     sessionId: "sess_1",
     borrowRuntimeEntries: () => sampleRuntimeEntries(),
     ...fakeStore(storedMessageFixtures()),
   });
   assert.equal(provider.readMessageById("mc3").role, "assistant");
-  assert.equal(provider.readMessageById("m2").role, "assistant");
+  // A real persisted row id still resolves through the primary-key lookup, but
+  // it never enters the ordinal space (it is reported by id only).
+  assert.equal(provider.readMessageById("m2").id, "m2");
+  assert.equal(provider.readMessageOrdinalById("m2"), null);
   assert.equal(provider.readMessageById("nope"), null);
-  assert.equal(provider.hasMessageById("m3"), true);
+  assert.equal(provider.hasMessageById("mc5"), true);
   assert.equal(provider.hasMessageById("nope"), false);
   // readMessagePartsById answers with a RawMessageParts (id/role/parts/createdAt),
   // exactly like the source's provider contract.
-  assert.equal(provider.readMessagePartsById("m3").parts[0].text, "three");
+  assert.equal(provider.readMessagePartsById("mc2").parts[0].text, "list the files");
   assert.equal(provider.readMessagePartsById("nope"), null);
 
   const ordinals = provider.readMessageIdOrdinals();
-  assert.equal(ordinals.get("m1"), 1);
-  assert.equal(ordinals.get("m3"), 3);
-  assert.equal(ordinals.get("mc3"), 3, "live entries without a stored row still get an ordinal");
+  assert.equal(ordinals.size, 5, "one source means one vocabulary, not a union of two");
+  assert.equal(ordinals.get("mc1"), 1);
+  assert.equal(ordinals.get("mc5"), 5);
+  assert.equal(ordinals.has("m1"), false);
 
   const ranged = provider.readMessageIdOrdinalsForRange(2, 3);
-  assert.equal(ranged.has("m1"), false);
-  assert.equal(ranged.get("m2"), 2);
+  assert.equal(ranged.has("mc1"), false);
+  assert.equal(ranged.get("mc2"), 2);
   assert.deepEqual([...provider.readMessageIdOrdinalsForRange(9, 8)], []);
 });
 
@@ -446,30 +471,123 @@ await it("provider: counts, ordinal pages and the served-boundary identity", () 
   });
   assert.equal(provider.getMessageCount(), 5);
   assert.equal(provider.getStoredMessageCount(), 3);
-  assert.equal(provider.readServedBoundaryId("m1"), "m1");
+  assert.equal(provider.readServedBoundaryId("mc1"), "mc1");
   assert.equal(provider.readServedBoundaryId(""), null);
 
   const page = provider.readMessageOrdinalPage(null, 10);
-  // Stored rows keep their wall clock; live rows fall back to their ordinal as
-  // the timestamp, so the merged page is ordered by (timeCreated, id) overall.
+  // FORK (S24-fix2): a live-backed page is the live vocabulary only — the stored
+  // rows' ids must not be merged in beside `mc*` ones.
   assert.deepEqual(
     page.map((row) => row.id),
-    ["mc1", "mc2", "mc3", "mc4", "mc5", "m1", "m2", "m3"],
+    ["mc1", "mc2", "mc3", "mc4", "mc5"],
   );
   assert.ok(page.every((row) => row.contributesOrdinal && row.hasValidInfo));
   assert.deepEqual(
     page.map((row) => row.timeCreated),
-    [1, 2, 3, 4, 5, 1000, 2000, 3000],
+    [1, 2, 3, 4, 5],
   );
 
   // The anchor is a strict (timeCreated, id) resume point, so equal timestamps
   // never re-serve a row.
-  const anchored = provider.readMessageOrdinalPage({ timeCreated: 2000, id: "m1" }, 10);
+  const anchored = provider.readMessageOrdinalPage({ timeCreated: 3, id: "mc3" }, 10);
   assert.equal(
-    anchored.some((row) => row.id === "m1"),
+    anchored.some((row) => row.id === "mc3"),
     false,
   );
-  assert.equal(anchored[0].id, "m2");
+  assert.equal(anchored[0].id, "mc4");
+
+  const storedOnly = createRawMessageProvider({
+    sessionId: "sess_1",
+    borrowRuntimeEntries: () => [],
+    ...fakeStore(storedMessageFixtures()),
+  });
+  assert.deepEqual(
+    storedOnly.readMessageOrdinalPage(null, 10).map((row) => row.id),
+    ["m1", "m2", "m3"],
+  );
+  assert.deepEqual(
+    storedOnly.readMessageOrdinalPage(null, 10).map((row) => row.timeCreated),
+    [1000, 2000, 3000],
+  );
+});
+
+// ── FORK (S24-fix2): ordinal↔id stability across passes ───────────────────────
+// The T-M6 root cause: a snapshot resolved from the live half recorded
+// `mc1` at ordinal 1, while `validateBoundarySnapshot` read the same ordinal
+// back through the persisted half and got `msg_…`. Three assertions pin the
+// invariant that closes it: one vocabulary, stable across a growing history,
+// and the same answer whichever read path asks.
+
+await it("provider: ordinal↔id stays stable when new messages land between two reads", () => {
+  const live = sampleRuntimeEntries();
+  const stored = storedMessageFixtures();
+  const provider = createRawMessageProvider({
+    sessionId: "sess_1",
+    borrowRuntimeEntries: () => live,
+    ...fakeStore(stored),
+  });
+
+  const before = provider.readMessageIdOrdinals();
+  assert.deepEqual([...before.keys()], ["mc1", "mc2", "mc3", "mc4", "mc5"]);
+  const offsetIdBefore = provider.readMessageIdOrdinalsForRange(1, 1).keys().next().value;
+  assert.equal(offsetIdBefore, "mc1");
+  const lastIdBefore = before.get("mc5");
+  assert.equal(lastIdBefore, 5);
+
+  // The host appends this turn's user message and the tool result it triggers.
+  live.push({ message: { role: "user", content: "now drop the noisy reads" } });
+  live.push({
+    message: { role: "tool", content: "ok", toolCallId: "call_1", toolName: "Bash" },
+  });
+
+  const after = provider.readMessageIdOrdinals();
+  assert.equal(after.size, 7);
+  for (const [id, ordinal] of before) {
+    assert.equal(after.get(id), ordinal, `${id} must keep ordinal ${ordinal}`);
+  }
+  assert.equal(provider.readMessageIdOrdinalsForRange(1, 1).keys().next().value, offsetIdBefore);
+  // Only the tail moved: the old last message is no longer the last ordinal.
+  assert.equal(after.get("mc5"), 5);
+  assert.notEqual(after.get("mc7"), lastIdBefore);
+  // The persisted ids never surfaced in the ordinal space.
+  assert.deepEqual(
+    [...after.keys()].filter((id) => stored.some((row) => row.id === id)),
+    [],
+  );
+
+  // Every read path must answer the SAME ordinal-1 id — this is exactly what
+  // `validateBoundarySnapshot` compares the trigger's snapshot against.
+  const rangeFirst = provider.readMessageIdOrdinalsForRange(1, 1).keys().next().value;
+  assert.equal(provider.readMessageOrdinalById(rangeFirst), 1);
+  assert.equal(provider.readMessages()[0].id, rangeFirst);
+  assert.equal(provider.readMessagePage(0, 1, 1)[0].id, rangeFirst);
+  assert.equal([...provider.iterateMessageRange(1, 1)][0].id, rangeFirst);
+  assert.equal(provider.readMessageOrdinalPage(null, 1)[0].id, rangeFirst);
+  assert.equal(provider.readMessageOrdinalPage(null, 10)[0].timeCreated, 1);
+});
+
+await it("provider: the live authority survives a store that is longer than the borrow", () => {
+  // A cold turn borrows nothing yet the store already holds rows; the reverse —
+  // a borrow that outruns the store — must not splice the store back in.
+  const live = sampleRuntimeEntries();
+  const longerStore = [
+    ...storedMessageFixtures(),
+    { id: "m4", role: "assistant", parts: [{ type: "text", text: "four" }], createdAt: 4000 },
+  ];
+  const provider = createRawMessageProvider({
+    sessionId: "sess_1",
+    borrowRuntimeEntries: () => live,
+    ...fakeStore(longerStore),
+  });
+  assert.equal(provider.getMessageCount(), 5);
+  assert.equal(provider.getStoredMessageCount(), 4);
+  assert.equal(provider.readMessageIdOrdinals().size, 5);
+  assert.deepEqual(
+    [...provider.iterateMessageRange(1, 99)].map((message) => message.id),
+    ["mc1", "mc2", "mc3", "mc4", "mc5"],
+  );
+  assert.equal(provider.readMessageById("m4").id, "m4", "store rows are by-id only");
+  assert.equal(provider.readMessageOrdinalById("m4"), null);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────

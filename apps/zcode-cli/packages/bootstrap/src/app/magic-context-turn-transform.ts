@@ -112,6 +112,7 @@ import {
   createTagger,
   createTransform,
   findConfigReadinessError,
+  getActiveCompartmentRun,
   getMagicContextDatabasePath,
   getSchemaFenceRejection,
   initializeMagicContextHost,
@@ -125,9 +126,9 @@ import {
   replayLkg,
   resolveLkgModelKeys,
   resolveModelKey,
+  setRawMessageProvider,
   snapshotRuntimeEntries,
   updateSessionMeta,
-  withRawMessageProvider,
   type ContextDatabase,
   type MagicContextConfig,
   type MessageLike,
@@ -907,6 +908,45 @@ function buildTransformDeps(
 }
 
 /**
+ * FORK（S24-fix2）：让本 pass 起的 historian 跑完再交还控制权。
+ *
+ * 上游（OpenCode）是长驻进程：compartment agent 是 fire-and-forget 的，但**进程
+ * 不会退出**，所以它跑完的 publish 与 drain 预留一定落地。
+ *
+ * ZCode CLI 是「一进程 = 一轮 prompt」：transform 一返回，这一轮就结束了，historian
+ * 还在飞的那几秒会随进程一起消失——drain 预留泄漏（下一轮报
+ * `historian skip: internal drain budget spent`）、compartment 不落库。
+ *
+ * 所以这里有界地等这一轮 historian 落定（失败/拒绝都被吞掉——它本来就不该影响
+ * 这一轮请求）。代价是这一轮的请求会晚发出几秒；这是「进程会退出」这件事在本 fork
+ * 里必须付的钱，不改任何判据。
+ *
+ * provider 的注册范围问题见下面 `ensureProviderRegistered` 的注释。
+ */
+const HISTORIAN_SETTLE_TIMEOUT_MS = 60_000;
+
+async function settleInFlightHistorian(sessionId: string): Promise<void> {
+  const active = getActiveCompartmentRun(sessionId);
+  if (!active) return;
+  let timer: NodeJS.Timeout | undefined;
+  const expired = new Promise<void>((resolve) => {
+    timer = setTimeout(resolve, HISTORIAN_SETTLE_TIMEOUT_MS);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([
+      active.promise.then(
+        () => undefined,
+        () => undefined,
+      ),
+      expired,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * 端口工厂。导出是因为 Step 19b 的单测要能用一个**桩 transform**驱动整条
  * 投影 → transform → 反投影链路（真实 `createTransform` 需要 magic-context.db 与
  * historian，属 S20/S24 的实跑范围）。
@@ -954,6 +994,62 @@ export function createZCodeMagicContextTurnTransformPort(
     return cachedRows.rows;
   }
 
+  // FORK（S24-fix2）：provider 的生命周期是**整个进程**，不是「一次 transform」。
+  //
+  // 上游（OpenCode）是长驻进程 + 每事件注册，所以「transform 作用域」≈「进程」；
+  // 本 fork 是「一进程 = 一轮 prompt」，把注册绑在 transform 上就让**同一轮里的
+  // 其它消费者**读不到原始历史：
+  //
+  //   - historian 的 publish 前边界校验（`hasRawSessionMessageById`）——于是模型已经
+  //     产出的 compartment 被 `reason=dangling_boundary` 丢掉；
+  //   - `/ctx-flush`、`/ctx-status` 这类命令；
+  //   - **`ctx_expand` 按 tag 恢复原文**——`renderItemByTag` 走
+  //     `readRawSessionMessageById(tag.toolOwnerMessageId)`，owner 是 `mc<N>`，
+  //     没有 provider 就回落到 OpenCode 的库（ZCode 上不存在），于是每一个被 drop
+  //     的 tag 都回答「original tool owner is no longer in stored history」（T-M3）。
+  //
+  // 于是这里注册一次、之后每轮只**换内容**：deps 闭包读下面这两个 holder，provider
+  // 对象本身不变。进程退出即失效（CLI 一进程一轮），不留跨进程状态。
+  let currentSnapshot: readonly ZCodeRuntimeEntry[] = [];
+  let currentRows: StoredRow[] = [];
+  let providerRegistered = false;
+
+  function ensureProviderRegistered(sessionId: string): void {
+    if (providerRegistered) return;
+    setRawMessageProvider(
+      sessionId,
+      createRawMessageProvider({
+        sessionId,
+        borrowRuntimeEntries: () => currentSnapshot,
+        readStoredMessagePage: ({ afterOrdinal, limit, finalWatermark }) => ({
+          messages: pageFromRows(currentRows, afterOrdinal, limit, finalWatermark),
+          storedCount: currentRows.length,
+        }),
+        getStoredMessageCount: () => currentRows.length,
+        readStoredMessageById: (messageId) => {
+          const row = currentRows.find((candidate) => candidate.id === messageId);
+          return row ? withOrdinal(row) : null;
+        },
+        readStoredOrdinalPage: (after, limit) =>
+          currentRows
+            .filter(
+              (row) =>
+                after === null ||
+                row.timeCreated > after.timeCreated ||
+                (row.timeCreated === after.timeCreated && row.id > after.id),
+            )
+            .slice(0, Math.max(1, Math.floor(limit)))
+            .map((row) => ({
+              id: row.id,
+              timeCreated: row.timeCreated,
+              contributesOrdinal: true,
+              hasValidInfo: true,
+            })),
+      }),
+    );
+    providerRegistered = true;
+  }
+
   return async (
     input: MagicContextTurnTransformInput,
   ): Promise<MagicContextTurnTransformResult> => {
@@ -969,40 +1065,16 @@ export function createZCodeMagicContextTurnTransformPort(
       if (typeof id === "string" && original) originals.set(id, original);
     });
 
-    const storedRows = await resolveStoredRows(input.entries.length);
-    const provider = createRawMessageProvider({
-      sessionId,
-      borrowRuntimeEntries: () => snapshot,
-      readStoredMessagePage: ({ afterOrdinal, limit, finalWatermark }) => ({
-        messages: pageFromRows(storedRows, afterOrdinal, limit, finalWatermark),
-        storedCount: storedRows.length,
-      }),
-      getStoredMessageCount: () => storedRows.length,
-      readStoredMessageById: (messageId) => {
-        const row = storedRows.find((candidate) => candidate.id === messageId);
-        return row ? withOrdinal(row) : null;
-      },
-      readStoredOrdinalPage: (after, limit) =>
-        storedRows
-          .filter(
-            (row) =>
-              after === null ||
-              row.timeCreated > after.timeCreated ||
-              (row.timeCreated === after.timeCreated && row.id > after.id),
-          )
-          .slice(0, Math.max(1, Math.floor(limit)))
-          .map((row) => ({
-            id: row.id,
-            timeCreated: row.timeCreated,
-            contributesOrdinal: true,
-            hasValidInfo: true,
-          })),
-    });
+    currentSnapshot = snapshot;
+    currentRows = await resolveStoredRows(input.entries.length);
+    ensureProviderRegistered(sessionId);
 
     try {
-      await withRawMessageProvider(sessionId, provider, async () => {
-        await transform({}, { messages: projected });
-      });
+      await transform({}, { messages: projected });
+      // FORK（S24-fix2）：见 settleInFlightHistorian 的注释——historian 必须跑完，
+      // 否则「一进程 = 一轮」会让它在 publish 之前随进程一起消失（drain 预留泄漏、
+      // compartment 不落库）。
+      await settleInFlightHistorian(sessionId);
     } catch (error) {
       return handleTransformFailure(
         error,

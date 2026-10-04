@@ -119,6 +119,37 @@ export interface MagicContextHistorianHost {
 const UNKNOWN_HISTORIAN_CONTEXT_LIMIT = 128_000;
 
 /**
+ * FORK（S24-fix2）：historian 请求的输出上限。
+ *
+ * `magicContext.historian.maxTokens` 是用户的旋钮；没配时本 fork 必须自己给一个
+ * 缺省值，原因是**两端的模型契约不同**：上游 OpenCode 的模型层会替调用方补一个
+ * 默认输出上限，而 ZCode 的 `Model` 契约把 `maxOutputTokens` 列为**每次请求的必填项**
+ * （`adapters/src/model/model.ts` 的 `validateOptions`，缺省与越界共用同一条文案）。
+ * 于是「用户没配 maxTokens」在 fork 里等于「每一次旁路请求都在建请求阶段被拒」——
+ * live 证据：`historian failure: … (invalid_model_request): maxOutputTokens is
+ * outside the model option range`，historian 一个 compartment 都产不出来。
+ *
+ * 缺省值按模型自己声明的上限夹紧（`optionSpecs.maxOutputTokens.max`），因此小输出
+ * 模型永远不会被要求超过它接受的值；用户显式配的值同样走这条夹紧。
+ */
+const DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS = 8_192;
+
+function resolveHistorianMaxOutputTokens(
+  config: MagicContextConfig,
+  model: Model,
+): number | undefined {
+  const ceiling = model.optionSpecs?.maxOutputTokens?.max;
+  const max = typeof ceiling === "number" && ceiling > 0 ? Math.floor(ceiling) : undefined;
+  const configured = config.historian.maxTokens;
+  const wanted =
+    typeof configured === "number" && configured > 0
+      ? Math.floor(configured)
+      : Math.min(DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS, max ?? Number.POSITIVE_INFINITY);
+  if (max !== undefined && wanted > max) return max;
+  return wanted > 0 ? wanted : undefined;
+}
+
+/**
  * 主模型窗口未知时的回退。取 200k：绝大多数现代模型在 128k–1M 之间，选一个偏小
  * 的值会让 protected tail 变窄——**那才是危险的方向**（切进本该保护的尾巴），
  * 而偏大只会让可跑头部更窄、多跳一次 pass。
@@ -163,39 +194,63 @@ export function createZCodeSidecarModelCall(deps: {
       attributes: { feature: "magic_context", kind: request.run.kind },
     });
 
-    const result = await runCompactSummaryModelRequest({
-      logger: deps.logger,
-      model,
-      request: {
-        abortSignal: request.abortSignal,
-        messages,
-        // 硬约束的转手点：包内 executor 传进来的字面量 `true` 原样递给原语，
-        // 于是 `compact_stream_boundary` 事件照常发出。中间任何一层都不能"优化"掉它。
-        preserveProviderStreamBoundaries: options.preserveProviderStreamBoundaries,
-        traceContext,
-        metadata: {
-          module: "bootstrap",
-          event: "magic_context.historian_sidecar",
-          agent: request.run.agent,
+    let raw: Awaited<ReturnType<typeof runCompactSummaryModelRequest>>;
+    try {
+      raw = await runCompactSummaryModelRequest({
+        logger: deps.logger,
+        model,
+        request: {
+          abortSignal: request.abortSignal,
+          messages,
+          // 硬约束的转手点：包内 executor 传进来的字面量 `true` 原样递给原语，
+          // 于是 `compact_stream_boundary` 事件照常发出。中间任何一层都不能"优化"掉它。
+          preserveProviderStreamBoundaries: options.preserveProviderStreamBoundaries,
+          traceContext,
+          metadata: {
+            module: "bootstrap",
+            event: "magic_context.historian_sidecar",
+            agent: request.run.agent,
+          },
+          ...(request.run.maxOutputTokens === undefined
+            ? {}
+            : { maxOutputTokens: request.run.maxOutputTokens }),
         },
-        ...(request.run.maxOutputTokens === undefined
-          ? {}
-          : { maxOutputTokens: request.run.maxOutputTokens }),
-      },
-    });
+      });
+    } catch (error) {
+      // FORK (S24-fix2)：包内 executor 把 setup 类失败**分类**成
+      // `HiddenCompletionRefusal{code}`，原始 `error.message` 就此丢失——
+      // 而「为什么这次旁路请求在建请求阶段就被拒」恰恰是排障时唯一需要的那句话
+      // （S24-fix 的 T-M6 取证就是卡在这条信息缺失上）。这里只补一条诊断日志并原样
+      // 重抛：不改分类、不改重试语义、不吞异常。
+      deps.logger.warn(
+        "Magic context historian sidecar request failed before/while reaching the provider",
+        {
+          module: "bootstrap",
+          event: "magic_context.historian_sidecar_failed",
+          model: modelKey,
+          errorName: error instanceof Error ? error.name : typeof error,
+          errorCode:
+            error !== null && typeof error === "object" && "code" in error
+              ? String((error as { code?: unknown }).code)
+              : undefined,
+          detail: error instanceof Error ? error.message : String(error),
+        },
+      );
+      throw error;
+    }
 
-    const finishReason = result.finishReason ?? "";
-    return {
-      text: result.text,
-      usage: result.usage,
+    const finishReason = raw.finishReason ?? "";
+    const result: SidecarModelCallResult = {
+      text: raw.text,
+      usage: raw.usage,
       finishReason,
       // 输出被 cap 截断且一个字都没吐时，historian 必须把它当成一个**不同的失败**
       // （`historianReasoningBudgetDiagnostic`）而不是「空输出」去升级重试。
-      lengthCapped:
-        /length|token.?limit|max.?output/i.test(finishReason) && result.text.length === 0,
+      lengthCapped: /length|token.?limit|max.?output/i.test(finishReason) && raw.text.length === 0,
       providerId: model.providerId,
       modelId: model.modelId,
     };
+    return result;
   };
 }
 
@@ -224,7 +279,6 @@ export function createMagicContextHistorianHost(
   const historianModel = config.historian.model;
   const fallbackModels = [...config.historian.fallback_models];
   const historianTwoPass = config.historian.two_pass;
-  const historianMaxOutputTokens = config.historian.maxTokens;
   const historianTimeoutMs = DEFAULT_HISTORIAN_TIMEOUT_MS;
   const executeThresholdPercentage = readExecuteThreshold(config);
 
@@ -234,10 +288,12 @@ export function createMagicContextHistorianHost(
   let historianContextLimit = UNKNOWN_HISTORIAN_CONTEXT_LIMIT;
 
   let hiddenCompletionExecutor: HiddenCompletionExecutor | undefined;
+  let historianMaxOutputTokens: number | undefined = config.historian.maxTokens;
   if (historianModel !== undefined && deps.createSidecarModel !== undefined) {
     const model = deps.createSidecarModel(historianModel);
     if (model) {
       historianContextLimit = model.properties.contextWindow;
+      historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config, model);
       hiddenCompletionExecutor = createHiddenCompletionExecutor({
         sidecarModelCall: createZCodeSidecarModelCall({
           logger: deps.logger,

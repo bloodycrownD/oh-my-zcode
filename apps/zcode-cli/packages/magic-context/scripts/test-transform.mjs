@@ -888,8 +888,21 @@ for (const [name, fn] of cases) {
   }
 }
 
-rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
-rmSync(b4DbDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 50 });
+// Windows 宿主（杀软/索引器）可能在测试退出后仍短暂持有编译缓存目录的句柄，
+// EPERM 清理失败不应把全绿的测试判成失败；残留目录由下次运行复用前清掉。
+function bestEffortRmSync(path) {
+  try {
+    rmSync(path, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  } catch (error) {
+    if (error && (error.code === "EPERM" || error.code === "EBUSY" || error.code === "ENOTEMPTY")) {
+      console.log(`  note  cleanup deferred (${error.code}): ${path}`);
+    } else {
+      throw error;
+    }
+  }
+}
+bestEffortRmSync(root);
+bestEffortRmSync(b4DbDir);
 
 console.log("");
 if (failures === 0) {
