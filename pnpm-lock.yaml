@@ -466,6 +466,12 @@ importers:
         specifier: workspace:*
         version: link:../contracts
 
+  apps/zcode-cli/packages/magic-context:
+    devDependencies:
+      '@types/node':
+        specifier: ^24.0.0
+        version: 24.12.2
+
   apps/zcode-cli/packages/node-repl-host:
     dependencies:
       '@modelcontextprotocol/server':
