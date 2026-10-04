@@ -119,7 +119,13 @@ function isStrictDescendant(parentPath: string, childPath: string): boolean {
 }
 
 function assertOfficialManifest(manifest: Record<string, unknown>): void {
-  if (manifest.name !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE) {
+  // FORK (S32/S33)：canonical id 已改为 oh-my-zcode-official，但官方 CDN manifest（D-2
+  // 端点保留）仍以旧名 zcode-plugins-official 发布。在其重新发布前，旧名作为别名接受，
+  // 防止本地缓存从 CDN 刷新时因名字不匹配抛错、整个插件市场不可用。
+  if (
+    manifest.name !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE &&
+    manifest.name !== "zcode-plugins-official"
+  ) {
     throw new Error(
       `Official marketplace manifest must be named ${ZCODE_OFFICIAL_PLUGIN_MARKETPLACE}`,
     );
