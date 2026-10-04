@@ -73,7 +73,6 @@ import {
   zcodeToolExecResourceSchema,
   zcodeProcessResourceSampleSchema,
   zcodeSessionCloseResultSchema,
-  zcodeSessionCompactResultSchema,
   zcodeSessionEventsResultSchema,
   zcodeSessionGoalResultSchema,
   zcodeSessionListResultSchema,
@@ -139,7 +138,6 @@ import type {
   ZCodeAgentAddPluginMarketplaceParams,
   ZCodeAgentAppUsageParams,
   ZCodeAgentCancelPluginOperationParams,
-  ZCodeAgentCompactParams,
   ZCodeAgentConfigurePluginParams,
   ZCodeAgentResetPluginConfigParams,
   ZCodeAgentCreateSessionParams,
@@ -323,7 +321,6 @@ const PLUGIN_MANAGEMENT_REQUEST_TIMEOUT_MS = 5 * 60_000;
 /** 资源管理器每秒刷新；子进程映射是纯内存请求，超时就当本轮无映射，不能拖慢采样节拍。 */
 const CHILD_PROCESSES_REQUEST_TIMEOUT_MS = 800;
 const PLUGIN_OPERATION_CANCEL_REQUEST_TIMEOUT_MS = 5_000;
-const SESSION_COMPACT_REQUEST_TIMEOUT_MS = 5 * 60_000;
 
 interface PendingPermissionRequest {
   client: ZCodeProtocolClient;
@@ -725,15 +722,6 @@ function buildSessionSendParams(
     ...(params.toolDenylist !== undefined && !omittedFields.has("toolDenylist")
       ? { toolDenylist: params.toolDenylist }
       : {}),
-  };
-}
-
-function buildSessionCompactParams(params: ZCodeAgentCompactParams) {
-  return {
-    sessionId: params.sessionId,
-    inputId: params.inputId,
-    instructions: params.instructions,
-    expectedRevision: params.expectedRevision,
   };
 }
 
@@ -4505,48 +4493,6 @@ export function createZCodeAgentService(
           queryId: params.queryId ?? null,
           sessionId: params.sessionId,
           sessionTraceId: sessionTraceId ?? null,
-          workspaceKey: resolveWorkspaceKey(params),
-          workspacePath: params.workspacePath,
-        });
-        throw error;
-      }
-    },
-
-    async compactSession(params: ZCodeAgentCompactParams) {
-      const startedAt = Date.now();
-      const client = await getClient(params);
-      const sessionTraceId = getSessionTraceId(params);
-      logger.info(sessionTraceId ?? params.inputId, "ZCode Protocol session/compact 开始", {
-        inputId: params.inputId,
-        sessionId: params.sessionId,
-        workspaceKey: resolveWorkspaceKey(params),
-        workspacePath: params.workspacePath,
-      });
-      try {
-        const result = await client.request(
-          zcodeProtocolMethods.sessionCompact,
-          buildSessionCompactParams(params),
-          zcodeSessionCompactResultSchema,
-          {
-            // compact 的模型维护态可能进入分钟级窗口；这里放宽的是 ACK 边界，
-            // 终态仍由 session timeline / snapshot 推送，不能把它当作同步 compact 结果。
-            timeoutMs: SESSION_COMPACT_REQUEST_TIMEOUT_MS,
-          },
-        );
-        logger.info(sessionTraceId ?? params.inputId, "ZCode Protocol session/compact ACK", {
-          durationMs: Date.now() - startedAt,
-          inputId: params.inputId,
-          sessionId: params.sessionId,
-          workspaceKey: resolveWorkspaceKey(params),
-          workspacePath: params.workspacePath,
-        });
-        return result;
-      } catch (error) {
-        logger.warn(sessionTraceId ?? params.inputId, "ZCode Protocol session/compact 失败", {
-          durationMs: Date.now() - startedAt,
-          error: error instanceof Error ? error.message : String(error),
-          inputId: params.inputId,
-          sessionId: params.sessionId,
           workspaceKey: resolveWorkspaceKey(params),
           workspacePath: params.workspacePath,
         });

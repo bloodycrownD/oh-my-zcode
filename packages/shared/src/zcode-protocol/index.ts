@@ -1779,32 +1779,6 @@ export const zcodeSessionForkResultSchema = z
   .strict();
 export type ZCodeSessionForkResult = z.infer<typeof zcodeSessionForkResultSchema>;
 
-export const zcodeSessionCompactParamsSchema = z
-  .object({
-    sessionId: nonEmptyString,
-    inputId: nonEmptyString.optional(),
-    instructions: z.string().optional(),
-    expectedRevision: z.number().int().nonnegative().optional(),
-  })
-  .strict();
-export type ZCodeSessionCompactParams = z.infer<typeof zcodeSessionCompactParamsSchema>;
-
-export const zcodeSessionCompactResultSchema = z
-  .object({
-    response: z.string(),
-    snapshot: zcodeSessionStateSnapshotSchema,
-    compact: z
-      .object({
-        state: z.enum(["accepted", "already_running"]),
-        inputId: nonEmptyString.optional(),
-        operationId: nonEmptyString.optional(),
-      })
-      .strict()
-      .optional(),
-  })
-  .strict();
-export type ZCodeSessionCompactResult = z.infer<typeof zcodeSessionCompactResultSchema>;
-
 export const zcodeSessionGoalActionSchema = z.enum([
   "show",
   "set",
@@ -3578,7 +3552,6 @@ export const zcodeProtocolMethods = {
   // forkSessionAtMessage 钩子直调 server-operations.forkSession op）。wire case 与
   // fork params/result schema 保留＝op 存活面；fork record 归 v4 原生重写。
   sessionFork: "session/fork",
-  sessionCompact: "session/compact",
   sessionGoal: "session/goal",
   sessionClose: "session/close",
   // setModel 仍被 zcodeSessionService 的 desktop 旧链路消费；replayable

@@ -46,7 +46,6 @@ import {
   zcodeProtocolErrorCodes,
   zcodeProtocolMethods,
   zcodeSessionCancelBackgroundTaskParamsSchema,
-  zcodeSessionCompactParamsSchema,
   zcodeSessionCloseParamsSchema,
   zcodeSessionCreateParamsSchema,
   zcodeSessionEventsParamsSchema,
@@ -2010,113 +2009,6 @@ export async function sendPrompt(context: ZCodeProtocolAgentServerContext, rawPa
   // 同步等待首 token/整轮会让超过 30s 的请求触发 host timeout，并且阻塞后续 session/resume、list 等协议消息。
   // 这里收到输入后立即 ACK，后台 turn 继续通过 session event/state.updated 推送进度。
   return afterPromptAccepted(context, record, "prompt_started");
-}
-
-export async function compactSession(context: ZCodeProtocolAgentServerContext, rawParams: unknown) {
-  const params = parseParams(zcodeSessionCompactParamsSchema, rawParams);
-  const record = requireSession(context, params.sessionId);
-  assertExpectedRevision(record, params.expectedRevision);
-  const activeTurn = record.app.runtime.getActiveTurnInfo();
-  if (activeTurn?.kind === "compact") {
-    // 重复 `/compact` 是同一 session 的上下文维护请求；压缩中再收到时应直接丢弃，
-    // 不能进入普通 prompt/steer 队列，也不能渲染成一次失败的压缩横条。
-    return {
-      response: "",
-      snapshot: await snapshot(context, record, undefined, {
-        modelAvailability: "current",
-      }),
-      compact: {
-        state: "already_running" as const,
-        ...(params.inputId ? { inputId: params.inputId } : {}),
-      },
-    };
-  }
-  ensureNoActiveTurn(record, "Cannot compact while a prompt is running");
-  if (record.restoreWarning) {
-    throw new ProtocolRequestError(-32031, record.restoreWarning.message, {
-      code: record.restoreWarning.type,
-      sessionId: record.app.sessionId,
-      workspace: record.workspace,
-    });
-  }
-  await ensureSessionModelAvailableForNextTurn(context, record);
-  const instructions = params.instructions?.trim();
-  const command = instructions ? `/compact ${instructions}` : "/compact";
-  const abortController = new AbortController();
-  // compact 的真实模型请求在后台执行，但 Stop 仍通过 record.activeAbortController 中断。
-  // 如果这里不登记 controller，压缩中的模型请求会继续跑到自然结束。
-  record.activeAbortController = abortController;
-  void runWithSessionResidencyFinalization(record, () =>
-    runCompactTurnInBackground(context, record, {
-      abortController,
-      command,
-      inputId: params.inputId,
-    }),
-  ).catch(() => {
-    // 后台 compact 的错误会通过 compact timeline/state.updated 降级上报；这里兜底防 unhandled rejection。
-  });
-  record.stateRevision++;
-  record.updatedAt = Date.now();
-  const acceptedSnapshot = await snapshot(context, record, undefined, {
-    modelAvailability: "current",
-  });
-  emitStateUpdated(context, record, "compact_started", { status: "running" });
-  return {
-    response: "",
-    snapshot: acceptedSnapshot,
-    compact: {
-      state: "accepted" as const,
-      ...(params.inputId ? { inputId: params.inputId } : {}),
-    },
-  };
-}
-
-async function runCompactTurnInBackground(
-  context: ZCodeProtocolAgentServerContext,
-  record: ZCodeProtocolSessionRecord,
-  params: {
-    abortController: AbortController;
-    command: string;
-    inputId?: string;
-  },
-): Promise<void> {
-  const startedAt = Date.now();
-  let mutationReason = "session_compacted";
-  context.logger?.info("ZCode Protocol background compact started", {
-    inputId: params.inputId,
-    sessionId: record.app.sessionId,
-    workspacePath: record.workspace.workspacePath,
-  });
-  try {
-    await record.app.submitPrompt(params.command, {
-      abortSignal: params.abortController.signal,
-      inputId: params.inputId,
-    });
-    context.logger?.info("ZCode Protocol background compact completed", {
-      durationMs: Date.now() - startedAt,
-      inputId: params.inputId,
-      sessionId: record.app.sessionId,
-      workspacePath: record.workspace.workspacePath,
-    });
-  } catch (error) {
-    mutationReason = params.abortController.signal.aborted
-      ? "session_compact_cancelled"
-      : "session_compact_failed";
-    context.logger?.warn("ZCode Protocol background compact failed", {
-      durationMs: Date.now() - startedAt,
-      error: error instanceof Error ? error.message : String(error),
-      inputId: params.inputId,
-      sessionId: record.app.sessionId,
-      workspacePath: record.workspace.workspacePath,
-    });
-  } finally {
-    if (record.activeAbortController === params.abortController) {
-      // compact 结束后必须先释放 active lock 再广播状态；否则 queued prompt
-      // 或后续 `/compact` 会在 ready 边界短暂撞上旧 controller。
-      record.activeAbortController = undefined;
-    }
-  }
-  await afterStateMutation(context, record, mutationReason);
 }
 
 export async function goalSession(context: ZCodeProtocolAgentServerContext, rawParams: unknown) {

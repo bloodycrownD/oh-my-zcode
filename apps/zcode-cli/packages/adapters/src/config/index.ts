@@ -115,8 +115,6 @@ class ConfigStore {
         this.set(ConfigKey.HttpTimeout, config.network.timeout, scope);
     }
     if (config.features) {
-      if (config.features.compact !== undefined)
-        this.set(ConfigKey.FeatureCompact, config.features.compact, scope);
       if (config.features.rewind !== undefined)
         this.set(ConfigKey.FeatureRewind, config.features.rewind, scope);
       if (config.features.subagent !== undefined)
@@ -290,7 +288,6 @@ export class ConfigPortImpl implements ConfigPort {
         timeout: this.store.get(ConfigKey.HttpTimeout) ?? DefaultConfig.network.timeout,
       },
       features: {
-        compact: this.store.get(ConfigKey.FeatureCompact) ?? true,
         rewind: this.store.get(ConfigKey.FeatureRewind) ?? true,
         subagent: this.store.get(ConfigKey.FeatureSubagent) ?? true,
         memory: this.store.get(ConfigKey.FeatureMemory) ?? true,
@@ -407,8 +404,6 @@ function getDefaultValue(key: ConfigKey): unknown {
       return defaults.network.caCertFile;
     case ConfigKey.HttpTimeout:
       return defaults.network.timeout;
-    case ConfigKey.FeatureCompact:
-      return defaults.features.compact;
     case ConfigKey.FeatureRewind:
       return defaults.features.rewind;
     case ConfigKey.FeatureSubagent:

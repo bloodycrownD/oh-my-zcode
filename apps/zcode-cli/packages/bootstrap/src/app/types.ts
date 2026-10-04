@@ -221,7 +221,7 @@ export interface SteerTurnOptions {
   inputId?: string;
   queryId?: QueryId;
   expectedTurnId?: TurnId;
-  commandKind?: "sendText" | "sendGoalCommand" | "compact";
+  commandKind?: "sendText" | "sendGoalCommand";
   /** 投递语义：queue=消费时切新轮；guide=内联当前轮。缺省 queue。 */
   delivery?: "guide" | "queue";
   intent?: TurnInputIntentMetadata;
@@ -241,7 +241,7 @@ export type SendInputOptions = SubmitPromptOptions & {
   queueDelivery?: "guide" | "queue";
   requireIdle?: boolean;
   expectedTurnId?: TurnId;
-  commandKind?: "sendText" | "sendGoalCommand" | "compact";
+  commandKind?: "sendText" | "sendGoalCommand";
 };
 
 export interface UserPromptInput {

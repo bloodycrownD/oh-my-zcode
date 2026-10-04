@@ -122,7 +122,6 @@ function sessionUsageSeedFromRuntimeContextUsage(
     contextWindow: {
       usedTokens: contextUsage.used,
       maxTokens: contextWindowOverride ?? null,
-      autoCompactThresholdTokens: null,
       ...(contextUsage.cache ? { cache: contextUsage.cache } : {}),
       ...(contextUsage.breakdown ? { breakdown: contextUsage.breakdown } : {}),
     },
@@ -349,9 +348,6 @@ function resolveInputCommandForAdmission(
       ...(payload.context_refs ? { sharedContextRefs: payload.context_refs } : {}),
     };
   }
-  if (envelope.type === "compact") {
-    return { kind: "compact", text: "/compact", attachments: [] };
-  }
   if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") return null;
   if (!envelope.sessionId) return null;
   const payload = envelope.payload as {
@@ -401,7 +397,6 @@ function isConversationInputAdmissionCommand(type: CommandEnvelope["type"]): boo
   return (
     type === "sendText" ||
     type === "sendGoalCommand" ||
-    type === "compact" ||
     type === "editUserQuery" ||
     type === "retryTurn"
   );
@@ -738,13 +733,11 @@ export function createConversationV4Gateway(
       // 幂等更新同一记录。startNow 不能伪装成 queue，否则重启 discarded 的诊断事实失真。
       const requestedDelivery =
         input.requestedDelivery ??
-        (kind === "compact" && routingMode !== null && routingMode !== "startNow"
+        (routingMode === "enqueue"
           ? "queue"
-          : routingMode === "enqueue"
-            ? "queue"
-            : routingMode === "guide" && kind === "sendText"
-              ? "guide"
-              : "startNow");
+          : routingMode === "guide" && kind === "sendText"
+            ? "guide"
+            : "startNow");
       const attachmentRefs = input.attachments;
       const fallbackReasonCode =
         input.fallbackReasonCode ??

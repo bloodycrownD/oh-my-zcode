@@ -54,20 +54,12 @@ function checkpointToSelectionItem(
     checkpoint.fileCount === undefined
       ? "unknown files"
       : `${checkpoint.fileCount} file${checkpoint.fileCount === 1 ? "" : "s"}`;
-  const compact = checkpoint.coveredByCompact
-    ? ` | compact ${checkpoint.compactBoundaryId ?? "covered"}`
-    : "";
   const preview = checkpoint.preview ?? `message ${shortId(checkpoint.messageId)}`;
   return {
     command: `/${action} ${checkpoint.checkpointId}`,
     id: checkpoint.checkpointId,
-    keywords: [
-      checkpoint.messageId,
-      checkpoint.scope,
-      checkpoint.compactBoundaryId ?? "",
-      checkpoint.preview ?? "",
-    ],
-    meta: `${fileCount} | ${formatTime(checkpoint.createdAt)}${compact}`,
+    keywords: [checkpoint.messageId, checkpoint.scope, checkpoint.preview ?? ""],
+    meta: `${fileCount} | ${formatTime(checkpoint.createdAt)}`,
     primary: preview,
     secondary: shortId(checkpoint.checkpointId),
   };

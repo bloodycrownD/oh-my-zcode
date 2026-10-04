@@ -36,7 +36,6 @@ const networkSchema = z.object({
 });
 
 const featuresSchema = z.object({
-  compact: z.boolean().optional(),
   rewind: z.boolean().optional(),
   subagent: z.boolean().optional(),
   memory: z.boolean().optional(),

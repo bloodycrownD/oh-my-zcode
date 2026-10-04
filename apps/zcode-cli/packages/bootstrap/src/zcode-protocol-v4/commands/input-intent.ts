@@ -40,12 +40,7 @@ export function inputIntentMetadata(
     sourceCommandId: envelope.commandId,
     queueItemId: admission.queueItemId,
     clientId: envelope.clientId || "cli",
-    kind:
-      envelope.type === "compact"
-        ? "compact"
-        : envelope.type === "sendGoalCommand"
-          ? "sendGoalCommand"
-          : "sendText",
+    kind: envelope.type === "sendGoalCommand" ? "sendGoalCommand" : "sendText",
     // live intent 过去只带 kind/来源，projection 只能回退可见 command 文案；
     // goal 的 displayText（如 `/GoAl replace X`）不是 runtime 已解析的 canonical objective。
     text: options.text,

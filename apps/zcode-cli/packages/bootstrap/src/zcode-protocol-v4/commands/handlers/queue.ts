@@ -16,9 +16,8 @@ import type { V4CommandCoreHost, V4SessionRecordView } from "../types.js";
 import {
   applyGoalCommand,
   parseGoalObjectiveFromCommandText,
-  startManualCompact,
-  V4GoalCompactRejectedError,
-} from "./goal-compact.js";
+  V4GoalRejectedError,
+} from "./goal.js";
 import { preemptActiveTurnAndWait } from "./session-flow.js";
 import { V4CommandNoopError } from "../../v4-gateway.js";
 import { commandExecutionContextOf } from "../executor.js";
@@ -95,11 +94,6 @@ async function editQueueItem(
   const payload = envelope.payload as CommandPayloadMap["editQueueItem"];
   const record = requireRecord(host, envelope.sessionId);
   const queueItem = host.getQueueItem?.(record.app.sessionId, payload.queueItemId) ?? null;
-  if (queueItem?.kind === "compact") {
-    // compact 是 typed maintenance intent；允许改文本会把它伪装成普通输入，
-    // 但 commandKind 仍是 compact，消费时产生与 UI 文案不一致的压缩副作用。
-    throw new V4QueueItemNotEditableError(payload.queueItemId);
-  }
   // core reducer 同 id 原地更新（保位）；未命中 = noop + warn（同 delete 的竞态语义）。
   const edited = await record.app.editQueueItem(payload.queueItemId, payload.newText);
   if (!edited) {
@@ -204,12 +198,9 @@ async function sendQueuedNow(
         ? parseGoalObjectiveFromCommandText(queueItem.text)
         : undefined;
     if (queueItem.kind === "sendGoalCommand" && !objective) {
-      throw new V4GoalCompactRejectedError("emptyObjective", "Usage: /goal <objective>");
+      throw new V4GoalRejectedError("emptyObjective", "Usage: /goal <objective>");
     }
-    const attachments =
-      queueItem.kind === "compact"
-        ? undefined
-        : await mapAttachmentRefsToTurnAttachments(record.app, queueItem.attachments);
+    const attachments = await mapAttachmentRefsToTurnAttachments(record.app, queueItem.attachments);
     if (!autoDrainPromotion) acquirePromotionLease("after-current");
     let preempted = false;
     if (!autoDrainPromotion) {
@@ -224,10 +215,7 @@ async function sendQueuedNow(
     ) {
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
-    if (queueItem.kind === "compact") {
-      await startManualCompact(host, record, queueItem.sourceCommandId, foregroundPromotionLeaseId);
-      leaseReleaseOwnedByBackground = true;
-    } else if (queueItem.kind === "sendGoalCommand") {
+    if (queueItem.kind === "sendGoalCommand") {
       const intent = inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text);
       const goalContinuationWillStart = !(
         intent.planEnabled ??
@@ -267,12 +255,6 @@ async function sendQueuedNow(
       ...traceOptions,
     });
     if (!removed) throw new V4QueuePromotionCommitError(payload.queueItemId);
-    if (queueItem.kind === "compact") {
-      // no-op compact 可能在 promoting 项删除前就完成；它的 ready hook 此时看见的
-      // 仍是 dispatch=promoting，无法继续消费下一条 typed intent。删除后再过一次 mutation
-      // 边界可关闭这个竞态；正常慢 compact 因 active controller 存在不会重复 drain。
-      await host.afterLegacyStateMutation?.(record, "queue_compact_promoted");
-    }
     return undefined;
   } finally {
     if (foregroundPromotionLeaseAcquired && !leaseReleaseOwnedByBackground) {

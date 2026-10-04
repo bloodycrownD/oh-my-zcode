@@ -30,7 +30,6 @@ export const ConfigKey = {
   HttpTimeout: "network.timeout",
 
   // Features
-  FeatureCompact: "features.compact",
   FeatureRewind: "features.rewind",
   FeatureSubagent: "features.subagent",
   FeatureMemory: "features.memory",
@@ -123,7 +122,6 @@ export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeou
           : K extends "network.timeout"
             ? number
             : K extends
-                  | "features.compact"
                   | "features.rewind"
                   | "features.subagent"
                   | "features.memory"
@@ -242,7 +240,6 @@ export interface RuntimeConfig {
     timeout: number;
   };
   features: {
-    compact: boolean;
     rewind: boolean;
     subagent: boolean;
     memory: boolean;
@@ -341,7 +338,6 @@ export const DefaultRuntimeConfig: RuntimeConfig = {
     timeout: 180000,
   },
   features: {
-    compact: true,
     rewind: true,
     subagent: true,
     memory: true,

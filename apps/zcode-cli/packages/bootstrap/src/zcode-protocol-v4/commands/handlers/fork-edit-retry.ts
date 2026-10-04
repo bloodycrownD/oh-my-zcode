@@ -26,7 +26,7 @@ import {
   preemptActiveTurnAndWait,
   V4InputAdmissionRejectedError,
 } from "./session-flow.js";
-import { applyGoalCommand } from "./goal-compact.js";
+import { applyGoalCommand } from "./goal.js";
 import type { ConversationEditTarget } from "../../product-projection.js";
 
 const CONVERSATION_COMMAND_LOG_MODULE = "bootstrap.zcode_protocol_v4.commands";

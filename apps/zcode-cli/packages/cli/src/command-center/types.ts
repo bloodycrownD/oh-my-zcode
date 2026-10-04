@@ -96,8 +96,6 @@ export type CommandCenterForkResult = {
 
 export type CommandCenterCheckpoint = {
   checkpointId: string;
-  compactBoundaryId?: string;
-  coveredByCompact?: boolean;
   createdAt: Date | number | string;
   fileCount?: number;
   messageId: string;

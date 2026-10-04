@@ -24,15 +24,6 @@ export function parseSlashCommand(input: string): SlashCommand | null {
   ).toLowerCase();
   const args = commandEnd === -1 ? "" : trimmed.slice(commandEnd + 1).trim();
 
-  if (rawName === "compact") {
-    return {
-      args,
-      name: "compact",
-      rawName,
-      type: "known",
-    };
-  }
-
   // magic-context 的四个本地控制命令（S22）。它们**不**发模型提示，由
   // `handlers/ctx.ts` 就地执行：/ctx-status 读一份文本快照，/ctx-reduce 与
   // /ctx-expand 走工具同一条路径，/ctx-recomp 触发一次 compartment 重算。

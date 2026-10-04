@@ -2087,45 +2087,6 @@ export function createZCodeTaskServiceAdapter(
       });
     },
 
-    async compactSession(params) {
-      // v4 compact 是 CAS 命令（必带 v4 conversation revision
-      // 的 baseRevision），而本 facade 的 expectedRevision 是旧协议 stateRevision——
-      // 两套计数器不可互换；replayable 侧拿到 v4 revision 前强行迁移会造成假 stale。
-      // 且 v4 compact 无 instructions/runtimeModel 载荷。
-      const target = params.workspacePath
-        ? {
-            taskId: params.taskId,
-            workspacePath: params.workspacePath,
-            workspaceIdentity: params.workspaceIdentity,
-          }
-        : getTaskTarget(params.taskId);
-      notifySyncerSession(target);
-      if (params.inputId) {
-        activePromptInputIds.set(taskKey(target), params.inputId);
-      }
-      try {
-        const result = await options.zcodeAgentService.compactSession({
-          workspacePath: target.workspacePath,
-          workspaceIdentity: target.workspaceIdentity,
-          sessionId: params.taskId,
-          inputId: params.inputId,
-          instructions: params.instructions,
-          expectedRevision: params.expectedRevision,
-        });
-        if (result.compact?.state === "accepted") {
-          return result;
-        }
-        const meta = await syncTaskIndexSnapshot(result.snapshot);
-        // compact 收敛是状态同步，不涉及归属；缺省 task_meta_changed 会触发全局 membership 重拉。
-        emitWorkspaceTaskListChanged(target, meta, "task_status_changed");
-        activePromptInputIds.delete(taskKey(target));
-        return result;
-      } catch (error) {
-        activePromptInputIds.delete(taskKey(target));
-        throw error;
-      }
-    },
-
     async goalSession(params) {
       // v4 sendGoalCommand 只覆盖 set 语义（text 原文），
       // 本 facade 的 action=resume/clear/replace/status 依赖旧 op 的结构化 action 面

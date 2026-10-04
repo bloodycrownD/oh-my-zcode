@@ -8,7 +8,6 @@ import { BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES, type ZCodeSlashCommand } from
 export const APP_PROTOCOL_VISIBLE_BUILTIN_SLASH_COMMAND_NAMES = [
   "goal",
   "workflow",
-  "compact",
   "init",
 ] as const;
 

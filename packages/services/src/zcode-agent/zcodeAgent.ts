@@ -10,7 +10,6 @@ import type {
   ZCodeAgentMcpServer,
   ZCodeBackgroundTurnAttribution,
   TraceId,
-  ZCodeSessionCompactResult,
   ZCodeSessionGoalAction,
   ZCodeSessionGoalResult,
   ZCodeMessageWithParts,
@@ -284,12 +283,6 @@ export interface ZCodeAgentSendPromptParamsBase extends ZCodeAgentSessionTarget 
 
 export type ZCodeAgentSendPromptParams = ZCodeAgentSendPromptParamsBase &
   ZCodeBackgroundTurnAttribution;
-
-export interface ZCodeAgentCompactParams extends ZCodeAgentSessionTarget {
-  inputId?: string;
-  instructions?: string;
-  expectedRevision?: number;
-}
 
 export interface ZCodeAgentGoalParams extends ZCodeAgentSessionTarget {
   inputId?: string;
@@ -714,7 +707,6 @@ export interface IZCodeAgentService {
    * pass-through；新代码禁止回用。
    */
   sendPrompt(params: ZCodeAgentSendPromptParams): Promise<ZCodeSessionSendResult>;
-  compactSession(params: ZCodeAgentCompactParams): Promise<ZCodeSessionCompactResult>;
   goalSession(params: ZCodeAgentGoalParams): Promise<ZCodeSessionGoalResult>;
   closeSession(
     params: ZCodeAgentSessionTarget & { expectedPersistence?: "deferred" | "immediate" },

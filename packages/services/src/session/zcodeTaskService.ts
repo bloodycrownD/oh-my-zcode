@@ -6,7 +6,6 @@ import { createServiceDescriptor } from "#src/descriptors.js";
 import type {
   ZCodeImportSessionsResult,
   ZCodeImportableSessionCandidate,
-  ZCodeSessionCompactResult,
   ZCodeSessionGoalAction,
   ZCodeSessionGoalResult,
   ZCodeTaskCreateResult,
@@ -312,16 +311,6 @@ export interface IZCodeTaskService {
     workspaceIdentity?: string;
     runId?: TraceId;
   }): Promise<void>;
-
-  /** 执行 agent 内建 /compact 命令；手机 replayable 仍经 shared host 路由。 */
-  compactSession(params: {
-    taskId: string;
-    workspacePath?: string;
-    workspaceIdentity?: string;
-    inputId?: string;
-    instructions?: string;
-    expectedRevision?: number;
-  }): Promise<ZCodeSessionCompactResult>;
 
   /** 执行 agent 内建 /goal 命令；不要把 /goal 当普通正文 prompt 发送。 */
   goalSession(params: {

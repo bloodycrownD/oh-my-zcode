@@ -26,7 +26,6 @@ import type {
 import {
   cancelBackgroundTask,
   closeSession,
-  compactSession,
   createSession,
   forkSession,
   generateWorkspaceText,
@@ -591,8 +590,6 @@ export class ZCodeProtocolAgentServer {
         return await cancelBackgroundTask(this.context, request.params);
       case zcodeProtocolMethods.sessionFork:
         return await forkSession(this.context, request.params);
-      case zcodeProtocolMethods.sessionCompact:
-        return await compactSession(this.context, request.params);
       case zcodeProtocolMethods.sessionGoal:
         return await goalSession(this.context, request.params);
       case zcodeProtocolMethods.sessionSetModel:

@@ -1,8 +1,6 @@
 // SessionEvent payload → ConversationRow 的构造纯函数。
 // row 自包含原则：这里产出的每一行都必须不依赖其它行即可渲染。
 import type {
-  CompactTimelineStatus,
-  CompactTrigger,
   GoalStatus,
   SyntheticUserMessageSource,
   ToolResultPayload,
@@ -113,34 +111,6 @@ export function mapTurnResultToHeaderState(
     default:
       return "failed";
   }
-}
-
-// CompactTimelineStatus → compact marker.status。
-// 语义映射：retrying 仍是运行中；skipped = 无事发生（noop）；interrupted = 被 stop（cancelled）。
-export function mapCompactMarkerStatus(
-  status: CompactTimelineStatus,
-): Extract<TimelineMarkerPayload, { type: "compact" }>["status"] {
-  switch (status) {
-    case "started":
-    case "retrying":
-      return "running";
-    case "completed":
-      return "success";
-    case "skipped":
-      return "noop";
-    case "interrupted":
-      return "cancelled";
-    default:
-      return "failed";
-  }
-}
-
-// CompactTrigger → marker.origin：manual 之外（auto/partial/reactive/session_memory）
-// 一律归 auto —— UI 只区分「用户点的」与「系统触发的」。
-export function mapCompactMarkerOrigin(
-  trigger: CompactTrigger,
-): Extract<TimelineMarkerPayload, { type: "compact" }>["origin"] {
-  return trigger === "manual" ? "manual" : "auto";
 }
 
 // 旧 GoalStatus → v4 GoalState.status。
