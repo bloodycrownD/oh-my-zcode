@@ -9,10 +9,10 @@ import {
     scheduleReconciliation,
 } from "../../features/magic-context/message-index-async.js";
 import { isPrefixBoundThinkingModel } from "../../features/magic-context/overflow-detection.js";
-import { getProtectionWindowForSession } from "../../deferred/protection-window.js";
-import type { Scheduler } from "../../deferred/scheduler.js";
-import { parseCacheTtl } from "../../deferred/scheduler.js";
-import { resolveSessionCacheTtl } from "../../deferred/session-cache-ttl.js";
+import { getProtectionWindowForSession } from "../../features/magic-context/protection-window.js";
+import type { Scheduler } from "../../features/magic-context/scheduler.js";
+import { parseCacheTtl } from "../../features/magic-context/scheduler.js";
+import { resolveSessionCacheTtl } from "../../features/magic-context/session-cache-ttl.js";
 import { sessionDecisionCalibration } from "../../features/magic-context/session-decision-calibration.js";
 import {
     hasRecordedSessionProjectIdentity,
@@ -414,7 +414,7 @@ export async function sendEmergencyRefusalNotice(
 }
 
 export interface TransformDeps {
-    cacheTtlConfig?: import("../../deferred/model-cache-ttl.js").CacheTtlConfig;
+    cacheTtlConfig?: import("../../shared/model-cache-ttl.js").CacheTtlConfig;
     hiddenCompletionExecutor?: import("./compartment-runner-types.js").HiddenCompletionExecutor;
     /** Host marker lifecycle; omission preserves OpenCode 1 marker writes and replay. */
     compactionMarkerStrategy?: CompactionMarkerStrategy & {

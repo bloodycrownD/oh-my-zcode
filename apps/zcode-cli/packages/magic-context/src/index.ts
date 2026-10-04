@@ -157,8 +157,11 @@ export {
 } from "./core/hooks/magic-context/read-session-chunk.js";
 
 /** 阈值解析（B 组已移植的 resolver）：装配 Scheduler 用它算 execute threshold。 */
-export { parseCacheTtl } from "./core/deferred/scheduler.js";
-export type { Scheduler } from "./core/deferred/scheduler.js";
+export {
+  createScheduler,
+  parseCacheTtl,
+  type Scheduler,
+} from "./core/features/magic-context/scheduler.js";
 export {
   resolveExecuteThreshold,
   resolveExecuteThresholdDetail,
@@ -180,6 +183,104 @@ export {
   type OpenDatabaseOptions,
 } from "./core/features/magic-context/storage-db.js";
 export { createTagger, type Tagger } from "./core/features/magic-context/tagger.js";
+
+// ── 4b. D 组 ctx 工具面 + 状态读取（Step 21） ──────────────────────────────────
+
+/**
+ * D 组第一批两个 ctx 工具的真身（`tools/ctx-reduce/**` + `tools/ctx-expand/**`），
+ * 连同它们依赖的 `unwrap-imitated-reduced-args` / `range-parser` / `tag-input`。
+ *
+ * 剥离的两处（SPEC「明确不搬」）：`@opencode-ai/plugin` 的 `tool()` / `ToolDefinition`
+ * 运行时值导入 → `CtxToolDefinition` + `toolSchema`（zod）；`plugin/rust-tool-backends`
+ * 的类型导入（连同其 `rustReduce` 分支）。`ctx_reduce` 的**命令幂等**语义因此由
+ * 工具自身的 `commandIdLedger` 承担，键的推导逻辑逐字保留（T-M11）。
+ */
+export { CTX_REDUCE_DESCRIPTION } from "./core/tools/ctx-reduce/constants.js";
+export {
+  createCtxReduceTools,
+  type CtxReduceToolDeps,
+} from "./core/tools/ctx-reduce/tools.js";
+export type { CtxReduceArgs } from "./core/tools/ctx-reduce/types.js";
+export { CTX_EXPAND_DESCRIPTION, CTX_EXPAND_TOKEN_BUDGET } from "./core/tools/ctx-expand/constants.js";
+export {
+  resolveCtxExpandMode,
+  type CtxExpandMode,
+  type CtxExpandOrdinalDomain,
+} from "./core/tools/ctx-expand/mode.js";
+export {
+  createCtxExpandTools,
+  type CtxExpandToolDeps,
+} from "./core/tools/ctx-expand/tools.js";
+export type { CtxExpandArgs } from "./core/tools/ctx-expand/types.js";
+export type { CtxToolContext, CtxToolDefinition } from "./core/tools/tool-definition.js";
+
+/** range / tag 解析：模型经常把 `§N§` 标记原样抄回来，这两个助手负责归一化。 */
+export { parseRangeString } from "./core/features/magic-context/range-parser.js";
+export { parseTagInput, TAG_INPUT_ERROR } from "./core/features/magic-context/tag-input.js";
+export {
+  unwrapImitatedReducedArgs,
+  type ImitatedArgRule,
+  type ImitatedArgsSchema,
+  type ImitatedReducedArgs,
+} from "./core/tools/unwrap-imitated-reduced-args.js";
+
+/**
+ * protected working set（Step 21 真身替换 `deferred/protection-window.ts`）。
+ * `ctx_reduce` 直接用它算「held」的那部分，`transform` 用它决定哪些行活过压缩。
+ */
+export {
+  computeProtectionWindow,
+  getProtectionWindowForSession,
+  readEpochFloorSnapshot,
+  type ProtectionWindowResult,
+  type ProtectionWindowRow,
+} from "./core/features/magic-context/protection-window.js";
+
+/** cache TTL 冻结策略（Step 21 真身替换两个 deferred 缝）。 */
+export {
+  type CacheTtlConfig,
+  type ResolvedCacheTtl,
+  resolveModelCacheTtl,
+} from "./core/shared/model-cache-ttl.js";
+export {
+  readSessionCacheTtl,
+  resolveSessionCacheTtl,
+} from "./core/features/magic-context/session-cache-ttl.js";
+
+/**
+ * 用户可见 refusal 目录（Step 21 真身替换 `deferred/user-facing-codes.ts`）。
+ * B 组的 refusal 类与 `/ctx-status` 的「读不出来」文案都走它。
+ */
+export {
+  renderCapabilityRefusal,
+  renderEmbeddingFailure,
+  renderUserFacingFailure,
+  USER_FACING_FAILURES,
+  type UserFacingFailureKey,
+  type UserFacingTextStyle,
+} from "./core/shared/user-facing-codes.js";
+
+/**
+ * `/ctx-*` 命令注册表（Step 21 真身替换 `deferred/builtin-commands.ts` 的命令表一半）。
+ * 「哪些名字存在、描述是什么」在这里；命令的**执行**按 SPEC 由 Step 22 在 ZCode 侧
+ * 重写为本地命令语义（替代上游的 Effect 204 sentinel）。
+ */
+export {
+  getMagicContextBuiltinCommands,
+  type MagicContextBuiltinCommandName,
+} from "./core/features/builtin-commands/commands.js";
+
+/**
+ * `/ctx-status` 文本快照（Step 21 新写，替代源实现那 5 个约 2137 行的
+ * RPC/TUI-coupled 文件）。只读 `magic-context.db`：预算 / compartments / dropped 统计。
+ */
+export {
+  formatMagicContextStatusSnapshot,
+  readMagicContextStatusSnapshot,
+  type CtxStatusTagBucket,
+  type MagicContextStatusSnapshot,
+  type ReadMagicContextStatusOptions,
+} from "./host/ctx-status.js";
 
 // ── 5. message 转换纯函数 ───────────────────────────────────────────────────
 

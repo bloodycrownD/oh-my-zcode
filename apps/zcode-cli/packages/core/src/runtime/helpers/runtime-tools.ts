@@ -8,8 +8,9 @@ import {
   traceContextToLogContext,
 } from "../deps.js";
 import type { HookRunner, SessionId, ToolExecutor, TraceContext } from "../deps.js";
+import { CTX_EXPAND_TOOL_NAME, CTX_REDUCE_TOOL_NAME } from "@zcode/contracts";
 import type { AgentRuntimeInternal } from "../internal.js";
-import type { AgentRuntimeDeps } from "../types.js";
+import type { AgentRuntimeDeps, AgentRuntimeConfig } from "../types.js";
 import { resolveRuntimeEmbeddedSearchEnabled } from "../methods/embedded-search-branch.js";
 import { getSessionShellSelectionFromConfig } from "../methods/session-shell-environment.js";
 import { createRuntimeSessionModePort } from "../session-mode-port.js";
@@ -24,6 +25,12 @@ import { resolveEnabledProjectMemoryRoot } from "./project-memory.js";
 import { sessionHasLoadedSkill } from "../../agent/loaded-skills.js";
 
 const DEFAULT_SUBAGENT_BACKGROUND_BASH_MAX_MS = 3_600_000;
+
+/** 见 `resolveRuntimeDisallowedToolsWithMagicContext` 的根因注释。 */
+const MAGIC_CONTEXT_WORKFLOW_CHILD_DISALLOWED_TOOLS: readonly string[] = [
+  CTX_REDUCE_TOOL_NAME,
+  CTX_EXPAND_TOOL_NAME,
+];
 const EMPTY_RUNTIME_HOOK_CONFIG = {
   enabled: false,
   events: {},
@@ -76,14 +83,46 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
     // node_repl/browser-use 由 ZCode 官方 browser-use 插件启停推导出的 runtimeFeatures 控制。
     includeNodeRepl: nodeReplEnabled,
     includeBrowserUse: browserUseEnabled,
+    // magic-context 上下文回收面：门是 `features.magicContext`（D-11 默认 false）。
+    // ctx handler 是动态 import 包的，所以这道门同时决定了「模型看得见这两个工具吗」
+    // 与「整棵 magic-context 模块图进不进内存」——见 handlers/index.ts 的注释。
+    includeMagicContextTools: runtime.config.magicContext?.enabled === true,
     embeddedSearchEnabled: resolveRuntimeEmbeddedSearchEnabled(runtime),
     agentProfiles: runtime.config.subagents?.profiles,
     allowedTools: resolveBuiltInToolAllowlist(runtime.config),
     // workflow_child 的结构性禁用（CreateWorkflow/SaveWorkflow 因 alwaysAsk 隐形挂起；
     // ResumeWorkflowRun 已免确认但因「child 内不得再编排」仍在列）在 helper
     // 里与 turn 级名单合并，见 tool-allowlist.ts 的根因注释。
-    disallowedTools: resolveRuntimeDisallowedTools(runtime.config),
+    disallowedTools: resolveRuntimeDisallowedToolsWithMagicContext(runtime.config),
   });
+}
+
+/**
+ * workflow_child 额外不注册两个 ctx 工具。
+ *
+ * 根因与 `WORKFLOW_CHILD_DISALLOWED_TOOLS` 的第一条同源，但更硬：child 的工具交互
+ * 事件只在 subagent 路径上镜像到父会话，一个 workflow child 在自己的会话里盖掉的
+ * §N§ 标记，父会话与用户**都看不到**——用户会以为那段上下文还在，而它已经被排队
+ * 清掉了。这不是「无窗可弹」，是「用户失去了否决的机会」，因此属于**结构性禁用**
+ * 而不是权限档位问题。
+ *
+ * `ctx_expand` 也一并禁掉：它读的是同一个 store，读到被别的 actor 盖掉的 tag 只会
+ * 让 child 拿到一份用户没批准过的视图。
+ *
+ * 这份追加刻意留在本文件而不是 `tool-allowlist.ts`：`resolveRuntimeDisallowedTools`
+ * 是两个 child runtime 构造点共用的推导入口，而 ctx 这道门只跟「magic-context 开着」
+ * 这件事有关，与 workflow child 的构造点无关。
+ */
+function resolveRuntimeDisallowedToolsWithMagicContext(
+  config: AgentRuntimeConfig,
+): readonly string[] | undefined {
+  const base = resolveRuntimeDisallowedTools(config);
+  if (config.taskType !== "workflow_child") return base;
+  const disallowed = new Set(base ?? []);
+  for (const toolName of MAGIC_CONTEXT_WORKFLOW_CHILD_DISALLOWED_TOOLS) {
+    disallowed.add(toolName);
+  }
+  return [...disallowed];
 }
 
 function createRuntimeHookRunner(

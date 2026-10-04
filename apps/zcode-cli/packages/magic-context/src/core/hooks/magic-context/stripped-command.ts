@@ -1,8 +1,8 @@
 import {
     getMagicContextBuiltinCommands,
     type MagicContextBuiltinCommandName,
-} from "../../deferred/builtin-commands.js";
-import { acceptsMagicContextCommandArguments } from "../../deferred/builtin-commands.js";
+} from "../../features/builtin-commands/commands.js";
+import { acceptsMagicContextCommandArguments } from "../../features/builtin-commands/command-arguments.js";
 
 export interface StrippedMagicContextCommand {
     command: MagicContextBuiltinCommandName;

@@ -1,31 +1,23 @@
-// FORK-DEFERRED(S21): `shared/model-cache-ttl.ts` 的 CacheTtlConfig / CacheTtlSource / ResolvedCacheTtl / resolveModelCacheTtl 摘录，Step 21 移植真身后删除本文件
-//
-// WHY A SEAM AND NOT THE MODULE. The provider cache-TTL resolver is E/D surface:
-// it reads the `cache_ttl` config block and applies the OpenAI GPT-5.6+
-// documented lifetime table. The B group reaches it from two directions
-// (`transform.ts` types `TransformDeps.cacheTtlConfig`, and
-// `resolveSessionCacheTtl` below calls it), so the resolver and its types are
-// reproduced verbatim. It has one upstream import,
-// `./prompt-surface`'s `resolveModelConfigValue`, which is inlined below as a
-// verbatim excerpt of the same model-key walk so the per-model override lookup
-// behaves identically.
-//
-// NOT reproduced: `prompt-surface`'s preset/registration surface (E group,
-// reached through `host/config/schema.ts` on the ZCode side) — only the
-// `resolveModelConfigValue` helper this file actually calls.
-//
-// Step 21: delete this file and repoint `transform.ts` back at
-// `../../shared/model-cache-ttl.js`.
+/**
+ * Step 21 真身替换：`deferred/model-cache-ttl.ts` 的摘录在此归位为源文件本体。
+ *
+ * 逐字来自 `.reference/magic-context/packages/plugin/src/shared/model-cache-ttl.ts`
+ * （58 行），唯一改动：`resolveModelConfigValue` 的上游 `./prompt-surface` 是 E 组
+ * （D-12 缩减版走 `host/config/schema.ts`），因此那一个 model-key walk 助手按缝里
+ * 同样的方式内联为逐字摘录，其余逐字不变。
+ *
+ * 为何值得逐字保真：provider cache-TTL 解析是 provider 文档化的寿命表；行为漂移会让
+ * 缓存命中率与实际账单一起漂。
+ *
+ * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ */
 
-import { canonicalModelIdentity, modelRefLookupOrder } from "../shared/harness-provider-map.js";
+import { canonicalModelIdentity, modelRefLookupOrder } from "./harness-provider-map.js";
 
-/** Verbatim: `model-cache-ttl.ts:4`. */
 export type CacheTtlConfig = string | Record<string, string>;
 
-/** Verbatim: `model-cache-ttl.ts:5`. */
 export type CacheTtlSource = "config" | "default" | "OpenAI GPT-5.6+ default";
 
-/** Verbatim: `model-cache-ttl.ts:6-10`. */
 export interface ResolvedCacheTtl {
     value: string;
     source: CacheTtlSource;
@@ -96,11 +88,8 @@ function modelKeyLookupOrder(modelKey: string | undefined): {
     });
 }
 
-/**
- * Provider documentation: https://developers.openai.com/api/docs/guides/prompt-caching
- * Cache lifetime / Summary of model differences: at least 30 minutes since write or reuse.
- */
-/** Verbatim: `model-cache-ttl.ts:13-27`. */
+// Provider documentation: https://developers.openai.com/api/docs/guides/prompt-caching
+// Cache lifetime / Summary of model differences: at least 30 minutes since write or reuse.
 const MODEL_CACHE_LIFETIMES = [
     {
         source: "OpenAI GPT-5.6+ default" as const,
@@ -115,7 +104,6 @@ const MODEL_CACHE_LIFETIMES = [
     },
 ];
 
-/** Verbatim: `model-cache-ttl.ts:29-57`. */
 export function resolveModelCacheTtl(
     config: CacheTtlConfig | undefined,
     modelKey: string | undefined,

@@ -14,7 +14,7 @@
 // its previous boundary and re-reads those raw messages on the repair attempt.
 
 import { withContentLanguageDirective } from "../../agents/language-directive.js";
-import { renderUserFacingFailure } from "../../deferred/user-facing-codes.js";
+import { renderUserFacingFailure } from "../../shared/user-facing-codes.js";
 import { parseCompartmentOutput } from "./compartment-parser.js";
 import { mapParsedCompartmentsToChunk } from "./compartment-runner-mapping.js";
 import type {

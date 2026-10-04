@@ -27,6 +27,10 @@ export * from "./respond-to-coordinator.js";
 export * from "./task-output.js";
 export * from "./task-stop.js";
 export * from "./read-session-context.js";
+// magic-context 上下文回收面（S21）。名字常量被 core 的工具注册与 workflow-child
+// 禁用名单读走；schema 被 core 的 ctx handler 当 provider 可见声明与运行时校验共用。
+// 漏掉这行消费方拿不到 CTX_REDUCE_TOOL_NAME / CTX_EXPAND_TOOL_NAME 与那份 zod 面。
+export * from "./ctx-context.js";
 export * from "./submit-result.js";
 export * from "./websearch.js";
 export * from "./workflow.js";

@@ -1,4 +1,4 @@
-import { renderUserFacingFailure } from "../../deferred/user-facing-codes.js";
+import { renderUserFacingFailure } from "../../shared/user-facing-codes.js";
 
 /**
  * The transform could not cut the conversation at the history boundary, and

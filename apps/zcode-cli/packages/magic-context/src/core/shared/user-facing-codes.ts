@@ -1,29 +1,24 @@
-// FORK-DEFERRED(S21): `shared/user-facing-codes.ts` 的 USER_FACING_FAILURES / UserFacingFailureKey / UserFacingTextStyle / CapabilityRefusal / renderUserFacingFailure / renderCapabilityRefusal / renderEmbeddingFailure 摘录，Step 21 移植真身后删除本文件
-//
-// WHY A SEAM AND NOT THE MODULE. The file is the user-facing copy catalogue for
-// every refusal Magic Context can emit — 371 lines, no logic beyond two renderers
-// and three lookup tables. It is D group (Step 21) because the capabilities whose
-// refusals it words (notes, memory, ctx_reduce) are D/E surface.
-//
-// The whole catalogue is reproduced verbatim, not stubbed. Reason: this is
-// USER-VISIBLE TEXT with stable codes (`MC-H01`, `MC-E05`, `MC-C14`, …). The B
-// group already ships the classes that raise these refusals
-// (`DegradedPassRefusalError`, `UnmanagedOverWindowError`,
-// `UnresolvedHistoryBoundaryError`, `single-store-refusal`, `store-ahead-refusal`,
-// `maintenance-authority`, `format-embed-failure`), and those constructors call
-// the renderers at module-evaluation-adjacent time. Inventing placeholder copy
-// here would ship wrong sentences and wrong codes to users; reproducing the
-// table is the only safe option, and it is pure data with no dependency closure
-// (`EmbeddingFailureClass` and `PromptFailureClass` are two string unions
-// declared locally below).
-//
-// Step 21: delete this file and repoint `degraded-pass-refusal.ts`,
-// `format-embed-failure.ts`, `maintenance-authority.ts`,
-// `single-store-refusal.ts`, `store-ahead-refusal.ts`,
-// `unmanaged-over-window.ts` and `unresolved-history-boundary.ts` back at
-// `../../shared/user-facing-codes.js`.
+/**
+ * Step 21 真身替换：`deferred/user-facing-codes.ts` 的摘录在此归位为源文件本体。
+ *
+ * 逐字来自 `.reference/magic-context/packages/plugin/src/shared/user-facing-codes.ts`
+ * （370 行），唯一改动是两条上游 import 换成本地声明的类型别名：源从
+ * `features/magic-context/memory/embedding-failure` 与 `shared/model-suggestion-retry`
+ * 取两个字符串联合，两者都是 Batch 2 / 不搬子树，因此按原样本地重声明
+ * （与被替换的缝逐字相同的两个 union）。
+ *
+ * 为何值得逐字保真：这是**用户可见文案**目录，带稳定错误码（`MC-H01`、`MC-E05`、
+ * `MC-C14` …）。B 组已经在抛这些 refusal（`DegradedPassRefusalError`、
+ * `UnmanagedOverWindowError`、`single-store-refusal`、`maintenance-authority` …），
+ * 编造占位文案会把错误的句子与错误的码发给用户。
+ *
+ * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ */
 
-/** Verbatim: `embedding-failure.ts:1-13`. */
+/**
+ * Verbatim: `embedding-failure.ts:1-13`. Locally declared because
+ * `features/magic-context/memory/embedding-failure.ts` is Batch 2 (不搬).
+ */
 export type EmbeddingFailureClass =
     | "substitution_rejected"
     | "http_error"
@@ -37,7 +32,10 @@ export type EmbeddingFailureClass =
     | "local_download_failure"
     | "local_runtime_error";
 
-/** Verbatim: `model-suggestion-retry.ts:20-29`. */
+/**
+ * Verbatim: `model-suggestion-retry.ts:20-29`. Locally declared because
+ * `shared/model-suggestion-retry.ts` is E/D surface owned by another step.
+ */
 export type PromptFailureClass =
     | "provider_timeout"
     | "provider_error"
@@ -49,7 +47,6 @@ export type PromptFailureClass =
     | "parse_failed"
     | "unknown";
 
-/** Verbatim: `user-facing-codes.ts:4-274`. */
 export const USER_FACING_FAILURES = {
     historian_unavailable: {
         code: "MC-H01",
@@ -322,13 +319,10 @@ export const USER_FACING_FAILURES = {
     },
 } as const;
 
-/** Verbatim: `user-facing-codes.ts:276`. */
 export type UserFacingFailureKey = keyof typeof USER_FACING_FAILURES;
 
-/** Verbatim: `user-facing-codes.ts:278`. */
 export type UserFacingTextStyle = "markdown" | "plain";
 
-/** Verbatim: `user-facing-codes.ts:280-290`. */
 export function renderUserFacingFailure(
     key: UserFacingFailureKey,
     style: UserFacingTextStyle = "markdown",
@@ -338,12 +332,10 @@ export function renderUserFacingFailure(
     return `${failure.sentence} ${action} (${failure.code})`;
 }
 
-/** Verbatim: `user-facing-codes.ts:292-294`. */
 export function userFacingFailureCode(key: UserFacingFailureKey): string {
     return USER_FACING_FAILURES[key].code;
 }
 
-/** Verbatim: `user-facing-codes.ts:296-306`. */
 export type CapabilityRefusal =
     | "memory_write"
     | "memory_access"
@@ -355,7 +347,6 @@ export type CapabilityRefusal =
     | "history_compression"
     | "context_service";
 
-/** Verbatim: `user-facing-codes.ts:308-314`. */
 const CAPABILITY_FAILURES: Record<CapabilityRefusal, UserFacingFailureKey> = {
     memory_write: "memory_writes_paused",
     memory_access: "memory_access_unavailable",
@@ -368,17 +359,14 @@ const CAPABILITY_FAILURES: Record<CapabilityRefusal, UserFacingFailureKey> = {
     context_service: "context_service_unavailable",
 };
 
-/** Verbatim: `user-facing-codes.ts:316-318`. */
 export function renderCapabilityRefusal(capability: CapabilityRefusal): string {
     return renderUserFacingFailure(CAPABILITY_FAILURES[capability]);
 }
 
-/** Verbatim: `user-facing-codes.ts:320-322`. */
 export function capabilityRefusalCode(capability: CapabilityRefusal): string {
     return userFacingFailureCode(CAPABILITY_FAILURES[capability]);
 }
 
-/** Verbatim: `user-facing-codes.ts:324-334`. */
 const DREAM_FAILURE_KEYS = {
     provider_timeout: "dream_provider_timeout",
     provider_error: "dream_provider_error",
@@ -391,7 +379,6 @@ const DREAM_FAILURE_KEYS = {
     unknown: "dream_unknown",
 } as const satisfies Record<PromptFailureClass, UserFacingFailureKey>;
 
-/** Verbatim: `user-facing-codes.ts:336-348`. */
 const EMBEDDING_FAILURE_KEYS = {
     substitution_rejected: "embedding_substitution_rejected",
     http_error: "embedding_http_error",
@@ -406,7 +393,6 @@ const EMBEDDING_FAILURE_KEYS = {
     local_runtime_error: "embedding_local_runtime_error",
 } as const satisfies Record<EmbeddingFailureClass, UserFacingFailureKey>;
 
-/** Verbatim: `user-facing-codes.ts:344-350`. */
 export function renderDreamFailure(
     failureClass: PromptFailureClass,
     style: UserFacingTextStyle = "markdown",
@@ -414,12 +400,10 @@ export function renderDreamFailure(
     return renderUserFacingFailure(DREAM_FAILURE_KEYS[failureClass], style);
 }
 
-/** Verbatim: `user-facing-codes.ts:352-354`. */
 export function dreamFailureCode(failureClass: PromptFailureClass): string {
     return userFacingFailureCode(DREAM_FAILURE_KEYS[failureClass]);
 }
 
-/** Verbatim: `user-facing-codes.ts:361-367`. */
 export function renderEmbeddingFailure(
     failureClass: EmbeddingFailureClass,
     style: UserFacingTextStyle = "markdown",
@@ -427,7 +411,6 @@ export function renderEmbeddingFailure(
     return renderUserFacingFailure(EMBEDDING_FAILURE_KEYS[failureClass], style);
 }
 
-/** Verbatim: `user-facing-codes.ts:369-371`. */
 export function embeddingFailureCode(failureClass: EmbeddingFailureClass): string {
     return userFacingFailureCode(EMBEDDING_FAILURE_KEYS[failureClass]);
 }

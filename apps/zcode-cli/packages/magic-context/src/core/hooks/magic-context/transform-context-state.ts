@@ -1,4 +1,4 @@
-import type { Scheduler } from "../../deferred/scheduler.js";
+import type { Scheduler } from "../../features/magic-context/scheduler.js";
 import type { ContextDatabase } from "../../features/magic-context/storage.js";
 import { loadPersistedUsage, type PersistedUsageState } from "../../features/magic-context/storage.js";
 import type { ContextUsage, SessionMeta } from "../../features/magic-context/types.js";

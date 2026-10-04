@@ -1,4 +1,4 @@
-import { USER_FACING_FAILURES } from "../../deferred/user-facing-codes.js";
+import { USER_FACING_FAILURES } from "../../shared/user-facing-codes.js";
 
 /**
  * The error code ck-mc answers every request with when the `store.db` it was started on records

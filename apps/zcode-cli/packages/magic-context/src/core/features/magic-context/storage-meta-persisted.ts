@@ -9,7 +9,7 @@ import type { Database } from "../../shared/sqlite.js";
 import { stableStringify } from "../../shared/stable-json.js";
 import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.js";
 import { deriveDefaultProtectedTokens } from "../../deferred/magic-context-schema.js";
-import { readEpochFloorSnapshot } from "../../deferred/protection-window.js";
+import { readEpochFloorSnapshot } from "./protection-window.js";
 import type { ProtectedTokensTierOverrides } from "../../deferred/project-security.js";
 import {
     decodeMergedReasoningParts,

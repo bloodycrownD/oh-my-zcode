@@ -1,33 +1,23 @@
-// FORK-DEFERRED(S21): `features/magic-context/protection-window.ts` 的 ProtectionWindowRow / ProtectionWindowResult / rowWindowMass / getRowKind / getRowTagNumber / getRowIdentity / rowKey / compareRowsAscending / computeProtectionWindow / readEpochFloorSnapshot / getProtectionWindowForSession 摘录，Step 21 移植真身后删除本文件
-//
-// The protection window is D group (Step 21). Two consumers reach it, and the
-// seam now covers both:
-//
-//   - the A group's `storage-meta-persisted.ts` reads the snapshotted epoch floor
-//     (`readEpochFloorSnapshot`);
-//   - the B group's `transform.ts:2535` resolves the window itself
-//     (`getProtectionWindowForSession`).
-//
-// The whole walk is reproduced verbatim, not stubbed. All three of its upstream
-// imports are already in the package — `shared/sqlite`'s `Database`,
-// `session-decision-calibration`'s `sessionDecisionCalibration`, and
-// `storage-tags`'s `TAG_SELECT_COLUMNS` — so there is no dependency closure to
-// trim, and the window's members feed the protected-tag-number set that
-// `transform.ts` hands to postprocess; a stubbed window would silently change
-// which rows survive compaction.
-//
-// Step 21: delete this file and repoint `storage-meta-persisted.ts` and
-// `transform.ts` back at `./protection-window.js` /
-// `../../features/magic-context/protection-window.js`.
+/**
+ * Step 21 真身替换：`deferred/protection-window.ts` 的摘录在此归位为源文件本体。
+ *
+ * 逐字来自 `.reference/magic-context/packages/plugin/src/features/magic-context/
+ * protection-window.ts`（316 行）。唯一改动是相对导入加上 fork 的 `.js` 后缀，
+ * 三个上游依赖（`shared/sqlite`、`session-decision-calibration`、`storage-tags`）
+ * 在包内本来就存在，因此没有依赖闭包要裁。
+ *
+ * 为何值得逐字保真：窗口成员喂给 postprocess 的 protected-tag-number 集合，
+ * 打桩的窗口会静默改变「哪些行能活过压缩」。
+ *
+ * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ */
 
-import { sessionDecisionCalibration } from "../features/magic-context/session-decision-calibration.js";
-import { TAG_SELECT_COLUMNS } from "../features/magic-context/storage-tags.js";
-import type { Database } from "../shared/sqlite.js";
+import type { Database } from "../../shared/sqlite.js";
+import { sessionDecisionCalibration } from "./session-decision-calibration.js";
+import { TAG_SELECT_COLUMNS } from "./storage-tags.js";
 
-/** Verbatim: `protection-window.ts:5`. */
 export type CoordinateSpace = "tag-number" | "row-identity";
 
-/** Verbatim: `protection-window.ts:7-21`. */
 export interface ProtectionWindowRow {
     tag_number?: number;
     tagNumber?: number;
@@ -44,32 +34,27 @@ export interface ProtectionWindowRow {
     messageId?: string;
 }
 
-/** Verbatim: `protection-window.ts:23-26`. */
 export interface TagNumberProjection {
     coordinateSpace: "tag-number";
     tagNumbers: Set<number>;
 }
 
-/** Verbatim: `protection-window.ts:28-32`. */
 export interface RowIdentityProjection<T = number | string> {
     coordinateSpace: "row-identity";
     rowIdentities: Set<T>;
 }
 
-/** Verbatim: `protection-window.ts:34-37`. */
 export interface OrdinalCutoffProjection {
     coordinateSpace: "tag-number";
     cutoff: number | null;
 }
 
-/** Verbatim: `protection-window.ts:39-43`. */
 export interface ProtectionWindowStatus {
     floor: number;
     protectedCount: number;
     protectedMass: number;
 }
 
-/** Verbatim: `protection-window.ts:45-57`. */
 export interface ProtectionWindowResult<TRow = ProtectionWindowRow, TIdentity = number | string> {
     memberRows: TRow[];
     memberRowKeys: Set<string>;
@@ -86,8 +71,6 @@ export interface ProtectionWindowResult<TRow = ProtectionWindowRow, TIdentity = 
 /**
  * Window mass unit is COALESCE(token_count, 0) only — input_token_count is excluded.
  * This single shared helper computes the mass contribution of a walked row.
- *
- * Verbatim: `protection-window.ts:64-70`.
  */
 export function rowWindowMass(row: ProtectionWindowRow): number {
     const raw = row.token_count ?? row.tokenCount;
@@ -97,12 +80,10 @@ export function rowWindowMass(row: ProtectionWindowRow): number {
     return 0;
 }
 
-/** Verbatim: `protection-window.ts:72-74`. */
 export function getRowKind(row: ProtectionWindowRow): string {
     return (row.kind ?? row.type ?? "").toLowerCase();
 }
 
-/** Verbatim: `protection-window.ts:76-82`. */
 export function getRowTagNumber(row: ProtectionWindowRow): number {
     const num = row.tag_number ?? row.tagNumber;
     if (typeof num === "number" && Number.isFinite(num)) {
@@ -111,7 +92,6 @@ export function getRowTagNumber(row: ProtectionWindowRow): number {
     return 0;
 }
 
-/** Verbatim: `protection-window.ts:84-90`. */
 export function getRowIdentity(row: ProtectionWindowRow): number | string {
     const id = row.row_identity ?? row.id;
     if (id !== undefined && id !== null) {
@@ -120,12 +100,10 @@ export function getRowIdentity(row: ProtectionWindowRow): number | string {
     return getRowTagNumber(row);
 }
 
-/** Verbatim: `protection-window.ts:92-94`. */
 export function rowKey(row: ProtectionWindowRow): string {
     return `${getRowTagNumber(row)}:${getRowIdentity(row)}`;
 }
 
-/** Verbatim: `protection-window.ts:96-102`. */
 export function compareRowsAscending(a: ProtectionWindowRow, b: ProtectionWindowRow): number {
     const tagDiff = getRowTagNumber(a) - getRowTagNumber(b);
     if (tagDiff !== 0) return tagDiff;
@@ -146,8 +124,6 @@ export function compareRowsAscending(a: ProtectionWindowRow, b: ProtectionWindow
  * Structural minimum: newest min(3, N) tool-kind tags by tag_number descending.
  * Cutoff: min(mass_cutoff, newest3_cutoff).
  * Canonical membership: union row set (all tool rows with tag_number >= cutoff).
- *
- * Verbatim: `protection-window.ts:114-243`.
  */
 export function computeProtectionWindow<TRow extends ProtectionWindowRow = ProtectionWindowRow>(
     rows: readonly TRow[],
@@ -283,8 +259,6 @@ export function computeProtectionWindow<TRow extends ProtectionWindowRow = Prote
 /**
  * Read the snapshotted epoch floor from session_meta.
  * On defer passes this module reads the snapshot and never recomputes the floor.
- *
- * Verbatim: `protection-window.ts:249-266`.
  */
 export function readEpochFloorSnapshot(db: Database, sessionId: string): number | null {
     try {
@@ -308,8 +282,6 @@ export function readEpochFloorSnapshot(db: Database, sessionId: string): number 
  * Read only the persisted tool suffix needed for protection. A tag-number group
  * can span pages, so test the stopping condition only when the next group starts.
  * Dropped rows still contribute to chronology and mass, just as in the pure walk.
- *
- * Verbatim: `protection-window.ts:272-317`.
  */
 export function getProtectionWindowForSession(
     db: Database,

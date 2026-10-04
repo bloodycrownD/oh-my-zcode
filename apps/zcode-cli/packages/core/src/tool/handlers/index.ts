@@ -5,6 +5,8 @@
 import {
   AMEND_WORKFLOW_TOOL_NAME,
   CREATE_WORKFLOW_TOOL_NAME,
+  CTX_EXPAND_TOOL_NAME,
+  CTX_REDUCE_TOOL_NAME,
   EVAL_WORKFLOW_SNIPPET_TOOL_NAME,
   GET_WORKFLOW_RUN_TOOL_NAME,
   LIST_MODELS_TOOL_NAME,
@@ -58,6 +60,7 @@ import { resolveWorkflowQuestionToolEntry } from "./resolve-workflow-question.js
 import { taskOutputToolEntry } from "./task-output.js";
 import { taskStopToolEntry } from "./task-stop.js";
 import { readSessionContextToolEntry } from "./read-session-context.js";
+import { ctxExpandToolEntry, ctxReduceToolEntry } from "./ctx-context.js";
 import { amendWorkflowToolEntry } from "./amend-workflow.js";
 import { createWorkflowToolEntry } from "./create-workflow.js";
 import { saveWorkflowToolEntry } from "./save-workflow.js";
@@ -105,6 +108,11 @@ export const builtInTools: ToolEntry[] = [
   taskOutputToolEntry,
   taskStopToolEntry,
   readSessionContextToolEntry,
+  // magic-context 上下文回收面（S21）。只有 `features.magicContext` 打开的会话才注册
+  // （见 registerBuiltInTools 的 includeMagicContextTools 过滤）：默认态下模型看到的
+  // 工具表里没有 ctx_*，而包也整棵没被 import。
+  ctxReduceToolEntry,
+  ctxExpandToolEntry,
   agentToolEntry,
   taskToolEntry,
   skillToolEntry,
@@ -183,6 +191,17 @@ interface RegisterBuiltInToolsOptions {
   includeDynamicWorkflow?: boolean;
   /** node_repl（js）默认关闭，由官方 browser-use 插件启用。 */
   includeNodeRepl?: boolean;
+  /**
+   * magic-context 上下文回收面（`ctx_reduce` / `ctx_expand`）是否注册。
+   *
+   * **默认关**，理由与 `includeNodeRepl` 同款但更强一层：这两个工具的实现在
+   * `@zcode/magic-context` 里，而 handler 是**动态 import** 它的，所以 flag 关时包
+   * 整棵不会被拉进内存（zod schema + sqlite chokepoint + 迁移模块）。若在这里默认
+   * 开启，「默认态零行为」这条 D-11 不变式就会在一个不起眼的注册点被悄悄破掉。
+   *
+   * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
+   */
+  includeMagicContextTools?: boolean;
   /** browser-use 说明和 agent.browsers 注入由官方 browser-use 插件 + 宿主 browser bridge 共同启用。 */
   includeBrowserUse?: boolean;
   embeddedSearchEnabled?: boolean;
@@ -260,6 +279,13 @@ export function registerBuiltInTools(
       continue;
     }
     if (entry.metadata.name === "js" && options.includeNodeRepl !== true) {
+      continue;
+    }
+    if (
+      (entry.metadata.name === CTX_REDUCE_TOOL_NAME ||
+        entry.metadata.name === CTX_EXPAND_TOOL_NAME) &&
+      options.includeMagicContextTools !== true
+    ) {
       continue;
     }
     registry.register(resolveBuiltInToolEntryForBranch(entry, options), {

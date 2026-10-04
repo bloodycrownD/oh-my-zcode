@@ -1,35 +1,30 @@
-// FORK-DEFERRED(S21): `features/magic-context/session-cache-ttl.ts` 的 SessionCacheTtl / readSessionCacheTtl / resolveSessionCacheTtl 摘录，Step 21 移植真身后删除本文件
-//
-// WHY A SEAM AND NOT THE MODULE. The resolver freezes the provider cache TTL per
-// session once the outgoing model is known (a real model switch still selects
-// its own lifetime) and persists the decision in the extensible replay document
-// so a restart does not re-derive it. That policy — and with it the
-// `cache_ttl` config block — is D/E surface (Step 21).
-//
-// It is nevertheless reproduced VERBATIM, because all four of its dependencies
-// are already in the package: `shared/model-cache-ttl` (above), `storage-db`'s
-// `ContextDatabase`, `storage-meta`'s `getOrCreateSessionMeta`/`updateSessionMeta`,
-// and `storage-replay-document`. There is nothing to stub, and its behaviour is
-// load-bearing for provider cache hits (a re-derived TTL busts the cache).
-//
-// Step 21: delete this file and repoint `transform.ts` back at
-// `../../features/magic-context/session-cache-ttl.js`.
+/**
+ * Step 21 真身替换：`deferred/session-cache-ttl.ts` 的摘录在此归位为源文件本体。
+ *
+ * 逐字来自 `.reference/magic-context/packages/plugin/src/features/magic-context/
+ * session-cache-ttl.ts`（52 行），唯一改动是相对导入加上 `.js` 后缀。四个上游依赖
+ * （`shared/model-cache-ttl`、`storage-db`、`storage-meta`、`storage-replay-document`）
+ * 在包内全部存在。
+ *
+ * 为何值得逐字保真：模型一旦已知就把 provider cache TTL **冻结**进可扩展的 replay
+ * 文档里，重启不重算；重新推导出来的 TTL 会击穿缓存。
+ *
+ * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
+ */
 
-import type { ContextDatabase } from "../features/magic-context/storage-db.js";
-import { getOrCreateSessionMeta, updateSessionMeta } from "../features/magic-context/storage-meta.js";
-import { readReplayEnvelope, updateReplayDocument } from "../features/magic-context/storage-replay-document.js";
 import {
     type CacheTtlConfig,
     type ResolvedCacheTtl,
     resolveModelCacheTtl,
-} from "./model-cache-ttl.js";
+} from "../../shared/model-cache-ttl.js";
+import type { ContextDatabase } from "./storage-db.js";
+import { getOrCreateSessionMeta, updateSessionMeta } from "./storage-meta.js";
+import { readReplayEnvelope, updateReplayDocument } from "./storage-replay-document.js";
 
-/** Verbatim: `session-cache-ttl.ts:10-12`. */
 interface SessionCacheTtl extends ResolvedCacheTtl {
     config: CacheTtlConfig;
 }
 
-/** Verbatim: `session-cache-ttl.ts:14-22`. */
 export function readSessionCacheTtl(
     db: ContextDatabase,
     sessionId: string,
@@ -40,12 +35,7 @@ export function readSessionCacheTtl(
         : undefined;
 }
 
-/**
- * Freeze config once the model is known; a real model switch still selects its
- * own lifetime.
- *
- * Verbatim: `session-cache-ttl.ts:24-52`.
- */
+/** Freeze config once the model is known; a real model switch still selects its own lifetime. */
 export function resolveSessionCacheTtl(
     db: ContextDatabase,
     sessionId: string,

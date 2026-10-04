@@ -1,4 +1,4 @@
-import { USER_FACING_FAILURES } from "../../deferred/user-facing-codes.js";
+import { USER_FACING_FAILURES } from "../../shared/user-facing-codes.js";
 
 export const SINGLE_STORE_MIGRATION_REQUIRED_CODE = "single_store_migration_required";
 

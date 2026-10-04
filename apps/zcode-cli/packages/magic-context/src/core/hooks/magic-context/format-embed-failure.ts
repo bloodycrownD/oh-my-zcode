@@ -1,5 +1,5 @@
 import type { EmbeddingFailure } from "../../deferred/embedding-failure.js";
-import { renderEmbeddingFailure, type UserFacingTextStyle } from "../../deferred/user-facing-codes.js";
+import { renderEmbeddingFailure, type UserFacingTextStyle } from "../../shared/user-facing-codes.js";
 
 export function formatEmbedFailureSummary(
     embedded: number,
