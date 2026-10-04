@@ -3,7 +3,8 @@
  * Step 19a acceptance tests — features.magicContext gating chain (D-11).
  *
  * Covers the 7 hand-written mappings the feature flag needs, anchored on
- * `features.compact` as the template:
+ * `features.rewind` as the template (`features.compact` was the original
+ * template and was removed together with the compaction subsystem in step 26):
  *   1. contracts ConfigKey.FeatureMagicContext
  *   2. contracts ConfigValue<K> boolean branch (miss -> silent `unknown`)
  *   3. contracts RuntimeConfig["features"].magicContext
@@ -96,7 +97,7 @@ test("mapping 6: getAll() default is false, unlike its `?? true` neighbours", ()
   const features = createConfigPort({}).getAll().features;
   assert.equal(features.magicContext, false);
   // Guard the trap: the flag is opt-in while every legacy feature stays opt-out.
-  assert.equal(features.compact, true);
+  assert.equal(features.rewind, true);
   assert.equal(features.mcp, true);
   // Same fallback path via the fully-defaulted port.
   assert.equal(createConfigPort().getAll().features.magicContext, false);
@@ -117,7 +118,7 @@ test("mapping 5: explicit features.magicContext=true overrides the off default",
 
 test("mapping 5: explicit magicContext:false survives a merge that omits the key", () => {
   const config = createConfigPort({ features: { magicContext: true } });
-  config.merge({ features: { compact: false } }, ConfigScope.Project);
+  config.merge({ features: { rewind: false } }, ConfigScope.Project);
   assert.equal(config.getAll().features.magicContext, true);
   config.merge({ features: { magicContext: false } }, ConfigScope.Cli);
   assert.equal(config.getAll().features.magicContext, false);
@@ -164,4 +165,36 @@ test("end-to-end: config file magicContext:true reaches getAll()", () => {
   const port = createConfigPort();
   port.merge(config, ConfigScope.System);
   assert.equal(port.getAll().features.magicContext, true);
+});
+
+// ── T-M10 (step 26): the retired `features.compact` key must be survivable ──
+// A user upgrading from an older build still has `features.compact` in their
+// config.json. Removing the key from the schema must not turn that file into a
+// load error: the strict object simply drops the unknown key, and the rest of
+// the file (including the neighbouring live flags) still lands.
+test("T-M10: config.json with the retired features.compact key loads and is stripped", () => {
+  const fileConfig = {
+    features: { compact: true, magicContext: true, rewind: false },
+  };
+  assert.equal(ZCodeConfigFileSchema.safeParse(fileConfig).success, true);
+  const parsed = ZCodeConfigFileSchema.parse(fileConfig);
+  assert.equal("compact" in parsed.features, false, "retired key must not survive parsing");
+
+  const { config, diagnostics } = parseConfigFileToRuntimePatchWithDiagnostics(fileConfig);
+  assert.deepEqual(diagnostics, []);
+  assert.equal("compact" in config.features, false);
+
+  const port = createConfigPort();
+  port.merge(config, ConfigScope.System);
+  const features = port.getAll().features;
+  assert.equal("compact" in features, false, "retired key must not reach the runtime config");
+  // Neighbouring live flags in the same file are unaffected.
+  assert.equal(features.magicContext, true);
+  assert.equal(features.rewind, false);
+});
+
+test("T-M10: the retired features.compact key is absent from every config surface", () => {
+  assert.equal("FeatureCompact" in ConfigKey, false);
+  assert.equal("compact" in DefaultRuntimeConfig.features, false);
+  assert.equal("compact" in createConfigPort().getAll().features, false);
 });

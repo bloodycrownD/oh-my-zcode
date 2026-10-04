@@ -97,7 +97,6 @@ import {
   type ZCodeSessionStateSnapshot,
   type ZCodeStateUpdatedNotification,
   type ZCodeTimelineMeta,
-  type ZCodeTimelineStatus,
   type ZCodeToolProjectionMemory,
   type ZCodeUserInputRequestParams,
   type ZCodeUserInputResponse,
@@ -5424,21 +5423,6 @@ function nonNegativeIntegerValue(value: unknown): number | undefined {
 
 function positiveIntegerValue(value: unknown): number | undefined {
   return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
-}
-
-function booleanValue(value: unknown): boolean | undefined {
-  return typeof value === "boolean" ? value : undefined;
-}
-
-function timelineStatusValue(value: unknown): ZCodeTimelineStatus | undefined {
-  return value === "started" ||
-    value === "retrying" ||
-    value === "skipped" ||
-    value === "completed" ||
-    value === "failed" ||
-    value === "interrupted"
-    ? value
-    : undefined;
 }
 
 function stringArray(value: unknown): string[] {
