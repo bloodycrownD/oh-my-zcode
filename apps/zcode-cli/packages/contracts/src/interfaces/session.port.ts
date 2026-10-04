@@ -264,7 +264,7 @@ export interface TurnSteerInput {
   toolDisallowlist?: readonly string[];
 }
 
-export type TurnSteerCommandKind = "sendText" | "sendGoalCommand" | "compact";
+export type TurnSteerCommandKind = "sendText" | "sendGoalCommand";
 export type TurnSteerSource = "plan_approval_feedback" | "workflow_refine_feedback";
 
 /**

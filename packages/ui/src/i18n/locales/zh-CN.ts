@@ -983,7 +983,6 @@ const zhCN: Record<string, string> = {
   "modelTrajectory.finish.contentFilter": "内容过滤",
   "modelTrajectory.source.main": "主会话",
   "modelTrajectory.source.sessionTitle": "标题生成",
-  "modelTrajectory.source.compact": "上下文压缩",
   "modelTrajectory.source.promptEnhance": "提示优化",
   "modelTrajectory.source.targetCompletion": "目标验证",
   "modelTrajectory.source.subagent": "子智能体",

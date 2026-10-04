@@ -89,12 +89,7 @@ export interface ZCodeModelTrajectoryUsage {
   reasoningTokens?: number;
 }
 
-export type ZCodeModelTrajectoryCallSourceKind =
-  | "main"
-  | "sidecar"
-  | "subagent"
-  | "compact"
-  | "unknown";
+export type ZCodeModelTrajectoryCallSourceKind = "main" | "sidecar" | "subagent" | "unknown";
 
 export interface ZCodeModelTrajectoryCallSource {
   kind: ZCodeModelTrajectoryCallSourceKind;

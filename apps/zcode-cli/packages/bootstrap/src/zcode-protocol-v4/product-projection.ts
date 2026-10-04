@@ -6,7 +6,7 @@ import { PERMISSION_FULL_ACCESS_OPTION_ID } from "@zcode/shared/zcode-protocol-v
 //
 // 覆盖：session/turn 生命周期、流式文本/思考、tool call 状态机、
 // 权限交互、turn-steer 队列、usage、错误态、迟到终态拒收、
-// compact marker、goal 状态机、fork marker。传输外壳（TopicFrame/subscribe）在后续片。
+// goal 状态机、fork marker。传输外壳（TopicFrame/subscribe）在后续片。
 import {
   projectToolActivity,
   clearSettledOutputPreviews,
@@ -436,7 +436,7 @@ export class ProductProjection {
   // 不进 row schema（客户端只发 rowId，messageId 是服务端内部锚点，避免污染冻结的行结构）。
   private messageIdByRowId = new Map<number, string>();
   // Continue 复用 rowId 后，动作锚点推进到最后一条 assistant message；旧 partial messageId
-  // 仍需能命中同一 row，供 compact coverage、rewind 和整轮文件事实恢复使用。
+  // 仍需能命中同一 row，供 rewind 和整轮文件事实恢复使用。
   private outputContinuationRowIdByMessageId = new Map<string, number>();
   private entityIdByRowId = new Map<number, string>();
   // canonical command target 只按稳定实体身份寻址；rowId 仅是本次 materialization 的
@@ -459,8 +459,8 @@ export class ProductProjection {
   // drain 时决定切轮 vs 内联；账本落地后以账本为准。
   private deliveryByPendingInputId = new Map<string, "guide" | "queue">();
   private currentTurnId: string | null = null;
-  // 当前 runtime turn 是否由 model-only TurnStarted 建立（manual /compact、
-  // goal continuation 等维护 turn）。SessionStart 摘要的 pending 归位不得以维护
+  // 当前 runtime turn 是否由 model-only TurnStarted 建立（goal continuation
+  // 等维护 turn）。SessionStart 摘要的 pending 归位不得以维护
   // turn 为收口目标，必须等下一条 user-visible 真实 turn。
   private currentTurnStartedModelOnly = false;
   // contextWindow=null 时协议不暴露分母与已用量，但 reducer 仍需保留最新 context 用量，
@@ -639,7 +639,7 @@ export class ProductProjection {
     if (currentContextWindow) {
       this.contextWindowState.usedTokens = currentContextWindow.usedTokens;
     }
-    // 未知容量也有内部用量事实；迟到的恢复种子不能覆盖真实 ModelComplete/Compact 水位。
+    // 未知容量也有内部用量事实；迟到的恢复种子不能覆盖真实 ModelComplete 水位。
     if (this.contextWindowState.usedTokens > 0) {
       return;
     }
@@ -1308,7 +1308,7 @@ export class ProductProjection {
         if (fact.semanticKind !== "userIntent") return [];
         return [
           ...this.onTurnStarted(fact),
-          // model-only 维护 turn（manual /compact、goal continuation）没有资格
+          // model-only 维护 turn（goal continuation）没有资格
           // 承载 SessionStart 摘要；pending 保持到下一条 user-visible 真实 turn。
           ...(this.currentTurnStartedModelOnly
             ? []
@@ -1588,8 +1588,8 @@ export class ProductProjection {
     if (
       pending ||
       !event.turnId ||
-      // 维护 turn 排除只属于 SessionStart——首条输入即 /compact 时
-      // SessionStart Hook 携带 compact turnId 到达，不能直挂，先入 pending 等
+      // 维护 turn 排除只属于 SessionStart——首条输入即维护命令时
+      // SessionStart Hook 携带维护 turnId 到达，不能直挂，先入 pending 等
       // 真实 turn。model-only ≠ 维护 turn：background_task / subagent_message /
       // goal continuation 轮同样是 model-only，但它们是会真实跑工具的 agent 轮，
       // 其 PreToolUse/PostToolUse/Stop 必须按 event.turnId 直挂原轮（与 cold
@@ -4882,7 +4882,6 @@ export class ProductProjection {
     const context = {
       phase: next.phase,
       goalStatus: nextGoal?.status ?? null,
-      // compacting 不是独立 phase（封闭枚举），从 activeWorks 派生。
       compacting: false,
       goalVerifying: next.activeWorks.some((work) => work.kind === "goalVerifier"),
       queueLength: nextQueue.items.length,

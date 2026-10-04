@@ -20,7 +20,6 @@ import { isModelContextExceededError } from "../helpers/index.js";
 
 type ModelUsageQuerySource =
   | "main_turn"
-  | "compact"
   | "session_title"
   | "goal_completion_verification"
   | string;

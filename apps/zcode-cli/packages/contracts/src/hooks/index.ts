@@ -127,7 +127,7 @@ export interface UserPromptSubmitHookInput extends BaseHookInput {
 export interface SessionStartHookInput extends BaseHookInput {
   hookEventName: typeof HookEventName.SessionStart;
   model?: string;
-  source: "startup" | "resume" | "clear" | "compact";
+  source: "startup" | "resume" | "clear";
 }
 
 export interface StopHookInput extends BaseHookInput {

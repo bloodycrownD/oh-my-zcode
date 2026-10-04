@@ -1063,7 +1063,6 @@ const enUS: Record<string, string> = {
   "modelTrajectory.finish.contentFilter": "Content filtered",
   "modelTrajectory.source.main": "Main session",
   "modelTrajectory.source.sessionTitle": "Title generation",
-  "modelTrajectory.source.compact": "Compaction",
   "modelTrajectory.source.promptEnhance": "Prompt enhance",
   "modelTrajectory.source.targetCompletion": "Goal check",
   "modelTrajectory.source.subagent": "Subagent",

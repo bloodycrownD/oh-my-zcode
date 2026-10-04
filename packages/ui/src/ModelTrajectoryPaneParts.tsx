@@ -139,8 +139,6 @@ function sourceLabelId(callSource: NonNullable<ZCodeModelTrajectoryRecord["callS
       return "modelTrajectory.source.main";
     case "session_title":
       return "modelTrajectory.source.sessionTitle";
-    case "compact":
-      return "modelTrajectory.source.compact";
     case "prompt_enhance":
       return "modelTrajectory.source.promptEnhance";
     case "target_completion_verification":
@@ -156,8 +154,6 @@ function sourceLabelId(callSource: NonNullable<ZCodeModelTrajectoryRecord["callS
       return "modelTrajectory.source.main";
     case "subagent":
       return "modelTrajectory.source.subagent";
-    case "compact":
-      return "modelTrajectory.source.compact";
     case "sidecar":
       return "modelTrajectory.source.sidecar";
     case "unknown":

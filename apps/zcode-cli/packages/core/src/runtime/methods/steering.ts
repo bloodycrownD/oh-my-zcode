@@ -449,7 +449,6 @@ function firstInlineGuideIndex(activeTurn: ActiveTurnSteeringState): number {
   return activeTurn.pendingInputs.findIndex(
     (pendingInput) =>
       pendingInput.commandKind !== "sendGoalCommand" &&
-      pendingInput.commandKind !== "compact" &&
       pendingInputDelivery(pendingInput) === "guide",
   );
 }
@@ -466,7 +465,6 @@ export function hasInlineGuidePendingInput(
     !this.queueExternalDrainActive &&
     !this.pendingInputReservations.has(pendingInput?.id ?? "") &&
     pendingInput?.commandKind !== "sendGoalCommand" &&
-    pendingInput?.commandKind !== "compact" &&
     pendingInputDelivery(pendingInput) === "guide"
   );
 }

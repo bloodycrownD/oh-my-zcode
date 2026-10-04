@@ -439,7 +439,7 @@ export type ZCodeStreamEvent = (
   | ZCodeTaskSnapshotUpdated
 ) & { inputId?: InputId };
 export type ZCodeTurnSteerSource = "plan_approval_feedback" | "workflow_refine_feedback";
-export type ZCodeTurnSteerCommandKind = "sendText" | "sendGoalCommand" | "compact";
+export type ZCodeTurnSteerCommandKind = "sendText" | "sendGoalCommand";
 export interface ZCodeTurnSteerQueued {
   type: "turn_steer_queued";
   taskId: string;

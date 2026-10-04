@@ -1137,7 +1137,7 @@ export const zcodeTurnStartedEventPayloadSchema = z
   })
   .strict();
 const zcodeTurnSteerSourceSchema = z.enum(["plan_approval_feedback", "workflow_refine_feedback"]);
-const zcodeTurnSteerCommandKindSchema = z.enum(["sendText", "sendGoalCommand", "compact"]);
+const zcodeTurnSteerCommandKindSchema = z.enum(["sendText", "sendGoalCommand"]);
 const zcodeTurnSteerDeliverySchema = z.enum(["queue", "guide"]);
 
 export const zcodeTurnSteerQueuedEventPayloadSchema = z

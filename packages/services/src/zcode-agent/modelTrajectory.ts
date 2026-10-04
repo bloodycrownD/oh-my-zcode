@@ -205,9 +205,6 @@ function classifyCallSource(
   if (querySource === "subagent") {
     return { kind: "subagent", querySource };
   }
-  if (querySource === "compact" || modelRole === "compact") {
-    return { kind: "compact", querySource };
-  }
   if (querySource) {
     return { kind: "sidecar", querySource };
   }
