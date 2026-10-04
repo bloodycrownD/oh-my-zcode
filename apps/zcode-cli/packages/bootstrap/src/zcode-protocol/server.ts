@@ -82,7 +82,7 @@ import {
 } from "./saved-workflows.js";
 import { listMcpServers } from "./mcp.js";
 import { updateInteractionPreferences } from "./interaction-preferences.js";
-import { updateMagicContextConfig } from "./magic-context-config.js";
+import { readMagicContextConfig, updateMagicContextConfig } from "./magic-context-config.js";
 import { updateAccountProviderConfig } from "./account-provider-config.js";
 import { updateModelIoPreferences } from "./model-io-preferences.js";
 import { updateOffPeakToolPolicy } from "./off-peak-tool-policy.js";
@@ -628,6 +628,10 @@ export class ZCodeProtocolAgentServer {
       // FORK（S23 / D-12）：写盘 + ConfigPort 内存双写；推送由 observe 扇出，不在此层。
       case zcodeProtocolMethods.workspaceUpdateMagicContextConfig:
         return await updateMagicContextConfig(this.context, request.params);
+      // FORK（Step 29 / D-12）：设置的表单初值。放在 update 旁边而不是独立文件，
+      // 因为它与 update 共用同一个 ConfigPort 读取约定与同一个 schema 对象。
+      case zcodeProtocolMethods.workspaceReadMagicContextConfig:
+        return await readMagicContextConfig(this.context, request.params);
       case zcodeProtocolMethods.workspaceUpdateModelIoPreferences:
         return await updateModelIoPreferences(this.context, request.params);
       case zcodeProtocolMethods.workspaceUpdateOffPeakToolPolicy:

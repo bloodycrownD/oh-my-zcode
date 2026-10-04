@@ -19,6 +19,8 @@ export type SettingsSectionId =
   | "workspaceFileSearch"
   | "computerUse"
   | "automations"
+  // FORK（Step 29 / D-12）：magic-context 参数域的设置分区。
+  | "context"
   | "shortcuts";
 
 type SettingsUsageTabTarget = "app" | "codingPlan";
@@ -77,6 +79,7 @@ function isSettingsSectionId(value: string): value is SettingsSectionId {
     value === "workspaceFileSearch" ||
     value === "computerUse" ||
     value === "automations" ||
+    value === "context" ||
     value === "shortcuts"
   );
 }

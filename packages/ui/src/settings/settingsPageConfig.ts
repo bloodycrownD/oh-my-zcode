@@ -18,6 +18,7 @@ import {
   WandSparkles,
   Keyboard,
   FileSearch,
+  Layers,
 } from "lucide-react";
 import { isSettingsSectionEnabled, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 import type { Theme } from "@/useTheme.js";
@@ -77,6 +78,14 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     id: "memory",
     icon: Brain,
     titleId: "settings.memory",
+    groupId: "agentCapabilities",
+  },
+  // FORK（Step 29 / D-12）：magic-context 参数域。紧跟 Memory——两者都是
+  // Agent 侧的上下文供给配置，Memory 管「注入什么」，本分区管「怎么裁剪/分舱」。
+  {
+    id: "context",
+    icon: Layers,
+    titleId: "settings.context.title",
     groupId: "agentCapabilities",
   },
   {

@@ -92,6 +92,7 @@ import {
   zcodeWorkspaceHookTrustGrantResultSchema,
   zcodeWorkspaceUpdateInteractionPreferencesResultSchema,
   zcodeWorkspaceUpdateMagicContextConfigResultSchema,
+  zcodeWorkspaceReadMagicContextConfigResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
   zcodeProviderUpdateAccountConfigResultSchema,
   type ZCodeSessionStateSnapshot,
@@ -3805,6 +3806,41 @@ export function createZCodeAgentService(
         return result;
       } catch (error) {
         logger.warn(undefined, "ZCode Protocol workspace/updateMagicContextConfig 失败", {
+          durationMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : String(error),
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        throw error;
+      }
+    },
+
+    // FORK（Step 29 / D-12）：读回 effective 域，供设置分区渲染表单初值。
+    // 与 update 走同一条 read-only 控制面：设置页在 provider/model 未就绪时也
+    // 必须可读，且这条 lane 在已有活动 runtime 时复用同一个 client，因此读到
+    // 的就是那些 session 正在用的 ConfigPort 值。
+    async readMagicContextConfig(params: ZCodeAgentWorkspaceTarget) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      const startedAt = Date.now();
+      logger.info(undefined, "开始请求 ZCode Protocol workspace/readMagicContextConfig", {
+        workspaceKey,
+        workspacePath: params.workspacePath,
+      });
+      try {
+        const client = await getReadOnlyClient(params);
+        const result = await client.request(
+          zcodeProtocolMethods.workspaceReadMagicContextConfig,
+          { workspace: buildWorkspaceRef(params) },
+          zcodeWorkspaceReadMagicContextConfigResultSchema,
+        );
+        logger.info(undefined, "ZCode Protocol workspace/readMagicContextConfig 完成", {
+          durationMs: Date.now() - startedAt,
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        return result;
+      } catch (error) {
+        logger.warn(undefined, "ZCode Protocol workspace/readMagicContextConfig 失败", {
           durationMs: Date.now() - startedAt,
           message: error instanceof Error ? error.message : String(error),
           workspaceKey,

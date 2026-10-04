@@ -2004,6 +2004,48 @@ const zhCN: Record<string, string> = {
   "settings.nativeSearchEnhancementsDescription":
     "在新建会话或应用重启后恢复的会话中使用增强 Find 和 Grep。当前会话保持现有设置；Windows 的 Find 保持不变。",
   "settings.memory": "记忆",
+  // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
+  "settings.context.title": "上下文管理",
+  "settings.context.description":
+    "上下文管理（magic-context）负责在每轮请求前裁剪、折叠并分舱会话历史。保存后立即对正在运行的会话生效，无需重启。",
+  "settings.context.noWorkspace": "请先打开一个工作区，再配置上下文管理。",
+  "settings.context.loadFailed": "读取上下文管理配置失败。",
+  "settings.context.saved": "上下文管理配置已保存并生效。",
+  "settings.context.saveFailed": "保存上下文管理配置失败，请重试。",
+  "settings.context.reset": "放弃修改",
+  "settings.context.enabled.label": "启用上下文管理",
+  "settings.context.enabled.description":
+    "关闭后 transform 直通原始消息，不做任何预算管理与历史折叠；其余参数在重新开启前不生效。",
+  "settings.context.executeThreshold.label": "执行阈值",
+  "settings.context.executeThreshold.description":
+    "上下文占用达到该百分比时，强制执行已排队的上下文操作。取值 20–90；越高越晚执行，留给输出与突发增长的空间越小。",
+  "settings.context.executeThresholdTokens.label": "执行阈值（Token 覆盖）",
+  "settings.context.executeThresholdTokens.description":
+    "按绝对 Token 数覆盖上面的百分比阈值，留空表示不覆盖。仅用于同一台机器上模型上下文窗口差异很大的场景。",
+  "settings.context.executeThresholdTokens.placeholder": "不覆盖",
+  "settings.context.protectedTokens.label": "受保护 Token 下限",
+  "settings.context.protectedTokens.description":
+    "自动回收不会把上下文压到这条线以下，用于保住最近若干轮对话。取值 4000–1000000，留空表示不额外保护。",
+  "settings.context.protectedTokens.placeholder": "不额外保护",
+  "settings.context.historyBudget.label": "历史预算占比",
+  "settings.context.historyBudget.description":
+    "会话历史块占「可用上下文 × 执行阈值」的比例，取值 0.05–0.5。占比越大留给工具输出与分舱的空间越小。",
+  "settings.context.cacheTtl.label": "前缀缓存有效期",
+  "settings.context.cacheTtl.description":
+    "假定服务端前缀缓存仍然有效的时长，例如 5m、1h；填 never 表示不做有效期假设。",
+  "settings.context.historianModel.label": "折叠模型",
+  "settings.context.historianModel.description":
+    "运行上下文分舱折叠（historian）的旁路模型，格式为 provider/model。建议选一个便宜的小模型。",
+  "settings.context.historianModel.select": "选择模型",
+  "settings.context.historianModel.clear": "不配置（留空）",
+  "settings.context.historianModel.missingHint":
+    "上下文管理已启用但未配置折叠模型，分舱折叠将无法运行。可在此选择模型，或把「启用上下文管理」关闭。",
+  "settings.context.smartDrops.label": "智能丢弃",
+  "settings.context.smartDrops.description":
+    "在已有的执行期自动丢弃之上，额外回收可证明已被取代的工具输出。实验特性，默认关闭；关闭时输出与仅按位置回收完全一致。",
+  "settings.context.failClosedBlocking.label": "故障时阻断请求",
+  "settings.context.failClosedBlocking.description":
+    "上下文管理无法工作时（存储打开失败、schema 不匹配）直接阻断请求并给出可恢复的错误，而不是静默降级为原样透传。",
   "settings.memory.workspaceMemory": "工作区记忆",
   "settings.memoryDescription":
     "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",

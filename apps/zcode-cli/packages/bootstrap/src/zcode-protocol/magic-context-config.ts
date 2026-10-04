@@ -1,9 +1,12 @@
 import { ConfigKey } from "@zcode/contracts";
-import { getDefaultConfigPath, updateMagicContextInFileConfig } from "@zcode/adapters/config";
+import { getDefaultConfigPath, loadFileConfig, updateMagicContextInFileConfig } from "@zcode/adapters/config";
 import { MagicContextConfigSchema } from "@zcode/magic-context";
 import {
+  zcodeWorkspaceReadMagicContextConfigParamsSchema,
+  zcodeWorkspaceReadMagicContextConfigResultSchema,
   zcodeWorkspaceUpdateMagicContextConfigParamsSchema,
   zcodeWorkspaceUpdateMagicContextConfigResultSchema,
+  type ZCodeWorkspaceReadMagicContextConfigResult,
   type ZCodeWorkspaceUpdateMagicContextConfigResult,
 } from "@zcode/shared";
 import {
@@ -46,6 +49,59 @@ import {
 /** 供单测注入的窄缝；生产路径固定为默认用户配置路径。 */
 export interface UpdateMagicContextConfigDependencies {
   configPath?: string;
+}
+
+/**
+ * FORK（Step 29 / D-12）：读回 effective 域，供设置分区渲染表单初值。
+ *
+ * 读取顺序刻意是「ConfigPort 优先、文件兜底」，与 update 的写入顺序相反：
+ * update 刚把值推给所有 resident session，此刻 ConfigPort 才是运行时真正在用的
+ * 那一份；只在有活动 session 时才「碰得到」，没有活动 session 说明配置面此刻
+ * 没有读者，读文件得到的就是下次建 App 时 `createConfig` 会读到的同一份值。
+ * 两条路径都过同一个 `MagicContextConfigSchema`，因此返回给 UI 的形状恒定，
+ * 不会因为「有没有活动 session」而让表单在两种字段布局之间跳。
+ *
+ * 同样走 `getDefaultConfigPath()`，不接受调用方传路径——与 update 同一条纪律。
+ */
+export async function readMagicContextConfig(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+  dependencies: UpdateMagicContextConfigDependencies = {},
+): Promise<ZCodeWorkspaceReadMagicContextConfigResult> {
+  const params = parseParams(zcodeWorkspaceReadMagicContextConfigParamsSchema, rawParams);
+  const configPath = dependencies.configPath ?? getDefaultConfigPath();
+
+  for (const record of context.sessions.values()) {
+    const configPort = record.app?.getConfigPort?.();
+    if (!configPort) continue;
+    // ConfigPort 的 MagicContext 域**恒有值**（注册时就把 `.default()` 解析结果
+    // 钉进去了，见 adapters config `setInitialConfig`），所以这里不需要再兜一层
+    // undefined 合并——真有值就直接用，避免读路径与 update 路径各自补一遍默认值。
+    const result = zcodeWorkspaceReadMagicContextConfigResultSchema.parse({
+      workspace: params.workspace,
+      path: configPath,
+      config: configPort.get(ConfigKey.MagicContext),
+    });
+    return result;
+  }
+
+  const loaded = loadFileConfig(configPath);
+  const result = zcodeWorkspaceReadMagicContextConfigResultSchema.parse({
+    workspace: params.workspace,
+    path: loaded.path,
+    // `loadFileConfig` 装载失败时给的是 `{}`，这里让 schema 补齐成完整默认域，
+    // 与 update 的 `params.config ?? {}` 兜底语义一致：文件坏掉时 UI 仍然看到
+    // 一份可编辑的完整表单，而不是一堆 undefined 输入框。
+    config: MagicContextConfigSchema.parse(loaded.config.magicContext ?? {}),
+  });
+  context.logger?.info("magicContext config read", {
+    module: "bootstrap.zcode_protocol",
+    event: "zcode_protocol.magic_context.config_read",
+    configPath: loaded.path,
+    fromConfigPort: false,
+    workspaceKey: params.workspace.workspaceKey,
+  });
+  return result;
 }
 
 export async function updateMagicContextConfig(
@@ -100,6 +156,10 @@ export async function updateMagicContextConfig(
     path: persisted.path,
     changed: persisted.changed,
     applied: true,
+    // FORK（Step 29 / D-12）：回 effective 域而不是 `params.config`。schema 的
+    // `.default()` 与 strip 已经把它规范化过一次，写盘的与推入内存的都是
+    // `parsed.data`；回显原始入参会让 UI 在成功保存后展示一份与内存不一致的表单。
+    config: parsed.data,
   });
 }
 

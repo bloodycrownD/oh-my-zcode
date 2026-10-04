@@ -2134,6 +2134,48 @@ const enUS: Record<string, string> = {
   "settings.nativeSearchEnhancementsDescription":
     "Use enhanced Find and Grep in new sessions and sessions restored after an app restart. Active sessions keep their current setting; Find remains unchanged on Windows.",
   "settings.memory": "Memory",
+  // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
+  "settings.context.title": "Context Management",
+  "settings.context.description":
+    "Context Management (magic-context) trims, folds and compartments conversation history before each request. Changes take effect on running sessions immediately — no restart needed.",
+  "settings.context.noWorkspace": "Open a workspace before configuring context management.",
+  "settings.context.loadFailed": "Failed to read the context management configuration.",
+  "settings.context.saved": "Context management settings saved and applied.",
+  "settings.context.saveFailed": "Failed to save the context management configuration. Try again.",
+  "settings.context.reset": "Discard changes",
+  "settings.context.enabled.label": "Enable context management",
+  "settings.context.enabled.description":
+    "When off, the transform passes messages through untouched — no budget management and no history folding. The other settings have no effect until it is turned back on.",
+  "settings.context.executeThreshold.label": "Execute threshold",
+  "settings.context.executeThreshold.description":
+    "Once context usage reaches this percentage, queued context operations are forced to execute. Range 20–90; higher values execute later and leave less room for output and mid-turn growth.",
+  "settings.context.executeThresholdTokens.label": "Execute threshold (token override)",
+  "settings.context.executeThresholdTokens.description":
+    "Override the percentage threshold above with an absolute token count. Leave empty for no override. Only useful when models on the same machine have very different context windows.",
+  "settings.context.executeThresholdTokens.placeholder": "No override",
+  "settings.context.protectedTokens.label": "Protected token floor",
+  "settings.context.protectedTokens.description":
+    "Automatic reclaim never pushes context below this line, preserving the most recent turns. Range 4000–1000000; leave empty for no extra protection.",
+  "settings.context.protectedTokens.placeholder": "No extra protection",
+  "settings.context.historyBudget.label": "History budget share",
+  "settings.context.historyBudget.description":
+    "Share of (usable context × execute threshold) reserved for the session history block. Range 0.05–0.5; larger values leave less room for tool output and compartments.",
+  "settings.context.cacheTtl.label": "Prefix cache lifetime",
+  "settings.context.cacheTtl.description":
+    "How long the provider's cached prefix is assumed to stay valid, e.g. 5m or 1h. Use never to make no expiry assumption.",
+  "settings.context.historianModel.label": "Folding model",
+  "settings.context.historianModel.description":
+    "Sidecar model that runs context compartment folding (historian), as provider/model. A cheap small model is usually enough.",
+  "settings.context.historianModel.select": "Select a model",
+  "settings.context.historianModel.clear": "Not configured (leave empty)",
+  "settings.context.historianModel.missingHint":
+    "Context management is enabled but no folding model is configured, so compartment folding cannot run. Pick a model here, or turn Enable context management off.",
+  "settings.context.smartDrops.label": "Smart drops",
+  "settings.context.smartDrops.description":
+    "Layer content-aware reclaim of provably-superseded tool output on top of the existing execute-pass auto-drop. Experimental and off by default; while off the output is byte-identical to positional-only reclaim.",
+  "settings.context.failClosedBlocking.label": "Block requests on failure",
+  "settings.context.failClosedBlocking.description":
+    "When context management cannot operate (storage open failure, schema fence mismatch), block the request with a loud recovery error instead of silently degrading to pass-through.",
   "settings.memory.workspaceMemory": "Workspace Memory",
   "settings.memoryDescription":
     "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",

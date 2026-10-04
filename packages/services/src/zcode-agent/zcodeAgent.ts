@@ -62,6 +62,7 @@ import type {
   ZCodeWorkspaceGenerateTextParams,
   ZCodeWorkspaceHookTrustGrantResult,
   ZCodeWorkspaceUpdateMagicContextConfigResult,
+  ZCodeWorkspaceReadMagicContextConfigResult,
   ZCodeAutomationBotDeliveryTarget,
 } from "@zcode/shared";
 import type {
@@ -615,6 +616,14 @@ export interface IZCodeAgentService {
   updateMagicContextConfig(
     params: ZCodeAgentUpdateMagicContextConfigParams,
   ): Promise<ZCodeWorkspaceUpdateMagicContextConfigResult>;
+  /**
+   * FORK（Step 29 / D-12）：读回 effective `magicContext` 域，作为设置分区表单的
+   * 初值。必须与 update 成对使用——update 是整域覆盖，UI 不先读一次就会在首次
+   * 保存时把用户手写的其余字段重置成默认值。
+   */
+  readMagicContextConfig(
+    params: ZCodeAgentWorkspaceTarget,
+  ): Promise<ZCodeWorkspaceReadMagicContextConfigResult>;
   listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams): Promise<ZCodeMcpListResult>;
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**

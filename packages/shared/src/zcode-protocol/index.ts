@@ -2165,10 +2165,54 @@ export const zcodeWorkspaceUpdateMagicContextConfigResultSchema = z
      * 「写盘 → 内存」两段都走完了，而不是只看到 RPC 成功就当生效。
      */
     applied: z.literal(true),
+    /**
+     * FORK（Step 29 / D-12）：**写盘并推入内存后的 effective 域**——即
+     * `MagicContextConfigSchema` 规范化（补齐 `.default()`、剥掉 `compaction`
+     * 等未移植键）之后、写进 config.json 的那一个对象，UI 表单据此回填，不必
+     * 自己再猜一遍 schema 行为。与 params 一样只声明「是个 JSON 值」：字段表
+     * 仍然只有包里那一份。
+     *
+     * 为什么必须是 effective 而不是回显 params：S23 的语义是**整域覆盖**，
+     * 调用方漏传一个可选字段就等于把它重置成默认值。回显 params 会让 UI 在
+     * 一次成功保存后展示与内存不一致的表单状态。
+     */
+    config: z.unknown(),
   })
   .strict();
 export type ZCodeWorkspaceUpdateMagicContextConfigResult = z.infer<
   typeof zcodeWorkspaceUpdateMagicContextConfigResultSchema
+>;
+
+/**
+ * FORK（Step 29 / D-12）：读回 `magicContext` 参数域，供设置分区渲染表单初值。
+ *
+ * 与 update 成对存在的理由：update 是整域覆盖（见上），UI 必须在发请求**之前**
+ * 读一次现值再合并，否则第一次保存就会把用户手写的其余字段清成默认值。
+ *
+ * 同样不在协议层声明字段结构——权威 schema 只有包里那一份。
+ */
+export const zcodeWorkspaceReadMagicContextConfigParamsSchema = z
+  .object({ workspace: zcodeWorkspaceRefSchema })
+  .strict();
+export type ZCodeWorkspaceReadMagicContextConfigParams = z.infer<
+  typeof zcodeWorkspaceReadMagicContextConfigParamsSchema
+>;
+
+export const zcodeWorkspaceReadMagicContextConfigResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 读盘路径（用户级 config.json）；与 update result 的 `path` 同一语义。 */
+    path: nonEmptyString,
+    /**
+     * effective 域：ConfigPort 里运行时真正在用的值（没有活动 session 时退回
+     * 直接读文件 + schema parse）。与 update result 的 `config` 同构，UI 可以
+     * 用同一个类型接住两边。
+     */
+    config: z.unknown(),
+  })
+  .strict();
+export type ZCodeWorkspaceReadMagicContextConfigResult = z.infer<
+  typeof zcodeWorkspaceReadMagicContextConfigResultSchema
 >;
 
 export const zcodeModelIoPreferencesSchema = z
@@ -3569,6 +3613,9 @@ export const zcodeProtocolMethods = {
   // FORK（S23 / D-12）：magic-context 参数域。与 interaction-preferences 的关键
   // 差异是**写盘 + 内存双写**——后者只改进程内 registry，改完即失、不落盘、无推送。
   workspaceUpdateMagicContextConfig: "workspace/updateMagicContextConfig",
+  // FORK（Step 29 / D-12）：update 的配对读方法。设置分区渲染表单初值必须先读
+  // effective 域——update 是整域覆盖，UI 不先读就会在首次保存时抹掉其余字段。
+  workspaceReadMagicContextConfig: "workspace/readMagicContextConfig",
   workspaceUpdateModelIoPreferences: "workspace/updateModelIoPreferences",
   // Off-Peak 工具面门禁是 workspace 级事实（灰度 + 本地/远程），由 host 在 agent 就绪时同步；
   // CLI 对 legacy create/resume 与 v4 冷恢复统一读取。旧 CLI method-not-found → host 降级忽略。

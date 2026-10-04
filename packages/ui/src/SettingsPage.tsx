@@ -70,6 +70,7 @@ import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
 import { MemorySettingsSection } from "@/settings/MemorySettingsSection.js";
+import { MagicContextSettingsSection } from "@/settings/MagicContextSettingsSection.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
 import { ShortcutSettingsSection } from "@/settings/ShortcutSettingsSection.js";
@@ -1690,6 +1691,15 @@ export function SettingsPage({
                               onMemoryEnabledChange={handleMemoryEnabledChange}
                               projectMemoryViewerAvailable={Boolean(isDesktop)}
                               workspaceDisplayNames={memoryWorkspaceDisplayNames}
+                            />
+                          </ServiceProvider>
+                        ) : activeSection === "context" ? (
+                          <ServiceProvider services={localHostServices}>
+                            {/* magicContext 是用户级参数域：写盘固定落在
+                                ~/.zcode/cli/config.json，workspace 只用于定位本机控制面
+                                （读/写都走同一条 read-only lane）。 */}
+                            <MagicContextSettingsSection
+                              workspacePath={activeWorkspacePath ?? captionWorkspacePath}
                             />
                           </ServiceProvider>
                         ) : activeSection === "plugin" ? (
