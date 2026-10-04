@@ -45,7 +45,6 @@ interface RemoteAttachmentRoute {
     reject: (error: Error) => void;
   };
   attachmentState: "attachable" | "closed";
-  connectFinalized: boolean;
   providerProvisioningDispose?: () => void;
 }
 
@@ -331,9 +330,6 @@ export function createRemoteWorkspaceSessionManager(options: {
     options.logger.info(
       `[window-host-remote] renderer attachment ready, sessionId=${payload.sessionId}, reason=${pending.reason}`,
     );
-    if (!route.connectFinalized) {
-      route.connectFinalized = true;
-    }
     pending.resolve();
   }
 
@@ -358,7 +354,6 @@ export function createRemoteWorkspaceSessionManager(options: {
       webContentsId,
       descriptor,
       attachmentState: "attachable",
-      connectFinalized: false,
     };
     routesBySessionId.set(descriptor.remoteSessionId, route);
     const environmentKey = buildRemoteEnvironmentKey(descriptor.target);

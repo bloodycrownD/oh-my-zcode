@@ -32,9 +32,9 @@ export function createModelRequestAttributionHeaders(
   // 只把跨 provider 网络边界需要的观测归因字段写入 header，span 等细粒度信息仍留在事件和日志里。
   return {
     [MODEL_REQUEST_HEADER]: statusContext.requestId,
-    [MODEL_SESSION_TYPE_HEADER]: isModelRequestSessionType(statusContext.modelRequestSessionType)
-      ? statusContext.modelRequestSessionType
-      : ModelRequestSessionType.Other,
+    [MODEL_SESSION_TYPE_HEADER]: resolveModelRequestSessionType(
+      statusContext.modelRequestSessionType,
+    ),
     [MODEL_TRACE_HEADER]: statusContext.traceId,
     ...(queryHeaderValue ? { [MODEL_QUERY_HEADER]: queryHeaderValue } : {}),
     ...(sessionHeaderValue ? { [MODEL_SESSION_HEADER]: sessionHeaderValue } : {}),
