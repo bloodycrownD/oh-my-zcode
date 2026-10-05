@@ -149,7 +149,7 @@ import {
   resolveConversationShareBackgroundScrollLocked,
   resolveConversationShareSelectionPanelVisible,
 } from "@/v4/conversationShareModePolicy.js";
-import { buildConversationTurnRenderUnits } from "@/v4/conversationTurnRenderUnits.js";
+import { conversationTurnRenderUnitsCache } from "@/v4/conversationProjectionCore.js";
 import { buildConversationTurnNavigatorItems } from "@/v4/conversationTurnNavigatorHelpers.js";
 import { SessionPluginReferenceIconBoundary } from "@/v4/SessionPluginReferenceIconProvider.js";
 import {
@@ -638,9 +638,18 @@ export function SessionPane({
     enabled: shareSelectionPanelVisible,
     onDismiss: dismissShareSelectionPanel,
   });
+  // 与 ConversationTimeline 共用同一个增量缓存句柄：这是同一帧里对同一份
+  // rows.window 的第二份派生，过去是独立的一份全量重建（hook 无条件执行，非分享态也在跑）。
+  // sessionPhase 必须与传给 Timeline 的一致——缓存按 (scopeKey, sessionPhase) 整体作废，
+  // 两边喂不同 phase 会互相把对方的条目冲掉，谁都拿不到复用。
   const shareRenderUnits = useMemo(
-    () => buildConversationTurnRenderUnits(snapshot?.rows.window ?? []),
-    [snapshot?.rows.window],
+    () =>
+      conversationTurnRenderUnitsCache.build(
+        snapshot?.rows.window ?? [],
+        { sessionPhase: snapshot?.control.phase, scopeKey: sessionId ?? "draft" },
+        state.lastMutation?.turnIdByRowId,
+      ),
+    [snapshot?.rows.window, snapshot?.control.phase, sessionId, state.lastMutation],
   );
   const shareItems = useMemo(
     () =>
@@ -4523,6 +4532,7 @@ export function SessionPane({
               apiRetry={timelineSnapshot?.control.apiRetry ?? null}
               totalCount={timelineSnapshot?.rows.totalCount ?? 0}
               sessionKey={sessionId ?? "draft"}
+              lastMutation={timelineSnapshot ? state.lastMutation : undefined}
               scrollMemoryKey={timelineScrollMemoryKey}
               rowContext={rowContext}
               onFork={forkActionsEnabled ? handleFork : undefined}

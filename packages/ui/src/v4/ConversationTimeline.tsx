@@ -45,10 +45,9 @@ import {
   getConversationContentWidthClassName,
   getConversationStatusPanelOffsetClassName,
 } from "@/v4/conversationLayout.js";
-import {
-  buildConversationTurnRenderUnits,
-  type ConversationTurnRenderUnit,
-} from "@/v4/conversationTurnRenderUnits.js";
+import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
+import { conversationTurnRenderUnitsCache } from "@/v4/conversationProjectionCore.js";
+import type { ConversationProjectionLastMutation } from "@/v4/conversationProjectionStore.js";
 import {
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
@@ -254,6 +253,12 @@ interface ConversationTimelineProps {
    * rowId 在不同 session 间会重复，测高缓存禁止跨会话串号。
    */
   sessionKey: string;
+  /**
+   * 最近一个 delta 帧的变更行 rowId → turnId（projection store 提供）。
+   * 渲染层据此把 renderUnits 从「每帧全量重建」降到 O(dirty)；缺省即无失效依据，
+   * 缓存句柄会退化成全量重建，不会拿旧值糊弄。
+   */
+  lastMutation?: ConversationProjectionLastMutation | undefined;
   /** renderer-local 滚动记忆 key；draft 为 null，不参与保存或恢复。 */
   scrollMemoryKey?: string | null;
   /** 行渲染上下文（theme/codePreviewSettings/workspacePath）；宿主保证引用稳定。 */
@@ -350,6 +355,7 @@ function ConversationTimelineImpl({
   apiRetry = null,
   totalCount,
   sessionKey,
+  lastMutation,
   scrollMemoryKey = null,
   rowContext,
   onFork,
@@ -408,12 +414,17 @@ function ConversationTimelineImpl({
     observer.observe(element);
     return () => observer.disconnect();
   }, [hasHeaderSlot]);
+  // 走与 SessionPane 共享的增量缓存句柄：只有本帧变更的轮（外加 isLastTurn 可能翻转的
+  // 上一末轮）真正重算，其余轮复用上一帧的 unit 对象。deps 必须带上 lastMutation，
+  // 否则「窗口引用没换但内容被原地改写」的帧会被 memo 静默跳过。
   const renderUnits = useMemo(
     () =>
-      buildConversationTurnRenderUnits(rows, {
-        sessionPhase,
-      }),
-    [rows, sessionPhase],
+      conversationTurnRenderUnitsCache.build(
+        rows,
+        { sessionPhase, scopeKey: sessionKey },
+        lastMutation?.turnIdByRowId,
+      ),
+    [rows, sessionPhase, sessionKey, lastMutation],
   );
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
@@ -897,8 +908,8 @@ function ConversationTimelineImpl({
       const viewportRect = element.getBoundingClientRect();
       const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
       // 只查已挂载行的注册表，不再对滚动容器做 querySelectorAll 全扫描
-      // （那会让每次滚动都强制 reflow）。注册表按 query 集合的文档序遍历，
-      // positions 的顺序语义与原先 DOM 顺序一致。
+      // （那会让每次滚动都强制 reflow）。遍历序不参与判定，顺序由 normalize 的
+      // start/rowId 排序兜底。
       for (const rowId of turnNavigatorQueryRowIdsRef.current) {
         const rowElement = rowElementRegistry.get(rowId);
         if (!rowElement) continue;
