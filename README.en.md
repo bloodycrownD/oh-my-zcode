@@ -79,7 +79,7 @@ After changing Agent source code, run `pnpm --filter @zcode/cli... build` and re
 
 The command-line distribution includes the TUI, Web client, and Agent behind one `omz` command. With no arguments it starts the TUI; a leading `--web` starts Web mode; all other arguments go to the existing Agent CLI. Both modes run locally without Electron.
 
-Install it globally with `npm i -g oh-my-zcode` and run `omz`; building the distribution from this repository is covered under Packaging below. The command name is `omz` and the data directory is `~/.omz`.
+The distribution channel is the release artifact plus `install.sh`: the script reads `latest.json` and `oh-my-zcode-<version>.tar.gz` from the configured download root, installs to `~/.omz/runtime` by default, and drops an `omz` command into the bin directory. This project is not published to the public npm registry (the root `package.json` is `private: true`), so **global installation via npm is not supported**; building the distribution from this repository is covered under Packaging below. The command name is `omz` and the data directory is `~/.omz`.
 
 ```bash
 # Start the terminal UI by default

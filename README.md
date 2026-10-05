@@ -85,7 +85,7 @@ Agent 源码修改后，执行 `pnpm --filter @zcode/cli... build` 并重启服�
 
 命令行发行包包含 TUI、Web 和 Agent，统一使用 `omz` 启动：无参数进入 TUI；第一个参数为 `--web` 时启动 Web；其他参数交给现有 Agent CLI 处理。两种模式都在本机运行，无需 Electron。
 
-全局安装用 `npm i -g oh-my-zcode`，装完直接跑 `omz`；从本仓库源码构建发行包见下方打包章节。命令名和数据目录分别是 `omz` 与 `~/.omz`。
+发行渠道是 release 产物 + `install.sh`：脚本从配置的下载根地址取 `latest.json` 与 `oh-my-zcode-<version>.tar.gz`，默认安装到 `~/.omz/runtime`，并在 `~/.local/bin` 创建 `omz` 命令。本项目尚未发布到 npm 公共 registry（根 `package.json` 为 `private: true`），因此**不支持通过 npm 做全局安装**；从本仓库源码构建发行包见下方打包章节。命令名和数据目录分别是 `omz` 与 `~/.omz`。
 
 ```bash
 # 默认进入终端交互界面

@@ -113,7 +113,7 @@ export function shouldLoadCliDotenvForProtocolServer(env: CliEnv): boolean {
 
 function applyCliRuntimeEnvDefaults(env: CliEnv, argv: readonly string[]): void {
   env[ZCODE_RUNTIME_ENV_KEY] = resolveCliRuntimeEnv(env, argv);
-  applyBetaStorageDefault(env, argv);
+  applyBetaStorageDefault(env);
 }
 
 function resolveCliRuntimeEnv(env: CliEnv, argv: readonly string[]): ZCodeRuntimeEnv {
@@ -130,10 +130,10 @@ function resolveCliRuntimeEnv(env: CliEnv, argv: readonly string[]): ZCodeRuntim
     : "production";
 }
 
-function applyBetaStorageDefault(env: CliEnv, argv: readonly string[]): void {
+function applyBetaStorageDefault(env: CliEnv): void {
   if (env.ZCODE_STORAGE_DIR?.trim()) return;
+  // S32 品牌改名后发行链只产 `omz`，按旧 bin 名 `zcode-beta` 触发的隐式 beta 判定不可达，已删。
   const explicitBeta = env.ZCODE_BETA === "1" || env.ZCODE_ENV === "beta";
-  const invokedAsBeta = argv.some((arg) => /(^|[/\\])zcode-beta(?:$|\.)/u.test(arg));
-  if (!explicitBeta && !invokedAsBeta) return;
+  if (!explicitBeta) return;
   env.ZCODE_STORAGE_DIR = join(homedir(), ".omz-beta");
 }
