@@ -45,6 +45,14 @@ export interface PerfProbe {
   reset(): void;
   /** 返回 JSON 字符串（`PerfProbeSegment[]`），供 CDP 以字符串取回。 */
   dump(): string;
+  /**
+   * 断开长任务观察者并清空缓冲。调用后本实例不再记账（幂等）。
+   *
+   * 存在的理由：`PerformanceObserver` 的句柄此前挂在模块级变量上，Vite HMR 重求值后
+   * 句柄随旧模块一起丢失，新探针再挂一个 → 同一条长任务被两个观察者各记一次，
+   * dump 条目数翻倍、基线与终验采样失真。句柄收进实例闭包后才能被可靠摘掉。
+   */
+  stop(): void;
 }
 
 export interface CreatePerfProbeOptions {
@@ -89,6 +97,9 @@ export function createPerfProbe(options: CreatePerfProbeOptions = {}): PerfProbe
 
   const segments: MutableSegment[] = [];
   let current: MutableSegment = openSegment();
+  /** 观察者句柄随实例走（不再挂模块级）：HMR 重求值后旧模块的句柄已无法被摘除。 */
+  let observer: PerformanceObserver | undefined;
+  let stopped = false;
 
   function openSegment(): MutableSegment {
     const segment: MutableSegment = { startedAt: now(), longtasks: [] };
@@ -107,12 +118,35 @@ export function createPerfProbe(options: CreatePerfProbeOptions = {}): PerfProbe
     }
   }
 
+  function pushLongTask(entry: PerfProbeLongTask): void {
+    if (stopped) return;
+    current.longtasks.push(entry);
+    if (current.longtasks.length > maxLongTasks) {
+      current.longtasks.splice(0, current.longtasks.length - maxLongTasks);
+    }
+  }
+
+  // longtask 是 Chromium 专有类型；不支持的环境（如 Node、部分 WebKit）降级为
+  // 只做内存分段采样，探针其余部分照常可用。Node 下 PerformanceObserver 接受该
+  // type 但从不派发，因此单测可以安全地让每个探针都挂观察器。
+  if (typeof PerformanceObserver !== "undefined") {
+    try {
+      observer = new PerformanceObserver((list) => {
+        for (const entry of list.getEntries()) {
+          pushLongTask({ start: entry.startTime, duration: entry.duration });
+        }
+      });
+      // buffered: true 补上探针启动前已经产生的长任务，避免开局窗口漏采。
+      observer.observe({ type: "longtask", buffered: true });
+    } catch {
+      observer?.disconnect();
+      observer = undefined;
+    }
+  }
+
   return {
     recordLongTask(entry) {
-      current.longtasks.push(entry);
-      if (current.longtasks.length > maxLongTasks) {
-        current.longtasks.splice(0, current.longtasks.length - maxLongTasks);
-      }
+      pushLongTask(entry);
     },
     sampleMemory() {
       return memorySample();
@@ -135,6 +169,14 @@ export function createPerfProbe(options: CreatePerfProbeOptions = {}): PerfProbe
       }));
       return JSON.stringify(snapshot);
     },
+    stop() {
+      observer?.disconnect();
+      observer = undefined;
+      stopped = true;
+      // 缓冲一并清空：stop 后 dump() 必须是空数组，否则上一实例的残留样本
+      // 会和新实例的样本混在一起，采样口径失真。
+      segments.length = 0;
+    },
   };
 }
 
@@ -146,53 +188,34 @@ function isPerfProbeEnabled(): boolean {
   return viteDev && typeof window !== "undefined";
 }
 
-type PerfProbeDebugWindow = Window & {
+/** window 上的探针调试面类型：CDP 侧与 App.tsx 的 cleanup 都要按它取实例。 */
+export type PerfProbeDebugWindow = Window & {
   __zcodePerfProbe?: PerfProbe;
 };
 
-let started: PerfProbe | undefined;
-let observer: PerformanceObserver | undefined;
-
 /**
  * 启动探针并挂上 window 调试面（范式同 `v4/commandAckObservability.ts`）。
- * 幂等：重复调用返回同一个探针实例。生产 build / 非浏览器环境下返回 undefined。
+ * 生产 build / 非浏览器环境下返回 undefined。
+ *
+ * 每次调用都先摘掉 window 上可能残留的旧探针再新建：Vite HMR 会重求值本模块，
+ * 模块级变量随之丢失但 window 上的旧实例仍带着自己的观察者——不摘就会新旧两个
+ * 观察者同时记账，同一条长任务在 dump 里出现两次，采样条目翻倍、基线失真。
  */
 export function startPerfProbe(): PerfProbe | undefined {
   if (!isPerfProbeEnabled()) {
     return undefined;
   }
-  if (started) {
-    return started;
-  }
+  const debugWindow = window as PerfProbeDebugWindow;
+  debugWindow.__zcodePerfProbe?.stop();
   const probe = createPerfProbe();
-  started = probe;
-
-  // longtask 是 Chromium 专有类型；不支持的环境（如 Node、部分 WebKit）降级为
-  // 只做内存分段采样，探针其余部分照常可用。
-  if (typeof PerformanceObserver !== "undefined") {
-    try {
-      observer = new PerformanceObserver((list) => {
-        for (const entry of list.getEntries()) {
-          probe.recordLongTask({ start: entry.startTime, duration: entry.duration });
-        }
-      });
-      // buffered: true 补上探针启动前已经产生的长任务，避免开局窗口漏采。
-      observer.observe({ type: "longtask", buffered: true });
-    } catch {
-      observer = undefined;
-    }
-  }
-
-  (window as PerfProbeDebugWindow).__zcodePerfProbe = probe;
+  debugWindow.__zcodePerfProbe = probe;
   return probe;
 }
 
-/** 断开观察者并摘掉 window 调试面（热更新与单测清理用）。 */
+/** 断开旧实例的观察者并摘掉 window 调试面（热更新与单测清理用）。 */
 export function stopPerfProbe(): void {
-  observer?.disconnect();
-  observer = undefined;
-  started = undefined;
-  if (typeof window !== "undefined") {
-    delete (window as PerfProbeDebugWindow).__zcodePerfProbe;
-  }
+  if (typeof window === "undefined") return;
+  const debugWindow = window as PerfProbeDebugWindow;
+  debugWindow.__zcodePerfProbe?.stop();
+  delete debugWindow.__zcodePerfProbe;
 }

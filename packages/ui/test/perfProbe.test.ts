@@ -253,6 +253,22 @@ test("T-PA1: sampleMemory() 走 collectRendererMemorySample 的注入出口", ()
   assert.equal(sample.heapTotalKb, 2048);
 });
 
+test("T-PA1: stop() 之后 recordLongTask 不再进 dump（观察者已断开、缓冲已清）", () => {
+  const probe = createPerfProbe({ now: () => 0, memorySample: () => fakeMemorySample("stop") });
+
+  probe.recordLongTask({ start: 1, duration: 10 });
+  assert.equal(
+    parseDump(probe.dump())[0].longtasks.length,
+    1,
+    "stop 之前必须已经记到条目，否则本用例测不出差异",
+  );
+
+  probe.stop();
+  // stop 之后注入的长任务（旧观察者若还活着就会走这条路径）不得进入缓冲。
+  probe.recordLongTask({ start: 2, duration: 20 });
+  assert.deepEqual(parseDump(probe.dump()), [], "stop 后 dump 必须是空数组");
+});
+
 test("T-PA1: 非 dev/无 window 环境下 startPerfProbe 是 no-op", () => {
   // Node 下 import.meta.env.DEV 为 false 且没有 window，生产/单测都不该产生副作用。
   assert.equal(typeof window, "undefined");
