@@ -1,11 +1,11 @@
 /* eslint-disable max-lines -- context 面板聚合 Context windows 与 Magic Context 两段通用展示；后续拆分需要单独梳理弹层状态边界。 */
 import {
   useCallback,
-  useEffect,
+
   useMemo,
   useRef,
   useState,
-  useSyncExternalStore,
+
   type CSSProperties,
 } from "react";
 import {
@@ -27,7 +27,7 @@ import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import { isSettingsTab } from "@/store/tabStore.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { runContextPanelActionWithClose } from "@/chat-input-toolbar/contextPanelAction.js";
+
 import { buildMagicContextUsageRows } from "@/chat-input-toolbar/magicContextUsageRows.js";
 import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
 
@@ -235,7 +235,6 @@ const contextUsageTriggerRef = useRef<HTMLElement | null>(null);
   // （resetUi、opportunityBadge、opportunityReminder 及其 effect）随订阅面整删。
   // context 面板的通用区（Context windows / Magic Context / cache 命中 / breakdown）
   // 不受影响，继续由本组件渲染。
-  const opportunityReminder = null;
   const hasCodingPlanUsageRemaining = false;
   const hasStartPlanBalance = false;
 

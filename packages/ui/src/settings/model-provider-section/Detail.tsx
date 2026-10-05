@@ -1,14 +1,14 @@
 /* eslint-disable max-lines -- Model Provider 详情页当前集中编排 Plan Card、API Key 表单和 OAuth 套餐态；后续稳定后再按 family/API/OAuth 拆分。 */
 import {
-  BIGMODEL_PROVIDER_ID,
-  BUILTIN_MODEL_PROVIDER_IDS,
-  ZAI_PROVIDER_ID,
+
+
+
   type BuiltinModelProviderId,
   type ProviderFamilyConnectionSelectionSettings,
-  type StartPlanPreviewConfig,
-  isStartPlanModelProviderId,
-  isIndividualCodingPlanModelProviderId,
-  resolveModelProviderFamilySpecByProviderId,
+
+
+
+
   type ModelConnectivityResult,
   type OAuthProviderId,
 } from "@zcode/shared";
@@ -21,7 +21,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
   type CodingPlanStatus,
-  type CodingPlanProviderId,
+
   type ModelProviderNavItem,
 } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
@@ -30,25 +30,25 @@ import {
   PresetProviderPlaceholderCard,
 } from "./ProviderPlaceholderCards.js";
 import {
-  resolveCodingPlanUpgradeProductsProviderId,
+
   type CodingPlanLoginOptions,
 } from "./codingPlanPricingCards.js";
 import {
-  type EnterpriseCodingPlanProductGroup,
-  type PurchaseAudience,
+
+
 } from "./codingPlanEnterpriseTiers.js";
-import { resolveCodingPlanStatusPanelViewState } from "./codingPlanStatusPanelViewState.js";
+
 import {
-  formatCodingPlanAmount,
-  pickProductPrice,
-  type CodingPlanProductDisplay,
+
+
+
 } from "./codingPlanProductPresentation.js";
 import {
   ProviderFamilyDetailShell,
   ProviderFamilyHeader,
-  ProviderFamilyPlanModeSwitch,
+
 } from "./ProviderFamilyModeHeader.js";
-import { resolveStartPlanEntitlementSummary } from "./StartPlanCard.js";
+
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import type { ProviderSettingsView } from "@zcode/services";
 import type { SavePersonalModelDraftInput } from "@zcode/provider";
@@ -67,7 +67,9 @@ function isPlanNavItem(
   return item?.type === "codingPlan" || item?.type === "teamPlan";
 }
 
-function hasTeamPlanContext(item: ModelProviderNavItem | null): item is Extract<
+function hasTeamPlanContext(
+  item: Extract<ModelProviderNavItem, { type: "teamPlan" }>,
+): item is Extract<
   ModelProviderNavItem,
   { type: "teamPlan" }
 > & {
@@ -81,38 +83,18 @@ function hasTeamPlanContext(item: ModelProviderNavItem | null): item is Extract<
   );
 }
 
-
-function resolvePlanSettingsProvider({
-  view,
-  providerId,
-  fallback,
-}: {
-  view: ProviderSettingsView | null | undefined;
-  providerId: string;
-  fallback: ProviderSettingsFormProvider | null;
-}): ProviderSettingsFormProvider | null {
-  if (view) {
-    return (
-      projectProviderSettingsViewToFormProviders(view).find(
-        (provider) => provider.providerId === providerId,
-      ) ?? null
-    );
-  }
-  return fallback?.providerId === providerId ? fallback : null;
-}
-
 export function ModelProviderSectionDetail({
   selectedNavItem,
   navigationItems = selectedNavItem ? [selectedNavItem] : [],
   connectionSettingsFailed = false,
-  connectionSelections,
+
   startPlanSubscriptionCount = 0,
   presetLoading,
-  codingPlanPurchaseTokenAuthenticatedByProviderId,
-  codingPlanAuthError,
-  presetSubscriptionProviderId,
-  codingPlanStatusSyncProviderId,
-  codingPlanDisconnectProviderId,
+
+
+
+
+
   onSave,
   onAddPersonalModel,
   onSavePersonalModelDraft,
@@ -121,13 +103,13 @@ export function ModelProviderSectionDetail({
   onDelete,
   onReorderProviderModels,
   onTestModel,
-  onCodingPlanLogin,
-  onRetryCodingPlan,
-  onCodingPlanDisconnect,
+
+
+
   onOpenApiKeyUrl,
-  onOpenBigModelRegistration,
-  onCodingPlanPurchaseComplete,
-  onSelectNavItem,
+
+
+
   providerSettingsView: providerSettingsViewOverride,
 }: {
   selectedNavItem: ModelProviderNavItem | null;
@@ -181,7 +163,6 @@ export function ModelProviderSectionDetail({
 }) {
   const { intl } = useZCodeIntl();
   const loadingLabel = intl.formatMessage({ id: "common.loading" });
-  const selectedItemKey = selectedNavItem?.key ?? null;
   const rootProviderSettingsRead = useProviderSettingsView();
   const rootProviderSettingsView =
     rootProviderSettingsRead.state.status === "ready" ? rootProviderSettingsRead.state.view : null;

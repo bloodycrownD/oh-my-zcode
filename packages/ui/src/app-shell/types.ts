@@ -9,7 +9,7 @@ import type {
   IPlatformService,
   RemoteTarget,
 RemoteWorkspaceSessionEntry,
-UserInfo,
+
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import type { BrowserNavigationRequest, RecentClosedSidePaneTab } from "@/hooks/useAppPanels.js";

@@ -14,7 +14,7 @@ import {
 } from "react";
 import { Hand } from "lucide-react";
 import {
-  BUILTIN_MODEL_PROVIDER_IDS,
+
   buildCustomSupplierKey,
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
@@ -568,7 +568,6 @@ export function SessionPane({
     useServices();
   const { intl, locale } = useZCodeIntl();
   const slashCommands = useSlashCommands(workspacePath, workspaceIdentity);
-  const baseWorkspaceServices = useBaseWorkspaceServices();
   const workspaceHomePath = useWorkspaceHomePath({
     workspacePath,
     workspaceIdentity,
@@ -1252,7 +1251,6 @@ export function SessionPane({
     [draftConfig, modelSelectionView],
   );
   // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
-  const codingPlanUpgradeDialog = null;
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
   const promoteGroupedDraftTask = useZCodeSessionStore((state) => state.promoteGroupedDraftTask);
   const handleDraftSessionCreated = useCallback(
@@ -3784,7 +3782,6 @@ export function SessionPane({
   }, [openSettingsTab]);
   // FORK（D-4）：购买 webview 面整删，升级入口不再可达。
   const handleOpenModelUpgrade = useCallback(() => {}, []);
-  const handleOpenQuotaUpgrade = useCallback(() => {}, []);
 
   const handleConfirmShareDisclosure = useCallback(async () => {
     if (!sessionId || !shareDraft || sharePublishing) return;

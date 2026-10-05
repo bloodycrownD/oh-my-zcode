@@ -11,7 +11,7 @@ import {
 } from "@/remote-connection/remoteConnectionLogScroll.js";
 
 export function RemoteConnectionConnectingStep({
-  kind,
+
   logs,
   errorMessage,
   loading,

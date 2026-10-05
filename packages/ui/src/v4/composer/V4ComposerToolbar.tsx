@@ -18,15 +18,15 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
-  getModelProviderFamilySpec,
-  resolveModelProviderFamilySpecByProviderId,
+
+
   TID_V4_MODEL_CONFIG,
   TID_V4_COMPOSER_INPUT,
   ZCODE_AGENT_PROVIDER,
   type ProviderFamilyConnectionSelection,
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
-  type UsageEntitlementSnapshot,
+
   type ZCodeConfigOption,
   type ZCodeProvider,
 } from "@zcode/shared";
@@ -55,7 +55,7 @@ import { useTabStore } from "@/store/TabStoreProvider.js";
 import type { ModelSelectionView } from "@zcode/services";
 import type { ModelSelectionState } from "@/hooks/useModelSelectionView.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
-import { useSettings } from "@/hooks/useSettingService.js";
+
 import { useToolbarConfigOptions } from "@/hooks/useZCodeConfig.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useShortcutCommandLabel } from "@/shortcuts/useShortcutBindings.js";
@@ -133,57 +133,6 @@ function resolveFamilyForPlanProviderId(providerId: string | null | undefined): 
   }
 }
 
-function resolveV4ContextPlanConnection(params: {
-  connectionSelections?: ProviderFamilyConnectionSelectionSettings | null;
-  providerId?: string | null;
-}): V4ContextPlanConnection {
-  const providerFamily = resolveFamilyForPlanProviderId(params.providerId);
-  if (!providerFamily) {
-    return { kind: "none" };
-  }
-
-  // Start 额度属于输入框的有效模型；全局付费连接不能作为它的查询门禁。
-  if (providerFamily.kind === "start") {
-    const providerId = params.providerId?.trim();
-    if (
-      providerId !== BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan &&
-      providerId !== BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan
-    ) {
-      return { kind: "none" };
-    }
-    return {
-      family: providerFamily.family,
-      kind: "start",
-      providerId,
-    };
-  }
-
-  const selection = params.connectionSelections?.[providerFamily.family];
-  if (!selection) return { kind: "none" };
-
-  const providerId = params.providerId?.trim();
-  if (providerFamily.kind === "teamCoding" && selection.kind === "team-coding-plan") {
-    return {
-      family: providerFamily.family,
-      kind: "teamCoding",
-      providerId: providerId as
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiTeamCodingPlan
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan,
-      selection,
-    };
-  }
-  if (providerFamily.kind !== "personalCoding" || selection.kind !== "individual-coding-plan") {
-    return { kind: "none" };
-  }
-
-  return {
-    family: providerFamily.family,
-    kind: "personalCoding",
-    providerId: providerId as
-      | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan
-      | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
-  };
-}
 
 export interface V4ComposerToolbarProps {
   workspacePath: string;
@@ -255,7 +204,6 @@ function V4ComposerModelControlsImpl({
   const providerSettingsRead = useProviderSettingsView();
   const providerSettingsView =
     providerSettingsRead.state.status === "ready" ? providerSettingsRead.state.view : null;
-  const providerSourcesLoading = providerSettingsRead.state.status !== "ready";
   const openSettingsTab = useTabStore((state) => state.openSettingsTab);
   const modelTriggerRef = useRef<HTMLSpanElement | null>(null);
   const thoughtTriggerRef = useRef<HTMLSpanElement | null>(null);
@@ -296,7 +244,6 @@ function V4ComposerModelControlsImpl({
   }, [draftConfig]);
 
   // FORK（D-4）：购买 webview 与来源偏好持久化随订阅面整删，两个 handler 退化为只开设置页。
-  const handleOpenStartPlanUpgrade = useCallback((_providerId: string) => {}, []);
   const handleOpenUsageDetails = useCallback(
     (_sourceId?: SidebarUsageCodingPlanSourceId) => {
       setPendingSettingsUsageCodingPlanIntent();
@@ -306,25 +253,17 @@ function V4ComposerModelControlsImpl({
   );
 
   // FORK（D-4）：连接方式选择随订阅面整删，恒为无连接形态。
-  const contextPlanConnection = { kind: "none" } as const;
 // FORK（D-4）：账号访问判定、Start Plan 余额、团队套餐产品目录、团队 usage source、
   // Coding Plan 权益与个人额度余额全部随订阅面整删。context 区只保留通用用量
   // （contextWindow / magicContext / taskUsage），由 ChatContextUsage 继续渲染。
-  const contextAccountProviderAccess = null;
-  const contextStartPlanBalance = undefined;
-  const contextCodingPlanUsageProviderId = undefined;
   const contextCodingPlanUsageSelectedSourceId: SidebarUsageCodingPlanSourceId | undefined =
     undefined;
-  const refreshTaskEntitlements = useCallback(async (_options?: unknown) => {}, []);
-  const contextCodingPlanUsageProviders: never[] = [];
-  const codingPlanUsageEntitlements: never[] = [];
   const handleUsageClick = useCallback(
     () => handleOpenUsageDetails(contextCodingPlanUsageSelectedSourceId),
     [contextCodingPlanUsageSelectedSourceId, handleOpenUsageDetails],
   );
   // FORK（D-4）：Coding Plan 剩余额度区随订阅面整删，恒 undefined；
   // ChatContextUsage 的 contextWindow / magicContext / taskUsage 通用区不受影响。
-  const codingPlanUsageRemaining = undefined;
 
   // 高频交互排障只走 debug，避免生产日志量随每次选择增长。
   useEffect(() => {

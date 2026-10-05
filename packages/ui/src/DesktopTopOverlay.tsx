@@ -61,7 +61,7 @@ export function DesktopTopOverlay({
   canGoForward: _canGoForward,
   showNewTaskButton,
   appLogoUrl,
-  platform,
+
   onToggleSidebar,
   onCreateTask,
   onGoBack,

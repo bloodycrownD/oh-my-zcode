@@ -8,9 +8,9 @@ import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
 import type { IDisposable } from "@zcode/rpc";
 import type {
-  AccountProviderConfigSnapshot,
+
   ModelSelectionView,
-  ProviderSource,
+
 } from "@zcode/provider";
 import {
   ZCODE_SESSION_RUNTIME_PREFERENCES_REQUEST_TIMEOUT_MS,
@@ -85,7 +85,7 @@ import {
   zcodeWorkspaceUpdateMagicContextConfigResultSchema,
   zcodeWorkspaceReadMagicContextConfigResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
-  zcodeProviderUpdateAccountConfigResultSchema,
+
   type ZCodeSessionStateSnapshot,
   type ZCodeAutomation,
   type ZCodeAutomationRun,
@@ -1139,7 +1139,6 @@ export function createZCodeAgentService(
             return;
           }
           const { workspace } = waiting;
-          const client = await getClient(workspace);
           logger.info(undefined, "provider/model 就绪后已启动等待中的 ZCode agent", {
             providerCount: event.snapshot.providerCount,
             reason: event.reason,

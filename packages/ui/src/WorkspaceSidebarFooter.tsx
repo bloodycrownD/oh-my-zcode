@@ -3,9 +3,9 @@ import type { Locale, UserInfo } from "@zcode/shared";
 import { memo, useCallback, useEffect, useState } from "react";
 import {
   DesktopCommandIds,
-  TID_LOGIN_MENU_ITEM,
-  TID_LOGIN_TRIGGER,
-  TID_LOGOUT_BUTTON,
+
+
+
   TID_TASK_SETTINGS_BUTTON,
 } from "@zcode/shared";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -18,7 +18,7 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
+
   DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
@@ -28,13 +28,13 @@ import {
 import {
   PencilRuler,
   Globe,
-  Loader2,
-  LogInIcon,
-  LogOut,
+
+
+
   Maximize,
   Palette,
   Settings,
-  User,
+
   ZoomIn,
   ZoomOut,
 } from "lucide-react";
@@ -58,8 +58,8 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   settingsButtonMode = "settings",
   workspacePath,
   workspaceIdentity,
-  workspaceRemoteSessionId,
-  activeTaskId,
+
+
   isDesktop = false,
   className,
 }: {
@@ -85,7 +85,6 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   const resetZoomShortcutLabel = useShortcutCommandLabel("resetZoom");
   // FORK（D-19）：登录与订阅额度面整删后，profile 区不再承载任何身份或套餐信息。
   // 显式清空而不是留一个恒为「未登录 / 恒 Z 头像」的空壳——那是永远不会可点的装饰。
-  const profileContent = null;
   const settingsButtonLabel =
     settingsButtonMode === "back"
       ? intl.formatMessage({ id: "workspace.backToWorkspace" })

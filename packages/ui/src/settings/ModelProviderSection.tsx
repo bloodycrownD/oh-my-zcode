@@ -7,7 +7,7 @@ import {
 import {
   BIGMODEL_PROVIDER_ID,
   BUILTIN_MODEL_PROVIDER_IDS,
-  DesktopCommandIds,
+
   isStartPlanModelProviderId,
   type BuiltinModelProviderId,
   type ModelConnectivityResult,
@@ -15,7 +15,7 @@ import {
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
   type OAuthProviderId,
-  resolveModelProviderFamilyIdByProviderId,
+
   resolveModelProviderFamilySpecByProviderId,
   resolveProviderFamilyDomainFromOAuthProvider,
   ZAI_PROVIDER_ID,
@@ -26,7 +26,7 @@ import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useModelProviders } from "@/hooks/useModelProviders.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useServices } from "@/hooks/useServices.js";
-import { useZCodeStore } from "@/store/StoreProvider.js";
+
 import { logger } from "@/logger.js";
 import {
   PRESET_PROVIDER_SPECS,
@@ -41,9 +41,9 @@ import { ProviderTemplatePicker } from "./model-provider-section/ProviderTemplat
 import type { CodingPlanLoginOptions } from "./model-provider-section/codingPlanPricingCards.js";
 import { useModelProviderNavigation } from "./model-provider-section/useModelProviderNavigation.js";
 import {
-  createCodingPlanProviderNodeKey,
+
   createCustomProviderNodeKey,
-  createPresetProviderNodeKey,
+
 } from "./model-provider-section/utils.js";
 import {
   confirmAndDeleteModelProvider,
@@ -52,7 +52,7 @@ import {
 } from "./model-provider-section/modelProviderActions.js";
 import { sortModelProvidersForDisplay } from "@/lib/modelProviderOrdering.js";
 import { useSettings } from "@/hooks/useSettingService.js";
-import { resolveLogoutProviderFamilyDomain } from "@/lib/providerFamilyDomainSettings.js";
+
 import {
   addPendingSettingsSectionListener,
   consumePendingSettingsModelProviderTarget,
@@ -347,10 +347,9 @@ export function ModelProviderSection({
       }),
     [applyModelProviderTarget],
   );
-  const [
-    codingPlanPurchaseTokenAuthenticatedByProviderId,
-    setCodingPlanPurchaseTokenAuthenticatedByProviderId,
-  ] = useState<Partial<Record<BuiltinModelProviderId, boolean>>>({});
+  const [, setCodingPlanPurchaseTokenAuthenticatedByProviderId] = useState<
+    Partial<Record<BuiltinModelProviderId, boolean>>
+  >({});
   const [activeOAuthProvider, setActiveOAuthProvider] = useState<OAuthProviderId | null>(null);
   const [pendingConnectionSelections, setPendingConnectionSelections] =
     useState<ProviderFamilyConnectionSelectionSettings>({});

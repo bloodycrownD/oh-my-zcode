@@ -13,16 +13,16 @@ import type {
   IntegratedTerminalShellOption,
   IntegratedTerminalShellSelection,
   Locale,
-  UsageEntitlementSnapshot,
+
   UserInfo,
   ZCodeInteractionBehavior,
 } from "@zcode/shared";
 import {
-  BUILTIN_MODEL_PROVIDER_IDS,
+
   TID_SETTINGS_BACK_BUTTON,
   TID_SETTINGS_PAGE,
   TID_SETTINGS_SECTION_NAV,
-  TID_SETTINGS_USAGE_TAB,
+
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
@@ -31,7 +31,7 @@ import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { getPathLeaf } from "@/lib/path.js";
-import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
+
 import {
   addPendingSettingsSectionListener,
   clearPendingSettingsPluginOrigin,
@@ -41,18 +41,18 @@ import {
   consumePendingSettingsPluginScopeKey,
   consumePendingSettingsPluginTab,
   consumePendingSettingsModelProviderTarget,
-  consumePendingSettingsUsageTab,
+
   resolveSettingsSection,
   shouldFallbackSettingsUsageTabToApp,
   writeLastSettingsSectionPreference,
   type SettingsModelProviderTarget,
 } from "@/lib/settingsNavigation.js";
-import { readSidebarUsageCodingPlanSourcePreference } from "@/lib/sidebarUsageCodingPlanProviderPreference.js";
+
 import { ModelProviderSection } from "@/settings/ModelProviderSection.js";
 import { UsageStatsSection } from "@/settings/UsageStatsSection.js";
 import { SubagentsSection } from "@/settings/SubagentsSection.js";
 import { AutomationsSection } from "@/settings/AutomationsSection.js";
-import { SegmentPill } from "@/settings/PluginStoreListView.js";
+
 import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
@@ -157,11 +157,11 @@ export function SettingsPage({
   captionWorkspacePath,
   onBack,
   onCreateTask,
-  onOpenWorkspace,
+
   allowOpenWorkspace = true,
-  onLogin,
-  onLogout,
-  user,
+
+
+
 }: {
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
@@ -231,14 +231,11 @@ export function SettingsPage({
   const setNotificationSoundEnabled = useZCodeStore((state) => state.setNotificationSoundEnabled);
 // FORK（D-4）：Coding Plan 使用统计（账号来源、权益、团队商品、tab 切换、
   // 购买入口）随订阅面整删。usage 分区只剩 App Usage（本地 agent 数据库统计）。
-  const usageCodingPlanSources: never[] = [];
   const usageActiveTab = "app" as const;
   const checkingUsageCodingPlanTab = false;
   const showUsageCodingPlanTab = false;
   const usageProviderSettingsLoading = false;
   const usageSubscribedTeamProducts: never[] = [];
-  const handleUsageTabSelect = useCallback((_tab: "app") => {}, []);
-  const handleOpenCodingPlanUpgradeSettings = useCallback((_providerId: string) => {}, []);
   const setNewUserOnboardingOpen = useZCodeStore((state) => state.setNewUserOnboardingOpen);
   const requestOnboardingDialog = () => setNewUserOnboardingOpen(true);
   const [initialModelProviderTarget] = useState(() => consumePendingSettingsModelProviderTarget());

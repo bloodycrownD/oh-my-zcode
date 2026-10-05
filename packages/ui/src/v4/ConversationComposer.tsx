@@ -507,7 +507,7 @@ function ConversationComposerImpl({
   error,
   onDismissError,
   onOpenModelSettings,
-  onOpenModelUpgrade,
+
   onOpenCodeViewer,
   listenAddToChatEvents = true,
   externalTextInsertRequest = null,
