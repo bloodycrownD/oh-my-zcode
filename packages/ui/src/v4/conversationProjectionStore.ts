@@ -18,6 +18,7 @@ import {
   type SessionModelTransition,
   type ToolCallRow,
   type TopicFrameDeliveryKind,
+  type TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
@@ -122,13 +123,26 @@ export interface ConversationStoreState {
   planDirectoryRevision: number;
   plansLoading: boolean;
   /**
-   * 问题导航目录（turn navigator）的失效代际。
+   * 问题导航目录（turnNavigator）的失效代际。
    * not-enough-queries 终态过去只以 logEpoch 判定有效，但
    * "是否已有 ≥2 条可导航 query"是随增量变化的派生条件，logEpoch 表示日志代际而非
    * 内容静止。real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
-   * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态缓存失效。
+   * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态失效重探测。
+   *
+   * **代际分工**：本 revision 只做「要不要重查目录」的 UI 闸门（含 250ms trailing 去抖）；
+   * 单次目录读自身是否陈旧由服务端随读返回的 `atRevision`/`atLogEpoch` 裁决，两者不互相替代。
    */
   turnNavigatorDirectoryRevision: number;
+  /**
+   * turnNavigator 窄投影目录（`v4/conversation/turnDirectory` 只读查询的结果）。
+   *
+   * 目录与正文窗口解耦：条目**不并入** `rows.window`——为一个宽屏 rail 把完整历史
+   * 常驻 renderer 正是本轮要消除的成本。条目数据源消费在 items 合并层；
+   * 这里只保留窄投影与它的裁决水位。
+   */
+  turnDirectory: ConversationTurnDirectoryState;
+  /** 目录只读查询在途（自动重查防重入 + rail hydration 态）。 */
+  loadingDirectory: boolean;
   /**
    * 最近一个 delta 帧的变更定位（变更行 rowId → turnId）。
    *
@@ -146,6 +160,40 @@ export interface SessionOpenRendererTiming {
   snapshotAppliedAt?: number;
 }
 
+/**
+ * turnNavigator 目录缓存态（只读 query 结果 + 裁决水位，非 conversation 协议事实）。
+ *
+ * 水位字段是陈旧读丢弃的依据：目录查询与订阅流并行，跨 revision/跨纪元拼接出的
+ * 目录既可能漏条目（游标按全量行现算）也可能复活已被裁剪的分支。
+ */
+export interface ConversationTurnDirectoryState {
+  /** 服务端按 queryRowId 升序返回的目录条目（客户端已按同向拼接）。 */
+  entries: readonly TurnDirectoryEntry[];
+  /** 服务端从全量投影行现算的 realUser query 权威总数（不受游标与 limit 影响）。 */
+  realUserQueryTotal: number;
+  /** 最近一次被接纳的读的服务端水位（跨 revision 拼接的裁决依据）。 */
+  atRevision: number | null;
+  atSeq: number | null;
+  atLogEpoch: string | null;
+  /** 更早方向仍有条目（本次未续拉至齐）。 */
+  hasMore: boolean;
+  /** 是否成功取过一次目录（rail 隐藏判定与失效重查都以「已取过」为前提）。 */
+  loaded: boolean;
+}
+
+const EMPTY_TURN_DIRECTORY_STATE: ConversationTurnDirectoryState = {
+  entries: [],
+  realUserQueryTotal: 0,
+  atRevision: null,
+  atSeq: null,
+  atLogEpoch: null,
+  hasMore: false,
+  loaded: false,
+};
+
+/** 目录续拉页数上限（每页 turnDirectoryMaxEntries 条）；到顶即以「已取到的部分」提交。 */
+const TURN_DIRECTORY_MAX_PAGES = 50;
+
 const INITIAL_STATE: ConversationStoreState = {
   status: "connecting",
   snapshot: null,
@@ -158,6 +206,8 @@ const INITIAL_STATE: ConversationStoreState = {
   planDirectoryRevision: 0,
   plansLoading: false,
   turnNavigatorDirectoryRevision: 0,
+  turnDirectory: EMPTY_TURN_DIRECTORY_STATE,
+  loadingDirectory: false,
   lastMutation: undefined,
 };
 
@@ -178,25 +228,6 @@ function shouldInvalidatePlanDirectory(frame: ConversationTopicFrame): boolean {
       row.toolName === "ExitPlanMode" &&
       TERMINAL_PLAN_STATUSES.has(row.status)
     );
-  });
-}
-
-/**
- * 问题导航目录是否需要失效。
- * not-enough-queries 终态曾只以 logEpoch 判定，导致同一 epoch
- * 内追加 real-user query 后永久命中缓存。判定条件：
- * - snapshot 整体替换 → true（全新状态，终态作废）；
- * - row.removed → true（rewind/分支裁剪改变可导航 query 集合）；
- * - row.appended/row.upserted 命中 realUser userInput → true（新增/变更用户问题）；
- * - 其余 delta（assistant text、tool、reasoning 流式）→ false，不触发重探测。
- */
-function shouldInvalidateTurnNavigatorDirectory(frame: ConversationTopicFrame): boolean {
-  if (frame.payload.kind === "snapshot") return true;
-  return frame.payload.deltas.some((delta) => {
-    if (delta.op === "row.removed") return true;
-    if (delta.op !== "row.appended" && delta.op !== "row.upserted") return false;
-    const row = delta.row;
-    return row.kind === "userInput" && row.origin === "realUser";
   });
 }
 
@@ -261,9 +292,13 @@ export function shouldAutoLoadIncompleteLeadingTurn(
 // 这里 import + re-export 保持既有外部引用不破。
 import {
   createConversationProjectionAccumulator,
+  createTrailingDebouncer,
   mergeOlderRows,
+  nextTurnNavigatorDirectoryRevision,
+  TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
   type ConversationProjectionAccumulator,
   type ConversationProjectionLastMutation,
+  type TrailingDebouncer,
 } from "@/v4/conversationProjectionCore.js";
 
 export { mergeOlderRows };
@@ -336,6 +371,24 @@ export class ConversationProjectionStore {
         { status: "hydrated" | "not-enough-queries" }
       > & { directoryRevision: number })
     | null = null;
+  /**
+   * 目录路径（{@link loadTurnDirectory}）**自己的**终态缓存。
+   *
+   * 刻意不与 {@link turnNavigatorHydrationTerminal} 共用：那条缓存代表「完整历史正文
+   * 已经并入窗口」，而目录终态只代表「rail 的条目取齐了」。共用会让分享模式的首轮
+   * 补齐命中目录终态后直接返回，正文永远补不齐——两条路径的产物根本不是一回事。
+   */
+  private turnDirectoryHydrationTerminal:
+    | (Extract<
+        ConversationTurnNavigatorHydrationResult,
+        { status: "hydrated" | "not-enough-queries" }
+      > & { directoryRevision: number })
+    | null = null;
+  /** 目录重查去抖器（trailing 250ms）；懒建，未 hydrate 过的会话不排。 */
+  private turnDirectoryDebouncer: TrailingDebouncer | null = null;
+  /** 目录查询在途标记：在途期间来的重查并入下一次，不并发打 RPC。 */
+  private turnDirectoryQueryInFlight = false;
+  private turnDirectoryQueryPending = false;
   private closed = false;
   /**
    * delta 应用的可变累加器（copy-on-notify）。
@@ -728,6 +781,7 @@ export class ConversationProjectionStore {
         // snapshot 整体替换后 real-user query 集合可能已变，终态缓存必须失效。
         turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
       });
+      this.scheduleTurnDirectoryRequery();
       this.subscriptionHasAppliedBase = true;
       // 以下三步一律读发布后的外壳副本 next，绝不读累加器本体：
       // 本体是活的，下一帧的原地变更会改掉它此刻读到的一切。
@@ -796,6 +850,13 @@ export class ConversationProjectionStore {
           : earliest,
       null,
     );
+    // real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
+    // 或 row.removed 截断分支）递增导航目录 revision，使终态缓存失效允许重新探测。
+    const previousDirectoryRevision = this.state.turnNavigatorDirectoryRevision;
+    const nextDirectoryRevision = nextTurnNavigatorDirectoryRevision(
+      previousDirectoryRevision,
+      frame,
+    );
     this.setState({
       snapshot: next,
       // 累加器刚重建过就没有 lastMutation：这一帧无失效依据，下游退化为全量重建。
@@ -810,14 +871,15 @@ export class ConversationProjectionStore {
       ...(shouldInvalidatePlanDirectory(frame)
         ? { planDirectoryRevision: this.state.planDirectoryRevision + 1 }
         : {}),
-      // real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
-      // 或 row.removed 截断分支）递增导航目录 revision，使终态缓存失效允许重新探测。
-      ...(shouldInvalidateTurnNavigatorDirectory(frame)
-        ? {
-            turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
-          }
-        : {}),
+      ...(nextDirectoryRevision === previousDirectoryRevision
+        ? {}
+        : { turnNavigatorDirectoryRevision: nextDirectoryRevision }),
     });
+    // 目录失效代际变了 → 250ms trailing 合并重查（代际是 UI 闸门，不替代读自身的
+    // atRevision 陈旧读丢弃）。setState 同步换过 this.state，必须与旧值比。
+    if (nextDirectoryRevision !== previousDirectoryRevision) {
+      this.scheduleTurnDirectoryRequery();
+    }
     this.subscriptionHasAppliedBase = true;
     // 与 snapshot 分支同款禁令：只读发布后的外壳副本 next。读累加器本体等于读一个
     // 「已发布但仍在变」的对象——reconcile 的判定结果会随下一帧的流式追加漂移。
@@ -1266,6 +1328,188 @@ export class ConversationProjectionStore {
   }
 
   /**
+   * turnNavigator 窄投影目录查询（宽屏 rail 的数据源，与正文补齐路径解耦）。
+   *
+   * 与 {@link loadAllOlder} 的分工：那条路把历史**行**并进 `rows.window`，服务正文与
+   * 分享模式的全量语义；这条路只取目录**条目**，代价是 O(总行数) 的一次现算，
+   * 换来「为一个 rail 不把完整历史常驻 renderer」。
+   *
+   * 三条硬纪律：
+   * - 陈旧读丢弃：`atLogEpoch` 与当前快照纪元不符 → 整批弃；翻页期间 `atRevision`
+   *   漂移 → 整批弃（游标语义按全量行现算，跨 revision 拼接必漏条目）；
+   * - `realUserQueryTotal < 2` 首屏即终态：服务端现算的权威总数替代旧路径
+   *   「翻页探测后 reduce」，`not-enough-queries` 不再需要探测页；
+   * - 不并入窗口：目录条目与 `rows.window` 互不影响，正文路径的既有行为不变。
+   */
+  async loadTurnDirectory(): Promise<ConversationTurnNavigatorHydrationResult> {
+    const stale = (logEpoch = this.state.snapshot?.logEpoch ?? "unknown") => ({
+      status: "stale" as const,
+      logEpoch,
+    });
+    if (this.closed) return stale();
+    if (this.turnDirectoryQueryInFlight) {
+      // 单飞：在途期间来的重查并入 finally 的一次补跑，不并发打第二条只读查询。
+      this.turnDirectoryQueryPending = true;
+      return stale();
+    }
+    const snapshot = this.state.snapshot;
+    if (!snapshot) return stale();
+    // 目录终态与 (logEpoch, directoryRevision) 一起缓存：同一代际内不重复查，
+    // real-user query 增删（revision 自增）后自动失效重查。
+    const directoryRevision = this.state.turnNavigatorDirectoryRevision;
+    if (
+      this.turnDirectoryHydrationTerminal?.logEpoch === snapshot.logEpoch &&
+      this.turnDirectoryHydrationTerminal.directoryRevision === directoryRevision
+    ) {
+      return this.turnDirectoryHydrationTerminal;
+    }
+    const sessionId = parseConversationTopic(this.topic);
+    if (!sessionId) return stale(snapshot.logEpoch);
+
+    const logEpoch = snapshot.logEpoch;
+    // 同一次查询的所有页必须来自同一服务端 revision，否则拼接结果既漏又重。
+    let pinnedRevision: number | null = null;
+    let atSeq = 0;
+    let realUserQueryTotal = 0;
+    let hasMore = false;
+    let pages = 0;
+    let beforeQueryRowId: number | undefined;
+    // 服务端按 queryRowId 升序返回，游标向更早方向翻 → 每页前插（整体保持升序）。
+    const entries: TurnDirectoryEntry[] = [];
+    this.turnDirectoryQueryInFlight = true;
+    this.setState({ loadingDirectory: true });
+    try {
+      while (true) {
+        const result = await this.transport.turnDirectory({
+          sessionId,
+          limit: PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
+          ...(beforeQueryRowId === undefined ? {} : { beforeQueryRowId }),
+        });
+        if (this.closed) return stale(logEpoch);
+        const current = this.state.snapshot;
+        if (!current || current.logEpoch !== logEpoch || result.atLogEpoch !== logEpoch) {
+          logger.warn("[v4-store] turn 目录纪元不匹配，整批丢弃", {
+            resultLogEpoch: result.atLogEpoch,
+            sessionId,
+          });
+          return stale(logEpoch);
+        }
+        if (pinnedRevision === null) {
+          pinnedRevision = result.atRevision;
+        } else if (result.atRevision !== pinnedRevision) {
+          logger.warn("[v4-store] turn 目录翻页跨 revision，整批丢弃", {
+            pinnedRevision,
+            resultRevision: result.atRevision,
+            sessionId,
+          });
+          return stale(logEpoch);
+        }
+        realUserQueryTotal = result.realUserQueryTotal;
+        atSeq = result.atSeq;
+        // 权威总数不足两条 → 首屏即终态，不再翻页探测（旧路径靠 reduce 才有这个结论）。
+        if (realUserQueryTotal < 2) {
+          this.setState({
+            turnDirectory: {
+              ...EMPTY_TURN_DIRECTORY_STATE,
+              realUserQueryTotal,
+              atRevision: result.atRevision,
+              atSeq: result.atSeq,
+              atLogEpoch: result.atLogEpoch,
+              loaded: true,
+            },
+          });
+          logger.debug("[v4-store] turn 目录不足两条 query，跳过翻页", {
+            pages,
+            realUserQueryTotal,
+            sessionId,
+          });
+          const terminal = {
+            status: "not-enough-queries" as const,
+            logEpoch,
+            directoryRevision,
+          };
+          this.turnDirectoryHydrationTerminal = terminal;
+          return terminal;
+        }
+        entries.unshift(...result.entries);
+        hasMore = result.hasMore;
+        // 权威总数取齐即止：hasMore 只说「更早方向还有」，条目数对齐后无需再翻。
+        if (!hasMore || entries.length >= realUserQueryTotal) {
+          hasMore = entries.length < realUserQueryTotal;
+          break;
+        }
+        const nextCursor = result.entries[0]?.queryRowId;
+        if (
+          nextCursor === undefined ||
+          (beforeQueryRowId !== undefined && nextCursor >= beforeQueryRowId)
+        ) {
+          logger.warn("[v4-store] turn 目录游标未推进，停止翻页", {
+            beforeQueryRowId,
+            sessionId,
+          });
+          return { status: "retryable-failure", logEpoch };
+        }
+        beforeQueryRowId = nextCursor;
+        pages += 1;
+        // 页数上限：到顶即以已取到的部分提交，rail 不因超长会话一直转圈。
+        if (pages >= TURN_DIRECTORY_MAX_PAGES) break;
+      }
+
+      this.setState({
+        turnDirectory: {
+          entries,
+          realUserQueryTotal,
+          atRevision: pinnedRevision,
+          atSeq,
+          atLogEpoch: logEpoch,
+          hasMore,
+          loaded: true,
+        },
+      });
+      logger.debug("[v4-store] turn 目录查询完成", {
+        entryCount: entries.length,
+        hasMore,
+        pages,
+        realUserQueryTotal,
+        sessionId,
+      });
+      const terminal = { status: "hydrated" as const, logEpoch, directoryRevision };
+      this.turnDirectoryHydrationTerminal = terminal;
+      return terminal;
+    } catch (error) {
+      logger.warn(
+        `[v4-store] turnDirectory ${this.topic} 失败: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      return { status: "retryable-failure", logEpoch };
+    } finally {
+      this.turnDirectoryQueryInFlight = false;
+      if (!this.closed) this.setState({ loadingDirectory: false });
+      if (this.turnDirectoryQueryPending && !this.closed) {
+        this.turnDirectoryQueryPending = false;
+        void this.loadTurnDirectory();
+      }
+    }
+  }
+
+  /**
+   * 目录失效代际变更后按 250ms trailing 合并重查。
+   *
+   * 触发源是 {@link nextTurnNavigatorDirectoryRevision} 命中的三类帧（append/upsert/
+   * removed + snapshot 整体替换）。只在「本会话已经取过目录」时排——从未 hydrate 过的
+   * 会话没有目录可失效，交给组件的首轮 effect 决定要不要查。
+   */
+  private scheduleTurnDirectoryRequery(): void {
+    if (this.closed || !this.state.turnDirectory.loaded) return;
+    this.turnDirectoryDebouncer ??= createTrailingDebouncer(
+      TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+      () => {
+        void this.loadTurnDirectory();
+      },
+    );
+    this.turnDirectoryDebouncer.schedule();
+  }
+
+  /**
    * 按本地失效 revision 合并并发的计划目录查询。
    * 旧计划可能早于 snapshot tail；同时 edit/retry 的 row.removed 会让在途
    * query 立刻过期，必须以 revision + epoch 双重校验，不能把旧分支计划重新写回 UI。
@@ -1431,6 +1675,8 @@ export class ConversationProjectionStore {
     this.offRuntimeRestart?.();
     this.offRuntimeLifecycle?.();
     this.clearRuntimeRecycleRetry();
+    this.turnDirectoryDebouncer?.cancel();
+    this.turnDirectoryDebouncer = null;
     for (const timer of this.acceptedInputProjectionTimers.values()) clearTimeout(timer);
     this.acceptedInputProjectionTimers.clear();
     this.modelTransitionListeners.clear();
