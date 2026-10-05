@@ -22,7 +22,7 @@ import type { SessionMagicContextUsage } from "@zcode/shared/zcode-protocol-v4";
 import { formatCompactTokenNumber } from "../lib/tokenNumberFormat.js";
 
 /** 面板里的一行：`label` 左对齐、`value` 右对齐等宽。 */
-export interface MagicContextUsageRow {
+interface MagicContextUsageRow {
   id: string;
   label: string;
   value: string;
@@ -31,13 +31,16 @@ export interface MagicContextUsageRow {
 /** 未知值统一用破折号；`0` 与「不知道」在面板上是两件事，绝不混。 */
 const UNKNOWN = "—";
 
-export interface MagicContextUsageRowInput {
+interface MagicContextUsageRowInput {
   /** 已解析的 `chat.contextUsage.magicContext.*` 文案（组件注入，模块本身不引 i18n）。 */
   labels: {
     budget: string;
     cache: string;
     cacheHit: string;
     cacheMiss: string;
+    /** 两段注入缓存的用户可读段名（替代裸 SQLite 列名 `m[0]`/`m[1]`）。 */
+    cacheSegment1: string;
+    cacheSegment2: string;
     compartments: string;
     dropped: string;
     used: string;
@@ -101,12 +104,16 @@ export function buildMagicContextUsageRows({
     {
       id: "cache",
       label: labels.cache,
+      // 段名走注入的用户可读文案，不直接呈现 `m[0]`/`m[1]`——那是 SQLite 侧的
+      // 列名/消息下标，属于实现细节，出现在用户面板上既无法理解也无法据此排查
+      // （面板上的 `m[0]` 既不是消息也不是列）。语义上这两段分别是「系统段」
+      // （system + tools 的稳定前缀）与「历史段」（折叠后的会话历史块）。
       value:
         cache === null
           ? UNKNOWN
-          : `m[0] ${cache.m0 ? labels.cacheHit : labels.cacheMiss} · m[1] ${
-              cache.m1 ? labels.cacheHit : labels.cacheMiss
-            }`,
+          : `${labels.cacheSegment1} ${cache.m0 ? labels.cacheHit : labels.cacheMiss} · ${
+              labels.cacheSegment2
+            } ${cache.m1 ? labels.cacheHit : labels.cacheMiss}`,
     },
   ];
 }

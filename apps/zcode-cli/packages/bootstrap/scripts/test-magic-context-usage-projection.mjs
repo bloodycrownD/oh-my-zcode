@@ -294,6 +294,8 @@ const LABELS = {
   cache: "Injected blocks",
   cacheHit: "cached",
   cacheMiss: "rebuilt",
+  cacheSegment1: "System segment",
+  cacheSegment2: "History segment",
   compartments: "Compartments",
   dropped: "Dropped tags",
   used: "Context used",
@@ -318,7 +320,8 @@ test("D2: present data yields the five budget rows in a stable order", () => {
   assert.match(rows[1].value, /^48\.1K \(37\.4%\)$/);
   assert.equal(rows[2].value, "7");
   assert.equal(rows[3].value, "3 (12.4K)");
-  assert.equal(rows[4].value, "m[0] cached · m[1] rebuilt");
+  // 段名必须是用户可读文案，不能回退到裸 SQLite 列名 m[0]/m[1]（MF-28）。
+  assert.equal(rows[4].value, "System segment cached · History segment rebuilt");
 });
 
 test("D3: unknown budget and unknown cache render as an em dash, never as 0", () => {

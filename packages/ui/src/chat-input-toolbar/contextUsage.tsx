@@ -162,6 +162,9 @@ const MAGIC_CONTEXT_ROW_LABEL_IDS = {
   cache: "chat.contextUsage.magicContext.cache",
   cacheHit: "chat.contextUsage.magicContext.cacheHit",
   cacheMiss: "chat.contextUsage.magicContext.cacheMiss",
+  // 面板不呈现 `m[0]`/`m[1]` 这两个 SQLite 侧的名字（见 magicContextUsageRows.ts）。
+  cacheSegment1: "chat.contextUsage.magicContext.cacheSegment1",
+  cacheSegment2: "chat.contextUsage.magicContext.cacheSegment2",
   compartments: "chat.contextUsage.magicContext.compartments",
   dropped: "chat.contextUsage.magicContext.dropped",
   used: "chat.contextUsage.magicContext.used",
@@ -832,6 +835,8 @@ export function ChatContextUsage({
           cache: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cache }),
           cacheHit: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheHit }),
           cacheMiss: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheMiss }),
+          cacheSegment1: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheSegment1 }),
+          cacheSegment2: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheSegment2 }),
           compartments: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.compartments }),
           dropped: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.dropped }),
           used: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.used }),

@@ -2018,18 +2018,18 @@ const zhCN: Record<string, string> = {
     "关闭后 transform 直通原始消息，不做任何预算管理与历史折叠；其余参数在重新开启前不生效。",
   "settings.context.executeThreshold.label": "执行阈值",
   "settings.context.executeThreshold.description":
-    "上下文占用达到该百分比时，强制执行已排队的上下文操作。取值 20–90；越高越晚执行，留给输出与突发增长的空间越小。",
+    "上下文占用达到该百分比时，强制执行已排队的上下文操作。越高越晚执行，留给输出与突发增长的空间越小；输入框会自行限死在 schema 允许的区间内。",
   "settings.context.executeThresholdTokens.label": "执行阈值（Token 覆盖）",
   "settings.context.executeThresholdTokens.description":
     "按绝对 Token 数覆盖上面的百分比阈值，留空表示不覆盖。仅用于同一台机器上模型上下文窗口差异很大的场景。",
   "settings.context.executeThresholdTokens.placeholder": "不覆盖",
   "settings.context.protectedTokens.label": "受保护 Token 下限",
   "settings.context.protectedTokens.description":
-    "自动回收不会把上下文压到这条线以下，用于保住最近若干轮对话。取值 4000–1000000，留空表示不额外保护。",
+    "自动回收不会把上下文压到这条线以下，用于保住最近若干轮对话。留空表示不额外保护。",
   "settings.context.protectedTokens.placeholder": "不额外保护",
   "settings.context.historyBudget.label": "历史预算占比",
   "settings.context.historyBudget.description":
-    "会话历史块占「可用上下文 × 执行阈值」的比例，取值 0.05–0.5。占比越大留给工具输出与分舱的空间越小。",
+    "会话历史块占「可用上下文 × 执行阈值」的比例。占比越大留给工具输出与分舱的空间越小。",
   "settings.context.cacheTtl.label": "前缀缓存有效期",
   "settings.context.cacheTtl.description":
     "假定服务端前缀缓存仍然有效的时长，例如 5m、1h；填 never 表示不做有效期假设。",
@@ -4378,8 +4378,6 @@ const zhCN: Record<string, string> = {
   "chat.queue.title": "待发送消息（{count}）",
   "chat.queue.drag": "拖拽排序",
   "chat.queue.sendNow": "立即",
-  // compact 队列项曾单独显示“立即执行”，与同一队列中的即时动作文案不一致。
-  "chat.queue.runNow": "立即",
   "chat.queue.edit": "编辑",
   "chat.queue.editDraftConflict": "请先发送或清空当前草稿，再编辑队列消息。",
   "chat.queue.editRestoreFailed": "未能把队列消息退回输入框，请重试。",
@@ -4426,8 +4424,8 @@ const zhCN: Record<string, string> = {
   "chat.contextUsage.magicContext.cache": "注入块缓存",
   "chat.contextUsage.magicContext.cacheHit": "命中",
   "chat.contextUsage.magicContext.cacheMiss": "重建",
-  "chat.contextUsage.compress": "压缩",
-  "chat.contextUsage.compressDescription": "发送 {command} 压缩当前上下文",
+  "chat.contextUsage.magicContext.cacheSegment1": "系统段",
+  "chat.contextUsage.magicContext.cacheSegment2": "历史段",
   "tokenDebug.open": "打开 Token 调试",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription": "Output tokens ÷ 首个输出 token 到请求结束的秒数",

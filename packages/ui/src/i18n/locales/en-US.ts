@@ -2148,18 +2148,18 @@ const enUS: Record<string, string> = {
     "When off, the transform passes messages through untouched — no budget management and no history folding. The other settings have no effect until it is turned back on.",
   "settings.context.executeThreshold.label": "Execute threshold",
   "settings.context.executeThreshold.description":
-    "Once context usage reaches this percentage, queued context operations are forced to execute. Range 20–90; higher values execute later and leave less room for output and mid-turn growth.",
+    "Once context usage reaches this percentage, queued context operations are forced to execute. Higher values execute later and leave less room for output and mid-turn growth; the input keeps itself inside the range the schema allows.",
   "settings.context.executeThresholdTokens.label": "Execute threshold (token override)",
   "settings.context.executeThresholdTokens.description":
     "Override the percentage threshold above with an absolute token count. Leave empty for no override. Only useful when models on the same machine have very different context windows.",
   "settings.context.executeThresholdTokens.placeholder": "No override",
   "settings.context.protectedTokens.label": "Protected token floor",
   "settings.context.protectedTokens.description":
-    "Automatic reclaim never pushes context below this line, preserving the most recent turns. Range 4000–1000000; leave empty for no extra protection.",
+    "Automatic reclaim never pushes context below this line, preserving the most recent turns. Leave empty for no extra protection.",
   "settings.context.protectedTokens.placeholder": "No extra protection",
   "settings.context.historyBudget.label": "History budget share",
   "settings.context.historyBudget.description":
-    "Share of (usable context × execute threshold) reserved for the session history block. Range 0.05–0.5; larger values leave less room for tool output and compartments.",
+    "Share of (usable context × execute threshold) reserved for the session history block. Larger values leave less room for tool output and compartments.",
   "settings.context.cacheTtl.label": "Prefix cache lifetime",
   "settings.context.cacheTtl.description":
     "How long the provider's cached prefix is assumed to stay valid, e.g. 5m or 1h. Use never to make no expiry assumption.",
@@ -4677,7 +4677,6 @@ const enUS: Record<string, string> = {
   "chat.queue.title": "Queued messages ({count})",
   "chat.queue.drag": "Drag to reorder",
   "chat.queue.sendNow": "Steer",
-  "chat.queue.runNow": "Run now",
   "chat.queue.edit": "Edit",
   "chat.queue.editDraftConflict":
     "Send or clear the current draft before editing a queued message.",
@@ -4727,8 +4726,8 @@ const enUS: Record<string, string> = {
   "chat.contextUsage.magicContext.cache": "Injected blocks",
   "chat.contextUsage.magicContext.cacheHit": "cached",
   "chat.contextUsage.magicContext.cacheMiss": "rebuilt",
-  "chat.contextUsage.compress": "Compress",
-  "chat.contextUsage.compressDescription": "Send {command} to compress the current context",
+  "chat.contextUsage.magicContext.cacheSegment1": "System segment",
+  "chat.contextUsage.magicContext.cacheSegment2": "History segment",
   "tokenDebug.open": "Open token debug",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription":
