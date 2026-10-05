@@ -651,19 +651,37 @@ export function SessionPane({
     enabled: shareSelectionPanelVisible,
     onDismiss: dismissShareSelectionPanel,
   });
+// 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
+  // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
+  // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
+  // 声明上提到 shareRenderUnits 之前：share 侧现在也走这份受闸口径，两处必须同源，
+  // 放在任何消费点之后会撞 TDZ。
+  const sessionLeaseReady = lease?.sessionId === sessionId;
+  const timelineSnapshot =
+    !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
+      ? snapshot
+      : null;
   // 与 ConversationTimeline 共用同一个增量缓存句柄：这是同一帧里对同一份
   // rows.window 的第二份派生，过去是独立的一份全量重建（hook 无条件执行，非分享态也在跑）。
   // sessionPhase 必须与传给 Timeline 的一致（同为 sessionRenderPhase）——缓存按
   // (scopeKey, sessionPhase) 整体作废，两边喂不同 phase 会互相把对方的条目冲掉，
   // 谁都拿不到复用。
+  //
+  // rows 走 timelineSnapshot 这份受闸口径（可为 null）而非 snapshot 原口径：Timeline 侧
+  // 拿到的就是它，两侧喂不同 rows 时缓存句柄会在同一帧里被两个口径交替清表。
+  // lastMutation 同理必须与 Timeline 侧同为「受闸才给」——传 undefined 会让 share 侧
+  // 退化成全量重建并把 Timeline 侧的条目整表冲掉。
+  // 其余派生（syncAvailableTurns / 指纹 / 预检等）仍读 snapshot 原口径，不受这道闸约束。
   const shareRenderUnits = useMemo(
     () =>
-      conversationTurnRenderUnitsCache.build(
-        snapshot?.rows.window ?? [],
-        { sessionPhase: sessionRenderPhase, scopeKey: sessionId ?? "draft" },
-        state.lastMutation?.turnIdByRowId,
-      ),
-    [snapshot?.rows.window, sessionRenderPhase, sessionId, state.lastMutation],
+      timelineSnapshot === null
+        ? []
+        : conversationTurnRenderUnitsCache.build(
+            timelineSnapshot.rows.window,
+            { sessionPhase: sessionRenderPhase, scopeKey: sessionId ?? "draft" },
+            state.lastMutation?.turnIdByRowId,
+          ),
+    [timelineSnapshot, sessionRenderPhase, sessionId, state.lastMutation],
   );
   const shareItems = useMemo(
     () =>
@@ -986,7 +1004,6 @@ export function SessionPane({
     workspaceIdentity,
     workspacePath,
   ]);
-  const sessionLeaseReady = lease?.sessionId === sessionId;
   useEffect(() => {
     const newlyCreatedSessionId = newlyCreatedSessionIdRef.current;
     if (newlyCreatedSessionId !== null && newlyCreatedSessionId !== sessionId) {
@@ -3571,13 +3588,6 @@ export function SessionPane({
   // editUserQuery 已由 command 层防御 latest real user query，并在 running
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
   const editActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
-  // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
-  // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
-  // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
-  const timelineSnapshot =
-    !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
-      ? snapshot
-      : null;
   const shareHandoverContext =
     snapshot?.sharedContextImport && "contextId" in snapshot.sharedContextImport
       ? snapshot.sharedContextImport

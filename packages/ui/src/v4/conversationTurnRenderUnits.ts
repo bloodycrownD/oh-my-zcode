@@ -144,6 +144,18 @@ function collectDirtyTurnIds(
 }
 
 /**
+ * 是否跑在开发构建里（供 DEV-only 断言用）。
+ *
+ * 与 perfProbe 的 `isPerfProbeEnabled` 同款取法：Vite 构建里 `import.meta.env.DEV`
+ * 一定是布尔值；Node 单测（tsx）下 `import.meta.env` 是 undefined，这里按 dev 处理——
+ * 断言本来就只能在可测环境里被观测到，测试依赖的正是这一侧。
+ */
+function isDevBuild(): boolean {
+  const viteDev = ((import.meta as ImportMeta & { env?: { readonly DEV?: boolean } }).env ?? {}).DEV;
+  return typeof viteDev === "boolean" ? viteDev : true;
+}
+
+/**
  * 增量重建的缓存句柄（显式传入，不藏全局单例之外的隐式状态）。
  *
  * 为什么值得做：每个 delta 通知帧过去都要把整棵 rows 重跑一遍
@@ -171,11 +183,36 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
   let cachedSessionPhase: SessionPhase | undefined;
   /** 上一帧最后一个保留 unit 的 turnId——isLastTurn 翻转的失效锚点。 */
   let lastUnitTurnId: string | null = null;
+  let scopeMismatchWarned = false;
+
+  /**
+   * (scopeKey, sessionPhase) 同源不变量的运行时断言。
+   *
+   * `ConversationTimeline` 的 renderUnits 与 `SessionPane` 的 shareRenderUnits 写的是
+   * 同一张表，两侧喂的值一旦不同源，后写的一方会把前一方刚写下的条目整表清掉。
+   * 这类错不抛异常、不报错，只表现为「复用率莫名归零」，因此在 DEV 下留一次告警证据。
+   * 只告警一次，且只在换代时缓存非空（首帧建表不算冲突）；换会话与 phase 迁移本身
+   * 也是合法换代，会命中同一条告警——这是本断言的已知噪声边界。
+   */
+  const assertScopeInvariant = (
+    nextScopeKey: string | undefined,
+    nextSessionPhase: SessionPhase | undefined,
+  ): void => {
+    if (scopeMismatchWarned || !isDevBuild() || cacheByTurnId.size === 0) return;
+    if (nextScopeKey === scopeKey && nextSessionPhase === cachedSessionPhase) return;
+    scopeMismatchWarned = true;
+    console.warn(
+      "[v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致：",
+      "ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。",
+      { cached: { scopeKey, sessionPhase: cachedSessionPhase }, next: { scopeKey: nextScopeKey, sessionPhase: nextSessionPhase } },
+    );
+  };
 
   return {
     build(rows, options = {}, lastMutation) {
       const nextScopeKey = options.scopeKey;
       const sessionPhase = options.sessionPhase;
+      assertScopeInvariant(nextScopeKey, sessionPhase);
       if (nextScopeKey !== scopeKey || sessionPhase !== cachedSessionPhase) {
         // 换会话（turnId 撞号也拿不到别家的条目）或 phase 迁移（该 phase 下的旧条目
         // 未必描述当前内容，迁移帧又常常不带行 delta）→ 整表清空，绝不跨代复用。
@@ -247,10 +284,18 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
       }
 
       // 清理已不在窗口里的轮（裁剪分支 / 换会话后残留），否则缓存无上界增长。
-      for (const turnId of cacheByTurnId.keys()) {
-        if (!draftByTurnId.has(turnId)) cacheByTurnId.delete(turnId);
+      // 空 rows 是「这一侧这一帧没有窗口可依据」，不是「窗口里的轮都没了」——
+      // 分享侧在受闸口径下（timelineSnapshot 为 null）会喂空数组，此时清空整表等于
+      // 抹掉 Timeline 侧仍持有的真实条目。只跳过清理，锚点仍归零：保留上一帧的
+      // lastUnitTurnId 会让下一帧把一个当前根本不存在的末轮白标成脏轮。
+      if (rows.length === 0) {
+        lastUnitTurnId = null;
+      } else {
+        for (const turnId of cacheByTurnId.keys()) {
+          if (!draftByTurnId.has(turnId)) cacheByTurnId.delete(turnId);
+        }
+        lastUnitTurnId = units.at(-1)?.turnId ?? null;
       }
-      lastUnitTurnId = units.at(-1)?.turnId ?? null;
       return units;
     },
     size() {
