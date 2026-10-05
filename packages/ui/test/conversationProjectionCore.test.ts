@@ -8,17 +8,24 @@ import {
   conversationDeltaSchema,
   conversationRowSchema,
   conversationSnapshotSchema,
+  conversationTopicFrameSchema,
   type ConversationDelta,
   type ConversationRow,
   type ConversationSnapshot,
+  type ConversationTopicFrame,
   type SessionPhase,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   buildConversationTurnRenderUnits,
   createConversationProjectionAccumulator,
   createConversationTurnRenderUnitsCache,
+  createTrailingDebouncer,
   mergeOlderRows,
+  nextTurnNavigatorDirectoryRevision,
+  shouldInvalidateTurnNavigatorDirectory,
+  TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
   type ConversationTurnRenderUnit,
+  type TrailingDebounceTimers,
 } from "../src/v4/conversationProjectionCore.js";
 
 /** 最小 userInput 行：mergeOlderRows 只读 rowId/turnId，构造足够即可。 */
@@ -610,4 +617,179 @@ test("T-AP4 随机 delta 序列下增量 ≡ 全量（含 upsert / row.delta / �
     const actual = cache.build(rows, options, mutation(changed));
     assertIncrementalEqualsFull(actual, rows, options);
   }
+});
+
+// ---------------------------------------------------------------------------
+// turn 目录失效代际 + 250ms trailing 重查去抖（T-TD3）
+// ---------------------------------------------------------------------------
+
+function frame(deltas: readonly ConversationDelta[]): ConversationTopicFrame {
+  return conversationTopicFrameSchema.parse({
+    topic: "conversation/sess-projection-core",
+    subscriptionId: "sub-td3",
+    fromSeq: 100,
+    toSeq: 101,
+    sentAt: BASE_TS,
+    payload: { kind: "deltas", deltas: [...deltas] },
+  });
+}
+
+function snapshotFrame(): ConversationTopicFrame {
+  return conversationTopicFrameSchema.parse({
+    topic: "conversation/sess-projection-core",
+    subscriptionId: "sub-td3",
+    fromSeq: 0,
+    toSeq: 100,
+    sentAt: BASE_TS,
+    payload: { kind: "snapshot", snapshot: buildSnapshot([streamRow(10, "turn-a", "a")]) },
+  });
+}
+
+/** realUser userInput：目录粒度是用户可见 query，只有它命中才让目录失效。 */
+function realUserQueryRow(rowId: number): ConversationRow {
+  return conversationRowSchema.parse({
+    rowId,
+    turnId: "turn-b",
+    createdAt: BASE_TS + rowId,
+    createdAtSeq: rowId,
+    kind: "userInput",
+    text: `q-${rowId}`,
+    origin: "realUser",
+  });
+}
+
+/** 非 realUser 的系统上下文行：进得了 projection，但不该出现在 rail 上。 */
+function systemContextRow(rowId: number): ConversationRow {
+  return conversationRowSchema.parse({
+    rowId,
+    turnId: "turn-b",
+    createdAt: BASE_TS + rowId,
+    createdAtSeq: rowId,
+    kind: "userInput",
+    text: `sys-${rowId}`,
+    origin: "goalContinuation",
+  });
+}
+
+/** 假时钟：不真睡 250ms，只把已排期的回调按后进先出放出来。 */
+function fakeClock(): {
+  timers: TrailingDebounceTimers;
+  runPending: () => void;
+  pending: () => number;
+} {
+  let nextHandle = 1;
+  const scheduled = new Map<number, () => void>();
+  return {
+    timers: {
+      setTimeout(handler) {
+        const handle = nextHandle++;
+        scheduled.set(handle, handler);
+        return handle;
+      },
+      clearTimeout(handle) {
+        scheduled.delete(handle as number);
+      },
+    },
+    pending: () => scheduled.size,
+    runPending() {
+      for (const [handle, handler] of [...scheduled].reverse()) {
+        scheduled.delete(handle);
+        handler();
+      }
+    },
+  };
+}
+
+test("T-TD3 三类失效帧各一例：append / upsert / removed 都让目录代际自增", () => {
+  const cases: ReadonlyArray<[string, ConversationTopicFrame]> = [
+    ["append", frame([delta({ op: "row.appended", row: realUserQueryRow(20) })])],
+    ["upsert", frame([delta({ op: "row.upserted", row: realUserQueryRow(21) })])],
+    ["removed", frame([delta({ op: "row.removed", fromRowId: 12 })])],
+  ];
+  for (const [label, target] of cases) {
+    assert.equal(shouldInvalidateTurnNavigatorDirectory(target), true, label);
+    assert.equal(nextTurnNavigatorDirectoryRevision(7, target), 8, label);
+  }
+});
+
+test("T-TD3 snapshot 整体替换同样让目录代际自增", () => {
+  const target = snapshotFrame();
+  assert.equal(shouldInvalidateTurnNavigatorDirectory(target), true);
+  assert.equal(nextTurnNavigatorDirectoryRevision(7, target), 8);
+});
+
+test("T-TD3 与目录无关的帧不触发失效：非 realUser 输入与 assistantText 流式", () => {
+  const systemContext = frame([delta({ op: "row.appended", row: systemContextRow(22) })]);
+  const streaming = frame([delta({ op: "row.delta", rowId: 10, path: "text", append: "更多" })]);
+  for (const target of [systemContext, streaming]) {
+    assert.equal(shouldInvalidateTurnNavigatorDirectory(target), false);
+    assert.equal(nextTurnNavigatorDirectoryRevision(7, target), 7);
+  }
+});
+
+test("T-TD3 同一帧内多类失效只自增一次（代际是闸门，不是计数器）", () => {
+  const target = frame([
+    delta({ op: "row.appended", row: realUserQueryRow(20) }),
+    delta({ op: "row.upserted", row: realUserQueryRow(21) }),
+    delta({ op: "row.removed", fromRowId: 12 }),
+  ]);
+  assert.equal(nextTurnNavigatorDirectoryRevision(7, target), 8);
+});
+
+test("T-TD3 重查去抖写死 250ms trailing", () => {
+  assert.equal(TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS, 250);
+});
+
+test("T-TD3 revision 连续变更的多次重查被合并为一次查询", () => {
+  const clock = fakeClock();
+  let queryCount = 0;
+  const debouncer = createTrailingDebouncer(
+    TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+    () => {
+      queryCount += 1;
+    },
+    clock.timers,
+  );
+
+  // 三类失效帧各来一次（与上面同款），每次都排一次重查。
+  const invalidating = [
+    frame([delta({ op: "row.appended", row: realUserQueryRow(20) })]),
+    frame([delta({ op: "row.upserted", row: realUserQueryRow(21) })]),
+    frame([delta({ op: "row.removed", fromRowId: 12 })]),
+  ];
+  let revision = 0;
+  for (const target of invalidating) {
+    const before = revision;
+    revision = nextTurnNavigatorDirectoryRevision(revision, target);
+    assert.equal(revision, before + 1);
+    debouncer.schedule();
+  }
+
+  // 三次 schedule 只留一个排期：服务端每次目录查询都是 O(总行数) 的现算。
+  assert.equal(revision, 3);
+  assert.equal(clock.pending(), 1);
+  assert.equal(queryCount, 0);
+
+  clock.runPending();
+  assert.equal(queryCount, 1);
+  assert.equal(clock.pending(), 0);
+  assert.equal(debouncer.pending, false);
+});
+
+test("T-TD3 去抖 cancel 能掐掉未执行的重查（store close 时必须清得掉）", () => {
+  const clock = fakeClock();
+  let queryCount = 0;
+  const debouncer = createTrailingDebouncer(
+    TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+    () => {
+      queryCount += 1;
+    },
+    clock.timers,
+  );
+  debouncer.schedule();
+  assert.equal(debouncer.pending, true);
+  debouncer.cancel();
+  assert.equal(debouncer.pending, false);
+  clock.runPending();
+  assert.equal(queryCount, 0);
 });
