@@ -10,6 +10,7 @@ import {
   type ConversationDelta,
   type ConversationRow,
   type ConversationSnapshot,
+  type ConversationTopicFrame,
   type MutableConversationSnapshotAccumulator,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createConversationTurnRenderUnitsCache } from "./conversationTurnRenderUnits.js";
@@ -35,6 +36,98 @@ export {
  * 换会话由 `scopeKey` 触发整表清空，turnId 撞号也拿不到别家的条目。
  */
 export const conversationTurnRenderUnitsCache = createConversationTurnRenderUnitsCache();
+
+// ─────────────────────────── turn 目录失效代际 + 重查去抖 ───────────────────────────
+
+/**
+ * 问题导航目录（turnNavigator 窄投影）是否需要失效。
+ *
+ * not-enough-queries / hydrated 终态曾只以 logEpoch 判定有效，导致同一 epoch 内追加
+ * real-user query 后仍永久命中缓存。判定条件（append/upsert/removed 三类帧）：
+ * - snapshot 整体替换 → true（全新状态，终态作废）；
+ * - row.removed → true（rewind/分支裁剪改变可导航 query 集合）；
+ * - row.appended/row.upserted 命中 realUser userInput → true（新增/变更用户问题）；
+ * - 其余 delta（assistant text、tool、reasoning 流式）→ false，不触发重查。
+ *
+ * 失效代际只服务「要不要重查目录」这一个闸门；目录结果自身的新鲜度由服务端随读返回的
+ * `atRevision`/`atLogEpoch` 裁决（陈旧读丢弃）。两者是代际分工，谁也不替代谁。
+ */
+export function shouldInvalidateTurnNavigatorDirectory(frame: ConversationTopicFrame): boolean {
+  if (frame.payload.kind === "snapshot") return true;
+  return frame.payload.deltas.some((delta) => {
+    if (delta.op === "row.removed") return true;
+    if (delta.op !== "row.appended" && delta.op !== "row.upserted") return false;
+    const row = delta.row;
+    return row.kind === "userInput" && row.origin === "realUser";
+  });
+}
+
+/** 目录失效代际的下一值：命中失效帧 +1，否则原值透传（未失效时不换引用）。 */
+export function nextTurnNavigatorDirectoryRevision(
+  currentRevision: number,
+  frame: ConversationTopicFrame,
+): number {
+  return shouldInvalidateTurnNavigatorDirectory(frame) ? currentRevision + 1 : currentRevision;
+}
+
+/**
+ * 目录重查去抖窗口（trailing，写死 250ms）。
+ *
+ * 服务端每次目录查询都从全量投影行现算 O(总行数)。流式回答期间 snapshot 帧密集到达，
+ * 逐帧重查会把一个只读窄投影打成 RPC 风暴；250ms trailing 把窗口内的多次 revision
+ * 变更合并成一次查询，代价是最坏情况多等 250ms。
+ */
+export const TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS = 250;
+
+/** 可注入的定时器面（单测用假时钟驱动，不依赖真实 250ms 等待）。 */
+export interface TrailingDebounceTimers {
+  setTimeout(handler: () => void, delayMs: number): unknown;
+  clearTimeout(handle: unknown): void;
+}
+
+const DEFAULT_DEBOUNCE_TIMERS: TrailingDebounceTimers = {
+  setTimeout: (handler, delayMs) => setTimeout(handler, delayMs),
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
+};
+
+export interface TrailingDebouncer {
+  /** 合并式调度：pending 期间的重复调用只重置触发时间，不新增一次执行。 */
+  schedule(): void;
+  cancel(): void;
+  /** 是否已排队未执行（单测断言「合并为一次」的观测点）。 */
+  readonly pending: boolean;
+}
+
+/**
+ * trailing 去抖器。store 用它把「revision 变更 → 目录重查」压成一次查询。
+ *
+ * 与 `refreshPlans` 的 pending 标记是两种不同的合并：那是「在途时再排一次」，
+ * 这里是「窗口内无论来几次都只跑最后一次」，前者保证不漏、后者保证不抖。
+ */
+export function createTrailingDebouncer(
+  delayMs: number,
+  run: () => void,
+  timers: TrailingDebounceTimers = DEFAULT_DEBOUNCE_TIMERS,
+): TrailingDebouncer {
+  let handle: unknown = null;
+  return {
+    get pending() {
+      return handle !== null;
+    },
+    schedule() {
+      if (handle !== null) timers.clearTimeout(handle);
+      handle = timers.setTimeout(() => {
+        handle = null;
+        run();
+      }, delayMs);
+    },
+    cancel() {
+      if (handle === null) return;
+      timers.clearTimeout(handle);
+      handle = null;
+    },
+  };
+}
 
 /**
  * rows/range 结果并入本地窗口（合并规范）：按 rowId 键控、只收
