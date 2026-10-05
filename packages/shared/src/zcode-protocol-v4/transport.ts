@@ -333,6 +333,10 @@ export const V4_METHODS = {
   conversationUnsubscribe: "v4/conversation/unsubscribe",
   // 行分页 query（rows/range）：只读、无状态、超时重发安全。
   conversationRowsRange: "v4/conversation/rowsRange",
+  // turn 目录（turnNavigator 的窄投影）：与 rowsRange 同族的只读 query。
+  // 目录不是"再给一份全量快照"——服务端从全量投影行现算派生，客户端只按
+  // queryRowId 游标翻页，故必须独立成方法（给 rowsRange 加 mode 会污染行语义）。
+  conversationTurnDirectory: "v4/conversation/turnDirectory",
   // 当前有效分支的终态 ExitPlanMode 目录；只读、无状态、超时重发安全。
   conversationPlans: "v4/conversation/plans",
   conversationFileChanges: "v4/conversation/fileChanges",
@@ -522,6 +526,61 @@ export const v4ConversationRowsRangeResultSchema = z.object({
   hasMore: z.boolean(),
 });
 export type V4ConversationRowsRangeResult = z.infer<typeof v4ConversationRowsRangeResultSchema>;
+
+// ── turn 目录（turnNavigator 的窄投影，游标制翻页）──
+// 与 rowsRange 同族的只读 query：无状态、超时重发安全、带 atLogEpoch + atRevision。
+// 目录粒度是**用户可见 query**（realUser origin），不是 product turn——同一 turn 的
+// steer query 要各自成条，故游标落在 queryRowId 上。
+export const v4ConversationTurnDirectoryParamsSchema = z.object({
+  sessionId: z.string(),
+  /** Host attachment injects this trusted value; renderer callers omit it. */
+  clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]).optional(),
+  // 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。
+  beforeQueryRowId: z.number().optional(),
+  // 缺省 = 服务端取 PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries。
+  limit: z.number().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
+});
+export type V4ConversationTurnDirectoryParams = z.infer<
+  typeof v4ConversationTurnDirectoryParamsSchema
+>;
+
+/**
+ * 目录条目。**不带 turnKey**：游标直接用 queryRowId，再引入一个键只会让
+ * turnId / productTurnId / turnKey 变成三义。
+ *
+ * 顺序与翻页的三条硬定义（客户端的合并、定位、rail 隐藏条件都按它们写死）：
+ *   1. `entries` 按 `queryRowId` **升序**——与 rail 自上而下的时间序一致，也与
+ *      `getRowsRange` 同向；注意同族 `getPlans` 是降序，不要照抄它的方向；
+ *   2. `beforeQueryRowId` = 只返回 `queryRowId` **严格小于**该值的更早条目；
+ *   3. `hasMore` = 更早方向**仍存在**条目（不是"这次拉满了 limit"）。
+ */
+export const turnDirectoryEntrySchema = z.object({
+  turnId: z.string(),
+  queryRowId: z.number(),
+  queryPreview: z.string(),
+  assistantPreview: z.string(),
+  // 三态判定：turn 内有 assistantText 行 = "text"；否则 turnHeader.state === "running"
+  // = "running"；否则（含无 header 兜底路径）= "empty"。文案不下发，客户端填 i18n。
+  assistantPreviewKind: z.enum(["empty", "running", "text"]),
+});
+export type TurnDirectoryEntry = z.infer<typeof turnDirectoryEntrySchema>;
+
+export const v4ConversationTurnDirectoryResultSchema = z.object({
+  // queryRowId 升序（见 turnDirectoryEntrySchema 的三条硬定义）。
+  entries: z.array(turnDirectoryEntrySchema),
+  // 服务端从全量投影行现算的 realUser query 权威总数，替代客户端"翻页探测后 reduce"
+  // 的判定（那条路在窄投影下会误判 rail 是否值得 hydrate）。
+  realUserQueryTotal: z.number().int().nonnegative(),
+  // 服务端取值时的水位/纪元；与 rowsRange 等只读查询共用，避免跨 revision 拼接。
+  atSeq: z.number(),
+  atRevision: z.number().int().nonnegative(),
+  atLogEpoch: z.string(),
+  // 更早方向是否还有条目。
+  hasMore: z.boolean(),
+});
+export type V4ConversationTurnDirectoryResult = z.infer<
+  typeof v4ConversationTurnDirectoryResultSchema
+>;
 
 // ── conversation plans directory ──
 // 目录来自 CLI 完整有效 projection，不能用 renderer 的有界 tail window 推导。
