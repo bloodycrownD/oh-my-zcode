@@ -3,8 +3,8 @@
 // TaskChatToolCall 形态；v4 row 自包含，字段一一映射即可，不需要看别的行。
 import { buildZCodeStreamingToolInputPreview } from "@zcode/shared";
 import type { ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
-import type { TaskChatToolCallTreeNode } from "@/lib/toolCallTree.js";
-import { normalizeWrappedErrorText } from "@/lib/toolError.js";
+import type { TaskChatToolCallTreeNode } from "../lib/toolCallTree.js";
+import { normalizeWrappedErrorText } from "../lib/toolError.js";
 
 // v4 status → 旧 ChatToolCall.status（mapToolStatus 的输入词表：
 // pending/in_progress/completed/failed/stopped）。

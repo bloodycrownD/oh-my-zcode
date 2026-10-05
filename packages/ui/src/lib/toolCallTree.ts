@@ -1,4 +1,4 @@
-import type { TaskChatToolCall } from "@/lib/taskChatMessageTypes.js";
+import type { TaskChatToolCall } from "./taskChatMessageTypes.js";
 
 export interface TaskChatToolCallTreeNode {
   toolCall: TaskChatToolCall;
