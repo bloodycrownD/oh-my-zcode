@@ -5,6 +5,15 @@ import type { SkillRoot } from "../skills/index.js";
 import type { ExecutionContext, TraceContext } from "../tracing/tracer.js";
 
 export const ZCODE_OFFICIAL_PLUGIN_MARKETPLACE = "oh-my-zcode-official";
+/**
+ * FORK（S32/S33）：canonical marketplace id 已改为 {@link ZCODE_OFFICIAL_PLUGIN_MARKETPLACE}，
+ * 但官方 CDN 端点（D-2 保留）仍以旧名 `zcode-plugins-official` 发布 manifest。
+ *
+ * 过渡期语义：**只**用于「这个 id 指的是官方市场」这一身份判定与 CDN manifest 的别名容忍；
+ * 一切持久化（known record、分片目录、merged manifest、插件 id 后缀）一律用 canonical。
+ * CDN 换发新名后连同 {@link isOfficialMarketplaceId} 的扩集分支一并摘除。
+ */
+export const ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE = "zcode-plugins-official";
 export const ZCODE_INLINE_PLUGIN_MARKETPLACE = "inline";
 export const ZCODE_PLUGIN_HOST_COMMAND = "__zcode-plugin-host";
 /**
@@ -19,7 +28,19 @@ export const ZCODE_PLUGIN_HOST_COMMAND = "__zcode-plugin-host";
  */
 export const ZCODE_DWF_CHILD_COMMAND = "__zcode-dwf-child";
 
+/**
+ * 「该 id 是官方市场」= canonical ∪ legacy 别名。
+ *
+ * 扩集方向无害：多认一个旧名只会让旧名声明多产生一条保留诊断，不会让第三方名获得官方待遇。
+ * 判定「本次操作是否由 canonical 记录发起的受信任刷新」时必须用
+ * {@link isCanonicalOfficialMarketplaceId}，否则受信任刷新会被自己发出的旧名挡下。
+ */
 export function isOfficialMarketplaceId(id: string): boolean {
+  return isCanonicalOfficialMarketplaceId(id) || id === ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE;
+}
+
+/** 只认 canonical id；legacy 别名不满足——用于「刷新方是否持有 canonical 身份」的判定。 */
+export function isCanonicalOfficialMarketplaceId(id: string): boolean {
   return id === ZCODE_OFFICIAL_PLUGIN_MARKETPLACE;
 }
 

@@ -95,6 +95,7 @@
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:magic-context-domain": "node scripts/test-magic-context-domain.mjs",
+    "test:plugin-marketplace-official-alias": "node scripts/test-plugin-marketplace-official-alias.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

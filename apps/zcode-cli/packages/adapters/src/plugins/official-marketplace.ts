@@ -1,6 +1,9 @@
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { ZCODE_OFFICIAL_PLUGIN_MARKETPLACE } from "@zcode/contracts";
+import {
+  ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE,
+  ZCODE_OFFICIAL_PLUGIN_MARKETPLACE,
+} from "@zcode/contracts";
 
 const BUNDLED_PARTITION_FILE = "bundled-marketplace.json";
 const CDN_PARTITION_FILE = "cdn-marketplace.json";
@@ -32,17 +35,11 @@ export function writeCdnOfficialMarketplacePartitionSync(input: {
   return rebuildOfficialMarketplaceSync(input.storageRoot);
 }
 
-export function loadBundledOfficialPluginRootsSync(
-  storageRoot: string,
-): string[] | undefined {
+export function loadBundledOfficialPluginRootsSync(storageRoot: string): string[] | undefined {
   const bundledPartition = readBundledPartition(storageRoot);
   if (!bundledPartition) return undefined;
 
-  const officialCacheRoot = resolve(
-    storageRoot,
-    "cache",
-    ZCODE_OFFICIAL_PLUGIN_MARKETPLACE,
-  );
+  const officialCacheRoot = resolve(storageRoot, "cache", ZCODE_OFFICIAL_PLUGIN_MARKETPLACE);
   return readPluginEntries(bundledPartition.manifest).flatMap((plugin) => {
     const name = readPluginName(plugin);
     const cachePath = typeof plugin.cachePath === "string" ? plugin.cachePath : undefined;
@@ -119,12 +116,14 @@ function isStrictDescendant(parentPath: string, childPath: string): boolean {
 }
 
 function assertOfficialManifest(manifest: Record<string, unknown>): void {
-  // FORK (S32/S33)：canonical id 已改为 oh-my-zcode-official，但官方 CDN manifest（D-2
+  // FORK（S32/S33，MF-02）：canonical id 已改为 oh-my-zcode-official，但官方 CDN manifest（D-2
   // 端点保留）仍以旧名 zcode-plugins-official 发布。在其重新发布前，旧名作为别名接受，
-  // 防止本地缓存从 CDN 刷新时因名字不匹配抛错、整个插件市场不可用。
+  // 防止本地缓存从 CDN 刷新时因名字不匹配抛错、整个插件市场不可用。写盘侧只认 canonical
+  // （见 rebuildOfficialMarketplaceSync 的 name 归一），别名常量与 contracts 同源。
+  // CDN 换发 canonical 后连同此处一并摘除。
   if (
     manifest.name !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE &&
-    manifest.name !== "zcode-plugins-official"
+    manifest.name !== ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE
   ) {
     throw new Error(
       `Official marketplace manifest must be named ${ZCODE_OFFICIAL_PLUGIN_MARKETPLACE}`,

@@ -5,7 +5,11 @@ import { basename, dirname, join, resolve } from "node:path";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { PluginDiagnostic, PluginManifest, PluginStoreListing } from "@zcode/contracts";
-import { isOfficialMarketplaceId, ZCODE_OFFICIAL_PLUGIN_MARKETPLACE } from "@zcode/contracts";
+import {
+  isCanonicalOfficialMarketplaceId,
+  isOfficialMarketplaceId,
+  ZCODE_OFFICIAL_PLUGIN_MARKETPLACE,
+} from "@zcode/contracts";
 import { DEFAULT_PLUGIN_MARKETPLACES, sanitizeZCodeRuntimeEnv } from "@zcode/shared";
 import { loadPluginMcpServerDefinitions, resolvePluginMcpServers } from "./mcp.js";
 import {
@@ -333,10 +337,16 @@ export async function addMarketplace(input: {
   source: MarketplaceSource;
   storageRoot: string;
   // 受信任的内部刷新传入正在刷新的 known record 规范 id。守卫只在 manifest 声明了官方 id
-  // 且该 id 不等于本次刷新的 trustedId 时拒绝，避免来源在刷新过程中被改名冒用：
-  //   - 用户侧新增（trustedId 缺失）声明官方 id → 拒绝；
-  //   - 非官方市场日后把 manifest 改名成官方 id，刷新时 trustedId 不匹配 → 拒绝；
+  // 且本次刷新不持有 canonical 身份时拒绝，避免来源在刷新过程中被改名冒用：
+  //   - 用户侧新增（trustedId 缺失）声明官方 id（含 CDN 过渡期旧名）→ 拒绝；
+  //   - 非官方市场日后把 manifest 改名成官方 id，刷新时 trustedId 不匹配 → 拒绝。
   // 非官方 manifest 名不受此约束，保持既有行为。
+  //
+  // FORK（S32/S33，MF-02）：官方 manifest 的合法名集合是 canonical∪legacy（旧名）。
+  // 「本次刷新是否受信任」只认 canonical（isCanonicalOfficialMarketplaceId）——若拿扩集
+  // 判定，官方记录刷回 CDN 旧名 manifest 时会被自己发出的名字当场撞下，别名容忍永不可达。
+  // OQ-6 互指：本条只治 marketplace manifest/刷新侧；plugins.enabledPlugins 里
+  // `xxx@zcode-plugins-official` 旧后缀仍不迁移，「市场能刷新但旧后缀条目不复活」是预期。
   trustedId?: string;
 }): Promise<KnownMarketplaceRecord> {
   // persist:false 先只解析 manifest，不落盘——否则 marketplace 目录激活会用
@@ -353,7 +363,20 @@ export async function addMarketplace(input: {
       signal: operationSignal,
     });
     throwIfPluginOperationAborted(operationSignal);
-    if (isOfficialMarketplaceId(loaded.manifest.name) && loaded.manifest.name !== input.trustedId) {
+    // FORK（S32/S33，MF-02）：受信任刷新判定用 canonical 而不是扩集。CDN 仍以旧名发布
+    // manifest，若这里用 isOfficialMarketplaceId（canonical∪legacy），「trustedId=canonical +
+    // manifest=旧名」这条真实刷新路径会被自己发出的旧名提前撞下——别名容忍反而不可达。
+    const officialRefresh = isCanonicalOfficialMarketplaceId(input.trustedId ?? "");
+    // 官方市场的持久化身份永远是 canonical：CDN 旧名 manifest 是同一条记录的刷新结果，
+    // 不允许在 known_marketplaces 里长出一条与 canonical 并存的影子记录。
+    const marketplaceId = officialRefresh
+      ? ZCODE_OFFICIAL_PLUGIN_MARKETPLACE
+      : loaded.manifest.name;
+    if (
+      isOfficialMarketplaceId(loaded.manifest.name) &&
+      !officialRefresh &&
+      loaded.manifest.name !== input.trustedId
+    ) {
       throw new Error(
         `Cannot add a marketplace named "${loaded.manifest.name}": that id is reserved for the official marketplace.`,
       );
@@ -363,37 +386,35 @@ export async function addMarketplace(input: {
         `Marketplace declaration id mismatch: expected ${input.expectedId}, received ${loaded.manifest.name}`,
       );
     }
-    if (
-      input.trustedId === ZCODE_OFFICIAL_PLUGIN_MARKETPLACE &&
-      loaded.manifest.name !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE
-    ) {
+    // 官方记录刷回来的 manifest 名只要落在 canonical∪legacy 内就算数（旧名由 CDN 过渡期
+    // 提供）；落在集合外说明 source 被指向了非官方目录，必须拒绝而不是把官方缓存换成它。
+    if (officialRefresh && !isOfficialMarketplaceId(loaded.manifest.name)) {
       throw new Error(
-        `Official marketplace source must provide ${ZCODE_OFFICIAL_PLUGIN_MARKETPLACE}, received ${loaded.manifest.name}`,
+        `Official marketplace source must provide ${ZCODE_OFFICIAL_PLUGIN_MARKETPLACE} (or its legacy alias), received ${loaded.manifest.name}`,
       );
     }
-    const persistedManifest =
-      loaded.manifest.name === ZCODE_OFFICIAL_PLUGIN_MARKETPLACE
-        ? parseRequiredMarketplaceManifest(
-            writeCdnOfficialMarketplacePartitionSync({
-              manifest: loaded.manifest.raw,
-              storageRoot: input.storageRoot,
-            }),
-          )
-        : loaded.manifest;
+    const persistedManifest = isOfficialMarketplaceId(loaded.manifest.name)
+      ? parseRequiredMarketplaceManifest(
+          writeCdnOfficialMarketplacePartitionSync({
+            manifest: loaded.manifest.raw,
+            storageRoot: input.storageRoot,
+          }),
+        )
+      : loaded.manifest;
     // 旧流程先删 marketplace target 再复制 source，刷新失败会丢失最后成功快照。
     // source tree 与规范 manifest 在同一 staging 目录准备完毕后一次 rename 激活。
     if (loaded.sourceRoot) {
       marketplaceActivation = await stageMarketplaceDirectoryPlugins(
         loaded.sourceRoot,
         input.storageRoot,
-        loaded.manifest.name,
+        marketplaceId,
         persistedManifest.raw,
         operationSignal,
       );
-    } else if (loaded.manifest.name !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE) {
+    } else if (marketplaceId !== ZCODE_OFFICIAL_PLUGIN_MARKETPLACE) {
       marketplaceActivation = await stageMarketplaceManifest(
         input.storageRoot,
-        loaded.manifest.name,
+        marketplaceId,
         loaded.manifest.raw,
         operationSignal,
       );
@@ -401,9 +422,9 @@ export async function addMarketplace(input: {
     throwIfPluginOperationAborted(operationSignal);
     const now = new Date().toISOString();
     const record: KnownMarketplaceRecord = {
-      id: loaded.manifest.name,
+      id: marketplaceId,
       source: input.source,
-      name: loaded.manifest.name,
+      name: marketplaceId,
       ...(loaded.manifest.description ? { description: loaded.manifest.description } : {}),
       addedAt: now,
       lastUpdated: now,
