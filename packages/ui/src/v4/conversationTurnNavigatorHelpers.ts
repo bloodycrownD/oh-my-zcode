@@ -1,3 +1,8 @@
+import {
+  buildPreviewText,
+  DEFAULT_MAX_PREVIEW_CHARS,
+  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+} from "@zcode/shared/zcode-protocol-v4";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 
 export type ConversationTurnNavigatorAssistantPreviewKind = "empty" | "running" | "text";
@@ -115,43 +120,9 @@ export function resolveConversationTurnNavigatorHydrationRetryDelayMs(
   return null;
 }
 
-const DEFAULT_MAX_PREVIEW_CHARS = 220;
-const DEFAULT_MAX_PREVIEW_PARAGRAPHS = 2;
-
-function normalizePreviewParagraphs(text: string, maxParagraphs: number): string[] {
-  return text
-    .trim()
-    .split(/\n\s*\n/u)
-    .map((paragraph) => paragraph.replace(/\s+/gu, " ").trim())
-    .filter(Boolean)
-    .slice(0, Math.max(1, maxParagraphs));
-}
-
-function truncatePreview(text: string, maxChars: number): string {
-  const normalizedMaxChars = Math.max(8, maxChars);
-  if (text.length <= normalizedMaxChars) {
-    return text;
-  }
-  return `${text.slice(0, normalizedMaxChars - 3).trimEnd()}...`;
-}
-
-function buildPreviewText({
-  texts,
-  fallback,
-  maxPreviewChars,
-  maxPreviewParagraphs,
-}: {
-  texts: readonly string[];
-  fallback: string;
-  maxPreviewChars: number;
-  maxPreviewParagraphs: number;
-}): string {
-  const paragraphs = normalizePreviewParagraphs(texts.join("\n\n"), maxPreviewParagraphs);
-  if (paragraphs.length === 0) {
-    return fallback;
-  }
-  return truncatePreview(paragraphs.join("\n"), maxPreviewChars);
-}
+// 摘要口径（折叠/分段/截断三件套）已下沉到 @zcode/shared 的 previewText.ts：
+// 服务端 turn 目录要出同一口径的 queryPreview / assistantPreview，两处实现必然漂移。
+// 这里只留依赖 UI 类型的 buildAssistantPreview。
 
 function buildAssistantPreview(
   unit: ConversationTurnRenderUnit,

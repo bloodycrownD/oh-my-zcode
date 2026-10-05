@@ -31,6 +31,8 @@ export * from "./delta.js";
 export * from "./coalesce.js";
 export * from "./profiles.js";
 export * from "./apply.js";
+// 摘要口径（220 字符 / 2 段落）的唯一实现：renderer rail 与服务端 turn 目录共用。
+export * from "./previewText.js";
 export * from "./transport.js";
 export * from "./wire.js";
 export * from "./wire-codec.js";
