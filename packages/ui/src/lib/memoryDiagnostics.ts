@@ -6,7 +6,9 @@ import {
   type MemoryDiagnosticsRegistry,
   type MemorySample,
 } from "@zcode/shared";
-import { logMemoryDiagnostics } from "@/logger.js";
+// 相对路径而非 `@/logger.js`：注册表被 shikiHighlighter 的单测 import，
+// `@/` 别名在纯 Node（tsx --test）下无法解析。
+import { logMemoryDiagnostics } from "../logger.js";
 
 /**
  * renderer 内存诊断计数器注册表。
