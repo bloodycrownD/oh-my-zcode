@@ -3,6 +3,7 @@ import type { z } from "zod";
 import type { completeModelConfigDataSchema } from "@zcode/shared/model-config";
 import type {
   completeApiKeyAccessDataSchema,
+  completeZhipuAccountAccessDataSchema,
   completeProviderConfigDataSchema,
 } from "./config/provider-data-schema.js";
 import type { ConfigValidationIssue } from "./config-overlay.js";
@@ -10,6 +11,7 @@ import {
   type ApiKeyAccessConfig,
   ModelConfig,
   ModelConfigRules,
+  type ZhipuAccountAccessConfig,
   type ModelId,
   type ProviderConfig,
   type ProviderConfigRule,
@@ -18,9 +20,14 @@ import {
   type ProviderId,
 } from "./config/index.js";
 import { resolveOwnedOrder } from "./owned-order.js";
+import type { AccountProviderStates } from "./account-provider-state.js";
 
-export type RegistryProviderAccessConfig = ApiKeyAccessConfig &
-  z.infer<typeof completeApiKeyAccessDataSchema>;
+export type RegistryZhipuAccountAccessConfig = ZhipuAccountAccessConfig &
+  z.infer<typeof completeZhipuAccountAccessDataSchema>;
+
+export type RegistryProviderAccessConfig =
+  | (ApiKeyAccessConfig & z.infer<typeof completeApiKeyAccessDataSchema>)
+  | RegistryZhipuAccountAccessConfig;
 
 export type RegistryProviderConfig = ProviderConfig &
   z.infer<typeof completeProviderConfigDataSchema> & {
@@ -35,13 +42,21 @@ export function serializeRegistryProviderConfig(
   return {
     group: config.group,
     ...(config.logo === undefined ? {} : { logo: config.logo }),
-    access: {
-      type: config.access.type,
-      apiKey: config.access.apiKey,
-      ...(config.access.apiKeyManagementUrl === undefined
-        ? {}
-        : { apiKeyManagementUrl: config.access.apiKeyManagementUrl }),
-    },
+    access:
+      config.access.type !== "zhipu-account"
+        ? {
+            type: config.access.type,
+            apiKey: config.access.apiKey,
+            ...(config.access.apiKeyManagementUrl === undefined
+              ? {}
+              : { apiKeyManagementUrl: config.access.apiKeyManagementUrl }),
+          }
+        : {
+            type: config.access.type,
+            accountType: config.access.accountType,
+            mode: config.access.mode,
+            entitled: config.access.entitled,
+          },
     api: {
       type: config.api.type,
       baseUrl: config.api.baseUrl,
@@ -116,6 +131,8 @@ export interface ProviderConfigResolverInput {
   readonly personalProviders: ProviderConfigMap;
   readonly zcodeBuiltinModelRules: ModelConfigRules;
   readonly personalModels: ModelConfigRules;
+  readonly accountProviders: ProviderConfigMap;
+  readonly accountStates?: AccountProviderStates;
   readonly personalProviderOrder?: readonly ProviderId[];
 }
 
@@ -164,8 +181,13 @@ export interface ProviderConfigResolution {
 
 export class ProviderConfigResolver {
   resolve(input: ProviderConfigResolverInput): ProviderConfigResolution {
-    // FORK（D-4）：账号 Overlay 已整删，Registry 是唯一数据源。
-    const concreteBuiltinProviders = input.zcodeBuiltinProviders;
+    const accountProviders = new ProviderConfigMap(
+      input.accountProviders
+        .entries()
+        .filter(([providerId]) => input.zcodeBuiltinProviders.has(providerId))
+        .map(([providerId, config]) => [providerId, config.withoutGroup()] as const),
+    );
+    const concreteBuiltinProviders = input.zcodeBuiltinProviders.overlay(accountProviders);
     const providerTemplates = input.zcodeBuiltinProviderTemplates;
     const effectiveBuiltinProviders = concreteBuiltinProviders.mapConfigs((concrete, _id, rule) => {
       const template = rule.templateId
@@ -195,8 +217,8 @@ export class ProviderConfigResolver {
     for (const providerId of resolveProviderOrder(input, effectiveProviders)) {
       const rule = effectiveProviders.getRule(providerId)!;
       const { config, providerName } = rule;
-      // FORK（D-4）：账号型 provider 的「永 enabled」豁免已随 zhipu-account 一并移除。
-      const enabled = rule.enabled ?? true;
+      // 账号不再支持总禁用；旧覆盖值不能让无开关的账号永久失效，其他资格仍正常校验。
+      const enabled = config.access?.type === "zhipu-account" || (rule.enabled ?? true);
       const providerPath = ["providers", providerId];
       const registryProviderResult = createRegistryProviderConfig(config, providerPath);
       const providerIssues: ConfigValidationIssue[] = registryProviderResult.ok
@@ -224,9 +246,13 @@ export class ProviderConfigResolver {
         personalIdsInOrder,
         config.modelOrder ?? [],
       );
-      // FORK（D-4）：账号权益/当前连接判定式已随 zhipu-account 移除；
-      // 只剩「配置启用 + 无配置问题」这一条个人 provider 判定。
-      const providerExecutable = enabled && providerIssues.length === 0;
+      const accessEntitled =
+        config.access?.type !== "zhipu-account" || config.access.entitled === true;
+      // 账号权益与当前连接是两件事。非当前账号仍保留设置展示，不向普通 Registry 发布模型。
+      // Off-Peak 不定义 current，沿用其独立调度、隐藏和鉴权规则。
+      const accountCurrent = input.accountStates?.[providerId]?.current !== false;
+      const providerExecutable =
+        enabled && accessEntitled && accountCurrent && providerIssues.length === 0;
       const models = orderedModelIds.map((modelId): ResolvedProviderModel => {
         const modelConfig = effectiveModelRules.resolve({
           providerId,

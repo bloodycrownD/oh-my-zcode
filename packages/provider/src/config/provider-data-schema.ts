@@ -11,6 +11,12 @@ export const providerGroupDataSchema = z.enum([
   "zai-family",
   "bigmodel-family",
 ]);
+export const zhipuAccountModeDataSchema = z.enum([
+  "start-plan",
+  "individual-coding-plan",
+  "team-coding-plan",
+  "off-peak",
+]);
 export const providerVisibilityDataSchema = z.enum(["visible", "hidden"]);
 export const providerLogoDataSchema = z
   .object({ type: z.literal("builtin"), key: z.string().min(1) })
@@ -32,9 +38,28 @@ export const completeApiKeyAccessDataSchema = apiKeyAccessDataSchema.extend({
   apiKey: nonBlankRequiredString,
 });
 
-// FORK（D-4）：zhipu-account access 型整删，Provider Access 只剩 API Key 一种形态。
-export const providerAccessDataSchema = apiKeyAccessDataSchema;
-const completeProviderAccessDataSchema = completeApiKeyAccessDataSchema;
+export const completeZhipuAccountAccessDataSchema = z
+  .object({
+    type: z.literal("zhipu-account"),
+    accountType: z.enum(["zai", "bigmodel"]),
+    mode: zhipuAccountModeDataSchema,
+    entitled: z.boolean(),
+  })
+  .strict();
+export const zhipuAccountAccessDataSchema = z
+  .object({
+    ...sparseShape(completeZhipuAccountAccessDataSchema.shape),
+    type: completeZhipuAccountAccessDataSchema.shape.type,
+  })
+  .strict();
+export const providerAccessDataSchema = z.discriminatedUnion("type", [
+  apiKeyAccessDataSchema,
+  zhipuAccountAccessDataSchema,
+]);
+const completeProviderAccessDataSchema = z.discriminatedUnion("type", [
+  completeApiKeyAccessDataSchema,
+  completeZhipuAccountAccessDataSchema,
+]);
 
 export const completeProviderApiDataSchema = z
   .object({
