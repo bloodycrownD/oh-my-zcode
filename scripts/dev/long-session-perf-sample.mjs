@@ -31,6 +31,14 @@ const DEFAULT_DURATION_MS = 30_000;
 const DEFAULT_READY_TIMEOUT_MS = 90_000;
 const EVALUATE_TIMEOUT_MS = 60_000;
 const SCROLL_INTERVAL_MS = 120;
+// 长会话判据阈值。虚拟化时间线在 DOM 里永远只有可视区几十行，
+// [data-row-id] 计数不能用来判断「有没有打开长会话」；改用两个 DOM 常驻量：
+//   - totalRowCount：v4-timeline 的 data-total-row-count（组件持有的总行数）
+//   - maxScrollTop：滚动容器的可滚动余量（px）
+// 两者任一达标即认为长会话已就位。
+const LONG_SESSION_MIN_TOTAL_ROWS = 200;
+const LONG_SESSION_MIN_MAX_SCROLL_TOP = 1_000;
+const TIMELINE_SELECTOR = '[data-testid="v4-timeline"]';
 // 复用既有实例时，转发深链的第二个进程应当很快自行退出（second-instance 通道）。
 const FORWARDER_EXIT_TIMEOUT_MS = 20_000;
 // 自行 spawn 后留给主进程的时间：超过即视为「秒退 = 单实例锁让位」，按失败处理。
@@ -294,15 +302,27 @@ const PROBE_DUMP_EXPR = `(() => {
   return typeof dumped === "string" ? dumped : JSON.stringify(dumped);
 })()`;
 
-const RENDERER_ENV_EXPR = `(() => JSON.stringify({
-  url: location.href,
-  userAgent: navigator.userAgent,
-  innerWidth: window.innerWidth,
-  innerHeight: window.innerHeight,
-  devicePixelRatio: window.devicePixelRatio,
-  rowCount: document.querySelectorAll("[data-row-id]").length,
-  now: new Date().toISOString(),
-}))()`;
+const RENDERER_ENV_EXPR = `(() => {
+  const timeline = document.querySelector(${JSON.stringify(TIMELINE_SELECTOR)});
+  const num = (value) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  return JSON.stringify({
+    url: location.href,
+    userAgent: navigator.userAgent,
+    innerWidth: window.innerWidth,
+    innerHeight: window.innerHeight,
+    devicePixelRatio: window.devicePixelRatio,
+    // 仅作参考：虚拟化下它等于可视区窗口行数，不能当长会话判据。
+    rowCount: document.querySelectorAll("[data-row-id]").length,
+    timelinePresent: Boolean(timeline),
+    totalRowCount: timeline ? num(timeline.getAttribute("data-total-row-count")) : null,
+    windowRowCount: timeline ? num(timeline.getAttribute("data-window-row-count")) : null,
+    maxScrollTop: timeline ? Math.max(0, timeline.scrollHeight - timeline.clientHeight) : null,
+    now: new Date().toISOString(),
+  });
+})()`;
 
 const SCROLL_DRIVER_EXPR = (selectorJson, intervalMs) => `(() => {
   const selector = ${selectorJson};
@@ -518,9 +538,24 @@ async function sampleSegment(cdp, name, { durationMs, drive }) {
   }
   const dumped = safeParse(await cdp.evaluate(PROBE_DUMP_EXPR));
   const rendererEnv = await readRendererEnv(cdp);
-  if (rendererEnv.rowCount === 0) {
+  // 长会话双判据：DOM 常驻的 totalRowCount 与滚动余量 maxScrollTop，
+  // 不用 [data-row-id] 计数（虚拟化下永远只有可视区几行）。
+  const totalRowCount = rendererEnv.totalRowCount ?? 0;
+  const windowRowCount = rendererEnv.windowRowCount ?? 0;
+  const domRowCount = rendererEnv.rowCount ?? 0;
+  const maxScrollTop = Math.max(
+    rendererEnv.maxScrollTop ?? 0,
+    driverInfo?.maxScrollTop ?? 0,
+  );
+  const longSessionOk =
+    totalRowCount >= LONG_SESSION_MIN_TOTAL_ROWS ||
+    maxScrollTop >= LONG_SESSION_MIN_MAX_SCROLL_TOP;
+  if (!longSessionOk) {
     console.error(
-      `${TAG} 警告: ${name} 窗口内 [data-row-id] 计数为 0，当前多半没打开长会话，采样不代表真实负载。`,
+      `${TAG} 警告: ${name} 窗口未检出长会话` +
+        `（data-total-row-count=${totalRowCount} < ${LONG_SESSION_MIN_TOTAL_ROWS}，` +
+        `maxScrollTop=${maxScrollTop} < ${LONG_SESSION_MIN_MAX_SCROLL_TOP}）。`,
+      "采样不代表真实负载——请先在窗口里打开长会话再重跑；虚拟化下 [data-row-id] 计数不参与该判据。",
     );
   }
   console.log(`${TAG} ${name} 窗口结束，已取回 dump`);
@@ -530,6 +565,17 @@ async function sampleSegment(cdp, name, { durationMs, drive }) {
     durationMs,
     driverInfo,
     rendererEnv,
+    longSession: {
+      ok: longSessionOk,
+      totalRowCount,
+      windowRowCount,
+      domRowCount,
+      maxScrollTop,
+      thresholds: {
+        minTotalRowCount: LONG_SESSION_MIN_TOTAL_ROWS,
+        minMaxScrollTop: LONG_SESSION_MIN_MAX_SCROLL_TOP,
+      },
+    },
     probe: dumped,
   };
 }
