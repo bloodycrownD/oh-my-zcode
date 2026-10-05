@@ -1,0 +1,157 @@
+# 打 tag（v*）自动构建桌面安装包（macOS / Windows / Linux），并附到 GitHub Release。
+#
+# 构建入口是仓库自带的聚合脚本 `pnpm --filter @zcode/desktop bundle -- <os> <arch>`，
+# 它按 ZCODE_TARGET_OS/ZCODE_TARGET_ARCH 准备平台资产（agent bundle、ripgrep/native-search、
+# node-pty prebuild、macOS 窗口边界工具），再跑完整 build 与 electron-builder，
+# 最后自带运行时依赖校验和产物体积门禁（audit-bundle-size，超 500MB 会让 job 失败——
+# 这是防包体异常膨胀的内置闸门，不要绕过）。
+#
+# 产物矩阵：
+#   macos-latest   → mac   arm64（dmg + zip）
+#   macos-13       → mac   x64  （dmg + zip）
+#   windows-latest → win   x64  （nsis exe）
+#   ubuntu-latest  → linux x64  （AppImage + deb + rpm + pacman/pkg.tar.zst）
+#
+# 已知边界：
+# - macOS 包未签名/未公证（无证书时 electron-builder 配置默认 identity=null），
+#   用户首次打开需要右键 → 打开。
+# - GitHub Release 单文件上限 2GiB：超限的产物上传 Release 会被跳过并打 warning，
+#   但构建产物始终完整保留在本 run 的 Artifacts 里可下载。
+# - linux-arm64 交叉打包未验证过（agent/native 工具链按 targetPlatform.key 准备，
+#   理论可行）；需要时往 matrix 加一项并先本地验证 bundle -- linux arm64。
+# - CLI 侧 tarball/install.sh 分发链（scripts/zcode-distribution）不在本 workflow
+#   范围内，桌面 Electron 是当前唯一目标用户面。
+
+name: Release Desktop
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-desktop-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: bundle ${{ matrix.target_os }}-${{ matrix.target_arch }}
+    runs-on: ${{ matrix.runs_on }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runs_on: macos-latest
+            target_os: mac
+            target_arch: arm64
+            # 同一 checkout 双架构并行时用独立 dist 目录隔离（electron-builder.config
+            # 的注释明确支持该用法）；单 job 单机虽然用不到，保持配置自洽。
+            dist_dir: dist-arm64
+          - runs_on: macos-13
+            target_os: mac
+            target_arch: x64
+            dist_dir: dist-x64
+          - runs_on: windows-latest
+            target_os: win
+            target_arch: x64
+            dist_dir: dist
+          - runs_on: ubuntu-latest
+            target_os: linux
+            target_arch: x64
+            dist_dir: dist
+    env:
+      ZCODE_DESKTOP_DIST_DIR: ${{ matrix.dist_dir }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 版本取根 package.json 的 packageManager 字段（pnpm@10.33.2）
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      # rpm 需要 rpmbuild；pacman 的 .pkg.tar.zst 需要 tar + zstd；deb 由
+      # electron-builder 自带的 app-builder/fpm 处理，不需要系统 ruby。
+      - name: Install Linux packaging tools
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm zstd xz-utils
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Bundle desktop app
+        shell: bash
+        run: pnpm --filter @zcode/desktop bundle -- ${{ matrix.target_os }} ${{ matrix.target_arch }}
+
+      - name: Upload installer artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target_os }}-${{ matrix.target_arch }}
+          # 只收集安装包本体；*-unpacked/、.app 目录和 blockmap/增量文件不上传。
+          path: |
+            packages/desktop/${{ matrix.dist_dir }}/*.dmg
+            packages/desktop/${{ matrix.dist_dir }}/*.zip
+            packages/desktop/${{ matrix.dist_dir }}/*.exe
+            packages/desktop/${{ matrix.dist_dir }}/*.AppImage
+            packages/desktop/${{ matrix.dist_dir }}/*.deb
+            packages/desktop/${{ matrix.dist_dir }}/*.rpm
+            packages/desktop/${{ matrix.dist_dir }}/*.pkg.tar.zst
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+
+  release:
+    name: Attach artifacts to GitHub Release
+    needs: build
+    # 只有 tag 推送才发 Release；workflow_dispatch 手动跑只出 Artifacts 供验证。
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
+          path: release-files
+          merge-multiple: true
+
+      - name: Create release if missing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+                 --title "$TAG" --generate-notes --draft=false
+
+      - name: Upload artifacts (skip >2GiB assets with warning)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -u
+          ok=0; skipped=0; failed=0
+          while IFS= read -r -d '' f; do
+            size=$(( $(stat -c%s "$f") / 1024 / 1024 / 1024 ))
+            if [ "$size" -ge 2 ]; then
+              echo "::warning::skip $f (≥2GiB, over GitHub Release asset limit; available in run Artifacts)"
+              skipped=$((skipped+1)); continue
+            fi
+            if gh release upload "$TAG" "$f" --repo "$GITHUB_REPOSITORY" --clobber; then
+              ok=$((ok+1))
+            else
+              echo "::error::failed to upload $f"
+              failed=$((failed+1))
+            fi
+          done < <(find release-files -type f -print0 | sort -z)
+          echo "uploaded=$ok skipped=$skipped failed=$failed"
+          [ "$failed" -eq 0 ]
