@@ -1,11 +1,13 @@
 /**
  * turnNavigator helpers 的单测（Step 7 滚动 O(N) 消除）。
  *
- * 覆盖两件事：
+ * 覆盖三件事：
  * 1. `resolveConversationTurnNavigatorActiveUnitIndex` 传入预计算的
  *    `itemByUnitIndex` 与不传（函数内自建）结果完全一致——保证优化不改变语义；
  * 2. 滚动触发量化（`Math.floor(scrollOffsetPx / DEFAULT_ROW_HEIGHT_ESTIMATE_PX)`）
- *    的边界：同一量化桶内 active 结果稳定，跨桶才可能变。
+ *    的边界：同一量化桶内 active 结果稳定，跨桶才可能变；
+ * 3. 目录门控（Step 17 接线修复）：未取过目录时窄面必须把权威总数留成
+ *    undefined，否则宽屏 rail 首查被 `total < 2` 挡死形成闭环自锁。
  *
  * 可测性前置：本文件只走相对路径导入，`conversationTurnNavigatorHelpers.ts` 的
  * `@/v4/conversationTurnRenderUnits.js` 是 type-only 导入（编译期剥离），
@@ -17,6 +19,9 @@ import {
   normalizeConversationTurnNavigatorQueryPositions,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorActiveUnitIndex,
+  shouldHideConversationTurnNavigatorRail,
+  shouldHydrateConversationTurnNavigatorDirectory,
+  type ConversationTurnNavigatorDirectoryView,
   type ConversationTurnNavigatorItem,
   type ConversationTurnNavigatorQueryPosition,
   type ConversationTurnNavigatorVirtualItem,
@@ -258,5 +263,149 @@ test("ActiveQueryRowId：传 normalizedPositions 与不传结果一致", () => {
       viewportHeightPx: 200,
     }),
     undefined,
+  );
+});
+
+/** 宽屏（>= 864px rail 门槛）判定用的固定容器宽度。 */
+const WIDE_CONTAINER_PX = 1_200;
+
+/** store `ConversationTurnDirectoryState` 里与裁决相关的四个字段。 */
+interface StoreDirectoryFacts {
+  loaded: boolean;
+  entryCount: number;
+  realUserQueryTotal: number;
+  hasMore: boolean;
+}
+
+/**
+ * SessionPane 构造窄面那段门控的单测镜像。
+ *
+ * 组件无法在 Node 下加载，所以这里复刻「`loaded === false` → total/hasMore 留
+ * undefined」这一条接线，锁的是**门控 + 判定**的组合语义：未取过目录时把 store 空态
+ * 默认的 0 当权威值下发，首查会被 `total < 2` 挡死，而 store 的失效重查又要求
+ * `loaded === true`，形成闭环自锁。
+ */
+function buildDirectoryView(facts: StoreDirectoryFacts): ConversationTurnNavigatorDirectoryView {
+  return {
+    loaded: facts.loaded,
+    entryCount: facts.entryCount,
+    realUserQueryTotal: facts.loaded ? facts.realUserQueryTotal : undefined,
+    hasMore: facts.loaded ? facts.hasMore : undefined,
+  };
+}
+
+/** 组件侧喂给判定函数的入参（ConversationTimeline.tsx 的展开形状）。 */
+function hydrate(directory: ConversationTurnNavigatorDirectoryView, canLoadOlder: boolean) {
+  return shouldHydrateConversationTurnNavigatorDirectory({
+    canLoadOlder,
+    containerWidthPx: WIDE_CONTAINER_PX,
+    hasLoadHandler: true,
+    loadingDirectory: false,
+    ...(directory
+      ? {
+          realUserQueryTotal: directory.realUserQueryTotal,
+          directoryHasMore: directory.hasMore,
+        }
+      : {}),
+  });
+}
+
+test("目录门控：未取过目录（total 为 undefined）落回 canLoadOlder 放行首查", () => {
+  const notLoaded = buildDirectoryView({
+    loaded: false,
+    entryCount: 0,
+    // store 空态默认：语义是「还没取过」，不是「取到了 0 条」。
+    realUserQueryTotal: 0,
+    hasMore: false,
+  });
+
+  assert.equal(notLoaded.realUserQueryTotal, undefined, "未取过时权威总数必须留 undefined");
+  assert.equal(notLoaded.hasMore, undefined, "未取过时 hasMore 必须留 undefined");
+  assert.equal(hydrate(notLoaded, true), true, "宽屏 + 还有更早行 → 放行首查（不能被空态 0 挡死）");
+  assert.equal(hydrate(notLoaded, false), false, "没有更早行 → 沿用 canLoadOlder 拦截");
+
+  // 窄面整体缺省（拿不到 store 目录态）与 loaded=false 同义，同样放行。
+  assert.equal(hydrate(undefined, true), true);
+  assert.equal(
+    shouldHideConversationTurnNavigatorRail(notLoaded),
+    false,
+    "未取过目录时不能按空判隐藏，否则首帧闪一下",
+  );
+});
+
+test("目录门控：已取过且权威总数不足两条 → 不放行（rail 不会出现）", () => {
+  for (const realUserQueryTotal of [0, 1]) {
+    const loaded = buildDirectoryView({
+      loaded: true,
+      entryCount: realUserQueryTotal,
+      realUserQueryTotal,
+      hasMore: false,
+    });
+    assert.equal(hydrate(loaded, true), false, `total=${realUserQueryTotal} 应被 <2 闸门拦下`);
+  }
+
+  // 恰好两条 + 更早方向还有条目 → 放行，且不再看 canLoadOlder（目录自身的事实已够）。
+  const enough = buildDirectoryView({
+    loaded: true,
+    entryCount: 2,
+    realUserQueryTotal: 2,
+    hasMore: true,
+  });
+  assert.equal(hydrate(enough, false), true);
+
+  // 目录已取齐（hasMore === false）→ 没有可补的内容，不放行。
+  const drained = buildDirectoryView({
+    loaded: true,
+    entryCount: 9,
+    realUserQueryTotal: 9,
+    hasMore: false,
+  });
+  assert.equal(hydrate(drained, true), false, "目录已取齐时不该再 hydrate");
+});
+
+test("目录门控：终态 not-enough-queries 不被重新放行（total 是权威结论）", () => {
+  // store 结案时写入 loaded=true + 权威总数（<2），窄面照常下发：
+  // 「不足两条」是已确认的终态，不是「还没取」。
+  const terminal = buildDirectoryView({
+    loaded: true,
+    entryCount: 0,
+    realUserQueryTotal: 0,
+    hasMore: false,
+  });
+
+  assert.equal(terminal.realUserQueryTotal, 0, "终态必须照常下发权威总数");
+  assert.equal(hydrate(terminal, true), false, "终态不得因 canLoadOlder 重新放行");
+  assert.equal(hydrate(terminal, false), false);
+  assert.equal(
+    shouldHideConversationTurnNavigatorRail(terminal),
+    true,
+    "终态且一条都没有 → rail 隐藏（画出来是一根空条）",
+  );
+  // 终态条目非空（权威 0 但本地窗口有条目）不隐藏。
+  assert.equal(shouldHideConversationTurnNavigatorRail({ ...terminal, entryCount: 1 }), false);
+});
+
+test("目录门控：宽度 / 缺 handler / 在途 三道前置闸门不受门控影响", () => {
+  const base = {
+    canLoadOlder: true,
+    containerWidthPx: WIDE_CONTAINER_PX,
+    hasLoadHandler: true,
+    loadingDirectory: false,
+  };
+
+  assert.equal(
+    shouldHydrateConversationTurnNavigatorDirectory({ ...base, containerWidthPx: 863 }),
+    false,
+    "窄屏（< 864px）不放行",
+  );
+  assert.equal(
+    shouldHydrateConversationTurnNavigatorDirectory({ ...base, hasLoadHandler: false }),
+    false,
+    "没有目录查询 handler 不放行",
+  );
+  assert.equal(
+    shouldHydrateConversationTurnNavigatorDirectory({ ...base, loadingDirectory: true }),
+    false,
+    "查询在途不放行（防重入）",
   );
 });

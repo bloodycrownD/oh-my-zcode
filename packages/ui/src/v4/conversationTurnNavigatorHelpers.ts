@@ -107,10 +107,18 @@ export interface ConversationTurnNavigatorDirectoryView {
   /** 是否成功取过一次目录（未取过时不能按「空」判隐藏，否则首帧闪一下）。 */
   loaded: boolean;
   entryCount: number;
-  /** 服务端现算的 realUser query 权威总数。 */
-  realUserQueryTotal: number;
-  /** 更早方向仍有条目。 */
-  hasMore: boolean;
+  /**
+   * 服务端现算的 realUser query 权威总数。
+   *
+   * **只在 `loaded === true` 后才有权威值**，未取过目录时必须保持 `undefined`：
+   * store 的空态默认 0 表示「还没取」而不是「取到 0 条」，当成 0 下发会让
+   * `shouldHydrateConversationTurnNavigatorDirectory` 的 `total < 2` 闸门把首查
+   * 永久挡掉（store 的失效重查又要求已取过 → 闭环自锁）。具体门控在 SessionPane
+   * 构造本窄面处，这里只负责把「未知」与「已知为 0」区分开。
+   */
+  realUserQueryTotal?: number;
+  /** 更早方向仍有条目。同样只在 `loaded === true` 后有权威值。 */
+  hasMore?: boolean;
 }
 
 /**
@@ -120,6 +128,10 @@ export interface ConversationTurnNavigatorDirectoryView {
  * `realUserQueryTotal`（够不够两条 query 撑起 rail）与 `directoryHasMore`
  * （更早方向还有没有没取到的条目）。两者都未知（首轮、尚未取过目录）时，
  * 仍以 `canLoadOlder` 放行——「不知道」不能当成「不需要」。
+ *
+ * **调用方契约**：`realUserQueryTotal` 留 `undefined` 必须真的表示「还没取过目录」
+ * （SessionPane 按 store 的 `turnDirectory.loaded` 门控），不能把空态默认 0 当权威值
+ * 传进来——否则 `total < 2` 会把首查挡死，而 store 的失效重查要求已取过，闭环自锁。
  */
 export function shouldHydrateConversationTurnNavigatorDirectory(params: {
   canLoadOlder: boolean;
@@ -147,12 +159,13 @@ export function shouldHydrateConversationTurnNavigatorDirectory(params: {
  *
  * 目录已知且「一条都没有、权威总数也不足两条」时隐藏——这时 rail 画出来是一根空条。
  * 尚未取过目录（`loaded === false`）一律不隐藏：加载中隐藏会在首帧闪一下。
+ * `loaded === true` 时权威总数必有值，缺省按 0 兜（与旧窄面口径一致）。
  */
 export function shouldHideConversationTurnNavigatorRail(
   directory: ConversationTurnNavigatorDirectoryView | undefined,
 ): boolean {
   if (!directory?.loaded) return false;
-  return directory.entryCount === 0 && directory.realUserQueryTotal < 2;
+  return directory.entryCount === 0 && (directory.realUserQueryTotal ?? 0) < 2;
 }
 
 export function resolveConversationTurnNavigatorHydrationRetryDelayMs(

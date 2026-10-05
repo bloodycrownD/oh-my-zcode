@@ -585,6 +585,19 @@ export function SessionPane({
   const [lease, setLease] = useState<SessionLease | null>(null);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  // 草稿态：还没有 sessionId，既没有权威 phase 也没有正式会话的行。
+  const isDraft = sessionId === null;
+  /**
+   * 共享增量缓存的 phase 口径。
+   *
+   * **不变量：`ConversationTimeline` 的 `sessionPhase` 与本文件 `shareRenderUnits` 的
+   * `sessionPhase` 必须喂同一个值**——所以两侧都只引用这里，不再各自推导。
+   *
+   * 缓存按 (scopeKey, sessionPhase) 整体作废，而这两处 build 的是同一帧里的同一份
+   * `rows.window`。草稿态只要有一侧带 phase、另一侧传 undefined，两侧就会轮流把对方
+   * 的条目冲掉，谁都拿不到复用，共享缓存退化成每帧两次全量重建。
+   */
+  const sessionRenderPhase = isDraft ? undefined : snapshot?.control.phase;
   const newlyCreatedSessionIdRef = useRef<string | null>(null);
   const shareDraft = useConversationShareSelectionStore((storeState) =>
     sessionId ? storeState.drafts[sessionId] : undefined,
@@ -640,16 +653,17 @@ export function SessionPane({
   });
   // 与 ConversationTimeline 共用同一个增量缓存句柄：这是同一帧里对同一份
   // rows.window 的第二份派生，过去是独立的一份全量重建（hook 无条件执行，非分享态也在跑）。
-  // sessionPhase 必须与传给 Timeline 的一致——缓存按 (scopeKey, sessionPhase) 整体作废，
-  // 两边喂不同 phase 会互相把对方的条目冲掉，谁都拿不到复用。
+  // sessionPhase 必须与传给 Timeline 的一致（同为 sessionRenderPhase）——缓存按
+  // (scopeKey, sessionPhase) 整体作废，两边喂不同 phase 会互相把对方的条目冲掉，
+  // 谁都拿不到复用。
   const shareRenderUnits = useMemo(
     () =>
       conversationTurnRenderUnitsCache.build(
         snapshot?.rows.window ?? [],
-        { sessionPhase: snapshot?.control.phase, scopeKey: sessionId ?? "draft" },
+        { sessionPhase: sessionRenderPhase, scopeKey: sessionId ?? "draft" },
         state.lastMutation?.turnIdByRowId,
       ),
-    [snapshot?.rows.window, snapshot?.control.phase, sessionId, state.lastMutation],
+    [snapshot?.rows.window, sessionRenderPhase, sessionId, state.lastMutation],
   );
   const shareItems = useMemo(
     () =>
@@ -3469,12 +3483,24 @@ export function SessionPane({
   }, [lease, snapshot?.logEpoch]);
 
   // rail 显隐的目录裁决窄面（条目数组不进组件，避免同一份目录存第二份）。
+  //
+  // **未取过目录时（loaded === false）必须把 realUserQueryTotal / hasMore 留成 undefined。**
+  // store 的空态默认是 0 / false，语义是「还没取过」，不是「取到了 0 条」；无条件下发会让
+  // `shouldHydrateConversationTurnNavigatorDirectory` 的 `total < 2` 闸门把首查永久挡掉，
+  // 而 store 的失效重查 `scheduleTurnDirectoryRequery` 又要求 `loaded === true`——闭环自锁，
+  // 宽屏 rail 永远拿不到目录（相对旧 loadAllOlder 路径是能力回退）。留 undefined 让判定函数
+  // 落回 `canLoadOlder` 放行首查（重试同理：retryable-failure 不会写 loaded）。
+  //
+  // 终态不走这条路：`not-enough-queries` 结案时 `loaded === true`，权威总数照常下发，
+  // `< 2` 继续作为「不再 hydrate」的结论，`hasMore === false` 也不再放行。
   const turnDirectoryView = useMemo(
     () => ({
       loaded: state.turnDirectory.loaded,
       entryCount: state.turnDirectory.entries.length,
-      realUserQueryTotal: state.turnDirectory.realUserQueryTotal,
-      hasMore: state.turnDirectory.hasMore,
+      realUserQueryTotal: state.turnDirectory.loaded
+        ? state.turnDirectory.realUserQueryTotal
+        : undefined,
+      hasMore: state.turnDirectory.loaded ? state.turnDirectory.hasMore : undefined,
     }),
     [
       state.turnDirectory.hasMore,
@@ -3545,7 +3571,6 @@ export function SessionPane({
   // editUserQuery 已由 command 层防御 latest real user query，并在 running
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
   const editActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
-  const isDraft = sessionId === null;
   // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
   // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
   // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
@@ -4630,7 +4655,7 @@ export function SessionPane({
               }
               searchResultHighlightRequest={isDraft ? null : searchResultHighlightRequest}
               onSearchResultHighlightDone={onSearchResultHighlightDone}
-              sessionPhase={isDraft ? undefined : snapshot?.control.phase}
+              sessionPhase={sessionRenderPhase}
               shareSelection={
                 shareActive && shareInSelectionStage && shareDraft?.view === "timeline" && sessionId
                   ? {

@@ -763,14 +763,10 @@ export class ConversationProjectionStore {
   ): void {
     if (frame.payload.kind === "snapshot") {
       const hadAppliedBase = this.subscriptionHasAppliedBase;
-      logSubagentProjectionTransition(
-        this.topic,
-        this.state.snapshot,
-        frame.payload.snapshot,
-        "snapshot",
-      );
       // 规则 1：整体替换，扔掉手里的一切换新的。整体替换后行下标全变，
       // 必须走 rebuildAccumulator，否则后续 row.delta 会按旧索引写错行。
+      // 转换日志只打 publish 之后这一次：那才是真正发布给订阅者的外壳副本，
+      // 打 rebuild 入参等于把同一帧记两遍，且记的是没人看见的中间态。
       const next = this.rebuildAccumulator(frame.payload.snapshot).publish();
       logSubagentProjectionTransition(this.topic, this.state.snapshot, next, "snapshot");
       this.setState({
