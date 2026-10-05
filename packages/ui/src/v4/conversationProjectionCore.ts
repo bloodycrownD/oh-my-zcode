@@ -176,8 +176,6 @@ function publishConversationShell(
  * 否则消费方（renderUnits 增量构建器）无法判断哪几轮失效。
  */
 export interface ConversationProjectionLastMutation {
-  /** 帧的右端点 seq，与同帧发布的 snapshot.seq 对齐，便于消费方断言同代。 */
-  seq: number;
   /** 本帧变更行的 rowId → turnId。 */
   turnIdByRowId: ReadonlyMap<number, string>;
 }
@@ -257,7 +255,7 @@ export function createConversationProjectionAccumulator(
       accumulator.snapshot.seq = toSeq;
       // 空 delta 帧（如纯 state.updated 水位推进）也要发布 lastMutation：
       // 消费方据此知道「本帧无行变更」，只有失效锚点那一轮需要重算。
-      lastMutation = { seq: toSeq, turnIdByRowId };
+      lastMutation = { turnIdByRowId };
       return publishConversationShell(accumulator);
     },
     lastMutation() {
