@@ -41,9 +41,10 @@ export interface UiLocalePatchResult {
 /**
  * FORK（S23 / D-12）：`magicContext` 参数域写盘的结果。
  *
- * 只回报「写到了哪里」——刻意不回显整个域值：它是十几 KB 量级的运行时配置快照，
- * 把它塞进 JSON-RPC result 会污染协议日志，而调用方要的是「写成功 + 后续从
- * ConfigPort 读到的就是这个值」这条保证。
+ * 只回报「写到了哪里」——域值由**协议层**统一回显（`workspace/updateMagicContextConfig`
+ * 的 result 带 `config` 字段，取自写盘之后的 `ConfigPort`），写盘层再回显一份就成了
+ * 第二份出口：两份出口迟早会分叉，而分叉的那份没人测。这里刻意只给 `path` + `changed`，
+ * 调用方要的「写成功 + 后续从 ConfigPort 读到的就是这个值」这条保证由协议层兑现。
  */
 export interface MagicContextPatchResult {
   path: string;

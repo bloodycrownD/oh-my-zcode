@@ -431,9 +431,9 @@ function parsedConfigFileToRuntimePatch(parsed: ZCodeConfigFile): RuntimeConfigP
   if (parsed.storage) config.storage = parsed.storage;
   if (parsed.network) config.network = parsed.network;
   if (parsed.features) config.features = parsed.features;
-if (parsed.memory) config.memory = parsed.memory;
-if (parsed.magicContext) config.magicContext = parsed.magicContext;
-if (parsed.mcp) config.mcp = parsed.mcp;
+  if (parsed.memory) config.memory = parsed.memory;
+  if (parsed.magicContext) config.magicContext = parsed.magicContext;
+  if (parsed.mcp) config.mcp = parsed.mcp;
   if (parsed.plugins) config.plugins = normalizePluginConfig(parsed.plugins);
   const skillsConfig = parseSkillsRuntimeConfig(parsed.skills);
   if (skillsConfig) config.skills = skillsConfig;
