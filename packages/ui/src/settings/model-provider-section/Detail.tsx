@@ -16,72 +16,21 @@ import {
   getProviderFormApiKeyManagementUrl,
   type ProviderSettingsFormProvider,
 } from "@/lib/providerSettingsFormTypes.js";
-import { ArrowRightIcon, AstroidIcon, UsersIcon } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import {
-  type CodingPlanStatus,
-
-  type ModelProviderNavItem,
-} from "./constants.js";
+import { type CodingPlanStatus, type ModelProviderNavItem } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
 import {
   ModelProviderLoadingCard,
   PresetProviderPlaceholderCard,
 } from "./ProviderPlaceholderCards.js";
-import {
-
-  type CodingPlanLoginOptions,
-} from "./codingPlanPricingCards.js";
-import {
-
-
-} from "./codingPlanEnterpriseTiers.js";
-
-import {
-
-
-
-} from "./codingPlanProductPresentation.js";
+import { type CodingPlanLoginOptions } from "./codingPlanPricingCards.js";
 import {
   ProviderFamilyDetailShell,
   ProviderFamilyHeader,
-
 } from "./ProviderFamilyModeHeader.js";
-
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import type { ProviderSettingsView } from "@zcode/services";
 import type { SavePersonalModelDraftInput } from "@zcode/provider";
-import { projectProviderSettingsViewToFormProviders } from "@/lib/providerSettingsFormProjection.js";
-
-const START_PLAN_ENTRY_BANNER_CLASS =
-  "min-h-20 w-full overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle_at_14%_12%,color-mix(in_srgb,var(--color-success)_24%,var(--color-background)_76%)_0%,color-mix(in_srgb,var(--color-success)_10%,var(--color-surface)_90%)_64%,var(--color-surface)_300%)] p-4 text-left transition-colors hover:border-border-hover";
-const PERSONAL_PLAN_ENTRY_BANNER_CLASS =
-  "min-h-20 w-full overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle_at_14%_12%,color-mix(in_srgb,#4099ff_24%,var(--color-background)_76%)_0%,color-mix(in_srgb,#4099ff_10%,var(--color-surface)_90%)_64%,var(--color-surface)_300%)] p-4 text-left transition-colors hover:border-border-hover";
-const TEAM_PLAN_ENTRY_BANNER_CLASS =
-  "min-h-20 w-full overflow-hidden rounded-xl border border-border bg-[radial-gradient(circle_at_14%_12%,color-mix(in_srgb,#0ea5e9_24%,var(--color-background)_76%)_0%,color-mix(in_srgb,#0ea5e9_10%,var(--color-surface)_90%)_64%,var(--color-surface)_300%)] p-4 text-left transition-colors hover:border-border-hover";
-
-function isPlanNavItem(
-  item: ModelProviderNavItem | null,
-): item is Extract<ModelProviderNavItem, { type: "codingPlan" | "teamPlan" }> {
-  return item?.type === "codingPlan" || item?.type === "teamPlan";
-}
-
-function hasTeamPlanContext(
-  item: Extract<ModelProviderNavItem, { type: "teamPlan" }>,
-): item is Extract<
-  ModelProviderNavItem,
-  { type: "teamPlan" }
-> & {
-  organizationId: string;
-  projectId: string;
-} {
-  return (
-    item?.type === "teamPlan" &&
-    (item.organizationId?.trim().length ?? 0) > 0 &&
-    (item.projectId?.trim().length ?? 0) > 0
-  );
-}
 
 export function ModelProviderSectionDetail({
   selectedNavItem,
