@@ -9,7 +9,12 @@ import type {
   WindowOpenHandlerResponse,
 } from "electron";
 import type { DesktopTitleBarTheme, Locale } from "@zcode/shared";
-import { DEFAULT_LOCALE, desktopMenuMessageIds, getDesktopMenuMessage, PlatformChannels } from "@zcode/shared";
+import {
+  DEFAULT_LOCALE,
+  desktopMenuMessageIds,
+  getDesktopMenuMessage,
+  PlatformChannels,
+} from "@zcode/shared";
 import { loadWindow, type WindowBootstrapOptions } from "./desktopHostProcess.js";
 import {
   buildWindowsTitleBarOverlayForZoomLevel,
