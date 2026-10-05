@@ -6,12 +6,12 @@
 //   3. base 与状态同生共死——断档时状态未被污染，携当前水位重订阅，由服务端裁决 resume/snapshot。
 // 除 optimistic overlay（pending 命令展示）外，本 store 不产生任何 conversation 事实。
 import {
-  applyConversationDeltas,
   isDeterministicContentFault,
   parseConversationTopic,
   PROTOCOL_V4_LIMITS,
   SUBSCRIPTION_CONTENT_REJECTED,
   type ConversationRow,
+  type ConversationDelta,
   type ConversationSnapshot,
   type ConversationOpenTiming,
   type ConversationTopicFrame,
@@ -247,11 +247,17 @@ export function shouldAutoLoadIncompleteLeadingTurn(
   );
 }
 
-// 合并规范已下沉到 @/-free 的 conversationProjectionCore（可测性前置：被测模块
-// 传递依赖链零 `@/` 导入）。这里 import + re-export 保持既有外部引用不破。
-import { mergeOlderRows } from "@/v4/conversationProjectionCore.js";
+// 合并规范、accumulator 应用包装与 copy-on-notify 发布已下沉到 @/-free 的
+// conversationProjectionCore（可测性前置：被测模块传递依赖链零 `@/` 导入）。
+// 这里 import + re-export 保持既有外部引用不破。
+import {
+  createConversationProjectionAccumulator,
+  mergeOlderRows,
+  type ConversationProjectionAccumulator,
+} from "@/v4/conversationProjectionCore.js";
 
 export { mergeOlderRows };
+export type { ConversationProjectionAccumulator };
 
 /**
  * 外部 store（useSyncExternalStore 兼容：subscribe + getState 返回稳定引用）。
@@ -321,6 +327,15 @@ export class ConversationProjectionStore {
       > & { directoryRevision: number })
     | null = null;
   private closed = false;
+  /**
+   * delta 应用的可变累加器（copy-on-notify）。
+   *
+   * `state.snapshot` 永远是它发布出来的**外壳副本**，不是累加器本体：本帧之后的
+   * 原地变更只落在累加器自己的 window 数组上，已发布的那一份保持定格。因此
+   * setState 之后的任何读（reconcile / observeModelTransition / 子组件 memo）
+   * 拿到的都是稳定的帧快照。
+   */
+  private accumulator: ConversationProjectionAccumulator | null = null;
 
   constructor(
     readonly topic: string,
@@ -636,6 +651,38 @@ export class ConversationProjectionStore {
     });
   }
 
+  /**
+   * 统一 rebuild 入口：凡是把 rows.window 整体换掉（新 snapshot、mergeOlderRows
+   * 前插补拉）的路径都必须过这里。返回重建好的累加器，**发布给订阅者的必须是它的
+   * `publish()` 外壳副本，不是它本身**。
+   *
+   * 为什么漏一次就是静默内容错乱：累加器内部用 rowId → 下标 的索引命中行，
+   * mergeOlderRows 换了数组之后旧索引全部错位，后续 row.delta 会把流式文本
+   * 追加到别的行上——不报错、不掉帧，只是内容慢慢错位。
+   */
+  private rebuildAccumulator(
+    nextSnapshot: ConversationSnapshot,
+  ): ConversationProjectionAccumulator {
+    this.accumulator = createConversationProjectionAccumulator(nextSnapshot);
+    return this.accumulator;
+  }
+
+  /**
+   * delta 帧的应用入口：走可变累加器，返回通知用的外壳副本。
+   *
+   * 正常路径下这里必定已有累加器——delta 帧要先过 handleFrame 的
+   * subscriptionHasAppliedBase 闸门，而该标志只由已 apply 过的帧置位。缺失只可能是
+   * 累加器被丢掉（close 之后不再收帧）；真到了就从当前外壳重建再施加，绝不吞掉本帧。
+   */
+  private applyFrameDeltas(
+    current: ConversationSnapshot,
+    deltas: readonly ConversationDelta[],
+    toSeq: number,
+  ): ConversationSnapshot {
+    const accumulator = this.accumulator ?? this.rebuildAccumulator(current);
+    return accumulator.applyDeltas(deltas, toSeq);
+  }
+
   private applyFrame(
     frame: ConversationTopicFrame,
     context: {
@@ -653,20 +700,25 @@ export class ConversationProjectionStore {
         frame.payload.snapshot,
         "snapshot",
       );
-      // 规则 1：整体替换，扔掉手里的一切换新的。
+      // 规则 1：整体替换，扔掉手里的一切换新的。整体替换后行下标全变，
+      // 必须走 rebuildAccumulator，否则后续 row.delta 会按旧索引写错行。
+      const next = this.rebuildAccumulator(frame.payload.snapshot).publish();
+      logSubagentProjectionTransition(this.topic, this.state.snapshot, next, "snapshot");
       this.setState({
-        snapshot: frame.payload.snapshot,
+        snapshot: next,
         planDirectoryRevision: this.state.planDirectoryRevision + 1,
         // snapshot 整体替换后 real-user query 集合可能已变，终态缓存必须失效。
         turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
       });
       this.subscriptionHasAppliedBase = true;
-      this.reconcileOptimistic(frame.payload.snapshot);
-      this.reconcileAcceptedInputProjection(frame.payload.snapshot);
+      // 以下三步一律读发布后的外壳副本 next，绝不读累加器本体：
+      // 本体是活的，下一帧的原地变更会改掉它此刻读到的一切。
+      this.reconcileOptimistic(next);
+      this.reconcileAcceptedInputProjection(next);
       // initial 丢失时，publisher 允许完整 online snapshot 建立首个
       // applied base；其中的持久 transition 可能早于本次订阅，不能冒充实时新事件。
       // 首帧只播种观察基线，后续 online 跃迁才通知 pane。
-      this.observeModelTransition(frame.payload.snapshot, context.online && hadAppliedBase);
+      this.observeModelTransition(next, context.online && hadAppliedBase);
       if (context.subscribeMode !== null && context.frameReceivedAt !== undefined) {
         const snapshotAppliedAt = monotonicNow();
         this.sessionOpenRendererTiming = {
@@ -710,9 +762,10 @@ export class ConversationProjectionStore {
       }
       return;
     }
-    const applied = applyConversationDeltas(current, frame.payload.deltas);
-    // seq 是快照对齐水位，delta 帧应用完推进到帧右端点。
-    const next = { ...applied, seq: frame.toSeq };
+    // 规则 3a：delta 帧走可变累加器，通知边界换三层引用。
+    // current 是上一帧发布的外壳副本（不是累加器本体），因此可以直接当 previous 传给
+    // subagent 观察日志：它定格在上一帧，不会被本帧的原地变更改写。
+    const next = this.applyFrameDeltas(current, frame.payload.deltas, frame.toSeq);
     logSubagentProjectionTransition(this.topic, current, next, "deltas");
     const removedFromRowId = frame.payload.deltas.reduce<number | null>(
       (earliest, delta) =>
@@ -742,6 +795,8 @@ export class ConversationProjectionStore {
         : {}),
     });
     this.subscriptionHasAppliedBase = true;
+    // 与 snapshot 分支同款禁令：只读发布后的外壳副本 next。读累加器本体等于读一个
+    // 「已发布但仍在变」的对象——reconcile 的判定结果会随下一帧的流式追加漂移。
     this.reconcileOptimistic(next);
     this.reconcileAcceptedInputProjection(next);
     this.observeModelTransition(next, context.online);
@@ -1003,8 +1058,12 @@ export class ConversationProjectionStore {
       if (current.rows.window[0]?.rowId !== beforeRowId) return;
       const window = mergeOlderRows(current.rows.window, result.rows);
       if (window === null) return;
+      // window 换了数组 → 行下标全变，必须 rebuild 重建 rowId 索引。
       this.setState({
-        snapshot: { ...current, rows: { ...current.rows, window } },
+        snapshot: this.rebuildAccumulator({
+          ...current,
+          rows: { ...current.rows, window },
+        }).publish(),
       });
     } catch (error) {
       // query 只读且可重发：失败不进 error 态，留给下次触发重试。
@@ -1117,7 +1176,10 @@ export class ConversationProjectionStore {
           committed = true;
           this.setState({
             loadingOlder: false,
-            snapshot: { ...current, rows: { ...current.rows, window } },
+            snapshot: this.rebuildAccumulator({
+              ...current,
+              rows: { ...current.rows, window },
+            }).publish(),
           });
           // navigator 已经拿到补齐首轮所需的权威 rows，必须在隐藏 rail 前先提交它们。
           logger.debug("[v4-store] 完整问题目录不足两条 query，保留首轮补齐 rows", {
@@ -1148,7 +1210,10 @@ export class ConversationProjectionStore {
       committed = true;
       this.setState({
         loadingOlder: false,
-        snapshot: { ...current, rows: { ...current.rows, window } },
+        snapshot: this.rebuildAccumulator({
+          ...current,
+          rows: { ...current.rows, window },
+        }).publish(),
       });
       logger.debug("[v4-store] 完整问题目录历史 rows 补拉完成", {
         loadedRows: window.length,
@@ -1344,6 +1409,7 @@ export class ConversationProjectionStore {
     this.discardRecovery();
     this.awaitingInitial = null;
     this.subscriptionHasAppliedBase = false;
+    this.accumulator = null;
     this.generation++;
     const { subscriptionId } = this.state;
     this.setState({ status: "closed", subscriptionId: null });
