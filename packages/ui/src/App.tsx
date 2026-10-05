@@ -81,6 +81,7 @@ import { usePaneLayoutStore } from "@/v4/paneLayoutStore.js";
 import { useWorkbenchGroupStore } from "@/v4/workbenchGroupStore.js";
 import type { AssistantPreviewCardsAutoOpenRequest } from "@/lib/assistantPreviewCards.js";
 import { startMemoryDiagnosticsLogger } from "@/lib/memoryDiagnostics.js";
+import { startPerfProbe } from "@/lib/perfProbe.js";
 
 const EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY: NonNullable<
   AppProps["reconnectingRemoteWorkspaceLogsByWorkspaceKey"]
@@ -141,6 +142,11 @@ export function App({
   useEffect(() => {
     const memoryDiagnosticsLogger = startMemoryDiagnosticsLogger();
     return () => memoryDiagnosticsLogger.stop();
+  }, []);
+  // 页面内性能探针（dev-only）：长任务环形缓冲 + 内存分段采样，
+  // CDP 经 window.__zcodePerfProbe 的 reset/dump 取数，生产 build 下是 no-op。
+  useEffect(() => {
+    startPerfProbe();
   }, []);
   const activeWorkspaceRpcTarget = useTabStore(
     useShallow((state) => {
