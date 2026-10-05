@@ -200,7 +200,7 @@ export function useModelProviderNavigation({
                 (candidate) =>
                   candidate.providerId ===
                   resolveModelProviderFamilySpecByProviderId(id)?.individualCodingPlanProviderId,
-              )?.config.logo,
+              )?.config.logo ?? provider?.config.logo,
               provider,
               displayName,
               statusProvider,
@@ -464,12 +464,9 @@ function resolveSideNavigationNodeKeyForConnectionItem(
   if (item.type !== "preset" && item.type !== "codingPlan" && item.type !== "teamPlan") {
     return item.key;
   }
-  if (item.type === "codingPlan" && isStartPlanModelProviderId(item.presetId)) return item.key;
-  const familySpec = resolveModelProviderFamilySpecByProviderId(item.presetId);
-  if (!familySpec) {
-    return item.key;
-  }
-  return createPresetProviderNodeKey(familySpec.startPlanProviderId);
+  // FORK（D-13）：`startPlanProviderId` 字段已删，family↔provider 映射恒 null，
+  // 侧节点 key 恒回落 `item.key`。
+  return item.key;
 }
 
 function pickInitialConnectionNavigationItem(
@@ -524,25 +521,9 @@ export function connectionSelectionMatchesNavigationItem(
   selection: ProviderFamilyConnectionSelection,
   item: Exclude<ModelProviderNavGroup["items"][number], { type: "codingPlanLoading" }>,
 ): boolean {
-  if (item.type === "custom") return false;
-  const familySpec = resolveModelProviderFamilySpecByProviderId(item.presetId ?? "");
-  if (familySpec?.id !== family) return false;
-  if (selection.kind === "start-plan") {
-    return false;
-  }
-  if (selection.kind === "individual-coding-plan") {
-    return (
-      item.type === "codingPlan" && item.presetId === familySpec.individualCodingPlanProviderId
-    );
-  }
-  return (
-    item.type === "teamPlan" &&
-    item.presetId === familySpec.teamCodingPlanProviderId &&
-    // 团队连接按平台、组织和项目定位；订阅商品会在权益快照和 pricing 校正间变化。
-    // 不能把同项目的商品更新误判为连接丢失，否则初始化会出现空选项和错误提示。
-    item.organizationId === selection.organizationId &&
-    item.projectId === selection.projectId
-  );
+  // FORK（D-13）：family↔provider 映射恒 null，故 `familySpec?.id !== family` 恒成立，
+  // 本判据恒返回 false。保留函数签名以免调用点与类型一起塌陷。
+  return false;
 }
 
 function isPlanConnectionNavigationItem(

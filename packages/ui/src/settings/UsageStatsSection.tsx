@@ -1,34 +1,9 @@
 import { AppUsagePanel } from "@/settings/usage-stats/AppUsagePanel.js";
-import {
-  CodingPlanUsagePanel,
-  type CodingPlanUsageSource,
-} from "@/settings/usage-stats/CodingPlanUsagePanel.js";
 
-export type UsageStatsSectionTab = "app" | "codingPlan" | `codingPlan:${string}`;
-
-export function UsageStatsSection({
-  activeTab,
-  providerSourcesLoading,
-  workspaceIdentity,
-  workspacePath,
-  selectedCodingPlanSource,
-}: {
-  activeTab: UsageStatsSectionTab;
-  providerSourcesLoading: boolean;
-  workspaceIdentity?: string;
-  workspacePath?: string;
-  selectedCodingPlanSource?: CodingPlanUsageSource | null;
-}) {
-  if (activeTab === "app") {
-    return <AppUsagePanel />;
-  }
-
-  return (
-    <CodingPlanUsagePanel
-      loadingSources={providerSourcesLoading}
-      workspaceIdentity={workspaceIdentity}
-      workspacePath={workspacePath}
-      selectedSource={selectedCodingPlanSource}
-    />
-  );
+/**
+ * FORK（D-4）：Coding Plan 额度页整删后只剩 App Usage（本地 agent 数据库统计）。
+ * 设置页的 usage 分区不再有第二个 tab。
+ */
+export function UsageStatsSection() {
+  return <AppUsagePanel />;
 }
