@@ -10,10 +10,21 @@
 //                                historian, `inject-compartments`,
 //                                `protected-tail-boundary` and `transform` all
 //                                import `./compartment-storage.js` directly.
-//   ./message-index.js          C group (Step 20) — the fork has no FTS tables
-//                                to reconcile into; only `message-index-async.ts`
-//                                landed (also reached by its own path).
-//   ./project-docs-hash.js      Batch 2 (Step 31)
+//   ./message-index.js          C group (Step 20) — only `message-index-async.ts`
+//                                landed (also reached by its own path, from
+//                                `transform.ts`). Its reconciler body is still
+//                                stripped, but NOT because the FTS tables are
+//                                missing: `storage-db.ts:1669,1732` does create
+//                                `message_history_fts` / `message_history_index`,
+//                                and the rowid map it reconciles against is
+//                                backfilled for real at `storage-db.ts:1107`
+//                                (`startMessageFtsRowidMapBackfill`). The sync
+//                                module has simply not been ported.
+//   ./project-docs-hash.js      Batch 2 (Step 31) for the barrel re-export only —
+//                                the module itself LANDED (190+ lines at its own
+//                                path, exporting `readProjectDocsCanonical` /
+//                                `computeProjectDocsHash`) and is consumed by
+//                                `hooks/magic-context/inject-compartments.ts:39`.
 //   ./project-identity.js       Batch 2 (Step 31)
 //
 // Each is restored at the step that ports it. Nothing in the A group imports

@@ -18,7 +18,6 @@ import {
     getMagicContextStorageDir,
 } from "../../shared/data-path.js";
 import { getErrorMessage } from "../../shared/error-message.js";
-import { harnessOwnsOpenCodeStore } from "../../shared/harness.js";
 import { log } from "../../shared/logger.js";
 import {
     type AsyncProcessInspection,
