@@ -16,21 +16,14 @@ import {
 import type { ICredentialService } from "../credential/credential.js";
 import type { ISettingService } from "../setting/setting.js";
 import type { ProviderRuntime } from "./providerRuntime.js";
-import type { AccountProviderService } from "@zcode/provider";
 import type { IProviderProvisioningTargetService } from "./providerProvisioning.js";
-import {
-  PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS,
-  readProvisionablePersonalConfig,
-} from "./providerProvisioningSource.js";
+import { readProvisionablePersonalConfig } from "./providerProvisioningSource.js";
 
 const PROVISIONING_SCHEMA_VERSION = 1 as const;
-
-const OAUTH_CREDENTIAL_KEYS = new Set<string>(PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS);
 
 export interface ProviderProvisioningTargetOptions {
   readonly providerRuntime: ProviderRuntime;
   readonly personalRepository: PersonalProviderConfigRepository;
-  readonly accountProviderSource: AccountProviderService;
   readonly credentialService: ICredentialService;
   readonly settingService: ISettingService;
   readonly personalConfigFilePath: string;
@@ -107,7 +100,6 @@ export function createProviderProvisioningTarget(
             return personalUpdate;
           });
 
-          await options.accountProviderSource.refresh("provider-provisioning");
           const snapshot =
             await options.providerRuntime.registryService.refresh("provider-provisioning");
           if (
@@ -185,13 +177,13 @@ async function captureBeforeState(
     options.settingService.get(),
   ]);
   const credentials = new Map<string, string | null>();
+  // FORK（D-4）：OAuth 会话凭据键族已随账号面整删，Provisioning 只同步 account-provider 键。
   const credentialKeys = new Set<string>([
-    ...OAUTH_CREDENTIAL_KEYS,
     ...((await options.listProvisioningCredentialKeys?.()) ?? []),
     ...envelope.credentials.map((entry) => entry.key),
   ]);
   for (const key of credentialKeys) {
-    if (!OAUTH_CREDENTIAL_KEYS.has(key) && !isProviderProvisioningAccountCredentialKey(key)) {
+    if (!isProviderProvisioningAccountCredentialKey(key)) {
       continue;
     }
     credentials.set(key, await options.credentialService.load(key));
@@ -265,7 +257,6 @@ async function rollback(
     return new Error(errors.map(formatError).join("；"));
   }
   try {
-    await options.accountProviderSource.refresh("provider-provisioning-rollback");
     await options.providerRuntime.registryService.refresh("provider-provisioning-rollback");
   } catch (error) {
     return error instanceof Error ? error : new Error(String(error));
@@ -304,10 +295,10 @@ function validateCredentialEntries(envelope: ProviderProvisioningEnvelope): void
   for (const entry of envelope.credentials) {
     if (seen.has(entry.key)) throw new Error(`重复 Provisioning Credential key: ${entry.key}`);
     seen.add(entry.key);
-    const allowed =
-      (entry.scope === "oauth-session" && OAUTH_CREDENTIAL_KEYS.has(entry.key)) ||
-      (entry.scope === "account-provider" && isProviderProvisioningAccountCredentialKey(entry.key));
-    if (!allowed) throw new Error(`不允许同步的 Credential key: ${entry.key}`);
+    // FORK（D-4）：oauth-session scope 随账号凭据整删，这里只允许 account-provider 键。
+    if (!(entry.scope === "account-provider" && isProviderProvisioningAccountCredentialKey(entry.key))) {
+      throw new Error(`不允许同步的 Credential key: ${entry.key}`);
+    }
   }
 }
 

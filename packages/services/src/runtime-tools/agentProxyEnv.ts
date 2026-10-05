@@ -2,7 +2,6 @@ import {
   ZCODE_AGENT_CA_CERT_ENV_KEY,
   ZCODE_HTTP_PROXY_ENV_KEY,
   ZCODE_NO_PROXY_ENV_KEY,
-  ZCODE_WORKSPACE_IDENTITY_ENV,
 } from "@zcode/shared";
 
 // 把设置页的 HTTP 代理、No Proxy 和自定义 CA 翻译成 agent 子进程的环境变量补丁。
@@ -114,10 +113,11 @@ export function buildAgentEndpointOriginEnv(
 
 /** 把 Host 已知的 remote workspace identity 注入对应 Agent；本地 workspace 保持 path fallback。 */
 export function buildAgentWorkspaceIdentityEnv(
-  workspaceIdentity: string | undefined,
+  _workspaceIdentity: string | undefined,
 ): Record<string, string> {
-  const trimmed = workspaceIdentity?.trim();
-  return trimmed ? { [ZCODE_WORKSPACE_IDENTITY_ENV]: trimmed } : {};
+  // FORK（D-4）：workspace identity 原本只服务于官方 Server MCP 的身份头投递，
+  // 该链已整删，因此不再向 Agent 注入该变量。
+  return {};
 }
 
 function normalizeProxyValue(value: string | undefined): string | undefined {
