@@ -17,13 +17,10 @@ import {
   IConversationShareService,
   IBotsService,
   IFileWatcherService,
-  IOAuthService,
   IModelSelectionService,
   IProviderSettingsService,
   IProviderProvisioningTargetService,
   IUsageStatsService,
-  ICodingPlanSubscriptionService,
-  IClientConfigService,
   IClientScenesService,
   ISkillsService,
   ISkillSyncService,
@@ -36,7 +33,6 @@ import {
   IHooksService,
   IMemoryService,
   ISettingsSyncService,
-  IFeedbackService,
   IPromptAttachmentTransferService,
   IWindowControllerService,
   type IServiceAccessor,
@@ -68,14 +64,11 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly conversationShareService: IConversationShareService;
   readonly botsService: IBotsService;
   readonly fileWatcherService: IFileWatcherService;
-  readonly oauthService: IOAuthService;
   readonly providerSettingsService: IProviderSettingsService;
   readonly modelSelectionService: IModelSelectionService;
   /** Host-only target proxy；不属于 IServiceAccessor，避免向 Renderer 暴露 Secret 写入接口。 */
   readonly providerProvisioningTargetService!: IProviderProvisioningTargetService;
   readonly usageStatsService: IUsageStatsService;
-  readonly codingPlanSubscriptionService: ICodingPlanSubscriptionService;
-  readonly clientConfigService: IClientConfigService;
   readonly clientScenesService: IClientScenesService;
   readonly skillsService: ISkillsService;
   readonly skillSyncService: ISkillSyncService;
@@ -88,7 +81,6 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly hooksService: IHooksService;
   readonly memoryService: IMemoryService;
   readonly settingsSyncService: ISettingsSyncService;
-  readonly feedbackService: IFeedbackService;
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
 
   constructor(channelClient: IChannelClient) {
@@ -148,9 +140,6 @@ export class RemoteServiceAccess implements IServiceAccessor {
     this.fileWatcherService = ProxyChannel.toService<IFileWatcherService>(
       channelClient.getChannel(IFileWatcherService.channelName),
     );
-    this.oauthService = ProxyChannel.toService<IOAuthService>(
-      channelClient.getChannel(IOAuthService.channelName),
-    );
     this.providerSettingsService = ProxyChannel.toService<IProviderSettingsService>(
       channelClient.getChannel(IProviderSettingsService.channelName),
     );
@@ -165,12 +154,6 @@ export class RemoteServiceAccess implements IServiceAccessor {
     });
     this.usageStatsService = ProxyChannel.toService<IUsageStatsService>(
       channelClient.getChannel(IUsageStatsService.channelName),
-    );
-    this.codingPlanSubscriptionService = ProxyChannel.toService<ICodingPlanSubscriptionService>(
-      channelClient.getChannel(ICodingPlanSubscriptionService.channelName),
-    );
-    this.clientConfigService = ProxyChannel.toService<IClientConfigService>(
-      channelClient.getChannel(IClientConfigService.channelName),
     );
     this.clientScenesService = ProxyChannel.toService<IClientScenesService>(
       channelClient.getChannel(IClientScenesService.channelName),
@@ -207,9 +190,6 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.settingsSyncService = ProxyChannel.toService<ISettingsSyncService>(
       channelClient.getChannel(ISettingsSyncService.channelName),
-    );
-    this.feedbackService = ProxyChannel.toService<IFeedbackService>(
-      channelClient.getChannel(IFeedbackService.channelName),
     );
     this.promptAttachmentTransferService = ProxyChannel.toService<IPromptAttachmentTransferService>(
       channelClient.getChannel(IPromptAttachmentTransferService.channelName),
