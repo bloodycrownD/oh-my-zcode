@@ -1326,7 +1326,6 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
             (() => getApplicationWindowsExcludingCuaIndicator()[0] ?? null),
         }),
       resolveApplicationWindow: () => getApplicationWindowsExcludingCuaIndicator()[0] ?? null,
-      logger,
       workspaceConfirmationCopy: resolveExternalWorkspaceConfirmationCopy(),
     })
   ) {
