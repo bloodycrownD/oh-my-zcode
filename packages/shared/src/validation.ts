@@ -42,7 +42,6 @@ export {
   appSettingsPatchSchema,
   appSettingsSchema,
   localeSchema,
-  postUpdateReleaseNotesPayloadSchema,
 } from "./validationAppSettings.js";
 
 export function formatZodError(error: z.ZodError): string {
