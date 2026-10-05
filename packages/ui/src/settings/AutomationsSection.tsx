@@ -531,13 +531,13 @@ export function AutomationsSection({
       onOpenAutomationConsumed?.();
       return;
     }
-    // 闲时任务 tab 已随官方端点全清移除；旧深链（idle）落到「定时任务」并消费掉，
-    // 不能悬着——否则每次进入页面都会重复触发同一条失效导航。
+    // 闲时任务 tab 已随官方端点全清移除；AutomationsNavigationTab 联合里不再有 "idle"，
+    // 旧会话里记住的 idle 值在读取处被归一到 "scheduled" 并消费掉。
     const currentWorkspaceKey = workspacePath
       ? resolveWorkspaceKey({ workspacePath, workspaceIdentity })
       : null;
     const result = resolveAutomationTabNavigation({
-      requestedTab: openAutomationTab === "idle" ? "scheduled" : openAutomationTab,
+      requestedTab: openAutomationTab,
       tabsReady:
         currentWorkspaceKey !== null && loadedWorkspaceKey === currentWorkspaceKey,
       visibleTabs,
