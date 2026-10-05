@@ -209,7 +209,13 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
           resolveTurnRunning(draft, options),
         );
         keepFlags.push(keep);
-        entryFor(cacheByTurnId, draft.turnId).keepByPhase.set(phaseKey, keep);
+        // 与 unitByKey 同样走有界写入：keepByPhase 也是按 phase 分区的缓存，
+        // 裸 .set 会绕过 MAX_PARTITIONS_PER_TURN 上界，phase 抖动能把这一张表撑爆。
+        setBoundedPartition(
+          entryFor(cacheByTurnId, draft.turnId).keepByPhase,
+          phaseKey,
+          keep,
+        );
       }
 
       // 第二遍：只物化保留的轮；命中缓存的轮直接复用上一帧的输出对象。
