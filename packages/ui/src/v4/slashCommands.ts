@@ -26,7 +26,24 @@ export type V4VisibleSlashCommand =
       kind: "unsupportedGoal";
       action: string;
       displayText: string;
+    }
+  | {
+      /**
+       * magic-context 本地控制命令（`/ctx-status` / `/ctx-reduce` / `/ctx-expand` /
+       * `/ctx-recomp`）。App 侧由 v4 `ctxCommand` 通道就地执行，结果以文本回来，
+       * 不进对话历史——与 CLI/TUI 的 command-center 语义同源。
+       *
+       * `range` 是命令名之后的**剩余文本逐字**：文法（tag=/message=/区间/verbose）只有
+       * 服务端与包内工具路径共享一份实现，客户端不再抄第二遍。
+       */
+      kind: "ctxCommand";
+      command: CtxCommandKind;
+      range?: string;
+      displayText: string;
     };
+
+/** 四个 `/ctx-*` 对应的 v4 命令 kind（契约见 shared/zcode-protocol-v4/command.ts）。 */
+export type CtxCommandKind = "ctxStatus" | "ctxReduce" | "ctxExpand" | "ctxRecomp";
 
 interface V4VisibleSlashCommandParseOptions {
   contextAttachmentCount?: number;
@@ -45,6 +62,17 @@ interface SelectionSideSlashCommandParseOptions {
 }
 
 const GOAL_COMMAND_RE = /^\/(?:goal|target)(?:\s|$)/i;
+
+/**
+ * `/ctx-*` 的命令名 → v4 kind。键是连字符形式，与 App `/` 目录（`/ctx-status` 等）
+ * 和 CLI 的 `parseSlashCommand` 逐字对齐。
+ */
+const CTX_COMMAND_KINDS: Readonly<Record<string, CtxCommandKind>> = {
+  "ctx-expand": "ctxExpand",
+  "ctx-recomp": "ctxRecomp",
+  "ctx-reduce": "ctxReduce",
+  "ctx-status": "ctxStatus",
+};
 
 export function parseV4VisibleSlashCommand(
   content: string,
@@ -70,6 +98,17 @@ export function parseV4VisibleSlashCommand(
 
   if (attachments.length > 0 || (options.contextAttachmentCount ?? 0) > 0) {
     return null;
+  }
+
+  // magic-context 本地控制命令。它们与 goal 一样**不走 prompt 通道**（那会把 `/ctx-status`
+  // 原文当 prompt 发给模型），改由 v4 `ctxCommand` 就地执行。
+  //
+  // 位置在附件门之后：携带附件/网页元素上下文时不消费为 v4 原生命令，随 sendText 直发。
+  // 这与 `/goal` 的取舍一致——先不引入「带附件敲 `/ctx-*` 该怎么办」这份额外语义，
+  // 也让未消费时的行为与本次改动前逐字相同（原文进 prompt）。
+  const ctxKind = CTX_COMMAND_KINDS[commandName];
+  if (ctxKind) {
+    return { command: ctxKind, displayText, kind: "ctxCommand", ...(args ? { range: args } : {}) };
   }
 
   if (commandName !== "goal" && commandName !== "target") {

@@ -4550,6 +4550,11 @@ const zhCN: Record<string, string> = {
   "chat.goal.runningBlocked": "请结束任务后设定目标。",
   "chat.goal.planModeBlocked": "Goal 无法在 Plan 模式下使用，请切换模式。",
   "chat.plan.attachmentsBlocked": "首版 /plan 仅支持纯文本，请移除附件或上下文后重试。",
+  // /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的
+  // 三种提示——命令被拒、回执没带文本、draft 还没有会话可作用。
+  "chat.ctx.rejected": "Magic Context 命令被拒绝。",
+  "chat.ctx.noResponse": "Magic Context 命令没有返回输出。",
+  "chat.ctx.sessionRequired": "/ctx-* 需要一个已存在的会话，请先发送一条消息再试。",
   "chat.toolbar.mode.label": "切换模式",
   // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",

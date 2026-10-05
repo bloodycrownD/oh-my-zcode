@@ -4852,6 +4852,12 @@ const enUS: Record<string, string> = {
   "chat.goal.planModeBlocked": "Goal is unavailable in Plan mode. Switch modes to continue.",
   "chat.plan.attachmentsBlocked":
     "The /plan shortcut supports text only for now. Remove attachments or context and try again.",
+  // /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的
+  // 三种提示——命令被拒、回执没带文本、draft 还没有会话可作用。
+  "chat.ctx.rejected": "Magic Context command was rejected.",
+  "chat.ctx.noResponse": "Magic Context command returned no output.",
+  "chat.ctx.sessionRequired":
+    "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",
   // CUA composer entry button
   "chat.toolbar.computerUse.label": "Computer Use",
