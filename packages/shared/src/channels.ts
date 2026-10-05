@@ -381,24 +381,8 @@ export interface EmbeddedBrowserWheelBoundaryPayload {
 }
 
 // ============================================================================
-// Coding Plan WebView 频道 —— 官网页 preload ↔ App renderer
+// Coding Plan WebView 频道 —— FORK（D-4/D-6）：购买 webview 面整删，频道与 payload 一并下线。
 // ============================================================================
-
-/**
- * Electron `<webview>`（partition=persist:zcode-coding-plan）的 `sendToHost` / `ipc-message` 频道。
- * 官网页通过 preload 注入的 window.zcodeBridge 调用，不经过 main process。
- */
-export const CodingPlanWebviewChannels = {
-  /** 官网页购买成功后通知 App 刷新 entitlements 并关闭 webview。 */
-  PurchaseComplete: "zcode:coding-plan-purchase-complete",
-} as const;
-
-/** 购买完成回传 payload。provider 与官网 CodingPlanProvider / auth-ready 事件 detail.provider 同构。 */
-export interface CodingPlanPurchaseCompletePayload {
-  provider: "zai" | "bigmodel";
-  /** 客户端时间戳，用于 App 侧去重/日志，不参与判等。 */
-  timestamp: number;
-}
 
 /**
  * 官网页 window.__zcodeLang__ 的取值，与 App IntlProvider 的 Locale 一致。
