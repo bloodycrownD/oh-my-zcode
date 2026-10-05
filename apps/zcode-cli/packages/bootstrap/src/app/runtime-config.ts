@@ -200,10 +200,12 @@ export function resolveAppRuntimeConfig(input: {
     // `magic-context-turn-transform.ts`。
     magicContext: {
       enabled:
-        (options.runtimeConfig?.magicContext?.enabled ?? configResult.config.features.magicContext) &&
+        (options.runtimeConfig?.magicContext?.enabled ??
+          configResult.config.features.magicContext) &&
         // 配置契约层把参数域收敛成不透明对象（`create-app.ts` 侧同样靠断言读它），
         // 这里只需要 `enabled` 那一位。
-        (configResult.config as { magicContext?: { enabled?: boolean } }).magicContext?.enabled !== false,
+        (configResult.config as { magicContext?: { enabled?: boolean } }).magicContext?.enabled !==
+          false,
     },
   };
   return {

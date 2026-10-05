@@ -156,6 +156,54 @@ function makeRun(overrides = {}) {
   };
 }
 
+test("shutdown 后在飞的 sidecar 请求真的被 abort，且调度器变惰性（MF-03）", async () => {
+  // 一个**永不自己结束**的模型：唯一的出路是 abortSignal。executor 自己的超时预算
+  // 给了 60s，所以这里观察到的 abort 只可能来自宿主的关闭信号。
+  const observed = { abortSignals: [] };
+  const hangingModel = fakeModel(observed, { reply: "never used" });
+  hangingModel.optionSpecs = { maxOutputTokens: { max: 8_000 }, reasoningLevel: { values: [] } };
+  const originalStream = hangingModel.streamText;
+  hangingModel.streamText = async function* (request) {
+    observed.abortSignals.push(request.abortSignal);
+    yield* [{ type: "start" }];
+    await new Promise((_resolve, reject) => {
+      request.abortSignal.addEventListener("abort", () => reject(new Error("aborted by host")), {
+        once: true,
+      });
+    });
+    void originalStream;
+  };
+
+  const host = createMagicContextHistorianHost(
+    MagicContextConfigSchema.parse({ historian: { model: "zcode/fake-model" } }),
+    hostDeps({ createSidecarModel: () => hangingModel }),
+  );
+  assert.ok(host.hiddenCompletionExecutor, "executor 必须在场");
+
+  const handle = await host.hiddenCompletionExecutor.open(makeRun({ timeoutMs: 60_000 }));
+  await host.hiddenCompletionExecutor.attempt(handle, makePrompt("p"));
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  assert.equal(observed.abortSignals.length, 1, "前置条件：请求已在飞");
+  assert.equal(observed.abortSignals[0].aborted, false);
+
+  host.shutdown();
+  await assert.rejects(host.hiddenCompletionExecutor.collect(handle, 1), /aborted by host/);
+  assert.equal(observed.abortSignals[0].aborted, true, "shutdown 必须 abort 在飞请求");
+  await host.hiddenCompletionExecutor.close(handle, {
+    promptSettled: false,
+    privacySensitive: false,
+    context: "test",
+    log: () => {},
+  });
+
+  // 调度器也随之变惰性：关闭后的触发被记成 no-fire `shutdown`，而不是悄悄再排一次。
+  host.historianScheduler.notifyTurnSuccess({ sessionId: SESSION_ID });
+  assert.equal(host.historianScheduler.getLastNoFireCause(SESSION_ID), "shutdown");
+  assert.equal(host.historianScheduler.hasPendingWork(), false);
+  // 幂等：重复关闭不抛。
+  host.shutdown();
+});
+
 function makePrompt(text) {
   return { path: { id: "prompt-1" }, body: { parts: [{ type: "text", text, synthetic: true }] } };
 }

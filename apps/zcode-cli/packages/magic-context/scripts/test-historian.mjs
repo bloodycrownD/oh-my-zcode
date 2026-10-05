@@ -265,6 +265,70 @@ test("close(null) is safe and close on an unsettled run aborts the request", asy
   assert.equal(observedAbort, true, "close must abort the in-flight request");
 });
 
+test("an external shutdown signal aborts every live run slot (MF-03)", async () => {
+  // The provider call that must be unwound when the host/session shuts down. It is
+  // deliberately NOT the executor's own timeout: the budget here is 60s, so an abort
+  // can only have come from `externalSignal`.
+  const observed = [];
+  const hanging = async (request) => {
+    observed.push(request.abortSignal);
+    return await new Promise((_resolve, reject) => {
+      request.abortSignal.addEventListener("abort", () => reject(new Error("aborted by host")), {
+        once: true,
+      });
+      setTimeout(() => reject(new Error("executor timeout budget")), 60_000);
+    });
+  };
+
+  const hostShutdown = new AbortController();
+  const executor = createHiddenCompletionExecutor({
+    sidecarModelCall: hanging,
+    externalSignal: hostShutdown.signal,
+  });
+  const handle = await executor.open(makeRun({ timeoutMs: 60_000 }));
+  await executor.attempt(handle, makePrompt("p"));
+  assert.equal(observed[0].aborted, false, "precondition: the request is still in flight");
+
+  hostShutdown.abort(new Error("historian scheduler shut down"));
+  await assert.rejects(executor.collect(handle, 1), /aborted by host/);
+  assert.equal(observed[0].aborted, true, "the provider request must be aborted, not abandoned");
+
+  await executor.close(handle, {
+    promptSettled: false,
+    privacySensitive: false,
+    context: "t",
+    log: () => {},
+  });
+});
+
+test("a run opened after the external signal already aborted never reaches the provider", async () => {
+  // The race this covers: host shutdown lands between the scheduler firing a pass and
+  // that pass reaching `open`. Without the pre-check the run would register a slot and
+  // send a prompt on a session that is already gone.
+  const hostShutdown = new AbortController();
+  hostShutdown.abort(new Error("closed"));
+  let sent = false;
+  const executor = createHiddenCompletionExecutor({
+    sidecarModelCall: async (request) => {
+      sent = true;
+      return { text: "should never happen", abortSignal: request.abortSignal };
+    },
+    externalSignal: hostShutdown.signal,
+  });
+  const handle = await executor.open(makeRun());
+  await assert.rejects(
+    () => executor.attempt(handle, makePrompt("p")),
+    /aborted before its prompt/,
+  );
+  assert.equal(sent, false, "an already-aborted host signal must not send a prompt");
+  await executor.close(handle, {
+    promptSettled: false,
+    privacySensitive: false,
+    context: "t",
+    log: () => {},
+  });
+});
+
 test("toTokenTotals sums the parts when the provider omitted a total", () => {
   const totals = toTokenTotals({
     text: "x",

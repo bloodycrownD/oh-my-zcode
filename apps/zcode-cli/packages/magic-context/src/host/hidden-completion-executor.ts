@@ -255,13 +255,13 @@ export interface HiddenCompletionExecutorOptions {
 export const DEFAULT_HIDDEN_RUN_TIMEOUT_MS = 600_000;
 
 interface RunSlot {
-    run: HiddenRunIdentity;
-    controller: AbortController;
-    /** Set by `attempt`, awaited by `collect`. Absent = no prompt was sent. */
-    attempt?: Promise<SidecarModelCallResult>;
-    timeout?: ReturnType<typeof setTimeout>;
-    /** Unhooks the external-signal listener; always called from `close`. */
-    detachExternalSignal?: () => void;
+  run: HiddenRunIdentity;
+  controller: AbortController;
+  /** Set by `attempt`, awaited by `collect`. Absent = no prompt was sent. */
+  attempt?: Promise<SidecarModelCallResult>;
+  timeout?: ReturnType<typeof setTimeout>;
+  /** Unhooks the external-signal listener; always called from `close`. */
+  detachExternalSignal?: () => void;
 }
 
 /**
@@ -331,14 +331,21 @@ export function createHiddenCompletionExecutor(
 
       const id = crypto.randomUUID();
       const controller = new AbortController();
-      const timeoutMs = run.timeoutMs > 0 ? run.timeoutMs : (options.defaultTimeoutMs ?? DEFAULT_HIDDEN_RUN_TIMEOUT_MS);
+      const timeoutMs =
+        run.timeoutMs > 0
+          ? run.timeoutMs
+          : (options.defaultTimeoutMs ?? DEFAULT_HIDDEN_RUN_TIMEOUT_MS);
       const slot: RunSlot = { run, controller };
       // The executor owns the clock so a hung provider socket cannot wedge the
       // historian's drain: the runner's own race is a second line of defence, but
       // this one fires first and unwinds the request properly.
-      const timer = setTimeout(() => controller.abort(new Error(
-        `hidden completion ${run.kind} exceeded its ${timeoutMs}ms timeout budget`,
-      )), timeoutMs);
+      const timer = setTimeout(
+        () =>
+          controller.abort(
+            new Error(`hidden completion ${run.kind} exceeded its ${timeoutMs}ms timeout budget`),
+          ),
+        timeoutMs,
+      );
       timer.unref?.();
       slot.timeout = timer;
       if (options.externalSignal !== undefined) {
@@ -368,6 +375,15 @@ export function createHiddenCompletionExecutor(
       const prompt = readPrompt(request);
       if (prompt.length === 0) {
         throw refuse("hidden_prompt_unrecognized", "the attempt carried no text part to send");
+      }
+      if (slot.controller.signal.aborted) {
+        // FORK (MF-03): the host shut down between `open` and `attempt` (the scheduler
+        // fires a pass, the host closes a moment later). Refusing here is the only
+        // place that can *guarantee* nothing goes out — a transport that ignores its
+        // `abortSignal` would otherwise happily bill a session that is already gone.
+        throw new Error(
+          `hidden completion run ${handle.id} was aborted before its prompt could be sent`,
+        );
       }
       slot.attempt = call(
         {
@@ -430,7 +446,9 @@ export function createHiddenCompletionExecutor(
         // The prompt never settled — cancel the provider request rather than let
         // an orphan stream keep billing. Swallowing the rejection is correct: the
         // runner is already unwinding and `attempt`'s error is what it will report.
-        slot.controller.abort(new Error(`${settlement.context} run closed before the prompt settled`));
+        slot.controller.abort(
+          new Error(`${settlement.context} run closed before the prompt settled`),
+        );
         void slot.attempt.catch(() => {});
       }
       settlement.log(

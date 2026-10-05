@@ -222,6 +222,35 @@ export interface MagicContextTurnTransformOptions {
   onMagicContextUsage?: (usage: SessionMagicContextUsage | null) => void;
 }
 
+/**
+ * FORK（D-13 / MF-11）：把一次预算摘要读数推给投影层，**绝不**让读失败变成静默。
+ *
+ * 读不出来时推 `null`——投影层据此删掉该键、面板整段收起。这不是可选的礼貌：
+ * 之前的 `.catch(() => {})` 让面板停留在上一帧的读数上，用户看到的是「用量卡住
+ * 了」，而真相是「这一轮没读到」。空 catch 的注释承诺与代码不一致，正是 MF-11 的
+ * 全部内容。
+ *
+ * 不 await：UI 的用量面板必须永远不等一次 sqlite 读。`sink` 自己抛错也被就地消化
+ * ——诊断面不参与这一轮的成败，更不该变成一条 unhandled rejection。
+ */
+export function pushMagicContextUsageSummary(
+  read: () => Promise<SessionMagicContextUsage | null>,
+  sink: (usage: SessionMagicContextUsage | null) => void,
+): void {
+  void read()
+    .then(
+      (usage) => {
+        sink(usage);
+      },
+      () => {
+        sink(null);
+      },
+    )
+    .catch(() => {
+      // sink 自己抛错：到这里读已经成功，吞掉即可。
+    });
+}
+
 /** `TransformDeps.contextUsageMap` 的值形状（包内 `loadContextUsage` 读的那三个字段）。 */
 export interface MagicContextUsageMapEntry {
   hasUsageTokens: boolean;
@@ -836,12 +865,10 @@ export async function createMagicContextTurnTransform(
   const publishUsageSummary = (): void => {
     const sink = options.onMagicContextUsage;
     if (!sink) return;
-    void readMagicContextUsageSummary(db, options.sessionId)
-      .then((summary) => sink(summary.usage))
-      // FORK（MF-11）：读不出来就推 `null`，投影层据此删掉该键、面板整段收起。
-      // 注释曾承诺这件事、代码却只有一个空 catch —— 读失败会静默地让面板停留在
-      // 上一帧的读数上，看起来像「用量卡住了」而不是「这一轮没读到」。
-      .catch(() => sink(null));
+    pushMagicContextUsageSummary(
+      async () => (await readMagicContextUsageSummary(db, options.sessionId)).usage,
+      sink,
+    );
   };
   options.usageRecorder?.onUsageRecorded(publishUsageSummary);
 
@@ -905,10 +932,13 @@ export async function createMagicContextTurnTransform(
     // 退出**——于是在这一轮交还控制权之前，替它等一个有界的窗口。
     ...(historian.historianScheduler === undefined
       ? {}
-      : { settleScheduledPass: () => drainHistorianSchedulerWithTimeout(
-            historian.historianScheduler as NonNullable<typeof historian.historianScheduler>,
-            HISTORIAN_SETTLE_TIMEOUT_MS,
-          ) }),
+      : {
+          settleScheduledPass: () =>
+            drainHistorianSchedulerWithTimeout(
+              historian.historianScheduler as NonNullable<typeof historian.historianScheduler>,
+              HISTORIAN_SETTLE_TIMEOUT_MS,
+            ),
+        }),
   });
   // FORK（MF-01）：端口上的活值开关。core 每个 turn 现读它，于是设置页把
   // `magicContext.enabled` 关掉后**下一个 turn**就不再插桩，而不必重启进程。
@@ -1236,7 +1266,11 @@ export function createZCodeMagicContextTurnTransformPort(
     // FORK（MF-04）：调度器新起的那次 pass 也要有界 settle，理由同
     // `settleInFlightHistorian`——进程会退出。失败/拒绝由钩子自己吞掉：它本来就不该
     // 影响这一轮请求（上面那次 settle 也是同样的处置）。
-    if (port.settleScheduledPass !== undefined) await port.settleScheduledPass();
+    if (port.settleScheduledPass !== undefined) {
+      // 失败/拒绝在这里被吞掉：settle 只是替这一轮多等一个窗口，它本身绝不该改变
+      // 这一轮请求的成败（与上面 `settleInFlightHistorian` 同一处置）。
+      await port.settleScheduledPass().catch(() => undefined);
+    }
     return { entries, outcome: unchanged ? "unchanged" : "applied", syntheticHeadPositions };
   };
 }

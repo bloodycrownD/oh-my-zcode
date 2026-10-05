@@ -310,6 +310,106 @@ test("wire 调试摘要给出 role / source / syntheticHead / cacheControl 落�
 // 不同的配置——这正是设置页改完开关、不重启就生效的那条路。冻结副本会让第二次
 // turn 继续按旧配置分级，用户看到的现象是「开关没反应」。
 
+// ── FORK（MF-01）：端口上的活值开关 ───────────────────────────────────────────
+//
+// `runtime.config` 是装配期冻结的副本，而 `magicContext.enabled` 是设置页的一个
+// 普通表单字段。只读冻结副本时，用户点「保存」看到成功、下一 turn 却照样插桩。
+// 这里钉住的是 core 那道门：`isEnabled()` 说关时，输出必须逐引用等于输入。
+
+function withIsEnabled(port, readEnabled) {
+  return Object.assign(port, { isEnabled: readEnabled });
+}
+
+test("端口的活值谓词说关时，turn 循环完全不插桩（MF-01）", async () => {
+  const live = { enabled: true };
+  const entries = sampleEntries();
+  const out = await runMagicContextTurnTransform(
+    {
+      // 冷求值的那一位仍然说是开的——只有活值谓词知道用户刚把它关掉了。
+      config: { magicContext: { enabled: true } },
+      magicContextTurnTransform: withIsEnabled(portWith(injectM0M1), () => live.enabled),
+    },
+    { entries },
+  );
+  assert.notEqual(out, entries, "开着时必须真的插桩，否则这条断言没有区分力");
+
+  live.enabled = false;
+  const gated = sampleEntries();
+  const outAfterToggle = await runMagicContextTurnTransform(
+    {
+      config: { magicContext: { enabled: true } },
+      magicContextTurnTransform: withIsEnabled(portWith(injectM0M1), () => live.enabled),
+    },
+    { entries: gated },
+  );
+  assert.equal(outAfterToggle, gated, "活值谓词说关时必须返回同一份数组");
+
+  // 再打开后恢复插桩——证明不是一次性的单向门。
+  live.enabled = true;
+  const reopened = sampleEntries();
+  const outReopened = await runMagicContextTurnTransform(
+    {
+      config: { magicContext: { enabled: true } },
+      magicContextTurnTransform: withIsEnabled(portWith(injectM0M1), () => live.enabled),
+    },
+    { entries: reopened },
+  );
+  assert.notEqual(outReopened, reopened);
+});
+
+test("端口没有活值谓词时退回冻结配置那一位（不改变既有端口行为）", async () => {
+  const entries = sampleEntries();
+  const out = await runMagicContextTurnTransform(
+    {
+      config: { magicContext: { enabled: false } },
+      magicContextTurnTransform: portWith(injectM0M1),
+    },
+    { entries },
+  );
+  assert.equal(out, entries);
+});
+
+// ── FORK（MF-04）：调度器那次 pass 的有界 settle ─────────────────────────────
+//
+// 「一进程 = 一轮」下，turn 成功后新起的那次后台 pass 若纯 fire-and-forget，就会随
+// 进程退出一起消失（drain 预留泄漏、compartment 不落库）。钩子必须在这一轮交还
+// 控制权之前被 await。
+
+test("调度器那次 pass 在 pass 成功后才启动，并在返回前被有界 settle（MF-04）", async () => {
+  const order = [];
+  const port = createZCodeMagicContextTurnTransformPort(
+    async () => {
+      order.push("transform");
+    },
+    {
+      getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+      options: { sessionId: SESSION_ID, logger: NOOP_LOGGER },
+      onPassSucceeded: () => order.push("notify"),
+      settleScheduledPass: async () => {
+        order.push("settle:start");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        order.push("settle:end");
+      },
+    },
+  );
+
+  await runPort(port, sampleEntries());
+  assert.deepEqual(order, ["transform", "notify", "settle:start", "settle:end"]);
+});
+
+test("settle 抛错不影响这一轮请求（historian 本来就不该阻塞用户）", async () => {
+  const port = createZCodeMagicContextTurnTransformPort(async () => {}, {
+    getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+    options: { sessionId: SESSION_ID, logger: NOOP_LOGGER },
+    settleScheduledPass: async () => {
+      throw new Error("drain blew up");
+    },
+  });
+  const entries = sampleEntries();
+  const result = await runPort(port, entries);
+  assert.equal(result.outcome, "unchanged", "settle 失败不得改变这一轮的成败");
+});
+
 test("同一端口在下一次 turn 读到改过的配置（热生效，不需要重建实例）", async () => {
   const live = { config: DEFAULT_MAGIC_CONTEXT_CONFIG };
   const port = createZCodeMagicContextTurnTransformPort(
