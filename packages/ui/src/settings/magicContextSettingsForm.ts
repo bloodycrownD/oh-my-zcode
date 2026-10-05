@@ -24,16 +24,19 @@ import { encodeCustomModelValue, parseModelPickerValue } from "@zcode/shared";
  * `historian` 除 `model` 外的元数据（temperature/tools/prompt/…）、`language`、
  * `fallback_models`、`variant`、`two_pass` 等在首版不暴露编辑入口，
  * 但它们会被原样带回写盘，不会被表单抹掉。
+ *
+ * 数值字段的 min/max **不在这里复述**：本文件下方的 `MAGIC_CONTEXT_NUMBER_FIELD_SPECS`
+ * 是 UI 侧唯一副本，i18n description 也不写死数字（改了 schema 时文案不会跟着变）。
  */
 export interface MagicContextSettingsForm {
   enabled: boolean;
-  /** 上下文占用百分比阈值（20–90）。per-model 覆盖形态首版只编辑 `default` 分支。 */
+  /** 上下文占用百分比阈值。per-model 覆盖形态首版只编辑 `default` 分支。 */
   executeThresholdPercentage: number;
-  /** 绝对 token 阈值覆盖（5000–2000000）。空 = 不覆盖，走百分比。 */
+  /** 绝对 token 阈值覆盖。空 = 不覆盖，走百分比。 */
   executeThresholdTokens: number | null;
-  /** 自动回收的 token 地板（4000–1000000）。空 = 用包内默认。 */
+  /** 自动回收的 token 地板。空 = 用包内默认。 */
   protectedTokens: number | null;
-  /** 会话历史块占可用上下文的比例（0.05–0.5）。 */
+  /** 会话历史块占可用上下文的比例。 */
   historyBudgetPercentage: number;
   /** 前缀缓存 TTL，如 "5m" / "1h" / "never"。 */
   cacheTtl: string;
