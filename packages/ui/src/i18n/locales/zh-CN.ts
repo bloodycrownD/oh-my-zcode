@@ -1884,6 +1884,7 @@ const zhCN: Record<string, string> = {
   "chat.turnNavigator.runningAssistant": "助手仍在工作",
   "chat.turnNavigator.userFallback": "用户输入",
   "chat.turnNavigator.jumpTargetUnavailable": "这条提问太靠前了，暂未能加载到对应内容",
+  "chat.turnNavigator.olderEntriesNotLoaded": "更早的 {count} 条提问尚未加载",
   "chat.rewind.conflictConfirm":
     "以下文件在该轮之后被外部修改过，强制回滚可能导致冲突：\n\n{paths}",
   "taskNav.back": "后退",

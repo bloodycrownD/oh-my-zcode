@@ -40,6 +40,13 @@ interface ConversationTurnNavigatorProps {
    */
   directoryEntries?: readonly ConversationTurnNavigatorDirectoryEntry[];
   /**
+   * 目录被页数上限截断时，还没取到的更早条目数；undefined / 0 不渲染提示。
+   *
+   * 截断必须显式告诉用户：否则 rail 顶部那条「更早没有更多了」的假象会让人以为
+   * 会话只有这么几条提问。数量取自服务端现算的权威总数减去已取到的条目数。
+   */
+  olderEntriesNotLoadedCount?: number;
+  /**
    * 当前正文窗口首行 rowId（`rows.window[0].rowId`）。active 定位降级用它判断
    * 「视口是否落在窗口之上的未加载区」；窗口为空时传 undefined。
    */
@@ -79,6 +86,7 @@ function ConversationTurnNavigatorImpl({
   activeQueryRowId,
   isHydratingDirectory = false,
   directoryEntries,
+  olderEntriesNotLoadedCount,
   windowFirstRowId,
   onJumpToQuery,
 }: ConversationTurnNavigatorProps) {
@@ -94,6 +102,15 @@ function ConversationTurnNavigatorImpl({
   const userFallbackPreview = intl.formatMessage({
     id: "chat.turnNavigator.userFallback",
   });
+  // 截断提示：rail 只有 36px 宽，正文放不下，视觉上是一条「上面还有」的断口标记，
+  // 完整文案（含还差多少条）走 hover 卡与 aria-label——与条目 tooltip 同一套交互。
+  const olderEntriesNotLoadedText =
+    olderEntriesNotLoadedCount === undefined || olderEntriesNotLoadedCount <= 0
+      ? null
+      : intl.formatMessage(
+          { id: "chat.turnNavigator.olderEntriesNotLoaded" },
+          { count: String(olderEntriesNotLoadedCount) },
+        );
   // 已加载 items（含实时运行态与 i18n 文案）。
   const loadedItems = useMemo(
     () =>
@@ -212,6 +229,33 @@ function ConversationTurnNavigatorImpl({
       data-rendered-item-count={virtualRows.length}
       className="pointer-events-none invisible absolute inset-y-0 left-0 z-10 w-12 -translate-x-2 opacity-0 transition-[opacity,transform,visibility] duration-150 ease-out motion-reduce:transition-none @min-[864px]/conversation:visible @min-[864px]/conversation:translate-x-0 @min-[864px]/conversation:opacity-100"
     >
+      {olderEntriesNotLoadedText !== null ? (
+        <HoverCard closeDelay={80} openDelay={120}>
+          <HoverCardTrigger asChild>
+            <div
+              data-testid={testId(TID_V4_TURN_NAVIGATOR, "older-entries-not-loaded")}
+              data-missing-entry-count={olderEntriesNotLoadedCount}
+              aria-label={olderEntriesNotLoadedText}
+              className="pointer-events-auto absolute left-3 top-6 z-10 flex w-9 flex-col items-center gap-0.5"
+            >
+              <span className="block h-px w-3 bg-foreground-subtlest" />
+              <span className="block h-px w-2 bg-foreground-subtlest" />
+              <span className="block h-px w-3 bg-foreground-subtlest" />
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent
+            align="start"
+            side="right"
+            sideOffset={8}
+            data-testid={testId(TID_V4_TURN_NAVIGATOR_TOOLTIP, "older-entries-not-loaded")}
+            className="w-80 max-w-[calc(100vw-2rem)] border border-popover-border bg-popover p-3 text-popover-foreground shadow-lg"
+          >
+            <p className="whitespace-pre-line text-ui-base leading-5 text-popover-foreground/80">
+              {olderEntriesNotLoadedText}
+            </p>
+          </HoverCardContent>
+        </HoverCard>
+      ) : null}
       <div
         ref={railScrollRef}
         // 只声明 overflow-y-auto 时，浏览器会把 overflow-x 计算为 auto；

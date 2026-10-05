@@ -1901,6 +1901,9 @@ function ConversationTimelineImpl({
           virtualItems={turnNavigatorVirtualItems}
           activeQueryRowId={turnNavigatorViewport.activeQueryRowId}
           directoryEntries={turnDirectoryEntries}
+          olderEntriesNotLoadedCount={
+            turnDirectory?.truncated === true ? turnDirectory.olderEntriesNotLoadedCount : undefined
+          }
           windowFirstRowId={rows[0]?.rowId}
           onJumpToQuery={scrollToQuery}
         />

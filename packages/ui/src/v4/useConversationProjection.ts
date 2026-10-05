@@ -13,6 +13,7 @@ const CLOSED_TURN_DIRECTORY: ConversationTurnDirectoryState = {
   atSeq: null,
   atLogEpoch: null,
   hasMore: false,
+  truncated: false,
   loaded: false,
 };
 

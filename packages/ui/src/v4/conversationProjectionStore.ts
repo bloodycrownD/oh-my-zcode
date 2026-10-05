@@ -177,6 +177,13 @@ export interface ConversationTurnDirectoryState {
   atLogEpoch: string | null;
   /** 更早方向仍有条目（本次未续拉至齐）。 */
   hasMore: boolean;
+  /**
+   * 提交时条目数少于服务端现算的权威总数（翻页撞到 50 页上限）。
+   *
+   * 截断必须显式存在：`hasMore` 只说「更早方向还有」，rail 拿它继续想上拉，
+   * 用户看到的却是一条「到此为止」的完整目录。rail 据此在顶部渲染提示。
+   */
+  truncated: boolean;
   /** 是否成功取过一次目录（rail 隐藏判定与失效重查都以「已取过」为前提）。 */
   loaded: boolean;
 }
@@ -188,6 +195,7 @@ const EMPTY_TURN_DIRECTORY_STATE: ConversationTurnDirectoryState = {
   atSeq: null,
   atLogEpoch: null,
   hasMore: false,
+  truncated: false,
   loaded: false,
 };
 
@@ -1437,6 +1445,7 @@ export class ConversationProjectionStore {
             atLogEpoch: logEpoch,
             loaded: true,
             realUserQueryTotal,
+            truncated: false,
           },
         });
         logger.debug("[v4-store] turn 目录不足两条 query，跳过翻页", {
@@ -1452,6 +1461,17 @@ export class ConversationProjectionStore {
         this.turnDirectoryHydrationTerminal = terminal;
         return terminal;
       }
+      // 翻到页数上限：rail 只拿到前若干页。静默提交会被读成「更早方向没有条目」，
+      // 因此先打一条可定位的 warn，再把截断事实本身写进目录态交给 rail 提示。
+      const truncated = entries.length < realUserQueryTotal;
+      if (stopReason === "page-limit") {
+        logger.warn("[v4-store] turn 目录翻页达到页数上限，仅取到部分条目", {
+          entryCount: entries.length,
+          pages,
+          realUserQueryTotal,
+          sessionId,
+        });
+      }
       this.setState({
         turnDirectory: {
           atLogEpoch: logEpoch,
@@ -1461,6 +1481,7 @@ export class ConversationProjectionStore {
           hasMore: accumulated.hasMore,
           loaded: true,
           realUserQueryTotal,
+          truncated,
         },
       });
       logger.debug("[v4-store] turn 目录查询完成", {

@@ -119,6 +119,15 @@ export interface ConversationTurnNavigatorDirectoryView {
   realUserQueryTotal?: number;
   /** 更早方向仍有条目。同样只在 `loaded === true` 后有权威值。 */
   hasMore?: boolean;
+  /**
+   * 目录是否被页数上限截断（只取到一部分）。同样只在 `loaded === true` 后有权威值。
+   */
+  truncated?: boolean;
+  /**
+   * 还没取到的更早条目数（`realUserQueryTotal - entries.length`，截断时 > 0）。
+   * rail 顶部提示的参数；未取过目录时为 undefined。
+   */
+  olderEntriesNotLoadedCount?: number;
 }
 
 /**

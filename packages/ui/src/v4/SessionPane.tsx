@@ -3525,12 +3525,17 @@ export function SessionPane({
         ? state.turnDirectory.realUserQueryTotal
         : undefined,
       hasMore: state.turnDirectory.loaded ? state.turnDirectory.hasMore : undefined,
+      truncated: state.turnDirectory.loaded ? state.turnDirectory.truncated : undefined,
+      olderEntriesNotLoadedCount: state.turnDirectory.loaded
+        ? Math.max(0, state.turnDirectory.realUserQueryTotal - state.turnDirectory.entries.length)
+        : undefined,
     }),
     [
       state.turnDirectory.hasMore,
       state.turnDirectory.loaded,
       state.turnDirectory.entries.length,
       state.turnDirectory.realUserQueryTotal,
+      state.turnDirectory.truncated,
     ],
   );
 
