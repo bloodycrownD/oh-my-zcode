@@ -87,6 +87,42 @@ it("empty object parses to the full documented default set", () => {
   assert.equal(parsed.execute_threshold_tokens, undefined);
 });
 
+it("the default set's top-level key set matches the schema exactly", () => {
+  // MF-21：原来的断言是 `parse({}) deepEqual DEFAULT_MAGIC_CONTEXT_CONFIG`，而后者
+  // 本身就**是** `parse({})` 的结果——恒真，加键减键都不会红。这里的断言反过来钉住
+  // 「哪些键有默认值」：给 schema 加一个带 `.default()` 的新键而不更新下面这张名单，
+  // 测试立刻失败，逼作者确认默认值；把某个键的 `.default()` 去掉同样失败。
+  const parsed = MagicContextConfigSchema.parse({});
+  const DEFAULTED_TOP_LEVEL_KEYS = [
+    "cache_ttl",
+    "enabled",
+    "execute_threshold_percentage",
+    "fail_closed_blocking",
+    "historian",
+    "history_budget_percentage",
+    "smart_drops",
+  ];
+  // 有 .default() 的键：parse({}) 之后一定在结果里。
+  assert.deepEqual(Object.keys(parsed).sort(), DEFAULTED_TOP_LEVEL_KEYS);
+  // 反向：这三个是刻意 optional 且**无**默认值，缺席才是对的（per-model 覆盖
+  // 与「跟随对话语言」都靠缺席表达）。写成在集合里就红。
+  for (const optionalWithoutDefault of [
+    "execute_threshold_tokens",
+    "language",
+    "protected_tokens",
+  ]) {
+    assert.equal(
+      optionalWithoutDefault in parsed,
+      false,
+      `${optionalWithoutDefault} 无默认值，不应出现在默认域里`,
+    );
+  }
+  // 排除名单里的键既不在 schema 也不在默认域。
+  for (const excluded of EXCLUDED_CONFIG_KEYS) {
+    assert.equal(excluded in parsed, false);
+  }
+});
+
 it("whitelist field validators hold (threshold bounds, per-model object, tokens)", () => {
   // out of range both ways
   assert.equal(

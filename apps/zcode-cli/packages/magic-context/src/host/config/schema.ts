@@ -217,9 +217,16 @@ export const MagicContextConfigSchema = z.object({
 export type MagicContextConfig = z.infer<typeof MagicContextConfigSchema>;
 
 /**
- * The complete default configuration, transcribed field by field from the
- * reference schema's `.default()` calls. `MagicContextConfigSchema.parse({})`
- * must equal this object; `scripts/test-config.mjs` asserts it.
+ * The complete default configuration, **derived** from the schema rather than
+ * transcribed: `MagicContextConfigSchema.parse({})` is the single source, so a
+ * new field with a `.default()` shows up here automatically and a field whose
+ * default is dropped shows up as a removal. Hand-transcribing the defaults
+ * would make this object a second copy that silently drifts.
+ *
+ * `scripts/test-config.mjs` asserts the top-level key set both ways (every key
+ * present here has a default, every defaulted key is present here) plus the
+ * absence of excluded keys — a hand-written copy passes the spot checks that a
+ * derived one would not.
  */
 export const DEFAULT_MAGIC_CONTEXT_CONFIG: MagicContextConfig = MagicContextConfigSchema.parse({});
 
