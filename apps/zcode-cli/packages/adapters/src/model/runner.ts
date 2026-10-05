@@ -11,6 +11,7 @@ import type {
   Logger,
   Model,
   ModelOptions,
+  ModelRequestAuth,
   ModelRequestDependencies,
   ModelStreamEvent,
   ModelTextResult,

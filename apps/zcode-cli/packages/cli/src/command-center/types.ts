@@ -311,11 +311,6 @@ export type CommandCenterDeps = {
   listSessions?: () => Promise<CommandCenterSession[]>;
   listCustomCommands?: () => Promise<CommandCenterCustomCommandListOutcome>;
   listSkills?: () => Promise<CommandCenterSkillListOutcome>;
-  login?: (options?: CommandCenterLoginOptions) => Promise<CommandCenterLoginResult>;
-  loginBigmodel?: (
-    options?: CommandCenterBigmodelLoginOptions,
-  ) => Promise<CommandCenterBigmodelLoginResult>;
-  configureApiKey?: (options: CommandCenterApiKeyOptions) => Promise<CommandCenterApiKeyResult>;
   loadCustomCommand?: (name: string) => Promise<CommandCenterCustomCommandContent>;
   newApp?: () => Promise<CommandCenterApp>;
   recordInputHistory?: (
@@ -325,7 +320,6 @@ export type CommandCenterDeps = {
   resumeApp(sessionId?: string): Promise<CommandCenterApp>;
   /** 用户主动切换成功后保存完整默认选择；恢复会话与自动初始化不调用。 */
   saveDefaultModelSelection?: (selection: ModelSelection) => Promise<void>;
-  logout?: () => Promise<CommandCenterLogoutResult>;
   setLocale?: (locale: UiLocale) => Promise<CommandCenterLocaleResult> | CommandCenterLocaleResult;
   setMode?: (mode: SwitchableCommandCenterMode) => Promise<CommandCenterMode> | CommandCenterMode;
 };

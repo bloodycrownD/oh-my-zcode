@@ -850,15 +850,9 @@ class NodeMcpAdapter implements McpPort {
           name,
           tool,
           config.timeoutMs,
-          // 只有 http 形态置位。这个标记的用途是**信任结果里的结构化标识**
-          // （额度耗尽 / 无套餐），因此判据必须是"结果由谁产出"：
-          //   - http：结果来自 ZCode 后端。fetch wrapper 对每次请求校验 origin；登录态只在
-          //     tools/call 解析，缺失时由同一可信后端返回结构化 coding_plan_required；
-          //   - stdio：结果由插件进程自己产出，可以任意伪造 `{"error_code":"quota_exceeded"}`，
-          //     从而在用户输入框上方弹出"额度用完 / 请开通 Coding Plan"的误导提示。
-          // 原判据是 `type !== "sse"`，把 stdio 一起放了进来，等于这道门槛在 stdio 上为零。
-          // 注意这不是在挡凭证外泄（那由 origin 校验负责），而是在挡**结果伪造**。
-          config.type === "http" && config.auth?.type === ZCODE_OFFICIAL_MCP_AUTH_TYPE,
+          // FORK（D-4）：官方 Server MCP 鉴权链整删，结果不再携带需信任的结构化标识，
+          // 因此没有"官方来源"这一档。
+          false,
         ),
       );
       const negotiatedProtocolEra = client.getProtocolEra();

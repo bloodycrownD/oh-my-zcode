@@ -197,7 +197,7 @@ function buildTurnToolDisallowlist(
   params: Pick<StartPromptTurnParams, "automationId" | "toolDisallowlist">,
   activeAutomationId = params.automationId,
 ): readonly string[] | undefined {
-  const tools = new Set(params.toolDenylist ?? []);
+  const tools = new Set(params.toolDisallowlist ?? []);
   if (activeAutomationId) {
     // automation 派发漏传身份时，后续 model step 会重新暴露 Cron 写工具。
     for (const toolName of AUTOMATION_MUTATION_TOOL_NAMES) tools.add(toolName);
