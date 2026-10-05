@@ -1412,15 +1412,19 @@ export class ConversationProjectionStore {
         });
         return stale(logEpoch);
       }
-      if (stopReason === "cursor-stalled") {
-        // 游标不后退，继续翻必然死循环。guard 本身在 core 里；这里只落日志与终态。
-        logger.warn("[v4-store] turn 目录游标未推进，停止翻页", { sessionId });
-        return { status: "retryable-failure", logEpoch };
-      }
-      if (stopReason === "fetch-failed") {
+      if (stopReason === "cursor-stalled" || stopReason === "fetch-failed") {
+        // 失败即清空目录态。旧目录配已前进的 revision 就是「旧目录 + 新 revision」：
+        // 流式期的 assistantText 帧不触发目录失效，rail 会无限期停在陈旧条目上。
+        // 清空后 loaded=false → rail 隐藏；组件 effect 的退避阶梯（250/1000ms×2）
+        // 重试 3 次，耗尽后 attempt=terminal 挡住重查——目录在 revision 下次变化前
+        // 保持隐藏，这是本方案已知的取舍（详见 cr-fix-spec full/B-2）。
         logger.warn(
-          `[v4-store] turnDirectory ${this.topic} 失败: ${accumulated.failure instanceof Error ? accumulated.failure.message : String(accumulated.failure)}`,
+          stopReason === "cursor-stalled"
+            ? "[v4-store] turn 目录游标未推进，停止翻页并清空目录态"
+            : `[v4-store] turnDirectory ${this.topic} 失败并清空目录态: ${accumulated.failure instanceof Error ? accumulated.failure.message : String(accumulated.failure)}`,
+          { sessionId },
         );
+        this.clearTurnDirectory();
         return { status: "retryable-failure", logEpoch };
       }
       // 权威总数不足两条 → 首屏即终态，不再翻页探测（旧路径靠 reduce 才有这个结论）。
@@ -1470,9 +1474,12 @@ export class ConversationProjectionStore {
       this.turnDirectoryHydrationTerminal = terminal;
       return terminal;
     } catch (error) {
+      // 兜底 catch：accumulateTurnDirectoryPages 已经把查询失败表达成 stopReason，
+      // 能落到这里的都是它之外的意外。同样按「失败不留旧目录」处理。
       logger.warn(
-        `[v4-store] turnDirectory ${this.topic} 失败: ${error instanceof Error ? error.message : String(error)}`,
+        `[v4-store] turnDirectory ${this.topic} 失败并清空目录态: ${error instanceof Error ? error.message : String(error)}`,
       );
+      this.clearTurnDirectory();
       return { status: "retryable-failure", logEpoch };
     } finally {
       this.turnDirectoryQueryInFlight = false;
@@ -1482,6 +1489,17 @@ export class ConversationProjectionStore {
         void this.loadTurnDirectory();
       }
     }
+  }
+
+  /**
+   * 目录查询失败后的降级：清空目录态（loaded 归 false → rail 隐藏）。
+   *
+   * 已经处于空态时不重复通知——退避阶梯会在同一代际里重试好几次，每次都推一份
+   * 等值的新 state 只会白白惊动所有 useSyncExternalStore 订阅者。
+   */
+  private clearTurnDirectory(): void {
+    if (this.state.turnDirectory === EMPTY_TURN_DIRECTORY_STATE) return;
+    this.setState({ turnDirectory: EMPTY_TURN_DIRECTORY_STATE });
   }
 
   /**
