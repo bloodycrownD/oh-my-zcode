@@ -30,13 +30,6 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { runContextPanelActionWithClose } from "@/chat-input-toolbar/contextPanelAction.js";
 import { buildMagicContextUsageRows } from "@/chat-input-toolbar/magicContextUsageRows.js";
 import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
-import {
-  CONTEXT_QUOTA_RESET_URGENT_SECONDS,
-  ContextQuotaResetOpportunityReminderContent,
-  contextQuotaResetOpportunityDismissalStore,
-  resolveContextQuotaResetOpportunityReminder,
-  shouldDismissContextQuotaResetOpportunityReminder,
-} from "@/chat-input-toolbar/contextQuotaResetOpportunityReminder.js";
 
 type ContextUsageBreakdownSource = ZCodeContextUsageBreakdownItem["source"];
 
@@ -209,24 +202,13 @@ export function getRenderableTaskUsage<T extends { used: number; size: number }>
   return taskUsage;
 }
 
-// 自动/运营完成（startedAt 为空）当前生效的 used_at；手动完成不进入触发器交互。
-function resolveAutomaticCompletedAt(entry: CodingPlanQuotaResetUiEntry | null): number | null {
-  return entry?.status === "completed" && entry.startedAt === null && entry.observedAt !== null
-    ? entry.completedAt
-    : null;
-}
-
 export function ChatContextUsage({
-  codingPlanUsageRemaining,
-  startPlanBalance,
   taskUsage,
   magicContext,
   selectedProvider: _selectedProvider,
   intl,
   locale,
 }: {
-  codingPlanUsageRemaining?: ChatCodingPlanUsageRemainingConfig;
-  startPlanBalance?: ChatStartPlanBalanceConfig;
   magicContext?: SessionMagicContextUsage | null;
   taskUsage: {
     used: number;
@@ -242,119 +224,20 @@ export function ChatContextUsage({
     (state) => !state.tabs.some((tab) => tab.id === state.activeTabId && isSettingsTab(tab)),
   );
   const [contextOpen, setContextOpen] = useState(false);
-  const [contextAccessRefreshing, setContextAccessRefreshing] = useState(false);
-  const [quotaResetDialogOpen, setQuotaResetDialogOpen] = useState(false);
-  const quotaResetDialogOpenRef = useRef(false);
-  const contextUsageTriggerRef = useRef<HTMLElement | null>(null);
-  const contextAccessRefreshSeqRef = useRef(0);
-  const handleContextOpenChange = useCallback(
-    (open: boolean) => {
-      // Dialog 打开后会把焦点移出 HoverCard，Radix 随即请求关闭 HoverCard；
-      // 若此时卸载内容，Portal 中的重置弹框也会一起消失，因此弹框存活期间必须拒绝关闭。
-      if (!open && quotaResetDialogOpenRef.current) {
-        return;
-      }
-      setContextOpen(open);
-      // hover 刷新入口不能只认 Coding Plan 的 onAccess：Start Plan（今日余额）与
-      // Coding Plan 连接方式互斥，start plan 用户 hover 时整条刷新链路都不触发，余额只能被动等
-      // 设置页/侧栏刷新。改为两段配置任一提供 onAccess 即发起本次静默 access 刷新（互斥下实际只有一个存在）。
-      const accessRefresh = codingPlanUsageRemaining?.onAccess ?? startPlanBalance?.onAccess;
-      if (!open || !accessRefresh) {
-        return;
-      }
-      // silent access refresh 有缓存快照时不会把 entitlement.loading 置 true。
-      // header 的刷新图标必须跟随本次 hover 触发的远端 promise，而不是只看快照 loading。
-      const refreshSeq = contextAccessRefreshSeqRef.current + 1;
-      contextAccessRefreshSeqRef.current = refreshSeq;
-      setContextAccessRefreshing(true);
-      Promise.resolve(accessRefresh()).finally(() => {
-        if (contextAccessRefreshSeqRef.current === refreshSeq) {
-          setContextAccessRefreshing(false);
-        }
-      });
-    },
-    [codingPlanUsageRemaining?.onAccess, startPlanBalance?.onAccess],
-  );
-  const handleQuotaResetDialogOpenChange = useCallback((open: boolean) => {
-    quotaResetDialogOpenRef.current = open;
-    setQuotaResetDialogOpen(open);
-    if (!open) {
-      setContextOpen(false);
-    }
+const contextUsageTriggerRef = useRef<HTMLElement | null>(null);
+  const handleContextOpenChange = useCallback((open: boolean) => {
+    setContextOpen(open);
   }, []);
   const renderableTaskUsage = getRenderableTaskUsage(taskUsage);
-  const codingPlanUsageRemainingWithClose = useMemo<
-    ChatCodingPlanUsageRemainingConfig | undefined
-  >(() => {
-    if (!codingPlanUsageRemaining) {
-      return undefined;
-    }
-    const base = {
-      ...codingPlanUsageRemaining,
-      refreshing: contextAccessRefreshing || codingPlanUsageRemaining.refreshing === true,
-    };
-    if (!codingPlanUsageRemaining.onUsageClick) {
-      return base;
-    }
-
-    return {
-      ...base,
-      onUsageClick: () =>
-        runContextPanelActionWithClose({
-          action: codingPlanUsageRemaining.onUsageClick,
-          close: () => setContextOpen(false),
-        }),
-    };
-  }, [codingPlanUsageRemaining, contextAccessRefreshing]);
-  const startPlanBalanceWithClose = useMemo<ChatStartPlanBalanceConfig | undefined>(() => {
-    if (!startPlanBalance) {
-      return undefined;
-    }
-    const base: ChatStartPlanBalanceConfig = {
-      ...startPlanBalance,
-      // 静默 access 刷新不置 entitlement.loading，今日余额标题旁 spinner 需要跟随
-      // 本次 hover 触发的 promise（contextAccessRefreshing），语义对齐 Coding Plan 段的 refreshing。
-      refreshing: contextAccessRefreshing || startPlanBalance.refreshing === true,
-    };
-    if (!startPlanBalance.onUpgradeClick) {
-      return base;
-    }
-
-    return {
-      ...base,
-      onUpgradeClick: () => {
-        // HoverCard 内按钮点击不会像外部 hover leave 一样自动关闭面板。
-        // 升级入口会切到设置页，必须先收起 context 面板，避免旧浮层残留在新页面上。
-        setContextOpen(false);
-        startPlanBalance.onUpgradeClick?.();
-      },
-    };
-  }, [startPlanBalance, contextAccessRefreshing]);
-  const hasCodingPlanUsageRemaining = codingPlanUsageRemainingWithClose
-    ? hasChatCodingPlanUsageRemaining(codingPlanUsageRemainingWithClose)
-    : false;
-  const hasStartPlanBalance = hasChatStartPlanBalance(startPlanBalanceWithClose);
-
-  // 自动重置：触发器和面板复用同一完整 Personal/Team scope；共享 in-flight 避免重复请求。
-  const resetCodingPlanState = useMemo(
-    () =>
-      codingPlanUsageRemainingWithClose
-        ? resolveCodingPlanUsageRemainingState(codingPlanUsageRemainingWithClose)
-        : null,
-    [codingPlanUsageRemainingWithClose],
-  );
-  const resetSourceKey = resetCodingPlanState?.displayedProviderId ?? null;
   // MCP 与不足三张的主额度同排；主额度占满三列时才在下一行贯穿，浮层始终保持统一宽度。
   const contextPanelWidthClass = "!w-80";
-// FORK（D-4）：Coding Plan 额度重置的 badge / 提醒倒计时 / 撒花自动播报
+  // FORK（D-4）：Coding Plan 额度重置的 badge / 提醒倒计时 / 撒花自动播报
   // （resetUi、opportunityBadge、opportunityReminder 及其 effect）随订阅面整删。
   // context 面板的通用区（Context windows / Magic Context / cache 命中 / breakdown）
   // 不受影响，继续由本组件渲染。
   const opportunityReminder = null;
-// FORK（D-4）：Coding Plan 额度重置的撒花/自动播报状态机（468-793 整段）随订阅面删除。
-  // context 面板的通用区（Context windows / Magic Context / cache 命中 / breakdown）
-  // 不受影响，继续由本组件渲染。
-  const activeResetType = null;
+  const hasCodingPlanUsageRemaining = false;
+  const hasStartPlanBalance = false;
 
   const numberFormatter = useMemo(() => new Intl.NumberFormat(locale), [locale]);
   const contextUsageLabel = useMemo(() => {
@@ -453,17 +336,7 @@ export function ChatContextUsage({
         side="top"
         standalone
         triggerRef={contextUsageTriggerRef}
-        title={
-          opportunityReminder ? (
-            <ContextQuotaResetOpportunityReminderContent
-              count={opportunityReminder.count}
-              intl={intl}
-              onDismiss={dismissOpportunityReminder}
-              phase={opportunityReminder.phase}
-              remainingSeconds={opportunityReminder.remainingSeconds}
-            />
-          ) : null
-        }
+        title={null}
       >
         {/* span 承载 ControlHintTooltip 的 asChild 锚点，内部 ContextTrigger 仍作为
             HoverCard 触发器，避免两个 Radix 浮层在同一 DOM 上叠加 ref。手动核销的
@@ -471,11 +344,7 @@ export function ChatContextUsage({
         <span className="inline-flex shrink-0">
           <ContextTrigger
             aria-label={triggerLabel}
-            className={cn(
-              "text-foreground-subtle",
-              opportunityTriggerTone === "available" && "text-success",
-              opportunityTriggerTone === "urgent" && "bg-warning/10 text-warning",
-            )}
+            className={cn("text-foreground-subtle")}
             data-chat-toolbar-popover-trigger="true"
             data-testid={TID_CHAT_CONTEXT_USAGE_TRIGGER}
             onPointerDown={(event) => {
