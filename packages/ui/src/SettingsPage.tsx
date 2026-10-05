@@ -1709,13 +1709,8 @@ export function SettingsPage({
                             isDesktop={isDesktop}
                           />
                         ) : activeSection === "usage" ? (
-                          <UsageStatsSection
-                            activeTab={usageActiveTab}
-                            providerSourcesLoading={usageProviderSettingsLoading}
-                            selectedCodingPlanSource={selectedUsageCodingPlanSource}
-                            workspaceIdentity={activeWorkspaceIdentity}
-                            workspacePath={activeWorkspacePath ?? undefined}
-                          />
+                          /* FORK（D-4）：Coding Plan 额度页整删，只剩 App Usage（无 tab）。 */
+                          <UsageStatsSection />
                         ) : activeSection === "subagents" ? (
                           <SubagentsSection
                             onManageModels={handleOpenModelProviderSettings}

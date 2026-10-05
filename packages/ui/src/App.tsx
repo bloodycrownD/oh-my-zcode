@@ -964,9 +964,8 @@ export function App({
         canOpenCommunity: canOpenCommunityFromQuickPick,
         isSidebarVisible,
         supportsEmbeddedBrowser,
-        // quick pick 命令只关心登录态布尔值。
-        // 如果依赖完整 user 对象，auth store 返回等价新引用时会重建整组 command/run 闭包。
-        isLoggedIn,
+        // FORK（D-19）：登录面整删后 quick pick 不再有「已登录」这一维度。
+        isLoggedIn: false,
         themeTarget,
         shortcuts: {
           newTask: newTaskShortcutLabel,
@@ -1013,12 +1012,9 @@ export function App({
       handleToggleBrowser,
       handleToggleSidebar,
       handleToggleTerminalIfWritable,
-      isLoggedIn,
       isSidebarVisible,
       newTaskShortcutLabel,
       handleCreateTaskIfWritable,
-      onLogin,
-      onLogout,
       onOpenWorkspace,
       runVisibleWorkspaceCommand,
       openSettingsTab,
