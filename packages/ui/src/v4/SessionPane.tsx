@@ -1,5 +1,4 @@
 import { resolveSelectionSideInheritedModel } from "@/lib/selectionSideInheritedModel.js";
-import { useStartPlanRecommendation } from "@/hooks/useStartPlanRecommendation.js";
 import type { SessionCreateSource } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- SessionPane 是单 pane 竖切的命令编排收口（订阅/发送/停止/fork/edit/retry/queue/slash 全集），与旧 ChatView 同粒度；HEAD 已超限（693 行计数），拆散命令组会打散 dispatchCommand/snapshotRef 的闭包纪律。 */
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
@@ -69,7 +68,6 @@ import {
   type WorkflowRunSettingsChange,
 } from "@/components/workflow-timeline/workflowRunSettings.js";
 import { useWorkflowRunJournalSummaries } from "@/hooks/useWorkflowRunJournalSummaries.js";
-import { usePlanIdentitySnapshot } from "@/hooks/usePlanIdentitySnapshot.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useWorkspaceHomePath } from "@/hooks/useWorkspaceHomePath.js";
 import { prepareWorkspaceWithZCodeSessionService } from "@/hooks/useWorkspacePrepare.js";
@@ -118,7 +116,6 @@ import { ConversationDraftSuggestedPromptsContainer } from "@/v4/ConversationDra
 import { ConversationHeader, type PaneWorkspaceBadge } from "@/v4/ConversationHeader.js";
 import { ConversationQueuePanel } from "@/v4/ConversationQueuePanel.js";
 import { projectPendingGuideQueue } from "@/v4/pendingGuideProjection.js";
-import { ConversationQuotaBanner } from "@/v4/ConversationQuotaBanner.js";
 import { PendingCommandRecoveryBanner } from "@/v4/PendingCommandRecoveryBanner.js";
 import { WorkspaceHookPendingBanner } from "@/v4/WorkspaceHookPendingBanner.js";
 import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
@@ -214,8 +211,6 @@ import { useSlashCommands } from "@/hooks/useSlashCommands.js";
 import { useV4Conversation } from "@/v4/V4ConversationContext.js";
 import { useConversationProjection } from "@/v4/useConversationProjection.js";
 import { usePendingCommandRecovery } from "@/v4/usePendingCommandRecovery.js";
-import { useV4SessionQuotaBanner } from "@/v4/useV4SessionQuotaBanner.js";
-import { resolveMcpUnavailableNotice } from "@/v4/mcpUnavailableBannerNotice.js";
 import { shouldFocusTimelineAfterComposerSend } from "@/v4/promptScrollFocusPolicy.js";
 import {
   hasChatLoadingBlockingActiveWork,
@@ -223,7 +218,6 @@ import {
 } from "@/v4/chatLoadingVisibility.js";
 import type { ZCodeUiError } from "@/lib/zcodeUiError.js";
 import { isProviderNotReadyError } from "@/lib/chatPrepareError.js";
-import { useOptionalCodingPlanUpgradeDialog } from "@/settings/CodingPlanUpgradeDialogProvider.js";
 import { setPendingSettingsSectionIntent } from "@/lib/settingsNavigation.js";
 import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import type {
@@ -1244,7 +1238,11 @@ export function SessionPane({
     // 回收并按最新选择事实重建，已显式选择和正式会话仍保持冻结。
     useZCodeSessionStore.getState().invalidateDraftRuntime(workspacePath, workspaceIdentity);
   }, [draftConfigRef, modelSelectionView?.revision, sessionId, workspaceIdentity, workspacePath]);
-  const recommendStartPlan = useStartPlanRecommendation(modelSelectionView);
+  // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
+  const recommendStartPlan = useCallback(
+    async <T,>(selection: T): Promise<T> => selection,
+    [],
+  );
   const createSubmissionFromComposer = useCallback(
     () => createComposerSubmissionConfig(draftConfigRef.current, modelSelectionView),
     [draftConfigRef, modelSelectionView],
@@ -1253,7 +1251,8 @@ export function SessionPane({
     () => createComposerSubmissionConfig(draftConfig, modelSelectionView) !== null,
     [draftConfig, modelSelectionView],
   );
-  const codingPlanUpgradeDialog = useOptionalCodingPlanUpgradeDialog();
+  // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
+  const codingPlanUpgradeDialog = null;
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
   const promoteGroupedDraftTask = useZCodeSessionStore((state) => state.promoteGroupedDraftTask);
   const handleDraftSessionCreated = useCallback(
@@ -1286,13 +1285,6 @@ export function SessionPane({
     ],
   );
   const { settings: sharedSettings } = useSettings();
-  const readPlanIdentitySnapshot = usePlanIdentitySnapshot(
-    sharedSettings?.providerFamilyDomain,
-    sharedSettings?.providerFamilyDomain
-      ? sharedSettings.providerFamilyConnectionSelections?.[sharedSettings.providerFamilyDomain]
-      : undefined,
-    baseWorkspaceServices.usageStatsService,
-  );
   const appFollowupMode = resolveAppFollowupMode(sharedSettings);
   const messageStreamShowReasoning = sharedSettings?.messageStreamShowReasoning ?? true;
   const messageStreamShowTodos = sharedSettings?.messageStreamShowTodos ?? false;
@@ -3750,26 +3742,18 @@ export function SessionPane({
     controlLastError && controlLastErrorKey && !dismissedErrorKeys.includes(controlLastErrorKey)
       ? toComposerUiError(snapshot?.sessionId ?? sessionId, controlLastError)
       : null;
-  // 官方 Server MCP 不可用（额度耗尽 / 无 Coding Plan）：事实来自 tool row 上的结构化标识，
-  // 与模型额度是两条独立信息通道，这里只做投影。
-  const mcpUnavailableNotice = useMemo(
-    () => resolveMcpUnavailableNotice(snapshot?.rows.window),
-    [snapshot?.rows.window],
-  );
-  const quotaBanner = useV4SessionQuotaBanner({
-    sessionId: snapshot?.sessionId ?? sessionId,
-    error: controlLastError,
-    errorKey: controlLastErrorKey,
-    phase: snapshot?.control.phase ?? null,
-    providerId: snapshot?.config.provider ?? null,
-    modelId: snapshot?.config.model ?? null,
-    usageStatsService: baseWorkspaceServices.usageStatsService,
-    mcpUnavailableNotice,
-  });
-  const composerError =
-    draftModelReadinessError ??
-    sendSubmissionError ??
-    (quotaBanner.takesOverError ? null : projectedComposerError);
+  // FORK（D-4）：会话内额度横幅族整删（官方 MCP 不可用提示 + Coding Plan 额度横幅）。
+  // 恒定形状：不可见、不接管错误、不阻断提交。
+  const quotaBanner = {
+    state: { visible: false, blocksSubmit: false },
+    takesOverError: false,
+    dismissed: false,
+    markShown: () => {},
+    dismiss: () => {},
+    upgradeActionLabelId: undefined,
+    upgradeProviderId: undefined,
+  } as const;
+  const composerError = draftModelReadinessError ?? sendSubmissionError ?? projectedComposerError;
   useEffect(() => {
     setSendSubmissionError(null);
   }, [sessionId]);
@@ -3798,19 +3782,9 @@ export function SessionPane({
     setPendingSettingsSectionIntent("modelProvider");
     openSettingsTab();
   }, [openSettingsTab]);
-  const handleOpenModelUpgrade = useCallback(() => {
-    if (!codingPlanUpgradeDialog) return;
-    const providerId =
-      sharedSettings?.providerFamilyDomain === "bigmodel"
-        ? BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan
-        : BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan;
-    codingPlanUpgradeDialog.openCodingPlanUpgrade({ providerId });
-  }, [codingPlanUpgradeDialog, sharedSettings?.providerFamilyDomain]);
-  const handleOpenQuotaUpgrade = useCallback(() => {
-    const providerId = quotaBanner.upgradeProviderId;
-    if (!providerId || !codingPlanUpgradeDialog) return;
-    codingPlanUpgradeDialog.openCodingPlanUpgrade({ providerId });
-  }, [codingPlanUpgradeDialog, quotaBanner.upgradeProviderId]);
+  // FORK（D-4）：购买 webview 面整删，升级入口不再可达。
+  const handleOpenModelUpgrade = useCallback(() => {}, []);
+  const handleOpenQuotaUpgrade = useCallback(() => {}, []);
 
   const handleConfirmShareDisclosure = useCallback(async () => {
     if (!sessionId || !shareDraft || sharePublishing) return;
@@ -4188,7 +4162,7 @@ export function SessionPane({
       onRuntimeRestart={onRuntimeRestart}
       onRuntimeLifecycle={onRuntimeLifecycle}
       provider={provider}
-      readPlanIdentitySnapshot={readPlanIdentitySnapshot}
+      readPlanIdentitySnapshot={undefined}
       onSendText={handleSendText}
       onDraftStateChange={handleComposerDraftStateChange}
       composerRestoreRequest={composerRestoreRequest}
@@ -4274,21 +4248,7 @@ export function SessionPane({
     )
   ) : (
     <>
-      {quotaBanner.state.visible &&
-      !quotaBanner.dismissed &&
-      (!projectedComposerError || quotaBanner.takesOverError || quotaBanner.state.blocksSubmit) ? (
-        <ConversationQuotaBanner
-          state={quotaBanner.state}
-          onShown={quotaBanner.markShown}
-          upgradeActionLabelId={quotaBanner.upgradeActionLabelId}
-          onUpgrade={
-            quotaBanner.upgradeProviderId && codingPlanUpgradeDialog
-              ? handleOpenQuotaUpgrade
-              : undefined
-          }
-          onDismiss={quotaBanner.dismiss}
-        />
-      ) : null}
+      {/* FORK（D-4）：会话内额度横幅族整删，此处不再渲染。 */}
       {recoverableCommand ? (
         <PendingCommandRecoveryBanner
           entry={recoverableCommand}
