@@ -31,6 +31,9 @@
     "apps/zcode-cli/packages/magic-context": {
       "ignore": ["src/**"],
       "ignoreDependencies": ["ai-tokenizer"]
+    },
+    "apps/zcode-cli/packages/cli": {
+      "ignoreDependencies": ["@zcode/magic-context"]
     }
   },
   "ignore": [".agents/**", "docs/**", "packages/ui/src/components/**"]

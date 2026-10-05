@@ -353,9 +353,8 @@ type ExpandParse =
  * 也接受裸的 `N`：裸数字先按 ordinal（message）读，因为用户手里最常有的就是一个
  * `<session-history>` 标题里的序号；tag 必须显式写 `tag=`（与工具描述一致）。
  *
- * 导出仅供 `packages/cli/scripts/test-ctx-commands.mjs` 直接断言文法；knip 追不到测试的
- * file-URL 动态 import。
- * @lintignore
+ * 导出供 `packages/cli/scripts/test-ctx-commands.mjs` 直接断言文法，也经
+ * `@zcode/bootstrap/ctx-commands` 子路径对外。
  */
 export function parseExpandArgs(raw: string): ExpandParse {
   const trimmed = raw.trim();
@@ -422,9 +421,8 @@ type RecompParse =
 
 /**
  * 参数文法与包内那份逐字移植的 `parseRecompArgs` 同款（`full` / `--upgrade` / 区间）。
- * 导出仅供 `packages/cli/scripts/test-ctx-commands.mjs` 直接断言文法；knip 追不到测试的
- * file-URL 动态 import。
- * @lintignore
+ * 导出供 `packages/cli/scripts/test-ctx-commands.mjs` 直接断言文法，也经
+ * `@zcode/bootstrap/ctx-commands` 子路径对外。
  */
 export function parseRecompArgs(raw: string): RecompParse {
   const trimmed = raw.trim();

@@ -16,9 +16,8 @@
  *   3. **未知值统一 `-`**：与包侧同义，但收在一处产出，不再散在模板字符串里。
  *   4. **读不出来时一句话说清**：不再把一段失败文案混进正常布局。
  *
- * 导出仅供 `packages/cli/scripts/test-ctx-commands.mjs` 直接断言排版；knip 追不到测试的
- * file-URL 动态 import。
- * @lintignore
+ * 导出仅供同包 `run-ctx-command.ts` 调用，随它经 `@zcode/bootstrap/ctx-commands` 对外；
+ * 排版断言直接打在这份实现上。
  */
 export function formatCtxStatus(
   snapshot: Awaited<

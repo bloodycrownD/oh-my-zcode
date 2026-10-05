@@ -8,16 +8,21 @@
  *     文本逐段包含正确的数字，且段序固定。
  *   - `handlers/ctx.ts` 的两个纯参数解析器（`parseExpandArgs` / `parseRecompArgs`），
  *     以及 `slash-commands.ts` 对四个 `/ctx-*` 名字的识别（**不**回落成 unknown，
- *     也不**不**被转发给 submitPrompt——这就是替代 Effect 204 sentinel 的落点）。
+ *     也**不**被转发给 submitPrompt——这就是替代 Effect 204 sentinel 的落点）。
  *   - **MF-06**：`handleCtxCommand` 的 effective 门——off 态四条命令全回
  *     UNAVAILABLE 且**一条 db 都不建**；on 态 `/ctx-reduce` 写出的
  *     `pending_ops.harness` 归一为 `"zcode"`（自建工具路径不经过装配层的
  *     `initializeMagicContextHost()`）。
  *
+ * 排版与参数解析器已随核心实现下沉到 `@zcode/bootstrap/ctx-commands`（桌面 App 的 v4
+ * ctx handler 共用同一份），故从那个子路径导入；`handleCtxCommand` 仍从 CLI **源码**
+ * 导入——CLI 侧「薄壳行为不变」正是这几条用例要钉的东西。
+ *
  * 与 S21 的 `scripts/test-ctx-tools.mjs` 共用同一套「临时 db + dist」跑法；本文件
  * 需要 CLI 侧的 TS 源码，故用仓库根的 `tsx` 装载器跑（`node --import tsx`）。
  *
- * Requires Node >= 24 and a prior `pnpm build` of @zcode/magic-context.
+ * Requires Node >= 24 and a prior `pnpm build` of @zcode/magic-context and
+ * @zcode/bootstrap.
  * Exits 0 when every test passes, 1 otherwise.
  */
 
@@ -66,9 +71,11 @@ const { __resetHostInitializationForTests } = await import(dist("host/harness.js
 // CLI 侧的纯函数与解析器（TS 源码，经 tsx 装载）。
 const CLI_SRC = fileURLToPath(new URL("../src/command-center/", import.meta.url));
 const { parseSlashCommand } = await import(pathToFileURL(join(CLI_SRC, "slash-commands.ts")).href);
-const { parseExpandArgs, parseRecompArgs, formatCtxStatus, handleCtxCommand } = await import(
-  pathToFileURL(join(CLI_SRC, "handlers", "ctx.ts")).href
-);
+const { handleCtxCommand } = await import(pathToFileURL(join(CLI_SRC, "handlers", "ctx.ts")).href);
+// 排版与两个参数解析器随核心实现一起下沉到了 `@zcode/bootstrap/ctx-commands`
+// （桌面 App 的 v4 ctx handler 共用同一份），断言直接打在那儿。
+const { parseExpandArgs, parseRecompArgs, formatCtxStatus } =
+  await import("@zcode/bootstrap/ctx-commands");
 
 const db = openDatabase();
 assert.ok(db, "openDatabase() must succeed against the temp store");
@@ -191,7 +198,8 @@ test("formatCtxStatus renders the same snapshot in aligned sections", async () =
   assert.ok(lines.includes("  compacted  0 (0 tokens)"));
 
   // 同一段里的值列起始位置一致——这正是 Step 30 要的可读性。
-  const valueColumnOf = (line) => line.length - line.trimStart().length + line.trim().search(/\S\S+/);
+  const valueColumnOf = (line) =>
+    line.length - line.trimStart().length + line.trim().search(/\S\S+/);
   for (const title of ["BUDGET", "COMPARTMENTS", "TAGS"]) {
     const start = lines.indexOf(title) + 1;
     const body = lines.slice(start).filter((line) => line.startsWith("  "));

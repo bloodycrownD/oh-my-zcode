@@ -20,6 +20,12 @@
  * （`@zcode/bootstrap/ctx-commands`）让命令面只静态依赖这一小块，`@zcode/magic-context`
  * 在共享实现内部仍然是动态 import——用户显式关掉 magic-context 时，一条 `/ctx-status`
  * 不该把整棵 magic-context 模块图拉进内存。
+ *
+ * 副作用：`@zcode/magic-context` 在本包 `src/` 里不再有静态引用，但它仍是本包的
+ * **必需依赖**——`scripts/build.mjs` 把它列进 esbuild external，`scripts/sea-tui-assets.mjs`
+ * 按 workspace 依赖放置它的 dist 与 `node_modules/zod`；删依赖会打断 SEA 打包。
+ * knip 看不见这两处字符串字面量，故在根 `knip.json` 里对该 workspace 声明
+ * `ignoreDependencies`。
  */
 
 import {
@@ -33,9 +39,9 @@ import type { CommandCenterDeps } from "../types.js";
 /** 四个命令的机器可读名。`slash-commands.ts` 的解析结果直接带这个名。 */
 export type { CtxCommandName };
 
-// 纯函数与参数解析器随核心实现一起下沉；这里原样再导出，让既有断言
-// （`scripts/test-ctx-commands.mjs` 直接引 CLI 源码）的落点保持不变。
-export { formatCtxStatus, parseExpandArgs, parseRecompArgs } from "@zcode/bootstrap/ctx-commands";
+// 纯函数与参数解析器（`formatCtxStatus` / `parseExpandArgs` / `parseRecompArgs`）**不再**
+// 从这里转出：它们随核心实现一起住进 `@zcode/bootstrap/ctx-commands`，再在本文件复述
+// 一遍只会多出一条无人消费的导出。断言直接打在那份实现上。
 
 /**
  * 把 command-center 的 deps 解析成共享实现的窄宿主。
