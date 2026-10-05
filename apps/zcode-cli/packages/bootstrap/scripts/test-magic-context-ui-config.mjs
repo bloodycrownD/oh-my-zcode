@@ -287,6 +287,54 @@ test("B3: clearing optional fields deletes the key instead of writing null or st
   assert.doesNotThrow(() => MagicContextConfigSchema.parse(next));
 });
 
+test("B4: clearing the token override drops only `default`, never the per-model table", () => {
+  const base = MagicContextConfigSchema.parse({
+    execute_threshold_tokens: { "zcode/big": 90_000 },
+  });
+
+  // `default` 在 schema 里可选，所以「只有 per-model 键」是合法形态；而表单首版
+  // 没有按模型编辑入口，读侧只能把它坍缩成 null（展示为「未覆盖」）。
+  const form = magicContextSettingsFormFromConfig(base, UI_FALLBACK_FORM);
+  assert.equal(form.executeThresholdTokens, null);
+
+  // 写侧不能因此删掉整张表：那些键在设置页上完全不可见（MF-09 数据损坏）。
+  const cleared = buildMagicContextConfigFromForm(base, form);
+  assert.deepEqual(cleared.execute_threshold_tokens, { "zcode/big": 90_000 });
+  assert.doesNotThrow(() => MagicContextConfigSchema.parse(cleared));
+
+  // per-model-only + 新填 default：两个分支共存，default 覆盖未单列的模型。
+  const withDefault = buildMagicContextConfigFromForm(base, {
+    ...form,
+    executeThresholdTokens: 55_000,
+  });
+  assert.deepEqual(withDefault.execute_threshold_tokens, {
+    default: 55_000,
+    "zcode/big": 90_000,
+  });
+
+  // 只有 default 时清空 = 真删键（不能留下一张空对象）。
+  const defaultOnly = buildMagicContextConfigFromForm(
+    MagicContextConfigSchema.parse({ execute_threshold_tokens: { default: 40_000 } }),
+    { ...form, executeThresholdTokens: null },
+  );
+  assert.equal("execute_threshold_tokens" in defaultOnly, false);
+});
+
+test("B5: a zero-edit save of a per-model-only domain is byte-identical", () => {
+  const base = MagicContextConfigSchema.parse({
+    execute_threshold_tokens: { "zcode/big": 90_000 },
+  });
+  const form = magicContextSettingsFormFromConfig(base, UI_FALLBACK_FORM);
+
+  // MagicContextSettingsSection 的 dirty 判定就是这两个 stringify 的比较。
+  // 写侧一旦丢掉 per-model 键（或改动键序），零改动也会被判成 dirty →
+  // 保存按钮可点 → 点一下即销毁用户配置。修复前本断言失败。
+  assert.equal(
+    JSON.stringify(buildMagicContextConfigFromForm(base, form)),
+    JSON.stringify(base),
+  );
+});
+
 // ���� C: T-U1 ���壨UI �޸� �� ���� �� ��������Ч�� ����������������������������������������������������������
 
 test("C (T-U1): a settings save lands on disk, notifies observers, and is read by the next turn", async () => {

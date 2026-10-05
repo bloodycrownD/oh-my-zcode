@@ -111,6 +111,10 @@ export function magicContextSettingsFormFromConfig(
  *   - `execute_threshold_tokens` / `cache_ttl` 若原本是 per-model 对象，
  *     只改写 `default` 分支并保留其它模型键；
  *   - 可选数字字段留空时**删键**而不是写 `null`——`z.number().optional()` 不接受 null。
+ *
+ * 第三条对「表里还有 per-model 键」的情形不适用：`execute_threshold_tokens` 的
+ * `default` 在 schema 里可选，留空时的正确处置是**只摘 `default` 分支**（见下），
+ * 而不是删掉整张 per-model 表。
  */
 export function buildMagicContextConfigFromForm(
   base: unknown,
@@ -137,8 +141,27 @@ export function buildMagicContextConfigFromForm(
     fail_closed_blocking: form.failClosedBlocking,
   };
 
+  // `execute_threshold_tokens` 的 schema 是 `{ default?: number, [model]: number }`：
+  // **`default` 本身可选**，所以一份只带 per-model 键的配置完全合法，而表单的首版
+  // 没有按模型编辑入口——读侧因此把它坍缩成 `null`（表单里「未覆盖」）。
+  //
+  // 曾经的写法是 `null` ⇒ `delete next.execute_threshold_tokens`，也就是「删整表」。
+  // 那会把用户在设置页**看不见**的 per-model 键一次性抹掉：点一次保存就销毁配置，
+  // 且页面上没有任何提示（键可见性为零 ⇒ 用户无从恢复）。属于数据损坏级。
+  //
+  // 现在改为只摘 `default` 分支：per-model 键原样带回，摘完还剩键才保留该对象，
+  // 否则才删键。这样「清空 Token 覆盖」回到的正是 schema 允许的 per-model-only 形态。
   if (form.executeThresholdTokens === null) {
-    delete next.execute_threshold_tokens;
+    if (isRecord(previousTokens)) {
+      const { default: _droppedDefault, ...perModelOnly } = previousTokens;
+      if (Object.keys(perModelOnly).length > 0) {
+        next.execute_threshold_tokens = perModelOnly;
+      } else {
+        delete next.execute_threshold_tokens;
+      }
+    } else {
+      delete next.execute_threshold_tokens;
+    }
   } else if (isRecord(previousTokens)) {
     next.execute_threshold_tokens = { ...previousTokens, default: form.executeThresholdTokens };
   } else {
@@ -180,7 +203,7 @@ export function buildMagicContextConfigFromForm(
  */
 
 /** 空 historian 模型的选择器哨兵值。与 Subagents 的 `inherit` 同构：展示态专用。 */
-export const NO_HISTORIAN_MODEL_VALUE = "none";
+const NO_HISTORIAN_MODEL_VALUE = "none";
 
 export function toModelPickerValue(model: string): string {
   const trimmed = model.trim();
@@ -205,7 +228,7 @@ export function toPersistedModelId(pickerValue: string): string {
   }
 }
 
-export interface MagicContextNumberFieldSpec {
+interface MagicContextNumberFieldSpec {
   min: number;
   max: number;
   step: number;
