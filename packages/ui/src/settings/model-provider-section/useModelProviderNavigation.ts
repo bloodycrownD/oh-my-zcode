@@ -101,8 +101,9 @@ export function useModelProviderNavigation({
         const state = resolveCodingPlanEntitlementState({
           providerId: spec.id,
           accountEntitled,
-          accountAvailability: provider?.accountState?.availability,
-          accountUnavailableReason: provider?.accountState?.unavailableReason,
+          // FORK（D-13）：accountState 字段已从 ProviderSettingsProviderView 删除。
+          accountAvailability: undefined,
+          accountUnavailableReason: undefined,
           entitlement,
           modelProvidersLoading,
         });
@@ -196,11 +197,8 @@ export function useModelProviderNavigation({
               type: "preset" as const,
               presetId: id,
               label: displayName,
-              logo: modelProviders.find(
-                (candidate) =>
-                  candidate.providerId ===
-                  resolveModelProviderFamilySpecByProviderId(id)?.individualCodingPlanProviderId,
-              )?.config.logo ?? provider?.config.logo,
+              // FORK（D-13）：family↔provider 映射恒 null，logo 直接取该 preset 自身。
+              logo: provider?.config.logo,
               provider,
               displayName,
               statusProvider,
