@@ -17,8 +17,9 @@ function savedWorkflowsDirectoryPath(workspacePath: string): string {
  * 刷新补上。非递归：只看这一层（Linux 上递归 fs.watch 有既知问题）。服务实例变化（远程重连）时
  * effect 依赖变化会拆掉旧 watcher 重建，旧 host 的 id 不会泄漏。
  *
- * 项目组传 `workspacePath`（拼出 `<ws>/.omz/workflows`）；全局组传 `directory`（协议 list 回的
- * 绝对目录，即 `~/.omz/workflows`），二者择一——`directory` 优先。
+ * 项目组传 `workspacePath`（拼出 `<ws>/.zcode/workflows`，工作区级、刻意保留旧产品名）；
+ * 全局组传 `directory`（协议 list 回的绝对目录，即 `~/.omz/workflows`，用户级数据根），
+ * 二者择一——`directory` 优先。
  */
 export function useSavedWorkflowsDirectoryWatch({
   fileWatcherService,
@@ -59,7 +60,7 @@ export function useSavedWorkflowsDirectoryWatch({
         });
       })
       .catch((error: unknown) => {
-        logger.debug("[SavedWorkflows] 监听 .omz/workflows 失败（目录可能尚不存在）", {
+        logger.debug("[SavedWorkflows] 监听工作流目录失败（目录可能尚不存在）", {
           path: directoryPath,
           error: error instanceof Error ? error.message : String(error),
         });

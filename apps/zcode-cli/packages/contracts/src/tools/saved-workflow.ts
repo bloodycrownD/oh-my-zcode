@@ -15,7 +15,17 @@ import { z } from "zod";
  */
 export const SAVED_WORKFLOW_FILE_EXTENSION = ".dwf.ts";
 
-/** 项目作用域的存放目录（相对会话工作目录）。 */
+/**
+ * 项目作用域的存放目录（相对会话工作目录）。
+ *
+ * 锚定（MF-17）：这里是**工作区级**的 `.zcode/`——刻意保留 L1 品牌改名之前的产品名，
+ * 因为它要随仓库提交、被别的工具和 `.gitignore` 规则引用；改名会让所有已提交的项目档
+ * 一次性失联。同理 `WORKFLOW_DRAFTS_DIR` 也在 `.zcode/` 下。
+ *
+ * 别把它和下面的全局档 `SAVED_WORKFLOW_GLOBAL_DIR`（`~/.omz/workflows`）混为一谈：
+ * 用户级数据根在 L1 里改成了 `.omz`，工作区级没有改——两档落点不同是**有意**的分层，
+ * 不是漏改。改动前先看 `UPSTREAM-SYNC.md` 的 L1 规则登记。
+ */
 export const SAVED_WORKFLOW_PROJECT_DIR = ".zcode/workflows";
 
 /**
@@ -41,8 +51,9 @@ export const SAVED_WORKFLOW_NAME_PATTERN = /^[A-Za-z0-9_.-]+$/u;
 export const SAVED_WORKFLOW_MAX_NAME_CHARS = 64;
 
 /**
- * 作用域。两档：`project` 落在项目的 `.omz/workflows/`，只在那个项目里可见；`global`
- * 落在 `~/.omz/workflows/`（agent 进程的家目录），对所有项目可见。一个文件的作用域由它所在的目录推得，frontmatter 不存。
+ * 作用域。两档：`project` 落在项目的 `.zcode/workflows/`（工作区级，刻意保留旧产品名，
+ * 见 `SAVED_WORKFLOW_PROJECT_DIR` 的锚定注释），只在那个项目里可见；`global`
+ * 落在 `~/.omz/workflows/`（用户级数据根，L1 已改名为 `.omz`），对所有项目可见。一个文件的作用域由它所在的目录推得，frontmatter 不存。
  */
 export const SAVED_WORKFLOW_SCOPES = ["project", "global"] as const;
 

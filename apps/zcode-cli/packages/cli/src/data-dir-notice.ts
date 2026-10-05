@@ -59,6 +59,7 @@ function formatNotice(dataRoot: string, legacyRoot: string, legacyRootExists: bo
     "",
     `[oh-my-zcode] 数据目录已更名：本产品现在使用 ${dataRoot}。`,
     `[oh-my-zcode] 旧的 ${legacyRoot} 不会被自动迁移——请按需自行把里面的内容复制到新目录后重启。`,
+    `[oh-my-zcode] 注意：会话库在解码时不校验 schema，跨版本直接复制过来的旧会话记录可能无法在新版本中打开（表现为该条记录的内容不渲染，而不是整条消失）。`,
   ];
   if (legacyRootExists) {
     lines.push(`[oh-my-zcode] 检测到旧目录 ${legacyRoot} 仍然存在，复制与否由你决定。`);
