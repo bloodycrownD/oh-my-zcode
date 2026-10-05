@@ -49,7 +49,10 @@ import {
   getConversationStatusPanelOffsetClassName,
 } from "@/v4/conversationLayout.js";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
-import { conversationTurnRenderUnitsCache } from "@/v4/conversationProjectionCore.js";
+import {
+  conversationTurnRenderUnitsCache,
+  withDetachedTurnIds,
+} from "@/v4/conversationProjectionCore.js";
 import type { ConversationProjectionLastMutation } from "@/v4/conversationProjectionStore.js";
 import {
   resolveConversationTurnNavigatorActiveQueryRowId,
@@ -477,7 +480,7 @@ function ConversationTimelineImpl({
       conversationTurnRenderUnitsCache.build(
         rows,
         { sessionPhase, scopeKey: sessionKey },
-        lastMutation?.turnIdByRowId,
+        lastMutation && withDetachedTurnIds(lastMutation.turnIdByRowId, lastMutation.detachedTurnIds),
       ),
     [rows, sessionPhase, sessionKey, lastMutation],
   );

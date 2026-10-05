@@ -149,7 +149,10 @@ import {
   resolveConversationShareBackgroundScrollLocked,
   resolveConversationShareSelectionPanelVisible,
 } from "@/v4/conversationShareModePolicy.js";
-import { conversationTurnRenderUnitsCache } from "@/v4/conversationProjectionCore.js";
+import {
+  conversationTurnRenderUnitsCache,
+  withDetachedTurnIds,
+} from "@/v4/conversationProjectionCore.js";
 import { buildConversationTurnNavigatorItems } from "@/v4/conversationTurnNavigatorHelpers.js";
 import { SessionPluginReferenceIconBoundary } from "@/v4/SessionPluginReferenceIconProvider.js";
 import {
@@ -679,7 +682,11 @@ export function SessionPane({
         : conversationTurnRenderUnitsCache.build(
             timelineSnapshot.rows.window,
             { sessionPhase: sessionRenderPhase, scopeKey: sessionId ?? "draft" },
-            state.lastMutation?.turnIdByRowId,
+            state.lastMutation &&
+              withDetachedTurnIds(
+                state.lastMutation.turnIdByRowId,
+                state.lastMutation.detachedTurnIds,
+              ),
           ),
     [timelineSnapshot, sessionRenderPhase, sessionId, state.lastMutation],
   );

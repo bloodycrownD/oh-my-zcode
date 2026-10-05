@@ -24,6 +24,7 @@ import {
   nextTurnNavigatorDirectoryRevision,
   shouldInvalidateTurnNavigatorDirectory,
   TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+  withDetachedTurnIds,
   type ConversationTurnRenderUnit,
   type TrailingDebounceTimers,
 } from "../src/v4/conversationProjectionCore.js";
@@ -373,6 +374,86 @@ test("T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳", () =
   assert.notStrictEqual(first.rows, second.rows);
   assert.notStrictEqual(first.rows.window, second.rows.window);
   assert.deepStrictEqual(base, buildSnapshot([streamRow(1, "turn-0", "甲")]), "基线快照不被改写");
+});
+
+// ---------------------------------------------------------------------------
+// row.upserted 改挂 turnId：旧轮必须一并进脏集（C-3 防御性缺口）
+// ---------------------------------------------------------------------------
+
+test("C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTurnIds", () => {
+  const base = buildSnapshot(
+    [streamRow(1, "turn-a", "甲"), streamRow(2, "turn-a", "乙")],
+  );
+  const accumulator = createConversationProjectionAccumulator(base);
+  accumulator.publish();
+
+  // rowId 1 被 upsert 到 turn-b：变更集里是新轮，旧轮 turn-a 不能被漏掉。
+  const next = accumulator.applyDeltas(
+    [delta({ op: "row.upserted", row: streamRow(1, "turn-b", "甲改挂") })],
+    101,
+  );
+  const mutation = accumulator.lastMutation();
+  assert.equal(mutation?.turnIdByRowId.get(1), "turn-b", "变更集记改挂之后的落点");
+  assert.deepEqual([...(mutation?.detachedTurnIds ?? [])], ["turn-a"], "旧轮必须一并失效");
+  assert.equal(textsByRowId(next.rows.window).get(1), "甲改挂");
+
+  // 并进脏集后喂给增量构建器：改挂前后的两轮都必须重算，结果与全量重建逐字段一致。
+  assert.ok(mutation);
+  const dirty = withDetachedTurnIds(mutation.turnIdByRowId, mutation.detachedTurnIds);
+  assert.deepEqual([...new Set(dirty.values())].sort(), ["turn-a", "turn-b"]);
+  const cache = createConversationTurnRenderUnitsCache();
+  const options = { scopeKey: "sess-c3" };
+  // turn-a 的 header（rowId 1）被改挂到 turn-b，turn-a 只剩两行；turn-z 完全没动。
+  const after = [
+    userRow(1, "turn-b", "问 turn-b"),
+    textRow(2, "turn-b", "答 turn-b"),
+    ...visibleTurn(4, "turn-z"),
+  ];
+  assertIncrementalEqualsFull(cache.build(after, options, dirty), after, options);
+});
+
+test("C-3 改挂帧的脏集并入后：增量重建 ≡ 全量重建，与改挂无关的轮仍复用", () => {
+  const cache = createConversationTurnRenderUnitsCache();
+  const options = { scopeKey: "sess-c3" };
+  const before = [...visibleTurn(1, "turn-a"), ...visibleTurn(4, "turn-b"), ...visibleTurn(7, "turn-c")];
+  const first = cache.build(before, options, undefined);
+  assert.deepEqual(first.map((unit) => unit.turnId), ["turn-a", "turn-b", "turn-c"]);
+
+  // turn-b 的 header（rowId 4）被改挂到 turn-b2，其余两行留在 turn-b：
+  // 脏集 = {turn-b2（新落点）} ∪ {turn-b（被改挂掉的旧轮）}，两者都得重算。
+  const after = [
+    ...visibleTurn(1, "turn-a"),
+    turnHeader(4, "turn-b2"),
+    userRow(5, "turn-b", "问 turn-b"),
+    textRow(6, "turn-b", "答 turn-b"),
+    ...visibleTurn(7, "turn-c"),
+  ];
+  const second = cache.build(
+    after,
+    options,
+    withDetachedTurnIds(new Map([[4, "turn-b2"]]), new Set(["turn-b"])),
+  );
+  assertIncrementalEqualsFull(second, after, options);
+  assert.equal(second[0]?.turnId, "turn-a", "首轮位置仍是 turn-a");
+  assert.strictEqual(second[0], first[0], "既不脏又不是末位的 turn-a 必须复用缓存条目");
+});
+
+test("C-3 未改挂的 upsert 不产生 detachedTurnIds，withDetachedTurnIds 原样返回入参引用", () => {
+  const base = buildSnapshot([streamRow(1, "turn-a", "甲")]);
+  const accumulator = createConversationProjectionAccumulator(base);
+  accumulator.publish();
+  accumulator.applyDeltas([delta({ op: "row.upserted", row: streamRow(1, "turn-a", "甲改") })], 101);
+
+  const mutation = accumulator.lastMutation();
+  assert.equal(mutation?.detachedTurnIds, undefined, "同 turnId 的 upsert 不是改挂");
+  const turnIdByRowId = new Map([[1, "turn-a"]]);
+  assert.strictEqual(withDetachedTurnIds(turnIdByRowId, undefined), turnIdByRowId, "memo 依赖不得被打掉");
+  assert.strictEqual(withDetachedTurnIds(turnIdByRowId, new Set<string>()), turnIdByRowId);
+  assert.deepEqual(
+    [...withDetachedTurnIds(turnIdByRowId, new Set(["turn-old"])).values()],
+    ["turn-a", "turn-old"],
+    "并入后的脏集必须同时含新旧两轮",
+  );
 });
 
 // ---------------------------------------------------------------------------

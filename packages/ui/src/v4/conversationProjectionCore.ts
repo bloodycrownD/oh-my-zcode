@@ -208,6 +208,32 @@ function publishConversationShell(
 export interface ConversationProjectionLastMutation {
   /** 本帧变更行的 rowId → turnId。 */
   turnIdByRowId: ReadonlyMap<number, string>;
+  /**
+   * 本帧被「改挂」掉的旧轮（`row.upserted` 把同一 rowId 挪到别的 turnId 上）。
+   *
+   * `turnIdByRowId` 记的是改挂**之后**的落点，旧轮因此不在其中——而旧轮的行内容
+   * 同样被这一帧换掉了，不失效就会命中上一帧的缓存 unit。当前不可达（服务端不会
+   * 改挂已有行的 turnId），这里是补防御性缺口：集合为空时整条通路零开销。
+   */
+  detachedTurnIds?: ReadonlySet<string>;
+}
+
+/**
+ * 把「改挂掉的旧轮」并进变更集，供 renderUnits 增量构建器消费。
+ *
+ * 合并后的容器仍满足 `ReadonlyMap<number, string>`（构建器只遍历 values 取脏轮），
+ * 合成键从 -1 起向下借——协议 rowId 是非负整数，不会撞上。无 detached 轮时原样
+ * 返回入参引用，memo 依赖不会被无谓打掉。
+ */
+export function withDetachedTurnIds(
+  turnIdByRowId: ReadonlyMap<number, string>,
+  detachedTurnIds: ReadonlySet<string> | undefined,
+): ReadonlyMap<number, string> {
+  if (detachedTurnIds === undefined || detachedTurnIds.size === 0) return turnIdByRowId;
+  const merged = new Map(turnIdByRowId);
+  let syntheticRowId = -1;
+  for (const turnId of detachedTurnIds) merged.set(syntheticRowId--, turnId);
+  return merged;
 }
 
 /**
@@ -229,6 +255,12 @@ function lowerBoundByRowId(window: readonly ConversationRow[], target: number): 
   return low;
 }
 
+/** 一帧 delta 的变更定位：变更行 rowId → turnId，外加被改挂掉的旧轮。 */
+interface CollectedMutationTurnIds {
+  turnIdByRowId: Map<number, string>;
+  detachedTurnIds: Set<string>;
+}
+
 /**
  * 收集一帧 delta 触及的行 → turnId。必须在 apply **之前**取：`row.removed` 之后
  * 行索引与窗口都被裁掉，届时已经无从反解；`row.delta` 虽只就地改 text（turnId 不变），
@@ -237,14 +269,24 @@ function lowerBoundByRowId(window: readonly ConversationRow[], target: number): 
 function collectMutationTurnIds(
   accumulator: MutableConversationSnapshotAccumulator,
   deltas: readonly ConversationDelta[],
-): Map<number, string> {
+): CollectedMutationTurnIds {
   const turnIdByRowId = new Map<number, string>();
+  const detachedTurnIds = new Set<string>();
   const window = accumulator.snapshot.rows.window;
   for (const delta of deltas) {
     switch (delta.op) {
       case "row.appended":
       case "row.upserted":
-        // upsert 可能把行改挂到别的 turn 上，取新行的 turnId 才是本帧的落点。
+        // upsert 可能把行改挂到别的 turn 上，取新行的 turnId 才是本帧的落点；
+        // 改挂前的旧 turnId 同样要失效——那一轮的行内容也被这一帧换掉了。
+        // appended 是新行，索引里必然查不到，查一次只是多一次 Map 查找。
+        if (delta.op === "row.upserted") {
+          const index = accumulator.rowIndexById.get(delta.row.rowId);
+          const previous = index === undefined ? undefined : window[index];
+          if (previous !== undefined && previous.turnId !== delta.row.turnId) {
+            detachedTurnIds.add(previous.turnId);
+          }
+        }
         turnIdByRowId.set(delta.row.rowId, delta.row.turnId);
         break;
       case "row.delta": {
@@ -270,7 +312,7 @@ function collectMutationTurnIds(
         break;
     }
   }
-  return turnIdByRowId;
+  return { detachedTurnIds, turnIdByRowId };
 }
 
 /**
@@ -304,12 +346,13 @@ export function createConversationProjectionAccumulator(
   let published: ConversationSnapshot | null = null;
   return {
     applyDeltas(deltas, toSeq) {
-      const turnIdByRowId = collectMutationTurnIds(accumulator, deltas);
+      const { turnIdByRowId, detachedTurnIds } = collectMutationTurnIds(accumulator, deltas);
       applyConversationDeltasMutable(accumulator, deltas);
       accumulator.snapshot.seq = toSeq;
       // 空 delta 帧（如纯 state.updated 水位推进）也要发布 lastMutation：
       // 消费方据此知道「本帧无行变更」，只有失效锚点那一轮需要重算。
-      lastMutation = { turnIdByRowId };
+      lastMutation =
+        detachedTurnIds.size === 0 ? { turnIdByRowId } : { detachedTurnIds, turnIdByRowId };
       published = publishConversationShell(accumulator, published, turnIdByRowId.size > 0);
       return published;
     },
