@@ -17,6 +17,7 @@ import {
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
+import { DEFAULT_ROW_HEIGHT_ESTIMATE_PX } from "@/v4/timelineRowHeightCache.js";
 
 interface ConversationTurnNavigatorProps {
   renderUnits: readonly ConversationTurnRenderUnit[];
@@ -73,15 +74,28 @@ function ConversationTurnNavigatorImpl({
     [intl, renderUnits],
   );
 
+  // items 变化远少于滚动事件，索引在这里建一次；滚动重算时直接复用，
+  // 避免 resolveConversationTurnNavigatorActiveUnitIndex 每次滚动都 O(N) 重建 Map。
+  const itemByUnitIndex = useMemo(
+    () => new Map(items.map((item) => [item.unitIndex, item])),
+    [items],
+  );
+  // 触发量化用**主时间线**行高（DEFAULT_ROW_HEIGHT_ESTIMATE_PX = 72）：scrollOffsetPx
+  // 是主滚动容器的偏移，与 rail 自身 10px 的行高不同量级，不能混用。量化到「行」后
+  // active 重算只在跨行时发生（原来每个滚动像素都重算一次 O(可见行数) 扫描）。
+  const scrollOffsetPxFinite = Number.isFinite(scrollOffsetPx) ? Math.max(0, scrollOffsetPx) : 0;
+  const scrollRowBucket = Math.floor(scrollOffsetPxFinite / DEFAULT_ROW_HEIGHT_ESTIMATE_PX);
   const activeUnitIndex = useMemo(
     () =>
       resolveConversationTurnNavigatorActiveUnitIndex({
         items,
-        scrollOffsetPx,
+        itemByUnitIndex,
+        scrollOffsetPx: scrollRowBucket * DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
         viewportHeightPx,
         virtualItems,
       }),
-    [items, scrollOffsetPx, viewportHeightPx, virtualItems],
+    // 量化值（scrollRowBucket）取代原始 scrollOffsetPx 作为依赖：同一行内滚动不再触发重算。
+    [items, itemByUnitIndex, scrollRowBucket, viewportHeightPx, virtualItems],
   );
   const itemIndexes = useMemo(() => {
     const byRowId = new Map<number, number>();

@@ -32,9 +32,22 @@ interface ResolveConversationTurnNavigatorActiveUnitIndexOptions {
   virtualItems: readonly ConversationTurnNavigatorVirtualItem[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
+  /**
+   * 可选：`unitIndex -> item` 索引。滚动路径上 items 变化极少而每次滚动都要重算，
+   * 传入组件侧已缓存的索引即可跳过每次调用 O(N) 的 `new Map(items.map(...))`；
+   * 缺省时函数内自建，保持纯函数可单测、向后兼容。
+   */
+  itemByUnitIndex?: Map<number, ConversationTurnNavigatorItem>;
 }
 
 export interface ConversationTurnNavigatorQueryPosition {
+  rowId: number;
+  start: number;
+  end: number;
+}
+
+/** 归一化（start/end 已夹取为有限非负）且按 start 升序、rowId 升序排好的位置表。 */
+export interface ConversationTurnNavigatorNormalizedQueryPosition {
   rowId: number;
   start: number;
   end: number;
@@ -44,6 +57,12 @@ interface ResolveConversationTurnNavigatorActiveQueryRowIdOptions {
   positions: readonly ConversationTurnNavigatorQueryPosition[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
+  /**
+   * 可选：同一批 positions 的归一化+排序结果（由
+   * `normalizeConversationTurnNavigatorQueryPositions` 产出）。调用方已持有排序结果时
+   * 传入，跳过每次调用的 `map().sort()`；缺省时函数内自建。
+   */
+  normalizedPositions?: readonly ConversationTurnNavigatorNormalizedQueryPosition[];
 }
 
 type ConversationTurnNavigatorBarTone = "idle" | "mid" | "near" | "peak";
@@ -214,17 +233,16 @@ function resolveFiniteNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-export function resolveConversationTurnNavigatorActiveUnitIndex({
-  items,
-  virtualItems,
-  scrollOffsetPx,
-  viewportHeightPx,
-}: ResolveConversationTurnNavigatorActiveUnitIndexOptions): number | undefined {
+export function resolveConversationTurnNavigatorActiveUnitIndex(
+  options: ResolveConversationTurnNavigatorActiveUnitIndexOptions,
+): number | undefined {
+  const { items, virtualItems, scrollOffsetPx, viewportHeightPx } = options;
   if (items.length === 0) {
     return undefined;
   }
 
-  const itemByUnitIndex = new Map(items.map((item) => [item.unitIndex, item]));
+  const itemByUnitIndex =
+    options.itemByUnitIndex ?? new Map(items.map((item) => [item.unitIndex, item]));
   const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
   const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
 
@@ -267,16 +285,14 @@ export function resolveConversationTurnNavigatorActiveUnitIndex({
   );
 }
 
-export function resolveConversationTurnNavigatorActiveQueryRowId({
-  positions,
-  scrollOffsetPx,
-  viewportHeightPx,
-}: ResolveConversationTurnNavigatorActiveQueryRowIdOptions): number | undefined {
-  if (positions.length === 0) return undefined;
-
-  const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
-  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
-  const normalized = positions
+/**
+ * 把原始位置表归一化并排序，供 `resolveConversationTurnNavigatorActiveQueryRowId`
+ * 复用（滚动高频路径上避免每次重排）。
+ */
+export function normalizeConversationTurnNavigatorQueryPositions(
+  positions: readonly ConversationTurnNavigatorQueryPosition[],
+): ConversationTurnNavigatorNormalizedQueryPosition[] {
+  return positions
     .map((position) => {
       const start = resolveFiniteNonNegative(position.start);
       return {
@@ -286,6 +302,18 @@ export function resolveConversationTurnNavigatorActiveQueryRowId({
       };
     })
     .sort((left, right) => left.start - right.start || left.rowId - right.rowId);
+}
+
+export function resolveConversationTurnNavigatorActiveQueryRowId(
+  options: ResolveConversationTurnNavigatorActiveQueryRowIdOptions,
+): number | undefined {
+  const { positions, scrollOffsetPx, viewportHeightPx } = options;
+  if (positions.length === 0) return undefined;
+
+  const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
+  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
+  const normalized =
+    options.normalizedPositions ?? normalizeConversationTurnNavigatorQueryPositions(positions);
 
   const visible = normalized.filter(
     (position) => position.end >= viewportStart && position.start <= viewportEnd,
