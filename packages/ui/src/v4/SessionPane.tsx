@@ -2334,7 +2334,9 @@ export function SessionPane({
           payload =
             command.command === "ctxReduce"
               ? { tags: command.range ?? "" }
-              : { ...(command.range ? { range: command.range } : {}) };
+              : command.range
+                ? { range: command.range }
+                : {};
           break;
         default:
           return false;
