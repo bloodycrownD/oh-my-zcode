@@ -192,6 +192,15 @@ export type CommandCenterApp = {
   getTheme?(): TuiSubmitPromptResult["theme"];
   getThoughtLevel?(): string | undefined;
   loadSessionTranscript?(): Promise<NonNullable<TuiSubmitPromptResult["restoredMessages"]>>;
+  /**
+   * FORK（MF-06）：magic-context 的 effective 开关（契约 8：
+   * `features.magicContext && magicContext.enabled`），值由 `create-app` 从
+   * `runtimeConfig.magicContext.enabled` 透传——与 turn-loop 的插桩门同源同一次求值。
+   * `/ctx-*` 读它决定要不要开库，不自行读 `features`（MF-06 r2 硬约束）。
+   *
+   * 可选而非必需：与 bootstrap 侧的同名能力一致，缺席按「关」处理。
+   */
+  isMagicContextEnabled?(): boolean;
   readSubagents?: import("@zcode/tui").TuiReadSubagents;
   readSubagentTranscript?: import("@zcode/tui").TuiReadSubagentTranscript;
   readTarget?(): Promise<CommandCenterTarget | null>;

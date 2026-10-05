@@ -36,9 +36,20 @@
  *                     「runner 未接线、什么都没重建」，并给出重建前的状态。帮助
  *                     文案注明这是简化首版。
  *
- * 包是**动态 import** 的：用户显式把 `features.magicContext` 关闭时，不应因为一
- * 条 `/ctx-status` 就把整棵 magic-context 模块图拉进内存——而这条命令完全可能在
+ * 包是**动态 import** 的：用户显式把 magic-context 关掉时，不应因为一条
+ * `/ctx-status` 就把整棵 magic-context 模块图拉进内存——而这条命令完全可能在
  * 那个状态下被敲出来。
+ *
+ * ============================================================================
+ * effective 开关（MF-06）
+ * ============================================================================
+ *
+ * 关掉时敲这四条命令**不许建库**：off 态回一条 UNAVAILABLE 就完事——命令面读
+ * `app.isMagicContextEnabled?.()`（`create-app` 从 `runtimeConfig.magicContext.enabled`
+ * 透传的那个值，与 turn-loop 的插桩门**同源同一次求值**）。**不**在这里自行读
+ * `features`、**不**重算一遍：features=true 而 `enabled=false` 时两份算法会分叉，
+ * 一边开库出报告、一边根本不插桩。能力缺席（旧的轻量嵌入方 / 测试 app）按「关」
+ * 处理，见 `isMagicContextEnabled` 的注释。
  */
 
 import type { TuiSubmitPromptResult } from "@zcode/tui";
@@ -55,7 +66,57 @@ const USAGE: Record<CtxCommandName, string> = {
 };
 
 const MAGIC_CONTEXT_UNAVAILABLE =
-  "Magic Context is not available in this session; enable features.magicContext to use /ctx-* commands.";
+  "Magic Context is not available in this session; enable features.magicContext (and leave magicContext.enabled on) to use /ctx-* commands.";
+
+/**
+ * 宿主身份装不上（harness 被锁在别的 id 上）时的回话。与 UNAVAILABLE 分开是因为
+ * 它不是「功能没开」，而是「开了但归属写不对」——照写就会污染归因列。
+ */
+const MAGIC_CONTEXT_HOST_IDENTITY_UNAVAILABLE =
+  "Magic Context host identity could not be initialized, so nothing was read or written; the host wiring pins the wrong harness.";
+
+/**
+ * magic-context 的 effective 开关（契约 8：`features.magicContext &&
+ * magicContext.enabled`）。
+ *
+ * **唯一可信来源是 App 暴露的那一次求值**（`app.isMagicContextEnabled?.()`，
+ * `create-app` 用 `runtimeConfig.magicContext.enabled === true` 填的，与
+ * `createMagicContextTurnTransform` 的装配门同一个值）。本文件既不读 `features`
+ * 也不重算：两份算法只要有一处漂移，命令面与 turn-loop 就会分叉。
+ *
+ * 能力缺席（`isMagicContextEnabled` 未实现的旧嵌入方 / 测试 record）或取 App 失败
+ * 时按**关**处理——命令面不做「猜开」的兜底。理由：本文件能看见的唯一数据库路径
+ * 是「开了才有意义」的那条，宁可少回一条诊断，也不凭空造一个 db 文件。
+ */
+async function isMagicContextEnabled(deps: CommandCenterDeps): Promise<boolean> {
+  try {
+    const app = await deps.getApp();
+    return app.isMagicContextEnabled?.() === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * 宿主身份归一（MF-06）。
+ *
+ * `/ctx-reduce` 走的是**自建工具路径**（`createCtxReduceTools`），写入
+ * `pending_ops.harness` 时取的是 `core/shared/harness.ts` 的当前值——那条路径不经过
+ * 装配层的 `initializeMagicContextHost()`（只有 create-app 装 transform 时才调），于是
+ * 默认的 `"opencode"` 会被真写进库，正是 `host/harness.ts` 自称的那个 correctness
+ * bug。这里补一次幂等初始化：真实 App 上它早被装配层调过，这一行是 no-op。
+ *
+ * 装不上（harness 已被锁在别的 id 上）时返回 false，让调用方回一条专门的「归属装不上」
+ * ——此时继续写只会把行归因到错的 harness。
+ */
+function ensureHostIdentity(magicContext: typeof import("@zcode/magic-context")): boolean {
+  try {
+    magicContext.initializeMagicContextHost();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** 包不可用 / 加载失败。命令**不抛**：一条诊断命令失败不该打断会话。 */
 export async function handleCtxCommand(
@@ -65,6 +126,12 @@ export async function handleCtxCommand(
 ): Promise<TuiSubmitPromptResult> {
   const trimmed = args.trim();
 
+  // effective 门**先于一切副作用**：动态 import、开库、连参数提示都不做。关着的
+  // 功能没有「用法提示」可言——用户要做的是把功能打开。
+  if (!(await isMagicContextEnabled(deps))) {
+    return respond(MAGIC_CONTEXT_UNAVAILABLE, deps);
+  }
+
   if (name === "ctx-reduce" && trimmed.length === 0) {
     return respond(USAGE["ctx-reduce"], deps);
   }
@@ -72,6 +139,11 @@ export async function handleCtxCommand(
   const magicContext = await loadMagicContext();
   if (!magicContext) {
     return respond(MAGIC_CONTEXT_UNAVAILABLE, deps);
+  }
+
+  // 在碰库之前归一归属：读面写错无所谓，`pending_ops.harness` 写错就是脏数据。
+  if (!ensureHostIdentity(magicContext)) {
+    return respond(MAGIC_CONTEXT_HOST_IDENTITY_UNAVAILABLE, deps);
   }
 
   try {

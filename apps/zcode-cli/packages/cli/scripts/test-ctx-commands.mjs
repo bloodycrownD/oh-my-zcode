@@ -9,6 +9,10 @@
  *   - `handlers/ctx.ts` 的两个纯参数解析器（`parseExpandArgs` / `parseRecompArgs`），
  *     以及 `slash-commands.ts` 对四个 `/ctx-*` 名字的识别（**不**回落成 unknown，
  *     也不**不**被转发给 submitPrompt——这就是替代 Effect 204 sentinel 的落点）。
+ *   - **MF-06**：`handleCtxCommand` 的 effective 门——off 态四条命令全回
+ *     UNAVAILABLE 且**一条 db 都不建**；on 态 `/ctx-reduce` 写出的
+ *     `pending_ops.harness` 归一为 `"zcode"`（自建工具路径不经过装配层的
+ *     `initializeMagicContextHost()`）。
  *
  * 与 S21 的 `scripts/test-ctx-tools.mjs` 共用同一套「临时 db + dist」跑法；本文件
  * 需要 CLI 侧的 TS 源码，故用仓库根的 `tsx` 装载器跑（`node --import tsx`）。
@@ -18,9 +22,9 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -54,10 +58,15 @@ const {
   setMagicContextRecompRunner,
 } = await import(dist("host/ctx-recomp.js"));
 
+// harness 归一要断言的是「自建工具路径写出的行归到 zcode」，所以这里要能把 harness
+// 打回默认的 "opencode" 再让命令面自己归一——否则断言的是文件顶部的初始化，纯同义反复。
+const { _resetHarnessForTesting } = await import(dist("core/shared/harness.js"));
+const { __resetHostInitializationForTests } = await import(dist("host/harness.js"));
+
 // CLI 侧的纯函数与解析器（TS 源码，经 tsx 装载）。
 const CLI_SRC = fileURLToPath(new URL("../src/command-center/", import.meta.url));
 const { parseSlashCommand } = await import(pathToFileURL(join(CLI_SRC, "slash-commands.ts")).href);
-const { parseExpandArgs, parseRecompArgs, formatCtxStatus } = await import(
+const { parseExpandArgs, parseRecompArgs, formatCtxStatus, handleCtxCommand } = await import(
   pathToFileURL(join(CLI_SRC, "handlers", "ctx.ts")).href
 );
 
@@ -304,6 +313,110 @@ test("parseRecompArgs accepts full / --upgrade / a valid range and rejects the r
   const junk = parseRecompArgs("everything");
   assert.ok("error" in junk);
   assert.match(junk.error, /Invalid \/ctx-recomp arguments/);
+});
+
+// ── MF-06：effective 开关 + harness 归一 ─────────────────────────────────────
+//
+// 命令面**不开库**的 off 态、以及 `/ctx-reduce` 自建工具路径上的 harness 归一，都只能
+// 从命令这一层观测：单测里没有 turn-loop，也没有真实 features 配置。effective 的值
+// 由 `app.isMagicContextEnabled?.()` 给（MF-01 在 create-app 里填的同一个求值结果）。
+
+const UNAVAILABLE_RE = /Magic Context is not available in this session/;
+
+/** 造一份最小 deps：`getApp` 给出一个只声明自己能力面的 app。 */
+function depsForApp(app) {
+  return { getApp: async () => app };
+}
+
+test("off 态：四条 /ctx-* 都回 UNAVAILABLE，且一条 db 都不建", async () => {
+  // 指向一条谁也没碰过的路径：命令面若偷跑 openDatabase，这里就会多出文件。
+  const virginDbPath = join(mkdtempSync(join(tmpdir(), "magic-context-ctxcmd-off-")), "off.db");
+  const previousOverride = process.env.MAGIC_CONTEXT_DB_PATH;
+  process.env.MAGIC_CONTEXT_DB_PATH = virginDbPath;
+
+  try {
+    for (const enabled of [false, undefined]) {
+      const app = {
+        sessionId: "sess_ctx_off",
+        ...(enabled === undefined ? {} : { isMagicContextEnabled: () => enabled }),
+      };
+      const deps = depsForApp(app);
+      // 参数也给足：`/ctx-reduce` 无参走的是用法提示分支，off 态不该从那里漏出去。
+      for (const [name, args] of [
+        ["ctx-status", ""],
+        ["ctx-reduce", "3-5"],
+        ["ctx-expand", "10-20"],
+        ["ctx-recomp", "full"],
+      ]) {
+        const result = await handleCtxCommand(name, args, deps);
+        assert.match(result.response, UNAVAILABLE_RE, `${name} 在 off 态必须回 UNAVAILABLE`);
+        // 连 usage 都不给：功能没开的时候讲用法是噪音。
+        assert.doesNotMatch(result.response, /Usage: \/ctx-/);
+      }
+    }
+
+    assert.equal(
+      existsSync(virginDbPath),
+      false,
+      "off 态不许建库——openDatabase 一旦发生，这里就会多出 off.db（可能还有 -wal/-shm）",
+    );
+  } finally {
+    if (previousOverride === undefined) delete process.env.MAGIC_CONTEXT_DB_PATH;
+    else process.env.MAGIC_CONTEXT_DB_PATH = previousOverride;
+    rmSync(dirname(virginDbPath), { force: true, maxRetries: 5, recursive: true, retryDelay: 50 });
+  }
+});
+
+test("off 态的 effective 只认 app.isMagicContextEnabled，不看别的", async () => {
+  // 能力缺席（旧嵌入方）按「关」处理：`getApp` 抛错同样按「关」处理。
+  const absent = await handleCtxCommand(
+    "ctx-status",
+    "",
+    depsForApp({ sessionId: "sess_ctx_off" }),
+  );
+  assert.match(absent.response, UNAVAILABLE_RE);
+
+  const failing = await handleCtxCommand("ctx-status", "", {
+    getApp: async () => {
+      throw new Error("app not ready");
+    },
+  });
+  assert.match(failing.response, UNAVAILABLE_RE);
+
+  // 开了才放行——放行后的落点由下一条用例兜。
+  const on = await handleCtxCommand(
+    "ctx-status",
+    "",
+    depsForApp({
+      isMagicContextEnabled: () => true,
+      sessionId: SESSION,
+    }),
+  );
+  assert.doesNotMatch(on.response, UNAVAILABLE_RE);
+});
+
+test("on 态：/ctx-reduce 的 pending_ops.harness 归一为 zcode", async () => {
+  // 把 harness 打回 core 的默认值 "opencode"，模拟「自建工具路径先于装配层跑到」的
+  // 那一瞬；命令面必须自己在碰库之前把身份装回去。
+  _resetHarnessForTesting();
+  __resetHostInitializationForTests();
+
+  const sessionId = "sess_ctx_reduce_harness";
+  insertTag(db, sessionId, "msg_1", "text", 64, 1, 0, null, 0, null, null, { tokenCount: 10 });
+
+  const deps = depsForApp({ isMagicContextEnabled: () => true, sessionId });
+  const result = await handleCtxCommand("ctx-reduce", "1", deps);
+  assert.match(result.response, /Queued: drop/, `/ctx-reduce 应排队而不是报错：${result.response}`);
+
+  const rows = db
+    .prepare("SELECT harness FROM pending_ops WHERE session_id = ? ORDER BY id")
+    .all(sessionId);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].harness, "zcode", "pending_ops 必须归到 zcode，而不是 core 默认的 opencode");
+
+  // 归一之后留在进程里的也必须是 zcode（幂等、不回退）。
+  const { getHarness } = await import(dist("core/shared/harness.js"));
+  assert.equal(getHarness(), "zcode");
 });
 
 // pending_ops 只读断言：/ctx-status 不写库（除了 A 组 getOrCreateSessionMeta 建行）。
