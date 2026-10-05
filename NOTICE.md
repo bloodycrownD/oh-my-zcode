@@ -9,7 +9,7 @@
 - **遥测与崩溃上报整体移除**：摘除 ARMS / OTLP / RUM 上报链、崩溃采集、性能 trace 与转化漏斗归因，以及相应依赖与打包接线；模型输入输出日志只写本地，不向任何运营方回传使用数据。
 - **ZCode 原生上下文压缩移除**：删除上游自带的会话压缩实现，压缩与上下文治理统一由下述 magic-context 承担。
 - **集成 magic-context 并默认启用**：把 magic-context（MIT，Copyright (c) 2025 Ufuk Altinok）移植进 [`apps/zcode-cli/packages/magic-context`](apps/zcode-cli/packages/magic-context)。`src/core/` 是上游逐字或近逐字移植件，文件头保留移植来源与 MIT 归属声明；`src/host/` 是本 fork 编写的 ZCode 侧适配层。上游许可全文见 [magic-context/LICENSE.magic-context](apps/zcode-cli/packages/magic-context/LICENSE.magic-context)。
-- **品牌改名**：可执行名 `zcode` → `omz`，npm 包名 → `oh-my-zcode`，数据目录 `~/.zcode` → `~/.omz`，插件市场 id → `oh-my-zcode-official`（过渡期仍接受官方市场的旧 id 别名）。
+- **品牌改名**：可执行名 `zcode` → `omz`，npm 包名 → `oh-my-zcode`，用户级数据目录 `~/.zcode` → `~/.omz`，插件市场 id → `oh-my-zcode-official`（过渡期仍接受官方市场的旧 id 别名）。**改名只覆盖用户级 HOME 下的 `.zcode`**：工作区级 `<cwd>/.zcode` 与插件清单目录 `.zcode-plugin/` 跟随仓库内容，不参与品牌改名，刻意保留原名。
 - **apps 目录扁平化**：`apps/zcode-cli` 不再是 Git submodule，作为普通目录随主仓库一起提交；`scripts/bootstrap.mjs` 不再执行 `git submodule update`。
 
 本 fork 与上游的同步、重放与门禁流程见 [UPSTREAM-SYNC.md](UPSTREAM-SYNC.md)。

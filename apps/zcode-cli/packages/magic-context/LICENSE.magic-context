@@ -6,20 +6,24 @@ This package (`@zcode/magic-context`) is a fork-local port of:
   upstream version : 0.44.4
   upstream license : MIT
   upstream copyright: Copyright (c) 2025 Ufuk Altinok
-  snapshot used    : .reference/magic-context (read-only upstream snapshot)
+  snapshot used    : <repo>/../.reference/magic-context (read-only upstream snapshot)
 
-The ported files carry this attribution in their header comment, e.g.
+A subset of the ported files carries this attribution in a header comment added
+by this fork, e.g.
 
   MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
 
-Files under `src/core/` are, per their own header comments, verbatim or
-near-verbatim ports of the corresponding upstream files; `src/host/` and
-`src/index.ts` are fork-written ZCode adapters that reuse upstream types and
-storage semantics.
+Files under `src/core/` are verbatim or near-verbatim ports of the
+corresponding upstream files; `src/host/` and `src/index.ts` are fork-written
+oh-my-zcode adapters that reuse upstream types and storage semantics.
 
-The upstream per-file headers were preserved as-is (the upstream sources carry
-no per-file copyright header, so there is nothing per-file to restore). This
-file carries the MIT notice the license requires to travel with copies or
+Upstream declares its license once, at its repository root — the upstream
+sources carry no per-file copyright header, so there is no per-file upstream
+notice to preserve or restore. The per-file headers here are fork-authored
+attribution, not upstream text: 33 files that had been mislabelled Apache-2.0
+in their header comments were corrected to MIT, and only a subset of files
+carries such a header at all (22 of the 245 TypeScript files under `src/core/`).
+This file carries the MIT notice the license requires to travel with copies or
 substantial portions of the upstream Software. The fork's own code remains
 under the repository-root Apache-2.0 LICENSE; MIT permits this combination as
 long as the MIT notice above is retained.
