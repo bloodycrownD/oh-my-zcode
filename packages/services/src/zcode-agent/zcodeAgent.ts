@@ -96,6 +96,7 @@ import type {
   V4ConversationWorkflowRunWorkspaceResult,
   V4ConversationWorkflowRunsResult,
   V4ConversationRowsRangeResult,
+  V4ConversationTurnDirectoryResult,
   V4ConversationResyncResult,
   V4ConversationSubscribeResult,
   V4SessionsIndexSubscribeResult,
@@ -379,6 +380,17 @@ export interface ZCodeAgentConversationRowsRangeParams extends ZCodeAgentSession
   beforeRowId?: number;
   /** 1..rowsRangeMaxLimit（200）。 */
   limit: number;
+}
+
+/**
+ * turn 目录窄投影（turnNavigator 的数据源）：粒度是 realUser origin 的 query，
+ * 与 rowsRange 同族的只读 query。游标落在 queryRowId 上而非 turnKey。
+ */
+export interface ZCodeAgentConversationTurnDirectoryParams extends ZCodeAgentSessionTarget {
+  /** 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。 */
+  beforeQueryRowId?: number;
+  /** 1..turnDirectoryMaxEntries；缺省 = 服务端取契约限额。 */
+  limit?: number;
 }
 
 /** 当前有效分支里的终态 ExitPlanMode 目录。 */
@@ -762,6 +774,10 @@ export interface IZCodeAgentService {
   conversationRowsRangeV4(
     params: ZCodeAgentConversationRowsRangeParams,
   ): Promise<V4ConversationRowsRangeResult>;
+  /** turn 目录窄投影 query（turnNavigator 的目录态数据源；游标 queryRowId）。 */
+  conversationTurnDirectoryV4(
+    params: ZCodeAgentConversationTurnDirectoryParams,
+  ): Promise<V4ConversationTurnDirectoryResult>;
   conversationPlansV4(
     params: ZCodeAgentConversationPlansParams,
   ): Promise<V4ConversationPlansResult>;

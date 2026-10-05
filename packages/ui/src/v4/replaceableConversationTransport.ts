@@ -133,6 +133,12 @@ export class ReplaceableConversationTransport implements ConversationTransport {
     return this.current.rowsRange(params);
   }
 
+  turnDirectory(
+    params: Parameters<ConversationTransport["turnDirectory"]>[0],
+  ): ReturnType<ConversationTransport["turnDirectory"]> {
+    return this.current.turnDirectory(params);
+  }
+
   plans(
     params: Parameters<ConversationTransport["plans"]>[0],
   ): ReturnType<ConversationTransport["plans"]> {
