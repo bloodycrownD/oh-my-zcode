@@ -8,9 +8,8 @@ import type {
   DesktopWindowChromeState,
   IPlatformService,
   RemoteTarget,
-  RemoteWorkspaceSessionEntry,
-  UpdateStatePayload,
-  UserInfo,
+RemoteWorkspaceSessionEntry,
+UserInfo,
 } from "@zcode/shared";
 import type { IFeedbackService, IServiceAccessor } from "@zcode/services";
 import type { BrowserNavigationRequest, RecentClosedSidePaneTab } from "@/hooks/useAppPanels.js";
@@ -136,8 +135,6 @@ export interface WorkspaceShellLayoutProps extends Omit<AppProps, "baseFeedbackS
   desktopWindowChromeState: DesktopWindowChromeState | null;
   macWindowControlsLeftPaddingPx: number;
   windowsWindowControlsRightPaddingPx: number;
-  updateReadyVersion: string | null;
-  updateState: UpdateStatePayload | null;
   sidebarContainerRef: RefObject<HTMLElement | null>;
   toggleSidebarShortcutLabel: string;
   newTaskShortcutLabel: string;
