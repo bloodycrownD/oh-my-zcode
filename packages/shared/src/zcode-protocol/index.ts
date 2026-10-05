@@ -2142,13 +2142,29 @@ export type ZCodeWorkspaceUpdateInteractionPreferencesResult = z.infer<
  * 传整域而非 partial：schema 的 `.default()` 保证一次 parse 就产出完整域，写盘与
  * `configPort.set` 因此都是整域替换，不会出现「这次保存只改了阈值，下次读却把
  * 上次的 historian 抹掉」的部分覆盖。
+ *
+ * `config` 的两种「空」由**两层**分别拦住（zod 4.6.5 实测结论）：
+ *
+ *   1. **键缺席** —— `z.unknown()` 在 zod 4 里是 nonoptional 的（不是 zod 3 的
+ *      「可缺席」语义），所以 `{ workspace }` 直接被 object 层判 `invalid_type`
+ *      拒绝，根本进不到下面的 refine。
+ *   2. **值为空**（`config: null` / `config: undefined`）—— 键存在、值为空，
+ *      在 JSON-RPC 线上完全合法，会一路穿过 `.strict()`。这才是静默重置整域的
+ *      真实入口：handler 若 `?? {}` 兜底，就把空值当成「保存一份全默认域」写盘 +
+ *      fan-out + 回 `applied:true`，用户一次调用丢掉整份配置却毫无提示。因此
+ *      在信封层用 refine 硬拒，且**不用 `.default()` / `.catch()`** —— 那两个
+ *      恰恰会把空值重新变回合法入参。
  */
 export const zcodeWorkspaceUpdateMagicContextConfigParamsSchema = z
   .object({
     workspace: zcodeWorkspaceRefSchema,
     config: z.unknown(),
   })
-  .strict();
+  .strict()
+  .refine((params) => params.config !== undefined && params.config !== null, {
+    message: "config is required and must not be null: 整域替换，缺席或空值等于重置",
+    path: ["config"],
+  });
 export type ZCodeWorkspaceUpdateMagicContextConfigParams = z.infer<
   typeof zcodeWorkspaceUpdateMagicContextConfigParamsSchema
 >;

@@ -89,9 +89,10 @@ export async function readMagicContextConfig(
   const result = zcodeWorkspaceReadMagicContextConfigResultSchema.parse({
     workspace: params.workspace,
     path: loaded.path,
-    // `loadFileConfig` 装载失败时给的是 `{}`，这里让 schema 补齐成完整默认域，
-    // 与 update 的 `params.config ?? {}` 兜底语义一致：文件坏掉时 UI 仍然看到
-    // 一份可编辑的完整表单，而不是一堆 undefined 输入框。
+    // `loadFileConfig` 装载失败时给的是 `{}`，这里让 schema 补齐成完整默认域：
+    // 文件坏掉时 UI 仍然看到一份可编辑的完整表单，而不是一堆 undefined 输入框。
+    // 注意这是**读**路径的空对象兜底，与 update 路径的 `?? {}` 不是一回事——后者
+    // 会把「调用方没传域」当成合法入参，属 MF-07 已删除的静默重置入口。
     config: MagicContextConfigSchema.parse(loaded.config.magicContext ?? {}),
   });
   context.logger?.info("magicContext config read", {
@@ -119,7 +120,18 @@ export async function updateMagicContextConfig(
   // 键 **strip 而非 reject**：未知键被静默丢弃（不进 `parsed.data`，因而也不会被写盘
   // 或推给 ConfigPort），**只有类型/形状错误**才落到下面的 -32602 分支。措辞上
   // 不能把它读成「未知键会被拒」。
-  const parsed = MagicContextConfigSchema.safeParse(params.config ?? {});
+  //
+  // FORK（MF-07）：纵深防御——信封层的 refine 已经拒掉 `null`/`undefined`，这里
+  // 再挡一次，绝不 `?? {}`。`?? {}` 会把「空值」读成「保存一份全默认域」：整域
+  // 替换语义下一次空值调用就把用户整份配置静默重置，还回 `applied:true`、改磁盘、
+  // 推广播——这是本条修复的真因。空值是调用方的错，只能是 -32602。
+  if (params.config === undefined || params.config === null) {
+    throw new ProtocolRequestError(
+      -32602,
+      "Invalid params — config is required and must not be null: 整域替换，缺席或空值等于重置",
+    );
+  }
+  const parsed = MagicContextConfigSchema.safeParse(params.config);
   if (!parsed.success) {
     throw new ProtocolRequestError(
       -32602,

@@ -177,6 +177,98 @@ test("A2: empty/absent config falls back to the full default domain", async () =
   });
 });
 
+// ── A2-MF07: 「空值」不是「空对象」，两者语义相反 ────────────────────────────
+//
+// 整域替换语义下，`config` 缺席或为空值都等于「把整份配置重置成默认值」，且会被
+// 写盘 + fan-out + 回 `applied:true`——静默数据损坏。反过来 `config: {}` 是合法
+// 的「我就要存全默认域」，必须放行。三条路径各自钉住：
+
+test("A2 (MF-07): absent config key is rejected by the envelope, nothing is written", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ ui: { locale: "zh-CN" } }), "utf-8");
+    const configPort = createConfigPort({});
+    let setCalls = 0;
+    const originalSet = configPort.set.bind(configPort);
+    configPort.set = (key, value) => {
+      setCalls += 1;
+      originalSet(key, value);
+    };
+
+    // zod 4 的 `z.unknown()` 是 nonoptional 的：键缺席在 object 层就判 invalid_type。
+    const parsed = zcodeWorkspaceUpdateMagicContextConfigParamsSchema.safeParse({
+      workspace: WORKSPACE,
+    });
+    assert.equal(parsed.success, false);
+    assert.equal(parsed.error.issues[0].code, "invalid_type");
+
+    await assert.rejects(
+      () =>
+        updateMagicContextConfig(
+          contextWith(sessionRecord(configPort)),
+          { workspace: WORKSPACE },
+          { configPath },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32602);
+        return true;
+      },
+    );
+
+    assert.equal(setCalls, 0);
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf-8")), {
+      ui: { locale: "zh-CN" },
+    });
+  });
+});
+
+test("A2 (MF-07): null config is rejected by the envelope refine, disk and ConfigPort untouched", async () => {
+  await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeFile(configPath, JSON.stringify({ ui: { locale: "en-US" } }), "utf-8");
+    const configPort = createConfigPort({});
+    const before = configPort.get(ConfigKey.MagicContext);
+    let setCalls = 0;
+    const originalSet = configPort.set.bind(configPort);
+    configPort.set = (key, value) => {
+      setCalls += 1;
+      originalSet(key, value);
+    };
+
+    // 键存在、值为空：JSON-RPC 线上合法，会一路穿过 `.strict()`，由 refine 兜住。
+    for (const empty of [null, undefined]) {
+      const parsed = zcodeWorkspaceUpdateMagicContextConfigParamsSchema.safeParse({
+        workspace: WORKSPACE,
+        config: empty,
+      });
+      assert.equal(parsed.success, false, `expected envelope to reject config=${String(empty)}`);
+      assert.equal(parsed.error.issues[0].path[0], "config");
+
+      await assert.rejects(
+        () =>
+          updateMagicContextConfig(
+            contextWith(sessionRecord(configPort)),
+            { workspace: WORKSPACE, config: empty },
+            { configPath },
+          ),
+        (error) => {
+          assert.equal(error.name, "ProtocolRequestError");
+          assert.equal(error.code, -32602);
+          assert.match(error.message, /config is required and must not be null/);
+          return true;
+        },
+      );
+    }
+
+    assert.equal(setCalls, 0, "空值调用绝不能广播到内存");
+    assert.deepEqual(configPort.get(ConfigKey.MagicContext), before);
+    assert.deepEqual(JSON.parse(await readFile(configPath, "utf-8")), {
+      ui: { locale: "en-US" },
+    });
+  });
+});
+
 // ── A3: success = 写盘 + 内存双写 ─────────────────────────────────────────────
 
 test("A3: success writes the file and pushes the parsed domain into every session", async () => {
