@@ -263,6 +263,9 @@ export function SettingsPage({
   onCreateTask,
   onOpenWorkspace,
   allowOpenWorkspace = true,
+  onLogin,
+  onLogout,
+  user,
 }: {
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
@@ -273,6 +276,9 @@ export function SettingsPage({
   onCreateTask?: (request?: CreateTaskRequest) => void;
   onOpenWorkspace?: () => void;
   allowOpenWorkspace?: boolean;
+  onLogin?: () => void;
+  onLogout?: () => void;
+  user?: UserInfo | null;
 }) {
   const { intl, localePreference, setLocalePreference } = useZCodeIntl();
   const { settingsSectionGroups, settingsSections } = useMemo(
@@ -1406,7 +1412,10 @@ export function SettingsPage({
                   onSettingsButtonClick={onBack}
                   onUsageClick={handleOpenUsageSettings}
                   onUpgradeClick={handleOpenCodingPlanUpgradeSettings}
+                  onLogin={onLogin}
+                  onLogout={onLogout}
                   settingsButtonMode="back"
+                  user={user}
                   // 头像菜单是 WorkspaceSidebarFooter 的共享菜单，Settings 场景不能丢失桌面平台能力。
                   // 之前这里没透传 isDesktop，导致同一个头像菜单在设置页缺少界面缩放入口。
                   isDesktop={isDesktop}
