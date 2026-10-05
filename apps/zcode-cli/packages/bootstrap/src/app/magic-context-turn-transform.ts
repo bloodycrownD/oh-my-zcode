@@ -112,6 +112,7 @@ import {
   createScheduler as createPackageScheduler,
   createTagger,
   createTransform,
+  drainHistorianSchedulerWithTimeout,
   findConfigReadinessError,
   getActiveCompartmentRun,
   getMagicContextDatabasePath,
@@ -152,7 +153,13 @@ export type ZCodeMagicContextTransform = (
 ) => Promise<void>;
 
 export interface MagicContextTurnTransformOptions {
-  /** `RuntimeConfig.features.magicContext`。false → 工厂直接返回 undefined。 */
+  /**
+   * **冷**求值后的 effective 开关（`features.magicContext && magicContext.enabled`，
+   * 见 spec 契约 8 与 `runtime-config.ts`）。false → 工厂直接返回 undefined：不开
+   * bridge、不 import 模块图、不开 DB。
+   *
+   * 运行中切换走返回端口上的 `isEnabled()`，不是这里。
+   */
   enabled: boolean;
   /**
    * FORK（S23 / D-12）：本 App 的配置口。提供时 config bridge 订阅
@@ -179,6 +186,22 @@ export interface MagicContextTurnTransformOptions {
   createSidecarModel?: CreateSidecarModel;
   /** 会话根 trace；sidecar 请求在它下面开子 span。 */
   traceContext?: TraceContext;
+  /**
+   * FORK（MF-05）：把本装配的**关闭钩子**交给装配层。
+   *
+   * 之前 `drainHistorianSchedulerWithTimeout` / `historian.shutdown` /
+   * `bridge.dispose` 三件事没有任何生产调用方（config bridge 在
+   * `config-bridge.ts` 里订阅 `ConfigPort` 且永不退订），于是会话/进程结束时
+   * 在飞的 historian 不会被收口、订阅计数也不会归零。
+   *
+   * 装配层把它挂进 `session-facade.ts` 的 `close()` 链——**必须**在
+   * `closeSessionResources` 之前：historian 的在飞请求要写库，而 store / execution
+   * port 一旦先关，写库就落在已关闭的 store 上。
+   *
+   * 缺席（单测与不装 historian 的装配）= 不产生关闭钩子，行为与本 fork 之前逐行
+   * 相同。
+   */
+  registerClose?(close: () => Promise<void>): void;
   /**
    * FORK（S24）：provider usage 的记录口。上游 OpenCode 的 plugin 在
    * `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里由宿主
@@ -740,6 +763,10 @@ export async function createMagicContextTurnTransform(
   });
   const config = bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG;
 
+  // FORK（MF-05）：bridge 一旦建立就持有 `ConfigPort` 的订阅，退订与否必须有
+  // 主人。下面三条提前 return 都要走同一个 dispose。
+  const disposeBridge = (): void => bridge.dispose();
+
   const readiness = findConfigReadinessError(config);
   if (readiness) {
     // historian 属 S20/S24；S19b 只记诊断，不因此拒绝装配——否则默认配置（无
@@ -765,6 +792,9 @@ export async function createMagicContextTurnTransform(
       event: "magic_context.storage_unavailable",
       detail,
     });
+    // DB 开不出来时没有 historian、没有调度器，但 bridge 的 ConfigPort 订阅已
+    // 建立——不 dispose 就等于给一个永不会生效的订阅留个尾巴。
+    disposeBridge();
     return undefined;
   }
 
@@ -808,9 +838,10 @@ export async function createMagicContextTurnTransform(
     if (!sink) return;
     void readMagicContextUsageSummary(db, options.sessionId)
       .then((summary) => sink(summary.usage))
-      .catch(() => {
-        // 读不出来就推 null：投影层据此删掉该键，面板整段收起。诊断面不抛。
-      });
+      // FORK（MF-11）：读不出来就推 `null`，投影层据此删掉该键、面板整段收起。
+      // 注释曾承诺这件事、代码却只有一个空 catch —— 读失败会静默地让面板停留在
+      // 上一帧的读数上，看起来像「用量卡住了」而不是「这一轮没读到」。
+      .catch(() => sink(null));
   };
   options.usageRecorder?.onUsageRecorded(publishUsageSummary);
 
@@ -840,7 +871,28 @@ export async function createMagicContextTurnTransform(
     // D-13 ①：这一 pass 刚改过 compartments / dropped / 缓存块。
     publishUsageSummary();
   };
-  return createZCodeMagicContextTurnTransformPort(transform, {
+  // FORK（MF-05）：会话/进程关闭时按 **drain → shutdown → dispose** 的顺序收口。
+  //
+  //   ① drain（有界）：在飞的那次后台 pass 先跑完，让它的 publish 与 drain 预留真正
+  //      落库——「一进程 = 一轮」下这一步不做就等于把尾账留给下一个进程。
+  //   ② shutdown：停调度 + abort 在飞的 sidecar 请求（MF-03 补上 signal 之后它才
+  //      真的停得下来）。
+  //   ③ dispose：退掉 bridge 对 `ConfigPort` 的订阅，订阅计数归零。
+  //
+  // 三步都必须在 `closeSessionResources` **之前**：historian 要写库，而那时 store /
+  // execution port 还开着。
+  options.registerClose?.(async () => {
+    if (historian.historianScheduler !== undefined) {
+      await drainHistorianSchedulerWithTimeout(
+        historian.historianScheduler,
+        HISTORIAN_SETTLE_TIMEOUT_MS,
+      );
+    }
+    historian.shutdown();
+    disposeBridge();
+  });
+
+  const port = createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
     options,
     // 两个消费者都不在时**不挂**回调：Step 19b 的单测走的就是这条路径，它必须与
@@ -848,7 +900,25 @@ export async function createMagicContextTurnTransform(
     ...(historian.historianScheduler === undefined && options.usageRecorder === undefined
       ? {}
       : { onPassSucceeded: notifyPassSucceeded }),
+    // FORK（MF-04）：调度器那一次 pass 也需要有界 settle。`notifyTurnSuccess` 本身
+    // 仍是 fire-and-forget（不该让 UI 等一次可能几十秒的 historian），但**进程会
+    // 退出**——于是在这一轮交还控制权之前，替它等一个有界的窗口。
+    ...(historian.historianScheduler === undefined
+      ? {}
+      : { settleScheduledPass: () => drainHistorianSchedulerWithTimeout(
+            historian.historianScheduler as NonNullable<typeof historian.historianScheduler>,
+            HISTORIAN_SETTLE_TIMEOUT_MS,
+          ) }),
   });
+  // FORK（MF-01）：端口上的活值开关。core 每个 turn 现读它，于是设置页把
+  // `magicContext.enabled` 关掉后**下一个 turn**就不再插桩，而不必重启进程。
+  //
+  // 数据源刻意是 bridge 自己的快照而不是 `runtimeConfig`：那份 config 是装配期的
+  // 冻结副本，而这里的快照被 `ConfigPort` 订阅持续更新，正是「活值」的那一半。
+  // `enabled` 缺席按 schema 缺省 true 处理。
+  const isEnabled = (): boolean =>
+    (bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG).enabled !== false;
+  return Object.assign(port, { isEnabled });
 }
 
 /**
@@ -1029,6 +1099,15 @@ export function createZCodeMagicContextTurnTransformPort(
      * 缺席（Step 19b 的单测走的就是这条）时端口行为与 S19b 逐行相同。
      */
     onPassSucceeded?: (model: MagicContextTurnTransformInput["model"]) => void;
+    /**
+     * FORK（MF-04）：`onPassSucceeded` 之后**有界**地等调度器那一次后台 pass 落定。
+     *
+     * 缺席 = 只保留 S24-fix2 的 `settleInFlightHistorian`（它只护 transform **内部**
+     * 那条触发路径）。有了本钩子，「一进程 = 一轮」下的调度器 pass 也不再随进程
+     * 退出被截断——否则 drain 预留泄漏、compartment 不落库（`:970` 注释自陈的
+     * 那条风险）。
+     */
+    settleScheduledPass?: () => Promise<void>;
   },
 ): MagicContextTurnTransform {
   const { options } = port;
@@ -1154,6 +1233,10 @@ export function createZCodeMagicContextTurnTransformPort(
     // 意味着这一 pass 什么都没做（放行了未改写的请求），此时驱动 historian 是
     // 在替一次已经失败的折叠再调度一次——所以严格排除。
     if (port.onPassSucceeded !== undefined) port.onPassSucceeded(input.model);
+    // FORK（MF-04）：调度器新起的那次 pass 也要有界 settle，理由同
+    // `settleInFlightHistorian`——进程会退出。失败/拒绝由钩子自己吞掉：它本来就不该
+    // 影响这一轮请求（上面那次 settle 也是同样的处置）。
+    if (port.settleScheduledPass !== undefined) await port.settleScheduledPass();
     return { entries, outcome: unchanged ? "unchanged" : "applied", syntheticHeadPositions };
   };
 }

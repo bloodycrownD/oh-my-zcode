@@ -89,9 +89,21 @@ export interface MagicContextTurnTransformResult {
  * 装配层提供的每请求 transform。缺席即"flag off"——装配层在 flag off 时根本不创建
  * 它，所以 turn-loop 的判空就是完整门控。
  */
-export type MagicContextTurnTransform = (
-  input: MagicContextTurnTransformInput,
-) => Promise<MagicContextTurnTransformResult>;
+export interface MagicContextTurnTransform {
+  (input: MagicContextTurnTransformInput): Promise<MagicContextTurnTransformResult>;
+  /**
+   * FORK（MF-01）：**活值**开关谓词，每 turn 现读一次。
+   *
+   * 为什么不能只读 `runtime.config.magicContext?.enabled`：那份 config 是**装配期
+   * 冻结**的副本，D-12 的「运行中改设置、无需重启」在它上面读不到 ConfigPort 的
+   * 新值（spec Step 16 判据）。而 `magicContext.enabled` 是设置页的一个普通表单
+   * 字段——不给活值通道，用户点下去就会得到「保存成功但行为不变」。
+   *
+   * 缺席（旧的/轻量的端口实现）= 不做二次门控，退回到 `runtime.config` 那一位，
+   * 行为与本 fork 之前逐行相同。
+   */
+  isEnabled?(): boolean;
+}
 
 export interface MagicContextTurnTransformRuntime {
   readonly config: { magicContext?: { enabled?: boolean } };
@@ -207,7 +219,12 @@ export async function runMagicContextTurnTransform(
 ): Promise<readonly RuntimeMessageEntry[]> {
   // 门控：端口缺席（装配层没建实例）已经覆盖了 flag off；配置再显式关一次是防御
   // ——Step 23 接 ConfigPort 热更新后，运行中改配置必须立刻生效而不必重启装配。
+  //
+  // FORK（MF-01）：两个门是**同源**的两半——`runtime.config` 那一位是装配期的冷求值
+  // （`features && magicContext.enabled`），端口的 `isEnabled()` 是同一字段的活值
+  // 版本。后者在场时以它为准，于是设置页把 `enabled` 关掉后，下一个 turn 不再插桩。
   if (!runtime.magicContextTurnTransform) return input.entries;
+  if (runtime.magicContextTurnTransform.isEnabled?.() === false) return input.entries;
   if (runtime.config.magicContext?.enabled === false) return input.entries;
 
   const result = await runtime.magicContextTurnTransform(input);

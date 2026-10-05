@@ -112,6 +112,10 @@ export interface MagicContextHistorianHost {
    */
   noteLiveModel: (model: Pick<Model, "properties">) => void;
   /** 关闭时终止在飞的 historian（会话关闭 / App 退出）。 */
+  /**
+   * 幂等。先 abort 宿主信号（在飞的 sidecar 请求立刻停，MF-03），再停调度器
+   * （不再接新的 pass）。
+   */
   shutdown: () => void;
 }
 
@@ -289,6 +293,11 @@ export function createMagicContextHistorianHost(
 
   let hiddenCompletionExecutor: HiddenCompletionExecutor | undefined;
   let historianMaxOutputTokens: number | undefined = config.historian.maxTokens;
+  // FORK（MF-03）：本宿主级的关闭信号。包内调度器自己有一只 `shutdownController`，
+  // 但它的 `signal` 只传到 `runSession` 的形参——而真正握着 provider 请求的
+  // `AbortSignal` 是 executor 每个 run slot 的 `controller`。把这一只接到 executor 的
+  // `externalSignal` 上，关闭时才真的能停掉在飞的 sidecar 请求，而不是「不再等待」。
+  const hostShutdownController = new AbortController();
   if (historianModel !== undefined && deps.createSidecarModel !== undefined) {
     const model = deps.createSidecarModel(historianModel);
     if (model) {
@@ -300,6 +309,7 @@ export function createMagicContextHistorianHost(
           createSidecarModel: deps.createSidecarModel,
           ...(deps.traceContext === undefined ? {} : { traceContext: deps.traceContext }),
         }),
+        externalSignal: hostShutdownController.signal,
       });
     } else {
       deps.logger.warn("Magic context historian model cannot be constructed; historian stays off", {
@@ -312,7 +322,11 @@ export function createMagicContextHistorianHost(
 
   const getHistorianChunkTokens = (): number => deriveHistorianChunkTokens(historianContextLimit);
 
-  const runPass = (sessionId: string, forceDrainQuota: boolean): Promise<HistorianRunStatus> => {
+  const runPass = (
+    sessionId: string,
+    forceDrainQuota: boolean,
+    signal?: AbortSignal,
+  ): Promise<HistorianRunStatus> => {
     if (!hiddenCompletionExecutor) return Promise.resolve("no-op");
     return runOneCompartmentPass({
       db: deps.db,
@@ -329,6 +343,7 @@ export function createMagicContextHistorianHost(
       mainContextLimit,
       liveUsage: deps.readLiveUsage?.() ?? null,
       forceDrainQuota,
+      ...(signal === undefined ? {} : { signal }),
     });
   };
 
@@ -336,7 +351,10 @@ export function createMagicContextHistorianHost(
     hiddenCompletionExecutor === undefined
       ? undefined
       : createHistorianScheduler({
-          runSession: async (sessionId) => runPass(sessionId, false),
+          // FORK（MF-03）：包侧注释明写 `runSession` MUST honour `signal` —— 它是
+          // `shutdown()` 不止于「不再等待」的唯一保障。装配层此前把这一位整个丢掉，
+          // 于是在飞的 provider 请求停不下来。
+          runSession: async (sessionId, signal) => runPass(sessionId, false, signal),
           onError: (sessionId, error) =>
             deps.logger.warn("Magic context historian pass failed", {
               module: "bootstrap",
@@ -371,7 +389,14 @@ export function createMagicContextHistorianHost(
       const window = model.properties?.contextWindow;
       if (typeof window === "number" && window > 0) mainContextLimit = window;
     },
-    shutdown: () => historianScheduler?.shutdown(),
+    shutdown: () => {
+      // 顺序有意义：先 abort 宿主信号（在飞的那次 sidecar 请求立刻停下），
+      // 再停调度器（不再接新的 pass）。
+      if (!hostShutdownController.signal.aborted) {
+        hostShutdownController.abort(new Error("magic context historian host shut down"));
+      }
+      historianScheduler?.shutdown();
+    },
   };
 }
 
@@ -413,8 +438,17 @@ async function runOneCompartmentPass(input: {
   mainContextLimit: number;
   liveUsage: ContextUsage | null;
   forceDrainQuota: boolean;
+  /**
+   * FORK（MF-03）：调度器的关闭信号。透到这里的最后一跳是 executor 的
+   * `externalSignal`（`HiddenCompartmentRunnerDeps` 没有 signal 字段，而唯一握着
+   * provider 请求 AbortSignal 的就是 executor 的 run slot），所以本函数对 signal 的
+   * 职责是**如实记账**：已关闭就别再开跑，跑挂了也要报 `"aborted"` 而不是
+   * `"error"`，让 `/ctx-status` 与调度器的 `lastStatus` 说的是同一件事。
+   */
+  signal?: AbortSignal;
 }): Promise<HistorianRunStatus> {
   if (getActiveCompartmentRun(input.sessionId)) return "no-op";
+  if (input.signal?.aborted) return "aborted";
 
   // 边界用**本进程已知的真实读数**（S24-fix）。S24 之前这里恒传 `usage:null`
   // （provisional-zero），因为 `contextUsageMap` 那时没有生产者；现在 recorder 记下的
@@ -477,8 +511,11 @@ async function runOneCompartmentPass(input: {
   if (!active) return "no-op";
   try {
     await active.promise;
-    return active.published ? "success" : "no-op";
+    // 关闭信号可能在 run 落定**之前**触发（宿主先 abort、run 随后自己收尾）：
+    // 这时终态仍然该记 aborted——scheduler 的 `getLastStatus` 才是 `/ctx-status`
+    // 读的那一位。
+    return input.signal?.aborted ? "aborted" : active.published ? "success" : "no-op";
   } catch {
-    return "error";
+    return input.signal?.aborted ? "aborted" : "error";
   }
 }

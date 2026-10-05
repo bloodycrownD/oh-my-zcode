@@ -98,6 +98,19 @@ interface CreateSessionFacadeDeps {
    * run service 的 `close()`。缺席即本装配没有 dwf 端口（journal 窄化失败、测试装配）。
    */
   closeDynamicWorkflowRuns?: () => Promise<void>;
+  /**
+   * FORK（MF-05）：收口 magic-context 装配层。缺席即本装配没装 magic-context
+   * （features/`enabled` 为关、单测装配）。
+   *
+   * 钩子内部按 drain → shutdown → bridge.dispose 顺序做完三件事：
+   * 有界 drain 在飞的后台 pass、停调度并 abort 在飞的 sidecar 请求、退掉 config
+   * bridge 对 `ConfigPort` 的订阅。
+   *
+   * 调用位置被两个约束夹住：在 `beginShutdown()` **之后**（关闭中的会话不该再被新
+   * pass 叫醒），在 `closeSessionResources` **之前**（historian 的在飞请求要写库，
+   * store / execution port 一旦先关，写库就落在已关闭的端口上）。
+   */
+  closeMagicContext?: () => Promise<void>;
   closeNodeReplBrowserBroker?: () => Promise<void> | undefined;
   configResult: ConfigResult;
   configuredMcpServers: Record<string, McpServerConfig>;
@@ -266,6 +279,25 @@ export function createSessionFacade(deps: CreateSessionFacadeDeps): SessionFacad
         // 关闭入口先阻止新调度并取消在飞 Memory Extraction，再等待取消链路收口。
         deps.runtime.beginShutdown();
         await deps.runtime.drainMemoryExtractions(60_000);
+        // FORK（MF-05）：magic-context 先收口。位置在 dwf 与资源关闭**之前**——
+        // historian 的在飞请求要写库，store / execution port 一旦先关，写库就落在已
+        // 关闭的端口上；而在 `beginShutdown()` 之后，它也不会再被新的 pass 叫醒。
+        //
+        // 整段套 try/catch + logger.warn：historian 关闭抛错绝不能吃掉后面的资源关闭。
+        if (deps.closeMagicContext !== undefined) {
+          try {
+            await deps.closeMagicContext();
+          } catch (error: unknown) {
+            deps.logger.warn?.(
+              "Closing magic context historian failed; continuing to close resources",
+              {
+                errorMessage: error instanceof Error ? error.message : String(error),
+                event: "magic_context.historian_close_failed",
+                module: "bootstrap.app",
+              },
+            );
+          }
+        }
         // 引擎归本 App 所有，所以关闭要主动停下它。
         // 位置是两个约束夹出来的：在 beginShutdown **之后**，结算带出的终态通知才会被丢掉
         // （background-notifications.ts 在 shuttingDown 时不入队），不会把正在关闭的会话的模型

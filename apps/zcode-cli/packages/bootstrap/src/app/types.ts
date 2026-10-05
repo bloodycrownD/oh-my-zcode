@@ -633,6 +633,18 @@ export interface ZCodeApp {
    * 可选而非必需：测试与轻量 embedder 可以不实现，handler 会跳过这些 App。
    */
   getConfigPort?(): ConfigPort;
+  /**
+   * FORK（MF-01 / MF-06）：本 App 的 magic-context **effective 开关**。
+   *
+   * 值就是 `runtimeConfig.magicContext.enabled` 那一次求值的结果
+   * （契约 8：`features.magicContext && magicContext.enabled`），由 `create-app`
+   * 填充。命令面（`/ctx-status` / `/ctx-reduce` / …）**必须**经这一条读，不能自己
+   * 去读 `features` 或重算一遍——否则 features=true 而 `enabled=false` 时，命令面
+   * 与 turn-loop 会分叉：一边开库出报告，一边根本不插桩。
+   *
+   * 可选而非必需：与 `getConfigPort` 同理，测试与轻量 embedder 可以不实现。
+   */
+  isMagicContextEnabled?(): boolean;
   setModel(
     modelId: string | ModelSelection,
     options?: {

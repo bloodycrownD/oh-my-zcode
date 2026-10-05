@@ -187,9 +187,23 @@ export function resolveAppRuntimeConfig(input: {
     // 默认 true）投影进 runtime config。core 的 turn-loop 只读这一位做二次门控，
     // 真正的注册门是装配层——它在 false 时连 transform 实例都不构造（用户显式
     // 关闭时的零成本态，T-M8 语义）。
+    //
+    // FORK（MF-01）：这里补上 spec 契约 8 的另一半——`effective = features.magicContext
+    // && magicContext.enabled`。之前只镜像 features flag，于是 D-12 设置页把
+    // `enabled` 当表单字段提交时「保存成功」而行为逐行不变（`config.enabled`
+    // 全仓只被 `findConfigReadinessError` 读过一次）。域值缺席时按包内 schema 的
+    // 缺省 true 处理（`enabled: z.boolean().default(true)`）。
+    //
+    // 这是**冷**求值：结果冻结进 runtime.config。运行中改 `enabled` 走端口上的
+    // 活值谓词 `isEnabled()`（core 每 turn 现读），见 core
+    // `runtime/helpers/magic-context-turn-transform.ts` 与 bootstrap
+    // `magic-context-turn-transform.ts`。
     magicContext: {
       enabled:
-        options.runtimeConfig?.magicContext?.enabled ?? configResult.config.features.magicContext,
+        (options.runtimeConfig?.magicContext?.enabled ?? configResult.config.features.magicContext) &&
+        // 配置契约层把参数域收敛成不透明对象（`create-app.ts` 侧同样靠断言读它），
+        // 这里只需要 `enabled` 那一位。
+        (configResult.config as { magicContext?: { enabled?: boolean } }).magicContext?.enabled !== false,
     },
   };
   return {

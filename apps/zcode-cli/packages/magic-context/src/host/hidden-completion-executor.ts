@@ -232,17 +232,55 @@ export interface HiddenCompletionExecutorOptions {
    * identity by hand.
    */
   defaultTimeoutMs?: number;
+  /**
+   * FORK (MF-03): a host/session-level shutdown signal.
+   *
+   * Why this seam exists at all. `createHistorianScheduler` aborts a controller on
+   * `shutdown()` and the contract says `runSession` MUST honour the signal it hands
+   * over — but `CompartmentRunnerDeps` carries no signal, so that mandate used to
+   * end at the host adapter. The `AbortSignal` that actually reaches the provider
+   * request is the one owned by each run SLOT below, and nothing outside this
+   * factory holds a reference to it. Without this seam, `shutdown()` only meant
+   * "stop waiting": an in-flight sidecar request kept running, and kept writing
+   * compartments, after the session that asked for it was gone.
+   *
+   * Aborting it aborts every live slot (open, pending, or collecting), so the
+   * provider call is unwound rather than abandoned. Absent (the default, and what
+   * every existing caller does) means the executor behaves exactly as before.
+   */
+  externalSignal?: AbortSignal;
 }
 
 /** Upstream's `DEFAULT_HISTORIAN_TIMEOUT_MS`, restated for a hand-built run. */
 export const DEFAULT_HIDDEN_RUN_TIMEOUT_MS = 600_000;
 
 interface RunSlot {
-  run: HiddenRunIdentity;
-  controller: AbortController;
-  /** Set by `attempt`, awaited by `collect`. Absent = no prompt was sent. */
-  attempt?: Promise<SidecarModelCallResult>;
-  timeout?: ReturnType<typeof setTimeout>;
+    run: HiddenRunIdentity;
+    controller: AbortController;
+    /** Set by `attempt`, awaited by `collect`. Absent = no prompt was sent. */
+    attempt?: Promise<SidecarModelCallResult>;
+    timeout?: ReturnType<typeof setTimeout>;
+    /** Unhooks the external-signal listener; always called from `close`. */
+    detachExternalSignal?: () => void;
+}
+
+/**
+ * FORK (MF-03): bind one run slot's controller to the host's shutdown signal.
+ *
+ * Manual linkage instead of `AbortSignal.any` because the slot controller must
+ * itself abort — `attempt` hands `slot.controller.signal` to the sidecar call and
+ * `collect` keeps reading the same promise, so a composed signal would leave the
+ * slot's own state inconsistent with what the request did. The listener is
+ * detached in `close`, which every caller reaches from its `finally`.
+ */
+function linkExternalSignal(controller: AbortController, signal: AbortSignal): () => void {
+  if (signal.aborted) {
+    controller.abort(signal.reason);
+    return () => {};
+  }
+  const onAbort = (): void => controller.abort(signal.reason);
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
 }
 
 /**
@@ -303,6 +341,9 @@ export function createHiddenCompletionExecutor(
       )), timeoutMs);
       timer.unref?.();
       slot.timeout = timer;
+      if (options.externalSignal !== undefined) {
+        slot.detachExternalSignal = linkExternalSignal(controller, options.externalSignal);
+      }
       slots.set(id, slot);
       return { id };
     },
@@ -384,6 +425,7 @@ export function createHiddenCompletionExecutor(
       if (!slot) return;
       slots.delete(handle.id);
       if (slot.timeout) clearTimeout(slot.timeout);
+      slot.detachExternalSignal?.();
       if (slot.attempt && !settlement.promptSettled) {
         // The prompt never settled — cancel the provider request rather than let
         // an orphan stream keep billing. Swallowing the rejection is correct: the

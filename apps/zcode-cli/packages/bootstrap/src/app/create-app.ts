@@ -783,9 +783,19 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       sessionId,
       logger,
     );
+    // FORK（MF-05）：magic-context 的关闭钩子由装配工厂**注册**回来，而不是这里
+    // 拿它的内部对象——后者会把 drain/shutdown/dispose 的顺序知识泄到装配层。
+    // 缺席 = 没装 magic-context（flag 关或 DB 开不出来），此时不注入 session facade。
+    let closeMagicContext: (() => Promise<void>) | undefined;
     const magicContextTurnTransform = magicContextAssembly
       ? await magicContextAssembly.createMagicContextTurnTransform({
-          enabled: true,
+          // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
+          // 是 `features.magicContext && magicContext.enabled`，这一位与下面装配门读
+          // 的是同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。
+          enabled: runtimeConfig.magicContext?.enabled === true,
+          registerClose: (close) => {
+            closeMagicContext = close;
+          },
           // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
           // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
           // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
@@ -958,6 +968,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       ...(dynamicWorkflowRunPort === undefined
         ? {}
         : { closeDynamicWorkflowRuns: () => dynamicWorkflowRunPort.close() }),
+      // App 关闭时收口 magic-context（drain → shutdown → bridge.dispose）。参照上面
+      // `closeDynamicWorkflowRuns` 的注入范式；缺席即本装配没有 magic-context。
+      ...(closeMagicContext === undefined ? {} : { closeMagicContext }),
       configResult,
       configuredMcpServers,
       ...(options.configuredDefaultModelSelection
@@ -1110,6 +1123,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // 侧的唯一入口必须是**本 App 正在用的** ConfigPort——magic-context 的 config
       // bridge 订阅的就是它（见 magic-context-turn-transform.ts）。
       getConfigPort: () => configResult.configPort,
+      // FORK（MF-06）：命令面读同一个 effective 开关，与 turn-loop 的门**同源同值**
+      // ——都来自 `runtimeConfig.magicContext.enabled` 那一次求值（MF-01 算出来的
+      // 那个）。`/ctx-*` 消费它来决定要不要开库，不再自行读 `features`。
+      isMagicContextEnabled: () => runtimeConfig.magicContext?.enabled === true,
       readToolResultArtifact: (uri) =>
         artifactStore.readToolResultArtifact({ uri, trace: traceContext }),
       // wire/staging 全程是 decoded chunk；只有完整 checksum commit 后才在
