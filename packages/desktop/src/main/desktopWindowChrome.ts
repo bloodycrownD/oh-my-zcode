@@ -498,6 +498,7 @@ export function createBrowserWindow(options: {
       guestWebContents,
       hostWebContents: win.webContents,
       resolveBrowserViewOwner: options.resolveBrowserViewOwner,
+      logger: options.logger,
     });
   });
 

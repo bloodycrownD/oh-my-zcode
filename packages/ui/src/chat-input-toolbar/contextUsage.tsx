@@ -220,11 +220,8 @@ export function ChatContextUsage({
   intl: ReturnType<typeof useZCodeIntl>["intl"];
   locale: string;
 }) {
-  const isWorkspaceVisible = useOptionalTabStore(
-    (state) => !state.tabs.some((tab) => tab.id === state.activeTabId && isSettingsTab(tab)),
-  );
   const [contextOpen, setContextOpen] = useState(false);
-const contextUsageTriggerRef = useRef<HTMLElement | null>(null);
+  const contextUsageTriggerRef = useRef<HTMLElement | null>(null);
   const handleContextOpenChange = useCallback((open: boolean) => {
     setContextOpen(open);
   }, []);
