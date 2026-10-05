@@ -1,14 +1,6 @@
 /* eslint-disable max-lines -- task item 同时承载默认列表和 timeline 两行布局的共享交互，先保持动作链路集中避免归档/置顶回归。 */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import {
-  Archive,
-  Clock,
-  CloudUpload,
-  ListTree,
-  LoaderIcon,
-  Pin,
-  Smartphone,
-} from "lucide-react";
+import { Archive, Clock, CloudUpload, ListTree, LoaderIcon, Pin, Smartphone } from "lucide-react";
 import { isCronTask, type ZCodeTaskMeta } from "@zcode/shared";
 import { TID_TASK_ARCHIVE, TID_TASK_ITEM, testId } from "@zcode/shared";
 import { Badge } from "@/components/ui/badge.js";

@@ -7,8 +7,7 @@ export interface DraftSuggestedPromptLocalizedText {
 
 export const DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS = "NAVIGATE:AUTOMATIONS" as const;
 
-export type DraftSuggestedPromptAction =
-  typeof DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS;
+export type DraftSuggestedPromptAction = typeof DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS;
 
 export interface DraftSuggestedPromptItem {
   id: string;

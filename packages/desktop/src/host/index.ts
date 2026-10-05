@@ -46,7 +46,6 @@ import {
   disposeServiceResourcesAndWait,
   AutomationRepo,
   createServiceLogger,
-  buildTaskChangeSummary,
   createHostApiNetworkTransport,
   createSettingServiceWithMigrations,
   type HostApiNetworkTransport,
@@ -328,7 +327,6 @@ const logger = {
 
 const cronAutomationRepo = new AutomationRepo();
 const cronRunSubscriptions = new Map<string, { dispose(): void }>();
-
 
 interface CronRunDispatchRequest {
   automationId: string;

@@ -1,17 +1,8 @@
 /* eslint-disable max-lines -- 定时任务主视图集中维护列表、创建/编辑整页路由与启停/删除操作，集中更利于交互一致。 */
-import {
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ComponentType,
-  type SVGProps,
-} from "react";
+import { useCallback, useEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
 import { CircleCheck, RotateCcw, TriangleAlert } from "lucide-react";
 import {
   AUTOMATION_CREATE_LIMIT,
-  BUILTIN_MODEL_PROVIDER_IDS,
   TID_AUTOMATION_ACTION_DELETE,
   TID_AUTOMATION_ACTION_TOGGLE,
   TID_AUTOMATION_CARD,
@@ -538,8 +529,7 @@ export function AutomationsSection({
       : null;
     const result = resolveAutomationTabNavigation({
       requestedTab: openAutomationTab,
-      tabsReady:
-        currentWorkspaceKey !== null && loadedWorkspaceKey === currentWorkspaceKey,
+      tabsReady: currentWorkspaceKey !== null && loadedWorkspaceKey === currentWorkspaceKey,
       visibleTabs,
     });
     if (result.status === "pending") return;
@@ -839,7 +829,6 @@ export function AutomationsSection({
     },
     [confirmDialog, deleteAutomation, intl, platform, providerSettingsView, zcodeAgentService],
   );
-
 
   if (!workspacePath) {
     return (

@@ -139,7 +139,7 @@ export function ConversationDraftSuggestedPromptsContainer({
       (proactive ? recommendedItems : allItems).filter(
         (item) =>
           !item.actions?.some((action) => action === DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS) ||
-            Boolean(onOpenAutomations),
+          Boolean(onOpenAutomations),
       ),
     [allItems, onOpenAutomations, proactive, recommendedItems],
   );

@@ -1319,7 +1319,7 @@ export class TaskIndexRepo {
     });
   }
 
-private ensureSystemGroupMembership(
+  private ensureSystemGroupMembership(
     meta: Pick<ZCodeTaskMeta, "workspacePath" | "workspaceIdentity" | "taskId">,
     params: { groupId: string; title: string; color: string },
   ): void {

@@ -12,7 +12,6 @@ import type {
   ModelSelectionView,
   ProviderSource,
 } from "@zcode/provider";
-import { completeNewModelSelection } from "@zcode/provider";
 import {
   ZCODE_SESSION_RUNTIME_PREFERENCES_REQUEST_TIMEOUT_MS,
   formatLogPrefix,
@@ -3111,10 +3110,7 @@ export function createZCodeAgentService(
         // 可选字段降级重试，避免 thoughtLevel/persistence 版本差阻塞首发创建。
         const snapshot = await client.request(
           zcodeProtocolMethods.sessionCreate,
-          buildSessionCreateParams(
-            { ...params, dynamicWorkflowEnabled },
-            new Set(compatFields),
-          ),
+          buildSessionCreateParams({ ...params, dynamicWorkflowEnabled }, new Set(compatFields)),
           zcodeSessionStateSnapshotSchema,
           sessionTraceId ? { trace: { traceId: sessionTraceId } } : undefined,
         );
