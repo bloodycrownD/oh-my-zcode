@@ -1,26 +1,20 @@
 import { BIGMODEL_PROVIDER_ID, type OAuthProviderId, ZAI_PROVIDER_ID } from "./oauth.js";
-import { BUILTIN_MODEL_PROVIDER_IDS, type BuiltinModelProviderId } from "./model-provider-types.js";
-import { ZCODE_ENV } from "./env.js";
-import { buildBigModelCodingPlanTeamManageUrl } from "./zcodeEndpoint.js";
 
 export type ModelProviderFamilyId = "zai" | "bigmodel";
 export type ProviderFamilyDomain = ModelProviderFamilyId;
 
+/**
+ * FORK（D-13）：Coding Plan providerId 三字段与 teamCodingPlanManageUrl 随订阅面整删，
+ * family 本体只保留 `{ id, label, rootDomain, oauthProviderId }` 四字段。
+ *
+ * `oauthProviderId` 仍被 StatusCards / useModelProviderNavigation 消费，误删即断。
+ * `rootDomain` 两行是 T-INF1 扫描白名单登记项，按符号复核不按行号。
+ */
 export interface ModelProviderFamilySpec {
   id: ModelProviderFamilyId;
   label: string;
   rootDomain: string;
   oauthProviderId: typeof ZAI_PROVIDER_ID | typeof BIGMODEL_PROVIDER_ID;
-  startPlanProviderId:
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan;
-  individualCodingPlanProviderId:
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan;
-  teamCodingPlanProviderId:
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiTeamCodingPlan
-    | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan;
-  teamCodingPlanManageUrl: string;
 }
 
 export const MODEL_PROVIDER_FAMILY_SPECS = [
@@ -29,20 +23,12 @@ export const MODEL_PROVIDER_FAMILY_SPECS = [
     label: "Z.ai",
     rootDomain: "z.ai",
     oauthProviderId: ZAI_PROVIDER_ID,
-    startPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
-    individualCodingPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan,
-    teamCodingPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.zaiTeamCodingPlan,
-    teamCodingPlanManageUrl: "https://z.ai/manage-apikey/subscription",
   },
   {
     id: "bigmodel",
     label: "BigModel",
     rootDomain: "bigmodel.cn",
     oauthProviderId: BIGMODEL_PROVIDER_ID,
-    startPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
-    individualCodingPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan,
-    teamCodingPlanProviderId: BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan,
-    teamCodingPlanManageUrl: buildBigModelCodingPlanTeamManageUrl({ ZCODE_ENV }),
   },
 ] as const satisfies readonly ModelProviderFamilySpec[];
 
@@ -50,19 +36,10 @@ const MODEL_PROVIDER_FAMILY_SPEC_BY_ID = new Map<ModelProviderFamilyId, ModelPro
   MODEL_PROVIDER_FAMILY_SPECS.map((spec) => [spec.id, spec]),
 );
 
-const MODEL_PROVIDER_FAMILY_ID_BY_PROVIDER_ID = new Map<
-  BuiltinModelProviderId,
-  ModelProviderFamilyId
->(
-  MODEL_PROVIDER_FAMILY_SPECS.flatMap((spec) =>
-    [
-      spec.startPlanProviderId,
-      spec.individualCodingPlanProviderId,
-      spec.teamCodingPlanProviderId,
-    ].map((providerId) => [providerId, spec.id] as const),
-  ),
-);
-
+/**
+ * FORK（D-13）：账号型 providerId 已整删，family↔provider 映射恒空，
+ * 因此按 providerId 解析 family 恒返回 null（调用点走既有兜底）。
+ */
 export function getModelProviderFamilySpec(
   familyId: ModelProviderFamilyId,
 ): ModelProviderFamilySpec {
@@ -70,9 +47,9 @@ export function getModelProviderFamilySpec(
 }
 
 export function resolveModelProviderFamilyIdByProviderId(
-  providerId: string,
+  _providerId: string,
 ): ModelProviderFamilyId | null {
-  return MODEL_PROVIDER_FAMILY_ID_BY_PROVIDER_ID.get(providerId as BuiltinModelProviderId) ?? null;
+  return null;
 }
 
 export function resolveModelProviderFamilyIdByBaseURL(
@@ -97,10 +74,9 @@ export function resolveModelProviderFamilyIdByBaseURL(
 }
 
 export function resolveModelProviderFamilySpecByProviderId(
-  providerId: string,
+  _providerId: string,
 ): ModelProviderFamilySpec | null {
-  const familyId = resolveModelProviderFamilyIdByProviderId(providerId);
-  return familyId ? getModelProviderFamilySpec(familyId) : null;
+  return null;
 }
 
 export function resolveModelProviderFamilyLabelByProviderId(providerId: string): string | null {
@@ -146,18 +122,16 @@ export function shouldShowModelProviderFamilyForActiveOAuth(params: {
   });
 }
 
-export function shouldShowBuiltinModelProviderForDomain(params: {
+/**
+ * FORK（D-13）：family↔provider 映射恒空后，本判据恒返回 true——
+ * 即内置 preset provider 全部可见。这是刻意的：删掉它会让**升级用户**
+ * （providerFamilyDomain 已持久化非空）的设置页里内置 preset provider 静默消失。
+ */
+export function shouldShowBuiltinModelProviderForDomain(_params: {
   providerId: string;
   providerFamilyDomain: ProviderFamilyDomain | null | undefined;
 }): boolean {
-  const familyId = resolveModelProviderFamilyIdByProviderId(params.providerId);
-  if (!familyId) {
-    return true;
-  }
-  return shouldShowModelProviderFamilyForDomain({
-    familyId,
-    providerFamilyDomain: params.providerFamilyDomain,
-  });
+  return true;
 }
 
 export function shouldShowBuiltinModelProviderForActiveOAuth(params: {
