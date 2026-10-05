@@ -211,6 +211,25 @@ export interface ConversationProjectionLastMutation {
 }
 
 /**
+ * 在按 rowId 升序的窗口里找第一个 rowId >= target 的下标（不存在则为窗口长度）。
+ *
+ * 窗口升序是 rowsRange 契约保证的全序，apply 的 removed 分支本身也正是按这个升序做
+ * 前缀压缩，所以「裁掉 fromRowId 起的连续后缀」的下界可以直接二分，不必逐行跳过前缀。
+ * 全程只读 `rowId`，不解引用行内容。
+ */
+function lowerBoundByRowId(window: readonly ConversationRow[], target: number): number {
+  let low = 0;
+  let high = window.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    const row = window[middle];
+    if (row !== undefined && row.rowId < target) low = middle + 1;
+    else high = middle;
+  }
+  return low;
+}
+
+/**
  * 收集一帧 delta 触及的行 → turnId。必须在 apply **之前**取：`row.removed` 之后
  * 行索引与窗口都被裁掉，届时已经无从反解；`row.delta` 虽只就地改 text（turnId 不变），
  * 但读旧行同样安全且更省一次索引查找。
@@ -237,8 +256,11 @@ function collectMutationTurnIds(
       case "row.removed": {
         // 窗口按 rowId 升序，fromRowId 之后的连续后缀整段被裁；逐行记 turnId，
         // 好让「被裁掉一半的轮」也能失效（否则它的 unit 会留着已不存在的行）。
-        for (const row of window) {
-          if (row.rowId < delta.fromRowId) continue;
+        // 裁剪边界用二分下界定位：rewind 只裁末尾一两行时线性扫描要白走整个窗口，
+        // 长会话里那是每帧 O(N)。窗口升序是 rowsRange 契约保证的全序，apply 的
+        // removed 分支本身也正是按这个升序做前缀压缩。
+        for (let index = lowerBoundByRowId(window, delta.fromRowId); index < window.length; index++) {
+          const row = window[index]!;
           turnIdByRowId.set(row.rowId, row.turnId);
         }
         break;
