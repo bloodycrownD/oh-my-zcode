@@ -247,20 +247,11 @@ export function shouldAutoLoadIncompleteLeadingTurn(
   );
 }
 
-/**
- * rows/range 结果并入本地窗口（合并规范）：按 rowId 键控、只收
- * 窗口首行之前的行、去重后前插；顺序键 = rowId 升序（全序保证）。
- * 返回 null 表示无可并入行（窗口无变化，调用方不换引用）。
- */
-function mergeOlderRows(
-  window: readonly ConversationRow[],
-  fetched: readonly ConversationRow[],
-): ConversationRow[] | null {
-  const firstRowId = window[0]?.rowId ?? Number.POSITIVE_INFINITY;
-  const older = fetched.filter((row) => row.rowId < firstRowId);
-  if (older.length === 0) return null;
-  return [...older, ...window];
-}
+// 合并规范已下沉到 @/-free 的 conversationProjectionCore（可测性前置：被测模块
+// 传递依赖链零 `@/` 导入）。这里 import + re-export 保持既有外部引用不破。
+import { mergeOlderRows } from "@/v4/conversationProjectionCore.js";
+
+export { mergeOlderRows };
 
 /**
  * 外部 store（useSyncExternalStore 兼容：subscribe + getState 返回稳定引用）。
