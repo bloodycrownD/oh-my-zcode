@@ -86,6 +86,15 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # bundle 链假设 workspace 各包的 dist/ 已产出（本地由 typecheck 门禁顺手
+      # 生成；CI 全新 checkout 没有，直接 bundle 会在 cli 侧 tsc 阶段报
+      # "Cannot find module '@zcode/magic-context'"）。这里显式产出两段：
+      # 根 tsc -b 覆盖 packages/*，turbo 覆盖 apps/zcode-cli 全部 27 个包。
+      - name: Build workspace type outputs
+        run: |
+          pnpm typecheck
+          pnpm exec turbo --cwd apps/zcode-cli run typecheck --force
+
       - name: Bundle desktop app
         shell: bash
         run: pnpm --filter @zcode/desktop bundle -- ${{ matrix.target_os }} ${{ matrix.target_arch }}
