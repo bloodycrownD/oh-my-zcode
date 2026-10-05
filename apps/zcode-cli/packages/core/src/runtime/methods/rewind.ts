@@ -241,10 +241,9 @@ export async function rewindWorkspaceToCheckpoint(
     targetMessageId: checkpoint.targetMessageId ?? checkpoint.messageId,
   });
 
-  if (
-    evaluation.strategy !== RewindStrategy.ActiveChain &&
-    evaluation.strategy !== RewindStrategy.FileOnly
-  ) {
+  // MF-08：evaluateRewindTarget 只有 ActiveChain / Unavailable 两种取值，
+  // 原先并列的「只回滚文件」分支恒假，删掉后语义不变。
+  if (evaluation.strategy !== RewindStrategy.ActiveChain) {
     return this.finishUnavailableRewind({
       checkpoint,
       evaluation,
@@ -323,16 +322,12 @@ export async function rewindWorkspaceToCheckpoint(
   options.events.push(event);
 
   const fileText = `${restoredFiles.length} file${restoredFiles.length === 1 ? "" : "s"}`;
-  const strategyText =
-    evaluation.strategy === RewindStrategy.FileOnly
-      ? " Workspace files were restored; conversation history stayed at the compacted context."
-      : "";
 
   return {
     checkpoint,
     evaluation,
     restoredFiles,
-    response: `Rewound workspace to checkpoint ${checkpoint.checkpointId}: restored ${fileText}.${strategyText}`,
+    response: `Rewound workspace to checkpoint ${checkpoint.checkpointId}: restored ${fileText}.`,
     rewindId,
     strategy: evaluation.strategy,
   };

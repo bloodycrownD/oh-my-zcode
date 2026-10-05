@@ -24,9 +24,11 @@ export const RewindScope = {
 
 export type RewindScope = (typeof RewindScope)[keyof typeof RewindScope];
 
+// MF-08：本枚举原先还挂着一个「只回滚文件、不动对话链」的成员。evaluateRewindTarget
+// 只产出 ActiveChain / Unavailable，那个成员从来没有产生点，是枚举与 wire schema 里的死值，
+// 一并删除，避免调用方写出恒假分支。
 export const RewindStrategy = {
   ActiveChain: "active_chain",
-  FileOnly: "file_only",
   ForkRequired: "fork_required",
   Unavailable: "unavailable",
 } as const;
@@ -68,7 +70,6 @@ export const rewindTriggeredPayloadSchema = z
     scope: z.enum([RewindScope.Conversation, RewindScope.Workspace, RewindScope.Both]),
     strategy: z.enum([
       RewindStrategy.ActiveChain,
-      RewindStrategy.FileOnly,
       RewindStrategy.ForkRequired,
       RewindStrategy.Unavailable,
     ]),
