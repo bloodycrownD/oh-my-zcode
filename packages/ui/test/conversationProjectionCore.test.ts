@@ -303,6 +303,66 @@ test("T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换", () =>
   assert.deepStrictEqual(p2, { ...applyConversationDeltas(applyConversationDeltas(base, step1), step2), seq: 102 });
 });
 
+test("T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用保持不变", () => {
+  const base = buildSnapshot([streamRow(1, "turn-0", "甲"), streamRow(2, "turn-0", "乙")]);
+  const accumulator = createConversationProjectionAccumulator(base);
+  const p0 = accumulator.publish();
+  const p1 = accumulator.applyDeltas(
+    [delta({ op: "state.updated", patch: { revision: 6 } })],
+    101,
+  );
+
+  // 只换 snapshot 外壳（[snapshot] effect 依赖）；下面两层是本轮收窄掉的：
+  // 内容逐行相同的帧每帧换引用，等于让长会话里那批 [rows.window] memo 白失效。
+  assert.notStrictEqual(p1, p0, "snapshot 外壳仍必须换");
+  assert.strictEqual(p1.rows, p0.rows, "纯 state.updated 帧的 rows 容器必须复用");
+  assert.strictEqual(p1.rows.window, p0.rows.window, "纯 state.updated 帧的 window 数组必须复用");
+  // 复用不得牺牲内容正确性：水位与 revision 仍按本帧推进。
+  assert.equal(p1.seq, 101);
+  assert.equal(p1.revision, 6);
+  assert.deepStrictEqual(ids(p1.rows.window), [1, 2]);
+  // 复用窗口引用的帧之后，一旦有行变更必须立刻换新（不能被复用钉住）。
+  const p2 = accumulator.applyDeltas(
+    [delta({ op: "row.delta", rowId: 1, path: "text", append: "A" })],
+    102,
+  );
+  assert.notStrictEqual(p2.rows, p1.rows);
+  assert.notStrictEqual(p2.rows.window, p1.rows.window);
+  assert.equal(textsByRowId(p2.rows.window).get(1), "甲A");
+});
+
+test("T-AP3 无行变更帧的 rows 复用必须逐字段等价：窗口外的 row.removed 不动任何标量", () => {
+  // fromRowId 落在窗口末行之后 → 一行都没裁掉（变更集为空），apply 也不会改
+  // totalCount（removed 按实际裁掉的行数算）。此时 window 与 rows 都可整份复用。
+  const base = buildSnapshot(
+    [streamRow(10, "turn-c", "c"), streamRow(11, "turn-d", "d")],
+    { totalCount: 40 },
+  );
+  const accumulator = createConversationProjectionAccumulator(base);
+  const p0 = accumulator.publish();
+  const p1 = accumulator.applyDeltas([delta({ op: "row.removed", fromRowId: 99 })], 101);
+
+  assert.strictEqual(p1.rows, p0.rows, "三个标量都没变，rows 容器可复用");
+  assert.strictEqual(p1.rows.window, p0.rows.window, "窗口内容未变，window 引用可复用");
+  assert.equal(p1.rows.totalCount, 40);
+  assert.deepStrictEqual(ids(p1.rows.window), [10, 11]);
+});
+
+test("T-AP3 变更集为空但 rows 标量变了时必须换 rows 容器", () => {
+  // 空窗口 + firstRowId 非 null 的冷恢复态：fromRowId 命中 firstRowId 意味着
+  // 「整条活动分支被裁掉」，apply 把 totalCount 归零、firstRowId 清空——
+  // 但窗口里一行都没有，变更集必然为空。直接复用 rows 会让 hasOlderRows 读到旧值。
+  const base = buildSnapshot([], { firstRowId: 1, totalCount: 5 });
+  const accumulator = createConversationProjectionAccumulator(base);
+  const p0 = accumulator.publish();
+  const p1 = accumulator.applyDeltas([delta({ op: "row.removed", fromRowId: 1 })], 101);
+
+  assert.equal(accumulator.lastMutation()?.turnIdByRowId.size, 0, "前置条件：变更集为空");
+  assert.notStrictEqual(p1.rows, p0.rows, "标量变了，rows 容器必须换");
+  assert.equal(p1.rows.totalCount, 0);
+  assert.equal(p1.rows.firstRowId, null);
+});
+
 test("T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳", () => {
   const base = buildSnapshot([streamRow(1, "turn-0", "甲")]);
   const accumulator = createConversationProjectionAccumulator(base);

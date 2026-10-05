@@ -853,10 +853,20 @@ export class ConversationProjectionStore {
       previousDirectoryRevision,
       frame,
     );
+    // 空变更集（纯 state.updated 水位推进）复用上一帧的 lastMutation 对象：空集是任意
+    // 脏集的子集，下游只按 turnId 集合做失效裁决，消费结果逐条等价，却省掉一次
+    // `[lastMutation]` 依赖的失效。上一帧压根没有对象（刚 rebuild / 整块换窗）时才沿用
+    // 本帧空集——那几帧的语义是「无失效依据，走全量重建」，不能被复用改写成增量。
+    const publishedLastMutation =
+      lastMutation === null
+        ? undefined
+        : lastMutation.turnIdByRowId.size === 0
+          ? (this.state.lastMutation ?? lastMutation)
+          : lastMutation;
     this.setState({
       snapshot: next,
       // 累加器刚重建过就没有 lastMutation：这一帧无失效依据，下游退化为全量重建。
-      ...(lastMutation ? { lastMutation } : { lastMutation: undefined }),
+      lastMutation: publishedLastMutation,
       // row.removed 已给出权威裁剪边界，可以同步删掉缓存目录中的旧分支计划；
       // 完整 query 继续负责补回 wire tail 之外、但仍属于当前分支的早期计划。
       ...(removedFromRowId === null

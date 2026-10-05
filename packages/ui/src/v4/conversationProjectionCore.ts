@@ -145,14 +145,33 @@ export function mergeOlderRows(
 }
 
 /**
+ * rows 容器的两个标量字段是否逐字段相同（window 是数组引用，不在此列）。
+ *
+ * 单独抽出来是因为「本帧没裁到任何窗口行」并不等于「rows 容器可以直接复用」：
+ * `row.removed` 命中 `firstRowId` 时走的是「整条活动分支被裁掉」分支，apply 会把
+ * totalCount 归零、firstRowId 清空（见 apply.ts 的 removed 分支），而只要窗口本身
+ * 就是空的，一行也不会进变更集。那种帧必须换新的 rows 容器，否则 hasOlderRows 与
+ * 滚动条估计会读到上一帧的值。
+ */
+function sameRowsMeta(a: ConversationSnapshot["rows"], b: ConversationSnapshot["rows"]): boolean {
+  return a.totalCount === b.totalCount && a.firstRowId === b.firstRowId;
+}
+
+/**
  * copy-on-notify 发布：把累加器当前状态复制成可以交给订阅者的外壳副本。
  *
- * 三层引用必须同时换新，否则下游静默不更新（renderer 侧的硬约束，不是性能优化）：
+ * **有行变更的帧**三层引用必须同时换新，否则下游静默不更新（renderer 侧的硬约束，
+ * 不是性能优化）：
  * - `rows.window`：约 15 处 `[snapshot?.rows.window]` memo 依赖
  *   （SessionPane.tsx:643/670/678/740/746/754/962/1132/1691/1697/3757、
  *   useTreemappingConversationMessage.ts:97 等），引用不换则这些 memo 全部不更新；
  * - `rows`：只换 window 漏掉 rows 对象会留下半旧半新的窗口容器；
  * - `snapshot`：`usePendingCommandRecovery.ts:36` 等 `[snapshot]` effect 依赖。
+ *
+ * **无行变更的帧**（纯 `state.updated` 水位推进，或 delta 目标在窗口之外）只换
+ * `snapshot` 外壳，`rows.window` 复用上一帧的引用：内容逐行相同却每帧换新，等于
+ * 让上面那批 memo 在长会话里被无意义的帧反复打掉——这正是本轮旗舰指标的来源。
+ * `rows` 容器是否一并复用由 sameRowsMeta 裁决（见其注释）。
  *
  * 累加器本体继续持有自己的 window 数组，下一帧的原地 push/覆盖不会写穿这份副本——
  * 这也是「发布外壳副本而非 accumulator 本体」的原因：本体是活的，外壳是那一帧的定格。
@@ -161,11 +180,22 @@ export function mergeOlderRows(
  */
 function publishConversationShell(
   accumulator: MutableConversationSnapshotAccumulator,
+  previous: ConversationSnapshot | null,
+  rowsChanged: boolean,
 ): ConversationSnapshot {
   const { snapshot } = accumulator;
-  const window = [...snapshot.rows.window];
-  const rows = { ...snapshot.rows, window };
-  return { ...snapshot, rows };
+  // rowsChanged 的口径写死为「本帧变更集非空」（由调用方给，见 applyDeltas）：
+  // row.delta 未命中窗口时压根不会进集合，因此空集就是「窗口未变」的安全代理。
+  if (!rowsChanged && previous !== null && sameRowsMeta(previous.rows, snapshot.rows)) {
+    return { ...snapshot, rows: previous.rows };
+  }
+  // 有行变更 → window 必换；无行变更但 rows 标量变了 → window 内容仍相同，复用引用，
+  // 只换承载新标量的 rows 容器。
+  const window =
+    rowsChanged || previous === null
+      ? [...snapshot.rows.window]
+      : previous.rows.window;
+  return { ...snapshot, rows: { ...snapshot.rows, window } };
 }
 
 /**
@@ -248,6 +278,8 @@ export function createConversationProjectionAccumulator(
 ): ConversationProjectionAccumulator {
   const accumulator = createMutableConversationSnapshotAccumulator(base);
   let lastMutation: ConversationProjectionLastMutation | null = null;
+  // 最近一次发布出去的外壳副本：无行变更帧要复用它的 rows 引用。
+  let published: ConversationSnapshot | null = null;
   return {
     applyDeltas(deltas, toSeq) {
       const turnIdByRowId = collectMutationTurnIds(accumulator, deltas);
@@ -256,13 +288,18 @@ export function createConversationProjectionAccumulator(
       // 空 delta 帧（如纯 state.updated 水位推进）也要发布 lastMutation：
       // 消费方据此知道「本帧无行变更」，只有失效锚点那一轮需要重算。
       lastMutation = { turnIdByRowId };
-      return publishConversationShell(accumulator);
+      published = publishConversationShell(accumulator, published, turnIdByRowId.size > 0);
+      return published;
     },
     lastMutation() {
       return lastMutation;
     },
     publish() {
-      return publishConversationShell(accumulator);
+      // 只读发布不推进任何状态，但窗口可能是 rebuild 之后尚未 apply 过的中间态
+      // （前插补拉 / 目录补齐都走这条路），内容确实与上一份外壳不同 →
+      // 显式传 rowsChanged=true，不允许复用旧引用。
+      published = publishConversationShell(accumulator, published, true);
+      return published;
     },
   };
 }
