@@ -60,7 +60,14 @@ export async function ensureProviderFamilyDomainMigration(
     providerFamilyDomainMigrated: true,
   });
 
-  logger.info("[providerFamilyDomainMigration] provider family domain 迁移完成", {
-    inferredDomain,
-  });
+  // FORK（免登录完整使用）：只配外部 API 的用户永远推断不出 zai/bigmodel domain，
+  // 这里只是把 migrated 标记落盘避免每次启动重跑；INFO 会每次启动都打一条看似
+  // 成功的迁移日志，降为 debug。
+  if (inferredDomain) {
+    logger.info("[providerFamilyDomainMigration] provider family domain 迁移完成", {
+      inferredDomain,
+    });
+  } else {
+    logger.debug("[providerFamilyDomainMigration] 推断不出 family domain（如仅外部 API），仅落迁移标记");
+  }
 }

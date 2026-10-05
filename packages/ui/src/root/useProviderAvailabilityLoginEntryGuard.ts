@@ -54,7 +54,13 @@ export function useProviderAvailabilityLoginEntryGuard({
         : modelSelectionView;
       const availability = resolveProviderAvailabilityState({ modelSelectionView: refreshedView });
       const { hasUsableProvider, providerCount } = availability;
-      const shouldOpenLoginEntry = !providerFamilyDomain || (!user && !hasUsableProvider);
+      // FORK（免登录完整使用）：只配外部 API（standard-personal / api-key）的用户不选
+      // providerFamilyDomain 也不登录。原判定 `!providerFamilyDomain || ...` 把「品牌
+      // family 未选」误当成「没有可用 Provider」，DeepSeek 这类用户会被 WelcomeScreen
+      // 全屏拦住、被迫点「跳过」伪造一个 zai/bigmodel domain。门禁的充分条件本来就
+      // 是「未登录且没有任何可用模型」；domain 只影响 Coding Plan 分组/额度展示等
+      // family 语义 UI（null 时按现有各消费方分支安全降级），与能不能用无关。
+      const shouldOpenLoginEntry = !user && !hasUsableProvider;
 
       // 未登录且没有可用模型配置时必须引导用户连接账号或填写 API Key。
       // 启动检查、API Key 设置回流等入口统一走这里，避免各处复制判断后语义分叉。
