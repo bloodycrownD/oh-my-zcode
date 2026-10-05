@@ -291,10 +291,12 @@ export function shouldAutoLoadIncompleteLeadingTurn(
 // conversationProjectionCore（可测性前置：被测模块传递依赖链零 `@/` 导入）。
 // 这里 import + re-export 保持既有外部引用不破。
 import {
+  accumulateTurnDirectoryPages,
   createConversationProjectionAccumulator,
   createTrailingDebouncer,
   mergeOlderRows,
   nextTurnNavigatorDirectoryRevision,
+  TurnDirectoryAbortedError,
   TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
   type ConversationProjectionAccumulator,
   type ConversationProjectionLastMutation,
@@ -1373,108 +1375,93 @@ export class ConversationProjectionStore {
     if (!sessionId) return stale(snapshot.logEpoch);
 
     const logEpoch = snapshot.logEpoch;
-    // 同一次查询的所有页必须来自同一服务端 revision，否则拼接结果既漏又重。
-    let pinnedRevision: number | null = null;
-    let atSeq = 0;
-    let realUserQueryTotal = 0;
-    let hasMore = false;
-    let pages = 0;
-    let beforeQueryRowId: number | undefined;
-    // 服务端按 queryRowId 升序返回，游标向更早方向翻 → 每页前插（整体保持升序）。
-    const entries: TurnDirectoryEntry[] = [];
     this.turnDirectoryQueryInFlight = true;
     this.setState({ loadingDirectory: true });
     try {
-      while (true) {
-        const result = await this.transport.turnDirectory({
+      // 分页循环的纯逻辑已下沉 core（纪元弃 / 跨页 revision pin / 游标未推进 guard /
+      // 50 页上限都在那里可测）；本层只留 closed 判定、setState 与终态写入。
+      // closed 由 fetchPage 就地抛哨兵——翻页途中 store 被 close 时必须立刻停，
+      // 那不是一次查询失败，不能走清空目录态的分支。
+      const accumulated = await accumulateTurnDirectoryPages({
+        fetchPage: async (cursor, limit) => {
+          if (this.closed) throw new TurnDirectoryAbortedError();
+          return this.transport.turnDirectory({
+            sessionId,
+            limit,
+            ...(cursor === undefined ? {} : { beforeQueryRowId: cursor }),
+          });
+        },
+        expectedLogEpoch: logEpoch,
+        limit: PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
+        maxPages: TURN_DIRECTORY_MAX_PAGES,
+        readCurrentLogEpoch: () => this.state.snapshot?.logEpoch,
+        sessionId,
+      });
+      const { entries, pages, pinnedRevision, realUserQueryTotal, stopReason } = accumulated;
+      if (stopReason === "aborted") return stale(logEpoch);
+      if (stopReason === "epoch-mismatch") {
+        logger.warn("[v4-store] turn 目录纪元不匹配，整批丢弃", {
+          currentLogEpoch: this.state.snapshot?.logEpoch,
           sessionId,
-          limit: PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
-          ...(beforeQueryRowId === undefined ? {} : { beforeQueryRowId }),
         });
-        if (this.closed) return stale(logEpoch);
-        const current = this.state.snapshot;
-        if (!current || current.logEpoch !== logEpoch || result.atLogEpoch !== logEpoch) {
-          logger.warn("[v4-store] turn 目录纪元不匹配，整批丢弃", {
-            resultLogEpoch: result.atLogEpoch,
-            sessionId,
-          });
-          return stale(logEpoch);
-        }
-        if (pinnedRevision === null) {
-          pinnedRevision = result.atRevision;
-        } else if (result.atRevision !== pinnedRevision) {
-          logger.warn("[v4-store] turn 目录翻页跨 revision，整批丢弃", {
-            pinnedRevision,
-            resultRevision: result.atRevision,
-            sessionId,
-          });
-          return stale(logEpoch);
-        }
-        realUserQueryTotal = result.realUserQueryTotal;
-        atSeq = result.atSeq;
-        // 权威总数不足两条 → 首屏即终态，不再翻页探测（旧路径靠 reduce 才有这个结论）。
-        if (realUserQueryTotal < 2) {
-          this.setState({
-            turnDirectory: {
-              ...EMPTY_TURN_DIRECTORY_STATE,
-              realUserQueryTotal,
-              atRevision: result.atRevision,
-              atSeq: result.atSeq,
-              atLogEpoch: result.atLogEpoch,
-              loaded: true,
-            },
-          });
-          logger.debug("[v4-store] turn 目录不足两条 query，跳过翻页", {
-            pages,
-            realUserQueryTotal,
-            sessionId,
-          });
-          const terminal = {
-            status: "not-enough-queries" as const,
-            logEpoch,
-            directoryRevision,
-          };
-          this.turnDirectoryHydrationTerminal = terminal;
-          return terminal;
-        }
-        entries.unshift(...result.entries);
-        hasMore = result.hasMore;
-        // 权威总数取齐即止：hasMore 只说「更早方向还有」，条目数对齐后无需再翻。
-        if (!hasMore || entries.length >= realUserQueryTotal) {
-          hasMore = entries.length < realUserQueryTotal;
-          break;
-        }
-        const nextCursor = result.entries[0]?.queryRowId;
-        if (
-          nextCursor === undefined ||
-          (beforeQueryRowId !== undefined && nextCursor >= beforeQueryRowId)
-        ) {
-          logger.warn("[v4-store] turn 目录游标未推进，停止翻页", {
-            beforeQueryRowId,
-            sessionId,
-          });
-          return { status: "retryable-failure", logEpoch };
-        }
-        beforeQueryRowId = nextCursor;
-        pages += 1;
-        // 页数上限：到顶即以已取到的部分提交，rail 不因超长会话一直转圈。
-        if (pages >= TURN_DIRECTORY_MAX_PAGES) break;
+        return stale(logEpoch);
       }
-
+      if (stopReason === "revision-mismatch") {
+        logger.warn("[v4-store] turn 目录翻页跨 revision，整批丢弃", {
+          sessionId,
+        });
+        return stale(logEpoch);
+      }
+      if (stopReason === "cursor-stalled") {
+        // 游标不后退，继续翻必然死循环。guard 本身在 core 里；这里只落日志与终态。
+        logger.warn("[v4-store] turn 目录游标未推进，停止翻页", { sessionId });
+        return { status: "retryable-failure", logEpoch };
+      }
+      if (stopReason === "fetch-failed") {
+        logger.warn(
+          `[v4-store] turnDirectory ${this.topic} 失败: ${accumulated.failure instanceof Error ? accumulated.failure.message : String(accumulated.failure)}`,
+        );
+        return { status: "retryable-failure", logEpoch };
+      }
+      // 权威总数不足两条 → 首屏即终态，不再翻页探测（旧路径靠 reduce 才有这个结论）。
+      if (stopReason === "not-enough-queries") {
+        this.setState({
+          turnDirectory: {
+            ...EMPTY_TURN_DIRECTORY_STATE,
+            atRevision: pinnedRevision,
+            atSeq: accumulated.atSeq,
+            atLogEpoch: logEpoch,
+            loaded: true,
+            realUserQueryTotal,
+          },
+        });
+        logger.debug("[v4-store] turn 目录不足两条 query，跳过翻页", {
+          pages,
+          realUserQueryTotal,
+          sessionId,
+        });
+        const terminal = {
+          status: "not-enough-queries" as const,
+          logEpoch,
+          directoryRevision,
+        };
+        this.turnDirectoryHydrationTerminal = terminal;
+        return terminal;
+      }
       this.setState({
         turnDirectory: {
-          entries,
-          realUserQueryTotal,
-          atRevision: pinnedRevision,
-          atSeq,
           atLogEpoch: logEpoch,
-          hasMore,
+          atRevision: pinnedRevision,
+          atSeq: accumulated.atSeq,
+          entries,
+          hasMore: accumulated.hasMore,
           loaded: true,
+          realUserQueryTotal,
         },
       });
       logger.debug("[v4-store] turn 目录查询完成", {
         entryCount: entries.length,
-        hasMore,
+        hasMore: accumulated.hasMore,
         pages,
         realUserQueryTotal,
         sessionId,

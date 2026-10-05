@@ -14,8 +14,10 @@ import {
   type ConversationSnapshot,
   type ConversationTopicFrame,
   type SessionPhase,
+  type TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
+  accumulateTurnDirectoryPages,
   buildConversationTurnRenderUnits,
   createConversationProjectionAccumulator,
   createConversationTurnRenderUnitsCache,
@@ -24,9 +26,12 @@ import {
   nextTurnNavigatorDirectoryRevision,
   shouldInvalidateTurnNavigatorDirectory,
   TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+  TurnDirectoryAbortedError,
   withDetachedTurnIds,
+  type AccumulateTurnDirectoryPagesResult,
   type ConversationTurnRenderUnit,
   type TrailingDebounceTimers,
+  type TurnDirectoryPage,
 } from "../src/v4/conversationProjectionCore.js";
 
 /** 最小 userInput 行：mergeOlderRows 只读 rowId/turnId，构造足够即可。 */
@@ -933,4 +938,306 @@ test("T-TD3 去抖 cancel 能掐掉未执行的重查（store close 时必须清
   assert.equal(debouncer.pending, false);
   clock.runPending();
   assert.equal(queryCount, 0);
+});
+
+// ---------------------------------------------------------------------------
+// turn 目录分页累积：纪元弃 / 跨页 revision pin / 游标未推进 / 页数上限（G-1）
+// ---------------------------------------------------------------------------
+
+/** 一条目录条目：queryRowId 是游标与排序键，其余字段只占位。 */
+function directoryEntry(queryRowId: number, turnId = `turn-${queryRowId}`): TurnDirectoryEntry {
+  return {
+    assistantPreview: `答 ${turnId}`,
+    assistantPreviewKind: "text",
+    queryPreview: `问 ${turnId}`,
+    queryRowId,
+    turnId,
+  };
+}
+
+/**
+ * 按游标切分的分页假服务端：`all` 是全量条目（queryRowId 升序）。首屏取尾部
+ * `pageSize` 条（最新的一批），之后每页按 beforeQueryRowId 严格小于的协议语义
+ * 再取更早的一批，因此第 i 页的游标是上一页返回的最小 queryRowId。
+ */
+function pagedDirectory(
+  all: readonly TurnDirectoryEntry[],
+  pageSize: number,
+  overrides: { atRevision?: number[]; atLogEpoch?: string[] } = {},
+): { pages: TurnDirectoryPage[]; cursors: (number | undefined)[] } {
+  const pages: TurnDirectoryPage[] = [];
+  const cursors: (number | undefined)[] = [];
+  let rest = [...all];
+  let cursor: number | undefined;
+  let index = 0;
+  while (true) {
+    const entries = rest.slice(-pageSize);
+    rest = rest.slice(0, Math.max(0, rest.length - pageSize));
+    const position = index++;
+    pages.push({
+      atLogEpoch: overrides.atLogEpoch?.[position] ?? "epoch-1",
+      atRevision: overrides.atRevision?.[position] ?? 5,
+      atSeq: 100 + position,
+      entries,
+      hasMore: rest.length > 0,
+      realUserQueryTotal: all.length,
+    });
+    cursors.push(cursor);
+    if (entries.length === 0 || rest.length === 0) break;
+    cursor = entries[0]!.queryRowId;
+  }
+  return { cursors, pages };
+}
+
+/** 用预置页序列驱动 core，逐次返回并记录被请求的游标。 */
+function scriptedFetch(pages: readonly TurnDirectoryPage[]): {
+  cursors: (number | undefined)[];
+  fetchPage: (cursor: number | undefined, limit: number) => Promise<TurnDirectoryPage>;
+} {
+  const cursors: (number | undefined)[] = [];
+  let index = 0;
+  return {
+    cursors,
+    fetchPage: async (cursor) => {
+      cursors.push(cursor);
+      const page = pages[index++];
+      if (page === undefined) throw new Error(`第 ${index} 页没有预置数据`);
+      return page;
+    },
+  };
+}
+
+const DIRECTORY_SESSION = "sess-directory";
+
+/** 默认参数：纪元恒定、单页 500、上限 50 页（与 store 传值一致）。 */
+function accumulate(
+  fetchPage: (cursor: number | undefined, limit: number) => Promise<TurnDirectoryPage>,
+  overrides: {
+    currentLogEpoch?: () => string | null | undefined;
+    maxPages?: number;
+    expectedLogEpoch?: string;
+  } = {},
+): Promise<AccumulateTurnDirectoryPagesResult> {
+  return accumulateTurnDirectoryPages({
+    expectedLogEpoch: overrides.expectedLogEpoch ?? "epoch-1",
+    fetchPage,
+    limit: 500,
+    maxPages: overrides.maxPages ?? 50,
+    readCurrentLogEpoch: overrides.currentLogEpoch ?? (() => "epoch-1"),
+    sessionId: DIRECTORY_SESSION,
+  });
+}
+
+test("G-1 两页取齐：游标向更早方向翻，条目整体保持 queryRowId 升序", async () => {
+  const all = Array.from({ length: 5 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 3);
+  const scripted = scriptedFetch(pages);
+  const result = await accumulate(scripted.fetchPage);
+
+  assert.equal(result.stopReason, "completed");
+  assert.deepEqual(scripted.cursors, [undefined, 3], "第二页必须带上首页最小 queryRowId");
+  assert.deepEqual(
+    result.entries.map((entry) => entry.queryRowId),
+    [1, 2, 3, 4, 5],
+    "每页前插，最终必须同序",
+  );
+  assert.equal(result.realUserQueryTotal, 5);
+  assert.equal(result.pinnedRevision, 5);
+  assert.equal(result.hasMore, false, "取齐后 hasMore 必须为 false（否则 rail 会一直想再拉）");
+  assert.equal(result.pages, 1, "翻了两页，pages 记的是已发起的续拉次数");
+  assert.equal(result.atSeq, 101, "atSeq 取最后一页的水位");
+});
+
+test("G-1 单页就取齐：不再发第二次查询", async () => {
+  const all = Array.from({ length: 2 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 10);
+  const scripted = scriptedFetch(pages);
+  const result = await accumulate(scripted.fetchPage);
+
+  assert.equal(result.stopReason, "completed");
+  assert.deepEqual(scripted.cursors, [undefined], "取齐即止，不许多打一次只读查询");
+  assert.equal(result.entries.length, 2);
+  assert.equal(result.hasMore, false);
+});
+
+test("G-1 权威总数不足两条：首屏即终态，一条都不提交", async () => {
+  const result = await accumulate(async () => ({
+    atLogEpoch: "epoch-1",
+    atRevision: 5,
+    atSeq: 100,
+    entries: [directoryEntry(1)],
+    hasMore: false,
+    realUserQueryTotal: 1,
+  }));
+
+  assert.equal(result.stopReason, "not-enough-queries");
+  assert.deepEqual(result.entries, [], "终态不带任何条目（rail 也不该出现）");
+  assert.equal(result.realUserQueryTotal, 1, "权威总数仍要带给 store 做隐藏判定");
+});
+
+test("G-1 条目数对齐后 hasMore 收敛为 false：服务端仍报「更早方向还有」也不多翻一页", async () => {
+  // hasMore 只说「更早方向还有」，条目数对齐权威总数后继续翻只会空转——这里钉住收敛口径。
+  const result = await accumulate(async () => ({
+    atLogEpoch: "epoch-1",
+    atRevision: 5,
+    atSeq: 100,
+    entries: [directoryEntry(1), directoryEntry(2)],
+    hasMore: true,
+    realUserQueryTotal: 2,
+  }));
+
+  assert.equal(result.stopReason, "completed");
+  assert.equal(result.hasMore, false, "取齐后 hasMore 必须收敛为 false（否则 rail 会一直想再拉）");
+  assert.equal(result.entries.length, 2);
+});
+
+test("G-1 跨 revision：第二页 revision 漂移即整批弃（游标按全量行现算，跨代拼接必漏）", async () => {
+  const all = Array.from({ length: 5 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 3, { atRevision: [5, 6] });
+  const scripted = scriptedFetch(pages);
+  const result = await accumulate(scripted.fetchPage);
+
+  assert.equal(result.stopReason, "revision-mismatch");
+  assert.deepEqual(result.entries, [], "整批弃：已取到的第一页也不提交");
+  assert.equal(result.pinnedRevision, 5, "pin 住的是首页 revision");
+});
+
+test("G-1 纪元不匹配：本地活纪元已推进则整批弃", async () => {
+  const all = Array.from({ length: 5 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 3);
+  const scripted = scriptedFetch(pages);
+  // 第一页回来时活纪元还是 epoch-1，翻页途中订阅流把它推进到 epoch-2。
+  let calls = 0;
+  const result = await accumulate(
+    async (cursor, limit) => {
+      calls += 1;
+      const page = await scripted.fetchPage(cursor, limit);
+      if (calls === 1) return page;
+      return { ...page, atLogEpoch: "epoch-2" };
+    },
+    { currentLogEpoch: () => "epoch-2" },
+  );
+
+  assert.equal(result.stopReason, "epoch-mismatch");
+  assert.deepEqual(result.entries, []);
+});
+
+test("G-1 纪元不匹配：服务端回执与本批不符（本地还没推进）也整批弃", async () => {
+  const result = await accumulate(async () => ({
+    atLogEpoch: "epoch-other",
+    atRevision: 5,
+    atSeq: 100,
+    entries: [directoryEntry(1), directoryEntry(2)],
+    hasMore: false,
+    realUserQueryTotal: 2,
+  }));
+
+  assert.equal(result.stopReason, "epoch-mismatch");
+  assert.deepEqual(result.entries, []);
+});
+
+test("G-1 纪元缺失（会话快照已被清）同样按弃处理", async () => {
+  const result = await accumulate(
+    async () => ({
+      atLogEpoch: "epoch-1",
+      atRevision: 5,
+      atSeq: 100,
+      entries: [directoryEntry(1), directoryEntry(2)],
+      hasMore: false,
+      realUserQueryTotal: 2,
+    }),
+    { currentLogEpoch: () => null },
+  );
+
+  assert.equal(result.stopReason, "epoch-mismatch");
+});
+
+test("G-1 游标未推进：hasMore 为真却返回空页即判失败（否则死循环）", async () => {
+  const result = await accumulate(async () => ({
+    atLogEpoch: "epoch-1",
+    atRevision: 5,
+    atSeq: 100,
+    entries: [],
+    hasMore: true,
+    realUserQueryTotal: 9,
+  }));
+
+  assert.equal(result.stopReason, "cursor-stalled");
+  assert.equal(result.realUserQueryTotal, 9, "失败也要把已知的权威总数带给 store 做日志");
+});
+
+test("G-1 游标未推进：游标不后退（nextCursor >= 上一页游标）同样判失败", async () => {
+  // 第二页返回的最小 queryRowId 比上一页的游标还大：协议被违反，必须挡住。
+  const scripted = scriptedFetch([
+    {
+      atLogEpoch: "epoch-1",
+      atRevision: 5,
+      atSeq: 100,
+      entries: [directoryEntry(3), directoryEntry(4), directoryEntry(5)],
+      hasMore: true,
+      realUserQueryTotal: 9,
+    },
+    {
+      atLogEpoch: "epoch-1",
+      atRevision: 5,
+      atSeq: 101,
+      entries: [directoryEntry(4)],
+      hasMore: true,
+      realUserQueryTotal: 9,
+    },
+  ]);
+  const result = await accumulate(scripted.fetchPage);
+
+  assert.deepEqual(scripted.cursors, [undefined, 3]);
+  assert.equal(result.stopReason, "cursor-stalled");
+});
+
+test("G-1 页数上限：到顶以已取到的部分提交，并如实报 page-limit（不再多翻一页）", async () => {
+  const all = Array.from({ length: 10 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 2);
+  const scripted = scriptedFetch(pages);
+  const result = await accumulate(scripted.fetchPage, { maxPages: 2 });
+
+  assert.equal(result.stopReason, "page-limit");
+  assert.deepEqual(scripted.cursors, [undefined, 9], "首页 + 一次续拉，正好到上限；不多发一页");
+  assert.equal(result.pages, 2);
+  assert.equal(result.entries.length, 4, "部分结果照常返回，由 store 决定怎么提示");
+  assert.equal(result.hasMore, true);
+  assert.equal(result.realUserQueryTotal, 10);
+  assert.ok(result.entries.length < result.realUserQueryTotal, "截断态必须可被 store 识别");
+});
+
+test("G-1 fetchPage 抛错：表达为 fetch-failed 并把原始错误带回（core 不打日志）", async () => {
+  const boom = new Error("transport down");
+  const result = await accumulate(async () => {
+    throw boom;
+  });
+
+  assert.equal(result.stopReason, "fetch-failed");
+  assert.equal(result.failure, boom, "错误必须原样带回，否则 store 的 warn 里只剩「失败了」");
+});
+
+test("G-1 调用方中止（store close）不混同于失败", async () => {
+  const result = await accumulate(async () => {
+    throw new TurnDirectoryAbortedError();
+  });
+
+  assert.equal(result.stopReason, "aborted", "中止不是查询失败，不能走清空目录态的分支");
+});
+
+test("G-1 翻页途中 store 关闭：第二页之前就停，已取到的第一页也不提交", async () => {
+  const all = Array.from({ length: 5 }, (_, index) => directoryEntry(index + 1));
+  const { pages } = pagedDirectory(all, 3);
+  const scripted = scriptedFetch(pages);
+  let closed = false;
+  const result = await accumulate(async (cursor, limit) => {
+    if (closed) throw new TurnDirectoryAbortedError();
+    const page = await scripted.fetchPage(cursor, limit);
+    closed = true;
+    return page;
+  });
+
+  assert.equal(result.stopReason, "aborted");
+  assert.deepEqual(scripted.cursors, [undefined], "关掉之后不该再发第二次查询");
+  assert.deepEqual(result.entries, [], "中止不写状态，已取到的条目也不能提交");
 });

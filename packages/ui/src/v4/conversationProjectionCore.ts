@@ -12,6 +12,7 @@ import {
   type ConversationSnapshot,
   type ConversationTopicFrame,
   type MutableConversationSnapshotAccumulator,
+  type TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import { createConversationTurnRenderUnitsCache } from "./conversationTurnRenderUnits.js";
 
@@ -127,6 +128,204 @@ export function createTrailingDebouncer(
       handle = null;
     },
   };
+}
+
+// ─────────────────────────── turn 目录分页累积（游标 + 陈旧读裁决） ───────────────────────────
+
+/**
+ * 目录分页中止原因。**陈旧与失败一律用返回值表达**——core 是 @/-free 的纯逻辑，
+ * 不能 import UI logger，日志与 setState 全部由 store 按此裁决。
+ */
+export type TurnDirectoryStopReason =
+  /** 取齐：条目数对齐权威总数，或服务端说更早方向没有了。 */
+  | "completed"
+  /** 权威总数不足两条 → 首屏即终态，不再翻页探测。 */
+  | "not-enough-queries"
+  /** 翻到页数上限仍未取齐 → 以已取到的部分提交（rail 需提示，见 truncated）。 */
+  | "page-limit"
+  /** 游标未推进（空页或游标不后退）→ 继续翻必然死循环，判失败。 */
+  | "cursor-stalled"
+  /** 纪元不匹配（本地活纪元或服务端回执与本批不符）→ 整批弃。 */
+  | "epoch-mismatch"
+  /** 翻页跨 revision → 整批弃（游标按全量行现算，跨代拼接必漏条目）。 */
+  | "revision-mismatch"
+  /** 调用方在翻页途中关闭（store close）→ 弃，不写状态。 */
+  | "aborted"
+  /** fetchPage 抛错 → 失败。 */
+  | "fetch-failed";
+
+/** 一页目录查询的结果（结构上是 transport 的 turnDirectory 返回值的窄面）。 */
+export interface TurnDirectoryPage {
+  readonly entries: readonly TurnDirectoryEntry[];
+  readonly hasMore: boolean;
+  readonly realUserQueryTotal: number;
+  readonly atRevision: number;
+  readonly atSeq: number;
+  readonly atLogEpoch: string;
+}
+
+export interface AccumulateTurnDirectoryPagesOptions {
+  /**
+   * 取一页。`cursor` 为 undefined 表示首屏，之后为上一页返回的最小 queryRowId；
+   * `limit` 由 core 统一给出（页大小是本层的口径，不交给调用方各写一份）。
+   */
+  fetchPage(cursor: number | undefined, limit: number): Promise<TurnDirectoryPage>;
+  /**
+   * 本批查询的会话 id。
+   *
+   * core 是 @/-free 的纯逻辑、不打日志，因此本函数体内不消费该字段——它是调用方
+   * 组 `fetchPage` 参数时用的同一份上下文，随调用契约一起显式传下来，避免两边
+   * 各持一份可能不一致的 sessionId。
+   */
+  sessionId: string;
+  /** 单页条数上限（服务端 limit）。 */
+  limit: number;
+  /** 最多翻多少页；到顶以已取到的部分提交。 */
+  maxPages: number;
+  /** 本批查询钉住的本地纪元：与活纪元不一致即整批弃。 */
+  expectedLogEpoch: string;
+  /**
+   * 回读**当前活纪元**的回调（store 传 `() => this.state.snapshot?.logEpoch`）。
+   *
+   * 不收纪元快照：翻页期间订阅流可能在推进 epoch，只有回调才能读到 await 之后的
+   * 真值，也才让「跨纪元丢弃」这条路径在单测里可构造。
+   */
+  readCurrentLogEpoch(): string | null | undefined;
+}
+
+export interface AccumulateTurnDirectoryPagesResult {
+  /** 按 queryRowId 升序拼接的条目（每页前插，因此天然同序）。 */
+  readonly entries: readonly TurnDirectoryEntry[];
+  readonly realUserQueryTotal: number;
+  readonly atSeq: number;
+  /** 首页钉下的 revision；后续页与之不符即 revision-mismatch。 */
+  readonly pinnedRevision: number | null;
+  readonly hasMore: boolean;
+  /** 实际翻了多少页（page-limit 的告警上下文）。 */
+  readonly pages: number;
+  readonly stopReason: TurnDirectoryStopReason;
+  /**
+   * `fetch-failed` 时的原始错误。
+   *
+   * core 不打日志，错误文案只能原样带回给 store——否则一次查询失败在日志里只剩
+   * 「失败了」，排查时拿不到任何原因。
+   */
+  readonly failure?: unknown;
+}
+
+/** 调用方主动中止（store 在 closed 时从 fetchPage 里抛）。 */
+export class TurnDirectoryAbortedError extends Error {
+  constructor() {
+    super("turn 目录分页被调用方中止");
+    this.name = "TurnDirectoryAbortedError";
+  }
+}
+
+/**
+ * 目录分页循环的纯逻辑下沉（store 只留 closed 判定 / setState / 终态写入）。
+ *
+ * 纪律全部落在这一层，因为它们全是「错了不报错、只静默漏条目」的形状：
+ * - **纪元弃**：本地活纪元与服务端回执任一与本批不符即整批弃（跨纪元拼接会复活
+ *   已被裁剪的分支）；
+ * - **跨页 revision pin**：首页钉 revision，后续页必须同代；
+ * - **游标未推进 guard**：空页或游标不后退即停，否则无限翻页；
+ * - **页数上限**：到顶以部分结果提交，rail 由 truncated 提示（静默截断会被当成
+ *   「没有更早条目」）；
+ * - **首屏终态**：`realUserQueryTotal < 2` 直接收，不必再探测页。
+ */
+export async function accumulateTurnDirectoryPages(
+  options: AccumulateTurnDirectoryPagesOptions,
+): Promise<AccumulateTurnDirectoryPagesResult> {
+  const { expectedLogEpoch, limit, maxPages, readCurrentLogEpoch } = options;
+  // 同一次查询的所有页必须来自同一服务端 revision，否则拼接结果既漏又重。
+  let pinnedRevision: number | null = null;
+  let atSeq = 0;
+  let realUserQueryTotal = 0;
+  let hasMore = false;
+  let pages = 0;
+  let cursor: number | undefined;
+  const entries: TurnDirectoryEntry[] = [];
+  // 弃/失败一律交出空条目：陈旧读与半截目录一旦被提交，rail 会停在「旧目录 + 新
+  // revision」上（这正是 B-2 要清的那个坑）。把「整批弃」钉在这一层，调用方就不必
+  // 记得在每个失败分支里手动丢弃。
+  const giveUp = (
+    stopReason: TurnDirectoryStopReason,
+    failure?: unknown,
+  ): AccumulateTurnDirectoryPagesResult => ({
+    atSeq,
+    entries: [],
+    failure,
+    hasMore,
+    pages,
+    pinnedRevision,
+    realUserQueryTotal,
+    stopReason,
+  });
+  while (true) {
+    let page: TurnDirectoryPage;
+    try {
+      page = await options.fetchPage(cursor, limit);
+    } catch (error) {
+      return giveUp(
+        error instanceof TurnDirectoryAbortedError ? "aborted" : "fetch-failed",
+        error,
+      );
+    }
+    if (readCurrentLogEpoch() !== expectedLogEpoch || page.atLogEpoch !== expectedLogEpoch) {
+      return giveUp("epoch-mismatch");
+    }
+    if (pinnedRevision === null) pinnedRevision = page.atRevision;
+    else if (page.atRevision !== pinnedRevision) {
+      return giveUp("revision-mismatch");
+    }
+    realUserQueryTotal = page.realUserQueryTotal;
+    atSeq = page.atSeq;
+    // 权威总数不足两条 → 首屏即终态（此时一条都不提交）。
+    if (realUserQueryTotal < 2) {
+      return {
+        atSeq,
+        entries: [],
+        hasMore: false,
+        pages,
+        pinnedRevision,
+        realUserQueryTotal,
+        stopReason: "not-enough-queries",
+      };
+    }
+    // 服务端按 queryRowId 升序返回，游标向更早方向翻 → 每页前插（整体保持升序）。
+    entries.unshift(...page.entries);
+    hasMore = page.hasMore;
+    // 权威总数取齐即止：hasMore 只说「更早方向还有」，条目数对齐后无需再翻。
+    if (!hasMore || entries.length >= realUserQueryTotal) {
+      return {
+        atSeq,
+        entries,
+        hasMore: entries.length < realUserQueryTotal,
+        pages,
+        pinnedRevision,
+        realUserQueryTotal,
+        stopReason: "completed",
+      };
+    }
+    const nextCursor = page.entries[0]?.queryRowId;
+    if (nextCursor === undefined || (cursor !== undefined && nextCursor >= cursor)) {
+      return giveUp("cursor-stalled");
+    }
+    cursor = nextCursor;
+    pages += 1;
+    // 页数上限：到顶即以已取到的部分提交，rail 不因超长会话一直转圈。
+    if (pages >= maxPages) {
+      return {
+        atSeq,
+        entries,
+        hasMore,
+        pages,
+        pinnedRevision,
+        realUserQueryTotal,
+        stopReason: "page-limit",
+      };
+    }
+  }
 }
 
 /**
