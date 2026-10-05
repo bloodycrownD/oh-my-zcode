@@ -32,6 +32,10 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { ConversationTurnGroup } from "@/v4/ConversationTurnGroup.js";
 import { ConversationPendingGuideList } from "@/v4/ConversationPendingGuideList.js";
+import {
+  clearRowElementRegistry,
+  rowElementRegistry,
+} from "@/v4/ConversationRowView.js";
 import type { AssistantFeedbackHandler } from "@/v4/ConversationRowView.js";
 import { ConversationTurnNavigator } from "@/v4/ConversationTurnNavigator.js";
 import { syncConversationShareSelectionPanelLayout } from "@/v4/conversationShareSelectionPanelLayout.js";
@@ -484,6 +488,9 @@ function ConversationTimelineImpl({
   if (heightCacheRef.current === null) {
     heightCacheRef.current = new TimelineRowHeightCache();
   }
+  // 首次挂载不清注册表：行元素的 ref 在本 effect 之前就已挂上，
+  // 以当前 sessionKey 作为「已清理过」的基线。
+  const rowElementRegistrySessionRef = useRef<string | null>(sessionKey);
   const [backToBottomVisible, setBackToBottomVisible] = useState(false);
   const [turnNavigatorViewport, setTurnNavigatorViewport] = useState({
     scrollOffsetPx: 0,
@@ -889,11 +896,12 @@ function ConversationTimelineImpl({
       syncMessageLayerMask(element);
       const viewportRect = element.getBoundingClientRect();
       const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
-      for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
-        const rowId = Number(rowElement.dataset.rowId);
-        if (!Number.isSafeInteger(rowId) || !turnNavigatorQueryRowIdsRef.current.has(rowId)) {
-          continue;
-        }
+      // 只查已挂载行的注册表，不再对滚动容器做 querySelectorAll 全扫描
+      // （那会让每次滚动都强制 reflow）。注册表按 query 集合的文档序遍历，
+      // positions 的顺序语义与原先 DOM 顺序一致。
+      for (const rowId of turnNavigatorQueryRowIdsRef.current) {
+        const rowElement = rowElementRegistry.get(rowId);
+        if (!rowElement) continue;
         const rowRect = rowElement.getBoundingClientRect();
         const start = element.scrollTop + rowRect.top - viewportRect.top;
         queryPositions.push({ rowId, start, end: start + rowRect.height });
@@ -1411,6 +1419,12 @@ function ConversationTimelineImpl({
   useLayoutEffect(() => {
     clearUserScrollIntent();
     heightCacheRef.current?.clear();
+    // rowId 跨会话可重复，且行元素由 ref callback 注册（挂载时才写），
+    // 切会话必须清空；否则新会话里旧 rowId 会命中已卸载的元素。
+    if (rowElementRegistrySessionRef.current !== sessionKey) {
+      rowElementRegistrySessionRef.current = sessionKey;
+      clearRowElementRegistry();
+    }
     // prepend 锚定基线一并重置：rowId 跨会话可重复，禁止拿旧会话首行比较。
     prependAnchorRef.current = { firstRowId: null, totalSize: 0 };
     pendingPrependVirtualAnchorRef.current = null;
