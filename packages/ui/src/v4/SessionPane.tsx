@@ -4575,6 +4575,8 @@ export function SessionPane({
               onLoadTurnDirectory={handleLoadTurnDirectory}
               loadingDirectory={state.loadingDirectory}
               turnDirectory={turnDirectoryView}
+              // 目录条目本体进 rail 的 items 合并层（窄面 turnDirectoryView 只做显隐裁决）。
+              turnDirectoryEntries={state.turnDirectory.entries}
               turnNavigatorDirectoryRevision={state.turnNavigatorDirectoryRevision}
               bottomDock={conversationBottomDock}
               hideTurnNavigator={shareActive && shareInSelectionStage}

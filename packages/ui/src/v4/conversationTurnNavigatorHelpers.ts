@@ -4,19 +4,18 @@ import {
   DEFAULT_MAX_PREVIEW_PARAGRAPHS,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
+// item 形状的权威源搬到目录合并模块：那份模块必须零导入才能被 Node 侧直接单测，
+// 由它定义形状、本模块转出去，避免同一个 interface 出现两份定义漂移。
+// （两条都是纯 type import，编译期剥离，helpers 的可测性不受影响。）
+import type {
+  ConversationTurnNavigatorAssistantPreviewKind,
+  ConversationTurnNavigatorItem,
+} from "@/v4/conversationTurnNavigatorDirectory.js";
 
-export type ConversationTurnNavigatorAssistantPreviewKind = "empty" | "running" | "text";
-
-export interface ConversationTurnNavigatorItem {
-  key: string;
-  turnId: string;
-  unitIndex: number;
-  rowId: number;
-  userPreview: string;
-  assistantPreview: string;
-  assistantPreviewKind: ConversationTurnNavigatorAssistantPreviewKind;
-  isRunning: boolean;
-}
+export type {
+  ConversationTurnNavigatorAssistantPreviewKind,
+  ConversationTurnNavigatorItem,
+};
 
 interface BuildConversationTurnNavigatorItemsOptions {
   assistantEmptyPreview: string;

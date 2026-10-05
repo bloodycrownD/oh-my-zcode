@@ -25,6 +25,7 @@ import type {
   ConversationRowTarget,
   QueueItem,
   SessionPhase,
+  TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
@@ -292,6 +293,13 @@ interface ConversationTimelineProps {
   /** rail 显隐的目录裁决输入（条目数据由 items 合并层消费）。 */
   turnDirectory?: ConversationTurnNavigatorDirectoryView;
   /**
+   * turn 目录条目本体（store `turnDirectory.entries`，按 queryRowId 升序）。
+   *
+   * 与上面的 `turnDirectory` 窄面互补：窄面只做显隐/水位的裁决，本数组才是
+   * rail items 的第二个数据源（未加载区间的降级 item）。未取过目录时为空数组。
+   */
+  turnDirectoryEntries?: readonly TurnDirectoryEntry[];
+  /**
    * 问题导航目录失效代际（store turnNavigatorDirectoryRevision）。
    * real-user query 增删后终态必须失效重探测；组件 hydration key
    * 追加此 revision，避免同一 logEpoch 内永久拦截。
@@ -379,6 +387,7 @@ function ConversationTimelineImpl({
   onLoadTurnDirectory,
   loadingDirectory = false,
   turnDirectory,
+  turnDirectoryEntries,
   turnNavigatorDirectoryRevision = 0,
   bottomDock,
   selectionPanelLayoutContainerRef,
@@ -1739,6 +1748,8 @@ function ConversationTimelineImpl({
           }
           virtualItems={turnNavigatorVirtualItems}
           activeQueryRowId={turnNavigatorViewport.activeQueryRowId}
+          directoryEntries={turnDirectoryEntries}
+          windowFirstRowId={rows[0]?.rowId}
           onJumpToQuery={scrollToQuery}
         />
       )}

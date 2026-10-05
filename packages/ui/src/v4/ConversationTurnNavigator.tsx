@@ -16,6 +16,11 @@ import {
   resolveConversationTurnNavigatorVisualFocusItemIndex,
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
+import {
+  mergeTurnNavigatorItems,
+  resolveTurnNavigatorActiveItemIndex,
+  type ConversationTurnNavigatorDirectoryEntry,
+} from "@/v4/conversationTurnNavigatorDirectory.js";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 import { DEFAULT_ROW_HEIGHT_ESTIMATE_PX } from "@/v4/timelineRowHeightCache.js";
 
@@ -26,7 +31,27 @@ interface ConversationTurnNavigatorProps {
   virtualItems: readonly ConversationTurnNavigatorVirtualItem[];
   activeQueryRowId?: number;
   isHydratingDirectory?: boolean;
-  onJumpToQuery: (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior) => void;
+  /**
+   * turn 目录窄投影条目（store `turnDirectory.entries`，按 queryRowId 升序）。
+   *
+   * 与正文窗口解耦：目录给上方未加载 query 的概要，已加载窗口给实时运行态，
+   * 两者在 items 合并层去重合并。目录尚未取过时为空数组——items 退化为纯已加载
+   * items，行为与旧实现完全一致。
+   */
+  directoryEntries?: readonly ConversationTurnNavigatorDirectoryEntry[];
+  /**
+   * 当前正文窗口首行 rowId（`rows.window[0].rowId`）。active 定位降级用它判断
+   * 「视口是否落在窗口之上的未加载区」；窗口为空时传 undefined。
+   */
+  windowFirstRowId?: number;
+  /**
+   * 跳转回调。`isDirectoryFallback` 标记目标行尚未加载（只有目录项），
+   * 此时 `unitIndex` 只是 rail 序占位，调用方须按 `rowId` 走拉取闭环定位。
+   */
+  onJumpToQuery: (
+    target: { unitIndex: number; rowId: number; isDirectoryFallback?: boolean },
+    behavior: ScrollBehavior,
+  ) => void;
 }
 
 function usePrefersReducedMotion() {
@@ -53,32 +78,53 @@ function ConversationTurnNavigatorImpl({
   virtualItems,
   activeQueryRowId,
   isHydratingDirectory = false,
+  directoryEntries,
+  windowFirstRowId,
   onJumpToQuery,
 }: ConversationTurnNavigatorProps) {
   const { intl } = useZCodeIntl();
   const prefersReducedMotion = usePrefersReducedMotion();
   const [interactionItemIndex, setInteractionItemIndex] = useState<number | undefined>(undefined);
-  const items = useMemo(
+  const assistantEmptyPreview = intl.formatMessage({
+    id: "chat.turnNavigator.emptyAssistant",
+  });
+  const assistantRunningPreview = intl.formatMessage({
+    id: "chat.turnNavigator.runningAssistant",
+  });
+  const userFallbackPreview = intl.formatMessage({
+    id: "chat.turnNavigator.userFallback",
+  });
+  // 已加载 items（含实时运行态与 i18n 文案）。
+  const loadedItems = useMemo(
     () =>
       buildConversationTurnNavigatorItems(renderUnits, {
-        assistantEmptyPreview: intl.formatMessage({
-          id: "chat.turnNavigator.emptyAssistant",
-        }),
-        assistantRunningPreview: intl.formatMessage({
-          id: "chat.turnNavigator.runningAssistant",
-        }),
-        userFallbackPreview: intl.formatMessage({
-          id: "chat.turnNavigator.userFallback",
-        }),
+        assistantEmptyPreview,
+        assistantRunningPreview,
+        userFallbackPreview,
       }),
-    [intl, renderUnits],
+    [assistantEmptyPreview, assistantRunningPreview, renderUnits, userFallbackPreview],
+  );
+  // items 数据源 = 目录 + 已加载去重合并（升序稳定）。目录为空/未取过时退化为纯已加载 items。
+  const items = useMemo(
+    () =>
+      mergeTurnNavigatorItems(directoryEntries ?? [], loadedItems, windowFirstRowId, {
+        assistantEmptyPreview,
+        assistantRunningPreview,
+      }),
+    [
+      assistantEmptyPreview,
+      assistantRunningPreview,
+      directoryEntries,
+      loadedItems,
+      windowFirstRowId,
+    ],
   );
 
-  // items 变化远少于滚动事件，索引在这里建一次；滚动重算时直接复用，
-  // 避免 resolveConversationTurnNavigatorActiveUnitIndex 每次滚动都 O(N) 重建 Map。
-  const itemByUnitIndex = useMemo(
-    () => new Map(items.map((item) => [item.unitIndex, item])),
-    [items],
+  // 已加载侧索引：unitIndex 是虚拟列表单位，降级目录项的 unitIndex 只是 rail 序占位，
+  // 两者不能混在一张 Map 里（否则 active 判定会撞键）。
+  const loadedItemByUnitIndex = useMemo(
+    () => new Map(loadedItems.map((item) => [item.unitIndex, item])),
+    [loadedItems],
   );
   // 触发量化用**主时间线**行高（DEFAULT_ROW_HEIGHT_ESTIMATE_PX = 72）：scrollOffsetPx
   // 是主滚动容器的偏移，与 rail 自身 10px 的行高不同量级，不能混用。量化到「行」后
@@ -88,32 +134,41 @@ function ConversationTurnNavigatorImpl({
   const activeUnitIndex = useMemo(
     () =>
       resolveConversationTurnNavigatorActiveUnitIndex({
-        items,
-        itemByUnitIndex,
+        items: loadedItems,
+        itemByUnitIndex: loadedItemByUnitIndex,
         scrollOffsetPx: scrollRowBucket * DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
         viewportHeightPx,
         virtualItems,
       }),
     // 量化值（scrollRowBucket）取代原始 scrollOffsetPx 作为依赖：同一行内滚动不再触发重算。
-    [items, itemByUnitIndex, scrollRowBucket, viewportHeightPx, virtualItems],
+    [loadedItems, loadedItemByUnitIndex, scrollRowBucket, viewportHeightPx, virtualItems],
   );
   const itemIndexes = useMemo(() => {
     const byRowId = new Map<number, number>();
-    const firstByUnitIndex = new Map<number, number>();
+    // unitIndex（已加载侧）-> 合并后 items 下标：active unit 要落到合并后的 rail 位置。
+    const mergedByLoadedUnitIndex = new Map<number, number>();
     items.forEach((item, index) => {
       byRowId.set(item.rowId, index);
-      if (!firstByUnitIndex.has(item.unitIndex)) {
-        firstByUnitIndex.set(item.unitIndex, index);
+      if (!item.isDirectoryFallback && !mergedByLoadedUnitIndex.has(item.unitIndex)) {
+        mergedByLoadedUnitIndex.set(item.unitIndex, index);
       }
     });
-    return { byRowId, firstByUnitIndex };
+    return { byRowId, mergedByLoadedUnitIndex };
   }, [items]);
-  const activeItemIndex =
-    (activeQueryRowId === undefined ? undefined : itemIndexes.byRowId.get(activeQueryRowId)) ??
-    (activeUnitIndex === undefined
+  const loadedActiveItemIndex =
+    activeQueryRowId === undefined ? undefined : itemIndexes.byRowId.get(activeQueryRowId);
+  const loadedUnitActiveItemIndex =
+    activeUnitIndex === undefined
       ? undefined
-      : itemIndexes.firstByUnitIndex.get(activeUnitIndex)) ??
-    -1;
+      : itemIndexes.mergedByLoadedUnitIndex.get(activeUnitIndex);
+  const loadedActiveItemIndexFinal = loadedActiveItemIndex ?? loadedUnitActiveItemIndex;
+  // active 定位降级三态：已加载主循环 → 未加载区取第一个未加载目录项 → 混合态已加载优先。
+  const activeItemIndex =
+    resolveTurnNavigatorActiveItemIndex({
+      items,
+      loadedActiveItemIndex: loadedActiveItemIndexFinal,
+      windowFirstRowId,
+    }) ?? -1;
   const visualFocusItemIndex = resolveConversationTurnNavigatorVisualFocusItemIndex({
     activeItemIndex,
     interactionItemIndex,
@@ -200,13 +255,19 @@ function ConversationTurnNavigatorImpl({
                       data-query-row-id={item.rowId}
                       data-active={active ? "true" : "false"}
                       data-running={item.isRunning ? "true" : "false"}
+                      // 目录降级项（未加载区间）标记：跳转闭环按它区分「目标行尚未加载」。
+                      data-directory-fallback={item.isDirectoryFallback ? "true" : "false"}
                       data-visual-color-tone={visualState.colorTone}
                       data-visual-scale={String(visualState.scaleX)}
                       data-visual-tone={visualState.tone}
                       onBlur={() => setInteractionItemIndex(undefined)}
                       onClick={() =>
                         onJumpToQuery(
-                          { unitIndex: item.unitIndex, rowId: item.rowId },
+                          {
+                            unitIndex: item.unitIndex,
+                            rowId: item.rowId,
+                            isDirectoryFallback: item.isDirectoryFallback,
+                          },
                           prefersReducedMotion ? "auto" : "smooth",
                         )
                       }
