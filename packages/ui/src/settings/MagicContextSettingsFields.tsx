@@ -54,6 +54,7 @@ function NumberField(props: {
           inputMode={props.inputMode}
           className="w-40"
           placeholder={props.placeholder}
+          aria-label={props.label}
           min={props.min}
           max={props.max}
           step={props.step}
@@ -61,12 +62,21 @@ function NumberField(props: {
           disabled={props.disabled}
           data-testid={props.testId}
           onChange={(event) => {
-            if (props.inputMode === "decimal") {
-              const next = Number(event.target.value);
-              if (Number.isFinite(next)) props.onChange(next);
+            // 空串优先判 null：`Number("")` 是 0 且 finite，先走数字分支会把
+            // 「用户清空了输入框」翻译成「把值设成 0」——对 historyBudget 来说
+            // 0 低于 schema 下界 0.05，保存必被 -32602 拒，而用户看不出原因。
+            if (event.target.value.trim() === "") {
+              props.onChange(null);
               return;
             }
-            props.onChange(parseOptionalNumber(event.target.value));
+            const next = parseOptionalNumber(event.target.value);
+            if (next === null) return;
+            // 越界不采纳（也不 clamp）：min/max 的权威是 CLI 的 schema parse，
+            // 这一层按「不给用户必然被拒的输入」的既定意图挡住越界输入即可
+            // （见 magicContextSettingsForm.ts 的 SPECS 注释）。不采纳意味着
+            // 输入框保持原值，用户能立刻看出这个数不被接受。
+            if (next < props.min || next > props.max) return;
+            props.onChange(next);
           }}
         />
       }
@@ -172,7 +182,7 @@ export function MagicContextSettingsFields({
           <Input
             type="text"
             className="w-40"
-            placeholder="5m"
+            aria-label={intl.formatMessage({ id: "settings.context.cacheTtl.label" })}
             value={form.cacheTtl}
             disabled={disabled}
             data-testid="magic-context-cache-ttl"

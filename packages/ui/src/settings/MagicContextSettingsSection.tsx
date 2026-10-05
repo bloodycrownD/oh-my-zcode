@@ -140,10 +140,14 @@ export function MagicContextSettingsSection({
       setForm(magicContextSettingsFormFromConfig(result.config, DEFAULT_FORM));
       toast(intl.formatMessage({ id: "settings.context.saved" }));
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
       logger.warn("[MagicContextSettingsSection] 保存 magicContext 配置失败", {
-        error: error instanceof Error ? error.message : String(error),
+        error: message,
       });
-      toast(intl.formatMessage({ id: "settings.context.saveFailed" }));
+      // 服务端的错误消息里带字段路径（-32602 的 refine/zod issue 会点名
+      // `config.execute_threshold_tokens` 之类），丢掉它等于让用户对着一条
+      // 「保存失败」去猜是哪个旋钮越界。formatIssues 已在协议层拼好路径。
+      toast(`${intl.formatMessage({ id: "settings.context.saveFailed" })} ${message}`);
     } finally {
       setSaving(false);
     }
