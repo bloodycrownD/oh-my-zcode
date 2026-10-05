@@ -25,11 +25,8 @@ import { test } from "node:test";
 // 走 `dist/tools/saved-workflow.js` 子路径而不是包根 barrel：`dist/index.js` 会经
 // `@zcode/shared` 拉进原始 TypeScript 源码（内部 `.js` specifier 不重映射到 `.ts`），
 // 裸 node 加载不了。这个子模块的对外依赖只有 zod，可以独立加载。
-const {
-  SAVED_WORKFLOW_GLOBAL_DIR,
-  SAVED_WORKFLOW_PROJECT_DIR,
-  WORKFLOW_DRAFTS_DIR,
-} = await import("../dist/tools/saved-workflow.js");
+const { SAVED_WORKFLOW_GLOBAL_DIR, SAVED_WORKFLOW_PROJECT_DIR, WORKFLOW_DRAFTS_DIR } =
+  await import("../dist/tools/saved-workflow.js");
 
 // Printed from the exit handler, not `after()`: the node:test `after` hook runs
 // before the runner has assigned the exit code, so it would always report PASS.
