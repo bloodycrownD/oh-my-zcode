@@ -19,8 +19,11 @@ export type DynamicWorkflowMode = (typeof DYNAMIC_WORKFLOW_MODES)[number];
  */
 export const ZCODE_DYNAMIC_WORKFLOW_MODE_ENV = "ZCODE_DYNAMIC_WORKFLOW_MODE";
 
-/** 服务端缺省、格式非法或请求失败时的取值：fail-closed，与闲时任务灰度一致。 */
-export const DEFAULT_DYNAMIC_WORKFLOW_MODE: DynamicWorkflowMode = "disabled";
+/**
+ * FORK（D-20）：远端灰度下发链（`/api/v1/client/configs`）已随账号面整删，
+ * 动态工作流开关改为本地默认启用，取值仍由 `ZCODE_DYNAMIC_WORKFLOW_MODE` 覆盖。
+ */
+export const DEFAULT_DYNAMIC_WORKFLOW_MODE: DynamicWorkflowMode = "alwaysOn";
 
 export function normalizeDynamicWorkflowMode(value: unknown): DynamicWorkflowMode | undefined {
   if (typeof value !== "string") return undefined;
@@ -56,21 +59,13 @@ export function createDynamicWorkflowClientConfig(
 }
 
 /**
- * 纯函数：把远端 envelope 的 `configs.dynamicWorkflow` 与本地覆盖环境变量折叠成一个快照。
- * 优先级：覆盖 > 远端合法值 > 缺省。远端成功但**未下发**该 key 也视为 disabled——
- * 服务端撤掉 key 等于关闭，不能沿用旧快照（与 desktopContextPromptRollout 同一裁决）。
+ * 纯函数：把本地覆盖环境变量折叠成一个快照。
+ * FORK（D-20）：远端下发已删除，只剩「环境变量覆盖 > 本地缺省」。
  */
 export function resolveDynamicWorkflowClientConfig(input: {
-  remote: unknown;
   env?: Record<string, string | undefined>;
 }): DynamicWorkflowClientConfig {
   const override = normalizeDynamicWorkflowMode(input.env?.[ZCODE_DYNAMIC_WORKFLOW_MODE_ENV]);
   if (override) return createDynamicWorkflowClientConfig(override, "override");
-  const remoteMode = normalizeDynamicWorkflowMode(
-    typeof input.remote === "object" && input.remote !== null
-      ? (input.remote as { mode?: unknown }).mode
-      : undefined,
-  );
-  if (remoteMode) return createDynamicWorkflowClientConfig(remoteMode, "remote");
   return createDynamicWorkflowClientConfig(DEFAULT_DYNAMIC_WORKFLOW_MODE, "default");
 }

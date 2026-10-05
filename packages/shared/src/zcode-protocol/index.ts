@@ -38,7 +38,6 @@ import {
 import { browserCommandResultSchema } from "../browser-use/result.js";
 import { integratedTerminalShellSelectionSchema } from "../validationAppSettings.js";
 import { zcodeTaskModeSchema } from "../zcode-task-mode-schema.js";
-import { OFFICIAL_MCP_AUTH_PORT_FAILURE_REASONS } from "../official-mcp-auth.js";
 import {
   zcodeDeliveryKindSchema,
   zcodeMessageVisibilitySchema,
@@ -759,45 +758,6 @@ export const zcodeModelOptionSchema = z
   })
   .strict();
 export type ZCodeModelOption = z.infer<typeof zcodeModelOptionSchema>;
-
-export const zcodeAccountAccessSchema = z.discriminatedUnion("planKind", [
-  z
-    .object({
-      type: z.literal("zhipu-account"),
-      family: z.enum(["zai", "bigmodel"]),
-      planKind: z.literal("start-plan"),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("zhipu-account"),
-      family: z.enum(["zai", "bigmodel"]),
-      planKind: z.literal("individual-coding-plan"),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("zhipu-account"),
-      family: z.enum(["zai", "bigmodel"]),
-      planKind: z.literal("team-coding-plan"),
-      productId: nonEmptyString,
-      organizationId: nonEmptyString,
-      projectId: nonEmptyString,
-    })
-    .strict(),
-]);
-export type ZCodeAccountAccess = z.infer<typeof zcodeAccountAccessSchema>;
-
-/** Active Model 固定的账号访问类别；当前商品和 Team scope 由账号服务在请求期解析。 */
-export const zcodeProviderAccountAccessSchema = z
-  .object({
-    type: z.literal("zhipu-account"),
-    accountType: z.enum(["zai", "bigmodel"]),
-    mode: z.enum(["start-plan", "individual-coding-plan", "team-coding-plan", "off-peak"]),
-    entitled: z.boolean(),
-  })
-  .strict();
-export type ZCodeProviderAccountAccess = z.infer<typeof zcodeProviderAccountAccessSchema>;
 
 export type ZCodeSessionMode = z.infer<typeof zcodeSessionModeSchema>;
 export type ZCodeSessionKind = z.infer<typeof zcodeSessionKindSchema>;
@@ -2362,105 +2322,8 @@ export const zcodeUserInputResponseSchema = z
   .strict();
 export type ZCodeUserInputResponse = z.infer<typeof zcodeUserInputResponseSchema>;
 
-export const zcodeProviderRuntimeHeadersRequestReasonSchema = z.enum(["model-request"]);
-export const zcodeProviderRuntimeHeadersRequestParamsSchema = z
-  .object({
-    requestId: nonEmptyString,
-    sessionId: nonEmptyString,
-    turnId: nonEmptyString.optional(),
-    workspace: zcodeWorkspaceRefSchema,
-    modelSelection: modelSelectionSchema,
-    providerId: nonEmptyString,
-    accountAccess: zcodeProviderAccountAccessSchema.optional(),
-    reason: zcodeProviderRuntimeHeadersRequestReasonSchema,
-  })
-  .strict();
-export type ZCodeProviderRuntimeHeadersRequestParams = z.infer<
-  typeof zcodeProviderRuntimeHeadersRequestParamsSchema
->;
-
-/** 请求取消只作用于同 workspace/session 的这一轮凭据刷新。 */
-export const zcodeProviderRuntimeHeadersCancelledSchema = z
-  .object({
-    requestId: nonEmptyString,
-    sessionId: nonEmptyString,
-    workspace: zcodeWorkspaceRefSchema,
-  })
-  .strict();
-export type ZCodeProviderRuntimeHeadersCancelled = z.infer<
-  typeof zcodeProviderRuntimeHeadersCancelledSchema
->;
-
-export const zcodeProviderRuntimeHeadersResponseSchema = z.discriminatedUnion("headersApplied", [
-  z
-    .object({
-      headersApplied: z.literal(true),
-      // 合并重接：成功必须携带当前请求的鉴权材料，不依赖旧 Registry 已被写入。
-      requestAuth: z
-        .object({
-          apiKey: nonEmptyString.optional(),
-          headers: z.record(nonEmptyString, nonEmptyString).optional(),
-        })
-        .strict(),
-      errorMessage: nonEmptyString.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      headersApplied: z.literal(false),
-      errorMessage: nonEmptyString.optional(),
-    })
-    .strict(),
-]);
-export type ZCodeProviderRuntimeHeadersResponse = z.infer<
-  typeof zcodeProviderRuntimeHeadersResponseSchema
->;
-
-// ── 官方 Server MCP 鉴权──
-// Agent 进程不是用户身份权威：它把 (pluginId, mcpKey, targetOrigin) 报给 host，由 host
-// 解析当前 Coding Plan 凭证并回传本次请求的身份头。请求侧不含任何秘密。
-// 与 interaction/requestProviderRuntimeHeaders 同类：Agent 发起、host 自动响应、零 UI。
-export const zcodeOfficialMcpAuthHeadersRequestParamsSchema = z
-  .object({
-    requestId: nonEmptyString,
-    workspace: zcodeWorkspaceRefSchema,
-    pluginId: nonEmptyString,
-    mcpKey: nonEmptyString,
-    targetOrigin: nonEmptyString,
-  })
-  .strict();
-export type ZCodeOfficialMcpAuthHeadersRequestParams = z.infer<
-  typeof zcodeOfficialMcpAuthHeadersRequestParamsSchema
->;
-
-/**
- * 失败原因必须可枚举，避免调用方按文本分流；因此响应不含 errorMessage。
- *
- * `official_mcp_origin_untrusted` 是 host 侧二次校验的拒绝原因：`targetOrigin` 不等于当前
- * ZCode API origin。判定只看 origin，`pluginId` / `mcpKey` 仅用于日志归属。与"未登录/无凭据"
- * 分开，才能在排查时区分"被拒绝"和"没身份"。
- */
-export const zcodeOfficialMcpAuthFailureReasonSchema = z.enum(
-  OFFICIAL_MCP_AUTH_PORT_FAILURE_REASONS,
-);
-
-export const zcodeOfficialMcpAuthHeadersResponseSchema = z.discriminatedUnion("ok", [
-  z
-    .object({
-      ok: z.literal(true),
-      headers: z.record(z.string(), z.string()),
-    })
-    .strict(),
-  z
-    .object({
-      ok: z.literal(false),
-      reason: zcodeOfficialMcpAuthFailureReasonSchema,
-    })
-    .strict(),
-]);
-export type ZCodeOfficialMcpAuthHeadersResponse = z.infer<
-  typeof zcodeOfficialMcpAuthHeadersResponseSchema
->;
+// FORK（D-4）：ProviderRuntimeHeadersPort 整族已随账号面删除；
+// 官方 Server MCP 鉴权（officialMcpAuthHeaders）随 official-mcp 凭据一并下线。
 
 // ── Plugin management (list + enable/disable) ──
 // 镜像 @zcode/contracts 的 PluginMetadata, 仅保留 UI 需要的可序列化字段。
@@ -3518,8 +3381,6 @@ export const zcodeProtocolMethods = {
   sessionSetMode: "session/setMode",
   workspaceReadPresentation: "workspace/readPresentation",
   workspaceHookTrustGrant: "workspace/hooks/trustGrant",
-  // 进程级 Account Provider Config 与 workspace 运行目录分离。
-  providerUpdateAccountConfig: "provider/updateAccountConfig",
   workspaceUpdateInteractionPreferences: "workspace/updateInteractionPreferences",
   // FORK（S23 / D-12）：magic-context 参数域。与 interaction-preferences 的关键
   // 差异是**写盘 + 内存双写**——后者只改进程内 registry，改完即失、不落盘、无推送。
