@@ -133,8 +133,11 @@ async function isUserAgentsSkillCoveredByZcode(params: {
 
 /**
  * 从 workspacePath 向上走到 worktree 根（含 .git 标记），把每一层的
- * `.omz/skills` 与 `.agents/skills` 都收集起来。
- * 对齐 apps/zcode-cli/packages/adapters/src/skills/roots.ts:60-72。
+ * `.zcode/skills` 与 `.agents/skills` 都收集起来。
+ * 工作区级 `.zcode` 是仓库内容约定、不参与品牌改名（只有用户级 HOME 下的
+ * `.zcode` 才改名成 `.omz`），故此处保持 `.zcode`。
+ * 对齐 apps/zcode-cli/packages/adapters/src/skills/roots.ts:66-78（沿 worktree
+ * 向上收集 base 目录）与同文件 :99-111（每级并挂 `.zcode/skills` + `.agents/skills`）。
  * 找不到 .git 时退回 workspacePath 自身。
  */
 async function resolveAncestorWorkspaceRoots(workspacePath: string): Promise<string[]> {
@@ -1206,7 +1209,8 @@ export function createSkillsService(options?: SkillsServiceOptions): ISkillsServ
       }
 
       // 安全护栏：删除是 `rm -rf` 目录的破坏性操作，仅允许命中受控技能根。
-      // 收集工作区各层级（沿 worktree 向上）的 .omz/skills 与 .agents/skills，外加用户级两根。
+      // 收集工作区各层级（沿 worktree 向上）的 .zcode/skills 与 .agents/skills，
+      // 外加用户级两根（~/.omz/skills、~/.agents/skills）。
       const allowedRootCandidates = await resolveAncestorWorkspaceRoots(params.workspacePath);
       allowedRootCandidates.push(getUserZcodeSkillRoot());
       allowedRootCandidates.push(getUserAgentsSkillRoot());
