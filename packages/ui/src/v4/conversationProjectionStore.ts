@@ -129,6 +129,14 @@ export interface ConversationStoreState {
    * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态缓存失效。
    */
   turnNavigatorDirectoryRevision: number;
+  /**
+   * 最近一个 delta 帧的变更定位（变更行 rowId → turnId）。
+   *
+   * renderUnits 增量重建据此把「每帧全量」降到 O(dirty)。任何整体替换窗口的路径
+   * （snapshot 帧、loadOlder / loadAllOlder 前插补拉）都必须把它清成 undefined：
+   * 那几帧的行集合是整块换的，用上一帧的变更集当失效依据会漏掉真正变过的轮。
+   */
+  lastMutation?: ConversationProjectionLastMutation;
 }
 
 export interface SessionOpenRendererTiming {
@@ -150,6 +158,7 @@ const INITIAL_STATE: ConversationStoreState = {
   planDirectoryRevision: 0,
   plansLoading: false,
   turnNavigatorDirectoryRevision: 0,
+  lastMutation: undefined,
 };
 
 const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
@@ -254,10 +263,11 @@ import {
   createConversationProjectionAccumulator,
   mergeOlderRows,
   type ConversationProjectionAccumulator,
+  type ConversationProjectionLastMutation,
 } from "@/v4/conversationProjectionCore.js";
 
 export { mergeOlderRows };
-export type { ConversationProjectionAccumulator };
+export type { ConversationProjectionAccumulator, ConversationProjectionLastMutation };
 
 /**
  * 外部 store（useSyncExternalStore 兼容：subscribe + getState 返回稳定引用）。
@@ -668,19 +678,25 @@ export class ConversationProjectionStore {
   }
 
   /**
-   * delta 帧的应用入口：走可变累加器，返回通知用的外壳副本。
+   * delta 帧的应用入口：走可变累加器，返回通知用的外壳副本与本帧变更定位。
    *
    * 正常路径下这里必定已有累加器——delta 帧要先过 handleFrame 的
    * subscriptionHasAppliedBase 闸门，而该标志只由已 apply 过的帧置位。缺失只可能是
    * 累加器被丢掉（close 之后不再收帧）；真到了就从当前外壳重建再施加，绝不吞掉本帧。
+   * 重建出来的累加器没有 lastMutation，返回 null 即「本帧无失效依据」，
+   * 下游 renderUnits 会退化为全量重建——宁可慢，不可错。
    */
   private applyFrameDeltas(
     current: ConversationSnapshot,
     deltas: readonly ConversationDelta[],
     toSeq: number,
-  ): ConversationSnapshot {
+  ): {
+    snapshot: ConversationSnapshot;
+    lastMutation: ConversationProjectionLastMutation | null;
+  } {
     const accumulator = this.accumulator ?? this.rebuildAccumulator(current);
-    return accumulator.applyDeltas(deltas, toSeq);
+    const snapshot = accumulator.applyDeltas(deltas, toSeq);
+    return { snapshot, lastMutation: accumulator.lastMutation() };
   }
 
   private applyFrame(
@@ -706,6 +722,8 @@ export class ConversationProjectionStore {
       logSubagentProjectionTransition(this.topic, this.state.snapshot, next, "snapshot");
       this.setState({
         snapshot: next,
+        // 窗口整块换掉，上一帧的变更集不再描述这批行；清空让 renderUnits 走全量重建。
+        lastMutation: undefined,
         planDirectoryRevision: this.state.planDirectoryRevision + 1,
         // snapshot 整体替换后 real-user query 集合可能已变，终态缓存必须失效。
         turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
@@ -765,7 +783,11 @@ export class ConversationProjectionStore {
     // 规则 3a：delta 帧走可变累加器，通知边界换三层引用。
     // current 是上一帧发布的外壳副本（不是累加器本体），因此可以直接当 previous 传给
     // subagent 观察日志：它定格在上一帧，不会被本帧的原地变更改写。
-    const next = this.applyFrameDeltas(current, frame.payload.deltas, frame.toSeq);
+    const { snapshot: next, lastMutation } = this.applyFrameDeltas(
+      current,
+      frame.payload.deltas,
+      frame.toSeq,
+    );
     logSubagentProjectionTransition(this.topic, current, next, "deltas");
     const removedFromRowId = frame.payload.deltas.reduce<number | null>(
       (earliest, delta) =>
@@ -776,6 +798,8 @@ export class ConversationProjectionStore {
     );
     this.setState({
       snapshot: next,
+      // 累加器刚重建过就没有 lastMutation：这一帧无失效依据，下游退化为全量重建。
+      ...(lastMutation ? { lastMutation } : { lastMutation: undefined }),
       // row.removed 已给出权威裁剪边界，可以同步删掉缓存目录中的旧分支计划；
       // 完整 query 继续负责补回 wire tail 之外、但仍属于当前分支的早期计划。
       ...(removedFromRowId === null
@@ -1064,6 +1088,8 @@ export class ConversationProjectionStore {
           ...current,
           rows: { ...current.rows, window },
         }).publish(),
+        // 前插补拉是整块窗口变化，上一帧变更集不描述新增的更早行。
+        lastMutation: undefined,
       });
     } catch (error) {
       // query 只读且可重发：失败不进 error 态，留给下次触发重试。
@@ -1180,6 +1206,7 @@ export class ConversationProjectionStore {
               ...current,
               rows: { ...current.rows, window },
             }).publish(),
+            lastMutation: undefined,
           });
           // navigator 已经拿到补齐首轮所需的权威 rows，必须在隐藏 rail 前先提交它们。
           logger.debug("[v4-store] 完整问题目录不足两条 query，保留首轮补齐 rows", {
@@ -1214,6 +1241,7 @@ export class ConversationProjectionStore {
           ...current,
           rows: { ...current.rows, window },
         }).publish(),
+        lastMutation: undefined,
       });
       logger.debug("[v4-store] 完整问题目录历史 rows 补拉完成", {
         loadedRows: window.length,
