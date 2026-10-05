@@ -89,12 +89,11 @@ export type ConfigKey = (typeof ConfigKey)[keyof typeof ConfigKey];
 // ============================================================
 
 /**
- * 每个 key 的值类型；`:153` 的兜底是 `unknown`。
+ * 每个 key 的值类型；链尾的兜底是 `unknown`。
  *
- * FORK（S23 / D-12）：`"magicContext"` 分支**显式写出**却仍然解析为 `unknown`。
- * 这与其它域的写法看起来冗余，但目的是让「本 key 的承载类型是刻意的选择」这件事
- * 在类型层可 grep——漏写会静默落进同一个 `unknown` 兜底，评审无法区分「有意」与
- * 「忘了」。
+ * FORK（S23 / D-12）：`"magicContext"` 走的就是链尾兜底 `unknown`——它曾有一个
+ * `K extends "magicContext" ? unknown : unknown` 的恒等分支，与兜底同值、对类型零贡献，
+ * 却让人以为这个 key 有特殊承载类型。分支已删，理由登记在该类型定义之后。
  *
  * 为什么是 `unknown` 而不是结构类型：`@zcode/magic-context` 的
  * `MagicContextConfig` 是 zod 推断出的 ~20 字段子树，contracts 是它所有下游包的
@@ -167,9 +166,19 @@ export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeou
                                                 ? UiLocale
                                                 : K extends "ui.theme"
                                                   ? UiThemePreference
-                                                  : K extends "magicContext"
-                                                    ? unknown
-                                                    : unknown;
+                                                  : unknown;
+// `"magicContext"` 曾在这里占一个恒等分支（`K extends "magicContext" ? unknown : unknown`）。
+// 它与兜底完全同值，因此对类型**零**贡献，却让读者以为这个 key 有特殊承载类型——
+// 而它的承载类型恰恰就是兜底的 `unknown`。删掉分支、改成这条注释，理由见
+// `ConfigValue` 的头注：唯一权威结构在 `@zcode/magic-context` 的
+// `MagicContextConfig`，contracts 只能声明 `unknown`。
+//
+// 恒等分支删掉后，「key 还在不在」就只剩注释在说了——所以下面这条编译期锚点把它钉住：
+// 删掉 `ConfigKey.MagicContext` 里那个 `"magicContext"` 字面量，会让本行**编译失败**
+// （`"magicContext"` 不再是合法 `ConfigKey`），而不是静默地让整条链退回兜底。
+// `_` 前缀是 oxlint 的未使用豁免；类型别名把它固定成 `ConfigKey` 而非 `string`。
+const _: ConfigKey = "magicContext";
+type _MagicContextConfigKeyAnchor = typeof _;
 
 // ============================================================
 // Config Scope

@@ -5,8 +5,8 @@
  * 覆盖 spec Step 23 点名的映射项，锚点沿用 Step 19a（`features.magicContext`）的
  * 七处手写映射范式：
  *   1. contracts `ConfigKey.MagicContext`
- *   2. contracts `ConfigValue<"magicContext">` 分支（类型层，运行时以
- *      `getDefaultValue` 登记可观测地证明它没落进 `unknown` 兜底之外）
+ *   2. contracts `ConfigValue<"magicContext">` 分支（类型层不可运行时观测，改为
+ *      断言它的可观测投影：key 在 `ConfigKey` 里 + `has()` 命中默认域登记）
  *   3. contracts `RuntimeConfig.magicContext` / `RuntimeConfigPatch.magicContext`
  *   4. adapters `ZCodeConfigFileSchema.magicContext`（直接复用包内 schema）
  *   5. adapters `ConfigStore.merge()` 整域透传
@@ -108,6 +108,24 @@ test("mapping 1: ConfigKey.MagicContext is the top-level config.json domain key"
   assert.equal(ConfigKey.MagicContext, "magicContext");
 });
 
+test("mapping 2: ConfigValue<\"magicContext\"> is the unknown tail, pinned by the key", () => {
+  // contracts 的 `ConfigValue<K>` 是一条以 `unknown` 收尾的条件类型链，
+  // `"magicContext"` 走的就是这个兜底（它曾有一个与兜底同值的恒等分支，已删——
+  // 见 contracts `src/config/index.ts` 的登记注释）。类型层不可运行时观测，能观测的
+  // 是它的**投影**：key 必须在 `ConfigKey` 里（否则整条链都够不着它），且
+  // `RuntimeConfigPatch.magicContext` 也声明为 `unknown` 承载。
+  assert.equal(ConfigKey.MagicContext, "magicContext");
+  assert.equal(Object.values(ConfigKey).includes("magicContext"), true);
+  // `getDefaultValue` 的登记面：key 可被 `has()` 命中，说明它确实走的是
+  // 「已登记的 key → 取默认域」这条路径，而不是落进未登记的 undefined 兜底。
+  const port = createConfigPort();
+  assert.equal(port.has(ConfigKey.MagicContext), true);
+  assert.notEqual(port.get(ConfigKey.MagicContext), undefined);
+  // 兜底是 `unknown` 而不是 `any`：`any` 会让下游 `get()` 的结果丢掉一切检查。
+  // 运行时不可区分，但至少确认值仍然是对象而不是被展开的原始值。
+  assert.equal(typeof port.get(ConfigKey.MagicContext), "object");
+});
+
 test("mapping 3: RuntimeConfigPatch.magicContext round-trips through the file patch", () => {
   const { config } = parseConfigFileToRuntimePatchWithDiagnostics({
     magicContext: { enabled: false, protected_tokens: 8000 },
@@ -173,6 +191,23 @@ test("mapping 7: DEFAULT_MAGIC_CONTEXT_CONFIG is the package's own parse of {}",
   assert.equal(DEFAULT_MAGIC_CONTEXT_CONFIG.execute_threshold_percentage, 65);
   assert.equal(DEFAULT_MAGIC_CONTEXT_CONFIG.history_budget_percentage, 0.15);
   assert.equal(DEFAULT_MAGIC_CONTEXT_CONFIG.cache_ttl, "5m");
+});
+
+// MF-21：上面那条 `deepEqual` 只证明「值相同」，不证明「是同一个对象」——
+// adapters 若哪天改成 `{ ...DEFAULT }` 或重新 parse 一份，值照样相等，但
+// `DEFAULT_MAGIC_CONTEXT_CONFIG === <包内那个>` 的引用同一性就断了。引用同一性
+// 是 packages/adapters/src/config/schema.ts:332-336 那段 re-export 注释承诺的
+// （「调用方取到的是与包内运行时**同一个对象**」），这里把它钉住。
+test("MF-21: adapters re-export IS the package's own object (identity, not just equality)", async () => {
+  const pkg = await import("@zcode/magic-context");
+  assert.equal(pkg.DEFAULT_MAGIC_CONTEXT_CONFIG, DEFAULT_MAGIC_CONTEXT_CONFIG);
+  assert.equal(pkg.MagicContextConfigSchema, MagicContextConfigSchema);
+  // 同一性成立，则对 adapters 这份做的 parse 与对包内那份做的 parse 走的是同一条
+  // 校验管线（zod schema 身份比较成立），运行时 schema 比对不会分叉。
+  assert.equal(
+    MagicContextConfigSchema.parse({ cache_ttl: "1h" }).cache_ttl,
+    pkg.MagicContextConfigSchema.parse({ cache_ttl: "1h" }).cache_ttl,
+  );
 });
 
 // ── mapping 5 ────────────────────────────────────────────────────────────────

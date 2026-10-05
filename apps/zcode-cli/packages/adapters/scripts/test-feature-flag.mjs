@@ -108,6 +108,21 @@ test("mapping 6: getAll() default is true, matching its `?? true` neighbours", (
   assert.equal(createConfigPort().getAll().features.magicContext, true);
 });
 
+// MF-19：mapping 2 在本仓有两处同名条目（feature flag 侧在这里、参数域侧在
+// test-magic-context-domain.mjs），两侧各钉一半——这里钉「两个 key 是不同的 key」。
+// D-11 的开关是 `features.magicContext`（一级 boolean），D-12 的参数域是顶层
+// `magicContext`（整域对象）；它们曾经只差一个 `features.` 前缀。哪次「顺手统一」
+// 把其中一个删掉或改名，另一个会静默接管它的语义，而两处断言都还在绿。
+test("mapping 2: the feature flag key and the parameter-domain key are distinct", () => {
+  assert.equal(ConfigKey.FeatureMagicContext, "features.magicContext");
+  assert.equal(ConfigKey.MagicContext, "magicContext");
+  assert.notEqual(ConfigKey.FeatureMagicContext, ConfigKey.MagicContext);
+  // 两者的运行时投影也必须分开：一个 boolean，一个对象。
+  const port = createConfigPort();
+  assert.equal(typeof port.get(ConfigKey.FeatureMagicContext), "boolean");
+  assert.equal(typeof port.get(ConfigKey.MagicContext), "object");
+});
+
 test("mapping 2/5: get(ConfigKey.FeatureMagicContext) falls back to the registered default", () => {
   const config = createConfigPort();
   assert.equal(config.get(ConfigKey.FeatureMagicContext), true);
