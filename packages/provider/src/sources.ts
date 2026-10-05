@@ -1,8 +1,6 @@
 import {
-  ProviderConfig,
   ProviderConfigMap,
   ProviderTemplateMap,
-  ZhipuAccountAccessConfig,
   type ModelConfigRules,
 } from "./config/index.js";
 import type { AccountProviderStates } from "./account-provider-state.js";
@@ -31,40 +29,6 @@ export interface AccountProviderConfigSnapshot {
   readonly states?: AccountProviderStates;
 }
 
-/** 首次 Account 事实尚未到达时，基于当前 Built-in 生成可发布的 fail-closed Overlay。 */
-export function createFailClosedAccountProviderConfigSnapshot(
-  config: ProviderConfigSnapshot,
-): AccountProviderConfigSnapshot {
-  const unentitledProviders = new ProviderConfigMap(
-    config.zcodeBuiltinProviders.entries().flatMap(([providerId, provider]) =>
-      provider.access?.type === "zhipu-account"
-        ? ([
-            [
-              providerId,
-              new ProviderConfig({
-                access: new ZhipuAccountAccessConfig({ entitled: false }),
-              }),
-            ],
-          ] as const)
-        : [],
-    ),
-  );
-  return createAccountProviderConfigSnapshot(config.zcodeBuiltinRevision, unentitledProviders);
-}
-
-export function createAccountProviderConfigSnapshot(
-  basedOnZCodeBuiltinRevision: string,
-  providers: ProviderConfigMap,
-  states?: AccountProviderStates,
-): AccountProviderConfigSnapshot {
-  return Object.freeze({
-    revision: `account:${JSON.stringify([basedOnZCodeBuiltinRevision, providers.toJSON(), states])}`,
-    basedOnZCodeBuiltinRevision,
-    providers,
-    ...(states ? { states } : {}),
-  });
-}
-
 const EMPTY_ACCOUNT_PROVIDER_CONFIG_SNAPSHOT: AccountProviderConfigSnapshot = Object.freeze({
   revision: "empty-account-config-v1",
   basedOnZCodeBuiltinRevision: "uninitialized",
@@ -72,39 +36,18 @@ const EMPTY_ACCOUNT_PROVIDER_CONFIG_SNAPSHOT: AccountProviderConfigSnapshot = Ob
 });
 
 /**
- * 由进程外围适配器更新的账号 Provider 可用范围。
+ * FORK（D-4）：账号体系整删后 Registry 只剩 Config 一个数据源。
  *
- * Source 只保存账号状态投影出的第三层 Provider Config Overlay。
- * models 是账号权益约束；Token、API Key、Header 与账号身份不得写入 Config。
+ * 快照形状保留是为了让 Registry 的读取路径不必为「第二事实源」留分支；
+ * 这里恒定返回空 Overlay，不再有 revision 对齐门，Registry 永远能发布。
  */
-export class MutableAccountProviderConfigSource implements ProviderSource<AccountProviderConfigSnapshot> {
-  readonly #listeners = new Set<(reason: string) => void>();
-  #snapshot: AccountProviderConfigSnapshot = EMPTY_ACCOUNT_PROVIDER_CONFIG_SNAPSHOT;
-
-  async read(): Promise<AccountProviderConfigSnapshot> {
-    return this.#snapshot;
-  }
-
-  onDidChange(listener: (reason: string) => void): () => void {
-    this.#listeners.add(listener);
-    return () => this.#listeners.delete(listener);
-  }
-
-  replace(snapshot: AccountProviderConfigSnapshot, reason = "replace"): boolean {
-    if (snapshot.revision === this.#snapshot.revision) return false;
-    this.#snapshot = freezeAccountProviderConfigSnapshot(snapshot);
-    for (const listener of this.#listeners) listener(reason);
-    return true;
-  }
-}
-
-function freezeAccountProviderConfigSnapshot(
-  snapshot: AccountProviderConfigSnapshot,
-): AccountProviderConfigSnapshot {
-  return Object.freeze({
-    revision: snapshot.revision,
-    basedOnZCodeBuiltinRevision: snapshot.basedOnZCodeBuiltinRevision,
-    providers: snapshot.providers,
-    ...(snapshot.states ? { states: snapshot.states } : {}),
-  });
+export function createEmptyAccountProviderConfigSource(): ProviderSource<AccountProviderConfigSnapshot> {
+  return {
+    async read(): Promise<AccountProviderConfigSnapshot> {
+      return EMPTY_ACCOUNT_PROVIDER_CONFIG_SNAPSHOT;
+    },
+    onDidChange(): () => void {
+      return () => undefined;
+    },
+  };
 }

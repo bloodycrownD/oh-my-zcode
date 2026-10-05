@@ -15,7 +15,6 @@ import {
   type ZCodeProtocolSessionRecord,
 } from "./server-types.js";
 import { runSessionModelConfigMutation } from "../zcode-protocol-v4/model-config-mutation.js";
-import { createProviderRuntimeHeadersPort } from "./provider-runtime-headers.js";
 
 export async function readWorkspacePresentation(
   context: ZCodeProtocolAgentServerContext,
@@ -72,13 +71,10 @@ export async function createWorkspaceZCodeApp(
   workspace: ZCodeWorkspaceRef,
   options: Omit<ZCodeAppOptions, "providerRegistry">,
 ): Promise<ZCodeApp> {
-  const providerRuntimeHeadersPort =
-    options.providerRuntimeHeadersPort ?? createProviderRuntimeHeadersPort(context, workspace);
-  const sessionId = options.sessionId;
-  return context.deps.createZCodeApp({
+const sessionId = options.sessionId;
+return context.deps.createZCodeApp({
     ...options,
-    platform: context.deps.platform,
-    providerRuntimeHeadersPort,
+platform: context.deps.platform,
     // FORK（D-13）：magic-context 的预算摘要 side state 出口。App 侧每轮 pass /
     // 每次 provider usage 落库后读一次 `magic-context.db` 并推过来，这里接到 v4
     // gateway 的投影层。`sessionId` 缺席的临时 App（模型连通性探测）不装这条——

@@ -11,7 +11,6 @@ import type { ReadFileStateMap } from "../../tool/types.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import { getSessionShellSelectionFromConfig } from "../methods/session-shell-environment.js";
 import { buildRuntimeProviderRequestMessages } from "./runtime-provider-request-messages.js";
-import { createRefreshRuntimeHeadersBeforeModelAttempt } from "../methods/model-runtime-headers.js";
 import { createRuntimeModel, withModelInvocationContext } from "../methods/runtime-model.js";
 
 export interface ProjectMemoryAgentContext {
@@ -43,7 +42,7 @@ export function captureProjectMemoryAgentContext(
     createRuntimeModel(runtime, {
       selection: runtime.getSessionModelSelection(),
     });
-  const model = withModelInvocationContext(baseModel, (request) => ({
+  const model = withModelInvocationContext(baseModel, () => ({
     // Extraction 是 transcript 的消费者；不把它自己的请求写回同一 model-io 目录，
     // 避免后台链路占用 rollout 槽位并在后续 Extraction 中自反馈。
     metadata: {
@@ -52,11 +51,6 @@ export function captureProjectMemoryAgentContext(
       skipTranscript: true,
     },
     modelRequestSessionType: "other",
-    refreshRuntimeHeadersBeforeAttempt: createRefreshRuntimeHeadersBeforeModelAttempt(runtime, {
-      abortSignal: request.abortSignal,
-      model,
-      traceContext: input.traceContext,
-    }),
     traceContext: input.traceContext,
   }));
   return {

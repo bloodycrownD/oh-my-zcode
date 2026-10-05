@@ -1,5 +1,4 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import type { ZCodeProviderAccountAccess } from "@zcode/shared";
 import type { TraceContext } from "../tracing/tracer.js";
 import type {
   ModelRequestAdmission,
@@ -28,7 +27,6 @@ export interface ModelInvocationContext {
   streamRecovery?: ModelStreamRecoveryStatus;
   preserveProviderStreamBoundaries?: boolean;
   refreshRuntimeHeadersBeforeAttempt?: (input: {
-    accountAccess?: ZCodeProviderAccountAccess;
     attempt: number;
     reason?: "model-request";
     abortSignal?: AbortSignal;

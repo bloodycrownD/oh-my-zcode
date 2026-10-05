@@ -586,6 +586,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     providerModelRuntime = new ApiProviderModelRuntime({
       registry: options.providerRegistry,
       modelAdapter,
+      logger,
+      // FORK（D-12）：旧会话里的 `account:*` providerId 在账号体系整删后已不可解析，
+      // 回落到 Environment 默认模型；`validateSelection` 本体不变（纯判定）。
+      resolveFallbackSelection: () => options.configuredDefaultModelSelection,
     });
     providerModelRuntime.start();
     // model factory 提前到三条 workflow child 装配线之前构造：script workflow bridge、dwf actor
@@ -878,9 +882,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // 混进来会把占比算成"侧车小请求"——与 event-reducer 的同一条判据）。
       eventSink: composeMagicContextUsageSink(options.eventSink, magicContextUsageRecorder),
       modelFactory,
-      modelIoDir,
-      providerRuntimeHeadersPort: options.providerRuntimeHeadersPort,
-      resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
+modelIoDir,
+resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
       isRemoteWorkspace: () =>
         isRemoteWorkspaceIdentity(runtimeConfig.memory?.workspaceIdentity ?? ""),
       permissionBroker: options.permissionBroker,

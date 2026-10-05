@@ -31,12 +31,10 @@ export function maybeStartSessionTitleGeneration(
   messageID: MessageId,
   traceContext: TraceContext,
   options?: {
-    deferIfProviderRuntimeHeadersRefresh?: boolean;
     goalSummaryTargetID?: string;
   },
 ): boolean {
   return maybeStartSessionTitleGenerationFromSeed.call(this, input, {
-    deferIfProviderRuntimeHeadersRefresh: options?.deferIfProviderRuntimeHeadersRefresh,
     goalSummaryTargetID: options?.goalSummaryTargetID,
     messageID,
     traceContext,
@@ -73,7 +71,6 @@ function maybeStartSessionTitleGenerationFromSeed(
   this: AgentRuntimeInternal,
   input: string,
   options: {
-    deferIfProviderRuntimeHeadersRefresh?: boolean;
     goalSummaryTargetID?: string;
     messageID?: MessageId;
     traceContext: TraceContext;
@@ -85,14 +82,6 @@ function maybeStartSessionTitleGenerationFromSeed(
       bypassShortInputGuard: options.bypassShortInputGuard,
     })
   ) {
-    return false;
-  }
-  if (
-    options.deferIfProviderRuntimeHeadersRefresh &&
-    shouldDeferSessionTitleForRuntimeHeaders(this)
-  ) {
-    // 首条消息的 title generation 和主消息会共享同一个 runtimeModel。
-    // 需要刷新 runtime headers 的 provider 先让主 turn 发出去，再异步补标题。
     return false;
   }
   this.sessionTitleGenerationAttempted = true;
@@ -149,20 +138,6 @@ function shouldAttemptSessionTitleGeneration(
   return (
     options.bypassShortInputGuard ||
     Array.from(normalizedInput).length >= MIN_GENERATED_TITLE_INPUT_CHARS
-  );
-}
-
-function shouldDeferSessionTitleForRuntimeHeaders(runtime: AgentRuntimeInternal): boolean {
-  const runtimeHeadersPort = runtime.providerRuntimeHeadersPort;
-  if (!runtimeHeadersPort) return false;
-  const selection =
-    runtime.config.titleGeneration?.modelSelection ?? runtime.getSessionModelSelection();
-  if (!selection) return true;
-  return (
-    runtimeHeadersPort.shouldRefreshBeforeModelRequest?.({
-      providerId: selection.providerId,
-      modelId: selection.modelId,
-    }) ?? true
   );
 }
 

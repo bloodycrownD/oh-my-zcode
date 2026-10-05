@@ -626,8 +626,9 @@ export async function* runStreamText(input: {
         classified.retryable = false;
       }
       // off-peak 特判（仅 idle plan provider）：排队 429 豁免预算无限探测；3102 标记落败触发续跑。
+      // FORK（官方端点全清）：账号型 access 已整删，非账号 provider 一律不走该协议。
       const offPeak = resolveOffPeakFailureDecision({
-        offPeak: resolved.accountAccess?.mode === "off-peak",
+        offPeak: false,
         failure: classified,
         error: unwrapRetryError(error),
       });
@@ -1155,8 +1156,9 @@ async function handleStreamErrorEvent(
     : input.statusContext;
   const classified = classifyModelFailure(error, input.input.request.abortSignal);
   // off-peak 特判：SSE 首块即错（尚无可见输出）时的排队 429 同样豁免预算重试。
+  // FORK（官方端点全清）：账号型 access 已整删。
   const offPeak = resolveOffPeakFailureDecision({
-    offPeak: input.input.resolved.accountAccess?.mode === "off-peak",
+    offPeak: false,
     failure: classified,
     error: unwrapRetryError(error),
   });

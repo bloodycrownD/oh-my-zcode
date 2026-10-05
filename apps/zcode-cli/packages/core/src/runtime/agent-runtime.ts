@@ -149,9 +149,8 @@ export class AgentRuntime {
   private hookRunner?: HookRunner;
   private workspaceHookAdmission?: WorkspaceHookRuntimeAdmissionPort;
   private modelFactory: AgentRuntimeDeps["modelFactory"];
-  private modelIoDir?: string;
-  private providerRuntimeHeadersPort?: AgentRuntimeDeps["providerRuntimeHeadersPort"];
-  private browserControlPort?: AgentRuntimeDeps["browserControlPort"];
+private modelIoDir?: string;
+private browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   /** 模型请求准入端口；随每次模型请求进调用上下文。 */
   private modelRequestAdmission?: AgentRuntimeDeps["modelRequestAdmission"];
   private sessionModelSelection: ModelSelection | undefined;
@@ -258,9 +257,8 @@ export class AgentRuntime {
     this.now = deps.now ?? (() => new Date());
     this.isRemoteWorkspace = deps.isRemoteWorkspace ?? (() => false);
     this.modelFactory = deps.modelFactory;
-    this.modelIoDir = deps.modelIoDir;
-    this.providerRuntimeHeadersPort = deps.providerRuntimeHeadersPort;
-    this.browserControlPort = deps.browserControlPort;
+this.modelIoDir = deps.modelIoDir;
+this.browserControlPort = deps.browserControlPort;
     this.modelRequestAdmission = deps.modelRequestAdmission;
     // 旧会话的选择缺失不能阻断历史恢复；不在这里制造默认模型。
     this.sessionModelSelection =

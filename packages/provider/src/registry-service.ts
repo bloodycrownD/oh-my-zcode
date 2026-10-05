@@ -16,6 +16,7 @@ import type {
   ProviderConfigSnapshot,
   ProviderSource,
 } from "./sources.js";
+import { createEmptyAccountProviderConfigSource } from "./sources.js";
 
 export interface ProviderRegistryServiceSnapshot {
   readonly sourceRevisions: {
@@ -40,7 +41,8 @@ export interface ProviderRegistryServiceRefreshErrorEvent {
 
 export interface ProviderRegistryServiceDependencies {
   readonly configSource: ProviderSource<ProviderConfigSnapshot>;
-  readonly accountSource: ProviderSource<AccountProviderConfigSnapshot>;
+  /** FORK（D-4）：账号 Overlay 已整删；缺席时用恒定空源，Registry 只读 Config 一个数据源。 */
+  readonly accountSource?: ProviderSource<AccountProviderConfigSnapshot>;
   readonly resolver?: ProviderConfigResolver;
 }
 
@@ -69,7 +71,7 @@ export class ProviderRegistryService {
 
   constructor(dependencies: ProviderRegistryServiceDependencies) {
     this.#configSource = dependencies.configSource;
-    this.#accountSource = dependencies.accountSource;
+    this.#accountSource = dependencies.accountSource ?? createEmptyAccountProviderConfigSource();
     this.#resolver = dependencies.resolver ?? new ProviderConfigResolver();
   }
 
@@ -202,15 +204,6 @@ export class ProviderRegistryService {
       if (generation < this.#requestedGeneration) continue;
       this.#assertNotDisposed();
 
-      if (account.basedOnZCodeBuiltinRevision !== config.zcodeBuiltinRevision) {
-        // Built-in 已变化但 Account 仍基于旧事实时，继续服务上一份完整 Registry。
-        // 当前 generation 结束；等待 Account Source 的后续 change 再一次性发布最终组合。
-        this.#completedGeneration = generation;
-        if (this.#snapshot) this.#resolveRefreshWaiters(generation, this.#snapshot);
-        reasons.clear();
-        continue;
-      }
-
       if (this.#hasSameSourceRevisions(config, account)) {
         this.#completedGeneration = generation;
         this.#resolveRefreshWaiters(generation, this.#snapshot!);
@@ -224,10 +217,8 @@ export class ProviderRegistryService {
           zcodeBuiltinProviderTemplates: config.zcodeBuiltinProviderTemplates,
           personalProviders: config.personalProviders,
           zcodeBuiltinModelRules: config.zcodeBuiltinModelRules,
-          personalModels: config.personalModels,
-          accountProviders: account.providers,
-          accountStates: account.states,
-          personalProviderOrder: config.personalProviderOrder,
+personalModels: config.personalModels,
+personalProviderOrder: config.personalProviderOrder,
         });
         this.#registry.replace(resolution.registryProviders, [...reasons].join(","));
         const snapshot = Object.freeze({
