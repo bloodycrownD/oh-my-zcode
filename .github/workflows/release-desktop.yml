@@ -6,9 +6,9 @@
 # 最后自带运行时依赖校验和产物体积门禁（audit-bundle-size，超 500MB 会让 job 失败——
 # 这是防包体异常膨胀的内置闸门，不要绕过）。
 #
-# 产物矩阵：
+# 产物矩阵（ZCODE_ENV=production：正式 ZCode 身份、产物名无 _TEST 后缀）：
 #   macos-latest   → mac   arm64（dmg + zip）
-#   macos-13       → mac   x64  （dmg + zip）
+#   macos-latest   → mac   x64  （arm64 主机交叉打 x64，Intel runner 已枯竭）
 #   windows-latest → win   x64  （nsis exe）
 #   ubuntu-latest  → linux x64  （AppImage + deb + rpm + pacman/pkg.tar.zst）
 #
@@ -51,7 +51,10 @@ jobs:
             # 同一 checkout 双架构并行时用独立 dist 目录隔离（electron-builder.config
             # 的注释明确支持该用法）；单 job 单机虽然用不到，保持配置自洽。
             dist_dir: dist-arm64
-          - runs_on: macos-13
+          # Intel macOS runner（macos-13）已长期排队枯竭；arm64 主机交叉打 x64
+          # 包是上游 config 注释明确的既定模式（prepare 链按 ZCODE_TARGET_ARCH
+          # 拉目标架构的 node-pty/bundled-agents 资产）。
+          - runs_on: macos-latest
             target_os: mac
             target_arch: x64
             dist_dir: dist-x64
@@ -64,6 +67,7 @@ jobs:
             target_arch: x64
             dist_dir: dist
     env:
+      ZCODE_ENV: production
       ZCODE_DESKTOP_DIST_DIR: ${{ matrix.dist_dir }}
 
     steps:
@@ -77,11 +81,12 @@ jobs:
           node-version: "24"
           cache: pnpm
 
-      # rpm 需要 rpmbuild；pacman 的 .pkg.tar.zst 需要 tar + zstd；deb 由
-      # electron-builder 自带的 app-builder/fpm 处理，不需要系统 ruby。
+      # rpm 需要 rpmbuild；pacman 的 .pkg.tar.zst 需要 tar + zstd，且 fpm 生成
+      # .MTREE 要调 bsdtar（Ubuntu 在 libarchive-tools 包里，缺了会 exit 127）；
+      # deb 由 electron-builder 自带的 app-builder/fpm 处理，不需要系统 ruby。
       - name: Install Linux packaging tools
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm zstd xz-utils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends rpm zstd xz-utils libarchive-tools
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
