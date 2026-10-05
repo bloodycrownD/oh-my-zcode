@@ -29,7 +29,7 @@ export const DEFAULT_MAX_PREVIEW_CHARS = 220;
 export const DEFAULT_MAX_PREVIEW_PARAGRAPHS = 2;
 
 /** truncatePreview 的下界：调用方把 maxChars 写成 0/负数时也不至于切出负长度。 */
-const PREVIEW_MIN_MAX_CHARS = 8;
+export const PREVIEW_MIN_MAX_CHARS = 8;
 const PREVIEW_TRUNCATION_SUFFIX = "...";
 const PREVIEW_NEWLINE_CODE = 0x0a;
 

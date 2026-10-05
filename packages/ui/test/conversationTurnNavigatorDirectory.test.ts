@@ -14,7 +14,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   buildTurnNavigatorDirectoryFallbackItem,
-  classifyTurnNavigatorActiveScope,
   mergeTurnNavigatorItems,
   resolveTurnNavigatorActiveItemIndex,
   type ConversationTurnNavigatorDirectoryEntry,
@@ -179,7 +178,6 @@ test("active 降级三态：已加载 / 未加载 / 混合（跨边界）", () =
     windowFirstRowId: 30,
   });
   assert.equal(mixed, 3, "混合态以已加载侧为准，未加载目录项不夺走高亮");
-  assert.equal(classifyTurnNavigatorActiveScope({ items: merged, loadedActiveItemIndex: 3, windowFirstRowId: 30 }), "mixed");
 
   // 2. 视口落到窗口之上的未加载区 → 取第一个未加载目录项。
   const unloaded = resolveTurnNavigatorActiveItemIndex({
@@ -188,10 +186,6 @@ test("active 降级三态：已加载 / 未加载 / 混合（跨边界）", () =
     windowFirstRowId: 30,
   });
   assert.equal(unloaded, 0, "未加载区高亮第一个未加载目录项（升序最早的那条）");
-  assert.equal(
-    classifyTurnNavigatorActiveScope({ items: merged, loadedActiveItemIndex: undefined, windowFirstRowId: 30 }),
-    "unloaded",
-  );
 
   // 3. 纯已加载区间（目录未取过）→ 只有主循环能判定，且不产生降级项。
   const loadedOnly = mergeTurnNavigatorItems([], [makeLoadedItem(30), makeLoadedItem(40)], 30, I18N);
@@ -211,14 +205,6 @@ test("active 降级三态：已加载 / 未加载 / 混合（跨边界）", () =
     }),
     undefined,
     "既无已加载命中也无未加载目录项时交回调用方兜底",
-  );
-  assert.equal(
-    classifyTurnNavigatorActiveScope({
-      items: loadedOnly,
-      loadedActiveItemIndex: 1,
-      windowFirstRowId: 30,
-    }),
-    "loaded",
   );
 });
 

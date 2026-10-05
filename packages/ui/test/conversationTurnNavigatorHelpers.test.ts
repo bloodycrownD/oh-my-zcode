@@ -16,7 +16,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
-  normalizeConversationTurnNavigatorQueryPositions,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorActiveUnitIndex,
   shouldHideConversationTurnNavigatorRail,
@@ -228,34 +227,44 @@ test("量化与原始 offset 的偏差不超过一行（且行高量级对齐时
   }
 });
 
-test("ActiveQueryRowId：传 normalizedPositions 与不传结果一致", () => {
+test("ActiveQueryRowId：视口定位口径 + 空表返回 undefined", () => {
   const positions: ConversationTurnNavigatorQueryPosition[] = [
     { rowId: 30, start: 200, end: 260 },
     { rowId: 10, start: 0, end: 80 },
     { rowId: 20, start: 90, end: 150 },
-    // 边界：非有限/负值需夹取，验证归一化口径一致。
+    // 边界：start 为负数需夹取为 0（并按夹取后的 start 参与升序）。
     { rowId: 40, start: -50, end: 10 },
   ];
-  const normalizedPositions = normalizeConversationTurnNavigatorQueryPositions(positions);
 
-  for (const scrollOffsetPx of [0, 95, 210, 500]) {
-    for (const viewportHeightPx of [1, 120, 600]) {
-      assert.equal(
-        resolveConversationTurnNavigatorActiveQueryRowId({
-          positions,
-          normalizedPositions,
-          scrollOffsetPx,
-          viewportHeightPx,
-        }),
-        resolveConversationTurnNavigatorActiveQueryRowId({
-          positions,
-          scrollOffsetPx,
-          viewportHeightPx,
-        }),
-        `offset=${scrollOffsetPx} height=${viewportHeightPx}`,
-      );
-    }
-  }
+  // 视口覆盖全部位置 → 取 start 最靠近视口顶的那条（夹取后 row10/row40 的 start 同为 0，
+  // 按 rowId 升序取先到的 row10）。
+  assert.equal(
+    resolveConversationTurnNavigatorActiveQueryRowId({
+      positions,
+      scrollOffsetPx: 0,
+      viewportHeightPx: 600,
+    }),
+    10,
+  );
+  // 视口压在 rowId=20 的区间上 → 取该区间内 start 距视口顶最近的一条。
+  assert.equal(
+    resolveConversationTurnNavigatorActiveQueryRowId({
+      positions,
+      scrollOffsetPx: 95,
+      viewportHeightPx: 60,
+    }),
+    20,
+  );
+  // 视口在所有位置之下 → 取最后一个 start <= 视口顶的（rowId=30，start=200）。
+  assert.equal(
+    resolveConversationTurnNavigatorActiveQueryRowId({
+      positions,
+      scrollOffsetPx: 5_000,
+      viewportHeightPx: 200,
+    }),
+    30,
+  );
+  // 空位置表没有可判定项。
   assert.equal(
     resolveConversationTurnNavigatorActiveQueryRowId({
       positions: [],

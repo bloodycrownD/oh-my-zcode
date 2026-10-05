@@ -146,9 +146,6 @@ export function mergeTurnNavigatorItems(
   return merged.slice().sort((left, right) => left.rowId - right.rowId);
 }
 
-/** active 判定所处的区间：已加载 / 未加载 / 混合（视口跨加载边界）。 */
-export type TurnNavigatorActiveScope = "loaded" | "mixed" | "unloaded";
-
 export interface ResolveTurnNavigatorActiveItemIndexParams {
   /** 合并后的 items（`mergeTurnNavigatorItems` 的产物）。 */
   items: readonly ConversationTurnNavigatorMergedItem[];
@@ -159,22 +156,6 @@ export interface ResolveTurnNavigatorActiveItemIndexParams {
   loadedActiveItemIndex: number | undefined;
   /** 当前窗口首行 rowId（`rows.window[0].rowId`）；`undefined` = 正文窗口为空。 */
   windowFirstRowId: number | undefined;
-}
-
-/**
- * 当前 active 落在哪一段（只用于判定与日志/测试，不参与渲染）。
- *
- * 混合态的判定口径：已加载侧命中活动项、同时还存在未加载目录项——即视口跨过加载
- * 边界。此时以已加载侧为准，降级分支不介入。
- */
-export function classifyTurnNavigatorActiveScope(
-  params: ResolveTurnNavigatorActiveItemIndexParams,
-): TurnNavigatorActiveScope {
-  const hasUnloaded = params.items.some((item) => item.isDirectoryFallback);
-  if (params.loadedActiveItemIndex === undefined) {
-    return hasUnloaded ? "unloaded" : "loaded";
-  }
-  return hasUnloaded ? "mixed" : "loaded";
 }
 
 /**

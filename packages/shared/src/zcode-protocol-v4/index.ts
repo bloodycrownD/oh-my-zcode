@@ -32,7 +32,14 @@ export * from "./coalesce.js";
 export * from "./profiles.js";
 export * from "./apply.js";
 // 摘要口径（220 字符 / 2 段落）的唯一实现：renderer rail 与服务端 turn 目录共用。
-export * from "./previewText.js";
+// 具名导出而非 `export *`：诊断函数 `buildPreviewTextWithStats` 与其 `PreviewTextBuildResult`
+// 只服务测试/诊断，不该经协议桶扩散成对外契约——需要时按相对路径从 previewText.js 直接导入。
+export {
+  buildPreviewText,
+  DEFAULT_MAX_PREVIEW_CHARS,
+  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+  PREVIEW_MIN_MAX_CHARS,
+} from "./previewText.js";
 export * from "./transport.js";
 export * from "./wire.js";
 export * from "./wire-codec.js";

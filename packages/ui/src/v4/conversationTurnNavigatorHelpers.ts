@@ -50,23 +50,10 @@ export interface ConversationTurnNavigatorQueryPosition {
   end: number;
 }
 
-/** 归一化（start/end 已夹取为有限非负）且按 start 升序、rowId 升序排好的位置表。 */
-export interface ConversationTurnNavigatorNormalizedQueryPosition {
-  rowId: number;
-  start: number;
-  end: number;
-}
-
 interface ResolveConversationTurnNavigatorActiveQueryRowIdOptions {
   positions: readonly ConversationTurnNavigatorQueryPosition[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
-  /**
-   * 可选：同一批 positions 的归一化+排序结果（由
-   * `normalizeConversationTurnNavigatorQueryPositions` 产出）。调用方已持有排序结果时
-   * 传入，跳过每次调用的 `map().sort()`；缺省时函数内自建。
-   */
-  normalizedPositions?: readonly ConversationTurnNavigatorNormalizedQueryPosition[];
 }
 
 type ConversationTurnNavigatorBarTone = "idle" | "mid" | "near" | "peak";
@@ -321,13 +308,10 @@ export function resolveConversationTurnNavigatorActiveUnitIndex(
   );
 }
 
-/**
- * 把原始位置表归一化并排序，供 `resolveConversationTurnNavigatorActiveQueryRowId`
- * 复用（滚动高频路径上避免每次重排）。
- */
-export function normalizeConversationTurnNavigatorQueryPositions(
+/** 位置表归一化（start/end 夹取为有限非负）并按 start 升序、rowId 升序排好。 */
+function normalizeQueryPositions(
   positions: readonly ConversationTurnNavigatorQueryPosition[],
-): ConversationTurnNavigatorNormalizedQueryPosition[] {
+): ConversationTurnNavigatorQueryPosition[] {
   return positions
     .map((position) => {
       const start = resolveFiniteNonNegative(position.start);
@@ -348,8 +332,7 @@ export function resolveConversationTurnNavigatorActiveQueryRowId(
 
   const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
   const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
-  const normalized =
-    options.normalizedPositions ?? normalizeConversationTurnNavigatorQueryPositions(positions);
+  const normalized = normalizeQueryPositions(positions);
 
   const visible = normalized.filter(
     (position) => position.end >= viewportStart && position.start <= viewportEnd,
