@@ -893,7 +893,6 @@ resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
       dynamicWorkflowSnippetPort,
       modelCatalogPort,
       automationPort: options.automationPort,
-      offPeakPort: options.offPeakPort,
       // 端口在场即注册门：缺席（默认）时 turn-loop 的插入点是纯判空。
       ...(magicContextTurnTransform === undefined ? {} : { magicContextTurnTransform }),
       appVersion,

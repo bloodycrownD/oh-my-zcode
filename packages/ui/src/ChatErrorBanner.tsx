@@ -29,10 +29,7 @@ import { toast } from "./components/ui/toast.js";
 import { useFeedbackStore } from "@/feedback/feedbackStore.js";
 import { getProviderBusinessErrorMessageId } from "@/lib/providerBusinessError.js";
 import { buildErrorFeedbackDescription } from "@/lib/errorFeedbackDraft.js";
-import {
-  isSuspiciousEmptyModelResultMessage,
-  resolveOffPeakTicketExpiredBusinessCode,
-} from "@/lib/providerBusinessError.js";
+import { isSuspiciousEmptyModelResultMessage } from "@/lib/providerBusinessError.js";
 import type { ZCodeUiError } from "@/lib/zcodeUiError.js";
 
 const HISTORICAL_MODEL_UNAVAILABLE_MESSAGES = [
@@ -73,9 +70,7 @@ function resolveChatErrorBannerDisplayMessage(error: ZCodeUiError, intl: IntlIns
     return intl.formatMessage({ id: "chat.error.noAvailableModel" });
   }
 
-  const providerBusinessCode =
-    resolveOffPeakTicketExpiredBusinessCode(error.code, error.message) ?? error.code;
-  const providerBusinessMessageId = getProviderBusinessErrorMessageId(providerBusinessCode);
+  const providerBusinessMessageId = getProviderBusinessErrorMessageId(error.code);
   if (providerBusinessMessageId) {
     return intl.formatMessage({ id: providerBusinessMessageId });
   }

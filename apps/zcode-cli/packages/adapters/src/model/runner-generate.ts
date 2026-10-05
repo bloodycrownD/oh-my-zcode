@@ -8,7 +8,6 @@ import {
 import { classifyModelFailure, inspectProviderFailure } from "./failure-classifier.js";
 import type { ClassifiedModelFailure } from "./failure-classifier.js";
 import { getResponseHeaders, unwrapRetryError } from "./failure-inspection.js";
-import { offPeakTicketExpiredMessage, resolveOffPeakFailureDecision } from "./offpeak-retry.js";
 import { AiSdkModelAdapterError } from "./errors.js";
 import { resolveAnthropicRequestMetadataUserId } from "./anthropic-request-metadata.js";
 import { createGenerateTextOptions } from "./runner-options.js";
@@ -341,24 +340,7 @@ export async function runGenerateText(input: {
         classified.message = error.message;
         classified.retryable = false;
       }
-      // off-peak 特判（仅 idle plan provider，见 offpeak-retry.ts）：排队 429 豁免预算、
-      // 3102（兼容旧 3001）以稳定标记落败触发 desktop 侧续跑。
-      // FORK（官方端点全清）：账号型 access 已整删，非账号 provider 一律不走该协议。
-      const offPeak = resolveOffPeakFailureDecision({
-        offPeak: false,
-        failure: classified,
-        error: unwrapRetryError(error),
-      });
-      const failure: ClassifiedModelFailure =
-        offPeak?.kind === "ticketExpired"
-          ? {
-              ...classified,
-              retryable: false,
-              message: offPeakTicketExpiredMessage(classified.message),
-            }
-          : offPeak?.kind === "queued"
-            ? { ...classified, retryable: true, retryReason: ModelRetryReason.OffpeakQueued }
-            : classified;
+      const failure: ClassifiedModelFailure = classified;
       const responseHeaders = sanitizeModelNetworkHeaders(
         getResponseHeaders(unwrapRetryError(error)),
       );
@@ -379,15 +361,13 @@ export async function runGenerateText(input: {
         };
       }
       const canRetryWithFailurePolicy =
-        offPeak?.kind === "queued"
-          ? true
-          : retryBudgetAllows(retryBudget, retryBudgetAttempt, input.retry.maxAttempts) &&
-            // workflow 流量（无上限预算）读策略表而不是分类器的 retryable；有界预算逐字不变。
-            retryAllowedByFailurePolicy(
-              failure,
-              retryBudget,
-              inspectProviderFailure(error).providerErrorCode,
-            );
+          retryBudgetAllows(retryBudget, retryBudgetAttempt, input.retry.maxAttempts) &&
+          // workflow 流量（无上限预算）读策略表而不是分类器的 retryable；有界预算逐字不变。
+          retryAllowedByFailurePolicy(
+            failure,
+            retryBudget,
+            inspectProviderFailure(error).providerErrorCode,
+          );
       const canRetry = retryWithRepairedHistory || canRetryWithFailurePolicy;
 
       if (options) {
@@ -468,10 +448,7 @@ export async function runGenerateText(input: {
         continue;
       }
 
-      const delayMs =
-        offPeak?.kind === "queued"
-          ? offPeak.delayMs
-          : calculateRetryDelay(input.retry, retryBudgetAttempt, failure.retryAfterMs);
+      const delayMs = calculateRetryDelay(input.retry, retryBudgetAttempt, failure.retryAfterMs);
       logRetryDelayDecision({
         attempt,
         canRetry,
@@ -527,10 +504,6 @@ export async function runGenerateText(input: {
         throw toAdapterError(sleepError, sleepFailure, statusContext, attempt, {
           errorPhase: "connect",
         });
-      }
-      if (offPeak?.kind === "queued") {
-        // 排队等待不消耗重试预算：回退计数让 for 自增后原地重试，无限探测。
-        attempt -= 1;
       }
     } finally {
       admission.release();

@@ -40,7 +40,7 @@ export async function executeToolBatch(
       batch.map((tc) =>
         executeOne(tc, {
           automationTurn: options?.automationTurn,
-          offPeakTurn: options?.offPeakTurn,
+          unattendedDispatchTurn: options?.unattendedDispatchTurn,
           signal: options?.signal,
           traceContext: options?.traceContext,
           subagentModelOverride: options?.subagentModelOverride,

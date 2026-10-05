@@ -110,7 +110,6 @@ export type {
   LogContext,
   AttachmentStorageMetadata,
   AutomationPort,
-  OffPeakPort,
   BackgroundExecutionSnapshot,
   BackgroundTaskCancelResult,
   BackgroundTaskInfo,
