@@ -11,6 +11,12 @@ const SELECTION_SIDE_CHAT_RESTRICTED_COMMANDS = new Set<CommandEnvelope["type"]>
   "sendGoalCommand",
   "pauseGoal",
   "resumeGoal",
+  // magic-context 控制面同样按「操作会话自身状态」处理：副屏是一次性的选区问答，
+  // 它没有独立的 magic-context 会话归属，`/ctx-reduce` 写进去的 pending_ops 会归错会话。
+  "ctxStatus",
+  "ctxReduce",
+  "ctxExpand",
+  "ctxRecomp",
   "editUserQuery",
   "retryTurn",
   "forkAssistant",

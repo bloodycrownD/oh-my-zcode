@@ -212,6 +212,24 @@ export const commandPayloadSchemas = {
     mode: z.enum(["build", "edit", "plan", "yolo"]),
   }),
   setFollowupMode: z.object({ mode: z.enum(["queue", "guide"]) }),
+  // ── magic-context 本地控制命令（S22 的桌面执行面）────────────────────────
+  //
+  // 这四个名字的语义与 CLI/TUI 完全同源（实现见 bootstrap/src/ctx-commands）：
+  // 桌面 composer 敲 `/ctx-status` 时不再走 `sendText`（那会把命令原文发给模型），
+  // 而是发一条 v4 命令，由 `zcode-protocol-v4/commands/handlers/ctx.ts` 就地执行并
+  // 把文本回在 ACK 的 `ctxCommand` 结果里。
+  //
+  // 参数一律**逐字携带命令名之后的剩余文本**，解析在服务端做：文法只有服务端与包内
+  // 工具路径共享一份实现，客户端再抄一遍必然漂移。字段名沿用「这段文本指向哪段
+  // 历史」的读法——`tags` 是 `/ctx-reduce` 的 tag-id 列表，`range` 是 expand/recomp 的
+  // 选择器文本（`/ctx-expand` 的 `range` 覆盖工具同款文法
+  // `tag=N | message=N | <start>-<end> [verbose]`，`/ctx-recomp` 的覆盖
+  // `full | --upgrade | <start>-<end>`），缺省即「不限定」。
+  ctxStatus: z.object({}),
+  // `/ctx-reduce <tag-ids>`，例如 `3-5, 8, 12-15`。空串由服务端回用法提示。
+  ctxReduce: z.object({ tags: z.string() }),
+  ctxExpand: z.object({ range: z.string().optional() }),
+  ctxRecomp: z.object({ range: z.string().optional() }),
   pauseGoal: z.object({}),
   resumeGoal: z.object({}),
   cancelBackgroundWork: z.object({ workId: z.string() }),
@@ -404,6 +422,14 @@ export const commandResultSchema = z.discriminatedUnion("type", [
     toolCallId: z.string().min(1),
   }),
   amendWorkflowRunSettingsResultSchema,
+  z.object({
+    // `/ctx-*` 的执行结果：命令就地算完，把**逐字文本**回给客户端，不进对话历史。
+    // 形态对齐 applyFileRewind 的 `response`（同一类「命令自带一段可展示文本」），
+    // 差别只是这里没有别的结构化字段要带——四个命令的输出都是一段人读的文本。
+    type: z.literal("ctxCommand"),
+    command: z.enum(["ctxStatus", "ctxReduce", "ctxExpand", "ctxRecomp"]),
+    response: z.string(),
+  }),
   z.object({
     // messageId 只在 TurnStarted 后作为旁路归因补齐；Core admission ACK 不等待
     // projection commit，不能把 messageId 作为输入 accepted 的必要条件。

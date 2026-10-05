@@ -131,6 +131,13 @@ export function computeAvailability(context: AvailabilityContext): SessionAction
       goalStatus === "paused"
         ? ALLOWED
         : denied(goalStatus === null ? "noGoalToResume" : "goalNotPaused"),
+    // `/ctx-*` 与 goal 状态无关，也不受 phase 影响（它们就地执行，不起 turn、不入队）。
+    // magicContext.enabled 的判定刻意留在命令内部：那边回的是与 CLI/TUI 逐字相同的
+    // UNAVAILABLE 文案，在这里藏能力只会制造客户端间的行为分叉。
+    ctxStatus: ALLOWED,
+    ctxReduce: ALLOWED,
+    ctxExpand: ALLOWED,
+    ctxRecomp: ALLOWED,
   };
 }
 

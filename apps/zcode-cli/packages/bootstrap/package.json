@@ -10,6 +10,10 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
     },
+    "./ctx-commands": {
+      "types": "./dist/ctx-commands/index.d.ts",
+      "import": "./dist/ctx-commands/index.js"
+    },
     "./v4-replay": {
       "types": "./dist/zcode-protocol-v4/replay.d.ts",
       "import": "./dist/zcode-protocol-v4/replay.js"

@@ -154,6 +154,14 @@ export const sessionActionAvailabilitySchema = z.object({
   sendQueuedNow: actionAvailabilitySchema,
   pauseGoal: actionAvailabilitySchema,
   resumeGoal: actionAvailabilitySchema,
+  // `/ctx-*`（magic-context 本地控制面）：恒定可用。刻意**不**按 magicContext.enabled
+  // 过滤目录/能力——关掉时命令自己回一条 UNAVAILABLE 文案，与 CLI/TUI 逐字一致；
+  // 在这里藏起来会让「命令列出来了但按了没反应」和「命令回了为什么不能用」这两种
+  // 失败模式在不同客户端上分叉。
+  ctxStatus: actionAvailabilitySchema,
+  ctxReduce: actionAvailabilitySchema,
+  ctxExpand: actionAvailabilitySchema,
+  ctxRecomp: actionAvailabilitySchema,
 });
 export type SessionActionAvailability = z.infer<typeof sessionActionAvailabilitySchema>;
 
