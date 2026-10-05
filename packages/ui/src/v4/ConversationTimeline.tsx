@@ -52,6 +52,8 @@ import {
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
   shouldHydrateConversationTurnNavigatorDirectory,
+  shouldHideConversationTurnNavigatorRail,
+  type ConversationTurnNavigatorDirectoryView,
   type ConversationTurnNavigatorHydrationResult,
   type ConversationTurnNavigatorQueryPosition,
   type ConversationTurnNavigatorVirtualItem,
@@ -278,8 +280,17 @@ interface ConversationTimelineProps {
   loadingOlder?: boolean;
   /** 拉取更早一窗历史（接近顶部时自动预取）。 */
   onLoadOlder?: () => Promise<void> | void;
-  /** 宽屏问题目录挂载后一次补齐当前有效分支的全部历史。 */
-  onLoadAllOlder?: () => Promise<ConversationTurnNavigatorHydrationResult>;
+  /**
+   * 宽屏问题目录查询（turnNavigator 窄投影）。
+   *
+   * 正文/分享模式的全量补齐走 store 的 `loadAllOlder`（SessionPane 内），不经过本组件：
+   * 那条路要的是完整正文行，目录那条路要的只是 rail 条目。
+   */
+  onLoadTurnDirectory?: () => Promise<ConversationTurnNavigatorHydrationResult>;
+  /** 目录只读查询在途（替代原正文 loadingOlder 作为 rail hydration 态）。 */
+  loadingDirectory?: boolean;
+  /** rail 显隐的目录裁决输入（条目数据由 items 合并层消费）。 */
+  turnDirectory?: ConversationTurnNavigatorDirectoryView;
   /**
    * 问题导航目录失效代际（store turnNavigatorDirectoryRevision）。
    * real-user query 增删后终态必须失效重探测；组件 hydration key
@@ -365,7 +376,9 @@ function ConversationTimelineImpl({
   canLoadOlder = false,
   loadingOlder = false,
   onLoadOlder,
-  onLoadAllOlder,
+  onLoadTurnDirectory,
+  loadingDirectory = false,
+  turnDirectory,
   turnNavigatorDirectoryRevision = 0,
   bottomDock,
   selectionPanelLayoutContainerRef,
@@ -608,8 +621,14 @@ function ConversationTimelineImpl({
       !shouldHydrateConversationTurnNavigatorDirectory({
         canLoadOlder,
         containerWidthPx: turnNavigatorContainerWidthPx,
-        hasLoadHandler: Boolean(onLoadAllOlder),
-        loadingOlder,
+        hasLoadHandler: Boolean(onLoadTurnDirectory),
+        loadingDirectory,
+        ...(turnDirectory
+          ? {
+              realUserQueryTotal: turnDirectory.realUserQueryTotal,
+              directoryHasMore: turnDirectory.hasMore,
+            }
+          : {}),
       })
     ) {
       return;
@@ -628,15 +647,14 @@ function ConversationTimelineImpl({
         status: "idle" as const,
       });
     }
-    if (attempt.status !== "idle" || !onLoadAllOlder) return;
+    if (attempt.status !== "idle" || !onLoadTurnDirectory) return;
     attempt.status = "in-flight";
-    logger.debug("[v4-turn-navigator] 目录请求补齐完整历史", {
+    logger.debug("[v4-turn-navigator] 目录窄投影查询", {
       attempt: attempt.attemptCount + 1,
-      loadedRows: rows.length,
+      knownEntryCount: turnDirectory?.entryCount ?? null,
       sessionKey,
-      totalRows: totalCount,
     });
-    void onLoadAllOlder().then((result) => {
+    void onLoadTurnDirectory().then((result) => {
       if (attempt.key !== hydrationKey) return;
       if (result.status === "hydrated" || result.status === "not-enough-queries") {
         attempt.status = "terminal";
@@ -664,12 +682,11 @@ function ConversationTimelineImpl({
     });
   }, [
     canLoadOlder,
-    loadingOlder,
-    onLoadAllOlder,
+    loadingDirectory,
+    onLoadTurnDirectory,
     rowContext.logEpoch,
-    rows,
     sessionKey,
-    totalCount,
+    turnDirectory,
     turnNavigatorContainerWidthPx,
     turnNavigatorDirectoryRevision,
     turnNavigatorHydrationRetryRevision,
@@ -1682,6 +1699,14 @@ function ConversationTimelineImpl({
     };
   }, []);
 
+  // rail 显隐：目录已知且一条都没有、权威总数也不足两条时隐藏（否则画出一根空条）。
+  // 未取过目录时保持可见——加载中隐藏会在首帧闪一下。
+  const turnNavigatorRailHidden = shouldHideConversationTurnNavigatorRail(turnDirectory);
+  // turn map 覆盖左侧 48px 的留位与 rail 显隐必须同源：目录模式下 rail 的可见性由
+  // 窄投影决定，不能只看当前窗口里已加载的 query 条数。
+  const turnNavigatorOccupiesLeftGutter =
+    turnNavigatorQueryRowIds.size >= 2 || (Boolean(turnDirectory) && !turnNavigatorRailHidden);
+
   // raw projection row 与按 turn 合并后的 render unit 不是同一计量单位；
   // 分开暴露才能让恢复/分页验证不再把可见 unit 误当成持久 row。
   return (
@@ -1704,10 +1729,10 @@ function ConversationTimelineImpl({
       />
       {/* 分享选择流程无论面板展开还是收起，左 rail 都由分享面板或 reopen 按钮独占，
           必须隐藏对话轮导航，避免两个绝对定位控件互相覆盖。退出分享选择后自动恢复。 */}
-      {hideTurnNavigator ? null : (
+      {hideTurnNavigator || turnNavigatorRailHidden ? null : (
         <ConversationTurnNavigator
           renderUnits={renderUnits}
-          isHydratingDirectory={loadingOlder}
+          isHydratingDirectory={loadingDirectory}
           scrollOffsetPx={virtualizer.scrollOffset ?? turnNavigatorViewport.scrollOffsetPx}
           viewportHeightPx={
             virtualizer.scrollRect?.height ?? turnNavigatorViewport.viewportHeightPx
@@ -1750,7 +1775,7 @@ function ConversationTimelineImpl({
           backgroundScrollLocked && "!overflow-y-hidden",
           // Conversation turn map 覆盖 timeline 左侧 48px；表格增强滚动如果仍按
           // 普通 16px 边距借位，会有 32px 落到 turn map 下方，必须把完整占用计入左边界。
-          turnNavigatorQueryRowIds.size >= 2 &&
+          turnNavigatorOccupiesLeftGutter &&
             "@min-[864px]/conversation:[--markdown-table-layout-left-inset:48px]",
         )}
       >

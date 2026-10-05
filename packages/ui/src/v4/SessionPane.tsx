@@ -3453,6 +3453,34 @@ export function SessionPane({
     return lease?.store.loadOlder();
   }, [lease]);
 
+  // 宽屏 rail 的目录查询（窄投影，只取条目不并入正文窗口）。
+  // 与下面的 loadAllOlder 是两条路：那条服务正文/分享模式的全量语义。
+  const handleLoadTurnDirectory = useCallback(() => {
+    return lease
+      ? lease.store.loadTurnDirectory()
+      : Promise.resolve({
+          status: "stale" as const,
+          logEpoch: snapshot?.logEpoch ?? "unknown",
+        });
+  }, [lease, snapshot?.logEpoch]);
+
+  // rail 显隐的目录裁决窄面（条目数组不进组件，避免同一份目录存第二份）。
+  const turnDirectoryView = useMemo(
+    () => ({
+      loaded: state.turnDirectory.loaded,
+      entryCount: state.turnDirectory.entries.length,
+      realUserQueryTotal: state.turnDirectory.realUserQueryTotal,
+      hasMore: state.turnDirectory.hasMore,
+    }),
+    [
+      state.turnDirectory.hasMore,
+      state.turnDirectory.loaded,
+      state.turnDirectory.entries.length,
+      state.turnDirectory.realUserQueryTotal,
+    ],
+  );
+
+  // 正文/分享模式的全量补齐：目录路径不并入窗口，分享链路仍依赖这里的全量正文语义。
   const handleLoadAllOlder = useCallback(() => {
     return lease
       ? lease.store.loadAllOlder()
@@ -4544,7 +4572,9 @@ export function SessionPane({
               canLoadOlder={timelineSnapshot ? hasOlderRows(timelineSnapshot) : false}
               loadingOlder={timelineSnapshot ? state.loadingOlder : false}
               onLoadOlder={handleLoadOlder}
-              onLoadAllOlder={handleLoadAllOlder}
+              onLoadTurnDirectory={handleLoadTurnDirectory}
+              loadingDirectory={state.loadingDirectory}
+              turnDirectory={turnDirectoryView}
               turnNavigatorDirectoryRevision={state.turnNavigatorDirectoryRevision}
               bottomDock={conversationBottomDock}
               hideTurnNavigator={shareActive && shareInSelectionStage}

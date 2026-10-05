@@ -98,18 +98,62 @@ export type ConversationTurnNavigatorHydrationResult =
   | { status: "retryable-failure"; logEpoch: string }
   | { status: "stale"; logEpoch: string };
 
+/**
+ * rail 的目录可见性输入（store 的窄投影目录状态的窄面）。
+ *
+ * 只带裁决 rail 显隐所需的四个数：条目数据由 items 合并层消费，这里不复制条目数组，
+ * 免得同一份目录在组件里存第二份。
+ */
+export interface ConversationTurnNavigatorDirectoryView {
+  /** 是否成功取过一次目录（未取过时不能按「空」判隐藏，否则首帧闪一下）。 */
+  loaded: boolean;
+  entryCount: number;
+  /** 服务端现算的 realUser query 权威总数。 */
+  realUserQueryTotal: number;
+  /** 更早方向仍有条目。 */
+  hasMore: boolean;
+}
+
+/**
+ * 宽屏是否该拉一次 turn 目录。
+ *
+ * 目录模式下判定输入从「窗口里还有没有更早行」换成目录自身的两个事实：
+ * `realUserQueryTotal`（够不够两条 query 撑起 rail）与 `directoryHasMore`
+ * （更早方向还有没有没取到的条目）。两者都未知（首轮、尚未取过目录）时，
+ * 仍以 `canLoadOlder` 放行——「不知道」不能当成「不需要」。
+ */
 export function shouldHydrateConversationTurnNavigatorDirectory(params: {
   canLoadOlder: boolean;
   containerWidthPx: number;
   hasLoadHandler: boolean;
-  loadingOlder: boolean;
+  loadingDirectory: boolean;
+  realUserQueryTotal?: number;
+  directoryHasMore?: boolean;
 }): boolean {
-  return (
-    params.canLoadOlder &&
-    !params.loadingOlder &&
-    params.hasLoadHandler &&
-    params.containerWidthPx >= CONVERSATION_TURN_NAVIGATOR_MIN_WIDTH_PX
-  );
+  if (!params.hasLoadHandler || params.loadingDirectory) return false;
+  if (params.containerWidthPx < CONVERSATION_TURN_NAVIGATOR_MIN_WIDTH_PX) return false;
+  const total = params.realUserQueryTotal;
+  if (total !== undefined) {
+    // 权威总数不足两条：rail 不会出现，不必 hydrate。
+    if (total < 2) return false;
+    // 目录已取齐（更早方向没有条目）：没有可补的内容。
+    if (params.directoryHasMore === false) return false;
+    return true;
+  }
+  return params.canLoadOlder;
+}
+
+/**
+ * rail 是否隐藏。
+ *
+ * 目录已知且「一条都没有、权威总数也不足两条」时隐藏——这时 rail 画出来是一根空条。
+ * 尚未取过目录（`loaded === false`）一律不隐藏：加载中隐藏会在首帧闪一下。
+ */
+export function shouldHideConversationTurnNavigatorRail(
+  directory: ConversationTurnNavigatorDirectoryView | undefined,
+): boolean {
+  if (!directory?.loaded) return false;
+  return directory.entryCount === 0 && directory.realUserQueryTotal < 2;
 }
 
 export function resolveConversationTurnNavigatorHydrationRetryDelayMs(
