@@ -144,6 +144,14 @@ export const AUTOMATION_SCHEMA = `
       ON automation_runs (automation_id, created_at DESC);
     `;
 
+/**
+ * 闲时任务（Off-Peak）历史表结构。
+ *
+ * 自「官方端点全清」版本起闲时任务整链已移除，本段建表语句作为 schema 版本链的
+ * 一部分**必须原样保留**：删掉它会让老库升级路径缺一步，新库也不再拥有同样的表结构，
+ * 造成 schema 版本链断裂。运行期已无任何代码向 off_peak_tasks 写入或读取，
+ * 存量行是孤儿数据（无 UI 展示、无调度消费），保留无害，可安全忽略。
+ */
 export const OFF_PEAK_SCHEMA = `
       CREATE TABLE IF NOT EXISTS off_peak_tasks (
         off_peak_task_id   TEXT PRIMARY KEY,

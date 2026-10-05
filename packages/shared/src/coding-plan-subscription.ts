@@ -118,12 +118,6 @@ export interface ForceUpdateConfig {
   minimalVersion: string;
 }
 
-/**
- * 闲时任务客户端配置：client/configs 只下发入口曝光开关；模型展示来自 Built-in
- * offpeak Provider。准入/低峰判断仍以服务端为准（3006 兜底）。
- * 有效开启判据 = enable_offpeak_task===true 且 Built-in 模型成员非空。
- * 额度不再经 client/configs 下发；改由专用 availability 接口提供服务端即时快照。
- */
 export interface CodingPlanProductInfoRequest {
   providerId?: CodingPlanSubscriptionProviderId;
   productId: string;
