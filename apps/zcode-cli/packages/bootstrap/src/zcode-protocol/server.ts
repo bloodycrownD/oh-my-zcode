@@ -510,6 +510,9 @@ export class ZCodeProtocolAgentServer {
       // ── 行分页 query（独立分支，便于与帧分派改动合并）──
       case V4_METHODS.conversationRowsRange:
         return await this.requireV4Gateway().rowsRange(request.params);
+      // turn 目录窄投影：与 rowsRange 同族的只读 query，独立 case 便于按方法分派。
+      case V4_METHODS.conversationTurnDirectory:
+        return await this.requireV4Gateway().turnDirectory(request.params);
       case V4_METHODS.conversationPlans:
         return await this.requireV4Gateway().plans(request.params);
       case V4_METHODS.backgroundBashOutput:
