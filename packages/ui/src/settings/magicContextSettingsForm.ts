@@ -17,7 +17,11 @@
  *      只依赖 `@zcode/shared`（CLI 与 UI 共用的那个包），**不用 `@/` 别名**——
  *      别名只有 UI 的打包器解析得了，而这个模块还要被 node 直接 import。
  */
-import { encodeCustomModelValue, parseModelPickerValue } from "@zcode/shared";
+import {
+  decodeCustomModelValue,
+  encodeCustomModelValue,
+  parseModelPickerValue,
+} from "@zcode/shared";
 
 /**
  * 表单可编辑的字段集。与包的 schema 白名单一一对应，**只少不多**——
@@ -223,6 +227,14 @@ export function toModelPickerValue(model: string): string {
 
 export function toPersistedModelId(pickerValue: string): string {
   if (pickerValue === NO_HISTORIAN_MODEL_VALUE) return "";
+  // 菜单项的 value 是 `encodeCustomModelValue` 的产物（`custom:provider:model`，
+  // URI 编码 + 冒号分隔）。`parseModelPickerValue` 只认 `provider/model`，对
+  // `custom:` 串在 `indexOf("/")` 一步就抛「缺少 Provider」——修复前正是这条
+  // 路径把用户选中的模型静默清成 ""：触发器回不到模型名、保存按钮永不点亮。
+  const custom = decodeCustomModelValue(pickerValue);
+  if (custom) {
+    return custom.modelName ? `${custom.providerId}/${custom.modelName}` : "";
+  }
   try {
     const selection = parseModelPickerValue(pickerValue);
     return `${selection.providerId}/${selection.modelId}`;

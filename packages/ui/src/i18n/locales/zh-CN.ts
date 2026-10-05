@@ -2007,12 +2007,12 @@ const zhCN: Record<string, string> = {
   // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
   "settings.context.title": "上下文管理",
   "settings.context.description":
-    "上下文管理（magic-context）负责在每轮请求前裁剪、折叠并分舱会话历史。保存后立即对正在运行的会话生效，无需重启。",
+    "上下文管理（magic-context）负责在每轮请求前裁剪、折叠并分舱会话历史。修改会自动保存，并立即对正在运行的会话生效，无需重启。",
   "settings.context.noWorkspace": "请先打开一个工作区，再配置上下文管理。",
   "settings.context.loadFailed": "读取上下文管理配置失败。",
-  "settings.context.saved": "上下文管理配置已保存并生效。",
-  "settings.context.saveFailed": "保存上下文管理配置失败，请重试。",
-  "settings.context.reset": "放弃修改",
+  "settings.context.saveFailed": "自动保存上下文管理配置失败，已还原为上次保存的值。",
+  "settings.context.autosave.pending": "待自动保存…",
+  "settings.context.autosave.saved": "已自动保存",
   "settings.context.enabled.label": "启用上下文管理",
   "settings.context.enabled.description":
     "关闭后 transform 直通原始消息，不做任何预算管理与历史折叠；其余参数在重新开启前不生效。",

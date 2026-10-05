@@ -2137,12 +2137,13 @@ const enUS: Record<string, string> = {
   // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
   "settings.context.title": "Context Management",
   "settings.context.description":
-    "Context Management (magic-context) trims, folds and compartments conversation history before each request. Changes take effect on running sessions immediately — no restart needed.",
+    "Context Management (magic-context) trims, folds and compartments conversation history before each request. Changes save automatically and take effect on running sessions immediately — no restart needed.",
   "settings.context.noWorkspace": "Open a workspace before configuring context management.",
   "settings.context.loadFailed": "Failed to read the context management configuration.",
-  "settings.context.saved": "Context management settings saved and applied.",
-  "settings.context.saveFailed": "Failed to save the context management configuration. Try again.",
-  "settings.context.reset": "Discard changes",
+  "settings.context.saveFailed":
+    "Failed to auto-save the context management configuration; the form was restored to the last saved values.",
+  "settings.context.autosave.pending": "Pending auto-save…",
+  "settings.context.autosave.saved": "Saved automatically",
   "settings.context.enabled.label": "Enable context management",
   "settings.context.enabled.description":
     "When off, the transform passes messages through untouched — no budget management and no history folding. The other settings have no effect until it is turned back on.",
