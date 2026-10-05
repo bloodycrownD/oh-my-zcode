@@ -3448,10 +3448,14 @@ export function SessionPane({
     void lease?.store.retry();
   }, [lease]);
 
-  // loadOlder 触发（接近顶部自动预取）。store 内部单飞防重入。
-  const handleLoadOlder = useCallback(() => {
-    return lease?.store.loadOlder();
-  }, [lease]);
+  // loadOlder 触发（接近顶部自动预取 / 目录跳转补拉）。store 内部单飞防重入。
+  // limit 缺省走 store 默认尾窗大小；跳转补拉显式传 rowsRangeMaxLimit 一页拉满。
+  const handleLoadOlder = useCallback(
+    (limit?: number) => {
+      return lease?.store.loadOlder(limit);
+    },
+    [lease],
+  );
 
   // 宽屏 rail 的目录查询（窄投影，只取条目不并入正文窗口）。
   // 与下面的 loadAllOlder 是两条路：那条服务正文/分享模式的全量语义。

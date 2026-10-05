@@ -17,6 +17,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDownIcon } from "lucide-react";
 import { TID_V4_TIMELINE, TID_V4_TIMELINE_BOTTOM } from "@zcode/shared";
+import { PROTOCOL_V4_LIMITS } from "@zcode/shared/zcode-protocol-v4";
 import type {
   ApiRetryState,
   AttachmentRef,
@@ -29,6 +30,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
+import { toast } from "@/components/ui/toast.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { ConversationTurnGroup } from "@/v4/ConversationTurnGroup.js";
@@ -107,6 +109,16 @@ const LAYOUT_SCROLL_GUARD_MS = 250;
 const CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
 const SCROLL_MEMORY_RESTORE_TOLERANCE_PX = 1;
 
+// 跳转补拉（Step 19）：目标 query 不在已加载窗口时，按协议单页上限逐页向上取历史。
+// 页上限即 rowsRangeMaxLimit；50 页封顶 = 最多回溯 10000 行，再深的目标直接放弃，
+// 免得用户点一条极早的 query 就把整段会话拉进内存（正是本轮要消除的成本）。
+const JUMP_LOAD_PAGE_LIMIT = PROTOCOL_V4_LIMITS.rowsRangeMaxLimit;
+const JUMP_LOAD_MAX_PAGES = 50;
+// 每页补拉后等待 React 提交新窗口的帧数上限。正常一两帧就落地，超出即视为无进展。
+const JUMP_LOAD_SETTLE_FRAMES = 12;
+// 目标行挂载后的对齐重试帧数上限（虚拟化可能需要一两帧才补上测量）。
+const JUMP_ALIGN_MAX_FRAMES = 12;
+
 function scheduleMicrotask(callback: () => void): void {
   // 部分 WebView/最小 DOM 运行时没有 window.queueMicrotask；调度能力应从
   // globalThis 注入，并保留 Promise 微任务降级，避免滚动恢复在 commit 阶段直接中断。
@@ -125,6 +137,27 @@ function isEditableScrollTarget(target: EventTarget | null): boolean {
     target.tagName === "TEXTAREA" ||
     target.tagName === "SELECT"
   );
+}
+
+/**
+ * 跳到下一帧。补拉一页历史后必须让出主线程：store 的 setState 触发 React 重渲染、
+ * 虚拟列表重算 count 与测量都要等 commit，循环里不主动让帧会读到过期的 `rows`。
+ * 后台标签页 rAF 不触发，补一个 setTimeout 兜底免得跳转链路卡死。
+ */
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = window.setTimeout(done, 64);
+    window.requestAnimationFrame(() => {
+      window.clearTimeout(timer);
+      done();
+    });
+  });
 }
 
 // v4 时间线重写滚动控件时把可访问名称误做成了可见文字，偏离旧版
@@ -279,8 +312,8 @@ interface ConversationTimelineProps {
   canLoadOlder?: boolean;
   /** loadOlder 在途，抑制重复触发。 */
   loadingOlder?: boolean;
-  /** 拉取更早一窗历史（接近顶部时自动预取）。 */
-  onLoadOlder?: () => Promise<void> | void;
+  /** 拉取更早一窗历史（接近顶部时自动预取；目录跳转补拉时传单页上限）。 */
+  onLoadOlder?: (limit?: number) => Promise<void> | void;
   /**
    * 宽屏问题目录查询（turnNavigator 窄投影）。
    *
@@ -532,6 +565,11 @@ function ConversationTimelineImpl({
   });
   const [turnNavigatorContainerWidthPx, setTurnNavigatorContainerWidthPx] = useState(0);
   const turnNavigatorJumpFrameRef = useRef<number | null>(null);
+  // 跳转闭环（Step 19）：防重入序号 + 补拉在途标记。
+  // 目录 item 现在可能指向未加载区间，点一次要连翻若干页历史；此期间再点另一条
+  // 必须让前一次立即作废，否则两条跳转会互相把 virtualizer 拉到不同位置。
+  const turnNavigatorJumpSeqRef = useRef(0);
+  const [turnNavigatorJumpLoading, setTurnNavigatorJumpLoading] = useState(false);
   const turnNavigatorHydrationAttemptRef = useRef<{
     attemptCount: number;
     key: string | null;
@@ -1298,8 +1336,28 @@ function ConversationTimelineImpl({
     };
   }, [handleBackToBottom, scrollToBottomActionRef]);
 
+  /**
+   * 按 rowId 反查它在 renderUnits 里的轮下标。
+   *
+   * rail item 的 `unitIndex` 不能直接信任：已加载 item 传的是真实轮下标，但目录降级
+   * item（未加载区间）传的是 rail 上的顺序占位，根本不对应虚拟列表的任一 unit。
+   * 补拉把目标并进窗口后，下标必须由 rowId 重新解析——这是跳转闭环能落地的关键。
+   */
+  const findUnitIndexByRowId = useCallback((rowId: number): number => {
+    const units = unitsRef.current;
+    for (let index = 0; index < units.length; index += 1) {
+      if (units[index]?.visibleUserInputs.some((row) => row.rowId === rowId)) return index;
+    }
+    return -1;
+  }, []);
+
   const scrollToQuery = useCallback(
-    (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior = "auto") => {
+    async (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior = "auto") => {
+      // 防重入：新跳转作废旧跳转的补拉循环与挂载等待（序号失效法）。
+      const jumpSeq = turnNavigatorJumpSeqRef.current + 1;
+      turnNavigatorJumpSeqRef.current = jumpSeq;
+      const isStaleJump = (): boolean => turnNavigatorJumpSeqRef.current !== jumpSeq;
+
       clearUserScrollIntent();
       commitFollowing(false);
       if (turnNavigatorJumpFrameRef.current !== null) {
@@ -1307,8 +1365,14 @@ function ConversationTimelineImpl({
         turnNavigatorJumpFrameRef.current = null;
       }
 
-      const scrollMountedQuery = (element: HTMLDivElement): boolean => {
-        const rowElement = element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
+      const scrollMountedQuery = (element: HTMLDivElement, unitIndex: number): boolean => {
+        // 已挂载行优先查注册表：虚拟列表只挂可见行，注册表天然是它们的子集，
+        // 比对滚动容器做 querySelector 更省。注册表未登记时回退选择器查询。
+        const registered = rowElementRegistry.get(target.rowId);
+        const rowElement =
+          registered?.isConnected === true
+            ? registered
+            : element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
         if (!rowElement) return false;
         const targetTop =
           element.scrollTop +
@@ -1324,55 +1388,138 @@ function ConversationTimelineImpl({
         logger.debug("[v4-turn-navigator] 定位用户 query", {
           behavior,
           rowId: target.rowId,
-          unitIndex: target.unitIndex,
+          unitIndex,
+          viaRegistry: registered?.isConnected === true,
         });
         return true;
       };
 
       const element = scrollRef.current;
-      if (!element || scrollMountedQuery(element)) return;
+      if (!element) return;
 
-      // product turn 是虚拟列表的最小挂载单元，steer query 是单元内锚点。目标未挂载时
-      // 先无动画挂载所属 turn，再按用户 motion 偏好精确滚到 row，不能退回 turn 开头。
-      if (target.unitIndex === liveUnitIndex) {
-        const liveTail = liveTailRef.current;
-        if (liveTail) {
-          element.scrollTop =
-            element.scrollTop +
-            liveTail.getBoundingClientRect().top -
-            element.getBoundingClientRect().top;
+      // 在途标记覆盖整个跳转（含补拉与等挂载）：每次跳转都先置位，只有最新一次
+      // 跳转负责清零。放在这里无条件置位，是为了覆盖「新跳转目标已在窗口内、
+      // 不走补拉分支」的情况——否则前一次补拉留下的 true 永远没人清。
+      setTurnNavigatorJumpLoading(true);
+
+      const isRowLoaded = (): boolean => rowsRef.current.some((row) => row.rowId === target.rowId);
+
+      try {
+        // 目标不在已加载窗口：逐页向上补拉，直到窗口含该 anchor rowId。
+        // 拉取页由 store 的 loadOlder 合并进 window（用户主动跳转，与探测页不合并不同）。
+        if (!isRowLoaded()) {
+          for (let page = 0; page < JUMP_LOAD_MAX_PAGES; page += 1) {
+            if (isStaleJump()) return;
+            const loader = loadOlderRef.current;
+            // 窗口已是全序首行，再翻也没有更早的行；或宿主没给 loadOlder 通道。
+            if (!loader.canLoadOlder || !loader.onLoadOlder) break;
+            const headRowIdBefore = rowsRef.current[0]?.rowId;
+            await loader.onLoadOlder(JUMP_LOAD_PAGE_LIMIT);
+            // store 已 setState，但 rows 是 React props：必须等 commit 才会更新。
+            // 等到目标行出现或窗口头前移即认为这一页落地，最多等固定帧数兜底。
+            let progressed = false;
+            for (let frame = 0; frame < JUMP_LOAD_SETTLE_FRAMES; frame += 1) {
+              if (isStaleJump()) return;
+              if (isRowLoaded()) {
+                progressed = true;
+                break;
+              }
+              if (rowsRef.current[0]?.rowId !== headRowIdBefore) {
+                progressed = true;
+                break;
+              }
+              await waitForNextFrame();
+            }
+            // 一页都没能把窗口往上推（陈旧读/游标失效/请求失败）：再翻也是空转。
+            if (!progressed) {
+              logger.warn("[v4-turn-navigator] 跳转补拉无进展，停止翻页", {
+                rowId: target.rowId,
+                page,
+              });
+              break;
+            }
+            if (isRowLoaded()) break;
+            await waitForNextFrame();
+          }
+
+          if (isStaleJump()) return;
+          if (!isRowLoaded()) {
+            logger.warn("[v4-turn-navigator] 目标 query 不在可达历史内，放弃跳转", {
+              rowId: target.rowId,
+            });
+            toast(intl.formatMessage({ id: "chat.turnNavigator.jumpTargetUnavailable" }), {
+              variant: "warning",
+              dedupeKey: "turn-navigator-jump-unavailable",
+            });
+            return;
+          }
         }
-      } else {
-        virtualizer.scrollToIndex(target.unitIndex, {
-          align: "start",
-          behavior: "auto",
-        });
-      }
 
-      let remainingAttempts = 12;
-      const alignMountedQuery = () => {
-        turnNavigatorJumpFrameRef.current = null;
-        const currentElement = scrollRef.current;
-        if (currentElement && scrollMountedQuery(currentElement)) return;
-        remainingAttempts -= 1;
-        if (remainingAttempts <= 0) {
-          logger.warn("[v4-turn-navigator] query 锚点挂载超时", {
+        // 补拉后轮下标整体位移，必须按 rowId 重解析，不能沿用 rail 传来的占位下标。
+        const resolvedUnitIndex = findUnitIndexByRowId(target.rowId);
+        if (resolvedUnitIndex < 0) {
+          logger.warn("[v4-turn-navigator] 目标 query 未落在任何已加载轮内，放弃跳转", {
             rowId: target.rowId,
             unitIndex: target.unitIndex,
           });
           return;
         }
+
+        if (scrollMountedQuery(element, resolvedUnitIndex)) return;
+
+        // product turn 是虚拟列表的最小挂载单元，steer query 是单元内锚点。目标未挂载时
+        // 先无动画挂载所属 turn，再按用户 motion 偏好精确滚到 row，不能退回 turn 开头。
+        if (resolvedUnitIndex === liveUnitIndex) {
+          const liveTail = liveTailRef.current;
+          if (liveTail) {
+            element.scrollTop =
+              element.scrollTop +
+              liveTail.getBoundingClientRect().top -
+              element.getBoundingClientRect().top;
+          }
+        } else {
+          virtualizer.scrollToIndex(resolvedUnitIndex, {
+            align: "start",
+            behavior: "auto",
+          });
+        }
+
+        let remainingAttempts = JUMP_ALIGN_MAX_FRAMES;
+        const alignMountedQuery = () => {
+          turnNavigatorJumpFrameRef.current = null;
+          if (isStaleJump()) return;
+          const currentElement = scrollRef.current;
+          if (currentElement && scrollMountedQuery(currentElement, resolvedUnitIndex)) return;
+          remainingAttempts -= 1;
+          if (remainingAttempts <= 0) {
+            logger.warn("[v4-turn-navigator] query 锚点挂载超时", {
+              rowId: target.rowId,
+              unitIndex: resolvedUnitIndex,
+            });
+            return;
+          }
+          turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
+        };
         turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
-      };
-      turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
+      } finally {
+        if (!isStaleJump()) setTurnNavigatorJumpLoading(false);
+      }
     },
-    [clearUserScrollIntent, commitFollowing, liveUnitIndex, syncTurnNavigatorViewport, virtualizer],
+    [
+      clearUserScrollIntent,
+      commitFollowing,
+      findUnitIndexByRowId,
+      intl,
+      liveUnitIndex,
+      syncTurnNavigatorViewport,
+      virtualizer,
+    ],
   );
 
   useLayoutEffect(() => {
     if (!scrollToQueryActionRef) return;
     const action = (target: { unitIndex: number; rowId: number }) => {
-      scrollToQuery(target);
+      void scrollToQuery(target);
     };
     scrollToQueryActionRef.current = action;
     return () => {
@@ -1384,6 +1531,8 @@ function ConversationTimelineImpl({
 
   useEffect(
     () => () => {
+      // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
+      turnNavigatorJumpSeqRef.current += 1;
       if (turnNavigatorJumpFrameRef.current !== null) {
         window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
         turnNavigatorJumpFrameRef.current = null;
@@ -1765,6 +1914,7 @@ function ConversationTimelineImpl({
         data-total-row-count={totalCount}
         data-following={backToBottomVisible ? "false" : "true"}
         data-loading-older={loadingOlder ? "true" : "false"}
+        data-jump-loading={turnNavigatorJumpLoading ? "true" : "false"}
         onKeyDownCapture={handleKeyDownCapture}
         onPointerCancelCapture={handlePointerEndCapture}
         onPointerDownCapture={handlePointerDownCapture}
