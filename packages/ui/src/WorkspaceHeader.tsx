@@ -5,7 +5,6 @@ import type {
   EditorInfo,
   GitRepositorySummary,
   RemoteTarget,
-  UserInfo,
 } from "@zcode/shared";
 import { useState } from "react";
 import { TID_WORKSPACE_HEADER } from "@zcode/shared";
@@ -32,7 +31,6 @@ export function WorkspaceHeader({
   activeTaskTitle,
   activeTaskChangeSummary,
   activeTaskId,
-  user,
   activeTraceId,
   activeSessionId,
   activeTaskProvider,
@@ -74,7 +72,6 @@ export function WorkspaceHeader({
   activeTaskTitle: string;
   activeTaskChangeSummary?: ZCodeTaskChangeSummary | null;
   activeTaskId: string | null;
-  user?: UserInfo | null;
   activeTraceId: string | null;
   activeSessionId: string | null;
   activeTaskProvider: ZCodeProvider | null;
@@ -194,7 +191,6 @@ export function WorkspaceHeader({
         <WorkspaceHeaderActionSection
           variant={variant}
           activeTaskId={activeTaskId}
-          user={user}
           readOnlyReason={readOnlyReason}
           workspaceAbsPath={workspaceAbsPath}
           workspaceIdentity={workspaceIdentity}

@@ -12,7 +12,6 @@ import type {
   MigrateLegacyCommonMcpResult,
   SaveCliMcpToUserDirectoryRequest,
 } from "./mcp.js";
-import type { OAuthStateRegistration } from "./oauth.js";
 import type { AppSettings, Locale } from "./protocol.js";
 import type {
   CuaAccessibilitySettingsResult,
@@ -473,10 +472,7 @@ export const DesktopCommandIds = {
   ZoomIn: "zoomIn",
   ZoomOut: "zoomOut",
   ShowAbout: "showAbout",
-  OpenChangelog: "openChangelog",
   RelaunchApp: "relaunchApp",
-  OpenFeedback: "openFeedback",
-  OpenCommunity: "openCommunity",
   ExportLogs: "exportLogs",
   ToggleDevTools: "toggleDevTools",
   OpenResourceManager: "openResourceManager",
@@ -624,21 +620,6 @@ export interface IPlatformService {
     request: string | ApplicationIconRequest,
   ): Promise<ApplicationIconInfo | null>;
 
-  /** 打开反馈入口，由平台自行解析最终地址 */
-  openFeedback(): Promise<void>;
-
-  /** 订阅 main 进程打开内置反馈对话框事件（Desktop） */
-  onOpenFeedbackDialog?(handler: () => void): () => void;
-
-  /** 订阅 main 进程打开我的工单面板事件（Desktop） */
-  onOpenTicketsPanel?(handler: () => void): () => void;
-
-  /** 打开用户社群入口，由平台自行解析当前语言对应渠道 */
-  openCommunity(): Promise<void>;
-
-  /** 查询当前语言下是否存在可用的用户社群入口 */
-  canOpenCommunity(locale: Locale): Promise<boolean>;
-
   /** 在系统文件管理器中打开指定路径 */
   openInFileManager(path: string): Promise<{ success: boolean; error?: string }>;
 
@@ -659,24 +640,6 @@ export interface IPlatformService {
   prepareCuaHelperPermissionDrag?(): Promise<PrepareCuaHelperPermissionDragResult>;
   /** 从权限浮窗把 Helper.app 拖进 macOS 权限列表。Desktop only。 */
   startCuaHelperPermissionDrag?(): void;
-
-  /** 上报 OAuth state 给 main process，用于 deep link 路由 */
-  registerOAuthState(payload: OAuthStateRegistration): void;
-
-  /**
-   * 注册 OAuth deep link 回调监听
-   * @returns disposer 函数，调用后只移除当前回调
-   */
-  onOAuthCallback(callback: (url: string) => void): () => void;
-
-  /**
-   * 注册支付 deep link 回调监听
-   * @returns disposer 函数，调用后只移除当前回调
-   */
-  onPaymentCallback(callback: (url: string) => void): () => void;
-
-  /** 注册 `zcode://share/import?code=...` 导入意图。 */
-  onShareImport?(callback: (payload: { shareCode: string }) => void): () => void;
 
   /** 通知 main process renderer 已就绪，触发缓存的冷启动 deep link 转发 */
   notifyRendererReady(): void;

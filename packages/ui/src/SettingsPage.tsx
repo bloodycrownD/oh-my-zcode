@@ -14,7 +14,6 @@ import type {
   IntegratedTerminalShellSelection,
   Locale,
 
-  UserInfo,
   ZCodeInteractionBehavior,
 } from "@zcode/shared";
 import {
@@ -172,9 +171,6 @@ export function SettingsPage({
   onCreateTask?: (request?: CreateTaskRequest) => void;
   onOpenWorkspace?: () => void;
   allowOpenWorkspace?: boolean;
-  onLogin?: () => void;
-  onLogout?: () => void;
-  user?: UserInfo | null;
 }) {
   const { intl, localePreference, setLocalePreference } = useZCodeIntl();
   const { settingsSectionGroups, settingsSections } = useMemo(

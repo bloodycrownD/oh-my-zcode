@@ -1,4 +1,4 @@
-/* eslint-disable max-lines -- 远程连接、OAuth 回调和通知 IPC 共用窗口级上下文，集中注册避免跨文件状态漂移。 */
+/* eslint-disable max-lines -- 远程连接、workspace deep link 投递和通知 IPC 共用窗口级上下文，集中注册避免跨文件状态漂移。 */
 import { app, BrowserWindow, ipcMain, shell } from "electron";
 import {
   formatZodError,
@@ -10,11 +10,9 @@ import {
 } from "@zcode/shared";
 import { dispatchTaskNotification } from "./desktopNotifications.js";
 import {
-  clearOAuthRoutesForWindow,
+  clearDeepLinkRoutesForWindow,
   deliverPendingDeepLink,
-  parseOAuthStateRegistration,
-  registerOAuthState,
-} from "./desktopOAuthDeepLink.js";
+} from "./desktopDeepLinkRouter.js";
 import { openPathInDefaultApp } from "./desktopMainIpcHelpers.js";
 
 function isAllowedExternalOpenUrl(value: string): boolean {
@@ -94,16 +92,6 @@ export function registerRemoteIpcHandlers(options: {
     options.confirmRendererAttachmentReady(event.sender.id, { sessionId, attachmentId });
   });
 
-  ipcMain.on(PlatformChannels.OAuthRegisterState, (event, payload: unknown) => {
-    const registration = parseOAuthStateRegistration(payload);
-    if (!registration) {
-      options.logger.warn("[oauth-register-state] invalid payload", payload);
-      return;
-    }
-
-    registerOAuthState(event.sender.id, registration);
-  });
-
   ipcMain.on(PlatformChannels.OpenExternal, (event, payload: unknown) => {
     const request = parseOpenExternalRequest(payload);
     if (!request) {
@@ -144,7 +132,7 @@ export function registerRemoteIpcHandlers(options: {
       // BrowserWindow 的 closed 阶段里 webContents 可能已被 Electron 释放。
       // 之前这里直接读取 win.webContents.id，会把正常关窗流程变成主进程未捕获异常。
       // 提前缓存 id 后再做清理，避免访问已经销毁的对象。
-      clearOAuthRoutesForWindow(windowWebContentsId);
+      clearDeepLinkRoutesForWindow(windowWebContentsId);
     });
   });
 
