@@ -81,7 +81,7 @@ export async function executeTools(
 
   const generator = this.executor.executeSchedule(executableCalls, schedule, {
     automationTurn: options?.automationTurn,
-    offPeakTurn: options?.offPeakTurn,
+    unattendedDispatchTurn: options?.unattendedDispatchTurn,
     signal: options?.signal,
     traceContext,
     subagentModelOverride: options?.subagentModelOverride,

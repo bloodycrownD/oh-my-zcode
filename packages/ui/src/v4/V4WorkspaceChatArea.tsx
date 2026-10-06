@@ -28,7 +28,7 @@ import {
   effectiveFocusedPaneId,
   MAX_WORKBENCH_PANES,
   paneWorkspaceKey,
-  PRIMARY_LEAF,
+
   usePaneLayoutStore,
   V4_PRIMARY_PANE_ID,
   type PaneSplitSide,

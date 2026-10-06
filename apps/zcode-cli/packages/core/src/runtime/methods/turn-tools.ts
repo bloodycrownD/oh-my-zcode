@@ -33,7 +33,7 @@ import { emitNestedModelUsageEvents } from "./turn-nested-model-usage.js";
 import type { RegularTurnLoopState } from "./turn-loop-state.js";
 import {
   isAutomationMutationRestrictedTurn,
-  isOffPeakCreateRestrictedTurn,
+  isUnattendedDispatchTurn,
 } from "./turn-loop-state.js";
 import { recordToolUsageFromResult } from "./turn-tool-usage.js";
 import { recordBrowserTurnToolResult } from "../../repl/browser-turn-state.js";
@@ -178,7 +178,7 @@ export async function executeToolCallsForModelStep(
     });
     const execution = await this.executeTools(pendingToolCalls, pendingSchedule, {
       automationTurn: isAutomationMutationRestrictedTurn(state),
-      offPeakTurn: isOffPeakCreateRestrictedTurn(state),
+      unattendedDispatchTurn: isUnattendedDispatchTurn(state),
       signal: state.turnAbortSignal,
       traceContext: options.modelTraceContext,
       subagentModelOverride: state.subagentModelOverride,

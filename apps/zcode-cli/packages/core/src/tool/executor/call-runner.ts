@@ -331,7 +331,7 @@ export async function executeToolCall(
     const context: ToolExecutionContext = {
       toolCallId: canonicalToolCall.id,
       automationTurn: options?.automationTurn,
-      offPeakTurn: options?.offPeakTurn,
+      unattendedDispatchTurn: options?.unattendedDispatchTurn,
       traceContext,
       traceId,
       spanId: traceContext.spanId,
@@ -364,7 +364,6 @@ export async function executeToolCall(
       workflowEscalatePort: deps.workflowEscalatePort,
       artifactStore: deps.artifactStore,
       automationPort: deps.automationPort,
-      offPeakPort: deps.offPeakPort,
       sessionStore: deps.sessionStore,
       sessionModePort: deps.sessionModePort,
       workflowPort: deps.workflowPort,

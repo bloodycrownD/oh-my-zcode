@@ -2,7 +2,7 @@ import type { RemoteAssetInstallMode } from "./remoteAssetInstallMode.js";
 import type { RemoteResourcePackageSelection } from "./remoteResourcePackages.js";
 import type { ProviderFamilyDomain } from "./model-provider-family.js";
 import type { ProviderFamilyConnectionSelectionSettings } from "./provider-family-connection-selection.js";
-import type { ZCodeProvider } from "./zcode-task-types-core.js";
+
 import type { WorkspacePurpose } from "./workspacePurpose.js";
 import type { EmbeddedBrowserViewportPreference } from "./browser-use/command-metadata.js";
 
@@ -313,8 +313,8 @@ export interface AppSettings {
   modelIoFullRetentionEnabled?: boolean;
   /** 设置页中每个 Provider Family 当前唯一的结构化连接选择。 */
   providerFamilyConnectionSelections?: ProviderFamilyConnectionSelectionSettings;
-  /** 用户通过 WelcomeScreen 成功连接后确认的 ZAI / BigModel provider family 运行域。 */
-  providerFamilyDomain?: ProviderFamilyDomain;
+  /** 历史字段：账号连接时代确认的 ZAI / BigModel provider family 运行域。 */
+providerFamilyDomain?: ProviderFamilyDomain;
   /** 最近一次设置或清空 providerFamilyDomain 的时间。 */
   providerFamilyDomainUpdatedAt?: number;
   /** 旧 oauth/provider 状态是否已经尝试迁移到 providerFamilyDomain。 */
@@ -348,20 +348,6 @@ export interface AppSettings {
   lastActiveTaskByWorkspace?: Record<string, string>;
   /** 数据目录的根路径（替代 homedir），默认为 os.homedir()；.omz/v2 后缀不变 */
   dataBaseDir?: string;
-  /** 自动更新安装完成后，等待首次启动展示的版本说明 */
-  pendingPostUpdateReleaseNotes?: {
-    version: string;
-    title: string;
-    markdown: string;
-    releaseDate?: string;
-    releaseNotesByLocale?: Partial<Record<Locale, { title: string; markdown: string }>>;
-  };
-  /** 设置页“接收 preview 自动更新”偏好；仅桌面端自动更新读取。 */
-  receivePreviewUpdates?: boolean;
-  /** 设置页/更新弹窗“以后自动下载并安装更新”偏好；仅桌面端自动更新读取。 */
-  autoDownloadAndInstallUpdates?: boolean;
-  /** 用户跳过的 Electron 自动更新版本；按通道隔离，避免 stable / preview 互相遮挡。 */
-  skippedElectronUpdateVersions?: Partial<Record<ElectronReleaseChannel, string>>;
   /** 首次启动设置同步提示是否已消费；只表示弹窗不再出现，不代表导入成功。 */
   settingsSyncFirstRunPromptHandled?: boolean;
   /** 设置页里的临时 endpoint override；正式/测试默认 base url 由 ZCODE_BASE_URL env 管理。 */

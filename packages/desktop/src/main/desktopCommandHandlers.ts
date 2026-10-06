@@ -1,7 +1,5 @@
 /* eslint-disable max-lines -- 桌面命令分发需要共享窗口与平台上下文，集中维护更便于一致性 */
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
-import { app, BrowserWindow, dialog, session, shell } from "electron";
+import { app, BrowserWindow, dialog } from "electron";
 import type { MessageBoxOptions } from "electron";
 import {
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
@@ -12,17 +10,10 @@ import {
   type Locale,
   resolveRuntimeZCodeEndpointOrigin,
   ZCODE_ENV,
-  ZCODE_PRODUCT_FLAVOR,
-  buildZCodeEndpointUrls,
-  getCommunityUrlFromConfigs,
-  getFeedbackUrlFromConfig,
-  resolveHelpAppConfig,
   normalizeZCodeEndpointOrigin,
-  resolveZCodeEndpointOrigin,
 } from "@zcode/shared";
 import { readZCodeStdioTapDevState, setZCodeStdioTapDevEnabled } from "@zcode/services/node";
 import { showAboutDialog } from "./about.js";
-import { checkForUpdateMenuClick } from "./autoUpdater.js";
 import { exportLogs } from "./exportLogs.js";
 import { openResourceManager } from "./resourceManagerWindow.js";
 import { resolveCuaOsSupport } from "./cuaOsSupport.js";
@@ -41,7 +32,6 @@ export const HELP_TOGGLE_DEV_TOOLS_MENU_ID = "help.toggle-dev-tools";
 export const HELP_TOGGLE_ZCODE_STDIO_TAP_MENU_ID = "help.toggle-zcode-stdio-tap";
 const ZCODE_ENDPOINT_PROMPT_WIDTH = 460;
 const ZCODE_ENDPOINT_PROMPT_HEIGHT = 210;
-const CODING_PLAN_WEBVIEW_PARTITION = "persist:zcode-coding-plan";
 
 function resolveTargetWindow(senderWindow?: BrowserWindow | null) {
   if (senderWindow && !senderWindow.isDestroyed()) {
@@ -127,161 +117,6 @@ async function clearAllDataAndRelaunch(options: {
 
   app.relaunch();
   app.exit(0);
-}
-
-export async function clearCodingPlanWebviewStorage(options: {
-  logger: {
-    info: (...args: unknown[]) => void;
-    warn: (...args: unknown[]) => void;
-  };
-}) {
-  try {
-    // Coding Plan webview 使用独立持久 partition，默认窗口 session.clearStorageData()
-    // 不会覆盖它；退出登录/清理数据时必须显式清除，避免旧账号 token 被下一次官网首屏读到。
-    await session.fromPartition(CODING_PLAN_WEBVIEW_PARTITION).clearStorageData();
-    options.logger.info("[coding-plan-webview] cleared persistent partition storage");
-  } catch (error) {
-    options.logger.warn(
-      "[coding-plan-webview] failed to clear persistent partition storage:",
-      error,
-    );
-  }
-}
-
-async function fetchRemoteAppConfig(fetchRemoteConfig?: () => Promise<unknown>): Promise<unknown> {
-  if (!fetchRemoteConfig) throw new Error("Help config reader is unavailable");
-  return fetchRemoteConfig();
-}
-
-function resolveLocalAppConfigPath(options?: {
-  appPath?: string;
-  isPackaged?: boolean;
-  resourcesPath?: string;
-}): string {
-  const isPackaged = options?.isPackaged ?? app.isPackaged;
-  if (isPackaged) {
-    // app.getAppPath() 在正式包中指向 resources/app.asar，向上两级后会误读
-    // Contents/config。内置配置由 electron-builder 放在 resources/config，必须从 resourcesPath 解析。
-    return join(options?.resourcesPath ?? process.resourcesPath, "config/default.json");
-  }
-  return join(options?.appPath ?? app.getAppPath(), "../../config/default.json");
-}
-
-async function readLocalAppConfig(readLocalConfig?: () => unknown): Promise<unknown> {
-  const localConfigPath = resolveLocalAppConfigPath();
-  return readLocalConfig?.() ?? JSON.parse(await readFile(localConfigPath, "utf-8"));
-}
-
-async function resolveRemoteAppConfigValue(options: {
-  fetchRemoteConfig?: () => Promise<unknown>;
-  readLocalConfig?: () => unknown;
-  resolveFromConfig: (config: unknown) => string | undefined;
-  logPrefix: "feedback" | "community";
-  logger: {
-    warn: (...args: unknown[]) => void;
-  };
-}): Promise<string | undefined> {
-  try {
-    const remoteConfig = await fetchRemoteAppConfig(options.fetchRemoteConfig);
-    const remoteResolvedValue = options.resolveFromConfig(remoteConfig);
-    if (remoteResolvedValue) {
-      return remoteResolvedValue;
-    }
-  } catch (error) {
-    options.logger.warn(`[${options.logPrefix}] failed to fetch remote config:`, error);
-  }
-
-  try {
-    const localConfig = await readLocalAppConfig(options.readLocalConfig);
-    const localResolvedValue = options.resolveFromConfig(localConfig);
-    if (localResolvedValue) {
-      return localResolvedValue;
-    }
-  } catch (error) {
-    options.logger.warn(`[${options.logPrefix}] failed to read local config:`, error);
-  }
-
-  return undefined;
-}
-
-export async function resolveFeedbackUrl(options: {
-  fetchRemoteConfig?: () => Promise<unknown>;
-  readLocalConfig?: () => unknown;
-  logger: {
-    warn: (...args: unknown[]) => void;
-  };
-}): Promise<string | undefined> {
-  return resolveRemoteAppConfigValue({
-    ...options,
-    logPrefix: "feedback",
-    resolveFromConfig: getFeedbackUrlFromConfig,
-  });
-}
-
-export async function resolveCommunityUrl(options: {
-  locale: Locale;
-  fetchRemoteConfig?: () => Promise<unknown>;
-  readLocalConfig?: () => unknown;
-  logger: {
-    warn: (...args: unknown[]) => void;
-  };
-}): Promise<string | undefined> {
-  let remoteConfig: unknown;
-  try {
-    remoteConfig = await fetchRemoteAppConfig(options.fetchRemoteConfig);
-  } catch (error) {
-    options.logger.warn("[community] failed to fetch remote config:", error);
-  }
-
-  let localConfig: unknown;
-  try {
-    localConfig = await readLocalAppConfig(options.readLocalConfig);
-  } catch (error) {
-    options.logger.warn("[community] failed to read local config:", error);
-  }
-
-  return getCommunityUrlFromConfigs(remoteConfig, localConfig, options.locale);
-}
-
-async function openFeedback(
-  logger: { warn: (...args: unknown[]) => void; error: (...args: unknown[]) => void },
-  targetWindow?: BrowserWindow | null,
-  fetchRemoteConfig?: () => Promise<unknown>,
-) {
-  let remoteConfig: unknown;
-  let localConfig: unknown;
-  try {
-    remoteConfig = await fetchRemoteAppConfig(fetchRemoteConfig);
-  } catch (error) {
-    logger.warn("[feedback] failed to fetch remote config:", error);
-  }
-  try {
-    localConfig = await readLocalAppConfig();
-  } catch (error) {
-    logger.warn("[feedback] failed to read local config:", error);
-  }
-  const config = resolveHelpAppConfig(remoteConfig, localConfig);
-  if (!config.feedback_use_external_form) {
-    resolveTargetWindow(targetWindow)?.webContents.send(PlatformChannels.OpenFeedbackDialog);
-    return;
-  }
-  if (config.feedback_url) await shell.openExternal(config.feedback_url);
-}
-
-async function openCommunity(
-  locale: Locale,
-  logger: {
-    warn: (...args: unknown[]) => void;
-    error: (...args: unknown[]) => void;
-  },
-  fetchRemoteConfig?: () => Promise<unknown>,
-) {
-  const communityUrl = await resolveCommunityUrl({ locale, logger, fetchRemoteConfig });
-  if (!communityUrl) {
-    logger.warn("[community] community_urls is missing from both remote and local config");
-    return;
-  }
-  await shell.openExternal(communityUrl);
 }
 
 async function promptCustomZCodeEndpoint(
@@ -445,38 +280,8 @@ function toggleZCodeStdioTapDevProxy(options: {
   });
 }
 
-function resolveChangelogUrl(
-  locale: Locale,
-  endpointOrigin = DEFAULT_ZCODE_ENDPOINT_ORIGIN,
-): string {
-  // 帮助菜单里的外链以前只有固定英文地址，切到中文界面后仍会落到英文 changelog。
-  // 这里统一收口到主进程按当前应用语言分流，避免菜单模板里手写分支后续再出现多处不一致。
-  const origin = buildZCodeEndpointUrls(endpointOrigin).origin;
-  return locale === "zh-CN" ? `${origin}/cn/changelog` : `${origin}/en/changelog`;
-}
-
-export async function openChangelog(
-  locale: Locale,
-  endpointOrigin = DEFAULT_ZCODE_ENDPOINT_ORIGIN,
-) {
-  await shell.openExternal(resolveChangelogUrl(locale, endpointOrigin));
-}
-
-async function resolveCurrentZCodeEndpointOrigin(settingService: {
-  get(): Promise<{ zcodeEndpointOrigin?: string }>;
-  envBaseOrigin?: string | null;
-}): Promise<string> {
-  const settings = await settingService.get();
-  return resolveZCodeEndpointOrigin({
-    env: ZCODE_ENV,
-    envBaseOrigin: settingService.envBaseOrigin,
-    overrideOrigin: settings.zcodeEndpointOrigin,
-  });
-}
-
 export async function executeDesktopCommand(options: {
   command: DesktopCommandId;
-  fetchHelpConfig?: () => Promise<unknown>;
   senderWindow?: BrowserWindow | null;
   logger: {
     info: (...args: unknown[]) => void;
@@ -579,35 +384,8 @@ export async function executeDesktopCommand(options: {
     case DesktopCommandIds.ShowAbout:
       await showAboutDialog(targetWindow ?? undefined, options.currentApplicationLocale);
       return;
-    case DesktopCommandIds.OpenChangelog:
-      await openChangelog(
-        options.currentApplicationLocale,
-        await resolveCurrentZCodeEndpointOrigin({
-          ...options.settingService,
-          envBaseOrigin: options.zcodeEndpointEnvBaseOrigin,
-        }),
-      );
-      return;
-    case DesktopCommandIds.CheckForUpdates:
-      // 按产品身份而不是后端环境放行：生产后端的 Preview 同样没有更新器。
-      if (ZCODE_PRODUCT_FLAVOR === "production") {
-        checkForUpdateMenuClick(targetWindow);
-      } else {
-        options.logger.info("[auto-update] Preview 已禁用手动更新检查");
-      }
-      return;
     case DesktopCommandIds.RelaunchApp:
       await options.onRelaunchApp();
-      return;
-    case DesktopCommandIds.OpenFeedback:
-      await openFeedback(options.logger, targetWindow, options.fetchHelpConfig);
-      return;
-    case DesktopCommandIds.OpenCommunity:
-      await openCommunity(
-        options.currentApplicationLocale,
-        options.logger,
-        options.fetchHelpConfig,
-      );
       return;
     case DesktopCommandIds.ExportLogs:
       await exportLogs();
@@ -673,14 +451,10 @@ export async function executeDesktopCommand(options: {
       });
       return;
     case DesktopCommandIds.ClearAllData:
-      await clearCodingPlanWebviewStorage({ logger: options.logger });
       await clearAllDataAndRelaunch({
         credentialsDir: options.credentialsDir,
         logger: options.logger,
       });
-      return;
-    case DesktopCommandIds.ClearCodingPlanWebviewStorage:
-      await clearCodingPlanWebviewStorage({ logger: options.logger });
       return;
     case DesktopCommandIds.GetCuaOsSupport:
       return resolveCuaOsSupport();

@@ -12,7 +12,6 @@ import type {
   MigrateLegacyCommonMcpResult,
   SaveCliMcpToUserDirectoryRequest,
 } from "./mcp.js";
-import type { OAuthStateRegistration } from "./oauth.js";
 import type { AppSettings, Locale } from "./protocol.js";
 import type {
   CuaAccessibilitySettingsResult,
@@ -20,16 +19,6 @@ import type {
   PrepareCuaHelperPermissionDragResult,
 } from "./cuaAccessibilitySettings.js";
 import type { BrowserViewportSize } from "./browser-use/command-metadata.js";
-import type {
-  PostUpdateReleaseNotesPayload,
-  UpdateCheckResultPayload,
-  UpdateStatePayload,
-} from "./update.js";
-export type {
-  PostUpdateReleaseNotesPayload,
-  UpdateCheckResultPayload,
-  UpdateStatePayload,
-} from "./update.js";
 
 export interface TaskNotificationPayload {
   taskId: string;
@@ -483,11 +472,7 @@ export const DesktopCommandIds = {
   ZoomIn: "zoomIn",
   ZoomOut: "zoomOut",
   ShowAbout: "showAbout",
-  OpenChangelog: "openChangelog",
-  CheckForUpdates: "checkForUpdates",
   RelaunchApp: "relaunchApp",
-  OpenFeedback: "openFeedback",
-  OpenCommunity: "openCommunity",
   ExportLogs: "exportLogs",
   ToggleDevTools: "toggleDevTools",
   OpenResourceManager: "openResourceManager",
@@ -497,7 +482,6 @@ export const DesktopCommandIds = {
   SetZCodeEndpointCustom: "setZCodeEndpointCustom",
   ResetZCodeEndpoint: "resetZCodeEndpoint",
   ClearAllData: "clearAllData",
-  ClearCodingPlanWebviewStorage: "clearCodingPlanWebviewStorage",
   GetCuaOsSupport: "getCuaOsSupport",
 } as const;
 
@@ -636,21 +620,6 @@ export interface IPlatformService {
     request: string | ApplicationIconRequest,
   ): Promise<ApplicationIconInfo | null>;
 
-  /** 打开反馈入口，由平台自行解析最终地址 */
-  openFeedback(): Promise<void>;
-
-  /** 订阅 main 进程打开内置反馈对话框事件（Desktop） */
-  onOpenFeedbackDialog?(handler: () => void): () => void;
-
-  /** 订阅 main 进程打开我的工单面板事件（Desktop） */
-  onOpenTicketsPanel?(handler: () => void): () => void;
-
-  /** 打开用户社群入口，由平台自行解析当前语言对应渠道 */
-  openCommunity(): Promise<void>;
-
-  /** 查询当前语言下是否存在可用的用户社群入口 */
-  canOpenCommunity(locale: Locale): Promise<boolean>;
-
   /** 在系统文件管理器中打开指定路径 */
   openInFileManager(path: string): Promise<{ success: boolean; error?: string }>;
 
@@ -671,24 +640,6 @@ export interface IPlatformService {
   prepareCuaHelperPermissionDrag?(): Promise<PrepareCuaHelperPermissionDragResult>;
   /** 从权限浮窗把 Helper.app 拖进 macOS 权限列表。Desktop only。 */
   startCuaHelperPermissionDrag?(): void;
-
-  /** 上报 OAuth state 给 main process，用于 deep link 路由 */
-  registerOAuthState(payload: OAuthStateRegistration): void;
-
-  /**
-   * 注册 OAuth deep link 回调监听
-   * @returns disposer 函数，调用后只移除当前回调
-   */
-  onOAuthCallback(callback: (url: string) => void): () => void;
-
-  /**
-   * 注册支付 deep link 回调监听
-   * @returns disposer 函数，调用后只移除当前回调
-   */
-  onPaymentCallback(callback: (url: string) => void): () => void;
-
-  /** 注册 `zcode://share/import?code=...` 导入意图。 */
-  onShareImport?(callback: (payload: { shareCode: string }) => void): () => void;
 
   /** 通知 main process renderer 已就绪，触发缓存的冷启动 deep link 转发 */
   notifyRendererReady(): void;
@@ -868,38 +819,6 @@ export interface IPlatformService {
   /** 清理内置浏览器持久化分区；cache 模式保留认证数据，all 模式清理全部站点数据。 */
   clearEmbeddedBrowserData?(mode: "cache" | "all"): Promise<EmbeddedBrowserDataClearResult>;
 
-  /** 注册新版本已下载完毕的回调，参数为新版本号，返回 disposer */
-  onUpdateReady(callback: (version: string) => void): () => void;
-
-  /** 注册"手动检查更新"结果的回调（用于 toast 反馈），返回 disposer */
-  onUpdateCheckResult(callback: (payload: UpdateCheckResultPayload) => void): () => void;
-
-  /** 注册自动更新持续状态变化的回调，返回 disposer */
-  onUpdateStateChanged?(callback: (payload: UpdateStatePayload) => void): () => void;
-
-  /** 主动读取当前自动更新状态，用于菜单打开时补偿异步事件丢失 */
-  getUpdateState?(): Promise<UpdateStatePayload>;
-
-  /** 用户在更新弹窗中确认开始下载当前已发现版本 */
-  downloadUpdate(): Promise<void>;
-
-  /** 用户在更新弹窗中取消当前下载中的更新 */
-  cancelUpdateDownload(): Promise<void>;
-
-  /** 打开桌面端独立更新窗口；非桌面端可不实现并回退到内嵌弹窗 */
-  openUpdateStatusWindow?(): Promise<void>;
-
-  /** 读取桌面端自动更新偏好；非桌面端可返回默认值 */
-  getAutoUpdatePreferences?(): Promise<{
-    autoDownloadAndInstallUpdates: boolean;
-  }>;
-
-  /** 写入“以后自动下载并安装更新”偏好；非桌面端可 no-op */
-  setAutoDownloadAndInstallUpdates?(enabled: boolean): Promise<void>;
-
-  /** 用户跳过当前已发现版本；main 进程负责按当前通道持久化 */
-  skipUpdateVersion(version: string): Promise<void>;
-
   /** 查询桌面端当前正在运行的会话数量；非桌面端可返回 0 */
   getDesktopSessionActivity?(): Promise<{
     runningAgentSessionCount: number;
@@ -919,15 +838,6 @@ export interface IPlatformService {
 
   /** 宿主系统语言；桌面端由 main 进程读取，Web 端可回退到 navigator.language。 */
   getSystemLocale?(): Promise<Locale>;
-
-  /** 注册更新完成后的版本说明，返回 disposer */
-  onPostUpdateReleaseNotes(callback: (payload: PostUpdateReleaseNotesPayload) => void): () => void;
-
-  /** 标记当前版本说明已读，允许 main 进程清理持久化状态 */
-  acknowledgePostUpdateReleaseNotes(version: string): Promise<void>;
-
-  /** 用户确认重启安装更新 */
-  quitAndInstallUpdate(): Promise<void>;
 
   /** 获取系统中已安装的编辑器/终端列表（含图标） */
   getInstalledEditors(): Promise<EditorInfo[]>;

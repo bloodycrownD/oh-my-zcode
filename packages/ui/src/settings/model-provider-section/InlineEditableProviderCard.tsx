@@ -746,7 +746,8 @@ export function InlineEditableProviderCard({
   }, [onDelete]);
 
   const headerProviderName = providerDisplayName;
-  const isAccountProvider = provider.config.access?.type === "zhipu-account";
+  // FORK（D-4）：`zhipu-account` access 型整删后只剩 API Key 系 provider，
+  // 启停开关与连接段对所有 provider 一律可见。
   const isApiKeyProvider = isApiKeyAccess(provider.config.access);
   const effectiveHeaderVisible = headerVisible && statusSection === undefined;
 
@@ -773,7 +774,7 @@ export function InlineEditableProviderCard({
           onDelete={onDelete ? handleDeleteProvider : undefined}
           actionsVisible={headerActionsVisible}
           providerToggle={
-            isAccountProvider ? undefined : (
+            (
               <ControlHintTooltip
                 standalone
                 title={intl.formatMessage({
@@ -809,8 +810,7 @@ export function InlineEditableProviderCard({
       {statusSection}
 
       <div className="space-y-3">
-        {isAccountProvider ? null : (
-          <ProviderConnectionSection
+        <ProviderConnectionSection
             provider={provider}
             readOnly={readOnlyEndpoints}
             apiFormat={apiFormat}
@@ -822,7 +822,6 @@ export function InlineEditableProviderCard({
             onBaseUrlCompositionStart={handleTechnicalInputCompositionStart}
             onBaseUrlCompositionEnd={handleTechnicalInputCompositionEnd}
           />
-        )}
 
         {isApiKeyProvider ? (
           <ProviderApiKeySection

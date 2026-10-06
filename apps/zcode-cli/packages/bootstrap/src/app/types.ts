@@ -5,7 +5,6 @@ import type {
   AgentRuntimeConfig,
   ExecuteTurnOptions,
   ExpertWorkflowCommandResult,
-  ProviderRuntimeHeadersPort,
   PresentationSurface,
   ResumeSessionResult,
   StartSavedWorkflowRunResult,
@@ -33,7 +32,6 @@ import type { ModelProviderSourceTitle } from "../model-config.js";
 import type { ZCodeInstalledPluginData } from "../plugins.js";
 import type {
   AutomationPort,
-  OffPeakPort,
   BackgroundTaskCancelResult,
   CollaborationMode,
   ContextSourcePort,
@@ -144,11 +142,6 @@ export interface ZCodeAppOptions {
   /** 新 Session 使用的 Environment 默认选择；仅在没有显式 runtime modelSelection 时参与初始化。 */
   configuredDefaultModelSelection?: ModelSelection;
   modelIoFullRetentionEnabled?: boolean;
-  /**
-   * provider runtime headers 端口：主 runtime 每次调用报自己的会话；child runtime 一律向父
-   * runtime 取派生实例。
-   */
-  providerRuntimeHeadersPort?: ProviderRuntimeHeadersPort;
   loggerFactory?: LoggerFactory;
   officialPluginRoots?: string[];
   pluginStorageRoot?: string;
@@ -188,7 +181,6 @@ export interface ZCodeAppOptions {
    */
   onMagicContextUsage?: (usage: SessionMagicContextUsage | null) => void;
   automationPort?: AutomationPort;
-  offPeakPort?: OffPeakPort;
   /** 首次真实用户执行或 cold-resume fallback 时解析一次，之后由 app 生命周期缓存。 */
   resolveInitialBashShellSelection?: () => Promise<ExecutionShellSelection | undefined>;
   /** Trusted embedder policy; workspace/project files cannot populate this field. */

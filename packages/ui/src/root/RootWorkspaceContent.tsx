@@ -6,13 +6,12 @@ import { logger } from "@/logger.js";
 import { WorkspaceSettingsLayer } from "@/root/WorkspaceSettingsLayer.js";
 import type { AppProps } from "@/app-shell/types.js";
 import type { RootProps } from "@/root/types.js";
-import type { IFeedbackService, IServiceAccessor } from "@zcode/services";
+import type { IServiceAccessor } from "@zcode/services";
 
 const StableWorkspaceApp = memo(App);
 
 interface RootWorkspaceContentProps {
   workspaceScopedServices: IServiceAccessor;
-  baseFeedbackService: IFeedbackService;
   workspaceShellPath: string;
   workspaceIdentity?: string;
   workspaceRemoteSessionId?: string;
@@ -33,9 +32,6 @@ interface RootWorkspaceContentProps {
   remoteWorkspaceSessions: NonNullable<AppProps["remoteWorkspaceSessions"]>;
   allowRemoteWorkspace: NonNullable<RootProps["allowRemoteWorkspace"]>;
   handleBackFromSettings: () => void;
-  handleLogout?: () => void;
-  onLogin?: () => void;
-  user: AppProps["user"];
   reconnectingRemoteWorkspaceKeys: AppProps["reconnectingRemoteWorkspaceKeys"];
   remoteWorkspaceErrorByWorkspaceKey: AppProps["remoteWorkspaceErrorByWorkspaceKey"];
   reconnectingRemoteWorkspaceLogsByWorkspaceKey: AppProps["reconnectingRemoteWorkspaceLogsByWorkspaceKey"];
@@ -50,7 +46,6 @@ interface RootWorkspaceContentProps {
 
 export function RootWorkspaceContent({
   workspaceScopedServices,
-  baseFeedbackService,
   workspaceShellPath,
   workspaceIdentity,
   workspaceRemoteSessionId,
@@ -71,9 +66,6 @@ export function RootWorkspaceContent({
   remoteWorkspaceSessions,
   allowRemoteWorkspace,
   handleBackFromSettings,
-  handleLogout,
-  onLogin,
-  user,
   reconnectingRemoteWorkspaceKeys,
   remoteWorkspaceErrorByWorkspaceKey,
   reconnectingRemoteWorkspaceLogsByWorkspaceKey,
@@ -129,14 +121,10 @@ export function RootWorkspaceContent({
           >
             <StableWorkspaceApp
               services={workspaceScopedServices}
-              baseFeedbackService={baseFeedbackService}
               onConnectRemote={handleConnectRemote}
               onSelectRemoteProject={handleSelectRemoteProject}
               onCancelRemoteProject={handleCancelRemoteProject}
               onReconnectRemoteWorkspace={handleReconnectRemoteWorkspace}
-              onLogout={handleLogout}
-              onLogin={onLogin}
-              user={user}
               reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
               remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
               reconnectingRemoteWorkspaceLogsByWorkspaceKey={
@@ -186,9 +174,6 @@ export function RootWorkspaceContent({
             onCreateTask={handleCreateTask}
             onOpenWorkspace={handleOpenWorkspace}
             allowOpenWorkspace={allowOpenWorkspace}
-            onLogin={onLogin}
-            onLogout={handleLogout}
-            user={user}
           />
         </ScopedErrorBoundary>
       ) : null}

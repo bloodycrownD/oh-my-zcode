@@ -18,8 +18,8 @@ import { runModelBackedTurnStep } from "./turn-model-step.js";
 import {
   AUTOMATION_MUTATION_TOOL_NAMES,
   isAutomationMutationRestrictedTurn,
-  isOffPeakCreateRestrictedTurn,
-  OFF_PEAK_MUTATION_TOOL_NAMES,
+  isUnattendedDispatchTurn,
+  UNATTENDED_DISPATCH_DENIED_TOOL_NAMES,
 } from "./turn-loop-state.js";
 import type { RegularTurnLoopState } from "./turn-loop-state.js";
 import {
@@ -186,10 +186,10 @@ function buildTurnDisallowedTools(state: RegularTurnLoopState): Set<string> | nu
       tools.add(toolName);
     }
   }
-  if (isOffPeakCreateRestrictedTurn(state)) {
-    // 闲时执行轮禁止再创建闲时任务（防递归自我派生）；OffPeakList 只读保留。
-    // 注意 automation 执行轮不进此分支——cron turn 放行 OffPeakCreate。
-    for (const toolName of OFF_PEAK_MUTATION_TOOL_NAMES) {
+  if (isUnattendedDispatchTurn(state)) {
+    // 无值班次执行轮禁止在 modelExecution 之外另起子 Agent/子会话。
+    // 注意 automation 执行轮不进此分支——cron turn 的工具面隔离由上面的分支单独裁决。
+    for (const toolName of UNATTENDED_DISPATCH_DENIED_TOOL_NAMES) {
       tools.add(toolName);
     }
   }

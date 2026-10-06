@@ -44,7 +44,6 @@ import type {
   AgentRuntimeDeps,
   BackgroundTaskNotificationSealReason,
   PendingModelChangeTimeline,
-  ProviderRuntimeHeadersPort,
   MainTurnCacheHitAggregate,
   RuntimeTurnFileChangeMap,
 } from "./types.js";
@@ -78,9 +77,8 @@ export interface AgentRuntimeInternal
   hookRunner?: HookRunner;
   workspaceHookAdmission?: WorkspaceHookRuntimeAdmissionPort;
   modelFactory: AgentRuntimeDeps["modelFactory"];
-  modelIoDir?: string;
-  providerRuntimeHeadersPort?: ProviderRuntimeHeadersPort;
-  browserControlPort?: AgentRuntimeDeps["browserControlPort"];
+modelIoDir?: string;
+browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   modelRequestAdmission?: AgentRuntimeDeps["modelRequestAdmission"];
   sessionModelSelection: ModelSelection | undefined;
   messageHistory: MessageHistory;

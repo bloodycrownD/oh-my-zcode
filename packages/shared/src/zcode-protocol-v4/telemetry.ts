@@ -29,8 +29,6 @@ const turnStartedFactSchema = z
     // `workflow`：dynamic-workflow run 的完成 / 提问通知唤起的独立轮。
     backgroundSource: z.enum(["bash", "subagent", "workflow"]).optional(),
     automationId: z.string().min(1).optional(),
-    offPeakTaskId: z.string().min(1).optional(),
-    offPeakRunType: z.enum(["init", "resume"]).optional(),
     taskTrigger: z.enum(["schedule", "manual"]).optional(),
     scheduledAt: timestampSchema.optional(),
   })
@@ -57,23 +55,10 @@ const turnTerminalFactSchema = z
  * CLI 经 `v4/telemetry/event` 上送的实时会话事实，供桌面运行中会话统计消费。
  * 每个分支都 strict，避免新增 runtime 字段时把 prompt、工具输入或 provider URL 意外外带。
  */
-const conversationTelemetryFactRuntimeSchema = z
-  .discriminatedUnion("kind", [turnStartedFactSchema, turnTerminalFactSchema])
-  .superRefine((fact, context) => {
-    if (fact.kind === "turn.started" && fact.automationId && fact.offPeakTaskId) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "automationId and offPeakTaskId are mutually exclusive",
-      });
-    }
-    if (fact.kind === "turn.started" && fact.offPeakRunType && !fact.offPeakTaskId) {
-      context.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "offPeakRunType requires offPeakTaskId",
-        path: ["offPeakRunType"],
-      });
-    }
-  });
+const conversationTelemetryFactRuntimeSchema = z.discriminatedUnion("kind", [
+  turnStartedFactSchema,
+  turnTerminalFactSchema,
+]);
 
 type ConversationTelemetryFactBase = z.infer<typeof conversationTelemetryFactRuntimeSchema>;
 type TurnStartedConversationTelemetryFact = Extract<

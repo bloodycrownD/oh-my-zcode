@@ -12,7 +12,6 @@ import type {
   TraceContext,
 } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
-import { createRefreshRuntimeHeadersBeforeModelAttempt } from "./model-runtime-headers.js";
 import { recordModelUsageFact } from "./usage-observability.js";
 import { createRuntimeModel } from "./runtime-model.js";
 import { cloneModelSelection } from "../model-selection.js";
@@ -97,11 +96,6 @@ export async function generateTitleCandidate(
     modelRequestSessionType: "other" as const,
     statusSink: this.createModelStatusSink(modelTraceContext, events),
     traceContext: modelTraceContext,
-    refreshRuntimeHeadersBeforeAttempt: createRefreshRuntimeHeadersBeforeModelAttempt(this, {
-      abortSignal: titleAbortSignal,
-      model,
-      traceContext: modelTraceContext,
-    }),
   };
 
   const resultPromise = runWithModelInvocationContext(invocationContext, () =>

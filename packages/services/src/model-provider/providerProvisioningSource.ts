@@ -19,16 +19,6 @@ import {
 import type { ISettingService } from "../setting/setting.js";
 
 const CREDENTIAL_FILE_NAME = "credentials.json";
-export const PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS = [
-  "oauth:active_provider",
-  "oauth:zai:access_token",
-  "oauth:zai:refresh_token",
-  "oauth:zai:user_info",
-  "oauth:bigmodel:access_token",
-  "oauth:bigmodel:refresh_token",
-  "oauth:bigmodel:user_info",
-  "zcodejwttoken",
-] as const;
 
 export interface ProviderProvisioningSource {
   read(syncId: string): Promise<ProviderProvisioningEnvelope>;
@@ -124,24 +114,19 @@ async function readProvisioningCredentials(
     throw new Error("Credential Store 必须是 JSON 对象");
   }
   const cipher = cipherProvider ?? createCredentialCipherProvider();
-  const allowedKeys = new Set<string>(PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS);
   const entries: ProviderProvisioningCredentialEntry[] = [];
-  // Credential Store 还可能包含不属于 Provisioning allowlist 的历史记录；
-  // 这些记录不是本次同步事实，不能因为其值损坏而阻断合法账号凭据的同步。
-  // allowlist 内的条目仍保持字符串和解密校验，避免把未知内容当成 Secret 传输。
+  // FORK（D-4）：OAuth 会话凭据键族已整删，allowlist 只剩 account-provider 键。
+  // Credential Store 还可能包含不属于 allowlist 的历史记录；这些记录不是本次同步事实，
+  // 不能因为其值损坏而阻断合法凭据的同步。allowlist 内的条目仍保持字符串和解密校验，
+  // 避免把未知内容当成 Secret 传输。
   for (const [key, encrypted] of Object.entries(parsed)) {
-    const scope = allowedKeys.has(key)
-      ? ("oauth-session" as const)
-      : isProviderProvisioningAccountCredentialKey(key)
-        ? ("account-provider" as const)
-        : undefined;
-    if (!scope) continue;
+    if (!isProviderProvisioningAccountCredentialKey(key)) continue;
     if (typeof encrypted !== "string") {
       throw new Error(`Credential allowlist value must be a string: ${key}`);
     }
     const value = cipher.decrypt(encrypted);
     if (!value.trim()) continue;
-    entries.push({ scope, key, value });
+    entries.push({ scope: "account-provider", key, value });
   }
   return entries;
 }
@@ -176,8 +161,5 @@ export async function listProviderProvisioningCredentialKeys(
   }
   const parsed = JSON.parse(raw) as unknown;
   if (!isRecord(parsed)) throw new Error("Credential Store 必须是 JSON 对象");
-  const oauthKeys = new Set<string>(PROVIDER_PROVISIONING_OAUTH_CREDENTIAL_KEYS);
-  return Object.keys(parsed).filter(
-    (key) => oauthKeys.has(key) || isProviderProvisioningAccountCredentialKey(key),
-  );
+  return Object.keys(parsed).filter(isProviderProvisioningAccountCredentialKey);
 }

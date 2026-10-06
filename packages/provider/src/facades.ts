@@ -30,7 +30,6 @@ import { resolveInitialModelSelection } from "./model-selection-config.js";
 import {
   resolveEffectiveModelSelection,
   type EffectiveModelSelectionResult,
-  type ModelSelectionProviderClassifier,
 } from "./effective-model-selection.js";
 import type { ModelSelection } from "./registry.js";
 import type {
@@ -151,7 +150,6 @@ export interface ProviderSettingsProviderView extends Pick<
   "providerName" | "templateId"
 > {
   readonly enabled: boolean;
-  readonly accountState?: import("./account-provider-state.js").AccountProviderState;
   readonly providerId: ProviderId;
   /** 当前 Effective Config 是否已经进入 Registry，可用于模型选择和创建。 */
   readonly executable: boolean;
@@ -223,7 +221,6 @@ export class ProviderSettingsFacade {
       personalProviders: snapshot.config.personalProviders,
       personalModels: snapshot.config.personalModels,
       resolution: snapshot.resolution,
-      accountStates: snapshot.account.states,
     });
   }
 
@@ -497,7 +494,6 @@ export class ProviderSettingsFacade {
 
 export class ModelSelectionFacade {
   readonly #source: ProviderRegistryFacadeSource;
-  readonly #classifyProvider: ModelSelectionProviderClassifier;
   readonly #resolveLegacyReasoningLevel?: (
     snapshot: ProviderRegistryServiceSnapshot,
     selection: ModelSelection,
@@ -505,14 +501,12 @@ export class ModelSelectionFacade {
 
   constructor(
     source: ProviderRegistryFacadeSource,
-    classifyProvider: ModelSelectionProviderClassifier = () => "ordinary",
     resolveLegacyReasoningLevel?: (
       snapshot: ProviderRegistryServiceSnapshot,
       selection: ModelSelection,
     ) => string | undefined,
   ) {
     this.#source = source;
-    this.#classifyProvider = classifyProvider;
     this.#resolveLegacyReasoningLevel = resolveLegacyReasoningLevel;
   }
 
@@ -521,20 +515,19 @@ export class ModelSelectionFacade {
     revision?: number,
     input?: ModelSelectionViewInput,
   ): ModelSelectionView {
-    // 账号事实与候选从同一已应用快照读取；不把最新 Settings 配给旧 Registry。
+    // FORK（D-4）：账号事实与候选从同一已应用快照读取；不把最新 Settings 配给旧 Registry。
     const snapshot = input ? requireSnapshot(this.#source) : this.#source.getSnapshot();
     const registry = snapshot?.registry ?? this.#source.getView();
     const resolveLegacyReasoningLevel =
       snapshot && this.#resolveLegacyReasoningLevel
         ? (selection: ModelSelection) => this.#resolveLegacyReasoningLevel!(snapshot, selection)
         : undefined;
-    // 默认偏好只归一化档位，不借此改写账号身份或保存配置。
+    // 默认偏好只归一化档位，不借此改写身份或保存配置。
     const normalizedDefault =
       configuredDefault && resolveLegacyReasoningLevel
         ? (resolveEffectiveModelSelection({
             selection: configuredDefault,
             registry,
-            classifyProvider: () => "ordinary",
             resolveLegacyReasoningLevel,
           }).effectiveSelection ?? undefined)
         : configuredDefault;
@@ -554,8 +547,6 @@ export class ModelSelectionFacade {
         ? resolveEffectiveModelSelection({
             selection: input.selection,
             registry,
-            accountStates: snapshot?.account.states,
-            classifyProvider: this.#classifyProvider,
             resolveLegacyReasoningLevel,
           })
         : {}),
@@ -609,7 +600,6 @@ function createProviderSettingsView(input: {
   personalProviders: ProviderRegistryServiceSnapshot["config"]["personalProviders"];
   personalModels: ProviderRegistryServiceSnapshot["config"]["personalModels"];
   resolution: ProviderConfigResolution;
-  accountStates?: import("./account-provider-state.js").AccountProviderStates;
 }): ProviderSettingsView {
   const executableProviderIds = new Set(
     input.resolution.registryProviders.map((provider) => provider.providerId),
@@ -621,9 +611,6 @@ function createProviderSettingsView(input: {
       providerName: provider.providerName,
       templateId: provider.templateId,
       enabled: provider.enabled,
-      ...(input.accountStates?.[provider.providerId]
-        ? { accountState: input.accountStates[provider.providerId] }
-        : {}),
       executable: executableProviderIds.has(provider.providerId),
       ...(provider.templateConfig ? { templateConfig: provider.templateConfig.toJSON() } : {}),
       ...(provider.effectiveBuiltinConfig

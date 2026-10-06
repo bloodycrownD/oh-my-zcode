@@ -2,6 +2,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { createHash } from "node:crypto";
 import { mkdir, readFile } from "node:fs/promises";
 import { basename, dirname, resolve } from "node:path";
+import { z } from "zod";
 import type { ProviderConfigLayerSnapshot, ProviderSource } from "@zcode/provider";
 import { atomicWritePrivateTextFile, withFileLock } from "@zcode/shared/node";
 import {
@@ -173,8 +174,20 @@ async function readReleaseCandidate(filePath: string): Promise<ReleaseCandidate 
     return { release: decodeZCodeBuiltinRelease(JSON.parse(await readFile(filePath, "utf8"))) };
   } catch (error) {
     if (isFileNotFound(error)) return null;
+    // D-16：升级用户的运行时缓存仍是旧 schema 时，这里是唯一的可诊断点。
+    // 该候选已按 error 排除在选择之外，回落到随包基线；只补一条 warn，不让旧缓存阻断启动。
+    if (isZodError(error)) {
+      console.warn(
+        `[zcode-builtin] 缓存配置与当前 schema 不兼容，已回落随包基线: ${filePath}`,
+        error.message,
+      );
+    }
     return { error };
   }
+}
+
+function isZodError(error: unknown): error is z.ZodError {
+  return error instanceof z.ZodError;
 }
 
 function selectReleaseCandidate(

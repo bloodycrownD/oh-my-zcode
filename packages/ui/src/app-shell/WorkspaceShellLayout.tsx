@@ -5,13 +5,13 @@ import type {
   KeyboardEvent as ReactKeyboardEvent,
   PointerEvent as ReactPointerEvent,
 } from "react";
-import type { PanelImperativeHandle } from "react-resizable-panels";
+
 
 import { TID_APP_HEADER } from "@zcode/shared";
 // 保活：workspace tab 真正关闭时，按 workspaceKey 回收 side pane terminal 的常驻 PTY/xterm。
 // 对称下侧 Terminal.tsx 的 openWorkspaceKeys 回收。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
-import { V4ChatPane } from "@/v4/V4ChatPane.js";
+
 import { V4WorkspaceChatArea } from "@/v4/V4WorkspaceChatArea.js";
 import {
   V4SplitPaneEntryProvider,
@@ -65,7 +65,7 @@ import {
   resolveWorkspaceShellWindowChromeClass,
 } from "@/app-shell/workspaceShellWindowChrome.js";
 import { cn } from "@/components/lib/utils.js";
-import { Button } from "@/components/ui/button.js";
+
 import { ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable.js";
 import { toast } from "@/components/ui/toast.js";
 import { getGitDirtyFileCount } from "@/git-branch-switcher/display.js";
@@ -203,9 +203,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   onSelectRemoteProject,
   onCancelRemoteProject,
   onReconnectRemoteWorkspace,
-  onLogout,
-  onLogin,
-  user,
   reconnectingRemoteWorkspaceKeys,
   remoteWorkspaceErrorByWorkspaceKey,
   reconnectingRemoteWorkspaceLogsByWorkspaceKey = EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY,
@@ -215,7 +212,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   onOpenWorkspace,
   onOpenFolderFromWorkspaceMenu,
   onOpenRemoteWorkspace,
-  onCreateScratchWorkspace,
+
   allowOpenWorkspace = true,
   allowRemoteWorkspace = true,
   remoteWorkspaceSessions = EMPTY_REMOTE_WORKSPACE_SESSIONS,
@@ -232,8 +229,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   desktopWindowChromeState,
   macWindowControlsLeftPaddingPx,
   windowsWindowControlsRightPaddingPx = 136,
-  updateReadyVersion,
-  updateState,
   sidebarContainerRef,
   toggleSidebarShortcutLabel,
   newTaskShortcutLabel,
@@ -271,7 +266,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   browserRestoreUrls,
   taskNativeSessionLogFile,
   taskSessionFile,
-  testMessages,
+
   conversationFindActiveIndex,
   conversationFindNavigationRequestId,
   conversationFindQuery,
@@ -299,7 +294,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
   handleToggleTerminal,
   handleToggleBrowser,
   handleOpenBrowserTab,
-  handleOpenTreemapping,
+
   handleOpenWhiteboard,
   handleOpenDeveloperTools,
   handleOpenTerminalTab,
@@ -1483,11 +1478,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     />
   );
   const sidePanePanel = renderSidePanePanel();
-  const hasUpdateStatusButton =
-    updateReadyVersion !== null ||
-    updateState?.kind === "update-available" ||
-    updateState?.kind === "download-progress" ||
-    updateState?.kind === "update-downloaded";
   // Draft 之前维护一套独立轻量 header，导致 side pane、caption 安全区和拖拽入口
   // 与 Task Header 分叉。桌面端统一复用 WorkspaceHeader，只由 variant 裁剪 task 专属内容；
   // 手机远控无 active task 时仍不渲染桌面 chrome，继续遵守 replayable overlay 边界。
@@ -1580,9 +1570,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                     reconnectingRemoteWorkspaceLogsByWorkspaceKey={
                       reconnectingRemoteWorkspaceLogsByWorkspaceKey
                     }
-                    onLogout={onLogout}
-                    onLogin={onLogin}
-                    user={user}
                     isDesktop={isDesktop}
                     isMacDesktop={isMacDesktop}
                     isWindowsDesktop={isWindowsDesktop}
@@ -1706,9 +1693,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           projectName={projectName}
                           activeTaskTitle={activeTaskTitle}
                           activeTaskChangeSummary={activeTaskChangeSummary}
-                          hasUpdateReady={hasUpdateStatusButton}
                           activeTaskId={activeTaskId}
-                          user={user}
                           activeTraceId={activeTraceId}
                           activeSessionId={activeSessionId}
                           activeTaskProvider={activeTaskProvider}
@@ -1949,8 +1934,6 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
             isWindowsDesktop={isWindowsDesktop}
             isDesktop={isDesktop}
             isSidebarVisible={isSidebarVisible}
-            updateReadyVersion={updateReadyVersion}
-            updateState={updateState}
             toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
             newTaskShortcutLabel={newTaskShortcutLabel}
             goBackShortcutLabel={goBackShortcutLabel}

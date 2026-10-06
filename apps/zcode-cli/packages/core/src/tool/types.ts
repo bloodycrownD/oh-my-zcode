@@ -5,7 +5,6 @@
 import type {
   ExecutionShellSelection,
   AutomationPort,
-  OffPeakPort,
   EmbeddedSearchBackend,
   ExecutionPort,
   BrowserControlPort,
@@ -90,8 +89,6 @@ export interface ToolMetadata {
     serverName: string;
     toolName: string;
     description?: string;
-    /** 来自声明 zcode_official 鉴权的 MCP server；仅用于信任其结果里的结构化标识。 */
-    official?: boolean;
   };
 }
 
@@ -131,8 +128,11 @@ export interface ToolExecutionContext {
   toolCallId: string;
   /** 当前工具调用是否属于 automation 派发轮；写工具 handler 用它做最终权限校验。 */
   automationTurn?: boolean;
-  /** 当前工具调用是否属于闲时任务派发轮；OffPeakCreate handler 用它做最终拒绝。 */
-  offPeakTurn?: boolean;
+  /**
+   * 当前工具调用是否属于无值班次派发轮；SendMessage / Bash 的 handler 级纵深拒绝读它。
+   * 与 automationTurn 是两条独立信号：automation 轮由 automation denylist 单独裁决。
+   */
+  unattendedDispatchTurn?: boolean;
   traceContext?: TraceContext;
   traceId: TraceId;
   spanId?: string;
@@ -161,7 +161,6 @@ export interface ToolExecutionContext {
   workflowEscalatePort?: WorkflowEscalatePort;
   artifactStore?: ToolArtifactStorePort;
   automationPort?: AutomationPort;
-  offPeakPort?: OffPeakPort;
   sessionStore?: SessionStorePort;
   sessionModePort?: SessionModePort;
   workflowPort?: WorkflowPort;
