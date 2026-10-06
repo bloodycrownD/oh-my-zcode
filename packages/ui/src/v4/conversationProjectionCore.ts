@@ -329,8 +329,9 @@ export async function accumulateTurnDirectoryPages(
 }
 
 /**
- * rows/range 结果并入本地窗口（合并规范）：按 rowId 键控、只收
- * 窗口首行之前的行、去重后前插；顺序键 = rowId 升序（全序保证）。
+ * rows/range 结果并入本地窗口（合并规范）：只收窗口首行之前的行（fetched 原序），
+ * 前插到 window 原序之前；结果 = fetched 原序在前 + window 原序在后。
+ * 全局升序依赖调用方 rowsRange 升序契约（本函数不做排序）。
  * 返回 null 表示无可并入行（窗口无变化，调用方不换引用）。
  */
 export function mergeOlderRows(
@@ -361,9 +362,8 @@ function sameRowsMeta(a: ConversationSnapshot["rows"], b: ConversationSnapshot["
  *
  * **有行变更的帧**三层引用必须同时换新，否则下游静默不更新（renderer 侧的硬约束，
  * 不是性能优化）：
- * - `rows.window`：约 15 处 `[snapshot?.rows.window]` memo 依赖
- *   （SessionPane.tsx:643/670/678/740/746/754/962/1132/1691/1697/3757、
- *   useTreemappingConversationMessage.ts:97 等），引用不换则这些 memo 全部不更新；
+ * - `rows.window`：renderer 侧多处 `[snapshot?.rows.window]` memo 依赖
+ *   （SessionPane.tsx、useTreemappingConversationMessage.ts 等），引用不换则这些 memo 全部不更新；
  * - `rows`：只换 window 漏掉 rows 对象会留下半旧半新的窗口容器；
  * - `snapshot`：`usePendingCommandRecovery.ts:36` 等 `[snapshot]` effect 依赖。
  *
@@ -559,9 +559,9 @@ export function createConversationProjectionAccumulator(
       return lastMutation;
     },
     publish() {
-      // 只读发布不推进任何状态，但窗口可能是 rebuild 之后尚未 apply 过的中间态
-      // （前插补拉 / 目录补齐都走这条路），内容确实与上一份外壳不同 →
-      // 显式传 rowsChanged=true，不允许复用旧引用。
+      // 只读发布不推进任何状态；rebuild 后未 apply 的中间窗口仅存在于 accumulator
+      // 本体，store 读 published 外壳不会读到它。若此路径被触发（前插补拉 / 目录补齐），
+      // 内容确实与上一份外壳不同 → 显式传 rowsChanged=true，不允许复用旧引用。
       published = publishConversationShell(accumulator, published, true);
       return published;
     },
