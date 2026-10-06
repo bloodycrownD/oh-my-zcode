@@ -45,6 +45,8 @@ const {
   DEFAULT_MAX_PREVIEW_PARAGRAPHS,
   PROTOCOL_V4_LIMITS,
   buildPreviewText,
+  turnDirectoryEntrySchema,
+  v4ConversationTurnDirectoryParamsSchema,
   v4ConversationTurnDirectoryResultSchema,
 } = await import("@zcode/shared/zcode-protocol-v4");
 const { ConversationTopicPublisher } = await import(
@@ -520,4 +522,31 @@ test("H2: 全新会话（零行）同样返回合法空目录", () => {
   assert.equal(result.realUserQueryTotal, 0);
   assert.equal(result.hasMore, false);
   assert.doesNotThrow(() => v4ConversationTurnDirectoryResultSchema.parse(result));
+});
+
+// ── I: schema 数值约束边界（D-1）────────────────────────────────────────────
+
+test("I1: 负数 atSeq / queryRowId 被 schema 拒绝", () => {
+  const baseEntry = { turnId: "t", queryRowId: 1, queryPreview: "", assistantPreview: "", assistantPreviewKind: "text" };
+  assert.equal(turnDirectoryEntrySchema.safeParse({ ...baseEntry, queryRowId: -1 }).success, false);
+  const baseResult = {
+    entries: [],
+    realUserQueryTotal: 0,
+    atSeq: 0,
+    atRevision: 0,
+    atLogEpoch: "e",
+    hasMore: false,
+  };
+  assert.equal(v4ConversationTurnDirectoryResultSchema.safeParse({ ...baseResult, atSeq: -1 }).success, false);
+});
+
+test("I2: limit 超 max 被 params schema 拒绝", () => {
+  const base = { sessionId: "s" };
+  const overMax = PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries + 1;
+  assert.equal(v4ConversationTurnDirectoryParamsSchema.safeParse({ ...base, limit: overMax }).success, false);
+  assert.equal(v4ConversationTurnDirectoryParamsSchema.safeParse({ ...base, limit: 0 }).success, false);
+  assert.equal(v4ConversationTurnDirectoryParamsSchema.safeParse({ ...base, limit: -1 }).success, false);
+  // 边界值：恰好等于 max 与 1 都合法。
+  assert.equal(v4ConversationTurnDirectoryParamsSchema.safeParse({ ...base, limit: PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries }).success, true);
+  assert.equal(v4ConversationTurnDirectoryParamsSchema.safeParse({ ...base, limit: 1 }).success, true);
 });

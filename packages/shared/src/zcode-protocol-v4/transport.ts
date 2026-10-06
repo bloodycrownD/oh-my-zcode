@@ -531,14 +531,15 @@ export type V4ConversationRowsRangeResult = z.infer<typeof v4ConversationRowsRan
 // 与 rowsRange 同族的只读 query：无状态、超时重发安全、带 atLogEpoch + atRevision。
 // 目录粒度是**用户可见 query**（realUser origin），不是 product turn——同一 turn 的
 // steer query 要各自成条，故游标落在 queryRowId 上。
+// 有意不 .strict()：老客户端剥键而非解析失败，取舍同 rowsRange。
 export const v4ConversationTurnDirectoryParamsSchema = z.object({
   sessionId: z.string(),
   /** Host attachment injects this trusted value; renderer callers omit it. */
   clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]).optional(),
   // 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。
-  beforeQueryRowId: z.number().optional(),
+  beforeQueryRowId: z.number().int().nonnegative().optional(),
   // 缺省 = 服务端取 PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries。
-  limit: z.number().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
+  limit: z.number().int().nonnegative().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
 });
 export type V4ConversationTurnDirectoryParams = z.infer<
   typeof v4ConversationTurnDirectoryParamsSchema
@@ -553,10 +554,12 @@ export type V4ConversationTurnDirectoryParams = z.infer<
  *      `getRowsRange` 同向；注意同族 `getPlans` 是降序，不要照抄它的方向；
  *   2. `beforeQueryRowId` = 只返回 `queryRowId` **严格小于**该值的更早条目；
  *   3. `hasMore` = 更早方向**仍存在**条目（不是"这次拉满了 limit"）。
+ *
+ * 有意不 .strict()：老客户端剥键而非解析失败，取舍同 rowsRange。
  */
 export const turnDirectoryEntrySchema = z.object({
   turnId: z.string(),
-  queryRowId: z.number(),
+  queryRowId: z.number().int().nonnegative(),
   queryPreview: z.string(),
   assistantPreview: z.string(),
   // 三态判定：turn 内有 assistantText 行 = "text"；否则 turnHeader.state === "running"
@@ -565,6 +568,7 @@ export const turnDirectoryEntrySchema = z.object({
 });
 export type TurnDirectoryEntry = z.infer<typeof turnDirectoryEntrySchema>;
 
+// 有意不 .strict()：老客户端剥键而非解析失败，取舍同 rowsRange。
 export const v4ConversationTurnDirectoryResultSchema = z.object({
   // queryRowId 升序（见 turnDirectoryEntrySchema 的三条硬定义）。
   entries: z.array(turnDirectoryEntrySchema),
@@ -572,7 +576,7 @@ export const v4ConversationTurnDirectoryResultSchema = z.object({
   // 的判定（那条路在窄投影下会误判 rail 是否值得 hydrate）。
   realUserQueryTotal: z.number().int().nonnegative(),
   // 服务端取值时的水位/纪元；与 rowsRange 等只读查询共用，避免跨 revision 拼接。
-  atSeq: z.number(),
+  atSeq: z.number().int().nonnegative(),
   atRevision: z.number().int().nonnegative(),
   atLogEpoch: z.string(),
   // 更早方向是否还有条目。
