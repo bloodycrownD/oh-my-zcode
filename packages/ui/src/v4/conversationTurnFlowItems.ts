@@ -4,7 +4,7 @@ import type {
   TurnHeaderRow,
   UserInputRow,
 } from "@zcode/shared/zcode-protocol-v4";
-import type { ConversationCuaGroupRenderItem } from "@/v4/conversationCuaGroups.js";
+import type { ConversationCuaGroupRenderItem } from "./conversationCuaGroups.js";
 
 export type AssistantWorkRow = Exclude<ConversationRow, TurnHeaderRow | UserInputRow>;
 

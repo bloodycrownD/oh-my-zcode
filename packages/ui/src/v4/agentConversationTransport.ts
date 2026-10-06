@@ -28,6 +28,8 @@ import {
   type V4ConversationPlansResult,
   type V4ConversationRowsRangeParams,
   type V4ConversationRowsRangeResult,
+  type V4ConversationTurnDirectoryParams,
+  type V4ConversationTurnDirectoryResult,
   type V4ConversationSubscribeResult,
   type V4ConversationResyncResult,
 } from "@zcode/shared/zcode-protocol-v4";
@@ -59,6 +61,7 @@ type ConversationV4AgentService = Pick<
   | "sendConversationCommandV4"
   | "queryConversationCommandsV4"
   | "conversationRowsRangeV4"
+  | "conversationTurnDirectoryV4"
   | "conversationPlansV4"
   | "conversationWorkflowRunEventsV4"
   | "conversationWorkflowRunsV4"
@@ -336,6 +339,19 @@ export function createAgentConversationTransport(
         sessionId: params.sessionId,
         ...(params.beforeRowId !== undefined ? { beforeRowId: params.beforeRowId } : {}),
         limit: params.limit,
+      });
+    },
+    async turnDirectory(
+      params: V4ConversationTurnDirectoryParams,
+    ): Promise<V4ConversationTurnDirectoryResult> {
+      await ensureHandshake();
+      return agentService.conversationTurnDirectoryV4({
+        ...workspace,
+        sessionId: params.sessionId,
+        ...(params.beforeQueryRowId !== undefined
+          ? { beforeQueryRowId: params.beforeQueryRowId }
+          : {}),
+        ...(params.limit !== undefined ? { limit: params.limit } : {}),
       });
     },
     async plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult> {

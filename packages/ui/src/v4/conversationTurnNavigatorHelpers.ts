@@ -1,17 +1,21 @@
+import {
+  buildPreviewText,
+  DEFAULT_MAX_PREVIEW_CHARS,
+  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+} from "@zcode/shared/zcode-protocol-v4";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
+// item 形状的权威源搬到目录合并模块：那份模块必须零导入才能被 Node 侧直接单测，
+// 由它定义形状、本模块转出去，避免同一个 interface 出现两份定义漂移。
+// （两条都是纯 type import，编译期剥离，helpers 的可测性不受影响。）
+import type {
+  ConversationTurnNavigatorAssistantPreviewKind,
+  ConversationTurnNavigatorItem,
+} from "@/v4/conversationTurnNavigatorDirectory.js";
 
-export type ConversationTurnNavigatorAssistantPreviewKind = "empty" | "running" | "text";
-
-export interface ConversationTurnNavigatorItem {
-  key: string;
-  turnId: string;
-  unitIndex: number;
-  rowId: number;
-  userPreview: string;
-  assistantPreview: string;
-  assistantPreviewKind: ConversationTurnNavigatorAssistantPreviewKind;
-  isRunning: boolean;
-}
+export type {
+  ConversationTurnNavigatorAssistantPreviewKind,
+  ConversationTurnNavigatorItem,
+};
 
 interface BuildConversationTurnNavigatorItemsOptions {
   assistantEmptyPreview: string;
@@ -32,6 +36,12 @@ interface ResolveConversationTurnNavigatorActiveUnitIndexOptions {
   virtualItems: readonly ConversationTurnNavigatorVirtualItem[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
+  /**
+   * 可选：`unitIndex -> item` 索引。滚动路径上 items 变化极少而每次滚动都要重算，
+   * 传入组件侧已缓存的索引即可跳过每次调用 O(N) 的 `new Map(items.map(...))`；
+   * 缺省时函数内自建，保持纯函数可单测、向后兼容。
+   */
+  itemByUnitIndex?: Map<number, ConversationTurnNavigatorItem>;
 }
 
 export interface ConversationTurnNavigatorQueryPosition {
@@ -74,18 +84,84 @@ export type ConversationTurnNavigatorHydrationResult =
   | { status: "retryable-failure"; logEpoch: string }
   | { status: "stale"; logEpoch: string };
 
+/**
+ * rail 的目录可见性输入（store 的窄投影目录状态的窄面）。
+ *
+ * 只带裁决 rail 显隐所需的四个数：条目数据由 items 合并层消费，这里不复制条目数组，
+ * 免得同一份目录在组件里存第二份。
+ */
+export interface ConversationTurnNavigatorDirectoryView {
+  /** 是否成功取过一次目录（未取过时不能按「空」判隐藏，否则首帧闪一下）。 */
+  loaded: boolean;
+  entryCount: number;
+  /**
+   * 服务端现算的 realUser query 权威总数。
+   *
+   * **只在 `loaded === true` 后才有权威值**，未取过目录时必须保持 `undefined`：
+   * store 的空态默认 0 表示「还没取」而不是「取到 0 条」，当成 0 下发会让
+   * `shouldHydrateConversationTurnNavigatorDirectory` 的 `total < 2` 闸门把首查
+   * 永久挡掉（store 的失效重查又要求已取过 → 闭环自锁）。具体门控在 SessionPane
+   * 构造本窄面处，这里只负责把「未知」与「已知为 0」区分开。
+   */
+  realUserQueryTotal?: number;
+  /** 更早方向仍有条目。同样只在 `loaded === true` 后有权威值。 */
+  hasMore?: boolean;
+  /**
+   * 目录是否被页数上限截断（只取到一部分）。同样只在 `loaded === true` 后有权威值。
+   */
+  truncated?: boolean;
+  /**
+   * 还没取到的更早条目数（`realUserQueryTotal - entries.length`，截断时 > 0）。
+   * rail 顶部提示的参数；未取过目录时为 undefined。
+   */
+  olderEntriesNotLoadedCount?: number;
+}
+
+/**
+ * 宽屏是否该拉一次 turn 目录。
+ *
+ * 目录模式下判定输入从「窗口里还有没有更早行」换成目录自身的两个事实：
+ * `realUserQueryTotal`（够不够两条 query 撑起 rail）与 `directoryHasMore`
+ * （更早方向还有没有没取到的条目）。两者都未知（首轮、尚未取过目录）时，
+ * 仍以 `canLoadOlder` 放行——「不知道」不能当成「不需要」。
+ *
+ * **调用方契约**：`realUserQueryTotal` 留 `undefined` 必须真的表示「还没取过目录」
+ * （SessionPane 按 store 的 `turnDirectory.loaded` 门控），不能把空态默认 0 当权威值
+ * 传进来——否则 `total < 2` 会把首查挡死，而 store 的失效重查要求已取过，闭环自锁。
+ */
 export function shouldHydrateConversationTurnNavigatorDirectory(params: {
   canLoadOlder: boolean;
   containerWidthPx: number;
   hasLoadHandler: boolean;
-  loadingOlder: boolean;
+  loadingDirectory: boolean;
+  realUserQueryTotal?: number;
+  directoryHasMore?: boolean;
 }): boolean {
-  return (
-    params.canLoadOlder &&
-    !params.loadingOlder &&
-    params.hasLoadHandler &&
-    params.containerWidthPx >= CONVERSATION_TURN_NAVIGATOR_MIN_WIDTH_PX
-  );
+  if (!params.hasLoadHandler || params.loadingDirectory) return false;
+  if (params.containerWidthPx < CONVERSATION_TURN_NAVIGATOR_MIN_WIDTH_PX) return false;
+  const total = params.realUserQueryTotal;
+  if (total !== undefined) {
+    // 权威总数不足两条：rail 不会出现，不必 hydrate。
+    if (total < 2) return false;
+    // 目录已取齐（更早方向没有条目）：没有可补的内容。
+    if (params.directoryHasMore === false) return false;
+    return true;
+  }
+  return params.canLoadOlder;
+}
+
+/**
+ * rail 是否隐藏。
+ *
+ * 目录已知且「一条都没有、权威总数也不足两条」时隐藏——这时 rail 画出来是一根空条。
+ * 尚未取过目录（`loaded === false`）一律不隐藏：加载中隐藏会在首帧闪一下。
+ * `loaded === true` 时权威总数必有值，缺省按 0 兜（与旧窄面口径一致）。
+ */
+export function shouldHideConversationTurnNavigatorRail(
+  directory: ConversationTurnNavigatorDirectoryView | undefined,
+): boolean {
+  if (!directory?.loaded) return false;
+  return directory.entryCount === 0 && (directory.realUserQueryTotal ?? 0) < 2;
 }
 
 export function resolveConversationTurnNavigatorHydrationRetryDelayMs(
@@ -96,43 +172,9 @@ export function resolveConversationTurnNavigatorHydrationRetryDelayMs(
   return null;
 }
 
-const DEFAULT_MAX_PREVIEW_CHARS = 220;
-const DEFAULT_MAX_PREVIEW_PARAGRAPHS = 2;
-
-function normalizePreviewParagraphs(text: string, maxParagraphs: number): string[] {
-  return text
-    .trim()
-    .split(/\n\s*\n/u)
-    .map((paragraph) => paragraph.replace(/\s+/gu, " ").trim())
-    .filter(Boolean)
-    .slice(0, Math.max(1, maxParagraphs));
-}
-
-function truncatePreview(text: string, maxChars: number): string {
-  const normalizedMaxChars = Math.max(8, maxChars);
-  if (text.length <= normalizedMaxChars) {
-    return text;
-  }
-  return `${text.slice(0, normalizedMaxChars - 3).trimEnd()}...`;
-}
-
-function buildPreviewText({
-  texts,
-  fallback,
-  maxPreviewChars,
-  maxPreviewParagraphs,
-}: {
-  texts: readonly string[];
-  fallback: string;
-  maxPreviewChars: number;
-  maxPreviewParagraphs: number;
-}): string {
-  const paragraphs = normalizePreviewParagraphs(texts.join("\n\n"), maxPreviewParagraphs);
-  if (paragraphs.length === 0) {
-    return fallback;
-  }
-  return truncatePreview(paragraphs.join("\n"), maxPreviewChars);
-}
+// 摘要口径（折叠/分段/截断三件套）已下沉到 @zcode/shared 的 previewText.ts：
+// 服务端 turn 目录要出同一口径的 queryPreview / assistantPreview，两处实现必然漂移。
+// 这里只留依赖 UI 类型的 buildAssistantPreview。
 
 function buildAssistantPreview(
   unit: ConversationTurnRenderUnit,
@@ -214,17 +256,16 @@ function resolveFiniteNonNegative(value: number): number {
   return Number.isFinite(value) ? Math.max(0, value) : 0;
 }
 
-export function resolveConversationTurnNavigatorActiveUnitIndex({
-  items,
-  virtualItems,
-  scrollOffsetPx,
-  viewportHeightPx,
-}: ResolveConversationTurnNavigatorActiveUnitIndexOptions): number | undefined {
+export function resolveConversationTurnNavigatorActiveUnitIndex(
+  options: ResolveConversationTurnNavigatorActiveUnitIndexOptions,
+): number | undefined {
+  const { items, virtualItems, scrollOffsetPx, viewportHeightPx } = options;
   if (items.length === 0) {
     return undefined;
   }
 
-  const itemByUnitIndex = new Map(items.map((item) => [item.unitIndex, item]));
+  const itemByUnitIndex =
+    options.itemByUnitIndex ?? new Map(items.map((item) => [item.unitIndex, item]));
   const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
   const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
 
@@ -267,16 +308,11 @@ export function resolveConversationTurnNavigatorActiveUnitIndex({
   );
 }
 
-export function resolveConversationTurnNavigatorActiveQueryRowId({
-  positions,
-  scrollOffsetPx,
-  viewportHeightPx,
-}: ResolveConversationTurnNavigatorActiveQueryRowIdOptions): number | undefined {
-  if (positions.length === 0) return undefined;
-
-  const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
-  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
-  const normalized = positions
+/** 位置表归一化（start/end 夹取为有限非负）并按 start 升序、rowId 升序排好。 */
+function normalizeQueryPositions(
+  positions: readonly ConversationTurnNavigatorQueryPosition[],
+): ConversationTurnNavigatorQueryPosition[] {
+  return positions
     .map((position) => {
       const start = resolveFiniteNonNegative(position.start);
       return {
@@ -286,6 +322,17 @@ export function resolveConversationTurnNavigatorActiveQueryRowId({
       };
     })
     .sort((left, right) => left.start - right.start || left.rowId - right.rowId);
+}
+
+export function resolveConversationTurnNavigatorActiveQueryRowId(
+  options: ResolveConversationTurnNavigatorActiveQueryRowIdOptions,
+): number | undefined {
+  const { positions, scrollOffsetPx, viewportHeightPx } = options;
+  if (positions.length === 0) return undefined;
+
+  const viewportStart = resolveFiniteNonNegative(scrollOffsetPx);
+  const viewportEnd = viewportStart + Math.max(1, resolveFiniteNonNegative(viewportHeightPx));
+  const normalized = normalizeQueryPositions(positions);
 
   const visible = normalized.filter(
     (position) => position.end >= viewportStart && position.start <= viewportEnd,
@@ -329,4 +376,24 @@ export function resolveConversationTurnNavigatorVisualFocusItemIndex({
   interactionItemIndex,
 }: ResolveConversationTurnNavigatorVisualFocusItemIndexOptions): number | undefined {
   return interactionItemIndex;
+}
+
+/**
+ * 按容器归属过滤 row 元素注册表（cr-fix-spec full/B-1）。
+ *
+ * 注册表是模块级单例、仅以 rowId 为键，而 SessionPane 存在多处 timeline 挂载点
+ * （主 pane 与侧 pane 并存是常态），rowId 跨会话又可重复——读取端若不按「元素
+ * 是否挂在本滚动容器内」过滤，rail 的 active 高亮与跳转落点会取到别家 pane 的
+ * 坐标。container 用结构化类型便于 Node 侧单测（手写 `{ contains }` 桩即可，
+ * 真实 HTMLDivElement 天然满足）。
+ */
+export function pickOwnedRowElements(
+  registry: ReadonlyMap<number, HTMLElement>,
+  container: { contains: (element: HTMLElement) => boolean },
+): Map<number, HTMLElement> {
+  const owned = new Map<number, HTMLElement>();
+  for (const [rowId, element] of registry) {
+    if (container.contains(element)) owned.set(rowId, element);
+  }
+  return owned;
 }

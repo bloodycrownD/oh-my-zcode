@@ -10,22 +10,62 @@ import { cn } from "@/components/lib/utils.js";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
-  buildConversationTurnNavigatorItems,
   resolveConversationTurnNavigatorActiveUnitIndex,
   resolveConversationTurnNavigatorBarVisualState,
   resolveConversationTurnNavigatorVisualFocusItemIndex,
+  type ConversationTurnNavigatorItem,
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
-import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
+import {
+  resolveTurnNavigatorActiveItemIndex,
+  type ConversationTurnNavigatorMergedItem,
+} from "@/v4/conversationTurnNavigatorDirectory.js";
+import { DEFAULT_ROW_HEIGHT_ESTIMATE_PX } from "@/v4/timelineRowHeightCache.js";
 
 interface ConversationTurnNavigatorProps {
-  renderUnits: readonly ConversationTurnRenderUnit[];
+  /**
+   * 合并后的 rail 条目（目录降级项 + 已加载项按 queryRowId 去重，升序稳定）。
+   * 由父组件 ConversationTimeline 构建（full/J-2 上提）：rail 的实际渲染条件
+   * （turnNavigatorVisible）与左侧 gutter 占位在父层共用同一份派生结果，
+   * 子组件不再自算，避免两套条件漂移。
+   */
+  items: readonly ConversationTurnNavigatorMergedItem[];
+  /**
+   * 已加载侧条目（buildConversationTurnNavigatorItems 产物，父层随 items 一起
+   * 传入）。active 判定的已加载主循环与 loadedItemByUnitIndex 索引以它为源；
+   * unitIndex 是虚拟列表单位，与目录降级项的 rail 序占位不同计量，不能混用。
+   */
+  loadedItems: readonly ConversationTurnNavigatorItem[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
   virtualItems: readonly ConversationTurnNavigatorVirtualItem[];
   activeQueryRowId?: number;
   isHydratingDirectory?: boolean;
-  onJumpToQuery: (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior) => void;
+  /**
+   * 跳转补拉在途（父层 turnNavigatorJumpLoading，full/J-1）。并入 aria-busy 让
+   * 补拉期间 rail 有可见反馈，并在在途期间禁掉条目点击，防止连点叠跳转。
+   */
+  jumpLoading?: boolean;
+  /**
+   * 目录被页数上限截断时，还没取到的更早条目数；undefined / 0 不渲染提示。
+   *
+   * 截断必须显式告诉用户：否则 rail 顶部那条「更早没有更多了」的假象会让人以为
+   * 会话只有这么几条提问。数量取自服务端现算的权威总数减去已取到的条目数。
+   */
+  olderEntriesNotLoadedCount?: number;
+  /**
+   * 当前正文窗口首行 rowId（`rows.window[0].rowId`）。active 定位降级用它判断
+   * 「视口是否落在窗口之上的未加载区」；窗口为空时传 undefined。
+   */
+  windowFirstRowId?: number;
+  /**
+   * 跳转回调。`isDirectoryFallback` 标记目标行尚未加载（只有目录项），
+   * 此时 `unitIndex` 只是 rail 序占位，调用方须按 `rowId` 走拉取闭环定位。
+   */
+  onJumpToQuery: (
+    target: { unitIndex: number; rowId: number; isDirectoryFallback?: boolean },
+    behavior: ScrollBehavior,
+  ) => void;
 }
 
 function usePrefersReducedMotion() {
@@ -46,60 +86,80 @@ function usePrefersReducedMotion() {
 }
 
 function ConversationTurnNavigatorImpl({
-  renderUnits,
+  items,
+  loadedItems,
   scrollOffsetPx,
   viewportHeightPx,
   virtualItems,
   activeQueryRowId,
   isHydratingDirectory = false,
+  jumpLoading = false,
+  olderEntriesNotLoadedCount,
+  windowFirstRowId,
   onJumpToQuery,
 }: ConversationTurnNavigatorProps) {
   const { intl } = useZCodeIntl();
   const prefersReducedMotion = usePrefersReducedMotion();
   const [interactionItemIndex, setInteractionItemIndex] = useState<number | undefined>(undefined);
-  const items = useMemo(
-    () =>
-      buildConversationTurnNavigatorItems(renderUnits, {
-        assistantEmptyPreview: intl.formatMessage({
-          id: "chat.turnNavigator.emptyAssistant",
-        }),
-        assistantRunningPreview: intl.formatMessage({
-          id: "chat.turnNavigator.runningAssistant",
-        }),
-        userFallbackPreview: intl.formatMessage({
-          id: "chat.turnNavigator.userFallback",
-        }),
-      }),
-    [intl, renderUnits],
-  );
+  // 截断提示：rail 只有 36px 宽，正文放不下，视觉上是一条「上面还有」的断口标记，
+  // 完整文案（含还差多少条）走 hover 卡与 aria-label——与条目 tooltip 同一套交互。
+  const olderEntriesNotLoadedText =
+    olderEntriesNotLoadedCount === undefined || olderEntriesNotLoadedCount <= 0
+      ? null
+      : intl.formatMessage(
+          { id: "chat.turnNavigator.olderEntriesNotLoaded" },
+          { count: String(olderEntriesNotLoadedCount) },
+        );
 
+  // 已加载侧索引：unitIndex 是虚拟列表单位，降级目录项的 unitIndex 只是 rail 序占位，
+  // 两者不能混在一张 Map 里（否则 active 判定会撞键）。
+  const loadedItemByUnitIndex = useMemo(
+    () => new Map(loadedItems.map((item) => [item.unitIndex, item])),
+    [loadedItems],
+  );
+  // 触发量化用**主时间线**行高（DEFAULT_ROW_HEIGHT_ESTIMATE_PX = 72）：scrollOffsetPx
+  // 是主滚动容器的偏移，与 rail 自身 10px 的行高不同量级，不能混用。量化到「行」后
+  // active 重算只在跨行时发生（原来每个滚动像素都重算一次 O(可见行数) 扫描）。
+  const scrollOffsetPxFinite = Number.isFinite(scrollOffsetPx) ? Math.max(0, scrollOffsetPx) : 0;
+  const scrollRowBucket = Math.floor(scrollOffsetPxFinite / DEFAULT_ROW_HEIGHT_ESTIMATE_PX);
   const activeUnitIndex = useMemo(
     () =>
       resolveConversationTurnNavigatorActiveUnitIndex({
-        items,
-        scrollOffsetPx,
+        items: loadedItems,
+        itemByUnitIndex: loadedItemByUnitIndex,
+        scrollOffsetPx: scrollRowBucket * DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
         viewportHeightPx,
         virtualItems,
       }),
-    [items, scrollOffsetPx, viewportHeightPx, virtualItems],
+    // 量化值（scrollRowBucket）取代原始 scrollOffsetPx 作为依赖：同一行内滚动不再触发重算。
+    [loadedItems, loadedItemByUnitIndex, scrollRowBucket, viewportHeightPx, virtualItems],
   );
   const itemIndexes = useMemo(() => {
     const byRowId = new Map<number, number>();
-    const firstByUnitIndex = new Map<number, number>();
+    // unitIndex（已加载侧）-> 合并后 items 下标：active unit 要落到合并后的 rail 位置。
+    const mergedByLoadedUnitIndex = new Map<number, number>();
     items.forEach((item, index) => {
       byRowId.set(item.rowId, index);
-      if (!firstByUnitIndex.has(item.unitIndex)) {
-        firstByUnitIndex.set(item.unitIndex, index);
+      if (!item.isDirectoryFallback && !mergedByLoadedUnitIndex.has(item.unitIndex)) {
+        mergedByLoadedUnitIndex.set(item.unitIndex, index);
       }
     });
-    return { byRowId, firstByUnitIndex };
+    return { byRowId, mergedByLoadedUnitIndex };
   }, [items]);
-  const activeItemIndex =
-    (activeQueryRowId === undefined ? undefined : itemIndexes.byRowId.get(activeQueryRowId)) ??
-    (activeUnitIndex === undefined
+  const loadedActiveItemIndex =
+    activeQueryRowId === undefined ? undefined : itemIndexes.byRowId.get(activeQueryRowId);
+  const loadedUnitActiveItemIndex =
+    activeUnitIndex === undefined
       ? undefined
-      : itemIndexes.firstByUnitIndex.get(activeUnitIndex)) ??
-    -1;
+      : itemIndexes.mergedByLoadedUnitIndex.get(activeUnitIndex);
+  const loadedActiveItemIndexFinal = loadedActiveItemIndex ?? loadedUnitActiveItemIndex;
+  // active 定位降级三态：已加载主循环 → 未加载区取第一个未加载目录项 → 混合态已加载优先。
+  const activeItemIndex =
+    resolveTurnNavigatorActiveItemIndex({
+      items,
+      loadedActiveItemIndex: loadedActiveItemIndexFinal,
+      windowFirstRowId,
+    }) ?? -1;
   const visualFocusItemIndex = resolveConversationTurnNavigatorVisualFocusItemIndex({
     activeItemIndex,
     interactionItemIndex,
@@ -130,19 +190,47 @@ function ConversationTurnNavigatorImpl({
     });
   }, [activeItemIndex, items.length, railVirtualizer]);
 
-  if (items.length < 2) {
-    return null;
-  }
+  // 条目不足两条时不渲染的裁决在父层 turnNavigatorVisible 完成（full/J-2 单一真源），
+  // 本组件只保留上面 effect 内的 items.length 守卫。
 
   return (
     <nav
       aria-label={intl.formatMessage({ id: "chat.turnNavigator.label" })}
-      aria-busy={isHydratingDirectory}
+      // 合并式 busy（full/J-1）：目录 hydrate 与跳转补拉都在途时 rail 都要报忙，
+      // 跳转反馈此前只落在滚动容器的 data 属性上，用户无感知。
+      aria-busy={isHydratingDirectory || jumpLoading}
       data-testid={TID_V4_TURN_NAVIGATOR}
       data-item-count={items.length}
       data-rendered-item-count={virtualRows.length}
       className="pointer-events-none invisible absolute inset-y-0 left-0 z-10 w-12 -translate-x-2 opacity-0 transition-[opacity,transform,visibility] duration-150 ease-out motion-reduce:transition-none @min-[864px]/conversation:visible @min-[864px]/conversation:translate-x-0 @min-[864px]/conversation:opacity-100"
     >
+      {olderEntriesNotLoadedText !== null ? (
+        <HoverCard closeDelay={80} openDelay={120}>
+          <HoverCardTrigger asChild>
+            <div
+              data-testid={testId(TID_V4_TURN_NAVIGATOR, "older-entries-not-loaded")}
+              data-missing-entry-count={olderEntriesNotLoadedCount}
+              aria-label={olderEntriesNotLoadedText}
+              className="pointer-events-auto absolute left-3 top-6 z-10 flex w-9 flex-col items-center gap-0.5"
+            >
+              <span className="block h-px w-3 bg-foreground-subtlest" />
+              <span className="block h-px w-2 bg-foreground-subtlest" />
+              <span className="block h-px w-3 bg-foreground-subtlest" />
+            </div>
+          </HoverCardTrigger>
+          <HoverCardContent
+            align="start"
+            side="right"
+            sideOffset={8}
+            data-testid={testId(TID_V4_TURN_NAVIGATOR_TOOLTIP, "older-entries-not-loaded")}
+            className="w-80 max-w-[calc(100vw-2rem)] border border-popover-border bg-popover p-3 text-popover-foreground shadow-lg"
+          >
+            <p className="whitespace-pre-line text-ui-base leading-5 text-popover-foreground/80">
+              {olderEntriesNotLoadedText}
+            </p>
+          </HoverCardContent>
+        </HoverCard>
+      ) : null}
       <div
         ref={railScrollRef}
         // 只声明 overflow-y-auto 时，浏览器会把 overflow-x 计算为 auto；
@@ -186,20 +274,31 @@ function ConversationTurnNavigatorImpl({
                       data-query-row-id={item.rowId}
                       data-active={active ? "true" : "false"}
                       data-running={item.isRunning ? "true" : "false"}
+                      // 目录降级项（未加载区间）标记：跳转闭环按它区分「目标行尚未加载」。
+                      data-directory-fallback={item.isDirectoryFallback ? "true" : "false"}
                       data-visual-color-tone={visualState.colorTone}
                       data-visual-scale={String(visualState.scaleX)}
                       data-visual-tone={visualState.tone}
                       onBlur={() => setInteractionItemIndex(undefined)}
                       onClick={() =>
                         onJumpToQuery(
-                          { unitIndex: item.unitIndex, rowId: item.rowId },
+                          {
+                            unitIndex: item.unitIndex,
+                            rowId: item.rowId,
+                            isDirectoryFallback: item.isDirectoryFallback,
+                          },
                           prefersReducedMotion ? "auto" : "smooth",
                         )
                       }
                       onFocus={() => setInteractionItemIndex(itemIndex)}
                       onPointerEnter={() => setInteractionItemIndex(itemIndex)}
                       onPointerLeave={() => setInteractionItemIndex(undefined)}
-                      className="flex h-2.5 w-9 items-center justify-start rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      // 跳转补拉在途禁点（full/J-1）：连点会叠出多个补拉循环，
+                      // 虽有序号失效法兜底，但 UI 侧应直接挡掉；键盘焦点不受影响。
+                      className={cn(
+                        "flex h-2.5 w-9 items-center justify-start rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                        jumpLoading && "pointer-events-none",
+                      )}
                     >
                       <span
                         className={cn(

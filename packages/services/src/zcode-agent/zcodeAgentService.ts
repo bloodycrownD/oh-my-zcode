@@ -186,6 +186,7 @@ import type {
   ZCodeAgentConversationFileChangesParams,
   ZCodeAgentConversationFileRewindPreviewParams,
   ZCodeAgentConversationRowsRangeParams,
+  ZCodeAgentConversationTurnDirectoryParams,
   ZCodeAgentConversationPlansParams,
   ZCodeAgentConversationWorkflowRunEventsParams,
   ZCodeAgentConversationWorkflowRunArtifactDataParams,
@@ -236,6 +237,7 @@ import {
   v4ConversationFileChangesResultSchema,
   v4ConversationFileRewindPreviewResultSchema,
   v4ConversationRowsRangeResultSchema,
+  v4ConversationTurnDirectoryResultSchema,
   v4ConversationPlansResultSchema,
   v4ConversationWorkflowRunEventsResultSchema,
   v4ConversationWorkflowRunArtifactDataResultSchema,
@@ -4477,6 +4479,27 @@ export function createZCodeAgentService(
           limit: params.limit,
         },
         v4ConversationRowsRangeResultSchema,
+      );
+    },
+
+    // turn 目录：turnNavigator 的窄投影 query。与 rowsRange 同族，故走同一条
+    // trusted connection 路径（clientMode 由 host attachment 注入，不信任调用方自报）；
+    // 不跟 plans 的裸透传。
+    async conversationTurnDirectoryV4(params: ZCodeAgentConversationTurnDirectoryParams) {
+      const trusted = readTrustedZCodeAgentV4Connection(params);
+      if (!trusted) throw new Error("fault.conversation.turnDirectoryConnectionUntrusted");
+      const client = await getReadOnlyClient(params);
+      return client.request(
+        V4_METHODS.conversationTurnDirectory,
+        {
+          sessionId: params.sessionId,
+          clientMode: trusted.clientMode,
+          ...(params.beforeQueryRowId !== undefined
+            ? { beforeQueryRowId: params.beforeQueryRowId }
+            : {}),
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
+        },
+        v4ConversationTurnDirectoryResultSchema,
       );
     },
 

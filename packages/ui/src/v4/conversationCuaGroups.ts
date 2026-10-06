@@ -1,8 +1,8 @@
 import type { AssistantTextRow, ReasoningRow, ToolCallRow } from "@zcode/shared/zcode-protocol-v4";
-import type { TaskChatToolCallTreeNode } from "@/lib/toolCallTree.js";
-import type { AssistantWorkRow } from "@/v4/conversationTurnRenderUnits.js";
-import type { ConversationTurnFlowItem } from "@/v4/conversationTurnFlowItems.js";
-import { toolCallRowToLegacyNode } from "@/v4/toolCallRowAdapter.js";
+import type { TaskChatToolCallTreeNode } from "../lib/toolCallTree.js";
+import type { AssistantWorkRow } from "./conversationTurnRenderUnits.js";
+import type { ConversationTurnFlowItem } from "./conversationTurnFlowItems.js";
+import { toolCallRowToLegacyNode } from "./toolCallRowAdapter.js";
 
 export type ConversationCuaGroupEvent =
   | { kind: "tool"; row: ToolCallRow; node: TaskChatToolCallTreeNode }

@@ -7,9 +7,9 @@ import type {
 import {
   ENABLE_CUA_TOOL_CALL_GROUPING,
   prepareCuaGroupFlowItems,
-} from "@/v4/conversationCuaGroups.js";
-import { buildConversationFlowItems } from "@/v4/conversationTurnFlowItems.js";
-import type { AssistantWorkRow, ConversationTurnFlowItem } from "@/v4/conversationTurnFlowItems.js";
+} from "./conversationCuaGroups.js";
+import { buildConversationFlowItems } from "./conversationTurnFlowItems.js";
+import type { AssistantWorkRow, ConversationTurnFlowItem } from "./conversationTurnFlowItems.js";
 
 export interface ConversationTurnWorkStatus {
   state: "running" | "completed" | "interrupted";
@@ -25,6 +25,11 @@ export interface ConversationTurnWorkSegment {
   assistantFollowingRows: AssistantWorkRow[];
   assistantHistoryDefaultOpen: boolean;
   workStatus?: ConversationTurnWorkStatus;
+  /**
+   * 本段工时的起算时刻，取值与 resolveSegmentDurationMs 逐分支同源。
+   * durationMs 是构建期烘焙值，运行中显示必须靠它现算，避免整棵时间线每秒重渲染。
+   */
+  startedAt?: number;
 }
 
 export function resolveConversationTurnWorkStatus(
@@ -48,17 +53,15 @@ export function resolveConversationTurnWorkStatus(
 
 export function resolveConversationTurnWorkDurationMs(
   header: TurnHeaderRow | undefined,
-  options: { nowMs?: number },
-  isRunning: boolean,
 ): number | undefined {
   if (!header) return undefined;
   if (header.activeMs !== undefined) return header.activeMs;
   if (header.endedAt !== undefined) return Math.max(header.endedAt - header.startedAt, 0);
-  // UI 每秒传入 nowMs 只用于运行中“工作中 N 秒”；完成态缺少
-  // activeMs/endedAt 时不能继续吃当前时钟，否则历史“已工作”会随时间增长。
-  if (isRunning && options.nowMs !== undefined) {
-    return Math.max(options.nowMs - header.startedAt, 0);
-  }
+  // 这里只给「构建期烘焙」的静态工时：完成态缺 activeMs/endedAt 就返回 undefined，
+  // 绝不能让历史「已工作」随时钟增长。运行中的「工作中 N 秒」不再由构建器按当前时钟
+  // 外推——那要求每秒把 nowMs 送进整条时间线的构建，代价是整棵 ConversationTimeline
+  // 重渲染；改由 WorkingDurationText 拿 segment.startedAt 自己 tick（见
+  // resolveSegmentStartedAt，取值与本函数逐分支同源）。因此本函数不再接收 nowMs。
   return undefined;
 }
 
@@ -93,42 +96,61 @@ function splitVisualWorkSegments(rows: readonly ConversationRow[]): DraftVisualW
   return segments;
 }
 
+/** guide 段命中的协议工时事实；普通单段 turn 没有它（workSegments 是 optional）。 */
+function resolveSegmentWorkFact(options: {
+  header?: TurnHeaderRow;
+  segmentIndex: number;
+  triggerRow?: UserInputRow;
+}): NonNullable<TurnHeaderRow["workSegments"]>[number] | undefined {
+  return (
+    (options.triggerRow?.entityId
+      ? options.header?.workSegments?.find(
+          (candidate) => candidate.triggerEntityId === options.triggerRow?.entityId,
+        )
+      : undefined) ?? options.header?.workSegments?.[options.segmentIndex]
+  );
+}
+
 function resolveSegmentDurationMs(options: {
   header?: TurnHeaderRow;
   segmentIndex: number;
   triggerRow?: UserInputRow;
   nextTriggerRow?: UserInputRow;
-  segmentRunning: boolean;
   segmentCount: number;
-  nowMs?: number;
 }): number | undefined {
-  const fact =
-    (options.triggerRow?.entityId
-      ? options.header?.workSegments?.find(
-          (candidate) => candidate.triggerEntityId === options.triggerRow?.entityId,
-        )
-      : undefined) ?? options.header?.workSegments?.[options.segmentIndex];
+  const fact = resolveSegmentWorkFact(options);
   if (fact?.activeMs !== undefined) return fact.activeMs;
   if (fact?.endedAt !== undefined) return Math.max(0, fact.endedAt - fact.startedAt);
-  if (fact && options.segmentRunning && options.nowMs !== undefined) {
-    return Math.max(0, options.nowMs - fact.startedAt);
-  }
   if (options.segmentCount === 1) {
-    return resolveConversationTurnWorkDurationMs(
-      options.header,
-      { nowMs: options.nowMs },
-      options.segmentRunning,
-    );
+    return resolveConversationTurnWorkDurationMs(options.header);
   }
   // 兼容旧 guide snapshot：新 CLI 会下发 workSegments；仅旧数据缺事实时才按
   // guided row 的稳定时间边界恢复，避免刷新后又退回整个 turn 的单一工时。
   const startedAt = options.triggerRow?.createdAt ?? options.header?.startedAt;
   const endedAt = options.nextTriggerRow?.createdAt ?? options.header?.endedAt;
   if (startedAt !== undefined && endedAt !== undefined) return Math.max(0, endedAt - startedAt);
-  if (startedAt !== undefined && options.segmentRunning && options.nowMs !== undefined) {
-    return Math.max(0, options.nowMs - startedAt);
-  }
+  // 运行中且缺 endedAt 的段不给 durationMs：外推当前时钟会让「已工作」随时间增长，
+  // 而构建器已不再接收 nowMs。运行中展示由 WorkingDurationText 按 startedAt 现算。
   return undefined;
+}
+
+/**
+ * 本段工时起算时刻。必须与 resolveSegmentDurationMs 逐分支同源：
+ * 有 fact → fact.startedAt；无 fact 且单段 → header.startedAt（普通单段 turn 走
+ * resolveConversationTurnWorkDurationMs 的 header 分支，不是 triggerRow.createdAt）；
+ * 无 fact 且多段（旧 guide 数据）→ triggerRow.createdAt ?? header.startedAt。
+ * 分支写错会让运行中时长恒 0 或恒等于整轮时长。
+ */
+function resolveSegmentStartedAt(options: {
+  header?: TurnHeaderRow;
+  segmentIndex: number;
+  triggerRow?: UserInputRow;
+  segmentCount: number;
+}): number | undefined {
+  const fact = resolveSegmentWorkFact(options);
+  if (fact) return fact.startedAt;
+  if (options.segmentCount === 1) return options.header?.startedAt;
+  return options.triggerRow?.createdAt ?? options.header?.startedAt;
 }
 
 export function buildConversationTurnWorkSegments(options: {
@@ -142,7 +164,6 @@ export function buildConversationTurnWorkSegments(options: {
   isInterrupted: boolean;
   forceOpenHistory: boolean;
   timelineOnly: boolean;
-  nowMs?: number;
 }): ConversationTurnWorkSegment[] {
   const visualDrafts = splitVisualWorkSegments(options.orderedRows);
   const tailRowIds = new Set(options.assistantTailRows.map((row) => row.rowId));
@@ -177,9 +198,13 @@ export function buildConversationTurnWorkSegments(options: {
       segmentIndex,
       triggerRow: segment.triggerRow,
       nextTriggerRow: visualDrafts[segmentIndex + 1]?.triggerRow,
-      segmentRunning,
       segmentCount: visualDrafts.length,
-      nowMs: options.nowMs,
+    });
+    const segmentStartedAt = resolveSegmentStartedAt({
+      header: options.header,
+      segmentIndex,
+      triggerRow: segment.triggerRow,
+      segmentCount: visualDrafts.length,
     });
     const segmentWorkStatus = resolveConversationTurnWorkStatus(
       options.header,
@@ -221,6 +246,7 @@ export function buildConversationTurnWorkSegments(options: {
             visibleAssistantTextRow === undefined &&
             segmentFlowRows.length > 0)),
       ...(segmentWorkStatus ? { workStatus: segmentWorkStatus } : {}),
+      ...(segmentStartedAt !== undefined ? { startedAt: segmentStartedAt } : {}),
     };
   });
 }

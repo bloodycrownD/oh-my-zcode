@@ -20,6 +20,8 @@ import type {
   V4ConversationPlansResult,
   V4ConversationRowsRangeParams,
   V4ConversationRowsRangeResult,
+  V4ConversationTurnDirectoryParams,
+  V4ConversationTurnDirectoryResult,
   V4ConversationWorkflowRunArtifactDataParams,
   V4ConversationWorkflowRunArtifactDataResult,
   V4ConversationWorkflowRunArtifactReadParams,
@@ -60,6 +62,10 @@ export interface ConversationTransport {
   queryCommands(params: CommandsQueryParams): Promise<CommandsQueryResult>;
   /** v4/conversation/rowsRange（loadOlder）：按游标向上取一窗历史行。 */
   rowsRange(params: V4ConversationRowsRangeParams): Promise<V4ConversationRowsRangeResult>;
+  /** v4/conversation/turnDirectory：turnNavigator 的窄投影目录（游标 queryRowId）。 */
+  turnDirectory(
+    params: V4ConversationTurnDirectoryParams,
+  ): Promise<V4ConversationTurnDirectoryResult>;
   /** v4/conversation/plans：当前有效分支里的全部终态计划。 */
   plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult>;
   /** v4/conversation/workflowRunEvents：workflow run 的事件日志分页（cursor = journal sequence）。 */

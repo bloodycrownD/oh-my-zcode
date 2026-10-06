@@ -75,6 +75,7 @@ import type {
   ConversationTurnFlowItem,
   ConversationTurnRenderUnit,
   ConversationTurnWorkSegment,
+  ConversationTurnWorkStatus,
 } from "@/v4/conversationTurnRenderUnits.js";
 import { formatConversationWorkDuration } from "@/v4/conversationWorkDuration.js";
 import { ConversationTurnRow, resolveAssistantCopyText } from "@/v4/ConversationTurnRow.js";
@@ -489,6 +490,48 @@ function CronAutomationTurnCards({
   );
 }
 
+/** 运行中工时的刷新间隔：只驱动这一枚文案叶子自更新。 */
+const WORKING_DURATION_TICK_MS = 1000;
+
+/**
+ * 折叠头的工作时长文案。只有这一枚 memo 叶子按秒自刷新，运行中「工作中 N 秒」
+ * 不再要求整棵 ConversationTimeline 每秒重算 renderUnits；
+ * startedAt 缺失（协议未给起点）时回退构建期烘焙的 durationMs。
+ */
+const WorkingDurationText = memo(function WorkingDurationText({
+  state,
+  startedAt,
+  durationMs,
+}: {
+  state: ConversationTurnWorkStatus["state"] | undefined;
+  startedAt?: number;
+  durationMs?: number;
+}) {
+  const { intl, locale } = useZCodeIntl();
+  const live = state === "running" && startedAt !== undefined;
+  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    setLiveNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setLiveNowMs(Date.now());
+    }, WORKING_DURATION_TICK_MS);
+    return () => window.clearInterval(timer);
+  }, [live, startedAt]);
+  const label = formatConversationWorkDuration(
+    live ? Math.max(liveNowMs - startedAt, 0) : durationMs,
+    intl,
+    locale,
+  );
+  if (state === "interrupted") return intl.formatMessage({ id: "chat.history.stopped" });
+  if (state === "running") {
+    return intl.formatMessage({ id: "chat.history.workingFor" }, { duration: label ?? "" });
+  }
+  return label
+    ? intl.formatMessage({ id: "chat.history.workedFor" }, { duration: label })
+    : intl.formatMessage({ id: "chat.history.worked" });
+});
+
 function AssistantHistoryStatus({
   segment,
   open,
@@ -496,21 +539,6 @@ function AssistantHistoryStatus({
   segment: ConversationTurnWorkSegment;
   open: boolean;
 }) {
-  const { intl, locale } = useZCodeIntl();
-  const durationLabel = formatConversationWorkDuration(
-    segment.workStatus?.durationMs,
-    intl,
-    locale,
-  );
-  const label =
-    segment.workStatus?.state === "interrupted"
-      ? intl.formatMessage({ id: "chat.history.stopped" })
-      : segment.workStatus?.state === "running"
-        ? intl.formatMessage({ id: "chat.history.workingFor" }, { duration: durationLabel ?? "" })
-        : durationLabel
-          ? intl.formatMessage({ id: "chat.history.workedFor" }, { duration: durationLabel })
-          : intl.formatMessage({ id: "chat.history.worked" });
-
   return (
     <div className="flex w-full border-b border-[var(--color-border)]/50 pb-2">
       <CollapsibleTrigger asChild>
@@ -520,7 +548,13 @@ function AssistantHistoryStatus({
           data-history-open={String(open)}
           className="group/history-message inline-flex max-w-full items-center gap-2 text-left text-ui-base text-foreground-subtle focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-input-border-focused)]"
         >
-          <span className="truncate">{label}</span>
+          <span className="truncate">
+            <WorkingDurationText
+              state={segment.workStatus?.state}
+              startedAt={segment.startedAt}
+              durationMs={segment.workStatus?.durationMs}
+            />
+          </span>
           {!segment.assistantHistoryDefaultOpen ? (
             <ChevronRightIcon
               aria-hidden

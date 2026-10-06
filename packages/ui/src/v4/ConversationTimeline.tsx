@@ -17,6 +17,7 @@ import {
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { ArrowDownIcon } from "lucide-react";
 import { TID_V4_TIMELINE, TID_V4_TIMELINE_BOTTOM } from "@zcode/shared";
+import { PROTOCOL_V4_LIMITS } from "@zcode/shared/zcode-protocol-v4";
 import type {
   ApiRetryState,
   AttachmentRef,
@@ -25,13 +26,19 @@ import type {
   ConversationRowTarget,
   QueueItem,
   SessionPhase,
+  TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
+import { toast } from "@/components/ui/toast.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { ConversationTurnGroup } from "@/v4/ConversationTurnGroup.js";
 import { ConversationPendingGuideList } from "@/v4/ConversationPendingGuideList.js";
+import {
+  clearRowElementRegistry,
+  rowElementRegistry,
+} from "@/v4/ConversationRowView.js";
 import type { AssistantFeedbackHandler } from "@/v4/ConversationRowView.js";
 import { ConversationTurnNavigator } from "@/v4/ConversationTurnNavigator.js";
 import type { ConversationRowRenderContext } from "@/v4/conversationRowContext.js";
@@ -40,18 +47,25 @@ import {
   getConversationContentWidthClassName,
   getConversationStatusPanelOffsetClassName,
 } from "@/v4/conversationLayout.js";
+import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 import {
-  buildConversationTurnRenderUnits,
-  type ConversationTurnRenderUnit,
-} from "@/v4/conversationTurnRenderUnits.js";
+  conversationTurnRenderUnitsCache,
+  withDetachedTurnIds,
+} from "@/v4/conversationProjectionCore.js";
+import type { ConversationProjectionLastMutation } from "@/v4/conversationProjectionStore.js";
 import {
+  buildConversationTurnNavigatorItems,
+  pickOwnedRowElements,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
   shouldHydrateConversationTurnNavigatorDirectory,
+  shouldHideConversationTurnNavigatorRail,
+  type ConversationTurnNavigatorDirectoryView,
   type ConversationTurnNavigatorHydrationResult,
   type ConversationTurnNavigatorQueryPosition,
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
+import { mergeTurnNavigatorItems } from "@/v4/conversationTurnNavigatorDirectory.js";
 import {
   DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
   TimelineRowHeightCache,
@@ -93,13 +107,22 @@ import type { ConversationSelectionReference } from "@/lib/conversationSelection
 const EMPTY_PENDING_GUIDES: readonly QueueItem[] = [];
 
 const ROW_OVERSCAN = 8;
-const RUNNING_WORK_DURATION_TICK_MS = 1000;
 const COMPOSER_MESSAGE_MASK_FADE_PX = 24;
 const COMPOSER_MESSAGE_MASK_TRANSPARENT_HEIGHT_PX = 96;
 const USER_SCROLL_INTENT_TTL_MS = 1200;
 const LAYOUT_SCROLL_GUARD_MS = 250;
 const CONTENT_WIDTH_RESIZE_SETTLE_MS = 120;
 const SCROLL_MEMORY_RESTORE_TOLERANCE_PX = 1;
+
+// 跳转补拉（Step 19）：目标 query 不在已加载窗口时，按协议单页上限逐页向上取历史。
+// 页上限即 rowsRangeMaxLimit；50 页封顶 = 最多回溯 10000 行，再深的目标直接放弃，
+// 免得用户点一条极早的 query 就把整段会话拉进内存（正是本轮要消除的成本）。
+const JUMP_LOAD_PAGE_LIMIT = PROTOCOL_V4_LIMITS.rowsRangeMaxLimit;
+const JUMP_LOAD_MAX_PAGES = 50;
+// 每页补拉后等待 React 提交新窗口的帧数上限。正常一两帧就落地，超出即视为无进展。
+const JUMP_LOAD_SETTLE_FRAMES = 12;
+// 目标行挂载后的对齐重试帧数上限（虚拟化可能需要一两帧才补上测量）。
+const JUMP_ALIGN_MAX_FRAMES = 12;
 
 function scheduleMicrotask(callback: () => void): void {
   // 部分 WebView/最小 DOM 运行时没有 window.queueMicrotask；调度能力应从
@@ -119,6 +142,27 @@ function isEditableScrollTarget(target: EventTarget | null): boolean {
     target.tagName === "TEXTAREA" ||
     target.tagName === "SELECT"
   );
+}
+
+/**
+ * 跳到下一帧。补拉一页历史后必须让出主线程：store 的 setState 触发 React 重渲染、
+ * 虚拟列表重算 count 与测量都要等 commit，循环里不主动让帧会读到过期的 `rows`。
+ * 后台标签页 rAF 不触发，补一个 setTimeout 兜底免得跳转链路卡死。
+ */
+function waitForNextFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (): void => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+    const timer = window.setTimeout(done, 64);
+    window.requestAnimationFrame(() => {
+      window.clearTimeout(timer);
+      done();
+    });
+  });
 }
 
 // v4 时间线重写滚动控件时把可访问名称误做成了可见文字，偏离旧版
@@ -250,6 +294,12 @@ interface ConversationTimelineProps {
    * rowId 在不同 session 间会重复，测高缓存禁止跨会话串号。
    */
   sessionKey: string;
+  /**
+   * 最近一个 delta 帧的变更行 rowId → turnId（projection store 提供）。
+   * 渲染层据此把 renderUnits 从「每帧全量重建」降到 O(dirty)；缺省即无失效依据，
+   * 缓存句柄会退化成全量重建，不会拿旧值糊弄。
+   */
+  lastMutation?: ConversationProjectionLastMutation | undefined;
   /** renderer-local 滚动记忆 key；draft 为 null，不参与保存或恢复。 */
   scrollMemoryKey?: string | null;
   /** 行渲染上下文（theme/codePreviewSettings/workspacePath）；宿主保证引用稳定。 */
@@ -267,10 +317,26 @@ interface ConversationTimelineProps {
   canLoadOlder?: boolean;
   /** loadOlder 在途，抑制重复触发。 */
   loadingOlder?: boolean;
-  /** 拉取更早一窗历史（接近顶部时自动预取）。 */
-  onLoadOlder?: () => Promise<void> | void;
-  /** 宽屏问题目录挂载后一次补齐当前有效分支的全部历史。 */
-  onLoadAllOlder?: () => Promise<ConversationTurnNavigatorHydrationResult>;
+  /** 拉取更早一窗历史（接近顶部时自动预取；目录跳转补拉时传单页上限）。 */
+  onLoadOlder?: (limit?: number) => Promise<void> | void;
+  /**
+   * 宽屏问题目录查询（turnNavigator 窄投影）。
+   *
+   * 正文/分享模式的全量补齐走 store 的 `loadAllOlder`（SessionPane 内），不经过本组件：
+   * 那条路要的是完整正文行，目录那条路要的只是 rail 条目。
+   */
+  onLoadTurnDirectory?: () => Promise<ConversationTurnNavigatorHydrationResult>;
+  /** 目录只读查询在途（替代原正文 loadingOlder 作为 rail hydration 态）。 */
+  loadingDirectory?: boolean;
+  /** rail 显隐的目录裁决输入（条目数据由 items 合并层消费）。 */
+  turnDirectory?: ConversationTurnNavigatorDirectoryView;
+  /**
+   * turn 目录条目本体（store `turnDirectory.entries`，按 queryRowId 升序）。
+   *
+   * 与上面的 `turnDirectory` 窄面互补：窄面只做显隐/水位的裁决，本数组才是
+   * rail items 的第二个数据源（未加载区间的降级 item）。未取过目录时为空数组。
+   */
+  turnDirectoryEntries?: readonly TurnDirectoryEntry[];
   /**
    * 问题导航目录失效代际（store turnNavigatorDirectoryRevision）。
    * real-user query 增删后终态必须失效重探测；组件 hydration key
@@ -329,6 +395,7 @@ function ConversationTimelineImpl({
   apiRetry = null,
   totalCount,
   sessionKey,
+  lastMutation,
   scrollMemoryKey = null,
   rowContext,
   onFork,
@@ -338,7 +405,10 @@ function ConversationTimelineImpl({
   canLoadOlder = false,
   loadingOlder = false,
   onLoadOlder,
-  onLoadAllOlder,
+  onLoadTurnDirectory,
+  loadingDirectory = false,
+  turnDirectory,
+  turnDirectoryEntries,
   turnNavigatorDirectoryRevision = 0,
   bottomDock,
   emptyState,
@@ -383,20 +453,22 @@ function ConversationTimelineImpl({
     observer.observe(element);
     return () => observer.disconnect();
   }, [hasHeaderSlot]);
-  const [liveNowMs, setLiveNowMs] = useState(() => Date.now());
+  // 走与 SessionPane 共享的增量缓存句柄：只有本帧变更的轮（外加 isLastTurn 可能翻转的
+  // 上一末轮）真正重算，其余轮复用上一帧的 unit 对象。deps 必须带上 lastMutation，
+  // 否则「窗口引用没换但内容被原地改写」的帧会被 memo 静默跳过。
   const renderUnits = useMemo(
     () =>
-      buildConversationTurnRenderUnits(rows, {
-        nowMs: liveNowMs,
-        sessionPhase,
-      }),
-    [liveNowMs, rows, sessionPhase],
+      conversationTurnRenderUnitsCache.build(
+        rows,
+        { sessionPhase, scopeKey: sessionKey },
+        lastMutation && withDetachedTurnIds(lastMutation.turnIdByRowId, lastMutation.detachedTurnIds),
+      ),
+    [rows, sessionPhase, sessionKey, lastMutation],
   );
   const { virtualizedUnits, liveUnit, liveUnitIndex } = useMemo(
     () => splitConversationTimelineLiveTail(renderUnits),
     [renderUnits],
   );
-  const hasRunningUnit = useMemo(() => renderUnits.some((unit) => unit.isRunning), [renderUnits]);
   const turnNavigatorQueryRowIds = useMemo(
     () =>
       new Set(
@@ -408,6 +480,37 @@ function ConversationTimelineImpl({
   );
   const turnNavigatorQueryRowIdsRef = useRef(turnNavigatorQueryRowIds);
   turnNavigatorQueryRowIdsRef.current = turnNavigatorQueryRowIds;
+  // rail 的 items 数据源在父层构建（full/J-2）：可见性裁决 turnNavigatorVisible 必须
+  // 与实际渲染同源，子组件不再自算 build/merge——否则 gutter 占位条件与 rail 渲染
+  // 条件各看一份派生结果，一侧翻另一侧不翻，出现 48px 白占或反向遮挡。
+  const assistantEmptyPreview = intl.formatMessage({ id: "chat.turnNavigator.emptyAssistant" });
+  const assistantRunningPreview = intl.formatMessage({ id: "chat.turnNavigator.runningAssistant" });
+  const userFallbackPreview = intl.formatMessage({ id: "chat.turnNavigator.userFallback" });
+  const turnNavigatorLoadedItems = useMemo(
+    () =>
+      buildConversationTurnNavigatorItems(renderUnits, {
+        assistantEmptyPreview,
+        assistantRunningPreview,
+        userFallbackPreview,
+      }),
+    [assistantEmptyPreview, assistantRunningPreview, renderUnits, userFallbackPreview],
+  );
+  const turnNavigatorItems = useMemo(
+    () =>
+      mergeTurnNavigatorItems(turnDirectoryEntries ?? [], turnNavigatorLoadedItems, rows[0]?.rowId, {
+        assistantEmptyPreview,
+        assistantRunningPreview,
+        userFallbackPreview,
+      }),
+    [
+      assistantEmptyPreview,
+      assistantRunningPreview,
+      turnDirectoryEntries,
+      turnNavigatorLoadedItems,
+      userFallbackPreview,
+      rows,
+    ],
+  );
   const centeredEmptyLayout = centerEmptyStateWithDock && renderUnits.length === 0;
   const responsiveCenteredEmptyLayout = centeredEmptyLayout && !compactEmptyStateWithDock;
   // 高频值经 ref 供稳定回调读取（不进依赖数组）。
@@ -466,6 +569,9 @@ function ConversationTimelineImpl({
   if (heightCacheRef.current === null) {
     heightCacheRef.current = new TimelineRowHeightCache();
   }
+  // 首次挂载不清注册表：行元素的 ref 在本 effect 之前就已挂上，
+  // 以当前 sessionKey 作为「已清理过」的基线。
+  const rowElementRegistrySessionRef = useRef<string | null>(sessionKey);
   const [backToBottomVisible, setBackToBottomVisible] = useState(false);
   const [turnNavigatorViewport, setTurnNavigatorViewport] = useState({
     scrollOffsetPx: 0,
@@ -474,6 +580,11 @@ function ConversationTimelineImpl({
   });
   const [turnNavigatorContainerWidthPx, setTurnNavigatorContainerWidthPx] = useState(0);
   const turnNavigatorJumpFrameRef = useRef<number | null>(null);
+  // 跳转闭环（Step 19）：防重入序号 + 补拉在途标记。
+  // 目录 item 现在可能指向未加载区间，点一次要连翻若干页历史；此期间再点另一条
+  // 必须让前一次立即作废，否则两条跳转会互相把 virtualizer 拉到不同位置。
+  const turnNavigatorJumpSeqRef = useRef(0);
+  const [turnNavigatorJumpLoading, setTurnNavigatorJumpLoading] = useState(false);
   const turnNavigatorHydrationAttemptRef = useRef<{
     attemptCount: number;
     key: string | null;
@@ -491,21 +602,6 @@ function ConversationTimelineImpl({
     centeredEmptyLayout,
     statusPanelLayout: summaryPanelLayout,
   });
-
-  useEffect(() => {
-    if (!hasRunningUnit) {
-      return;
-    }
-
-    // 运行中的 assistant work 状态文案要显示“工作中 N 秒”并随时间推进；
-    // 完成态耗时由协议事实固定，builder 会拒绝把这个 UI 时钟用于已结束轮次。
-    setLiveNowMs(Date.now());
-    const timer = window.setInterval(() => {
-      setLiveNowMs(Date.now());
-    }, RUNNING_WORK_DURATION_TICK_MS);
-
-    return () => window.clearInterval(timer);
-  }, [hasRunningUnit]);
 
   useLayoutEffect(() => {
     const element = timelineRootRef.current;
@@ -542,8 +638,14 @@ function ConversationTimelineImpl({
       !shouldHydrateConversationTurnNavigatorDirectory({
         canLoadOlder,
         containerWidthPx: turnNavigatorContainerWidthPx,
-        hasLoadHandler: Boolean(onLoadAllOlder),
-        loadingOlder,
+        hasLoadHandler: Boolean(onLoadTurnDirectory),
+        loadingDirectory,
+        ...(turnDirectory
+          ? {
+              realUserQueryTotal: turnDirectory.realUserQueryTotal,
+              directoryHasMore: turnDirectory.hasMore,
+            }
+          : {}),
       })
     ) {
       return;
@@ -562,15 +664,20 @@ function ConversationTimelineImpl({
         status: "idle" as const,
       });
     }
-    if (attempt.status !== "idle" || !onLoadAllOlder) return;
+    // 与 SessionPane.tsx 的 lease.store.refreshPlans()（plans 目录刷新 effect）是平行的独立状态机：
+    // 本处作用域是 turn 窄投影（hydrationKey 驱动，有 idle/in-flight/waiting/terminal 四态 +
+    // 指数退避 + logEpoch 守卫），失败必须重试到终态；对方作用域是 plans 目录
+    // （planDirectoryRevision 驱动，fire-and-forget，无重试/退避），失败只影响 plans 新鲜度。
+    // 刻意不合并：目录 hydrate 有状态、失败必须重试到终态，plans 刷新无状态、失败可静默丢弃；
+    // 合并会让一方的重试/失效策略污染另一方。
+    if (attempt.status !== "idle" || !onLoadTurnDirectory) return;
     attempt.status = "in-flight";
-    logger.debug("[v4-turn-navigator] 目录请求补齐完整历史", {
+    logger.debug("[v4-turn-navigator] 目录窄投影查询", {
       attempt: attempt.attemptCount + 1,
-      loadedRows: rows.length,
+      knownEntryCount: turnDirectory?.entryCount ?? null,
       sessionKey,
-      totalRows: totalCount,
     });
-    void onLoadAllOlder().then((result) => {
+    void onLoadTurnDirectory().then((result) => {
       if (attempt.key !== hydrationKey) return;
       if (result.status === "hydrated" || result.status === "not-enough-queries") {
         attempt.status = "terminal";
@@ -598,12 +705,11 @@ function ConversationTimelineImpl({
     });
   }, [
     canLoadOlder,
-    loadingOlder,
-    onLoadAllOlder,
+    loadingDirectory,
+    onLoadTurnDirectory,
     rowContext.logEpoch,
-    rows,
     sessionKey,
-    totalCount,
+    turnDirectory,
     turnNavigatorContainerWidthPx,
     turnNavigatorDirectoryRevision,
     turnNavigatorHydrationRetryRevision,
@@ -840,12 +946,15 @@ function ConversationTimelineImpl({
     (element: HTMLDivElement) => {
       syncMessageLayerMask(element);
       const viewportRect = element.getBoundingClientRect();
+      // 只查已挂载行的注册表，不再对滚动容器做 querySelectorAll 全扫描
+      // （那会让每次滚动都强制 reflow）。注册表是模块级单例、多 pane 共享，
+      // 必须先按本容器归属过滤，rowId 跨会话撞号时才不会取到别家 pane 的坐标。
+      // 遍历序不参与判定，顺序由 normalize 的 start/rowId 排序兜底。
+      const ownedRowElements = pickOwnedRowElements(rowElementRegistry, element);
       const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
-      for (const rowElement of element.querySelectorAll<HTMLElement>("[data-row-id]")) {
-        const rowId = Number(rowElement.dataset.rowId);
-        if (!Number.isSafeInteger(rowId) || !turnNavigatorQueryRowIdsRef.current.has(rowId)) {
-          continue;
-        }
+      for (const rowId of turnNavigatorQueryRowIdsRef.current) {
+        const rowElement = ownedRowElements.get(rowId);
+        if (!rowElement) continue;
         const rowRect = rowElement.getBoundingClientRect();
         const start = element.scrollTop + rowRect.top - viewportRect.top;
         queryPositions.push({ rowId, start, end: start + rowRect.height });
@@ -1205,8 +1314,28 @@ function ConversationTimelineImpl({
     };
   }, [handleBackToBottom, scrollToBottomActionRef]);
 
+  /**
+   * 按 rowId 反查它在 renderUnits 里的轮下标。
+   *
+   * rail item 的 `unitIndex` 不能直接信任：已加载 item 传的是真实轮下标，但目录降级
+   * item（未加载区间）传的是 rail 上的顺序占位，根本不对应虚拟列表的任一 unit。
+   * 补拉把目标并进窗口后，下标必须由 rowId 重新解析——这是跳转闭环能落地的关键。
+   */
+  const findUnitIndexByRowId = useCallback((rowId: number): number => {
+    const units = unitsRef.current;
+    for (let index = 0; index < units.length; index += 1) {
+      if (units[index]?.visibleUserInputs.some((row) => row.rowId === rowId)) return index;
+    }
+    return -1;
+  }, []);
+
   const scrollToQuery = useCallback(
-    (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior = "auto") => {
+    async (target: { unitIndex: number; rowId: number }, behavior: ScrollBehavior = "auto") => {
+      // 防重入：新跳转作废旧跳转的补拉循环与挂载等待（序号失效法）。
+      const jumpSeq = turnNavigatorJumpSeqRef.current + 1;
+      turnNavigatorJumpSeqRef.current = jumpSeq;
+      const isStaleJump = (): boolean => turnNavigatorJumpSeqRef.current !== jumpSeq;
+
       clearUserScrollIntent();
       commitFollowing(false);
       if (turnNavigatorJumpFrameRef.current !== null) {
@@ -1214,8 +1343,13 @@ function ConversationTimelineImpl({
         turnNavigatorJumpFrameRef.current = null;
       }
 
-      const scrollMountedQuery = (element: HTMLDivElement): boolean => {
-        const rowElement = element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
+      const scrollMountedQuery = (element: HTMLDivElement, unitIndex: number): boolean => {
+        // 已挂载行优先查注册表：虚拟列表只挂可见行，注册表天然是它们的子集，
+        // 比对滚动容器做 querySelector 更省。注册表多 pane 共享，按本容器归属
+        // 过滤后命中才可信；未命中回退选择器查询（本就 scoped 在本容器内）。
+        const registered = pickOwnedRowElements(rowElementRegistry, element).get(target.rowId);
+        const rowElement =
+          registered ?? element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
         if (!rowElement) return false;
         const targetTop =
           element.scrollTop +
@@ -1231,55 +1365,138 @@ function ConversationTimelineImpl({
         logger.debug("[v4-turn-navigator] 定位用户 query", {
           behavior,
           rowId: target.rowId,
-          unitIndex: target.unitIndex,
+          unitIndex,
+          viaRegistry: registered !== undefined,
         });
         return true;
       };
 
       const element = scrollRef.current;
-      if (!element || scrollMountedQuery(element)) return;
+      if (!element) return;
 
-      // product turn 是虚拟列表的最小挂载单元，steer query 是单元内锚点。目标未挂载时
-      // 先无动画挂载所属 turn，再按用户 motion 偏好精确滚到 row，不能退回 turn 开头。
-      if (target.unitIndex === liveUnitIndex) {
-        const liveTail = liveTailRef.current;
-        if (liveTail) {
-          element.scrollTop =
-            element.scrollTop +
-            liveTail.getBoundingClientRect().top -
-            element.getBoundingClientRect().top;
+      // 在途标记覆盖整个跳转（含补拉与等挂载）：每次跳转都先置位，只有最新一次
+      // 跳转负责清零。放在这里无条件置位，是为了覆盖「新跳转目标已在窗口内、
+      // 不走补拉分支」的情况——否则前一次补拉留下的 true 永远没人清。
+      setTurnNavigatorJumpLoading(true);
+
+      const isRowLoaded = (): boolean => rowsRef.current.some((row) => row.rowId === target.rowId);
+
+      try {
+        // 目标不在已加载窗口：逐页向上补拉，直到窗口含该 anchor rowId。
+        // 拉取页由 store 的 loadOlder 合并进 window（用户主动跳转，与探测页不合并不同）。
+        if (!isRowLoaded()) {
+          for (let page = 0; page < JUMP_LOAD_MAX_PAGES; page += 1) {
+            if (isStaleJump()) return;
+            const loader = loadOlderRef.current;
+            // 窗口已是全序首行，再翻也没有更早的行；或宿主没给 loadOlder 通道。
+            if (!loader.canLoadOlder || !loader.onLoadOlder) break;
+            const headRowIdBefore = rowsRef.current[0]?.rowId;
+            await loader.onLoadOlder(JUMP_LOAD_PAGE_LIMIT);
+            // store 已 setState，但 rows 是 React props：必须等 commit 才会更新。
+            // 等到目标行出现或窗口头前移即认为这一页落地，最多等固定帧数兜底。
+            let progressed = false;
+            for (let frame = 0; frame < JUMP_LOAD_SETTLE_FRAMES; frame += 1) {
+              if (isStaleJump()) return;
+              if (isRowLoaded()) {
+                progressed = true;
+                break;
+              }
+              if (rowsRef.current[0]?.rowId !== headRowIdBefore) {
+                progressed = true;
+                break;
+              }
+              await waitForNextFrame();
+            }
+            // 一页都没能把窗口往上推（陈旧读/游标失效/请求失败）：再翻也是空转。
+            if (!progressed) {
+              logger.warn("[v4-turn-navigator] 跳转补拉无进展，停止翻页", {
+                rowId: target.rowId,
+                page,
+              });
+              break;
+            }
+            if (isRowLoaded()) break;
+            await waitForNextFrame();
+          }
+
+          if (isStaleJump()) return;
+          if (!isRowLoaded()) {
+            logger.warn("[v4-turn-navigator] 目标 query 不在可达历史内，放弃跳转", {
+              rowId: target.rowId,
+            });
+            toast(intl.formatMessage({ id: "chat.turnNavigator.jumpTargetUnavailable" }), {
+              variant: "warning",
+              dedupeKey: "turn-navigator-jump-unavailable",
+            });
+            return;
+          }
         }
-      } else {
-        virtualizer.scrollToIndex(target.unitIndex, {
-          align: "start",
-          behavior: "auto",
-        });
-      }
 
-      let remainingAttempts = 12;
-      const alignMountedQuery = () => {
-        turnNavigatorJumpFrameRef.current = null;
-        const currentElement = scrollRef.current;
-        if (currentElement && scrollMountedQuery(currentElement)) return;
-        remainingAttempts -= 1;
-        if (remainingAttempts <= 0) {
-          logger.warn("[v4-turn-navigator] query 锚点挂载超时", {
+        // 补拉后轮下标整体位移，必须按 rowId 重解析，不能沿用 rail 传来的占位下标。
+        const resolvedUnitIndex = findUnitIndexByRowId(target.rowId);
+        if (resolvedUnitIndex < 0) {
+          logger.warn("[v4-turn-navigator] 目标 query 未落在任何已加载轮内，放弃跳转", {
             rowId: target.rowId,
             unitIndex: target.unitIndex,
           });
           return;
         }
+
+        if (scrollMountedQuery(element, resolvedUnitIndex)) return;
+
+        // product turn 是虚拟列表的最小挂载单元，steer query 是单元内锚点。目标未挂载时
+        // 先无动画挂载所属 turn，再按用户 motion 偏好精确滚到 row，不能退回 turn 开头。
+        if (resolvedUnitIndex === liveUnitIndex) {
+          const liveTail = liveTailRef.current;
+          if (liveTail) {
+            element.scrollTop =
+              element.scrollTop +
+              liveTail.getBoundingClientRect().top -
+              element.getBoundingClientRect().top;
+          }
+        } else {
+          virtualizer.scrollToIndex(resolvedUnitIndex, {
+            align: "start",
+            behavior: "auto",
+          });
+        }
+
+        let remainingAttempts = JUMP_ALIGN_MAX_FRAMES;
+        const alignMountedQuery = () => {
+          turnNavigatorJumpFrameRef.current = null;
+          if (isStaleJump()) return;
+          const currentElement = scrollRef.current;
+          if (currentElement && scrollMountedQuery(currentElement, resolvedUnitIndex)) return;
+          remainingAttempts -= 1;
+          if (remainingAttempts <= 0) {
+            logger.warn("[v4-turn-navigator] query 锚点挂载超时", {
+              rowId: target.rowId,
+              unitIndex: resolvedUnitIndex,
+            });
+            return;
+          }
+          turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
+        };
         turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
-      };
-      turnNavigatorJumpFrameRef.current = window.requestAnimationFrame(alignMountedQuery);
+      } finally {
+        if (!isStaleJump()) setTurnNavigatorJumpLoading(false);
+      }
     },
-    [clearUserScrollIntent, commitFollowing, liveUnitIndex, syncTurnNavigatorViewport, virtualizer],
+    [
+      clearUserScrollIntent,
+      commitFollowing,
+      findUnitIndexByRowId,
+      intl,
+      liveUnitIndex,
+      syncTurnNavigatorViewport,
+      virtualizer,
+    ],
   );
 
   useLayoutEffect(() => {
     if (!scrollToQueryActionRef) return;
     const action = (target: { unitIndex: number; rowId: number }) => {
-      scrollToQuery(target);
+      void scrollToQuery(target);
     };
     scrollToQueryActionRef.current = action;
     return () => {
@@ -1290,11 +1507,18 @@ function ConversationTimelineImpl({
   }, [scrollToQuery, scrollToQueryActionRef]);
 
   useEffect(
-    () => () => {
-      if (turnNavigatorJumpFrameRef.current !== null) {
-        window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
-        turnNavigatorJumpFrameRef.current = null;
-      }
+    () => {
+      // 切会话（full/J-1）：在途跳转的 finally 带 isStaleJump 守卫，会话换掉后永远
+      // 等不到清零机会——必须在 effect 体里直接清，cleanup 只负责作废序号与撤帧。
+      setTurnNavigatorJumpLoading(false);
+      return () => {
+        // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
+        turnNavigatorJumpSeqRef.current += 1;
+        if (turnNavigatorJumpFrameRef.current !== null) {
+          window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
+          turnNavigatorJumpFrameRef.current = null;
+        }
+      };
     },
     [sessionKey],
   );
@@ -1363,6 +1587,12 @@ function ConversationTimelineImpl({
   useLayoutEffect(() => {
     clearUserScrollIntent();
     heightCacheRef.current?.clear();
+    // rowId 跨会话可重复，且行元素由 ref callback 注册（挂载时才写），
+    // 切会话必须清空；否则新会话里旧 rowId 会命中已卸载的元素。
+    if (rowElementRegistrySessionRef.current !== sessionKey) {
+      rowElementRegistrySessionRef.current = sessionKey;
+      clearRowElementRegistry();
+    }
     // prepend 锚定基线一并重置：rowId 跨会话可重复，禁止拿旧会话首行比较。
     prependAnchorRef.current = { firstRowId: null, totalSize: 0 };
     pendingPrependVirtualAnchorRef.current = null;
@@ -1609,6 +1839,17 @@ function ConversationTimelineImpl({
     };
   }, []);
 
+  // rail 显隐：目录已知且一条都没有、权威总数也不足两条时隐藏（否则画出一根空条）。
+  // 未取过目录时保持可见——加载中隐藏会在首帧闪一下。
+  const turnNavigatorRailHidden = shouldHideConversationTurnNavigatorRail(turnDirectory);
+  // rail 实际渲染条件的单一真源（full/J-2）：= 目录未裁决隐藏 &&
+  // 合并后条目 >= 2（子组件不再自行 return null）。gutter 占位与 JSX 挂载都必须
+  // 引用这一个值，任何一侧另算条件都会重现「rail 不在时 48px 白占」的漂移。
+  // （分享选择域下线后宿主禁用入口 hideTurnNavigator 已随 official-endpoints
+  // 分支移除，条件里不再保留该项。）
+  const turnNavigatorVisible = !turnNavigatorRailHidden && turnNavigatorItems.length >= 2;
+  const turnNavigatorOccupiesLeftGutter = turnNavigatorVisible;
+
   // raw projection row 与按 turn 合并后的 render unit 不是同一计量单位；
   // 分开暴露才能让恢复/分页验证不再把可见 unit 误当成持久 row。
   return (
@@ -1629,15 +1870,25 @@ function ConversationTimelineImpl({
         capture={captureScrollMemoryBeforeScopeMutation}
         commit={commitCapturedScrollMemory}
       />
-      <ConversationTurnNavigator
-        renderUnits={renderUnits}
-        isHydratingDirectory={loadingOlder}
-        scrollOffsetPx={virtualizer.scrollOffset ?? turnNavigatorViewport.scrollOffsetPx}
-        viewportHeightPx={virtualizer.scrollRect?.height ?? turnNavigatorViewport.viewportHeightPx}
-        virtualItems={turnNavigatorVirtualItems}
-        activeQueryRowId={turnNavigatorViewport.activeQueryRowId}
-        onJumpToQuery={scrollToQuery}
-      />
+      {turnNavigatorVisible ? (
+        <ConversationTurnNavigator
+          items={turnNavigatorItems}
+          loadedItems={turnNavigatorLoadedItems}
+          isHydratingDirectory={loadingDirectory}
+          jumpLoading={turnNavigatorJumpLoading}
+          scrollOffsetPx={virtualizer.scrollOffset ?? turnNavigatorViewport.scrollOffsetPx}
+          viewportHeightPx={
+            virtualizer.scrollRect?.height ?? turnNavigatorViewport.viewportHeightPx
+          }
+          virtualItems={turnNavigatorVirtualItems}
+          activeQueryRowId={turnNavigatorViewport.activeQueryRowId}
+          olderEntriesNotLoadedCount={
+            turnDirectory?.truncated === true ? turnDirectory.olderEntriesNotLoadedCount : undefined
+          }
+          windowFirstRowId={rows[0]?.rowId}
+          onJumpToQuery={scrollToQuery}
+        />
+      ) : null}
       <div
         ref={scrollRef}
         data-testid={TID_V4_TIMELINE}
@@ -1650,6 +1901,7 @@ function ConversationTimelineImpl({
         data-total-row-count={totalCount}
         data-following={backToBottomVisible ? "false" : "true"}
         data-loading-older={loadingOlder ? "true" : "false"}
+        data-jump-loading={turnNavigatorJumpLoading ? "true" : "false"}
         onKeyDownCapture={handleKeyDownCapture}
         onPointerCancelCapture={handlePointerEndCapture}
         onPointerDownCapture={handlePointerDownCapture}
@@ -1668,7 +1920,7 @@ function ConversationTimelineImpl({
           "min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] [--markdown-table-layout-left-inset:16px] [--markdown-table-layout-right-inset:16px] max-md:[--markdown-table-layout-left-inset:8px] max-md:[--markdown-table-layout-right-inset:8px]",
           // Conversation turn map 覆盖 timeline 左侧 48px；表格增强滚动如果仍按
           // 普通 16px 边距借位，会有 32px 落到 turn map 下方，必须把完整占用计入左边界。
-          turnNavigatorQueryRowIds.size >= 2 &&
+          turnNavigatorOccupiesLeftGutter &&
             "@min-[864px]/conversation:[--markdown-table-layout-left-inset:48px]",
         )}
       >

@@ -126,6 +126,34 @@ import { ConversationHookDetailsAction } from "@/v4/ConversationHookDetailsActio
 import { formatModelChangeLabel } from "@/v4/composer/modelTriggerDisplay.js";
 import { formatMessageTimeLabel } from "@/v4/messageTimeLabel.js";
 
+const rowElements = new Map<number, HTMLElement>();
+
+/**
+ * 已挂载 row 根元素注册表（rowId → 元素）。虚拟列表只挂载可见行，注册表天然是
+ * 可见行的子集；turn rail 的视口同步据此取位置，免去对滚动容器做
+ * querySelectorAll 全扫描引发的强制 reflow。生命周期与 timelineRowHeightCache 一致：
+ * session 切换由 ConversationTimeline 清空。
+ */
+export const rowElementRegistry: ReadonlyMap<number, HTMLElement> = rowElements;
+
+/** ref callback 入口：卸载时传 null。delete+set 幂等，StrictMode 双挂载不会互相误删。 */
+function registerRowElement(rowId: number, element: HTMLElement | null): void {
+  rowElements.delete(rowId);
+  if (element) rowElements.set(rowId, element);
+}
+
+/**
+ * session 切换清空：rowId 跨会话可重复，旧行已脱离文档必须丢弃。
+ * 只丢 `isConnected === false` 的条目——本轮切会话时新会话的行可能已随同一次
+ * commit 挂上并注册，无差别 clear 会把它们一起抹掉、rail 定位要等下一次
+ * 虚拟化挂载才恢复。
+ */
+export function clearRowElementRegistry(): void {
+  for (const [rowId, element] of rowElements) {
+    if (!element.isConnected) rowElements.delete(rowId);
+  }
+}
+
 function RowShell({
   rowId,
   children,
@@ -135,8 +163,15 @@ function RowShell({
   children: React.ReactNode;
   className?: string;
 }) {
+  const handleRowRef = useCallback(
+    (element: HTMLDivElement | null) => {
+      registerRowElement(rowId, element);
+    },
+    [rowId],
+  );
   return (
     <div
+      ref={handleRowRef}
       data-row-id={rowId}
       data-testid={testId(TID_V4_ROW, String(rowId))}
       className={cn(className)}

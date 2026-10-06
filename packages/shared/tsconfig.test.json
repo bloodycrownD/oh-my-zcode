@@ -1,0 +1,12 @@
+{
+  "extends": "./tsconfig.json",
+  // 测试专用工程：把本期测试文件（packages/shared/test）纳入 typecheck 覆盖，
+  // 与 src 主工程分离，避免测试代码污染构建产物。
+  // rootDir 必须覆盖为 "."：测试文件位于 src 之外，继承 rootDir:"src" 会对测试文件报 TS6059（文件不在 rootDir 内）。
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": "."
+  },
+  "include": ["src", "test"]
+}

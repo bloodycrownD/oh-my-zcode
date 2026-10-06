@@ -25,12 +25,18 @@ import type {
   SubscribeAck,
   TopicFrameDeliveryKind,
   ToolCallRow,
+  TurnDirectoryEntry,
+  UserInputRow,
   V4ConversationPlansResult,
   V4ConversationRowsRangeResult,
+  V4ConversationTurnDirectoryResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
+  DEFAULT_MAX_PREVIEW_CHARS,
+  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
   DELIVERY_PROFILES,
   PROTOCOL_V4_LIMITS,
+  buildPreviewText,
   clampWorkflowRunsForLegacy,
   coalesceConversationDeltas,
   filterConversationDeltasForProfile,
@@ -62,6 +68,13 @@ const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
   "error",
   "cancelled",
 ]);
+
+/**
+ * turn 目录里「没有正文可摘」时的 fallback。i18n 文案不下发（客户端按
+ * `assistantPreviewKind` 填 `chat.turnNavigator.*`），所以这里只能是空串——
+ * 服务端一旦下发占位文案，客户端就再也无法本地化。
+ */
+const TURN_DIRECTORY_EMPTY_PREVIEW = "";
 
 /**
  * cold replay 会高频测量临时 delta；TextEncoder 会为每次测量再分配完整 Uint8Array。
@@ -476,6 +489,103 @@ export class ConversationTopicPublisher {
       plans,
       atSeq: snapshot.seq,
       atLogEpoch: this.logEpoch,
+    };
+  }
+
+  /**
+   * turn 目录窄投影（turnNavigator 的数据源）：从投影**全量行现算派生**，不在
+   * ProductProjection 里维护第二份目录结构——目录一旦成为权威的第二份投影，
+   * 增量事件就要双写，drift 只能靠对账发现。
+   *
+   * 三条硬定义（客户端的合并、定位、rail 隐藏条件都按它们写死，见 transport.ts）：
+   *   1. `entries` 按 `queryRowId` **升序**（与 rail 自上而下的时间序一致，也与
+   *      {@link getRowsRange} 同向；同族的 {@link getPlans} 是降序，方向别照抄）；
+   *   2. `beforeQueryRowId` 只取 `queryRowId` 严格更小的更早条目，再取最靠后的 limit 条；
+   *   3. `hasMore` 是「更早方向仍有条目」，不是「这页正好拉满 limit」。
+   *
+   * 目录粒度是**用户可见 query**（`origin === "realUser"` 的 userInput 行），不是
+   * product turn：同一 turn 的 steer query 各自成条，所以游标落在 queryRowId 上。
+   * turnHeader 行只用来定 turn 边界与 running 判定，assistantText 行出概要。
+   */
+  getTurnDirectory(
+    params: { limit?: number; beforeQueryRowId?: number },
+    deliveryProfile: DeliveryProfileName = "replayable",
+  ): V4ConversationTurnDirectoryResult {
+    const snapshot = this.projection.getSnapshot();
+    const limit = Math.max(
+      1,
+      Math.min(
+        params.limit ?? PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
+        PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
+      ),
+    );
+    // profile 过滤当前是 no-op，但保留边界：将来 replayable 档收窄行可见性时，
+    // 目录必须与 rowsRange 看到同一批行，否则目录会泄出客户端根本拿不到的行。
+    const visibleRows = filterConversationRowsForProfile(
+      snapshot.rows.window,
+      DELIVERY_PROFILES[deliveryProfile],
+    );
+
+    // 单趟扫全量行：turn 边界靠 turnId 归并，header 只留首个（同一 turn 只有一条）。
+    const turns = new Map<string, { headerState?: string; assistantTexts: string[] }>();
+    const queries: UserInputRow[] = [];
+    for (const row of visibleRows) {
+      let turn = turns.get(row.turnId);
+      if (turn === undefined) {
+        turn = { assistantTexts: [] };
+        turns.set(row.turnId, turn);
+      }
+      if (row.kind === "turnHeader") {
+        turn.headerState ??= row.state;
+      } else if (row.kind === "assistantText") {
+        turn.assistantTexts.push(row.text);
+      } else if (row.kind === "userInput" && row.origin === "realUser") {
+        queries.push(row);
+      }
+    }
+
+    const preview = (texts: readonly string[]): string =>
+      buildPreviewText({
+        texts,
+        // 摘要口径与 renderer rail 严格同源（@zcode/shared/previewText 的 220 字符 / 2 段）。
+        fallback: TURN_DIRECTORY_EMPTY_PREVIEW,
+        maxPreviewChars: DEFAULT_MAX_PREVIEW_CHARS,
+        maxPreviewParagraphs: DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+      });
+
+    const allEntries = queries
+      .toSorted((left, right) => left.rowId - right.rowId)
+      .map((row): TurnDirectoryEntry => {
+        const turn = turns.get(row.turnId);
+        const hasAssistantText = (turn?.assistantTexts.length ?? 0) > 0;
+        return {
+          turnId: row.turnId,
+          queryRowId: row.rowId,
+          queryPreview: preview([row.text]),
+          // 文案不下发：非 text 态的 assistantPreview 恒为空串，客户端按枚举填 i18n。
+          assistantPreview: hasAssistantText ? preview(turn?.assistantTexts ?? []) : "",
+          assistantPreviewKind: hasAssistantText
+            ? "text"
+            : turn?.headerState === "running"
+              ? "running"
+              : "empty",
+        };
+      });
+
+    const eligible =
+      params.beforeQueryRowId === undefined
+        ? allEntries
+        : allEntries.filter((entry) => entry.queryRowId < (params.beforeQueryRowId as number));
+    const page = eligible.slice(-limit);
+    return {
+      entries: page,
+      // 权威总数从全量行现算，**不受游标与 limit 影响**：客户端用它判「够不够 hydrate
+      // turn 目录」，靠翻页探测 reduce 在窄投影下会误判。
+      realUserQueryTotal: allEntries.length,
+      atSeq: snapshot.seq,
+      atRevision: snapshot.revision,
+      atLogEpoch: this.logEpoch,
+      hasMore: eligible.length > page.length,
     };
   }
 

@@ -6,7 +6,9 @@ import {
   type MemoryDiagnosticsRegistry,
   type MemorySample,
 } from "@zcode/shared";
-import { logMemoryDiagnostics } from "@/logger.js";
+// 相对路径而非 `@/logger.js`：注册表被 shikiHighlighter 的单测 import，
+// `@/` 别名在纯 Node（tsx --test）下无法解析。
+import { logMemoryDiagnostics } from "../logger.js";
 
 /**
  * renderer 内存诊断计数器注册表。
@@ -33,6 +35,31 @@ function readRendererHeapSnapshot(): RendererHeapSnapshot | undefined {
   return memory;
 }
 
+/**
+ * renderer 内存样本的纯读出口：注册表计数 + `performance.memory`，
+ * **不经过写盘门控、不落盘、无副作用**。
+ *
+ * 与 `sampleNow()` 的分工：后者是 60s 定时采样器，返回的只是「这次有没有写盘」的 boolean，
+ * 拿不到数据本身；页面内探针（perfProbe）需要在任意时刻按需取一份完整样本，因此走这里。
+ */
+export function collectRendererMemorySample(
+  registry: MemoryDiagnosticsRegistry = uiMemoryDiagnosticsRegistry,
+  readHeap: () => RendererHeapSnapshot | undefined = readRendererHeapSnapshot,
+): MemorySample {
+  const sample: MemorySample = {
+    role: "renderer",
+    counters: registry.collect(),
+  };
+  const heap = readHeap();
+  if (heap) {
+    sample.heapUsedKb = Math.round(heap.usedJSHeapSize! / 1024);
+    if (typeof heap.totalJSHeapSize === "number") {
+      sample.heapTotalKb = Math.round(heap.totalJSHeapSize / 1024);
+    }
+  }
+  return sample;
+}
+
 interface StartMemoryDiagnosticsLoggerOptions {
   intervalMs?: number;
   now?: () => number;
@@ -57,18 +84,7 @@ export function startMemoryDiagnosticsLogger(
 
   const sampleNow = (): boolean => {
     try {
-      const heap = readHeap();
-      const heapUsedKb = heap ? Math.round(heap.usedJSHeapSize! / 1024) : undefined;
-      const sample: MemorySample = {
-        role: "renderer",
-        counters: registry.collect(),
-      };
-      if (heap) {
-        sample.heapUsedKb = heapUsedKb;
-        if (typeof heap.totalJSHeapSize === "number") {
-          sample.heapTotalKb = Math.round(heap.totalJSHeapSize / 1024);
-        }
-      }
+      const sample = collectRendererMemorySample(registry, readHeap);
       const reason = gate.evaluate(sample, now());
       if (!reason) {
         return false;

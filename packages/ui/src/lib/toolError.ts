@@ -1,4 +1,4 @@
-import type { TaskChatToolCall as ChatToolCall } from "@/lib/taskChatMessageTypes.js";
+import type { TaskChatToolCall as ChatToolCall } from "./taskChatMessageTypes.js";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

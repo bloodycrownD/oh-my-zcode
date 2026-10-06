@@ -528,8 +528,24 @@ export function SessionPane({
   const [lease, setLease] = useState<SessionLease | null>(null);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  // 草稿态：还没有 sessionId，既没有权威 phase 也没有正式会话的行。
+  const isDraft = sessionId === null;
+  /**
+   * 增量缓存喂 phase 的统一口径：Timeline 的 sessionPhase 从这里取，不自行推导。
+   * 缓存按 (scopeKey, sessionPhase) 整体作废；此处与 Timeline 侧曾各有 build 时
+   * 两边必须同值（详见 conversationTurnRenderUnitsCache 的说明），收敛成一个
+   * 出口后推导逻辑只剩这一份。
+   */
+  const sessionRenderPhase = isDraft ? undefined : snapshot?.control.phase;
   const newlyCreatedSessionIdRef = useRef<string | null>(null);
+  // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
+  // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
+  // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
   const sessionLeaseReady = lease?.sessionId === sessionId;
+  const timelineSnapshot =
+    !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
+      ? snapshot
+      : null;
   useEffect(() => {
     const newlyCreatedSessionId = newlyCreatedSessionIdRef.current;
     if (newlyCreatedSessionId !== null && newlyCreatedSessionId !== sessionId) {
@@ -1815,6 +1831,12 @@ export function SessionPane({
 
   useEffect(() => {
     if (!sessionId || !lease || snapshot?.sessionId !== sessionId) return;
+    // 与 ConversationTimeline.tsx 的 turnNavigatorHydrationAttemptRef（目录 hydrate 重试状态机）
+    // 是平行的独立状态机：本处作用域是 plans 目录（planDirectoryRevision 驱动，fire-and-forget，
+    // 无重试/退避），失败只影响 plans 新鲜度；对方作用域是 turn 窄投影（hydrationKey 驱动，
+    // 有 idle/in-flight/waiting/terminal 四态 + 指数退避 + logEpoch 守卫）。
+    // 刻意不合并：plans 刷新无状态、失败可静默丢弃，目录 hydrate 有状态、失败必须重试到终态；
+    // 合并会让一方的重试/失效策略污染另一方。
     void lease.store.refreshPlans();
   }, [lease, sessionId, snapshot?.sessionId, state.planDirectoryRevision]);
 
@@ -2995,19 +3017,58 @@ export function SessionPane({
     void lease?.store.retry();
   }, [lease]);
 
-  // loadOlder 触发（接近顶部自动预取）。store 内部单飞防重入。
-  const handleLoadOlder = useCallback(() => {
-    return lease?.store.loadOlder();
-  }, [lease]);
+  // loadOlder 触发（接近顶部自动预取 / 目录跳转补拉）。store 内部单飞防重入。
+  // limit 缺省走 store 默认尾窗大小；跳转补拉显式传 rowsRangeMaxLimit 一页拉满。
+  const handleLoadOlder = useCallback(
+    (limit?: number) => {
+      return lease?.store.loadOlder(limit);
+    },
+    [lease],
+  );
 
-  const handleLoadAllOlder = useCallback(() => {
+  // 宽屏 rail 的目录查询（窄投影，只取条目不并入正文窗口）。
+  // 与下面的 loadAllOlder 是两条路：那条服务正文/分享模式的全量语义。
+  const handleLoadTurnDirectory = useCallback(() => {
     return lease
-      ? lease.store.loadAllOlder()
+      ? lease.store.loadTurnDirectory()
       : Promise.resolve({
           status: "stale" as const,
           logEpoch: snapshot?.logEpoch ?? "unknown",
         });
   }, [lease, snapshot?.logEpoch]);
+
+  // rail 显隐的目录裁决窄面（条目数组不进组件，避免同一份目录存第二份）。
+  //
+  // **未取过目录时（loaded === false）必须把 realUserQueryTotal / hasMore 留成 undefined。**
+  // store 的空态默认是 0 / false，语义是「还没取过」，不是「取到了 0 条」；无条件下发会让
+  // `shouldHydrateConversationTurnNavigatorDirectory` 的 `total < 2` 闸门把首查永久挡掉，
+  // 而 store 的失效重查 `scheduleTurnDirectoryRequery` 又要求 `loaded === true`——闭环自锁，
+  // 宽屏 rail 永远拿不到目录（相对旧 loadAllOlder 路径是能力回退）。留 undefined 让判定函数
+  // 落回 `canLoadOlder` 放行首查（重试同理：retryable-failure 不会写 loaded）。
+  //
+  // 终态不走这条路：`not-enough-queries` 结案时 `loaded === true`，权威总数照常下发，
+  // `< 2` 继续作为「不再 hydrate」的结论，`hasMore === false` 也不再放行。
+  const turnDirectoryView = useMemo(
+    () => ({
+      loaded: state.turnDirectory.loaded,
+      entryCount: state.turnDirectory.entries.length,
+      realUserQueryTotal: state.turnDirectory.loaded
+        ? state.turnDirectory.realUserQueryTotal
+        : undefined,
+      hasMore: state.turnDirectory.loaded ? state.turnDirectory.hasMore : undefined,
+      truncated: state.turnDirectory.loaded ? state.turnDirectory.truncated : undefined,
+      olderEntriesNotLoadedCount: state.turnDirectory.loaded
+        ? Math.max(0, state.turnDirectory.realUserQueryTotal - state.turnDirectory.entries.length)
+        : undefined,
+    }),
+    [
+      state.turnDirectory.hasMore,
+      state.turnDirectory.loaded,
+      state.turnDirectory.entries.length,
+      state.turnDirectory.realUserQueryTotal,
+      state.turnDirectory.truncated,
+    ],
+  );
 
   useEffect(() => {
     if (
@@ -3049,14 +3110,6 @@ export function SessionPane({
   // editUserQuery 已由 command 层防御 latest real user query，并在 running
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
   const editActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
-  const isDraft = sessionId === null;
-  // 滚动恢复必须使用与 sessionId 匹配的 lease projection。切换 session 的 render 与
-  // passive effect 不在同一时刻，旧 lease 的 rows 若提前交给 timeline，会让新记忆按旧
-  // 内容高度 clamp，后续目标 rows 到达时也无法区分这次临时落点。
-  const timelineSnapshot =
-    !isDraft && (lease === null || sessionLeaseReady) && snapshot?.sessionId === sessionId
-      ? snapshot
-      : null;
   const initialDraftConfigForDiagnostics = isDraft ? resolveInitialDraftConfig() : undefined;
   // CLI V4 projection 是 running/count/manifest 的唯一权威；renderer 不再在 spawn
   // 事件后另发查询拼接第二份状态，避免并发 child 的 in-flight refresh 丢更新。
@@ -3562,6 +3615,7 @@ export function SessionPane({
               apiRetry={timelineSnapshot?.control.apiRetry ?? null}
               totalCount={timelineSnapshot?.rows.totalCount ?? 0}
               sessionKey={sessionId ?? "draft"}
+              lastMutation={timelineSnapshot ? state.lastMutation : undefined}
               scrollMemoryKey={timelineScrollMemoryKey}
               rowContext={rowContext}
               onFork={forkActionsEnabled ? handleFork : undefined}
@@ -3573,7 +3627,11 @@ export function SessionPane({
               canLoadOlder={timelineSnapshot ? hasOlderRows(timelineSnapshot) : false}
               loadingOlder={timelineSnapshot ? state.loadingOlder : false}
               onLoadOlder={handleLoadOlder}
-              onLoadAllOlder={handleLoadAllOlder}
+              onLoadTurnDirectory={handleLoadTurnDirectory}
+              loadingDirectory={state.loadingDirectory}
+              turnDirectory={turnDirectoryView}
+              // 目录条目本体进 rail 的 items 合并层（窄面 turnDirectoryView 只做显隐裁决）。
+              turnDirectoryEntries={state.turnDirectory.entries}
               turnNavigatorDirectoryRevision={state.turnNavigatorDirectoryRevision}
               bottomDock={conversationBottomDock}
               emptyState={
@@ -3595,7 +3653,7 @@ export function SessionPane({
               }
               searchResultHighlightRequest={isDraft ? null : searchResultHighlightRequest}
               onSearchResultHighlightDone={onSearchResultHighlightDone}
-              sessionPhase={isDraft ? undefined : snapshot?.control.phase}
+              sessionPhase={sessionRenderPhase}
               selectionActions={
                 !isDraft && sessionId && !readOnly && !selectionSideChat
                   ? {

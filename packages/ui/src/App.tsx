@@ -77,6 +77,7 @@ import { usePaneLayoutStore } from "@/v4/paneLayoutStore.js";
 import { useWorkbenchGroupStore } from "@/v4/workbenchGroupStore.js";
 import type { AssistantPreviewCardsAutoOpenRequest } from "@/lib/assistantPreviewCards.js";
 import { startMemoryDiagnosticsLogger } from "@/lib/memoryDiagnostics.js";
+import { startPerfProbe, type PerfProbeDebugWindow } from "@/lib/perfProbe.js";
 
 const EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY: NonNullable<
   AppProps["reconnectingRemoteWorkspaceLogsByWorkspaceKey"]
@@ -133,6 +134,14 @@ export function App({
   useEffect(() => {
     const memoryDiagnosticsLogger = startMemoryDiagnosticsLogger();
     return () => memoryDiagnosticsLogger.stop();
+  }, []);
+  // 页面内性能探针（dev-only）：长任务环形缓冲 + 内存分段采样，
+  // CDP 经 window.__zcodePerfProbe 的 reset/dump 取数，生产 build 下是 no-op。
+  // 卸载时必须 stop：否则观察者继续挂着，HMR 后的新探针再挂一个，同一条长任务
+  // 被双 observer 记账，采样条目翻倍（基线/终验直接失真）。
+  useEffect(() => {
+    startPerfProbe();
+    return () => (window as PerfProbeDebugWindow).__zcodePerfProbe?.stop();
   }, []);
   const activeWorkspaceRpcTarget = useTabStore(
     useShallow((state) => {

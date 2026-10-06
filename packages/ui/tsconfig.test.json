@@ -1,0 +1,20 @@
+{
+  "extends": "./tsconfig.json",
+  // 测试专用工程：把本期测试文件（packages/ui/test）纳入 typecheck 覆盖，
+  // 与 src 主工程分离，避免测试代码污染构建产物。
+  // rootDir 必须覆盖为 "."：测试文件位于 src 之外，继承 rootDir:"src" 会对测试文件报 TS6059（文件不在 rootDir 内）。
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["node"],
+    "rootDir": "."
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.d.ts", "src/**/*.json", "test/**/*.ts", "test/**/*.tsx"],
+  // extends 不继承 references，必须显式声明：测试文件通过 @zcode/shared 等包名导入，
+  // 需要引用工程解析，否则 shared 源文件会被当作本工程输入触发 TS6307/TS6059。
+  "references": [
+    { "path": "../provider" },
+    { "path": "../shared" },
+    { "path": "../services" },
+    { "path": "../rpc" }
+  ]
+}

@@ -6,18 +6,19 @@
 //   3. base 与状态同生共死——断档时状态未被污染，携当前水位重订阅，由服务端裁决 resume/snapshot。
 // 除 optimistic overlay（pending 命令展示）外，本 store 不产生任何 conversation 事实。
 import {
-  applyConversationDeltas,
   isDeterministicContentFault,
   parseConversationTopic,
   PROTOCOL_V4_LIMITS,
   SUBSCRIPTION_CONTENT_REJECTED,
   type ConversationRow,
+  type ConversationDelta,
   type ConversationSnapshot,
   type ConversationOpenTiming,
   type ConversationTopicFrame,
   type SessionModelTransition,
   type ToolCallRow,
   type TopicFrameDeliveryKind,
+  type TurnDirectoryEntry,
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
@@ -122,13 +123,34 @@ export interface ConversationStoreState {
   planDirectoryRevision: number;
   plansLoading: boolean;
   /**
-   * 问题导航目录（turn navigator）的失效代际。
+   * 问题导航目录（turnNavigator）的失效代际。
    * not-enough-queries 终态过去只以 logEpoch 判定有效，但
    * "是否已有 ≥2 条可导航 query"是随增量变化的派生条件，logEpoch 表示日志代际而非
    * 内容静止。real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
-   * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态缓存失效。
+   * 或 row.removed 截断分支）与 snapshot 整体替换时递增此 revision，使终态失效重探测。
+   *
+   * **代际分工**：本 revision 只做「要不要重查目录」的 UI 闸门（含 250ms trailing 去抖）；
+   * 单次目录读自身是否陈旧由服务端随读返回的 `atRevision`/`atLogEpoch` 裁决，两者不互相替代。
    */
   turnNavigatorDirectoryRevision: number;
+  /**
+   * turnNavigator 窄投影目录（`v4/conversation/turnDirectory` 只读查询的结果）。
+   *
+   * 目录与正文窗口解耦：条目**不并入** `rows.window`——为一个宽屏 rail 把完整历史
+   * 常驻 renderer 正是本轮要消除的成本。条目数据源消费在 items 合并层；
+   * 这里只保留窄投影与它的裁决水位。
+   */
+  turnDirectory: ConversationTurnDirectoryState;
+  /** 目录只读查询在途（自动重查防重入 + rail hydration 态）。 */
+  loadingDirectory: boolean;
+  /**
+   * 最近一个 delta 帧的变更定位（变更行 rowId → turnId）。
+   *
+   * renderUnits 增量重建据此把「每帧全量」降到 O(dirty)。任何整体替换窗口的路径
+   * （snapshot 帧、loadOlder / loadAllOlder 前插补拉）都必须把它清成 undefined：
+   * 那几帧的行集合是整块换的，用上一帧的变更集当失效依据会漏掉真正变过的轮。
+   */
+  lastMutation?: ConversationProjectionLastMutation;
 }
 
 export interface SessionOpenRendererTiming {
@@ -137,6 +159,48 @@ export interface SessionOpenRendererTiming {
   rendererSnapshotApplyMs?: number;
   snapshotAppliedAt?: number;
 }
+
+/**
+ * turnNavigator 目录缓存态（只读 query 结果 + 裁决水位，非 conversation 协议事实）。
+ *
+ * 水位字段是陈旧读丢弃的依据：目录查询与订阅流并行，跨 revision/跨纪元拼接出的
+ * 目录既可能漏条目（游标按全量行现算）也可能复活已被裁剪的分支。
+ */
+export interface ConversationTurnDirectoryState {
+  /** 服务端按 queryRowId 升序返回的目录条目（客户端已按同向拼接）。 */
+  entries: readonly TurnDirectoryEntry[];
+  /** 服务端从全量投影行现算的 realUser query 权威总数（不受游标与 limit 影响）。 */
+  realUserQueryTotal: number;
+  /** 最近一次被接纳的读的服务端水位（跨 revision 拼接的裁决依据）。 */
+  atRevision: number | null;
+  atSeq: number | null;
+  atLogEpoch: string | null;
+  /** 更早方向仍有条目（本次未续拉至齐）。 */
+  hasMore: boolean;
+  /**
+   * 提交时条目数少于服务端现算的权威总数（翻页撞到 50 页上限）。
+   *
+   * 截断必须显式存在：`hasMore` 只说「更早方向还有」，rail 拿它继续想上拉，
+   * 用户看到的却是一条「到此为止」的完整目录。rail 据此在顶部渲染提示。
+   */
+  truncated: boolean;
+  /** 是否成功取过一次目录（rail 隐藏判定与失效重查都以「已取过」为前提）。 */
+  loaded: boolean;
+}
+
+const EMPTY_TURN_DIRECTORY_STATE: ConversationTurnDirectoryState = {
+  entries: [],
+  realUserQueryTotal: 0,
+  atRevision: null,
+  atSeq: null,
+  atLogEpoch: null,
+  hasMore: false,
+  truncated: false,
+  loaded: false,
+};
+
+/** 目录续拉页数上限（每页 turnDirectoryMaxEntries 条）；到顶即以「已取到的部分」提交。 */
+const TURN_DIRECTORY_MAX_PAGES = 50;
 
 const INITIAL_STATE: ConversationStoreState = {
   status: "connecting",
@@ -150,6 +214,9 @@ const INITIAL_STATE: ConversationStoreState = {
   planDirectoryRevision: 0,
   plansLoading: false,
   turnNavigatorDirectoryRevision: 0,
+  turnDirectory: EMPTY_TURN_DIRECTORY_STATE,
+  loadingDirectory: false,
+  lastMutation: undefined,
 };
 
 const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
@@ -169,25 +236,6 @@ function shouldInvalidatePlanDirectory(frame: ConversationTopicFrame): boolean {
       row.toolName === "ExitPlanMode" &&
       TERMINAL_PLAN_STATUSES.has(row.status)
     );
-  });
-}
-
-/**
- * 问题导航目录是否需要失效。
- * not-enough-queries 终态曾只以 logEpoch 判定，导致同一 epoch
- * 内追加 real-user query 后永久命中缓存。判定条件：
- * - snapshot 整体替换 → true（全新状态，终态作废）；
- * - row.removed → true（rewind/分支裁剪改变可导航 query 集合）；
- * - row.appended/row.upserted 命中 realUser userInput → true（新增/变更用户问题）；
- * - 其余 delta（assistant text、tool、reasoning 流式）→ false，不触发重探测。
- */
-function shouldInvalidateTurnNavigatorDirectory(frame: ConversationTopicFrame): boolean {
-  if (frame.payload.kind === "snapshot") return true;
-  return frame.payload.deltas.some((delta) => {
-    if (delta.op === "row.removed") return true;
-    if (delta.op !== "row.appended" && delta.op !== "row.upserted") return false;
-    const row = delta.row;
-    return row.kind === "userInput" && row.origin === "realUser";
   });
 }
 
@@ -247,20 +295,24 @@ export function shouldAutoLoadIncompleteLeadingTurn(
   );
 }
 
-/**
- * rows/range 结果并入本地窗口（合并规范）：按 rowId 键控、只收
- * 窗口首行之前的行、去重后前插；顺序键 = rowId 升序（全序保证）。
- * 返回 null 表示无可并入行（窗口无变化，调用方不换引用）。
- */
-function mergeOlderRows(
-  window: readonly ConversationRow[],
-  fetched: readonly ConversationRow[],
-): ConversationRow[] | null {
-  const firstRowId = window[0]?.rowId ?? Number.POSITIVE_INFINITY;
-  const older = fetched.filter((row) => row.rowId < firstRowId);
-  if (older.length === 0) return null;
-  return [...older, ...window];
-}
+// 合并规范、accumulator 应用包装与 copy-on-notify 发布已下沉到 @/-free 的
+// conversationProjectionCore（可测性前置：被测模块传递依赖链零 `@/` 导入）。
+// 这里 import + re-export 保持既有外部引用不破。
+import {
+  accumulateTurnDirectoryPages,
+  createConversationProjectionAccumulator,
+  createTrailingDebouncer,
+  mergeOlderRows,
+  nextTurnNavigatorDirectoryRevision,
+  TurnDirectoryAbortedError,
+  TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+  type ConversationProjectionAccumulator,
+  type ConversationProjectionLastMutation,
+  type TrailingDebouncer,
+} from "@/v4/conversationProjectionCore.js";
+
+export { mergeOlderRows };
+export type { ConversationProjectionAccumulator, ConversationProjectionLastMutation };
 
 /**
  * 外部 store（useSyncExternalStore 兼容：subscribe + getState 返回稳定引用）。
@@ -329,7 +381,34 @@ export class ConversationProjectionStore {
         { status: "hydrated" | "not-enough-queries" }
       > & { directoryRevision: number })
     | null = null;
+  /**
+   * 目录路径（{@link loadTurnDirectory}）**自己的**终态缓存。
+   *
+   * 刻意不与 {@link turnNavigatorHydrationTerminal} 共用：那条缓存代表「完整历史正文
+   * 已经并入窗口」，而目录终态只代表「rail 的条目取齐了」。共用会让分享模式的首轮
+   * 补齐命中目录终态后直接返回，正文永远补不齐——两条路径的产物根本不是一回事。
+   */
+  private turnDirectoryHydrationTerminal:
+    | (Extract<
+        ConversationTurnNavigatorHydrationResult,
+        { status: "hydrated" | "not-enough-queries" }
+      > & { directoryRevision: number })
+    | null = null;
+  /** 目录重查去抖器（trailing 250ms）；懒建，未 hydrate 过的会话不排。 */
+  private turnDirectoryDebouncer: TrailingDebouncer | null = null;
+  /** 目录查询在途标记：在途期间来的重查并入下一次，不并发打 RPC。 */
+  private turnDirectoryQueryInFlight = false;
+  private turnDirectoryQueryPending = false;
   private closed = false;
+  /**
+   * delta 应用的可变累加器（copy-on-notify）。
+   *
+   * `state.snapshot` 永远是它发布出来的**外壳副本**，不是累加器本体：本帧之后的
+   * 原地变更只落在累加器自己的 window 数组上，已发布的那一份保持定格。因此
+   * setState 之后的任何读（reconcile / observeModelTransition / 子组件 memo）
+   * 拿到的都是稳定的帧快照。
+   */
+  private accumulator: ConversationProjectionAccumulator | null = null;
 
   constructor(
     readonly topic: string,
@@ -645,6 +724,44 @@ export class ConversationProjectionStore {
     });
   }
 
+  /**
+   * 统一 rebuild 入口：凡是把 rows.window 整体换掉（新 snapshot、mergeOlderRows
+   * 前插补拉）的路径都必须过这里。返回重建好的累加器，**发布给订阅者的必须是它的
+   * `publish()` 外壳副本，不是它本身**。
+   *
+   * 为什么漏一次就是静默内容错乱：累加器内部用 rowId → 下标 的索引命中行，
+   * mergeOlderRows 换了数组之后旧索引全部错位，后续 row.delta 会把流式文本
+   * 追加到别的行上——不报错、不掉帧，只是内容慢慢错位。
+   */
+  private rebuildAccumulator(
+    nextSnapshot: ConversationSnapshot,
+  ): ConversationProjectionAccumulator {
+    this.accumulator = createConversationProjectionAccumulator(nextSnapshot);
+    return this.accumulator;
+  }
+
+  /**
+   * delta 帧的应用入口：走可变累加器，返回通知用的外壳副本与本帧变更定位。
+   *
+   * 正常路径下这里必定已有累加器——delta 帧要先过 handleFrame 的
+   * subscriptionHasAppliedBase 闸门，而该标志只由已 apply 过的帧置位。缺失只可能是
+   * 累加器被丢掉（close 之后不再收帧）；真到了就从当前外壳重建再施加，绝不吞掉本帧。
+   * 重建出来的累加器没有 lastMutation，返回 null 即「本帧无失效依据」，
+   * 下游 renderUnits 会退化为全量重建——宁可慢，不可错。
+   */
+  private applyFrameDeltas(
+    current: ConversationSnapshot,
+    deltas: readonly ConversationDelta[],
+    toSeq: number,
+  ): {
+    snapshot: ConversationSnapshot;
+    lastMutation: ConversationProjectionLastMutation | null;
+  } {
+    const accumulator = this.accumulator ?? this.rebuildAccumulator(current);
+    const snapshot = accumulator.applyDeltas(deltas, toSeq);
+    return { snapshot, lastMutation: accumulator.lastMutation() };
+  }
+
   private applyFrame(
     frame: ConversationTopicFrame,
     context: {
@@ -656,26 +773,30 @@ export class ConversationProjectionStore {
   ): void {
     if (frame.payload.kind === "snapshot") {
       const hadAppliedBase = this.subscriptionHasAppliedBase;
-      logSubagentProjectionTransition(
-        this.topic,
-        this.state.snapshot,
-        frame.payload.snapshot,
-        "snapshot",
-      );
-      // 规则 1：整体替换，扔掉手里的一切换新的。
+      // 规则 1：整体替换，扔掉手里的一切换新的。整体替换后行下标全变，
+      // 必须走 rebuildAccumulator，否则后续 row.delta 会按旧索引写错行。
+      // 转换日志只打 publish 之后这一次：那才是真正发布给订阅者的外壳副本，
+      // 打 rebuild 入参等于把同一帧记两遍，且记的是没人看见的中间态。
+      const next = this.rebuildAccumulator(frame.payload.snapshot).publish();
+      logSubagentProjectionTransition(this.topic, this.state.snapshot, next, "snapshot");
       this.setState({
-        snapshot: frame.payload.snapshot,
+        snapshot: next,
+        // 窗口整块换掉，上一帧的变更集不再描述这批行；清空让 renderUnits 走全量重建。
+        lastMutation: undefined,
         planDirectoryRevision: this.state.planDirectoryRevision + 1,
         // snapshot 整体替换后 real-user query 集合可能已变，终态缓存必须失效。
         turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
       });
+      this.scheduleTurnDirectoryRequery();
       this.subscriptionHasAppliedBase = true;
-      this.reconcileOptimistic(frame.payload.snapshot);
-      this.reconcileAcceptedInputProjection(frame.payload.snapshot);
+      // 以下三步一律读发布后的外壳副本 next，绝不读累加器本体：
+      // 本体是活的，下一帧的原地变更会改掉它此刻读到的一切。
+      this.reconcileOptimistic(next);
+      this.reconcileAcceptedInputProjection(next);
       // initial 丢失时，publisher 允许完整 online snapshot 建立首个
       // applied base；其中的持久 transition 可能早于本次订阅，不能冒充实时新事件。
       // 首帧只播种观察基线，后续 online 跃迁才通知 pane。
-      this.observeModelTransition(frame.payload.snapshot, context.online && hadAppliedBase);
+      this.observeModelTransition(next, context.online && hadAppliedBase);
       if (context.subscribeMode !== null && context.frameReceivedAt !== undefined) {
         const snapshotAppliedAt = monotonicNow();
         this.sessionOpenRendererTiming = {
@@ -719,9 +840,14 @@ export class ConversationProjectionStore {
       }
       return;
     }
-    const applied = applyConversationDeltas(current, frame.payload.deltas);
-    // seq 是快照对齐水位，delta 帧应用完推进到帧右端点。
-    const next = { ...applied, seq: frame.toSeq };
+    // 规则 3a：delta 帧走可变累加器，通知边界换三层引用。
+    // current 是上一帧发布的外壳副本（不是累加器本体），因此可以直接当 previous 传给
+    // subagent 观察日志：它定格在上一帧，不会被本帧的原地变更改写。
+    const { snapshot: next, lastMutation } = this.applyFrameDeltas(
+      current,
+      frame.payload.deltas,
+      frame.toSeq,
+    );
     logSubagentProjectionTransition(this.topic, current, next, "deltas");
     const removedFromRowId = frame.payload.deltas.reduce<number | null>(
       (earliest, delta) =>
@@ -730,8 +856,27 @@ export class ConversationProjectionStore {
           : earliest,
       null,
     );
+    // real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
+    // 或 row.removed 截断分支）递增导航目录 revision，使终态缓存失效允许重新探测。
+    const previousDirectoryRevision = this.state.turnNavigatorDirectoryRevision;
+    const nextDirectoryRevision = nextTurnNavigatorDirectoryRevision(
+      previousDirectoryRevision,
+      frame,
+    );
+    // 空变更集（纯 state.updated 水位推进）复用上一帧的 lastMutation 对象：空集是任意
+    // 脏集的子集，下游只按 turnId 集合做失效裁决，消费结果逐条等价，却省掉一次
+    // `[lastMutation]` 依赖的失效。上一帧压根没有对象（刚 rebuild / 整块换窗）时才沿用
+    // 本帧空集——那几帧的语义是「无失效依据，走全量重建」，不能被复用改写成增量。
+    const publishedLastMutation =
+      lastMutation === null
+        ? undefined
+        : lastMutation.turnIdByRowId.size === 0
+          ? (this.state.lastMutation ?? lastMutation)
+          : lastMutation;
     this.setState({
       snapshot: next,
+      // 累加器刚重建过就没有 lastMutation：这一帧无失效依据，下游退化为全量重建。
+      lastMutation: publishedLastMutation,
       // row.removed 已给出权威裁剪边界，可以同步删掉缓存目录中的旧分支计划；
       // 完整 query 继续负责补回 wire tail 之外、但仍属于当前分支的早期计划。
       ...(removedFromRowId === null
@@ -742,15 +887,18 @@ export class ConversationProjectionStore {
       ...(shouldInvalidatePlanDirectory(frame)
         ? { planDirectoryRevision: this.state.planDirectoryRevision + 1 }
         : {}),
-      // real-user query 增删（row.appended/row.upserted 命中 realUser userInput，
-      // 或 row.removed 截断分支）递增导航目录 revision，使终态缓存失效允许重新探测。
-      ...(shouldInvalidateTurnNavigatorDirectory(frame)
-        ? {
-            turnNavigatorDirectoryRevision: this.state.turnNavigatorDirectoryRevision + 1,
-          }
-        : {}),
+      ...(nextDirectoryRevision === previousDirectoryRevision
+        ? {}
+        : { turnNavigatorDirectoryRevision: nextDirectoryRevision }),
     });
+    // 目录失效代际变了 → 250ms trailing 合并重查（代际是 UI 闸门，不替代读自身的
+    // atRevision 陈旧读丢弃）。setState 同步换过 this.state，必须与旧值比。
+    if (nextDirectoryRevision !== previousDirectoryRevision) {
+      this.scheduleTurnDirectoryRequery();
+    }
     this.subscriptionHasAppliedBase = true;
+    // 与 snapshot 分支同款禁令：只读发布后的外壳副本 next。读累加器本体等于读一个
+    // 「已发布但仍在变」的对象——reconcile 的判定结果会随下一帧的流式追加漂移。
     this.reconcileOptimistic(next);
     this.reconcileAcceptedInputProjection(next);
     this.observeModelTransition(next, context.online);
@@ -1012,8 +1160,14 @@ export class ConversationProjectionStore {
       if (current.rows.window[0]?.rowId !== beforeRowId) return;
       const window = mergeOlderRows(current.rows.window, result.rows);
       if (window === null) return;
+      // window 换了数组 → 行下标全变，必须 rebuild 重建 rowId 索引。
       this.setState({
-        snapshot: { ...current, rows: { ...current.rows, window } },
+        snapshot: this.rebuildAccumulator({
+          ...current,
+          rows: { ...current.rows, window },
+        }).publish(),
+        // 前插补拉是整块窗口变化，上一帧变更集不描述新增的更早行。
+        lastMutation: undefined,
       });
     } catch (error) {
       // query 只读且可重发：失败不进 error 态，留给下次触发重试。
@@ -1126,7 +1280,11 @@ export class ConversationProjectionStore {
           committed = true;
           this.setState({
             loadingOlder: false,
-            snapshot: { ...current, rows: { ...current.rows, window } },
+            snapshot: this.rebuildAccumulator({
+              ...current,
+              rows: { ...current.rows, window },
+            }).publish(),
+            lastMutation: undefined,
           });
           // navigator 已经拿到补齐首轮所需的权威 rows，必须在隐藏 rail 前先提交它们。
           logger.debug("[v4-store] 完整问题目录不足两条 query，保留首轮补齐 rows", {
@@ -1157,7 +1315,11 @@ export class ConversationProjectionStore {
       committed = true;
       this.setState({
         loadingOlder: false,
-        snapshot: { ...current, rows: { ...current.rows, window } },
+        snapshot: this.rebuildAccumulator({
+          ...current,
+          rows: { ...current.rows, window },
+        }).publish(),
+        lastMutation: undefined,
       });
       logger.debug("[v4-store] 完整问题目录历史 rows 补拉完成", {
         loadedRows: window.length,
@@ -1179,6 +1341,204 @@ export class ConversationProjectionStore {
     } finally {
       if (!this.closed && !committed) this.setState({ loadingOlder: false });
     }
+  }
+
+  /**
+   * turnNavigator 窄投影目录查询（宽屏 rail 的数据源，与正文补齐路径解耦）。
+   *
+   * 与 {@link loadAllOlder} 的分工：那条路把历史**行**并进 `rows.window`，服务正文与
+   * 分享模式的全量语义；这条路只取目录**条目**，代价是 O(总行数) 的一次现算，
+   * 换来「为一个 rail 不把完整历史常驻 renderer」。
+   *
+   * 三条硬纪律：
+   * - 陈旧读丢弃：`atLogEpoch` 与当前快照纪元不符 → 整批弃；翻页期间 `atRevision`
+   *   漂移 → 整批弃（游标语义按全量行现算，跨 revision 拼接必漏条目）；
+   * - `realUserQueryTotal < 2` 首屏即终态：服务端现算的权威总数替代旧路径
+   *   「翻页探测后 reduce」，`not-enough-queries` 不再需要探测页；
+   * - 不并入窗口：目录条目与 `rows.window` 互不影响，正文路径的既有行为不变。
+   */
+  async loadTurnDirectory(): Promise<ConversationTurnNavigatorHydrationResult> {
+    const stale = (logEpoch = this.state.snapshot?.logEpoch ?? "unknown") => ({
+      status: "stale" as const,
+      logEpoch,
+    });
+    if (this.closed) return stale();
+    if (this.turnDirectoryQueryInFlight) {
+      // 单飞：在途期间来的重查并入 finally 的一次补跑，不并发打第二条只读查询。
+      this.turnDirectoryQueryPending = true;
+      return stale();
+    }
+    const snapshot = this.state.snapshot;
+    if (!snapshot) return stale();
+    // 目录终态与 (logEpoch, directoryRevision) 一起缓存：同一代际内不重复查，
+    // real-user query 增删（revision 自增）后自动失效重查。
+    const directoryRevision = this.state.turnNavigatorDirectoryRevision;
+    if (
+      this.turnDirectoryHydrationTerminal?.logEpoch === snapshot.logEpoch &&
+      this.turnDirectoryHydrationTerminal.directoryRevision === directoryRevision
+    ) {
+      return this.turnDirectoryHydrationTerminal;
+    }
+    const sessionId = parseConversationTopic(this.topic);
+    if (!sessionId) return stale(snapshot.logEpoch);
+
+    const logEpoch = snapshot.logEpoch;
+    this.turnDirectoryQueryInFlight = true;
+    this.setState({ loadingDirectory: true });
+    try {
+      // 分页循环的纯逻辑已下沉 core（纪元弃 / 跨页 revision pin / 游标未推进 guard /
+      // 50 页上限都在那里可测）；本层只留 closed 判定、setState 与终态写入。
+      // closed 由 fetchPage 就地抛哨兵——翻页途中 store 被 close 时必须立刻停，
+      // 那不是一次查询失败，不能走清空目录态的分支。
+      const accumulated = await accumulateTurnDirectoryPages({
+        fetchPage: async (cursor, limit) => {
+          if (this.closed) throw new TurnDirectoryAbortedError();
+          return this.transport.turnDirectory({
+            sessionId,
+            limit,
+            ...(cursor === undefined ? {} : { beforeQueryRowId: cursor }),
+          });
+        },
+        expectedLogEpoch: logEpoch,
+        limit: PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries,
+        maxPages: TURN_DIRECTORY_MAX_PAGES,
+        readCurrentLogEpoch: () => this.state.snapshot?.logEpoch,
+        sessionId,
+      });
+      const { entries, pages, pinnedRevision, realUserQueryTotal, stopReason } = accumulated;
+      if (stopReason === "aborted") return stale(logEpoch);
+      if (stopReason === "epoch-mismatch") {
+        logger.warn("[v4-store] turn 目录纪元不匹配，整批丢弃", {
+          currentLogEpoch: this.state.snapshot?.logEpoch,
+          sessionId,
+        });
+        return stale(logEpoch);
+      }
+      if (stopReason === "revision-mismatch") {
+        logger.warn("[v4-store] turn 目录翻页跨 revision，整批丢弃", {
+          sessionId,
+        });
+        return stale(logEpoch);
+      }
+      if (stopReason === "cursor-stalled" || stopReason === "fetch-failed") {
+        // 失败即清空目录态。旧目录配已前进的 revision 就是「旧目录 + 新 revision」：
+        // 流式期的 assistantText 帧不触发目录失效，rail 会无限期停在陈旧条目上。
+        // 清空后 loaded=false → rail 隐藏；组件 effect 的退避阶梯（250/1000ms×2）
+        // 重试 3 次，耗尽后 attempt=terminal 挡住重查——目录在 revision 下次变化前
+        // 保持隐藏，这是本方案已知的取舍（详见 cr-fix-spec full/B-2）。
+        logger.warn(
+          stopReason === "cursor-stalled"
+            ? "[v4-store] turn 目录游标未推进，停止翻页并清空目录态"
+            : `[v4-store] turnDirectory ${this.topic} 失败并清空目录态: ${accumulated.failure instanceof Error ? accumulated.failure.message : String(accumulated.failure)}`,
+          { sessionId },
+        );
+        this.clearTurnDirectory();
+        return { status: "retryable-failure", logEpoch };
+      }
+      // 权威总数不足两条 → 首屏即终态，不再翻页探测（旧路径靠 reduce 才有这个结论）。
+      if (stopReason === "not-enough-queries") {
+        this.setState({
+          turnDirectory: {
+            ...EMPTY_TURN_DIRECTORY_STATE,
+            atRevision: pinnedRevision,
+            atSeq: accumulated.atSeq,
+            atLogEpoch: logEpoch,
+            loaded: true,
+            realUserQueryTotal,
+            truncated: false,
+          },
+        });
+        logger.debug("[v4-store] turn 目录不足两条 query，跳过翻页", {
+          pages,
+          realUserQueryTotal,
+          sessionId,
+        });
+        const terminal = {
+          status: "not-enough-queries" as const,
+          logEpoch,
+          directoryRevision,
+        };
+        this.turnDirectoryHydrationTerminal = terminal;
+        return terminal;
+      }
+      // 翻到页数上限：rail 只拿到前若干页。静默提交会被读成「更早方向没有条目」，
+      // 因此先打一条可定位的 warn，再把截断事实本身写进目录态交给 rail 提示。
+      const truncated = entries.length < realUserQueryTotal;
+      if (stopReason === "page-limit") {
+        logger.warn("[v4-store] turn 目录翻页达到页数上限，仅取到部分条目", {
+          entryCount: entries.length,
+          pages,
+          realUserQueryTotal,
+          sessionId,
+        });
+      }
+      this.setState({
+        turnDirectory: {
+          atLogEpoch: logEpoch,
+          atRevision: pinnedRevision,
+          atSeq: accumulated.atSeq,
+          entries,
+          hasMore: accumulated.hasMore,
+          loaded: true,
+          realUserQueryTotal,
+          truncated,
+        },
+      });
+      logger.debug("[v4-store] turn 目录查询完成", {
+        entryCount: entries.length,
+        hasMore: accumulated.hasMore,
+        pages,
+        realUserQueryTotal,
+        sessionId,
+      });
+      const terminal = { status: "hydrated" as const, logEpoch, directoryRevision };
+      this.turnDirectoryHydrationTerminal = terminal;
+      return terminal;
+    } catch (error) {
+      // 兜底 catch：accumulateTurnDirectoryPages 已经把查询失败表达成 stopReason，
+      // 能落到这里的都是它之外的意外。同样按「失败不留旧目录」处理。
+      logger.warn(
+        `[v4-store] turnDirectory ${this.topic} 失败并清空目录态: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      this.clearTurnDirectory();
+      return { status: "retryable-failure", logEpoch };
+    } finally {
+      this.turnDirectoryQueryInFlight = false;
+      if (!this.closed) this.setState({ loadingDirectory: false });
+      if (this.turnDirectoryQueryPending && !this.closed) {
+        this.turnDirectoryQueryPending = false;
+        void this.loadTurnDirectory();
+      }
+    }
+  }
+
+  /**
+   * 目录查询失败后的降级：清空目录态（loaded 归 false → rail 隐藏）。
+   *
+   * 已经处于空态时不重复通知——退避阶梯会在同一代际里重试好几次，每次都推一份
+   * 等值的新 state 只会白白惊动所有 useSyncExternalStore 订阅者。
+   */
+  private clearTurnDirectory(): void {
+    if (this.state.turnDirectory === EMPTY_TURN_DIRECTORY_STATE) return;
+    this.setState({ turnDirectory: EMPTY_TURN_DIRECTORY_STATE });
+  }
+
+  /**
+   * 目录失效代际变更后按 250ms trailing 合并重查。
+   *
+   * 触发源是 {@link nextTurnNavigatorDirectoryRevision} 命中的三类帧（append/upsert/
+   * removed + snapshot 整体替换）。只在「本会话已经取过目录」时排——从未 hydrate 过的
+   * 会话没有目录可失效，交给组件的首轮 effect 决定要不要查。
+   */
+  private scheduleTurnDirectoryRequery(): void {
+    if (this.closed || !this.state.turnDirectory.loaded) return;
+    this.turnDirectoryDebouncer ??= createTrailingDebouncer(
+      TURN_NAVIGATOR_DIRECTORY_REQUERY_DEBOUNCE_MS,
+      () => {
+        void this.loadTurnDirectory();
+      },
+    );
+    this.turnDirectoryDebouncer.schedule();
   }
 
   /**
@@ -1347,12 +1707,15 @@ export class ConversationProjectionStore {
     this.offRuntimeRestart?.();
     this.offRuntimeLifecycle?.();
     this.clearRuntimeRecycleRetry();
+    this.turnDirectoryDebouncer?.cancel();
+    this.turnDirectoryDebouncer = null;
     for (const timer of this.acceptedInputProjectionTimers.values()) clearTimeout(timer);
     this.acceptedInputProjectionTimers.clear();
     this.modelTransitionListeners.clear();
     this.discardRecovery();
     this.awaitingInitial = null;
     this.subscriptionHasAppliedBase = false;
+    this.accumulator = null;
     this.generation++;
     const { subscriptionId } = this.state;
     this.setState({ status: "closed", subscriptionId: null });

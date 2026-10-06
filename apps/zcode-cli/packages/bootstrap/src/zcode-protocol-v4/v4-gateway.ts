@@ -67,6 +67,7 @@ import type {
   V4ConversationWorkflowRunEventsResult,
   V4ConversationWorkflowRunsResult,
   V4ConversationRowsRangeResult,
+  V4ConversationTurnDirectoryResult,
   WorkspaceConfigState,
   WorkspaceConfigTopicFrame,
   ConversationTelemetryFact,
@@ -119,6 +120,8 @@ import {
   v4ConversationWorkflowRunsParamsSchema,
   v4ConversationWorkflowRunsResultSchema,
   v4ConversationRowsRangeParamsSchema,
+  v4ConversationTurnDirectoryParamsSchema,
+  v4ConversationTurnDirectoryResultSchema,
   v4ConversationResyncParamsSchema,
   v4ConversationSubscribeParamsSchema,
   v4ConversationUnsubscribeParamsSchema,
@@ -1571,6 +1574,35 @@ export class ConversationV4Gateway {
       },
       // clientMode 决定行可见性过滤档位：桌面 continuous（默认）/ 断线恢复 replayable。
       params.clientMode === "desktop-continuous" ? "continuous" : "replayable",
+    );
+  }
+
+  /**
+   * v4/conversation/turnDirectory：turnNavigator 的窄投影目录（用户可见 query 粒度）。
+   *
+   * 与 rowsRange 同族同形：只读 query、不建订阅、三段式取 publisher（readyFlights →
+   * hasLiveConversation → ensureColdReadyPublisher / hydratePublisher），因此冷会话
+   * （重启后直开历史）无需改动 transcript-hydration 即可自动可用。
+   */
+  async turnDirectory(rawParams: unknown): Promise<V4ConversationTurnDirectoryResult> {
+    const params = v4ConversationTurnDirectoryParamsSchema.parse(rawParams);
+    const existingReady = this.readyFlights.get(params.sessionId);
+    const publisher = existingReady
+      ? await existingReady
+      : !this.hasLiveConversation(params.sessionId)
+        ? await this.ensureColdReadyPublisher(params.sessionId)
+        : await this.hydratePublisher(params.sessionId);
+    return v4ConversationTurnDirectoryResultSchema.parse(
+      publisher.getTurnDirectory(
+        {
+          ...(params.limit !== undefined ? { limit: params.limit } : {}),
+          ...(params.beforeQueryRowId !== undefined
+            ? { beforeQueryRowId: params.beforeQueryRowId }
+            : {}),
+        },
+        // clientMode 决定行可见性过滤档位：桌面 continuous（默认）/ 断线恢复 replayable。
+        params.clientMode === "desktop-continuous" ? "continuous" : "replayable",
+      ),
     );
   }
 

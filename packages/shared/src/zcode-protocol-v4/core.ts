@@ -74,6 +74,9 @@ export const PROTOCOL_V4_LIMITS = {
   eventRetentionPerSession: 2000,
   snapshotTailWindowRows: 60,
   rowsRangeMaxLimit: 200,
+  // turn 目录单页条目上限。目录条目自带 220 字符摘要，500 条 ≈ 一屏可用的导航纵深；
+  // 再多客户端也用不完，且传输成本线性涨。
+  turnDirectoryMaxEntries: 500,
   toolOutputFinalHeadBytes: 32 * 1024,
   toolOutputFinalTailBytes: 32 * 1024,
   goalVerificationsRetained: 20,
