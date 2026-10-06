@@ -1568,13 +1568,18 @@ function ConversationTimelineImpl({
   }, [scrollToQuery, scrollToQueryActionRef]);
 
   useEffect(
-    () => () => {
-      // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
-      turnNavigatorJumpSeqRef.current += 1;
-      if (turnNavigatorJumpFrameRef.current !== null) {
-        window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
-        turnNavigatorJumpFrameRef.current = null;
-      }
+    () => {
+      // 切会话（full/J-1）：在途跳转的 finally 带 isStaleJump 守卫，会话换掉后永远
+      // 等不到清零机会——必须在 effect 体里直接清，cleanup 只负责作废序号与撤帧。
+      setTurnNavigatorJumpLoading(false);
+      return () => {
+        // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
+        turnNavigatorJumpSeqRef.current += 1;
+        if (turnNavigatorJumpFrameRef.current !== null) {
+          window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
+          turnNavigatorJumpFrameRef.current = null;
+        }
+      };
     },
     [sessionKey],
   );
@@ -1932,6 +1937,7 @@ function ConversationTimelineImpl({
           items={turnNavigatorItems}
           loadedItems={turnNavigatorLoadedItems}
           isHydratingDirectory={loadingDirectory}
+          jumpLoading={turnNavigatorJumpLoading}
           scrollOffsetPx={virtualizer.scrollOffset ?? turnNavigatorViewport.scrollOffsetPx}
           viewportHeightPx={
             virtualizer.scrollRect?.height ?? turnNavigatorViewport.viewportHeightPx

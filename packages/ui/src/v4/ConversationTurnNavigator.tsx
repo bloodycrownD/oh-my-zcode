@@ -42,6 +42,11 @@ interface ConversationTurnNavigatorProps {
   activeQueryRowId?: number;
   isHydratingDirectory?: boolean;
   /**
+   * 跳转补拉在途（父层 turnNavigatorJumpLoading，full/J-1）。并入 aria-busy 让
+   * 补拉期间 rail 有可见反馈，并在在途期间禁掉条目点击，防止连点叠跳转。
+   */
+  jumpLoading?: boolean;
+  /**
    * 目录被页数上限截断时，还没取到的更早条目数；undefined / 0 不渲染提示。
    *
    * 截断必须显式告诉用户：否则 rail 顶部那条「更早没有更多了」的假象会让人以为
@@ -88,6 +93,7 @@ function ConversationTurnNavigatorImpl({
   virtualItems,
   activeQueryRowId,
   isHydratingDirectory = false,
+  jumpLoading = false,
   olderEntriesNotLoadedCount,
   windowFirstRowId,
   onJumpToQuery,
@@ -190,7 +196,9 @@ function ConversationTurnNavigatorImpl({
   return (
     <nav
       aria-label={intl.formatMessage({ id: "chat.turnNavigator.label" })}
-      aria-busy={isHydratingDirectory}
+      // 合并式 busy（full/J-1）：目录 hydrate 与跳转补拉都在途时 rail 都要报忙，
+      // 跳转反馈此前只落在滚动容器的 data 属性上，用户无感知。
+      aria-busy={isHydratingDirectory || jumpLoading}
       data-testid={TID_V4_TURN_NAVIGATOR}
       data-item-count={items.length}
       data-rendered-item-count={virtualRows.length}
@@ -285,7 +293,12 @@ function ConversationTurnNavigatorImpl({
                       onFocus={() => setInteractionItemIndex(itemIndex)}
                       onPointerEnter={() => setInteractionItemIndex(itemIndex)}
                       onPointerLeave={() => setInteractionItemIndex(undefined)}
-                      className="flex h-2.5 w-9 items-center justify-start rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused focus-visible:ring-offset-2 focus-visible:ring-offset-background"
+                      // 跳转补拉在途禁点（full/J-1）：连点会叠出多个补拉循环，
+                      // 虽有序号失效法兜底，但 UI 侧应直接挡掉；键盘焦点不受影响。
+                      className={cn(
+                        "flex h-2.5 w-9 items-center justify-start rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-input-border-focused focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                        jumpLoading && "pointer-events-none",
+                      )}
                     >
                       <span
                         className={cn(
