@@ -731,6 +731,12 @@ function ConversationTimelineImpl({
         status: "idle" as const,
       });
     }
+    // 与 SessionPane.tsx 的 lease.store.refreshPlans()（plans 目录刷新 effect）是平行的独立状态机：
+    // 本处作用域是 turn 窄投影（hydrationKey 驱动，有 idle/in-flight/waiting/terminal 四态 +
+    // 指数退避 + logEpoch 守卫），失败必须重试到终态；对方作用域是 plans 目录
+    // （planDirectoryRevision 驱动，fire-and-forget，无重试/退避），失败只影响 plans 新鲜度。
+    // 刻意不合并：目录 hydrate 有状态、失败必须重试到终态，plans 刷新无状态、失败可静默丢弃；
+    // 合并会让一方的重试/失效策略污染另一方。
     if (attempt.status !== "idle" || !onLoadTurnDirectory) return;
     attempt.status = "in-flight";
     logger.debug("[v4-turn-navigator] 目录窄投影查询", {

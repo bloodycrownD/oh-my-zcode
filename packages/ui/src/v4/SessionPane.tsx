@@ -2302,6 +2302,12 @@ export function SessionPane({
 
   useEffect(() => {
     if (!sessionId || !lease || snapshot?.sessionId !== sessionId) return;
+    // 与 ConversationTimeline.tsx 的 turnNavigatorHydrationAttemptRef（目录 hydrate 重试状态机）
+    // 是平行的独立状态机：本处作用域是 plans 目录（planDirectoryRevision 驱动，fire-and-forget，
+    // 无重试/退避），失败只影响 plans 新鲜度；对方作用域是 turn 窄投影（hydrationKey 驱动，
+    // 有 idle/in-flight/waiting/terminal 四态 + 指数退避 + logEpoch 守卫）。
+    // 刻意不合并：plans 刷新无状态、失败可静默丢弃，目录 hydrate 有状态、失败必须重试到终态；
+    // 合并会让一方的重试/失效策略污染另一方。
     void lease.store.refreshPlans();
   }, [lease, sessionId, snapshot?.sessionId, state.planDirectoryRevision]);
 
