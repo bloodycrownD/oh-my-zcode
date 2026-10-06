@@ -11,8 +11,8 @@
 //   → filter(Boolean) → slice(0,段上限) → join("\n") → slice + 补点
 // 一条长度 L 的长回复会被整体扫进若干个新串，长会话里 rail 每次重建 items 都付这笔账。
 // 新实现逐 UTF-16 码元消费，累计输出到预算即停；因为折叠是前缀单调运算
-// （任一前缀的折叠结果 = 整串折叠结果的对应前缀），对任意输入与旧实现**逐字节一致**
-// （T-TD1 用四类边界语料 + maxChars 扫描钉住）。
+// （任一前缀的折叠结果 = 整串折叠结果的对应前缀），对任意输入（maxChars 为有限非负整数时）
+// 与旧实现**逐字节一致**（T-TD1 用四类边界语料 + maxChars 扫描钉住）。
 //
 // 逐字节等价依赖两个容易踩空的事实：
 //   1) `/\s+/gu` 的空白集合 == `String.prototype.trim` 的空白集合
@@ -42,7 +42,8 @@ export interface BuildPreviewTextParams {
 
 /**
  * 诊断/测试钩子：`scannedChars` 是本次实际消费的输入码元数（不是输入总长）。
- * 正文密集的长回复上它被 `maxChars` 卡住——这正是 B-4 要买的性质。
+ * 扫描量以遇到第一个非空白码元或 emit 预算用尽为界；含长空白串的输入扫描量
+ * 可达输入全长——逐字节等价的必要代价。
  */
 export interface PreviewTextBuildResult {
   text: string;
@@ -76,9 +77,8 @@ function isPreviewWhitespaceCode(code: number): boolean {
  * 长度封顶 `maxChars + 1`（多出的那一位用来分辨「恰好等于上限」与「超过上限」，
  * 也就是旧 truncatePreview 的长度分支）。
  *
- * 唯一的无界情形：输入里没有任何非空白字符（纯空白），或长空白串之后接不到内容——
- * 要判定「回落 fallback / 段已收尾」就必须扫到那串空白末尾，这是逐字节等价的必要代价。
- * 只要输出超过预算，扫描就随之停止。
+ * 扫描量以遇到第一个非空白码元或 emit 预算用尽为界；含长空白串的输入扫描量
+ * 可达输入全长——逐字节等价的必要代价。只要输出超过预算，扫描就随之停止。
  */
 function buildPreviewTextStreaming(params: BuildPreviewTextParams): PreviewTextBuildResult {
   const cap = Math.max(PREVIEW_MIN_MAX_CHARS, params.maxPreviewChars);

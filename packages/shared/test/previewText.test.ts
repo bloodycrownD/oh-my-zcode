@@ -193,12 +193,25 @@ test("T-TD1 扫描量有界：1 MiB 输入只扫 maxChars 的常数倍", () => {
     }),
   );
   assert.ok(stats.text.endsWith("..."), "超长输入必须走截断分支");
-  // 折叠是前缀单调的：输出封顶 maxChars+1，扫描量随之封顶（宽容常数覆盖段首/段尾空白串）。
+  // 无长空白串语料：折叠是前缀单调的，输出封顶 maxChars+1，扫描量随之封顶。
   assert.ok(
     stats.scannedChars <= maxPreviewChars * 2 + 64,
     `scannedChars=${stats.scannedChars} 应远小于 1MiB`,
   );
   assert.ok(stats.scannedChars < 1_024, `scannedChars=${stats.scannedChars} 与输入长度脱钩`);
+  // 含长空白串语料：扫描量以遇到第一个非空白码元为界，可达输入全长。
+  const longBlank = " ".repeat(512 * 1024);
+  const longBlankInput = `${longBlank}${"x".repeat(64)}`;
+  const longBlankStats = buildPreviewTextWithStats({
+    texts: [longBlankInput],
+    fallback: LIMITS.fallback,
+    maxPreviewChars,
+    maxPreviewParagraphs: DEFAULT_MAX_PREVIEW_PARAGRAPHS,
+  });
+  assert.ok(
+    longBlankStats.scannedChars <= longBlankInput.length,
+    `scannedChars=${longBlankStats.scannedChars} 不应超过输入长度`,
+  );
 });
 
 test("T-TD1 扫描量有界：单条超长无空行正文在首段就收工", () => {
