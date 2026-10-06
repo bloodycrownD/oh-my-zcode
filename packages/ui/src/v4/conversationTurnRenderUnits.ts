@@ -105,7 +105,7 @@ interface TurnCacheEntry {
 }
 
 /** 单轮内层分区的上界：2（isLastTurn 取值）× 若干 sessionPhase 取值，留足余量后硬封顶。 */
-const MAX_PARTITIONS_PER_TURN = 8;
+export const MAX_PARTITIONS_PER_TURN = 8;
 
 function createTurnCacheEntry(): TurnCacheEntry {
   return { keepByPhase: new Map(), unitByKey: new Map() };
@@ -175,6 +175,12 @@ export interface ConversationTurnRenderUnitsCache {
   ): ConversationTurnRenderUnit[];
   /** 当前缓存的轮数（诊断/测试用）。 */
   size(): number;
+  /**
+   * 测试专用探针（cr-fix-spec full/C-2）：单轮内层分区数（keepByPhase + unitByKey
+   * 条目之和），用于断言「同一 turnId 多 phase 注入后分区数 ≤ MAX_PARTITIONS_PER_TURN」。
+   * 生产代码不得依赖；命名沿用 G-3 的 `__…ForTest` 惯例。
+   */
+  __partitionCountForTest(turnId: string): number;
 }
 
 export function createConversationTurnRenderUnitsCache(): ConversationTurnRenderUnitsCache {
@@ -300,6 +306,10 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
     },
     size() {
       return cacheByTurnId.size;
+    },
+    __partitionCountForTest(turnId: string) {
+      const entry = cacheByTurnId.get(turnId);
+      return entry ? entry.keepByPhase.size + entry.unitByKey.size : 0;
     },
   };
 }
