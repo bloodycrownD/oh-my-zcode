@@ -150,7 +150,16 @@ export function mergeTurnNavigatorItems(
   }
 
   if (merged.length === 0) return merged;
-  return merged.slice().sort((left, right) => left.rowId - right.rowId);
+  const sorted = merged.slice().sort((left, right) => left.rowId - right.rowId);
+  // 降级项的 unitIndex 在 push 时赋的是插入序，排序后不再等于最终下标；
+  // 统一重编号为最终下标（已加载侧 unitIndex 不动）。
+  for (let i = 0; i < sorted.length; i += 1) {
+    const item = sorted[i];
+    if (item !== undefined && item.isDirectoryFallback) {
+      sorted[i] = { ...item, unitIndex: i };
+    }
+  }
+  return sorted;
 }
 
 export interface ResolveTurnNavigatorActiveItemIndexParams {

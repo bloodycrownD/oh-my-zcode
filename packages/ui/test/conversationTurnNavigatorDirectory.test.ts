@@ -259,3 +259,35 @@ test("active 降级：未加载项与窗口首行同行/在窗口之下时不参
     0,
   );
 });
+
+test("C-4 降级项 unitIndex 排序后重编号：交错语料下严格等于最终下标", () => {
+  // 目录项 10/20/30/40/50 与已加载项 15/35 交错输入；windowFirstRowId=60 使全部
+  // 目录项都算未加载区间（不触发窗口内丢弃）。排序后降级项散布在已加载项之间，
+  // 若 unitIndex 仍是 push 时的插入序，断言会红。
+  const merged = mergeTurnNavigatorItems(
+    [makeEntry(10), makeEntry(20), makeEntry(30), makeEntry(40), makeEntry(50)],
+    [makeLoadedItem(15), makeLoadedItem(35)],
+    60,
+    I18N,
+  );
+  assert.deepEqual(
+    merged.map((item) => item.rowId),
+    [10, 15, 20, 30, 35, 40, 50],
+    "交错输入排序后按 rowId 升序",
+  );
+  // 每个降级项的 unitIndex 严格等于其最终下标。
+  merged.forEach((item, index) => {
+    if (item.isDirectoryFallback) {
+      assert.equal(
+        item.unitIndex,
+        index,
+        `降级项 rowId=${item.rowId} unitIndex 应等于最终下标 ${index}`,
+      );
+    }
+  });
+  // 已加载侧 unitIndex 不动（保持主循环赋的值）。
+  const loaded15 = merged.find((item) => item.rowId === 15);
+  const loaded35 = merged.find((item) => item.rowId === 35);
+  assert.equal(loaded15?.unitIndex, 15, "已加载项 unitIndex 不被动");
+  assert.equal(loaded35?.unitIndex, 35, "已加载项 unitIndex 不被动");
+});
