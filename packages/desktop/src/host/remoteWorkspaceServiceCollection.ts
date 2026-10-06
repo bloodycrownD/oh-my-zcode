@@ -13,7 +13,6 @@ import {
   IZCodeTaskService,
   IZCodeAgentService,
   IZCodeSessionService,
-  IConversationShareService,
   IBotsService,
   IFileWatcherService,
   IModelSelectionService,
@@ -35,8 +34,6 @@ import {
   type IServiceAccessor,
 } from "@zcode/services";
 import {
-  ConversationShareHttpClient,
-  ConversationShareService,
   createSettingService,
   createCredentialService,
   createBroadcastService,
@@ -51,7 +48,6 @@ import {
   createServiceLogger,
   createSubagentsService,
   createMemoryService,
-  createRemoteConversationShareArtifactSource,
 } from "@zcode/services/node";
 import {
   buildRuntimeZCodeApiUrl,
@@ -93,20 +89,6 @@ export function createRemoteWorkspaceServiceCollection(params: {
     fetchImpl: hostApiNetworkTransport.fetch,
   });
   const localBroadcastService = createBroadcastService(params.parentPort);
-  const conversationShareClient = new ConversationShareHttpClient({
-    // 远端 workspace 的分享也必须使用真实 API；本地 Mock 仅用于单测，不生成无法跨进程访问的链接。
-    apiClient: localApiClient,
-    baseUrl: buildRuntimeZCodeApiUrl(process.env, "/api/v1"),
-    // FORK（D-4）：登录凭据已整删，分享链不再有用户 token；分享面本身归 S6 整删。
-    tokenProvider: async () => null,
-  });
-  const conversationShareService = new ConversationShareService({
-    zcodeAgentService: params.connectionServices.zcodeAgentService,
-    client: conversationShareClient,
-    artifactSource: createRemoteConversationShareArtifactSource(
-      params.connectionServices.fileService,
-    ),
-  });
   const reportingRemoteZCodeTaskService = params.createReportingRemoteZCodeTaskService(
     params.connectionServices.zcodeTaskService,
   );
@@ -237,7 +219,6 @@ export function createRemoteWorkspaceServiceCollection(params: {
     .register(IZCodeTaskService, remoteZCodeTaskService)
     .register(IZCodeAgentService, params.connectionServices.zcodeAgentService)
     .register(IZCodeSessionService, remoteZCodeSessionService)
-    .register(IConversationShareService, conversationShareService)
     .register(
       IBotsService,
       createBotsService({
