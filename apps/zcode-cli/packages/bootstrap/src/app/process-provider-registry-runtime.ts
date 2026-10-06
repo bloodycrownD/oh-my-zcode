@@ -30,15 +30,22 @@ export async function startProcessProviderRegistryRuntime(
     throw new Error("缺少进程 Provider Registry 的 ZCode Built-in / Personal Config 路径");
   }
 
-  const bundledFile = options.standalone
-    ? env[ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]?.trim()
-    : undefined;
+  // BUNDLED env 的读取不设 standalone 门槛：Desktop host 给 agent 下发的 spawn env
+  // 里 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 永远是「按 endpoint 隔离的 Active 缓存」，
+  // 升级用户的旧缓存仍是已删字段（如 access.accountType）时，没有随包基线可回落
+  // 就只能整段判死（模型配置加载失败）。远端同步仍只属于 standalone——本 fork 的
+  // Built-in 目录已冻结为打包内置，桌面 agent 不得自行远端拉取。
+  const bundledFile = env[ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]?.trim();
   const runtime = new NodeProviderRegistryRuntime({
     ...paths,
     ...(bundledFile
       ? {
           zcodeBuiltinFilePath: bundledFile,
           zcodeBuiltinActiveFilePath: paths.zcodeBuiltinFilePath,
+        }
+      : {}),
+    ...(bundledFile && options.standalone
+      ? {
           zcodeBuiltinRemote: {
             controlFilePath: join(
               dirname(paths.zcodeBuiltinFilePath),

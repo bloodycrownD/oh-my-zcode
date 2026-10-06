@@ -8,6 +8,7 @@ import {
   createNodeProviderRuntimePathEnv,
   NodeModelSelectionConfigRepository,
   PERSONAL_PROVIDER_CONFIG_FILE_NAME,
+  ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV,
 } from "@zcode/provider-node";
 import { getAppConfigDir as resolveAppConfigDir } from "./paths.js";
 import {
@@ -1838,6 +1839,10 @@ export function createLocalServices(options: {
           zcodeBuiltinFilePath: await providerConfigRuntime.resolveZCodeBuiltinActiveFilePath(),
           personalFilePath: join(resolveAppConfigDir(), PERSONAL_PROVIDER_CONFIG_FILE_NAME),
         }),
+        // 随包基线一并下发：Active 缓存仍是旧 schema（升级用户，如 access.accountType
+        // 已删字段）时，Agent 侧 Registry 靠这份基线回落而不是整段判死——与 D-16 的
+        // 「缓存不兼容回落随包」同一语义，Desktop 此前只是漏传了这一半。
+        [ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]: options.zcodeBuiltinProviderConfigFilePath,
       };
     },
     ...(isDesktopAttachedRemote
