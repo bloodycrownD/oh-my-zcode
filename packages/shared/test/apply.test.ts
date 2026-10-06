@@ -371,13 +371,13 @@ function generateDeltaSequence(
     } else if (roll < 0.88) {
       // workflowRun.updated（G-3 补强）：已知 run 出partial header（键级合并路径），
       // 未知 run 出完整 header（出生路径：runId + status + usage 缺一不可）。
-      const known = shadow.workflowRuns.runs;
+      const known = shadow.workflowRuns!.runs;
       const target = known.length > 0 && random() < 0.6 ? pick(random, known) : undefined;
       if (target) {
         raw = {
           op: "workflowRun.updated",
           runId: target.runId,
-          revision: shadow.workflowRuns.revision + 1 + index,
+          revision: shadow.workflowRuns!.revision + 1 + index,
           run: {
             status: pick(random, ["running", "completed", "errored", "stopped"] as const),
             usage: { spentTokens: index, nodesUsed: Math.floor(random() * 8) },
@@ -388,7 +388,7 @@ function generateDeltaSequence(
         raw = {
           op: "workflowRun.updated",
           runId,
-          revision: shadow.workflowRuns.revision + 1 + index,
+          revision: shadow.workflowRuns!.revision + 1 + index,
           run: {
             runId,
             status: "running",
@@ -398,12 +398,12 @@ function generateDeltaSequence(
       }
     } else if (roll < 0.92) {
       // workflowRun.removed：已知 runId 真删；偶尔打未知的（协议语义 = 容器 revision 跟上）。
-      const known = shadow.workflowRuns.runs;
+      const known = shadow.workflowRuns!.runs;
       const target = known.length > 0 && random() < 0.7 ? pick(random, known) : undefined;
       raw = {
         op: "workflowRun.removed",
         runId: target ? target.runId : `run-ghost-${index}`,
-        revision: shadow.workflowRuns.revision + 1 + index,
+        revision: shadow.workflowRuns!.revision + 1 + index,
       };
     } else {
       const anchor = pick(random, live);

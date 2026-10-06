@@ -305,7 +305,7 @@ function buildDirectoryView(facts: StoreDirectoryFacts): ConversationTurnNavigat
 }
 
 /** 组件侧喂给判定函数的入参（ConversationTimeline.tsx 的展开形状）。 */
-function hydrate(directory: ConversationTurnNavigatorDirectoryView, canLoadOlder: boolean) {
+function hydrate(directory: ConversationTurnNavigatorDirectoryView | undefined, canLoadOlder: boolean) {
   return shouldHydrateConversationTurnNavigatorDirectory({
     canLoadOlder,
     containerWidthPx: WIDE_CONTAINER_PX,

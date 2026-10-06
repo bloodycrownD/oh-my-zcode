@@ -148,11 +148,11 @@ test("降级 item：key/摘要三态/unitIndex 目录序口径", () => {
     "降级 item 的 unitIndex 取目录序",
   );
   // text 态直传服务端摘要；running / empty 态文案由客户端 i18n 填。
-  assert.equal(merged[0].assistantPreview, "a10");
-  assert.equal(merged[1].assistantPreview, "进行中");
-  assert.equal(merged[1].isRunning, true);
-  assert.equal(merged[2].assistantPreview, "空");
-  assert.equal(merged[2].isRunning, false);
+  assert.equal(merged[0]!.assistantPreview, "a10");
+  assert.equal(merged[1]!.assistantPreview, "进行中");
+  assert.equal(merged[1]!.isRunning, true);
+  assert.equal(merged[2]!.assistantPreview, "空");
+  assert.equal(merged[2]!.isRunning, false);
   assert.deepEqual(
     merged.map((item) => item.assistantPreviewKind),
     ["text", "running", "empty"],

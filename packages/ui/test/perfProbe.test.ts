@@ -105,8 +105,8 @@ test("T-PA1: 同步 busy loop 注入长任务后 dump() 能解析出 longtask �
   }
 
   const segments = parseDump(probe.dump());
-  assert.ok(segments[0].longtasks.length > 0, "dump() 必须能解析出 longtask 条目");
-  for (const task of segments[0].longtasks) {
+  assert.ok(segments[0]!.longtasks.length > 0, "dump() 必须能解析出 longtask 条目");
+  for (const task of segments[0]!.longtasks) {
     assert.equal(typeof task.start, "number");
     assert.equal(typeof task.duration, "number");
   }
@@ -189,13 +189,13 @@ test("T-PA1: reset() 清空当前段并开启新段，旧段数据保留", () =>
 
   const segments = parseDump(probe.dump());
   assert.equal(segments.length, 2, "reset 应开启新段而不是丢弃历史");
-  assert.deepEqual(segments[0].longtasks, [{ start: 1, duration: 60 }], "旧段长任务必须保留");
+  assert.deepEqual(segments[0]!.longtasks, [{ start: 1, duration: 60 }], "旧段长任务必须保留");
   assert.deepEqual(
-    segments[1].longtasks,
+    segments[1]!.longtasks,
     [{ start: 2, duration: 30 }],
     "新段只含 reset 之后的条目",
   );
-  assert.ok(segments[0].startedAt < segments[1].startedAt, "段起始时间应递增");
+  assert.ok(segments[0]!.startedAt < segments[1]!.startedAt, "段起始时间应递增");
 });
 
 test("T-PA1: dump() 是 JSON 字符串且每段带 memory 样本（role=renderer）", () => {
@@ -232,7 +232,7 @@ test("T-PA1: 段数与单段条目数都按环形上限淘汰最旧", () => {
     assert.equal(segment.longtasks.length, 2, "单段条目超过上限后丢最旧");
   }
   // 最新一段（i=3 注入了 start 30/31/32）只保留后两条。
-  const newest = segments[segments.length - 1];
+  const newest = segments[segments.length - 1]!;
   assert.deepEqual(newest.longtasks, [
     { start: 31, duration: 6 },
     { start: 32, duration: 7 },
@@ -258,7 +258,7 @@ test("T-PA1: stop() 之后 recordLongTask 不再进 dump（观察者已断开、
 
   probe.recordLongTask({ start: 1, duration: 10 });
   assert.equal(
-    parseDump(probe.dump())[0].longtasks.length,
+    parseDump(probe.dump())[0]!.longtasks.length,
     1,
     "stop 之前必须已经记到条目，否则本用例测不出差异",
   );
