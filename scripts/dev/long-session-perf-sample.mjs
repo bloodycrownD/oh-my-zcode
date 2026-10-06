@@ -97,7 +97,15 @@ function killStrayChild() {
   if (activeChild && activeChild.exitedAt == null) {
     console.error(`${TAG} 回收本次启动的进程 pid=${activeChild.pid}`);
     try {
-      activeChild.kill();
+      if (process.platform === "win32") {
+        // child.kill 杀不干净 electron 进程树（主进程退出后 renderer/utility 子进程
+        // 仍占着 9229），必须用 taskkill /T 强杀整棵树。
+        execFileSync("taskkill", ["/pid", String(activeChild.pid), "/T", "/F"], {
+          stdio: "ignore",
+        });
+      } else {
+        activeChild.kill();
+      }
     } catch {
       // kill 失败只作提示，不覆盖原始错误
     }
@@ -614,6 +622,9 @@ async function main() {
   const running = await fetchJson(`${cdpBase}/json/version`);
   let child = null;
   let mode;
+  // resolveElectronExecutable 的结果缓存：报告构造阶段直接复用，不再二次调用解析
+  // （采样成功但报告写不出的问题——解析在报告期失败会导致整个报告丢失）。
+  let resolvedExecutable = null;
   if (running.ok) {
     if (options.skipLaunch) {
       mode = "reuse-skip-launch";
@@ -621,6 +632,7 @@ async function main() {
     } else {
       mode = "reuse-forward-deep-link";
       const executable = resolveElectronExecutable(options.electron);
+      resolvedExecutable = executable;
       console.log(`${TAG} 检测到已运行实例，转发 --open-workspace 深链: ${workspacePath}`);
       child = spawnElectron(executable, workspacePath, options.devServerUrl);
       const exited = await waitChildExit(child, FORWARDER_EXIT_TIMEOUT_MS);
@@ -645,6 +657,7 @@ async function main() {
   } else {
     mode = "launch";
     const executable = resolveElectronExecutable(options.electron);
+    resolvedExecutable = executable;
     console.log(`${TAG} 启动 dev 实例: ${executable} . --open-workspace ${workspacePath}`);
     child = spawnElectron(executable, workspacePath, options.devServerUrl);
   }
@@ -712,7 +725,7 @@ async function main() {
       spawnedPid: child?.pid ?? null,
       childExitInfo: child?.exitInfo ?? null,
       childStillRunning: child != null && child.exitedAt == null,
-      electronExecutable: child ? resolveElectronExecutable(options.electron) : null,
+      electronExecutable: resolvedExecutable,
     },
     target: {
       id: target.id ?? null,
