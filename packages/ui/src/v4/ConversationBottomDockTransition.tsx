@@ -53,24 +53,15 @@ function resolveConversationBottomDockMotion(prefersReducedMotion: boolean) {
   };
 }
 
-export function ConversationBottomDockTransition({
-  mode,
-  children,
-}: {
-  mode: "chat" | "confirmation";
-  children: ReactNode;
-}) {
+export function ConversationBottomDockTransition({ children }: { children: ReactNode }) {
   const prefersReducedMotion = useReducedMotion() === true;
   const motionConfig = resolveConversationBottomDockMotion(prefersReducedMotion);
 
   return (
     <div data-testid="conversation-bottom-dock-transition" className="grid w-full">
-      {/* chat 与确认区高度不同；共享 grid 单元并底部对齐，避免父高度切换时退出层先跳位再动画。*/}
       <AnimatePresence initial={false} mode="sync">
         <motion.div
-          key={mode}
           data-testid="conversation-bottom-dock-transition-layer"
-          data-conversation-bottom-dock-mode={mode}
           // grid 子项默认 min-width:auto，最小尺寸等于内容的 min-content；
           // 隐式列轨道是 auto，其下限被这个最小尺寸顶住，于是面板收窄时 composer
           // 仍按 min-content（约 465px）撑开轨道，超出容器宽度后右侧被裁掉。
