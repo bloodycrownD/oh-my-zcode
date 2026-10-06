@@ -18,27 +18,6 @@ export {
 
 // Accessor
 export type { IServiceAccessor } from "./accessor.js";
-export {
-  ConversationShareServiceError,
-  createUnsupportedConversationShareService,
-  IConversationShareService,
-} from "./conversation-share/conversationShare.js";
-export type {
-  ConversationShareSelection,
-  ConversationSharePublishProgress,
-  ConversationShareImportProgress,
-  ImportConversationShareInput,
-  ImportConversationShareResult,
-  ImportedConversationShare,
-  ConversationShareServiceErrorKind,
-  ConversationShareFailureIssue,
-  ConversationShareFailureIssueCode,
-  ConversationSharePreflightInput,
-  ConversationSharePreflightResult,
-  ConversationShareAllowedArtifact,
-  ConversationShareTurnPreflightResult,
-  PublishTextConversationInput,
-} from "./conversation-share/conversationShare.js";
 
 // File service — IFileService is both a type (interface) and value (descriptor)
 export { IFileService } from "./file/file.js";
@@ -264,20 +243,3 @@ export type {
   PromptAttachmentTransferPhase,
   PromptAttachmentTransferProgress,
 } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
-export type {
-  CreateFeedbackTicketInput,
-  FeedbackAttachment,
-  FeedbackAttachmentKind,
-  FeedbackComment,
-  FeedbackDeviceInfo,
-  FeedbackListQuery,
-  FeedbackListResult,
-  FeedbackReporter,
-  FeedbackTicketDetail,
-  FeedbackTicketFramework,
-  FeedbackTicketModule,
-  FeedbackTicketSeverity,
-  FeedbackTicketStatus,
-  FeedbackTicketSummary,
-  FeedbackTicketType,
-} from "@zcode/shared";

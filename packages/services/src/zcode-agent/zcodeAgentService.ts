@@ -873,7 +873,6 @@ export function createZCodeAgentService(
   const automationTaskIndexRepo = new TaskIndexRepo();
   const pluginProcessManager = new ZCodeAgentProcessManager({
     commandResolver: options?.commandResolver,
-    presentationSurface: options?.presentationSurface,
     requestTimeoutMs: options?.requestTimeoutMs,
     resolveSpawnEnv: options?.resolveSpawnEnv,
     waitForSpawnAdmission: options?.waitForSpawnAdmission,
@@ -882,7 +881,6 @@ export function createZCodeAgentService(
   // 恢复专用控制面进程及空闲回收；共享 workspace 路径，不共享请求队列或 watchdog。
   const mcpStatusProcessManager = new ZCodeAgentProcessManager({
     commandResolver: options?.commandResolver,
-    presentationSurface: options?.presentationSurface,
     processLifecycleReporter: options?.processLifecycleReporter,
     requestTimeoutMs: options?.requestTimeoutMs,
     resolveSpawnEnv: options?.resolveSpawnEnv,

@@ -7,10 +7,6 @@ import {
   configureDatabaseStartupQuit,
 } from "./databaseStartupRelay.js";
 import { ensureDesktopDeviceMidSync } from "./desktopDeviceMid.js";
-import {
-  createDesktopContextPromptRollout,
-  createElectronDesktopContextPromptConfigFetcher,
-} from "./desktopContextPromptRollout.js";
 import { buildBrowserViewCloseTabNotification } from "./browserView/browserCloseTabNotification.js";
 import { BrowserGuestManager } from "./browserView/browserGuestManager.js";
 import { createElectronBrowserWebmRecorder } from "./browserView/electronBrowserWebmRecorder.js";
@@ -58,7 +54,6 @@ import {
   ZCODE_PRODUCT_FLAVOR,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
-  ZCODE_VERSION,
 
   resolveZCodeEndpointOrigin,
   HostMessageTypes,
@@ -126,12 +121,12 @@ import {
 } from "./desktopHostProcess.js";
 import { spawnCronScheduler, type CronSchedulerHandle } from "./desktopCronScheduler.js";
 import {
-  clearOAuthRoutesForWindow,
+  clearDeepLinkRoutesForWindow,
   handleDeepLink,
   handleOpenWorkspacePath,
   registerDeepLinkProtocol,
   resolveExternalWorkspaceOpenDialogCopy,
-} from "./desktopOAuthDeepLink.js";
+} from "./desktopDeepLinkRouter.js";
 import { handleSecondInstanceWorkspaceRequest } from "./desktopSecondInstanceDeepLink.js";
 import { installFinderOpenFolderWorkflow } from "./desktopFinderOpenFolderWorkflow.js";
 import { installWindowsOpenFolderContextMenu } from "./desktopWindowsOpenFolderContextMenu.js";
@@ -148,7 +143,7 @@ import {
 
   setBrowserUseGuestWebContentsIdsProvider,
 } from "./resourceManagerWindow.js";
-import { createDesktopHelpConfigReader } from "./desktopHelpConfig.js";
+
 import { registerPlatformIpcHandlers } from "./desktopMainIpcPlatform.js";
 import {
 
@@ -441,7 +436,6 @@ let currentDesktopWindowSize: DesktopWindowSize | undefined;
 const preloadPath = join(import.meta.dirname, "../preload/index.cjs");
 const settingsFile = join(homedir(), ".omz", "v2", "setting.json");
 const activeAppShutdownPolicy = resolveAppShutdownPolicy(process.platform);
-const WINDOWS_AGENT_FORCE_KILL_TIMEOUT_MS = 2_000;
 
 const broadcastHub = new BroadcastHub();
 const taskRealtimeBus = new TaskRealtimeBus({ logger });
@@ -559,52 +553,6 @@ async function resolveCurrentZCodeEndpointOrigin() {
     overrideOrigin: (await mainSettingService.get()).zcodeEndpointOrigin,
   });
 }
-let desktopContextPromptRollout: ReturnType<typeof createDesktopContextPromptRollout> | undefined;
-function resolveDesktopContextPromptEnabledForHost(): boolean {
-  const rollout = desktopContextPromptRollout;
-  if (!rollout) {
-    return false;
-  }
-  // Host 创建时顺便触发过期刷新，但只读取当前快照；网络请求不能阻塞 Local/Remote Host。
-  void rollout.refresh();
-  return rollout.getSnapshot().enabled;
-}
-
-// 首个 Host 创建前的有界灰度裁决门。Host/Agent 的 presentation surface 在进程启动时
-// 冻结（services/node.ts 顶层 const + CLI --surface），而灰度请求是旁路、不阻塞 Host。若首个
-// Host fork 早于请求 resolve，成功结果（enabled:true）对已冻结的 Host/Agent 无可达生效路径。
-// 这里给"成功结果"一条有界的生效路径：首 Host fork 前 await 一次裁决（≤2s），失败/超时仍按当前
-// 快照继续（desktopContextPrompt fail-open）。first-only 永久
-// latch——后续 Host fork await 已 resolve 的 promise（近乎 0ms），且各 resolve*ForHost()
-// 同步读取已被刷新的 live 快照。
-const DESKTOP_FIRST_HOST_SPAWN_DECISION_TIMEOUT_MS = 2_000;
-let firstHostSpawnDecisionPromise: Promise<void> | null = null;
-function awaitFirstHostSpawnDecision(): Promise<void> {
-  if (firstHostSpawnDecisionPromise) {
-    return firstHostSpawnDecisionPromise;
-  }
-  firstHostSpawnDecisionPromise = (async () => {
-    const rollout = desktopContextPromptRollout;
-    if (!rollout) {
-      return;
-    }
-    try {
-      const decision = await rollout.awaitFirstDecision(
-        DESKTOP_FIRST_HOST_SPAWN_DECISION_TIMEOUT_MS,
-      );
-      logger.info("[desktop-context-prompt] first host spawn decision resolved", {
-        enabled: decision.enabled,
-        configVersion: decision.configVersion,
-      });
-    } catch (error) {
-      // awaitFirstDecision 永不 reject（refresh 内部已 catch + timeout 回退快照），此处仅兜底。
-      logger.warn("[desktop-context-prompt] first host spawn decision failed, fail-open", {
-        error,
-      });
-    }
-  })();
-  return firstHostSpawnDecisionPromise;
-}
 
 app.on("browser-window-focus", (_event, win) => {
   rebuildMenu();
@@ -629,23 +577,6 @@ const remoteSessionManager = createRemoteWorkspaceSessionManager({
 });
 
 const deviceMid = ensureDesktopDeviceMidSync();
-// 帮助配置是公开读取，不能复用下面附带账号鉴权的灰度响应缓存。
-const readHelpConfig = createDesktopHelpConfigReader({
-  appVersion: ZCODE_VERSION || app.getVersion(),
-  deviceMid,
-  resolveEndpointOrigin: resolveCurrentZCodeEndpointOrigin,
-});
-// 同一个 /api/v1/client/configs fetcher 供灰度 rollout 使用（请求参数与鉴权完全一致，
-// 服务端按 data.configs.<key> 区分功能）。
-const electronClientConfigsFetcher = createElectronDesktopContextPromptConfigFetcher({
-  appVersion: ZCODE_VERSION || app.getVersion(),
-  deviceMid,
-  resolveEndpointOrigin: resolveCurrentZCodeEndpointOrigin,
-});
-desktopContextPromptRollout = createDesktopContextPromptRollout({
-  fetchConfig: electronClientConfigsFetcher,
-  logger,
-});
 
 function extractOpenWorkspacePathFromDeepLinkUrl(url: string): string | null {
   try {
@@ -848,83 +779,6 @@ function getRunningAgentSessionCount() {
   return [...hostRunningTaskCountMap.values()].reduce((total, count) => total + count, 0);
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    const timer = setTimeout(resolve, Math.max(ms, 0));
-    timer.unref?.();
-  });
-}
-
-async function execWithTimeout(
-  file: string,
-  args: string[],
-  timeoutMs: number,
-  spawnOptions: { windowsHide?: boolean; encoding?: BufferEncoding } = {},
-): Promise<{
-  timedOut: boolean;
-  code?: number | null;
-  signal?: NodeJS.Signals | null;
-  error?: string;
-}> {
-  const { execFile } = await import("node:child_process");
-  return new Promise((resolve) => {
-    let settled = false;
-    let timedOut = false;
-    const child = execFile(file, args, {
-      windowsHide: spawnOptions.windowsHide,
-      encoding: spawnOptions.encoding,
-    });
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        process.kill(child.pid!, "SIGKILL");
-      } catch {
-        // 进程可能已自行退出，忽略
-      }
-    }, timeoutMs);
-    child.on("close", (code, signal) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve({ timedOut, code, signal });
-    });
-    child.on("error", (error) => {
-      if (settled) {
-        return;
-      }
-      settled = true;
-      clearTimeout(timer);
-      resolve({ timedOut, error: error.message });
-    });
-  });
-}
-
-async function forceTerminateWindowsAgentProcesses(pids: number[]): Promise<
-  Array<{
-    pid: number;
-    timedOut: boolean;
-    code?: number | null;
-    signal?: NodeJS.Signals | null;
-    error?: string;
-  }>
-> {
-  const uniquePids = [...new Set(pids.filter((pid) => Number.isInteger(pid) && pid > 0))];
-  return Promise.all(
-    uniquePids.map((pid) =>
-      execWithTimeout(
-        "taskkill",
-        ["/PID", String(pid), "/T", "/F"],
-        WINDOWS_AGENT_FORCE_KILL_TIMEOUT_MS,
-        {
-          windowsHide: true,
-        },
-      ).then((result) => ({ pid, ...result })),
-    ),
-  );
-}
-
 function logWindowsBundledRuntimeIntegrityDiagnostic() {
   if (process.platform !== "win32" || !app.isPackaged) {
     return;
@@ -995,7 +849,6 @@ async function executeDesktopCommandForApp(
   senderWindow?: BrowserWindow | null,
 ) {
   return executeDesktopCommand({
-    fetchHelpConfig: readHelpConfig,
     command,
     senderWindow,
     logger,
@@ -1129,7 +982,6 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
       }),
     windowHostProcessMap,
     onHostProcessReady: (windowKey) => cuaPipFocusRouter.refreshWindow(windowKey),
-    awaitFirstHostSpawnDecision,
     spawnHostProcess: (win, label, initMessage) =>
       spawnHostProcess(
         win,
@@ -1142,7 +994,6 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         },
         {
           hostProcessLocalEnv,
-          desktopContextPromptEnabled: resolveDesktopContextPromptEnabledForHost,
           logger,
           broadcastHub,
           taskRealtimeBus,
@@ -1338,8 +1189,6 @@ app.whenReady().then(async () => {
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,
   });
-  // Electron 的 net.request 只能在 app ready 后使用；灰度请求仍是旁路预热，不阻塞首个 Host。
-  void desktopContextPromptRollout?.refresh();
   installBrowserRestoreBootstrapProtocol(
     session.fromPartition(EMBEDDED_BROWSER_PARTITION).protocol,
   );
@@ -1442,7 +1291,6 @@ app.whenReady().then(async () => {
   });
 
   registerPlatformIpcHandlers({
-    fetchHelpConfig: readHelpConfig,
     logger,
     // CDP-on-guest pivot：renderer `<webview>` dom-ready 上报 guest webContentsId → attach。
     attachBrowserGuest: (key, webContentsId, options) => {
@@ -1586,8 +1434,8 @@ app.on("browser-window-created", (_, win) => {
     }
     // Electron 进入 closed 回调时，win.webContents 可能已经被销毁。
     // 之前这里现取 win.webContents.id，会在关窗收尾阶段抛出 "Object has been destroyed"。
-    // 改为在窗口创建时缓存 webContents id，确保清理 OAuth 路由时不再访问已销毁对象。
-    clearOAuthRoutesForWindow(windowWebContentsId);
+    // 改为在窗口创建时缓存 webContents id，确保清理 deep link 路由时不再访问已销毁对象。
+    clearDeepLinkRoutesForWindow(windowWebContentsId);
     // 录制中关窗/崩溃时 renderer 不会发复位 IPC，这里按发起 webContents 复位录制态，
     // 防止菜单 accelerator 被永久摘除。
     resetShortcutRecordingForWebContents(windowWebContentsId);

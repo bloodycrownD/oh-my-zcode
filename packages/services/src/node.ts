@@ -64,9 +64,6 @@ export {
   getAppConfigDir,
   getExportLogStageDir,
   getExportLogDir,
-  getFeedbackRootDir,
-  getFeedbackAttachmentDir,
-  getFeedbackLogArchiveDir,
   getGitCheckpointIndexRootDir,
   copyDataDirectory,
   validateDataBaseDirTarget,
@@ -187,10 +184,6 @@ export { createHooksService } from "./hooks/hooksService.js";
 export { createMemoryService } from "./memory/memoryService.js";
 export { createSettingsSyncService } from "./settings-sync/settingsSyncService.js";
 export { createLocalPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransferService.js";
-export {
-  createLocalConversationShareArtifactSource,
-  createRemoteConversationShareArtifactSource,
-} from "./conversation-share/conversationShareArtifactSource.js";
 export { createNodeApiClient, NodeApiClient } from "./providers/api/nodeApiClient.js";
 export {
   createHostApiNetworkTransport,
@@ -239,17 +232,6 @@ import { IZCodeTaskService } from "./session/zcodeTaskService.js";
 import { IZCodeAgentService } from "./zcode-agent/zcodeAgent.js";
 import type { CuaOperationStateReporter } from "./zcode-agent/cuaOperationTurnTracker.js";
 import { IZCodeSessionService } from "./zcode-session/zcodeSession.js";
-import {
-  createUnsupportedConversationShareService,
-  IConversationShareService,
-  type IConversationShareService as IConversationShareServiceType,
-} from "./conversation-share/conversationShare.js";
-import {
-  ConversationShareService,
-  conversationShareConnectionScopeFactory,
-} from "./conversation-share/conversationShareService.js";
-import { createLocalConversationShareArtifactSource } from "./conversation-share/conversationShareArtifactSource.js";
-import { ConversationShareHttpClient } from "./conversation-share/conversationShareHttpClient.js";
 import { IBotsService } from "./bots/bots.js";
 import { IFileWatcherService } from "./fileWatcher/fileWatcher.js";
 import { IUsageStatsService } from "./usage-stats/usageStats.js";
@@ -281,7 +263,6 @@ import { createCredentialService } from "./credential/credentialService.js";
 import { createBroadcastService } from "./broadcast/broadcastService.js";
 import { createZCodeAgentService } from "./zcode-agent/zcodeAgentService.js";
 import type { ZCodeAgentCommandResolver } from "./zcode-agent/zcodeAgentProcessManager.js";
-import { resolveZCodeAgentPresentationSurface } from "./zcode-agent/zcodeAgentPresentationSurface.js";
 import { createZCodeTaskServiceAdapter } from "./zcode-agent/zcodeTaskServiceAdapter.js";
 import { createZCodeSessionService } from "./zcode-session/zcodeSessionService.js";
 import { createZCodeTaskIndexSyncer } from "./zcode-agent/zcodeTaskIndexSyncer.js";
@@ -323,7 +304,6 @@ import { createHooksService } from "./hooks/hooksService.js";
 import { createMemoryService } from "./memory/memoryService.js";
 import { createSettingsSyncService } from "./settings-sync/settingsSyncService.js";
 import { createLocalPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransferService.js";
-import { createNodeApiClient } from "./providers/api/nodeApiClient.js";
 import { createClientScenesService } from "./client-scenes/clientScenesService.js";
 import { resolveDynamicWorkflowClientConfig } from "@zcode/shared";
 import {
@@ -404,20 +384,7 @@ import {
   ZCODE_CUA_PLUGIN_AUTHORITY_ENV_KEY,
   type ZCodeAutomation,
   type ZCodeAutomationRun,
-  ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV,
-
-
-
-  buildRuntimeZCodeApiUrl,
 } from "@zcode/shared";
-
-// 这些 conversation-share 实现依赖 Node 文件系统；仅通过 @zcode/services/node 暴露，
-// 防止 browser-safe 根入口把 node:* 依赖带进 renderer。
-export {
-  ConversationShareService,
-  ConversationShareHttpClient,
-  conversationShareConnectionScopeFactory,
-};
 
 interface ServiceWithDisposeAll {
   disposeAll: () => void;
@@ -1237,15 +1204,6 @@ export function createLocalServices(options: {
   // 让 ZCode Agent、终端、认证 runtime 共用同一套命令解析结果。
   initializeRuntimeProcessEnv(options?.runtimeProcessEnvPatch);
 
-  const desktopContextPromptEnabledRaw =
-    process.env[ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV]?.trim();
-  const desktopContextPromptEnabled =
-    desktopContextPromptEnabledRaw === "1"
-      ? true
-      : desktopContextPromptEnabledRaw === "0"
-        ? false
-        : undefined;
-
   // app 自签 CA：首次启动生成一份根 CA（幂等），供 agent 子进程经 NODE_EXTRA_CA_CERTS 信任、
   // 出口代理用其私钥重签。生成失败不应阻断启动（例如只读文件系统），仅记录日志后继续。
   try {
@@ -1281,11 +1239,7 @@ export function createLocalServices(options: {
         caCertPath: settings.httpProxyCaCertPath,
       };
     });
-  // FORK（D-4）：JWT 失效重启钩子随登录面整删；ApiClient 只保留端点与代理装配。
-  const apiClient = createNodeApiClient({
-    fetchImpl: hostApiNetworkTransport.fetch,
-    resolveZCodeEndpointOrigin: resolveCurrentZCodeEndpointOrigin,
-  });
+  // FORK（D-4）：JWT 失效重启钩子随登录面整删；ApiClient 装配也已随账号面移除。
   const systemService = createSystemService();
   // onboarding 资格与任务列表共用同一份全局 tasks-index；repo 懒加载数据库，提前构造不会
   // 增加启动 I/O，后续 session syncer 也继续复用这一实例。
@@ -1371,9 +1325,6 @@ export function createLocalServices(options: {
   const pluginSyncService = createPluginSyncService();
   const subagentsService = createSubagentsService({
     isDesktopRuntime: true,
-  });
-  const hooksService = createHooksService({
-    grantWorkspaceHookTrust: (params) => zcodeAgentService.grantWorkspaceHookTrust(params),
   });
   // 只要当前进程已经装配 Provider Runtime，就由该 Environment 自己的 Selection View
   // 决定执行就绪状态。Desktop-attached remote 也读取远端自己的 Config/Account Facts。
@@ -1776,11 +1727,6 @@ export function createLocalServices(options: {
     resolveDynamicWorkflowClientConfig: async () =>
       resolveDynamicWorkflowClientConfig({ env: process.env }),
     commandResolver: options?.zcodeAgentCommandResolver,
-    presentationSurface: resolveZCodeAgentPresentationSurface({
-      runtimeSurface: options?.agentRuntimeContext?.runtimeSurface,
-      serviceAuthorityMode: options?.serviceAuthorityMode,
-      desktopContextPromptEnabled,
-    }),
     onAutomationManualRunRequested: options?.onAutomationManualRunRequested,
     // createLocalServices 虽然暴露了 reporter 注入点，旧装配却没有继续传给
     // ZCodeAgentProcessManager，导致 host 永远不向 main 上报 Agent spawn/exit，进程监控器
@@ -1996,27 +1942,6 @@ export function createLocalServices(options: {
     authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
   });
-  const conversationShareClient = new ConversationShareHttpClient({
-    // 分享运行时始终走真实 API；测试/Mock 场景应在 service 单测或 Web fixture 中显式注入，
-    // 不能让开发环境默认生成仅存在于进程内存的 mock-share 链接。
-    apiClient,
-    baseUrl: buildRuntimeZCodeApiUrl(process.env, "/api/v1"),
-    tokenProvider: async (): Promise<string | null> => {
-      // FORK（D-4）：登录凭据已整删，分享链不再有用户 token。
-      // 会话分享面本身归 S6 整删，这里先恒返回 null 保持编译通过。
-      return null;
-    },
-  });
-  const conversationShareService: IConversationShareServiceType = isDesktopAttachedRemote
-    ? createUnsupportedConversationShareService({
-        message: "Conversation publishing is not available for remote workspaces",
-      })
-    : new ConversationShareService({
-        zcodeAgentService,
-        zcodeSessionService,
-        client: conversationShareClient,
-        artifactSource: createLocalConversationShareArtifactSource(),
-      });
   // 注册链上的懒工厂会各自创建 tasks-index sqlite repo；先收集到本数组，
   // services 集合建好后在 return 前统一登记进 sharedSqliteRepos 侧表
   const sqliteReposToClose: Array<{ close(): void }> = [];
@@ -2036,7 +1961,6 @@ export function createLocalServices(options: {
     .register(IZCodeSessionService, zcodeSessionService)
     .register(ICuaPermissionService, cuaPermissionService)
     .register(ICuaPipSessionService, cuaPipSessionService)
-    .register(IConversationShareService, conversationShareService)
     .register(
       IBotsService,
       createBotsService({

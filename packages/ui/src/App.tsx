@@ -44,7 +44,6 @@ import {
   type SettingsSectionId,
 } from "@/lib/settingsNavigation.js";
 import { runWorkspaceVisibleCommand } from "@/lib/workspaceVisibleCommand.js";
-import { ZCODE_PRODUCT_DOCS_URL } from "@/lib/productDocs.js";
 import appLogoUrl from "@/assets/provider-icons/logo-zai.svg";
 import { resolveTheme } from "@/useTheme.js";
 import { WorkspaceShellLayout } from "@/app-shell/WorkspaceShellLayout.js";
@@ -325,7 +324,6 @@ export function App({
     useState<ChatSearchResultHighlightRequest | null>(null);
   const [fileChangeFindState, setFileChangeFindState] = useState(createTaskFindNavigationState);
   const [fileChangeFindMatchCount, setFileChangeFindMatchCount] = useState(0);
-  const [canOpenCommunityFromQuickPick, setCanOpenCommunityFromQuickPick] = useState(false);
   const [gitSelectedSourceId, setGitSelectedSourceId] = useState<GitChangeSourceId>("unstaged");
   const [gitRefreshVersion, setGitRefreshVersion] = useState(0);
   const { browserRestoreUrls, handleBrowserUrlChange } = useTaskSidePaneMemoryBridge({
@@ -638,15 +636,6 @@ export function App({
   const handleOpenQuickPick = useCallback(() => {
     setIsQuickPickOpen((open) => !open);
   }, []);
-  // FORK（D-19）：登录面整删后没有「已登录」态。
-  const handleOpenFeedback = useCallback(() => {
-    void platform.openFeedback();
-  }, [platform]);
-
-  const handleOpenCommunity = useCallback(() => platform.openCommunity(), [platform]);
-  const handleOpenProductDocs = useCallback(() => {
-    platform.openExternal(ZCODE_PRODUCT_DOCS_URL);
-  }, [platform]);
   const themeTarget = resolveTheme(theme) === "dark" ? "light" : "dark";
   const handleSwitchTheme = useCallback(() => {
     setTheme(themeTarget);
@@ -934,34 +923,12 @@ export function App({
       : null,
   });
 
-  useEffect(() => {
-    let disposed = false;
-
-    void platform.canOpenCommunity(locale).then(
-      (visible) => {
-        if (!disposed) {
-          setCanOpenCommunityFromQuickPick(visible);
-        }
-      },
-      () => {
-        if (!disposed) {
-          setCanOpenCommunityFromQuickPick(false);
-        }
-      },
-    );
-
-    return () => {
-      disposed = true;
-    };
-  }, [locale, platform]);
-
   const quickPickCommands = useMemo(
     () =>
       createQuickPickCommands({
         supportsTerminal: !isOfficeMode,
         supportsReview: !isOfficeMode,
         allowOpenWorkspace,
-        canOpenCommunity: canOpenCommunityFromQuickPick,
         isSidebarVisible,
         supportsEmbeddedBrowser,
         // FORK（D-19）：登录面整删后 quick pick 不再有「已登录」这一维度。
@@ -986,9 +953,6 @@ export function App({
             openSettingsTab();
           },
           switchTheme: handleSwitchTheme,
-          openFeedback: handleOpenFeedback,
-          openCommunity: handleOpenCommunity,
-          openProductDocs: handleOpenProductDocs,
           toggleSidebar: () => runVisibleWorkspaceCommand(handleToggleSidebar),
           toggleTerminal: () => runVisibleWorkspaceCommand(handleToggleTerminalIfWritable),
           togglePreview: () => runVisibleWorkspaceCommand(handleToggleBrowser),
@@ -1000,10 +964,6 @@ export function App({
     [
       allowOpenWorkspace,
       isOfficeMode,
-      canOpenCommunityFromQuickPick,
-      handleOpenCommunity,
-      handleOpenFeedback,
-      handleOpenProductDocs,
       handleOpenSettingsSection,
       handleSwitchTheme,
       handleOpenBrowserTab,

@@ -27,7 +27,6 @@ import {
   serializeLaunchMarks,
   type RemoteTarget,
   type WorkspacePurpose,
-  ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV,
 } from "@zcode/shared";
 import { getMainLaunchPartialMarks } from "./desktopLaunchMarks.js";
 import { BroadcastHub } from "./broadcastHub.js";
@@ -63,7 +62,6 @@ export interface HostInitMessage {
   databaseStartupId?: string;
   deliveryKind?: TaskRealtimeHostDeliveryKind;
   deviceMid?: string;
-  feedbackApiBase?: string;
   workspacePath?: string;
   workspaceIdentity?: string;
   agentWarmupTargets?: Array<{
@@ -146,8 +144,6 @@ export function spawnHostProcess(
   initMessage: HostInitMessage,
   dependencies: {
     hostProcessLocalEnv: Record<string, string>;
-    /** Main 进程已完成服务端灰度裁决；Host 只消费这个快照，不自行请求或分桶。 */
-    desktopContextPromptEnabled?: () => boolean;
     logger: {
       info: (...args: unknown[]) => void;
       warn: (...args: unknown[]) => void;
@@ -247,13 +243,6 @@ export function spawnHostProcess(
       // health-timing out. Env-name mirror of services' LAUNCHER_PID_ENV. Not set on
       // Windows/Linux (CUA is macOS-only; nothing reads it there) to keep the host env pristine.
       ...(process.platform === "darwin" ? { ZCODE_CUA_LAUNCHER_PID: String(process.pid) } : {}),
-      ...(dependencies.desktopContextPromptEnabled
-        ? {
-            [ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED_ENV]: dependencies.desktopContextPromptEnabled()
-              ? "1"
-              : "0",
-          }
-        : {}),
     },
   });
 
