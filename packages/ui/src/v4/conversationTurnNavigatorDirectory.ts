@@ -60,6 +60,12 @@ export interface MergeTurnNavigatorItemsOptions {
   assistantRunningPreview?: string;
   /** 目录项落在 `empty` 态时的 assistant 摘要（同上）。 */
   assistantEmptyPreview?: string;
+  /**
+   * 目录项 `queryPreview` 为空串时的用户输入摘要兜底文案——与已加载侧
+   * `buildConversationTurnNavigatorItems` 的 userFallback 同口径，避免同一条
+   * 空白 query 在已加载/未加载两侧显示不一致（cr-fix-spec full/B-4）。
+   */
+  userFallbackPreview?: string;
 }
 
 /**
@@ -86,7 +92,8 @@ export function buildTurnNavigatorDirectoryFallbackItem(
     turnId: entry.turnId,
     unitIndex,
     rowId: entry.queryRowId,
-    userPreview: entry.queryPreview,
+    // 空白 query（服务端下发空串）套与已加载侧同源的 fallback 文案，两侧观感一致。
+    userPreview: entry.queryPreview || (options.userFallbackPreview ?? ""),
     assistantPreview,
     assistantPreviewKind: kind,
     // 未加载区间没有 turnHeader 可读；running 态由服务端三态直传，

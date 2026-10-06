@@ -158,6 +158,23 @@ test("降级 item：key/摘要三态/unitIndex 目录序口径", () => {
   assert.equal(bare.assistantPreview, "");
 });
 
+test("降级 item：queryPreview 空串时 userPreview 套 fallback 文案（full/B-4）", () => {
+  // 服务端对空白 query 下发空串；已加载侧 buildConversationTurnNavigatorItems 会套
+  // userFallback 文案，目录降级侧必须同口径，否则同一条空白 query 两侧显示不一致。
+  const withFallback = mergeTurnNavigatorItems(
+    [makeEntry(10, { queryPreview: "" }), makeEntry(20)],
+    [],
+    30,
+    { ...I18N, userFallbackPreview: "(无输入)" },
+  );
+  assert.equal(withFallback[0]?.userPreview, "(无输入)");
+  assert.equal(withFallback[1]?.userPreview, "q20", "非空 queryPreview 直传不套 fallback");
+
+  // 未传 fallback 维持旧语义（空串直出），调用方缺省不改变行为。
+  const withoutFallback = mergeTurnNavigatorItems([makeEntry(10, { queryPreview: "" })], [], 30, I18N);
+  assert.equal(withoutFallback[0]?.userPreview, "");
+});
+
 test("active 降级三态：已加载 / 未加载 / 混合（跨边界）", () => {
   // 窗口首行 rowId=30：10 与 20 是未加载目录项，30/40 是已加载项。
   const merged = mergeTurnNavigatorItems(
