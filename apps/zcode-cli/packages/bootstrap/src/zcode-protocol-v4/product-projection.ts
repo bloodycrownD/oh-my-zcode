@@ -638,7 +638,7 @@ export class ProductProjection {
   seedSharedContextImport(
     source: ConversationSnapshot["sharedContextImport"] | null | undefined,
   ): void {
-    const title = source?.title.trim();
+    const title = source?.title?.trim();
     if (!title) return;
     if (
       this.snapshot.sharedContextImport?.title === title &&
