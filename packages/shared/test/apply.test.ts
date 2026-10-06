@@ -287,6 +287,15 @@ const LEGAL_PATCH_KEYS: ReadonlySet<string> = new Set(
   statePatchSchema.keyof().options as readonly string[],
 );
 
+test("G-3 守卫：PATCH_BUILDERS 键集合 == statePatchSchema 除 rows/seq/logEpoch 外的全部键", () => {
+  const excluded = new Set(["rows", "seq", "logEpoch"]);
+  const expected = [...LEGAL_PATCH_KEYS].filter((key) => !excluded.has(key)).sort();
+  const actual = Object.keys(PATCH_BUILDERS).sort();
+  // schema 新增状态键而没有补 builder 时，随机 patch 就永远盖不到它——这条守卫让
+  // 遗漏在等价性测试里直接红出来，而不是静默缩窄覆盖面。
+  assert.deepEqual(actual, expected, "PATCH_BUILDERS 与 statePatchSchema 键集合漂移");
+});
+
 /** 初始窗口固定带上四种可流式行，保证每轮随机序列都覆盖到全部 path。 */
 function buildInitialRows(random: () => number): ConversationRow[] {
   const prefix: RowKind[] = ["turnHeader", "userInput", "assistantText", "toolCall"];
@@ -305,7 +314,8 @@ function pickDeltaPath(random: () => number, targetKind: string | undefined): St
 }
 
 /**
- * 造一串随机 delta：五类 op 混合、乱序、可多条同帧。
+ * 造一串随机 delta：七类 op 混合（五类行/状态 + workflowRun 两 op，G-3 补强）、
+ * 乱序、可多条同帧。
  *
  * 「当前哪些 rowId 已在窗口里」用不可变 apply 当参照 oracle 推出来——它就是协议语义的
  * 规范实现（apply.ts 头部），拿它当生成器的观察窗比在测试里复抄一遍裁剪规则更可靠。
@@ -356,8 +366,45 @@ function generateDeltaSequence(
         path: pickDeltaPath(random, target?.kind),
         append: `-${index}-`,
       };
-    } else if (roll < 0.87) {
+    } else if (roll < 0.80) {
       raw = { op: "state.updated", patch: buildPatch(random, index) };
+    } else if (roll < 0.88) {
+      // workflowRun.updated（G-3 补强）：已知 run 出partial header（键级合并路径），
+      // 未知 run 出完整 header（出生路径：runId + status + usage 缺一不可）。
+      const known = shadow.workflowRuns.runs;
+      const target = known.length > 0 && random() < 0.6 ? pick(random, known) : undefined;
+      if (target) {
+        raw = {
+          op: "workflowRun.updated",
+          runId: target.runId,
+          revision: shadow.workflowRuns.revision + 1 + index,
+          run: {
+            status: pick(random, ["running", "completed", "errored", "stopped"] as const),
+            usage: { spentTokens: index, nodesUsed: Math.floor(random() * 8) },
+          },
+        };
+      } else {
+        const runId = `run-${index}`;
+        raw = {
+          op: "workflowRun.updated",
+          runId,
+          revision: shadow.workflowRuns.revision + 1 + index,
+          run: {
+            runId,
+            status: "running",
+            usage: { spentTokens: 0, nodesUsed: 0 },
+          },
+        };
+      }
+    } else if (roll < 0.92) {
+      // workflowRun.removed：已知 runId 真删；偶尔打未知的（协议语义 = 容器 revision 跟上）。
+      const known = shadow.workflowRuns.runs;
+      const target = known.length > 0 && random() < 0.7 ? pick(random, known) : undefined;
+      raw = {
+        op: "workflowRun.removed",
+        runId: target ? target.runId : `run-ghost-${index}`,
+        revision: shadow.workflowRuns.revision + 1 + index,
+      };
     } else {
       const anchor = pick(random, live);
       // anchor+1 / anchor / anchor-1 三种落点：命中该行、命中更早行、以及什么都不删。

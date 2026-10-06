@@ -181,6 +181,12 @@ export interface ConversationTurnRenderUnitsCache {
    * 生产代码不得依赖；命名沿用 G-3 的 `__…ForTest` 惯例。
    */
   __partitionCountForTest(turnId: string): number;
+  /**
+   * 测试专用探针（cr-fix-spec full/G-3）：本句柄累计真实物化（materializeDraftUnit）
+   * 的次数。护栏断言「每帧物化数 ≤ 该帧脏轮数 + 常数」用它取数。
+   * 生产代码不得依赖。
+   */
+  __materializeCountForTest(): number;
 }
 
 export function createConversationTurnRenderUnitsCache(): ConversationTurnRenderUnitsCache {
@@ -190,6 +196,8 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
   /** 上一帧最后一个保留 unit 的 turnId——isLastTurn 翻转的失效锚点。 */
   let lastUnitTurnId: string | null = null;
   let scopeMismatchWarned = false;
+  /** G-3 护栏探针：累计物化次数（命中缓存的轮不计）。 */
+  let materializeCount = 0;
 
   /**
    * (scopeKey, sessionPhase) 同源不变量的运行时断言。
@@ -284,6 +292,7 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
           keptTotal,
           options,
         );
+        materializeCount += 1;
         units.push(unit);
         setBoundedPartition(entryFor(cacheByTurnId, draft.turnId).unitByKey, cacheKey, unit);
         keptIndex += 1;
@@ -310,6 +319,9 @@ export function createConversationTurnRenderUnitsCache(): ConversationTurnRender
     __partitionCountForTest(turnId: string) {
       const entry = cacheByTurnId.get(turnId);
       return entry ? entry.keepByPhase.size + entry.unitByKey.size : 0;
+    },
+    __materializeCountForTest() {
+      return materializeCount;
     },
   };
 }

@@ -12,6 +12,7 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { turnDirectoryEntrySchema } from "@zcode/shared/zcode-protocol-v4";
 import {
   buildTurnNavigatorDirectoryFallbackItem,
   mergeTurnNavigatorItems,
@@ -115,6 +116,14 @@ test("合并：窗口范围内的未命中目录项被丢弃（窗口是那一�
     noWindow.map((item) => item.rowId),
     [10, 30],
   );
+});
+
+test("G-3 守卫：本地三态字面量与协议枚举逐字相同", () => {
+  // 本模块零导入，assistantPreviewKind 三态是手抄的协议字面量；协议侧加第四态而本地
+  // 不知道时，降级 item 会把新值静默显示成旧文案——这里让漂移直接红出来。
+  const protocolKinds = turnDirectoryEntrySchema.shape.assistantPreviewKind.options;
+  const localKinds = ["empty", "running", "text"] as const;
+  assert.deepEqual([...localKinds].sort(), [...protocolKinds].sort());
 });
 
 test("降级 item：key/摘要三态/unitIndex 目录序口径", () => {

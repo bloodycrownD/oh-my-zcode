@@ -643,6 +643,38 @@ test("T-AP4 每次调用都返回新数组，未变更且非末位的轮复用�
   assert.notStrictEqual(second[1], first[1]);
 });
 
+test("G-3 护栏：每帧物化数 ≤ 脏轮数 + 1（失效锚点）", () => {
+  const cache = createConversationTurnRenderUnitsCache();
+  const options = { sessionPhase: "running" as SessionPhase, scopeKey: "sess-ap4" };
+  const threeTurns = [
+    ...visibleTurn(1, "turn-a"),
+    ...visibleTurn(4, "turn-b"),
+    ...visibleTurn(7, "turn-c"),
+  ];
+
+  // 首帧：空缓存，全部物化（3 轮），这是护栏的基准不计入后续帧。
+  cache.build(threeTurns, options, mutation([[9, "turn-c"]]));
+  const afterFirst = cache.__materializeCountForTest();
+  assert.equal(afterFirst, 3);
+
+  // 追加 turn-d（脏轮=1）：只有 turn-d 与锚点 turn-c 物化 ≤ 1+1。
+  const fourTurns = [...threeTurns, ...visibleTurn(10, "turn-d")];
+  cache.build(fourTurns, options, mutation([[10, "turn-d"], [11, "turn-d"], [12, "turn-d"]]));
+  const appended = cache.__materializeCountForTest() - afterFirst;
+  assert.ok(appended <= 2, `追加一帧物化了 ${appended} 轮，超出 脏轮1+锚点1 的界`);
+
+  // 中段变更 turn-b（脏轮=1）：物化 ≤ turn-b + 锚点 turn-d = 2。
+  const bumped = fourTurns.map((row) => (row.rowId === 6 ? textRow(6, "turn-b", "答(改)") : row));
+  cache.build(bumped, options, mutation([[6, "turn-b"]]));
+  const middle = cache.__materializeCountForTest() - afterFirst - appended;
+  assert.ok(middle <= 2, `中段变更帧物化了 ${middle} 轮，超出 脏轮1+锚点1 的界`);
+
+  // 静帧（空 mutation）：只剩锚点 1 轮物化——这是长会话稳态的每帧成本上界。
+  cache.build(bumped, options, mutation([]));
+  const idle = cache.__materializeCountForTest() - afterFirst - appended - middle;
+  assert.ok(idle <= 1, `静帧物化了 ${idle} 轮，超出仅锚点 1 轮的界`);
+});
+
 test("T-AP4 场景三：sessionPhase 迁移改写 running 判定与展开态（增量 ≡ 全量）", () => {
   const cache = createConversationTurnRenderUnitsCache();
   // 冷恢复尾窗：只有 userInput + 一个 running toolCall，没有 turnHeader。

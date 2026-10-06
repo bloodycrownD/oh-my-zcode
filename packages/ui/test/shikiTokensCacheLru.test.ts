@@ -6,6 +6,11 @@
  * 计数断言经 uiMemoryDiagnosticsRegistry 观测，与 60s 内存采样日志看到的是同一个数。
  *
  * 零 `@/` 导入：测试及其模块图必须能在纯 Node（tsx --test）下加载。
+ *
+ * subscribers 的两个分支按 cr-fix-spec full/G-3 以人工核验结案（真实订阅要等 wasm
+ * 高亮完成，纯 Node 无法驱动）：① 同键二次订阅走 `Set.add` 去重、不重复登记；
+ * ② 满 SUBSCRIBERS_MAX_PENDING_KEYS(500) 键时最旧键连同其回调集整键淘汰，通知
+ * 完成后整键删除（与 pending 计数对称）。
  */
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -82,6 +87,22 @@ test("T-MG1 反复命中同一条不会挤出其它热条目", () => {
 
   assert.equal(__hasTokensCacheEntryForTest(hot), true, "持续命中的条目应始终保留");
   assert.equal(__hasTokensCacheEntryForTest(cold), false, "未再访问的冷条目应被淘汰");
+});
+
+test("T-MG1 满载（恰 500 条）时全部命中：既不增长也不误淘汰（full/G-3）", () => {
+  __resetShikiHighlighterCachesForTest();
+
+  const keys = __seedTokensCacheForTest("lru:full", 500);
+  assert.equal(__getTokensCacheSizeForTest(), TOKENS_CACHE_MAX_ENTRIES);
+
+  // 满载状态下逐条命中：命中路径只做顺序刷新，绝不能触发写入/淘汰。
+  for (const key of keys) {
+    assert.equal(__touchTokensCacheForTest(key), true, `满载命中不得 miss：${key}`);
+  }
+  assert.equal(__getTokensCacheSizeForTest(), TOKENS_CACHE_MAX_ENTRIES);
+  for (const key of keys) {
+    assert.equal(__hasTokensCacheEntryForTest(key), true, "纯命中后所有条目必须原样保留");
+  }
 });
 
 test("T-MG1 订阅/退订对称，pending 计数回到 0", () => {
