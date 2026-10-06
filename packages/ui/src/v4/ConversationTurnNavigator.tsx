@@ -10,35 +10,37 @@ import { cn } from "@/components/lib/utils.js";
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
-  buildConversationTurnNavigatorItems,
   resolveConversationTurnNavigatorActiveUnitIndex,
   resolveConversationTurnNavigatorBarVisualState,
   resolveConversationTurnNavigatorVisualFocusItemIndex,
+  type ConversationTurnNavigatorItem,
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
 import {
-  mergeTurnNavigatorItems,
   resolveTurnNavigatorActiveItemIndex,
-  type ConversationTurnNavigatorDirectoryEntry,
+  type ConversationTurnNavigatorMergedItem,
 } from "@/v4/conversationTurnNavigatorDirectory.js";
-import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 import { DEFAULT_ROW_HEIGHT_ESTIMATE_PX } from "@/v4/timelineRowHeightCache.js";
 
 interface ConversationTurnNavigatorProps {
-  renderUnits: readonly ConversationTurnRenderUnit[];
+  /**
+   * 合并后的 rail 条目（目录降级项 + 已加载项按 queryRowId 去重，升序稳定）。
+   * 由父组件 ConversationTimeline 构建（full/J-2 上提）：rail 的实际渲染条件
+   * （turnNavigatorVisible）与左侧 gutter 占位在父层共用同一份派生结果，
+   * 子组件不再自算，避免两套条件漂移。
+   */
+  items: readonly ConversationTurnNavigatorMergedItem[];
+  /**
+   * 已加载侧条目（buildConversationTurnNavigatorItems 产物，父层随 items 一起
+   * 传入）。active 判定的已加载主循环与 loadedItemByUnitIndex 索引以它为源；
+   * unitIndex 是虚拟列表单位，与目录降级项的 rail 序占位不同计量，不能混用。
+   */
+  loadedItems: readonly ConversationTurnNavigatorItem[];
   scrollOffsetPx: number;
   viewportHeightPx: number;
   virtualItems: readonly ConversationTurnNavigatorVirtualItem[];
   activeQueryRowId?: number;
   isHydratingDirectory?: boolean;
-  /**
-   * turn 目录窄投影条目（store `turnDirectory.entries`，按 queryRowId 升序）。
-   *
-   * 与正文窗口解耦：目录给上方未加载 query 的概要，已加载窗口给实时运行态，
-   * 两者在 items 合并层去重合并。目录尚未取过时为空数组——items 退化为纯已加载
-   * items，行为与旧实现完全一致。
-   */
-  directoryEntries?: readonly ConversationTurnNavigatorDirectoryEntry[];
   /**
    * 目录被页数上限截断时，还没取到的更早条目数；undefined / 0 不渲染提示。
    *
@@ -79,13 +81,13 @@ function usePrefersReducedMotion() {
 }
 
 function ConversationTurnNavigatorImpl({
-  renderUnits,
+  items,
+  loadedItems,
   scrollOffsetPx,
   viewportHeightPx,
   virtualItems,
   activeQueryRowId,
   isHydratingDirectory = false,
-  directoryEntries,
   olderEntriesNotLoadedCount,
   windowFirstRowId,
   onJumpToQuery,
@@ -93,15 +95,6 @@ function ConversationTurnNavigatorImpl({
   const { intl } = useZCodeIntl();
   const prefersReducedMotion = usePrefersReducedMotion();
   const [interactionItemIndex, setInteractionItemIndex] = useState<number | undefined>(undefined);
-  const assistantEmptyPreview = intl.formatMessage({
-    id: "chat.turnNavigator.emptyAssistant",
-  });
-  const assistantRunningPreview = intl.formatMessage({
-    id: "chat.turnNavigator.runningAssistant",
-  });
-  const userFallbackPreview = intl.formatMessage({
-    id: "chat.turnNavigator.userFallback",
-  });
   // 截断提示：rail 只有 36px 宽，正文放不下，视觉上是一条「上面还有」的断口标记，
   // 完整文案（含还差多少条）走 hover 卡与 aria-label——与条目 tooltip 同一套交互。
   const olderEntriesNotLoadedText =
@@ -111,31 +104,6 @@ function ConversationTurnNavigatorImpl({
           { id: "chat.turnNavigator.olderEntriesNotLoaded" },
           { count: String(olderEntriesNotLoadedCount) },
         );
-  // 已加载 items（含实时运行态与 i18n 文案）。
-  const loadedItems = useMemo(
-    () =>
-      buildConversationTurnNavigatorItems(renderUnits, {
-        assistantEmptyPreview,
-        assistantRunningPreview,
-        userFallbackPreview,
-      }),
-    [assistantEmptyPreview, assistantRunningPreview, renderUnits, userFallbackPreview],
-  );
-  // items 数据源 = 目录 + 已加载去重合并（升序稳定）。目录为空/未取过时退化为纯已加载 items。
-  const items = useMemo(
-    () =>
-      mergeTurnNavigatorItems(directoryEntries ?? [], loadedItems, windowFirstRowId, {
-        assistantEmptyPreview,
-        assistantRunningPreview,
-      }),
-    [
-      assistantEmptyPreview,
-      assistantRunningPreview,
-      directoryEntries,
-      loadedItems,
-      windowFirstRowId,
-    ],
-  );
 
   // 已加载侧索引：unitIndex 是虚拟列表单位，降级目录项的 unitIndex 只是 rail 序占位，
   // 两者不能混在一张 Map 里（否则 active 判定会撞键）。
@@ -216,9 +184,8 @@ function ConversationTurnNavigatorImpl({
     });
   }, [activeItemIndex, items.length, railVirtualizer]);
 
-  if (items.length < 2) {
-    return null;
-  }
+  // 条目不足两条时不渲染的裁决在父层 turnNavigatorVisible 完成（full/J-2 单一真源），
+  // 本组件只保留上面 effect 内的 items.length 守卫。
 
   return (
     <nav

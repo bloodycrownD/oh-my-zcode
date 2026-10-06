@@ -55,6 +55,7 @@ import {
 } from "@/v4/conversationProjectionCore.js";
 import type { ConversationProjectionLastMutation } from "@/v4/conversationProjectionStore.js";
 import {
+  buildConversationTurnNavigatorItems,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
   shouldHydrateConversationTurnNavigatorDirectory,
@@ -64,6 +65,7 @@ import {
   type ConversationTurnNavigatorQueryPosition,
   type ConversationTurnNavigatorVirtualItem,
 } from "@/v4/conversationTurnNavigatorHelpers.js";
+import { mergeTurnNavigatorItems } from "@/v4/conversationTurnNavigatorDirectory.js";
 import {
   DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
   TimelineRowHeightCache,
@@ -499,6 +501,37 @@ function ConversationTimelineImpl({
   );
   const turnNavigatorQueryRowIdsRef = useRef(turnNavigatorQueryRowIds);
   turnNavigatorQueryRowIdsRef.current = turnNavigatorQueryRowIds;
+  // rail 的 items 数据源在父层构建（full/J-2）：可见性裁决 turnNavigatorVisible 必须
+  // 与实际渲染同源，子组件不再自算 build/merge——否则 gutter 占位条件与 rail 渲染
+  // 条件各看一份派生结果，一侧翻另一侧不翻，出现 48px 白占或反向遮挡。
+  const assistantEmptyPreview = intl.formatMessage({ id: "chat.turnNavigator.emptyAssistant" });
+  const assistantRunningPreview = intl.formatMessage({ id: "chat.turnNavigator.runningAssistant" });
+  const userFallbackPreview = intl.formatMessage({ id: "chat.turnNavigator.userFallback" });
+  const turnNavigatorLoadedItems = useMemo(
+    () =>
+      buildConversationTurnNavigatorItems(renderUnits, {
+        assistantEmptyPreview,
+        assistantRunningPreview,
+        userFallbackPreview,
+      }),
+    [assistantEmptyPreview, assistantRunningPreview, renderUnits, userFallbackPreview],
+  );
+  const turnNavigatorItems = useMemo(
+    () =>
+      mergeTurnNavigatorItems(turnDirectoryEntries ?? [], turnNavigatorLoadedItems, rows[0]?.rowId, {
+        assistantEmptyPreview,
+        assistantRunningPreview,
+        userFallbackPreview,
+      }),
+    [
+      assistantEmptyPreview,
+      assistantRunningPreview,
+      turnDirectoryEntries,
+      turnNavigatorLoadedItems,
+      userFallbackPreview,
+      rows,
+    ],
+  );
   const centeredEmptyLayout = centerEmptyStateWithDock && renderUnits.length === 0;
   const responsiveCenteredEmptyLayout = centeredEmptyLayout && !compactEmptyStateWithDock;
   // 高频值经 ref 供稳定回调读取（不进依赖数组）。
@@ -1863,10 +1896,12 @@ function ConversationTimelineImpl({
   // rail 显隐：目录已知且一条都没有、权威总数也不足两条时隐藏（否则画出一根空条）。
   // 未取过目录时保持可见——加载中隐藏会在首帧闪一下。
   const turnNavigatorRailHidden = shouldHideConversationTurnNavigatorRail(turnDirectory);
-  // turn map 覆盖左侧 48px 的留位与 rail 显隐必须同源：目录模式下 rail 的可见性由
-  // 窄投影决定，不能只看当前窗口里已加载的 query 条数。
-  const turnNavigatorOccupiesLeftGutter =
-    turnNavigatorQueryRowIds.size >= 2 || (Boolean(turnDirectory) && !turnNavigatorRailHidden);
+  // rail 实际渲染条件的单一真源（full/J-2）：= 宿主未禁用 && 目录未裁决隐藏 &&
+  // 合并后条目 >= 2（子组件不再自行 return null）。gutter 占位与 JSX 挂载都必须
+  // 引用这一个值，任何一侧另算条件都会重现「rail 不在时 48px 白占」的漂移。
+  const turnNavigatorVisible =
+    !hideTurnNavigator && !turnNavigatorRailHidden && turnNavigatorItems.length >= 2;
+  const turnNavigatorOccupiesLeftGutter = turnNavigatorVisible;
 
   // raw projection row 与按 turn 合并后的 render unit 不是同一计量单位；
   // 分开暴露才能让恢复/分页验证不再把可见 unit 误当成持久 row。
@@ -1890,9 +1925,10 @@ function ConversationTimelineImpl({
       />
       {/* 分享选择流程无论面板展开还是收起，左 rail 都由分享面板或 reopen 按钮独占，
           必须隐藏对话轮导航，避免两个绝对定位控件互相覆盖。退出分享选择后自动恢复。 */}
-      {hideTurnNavigator || turnNavigatorRailHidden ? null : (
+      {turnNavigatorVisible ? (
         <ConversationTurnNavigator
-          renderUnits={renderUnits}
+          items={turnNavigatorItems}
+          loadedItems={turnNavigatorLoadedItems}
           isHydratingDirectory={loadingDirectory}
           scrollOffsetPx={virtualizer.scrollOffset ?? turnNavigatorViewport.scrollOffsetPx}
           viewportHeightPx={
@@ -1900,14 +1936,13 @@ function ConversationTimelineImpl({
           }
           virtualItems={turnNavigatorVirtualItems}
           activeQueryRowId={turnNavigatorViewport.activeQueryRowId}
-          directoryEntries={turnDirectoryEntries}
           olderEntriesNotLoadedCount={
             turnDirectory?.truncated === true ? turnDirectory.olderEntriesNotLoadedCount : undefined
           }
           windowFirstRowId={rows[0]?.rowId}
           onJumpToQuery={scrollToQuery}
         />
-      )}
+      ) : null}
       <div
         ref={scrollRef}
         data-testid={TID_V4_TIMELINE}
