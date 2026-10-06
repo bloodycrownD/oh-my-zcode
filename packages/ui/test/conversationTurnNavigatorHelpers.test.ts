@@ -16,6 +16,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  pickOwnedRowElements,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorActiveUnitIndex,
   shouldHideConversationTurnNavigatorRail,
@@ -417,4 +418,29 @@ test("目录门控：宽度 / 缺 handler / 在途 三道前置闸门不受门�
     false,
     "查询在途不放行（防重入）",
   );
+});
+
+test("pickOwnedRowElements：注册表条目不属于本容器时被跳过（full/B-1）", () => {
+  // Node 侧无 DOM：元素用裸对象桩、容器用 contains 闭包桩，只测归属过滤纯逻辑。
+  const ownedElement = {} as HTMLElement;
+  const foreignElement = {} as HTMLElement;
+  const registry = new Map<number, HTMLElement>([
+    [10, ownedElement],
+    [20, foreignElement],
+    [30, ownedElement],
+  ]);
+  const ownedSet = new Set([ownedElement]);
+  const container = { contains: (element: HTMLElement) => ownedSet.has(element) };
+
+  const owned = pickOwnedRowElements(registry, container);
+
+  assert.deepEqual([...owned.keys()].sort((a, b) => a - b), [10, 30]);
+  assert.equal(owned.get(10), ownedElement);
+  assert.equal(owned.has(20), false, "别家 pane 的活元素（contains 不命中）必须被过滤");
+});
+
+test("pickOwnedRowElements：全部不归属 / 空注册表 → 空 Map", () => {
+  const container = { contains: () => false };
+  assert.equal(pickOwnedRowElements(new Map([[1, {} as HTMLElement]]), container).size, 0);
+  assert.equal(pickOwnedRowElements(new Map(), { contains: () => true }).size, 0);
 });

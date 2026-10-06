@@ -56,6 +56,7 @@ import {
 import type { ConversationProjectionLastMutation } from "@/v4/conversationProjectionStore.js";
 import {
   buildConversationTurnNavigatorItems,
+  pickOwnedRowElements,
   resolveConversationTurnNavigatorActiveQueryRowId,
   resolveConversationTurnNavigatorHydrationRetryDelayMs,
   shouldHydrateConversationTurnNavigatorDirectory,
@@ -1006,12 +1007,14 @@ function ConversationTimelineImpl({
     (element: HTMLDivElement) => {
       syncMessageLayerMask(element);
       const viewportRect = element.getBoundingClientRect();
-      const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
       // 只查已挂载行的注册表，不再对滚动容器做 querySelectorAll 全扫描
-      // （那会让每次滚动都强制 reflow）。遍历序不参与判定，顺序由 normalize 的
-      // start/rowId 排序兜底。
+      // （那会让每次滚动都强制 reflow）。注册表是模块级单例、多 pane 共享，
+      // 必须先按本容器归属过滤，rowId 跨会话撞号时才不会取到别家 pane 的坐标。
+      // 遍历序不参与判定，顺序由 normalize 的 start/rowId 排序兜底。
+      const ownedRowElements = pickOwnedRowElements(rowElementRegistry, element);
+      const queryPositions: ConversationTurnNavigatorQueryPosition[] = [];
       for (const rowId of turnNavigatorQueryRowIdsRef.current) {
-        const rowElement = rowElementRegistry.get(rowId);
+        const rowElement = ownedRowElements.get(rowId);
         if (!rowElement) continue;
         const rowRect = rowElement.getBoundingClientRect();
         const start = element.scrollTop + rowRect.top - viewportRect.top;
@@ -1403,12 +1406,11 @@ function ConversationTimelineImpl({
 
       const scrollMountedQuery = (element: HTMLDivElement, unitIndex: number): boolean => {
         // 已挂载行优先查注册表：虚拟列表只挂可见行，注册表天然是它们的子集，
-        // 比对滚动容器做 querySelector 更省。注册表未登记时回退选择器查询。
-        const registered = rowElementRegistry.get(target.rowId);
+        // 比对滚动容器做 querySelector 更省。注册表多 pane 共享，按本容器归属
+        // 过滤后命中才可信；未命中回退选择器查询（本就 scoped 在本容器内）。
+        const registered = pickOwnedRowElements(rowElementRegistry, element).get(target.rowId);
         const rowElement =
-          registered?.isConnected === true
-            ? registered
-            : element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
+          registered ?? element.querySelector<HTMLElement>(`[data-row-id="${target.rowId}"]`);
         if (!rowElement) return false;
         const targetTop =
           element.scrollTop +
@@ -1425,7 +1427,7 @@ function ConversationTimelineImpl({
           behavior,
           rowId: target.rowId,
           unitIndex,
-          viaRegistry: registered?.isConnected === true,
+          viaRegistry: registered !== undefined,
         });
         return true;
       };

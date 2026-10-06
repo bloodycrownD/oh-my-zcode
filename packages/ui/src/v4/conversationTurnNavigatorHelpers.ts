@@ -377,3 +377,23 @@ export function resolveConversationTurnNavigatorVisualFocusItemIndex({
 }: ResolveConversationTurnNavigatorVisualFocusItemIndexOptions): number | undefined {
   return interactionItemIndex;
 }
+
+/**
+ * 按容器归属过滤 row 元素注册表（cr-fix-spec full/B-1）。
+ *
+ * 注册表是模块级单例、仅以 rowId 为键，而 SessionPane 存在多处 timeline 挂载点
+ * （主 pane 与侧 pane 并存是常态），rowId 跨会话又可重复——读取端若不按「元素
+ * 是否挂在本滚动容器内」过滤，rail 的 active 高亮与跳转落点会取到别家 pane 的
+ * 坐标。container 用结构化类型便于 Node 侧单测（手写 `{ contains }` 桩即可，
+ * 真实 HTMLDivElement 天然满足）。
+ */
+export function pickOwnedRowElements(
+  registry: ReadonlyMap<number, HTMLElement>,
+  container: { contains: (element: HTMLElement) => boolean },
+): Map<number, HTMLElement> {
+  const owned = new Map<number, HTMLElement>();
+  for (const [rowId, element] of registry) {
+    if (container.contains(element)) owned.set(rowId, element);
+  }
+  return owned;
+}
