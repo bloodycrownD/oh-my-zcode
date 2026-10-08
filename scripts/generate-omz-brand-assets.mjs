@@ -270,10 +270,13 @@ function encodePng(width, height, rgba) {
 
 // ---------- 扫描线栅格化（像素坐标 + 4x 超采样） ----------
 // shapes = [{ polys: 点集数组（一组内 even-odd）, color: [r,g,b] | (y)=>[r,g,b] }]
-function renderPixels(size, shapes, ss = 4) {
-  const W = size * ss;
-  const acc = new Float64Array(W * W * 3);
-  const cov = new Float64Array(W * W);
+function renderPixels(width, height, shapes, ss = 4) {
+  const W = width * ss;
+  const H = height * ss;
+  // source-over 语义：shapes 按数组顺序绘制，后画的覆盖先画的（背景→描边→字标）。
+  // 早先是「颜色累加平均」，重叠区会被洗成半透明灰（DMG 背景字标不可读），弃用。
+  const sample = new Float64Array(W * H * 3);
+  const hit = new Uint8Array(W * H);
   for (const shape of shapes) {
     const edges = [];
     for (const poly of shape.polys) {
@@ -283,7 +286,7 @@ function renderPixels(size, shapes, ss = 4) {
         if (p[1] !== q[1]) edges.push([p, q]);
       }
     }
-    for (let y = 0; y < W; y++) {
+    for (let y = 0; y < H; y++) {
       const wy = (y + 0.5) / ss;
       const xs = [];
       for (const [[x1, y1], [x2, y2]] of edges) {
@@ -296,17 +299,17 @@ function renderPixels(size, shapes, ss = 4) {
         const xb = Math.min(W - 1, Math.round(xs[k + 1] * ss) - 1);
         for (let x = xa; x <= xb; x++) {
           const idx = (y * W + x) * 3;
-          acc[idx] += color[0];
-          acc[idx + 1] += color[1];
-          acc[idx + 2] += color[2];
-          cov[y * W + x] += 1;
+          sample[idx] = color[0];
+          sample[idx + 1] = color[1];
+          sample[idx + 2] = color[2];
+          hit[y * W + x] = 1;
         }
       }
     }
   }
-  const out = Buffer.alloc(size * size * 4);
-  for (let y = 0; y < size; y++) {
-    for (let x = 0; x < size; x++) {
+  const out = Buffer.alloc(width * height * 4);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
       let r = 0;
       let g = 0;
       let b = 0;
@@ -314,22 +317,21 @@ function renderPixels(size, shapes, ss = 4) {
       for (let sy = 0; sy < ss; sy++) {
         for (let sx = 0; sx < ss; sx++) {
           const p = (y * ss + sy) * W + x * ss + sx;
-          const c = Math.min(1, cov[p]);
-          if (c > 0) {
+          if (hit[p]) {
             const idx = p * 3;
-            r += acc[idx] / cov[p];
-            g += acc[idx + 1] / cov[p];
-            b += acc[idx + 2] / cov[p];
+            r += sample[idx];
+            g += sample[idx + 1];
+            b += sample[idx + 2];
           }
-          a += c;
+          a += hit[p];
         }
       }
-      const o = (y * size + x) * 4;
+      const o = (y * width + x) * 4;
       const cover = a / (ss * ss);
-      const div = ss * ss * cover || 1;
-      out[o] = Math.round(r / div);
-      out[o + 1] = Math.round(g / div);
-      out[o + 2] = Math.round(b / div);
+      const covered = a || 1;
+      out[o] = Math.round(r / covered);
+      out[o + 1] = Math.round(g / covered);
+      out[o + 2] = Math.round(b / covered);
       out[o + 3] = Math.round(cover * 255);
     }
   }
@@ -394,20 +396,20 @@ function formBShapes(size, marginRatio) {
 // ---------- 输出 PNG/ICO ----------
 const sizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
 for (const size of sizes) {
-  writeFileSync(resolve(outDir, `icon-${size}.png`), encodePng(size, size, renderPixels(size, formBShapes(size, 0.07))));
+  writeFileSync(resolve(outDir, `icon-${size}.png`), encodePng(size, size, renderPixels(size, size, formBShapes(size, 0.07))));
 }
 // icon.png（留 7% 透明边）与 icon_windows.png（满幅：圆角方撑满画布）
-writeFileSync(resolve(outDir, "icon.png"), encodePng(1024, 1024, renderPixels(1024, formBShapes(1024, 0.07))));
+writeFileSync(resolve(outDir, "icon.png"), encodePng(1024, 1024, renderPixels(1024, 1024, formBShapes(1024, 0.07))));
 writeFileSync(
   resolve(outDir, "icon_windows.png"),
-  encodePng(1024, 1024, renderPixels(1024, formBShapes(1024, 0.001))),
+  encodePng(1024, 1024, renderPixels(1024, 1024, formBShapes(1024, 0.001))),
 );
 console.log("✓ PNG 图标集");
 
 function buildIco(sizeList) {
   const entries = sizeList.map((s) => ({
     size: s,
-    data: encodePng(s, s, renderPixels(s, formBShapes(s, 0.07))),
+    data: encodePng(s, s, renderPixels(s, s, formBShapes(s, 0.07))),
   }));
   const header = Buffer.alloc(6);
   header.writeUInt16LE(0, 0);
@@ -475,3 +477,80 @@ console.log("✓ wordmark.ascii.txt（ASCII 目检）");
 console.log(`\n输出目录：${outDir}`);
 console.log(`字标 viewBox：${wordmarkViewBox}（宽高比 ${(WORDMARK_W / H).toFixed(2)}:1）`);
 console.log("\n" + asciiWordmark(110, 20));
+
+// ---------- ICNS（macOS 应用图标容器）----------
+// icns = "icns" + 总长 + 一组 [4 字节类型 + 4 字节长度 + PNG 数据]；现代类型（ic07..ic10）
+// 直接内嵌 PNG（macOS 10.7+），与 ICO 的 PNG 内嵌同理，可纯 Node 写入。
+const ICNS_PNG_ENTRIES = [
+  { type: "ic07", size: 128 },
+  { type: "ic08", size: 256 },
+  { type: "ic09", size: 512 },
+  { type: "ic10", size: 1024 },
+];
+function buildIcns() {
+  const chunks = ICNS_PNG_ENTRIES.map((entry) => {
+    const png = encodePng(
+      entry.size,
+      entry.size,
+      renderPixels(entry.size, entry.size, formBShapes(entry.size, 0.07)),
+    );
+    const head = Buffer.alloc(8);
+    head.write(entry.type, 0, "ascii");
+    head.writeUInt32BE(8 + png.length, 4);
+    return Buffer.concat([head, png]);
+  });
+  const total = 8 + chunks.reduce((n, c) => n + c.length, 0);
+  const header = Buffer.alloc(8);
+  header.write("icns", 0, "ascii");
+  header.writeUInt32BE(total, 4);
+  return Buffer.concat([header, ...chunks]);
+}
+// 应用图标与安装器/DMG 卷图标同视觉（旧「包裹箱插画」统一替换为应用方标）
+writeFileSync(resolve(outDir, "icon.icns"), buildIcns());
+writeFileSync(resolve(outDir, "icon_installer.icns"), buildIcns());
+writeFileSync(
+  resolve(outDir, "icon_installer.png"),
+  encodePng(1024, 1024, renderPixels(1024, 1024, formBShapes(1024, 0.07))),
+);
+writeFileSync(resolve(outDir, "icon_installer.ico"), buildIco([16, 24, 32, 48, 64, 128, 256]));
+console.log("✓ icon.icns / icon_installer.icns / icon_installer.png / icon_installer.ico");
+
+// ---------- DMG 安装背景（540×380 与 @2x）----------
+// 原图为浅底 + 字标 + 指向「应用程序」的箭头；以 OMZ 字标重绘同构图。
+function renderDmgBackground(scale) {
+  const w = 540 * scale;
+  const h = 380 * scale;
+  const bg = [0xf5, 0xf5, 0xf7];
+  const fg = [0x1d, 0x1d, 0x1f];
+  const shapes = [{ polys: [[[0, 0], [w, 0], [w, h], [0, h]]], color: bg }];
+  // OMZ 字标：宽 200（@2x 同比例），置顶部居中
+  const wmW = 200 * scale;
+  const wmS = wmW / WORDMARK_W;
+  const wmX = (w - wmW) / 2;
+  const wmY = 48 * scale;
+  for (const group of wordmarkShapesPolys) {
+    shapes.push({
+      polys: group.map((poly) => poly.map(([x, y]) => [x * wmS + wmX, y * wmS + wmY])),
+      color: fg,
+    });
+  }
+  // 箭头：指向右侧「应用程序」（electron-builder 默认窗口布局：app 左、alias 右）
+  const ay = 300 * scale;
+  const arrow = [
+    [190 * scale, ay - 6 * scale],
+    [324 * scale, ay - 6 * scale],
+    [324 * scale, ay - 18 * scale],
+    [350 * scale, ay],
+    [324 * scale, ay + 18 * scale],
+    [324 * scale, ay + 6 * scale],
+    [190 * scale, ay + 6 * scale],
+  ];
+  shapes.push({ polys: [arrow], color: fg });
+  return renderPixels(w, h, shapes);
+}
+writeFileSync(resolve(outDir, "dmg_background.png"), encodePng(540, 380, renderDmgBackground(1)));
+writeFileSync(
+  resolve(outDir, "dmg_background@2x.png"),
+  encodePng(1080, 760, renderDmgBackground(2)),
+);
+console.log("✓ dmg_background.png / dmg_background@2x.png");
