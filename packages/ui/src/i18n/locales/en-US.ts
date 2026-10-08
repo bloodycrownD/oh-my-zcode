@@ -2854,14 +2854,6 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.startPlan.title": "{provider} - Coding Plan",
   "settings.modelProvider.startPlan.meta.today": "Today",
   "settings.modelProvider.startPlan.meta.tomorrow": "Tomorrow",
-  "settings.modelProvider.startPlan.quotaSectionTitle": "Trial plan",
-  "settings.modelProvider.startPlan.eligibleNewUser": "New User",
-  "settings.modelProvider.startPlan.preview.unit.tokens": "tokens",
-  "settings.modelProvider.startPlan.preview.period.daily": "{unit} per day",
-  "settings.modelProvider.startPlan.preview.entitlementSummary.daily": "Daily quota · {details}",
-  "settings.modelProvider.startPlan.preview.entitlementSummary.generic": "Quota · {details}",
-  "settings.modelProvider.startPlan.preview.entitlementGroup.single": "{model} {quota}",
-  "settings.modelProvider.startPlan.preview.entitlementGroup.each": "{models} {quota} each",
   "settings.modelProvider.startPlan.balance.title": "Today's balance",
   "settings.modelProvider.startPlan.balance.remaining": "{value} tokens remaining",
   "settings.modelProvider.startPlan.balance.used": "{value} used",
@@ -2898,9 +2890,6 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.codingPlan.status.teamUnavailable":
     "Team plan not assigned. Contact your team admin.",
   "settings.modelProvider.codingPlan.status.unsupported": "Not supported yet",
-  "settings.modelProvider.codingPlan.bigmodel.unregisteredHint":
-    "This BigModel account is not registered yet. Register first.",
-  "settings.modelProvider.codingPlan.bigmodel.registerAction": "Register",
   "settings.modelProvider.codingPlan.description.disconnected":
     "Connect to view Coding Plan entitlements.",
   "settings.modelProvider.codingPlan.description.checking":

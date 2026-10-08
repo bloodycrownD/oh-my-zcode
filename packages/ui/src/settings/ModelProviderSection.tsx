@@ -877,8 +877,7 @@ export function ModelProviderSection({
   // 首屏慢网时之前直接 return null，导致整块模型供应商页空白，
   // 已有的左侧分组 loading 和刷新按钮 loading 都没有机会渲染。
   // 这里改为始终先渲染布局壳子，再按分组展示 loading，避免用户误以为页面坏了。
-  const presetLoading = loading || modelProvidersRefreshing;
-  const customLoading = loading || modelProvidersRefreshing;
+  const providerListLoading = loading || modelProvidersRefreshing;
 
   if (loadError) {
     return (
@@ -896,8 +895,7 @@ export function ModelProviderSection({
       description={intl.formatMessage({ id: "settings.modelProviderDescription" })}
       refreshLabel={intl.formatMessage({ id: "settings.modelProvider.refresh" })}
       loadingLabel={intl.formatMessage({ id: "common.loading" })}
-      presetLoading={presetLoading}
-      customLoading={customLoading}
+      providerListLoading={providerListLoading}
       onRefresh={() => {
         void refreshModelProviderSection({
           refresh,
@@ -943,7 +941,7 @@ export function ModelProviderSection({
           selectedNavItem={selectedNavItem}
           navigationItems={navigationItems}
           connectionSettingsFailed={familyConnectionSettingsFailed}
-          providerListLoading={customLoading}
+          providerListLoading={providerListLoading}
           presetSubscriptionProviderId={presetSubscriptionProviderId}
           codingPlanStatusSyncProviderId={codingPlanStatusSyncProviderId}
           codingPlanDisconnectProviderId={codingPlanDisconnectProviderId}

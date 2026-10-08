@@ -75,7 +75,8 @@ export interface IProviderSettingsService {
   ): Promise<ModelConnectivityResult>;
   /**
    * 从 Provider 的 OpenAI 兼容端点拉取可选模型 ID 列表。
-   * 主机侧读取有效配置并发起请求；API Key 不经过 renderer。
+   * renderer 不把 Key 交给主机组请求：主机本地读取有效配置并发起请求，
+   * 返回值仅模型 ID（renderer 表单本就持有 Key，此处不是「Key 不进 renderer」）。
    */
   listProviderModels(input: ProviderModelListInput): Promise<ProviderModelListResult>;
 }

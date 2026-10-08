@@ -132,13 +132,6 @@ export function ModelProviderSectionDetail({
     );
   }
 
-  if (selectedNavItem.type === "preset") {
-    // FORK（删除 zai/bigmodel 预设面）：内置 preset provider 与对应导航分组已整删，
-    // 原「尚未同步，请先完成 OAuth 登录」占位分支不会再被命中；这里只保留 loading 兜底，
-    // 防止旧导航 key 或外部入口残留时把 preset 误渲染成自定义供应商表单。
-    return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
-  }
-
   if (selectedNavItem.type === "codingPlanLoading") {
     // Z.AI plan 判定占位只属于左侧导航，不应进入详情表单渲染路径。
     return null;

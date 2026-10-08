@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- 模型元数据弹窗集中承载模型 ID（含拉取模型列表）、Token、模态与推理档位编辑；待稳定后再按字段族拆分。 */
 import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
-import { ChevronDownIcon, Loader2Icon, Pencil } from "lucide-react";
+import { CheckIcon, ChevronDownIcon, Loader2Icon, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -12,12 +12,6 @@ import {
 } from "@/components/ui/dialog.js";
 import { Input } from "@/components/ui/input.js";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
-import {
-  Command,
-  CommandGroup,
-  CommandItem,
-  CommandList,
-} from "@/components/ui/command.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useServices } from "@/hooks/useServices.js";
 import type { ModelConfigObject } from "@zcode/provider";
@@ -50,6 +44,11 @@ import { ModelEditorAdvanced } from "@/settings/model-provider-section/ModelEdit
 
 function selectFocusedInputText(event: Pick<FocusEvent<HTMLInputElement>, "currentTarget">) {
   event.currentTarget.select();
+}
+
+/** 候选列表项 id：输入框用 aria-activedescendant 指向当前键盘高亮项。 */
+function modelOptionId(listboxId: string, index: number): string {
+  return `${listboxId}-option-${index}`;
 }
 
 export function ProviderModelMetadataDialog({
@@ -98,53 +97,81 @@ export function ProviderModelMetadataDialog({
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
   const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
+  // 拉取结果用可搜索下拉呈现：芯片形态在几十上百个模型时不可用。
+  const [modelsPickerOpen, setModelsPickerOpen] = useState(false);
+  // 键盘导航的当前高亮项；-1 = 未高亮（回车仍走提交草稿的既有语义）。
+  const [activeModelIndex, setActiveModelIndex] = useState(-1);
+  const modelIdInputRef = useRef<HTMLInputElement>(null);
+  const modelsListRef = useRef<HTMLDivElement>(null);
+  const modelsListboxId = useId();
+  // 在途拉取的序号与弹窗开关快照：关闭弹窗或再次拉取都会推进序号，过期响应一律丢弃。
+  const fetchModelsSeqRef = useRef(0);
+  const openRef = useRef(open);
   const commit = async () => {
     const result = await onCommit();
     if (!result) setValidationAttempt((value) => value + 1);
   };
-  // 每次关闭清空上一次拉取结果，避免下次打开把旧 Provider 的模型列表带进新草稿。
+  // 每次关闭清空上一次拉取结果与在途状态，避免下次打开把旧 Provider 的模型列表带进新草稿。
   useEffect(() => {
-    if (!open) {
-      setFetchedModels(null);
-      setFetchModelsError(null);
+    openRef.current = open;
+    if (open) {
+      return;
     }
+    fetchModelsSeqRef.current += 1;
+    setFetchedModels(null);
+    setFetchModelsError(null);
+    setFetchingModels(false);
+    setModelsPickerOpen(false);
+    setActiveModelIndex(-1);
   }, [open]);
   const canFetchModels = Boolean(providerId) && !modelIdReadOnly;
   const handleFetchModels = async () => {
     if (!providerId || fetchingModels) {
       return;
     }
+    const seq = ++fetchModelsSeqRef.current;
     setFetchingModels(true);
     setFetchModelsError(null);
     try {
       const result = await providerSettingsService.listProviderModels({ providerId });
+      // 弹窗已关闭或已有更新的拉取：丢弃过期响应，不能把它写进（下次打开的）弹窗。
+      if (seq !== fetchModelsSeqRef.current || !openRef.current) {
+        return;
+      }
       setFetchedModels(result.models);
+      setActiveModelIndex(-1);
     } catch (error) {
+      if (seq !== fetchModelsSeqRef.current || !openRef.current) {
+        return;
+      }
       setFetchedModels(null);
       setFetchModelsError(error instanceof Error ? error.message : String(error));
     } finally {
-      setFetchingModels(false);
+      if (seq === fetchModelsSeqRef.current) {
+        setFetchingModels(false);
+      }
     }
   };
-  // 拉取结果用可搜索下拉呈现：芯片形态在几十上百个模型时不可用。
-  const [modelsPickerOpen, setModelsPickerOpen] = useState(false);
-  const modelsListRef = useRef<HTMLDivElement>(null);
   // 输入框内容即过滤词：空=全部候选；模型 ID 子串匹配（大小写不敏感）。
   const fetchedModelQuery = draft.idValue.trim().toLowerCase();
   const visibleFetchedModels =
     fetchedModels?.filter(
       (modelId) => !fetchedModelQuery || modelId.toLowerCase().includes(fetchedModelQuery),
     ) ?? [];
+  // 高亮项可能已被后续输入过滤掉；越界一律按未高亮处理。
+  const activeOptionIndex =
+    activeModelIndex >= 0 && activeModelIndex < visibleFetchedModels.length
+      ? activeModelIndex
+      : -1;
   const handleModelsListWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
     const listElement = event.currentTarget;
     if (listElement.scrollHeight <= listElement.clientHeight) {
       return;
     }
     // Popover 嵌在 Dialog 中时，外层滚动锁会吞掉默认滚轮行为（同
-    // RemoteConnectionFields 的 SSH 别名列表），这里显式驱动列表自身滚动。
+    // RemoteConnectionFields 的 SSH 别名列表）：显式驱动列表自身滚动即可；
+    // 被动监听下 preventDefault/stopPropagation 无效，不再调用。
     listElement.scrollTop += event.deltaY;
-    event.preventDefault();
-    event.stopPropagation();
   }, []);
   const contextWindowInputId = useId();
   const maxOutputInputId = useId();
@@ -177,6 +204,45 @@ export function ProviderModelMetadataDialog({
     }
     event.preventDefault();
     void commit();
+  };
+  // 候选列表打开时由输入框接管上下键 / 回车 / Esc：焦点始终留在输入框（弹层不抢焦），
+  // 高亮项经 aria-activedescendant 暴露；实现不依赖 cmdk 的内部键盘状态。
+  const handleModelIdKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    const composing = isImeComposingKeyEvent({
+      compositionActive: compositionActiveRef.current,
+      nativeEvent: event.nativeEvent,
+    });
+    if (!composing && modelsPickerOpen && visibleFetchedModels.length > 0) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const count = visibleFetchedModels.length;
+        const delta = event.key === "ArrowDown" ? 1 : -1;
+        setActiveModelIndex((current) => {
+          const base = current >= 0 && current < count ? current : delta > 0 ? -1 : 0;
+          return (base + delta + count) % count;
+        });
+        return;
+      }
+      if (event.key === "Enter") {
+        const activeModel = visibleFetchedModels[activeOptionIndex];
+        if (activeModel !== undefined) {
+          event.preventDefault();
+          onDraftChange({ idValue: activeModel });
+          setModelsPickerOpen(false);
+          setActiveModelIndex(-1);
+          return;
+        }
+      }
+      if (event.key === "Escape") {
+        // 只收起候选：阻止继续冒泡，避免同一按键再触发外层 Dialog 的关闭。
+        event.preventDefault();
+        event.stopPropagation();
+        setModelsPickerOpen(false);
+        setActiveModelIndex(-1);
+        return;
+      }
+    }
+    handleTechnicalInputKeyDown(event);
   };
   const handleCompositionStart = () => {
     compositionActiveRef.current = true;
@@ -263,20 +329,38 @@ export function ProviderModelMetadataDialog({
                   ) : null}
                 </div>
                 {/* 可输入下拉框（combobox）：拉取成功后，模型 ID 输入框本身承担候选筛选——
-                    聚焦弹出候选、输入即过滤、点选即填入；也保留任意手输。 */}
+                    聚焦弹出候选、输入即过滤、点选或上下键+回车即填入；也保留任意手输。 */}
                 <Popover
                   open={modelsPickerOpen}
                   onOpenChange={(nextOpen) => {
-                    if (!nextOpen) {
-                      setModelsPickerOpen(false);
+                    if (nextOpen) {
+                      setModelsPickerOpen(true);
+                      return;
                     }
+                    // 展开态点击输入框会经 Trigger 语义请求关闭；此时输入框仍是焦点，
+                    // 说明用户只是要定位光标/继续输入，保留候选不关。
+                    if (document.activeElement === modelIdInputRef.current) {
+                      return;
+                    }
+                    setModelsPickerOpen(false);
+                    setActiveModelIndex(-1);
                   }}
                 >
                   <PopoverTrigger asChild>
                     <div className="relative">
                       <Input
                         {...TECHNICAL_INPUT_ATTRIBUTES}
+                        ref={modelIdInputRef}
                         type="text"
+                        role="combobox"
+                        aria-expanded={modelsPickerOpen}
+                        aria-controls={modelsPickerOpen ? modelsListboxId : undefined}
+                        aria-activedescendant={
+                          modelsPickerOpen && activeOptionIndex >= 0
+                            ? modelOptionId(modelsListboxId, activeOptionIndex)
+                            : undefined
+                        }
+                        aria-autocomplete="list"
                         autoFocus={shouldFocusModelIdInput}
                         size="lg"
                         className={cn("font-mono", modelEditorControlStyle(false))}
@@ -299,7 +383,7 @@ export function ProviderModelMetadataDialog({
                         onBlur={onModelIdBlur}
                         onCompositionStart={handleCompositionStart}
                         onCompositionEnd={handleCompositionEnd}
-                        onKeyDown={handleTechnicalInputKeyDown}
+                        onKeyDown={handleModelIdKeyDown}
                       />
                       {canFetchModels && fetchedModels?.length ? (
                         <ChevronDownIcon
@@ -321,46 +405,59 @@ export function ProviderModelMetadataDialog({
                       // 一直挂着幽灵面板）。
                       className="w-[var(--radix-popover-trigger-width)] gap-0 bg-menu p-0"
                     >
-                      <Command
-                        shouldFilter={false}
-                        className="bg-transparent p-0 text-foreground"
+                      {/* 手写 listbox：cmdk 的 Item 会覆写 id/data-selected/aria-selected，
+                          外部输入框驱动的键盘高亮无法与它对齐；这里直接渲染带 id 的选项。 */}
+                      <div
+                        ref={modelsListRef}
+                        id={modelsListboxId}
+                        role="listbox"
+                        tabIndex={-1}
+                        aria-label={intl.formatMessage({
+                          id: "settings.modelProvider.fetchModels",
+                        })}
+                        className="max-h-60 overflow-y-auto overscroll-contain p-1"
+                        onWheel={handleModelsListWheel}
                       >
-                        <CommandList
-                          ref={modelsListRef}
-                          className="max-h-60 overscroll-contain"
-                          onWheel={handleModelsListWheel}
-                        >
-                          {visibleFetchedModels.length === 0 ? (
-                            <p className="px-4 py-5 text-foreground-subtle">
-                              {intl.formatMessage({
-                                id: "settings.modelProvider.fetchModelsNoMatch",
-                              })}
-                            </p>
-                          ) : (
-                            <CommandGroup className="p-1">
-                              {visibleFetchedModels.map((modelId) => (
-                                <CommandItem
-                                  key={modelId}
-                                  value={modelId}
-                                  data-checked={
-                                    modelId === draft.idValue.trim() ? "true" : undefined
-                                  }
-                                  className="min-h-8 cursor-pointer px-2 text-ui-base"
-                                  title={modelId}
-                                  // mousedown 默认行为会把焦点从输入框抢走，先拦掉再靠 select 填值。
-                                  onMouseDown={(event) => event.preventDefault()}
-                                  onSelect={() => {
-                                    onDraftChange({ idValue: modelId });
-                                    setModelsPickerOpen(false);
-                                  }}
-                                >
-                                  <span className="truncate font-mono text-ui-sm">{modelId}</span>
-                                </CommandItem>
-                              ))}
-                            </CommandGroup>
-                          )}
-                        </CommandList>
-                      </Command>
+                        {visibleFetchedModels.length === 0 ? (
+                          <p className="px-4 py-5 text-foreground-subtle">
+                            {intl.formatMessage({
+                              id: "settings.modelProvider.fetchModelsNoMatch",
+                            })}
+                          </p>
+                        ) : (
+                          visibleFetchedModels.map((modelId, index) => {
+                            const checked = modelId === draft.idValue.trim();
+                            const active = index === activeOptionIndex;
+                            return (
+                              <div
+                                key={modelId}
+                                id={modelOptionId(modelsListboxId, index)}
+                                role="option"
+                                aria-selected={active}
+                                data-selected={active ? "true" : undefined}
+                                className="relative flex min-h-8 cursor-pointer items-center gap-2 rounded-lg px-2 text-ui-base select-none hover:bg-menu-hover data-selected:bg-menu-hover data-selected:text-foreground"
+                                title={modelId}
+                                // mousedown 默认行为会把焦点从输入框抢走，先拦掉再靠 click 填值。
+                                onMouseDown={(event) => event.preventDefault()}
+                                onMouseMove={() => setActiveModelIndex(index)}
+                                onClick={() => {
+                                  onDraftChange({ idValue: modelId });
+                                  setModelsPickerOpen(false);
+                                  setActiveModelIndex(-1);
+                                }}
+                              >
+                                <span className="truncate font-mono text-ui-sm">{modelId}</span>
+                                {checked ? (
+                                  <CheckIcon
+                                    aria-hidden="true"
+                                    className="ml-auto size-4 shrink-0 text-foreground-subtle"
+                                  />
+                                ) : null}
+                              </div>
+                            );
+                          })
+                        )}
+                      </div>
                     </PopoverContent>
                   ) : null}
                 </Popover>

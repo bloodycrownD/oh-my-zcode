@@ -27,6 +27,8 @@ export interface ProviderRuntimeOptions extends ProviderConfigRuntimeOptions {
   /**
    * Host 侧 API 网络出口（按设置页代理/CA 注入 dispatcher）。
    * 拉取模型列表必须走它，renderer 直连会被 CORS 拦截且不经过代理。
+   * 注意：它规避的是 renderer 直连，不是「Key 不进 renderer」——Key 由主机本地
+   * 读取有效配置后注入请求，该 RPC 的参数与返回值都不携带它。
    */
   readonly apiFetch?: typeof fetch;
 }
@@ -65,8 +67,9 @@ export class ProviderRuntime {
     const mutations = createSettingsMutationTarget(this.#configRuntime, this.registryService);
     const ensureReady = () => this.start();
     const settingsFacade = new ProviderSettingsFacade(this.registryService, mutations);
-    // 模型列表出口读 Provider 的有效配置（api.type/baseUrl + access.apiKey）；
-    // Key 只在 Host 进程内用于构造请求头，不回传 renderer。
+    // 模型列表出口读 Provider 的有效配置（api.type/baseUrl/headers + access.apiKey）：
+    // renderer 不把 Key 交给主机组请求，由主机本地读取并注入请求头；
+    // 返回值只有模型 ID，不含 Key 等配置。
     const listProviderModels = dependencies.apiFetch
       ? createProviderModelLister({
           fetch: dependencies.apiFetch,
@@ -79,6 +82,8 @@ export class ProviderRuntime {
               apiType: provider.effectiveConfig.api?.type,
               baseUrl: provider.effectiveConfig.api?.baseUrl,
               apiKey: provider.effectiveConfig.access?.apiKey,
+              // legacy 导入保留的自定义头（如网关要求的额外鉴权头）必须随请求发出。
+              headers: provider.effectiveConfig.api?.headers,
             };
           },
         })

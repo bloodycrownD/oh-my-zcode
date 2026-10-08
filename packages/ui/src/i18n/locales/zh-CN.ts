@@ -2670,14 +2670,6 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.startPlan.title": "{provider} - 编程套餐",
   "settings.modelProvider.startPlan.meta.today": "Today",
   "settings.modelProvider.startPlan.meta.tomorrow": "Tomorrow",
-  "settings.modelProvider.startPlan.quotaSectionTitle": "体验套餐",
-  "settings.modelProvider.startPlan.eligibleNewUser": "新用户体验",
-  "settings.modelProvider.startPlan.preview.unit.tokens": "tokens",
-  "settings.modelProvider.startPlan.preview.period.daily": "{unit}/日",
-  "settings.modelProvider.startPlan.preview.entitlementSummary.daily": "每日额度 · {details}",
-  "settings.modelProvider.startPlan.preview.entitlementSummary.generic": "额度 · {details}",
-  "settings.modelProvider.startPlan.preview.entitlementGroup.single": "{model} {quota}",
-  "settings.modelProvider.startPlan.preview.entitlementGroup.each": "{models} 各{quota}",
   "settings.modelProvider.startPlan.balance.title": "今日余额",
   "settings.modelProvider.startPlan.balance.remaining": "剩余 {value} tokens",
   "settings.modelProvider.startPlan.balance.used": "已用 {value}",
@@ -2709,9 +2701,6 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.codingPlan.status.teamExpired": "团队套餐已过期，请联系团队管理员。",
   "settings.modelProvider.codingPlan.status.teamUnavailable": "团队套餐未分配，请联系团队管理员。",
   "settings.modelProvider.codingPlan.status.unsupported": "暂未支持",
-  "settings.modelProvider.codingPlan.bigmodel.unregisteredHint":
-    "该 BigModel 账号尚未注册，请先完成注册。",
-  "settings.modelProvider.codingPlan.bigmodel.registerAction": "去注册",
   // Coding Plan 卡片直接使用这些 id，中文漏配会把 key 原样渲染到界面。
   "settings.modelProvider.codingPlan.description.disconnected": "请连接后查看 Coding Plan 权益。",
   "settings.modelProvider.codingPlan.description.checking":

@@ -58,17 +58,6 @@ function resolveReorderedProviderIdsForGroup(params: {
   return arrayMove([...params.providerIds], activeIndex, overIndex);
 }
 
-function shouldShowModelProviderGroupLoadingIndicator(params: {
-  groupId: ModelProviderNavGroup["id"];
-  presetLoading: boolean;
-  customLoading: boolean;
-}): boolean {
-  if (params.groupId === "preset") {
-    return params.presetLoading;
-  }
-  return params.customLoading;
-}
-
 function ModelProviderNavigationButton({
   item,
   label,
@@ -326,16 +315,14 @@ function projectItemsToOptimisticProviderOrder({
 export function ModelProviderSectionNavigation({
   navigationGroups,
   selectedNodeKey,
-  presetLoading,
-  customLoading,
+  providerListLoading,
   onSelectNavItem,
   onReorderProviderIds,
   reorderableProviderIds,
 }: {
   navigationGroups: ModelProviderNavGroup[];
   selectedNodeKey: string | null;
-  presetLoading: boolean;
-  customLoading: boolean;
+  providerListLoading: boolean;
   onSelectNavItem: (item: ModelProviderNavItem) => void;
   onReorderProviderIds?: (providerIds: string[]) => Promise<void>;
   reorderableProviderIds?: ReadonlySet<string>;
@@ -356,11 +343,7 @@ export function ModelProviderSectionNavigation({
             <div key={group.id} className="flex flex-col gap-2 max-md:gap-1">
               <div className="flex h-7 items-center justify-between px-2 py-1 max-md:hidden">
                 <h3 className="text-ui-sm font-semibold text-foreground-subtlest">{group.title}</h3>
-                {shouldShowModelProviderGroupLoadingIndicator({
-                  groupId: group.id,
-                  presetLoading,
-                  customLoading,
-                }) ? (
+                {providerListLoading ? (
                   <Loader2Icon className="size-3 animate-spin text-foreground-subtlest" />
                 ) : null}
               </div>

@@ -15,12 +15,18 @@ export interface ProviderModelListResult {
   readonly models: string[];
 }
 
-/** Provider 有效配置里拉取模型列表所需的字段；apiKey 只在本进程内使用，绝不回传 renderer。 */
+/**
+ * Provider 有效配置里拉取模型列表所需的字段。
+ * apiKey 与 headers 由主机本地读取并注入请求——renderer 不把它们作为该 RPC 的参数，
+ * 返回值也只有模型 ID（renderer 表单本身持有 Key，此处不构成「Key 不进 renderer」）。
+ */
 export interface ProviderModelListSource {
   // Provider Overlay 的字段可能显式为 null（未覆盖），按「未配置」处理。
   readonly apiType?: string | null;
   readonly baseUrl?: string | null;
   readonly apiKey?: string | null;
+  /** legacy 导入保留的自定义请求头；同名显式鉴权头随后覆盖它。 */
+  readonly headers?: Record<string, string> | null;
 }
 
 export type ProviderModelListSourceReader = (
@@ -34,7 +40,7 @@ export type ProviderModelLister = (
 /**
  * 从 Provider 的 OpenAI 兼容端点（含 Anthropic Messages）读取可选模型 ID。
  * 网络出口必须使用 Host 侧 transport（renderer 有 CORS 且无代理配置），
- * 日志与错误信息一律不包含 API Key。
+ * 日志与错误信息一律不包含 API Key 与自定义头值。
  *
  * 路径兼容（各家网关差异实测）：Anthropic 协议的消息端点是 `{base}/v1/messages`，
  * 列表按同约定先试 `/v1/models`；但部分双面网关（如 DeepSeek 的 `/anthropic`）只在
@@ -63,24 +69,32 @@ export function createProviderModelLister(dependencies: {
 
     const apiKey = source.apiKey?.trim() ? normalizeApiKeyForHeader(source.apiKey) : "";
     const anthropicProtocol = source.apiType === "anthropic-messages";
+    const customHeaders = readCustomHeaders(source.headers);
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     // 超时覆盖整个候选链（含响应体读取结束），避免服务端只发响应头就挂住连接。
     try {
       const tried: string[] = [];
+      let lastStatus: number | null = null;
       for (const candidate of candidates) {
         const response = await fetchCandidate(
           dependencies.fetch,
           candidate,
-          apiKey,
-          anthropicProtocol,
+          { apiKey, anthropicProtocol, customHeaders },
           timeoutMs,
           controller.signal,
         );
         if (response.ok) {
-          const models = await readModelIdsFromResponse(response, input.providerId, log);
+          const models = await readModelIdsFromResponse(
+            response,
+            input.providerId,
+            log,
+            timeoutMs,
+            controller.signal,
+          );
           return { models };
         }
+        lastStatus = response.status;
         // 404/405 = 该路径不存在，换下一条候选；其它状态码（鉴权/限流/服务端错误）
         // 与路径无关，重试没有意义，直接抛出。
         if (response.status === 404 || response.status === 405) {
@@ -92,7 +106,7 @@ export function createProviderModelLister(dependencies: {
         throw new Error(`拉取模型列表失败：HTTP ${response.status}${hint}`);
       }
       throw new Error(
-        `拉取模型列表失败：HTTP 404，该端点未提供模型列表（已尝试 ${tried.join("、")}）`,
+        `未找到模型列表端点（已尝试 ${tried.join("、")}，最后状态 HTTP ${lastStatus ?? 404}）。`,
       );
     } finally {
       clearTimeout(timer);
@@ -143,28 +157,65 @@ function buildModelListCandidates(
   );
 }
 
+/** 单条候选请求的鉴权材料；自定义头来自配置，显式鉴权头同名时覆盖它。 */
+interface ModelListRequestAuth {
+  readonly apiKey: string;
+  readonly anthropicProtocol: boolean;
+  readonly customHeaders?: Record<string, string>;
+}
+
+/** 只接受字符串字典；非字符串值不进入请求，避免畸形配置把非法头带出去。 */
+function readCustomHeaders(
+  headers: Record<string, string> | null | undefined,
+): Record<string, string> | undefined {
+  if (!headers || typeof headers !== "object") {
+    return undefined;
+  }
+  const entries = Object.entries(headers).filter(
+    (entry): entry is [string, string] => typeof entry[1] === "string",
+  );
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function timeoutMessage(timeoutMs: number): string {
+  const duration = timeoutMs >= 1000 ? `${Math.round(timeoutMs / 1000)} 秒` : `${timeoutMs} 毫秒`;
+  return `拉取模型列表超时（${duration}）。`;
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === "AbortError";
+}
+
 async function fetchCandidate(
   fetchImpl: typeof fetch,
   candidate: ModelListCandidate,
-  apiKey: string,
-  anthropicProtocol: boolean,
+  auth: ModelListRequestAuth,
   timeoutMs: number,
   signal: AbortSignal,
 ): Promise<Response> {
+  // 先铺开自定义头，再写显式鉴权头：同名（HTTP 头名大小写不敏感，统一转小写）
+  // 时以本端点的鉴权为准，自定义头不得覆盖 Key——headers 可能含 x-api-key 类秘密，
+  // 日志与错误一律不输出取值。
   const headers: Record<string, string> = { accept: "application/json" };
-  if (apiKey) {
-    headers.authorization = `Bearer ${apiKey}`;
-    if (anthropicProtocol && candidate.auth === "protocol") {
+  for (const [name, value] of Object.entries(auth.customHeaders ?? {})) {
+    const normalizedName = name.trim().toLowerCase();
+    if (normalizedName) {
+      headers[normalizedName] = value;
+    }
+  }
+  if (auth.apiKey) {
+    headers.authorization = `Bearer ${auth.apiKey}`;
+    if (auth.anthropicProtocol && candidate.auth === "protocol") {
       // Anthropic SDK 标准头；与 Bearer 双发，只认其中一种的网关不受影响。
-      headers["x-api-key"] = apiKey;
+      headers["x-api-key"] = auth.apiKey;
       headers["anthropic-version"] = ANTHROPIC_VERSION;
     }
   }
   try {
     return await fetchImpl(candidate.url, { method: "GET", headers, signal });
   } catch (error) {
-    if (signal.aborted) {
-      throw new Error(`拉取模型列表超时（${Math.round(timeoutMs / 1000)} 秒）。`);
+    if (signal.aborted || isAbortError(error)) {
+      throw new Error(timeoutMessage(timeoutMs));
     }
     throw new Error(
       `拉取模型列表失败：${error instanceof Error ? error.message : String(error)}`,
@@ -176,12 +227,18 @@ async function readModelIdsFromResponse(
   response: Response,
   providerId: string,
   log: ReturnType<typeof createServiceLogger>,
+  timeoutMs: number,
+  signal: AbortSignal,
 ): Promise<string[]> {
   let payload: unknown;
   try {
     payload = await response.json();
-  } catch {
-    throw new Error("拉取模型列表失败：响应不是合法 JSON。");
+  } catch (error) {
+    // 全链超时覆盖响应体读取：这里的中断先按超时译文，否则才是响应体不是合法 JSON。
+    if (signal.aborted || isAbortError(error)) {
+      throw new Error(timeoutMessage(timeoutMs));
+    }
+    throw new Error(`拉取模型列表失败：HTTP ${response.status}，响应不是合法 JSON。`);
   }
   const models = readModelIds(payload);
   log.debug(undefined, "provider model list resolved", {
