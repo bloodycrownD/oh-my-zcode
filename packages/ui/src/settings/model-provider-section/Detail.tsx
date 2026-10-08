@@ -19,15 +19,8 @@ import {
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { type CodingPlanStatus, type ModelProviderNavItem } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
-import {
-  ModelProviderLoadingCard,
-  PresetProviderPlaceholderCard,
-} from "./ProviderPlaceholderCards.js";
+import { ModelProviderLoadingCard } from "./ProviderPlaceholderCards.js";
 import { type CodingPlanLoginOptions } from "./codingPlanPricingCards.js";
-import {
-  ProviderFamilyDetailShell,
-  ProviderFamilyHeader,
-} from "./ProviderFamilyModeHeader.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import type { ProviderSettingsView } from "@zcode/services";
 import type { SavePersonalModelDraftInput } from "@zcode/provider";
@@ -38,7 +31,7 @@ export function ModelProviderSectionDetail({
   connectionSettingsFailed = false,
 
   startPlanSubscriptionCount = 0,
-  presetLoading,
+  providerListLoading = false,
 
 
 
@@ -66,7 +59,8 @@ export function ModelProviderSectionDetail({
   connectionSettingsFailed?: boolean;
   connectionSelections?: ProviderFamilyConnectionSelectionSettings;
   startPlanSubscriptionCount?: number;
-  presetLoading: boolean;
+  /** 供应商列表是否仍在加载：用于区分「首屏加载中」与「确实还没有自定义供应商」的空状态。 */
+  providerListLoading?: boolean;
   codingPlanPurchaseTokenAuthenticatedByProviderId: Partial<
     Record<BuiltinModelProviderId, boolean>
   >;
@@ -105,7 +99,6 @@ export function ModelProviderSectionDetail({
     providerName: string,
   ) => void;
   onOpenApiKeyUrl: (url: string) => void;
-  onOpenBigModelRegistration: () => void;
   onCodingPlanPurchaseComplete: () => void | Promise<void>;
   onSelectNavItem?: (item: ModelProviderNavItem) => void;
   providerSettingsView?: ProviderSettingsView | null;
@@ -126,45 +119,24 @@ export function ModelProviderSectionDetail({
   };
 
   if (!selectedNavItem) {
-    return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
+    // 预设分组删除后，列表加载完成但没有任何自定义供应商时不能一直显示 loading。
+    // 空状态把入口交给页面右上角「添加供应商」，避免用户把空列表误判成页面卡住。
+    if (providerListLoading) {
+      return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
+    }
+
+    return (
+      <div className="flex h-12 items-center rounded-lg border border-dashed border-border px-4 text-ui-base text-foreground-subtle">
+        {intl.formatMessage({ id: "settings.modelProvider.empty" })}
+      </div>
+    );
   }
 
   if (selectedNavItem.type === "preset") {
-    if (!selectedNavItem.provider) {
-      // 首屏慢网时预置供应商配置尚未返回，之前这里会直接展示“尚未同步，请先完成 OAuth 登录”，
-      // 用户会把“还在下载”误判成“当前账号未登录”。首刷期间改为明确显示 loading，等请求结束后再决定是否展示未同步占位。
-      if (presetLoading) {
-        return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
-      }
-
-      return <PresetProviderPlaceholderCard displayName={selectedNavItem.displayName} />;
-    }
-
-    const presetProvider = selectedNavItem.provider;
-
-    // FORK（D-13）：family↔provider 映射恒 null，故 familySpec 恒不存在，
-    // 套餐模式切换（planModeSwitch）随之不再出现在 preset 头部。
-    const presetFamilyHeader = <ProviderFamilyHeader selectedNavItem={selectedNavItem} />;
-    return (
-      <ProviderFamilyDetailShell header={presetFamilyHeader}>
-        <InlineEditableProviderCard
-          provider={presetProvider}
-          onSave={onSave}
-          {...modelEditingProps}
-          onReorderModelIds={
-            onReorderProviderModels
-              ? (modelIds) => onReorderProviderModels(presetProvider.providerId, modelIds)
-              : undefined
-          }
-          onTestModel={onTestModel}
-          readOnlyEndpoints
-          // 预置供应商名称承载固定 API Key 入口语义，
-          // 允许重命名会让侧边栏和模型选择器展示含义不一致，因此只允许自定义供应商改名。
-          nameEditable={false}
-          headerVisible
-        />
-      </ProviderFamilyDetailShell>
-    );
+    // FORK（删除 zai/bigmodel 预设面）：内置 preset provider 与对应导航分组已整删，
+    // 原「尚未同步，请先完成 OAuth 登录」占位分支不会再被命中；这里只保留 loading 兜底，
+    // 防止旧导航 key 或外部入口残留时把 preset 误渲染成自定义供应商表单。
+    return <ModelProviderLoadingCard loadingLabel={loadingLabel} />;
   }
 
   if (selectedNavItem.type === "codingPlanLoading") {

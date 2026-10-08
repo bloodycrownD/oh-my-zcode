@@ -16,29 +16,18 @@ import {
 } from "@zcode/shared";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
-
   type CodingPlanEntitlementState,
   type ModelProviderNavGroup,
-  type PresetProviderSpec,
 } from "@/settings/model-provider-section/constants.js";
 
-import {
-
-  createCustomProviderNodeKey,
-  createPresetProviderNodeKey,
-} from "@/settings/model-provider-section/utils.js";
+import { createCustomProviderNodeKey } from "@/settings/model-provider-section/utils.js";
 import {
   sortModelProvidersForDisplay,
   type ProviderOrderView,
 } from "@/lib/modelProviderOrdering.js";
 import type { EnterpriseCodingPlanProductDisplay } from "@/settings/model-provider-section/enterpriseCodingPlanProducts.js";
 
-interface PresetProviderWithConfig extends PresetProviderSpec {
-  provider: ProviderSettingsFormProvider | null;
-}
-
 interface UseModelProviderNavigationOptions {
-  presetProviders: PresetProviderWithConfig[];
   modelProviders: ProviderSettingsFormProvider[];
   /**
    * 当前账号明确有权益的 Provider。缺省等价于尚无账号权益；生产设置页始终显式传入。
@@ -60,7 +49,6 @@ interface UseModelProviderNavigationOptions {
 }
 
 export function useModelProviderNavigation({
-  presetProviders,
   modelProviders,
   entitledAccountProviderIds = new Set(),
   modelProvidersLoading = false,
@@ -85,26 +73,12 @@ export function useModelProviderNavigation({
     return sortModelProvidersForDisplay(allCustomProviders, displayOrder);
   }, [displayOrder, modelProviders]);
 
-  // FORK（D-4）：Coding Plan 额度/连接面整删后导航只剩 preset 与 custom 两组，
-  // 原 codingPlanItems / connectionModeCodingPlanItems 两条链（及其
-  // providerFamilyConnectionVisibility 的两个导出）一并下线。
+  // FORK（删除 zai/bigmodel 预设面）：原 preset 分组由已冻结的内置 provider 生成，
+  // 内置 providerRules 清空后该分组永远只渲染占位卡，导航只保留自定义供应商分组。
+  // 原 codingPlanItems / connectionModeCodingPlanItems 两条链
+  // （及其 providerFamilyConnectionVisibility 的两个导出）也已下线。
   const navigationGroups = useMemo<ModelProviderNavGroup[]>(() => {
     const groups: ModelProviderNavGroup[] = [
-      {
-        id: "preset",
-        title: intl.formatMessage({ id: "settings.modelProvider.presetTitle" }),
-        items: presetProviders.map(({ id, displayName, provider }) => ({
-          key: createPresetProviderNodeKey(id),
-          type: "preset" as const,
-          presetId: id,
-          label: displayName,
-          // FORK（D-13）：family↔provider 映射恒 null，logo 直接取该 preset 自身。
-          logo: provider?.config.logo,
-          provider,
-          displayName,
-          statusActive: provider?.executable === true,
-        })),
-      },
       {
         id: "custom",
         title: intl.formatMessage({ id: "settings.modelProvider.customTitle" }),
@@ -123,7 +97,7 @@ export function useModelProviderNavigation({
     // 左侧导航分组标题在这个 memo 内格式化。
     // 语言切换时 provider 引用可能不变，必须依赖 intl 才能刷新旧 locale 的文案。
     intl,
-    presetProviders,
+    customProviders,
   ]);
 
   const navigationItems = useMemo(() => {

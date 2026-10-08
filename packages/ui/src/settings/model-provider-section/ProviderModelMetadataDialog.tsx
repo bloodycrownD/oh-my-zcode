@@ -1,5 +1,6 @@
-import { useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
-import { Loader2Icon, Pencil } from "lucide-react";
+/* eslint-disable max-lines -- 模型元数据弹窗集中承载模型 ID（含拉取模型列表）、Token、模态与推理档位编辑；待稳定后再按字段族拆分。 */
+import { useCallback, useEffect, useId, useRef, useState, type FocusEvent, type KeyboardEvent } from "react";
+import { ChevronDownIcon, Loader2Icon, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import {
   Dialog,
@@ -10,7 +11,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog.js";
 import { Input } from "@/components/ui/input.js";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover.js";
+import {
+  Command,
+  CommandGroup,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useServices } from "@/hooks/useServices.js";
 import type { ModelConfigObject } from "@zcode/provider";
 import type {
   ProviderModelDraftValues,
@@ -60,6 +69,7 @@ export function ProviderModelMetadataDialog({
   modelIdReadOnly = false,
   saving = false,
   modelDefaultsLoaded = false,
+  providerId,
   onModelIdBlur,
 }: {
   mode?: "add" | "edit";
@@ -78,14 +88,64 @@ export function ProviderModelMetadataDialog({
   modelIdReadOnly?: boolean;
   saving?: boolean;
   modelDefaultsLoaded?: boolean;
+  /** 目标 Provider；提供后允许从 Provider 的兼容端点拉取可选模型列表。 */
+  providerId?: string;
   onModelIdBlur?: () => void;
 }) {
   const { intl } = useZCodeIntl();
+  const { providerSettingsService } = useServices();
   const [validationAttempt, setValidationAttempt] = useState(0);
+  const [fetchingModels, setFetchingModels] = useState(false);
+  const [fetchedModels, setFetchedModels] = useState<string[] | null>(null);
+  const [fetchModelsError, setFetchModelsError] = useState<string | null>(null);
   const commit = async () => {
     const result = await onCommit();
     if (!result) setValidationAttempt((value) => value + 1);
   };
+  // 每次关闭清空上一次拉取结果，避免下次打开把旧 Provider 的模型列表带进新草稿。
+  useEffect(() => {
+    if (!open) {
+      setFetchedModels(null);
+      setFetchModelsError(null);
+    }
+  }, [open]);
+  const canFetchModels = Boolean(providerId) && !modelIdReadOnly;
+  const handleFetchModels = async () => {
+    if (!providerId || fetchingModels) {
+      return;
+    }
+    setFetchingModels(true);
+    setFetchModelsError(null);
+    try {
+      const result = await providerSettingsService.listProviderModels({ providerId });
+      setFetchedModels(result.models);
+    } catch (error) {
+      setFetchedModels(null);
+      setFetchModelsError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setFetchingModels(false);
+    }
+  };
+  // 拉取结果用可搜索下拉呈现：芯片形态在几十上百个模型时不可用。
+  const [modelsPickerOpen, setModelsPickerOpen] = useState(false);
+  const modelsListRef = useRef<HTMLDivElement>(null);
+  // 输入框内容即过滤词：空=全部候选；模型 ID 子串匹配（大小写不敏感）。
+  const fetchedModelQuery = draft.idValue.trim().toLowerCase();
+  const visibleFetchedModels =
+    fetchedModels?.filter(
+      (modelId) => !fetchedModelQuery || modelId.toLowerCase().includes(fetchedModelQuery),
+    ) ?? [];
+  const handleModelsListWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    const listElement = event.currentTarget;
+    if (listElement.scrollHeight <= listElement.clientHeight) {
+      return;
+    }
+    // Popover 嵌在 Dialog 中时，外层滚动锁会吞掉默认滚轮行为（同
+    // RemoteConnectionFields 的 SSH 别名列表），这里显式驱动列表自身滚动。
+    listElement.scrollTop += event.deltaY;
+    event.preventDefault();
+    event.stopPropagation();
+  }, []);
   const contextWindowInputId = useId();
   const maxOutputInputId = useId();
   const smart = draft.useRecommendedConfigValue !== false;
@@ -175,28 +235,148 @@ export function ProviderModelMetadataDialog({
           <ModelSettingsGroup group="basic">
             <div data-model-identity-row="true" className="flex flex-col gap-4">
               <div className="min-w-0 flex-1">
-                <label className="mb-1 block text-ui-base text-foreground-subtle">
-                  {intl.formatMessage({ id: "settings.modelProvider.modelId" })}
-                </label>
-                <Input
-                  {...TECHNICAL_INPUT_ATTRIBUTES}
-                  type="text"
-                  autoFocus={shouldFocusModelIdInput}
-                  size="lg"
-                  className={cn("font-mono", modelEditorControlStyle(false))}
-                  readOnly={modelIdReadOnly}
-                  value={draft.idValue}
-                  placeholder={intl.formatMessage({
-                    id: "settings.modelProvider.modelId",
-                  })}
-                  onChange={(event) => {
-                    onDraftChange({ idValue: event.target.value });
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <label className="block text-ui-base text-foreground-subtle">
+                    {intl.formatMessage({ id: "settings.modelProvider.modelId" })}
+                  </label>
+                  {canFetchModels ? (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="shrink-0"
+                      data-testid="model-provider-fetch-models"
+                      disabled={saving || fetchingModels}
+                      onClick={() => {
+                        void handleFetchModels();
+                      }}
+                    >
+                      {fetchingModels ? (
+                        <Loader2Icon className="size-3 animate-spin" aria-hidden="true" />
+                      ) : null}
+                      {intl.formatMessage({
+                        id: fetchingModels
+                          ? "settings.modelProvider.fetchModelsLoading"
+                          : "settings.modelProvider.fetchModels",
+                      })}
+                    </Button>
+                  ) : null}
+                </div>
+                {/* 可输入下拉框（combobox）：拉取成功后，模型 ID 输入框本身承担候选筛选——
+                    聚焦弹出候选、输入即过滤、点选即填入；也保留任意手输。 */}
+                <Popover
+                  open={modelsPickerOpen}
+                  onOpenChange={(nextOpen) => {
+                    if (!nextOpen) {
+                      setModelsPickerOpen(false);
+                    }
                   }}
-                  onBlur={onModelIdBlur}
-                  onCompositionStart={handleCompositionStart}
-                  onCompositionEnd={handleCompositionEnd}
-                  onKeyDown={handleTechnicalInputKeyDown}
-                />
+                >
+                  <PopoverTrigger asChild>
+                    <div className="relative">
+                      <Input
+                        {...TECHNICAL_INPUT_ATTRIBUTES}
+                        type="text"
+                        autoFocus={shouldFocusModelIdInput}
+                        size="lg"
+                        className={cn("font-mono", modelEditorControlStyle(false))}
+                        readOnly={modelIdReadOnly}
+                        value={draft.idValue}
+                        placeholder={intl.formatMessage({
+                          id: "settings.modelProvider.modelId",
+                        })}
+                        onFocus={() => {
+                          if (fetchedModels?.length) {
+                            setModelsPickerOpen(true);
+                          }
+                        }}
+                        onChange={(event) => {
+                          onDraftChange({ idValue: event.target.value });
+                          if (fetchedModels?.length) {
+                            setModelsPickerOpen(true);
+                          }
+                        }}
+                        onBlur={onModelIdBlur}
+                        onCompositionStart={handleCompositionStart}
+                        onCompositionEnd={handleCompositionEnd}
+                        onKeyDown={handleTechnicalInputKeyDown}
+                      />
+                      {canFetchModels && fetchedModels?.length ? (
+                        <ChevronDownIcon
+                          aria-hidden="true"
+                          className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-foreground-subtle"
+                        />
+                      ) : null}
+                    </div>
+                  </PopoverTrigger>
+                  {canFetchModels && fetchedModels && fetchedModels.length > 0 && modelsPickerOpen ? (
+                    <PopoverContent
+                      align="start"
+                      sideOffset={4}
+                      data-testid="model-provider-fetch-models-picker"
+                      // 弹层不得抢焦点：输入框必须保持聚焦才能连续输入过滤。
+                      onOpenAutoFocus={(event) => event.preventDefault()}
+                      // 内容随 modelsPickerOpen 条件渲染，关闭即卸载：不依赖退出动画的
+                      // animationend（该上下文中 exit 动画可能不触发，Radix Presence 会
+                      // 一直挂着幽灵面板）。
+                      className="w-[var(--radix-popover-trigger-width)] gap-0 bg-menu p-0"
+                    >
+                      <Command
+                        shouldFilter={false}
+                        className="bg-transparent p-0 text-foreground"
+                      >
+                        <CommandList
+                          ref={modelsListRef}
+                          className="max-h-60 overscroll-contain"
+                          onWheel={handleModelsListWheel}
+                        >
+                          {visibleFetchedModels.length === 0 ? (
+                            <p className="px-4 py-5 text-foreground-subtle">
+                              {intl.formatMessage({
+                                id: "settings.modelProvider.fetchModelsNoMatch",
+                              })}
+                            </p>
+                          ) : (
+                            <CommandGroup className="p-1">
+                              {visibleFetchedModels.map((modelId) => (
+                                <CommandItem
+                                  key={modelId}
+                                  value={modelId}
+                                  data-checked={
+                                    modelId === draft.idValue.trim() ? "true" : undefined
+                                  }
+                                  className="min-h-8 cursor-pointer px-2 text-ui-base"
+                                  title={modelId}
+                                  // mousedown 默认行为会把焦点从输入框抢走，先拦掉再靠 select 填值。
+                                  onMouseDown={(event) => event.preventDefault()}
+                                  onSelect={() => {
+                                    onDraftChange({ idValue: modelId });
+                                    setModelsPickerOpen(false);
+                                  }}
+                                >
+                                  <span className="truncate font-mono text-ui-sm">{modelId}</span>
+                                </CommandItem>
+                              ))}
+                            </CommandGroup>
+                          )}
+                        </CommandList>
+                      </Command>
+                    </PopoverContent>
+                  ) : null}
+                </Popover>
+                {canFetchModels && fetchedModels && fetchedModels.length === 0 ? (
+                  <p className="mt-2 text-ui-sm text-foreground-subtle">
+                    {intl.formatMessage({ id: "settings.modelProvider.fetchModelsEmpty" })}
+                  </p>
+                ) : null}
+                {fetchModelsError ? (
+                  <p role="alert" className="mt-2 text-ui-sm text-destructive">
+                    {intl.formatMessage(
+                      { id: "settings.modelProvider.fetchModelsError" },
+                      { reason: fetchModelsError },
+                    )}
+                  </p>
+                ) : null}
               </div>
             </div>
           </ModelSettingsGroup>

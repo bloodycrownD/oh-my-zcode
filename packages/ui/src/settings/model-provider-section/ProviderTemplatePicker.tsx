@@ -34,17 +34,22 @@ export function ProviderTemplatePicker({
   const { intl, locale } = useZCodeIntl();
   const { dismissFeedback, showFeedback } = useProviderDetailFeedback();
   const customLabel = intl.formatMessage({ id: "settings.modelProvider.newProviderName" });
-  const zhipuIds = ["bigmodel-api", "zai-api", "bigmodel-standard-api", "zai-standard-api"];
+  // FORK（删除 zai/bigmodel 预设面）：选择器不再提供这 4 个智谱模板入口（Z.ai / BigModel API、Coding Plan），
+  // 也不再单独分组。模板来源数据（config/provider/zcode-builtin.json 的 templateRules）保持不动，
+  // 存量用户的 personal provider 仍按 templateId 解析 overlay，删数据会让旧 Provider 不可执行。
+  const hiddenZhipuTemplateIds = [
+    "bigmodel-api",
+    "zai-api",
+    "bigmodel-standard-api",
+    "zai-standard-api",
+  ];
+  const visibleTemplates = templates.filter(
+    (template) => !hiddenZhipuTemplateIds.includes(template.templateId),
+  );
   const groups = [
     {
-      id: "zhipu",
-      templates: zhipuIds.flatMap((id) =>
-        templates.filter((template) => template.templateId === id),
-      ),
-    },
-    {
       id: "other",
-      templates: templates.filter((template) => !zhipuIds.includes(template.templateId)),
+      templates: visibleTemplates,
     },
   ] as const;
   const createWithFeedback = async (create: () => Promise<void>) => {

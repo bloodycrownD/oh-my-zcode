@@ -29,9 +29,7 @@ import { useServices } from "@/hooks/useServices.js";
 
 import { logger } from "@/logger.js";
 import {
-  PRESET_PROVIDER_SPECS,
   PRESET_SUBSCRIPTION_TIMEOUT_MS,
-  BIGMODEL_REGISTRATION_URL,
   type CodingPlanStatus,
   type ModelProviderNavGroup,
 } from "./model-provider-section/constants.js";
@@ -535,17 +533,9 @@ export function ModelProviderSection({
     };
   }, [providerConnectionRefreshSignal, refreshCodingPlanPurchaseTokenState]);
 
-  // FORK（D-13）：`shouldShowPresetProviderForActiveOAuth` 过滤已随 family↔provider
-    // 映射恒空一并摘除。它是 **preset provider 列表可见性过滤器**（不是 codingPlan 守卫），
-    // 留着会让升级用户（providerFamilyDomain 已持久化非空）的内置 preset provider 全部消失。
-  const presetProviders = useMemo(
-    () =>
-      PRESET_PROVIDER_SPECS.map((preset) => ({
-        ...preset,
-        provider: modelProviders.find((provider) => provider.providerId === preset.id) ?? null,
-      })),
-    [modelProviders],
-  );
+  // FORK（删除 zai/bigmodel 预设面）：原 preset provider 占位列表（PRESET_PROVIDER_SPECS）
+  // 及其导航分组已整删；内置 providerRules 为空时它只能渲染死文案占位卡。
+  // FORK（D-4）：账号授权判定随账号面整删，恒 false。
 
   useEffect(() => {
     if (!presetSubscriptionProviderId) {
@@ -607,7 +597,6 @@ export function ModelProviderSection({
 
   const { navigationGroups, navigationItems, selectedNavItem, navigationUnavailable } =
     useModelProviderNavigation({
-      presetProviders,
       modelProviders,
       entitledAccountProviderIds,
       modelProvidersLoading: loading,
@@ -954,7 +943,7 @@ export function ModelProviderSection({
           selectedNavItem={selectedNavItem}
           navigationItems={navigationItems}
           connectionSettingsFailed={familyConnectionSettingsFailed}
-          presetLoading={presetLoading}
+          providerListLoading={customLoading}
           presetSubscriptionProviderId={presetSubscriptionProviderId}
           codingPlanStatusSyncProviderId={codingPlanStatusSyncProviderId}
           codingPlanDisconnectProviderId={codingPlanDisconnectProviderId}
@@ -977,9 +966,6 @@ export function ModelProviderSection({
           onCodingPlanDisconnect={handleCodingPlanDisconnect}
           onOpenApiKeyUrl={handleOpenApiKeyUrl}
           onSelectNavItem={handleSelectNavItem}
-          onOpenBigModelRegistration={() => {
-            platform.openExternal(BIGMODEL_REGISTRATION_URL);
-          }}
           onCodingPlanPurchaseComplete={async () => {
             await refreshProviderPanelAfterAuthChange({ refreshReason: "purchase" });
           }}

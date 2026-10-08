@@ -1,6 +1,5 @@
 import {
   BIGMODEL_PROVIDER_ID,
-  buildBigModelApiUrl,
   buildBigModelCodingPlanPersonalManageUrl,
   BUILTIN_MODEL_PROVIDER_IDS,
   createUuid,
@@ -20,33 +19,9 @@ export function generateId(): string {
 }
 
 export const PRESET_SUBSCRIPTION_TIMEOUT_MS = 2 * 60 * 1000;
-export const BIGMODEL_REGISTRATION_URL = buildBigModelApiUrl({ ZCODE_ENV }, "/login");
 const BIGMODEL_CODING_PLAN_PERSONAL_MANAGE_URL = buildBigModelCodingPlanPersonalManageUrl({
   ZCODE_ENV,
 });
-
-export interface PresetProviderSpec {
-  id: BuiltinModelProviderId;
-  displayName: string;
-  oauthProviderId?: OAuthProviderId;
-}
-
-export const PRESET_PROVIDER_SPECS: PresetProviderSpec[] = [
-  {
-    id: BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan,
-    displayName: "Z.ai",
-    oauthProviderId: ZAI_PROVIDER_ID,
-  },
-  {
-    id: BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan,
-    displayName: "BigModel",
-    oauthProviderId: BIGMODEL_PROVIDER_ID,
-  },
-];
-
-export const PRESET_PROVIDER_SPEC_BY_ID = new Map<BuiltinModelProviderId, PresetProviderSpec>(
-  PRESET_PROVIDER_SPECS.map((item) => [item.id, item]),
-);
 
 export type CodingPlanProviderId =
   | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan

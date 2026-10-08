@@ -314,6 +314,8 @@ export function ModelRowInput({
             void editor.flush().catch(() => undefined);
           }}
           modelIdReadOnly={model.builtin}
+          // 编辑态也可拉取同一个 Provider 的模型列表；内置模型 ID 只读时按钮自动隐藏。
+          providerId={providerId}
         />
         {onDelete ? (
           <Button

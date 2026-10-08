@@ -19,6 +19,11 @@ import {
 import { createServiceDescriptor } from "../descriptors.js";
 import type { ModelConnectivityResult } from "@zcode/shared";
 import { createServiceLogger } from "../logger/serviceLogger.js";
+import type {
+  ProviderModelLister,
+  ProviderModelListInput,
+  ProviderModelListResult,
+} from "./providerModelList.js";
 
 export type {
   ProviderSettingsProviderView,
@@ -68,6 +73,11 @@ export interface IProviderSettingsService {
   testModelConnectivity(
     input: ProviderSettingsConnectivityRequest,
   ): Promise<ModelConnectivityResult>;
+  /**
+   * 从 Provider 的 OpenAI 兼容端点拉取可选模型 ID 列表。
+   * 主机侧读取有效配置并发起请求；API Key 不经过 renderer。
+   */
+  listProviderModels(input: ProviderModelListInput): Promise<ProviderModelListResult>;
 }
 
 export const IProviderSettingsService = createServiceDescriptor<IProviderSettingsService>(
@@ -110,6 +120,7 @@ export function createProviderSettingsService(
   facade: ProviderSettingsFacade,
   ensureReady: () => Promise<void> = async () => {},
   testConnectivity?: ProviderSettingsConnectivityTester,
+  listProviderModels?: ProviderModelLister,
 ): IProviderSettingsService {
   return {
     onDidChange: toEvent((listener) => facade.onDidChange(listener)),
@@ -205,6 +216,14 @@ export function createProviderSettingsService(
         providerId: input.providerId,
         modelId: input.modelId,
       });
+    },
+    listProviderModels: async (input) => {
+      await ensureReady();
+      if (!listProviderModels) {
+        // 与连通性测试同一降级语义：功能未装配时给出可读错误，而不是 undefined 崩溃。
+        throw new Error("当前 Environment 未装配模型列表能力");
+      }
+      return listProviderModels(input);
     },
   };
 }

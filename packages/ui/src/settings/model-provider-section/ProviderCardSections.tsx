@@ -566,6 +566,8 @@ export function ProviderModelsSection({
           draftErrorField={addDraftErrorField}
           inheritedConfig={editor.inheritedConfig}
           overrideFields={editor.overrides}
+          // 新增模型可从该 Provider 的兼容端点拉取可选模型 ID（主机侧代理请求）。
+          providerId={providerId}
           onOpenChange={handleAddDialogOpenChange}
           onDraftChange={updateAddDraft}
           onCommit={commitAddDraft}

@@ -20,14 +20,21 @@ import {
   type ModelSelectionConfiguredDefaultSource,
   type ProviderSettingsConnectivityTester,
 } from "./providerFacadeServices.js";
+import { createProviderModelLister } from "./providerModelList.js";
 
 export interface ProviderRuntimeOptions extends ProviderConfigRuntimeOptions {
   readonly testConnectivity?: ProviderSettingsConnectivityTester;
+  /**
+   * Host 侧 API 网络出口（按设置页代理/CA 注入 dispatcher）。
+   * 拉取模型列表必须走它，renderer 直连会被 CORS 拦截且不经过代理。
+   */
+  readonly apiFetch?: typeof fetch;
 }
 
 export interface ProviderRuntimeDependencies {
   readonly configRuntime: ProviderConfigRuntime;
   readonly testConnectivity?: ProviderSettingsConnectivityTester;
+  readonly apiFetch?: typeof fetch;
   readonly modelSelectionConfiguredDefaultSource?: ModelSelectionConfiguredDefaultSource;
   readonly disposeModelSelectionConfiguredDefaultSource?: () => void;
 }
@@ -58,10 +65,29 @@ export class ProviderRuntime {
     const mutations = createSettingsMutationTarget(this.#configRuntime, this.registryService);
     const ensureReady = () => this.start();
     const settingsFacade = new ProviderSettingsFacade(this.registryService, mutations);
+    // 模型列表出口读 Provider 的有效配置（api.type/baseUrl + access.apiKey）；
+    // Key 只在 Host 进程内用于构造请求头，不回传 renderer。
+    const listProviderModels = dependencies.apiFetch
+      ? createProviderModelLister({
+          fetch: dependencies.apiFetch,
+          readSource: (providerId) => {
+            const provider = settingsFacade
+              .getView()
+              .providers.find((item) => item.providerId === providerId);
+            if (!provider) return undefined;
+            return {
+              apiType: provider.effectiveConfig.api?.type,
+              baseUrl: provider.effectiveConfig.api?.baseUrl,
+              apiKey: provider.effectiveConfig.access?.apiKey,
+            };
+          },
+        })
+      : undefined;
     this.providerSettings = createProviderSettingsService(
       settingsFacade,
       ensureReady,
       dependencies.testConnectivity,
+      listProviderModels,
     );
     this.#modelSelectionRuntime = createModelSelectionService(
       createNodeModelSelectionFacade(this.registryService),
@@ -144,7 +170,7 @@ function createSettingsMutationTarget(
 }
 
 export function createProviderRuntime(options: ProviderRuntimeOptions): ProviderRuntime {
-  const { testConnectivity, ...configRuntimeOptions } = options;
+  const { testConnectivity, apiFetch, ...configRuntimeOptions } = options;
   const configRuntime = createProviderConfigRuntime(configRuntimeOptions);
   const modelSelectionConfiguredDefaultSource = new NodeModelSelectionConfigRepository({
     personalRepository: configRuntime.personalRepository,
@@ -152,6 +178,7 @@ export function createProviderRuntime(options: ProviderRuntimeOptions): Provider
   return createProviderRuntimeFromConfigRuntime({
     configRuntime,
     testConnectivity,
+    apiFetch,
     modelSelectionConfiguredDefaultSource,
     disposeModelSelectionConfiguredDefaultSource: () =>
       modelSelectionConfiguredDefaultSource.dispose(),

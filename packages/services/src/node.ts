@@ -1154,6 +1154,8 @@ export function createLocalServices(options: {
   };
   /** 所属 Environment 的 ZCode Built-in Provider Config 物理路径。 */
   zcodeBuiltinProviderConfigFilePath: string;
+  /** 上一路径无效（显式覆盖指向旧缓存等）时的随包回落路径；桌面 Main 解析后传入。 */
+  zcodeBuiltinProviderConfigFallbackFilePath?: string;
   /** HTTP Server 只有在调用方明确配置认证时才暴露跨 Environment Provisioning target。 */
   providerProvisioningTargetEnabled?: boolean;
   /** Desktop Host 私有通知；只在 Source 成功持久化后请求 Main 调度远端镜像。 */
@@ -1255,6 +1257,7 @@ export function createLocalServices(options: {
   // 因此 zcodeBuiltinEnvironment（endpoint 作用域源 + 远端同步器）整段不再装配。
   const providerConfigRuntime = createProviderConfigRuntime({
     zcodeBuiltinFilePath: options.zcodeBuiltinProviderConfigFilePath,
+    zcodeBuiltinFallbackFilePath: options.zcodeBuiltinProviderConfigFallbackFilePath,
     onPersonalConfigRecovery: (event) => {
       providerConfigLog.warn(
         undefined,
@@ -1308,6 +1311,8 @@ export function createLocalServices(options: {
     modelSelectionConfiguredDefaultSource,
     disposeModelSelectionConfiguredDefaultSource: () =>
       modelSelectionConfiguredDefaultSource.dispose(),
+    // 设置页「拉取模型列表」由 Host 代理请求出口发起，避免 renderer CORS 与代理绕过。
+    apiFetch: hostApiNetworkTransport.fetch,
     testConnectivity: createProviderSettingsConnectivityTester({
       testModelConnectivity: async (input) => {
         if (!providerConnectivityAgentService) {
