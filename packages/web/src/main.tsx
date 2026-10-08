@@ -14,6 +14,9 @@ import { connectViaWebSocket } from "@zcode/client";
 import type { IPlatformService, RemoteTarget, ServerRemoteInfo } from "@zcode/shared";
 import { WEB_DEFAULT_THEME, resolveWebInitialTheme } from "./webThemeSeed.js";
 
+// Web 标签标题的品牌名单一常量：静态 index.html title 与两条 bootstrap 路径的运行时重写共用，防止漂移。
+const OMZ_WEB_BRAND_NAME = "omz";
+
 function resolveWebThemePreference(defaultTheme: Theme = WEB_DEFAULT_THEME): Theme {
   const saved = localStorage.getItem("zcode-theme");
   return resolveWebInitialTheme({ storedTheme: saved, defaultTheme });
@@ -253,7 +256,7 @@ function WebBootstrapErrorScreen({ message }: { message: string }) {
 }
 
 function renderWebBootstrapError(error: unknown): void {
-  document.title = "ZCode - Web";
+  document.title = `${OMZ_WEB_BRAND_NAME} - Web`;
   root.render(
     <WebBootstrapErrorScreen message={error instanceof Error ? error.message : String(error)} />,
   );
@@ -273,7 +276,7 @@ async function bootstrapWebApp() {
       onClose: () => {},
     });
     const platform = createWebPlatform();
-    document.title = "ZCode - Web + Server";
+    document.title = `${OMZ_WEB_BRAND_NAME} - Web + Server`;
 
     root.render(
       <AppErrorBoundary>

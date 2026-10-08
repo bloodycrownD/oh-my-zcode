@@ -1,5 +1,5 @@
 /**
- * 草稿态空态问候：时间问候语 + ZCode Logo。
+ * 草稿态空态问候：时间问候语 + omz Logo。
  * 自旧版 ChatView/ChatViewEmptyState.tsx 恢复（该组件随旧 ChatView 删除，
  * i18n key `chat.empty.greeting.*` 一直保留）；边界时刻自动换档逻辑保真。
  * 手机远控复用同一组件，但继续保留 20px 紧凑标题；桌面草稿首页才按标题自身宽度适配。
@@ -229,7 +229,11 @@ function ZCodeEmptyStateLogo({ className }: { className?: string }) {
         fill="none"
         xmlns="http://www.w3.org/2000/svg"
       >
-        <g transform="translate(11.5 107.03) scale(0.48582)" stroke="currentColor">
+        <g
+          transform="translate(11.5 107.03) scale(0.48582)"
+          strokeWidth={2.06}
+          stroke="currentColor"
+        >
           {/* OMZ 线框字标：几何与 scripts/generate-omz-brand-assets.mjs 同源 */}
           <path
             fillRule="evenodd"

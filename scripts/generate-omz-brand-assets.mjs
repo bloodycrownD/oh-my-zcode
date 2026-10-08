@@ -6,11 +6,34 @@
 // 纯 Node 实现（zlib + 扫描线栅格化 + 4x 超采样），不引入 sharp 等新依赖。
 // 用法：node scripts/generate-omz-brand-assets.mjs [输出目录]（默认写到仓库外的人工过目目录，
 //       目标资产文件确认后再拷贝，脚本不直接覆盖仓库资产）。
+// 用法（校验）：node scripts/generate-omz-brand-assets.mjs --check <repoRoot>
+//       发射到临时目录后与仓库内资产比对：SVG/PNG/ICO/ICNS/DMG/内嵌 favicon 逐字节，
+//       5 处内联（form-a 对应）按提取的 d 串比对；不一致时退出码非零。
+// 输出名 ↔ 仓库名映射：
+//   form-a-wordmark.svg     → 5 处内联：packages/desktop/src/main/aboutWindow.ts、
+//                             packages/desktop/src/renderer/index.html、
+//                             packages/ui/src/components/ui/ZCodeAboutLogo.tsx、
+//                             packages/ui/src/root/RootStartupLoading.tsx、packages/web/index.html
+//   form-b-app-logo.svg     → packages/ui/src/assets/app-logo.svg
+//   icon-<S>.png            → packages/desktop/build/icons/<S>x<S>.png、public/logo/icons/<S>x<S>.png
+//   icon.ico                → packages/desktop/build/icon.ico、packages/web/public/favicon.ico、
+//                             public/logo/icons/icon.ico
+//   icon-32.png             → packages/web/index.html 内嵌 base64 favicon（32×32）
+//   icon.icns               → packages/desktop/build/icon.icns、public/logo/icons/icon.icns
+//   icon_installer.{icns,ico,png} → packages/desktop/build/icon_installer.{icns,ico,png}
+//   dmg_background{,@2x}.png → packages/desktop/build/dmg_background{,@2x}.png
 import { deflateSync } from "node:zlib";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 
-const outDir = resolve(process.argv[2] ?? "../.tools/brand-preview");
+const argv = process.argv.slice(2);
+const checkModeIndex = argv.indexOf("--check");
+const checkMode = checkModeIndex !== -1;
+const checkRepoRoot = checkMode ? resolve(argv[checkModeIndex + 1] ?? ".") : null;
+const outDir = checkMode
+  ? mkdtempSync(join(tmpdir(), "omz-brand-assets-"))
+  : resolve(argv[0] ?? "../.tools/brand-preview");
 mkdirSync(outDir, { recursive: true });
 
 // ---------- 几何参数（与原 Z 字标同源） ----------
@@ -181,7 +204,10 @@ const wordmarkShapesPolys = [oRing, ...mPlaced.map((p) => [p]), ...zPlaced.map((
 // path 数据（每字母一条 path；M 的交叠子路径在 nonzero 填充下自然并集）
 const oD = polyToD(oRing[0]) + polyToD(oRing[1]);
 const mD = mPlaced.map(polyToD).join("");
-const zD = zPlaced.map(polyToD).join("");
+// Z 的 SVG 输出直接复用 Z_PATHS_D 原始 d 文本（保留 C 曲线）并把平移交给 transform：
+// 折线化只服务于栅格化（zPlaced），这样 SVG 输出与仓库内联不会再因人肉平移而漂移。
+const zD = Z_PATHS_D.join("");
+const zDTransform = `translate(${zX} 0)`;
 const wordmarkViewBox = `0 0 ${WORDMARK_W} ${H}`;
 
 // ---------- SVG 输出 ----------
@@ -196,7 +222,7 @@ writeSvg(
   `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${wordmarkViewBox}" fill="none">\n` +
     `  <path fill="currentColor" fill-rule="evenodd" d="${oD}"/>\n` +
     `  <path fill="currentColor" d="${mD}"/>\n` +
-    `  <path fill="currentColor" d="${zD}"/>\n` +
+    `  <path fill="currentColor" d="${zD}" transform="${zDTransform}"/>\n` +
     `</svg>`,
 );
 
@@ -209,11 +235,11 @@ writeSvg(
   "form-b-app-logo.svg",
   `<svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">\n` +
     `  <path d="M2.91528 17.32C1.40918 17.32 0.183716 16.0946 0.183716 14.5885V2.91906C0.183716 1.41296 1.40918 0.1875 2.91528 0.1875H14.5847C16.0908 0.1875 17.3163 1.41296 17.3163 2.91906V14.5885C17.3163 16.0946 16.0908 17.32 14.5847 17.32H2.91528Z" fill="url(#omzBoxGrad)"/>\n` +
-    `  <path d="M14.5847 0.367454C15.9918 0.367454 17.1325 1.50817 17.1325 2.91529V14.5847C17.1325 15.9918 15.9918 17.1325 14.5847 17.1325H2.91529C1.50817 17.1325 0.367454 15.9918 0.367454 14.5847V2.91529C0.367454 1.50817 1.50817 0.367454 2.91529 0.367454H14.5847ZM14.5847 0H2.91529C2.13652 0 1.40459 0.303149 0.853871 0.853871C0.303149 1.40459 0 2.13652 0 2.91529V14.5847C0 15.3635 0.303149 16.0954 0.853871 16.6461C1.40459 17.1969 2.13652 17.5 2.91529 17.5H14.5847C15.3635 17.5 16.0954 17.1969 16.6461 16.6461C17.1969 16.0954 17.5 15.3635 17.5 14.5847V2.91529C17.5 2.13652 17.1969 2.13652 16.6461 0.853871C16.0954 0.303149 15.3635 0 14.5847 0Z" fill="#B7BCBF"/>\n` +
-    `  <g transform="translate(1.8 ${fmt(wmBoxY)}) scale(${fmt(boxScale)})" fill="white">\n` +
+    `  <path d="M14.5847 0.367454C15.9918 0.367454 17.1325 1.50817 17.1325 2.91529V14.5847C17.1325 15.9918 15.9918 17.1325 14.5847 17.1325H2.91529C1.50817 17.1325 0.367454 15.9918 0.367454 14.5847V2.91529C0.367454 1.50817 1.50817 0.367454 2.91529 0.367454H14.5847ZM14.5847 0H2.91529C2.13652 0 1.40459 0.303149 0.853871 0.853871C0.303149 1.40459 0 2.13652 0 2.91529V14.5847C0 15.3635 0.303149 16.0954 0.853871 16.6461C1.40459 17.1969 2.13652 17.5 2.91529 17.5H14.5847C15.3635 17.5 16.0954 17.1969 16.6461 16.6461C17.1969 16.0954 17.5 15.3635 17.5 14.5847V2.91529C17.5 2.13652 17.1969 1.40459 16.6461 0.853871C16.0954 0.303149 15.3635 0 14.5847 0Z" fill="#B7BCBF"/>\n` +
+    `  <g transform="translate(1.8 ${fmt(wmBoxY)}) scale(${boxScale.toFixed(7)})" fill="white">\n` +
     `    <path fill-rule="evenodd" d="${oD}"/>\n` +
     `    <path d="${mD}"/>\n` +
-    `    <path d="${zD}"/>\n` +
+    `    <path d="${zD}" transform="${zDTransform}"/>\n` +
     `  </g>\n` +
     `  <defs>\n` +
     `    <linearGradient id="omzBoxGrad" x1="8.74999" y1="17.32" x2="8.74999" y2="0.187504" gradientUnits="userSpaceOnUse">\n` +
@@ -474,18 +500,26 @@ function asciiWordmark(cols, rows) {
 }
 writeFileSync(resolve(outDir, "wordmark.ascii.txt"), asciiWordmark(150, 26) + "\n", "utf8");
 console.log("✓ wordmark.ascii.txt（ASCII 目检）");
-console.log(`\n输出目录：${outDir}`);
-console.log(`字标 viewBox：${wordmarkViewBox}（宽高比 ${(WORDMARK_W / H).toFixed(2)}:1）`);
-console.log("\n" + asciiWordmark(110, 20));
+if (!checkMode) {
+  console.log(`\n输出目录：${outDir}`);
+  console.log(`字标 viewBox：${wordmarkViewBox}（宽高比 ${(WORDMARK_W / H).toFixed(2)}:1）`);
+  console.log("\n" + asciiWordmark(110, 20));
+}
 
 // ---------- ICNS（macOS 应用图标容器）----------
-// icns = "icns" + 总长 + 一组 [4 字节类型 + 4 字节长度 + PNG 数据]；现代类型（ic07..ic10）
-// 直接内嵌 PNG（macOS 10.7+），与 ICO 的 PNG 内嵌同理，可纯 Node 写入。
+// icns = "icns" + 总长 + 一组 [4 字节类型 + 4 字节长度 + PNG 数据]；现代类型直接内嵌 PNG
+// （macOS 10.7+），与 ICO 的 PNG 内嵌同理，可纯 Node 写入。
+// 档位语义：ic07..ic10 = 128/256/512/1024px 主槽位；ic11..ic14 = 32/64/256/512px @2x 槽位
+// （32/64 对应 16pt/32pt 的 Retina 原生档位，缺失时 Finder 小图标只能降采样）。
 const ICNS_PNG_ENTRIES = [
   { type: "ic07", size: 128 },
   { type: "ic08", size: 256 },
   { type: "ic09", size: 512 },
   { type: "ic10", size: 1024 },
+  { type: "ic11", size: 32 },
+  { type: "ic12", size: 64 },
+  { type: "ic13", size: 256 },
+  { type: "ic14", size: 512 },
 ];
 function buildIcns() {
   const chunks = ICNS_PNG_ENTRIES.map((entry) => {
@@ -508,6 +542,7 @@ function buildIcns() {
 // 应用图标与安装器/DMG 卷图标同视觉（旧「包裹箱插画」统一替换为应用方标）
 writeFileSync(resolve(outDir, "icon.icns"), buildIcns());
 writeFileSync(resolve(outDir, "icon_installer.icns"), buildIcns());
+// icon_installer.png：DMG 装饰素材备份，electron-builder 未消费该文件（保留，待人工确认后再删）。
 writeFileSync(
   resolve(outDir, "icon_installer.png"),
   encodePng(1024, 1024, renderPixels(1024, 1024, formBShapes(1024, 0.07))),
@@ -534,8 +569,8 @@ function renderDmgBackground(scale) {
       color: fg,
     });
   }
-  // 箭头：指向右侧「应用程序」（electron-builder 默认窗口布局：app 左、alias 右）
-  const ay = 300 * scale;
+  // 箭头：指向右侧「应用程序」（electron-builder 窗口布局：app 左、alias 右，contents 图标行 y=220）
+  const ay = 220 * scale;
   const arrow = [
     [190 * scale, ay - 6 * scale],
     [324 * scale, ay - 6 * scale],
@@ -554,3 +589,140 @@ writeFileSync(
   encodePng(1080, 760, renderDmgBackground(2)),
 );
 console.log("✓ dmg_background.png / dmg_background@2x.png");
+
+// ---------- --check：发射产物与仓库资产一致性校验 ----------
+// 正常模式写临时目录后照常退出；--check 模式在同一批发射产物上跑完整比对，不一致退出非零。
+if (checkMode) {
+  const passes = [];
+  const failures = [];
+  const repoPath = (rel) => resolve(checkRepoRoot, rel);
+  const outPath = (name) => resolve(outDir, name);
+  const count = { files: 0 };
+
+  const compareFile = (name, rel) => {
+    count.files++;
+    const target = repoPath(rel);
+    if (!existsSync(target)) {
+      failures.push(`缺失：${rel}（应等于发射产物 ${name}）`);
+      return;
+    }
+    const expected = readFileSync(outPath(name));
+    const actual = readFileSync(target);
+    if (expected.equals(actual)) {
+      passes.push(rel);
+    } else {
+      failures.push(
+        `不一致：${rel} ≠ ${name}（仓库 ${actual.length}B vs 发射 ${expected.length}B）`,
+      );
+    }
+  };
+
+  // PNG 图标九种尺寸 → build/icons 与 public/logo/icons 两处仓库拷贝
+  for (const size of sizes) {
+    compareFile(`icon-${size}.png`, `packages/desktop/build/icons/${size}x${size}.png`);
+    compareFile(`icon-${size}.png`, `public/logo/icons/${size}x${size}.png`);
+  }
+  // icon.ico 三份拷贝 / icon.icns 两份拷贝 / icon_installer 三件 / DMG 背景两张
+  for (const rel of [
+    "packages/desktop/build/icon.ico",
+    "packages/web/public/favicon.ico",
+    "public/logo/icons/icon.ico",
+  ]) {
+    compareFile("icon.ico", rel);
+  }
+  for (const rel of ["packages/desktop/build/icon.icns", "public/logo/icons/icon.icns"]) {
+    compareFile("icon.icns", rel);
+  }
+  compareFile("icon_installer.icns", "packages/desktop/build/icon_installer.icns");
+  compareFile("icon_installer.ico", "packages/desktop/build/icon_installer.ico");
+  compareFile("icon_installer.png", "packages/desktop/build/icon_installer.png");
+  compareFile("dmg_background.png", "packages/desktop/build/dmg_background.png");
+  compareFile("dmg_background@2x.png", "packages/desktop/build/dmg_background@2x.png");
+  // form-b 与 app-logo.svg 整文件逐字节
+  compareFile("form-b-app-logo.svg", "packages/ui/src/assets/app-logo.svg");
+
+  // 5 处内联：form-a 三条 path 的 d 串必须逐字出现在对应 JSX/HTML 内联中
+  const formASvg = readFileSync(outPath("form-a-wordmark.svg"), "utf8");
+  const expectedD = [...formASvg.matchAll(/\sd="([^"]+)"/g)].map((match) => match[1]);
+  const INLINE_SITES = [
+    "packages/desktop/src/main/aboutWindow.ts",
+    "packages/desktop/src/renderer/index.html",
+    "packages/ui/src/components/ui/ZCodeAboutLogo.tsx",
+    "packages/ui/src/root/RootStartupLoading.tsx",
+    "packages/web/index.html",
+  ];
+  for (const rel of INLINE_SITES) {
+    const text = readFileSync(repoPath(rel), "utf8");
+    const found = [...text.matchAll(/\sd="([^"]+)"/g)].map((match) => match[1]);
+    const missing = expectedD.filter((d) => !found.includes(d));
+    if (missing.length === 0) {
+      passes.push(`${rel}（内联 d 串 ${expectedD.length}/${expectedD.length}）`);
+    } else {
+      failures.push(`内联不一致：${rel} 缺少 ${missing.length}/${expectedD.length} 条 form-a d 串`);
+    }
+  }
+
+  // 32×32 → packages/web/index.html 内嵌 base64 favicon（解码后逐字节）
+  {
+    const html = readFileSync(repoPath("packages/web/index.html"), "utf8");
+    const match = html.match(/href="data:image\/png;base64,([A-Za-z0-9+/=]+)"/);
+    if (!match) {
+      failures.push("packages/web/index.html 未找到内嵌 base64 favicon");
+    } else {
+      const embedded = Buffer.from(match[1], "base64");
+      const source = readFileSync(outPath("icon-32.png"));
+      if (embedded.equals(source)) {
+        passes.push("packages/web/index.html（内嵌 favicon ≡ icon-32.png）");
+      } else {
+        failures.push(
+          `不一致：packages/web/index.html 内嵌 favicon ≠ icon-32.png（${embedded.length}B vs ${source.length}B）`,
+        );
+      }
+    }
+  }
+
+  // ICNS 内部：档位齐全（ic07..ic14）且内嵌 PNG 与同尺寸发射 PNG 逐字节一致
+  {
+    const icns = readFileSync(outPath("icon.icns"));
+    const seen = [];
+    let offset = 8;
+    while (offset + 8 <= icns.length) {
+      const type = icns.toString("ascii", offset, offset + 4);
+      const length = icns.readUInt32BE(offset + 4);
+      if (length < 8 || offset + length > icns.length) {
+        failures.push(`icon.icns 分块 ${type} 长度非法（${length}）`);
+        break;
+      }
+      seen.push(type);
+      const entry = ICNS_PNG_ENTRIES.find((item) => item.type === type);
+      if (entry) {
+        const png = icns.subarray(offset + 8, offset + length);
+        const source = readFileSync(outPath(`icon-${entry.size}.png`));
+        if (!png.equals(source)) {
+          failures.push(`icon.icns 内嵌 ${type}(${entry.size}px) 与 icon-${entry.size}.png 不一致`);
+        }
+      }
+      offset += length;
+    }
+    const missingTypes = ICNS_PNG_ENTRIES.filter((item) => !seen.includes(item.type)).map(
+      (item) => item.type,
+    );
+    if (missingTypes.length === 0) {
+      passes.push(`icon.icns 档位 ${seen.join(",")}`);
+    } else {
+      failures.push(`icon.icns 缺少档位：${missingTypes.join(",")}`);
+    }
+  }
+
+  console.log(`\n--check ${checkRepoRoot}`);
+  console.log(`文件级比对 ${count.files} 项 + 内联 ${INLINE_SITES.length} 处 + 内嵌/分块断言`);
+  console.log(`通过 ${passes.length} 项，失败 ${failures.length} 项`);
+  for (const item of failures) {
+    console.error(`✗ ${item}`);
+  }
+  if (failures.length > 0) {
+    process.exitCode = 1;
+  } else {
+    console.log("✓ 仓库资产与脚本发射产物一致");
+  }
+}
