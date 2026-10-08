@@ -1,3 +1,4 @@
+export * from "./bundled-provider-config-path.js";
 export * from "./zcode-builtin-provider-config-source.js";
 export * from "./zcode-builtin-release.js";
 export * from "./zcode-builtin-download.js";

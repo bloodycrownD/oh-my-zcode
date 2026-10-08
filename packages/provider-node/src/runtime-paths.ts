@@ -29,3 +29,25 @@ export function resolveNodeProviderRuntimePaths(
   }
   return Object.freeze({ zcodeBuiltinFilePath, personalFilePath });
 }
+
+export interface ZCodeBuiltinBundledEnvSource {
+  /** 随包基线路径（桌面 Main 按 packed/dev 布局解析，可能缺省）。 */
+  readonly zcodeBuiltinProviderConfigFallbackFilePath?: string;
+  /** 显式覆盖路径（Active/显式 env）；仅在无 fallback 时兜底，语义上只是读取入口。 */
+  readonly zcodeBuiltinProviderConfigFilePath?: string;
+}
+
+// FORK（cr-fix DF-C-orch-1）：BUNDLED env 必须是「真实随包基线」——优先下发桌面 Main
+// 解析出的 fallback；仅当 fallback 缺省时才退回显式值（此时该值即随打包布局解析出的
+// 基线）。services/node.ts 的 agent spawn env 用此函数取值：CLI 成对显式早退路径不返回
+// BUNDLED 时，agent 继承到的不会是可能 stale 的显式覆盖，避免
+// process-provider-registry-runtime 把它当 bundled 基线、Active 坏即整段判死。
+export function createZCodeBuiltinBundledEnv(
+  source: ZCodeBuiltinBundledEnvSource,
+): Record<string, string> {
+  const bundled =
+    source.zcodeBuiltinProviderConfigFallbackFilePath ?? source.zcodeBuiltinProviderConfigFilePath;
+  // 双缺省时不注入该键：undefined 值本就不会随 env 序列化下发，保持 spawn env 的
+  // Record<string, string> 契约。
+  return bundled === undefined ? {} : { [ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]: bundled };
+}

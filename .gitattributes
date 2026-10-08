@@ -1,5 +1,10 @@
 # 保持脚本文件 LF 换行，避免 Windows CRLF 导致 shebang 解析失败
 *.mjs text eol=lf
+# DF-C-2（cr-fix-v1.0.1）：electron-builder.config.js 曾被整文件 CRLF 化（746/737 噪音 diff）。
+# 全仓 13 个 tracked .js 里只有这一份 index 是 CRLF，故用全局规则锁定；工作区其它 .js
+# （zcode-cua）index 本为 LF，text 归一后不会产生 renormalize 噪音。下方 third-party
+# 的 -text 规则更晚匹配，仍按字节保存。
+*.js  text eol=lf
 *.sh  text eol=lf
 
 # JSON 清单/配置同样锁定 LF：整文件 CRLF 改写会让 diff 与 license 哈希校验失去意义。

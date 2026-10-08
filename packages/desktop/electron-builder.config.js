@@ -725,7 +725,7 @@ export default {
     size: "3200m",
     // 使用自定义安装背景图。
     background: "build/dmg_background.png",
-    // 安装盘图标统一使用安装专用素材，避免复用应用图标导致安装识别度不足。
+    // 安装盘/安装器图标统一复用应用方标（macOS 卷图标与 NSIS 安装器同视觉）。
     icon: "build/icon_installer.icns",
     contents: [
       // 实验性调整：为隐藏资源文件显式指定图标坐标，尽量把它们移到角落区域。
@@ -738,7 +738,7 @@ export default {
   nsis: {
     oneClick: false,
     allowToChangeInstallationDirectory: true,
-    // Windows 安装流程使用独立安装图标，和应用运行时图标解耦。
+    // Windows 安装/卸载器与应用运行时统一复用应用方标（icon_installer.ico 与 icon.ico 同源）。
     installerIcon: "build/icon_installer.ico",
     uninstallerIcon: "build/icon_installer.ico",
     installerHeaderIcon: "build/icon_installer.ico",
