@@ -1,16 +1,10 @@
 // File Config Adapter - Load and patch JSON configuration files
 
-import {
-  existsSync,
-  readFileSync,
-  renameSync,
-  unlinkSync,
-  writeFileSync,
-} from "node:fs";
+import { existsSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import type { RuntimeConfigPatch, UiLocale } from "@zcode/contracts";
+import type { PromptLanguage, RuntimeConfigPatch, UiLocale } from "@zcode/contracts";
 import { z } from "zod";
 import {
   CANONICAL_CUA_PLUGIN_ID,
@@ -36,6 +30,17 @@ export interface LoadedConfig {
 export interface UiLocalePatchResult {
   locale: UiLocale;
   path: string;
+}
+
+/**
+ * FORK（prompt-language-option）：`promptLanguage` 顶层字段写盘的结果。
+ *
+ * 与 `MagicContextPatchResult` 同一形态：写盘层只回报「写到了哪里 + 写了什么」，
+ * effective 回显由协议层统一负责（见 magic-context-config.ts 的注释）。
+ */
+export interface PromptLanguagePatchResult {
+  path: string;
+  promptLanguage: PromptLanguage;
 }
 
 /**
@@ -176,10 +181,7 @@ function migratePluginConfigInFile(value: unknown): Record<string, unknown> | un
   return changed ? { ...value, plugins: nextPlugins } : undefined;
 }
 
-function persistPluginConfigMigration(
-  filePath: string,
-  value: Record<string, unknown>,
-): void {
+function persistPluginConfigMigration(filePath: string, value: Record<string, unknown>): void {
   const tempPath = `${filePath}.migrate.${process.pid}.${Date.now()}.tmp`;
   try {
     writeFileSync(tempPath, `${JSON.stringify(value, null, 2)}\n`, {
@@ -249,6 +251,28 @@ export async function updateUiLocaleInFileConfig(
 }
 
 /**
+ * FORK（prompt-language-option）：把「模型语言」写进用户级 config.json 顶层。
+ *
+ * 与 `updateUiLocaleInFileConfig` 逐点一致（atomicWriteJson、读改写保留其余顶层键、
+ * 不做项目级级联写入）；差异只有目标字段——`promptLanguage` 是顶层标量，
+ * 不是 `ui` 子树的键，因为它的语义是 agent 提示词语言而非应用界面语言。
+ */
+export async function updatePromptLanguageInFileConfig(
+  filePath: string,
+  promptLanguage: PromptLanguage,
+): Promise<PromptLanguagePatchResult> {
+  const resolvedPath = resolvePath(filePath);
+  const parsed = await readJsonConfigFileOrEmpty(resolvedPath);
+  const next = patchPromptLanguage(parsed, promptLanguage);
+
+  await atomicWriteJson(resolvedPath, next);
+  return {
+    path: resolvedPath,
+    promptLanguage,
+  };
+}
+
+/**
  * FORK（S23 / D-12）：把整个 `magicContext` 参数域写进用户级 config.json 顶层。
  *
  * 三点与 `updateUiLocaleInFileConfig` 刻意一致：走同一条 `atomicWriteJson`（临时文件
@@ -305,8 +329,7 @@ function isDeepEqualJson(left: unknown, right: unknown): boolean {
   const rightKeys = Object.keys(right).sort();
   if (leftKeys.length !== rightKeys.length) return false;
   return leftKeys.every(
-    (key, index) =>
-      rightKeys[index] === key && isDeepEqualJson(left[key], right[key]),
+    (key, index) => rightKeys[index] === key && isDeepEqualJson(left[key], right[key]),
   );
 }
 
@@ -570,6 +593,17 @@ function patchUiLocale(parsed: Record<string, unknown>, locale: UiLocale): Recor
       ...currentUi,
       locale,
     },
+  };
+}
+
+/** FORK（prompt-language-option）：顶层标量替换，保留其余顶层键。 */
+function patchPromptLanguage(
+  parsed: Record<string, unknown>,
+  promptLanguage: PromptLanguage,
+): Record<string, unknown> {
+  return {
+    ...parsed,
+    promptLanguage,
   };
 }
 

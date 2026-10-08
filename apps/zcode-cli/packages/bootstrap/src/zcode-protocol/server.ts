@@ -83,6 +83,8 @@ import {
 import { listMcpServers } from "./mcp.js";
 import { updateInteractionPreferences } from "./interaction-preferences.js";
 import { readMagicContextConfig, updateMagicContextConfig } from "./magic-context-config.js";
+// FORK（prompt-language-option）：模型语言读写（写盘 + ConfigPort + runtime 热更新）。
+import { readPromptLanguage, updatePromptLanguage } from "./prompt-language.js";
 import { updateModelIoPreferences } from "./model-io-preferences.js";
 import { updateDynamicWorkflowPolicy } from "./dynamic-workflow-policy.js";
 import { grantWorkspaceHookTrustForProtocol } from "./workspace-hook-trust.js";
@@ -621,6 +623,12 @@ export class ZCodeProtocolAgentServer {
       // 因为它与 update 共用同一个 ConfigPort 读取约定与同一个 schema 对象。
       case zcodeProtocolMethods.workspaceReadMagicContextConfig:
         return await readMagicContextConfig(this.context, request.params);
+      // FORK（prompt-language-option）：模型语言。除写盘与 ConfigPort 外，还会对
+      // 每个 resident session 调 runtime.updateConfig({language}) 做下一轮生效。
+      case zcodeProtocolMethods.workspaceUpdatePromptLanguage:
+        return await updatePromptLanguage(this.context, request.params);
+      case zcodeProtocolMethods.workspaceReadPromptLanguage:
+        return await readPromptLanguage(this.context, request.params);
       case zcodeProtocolMethods.workspaceUpdateModelIoPreferences:
         return await updateModelIoPreferences(this.context, request.params);
       case zcodeProtocolMethods.workspaceUpdateDynamicWorkflowPolicy:

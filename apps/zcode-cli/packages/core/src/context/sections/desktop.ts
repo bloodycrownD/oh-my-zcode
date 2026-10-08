@@ -1,7 +1,13 @@
 import type { ContextSection } from "../types.js";
 import { estimateTokens } from "../utils.js";
+// FORK（prompt-language-option）：模型语言为 zh-CN 时改用中文桌面端上下文段；
+// 英文原文保留为默认/回退，中文文案集中在 ../prompt-copy-zh-cn.ts。
+import { DESKTOP_CONTEXT_ZH_CN, isChinesePromptLanguage } from "../prompt-copy-zh-cn.js";
 
-export function buildDesktopContextSection(): ContextSection {
+export function buildDesktopContextSection(language?: string): ContextSection {
+  if (isChinesePromptLanguage(language)) {
+    return createDesktopSection("ZCode Desktop Context", "desktop_context", DESKTOP_CONTEXT_ZH_CN);
+  }
   return createDesktopSection(
     "ZCode Desktop Context",
     "desktop_context",

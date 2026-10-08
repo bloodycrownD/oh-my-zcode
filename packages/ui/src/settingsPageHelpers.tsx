@@ -28,6 +28,8 @@ import { Input } from "@/components/ui/input.js";
 import { Button } from "@/components/ui/button.js";
 import { SettingsBadge, SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
 import { DataBaseDirControl } from "@/settings/DataBaseDirControl.js";
+// FORK（prompt-language-option）：模型语言行（协议读写 + 自动保存）挂在 General 分区。
+import { ModelLanguageSetting } from "@/settings/ModelLanguageSetting.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useOptionalServices } from "@/hooks/useServices.js";
 import { ProactiveSuggestionsSetting } from "@/settings/ProactiveSuggestionsSetting.js";
@@ -47,6 +49,7 @@ const ZCODE_INTERACTION_BEHAVIOR_OPTIONS: readonly ZCodeInteractionBehavior[] = 
 
 export function GeneralSectionContent({
   localePreference,
+  promptLanguageWorkspacePath,
   interfaceMode = "coding",
   setInterfaceMode = () => {},
   notificationEnabled,
@@ -105,6 +108,11 @@ export function GeneralSectionContent({
   onOpenOnboardingDialog,
 }: {
   localePreference: LocalePreference;
+  /**
+   * FORK（prompt-language-option）：模型语言行需要 workspace 定位本机控制面
+   * （用户级配置，但读写都走该 workspace 的 Agent 连接）；缺席时该行渲染为禁用。
+   */
+  promptLanguageWorkspacePath?: string;
   interfaceMode?: InterfaceMode;
   setInterfaceMode?: (mode: InterfaceMode) => void;
   notificationEnabled: boolean;
@@ -309,6 +317,10 @@ export function GeneralSectionContent({
             </Select>
           }
         />
+        {/* FORK（prompt-language-option）：紧挨界面语言行的「模型语言」。它是 agent
+            系统提示词语言，与界面语言相互独立；仅在有服务时渲染（SSR/精简装配跳过，
+            与 ProactiveSuggestionsSetting 同判据）。 */}
+        {hasServices ? <ModelLanguageSetting workspacePath={promptLanguageWorkspacePath} /> : null}
       </SettingsGroupCard>
 
       <SettingsGroupCard>

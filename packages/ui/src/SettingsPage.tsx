@@ -1167,6 +1167,11 @@ export function SettingsPage({
                         {activeSection === "general" ? (
                           <GeneralSectionContent
                             localePreference={localePreference}
+                            // FORK（prompt-language-option）：模型语言行的协议读写载体
+                            // （用户级配置，workspace 只用于定位本机控制面）。
+                            promptLanguageWorkspacePath={
+                              activeWorkspacePath ?? captionWorkspacePath ?? undefined
+                            }
                             interfaceMode={interfaceMode}
                             setInterfaceMode={setInterfaceMode}
                             isDesktop={isDesktop}

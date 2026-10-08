@@ -321,6 +321,10 @@ export const ZCodeConfigFileSchema = z
     command: skillCommandOverridesSchema.optional(),
     logging: loggingSchema.optional(),
     ui: uiSchema.optional(),
+    // FORK（prompt-language-option）：agent 提示词语言（模型语言）顶层字段。
+    // 与 ui.locale 的值域刻意相同但相互独立：一个是应用界面语言，一个是喂给模型的
+    // system prompt 语言。optional 让缺席保持「没配置过」，装配层按 auto 处理。
+    promptLanguage: z.enum(["auto", "en-US", "zh-CN"]).optional(),
     toolConcurrency: toolConcurrencySchema.optional(),
     modelAnomalyGuard: modelAnomalyGuardSchema.optional(),
     hooks: hooksSchema.optional(),
@@ -445,6 +449,8 @@ function parsedConfigFileToRuntimePatch(parsed: ZCodeConfigFile): RuntimeConfigP
   if (parsed.command) config.commandOverrides = parsed.command;
   if (parsed.logging) config.logging = parsed.logging;
   if (parsed.ui) config.ui = parsed.ui;
+  // FORK（prompt-language-option）：缺席即不写进 patch，由 ConfigPort 的默认值兜底为 auto。
+  if (parsed.promptLanguage) config.promptLanguage = parsed.promptLanguage;
   if (parsed.toolConcurrency) config.toolConcurrency = parsed.toolConcurrency;
   if (parsed.modelAnomalyGuard) config.modelAnomalyGuard = parsed.modelAnomalyGuard;
   if (parsed.hooks) config.hooks = parsed.hooks;

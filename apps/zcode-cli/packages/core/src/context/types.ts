@@ -120,6 +120,10 @@ export interface ContextBuilderConfig {
    * 而不是像 `customSystemPrompt` 那样整段替换。与 `customSystemPrompt` 互斥。
    */
   workflowActor?: WorkflowActorContext;
+  /**
+   * FORK（prompt-language-option）：提示词语言。仅本层已覆盖的段落消费（cli-prefix、
+   * identity、desktop、dynamic-sections）；未覆盖段落一律回落英文原文。
+   */
   language?: string;
   outputStyle?: OutputStylePromptConfig;
   guidanceToolNames?: readonly string[];

@@ -2170,6 +2170,70 @@ export type ZCodeWorkspaceReadMagicContextConfigResult = z.infer<
   typeof zcodeWorkspaceReadMagicContextConfigResultSchema
 >;
 
+/**
+ * FORK（prompt-language-option）：模型语言（agent 系统提示词语言）。
+ *
+ * 与 magicContext 的关键差异：这是**单个标量**（"auto" | "zh-CN" | "en-US"），
+ * 不是参数域，因此没有「整域替换 → UI 必须先读再合并」的强约束；read 仍然保留，
+ * 因为设置页需要读回 effective 值（尤其是「缺省 = auto」这一态在文件里可能不存在）。
+ */
+export const zcodePromptLanguageSchema = z.enum(["auto", "zh-CN", "en-US"]);
+export type ZCodePromptLanguage = z.infer<typeof zcodePromptLanguageSchema>;
+
+export const zcodeWorkspaceReadPromptLanguageParamsSchema = z
+  .object({ workspace: zcodeWorkspaceRefSchema })
+  .strict();
+export type ZCodeWorkspaceReadPromptLanguageParams = z.infer<
+  typeof zcodeWorkspaceReadPromptLanguageParamsSchema
+>;
+
+export const zcodeWorkspaceReadPromptLanguageResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /**
+     * 读盘路径（用户级 config.json）；与 update result 的 `path` 同一语义。
+     * 旧 CLI 降级（supported:false）时缺席——host 不伪造一个没读过的路径。
+     */
+    path: nonEmptyString.optional(),
+    /** effective 值：ConfigPort 优先、文件兜底；缺省为 "auto"。 */
+    promptLanguage: zcodePromptLanguageSchema,
+    /**
+     * 旧 CLI 不认识该方法时为 false（host 侧按 -32601 降级合成的结果，值恒为
+     * "auto"）。UI 据此把该项显示为「当前 CLI 不支持」，而不是给出一个写不动的
+     * 选择器让用户反复保存失败。
+     */
+    supported: z.boolean(),
+  })
+  .strict();
+export type ZCodeWorkspaceReadPromptLanguageResult = z.infer<
+  typeof zcodeWorkspaceReadPromptLanguageResultSchema
+>;
+
+export const zcodeWorkspaceUpdatePromptLanguageParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    promptLanguage: zcodePromptLanguageSchema,
+  })
+  .strict();
+export type ZCodeWorkspaceUpdatePromptLanguageParams = z.infer<
+  typeof zcodeWorkspaceUpdatePromptLanguageParamsSchema
+>;
+
+export const zcodeWorkspaceUpdatePromptLanguageResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 写盘目标（用户级 config.json）。 */
+    path: nonEmptyString,
+    /** effective 值：写盘并推入内存后的那一个（单标量无需 schema 规范化）。 */
+    promptLanguage: zcodePromptLanguageSchema,
+    /** 收到内存热更新的 resident session 数；没有活动 session 时为 0。 */
+    updatedSessionCount: z.number().int().nonnegative(),
+  })
+  .strict();
+export type ZCodeWorkspaceUpdatePromptLanguageResult = z.infer<
+  typeof zcodeWorkspaceUpdatePromptLanguageResultSchema
+>;
+
 export const zcodeModelIoPreferencesSchema = z
   .object({
     fullRetentionEnabled: z.boolean(),
@@ -3388,6 +3452,11 @@ export const zcodeProtocolMethods = {
   // FORK（Step 29 / D-12）：update 的配对读方法。设置分区渲染表单初值必须先读
   // effective 域——update 是整域覆盖，UI 不先读就会在首次保存时抹掉其余字段。
   workspaceReadMagicContextConfig: "workspace/readMagicContextConfig",
+  // FORK（prompt-language-option）：模型语言（agent 提示词语言）读写。
+  // 写盘 + ConfigPort 双写 + 运行中 session 热更新（下一轮生效）。
+  // 旧 CLI method-not-found → host 侧降级（read 返回 supported:false）。
+  workspaceUpdatePromptLanguage: "workspace/updatePromptLanguage",
+  workspaceReadPromptLanguage: "workspace/readPromptLanguage",
   workspaceUpdateModelIoPreferences: "workspace/updateModelIoPreferences",
   // 动态工作流灰度门禁：workspace 级事实，由 host 在 agent 就绪时同步；
   // CLI 对 legacy create/resume 与 v4 冷恢复统一读取。旧 CLI method-not-found → host 降级忽略。

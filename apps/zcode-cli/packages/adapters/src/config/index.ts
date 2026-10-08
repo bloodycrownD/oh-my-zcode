@@ -213,6 +213,10 @@ class ConfigStore {
         scope,
       );
     }
+    if (config.promptLanguage !== undefined) {
+      // FORK（prompt-language-option）：单字段透传，缺省由 DefaultRuntimeConfig 的 "auto" 兜底。
+      this.set(ConfigKey.PromptLanguage, config.promptLanguage, scope);
+    }
     if (config.ui?.locale !== undefined) {
       this.set(ConfigKey.UiLocale, config.ui.locale, scope);
     }
@@ -341,6 +345,8 @@ export class ConfigPortImpl implements ConfigPort {
       modelAnomalyGuard:
         this.store.get(ConfigKey.ModelAnomalyGuard) ?? DefaultConfig.modelAnomalyGuard,
       hooks: this.store.get(ConfigKey.Hooks) ?? DefaultConfig.hooks,
+      // FORK（prompt-language-option）：缺席 = "auto"（中文系统默认中文提示词）。
+      promptLanguage: this.store.get(ConfigKey.PromptLanguage) ?? DefaultConfig.promptLanguage,
       ui: {
         locale: this.store.get(ConfigKey.UiLocale) ?? DefaultConfig.ui.locale,
         theme: this.store.get(ConfigKey.UiTheme) ?? DefaultConfig.ui.theme,
@@ -462,6 +468,10 @@ function getDefaultValue(key: ConfigKey): unknown {
       return defaults.ui.locale;
     case ConfigKey.UiTheme:
       return defaults.ui.theme;
+    // FORK（prompt-language-option）：与 ui.locale 同一条登记理由——不登记会让
+    // `ConfigPortImpl.get` 抛 `Config key not found`，而这一项永远有值（缺省 auto）。
+    case ConfigKey.PromptLanguage:
+      return defaults.promptLanguage;
     default:
       return undefined;
   }
@@ -498,6 +508,9 @@ export {
   type PluginRemovePatchResult,
   type SuppressedBuiltinPatchResult,
   type UiLocalePatchResult,
+  // FORK（prompt-language-option）：模型语言写盘。
+  updatePromptLanguageInFileConfig,
+  type PromptLanguagePatchResult,
   updateMagicContextInFileConfig,
   type MagicContextPatchResult,
 } from "./file-config.adapter.js";

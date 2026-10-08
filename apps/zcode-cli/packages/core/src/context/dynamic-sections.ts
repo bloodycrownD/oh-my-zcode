@@ -1,5 +1,15 @@
 import type { ContextBuilderConfig, ContextSection } from "./types.js";
 import { estimateTokens } from "./utils.js";
+// FORK（prompt-language-option）：模型语言为 zh-CN 时改用中文动态段文案；
+// 英文原文保留为默认/回退，中文文案集中在 ./prompt-copy-zh-cn.ts。
+import {
+  COMMUNICATION_PROMPTS_ZH_CN,
+  CONTEXT_MANAGEMENT_PROMPTS_ZH_CN,
+  DYNAMIC_BEHAVIOR_TAIL_ZH_CN,
+  SESSION_GUIDANCE_SKILL_ZH_CN,
+  SESSION_GUIDANCE_TITLE_ZH_CN,
+  isChinesePromptLanguage,
+} from "./prompt-copy-zh-cn.js";
 
 const COMMUNICATION_PROMPTS = {
   default:
@@ -41,9 +51,14 @@ const CONTEXT_MANAGEMENT_PROMPTS = {
   ].join("\n"),
 } as const;
 
-export function buildSessionGuidanceSection(toolNames: readonly string[], hasSkills = false): ContextSection | null {
+export function buildSessionGuidanceSection(
+  toolNames: readonly string[],
+  hasSkills = false,
+  language?: string,
+): ContextSection | null {
   const tools = new Set(toolNames);
-  const lines = ["# Session-specific guidance"];
+  const zh = isChinesePromptLanguage(language);
+  const lines = [zh ? SESSION_GUIDANCE_TITLE_ZH_CN : "# Session-specific guidance"];
 
   // 当前不输出 Agent 指导段。
   // if (tools.has("Agent")) {
@@ -58,7 +73,11 @@ export function buildSessionGuidanceSection(toolNames: readonly string[], hasSki
   // }
 
   if (tools.has("Skill") && hasSkills) {
-    lines.push("- When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section \u2014 don't guess.");
+    lines.push(
+      zh
+        ? SESSION_GUIDANCE_SKILL_ZH_CN
+        : "- When the user types `/<skill-name>`, invoke it via Skill. Only use skills listed in the user-invocable skills section \u2014 don't guess.",
+    );
   }
 
   // if (tools.has("AskUserQuestion")) {
@@ -73,18 +92,28 @@ export function buildSessionGuidanceSection(toolNames: readonly string[], hasSki
   return createDynamicSection("Session-specific guidance", "session_guidance", lines.join("\n"));
 }
 
-export function buildDynamicBehaviorSection(): ContextSection {
+export function buildDynamicBehaviorSection(language?: string): ContextSection {
+  const zh = isChinesePromptLanguage(language);
   return createDynamicSection(
     "Dynamic Behavior",
     "dynamic_behavior",
-    [
-      COMMUNICATION_PROMPTS.additional.beforeDefault,
-      "",
-      COMMUNICATION_PROMPTS.default,
-      COMMUNICATION_PROMPTS.additional.afterDefault,
-      "",
-      "For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target \u2014 if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
-    ].join("\n"),
+    zh
+      ? [
+          COMMUNICATION_PROMPTS_ZH_CN.additional.beforeDefault,
+          "",
+          COMMUNICATION_PROMPTS_ZH_CN.default,
+          COMMUNICATION_PROMPTS_ZH_CN.additional.afterDefault,
+          "",
+          DYNAMIC_BEHAVIOR_TAIL_ZH_CN,
+        ].join("\n")
+      : [
+          COMMUNICATION_PROMPTS.additional.beforeDefault,
+          "",
+          COMMUNICATION_PROMPTS.default,
+          COMMUNICATION_PROMPTS.additional.afterDefault,
+          "",
+          "For actions that are hard to reverse or outward-facing, confirm first unless durably authorized or explicitly told to proceed without asking; approval in one context doesn't extend to the next. Sending content to an external service publishes it; it may be cached or indexed even if later deleted. Before deleting or overwriting, look at the target \u2014 if what you find contradicts how it was described, or you didn't create it, surface that instead of proceeding. Report outcomes faithfully: if tests fail, say so with the output; if a step was skipped, say that; when something is done and verified, state it plainly without hedging.",
+        ].join("\n"),
   );
 }
 
@@ -99,11 +128,14 @@ export function buildOutputStyleSection(
   );
 }
 
-export function buildContextManagementSection(): ContextSection {
+export function buildContextManagementSection(language?: string): ContextSection {
+  const prompts = isChinesePromptLanguage(language)
+    ? CONTEXT_MANAGEMENT_PROMPTS_ZH_CN
+    : CONTEXT_MANAGEMENT_PROMPTS;
   return createDynamicSection(
     "Context Management",
     "context_management",
-    [CONTEXT_MANAGEMENT_PROMPTS.default, "", CONTEXT_MANAGEMENT_PROMPTS.additional].join("\n"),
+    [prompts.default, "", prompts.additional].join("\n"),
   );
 }
 

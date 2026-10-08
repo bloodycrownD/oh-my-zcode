@@ -231,6 +231,11 @@ export interface AgentRuntimeConfig {
     agentPrompt: string;
     userInstructions?: ResolvedUserInstructions;
   };
+  /**
+   * FORK（prompt-language-option）：agent 系统提示词语言（"zh-CN" 用中文文案，
+   * 其余值回落英文原文）。装配层已把配置域的 "auto" 解析成具体语言后再传入；
+   * 运行中变更走 `updateConfig({ language })`，下一轮 turn 生效。
+   */
   language?: string;
   outputStyle?: OutputStylePromptConfig;
   agentName?: string; // Default: "zcode-agent"

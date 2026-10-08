@@ -80,6 +80,11 @@ export const ConfigKey = {
   // UI
   UiLocale: "ui.locale",
   UiTheme: "ui.theme",
+
+  // FORK（prompt-language-option）：agent 系统提示词语言（模型语言）。
+  // 顶层字段而非 ui 域：ui.locale 管的是应用界面语言，这一项管的是喂给模型的
+  // system prompt 语言，两者可以不同（例如界面英文、提示词中文）。
+  PromptLanguage: "promptLanguage",
 } as const;
 
 export type ConfigKey = (typeof ConfigKey)[keyof typeof ConfigKey];
@@ -166,7 +171,9 @@ export type ConfigValue<K extends ConfigKey> = K extends "modelStream.idleTimeou
                                                 ? UiLocale
                                                 : K extends "ui.theme"
                                                   ? UiThemePreference
-                                                  : unknown;
+                                                  : K extends "promptLanguage"
+                                                    ? PromptLanguage
+                                                    : unknown;
 // `"magicContext"` 曾在这里占一个恒等分支（`K extends "magicContext" ? unknown : unknown`）。
 // 它与兜底完全同值，因此对类型**零**贡献，却让读者以为这个 key 有特殊承载类型——
 // 而它的承载类型恰恰就是兜底的 `unknown`。删掉分支、改成这条注释，理由见
@@ -290,6 +297,12 @@ export interface RuntimeConfig {
   toolConcurrency: ToolConcurrencyConfig;
   modelAnomalyGuard: ModelAnomalyGuardConfig;
   hooks: HooksRuntimeConfig;
+  /**
+   * FORK（prompt-language-option）：agent 系统提示词语言（"auto" | "zh-CN" | "en-US"）。
+   * "auto" 在装配时按系统/宿主语言探测，解析结果非 zh-CN 一律落 en-US；核心诉求是
+   * 中文系统默认得到中文提示词，不需要用户先改配置。
+   */
+  promptLanguage: PromptLanguage;
   ui: {
     locale: UiLocale;
     theme: UiThemePreference;
@@ -314,11 +327,15 @@ export interface RuntimeConfigPatch {
   toolConcurrency?: Partial<RuntimeConfig["toolConcurrency"]>;
   modelAnomalyGuard?: Partial<RuntimeConfig["modelAnomalyGuard"]>;
   hooks?: HooksRuntimeConfigPatch;
+  /** FORK（prompt-language-option）：见 `RuntimeConfig.promptLanguage`。 */
+  promptLanguage?: PromptLanguage;
   ui?: Partial<RuntimeConfig["ui"]>;
 }
 
 export type SupportedLocale = "en-US" | "zh-CN";
 export type UiLocale = SupportedLocale | "auto";
+/** FORK（prompt-language-option）：模型提示词语言偏好；"auto" 在装配时按系统语言探测。 */
+export type PromptLanguage = SupportedLocale | "auto";
 export type UiThemeMode = "dark" | "light";
 export type UiThemePreference = UiThemeMode | "auto";
 
@@ -396,6 +413,8 @@ export const DefaultRuntimeConfig: RuntimeConfig = {
     maxOutputBytes: 32768,
     timeoutMs: 60000,
   },
+  // FORK（prompt-language-option）：缺省 auto，中文系统开箱得到中文提示词。
+  promptLanguage: "auto",
   ui: {
     locale: "en-US",
     theme: "auto",

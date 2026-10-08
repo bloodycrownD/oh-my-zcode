@@ -403,6 +403,10 @@ export const TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH =
 export const TID_SETTINGS_LOCALE_SELECT_TRIGGER = "settings-locale-select-trigger";
 /** 设置页通用分区的界面语言下拉项（动态后缀为 locale preference） */
 export const TID_SETTINGS_LOCALE_SELECT_ITEM = "settings-locale-select-item";
+/** FORK（prompt-language-option）：设置页通用分区的模型语言下拉触发器 */
+export const TID_SETTINGS_MODEL_LANGUAGE_SELECT_TRIGGER = "settings-model-language-select-trigger";
+/** FORK（prompt-language-option）：模型语言下拉项（动态后缀为 prompt language） */
+export const TID_SETTINGS_MODEL_LANGUAGE_SELECT_ITEM = "settings-model-language-select-item";
 /** 用户/工作区 MCP 列表行（动态后缀为 MCP runtime 名称） */
 export const TID_MCP_SERVER_ROW = "mcp-server-row";
 /** 插件 MCP 列表行（动态后缀为 MCP runtime 名称） */

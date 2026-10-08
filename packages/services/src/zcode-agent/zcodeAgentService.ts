@@ -84,6 +84,9 @@ import {
   zcodeWorkspaceUpdateInteractionPreferencesResultSchema,
   zcodeWorkspaceUpdateMagicContextConfigResultSchema,
   zcodeWorkspaceReadMagicContextConfigResultSchema,
+  // FORK（prompt-language-option）：模型语言读写。
+  zcodeWorkspaceReadPromptLanguageResultSchema,
+  zcodeWorkspaceUpdatePromptLanguageResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
 
   type ZCodeSessionStateSnapshot,
@@ -129,6 +132,8 @@ import type {
   ZCodeAgentGoalParams,
   ZCodeAgentGrantWorkspaceHookTrustParams,
   ZCodeAgentUpdateMagicContextConfigParams,
+  // FORK（prompt-language-option）：模型语言写参数。
+  ZCodeAgentUpdatePromptLanguageParams,
   ZCodeAgentInitializeResult,
   ZCodeAgentListSessionsParams,
   ZCodeAgentListSessionSubagentsParams,
@@ -3076,6 +3081,61 @@ export function createZCodeAgentService(
           workspaceKey,
           workspacePath: params.workspacePath,
         });
+        throw error;
+      }
+    },
+
+    // FORK（prompt-language-option）：模型语言读回，供设置页渲染初值。
+    // 走与 magic-context 同一条 read-only 控制面（provider/model 未就绪也可用）。
+    // 旧 CLI 不认识该方法（-32601）时按失败即降级：返回 supported:false + "auto"，
+    // 让设置页把该项显示为「当前 CLI 不支持」，而不是抛错卡住整个 General 分区。
+    async readPromptLanguage(params: ZCodeAgentWorkspaceTarget) {
+      try {
+        const client = await getReadOnlyClient(params);
+        return await client.request(
+          zcodeProtocolMethods.workspaceReadPromptLanguage,
+          { workspace: buildWorkspaceRef(params) },
+          zcodeWorkspaceReadPromptLanguageResultSchema,
+        );
+      } catch (error) {
+        if (isProtocolMethodNotFoundError(error)) {
+          logger.info(undefined, "旧 Agent 不支持模型语言读取，按不支持降级", {
+            workspaceKey: resolveWorkspaceKey(params),
+            workspacePath: params.workspacePath,
+          });
+          return zcodeWorkspaceReadPromptLanguageResultSchema.parse({
+            workspace: buildWorkspaceRef(params),
+            promptLanguage: "auto",
+            supported: false,
+          });
+        }
+        throw error;
+      }
+    },
+
+    // FORK（prompt-language-option）：写模型语言。三段（校验→写盘→推送）都在 CLI 侧；
+    // 这里只负责转发。旧 CLI method-not-found 时给出可读错误——正常路径下 UI 已经
+    // 由 read 的 supported:false 提前禁用，这里是竞态兜底。
+    async updatePromptLanguage(params: ZCodeAgentUpdatePromptLanguageParams) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      try {
+        const client = await getReadOnlyClient(params);
+        return await client.request(
+          zcodeProtocolMethods.workspaceUpdatePromptLanguage,
+          {
+            workspace: buildWorkspaceRef(params),
+            promptLanguage: params.promptLanguage,
+          },
+          zcodeWorkspaceUpdatePromptLanguageResultSchema,
+        );
+      } catch (error) {
+        if (isProtocolMethodNotFoundError(error)) {
+          logger.info(undefined, "旧 Agent 不支持模型语言写入", {
+            workspaceKey,
+            workspacePath: params.workspacePath,
+          });
+          throw new Error("当前 CLI 版本不支持「模型语言」设置，升级 CLI 后重试");
+        }
         throw error;
       }
     },

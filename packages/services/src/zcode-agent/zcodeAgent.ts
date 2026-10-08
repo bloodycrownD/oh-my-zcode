@@ -63,6 +63,10 @@ import type {
   ZCodeWorkspaceHookTrustGrantResult,
   ZCodeWorkspaceUpdateMagicContextConfigResult,
   ZCodeWorkspaceReadMagicContextConfigResult,
+  // FORK（prompt-language-option）：模型语言（agent 提示词语言）。
+  ZCodePromptLanguage,
+  ZCodeWorkspaceReadPromptLanguageResult,
+  ZCodeWorkspaceUpdatePromptLanguageResult,
   ZCodeAutomationBotDeliveryTarget,
 } from "@zcode/shared";
 import type {
@@ -256,6 +260,16 @@ export type ZCodeAgentReadWorkspacePresentationParams = ZCodeAgentWorkspaceTarge
  */
 export interface ZCodeAgentUpdateMagicContextConfigParams extends ZCodeAgentWorkspaceTarget {
   config: unknown;
+}
+
+/**
+ * FORK（prompt-language-option）：写「模型语言」（agent 系统提示词语言）。
+ *
+ * 单标量而非整域：`promptLanguage` 就是 "auto" | "zh-CN" | "en-US" 三态本身，
+ * 不需要先读后合并。
+ */
+export interface ZCodeAgentUpdatePromptLanguageParams extends ZCodeAgentWorkspaceTarget {
+  promptLanguage: ZCodePromptLanguage;
 }
 
 export interface ZCodeAgentGrantWorkspaceHookTrustParams extends ZCodeAgentWorkspaceTarget {
@@ -636,6 +650,22 @@ export interface IZCodeAgentService {
   readMagicContextConfig(
     params: ZCodeAgentWorkspaceTarget,
   ): Promise<ZCodeWorkspaceReadMagicContextConfigResult>;
+  /**
+   * FORK（prompt-language-option）：读回 effective 的模型语言，作为设置页初值。
+   * 旧 CLI 不认识该方法时按 -32601 降级：返回 `supported:false` + "auto"，
+   * 调用方（设置页）据此禁用该选项而不是反复保存失败。
+   */
+  readPromptLanguage(
+    params: ZCodeAgentWorkspaceTarget,
+  ): Promise<ZCodeWorkspaceReadPromptLanguageResult>;
+  /**
+   * FORK（prompt-language-option）：写「模型语言」——写盘 + ConfigPort 双写，
+   * 并对运行中的 session 调 runtime.updateConfig({language})（下一轮生效）。
+   * 无 provider/model 就绪也能调用——设置页必须可用。
+   */
+  updatePromptLanguage(
+    params: ZCodeAgentUpdatePromptLanguageParams,
+  ): Promise<ZCodeWorkspaceUpdatePromptLanguageResult>;
   listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams): Promise<ZCodeMcpListResult>;
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**
