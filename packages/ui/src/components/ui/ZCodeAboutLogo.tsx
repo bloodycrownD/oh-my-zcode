@@ -4,22 +4,24 @@ export function ZCodeAboutLogo({ className }: { className?: string }) {
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
-      width="118"
-      height="100"
+      width="178"
+      height="50"
       fill="none"
-      viewBox="0 0 256 218"
+      viewBox="0 0 776 218"
       className={cn("shrink-0 text-current", className)}
       aria-hidden="true"
       focusable="false"
     >
+      {/* OMZ 字标：O 切角方环 / M 双竖笔+会聚斜笔 / Z 沿用原标志字形；几何与 scripts/generate-omz-brand-assets.mjs 同源 */}
       <path
         fill="currentColor"
-        d="M134.4 0.130152L116.48 25.6022C113.665 29.5699 109.054 32.0019 104.064 32.0019H6.3999V0C6.3999 0.130149 134.4 0.130152 134.4 0.130152Z"
+        fillRule="evenodd"
+        d="M0 32L30.4 0L145.6 0L176 32L176 186L145.6 218L30.4 218L0 186ZM32 44.78L44.14 32L131.86 32L144 44.78L144 173.22L131.86 186L44.14 186L32 173.22Z"
       />
-      <path fill="currentColor" d="M256 0.130127L102.401 217.732H0L153.599 0.130127H256Z" />
+      <path fill="currentColor" d="M220 0L252 0L252 218L220 218ZM444 0L476 0L476 218L444 218ZM252 0L300 0L391.56 218L343.56 218ZM396 0L444 0L352.44 218L304.44 218Z" />
       <path
         fill="currentColor"
-        d="M121.601 217.732L139.65 192.134C142.465 188.166 147.076 185.734 152.067 185.734H249.604V217.736H121.601V217.732Z"
+        d="M654.4 0.130152L636.48 25.6022C633.665 29.5699 629.054 32.0019 624.064 32.0019H526.4V0ZM776 0.130127L622.401 217.732H520L673.599 0.130127H776ZM641.601 217.732L659.65 192.134C662.465 188.166 667.076 185.734 672.067 185.734H769.604V217.736H641.601V217.732Z"
       />
     </svg>
   );

@@ -2,12 +2,16 @@ import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import type { Locale } from "@zcode/shared";
 
-const MENU_KEY_NAME = "ZCode.OpenInZCode";
+const MENU_KEY_NAME = "omz.OpenInOmz";
+// 旧品牌键：升级用户的注册表里可能残留 ZCode 时代的右键菜单项，安装新键时顺带清理。
+const LEGACY_MENU_KEY_NAME = "ZCode.OpenInZCode";
 const DIRECTORY_MENU_KEY = `HKCU\\Software\\Classes\\Directory\\shell\\${MENU_KEY_NAME}`;
 const DRIVE_MENU_KEY = `HKCU\\Software\\Classes\\Drive\\shell\\${MENU_KEY_NAME}`;
+const LEGACY_DIRECTORY_MENU_KEY = `HKCU\\Software\\Classes\\Directory\\shell\\${LEGACY_MENU_KEY_NAME}`;
+const LEGACY_DRIVE_MENU_KEY = `HKCU\\Software\\Classes\\Drive\\shell\\${LEGACY_MENU_KEY_NAME}`;
 const MENU_LABELS: Record<Locale, string> = {
-  "zh-CN": "在ZCode中打开",
-  "en-US": "Open in ZCode",
+  "zh-CN": "在 omz 中打开",
+  "en-US": "Open in omz",
 };
 
 type Logger = {
@@ -75,6 +79,18 @@ function runRegAdd(args: readonly string[]): Promise<void> {
   });
 }
 
+/** 清理旧品牌注册键；reg delete 对不存在的键返回非零，统一按成功处理，不阻断新键安装。 */
+function runRegDeleteTree(menuKey: string): Promise<void> {
+  return new Promise((resolvePromise) => {
+    const child = spawn("reg.exe", ["delete", menuKey, "/f"], {
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.on("error", () => resolvePromise());
+    child.on("exit", () => resolvePromise());
+  });
+}
+
 export async function installWindowsOpenFolderContextMenu(options: {
   platform: NodeJS.Platform;
   executablePath: string;
@@ -98,6 +114,11 @@ export async function installWindowsOpenFolderContextMenu(options: {
   });
 
   try {
+    // 先清 ZCode 时代的旧键再装 omz 键，避免升级用户 Explorer 里同时出现两份右键菜单。
+    await Promise.all([
+      runRegDeleteTree(LEGACY_DIRECTORY_MENU_KEY),
+      runRegDeleteTree(LEGACY_DRIVE_MENU_KEY),
+    ]);
     await Promise.all(operations.map((operation) => runRegAdd(operation.args)));
 
     options.logger.info("[open-folder] Windows Explorer 右键菜单已安装或更新", {
