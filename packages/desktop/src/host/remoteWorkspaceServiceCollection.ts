@@ -37,7 +37,6 @@ import {
   createSettingService,
   createCredentialService,
   createBroadcastService,
-  createNodeApiClient,
   createHostApiNetworkTransport,
   registerHostApiNetworkTransportForDispose,
   createSettingsSyncService,
@@ -84,9 +83,6 @@ export function createRemoteWorkspaceServiceCollection(params: {
       noProxy: settings.httpProxyNoProxy,
       caCertPath: settings.httpProxyCaCertPath,
     };
-  });
-  const localApiClient = createNodeApiClient({
-    fetchImpl: hostApiNetworkTransport.fetch,
   });
   const localBroadcastService = createBroadcastService(params.parentPort);
   const reportingRemoteZCodeTaskService = params.createReportingRemoteZCodeTaskService(
