@@ -1,5 +1,34 @@
 # Changelog
 
+## v1.0.2（2026-10-09）
+
+v1.0.1 发布 diff 全量代码评审（32 项）+ 三线实机 E2E 验证后的修复批次：启动稳定性、品牌一致性收尾、模型体验补漏与测试基建。
+
+### 修复
+
+- **带残留旧版环境变量的机器上，打包版桌面仍「启动即退」（v1.0.1 修复的盲区）**：v1.0.1 的修复只在开发布局验证过——CLI 侧解析「随包基线」的候选清单缺桌面打包布局（`resources/glm` → `resources/config/provider`），打包产物在残留 stale `ZCODE_BUILTIN_PROVIDER_CONFIG_FILE` 的机器上仍会抛「无法定位 CLI ZCode Built-in Provider Config」退出（read-only 控制面与会话 agent 均受影响）。现在解析收敛为 `@zcode/provider-node` 公共函数，CLI 与桌面 Main 共用同一候选清单（CLI 打包/桌面打包/桌面 dev/CLI dev 四布局），并在解析失败时接受继承的 `ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE` 兜底；agent spawn env 的 BUNDLED 恒指真实随包基线（fallback 优先、显式值仅兜底，单测锁定）。附带：成对环境变量探针改为纯读取校验，不再对（可能属于另一旧安装的）显式文件目录产生 mkdir/文件锁写副作用。
+- **模型语言「自动」在 Windows 中文系统热切换回落英文**：运行中把「模型语言」切到「自动」（或从显式值切回）时，热路径只探测 `LANG`/`LC_*`（Windows 常缺位）会解析为英文直至重启，与冷启动（env → `Intl`）分叉。现在热路径与冷启动同源（公共函数单点），冷热一致有测试锁定；`zh_CN` 等 POSIX 风格标签也能正确识别为中文。
+- **模型列表拉取三处补漏**：legacy 导入的自定义请求头（`api.headers`）随拉取上行——此前被丢弃，依赖自定义鉴权头的 provider 会 401 且误提示「请检查 API Key」（同名头大小写不敏感覆盖，显式鉴权头优先，头值不进日志/错误）；超时不再误报为「响应不是合法 JSON」、全链 405 不再误报 404（错误文案附最后状态与已尝试路径）；「密钥不经过 renderer」类注释与 CHANGELOG 措辞订正为事实（API Key 不作为 RPC 参数传递，由主机本地读取）。
+- **「添加模型」可输入下拉的竞态与键盘可达性**：拉取未完成时关闭弹窗，晚到的响应不再把旧候选写进下次打开的弹窗（此前存在幽灵候选闪入）；已展开候选时点击输入框定位光标不再丢候选；补齐 combobox ARIA 契约（role/aria-expanded/aria-activedescendant），纯键盘（↓/↑ 选择、Enter 填入、Esc 收起候选且不连锁关弹窗）可完成全流程。
+- **web 标签页标题回退 ZCode**：web 入口 `main.tsx` 运行时覆盖 `document.title` 的两处品牌串漏改（静态 `<title>` 已改但会被覆盖），现收敛为单一品牌常量；CUA 权限面板的运行时标题同理修正。
+
+### 品牌
+
+- **资产再生成管线可复现**：字标缩放精度修正（0.0185567，不再四舍五入漂移）、Z 字形保留原始贝塞尔曲线（不再折线化）、新增 `--check` 模式——36 项资产映射逐字节比对（SVG/PNG/ICO/ICNS/DMG/内嵌 favicon + 5 处内联 `d` 串），「重跑产物与仓库资产字节一致」首次可机验。
+- **macOS 图标档位与 DMG 背景修正**：icns 补回 ic11..ic14（32/64/256/512 的 @2x 槽位——v1.0.1 重生成时档位回退，Finder 小图标此前只能降采样）；DMG 背景箭头纵向归位（与图标行 y=220 对齐，v1.0.1 补齐 mac 资产时错位约 80px 不指向「应用程序」）。
+- **web 内嵌 favicon 与重生成图标同步**（v1.0.1 重绘全量图标后内嵌副本漂移）；`app-logo.svg` 描边环一处贝塞尔控制点抄错订正（与 Z.ai 供应商图标壳形逐字一致）；空状态明/暗线框线宽补偿（缩放后有效线宽此前约为原设计一半）；**原生菜单/托盘品牌词补齐**——Windows 帮助菜单「关于 omz」、托盘 tooltip「omz」/「打开 omz」（v1.0.1 改名在 shared 原生菜单 catalog 的漏网项，E2E 实机发现）；陈旧品牌注释清理与 DMG 卷图标注释对齐（安装器图标统一复用应用方标）。
+
+### 工程
+
+- 四组常驻测试落盘（共 40 用例）：Built-in 基线回落（含桌面打包布局回归锁）、模型语言（RPC 写盘/上下文构建三态/旧 CLI -32601 降级）、模型列表拉取（候选路径链/超时与错误分类/鉴权头/脏数据/密钥不泄漏）；资产 `--check` 纳入门禁（UPSTREAM-SYNC.md 测试族 15→17 项）。
+- `electron-builder.config.js` 行尾归一 LF 并以 `.gitattributes` 锁定（`*.js text eol=lf`，消除 746/737 行的整文件噪音 diff）；设置页 i18n 清理删除组件遗留的 10×2 个孤儿 key（parity 5891=5891）；`presetLoading` 死别名与不可达 preset 分支清理。
+- 全部 32 项经三线实机 E2E 验证：打包布局模拟 + stale env 真实 bundle、桌面实机（含真实端点拉取与键盘操作）、web 运行时标题；相关 feature/bug 的 PRD/SPEC 文档同步订正。
+
+### 已知限制
+
+- macOS 安装包仍未签名/未公证，首次打开需右键 → 打开（沿用 v1.0.1）。
+- DMG 背景箭头指向与 icns 小尺寸槽位表现为像素级/结构级验证（箭头中心 y≈219.5、ic07..ic14 齐备），mac 实机视觉终判建议发版后目检确认。
+
 ## v1.0.1（2026-10-09）
 
 品牌视觉定型 omz + 模型体验补齐（中文提示词、拉取模型列表、预设清理）与三处稳定性修复。
@@ -13,7 +42,7 @@
 
 ### 新增
 
-- **「添加模型」支持拉取模型列表**：`IProviderSettingsService.listProviderModels` 在主机侧按 provider 的 api 类型请求模型列表端点（走 host 代理/CA 传输层，密钥不经过 renderer）；模型 ID 输入框为可输入下拉框——拉取后聚焦/输入即弹出候选、输入即过滤、点选即填入，也保留任意手输。**路径兼容**（实测各家网关差异）：anthropic-messages 按 `/v1/models` 约定先试（对齐 SDK 消息端点 `{base}/v1/messages`），OpenAI 系先试 `{base}/models`；404/405 时逐条回落（含源站根路径 `/v1/models`、`/models` 兜底，覆盖 DeepSeek `/anthropic` 这类只在 OpenAI 面提供列表的双面网关及 API 类型与基址错配的配置）；全部 404 时错误信息列出已尝试路径。
+- **「添加模型」支持拉取模型列表**：`IProviderSettingsService.listProviderModels` 在主机侧按 provider 的 api 类型请求模型列表端点（走 host 代理/CA 传输层，API Key 不作为 RPC 参数传递）；模型 ID 输入框为可输入下拉框——拉取后聚焦/输入即弹出候选、输入即过滤、点选即填入，也保留任意手输。**路径兼容**（实测各家网关差异）：anthropic-messages 按 `/v1/models` 约定先试（对齐 SDK 消息端点 `{base}/v1/messages`），OpenAI 系先试 `{base}/models`；404/405 时逐条回落（含源站根路径 `/v1/models`、`/models` 兜底，覆盖 DeepSeek `/anthropic` 这类只在 OpenAI 面提供列表的双面网关及 API 类型与基址错配的配置）；全部 404 时错误信息列出已尝试路径。
 
 ### 修复
 
