@@ -1,8 +1,18 @@
 // ============================================================
 // Identity Section Builder
 // ============================================================
-// FORK（prompt-language-option）：模型语言为 zh-CN 时改用中文身份段文案（品牌 omz）；
-// 英文原文保留为默认/回退，中文文案集中在 ../prompt-copy-zh-cn.ts。
+// FORK（prompt-language-option）：
+// ── 上游语义 ───────────────────────────────────────────────────────────
+// 源位置：上游 ZCode v3.14.3 `core/src/context/sections/identity.ts`。
+// `buildSecurityNotice()` / `buildHarnessBlock()` / `buildIdentitySection(outputStyle?)`
+// 均无语言参数，intro、SECURITY_NOTICE、Harness 三段英文硬编码；`language` 通路存在
+// （上游 runtime/context types 的 `language?: string`）但提示词层零消费者。
+// ── ZCode 的差异 ───────────────────────────────────────────────────────
+// 三个入口各加可选 `language`：zh-CN 改用中文身份段文案（品牌统一 omz）；其余值/
+// 缺席回落英文原文。
+// ── 改法与改动面 ───────────────────────────────────────────────────────
+// 中文文案常量（intro 两版 / SECURITY_NOTICE / Harness）与判定函数集中在
+// ../prompt-copy-zh-cn.ts；调用点 context/builder.ts 的 identity 段装配处。
 // buildSecurityNotice / buildHarnessBlock 的语言参数可选——工作流子代理身份段
 // （sections/workflow-actor.ts）继续不传参，逐字复用英文版。
 

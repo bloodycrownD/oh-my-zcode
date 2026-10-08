@@ -26,7 +26,7 @@ import {
   loadFileConfig,
   updatePromptLanguageInFileConfig,
 } from "@zcode/adapters/config";
-import { detectLocale, resolveLocale } from "@zcode/i18n";
+import { resolvePromptLanguage as resolvePromptLanguageByDetection } from "../app/app-config-options.js";
 import {
   zcodeWorkspaceReadPromptLanguageParamsSchema,
   zcodeWorkspaceReadPromptLanguageResultSchema,
@@ -37,10 +37,15 @@ import {
 } from "@zcode/shared";
 import { parseParams, type ZCodeProtocolAgentServerContext } from "./server-types.js";
 
-/** 供单测注入的窄缝；生产路径固定为默认用户配置路径与 process.env。 */
+/** 供单测注入的窄缝；生产路径固定为默认用户配置路径、process.env 与进程 Intl 探测。 */
 export interface PromptLanguageDependencies {
   configPath?: string;
   env?: Record<string, string | undefined>;
+  /**
+   * auto 解析的 Intl 注入缝（PL-B-1）；缺席或为 null 时回落到进程 Intl
+   * （app-config-options 的 resolveIntlLocale），与冷启动同源。
+   */
+  intlLocale?: string | null;
 }
 
 /**
@@ -99,6 +104,7 @@ export async function updatePromptLanguage(
   const effectiveLanguage = resolveEffectivePromptLanguage(
     params.promptLanguage,
     dependencies.env ?? process.env,
+    dependencies.intlLocale,
   );
   let updatedSessionCount = 0;
   for (const record of context.sessions.values()) {
@@ -130,18 +136,23 @@ export async function updatePromptLanguage(
 }
 
 /**
- * 把用户偏好解析成实际提示词语言，与 bootstrap/app/runtime-config.ts 的
- * `resolvePromptLanguage` 同一语义（auto → 宿主/系统探测；解析结果非 zh-CN 即
- * en-US；显式值透传）。
+ * 把用户偏好解析成实际提示词语言（PL-B-1：与冷启动单点共用）。
  *
- * 一处已知近似：宿主传入的 `uiDetectedLocale` 在 CLI 协议侧不可见，这里只能用
- * 环境变量探测（LC_ALL / LC_MESSAGES / LANG / LANGUAGE 等）。对显式选择的中文/
- * 英文无影响；仅「auto + 宿主语言与 CLI 环境语言不一致」的运行中会话可能在本次
- * 热更新里落到与下次启动不同的值，重启即收敛。
+ * 显式值透传；auto/缺省与冷启动装配共用 app-config-options 的 `resolvePromptLanguage`，
+ * 探测顺序同为 env（LC_ALL / LC_MESSAGES / LANG / LANGUAGE）→ Intl
+ * （`resolveIntlLocale`）。Windows/GUI 启动下 LANG/LC_* 常缺位，Intl 兜底正是
+ * 「auto + 中文系统 → zh-CN」在热路径上成立的关键；两处共用同一函数保证同一
+ * (env, intlLocale) 输入输出一致。
+ *
+ * 唯一与冷启动的差异是事实而非近似：宿主传入的 `uiDetectedLocale` 只活在冷启动
+ * options 里，协议通道不可见——仅「auto + 宿主 UI 语言与进程 locale 不一致」的
+ * 运行中会话可能在本次热更新里落到与下次启动不同的值，重启即收敛；显式选择的中文/
+ * 英文不受影响。
  */
 function resolveEffectivePromptLanguage(
   promptLanguage: PromptLanguage,
   env: Record<string, string | undefined>,
+  intlLocale?: string | null,
 ): SupportedLocale {
-  return resolveLocale(promptLanguage, detectLocale({ env }));
+  return resolvePromptLanguageByDetection(promptLanguage, { env, intlLocale });
 }

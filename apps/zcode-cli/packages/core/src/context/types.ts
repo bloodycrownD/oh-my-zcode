@@ -121,8 +121,18 @@ export interface ContextBuilderConfig {
    */
   workflowActor?: WorkflowActorContext;
   /**
-   * FORK（prompt-language-option）：提示词语言。仅本层已覆盖的段落消费（cli-prefix、
-   * identity、desktop、dynamic-sections）；未覆盖段落一律回落英文原文。
+   * FORK（prompt-language-option）：
+   * ── 上游语义 ─────────────────────────────────────────────────────────
+   * 源位置：上游 ZCode v3.14.3 `core/src/context/types.ts`（裸 `language?: string;`，
+   * 无注释、无消费者）。上游把它当纯透传字段：没有任何段读它，提示词层恒英文硬编码。
+   * ── ZCode 的差异 ─────────────────────────────────────────────────────
+   * 本层已覆盖的段落消费该值（cli-prefix、identity、desktop、dynamic-sections）；
+   * 未覆盖段落（memory、env-info、skills、request-user-context、meta_user 包装语、
+   * 工具描述等）一律回落英文原文。
+   * ── 改法与改动面 ─────────────────────────────────────────────────────
+   * 值由装配层把配置域 "auto" 解析成具体语言后写入（runtime config 的 `language`），
+   * builder 透传给 6 个调用点（见 context/builder.ts）；中文文案集中在
+   * context/prompt-copy-zh-cn.ts。
    */
   language?: string;
   outputStyle?: OutputStylePromptConfig;

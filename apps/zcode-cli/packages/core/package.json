@@ -26,6 +26,7 @@
   "scripts": {
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
+    "test:prompt-language-context": "node --test scripts/test-prompt-language-context.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src --no-ignore",
     "lint:fix": "oxlint --fix src --no-ignore"

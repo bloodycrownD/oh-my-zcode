@@ -2,28 +2,40 @@
 // FORK（prompt-language-option）：模型语言为 zh-CN 时的系统提示词文案
 // ============================================================
 //
-// 这是本仓库第一层（Layer 1）提示词中文化的文案集中地：被改的英文段文件只做
-// 「按 language 选文案」的最小 diff，英文原文全部保留为默认/回退，因此任何一段
-// 未覆盖的提示词都会自然回落英文。
-//
-// 覆盖范围（Layer 1）：cli-prefix、identity（intro / SECURITY_NOTICE / Harness）、
+// ── 上游语义 ───────────────────────────────────────────────────────────
+// 源位置：上游 ZCode v3.14.3 `core/src/context/` 各段文件——本文件是 fork 新增，
+// 无上游对应物。改动前上游提示词层全部英文硬编码；`language` 通路存在
+// （core/src/runtime/types.ts 与 core/src/context/types.ts 的 `language?: string`）
+// 但零消费者。
+// ── ZCode 的差异 ───────────────────────────────────────────────────────
+// 本文件是 Layer 1 提示词中文化的文案集中地：被改的英文段文件只做「按 language
+// 选文案」的最小 diff，英文原文全部保留为默认/回退，因此任何一段未覆盖的提示词都会
+// 自然回落英文。覆盖 cli-prefix、identity（intro / SECURITY_NOTICE / Harness）、
 // desktop 段、dynamic-sections（COMMUNICATION、动态行为尾段、context management、
-// session guidance 的 skill 行）。
-//
+// session guidance 的 skill 行）；品牌统一用 omz（英文原文里的 ZCode 品牌名在中文
+// 语境换成 omz）。
 // 刻意不做（后续层次）：memory.ts、env-info.ts、skills.ts、request-user-context.ts、
 // current-date.ts、builder.ts 的 meta_user 包装语、工具描述（tool/handlers/**）、
 // 子代理 prompt（subagent/**、workflow-actor 复用的身份段同样保持英文——子代理
 // 面向程序而非用户，中文化留给后续层次评估）。
-//
-// 品牌：中文文案统一用 omz（英文原文里的 ZCode 品牌名在中文语境换成 omz）。
+// ── 改法与改动面 ───────────────────────────────────────────────────────
+// 段 → 上游文件映射（同一段的中英文案对照）：
+//   cli_prefix      ← core/src/context/sections/cli-prefix.ts
+//   identity        ← core/src/context/sections/identity.ts
+//   desktop_context ← core/src/context/sections/desktop.ts
+//   dynamic_behavior / context_management / session_guidance
+//                   ← core/src/context/dynamic-sections.ts
+// 判定函数 isChinesePromptLanguage 与全部中文文案常量都在本文件导出；各段的接线
+// 改动面见对应上游文件顶部的 FORK 登记。
 
 /**
  * 提示词语言是否为中文。带区域性后缀（zh、zh-CN、zh-TW 等）一律按中文处理，
- * 与 i18n 包的 `normalizeLocale` 语义对齐（解析结果非 zh-CN 即 en-US）。
+ * 与 i18n 包 `normalizeLocale` 的 `_`→`-` 与 zh* 规则对齐（解析结果非 zh-CN 即
+ * en-US）；POSIX 风格标签（zh_CN.UTF-8、zh_TW 等）同样命中。
  */
 export function isChinesePromptLanguage(language: string | undefined): boolean {
   if (!language) return false;
-  const normalized = language.trim().toLowerCase();
+  const normalized = language.trim().toLowerCase().replaceAll("_", "-");
   return normalized === "zh" || normalized === "zh-cn" || normalized.startsWith("zh-");
 }
 

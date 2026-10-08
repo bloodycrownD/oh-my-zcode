@@ -1,7 +1,18 @@
 import type { ContextSection } from "../types.js";
 import { estimateTokens } from "../utils.js";
-// FORK（prompt-language-option）：模型语言为 zh-CN 时改用中文桌面端上下文段；
-// 英文原文保留为默认/回退，中文文案集中在 ../prompt-copy-zh-cn.ts。
+// FORK（prompt-language-option）：
+// ── 上游语义 ───────────────────────────────────────────────────────────
+// 源位置：上游 ZCode v3.14.3 `core/src/context/sections/desktop.ts`。
+// `buildDesktopContextSection()` 无参数，整段 "ZCode Desktop Context"（含
+// Files & URLs / Inline Code Comments 小节）英文硬编码；`language` 通路存在但
+// 提示词层零消费者。
+// ── ZCode 的差异 ───────────────────────────────────────────────────────
+// 新增可选 `language`：zh-CN 改用中文桌面端上下文段（标题与小节名翻译，
+// ::code-comment 协议指令字面量原样保留）；其余值/缺席回落英文原文。
+// ── 改法与改动面 ───────────────────────────────────────────────────────
+// `buildDesktopContextSection(language?)`；中文文案集中在 ../prompt-copy-zh-cn.ts；
+// 调用点 context/builder.ts 的 desktop 段装配处（仅 presentationSurface=zcode_desktop
+// 且非工作流子代理时输出）。
 import { DESKTOP_CONTEXT_ZH_CN, isChinesePromptLanguage } from "../prompt-copy-zh-cn.js";
 
 export function buildDesktopContextSection(language?: string): ContextSection {

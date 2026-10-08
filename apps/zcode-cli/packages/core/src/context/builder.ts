@@ -100,9 +100,19 @@ export class ContextBuilder {
     // 1. CLI / product prefix. Keep this as the short leading identity block.
     // 「You are ZCode, an interactive coding agent」对一个
     // 只对脚本说话、可能连读文件工具都没有的子代理是错的身份，且走在正确身份段前面。
-    // FORK（prompt-language-option）：language 从 runtime config 透传给各段，
-    // 由各段按语言自选文案（zh-CN 用中文，其余回落英文原文）。
-    // 注意 meta_user 包装语（buildContextMetaUserBody）本轮不在中文化范围内。
+    // FORK（prompt-language-option）：
+    // ── 上游语义 ─────────────────────────────────────────────────────────
+    // 源位置：上游 ZCode v3.14.3 `core/src/context/builder.ts`。上游 builder 只做
+    // 装配，各段文案逐字英文硬编码；`language` 通路存在（ContextBuilderConfig 与
+    // runtime types 各有 `language?: string`）但提示词层零消费者。
+    // ── ZCode 的差异 ─────────────────────────────────────────────────────
+    // `this.config.language`（runtime config 解析后的实际提示词语言）透传给各段，
+    // 由各段按语言自选文案（zh-CN 用中文，其余回落英文原文）；builder 自身不产文案。
+    // ── 改法与改动面 ─────────────────────────────────────────────────────
+    // language 透传点共 6 处（行号按当前文件）：:117 cli-prefix、:134 identity、
+    // :145 desktop、:150 dynamic behavior、:156 session guidance、:181 context
+    // management。
+    // meta_user 包装语（buildContextMetaUserBody）与其余段本轮不在中文化范围内。
     if (!isWorkflowActor) {
       sections.push(buildCliPrefixSection(this.config.language));
     }

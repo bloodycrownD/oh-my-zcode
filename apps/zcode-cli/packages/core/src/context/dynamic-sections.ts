@@ -1,7 +1,18 @@
 import type { ContextBuilderConfig, ContextSection } from "./types.js";
 import { estimateTokens } from "./utils.js";
-// FORK（prompt-language-option）：模型语言为 zh-CN 时改用中文动态段文案；
-// 英文原文保留为默认/回退，中文文案集中在 ./prompt-copy-zh-cn.ts。
+// FORK（prompt-language-option）：
+// ── 上游语义 ───────────────────────────────────────────────────────────
+// 源位置：上游 ZCode v3.14.3 `core/src/context/dynamic-sections.ts`。
+// `buildSessionGuidanceSection(toolNames, hasSkills?)` / `buildDynamicBehaviorSection()` /
+// `buildContextManagementSection()` 均无语言参数，communication、动态行为尾段、
+// context management、session guidance 四段英文硬编码；`language` 通路存在但
+// 提示词层零消费者。
+// ── ZCode 的差异 ───────────────────────────────────────────────────────
+// 三个建构器各加可选 `language`：zh-CN 改用中文动态段文案（含「与用户交流时使用
+// 简体中文」显式指令）；其余值/缺席回落英文原文。
+// ── 改法与改动面 ───────────────────────────────────────────────────────
+// 中文文案常量与判定函数集中在 ./prompt-copy-zh-cn.ts；调用点 context/builder.ts 的
+// dynamic behavior / session guidance / context management 装配处。
 import {
   COMMUNICATION_PROMPTS_ZH_CN,
   CONTEXT_MANAGEMENT_PROMPTS_ZH_CN,

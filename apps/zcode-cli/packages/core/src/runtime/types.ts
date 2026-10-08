@@ -232,9 +232,19 @@ export interface AgentRuntimeConfig {
     userInstructions?: ResolvedUserInstructions;
   };
   /**
-   * FORK（prompt-language-option）：agent 系统提示词语言（"zh-CN" 用中文文案，
-   * 其余值回落英文原文）。装配层已把配置域的 "auto" 解析成具体语言后再传入；
-   * 运行中变更走 `updateConfig({ language })`，下一轮 turn 生效。
+   * FORK（prompt-language-option）：
+   * ── 上游语义 ─────────────────────────────────────────────────────────
+   * 源位置：上游 ZCode v3.14.3 `core/src/runtime/types.ts`（裸 `language?: string;`）。
+   * 上游只把它当配置透传字段：context builder 与提示词层零消费者，system prompt
+   * 恒英文硬编码。
+   * ── ZCode 的差异 ─────────────────────────────────────────────────────
+   * 该值就是实际提示词语言（"zh-CN" 用中文文案，其余值回落英文原文）。装配层已把
+   * 配置域的 "auto" 解析成具体语言后再传入（env → Intl 探测，见 bootstrap
+   * app/app-config-options.ts 的 resolvePromptLanguage）。
+   * ── 改法与改动面 ─────────────────────────────────────────────────────
+   * 运行中变更走 `updateConfig({ language })`（core/src/runtime/methods/config.ts 的
+   * 活值链：非 activeTurn 重建 context prefix，activeTurn 留给下一轮）；消费者是
+   * context/builder.ts 的 6 个 language 透传点。
    */
   language?: string;
   outputStyle?: OutputStylePromptConfig;

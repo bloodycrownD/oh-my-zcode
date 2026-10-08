@@ -14,7 +14,7 @@ import {
 } from "@zcode/contracts";
 import { omitMcpServers, resolveTrustedOfficialCuaServerNames } from "../mcp-config.js";
 import { resolveDefaultEmbeddedSearchBackend } from "./embedded-search-backend.js";
-import { resolveEffectiveLocale } from "./app-config-options.js";
+import { resolvePromptLanguage } from "./app-config-options.js";
 import { getProjectMemoryRoot } from "./paths.js";
 import type { ZCodeAppOptions } from "./types.js";
 import {
@@ -139,12 +139,13 @@ export function resolveAppRuntimeConfig(input: {
     runtimeFeatures: pluginRuntimeFeatures,
     // FORK（prompt-language-option）：`language` 的语义就是提示词语言。
     // 显式传入的 runtimeConfig.language（协议/嵌入调用方）优先；否则把配置域的
-    // 「模型语言」在这里解析成实际语言——auto/缺省按宿主与系统语言探测（复用
-    // i18n 包的 resolveEffectiveLocale：中文系统落 zh-CN，其余落 en-US）。
+    // 「模型语言」在这里解析成实际语言——auto/缺省按宿主 UI locale → env → Intl
+    // 探测（resolveConfiguredPromptLanguage，与热更新共用同一解析函数）：
+    // 中文系统落 zh-CN，其余落 en-US。
     // 老配置没有这个字段，等价于 auto，这正是「对中国用户默认中文」的诉求。
     language:
       options.runtimeConfig?.language ??
-      resolvePromptLanguage(configResult.config.promptLanguage, options),
+      resolveConfiguredPromptLanguage(configResult.config.promptLanguage, options),
     titleGeneration,
     workingDirectory,
     userInstructions: {
@@ -244,23 +245,21 @@ function withHookConfigSource(
 }
 
 /**
- * FORK（prompt-language-option）：把配置域的「模型语言」解析为实际提示词语言。
+ * FORK（prompt-language-option / PL-B-1）：冷启动装配的模型语言解析（单点收敛）。
  *
- * - 显式 zh-CN / en-US：原样透传；
- * - auto 或缺省：复用 i18n 包的宿主/系统语言探测（`resolveEffectiveLocale`），
- *   解析结果非 zh-CN 一律落 en-US。
- *
- * 装配只走这一条函数，让「中文系统默认中文提示词」与设置页显式选择的行为一致：
- * 两者最终都只是同一个 language 字符串。
+ * - 宿主已探明的 uiDetectedLocale 优先级最高——它只活在冷启动 options 里，协议通道
+ *   不可见（OQ-9 拍板前的已知边界）；
+ * - 其余与热更新共用 app-config-options 的 `resolvePromptLanguage`：同一
+ *   (env, intlLocale) 输入两处输出一致，见那里的三段说明。
  */
-function resolvePromptLanguage(
+function resolveConfiguredPromptLanguage(
   promptLanguage: PromptLanguage | undefined,
   options: ZCodeAppOptions,
 ): SupportedLocale {
-  if (promptLanguage !== undefined && promptLanguage !== "auto") {
-    return promptLanguage;
+  if (options.uiDetectedLocale !== undefined) {
+    return resolvePromptLanguage(promptLanguage, { intlLocale: options.uiDetectedLocale });
   }
-  return resolveEffectiveLocale("auto", options);
+  return resolvePromptLanguage(promptLanguage, { env: options.env ?? process.env });
 }
 
 function resolveInitialRegistrySelection(
