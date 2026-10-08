@@ -14,6 +14,11 @@ import {
 
 export interface NodeZCodeBuiltinProviderConfigSourceOptions {
   readonly bundledFilePath: string;
+  /**
+   * Bundled 基线不可用（显式覆盖指向旧 schema/损坏文件）时的随包回落路径。
+   * 与构建脚本 builtin-provider-config.mjs 的回落语义一致：覆盖失败不阻断启动。
+   */
+  readonly bundledFallbackFilePath?: string;
   readonly activeFilePath?: string;
   readonly watch?: boolean;
 }
@@ -23,6 +28,7 @@ export type ApplyZCodeBuiltinReleaseResult = "updated" | "unchanged" | "stale";
 /** Bundled、Active/LKG 与 Remote 共用同一 Release，并最终发布为现有 Config Snapshot。 */
 export class NodeZCodeBuiltinProviderConfigSource implements ProviderSource<ProviderConfigLayerSnapshot> {
   readonly #bundledFilePath: string;
+  readonly #bundledFallbackFilePath: string | null;
   readonly #activeFilePath: string;
   readonly #sourceKey: string;
   readonly #watchEnabled: boolean;
@@ -36,6 +42,7 @@ export class NodeZCodeBuiltinProviderConfigSource implements ProviderSource<Prov
     const bundledFilePath = options.bundledFilePath.trim();
     if (!bundledFilePath) throw new Error("ZCode Built-in bundledFilePath 不能为空");
     this.#bundledFilePath = bundledFilePath;
+    this.#bundledFallbackFilePath = options.bundledFallbackFilePath?.trim() || null;
     this.#activeFilePath = options.activeFilePath?.trim() || bundledFilePath;
     // 旧标识只有发布序号，不同 Endpoint 同序号会让 Registry 误复用上一来源。
     // Active 路径已含规范化 Endpoint 隔离范围；Worker 收到同一路径，不另拼账号事实。
@@ -55,8 +62,8 @@ export class NodeZCodeBuiltinProviderConfigSource implements ProviderSource<Prov
       release = await withFileLock(this.#activeFilePath, () => this.#readAndMaterializeLocked());
     } catch {
       // Active 只是可丢弃缓存，目录锁、监听或原子物化失败不能阻断
-      // Bundled 基线。缓存边界不可用时绕过 Active；Bundled 自身无效仍会在这里抛错。
-      release = selectReleaseCandidate(await readReleaseCandidate(this.#bundledFilePath), null);
+      // Bundled 基线。缓存边界不可用时绕过 Active；Bundled 自身无效仍会在这里回落或抛错。
+      release = await this.#selectReleaseCandidates(null);
     }
     this.#observedSignature ??= signatureOf(release);
     return snapshotFromRelease(release, this.#sourceKey);
@@ -99,18 +106,35 @@ export class NodeZCodeBuiltinProviderConfigSource implements ProviderSource<Prov
   }
 
   async #readAndMaterializeLocked(): Promise<ZCodeBuiltinRelease> {
-    const [bundled, active] = await Promise.all([
-      readReleaseCandidate(this.#bundledFilePath),
+    const active =
       this.#activeFilePath === this.#bundledFilePath
-        ? Promise.resolve(null)
-        : readReleaseCandidate(this.#activeFilePath),
-    ]);
-    const selected = selectReleaseCandidate(bundled, active);
+        ? null
+        : await readReleaseCandidate(this.#activeFilePath);
+    const selected = await this.#selectReleaseCandidates(active);
     if (this.#activeFilePath !== this.#bundledFilePath) {
       const activeSignature = active?.release ? signatureOf(active.release) : null;
       if (activeSignature !== signatureOf(selected)) await this.#writeActiveLocked(selected);
     }
     return selected;
+  }
+
+  /**
+   * Bundled 基线无效（如显式 env 覆盖指向旧版本缓存）时回落随包基线，
+   * 与构建脚本 builtin-provider-config.mjs 的回落语义一致；回落也失败才抛出原始错误。
+   */
+  async #selectReleaseCandidates(active: ReleaseCandidate | null): Promise<ZCodeBuiltinRelease> {
+    const bundled = await readReleaseCandidate(this.#bundledFilePath);
+    try {
+      return selectReleaseCandidate(bundled, active);
+    } catch (error) {
+      if (!this.#bundledFallbackFilePath) throw error;
+      const fallback = await readReleaseCandidate(this.#bundledFallbackFilePath);
+      if (!fallback?.release) throw error;
+      console.warn(
+        `[zcode-builtin] Bundled 基线不可用，已回落随包基线: ${this.#bundledFilePath} -> ${this.#bundledFallbackFilePath} (${error instanceof Error ? error.message.split("\n")[0] : String(error)})`,
+      );
+      return selectReleaseCandidate(fallback, active);
+    }
   }
 
   async #writeActiveLocked(release: ZCodeBuiltinRelease): Promise<void> {

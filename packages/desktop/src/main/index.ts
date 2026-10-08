@@ -95,7 +95,10 @@ import {
   syncApplicationUnreadBadge,
   handleDesktopWindowCloseRequest,
 } from "./desktopWindowLifecycle.js";
-import { resolveZCodeBuiltinProviderConfigFilePath } from "./desktopProviderConfig.js";
+import {
+  resolveDefaultZCodeBuiltinProviderConfigFilePath,
+  resolveZCodeBuiltinProviderConfigFilePath,
+} from "./desktopProviderConfig.js";
 import {
   getCredentialsDir,
   isDockerDaemonAvailable,
@@ -991,6 +994,8 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           zcodeBuiltinProviderConfigFilePath: resolveZCodeBuiltinProviderConfigFilePath({
             env: { ...hostProcessLocalEnv, ...process.env },
           }),
+          zcodeBuiltinProviderConfigFallbackFilePath:
+            resolveDefaultZCodeBuiltinProviderConfigFilePath(),
         },
         {
           hostProcessLocalEnv,

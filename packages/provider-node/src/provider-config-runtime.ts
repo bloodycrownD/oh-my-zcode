@@ -20,6 +20,8 @@ import {
 
 export interface NodeProviderConfigRuntimeOptions {
   readonly zcodeBuiltinFilePath: string;
+  /** Bundled 基线无效时的随包回落路径（见 NodeZCodeBuiltinProviderConfigSourceOptions）。 */
+  readonly zcodeBuiltinFallbackFilePath?: string;
   readonly zcodeBuiltinActiveFilePath?: string;
   readonly zcodeBuiltinRemote?: Omit<ZCodeBuiltinRemoteSynchronizerOptions, "source">;
   readonly zcodeBuiltinEnvironment?: Omit<
@@ -56,10 +58,12 @@ export class NodeProviderConfigRuntime {
     this.#zcodeBuiltinSource = options.zcodeBuiltinEnvironment
       ? new EndpointScopedZCodeBuiltinSource({
           bundledFilePath: options.zcodeBuiltinFilePath,
+          bundledFallbackFilePath: options.zcodeBuiltinFallbackFilePath,
           ...options.zcodeBuiltinEnvironment,
         })
       : new NodeZCodeBuiltinProviderConfigSource({
           bundledFilePath: options.zcodeBuiltinFilePath,
+          bundledFallbackFilePath: options.zcodeBuiltinFallbackFilePath,
           activeFilePath: options.zcodeBuiltinActiveFilePath,
           watch: options.watch,
         });

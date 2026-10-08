@@ -12,6 +12,8 @@ import {
 
 export interface EndpointScopedZCodeBuiltinSourceOptions {
   readonly bundledFilePath: string;
+  /** Bundled 基线无效时的随包回落路径（透传给各 Endpoint 的 Source）。 */
+  readonly bundledFallbackFilePath?: string;
   readonly environmentConfigRoot: string;
   readonly platform: string;
   readonly appVersion: string;
@@ -87,6 +89,7 @@ export class EndpointScopedZCodeBuiltinSource implements ProviderSource<Provider
 
     const source = new NodeZCodeBuiltinProviderConfigSource({
       bundledFilePath: this.#options.bundledFilePath,
+      bundledFallbackFilePath: this.#options.bundledFallbackFilePath,
       activeFilePath: paths.activeFilePath,
       watch: this.#options.watch,
     });

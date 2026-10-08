@@ -55,23 +55,57 @@ export async function prepareCliProviderRuntimeEnv(
 ): Promise<Record<string, string>> {
   if (!requiresProviderRuntime(options.argv)) return {};
 
-  const explicitZCodeBuiltin = options.env[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]?.trim();
+  let explicitZCodeBuiltin = options.env[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]?.trim();
   const explicitPersonal = options.env[ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV]?.trim();
   const dataBaseDir = options.dataBaseDir ?? options.env.ZCODE_DATA_BASE_DIR?.trim() ?? homedir();
   if (explicitZCodeBuiltin && explicitPersonal) {
-    return {
-      [ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]: explicitZCodeBuiltin,
-      [ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV]: explicitPersonal,
-    };
+    // FORK（readonly-provider-fallback）：显式成对时也不能免检——本机残留的全局
+    // ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 可能与 personal 一同存在且 builtin 一侧已失效
+    // （旧安装缓存，schema 不兼容），原样透传会让 app-server 在
+    // startProcessProviderRegistryRuntime 里再次「Bundled 与 Active 均不可用」整进程退出。
+    // 先用无兜底探针校验显式 builtin：可读才按原样返回；失效则清空显式值，落到下方
+    // 主路径按「随包基线解析 + bundledFallbackFilePath 兜底」救援。
+    const probe = new NodeZCodeBuiltinProviderConfigSource({
+      bundledFilePath: explicitZCodeBuiltin,
+      activeFilePath: explicitZCodeBuiltin,
+      watch: false,
+    });
+    try {
+      await probe.read();
+    } catch {
+      explicitZCodeBuiltin = undefined;
+    } finally {
+      probe.dispose();
+    }
+    if (explicitZCodeBuiltin) {
+      return {
+        [ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]: explicitZCodeBuiltin,
+        [ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV]: explicitPersonal,
+      };
+    }
   }
 
-  const zcodeBuiltinFilePath =
-    explicitZCodeBuiltin ??
-    (await resolveBundledZCodeBuiltinProviderConfig({
+  // FORK（readonly-provider-fallback）：显式 env 值可能指向与当前 schema 脱节的旧缓存
+  // （本机遗留的 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE 指向 ~/.zcode 3.14.x），此时它充当的
+  // 「随包基线」本身无效，又没有兜底，app-server/TUI 会在启动时整进程退出（桌面侧表现为
+  // 「ZCode agent transport closed: stdout_closed」，设置页报「读取上下文管理配置失败」）。
+  // 这里与桌面侧 bundledFallbackFilePath、构建脚本 D-16 同语义：无条件解析真实随包基线
+  // 作为 source 的兜底，显式值失效时回落并告警，而不是让进程死掉。
+  let bundledBaselinePath: string | undefined;
+  try {
+    bundledBaselinePath = await resolveBundledZCodeBuiltinProviderConfig({
       dataBaseDir,
       entrypoint: options.entrypoint ?? process.argv[1],
       sea: options.sea ?? getSeaProviderConfigAssets(),
-    }));
+    });
+  } catch {
+    // 基线本身不可解析（个别自定义部署形态）时保留显式值的既有行为，不新增失败面。
+    bundledBaselinePath = undefined;
+  }
+  const zcodeBuiltinFilePath = explicitZCodeBuiltin ?? bundledBaselinePath;
+  if (!zcodeBuiltinFilePath) {
+    throw new Error("无法定位 CLI ZCode Built-in Provider Config：缺少入口路径");
+  }
   const personalFilePath =
     explicitPersonal ?? join(dataBaseDir, ".omz", "v2", PERSONAL_PROVIDER_CONFIG_FILE_NAME);
   const appVersion = options.appVersion ?? ZCODE_VERSION;
@@ -86,6 +120,10 @@ export async function prepareCliProviderRuntimeEnv(
   const source = new NodeZCodeBuiltinProviderConfigSource({
     bundledFilePath: zcodeBuiltinFilePath,
     activeFilePath: cachePaths.activeFilePath,
+    bundledFallbackFilePath:
+      explicitZCodeBuiltin && bundledBaselinePath && bundledBaselinePath !== explicitZCodeBuiltin
+        ? bundledBaselinePath
+        : undefined,
     watch: false,
   });
   // 入口只准备资源和路径；下载由 Prompt/TUI 长生命周期 Runtime 持有并取消。
@@ -97,7 +135,10 @@ export async function prepareCliProviderRuntimeEnv(
 
   return {
     [ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]: cachePaths.activeFilePath,
-    [ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]: zcodeBuiltinFilePath,
+    // 随包基线恒返回真实基线路径：即使本次以显式值作为读取入口，下游 registry
+    // （startProcessProviderRegistryRuntime）也不得把可能陈旧的显式值当 bundled 基线，
+    // 否则那里会再次失去兜底能力。
+    [ZCODE_BUILTIN_PROVIDER_BUNDLED_CONFIG_FILE_ENV]: bundledBaselinePath ?? zcodeBuiltinFilePath,
     [ZCODE_PERSONAL_PROVIDER_CONFIG_FILE_ENV]: personalFilePath,
   };
 }

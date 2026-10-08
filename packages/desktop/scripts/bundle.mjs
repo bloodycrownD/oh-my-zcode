@@ -690,6 +690,73 @@ function verifyPackagedRuntimeDependencies(os, arch) {
   }
 }
 
+function resolveTargetPlatformKey(os, arch) {
+  return `${os === "mac" ? "darwin" : os === "win" ? "win32" : os}-${arch}`;
+}
+
+function listStagedAgentRuntimeModuleNames(stagedRuntimeModulesDir) {
+  if (!existsSync(stagedRuntimeModulesDir)) return [];
+  const moduleNames = [];
+  for (const entry of readdirSync(stagedRuntimeModulesDir, { withFileTypes: true })) {
+    if (!entry.isDirectory()) continue;
+    if (entry.name.startsWith("@")) {
+      for (const scopedEntry of readdirSync(resolve(stagedRuntimeModulesDir, entry.name), {
+        withFileTypes: true,
+      })) {
+        if (scopedEntry.isDirectory()) moduleNames.push(`${entry.name}/${scopedEntry.name}`);
+      }
+      continue;
+    }
+    moduleNames.push(entry.name);
+  }
+  return moduleNames.sort();
+}
+
+/**
+ * 打包后校验：暂存源里有 glm/node_modules 而产物里没有就直接失败。
+ *
+ * 这类缺口此前有两处静默来源：electron-builder 会剪掉拷贝根下的 node_modules
+ * （见 electron-builder.config.js 里 agent 资产条目的注释），或后续 hook 改写
+ * resources 目录时丢文件。装出来的包都是「能安装、启动即崩」——Host 的存储准备
+ * Worker 一 require external 依赖就退出，用户只看到「数据准备进程意外退出或连接中断」。
+ * 与 app.asar 的运行时依赖校验同款思路，把坏包拦在 bundle 阶段。
+ */
+export function verifyPackagedAgentRuntimeExternalModules(os, arch) {
+  const stagedRuntimeModulesDir = resolve(
+    desktopRoot,
+    "bundled-agents",
+    resolveTargetPlatformKey(os, arch),
+    "glm",
+    "node_modules",
+  );
+  const stagedModuleNames = listStagedAgentRuntimeModuleNames(stagedRuntimeModulesDir);
+  if (stagedModuleNames.length === 0) {
+    console.warn(
+      `[bundle] staged glm/node_modules 为空，跳过 agent external 校验: ${stagedRuntimeModulesDir}`,
+    );
+    return;
+  }
+
+  const appAsarPath = resolveAppAsarPath(os, arch);
+  if (!existsSync(appAsarPath)) {
+    throw new Error(`打包产物缺少 app.asar: ${appAsarPath}`);
+  }
+  const packagedGlmDir = resolve(dirname(appAsarPath), "glm");
+  const missingModules = stagedModuleNames.filter(
+    (moduleName) => !existsSync(resolve(packagedGlmDir, "node_modules", moduleName, "package.json")),
+  );
+  if (missingModules.length > 0) {
+    throw new Error(
+      `打包产物 resources/glm/node_modules 缺少 agent 运行期依赖（源已暂存）:\n- ${missingModules.join(
+        "\n- ",
+      )}\nexpected under: ${packagedGlmDir}`,
+    );
+  }
+  console.log(
+    `[bundle] agent runtime external modules verified: ${stagedModuleNames.join(", ")}`,
+  );
+}
+
 async function main() {
   const { os, arch, skipPrepare, skipBuild, dryRun } = parseArgs(process.argv.slice(2));
   const buildArgs = [
@@ -730,6 +797,9 @@ async function main() {
 
   runTimedSync("bundle:verify-runtime-dependencies", () =>
     verifyPackagedRuntimeDependencies(os, arch),
+  );
+  runTimedSync("bundle:verify-agent-runtime-externals", () =>
+    verifyPackagedAgentRuntimeExternalModules(os, arch),
   );
 
   const artifactPath = findBuiltArtifact(os, arch);

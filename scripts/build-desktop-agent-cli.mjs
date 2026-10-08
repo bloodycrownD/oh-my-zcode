@@ -30,6 +30,10 @@ const pnpmRunEnv = {
 const cliWorkspaceBuilds = [
   { packageName: "@zcode/shared-types", packageDir: "shared-types" },
   { packageName: "@zcode/contracts", packageDir: "contracts" },
+  // magic-context 在 zcode.cjs 里是 esbuild external（TLA + import.meta.url 无法内联 CJS），
+  // stage-agent-bundle 会把它的 dist 平铺进 glm/node_modules——必须先出 dist，
+  // 否则暂存自检的 require.resolve 直接失败。无 workspace 依赖，排在最前即可。
+  { packageName: "@zcode/magic-context", packageDir: "magic-context" },
   // dynamic-workflow 的 tsc 构建依赖 gitignored 的 libs.generated.ts，
   // 而 bare-tsc 路径（runBootstrapWithRemoteBuild）不会执行 package build script，
   // 所以需要先跑生成脚本；必须排在 @zcode/core 之前，core 依赖 dynamic-workflow。

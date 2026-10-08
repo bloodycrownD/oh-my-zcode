@@ -11,6 +11,8 @@ import { importLegacyPersonalProviderConfig } from "./legacyPersonalProviderConf
 
 export interface ProviderConfigRuntimeOptions {
   readonly zcodeBuiltinFilePath: string;
+  /** Bundled 基线无效时的随包回落路径（透传 @zcode/provider-node）。 */
+  readonly zcodeBuiltinFallbackFilePath?: string;
   readonly zcodeBuiltinActiveFilePath?: string;
   readonly zcodeBuiltinRemote?: NodeProviderConfigRuntimeOptions["zcodeBuiltinRemote"];
   readonly zcodeBuiltinEnvironment?: NodeProviderConfigRuntimeOptions["zcodeBuiltinEnvironment"];
@@ -34,6 +36,7 @@ export class ProviderConfigRuntime {
   constructor(options: ProviderConfigRuntimeOptions) {
     const runtimeOptions: NodeProviderConfigRuntimeOptions = {
       zcodeBuiltinFilePath: options.zcodeBuiltinFilePath,
+      zcodeBuiltinFallbackFilePath: options.zcodeBuiltinFallbackFilePath,
       zcodeBuiltinActiveFilePath: options.zcodeBuiltinActiveFilePath,
       zcodeBuiltinRemote: options.zcodeBuiltinRemote,
       zcodeBuiltinEnvironment: options.zcodeBuiltinEnvironment,

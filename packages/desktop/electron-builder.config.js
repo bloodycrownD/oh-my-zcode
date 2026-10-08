@@ -266,7 +266,7 @@ async function runTimedAsync(label, fn) {
 
 function resolveAppAsarPath(context) {
   if (context.electronPlatformName === "darwin") {
-    const appName = `${context.packager?.appInfo?.productFilename ?? "ZCode"}.app`;
+    const appName = `${context.packager?.appInfo?.productFilename ?? "omz"}.app`;
     return resolve(context.appOutDir, appName, "Contents", "Resources", "app.asar");
   }
 
@@ -275,7 +275,7 @@ function resolveAppAsarPath(context) {
 
 function resolvePackagedResourcesDir(context) {
   if (context.electronPlatformName === "darwin") {
-    const appName = `${context.packager?.appInfo?.productFilename ?? "ZCode"}.app`;
+    const appName = `${context.packager?.appInfo?.productFilename ?? "omz"}.app`;
     return resolve(context.appOutDir, appName, "Contents", "Resources");
   }
 
@@ -606,9 +606,18 @@ export default {
       // 桌面端内置的是 agent 的 JS bundle（glm/zcode.cjs，由 prepare:agent-bundle 生成），
       // Host 进程用 app 自带的 Electron Node runtime（ELECTRON_RUN_AS_NODE）执行 `zcode.cjs app-server --stdio`，
       // 不再随包内置独立 Node 二进制。远端 SSH/WSL 仍走原生二进制（无 Electron）。
-      from: `bundled-agents/${targetPlatform.key}/glm`,
-      to: "glm",
-      filter: ["**/*", "!**/*.map"],
+      //
+      // 取件目录必须是平台目录（bundled-agents/<platform>）而不是 glm 本身：
+      // electron-builder 的 createFilter 会把「拷贝根下的 node_modules」整棵静默剪掉
+      // （app-builder-lib out/util/filter.js: `relative === "node_modules"`），
+      // 从 glm 取件时 glm/node_modules（zcode.cjs 的运行期 external 依赖平铺，
+      // 见 stage-agent-bundle.mjs）恰好是拷贝根 node_modules，会被整体丢弃——
+      // 装出来的包存储准备 Worker 启动即 Cannot find module，界面报
+      // 「数据准备进程意外退出或连接中断」。从平台目录取件时它是嵌套层 glm/node_modules，
+      // 不在剪枝范围内。规则与验收见 docs/specs/desktop-agent-bundle-externals.md。
+      from: `bundled-agents/${targetPlatform.key}`,
+      to: ".",
+      filter: ["glm/**/*", "!**/*.map"],
     },
     {
       // agent shell 之前完全依赖宿主系统 PATH，GUI 启动时经常拿不到用户自己装的 rg。
