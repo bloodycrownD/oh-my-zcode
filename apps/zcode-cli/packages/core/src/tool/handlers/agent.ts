@@ -46,8 +46,19 @@ const AGENT_TOOL_OUTPUT_SCHEMA = {
         totalDurationMs: { type: "integer", minimum: 0 },
         totalTokens: { type: "integer", minimum: 0 },
         usage: { type: "object", additionalProperties: true },
+        // 同步完成分支同样带 childSessionId：与 AgentCompletedOutputSchema
+        // （.strict()）和异步分支保持同构，漏一边会让工具输出校验失败。
+        childSessionId: { type: "string" },
       },
-      required: ["status", "agentId", "prompt", "content", "totalToolUseCount", "totalDurationMs"],
+      required: [
+        "status",
+        "agentId",
+        "prompt",
+        "content",
+        "totalToolUseCount",
+        "totalDurationMs",
+        "childSessionId",
+      ],
       additionalProperties: false,
     },
     {
@@ -74,8 +85,21 @@ const AGENT_TOOL_OUTPUT_SCHEMA = {
           type: "boolean",
           description: "Whether the calling agent has Read/Bash tools to check progress",
         },
+        // 异步分支原本漏了 childSessionId，而 AgentBackgroundedOutputSchema
+        // （.strict()）已要求它：补上以消解 provider schema 与契约的不一致。
+        childSessionId: {
+          type: "string",
+          description: "The child session ID of the async agent",
+        },
       },
-      required: ["status", "agentId", "description", "prompt", "outputFile"],
+      required: [
+        "status",
+        "agentId",
+        "description",
+        "prompt",
+        "outputFile",
+        "childSessionId",
+      ],
       additionalProperties: false,
     },
   ],
@@ -145,7 +169,10 @@ function formatAgentOutputForModel(output: unknown): string {
     ];
     return [
       ...childContent,
+      // 同步完成分支也透出 childSessionId，与异步分支的 agentId 行使父模型能
+      // 用同一套语义继续追问（SendMessage / 读 child 会话记录）。
       `agentId: ${data.agentId} (use SendMessage with to: '${data.agentId}' to continue this agent)`,
+      `sessionId: ${data.childSessionId}`,
       `<usage>${usageLines.join("\n")}</usage>`,
     ].join("\n");
   }

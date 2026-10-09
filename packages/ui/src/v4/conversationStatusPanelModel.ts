@@ -335,7 +335,22 @@ export function buildConversationStatusPanelModel(
     input.runningSubagents ?? []
   ).map((subagent) => {
     const controlWork = subagentControlByChildSessionId.get(subagent.childSessionId);
-    if (!controlWork) return subagent;
+    if (!controlWork) {
+      // 前台派遣的子智能体不会出现在 backgroundWorks 里（只有显式 run_in_background
+      // 才会），控制入口因此整条消失。回退到 subagent.agentId：runtime stopTask 按
+      // agentId（≡ taskId）就能停 local_agent，所以这条行仍然可停。
+      // 前置条件（缺一即不可停，宁可不显示控制）：
+      // - 有 agentId：没有它连 stopTask 的 taskId 都构造不出来；
+      // - status 非 waiting：waiting 的子智能体在等权限/输入，此刻停止会打断的
+      //   是等待本身而不是执行，控制语义不成立。
+      const fallbackAgentId = subagent.agentId;
+      if (fallbackAgentId === undefined || subagent.status === "waiting") return subagent;
+      return {
+        ...subagent,
+        controlWorkId: fallbackAgentId,
+        cancellable: true,
+      };
+    }
     return {
       ...subagent,
       controlWorkId: controlWork.workId,

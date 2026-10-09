@@ -383,6 +383,31 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         activityWatchdog.stop();
         taskAbort.dispose();
         borrowedForegroundAgentIds.delete(lifecycle.agentId);
+        // stopTask（cancelBackgroundTask → stopBackgroundTask → stopTask）已经把
+        // registry 置成终态 killed，并走完父侧 cancelled 事件/通知；此时若继续下面
+        // 的 failed 收口，killed 会被覆写成 failed，用户主动停止就显示成「失败」。
+        // 判据与后台路径（runBackgroundAgent / finalizeBackground*）对齐：
+        // 终态即放行，只把取消语义交回父侧。
+        const currentTask = registry.get(lifecycle.agentId);
+        if (currentTask && isTerminalRuntimeTask(currentTask)) {
+          if (isCoreError(error)) {
+            throw error;
+          }
+          throw createCoreError(
+            CoreErrorType.ToolCancelled,
+            "Agent was cancelled before the subagent returned findings or background launch completed",
+            {
+              cause: error instanceof Error ? error : undefined,
+              context: {
+                code: AgentErrorCode.CHILD_RUNTIME_FAILED,
+                agentId: lifecycle.agentId,
+                agentType: request.agentType,
+                parentToolCallId: request.parentToolCallId,
+              },
+              recoverable: true,
+            },
+          );
+        }
         const totalDurationMs = Date.now() - lifecycle.startedAt;
         const errorMessage = error instanceof Error ? error.message : String(error);
         await writeFailedAgentArtifacts(lifecycle, request, errorMessage);
@@ -1173,6 +1198,9 @@ async function runAgentToCompletion(
     agentType: request.agentType,
     description: request.description,
     prompt: request.prompt,
+    // 同步派遣也要透出 childSessionId（与异步 AgentBackgroundedOutput 对齐）：
+    // 父模型/UI 需要稳定句柄关联 child 会话记录与 stopTask 的 taskId。
+    childSessionId: lifecycle.childSessionId,
     content: [
       {
         type: "text",

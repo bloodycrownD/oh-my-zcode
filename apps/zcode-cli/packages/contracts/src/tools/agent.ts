@@ -47,6 +47,13 @@ export interface AgentCompletedOutput {
   agentType: AgentType;
   description: string;
   prompt: string;
+  /**
+   * 子代理 child session 标识。同步派遣（本分支）与异步派遣
+   * （AgentBackgroundedOutput.childSessionId）必须一致透出：父模型与 UI 都需要
+   * 一个稳定句柄去读 child 会话记录、关联 stopTask 的 taskId，过去同步分支漏
+   * 该字段导致同一工具在两种派遣模式下返回形状不对称。
+   */
+  childSessionId: string;
   content: AgentTextContentBlock[];
   totalToolUseCount: number;
   totalDurationMs: number;
@@ -83,6 +90,9 @@ export const AgentCompletedOutputSchema = z
     agentType: z.string(),
     description: z.string(),
     prompt: z.string(),
+    // 与 AgentCompletedOutput.childSessionId 同 PR 双改：本 schema 是 .strict()，
+    // 漏改任一侧都会让 Agent 工具调用在运行时校验处直接失败。
+    childSessionId: z.string(),
     content: z.array(AgentTextContentBlockSchema),
     totalToolUseCount: z.number().int().nonnegative(),
     totalDurationMs: z.number().int().nonnegative(),
