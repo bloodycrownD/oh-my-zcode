@@ -254,6 +254,7 @@ const load = (rel) => import(pathToFileURL(join(out, rel)).href);
 const applyOps = await load("hooks/magic-context/apply-operations.js");
 const tagPrimitives = await load("hooks/magic-context/tag-content-primitives.js");
 const tagParts = await load("hooks/magic-context/tag-part-guards.js");
+const toolDropTarget = await load("hooks/magic-context/tool-drop-target.js");
 const deriveBudgets = await load("hooks/magic-context/derive-budgets.js");
 const tokenizerCalibration = await load("hooks/magic-context/tokenizer-calibration.js");
 const decayCurve = await load("hooks/magic-context/decay-curve.js");
@@ -374,6 +375,74 @@ test("b1 isThinkingPart classifies reasoning under both host spellings", () => {
 test("b1 tag-part-guards strips the same prefix the tagger wrote", () => {
   const tagged = tagPrimitives.prependTag(5, "payload");
   if (tagParts.stripTagPrefix(tagged) !== "payload") throw new Error("guard drifted");
+});
+
+// --- b1: tool 弧分类（ZCode 拆分形态 FIFO 配对的前提） ------------------------
+//
+// extractToolCallObservation 是 owner 推导的入口：`type:"tool"` 必须按弧是否
+// 闭合（partHasCompletedResult）分流。若一律按 result 分类，ZCode 拆分形态
+// （assistant 上 running invocation + user 上 completed result）的两个 part
+// 会落进不同 composite key，drop 只清 result 一侧、invocation 成孤儿，宿主
+// 报 AI_MissingToolResultsError 且重启/重放不恢复。
+// 见 docs/specs/magic-context-tool-arc-pairing.md。
+
+test("b1 extractToolCallObservation classifies a running tool part as an invocation", () => {
+  const running = toolDropTarget.extractToolCallObservation({
+    type: "tool",
+    callID: "call_zc_running",
+    tool: "read",
+    state: { status: "running", input: { path: "a.txt" } },
+  });
+  if (!running || running.callId !== "call_zc_running" || running.kind !== "invocation") {
+    throw new Error(`running part -> ${JSON.stringify(running)}`);
+  }
+  const pending = toolDropTarget.extractToolCallObservation({
+    type: "tool",
+    callID: "call_zc_pending",
+    state: { input: {} },
+  });
+  if (!pending || pending.kind !== "invocation") {
+    throw new Error(`pending part (no status/output) -> ${JSON.stringify(pending)}`);
+  }
+});
+
+test("b1 extractToolCallObservation classifies completed and errored tool parts as results", () => {
+  const completed = toolDropTarget.extractToolCallObservation({
+    type: "tool",
+    callID: "call_zc_completed",
+    state: { status: "completed", input: {}, output: "42 lines" },
+  });
+  if (!completed || completed.callId !== "call_zc_completed" || completed.kind !== "result") {
+    throw new Error(`completed part -> ${JSON.stringify(completed)}`);
+  }
+  const errored = toolDropTarget.extractToolCallObservation({
+    type: "tool",
+    callID: "call_zc_errored",
+    state: { status: "error", input: {}, error: "ENOENT: no such file" },
+  });
+  if (!errored || errored.kind !== "result") {
+    throw new Error(`errored part -> ${JSON.stringify(errored)}`);
+  }
+});
+
+test("b1 extractToolCallObservation keeps the anthropic shapes type-driven", () => {
+  const use = toolDropTarget.extractToolCallObservation({
+    type: "tool_use",
+    id: "toolu_anthropic",
+    name: "bash",
+    input: { command: "ls" },
+  });
+  if (!use || use.callId !== "toolu_anthropic" || use.kind !== "invocation") {
+    throw new Error(`tool_use -> ${JSON.stringify(use)}`);
+  }
+  const result = toolDropTarget.extractToolCallObservation({
+    type: "tool_result",
+    tool_use_id: "toolu_anthropic",
+    content: "ok",
+  });
+  if (!result || result.callId !== "toolu_anthropic" || result.kind !== "result") {
+    throw new Error(`tool_result -> ${JSON.stringify(result)}`);
+  }
 });
 
 // --- b2: budget derivation ---------------------------------------------------

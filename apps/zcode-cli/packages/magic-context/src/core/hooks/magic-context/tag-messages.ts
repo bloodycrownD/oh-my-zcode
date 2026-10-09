@@ -643,8 +643,17 @@ export function tagMessages(
                 // Reuse that already-loaded composite binding before attempting the
                 // result-only fallback, which otherwise performs two database probes
                 // for every historical tool part on every replay pass.
+                // 修复：复用宿主绑定仅限 assistant 宿主（OpenCode「调用/结果同
+                // 消息」形态）。ZCode 拆分形态的 result 挂在 user 消息上，若也
+                // 走这条快路径，owner 会被钉在 result 自己的消息上，与
+                // invocation 侧分裂成两个 composite key，drop 只清 result 一侧、
+                // invocation 成孤儿（AI_MissingToolResultsError）。user-role
+                // 宿主必须交给 FIFO 配对（见
+                // docs/specs/magic-context-tool-arc-pairing.md）。
                 const boundToHostingMessage =
-                    toolObservation.kind === "result" && messageId
+                    toolObservation.kind === "result" &&
+                    message.info.role === "assistant" &&
+                    messageId
                         ? tagger.getToolTag(sessionId, toolObservation.callId, messageId)
                         : undefined;
                 const ownerMsgId =

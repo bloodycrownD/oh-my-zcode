@@ -294,7 +294,18 @@ export function partHasCompletedResult(part: unknown): boolean {
 export function extractToolCallObservation(part: unknown): ToolCallObservation | null {
     if (!isRecord(part)) return null;
     if (part.type === "tool" && isToolCallId(part.callID)) {
-        return { callId: part.callID, kind: "result" };
+        // ZCode 把一个 tool call 拆成两个 part：assistant 消息上是 running 的
+        // invocation（只有 input），user 结果消息上才是 completed/error 的
+        // result（有 output）。若一律按 result 分类，FIFO 配对收不到 invocation
+        // 入队，两个 part 会落进不同 composite key，drop 只清掉 result 一侧、
+        // invocation 成孤儿，宿主随即报 AI_MissingToolResultsError 且重启/重放
+        // 不恢复（见 docs/specs/magic-context-tool-arc-pairing.md）。因此按
+        // partHasCompletedResult 分流：弧闭合（完成/出错）才是 result，
+        // pending/running 一律是 invocation。
+        return {
+            callId: part.callID,
+            kind: partHasCompletedResult(part) ? "result" : "invocation",
+        };
     }
     if (part.type === "tool-invocation" && isToolCallId(part.callID)) {
         return { callId: part.callID, kind: "invocation" };
