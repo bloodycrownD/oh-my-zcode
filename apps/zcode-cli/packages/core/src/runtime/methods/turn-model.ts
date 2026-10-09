@@ -44,7 +44,12 @@ export async function applySubmissionExecutionState(
       selection,
       requestDependencies: modelExecution?.requestDependencies,
     });
-    if (modelExecution?.selectionScope !== "execution") {
+    // 仅当 modelSelection 由用户在本命令中显式携带（pin）时才写回会话并持久化。
+    // 编辑重发/queue 提升复用的是被编辑轮或 queue item 的旧快照：过去无条件三连
+    // （setSessionModelSelection + persist + emitModelSelected）会把用户刚切换的
+    // 模型静默还原并落库，表现为“编辑后模型没切到最新”。
+    // 本次执行仍使用上面的 selection 创建 Model（执行语义不变），只是不再动会话态。
+    if (modelExecution?.selectionScope !== "execution" && intent?.modelSelectionPinned === true) {
       const appliedSelection = cloneModelSelection(selection);
       runtime.setSessionModelSelection(appliedSelection);
       await persistRuntimeModelSelection(runtime, appliedSelection);

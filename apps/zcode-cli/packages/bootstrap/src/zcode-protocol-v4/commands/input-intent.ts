@@ -8,6 +8,8 @@ interface CanonicalCommandIntent {
   kind: "sendText" | "sendGoalCommand";
   text: string;
   modelSelection?: ModelSelection;
+  /** 显式携带（非继承快照）的 modelSelection 才允许 runtime 写回会话选择。 */
+  modelSelectionPinned?: boolean;
   mode?: SubmissionMode;
   planEnabled?: boolean;
   sourceCommandId?: string;
@@ -30,6 +32,8 @@ export function inputIntentMetadata(
     fallbackReasonCode?: string;
     attachmentRefs?: readonly AttachmentRef[];
     modelSelection?: ModelSelection;
+    /** 仅调用方显式提交了 modelSelection（非 admission 兜底固定）时置真。 */
+    modelSelectionPinned?: boolean;
     mode?: SubmissionMode;
     planEnabled?: boolean;
     sharedContextRefs?: TurnInputIntentMetadata["sharedContextRefs"];
@@ -45,6 +49,9 @@ export function inputIntentMetadata(
     // goal 的 displayText（如 `/GoAl replace X`）不是 runtime 已解析的 canonical objective。
     text: options.text,
     ...(options.modelSelection ? { modelSelection: options.modelSelection } : {}),
+    ...(options.modelSelectionPinned !== undefined
+      ? { modelSelectionPinned: options.modelSelectionPinned }
+      : {}),
     ...(options.mode ? { mode: options.mode } : {}),
     ...(options.planEnabled !== undefined ? { planEnabled: options.planEnabled } : {}),
     admissionSeq: admission.admissionSeq,
@@ -79,6 +86,9 @@ export function inputIntentMetadataFromCanonical(
     kind: canonical.kind,
     text,
     ...(canonical.modelSelection ? { modelSelection: canonical.modelSelection } : {}),
+    ...(canonical.modelSelectionPinned !== undefined
+      ? { modelSelectionPinned: canonical.modelSelectionPinned }
+      : {}),
     ...(canonical.mode ? { mode: canonical.mode } : {}),
     ...(canonical.planEnabled !== undefined ? { planEnabled: canonical.planEnabled } : {}),
     admissionSeq: admission.admissionSeq,
@@ -105,6 +115,8 @@ export function inputIntentMetadataFromQueueItem(
   item: QueueItem,
   canonicalText: string,
 ): TurnInputIntentMetadata {
+  // 注意：modelSelectionPinned 是 admission 期进程内标志，QueueItem 不持久化它，
+  // 本函数刻意不置 pin——queue 提升按非显式处理、不写回会话选择（有意语义，勿当漏字段补）。
   return {
     sourceCommandId: item.sourceCommandId,
     queueItemId: item.queueItemId,

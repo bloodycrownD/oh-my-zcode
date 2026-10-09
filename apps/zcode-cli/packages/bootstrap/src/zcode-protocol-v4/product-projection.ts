@@ -3400,6 +3400,8 @@ export class ProductProjection {
       attachments: payload.intent?.attachmentRefs ?? existing?.attachments ?? [],
       // QueueItem 同时是提升执行的输入，不只是 UI 展示；漏字段会让新 Turn 沿用旧权限／模型。
       // 旧的正文编辑事件可能没有 intent，只能保留同项原事实，不能读取当前 Session 补值。
+      // 注意：modelSelectionPinned 是 admission 期进程内标志，QueueItem 不携带、不透传；
+      // 提升（drain/sendQueuedNow）按非显式处理、不写回会话选择——有意语义，勿当漏字段补。
       modelSelection: payload.intent?.modelSelection ?? existing?.modelSelection,
       mode: payload.intent?.mode ?? existing?.mode,
       planEnabled: payload.intent?.planEnabled ?? existing?.planEnabled,
@@ -3527,6 +3529,9 @@ export class ProductProjection {
           (candidate) => candidate.queueItemId === pendingInputId,
         );
         if (!queueItem) return [];
+        // 提升执行的 intent 只从 QueueItem 重建：modelSelection 等执行字段照搬，
+        // 但 modelSelectionPinned 是 admission 期进程内标志、QueueItem 不持久化它，
+        // 因此这里刻意不置 pin——提升按非显式处理、不写回会话选择（有意语义，勿当漏字段补）。
         const intent: TurnInputIntentMetadata = {
           sourceCommandId: queueItem.sourceCommandId,
           queueItemId: queueItem.queueItemId,

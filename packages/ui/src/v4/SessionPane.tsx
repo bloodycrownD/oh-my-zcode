@@ -2466,12 +2466,17 @@ export function SessionPane({
         logger.warn("[v4-pane] edit 跳过：行内编辑内容为空且无附件");
         return false;
       }
+      // 编辑重发是一次新的 Submission：带上 composer 当前的 modelSelection（与普通
+      // 发送同源取值，用户可能在编辑前刚切换模型）。CLI 以该显式选择覆盖被编辑轮的
+      // 旧快照；composer 未就绪时缺省，CLI 沿用旧快照但不写回会话选择。
+      const submission = createSubmissionFromComposer();
       const ack = await dispatchCommand(
         "editUserQuery",
         {
           target,
           newText,
           workspaceMode,
+          ...(submission ? { modelSelection: submission.modelSelection } : {}),
           // editUserQuery 的 attachments 缺省表示保留 canonical 原附件；
           // 只有显式透传 []，CLI 才能区分“用户删除全部”与“调用方未修改附件”。
           ...(attachments ? { attachments: [...attachments] } : {}),
@@ -2487,7 +2492,7 @@ export function SessionPane({
       // fork ACK 只做旧协议解码兼容；新 edit 永不导航 child。blocked 由行内冲突弹窗处理。
       return ack;
     },
-    [dispatchCommand, sessionId],
+    [createSubmissionFromComposer, dispatchCommand, sessionId],
   );
 
   const dispatchRetryTurn = useCallback(

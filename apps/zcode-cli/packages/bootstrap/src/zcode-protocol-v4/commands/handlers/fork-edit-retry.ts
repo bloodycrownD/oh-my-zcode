@@ -13,6 +13,7 @@ import {
   RewindStrategy,
   traceContextToLogContext,
   type MessageId,
+  type ModelSelection,
   type TurnId,
 } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
@@ -214,6 +215,9 @@ async function editUserQuery(
     payload.newText,
     attachmentRefs,
     attachments,
+    // 编辑重发带当前 composer 的 modelSelection（用户可能在编辑前刚切模型）；
+    // 缺省时 handler 内回退旧快照，但不算显式选择（不 pin）。
+    payload.modelSelection,
   );
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
   // 无法与 retry 稳定区分。命令副作用完成后由 Agent server 写低频 info 审计索引。
@@ -342,6 +346,7 @@ async function startCanonicalIntent(
   text: string,
   attachmentRefs: ReturnType<typeof stableAttachmentRefs>,
   attachments: Awaited<ReturnType<typeof mapAttachmentRefsToTurnAttachments>>,
+  explicitModelSelection?: ModelSelection,
 ): Promise<void> {
   const intent = inputIntentMetadataFromCanonical(
     envelope,
@@ -354,7 +359,11 @@ async function startCanonicalIntent(
       requestedDelivery: editTarget.intent.requestedDelivery,
       admittedDelivery: editTarget.intent.admittedDelivery,
       fallbackReasonCode: editTarget.intent.fallbackReasonCode,
-      modelSelection: editTarget.intent.modelSelection,
+      // 显式覆盖优先：payload 携带的 modelSelection 胜过被编辑轮的旧快照。
+      // 仅显式携带时 pin——retryTurn 故意重发原文（不传覆盖值），继承快照
+      // 不写回会话，否则会把用户刚切换的模型静默还原并落库。
+      modelSelection: explicitModelSelection ?? editTarget.intent.modelSelection,
+      modelSelectionPinned: explicitModelSelection !== undefined,
       mode: editTarget.intent.mode,
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,

@@ -194,7 +194,14 @@ async function sendText(
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, payload.attachments);
   const submittedExecutionState = resolveSubmittedExecutionState(record, payload);
   const submissionIntent = (options: Parameters<typeof inputIntentMetadata>[1]) =>
-    inputIntentMetadata(envelope, { ...options, ...submittedExecutionState });
+    inputIntentMetadata(envelope, {
+      ...options,
+      ...submittedExecutionState,
+      // 仅 payload 显式携带的 modelSelection 是用户本轮的真实选择（pin）；
+      // resolveSubmittedExecutionState 对旧发送端兜底固定的 Session 快照不算显式选择，
+      // 不得据此写回会话模型，否则编辑重发/继承路径会把用户刚切的模型静默还原。
+      modelSelectionPinned: payload.modelSelection !== undefined,
+    });
   const routingMode = host.getInputRoutingMode?.(envelope.sessionId ?? "") ?? null;
   const forceStartNow = payload.requestedDelivery === "startNow";
   const foregroundPromotionLeaseId = forceStartNow ? `send-now:${envelope.commandId}` : undefined;

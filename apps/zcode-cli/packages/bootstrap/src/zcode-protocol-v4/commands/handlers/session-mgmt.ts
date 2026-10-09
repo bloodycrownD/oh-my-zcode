@@ -90,6 +90,10 @@ async function createSession(
         requestedDelivery: "startNow",
         attachmentRefs: payload.firstInput.attachments,
         ...resolveSubmittedExecutionState(record, payload.firstInput),
+        // createSession firstInput 显式携带 modelSelection 是用户在新建会话时的
+        // 显式选择：置 pin 让 runtime 写回并持久化；缺省（旧发送端）不置，
+        // admission 兜底固定的 Session 快照不得反向覆盖用户后续切换。
+        modelSelectionPinned: payload.firstInput.modelSelection !== undefined,
       });
       const started = await startPromptTurn(host, record, {
         content: payload.firstInput.text,

@@ -132,6 +132,10 @@ export const commandPayloadSchemas = {
     target: conversationRowTargetSchema,
     newText: z.string(),
     attachments: z.array(attachmentRefSchema).optional(),
+    // 编辑重发是一次新的用户 Submission：modelSelection 显式携带时覆盖被编辑轮
+    // 的旧快照（用户可能在编辑前刚切换模型），并标记为显式 pin；缺省则沿用旧快照，
+    // 由 CLI 决定是否写回会话选择（继承快照不写回）。
+    modelSelection: modelSelectionSchema.optional(),
     // 缺省 preserve：仅切 conversation branch；rewind 会先安全恢复该轮文件。
     workspaceMode: z.enum(["preserve", "rewind"]).optional(),
   }),

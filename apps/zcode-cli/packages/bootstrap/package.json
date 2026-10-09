@@ -27,6 +27,7 @@
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
     "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
+    "test:edit-retry-model": "tsx --test scripts/test-edit-retry-model.mjs",
     "test:prompt-language-rpc": "node --test scripts/test-prompt-language-rpc.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",

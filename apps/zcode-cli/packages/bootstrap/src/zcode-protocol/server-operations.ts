@@ -1975,6 +1975,10 @@ export async function sendPrompt(context: ZCodeProtocolAgentServerContext, rawPa
             text: params.content,
             requestedDelivery: "startNow",
             modelSelection: params.modelSelection,
+            // 本分支的进入条件就是 params.modelSelection 存在：legacy session/send
+            // 显式携带即用户显式选择。置 pin 让 runtime 按 1d 语义写回会话选择，
+            // 否则旧客户端首轮选择的模型不会落到 session_model_selection。
+            modelSelectionPinned: true,
           },
         )
       : undefined;

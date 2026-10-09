@@ -66,7 +66,14 @@ async function sendGoalCommand(
     );
   }
   const submissionIntent = (options: Parameters<typeof inputIntentMetadata>[1]) =>
-    inputIntentMetadata(envelope, { ...options, ...submittedExecutionState });
+    inputIntentMetadata(envelope, {
+      ...options,
+      ...submittedExecutionState,
+      // sendGoalCommand payload 显式携带 modelSelection 时同样是用户的显式选择：
+      // 置 pin 让 runtime 按 1d 语义写回会话；旧发送端缺省时不置，
+      // resolveSubmittedExecutionState 兜底固定的 Session 快照不得覆盖用户刚切的模型。
+      modelSelectionPinned: payload.modelSelection !== undefined,
+    });
   const routingMode = host.getInputRoutingMode?.(record.app.sessionId) ?? null;
   if (record.activeAbortController || routingMode === "enqueue" || routingMode === "guide") {
     // /goal 是目标控制命令，active turn 中不能直接写 target；

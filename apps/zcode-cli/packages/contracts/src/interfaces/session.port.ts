@@ -286,6 +286,12 @@ export interface TurnInputIntentMetadata {
   text?: string;
   /** Admission 时固定；Queue/Guide 后续不得重新读取 Composer 或 Session 最新选择。 */
   modelSelection?: ModelSelection;
+  /**
+   * modelSelection 是否由用户在当前命令中显式携带（而非继承被编辑轮/queue item 的
+   * 旧快照）。true 时 runtime 写回并持久化会话选择；缺省/false 表示继承快照，
+   * 不得静默覆盖会话选择——否则编辑重发会把用户刚切换的模型还原并落库。
+   */
+  modelSelectionPinned?: boolean;
   /** 与本次用户 Submission 一起固定的协作模式。 */
   mode?: "build" | "edit" | "plan" | "yolo";
   admissionSeq: number;

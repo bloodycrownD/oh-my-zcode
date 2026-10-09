@@ -29,6 +29,9 @@ export function buildPersistedConversationInputIntent(
     // 解析后的 canonical objective，持久化必须优先使用它以保证 live/cold 等价。
     text: intent.text ?? text,
     attachments: intent.attachmentRefs ?? [],
+    // modelSelection 落库供恢复与回放，但 modelSelectionPinned 是 admission 期进程内
+    // 标志、刻意不持久化也不跨 wire：冷恢复的第一轮视为非显式（不得写回会话选择），
+    // 写回只走恢复后用户的显式操作。后人勿当漏字段补上。
     ...(intent.modelSelection ? { modelSelection: intent.modelSelection } : {}),
     ...(intent.mode ? { mode: intent.mode } : {}),
     ...(intent.planEnabled !== undefined ? { planEnabled: intent.planEnabled } : {}),
