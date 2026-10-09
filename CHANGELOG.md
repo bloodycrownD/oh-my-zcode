@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.0.3（2026-10-09）
+
+两处本地已验证修复的上游落地：magic-context 会话卡死修复、macOS 打包 ad-hoc 签名开关（CI mac 产物默认开启）。
+
+### 修复
+
+- **magic-context tool drop 残留孤儿 tool-call，会话卡死且重启/重放不恢复**：ZCode 把一个 tool call 拆成两个 part——assistant 消息上是 running 的 invocation（只有 input），user 结果消息上才是 completed/error 的 result（有 output）；而 tool 弧分类把 `type:"tool"` 一律当 result，FIFO 配对收不到 invocation 入队，result 一侧又复用了 user 宿主绑定（本是为 OpenCode「调用/结果同消息」形态准备的快路径）。两个 part 落进不同 composite key 后，drop 只清 result 一侧，invocation 成孤儿：客户端持续报 `AI_MissingToolResultsError: Tool result is missing for tool call ...`，坏字节还会被 LKG 固化逐 pass 重放。现在 `extractToolCallObservation` 按弧是否闭合（`partHasCompletedResult`）分流——完成/出错 → result、pending/running → invocation（anthropic 的 `tool_use`/`tool_result` 形态不变）；result 复用宿主绑定补 `role === "assistant"` 条件，user-role 宿主交回 FIFO 配对；`tag-messages` 与 `read-session-chunk` 两个 FIFO 消费方同时修正。缺陷链路与规则见 `docs/specs/magic-context-tool-arc-pairing.md`，transform 常驻测试 +3 例（38 cases 全过）。
+
+### 功能
+
+- **macOS 打包 ad-hoc 签名开关 `ZCODE_MAC_ADHOC_SIGN`**：无证书时 `identity: null` 让 bundle 完全不签名（没有 `_CodeSignature`），浏览器下载（带 com.apple.quarantine 隔离属性）后被 Gatekeeper 判「已损坏」且无法自救。开关打开后以 ad-hoc（identity `"-"`）完整封签，报错回到真实可行动的「无法验证开发者」提示。identity 回退链为 真实证书 → ad-hoc → 不签名；`notarize` 恒 false、`hardenedRuntime` 只跟随真实证书签名；默认关闭，本地与 CI 现状行为不变。CI 的 mac 产物自本版起默认 ad-hoc 封签（按 matrix 注入开关）——未公证包首次打开仍需右键 → 打开（或系统设置放行 / `xattr -rd com.apple.quarantine`），彻底解决需要开发者证书 + 公证。
+
 ## v1.0.2（2026-10-09）
 
 v1.0.1 发布 diff 全量代码评审（32 项）+ 三线实机 E2E 验证后的修复批次：启动稳定性、品牌一致性收尾、模型体验补漏与测试基建。
