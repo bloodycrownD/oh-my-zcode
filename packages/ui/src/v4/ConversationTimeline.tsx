@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MutableRefObject,
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
   type TouchEvent as ReactTouchEvent,
@@ -35,10 +36,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { ConversationTurnGroup } from "@/v4/ConversationTurnGroup.js";
 import { ConversationPendingGuideList } from "@/v4/ConversationPendingGuideList.js";
-import {
-  clearRowElementRegistry,
-  rowElementRegistry,
-} from "@/v4/ConversationRowView.js";
+import { clearRowElementRegistry, rowElementRegistry } from "@/v4/ConversationRowView.js";
 import type { AssistantFeedbackHandler } from "@/v4/ConversationRowView.js";
 import { ConversationTurnNavigator } from "@/v4/ConversationTurnNavigator.js";
 import type { ConversationRowRenderContext } from "@/v4/conversationRowContext.js";
@@ -69,6 +67,7 @@ import { mergeTurnNavigatorItems } from "@/v4/conversationTurnNavigatorDirectory
 import {
   DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
   TimelineRowHeightCache,
+  createSessionInitialAnchorGuard,
 } from "@/v4/timelineRowHeightCache.js";
 import {
   readChatSessionScrollMemoryState,
@@ -234,6 +233,27 @@ function canReleasePendingScrollMemoryRestore(
   // 新 lease 的首帧 rows 可能仍是截断尾窗；只要还能拉取更早历史，就继续保留原始
   // 恢复意图，避免把临时 clamp 后的 scrollTop 当成最终阅读锚点。
   return rowCount > 0 && !hasOlderRows && pendingRestore.rowWindowKey !== rowWindowKey;
+}
+
+/**
+ * 取消初始落点 guard 释放后排的测高校正帧。
+ *
+ * 只在切会话（sessionKey effect cleanup）与卸载时调用；不能挂在 guard 释放 effect
+ * 自身的 cleanup——那个 effect 每次 commit 都会重跑（measurementsCache 不是响应式
+ * 数据，需要每次复查），挂上去会把尚未执行的校正帧误取消。
+ */
+function cancelInitialAnchorFrames(
+  correctionFrameRef: MutableRefObject<number | null>,
+  releaseFrameRef: MutableRefObject<number | null>,
+): void {
+  if (correctionFrameRef.current !== null) {
+    window.cancelAnimationFrame(correctionFrameRef.current);
+    correctionFrameRef.current = null;
+  }
+  if (releaseFrameRef.current !== null) {
+    window.cancelAnimationFrame(releaseFrameRef.current);
+    releaseFrameRef.current = null;
+  }
 }
 
 interface ConversationScrollMemoryScopeCaptureProps {
@@ -461,7 +481,8 @@ function ConversationTimelineImpl({
       conversationTurnRenderUnitsCache.build(
         rows,
         { sessionPhase, scopeKey: sessionKey },
-        lastMutation && withDetachedTurnIds(lastMutation.turnIdByRowId, lastMutation.detachedTurnIds),
+        lastMutation &&
+          withDetachedTurnIds(lastMutation.turnIdByRowId, lastMutation.detachedTurnIds),
       ),
     [rows, sessionPhase, sessionKey, lastMutation],
   );
@@ -497,11 +518,16 @@ function ConversationTimelineImpl({
   );
   const turnNavigatorItems = useMemo(
     () =>
-      mergeTurnNavigatorItems(turnDirectoryEntries ?? [], turnNavigatorLoadedItems, rows[0]?.rowId, {
-        assistantEmptyPreview,
-        assistantRunningPreview,
-        userFallbackPreview,
-      }),
+      mergeTurnNavigatorItems(
+        turnDirectoryEntries ?? [],
+        turnNavigatorLoadedItems,
+        rows[0]?.rowId,
+        {
+          assistantEmptyPreview,
+          assistantRunningPreview,
+          userFallbackPreview,
+        },
+      ),
     [
       assistantEmptyPreview,
       assistantRunningPreview,
@@ -569,6 +595,21 @@ function ConversationTimelineImpl({
   if (heightCacheRef.current === null) {
     heightCacheRef.current = new TimelineRowHeightCache();
   }
+  // 切会话初始落点 guard（2a，根因见 timelineRowHeightCache.ts 顶部注释）：
+  // 切会话清测高后估计总高（~2-5 unit×72px）会小于视口，立即落点会把 scrollTop
+  // 钳到 0，首帧渲染窗口最旧内容造成「跳顶」。guard 记录「本会话尚未定位」，
+  // 把首次落点推迟到 measurementsCache 出现本会话首项后执行一次；此后离底恢复
+  // 校正归 pending restore effect、贴底跟随归底部锚定 effect，三者以本 guard
+  // 状态机（tracksSession/isArmedFor）防重入，不得重复执行落点。
+  // 初始值直接创建（每 render 惰丢弃一个闭包）：effect 体内 ref.current 保持
+  // 非空类型，免除判空样板。
+  const initialAnchorGuardRef = useRef(
+    createSessionInitialAnchorGuard<ChatSessionScrollMemoryState>(),
+  );
+  // guard 释放后排的测高校正帧（restore 分支）：由切会话/卸载统一取消，
+  // 见 cancelInitialAnchorFrames。
+  const initialAnchorCorrectionFrameRef = useRef<number | null>(null);
+  const initialAnchorReleaseFrameRef = useRef<number | null>(null);
   // 首次挂载不清注册表：行元素的 ref 在本 effect 之前就已挂上，
   // 以当前 sessionKey 作为「已清理过」的基线。
   const rowElementRegistrySessionRef = useRef<string | null>(sessionKey);
@@ -723,32 +764,46 @@ function ConversationTimelineImpl({
     [],
   );
 
+  // 卸载时收尾 guard 的测高校正帧；切会话路径的取消在 sessionKey effect cleanup。
+  useEffect(
+    () => () => {
+      cancelInitialAnchorFrames(initialAnchorCorrectionFrameRef, initialAnchorReleaseFrameRef);
+    },
+    [],
+  );
+
   const getScrollElement = useCallback(() => scrollRef.current, []);
   const getItemKey = useCallback(
     (index: number) => virtualizedUnitsRef.current[index]?.key ?? index,
     [],
   );
   // 测高缓存兜底：行卸载重挂（甚至 virtualizer 重建）时用上次真实测量代替固定估计。
+  // 2b：按 sessionKey 分区读写——turnId 跨会话可重复，混表会让新会话行命中旧会话
+  // 同键高度，把首帧布局带到错误量级。
   const estimateSize = useCallback(
     (index: number) =>
       heightCacheRef.current?.estimate(
+        sessionKey,
         getUnitHeightCacheKey(virtualizedUnitsRef.current[index]),
         DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
       ) ?? DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
-    [],
+    [sessionKey],
   );
   // 动态测高：virtualizer 对窗口内元素挂 ResizeObserver，流式行长高即回调此处；
   // 同时把真实高度写入稳定的 turnId 缓存。
-  const measureElement = useCallback((element: Element, entry: ResizeObserverEntry | undefined) => {
-    const height = measureRowHeight(element, entry);
-    const indexAttr = element.getAttribute("data-index");
-    const unit = indexAttr === null ? undefined : virtualizedUnitsRef.current[Number(indexAttr)];
-    const cacheKey = getUnitHeightCacheKey(unit);
-    if (cacheKey !== undefined) {
-      heightCacheRef.current?.set(cacheKey, height);
-    }
-    return height;
-  }, []);
+  const measureElement = useCallback(
+    (element: Element, entry: ResizeObserverEntry | undefined) => {
+      const height = measureRowHeight(element, entry);
+      const indexAttr = element.getAttribute("data-index");
+      const unit = indexAttr === null ? undefined : virtualizedUnitsRef.current[Number(indexAttr)];
+      const cacheKey = getUnitHeightCacheKey(unit);
+      if (cacheKey !== undefined) {
+        heightCacheRef.current?.set(sessionKey, cacheKey, height);
+      }
+      return height;
+    },
+    [sessionKey],
+  );
 
   const virtualizer = useVirtualizer({
     count: virtualizedUnits.length,
@@ -1132,7 +1187,7 @@ function ConversationTimelineImpl({
 
     const cacheHeight = (entry?: ResizeObserverEntry) => {
       const height = measureRowHeight(element, entry);
-      heightCacheRef.current?.set(cacheKey, height);
+      heightCacheRef.current?.set(sessionKey, cacheKey, height);
       return height;
     };
     let observedHeight = cacheHeight();
@@ -1174,6 +1229,7 @@ function ConversationTimelineImpl({
     liveUnit?.key,
     markLayoutScrollGuard,
     scrollToBottom,
+    sessionKey,
   ]);
 
   const saveCurrentScrollMemory = useCallback(() => {
@@ -1506,22 +1562,19 @@ function ConversationTimelineImpl({
     };
   }, [scrollToQuery, scrollToQueryActionRef]);
 
-  useEffect(
-    () => {
-      // 切会话（full/J-1）：在途跳转的 finally 带 isStaleJump 守卫，会话换掉后永远
-      // 等不到清零机会——必须在 effect 体里直接清，cleanup 只负责作废序号与撤帧。
-      setTurnNavigatorJumpLoading(false);
-      return () => {
-        // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
-        turnNavigatorJumpSeqRef.current += 1;
-        if (turnNavigatorJumpFrameRef.current !== null) {
-          window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
-          turnNavigatorJumpFrameRef.current = null;
-        }
-      };
-    },
-    [sessionKey],
-  );
+  useEffect(() => {
+    // 切会话（full/J-1）：在途跳转的 finally 带 isStaleJump 守卫，会话换掉后永远
+    // 等不到清零机会——必须在 effect 体里直接清，cleanup 只负责作废序号与撤帧。
+    setTurnNavigatorJumpLoading(false);
+    return () => {
+      // 切会话/卸载：序号自增让在途补拉循环立即收敛，不再往已废弃的窗口里翻页。
+      turnNavigatorJumpSeqRef.current += 1;
+      if (turnNavigatorJumpFrameRef.current !== null) {
+        window.cancelAnimationFrame(turnNavigatorJumpFrameRef.current);
+        turnNavigatorJumpFrameRef.current = null;
+      }
+    };
+  }, [sessionKey]);
 
   const scrollToUnit = useCallback(
     (unitIndex: number, behavior: ScrollBehavior = "auto") => {
@@ -1582,11 +1635,14 @@ function ConversationTimelineImpl({
   const pendingGuideKey = pendingGuides.map((item) => item.queueItemId).join(":");
 
   // V4 迁移删除旧 ChatView 滚动 hook 后，sessionKey effect 仍固定滚到底部，
-  // 导致残留的 renderer-local 记忆模块彻底断线。这里在清测高并重新 measure 后按 scope
-  // 恢复；首个 layout 立即写入防闪动，下一帧再校正异步测高，但必须把滚动权让给用户。
+  // 导致残留的 renderer-local 记忆模块彻底断线。这里在重新 measure 后按 scope
+  // 恢复；滚动落点经 guard 推迟到首批真实测高后执行一次（见下方释放 effect），
+  // 校正帧同样由释放逻辑持有，但必须把滚动权让给用户。
   useLayoutEffect(() => {
     clearUserScrollIntent();
-    heightCacheRef.current?.clear();
+    // 2b：行高缓存已按 sessionKey 分区寻址（turnId 跨会话可重复，分区即消除
+    // 串号），这里不再全量 clear()——那会在切会话瞬间抹掉全部分区、切回会话
+    // 命中率恒 0（judge P1-3）。本会话的精确失效走 clearSession，不在这条路径。
     // rowId 跨会话可重复，且行元素由 ref callback 注册（挂载时才写），
     // 切会话必须清空；否则新会话里旧 rowId 会命中已卸载的元素。
     if (rowElementRegistrySessionRef.current !== sessionKey) {
@@ -1617,44 +1673,89 @@ function ConversationTimelineImpl({
             waitFor: pendingRestoreWait,
           }
         : null;
-    const restore = () => {
-      if (!restoredState || restoredState.wasPinnedToBottom === true) {
-        suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
-        followingRef.current = initialFollowing();
-        setBackToBottomVisible(false);
-        scrollToBottom();
-        return;
-      }
-      restoreScrollMemory(restoredState);
+    // 初始落点 guard（2a）：此刻本会话没有任何真实测高，virtualizer 只能按
+    // estimateSize（72px）估总高；少量行的会话（2-5 unit）估计总高 < 视口，
+    // 立即 scrollToBottom/restore 会被浏览器把 scrollTop 钳到 0，首帧渲染窗口
+    // 里最旧的内容，用户看到「切会话跳顶」。因此只 arm guard 记录「本会话尚未
+    // 定位」，落点与校正帧全部推迟到释放 effect 见 measurementsCache 出现本会话
+    // 首项之后执行一次。
+    const initialAnchorPlan = initialAnchorGuardRef.current.arm(restoredState, sessionKey);
+    if (initialAnchorPlan.action === "stickToBottom") {
+      // following/按钮状态初始化不涉及滚动写入，可立即做；滚动落点仍等 guard 释放。
+      followingRef.current = initialFollowing();
+      setBackToBottomVisible(false);
+    }
+    return () => {
+      cancelInitialAnchorFrames(initialAnchorCorrectionFrameRef, initialAnchorReleaseFrameRef);
+      suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
     };
+  }, [clearUserScrollIntent, initialFollowing, scrollMemoryKey, sessionKey, virtualizer]);
 
-    restore();
-    let releaseGuardFrame: number | null = null;
-    const correctionFrame = window.requestAnimationFrame(() => {
-      if (!userAdjustedScrollSinceRestoreRef.current) {
-        restore();
+  // 初始落点 guard 的释放 effect（2a）：以 virtualizer.measurementsCache 出现
+  // 本会话首项（= 行已挂载且完成首次真实测高）为「已定位」信号，释放时执行且
+  // 仅执行一次本会话首次落点（stickToBottom 或恢复记忆位置）。此后离底恢复的
+  // 二次校正归下方 pending restore effect，内容变化的贴底跟随归底部锚定 effect，
+  // 三处不得重复执行落点：guard 状态机的 tracksSession/isArmedFor 即防重入 ref。
+  // 刻意不加依赖数组：measurementsCache 不是响应式状态，只能每次 commit 复查
+  //（与下方 prepend 对账 effect 同构）；guard 未 armed 时首行即早退。
+  useLayoutEffect(() => {
+    if (!initialAnchorGuardRef.current.isArmedFor(sessionKey)) return;
+    const measuredKeys = new Set(virtualizer.measurementsCache.map((item) => item.key));
+    const plan = initialAnchorGuardRef.current.tryRelease({
+      currentSessionKey: sessionKey,
+      unitKeys: virtualRows.map((item) => item.key),
+      measuredKeys,
+    });
+    if (!plan) return;
+    if (plan.action === "stickToBottom") {
+      suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
+      scrollToBottom();
+      return;
+    }
+    const restoredState = plan.restoredState;
+    if (!restoredState) return;
+    // 复刻原 correctionFrame：异步测高逐行修正总高，先落地、下一帧用最终高度
+    // 再校正一次；抑制 virtualizer 自动调整直到校正完成，防恢复位被推回底部。
+    cancelInitialAnchorFrames(initialAnchorCorrectionFrameRef, initialAnchorReleaseFrameRef);
+    restoreScrollMemory(restoredState);
+    initialAnchorCorrectionFrameRef.current = window.requestAnimationFrame(() => {
+      initialAnchorCorrectionFrameRef.current = null;
+      if (
+        initialAnchorGuardRef.current.tracksSession(sessionKey) &&
+        !userAdjustedScrollSinceRestoreRef.current
+      ) {
+        restoreScrollMemory(restoredState);
       }
-      releaseGuardFrame = window.requestAnimationFrame(() => {
+      initialAnchorReleaseFrameRef.current = window.requestAnimationFrame(() => {
+        initialAnchorReleaseFrameRef.current = null;
         suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
       });
     });
-    return () => {
-      window.cancelAnimationFrame(correctionFrame);
-      if (releaseGuardFrame !== null) {
-        window.cancelAnimationFrame(releaseGuardFrame);
-      }
-      suppressVirtualizerAdjustmentDuringRestoreRef.current = false;
-    };
-  }, [
-    clearUserScrollIntent,
-    restoreScrollMemory,
-    scrollMemoryKey,
-    scrollToBottom,
-    sessionKey,
-    virtualizer,
-  ]);
+    // 首次落点已完成：pending restore 快照的使命（保护恢复意图不被中途覆盖）
+    // 到期，按原 releaseGuardFrame 判据放行，让滚动记忆恢复保存当前元素状态。
+    const pendingRestore = pendingDetachedScrollRestoreRef.current;
+    if (
+      pendingRestore &&
+      pendingRestore.key === scrollMemoryKey &&
+      canReleasePendingScrollMemoryRestore(
+        pendingRestore,
+        scrollRef.current,
+        rowCount,
+        canLoadOlder || totalCount > rows.length,
+        rowWindowKey,
+      )
+    ) {
+      pendingDetachedScrollRestoreRef.current = null;
+    }
+  });
 
   useLayoutEffect(() => {
+    // 2a 分工防线：本会话的首次落点由 guard（sessionKey effect arm + 释放 effect
+    // 执行）独占。guard 自记录该 session 起，本 effect 不再执行恢复落点，避免与
+    // guard/底部锚定 effect 三处重复执行同一意图（防重入 ref = initialAnchorGuardRef）。
+    if (initialAnchorGuardRef.current.tracksSession(sessionKey)) {
+      return;
+    }
     const pendingRestore = pendingDetachedScrollRestoreRef.current;
     if (rowCount === 0 || !pendingRestore || pendingRestore.key !== scrollMemoryKey) {
       return;
@@ -1795,7 +1896,12 @@ function ConversationTimelineImpl({
       anchorActionAfterContentChange(followingRef.current, isContentWidthChanging()) ===
       "stickToBottom"
     ) {
-      scrollToBottom();
+      // 2a：guard 挂起期间（本会话尚未定位）禁止贴底——此刻总高仍是估计值，
+      // 贴底会把 scrollTop 钳到 0（跳顶根因）。首次贴底由 guard 释放 effect 在
+      // 真实测高后执行一次；此后本 effect 照常承担内容变化的贴底跟随。
+      if (!initialAnchorGuardRef.current.isArmedFor(sessionKey)) {
+        scrollToBottom();
+      }
     }
   }, [
     getActiveUserScrollIntent,
