@@ -321,6 +321,7 @@ export function AnimatedSidePanePanel({
   onOpenCodeViewer,
   onOpenFileLink,
   onOpenSubagentSession,
+  canCancelBackgroundWork,
   onOpenWorkflowActorSession,
   onOpenWorkflowWorkspace,
   onOpenWorkflowArtifact,
@@ -387,6 +388,13 @@ export function AnimatedSidePanePanel({
   onOpenFileLink?: (target: MessageFileLinkTarget) => void;
   onOpenBackgroundBash?: (request: OpenBackgroundBashSideTabRequest) => void;
   onOpenSubagentSession: (request: OpenScopedSubagentSideTabRequest) => void;
+  /**
+   * side pane 内 v4 命令类操作的能力门（当前只有子智能体目录页的「停止」消费）。
+   * 壳层按当前 workspace 的只读态下发：只读时不下发，目录页运行中行不渲染停止按钮——
+   * 与主 pane 的 SessionPane（readOnly 时不下发 onCancelBackgroundWork）同语义。
+   * 具体命令由各 side pane 自己的 V4PaneConversationProvider 连接发出。
+   */
+  canCancelBackgroundWork?: boolean;
   /** run 详情页里点 ask 节点 → 打开那个 actor 实例的 transcript tab。 */
   onOpenWorkflowActorSession?: (request: OpenScopedWorkflowActorSessionSideTabRequest) => void;
   /** run 详情页里点脚本行 → 打开该 run 的脚本 transcript tab，落到那一站。 */
@@ -1118,6 +1126,7 @@ export function AnimatedSidePanePanel({
                           <SubagentDirectorySidePane
                             tab={tab}
                             onOpenSubagentSession={onOpenSubagentSession}
+                            canCancelBackgroundWork={canCancelBackgroundWork}
                           />
                         ) : tab.type === "selection-side-chat" ? (
                           <SelectionSideChatPane
