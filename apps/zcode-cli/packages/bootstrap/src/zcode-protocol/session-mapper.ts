@@ -143,7 +143,12 @@ async function mapSnapshotMessages(
   return await Promise.all(
     mapped.map(async (message) => ({
       ...message,
-      parts: await Promise.all(message.parts.map((part) => hydrateSnapshotFilePartUrl(app, part))),
+      // e2e 实测修复：编辑 rewind 截断后个别消息的 parts 会混入 undefined（rehydrate 遗留物），
+      // 快照映射在这里崩溃会把整个 editUserQuery 打成 executionFailed（rewind 已生效、重发丢失）。
+      // 过滤空 part 让快照可建；undefined part 的上游来源（rewind rehydrate）另行追踪。
+      parts: await Promise.all(
+        message.parts.filter((part) => part !== undefined && part !== null).map((part) => hydrateSnapshotFilePartUrl(app, part)),
+      ),
     })),
   );
 }
