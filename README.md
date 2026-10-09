@@ -153,7 +153,7 @@ pnpm bundle:desktop -- --help
 
 默认目标为 macOS arm64，默认输出目录为 `packages/desktop/dist/`。`--os` 支持 `mac`、`win`、`linux`，`--arch` 支持 `x64`、`arm64`；实际打包与签名需要目标平台对应的工具和配置。
 
-安装：双击打开产物 DMG，将 ZCode 拖入"应用程序"。本地构建未签名，首次打开若被 macOS 拦截，执行：
+安装：双击打开产物 DMG，将 ZCode 拖入"应用程序"。本地构建默认不签名：浏览器下载（带隔离属性）的未签名包会被 Gatekeeper 判「已损坏」，可加 `ZCODE_MAC_ADHOC_SIGN=1` 用 ad-hoc 签名完整封签，把报错回到可行动的「无法验证开发者」提示。未公证的包首次打开仍会被拦截，可右键 → 打开，或执行：
 
 ```bash
 sudo xattr -rd com.apple.quarantine /Applications/ZCode.app

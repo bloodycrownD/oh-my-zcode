@@ -84,6 +84,14 @@ const macSigningIdentity =
   rawMacSigningIdentity?.replace(/^Developer ID Application:\s*/, "") ?? null;
 const shouldEnableMacSigning =
   process.env.ZCODE_ENABLE_MAC_SIGN === "1" && Boolean(macSigningIdentity);
+// 无证书时 `identity: null` 会让 bundle 完全不签名（没有 _CodeSignature）。
+// 浏览器下载的产物带 com.apple.quarantine 隔离属性，Gatekeeper 对未签名
+// bundle 直接判「已损坏」，用户连右键打开自救的入口都没有。ZCODE_MAC_ADHOC_SIGN=1
+// 时退回 ad-hoc 签名（identity "-"，app-builder-lib 对该值走 Identity("-") 路径）：
+// bundle 被完整封签，首次打开的报错回到真实可行动的「无法验证开发者」提示。
+// 默认关闭：本地与 CI 行为不变；彻底解决仍需开发者证书 + 公证。
+const shouldEnableMacAdHocSigning =
+  !shouldEnableMacSigning && process.env.ZCODE_MAC_ADHOC_SIGN === "1";
 const workspaceRoot = resolve(import.meta.dirname, "../..");
 const desktopPackageRoot = import.meta.dirname;
 const runtimeModuleLookupRoots = [
@@ -658,7 +666,14 @@ export default {
     // z-code 之前只有本地未签名打包配置，CI 即使注入了证书变量，
     // electron-builder 也不会自动切到 hardened runtime / entitlement 这套发布参数。
     // 这里显式收拢到环境开关，保证本地开发不被签名配置绑死，CI 发布时再按需打开。
-    identity: shouldEnableMacSigning ? macSigningIdentity : null,
+    // identity 回退链：真实证书 → ZCODE_MAC_ADHOC_SIGN=1 时的 ad-hoc（"-"）→
+    // 完全不签名（null）。notarize 仍恒为 false（公证在独立阶段），hardenedRuntime
+    // 只跟随真实证书签名——ad-hoc 封签只为绕开「已损坏」误判，不承载发布语义。
+    identity: shouldEnableMacSigning
+      ? macSigningIdentity
+      : shouldEnableMacAdHocSigning
+        ? "-"
+        : null,
     // macOS 产物采用“build 阶段签名 + 独立公证阶段”的两段式流水线。
     // 如果这里不显式关闭 electron-builder 内置 notarize，它会在 build 阶段读取 Apple 凭据后直接尝试公证，
     // 并强制要求 APPLE_APP_SPECIFIC_PASSWORD，导致 build 还没产出 DMG 就提前失败。

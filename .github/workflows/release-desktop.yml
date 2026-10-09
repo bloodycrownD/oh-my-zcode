@@ -13,8 +13,10 @@
 #   ubuntu-latest  → linux x64  （AppImage + deb + rpm + pacman/pkg.tar.zst）
 #
 # 已知边界：
-# - macOS 包未签名/未公证（无证书时 electron-builder 配置默认 identity=null），
-#   用户首次打开需要右键 → 打开。
+# - macOS 包为 ad-hoc 签名、未公证（无证书；build job 的 ZCODE_MAC_ADHOC_SIGN=1
+#   让 bundle 完整封签，避免未签名产物被 Gatekeeper 判「已损坏」且无法自救）。
+#   下载后首次打开仍需右键 → 打开，或系统设置 → 隐私与安全性放行，或
+#   `xattr -rd com.apple.quarantine`；彻底解决需要开发者证书 + 公证。
 # - GitHub Release 单文件上限 2GiB：超限的产物上传 Release 会被跳过并打 warning，
 #   但构建产物始终完整保留在本 run 的 Artifacts 里可下载。
 # - linux-arm64 交叉打包未验证过（agent/native 工具链按 targetPlatform.key 准备，
@@ -69,6 +71,11 @@ jobs:
     env:
       ZCODE_ENV: production
       ZCODE_DESKTOP_DIST_DIR: ${{ matrix.dist_dir }}
+      # mac 产物用 ad-hoc 签名完整封签（见 electron-builder.config.js 的
+      # ZCODE_MAC_ADHOC_SIGN 注释）：未签名 bundle 被 Gatekeeper 判「已损坏」
+      # 且无法自救；ad-hoc 后报错回到可行动的「无法验证开发者」提示。
+      # 有证书时 CI 会注入 ZCODE_ENABLE_MAC_SIGN + 证书变量，真实签名优先。
+      ZCODE_MAC_ADHOC_SIGN: ${{ matrix.target_os == 'mac' && '1' || '0' }}
 
     steps:
       - uses: actions/checkout@v4
