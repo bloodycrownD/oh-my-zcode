@@ -24,6 +24,16 @@
  * `usage.magicContext` 键，UI 整段不渲染。全零对象会被渲染成一段假的
  * 「预算 0 / compartments 0」——那比不显示更坏。
  *
+ * ── bugfix-batch-20261009 / 5c：默认值不是读数 ──────────────────────────────
+ *
+ * `session_meta.last_context_percentage` / `last_input_tokens` 的列默认值是 0，
+ * 而「从未被 transform/recorder 写过的会话」与「真的只占了 0%」在库里长得一模
+ * 一样。把默认 0 当读数渲染，就是⑤取证里那个误导面：面板写着 0% 占用，压缩却
+ * 从未运行。因此这里在快照之后加一道**真读数门**：两个占用列都没有超过 0 时
+ * 整份摘要返回 `null`（面板收起），与 `loadPersistedUsage` 判定「没有持久化
+ * 读数」的同一口径（`percentage === 0 && inputTokens === 0` ⇒ null）对齐。
+ * 反过来，任一列为正就是真读数——哪怕百分比算出来是 0.0%，也如实渲染。
+ *
  * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
  */
 
@@ -60,6 +70,13 @@ export async function readMagicContextUsageSummary(
   try {
     const snapshot = await readMagicContextStatusSnapshot({ db, sessionId });
     if (!snapshot) return { usage: null };
+    // 5c 真读数门：`last_context_percentage` / `last_input_tokens` 的列默认值是 0，
+    // 「从未写过」与「真的 0%」在库里不可分辨。两个占用列都没超过 0 ⇒ 这份会话
+    // 没有可展示的占用读数，整份摘要作废（null ⇒ 投影层删键 ⇒ 面板收起），而不是
+    // 渲染一段假的「0%」。判据与 `loadPersistedUsage` 的「无持久化读数」同口径。
+    if (!(snapshot.contextPercentage > 0 || snapshot.lastInputTokens > 0)) {
+      return { usage: null };
+    }
     return {
       usage: {
         budgetTokens: snapshot.protectedTokensFloor,

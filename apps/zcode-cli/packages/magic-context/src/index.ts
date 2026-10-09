@@ -256,9 +256,16 @@ export {
 // ── 4. A 组存储的少量入口 ───────────────────────────────────────────────────
 
 export {
+  getMigrationOnOpenRefusal,
   getSchemaFenceRejection,
   openDatabase,
+  // bugfix-batch-20261009 / 5e：busy/瞬时开库失败的分类（cause 链上的类型与
+  // code 判定，不做 message 子串分类）。bootstrap 的 boot 有界重试只对判定为
+  // busy/瞬时的失败重试；fence/ABI/不可写等确定性失败仍走 fail-closed throw。
+  // 见 storage-db.ts 中该函数的 FORK 块。
+  isTransientStorageOpenError,
   type ContextDatabase,
+  type MigrationOnOpenRefusal,
   type OpenDatabaseOptions,
 } from "./core/features/magic-context/storage-db.js";
 export { createTagger, type Tagger } from "./core/features/magic-context/tagger.js";

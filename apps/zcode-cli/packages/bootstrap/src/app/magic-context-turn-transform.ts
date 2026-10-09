@@ -116,10 +116,12 @@ import {
   findConfigReadinessError,
   getActiveCompartmentRun,
   getMagicContextDatabasePath,
+  getMigrationOnOpenRefusal,
   getSchemaFenceRejection,
   initializeMagicContextHost,
   isFailClosedBlockingError,
   isTransientSqliteError,
+  isTransientStorageOpenError,
   loadPersistedUsage,
   noteEntry,
   openDatabase,
@@ -767,13 +769,156 @@ function withOrdinal(row: StoredRow): RawMessage {
 // 装配
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * ⑤-5a 结构化事件面：transform **缺席**（不是「跑了但没做事」）时发一条
+ * `magic_context.transform_absent`（logger.warn 级），带机器可判的 `reason`。
+ *
+ * 为什么需要它：⑤ 的本机取证显示桌面 app-server 进程开库成功、但 transform 从未
+ * 创建/从未执行，且该缺席**完全静默**——0 条 transform pass、0 条失败日志、0 条
+ * storage 事件，用户完全看不出「压缩已停机」。三条缺席路径全部发事件后，桌面
+ * 日志/事件面第一次能回答「为什么没有压缩」：
+ *
+ *   - `disabled`       ：enabled 门（features.magicContext / magicContext.enabled）
+ *   - `db_null:<细分>` ：openDatabase 返回 null（细分：`db_null:fence` /
+ *                        `db_null:migration_guard` / `db_null:pending_or_unclassified`）
+ *   - `import_failed`  ：装配层（create-app.ts）动态 import 本模块失败（5b）
+ *
+ * 语义边界（fail-closed 契约不受影响，事件只是可观测性）：
+ *   - import_failed：发事件后**照旧 throw**（保留 fail-closed 性状）；
+ *   - disabled / db_null：发事件后照旧 return undefined 降级；db_null 且
+ *     `fail_closed_blocking=true` 时同样**先发事件、再 throw**。
+ */
+function emitTransformAbsent(logger: Logger, reason: string, detail: string): void {
+  logger.warn("Magic context transform is absent", {
+    module: "bootstrap",
+    event: "magic_context.transform_absent",
+    reason,
+    detail,
+  });
+}
+
+/**
+ * 把 `openDatabase` 的 null 归到可行动的细分上（供 `db_null:<细分>` 的 reason）。
+ *
+ * 组合口径与包内 `storage-unavailable-reason.ts` 的 `describeStorageUnavailability`
+ * 一致（migration_guard → schema_fence → storage_failure 的优先级），刻意**不在
+ * bootstrap 侧 import 它**：那个 helper 未出包公共面，为本文件一个 reason 字符串
+ * 去扩公共面不划算；这里用已导出的 `getMigrationOnOpenRefusal` /
+ * `getSchemaFenceRejection` 两个 accessor 现拼（模块级状态由最近一次 open 写入，
+ * 每次 open 前都会被清空，因此拿到 null 时它们就是权威细分）。
+ *
+ * busy/瞬时类不在此列：那是 openDatabase 的 **throw** 路径（cause 链分类见
+ * `isTransientStorageOpenError`），由上面的有界重试负责，不会以 null 形态到达
+ * 本函数。
+ */
+function describeStorageUnavailability(): {
+  reason: "db_null:migration_guard" | "db_null:fence" | "db_null:pending_or_unclassified";
+  detail: string;
+} {
+  const refusal = getMigrationOnOpenRefusal();
+  if (refusal) {
+    return {
+      reason: "db_null:migration_guard",
+      detail: `magic-context.db migration on open refused: database v${refusal.persistedVersion} blocked by ${refusal.serverPids.length} live server process(es) on an older build`,
+    };
+  }
+  const fence = getSchemaFenceRejection();
+  if (fence) {
+    return {
+      reason: "db_null:fence",
+      detail: `magic-context.db schema fence rejected: database v${fence.persistedVersion} is newer than this build supports (v${fence.supportedVersion})`,
+    };
+  }
+  return {
+    reason: "db_null:pending_or_unclassified",
+    detail:
+      "magic-context.db could not be opened (pending async open competing for the same path, or an unclassified refusal)",
+  };
+}
+
+/**
+ * ⑤-5a：boot 开库的退避序列（毫秒）。
+ *
+ * 值与包内 `migrations.ts` 的 `MIGRATION_LOCK_RETRY_DELAYS_MS`
+ * （[1s,2s,4s,8s,15s]）的**前 4 档**一致；那个常量是模块私有符号、未出包公共面，
+ * 不为一次 import 去扩公共面，因此这里按同一序列复制前 4 档并在本注释登记出处
+ * （若包内序列调整，两处需同步）。上界语义同样对齐包内
+ * `runMigrationsWithRetry`：delays.length + 1 次尝试。
+ */
+const MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
+
+/**
+ * ⑤-5a：boot 开库的**有界** busy 重试。
+ *
+ * 只对 busy/瞬时类失败重试：5e 之后 `openDatabase` 的 catch 以 `{ cause }` 保留了
+ * 底层错误，`isTransientStorageOpenError` 在 cause 链上按类型与 code 判定
+ * （`SqliteAcquisitionBusyError` / `MigrationLockBusyError` / `isTransientSqliteError`），
+ * **不靠 message 文本猜**。schema fence、ABI 不匹配、路径不可写、迁移体失败等
+ * 确定性失败立即重抛，由装配点按 `fail_closed_blocking` 契约处理——重试绝不把
+ * fail-closed 偷换成静默降级。
+ *
+ * fence / migration guard / pending 竞争是 openDatabase 的**确定性 null**（不抛），
+ * 天然不进本函数，装配点照旧走 `db_null` 降级路径。
+ *
+ * 工厂本身是 async，直接 `await` sleep，不冻宿主、也不必改走 `openDatabaseAsync`。
+ *
+ * `delaysMs` / `sleep` 是测试缝（与 `runMigrationsWithRetry` 的同名选项同一手法）：
+ * 生产装配只传 logger，用上面的生产序列。
+ */
+export async function openMagicContextStorageWithBusyRetry(
+  open: () => ContextDatabase | null,
+  options: {
+    logger: Logger;
+    delaysMs?: readonly number[];
+    sleep?: (delayMs: number) => Promise<void>;
+  },
+): Promise<ContextDatabase | null> {
+  const delaysMs = options.delaysMs ?? MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS;
+  const sleep = options.sleep ?? ((delayMs: number) => new Promise<void>((r) => setTimeout(r, delayMs)));
+  const totalAttempts = delaysMs.length + 1;
+  for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
+    try {
+      return open();
+    } catch (error) {
+      // 不是 busy/瞬时（fence 之外的确定性失败）⇒ 原样上抛，fail-closed 语义不变。
+      if (!isTransientStorageOpenError(error)) throw error;
+      const delayMs = delaysMs[attempt - 1];
+      // 序列耗尽：上界到顶，维持「重试后仍失败就抛」的 fail-closed 终态。
+      if (delayMs === undefined) throw error;
+      options.logger.warn("Magic context storage open is busy; retrying with backoff", {
+        module: "bootstrap",
+        event: "magic_context.storage_open_retry",
+        reason: "storage_busy_retry",
+        attempt,
+        totalAttempts,
+        retryInMs: delayMs,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+      await sleep(delayMs);
+    }
+  }
+  // 不可达：循环内每条路径都 return/throw。给 TypeScript 一个确定的收尾。
+  throw new Error("[magic_context] storage open retry exhausted without a verdict");
+}
+
 export async function createMagicContextTurnTransform(
   options: MagicContextTurnTransformOptions,
 ): Promise<MagicContextTurnTransform | undefined> {
   // T-M8（Step 19a/23）：门控是**装配层**的判断，且必须是第一句——关着时既不建
   // bridge、也不 import magic-context 模块图、更不开 DB。这一行之下的一切都与
   // Phase 1 基线无关，所以关着时行为逐行等价。
-  if (!options.enabled) return undefined;
+  //
+  // ⑤-5a：关着也是一种「缺席」，必须留下可观测痕迹——桌面日志/事件面据此能回答
+  // 「为什么没有压缩」，而不是像取证时那样 0 条 transform pass 且 0 条告警。
+  // 语义照旧：发事件后 return undefined，不建 bridge、不开 DB。
+  if (!options.enabled) {
+    emitTransformAbsent(
+      options.logger,
+      "disabled",
+      "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
+    );
+    return undefined;
+  }
 
   // S15 遗留 #6：`initializeMagicContextHost()` 必须在任何 DB 写之前。装配层把本
   // 工厂放在 flag 判定之后，是因为 flag off 时整条链路（含本文件的动态 import）
@@ -807,19 +952,30 @@ export async function createMagicContextTurnTransform(
     });
   }
 
-  const db = openDatabase(getMagicContextDatabasePath());
+  // ⑤-5a：busy/瞬时失败经 `openMagicContextStorageWithBusyRetry` 有界重试
+  // （退避序列 = 包内 MIGRATION_LOCK_RETRY_DELAYS_MS 前 4 档），上界后仍失败照旧
+  // 抛给下面的 fail-closed 契约；确定性失败（fence/guard 之外的 ABI、不可写等）
+  // 不重试、原样上抛。fence / migration guard / pending 竞争是确定性 **null**，
+  // 走下面的 db_null 分支，与重试无关。
+  const db = await openMagicContextStorageWithBusyRetry(
+    () => openDatabase(getMagicContextDatabasePath()),
+    { logger: options.logger },
+  );
   if (!db) {
-    const fence = getSchemaFenceRejection();
-    const detail = fence
-      ? `magic-context.db schema fence rejected: database v${fence.persistedVersion} is newer than this build supports (v${fence.supportedVersion})`
-      : "magic-context.db could not be opened";
+    // 细分 fence / migration_guard / pending_or_unclassified：同一个「库没开出来」，
+    // 运维动作完全不同，reason 必须是机器可判的。
+    const unavailability = describeStorageUnavailability();
+    // ⑤-5a：db_null 缺席**先发事件**再决定降级还是抛错——默认
+    // fail_closed_blocking=true 时 :816-818 先 throw，事件不能因此缺席
+    // （「带着原因响亮地失败」正是可观测性的落点）。
+    emitTransformAbsent(options.logger, unavailability.reason, unavailability.detail);
     if (config.fail_closed_blocking !== false) {
-      throw new Error(`[magic_context] ${detail} (fail_closed_blocking=true)`);
+      throw new Error(`[magic_context] ${unavailability.detail} (fail_closed_blocking=true)`);
     }
     options.logger.warn("Magic context storage unavailable; transform stays inert", {
       module: "bootstrap",
-      event: "magic_context.storage_unavailable",
-      detail,
+      event: "magic_context.storage_unavailability",
+      detail: unavailability.detail,
     });
     // DB 开不出来时没有 historian、没有调度器，但 bridge 的 ConfigPort 订阅已
     // 建立——不 dispose 就等于给一个永不会生效的订阅留个尾巴。

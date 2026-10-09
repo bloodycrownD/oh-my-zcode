@@ -779,10 +779,26 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     //
     // 它与 transform 工厂**同一个动态 import**：flag off 时这段代码根本不求值，
     // 于是 recorder 的模块也不会被加载（flag off 的成本纪律对新增的缝一视同仁）。
-    const magicContextAssembly =
-      runtimeConfig.magicContext?.enabled === true
-        ? await import("./magic-context-turn-transform.js")
-        : undefined;
+    // ⑤-5b：动态 import 失败当前是**冒泡 throw**（fail-closed 性状），修复只补
+    // 可观测性——发 `magic_context.transform_absent`（reason=import_failed）后
+    // **照旧 rethrow**，不捕获成降级。reason 与事件名与
+    // `magic-context-turn-transform.ts` 的事件面保持一致；那里不能静态 import
+    // （否则 flag 关时也会把整个 magic-context 模块图拖进启动路径），所以这里
+    // 内联同一形状的一条 logger.warn。
+    let magicContextAssembly: typeof import("./magic-context-turn-transform.js") | undefined;
+    if (runtimeConfig.magicContext?.enabled === true) {
+      try {
+        magicContextAssembly = await import("./magic-context-turn-transform.js");
+      } catch (error) {
+        logger.warn("Magic context module failed to import; transform stays absent", {
+          module: "bootstrap",
+          event: "magic_context.transform_absent",
+          reason: "import_failed",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+        throw error;
+      }
+    }
     const magicContextUsageRecorder = magicContextAssembly?.createMagicContextUsageRecorder(
       sessionId,
       logger,

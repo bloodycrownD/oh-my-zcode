@@ -2544,7 +2544,24 @@ export async function runPostTransformPhase(
         }
         // After a TTL-based scheduler execute, reset lastResponseTime so
         // subsequent transforms defer instead of re-executing every pass.
-        if (args.schedulerDecision === "execute" && !materializationRequested) {
+        //
+        // FORK（bugfix-batch-20261009 / 5d）：上游此处只判
+        // `schedulerDecision === "execute" && !materializationRequested` 就无条件
+        // 推进 `last_response_time`（上游语义：TTL 到期执行过一次，让后续 pass
+        // defer，而不是每轮都重跑）。它与「真实 provider usage 读数」完全无绑定——
+        // `session_meta.last_*_usage` 三列从未被写过的会话（percentage / inputTokens
+        // 均为默认 0）也会被这一行推向当前时间戳，于是面板上出现「占用 0% 但压缩
+        // 时间戳在动」的误导组合（⑤ 的桌面取证结论之一，用户无法据此判断压缩是否
+        // 真的在运行）。
+        // 改动面：只增加「存在过真读数」这一条件——percentage > 0 或 inputTokens > 0，
+        // 与宿主 usage recorder 的写入判据（storage-meta-persisted.ts 的
+        // `percentage === 0 && inputTokens === 0` 反向）同一口径；无真读数时保持
+        // 上一个可信时间戳不动。上游的 execute/defer 决策与其它副作用逐行不变。
+        if (
+            args.schedulerDecision === "execute" &&
+            !materializationRequested &&
+            (args.contextUsage.percentage > 0 || args.contextUsage.inputTokens > 0)
+        ) {
             updateSessionMeta(args.db, args.sessionId, { lastResponseTime: Date.now() });
         }
 

@@ -21,7 +21,8 @@
     "test:transform": "node scripts/test-transform.mjs",
     "test:historian": "node scripts/test-historian.mjs",
     "test:ctx-tools": "node scripts/test-ctx-tools.mjs",
-    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:transform && npm run test:historian && npm run test:ctx-tools",
+    "test:boot-busy-retry": "node --test scripts/test-boot-busy-retry.mjs",
+    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:transform && npm run test:historian && npm run test:ctx-tools && npm run test:boot-busy-retry",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

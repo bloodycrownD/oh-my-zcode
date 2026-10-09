@@ -248,17 +248,33 @@ test("C1: the summary is read out of a real magic-context.db, not a placeholder"
   }
 }));
 
-test("C2: a session that was never transformed reports unknown budget / cache, not zeros", withTempDir(async (dir) => {
+test("C2 (T-M3): 无真读数 ⇒ usage 为 null（面板收起，不渲染假 0%）；任一占用列为正即为真读数", withTempDir(async (dir) => {
   const db = openDatabase(join(dir, "magic-context.db"));
   assert.ok(db);
   try {
-    const { usage } = await readMagicContextUsageSummary(db, "ses_never_seen");
-    assert.ok(usage, "getOrCreateSessionMeta 建行后仍应给出可展示的形状");
-    assert.equal(usage.budgetTokens, null, "从未冻结底线 ⇒ null，不是 0");
-    assert.equal(usage.compartmentCount, 0);
-    assert.equal(usage.droppedTagCount, 0);
-    // 缓存两列都没有值 ⇒ 「没命中」，而不是「读不到」。
-    assert.deepEqual(usage.cache, { m0: false, m1: false });
+    // 5c：`last_context_percentage` / `last_input_tokens` 的列默认值是 0，
+    // 「从未被 transform / recorder 写过」与「真的只占 0%」在 SQLite 里长得一模
+    // 一样。两个占用列都没超过 0 ⇒ 这份会话没有可展示的占用读数，整份摘要作废
+    // （null ⇒ 投影层删键 ⇒ UI 整段不渲染），而不是渲染一段假的「预算 0 / 0%」。
+    const never = await readMagicContextUsageSummary(db, "ses_never_seen");
+    assert.equal(never.usage, null, "从未写过读数的会话必须给 null，不是全零对象");
+    const collapsed = projection();
+    collapsed.applyMagicContextUsage(never.usage);
+    assert.equal("magicContext" in collapsed.getSnapshot().usage, false);
+    assert.deepEqual(rowsFor(collapsed.getSnapshot().usage.magicContext), []);
+
+    // 判据的边界：任一占用列为正就是真读数——哪怕百分比算出来是 0.0%，也如实渲染
+    // （percentage=0 但 inputTokens>0：小请求的真实读数，不是缺席）。
+    updateSessionMeta(db, "ses_tiny_prompt", { lastContextPercentage: 0, lastInputTokens: 812 });
+    const tiny = await readMagicContextUsageSummary(db, "ses_tiny_prompt");
+    assert.ok(tiny.usage, "inputTokens>0 就是真读数");
+    assert.equal(tiny.usage.usedPercent, 0, "0.0% 如实渲染");
+    assert.equal(tiny.usage.usedTokens, 812);
+
+    updateSessionMeta(db, "ses_pct_only", { lastContextPercentage: 12.5, lastInputTokens: 0 });
+    const pctOnly = await readMagicContextUsageSummary(db, "ses_pct_only");
+    assert.ok(pctOnly.usage, "percentage>0 就是真读数");
+    assert.equal(Math.round(pctOnly.usage.usedPercent * 10) / 10, 12.5);
   } finally {
     db.close?.();
   }

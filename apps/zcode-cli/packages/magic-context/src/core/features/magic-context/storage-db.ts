@@ -38,6 +38,7 @@ import {
     isTransientSqliteError,
     registerSlowWriteReporter,
     registerSqliteDiagnosticSink,
+    SqliteAcquisitionBusyError,
     withoutSqliteTransformPass,
     withSqliteBackgroundWriter,
 } from "../../shared/sqlite.js";
@@ -60,6 +61,7 @@ import {
 import { runMigrationsOffThread } from "./migration-worker-client.js";
 import {
     FORK_MIGRATION_VERSION_FLOOR,
+    MigrationLockBusyError,
     hasPendingMigrations,
     runMigrations,
     runMigrationsWithRetry,
@@ -2587,6 +2589,50 @@ function healWedgedChannel2Claims(db: Database): void {
 }
 
 /**
+ * FORK (bugfix-batch-20261009 / 5e)：openDatabase / openDatabaseAsync 的 catch
+ * 在重构错误时保留底层错误的类型信息（`{ cause }`），并导出本判定函数，供宿主
+ * 装配层（bootstrap `magic-context-turn-transform.ts` 的 boot 重试）分类
+ * 「busy/瞬时」与「确定性失败」。
+ *
+ * 源位置 / 上游语义：上游（以及本 fork 5e 之前的）catch 是
+ *     throw new Error(`[magic-context] storage unavailable: ${detail} …`)
+ * 只带 message、不带 `cause`；而 `detail = getErrorMessage(error)` 只取
+ * `error.message`。于是 `SqliteAcquisitionBusyError` / `MigrationLockBusyError`
+ * 的类名、`code`、`errcode` 在装配点**全部丢失**——catch 到的永远是普通
+ * `Error`，对上述两类做 `instanceof` 均不成立，包公共面的
+ * `isTransientSqliteError`（只认 code）对包装后的 Error 也一律返回 false。
+ * 锚点取证任务 C 已实证：装配点无法据错误类区分 busy 与确定性失败。
+ *
+ * 改动面（上游控制流逐行不变，message 逐字不变）：
+ *   1. 两处 catch 的 `new Error(...)` 追加第二个参数 `{ cause: error }`；
+ *   2. 新增本函数：只沿 **cause 链**按类型与 code 判定——
+ *      `SqliteAcquisitionBusyError` / `MigrationLockBusyError` 的 instanceof，
+ *      以及既有 `isTransientSqliteError` 的 code 判定（原始错误上的
+ *      SQLITE_BUSY/SQLITE_LOCKED / errcode 5,6）。
+ *      **刻意不做 message 子串分类**：文案里 `database is locked` 一类特征过于
+ *      脆弱（fence/ABI/不可写等确定性失败与 busy 类的差别只在一句运维提示），
+ *      而 cause 链上的原始错误本身就是权威判据。
+ *   3. 只有真正的 busy/瞬时类返回 true；schema fence、ABI 不匹配、路径不可写、
+ *      迁移体失败等确定性失败一律 false——宿主据此只重试前者，后者维持
+ *      fail-closed 立即抛，`fail_closed_blocking` 契约不受影响。
+ */
+export function isTransientStorageOpenError(error: unknown): boolean {
+    let current: unknown = error;
+    // cause 链有界：宿主侧包装 + writer 获取路径各挂一层，8 层远超实际深度。
+    for (let depth = 0; depth < 8; depth += 1) {
+        if (current === undefined || current === null) return false;
+        if (current instanceof SqliteAcquisitionBusyError) return true;
+        if (current instanceof MigrationLockBusyError) return true;
+        if (isTransientSqliteError(current)) return true;
+        current =
+            typeof current === "object" && "cause" in current
+                ? (current as { cause?: unknown }).cause
+                : undefined;
+    }
+    return false;
+}
+
+/**
  * Open the persistent Magic Context SQLite database.
  *
  * Fails closed: if the database cannot be opened (binary ABI mismatch,
@@ -2684,8 +2730,12 @@ export function openDatabase(dbPathOrOptions?: string | OpenDatabaseOptions): Da
         log(`[magic-context] storage fatal: failed to open ${dbPath}: ${detail}`);
         // No silent in-memory fallback — see comment above. Caller must
         // catch and disable Magic Context for that run.
+        // FORK (bugfix-batch-20261009 / 5e)：`{ cause }` 保留底层错误类型，供
+        // 宿主按 `isTransientStorageOpenError` 区分 busy/瞬时与确定性失败；
+        // message 逐字不变，见该函数的 FORK 块。
         throw new Error(
             `[magic-context] storage unavailable: ${detail}. Magic Context is disabled for this run; check log for details.`,
+            { cause: error },
         );
     }
 }
@@ -2784,8 +2834,11 @@ export async function openDatabaseAsync(
             if (db) closeQuietly(db);
             const detail = getErrorMessage(error);
             log(`[magic-context] storage fatal: failed to open ${dbPath}: ${detail}`);
+            // FORK (bugfix-batch-20261009 / 5e)：与同步 `openDatabase` 同构——
+            // `{ cause }` 保留底层错误类型，message 逐字不变。
             throw new Error(
                 `[magic-context] storage unavailable: ${detail}. Magic Context is disabled for this run; check log for details.`,
+                { cause: error },
             );
         } finally {
             if (openMs === 0) openMs = performance.now() - openStartedAt;
