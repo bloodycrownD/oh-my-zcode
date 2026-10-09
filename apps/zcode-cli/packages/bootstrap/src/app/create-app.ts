@@ -435,6 +435,12 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       options.executionPort ??
       createNodeExecutionAdapter({
         onToolExecResource: options.onToolExecResource,
+        // ⑥exec 输出上限（wave-0 已在 NodeExecutionAdapterOptions 加 onDebug）：
+        // `ZCODE_EXEC_OUTPUT_LIMIT_BYTES` 非法/越界回落默认值 256MiB 时的说明落点。
+        // adapter 层不持有 logger，宿主不接这条路就是静默回落——用户把上限写成
+        // 512KiB 或 2GiB 时对着错误的行为排错也看不出原因，所以接到本 App logger
+        // 的 debug 通道。
+        onDebug: (message) => logger.debug(message),
         network: {
           httpProxy: configResult.config.network.httpProxy,
           noProxy: configResult.config.network.noProxy,
@@ -567,6 +573,11 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       network: configResult.config.network,
       sourceTitle: options.sourceTitle,
     });
+    // ①默认模型实时（spec 1f）：默认模型的读取统一走这一个闭包——宿主（协议层）经
+    // accessor 注入进程级 registry 的同步缓存，Personal 配置的 defaultModelSelection
+    // 变更后同进程内新会话/兜底解析都能看到新值；没有 accessor 的宿主回落静态字段。
+    const readConfiguredDefaultModelSelection = () =>
+      options.resolveConfiguredDefaultModelSelection?.() ?? options.configuredDefaultModelSelection;
     const modelAdapter =
       options.modelAdapter ??
       createModelAdapter({
@@ -589,7 +600,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       logger,
       // FORK（D-12）：旧会话里的 `account:*` providerId 在账号体系整删后已不可解析，
       // 回落到 Environment 默认模型；`validateSelection` 本体不变（纯判定）。
-      resolveFallbackSelection: () => options.configuredDefaultModelSelection,
+      // ①默认模型实时（spec 1f）：回落源改成活读闭包——进程内改默认模型配置后，
+      // 这里解析到的是新默认，而不是 startup 时冻结的旧快照。
+      resolveFallbackSelection: () => readConfiguredDefaultModelSelection(),
     });
     providerModelRuntime.start();
     // model factory 提前到三条 workflow child 装配线之前构造：script workflow bridge、dwf actor
@@ -898,8 +911,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // 混进来会把占比算成"侧车小请求"——与 event-reducer 的同一条判据）。
       eventSink: composeMagicContextUsageSink(options.eventSink, magicContextUsageRecorder),
       modelFactory,
-modelIoDir,
-resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
+      modelIoDir,
+      resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
       isRemoteWorkspace: () =>
         isRemoteWorkspaceIdentity(runtimeConfig.memory?.workspaceIdentity ?? ""),
       permissionBroker: options.permissionBroker,
@@ -991,11 +1004,18 @@ resolveEffectiveModelSelection: options.resolveEffectiveModelSelection,
       ...(closeMagicContext === undefined ? {} : { closeMagicContext }),
       configResult,
       configuredMcpServers,
-      ...(options.configuredDefaultModelSelection
+      // ①默认模型实时（spec 1f）：优先把**活读取入**透传给 session facade，
+      // 而不是 build 时把静态值拷进这个新对象（那会让本次装配之后发生的默认模型
+      // 变更在本 App 内全部失效）。没有 accessor 的宿主才回落静态字段。
+      ...(options.resolveConfiguredDefaultModelSelection
         ? {
-            configuredDefaultModelSelection: options.configuredDefaultModelSelection,
+            resolveConfiguredDefaultModelSelection: options.resolveConfiguredDefaultModelSelection,
           }
-        : {}),
+        : options.configuredDefaultModelSelection
+          ? {
+              configuredDefaultModelSelection: options.configuredDefaultModelSelection,
+            }
+          : {}),
       executionPort,
       localSettingStore,
       logger,

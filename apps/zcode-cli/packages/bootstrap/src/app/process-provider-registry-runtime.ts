@@ -84,11 +84,38 @@ export async function startProcessProviderRegistryRuntime(
     });
     try {
       const configuredDefaultModelSelection = await modelSelectionConfigRepository.read();
+      // ①默认模型实时（spec 1f）：Personal 文件的 defaultModelSelection 是进程内可变的
+      // （TUI /model、设置页写回都会改它），首读快照会过期，而消费面（会话装配、
+      // fallback 解析）需要**同步**拿到「此刻的默认选择」。repository 只有 async
+      // read()，因此这里维护同步缓存：首读 await 后即缓存，onDidChange 触发后台刷新。
+      // 缓存的唯一读者是 getConfiguredDefaultModelSelection()，退订挂在 dispose 上，
+      // 进程退出不会留下悬挂订阅。
+      let cachedConfiguredDefaultModelSelection = configuredDefaultModelSelection;
+      let modelSelectionConfigDisposed = false;
+      // 刷新链：并发的配置变更可能交错，链式执行保证缓存停在某个已提交版本上，
+      // 不会被一次更早的读覆盖更晚的读。
+      let configuredDefaultRefreshChain: Promise<void> = Promise.resolve();
+      const unsubscribeModelSelectionConfig = modelSelectionConfigRepository.onDidChange(() => {
+        if (modelSelectionConfigDisposed) return;
+        configuredDefaultRefreshChain = configuredDefaultRefreshChain
+          .then(() => modelSelectionConfigRepository.read())
+          .then((next) => {
+            cachedConfiguredDefaultModelSelection = next;
+          })
+          .catch(() => {
+            // 读失败保持旧缓存：配置读取异常不得沿 registry 事件链反向抛出，
+            // 下一次变更还会再刷一次。
+          });
+      });
       return Object.freeze({
         dispose() {
+          modelSelectionConfigDisposed = true;
+          unsubscribeModelSelectionConfig();
           modelSelectionConfigRepository.dispose();
           runtime.dispose();
         },
+        /** 同步活读：同进程内默认模型配置变更后，这里返回新值。 */
+        getConfiguredDefaultModelSelection: () => cachedConfiguredDefaultModelSelection,
         runtime,
         snapshot,
         modelSelectionConfigRepository,

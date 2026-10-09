@@ -115,6 +115,12 @@ interface CreateSessionFacadeDeps {
   configResult: ConfigResult;
   configuredMcpServers: Record<string, McpServerConfig>;
   configuredDefaultModelSelection?: ModelSelection;
+  /**
+   * ①默认模型实时（spec 1f）：`configuredDefaultModelSelection` 的活读取入
+   * （进程级 registry 同步缓存）。在场时优先于上面的静态字段，
+   * `setModel("main")` 的兜底解析因此拿到最新的默认模型。
+   */
+  resolveConfiguredDefaultModelSelection?: () => ModelSelection | undefined;
   executionPort: ExecutionPort;
   localSettingStore?: LocalSettingStorePort;
   logger: Logger;
@@ -495,7 +501,10 @@ export function createSessionFacade(deps: CreateSessionFacadeDeps): SessionFacad
           ? resolveRegistryOwnedSelection(
               deps.providerRegistry,
               modelId,
-              deps.configuredDefaultModelSelection,
+              // ①默认模型实时（spec 1f）：`main` 的兜底源活读默认模型——
+              // 同进程内改配置后 `setModel("main")` 解析到新默认，而非 startup 快照。
+              deps.resolveConfiguredDefaultModelSelection?.() ??
+                deps.configuredDefaultModelSelection,
               { allowMissingReasoning: true },
             )
           : resolveRegistryOwnedModelSelection(deps.providerRegistry, modelId);

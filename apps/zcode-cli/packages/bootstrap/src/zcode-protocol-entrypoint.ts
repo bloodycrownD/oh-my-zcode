@@ -7,10 +7,7 @@ import {
   type McpConnectionPool,
   type McpTelemetryTracker,
 } from "@zcode/adapters/mcp";
-import {
-  zcodeProtocolNotifications,
-  type ZCodeMcpResourceSample,
-} from "@zcode/shared";
+import { zcodeProtocolNotifications, type ZCodeMcpResourceSample } from "@zcode/shared";
 import type { SqliteSessionStore } from "@zcode/adapters/storage";
 import { traceContextToLogContext, createRootTraceContext } from "@zcode/contracts";
 import type { McpPort, ModelSelection } from "@zcode/contracts";
@@ -55,16 +52,20 @@ function applyProtocolPresentationSurface(
  * 进程级 Registry 已就绪后，它就是当前 Environment 的模型事实源。
  *
  * 旧 workspace snapshot 不再参与 Provider 和 Model 执行。
+ *
+ * ①默认模型实时（spec 1f）：默认选择经 accessor 传入，而不是 startup 时读一次的
+ * 静态值——桌面是长驻进程，用户在设置里改默认模型后，同一进程内新建的会话必须
+ * 拿到新值。registry 侧已订阅 Personal 配置的 onDidChange 并维护同步缓存。
  */
 function applyProtocolProviderRegistry(
   options: Omit<ZCodeAppOptions, "providerRegistry">,
   providerRegistry: ZCodeAppOptions["providerRegistry"],
-  configuredDefaultModelSelection?: ModelSelection,
+  resolveConfiguredDefaultModelSelection?: () => ModelSelection | undefined,
 ): ZCodeAppOptions {
   return {
     ...options,
     providerRegistry,
-    ...(configuredDefaultModelSelection ? { configuredDefaultModelSelection } : {}),
+    ...(resolveConfiguredDefaultModelSelection ? { resolveConfiguredDefaultModelSelection } : {}),
   };
 }
 
@@ -188,7 +189,9 @@ export async function runZCodeProtocolAgent(
           ...applyProtocolProviderRegistry(
             applyProtocolPresentationSurface(appOptions, presentationSurface),
             activeProviderRegistryRuntime.runtime.registryService,
-            activeProviderRegistryRuntime.configuredDefaultModelSelection,
+            // ①默认模型实时（spec 1f）：活读进程级缓存的同步 getter；写死
+            // startup 快照会让桌面长驻进程里的默认模型变更永远不生效。
+            () => activeProviderRegistryRuntime.getConfiguredDefaultModelSelection(),
           ),
           // 只读同进程已应用快照；不为子任务另发 Host RPC，也不在 ModelFactory 偷换模型。
           resolveEffectiveModelSelection: (selection) => {

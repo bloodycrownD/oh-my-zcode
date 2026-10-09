@@ -141,6 +141,15 @@ export interface ZCodeAppOptions {
   resolveEffectiveModelSelection?: (selection: ModelSelection) => EffectiveModelSelectionResult;
   /** 新 Session 使用的 Environment 默认选择；仅在没有显式 runtime modelSelection 时参与初始化。 */
   configuredDefaultModelSelection?: ModelSelection;
+  /**
+   * ①默认模型实时（spec 1f）：`configuredDefaultModelSelection` 的活读取入。
+   *
+   * 进程级 provider registry 订阅 Personal 配置的 onDidChange 并维护同步缓存，宿主
+   * 经此 accessor 把「此刻的默认选择」交给 App；装配期/解析期调用它即可拿到最新值，
+   * 而不是 startup 时冻结的静态快照。缺省时回落上面的静态字段（CLI 每 prompt 一进程，
+   * 静态值本就是当次进程的最新读）。
+   */
+  resolveConfiguredDefaultModelSelection?: () => ModelSelection | undefined;
   modelIoFullRetentionEnabled?: boolean;
   loggerFactory?: LoggerFactory;
   officialPluginRoots?: string[];

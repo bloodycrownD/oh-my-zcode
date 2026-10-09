@@ -282,7 +282,11 @@ function resolveInitialRegistrySelection(
 
   if (options.resume) return undefined;
   const initial = resolveInitialModelSelection({
-    configuredDefault: options.configuredDefaultModelSelection,
+    // ①默认模型实时（spec 1f）：这里按 accessor 现读默认模型，而不是 startup 快照。
+    // Personal 配置的 defaultModelSelection 变更后，同进程内新建会话的初始选择跟随
+    // 新值；没有 accessor 的宿主（CLI 每 prompt 一进程）回落静态字段，语义不变。
+    configuredDefault:
+      options.resolveConfiguredDefaultModelSelection?.() ?? options.configuredDefaultModelSelection,
     registry: registry.getView(),
   });
   if (initial.source === "none") return undefined;
