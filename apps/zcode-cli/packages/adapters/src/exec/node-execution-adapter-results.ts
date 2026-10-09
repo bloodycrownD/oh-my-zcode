@@ -2,7 +2,7 @@ import { mkdir, open, rm } from "node:fs/promises";
 import { dirname } from "node:path";
 import { BashFileOutput, diagnoseLostBashOutput } from "./bash-file-output.js";
 import { NodeExecutionAdapterBase } from "./node-execution-adapter-base.js";
-import { DEFAULT_TIMEOUT_MS, formatTimeoutDuration } from "./execution-utils.js";
+import { DEFAULT_TIMEOUT_MS, formatExecOutputLimitBytes, formatTimeoutDuration } from "./execution-utils.js";
 import type {
   ExecutionOutputPaths,
   InternalExecutionRunOptions,
@@ -163,6 +163,7 @@ export class NodeExecutionAdapterResults extends NodeExecutionAdapterBase {
   protected normalizeBashBackgroundOutputLimitResult(
     result: ExecutionResult,
     persistedLimitReached: boolean,
+    limitBytes: number,
   ): ExecutionResult {
     if (!persistedLimitReached) return result;
     return {
@@ -173,7 +174,8 @@ export class NodeExecutionAdapterResults extends NodeExecutionAdapterBase {
       cancelled: true,
       error: {
         type: "output_limit",
-        message: "Background command killed: output file exceeded 5GB",
+        // 上限值随 env 覆盖变化，文案硬写 "5GB" 会与实际拦截阈值对不上。
+        message: `Background command killed: output file exceeded ${formatExecOutputLimitBytes(limitBytes)}`,
       },
     };
   }

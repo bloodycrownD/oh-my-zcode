@@ -143,10 +143,19 @@ export class NodeExecutionAdapterProcess extends NodeExecutionAdapterResults {
     };
   }
 
-  protected terminateProcessTree(child: ChildProcess, useBashProcessTreeStop: boolean): void {
+  /**
+   * 即发即忘地终止进程树；返回杀树收尾 Promise（非 bash 直写分支没有登记，
+   * 返回 undefined）。调用方可以 await 它来确认后代已收到信号并退出——
+   * Bash 直写路径的超限截断就必须等这个 Promise，否则会在子进程还在写盘时
+   * 提前改写文件（见 NodeExecutionAdapterRun 的截断收尾）。
+   */
+  protected terminateProcessTree(
+    child: ChildProcess,
+    useBashProcessTreeStop: boolean,
+  ): Promise<void> | undefined {
     if (!child.pid) {
       child.kill("SIGTERM");
-      return;
+      return undefined;
     }
 
     if (this.platform === "win32") {
@@ -165,15 +174,16 @@ export class NodeExecutionAdapterProcess extends NodeExecutionAdapterResults {
         // 直写后不再等待 pipe EOF，shutdown 必须显式等待 taskkill 收尾，避免提前释放资源。
         this.pendingBashProcessTreeKills.set(completion, killer);
         void completion.finally(() => this.pendingBashProcessTreeKills.delete(completion));
+        return completion;
       }
-      return;
+      return undefined;
     }
 
     if (!useBashProcessTreeStop) {
       // PPID 后代枚举只修复 Bash job-control 的跨 PGID 清理；通用 hook、
       // shell 和 argv execution 必须保留既有进程组边界，避免修复能力扩散到其它调用方。
       terminateGenericPosixProcessGroup(child);
-      return;
+      return undefined;
     }
 
     const rootPid = child.pid;
@@ -197,6 +207,7 @@ export class NodeExecutionAdapterProcess extends NodeExecutionAdapterResults {
     void escalation.finally(() => {
       this.pendingBashProcessTreeKills.delete(escalation);
     });
+    return escalation;
   }
 
   protected destroyChildOutputStreams(child: ChildProcess): void {

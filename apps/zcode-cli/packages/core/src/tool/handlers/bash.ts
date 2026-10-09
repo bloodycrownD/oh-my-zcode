@@ -60,7 +60,10 @@ export {
 } from "./bash-metadata.js";
 
 const MAX_INLINE_OUTPUT_BYTES = 30_000;
-const MAX_RUNTIME_PERSISTED_OUTPUT_BYTES = 5 * 1024 * 1024 * 1024;
+// 落盘上限不再由本层硬填：`outputLimit.maxPersistedBytes` 在 adapter 侧优先级最高，
+// 每请求填 5GiB 会把 `ZCODE_EXEC_OUTPUT_LIMIT_BYTES` 的 env 覆盖与 adapter 默认值
+// 一起架空（前台与 run_in_background 都不例外）。缺省时由 adapter 解析链给出，
+// 前后台因此共用同一上限。inline/展示上限仍在本层固定。
 const BASH_PROVIDER_DESCRIPTION = createBashProviderDescription({
   defaultTimeoutMs: DEFAULT_BASH_TIMEOUT_POLICY.defaultTimeoutMs,
   maxTimeoutMs: DEFAULT_BASH_TIMEOUT_POLICY.maxTimeoutMs,
@@ -311,7 +314,6 @@ function createExecutionRequest(
     outputLimit: {
       maxInlineBytes: MAX_INLINE_OUTPUT_BYTES,
       maxBufferBytes: MAX_INLINE_OUTPUT_BYTES,
-      maxPersistedBytes: MAX_RUNTIME_PERSISTED_OUTPUT_BYTES,
       persistOutput: input.run_in_background ? "always" : "on_truncate",
     },
     sandbox: {

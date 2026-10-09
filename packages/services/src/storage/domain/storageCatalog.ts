@@ -26,7 +26,10 @@ const CLEANABILITY: Record<StorageCategoryId, StorageCleanability> = {
   sessionStore: "none",
   // 只有 subagent 的 transcript.jsonl 可删；其余工具输出与临时缓存暂不可删。
   subagentTranscripts: "safe",
-  toolOutputs: "none",
+  // 6c：toolOutputs 整组里只把 cli/exec 单列出来接进清理入口（见 CLEAN_PATH_OVERRIDES）。
+  // 「safe」只对 cli/exec 生效：artifacts/agents/sessions/缓存…的删除范围被
+  // getStorageCleanScopes 与 isStoragePathInCleanScope 双双收敂到 cli/exec。
+  toolOutputs: "safe",
   modelTrajectory: "safe",
   devTraces: "safe",
   logs: "safe",
@@ -35,6 +38,23 @@ const CLEANABILITY: Record<StorageCategoryId, StorageCleanability> = {
   runtimes: "none",
   config: "none",
   other: "none",
+};
+
+/**
+ * 6c：类别内的 per-path 清理覆盖。
+ *
+ * `cli/exec/<sessionId>/<toolCallId>-stdout.log` 是 Bash 合并输出的落盘位置，
+ * 失控命令（子代理后台死循环灌 stdout）曾把单文件写到 5.13GiB、5 次共 25.7GB，
+ * 而整组历史上挂着 `toolOutputs: "none"`，现网没有任何回收手段。
+ *
+ * 这里不新增顶层类别、不动整组其余成员的清理性状：只把 `cli/exec` 这一段路径
+ * 从整组里单列出来——
+ *   - 占用统计/展示不变：`classifyStoragePath` 仍把 exec 归 toolOutputs；
+ *   - 清理范围收敛：`getStorageCleanScopes("toolOutputs")` 只枚举 cli/exec，
+ *     `planStorageClean` 再按 `isStoragePathInCleanScope` 过滤一遍候选（双保险）。
+ */
+const CLEAN_PATH_OVERRIDES: Partial<Record<StorageCategoryId, readonly string[]>> = {
+  toolOutputs: ["cli/exec"],
 };
 
 interface FileRule {
@@ -190,6 +210,34 @@ export function getStorageCategoryCleanability(categoryId: StorageCategoryId): S
   return CLEANABILITY[categoryId];
 }
 
+/**
+ * 该类别是否按 per-path 覆盖收敛清理范围（当前只有 toolOutputs → cli/exec）。
+ * 供清理计划侧决定要不要加路径级在飞保护。
+ */
+export function hasStorageCleanPathOverride(categoryId: StorageCategoryId): boolean {
+  return CLEAN_PATH_OVERRIDES[categoryId] !== undefined;
+}
+
+/**
+ * 候选路径是否属于该类别的可清理范围。
+ *
+ * 6c：带 per-path 覆盖的类别（toolOutputs）只认 cli/exec 前缀，避免一键清理把
+ * 整组里不可删的成员（artifacts/agents/sessions/缓存）一起带走；其余类别维持
+ * 既有的「分类相等」判定。
+ */
+export function isStoragePathInCleanScope(
+  categoryId: StorageCategoryId,
+  rawPath: string,
+  context: StorageCatalogContext,
+): boolean {
+  const overridePrefixes = CLEAN_PATH_OVERRIDES[categoryId];
+  if (overridePrefixes) {
+    const path = normalizeStorageRelativePath(rawPath);
+    return overridePrefixes.some((prefix) => isUnderPrefix(path, prefix));
+  }
+  return classifyStoragePath(rawPath, context).categoryId === categoryId;
+}
+
 export function isProtectedStoragePath(rawPath: string): boolean {
   const path = normalizeStorageRelativePath(rawPath);
   const basename = path.split("/").at(-1) ?? path;
@@ -209,6 +257,12 @@ const RECURSIVE_FILE_RULE_SCOPES: Partial<Record<StorageCategoryId, string[]>> =
 
 export function getStorageCleanScopes(categoryId: StorageCategoryId): StorageCleanScope[] {
   if (categoryId === "other" || CLEANABILITY[categoryId] === "none") return [];
+  // 6c：带 per-path 覆盖的类别（toolOutputs → cli/exec）只枚举覆盖前缀，
+  // 不枚举整组——枚举范围即删除范围的上界，别让"单列"变成"整组解锁"。
+  const overridePrefixes = CLEAN_PATH_OVERRIDES[categoryId];
+  if (overridePrefixes) {
+    return overridePrefixes.map((prefix) => ({ prefix, recursive: true }));
+  }
   const recursive = [
     ...PREFIX_RULES[categoryId],
     ...(RECURSIVE_FILE_RULE_SCOPES[categoryId] ?? []),

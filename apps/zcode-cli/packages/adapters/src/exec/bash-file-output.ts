@@ -4,11 +4,146 @@ import { constants } from "node:fs";
 import { lstat, mkdir, open, rm, stat, statfs, type FileHandle } from "node:fs/promises";
 import { dirname } from "node:path";
 import { decodeExecutionOutputBuffer } from "./outputEncoding.js";
+import { BASH_OUTPUT_TRUNCATE_WAIT_MS, waitForPromise } from "./execution-utils.js";
 import type { ExecutionStreamResult, ExecutionOutputPreview } from "@zcode/contracts";
 
 const OUTPUT_WATCH_INTERVAL_MS = 5_000;
 const OUTPUT_FILE_MODE = 0o600;
 const PROGRESS_TAIL_MAX_BYTES = 4096;
+/** 截断后文件头部保留的字节数：保住开头的命令回显/早期报错，最常用的诊断段。 */
+export const BASH_OUTPUT_TRUNCATE_HEAD_KEEP_BYTES = 1024 * 1024;
+/** 截断后文件尾部保留的字节数：保住结尾的失败摘要。 */
+export const BASH_OUTPUT_TRUNCATE_TAIL_KEEP_BYTES = 1024 * 1024;
+/** 截断标记行的长度预算（字节）。用于估算截断后体积的余量。 */
+export const BASH_OUTPUT_TRUNCATE_MARKER_MAX_BYTES = 256;
+
+export interface BashOutputTruncationResult {
+  /** 被一行标记替换掉的中间字节数（= 原体积 - 头 - 尾）。 */
+  removedBytes: number;
+  /** 截断后的文件体积（头 + 标记行 + 尾）。 */
+  finalBytes: number;
+  /** 替换用的标记行原文。 */
+  marker: string;
+}
+
+/**
+ * 把超限的 Bash 合并输出文件物理截断成「头 + 一行标记 + 尾」。
+ *
+ * 与 `capForegroundArtifactStream` 的区别：后者只保留头部并 truncate，结尾的
+ * 报错摘要会整段丢失；这里头尾各留 ~1MiB，中间替换成
+ * `[truncated N bytes by omz exec output limit]`，保住「开头命令回显 +
+ * 结尾失败原因」两段最常用诊断信息，同时让落盘体积重新有界。
+ *
+ * 头尾窗口按上限收缩：`headKeep + tailKeep <= limitBytes`，保证截断后体积
+ * 仍落在「上限 + 标记行」之内——否则上限被调小（env 覆盖到 1MiB）时，
+ * 两级默认窗口反而会让截断结果超出上限，"物理截断"失去意义。
+ *
+ * 上游看门狗（watchLimit）每 5s 才 stat 一次，杀进程那一刻文件通常已经超调到
+ * 上限 + 一个轮询间隔的写入量，因此判据用 `size <= limitBytes` 直接放行。
+ *
+ * IO 失败（文件被占用/权限/已消失）由调用方记日志吞掉——截断只是收尾优化，
+ * 不能让它反过来丢掉执行结果。
+ */
+export async function truncateBashOutputFileKeepHeadTail(
+  filePath: string,
+  limitBytes: number,
+  headKeepBytes: number = BASH_OUTPUT_TRUNCATE_HEAD_KEEP_BYTES,
+  tailKeepBytes: number = BASH_OUTPUT_TRUNCATE_TAIL_KEEP_BYTES,
+): Promise<BashOutputTruncationResult | undefined> {
+  const handle = await open(filePath, "r+");
+  try {
+    const { size } = await handle.stat();
+    if (size <= limitBytes) return undefined;
+    // 窗口按上限收缩：两级之和不得超过上限，否则小上限下截断结果反而更大。
+    const headKeep = Math.min(Math.max(0, headKeepBytes), Math.floor(limitBytes / 2));
+    const tailKeep = Math.min(Math.max(0, tailKeepBytes), Math.max(0, limitBytes - headKeep));
+    const headLength = Math.min(size, headKeep);
+    const tailLength = Math.min(size - headLength, tailKeep);
+    const removedBytes = size - headLength - tailLength;
+    const head = await readExact(handle, headLength, 0);
+    // 头尾窗口已覆盖整个文件（文件比收缩后的两级窗口加起来还小）时不存在中间段，
+    // 退化成「保留头部」，不做二次写入。
+    if (removedBytes <= 0) {
+      await handle.truncate(head.length);
+      return { removedBytes: 0, finalBytes: head.length, marker: "" };
+    }
+    const tail = await readExact(handle, tailLength, size - tailLength);
+    const marker = `\n[truncated ${removedBytes} bytes by omz exec output limit]\n`;
+    const content = Buffer.concat([head, Buffer.from(marker, "utf8"), tail]);
+    await handle.write(content, 0, content.length, 0);
+    // 只 truncate 不 fsync：页缓存里的数据由 OS 负责落盘，进程被 kill 不回退。
+    await handle.truncate(content.length);
+    return { removedBytes, finalBytes: content.length, marker };
+  } finally {
+    await handle.close().catch(() => undefined);
+  }
+}
+
+/** 定长读取；短读继续补，避免把缓冲区里的空洞当成真实输出。 */
+async function readExact(handle: FileHandle, length: number, position: number): Promise<Buffer> {
+  const buffer = Buffer.alloc(length);
+  let filled = 0;
+  while (filled < length) {
+    const { bytesRead } = await handle.read(buffer, filled, length - filled, position + filled);
+    if (bytesRead === 0) break;
+    filled += bytesRead;
+  }
+  return buffer.subarray(0, filled);
+}
+
+/**
+ * 看门狗超限杀进程后的收尾：把文件物理截断成「头 + 标记行 + 尾」。
+ *
+ * 时序（judge P1-1）：`terminateProcessTree` 是即发即忘的——Windows taskkill 与
+ * POSIX 两阶段信号都是异步，root shell 的 exit 事件只代表组长退出，持有继承 fd
+ * 的后代可能仍在往同一文件写。因此截断必须等 close 与杀树收尾都完成，否则刚写入
+ * 的「头 + 标记 + 尾」会被活着的写者重新撑大（标记行被埋进中间，落盘体积上限
+ * 形同虚设）。这也是 watchLimit 的 onLimit 只触发 requestStop、绝不在回调内截断
+ * 的原因。
+ *
+ * 有界等待：杀树永不完成时不能挂死 run() 的收尾，超时即跳过截断（保留原文件，
+ * 与修复前行为一致，不因清理失败丢掉执行结果）。
+ *
+ * 截断失败（文件被占用/权限/已消失）只经 onDebug 说明，不抛错。
+ */
+export async function truncateBashOutputAfterKill(args: {
+  filePath: string;
+  /** 子进程 close 事件（stdio 全部关闭）——见 run.ts 的 closePromise。 */
+  closePromise: Promise<void>;
+  /** 杀树收尾（taskkill / POSIX 两阶段）；未触发杀树时缺省。 */
+  killCompletion?: Promise<void>;
+  limitBytes: number;
+  /** 总等待上界，默认 BASH_OUTPUT_TRUNCATE_WAIT_MS。 */
+  waitMs?: number;
+  onDebug?: (message: string) => void;
+}): Promise<void> {
+  const settleWaits: Promise<unknown>[] = [args.closePromise];
+  if (args.killCompletion) settleWaits.push(args.killCompletion);
+  const settled = await waitForPromise(
+    Promise.all(settleWaits),
+    args.waitMs ?? BASH_OUTPUT_TRUNCATE_WAIT_MS,
+  );
+  if (!settled) {
+    args.onDebug?.(
+      `exec output truncation skipped: child/tree did not settle within ${
+        args.waitMs ?? BASH_OUTPUT_TRUNCATE_WAIT_MS
+      }ms (${args.filePath})`,
+    );
+    return;
+  }
+  try {
+    await truncateBashOutputFileKeepHeadTail(args.filePath, args.limitBytes);
+  } catch (error) {
+    const code = error instanceof Error && "code" in error ? String(error.code) : "unknown";
+    // Windows 上文件被其它句柄占用、POSIX 上权限不足都会走到这里；
+    // 保留原文件并说明原因，绝不因为清理失败丢掉执行结果。
+    args.onDebug?.(
+      `exec output truncation failed (${code}) for ${args.filePath}: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+}
 
 /** Bash 只持有文件身份和观察器；原始输出由子进程写入，不经过 Node collector。 */
 export class BashFileOutput {

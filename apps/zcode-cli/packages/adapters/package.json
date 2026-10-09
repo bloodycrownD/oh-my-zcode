@@ -96,6 +96,7 @@
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:magic-context-domain": "node scripts/test-magic-context-domain.mjs",
     "test:plugin-marketplace-official-alias": "node scripts/test-plugin-marketplace-official-alias.mjs",
+    "test:bash-output-limit": "node --test scripts/test-bash-output-limit.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

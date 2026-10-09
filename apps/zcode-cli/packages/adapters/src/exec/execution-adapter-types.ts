@@ -81,6 +81,8 @@ export interface NodeExecutionAdapterOptions {
   progressIntervalMs?: number;
   progressTailBytes?: number;
   progressThresholdMs?: number;
+  /** 调试说明去向（如 logger.debug）。exec 层不持有 logger，由宿主注入；缺省即静默。 */
+  onDebug?: (message: string) => void;
 }
 
 export type OutputPersistenceMode = "none" | "on_truncate" | "always";

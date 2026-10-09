@@ -2,7 +2,6 @@ import { BACKGROUND_BASH_OUTPUT_MAX_BYTES, type BackgroundBashOutputResult } fro
 import { readBashOutput } from "./bash-file-output.js";
 import { NodeExecutionAdapterRun } from "./node-execution-adapter-run.js";
 import {
-  BASH_RUNTIME_OUTPUT_LIMIT_BYTES,
   DEFAULT_TIMEOUT_MS,
   isBashMergedOutputRequest,
 } from "./execution-utils.js";
@@ -126,7 +125,9 @@ export class NodeExecutionAdapterLifecycle extends NodeExecutionAdapterRun {
       outputLimit: {
         ...request.outputLimit,
         killProcessOnPersistedLimit: false,
-        maxPersistedBytes: BASH_RUNTIME_OUTPUT_LIMIT_BYTES,
+        // 不再硬填 maxPersistedBytes：request 值优先级最高，这里写死会让 env
+        // `ZCODE_EXEC_OUTPUT_LIMIT_BYTES` 对后台任务（含子代理的后台 Bash，即
+        // 事故路径）完全失效。缺省时由 adapter 侧的解析链给出上限。
         persistOutput: "always",
       },
     };
@@ -262,7 +263,11 @@ export class NodeExecutionAdapterLifecycle extends NodeExecutionAdapterRun {
       if (state === "backgrounded") {
         this.finalizeBackgroundTaskRecord(
           record,
-          this.normalizeBashBackgroundOutputLimitResult(unprocessedResult, persistedLimitReached),
+          this.normalizeBashBackgroundOutputLimitResult(
+            unprocessedResult,
+            persistedLimitReached,
+            this.persistedOutputLimit(runRequest),
+          ),
         );
         return;
       }

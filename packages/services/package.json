@@ -14,7 +14,8 @@
   },
   "scripts": {
     "lint": "oxlint",
-    "lint:fix": "oxlint --fix"
+    "lint:fix": "oxlint --fix",
+    "test:storage-exec-output-clean": "tsx --test test/storageExecOutputClean.test.ts"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.64.0",

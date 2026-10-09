@@ -4,12 +4,12 @@ import { ShellInitSnapshotManager, cleanupStaleShellInitSnapshots } from "./shel
 import { OutputCollector, type AggregatePersistedOutputBudget } from "./output-collector.js";
 import {
   DEFAULT_INLINE_OUTPUT_BYTES,
-  BASH_RUNTIME_OUTPUT_LIMIT_BYTES,
   DEFAULT_MAX_PERSISTED_OUTPUT_BYTES,
   DEFAULT_PROGRESS_INTERVAL_MS,
   DEFAULT_PROGRESS_TAIL_BYTES,
   DEFAULT_PROGRESS_THRESHOLD_MS,
   isBashMergedOutputRequest,
+  resolveBashRuntimeOutputLimitBytes,
   resolveDefaultOutputRootDir,
   sanitizePathSegment,
 } from "./execution-utils.js";
@@ -43,6 +43,13 @@ export class NodeExecutionAdapterBase {
   protected closePromise?: Promise<void>;
 
   protected readonly options: NodeExecutionAdapterOptions;
+
+  /**
+   * Bash 合并输出软上限的 env 解析结果。
+   * 惰性求值 + 记忆化：processEnv/options 构造后不再变化，而每次 `run()` 的
+   * watchdog 都会读这个值，没必要反复解析（回落 debug 说明也只需报一次）。
+   */
+  private bashRuntimeOutputLimitBytes?: number;
 
   constructor(options: NodeExecutionAdapterOptions = {}) {
     this.options = options;
@@ -129,13 +136,25 @@ export class NodeExecutionAdapterBase {
   }
 
   protected persistedOutputLimit(request: ExecutionRequest): number {
+    // 优先级：request.outputLimit.maxPersistedBytes > options.maxPersistedOutputBytes
+    // > bash-merged 的 env/默认值（通用 pipe 仍是 50MiB 硬上限）。
+    // 早先 core 的 Bash handler 与后台 lifecycle 每请求硬填 5GiB，把这条链的
+    // 后两级彻底架空，env 覆盖因此完全失效；两处硬填已移除，现由这里兜底。
     return (
       request.outputLimit?.maxPersistedBytes ??
       this.options.maxPersistedOutputBytes ??
       (isBashMergedOutputRequest(request)
-        ? BASH_RUNTIME_OUTPUT_LIMIT_BYTES
+        ? this.bashRuntimeOutputLimit()
         : DEFAULT_MAX_PERSISTED_OUTPUT_BYTES)
     );
+  }
+
+  private bashRuntimeOutputLimit(): number {
+    this.bashRuntimeOutputLimitBytes ??= resolveBashRuntimeOutputLimitBytes(
+      this.processEnv,
+      this.options.onDebug,
+    );
+    return this.bashRuntimeOutputLimitBytes;
   }
 
   protected createBackgroundTaskRecord(args: {

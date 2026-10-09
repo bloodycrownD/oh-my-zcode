@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { BashFileOutput } from "./bash-file-output.js";
+import { BashFileOutput, truncateBashOutputAfterKill } from "./bash-file-output.js";
 import { readCapturedCwd } from "./cwd-capture.js";
 import { defaultCwdDialect } from "./execution-command.js";
 import { NodeExecutionAdapterProcess } from "./node-execution-adapter-process.js";
@@ -8,6 +8,7 @@ import {
   DEFAULT_TIMEOUT_MS,
   FORCE_EXIT_AFTER_KILL_MS,
   abortSignalReason,
+  formatExecOutputLimitBytes,
   isBashMergedOutputRequest,
   isExpectedChildStdinClosureError,
 } from "./execution-utils.js";
@@ -107,9 +108,16 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
     let childReadyForTermination = false;
     let terminationRequested = false;
     let stopRequested = false;
+    // 看门狗 stat 到「文件已超上限」这一事实本身。requestStop 在 `file && exited`
+    // （子进程刚在同一时刻自然退出）时会被抑制，outputLimitExceeded 因此不置位；
+    // 单独记这个标志，收尾时就不会漏掉这批已经超限的文件。
+    let outputLimitDetected = false;
     let forceExitTimer: NodeJS.Timeout | undefined;
     let progressTimer: NodeJS.Timeout | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
+    // 杀树 completion（taskkill / POSIX 两阶段收尾）。超限截断必须等它，
+    // 否则会在持有继承 fd 的后代还在写盘时改写文件。
+    let bashProcessTreeKill: Promise<void> | undefined;
     const timeoutMs = request.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     let finishExit: (state: ExitState) => void = () => undefined;
     let finishResourceTelemetry: (state: ExitState) => void = () => undefined;
@@ -135,7 +143,7 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
       terminationRequested = true;
       // root shell exit 不代表其进程组和继承 pipe 的后代已经退出。
       // cancel/close 必须在组长 exit 后仍能清理整个 execution，避免 orphan。
-      this.terminateProcessTree(startedChild, useBashMergedOutput);
+      bashProcessTreeKill = this.terminateProcessTree(startedChild, useBashMergedOutput);
       if (file) {
         finishExit({ code: timedOut ? 143 : 137 });
         return;
@@ -242,7 +250,10 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
       await file?.close();
       const watchBashLimit = () => {
         if (!file || exited || stopRequested) return;
-        file.watchLimit(this.persistedOutputLimit(request), () => requestStop("output_limit"));
+        file.watchLimit(this.persistedOutputLimit(request), () => {
+          outputLimitDetected = true;
+          requestStop("output_limit");
+        });
       };
       if (file) {
         watchBashLimit();
@@ -319,6 +330,16 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
         await Promise.all([stdout!.close(), stderr!.close()]);
       } else if (exitState.error) {
         await file.discard();
+      } else if (outputLimitExceeded || outputLimitDetected) {
+        // outputLimitDetected 覆盖「子进程在看门狗 stat 之后、requestStop 之前自然退出」
+        // 的竞态：那时没有杀树可等（close 早已发生），killCompletion 自然为 undefined。
+        await truncateBashOutputAfterKill({
+          filePath: file.path,
+          closePromise,
+          killCompletion: bashProcessTreeKill,
+          limitBytes: this.persistedOutputLimit(request),
+          onDebug: this.options.onDebug,
+        });
       }
       const stdoutResult = file
         ? await this.readBashResult(file, request, internalOptions, exitState, outputLimitExceeded)
@@ -339,7 +360,12 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
       const failure = exitState.error
         ? this.toFailure("spawn_error", exitState.error)
         : file && outputLimitExceeded
-          ? { type: "output_limit" as const, message: "Command killed: output file exceeded 5GB" }
+          ? {
+              type: "output_limit" as const,
+              message: `Command killed: output file exceeded ${formatExecOutputLimitBytes(
+                this.persistedOutputLimit(request),
+              )}`,
+            }
           : (this.statusFailure(timedOut, cancelled, outputLimitExceeded, timeoutMs) ??
             unexpectedStdinFailure);
       const status = unexpectedStdinFailure ? "failed" : baseStatus;
