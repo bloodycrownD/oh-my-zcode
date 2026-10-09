@@ -23,6 +23,7 @@ import { commandAdmissionOf } from "../executor.js";
 import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost, V4SessionRecordView } from "../types.js";
 import {
+  hasActiveTurn,
   hasPromptInput,
   preemptActiveTurnAndWait,
   V4InputAdmissionRejectedError,
@@ -141,7 +142,12 @@ async function editUserQuery(
   }
   // 附件映射在 rewind 前完成：引用失效要在截断历史之前暴露，避免半程失败。
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, attachmentRefs);
-  if (record.activeAbortController) {
+  // 抢占判据不能只看 Bootstrap activeAbortController：v4 sendText 起的 turn 与
+  // 后台通知的 model-only turn 由 Core runtime command 独立持有 foreground
+  // authority、不创建 Bootstrap controller。只看外层锁会漏掉这批活跃 turn——
+  // rewind 后旧 turn 照跑，新文本被 Core busy admission 退回 queue，用户看到
+  // 「编辑后发送仍是旧消息」。hasActiveTurn 与 waitForSessionIdle 判据同源。
+  if (hasActiveTurn(record)) {
     await preemptActiveTurnAndWait(host, record, {
       abortMessage: "v4 editUserQuery preempts active turn",
       goalPausedMutationReason: "edit_user_query_goal_paused",

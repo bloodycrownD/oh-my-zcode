@@ -413,6 +413,25 @@ async function waitForSessionIdle(record: V4SessionRecordView): Promise<void> {
   }
 }
 
+/**
+ * 活跃 turn 判据（与 waitForSessionIdle 同源，两处必须一致）：
+ * Bootstrap 外层锁或 Core foreground authority 任一在场都算活跃 turn。
+ *
+ * 只看 Bootstrap `activeAbortController` 会漏掉 model-only turn：后台通知与
+ * v4 sendText 起的 turn 由 Core runtime command 独立持有 foreground authority
+ * （`activeForegroundExecution`，runtime-command-queue.ts:421），不创建
+ * Bootstrap controller。抢占入口按旧判据跳过这类活跃 turn 后，rewind 照做、
+ * 旧 turn 照跑，新输入撞上 Core busy admission 被退回 queue
+ * （prompt-admission.ts:34-83），编辑重发表现为「发的还是旧消息」。
+ * v4-bridge.ts:601 的 auto-drain busy 判据已经是这个口径。
+ */
+export function hasActiveTurn(record: V4SessionRecordView): boolean {
+  return (
+    record.activeAbortController !== undefined ||
+    record.app.runtime?.getActiveForegroundExecutionId?.() !== undefined
+  );
+}
+
 /** 等待旧执行释放，返回 Core 是否实际取消了前台执行。 */
 export async function preemptActiveTurnAndWait(
   host: V4CommandCoreHost,
@@ -424,6 +443,10 @@ export async function preemptActiveTurnAndWait(
   },
 ): Promise<boolean> {
   const bootstrapAbortController = record.activeAbortController;
+  // 抢占判据与 waitForSessionIdle 对齐（hasActiveTurn）：Core 单独持有
+  // foreground authority 的 model-only turn 也算活跃，必须走 goal 暂停与
+  // 广播，不能因为它没有 Bootstrap controller 就当成 idle 跳过。
+  const activeTurnBeforeStop = hasActiveTurn(record);
   // background notification 的 model-only turn 由 Core runtime command
   // 独立持有 foreground authority，不会创建 Bootstrap activeAbortController。
   // 忽略这点会误判 idle，随后把被提升的 queue item steer 回旧 notification turn。
@@ -431,7 +454,7 @@ export async function preemptActiveTurnAndWait(
     preserveQueueAutoDrainOnCancel: options.preserveQueueAutoDrainOnCancel === true,
     reason: options.abortMessage,
   });
-  if (bootstrapAbortController || runtimeStop?.kind === "stopped") {
+  if (activeTurnBeforeStop || runtimeStop?.kind === "stopped") {
     const pausedGoal = await pauseActiveGoal(host, record);
     if (runtimeStop?.kind !== "stopped") {
       bootstrapAbortController?.abort(new Error(options.abortMessage));
