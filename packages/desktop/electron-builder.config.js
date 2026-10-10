@@ -694,7 +694,10 @@ export default {
     ],
   },
   win: {
-    target: ["nsis"],
+    // zip 与 mac 的 dmg+zip 双产物对齐：NSIS 安装器之外给一个免安装便携版。
+    // 产物即 win-unpacked 目录的 zip，解压后直接运行 exe；Release 上传 glob 已含 *.zip。
+    // 注意 GitHub Release 单资产 2GiB 上限：zip 压缩率低于 NSIS，超限时 CI 会跳过上传并打 warning（有兜底不挂）。
+    target: ["nsis", "zip"],
     artifactName: buildDesktopArtifactName("win"),
   },
   linux: {
