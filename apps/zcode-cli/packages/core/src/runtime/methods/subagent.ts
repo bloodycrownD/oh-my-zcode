@@ -70,7 +70,13 @@ export function createDefaultSubagentPort(
     autoBackgroundMs: this.config.subagents?.autoBackgroundMs,
     outputRootDir: this.config.subagents?.outputRootDir,
     profiles: this.config.subagents?.profiles,
-    builtInModelSelectionOverrides: this.config.subagents?.builtInModelSelectionOverrides,
+    // FORK（bugfix-batch-20261011 / Step 6）：override 从启动快照改为 per-spawn
+    // 活读。宿主（bootstrap）经 deps 注入读 agents-state.json 的 provider（带内容
+    // 缓存）；provider 读不到（文件缺失/损坏/字段缺失）或不可用时返回 undefined，
+    // 这里回退 App 创建时冻结进 config 的快照——两种失败都不阻塞 spawn。
+    builtInModelSelectionOverrides: () =>
+      deps.resolveBuiltInSubagentModelSelectionOverrides?.() ??
+      this.config.subagents?.builtInModelSelectionOverrides,
     runtimeTaskRegistry: this.runtimeTaskRegistry,
     emitParentEvent: async (event, traceContext) => {
       if (isStaleBranchRuntimeTaskEvent(this, event)) return;

@@ -97,7 +97,7 @@ import type {
   ModelAnomalyGuardConfig,
   OutputStylePromptConfig,
 } from "./deps.js";
-import type { AgentProfile } from "../subagent/profile.js";
+import type { AgentProfile, BuiltInSubagentModelSelectionOverrides } from "../subagent/profile.js";
 import type { RuntimeTaskRegistry } from "../runtime-task/registry.js";
 import type { BashTimeoutPolicy } from "../tool/bash-timeout-policy.js";
 import type { PresentationSurface } from "../context/types.js";
@@ -330,8 +330,8 @@ export interface AgentRuntimeDeps {
   modelFactory: RuntimeModelFactory;
   /** 可选宿主能力：解析未来执行的显式意图；不用于修改已冻结 Model。 */
   resolveEffectiveModelSelection?: (selection: ModelSelection) => EffectiveModelSelectionResult;
-modelIoDir?: string;
-permissionService?: PermissionService;
+  modelIoDir?: string;
+  permissionService?: PermissionService;
   permissionBroker?: PermissionBrokerPort;
   toolScheduler?: ToolScheduler;
   toolRegistry?: ToolRegistry;
@@ -392,6 +392,17 @@ permissionService?: PermissionService;
    * 一次判空之外什么都不做（T-M8）。
    */
   magicContextTurnTransform?: MagicContextTurnTransform;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 6）：内置子智能体模型 override 的
+   * per-spawn 活读源（bootstrap 读 agents-state.json，带内容缓存）。每次 spawn
+   * 解析 profile 前调用；返回 undefined 或缺席时回退
+   * `config.subagents.builtInModelSelectionOverrides` 启动快照——读侧故障
+   * （文件缺失/损坏/字段缺失）不阻塞 spawn。ConfigPort/RuntimeConfigPatch 无
+   * subagents 域，活读是本批选定的通道，不扩协议。
+   */
+  resolveBuiltInSubagentModelSelectionOverrides?: () =>
+    | BuiltInSubagentModelSelectionOverrides
+    | undefined;
 }
 
 export interface RuntimeModelFactoryInput {

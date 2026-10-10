@@ -14,6 +14,7 @@ import {
   modelSelectionSchema,
   type BuiltInSubagentModelSelectionOverrides,
   type BuiltInSubagentName,
+  type ModelSelection,
   type PluginSubagentModelSelectionOverrides,
 } from "@zcode/shared";
 
@@ -299,6 +300,128 @@ function normalizeBuiltInSelectionOverrides(
   if (generalPurpose.success) result["general-purpose"] = generalPurpose.data;
   if (explore.success) result.Explore = explore.data;
   return result;
+}
+
+const BUILT_IN_AGENT_NAMES = [
+  "general-purpose",
+  "Explore",
+] as const satisfies readonly BuiltInSubagentName[];
+
+export interface AgentStateOverrideProviderOptions {
+  /** 写侧（host 设置页）与启动读侧共用的 storage 根；状态文件为 `<storageRoot>/v2/agents-state.json`。 */
+  storageRoot: string;
+  logger?: Logger;
+  /**
+   * override 指向的模型当前不可用（Provider Registry 查不到）时丢弃该条目并 warn，
+   * 让 spawn 回退 profile 默认。缺省不校验（由 core 的 resolveSubagentSelection
+   * fail-visible 路径负责可见性）。
+   */
+  isModelSelectionAvailable?: (selection: ModelSelection) => boolean;
+}
+
+/**
+ * FORK（bugfix-batch-20261011 / Step 6）：内置子智能体模型 override 的
+ * per-spawn 活读源。写侧协议不变（设置页 → Local Host 写 agents-state.json 的
+ * builtInModelSelectionOverrides）；读侧从「App 创建时读一次、归一化后冻结进
+ * runtimeConfig.subagents」改为每次 spawn 现读：
+ *
+ * - 同步读 <2KB 的状态文件；内容与上次完全相同（同一字符串）时直接复用已归一化
+ *   结果，不重新 parse/normalize——与 mtime 缓存等效，且不受「同毫秒同尺寸改写」
+ *   的粒度坑影响；
+ * - 文件缺失/不可读、JSON 损坏 = fail-open 返回 undefined，core 回退启动冻结快照；
+ *   不写失败缓存，写侧恢复后下一次 spawn 自然跟上；
+ * - `builtInModelSelectionOverrides` 字段缺失或不是对象 = 无法确定活值，同样
+ *   fail-open（写侧 read-modify-write 恒写该字段，缺字段只可能是外部/旧格式写入，
+ *   此时信任启动快照）；字段存在且为 `{}`（用户把 override 改回「继承」）则如实
+ *   返回空表 = 所有内置 override 当场清除；
+ * - override 指向 Registry 中不存在的模型时丢弃该条目并 warn（回退 profile 默认），
+ *   不让 spawn 走进 core 的 fail-visible 抛错；
+ * - warn 按签名去重：同一失效形态只记一次，不随每次 spawn 刷屏。
+ *
+ * 同步 IO 不阻塞 spawn：调用方（core subagent port）在 spawn 前同步调用，失败
+ * 一律捕获。
+ */
+export function createAgentStateOverrideProvider(
+  options: AgentStateOverrideProviderOptions,
+): () => BuiltInSubagentModelSelectionOverrides | undefined {
+  const agentsStatePath = join(options.storageRoot, "v2", "agents-state.json");
+  let cachedRaw: string | undefined;
+  let cachedOverrides: BuiltInSubagentModelSelectionOverrides | undefined;
+  let warnedSignature: string | undefined;
+
+  const warnOnce = (signature: string, message: string, context: Record<string, unknown>): void => {
+    if (warnedSignature === signature) return;
+    warnedSignature = signature;
+    options.logger?.warn(message, { module: "bootstrap.subagents", ...context });
+  };
+
+  const readOverrides = (): BuiltInSubagentModelSelectionOverrides | undefined => {
+    let raw: string;
+    try {
+      raw = readFileSync(agentsStatePath, "utf8");
+    } catch (error) {
+      warnOnce("unreadable", "Subagent agents-state.json 不可读；模型 override 回退启动快照", {
+        path: agentsStatePath,
+        error: String(error),
+      });
+      return undefined;
+    }
+    if (raw === cachedRaw) return cachedOverrides;
+
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (error) {
+      // 写侧是原子写，torn read 理论不可见；真出现时 fail-open 且不写缓存——
+      // 写侧修好后下一次 spawn 自然恢复，无需重启。
+      warnOnce(
+        `corrupt:${raw.length}`,
+        "Subagent agents-state.json 解析失败；模型 override 回退启动快照",
+        { path: agentsStatePath, error: String(error) },
+      );
+      return undefined;
+    }
+    if (!isRecord(parsed) || !isRecord(parsed.builtInModelSelectionOverrides)) {
+      // 字段缺失/类型不符 = 无法确定活值（见函数注释）：信任启动快照。
+      // 这是合法状态（用户从未设置过 override），不记 warn。
+      return undefined;
+    }
+
+    const normalized = normalizeBuiltInSelectionOverrides(parsed.builtInModelSelectionOverrides);
+    // 可用性过滤每次现算（不缓存结果）：Registry 可能在不同 spawn 之间变化，
+    // 缓存会把「模型已不可用」的 override 继续递给 core 触发 fail-visible 抛错。
+    const result: BuiltInSubagentModelSelectionOverrides = {};
+    for (const agentName of BUILT_IN_AGENT_NAMES) {
+      const selection = normalized[agentName];
+      if (selection === undefined) continue;
+      if (options.isModelSelectionAvailable?.(selection) === false) {
+        warnOnce(
+          `unavailable:${agentName}:${selection.providerId}/${selection.modelId}`,
+          "Subagent model override 指向不可用模型；丢弃该 override，回退 profile 默认",
+          {
+            agentName,
+            path: agentsStatePath,
+            providerId: selection.providerId,
+            modelId: selection.modelId,
+          },
+        );
+        continue;
+      }
+      result[agentName] = selection;
+    }
+    cachedRaw = raw;
+    cachedOverrides = result;
+    return result;
+  };
+
+  return () => {
+    try {
+      return readOverrides();
+    } catch {
+      // 读侧任何意外都不得阻塞 spawn；上一层 core 会回退启动冻结快照。
+      return undefined;
+    }
+  };
 }
 
 function isDisabledUserProfile(

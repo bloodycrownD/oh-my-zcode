@@ -47,6 +47,7 @@ import {
   isBuiltInExploreAgentProfile,
   normalizeAgentProfiles,
   type AgentProfile,
+  type BuiltInSubagentModelSelectionOverrides,
 } from "./profile.js";
 import { EXPLORE_AGENT_ALLOWED_TOOLS } from "./explore-tools.js";
 import { formatLocalAgentTaskNotification } from "./completion-notification.js";
@@ -117,9 +118,22 @@ export interface ExploreSubagentPortOptions {
   enqueueParentTaskNotification?: EnqueueParentTaskNotification;
   outputRootDir?: string;
   profiles?: readonly AgentProfile[];
-  builtInModelSelectionOverrides?: Partial<
-    Record<"general-purpose" | "Explore", import("@zcode/shared").ModelSelection>
-  >;
+  /**
+   * 内置子智能体（general-purpose / Explore）的模型 override，两种形态：
+   * - 静态值：App 创建时读一次 agents-state.json 冻结的启动快照；
+   * - provider 回调：每次 spawn 解析 profile 前现读的活值。
+   *
+   * FORK（bugfix-batch-20261011 / Step 6）：读侧从「构造期冻结 profiles」改为
+   * 「per-spawn 活读」——设置页（Local Host 进程写 agents-state.json 的
+   * builtInModelSelectionOverrides）改「继承→具体模型」后，同一进程内下一次
+   * spawn 立即生效（subagent AgentRuntime 本就是进程内构造，活读即可覆盖，
+   * 无需扩 ConfigPort/RuntimeConfigPatch 的 subagents 域）。provider 返回
+   * undefined（文件缺失/损坏，宿主侧 fail-open）时回退静态快照，spawn 不失败。
+   * 归一化规则仍只走 normalizeAgentProfiles 一份，不复制校验逻辑。
+   */
+  builtInModelSelectionOverrides?:
+    | BuiltInSubagentModelSelectionOverrides
+    | (() => BuiltInSubagentModelSelectionOverrides | undefined);
   runtimeTaskRegistry?: RuntimeTaskRegistry;
   createAgentId?: () => string;
   getAllowedTools?: (profile: AgentProfile) => readonly string[];
@@ -132,9 +146,14 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
   const registry = options.runtimeTaskRegistry ?? new InMemoryRuntimeTaskRegistry();
   const abortControllers = new Map<string, AbortController>();
   const borrowedForegroundAgentIds = new Set<string>();
-  const profiles = normalizeAgentProfiles(options.profiles ?? [], {
-    builtInModelSelectionOverrides: options.builtInModelSelectionOverrides,
-  });
+  // FORK（bugfix-batch-20261011 / Step 6）：profiles 不再在端口构造期冻结。
+  // 每次 spawn 前重新归一化——内置 override 以 provider 形态现读（bootstrap 侧带
+  // 内容缓存，文件未变时零解析成本）；静态值形态逐行保持旧语义（值不变，等于构造期
+  // 快照）。用户/插件 profile 来自启动时加载，仍随 options.profiles 原样传入。
+  const resolveProfiles = (): readonly AgentProfile[] =>
+    normalizeAgentProfiles(options.profiles ?? [], {
+      builtInModelSelectionOverrides: resolveBuiltInModelSelectionOverrides(options),
+    });
   const autoBackgroundMs = normalizeAutoBackgroundMs(options.autoBackgroundMs);
 
   const port: SubagentPort & { start: NonNullable<SubagentPort["start"]> } = {
@@ -142,7 +161,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
       rawRequest: SubagentLaunchRequest,
       launchOptions?: SubagentLaunchOptions,
     ): Promise<AgentOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(resolveProfiles(), rawRequest);
       const executionRequest = toSubagentExecutionRequest(request);
       const backgroundRequested =
         rawRequest.runInBackground === true || profile.background === true;
@@ -174,7 +193,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
       rawRequest: SubagentRunRequest,
       runOptions?: SubagentRunOptions,
     ): Promise<AgentOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(resolveProfiles(), rawRequest);
       const lifecycle = createSubagentLifecycle(options, request, profile);
       const startedAt = new Date(lifecycle.startedAt);
 
@@ -465,7 +484,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
       rawRequest: SubagentStartRequest,
       startOptions?: SubagentStartOptions,
     ): Promise<AgentBackgroundedOutput> {
-      const { profile, request } = resolveAgentProfileForRequest(profiles, rawRequest);
+      const { profile, request } = resolveAgentProfileForRequest(resolveProfiles(), rawRequest);
       const lifecycle = createSubagentLifecycle(options, request, profile);
       const startedAt = new Date(lifecycle.startedAt);
       const output = createAgentBackgroundedOutput(request, lifecycle);
@@ -596,7 +615,9 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
     ): Promise<SubagentSendMessageResult> {
       return sendMessageToLocalAgent(
         options,
-        profiles,
+        // deliver 到运行中 task 是纯转发，不解析 profile；只有 resume 终态 task
+        // （= 一次新 spawn）才需要活读后的 profiles，故传 resolver 而非快照。
+        resolveProfiles,
         registry,
         abortControllers,
         request,
@@ -606,6 +627,23 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
   };
 
   return port;
+}
+
+/**
+ * FORK（bugfix-batch-20261011 / Step 6）：取当次 spawn 的内置 override。
+ * provider 形态每次现读（活值）；静态值形态直接返回（构造期快照语义不变）。
+ * provider 抛错同样 fail-open：spawn 不能被读侧故障阻塞。
+ */
+function resolveBuiltInModelSelectionOverrides(
+  options: ExploreSubagentPortOptions,
+): BuiltInSubagentModelSelectionOverrides | undefined {
+  const overrides = options.builtInModelSelectionOverrides;
+  if (typeof overrides !== "function") return overrides;
+  try {
+    return overrides();
+  } catch {
+    return undefined;
+  }
 }
 
 interface SubagentLifecycle {
@@ -924,7 +962,9 @@ function createSubagentLifecycleFromTask(
 
 async function sendMessageToLocalAgent(
   options: ExploreSubagentPortOptions,
-  profiles: readonly AgentProfile[],
+  // FORK（bugfix-batch-20261011 / Step 6）：惰性 resolver——deliver 路径不解析
+  // profile（零额外活读成本），resume 路径取当次 spawn 的活值。
+  resolveProfiles: () => readonly AgentProfile[],
   registry: RuntimeTaskRegistry,
   abortControllers: Map<string, AbortController>,
   request: SubagentSendMessageRequest,
@@ -949,7 +989,7 @@ async function sendMessageToLocalAgent(
 
   return resumeTerminalAgentInBackground(
     options,
-    profiles,
+    resolveProfiles,
     registry,
     abortControllers,
     task,
@@ -979,14 +1019,15 @@ async function deliverMessageToRunningAgent(
 
 async function resumeTerminalAgentInBackground(
   options: ExploreSubagentPortOptions,
-  profiles: readonly AgentProfile[],
+  resolveProfiles: () => readonly AgentProfile[],
   registry: RuntimeTaskRegistry,
   abortControllers: Map<string, AbortController>,
   task: RuntimeTaskSnapshot,
   request: SubagentSendMessageRequest,
   message: RuntimeTaskPendingMessage,
 ): Promise<SubagentSendMessageResult> {
-  const profile = profiles.find((candidate) => candidate.name === task.agentType);
+  // resume 终态 task 等价于一次新 spawn：活读后的 profiles 决定它用哪个模型。
+  const profile = resolveProfiles().find((candidate) => candidate.name === task.agentType);
   if (!profile) {
     return createSendMessageFailure(
       request,

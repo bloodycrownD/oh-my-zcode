@@ -99,11 +99,16 @@ import { resolveBuiltInNodeReplMcpServers } from "./built-in-node-repl.js";
 import { resolveZCodeCustomCommandPrompt } from "../custom-command-prompt.js";
 import { resolveZCodeBuiltinPromptCommand } from "../builtin-prompt-command.js";
 import { collectDisabledPaths } from "../skill-command-overrides.js";
-import { loadPluginAgentProfiles, loadZCodeAgentProfiles } from "../subagents.js";
+import {
+  loadPluginAgentProfiles,
+  loadZCodeAgentProfiles,
+  createAgentStateOverrideProvider,
+} from "../subagents.js";
 import { createRuntimeAiSdkModelExecutionConfig } from "../model-config.js";
 import { ApiProviderModelRuntime } from "./provider-registry-model-runtime.js";
 import {
   completeAuxiliaryRegistryModelSelection,
+  getRegistryBackedModel,
   resolveRegistryOwnedSelection,
 } from "./provider-registry-selection.js";
 import {
@@ -251,6 +256,18 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       logger,
       storageRoot,
       workingDirectory,
+    });
+    // FORK（bugfix-batch-20261011 / Step 6）：内置子智能体模型 override 的
+    // per-spawn 活读源。与上面 loadZCodeAgentProfiles 的启动快照读同一个
+    // agents-state.json，但这里是每次 spawn 现读（内容未变则复用归一化结果）：
+    // 设置页在 Local Host 进程改「继承→具体模型」后，同一 App 内下一次 spawn
+    // 立即生效，无需重启。文件缺失/损坏/字段缺失 fail-open 回退启动快照；
+    // Registry 查不到的模型 id 被丢弃并 warn（回退 profile 默认）。
+    const subagentModelOverrideProvider = createAgentStateOverrideProvider({
+      storageRoot,
+      logger,
+      isModelSelectionAvailable: (selection) =>
+        getRegistryBackedModel(options.providerRegistry, selection) !== undefined,
     });
     const zcodeSubagentProfiles = zcodeSubagentProfileOutcome.profiles;
     const pluginOutcome = resolveStartupPlugins({
@@ -968,6 +985,10 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       automationPort: options.automationPort,
       // 端口在场即注册门：缺席（默认）时 turn-loop 的插入点是纯判空。
       ...(magicContextTurnTransform === undefined ? {} : { magicContextTurnTransform }),
+      // FORK（bugfix-batch-20261011 / Step 6）：子智能体模型 override 的
+      // per-spawn 活读源（见上方创建处注释）。deps 经 createDefaultSubagentPort
+      // 传进 core subagent port，每次 spawn 解析 profile 前调用。
+      resolveBuiltInSubagentModelSelectionOverrides: subagentModelOverrideProvider,
       appVersion,
       traceContext,
     });
