@@ -138,6 +138,34 @@ jobs:
       contents: write
 
     steps:
+      # CHANGELOG.md 的对应版本段落是 Release 正文来源，release job 需要仓库内容。
+      - name: Checkout (changelog)
+        uses: actions/checkout@v4
+        with:
+          # tag 事件本身就是产物该对应的提交；只取 CHANGELOG 不需要历史。
+          ref: ${{ github.ref }}
+          sparse-checkout: |
+            CHANGELOG.md
+
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          VER="${TAG#v}"
+          # 两种节头都认：`## [1.0.4](compare-url) (date)`（release-it 生成）
+          # 与 `## v1.0.3（date）`（早期手写）。取该节到下一个 `## ` 前。
+          awk -v ver="$VER" '
+            /^## / { grab = (index($0, "[" ver "]") > 0 || index($0, "v" ver "（") > 0) }
+            grab { print }
+          ' CHANGELOG.md > release-notes.md
+          if [ -s release-notes.md ]; then
+            echo "notes_file=release-notes.md" >> "$GITHUB_OUTPUT"
+          else
+            # 该版本在 CHANGELOG 无段落（如 baseline/* tag）：回落 GitHub 自动 notes。
+            echo "notes_file=" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
@@ -149,10 +177,17 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
+          NOTES_FILE: ${{ steps.notes.outputs.notes_file }}
         run: |
-          gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
-            || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
-                 --title "$TAG" --generate-notes --draft=false
+          if [ -n "$NOTES_FILE" ]; then
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+                   --title "$TAG" --notes-file "$NOTES_FILE" --draft=false
+          else
+            gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 \
+              || gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+                   --title "$TAG" --generate-notes --draft=false
+          fi
 
       - name: Upload artifacts (skip >2GiB assets with warning)
         env:
