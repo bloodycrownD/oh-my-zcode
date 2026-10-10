@@ -15,12 +15,12 @@ import {
     CATEGORY_PRIORITY,
     V2_MEMORY_CATEGORIES,
 } from "../../features/magic-context/memory/constants.js";
-import { compareMemorySelectionPriority } from "../../deferred/memory-selection.js";
+import { compareMemorySelectionPriority } from "../../features/magic-context/memory/memory-selection.js";
 import {
     getMaxMemoryIdForProjects,
     getMemoriesByProject,
     getMemoriesByProjects,
-} from "../../deferred/storage-memory.js";
+} from "../../features/magic-context/memory/storage-memory.js";
 import type { Memory } from "../../features/magic-context/memory/types.js";
 import { resolveMuralWire } from "../../deferred/render-trigger.js";
 import type { MuralWireOptions } from "../../deferred/render-trigger.js";
@@ -40,7 +40,7 @@ import { readProjectDocsCanonical } from "../../features/magic-context/project-d
 import {
     getActiveUserMemories,
     type UserMemory,
-} from "../../deferred/storage-user-memory.js";
+} from "../../features/magic-context/user-memory/storage-user-memory.js";
 import {
     computeWorkspaceEpochFingerprint,
     expandWorkspaceIdentitySetWithAliases,

@@ -1,20 +1,21 @@
-// FORK-DEFERRED(E): `features/magic-context/memory/embedding-failure.ts` 的 EmbeddingFailureClass / EmbeddingFailure / LocalEmbeddingFailureContext 类型与 classifyLocalEmbeddingFailure / dominantEmbeddingFailure 函数摘录，S20 移植真身后删除本文件
+// FORK-NOTE(Step 8 / bugfix-batch-20261011): upstream
+// `features/magic-context/memory/embedding-failure.ts` (152 lines) landed
+// in FULL — the D8/N1 exception of the embedding exclusion list. This file
+// now lives at its upstream path and satisfies
+// `hooks/magic-context/format-embed-failure.ts`, which consumed
+// `EmbeddingFailure` through the deferred seam.
 //
-// WHY A SEAM AND NOT THE MODULE. The embedding subsystem is not in the fork's
-// first version (no embedding provider, no `@cortexkit/subc-client`), but the
-// TYPES are structural and already woven into a ported B-group file:
-// `format-embed-failure.ts` reads `EmbeddingFailure` and renders it through
-// `renderEmbeddingFailure` (see `deferred/user-facing-codes.ts`).
+// WHY THIS ONE IS PORTED WHILE THE REST OF EMBEDDING IS NOT (N1). The
+// classifier and the dominant-failure picker are pure functions over a
+// failure shape with zero imports — no provider, no onnxruntime, no
+// @cortexkit/subc-client, no sharp. Porting it removes a duplicate
+// declaration (`core/shared/user-facing-codes.ts` keeps its own local copy
+// on purpose so `shared/` never imports `features/`) and lets the honest
+// `format-embed-status` 'off' reporting classify real failures should a
+// user ever configure a provider out-of-band.
 //
-// The classifier and the dominant-failure picker are pure functions over the
-// failure shape with zero imports, so both are reproduced verbatim rather than
-// stubbed: `deferred/user-facing-codes.ts` declares its own copy of
-// `EmbeddingFailureClass` only because it must not depend on this seam, and
-// keeping the two in sync is exactly what the verbatim copy guarantees.
-//
-// Step 20: delete this file and repoint `format-embed-failure.ts` back at
-// `../../features/magic-context/memory/embedding-failure.js`.
-
+// MECHANICAL DIFFS ONLY: CRLF→LF. The file has no imports to rewrite and
+// no upstream line is edited.
 export type EmbeddingFailureClass =
     | "substitution_rejected"
     | "http_error"
@@ -37,7 +38,6 @@ export interface EmbeddingFailure {
     retryable: boolean;
 }
 
-/** Verbatim: `embedding-failure.ts:24-29`. */
 export interface LocalEmbeddingFailureContext {
     platform?: NodeJS.Platform;
     arch?: string;

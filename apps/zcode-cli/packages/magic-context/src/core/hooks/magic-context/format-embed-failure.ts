@@ -1,4 +1,4 @@
-import type { EmbeddingFailure } from "../../deferred/embedding-failure.js";
+import type { EmbeddingFailure } from "../../features/magic-context/memory/embedding-failure.js";
 import { renderEmbeddingFailure, type UserFacingTextStyle } from "../../shared/user-facing-codes.js";
 
 export function formatEmbedFailureSummary(

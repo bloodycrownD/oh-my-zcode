@@ -1,19 +1,18 @@
-// FORK-DEFERRED(Batch2): `features/magic-context/memory/memory-selection.ts` 的 MemorySelectionCandidate / memoryReinforcementAt / compareMemorySelectionPriority 摘录，Step 31 移植真身后删除本文件
+// FORK-NOTE(Step 8 / bugfix-batch-20261011): upstream
+// `features/magic-context/memory/memory-selection.ts` (45 lines) landed in
+// FULL. This file now lives at its upstream path.
 //
-// WHY VERBATIM. The comparator is a pure total order over memory rows with no
-// dependency beyond the `Memory` shape, and `inject-compartments.ts` passes it
-// straight into four `.sort(...)` calls. Reproducing it verbatim means that when
-// Step 31 lands the real memory store, the selection order is already proven
-// correct against the fork's own `memory/types.ts` — a stub comparator would
-// silently change which memories survive the injection budget.
+// WHAT CHANGED VS THE SEAM IT REPLACES. Nothing semantic: the
+// `deferred/memory-selection.ts` excerpt already reproduced
+// `MemorySelectionCandidate` / `memoryReinforcementAt` /
+// `compareMemorySelectionPriority` verbatim so the four `.sort(...)`
+// selection calls in `inject-compartments.ts` kept a proven order while
+// memories read empty. Only the import line changed (`./types` →
+// `./types.js`), matching upstream's own path.
 //
-// `MemorySelectionCandidate` is a `Pick<Memory, …>` over the fork's own
-// `memory/types.ts`, so the Pick resolves to the fork's field set.
-//
-// Step 31: delete this file and repoint `inject-compartments.ts` back at
-// `../../features/magic-context/memory/memory-selection.js`.
-
-import type { Memory } from "../features/magic-context/memory/types.js";
+// MECHANICAL DIFFS ONLY: CRLF→LF and the `.js` suffix. No upstream line
+// is edited.
+import type { Memory } from "./types.js";
 
 /** Fields that decide which equal-importance memory survives a bound render budget. */
 export type MemorySelectionCandidate = Pick<
@@ -25,8 +24,6 @@ export type MemorySelectionCandidate = Pick<
  * The newest evidence that a memory is still useful. Exact-dedup re-observation
  * advances last_seen_at (and seen_count) in storage-memory.ts; verification writes
  * verified_at. Taking the newer timestamp lets either reinforcement path carry signal.
- *
- * Verbatim: `memory-selection.ts:14-20`.
  */
 export function memoryReinforcementAt(memory: MemorySelectionCandidate): number | null {
     const timestamps = [memory.lastSeenAt, memory.verifiedAt].filter(

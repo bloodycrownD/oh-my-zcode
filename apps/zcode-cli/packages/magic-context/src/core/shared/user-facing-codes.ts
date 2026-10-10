@@ -2,10 +2,14 @@
  * Step 21 真身替换：`deferred/user-facing-codes.ts` 的摘录在此归位为源文件本体。
  *
  * 逐字来自 `.reference/magic-context/packages/plugin/src/shared/user-facing-codes.ts`
- * （370 行），唯一改动是两条上游 import 换成本地声明的类型别名：源从
+ * （370 行），两条上游 import 换成本地声明的类型别名：源从
  * `features/magic-context/memory/embedding-failure` 与 `shared/model-suggestion-retry`
- * 取两个字符串联合，两者都是 Batch 2 / 不搬子树，因此按原样本地重声明
- * （与被替换的缝逐字相同的两个 union）。
+ * 取两个字符串联合。**为何本地重声明而不是 import 真身**：`embedding-failure.ts` 已于
+ * bugfix-batch-20261011 Step 8 归位到 `features/magic-context/memory/`（D8，唯一
+ * 不舍弃的 embedding 文件——纯分类零依赖），但 `core/shared/**` 不得反向 import
+ * `core/features/**`（仓内零先例，保持分层），故保留与上游逐字相同的本地副本；
+ * `model-suggestion-retry` 仍属未移植面，同样本地声明。两个 union 与上游逐字一致，
+ * 漂移由逐字保真 + 用户可见文案不漂移的需求兜底。
  *
  * 为何值得逐字保真：这是**用户可见文案**目录，带稳定错误码（`MC-H01`、`MC-E05`、
  * `MC-C14` …）。B 组已经在抛这些 refusal（`DegradedPassRefusalError`、
@@ -16,8 +20,14 @@
  */
 
 /**
- * Verbatim: `embedding-failure.ts:1-13`. Locally declared because
- * `features/magic-context/memory/embedding-failure.ts` is Batch 2 (不搬).
+ * Verbatim: `embedding-failure.ts:1-13`. Locally declared — see the file header
+ * note. FORK-NOTE(bugfix-batch-20261011 Step 8): the real module now exists at
+ * `features/magic-context/memory/embedding-failure.ts` (D8, the one embedding
+ * file that is pure classification with zero provider imports), but this copy is
+ * deliberately kept so `shared/` never imports `features/` — the fork's layer
+ * rule. No file under `core/shared/` imports `core/features/**`, and this file
+ * must not be the first. Drift guard: the union below stays byte-identical to
+ * upstream, which is the same guarantee the replaced seam provided.
  */
 export type EmbeddingFailureClass =
     | "substitution_rejected"
