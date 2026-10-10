@@ -34,9 +34,14 @@
 //     `<session_references>` / `<project-memory>` blocks are empty strings. That is
 //     a real quality reduction (cross-project dedup seeds are gone) but not a
 //     correctness one: it is the same prompt with three optional blocks omitted.
-//   - durable fact promotion, embeddings, primer candidates and user-memory
-//     candidates (`memory/`, `compartment-embedding`, `user-memory/` — Batch 2,
-//     gated upstream on `memory.enabled` / `memory.auto_promote`).
+//   - durable fact promotion is BACK since bugfix-batch-20261011 Step 8 (D13):
+//     `memory/promotion.ts` + the in-transaction `promoteSessionFactsDurable`
+//     call below, gated on `deps.memoryEnabled` / `deps.autoPromote` exactly as
+//     upstream gates it (Issue #44). What still does NOT follow promotion:
+//     embedding the promoted facts (N1 final — the embedding runtime is excluded
+//     for good), primer candidates (N3 — no dreamer host in the fork), and the
+//     user-memory candidate write (`user-memory/`'s review flow — a future
+//     surface; this fork's historian never writes `user_memory_candidates`).
 //   - the `historian_runs` telemetry row (`storage-historian-runs.ts` is available,
 //     but upstream's row is keyed on the subagent invocation of an OpenCode child
 //     session this fork never creates; writing a row with a permanently-null FK
@@ -48,6 +53,9 @@
 import { insertCompartmentEvents } from "../../features/magic-context/compartment-events.js";
 import { isCompartmentLeaseHeld } from "../../features/magic-context/compartment-lease.js";
 import { appendCompartments, getCompartments } from "../../features/magic-context/compartment-storage.js";
+import { promoteSessionFactsDurable } from "../../features/magic-context/memory/promotion.js";
+import { resolveProjectIdentityForSession } from "../../features/magic-context/memory/project-identity.js";
+import { ModuleMemoryAuthorityError } from "../../features/magic-context/memory/storage-memory.js";
 import {
     clearEmergencyDrainLatch,
     clearEmergencyRecovery,
@@ -509,6 +517,50 @@ export async function runCompartmentAgent(deps: HiddenCompartmentRunnerDeps): Pr
         const lastCompartmentEnd = lastNewEnd;
         const lastNewEndMessageId = newCompartments[newCompartments.length - 1]?.endMessageId;
 
+        // D13 (bugfix-batch-20261011 Step 8): the promotion gates, computed here
+        // so the in-transaction call below can be a plain condition. Upstream
+        // computes the same three values in the same order
+        // (`compartment-runner-incremental.ts:921-943` upstream).
+        //
+        // v2 faithful fact lifecycle: facts are NOT a REPLACE-the-whole-list
+        // store anymore. The historian emits only THIS chunk's facts (deduped
+        // against <project-memory> in the prompt); they flow to project memory
+        // via in-transaction durable promotion. session_facts is no longer
+        // written/bumped. Promotion is in the SAME transaction as the boundary
+        // floor below so a crash cannot advance past facts that never became
+        // project memories.
+        const discardedLast = persistedCompartments.length < emittedCompartments.length;
+        // Discard-last / forced-final-keep both leave the chunk's facts
+        // unanchored: persisted-range facts cannot be separated from
+        // discarded-tail facts, and a reworded re-emission next run would
+        // double up. Skip promotion, keep the compartments.
+        const skipUnanchoredPromotion = discardedLast || forceKeepLastCompartmentForChunk;
+        // Issue #44: gate promotion behind both `memory.enabled` and
+        // `memory.auto_promote` (the fork threads them as `deps.memoryEnabled` /
+        // `deps.autoPromote` from `transform.ts`'s `deps.memoryConfig`). Without
+        // this, historian unconditionally wrote project memories even for users
+        // who explicitly disabled the memory feature in config.
+        //
+        // FORK-NOTE(Step 8): upstream resolves the identity with the THROWING
+        // `resolveProjectIdentity` (its :941-943). This fork resolves it with
+        // `resolveProjectIdentityForSession` — the session-scoped, NON-throwing
+        // wrapper the transform path already uses (`transform.ts:1869`) —
+        // because (a) the runner deps carry no `allowHomeProject` knob, and a
+        // home-project directory is a legitimate "memory off" state rather than
+        // a historian failure; (b) a throw here would fail history compaction
+        // for such users, starving overflow recovery for an unrelated feature.
+        // An unresolvable identity yields `undefined`, which skips promotion
+        // instead of aborting the publish — the same "no-op arm" the seams used
+        // to serve, now expressed by configuration instead of a stub.
+        const promotionDirectory = directory;
+        const promotionGateOpen =
+            promotionDirectory.length > 0 &&
+            deps.memoryEnabled !== false &&
+            deps.autoPromote !== false;
+        const promotionProjectIdentity = promotionGateOpen
+            ? resolveProjectIdentityForSession(promotionDirectory)
+            : undefined;
+
         // Append new compartments (existing stay untouched in DB) and publish all
         // synchronous durable side effects atomically. BEGIN IMMEDIATE ensures the
         // lease holder check and subsequent writes share one fresh write-locked
@@ -593,6 +645,44 @@ export async function runCompartmentAgent(deps: HiddenCompartmentRunnerDeps): Pr
             persistedIds = getCompartments(db, sessionId)
                 .slice(-persistedCompartments.length)
                 .map((c) => c.id);
+
+            // D13 (bugfix-batch-20261011 Step 8): restore upstream's durable fact
+            // promotion (upstream `:1058-1093`). The call sits INSIDE the publish
+            // transaction, before the event inserts, exactly where upstream put
+            // it relative to the boundary floor: a crash between COMMIT and a
+            // later promotion could otherwise advance the floor past facts that
+            // never became project memories.
+            if (promotionGateOpen && promotionProjectIdentity && !skipUnanchoredPromotion) {
+                try {
+                    const promotion = promoteSessionFactsDurable(
+                        db,
+                        sessionId,
+                        promotionProjectIdentity,
+                        validatedPass.facts ?? [],
+                    );
+                    if (promotion.factsPromoted > 0) {
+                        sessionLog(
+                            sessionId,
+                            `promoted ${promotion.factsPromoted} durable session fact(s) into project memory (${promotion.newMemoryRefs.length} new row(s))`,
+                        );
+                    }
+                } catch (error) {
+                    if (error instanceof ModuleMemoryAuthorityError) {
+                        // A project flipped back to the TS transform can still have
+                        // MODULE memory authority (authority does not follow the
+                        // transform-mode knob). Fact promotion is a side channel;
+                        // failing the whole publish here blocks history compaction
+                        // entirely, which starves overflow recovery. Skip the facts,
+                        // keep the compartments.
+                        sessionLog(
+                            sessionId,
+                            "fact promotion skipped: project memory is module-managed; compartments publish without facts",
+                        );
+                    } else {
+                        throw error;
+                    }
+                }
+            }
 
             // v2 (E2): persist historian-extracted events (stored, NOT rendered).
             // Independent of memory flags — events are a separate corpus for a future
