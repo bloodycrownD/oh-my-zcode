@@ -67,12 +67,7 @@
 
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import {
-  mkdirSync,
-  mkdtempSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -151,15 +146,11 @@ const { createAgentStateOverrideProvider } = await import(
 const { createExploreSubagentPort } = await import(
   new URL("../../core/dist/subagent/runner.js", import.meta.url).href
 );
-const {
-  DEFAULT_MAGIC_CONTEXT_CONFIG,
-  getActiveCompartmentRun,
-  registerActiveCompartmentRun,
-} = await import("@zcode/magic-context");
-const {
-  createMagicContextTurnTransform,
-  createZCodeMagicContextTurnTransformPort,
-} = await import(new URL("../dist/app/magic-context-turn-transform.js", import.meta.url).href);
+const { DEFAULT_MAGIC_CONTEXT_CONFIG, getActiveCompartmentRun, registerActiveCompartmentRun } =
+  await import("@zcode/magic-context");
+const { createMagicContextTurnTransform, createZCodeMagicContextTurnTransformPort } = await import(
+  new URL("../dist/app/magic-context-turn-transform.js", import.meta.url).href
+);
 
 process.on("exit", (code) => {
   console.log("");
@@ -243,9 +234,15 @@ function createStubModel(selection) {
     properties: {},
     optionSpecs: { reasoningLevel: { values: ["low", "medium", "high"] } },
     options: { reasoningLevel: selection.options?.reasoningLevel ?? "high" },
-    bind: () => { throw new Error("stub model bind must not be called"); },
-    generateText: async () => { throw new Error("stub model generateText must not be called"); },
-    streamText: async () => { throw new Error("stub model streamText must not be called"); },
+    bind: () => {
+      throw new Error("stub model bind must not be called");
+    },
+    generateText: async () => {
+      throw new Error("stub model generateText must not be called");
+    },
+    streamText: async () => {
+      throw new Error("stub model streamText must not be called");
+    },
   };
 }
 
@@ -351,8 +348,13 @@ async function promoteQueueItem({ queueItem, modelState, sessionId }) {
 function capturingLogger() {
   const entries = [];
   const logger = {
-    info() {}, warn() {}, error() {}, debug() {},
-    child() { return logger; },
+    info() {},
+    warn() {},
+    error() {},
+    debug() {},
+    child() {
+      return logger;
+    },
   };
   const note = (level) => (message, context) => entries.push({ level, message, context });
   logger.info = note("info");
@@ -365,7 +367,11 @@ function capturingLogger() {
 function sampleEntries() {
   return [
     { kind: "message", message: { role: "system", content: "you are zcode" } },
-    { kind: "message", message: { role: "user", content: "first question" }, metadata: { source: "real_user" } },
+    {
+      kind: "message",
+      message: { role: "user", content: "first question" },
+      metadata: { source: "real_user" },
+    },
     {
       kind: "message",
       message: {
@@ -374,8 +380,15 @@ function sampleEntries() {
         toolCalls: [{ id: "call_1", name: "read", input: { path: "a.ts" } }],
       },
     },
-    { kind: "message", message: { role: "tool", content: "file body", toolCallId: "call_1", toolName: "read" } },
-    { kind: "message", message: { role: "user", content: "second question" }, metadata: { source: "real_user" } },
+    {
+      kind: "message",
+      message: { role: "tool", content: "file body", toolCallId: "call_1", toolName: "read" },
+    },
+    {
+      kind: "message",
+      message: { role: "user", content: "second question" },
+      metadata: { source: "real_user" },
+    },
   ];
 }
 
@@ -438,7 +451,11 @@ test("T-E2E1: 长驻 App 下 turn A(M1) 在飞 → switchModelConfig(M2) → A �
   const result = await runPort(port, sampleEntries(), sessionId);
   const elapsedMs = Date.now() - startedAt;
   assert.equal(result.outcome, "unchanged");
-  assert.deepEqual(order, ["transform", "notify"], "叠加形态下 model step 前不得出现任何 settle 等待");
+  assert.deepEqual(
+    order,
+    ["transform", "notify"],
+    "叠加形态下 model step 前不得出现任何 settle 等待",
+  );
   assert.ok(elapsedMs < 100, `model step 不得被 200ms settle 拖住，实测 ${elapsedMs}ms`);
   assert.ok(
     getActiveCompartmentRun(sessionId) !== undefined,
@@ -457,7 +474,11 @@ test("T-E2E1: 长驻 App 下 turn A(M1) 在飞 → switchModelConfig(M2) → A �
 
   // A 完成 → Q promote：真实 sendQueuedNow。此刻后台折叠 run 仍在飞。
   const intent = await promoteQueueItem({ queueItem, modelState, sessionId });
-  assert.deepEqual(intent.modelSelection, M2, "提升轮必须用切换后的会话活值（三项叠加的核心交叉点）");
+  assert.deepEqual(
+    intent.modelSelection,
+    M2,
+    "提升轮必须用切换后的会话活值（三项叠加的核心交叉点）",
+  );
   assert.equal(intent.modelSelectionPinned, false, "活值不得 pin");
   assert.equal(intent.queueItemId, queueItem.queueItemId);
 
@@ -624,10 +645,7 @@ test("T-E2E3: 长驻真工厂端口：N 个 model step 均不等在飞折叠，c
     const startedAt = Date.now();
     const result = await runPort(port, sampleEntries(), sessionId);
     const elapsedMs = Date.now() - startedAt;
-    assert.ok(
-      result.outcome === "applied" || result.outcome === "unchanged",
-      result.outcome,
-    );
+    assert.ok(result.outcome === "applied" || result.outcome === "unchanged", result.outcome);
     assert.ok(elapsedMs < 100, `第 ${step} 个 model step 不得被在飞折叠拖住，实测 ${elapsedMs}ms`);
     assert.ok(
       getActiveCompartmentRun(sessionId) !== undefined,
