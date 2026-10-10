@@ -24,6 +24,7 @@
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:magic-context": "node --test scripts/test-magic-context-turn-transform.mjs",
     "test:settle-background": "node --test scripts/test-settle-background.mjs",
+    "test:e2e-live-all": "node --test scripts/test-e2e-live-all.mjs",
     "test:magic-context-absent-event": "node --test scripts/test-magic-context-absent-event.mjs",
     "test:magic-context-historian": "node --test scripts/test-magic-context-historian.mjs",
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
