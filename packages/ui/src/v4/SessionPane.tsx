@@ -2754,8 +2754,10 @@ export function SessionPane({
   );
   const ensureDraftPrewarmConfigBeforeSend = useCallback(
     async (targetSessionId: string) => {
-      // followupMode 仍是 Session 行为设置；模型与模式属于本次 Submission，随 sendText
-      // 原子提交，不能在发送前通过 CAS 改写共享 Session。
+      // followupMode 仍是 Session 行为设置。模型对**已有 session** 已由 handleSelectModel
+      // 在选择时即时下发 switchModelConfig，本函数不再补模型 CAS（保持单写者纪律，
+      // 不让发送前的预热路径成为第二条模型写入口）；草稿/预热 session 的模型选择仍随
+      // 首发 Submission 原子提交兜底。
       const desiredConfig = buildDraftCreateConfigPayload(
         draftConfigRef.current,
         appFollowupMode,
@@ -2821,8 +2823,12 @@ export function SessionPane({
     snapshotSessionId,
   ]);
 
-  // Composer 选择表达“下一次提交”。点击只更新 renderer intent；Session Selection
-  // 在 Submission 真正开跑（Guide 为下一次 model-step）时由 CLI/Core 更新。
+  // 选模型 = 对已有 session 的即时 session 语义下发（bugfix-batch-20261011 Step 4）：
+  // 已绑定会话时除更新 renderer intent 外，同时经配置 CAS 下发 switchModelConfig，
+  // Session Selection 立刻更新（handler 无 active-turn guard，运行中会话也允许切换，
+  // 下一轮与排队消息提升随之使用新模型）；草稿态/预热会话仍走首发 createSession.config
+  // 与 Submission 原子链，不在这里提前改写共享 Session。模型选择仍随首发原子提交兜底：
+  // 即使即时下发失败，下一次 Submission 依旧按当前草稿意图提交。
   const handleSelectModel = useCallback(
     (modelProvider: string, model: string, sourceModel: ModelSelectionSource | null) => {
       const resolvedProvider =
@@ -2830,11 +2836,25 @@ export function SessionPane({
       logger.debug("[v4-pane] onSelectModel", {
         modelProvider: resolvedProvider,
         model,
-        branch: "composer-submission-intent",
+        branch: sessionId === null ? "composer-submission-intent" : "session-config-cas",
       });
       handleDraftSelectModel(resolvedProvider, model);
+      if (sessionId === null) return;
+      // thought 传空串：思考深度是模型的附属配置，切模型后由目标模型默认档接管；用户
+      // 显式选档走 handleSelectThought 的既有路径（Composer 已在切模时清空旧 thought）。
+      void configCommandBarrier.enqueue(() =>
+        dispatchConfigCas("switchModelConfig", {
+          provider: resolvedProvider,
+          model,
+          thought: "",
+        }).catch((error: unknown) => {
+          // 收口对齐首发失败链（handleSendText）：noop/stale ack 不弹错误 toast，只按
+          // 既有 warn 通道记日志，草稿意图保留，下一次 Submission 仍按它提交。
+          logger.warn(`[v4-pane] switchModelConfig 下发失败: ${String(error)}`);
+        }),
+      );
     },
-    [draftConfigRef, handleDraftSelectModel],
+    [configCommandBarrier, dispatchConfigCas, draftConfigRef, handleDraftSelectModel, sessionId],
   );
 
   const handleSelectThought = useCallback(
