@@ -32,6 +32,8 @@ import {
   type ActiveToolCall,
   type BackgroundTaskInfo,
   type GoalCompletionVerificationOutput,
+  type Logger,
+  type MessagePart,
   type MessageWithParts,
   type ModelCompletePayload,
   type PendingPermission,
@@ -63,6 +65,8 @@ export async function buildSessionSnapshot(input: {
   fallbackCreatedAt?: number;
   fallbackUpdatedAt?: number;
   lastError?: SessionProjection["lastError"];
+  /** 丢弃 part 的观测出口（agent/B-1）；缺省 = 静默过滤（兼容旧调用方）。 */
+  logger?: Pick<Logger, "warn">;
   messages: MessageWithParts[];
   modelAvailability?: "all" | "current";
   persistedGoalVerificationEvents?: SessionEvent[];
@@ -96,7 +100,7 @@ export async function buildSessionSnapshot(input: {
     input.session,
     input.messages,
   );
-  const messages = await mapSnapshotMessages(input.app, input.messages);
+  const messages = await mapSnapshotMessages(input.app, input.messages, input.logger);
   return {
     messages,
     projection: mapSessionProjection(projection),
@@ -138,18 +142,48 @@ export async function buildSessionSnapshot(input: {
 async function mapSnapshotMessages(
   app: Pick<ZCodeApp, "readToolResultArtifact">,
   messages: readonly MessageWithParts[],
+  logger?: Pick<Logger, "warn">,
 ) {
-  const mapped = messages.map(mapMessageWithParts);
   return await Promise.all(
-    mapped.map(async (message) => ({
-      ...message,
-      // e2e 实测修复：编辑 rewind 截断后个别消息的 parts 会混入 undefined（rehydrate 遗留物），
-      // 快照映射在这里崩溃会把整个 editUserQuery 打成 executionFailed（rewind 已生效、重发丢失）。
-      // 过滤空 part 让快照可建；undefined part 的上游来源（rewind rehydrate）另行追踪。
-      parts: await Promise.all(
-        message.parts.filter((part) => part !== undefined && part !== null).map((part) => hydrateSnapshotFilePartUrl(app, part)),
-      ),
-    })),
+    messages.map(async (message) => {
+      // e2e/R-3 根因核验结论：未知/损坏 part type 才是 undefined part 的生产者
+      //（message-mapper switch 无 default 隐式返回 undefined；rewind 投影只整条
+      // 丢弃消息、不合成 part，"rewind rehydrate 遗留物"的旧归因不成立——raw parts
+      // 含 undefined 时崩点会在 mapMessageWithParts 的 filter 而非 hydrate）。
+      // mapMessageWithParts 现把未知 type 降级为 null 并经收集器回调上报，
+      // 这里与 legacy 的 undefined/null 兜底过滤合并统计丢弃数（agent/B-1）：
+      // part 被吞不再静默，编辑重发后 part 消失至少有 warn 可查。
+      const droppedParts: MessagePart[] = [];
+      const mappedMessage = mapMessageWithParts(message, (part) => {
+        droppedParts.push(part);
+      });
+      const beforeLegacyFilter = mappedMessage.parts;
+      const parts = await Promise.all(
+        beforeLegacyFilter
+          .filter((part) => part !== undefined && part !== null)
+          .map((part) => hydrateSnapshotFilePartUrl(app, part)),
+      );
+      const legacyDropped = beforeLegacyFilter.length - parts.length;
+      const dropped = droppedParts.length + legacyDropped;
+      if (dropped > 0) {
+        logger?.warn?.("ZCode Protocol session snapshot dropped message parts", {
+          dropped,
+          event: "zcode_protocol.session_snapshot.dropped_parts",
+          messageId: String(message.info.id),
+          module: "bootstrap.zcode_protocol",
+          partTypes: [
+            ...new Set([
+              ...droppedParts.map((part) =>
+                typeof part.type === "string" ? part.type : "(missing)",
+              ),
+              ...Array.from({ length: legacyDropped }, () => "(absent)"),
+            ]),
+          ],
+          sessionId: String(message.info.sessionID),
+        });
+      }
+      return { ...mappedMessage, parts };
+    }),
   );
 }
 

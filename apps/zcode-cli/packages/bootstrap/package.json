@@ -31,6 +31,7 @@
     "test:edit-retry-model": "tsx --test scripts/test-edit-retry-model.mjs",
     "test:default-model-live": "tsx --test scripts/test-default-model-live.mjs",
     "test:prompt-language-rpc": "node --test scripts/test-prompt-language-rpc.mjs",
+    "test:session-mapper-parts": "tsx --test scripts/test-session-mapper-parts.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

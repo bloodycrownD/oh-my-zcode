@@ -3415,6 +3415,9 @@ async function snapshotWithDiagnostics(
     fallbackCreatedAt: record.createdAt,
     fallbackUpdatedAt: record.updatedAt,
     lastError: record.restoreWarning,
+    // 丢弃 part 的 warn 观测出口（agent/B-1）：未知 type 的 part 被过滤时
+    // 记录 messageId/dropped/partTypes，避免 part 消失完全静默。
+    logger: context.logger,
     messages: limitMessages(messages, options.messageLimit),
     modelAvailability: options.modelAvailability,
     persistedContextUsageBreakdownEvents,

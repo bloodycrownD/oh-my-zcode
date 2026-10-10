@@ -2,7 +2,10 @@ import type { ZCodeMessagePart, ZCodeMessageWithParts, ZCodeToolState } from "@z
 import type { MessagePart, MessageWithParts, ToolState } from "@zcode/contracts";
 import { shouldHideInvalidToolCallFromProduct } from "../tool-call-product-visibility.js";
 
-export function mapMessageWithParts(message: MessageWithParts): ZCodeMessageWithParts {
+export function mapMessageWithParts(
+  message: MessageWithParts,
+  onDroppedPart?: (part: MessagePart) => void,
+): ZCodeMessageWithParts {
   return {
     info:
       message.info.role === "user"
@@ -56,11 +59,32 @@ export function mapMessageWithParts(message: MessageWithParts): ZCodeMessageWith
         (part) =>
           part.type !== "tool" || !shouldHideInvalidToolCallFromProduct(part.tool, part.metadata),
       )
-      .map(mapMessagePart),
+      .map((part) => {
+        const mapped = mapMessagePart(part);
+        // 未知/损坏 type 在 mapMessagePart 内降级为 null（e2e/R-3 上游根治）。
+        // 这里过滤出协议面并回调上报丢弃，snapshot 映射侧据此统计 warn（agent/B-1）——
+        // 过去丢弃完全静默，part 消失只能靠用户肉眼发现。
+        if (mapped === null) {
+          onDroppedPart?.(part);
+          return null;
+        }
+        return mapped;
+      })
+      .filter((part): part is ZCodeMessagePart => part !== null),
   };
 }
 
-function mapMessagePart(part: MessagePart): ZCodeMessagePart {
+/**
+ * 单 part → 协议 part。返回 null = 未知/损坏 type，不进协议快照。
+ *
+ * e2e/R-3 上游根治：过去 switch 没有 default 分支，未知 type 会让函数隐式返回
+ * undefined 混进 parts 数组，hydrateSnapshotFilePartUrl 对 undefined 读 .type
+ * 直接把编辑重发后的整个 buildSessionSnapshot 打成 TypeError（rewind 已生效、
+ * 重发丢失）。根因核验结论：rewind 投影只整条丢弃消息、不合成 part，真正的
+ * undefined 生产者就是这里的无 default 隐式返回——可达来源是 decodeStoredPart
+ * 对残缺 data 行返回的无 type 对象，以及前向兼容的新 part type。
+ */
+function mapMessagePart(part: MessagePart): ZCodeMessagePart | null {
   const base = {
     messageId: String(part.messageID),
     partId: String(part.id),
@@ -155,6 +179,10 @@ function mapMessagePart(part: MessagePart): ZCodeMessagePart {
         error: { name: part.error.name, data: part.error.data },
         type: "retry",
       };
+    default:
+      // 未知 type（缺 type 的残缺存储行 / 前向兼容新 type）：返回 null 由调用侧
+      // 过滤并统计，杜绝隐式 undefined 混入 parts 数组（e2e/R-3 崩溃源头）。
+      return null;
   }
 }
 
