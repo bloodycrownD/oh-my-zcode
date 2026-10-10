@@ -14,8 +14,15 @@ const PROGRESS_TAIL_MAX_BYTES = 4096;
 export const BASH_OUTPUT_TRUNCATE_HEAD_KEEP_BYTES = 1024 * 1024;
 /** 截断后文件尾部保留的字节数：保住结尾的失败摘要。 */
 export const BASH_OUTPUT_TRUNCATE_TAIL_KEEP_BYTES = 1024 * 1024;
-/** 截断标记行的长度预算（字节）。用于估算截断后体积的余量。 */
+/** 截断标记行的长度预算（字节）。截断窗口预算（budget）要先扣掉它，防止贴边越界。 */
 export const BASH_OUTPUT_TRUNCATE_MARKER_MAX_BYTES = 256;
+/**
+ * 结果面截断说明（N-1/C-1）：不改 status，只保证「文件被物理截断」对用户可见。
+ * 截断实际生效时附 TRUNCATED 文案——status 仍如实反映命令自身结局（completed
+ * 不谎报 killed、也不静默）；逃逸/IO 失败时附 NOT_TRUNCATED 文案。
+ */
+export const BASH_OUTPUT_TRUNCATED_NOTICE = "output file truncated (head/tail kept)";
+export const BASH_OUTPUT_NOT_TRUNCATED_NOTICE = "output file not truncated";
 
 export interface BashOutputTruncationResult {
   /** 被一行标记替换掉的中间字节数（= 原体积 - 头 - 尾）。 */
@@ -34,9 +41,11 @@ export interface BashOutputTruncationResult {
  * `[truncated N bytes by omz exec output limit]`，保住「开头命令回显 +
  * 结尾失败原因」两段最常用诊断信息，同时让落盘体积重新有界。
  *
- * 头尾窗口按上限收缩：`headKeep + tailKeep <= limitBytes`，保证截断后体积
- * 仍落在「上限 + 标记行」之内——否则上限被调小（env 覆盖到 1MiB）时，
- * 两级默认窗口反而会让截断结果超出上限，"物理截断"失去意义。
+ * 头尾窗口按上限收缩：预算先扣掉标记行（`budget = limitBytes -
+ * BASH_OUTPUT_TRUNCATE_MARKER_MAX_BYTES`，`headKeep + tailKeep <= budget`），
+ * 保证截断后体积「头 + 标记 + 尾」整体 ≤ limitBytes——否则上限被调小
+ * （env 覆盖到 1MiB）时，两级默认窗口反而会让截断结果超出上限，"物理截断"
+ * 失去意义（1MiB 下限场景早先正是靠 256B slack 贴边过关，marker 文案一变即越界）。
  *
  * 上游看门狗（watchLimit）每 5s 才 stat 一次，杀进程那一刻文件通常已经超调到
  * 上限 + 一个轮询间隔的写入量，因此判据用 `size <= limitBytes` 直接放行。
@@ -54,9 +63,11 @@ export async function truncateBashOutputFileKeepHeadTail(
   try {
     const { size } = await handle.stat();
     if (size <= limitBytes) return undefined;
-    // 窗口按上限收缩：两级之和不得超过上限，否则小上限下截断结果反而更大。
-    const headKeep = Math.min(Math.max(0, headKeepBytes), Math.floor(limitBytes / 2));
-    const tailKeep = Math.min(Math.max(0, tailKeepBytes), Math.max(0, limitBytes - headKeep));
+    // 窗口按上限收缩：两级之和不得超过「上限 - 标记行预算」，否则小上限下
+    // 截断结果（头 + 标记 + 尾）反而比上限还大。
+    const budget = Math.max(0, limitBytes - BASH_OUTPUT_TRUNCATE_MARKER_MAX_BYTES);
+    const headKeep = Math.min(Math.max(0, headKeepBytes), Math.floor(budget / 2));
+    const tailKeep = Math.min(Math.max(0, tailKeepBytes), Math.max(0, budget - headKeep));
     const headLength = Math.min(size, headKeep);
     const tailLength = Math.min(size - headLength, tailKeep);
     const removedBytes = size - headLength - tailLength;
@@ -104,6 +115,10 @@ async function readExact(handle: FileHandle, length: number, position: number): 
  * 有界等待：杀树永不完成时不能挂死 run() 的收尾，超时即跳过截断（保留原文件，
  * 与修复前行为一致，不因清理失败丢掉执行结果）。
  *
+ * 返回值 = 截断结果或 undefined（跳过/未生效/IO 失败）。调用方据此在结果面附
+ * 一句不改 status 的可见说明（N-1/C-1）：生效 → BASH_OUTPUT_TRUNCATED_NOTICE，
+ * 逃逸或 IO 失败 → BASH_OUTPUT_NOT_TRUNCATED_NOTICE。
+ *
  * 截断失败（文件被占用/权限/已消失）只经 onDebug 说明，不抛错。
  */
 export async function truncateBashOutputAfterKill(args: {
@@ -116,32 +131,57 @@ export async function truncateBashOutputAfterKill(args: {
   /** 总等待上界，默认 BASH_OUTPUT_TRUNCATE_WAIT_MS。 */
   waitMs?: number;
   onDebug?: (message: string) => void;
-}): Promise<void> {
+}): Promise<BashOutputTruncationResult | undefined> {
   const settleWaits: Promise<unknown>[] = [args.closePromise];
   if (args.killCompletion) settleWaits.push(args.killCompletion);
   const settled = await waitForPromise(
     Promise.all(settleWaits),
     args.waitMs ?? BASH_OUTPUT_TRUNCATE_WAIT_MS,
+    // 持活（uix/C-1）：等待期 timer 若 unref，事件循环可能在本段等待见分晓前
+    // 排空（裸消费方/测试进程实证，见 T-C1-6b），截断被静默放弃。CLI 宿主有
+    // 长驻句柄，持活不改变宿主行为，只兜住「只剩这段等待」的形态。
+    { keepAlive: true },
   );
   if (!settled) {
     args.onDebug?.(
-      `exec output truncation skipped: child/tree did not settle within ${
+      `exec output truncation skipped (output file not truncated): child/tree did not settle within ${
         args.waitMs ?? BASH_OUTPUT_TRUNCATE_WAIT_MS
       }ms (${args.filePath})`,
     );
-    return;
+    return undefined;
   }
   try {
-    await truncateBashOutputFileKeepHeadTail(args.filePath, args.limitBytes);
+    return await truncateBashOutputFileKeepHeadTail(args.filePath, args.limitBytes);
   } catch (error) {
     const code = error instanceof Error && "code" in error ? String(error.code) : "unknown";
     // Windows 上文件被其它句柄占用、POSIX 上权限不足都会走到这里；
     // 保留原文件并说明原因，绝不因为清理失败丢掉执行结果。
     args.onDebug?.(
-      `exec output truncation failed (${code}) for ${args.filePath}: ${
+      `exec output truncation failed (output file not truncated, ${code}) for ${args.filePath}: ${
         error instanceof Error ? error.message : String(error)
       }`,
     );
+    return undefined;
+  }
+}
+
+/**
+ * 截断触发用的轻判定：文件是否已超上限（只 stat 比大小，不读内容）。
+ * 收尾分支用它兜底「子进程自然退出 + 看门狗 5s 轮询从未落窗」的主事故形态——
+ * 那时 outputLimitExceeded / outputLimitDetected 两标志皆 false，但超限文件
+ * 仍必须截断（uix/B-1）。
+ * stat 失败（文件缺失/不可读）按「不超限」处理：真去截断也只会以 IO 失败收场
+ * 并留 debug 说明，这里不过度猜测。
+ */
+export async function isBashOutputOverLimit(
+  filePath: string,
+  limitBytes: number,
+): Promise<boolean> {
+  try {
+    const { size } = await stat(filePath);
+    return size > limitBytes;
+  } catch {
+    return false;
   }
 }
 

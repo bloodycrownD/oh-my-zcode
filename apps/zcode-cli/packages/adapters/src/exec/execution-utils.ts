@@ -23,10 +23,13 @@ export const IO_DRAIN_TIMEOUT_MS = 1_000;
 export const FORCE_EXIT_AFTER_KILL_MS = 5_000;
 /**
  * 超限杀进程后、物理截断前等待「子进程关闭 + 杀树收尾」的总上界。
- * 与 FORCE_EXIT_AFTER_KILL_MS 同档：那之后 ZCode 已强制销毁流，再等没有意义。
+ * 必须**严格大于** `FORCE_EXIT_AFTER_KILL_MS`（5s）：close 事件要等持有继承 fd
+ * 的后代全部退出才触发，而 5s 处 ZCode 已强制销毁流。若两档等长，「等到流被
+ * 销毁」与「截断等待超时」几乎同时发生，截断会在写者刚死透的边界上被跳过。
+ * 留 2s 余量（7s）让杀树收尾先于截断超时见分晓。
  * 上界只是防挂死；正常路径 close/taskkill 都在毫秒级完成。
  */
-export const BASH_OUTPUT_TRUNCATE_WAIT_MS = 5_000;
+export const BASH_OUTPUT_TRUNCATE_WAIT_MS = 7_000;
 export const DEFAULT_PROGRESS_THRESHOLD_MS = 2_000;
 export const DEFAULT_PROGRESS_INTERVAL_MS = 1_000;
 export const DEFAULT_PROGRESS_TAIL_BYTES = 4 * 1024;
@@ -95,7 +98,22 @@ export function abortSignalReason(signal: AbortSignal | undefined): unknown {
   return (signal as AbortSignal & { reason?: unknown }).reason;
 }
 
-export function waitForPromise(promise: Promise<unknown>, timeoutMs: number): Promise<boolean> {
+/**
+ * 有界等待：目标 Promise 先落地返回 true，超过 timeoutMs 返回 false。
+ *
+ * `keepAlive`（uix/C-1，截断等待专用）：默认 timer unref——「losing timeout」
+ * 不应在目标 Promise 已完成后继续单独保活 CLI。但 await 中的 Promise 本身不
+ * 保活事件循环：截断等待期若整个进程只剩这一段等待（裸一次性消费方、测试
+ * 进程），unref timer 会被事件循环提前丢弃、等待被静默放弃——T-C1-6b 实证
+ * （node --test 下事件循环排空后等待直接消失，后续用例连锁取消）。
+ * 截断是收尾正确性的一部分（超限文件必须有界），值得为这 ≤7s 持活；
+ * ZCode CLI 宿主本来就有长驻句柄（stdin/REPL、其它在飞执行），持活不改变宿主行为。
+ */
+export function waitForPromise(
+  promise: Promise<unknown>,
+  timeoutMs: number,
+  options: { keepAlive?: boolean } = {},
+): Promise<boolean> {
   return new Promise<boolean>((resolve) => {
     let settled = false;
     let timer: NodeJS.Timeout | undefined;
@@ -106,8 +124,13 @@ export function waitForPromise(promise: Promise<unknown>, timeoutMs: number): Pr
       resolve(completed);
     };
     timer = setTimeout(() => finish(false), timeoutMs);
-    // losing timeout 不应在目标 Promise 已完成后继续单独保活 CLI。
-    timer.unref?.();
+    if (options.keepAlive === true) {
+      // 等待期必须持活，否则事件循环可能在等待见分晓前排空（见上方注释）。
+      timer.ref?.();
+    } else {
+      // losing timeout 不应在目标 Promise 已完成后继续单独保活 CLI。
+      timer.unref?.();
+    }
     void promise.then(
       () => finish(true),
       () => finish(true),

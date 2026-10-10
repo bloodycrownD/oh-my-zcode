@@ -8,7 +8,10 @@
  *      请求不再硬填 `maxPersistedBytes`（judge P1-2：request 值优先级最高，
  *      硬填会把 env 与 adapter 默认一起架空），前后台走同一解析链。
  *   2. 杀进程后物理截断（6b）：文件被改写成「头 + `[truncated N bytes by omz
- *      exec output limit]` + 尾」，体积 ≤ 上限 + 标记行；未超限文件字节不变。
+ *      exec output limit]` + 尾」，体积 ≤ 上限（预算已扣 marker，不依赖 slack）；
+ *      未超限文件字节不变。截断触发是收尾状态判定：kill/竞态标志之外兜一次
+ *      stat，覆盖「子进程自然退出 + 看门狗从未落窗」的主事故形态（uix/B-1），
+ *      且结果面附不改 status 的截断说明（N-1/C-1）。
  *
  * 分层（对应 round-2 审查 P2）：
  *   - env 解析 / 请求级优先级 / 截断 helper：**直测**，不 spawn，任何主机可跑；
@@ -17,6 +20,12 @@
  *     而请求形状（`shellProfile: "posix-bash"`）与具体 shell 无关，仍然选中
  *     Bash 合并输出文件路径，因此用例在两类主机上都能验证「taskkill 杀进程 →
  *     子进程确认退出后截断」的真实链路。
+ *
+ * CI 矩阵登记（uix/G-3d）：**POSIX kill 链**（`process-tree.ts` 两阶段
+ * SIGTERM→SIGKILL escalation、`terminateProcessTree` 的 POSIX 分支）在本 CI
+ * 矩阵中**仅类型检查 + 人工验收**——真实失控命令用例（T-C1-4a）在 Windows 上
+ * 只走 taskkill 分支，POSIX 两阶段杀树没有自动化断言；合并前按 fix-spec 以
+ * 人工验收登记，不写平台条件化的 flaky 用例。
  *
  * 隔离：测试内显式 `ZCODE_STORAGE_DIR` 指向临时目录，绝不触碰真实 `~/.omz`。
  *
@@ -61,9 +70,16 @@ registerHooks({
 
 // 动态 import：resolve 钩子必须先注册，否则 adapters 的 dist 链在加载期就解析失败。
 const { NodeExecutionAdapter } = await import("../dist/exec/node-execution-adapter.js");
-const { truncateBashOutputFileKeepHeadTail } = await import("../dist/exec/bash-file-output.js");
 const {
+  BASH_OUTPUT_NOT_TRUNCATED_NOTICE,
+  BASH_OUTPUT_TRUNCATED_NOTICE,
+  truncateBashOutputAfterKill,
+  truncateBashOutputFileKeepHeadTail,
+} = await import("../dist/exec/bash-file-output.js");
+const {
+  BASH_OUTPUT_TRUNCATE_WAIT_MS,
   BASH_RUNTIME_OUTPUT_LIMIT_BYTES,
+  FORCE_EXIT_AFTER_KILL_MS,
   MAX_EXEC_OUTPUT_LIMIT_BYTES,
   MIN_EXEC_OUTPUT_LIMIT_BYTES,
   formatExecOutputLimitBytes,
@@ -77,6 +93,15 @@ const TRUNCATE_MARKER_SLACK_BYTES = 256;
 const WATCHDOG_INTERVAL_MS = 5_000;
 /** 5s 轮询看门狗 + 杀树 + 截断，留足余量。 */
 const OVERSIZE_TOTAL_MS = WATCHDOG_INTERVAL_MS + 30_000;
+/** 自然退出用例：命令毫秒级跑完，余量留给 shell 起飞与截断收尾。 */
+const NATURAL_EXIT_TOTAL_MS = 30_000;
+/**
+ * 逃逸用例：5s 看门狗 + 7s 截断等待上界（escape）+ 自退脚本的存活窗口 + 收尾。
+ * 17s 自退窗口保证「杀树 completion 悬挂」期间进程仍在，逼 waitForPromise 超时。
+ */
+const ESCAPE_SELF_EXIT_MS = 15_000;
+const ESCAPE_TOTAL_MS =
+  WATCHDOG_INTERVAL_MS + BASH_OUTPUT_TRUNCATE_WAIT_MS + ESCAPE_SELF_EXIT_MS + 30_000;
 
 // ── 公共工具 ────────────────────────────────────────────────────────────────
 
@@ -179,6 +204,52 @@ async function createPinnedOutputScript(workspace, scriptName, payload) {
     "utf8",
   );
   return scriptPath;
+}
+
+/**
+ * 自然退出用例：把 sizeBytes 输出写完就立刻退出——看门狗 5s 轮询根本落不了窗，
+ * 两标志皆 false，正是 uix/B-1 的主事故形态（旧代码在此场景完全不截断）。
+ */
+async function createOversizeExitScript(workspace, scriptName, sizeBytes) {
+  const scriptPath = join(workspace.rootDir, scriptName);
+  await writeFile(
+    scriptPath,
+    [
+      "const chunk = 'omz-natural-exit-payload\\n'.repeat(1024);",
+      `for (let written = 0; written < ${sizeBytes}; written += chunk.length) {`,
+      "  process.stdout.write(chunk);",
+      "}",
+    ].join("\n"),
+    "utf8",
+  );
+  return scriptPath;
+}
+
+/**
+ * 逃逸用例：写完超限输出后挂住不退出，`ESCAPE_SELF_EXIT_MS` 后自行退出。
+ * 配合 StalledKillAdapter（杀树 completion 永不 settle）把截断等待逼到上界。
+ */
+async function createEscapeScript(workspace, scriptName) {
+  const scriptPath = join(workspace.rootDir, scriptName);
+  await writeFile(
+    scriptPath,
+    [
+      "const chunk = 'omz-escape-payload\\n'.repeat(1024);",
+      "for (let written = 0; written < 2 * 1024 * 1024; written += chunk.length) {",
+      "  process.stdout.write(chunk);",
+      "}",
+      `setTimeout(() => process.exit(0), ${ESCAPE_SELF_EXIT_MS});`,
+    ].join("\n"),
+    "utf8",
+  );
+  return scriptPath;
+}
+
+/** 杀树 completion 永不 settle 的 adapter：确定性地把截断推进逃逸分支（uix/C-1）。 */
+class StalledKillAdapter extends NodeExecutionAdapter {
+  terminateProcessTree() {
+    return new Promise(() => {});
+  }
 }
 
 // ── T-C1-1：env 解析（直测） ────────────────────────────────────────────────
@@ -375,28 +446,42 @@ test("T-C1-2d: 请求级回潮网——core/adapters 不再硬填 maxPersistedBy
 
 // ── T-C1-3：截断 helper（直测） ─────────────────────────────────────────────
 
-test("T-C1-3a: 超限文件被改写成 头+标记+尾，体积 ≤ 上限+标记余量", async () => {
+test("T-C1-3a: 超限文件被改写成 头+标记+尾，整体体积 ≤ 上限（预算已扣 marker）", async () => {
   const workspace = createWorkspace();
   try {
-    const target = join(workspace.rootDir, "oversize.log");
-    // 4MiB 文件 + 1MiB 上限：头/尾窗口按上限收缩到各 512KiB。
-    const payload = Buffer.from("omz-truncate-payload\n".repeat(4 * MIB));
-    await writeFile(target, payload);
-    const result = await truncateBashOutputFileKeepHeadTail(target, MIB);
-    assert.ok(result, "超限文件必须被截断");
-    const after = await readFile(target);
-    assert.ok(
-      after.length <= MIB + TRUNCATE_MARKER_SLACK_BYTES,
-      `截断后 ${after.length} 超出上限+标记余量`,
-    );
-    const text = after.toString("utf8");
-    assert.match(text, /\[truncated \d+ bytes by omz exec output limit\]/);
-    // 头 = 原文件开头，尾 = 原文件结尾，中间只剩一行标记
-    const payloadText = payload.toString("utf8");
-    assert.equal(text.startsWith(payloadText.slice(0, 512 * 1024)), true, "头部必须是原文件开头");
-    assert.equal(text.endsWith(payloadText.slice(-512 * 1024)), true, "尾部必须是原文件结尾");
-    assert.equal(result.removedBytes, payload.length - MIB);
-    assert.equal(result.finalBytes, after.length);
+    // uix/B-2：1MiB 下限场景双跑（4MiB 与 1.5MiB 两档文件）。窗口预算 =
+    // limit - marker 上界，头尾各半；截断后「头 + 标记 + 尾」必须整体 ≤ limit，
+    // 不再依赖 256B slack（marker 文案一变旧实现即越界）。
+    const budget = MIB - TRUNCATE_MARKER_SLACK_BYTES;
+    const windowKeep = Math.floor(budget / 2);
+    for (const fileSizeMiB of [4, 1.5]) {
+      const target = join(workspace.rootDir, `oversize-${fileSizeMiB}.log`);
+      const payload = Buffer.from("omz-truncate-payload\n".repeat(Math.round(fileSizeMiB * MIB)));
+      await writeFile(target, payload);
+      const result = await truncateBashOutputFileKeepHeadTail(target, MIB);
+      assert.ok(result, `超限文件必须被截断（${fileSizeMiB}MiB）`);
+      const after = await readFile(target);
+      assert.ok(
+        after.length <= MIB,
+        `截断后 ${after.length} 超出上限 ${MIB}（预算已扣 marker，不含 slack）`,
+      );
+      assert.equal(result.finalBytes, after.length);
+      const text = after.toString("utf8");
+      assert.match(text, /\[truncated \d+ bytes by omz exec output limit\]/);
+      // 头 = 原文件开头，尾 = 原文件结尾，中间只剩一行标记
+      const payloadText = payload.toString("utf8");
+      assert.equal(
+        text.startsWith(payloadText.slice(0, windowKeep)),
+        true,
+        "头部必须是原文件开头（窗口按预算收缩）",
+      );
+      assert.equal(
+        text.endsWith(payloadText.slice(-windowKeep)),
+        true,
+        "尾部必须是原文件结尾（窗口按预算收缩）",
+      );
+      assert.equal(result.removedBytes, payload.length - budget);
+    }
   } finally {
     workspace.cleanup();
   }
@@ -488,8 +573,8 @@ test(
       // 等终态时截断已完成：文件应已是「头 + 标记 + 尾」。
       const truncatedSize = (await stat(outputFile)).size;
       assert.ok(
-        truncatedSize <= MIB + TRUNCATE_MARKER_SLACK_BYTES,
-        `截断后 ${truncatedSize} 必须 ≤ 上限 ${MIB} + 标记余量`,
+        truncatedSize <= MIB,
+        `截断后 ${truncatedSize} 必须 ≤ 上限 ${MIB}（预算已扣 marker，不含 slack）`,
       );
       const text = await readFile(outputFile, "utf8");
       assert.match(text, /\[truncated \d+ bytes by omz exec output limit\]/);
@@ -500,6 +585,82 @@ test(
       assert.ok(tailLines.length > 0, "尾部必须保留最后写入的行");
       const lastLine = Number(tailLines.at(-1).split("-").at(-1));
       assert.ok(lastLine > 1_000, `尾部应是写入后期的行（实得 ${lastLine}）`);
+    } finally {
+      await adapter?.close().catch(() => undefined);
+      workspace.cleanup();
+    }
+  },
+);
+
+test(
+  "T-C1-4b: 子进程自然退出但文件超限 → 收尾仍截断为头尾+标记（uix/B-1 主事故形态）",
+  { timeout: NATURAL_EXIT_TOTAL_MS },
+  async () => {
+    const workspace = createWorkspace();
+    let adapter;
+    try {
+      // 2MiB 输出 + 1MiB 上限，写完立刻退出：看门狗 5s 轮询落不了窗，
+      // outputLimitExceeded / outputLimitDetected 两标志皆 false——旧代码在此
+      // 场景完全不截断；修复后收尾 stat 兜底仍然截断。
+      const scriptPath = await createOversizeExitScript(workspace, "omz-natural-exit.mjs", 2 * MIB);
+      adapter = createAdapter(workspace, { ZCODE_EXEC_OUTPUT_LIMIT_BYTES: String(MIB) });
+      const request = createBashExecutionRequest({
+        command: `node "${scriptPath}"`,
+        sessionId: "sess_natural_exit",
+        toolCallId: "call_natural_exit",
+        persistOutput: "always",
+      });
+      const result = await adapter.run(request);
+      // 自然退出不是 killed：exitCode 0、status completed、无取消语义。
+      assert.equal(result.exitCode, 0);
+      assert.equal(result.status, "completed");
+      assert.equal(result.cancelled, false);
+      assert.equal(result.timedOut, false);
+      const outputFile = execOutputPath(
+        workspace.rootDir,
+        "sess_natural_exit",
+        "call_natural_exit",
+      );
+      const after = await readFile(outputFile, "utf8");
+      assert.ok(after.length <= MIB, `自然退出+超限也必须截断到 ≤ 上限（实得 ${after.length}）`);
+      assert.match(after, /\[truncated \d+ bytes by omz exec output limit\]/);
+      assert.ok(after.startsWith("omz-natural-exit-payload\n"), "头部必须是输出起点");
+    } finally {
+      await adapter?.close().catch(() => undefined);
+      workspace.cleanup();
+    }
+  },
+);
+
+test(
+  "T-C1-4c: 截断发生时 status 仍 completed，结果面附截断说明（N-1）",
+  { timeout: NATURAL_EXIT_TOTAL_MS },
+  async () => {
+    const workspace = createWorkspace();
+    let adapter;
+    try {
+      const scriptPath = await createOversizeExitScript(
+        workspace,
+        "omz-natural-exit-2.mjs",
+        2 * MIB,
+      );
+      adapter = createAdapter(workspace, { ZCODE_EXEC_OUTPUT_LIMIT_BYTES: String(MIB) });
+      const request = createBashExecutionRequest({
+        command: `node "${scriptPath}"`,
+        sessionId: "sess_natural_exit_2",
+        toolCallId: "call_natural_exit_2",
+        persistOutput: "always",
+      });
+      const result = await adapter.run(request);
+      // N-1：文件被物理截断后用户必须看得见，但 status 不谎报 killed。
+      assert.equal(result.status, "completed");
+      assert.equal(result.cancelled, false);
+      assert.equal(result.error?.type, "output_limit");
+      assert.equal(
+        result.error?.message,
+        BASH_OUTPUT_TRUNCATED_NOTICE,
+        "结果面必须附不改 status 的截断说明",
+      );
     } finally {
       await adapter?.close().catch(() => undefined);
       workspace.cleanup();
@@ -550,6 +711,163 @@ test("T-C1-5b: 上限文案随 env 覆盖变化", () => {
   assert.equal(formatExecOutputLimitBytes(2 * MIB), "2MiB");
   assert.equal(formatExecOutputLimitBytes(GIB), "1GiB");
   assert.equal(formatExecOutputLimitBytes(0), "0");
+});
+
+// ── T-C1-6：截断收尾 helper 直测（uix/G-3a） ───────────────────────────────
+
+test("T-C1-6a: settled（close 已发生）→ 截断生效并返回结果", async () => {
+  const workspace = createWorkspace();
+  try {
+    const target = join(workspace.rootDir, "settled.log");
+    const payload = Buffer.from("omz-settled-payload\n".repeat(2 * MIB));
+    await writeFile(target, payload);
+    const result = await truncateBashOutputAfterKill({
+      filePath: target,
+      closePromise: Promise.resolve(),
+      limitBytes: MIB,
+    });
+    assert.ok(result, "settled 且超限必须返回截断结果");
+    assert.ok(result.removedBytes > 0);
+    assert.ok(result.finalBytes <= MIB, "预算扣 marker 后不得超出上限");
+    assert.match(result.marker, /\[truncated \d+ bytes by omz exec output limit\]/);
+    const after = await readFile(target);
+    assert.equal(after.length, result.finalBytes);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test("T-C1-6b: 未 settle（close/kill 悬挂）→ 跳过截断并留 not truncated 说明", async () => {
+  const workspace = createWorkspace();
+  const notes = [];
+  try {
+    const target = join(workspace.rootDir, "never-settles.log");
+    const payload = Buffer.from("omz-never-settle\n".repeat(2 * MIB));
+    await writeFile(target, payload);
+    const result = await truncateBashOutputAfterKill({
+      filePath: target,
+      closePromise: new Promise(() => {}),
+      killCompletion: new Promise(() => {}),
+      limitBytes: MIB,
+      // 显式小等待（默认 7s 太慢）：逃逸分支要被确定性地走到。
+      waitMs: 40,
+      onDebug: (message) => notes.push(message),
+    });
+    assert.equal(result, undefined, "未 settle 不得截断");
+    const after = await readFile(target);
+    assert.equal(after.length, payload.length, "逃逸时文件必须字节不变");
+    assert.equal(notes.length, 1, "逃逸必须留一句 debug 说明");
+    assert.match(notes[0], /output file not truncated/, "逃逸说明必须带 not truncated");
+    assert.match(notes[0], /never-settles\.log/, "逃逸说明必须带文件路径");
+    // 本进程里此刻只剩这一段等待（两个悬挂 Promise + 唯一 timer）：用例能跑完
+    // 即证明截断等待期 timer 持活（keepAlive），没有被事件循环提前丢弃（uix/C-1）。
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test("T-C1-6c: killCompletion 缺省（竞态路径无杀树可等）→ 等 close 后照常截断", async () => {
+  const workspace = createWorkspace();
+  try {
+    const target = join(workspace.rootDir, "no-kill.log");
+    const payload = Buffer.from("omz-no-kill\n".repeat(2 * MIB));
+    await writeFile(target, payload);
+    // close 延迟一Tick 落地：证明 helper 真的在等 close，而不是碰巧立即成功。
+    const closeAfterTick = new Promise((resolve) => setTimeout(resolve, 20));
+    const result = await truncateBashOutputAfterKill({
+      filePath: target,
+      closePromise: closeAfterTick,
+      limitBytes: MIB,
+    });
+    assert.ok(result, "killCompletion 缺省不应妨碍 settled 截断（竞态路径）");
+    assert.ok(result.finalBytes <= MIB);
+    const after = await readFile(target);
+    assert.match(after.toString("utf8"), /\[truncated \d+ bytes by omz exec output limit\]/);
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+test("T-C1-6d: IO 失败（文件不存在）→ 吞错返回 undefined 并留 debug 说明", async () => {
+  const workspace = createWorkspace();
+  const notes = [];
+  try {
+    const result = await truncateBashOutputAfterKill({
+      filePath: join(workspace.rootDir, "missing-after-settle.log"),
+      closePromise: Promise.resolve(),
+      limitBytes: MIB,
+      onDebug: (message) => notes.push(message),
+    });
+    assert.equal(result, undefined, "IO 失败必须吞错，不抛给 run() 收尾");
+    assert.equal(notes.length, 1, "IO 失败必须留一句 debug 说明");
+    assert.match(notes[0], /ENOENT/);
+    assert.match(notes[0], /output file not truncated/, "IO 失败说明同样带 not truncated");
+  } finally {
+    workspace.cleanup();
+  }
+});
+
+// ── T-C1-7：逃逸路径与等待上界锚点（uix/C-1） ──────────────────────────────
+
+test(
+  "T-C1-7a: 逃逸路径（杀树 completion 悬挂）→ 结果 message 附「output file not truncated」",
+  { timeout: ESCAPE_TOTAL_MS },
+  async () => {
+    const workspace = createWorkspace();
+    let adapter;
+    try {
+      // 看门狗 5s 时杀树（被 override 成永不 settle）；脚本写完 2MiB 后挂到
+      // ESCAPE_SELF_EXIT_MS 自行退出，让 exit 先落地、再让截断等待越过 7s 上界。
+      const scriptPath = await createEscapeScript(workspace, "omz-escape.mjs");
+      adapter = new StalledKillAdapter({
+        outputRootDir: workspace.rootDir,
+        processEnv: {
+          ...process.env,
+          ZCODE_STORAGE_DIR: workspace.storageDir,
+          ZCODE_EXEC_OUTPUT_LIMIT_BYTES: String(MIB),
+        },
+      });
+      const request = createBashExecutionRequest({
+        command: `node "${scriptPath}"`,
+        sessionId: "sess_escape",
+        toolCallId: "call_escape",
+        persistOutput: "always",
+      });
+      // run_in_background 即事故路径（与 T-C1-4a 同）：前台 run() 会把
+      // output_limit 结算的 artifact 归一化删除，文件保留语义只在后台路径成立。
+      const started = await adapter.runBashWithBackgroundLifecycle(request, { mode: "explicit" });
+      assert.equal(started.kind, "backgrounded");
+      if (started.kind !== "backgrounded") return;
+      const snapshot = await adapter.waitForBackgroundTask(started.task.taskId);
+      assert.ok(snapshot, "后台任务必须有终态");
+      const result = snapshot.result;
+      assert.equal(result?.cancelled, true, "超限 kill 仍以 cancelled 结算");
+      assert.match(result?.error?.message ?? "", /output file exceeded 1MiB/);
+      // uix/C-1：逃逸（child/tree 未在等待上界内 settle）必须在结果 message 附注。
+      assert.match(
+        result?.error?.message ?? "",
+        /output file not truncated/,
+        "逃逸路径必须附「输出未截断」可见信号",
+      );
+      assert.ok(
+        result?.error?.message.includes(BASH_OUTPUT_NOT_TRUNCATED_NOTICE),
+        "附注须与 helper 输出的常量一致",
+      );
+      const outputFile = execOutputPath(workspace.rootDir, "sess_escape", "call_escape");
+      const size = (await stat(outputFile)).size;
+      assert.ok(size > MIB, `逃逸时原文件必须保持未截断（实得 ${size}）`);
+    } finally {
+      await adapter?.close().catch(() => undefined);
+      workspace.cleanup();
+    }
+  },
+);
+
+test("T-C1-7b: 截断等待上界严格大于 kill 上界（锚点关系，uix/C-1）", () => {
+  assert.ok(
+    BASH_OUTPUT_TRUNCATE_WAIT_MS > FORCE_EXIT_AFTER_KILL_MS,
+    `截断等待 ${BASH_OUTPUT_TRUNCATE_WAIT_MS}ms 必须严格大于 kill 上界 ${FORCE_EXIT_AFTER_KILL_MS}ms`,
+  );
 });
 
 // ── 进程报告 ────────────────────────────────────────────────────────────────

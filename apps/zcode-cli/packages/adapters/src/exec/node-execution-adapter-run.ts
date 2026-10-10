@@ -1,5 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { BashFileOutput, truncateBashOutputAfterKill } from "./bash-file-output.js";
+import {
+  BASH_OUTPUT_NOT_TRUNCATED_NOTICE,
+  BASH_OUTPUT_TRUNCATED_NOTICE,
+  BashFileOutput,
+  isBashOutputOverLimit,
+  truncateBashOutputAfterKill,
+} from "./bash-file-output.js";
 import { readCapturedCwd } from "./cwd-capture.js";
 import { defaultCwdDialect } from "./execution-command.js";
 import { NodeExecutionAdapterProcess } from "./node-execution-adapter-process.js";
@@ -111,7 +117,12 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
     // 看门狗 stat 到「文件已超上限」这一事实本身。requestStop 在 `file && exited`
     // （子进程刚在同一时刻自然退出）时会被抑制，outputLimitExceeded 因此不置位；
     // 单独记这个标志，收尾时就不会漏掉这批已经超限的文件。
+    // 收尾判定（见下方 exit 分支）是 `outputLimitExceeded || outputLimitDetected ||
+    // stat 兜底`：本标志在场时文件只增不减、stat 判定恒真，保留它仅为省一次
+    // stat IO 的快路径；真正的新覆盖是「自然退出 + 无任何 stat 落窗」的主事故形态。
     let outputLimitDetected = false;
+    // 收尾截断的结果面说明（N-1/C-1）：undefined = 未尝试截断；常量 = 生效/未生效。
+    let outputTruncationNotice: string | undefined;
     let forceExitTimer: NodeJS.Timeout | undefined;
     let progressTimer: NodeJS.Timeout | undefined;
     let timeoutTimer: NodeJS.Timeout | undefined;
@@ -330,16 +341,29 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
         await Promise.all([stdout!.close(), stderr!.close()]);
       } else if (exitState.error) {
         await file.discard();
-      } else if (outputLimitExceeded || outputLimitDetected) {
-        // outputLimitDetected 覆盖「子进程在看门狗 stat 之后、requestStop 之前自然退出」
-        // 的竞态：那时没有杀树可等（close 早已发生），killCompletion 自然为 undefined。
-        await truncateBashOutputAfterKill({
-          filePath: file.path,
-          closePromise,
-          killCompletion: bashProcessTreeKill,
-          limitBytes: this.persistedOutputLimit(request),
-          onDebug: this.options.onDebug,
-        });
+      } else {
+        // 截断触发改为收尾状态判定（uix/B-1）：除既有的 kill/竞态标志外兜一次
+        // stat——子进程自然退出且看门狗 5s 轮询从未落窗时两标志皆 false，而超限
+        // 文件仍必须截断，这正是 ⑥ 的主事故形态（旧代码在此场景完全不截断）。
+        // `outputLimitDetected ||` 是快路径：标志在场时 stat 判定恒真，省一次 IO。
+        const limitBytes = this.persistedOutputLimit(request);
+        const overLimit =
+          outputLimitExceeded ||
+          outputLimitDetected ||
+          (await isBashOutputOverLimit(file.path, limitBytes));
+        if (overLimit) {
+          // 截断是否实际生效决定结果面说明（N-1/C-1）：生效 → truncated 说明
+          // （status 不变，completed 不谎报 killed）；逃逸/IO 失败 → not truncated。
+          outputTruncationNotice = (await truncateBashOutputAfterKill({
+            filePath: file.path,
+            closePromise,
+            killCompletion: bashProcessTreeKill,
+            limitBytes,
+            onDebug: this.options.onDebug,
+          }))
+            ? BASH_OUTPUT_TRUNCATED_NOTICE
+            : BASH_OUTPUT_NOT_TRUNCATED_NOTICE;
+        }
       }
       const stdoutResult = file
         ? await this.readBashResult(file, request, internalOptions, exitState, outputLimitExceeded)
@@ -357,17 +381,34 @@ export class NodeExecutionAdapterRun extends NodeExecutionAdapterProcess {
         !isExpectedChildStdinClosureError(stdinWriteError)
           ? this.toFailure("unknown", stdinWriteError)
           : undefined;
+      // 结果面 failure 组装。N-1/C-1：截断尝试过的路径都要带一句不改 status 的
+      // 可见说明——kill 路径逃逸/IO 失败时附「output file not truncated」；自然退出/
+      // 竞态路径（outputLimitExceeded 恒 false、status 仍是 completed）生效时附
+      // 「output file truncated (head/tail kept)」：不谎报 killed、也不静默。
+      const killedByOutputLimitMessage = `Command killed: output file exceeded ${formatExecOutputLimitBytes(
+        this.persistedOutputLimit(request),
+      )}`;
+      const truncationFailure =
+        file && outputTruncationNotice !== undefined
+          ? { type: "output_limit" as const, message: outputTruncationNotice }
+          : undefined;
+      const baseStatusFailure = this.statusFailure(
+        timedOut,
+        cancelled,
+        outputLimitExceeded,
+        timeoutMs,
+      );
       const failure = exitState.error
         ? this.toFailure("spawn_error", exitState.error)
         : file && outputLimitExceeded
           ? {
               type: "output_limit" as const,
-              message: `Command killed: output file exceeded ${formatExecOutputLimitBytes(
-                this.persistedOutputLimit(request),
-              )}`,
+              message:
+                outputTruncationNotice === BASH_OUTPUT_NOT_TRUNCATED_NOTICE
+                  ? `${killedByOutputLimitMessage}; ${BASH_OUTPUT_NOT_TRUNCATED_NOTICE}`
+                  : killedByOutputLimitMessage,
             }
-          : (this.statusFailure(timedOut, cancelled, outputLimitExceeded, timeoutMs) ??
-            unexpectedStdinFailure);
+          : (truncationFailure ?? baseStatusFailure ?? unexpectedStdinFailure);
       const status = unexpectedStdinFailure ? "failed" : baseStatus;
       const resolvedCwd =
         status === "completed" && exitState.code === 0
