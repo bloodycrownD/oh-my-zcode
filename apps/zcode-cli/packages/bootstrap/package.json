@@ -23,6 +23,7 @@
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:magic-context": "node --test scripts/test-magic-context-turn-transform.mjs",
+    "test:magic-context-absent-event": "node --test scripts/test-magic-context-absent-event.mjs",
     "test:magic-context-historian": "node --test scripts/test-magic-context-historian.mjs",
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
     "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",

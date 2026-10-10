@@ -84,6 +84,7 @@ import {
 import { getWorkflowConcurrencyGovernor } from "./workflow-concurrency-governor.js";
 import { createDynamicWorkflowSnippetService } from "./dynamic-workflow-snippet-service.js";
 import { createModelCatalogPort } from "./model-catalog-port.js";
+import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
 import { createDynamicWorkflowRunProgressSink } from "./dynamic-workflow-run-progress-sink.js";
 import { createScriptWorkflowAgentRuntime } from "./script-workflow-child-runtime.js";
 import { workflowActorModelPolicy } from "./workflow-actor-model.js";
@@ -794,23 +795,33 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // 于是 recorder 的模块也不会被加载（flag off 的成本纪律对新增的缝一视同仁）。
     // ⑤-5b：动态 import 失败当前是**冒泡 throw**（fail-closed 性状），修复只补
     // 可观测性——发 `magic_context.transform_absent`（reason=import_failed）后
-    // **照旧 rethrow**，不捕获成降级。reason 与事件名与
-    // `magic-context-turn-transform.ts` 的事件面保持一致；那里不能静态 import
-    // （否则 flag 关时也会把整个 magic-context 模块图拖进启动路径），所以这里
-    // 内联同一形状的一条 logger.warn。
+    // **照旧 rethrow**，不捕获成降级。事件名/reason 词表与工厂侧同源，统一走
+    // `magic-context-absent-event.ts` 这个零依赖 leaf（工厂本模块不能静态 import
+    // ——否则 flag 关时也会把整个 magic-context 模块图拖进启动路径；leaf 没有
+    // 这个成本）。
+    //
+    // ⑤-5a：**disabled 也要发事件**。flag 关时工厂永不执行，`transform_absent`
+    // (reason=disabled) 若只由工厂发就一次都不会出现——「压缩停机」在 disabled
+    // 形态下依旧静默（mc/A-1 收口）。这是生产侧 disabled 的唯一发射点；工厂内
+    // 的 disabled 分支只保留给直构/测试。
     let magicContextAssembly: typeof import("./magic-context-turn-transform.js") | undefined;
     if (runtimeConfig.magicContext?.enabled === true) {
       try {
         magicContextAssembly = await import("./magic-context-turn-transform.js");
       } catch (error) {
-        logger.warn("Magic context module failed to import; transform stays absent", {
-          module: "bootstrap",
-          event: "magic_context.transform_absent",
-          reason: "import_failed",
-          detail: error instanceof Error ? error.message : String(error),
-        });
+        emitMagicContextTransformAbsent(
+          logger,
+          "import_failed",
+          error instanceof Error ? error.message : String(error),
+        );
         throw error;
       }
+    } else {
+      emitMagicContextTransformAbsent(
+        logger,
+        "disabled",
+        "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
+      );
     }
     const magicContextUsageRecorder = magicContextAssembly?.createMagicContextUsageRecorder(
       sessionId,

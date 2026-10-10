@@ -136,6 +136,7 @@ import {
   type ContextDatabase,
   type MagicContextConfig,
   type MessageLike,
+  type MigrationOnOpenRefusal,
   type RawMessage,
   type Scheduler,
   type TransformDeps,
@@ -146,6 +147,7 @@ import {
   type CreateSidecarModel,
   type MagicContextHistorianHost,
 } from "./magic-context-historian.js";
+import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
 import { readMagicContextUsageSummary } from "./magic-context-usage-summary.js";
 
 /** 包内 `createTransform` 的返回值形状（单测用桩实现替换它）。 */
@@ -776,11 +778,18 @@ function withOrdinal(row: StoredRow): RawMessage {
  * 为什么需要它：⑤ 的本机取证显示桌面 app-server 进程开库成功、但 transform 从未
  * 创建/从未执行，且该缺席**完全静默**——0 条 transform pass、0 条失败日志、0 条
  * storage 事件，用户完全看不出「压缩已停机」。三条缺席路径全部发事件后，桌面
- * 日志/事件面第一次能回答「为什么没有压缩」：
+ * 日志/事件面第一次能回答「为什么没有压缩」（细分词表见 leaf 模块的文件头）。
  *
- *   - `disabled`       ：enabled 门（features.magicContext / magicContext.enabled）
- *   - `db_null:<细分>` ：openDatabase 返回 null（细分：`db_null:fence` /
- *                        `db_null:migration_guard` / `db_null:pending_or_unclassified`）
+ * mc/A-1 / mc/C-orch-1：发射点收敛到零依赖 leaf
+ * `magic-context-absent-event.ts`——本模块在 flag 关时**不被加载**（装配门的
+ * 成本纪律），disabled 事件不可能由它发出，而 create-app 侧另写一条同形状的
+ * logger.warn 会让事件名/reason 词表分裂成两处无类型约束的字面量。leaf 零依赖，
+ * 装配层静态 import 它没有启动成本。工厂内只保留直构/测试路径的发射：
+ *
+ *   - `disabled`       ：**生产由 create-app 侧发射**（见那里的 enabled gate
+ *                        else 分支）；本分支保留给直构/测试
+ *   - `db_null:<细分>` ：本工厂的 openDatabase 返回 null 路径（细分见
+ *                        `describeStorageUnavailability`）
  *   - `import_failed`  ：装配层（create-app.ts）动态 import 本模块失败（5b）
  *
  * 语义边界（fail-closed 契约不受影响，事件只是可观测性）：
@@ -788,35 +797,40 @@ function withOrdinal(row: StoredRow): RawMessage {
  *   - disabled / db_null：发事件后照旧 return undefined 降级；db_null 且
  *     `fail_closed_blocking=true` 时同样**先发事件、再 throw**。
  */
-function emitTransformAbsent(logger: Logger, reason: string, detail: string): void {
-  logger.warn("Magic context transform is absent", {
-    module: "bootstrap",
-    event: "magic_context.transform_absent",
-    reason,
-    detail,
-  });
-}
+// （发射实现见 ./magic-context-absent-event.ts 的 emitMagicContextTransformAbsent）
 
 /**
  * 把 `openDatabase` 的 null 归到可行动的细分上（供 `db_null:<细分>` 的 reason）。
  *
- * 组合口径与包内 `storage-unavailable-reason.ts` 的 `describeStorageUnavailability`
- * 一致（migration_guard → schema_fence → storage_failure 的优先级），刻意**不在
- * bootstrap 侧 import 它**：那个 helper 未出包公共面，为本文件一个 reason 字符串
- * 去扩公共面不划算；这里用已导出的 `getMigrationOnOpenRefusal` /
- * `getSchemaFenceRejection` 两个 accessor 现拼（模块级状态由最近一次 open 写入，
- * 每次 open 前都会被清空，因此拿到 null 时它们就是权威细分）。
+ * 优先级与包内一致（migration_guard → schema_fence → storage_failure），守卫见
+ * 包内 `storage-unavailable-reason.ts:24`：**migration 且确有阻塞进程（或不可读
+ * 文件）** 才判 migration_guard——只有一条 migration 记录但零 blockers 时不误判
+ * （unreadable+空 pids 两处结论必须相同，mc/C-1）。刻意**不在 bootstrap 侧 import
+ * 那个 helper：它未出包公共面，为本文件一个 reason 字符串去扩公共面不划算；这里用
+ * 已导出的 `getMigrationOnOpenRefusal` / `getSchemaFenceRejection` 两个 accessor
+ * 现拼（模块级状态由最近一次 open 写入，每次 open 前都会被清空，因此拿到 null 时
+ * 它们就是权威细分）。
  *
  * busy/瞬时类不在此列：那是 openDatabase 的 **throw** 路径（cause 链分类见
  * `isTransientStorageOpenError`），由上面的有界重试负责，不会以 null 形态到达
  * 本函数。
+ *
+ * `refusal` 参数是测试缝（仅测试缝，不扩运行时面）：缺省读模块级状态（与生产零参
+ * 调用逐行等价），表驱动用例可直接注入夹具，免去为一条细分去伪造整个 open 场景。
  */
-function describeStorageUnavailability(): {
+export function describeStorageUnavailability(
+  refusal: MigrationOnOpenRefusal | null = getMigrationOnOpenRefusal(),
+): {
   reason: "db_null:migration_guard" | "db_null:fence" | "db_null:pending_or_unclassified";
   detail: string;
 } {
-  const refusal = getMigrationOnOpenRefusal();
-  if (refusal) {
+  // 与包内 storage-unavailable-reason.ts:24 同形守卫：migration 记录在场但毫无
+  // 阻塞证据（serverPids/blockingProcesses 皆空且没有 unreadableFile）时不判
+  // migration_guard——包内只在「挡着迁移的活进程确定存在」时给这个 kind。
+  if (
+    refusal &&
+    ((refusal.blockingProcesses?.length ?? refusal.serverPids.length) > 0 || refusal.unreadableFile)
+  ) {
     return {
       reason: "db_null:migration_guard",
       detail: `magic-context.db migration on open refused: database v${refusal.persistedVersion} blocked by ${refusal.serverPids.length} live server process(es) on an older build`,
@@ -874,7 +888,8 @@ export async function openMagicContextStorageWithBusyRetry(
   },
 ): Promise<ContextDatabase | null> {
   const delaysMs = options.delaysMs ?? MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS;
-  const sleep = options.sleep ?? ((delayMs: number) => new Promise<void>((r) => setTimeout(r, delayMs)));
+  const sleep =
+    options.sleep ?? ((delayMs: number) => new Promise<void>((r) => setTimeout(r, delayMs)));
   const totalAttempts = delaysMs.length + 1;
   for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
     try {
@@ -911,8 +926,12 @@ export async function createMagicContextTurnTransform(
   // ⑤-5a：关着也是一种「缺席」，必须留下可观测痕迹——桌面日志/事件面据此能回答
   // 「为什么没有压缩」，而不是像取证时那样 0 条 transform pass 且 0 条告警。
   // 语义照旧：发事件后 return undefined，不建 bridge、不开 DB。
+  //
+  // mc/A-1：**生产由 create-app 侧发射 disabled**（flag 关时本模块根本不加载，
+  // 只有那边发得出事件）；本分支保留给直构/测试（如 test-boot-busy-retry T4
+  // 绕开装配门直调工厂的场景）。
   if (!options.enabled) {
-    emitTransformAbsent(
+    emitMagicContextTransformAbsent(
       options.logger,
       "disabled",
       "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
@@ -968,10 +987,13 @@ export async function createMagicContextTurnTransform(
     // ⑤-5a：db_null 缺席**先发事件**再决定降级还是抛错——默认
     // fail_closed_blocking=true 时 :816-818 先 throw，事件不能因此缺席
     // （「带着原因响亮地失败」正是可观测性的落点）。
-    emitTransformAbsent(options.logger, unavailability.reason, unavailability.detail);
+    emitMagicContextTransformAbsent(options.logger, unavailability.reason, unavailability.detail);
     if (config.fail_closed_blocking !== false) {
       throw new Error(`[magic_context] ${unavailability.detail} (fail_closed_blocking=true)`);
     }
+    // 旧名 storage_unavailable → storage_unavailability，与 transform_absent
+    // 成对（absent=为什么没有 transform，unavailability=库为什么开不出来）；
+    // 已检索零消费者，改名不影响任何消费面。
     options.logger.warn("Magic context storage unavailable; transform stays inert", {
       module: "bootstrap",
       event: "magic_context.storage_unavailability",
