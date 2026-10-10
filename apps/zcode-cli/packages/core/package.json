@@ -28,6 +28,7 @@
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:prompt-language-context": "node --test scripts/test-prompt-language-context.mjs",
     "test:subagent-sync-dispatch": "tsx --test scripts/test-subagent-sync-dispatch.mjs",
+    "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src --no-ignore",
     "lint:fix": "oxlint --fix src --no-ignore"
