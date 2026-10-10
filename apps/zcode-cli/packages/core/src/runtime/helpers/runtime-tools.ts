@@ -8,7 +8,12 @@ import {
   traceContextToLogContext,
 } from "../deps.js";
 import type { HookRunner, SessionId, ToolExecutor, TraceContext } from "../deps.js";
-import { CTX_EXPAND_TOOL_NAME, CTX_REDUCE_TOOL_NAME } from "@zcode/contracts";
+import {
+  CTX_EXPAND_TOOL_NAME,
+  CTX_MEMORY_TOOL_NAME,
+  CTX_REDUCE_TOOL_NAME,
+  CTX_SEARCH_TOOL_NAME,
+} from "@zcode/contracts";
 import type { AgentRuntimeInternal } from "../internal.js";
 import type { AgentRuntimeDeps, AgentRuntimeConfig } from "../types.js";
 import { resolveRuntimeEmbeddedSearchEnabled } from "../methods/embedded-search-branch.js";
@@ -30,6 +35,13 @@ const DEFAULT_SUBAGENT_BACKGROUND_BASH_MAX_MS = 3_600_000;
 const MAGIC_CONTEXT_WORKFLOW_CHILD_DISALLOWED_TOOLS: readonly string[] = [
   CTX_REDUCE_TOOL_NAME,
   CTX_EXPAND_TOOL_NAME,
+  // Step 10（D4/D14）同族加入。ctx_memory 是**跨会话持久写**：workflow child
+  // 的工具交互只在 subagent 路径镜像到父会话，而一条记忆的影响远大于一次会话
+  // （所有后续会话的 m0/m1 注入与 ctx_search 都会看见它），用户在父界面没有
+  // 否决机会——与 ctx_reduce「盖章不可见」同属结构性禁用，不是权限档位问题。
+  // ctx_search 读的是同一个 store，与 ctx_expand 同理禁掉。
+  CTX_SEARCH_TOOL_NAME,
+  CTX_MEMORY_TOOL_NAME,
 ];
 const EMPTY_RUNTIME_HOOK_CONFIG = {
   enabled: false,
@@ -94,7 +106,7 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
 }
 
 /**
- * workflow_child 额外不注册两个 ctx 工具。
+ * workflow_child 额外不注册四个 ctx 工具。
  *
  * 根因与 `WORKFLOW_CHILD_DISALLOWED_TOOLS` 的第一条同源，但更硬：child 的工具交互
  * 事件只在 subagent 路径上镜像到父会话，一个 workflow child 在自己的会话里盖掉的
@@ -104,6 +116,10 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
  *
  * `ctx_expand` 也一并禁掉：它读的是同一个 store，读到被别的 actor 盖掉的 tag 只会
  * 让 child 拿到一份用户没批准过的视图。
+ *
+ * Step 10 起 `ctx_search` / `ctx_memory` 同族入列：前者读同一个记忆 store（同
+ * ctx_expand 理由），后者是跨会话持久写——一条从 child 钉进去的记忆会影响之后
+ * **所有**会话的注入与检索，比一次盖章的可见性缺口更大（见常量处的展开注释）。
  *
  * 这份追加刻意留在本文件而不是 `tool-allowlist.ts`：`resolveRuntimeDisallowedTools`
  * 是两个 child runtime 构造点共用的推导入口，而 ctx 这道门只跟「magic-context 开着」

@@ -6,7 +6,9 @@ import {
   AMEND_WORKFLOW_TOOL_NAME,
   CREATE_WORKFLOW_TOOL_NAME,
   CTX_EXPAND_TOOL_NAME,
+  CTX_MEMORY_TOOL_NAME,
   CTX_REDUCE_TOOL_NAME,
+  CTX_SEARCH_TOOL_NAME,
   EVAL_WORKFLOW_SNIPPET_TOOL_NAME,
   GET_WORKFLOW_RUN_TOOL_NAME,
   LIST_MODELS_TOOL_NAME,
@@ -60,6 +62,8 @@ import { taskOutputToolEntry } from "./task-output.js";
 import { taskStopToolEntry } from "./task-stop.js";
 import { readSessionContextToolEntry } from "./read-session-context.js";
 import { ctxExpandToolEntry, ctxReduceToolEntry } from "./ctx-context.js";
+import { ctxMemoryToolEntry } from "./ctx-memory.js";
+import { ctxSearchToolEntry } from "./ctx-search.js";
 import { amendWorkflowToolEntry } from "./amend-workflow.js";
 import { createWorkflowToolEntry } from "./create-workflow.js";
 import { saveWorkflowToolEntry } from "./save-workflow.js";
@@ -110,6 +114,12 @@ export const builtInTools: ToolEntry[] = [
   // 工具表里没有 ctx_*，而包也整棵没被 import。
   ctxReduceToolEntry,
   ctxExpandToolEntry,
+  // magic-context 记忆面（Step 10：ctx_search=D4 检索 / ctx_memory=D14 写入）。
+  // 与上面两个同门（includeMagicContextTools）：handler 都是动态 import 包的，
+  // flag 关时整棵模块图不进内存。ctx_search 纯读记忆库，ctx_memory 写本项目
+  // 记忆库一行（幂等，见 handler 注释）。
+  ctxSearchToolEntry,
+  ctxMemoryToolEntry,
   agentToolEntry,
   taskToolEntry,
   skillToolEntry,
@@ -187,13 +197,14 @@ interface RegisterBuiltInToolsOptions {
   /** node_repl（js）默认关闭，由官方 browser-use 插件启用。 */
   includeNodeRepl?: boolean;
   /**
-   * magic-context 上下文回收面（`ctx_reduce` / `ctx_expand`）是否注册。
+   * magic-context 上下文回收面与记忆面（`ctx_reduce` / `ctx_expand` /
+   * `ctx_search` / `ctx_memory`）是否注册。
    *
    * **跟随 `features.magicContext`**（step 28 起默认开），理由与 `includeNodeRepl`
-   * 同款但更强一层：这两个工具的实现在 `@zcode/magic-context` 里，而 handler 是
-   * **动态 import** 它的，所以 flag 关时包整棵不会被拉进内存（zod schema + sqlite
-   * chokepoint + 迁移模块）——用户显式关掉后，「零行为」这条不变式（今天记作 D-11）
-   * 才仍然成立。
+   * 同款但更强一层：这四个工具的实现在 `@zcode/magic-context` 里（ctx_search /
+   * ctx_memory 的薄封装在 core），而 handler 是**动态 import** 它的，所以 flag 关时
+   * 包整棵不会被拉进内存（zod schema + sqlite chokepoint + 迁移模块）——用户显式
+   * 关掉后，「零行为」这条不变式（今天记作 D-11）才仍然成立。
    *
    * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
    */
@@ -273,7 +284,9 @@ export function registerBuiltInTools(
     }
     if (
       (entry.metadata.name === CTX_REDUCE_TOOL_NAME ||
-        entry.metadata.name === CTX_EXPAND_TOOL_NAME) &&
+        entry.metadata.name === CTX_EXPAND_TOOL_NAME ||
+        entry.metadata.name === CTX_SEARCH_TOOL_NAME ||
+        entry.metadata.name === CTX_MEMORY_TOOL_NAME) &&
       options.includeMagicContextTools !== true
     ) {
       continue;

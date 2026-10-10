@@ -327,7 +327,9 @@ export { createCtxExpandTools, type CtxExpandToolDeps } from "./core/tools/ctx-e
 export type { CtxExpandArgs } from "./core/tools/ctx-expand/types.js";
 export type { CtxToolContext, CtxToolDefinition } from "./core/tools/tool-definition.js";
 
-/** range / tag 解析：模型经常把 `§N§` 标记原样抄回来，这两个助手负责归一化。 */
+/**
+ * range / tag 解析：模型经常把 `§N§` 标记原样抄回来，这两个助手负责归一化。
+ */
 export { parseRangeString } from "./core/features/magic-context/range-parser.js";
 export { parseTagInput, TAG_INPUT_ERROR } from "./core/features/magic-context/tag-input.js";
 export {
@@ -409,6 +411,75 @@ export {
   type MagicContextRecompScope,
   type RequestMagicContextRecomputeOptions,
 } from "./host/ctx-recomp.js";
+
+// ── 4c. 记忆读写与检索公共面（Step 10 / D4+D14） ──────────────────────────────
+//
+// 【为什么要出这个面】ctx_search（D4）与 ctx_memory（D14）两个工具的**卷积藏在
+// magic-context 侧**：
+//   - 检索：`searchMemoriesFTS` 内联了 `sanitizeFtsQuery` / `relaxedFtsQuery`
+//     （Step 8 移植的逐字层）与 bm25 排序、workspace 过滤、过期过滤。宿主工具
+//     （`@zcode/core` 的 `tool/handlers/ctx-search.ts`）只需要传「身份 + query +
+//     limit + 日期界」，FTS5 语法消毒的一切实例都不得出现在宿主侧。
+//   - 写入：`insertMemoryIdempotent` 是唯一的 memory 写入口之一（promotion 用
+//     `insertMemory`），唯一约束命中时的 seen_count 递增语义在它内部。
+//   - 身份：`resolveProjectIdentityForSession` 是 promotion（compartment runner）
+//     与 pack transform 共用的那个**非抛错**身份解析入口；宿主另写一份 git/dir
+//     身份推导，等于给同一项目造第二个身份空间。
+//   - 可见性：`getVisibleMemoryIds` 读的是 inject-compartments 写的那一列
+//     （`session_meta.memory_block_ids`），ctx_search 靠它把已在 <project-memory>
+//     里渲染过的命中过滤掉——与 m0/m1 注入读同一列，不另立口径。
+//
+// 【宿主不得自己抄】以上任何一条在宿主侧重写，都会与包内运行时分叉：查询消毒
+// 分叉 = FTS5 注入面重新打开；身份推导分叉 = 写入与检索落在两个 project_key 上
+// （记忆「写了却搜不到」）；seen_count 语义分叉 = 去重计数漂移。因此这些符号
+// 只经本 barrel 出，宿主（core / bootstrap）不得复制实现或 import 包内相对路径。
+//
+// FORK（bugfix-batch-20261011 / Step 10）：本批 D4/D14 落地面。
+//
+// ── 写入面的两条链（为什么 getMemoryByHash / updateMemorySeenCount /
+//    computeNormalizedHash 也要出）────────────────────────────────────────────
+// 上游 ctx_memory 的 write 分支本身就是「前置精确哈希检查 → 已存在则
+// updateMemorySeenCount 并回报现有 id → 否则 insertMemory」。fork 的
+// ctx_memory（core/tool/handlers/ctx-memory.ts）照搬这条链，写入用
+// `insertMemoryIdempotent`（它的唯一约束回退是**竞争窗口**的第二道闸：
+// 两个写者同时穿过前置检查时，靠唯一约束 + seen_count 递增收口）。
+// 因此这三个符号与 insertMemoryIdempotent 是同一条写路径的组成部分，不是可选项。
+//
+// 登记（本批观察项，待逐字区 owner 处置）：`insertMemoryIdempotent` 的唯一约束
+// 分支判定 `error.code === "SQLITE_CONSTRAINT_UNIQUE"` 是 Bun 后端的命名码
+// （上游逐字码），node:sqlite 抛的是 `ERR_SQLITE_ERROR` + `errcode: 2067`，
+// 该分支在本 fork 运行期不可达。宿主以前置检查覆盖去重语义（工具文案层无差异），
+// 真竞争时 fail-visible 抛错；`src/core/**` 逐字区本节点不改。
+
+export {
+  insertMemoryIdempotent,
+  getMemoriesByIds,
+  getMemoryByHash,
+  updateMemorySeenCount,
+  ModuleMemoryAuthorityError,
+  type InsertMemoryResult,
+} from "./core/features/magic-context/memory/storage-memory.js";
+export { computeNormalizedHash } from "./core/features/magic-context/memory/normalize-hash.js";
+/**
+ * v2 五分类：写入面唯一接受的分类集（V2_MEMORY_CATEGORIES 与契约层
+ * `CTX_MEMORY_CATEGORIES` 一一对应，drift guard 测试钉住两边一致）。出 barrel
+ * 是为了让宿主与测试都能核验「模型可写的分类」没有第二份定义。
+ */
+export { V2_MEMORY_CATEGORIES } from "./core/features/magic-context/memory/constants.js";
+export {
+  searchMemoriesFTS,
+  type MemorySearchDateRange,
+} from "./core/features/magic-context/memory/storage-memory-fts.js";
+export {
+  resolveProjectIdentityForSession,
+  storedPathBelongsToIdentity,
+} from "./core/features/magic-context/memory/project-identity.js";
+export { getVisibleMemoryIds } from "./core/hooks/magic-context/inject-compartments.js";
+export type {
+  Memory,
+  MemoryCategory,
+  MemoryInput,
+} from "./core/features/magic-context/memory/types.js";
 
 // ── 5. message 转换纯函数 ───────────────────────────────────────────────────
 
