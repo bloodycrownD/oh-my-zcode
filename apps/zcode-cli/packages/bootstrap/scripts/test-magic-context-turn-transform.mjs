@@ -14,10 +14,18 @@
  *   5. 桩 transform 抛普通错 → fail-open 放行原始输入（B 组第 ⑤ 档）。
  *   6. 桩 transform 抛 EmergencyFailClosedError → 重抛（B 组第 ① 档）。
  *   7. wire 调试摘要的形状：role / source / syntheticHead / cacheControl 落点。
+ *   8. FORK（bugfix-batch-20261011 / Step 2）settle 的进程形态分化：短驻/缺省
+ *      （`processExitsAfterTurn` 为 true 或不传）保留
+ *      `[transform,notify,settle:start,settle:end]` 的前台顺序断言；长驻（`false`）
+ *      停在 `[transform,notify]` 且 settle 钩子不被调用。
  *
  * 真实 `createTransform` 不在本测试范围内：它需要 magic-context.db 与 historian，
  * 属 S20/S24 的实跑范围（T-M4）。这里用**桩 transform**驱动同一条链路，验的是
  * Step 19b 自己拥有的代码（反投影与落位），不是 B 组的注入决策。
+ *
+ * 长驻形态另外两条断言（在飞 compartment run 的计时、close 钩子 drain 收口）在
+ * `scripts/test-settle-background.mjs`——那边要用**真**调度器与真 registerClose，
+ * 与本文件的桩驱动分层，不混在一起。
  *
  * 依赖已构建的 `dist/`：`pnpm --filter @zcode/magic-context build`、
  * `pnpm --filter @zcode/core build`、`pnpm --filter @zcode/bootstrap build`。
@@ -406,8 +414,18 @@ test("端口没有活值谓词时退回冻结配置那一位（不改变既有�
 // 「一进程 = 一轮」下，turn 成功后新起的那次后台 pass 若纯 fire-and-forget，就会随
 // 进程退出一起消失（drain 预留泄漏、compartment 不落库）。钩子必须在这一轮交还
 // 控制权之前被 await。
+//
+// FORK（bugfix-batch-20261011 / Step 2）：这一条按**进程形态**分化，不是删断言。
+// 下面三条分别钉死一个形态：
+//
+//   ① 短驻形态（`processExitsAfterTurn: true`，CLI `-p`）——原顺序断言逐字保留；
+//   ② 形态缺省（不传该字段）——与 ① 等价：缺省值就是 true，保守方向，未声明形态
+//      与 print 的行为在本批改动之前逐行相同；
+//   ③ 长驻形态（`false`，app-server / TUI）——前台不等：顺序停在
+//      `[transform, notify]`，且 settle 钩子**压根不被调用**（判据在端口，装配层
+//      递过来的钩子在长驻形态下是死闭包）。
 
-test("调度器那次 pass 在 pass 成功后才启动，并在返回前被有界 settle（MF-04）", async () => {
+test("短驻形态：调度器那次 pass 在 pass 成功后才启动，并在返回前被有界 settle（MF-04）", async () => {
   const order = [];
   const port = createZCodeMagicContextTurnTransformPort(
     async () => {
@@ -415,6 +433,30 @@ test("调度器那次 pass 在 pass 成功后才启动，并在返回前被有�
     },
     {
       getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+      options: { sessionId: SESSION_ID, logger: NOOP_LOGGER, processExitsAfterTurn: true },
+      onPassSucceeded: () => order.push("notify"),
+      settleScheduledPass: async () => {
+        order.push("settle:start");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        order.push("settle:end");
+      },
+    },
+  );
+
+  await runPort(port, sampleEntries());
+  assert.deepEqual(order, ["transform", "notify", "settle:start", "settle:end"]);
+});
+
+test("形态缺省 = 短驻：不声明 processExitsAfterTurn 时顺序断言逐字不变（Step 2）", async () => {
+  const order = [];
+  const port = createZCodeMagicContextTurnTransformPort(
+    async () => {
+      order.push("transform");
+    },
+    {
+      getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+      // 刻意不写 processExitsAfterTurn——老装配（与所有未声明形态的 embedder）
+      // 就是这个形状，不能被本批改动改变行为。
       options: { sessionId: SESSION_ID, logger: NOOP_LOGGER },
       onPassSucceeded: () => order.push("notify"),
       settleScheduledPass: async () => {
@@ -429,10 +471,38 @@ test("调度器那次 pass 在 pass 成功后才启动，并在返回前被有�
   assert.deepEqual(order, ["transform", "notify", "settle:start", "settle:end"]);
 });
 
+test("长驻形态：调度器那次 pass 不等 settle，钩子根本不被调用（Step 2）", async () => {
+  const order = [];
+  let settleCalls = 0;
+  const port = createZCodeMagicContextTurnTransformPort(
+    async () => {
+      order.push("transform");
+    },
+    {
+      getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+      options: { sessionId: SESSION_ID, logger: NOOP_LOGGER, processExitsAfterTurn: false },
+      onPassSucceeded: () => order.push("notify"),
+      settleScheduledPass: async () => {
+        settleCalls += 1;
+        order.push("settle:start");
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        order.push("settle:end");
+      },
+    },
+  );
+
+  await runPort(port, sampleEntries());
+  assert.deepEqual(order, ["transform", "notify"], "长驻形态不得在 turn 内等 settle");
+  assert.equal(settleCalls, 0, "判据在端口：装配层递过来的钩子在长驻形态是死闭包");
+  // 而 notify（notifyTurnSuccess 的宿主侧等价物）必须已经在端口返回前跑完——
+  // 排队消息的 idle-only 提升就等这一下，它不能被 settle 拖住。
+  // （order 里 notify 在 settle 之前且 settle 从没出现，即已证明。）
+});
+
 test("settle 抛错不影响这一轮请求（historian 本来就不该阻塞用户）", async () => {
   const port = createZCodeMagicContextTurnTransformPort(async () => {}, {
     getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
-    options: { sessionId: SESSION_ID, logger: NOOP_LOGGER },
+    options: { sessionId: SESSION_ID, logger: NOOP_LOGGER, processExitsAfterTurn: true },
     settleScheduledPass: async () => {
       throw new Error("drain blew up");
     },
@@ -440,6 +510,22 @@ test("settle 抛错不影响这一轮请求（historian 本来就不该阻塞用
   const entries = sampleEntries();
   const result = await runPort(port, entries);
   assert.equal(result.outcome, "unchanged", "settle 失败不得改变这一轮的成败");
+});
+
+test("长驻形态：settle 钩子压根不被调用，更谈不上影响这一轮（Step 2）", async () => {
+  const settleCalls = [];
+  const port = createZCodeMagicContextTurnTransformPort(async () => {}, {
+    getConfig: () => DEFAULT_MAGIC_CONTEXT_CONFIG,
+    options: { sessionId: SESSION_ID, logger: NOOP_LOGGER, processExitsAfterTurn: false },
+    settleScheduledPass: async () => {
+      settleCalls.push("settle");
+      throw new Error("must not be called in the long-lived form");
+    },
+  });
+  const entries = sampleEntries();
+  const result = await runPort(port, entries);
+  assert.equal(result.outcome, "unchanged");
+  assert.deepEqual(settleCalls, [], "长驻形态不得调用 settleScheduledPass");
 });
 
 test("同一端口在下一次 turn 读到改过的配置（热生效，不需要重建实例）", async () => {
