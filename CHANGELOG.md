@@ -1,5 +1,118 @@
 # Changelog
 
+## [1.0.4](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.3...v1.0.4) (2026-10-10)
+
+### Features
+
+* **subagent:** 同步派遣返回 childSessionId + 前台子智能体可手动停止 ([8a0909b](https://github.com/bloodycrownD/oh-my-zcode/commit/8a0909b60de51587fe2ad79065e6176b77a8d18c))
+  * ④ Agent/Task 同步派遣（AgentCompletedOutput 接口+zod .strict()+JSON schema
+  * ③ 前台子代理 run() catch 补 isTerminalRuntimeTask 早退：stopTask 置的
+  * ③ 状态面板 controlWorkId 回退：后台 work 条目未命中时用 subagent.agentId
+  * 测试：test-subagent-sync-dispatch.mjs 5 例（T-D1×3/T-S1×2，真实 port +
+
+* **ui:** ⑥ 清理展示链 UI 收口——cleanScope 透传 + 三门控统一谓词 + toolOutputs 文案收敛「仅 cli/exec」（uix/G-1） ([d195c57](https://github.com/bloodycrownD/oh-my-zcode/commit/d195c57ddd0f8b444c969c0be341b5e80a406a47))
+  * 新增零 @/ 依赖纯 model storageCategoryModel.ts（isStorageCategoryCleanable 门控谓词 + sumCategoriesAcrossRoots 跨根合并透传 cleanScope，取任一非空），storageCategoryPresentation 改再导出，消费方 import 面不变
+
+* **ui:** 子智能体目录页支持手动停止（3c） ([e86f020](https://github.com/bloodycrownD/oh-my-zcode/commit/e86f020070b8f681ac88c2db11e97dae2f0c2979))
+  * SubagentDirectorySidePane：running 行加「停止」按钮（复用既有 i18n key
+  * AnimatedSidePanePanel/WorkspaceShellLayout 透传 canCancelBackgroundWork，
+  * 纯判据模块 subagentDirectoryCancel.ts + 5 例测试（T-S3）；A4（子会话
+
+
+### Bug Fixes
+
+* **adapters:** ⑥ 截断三修——自然退出兜底截断 + 预算扣 marker + 等待上界/逃逸信号（uix/B-1+B-2+C-1/N-1） ([1bb5e9e](https://github.com/bloodycrownD/oh-my-zcode/commit/1bb5e9ed87235855fa243efff4ae1900058b23ed))
+  * uix/B-1：截断触发从「仅 kill/竞态标志」改为收尾状态判定——子进程自然退出、
+  * N-1：截断实际生效时结果面附「output file truncated (head/tail kept)」——
+  * uix/B-2：截断窗口预算先扣 BASH_OUTPUT_TRUNCATE_MARKER_MAX_BYTES
+  * uix/C-1：BASH_OUTPUT_TRUNCATE_WAIT_MS 5s→7s（严格大于 FORCE_EXIT_AFTER_KILL_MS，
+  * uix/G-3a/d：truncateBashOutputAfterKill 直测 4 例（settled 截断/未 settle 跳过/
+
+* **agent:** 编辑重发 rewind 后快照崩溃——session-mapper 过滤 rehydrate 遗留的空 part ([5a35027](https://github.com/bloodycrownD/oh-my-zcode/commit/5a35027bceb073b6f036296fac22f8593ecb282c))
+  * session-mapper 快照映射处过滤 undefined/null part（一行防御），编辑重发
+  * undefined part 的上游来源（rewind rehydrate）另行追踪，不在本提交展开。
+
+* **agent:** 编辑重发模型侧——editUserQuery 显式模型覆盖 + modelSelectionPinned 承载 + 写回收敛 ([e9f3ca9](https://github.com/bloodycrownD/oh-my-zcode/commit/e9f3ca9930d2c4ace9c688611b25639139649893))
+  * editUserQuery 协议补 modelSelection（可选）；UI handleEdit 与普通发送同源取当前
+  * 契约 TurnInputIntentMetadata 增 modelSelectionPinned：「显式携带=置 pin」全集
+  * turn-model 写回收敛：仅 pinned 时执行 set+persist+emit 三连；fork-edit-retry
+  * T-E1：test-edit-retry-model.mjs 12 用例（zod/编辑/retry/写回/三路径闭环）。
+
+* **agent:** 编辑重发文本侧——v4/model-only turn 抢占判据对齐，修复「编辑后发送仍是旧消息」 ([2dcb38c](https://github.com/bloodycrownD/oh-my-zcode/commit/2dcb38cbf0095d787b35aad7eb0910d9d35b1b6d))
+  * session-flow.ts 新增 hasActiveTurn（与 waitForSessionIdle 同源判据：
+  * fork-edit-retry.ts 抢占门改用 hasActiveTurn；
+  * T-E2 常驻 test-edit-retry.mjs 4 例（model-only 抢占生效/legacy 不回退/
+  * 候选(a)编辑器提交值回退经 chatPromptEditorSubmitValue.test.ts 6 例验证
+
+* **agent:** 默认模型配置同进程实时生效（1f）+ exec 上限 debug 落点接线 ([3aadf24](https://github.com/bloodycrownD/oh-my-zcode/commit/3aadf241efef6df7c07ef562a3c770752530442f))
+  * process-provider-registry-runtime：首读后维护同步缓存（repository 只有
+  * 消费面 8 点转活读（round-2 审查清单全量）：create-app 两处闭包/静态拷贝、
+  * 运行中会话粘住自己的选择（有意设计）未动——只改「解析时读哪一份默认」。
+  * T-E3 test-default-model-live 8 例（含变异验证：改回静态快照 5/8 红，
+  * 顺带 D4：create-app 装配 adapter 处接入 onDebug → logger.debug
+
+* **agent:** 未知 part type 上游根治（R-3）+ 丢弃观测（B-1） ([dbb63a8](https://github.com/bloodycrownD/oh-my-zcode/commit/dbb63a8adcfbca234ff797abf9c42fadd2062548))
+  * message-mapper mapMessagePart switch 补 default：未知/缺 type 一律返回 null 由调用侧过滤（原无 default 隐式返回 undefined 混入 parts 数组，是编辑重发快照 TypeError 的真源头）。根因核验结论：rewind 投影只整条丢弃消息、不合成 part，session-mapper 旧注释『rewind rehydrate 遗留物』归因不成立（raw parts 含 undefined 时崩点应在 mapMessageWithParts 的 filter 而非 hydrate）；可达来源为 decodeStoredPart 残缺行缺 type 与前向兼容新 type——『编辑重发不再产生丢弃 warn』理想态可达，不降级为登记项。
+  * session-mapper 过滤时统计丢弃数（未知 type + legacy undefined/null 兜底），buildSessionSnapshot 加可选 logger 参数，唯一调用点 server-operations.ts:3411 传 context.logger；warn 含 messageId/dropped/partTypes。
+  * 新增 scripts/test-session-mapper-parts.mjs：R-3 表驱动（未知 type→不产生 undefined）+ B-1 快照用例（无 undefined 且 warn 发射）/ B-1b（无丢弃不 warn），并挂 package.json test:session-mapper-parts 脚本。
+  * 回归：edit-retry-model 16/16、mapper-parts 3/3、edit-retry 4/4、turn-directory 15/15 全绿。
+
+* **exec:** 失控命令输出三道护栏——上限 256MiB/env 可配/杀后头尾截断/cli-exec 可清理 ([165045d](https://github.com/bloodycrownD/oh-my-zcode/commit/165045d550abe9948b1a917eba9de854787e09a1))
+  * 上限 5GiB→256MiB，env ZCODE_EXEC_OUTPUT_LIMIT_BYTES 可覆盖（1MiB..1GiB，
+  * 杀进程后物理截断（新 helper，不复用仅头部 truncate 的既有函数）：保留
+  * cli/exec 以 per-path 覆盖纳入可清理（不动 shared 类别面/ui/i18n），
+  * T-C1 14 例（env 解析/优先级链/防硬填回潮网/真实 spawn 端到端截断）+
+
+* **magic-context:** transform_absent 可观测性 + boot busy 有界重试 + 假 0% 修正 ([4e7f7d8](https://github.com/bloodycrownD/oh-my-zcode/commit/4e7f7d8a0c548d8a1c6486cb89f27d1c1d332bc6))
+  * 三条装配静默路径（enabled / db_null / import 失败）发结构化事件
+  * storage-db（FORK 登记）openDatabase/openDatabaseAsync catch 保留底层错误
+  * usage summary 无真读数返回 null（默认 0 不再当读数渲染）；TTL execute 后
+  * test-boot-busy-retry.mjs 6 例：真实子进程 BEGIN IMMEDIATE 占锁（临时目录
+
+* **mc:** contextWindow 绑定提前到 turn 开始 + 窗口三源兜底（e2e/R-2） ([29fd850](https://github.com/bloodycrownD/oh-my-zcode/commit/29fd850b106da175a6e18d978595202239380d14))
+  * record() 只有两道门（inputTokens / contextWindow），usage_skipped 日志的
+  * bridge 侧 resolveConfiguredDefaultModelSelectionOf（agent/C-1，35b37a2）
+  * onTurnStart：端口入口（pass 之前）即 noteLiveModel(input.model)，failure
+  * 窗口三源：模型 properties -> create-app 注入的 resolveFallbackContextWindow
+  * 保留 lastObservedModelKey 语义（S24-fix 换模型失效判据，提前绑定只会更准）。
+
+* **mc:** transform_absent 事件生产可达 + 发射点单点化（mc/A-1、mc/C-1、mc/K-1） ([c8de401](https://github.com/bloodycrownD/oh-my-zcode/commit/c8de401b9654c1f7e945e7fd120ccbbd0980959f))
+  * 新增零依赖 leaf src/app/magic-context-absent-event.ts：事件名常量 MAGIC_CONTEXT_TRANSFORM_ABSENT_EVENT、reason union（disabled|import_failed|db_null:migration_guard|db_null:fence|db_null:pending_or_unclassified，五值与真实发射值一致）与 emitMagicContextTransformAbsent；生产发射点（logger event 字段赋值处）收敛到这一处。
+  * mc/A-1：create-app 的 enabled gate 补 else 分支调 leaf 发 disabled（flag 关时工厂永不执行，事件此前生产不可达，『压缩停机』在 disabled 形态静默）；import_failed 分支与工厂 db_null/disabled 分支全部改调 leaf；工厂 disabled 分支注释标注生产由 create-app 侧发射、本分支保留给直构/测试。
+  * mc/C-1：describeStorageUnavailability 补与包内 storage-unavailable-reason.ts:24 同形守卫（migration 且确有阻塞进程或 unreadableFile 才判 migration_guard），export 作测试缝并支持注入 refusal 直测。
+  * mc/K-1：storage_unavailable → storage_unavailability 改名处补注释（与 transform_absent 成对，已检索零消费者）。
+  * 新增 scripts/test-magic-context-absent-event.mjs：子进程驱动 create-app 装配路径（enabled!==true）+ registerHooks resolve hook 断言工厂模块零加载（含阳性对照与哨兵活性自检）+ 可控 dataDir 断言无 db 文件 + 回传日志断言捕获 disabled 事件；leaf emit helper 进程内直测；db_null 细分表驱动直测。全部隔离在临时目录，不碰真实 ~/.omz。
+
+* **storage:** ⑥ 清理展示链 service 侧收口——override 前置 none 门 + cleanScope 下发 + 在飞保护时钟语义锁定（uix/G-1/G-2） ([1ae1dfc](https://github.com/bloodycrownD/oh-my-zcode/commit/1ae1dfc16a66b73a9774bcdbc86fc447ab2c341a))
+  * uix/G-1：service 三闸门统一以 hasStorageCleanPathOverride 优先于 none 门放行（storageCatalog.ts getStorageCleanScopes 枚举门、storageService.ts:84 clean throw、cleanPlan.ts planStorageClean 空 targets），CLEANABILITY.toolOutputs 回 none（整组不可一键清理）
+
+* **subagent:** 锁 Agent 工具 schema 同一引用与异步派遣 sessionId 渲染（④ e2e/R-1 + sub/G-1） ([1578414](https://github.com/bloodycrownD/oh-my-zcode/commit/157841442f57080cd9f48162ec62f3e4ca6d9fc2))
+
+* **ui:** ②guard 释放信号改组件自有 measuredKeys tracker——measurementsCache 陈旧键不再误释放切会话落点（uix/A-1 + G-3c） ([b12072f](https://github.com/bloodycrownD/oh-my-zcode/commit/b12072fc2c3e63f5aeb4ca561d8cfd69cc0e1139))
+  * 释放判据不再读 virtualizer.measurementsCache（非响应式快照；同 commit 内陈旧同键测量可让 guard 在首个真实测高前误释放，guard 一次性不可恢复，误判=本会话永久回退跳顶形态）
+  * 新增 SessionMeasuredKeysTracker（timelineRowHeightCache.ts 纯模块）：per-arm 代际契约——arm()（切会话武装）时整体清零，只收本 arm 周期内两写点（measureElement / live-tail cacheHeight）新写入 key；分区仅防跨会话串键、不跨 arm 保留（heights 缓存跨会话持久且切会话刻意不清，tracker 不得同源持久，否则 A→B→A 重访旧键复活跳顶回归）
+  * 测试补 4 例 tracker（空 tracker+armed 不释放 / 首键写入恰好一次 / 跨分区不串 / A→B→A 重访）+1 例 LRU 跨分区竞争（uix/G-3c）；既有 21 例不回归
+
+* **ui:** 会话切换首帧落点 guard + 测高缓存按会话分区 ([fd974fb](https://github.com/bloodycrownD/oh-my-zcode/commit/fd974fb2f3c5f3ae6cc5164a391a13e55fb68dad))
+  * 初始落点 guard：sessionKey 切换不再立即落点，等本会话首个真实测高
+  * timelineRowHeightCache 按 sessionKey 分区（\u0000 复合键），LRU 上限不变；
+  * T-U1：timelineRowHeightCache.test.ts 21 例（guard 状态机/分区/命中率/LRU/
+
+* **ui:** 重复 childSessionId 下 Agent 行回退 agentId 且可停性按组聚合（③ sub/C-orch-1+N-2） ([a7b1ee6](https://github.com/bloodycrownD/oh-my-zcode/commit/a7b1ee6ab1c58951061c8fe3e3d16dace2e2de9e))
+
+
+### Documentation
+
+* **core:** ctx 工具描述补主动使用时机引导（⑤ mc/T-1） ([acf6676](https://github.com/bloodycrownD/oh-my-zcode/commit/acf66765ef3efc4a465d110ea77bcb171d579766))
+
+
+### Refactorings
+
+* **agent:** 默认模型回落式抽为 resolveConfiguredDefaultModelSelectionOf（agent/C-1） ([35b37a2](https://github.com/bloodycrownD/oh-my-zcode/commit/35b37a28036dc486865832f30d12a869397ab152))
+  * types.ts 新增导出纯函数 resolveConfiguredDefaultModelSelectionOf(options)：accessor 优先 → 静态字段 → undefined；结构上只依赖那两个字段，不绑死 ZCodeAppOptions / CreateSessionFacadeDeps，无模块环。
+  * 三处重复回落改调用：create-app 的 resolveFallbackSelection 闭包、runtime-config 的初始选择解析、session-facade setModel("main") 兜底——漏改任一处都会悄悄退回 startup 快照，此后语义只有一份。
+  * test-default-model-live 补 E 组三例（accessor 优先/仅静态/都无→undefined），8 例 → 11 例。
+
 ## v1.0.3（2026-10-09）
 
 两处本地已验证修复的上游落地：magic-context 会话卡死修复、macOS 打包 ad-hoc 签名开关（CI mac 产物默认开启）。
