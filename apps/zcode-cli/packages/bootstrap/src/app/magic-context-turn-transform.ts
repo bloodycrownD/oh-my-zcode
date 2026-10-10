@@ -33,7 +33,16 @@
  *                                   prompt 一个进程，所以包内 transform 的「首 pass
  *                                   usage 重置」必须走累积语义——不声明它，每一轮都
  *                                   会把上一轮的占用读数清成 0%（T-M2/T-M3/T-M6 的
- *                                   共同根因，见 MVP 报告 §3）
+ *                                   共同根因，见 MVP 报告 §3）。**保持硬编码不动**：
+ *                                  改 per-session / 新增枚举的代价见下方 FORK 注释
+ *                                   （bugfix-batch-20261011 / Step 2）
+ *   settle 形态                      bugfix-batch-20261011 / Step 2：两处 settle
+ *                                   （`settleInFlightHistorian` 与端口钩子
+ *                                   `settleScheduledPass`）按 `processExitsAfterTurn`
+ *                                   条件化——短驻（print / 未声明）前台有界等待，
+ *                                   长驻（app-server / TUI）后台化，靠调度器自行
+ *                                   publish + close 钩子 drain 收口。core turn-loop
+ *                                   零改动
  *   clearReasoningAge               50（源 hook.ts 的 `?? 50`；clear_reasoning_age
  *                                   不在 E 组白名单）
  *   historyRefreshSessions /        装配层持有的 Set / Map（生产者 S20）
@@ -1282,6 +1291,19 @@ export async function createMagicContextTurnTransform(
     // FORK（MF-04）：调度器那一次 pass 也需要有界 settle。`notifyTurnSuccess` 本身
     // 仍是 fire-and-forget（不该让 UI 等一次可能几十秒的 historian），但**进程会
     // 退出**——于是在这一轮交还控制权之前，替它等一个有界的窗口。
+    //
+    // FORK（bugfix-batch-20261011 / Step 2）：钩子**无条件装配**，「要不要等」由
+    // 端口按 `processExitsAfterTurn` 决定（见 `settleScheduledPass` 的形参注释与
+    // 端口入口）。之所以不在这里按形态「不装配」：判据两处各写一次就会在将来只改
+    // 一处的午后静默分叉；端口是唯一的阻塞决策点，装配只负责把 drain 那个动作递
+    // 过去。长驻形态下这个闭包不被调用，本身零成本。
+    //
+    // `notifyTurnSuccess` 的 `in_flight` no-fire 在长驻形态是**预期行为**而不是
+    // 故障：端口不再前台等这一次 pass，于是下一轮 turn 成功时上一轮可能还在飞，
+    // 包内调度器按 coalescing 语义记 `in_flight` 后丢弃同一个 raw head 的重复请求
+    // （`historian-scheduler.ts` 的 `process()`）。`getLastNoFireCause` 会稳定显示
+    // `in_flight`——运维据此判断「折叠在进行中」，不得当故障修；真的要等它在飞的
+    // 那一次，走 close 钩子的 drain（MF-05）。
     ...(historian.historianScheduler === undefined
       ? {}
       : {
@@ -1389,6 +1411,16 @@ function buildTransformDeps(
     // 走累积语义而不是上游的清零语义。**这是 T-M2/T-M3/T-M6 三项能跑起来的前提**：
     // 不声明时每一轮 prompt 的首 pass 都会把上一轮落库的占用读数清成 0%，scheduler
     // 于是永远 defer，drop 与 historian 一次都不启动（现场见 MVP 报告 §3）。
+    //
+    // FORK（bugfix-batch-20261011 / Step 2）：这一位**保持硬编码
+    // `"one-process-per-turn"` 不动**，本批只条件化 settle，不碰 usage 累积语义。
+    // 两条理由登记在案（不是没想过，是各自都有不可接受的代价）：
+    //   ① 改成 per-session 会让长驻进程 resume 新 session 时按 per-session 语义重置
+    //      首 pass 读数，重引入 usage 全灭回归（T-M2/T-M3/T-M6 的共同根因，见上）；
+    //   ② 新增第三个枚举值落在包内 transform.ts 的 S20 特权区——改包内逐字区是
+    //      本 fork 的纪律禁区，宿主侧不越权。
+    // 进程形态（长驻/短驻）与这一位正交：`processExitsAfterTurn` 在**端口层**决定
+    // 「等不等 historian」，这里决定「首 pass 是否重置 usage 读数」，互不影响。
     hostProcessLifetime: "one-process-per-turn",
     clearReasoningAge: 50,
     historyRefreshSessions: new Set<string>(),
@@ -1431,18 +1463,21 @@ function buildTransformDeps(
 }
 
 /**
- * FORK（S24-fix2）：让本 pass 起的 historian 跑完再交还控制权。
+ * FORK（S24-fix2 + bugfix-batch-20261011 / Step 2）：让本 pass 起的 historian 跑完
+ * 再交还控制权——**只用于短驻形态**（`processExitsAfterTurn !== false`，即 CLI `-p`
+ * 一次性进程与所有未声明形态）。长驻形态（app-server / TUI）由
+ * {@link settleInFlightHistorianInBackground} 记账后放行，不阻塞前台。
  *
  * 上游（OpenCode）是长驻进程：compartment agent 是 fire-and-forget 的，但**进程
  * 不会退出**，所以它跑完的 publish 与 drain 预留一定落地。
  *
- * ZCode CLI 是「一进程 = 一轮 prompt」：transform 一返回，这一轮就结束了，historian
- * 还在飞的那几秒会随进程一起消失——drain 预留泄漏（下一轮报
+ * ZCode 的短驻形态是「一进程 = 一轮 prompt」：transform 一返回，这一轮就结束了，
+ * historian 还在飞的那几秒会随进程一起消失——drain 预留泄漏（下一轮报
  * `historian skip: internal drain budget spent`）、compartment 不落库。
  *
- * 所以这里有界地等这一轮 historian 落定（失败/拒绝都被吞掉——它本来就不该影响
- * 这一轮请求）。代价是这一轮的请求会晚发出几秒；这是「进程会退出」这件事在本 fork
- * 里必须付的钱，不改任何判据。
+ * 所以短驻形态这里有界地等这一轮 historian 落定（失败/拒绝都被吞掉——它本来就不该
+ * 影响这一轮请求）。代价是这一轮的请求会晚发出几秒；这是「进程会退出」这件事在本
+ * fork 里必须付的钱。长驻形态不付这笔钱（进程不会退出），支付方式见后台变体。
  *
  * provider 的注册范围问题见下面 `ensureProviderRegistered` 的注释。
  */
@@ -1470,6 +1505,50 @@ async function settleInFlightHistorian(sessionId: string): Promise<void> {
 }
 
 /**
+ * FORK（bugfix-batch-20261011 / Step 2）：{@link settleInFlightHistorian} 的后台变体
+ * ——长驻形态专用。
+ *
+ * 这一路**绝不 await**（调用点就用 `void` 丢出去）：app-server / TUI 的进程不会随
+ * 一轮退出，让首 token 或排队消息的 idle-only 提升等一次最长 60s 的 historian 是
+ * 错的（spec bugfix-batch-20261011 缺陷①）。收起工作交给两件既有的事：
+ *   ① 调度器契约自陈 fire-and-forget 自行 publish（historian-scheduler.ts 文件头）；
+ *   ② 优雅关闭（app.close() / disposeAllAndWait 的 graceful 段）由 `registerClose`
+ *      的 drain 收口兜底（MF-05）。
+ * 强杀（force-kill）下与 CLI 一进程一轮同损——既有风险，非本批新增。
+ *
+ * 保留 `settleInFlightHistorian` 内部的 60s 上界与 `timer.unref()`：后台 promise
+ * 因此既不会无限期挂在进程里，也不会拖住进程退出（unref 计时器不保持事件循环）。
+ * 本函数只做**记账**：有一条在飞的 run 时，落定后记一条 debug，异常路径记一条 warn
+ * ——`settleInFlightHistorian` 自己吞掉了 run 的拒绝，这里的 warn 只可能来自它自身
+ * 的编程错误，属于「可恢复异常」而不是崩溃。
+ */
+function settleInFlightHistorianInBackground(
+  sessionId: string,
+  logger: MagicContextTurnTransformOptions["logger"],
+): void {
+  // 本来就没有在飞的 run 时连日志都不多一条：settle 是每个 model step 前的常规路径，
+  // 而「没有 historian 在飞」才是常态。
+  if (getActiveCompartmentRun(sessionId) === undefined) return;
+  void settleInFlightHistorian(sessionId).then(
+    () => {
+      logger.debug("Magic context historian settled in the background", {
+        module: "bootstrap",
+        event: "magic_context.settle_background_settled",
+        sessionId,
+      });
+    },
+    (error: unknown) => {
+      logger.warn("Magic context historian background settle failed", {
+        module: "bootstrap",
+        event: "magic_context.settle_background_failed",
+        sessionId,
+        errorName: error instanceof Error ? error.name : typeof error,
+      });
+    },
+  );
+}
+
+/**
  * 端口工厂。导出是因为 Step 19b 的单测要能用一个**桩 transform**驱动整条
  * 投影 → transform → 反投影链路（真实 `createTransform` 需要 magic-context.db 与
  * historian，属 S20/S24 的实跑范围）。
@@ -1482,7 +1561,16 @@ export function createZCodeMagicContextTurnTransformPort(
   transform: ZCodeMagicContextTransform,
   port: {
     getConfig: () => MagicContextConfig;
-    options: Pick<MagicContextTurnTransformOptions, "sessionId" | "sessionStore" | "logger">;
+    /**
+     * FORK（bugfix-batch-20261011 / Step 2）：端口拿到的装配层选项。
+     *
+     * `processExitsAfterTurn` 是本文件两处 settle（`settleInFlightHistorian` 与
+     * `settleScheduledPass`）的唯一判据，必须在端口构造时拿得到；其余按需 Pick。
+     */
+    options: Pick<
+      MagicContextTurnTransformOptions,
+      "sessionId" | "sessionStore" | "logger" | "processExitsAfterTurn"
+    >;
     /**
      * FORK（e2e/R-2）：**turn 开始**（pass 之前）的本轮模型绑定。
      *
@@ -1512,11 +1600,22 @@ export function createZCodeMagicContextTurnTransformPort(
      * 那条触发路径）。有了本钩子，「一进程 = 一轮」下的调度器 pass 也不再随进程
      * 退出被截断——否则 drain 预留泄漏、compartment 不落库（`:970` 注释自陈的
      * 那条风险）。
+     *
+     * FORK（bugfix-batch-20261011 / Step 2）：本钩子按 `options.
+     * processExitsAfterTurn` **条件化**——长驻形态（`false`）下装配层即使递了钩子
+     * 过来，端口也不 await 它（`notifyTurnSuccess` 已 fire-and-forget，调度器自行
+     * publish，优雅关闭走 `registerClose` 的 drain）。判据只在端口这一处生效：装配
+     * 层保持单一形态，将来不会出现「装配说不等、端口还在等」的分叉。
      */
     settleScheduledPass?: () => Promise<void>;
   },
 ): MagicContextTurnTransform {
   const { options } = port;
+  // FORK（bugfix-batch-20261011 / Step 2）：settle 形态判据，一次求值、全程只用这一份。
+  // `true`（缺省 / `print`）= 进程会随本轮退出：两处 settle 都在这一轮交还控制权
+  // 之前有界地等完（本批改动之前的逐行行为）。`false`（stdio 协议宿主 / TUI）=
+  // 长驻进程：两处都不等，见下方调用点与 `settleInFlightHistorianInBackground`。
+  const settlesInForeground = port.options.processExitsAfterTurn !== false;
   // 持久历史快照的缓存键：同一 turn 内 live entries 长度不变，因此整个 turn 只读
   // 一次 session store；跨 turn 长度增长时自然失效。
   let cachedRows: { liveLength: number; rows: StoredRow[] } | undefined;
@@ -1624,7 +1723,15 @@ export function createZCodeMagicContextTurnTransformPort(
       // FORK（S24-fix2）：见 settleInFlightHistorian 的注释——historian 必须跑完，
       // 否则「一进程 = 一轮」会让它在 publish 之前随进程一起消失（drain 预留泄漏、
       // compartment 不落库）。
-      await settleInFlightHistorian(sessionId);
+      //
+      // FORK（bugfix-batch-20261011 / Step 2）：同一判据条件化。短驻形态照旧有界
+      // 地等；长驻形态（app-server / TUI）不阻塞前台——historian 继续在后台跑，
+      // 由 `settleInFlightHistorianInBackground` 记账、由 close 钩子 drain 收口。
+      if (settlesInForeground) {
+        await settleInFlightHistorian(sessionId);
+      } else {
+        settleInFlightHistorianInBackground(sessionId, options.logger);
+      }
     } catch (error) {
       return handleTransformFailure(
         error,
@@ -1647,7 +1754,12 @@ export function createZCodeMagicContextTurnTransformPort(
     // FORK（MF-04）：调度器新起的那次 pass 也要有界 settle，理由同
     // `settleInFlightHistorian`——进程会退出。失败/拒绝由钩子自己吞掉：它本来就不该
     // 影响这一轮请求（上面那次 settle 也是同样的处置）。
-    if (port.settleScheduledPass !== undefined) {
+    //
+    // FORK（bugfix-batch-20261011 / Step 2）：同判据条件化——长驻形态不 await。
+    // `notifyTurnSuccess`（上面的 `onPassSucceeded`）本身就是 fire-and-forget，包内
+    // 调度器契约自陈自行 publish；这一轮之后它继续在后台跑，优雅关闭由
+    // `registerClose` 的 drain 收口（MF-05），强杀与 CLI 一进程一轮同损（既有风险）。
+    if (settlesInForeground && port.settleScheduledPass !== undefined) {
       // 失败/拒绝在这里被吞掉：settle 只是替这一轮多等一个窗口，它本身绝不该改变
       // 这一轮请求的成败（与上面 `settleInFlightHistorian` 同一处置）。
       await port.settleScheduledPass().catch(() => undefined);
