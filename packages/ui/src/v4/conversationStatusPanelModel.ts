@@ -304,7 +304,12 @@ export function buildConversationStatusPanelModel(
   const plan = buildPlanModel(input.plan);
   const runningBashWorks: BackgroundWorkSummary[] = [];
   const workflowWorkByWorkId = new Map<string, BackgroundWorkSummary>();
-  const subagentControlByChildSessionId = new Map<string, BackgroundWorkSummary | null>();
+  // 主表值数组化兼作富哨兵：唯一命中存**单元素数组**，重复命中置 null（拒绝猜测）。
+  const subagentControlByChildSessionId = new Map<string, BackgroundWorkSummary[] | null>();
+  // 副表：childSessionId → 该身份下**全部** running work（唯一命中也是单元素组）。
+  // 主表置 null 哨兵（重复身份拒绝猜测）时，回退分支的可停性聚合仍要这组事实——
+  // 组信息不因主表不猜而丢失。
+  const subagentControlGroupByChildSessionId = new Map<string, BackgroundWorkSummary[]>();
   for (const work of input.backgroundWorks ?? []) {
     if (work.kind === "workflow") {
       // "workflow"（workflow run）曾与 bash 同列在 Terminals 下，那是保住停止入口的已记录错标；
@@ -322,20 +327,25 @@ export function buildConversationStatusPanelModel(
       runningBashWorks.push(work);
     } else if (work.kind === "subagent" && work.childSessionId) {
       // 目录投影接管 Agent 展示后，旧 backgroundWorks 的 workId/cancellable
-      // 没有再关联回来，导致 Stop 入口消失。只接受唯一 childSessionId 精确匹配；重复或
-      // 缺失身份时宁可不显示控制，也不能按标题、时间猜测并停止错误任务。
+      // 没有再关联回来，导致 Stop 入口消失。**重复身份仍回退 agentId**——回退目标
+      // 是任务自身 id，非按标题/时间猜测，无误停风险；唯一身份则精确联接到 work。
+      // 副表照单全收该身份的组（含重复组），供回退分支做可停性聚合。
       const existing = subagentControlByChildSessionId.get(work.childSessionId);
+      subagentControlGroupByChildSessionId.set(work.childSessionId, [
+        ...(subagentControlGroupByChildSessionId.get(work.childSessionId) ?? []),
+        work,
+      ]);
       subagentControlByChildSessionId.set(
         work.childSessionId,
-        existing === undefined ? work : null,
+        existing === undefined ? [work] : null,
       );
     }
   }
   const runningSubagentWorks: ConversationStatusPanelRunningSubagent[] = (
     input.runningSubagents ?? []
   ).map((subagent) => {
-    const controlWork = subagentControlByChildSessionId.get(subagent.childSessionId);
-    if (!controlWork) {
+    const controlWorks = subagentControlByChildSessionId.get(subagent.childSessionId);
+    if (!controlWorks) {
       // 前台派遣的子智能体不会出现在 backgroundWorks 里（只有显式 run_in_background
       // 才会），控制入口因此整条消失。回退到 subagent.agentId：runtime stopTask 按
       // agentId（≡ taskId）就能停 local_agent，所以这条行仍然可停。
@@ -345,12 +355,18 @@ export function buildConversationStatusPanelModel(
       //   是等待本身而不是执行，控制语义不成立。
       const fallbackAgentId = subagent.agentId;
       if (fallbackAgentId === undefined || subagent.status === "waiting") return subagent;
+      // 重复身份（null 哨兵）也走这里：回退目标是任务自身 agentId，无误停风险；
+      // 可停性则查副表、按该身份的整组 work 聚合——组内任一 `cancellable === false`
+      // 即不可停，缺省视为可停（与精确命中路径的 `!== false` 对称）。副表也无该组
+      // （纯未命中、无任何 work 关联）时维持可停，与旧回退语义一致。
+      const group = subagentControlGroupByChildSessionId.get(subagent.childSessionId);
       return {
         ...subagent,
         controlWorkId: fallbackAgentId,
-        cancellable: true,
+        cancellable: group ? !group.some((entry) => entry.cancellable === false) : true,
       };
     }
+    const controlWork = controlWorks[0]!;
     return {
       ...subagent,
       controlWorkId: controlWork.workId,
@@ -360,11 +376,13 @@ export function buildConversationStatusPanelModel(
   const projectedChildSessionIds = new Set(
     runningSubagentWorks.map((subagent) => subagent.childSessionId),
   );
-  for (const [childSessionId, controlWork] of subagentControlByChildSessionId) {
-    if (!controlWork || projectedChildSessionIds.has(childSessionId)) continue;
+  for (const [childSessionId, controlWorks] of subagentControlByChildSessionId) {
+    if (!controlWorks || projectedChildSessionIds.has(childSessionId)) continue;
     // backgroundWorks 已有精确 childSessionId 的 running 事实，但
     // subagents cold/live 投影交接的短窗口可能暂时缺行；旧模型会把 Agent 控制
-    // 整条隐藏。这里只用唯一身份的权威 work 补齐同一控制，重复身份仍拒绝猜测。
+    // 整条隐藏。这里只用唯一身份的权威 work 补齐同一控制，重复身份（null 哨兵）
+    // 仍拒绝猜测——没有唯一 work 可挂按钮，宁可不出这行。
+    const controlWork = controlWorks[0]!;
     runningSubagentWorks.push({
       agentId: controlWork.workId,
       childSessionId,

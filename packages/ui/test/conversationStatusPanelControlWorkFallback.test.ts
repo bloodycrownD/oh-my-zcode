@@ -112,3 +112,27 @@ test("backgrounded 侧 cancel 入口在任何偏斜下都不许消失（既有�
   );
   assert.equal(model.runningSubagentWorks[0]!.controlWorkId, "agent_1");
 });
+
+// T-S2（sub/C-orch-1 + N-2，r2 数据流版）：重复 childSessionId 下的回退语义与可停性
+// 聚合。RunningSubagentSummary 无 cancellable 字段（它只在 BackgroundWorkSummary 上，
+// snapshot.ts:424 optional），重复命中时主表置 null 哨兵、组信息转存副表——行仍回退
+// agentId 作为控制句柄（回退目标是任务自身 id，非按标题/时间猜测，无误停风险），
+// 可停性改按副表整组聚合：组内任一 cancellable===false 即不可停，缺省视为可停
+// （与精确命中路径的 !== false 对称）。
+test("重复 childSessionId 仍回退 agentId，可停性按组内 cancellable 聚合", () => {
+  // a) 两条 work 同 childSessionId（重复身份）→ 仍回退 agentId，不按标题/时间猜 work。
+  const duplicated = build([subagent()], [work(), work({ workId: "work_2" })]);
+  assert.equal(duplicated.runningSubagentWorks.length, 1, "重复身份不得补出第二行");
+  const rowA = duplicated.runningSubagentWorks[0]!;
+  assert.equal(rowA.controlWorkId, "agent_1");
+  // b) 同组仅一条 cancellable:false → 整行不可停（任一 false → 不可停）。
+  const oneFalse = build([subagent()], [work(), work({ workId: "work_2", cancellable: false })]);
+  assert.equal(oneFalse.runningSubagentWorks.length, 1, "重复身份不得补出第二行");
+  const rowB = oneFalse.runningSubagentWorks[0]!;
+  assert.equal(rowB.controlWorkId, "agent_1");
+  assert.equal(rowB.cancellable, false);
+  // c) 两条均缺省 → 可停。
+  const bothDefault = build([subagent()], [work(), work({ workId: "work_2" })]);
+  const rowC = bothDefault.runningSubagentWorks[0]!;
+  assert.equal(rowC.cancellable, true);
+});
