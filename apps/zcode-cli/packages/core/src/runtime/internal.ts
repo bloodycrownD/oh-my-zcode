@@ -81,6 +81,8 @@ modelIoDir?: string;
 browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   modelRequestAdmission?: AgentRuntimeDeps["modelRequestAdmission"];
   sessionModelSelection: ModelSelection | undefined;
+  /** Step 5（bugfix-batch-20261011）：最近一次选择变值的墙钟（ms）；0 = 从未变值。 */
+  lastModelSwitchAt: number;
   messageHistory: MessageHistory;
   readFileState: ReadFileStateMap;
   cachedTools: ModelToolContract[] | null;

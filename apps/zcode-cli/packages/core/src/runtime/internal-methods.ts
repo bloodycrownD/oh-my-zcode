@@ -81,6 +81,8 @@ export interface AgentRuntimeCoreMethods {
   ): Promise<void>;
   getSessionModelSelection(): ModelSelection | undefined;
   setSessionModelSelection(selection: ModelSelection | undefined): void;
+  /** Step 5（bugfix-batch-20261011）：最近一次会话模型选择变值的墙钟（ms）。 */
+  getLastModelSwitchAt(): number;
   getProjectId(): ProjectId;
   setWorkingDirectory(cwd: string): void;
   ensureSessionPersistedForExternalActivity(

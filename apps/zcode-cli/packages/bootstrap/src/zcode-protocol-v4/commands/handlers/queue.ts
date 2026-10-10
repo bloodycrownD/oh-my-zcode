@@ -7,7 +7,9 @@ import type {
   CommandEnvelope,
   CommandPayloadMap,
   CommandResult,
+  QueueItem,
 } from "@zcode/shared/zcode-protocol-v4";
+import type { TurnInputIntentMetadata } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
 import { inputIntentMetadataFromQueueItem } from "../input-intent.js";
 import { startPromptTurn } from "../prompt-turn.js";
@@ -148,6 +150,43 @@ async function setFollowupMode(
 }
 
 /**
+ * 提升轮的模型活值覆盖（bugfix-batch-20261011 Step 5 / spec 缺陷② b 刀）。
+ *
+ * 判据：runtime 记录「会话模型选择最近一次变值」的墙钟 `getLastModelSwitchAt()`；若它
+ * 晚于本项入队时间（`item.admittedAt` = v4 command admission 墙钟，语义即入队时刻），
+ * 说明用户在入队之后切过模型——提升轮必须改用当前会话活值，否则排队消息会拿着入队时的
+ * 旧快照执行（「切模型后排队消息还用旧模型」的报障根因）。
+ *
+ * 边界（回归红线，勿放宽）：
+ * - 未切换 → 维持 queue item 的旧快照语义，包含旧发送端 admission 兜底固定的快照。
+ *   core 侧同值写回不记时间戳（desktop 每条 sendText 都 pin 当前选择），因此「入队后又
+ *   提交了几条同模型消息」不会被误判成切换。
+ * - 旧投影缺 `admittedAt` → `?? 0` 视为最老：任何真实切换都晚于它，活值胜出。
+ * - 只覆盖 `intent.modelSelection`，**不置 pin、不写回会话态**：会话态已由
+ *   switchModelConfig 写成新值，promote 不需要也不允许出现第二条模型写路径
+ *   （v1.0.4「编辑重发/queue 提升不写回会话选择」语义原样保持）。
+ * - 编辑重发（fork-edit-retry / goal / session-mgmt）不经本函数，旧快照执行语义不动；
+ *   execution-scope 轮在 core 侧豁免切模（runtime/methods/turn-model.ts），此处不干预。
+ * - auto-drain（v4-bridge 的 sendQueuedNow 内部触发）走同一 handler，天然同规则。
+ */
+function applyPromotedModelSelection(
+  runtime: V4SessionRecordView["app"]["runtime"],
+  item: QueueItem,
+  intent: TurnInputIntentMetadata,
+): TurnInputIntentMetadata {
+  const lastModelSwitchAt = runtime.getLastModelSwitchAt?.() ?? 0;
+  if (!(lastModelSwitchAt > (item.admittedAt ?? 0))) return intent;
+  const liveSelection = runtime.getSessionModelSelection();
+  if (!liveSelection) return intent;
+  return {
+    ...intent,
+    modelSelection: liveSelection,
+    // 显式标注「非 pin」：活值来自会话态而非本轮提交，写回门（turn-model.ts）据此拒绝。
+    modelSelectionPinned: false,
+  };
+}
+
+/**
  * sendQueuedNow：reserve → Core promotion lease → stop barrier → start/promote → remove。
  * - 必须读取完整 QueueItem；text-only fallback 会丢 sourceCommandId/附件/client/order，禁止使用。
  * - stop 复用 session-flow 的语义：goal-pause barrier（否则 verifier 未收 abort 时
@@ -216,7 +255,11 @@ async function sendQueuedNow(
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
     if (queueItem.kind === "sendGoalCommand") {
-      const intent = inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text);
+      const intent = applyPromotedModelSelection(
+        record.app.runtime,
+        queueItem,
+        inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text),
+      );
       const goalContinuationWillStart = !(
         intent.planEnabled ??
         record.app.runtime?.getPlanEnabled?.() ??
@@ -231,7 +274,11 @@ async function sendQueuedNow(
       });
       leaseReleaseOwnedByBackground = goalContinuationWillStart;
     } else {
-      const intent = inputIntentMetadataFromQueueItem(queueItem, queueItem.text);
+      const intent = applyPromotedModelSelection(
+        record.app.runtime,
+        queueItem,
+        inputIntentMetadataFromQueueItem(queueItem, queueItem.text),
+      );
       const started = await startPromptTurn(host, record, {
         content: queueItem.text,
         inputId: queueItem.sourceCommandId,

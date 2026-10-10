@@ -154,6 +154,13 @@ private browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   /** 模型请求准入端口；随每次模型请求进调用上下文。 */
   private modelRequestAdmission?: AgentRuntimeDeps["modelRequestAdmission"];
   private sessionModelSelection: ModelSelection | undefined;
+  /**
+   * Step 5（bugfix-batch-20261011）：最近一次「会话模型选择变值」的墙钟（ms）。
+   * 0 = 本进程从未发生过选择变值。由 setSessionModelSelection 在值确实变化时写入，
+   * 供 queue 提升活值判据使用（bootstrap handlers/queue.ts）；
+   * 只用 Date.now()，与 v4 command admission 的 admittedAt 同一时钟。
+   */
+  private lastModelSwitchAt = 0;
   private messageHistory: MessageHistory;
   private readFileState: ReadFileStateMap;
   private cachedTools: ModelToolContract[] | null = null;
@@ -346,6 +353,11 @@ export interface AgentRuntime {
   ): Promise<void>;
   getSessionModelSelection(): ModelSelection | undefined;
   setSessionModelSelection(selection: ModelSelection | undefined): void;
+  /**
+   * Step 5（bugfix-batch-20261011）：最近一次会话模型选择变值的墙钟（ms）。
+   * 0 = 本进程未发生过选择变值。queue 提升据此判断「用户是否在入队后切过模型」。
+   */
+  getLastModelSwitchAt(): number;
   getProjectId(): ProjectId;
   ensureSessionPersistedForExternalActivity(
     input: string,
