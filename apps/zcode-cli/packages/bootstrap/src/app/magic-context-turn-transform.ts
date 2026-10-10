@@ -255,6 +255,42 @@ export function pushMagicContextUsageSummary(
     });
 }
 
+/**
+ * FORK（e2e/R-2）：catalog 与 registry 都给不出 `properties.contextWindow` 时的
+ * **保守默认窗口**（token）。
+ *
+ * 与包内 transform 的 `boundaryContextLimit` 兜底同值——那里在拿不到任何 limit
+ * 时同样落到 128_000（见包内 transform 的边界解析）。方向上偏保守：窗口取小 ⇒
+ * percentage 偏大 ⇒ 压缩宁可早一步；真发出去前 wire-estimate / emergency /
+ * DegradedPassRefusalError 等通道仍会拦住超窗口请求，不会把裸历史发给 provider。
+ *
+ * 这是 e2e/R-2「二层兜底」的最后一层：第一层是模型自带的 `properties.contextWindow`
+ * （catalog），第二层是装配层注入的「会话生效模型」registry 查询。三层都落空时用
+ * 这里的值——percentage 从此永远算得出来，scheduler 不再因窗口缺席而恒 defer。
+ */
+export const MAGIC_CONTEXT_CONSERVATIVE_CONTEXT_WINDOW = 128_000;
+
+/** e2e/R-2：保守默认窗口的 env 覆盖（诊断/实验通道，不是产品开关）。 */
+export const MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW_ENV =
+  "ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW";
+
+/** 读出「可用的正数窗口」；非有限/非正数一律视为缺席（走下一层兜底）。 */
+function positiveWindow(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+/**
+ * e2e/R-2 二层兜底：窗口的最终来源。每次求值都现读 env——测试改
+ * `ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW` 后下一次绑定即生效，不需要重建
+ * recorder。
+ */
+function resolveConservativeContextWindow(env: NodeJS.ProcessEnv = process.env): number {
+  return (
+    positiveWindow(Number(env[MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW_ENV])) ??
+    MAGIC_CONTEXT_CONSERVATIVE_CONTEXT_WINDOW
+  );
+}
+
 /** `TransformDeps.contextUsageMap` 的值形状（包内 `loadContextUsage` 读的那三个字段）。 */
 export interface MagicContextUsageMapEntry {
   hasUsageTokens: boolean;
@@ -287,6 +323,22 @@ export interface MagicContextUsageMapEntry {
  *
  * 百分比的分母是**本轮真实模型的窗口**——装配期没有 turn，也就还没有这个事实，
  * 所以分母来自 `noteLiveModel`。
+ *
+ * ── e2e/R-2（窗口三源） ────────────────────────────────────────────────────────
+ *
+ * 死结原形：`record()` 的 `contextWindow === undefined` 恒 skip ⇒ percentage 恒
+ * 0 ⇒ scheduler 恒 defer ⇒ 压缩一次不启动。而 `contextWindow` 的唯一来源
+ * `noteLiveModel` 又只在 **pass 成功后**的 `notifyPassSucceeded` 被调用——pass 需要
+ * percentage 才决定做不做事，percentage 又需要一次成功 pass 才拿得到窗口，鸡生蛋。
+ * 用户实证的触发条件是「未设置历史/默认模型」：那条路径上模型的
+ * `properties.contextWindow` 在 catalog/registry 里也缺席。
+ *
+ * R-2 的两半修法：
+ *   ① 绑定提前——turn 开始（端口入口，pass 之前）即 `noteLiveModel(input.model)`，
+ *      见 `createZCodeMagicContextTurnTransformPort` 的 `onTurnStart`；
+ *   ② 窗口三源——模型自带 properties → 装配层兜底（会话生效模型的 registry
+ *      查询，create-app 注入 `resolveFallbackContextWindow`）→ 保守默认/env
+ *      （`MAGIC_CONTEXT_CONSERVATIVE_CONTEXT_WINDOW`）。
  */
 export interface MagicContextUsageRecorder {
   /** 直接交给 `TransformDeps.contextUsageMap`。 */
@@ -324,6 +376,15 @@ export interface MagicContextRecorderModel {
 export function createMagicContextUsageRecorder(
   sessionId: string,
   logger?: Logger,
+  options?: {
+    /**
+     * FORK（e2e/R-2 二层兜底）：模型自带 `properties.contextWindow` 缺席时的窗口
+     * 解析。装配层（create-app）传入的闭包解析「会话生效模型」（显式选择 ?? 活默认，
+     * 与 agent/C-1 的 `resolveConfiguredDefaultModelSelectionOf` 同源）并在
+     * provider registry 里查它的窗口。返回 undefined 时落到保守默认/env 那一层。
+     */
+    resolveFallbackContextWindow?: () => number | undefined;
+  },
 ): MagicContextUsageRecorder {
   const contextUsageMap = new Map<string, MagicContextUsageMapEntry>();
   const recordedListeners: Array<() => void> = [];
@@ -374,8 +435,16 @@ export function createMagicContextUsageRecorder(
       }
     },
     noteLiveModel: (model) => {
-      const window = model.properties?.contextWindow;
-      if (typeof window === "number" && window > 0) contextWindow = window;
+      // e2e/R-2：窗口三源——模型自带（catalog）→ 装配层兜底（会话生效模型的
+      // registry 查询）→ 保守默认/env。原实现只认第一源，缺席时
+      // `contextWindow` 保持 undefined，`record()` 于是恒 skip、percentage 恒 0
+      // （用户实证场景：未设置历史/默认模型 ⇒ catalog 无窗口 ⇒ 压缩一次不启动）。
+      // 现在三个来源都落空也有 128_000 兜底，`contextWindow` 恒为正数。
+      const window =
+        positiveWindow(model.properties?.contextWindow) ??
+        positiveWindow(options?.resolveFallbackContextWindow?.()) ??
+        resolveConservativeContextWindow();
+      contextWindow = window;
       // S24-fix：`last_observed_model_key` 是 transform 换模型失效判据的**唯一**输入
       // （`persistedUsageBeforeResets.lastObservedModelKey`）。不写它，「换模型后用旧
       // 模型的占用去算新模型的阈值」这条路径就永远不触发。这里用包内 `resolveModelKey`
@@ -386,6 +455,11 @@ export function createMagicContextUsageRecorder(
       const inputTokens = getModelUsageContextTokens(usage);
       // provider 没报 input（某些 sidecar/错误路径）时写 0 只会把「不知道」说成
       // 「很空」，而 0% 会让 scheduler 一直 defer——所以宁可保持上一次的读数。
+      //
+      // e2e/R-2：`contextWindow` 分支保留作防御（三源兜底后恒为正数，见
+      // `noteLiveModel`），但不再是主跳过原因——R-2 之前它才是：未配置模型的
+      // 会话每轮都在这里 skip，`usage_skipped` 的 `contextWindow: null` 与
+      // `inputTokens: null` 是两道可区分的门（取证锚点见 spec）。
       if (inputTokens === undefined || contextWindow === undefined || contextWindow <= 0) {
         // 「没记上」是异常而不是常态：它意味着 transform 会一直看到 0% 并永远 defer。
         // 所以这条走 info 而不是 debug——默认日志级别下它必须看得见。
@@ -1065,11 +1139,25 @@ export async function createMagicContextTurnTransform(
   });
 
   const transform = createTransform(deps);
-  const notifyPassSucceeded = (model: MagicContextTurnTransformInput["model"]): void => {
-    // 主模型窗口有两个消费者，都只有 turn 知道：后台 protected-tail 边界的输入，
-    // 以及 usage recorder 的百分比分母（缺了分母，占比就永远算不出来）。
+  /**
+   * FORK（e2e/R-2）：把本轮实际执行模型绑给两个消费者——后台 protected-tail 边界
+   * 的输入，以及 usage recorder 的百分比分母（缺了分母，占比就永远算不出来）。
+   *
+   * 绑定时机有两处，缺一不可：
+   *   - **turn 开始**（`onTurnStart`，pass 之前）：这是 R-2 的核心。原实现只在
+   *     pass 成功后绑定，形成鸡生蛋死结——pass 的 scheduler 决策要读 percentage，
+   *     percentage 的分母又只在 pass 成功后才有；第一轮/失败轮永远算不出占比，
+   *     scheduler 恒 defer（用户实证：未设置历史/默认模型时不压缩）。
+   *   - **pass 成功后**（`notifyPassSucceeded`，保留）：turn 中途换模型的场景仍能
+   *     在当轮末尾刷新。提前绑定只会让这两处更准，不会互相覆盖出错——同一个
+   *     `input.model`，幂等。
+   */
+  const bindLiveModel = (model: MagicContextTurnTransformInput["model"]): void => {
     historian.noteLiveModel(model);
     options.usageRecorder?.noteLiveModel(model);
+  };
+  const notifyPassSucceeded = (model: MagicContextTurnTransformInput["model"]): void => {
+    bindLiveModel(model);
     // fire-and-forget：本行绝不 await。调度器自己合并同会话的连续触发、自己 drain、
     // 自己 abort——让 UI 等一个可能跑几十秒的 historian 是错的。
     historian.historianScheduler?.notifyTurnSuccess({ sessionId: options.sessionId });
@@ -1100,6 +1188,13 @@ export async function createMagicContextTurnTransform(
   const port = createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
     options,
+    // e2e/R-2：**turn 开始即绑定**实际执行模型（pass 之前）。门控与
+    // `onPassSucceeded` 同源：两个消费者（historian 边界 + usage recorder）
+    // 任一在场就挂。historian 的 `noteLiveModel` 只记一个数，runnable=false 时盲记
+    // 无害；recorder 缺席时 `bindLiveModel` 内部自动跳过那一半。
+    ...(historian.historianScheduler === undefined && options.usageRecorder === undefined
+      ? {}
+      : { onTurnStart: bindLiveModel }),
     // 两个消费者都不在时**不挂**回调：Step 19b 的单测走的就是这条路径，它必须与
     // S19b 逐行相同。
     ...(historian.historianScheduler === undefined && options.usageRecorder === undefined
@@ -1299,6 +1394,19 @@ export function createZCodeMagicContextTurnTransformPort(
     getConfig: () => MagicContextConfig;
     options: Pick<MagicContextTurnTransformOptions, "sessionId" | "sessionStore" | "logger">;
     /**
+     * FORK（e2e/R-2）：**turn 开始**（pass 之前）的本轮模型绑定。
+     *
+     * 为什么需要第三个时机：`onPassSucceeded` 在 pass **成功后**才跑，而 pass 的
+     * scheduler 决策要读 usage percentage，percentage 的分母（模型窗口）又是
+     * `onPassSucceeded` 才绑的——第一轮/失败轮永远 defer（鸡生蛋死结，用户实证
+     * 「未设置历史/默认模型 ⇒ 不压缩」）。本钩子由工厂在端口入口前调用，先于任何
+     * pass 决策拿到分母。同样**刻意不在 core 的 turn-loop 上挂点**——那是本 fork
+     * 的纪律禁区；端口入口就是「这一轮的插入点」，语义等价。
+     *
+     * 缺席（Step 19b 的单测走的就是这条）时端口行为与 R-2 之前逐行相同。
+     */
+    onTurnStart?: (model: MagicContextTurnTransformInput["model"]) => void;
+    /**
      * FORK（S24 / D-6）：每 pass 成功后的 historian 后台驱动。**刻意不在 core 的
      * turn-loop 上挂点**——那要求改 turn-loop 语义（本 fork 的纪律禁区）。本端口
      * 是装配层自己的回调：一次 transform 成功就意味着这一轮请求已被接受，此时让
@@ -1400,6 +1508,11 @@ export function createZCodeMagicContextTurnTransformPort(
   return async (
     input: MagicContextTurnTransformInput,
   ): Promise<MagicContextTurnTransformResult> => {
+    // e2e/R-2：turn 开始即绑定本轮实际执行模型——先于投影与任何 pass 决策，
+    // 让 usage recorder 的百分比分母在这一轮的第一pass 之前就位（破除「pass 成功
+    // 才绑窗口」的鸡生蛋死结）。失败路径（fail-open / LKG replay）也不例外地已绑：
+    // 它们同样会产生 model_complete，读数一样要落得下。
+    if (port.onTurnStart !== undefined) port.onTurnStart(input.model);
     // 数组浅快照：`borrowReadOnlyRuntimeEntries` 的契约要求跨 await 前做数组快照，
     // 且 transform 只允许就地改这份投影。
     const snapshot = snapshotRuntimeEntries(input.entries as readonly ZCodeRuntimeEntry[]);

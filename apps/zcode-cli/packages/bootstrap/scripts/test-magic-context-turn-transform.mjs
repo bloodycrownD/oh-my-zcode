@@ -77,7 +77,7 @@ const { buildMagicContextWireDebugSnapshot, runMagicContextTurnTransform } = awa
   CORE_HELPER.href
 );
 
-const { createZCodeMagicContextTurnTransformPort } = await import(
+const { createZCodeMagicContextTurnTransformPort, createMagicContextUsageRecorder } = await import(
   new URL("../dist/app/magic-context-turn-transform.js", import.meta.url).href
 );
 
@@ -141,6 +141,38 @@ async function runPort(port, entries) {
     sessionId: SESSION_ID,
     workingDirectory: "D:/tmp/project",
   });
+}
+
+/** 带自定义 model 的端口驱动（e2e/R-2 要控制模型的 properties.contextWindow）。 */
+async function runPortWithModel(port, entries, model) {
+  return await port({
+    entries,
+    model,
+    sessionId: SESSION_ID,
+    workingDirectory: "D:/tmp/project",
+  });
+}
+
+/** 捕获 recorder 的结构化日志（usage_skipped / usage_recorded 等断言用）。 */
+function capturingRecorderLogger() {
+  const entries = [];
+  const logger = {
+    info() {},
+    warn() {},
+    error() {},
+    debug() {},
+    child() {
+      return logger;
+    },
+  };
+  // recorder 用 `logger[level]("Magic context usage recorder", {...})` 记录。
+  const note = (level) => (message, context) => {
+    entries.push({ level, message, context });
+  };
+  logger.info = note("info");
+  logger.debug = note("debug");
+  logger.warn = note("warn");
+  return { logger, entries };
 }
 
 /** 复刻 `inject-compartments.ts:prependM0M1Messages` 的注入形状。 */
@@ -444,3 +476,165 @@ test("同一端口在下一次 turn 读到改过的配置（热生效，不需�
     (error) => error instanceof EmergencyFailClosedError,
   );
 });
+
+// ── e2e/R-2：contextWindow 绑定提前到 turn 开始 + 窗口三源兜底 ──────────────
+//
+// 死结原形（用户实证：未设置历史/默认模型 ⇒ 不压缩）：`record()` 的
+// `contextWindow === undefined` 恒 skip ⇒ percentage 恒 0 ⇒ scheduler 恒 defer。
+// 而 `contextWindow` 的唯一来源 `noteLiveModel` 原先只在 pass **成功后**的
+// `notifyPassSucceeded` 被调用——pass 的调度决策要读 percentage，percentage 的分母
+// 又要等一次成功 pass，鸡生蛋。R-2 的两半修法：
+//   ① `onTurnStart`：turn 开始（pass 之前，端口入口）即绑定 input.model；
+//   ② 窗口三源：模型 properties → 装配层会话生效模型兜底 → 保守默认/env。
+// 下面五例把这两半都钉死，含「不修时的对照组」。
+
+/** 带钩子的端口构造（onTurnStart / onPassSucceeded 可分别注入）。 */
+function portWithHooks(transform, hooks = {}, config = DEFAULT_MAGIC_CONTEXT_CONFIG) {
+  return createZCodeMagicContextTurnTransformPort(transform, {
+    getConfig: () => config,
+    options: {
+      sessionId: SESSION_ID,
+      logger: NOOP_LOGGER,
+    },
+    ...hooks,
+  });
+}
+
+test("e2e/R-2：turn 开始即绑定窗口——pass 走 fail_open 时也绑（鸡生蛋破除）", async () => {
+  const { logger, entries } = capturingRecorderLogger();
+  const recorder = createMagicContextUsageRecorder(SESSION_ID, logger);
+  const port = portWithHooks(
+    async () => {
+      throw new Error("boom");
+    },
+    {
+      onTurnStart: (model) => recorder.noteLiveModel(model),
+    },
+  );
+  const result = await runPortWithModel(port, sampleEntries(), {
+    providerId: "zcode",
+    modelId: "glm-4.6",
+    properties: { contextWindow: 8_000 },
+  });
+  assert.equal(result.outcome, "fail_open");
+  // pass 失败了、onPassSucceeded 不会跑，但绑定发生在 pass 之前：窗口已在。
+  recorder.record({ at: 1, usage: { inputTokens: 1_000 } });
+  const usage = recorder.readUsage();
+  assert.ok(usage, "提前绑定后必须有读数");
+  assert.equal(usage.percentage, (1_000 / 8_000) * 100);
+  assert.deepEqual(
+    entries.filter((entry) => entry.context?.event === "magic_context.usage_skipped"),
+    [],
+  );
+});
+
+test("e2e/R-2：对照组——无绑定时窗口缺席，record 恒 skip（修前的死结）", async () => {
+  const { logger } = capturingRecorderLogger();
+  const recorder = createMagicContextUsageRecorder(SESSION_ID, logger);
+  // 不挂任何绑定钩子（等价修前：notifyPassSucceeded 是唯一绑定点且本 pass 失败）。
+  const result = await runPortWithModel(
+    portWithHooks(async () => {
+      throw new Error("boom");
+    }),
+    sampleEntries(),
+    { providerId: "zcode", modelId: "glm-4.6", properties: { contextWindow: 8_000 } },
+  );
+  assert.equal(result.outcome, "fail_open");
+  recorder.record({ at: 1, usage: { inputTokens: 1_000 } });
+  assert.equal(recorder.readUsage(), null, "没有绑定的会话算不出占比（修前形态）");
+});
+
+test("e2e/R-2：窗口三源——模型自带 → fallback → 保守默认/env", async () => {
+  const { logger } = capturingRecorderLogger();
+
+  // 源 1：模型自带 properties.contextWindow 优先。
+  const fromModel = createMagicContextUsageRecorder(SESSION_ID, logger);
+  fromModel.noteLiveModel({
+    providerId: "p",
+    modelId: "m",
+    properties: { contextWindow: 4_000 },
+  });
+  fromModel.record({ at: 1, usage: { inputTokens: 1_000 } });
+  assert.equal(fromModel.readUsage().percentage, 25);
+
+  // 源 2：模型缺席 → 装配层兜底（create-app 注入的会话生效模型解析）。
+  const fromFallback = createMagicContextUsageRecorder(SESSION_ID, logger, {
+    resolveFallbackContextWindow: () => 2_000,
+  });
+  fromFallback.noteLiveModel({ providerId: "p", modelId: "m" });
+  fromFallback.record({ at: 1, usage: { inputTokens: 500 } });
+  assert.equal(fromFallback.readUsage().percentage, 25);
+
+  // 源 3a：兜底也缺席 → env 覆盖。
+  const previous = process.env.ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW;
+  try {
+    process.env.ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW = "1000";
+    const fromEnv = createMagicContextUsageRecorder(SESSION_ID, logger);
+    fromEnv.noteLiveModel({ providerId: "p", modelId: "m" });
+    fromEnv.record({ at: 1, usage: { inputTokens: 500 } });
+    assert.equal(fromEnv.readUsage().percentage, 50);
+
+    // 源 3b：什么都缺席 → 保守默认 128_000（与包内 boundaryContextLimit 兜底同值）。
+    delete process.env.ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW;
+    const fromDefault = createMagicContextUsageRecorder(SESSION_ID, logger);
+    fromDefault.noteLiveModel({ providerId: "p", modelId: "m" });
+    fromDefault.record({ at: 1, usage: { inputTokens: 1_000 } });
+    assert.equal(fromDefault.readUsage().percentage, (1_000 / 128_000) * 100);
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW;
+    } else {
+      process.env.ZCODE_MAGIC_CONTEXT_DEFAULT_CONTEXT_WINDOW = previous;
+    }
+  }
+});
+
+test("e2e/R-2：turn 开始与 pass 成功两次绑定同一 model 幂等", async () => {
+  const order = [];
+  const { logger } = capturingRecorderLogger();
+  const recorder = createMagicContextUsageRecorder(SESSION_ID, logger);
+  const port = portWithHooks(async () => {}, {
+    onTurnStart: (model) => {
+      order.push("turn-start");
+      recorder.noteLiveModel(model);
+    },
+    onPassSucceeded: (model) => {
+      order.push("pass-succeeded");
+      recorder.noteLiveModel(model);
+    },
+  });
+  await runPortWithModel(port, sampleEntries(), {
+    providerId: "zcode",
+    modelId: "glm-4.6",
+    properties: { contextWindow: 8_000 },
+  });
+  assert.deepEqual(order, ["turn-start", "pass-succeeded"]);
+  recorder.record({ at: 1, usage: { inputTokens: 1_000 } });
+  assert.equal(recorder.readUsage().percentage, 12.5);
+});
+
+test("e2e/R-2：兜底窗口下 record 不再 skip；provider 未报 input 时才 skip", async () => {
+  const { logger, entries } = capturingRecorderLogger();
+  const recorder = createMagicContextUsageRecorder(SESSION_ID, logger);
+  // catalog 缺窗口的模型（用户实证形态）：靠保守默认继续算 percentage。
+  recorder.noteLiveModel({ providerId: "zcode", modelId: "glm-4.6" });
+  recorder.record({ at: 1, usage: { inputTokens: 1_000 } });
+  const skipped = entries.filter((entry) => entry.context?.event === "magic_context.usage_skipped");
+  assert.deepEqual(skipped, [], "有窗口就必须记得上，不再恒 skip");
+  const recorded = entries.filter(
+    (entry) => entry.context?.event === "magic_context.usage_recorded",
+  );
+  assert.equal(recorded.length, 1);
+  assert.equal(recorded[0].context.contextWindow, 128_000);
+
+  // 防御语义保留：provider 没报 input 时仍然 skip（「不知道」不说成「很空」）。
+  recorder.record({ at: 2, usage: {} });
+  const skippedAfter = entries.filter(
+    (entry) => entry.context?.event === "magic_context.usage_skipped",
+  );
+  assert.equal(skippedAfter.length, 1);
+  assert.equal(skippedAfter[0].context.inputTokens, null);
+  assert.equal(skippedAfter[0].context.contextWindow, 128_000, "缺席的只会是 input 那一半");
+});
+
+// BG1-CASE-PLACEHOLDER
