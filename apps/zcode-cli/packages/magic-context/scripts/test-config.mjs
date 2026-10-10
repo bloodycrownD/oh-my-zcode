@@ -98,6 +98,11 @@ it("the default set's top-level key set matches the schema exactly", () => {
     "fail_closed_blocking",
     "historian",
     "history_budget_percentage",
+    // FORK（Step 11）：E 组白名单扩字段（memory on / prompt_surface full / mural off，
+    // 默认值对齐上游）。
+    "memory",
+    "mural",
+    "prompt_surface",
     "smart_drops",
   ];
   // 有 .default() 的键：parse({}) 之后一定在结果里。
@@ -119,6 +124,78 @@ it("the default set's top-level key set matches the schema exactly", () => {
   for (const excluded of EXCLUDED_CONFIG_KEYS) {
     assert.equal(excluded in parsed, false);
   }
+});
+
+it("Step 11 whitelist: memory / prompt_surface / mural defaults and validators", () => {
+  const parsed = MagicContextConfigSchema.parse({});
+  // 默认值对齐上游：memory on、prompt_surface full、mural off。
+  assert.deepEqual(parsed.memory, { enabled: true });
+  assert.deepEqual(parsed.prompt_surface, { default: "full" });
+  assert.deepEqual(parsed.mural, { enabled: false });
+
+  // 显式值原样落域（缺省 → 显式的双向都成立）。
+  const toggled = MagicContextConfigSchema.parse({
+    memory: { enabled: false },
+    prompt_surface: { default: "light", models: { "zcode/glm-4.6": "light", "zcode/*": "full" } },
+    mural: { enabled: true },
+  });
+  assert.deepEqual(toggled.memory, { enabled: false });
+  assert.equal(toggled.prompt_surface.default, "light");
+  assert.deepEqual(toggled.prompt_surface.models, {
+    "zcode/glm-4.6": "light",
+    "zcode/*": "full",
+  });
+  assert.deepEqual(toggled.mural, { enabled: true });
+
+  // models key 文法：坏 key 拒绝（永远不匹配的 key 必须立刻红，而不是静默失效）。
+  for (const badKey of ["", "zcode/", "/glm", "zco*de/glm", "zcode//glm", "zcode/glm/"]) {
+    assert.equal(
+      MagicContextConfigSchema.safeParse({ prompt_surface: { models: { [badKey]: "full" } } })
+        .success,
+      false,
+      `models key "${badKey}" must be rejected`,
+    );
+  }
+  // 合法 key：bare / provider/model / provider/*（model ID 可含额外斜杠）。
+  for (const goodKey of ["glm-4.6", "zcode/glm-4.6", "zcode/*", "zcode/glm/4.6"]) {
+    assert.equal(
+      MagicContextConfigSchema.safeParse({ prompt_surface: { models: { [goodKey]: "light" } } })
+        .success,
+      true,
+      `models key "${goodKey}" must be accepted`,
+    );
+  }
+
+  // 空白串覆盖被 refine 拒（guidance 路径与 tool 描述都是「给了就必须有内容」）。
+  assert.equal(
+    MagicContextConfigSchema.safeParse({ prompt_surface: { guidance_override_path: "   " } })
+      .success,
+    false,
+  );
+  assert.equal(
+    MagicContextConfigSchema.safeParse({
+      prompt_surface: { tool_descriptions: { ctx_search: "  " } },
+    }).success,
+    false,
+  );
+  assert.equal(
+    MagicContextConfigSchema.safeParse({
+      prompt_surface: { tool_descriptions: { "": "non-empty" } },
+    }).success,
+    false,
+  );
+  // 合法覆盖原样通过。
+  const withOverrides = MagicContextConfigSchema.parse({
+    prompt_surface: {
+      guidance_override_path: "~/guidance.md",
+      tool_descriptions: { ctx_search: "Custom search description." },
+    },
+  });
+  assert.equal(withOverrides.prompt_surface.guidance_override_path, "~/guidance.md");
+  assert.equal(
+    withOverrides.prompt_surface.tool_descriptions.ctx_search,
+    "Custom search description.",
+  );
 });
 
 it("whitelist field validators hold (threshold bounds, per-model object, tokens)", () => {
@@ -207,7 +284,6 @@ it("excluded keys never reach `effective` (compaction in particular)", () => {
     enabled: true,
     compaction: { enabled: false },
     dreamer: { tasks: {} },
-    mural: { enabled: true },
     profiles: { work: { historian: {} } },
   });
   for (const key of EXCLUDED_CONFIG_KEYS) {
@@ -215,8 +291,11 @@ it("excluded keys never reach `effective` (compaction in particular)", () => {
   }
   assert.equal("compaction" in parsed, false);
   assert.equal("dreamer" in parsed, false);
-  assert.equal("mural" in parsed, false);
   assert.equal("profiles" in parsed, false);
+  // FORK（Step 11）：`mural` 曾是「未移植即被 strip」的排除子树；本批它进了白名单
+  // （配置面），因此这里不能再断言它缺席——真正被排除的是 dreamer / profiles /
+  // compaction。
+  assert.deepEqual(parsed.mural, { enabled: false });
   // the excluded subtrees leave no trace at all
   assert.deepEqual(parsed, DEFAULT_MAGIC_CONTEXT_CONFIG);
 });

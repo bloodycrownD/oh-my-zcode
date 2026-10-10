@@ -29,6 +29,16 @@
  * 造不造得出来由 historian host 的 `historian_model_unavailable` 诊断负责，
  * 那是运行期事实，不是配置 readiness）。
  *
+ * FORK（bugfix-batch-20261011 / Step 11）：E 组白名单扩三个子树——
+ * `memory.enabled`、`prompt_surface.*`、`mural.enabled`（SPEC D4/D13/D14 的配套
+ * 配置面：记忆读写链与提示词面开关此前没有任何配置入口，只能永远默认开/关）。
+ * 默认值对齐上游：memory 默认 **on**（上游同款，见下）、prompt_surface 默认
+ * `{ default: "full" }`、mural 默认 **off**（mural 渲染本体是 Step 15 的事，
+ * 这里只落配置面，运行时消费方后续接线）。上游 memory 子树其余字段
+ * （injection_budget_tokens / auto_promote / auto_search / git_commit_indexing …）
+ * 与 mural.model（compress-cues dreamer 旋钮，N3 终局不做）**不搬**：本批的
+ * 注入链不消费它们，白名单只登记有消费者的字段。
+ *
  * Placement: this lives inside the package rather than in `adapters/src/config/`
  * (which is where the spec's E-group sentence points) because the package's own
  * transform/historian consumers must not reach back into a root-workspace
@@ -147,6 +157,139 @@ export type HistorianConfig = z.infer<typeof HistorianConfigSchema>;
 export const DEFAULT_HISTORIAN_CONFIG: HistorianConfig = HistorianConfigSchema.parse({});
 
 /**
+ * FORK（Step 11 / bugfix-batch-20261011）：`prompt_surface` 路由 key 的本地校验副本。
+ *
+ * 上游该校验在 `shared/prompt-surface.ts` 的 `isValidPromptSurfaceModelKey`
+ * （bare model ID / provider/model / provider/* 三种形态，大小写敏感，model ID
+ * 可含额外斜杠）。本批 `shared/prompt-surface.ts` 还是 `deferred/` 的缝（Step 12
+ * git mv 换真身），schema 不能 import 一个即将换位的路径，因此按同款规则内联一份
+ * 并在此登记；Step 12 真身落位后本函数改为从真身 import，删除本副本。
+ *
+ * 为什么值得校验：坏 key（空段、双斜杠、provider 带 *）不会报运行时错，只会
+ * **永远不匹配**——用户给某个模型配了 light 却发现毫无效果，且没有任何线索。
+ */
+function isValidPromptSurfaceModelKey(key: string): boolean {
+  if (key.length === 0 || key.trim() !== key) return false;
+  const slash = key.indexOf("/");
+  if (slash < 0) return !key.includes("*");
+  if (slash === 0 || slash === key.length - 1) return false;
+  const provider = key.slice(0, slash);
+  const modelId = key.slice(slash + 1);
+  if (
+    provider.trim() !== provider ||
+    modelId.trim() !== modelId ||
+    provider.includes("*") ||
+    (modelId.includes("*") && modelId !== "*")
+  ) {
+    return false;
+  }
+  if (modelId === "*") return true;
+  return (
+    modelId.length > 0 &&
+    !modelId.startsWith("/") &&
+    !modelId.endsWith("/") &&
+    !modelId.includes("//")
+  );
+}
+
+/**
+ * FORK（Step 11）：记忆总开关。上游 memory 子树的 reduced 版——只登记本批有
+ * 消费者的 `enabled`（消费方：211 行段 MEMORY_GUIDANCE 装配（Step 13）、ctx_memory /
+ * ctx_search 的语义边界、promotion 写入链的门）。上游其余字段
+ * （injection_budget_tokens / auto_promote / retrieval_count_promotion_threshold /
+ * auto_search / git_commit_indexing）不搬：本批注入链不读它们，白名单只登记
+ * 有消费者的字段。默认 **true**（与上游一致：记忆链默认在场，用户显式关才退场）。
+ */
+export const MemoryConfigSchema = z
+  .object({
+    enabled: z
+      .boolean()
+      .default(true)
+      .describe(
+        "Enable cross-session project memory: the memory store, ctx_memory/ctx_search, and the memory guidance in the prompt surface. Default true; turning it off keeps Magic Context's context reclamation working without any memory features.",
+      ),
+  })
+  .describe(
+    "Cross-session project memory (rules, architecture facts, constraints, config values, naming).",
+  );
+export type MemoryConfig = z.infer<typeof MemoryConfigSchema>;
+
+/**
+ * FORK（Step 11）：prompt-surface 预设备份路由。字段与上游
+ * `PromptSurfaceConfigSchema` 一致（default / models / guidance_override_path /
+ * tool_descriptions），但只落**配置面**：真正的 preset 解析与 guidance 覆盖
+ * 文件读取是 Step 12 的职责（`shared/prompt-surface.ts` 真身 + JSONC 宽松解析），
+ * 本批先把白名单与默认值立起来，让设置页与 config.json 有处可写。
+ *
+ * `guidance_override_path` / `tool_descriptions` 在上游是 **USER-LEVEL ONLY**：
+ * 本 fork 的配置真源只有一个用户级文件（`~/.omz/cli/config.json`，D-12），没有
+ * 项目级层，因此该限制在本 fork 自动成立，无需额外分层校验。
+ */
+export const PromptSurfaceConfigSchema = z
+  .object({
+    default: z
+      .enum(["full", "light"])
+      .default("full")
+      .describe(
+        'Fallback prompt-surface preset ("full" or "light"). "full" serves the complete tool descriptions; "light" serves the compact ones.',
+      ),
+    models: z
+      .record(
+        z.string().refine(isValidPromptSurfaceModelKey, {
+          message:
+            "Use a non-empty bare model key, provider/model key, or the literal provider/* wildcard; model IDs may contain additional slashes and matching is case-sensitive.",
+        }),
+        z.enum(["full", "light"]),
+      )
+      .optional()
+      .describe(
+        "Literal per-model routing. Keys are bare model IDs, provider/model, or provider/*; matching is case-sensitive and preserves additional slashes in model IDs.",
+      ),
+    guidance_override_path: z
+      .string()
+      .refine((value) => value.trim().length > 0, {
+        message: "guidance_override_path must not be empty or whitespace-only",
+      })
+      .optional()
+      .describe(
+        "Path to a complete primary guidance section that replaces the built-in one. The file is read and parsed when the prompt surface materializes (Step 12).",
+      ),
+    tool_descriptions: z
+      .record(
+        z.string().refine((value) => value.trim().length > 0, {
+          message: "tool description keys must not be empty or whitespace-only",
+        }),
+        z.string().refine((value) => value.trim().length > 0, {
+          message: "tool description values must not be empty or whitespace-only",
+        }),
+      )
+      .optional()
+      .describe(
+        "Top-level description overrides keyed by ctx_* tool ID; parameter schemas and descriptions are unchanged.",
+      ),
+  })
+  .describe("Prompt-surface preset routing for the Magic Context agent-facing surfaces.");
+export type PromptSurfaceConfig = z.infer<typeof PromptSurfaceConfigSchema>;
+
+/**
+ * FORK（Step 11）：mural 总开关。mural 渲染本体（render-trigger / resolve-mural /
+ * render-mural / mural-selection / storage-mural 五件套）是 Step 15 的事，本批
+ * 只把配置面立起来；默认 **false**（与上游一致：实验特性，opt-in）。上游的
+ * `mural.model`（compress-cues dreamer 任务旋钮）不搬——dreamer 按 N3 终局不做。
+ */
+export const MuralConfigSchema = z
+  .object({
+    enabled: z
+      .boolean()
+      .default(false)
+      .describe(
+        "Enable the experimental mural image for project memories that did not fit the context budget. Default false; the rendering path lands with the mural port.",
+      ),
+  })
+  .describe("Experimental mural: a single deterministically-rendered image of project memories.");
+export type MuralConfig = z.infer<typeof MuralConfigSchema>;
+
+/**
  * The reduced `magicContext` domain schema. Unknown keys (notably `compaction`,
  * plus every sub-tree this fork does not port) are stripped rather than
  * rejected, matching the reference's `z.object` default — so a config file
@@ -223,6 +366,20 @@ export const MagicContextConfigSchema = z.object({
     .describe(
       'Output language for Magic Context\'s generated content and guidance, as a 2-letter ISO 639-1 code (e.g. "tr", "es", "de", "ja", "pt"). Unset = the model mirrors the conversation.',
     ),
+  // FORK（Step 11 / bugfix-batch-20261011）：E 组白名单扩字段。三个子树的默认值
+  // 全部对齐上游（memory on / prompt_surface full / mural off），注册这里的字段
+  // 意味着 config.json 与设置页对它们可写，运行期消费方按各自 Step 接线
+  // （memory.enabled → Step 13 段装配；prompt_surface → Step 12 解析；
+  //  mural.enabled → Step 15 渲染）。
+  memory: MemoryConfigSchema.default({ enabled: true }).describe(
+    "Cross-session project memory settings.",
+  ),
+  // `as const`：缺省对象必须收敛到字面量 "full"，否则工厂/对象的返回类型会被 widening
+  // 成 string，与 z.enum(["full", "light"]) 的输入类型不匹配（tsc 直接拒）。
+  prompt_surface: PromptSurfaceConfigSchema.default({ default: "full" as const }).describe(
+    "Prompt-surface preset routing.",
+  ),
+  mural: MuralConfigSchema.default({ enabled: false }).describe("Experimental mural settings."),
 });
 export type MagicContextConfig = z.infer<typeof MagicContextConfigSchema>;
 

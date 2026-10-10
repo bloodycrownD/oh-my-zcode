@@ -62,11 +62,8 @@ registerHooks({
 
 // 动态 import：resolve 钩子必须先于被测模块的依赖图求值注册。
 const { ConfigKey, ConfigScope } = await import("@zcode/contracts");
-const {
-  ConfigPortImpl,
-  createConfigPort,
-  updateMagicContextInFileConfig,
-} = await import("../dist/config/index.js");
+const { ConfigPortImpl, createConfigPort, updateMagicContextInFileConfig } =
+  await import("../dist/config/index.js");
 const {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   MagicContextConfigSchema,
@@ -108,7 +105,7 @@ test("mapping 1: ConfigKey.MagicContext is the top-level config.json domain key"
   assert.equal(ConfigKey.MagicContext, "magicContext");
 });
 
-test("mapping 2: ConfigValue<\"magicContext\"> is the unknown tail, pinned by the key", () => {
+test('mapping 2: ConfigValue<"magicContext"> is the unknown tail, pinned by the key', () => {
   // contracts 的 `ConfigValue<K>` 是一条以 `unknown` 收尾的条件类型链，
   // `"magicContext"` 走的就是这个兜底（它曾有一个与兜底同值的恒等分支，已删——
   // 见 contracts `src/config/index.ts` 的登记注释）。类型层不可运行时观测，能观测的
@@ -155,7 +152,10 @@ test("mapping 4: config file schema rejects out-of-range magicContext values", (
   );
   // language 是 2 字母 ISO 639-1。
   assert.equal(ZCodeConfigFileSchema.safeParse({ magicContext: { language: "zh" } }).success, true);
-  assert.equal(ZCodeConfigFileSchema.safeParse({ magicContext: { language: "zho" } }).success, false);
+  assert.equal(
+    ZCodeConfigFileSchema.safeParse({ magicContext: { language: "zho" } }).success,
+    false,
+  );
   // 顶层不是对象时整体拒绝（不是「静默忽略」）。
   assert.equal(ZCodeConfigFileSchema.safeParse({ magicContext: 42 }).success, false);
   assert.equal(ZCodeConfigFileSchema.safeParse({ magicContext: "on" }).success, false);
@@ -291,6 +291,120 @@ test("mapping 8: patch creates the file when it does not exist yet", async () =>
   });
 });
 
+// ── Step 11（bugfix-batch-20261011）：E 组扩字段的四层一致性 ──────────────────
+//
+// 漏任何一层 = 运行时被裁：包 schema 不认 → 装载阶段就被 strip；contracts 域不在 →
+// ConfigPort 拿不到；adapters merge 不透 → 高层来源整域被丢；patchMagicContext 不落 →
+// 设置页保存成功但重启即还原。下面四组各钉一层。
+
+test("Step 11 layer 1: the package schema carries the three new subtrees with upstream defaults", () => {
+  // 默认值对齐上游：memory on / prompt_surface full / mural off。
+  assert.deepEqual(DEFAULT_MAGIC_CONTEXT_CONFIG.memory, { enabled: true });
+  assert.deepEqual(DEFAULT_MAGIC_CONTEXT_CONFIG.prompt_surface, { default: "full" });
+  assert.deepEqual(DEFAULT_MAGIC_CONTEXT_CONFIG.mural, { enabled: false });
+
+  // 显式值 + 可选子字段（models / guidance_override_path / tool_descriptions）原样落域。
+  const explicit = MagicContextConfigSchema.parse({
+    memory: { enabled: false },
+    prompt_surface: {
+      default: "light",
+      models: { "zcode/glm-4.6": "light", "zcode/*": "full" },
+      guidance_override_path: "~/guidance.md",
+      tool_descriptions: { ctx_search: "Custom search." },
+    },
+    mural: { enabled: true },
+  });
+  assert.deepEqual(explicit.memory, { enabled: false });
+  assert.equal(explicit.prompt_surface.default, "light");
+  assert.equal(explicit.prompt_surface.guidance_override_path, "~/guidance.md");
+  assert.deepEqual(explicit.mural, { enabled: true });
+
+  // 子域内的未知键被 strip（z.object 默认语义），不是整域拒绝。
+  const withUnknown = MagicContextConfigSchema.parse({
+    memory: { enabled: true, injection_budget_tokens: 4000 },
+  });
+  assert.equal("injection_budget_tokens" in withUnknown.memory, false);
+});
+
+test("Step 11 layer 2: the contracts domain surfaces the new subtrees via ConfigPort", () => {
+  for (const port of [createConfigPort(), createConfigPort({}), new ConfigPortImpl()]) {
+    const domain = port.get(ConfigKey.MagicContext);
+    assert.deepEqual(domain.memory, { enabled: true });
+    assert.deepEqual(domain.prompt_surface, { default: "full" });
+    assert.deepEqual(domain.mural, { enabled: false });
+  }
+});
+
+test("Step 11 layer 3: file parse + merge carry the new subtrees without trimming them", async () => {
+  const { config, diagnostics } = parseConfigFileToRuntimePatchWithDiagnostics({
+    magicContext: {
+      memory: { enabled: false },
+      prompt_surface: { default: "light", models: { "zcode/big": "light" } },
+      mural: { enabled: true },
+    },
+  });
+  assert.deepEqual(diagnostics, []);
+  // 解析后是完整域：新子树原样在场（没被 adapters 的某一层裁掉）。
+  assert.deepEqual(config.magicContext.memory, { enabled: false });
+  assert.deepEqual(config.magicContext.prompt_surface, {
+    default: "light",
+    models: { "zcode/big": "light" },
+  });
+  assert.deepEqual(config.magicContext.mural, { enabled: true });
+
+  // merge 整域透传 + observer 看到的就是含新子树的那一份。
+  const port = createConfigPort({});
+  const seen = [];
+  port.observe().subscribe(ConfigKey.MagicContext, (value) => seen.push(value));
+  port.merge({ magicContext: config.magicContext }, ConfigScope.Project);
+  assert.deepEqual(seen, [config.magicContext]);
+  assert.deepEqual(port.get(ConfigKey.MagicContext).prompt_surface.models, {
+    "zcode/big": "light",
+  });
+
+  // 文件 schema 层对坏 models key 的拒绝（与包 schema 同一份 zod 对象）。
+  assert.equal(
+    ZCodeConfigFileSchema.safeParse({
+      magicContext: { prompt_surface: { models: { "zcode//glm": "full" } } },
+    }).success,
+    false,
+  );
+});
+
+test("Step 11 layer 4: patchMagicContext persists the new subtrees and stays idempotent", async () => {
+  await withTempDir(async (dir) => {
+    const path = join(dir, "config.json");
+    const next = MagicContextConfigSchema.parse({
+      memory: { enabled: false },
+      prompt_surface: { default: "light", models: { "zcode/big": "light" } },
+      mural: { enabled: true },
+    });
+
+    const written = await updateMagicContextInFileConfig(path, next);
+    assert.equal(written.changed, true);
+    const onDisk = await readJson(path);
+    assert.deepEqual(onDisk.magicContext.memory, { enabled: false });
+    assert.deepEqual(onDisk.magicContext.prompt_surface, {
+      default: "light",
+      models: { "zcode/big": "light" },
+    });
+    assert.deepEqual(onDisk.magicContext.mural, { enabled: true });
+
+    // 幂等：同样内容重写不改盘（新子树参与深比较）。
+    assert.equal((await updateMagicContextInFileConfig(path, next)).changed, false);
+    // 真变化 → changed:true（memory 开关翻回去）。
+    assert.equal(
+      (
+        await updateMagicContextInFileConfig(
+          path,
+          MagicContextConfigSchema.parse({ memory: { enabled: true } }),
+        )
+      ).changed,
+      true,
+    );
+  });
+});
+
 // ── mapping 9: hot reload (spec Step 16 acceptance criterion) ─────────────────
 
 /**
@@ -301,7 +415,8 @@ test("mapping 8: patch creates the file when it does not exist yet", async () =>
 function createConfigSource(configPort) {
   return {
     read: () => configPort.get(ConfigKey.MagicContext),
-    subscribe: (listener) => configPort.observe().subscribe(ConfigKey.MagicContext, () => listener()),
+    subscribe: (listener) =>
+      configPort.observe().subscribe(ConfigKey.MagicContext, () => listener()),
   };
 }
 

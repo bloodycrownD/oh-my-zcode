@@ -2049,6 +2049,22 @@ const zhCN: Record<string, string> = {
   "settings.context.failClosedBlocking.label": "故障时阻断请求",
   "settings.context.failClosedBlocking.description":
     "上下文管理无法工作时（存储打开失败、schema 不匹配）直接阻断请求并给出可恢复的错误，而不是静默降级为原样透传。",
+  // FORK（Step 11 / bugfix-batch-20261011）：E 组白名单扩字段的设置面文案。
+  "settings.context.memoryEnabled.label": "跨会话项目记忆",
+  "settings.context.memoryEnabled.description":
+    "开启后，会话中沉淀的项目事实会写入记忆库，在后续会话与 ctx_search 检索中对所有 agent 可见，模型也可用 ctx_memory 主动钉入记忆。关闭后记忆读写与相关指引全部退场；上下文回收（折叠、分舱、ctx_reduce/ctx_expand）不受影响。",
+  "settings.context.promptSurface.label": "提示词面预设",
+  "settings.context.promptSurface.description":
+    "选择 Magic Context 面向 agent 的提示词面完整度：完整版使用完整工具描述，紧凑版使用精简描述、更省 token。",
+  "settings.context.promptSurface.full": "完整版",
+  "settings.context.promptSurface.light": "紧凑版",
+  "settings.context.promptSurfaceGuidancePath.label": "指导段覆盖文件",
+  "settings.context.promptSurfaceGuidancePath.description":
+    "指向一个包含完整指导段文本的文件，读取后替代内置指导段。留空表示使用内置指导段。",
+  "settings.context.promptSurfaceGuidancePath.placeholder": "未配置",
+  "settings.context.muralEnabled.label": "实验性记忆画布",
+  "settings.context.muralEnabled.description":
+    "开启后，未装入上下文预算的项目记忆会渲染成一张确定性的图片随提示词下发。实验特性，默认关闭。",
   "settings.memory.workspaceMemory": "工作区记忆",
   "settings.memoryDescription":
     "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",

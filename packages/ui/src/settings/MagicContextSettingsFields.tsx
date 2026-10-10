@@ -11,14 +11,23 @@
  */
 import type { IntlInstance } from "@/i18n/IntlProvider.js";
 import { Input } from "@/components/ui/input.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.js";
 import { Switch } from "@/components/ui/switch.js";
 import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
 import { SettingsRow } from "@/settings/SettingsPageParts.js";
 import {
   HISTORIAN_MODEL_INHERIT,
   MAGIC_CONTEXT_NUMBER_FIELD_SPECS,
+  PROMPT_SURFACE_PRESETS,
   toPersistedModelId,
   type MagicContextSettingsForm,
+  type PromptSurfacePresetValue,
 } from "@/settings/magicContextSettingsForm.js";
 
 /** historian 是旁路模型，不受会话模型可用性约束，因此不锁定任何候选。 */
@@ -263,6 +272,100 @@ export function MagicContextSettingsFields({
             aria-label={intl.formatMessage({ id: "settings.context.failClosedBlocking.label" })}
             data-testid="magic-context-fail-closed-switch"
             onCheckedChange={(checked) => patch("failClosedBlocking", checked)}
+          />
+        }
+      />
+
+      {/* FORK（Step 11）：记忆面。关掉后 ctx_memory/ctx_search 与记忆注入一起退场，
+          上下文回收面（ctx_reduce/ctx_expand）不受影响——描述里把边界说清。 */}
+      <SettingsRow
+        label={intl.formatMessage({ id: "settings.context.memoryEnabled.label" })}
+        description={intl.formatMessage({ id: "settings.context.memoryEnabled.description" })}
+        control={
+          <Switch
+            checked={form.memoryEnabled}
+            disabled={disabled}
+            aria-label={intl.formatMessage({ id: "settings.context.memoryEnabled.label" })}
+            data-testid="magic-context-memory-enabled-switch"
+            onCheckedChange={(checked) => patch("memoryEnabled", checked)}
+          />
+        }
+      />
+
+      {/* prompt-surface 预设：full = 完整工具描述，light = 紧凑描述。per-model 路由
+          （prompt_surface.models）首版不做编辑入口，按 execute_threshold per-model
+          分支的同款先例经 base 原样带回。 */}
+      <SettingsRow
+        label={intl.formatMessage({ id: "settings.context.promptSurface.label" })}
+        description={intl.formatMessage({ id: "settings.context.promptSurface.description" })}
+        controlLayout="wide"
+        detail={
+          <Select
+            value={form.promptSurfaceDefault}
+            disabled={disabled}
+            onValueChange={(value) =>
+              patch("promptSurfaceDefault", value as PromptSurfacePresetValue)
+            }
+          >
+            <SelectTrigger
+              size="lg"
+              className="w-40 min-w-0 justify-between"
+              aria-label={intl.formatMessage({ id: "settings.context.promptSurface.label" })}
+              data-testid="magic-context-prompt-surface-select"
+            >
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {PROMPT_SURFACE_PRESETS.map((preset) => (
+                <SelectItem
+                  key={preset}
+                  value={preset}
+                  data-testid={`magic-context-prompt-surface-option-${preset}`}
+                >
+                  {intl.formatMessage({ id: `settings.context.promptSurface.${preset}` })}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        }
+        control={null}
+      />
+
+      <SettingsRow
+        label={intl.formatMessage({ id: "settings.context.promptSurfaceGuidancePath.label" })}
+        description={intl.formatMessage({
+          id: "settings.context.promptSurfaceGuidancePath.description",
+        })}
+        controlLayout="wide"
+        detail={
+          <Input
+            type="text"
+            className="w-40"
+            placeholder={intl.formatMessage({
+              id: "settings.context.promptSurfaceGuidancePath.placeholder",
+            })}
+            aria-label={intl.formatMessage({
+              id: "settings.context.promptSurfaceGuidancePath.label",
+            })}
+            value={form.promptSurfaceGuidancePath}
+            disabled={disabled}
+            data-testid="magic-context-prompt-surface-guidance-path"
+            onChange={(event) => patch("promptSurfaceGuidancePath", event.target.value)}
+          />
+        }
+        control={null}
+      />
+
+      <SettingsRow
+        label={intl.formatMessage({ id: "settings.context.muralEnabled.label" })}
+        description={intl.formatMessage({ id: "settings.context.muralEnabled.description" })}
+        control={
+          <Switch
+            checked={form.muralEnabled}
+            disabled={disabled}
+            aria-label={intl.formatMessage({ id: "settings.context.muralEnabled.label" })}
+            data-testid="magic-context-mural-enabled-switch"
+            onCheckedChange={(checked) => patch("muralEnabled", checked)}
           />
         }
       />

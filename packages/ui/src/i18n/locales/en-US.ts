@@ -2181,6 +2181,22 @@ const enUS: Record<string, string> = {
   "settings.context.failClosedBlocking.label": "Block requests on failure",
   "settings.context.failClosedBlocking.description":
     "When context management cannot operate (storage open failure, schema fence mismatch), block the request with a loud recovery error instead of silently degrading to pass-through.",
+  // FORK (Step 11 / bugfix-batch-20261011): settings copy for the E-group whitelist additions.
+  "settings.context.memoryEnabled.label": "Cross-session project memory",
+  "settings.context.memoryEnabled.description":
+    "When on, project facts settled during sessions are written to the memory store, visible to every agent in later sessions and in ctx_search, and the model can pin facts with ctx_memory. Turning it off retires all memory reads, writes and guidance; context reclamation (folding, compartments, ctx_reduce/ctx_expand) keeps working.",
+  "settings.context.promptSurface.label": "Prompt-surface preset",
+  "settings.context.promptSurface.description":
+    "Completeness of the agent-facing Magic Context surface: the full preset serves complete tool descriptions, the light preset serves compact ones and spends fewer tokens.",
+  "settings.context.promptSurface.full": "Full",
+  "settings.context.promptSurface.light": "Light",
+  "settings.context.promptSurfaceGuidancePath.label": "Guidance override file",
+  "settings.context.promptSurfaceGuidancePath.description":
+    "Path to a file whose contents replace the built-in guidance section. Empty means the built-in guidance is used.",
+  "settings.context.promptSurfaceGuidancePath.placeholder": "Not configured",
+  "settings.context.muralEnabled.label": "Experimental memory mural",
+  "settings.context.muralEnabled.description":
+    "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt. Experimental; off by default.",
   "settings.memory.workspaceMemory": "Workspace Memory",
   "settings.memoryDescription":
     "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",
@@ -4597,8 +4613,7 @@ const enUS: Record<string, string> = {
   "chat.emptyResult.title": "No visible output",
   "chat.emptyResult.description":
     "This task finished without any chat content. It may have been stopped before the model produced a response.",
-  "chat.placeholder.newTask":
-    "Ask omz anything, @ to add context, / for commands or capabilities",
+  "chat.placeholder.newTask": "Ask omz anything, @ to add context, / for commands or capabilities",
   "chat.placeholder.newTaskMobile": "Ask omz anything…",
   "chat.placeholder.followUpAsk": "Ask for follow-up changes",
   "chat.placeholder.followUpQueue": "Keep typing to queue follow-up changes",

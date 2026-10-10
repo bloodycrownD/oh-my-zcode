@@ -29,6 +29,19 @@ import {
  * `fallback_models`、`variant`、`two_pass` 等在首版不暴露编辑入口，
  * 但它们会被原样带回写盘，不会被表单抹掉。
  *
+ * FORK（Step 11 / bugfix-batch-20261011）：随 E 组白名单扩字段新增 memory /
+ * prompt_surface / mural 三个子树的可编辑面：
+ *   - `memoryEnabled` ↔ `memory.enabled`（默认 true，对齐上游）；
+ *   - `muralEnabled` ↔ `mural.enabled`（默认 false；mural 渲染本体随后续批次接线，
+ *     这里只落配置面）；
+ *   - `promptSurfaceDefault` ↔ `prompt_surface.default`（full/light 预设）；
+ *   - `promptSurfaceGuidancePath` ↔ `prompt_surface.guidance_override_path`
+ *     （空串 = 未配置，写盘时删键而不是写空串——schema 的 refine 拒空白串）。
+ * `prompt_surface.models` 与 `prompt_surface.tool_descriptions` **刻意不做编辑 UI**，
+ * 按 `execute_threshold_percentage` per-model 分支的同款先例处理：读侧不解析、
+ * 写侧经 base 原样带回（见下方 build 的 spread），设置页对它们不可见的键不会
+ * 被一次保存抹掉。
+ *
  * 数值字段的 min/max **不在这里复述**：本文件下方的 `MAGIC_CONTEXT_NUMBER_FIELD_SPECS`
  * 是 UI 侧唯一副本，i18n description 也不写死数字（改了 schema 时文案不会跟着变）。
  */
@@ -55,7 +68,23 @@ export interface MagicContextSettingsForm {
   historianModel: string;
   smartDrops: boolean;
   failClosedBlocking: boolean;
+  /** FORK（Step 11）：跨会话项目记忆总开关（`memory.enabled`）。 */
+  memoryEnabled: boolean;
+  /** FORK（Step 11）：prompt-surface 预设（`prompt_surface.default`）。 */
+  promptSurfaceDefault: PromptSurfacePresetValue;
+  /**
+   * FORK（Step 11）：prompt-surface guidance 覆盖文件路径
+   * （`prompt_surface.guidance_override_path`）。空串 = 未配置。
+   */
+  promptSurfaceGuidancePath: string;
+  /** FORK（Step 11）：实验性 mural 开关（`mural.enabled`）。 */
+  muralEnabled: boolean;
 }
+
+/** 与包内 `PromptSurfaceConfigSchema.default` 同值的两个预设。 */
+export type PromptSurfacePresetValue = "full" | "light";
+
+export const PROMPT_SURFACE_PRESETS: readonly PromptSurfacePresetValue[] = ["full", "light"];
 
 type JsonRecord = Record<string, unknown>;
 
@@ -107,6 +136,12 @@ export function magicContextSettingsFormFromConfig(
   if (!isRecord(config)) return fallback;
   const historian = isRecord(config.historian) ? config.historian : {};
   const historianModel = readHistorianModel(historian.model, fallback.historianModel);
+  // FORK（Step 11）：三个新子树的读侧。schema 的 `.default()` 保证 ConfigPort 与
+  // 文件装载路径给出的都是完整域，这里的 isRecord/类型守卫只是「读失败兜底」与
+  // 「旧 CLI 没有这些字段」时的防御，语义与上方 historian 读侧一致。
+  const memory = isRecord(config.memory) ? config.memory : {};
+  const promptSurface = isRecord(config.prompt_surface) ? config.prompt_surface : {};
+  const mural = isRecord(config.mural) ? config.mural : {};
 
   return {
     enabled: typeof config.enabled === "boolean" ? config.enabled : fallback.enabled,
@@ -126,7 +161,31 @@ export function magicContextSettingsFormFromConfig(
       typeof config.fail_closed_blocking === "boolean"
         ? config.fail_closed_blocking
         : fallback.failClosedBlocking,
+    memoryEnabled: typeof memory.enabled === "boolean" ? memory.enabled : fallback.memoryEnabled,
+    promptSurfaceDefault: readPromptSurfaceDefault(
+      promptSurface.default,
+      fallback.promptSurfaceDefault,
+    ),
+    // guidance 覆盖路径：空串即「未配置」；非字符串（旧域/坏值）按未配置处理，
+    // 不清空用户文件里的值——写侧只在该字段为空时删键。
+    promptSurfaceGuidancePath:
+      typeof promptSurface.guidance_override_path === "string"
+        ? promptSurface.guidance_override_path
+        : "",
+    muralEnabled: typeof mural.enabled === "boolean" ? mural.enabled : fallback.muralEnabled,
   };
+}
+
+/**
+ * `prompt_surface.default` 读侧：只认 schema 的两个字面量，其它值（旧配置里的
+ * 手写串、将来的第三个预设）回落到 fallback，绝不把一个无法解析的值显示成选中态
+ * ——那会让用户以为某个预设生效而实际走的是 default。
+ */
+function readPromptSurfaceDefault(
+  value: unknown,
+  fallback: PromptSurfacePresetValue,
+): PromptSurfacePresetValue {
+  return value === "full" || value === "light" ? value : fallback;
 }
 
 /**
@@ -141,6 +200,11 @@ export function magicContextSettingsFormFromConfig(
  * 第三条对「表里还有 per-model 键」的情形不适用：`execute_threshold_tokens` 的
  * `default` 在 schema 里可选，留空时的正确处置是**只摘 `default` 分支**（见下），
  * 而不是删掉整张 per-model 表。
+ *
+ * FORK（Step 11）：三个新子树的写侧同样以 base 为底展开（`...previousXxx`），
+ * 因此 `prompt_surface.models` / `prompt_surface.tool_descriptions` 这些设置页
+ * 不可见的键原样带回；`guidance_override_path` 空串时删键（schema 的 refine 拒
+ * 空白串，写空串等于一次必然 -32602 的保存）。
  */
 export function buildMagicContextConfigFromForm(
   base: unknown,
@@ -150,6 +214,9 @@ export function buildMagicContextConfigFromForm(
   const previousThreshold = previous.execute_threshold_percentage;
   const previousTokens = previous.execute_threshold_tokens;
   const previousCacheTtl = previous.cache_ttl;
+  const previousMemory = isRecord(previous.memory) ? previous.memory : {};
+  const previousPromptSurface = isRecord(previous.prompt_surface) ? previous.prompt_surface : {};
+  const previousMural = isRecord(previous.mural) ? previous.mural : {};
 
   const next: JsonRecord = {
     ...previous,
@@ -165,6 +232,11 @@ export function buildMagicContextConfigFromForm(
         : form.cacheTtl,
     smart_drops: form.smartDrops,
     fail_closed_blocking: form.failClosedBlocking,
+    // FORK（Step 11）：三个新子树。每一项都以 base 的同名子树为底展开，键序因此
+    // 与读回的域一致——「零改动保存」的 stringify 比较才不会被无谓地判成 dirty。
+    memory: { ...previousMemory, enabled: form.memoryEnabled },
+    mural: { ...previousMural, enabled: form.muralEnabled },
+    prompt_surface: { ...previousPromptSurface, default: form.promptSurfaceDefault },
   };
 
   // `execute_threshold_tokens` 的 schema 是 `{ default?: number, [model]: number }`：
@@ -219,6 +291,19 @@ export function buildMagicContextConfigFromForm(
   } else {
     next.historian = { ...previousHistorian, model };
   }
+
+  // FORK（Step 11）：guidance 覆盖路径。schema 是 `z.string().refine(非空白).optional()`
+  // ——空串会被拒，所以「用户清空了输入框」的正确处置是**删键**（回到未配置），
+  // 与 protectedTokens 的留空删键同款；非空时照字面写（trim 后的值，前后空白在
+  // 路径语义里没有意义，且留着会让 refine 之外的可读性变差）。
+  const promptSurface = isRecord(next.prompt_surface) ? next.prompt_surface : {};
+  const guidancePath = form.promptSurfaceGuidancePath.trim();
+  if (guidancePath.length === 0) {
+    delete promptSurface.guidance_override_path;
+  } else {
+    promptSurface.guidance_override_path = guidancePath;
+  }
+  next.prompt_surface = promptSurface;
 
   return next;
 }

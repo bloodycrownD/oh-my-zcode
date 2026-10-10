@@ -48,6 +48,10 @@ import {
  * FORK（impl-historian-inherit）：`historianModel` 的缺省是 `"inherit"` 而不是 `""`
  * ——CLI 侧缺省即继承会话模型（分舱折叠不因未配置而静默关闭），`""` 现在只表示
  * 「显式关闭」。
+ *
+ * FORK（Step 11）：memory/prompt_surface/mural 四个新字段的缺省同样与
+ * `MagicContextConfigSchema.parse({})` 一致（memory on / preset full / 无覆盖路径 /
+ * mural off）。
  */
 const DEFAULT_FORM: MagicContextSettingsForm = {
   enabled: true,
@@ -59,6 +63,10 @@ const DEFAULT_FORM: MagicContextSettingsForm = {
   historianModel: HISTORIAN_MODEL_INHERIT,
   smartDrops: false,
   failClosedBlocking: true,
+  memoryEnabled: true,
+  promptSurfaceDefault: "full",
+  promptSurfaceGuidancePath: "",
+  muralEnabled: false,
 };
 
 /** 输入类字段的防抖：等用户停手再写盘，避免每个按键一次整域 RPC。 */
