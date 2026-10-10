@@ -19,6 +19,7 @@ import { buildEnvInfoSection, buildGitSystemContextSection } from "./sections/en
 import { buildSkillsSection } from "./sections/skills.js";
 import { buildRequestUserContextSection } from "./sections/request-user-context.js";
 import { buildCurrentDateSection } from "./sections/current-date.js";
+import { buildMagicContextSectionEntry } from "./sections/magic-context.js";
 import { buildMemorySection } from "./sections/memory.js";
 import { buildDesktopContextSection } from "./sections/desktop.js";
 import {
@@ -96,6 +97,12 @@ export class ContextBuilder {
       );
     }
     const isWorkflowActor = workflowActor !== undefined;
+    // Magic Context agent prompt surface (Step 13). Its presence owns the memory
+    // vocabulary for this session, which suppresses both native file-memory surfaces
+    // below — see sections/magic-context.ts for why two memory vocabularies cannot
+    // coexist in one system prompt.
+    const magicContextSection = buildMagicContextSectionEntry(this.config.magicContextSection);
+    const magicContextOwnsMemoryVocabulary = magicContextSection !== null;
 
     // 1. CLI / product prefix. Keep this as the short leading identity block.
     // 「You are ZCode, an interactive coding agent」对一个
@@ -162,8 +169,16 @@ export class ContextBuilder {
         sections.push(sessionGuidanceSection);
       }
 
-      // Memory
-      if (this.config.memoryRoot) {
+      // Magic Context agent prompt surface (Step 13). Mutually exclusive with the
+      // native file-based Memory section below — see sections/magic-context.ts for
+      // why two memory vocabularies cannot coexist in one system prompt.
+      if (magicContextSection) {
+        sections.push(magicContextSection);
+      }
+
+      // Memory (file-based MEMORY.md). Suppressed while the magic-context section is
+      // served: that section owns the memory vocabulary for this session.
+      if (this.config.memoryRoot && !magicContextOwnsMemoryVocabulary) {
         const memorySection = buildMemorySection(this.config.memoryRoot);
         if (memorySection) {
           sections.push(memorySection);
@@ -203,7 +218,12 @@ export class ContextBuilder {
     // 5. Meta user context: workspace instructions/project memory first, date second.
     const requestUserContextSection = buildRequestUserContextSection({
       userInstructions: this.config.userInstructions,
-      memoryIndexContent: this.config.memoryIndexContent,
+      // 同一个互斥：magic-context 段在场时不把 MEMORY.md 索引塞进 meta_user。索引是
+      // **数据**不是指令，单独出现会让模型看到一份「这里有持久记忆」的清单却不知道
+      // 怎么写新的——半套指令比没有更糟。
+      memoryIndexContent: magicContextOwnsMemoryVocabulary
+        ? undefined
+        : this.config.memoryIndexContent,
       memoryRoot: this.config.memoryRoot,
     });
     if (requestUserContextSection) {

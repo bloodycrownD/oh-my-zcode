@@ -36,6 +36,7 @@ export type ContextSource =
   | "tools" // 工具定义
   | "request_user_context" // request-level user context provider-visible 组合块
   | "memory" // 长期 memory read path
+  | "magic_context" // magic-context agent 提示词段（Step 13，与原生 memory 段互斥）
   | "current_date" // 当前日期
   | "custom_system_prompt" // 自定义 stable system body
   | "workflow_actor_identity" // 动态工作流子代理身份：契约 + persona 叠加
@@ -109,6 +110,18 @@ export interface ContextBuilderConfig {
   projectContext?: ProjectContext;
   memoryRoot?: string;
   memoryIndexContent?: string;
+  /**
+   * Step 13：已装配好的 `## Magic Context` 段文本（magic-context 的 agent 提示词）。
+   *
+   * 在场即注入，并且**原生 `# Memory` 段退场**——两套记忆指令互相矛盾（见
+   * `sections/magic-context.ts` 文件头的互斥裁定）。装配权在 bootstrap 的 resolver
+   * （`runtime/helpers/magic-context-prompt-section.ts` 的端口），core 只负责落位与
+   * token 记账，因此这里是**成品字节**而不是配置域。
+   *
+   * 缺席 = 本会话没有 magic-context 提示词段（flag 关 / 装配失败 / 段装配返回 null），
+   * 原生 `# Memory` 段按既有规则照常注入。
+   */
+  magicContextSection?: string;
   skills?: SkillLoadOutcome;
   agentProfiles?: readonly AgentProfile[];
   embeddedSearchEnabled?: boolean;

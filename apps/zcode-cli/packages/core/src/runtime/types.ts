@@ -20,6 +20,7 @@ import type {
 import type { EffectiveModelSelectionResult } from "@zcode/shared/model-selection";
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
 import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
+import type { MagicContextPromptSectionResolver } from "./helpers/magic-context-prompt-section.js";
 import type {
   CollaborationMode,
   EmbeddedSearchBackend,
@@ -392,6 +393,14 @@ export interface AgentRuntimeDeps {
    * 一次判空之外什么都不做（T-M8）。
    */
   magicContextTurnTransform?: MagicContextTurnTransform;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 13）：`## Magic Context` 段的装配入口
+   * （同步）。缺席 = 本会话没有 magic-context 提示词段，context builder 回落到原生
+   * `# Memory` 段（互斥裁定见 `context/sections/magic-context.ts`）。bootstrap 在
+   * `features.magicContext` 开着时注入；端口形状见
+   * `runtime/helpers/magic-context-prompt-section.ts`。
+   */
+  magicContextPromptSection?: MagicContextPromptSectionResolver;
   /**
    * FORK（bugfix-batch-20261011 / Step 6）：内置子智能体模型 override 的
    * per-spawn 活读源（bootstrap 读 agents-state.json，带内容缓存）。每次 spawn

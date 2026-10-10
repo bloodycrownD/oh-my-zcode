@@ -179,6 +179,14 @@ export {
   isMagicContextWireDebugEnabled,
   runMagicContextTurnTransform,
 } from "./runtime/helpers/magic-context-turn-transform.js";
+// Step 13：`## Magic Context` agent 提示词段的装配端口。与上一条同构——bootstrap 是唯一
+// 构造方（且只在 `features.magicContext` 打开时构造），core 这侧只判空并把成品字节放进
+// section 栈；段在场即原生 `# Memory` 段退场（互斥裁定见 context/sections/magic-context.ts）。
+export type {
+  MagicContextPromptSectionInput,
+  MagicContextPromptSectionResolver,
+} from "./runtime/helpers/magic-context-prompt-section.js";
+export { resolveMagicContextPromptSection } from "./runtime/helpers/magic-context-prompt-section.js";
 // D-6 的旁路原语（Step 24 接线）：historian 的 sidecar model request 走**同一条**
 // 流消费路径，所以「provider 到底提交了哪个 content block」由这一份原语判定，
 // 而不是在 historian 侧再写一份。本文件是它被留下的理由，**不许**跟着压缩移除一起删。

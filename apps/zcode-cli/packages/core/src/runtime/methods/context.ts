@@ -22,6 +22,7 @@ import {
   normalizeReadFileStateMtimeMs,
 } from "../../tool/read-file-state.js";
 import { resolveEnabledProjectMemoryRoot } from "../helpers/project-memory.js";
+import { resolveMagicContextPromptSection } from "../helpers/magic-context-prompt-section.js";
 import { buildContextHistoryEntries } from "./context-history-entries.js";
 import { resolveRuntimeEmbeddedSearchEnabled } from "./embedded-search-branch.js";
 import { getContextSourceShellDisplayName } from "./session-shell-environment.js";
@@ -107,6 +108,11 @@ export function createContextBuilderFromSnapshot(
     // 执行模型属于 model step，不写回可复用的 Context Source。
     this.config.envInfo = envInfo;
   }
+  // FORK（bugfix-batch-20261011 / Step 13）：`## Magic Context` 段。装配在 bootstrap
+  // 的 resolver 里做（core 不得 import 包），这里只提供活值输入并把结果交给 builder
+  // 落位。子智能体走另一条 builder 路径（`SubagentContextBuilder`，段在那里以
+  // `subagentMode` 分支落位——只保留 §N§ 机制），因此这里算一次就够。
+  const magicContextSection = resolveMagicContextPromptSection(this, options.model);
   if (this.config.subagentContext) {
     return createSubagentContextBuilder({
       agentPrompt: this.config.subagentContext.agentPrompt,
@@ -116,6 +122,7 @@ export function createContextBuilderFromSnapshot(
       skillMetadataBudget: this.config.skillMetadataBudget,
       skills: this.skillLoadOutcome,
       userInstructions: this.config.subagentContext.userInstructions,
+      ...(magicContextSection === null ? {} : { magicContextSection }),
     });
   }
 
@@ -138,6 +145,7 @@ export function createContextBuilderFromSnapshot(
     language: this.config.language,
     outputStyle: this.config.outputStyle,
     guidanceToolNames: this.getTools(options.model).map((tool) => tool.name),
+    ...(magicContextSection === null ? {} : { magicContextSection }),
   };
 
   return createContextBuilder(contextConfig).setToolRegistry(this.registry);

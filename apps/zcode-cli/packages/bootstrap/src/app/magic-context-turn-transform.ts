@@ -113,6 +113,7 @@
 
 import type {
   Logger,
+  MagicContextPromptSectionResolver,
   MagicContextTurnTransform,
   MagicContextTurnTransformInput,
   MagicContextTurnTransformResult,
@@ -136,7 +137,9 @@ import {
   StorageBusyRefusalError,
   UnmanagedOverWindowError,
   UnresolvedHistoryBoundaryError,
+  buildMagicContextSection,
   createConfigBridge,
+  createPromptSurfaceRuntime,
   createRawMessageProvider,
   createScheduler as createPackageScheduler,
   createTagger,
@@ -151,6 +154,7 @@ import {
   isTransientSqliteError,
   isTransientStorageOpenError,
   loadPersistedUsage,
+  MagicContextConfigSchema,
   noteEntry,
   openDatabase,
   projectRuntimeEntries,
@@ -1062,6 +1066,97 @@ export async function openMagicContextStorageWithBusyRetry(
   throw new Error("[magic_context] storage open retry exhausted without a verdict");
 }
 
+/**
+ * FORK（bugfix-batch-20261011 / Step 13，D1 的宿主侧装配层）：
+ * `## Magic Context` 段的 resolver。
+ *
+ * 这个模块是 bootstrap 里**唯一** import magic-context 包的地方（`features.magicContext`
+ * 关时它整棵都不被动态 import），所以 11 参装配只能落在这里——core 的 context builder
+ * 是同步的且不许 import 包，端口形状见 core
+ * `runtime/helpers/magic-context-prompt-section.ts`。
+ *
+ * 三个装配决定，逐条给出依据：
+ *
+ * ① **每次调用现读配置**（而不是闭包缓存一份）。调用点是 core 的
+ *    `createContextBuilderFromSnapshot`，它在每次 context 前缀重算时重建，因此参数对象
+ *    不可能过期；缓存配置域反而会让设置页改 preset/memory 开关后要等一个额外的失效点。
+ *
+ * ② **dreamer / temporal / caveman 三臂恒 false**，各自有裁定出处：dreamer=N3（ZCode
+ *    agent 进程无 cron 宿主）；temporal 与 caveman 在 fork 里没有任何 `deps.
+ *    experimentalTemporalAwareness` / `deps.cavemanTextCompression` 供给（transform 的
+ *    这两个字段 bootstrap 从不填，恒 undefined），开着就是在提示词里描述不存在的管道。
+ *    三个都是 `buildMagicContextSection` 的默认值，这里显式传 false 是为了让「不传」与
+ *    「传 false」在代码里不可区分地成立——注释即裁定。
+ *
+ * ③ **guidance/preset 每次现解**，不做 epoch 缓存：端口签名没有 sessionId（core 不该
+ *    为了一个缓存键把会话身份递给 prompt 装配），而 context 前缀重算本来就不是热路径。
+ *    上游的 epoch 缓存服务的是「system hook 与 Rust adapter 在同一 epoch 内看到同一份
+ *    字节」——fork 没有 Rust adapter，这条理由不存在；guidance 文件的用户编辑因此直接热读
+ *    （重复告警由 prompt-surface runtime 自己的去重集合收口，不会刷日志）。
+ */
+export function createMagicContextPromptSectionResolver(options: {
+  configPort?: ConfigPort;
+  /** 无配置口时的静态域（S19b 遗留路径，生产路径恒有 configPort）。 */
+  configDomain?: unknown;
+  logger?: Logger;
+}): MagicContextPromptSectionResolver {
+  const logger = options.logger;
+  const warn = (message: string): void => {
+    logger?.warn("Magic context prompt surface warning", {
+      module: "bootstrap",
+      event: "magic_context.prompt_surface_warning",
+      reason: message,
+    });
+  };
+  const promptSurfaceRuntime = createPromptSurfaceRuntime({ warn });
+  let lastConfigNotice: string | null = null;
+
+  const readConfig = (): MagicContextConfig => {
+    const raw = options.configPort
+      ? options.configPort.get(ConfigKey.MagicContext)
+      : options.configDomain;
+    const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
+    if (parsed.success) return parsed.data;
+    // 坏域按 schema 缺省走，并在**同一条坏因**上只记一次：context 前缀每次重算都会
+    // 走到这里，逐次 warn 会把日志刷成噪声。
+    const reason = parsed.error.issues.map((issue) => issue.message).join("; ");
+    if (lastConfigNotice !== reason) {
+      lastConfigNotice = reason;
+      logger?.warn("Magic context config rejected; prompt surface uses schema defaults", {
+        module: "bootstrap",
+        event: "magic_context.prompt_surface_config_defaulted",
+        detail: reason,
+      });
+    }
+    return DEFAULT_MAGIC_CONTEXT_CONFIG;
+  };
+
+  return (input) => {
+    const config = readConfig();
+    // guidance/preset 每次现解：guidance 覆盖文件按用户编辑热读（epoch 缓存的等价物是
+    // prompt-surface runtime 自己的告警去重），context 前缀重算本来就不是热路径。
+    const selection = promptSurfaceRuntime.resolveGuidance(config.prompt_surface, input.modelKey);
+
+    return buildMagicContextSection(
+      null,
+      0,
+      input.ctxReduceCallable,
+      // ② 三臂恒 false（N3 + 无供给），见文件头。
+      false,
+      false,
+      false,
+      input.subagentMode,
+      input.language,
+      // `memory.enabled`（Step 11 白名单 / 上游默认 on）的**运行期消费点**：false 时段
+      // 落 MEMORY_GUIDANCE 与 MEMORY_GUIDANCE_LIGHT。core 不持这一位，本行是它唯一的
+      // 读者；`<project-memory>` 那半边由包内 transform 的 `deps.memoryConfig` 消费。
+      config.memory.enabled,
+      selection.preset,
+      selection.primaryOverride,
+    );
+  };
+}
+
 export async function createMagicContextTurnTransform(
   options: MagicContextTurnTransformOptions,
 ): Promise<MagicContextTurnTransform | undefined> {
@@ -1392,6 +1487,18 @@ function applyConfigToDeps(deps: TransformDeps, config: MagicContextConfig): voi
   // 所以设置页改 preset / models / tool_descriptions / guidance_override_path 都在下一
   // 个 pass 生效，不需要重建 transform。
   deps.promptSurface = config.prompt_surface;
+  // FORK（bugfix-batch-20261011 / Step 13）：`memory.enabled` 的 transform 侧消费点。
+  // 包内 transform 用它决定 `<project-memory>` 注不注入（`memoryEnabled: deps.memoryConfig?.enabled`，
+  // 见包内 transform.ts 的 m0/m1 装配）以及 historian 分舱的 Issue #44 自动提升门。
+  // 此前该字段从未被填过 → 恒 undefined → 记忆注入面在运行期是**关**的，这正是本批缺陷④
+  // 「只接了压缩半边」的现场症状之一。另两个字段（injectionBudgetTokens / autoPromote）
+  // 上游缺省 4000 / true，本 fork 的白名单不登记它们（Step 11 已裁定：只落有消费者的
+  // 字段），因此按上游缺省直填并在此登记，不开新的配置入口。
+  deps.memoryConfig = {
+    enabled: config.memory.enabled,
+    injectionBudgetTokens: MEMORY_INJECTION_BUDGET_TOKENS_DEFAULT,
+    autoPromote: MEMORY_AUTO_PROMOTE_DEFAULT,
+  };
 }
 
 function buildTransformDeps(
@@ -1450,6 +1557,14 @@ function buildTransformDeps(
       : { historianMaxOutputTokens: historian.historianMaxOutputTokens }),
     cacheTtlConfig: config.cache_ttl,
     ...(config.protected_tokens === undefined ? {} : { protectedTokens: config.protected_tokens }),
+    // FORK（bugfix-batch-20261011 / Step 13）：记忆半边运行期开关。`applyConfigToDeps`
+    // 会在每次配置变更时原地改写这三个字段；这里给装配期的初值。三个字段的语义与缺省
+    // 依据见 applyConfigToDeps 处的登记。
+    memoryConfig: {
+      enabled: config.memory.enabled,
+      injectionBudgetTokens: MEMORY_INJECTION_BUDGET_TOKENS_DEFAULT,
+      autoPromote: MEMORY_AUTO_PROMOTE_DEFAULT,
+    },
     smartDrops: config.smart_drops,
     historyBudgetPercentage: config.history_budget_percentage,
     executeThresholdPercentage: config.execute_threshold_percentage,
@@ -1471,8 +1586,8 @@ function buildTransformDeps(
     // 操作数。因此这里折进配置身份是安全的，且必须折：
     // preset 从 full 翻到 light 时 ctx_* 四个工具的描述整段换掉，providers 侧的
     // `tools` 数组字节随之改变，m[0] 的 baseline 与它记录的指纹必须能在审计里对上；
-    // 继续回空串等于「本条路径的 tool-set 恒不变」的谎言（Step 12 之前这还算诚实——
-    // `deps.promptSurface` 是 undefined、包内也不读它；现在它真的进 deps 了）。
+    // 继续回空串等于「本条路径的 tool-set 恒不变」的谎言（Step 11 之前这还算诚实——
+    // `deps.promptSurface` 是 undefined、包内也不读它；Step 12 起它真的进 deps 了）。
     getToolSetHash: () => promptSurfaceConfigIdentity(config.prompt_surface),
     promptSurface: config.prompt_surface,
   } satisfies TransformDeps;
@@ -1498,6 +1613,24 @@ function buildTransformDeps(
  * provider 的注册范围问题见下面 `ensureProviderRegistered` 的注释。
  */
 const HISTORIAN_SETTLE_TIMEOUT_MS = 60_000;
+
+/**
+ * FORK（bugfix-batch-20261011 / Step 13）：`memory.injection_budget_tokens` 的缺省。
+ *
+ * 上游 `config/schema/magic-context.ts` 的 memory 子树上这个字段缺省 4000（min 500,
+ * max 20000）；本 fork 的 E 组白名单不登记它（Step 11 裁定：只落有消费者的字段——本批
+ * 没有任何配置入口要调它），因此按上游缺省直填。若将来要开放这个旋钮，改这里 +
+ * `MemoryConfigSchema` 两处，且必须同步这里的注释说明「为什么是同一个数」。
+ */
+const MEMORY_INJECTION_BUDGET_TOKENS_DEFAULT = 4000;
+
+/**
+ * FORK（bugfix-batch-20261011 / Step 13）：`memory.auto_promote` 的缺省。
+ *
+ * 上游缺省 true（Issue #44：没有它 memories 表永远是空的）。Step 8 已恢复 fork 的
+ * `promoteSessionFactsDurable` 写入链，因此这里必须是 true 而不是「先关着省事」。
+ */
+const MEMORY_AUTO_PROMOTE_DEFAULT = true;
 
 async function settleInFlightHistorian(sessionId: string): Promise<void> {
   const active = getActiveCompartmentRun(sessionId);

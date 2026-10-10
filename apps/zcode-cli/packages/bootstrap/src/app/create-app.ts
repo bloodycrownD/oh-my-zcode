@@ -985,6 +985,23 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       automationPort: options.automationPort,
       // 端口在场即注册门：缺席（默认）时 turn-loop 的插入点是纯判空。
       ...(magicContextTurnTransform === undefined ? {} : { magicContextTurnTransform }),
+      // FORK（bugfix-batch-20261011 / Step 13，D1）：`## Magic Context` agent 提示词段
+      // 的装配端口。与 turn transform 同一个门（`magicContextAssembly` 在场即
+      // `features.magicContext` 开着），同一个模块唯一的 import 点——core 的 context
+      // builder 是同步的且不许静态 import 包，所以 11 参装配只能由这里做。
+      // 缺席时 context builder 回落原生 `# Memory` 段（互斥裁定，
+      // 见 core `context/sections/magic-context.ts`）。
+      ...(magicContextAssembly === undefined
+        ? {}
+        : {
+            magicContextPromptSection: magicContextAssembly.createMagicContextPromptSectionResolver(
+              {
+                configPort: configResult.configPort,
+                configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
+                logger,
+              },
+            ),
+          }),
       // FORK（bugfix-batch-20261011 / Step 6）：子智能体模型 override 的
       // per-spawn 活读源（见上方创建处注释）。deps 经 createDefaultSubagentPort
       // 传进 core subagent port，每次 spawn 解析 profile 前调用。

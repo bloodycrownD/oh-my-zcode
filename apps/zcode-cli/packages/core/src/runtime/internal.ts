@@ -54,6 +54,7 @@ import type { AgentRuntimeTurnMethods } from "./internal-turn-methods.js";
 import type { AgentRuntimeHookMethods } from "./internal-hook-methods.js";
 import type { ProjectMemoryExtractionScheduler } from "./helpers/project-memory-extraction.js";
 import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
+import type { MagicContextPromptSectionResolver } from "./helpers/magic-context-prompt-section.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
 
 export interface AgentRuntimeInternal
@@ -95,6 +96,8 @@ browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   memoryExtractionScheduler?: ProjectMemoryExtractionScheduler;
   /** Step 19b：缺席即 `features.magicContext` 关闭；turn-loop 只判空。 */
   magicContextTurnTransform?: MagicContextTurnTransform;
+  /** Step 13（D1）：缺席即 `features.magicContext` 关闭或装配失败；context builder 只判空。 */
+  magicContextPromptSection?: MagicContextPromptSectionResolver;
   contextSourcePort?: ContextSourcePort;
   skillPort?: SkillPort;
   mcpPort?: McpPort;

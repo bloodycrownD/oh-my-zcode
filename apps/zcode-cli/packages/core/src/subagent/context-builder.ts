@@ -10,6 +10,7 @@ import {
 } from "../context/index.js";
 import { buildCliPrefixSection } from "../context/sections/cli-prefix.js";
 import { buildCurrentDateSection } from "../context/sections/current-date.js";
+import { buildMagicContextSectionEntry } from "../context/sections/magic-context.js";
 import { buildRequestUserContextSection } from "../context/sections/request-user-context.js";
 import { buildSkillsSection } from "../context/sections/skills.js";
 import { estimateTokens } from "../context/utils.js";
@@ -23,6 +24,13 @@ export interface SubagentContextBuilderConfig {
   skillMetadataBudget?: number;
   skills?: ContextBuilderConfig["skills"];
   userInstructions?: ContextBuilderConfig["userInstructions"];
+  /**
+   * Step 13：已装配好的 `## Magic Context` 段（子智能体档：只保留 §N§ + ctx_reduce
+   * 机制）。子代理同样注册 ctx 工具，因此同样需要知道「盖过章的东西去了哪、没有 tool
+   * result 就不能编」这两条；上游用 `buildMagicContextSection` 的 subagentMode 分支
+   * 产出这段。装配权在 bootstrap，见 `runtime/helpers/magic-context-prompt-section.ts`。
+   */
+  magicContextSection?: string;
 }
 
 const EPHEMERAL_CACHE_CONTROL = { type: "ephemeral" as const };
@@ -138,6 +146,13 @@ function buildSubagentContextSections(config: SubagentContextBuilderConfig): Con
       })}`,
     }),
   );
+
+  // Step 13：magic-context 子智能体档段。放在 request-user-context 之前——它是 agent
+  // 行为契约（怎么对待桌面上的 §N§ 与工具结果），不该被「以下是工作区说明」隔开。
+  const magicContextEntry = buildMagicContextSectionEntry(config.magicContextSection);
+  if (magicContextEntry) {
+    sections.push(magicContextEntry);
+  }
 
   const requestUserContextSection = buildRequestUserContextSection({
     userInstructions: config.userInstructions,

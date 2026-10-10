@@ -123,6 +123,7 @@ import { InMemoryRuntimeTaskRegistry, type RuntimeTaskRegistry } from "../runtim
 import type { ChildClientPortsContext, ClientFacingPorts } from "./helpers/child-client-ports.js";
 import type { ProjectMemoryExtractionScheduler } from "./helpers/project-memory-extraction.js";
 import type { MagicContextTurnTransform } from "./helpers/magic-context-turn-transform.js";
+import type { MagicContextPromptSectionResolver } from "./helpers/magic-context-prompt-section.js";
 import { projectPersistentAgentMemoryTools } from "../subagent/persistent-memory.js";
 import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-runtime-admission.js";
 import { disposeNodeReplSession } from "../tool/handlers/node-repl.js";
@@ -173,6 +174,8 @@ private browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   private memoryExtractionScheduler?: ProjectMemoryExtractionScheduler;
   /** Step 19b：每请求 magic-context transform 端口；装配层 flag off 时不注入。 */
   private magicContextTurnTransform?: MagicContextTurnTransform;
+  /** Step 13（D1）：`## Magic Context` 段装配端口；缺席即 flag off / 装配失败。 */
+  private magicContextPromptSection?: MagicContextPromptSectionResolver;
   private contextSourcePort?: ContextSourcePort;
   private skillPort?: SkillPort;
   private mcpPort?: McpPort;
@@ -299,6 +302,10 @@ this.browserControlPort = deps.browserControlPort;
     // Step 19b：端口在场即注册门。装配层在 `features.magicContext === false` 时
     // 根本不构造它，于是关闭态下 turn-loop 的插入点是纯判空。
     this.magicContextTurnTransform = deps.magicContextTurnTransform;
+    // Step 13（D1）：`## Magic Context` 段装配端口。与上一位同一个门、同一个理由：
+    // 装配层在 `features.magicContext === false` 时不构造它，context builder 的插入点
+    // 因此是纯判空，关闭态下原生 `# Memory` 段按既有规则照常注入。
+    this.magicContextPromptSection = deps.magicContextPromptSection;
     if (this.contextBuilder) {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;
