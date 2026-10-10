@@ -180,6 +180,10 @@ function formatAgentOutputForModel(output: unknown): string {
   const launchLines = [
     "Async agent launched successfully.",
     `agentId: ${data.agentId} (internal ID - do not mention to user. Use SendMessage with to: '${data.agentId}' to continue this agent.)`,
+    // 异步分支也透出 childSessionId（e2e/R-1）：与同步完成分支的 sessionId 行对称，
+    // 父模型才能用同一套语义继续追问（SendMessage / 读 child 会话记录）。行加在
+    // launchLines 里，一次覆盖下面两个 return——canReadOutputFile 路与兜底路。
+    `sessionId: ${data.childSessionId}`,
     "The agent is working in the background. You will be notified automatically when it completes.",
   ];
 

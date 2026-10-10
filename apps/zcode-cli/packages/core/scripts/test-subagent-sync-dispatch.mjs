@@ -44,10 +44,39 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
+import { registerHooks } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
+
+// 契约单实例钩子（sub/G-1 同一性断言的地基）。`@zcode/contracts` 包入口发布的
+// 是 dist 产物（package.json exports "." → ./dist/index.js），而本测试按**源码
+// URL**取契约（下方 import）：handler 经包 specifier 拿到的是 dist 副本，两处是两个
+// schema 实例，`===` 恒 false——runtimeOutputSchema 同一性断言会误红。钩子把契约
+// specifier（含 subpath）统一改指 contracts/src 源码，让被测模块与本测试共用同一份
+// 契约实例（同 packages/ui 测试 `@/` 别名钩子与 bootstrap registerHooks 的仓内范式）。
+const CONTRACTS_SRC_ROOT = fileURLToPath(new URL("../../contracts/src/", import.meta.url));
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    if (specifier === "@zcode/contracts" || specifier.startsWith("@zcode/contracts/")) {
+      const relative =
+        specifier === "@zcode/contracts"
+          ? "index"
+          : specifier.slice("@zcode/contracts/".length);
+      for (const candidate of [
+        `${CONTRACTS_SRC_ROOT}${relative}.ts`,
+        `${CONTRACTS_SRC_ROOT}${relative}/index.ts`,
+      ]) {
+        if (existsSync(candidate)) {
+          return { shortCircuit: true, url: pathToFileURL(candidate).href };
+        }
+      }
+    }
+    return nextResolve(specifier, context);
+  },
+});
 
 const { createExploreSubagentPort } = await import(
   new URL("../src/subagent/runner.ts", import.meta.url).href
@@ -59,7 +88,10 @@ const { InMemoryRuntimeTaskRegistry } = await import(
 const { AgentOutputSchema, SessionEventType, CoreErrorType } = await import(
   new URL("../../contracts/src/tools/../index.ts", import.meta.url).href
 );
-const { agentToolEntry } = await import(
+// runtimeOutputSchema 同一性断言要从四处入口逐一取：Agent 本体、Task 兼容别名
+// （对 agentToolEntry 的浅拷贝）、两个工厂（createAgentToolEntry / createTaskToolEntry，
+// 工厂链靠 spread 间接同引用——锁住它是防未来工厂层覆盖 schema 而不被发现）。
+const { agentToolEntry, taskToolEntry, createAgentToolEntry, createTaskToolEntry } = await import(
   new URL("../src/tool/handlers/agent.ts", import.meta.url).href
 );
 
@@ -174,7 +206,14 @@ test("T-D1b: AgentOutputSchema strict 双校验（漏字段必须红）", async 
     const { childSessionId: _omitted, ...withoutChildSessionId } = output;
     const rejected = AgentOutputSchema.safeParse(withoutChildSessionId);
     assert.equal(rejected.success, false);
-    // handler 的 runtimeOutputSchema 与契约同一个 schema 对象，行为必须一致。
+    // 断言 2c：handler 的 runtimeOutputSchema 与契约必须是**同一个 schema 对象**。
+    // 只 safeParse 契约不够——换成一份不含 childSessionId 的本地副本时，2a/2b 仍
+    // 可能全绿（契约侧没动），而 Agent 工具输出的 runtimeOutputSchema 校验当场
+    // 失效。四处入口逐一锁同一引用：Agent 本体、Task 别名浅拷贝、两个工厂。
+    assert.equal(agentToolEntry.runtimeOutputSchema, AgentOutputSchema);
+    assert.equal(taskToolEntry.runtimeOutputSchema, AgentOutputSchema);
+    assert.equal(createAgentToolEntry().runtimeOutputSchema, AgentOutputSchema);
+    assert.equal(createTaskToolEntry().runtimeOutputSchema, AgentOutputSchema);
     assert.equal(harness.registry.get(AGENT_ID)?.status, "completed");
   } finally {
     harness.dispose();
@@ -210,6 +249,34 @@ test("T-D1c: 模型可见渲染与两个分支的 JSON schema 都带 childSessio
     asyncLaunched.required.includes("childSessionId"),
     "async 分支 required 缺 childSessionId",
   );
+
+  // e2e/R-1：async_launched 的**模型可见渲染**同样要带 sessionId 行（同步分支早有，
+  // 异步分支曾漏）。夹具按 AgentBackgroundedOutputSchema（contracts 侧 .strict()）
+  // 备齐字段——isAsync/backgroundTaskId/outputFile/canReadOutputFile 一个都不能少，
+  // 先过 strict 契约再测渲染，少字段即红。
+  const asyncOutput = {
+    status: "async_launched",
+    isAsync: true,
+    agentId: AGENT_ID,
+    agentType: "general-purpose",
+    description: "probe the contract",
+    prompt: "probe",
+    childSessionId: CHILD_SESSION_ID,
+    backgroundTaskId: "bg_td1",
+    outputFile: "/tmp/td1-agent-output.md",
+    canReadOutputFile: true,
+  };
+  const asyncParsed = AgentOutputSchema.safeParse(asyncOutput);
+  assert.equal(asyncParsed.success, true, JSON.stringify(asyncParsed.error?.issues ?? {}));
+  // canReadOutputFile=true 覆盖 return 路 1；false 时兜底路同样走 launchLines。
+  const asyncModelText = agentToolEntry.formatModelContent(asyncOutput);
+  assert.match(asyncModelText, /sessionId: /);
+  assert.match(asyncModelText, new RegExp(`sessionId: ${CHILD_SESSION_ID}`));
+  const asyncFallbackText = agentToolEntry.formatModelContent({
+    ...asyncOutput,
+    canReadOutputFile: false,
+  });
+  assert.match(asyncFallbackText, new RegExp(`sessionId: ${CHILD_SESSION_ID}`));
 });
 
 // ── T-S1 ────────────────────────────────────────────────────────────────────
