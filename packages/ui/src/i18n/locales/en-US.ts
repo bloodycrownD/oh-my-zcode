@@ -2440,7 +2440,7 @@ const enUS: Record<string, string> = {
   "resourceManager.storage.categoryDescription.subagentTranscripts":
     "Full conversation records of subagent runs (transcript.jsonl), up to tens of MB each; sessions active in the last 24 hours are kept.",
   "resourceManager.storage.categoryDescription.toolOutputs":
-    "Archived tool results, full command outputs, image caches and temporary files; not cleanable yet.",
+    "Archived tool results, full command outputs, image caches and temporary files; cleanup only covers cli/exec command output logs.",
   "resourceManager.storage.categoryDescription.modelTrajectory":
     "Full model request/response records used by the trajectory viewer.",
   "resourceManager.storage.categoryDescription.devTraces":

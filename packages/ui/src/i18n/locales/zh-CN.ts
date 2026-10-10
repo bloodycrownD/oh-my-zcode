@@ -2295,7 +2295,7 @@ const zhCN: Record<string, string> = {
   "resourceManager.storage.categoryDescription.subagentTranscripts":
     "子代理运行的完整对话记录（transcript.jsonl），单文件可达数十 MB；最近 24 小时有活动的会话会保留。",
   "resourceManager.storage.categoryDescription.toolOutputs":
-    "工具结果留档、命令完整输出、图片缓存与临时文件；暂不提供清理。",
+    "工具结果留档、命令完整输出、图片缓存与临时文件；清理仅覆盖 cli/exec 下的命令输出日志。",
   "resourceManager.storage.categoryDescription.modelTrajectory":
     "模型请求与响应的完整记录，用于查看调用轨迹。",
   "resourceManager.storage.categoryDescription.devTraces": "开发态协议抓包与已退役的诊断目录。",

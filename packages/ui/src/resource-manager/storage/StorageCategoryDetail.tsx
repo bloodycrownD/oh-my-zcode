@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { formatBytes } from "@/resource-manager/resourceUsageView.js";
 import {
+  isStorageCategoryCleanable,
   STORAGE_CATEGORY_ICONS,
   joinStoragePath,
   storageCategoryDescriptionId,
@@ -43,6 +44,8 @@ export function StorageCategoryDetail({
     .filter((item) => item.category && item.category.bytes > 0);
   const totalBytes = perRoot.reduce((sum, item) => sum + (item.category?.bytes ?? 0), 0);
   const cleanability = perRoot[0]?.category?.cleanability ?? "none";
+  // cleanScope 跨根取任一非空（同类别派生一致）；缺省快照没这个字段时保持 undefined。
+  const cleanScope = perRoot.find((item) => item.category?.cleanScope)?.category?.cleanScope;
 
   return (
     <div data-testid={TID_RESOURCE_MANAGER_STORAGE_DETAIL} className="space-y-3">
@@ -69,7 +72,7 @@ export function StorageCategoryDetail({
           </div>
         </div>
         <span className="text-ui-base tabular-nums text-foreground">{formatBytes(totalBytes)}</span>
-        {cleanability !== "none" && totalBytes > 0 ? (
+        {isStorageCategoryCleanable({ cleanability, cleanScope, bytes: totalBytes }) ? (
           <Button
             type="button"
             variant="outline"

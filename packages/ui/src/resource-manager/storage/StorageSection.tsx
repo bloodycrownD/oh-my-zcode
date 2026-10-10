@@ -30,7 +30,11 @@ import {
   type StorageCleanConfirmTarget,
 } from "./StorageCleanConfirmDialog.js";
 import { StorageDiskCard } from "./StorageDiskCard.js";
-import { buildStorageLegend, sumCategoriesAcrossRoots } from "./storageCategoryPresentation.js";
+import {
+  buildStorageLegend,
+  isStorageCategoryCleanable,
+  sumCategoriesAcrossRoots,
+} from "./storageCategoryPresentation.js";
 
 export function StorageSection({
   bridge,
@@ -111,7 +115,9 @@ export function StorageSection({
   const requestClean = useCallback(
     (categoryId: StorageCategoryId) => {
       const category = categories.find((item) => item.id === categoryId);
-      if (!category || category.cleanability === "none") return;
+      // uix/G-1 r3：与类别行/详情页同一口径——cleanScope="paths" 的 none 类别
+      // （toolOutputs → cli/exec）也要能走到清理；confirm 判定沿用 cleanability。
+      if (!category || !isStorageCategoryCleanable(category)) return;
       if (category.cleanability === "confirm") {
         setConfirmTarget({ categoryId, bytes: category.bytes });
         return;

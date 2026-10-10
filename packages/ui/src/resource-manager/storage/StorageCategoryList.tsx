@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { formatBytes } from "@/resource-manager/resourceUsageView.js";
 import {
+  isStorageCategoryCleanable,
   STORAGE_CATEGORY_ICONS,
   storageCategoryDescriptionId,
   storageCategoryTitleId,
@@ -34,7 +35,9 @@ export function StorageCategoryList({
     <div className="overflow-hidden rounded-xl border border-card-border bg-card">
       {categories.map((category) => {
         const Icon = STORAGE_CATEGORY_ICONS[category.id];
-        const cleanable = category.cleanability !== "none" && category.bytes > 0;
+        // uix/G-1 r3：none 类别（toolOutputs）靠 cleanScope="paths" 放行 cli/exec
+        // 这一段入口；口径与详情页、requestClean 守卫一致（storageCategoryModel）。
+        const cleanable = isStorageCategoryCleanable(category);
         const cleaning = cleaningCategory === category.id;
         return (
           <div

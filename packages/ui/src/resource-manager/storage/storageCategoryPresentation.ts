@@ -11,8 +11,16 @@ import {
   PackageOpen,
   Route,
 } from "lucide-react";
-import type { StorageCategoryId, StorageCategoryUsage, StorageRootUsage } from "@zcode/shared";
+import type { StorageCategoryId } from "@zcode/shared";
 import { APP_USAGE_MODEL_CHART_COLORS } from "@/settings/usage-stats/appUsageChartPalette.js";
+// 类别合并（跨根）与清理入口门控在零 `@/` 依赖的纯 model 里，供 node:test 直测；
+// 这里再导出，消费方（List/Detail/Section）的 import 面不变。
+export {
+  isStorageCategoryCleanable,
+  sumCategoriesAcrossRoots,
+  type StorageCategoryTotal,
+} from "./storageCategoryModel.js";
+import { type StorageCategoryTotal } from "./storageCategoryModel.js";
 
 export const STORAGE_CATEGORY_ICONS: Record<StorageCategoryId, typeof Folder> = {
   sessionStore: Database,
@@ -37,35 +45,6 @@ export function storageCategoryTitleId(id: StorageCategoryId): string {
 
 export function storageCategoryDescriptionId(id: StorageCategoryId): string {
   return `resourceManager.storage.categoryDescription.${id}`;
-}
-
-export interface StorageCategoryTotal {
-  id: StorageCategoryId;
-  bytes: number;
-  fileCount: number;
-  cleanability: StorageCategoryUsage["cleanability"];
-}
-
-/** 把多个根的同类别占用合并，按 bytes 降序（同为 0 时保持目录顺序）。 */
-export function sumCategoriesAcrossRoots(roots: StorageRootUsage[]): StorageCategoryTotal[] {
-  const totals = new Map<StorageCategoryId, StorageCategoryTotal>();
-  for (const root of roots) {
-    for (const category of root.categories) {
-      const current = totals.get(category.id);
-      if (current) {
-        current.bytes += category.bytes;
-        current.fileCount += category.fileCount;
-      } else {
-        totals.set(category.id, {
-          id: category.id,
-          bytes: category.bytes,
-          fileCount: category.fileCount,
-          cleanability: category.cleanability,
-        });
-      }
-    }
-  }
-  return [...totals.values()].sort((a, b) => b.bytes - a.bytes);
 }
 
 export interface StorageLegendItem {
