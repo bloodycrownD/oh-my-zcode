@@ -637,4 +637,54 @@ test("e2e/R-2：兜底窗口下 record 不再 skip；provider 未报 input 时�
   assert.equal(skippedAfter[0].context.contextWindow, 128_000, "缺席的只会是 input 那一半");
 });
 
-// BG1-CASE-PLACEHOLDER
+// ── mc/BG-1：wire 事件的 pass 计时字段（降级路径的度量基线） ─────────────────
+//
+// r4 judge 核实 core helper 的 magic_context.wire 事件此前只有 outcome/total/
+// entries，没有计时字段；BG-1 降级登记（bootstrap 文件头「已知缺口」）后，
+// 「pass 耗时是否计入首 token 延迟」只能靠日志对照——这一例钉住字段存在、且覆盖
+// pass 的真实挂钟耗时（不只是个占位 0）。
+
+test("mc/BG-1：wire 调试日志带 passDurationMs，覆盖 pass 挂钟耗时", async () => {
+  const previous = process.env.ZCODE_MAGIC_CONTEXT_DEBUG_WIRE;
+  try {
+    process.env.ZCODE_MAGIC_CONTEXT_DEBUG_WIRE = "1";
+    const entries = [];
+    const logger = {
+      info(message, context) {
+        entries.push({ message, context });
+      },
+      warn() {},
+      error() {},
+      debug() {},
+    };
+    await runMagicContextTurnTransform(
+      {
+        config: { magicContext: { enabled: true } },
+        magicContextTurnTransform: portWith(async () => {
+          // 让 pass 花一点可测的挂钟时间：字段必须覆盖它，而不是恒 0。
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }),
+        logger,
+      },
+      {
+        entries: sampleEntries(),
+        model: { providerId: "zcode", modelId: "glm-4.6" },
+        sessionId: SESSION_ID,
+        workingDirectory: "D:/tmp/project",
+      },
+    );
+    const wire = entries.filter((entry) => entry.context?.event === "magic_context.wire");
+    assert.equal(wire.length, 1, "debug 开时必须恰好发一条 wire 事件");
+    assert.equal(typeof wire[0].context.passDurationMs, "number");
+    assert.ok(
+      wire[0].context.passDurationMs >= 20,
+      `passDurationMs 必须覆盖 pass 挂钟（>=20ms），实际 ${wire[0].context.passDurationMs}`,
+    );
+  } finally {
+    if (previous === undefined) {
+      delete process.env.ZCODE_MAGIC_CONTEXT_DEBUG_WIRE;
+    } else {
+      process.env.ZCODE_MAGIC_CONTEXT_DEBUG_WIRE = previous;
+    }
+  }
+});

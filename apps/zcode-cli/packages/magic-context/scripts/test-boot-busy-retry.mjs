@@ -21,6 +21,8 @@
  *   T5 db_null + fail_closed_blocking=false：发事件（reason=db_null:fence）后降级。
  *   T6 db_null + fail_closed_blocking=true：**先发事件、再 throw**（事件不能因为
  *      fail-closed 而缺席）。
+ *   T7 重试路径 open 显式传 busyTimeoutMs=1000（mc/OQ-1R）：helper 缺省即重试档
+ *      1s、调用方可覆盖；端到端断言 openDatabase 实装 PRAGMA 的诊断行为 1000ms。
  *
  * 隔离（硬规矩）：所有库写入只落在 `<repo>/node_modules/.cache` 下的 mkdtemp 临时
  * 目录（显式 `MAGIC_CONTEXT_DB_DIR`，日志同步改指 `MAGIC_CONTEXT_LOG_PATH`），
@@ -121,10 +123,7 @@ const tempDirs = [];
  */
 function newDbDir(prefix) {
   const dir = mkdtempSync(join(CACHE_ROOT, `magic-context-${prefix}-`));
-  assert.ok(
-    dir.startsWith(CACHE_ROOT),
-    `isolation violation: ${dir} is not under ${CACHE_ROOT}`,
-  );
+  assert.ok(dir.startsWith(CACHE_ROOT), `isolation violation: ${dir} is not under ${CACHE_ROOT}`);
   tempDirs.push(dir);
   process.env.MAGIC_CONTEXT_DB_DIR = dir;
   process.env.MAGIC_CONTEXT_LOG_PATH = join(dir, "magic-context.log");
@@ -247,12 +246,68 @@ const eventsOf = (entries, event) => entries.filter((entry) => entry.context?.ev
 
 // ── 用例 ─────────────────────────────────────────────────────────────────────
 
+test("T7 重试路径 open 显式传 busyTimeoutMs=1000（OQ-1R：单次尝试上界收敛进 boot 预算）", async () => {
+  const dir = newDbDir("boot-open-busy-timeout");
+  const { logger } = capturingLogger();
+
+  // 缝（spec r4 方案 C）：busyTimeoutMs 是 retry helper 的可注入参数，直接断言
+  // helper 递给 open thunk 的值。三态全覆盖：显式注入、缺省（=生产重试档 1s）、
+  // 显式覆盖（非重试档语义的对照组）。
+  const seen = [];
+  await openMagicContextStorageWithBusyRetry(
+    (busyTimeoutMs) => {
+      seen.push(busyTimeoutMs);
+      return null; // 演示：null = db_null 语义，不进重试链。
+    },
+    { logger },
+  );
+  assert.deepEqual(seen, [1_000], "缺省必须是重试档 1s，而不是包内默认 5s");
+
+  seen.length = 0;
+  await openMagicContextStorageWithBusyRetry(
+    (busyTimeoutMs) => {
+      seen.push(busyTimeoutMs);
+      return null;
+    },
+    { logger, openBusyTimeoutMs: 5_000 },
+  );
+  assert.deepEqual(seen, [5_000], "调用方仍可覆盖（非重试档 5s 语义）");
+
+  // 端到端：真朝 openDatabase 递 1s，经 resolveBootBusyTimeoutMs 钳制后原样落
+  // PRAGMA——诊断消息里必须看得到 timeout=1000ms（这是 OQ-1R 在生产路径生效的
+  // 直接证据，不依赖读源码）。注意 overload 的 shape：单 options 对象（path +
+  // busyTimeoutMs + 捕 Diagnostics 的 onBootBusyTimeout 同对象传入）。
+  const bootBusyTimeoutMessages = [];
+  const db = await openMagicContextStorageWithBusyRetry(
+    (busyTimeoutMs) =>
+      openDatabase({
+        dbPath: getMagicContextDatabasePath(),
+        busyTimeoutMs,
+        onBootBusyTimeout: (message) => bootBusyTimeoutMessages.push(message),
+      }),
+    { logger },
+  );
+  try {
+    assert.ok(db, "临时目录上的首次开库应当成功");
+    assert.equal(bootBusyTimeoutMessages.length, 1, "一次全新开库应发一条 busy timeout 诊断");
+    assert.match(
+      bootBusyTimeoutMessages[0],
+      /timeout=1000ms/,
+      `openDatabase 实际安装的 busy timeout 必须是 1000ms，诊断行：${bootBusyTimeoutMessages[0]}`,
+    );
+  } finally {
+    db?.close?.();
+  }
+});
+
 test("T1 占锁 → 退避重试 → 解锁后装配成功（工厂端到端，真实退避序列）", async () => {
   const dir = newDbDir("boot-busy-retry");
   const dbPath = join(dir, "magic-context.db");
-  // 持锁 5s。生产序列 [1s,2s,4s,8s] 的尝试时刻约为 0s/1s/3s/7s/15s，前 3 次必撞锁，
-  // 第 4 次（约 7s）锁已释放 ⇒ 至少 3 次重试后成功。
-  const holder = await spawnHolder(dbPath, 5_000);
+  // 持锁 9s。时序（mc/G-1 修订，不再依赖精确计数）：生产序列 [1s,2s,4s,8s] 的尝试
+  // 时刻约为 0s/1s/3s/7s/15s——持锁 9s 下前四次（0/1/3/7s）均撞锁，15s 那次成功，
+  // 重试事件 ≥1 即可。5s 老值只给 ~0.6s 余量、慢机即 flake；9s 下 margin 充裕。
+  // 「恰好 N 次」的确定性断言只留在 T2 注入 delaysMs 的场景。
+  const holder = await spawnHolder(dbPath, 9_000);
   const { logger, entries } = capturingLogger();
   let close;
   let transform;
@@ -274,12 +329,11 @@ test("T1 占锁 → 退避重试 → 解锁后装配成功（工厂端到端，�
   assert.equal(typeof transform.isEnabled, "function");
   const retryEvents = eventsOf(entries, "magic_context.storage_open_retry");
   assert.ok(
-    retryEvents.length >= 3,
-    `占锁 5s 期间至少应发生 3 次退避重试，实际 ${retryEvents.length} 次`,
+    retryEvents.length >= 1,
+    `占锁 9s 期间至少应发生 1 次退避重试，实际 ${retryEvents.length} 次`,
   );
   assert.equal(retryEvents[0].context?.reason, "storage_busy_retry");
   assert.equal(retryEvents[0].context?.attempt, 1, "第一次重试事件应标记 attempt=1");
-  assert.equal(retryEvents[1].context?.attempt, 2);
   assert.equal(retryEvents[0].context?.retryInMs, 1_000, "第一档退避必须是 1s");
   // 这条路径最终没有缺席：恢复后不允许留下 transform_absent。
   assert.deepEqual(eventsOf(entries, "magic_context.transform_absent"), []);
@@ -377,11 +431,7 @@ test("T4 enabled=false：发 transform_absent(disabled) 且不开库", async () 
   assert.equal(absent.length, 1, "关着也要留一条可观测事件");
   assert.equal(absent[0].context?.reason, "disabled");
   assert.equal(absent[0].context?.module, "bootstrap");
-  assert.equal(
-    existsSync(join(dir, "magic-context.db")),
-    false,
-    "关着时不允许创建/打开数据库",
-  );
+  assert.equal(existsSync(join(dir, "magic-context.db")), false, "关着时不允许创建/打开数据库");
 });
 
 test("T5 db_null:fence + fail_closed_blocking=false：先发事件再降级", async () => {

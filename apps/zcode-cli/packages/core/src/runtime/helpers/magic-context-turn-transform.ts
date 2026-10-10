@@ -182,6 +182,7 @@ function logMagicContextWireSnapshot(
   runtime: MagicContextTurnTransformRuntime,
   logContext: LogContext | undefined,
   result: MagicContextTurnTransformResult,
+  passDurationMs: number,
 ): void {
   const snapshot = buildMagicContextWireDebugSnapshot(
     result.entries,
@@ -194,6 +195,11 @@ function logMagicContextWireSnapshot(
     // 不复用 `status`：Logger 的 status 是事件生命周期词汇，而这里是本 pass 的
     // 分级结果（applied / unchanged / lkg_replayed / fail_open）。
     magicContextOutcome: result.outcome,
+    // mc/BG-1：本 pass 的挂钟耗时（ms）。这是「turn-loop 插入点的 await 耗时」——
+    // 阈值命中时的大 pass（长会话全量投影）就计在这里，直接进入用户首 token 之前。
+    // r4 judge 核实此前事件面只有 outcome/total/entries，没有计时字段；补上它，
+    // 「pass 计时是否计入首 token 延迟」才有日志对照面（BG-1 降级路径的验收口径）。
+    passDurationMs,
     total: snapshot.total,
     syntheticHeadCount: snapshot.syntheticHeadCount,
     syntheticHeadPositions: snapshot.syntheticHeadPositions,
@@ -227,9 +233,11 @@ export async function runMagicContextTurnTransform(
   if (runtime.magicContextTurnTransform.isEnabled?.() === false) return input.entries;
   if (runtime.config.magicContext?.enabled === false) return input.entries;
 
+  const startedAt = performance.now();
   const result = await runtime.magicContextTurnTransform(input);
+  const passDurationMs = Math.round((performance.now() - startedAt) * 100) / 100;
   if (isMagicContextWireDebugEnabled()) {
-    logMagicContextWireSnapshot(runtime, logContext, result);
+    logMagicContextWireSnapshot(runtime, logContext, result, passDurationMs);
   }
   return result.entries;
 }

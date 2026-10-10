@@ -80,6 +80,23 @@
  *   - 配置面（D-12）已接线：写盘 `updateMagicContextInFileConfig`、内存
  *     `ConfigPort.set`、推送 `ConfigPort.observe` 三段齐备；桌面设置页的调用侧
  *     （Step 29）落地后才有用户可改的入口。
+ *   - mc/BG-1（2026-10-10 调查，降级登记）：transform pass 是 turn-loop 插入点内的
+ *     `await`（发 wire 前必须完成投影，设计使然），阈值命中时的大 pass（长会话全量
+ *     投影）计入用户首 token 延迟。「turn 成功后后台预投影 + 下一 turn 走
+ *     `lkg_replayed` 快路径」经调查**本期不落地**，四条不可行原因：①
+ *     `registerLkgPersistence`（LKG durable hydration backend）生产零调用、且未出
+ *     barrel 公共面——CLI「一进程一轮」下后台 pass 落的内存 slot 随进程退出消失、
+ *     durable 行也无人 hydrate；② `lkg_replayed` 只是**失败分级**的 outcome
+ *     （bootstrap `tryReplayLkg` 与包内 wrapper），成功 pass 没有「先试 replay」的
+ *     入口；③ 在端口层 pre-replay 会让 LKG 固化（capture 只发生在 pass 内，replay
+ *     后压缩永远不更新），必须新增「何时可 replay」判据，等价重写 scheduler 决策；
+ *     ④ 补齐任何一块都要动 `magic-context/src/core/**` 上游逐字区主流程或扩 barrel
+ *     面，违反「能不动包内就不动」的 FORK 纪律。降级收益替代：core 侧
+ *     `magic_context.wire` 事件已补 `passDurationMs` 计时字段（见 core helper
+ *     `runtime/helpers/magic-context-turn-transform.ts`），「pass 耗时是否计入首
+ *     token 延迟」先有日志对照面；boot open 收敛（mc/OQ-1R，本文件
+ *     `BOOT_OPEN_BUSY_TIMEOUT_MS`）已在同批次收口。后续若要重开：先接线
+ *     hydration backend（扩 barrel：load），再评估成功路径快放的判据归属。
  */
 
 import type {
@@ -936,6 +953,23 @@ export function describeStorageUnavailability(
 const MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as const;
 
 /**
+ * OQ-1R：**重试档** open 的单次尝试 `busy_timeout` 上界（ms）。
+ *
+ * 两档语义（与 spec r4 澄清一致）：
+ *   - **重试档**（boot 装配，本文件唯一使用者）：每次尝试 1s 就让出，配合退避
+ *     序列 [1s,2s,4s,8s]，最坏链长 ~15s（=4×1s + 4 档退避），收敛进 boot 预算。
+ *     改前每尝试各叠包内默认 `BOOT_SQLITE_BUSY_TIMEOUT_MS=5s`，最坏 ~40s——
+ *     远超 15s boot 预算，且 boot 装配期 `await` 工厂整段阻塞前台。
+ *   - **非重试档**（`run-ctx-command.ts` / `ctx-context.ts` / `host/ctx-status.ts`
+ *     的生产 open）：**不传该参**，天然保持包内默认 5s——用户主动敲 `/ctx-*`
+ *     命令时容忍一次更长的等待。
+ *
+ * 1000 经包内 `resolveBootBusyTimeoutMs`（storage-db.ts:256-260）被
+ * `BOOT_SQLITE_BUSY_TIMEOUT_MS=5000` 钳制时原样通过（< 上界），语义即「1s」。
+ */
+const BOOT_OPEN_BUSY_TIMEOUT_MS = 1_000;
+
+/**
  * ⑤-5a：boot 开库的**有界** busy 重试。
  *
  * 只对 busy/瞬时类失败重试：5e 之后 `openDatabase` 的 catch 以 `{ cause }` 保留了
@@ -952,22 +986,30 @@ const MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS = [1_000, 2_000, 4_000, 8_000] as 
  *
  * `delaysMs` / `sleep` 是测试缝（与 `runMigrationsWithRetry` 的同名选项同一手法）：
  * 生产装配只传 logger，用上面的生产序列。
+ *
+ * OQ-1R：`open` thunk 收一个**单次尝试 busy_timeout**（ms）参数。helper 不自己调
+ * `openDatabase`——thunk 由调用方提供，参数让「重试档 1s / 非重试档默认 5s」的
+ * 两档语义留在调用点（工厂传 {@link BOOT_OPEN_BUSY_TIMEOUT_MS}，测试可注入任意值
+ * 或直接断言收到的值）。`openBusyTimeoutMs` 缺省即重试档生产值 1s。
  */
 export async function openMagicContextStorageWithBusyRetry(
-  open: () => ContextDatabase | null,
+  open: (busyTimeoutMs: number) => ContextDatabase | null,
   options: {
     logger: Logger;
     delaysMs?: readonly number[];
     sleep?: (delayMs: number) => Promise<void>;
+    /** OQ-1R：递给 `open` 的单次尝试 busy_timeout（ms）；缺省 = 重试档 1s。 */
+    openBusyTimeoutMs?: number;
   },
 ): Promise<ContextDatabase | null> {
   const delaysMs = options.delaysMs ?? MAGIC_CONTEXT_BOOT_OPEN_RETRY_DELAYS_MS;
+  const openBusyTimeoutMs = options.openBusyTimeoutMs ?? BOOT_OPEN_BUSY_TIMEOUT_MS;
   const sleep =
     options.sleep ?? ((delayMs: number) => new Promise<void>((r) => setTimeout(r, delayMs)));
   const totalAttempts = delaysMs.length + 1;
   for (let attempt = 1; attempt <= totalAttempts; attempt += 1) {
     try {
-      return open();
+      return open(openBusyTimeoutMs);
     } catch (error) {
       // 不是 busy/瞬时（fence 之外的确定性失败）⇒ 原样上抛，fail-closed 语义不变。
       if (!isTransientStorageOpenError(error)) throw error;
@@ -1050,9 +1092,17 @@ export async function createMagicContextTurnTransform(
   // 抛给下面的 fail-closed 契约；确定性失败（fence/guard 之外的 ABI、不可写等）
   // 不重试、原样上抛。fence / migration guard / pending 竞争是确定性 **null**，
   // 走下面的 db_null 分支，与重试无关。
+  //
+  // OQ-1R：open 显式传**重试档**单次尝试上界 1s——退避序列与内建 busy_timeout
+  // 此前叠加成最坏 ~40s（4 次尝试 × 5s），远超 15s boot 预算；1s 档把最坏链长压到
+  // ~15s。非重试路径的 open（/ctx-* 命令）不传该参，保持包内默认 5s。
   const db = await openMagicContextStorageWithBusyRetry(
-    () => openDatabase(getMagicContextDatabasePath()),
-    { logger: options.logger },
+    (busyTimeoutMs) =>
+      openDatabase({
+        dbPath: getMagicContextDatabasePath(),
+        busyTimeoutMs,
+      }),
+    { logger: options.logger, openBusyTimeoutMs: BOOT_OPEN_BUSY_TIMEOUT_MS },
   );
   if (!db) {
     // 细分 fence / migration_guard / pending_or_unclassified：同一个「库没开出来」，
