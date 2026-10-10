@@ -25,7 +25,7 @@
  * （`turn.ts:97-100`）。因此本文件断言的是「新会话跟随新默认」+「已绑定会话的
  * 选择不被追溯改写」，而不是「运行中会话被切换模型」。
  *
- * 四组断言：
+ * 五组断言：
  *   A runtime 层：onDidChange 驱动同步缓存跟随（外部改文件的 poll-changed 路径 +
  *     同进程 saveConfiguredDefault 的 updated 路径）。
  *   B 装配层：`resolveAppRuntimeConfig` 的初始选择解析活读——同进程改默认后
@@ -33,6 +33,8 @@
  *     旧装配（CLI 每 prompt 一进程）保持原语义。
  *   C facade 层：`setModel("main")` 的兜底源活读默认模型。
  *   D 生命周期：dispose 退订后同步缓存不再被外部变更刷新。
+ *   E 回落式纯函数（agent/C-1）：`resolveConfiguredDefaultModelSelectionOf` 的
+ *     优先级（accessor 先于静态字段）与空值语义（都无 → undefined）。
  *
  * 隔离：全部读写落在 `os.tmpdir()` 临时目录，Personal/Built-in 配置文件路径经
  * env 显式注入，**绝不触碰用户真实 ~/.omz / ~/.zcode**。
@@ -59,6 +61,9 @@ const { createSessionFacade } = await import(
   new URL("../src/app/session-facade.ts", import.meta.url).href
 );
 const { createConfig } = await import("@zcode/adapters/config");
+const { resolveConfiguredDefaultModelSelectionOf } = await import(
+  new URL("../src/app/types.ts", import.meta.url).href
+);
 
 process.on("exit", (code) => {
   console.log("");
@@ -444,4 +449,51 @@ test("D1: dispose 退订后同步缓存不再被外部变更刷新", async () =>
     // 断言失败也不能把第二个 runtime 的 fs watcher 留在进程里（测试进程会挂住）。
     own.dispose();
   }
+});
+
+// ── E: 回落式纯函数（agent/C-1） ────────────────────────────────────────────
+
+/**
+ * ①默认模型实时之后「默认模型怎么读」在三处重复（create-app 的
+ * `resolveFallbackSelection`、runtime-config 的初始选择解析、session-facade 的
+ * `setModel("main")` 兜底）。agent/C-1 把它抽成 `types.ts` 的
+ * `resolveConfiguredDefaultModelSelectionOf` 纯函数——语义只有一份，三处调用点
+ * （含本文件的 B/C 两组）共享。这里直测优先级与空值语义，锁死「漏改 accessor
+ * 就悄悄退回 startup 快照」的失效形态。
+ */
+test("E1: accessor 与静态字段同时在场时 accessor 优先（每次调用现读）", () => {
+  const calls = [];
+  const selection = resolveConfiguredDefaultModelSelectionOf({
+    configuredDefaultModelSelection: INITIAL_SELECTION,
+    resolveConfiguredDefaultModelSelection: () => {
+      calls.push(1);
+      return UPDATED_SELECTION;
+    },
+  });
+  assert.equal(selection, UPDATED_SELECTION, "accessor 在场必须先于静态字段");
+  assert.deepEqual(calls, [1], "每次解析调一次 accessor（活读语义，不是缓存）");
+  // 同一个 options 形状再解析一次可以拿到不同值：回落式不是把快照冻死。
+  const second = resolveConfiguredDefaultModelSelectionOf({
+    configuredDefaultModelSelection: INITIAL_SELECTION,
+    resolveConfiguredDefaultModelSelection: () => INITIAL_SELECTION,
+  });
+  assert.equal(second, INITIAL_SELECTION);
+});
+
+test("E2: 仅静态字段时回落静态值（CLI 每 prompt 一进程的旧语义）", () => {
+  const selection = resolveConfiguredDefaultModelSelectionOf({
+    configuredDefaultModelSelection: INITIAL_SELECTION,
+  });
+  assert.equal(selection, INITIAL_SELECTION);
+});
+
+test("E3: 两者都缺席时返回 undefined", () => {
+  assert.equal(resolveConfiguredDefaultModelSelectionOf({}), undefined);
+  assert.equal(
+    resolveConfiguredDefaultModelSelectionOf({
+      resolveConfiguredDefaultModelSelection: () => undefined,
+    }),
+    undefined,
+    "accessor 返回 undefined 同样不落到不存在的静态字段上",
+  );
 });

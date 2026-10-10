@@ -41,6 +41,7 @@ import {
   type ResolvedRegistrySelection,
 } from "./provider-registry-selection.js";
 import type { PrepareUserExecutionBoundary, ZCodeApp } from "./types.js";
+import { resolveConfiguredDefaultModelSelectionOf } from "./types.js";
 
 type SessionFacade = Pick<
   ZCodeApp,
@@ -503,8 +504,8 @@ export function createSessionFacade(deps: CreateSessionFacadeDeps): SessionFacad
               modelId,
               // ①默认模型实时（spec 1f）：`main` 的兜底源活读默认模型——
               // 同进程内改配置后 `setModel("main")` 解析到新默认，而非 startup 快照。
-              deps.resolveConfiguredDefaultModelSelection?.() ??
-                deps.configuredDefaultModelSelection,
+              // agent/C-1：回落式本身收敛在 `resolveConfiguredDefaultModelSelectionOf`。
+              resolveConfiguredDefaultModelSelectionOf(deps),
               { allowMissingReasoning: true },
             )
           : resolveRegistryOwnedModelSelection(deps.providerRegistry, modelId);

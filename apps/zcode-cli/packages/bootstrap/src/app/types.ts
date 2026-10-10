@@ -202,6 +202,27 @@ export interface ZCodeAppOptions {
   workspaceHookReviewHost?: WorkspaceHookReviewHostContext;
 }
 
+/**
+ * agent/C-1：默认模型回落式的**唯一**解析处（accessor 优先 → 静态字段 → undefined）。
+ *
+ * ①默认模型实时（spec 1f）之后「默认模型怎么读」在三处重复（create-app 的
+ * `resolveFallbackSelection`、runtime-config 的初始选择解析、session-facade 的
+ * `setModel("main")` 兜底）：三处各写一遍
+ * `resolveConfiguredDefaultModelSelection?.() ?? configuredDefaultModelSelection`，
+ * 任一处漏改 accessor 就悄悄退回 startup 快照。抽成纯函数后语义只有一份。
+ *
+ * 结构上刻意只依赖这两个字段（不绑死 `ZCodeAppOptions` / `CreateSessionFacadeDeps`
+ * 的具体类型）：三处调用方的 options 形状各不相同，纯函数也不引入模块环。
+ */
+export function resolveConfiguredDefaultModelSelectionOf(options: {
+  configuredDefaultModelSelection?: ModelSelection;
+  resolveConfiguredDefaultModelSelection?: () => ModelSelection | undefined;
+}): ModelSelection | undefined {
+  return (
+    options.resolveConfiguredDefaultModelSelection?.() ?? options.configuredDefaultModelSelection
+  );
+}
+
 export interface SubmitPromptOptionsBase {
   traceContext?: TraceContext;
   abortSignal?: AbortSignal;

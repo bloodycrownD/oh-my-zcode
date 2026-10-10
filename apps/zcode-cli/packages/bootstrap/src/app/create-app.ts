@@ -52,6 +52,7 @@ import type {
   ZCodeApp,
   ZCodeAppOptions,
 } from "./types.js";
+import { resolveConfiguredDefaultModelSelectionOf } from "./types.js";
 import {
   createConfigCliOverrides,
   isMessageEnabled,
@@ -577,8 +578,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // ①默认模型实时（spec 1f）：默认模型的读取统一走这一个闭包——宿主（协议层）经
     // accessor 注入进程级 registry 的同步缓存，Personal 配置的 defaultModelSelection
     // 变更后同进程内新会话/兜底解析都能看到新值；没有 accessor 的宿主回落静态字段。
+    // agent/C-1：回落式本身收敛在 `resolveConfiguredDefaultModelSelectionOf`。
     const readConfiguredDefaultModelSelection = () =>
-      options.resolveConfiguredDefaultModelSelection?.() ?? options.configuredDefaultModelSelection;
+      resolveConfiguredDefaultModelSelectionOf(options);
     const modelAdapter =
       options.modelAdapter ??
       createModelAdapter({
