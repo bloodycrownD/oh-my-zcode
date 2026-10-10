@@ -1,5 +1,34 @@
 # Changelog
 
+## [1.0.5](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.4...v1.0.5) (2026-10-10)
+
+### Features
+
+* **desktop:** Windows 打包补 zip 便携版产物——win target 加 zip，与 mac dmg+zip 双产物对齐（Release 上传 glob 已覆盖 *.zip） ([c27f44d](https://github.com/bloodycrownD/oh-my-zcode/commit/c27f44d630a5e6448b47719070286c2a3e928777))
+
+* **magic-context:** 折叠模型默认继承会话模型（historian.model 三态） ([33a4d57](https://github.com/bloodycrownD/oh-my-zcode/commit/33a4d572a19abd6a2a4d238404be7c0a9fecab4b))
+  * 字段缺失 / "inherit"（新 sentinel）：折叠模型 = 会话 live 绑定模型
+  * "provider/model"：显式旁路模型（现状不变，装配期静态解析）
+  * ""（显式清空）：关闭分舱折叠（现状「留空」语义收窄为显式关闭）
+  * 装配门改为「配置值 !== ""」即装 executor：inherit 无条件装（会话模型要等
+  * inherit：historian 模型 key 由 noteLiveModel 与主模型窗口同步刷新
+  * 「inherit」只是配置面哨兵：runPass 的 model 与 TransformDeps 的
+  * historianMaxOutputTokens 改为活值 getter：返回快照会让 live 夹紧对宿主
+  * turn-transform 的 bindLiveModel 在 inherit 模式原地改写 deps.historianModel
+  * historian.model 放行空串哨兵：z.union([z.literal(""), z.string().trim().min(1)])。
+  * 随「缺省即继承」一并失效的是「enabled 但未配 historian 模型」这条 readiness
+  * 配置链：adapters 的 magicContext 域直接复用包内 MagicContextConfigSchema，
+  * 新增「继承会话模型（默认）」项（persist "inherit"）
+  * 「不配置（留空）」改为「关闭分舱折叠」（persist ""，语义不变）
+  * form 读侧：缺省/undefined 显示为 inherit，"" 原样（不再塌成 fallback）
+  * form 写侧：空串照字面写进域（删键 = 缺失 = 继承，与显式选择相反）；
+  * missingHint 改为说明默认继承、关闭需显式选择；zh-CN / en-US 同步
+  * bootstrap historian：缺省=inherit 装载 + live 绑定后模型入口切换 + 惰性夹紧
+  * 绑不到 Model 退回保守回退 + ""/显式回归，共 11 项
+  * 包 test-config：historian.model 三态 schema 用例替换 readiness 用例
+  * UI form/picker：读侧三态、零改动保存逐字节相同、off⇄显式⇄inherit 往返、
+  * 回归全绿：magic-context config/host/transform/historian、bootstrap
+
 ## [1.0.4](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.3...v1.0.4) (2026-10-10)
 
 ### Features
