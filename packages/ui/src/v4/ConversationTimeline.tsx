@@ -66,6 +66,7 @@ import {
 import { mergeTurnNavigatorItems } from "@/v4/conversationTurnNavigatorDirectory.js";
 import {
   DEFAULT_ROW_HEIGHT_ESTIMATE_PX,
+  SessionMeasuredKeysTracker,
   TimelineRowHeightCache,
   createSessionInitialAnchorGuard,
 } from "@/v4/timelineRowHeightCache.js";
@@ -598,7 +599,7 @@ function ConversationTimelineImpl({
   // 切会话初始落点 guard（2a，根因见 timelineRowHeightCache.ts 顶部注释）：
   // 切会话清测高后估计总高（~2-5 unit×72px）会小于视口，立即落点会把 scrollTop
   // 钳到 0，首帧渲染窗口最旧内容造成「跳顶」。guard 记录「本会话尚未定位」，
-  // 把首次落点推迟到 measurementsCache 出现本会话首项后执行一次；此后离底恢复
+  // 把首次落点推迟到 measuredKeys tracker 出现本会话首项后执行一次；此后离底恢复
   // 校正归 pending restore effect、贴底跟随归底部锚定 effect，三者以本 guard
   // 状态机（tracksSession/isArmedFor）防重入，不得重复执行落点。
   // 初始值直接创建（每 render 惰丢弃一个闭包）：effect 体内 ref.current 保持
@@ -606,6 +607,14 @@ function ConversationTimelineImpl({
   const initialAnchorGuardRef = useRef(
     createSessionInitialAnchorGuard<ChatSessionScrollMemoryState>(),
   );
+  // uix/A-1：guard 释放信号的 measuredKeys tracker（per-arm 代际契约，见
+  // timelineRowHeightCache.ts 的 SessionMeasuredKeysTracker）。两写点
+  // （measureElement / live-tail cacheHeight）随真实测高同步写入；arm 点与
+  // guard 同步清零，只收本 arm 周期内新写入的 key——不再读
+  // virtualizer.measurementsCache（非响应式快照，陈旧同键测量可让 guard 在
+  // 首个真实测高前误释放，且 guard 一次性不可恢复）。同 initialAnchorGuardRef
+  // 模式：初始值直接创建，免除判空样板。
+  const initialAnchorMeasuredKeysRef = useRef(new SessionMeasuredKeysTracker());
   // guard 释放后排的测高校正帧（restore 分支）：由切会话/卸载统一取消，
   // 见 cancelInitialAnchorFrames。
   const initialAnchorCorrectionFrameRef = useRef<number | null>(null);
@@ -799,6 +808,9 @@ function ConversationTimelineImpl({
       const cacheKey = getUnitHeightCacheKey(unit);
       if (cacheKey !== undefined) {
         heightCacheRef.current?.set(sessionKey, cacheKey, height);
+        // uix/A-1 写点一：与 heights 缓存同源写 guard 释放信号，但 tracker 按 arm
+        // 代际隔离（arm 时整体清零），只反映本 arm 周期内本会话新到的真实测高。
+        initialAnchorMeasuredKeysRef.current.record(sessionKey, cacheKey);
       }
       return height;
     },
@@ -1188,6 +1200,8 @@ function ConversationTimelineImpl({
     const cacheHeight = (entry?: ResizeObserverEntry) => {
       const height = measureRowHeight(element, entry);
       heightCacheRef.current?.set(sessionKey, cacheKey, height);
+      // uix/A-1 写点二：live tail 行测高同样进 tracker（同源写、按 arm 代际隔离）。
+      initialAnchorMeasuredKeysRef.current.record(sessionKey, cacheKey);
       return height;
     };
     let observedHeight = cacheHeight();
@@ -1677,9 +1691,14 @@ function ConversationTimelineImpl({
     // estimateSize（72px）估总高；少量行的会话（2-5 unit）估计总高 < 视口，
     // 立即 scrollToBottom/restore 会被浏览器把 scrollTop 钳到 0，首帧渲染窗口
     // 里最旧的内容，用户看到「切会话跳顶」。因此只 arm guard 记录「本会话尚未
-    // 定位」，落点与校正帧全部推迟到释放 effect 见 measurementsCache 出现本会话
+    // 定位」，落点与校正帧全部推迟到释放 effect 见 measuredKeys tracker 出现本会话
     // 首项之后执行一次。
     const initialAnchorPlan = initialAnchorGuardRef.current.arm(restoredState, sessionKey);
+    // uix/A-1：tracker 与 guard 同点换代——清零上一 arm 的写入，只收本 arm 周期内
+    // 两写点新写入的 key。分区只防跨会话串键，不得跨 arm 保留：heights 缓存跨会话
+    // 持久且切会话刻意不清（clearSession 注释明令切会话路径禁调），tracker 若同样
+    // 持久，A→B→A 重访会在首个 commit 用旧键误释放（跳顶回归借 tracker 复活）。
+    initialAnchorMeasuredKeysRef.current.arm();
     if (initialAnchorPlan.action === "stickToBottom") {
       // following/按钮状态初始化不涉及滚动写入，可立即做；滚动落点仍等 guard 释放。
       followingRef.current = initialFollowing();
@@ -1691,20 +1710,27 @@ function ConversationTimelineImpl({
     };
   }, [clearUserScrollIntent, initialFollowing, scrollMemoryKey, sessionKey, virtualizer]);
 
-  // 初始落点 guard 的释放 effect（2a）：以 virtualizer.measurementsCache 出现
-  // 本会话首项（= 行已挂载且完成首次真实测高）为「已定位」信号，释放时执行且
-  // 仅执行一次本会话首次落点（stickToBottom 或恢复记忆位置）。此后离底恢复的
-  // 二次校正归下方 pending restore effect，内容变化的贴底跟随归底部锚定 effect，
-  // 三处不得重复执行落点：guard 状态机的 tracksSession/isArmedFor 即防重入 ref。
-  // 刻意不加依赖数组：measurementsCache 不是响应式状态，只能每次 commit 复查
-  //（与下方 prepend 对账 effect 同构）；guard 未 armed 时首行即早退。
+  // 初始落点 guard 的释放 effect（2a）：以组件自有 measuredKeys tracker 出现
+  // 本会话首项（= 本 arm 周期内行已挂载且完成首次真实测高）为「已定位」信号，
+  // 释放时执行且仅执行一次本会话首次落点（stickToBottom 或恢复记忆位置）。此后
+  // 离底恢复的二次校正归下方 pending restore effect，内容变化的贴底跟随归底部
+  // 锚定 effect，三处不得重复执行落点：guard 状态机的 tracksSession/isArmedFor
+  // 即防重入 ref。
+  // 刻意不加依赖数组：tracker 是可变 ref（非响应式），只能每次 commit 复查
+  // （与下方 prepend 对账 effect 同构）；guard 未 armed 时首行即早退。
   useLayoutEffect(() => {
+    const measuredKeysTracker = initialAnchorMeasuredKeysRef.current;
+    const firstUnitKey = virtualRows[0]?.key;
     if (!initialAnchorGuardRef.current.isArmedFor(sessionKey)) return;
-    const measuredKeys = new Set(virtualizer.measurementsCache.map((item) => item.key));
+    // uix/A-1：释放判据 = isArmedFor(sessionKey) && 本 arm 周期内两写点已写入首个
+    // unit key。不再读 virtualizer.measurementsCache——非响应式快照里同键陈旧测量
+    // 可在首个真实测高前误释放 guard；guard 一次性不可恢复，误判=本会话永久回退
+    // 跳顶形态（且两个既有 effect 已让位，无兜底）。
+    if (!measuredKeysTracker.has(sessionKey, firstUnitKey)) return;
     const plan = initialAnchorGuardRef.current.tryRelease({
       currentSessionKey: sessionKey,
       unitKeys: virtualRows.map((item) => item.key),
-      measuredKeys,
+      measuredKeys: measuredKeysTracker.snapshot(sessionKey),
     });
     if (!plan) return;
     if (plan.action === "stickToBottom") {

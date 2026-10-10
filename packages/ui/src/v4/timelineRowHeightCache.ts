@@ -16,7 +16,10 @@
 //   估总高；少量行的会话（2-5 unit）估计总高 < 视口，立即 scrollToBottom/restore
 //   会被浏览器把 scrollTop 钳到 0，首帧渲染窗口里最旧的内容，用户看到「msg 列表
 //   跳到最上方」。guard 只记录「本会话尚未定位」，等首批真实测高到达后再执行一次
-//   落点。判定逻辑全部收敛为本文件的纯函数/状态机，便于 T-U1 直测。
+//   落点。「首批真实测高」的信号由组件自有的 measuredKeys tracker
+//   （SessionMeasuredKeysTracker，uix/A-1）提供——只收本 arm 周期内两写点
+//   新写入的 key，不再读 virtualizer.measurementsCache 非响应式快照。
+//   判定逻辑全部收敛为本文件的纯函数/状态机，便于 T-U1 直测。
 
 /** 未测量行的兜底估计高度（与旧 ConversationTimeline 的 ROW_ESTIMATE_PX 一致）。 */
 export const DEFAULT_ROW_HEIGHT_ESTIMATE_PX = 72;
@@ -138,9 +141,12 @@ export function resolveSessionInitialAnchorPlan<T extends SessionScrollMemoryLik
 /**
  * guard 释放判据：本会话第一批真实测高是否已到达。
  *
- * 信号取 `virtualizer.measurementsCache` 出现本会话首项（行挂载后才会有测量，
- * 而 estimated 总高在首项测高前一直低于视口）。窗口首项做判据而不是任意项：
- * 释放越晚只是延迟一帧，释放越早则估计高度仍在、仍有被钳到 0 的跳顶风险。
+ * 信号由调用方以 measuredKeys 注入（uix/A-1 起为组件自有
+ * SessionMeasuredKeysTracker 的本 arm 快照——只含本 arm 周期内两写点真实测高
+ * 写入的 key；不再直读 virtualizer.measurementsCache：那是非响应式内部快照，
+ * 同 commit 内的陈旧同键测量可让释放早于首个真实测高）。窗口首项做判据而不是
+ * 任意项：释放越晚只是延迟一帧，释放越早则估计高度仍在、仍有被钳到 0 的跳顶
+ * 风险。
  */
 export function canPlaceSessionInitialAnchor(input: {
   /** guard 挂起的 sessionKey（null = 无挂起 guard）。 */
@@ -159,6 +165,59 @@ export function canPlaceSessionInitialAnchor(input: {
   // 本会话还没有任何虚拟行（rows 未到达）：无从判定首项已测，继续挂起。
   if (firstUnitKey === undefined) return false;
   return input.measuredKeys.has(firstUnitKey);
+}
+
+/** tracker 空快照：未写入的会话直接复用，避免每次分配空 Set。 */
+const EMPTY_MEASURED_KEYS: ReadonlySet<unknown> = new Set();
+
+/**
+ * guard 释放信号的 measuredKeys tracker（uix/A-1，替代
+ * virtualizer.measurementsCache 快照读取）。
+ *
+ * 只收「当前 arm 周期内」组件两写点（measureElement 与 live-tail cacheHeight）
+ * 新写入的行 key——即真实发生过的 DOM 测高，与非响应式的 measurementsCache
+ * 快照划清界限。
+ *
+ * per-arm 代际契约（cr-fix-spec r2，本类存在的主因）：arm()（切会话武装 guard）
+ * 时整体清零，只保留本次 arm 之后的写入。分区（按 sessionKey 分表）只负责防
+ * 「旧会话写点闭包误写入新 arm」的跨会话串键，不承担跨 arm 保留——heights
+ * 缓存（TimelineRowHeightCache）是跨会话持久 LRU 且切会话刻意不清，若 tracker
+ * 与缓存同源持久，A→B→A 重访会在首个 commit 用 A 分区的旧键误释放 guard
+ * （跳顶回归借 tracker 复活；guard 一次性，误判=本会话永久回退跳顶形态）。
+ */
+export class SessionMeasuredKeysTracker {
+  /** 分区表：sessionKey → 当前 arm 周期内该会话写点写入的 key 集合。 */
+  private readonly partitions = new Map<string, Set<unknown>>();
+
+  /**
+   * 切会话武装 guard 时调用：清空全部分区（per-arm 代际契约）。
+   * 必须与 guard.arm() 同点调用（ConversationTimeline 的 sessionKey effect）。
+   */
+  arm(): void {
+    this.partitions.clear();
+  }
+
+  /** 写点调用：记录一次本会话真实测高到达（与 heightCacheRef.set 同处调用）。 */
+  record(sessionKey: string, key: unknown): void {
+    if (key === undefined) return;
+    let partition = this.partitions.get(sessionKey);
+    if (partition === undefined) {
+      partition = new Set<unknown>();
+      this.partitions.set(sessionKey, partition);
+    }
+    partition.add(key);
+  }
+
+  /** 释放判据：该 key 是否在本 arm 周期内由本会话写点写入过。 */
+  has(sessionKey: string, key: unknown): boolean {
+    if (key === undefined) return false;
+    return this.partitions.get(sessionKey)?.has(key) ?? false;
+  }
+
+  /** 本会话本 arm 已测 key 快照（供 canPlaceSessionInitialAnchor 消费）。 */
+  snapshot(sessionKey: string): ReadonlySet<unknown> {
+    return this.partitions.get(sessionKey) ?? EMPTY_MEASURED_KEYS;
+  }
 }
 
 /** 组件侧 guard 状态机接口（实现全闭包，无 React/DOM 依赖）。 */
