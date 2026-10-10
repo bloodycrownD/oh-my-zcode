@@ -876,6 +876,11 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
           sessionId,
           workingDirectory,
+          // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：进程形态透传。
+          // 三个入口（protocol / TUI / print）各自知道自己是不是长驻，bootstrap 不
+          // 做 argv 嗅探——TUI 与 `-p` 在 argv 上不可区分。缺省 true = 保守，保持
+          // print 与所有未声明形态的现有前台 settle 行为。
+          processExitsAfterTurn: options.processExitsAfterTurn ?? true,
           sessionStore,
           logger,
           // FORK（D-13）：把预算摘要交给协议宿主的投影层。缺席（CLI/TUI）时本条

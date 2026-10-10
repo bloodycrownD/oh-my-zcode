@@ -197,6 +197,24 @@ export interface MagicContextTurnTransformOptions {
   configDomain?: unknown;
   sessionId: string;
   workingDirectory: string;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 1-2）：本进程是否「跑完一轮就退出」。
+   *
+   * 这是本文件两处 settle（`settleInFlightHistorian` 与端口钩子
+   * `settleScheduledPass`）**唯一**的判据来源。三个入口经
+   * `ZCodeAppOptions`（`app/types.ts`）把它显式透传进来：stdio 协议宿主与 TUI 是
+   * 长驻进程 → `false`；`print`（`-p`）一次性进程 → `true`。取进程生命周期而不是
+   * 「是不是桌面」，是因为 TUI 与 print 在 argv 上不可区分，只有入口自己知道。
+   *
+   * `true`（缺省）= 进程会退出，于是在这一轮交还控制权之前替 historian 等一个
+   * 有界窗口（本批改动之前的逐行行为）；`false` = 进程长驻，两处 settle 都不阻塞
+   * 前台——调度器契约自陈 fire-and-forget 自行 publish，优雅关闭时由
+   * `registerClose` 的 drain 收口兜底（MF-05）。
+   *
+   * 缺省 `true` 是刻意的保守方向：不声明形态时按「进程会退出」处理，即便那是长驻
+   * 进程，代价也只是一次多余的有界等待，而不是把在飞的折叠丢在半路。
+   */
+  processExitsAfterTurn?: boolean;
   /** 读历史的第二数据源；缺席时 raw-message provider 只服务内存历史。 */
   sessionStore?: SessionStorePort;
   logger: Logger;

@@ -213,6 +213,12 @@ export async function runZCodeProtocolAgent(
               }
             : {}),
           sourceTitle: "electron",
+          // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：stdio 协议宿主是
+          // Electron 拉起的**长驻** app-server——进程不随单轮退出，于是 magic-context
+          // 的两处前台 settle（historian 有界等待）在这里只会拖慢首 token 与排队消息
+          // 的 idle-only 提升。端口层据此把它们后台化（fire-and-forget + close 钩子
+          // drain 收口，见 `app/magic-context-turn-transform.ts` 的同名判据注释）。
+          processExitsAfterTurn: false,
           onToolExecResource: (params) =>
             connection.send({ method: zcodeProtocolNotifications.toolExecResource, params }),
         }),

@@ -141,6 +141,12 @@ export function createTuiSubmitPrompt(
       createdApp = await createAppFactory({
         browserControlPort: browserRuntime?.browserControlPort,
         env,
+        // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：TUI 是**长驻**进程
+        // （run.ts 的 TUI 分支跑完不退出，`/new`、`/resume` 还在同一进程里换会话），
+        // 于是 magic-context 的两处前台 settle 后台化——等 historian 只会拖住首
+        // token 与排队消息的 idle-only 提升。判据与 stdio 协议宿主同源：进程
+        // 生命周期，不是「是不是桌面」。
+        processExitsAfterTurn: false,
         projectConfigPath: deps.projectConfigPath,
         providerRegistry: providerRegistryRuntime.runtime.registryService,
         configuredDefaultModelSelection,

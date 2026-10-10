@@ -182,6 +182,13 @@ export const runPrompt = async (
     app = await createApp({
       browserControlPort: browserRuntime?.browserControlPort,
       env,
+      // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：`-p` 是**一次性**进程
+      // （submitPrompt 返回即退出），所以 magic-context 的两处前台 settle 必须保留
+      // 在 turn 内——否则在飞的 historian 会随进程一起消失（drain 预留泄漏、
+      // compartment 不落库）。这与 TUI / stdio 协议宿主（`processExitsAfterTurn:
+      // false`）是同一条判据的另一个取值，显式写出而不是靠缺省，免得将来有人把
+      // 缺省值反向调整时忘了这里。
+      processExitsAfterTurn: true,
       // headless 没有交互审批面，core 因此退到 deny broker，于是 CreateWorkflow 的
       // alwaysAsk gate 在 -p 下**必然被拒**（"No permission client configured"）。
       // 这个最小 broker 只按工具名放行 CreateWorkflow，其余工具委托回同一个 deny

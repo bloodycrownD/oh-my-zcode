@@ -131,6 +131,22 @@ export interface ZCodeAppOptions {
    * 普通 CLI 不传，继续使用 cli 默认值。
    */
   sourceTitle?: ModelProviderSourceTitle;
+  /**
+   * FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：本进程是否「跑完一轮就退出」。
+   *
+   * 判据取**进程生命周期**，不是「是不是桌面」：stdio 协议宿主（Electron 拉起的
+   * app-server）与 TUI 都是长驻进程，`print`（`-p` 一次性）才随轮退出。
+   * magic-context 的前台 settle（historian 的有界等待）只对后者有意义——长驻进程
+   * 里等它，只会把首 token 延迟与排队消息的 idle-only 提升一起拖住（spec
+   * `docs/iterations/bugfix-batch-20261011/spec.md` 缺陷①）。
+   *
+   * 缺省 `true`（保守：未声明形态与 print 保持本批改动之前的逐行行为）；长驻入口
+   * （`zcode-protocol-entrypoint.ts`、`cli/src/tui-prompt-handler.ts`）显式传
+   * `false`。透传终点是 bootstrap 的 magic-context 端口层
+   * （`app/magic-context-turn-transform.ts`），core 的 turn-loop 零改动——那边是
+   * 本 fork 的纪律禁区，不挂点。
+   */
+  processExitsAfterTurn?: boolean;
   eventStore?: SessionEventStorePort;
   sessionStore?: SessionStorePort;
   sessionMailboxPort?: SessionMailboxPort;
