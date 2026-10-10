@@ -17,7 +17,7 @@
  *   1d  runtime 仅对显式 pin 的选择执行「写回 + 持久化 + emitModelSelected」三连，
  *       继承快照不再覆盖会话选择，但本次执行仍按 intent 的 modelSelection 建 Model。
  *
- * 本文件四组断言各对一处收口：
+ * 本文件六组断言各对一处收口：
  *   A 协议面：editUserQuery payload 带/不带 modelSelection 均可解析（zod）。
  *   B 命令面：fork-edit-retry 显式覆盖优先 + pin 标记；缺省沿用旧快照但不 pin；
  *     retryTurn（故意重发原文）仍用旧快照且不 pin。
@@ -28,6 +28,15 @@
  *     payload 显式携带 modelSelection 的路径同样必须置 pin——漏置会让 1d 拒绝
  *     写回，把「显式选择不落库」变成静默行为变更。断言「显式携带 → pin →
  *     写回生效」闭环；缺省路径保持不 pin。
+ *   E pin 主路径（round-3 追加，agent/G-1）：sendText 是普通用户输入的唯一
+ *     主路径，session-flow.ts 置 pin 行（payload.modelSelection !== undefined）
+ *     的两个静默失效方向（恒 true→旧 bug 复活；恒 false→显式选择永不落库）
+ *     此前零测试覆盖（全仓无 sendText handler 测试）。直接驱动 handler：
+ *     E1 显式携带→pinned true+写回三连；E2 缺省→pinned false+不写回。
+ *   F pin 不跨持久化/queue 提升不变式（round-3 追加，agent/G-2）：
+ *     modelSelectionPinned 是 admission 期进程内标志——buildPersistedConversation
+ *     InputIntent 与 inputIntentMetadataFromQueueItem 的输出均不得携带该键，
+ *     且喂回执行态时不得写回（冷恢复/queue 提升按非显式处理）。
  *
  * 运行方式：`npx tsx --test scripts/test-edit-retry-model.mjs`（与
  * test-turn-directory 同源：tsx 直接吃 src，免去「先 build bootstrap 再跑测试」的
@@ -54,6 +63,15 @@ const { sessionMgmtHandlers } = await import(
 );
 const { sendPrompt } = await import(
   new URL("../src/zcode-protocol/server-operations.ts", import.meta.url).href
+);
+const { sessionFlowHandlers } = await import(
+  new URL("../src/zcode-protocol-v4/commands/handlers/session-flow.ts", import.meta.url).href
+);
+const { inputIntentMetadataFromCanonical, inputIntentMetadataFromQueueItem } = await import(
+  new URL("../src/zcode-protocol-v4/commands/input-intent.ts", import.meta.url).href
+);
+const { buildPersistedConversationInputIntent } = await import(
+  new URL("../../core/src/runtime/methods/input-intent-persistence.ts", import.meta.url).href
 );
 const { applySubmissionExecutionState } = await import(
   new URL("../../core/src/runtime/methods/turn-model.ts", import.meta.url).href
@@ -526,4 +544,175 @@ test("D5: legacy session/send 显式携带 modelSelection → pin + 写回生效
   assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
   assert.equal(intent.modelSelectionPinned, true);
   await assertPinClosesWriteBack(intent);
+});
+
+// ── E: pin 主路径（round-3 追加，sendText handler 直驱）──────────────────────
+
+/**
+ * sendText 的最小宿主/record（桩参考 D 组范式）：
+ * getInputRoutingMode→null（不经 held queue 分支）、ensureModelReady 空实现、
+ * queue 系钩子本路径不触达（routing=null 时 applyHeldQueueDisposition 即返回），
+ * app.sendInput 捕获 core admission 收到的 intent。
+ */
+function createSendTextHarness({ text, modelSelection }) {
+  const captured = {};
+  const record = {
+    app: {
+      sessionId: SESSION_ID,
+      getMode: () => "build",
+      getModel: () => "openai/gpt-5",
+      runtime: {
+        getSessionModelSelection: () => SNAPSHOT_SELECTION,
+        getPlanEnabled: () => false,
+        getActiveTurnInfo: () => undefined,
+      },
+      sendInput: async (input, options) => {
+        captured.sendInput = input;
+        captured.sendInputOptions = options;
+        return { kind: "started_turn", turnId: "turn-te1", completion: Promise.resolve() };
+      },
+    },
+    traceContext: { traceId: "trace-te1", sessionId: SESSION_ID },
+    persistence: "immediate",
+  };
+  const host = {
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { info: () => {}, warn: () => {} },
+    getInputRoutingMode: () => null,
+    ensureModelReady: async () => undefined,
+    afterLegacyStateMutation: async () => undefined,
+  };
+  const envelope = {
+    commandId: "cmd-send-te1",
+    clientId: "ui",
+    sessionId: SESSION_ID,
+    type: "sendText",
+    payload: { text, ...(modelSelection ? { modelSelection } : {}) },
+    issuedAt: new Date(1_700_000_000_000),
+    baseRevision: 3,
+    baseLogEpoch: EPOCH,
+  };
+  return { host, envelope, captured };
+}
+
+test("E1: sendText 显式携带 modelSelection → pin + 写回生效", async () => {
+  const { host, envelope, captured } = createSendTextHarness({
+    text: "send text te1",
+    modelSelection: EXPLICIT_SELECTION,
+  });
+  await sessionFlowHandlers.sendText(host, envelope);
+  const intent = captured.sendInputOptions?.intent;
+  assert.ok(intent, "sendText 必须携带 intent");
+  assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
+  assert.equal(intent.modelSelectionPinned, true);
+  assert.equal(intent.text, "send text te1");
+  assert.equal(captured.sendInput.text, "send text te1");
+  await assertPinClosesWriteBack(intent);
+});
+
+test("E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回）", async () => {
+  const { host, envelope, captured } = createSendTextHarness({ text: "send text te1" });
+  await sessionFlowHandlers.sendText(host, envelope);
+  const intent = captured.sendInputOptions?.intent;
+  assert.ok(intent, "sendText 必须携带 intent");
+  // admission 兜底固定的 Session 快照不算显式选择：不得 pin、不得写回。
+  assert.deepEqual(intent.modelSelection, SNAPSHOT_SELECTION);
+  assert.equal(intent.modelSelectionPinned, false);
+  const harness = createRuntimeHarness(SNAPSHOT_SELECTION);
+  const model = await applySubmissionExecutionState(harness.runtime, intent, TRACE);
+  assert.ok(model, "必须返回本次执行使用的 Model");
+  assert.equal(model.providerId, SNAPSHOT_SELECTION.providerId);
+  assert.equal(model.modelId, SNAPSHOT_SELECTION.modelId);
+  const kinds = harness.calls.map((call) => call.kind);
+  assert.deepEqual(
+    kinds.filter((kind) => kind !== "modelFactory"),
+    [],
+    "缺省路径不得写回/持久化/广播",
+  );
+  assert.deepEqual(harness.state.selection, SNAPSHOT_SELECTION);
+});
+
+// ── F: pin 不跨持久化/queue 提升不变式（round-3 追加）────────────────────────
+
+test("F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回）", async () => {
+  // 先经 admission 面构造确实带 pin 的 intent（E1 同源事实）。
+  const pinnedIntent = inputIntentMetadataFromCanonical(
+    {
+      commandId: "cmd-f1",
+      clientId: "ui",
+      sessionId: SESSION_ID,
+      type: "sendText",
+      issuedAt: new Date(1_700_000_000_000),
+      baseRevision: 3,
+      baseLogEpoch: EPOCH,
+    },
+    {
+      kind: "sendText",
+      text: "f1 text",
+      modelSelection: EXPLICIT_SELECTION,
+      modelSelectionPinned: true,
+      sourceCommandId: "cmd-f1-original",
+      clientId: "ui",
+      queueItemId: "queue-f1-original",
+      requestedDelivery: "startNow",
+      admittedDelivery: "startNow",
+    },
+  );
+  assert.equal(pinnedIntent.modelSelectionPinned, true, "前置：admission intent 必须带 pin");
+
+  const persisted = buildPersistedConversationInputIntent("f1 text", pinnedIntent, "queued");
+  assert.ok(persisted, "持久化输出必须存在");
+  assert.ok(
+    !("modelSelectionPinned" in persisted),
+    "持久化输出不得携带 modelSelectionPinned 键（admission 期进程内标志不落库）",
+  );
+  // modelSelection 本身仍落库（恢复与回放需要），丢的只是 pin。
+  assert.deepEqual(persisted.modelSelection, EXPLICIT_SELECTION);
+
+  // 喂回执行态：持久化对象无 pin → 不得写回/持久化/广播（冷恢复第一轮按非显式处理）。
+  const harness = createRuntimeHarness(SNAPSHOT_SELECTION);
+  await applySubmissionExecutionState(harness.runtime, persisted, TRACE);
+  const kinds = harness.calls.map((call) => call.kind);
+  assert.deepEqual(
+    kinds.filter((kind) => kind !== "modelFactory"),
+    [],
+    "持久化 intent 喂回执行态不得写回",
+  );
+  assert.deepEqual(harness.state.selection, SNAPSHOT_SELECTION);
+});
+
+test("F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回）", async () => {
+  const queueItem = {
+    sourceCommandId: "cmd-f2-original",
+    queueItemId: "queue-f2",
+    clientId: "ui",
+    kind: "sendText",
+    text: "f2 text",
+    attachments: [],
+    // queue item 里遗留的旧快照（继承语义，不是本轮显式选择）。
+    modelSelection: EXPLICIT_SELECTION,
+    delivery: { requested: "queue", admitted: "queue" },
+    order: { admissionSeq: 7, queuePosition: 0 },
+    steer: { state: "notRequested" },
+    dispatch: { state: "queued" },
+    admittedAt: 1_700_000_000_000,
+  };
+  const intent = inputIntentMetadataFromQueueItem(queueItem, "f2 text");
+  assert.ok(
+    !("modelSelectionPinned" in intent),
+    "queue 提升 intent 不得携带 modelSelectionPinned 键（QueueItem 不持久化 pin）",
+  );
+  assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
+
+  // 喂回执行态：queue 提升按非显式处理，不得写回。
+  const harness = createRuntimeHarness(SNAPSHOT_SELECTION);
+  const model = await applySubmissionExecutionState(harness.runtime, intent, TRACE);
+  assert.ok(model, "必须返回本次执行使用的 Model");
+  const kinds = harness.calls.map((call) => call.kind);
+  assert.deepEqual(
+    kinds.filter((kind) => kind !== "modelFactory"),
+    [],
+    "queue 提升 intent 喂回执行态不得写回",
+  );
+  assert.deepEqual(harness.state.selection, SNAPSHOT_SELECTION);
 });
