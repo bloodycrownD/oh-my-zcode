@@ -28,6 +28,15 @@ export const STORAGE_MORE_ENTRIES_PATH = "…";
 /** none：不提供清理；safe：直接清理；confirm：需要二次确认。 */
 export type StorageCleanability = "none" | "safe" | "confirm";
 
+/**
+ * per-path 覆盖类别的清理范围口径（uix/G-1 r3 收口）。
+ *
+ * 取值 "paths"：该类别整组 cleanability 仍为 "none"（不可一键清理），但组内有一段
+ * 路径单列接进清理入口（当前 toolOutputs → cli/exec）。aggregate 随分类快照下发，
+ * UI 三处门控据此在 none 类别上为这一段放行入口；缺失（undefined）= 无覆盖。
+ */
+export type StorageCategoryCleanScope = "paths";
+
 /** 扫描输入：由 RootsResolverPort 解析出的根目录。 */
 export interface StorageRootSpec {
   id: StorageRootId;
@@ -57,6 +66,8 @@ export interface StorageCategoryUsage {
   bytes: number;
   fileCount: number;
   cleanability: StorageCleanability;
+  /** per-path 覆盖类别（toolOutputs → cli/exec）为 "paths"；其余类别缺省。 */
+  cleanScope?: StorageCategoryCleanScope;
   /** 下钻明细：聚合到规则命中路径的下一级，按 bytes 降序，有数量上限。 */
   entries: StorageEntryUsage[];
 }

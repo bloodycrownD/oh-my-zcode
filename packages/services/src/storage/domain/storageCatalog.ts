@@ -26,10 +26,12 @@ const CLEANABILITY: Record<StorageCategoryId, StorageCleanability> = {
   sessionStore: "none",
   // 只有 subagent 的 transcript.jsonl 可删；其余工具输出与临时缓存暂不可删。
   subagentTranscripts: "safe",
-  // 6c：toolOutputs 整组里只把 cli/exec 单列出来接进清理入口（见 CLEAN_PATH_OVERRIDES）。
-  // 「safe」只对 cli/exec 生效：artifacts/agents/sessions/缓存…的删除范围被
-  // getStorageCleanScopes 与 isStoragePathInCleanScope 双双收敂到 cli/exec。
-  toolOutputs: "safe",
+  // 6c → uix/G-1 r3 收口：整组维持 "none"（不可一键清理），组内只有 cli/exec 这一段
+  // 经 CLEAN_PATH_OVERRIDES 单列接进清理入口——类别级 none + per-path override 表达
+  // 「仅 cli/exec 可清理」，UI 侧由 aggregate 下发的 cleanScope="paths" 放行入口，
+  // 服务三闸门（getStorageCleanScopes / storageService.clean / planStorageClean）
+  // 均以 hasStorageCleanPathOverride 优先于 none 门放行。
+  toolOutputs: "none",
   modelTrajectory: "safe",
   devTraces: "safe",
   logs: "safe",
@@ -52,6 +54,9 @@ const CLEANABILITY: Record<StorageCategoryId, StorageCleanability> = {
  *   - 占用统计/展示不变：`classifyStoragePath` 仍把 exec 归 toolOutputs；
  *   - 清理范围收敛：`getStorageCleanScopes("toolOutputs")` 只枚举 cli/exec，
  *     `planStorageClean` 再按 `isStoragePathInCleanScope` 过滤一遍候选（双保险）。
+ *
+ * uix/G-1 r3 收口：整组 cleanability 回 "none"，override 成为这一段唯一的清理依据；
+ * 因此 override 判定必须在各处 none 门之前（见 getStorageCleanScopes）。
  */
 const CLEAN_PATH_OVERRIDES: Partial<Record<StorageCategoryId, readonly string[]>> = {
   toolOutputs: ["cli/exec"],
@@ -256,13 +261,14 @@ const RECURSIVE_FILE_RULE_SCOPES: Partial<Record<StorageCategoryId, string[]>> =
 };
 
 export function getStorageCleanScopes(categoryId: StorageCategoryId): StorageCleanScope[] {
-  if (categoryId === "other" || CLEANABILITY[categoryId] === "none") return [];
-  // 6c：带 per-path 覆盖的类别（toolOutputs → cli/exec）只枚举覆盖前缀，
-  // 不枚举整组——枚举范围即删除范围的上界，别让"单列"变成"整组解锁"。
+  // uix/G-1 r3：per-path 覆盖类别（toolOutputs → cli/exec）的枚举优先于 none 门。
+  // 类别级 cleanability 已回 "none"（整组不可一键清理），但覆盖前缀这一段必须仍能
+  // 枚举——否则 UI 放行的清理入口在 service 侧一个候选都拿不到。
   const overridePrefixes = CLEAN_PATH_OVERRIDES[categoryId];
   if (overridePrefixes) {
     return overridePrefixes.map((prefix) => ({ prefix, recursive: true }));
   }
+  if (categoryId === "other" || CLEANABILITY[categoryId] === "none") return [];
   const recursive = [
     ...PREFIX_RULES[categoryId],
     ...(RECURSIVE_FILE_RULE_SCOPES[categoryId] ?? []),

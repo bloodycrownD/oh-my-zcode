@@ -42,7 +42,13 @@ export function planStorageClean(params: {
   now: number;
 }): StorageCleanPlan {
   const { categoryId, candidates, context, now } = params;
-  if (getStorageCategoryCleanability(categoryId) === "none") {
+  // uix/G-1 r3：none 门同样让位 per-path 覆盖类别（toolOutputs → cli/exec）。
+  // 类别级整组不可一键清理，但覆盖前缀这一段要能出计划；候选随后由
+  // isStoragePathInCleanScope 收敛到覆盖前缀，不会误伤整组其余成员。
+  if (
+    getStorageCategoryCleanability(categoryId) === "none" &&
+    !hasStorageCleanPathOverride(categoryId)
+  ) {
     return { targets: [], skippedCount: candidates.length };
   }
   // 候选来自按前缀枚举，可能混入其他类别（如 cli/plugins 下的 cache）；只保留分类一致且未受保护的。
@@ -101,5 +107,12 @@ function filterInactiveFiles(
   targets: StorageCleanCandidate[],
   now: number,
 ): StorageCleanCandidate[] {
-  return targets.filter((candidate) => now - candidate.mtimeMs > EXEC_OUTPUT_ACTIVE_WINDOW_MS);
+  // 时钟基准卫语句（uix/G-2）：mtime 晚于 now 时（本机时钟回拨、NTP 跳变、
+  // 从时钟更准的机器拷来的文件）now - mtimeMs 为负，本就不满足 24h 窗口——
+  // 这里显式写出来只为锁定「未来文件绝不回删」的语义，过滤行为与旧算式一致，
+  // 由 T-C2-5 两例 fake clock 测试钉住。
+  return targets.filter(
+    (candidate) =>
+      candidate.mtimeMs <= now && now - candidate.mtimeMs > EXEC_OUTPUT_ACTIVE_WINDOW_MS,
+  );
 }

@@ -5,7 +5,11 @@
 import { Emitter } from "@zcode/rpc";
 import type { IStorageService } from "../contract.js";
 import { planStorageClean } from "../domain/cleanPlan.js";
-import { getStorageCategoryCleanability, getStorageCleanScopes } from "../domain/storageCatalog.js";
+import {
+  getStorageCategoryCleanability,
+  getStorageCleanScopes,
+  hasStorageCleanPathOverride,
+} from "../domain/storageCatalog.js";
 import type { StorageRootId, StorageRootSpec, StorageUsageSnapshot } from "@zcode/shared";
 import type { FsCleanerPort, RootsResolverPort, ScanRunnerPort } from "./ports.js";
 import { createScanJob, type ScanJob } from "./scanJob.js";
@@ -81,7 +85,13 @@ export function createStorageService(deps: StorageServiceDependencies): IStorage
     onScanProgress: progressEmitter.event,
 
     async clean(request) {
-      if (getStorageCategoryCleanability(request.categoryId) === "none") {
+      // uix/G-1 r3：none 门让位 per-path 覆盖类别（toolOutputs → cli/exec）——
+      // 类别级整组不可一键清理，但覆盖前缀这一段服务侧必须能执行，否则 UI 放行的
+      // 入口点下去只会抛 "not cleanable"；删除范围仍由 scopes 收敛到 cli/exec。
+      if (
+        getStorageCategoryCleanability(request.categoryId) === "none" &&
+        !hasStorageCleanPathOverride(request.categoryId)
+      ) {
         throw new Error(`storage category is not cleanable: ${request.categoryId}`);
       }
       // 清理会改变磁盘内容，进行中的扫描结果会失真；先取消，UI 在清理后重新扫描。

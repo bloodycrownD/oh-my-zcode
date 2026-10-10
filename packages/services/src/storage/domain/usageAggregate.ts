@@ -2,7 +2,11 @@
  * 扫描条目 → 根目录占用快照的折叠器。纯函数式累加器，可在 Worker 内运行。
  * 保证快照体积有界：每个类别的 entries 只保留 bytes 最大的前 N 项，其余折叠进 STORAGE_MORE_ENTRIES_PATH。
  */
-import { classifyStoragePath, getStorageCategoryCleanability } from "./storageCatalog.js";
+import {
+  classifyStoragePath,
+  getStorageCategoryCleanability,
+  hasStorageCleanPathOverride,
+} from "./storageCatalog.js";
 import {
   STORAGE_CATEGORY_IDS,
   STORAGE_MORE_ENTRIES_PATH,
@@ -71,6 +75,10 @@ export function createStorageUsageAccumulator(
           bytes: bucket?.bytes ?? 0,
           fileCount: bucket?.fileCount ?? 0,
           cleanability: getStorageCategoryCleanability(id),
+          // uix/G-1 r3：per-path 覆盖类别（toolOutputs → cli/exec）显式下发
+          // cleanScope="paths"，UI 门控据此在 none 类别上放行这一段入口；
+          // 其余类别留 undefined。由 categoryId 派生，跨根确定性一致。
+          cleanScope: hasStorageCleanPathOverride(id) ? "paths" : undefined,
           entries: bucket ? foldEntries(bucket.entries, maxEntries) : [],
         };
       });
