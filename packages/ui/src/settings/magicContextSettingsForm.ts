@@ -44,7 +44,14 @@ export interface MagicContextSettingsForm {
   historyBudgetPercentage: number;
   /** 前缀缓存 TTL，如 "5m" / "1h" / "never"。 */
   cacheTtl: string;
-  /** historian 旁路模型 ID（"provider/model"）。空 = 未配置。 */
+  /**
+   * FORK（impl-historian-inherit）：折叠模型三态，与 CLI 侧
+   * `MagicContextConfigSchema.historian.model` 一一对应：
+   *   - `"inherit"`（**缺省**）：折叠模型跟随会话当前生效模型。配置字段缺失时
+   *     也按它显示，与 bootstrap 的缺省一致；
+   *   - `"provider/model"`：显式旁路模型；
+   *   - `""`：显式关闭分舱折叠。
+   */
   historianModel: string;
   smartDrops: boolean;
   failClosedBlocking: boolean;
@@ -80,6 +87,18 @@ function readCacheTtlDefault(value: unknown): string | undefined {
   return undefined;
 }
 
+/**
+ * `historian.model` 三态读侧（impl-historian-inherit）：
+ *   - 字符串（含 `""`）→ 原样带回：`"inherit"` = 继承、`""` = 显式关闭、
+ *     `"provider/model"` = 显式模型。**空串必须原样**——它现在是「关闭」这个
+ *     有意义的哨兵，塌成 fallback 会把用户的显式选择静默改回默认继承。
+ *   - 缺失 / 非字符串 → `fallback.historianModel`（装默认的表单给 "inherit"，
+ *     与 bootstrap 侧「字段缺失 = 继承」的缺省一致）。
+ */
+function readHistorianModel(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value.trim() : fallback;
+}
+
 /** 把 unknown（RPC result 的 `config`）收敛成一份可编辑表单。 */
 export function magicContextSettingsFormFromConfig(
   config: unknown,
@@ -87,7 +106,7 @@ export function magicContextSettingsFormFromConfig(
 ): MagicContextSettingsForm {
   if (!isRecord(config)) return fallback;
   const historian = isRecord(config.historian) ? config.historian : {};
-  const historianModel = typeof historian.model === "string" ? historian.model : "";
+  const historianModel = readHistorianModel(historian.model, fallback.historianModel);
 
   return {
     enabled: typeof config.enabled === "boolean" ? config.enabled : fallback.enabled,
@@ -101,7 +120,7 @@ export function magicContextSettingsFormFromConfig(
         ? config.history_budget_percentage
         : fallback.historyBudgetPercentage,
     cacheTtl: readCacheTtlDefault(config.cache_ttl) ?? fallback.cacheTtl,
-    historianModel: historianModel.trim() || fallback.historianModel,
+    historianModel,
     smartDrops: typeof config.smart_drops === "boolean" ? config.smart_drops : fallback.smartDrops,
     failClosedBlocking:
       typeof config.fail_closed_blocking === "boolean"
@@ -181,19 +200,24 @@ export function buildMagicContextConfigFromForm(
     next.protected_tokens = form.protectedTokens;
   }
 
-  // historian 只改 model 键：temperature/tools/prompt 等元数据原样保留，
-  // 但空值必须**删键**而不是写 "" 或留旧值——`z.string().trim().min(1).optional()`
-  // 拒绝空串，而保留旧值会让「清空」这个操作静默失效（用户点了清空却什么都没变，
-  // 下一次保存又把旧模型写回 config.json）。
+  // historian 只改 model 键：temperature/tools/prompt 等元数据原样保留。
+  //
+  // FORK（impl-historian-inherit）：写侧同样是三态，且空串**有意义**——它是
+  // 「显式关闭分舱折叠」的哨兵，所以照字面写进域（schema 侧已为它放行
+  // `z.literal("")`；删键那条老路不再走，因为删键 = 字段缺失 = 缺省继承，
+  // 与用户的显式选择正好相反）。
+  //
+  // 唯一的例外：用户停在默认「继承」而 base 里根本没写 model 时，不把哨兵显式
+  // 落盘——缺省即继承，写了只会让「零改动保存」变成一次真实写盘（设置页的
+  // dirty 判定是 build(base, form) 与 base 的 stringify 比较）。
   const previousHistorian = isRecord(previous.historian) ? previous.historian : {};
+  const previousModel =
+    typeof previousHistorian.model === "string" ? previousHistorian.model : undefined;
   const model = form.historianModel.trim();
-  if (model) {
-    next.historian = { ...previousHistorian, model };
-  } else if ("model" in previousHistorian) {
-    const { model: _dropped, ...rest } = previousHistorian;
-    next.historian = rest;
-  } else {
+  if (model === HISTORIAN_MODEL_INHERIT && previousModel === undefined) {
     next.historian = { ...previousHistorian };
+  } else {
+    next.historian = { ...previousHistorian, model };
   }
 
   return next;
@@ -209,12 +233,20 @@ export function buildMagicContextConfigFromForm(
  * 两端（读出来要能显示、选完要能写回），放一起才不会只改一端。
  */
 
-/** 空 historian 模型的选择器哨兵值。与 Subagents 的 `inherit` 同构：展示态专用。 */
+/**
+ * 选择器的两个哨兵值（展示态专用，与 Subagents 的 `inherit` 同构）：
+ *   - `"inherit"`：折叠模型跟随会话模型（**缺省**，与 CLI 侧哨兵同串）；
+ *   - `"none"`：显式关闭分舱折叠（表单态 `""`）。
+ * 真实模型的菜单项值是 `encodeCustomModelValue` 的产物（`custom:provider:model`），
+ * 不会与这两个哨兵相撞。
+ */
+export const HISTORIAN_MODEL_INHERIT = "inherit";
 const NO_HISTORIAN_MODEL_VALUE = "none";
 
 export function toModelPickerValue(model: string): string {
   const trimmed = model.trim();
   if (!trimmed) return NO_HISTORIAN_MODEL_VALUE;
+  if (trimmed === HISTORIAN_MODEL_INHERIT) return HISTORIAN_MODEL_INHERIT;
   try {
     const selection = parseModelPickerValue(trimmed);
     return encodeCustomModelValue(selection.providerId, selection.modelId);
@@ -226,6 +258,8 @@ export function toModelPickerValue(model: string): string {
 }
 
 export function toPersistedModelId(pickerValue: string): string {
+  // 继承哨兵原样透传（它不是 model id，但表单需要它过这条往返链）。
+  if (pickerValue === HISTORIAN_MODEL_INHERIT) return HISTORIAN_MODEL_INHERIT;
   if (pickerValue === NO_HISTORIAN_MODEL_VALUE) return "";
   // 菜单项的 value 是 `encodeCustomModelValue` 的产物（`custom:provider:model`，
   // URI 编码 + 冒号分隔）。`parseModelPickerValue` 只认 `provider/model`，对

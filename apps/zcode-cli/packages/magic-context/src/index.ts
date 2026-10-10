@@ -99,10 +99,8 @@ export {
   DEFAULT_HISTORY_BUDGET_PERCENTAGE,
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   EXCLUDED_CONFIG_KEYS,
-  HISTORIAN_MODEL_REQUIRED_MESSAGE,
   MagicContextConfigSchema,
   PROTECTED_TOKENS_MIN,
-  findConfigReadinessError,
   type HistorianConfig,
   type MagicContextConfig,
 } from "./host/config/schema.js";

@@ -15,6 +15,7 @@ import { Switch } from "@/components/ui/switch.js";
 import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
 import { SettingsRow } from "@/settings/SettingsPageParts.js";
 import {
+  HISTORIAN_MODEL_INHERIT,
   MAGIC_CONTEXT_NUMBER_FIELD_SPECS,
   toPersistedModelId,
   type MagicContextSettingsForm,
@@ -206,6 +207,14 @@ export function MagicContextSettingsFields({
             isItemLocked={MODEL_ITEM_NEVER_LOCKED}
             onValueChange={(value) => patch("historianModel", toPersistedModelId(value))}
             footerActions={[
+              {
+                // FORK（impl-historian-inherit）：三态下拉。继承是默认项（缺省
+                // 即继承，bootstrap 侧同语义），关闭是显式哨兵 ""。
+                key: "historian-model:inherit",
+                label: intl.formatMessage({ id: "settings.context.historianModel.inherit" }),
+                onSelect: () => patch("historianModel", HISTORIAN_MODEL_INHERIT),
+                selected: form.historianModel.trim() === HISTORIAN_MODEL_INHERIT,
+              },
               {
                 key: "historian-model:none",
                 label: intl.formatMessage({ id: "settings.context.historianModel.clear" }),

@@ -27,11 +27,27 @@
  *
  * ── historian 模型从哪来 ──────────────────────────────────────────────────────
  *
- * `magicContext.historian.model`，形如 `"provider/model"`（E 组 schema 的字段说明
- * 就是这么写的）。宿主侧由 `create-app.ts` 提供一个 `createSidecarModel(modelId)`
- * 闭包：它走 provider Registry + `modelFactory`，因此**「这个模型此刻能不能造出来」
- * 只有一个答案**——与主会话选模型走同一条校验（`validateSelection`），而不是这里
- * 再抄一份解析。
+ * `magicContext.historian.model` 三态（FORK / impl-historian-inherit，用户拍板的
+ * 产品决策：折叠模型默认继承会话模型，保证分舱折叠永不因「未配置」静默关闭；
+ * 计费取舍交给用户）。**本文件是三态的唯一分发点**：
+ *
+ *   - 字段缺失 / `"inherit"`（{@link HISTORIAN_MODEL_INHERIT}）→ **inherit**：
+ *     折叠模型 = 会话当前生效模型。装配期还不知道会话模型是什么（turn 还没开始），
+ *     所以 executor 无条件装上，模型 key 由 {@link MagicContextHistorianHost.noteLiveModel}
+ *     每 turn 刷新（live 绑定），窗口/输出上限随之惰性解析。
+ *   - `"provider/model"` → 显式模型（现状不变，装配期静态解析一次）。
+ *   - `""` → 显式关闭分舱折叠：不装 executor，`historianRunnable` 保持 false
+ *     （现状「留空」语义收窄为「显式关闭」）。
+ *
+ * `"inherit"` 只是**配置面**哨兵：凡是要过包侧边界的值（runPass 的 model、
+ * TransformDeps 的 historianModel）一律先在本文件解析成具体 key。包内
+ * `derive-budgets` 对没有 `/` 前缀的串只会 warn 后走默认窗口，把哨兵漏过去
+ * 等于悄悄换了个 chunk 预算。
+ *
+ * 模型形态的另一半没变：宿主侧（`create-app.ts`）提供一个
+ * `createSidecarModel(modelId)` 闭包，它走 provider Registry + `modelFactory`，
+ * 因此**「这个模型此刻能不能造出来」只有一个答案**——与主会话选模型走同一条
+ * 校验（`validateSelection`），而不是这里再抄一份解析。
  *
  * Apache-2.0, (c) the magic-context authors. Modified for oh-my-zcode.
  */
@@ -53,6 +69,7 @@ import {
   getActiveCompartmentRun,
   getCompartments,
   hasRunnableCompartmentWindow,
+  resolveModelKey,
   resolveOpenCodeProtectedTailBoundary,
   setMagicContextRecompRunner,
   startCompartmentAgent,
@@ -66,6 +83,18 @@ import {
   type SidecarModelCall,
   type SidecarModelCallResult,
 } from "@zcode/magic-context";
+
+/**
+ * FORK（impl-historian-inherit）：`historian.model` 的「继承」哨兵。
+ *
+ * 只活在**配置面**与 bootstrap 边界内：它在这里被解析成会话当前生效模型的
+ * 具体 key（`provider/model`），包侧永远看不到这个字面量。字段缺失与显式写
+ * `"inherit"` 等价（缺省即继承）。
+ */
+export const HISTORIAN_MODEL_INHERIT = "inherit";
+
+/** historian 模型的三种模式，装配期定死、运行期不再变（改它要走配置热重载）。 */
+export type HistorianModelMode = "explicit" | "inherit" | "off";
 
 /** 宿主按 `"provider/model"` 造一个 Model；返回 undefined 表示此刻造不出来。 */
 export type CreateSidecarModel = (modelId: string) => Model | undefined;
@@ -96,10 +125,29 @@ export interface MagicContextHistorianHostDeps {
 export interface MagicContextHistorianHost {
   hiddenCompletionExecutor?: HiddenCompletionExecutor;
   historianRunnable: boolean;
-  /** `magicContext.historian.model`（`"provider/model"`），未配置时 undefined。 */
+  /**
+   * **显式**配置的 historian 模型（`"provider/model"`）。只在 explicit 模式出现：
+   * inherit 模式这里恒 undefined（会话模型还没绑），off 模式也没有。包侧
+   * `TransformDeps.historianModel` 的值一律走 {@link getHistorianModel}——
+   * 那是三态解析后的**具体 key**，哨兵字符串不许过包边界。
+   */
   historianModel?: string;
+  /**
+   * 三态分发结果。调用方（turn-transform 装配）据此知道要不要在 live 绑定到达时
+   * 原地刷新 deps：只有 inherit 模式的模型 key 会随会话模型变化。
+   */
+  historianModelMode: HistorianModelMode;
+  /**
+   * 当前生效的折叠模型 key：explicit → 配置值；inherit → live 绑定（尚未绑定时
+   * undefined）；off → undefined。**这就是喂给包侧的唯一模型入口**。
+   */
+  getHistorianModel: () => string | undefined;
   fallbackModels: readonly string[];
   historianTwoPass: boolean;
+  /**
+   * historian 旁路请求的输出上限。**活值**（getter）：inherit 模式下随 live 绑定
+   * 按新模型声明的上限重新夹紧，显式模式装配期定死后不再变。
+   */
   historianMaxOutputTokens?: number;
   historianTimeoutMs: number;
   /** historian 自身的窗口决定 chunk 预算；historian 模型未知时用保守回退。 */
@@ -109,8 +157,11 @@ export interface MagicContextHistorianHost {
   /**
    * 每 pass 用本轮真实模型刷新主模型窗口。后台 pass 的 protected-tail 边界按
    * **主模型**的窗口解，所以这条事实必须来自 turn，而不是装配期猜一个。
+   *
+   * FORK（impl-historian-inherit）：inherit 模式下这里同时刷新**折叠模型自身**：
+   * 记下 live 绑定的 key，并惰性重解它的窗口与输出上限（装配期没有 Model 可读）。
    */
-  noteLiveModel: (model: Pick<Model, "properties">) => void;
+  noteLiveModel: (model: Pick<Model, "properties" | "providerId" | "modelId">) => void;
   /** 关闭时终止在飞的 historian（会话关闭 / App 退出）。 */
   /**
    * 幂等。先 abort 宿主信号（在飞的 sidecar 请求立刻停，MF-03），再停调度器
@@ -138,11 +189,18 @@ const UNKNOWN_HISTORIAN_CONTEXT_LIMIT = 128_000;
  */
 const DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS = 8_192;
 
+/**
+ * `magicContext.historian.maxTokens` 的解析：按模型自己声明的上限夹紧。
+ *
+ * `model` 缺席 = **此刻还不知道折叠模型是谁**（inherit 模式未绑定期）：此时只
+ * 能给出 `magicContext.historian.maxTokens` 或本 fork 的缺省值，夹紧动作等
+ * {@link MagicContextHistorianHost.noteLiveModel} 拿到 Model 后补做。
+ */
 function resolveHistorianMaxOutputTokens(
   config: MagicContextConfig,
-  model: Model,
+  model?: Model,
 ): number | undefined {
-  const ceiling = model.optionSpecs?.maxOutputTokens?.max;
+  const ceiling = model?.optionSpecs?.maxOutputTokens?.max;
   const max = typeof ceiling === "number" && ceiling > 0 ? Math.floor(ceiling) : undefined;
   const configured = config.historian.maxTokens;
   const wanted =
@@ -271,16 +329,30 @@ function readModelKey(model: unknown): string | undefined {
 /**
  * 装 historian 的宿主接线面。
  *
- * `historianRunnable` 的判据只有一条：**historian 模型配了、且此刻造得出来**。
- * 两者任一不成立就不装 executor，`historianRunnable` 保持 false ——
- * transform 侧于是走「诚实关闭」那条分支（清 `compartmentInProgress`、
- * 不 startCompartmentAgent），而不是每 pass 抛一个「没接线」。
+ * 装配门（FORK / impl-historian-inherit）：`historianRunnable` 的判据从
+ * 「模型配了且此刻造得出来」改成「三态不是 off，且宿主给得出 sidecar 模型」——
+ * 缺省/inherit 模式**无条件装** executor（会话模型要等 turn 开始才绑得到），
+ * 显式模式保留「造不出来就不装」的现状，off 模式与现状「未配置」逐行相同。
  */
 export function createMagicContextHistorianHost(
   config: MagicContextConfig,
   deps: MagicContextHistorianHostDeps,
 ): MagicContextHistorianHost {
-  const historianModel = config.historian.model;
+  // FORK（MF-03）：本宿主级的关闭信号。包内调度器自己有一只 `shutdownController`，
+  // 但它的 `signal` 只传到 `runSession` 的形参——而真正握着 provider 请求的
+  // `AbortSignal` 是 executor 每个 run slot 的 `controller`。把这一只接到 executor 的
+  // `externalSignal` 上，关闭时才真的能停掉在飞的 sidecar 请求，而不是「不再等待」。
+  const hostShutdownController = new AbortController();
+  // schema 保证 trim 过，这里再 trim 一次是为了让 `configDomain` 静态源（未过
+  // schema 的降级路径）也落到同一组三态上，而不是把 " " 当成一个模型 ID。
+  const configuredModel =
+    typeof config.historian.model === "string" ? config.historian.model.trim() : undefined;
+  const historianModelMode: HistorianModelMode =
+    configuredModel === ""
+      ? "off"
+      : configuredModel === undefined || configuredModel === HISTORIAN_MODEL_INHERIT
+        ? "inherit"
+        : "explicit";
   const fallbackModels = [...config.historian.fallback_models];
   const historianTwoPass = config.historian.two_pass;
   const historianTimeoutMs = DEFAULT_HISTORIAN_TIMEOUT_MS;
@@ -288,39 +360,68 @@ export function createMagicContextHistorianHost(
 
   // 主模型窗口：每 pass 由 `noteLiveModel` 刷新。装配期没有 turn，也就还没有事实。
   let mainContextLimit = UNKNOWN_MAIN_CONTEXT_LIMIT;
-  // historian 自身的窗口决定 chunk 预算，装配期从造出来的 Model 上读一次。
+  // historian 自身的窗口决定 chunk 预算。explicit 模式装配期从造出来的 Model 上
+  // 读一次；inherit 模式绑不到会话模型，用保守回退起步，等 noteLiveModel 补解。
   let historianContextLimit = UNKNOWN_HISTORIAN_CONTEXT_LIMIT;
+  // inherit 模式下的 live 绑定 key（会话当前生效的折叠模型）。未绑定时 undefined。
+  let liveHistorianModelKey: string | undefined;
 
   let hiddenCompletionExecutor: HiddenCompletionExecutor | undefined;
   let historianMaxOutputTokens: number | undefined = config.historian.maxTokens;
-  // FORK（MF-03）：本宿主级的关闭信号。包内调度器自己有一只 `shutdownController`，
-  // 但它的 `signal` 只传到 `runSession` 的形参——而真正握着 provider 请求的
-  // `AbortSignal` 是 executor 每个 run slot 的 `controller`。把这一只接到 executor 的
-  // `externalSignal` 上，关闭时才真的能停掉在飞的 sidecar 请求，而不是「不再等待」。
-  const hostShutdownController = new AbortController();
-  if (historianModel !== undefined && deps.createSidecarModel !== undefined) {
-    const model = deps.createSidecarModel(historianModel);
-    if (model) {
-      historianContextLimit = model.properties.contextWindow;
-      historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config, model);
-      hiddenCompletionExecutor = createHiddenCompletionExecutor({
-        sidecarModelCall: createZCodeSidecarModelCall({
-          logger: deps.logger,
-          createSidecarModel: deps.createSidecarModel,
-          ...(deps.traceContext === undefined ? {} : { traceContext: deps.traceContext }),
-        }),
-        externalSignal: hostShutdownController.signal,
-      });
+  // 提成局部 const：属性访问的收窄不会跨闭包边界存活（buildExecutor 在下面用）。
+  const createSidecarModel = deps.createSidecarModel;
+  // sidecar 调用面按请求现读 `run.model`（模型无关），所以同一条调用面 inherit
+  // 与显式模式共用，不需要按模型重建。
+  const buildExecutor = (createModel: CreateSidecarModel): void => {
+    hiddenCompletionExecutor = createHiddenCompletionExecutor({
+      sidecarModelCall: createZCodeSidecarModelCall({
+        logger: deps.logger,
+        createSidecarModel: createModel,
+        ...(deps.traceContext === undefined ? {} : { traceContext: deps.traceContext }),
+      }),
+      externalSignal: hostShutdownController.signal,
+    });
+  };
+  if (historianModelMode !== "off" && createSidecarModel !== undefined) {
+    // 显式模型：非空且非哨兵的一个具体 ID（`undefined` 只可能是 inherit）。
+    const explicitModel = historianModelMode === "explicit" ? configuredModel : undefined;
+    if (explicitModel !== undefined) {
+      // 显式模式：装配期静态解析一次（现状逐行不变）。
+      const model = createSidecarModel(explicitModel);
+      if (model) {
+        historianContextLimit = model.properties.contextWindow;
+        historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config, model);
+        buildExecutor(createSidecarModel);
+      } else {
+        deps.logger.warn(
+          "Magic context historian model cannot be constructed; historian stays off",
+          {
+            module: "bootstrap",
+            event: "magic_context.historian_model_unavailable",
+            model: explicitModel,
+          },
+        );
+      }
     } else {
-      deps.logger.warn("Magic context historian model cannot be constructed; historian stays off", {
-        module: "bootstrap",
-        event: "magic_context.historian_model_unavailable",
-        model: historianModel,
-      });
+      // inherit：会话模型未知，先按保守回退装上去；窗口与输出上限在
+      // `noteLiveModel` 里随 live 绑定惰性刷新。
+      historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config);
+      buildExecutor(createSidecarModel);
     }
   }
 
   const getHistorianChunkTokens = (): number => deriveHistorianChunkTokens(historianContextLimit);
+
+  /**
+   * 三态解析后的**具体 key**——喂给包侧（runPass 与 TransformDeps）的唯一入口。
+   * explicit → 配置值；inherit → live 绑定（尚未绑定时 undefined）；off → 永远
+   * undefined（关着的 historian 没有模型可言）。
+   */
+  const getHistorianModel = (): string | undefined => {
+    if (historianModelMode === "explicit") return configuredModel;
+    if (historianModelMode === "inherit") return liveHistorianModelKey;
+    return undefined;
+  };
 
   const runPass = (
     sessionId: string,
@@ -333,7 +434,7 @@ export function createMagicContextHistorianHost(
       executor: hiddenCompletionExecutor,
       sessionId,
       directory: deps.workingDirectory,
-      historianModel,
+      historianModel: getHistorianModel(),
       fallbackModels,
       historianTwoPass,
       historianMaxOutputTokens,
@@ -378,16 +479,42 @@ export function createMagicContextHistorianHost(
   return {
     ...(hiddenCompletionExecutor === undefined ? {} : { hiddenCompletionExecutor }),
     historianRunnable: hiddenCompletionExecutor !== undefined,
-    ...(historianModel === undefined ? {} : { historianModel }),
+    // 哨兵不许过包边界：explicit 才暴露配置值，inherit/off 一律缺席。
+    ...(historianModelMode === "explicit" ? { historianModel: configuredModel } : {}),
+    historianModelMode,
+    getHistorianModel,
     fallbackModels,
     historianTwoPass,
-    ...(historianMaxOutputTokens === undefined ? {} : { historianMaxOutputTokens }),
+    // inherit 模式下输出上限随 live 绑定刷新，所以这里必须是**活值**：return 一个
+    // 快照会让「按 live 模型上限夹紧」的刷新对宿主对象之外的所有读者静默失效
+    // （runPass 读局部变量，而包侧 deps 与测试读的是这个字段）。
+    get historianMaxOutputTokens(): number | undefined {
+      return historianMaxOutputTokens;
+    },
     historianTimeoutMs,
     getHistorianChunkTokens,
     ...(historianScheduler === undefined ? {} : { historianScheduler }),
     noteLiveModel: (model) => {
       const window = model.properties?.contextWindow;
       if (typeof window === "number" && window > 0) mainContextLimit = window;
+      if (historianModelMode !== "inherit") return;
+      // live 绑定：与主模型窗口同步刷新。用包内 `resolveModelKey` 而不是自己拼
+      // 字符串——宿主另写一份 key 规范化迟早与包内漂移（usage recorder 同理）。
+      const key = resolveModelKey(model.providerId, model.modelId);
+      if (key === undefined) return;
+      liveHistorianModelKey = key;
+      // 惰性解析折叠模型自己的窗口与输出上限。造不出 Model 时（provider 此刻
+      // 不可用）保持上一次的有效值而不是清零：128k 回退与缺省输出上限是未绑定
+      // 期的起点，绑定失败时退回那个起点比「窗口变 0」安全。
+      const liveModel = createSidecarModel?.(key);
+      if (liveModel) {
+        const window = liveModel.properties?.contextWindow;
+        if (typeof window === "number" && window > 0) historianContextLimit = window;
+        historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config, liveModel);
+      } else {
+        historianContextLimit = UNKNOWN_HISTORIAN_CONTEXT_LIMIT;
+        historianMaxOutputTokens = resolveHistorianMaxOutputTokens(config);
+      }
     },
     shutdown: () => {
       // 顺序有意义：先 abort 宿主信号（在飞的那次 sidecar 请求立刻停下），

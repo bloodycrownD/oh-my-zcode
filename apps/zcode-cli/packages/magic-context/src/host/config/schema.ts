@@ -21,6 +21,14 @@
  *   `HiddenCompletionExecutor`).
  * - `thinking_level` is dropped with the Pi/OMP vocabulary it belongs to.
  *
+ * FORK（impl-historian-inherit）：`historian.model` 三态化（缺失/"inherit" =
+ * 继承会话模型，"" = 显式关闭），详见 {@link HistorianConfigSchema} 上方的
+ * 登记块。随该决策一并失效的是上游「enabled 但未配 historian 模型」这条
+ * readiness 概念——缺省即继承，不再有「未配置」态，故 `HISTORIAN_MODEL_REQUIRED_MESSAGE`
+ * 与 `findConfigReadinessError` 在此删除（bootstrap 装配期不再调用它；模型此刻
+ * 造不造得出来由 historian host 的 `historian_model_unavailable` 诊断负责，
+ * 那是运行期事实，不是配置 readiness）。
+ *
  * Placement: this lives inside the package rather than in `adapters/src/config/`
  * (which is where the spec's E-group sentence points) because the package's own
  * transform/historian consumers must not reach back into a root-workspace
@@ -47,32 +55,34 @@ export const PROTECTED_TOKENS_MIN = 4000;
 
 /** Source: `DEFAULT_HISTORIAN_TIMEOUT_MS` is not ported (no hot-reload timeout knob in the whitelist). */
 
-/**
- * Reported when magic context is on but the historian has no model to run with.
- * Kept out of the schema on purpose: the parse must still succeed for a bare
- * `{}` so the config surface has a complete default (and so the UI can render
- * the form), while "enabled without a historian model" is a runtime readiness
- * failure the historian call path must surface. `findConfigReadinessError` is
- * the single place that decides it.
- */
-export const HISTORIAN_MODEL_REQUIRED_MESSAGE =
-  'magicContext 已启用但未配置 historian 模型，无法运行上下文分舱折叠（historian）。请在用户级 config.json 的 magicContext.historian.model 字段写入旁路模型 ID（形如 "provider/model"），例如 { "magicContext": { "historian": { "model": "zcode/glm-4.6" } } }。若暂不需要该功能，可将 magicContext.enabled 设为 false。';
-
 const ThresholdPercentageSchema = z.number().min(20).max(90, EXECUTE_THRESHOLD_CAP_MESSAGE);
 
 /**
- * Historian sub-object. Whitelist of the reference's `HistorianConfigSchema`
- * (agent metadata via `AgentOverrideConfigSchema.pick` + the harness-independent
- * knobs), with the model-resolution block flattened as described in the file
- * header. Every validator is copied from the source, defaults included.
+ * FORK（impl-historian-inherit）：historian 模型三态（用户拍板的产品决策）。
+ *
+ *   - 字段**缺失 / `undefined`**：缺省「继承会话模型」——折叠模型 = 会话当前
+ *     生效模型（live 绑定）。分舱折叠因此永不因「未配置」静默关闭。
+ *   - `"inherit"`：与上一行等价的显式哨兵（设置页下拉的「继承会话模型（默认）」）。
+ *   - `"provider/model"`：显式旁路模型（上游语义，逐字保留）。
+ *   - `""`（显式清空）：关闭分舱折叠。上游这里只有
+ *     `z.string().trim().min(1)`，空串一律拒绝；本 fork 把空串放行成一个**有
+ *     含义的哨兵值**，否则「用户显式选择关闭」与「字段缺失」在配置面上无法
+ *     区分，而两者的语义正好相反。本源是本次改动面。
+ *
+ * `"inherit"` 是**配置面**哨兵：bootstrap 侧（`magic-context-historian.ts`）
+ * 负责把它解析成具体 key，绝不能透到包内——`derive-budgets` 对没有 `/` 前缀的
+ * 串只会 warn 后走默认窗口。
+ *
+ * 保留 `.min(1)` 于空白串：`"  "` 依旧被拒（trim 后为空、但不带显式关闭意图），
+ * 只有字面空串代表「关闭」。
  */
 export const HistorianConfigSchema = z.object({
   model: z
-    .string()
-    .trim()
-    .min(1)
+    .union([z.literal(""), z.string().trim().min(1)])
     .optional()
-    .describe("Primary historian model ID (e.g. 'provider/model')."),
+    .describe(
+      'Historian model ID ("provider/model"), the sentinel "inherit" to follow the session model (the default when the field is missing), or "" to turn compartment folding off.',
+    ),
   fallback_models: z
     .array(z.string().trim().min(1))
     .default([])
@@ -237,13 +247,3 @@ export const DEFAULT_MAGIC_CONTEXT_CONFIG: MagicContextConfig = MagicContextConf
  * reintroduce one silently.
  */
 export const EXCLUDED_CONFIG_KEYS = ["compaction"] as const;
-
-/**
- * Runtime readiness check for a parsed configuration: returns a human-readable
- * error when the feature is on but cannot run, `null` when it can. Kept out of
- * the schema on purpose (see `HISTORIAN_MODEL_REQUIRED_MESSAGE`).
- */
-export function findConfigReadinessError(config: MagicContextConfig): string | null {
-  if (config.enabled && !config.historian.model) return HISTORIAN_MODEL_REQUIRED_MESSAGE;
-  return null;
-}

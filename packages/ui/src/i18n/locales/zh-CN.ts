@@ -2037,11 +2037,12 @@ const zhCN: Record<string, string> = {
     "假定服务端前缀缓存仍然有效的时长，例如 5m、1h；填 never 表示不做有效期假设。",
   "settings.context.historianModel.label": "折叠模型",
   "settings.context.historianModel.description":
-    "运行上下文分舱折叠（historian）的旁路模型，格式为 provider/model。建议选一个便宜的小模型。",
+    "运行上下文分舱折叠（historian）的旁路模型，格式为 provider/model。默认继承会话当前生效的模型；也可指定一个便宜的小模型，或显式关闭分舱折叠。继承时折叠请求按会话模型的用量计费。",
   "settings.context.historianModel.select": "选择模型",
-  "settings.context.historianModel.clear": "不配置（留空）",
+  "settings.context.historianModel.inherit": "继承会话模型（默认）",
+  "settings.context.historianModel.clear": "关闭分舱折叠",
   "settings.context.historianModel.missingHint":
-    "上下文管理已启用但未配置折叠模型，分舱折叠将无法运行。可在此选择模型，或把「启用上下文管理」关闭。",
+    "折叠模型默认继承会话当前生效的模型，无需额外配置，分舱折叠不会因「未配置」而关闭，折叠请求按该模型的用量计费。如需改用固定模型，在此选择；如完全不需要分舱折叠，选择「关闭分舱折叠」。",
   "settings.context.smartDrops.label": "智能丢弃",
   "settings.context.smartDrops.description":
     "在已有的执行期自动丢弃之上，额外回收可证明已被取代的工具输出。实验特性，默认关闭；关闭时输出与仅按位置回收完全一致。",

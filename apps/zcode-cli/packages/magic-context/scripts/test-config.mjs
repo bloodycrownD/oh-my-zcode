@@ -17,9 +17,7 @@ import { createConfigBridge } from "../dist/host/config-bridge.js";
 import {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   EXCLUDED_CONFIG_KEYS,
-  HISTORIAN_MODEL_REQUIRED_MESSAGE,
   MagicContextConfigSchema,
-  findConfigReadinessError,
 } from "../dist/host/config/schema.js";
 import { computeConfigDigest, diffConfigKeys } from "../dist/host/config/snapshot.js";
 import { resolveLanguageName } from "../dist/host/config/language.js";
@@ -223,25 +221,24 @@ it("excluded keys never reach `effective` (compaction in particular)", () => {
   assert.deepEqual(parsed, DEFAULT_MAGIC_CONTEXT_CONFIG);
 });
 
-it("historian.model missing while enabled reports the actionable message", () => {
-  const parsed = MagicContextConfigSchema.parse({ enabled: true });
-  assert.equal(findConfigReadinessError(parsed), HISTORIAN_MODEL_REQUIRED_MESSAGE);
-  assert.match(HISTORIAN_MODEL_REQUIRED_MESSAGE, /magicContext\.historian\.model/);
-  assert.match(HISTORIAN_MODEL_REQUIRED_MESSAGE, /config\.json/);
-  // the message must be Chinese prose, not an English-only error code
-  assert.ok(
-    /[　-鿿]/.test(HISTORIAN_MODEL_REQUIRED_MESSAGE),
-    "message must contain CJK characters",
+it('historian.model is three-state: missing/inherit run, "" is an explicit off', () => {
+  // FORK（impl-historian-inherit）：字段缺失 = 缺省「继承会话模型」，与显式写
+  // "inherit" 等价；空串 = 显式关闭分舱折叠，是本 fork 放行的有含义哨兵
+  // （上游 z.string().trim().min(1) 一律拒绝空串）。
+  const missing = MagicContextConfigSchema.parse({ enabled: true });
+  assert.equal(missing.historian.model, undefined);
+  assert.equal(
+    MagicContextConfigSchema.parse({ historian: { model: "inherit" } }).historian.model,
+    "inherit",
   );
-
-  const configured = MagicContextConfigSchema.parse({
-    enabled: true,
-    historian: { model: "zcode/glm-4.6" },
-  });
-  assert.equal(findConfigReadinessError(configured), null);
-
-  const off = MagicContextConfigSchema.parse({ enabled: false });
-  assert.equal(findConfigReadinessError(off), null);
+  assert.equal(MagicContextConfigSchema.parse({ historian: { model: "" } }).historian.model, "");
+  // 显式模型仍是上游语义（trim 后非空）。
+  assert.equal(
+    MagicContextConfigSchema.parse({ historian: { model: " zcode/glm-4.6 " } }).historian.model,
+    "zcode/glm-4.6",
+  );
+  // 纯空白没有被放行：它不代表「显式关闭」这个决定。
+  assert.equal(MagicContextConfigSchema.safeParse({ historian: { model: "  " } }).success, false);
 });
 
 it("digest is stable across key order and across repeated computation", () => {

@@ -30,6 +30,7 @@ import { MagicContextSettingsFields } from "@/settings/MagicContextSettingsField
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
 import {
   buildMagicContextConfigFromForm,
+  HISTORIAN_MODEL_INHERIT,
   magicContextSettingsFormFromConfig,
   toModelPickerValue,
   type MagicContextSettingsForm,
@@ -43,6 +44,10 @@ import {
  * 读失败时的表单初值。这些值与 `MagicContextConfigSchema.parse({})` 的 `.default()`
  * 一致（65 / 0.15 / "5m" / true / true / false），因此「读失败」退化成「显示包内默认」，
  * 而不是把用户已有的配置展示成一片空白。
+ *
+ * FORK（impl-historian-inherit）：`historianModel` 的缺省是 `"inherit"` 而不是 `""`
+ * ——CLI 侧缺省即继承会话模型（分舱折叠不因未配置而静默关闭），`""` 现在只表示
+ * 「显式关闭」。
  */
 const DEFAULT_FORM: MagicContextSettingsForm = {
   enabled: true,
@@ -51,7 +56,7 @@ const DEFAULT_FORM: MagicContextSettingsForm = {
   protectedTokens: null,
   historyBudgetPercentage: 0.15,
   cacheTtl: "5m",
-  historianModel: "",
+  historianModel: HISTORIAN_MODEL_INHERIT,
   smartDrops: false,
   failClosedBlocking: true,
 };
@@ -73,7 +78,6 @@ export function MagicContextSettingsSection({
   const modelSelectionRead = useModelSelectionServiceView(localHostServices.modelSelectionService);
   const modelSelectionView =
     modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
-  const modelSelectionLoading = modelSelectionRead.state.status !== "ready";
 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -195,8 +199,14 @@ export function MagicContextSettingsSection({
 
   const modelPickerValue = toModelPickerValue(form.historianModel);
   const historianModelTriggerLabel = useMemo(() => {
-    if (!form.historianModel) {
-      return intl.formatMessage({ id: "settings.context.historianModel.select" });
+    const trimmed = form.historianModel.trim();
+    // 三态各自的触发器文案（FORK / impl-historian-inherit）：哨兵值解析不出
+    // 模型显示名，走专属文案而不是把 "inherit" 原样摆在触发器上。
+    if (trimmed === HISTORIAN_MODEL_INHERIT) {
+      return intl.formatMessage({ id: "settings.context.historianModel.inherit" });
+    }
+    if (trimmed.length === 0) {
+      return intl.formatMessage({ id: "settings.context.historianModel.clear" });
     }
     return resolveModelDisplayName(modelGroups, modelPickerValue) ?? form.historianModel;
   }, [form.historianModel, intl, modelGroups, modelPickerValue]);
@@ -212,10 +222,10 @@ export function MagicContextSettingsSection({
   // 只在装载初读时锁字段；自动保存进行中不锁——锁了会把「连续调整阈值」变成
   // 一次只能改一格的糟糕体验，而整域 RPC + 版本守卫已经处理了竞态。
   const disabled = loading;
-  // 模型目录仍在加载时不做就绪性判断：把「还没读到」当成「没配模型」会给出一个
-  // 假的报错提示。S16 的缺省语义（enabled 但无 historian 模型 → 无法运行折叠）在这里
-  // 以一条说明文案呈现，不阻断编辑。
-  const showHistorianHint = form.enabled && !form.historianModel && !modelSelectionLoading;
+  // FORK（impl-historian-inherit）：提示的判据从「没配模型」改成「停在默认继承」。
+  // 不再依赖 modelSelectionLoading——继承不读模型目录，把「还没读到」当成
+  // 「没配」是旧语义的残留。文案说明默认继承、关闭需显式选择。
+  const showHistorianHint = form.enabled && form.historianModel.trim() === HISTORIAN_MODEL_INHERIT;
 
   return (
     <div className="space-y-3">

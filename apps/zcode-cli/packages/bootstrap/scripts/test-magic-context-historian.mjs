@@ -6,9 +6,11 @@
  *
  *   1. `historian.model` 配了且此刻造得出 Model → 装 executor、`historianRunnable: true`、
  *      后台调度器在场，`/ctx-recomp` 的 runner 也注册上了。
- *   2. `historian.model` **缺省** → 不装 executor、`historianRunnable: false`、
- *      没有调度器，但**装配不抛**（与 S16「缺省报错文案」同一条语义）。
- *   3. 模型配了但宿主造不出来（provider/model 已下线）→ 同上，不装、不抛。
+ *   2. FORK（impl-historian-inherit）三态：字段缺失 / `"inherit"` → 无条件装
+ *      executor（缺省继承会话模型，装配期还没有 turn 可绑），哨兵字面量**不过**
+ *      包边界；live 绑定（`noteLiveModel`）之后模型入口切到绑定 key，窗口与
+ *      输出上限惰性刷新；`""` → 不装（显式关闭）。
+ *   3. 模型配了但宿主造不出来（provider/model 已下线）→ 不装、不抛、记诊断。
  *   4. sidecarModelCall 的映射：两段消息（system + user）、usage/finishReason 透传，
  *      以及那条**编译期字面量之外**的运行期事实——`preserveProviderStreamBoundaries`
  *      真的以 `true` 抵达 provider 适配层（旁路原语把它放进 model invocation context）。
@@ -208,7 +210,110 @@ function makePrompt(text) {
   return { path: { id: "prompt-1" }, body: { parts: [{ type: "text", text, synthetic: true }] } };
 }
 
-test("historian 模型配了且造得出 Model：装 executor、historianRunnable 为 true", () => {
+test("historian.model 缺省（inherit）：无条件装 executor、哨兵不过包边界、未绑定期无模型 key", () => {
+  // FORK（impl-historian-inherit）：缺省 = 继承会话模型。装配期会话模型还没绑
+  // （turn 未开始），所以 executor 必须装；而 "inherit"/live key 都不能以字面量
+  // 形式出现在包侧入口上——`historianModel` 缺席，`getHistorianModel()` 也还是
+  // undefined（等 noteLiveModel）。
+  const host = createMagicContextHistorianHost(
+    DEFAULT_MAGIC_CONTEXT_CONFIG,
+    hostDeps({ createSidecarModel: () => assert.fail("缺省时不得按配置值去造模型") }),
+  );
+  assert.equal(host.historianRunnable, true);
+  assert.ok(host.hiddenCompletionExecutor, "executor 必须被装上（inherit 无条件装）");
+  assert.equal(host.historianModelMode, "inherit");
+  assert.equal(host.historianModel, undefined, "配置哨兵不得透到包侧");
+  assert.equal(host.getHistorianModel(), undefined, "未绑定期没有具体 key");
+  assert.ok(host.historianScheduler, "后台调度器必须在场");
+  // 未绑定期：保守窗口回退（128k）与缺省输出上限。
+  assert.equal(host.getHistorianChunkTokens(), 32_000);
+  assert.equal(host.historianMaxOutputTokens, 8_192);
+  host.shutdown();
+});
+
+test("inherit：live 绑定后 runPass 的模型入口切到绑定模型（窗口与输出上限惰性刷新）", async () => {
+  const observed = { messages: [], abortSignals: [], invocations: [] };
+  const liveModel = fakeModel(observed, { modelId: "glm-5", contextWindow: 128_000 });
+  liveModel.optionSpecs = { maxOutputTokens: { max: 4_096 }, reasoningLevel: { values: [] } };
+  const requested = [];
+  const host = createMagicContextHistorianHost(
+    MagicContextConfigSchema.parse({ historian: { model: "inherit" } }),
+    hostDeps({
+      createSidecarModel: (id) => {
+        requested.push(id);
+        return id === "zcode/glm-5" ? liveModel : undefined;
+      },
+    }),
+  );
+  assert.equal(host.historianModelMode, "inherit");
+
+  // 绑定前：只有显式模式才会在装配期调 createSidecarModel。
+  assert.deepEqual(requested, []);
+
+  // e2e/R-2 落的那条链：turn 开始即 noteLiveModel（onTurnStart，pass 之前）。
+  host.noteLiveModel({
+    providerId: "zcode",
+    modelId: "glm-5",
+    properties: { contextWindow: 128_000 },
+  });
+  assert.equal(host.getHistorianModel(), "zcode/glm-5", "runPass 的模型入口必须是绑定 key");
+  // 惰性解析：chunk 预算按绑定模型的窗口走，输出上限按它声明的 max 夹紧。
+  assert.equal(host.getHistorianChunkTokens(), 32_000);
+  assert.equal(host.historianMaxOutputTokens, 4_096, "输出上限要按 live 模型的上限夹紧");
+
+  // 端到端一半：这个 key 真的能造出 Model 并跑完一次旁路请求。
+  const model = host.getHistorianModel();
+  const handle = await host.hiddenCompletionExecutor.open(makeRun({ model }));
+  await host.hiddenCompletionExecutor.attempt(handle, makePrompt("p"));
+  const result = await host.hiddenCompletionExecutor.collect(handle, 1);
+  assert.equal(result.text, "SUMMARY");
+  // 两次造模型：noteLiveModel 的惰性解析 + sidecar 调用面现读 run.model。
+  // 两次必须是同一个 live key——任何一次漂回配置值都说明哨兵漏过了边界。
+  assert.ok(requested.length >= 2, `expected live-key lookups, got ${JSON.stringify(requested)}`);
+  assert.ok(
+    requested.every((id) => id === "zcode/glm-5"),
+    `every lookup must use the bound key: ${JSON.stringify(requested)}`,
+  );
+  host.shutdown();
+});
+
+test("inherit：绑不到 Model 时退回保守回退而不是把窗口清零", () => {
+  const host = createMagicContextHistorianHost(
+    MagicContextConfigSchema.parse({ historian: { model: "inherit" } }),
+    hostDeps({ createSidecarModel: () => undefined }),
+  );
+  host.noteLiveModel({
+    providerId: "zcode",
+    modelId: "gone",
+    properties: { contextWindow: 64_000 },
+  });
+  // key 仍然记着（runPass 会把它交给包侧，由 sidecar 调用面报 unavailable），
+  // 但 chunk 预算退回 128k 回退、输出上限退回缺省值——窗口变 0 会让 chunk 预算
+  // 归零，比「偏保守」危险得多。
+  assert.equal(host.getHistorianModel(), "zcode/gone");
+  assert.equal(host.getHistorianChunkTokens(), 32_000);
+  assert.equal(host.historianMaxOutputTokens, 8_192);
+  host.shutdown();
+});
+
+test('historian.model 显式清空（""）：不装 executor、historianRunnable 为 false、装配不抛', () => {
+  const host = createMagicContextHistorianHost(
+    MagicContextConfigSchema.parse({ historian: { model: "" } }),
+    hostDeps({ createSidecarModel: () => assert.fail("off 时不得去造模型") }),
+  );
+  assert.equal(host.historianRunnable, false);
+  assert.equal(host.hiddenCompletionExecutor, undefined);
+  assert.equal(host.historianScheduler, undefined);
+  assert.equal(host.historianModelMode, "off");
+  assert.equal(host.historianModel, undefined);
+  assert.equal(host.getHistorianModel(), undefined);
+  // off 是显式关闭，不是异常：bindLiveModel 照常被调用也不该改变任何状态。
+  host.noteLiveModel({ providerId: "zcode", modelId: "glm-5", properties: { contextWindow: 1 } });
+  assert.equal(host.getHistorianModel(), undefined);
+  host.shutdown();
+});
+
+test("historian.model 配了且造得出 Model：装 executor、historianRunnable 为 true", () => {
   const observed = { messages: [], abortSignals: [], invocations: [] };
   const model = fakeModel(observed);
   const host = createMagicContextHistorianHost(
@@ -218,23 +323,38 @@ test("historian 模型配了且造得出 Model：装 executor、historianRunnabl
 
   assert.equal(host.historianRunnable, true);
   assert.ok(host.hiddenCompletionExecutor, "executor 必须被装上");
+  assert.equal(host.historianModelMode, "explicit");
   assert.equal(host.historianModel, "zcode/fake-model");
+  assert.equal(host.getHistorianModel(), "zcode/fake-model");
   assert.ok(host.historianScheduler, "后台调度器必须在场");
   // chunk 预算按 historian 自己的窗口推导（200k × 25%），不是主模型的窗口。
   assert.equal(host.getHistorianChunkTokens(), 50_000);
+  // 显式模式不读 live 绑定：noteLiveModel 只刷主模型窗口，模型入口原地不动。
+  host.noteLiveModel({ providerId: "other", modelId: "x", properties: { contextWindow: 999 } });
+  assert.equal(host.getHistorianModel(), "zcode/fake-model");
   host.shutdown();
 });
 
-test("historian.model 缺省：不装 executor、historianRunnable 为 false、装配不抛", () => {
-  const host = createMagicContextHistorianHost(
+test('inherit 缺省配置同样装 executor：与显式写 "inherit" 逐位等价', () => {
+  // 同一条装配路径的两种写法：schema 里字段缺失与显式哨兵必须落到同一状态，
+  // 否则「用户从没配过」和「用户显式选了继承」会分叉。
+  const viaMissing = createMagicContextHistorianHost(
     DEFAULT_MAGIC_CONTEXT_CONFIG,
-    hostDeps({ createSidecarModel: () => assert.fail("缺省时不得去造模型") }),
+    hostDeps({ createSidecarModel: () => fakeModel({ messages: [], invocations: [] }) }),
   );
-  assert.equal(host.historianRunnable, false);
-  assert.equal(host.hiddenCompletionExecutor, undefined);
-  assert.equal(host.historianScheduler, undefined);
-  assert.equal(host.historianModel, undefined);
-  host.shutdown();
+  const viaSentinel = createMagicContextHistorianHost(
+    MagicContextConfigSchema.parse({ historian: { model: "inherit" } }),
+    hostDeps({ createSidecarModel: () => fakeModel({ messages: [], invocations: [] }) }),
+  );
+  for (const host of [viaMissing, viaSentinel]) {
+    assert.equal(host.historianRunnable, true);
+    assert.equal(host.historianModelMode, "inherit");
+    assert.equal(host.historianModel, undefined);
+    assert.equal(host.getHistorianModel(), undefined);
+    assert.equal(host.getHistorianChunkTokens(), 32_000);
+    assert.equal(host.historianMaxOutputTokens, 8_192);
+    host.shutdown();
+  }
 });
 
 test("模型配了但宿主造不出来：不装、不抛、并记一条诊断", () => {

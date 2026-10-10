@@ -41,12 +41,13 @@
  *   lastHeuristicsTurnId /
  *   commitSeenLastPass
  *   hiddenCompletionExecutor        S24：`createMagicContextHistorianHost` 造的 D-6
- *                                   sidecar executor；historian 模型缺省/造不出来时
- *                                   **不装**（见下「已知缺口」）
+ *                                   sidecar executor；historian 模型三态 off（显式
+ *                                   清空）或显式模型造不出来时**不装**，缺省/
+ *                                   "inherit" 无条件装（见下「已知缺口」）
  *   historianRunnable               同上：有 executor 才 true
  *   historianModel /fallbackModels/ two_pass / maxTokens → 同一次装配从 E 组 schema
- *   historianTimeoutMs /                 读出并原样下发
- *   getHistorianChunkTokens
+ *   historianTimeoutMs /                 读出并原样下发；historianModel 在 inherit
+ *   getHistorianChunkTokens             模式下是**活值**（live 绑定，见 bindLiveModel）
  *   client                          不传 —— ZCode 无 PluginContext client
  *                                   （通知缝缺口 S20）
  *   hostRawMessages /               createRawMessageProvider：内存 borrow +
@@ -67,9 +68,11 @@
  *
  * ── 已知缺口 ────────────────────────────────────────────────────────────────
  *   - historian executor：`createMagicContextTurnTransformOptions.createSidecarModel`
- *     缺席、或 `magicContext.historian.model` 没配/此刻造不出 Model 时不装，
- *     `historianRunnable` 保持 false。这与 S16 的缺省报错文案是同一条语义：
- *     「报了错」不等于「装配炸掉」。
+ *     缺席、`magicContext.historian.model` 显式清空（off）、或显式模型此刻造不出
+ *     Model 时不装，`historianRunnable` 保持 false。缺省/`"inherit"` 则无条件装
+ *     （impl-historian-inherit：折叠模型跟随会话模型，会话模型 turn 开始才绑得到）。
+ *     「报错」与「装配炸掉」仍是两件事：装配期只可能是显式模型造不出来，那时记
+ *     `historian_model_unavailable` 诊断后保持关闭。
  *   - 模型窗口几何（`models-dev-cache` / `window-geometry`）：包内模块级单例且没有
  *     注入缝，包外改不了（改包内是 S20 的特权）。S19b 让 transform 走自己的默认/检测
  *     回退，窗口偏小只会让阈值更保守，不会误发超大请求。
@@ -130,7 +133,6 @@ import {
   createTagger,
   createTransform,
   drainHistorianSchedulerWithTimeout,
-  findConfigReadinessError,
   getActiveCompartmentRun,
   getMagicContextDatabasePath,
   getMigrationOnOpenRefusal,
@@ -1076,17 +1078,6 @@ export async function createMagicContextTurnTransform(
   // 主人。下面三条提前 return 都要走同一个 dispose。
   const disposeBridge = (): void => bridge.dispose();
 
-  const readiness = findConfigReadinessError(config);
-  if (readiness) {
-    // historian 属 S20/S24；S19b 只记诊断，不因此拒绝装配——否则默认配置（无
-    // historian.model）下 flag 一开就完全不可用，而本步交付的是注入链路本身。
-    options.logger.warn("Magic context is enabled without a historian model", {
-      module: "bootstrap",
-      event: "magic_context.config_readiness",
-      detail: readiness,
-    });
-  }
-
   // ⑤-5a：busy/瞬时失败经 `openMagicContextStorageWithBusyRetry` 有界重试
   // （退避序列 = 包内 MIGRATION_LOCK_RETRY_DELAYS_MS 前 4 档），上界后仍失败照旧
   // 抛给下面的 fail-closed 契约；确定性失败（fence/guard 之外的 ABI、不可写等）
@@ -1204,6 +1195,26 @@ export async function createMagicContextTurnTransform(
    */
   const bindLiveModel = (model: MagicContextTurnTransformInput["model"]): void => {
     historian.noteLiveModel(model);
+    // FORK（impl-historian-inherit）：inherit 模式下折叠模型 = 会话模型，而包内
+    // transform 每个 pass 从 `deps.historianModel` 现读（包内 transform.ts:1771
+    // `historianRun?.model ?? deps.historianModel`）。deps 是本工厂持有的活对象
+    // （与 `applyConfigToDeps` 同一套原地改写纪律），所以 live 绑定刷新必须落到
+    // 同一处，否则 transform 只会看到装配期的空值。输出上限同理：它按 live 模型
+    // 声明的 maxOutputTokens 夹紧（historian host 的 getter 给活值）。
+    if (historian.historianModelMode === "inherit") {
+      const resolved = historian.getHistorianModel();
+      if (resolved === undefined) {
+        delete deps.historianModel;
+      } else {
+        deps.historianModel = resolved;
+      }
+      const maxOutputTokens = historian.historianMaxOutputTokens;
+      if (maxOutputTokens === undefined) {
+        delete deps.historianMaxOutputTokens;
+      } else {
+        deps.historianMaxOutputTokens = maxOutputTokens;
+      }
+    }
     options.usageRecorder?.noteLiveModel(model);
   };
   const notifyPassSucceeded = (model: MagicContextTurnTransformInput["model"]): void => {
@@ -1312,6 +1323,12 @@ function createConfigSource(options: MagicContextTurnTransformOptions): {
  * 只覆盖包内声明为「配置来源」的那些字段；`db` / `tagger` / `contextUsageMap` 等
  * 运行期状态不动。`scheduler` 是唯一例外——它在装配时按当时配置闭包捕获了阈值，
  * 所以换成每 pass 现读配置的版本（见 `createZCodeScheduler`）。
+ *
+ * historian 字段**故意不在这里**（含 `historianModel`）：executor 与模型三态是
+ * 装配期一次性决定的（`createMagicContextHistorianHost`），改 `historian.model`
+ * 的热更新要重建 executor，属于装配层而非 deps 层的事——与本次改动之前一致，
+ * 下一个进程生效。inherit 模型的**每 turn live 刷新**走 `bindLiveModel`，与本
+ * 函数的热更新是两条互不干扰的路。
  */
 function applyConfigToDeps(deps: TransformDeps, config: MagicContextConfig): void {
   deps.cacheTtlConfig = config.cache_ttl;
@@ -1339,6 +1356,11 @@ function buildTransformDeps(
 ): TransformDeps {
   const liveModelBySession = new Map<string, { providerID: string; modelID: string }>();
   const liveModels = liveModelBySession;
+  // FORK（impl-historian-inherit）：喂包侧的 historian 模型一律经过
+  // `getHistorianModel()`（三态解析后的具体 key）。装配期只能看到显式配置值；
+  // inherit 模式的 live 绑定要等 turn 开始，由 `bindLiveModel` 原地改写这一位
+  // （deps 是本工厂持有的活对象，包内 transform 每个 pass 现读它）。
+  const historianModel = historian.getHistorianModel();
   return {
     db,
     tagger: createTagger(),
@@ -1362,7 +1384,7 @@ function buildTransformDeps(
       ? {}
       : { hiddenCompletionExecutor: historian.hiddenCompletionExecutor }),
     historianRunnable: historian.historianRunnable,
-    ...(historian.historianModel === undefined ? {} : { historianModel: historian.historianModel }),
+    ...(historianModel === undefined ? {} : { historianModel }),
     ...(historian.fallbackModels.length === 0 ? {} : { fallbackModels: historian.fallbackModels }),
     historianTwoPass: historian.historianTwoPass,
     historianTimeoutMs: historian.historianTimeoutMs,

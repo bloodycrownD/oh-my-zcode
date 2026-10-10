@@ -91,7 +91,9 @@ process.on("exit", (code) => {
 
 const WORKSPACE = { workspacePath: "D:/tmp/project", workspaceKey: "ws_test" };
 const READ_PARAMS = { workspace: WORKSPACE };
-/** �� `MagicContextConfigSchema.parse({})` �� `.default()` һ�£���ʧ��ʱ�˻����� */
+/** 与 `MagicContextConfigSchema.parse({})` 的 `.default()` 一致，读失败时退化成包内默认。
+ *  FORK（impl-historian-inherit）：`historianModel` 的缺省是 "inherit"——CLI 侧
+ *  字段缺失即继承会话模型，`""` 只表示显式关闭。 */
 const UI_FALLBACK_FORM = {
   enabled: true,
   executeThresholdPercentage: 65,
@@ -99,7 +101,7 @@ const UI_FALLBACK_FORM = {
   protectedTokens: null,
   historyBudgetPercentage: 0.15,
   cacheTtl: "5m",
-  historianModel: "",
+  historianModel: "inherit",
   smartDrops: false,
   failClosedBlocking: true,
 };
@@ -265,7 +267,7 @@ test("B2: per-model overrides survive a UI save (only the default branch is edit
   });
 });
 
-test("B3: clearing optional fields deletes the key instead of writing null or stale values", () => {
+test("B3: turning folding off persists the empty-string sentinel instead of deleting the key", () => {
   const base = MagicContextConfigSchema.parse({
     protected_tokens: 12000,
     historian: { model: "zcode/glm-4.6", temperature: 0.3 },
@@ -279,12 +281,85 @@ test("B3: clearing optional fields deletes the key instead of writing null or st
   });
 
   assert.equal("protected_tokens" in next, false);
-  // �մ����ǺϷ�ֵ��z.string().trim().min(1).optional() �ܾ��մ�����������ֵ�ֻ���
-  // ����ա���ĬʧЧ����˱����ǡ��������ڡ���
-  assert.equal("model" in next.historian, false);
-  // ͬ historian ������Ԫ������Ȼ������
+  // FORK（impl-historian-inherit）：空串现在是「显式关闭」这个有意义的哨兵，所以照字面
+  // 写进域（schema 已为它放行 z.literal("")）。删键那条老路不能走——删键 = 字段
+  // 缺失 = 缺省继承，与用户的显式选择正好相反。
+  assert.equal(next.historian.model, "");
+  // 其余 historian 元数据原样保留（设置页对它们不可见，抹掉就是数据损坏）。
   assert.equal(next.historian.temperature, 0.3);
   assert.doesNotThrow(() => MagicContextConfigSchema.parse(next));
+  assert.equal(MagicContextConfigSchema.parse(next).historian.model, "");
+});
+
+test("B6: historian.model read side is three-state and never collapses an empty string to inherit", () => {
+  // 缺失 / undefined → 缺省继承（与 bootstrap 侧缺省一致）。
+  const missing = magicContextSettingsFormFromConfig(
+    MagicContextConfigSchema.parse({}),
+    UI_FALLBACK_FORM,
+  );
+  assert.equal(missing.historianModel, "inherit");
+  // 显式哨兵原样回显（下拉据此高亮「继承会话模型（默认）」）。
+  assert.equal(
+    magicContextSettingsFormFromConfig(
+      MagicContextConfigSchema.parse({ historian: { model: "inherit" } }),
+      UI_FALLBACK_FORM,
+    ).historianModel,
+    "inherit",
+  );
+  // 显式关闭必须原样：塌成 fallback 会把「关闭」静默改回「继承」。
+  assert.equal(
+    magicContextSettingsFormFromConfig(
+      MagicContextConfigSchema.parse({ historian: { model: "" } }),
+      UI_FALLBACK_FORM,
+    ).historianModel,
+    "",
+  );
+  // 显式模型照旧。
+  assert.equal(
+    magicContextSettingsFormFromConfig(
+      MagicContextConfigSchema.parse({ historian: { model: "zcode/glm-4.6" } }),
+      UI_FALLBACK_FORM,
+    ).historianModel,
+    "zcode/glm-4.6",
+  );
+});
+
+test("B7: a zero-edit save of the default domain stays byte-identical (inherit is not persisted)", () => {
+  const base = MagicContextConfigSchema.parse({});
+  const form = magicContextSettingsFormFromConfig(base, UI_FALLBACK_FORM);
+  assert.equal(form.historianModel, "inherit");
+  // 缺省即继承：停在默认态时**不**把哨兵显式落盘，否则设置页一挂载就判 dirty 并
+  // 触发一次整域写盘（分区里的 dirty 判定就是这两个 stringify 的比较）。
+  assert.equal(JSON.stringify(buildMagicContextConfigFromForm(base, form)), JSON.stringify(base));
+});
+
+test("B8: off ⇄ explicit ⇄ inherit round-trips through the write side, metadata intact", () => {
+  const base = MagicContextConfigSchema.parse({
+    historian: { model: "zcode/glm-4.6", temperature: 0.3, fallback_models: ["zcode/glm-4.5"] },
+  });
+  const form = magicContextSettingsFormFromConfig(base, UI_FALLBACK_FORM);
+
+  // 显式模型 → 关闭：写空串哨兵，元数据保留。
+  const off = buildMagicContextConfigFromForm(base, { ...form, historianModel: "" });
+  assert.equal(off.historian.model, "");
+  assert.equal(off.historian.temperature, 0.3);
+  assert.deepEqual(off.historian.fallback_models, ["zcode/glm-4.5"]);
+  assert.equal(MagicContextConfigSchema.parse(off).historian.model, "");
+
+  // 关闭 → 显式模型：恢复写具体 ID。
+  const explicit = buildMagicContextConfigFromForm(off, {
+    ...form,
+    historianModel: "zcode/glm-5",
+  });
+  assert.equal(explicit.historian.model, "zcode/glm-5");
+
+  // 关闭 → 继承：这一次要真的写哨兵（base 已有 model 键，缺省坍缩不再适用）。
+  const inherited = buildMagicContextConfigFromForm(explicit, {
+    ...form,
+    historianModel: "inherit",
+  });
+  assert.equal(inherited.historian.model, "inherit");
+  assert.equal(MagicContextConfigSchema.parse(inherited).historian.model, "inherit");
 });
 
 test("B4: clearing the token override drops only `default`, never the per-model table", () => {

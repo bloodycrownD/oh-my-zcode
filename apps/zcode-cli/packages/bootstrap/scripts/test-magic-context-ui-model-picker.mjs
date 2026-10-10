@@ -89,10 +89,17 @@ test("legacy `provider/model` picker values still parse directly", () => {
   assert.equal(toPersistedModelId("zcode/glm-4.6"), "zcode/glm-4.6");
 });
 
-test("sentinel and unparseable values collapse to empty (no historian)", () => {
+test("sentinel and unparseable values collapse to empty (off)", () => {
   assert.equal(toPersistedModelId("none"), "");
   assert.equal(toPersistedModelId("garbage-without-separator"), "");
   assert.equal(toPersistedModelId(""), "");
+});
+
+test("FORK（impl-historian-inherit）：inherit sentinel passes through both directions", () => {
+  // 下发的「继承会话模型（默认）」footer 项不走身份串解析，但往返链上任何一端把它
+  // 当成「解析不出来」都会把用户的显式选择静默变成「关闭」。
+  assert.equal(toPersistedModelId("inherit"), "inherit");
+  assert.equal(toModelPickerValue("inherit"), "inherit");
 });
 
 test("read direction: persisted `provider/model` renders back as the same picker value", () => {
@@ -117,10 +124,11 @@ test("end-to-end: a menu selection survives a full form save", () => {
     protectedTokens: null,
     historyBudgetPercentage: 0.15,
     cacheTtl: "5m",
-    historianModel: "",
+    historianModel: "inherit",
     smartDrops: false,
     failClosedBlocking: true,
   });
+  assert.equal(form.historianModel, "inherit");
   const next = buildMagicContextConfigFromForm(base, { ...form, historianModel: persisted });
   assert.equal(next.historian.model, "bigmodel-api/GLM-5.3");
   const reparsed = MagicContextConfigSchema.parse(next);

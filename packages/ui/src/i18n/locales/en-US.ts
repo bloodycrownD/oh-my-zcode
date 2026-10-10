@@ -2169,11 +2169,12 @@ const enUS: Record<string, string> = {
     "How long the provider's cached prefix is assumed to stay valid, e.g. 5m or 1h. Use never to make no expiry assumption.",
   "settings.context.historianModel.label": "Folding model",
   "settings.context.historianModel.description":
-    "Sidecar model that runs context compartment folding (historian), as provider/model. A cheap small model is usually enough.",
+    "Sidecar model that runs context compartment folding (historian), as provider/model. It inherits the session's current model by default; you can also pin a cheap small model, or turn compartment folding off explicitly. Inherited folding requests are billed at the session model's rates.",
   "settings.context.historianModel.select": "Select a model",
-  "settings.context.historianModel.clear": "Not configured (leave empty)",
+  "settings.context.historianModel.inherit": "Inherit the session model (default)",
+  "settings.context.historianModel.clear": "Turn off compartment folding",
   "settings.context.historianModel.missingHint":
-    "Context management is enabled but no folding model is configured, so compartment folding cannot run. Pick a model here, or turn Enable context management off.",
+    "The folding model inherits the session's current model by default, so no extra configuration is needed and compartment folding is never silently disabled — folding requests are billed at that model's rates. Pick a model here to pin one, or choose \"Turn off compartment folding\" if you do not want folding at all.",
   "settings.context.smartDrops.label": "Smart drops",
   "settings.context.smartDrops.description":
     "Layer content-aware reclaim of provably-superseded tool output on top of the existing execute-pass auto-drop. Experimental and off by default; while off the output is byte-identical to positional-only reclaim.",

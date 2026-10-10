@@ -202,9 +202,8 @@ export function resolveAppRuntimeConfig(input: {
     //
     // FORK（MF-01）：这里补上 spec 契约 8 的另一半——`effective = features.magicContext
     // && magicContext.enabled`。之前只镜像 features flag，于是 D-12 设置页把
-    // `enabled` 当表单字段提交时「保存成功」而行为逐行不变（`config.enabled`
-    // 全仓只被 `findConfigReadinessError` 读过一次）。域值缺席时按包内 schema 的
-    // 缺省 true 处理（`enabled: z.boolean().default(true)`）。
+    // `enabled` 当表单字段提交时「保存成功」而行为逐行不变。域值缺席时按包内
+    // schema 的缺省 true 处理（`enabled: z.boolean().default(true)`）。
     //
     // 这是**冷**求值：结果冻结进 runtime.config。运行中改 `enabled` 走端口上的
     // 活值谓词 `isEnabled()`（core 每 turn 现读），见 core
