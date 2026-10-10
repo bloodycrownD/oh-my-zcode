@@ -48,6 +48,7 @@
 
 import { z } from "zod";
 
+import { isValidPromptSurfaceModelKey } from "../../core/shared/prompt-surface.js";
 import { isValidLanguageCode } from "./language.js";
 
 /** Source: `DEFAULT_EXECUTE_THRESHOLD_PERCENTAGE`. */
@@ -157,40 +158,18 @@ export type HistorianConfig = z.infer<typeof HistorianConfigSchema>;
 export const DEFAULT_HISTORIAN_CONFIG: HistorianConfig = HistorianConfigSchema.parse({});
 
 /**
- * FORK（Step 11 / bugfix-batch-20261011）：`prompt_surface` 路由 key 的本地校验副本。
+ * FORK（Step 11 / Step 12）：`prompt_surface` 路由 key 校验的直接消费者。
  *
- * 上游该校验在 `shared/prompt-surface.ts` 的 `isValidPromptSurfaceModelKey`
- * （bare model ID / provider/model / provider/* 三种形态，大小写敏感，model ID
- * 可含额外斜杠）。本批 `shared/prompt-surface.ts` 还是 `deferred/` 的缝（Step 12
- * git mv 换真身），schema 不能 import 一个即将换位的路径，因此按同款规则内联一份
- * 并在此登记；Step 12 真身落位后本函数改为从真身 import，删除本副本。
+ * 上游该校验是 `shared/prompt-surface.ts` 的 `isValidPromptSurfaceModelKey`（bare model
+ * ID / provider/model / provider/* 三种形态，大小写敏感，model ID 可含额外斜杠）。Step 11
+ * 落地 `prompt_surface` 白名单时该文件还是 `deferred/` 的裁剪壳、路径即将随 Step 12 换位，
+ * 因此按同款规则内联了一份并在原址登记「Step 12 真身落位后改指 import」；Step 12 git mv
+ * 把真身放到 `core/shared/prompt-surface.ts`，本处即那次改指——本地副本删除，规则回归
+ * 单一来源（包内逐字区）。
  *
- * 为什么值得校验：坏 key（空段、双斜杠、provider 带 *）不会报运行时错，只会
- * **永远不匹配**——用户给某个模型配了 light 却发现毫无效果，且没有任何线索。
+ * 为什么值得校验：坏 key（空段、双斜杠、provider 带 *）不会报运行时错，只会**永远不
+ * 匹配**——用户给某个模型配了 light 却发现毫无效果，且没有任何线索。
  */
-function isValidPromptSurfaceModelKey(key: string): boolean {
-  if (key.length === 0 || key.trim() !== key) return false;
-  const slash = key.indexOf("/");
-  if (slash < 0) return !key.includes("*");
-  if (slash === 0 || slash === key.length - 1) return false;
-  const provider = key.slice(0, slash);
-  const modelId = key.slice(slash + 1);
-  if (
-    provider.trim() !== provider ||
-    modelId.trim() !== modelId ||
-    provider.includes("*") ||
-    (modelId.includes("*") && modelId !== "*")
-  ) {
-    return false;
-  }
-  if (modelId === "*") return true;
-  return (
-    modelId.length > 0 &&
-    !modelId.startsWith("/") &&
-    !modelId.endsWith("/") &&
-    !modelId.includes("//")
-  );
-}
 
 /**
  * FORK（Step 11）：记忆总开关。上游 memory 子树的 reduced 版——只登记本批有

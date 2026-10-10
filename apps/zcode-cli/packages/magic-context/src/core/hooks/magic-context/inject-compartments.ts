@@ -1,5 +1,5 @@
 import { Buffer } from "node:buffer";
-import { MEMORY_MURAL_BLOCK } from "../../deferred/magic-context-prompt.js";
+import { MEMORY_MURAL_BLOCK } from "../../agents/magic-context-prompt.js";
 import {
     buildCompartmentBlock,
     type Compartment,

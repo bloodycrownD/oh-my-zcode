@@ -6,7 +6,7 @@ import { type ContextDatabase, updateSessionMeta } from "../../features/magic-co
 import type { ContextUsage } from "../../features/magic-context/types.js";
 import type { PluginContext } from "../../plugin/types.js";
 import { sessionLog } from "../../shared/logger.js";
-import type { ModelInput } from "../../deferred/model-resolution.js";
+import type { ModelInput } from "../../shared/model-resolution.js";
 import { withoutSqliteTransformPass } from "../../shared/sqlite.js";
 import {
     type ActiveCompartmentRun,

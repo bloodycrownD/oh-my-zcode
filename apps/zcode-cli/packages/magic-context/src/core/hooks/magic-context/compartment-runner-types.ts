@@ -30,7 +30,7 @@
 import type { ParsedEvent } from "./compartment-parser.js";
 import type { PluginContext } from "../../plugin/types.js";
 import type { HarnessId } from "../../shared/harness.js";
-import type { ModelInput } from "../../deferred/model-resolution.js";
+import type { ModelInput } from "../../shared/model-resolution.js";
 import type { NotificationParams } from "../../deferred/send-session-notification.js";
 import type { Database } from "../../shared/sqlite.js";
 import type {

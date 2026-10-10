@@ -155,6 +155,7 @@ import {
   openDatabase,
   projectRuntimeEntries,
   projectStoredMessage,
+  promptSurfaceConfigIdentity,
   replayLkg,
   resolveLkgModelKeys,
   resolveModelKey,
@@ -1386,6 +1387,11 @@ function applyConfigToDeps(deps: TransformDeps, config: MagicContextConfig): voi
     deps.executeThresholdTokens = config.execute_threshold_tokens;
   }
   deps.scheduler = createZCodeScheduler(config);
+  // FORK（bugfix-batch-20261011 / Step 12）：prompt-surface 域进 deps。包内 transform 每
+  // pass 现读 `deps.promptSurface`（与 cacheTtlConfig 同一套「活对象原地改写」纪律），
+  // 所以设置页改 preset / models / tool_descriptions / guidance_override_path 都在下一
+  // 个 pass 生效，不需要重建 transform。
+  deps.promptSurface = config.prompt_surface;
 }
 
 function buildTransformDeps(
@@ -1457,8 +1463,18 @@ function buildTransformDeps(
       return live ? `${live.providerID}/${live.modelID}` : undefined;
     },
     getNotificationParams: () => ({}),
-    // telemetry-only：变化被记录但不会让 m[0] 折叠。空串 = 恒定指纹。
-    getToolSetHash: () => "",
+    // FORK（bugfix-batch-20261011 / Step 12）：prompt-surface 配置身份进 telemetry 指纹。
+    //
+    // 包内语义（inject-compartments.ts 的 M0HardSignals 注）：toolSetHash 是
+    // **attribution-only** 信号——「tool-set 变化永不触发 m[0] 折叠」（它的
+    // process-global 作用域会在无关会话上制造假折叠），只在决策审计里留下 prev/new 两个
+    // 操作数。因此这里折进配置身份是安全的，且必须折：
+    // preset 从 full 翻到 light 时 ctx_* 四个工具的描述整段换掉，providers 侧的
+    // `tools` 数组字节随之改变，m[0] 的 baseline 与它记录的指纹必须能在审计里对上；
+    // 继续回空串等于「本条路径的 tool-set 恒不变」的谎言（Step 12 之前这还算诚实——
+    // `deps.promptSurface` 是 undefined、包内也不读它；现在它真的进 deps 了）。
+    getToolSetHash: () => promptSurfaceConfigIdentity(config.prompt_surface),
+    promptSurface: config.prompt_surface,
   } satisfies TransformDeps;
 }
 

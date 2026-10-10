@@ -481,6 +481,79 @@ export type {
   MemoryInput,
 } from "./core/features/magic-context/memory/types.js";
 
+// ── 4d. 211 行段 + prompt-surface 解析面（Step 12 / D1+D6+D7） ─────────────────
+
+/**
+ * `## Magic Context` 系统提示词段的唯一文案来源（壳缝①，git mv 自
+ * `deferred/magic-context-prompt.ts`，上游 211 行真身）。
+ *
+ * 为何出这个面：宿主（core 的 context section / Step 14 的工具描述分档）必须拿到段文本
+ * 与 preset 解析。**宿主不得自抄这段文案**——它是与渲染器、`<project-memory>` 注入格式
+ * 逐字配套的用户可见提示词， paraphrasing 会让提示词与自己的管道脱同步；preset 分档同样
+ * 只有这一份 resolver，宿主再实现一遍 model-key walk 就会与 transform 的 cache_ttl 走法
+ * 分叉（`modelKeyLookupOrder` 是两条路共用的那个 walk）。
+ *
+ * `SELF_TAG_GUIDANCE` 单独导出：宿主 subagent 侧的引导需要它，而它与 11 参装配的完整段
+ * 是两个生命周期。
+ */
+export {
+  buildMagicContextSection,
+  SELF_TAG_GUIDANCE,
+} from "./core/agents/magic-context-prompt.js";
+
+/**
+ * prompt-surface 配置解析（壳缝①，git mv 自 `deferred/prompt-surface.ts`，上游 163 行
+ * 真身）+ 每宿主 runtime（壳缝①，git mv 出 `deferred/prompt-surface-runtime.ts`，
+ * 上游 284 行真身 + Step 12 三处 ZCode 适配，见文件头差异注）。
+ *
+ * 为何出这个面：
+ *   - `resolvePromptSurface` / `promptSurfaceConfigIdentity`：bootstrap 的
+ *     `buildTransformDeps` 把 `prompt_surface` 域喂给包内 transform，并把配置身份折进
+ *     `getToolSetHash`（prompt-surface 是 m[0] 的 attribution-only 信号，改 preset 不会
+ *     触发折叠，但必须在审计里看得见）；
+ *   - `createPromptSurfaceRuntime` / `ACTIVE_TOOL_IDS` / `LIGHT_TOOL_DESCRIPTIONS`：
+ *     tool registration 侧的 preset 分档（light 档换 compact 描述）与「哪些 ctx_* 工具
+ *     存在」的唯一权威表。宿主据此覆盖 description，**不复制描述文本**。
+ *   - `ACTIVE_TOOL_IDS` 不含 `ctx_note`（N2 终局不做），见 runtime 文件头差异 3。
+ */
+export {
+  ACTIVE_TOOL_IDS,
+  type CreatePromptSurfaceRuntimeOptions,
+  createPromptSurfaceGuidanceEpochCache,
+  createPromptSurfaceRuntime,
+  LIGHT_TOOL_DESCRIPTIONS,
+  type PromptSurfaceGuidanceEpochCache,
+  type PromptSurfaceGuidanceSelection,
+  type PromptSurfaceRegistrationSelection,
+  type PromptSurfaceRuntime,
+  type PromptSurfaceToolId,
+  promptSurfaceHashMaterial,
+} from "./core/shared/prompt-surface-runtime.js";
+export {
+  isValidPromptSurfaceModelKey,
+  type ModelKeyCandidate,
+  type ModelKeyLookupSource,
+  modelKeyLookupOrder,
+  type PromptSurfaceConfig,
+  type PromptSurfacePreset,
+  type PromptSurfaceResolutionSource,
+  promptSurfaceConfigIdentity,
+  resolveModelConfigOrDefault,
+  resolveModelConfigValue,
+  resolvePromptSurface,
+} from "./core/shared/prompt-surface.js";
+
+/**
+ * D7 全覆盖缝②：三个结构性 type（`ModelInput` 等），包内 transform 的签名面。按裁定
+ * 不搬上游的 harness 模型 resolver 家族（fork 的 E 组只有一套扁平 historian 配置），
+ * 因此这里也只出 type 面，没有可调用的实现需要宿主自抄。
+ */
+export type {
+  ModelHarness,
+  ModelInput,
+  ResolvedModelEntry,
+} from "./core/shared/model-resolution.js";
+
 // ── 5. message 转换纯函数 ───────────────────────────────────────────────────
 
 export {

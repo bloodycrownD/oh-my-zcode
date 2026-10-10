@@ -57,7 +57,7 @@ import { HISTORIAN_AGENT, HISTORIAN_EDITOR_AGENT } from "../../agents/historian.
 import { withContentLanguageDirective } from "../../agents/language-directive.js";
 import { describeError, getErrorMessage } from "../../shared/error-message.js";
 import { isTransientHistorianPromptError } from "./historian-transient-error.js";
-import type { ModelInput } from "../../deferred/model-resolution.js";
+import type { ModelInput } from "../../shared/model-resolution.js";
 import {
     buildHistorianEditorPrompt,
     COMPARTMENT_AGENT_SYSTEM_PROMPT,
