@@ -1157,6 +1157,68 @@ export function createMagicContextPromptSectionResolver(options: {
   };
 }
 
+/**
+ * FORK（bugfix-batch-20261011 / Step 14）：prompt-surface 的 preset 分档描述求值器。
+ *
+ * `prompt_surface.default` / `prompt_surface.models` 在这之前**没有任何运行期消费者**：
+ * 设置页写下去、schema 校验通过、ConfigPort 广播到位，然后什么都不会发生——模型看到的
+ * 永远是 full 档工具描述。本函数把配置接到 core 的工具注册链（`registerBuiltInTools` 的
+ * `magicContextToolDescription` 选项），light 档时四个 ctx_* 工具的描述换成紧凑文案。
+ *
+ * 为什么用求值器而不是把描述表传进去：light 文案的唯一权威是包侧
+ * `tools/light-descriptions.ts`（宿主不得自抄），而「用户 `tool_descriptions` 覆盖 >
+ * light 目录 > full 原文」这套优先级已经在包侧 `resolveRegistration().descriptionFor`
+ * 里排好。本函数只做两件事：现读配置域、把 modelKey 递进去。
+ *
+ * 每次调用现读配置（与 prompt-section resolver 同一条理由）：调用点是工具注册（runtime
+ * 构造与 embedded-search 分支刷新各一次），不是热路径；而预热缓存会让「刚改的 preset
+ * 下一次注册才生效」这件事失去可解释性。
+ */
+export function createMagicContextToolDescriptionResolver(options: {
+  configPort?: ConfigPort;
+  /** 无配置口时的静态域（S19b 遗留路径，生产路径恒有 configPort）。 */
+  configDomain?: unknown;
+  logger?: Logger;
+}): (input: { toolId: string; fullDescription: string; modelKey?: string }) => string {
+  const logger = options.logger;
+  const warn = (message: string): void => {
+    logger?.warn("Magic context prompt surface warning", {
+      module: "bootstrap",
+      event: "magic_context.prompt_surface_warning",
+      reason: message,
+    });
+  };
+  const promptSurfaceRuntime = createPromptSurfaceRuntime({ warn });
+  let lastConfigNotice: string | null = null;
+
+  const readConfig = (): MagicContextConfig => {
+    const raw = options.configPort
+      ? options.configPort.get(ConfigKey.MagicContext)
+      : options.configDomain;
+    const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
+    if (parsed.success) return parsed.data;
+    const reason = parsed.error.issues.map((issue) => issue.message).join("; ");
+    if (lastConfigNotice !== reason) {
+      lastConfigNotice = reason;
+      logger?.warn("Magic context config rejected; prompt surface uses schema defaults", {
+        module: "bootstrap",
+        event: "magic_context.prompt_surface_config_defaulted",
+        detail: reason,
+      });
+    }
+    return DEFAULT_MAGIC_CONTEXT_CONFIG;
+  };
+
+  return (input) => {
+    const config = readConfig();
+    const registration = promptSurfaceRuntime.resolveRegistration(
+      config.prompt_surface,
+      input.modelKey,
+    );
+    return registration.descriptionFor(input.toolId, input.fullDescription);
+  };
+}
+
 export async function createMagicContextTurnTransform(
   options: MagicContextTurnTransformOptions,
 ): Promise<MagicContextTurnTransform | undefined> {

@@ -2062,6 +2062,15 @@ const zhCN: Record<string, string> = {
   "settings.context.promptSurfaceGuidancePath.description":
     "指向一个包含完整指导段文本的文件，读取后替代内置指导段。留空表示使用内置指导段。",
   "settings.context.promptSurfaceGuidancePath.placeholder": "未配置",
+  // FORK（Step 14 / bugfix-batch-20261011）：per-model prompt-surface 路由的只读呈现。
+  // 刻意不建编辑入口（与 execute_threshold per-model 分支同款先例）；目的是让已配置的
+  // 覆盖可见，而不是继续隐形。
+  "settings.context.promptSurfaceOverrides.label": "按模型覆盖",
+  "settings.context.promptSurfaceOverrides.description":
+    "来自 config.json 的按模型 prompt-surface 路由与工具描述覆盖。此处只读呈现：本页没有按模型编辑入口，从这里保存会原样保留它们。",
+  "settings.context.promptSurfaceOverrides.empty": "未配置",
+  "settings.context.promptSurfaceOverrides.models": "模型路由：",
+  "settings.context.promptSurfaceOverrides.toolDescriptions": "工具描述：",
   "settings.context.muralEnabled.label": "实验性记忆画布",
   "settings.context.muralEnabled.description":
     "开启后，未装入上下文预算的项目记忆会渲染成一张确定性的图片随提示词下发。实验特性，默认关闭。",

@@ -176,6 +176,8 @@ private browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   private magicContextTurnTransform?: MagicContextTurnTransform;
   /** Step 13（D1）：`## Magic Context` 段装配端口；缺席即 flag off / 装配失败。 */
   private magicContextPromptSection?: MagicContextPromptSectionResolver;
+  /** Step 14：prompt-surface 分档描述求值器；缺席即不换档（full 原文照注册）。 */
+  private magicContextToolDescription?: AgentRuntimeDeps["magicContextToolDescription"];
   private contextSourcePort?: ContextSourcePort;
   private skillPort?: SkillPort;
   private mcpPort?: McpPort;
@@ -306,6 +308,7 @@ this.browserControlPort = deps.browserControlPort;
     // 装配层在 `features.magicContext === false` 时不构造它，context builder 的插入点
     // 因此是纯判空，关闭态下原生 `# Memory` 段按既有规则照常注入。
     this.magicContextPromptSection = deps.magicContextPromptSection;
+    this.magicContextToolDescription = deps.magicContextToolDescription;
     if (this.contextBuilder) {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;

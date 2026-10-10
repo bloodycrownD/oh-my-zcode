@@ -98,6 +98,12 @@ browserControlPort?: AgentRuntimeDeps["browserControlPort"];
   magicContextTurnTransform?: MagicContextTurnTransform;
   /** Step 13（D1）：缺席即 `features.magicContext` 关闭或装配失败；context builder 只判空。 */
   magicContextPromptSection?: MagicContextPromptSectionResolver;
+  /** Step 14：prompt-surface 分档描述求值器；缺席即不换档。 */
+  magicContextToolDescription?: (input: {
+    toolId: string;
+    fullDescription: string;
+    modelKey?: string;
+  }) => string;
   contextSourcePort?: ContextSourcePort;
   skillPort?: SkillPort;
   mcpPort?: McpPort;

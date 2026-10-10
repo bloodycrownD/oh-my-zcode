@@ -402,6 +402,22 @@ export interface AgentRuntimeDeps {
    */
   magicContextPromptSection?: MagicContextPromptSectionResolver;
   /**
+   * FORK（bugfix-batch-20261011 / Step 14）：prompt-surface 的 preset 分档描述求值器。
+   *
+   * `prompt_surface.default` / `prompt_surface.models` 决定这批 ctx_* 工具注册时用 full
+   * 还是 light 档描述；light 档文案在包侧 `light-descriptions`（宿主不得自抄），所以这里
+   * 收求值器而不是字面量表，由 bootstrap 把包侧
+   * `createPromptSurfaceRuntime().resolveRegistration().descriptionFor` 投影进来。
+   *
+   * 两个注册入口（首次装配与 embedded-search 分支刷新）共用同一个推导，见
+   * `runtime/helpers/runtime-tools.ts` 的 `resolveMagicContextPromptSurfaceOptions`。
+   */
+  magicContextToolDescription?: (input: {
+    toolId: string;
+    fullDescription: string;
+    modelKey?: string;
+  }) => string;
+  /**
    * FORK（bugfix-batch-20261011 / Step 6）：内置子智能体模型 override 的
    * per-spawn 活读源（bootstrap 读 agents-state.json，带内容缓存）。每次 spawn
    * 解析 profile 前调用；返回 undefined 或缺席时回退

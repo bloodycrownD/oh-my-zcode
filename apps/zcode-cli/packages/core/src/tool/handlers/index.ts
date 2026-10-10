@@ -171,6 +171,19 @@ const DYNAMIC_WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set([
   RESOLVE_WORKFLOW_QUESTION_TOOL_NAME,
 ]);
 
+/**
+ * FORK（Step 14）：prompt-surface 分档只作用于这四个 ctx_* 工具——它们是 prompt-surface
+ * 唯一有 full/light 两份文案的工具族（`ACTIVE_TOOL_IDS` 的同族集合）。
+ * 用与注册过滤**同一个**常量集合而不是另写一份名单：漏一个名字意味着那个工具永远拿不到
+ * light 描述，而那种偏差在 prompt 面上是静默的。
+ */
+const MAGIC_CONTEXT_PROMPT_SURFACE_TOOL_NAMES: ReadonlySet<string> = new Set([
+  CTX_REDUCE_TOOL_NAME,
+  CTX_EXPAND_TOOL_NAME,
+  CTX_SEARCH_TOOL_NAME,
+  CTX_MEMORY_TOOL_NAME,
+]);
+
 interface RegisterBuiltInToolsOptions {
   bashTimeoutPolicy?: BashTimeoutPolicy;
   includeSkill?: boolean;
@@ -209,6 +222,25 @@ interface RegisterBuiltInToolsOptions {
    * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
    */
   includeMagicContextTools?: boolean;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 14）：prompt-surface 的 preset 分档描述求值器。
+   *
+   * `prompt_surface.default` / `prompt_surface.models` 决定当前这届用 full 还是 light
+   * 档 ctx_* 工具描述；light 档的紧凑文案在 `@zcode/magic-context` 的
+   * `light-descriptions` 里（宿主不得自抄），因此这里收一个**求值器**而不是字面量表——
+   * 由 bootstrap 侧（唯一 import 包的地方）把 `createPromptSurfaceRuntime().
+   * resolveRegistration(config, modelKey).descriptionFor` 投影进来。
+   *
+   * 缺席 = 不换档，照原样注册 full 描述。求值器内部已经把「用户 tool_descriptions 覆盖
+   * > light 目录 > full 原文」的优先级排好，注册侧不重复实现这套优先级。
+   */
+  magicContextToolDescription?: (input: {
+    toolId: string;
+    fullDescription: string;
+    modelKey?: string;
+  }) => string;
+  /** preset 路由用的模型 key（`provider/model`）；缺席时只按 configured default 解析。 */
+  magicContextModelKey?: string;
   /** browser-use 说明和 agent.browsers 注入由官方 browser-use 插件 + 宿主 browser bridge 共同启用。 */
   includeBrowserUse?: boolean;
   embeddedSearchEnabled?: boolean;
@@ -336,6 +368,32 @@ function resolveBuiltInToolEntryForBranch(
     return createJsToolEntry({
       browserUseEnabled: options.includeBrowserUse === true,
     });
+  }
+  // FORK（Step 14）：ctx_* 四工具的 preset 分档。只换 `metadata.description`，参数
+  // schema / 权限 / 预算 / 超时一律不动——分档是「同一份能力的详简叙述」，不是第二个工具。
+  // 与 Agent/Task 的灰度门同款纪律：首次装配与分支刷新走同一个 options 推导，两次产出的
+  // 描述必然一致（否则一次刷新就会把换档结果悄悄翻回 full）。
+  if (
+    MAGIC_CONTEXT_PROMPT_SURFACE_TOOL_NAMES.has(entry.metadata.name) &&
+    options.magicContextToolDescription !== undefined
+  ) {
+    const fullDescription = entry.metadata.description;
+    // 没有 description 的工具不参与分档：分档是「同一份文案的详简两版」，
+    // 没有原文就无从简化，也不该凭空造一段。
+    if (fullDescription === undefined) return entry;
+    const description = options.magicContextToolDescription({
+      toolId: entry.metadata.name,
+      fullDescription,
+      ...(options.magicContextModelKey === undefined
+        ? {}
+        : { modelKey: options.magicContextModelKey }),
+    });
+    if (description !== fullDescription) {
+      return {
+        ...entry,
+        metadata: { ...entry.metadata, description },
+      };
+    }
   }
   return entry;
 }

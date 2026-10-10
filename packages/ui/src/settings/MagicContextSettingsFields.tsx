@@ -356,6 +356,51 @@ export function MagicContextSettingsFields({
         control={null}
       />
 
+      {/* FORK（Step 14）：per-model 覆盖的只读呈现。刻意没有编辑入口——与
+          execute_threshold per-model 分支同款先例：写侧经 base 原样带回（一次保存
+          不会抹掉它们），这里只负责让它们可见。没有覆盖时整块不渲染，避免给
+          「没有配任何东西」的用户看一个空壳。 */}
+      {form.promptSurfaceModelRoutes.length === 0 &&
+      form.promptSurfaceToolOverrides.length === 0 ? null : (
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.context.promptSurfaceOverrides.label" })}
+          description={intl.formatMessage({
+            id: "settings.context.promptSurfaceOverrides.description",
+          })}
+          controlLayout="wide"
+          detail={
+            <div
+              className="flex w-full min-w-0 flex-col gap-1 text-sm text-foreground-subtle"
+              data-testid="magic-context-prompt-surface-overrides"
+            >
+              {form.promptSurfaceModelRoutes.length === 0 ? null : (
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-medium text-foreground">
+                    {intl.formatMessage({
+                      id: "settings.context.promptSurfaceOverrides.models",
+                    })}
+                  </span>
+                  <span className="font-mono">
+                    {form.promptSurfaceModelRoutes.join(", ")}
+                  </span>
+                </div>
+              )}
+              {form.promptSurfaceToolOverrides.length === 0 ? null : (
+                <div className="flex flex-wrap items-baseline gap-x-2">
+                  <span className="font-medium text-foreground">
+                    {intl.formatMessage({
+                      id: "settings.context.promptSurfaceOverrides.toolDescriptions",
+                    })}
+                  </span>
+                  <span className="font-mono">{form.promptSurfaceToolOverrides.join(", ")}</span>
+                </div>
+              )}
+            </div>
+          }
+          control={null}
+        />
+      )}
+
       <SettingsRow
         label={intl.formatMessage({ id: "settings.context.muralEnabled.label" })}
         description={intl.formatMessage({ id: "settings.context.muralEnabled.description" })}

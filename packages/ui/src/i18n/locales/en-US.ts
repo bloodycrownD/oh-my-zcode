@@ -2194,6 +2194,16 @@ const enUS: Record<string, string> = {
   "settings.context.promptSurfaceGuidancePath.description":
     "Path to a file whose contents replace the built-in guidance section. Empty means the built-in guidance is used.",
   "settings.context.promptSurfaceGuidancePath.placeholder": "Not configured",
+  // FORK (Step 14 / bugfix-batch-20261011): read-only presentation of the per-model
+  // prompt-surface routes. No edit entry by design (same precedent as the
+  // execute_threshold per-model branch); the point is that a configured override is
+  // visible instead of invisible.
+  "settings.context.promptSurfaceOverrides.label": "Per-model overrides",
+  "settings.context.promptSurfaceOverrides.description":
+    "Model-keyed prompt-surface routes and tool-description overrides from config.json. They are presented read-only: this page has no per-model editor, and a save from here keeps them byte-for-byte.",
+  "settings.context.promptSurfaceOverrides.empty": "None configured",
+  "settings.context.promptSurfaceOverrides.models": "Model routes:",
+  "settings.context.promptSurfaceOverrides.toolDescriptions": "Tool descriptions:",
   "settings.context.muralEnabled.label": "Experimental memory mural",
   "settings.context.muralEnabled.description":
     "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt. Experimental; off by default.",

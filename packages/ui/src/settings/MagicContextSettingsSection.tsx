@@ -66,6 +66,9 @@ const DEFAULT_FORM: MagicContextSettingsForm = {
   memoryEnabled: true,
   promptSurfaceDefault: "full",
   promptSurfaceGuidancePath: "",
+  // FORK（Step 14）：只读呈现字段，缺省即「没有覆盖」。
+  promptSurfaceModelRoutes: [],
+  promptSurfaceToolOverrides: [],
   muralEnabled: false,
 };
 

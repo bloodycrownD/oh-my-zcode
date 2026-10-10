@@ -31,6 +31,7 @@
     "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
     "test:ctx-search-memory": "tsx --test scripts/test-ctx-search-memory.mjs",
     "test:magic-context-section": "node --test scripts/test-magic-context-prompt-section.mjs",
+    "test:prompt-surface-tiering": "node --test scripts/test-prompt-surface-tiering.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src --no-ignore",
     "lint:fix": "oxlint --fix src --no-ignore"

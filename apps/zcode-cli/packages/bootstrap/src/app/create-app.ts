@@ -1001,6 +1001,16 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
                 logger,
               },
             ),
+            // FORK（bugfix-batch-20261011 / Step 14）：同一个门注入 preset 分档描述
+            // 求值器。设置页的 `prompt_surface.default` / `models` 经它第一次真正影响
+            // 模型看得见的工具描述（light 档换紧凑文案）；在那之前这两个字段写下去
+            // 没有任何运行期消费者。
+            magicContextToolDescription:
+              magicContextAssembly.createMagicContextToolDescriptionResolver({
+                configPort: configResult.configPort,
+                configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
+                logger,
+              }),
           }),
       // FORK（bugfix-batch-20261011 / Step 6）：子智能体模型 override 的
       // per-spawn 活读源（见上方创建处注释）。deps 经 createDefaultSubagentPort

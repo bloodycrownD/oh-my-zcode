@@ -63,6 +63,34 @@ export function initializeRuntimeTooling(
   };
 }
 
+/**
+ * FORK（bugfix-batch-20261011 / Step 14）：prompt-surface 分档描述的一组注册选项。
+ *
+ * 首次装配（{@link registerRuntimeBuiltInTools}）与分支刷新
+ * （`refreshBranchAwareBuiltInTools`，embedded-search 分支的第二个注册入口）**必须**拿到
+ * 同一个推导结果。后者只传一个精简选项集，漏传这一组的后果不是「保持原样」而是「把 light
+ * 档描述翻回 full」——registry.register 覆盖同名项且 silentDuplicateWarnings 吞告警，
+ * 全程无声。因此抽成这一个函数，两个入口各自调用。
+ *
+ * `modelKey` 取会话当前的模型选择：它是 preset 路由的输入（`prompt_surface.models` 的
+ * per-model 键）。缺席（还没有活模型 / 无选择）时求值器自己按 configured default 解析——
+ * 那是配置的事实，不是退化路径。
+ */
+export function resolveMagicContextPromptSurfaceOptions(runtime: AgentRuntimeInternal): {
+  magicContextToolDescription?: NonNullable<AgentRuntimeDeps["magicContextToolDescription"]>;
+  magicContextModelKey?: string;
+} {
+  const describe = runtime.magicContextToolDescription;
+  if (describe === undefined) return {};
+  const selection = runtime.config.modelSelection;
+  const modelKey =
+    selection === undefined ? undefined : `${selection.providerId}/${selection.modelId}`;
+  return {
+    magicContextToolDescription: describe,
+    ...(modelKey === undefined ? {} : { magicContextModelKey: modelKey }),
+  };
+}
+
 function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentRuntimeDeps): void {
   const nodeReplEnabled = runtime.config.runtimeFeatures?.nodeRepl === true;
   const browserUseEnabled = resolveRuntimeBrowserUseEnabled(runtime, deps);
@@ -102,6 +130,9 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
     // ResumeWorkflowRun 已免确认但因「child 内不得再编排」仍在列）在 helper
     // 里与 turn 级名单合并，见 tool-allowlist.ts 的根因注释。
     disallowedTools: resolveRuntimeDisallowedToolsWithMagicContext(runtime.config),
+    // FORK（Step 14）：prompt-surface 分档描述。与 embedded-search 分支刷新共用同一个
+    // 推导入口，见 resolveMagicContextPromptSurfaceOptions 的说明。
+    ...resolveMagicContextPromptSurfaceOptions(runtime),
   });
 }
 

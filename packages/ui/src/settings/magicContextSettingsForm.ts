@@ -77,6 +77,18 @@ export interface MagicContextSettingsForm {
    * （`prompt_surface.guidance_override_path`）。空串 = 未配置。
    */
   promptSurfaceGuidancePath: string;
+  /**
+   * FORK（Step 14）：`prompt_surface.models` 的**只读**呈现（`"模型键 → 预设"` 展示串，
+   * 键序稳定）。刻意没有编辑入口：设置页对它们的写入策略是「原样带回」（见
+   * {@link buildMagicContextConfigFromForm} 的 spread 基底），渲染出来只是让已配置的
+   * 覆盖可见——在那之前用户改了 preset 却发现某个模型仍是另一档时，页面上没有任何线索。
+   */
+  promptSurfaceModelRoutes: readonly string[];
+  /**
+   * FORK（Step 14）：`prompt_surface.tool_descriptions` 的**只读**呈现（工具 id 列表，
+   * 键序稳定）。同上：不可编辑，只保证可见。
+   */
+  promptSurfaceToolOverrides: readonly string[];
   /** FORK（Step 11）：实验性 mural 开关（`mural.enabled`）。 */
   muralEnabled: boolean;
 }
@@ -172,6 +184,11 @@ export function magicContextSettingsFormFromConfig(
       typeof promptSurface.guidance_override_path === "string"
         ? promptSurface.guidance_override_path
         : "",
+    // FORK（Step 14）：per-model 路由与工具描述覆盖的只读读侧。只解析「键在不在、
+    // 值是不是 schema 认的两个预设」，不解释、不改写；坏值按「未配置」呈现而**不清盘**
+    // ——写侧经 base 原样带回，页面看不出差别才是正确的数据卫生。
+    promptSurfaceModelRoutes: readPromptSurfaceModelRoutes(promptSurface.models),
+    promptSurfaceToolOverrides: readPromptSurfaceToolOverrides(promptSurface.tool_descriptions),
     muralEnabled: typeof mural.enabled === "boolean" ? mural.enabled : fallback.muralEnabled,
   };
 }
@@ -186,6 +203,29 @@ function readPromptSurfaceDefault(
   fallback: PromptSurfacePresetValue,
 ): PromptSurfacePresetValue {
   return value === "full" || value === "light" ? value : fallback;
+}
+
+/**
+ * FORK（Step 14）：`prompt_surface.models` 的只读读侧 → 稳定的展示串数组。
+ *
+ * 键序按字典序排：同一份配置在两次读取之间必须产出同一份展示串，否则 React 每次渲染
+ * 都会看到一个「变了」的列表。只认 schema 的两个字面量，非 record / 非字面量一律不进
+ * 展示（不猜、不纠正）。
+ */
+function readPromptSurfaceModelRoutes(value: unknown): readonly string[] {
+  if (!isRecord(value)) return [];
+  return Object.entries(value)
+    .filter(([, preset]) => preset === "full" || preset === "light")
+    .map(([modelKey, preset]) => `${modelKey} → ${preset}`)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+}
+
+/** FORK（Step 14）：`prompt_surface.tool_descriptions` 的只读读侧（键名，字典序）。 */
+function readPromptSurfaceToolOverrides(value: unknown): readonly string[] {
+  if (!isRecord(value)) return [];
+  return Object.keys(value)
+    .filter((toolId) => toolId.trim().length > 0)
+    .sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
 }
 
 /**
