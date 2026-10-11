@@ -18,11 +18,12 @@
  *     runtime.lastModelSwitchAt > item.admittedAt → 提升轮改用会话活值。
  *     - T-ML1  切换后下一个新提交轮用新模型（admission 冻结活值 + 变值时间戳只记一次）。
  *     - T-ML2a 入队后切换 → 提升轮用活值，且不 pin、不写回会话态。
- *     - T-ML2b 入队后未切换（含「切换发生在入队之前」）→ 提升轮用 item 旧快照。
+ *     - T-ML2b 出队模型规则直证：快照≠会话活值时，无论切换先后，提升一律用活值
+ *       （2026-10-11 用户裁定，废除「未切换保快照」旧语义）。
  *     - T-ML2c auto-drain（v4-bridge 经同一 sendQueuedNow 路径）同规则。
- *     - T-ML2d item 缺 `admittedAt`（异常/跨版本投影）+ 已切换 → 提升仍用活值
+ *     - T-ML2d item 缺 `admittedAt`（异常/跨版本投影）→ 提升仍用活值
  *              （`?? 0` 防御语义直证：缺字段不是保留旧快照的理由）。
- *     - T-ML3  编辑重发仍用被编辑轮快照且不写回会话态——即使切换发生在编辑之后
+ *     - T-ML3  编辑重发用会话活值（出队模型，2026-10-11 裁定）且不写回会话态
  *              （v1.0.4 回归红线：时间戳判据不得被编辑重发路径消费）。
  *     - T-ML4  execution-scope 轮豁免：仍按 intent 选择执行，但绝不写回会话态。
  *
@@ -416,16 +417,17 @@ test("T-ML2a: 入队后切换 → 提升轮用活值且不 pin、不写回会话
   assert.deepEqual(harness.state.sessionModelSelection, SELECTION_B, "会话态保持活值");
 });
 
-test("T-ML2b: 入队后未切换 → 提升轮用 item 旧快照", async () => {
-  // 从未切换：时间戳 0，任何 admittedAt 都不满足「切换晚于入队」。
+test("T-ML2b: 出队模型规则直证——快照≠活值时，无论切换先后，提升一律用活值", async () => {
+  // 从未切换但快照≠会话默认：会话活值（A）胜出，item 快照（C）不再保留。
   const neverSwitched = createModelState(SELECTION_A);
   const intentNoSwitch = await promoteQueueItem({
     queueItem: createQueueItem({ admittedAt: 1_700_000_000_000, modelSelection: SELECTION_C }),
     modelState: neverSwitched,
   });
-  assert.deepEqual(intentNoSwitch.modelSelection, SELECTION_C, "未切换必须保留 item 快照");
+  assert.deepEqual(intentNoSwitch.modelSelection, SELECTION_A, "出队模型：未切换也用会话活值");
 
-  // 切换发生在入队之前：快照与会话活值不同也不能被时间戳判据翻掉。
+  // 切换发生在入队之前（admittedAt 晚于切换）：活值（B）同样胜出——
+  // 旧实现按时间戳保留快照（C），2026-10-11 裁定废除该语义。
   const switchedBeforeEnqueue = createModelState(SELECTION_A);
   switchedBeforeEnqueue.switchModel(SELECTION_B);
   const intentBeforeEnqueue = await promoteQueueItem({
@@ -438,9 +440,10 @@ test("T-ML2b: 入队后未切换 → 提升轮用 item 旧快照", async () => {
   });
   assert.deepEqual(
     intentBeforeEnqueue.modelSelection,
-    SELECTION_C,
-    "入队之后的切换才算「切过」；旧的 item 快照不被回溯改写",
+    SELECTION_B,
+    "出队模型：切换先于入队不构成保留快照的理由",
   );
+  assert.equal(intentBeforeEnqueue.modelSelectionPinned, false, "活值一律不 pin");
 });
 
 test("T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规则", async () => {
@@ -455,11 +458,10 @@ test("T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规�
   assert.deepEqual(writeBackKinds(harness.calls), [], "auto-drain 提升同样不得写回");
 });
 
-test("T-ML2d: item 缺 admittedAt（异常/跨版本投影）+ 已切换 → 提升仍用活值", async () => {
-  // `?? 0` 防御语义直证（CR MF-ML-3）：缺 admittedAt 不是真实路径——
-  // queueItemSchema extends conversationInputIntentSchema，admittedAt 必填，
-  // 且 queue 不持久化（snapshot.ts:257）；但一旦观测到缺字段的投影，
-  // `?? 0` 视为最老，任何真实切换（晚于 0）都必须胜出。
+test("T-ML2d: item 缺 admittedAt（异常/跨版本投影）→ 提升仍用活值", async () => {
+  // 出队模型规则下 admittedAt 已不参与判定（2026-10-11 裁定），本用例退化为
+  // 形状防御直证：异常/跨版本投影缺 `admittedAt` 不影响活值语义
+  // （`queueItemSchema` 的 admittedAt 必填且 queue 不持久化，非真实路径）。
   const modelState = createModelState(SELECTION_A);
   modelState.switchModel(SELECTION_B);
   const intent = await promoteQueueItem({
@@ -470,12 +472,12 @@ test("T-ML2d: item 缺 admittedAt（异常/跨版本投影）+ 已切换 → 提
   assert.equal(intent.modelSelectionPinned, false, "活值仍不得 pin");
 });
 
-// ── T-ML3：编辑重发回归（时间戳判据不得被编辑路径消费）───────────────────────
+// ── T-ML3：编辑重发（出队模型规则，2026-10-11 用户裁定）──────────────────────
 
-test("T-ML3: 编辑重发仍用被编辑轮快照且不写回会话态（切换发生在编辑之后）", async () => {
+test("T-ML3: 编辑重发用会话活值（出队模型）且不写回会话态", async () => {
   const modelState = createModelState(SELECTION_A);
   modelState.switchModel(SELECTION_B);
-  // 前置：编辑动作发生在切换之后——旧实现（无条件写回）会把 B 还原成 A。
+  // 前置：编辑动作发生在切换之后——被编辑轮快照（A）≠ 会话活值（B）。
   assert.ok(modelState.lastModelSwitchAt() > 0);
 
   const captured = {};
@@ -484,6 +486,7 @@ test("T-ML3: 编辑重发仍用被编辑轮快照且不写回会话态（切换�
       sessionId: SESSION_ID,
       runtime: {
         rewindConversationToMessage: async () => ({ strategy: "active_chain" }),
+        getSessionModelSelection: () => modelState.currentSelection(),
       },
       sendInput: async (input, options) => {
         captured.sendInput = input;
@@ -543,17 +546,17 @@ test("T-ML3: 编辑重发仍用被编辑轮快照且不写回会话态（切换�
 
   const intent = captured.sendInputOptions?.intent;
   assert.ok(intent, "编辑重发必须携带 intent");
-  // 时间戳判据只在 queue 提升路径生效：编辑重发仍按被编辑轮的旧快照执行。
-  assert.deepEqual(intent.modelSelection, SELECTION_A, "编辑重发必须沿用被编辑轮快照");
-  assert.equal(intent.modelSelectionPinned, false, "继承快照不得 pin");
+  // 出队模型规则（2026-10-11 裁定）：编辑重发一律用会话当前活值，不用被编辑轮旧快照。
+  assert.deepEqual(intent.modelSelection, SELECTION_B, "编辑重发必须用会话活值（出队模型）");
+  assert.equal(intent.modelSelectionPinned, false, "活值不是本轮显式选择：不得 pin");
 
   const { model, harness } = await executeWithIntent(intent, modelState.currentSelection());
-  assert.equal(model.providerId, SELECTION_A.providerId);
-  assert.equal(model.modelId, SELECTION_A.modelId);
+  assert.equal(model.providerId, SELECTION_B.providerId);
+  assert.equal(model.modelId, SELECTION_B.modelId);
   assert.deepEqual(
     writeBackKinds(harness.calls),
     [],
-    "编辑重发不得写回/持久化/广播（v1.0.4 回归红线）",
+    "编辑重发不得写回/持久化/广播（v1.0.4 写回红线不变）",
   );
   // 会话态仍是我刚切换到的活值，没有被旧快照还原。
   assert.deepEqual(modelState.currentSelection(), SELECTION_B);

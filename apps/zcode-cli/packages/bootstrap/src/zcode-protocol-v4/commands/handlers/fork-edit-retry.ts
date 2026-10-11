@@ -221,8 +221,9 @@ async function editUserQuery(
     payload.newText,
     attachmentRefs,
     attachments,
-    // 编辑重发带当前 composer 的 modelSelection（用户可能在编辑前刚切模型）；
-    // 缺省时 handler 内回退旧快照，但不算显式选择（不 pin）。
+    // 编辑重发带当前 composer 的 modelSelection（用户可能在编辑前刚切模型）。
+    // 出队模型规则（2026-10-11 裁定）下它仅在会话无活值时兜底；正常路径
+    // 会话活值已由 UI 即时下发的 switchModelConfig 与 composer 同步。
     payload.modelSelection,
   );
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
@@ -354,6 +355,12 @@ async function startCanonicalIntent(
   attachments: Awaited<ReturnType<typeof mapAttachmentRefsToTurnAttachments>>,
   explicitModelSelection?: ModelSelection,
 ): Promise<void> {
+  // 用户裁定 2026-10-11（出队模型）：编辑重发与 queue 提升同语义——
+  // 一律用会话当前活值；显式 payload 仅在会话无活值时兜底，被编辑轮旧快照最后兜底。
+  // 仍不写回会话态（v1.0.4 写回红线不变）；pin 仅当最终选择确实来自显式 payload。
+  const liveSelection = record.app.runtime.getSessionModelSelection();
+  const resolvedSelection =
+    liveSelection ?? explicitModelSelection ?? editTarget.intent.modelSelection;
   const intent = inputIntentMetadataFromCanonical(
     envelope,
     {
@@ -365,11 +372,8 @@ async function startCanonicalIntent(
       requestedDelivery: editTarget.intent.requestedDelivery,
       admittedDelivery: editTarget.intent.admittedDelivery,
       fallbackReasonCode: editTarget.intent.fallbackReasonCode,
-      // 显式覆盖优先：payload 携带的 modelSelection 胜过被编辑轮的旧快照。
-      // 仅显式携带时 pin——retryTurn 故意重发原文（不传覆盖值），继承快照
-      // 不写回会话，否则会把用户刚切换的模型静默还原并落库。
-      modelSelection: explicitModelSelection ?? editTarget.intent.modelSelection,
-      modelSelectionPinned: explicitModelSelection !== undefined,
+      modelSelection: resolvedSelection,
+      modelSelectionPinned: !liveSelection && explicitModelSelection !== undefined,
       mode: editTarget.intent.mode,
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,

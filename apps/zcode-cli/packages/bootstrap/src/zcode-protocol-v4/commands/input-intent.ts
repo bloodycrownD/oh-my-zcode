@@ -113,7 +113,7 @@ export function inputIntentMetadataFromCanonical(
 /**
  * sendQueuedNow 只能转换原 QueueItem，禁止用 promotion commandId 重建来源。
  *
- * 提升轮的模型活值覆盖（`lastModelSwitchAt > item.admittedAt → 用会话活值`）不在本函数内
+ * 提升轮的模型活值覆盖（出队模型规则：提升一律用会话活值）不在本函数内
  * 施加：它由 handlers/queue.ts 的 `applyPromotedModelSelection` 在本函数返回值上收口
  * （那里持有 runtime），本函数保持纯转换；pin 判据与写回门的语义以下方注释为准。
  */

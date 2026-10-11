@@ -98,7 +98,9 @@ export function getSessionModelSelection(this: AgentRuntimeInternal): ModelSelec
 
 /**
  * Step 5（bugfix-batch-20261011）：最近一次会话模型选择变值的墙钟（ms）。
- * 消费方见 bootstrap/src/zcode-protocol-v4/commands/handlers/queue.ts 的提升活值判据。
+ * 2026-10-11 规则简化（出队模型）后，queue 提升判据不再比较本时间戳——提升一律用
+ * `getSessionModelSelection()` 活值。字段保留：T-ML1 时间戳语义（同值写回不刷）与
+ * 诊断面仍在消费；勿据此恢复入队/出队时间比较。
  */
 export function getLastModelSwitchAt(this: AgentRuntimeInternal): number {
   return this.lastModelSwitchAt;
@@ -108,16 +110,14 @@ export function setSessionModelSelection(
   this: AgentRuntimeInternal,
   selection: ModelSelection | undefined,
 ): void {
-  // Step 5（bugfix-batch-20261011）：会话模型选择「变值」时记墙钟，供 queue 提升活值
-  // 判据（handlers/queue.ts：lastModelSwitchAt > item.admittedAt → 提升轮改用会话活值）
-  // 判定「用户是否在入队之后切过模型」。
+  // Step 5（bugfix-batch-20261011）：会话模型选择「变值」时记墙钟。2026-10-11
+  // 出队模型规则后，queue 提升/编辑重发一律读会话活值，不再比较该时间戳；
+  // 保留变值时间戳供 T-ML1 语义与诊断面使用。
   //
-  // 只在值确实变化时记，两个方向的静默失效都要防：
-  // - 同值重写不记：desktop 每条 sendText 都 pin 当前选择（session-flow.ts），若把每次
-  //   提交的写回都记成「切换」，时间戳会被提交动作本身不断刷新，把「入队后未切模」
-  //   误判成切换过，排队消息的旧快照语义被无声改写。
-  // - 清除（恢复/配置刷新使选择失效）不记：那是一次失效而不是用户切换，不得让
-  //   `lastModelSwitchAt > admittedAt` 恒真把排队项改判成活值。
+  // 只在值确实变化时记，同值重写不记：desktop 每条 sendText 都 pin 当前选择
+  // （session-flow.ts），若把每次提交的写回都记成「切换」，时间戳会被提交动作
+  // 本身不断刷新，诊断面会误报「频繁切模」。
+  // 清除（恢复/配置刷新使选择失效）不记：那是一次失效而不是用户切换。
   if (selection && !sameModelSelection(this.sessionModelSelection, selection)) {
     this.lastModelSwitchAt = Date.now();
   }

@@ -28,7 +28,7 @@
  *   1. 切模型×排队提升：长驻 App → turn A(M1) 在飞时入队 Q → switchModelConfig
  *      到 M2 → A 完成 → Q promote → 断言 Q 轮用 M2 且会话选择=M2；
  *      全程断言长驻形态 model step 前无 settle 等待（顺序数组/计时）。
- *   2. 红线：编辑重发仍用快照：入队 Q2(M1) → 切 M2 → 编辑重发 → 断言重发轮用 M1。
+ *   2. 出队模型：编辑重发用会话活值：入队 Q2(M1) → 切 M2 → 编辑重发 → 断言重发轮用 M2（2026-10-11 裁定；写回红线不变）。
  *   3. settle 叠加：长驻形态下 model step 前无 settle 等待；turn 后 close drain
  *      仍收口（折叠 pass 落库）。
  *   4. 子代理 spawn 间隙改设置：同 App spawn(override=M1) → 改临时
@@ -500,10 +500,10 @@ test("T-E2E1: 长驻 App 下 turn A(M1) 在飞 → switchModelConfig(M2) → A �
 });
 
 // ============================================================================
-// 场景 2：红线——编辑重发仍用快照（T-E2E2）
+// 场景 2：出队模型规则——编辑重发用会话活值（T-E2E2，2026-10-11 用户裁定）
 // ============================================================================
 
-test("T-E2E2: 入队 Q2(M1) → 切 M2 → 编辑重发 → 重发轮仍用 M1（v1.0.4 红线在叠加形态下不变）", async () => {
+test("T-E2E2: 入队 Q2(M1) → 切 M2 → 编辑重发 → 重发轮用 M2（出队模型；写回红线在叠加形态下不变）", async () => {
   const sessionId = "ses_e2e_2";
   const { order, port, releaseRun } = createLongLivedAssembly(sessionId, NOOP_LOGGER);
   const modelState = createModelState(M1);
@@ -522,7 +522,10 @@ test("T-E2E2: 入队 Q2(M1) → 切 M2 → 编辑重发 → 重发轮仍用 M1�
   const record = {
     app: {
       sessionId,
-      runtime: { rewindConversationToMessage: async () => ({ strategy: "active_chain" }) },
+      runtime: {
+        rewindConversationToMessage: async () => ({ strategy: "active_chain" }),
+        getSessionModelSelection: () => modelState.currentSelection(),
+      },
       sendInput: async (input, options) => {
         captured.sendInput = input;
         captured.sendInputOptions = options;
@@ -580,14 +583,14 @@ test("T-E2E2: 入队 Q2(M1) → 切 M2 → 编辑重发 → 重发轮仍用 M1�
 
   const intent = captured.sendInputOptions?.intent;
   assert.ok(intent, "编辑重发必须携带 intent");
-  assert.deepEqual(intent.modelSelection, M1, "编辑重发必须沿用被编辑轮快照（红线）");
-  assert.equal(intent.modelSelectionPinned, false, "继承快照不得 pin");
+  assert.deepEqual(intent.modelSelection, M2, "编辑重发用会话活值（出队模型，2026-10-11 裁定）");
+  assert.equal(intent.modelSelectionPinned, false, "活值不是本轮显式选择：不得 pin");
 
   const { model, harness } = await executeWithIntent(intent, modelState.currentSelection());
-  assert.equal(model.providerId, M1.providerId);
-  assert.equal(model.modelId, M1.modelId);
-  assert.deepEqual(writeBackKinds(harness.calls), [], "编辑重发不得写回（v1.0.4 回归红线）");
-  assert.deepEqual(modelState.currentSelection(), M2, "会话态不被旧快照还原");
+  assert.equal(model.providerId, M2.providerId);
+  assert.equal(model.modelId, M2.modelId);
+  assert.deepEqual(writeBackKinds(harness.calls), [], "编辑重发不得写回（v1.0.4 写回红线不变）");
+  assert.deepEqual(modelState.currentSelection(), M2, "会话态保持活值");
 
   releaseRun();
   await flush();

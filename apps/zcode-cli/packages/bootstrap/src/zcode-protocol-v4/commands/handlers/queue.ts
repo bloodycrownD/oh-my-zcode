@@ -150,37 +150,29 @@ async function setFollowupMode(
 }
 
 /**
- * 提升轮的模型活值覆盖（bugfix-batch-20261011 Step 5 / spec 缺陷② b 刀）。
+ * 提升轮的模型活值覆盖（bugfix-batch-20261011 Step 5 / spec 缺陷② b 刀；
+ * 规则简化 2026-10-11 用户裁定：「出队模型」——提升一律用会话当前活值）。
  *
- * 判据：runtime 记录「会话模型选择最近一次变值」的墙钟 `getLastModelSwitchAt()`；若它
- * 晚于本项入队时间（`item.admittedAt` = v4 command admission 墙钟，语义即入队时刻），
- * 说明用户在入队之后切过模型——提升轮必须改用当前会话活值，否则排队消息会拿着入队时的
- * 旧快照执行（「切模型后排队消息还用旧模型」的报障根因）。
+ * 规则：queue item 被提升的那一刻，`intent.modelSelection` 一律取
+ * `getSessionModelSelection()` 会话活值（即用户最后一次选择的模型），
+ * 不再比较 `lastModelSwitchAt` 与 `item.admittedAt`——无论切换发生在
+ * 入队之前还是之后，出队即用当前会话模型（入队后没切时活值==快照，无行为差）。
  *
  * 边界（回归红线，勿放宽）：
- * - 未切换 → 维持 queue item 的旧快照语义，包含旧发送端 admission 兜底固定的快照。
- *   core 侧同值写回不记时间戳（desktop 每条 sendText 都 pin 当前选择），因此「入队后又
- *   提交了几条同模型消息」不会被误判成切换。
- * - `?? 0` 仅防御异常/跨版本数据，不是真实缺场路径：TS/zod 层 `admittedAt` 必填
- *   （`queueItemSchema` extends `conversationInputIntentSchema`——`admittedAt:
- *   timestampSchema` 无 optional/default，shared/snapshot.ts:258），且 queue 不持久化
- *   （snapshot.ts:257 裁决：CLI 进程死亡即丢，没有旧库反序列化路径能送进缺字段的旧投影）。
- *   防御语义：`?? 0` 视为最老，任何真实切换都晚于 0，活值胜出
- *   （test-model-live.mjs 有缺 admittedAt 用例直证）。
- * - 只覆盖 `intent.modelSelection`，**不置 pin、不写回会话态**：会话态已由
- *   switchModelConfig 写成新值，promote 不需要也不允许出现第二条模型写路径
- *   （v1.0.4「编辑重发/queue 提升不写回会话选择」语义原样保持）。
- * - 编辑重发（fork-edit-retry / goal / session-mgmt）不经本函数，旧快照执行语义不动；
+ * - 会话无活值（getSessionModelSelection 为空）→ 维持 item 快照兜底。
+ * - 只覆盖 `intent.modelSelection`，**不置 pin、不写回会话态**：会话态只有
+ *   switchModelConfig / 首发原子链两条既有写入口，promote 不允许出现第三条
+ *   模型写路径（v1.0.4「queue 提升不写回会话选择」语义原样保持）。
+ * - 编辑重发（fork-edit-retry）按同语义在此刀对齐（startCanonicalIntent 活值优先）；
  *   execution-scope 轮在 core 侧豁免切模（runtime/methods/turn-model.ts），此处不干预。
  * - auto-drain（v4-bridge 的 sendQueuedNow 内部触发）走同一 handler，天然同规则。
+ * - `lastModelSwitchAt` 字段保留（T-ML1 时间戳语义/诊断面），但提升判据不再消费它。
  */
 function applyPromotedModelSelection(
   runtime: V4SessionRecordView["app"]["runtime"],
-  item: QueueItem,
+  _item: QueueItem,
   intent: TurnInputIntentMetadata,
 ): TurnInputIntentMetadata {
-  const lastModelSwitchAt = runtime.getLastModelSwitchAt?.() ?? 0;
-  if (!(lastModelSwitchAt > (item.admittedAt ?? 0))) return intent;
   const liveSelection = runtime.getSessionModelSelection();
   if (!liveSelection) return intent;
   return {
