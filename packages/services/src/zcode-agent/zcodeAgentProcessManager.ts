@@ -721,17 +721,22 @@ export class ZCodeAgentProcessManager {
         }
       });
     managed.cleanupPromise = cleanupPromise;
-    if (options.reportError !== false) {
-      void cleanupPromise.catch((error) => {
-        errorLog("ZCode agent process cleanup failed", {
-          workspaceKey: managed.runtimeIdentity.workspaceKey,
-          pid: managed.child.pid,
-          runtimeIdentity: managed.runtimeIdentity.identity,
-          reason,
-          error,
-        });
+    // Bug 原因：dispose 与重试编排竞态时，rejection 可能先于调用方 await 挂靠被判为
+    // unhandledRejection（vitest 计为运行级失败，生产等价于未处理拒绝）。catch 必须在
+    // 创建点无条件挂靠：reportError:false（重试路径）时静默吞掉，统一上报由
+    // cleanupManagedProcessWithRetry 的 await/catch 完成，告警语义不变。
+    void cleanupPromise.catch((error) => {
+      if (options.reportError === false) {
+        return;
+      }
+      errorLog("ZCode agent process cleanup failed", {
+        workspaceKey: managed.runtimeIdentity.workspaceKey,
+        pid: managed.child.pid,
+        runtimeIdentity: managed.runtimeIdentity.identity,
+        reason,
+        error,
       });
-    }
+    });
     return cleanupPromise;
   }
 
