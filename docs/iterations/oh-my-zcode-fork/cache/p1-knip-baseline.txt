@@ -1,0 +1,743 @@
+ WARN  Unsupported engine: wanted: {"node":">=24.0.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+
+> zcode@3.14.3 knip D:\Dev\Js\oh-my-zcode\omz
+> knip
+
+[93m[4mUnused files[24m[39m (29)
+scripts/build-desktop-agent-cli.mjs                                     
+scripts/compile-desktop-agent-bytecode.cjs                              
+scripts/desktop-agent-bytecode-runtime.cjs                              
+scripts/generate-third-party-notices.mjs                                
+scripts/licenses.mjs                                                    
+scripts/third-party-npm.mjs                                             
+scripts/zcode-distribution-smoke.mjs                                    
+scripts/dev/zcode-stdio-tap.mjs                                         
+scripts/zcode-distribution/runner.mjs                                   
+packages/desktop/scripts/conversation-docker-plan.mjs                   
+packages/desktop/scripts/powershell-command.d.mts                       
+packages/desktop/scripts/target-platform.d.mts                          
+packages/desktop/scripts/write-dev-ready-marker.mjs                     
+packages/desktop/src/host/hostMemoryDiagnosticsLog.ts                   
+packages/zcode-server-cli/scripts/verify-remote-ssh-target.mjs          
+packages/zcode-server-cli/scripts/verify-remote-ssh.mjs                 
+packages/ui/test/nonCliAcpRetirement.test.ts                            
+apps/zcode-cli/packages/node-repl-host/dist-types/browser-bridge.d.ts   
+apps/zcode-cli/packages/node-repl-host/dist-types/cua-bridge.d.ts       
+apps/zcode-cli/packages/node-repl-host/dist-types/cua-broker.d.ts       
+apps/zcode-cli/packages/node-repl-host/dist-types/process-lifecycle.d.ts
+apps/zcode-cli/packages/node-repl-host/dist-types/result.d.ts           
+apps/zcode-cli/packages/node-repl-host/dist-types/runtime-bridge.d.ts   
+apps/zcode-cli/packages/node-repl-host/dist-types/server.d.ts           
+apps/zcode-cli/packages/node-repl-host/dist-types/tool-contract.d.ts    
+packages/services/test/importedClaudeRecovery.test.ts                   
+packages/services/test/nonCliAcpRetirement.test.ts                      
+packages/services/test/providerConfigMigration.test.ts                  
+apps/zcode-cli/scripts/shadow-replay.mjs                                
+[93m[4mUnused dependencies[24m[39m (53)
+d3-path                          package.json:52:6                                           
+tailwind-scrollbar-hide          package.json:53:6                                           
+@larksuiteoapi/node-sdk          packages/desktop/package.json:31:6                          
+@lydell/node-pty-linux-arm64     packages/desktop/package.json:32:6                          
+@lydell/node-pty-linux-x64       packages/desktop/package.json:33:6                          
+@zcode/provider                  packages/desktop/package.json:35:6                          
+@zcode/provider-node             packages/desktop/package.json:36:6                          
+module-details-from-path         packages/desktop/package.json:44:6                          
+node-forge                       packages/desktop/package.json:45:6                          
+playwright-core                  packages/desktop/package.json:47:6                          
+ssh2                             packages/desktop/package.json:51:6                          
+yauzl                            packages/desktop/package.json:55:6                          
+@lydell/node-pty-darwin-arm64    packages/server/package.json:21:6                           
+@lydell/node-pty-darwin-x64      packages/server/package.json:22:6                           
+@lydell/node-pty-linux-arm64     packages/server/package.json:23:6                           
+@lydell/node-pty-linux-x64       packages/server/package.json:24:6                           
+axios                            packages/server/package.json:29:6                           
+combined-stream                  packages/server/package.json:30:6                           
+follow-redirects                 packages/server/package.json:31:6                           
+form-data                        packages/server/package.json:32:6                           
+node-forge                       packages/server/package.json:34:6                           
+node-pty                         packages/server/package.json:35:6                           
+proxy-from-env                   packages/server/package.json:36:6                           
+undici                           packages/server/package.json:38:6                           
+yaml                             packages/server/package.json:40:6                           
+yauzl                            packages/server/package.json:41:6                           
+yazl                             packages/server/package.json:42:6                           
+@modelcontextprotocol/server     apps/zcode-cli/packages/browser-use-plugin/package.json:17:6
+@zcode/contracts                 apps/zcode-cli/packages/browser-use-plugin/package.json:18:6
+@zcode/shared                    apps/zcode-cli/packages/browser-use-plugin/package.json:21:6
+zod                              apps/zcode-cli/packages/browser-use-plugin/package.json:22:6
+@zcode/dynamic-workflow-runtime  apps/zcode-cli/packages/cli/package.json:31:6               
+@dnd-kit/dom                     packages/ui/package.json:23:6                               
+@dnd-kit/helpers                 packages/ui/package.json:24:6                               
+@dnd-kit/react                   packages/ui/package.json:25:6                               
+@radix-ui/react-radio-group      packages/ui/package.json:32:6                               
+@rive-app/react-webgl2           packages/ui/package.json:34:6                               
+@stripe/react-stripe-js          packages/ui/package.json:39:6                               
+@stripe/stripe-js                packages/ui/package.json:40:6                               
+@xyflow/react                    packages/ui/package.json:44:6                               
+ansi-to-react                    packages/ui/package.json:50:6                               
+embla-carousel-react             packages/ui/package.json:55:6                               
+highlight.js                     packages/ui/package.json:56:6                               
+marked                           packages/ui/package.json:60:6                               
+media-chrome                     packages/ui/package.json:61:6                               
+react-jsx-parser                 packages/ui/package.json:68:6                               
+use-stick-to-bottom              packages/ui/package.json:81:6                               
+cheerio                          apps/zcode-cli/packages/adapters/package.json:113:6         
+cheerio                          apps/zcode-cli/packages/core/package.json:39:6              
+@zcode/model-option-map          packages/provider/package.json:14:6                         
+@zcode/shared-types              apps/zcode-cli/packages/swift-bridge/package.json:21:6      
+dotenv                           apps/zcode-cli/package.json:31:6                            
+proxy-agent                      apps/zcode-cli/package.json:32:6                            
+[93m[4mUnused devDependencies[24m[39m (32)
+@release-it/conventional-changelog  package.json:56:6                                           
+@tanstack/react-virtual             package.json:57:6                                           
+conventional-changelog-writer       package.json:61:6                                           
+dotenv                              package.json:62:6                                           
+istanbul-lib-instrument             package.json:64:6                                           
+lint-staged                         package.json:66:6                                           
+postject                            package.json:69:6                                           
+turbo                               package.json:73:6                                           
+@electron/asar                      packages/desktop/package.json:59:6                          
+@electron/rebuild                   packages/desktop/package.json:60:6                          
+@types/yauzl                        packages/desktop/package.json:66:6                          
+http-mitm-proxy                     packages/desktop/package.json:71:6                          
+istanbul-lib-instrument             packages/desktop/package.json:72:6                          
+tailwindcss                         packages/desktop/package.json:73:6                          
+tailwindcss                         packages/web/package.json:23:6                              
+ws                                  packages/web/package.json:26:6                              
+@modelcontextprotocol/client        apps/zcode-cli/packages/browser-use-plugin/package.json:25:6
+@zcode/adapters                     apps/zcode-cli/packages/browser-use-plugin/package.json:27:6
+@zcode/bootstrap                    apps/zcode-cli/packages/browser-use-plugin/package.json:28:6
+playwright-core                     apps/zcode-cli/packages/browser-use-plugin/package.json:30:6
+@modelcontextprotocol/client        apps/zcode-cli/packages/node-repl-host/package.json:30:6    
+@types/yazl                         apps/zcode-cli/packages/bootstrap/package.json:40:6         
+@zcode/formal-proof                 apps/zcode-cli/packages/bootstrap/package.json:41:6         
+yazl                                apps/zcode-cli/packages/bootstrap/package.json:42:6         
+tsx                                 apps/zcode-cli/packages/tui/package.json:35:6               
+@pierre/diffs                       packages/services/package.json:37:6                         
+esbuild                             packages/services/package.json:39:6                         
+@zcode/model-option-map             packages/provider-node/package.json:20:6                    
+c8                                  apps/zcode-cli/package.json:37:6                            
+oxlint                              apps/zcode-cli/package.json:40:6                            
+postject                            apps/zcode-cli/package.json:41:6                            
+tsx                                 apps/zcode-cli/package.json:42:6                            
+[93m[4mUnlisted dependencies[24m[39m (8)
+yazl                                scripts/package-native-search-tools.mjs:29:11                
+zod                                 packages/desktop/src/host/tasksStorageWorker.ts:2:19         
+vite                                packages/ui/vite/pdfJsCMapsPlugin.ts:4:29                    
+lucide-react                        packages/web/src/share/ConversationShareLandingPage.tsx:11:53
+[90m[39m[97m@modelcontextprotocol/sdk[39m[90m/types.js[39m  apps/zcode-cli/packages/node-repl-host/src/cua-bridge.ts:5:37
+yaml                                scripts/architecture/policy.mjs:4:36                         
+zod                                 packages/desktop/src/host/storagePreparationProcesses.ts:5:19
+builder-util-runtime                packages/desktop/src/main/manifestUpdateProvider.ts:2:60     
+[93m[4mUnused exports[24m[39m (408)
+resolveNativeSearchBundleMetaPath     function  scripts/native-search-tools-bundle-meta.mjs:25:17                       
+NATIVE_SEARCH_RIPGREP_REVISION                  scripts/native-search-tools-config.mjs:14:14                            
+NATIVE_SEARCH_PREBUILT_RELEASES                 scripts/native-search-tools-config.mjs:31:14                            
+NATIVE_SEARCH_SOURCE_ARCHIVES                   scripts/native-search-tools-config.mjs:43:14                            
+NATIVE_SEARCH_PRODUCER_ARCHIVE_SHA2…            scripts/native-search-tools-config.mjs:150:14                           
+resolveNativeSearchPrebuiltRelease    function  scripts/native-search-tools-config.mjs:235:17                           
+getNativeSearchProducerOutputIds      function  scripts/native-search-tools-config.mjs:265:17                           
+assertLinuxNativeSearchBuildEnviron…  function  scripts/native-search-tools-unix.mjs:34:17                              
+resolveNativeUnixBuildConfig          function  scripts/native-search-tools-unix.mjs:81:17                              
+createBfsBuildEnvironment             function  scripts/native-search-tools-unix.mjs:286:17                             
+resolveNativeWindowsBuildConfig       function  scripts/native-search-tools-windows.mjs:20:17                           
+repositoryRoot                                  scripts/third-party-notices.mjs:5:14                                    
+readNodeNotices                       function  scripts/third-party-notices.mjs:42:23                                   
+loadPolicy                                      scripts/architecture/index.mjs:390:10                                   
+extractCommitBodyBullets              function  scripts/release-it/changelog-writer.mjs:18:17                           
+getRequiredGlibcVersions              function  scripts/native-search-tools-verify.mjs:141:17                           
+verifyLinuxGlibcBaseline              function  scripts/native-search-tools-verify.mjs:148:17                           
+verifyMacosDeploymentTarget           function  scripts/native-search-tools-verify.mjs:168:17                           
+getAllowedLinuxNativeSearchDependen…  function  scripts/native-search-tools-verify.mjs:258:17                           
+DEV_ELECTRON_PROTOCOL_SCHEME                    packages/desktop/scripts/devElectronAppBundle.mjs:4:14                  
+DEV_ELECTRON_APP_NAME                           packages/desktop/scripts/devElectronAppBundle.mjs:5:14                  
+DEV_ELECTRON_APP_BUNDLE_ID                      packages/desktop/scripts/devElectronAppBundle.mjs:6:14                  
+DEV_ELECTRON_BUNDLE_FORMAT                      packages/desktop/scripts/devElectronAppBundle.mjs:8:14                  
+patchDevElectronInfoPlist             function  packages/desktop/scripts/devElectronAppBundle.mjs:44:17                 
+resolveDevElectronAppBundlePath       function  packages/desktop/scripts/devElectronAppBundle.mjs:51:17                 
+LEGACY_REMOTE_RIPGREP_VERSION                   scripts/remote-native-search-tools-config.mjs:9:14                      
+LEGACY_REMOTE_RIPGREP_ARCHIVE_SHA25…            scripts/remote-native-search-tools-config.mjs:11:14                     
+DEFAULT_INTRANET_MACHINE_HOST                   scripts/intranetDefaults.mjs:3:14                                       
+INTRANET_MACHINE_HOST                           scripts/intranetDefaults.mjs:9:14                                       
+INTRANET_ASSET_SERVICE_PORT                     scripts/intranetDefaults.mjs:10:14                                      
+INTRANET_ASSET_BASE_URL                         scripts/intranetDefaults.mjs:11:14                                      
+INTRANET_DEPS_BASE_URL                          scripts/intranetDefaults.mjs:14:14                                      
+AGENT_BUNDLE_SOURCE_RELATIVE                    packages/desktop/scripts/stage-agent-bundle.mjs:14:14                   
+resolveAgentBundlePaths               function  packages/desktop/scripts/stage-agent-bundle.mjs:16:17                   
+extractPrebuiltArchive                function  scripts/prebuilt-binary-extract.mjs:38:17                               
+findPrebuiltBinary                    function  scripts/prebuilt-binary-extract.mjs:65:17                               
+collectRuntimeModuleClosure           function  packages/desktop/scripts/runtime-dependency-closure.mjs:52:17           
+ZCODE_PREVIEW_IDENTITY_ENV                      packages/desktop/scripts/desktop-product-identity.mjs:6:14              
+desktopProductIdentities                        packages/desktop/scripts/desktop-product-identity.mjs:26:14             
+isPreviewIdentityRequested            function  packages/desktop/scripts/desktop-product-identity.mjs:40:17             
+resolveWindowsAppUserModelId          function  packages/desktop/scripts/desktop-product-identity.mjs:92:17             
+waitForDrainOrDisconnect                        packages/desktop/src/host/remoteMediaPreviewProxy.ts:13:10              
+ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLE…            packages/desktop/src/main/desktopContextPromptRollout.ts:13:10          
+DESKTOP_CONTEXT_PROMPT_CACHE_TTL_MS             packages/desktop/src/main/desktopContextPromptRollout.ts:16:14          
+buildLocalMediaPreviewUrl                       packages/desktop/src/main/localMediaPreviewProtocol.ts:178:10           
+clearCodingPlanWebviewStorage         function  packages/desktop/src/main/desktopCommandHandlers.ts:132:23              
+resolveFeedbackUrl                    function  packages/desktop/src/main/desktopCommandHandlers.ts:207:23              
+openChangelog                         function  packages/desktop/src/main/desktopCommandHandlers.ts:458:23              
+DESKTOP_ZOOM_FACTOR_STEP                        packages/desktop/src/main/desktopZoom.ts:3:14                           
+getResourceManagerWindowId            function  packages/desktop/src/main/resourceManagerWindow.ts:99:17                
+isMainApplicationWindowWebContents    function  packages/desktop/src/main/resourceManagerWindow.ts:146:17               
+collectChromiumProcessRolePids        function  packages/desktop/src/main/resourceManagerWindow.ts:177:17               
+MCP_SOURCE_DESCRIPTORS                          packages/desktop/src/main/mcpUserDirectory/index.ts:24:10               
+getSourceDescriptor                             packages/desktop/src/main/mcpUserDirectory/index.ts:24:34               
+resolvePdfJsCMapsDirectory            function  packages/ui/vite/pdfJsCMapsPlugin.ts:14:17                              
+listPdfJsCMapAssets                   function  packages/ui/vite/pdfJsCMapsPlugin.ts:18:23                              
+resolveBuiltinProviderBuildEnvironm…  function  scripts/builtin-provider-config.mjs:11:23                               
+resolveSourceNodePtyPrebuildPath      function  packages/desktop/scripts/node-pty-package-assets.mjs:43:17              
+stripSourceMappingUrlComments         function  packages/desktop/scripts/packaged-sourcemap-cleanup.mjs:23:17           
+stripSourceMappingUrlCommentsInDire…  function  packages/desktop/scripts/packaged-sourcemap-cleanup.mjs:45:17           
+removeSourceMapFilesInDirectory       function  packages/desktop/scripts/packaged-sourcemap-cleanup.mjs:66:17           
+stageKoffiIntoBundledAgents           function  packages/desktop/scripts/koffi-package-assets.mjs:40:17                 
+ASAR_UNPACK_NATIVE_GLOB                         packages/desktop/scripts/app-asar-repack.mjs:3:14                       
+createAppAsarPackArgs                 function  packages/desktop/scripts/app-asar-repack.mjs:14:17                      
+patchNsisInstallSectionSource         function  packages/desktop/scripts/patch-nsis-install-section.mjs:24:17           
+PATCH_MARKER                                    packages/desktop/scripts/patch-nsis-install-section.mjs:101:10          
+ConversationShareLandingPage          function  packages/web/src/share/ConversationShareLandingPage.tsx:260:17          
+downloadFile                                    apps/zcode-cli/packages/cli/scripts/sea-node-download.mjs:38:14         
+normalizeTarget                                 apps/zcode-cli/packages/cli/scripts/sea-targets.mjs:17:14               
+assertSupportedTarget                           apps/zcode-cli/packages/cli/scripts/sea-targets.mjs:29:14               
+readWindowsAuthenticodeDirectory                apps/zcode-cli/packages/cli/scripts/windows-authenticode.mjs:50:14      
+removeWindowsAuthenticodeSignatureF…            apps/zcode-cli/packages/cli/scripts/windows-authenticode.mjs:150:14     
+seaTuiManifestAssetKey                          apps/zcode-cli/packages/cli/scripts/sea-tui-assets.mjs:13:14            
+opentuiNativePackageForTarget                   apps/zcode-cli/packages/cli/scripts/sea-tui-assets.mjs:20:14            
+seaOfficialPluginAssetPrefix                    apps/zcode-cli/packages/cli/scripts/sea-official-plugin-assets.mjs:6:14 
+seaOfficialPluginManifestAssetKey               apps/zcode-cli/packages/cli/scripts/sea-official-plugin-assets.mjs:7:14 
+officialSeaPlugins                              apps/zcode-cli/packages/cli/scripts/sea-official-plugin-assets.mjs:20:14
+seaBundledSkillAssetPrefix                      apps/zcode-cli/packages/cli/scripts/sea-bundled-skill-assets.mjs:9:14   
+seaBundledSkillManifestAssetKey                 apps/zcode-cli/packages/cli/scripts/sea-bundled-skill-assets.mjs:10:14  
+bundledSkillPackRootPath                        apps/zcode-cli/packages/cli/scripts/sea-bundled-skill-assets.mjs:11:14  
+bundledSkillPackSkillsDirectory                 apps/zcode-cli/packages/cli/scripts/sea-bundled-skill-assets.mjs:12:14  
+bundledSkillPackRequiredPaths                   apps/zcode-cli/packages/cli/scripts/sea-bundled-skill-assets.mjs:15:14  
+seaRuntimeToolAssetPrefix                       apps/zcode-cli/packages/cli/scripts/sea-runtime-tool-assets.mjs:11:14   
+seaRuntimeToolManifestAssetKey                  apps/zcode-cli/packages/cli/scripts/sea-runtime-tool-assets.mjs:12:14   
+resolveSeaRuntimeToolPreparationPlan            apps/zcode-cli/packages/cli/scripts/sea-runtime-tool-prepare.mjs:6:14   
+seaPlaywrightAssetPrefix                        apps/zcode-cli/packages/cli/scripts/sea-playwright-assets.mjs:7:14      
+seaPlaywrightManifestAssetKey                   apps/zcode-cli/packages/cli/scripts/sea-playwright-assets.mjs:8:14      
+SEA_ZCODE_BUILTIN_PROVIDER_CONFIG_A…            apps/zcode-cli/packages/cli/scripts/sea-provider-config-assets.mjs:3:14 
+formatBytes                                     apps/zcode-cli/packages/cli/scripts/upload-progress.mjs:11:14           
+SEA_ZCODE_BUILTIN_PROVIDER_CONFIG_A…            apps/zcode-cli/packages/cli/src/provider-runtime-env.ts:18:14           
+DEFAULT_NODE_DIST_BASE                          packages/zcode-server-cli/src/packaging/nodeDistMirror.ts:18:14         
+isPathWithin                          function  packages/zcode-server-cli/src/runtime/paths.ts:100:17                   
+buildUnifiedDiff                                packages/ui/src/lib/codeViewer.ts:23:10                                 
+isAllowedBrowserUrl                   function  packages/ui/src/embeddedBrowserHelpers.ts:122:17                        
+useBaseWorkspaceServices                        packages/ui/src/hooks/index.ts:10:10                                    
+useWatchedReaddir                               packages/ui/src/hooks/index.ts:24:10                                    
+useWorkspaceHomePath                            packages/ui/src/hooks/index.ts:28:10                                    
+useSkills                                       packages/ui/src/hooks/index.ts:35:10                                    
+usePlugins                                      packages/ui/src/hooks/index.ts:36:10                                    
+useOnboardingRecordService                      packages/ui/src/hooks/index.ts:39:10                                    
+useAlertDialog                                  packages/ui/src/hooks/index.ts:43:10                                    
+useZCodeAgentService                            packages/ui/src/hooks/index.ts:47:10                                    
+useGitAutoRefresh                               packages/ui/src/hooks/index.ts:50:10                                    
+useTaskNativeSessionLogFile                     packages/ui/src/hooks/index.ts:54:10                                    
+useTaskSessionFilePath                          packages/ui/src/hooks/index.ts:55:10                                    
+useUsageStats                                   packages/ui/src/hooks/index.ts:56:10                                    
+mapSessionEvents                      function  …code-cli/packages/bootstrap/src/zcode-protocol/session-mapper.ts:349:17
+OAuthService                          class     packages/services/src/oauth/oauthService.ts:117:14                      
+pickOrgAndProject                     function  …ages/services/src/model-provider/accountProviderApiKeyResolver.ts:13:17
+resolveHostProxyForUrl                function  packages/services/src/providers/api/nodeApiNetwork.ts:61:17             
+parseLinuxVmRssKb                     function  packages/services/src/process/processResourceSampler.ts:150:17          
+ensureDeviceMidInLockedState          function  packages/services/src/device/deviceMid.ts:173:23                        
+AutomationCreateLimitError            class     packages/services/src/session/automationRepo.ts:45:14                   
+InvalidAutomationIntervalCarrierErr…            packages/services/src/session/automationService.ts:14:10                
+ZCODE_E2E_FS_FAULTS_ENV                         apps/zcode-cli/packages/adapters/src/storage/fs-fault-injection.ts:1:14 
+ZCODE_E2E_FS_FAULTS_ALLOW_ENV                   apps/zcode-cli/packages/adapters/src/storage/fs-fault-injection.ts:2:14 
+isExecutableCandidate                 function  apps/zcode-cli/packages/adapters/src/exec/bash-shell-provider.ts:312:17 
+findOfficialMcpReservedHeaders                  apps/zcode-cli/packages/adapters/src/mcp/official-auth.ts:436:10        
+MCP_OAUTH_CANONICAL_CREDENTIALS_KEY             apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:6:14      
+MCP_OAUTH_CREDENTIALS_VERSION                   apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:9:14      
+MCP_OAUTH_SUPPORTED_CREDENTIAL_VERS…            apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:10:14     
+isCanonicalCredentials                function  apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:69:17     
+deriveCredentialPair                  function  apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:261:17    
+getMessagesToSummarize                          apps/zcode-cli/packages/core/src/compact/index.ts:13:3                  
+BrowserCapabilityCollection           class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:104:14        
+AlertDialog                           class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:363:14        
+BeforeUnloadDialog                    class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:367:14        
+ConfirmDialog                         class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:371:14        
+PromptDialog                          class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:379:14        
+BrowserUser                           class     apps/zcode-cli/packages/core/src/browser-client/facade.ts:828:14        
+createDebugApp                        function  apps/zcode-cli/packages/debug/server/index.ts:29:17                     
+extractAttribution                    function  apps/zcode-cli/packages/debug/server/network-capture.ts:323:17          
+sanitizeHeaders                       function  apps/zcode-cli/packages/debug/server/network-capture.ts:334:17          
+readWindowsPeMetadata                 function  scripts/native-search-tools-windows-pe.mjs:40:17                        
+isAllowedBrowserUrl                             packages/desktop/src/main/browserView/browserCommandExecutor.ts:28:10   
+buildStandardChromeInstallations                packages/desktop/src/main/chromeProfileDiscovery.ts:16:3                
+parseRunningChromeInstallations                 packages/desktop/src/main/chromeProfileDiscovery.ts:17:3                
+WINDOWS_WINDOW_CONTROLS_BASE_RIGHT_…            packages/desktop/src/main/desktopWindowButtonPosition.ts:8:14           
+WINDOWS_TITLE_BAR_HEIGHT_PX                     packages/desktop/src/main/desktopWindowButtonPosition.ts:9:14           
+aggregateChromiumProcessRoles         function  packages/desktop/src/main/processResourceRoleClassifier.ts:89:17        
+MCP_SOURCE_DESCRIPTORS                          packages/desktop/src/main/mcpUserDirectory/types.ts:22:14               
+getSourceDescriptor                   function  packages/desktop/src/main/mcpUserDirectory/types.ts:32:17               
+DEFAULT_HOST_CAPABILITY_TTL_MS                  packages/server/src/hostCapability.ts:4:14                              
+matchesCtrlShortcut                   function  packages/ui/src/lib/keyboardShortcuts.ts:97:17                          
+hasAssistantPreviewFileChangeCandid…  function  packages/ui/src/lib/assistantFileReferences.ts:286:17                   
+hasAssistantPreviewFileChangeCandid…            packages/ui/src/lib/assistantPreviewCards.ts:22:3                       
+isAssistantPreviewHtmlPath                      packages/ui/src/lib/assistantPreviewCards.ts:23:3                       
+shouldAutoScanOnboardingSessions                packages/ui/src/onboarding/OnboardingDialog.tsx:36:10                   
+reconnectRemoteWorkspaceHistoryEntry            packages/ui/src/root/useRemoteWorkspaceHistory.ts:49:10                 
+refreshRestoredOAuthProviderFamilyA…            packages/ui/src/root/useRootOAuthEffects.ts:29:10                       
+syncBotTaskConfigOptionsToStore       function  packages/ui/src/root/useBotBroadcastEffects.ts:21:17                    
+shouldRefreshBotTaskList              function  packages/ui/src/root/useBotBroadcastEffects.ts:42:17                    
+shouldMirrorBotTaskStreamToStore      function  packages/ui/src/root/useBotBroadcastEffects.ts:58:17                    
+reserveCodingPlanQuotaResetAutoPlay   function  packages/ui/src/store/codingPlanQuotaResetState.ts:293:23               
+commitCodingPlanQuotaResetAutoPlay    function  packages/ui/src/store/codingPlanQuotaResetState.ts:358:17               
+releaseCodingPlanQuotaResetAutoPlay   function  packages/ui/src/store/codingPlanQuotaResetState.ts:397:23               
+useWatchedReaddir                     function  packages/ui/src/hooks/useFileWatcherService.ts:19:17                    
+usePlugins                            function  packages/ui/src/hooks/usePlugins.ts:5:17                                
+useUsageStats                         function  packages/ui/src/hooks/useUsageStats.ts:72:17                            
+roundPercent                          function  packages/ui/src/resource-manager/resourceUsageView.ts:44:17             
+zcodeSessionSettingsToConfigOptions   function  packages/ui/src/lib/zcodeSessionProjection.ts:88:17                     
+resolveProviderBaseURL                function  packages/ui/src/lib/registryProviderView.ts:18:17                       
+uuidv7                                          packages/ui/src/v4/commandFactory.ts:12:10                              
+BUNDLED_SKILL_PACK_DIRECTORY_NAME               apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:21:14       
+BUNDLED_SKILL_PACK_SKILLS_DIRECTORY             apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:22:14       
+BUNDLED_SKILL_PACK_REQUIRED_PATHS               apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:27:14       
+SEA_BUNDLED_SKILL_ASSET_PREFIX                  apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:41:14       
+findMissingBundledSkillPackPaths      function  apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:89:23       
+WorkflowActorPinnedModelError         class     apps/zcode-cli/packages/bootstrap/src/app/workflow-actor-model.ts:51:14 
+OFFICIAL_BROWSER_USE_REQUIRED_SEED_…            …ode-cli/packages/bootstrap/src/app/official-plugin-definitions.ts:62:14
+buildUserInputRow                     function  …e-cli/packages/bootstrap/src/zcode-protocol-v4/projection-rows.ts:78:17
+BUILTIN_TUI_THEMES                              apps/zcode-cli/packages/tui/src/theme/index.ts:1:10                     
+DARK_TUI_THEME                                  apps/zcode-cli/packages/tui/src/theme/index.ts:1:30                     
+LIGHT_TUI_THEME                                 apps/zcode-cli/packages/tui/src/theme/index.ts:1:46                     
+themeToLegacyPalette                            apps/zcode-cli/packages/tui/src/theme/index.ts:2:19                     
+getActiveTuiThemeMode                           apps/zcode-cli/packages/tui/src/theme/index.ts:5:3                      
+isTuiThemeMode                                  apps/zcode-cli/packages/tui/src/theme/index.ts:6:3                      
+inferThemeModeFromTerminalColors                apps/zcode-cli/packages/tui/src/theme/index.ts:11:3                     
+resolveInitialTerminalThemeMode                 apps/zcode-cli/packages/tui/src/theme/index.ts:12:3                     
+inferThemeModeFromTerminalColors      function  apps/zcode-cli/packages/tui/src/theme/terminal.ts:32:17                 
+atomicWriteJson                       function  packages/services/src/fs/atomicFileUtils.ts:160:23                      
+uuidv7                                function  packages/services/src/zcode-agent/zcodeV4HostCommand.ts:19:17           
+BOTS_LEGACY_MODEL_CACHE_FILE                    packages/services/src/bots/config.ts:20:14                              
+BOTS_MODEL_CACHE_FILE                           packages/services/src/bots/config.ts:21:14                              
+createDefaultBotCommands              function  packages/services/src/bots/config.ts:31:17                              
+FEISHU_STREAMING_CARD_TAGGED_ELEMEN…            packages/services/src/bots/providers/feishuProvider.ts:35:14            
+countFeishuCardTaggedElements         function  packages/services/src/bots/providers/feishuProvider.ts:1049:17          
+splitFeishuStreamingCardStates        function  packages/services/src/bots/providers/feishuProvider.ts:1055:17          
+createFeishuWebSocketEventHandlers    function  packages/services/src/bots/providers/feishuProvider.ts:1456:17          
+resolveTaskModel                      function  packages/services/src/bots/modelSelectionHelpers.ts:7:17                
+modelProviderCatalogFileSchema                  …ges/services/src/model-provider/legacyModelProviderSerialized.ts:208:14
+modelProviderStoreFileSchema                    …ges/services/src/model-provider/legacyModelProviderSerialized.ts:296:14
+modelProviderDisplayOrderStateSchema            …ges/services/src/model-provider/legacyModelProviderSerialized.ts:301:14
+resolveOffPeakClientConfig            function  …ing-plan-subscription/bigmodelCodingPlanSubscriptionProvider.ts:1328:17
+SKILL_SCAN_EXCLUDED_DIRECTORY_NAMES             packages/services/src/skills/skillDiscoveryWalk.ts:14:3                 
+resolveConfigPath                     function  packages/services/src/subagents/subagentStorage.ts:41:17                
+writeWorkspaceHookConfiguredToggle              packages/services/src/hooks/workspaceHookConfigMutation.ts:3:3          
+WorkspaceHookMutationError                      packages/services/src/hooks/workspaceHookConfigMutation.ts:4:3          
+ZCODE_SOURCE_HEADERS                            packages/services/src/providers/sourceHeaders.ts:13:10                  
+isAbortError                          function  packages/services/src/storage/app/scanJob.ts:14:17                      
+InvalidAutomationIntervalCarrierErr…  class     packages/services/src/session/automationIntervalCarrier.ts:11:14        
+getWindowsEnvValue                    function  apps/zcode-cli/packages/adapters/src/exec/windows-executable.ts:5:17    
+getMessagesToSummarize                function  apps/zcode-cli/packages/core/src/compact/manual.ts:61:17                
+DEFAULT_SUBAGENT_TYPE                           apps/zcode-cli/packages/core/src/subagent/profile.ts:10:14              
+addReadLineNumbers                              apps/zcode-cli/packages/core/src/tool/handlers/read.ts:53:10            
+getBashActivityDescription                      apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:55:3             
+getBashAutoClassifierInput                      apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:56:3             
+getBashDescription                              apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:57:3             
+getBashToolUseSummary                           apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:58:3             
+getBashUserFacingName                           apps/zcode-cli/packages/core/src/tool/handlers/bash.ts:59:3             
+clearWebFetchCacheForTests            function  apps/zcode-cli/packages/core/src/tool/handlers/webfetch.ts:35:17        
+buildExploreSystemPrompt              function  apps/zcode-cli/packages/core/src/subagent/explore.ts:70:17              
+INLINE_TEXT_ATTACHMENT_MAX_BYTES                apps/zcode-cli/packages/core/src/runtime/types.ts:741:14                
+buildSettingsMessageText                        …ackages/core/src/runtime/methods/dynamic-workflow-run-settings.ts:38:10
+join                                            apps/zcode-cli/packages/core/src/runtime/deps.ts:1:20                   
+formatTodoStateForModel                         apps/zcode-cli/packages/core/src/runtime/deps.ts:86:3                   
+formatGoalCompletionVerificationFai…            apps/zcode-cli/packages/core/src/runtime/deps.ts:91:3                   
+formatGoalCompletionVerificationPas…            apps/zcode-cli/packages/core/src/runtime/deps.ts:92:3                   
+escapeGoalPromptText                            apps/zcode-cli/packages/core/src/runtime/deps.ts:95:3                   
+MEDIA_BUDGET_CURRENT_IMAGE_TOO_LARG…            apps/zcode-cli/packages/core/src/runtime/deps.ts:98:3                   
+MEDIA_BUDGET_CURRENT_VIDEO_TOO_LARG…            apps/zcode-cli/packages/core/src/runtime/deps.ts:99:3                   
+VIDEO_INPUT_MAX_BYTES                           apps/zcode-cli/packages/core/src/runtime/deps.ts:102:3                  
+READ_VIDEO_MAX_INPUT_BYTES                      apps/zcode-cli/packages/core/src/runtime/deps.ts:103:3                  
+getMessagesToSummarize                          apps/zcode-cli/packages/core/src/runtime/deps.ts:299:3                  
+EXPLORE_AGENT_ALLOWED_TOOLS                     apps/zcode-cli/packages/core/src/runtime/deps.ts:310:3                  
+EXPLORE_AGENT_TYPE                              apps/zcode-cli/packages/core/src/runtime/deps.ts:311:3                  
+GENERAL_PURPOSE_AGENT_TYPE                      apps/zcode-cli/packages/core/src/runtime/deps.ts:312:3                  
+DEFAULT_SUBAGENT_TYPE                           apps/zcode-cli/packages/core/src/runtime/deps.ts:313:3                  
+buildGeneralPurposeSystemPrompt                 apps/zcode-cli/packages/core/src/runtime/deps.ts:314:3                  
+buildExploreSystemPrompt                        apps/zcode-cli/packages/core/src/runtime/deps.ts:317:3                  
+positiveInteger                       function  …zcode-cli/packages/contracts/src/events/event-reducer-helpers.ts:114:17
+fingerprintObservationSources         function  apps/zcode-cli/packages/debug/server/observation-events.ts:111:23       
+computeAggregateStats                 function  packages/desktop/src/main/resourceMetricsStats.ts:15:17                 
+appendBoundedSamples                  function  packages/desktop/src/main/resourceMetricsStats.ts:35:17                 
+CUA_PERMISSION_PANEL_STATE_CHANNEL              packages/desktop/src/main/cuaPermissionDragPanel.ts:66:14               
+manualSkillCommandUsage                         apps/zcode-cli/packages/cli/src/command-center.ts:6:3                   
+DEFAULT_HOST_CAPABILITY_TTL_MS                  packages/zcode-server-cli/src/server-core/hostCapability.ts:7:14        
+buildTaskChangeSummary                function  packages/ui/src/lib/taskChangeSummary.ts:83:17                          
+buildPerTurnChangeSummaries           function  packages/ui/src/lib/taskChangeSummary.ts:204:17                         
+getScratchWorkspaceLocationHint                 packages/ui/src/ChatEmptyState.tsx:50:3                                 
+getScratchWorkspaceNameErrorKind                packages/ui/src/ChatEmptyState.tsx:51:3                                 
+applyWorkspaceTriggerSelection                  packages/ui/src/WorkspaceSidebar.tsx:155:10                             
+WorkspaceSidebarCollapsedRail                   packages/ui/src/WorkspaceSidebar.tsx:156:10                             
+applySessionsIndexFrame               function  packages/ui/src/v4/sessionsIndexStore.ts:94:17                          
+fuzzyMatch                                      packages/ui/src/settings/ModelProviderSection.tsx:69:3                  
+handleEndpointSuggestionPopoverOpen…            packages/ui/src/settings/ModelProviderSection.tsx:70:3                  
+resolveEndpointSuggestionOpenRequest            packages/ui/src/settings/ModelProviderSection.tsx:71:3                  
+isCodingPlanPurchaseAuthPending                 packages/ui/src/settings/CodingPlanUpgradeDialog.tsx:17:10              
+beginCodingPlanUpgradeLogin                     packages/ui/src/settings/CodingPlanUpgradeDialog.tsx:19:3               
+resolvePendingCodingPlanUpgradeAfte…            packages/ui/src/settings/CodingPlanUpgradeDialog.tsx:20:3               
+OnboardingAgentSettingsStep           function  packages/ui/src/onboarding/OnboardingFlowParts.tsx:227:17               
+buildPromptCompletionUsageFallback    function  packages/ui/src/lib/zcodeTaskUsageFallback.ts:77:17                     
+areTaskListItemsEquivalent            function  packages/ui/src/v4/taskListItemStabilization.ts:46:17                   
+getContextCompressionCommand                    packages/ui/src/chat-input-toolbar/display.tsx:48:3                     
+getRenderableTaskUsage                          packages/ui/src/chat-input-toolbar/display.tsx:49:3                     
+resolveChatErrorBannerDisplayMessage  function  packages/ui/src/ChatErrorBanner.tsx:71:17                               
+MissingInlineImageContentError                  packages/ui/src/lib/chatAttachments.ts:23:3                             
+OversizedInlineImageAttachmentError             packages/ui/src/lib/chatAttachments.ts:25:3                             
+countClipboardTextLines                         packages/ui/src/lib/chatAttachments.ts:30:3                             
+BackgroundTaskElapsedLabel            function  packages/ui/src/BackgroundTaskElapsedLabel.tsx:50:17                    
+distanceToBottom                      function  packages/ui/src/v4/timelineScrollAnchor.ts:25:17                        
+isProviderBusinessErrorCode           function  packages/ui/src/lib/providerBusinessError.ts:78:17                      
+getProviderBusinessErrorUiAction      function  packages/ui/src/lib/providerBusinessError.ts:94:17                      
+START_PLAN_BUSY_AUTO_RETRY_EXHAUSTE…            packages/ui/src/lib/providerBusinessError.ts:149:14                     
+SUSPICIOUS_EMPTY_MODEL_RESULT_MESSA…            packages/ui/src/lib/providerBusinessError.ts:236:14                     
+ZCODE_CUA_BROKER_SOCKET_ENV                     apps/zcode-cli/packages/bootstrap/src/mcp-config.ts:18:45               
+journalActorResolvedModel             function  …de-cli/packages/bootstrap/src/app/dynamic-workflow-run-launch.ts:515:17
+officialPluginHostPrefixArgs          function  …s/zcode-cli/packages/bootstrap/src/app/official-plugin-runtime.ts:95:17
+BUILTIN_WORKFLOW_COMMAND_DESCRIPTION            apps/zcode-cli/packages/bootstrap/src/builtin-workflow-command.ts:23:14 
+BUILTIN_WORKFLOW_COMMAND_ARGUMENT_H…            apps/zcode-cli/packages/bootstrap/src/builtin-workflow-command.ts:24:14 
+BUILTIN_WORKFLOW_COMMAND                        apps/zcode-cli/packages/bootstrap/src/builtin-workflow-command.ts:41:14 
+readSessionDebug                      function  …zcode-cli/packages/bootstrap/src/zcode-protocol/session-debug.ts:150:17
+onSessionEvent                        function  …-cli/packages/bootstrap/src/zcode-protocol/server-operations.ts:2989:17
+CTRL_C_EXIT_CONFIRMATION_WINDOW_MS              apps/zcode-cli/packages/tui/src/app-keyboard.ts:44:3                    
+completeEffortCommand                           apps/zcode-cli/packages/tui/src/app-keyboard.ts:45:3                    
+completeModeCommand                             apps/zcode-cli/packages/tui/src/app-keyboard.ts:46:3                    
+completeModelCommand                            apps/zcode-cli/packages/tui/src/app-keyboard.ts:47:3                    
+completeSlashCommand                            apps/zcode-cli/packages/tui/src/app-keyboard.ts:48:3                    
+createCtrlCExitGuard                            apps/zcode-cli/packages/tui/src/app-keyboard.ts:49:3                    
+isModeSwitchKey                                 apps/zcode-cli/packages/tui/src/app-keyboard.ts:50:3                    
+resetCtrlCExitGuard                             apps/zcode-cli/packages/tui/src/app-keyboard.ts:51:3                    
+resolveCtrlCExitIntent                          apps/zcode-cli/packages/tui/src/app-keyboard.ts:52:3                    
+shouldHandleInputHistoryNavigation              apps/zcode-cli/packages/tui/src/app-keyboard.ts:53:3                    
+filterSelectionItems                            apps/zcode-cli/packages/tui/src/app-input.ts:26:3                       
+DARK_TUI_THEME                                  apps/zcode-cli/packages/tui/src/theme/defaults.ts:6:14                  
+LIGHT_TUI_THEME                                 apps/zcode-cli/packages/tui/src/theme/defaults.ts:64:14                 
+themeToLegacyPalette                  function  apps/zcode-cli/packages/tui/src/theme/legacy-palette.ts:18:17           
+getActiveTuiThemeMode                 function  apps/zcode-cli/packages/tui/src/theme/state.ts:11:17                    
+hasClaudeNativeSidechainMarker        function  …ices/src/session/claude-native/claudeNativeSessionImportParser.ts:91:17
+extractClaudeNativeSessionHeadInfo    function  …ces/src/session/claude-native/claudeNativeSessionImportParser.ts:217:17
+BOT_RUNTIME_LOCK_LEASE_MS                       packages/services/src/bots/channelRuntime.ts:8:14                       
+isBotRuntimeLockConflictError         function  packages/services/src/bots/channelRuntime.ts:74:17                      
+createNodeApiClient                             packages/services/src/providers/api/index.ts:1:10                       
+NodeApiClient                                   packages/services/src/providers/api/index.ts:1:31                       
+createHostApiNetworkTransport                   packages/services/src/providers/api/index.ts:3:3                        
+resolveHostProxyForUrl                          packages/services/src/providers/api/index.ts:4:3                        
+readApiJson                                     packages/services/src/providers/api/index.ts:8:10                       
+isNetworkFailure                      function  packages/services/src/providers/api/networkErrorClassifier.ts:32:17     
+OFF_PEAK_TICKET_EXPIRED_MARKER                  apps/zcode-cli/packages/adapters/src/model/offpeak-retry.ts:18:14       
+resolveModelRequestSessionType                  apps/zcode-cli/packages/adapters/src/model/runner-status.ts:21:3        
+PROCESS_PROBE_SAMPLE_TIMEOUT_MS                 apps/zcode-cli/packages/adapters/src/device/process-probe.ts:20:3       
+addReadLineNumbers                    function  apps/zcode-cli/packages/core/src/tool/handlers/read-text.ts:85:17       
+formatFileSize                        function  apps/zcode-cli/packages/core/src/tool/handlers/read-pdf.ts:343:17       
+getBashDescription                    function  apps/zcode-cli/packages/core/src/tool/handlers/bash-metadata.ts:3:17    
+getBashUserFacingName                 function  apps/zcode-cli/packages/core/src/tool/handlers/bash-metadata.ts:8:17    
+getBashToolUseSummary                 function  apps/zcode-cli/packages/core/src/tool/handlers/bash-metadata.ts:14:17   
+getBashActivityDescription            function  apps/zcode-cli/packages/core/src/tool/handlers/bash-metadata.ts:21:17   
+getBashAutoClassifierInput            function  apps/zcode-cli/packages/core/src/tool/handlers/bash-metadata.ts:28:17   
+extractSessionReferences                        …code-cli/packages/core/src/session-context/read-session-context.ts:13:3
+retuneUnchangedFailure                function  …ode-cli/packages/core/src/tool/handlers/amend-workflow-retune.ts:198:17
+runSettledFailure                     function  …ode-cli/packages/core/src/tool/handlers/amend-workflow-retune.ts:211:17
+notRetunableFailure                   function  …ode-cli/packages/core/src/tool/handlers/amend-workflow-retune.ts:220:17
+WORKFLOW_SKILL_NOT_LOADED_CODE                  …/zcode-cli/packages/core/src/tool/handlers/workflow-skill-gate.ts:17:14
+isDynamicWorkflowSkillLoaded          function  …/zcode-cli/packages/core/src/tool/handlers/workflow-skill-gate.ts:20:17
+builtInTools                                    apps/zcode-cli/packages/core/src/tool/index.ts:9:10                     
+manualModelConfigSchema                         packages/provider/src/config/rule-data-schema.ts:4:10                   
+normalizeCuaHelperArch                          packages/desktop/src/main/desktopCuaHelperInstaller.ts:13:10            
+normalizeCuaHelperArchs                         packages/desktop/src/main/desktopCuaHelperInstaller.ts:13:34            
+manualSkillCommandUsage               function  apps/zcode-cli/packages/cli/src/command-center/slash-commands.ts:245:17 
+SubmitProgressView                              packages/ui/src/feedback/FeedbackSubmitForm.tsx:56:10                   
+readCurrentAgentModelContext                    packages/ui/src/feedback/FeedbackSubmitForm.tsx:57:10                   
+getScratchWorkspaceLocationHint       function  packages/ui/src/ChatEmptyScratchWorkspaceDialog.tsx:1:17                
+getScratchWorkspaceNameErrorKind      function  packages/ui/src/ChatEmptyScratchWorkspaceDialog.tsx:5:17                
+AutomationsPageTitleSwitch            function  …es/ui/src/settings/saved-workflows/AutomationsPageTitleSwitch.tsx:42:17
+formatCanonicalPluginName                       packages/ui/src/settings/pluginStoreListing.ts:22:3                     
+resolveLocalizedText                            packages/ui/src/settings/pluginStoreListing.ts:23:3                     
+KNOWN_CATEGORY_ORDER                            packages/ui/src/settings/pluginStoreListing.ts:141:34                   
+cloneView                                       packages/ui/src/workspace-grouped-tasks/shared.tsx:5:3                  
+removeTaskFromGroupedView                       packages/ui/src/workspace-grouped-tasks/shared.tsx:17:3                 
+TASK_GROUP_ROW_CLASS                            packages/ui/src/workspace-grouped-tasks/shared.tsx:28:3                 
+applyWorkspaceTriggerSelection        function  packages/ui/src/WorkspaceSidebar/workspaceSidebarSelection.ts:1:17      
+WorkspaceSidebarCollapsedRail         function  packages/ui/src/WorkspaceSidebar/WorkspaceSidebarCollapsedRail.tsx:7:17 
+resolveTrajectoryInputMessages                  packages/ui/src/ModelTrajectoryPane.tsx:336:3                           
+resolveTrajectoryTimelineItems                  packages/ui/src/ModelTrajectoryPane.tsx:337:3                           
+generateId                            function  packages/ui/src/settings/model-provider-section/constants.ts:18:17      
+PRESET_PROVIDER_SPEC_BY_ID                      packages/ui/src/settings/model-provider-section/constants.ts:47:14      
+fuzzyMatch                            function  packages/ui/src/settings/model-provider-section/utils.tsx:32:17         
+handleEndpointSuggestionPopoverOpen…  function  packages/ui/src/settings/model-provider-section/utils.tsx:53:17         
+resolveEndpointSuggestionOpenRequest  function  packages/ui/src/settings/model-provider-section/utils.tsx:71:17         
+RANGE_OPTIONS                                   packages/ui/src/settings/usage-stats/usageStatsUiParts.tsx:5:14         
+RemoteSkillSyncSelectionList                    packages/ui/src/settings/RemoteSkillSyncDialog.tsx:30:3                 
+shouldToggleRemoteSkillSyncCardSele…            packages/ui/src/settings/RemoteSkillSyncDialog.tsx:31:3                 
+resolveSidebarFooterPlanBadgeLabel              packages/ui/src/WorkspaceSidebarFooterUsageSummary.tsx:45:3             
+resolveSidebarFooterProfilePlanBadge            packages/ui/src/WorkspaceSidebarFooterUsageSummary.tsx:46:3             
+WorkspaceSidebarFooterUsageSummary    function  packages/ui/src/WorkspaceSidebarFooterUsageSummary.tsx:51:17            
+SETTINGS_SECTIONS                               packages/ui/src/settings/settingsPageConfig.ts:163:14                   
+isCodingPlanPurchaseAuthPending       function  …/ui/src/settings/model-provider-section/codingPlanPurchaseAuth.ts:11:17
+isCodingPlanProviderId                function  …/ui/src/settings/model-provider-section/codingPlanPurchaseAuth.ts:24:17
+CODING_PLAN_WEBVIEW_OVERRIDE_ENV_KEY            packages/ui/src/settings/CodingPlanEmbeddedWebviewDialog.tsx:515:10     
+getRenderableTaskUsage                function  packages/ui/src/chat-input-toolbar/contextUsage.tsx:203:17              
+getContextCompressionCommand          function  packages/ui/src/chat-input-toolbar/contextUsage.tsx:224:17              
+CodingPlanUsageRemainingPanel         function  packages/ui/src/CodingPlanUsageRemainingPanel.tsx:213:17                
+MissingInlineImageContentError        class     packages/ui/src/lib/chatAttachmentErrors.ts:49:14                       
+featureSuggestedPrompts                         packages/ui/src/v4/featureSuggestedPrompts.ts:18:14                     
+AMEND_TRANSCRIPT_QUIESCE_MS                     …code-cli/packages/bootstrap/src/app/workflow-driver-quiescence.ts:25:14
+mapMessageWithParts                             apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mapper.ts:1:10     
+mapSessionEvent                                 apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mapper.ts:5:3      
+mapSessionEvents                                apps/zcode-cli/packages/bootstrap/src/zcode-protocol/mapper.ts:7:3      
+V4SessionNotFoundError                          …cli/packages/bootstrap/src/zcode-protocol-v4/commands/executor.ts:29:10
+V4SessionIdleTimeoutError                       …ckages/bootstrap/src/zcode-protocol-v4/commands/handlers/queue.ts:25:10
+MessageRow                            function  apps/zcode-cli/packages/tui/src/app-transcript-components.tsx:95:17     
+SIDEBAR_CONTENT_WIDTH                           apps/zcode-cli/packages/tui/src/app-sidebar.tsx:24:10                   
+workflowRunStepCounts                 function  apps/zcode-cli/packages/tui/src/app-workflow-mirror.ts:110:17           
+CTRL_C_EXIT_CONFIRMATION_WINDOW_MS              apps/zcode-cli/packages/tui/src/app-keyboard-helpers.ts:102:14          
+formatFileDiffDisplay                           apps/zcode-cli/packages/tui/src/app-tool-transcript.ts:14:10            
+normalizePromptInput                            apps/zcode-cli/packages/tui/src/state.ts:4:14                           
+emitSkippedToolError                  function  apps/zcode-cli/packages/core/src/tool/executor/events.ts:113:23         
+BASH_COMMAND_REGISTRY_VERSION                   …packages/core/src/tool/handlers/generated/bash-command-registry.ts:7:14
+BASH_COMMAND_REGISTRY_HASH                      …packages/core/src/tool/handlers/generated/bash-command-registry.ts:8:14
+extractSessionReferences              function  apps/zcode-cli/packages/core/src/session-context/references.ts:5:17     
+buildContextHistoryEntries                      apps/zcode-cli/packages/core/src/runtime/methods/context.ts:29:10       
+formatMemoryManifest                            apps/zcode-cli/packages/core/src/memory/recall/index.ts:1:10            
+parseDataUrlHeader                              apps/zcode-cli/packages/core/src/runtime/helpers/attachments.ts:306:10  
+inferImageMimeFromPath                          apps/zcode-cli/packages/core/src/runtime/helpers/attachments.ts:307:10  
+prepareImageDataUrl                             apps/zcode-cli/packages/core/src/runtime/helpers/attachments.ts:307:34  
+formatBytes                           function  packages/ui/src/feedback/feedbackSubmissionJob.ts:551:17                
+PluginComponentGroups                 function  packages/ui/src/settings/PluginComponentGroups.tsx:41:17                
+joinTaskListUnreadAt                  function  packages/ui/src/v4/buildTaskListResultFromSessions.ts:94:17             
+cloneView                                       packages/ui/src/workspace-grouped-tasks/view.ts:565:3                   
+removeTaskFromGroupedView                       packages/ui/src/workspace-grouped-tasks/view.ts:577:3                   
+GROUPED_TOP_LEVEL_VIRTUALIZATION_TH…            …ges/ui/src/workspace-grouped-tasks/virtualized-top-level-list.tsx:196:3
+shouldVirtualizeGroupedTopLevelNodes            …ges/ui/src/workspace-grouped-tasks/virtualized-top-level-list.tsx:198:3
+resolveTrajectoryInputMessages        function  packages/ui/src/ModelTrajectoryTimeline.tsx:163:17                      
+shouldToggleRemoteSkillSyncCardSele…  function  packages/ui/src/settings/RemoteSkillSyncSelectionList.tsx:15:17         
+getCompactToolCallSummary                       packages/ui/src/lib/toolCallSummary.ts:3:3                              
+isCompactToolCallFinishedState                  packages/ui/src/lib/toolCallSummary.ts:4:3                              
+buildInlineDiffHighlightCode                    packages/ui/src/ToolCallBlocks/renderers/EditInlineDiffContent.tsx:15:42
+getInlineDiffHighlightLine                      packages/ui/src/ToolCallBlocks/renderers/EditInlineDiffContent.tsx:16:40
+WORKFLOW_PROGRESS_INDEX_FANOUT_MS               …/bootstrap/src/zcode-protocol-v4/sessions-index-fanout-throttle.ts:8:14
+V4SessionNotFoundError                class     …packages/bootstrap/src/zcode-protocol-v4/commands/record-access.ts:4:14
+V4PromptRejectedError                 class     …/packages/bootstrap/src/zcode-protocol-v4/commands/prompt-turn.ts:44:14
+resolveTurnAutomationId               function  …packages/bootstrap/src/zcode-protocol-v4/commands/prompt-turn.ts:234:17
+V4SessionIdleTimeoutError             class     …bootstrap/src/zcode-protocol-v4/commands/handlers/session-flow.ts:93:14
+MAX_ACTOR_ROWS                                  apps/zcode-cli/packages/tui/src/app-workflow-card.tsx:18:14             
+actorRowsForCard                      function  apps/zcode-cli/packages/tui/src/app-workflow-card.tsx:36:17             
+deriveTaskLeadingIndicator                      packages/ui/src/TaskList.tsx:21:10                                      
+formatModelContextWindowLabel                   …s/ui/src/settings/model-provider-section/ProviderCardSections.tsx:52:10
+resolveProviderConnectionApiFormatD…            …es/ui/src/settings/model-provider-section/ProviderCardSections.tsx:54:3
+resolveProviderConnectionApiFormatO…            …es/ui/src/settings/model-provider-section/ProviderCardSections.tsx:55:3
+BOT_REPLY_GRANULARITIES                         packages/ui/src/botsUi.ts:25:14                                         
+DEFAULT_BOT_REPLY_GRANULARITY_ENTRY             packages/ui/src/botsUi.ts:52:14                                         
+readWorkflowKindMessageId                       packages/ui/src/ToolCallBlocks/renderers/create-workflow.tsx:42:10      
+V4ForkTargetNotLatestSegmentError     class     …tstrap/src/zcode-protocol-v4/commands/handlers/fork-edit-retry.ts:47:14
+START_PLAN_BUSY_AUTO_RETRY_EXHAUSTE…            …zcode-cli/packages/core/src/runtime/methods/streaming-recovery.ts:22:14
+GROUPED_TASK_ROW_ESTIMATE_PX                    …es/ui/src/workspace-grouped-tasks/virtualized-group-task-list.tsx:247:3
+GROUPED_TASK_VIRTUALIZATION_THRESHO…            …es/ui/src/workspace-grouped-tasks/virtualized-group-task-list.tsx:248:3
+shouldVirtualizeGroupedTasks                    …es/ui/src/workspace-grouped-tasks/virtualized-group-task-list.tsx:249:3
+resolveProviderConnectionApiFormatO…  function  …i/src/settings/model-provider-section/ProviderApiFormatSelect.tsx:34:17
+[93m[4mUnused exported types[24m[39m (153)
+McpConfigKeyName                   type       packages/desktop/src/main/mcpUserDirectory/index.ts:23:15                 
+McpSourceDescriptor                type       packages/desktop/src/main/mcpUserDirectory/index.ts:23:33                 
+PdfJsCMapAsset                     interface  packages/ui/vite/pdfJsCMapsPlugin.ts:9:18                                 
+RemoteServerBundleValidationInput  interface  packages/server/buildRemoteValidation.ts:1:18                             
+RunDependencies                    type       apps/zcode-cli/packages/cli/src/run.ts:35:15                              
+ServiceDescriptor                  interface  packages/zcode-server-cli/src/platform/serviceManager.ts:6:18             
+BrowserNavigationRequest           interface  packages/ui/src/embeddedBrowserHelpers.ts:91:18                           
+LogLevel                           type       packages/ui/src/logger.ts:3:13                                            
+TaskNavigationHistory              type       packages/ui/src/store/zcodeSessionStore.ts:45:3                           
+TaskNavEntry                       type       packages/ui/src/store/zcodeSessionStore.ts:46:3                           
+WorkspaceNavEntry                  type       packages/ui/src/store/zcodeSessionStore.ts:47:3                           
+WorkflowAgentRunner                type       apps/zcode-cli/packages/bootstrap/src/app/types.ts:752:15                 
+ZCodeAgentRuntimeLifecycleEvent    interface  packages/services/src/zcode-agent/zcodeAgentProcessManager.ts:212:18      
+OnboardingDecision                 type       packages/services/src/onboarding/onboardingRecord.ts:74:3                 
+StorageCategoryId                  type       packages/services/src/storage/contract.ts:10:3                            
+StorageCategoryUsage               type       packages/services/src/storage/contract.ts:11:3                            
+StorageCleanRequest                type       packages/services/src/storage/contract.ts:12:3                            
+StorageCleanResult                 type       packages/services/src/storage/contract.ts:13:3                            
+StorageCleanability                type       packages/services/src/storage/contract.ts:14:3                            
+StorageEntryUsage                  type       packages/services/src/storage/contract.ts:15:3                            
+StoragePathError                   type       packages/services/src/storage/contract.ts:17:3                            
+StorageRootId                      type       packages/services/src/storage/contract.ts:18:3                            
+StorageRootSpec                    type       packages/services/src/storage/contract.ts:19:3                            
+StorageRootUsage                   type       packages/services/src/storage/contract.ts:20:3                            
+StorageScanStatus                  type       packages/services/src/storage/contract.ts:21:3                            
+StorageVolume                      type       packages/services/src/storage/contract.ts:23:3                            
+StorageVolumeGroup                 type       packages/services/src/storage/contract.ts:24:3                            
+ModelConnectivityResult            type       packages/services/src/model-provider/providerSettingsConnectivity.ts:44:15
+HostApiNetworkOptions              interface  packages/services/src/providers/api/nodeApiNetwork.ts:5:18                
+LoginShellExecutor                 type       packages/services/src/runtime-tools/runtimeCommandEnv.ts:12:8             
+McpOAuthCanonicalCredentials       interface  apps/zcode-cli/packages/adapters/src/mcp/oauth-credentials.ts:19:18       
+ToolExecutorOptions                type       apps/zcode-cli/packages/core/src/tool/executor.ts:2:29                    
+PermissionDecisionResult           type       apps/zcode-cli/packages/core/src/runtime.ts:20:3                          
+StopActiveForegroundExecutionOpt…  type       apps/zcode-cli/packages/core/src/runtime.ts:24:3                          
+StopActiveForegroundExecutionRes…  type       apps/zcode-cli/packages/core/src/runtime.ts:25:3                          
+JsonValue                          type       apps/zcode-cli/packages/core/src/output.ts:3:15                           
+Point                              interface  apps/zcode-cli/packages/core/src/browser-client/facade.ts:47:18           
+BrowserHistoryOptions              interface  apps/zcode-cli/packages/core/src/browser-client/facade.ts:815:18          
+BrowserHistoryEntry                interface  apps/zcode-cli/packages/core/src/browser-client/facade.ts:822:18          
+WaitForState                       type       apps/zcode-cli/packages/core/src/browser-client/playwright.ts:105:13      
+SelectOptionInput                  type       apps/zcode-cli/packages/core/src/browser-client/playwright.ts:120:13      
+TrajectoryJsonlEntry               type       apps/zcode-cli/tools/prompt-trajectory/src/derive.ts:12:15                
+BrowserPoint                       type       packages/desktop/src/main/browserView/browserCommandExecutor.ts:30:3      
+ControlledViewCdp                  type       packages/desktop/src/main/browserView/browserCommandExecutor.ts:32:3      
+ControlledViewWebContents          type       packages/desktop/src/main/browserView/browserCommandExecutor.ts:33:3      
+ChromeInstallationCandidate        type       packages/desktop/src/main/chromeProfileDiscovery.ts:18:8                  
+ChromiumProcessMetricSample        interface  packages/desktop/src/main/processResourceRoleClassifier.ts:23:18          
+ChromiumRoleAggregate              interface  packages/desktop/src/main/processResourceRoleClassifier.ts:44:18          
+McpSourceDescriptor                interface  packages/desktop/src/main/mcpUserDirectory/types.ts:14:18                 
+HostCapabilityStoreOptions         interface  packages/server/src/hostCapability.ts:6:18                                
+HostCapabilityStore                interface  packages/server/src/hostCapability.ts:12:18                               
+PluginsCommandDependencies         type       apps/zcode-cli/packages/cli/src/plugins-command.ts:36:3                   
+AssistantFileReference             type       packages/ui/src/lib/assistantPreviewCards.ts:26:3                         
+ConversationShareAttempt           type       packages/ui/src/v4/conversationShareAttempt.ts:3:15                       
+ResolveBundledSkillRootsOptions    interface  apps/zcode-cli/packages/bootstrap/src/app/bundled-skills.ts:59:18         
+RuntimeModelFactory                type       …e-cli/packages/bootstrap/src/app/provider-registry-model-runtime.ts:13:13
+SubagentTranscriptSnapshot         interface  apps/zcode-cli/packages/bootstrap/src/app/subagent-observation.ts:17:18   
+ZCodeProtocolAgentDependencies     type       apps/zcode-cli/packages/bootstrap/src/zcode-protocol/server.ts:119:15     
+ZCodeProtocolSessionRecord         type       apps/zcode-cli/packages/bootstrap/src/zcode-protocol/server.ts:119:47     
+TuiLegacyPalette                   type       apps/zcode-cli/packages/tui/src/theme/index.ts:15:3                       
+TuiThemePreference                 type       apps/zcode-cli/packages/tui/src/theme/index.ts:17:3                       
+GitLineStat                        type       packages/services/src/git/repo/gitCliRepo.ts:66:3                         
+GitResolvedRepository              type       packages/services/src/git/repo/gitCliRepo.ts:67:3                         
+OAuthProviderContext               type       packages/services/src/oauth/providers/index.ts:37:37                      
+AtomicWorkspaceHookConfigWriteOp…  type       packages/services/src/hooks/workspaceHookConfigMutation.ts:5:8            
+LoginShellExecutor                 type       packages/services/src/runtime-tools/runtimeLoginShellEnvCapture.ts:24:13  
+CompactPreservedSegment            type       apps/zcode-cli/packages/core/src/runtime/deps.ts:124:3                    
+ModelEvent                         type       apps/zcode-cli/packages/core/src/runtime/deps.ts:141:3                    
+ModelOptions                       type       apps/zcode-cli/packages/core/src/runtime/deps.ts:143:3                    
+ModelProperties                    type       apps/zcode-cli/packages/core/src/runtime/deps.ts:144:3                    
+ModelVideoContentBlock             type       apps/zcode-cli/packages/core/src/runtime/deps.ts:155:3                    
+SessionMailboxEnvelope             type       apps/zcode-cli/packages/core/src/runtime/deps.ts:178:3                    
+InteractionRequestOrigin           type       apps/zcode-cli/packages/core/src/runtime/deps.ts:209:3                    
+SubagentTaskSnapshot               type       apps/zcode-cli/packages/core/src/runtime/deps.ts:220:3                    
+SessionModeChangedPayload          type       apps/zcode-cli/packages/core/src/runtime/deps.ts:228:3                    
+TokenUsageInfo                     type       apps/zcode-cli/packages/core/src/runtime/deps.ts:230:3                    
+ReadFileStateHydrationResult       type       apps/zcode-cli/packages/core/src/runtime/deps.ts:255:15                   
+AgentProfile                       type       apps/zcode-cli/packages/core/src/runtime/deps.ts:321:15                   
+ManualModelConfig                  type       packages/provider/src/config/manual-model-config.ts:29:13                 
+WorkflowRunUnlistedDelta           interface  packages/shared/src/zcode-protocol-v4/workflow-runs-unlisted.ts:30:18     
+ZCodeProvider                      type       packages/shared/src/providers.ts:14:13                                    
+AggregateStats                     interface  packages/desktop/src/main/resourceMetricsStats.ts:3:18                    
+PrepareCuaHelperPermissionDragMa…  interface  packages/desktop/src/main/cuaAccessibilitySettings.ts:577:18              
+CommandCenterCheckpoint            type       apps/zcode-cli/packages/cli/src/command-center.ts:12:3                    
+CommandCenterDeps                  type       apps/zcode-cli/packages/cli/src/command-center.ts:13:3                    
+CommandCenterExpertWorkflowResult  type       apps/zcode-cli/packages/cli/src/command-center.ts:14:3                    
+CommandCenterForkResult            type       apps/zcode-cli/packages/cli/src/command-center.ts:15:3                    
+CommandCenterLocaleResult          type       apps/zcode-cli/packages/cli/src/command-center.ts:16:3                    
+CommandCenterMcpStatus             type       apps/zcode-cli/packages/cli/src/command-center.ts:17:3                    
+CommandCenterModelOption           type       apps/zcode-cli/packages/cli/src/command-center.ts:19:3                    
+CommandCenterSession               type       apps/zcode-cli/packages/cli/src/command-center.ts:20:3                    
+CommandCenterSkill                 type       apps/zcode-cli/packages/cli/src/command-center.ts:21:3                    
+CommandCenterSkillListOutcome      type       apps/zcode-cli/packages/cli/src/command-center.ts:22:3                    
+CommandCenterTarget                type       apps/zcode-cli/packages/cli/src/command-center.ts:23:3                    
+CommandCenterTargetStatus          type       apps/zcode-cli/packages/cli/src/command-center.ts:24:3                    
+SwitchableCommandCenterMode        type       apps/zcode-cli/packages/cli/src/command-center.ts:25:3                    
+CommandCenterCustomCommand         type       apps/zcode-cli/packages/cli/src/command-center.ts:29:3                    
+CommandCenterCustomCommandContent  type       apps/zcode-cli/packages/cli/src/command-center.ts:30:3                    
+CommandCenterCustomCommandListOu…  type       apps/zcode-cli/packages/cli/src/command-center.ts:31:3                    
+PluginScope                        type       apps/zcode-cli/packages/cli/src/plugins-command-shared.ts:11:13           
+HostCapabilityStoreOptions         interface  packages/zcode-server-cli/src/server-core/hostCapability.ts:9:18          
+EditKindLabelId                    type       packages/ui/src/ToolCallBlocks/shared.tsx:2:3                             
+EditOperationKind                  type       packages/ui/src/ToolCallBlocks/shared.tsx:4:3                             
+RawToolCallFileSummary             type       packages/ui/src/ToolCallBlocks/shared.tsx:5:3                             
+Locale                             type       packages/ui/src/settingsPageHelpers.tsx:41:15                             
+LocalePreference                   type       packages/ui/src/settingsPageHelpers.tsx:41:23                             
+SettingsSectionId                  type       packages/ui/src/settingsPageHelpers.tsx:42:15                             
+LocalizedUpdateReleaseNotes        type       packages/ui/src/updateReleaseNotes.ts:3:13                                
+ComposerAttachmentUploadItem       type       packages/ui/src/v4/composer/useComposerAttachments.ts:58:3                
+ComposerAttachmentUploadStatus     type       packages/ui/src/v4/composer/useComposerAttachments.ts:59:3                
+WorkflowRetuneCall                 interface  packages/ui/src/ToolCallBlocks/renderers/createWorkflowInput.ts:189:18    
+ProviderBusinessErrorUiAction      type       packages/ui/src/lib/providerBusinessError.ts:35:13                        
+DynamicWorkflowRunRetuneContext    interface  …zcode-cli/packages/bootstrap/src/app/dynamic-workflow-run-retune.ts:24:18
+TuiThemePreference                 type       apps/zcode-cli/packages/tui/src/theme/types.ts:3:65                       
+BotProviderJsonResponse            interface  packages/services/src/bots/providers/providerRequest.ts:3:18              
+BotProviderResponse                interface  packages/services/src/bots/providers/providerRequest.ts:10:18             
+HostApiNetworkOptions              type       packages/services/src/providers/api/index.ts:5:8                          
+HostApiNetworkTransport            type       packages/services/src/providers/api/index.ts:6:8                          
+ProcessProbeCommandResult          type       apps/zcode-cli/packages/adapters/src/device/process-probe.ts:21:8         
+ProcessProbeExecFile               type       apps/zcode-cli/packages/adapters/src/device/process-probe.ts:22:8         
+BashBackgroundLifecycleMode        type       …ode-cli/packages/core/src/tool/handlers/bash-background-lifecycle.ts:9:13
+BashBackgroundLifecycleResult      type       …de-cli/packages/core/src/tool/handlers/bash-background-lifecycle.ts:11:13
+WorkflowDraftAuthoringTool         type       …de-cli/packages/core/src/tool/handlers/workflow-draft-read-state.ts:19:13
+ReadFileStateHydrationResult       interface  apps/zcode-cli/packages/core/src/agent/read-file-state-hydrator.ts:10:18  
+ManualModelConfig                  type       packages/provider/src/config/rule-data-schema.ts:4:40                     
+InstancePhases                     type       …code-cli/packages/dynamic-workflow/src/engine/engine-phase-stamp.ts:12:13
+PluginUpdateStatus                 type       packages/ui/src/settings/pluginStoreListing.ts:70:13                      
+WorkspaceHeaderTitleSectionProps   type       packages/ui/src/WorkspaceHeaderSections.tsx:58:37                         
+WorkspaceHeaderActionSectionProps  type       packages/ui/src/WorkspaceHeaderSections.tsx:61:8                          
+GroupedTaskInsertPosition          type       packages/ui/src/workspace-grouped-tasks/shared.tsx:32:15                  
+SortableBindings                   type       packages/ui/src/SortableWorkspaceSidebar.tsx:9:15                         
+RemoteSkillSyncRow                 type       packages/ui/src/settings/RemoteSkillSyncDialog.tsx:33:15                  
+PermissionRequestFileChange        type       packages/ui/src/lib/permissionRequest.ts:6:8                              
+PermissionRequestPreview           type       packages/ui/src/lib/permissionRequest.ts:7:8                              
+ActorRuntimeFactory                type       apps/zcode-cli/packages/bootstrap/src/app/workflow-driver.ts:599:15       
+AmendImportOptions                 interface  …ps/zcode-cli/packages/bootstrap/src/app/dynamic-workflow-import.ts:148:18
+V4GatewayHost                      interface  …s/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/v4-gateway.ts:206:18
+MemoryManifestEntry                type       apps/zcode-cli/packages/core/src/memory/recall/index.ts:2:15              
+MemoryRecallType                   type       apps/zcode-cli/packages/core/src/memory/recall/index.ts:2:36              
+CompactEntrySelection              type       apps/zcode-cli/packages/core/src/runtime/helpers/compact.ts:30:15         
+WorkspaceHeaderActionSectionProps  type       …ges/ui/src/WorkspaceHeaderSections/WorkspaceHeaderActionSection.tsx:10:15
+GroupedTaskInsertPosition          type       packages/ui/src/workspace-grouped-tasks/view.ts:581:15                    
+CompactToolCallState               type       packages/ui/src/lib/toolCallSummary.ts:8:3                                
+ToolCallChangeStat                 type       packages/ui/src/lib/toolCallSummary.ts:9:3                                
+ToolCallSummary                    type       packages/ui/src/lib/toolCallSummary.ts:10:3                               
+ToolCallSummarySource              type       packages/ui/src/lib/toolCallSummary.ts:11:3                               
+FanoutTimerHandle                  type       …s/bootstrap/src/zcode-protocol-v4/sessions-index-fanout-throttle.ts:11:13
+SessionsIndexFanoutThrottleOptio…  interface  …s/bootstrap/src/zcode-protocol-v4/sessions-index-fanout-throttle.ts:13:18
+ToolInputValidationIssue           type       apps/zcode-cli/packages/core/src/tool/json-schema.ts:18:3                 
+ToolInputValidationPath            type       apps/zcode-cli/packages/core/src/tool/json-schema.ts:19:3                 
+TargetCompletionVerificationResu…  interface  …packages/core/src/runtime/methods/target-completion-verification.ts:29:18
+CompactEntrySelection              interface  …ps/zcode-cli/packages/core/src/runtime/helpers/compact-selection.ts:23:18
+ToolResultDisplay                  type       packages/ui/src/ToolCallBlocks/toolResultDisplay.ts:67:13                 
+[93m[4mDuplicate exports[24m[39m (36)
+createElectronBrowserWebmRecorder|defaultElectronBrowserWebmRecorder      …in/browserView/electronBrowserWebmRecorder.ts
+RemoteConnectionDialog|SSHDialog                                          packages/ui/src/SSHDialog.tsx                 
+applyResolvedShellCommand|applyResolvedShellCommandForTest                …ckages/adapters/src/exec/execution-command.ts
+WorkflowStrategySchema|ExpertWorkflowStrategySchema                       …-cli/packages/contracts/src/workflow/index.ts
+WorkflowRunSnapshotSchema|ExpertWorkflowRunSnapshotSchema                 …-cli/packages/contracts/src/workflow/index.ts
+GoalStatus|TargetStatus                                                   …de-cli/packages/contracts/src/tools/target.ts
+MAX_GOAL_OBJECTIVE_CHARS|MAX_TARGET_OBJECTIVE_CHARS                       …de-cli/packages/contracts/src/tools/target.ts
+GOAL_COMPLETION_VERIFICATION_QUERY_SOURCE|TARGET_COMPLETION_VERIFICATIO…  …de-cli/packages/contracts/src/tools/target.ts
+GoalStatusSchema|TargetStatusSchema                                       …de-cli/packages/contracts/src/tools/target.ts
+GoalTokenBudgetSchema|TargetTokenBudgetSchema                             …de-cli/packages/contracts/src/tools/target.ts
+GoalObjectiveSchema|TargetObjectiveSchema                                 …de-cli/packages/contracts/src/tools/target.ts
+SessionGoalSchema|SessionTargetSchema                                     …de-cli/packages/contracts/src/tools/target.ts
+GoalReadInputSchema|TargetReadInputSchema                                 …de-cli/packages/contracts/src/tools/target.ts
+GoalReadInputJsonSchema|TargetReadInputJsonSchema                         …de-cli/packages/contracts/src/tools/target.ts
+GoalReadOutputSchema|TargetReadOutputSchema                               …de-cli/packages/contracts/src/tools/target.ts
+GoalReadOutputJsonSchema|TargetReadOutputJsonSchema                       …de-cli/packages/contracts/src/tools/target.ts
+GoalCompletionVerificationOutputSchema|TargetCompletionVerificationOutp…  …de-cli/packages/contracts/src/tools/target.ts
+normalizeGoalObjective|normalizeTargetObjective                           …de-cli/packages/contracts/src/tools/target.ts
+formatGoalStateForModel|formatTargetStateForModel                         …de-cli/packages/contracts/src/tools/target.ts
+formatGoalContinuationPrompt|formatTargetContinuationPrompt               …de-cli/packages/contracts/src/tools/target.ts
+formatGoalCompletionVerificationPrompt|formatTargetCompletionVerificati…  …de-cli/packages/contracts/src/tools/target.ts
+formatGoalCompletionVerificationFailurePrompt|formatTargetCompletionVer…  …de-cli/packages/contracts/src/tools/target.ts
+formatGoalCompletionVerificationPassedContent|formatTargetCompletionVer…  …de-cli/packages/contracts/src/tools/target.ts
+parseGoalCompletionVerificationText|parseTargetCompletionVerificationTe…  …de-cli/packages/contracts/src/tools/target.ts
+failedGoalCompletionVerification|failedTargetCompletionVerification       …de-cli/packages/contracts/src/tools/target.ts
+failOpenGoalCompletionVerification|failOpenTargetCompletionVerification   …de-cli/packages/contracts/src/tools/target.ts
+escapeGoalPromptText|escapeTargetPromptText                               …de-cli/packages/contracts/src/tools/target.ts
+nonEmptyStringSchema|credentialKeySchema                                  packages/shared/src/validation.ts             
+zcodeTaskGoalStatusSchema|zcodeTaskTargetStatusSchema                     packages/shared/src/validation.ts             
+zcodeTaskGoalSchema|zcodeTaskTargetSchema                                 packages/shared/src/validation.ts             
+zcodeTaskGoalChangedPatchSchema|zcodeTaskTargetChangedPatchSchema         packages/shared/src/validation.ts             
+taskStreamMirrorTargetSchema|taskRunLeaseTargetSchema                     packages/shared/src/task-realtime-core.ts     
+botAllowedCommandsSchema|botCommandPolicySchema                           packages/shared/src/bots.ts                   
+ZCODE_ACTIVE_STREAMING_TOOL_INPUT_PREVIEW_MIN_RAW_GROWTH|ZCODE_ACTIVE_S…  …es/shared/src/streaming-tool-input-preview.ts
+CUA_FALLBACK_ICON|CUA_TOOL_ICON                                           …s/ui/src/ToolCallBlocks/renderers/cuaIcon.tsx
+ArtifactChartView|default                                                 …kflow-artifacts/presets/ArtifactChartView.tsx
+[33m[4mConfiguration hints[24m (10)[39m
+. [90m(root)[39m                                  …p.json  [90mAdd [97mentry[90m and/or refine [97mproject[90m files in [97mworkspaces["."][90m (9 unused f…[39m
+…i/packages/node-repl-host                …p.json  [90mAdd [97mentry[90m and/or refine [97mproject[90m files in [97mworkspaces["apps/zcode-cli/[90m…[39m
+packages/desktop                          …p.json  [90mAdd [97mentry[90m and/or refine [97mproject[90m files in [97mworkspaces["packages/deskto[90m…[39m
+packages/services                         …p.json  [90mAdd [97mentry[90m and/or refine [97mproject[90m files in [97mworkspaces["packages/servic[90m…[39m
+packages/zcode-server-cli                 …p.json  [90mAdd [97mentry[90m and/or refine [97mproject[90m files in [97mworkspaces["packages/zcode-[90m…[39m
+docs/**                                   …p.json  [90mRemove from [97mignore[90m[39m                                                   
+…pts/sign-windows-hook.cjs  …ges/desktop  …p.json  [90mRefine [97mentry[90m pattern (no matches)[39m                                    
+src/index.ts                …ages/server  …p.json  [90mRemove redundant [97mentry[90m pattern[39m                                       
+build-remote.ts             …ages/server  …p.json  [90mRemove redundant [97mentry[90m pattern[39m                                       
+src/index.ts                …es/services  …p.json  [90mRemove redundant [97mentry[90m pattern[39m                                       
+ ELIFECYCLE  Command failed with exit code 1.

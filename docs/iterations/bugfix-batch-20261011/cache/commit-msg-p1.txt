@@ -1,0 +1,1 @@
+[bugfix-batch-20261011/review-full-P1] 两枚 P1 收尾：P1-1 ui 测试挂载进根 test:v4-perf（spec 测试策略补齐）；P1-2 cli 域 6 个本批文件 oxfmt 归一（交叉判定脚本路径映射 bug 修正后零命中）

@@ -1,0 +1,651 @@
+{
+  "schema": "zcode-desktop-long-session-perf-sample/v1",
+  "startedAt": "2026-10-06T12:46:43.632Z",
+  "finishedAt": "2026-10-06T12:47:43.746Z",
+  "repo": {
+    "root": "D:\\Dev\\Js\\oh-my-zcode\\omz",
+    "head": "2be607a9a67f57da213d70983895fa3f30d38bac",
+    "branch": "main"
+  },
+  "params": {
+    "workspacePath": "C:\\Users\\BloodyCrown\\.omz\\workspace\\default",
+    "durationMs": 30000,
+    "scrollSelector": "[data-testid=v4-timeline]",
+    "devServerUrl": "http://localhost:5174",
+    "cdpPort": 9229,
+    "skipLaunch": true,
+    "mode": "reuse-skip-launch",
+    "spawnedPid": null,
+    "childExitInfo": null,
+    "childStillRunning": false,
+    "electronExecutable": null
+  },
+  "target": {
+    "id": "DA59865829C790245822C6B54123984F",
+    "title": "ZCode",
+    "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791286309428.208%2C%22mainStart%22%3A1791286309926%2C%22appReady%22%3A1791286310169%2C%22loadUrl%22%3A1791286310415%7D",
+    "type": "page"
+  },
+  "segments": [
+    {
+      "name": "stream",
+      "startedAt": "2026-10-06T12:46:43.711Z",
+      "durationMs": 30000,
+      "driverInfo": null,
+      "rendererEnv": {
+        "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791286309428.208%2C%22mainStart%22%3A1791286309926%2C%22appReady%22%3A1791286310169%2C%22loadUrl%22%3A1791286310415%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 303,
+        "timelinePresent": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1160,
+        "maxScrollTop": 45581,
+        "now": "2026-10-06T12:47:13.728Z"
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1160,
+        "domRowCount": 303,
+        "maxScrollTop": 45581,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "probe": [
+        {
+          "startedAt": 15796.199999988079,
+          "longtasks": [
+            {
+              "start": 696.3999999761581,
+              "duration": 112
+            },
+            {
+              "start": 7755.599999964237,
+              "duration": 331
+            },
+            {
+              "start": 15581.199999988079,
+              "duration": 316
+            },
+            {
+              "start": 15970.699999988079,
+              "duration": 50
+            },
+            {
+              "start": 16027.599999964237,
+              "duration": 62
+            },
+            {
+              "start": 16310.099999964237,
+              "duration": 100
+            },
+            {
+              "start": 60980.299999952316,
+              "duration": 127
+            },
+            {
+              "start": 61755.19999998808,
+              "duration": 371
+            },
+            {
+              "start": 62153.39999997616,
+              "duration": 73
+            },
+            {
+              "start": 62236.69999998808,
+              "duration": 241
+            },
+            {
+              "start": 62512.19999998808,
+              "duration": 128
+            },
+            {
+              "start": 62704.299999952316,
+              "duration": 63
+            },
+            {
+              "start": 62776.19999998808,
+              "duration": 66
+            },
+            {
+              "start": 81560.5,
+              "duration": 51
+            },
+            {
+              "start": 81656,
+              "duration": 302
+            },
+            {
+              "start": 81974.19999998808,
+              "duration": 201
+            },
+            {
+              "start": 82182,
+              "duration": 105
+            },
+            {
+              "start": 82305.79999995232,
+              "duration": 135
+            },
+            {
+              "start": 82457.09999996424,
+              "duration": 161
+            },
+            {
+              "start": 82628.89999997616,
+              "duration": 212
+            },
+            {
+              "start": 82867.79999995232,
+              "duration": 1169
+            },
+            {
+              "start": 84037.29999995232,
+              "duration": 175
+            },
+            {
+              "start": 84238.89999997616,
+              "duration": 304
+            },
+            {
+              "start": 84592,
+              "duration": 294
+            },
+            {
+              "start": 84908.79999995232,
+              "duration": 625
+            },
+            {
+              "start": 85617.29999995232,
+              "duration": 203
+            },
+            {
+              "start": 85851.29999995232,
+              "duration": 224
+            },
+            {
+              "start": 86080.29999995232,
+              "duration": 548
+            },
+            {
+              "start": 86663.69999998808,
+              "duration": 92
+            },
+            {
+              "start": 86756.59999996424,
+              "duration": 242
+            },
+            {
+              "start": 87013.5,
+              "duration": 943
+            },
+            {
+              "start": 88655,
+              "duration": 55
+            },
+            {
+              "start": 88710.69999998808,
+              "duration": 102
+            },
+            {
+              "start": 88834.09999996424,
+              "duration": 335
+            },
+            {
+              "start": 89170.29999995232,
+              "duration": 330
+            },
+            {
+              "start": 89504.39999997616,
+              "duration": 78
+            },
+            {
+              "start": 965558.5,
+              "duration": 92
+            },
+            {
+              "start": 2063562.7999999523,
+              "duration": 55
+            },
+            {
+              "start": 3625890.699999988,
+              "duration": 321
+            },
+            {
+              "start": 4183019.0999999642,
+              "duration": 228
+            },
+            {
+              "start": 4279664.299999952,
+              "duration": 236
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155930,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4421594.099999964,
+          "longtasks": [
+            {
+              "start": 4451599,
+              "duration": 241
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155957,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4451842.099999964,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155985,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4493294.899999976,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155997,
+            "heapTotalKb": 158244
+          }
+        }
+      ]
+    },
+    {
+      "name": "scroll",
+      "startedAt": "2026-10-06T12:47:13.730Z",
+      "durationMs": 30000,
+      "driverInfo": {
+        "ok": true,
+        "tag": "DIV",
+        "className": "min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] [--markdown-table-layout-left-inset:16px] [--",
+        "scrollHeight": 46324,
+        "clientHeight": 743,
+        "maxScrollTop": 45581,
+        "steps": 7,
+        "finalScrollTop": 27847.333984375
+      },
+      "rendererEnv": {
+        "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791286309428.208%2C%22mainStart%22%3A1791286309926%2C%22appReady%22%3A1791286310169%2C%22loadUrl%22%3A1791286310415%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 303,
+        "timelinePresent": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1160,
+        "maxScrollTop": 45581,
+        "now": "2026-10-06T12:47:43.745Z"
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1160,
+        "domRowCount": 303,
+        "maxScrollTop": 45581,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "probe": [
+        {
+          "startedAt": 15796.199999988079,
+          "longtasks": [
+            {
+              "start": 696.3999999761581,
+              "duration": 112
+            },
+            {
+              "start": 7755.599999964237,
+              "duration": 331
+            },
+            {
+              "start": 15581.199999988079,
+              "duration": 316
+            },
+            {
+              "start": 15970.699999988079,
+              "duration": 50
+            },
+            {
+              "start": 16027.599999964237,
+              "duration": 62
+            },
+            {
+              "start": 16310.099999964237,
+              "duration": 100
+            },
+            {
+              "start": 60980.299999952316,
+              "duration": 127
+            },
+            {
+              "start": 61755.19999998808,
+              "duration": 371
+            },
+            {
+              "start": 62153.39999997616,
+              "duration": 73
+            },
+            {
+              "start": 62236.69999998808,
+              "duration": 241
+            },
+            {
+              "start": 62512.19999998808,
+              "duration": 128
+            },
+            {
+              "start": 62704.299999952316,
+              "duration": 63
+            },
+            {
+              "start": 62776.19999998808,
+              "duration": 66
+            },
+            {
+              "start": 81560.5,
+              "duration": 51
+            },
+            {
+              "start": 81656,
+              "duration": 302
+            },
+            {
+              "start": 81974.19999998808,
+              "duration": 201
+            },
+            {
+              "start": 82182,
+              "duration": 105
+            },
+            {
+              "start": 82305.79999995232,
+              "duration": 135
+            },
+            {
+              "start": 82457.09999996424,
+              "duration": 161
+            },
+            {
+              "start": 82628.89999997616,
+              "duration": 212
+            },
+            {
+              "start": 82867.79999995232,
+              "duration": 1169
+            },
+            {
+              "start": 84037.29999995232,
+              "duration": 175
+            },
+            {
+              "start": 84238.89999997616,
+              "duration": 304
+            },
+            {
+              "start": 84592,
+              "duration": 294
+            },
+            {
+              "start": 84908.79999995232,
+              "duration": 625
+            },
+            {
+              "start": 85617.29999995232,
+              "duration": 203
+            },
+            {
+              "start": 85851.29999995232,
+              "duration": 224
+            },
+            {
+              "start": 86080.29999995232,
+              "duration": 548
+            },
+            {
+              "start": 86663.69999998808,
+              "duration": 92
+            },
+            {
+              "start": 86756.59999996424,
+              "duration": 242
+            },
+            {
+              "start": 87013.5,
+              "duration": 943
+            },
+            {
+              "start": 88655,
+              "duration": 55
+            },
+            {
+              "start": 88710.69999998808,
+              "duration": 102
+            },
+            {
+              "start": 88834.09999996424,
+              "duration": 335
+            },
+            {
+              "start": 89170.29999995232,
+              "duration": 330
+            },
+            {
+              "start": 89504.39999997616,
+              "duration": 78
+            },
+            {
+              "start": 965558.5,
+              "duration": 92
+            },
+            {
+              "start": 2063562.7999999523,
+              "duration": 55
+            },
+            {
+              "start": 3625890.699999988,
+              "duration": 321
+            },
+            {
+              "start": 4183019.0999999642,
+              "duration": 228
+            },
+            {
+              "start": 4279664.299999952,
+              "duration": 236
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155930,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4421594.099999964,
+          "longtasks": [
+            {
+              "start": 4451599,
+              "duration": 241
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155957,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4451842.099999964,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155985,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4493294.899999976,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 155997,
+            "heapTotalKb": 158244
+          }
+        },
+        {
+          "startedAt": 4523313.099999964,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 2,
+              "taskQueryCache.taskMetas": 0,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1160,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 156037,
+            "heapTotalKb": 158245
+          }
+        }
+      ]
+    }
+  ]
+}

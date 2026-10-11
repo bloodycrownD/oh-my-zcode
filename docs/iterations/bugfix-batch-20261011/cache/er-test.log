@@ -1,0 +1,90 @@
+
+> @zcode/bootstrap@0.1.0 test:edit-retry-model D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-edit-retry-model.mjs
+
+(node:35204) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A1: editUserQuery payload 带/不带 modelSelection 均可解析 (3.3378ms)
+✔ B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖（且不 pin） (1.1643ms)
+✔ B2: 会话有活值、缺省 payload → 用活值，不 pin (0.2455ms)
+✔ B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变） (0.3212ms)
+✖ B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组） (6.3685ms)
+✖ B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin (0.8724ms)
+✔ C1: pin 的选择 → 写回 + 持久化 + emitModelSelected 三连 (1.0174ms)
+✔ C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用该选择执行 (0.3666ms)
+✔ C3: pin 且与会话选择相同 → 写回仍在，但不重复广播 (0.2797ms)
+✔ D1: sendGoalCommand 显式携带 modelSelection → pin + 写回生效 (1.5519ms)
+✔ D2: sendGoalCommand 缺省 modelSelection → 不 pin（不写回） (0.3148ms)
+✔ D3: createSession firstInput 显式携带 modelSelection → pin + 写回生效 (0.7422ms)
+✔ D4: createSession firstInput 缺省 modelSelection → 不 pin（不写回） (0.2082ms)
+✔ D5: legacy session/send 显式携带 modelSelection → pin + 写回生效 (9.5458ms)
+✔ E1: sendText 显式携带 modelSelection → pin + 写回生效 (0.7266ms)
+✔ E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回） (0.2987ms)
+✔ F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回） (0.2586ms)
+✔ F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回） (0.2137ms)
+
+TEST FAIL — Step 6 edit-resend model selection (exit code 1)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 16
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4502.6915
+
+✖ failing tests:
+
+test at scripts\test-edit-retry-model.mjs:260:1
+✖ B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组） (6.3685ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   modelId: 'gemini-3-pro',
+  -   modelId: 'claude-sonnet-5',
+      options: {
+  +     reasoningLevel: 'medium'
+  -     reasoningLevel: 'high'
+      },
+  +   providerId: 'google'
+  -   providerId: 'anthropic'
+    }
+  
+      at TestContext.<anonymous> (D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap\scripts\test-edit-retry-model.mjs:274:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { providerId: 'google', modelId: 'gemini-3-pro', options: { reasoningLevel: 'medium' } },
+    expected: { providerId: 'anthropic', modelId: 'claude-sonnet-5', options: { reasoningLevel: 'high' } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at scripts\test-edit-retry-model.mjs:278:1
+✖ B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin (0.8724ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   modelId: 'gemini-3-pro',
+  -   modelId: 'gpt-5',
+      options: {
+        reasoningLevel: 'medium'
+      },
+  +   providerId: 'google'
+  -   providerId: 'openai'
+    }
+  
+      at TestContext.<anonymous> (D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap\scripts\test-edit-retry-model.mjs:288:10)
+      at async Test.run (node:internal/test_runner/test:1125:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:787:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { providerId: 'google', modelId: 'gemini-3-pro', options: { reasoningLevel: 'medium' } },
+    expected: { providerId: 'openai', modelId: 'gpt-5', options: { reasoningLevel: 'medium' } },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+ ELIFECYCLE  Command failed with exit code 1.

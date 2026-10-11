@@ -1,0 +1,500 @@
+# oh-my-zcode-fork 迭代编排状态（spec-check-loop）
+dag_version: 5
+mode: code-review-loop（叠加于 code-dev-loop 之上；Phase 0/1 dev-ready 状态不变）
+cr_dag_version: 3
+cr_review_round: 3
+cr_fix_spec_path: docs/iterations/oh-my-zcode-fork/cr-fix-spec.md
+cr_wave_plan: [[review-scope×5], [review-full r2], [review-full r3 轻量终校]]
+cr_node_status:
+  review-scope-shared: { done, verdict: scope-ready:yes, findings: 5×P2 }
+  review-scope-cli: { done, verdict: scope-ready:no, findings: 4×P1+6×P2 }
+  review-scope-desktop: { done, verdict: scope-ready:no, findings: 3×P1+4×P2+1 benign deviation }
+  review-scope-uiservices: { done, verdict: scope-ready:no, findings: 4×P0+3×P1+2×P2（P0 全部为 s11 codemod 拆包运行时破损，typecheck/CLI-E2E 盲区） }
+  review-scope-root: { done, verdict: scope-ready:yes, findings: 4×P2 }
+  review-full-r2: { done, verdict: fix-spec-ready:no——6 项文档缺陷（desktop/B-1 前提被 s13 日志证伪、uis/C-2 行号/验收、desktop/B-2 误读、cli/C-3 验收不可达、cli/B-3 定性错、shared/C-3 互斥）→ 主代理已全部修正 }
+  review-full-r3: { done, verdict: 条件性 ready——4 处一行级订正（uis/C-2 路径/块形正则、uis/C-3 :88、Closure 计数、cli/C-3 因果链）→ 主代理逐字落实 }
+cr_must_fix_counts: { P0: 4, P1: 9, P2: 20 }  # + Open questions ×9（含 2 项必拍板：mainMemoryDiagnostics a/b、打包态 .env）
+cr_status: fix-spec-ready（code-review-loop 侧已收敛）
+fix_exec:
+  mode: code-dev-loop（按 cr-fix-spec 执行修复）
+  fx_dag_version: 2
+  fx_wave_plan: [[impl-w1-p0], [impl-w2-cli-desktop], [impl-w3-ui-p1], [impl-w4-p2-decls], [verify-fix], [cr-func-fix], [fix-mf1-mf2]]
+  fx_node_status: { impl-w1-p0: done(c66019e), impl-w2-cli-desktop: done(9commits), impl-w3-ui-p1: done(3commits), impl-w4-p2-decls: done(10commits), verify-fix: done(五门禁绿+E2E重跑四步一致), cr-func-fix: done(round1 func-ready:no → MF-1/MF-2 闭合), fix-mf1-mf2: done(b0fa8e9) }
+  fx_scope: 34 条全部处置——34 执行（desktop/B-2 已按用户拍板=option i 恢复打包态短路，commit 1fa2d0e）；Open#1=b、**Open#3=执行期结案保留**（"零消费"前提不成立，W4 复核 services 有活跃消费链）、#4=保留数组、#5=已加 eol=lf（*.json/*.ts/*.tsx）、#9=收敛
+  fx_commit_prefix: "fixspec(W1..W4/cleanup):"
+  fx_verify: 终验 TC0/CLITC0(--force 真跑)/GATE0(gate OK·removed307·无再生产物)/LINT0(70w·0e)/ARCH0；E2E 三轮覆盖三个产物阶段——原基线(.e2e)/W2产物(.e2e-fix2)/HEAD b0fa8e9 全量产物(.e2e-fix3，cache/e2e-fix3-report.md)：主链路四步+三子命令+DB结构断言全过，与基线逐项同构
+  fx_spec_deviations:
+    - "W4 clock-1 多删 zcodeAgent.ts:456 的 clock?:true 镜像字段（fix-spec 清单外同族第 4 处残留，不删即新死字段）——cr-func 判定合理接受"
+    - "W4 cli/C-3 多删 AiSdkModelAdapterOptions.statusSink/private 字段/两处透传（同条死出口链完整摘除，半删会留写而不读字段）——cr-func 判定合理接受"
+  fx_post_merge_qa: UI 冒烟（computer-use，cache/ui-smoke-report.md）——uis/B-1 输入全链路（输入落态→发送键双向转换→消息上屏→回复"收到"→会话自动命名）、uis/B-2 模型选择器菜单、uis/B-2 UI 字号 14→15→14 三项 P0 点位实机通过；通知开关/MCP 授权/记忆刷新/队列发送按"同机械形态已验证或场景不可达"结案；tag phase1/cr-fixed=1fa2d0e
+spec_path: docs/iterations/oh-my-zcode-fork/spec.md
+fork_repo: D:\Dev\Js\oh-my-zcode\omz（分支 dev/phase-0；baseline/v3.14.3=c34a938 → phase1/telemetry-removed=0e4c58d → phase1/cr-fixed=1fa2d0e → phase2a/magic-context-mvp=43c2280 → phase2b/compact-removed=2b3ca7e → v0.1.0=aba59a9）
+phase3:
+  status: spec 收官：S32-S35 完成 + 全面 E2E 终验通过，tag v0.1.0=aba59a9（S31 Batch2 按 spec 非阻塞设计登记推迟，待用户排期）
+cr_v010:
+  speccheck:
+    status: Go（3 轮收敛，用户已确认修复开工）
+  fix_exec_v010:
+    mode: code-dev-loop（执行 cr-fix-spec-v0.1.0.md，33 条）
+    fx_dag_version: 4
+    status: dev-ready（func-ready:yes，33/33 落实，W3 全量验证绿）
+    fx_node_status:
+      w1-host: done(53ac70e+9f87120, MF-01/03/04/05/11+能力面)
+      w1-market: done(1eaf1e7, MF-02 含真实 CDN 冒烟+反向复现)
+      w1-proto: done(05c124c, MF-07)
+      w1-rewind: done(1a34df8, MF-08+新套件 rewind-strategy 9/9)
+      w1-ui: done(03e7214/5a1e056/87bed7a/e8430c5, MF-09/10/22-28)
+      w2-ctx: done(6f90b01, MF-06 fail-closed+types.ts 越界登记)
+      w2-mech: done(e9c0756/4b0920b/5839d4a/1039a59/2496666/cb90b24/0468cac, MF-12..21+破坏验证双红)
+      w2-brand: done(75ce1bb/a718a9f/1739f91, MF-14/29..33)
+      verify-all: done(主代理执行降级——六门禁绿/19 套 277 case 0 败/knip magic 0 符号级基线/E2E 双态过)
+      cr-func: done(func_ready:yes, 手工审查降级, cache/crfunc-v010.md)
+    fx_verify:
+      gates: 根TC 0err / turbo 27/27 / desktop-full 59=基线 / lint 71w0e / cli+desktop build OK
+      tests: "19 套 277 case：feature-flag14/domain18/mkt-alias4/config10/ctx-tools20/historian18/host26+4skip/transform35/smoke36/turn-transform14/config-rpc10/historian7/lifecycle8/ui-config11/usage-projection14/ctx-cmd13/sidecar6/rewind9/scope-dirs4"
+      e2e: ".e2e-fixv010/——ON(marker+mc库+ctx-status格式化)/OFF(回复正常+mc目录空+0事件+UNAVAILABLE双开关文案)/隔离(真实~/.zcode未动,~/.omz不存在)；热生效与MF-04 settle 以套件证据覆盖"
+      incidents: "knip worktree+junction 清理穿透损 node_modules→pnpm install 修复（坑入 RULE.md）；verify/cr-func 子代理网络三连断→主代理降级执行（已标注）"
+    deviations_exec: 6 条执行偏离全部 cr-func 判定接受（cache/crfunc-v010.md §3）
+    k5_spec: 四处修订+DB解码登记+三收窄确认已落 spec.md 执行状态节
+  speccheck_v010:
+    target: 开发 spec（历史计划文档定位，勘误/注记风格收敛，正文原句不改）
+    rounds: r1 No-Go（手工审查降级：1 P0+6 P1）→ doc-fix（执行状态节+6 处行内注记）→ r2 No-Go（L374 许可句残留+4 P3）→ doc-fix r3 → r3 Go（P4 计数补改 20/109）
+    direction_rule: 方向 a（代码错修代码，spec 不动——契约 8/MF-01）与方向 b（spec 事实错误改 spec）逐条判定
+    artifacts: cache/speccheck-v010-r{1,2,3}.md
+  status: fix-spec 已执行完毕（dev-ready）
+  range: 1fa2d0e(phase1/cr-fixed) → aba59a9(v0.1.0)，584 文件 +92020/−7884，45 commits
+  fix_spec_path: docs/iterations/oh-my-zcode-fork/cr-fix-spec-v0.1.0.md
+  dag: v3/r3——wave-1 evidence×5（cache/cr-v010-evidence-*.md）→ wave-2 review-scope×5（cache/cr-v010-review-*.md）→ spec-fix r1 → wave-3 review-full（§1-3 完整、§4-5 断线缺）→ spec-fix r2（三条改法级修正）→ review-full-r2 轻量终校通过
+  findings: 33 must-fix（P0×2/P1×8/P2×23）——P0=magicContext.enabled 二级开关未接线（MF-01）、CDN 旧 id 别名死代码真实刷新必败（MF-02）；P1=abort 信号丢弃/调度器 settle 缺口/生命周期零接线//ctx-* flag+harness 错写/RPC config 空值重置/RewindStrategy 死枚举/per-model tokens 数据损坏/decimal 清空写 0
+  review_full_deltas: MF-02 扩集自撞（改双函数方案）、MF-07 zod4 前提推翻（真实路径 config:null）、MF-05 补 session-facade 锚点、MF-17 补 3 站点、MF-01×06 effective 同源硬约束
+  network_degradations: R1/R5 scope 与 review-full §4-5 由主代理手工等效审查（已标注）；E2/E3/R3/R4 经多轮 SendMessage 续跑完成；**fix-spec 曾被 PowerShell ANSI 往返毁坏一次，靠上下文全量重写恢复（坑已入 RULE.md）**
+  spec_deviations: 修复型随 MF 闭合；3 项收窄待用户确认（S29 hook 内联//compact 命令面确认/historian 热生效白名单）
+  open_questions: 7 项待拍板（fallbackModels 查证/diagnostic 串/zcode-beta/SEA 缓存/.zcodeignore+ZCode 产品名/enabledPlugins 旧后缀//ctx-status 双渲染）
+  evidence_install_drill: .e2e-s35/ 实证有效（E5 误查 .e2e-phase3-final 的勘误已入 MF-31）
+  commits: 8267303(s32 品牌改名 149文件) 4c8a580(s33-pre CDN旧id别名) 27b7109(s34 合规+初版v0.1.0) 8a395e7(s35-fix M1 分发staging) aba59a9(s35-fix M2/M3 + v0.1.0 重指)
+  s32: bin omz/npm oh-my-zcode/~/.omz 新起+首启提示(marker 一次性)/marketplace id oh-my-zcode-official(17文件106处)/latest.json/tarball/README；工作区级 <cwd>/.zcode 不改（spec 只写用户级）；electron 桌面身份 dev.zcode.app 刻意不改（L2/L3）；T-P1 全绿+真机冒烟（登录种子=复制4文件 test setup）
+  s34: NOTICE fork 声明；**magic-context 上游实为 MIT（Copyright (c) 2025 Ufuk Altinok, @cortexkit/opencode-magic-context 0.44.4）非 spec 假设的 Apache-2.0——33 文件头注释纠正+LICENSE.magic-context 落盘**；THIRD-PARTY-NOTICES 重生成（+1 ai-tokenizer）；UPSTREAM-SYNC.md 五节 SOP
+  e2e_final: B1-B9 全过（cache/phase3-final-e2e-report.md）——身份/首启/会话链路(工具+多轮+resume)/mc on(§N§ 21处+compartments+/ctx-status 新格式+usage.magicContext 面板数据)/mc off(T-M8 零足迹)/RPC热生效(T-U1 真实 app-server stdio)/压缩移除(T-M9)/后端(T-P2: coding plan 真回复+marketplace 合并 manifest 新id+CDN 别名容忍成立)/数据完整性/隔离审计
+  m1_blocker_fixed: 终验挖出分发通道缺 @zcode/magic-context（S24-fix 加了 esbuild external 没加 staging）——修在 sea-tui-assets.mjs 单点（**deferred 队列防 zod 根位劫持**：种子进首轮 BFS 会把 magic-context 的 zod4 抢根位挤 contracts 的 zod3，破坏 zod-to-json-schema peer 解析）；install 演练复验全绿（安装树/真实 prompt/Bash 工具/mc 库）
+  exempt:
+    - "EXEMPT-2a: build:sea --all 在 Windows 解 darwin Node tar 的 symlink 失败（host-only，同 EXEMPT-1 类）"
+    - "EXEMPT-2b: SEA 运行时 No such built-in module: @zcode/magic-context——Node SEA require() 只解析内置模块，裸说明符 staging 修不了；需按 sea-playwright-runtime/tui-runtime-loader 范式补显式路径加载层，把产物实测的 7 处加载点（5 处静态 require + 2 处动态 import）改懒加载（v0.1.1）；内联方案会退化 migration worker/tokenizer 语义已否决"
+  manual_leftovers: M8 GUI 登录/插件安装交互实机；M9 --web UI 冒烟；T-P2 全量人工复核（自动部分已过）
+  pending_user:
+    - "S31 Batch2 排期决策（ctx_note/ctx_search/ctx_memory/nudge/dreamer/embedding 评估）"
+    - "SEA loader（v0.1.1）投入决策"
+    - "npm publish 未做（spec 未要求，发布由用户执行）"
+phase2b:
+  status: S25-S30 全部完成（tag phase2b/compact-removed=2b3ca7e，features.magicContext 已翻 true）；S31 Batch2 可独立排期未做；Phase 3 未开始
+  s29: e94c895——设置分区 context + MagicContextSettingsSection/Fields/magicContextSettingsForm（9/11 schema 字段，language+historian 元数据 15 键原样带回不抹）；后端增量=workspace/readMagicContextConfig（新，防整域替换抹字段）+update result 加 config 回显；T-U1 以 packages/ui/dist 真实产物验证 9/9（落盘原子/observer generation/同 Port 同进程下一读生效/-32602 拒绝不留痕/mkdtemp 隔离）；i18n settings.context.* 30 键双语对称；顺手修真 bug=清空 historian 模型静默失效
+  s30: cf1f5df（19 文件 +1015/−6）——sessionUsageStateSchema.magicContext additive 可选（budgetTokens/usedTokens/usedPercent/compartmentCount/droppedTagCount/droppedTagTokens/cache{m0,m1}）；数据流 mc.db→bootstrap readMagicContextUsageSummary→publish closure（transform 成功+usageRecorder.record 双触发 fire-and-forget）→ZCodeAppOptions.onMagicContextUsage→V4Gateway→TopicPublisher.publishMagicContextUsage→ProductProjection.applyMagicContextUsage→ChatContextUsage 新段（字段缺席=整段不渲染，seedUsage 不再clobber）；/ctx-status 分节美化（BUDGET/COMPARTMENTS/TAGS，数字千分位）；新测试 test-magic-context-usage-projection 14/14 + ctx-commands 扩 2（10/10）
+  s30_incident: 测试初稿曾误开用户真实 ~/.zcode/cli/db/magic-context.db 写 ses_d13 一行——已删除并复核空库，readMagicContextUsageSummary 补 nullish db 防护（包 options.db ?? openDefaultDatabase() 的默认行为是坑）
+  phase2b_metrics: 总删除约 7400 行压缩代码；最终残留 1419 行全白名单（压缩词汇只在 magic-context 子树）；测试族 14 套 227+ case 全绿；knip 与基线逐字节同
+  pending: S31 Batch2（ctx_note/ctx_search/ctx_memory/nudge/dreamer/embedding 评估）；Phase 3 S32-35 品牌改名与发布链路；build:sea 验证（继承未做）；T-U2 视觉验收（manual）；desktop UI 实机冒烟（S29/S30 面板视觉）
+  commits: fdbfc3d(s25) afb1311/8f99f4e/631eea6/66b1596(w1-w4)+abc5712(s26) 8f78349/ce87d22/590364a(w1-w3)+43f8f59(s27) 7cae56c(s28-pre)+1189755(s28-pre2 文案) 2b3ca7e(s28 flag 翻 true+tag)
+  s25: 旁路原语去 compact 化更名 sidecar-model-request.ts（14 标识符映射+日志串）；compact_stream_boundary/preserveProviderStreamBoundaries 契约保留；新单测 6 项（boundary 分支命中/normalized end 不再充当提交证明/fallback 语义）；historian 传递链验证 6/6
+  s26: 115 文件 +247/−6673、24 整文件删除；8 项偏离登记（goal-compact 拆分出 goal.ts 保全 sendGoalCommand 族、estimateCurrentModelInputTokens 迁居 turn-model-step-usage.ts、services sessionCompact 连带一级、zcodeTaskTypes 压缩 timeline 类型链、queueItemSchema 结论=仅 kind 枚举耦合）；T-M10 +2 用例（旧 features.compact 键安全剥离）
+  s27: 33 文件 −703 行；TUI app-compact-timeline 整删+提交路径/keyboard 重放/CompactTimelineRow/TimelineMessage 类型；UI 死 prop 透传链/mention 图标/无消费者 TID/markerOrigin；i18n 双语删 chat.contextCompaction 9+contextOptimization 5+compact 3+modelSwitch.contextWindowGuard 5+TUI transcript.compact 8+status 3；T-M9 实证（TUI/App 普通文本、CLI Unknown command）；T-M12 parity zh-only 0；formal-proof compact 相位摘除；compactBoundary passthrough 删；compactLogArchive 甄别=日志归档保留
+  s28: 残留收口 7cae56c（steer/hook/usage-source/modelTrajectory 死链+陈旧注释，13 文件）+文案 1189755；全量回归全绿（213case/13套、knip 与基线逐字节同、CLI 28.3MB、desktop 6656f/132.9MB、E2E 8 用例：/compact=Unknown command、库内 compaction 0、off 连 mc 库不建、隔离 0 污染）；残留扫描白名单外 0（总 1419 行，压缩词汇只在 magic-context 子树）；报告 cache/phase2b-regression-report.md
+  s28_flip: 真源两处（contracts config/index.ts:348 DefaultRuntimeConfig + adapters config/index.ts:297 getAll ?? true）+10 注释；test-feature-flag 断言镜像翻转 13/13；E2E 默认态 §N§ 注入单调+mc 库建成、显式 false 连库不建（T-M8）；证据 .e2e-phase2b-flip/
+  whitelist_compact: 布局词/数字缩写/context-usage-log-compact/compact_stream_boundary(43)/preserveProviderStreamBoundaries/time_compacting 历史列(10，TS 层有活读写 codecs.ts:76+repositories/sessions.ts:153，将来清理需 migration)/magic-context 全包/shadow-replay 旧日志兼容/守卫测试
+  deviations:
+    - "s26 执行期细化：为满足'三套 typecheck 全绿'，TUI/UI 类型耦合消费点随 S26 删（spec 原文归 S27 的 marker 渲染 case/app-events 消费提前）；S27 只做纯死代码+i18n"
+    - "s27 额外：slash-command-surface 保留名 compress 摘除（退役 compact 别名占位）"
+    - "s28a 额外：modelTrajectory compact kind 三包+i18n 整链删净（S27 甄别出的真死代码）"
+    - "s28b 偏差登记：残留扫描总数 1419（任务书 1396 基线复现不出，口径差异；本轮 −1 精确成立）"
+    - "/ctx-status 在 off 态会建 magic-context.db（handlers/ctx.ts 2a 既有行为，未收口——待用户决策）"
+    - "headless -p 下 /ctx-* 走普通 prompt 路径（routesToPromptCommandCenter 只放行 /expert /goal，导入基线既有）"
+phase2a:
+  status: dev-ready（MVP 全绿，tag phase2a/magic-context-mvp=43c2280）
+  commits: 05eca01(s14) d37fe1a(s15) 3aa6e64(s16) b5e8767(s19a) c6a1dea(s17) ac63a41/73220c3/a76dc1e/3bbb700(s18b1-b4) 9b24c67(s18-fix) e7a6974(s19b) de52c88/71d4d88(wip s20)+eae2933(s20) 3bdd0e7(prep 依赖边) 65efa9b/a064213/cf7680c(s23) 2053bac(s21) da357c5(s22) 5c0b926(批次4收口) ac32c12/a6fdb91(s24) 7987405(s24-fix) 43c2280(s24-fix2)
+  mvp: T-M1..T-M8+T-M11 全 PASS（cache/phase2a-mvp-report.md §1/§8）——live 证据：§N§ 注入 16 条单调、m[1]@messages[3] 无幻影轮、cache 稳定 5.44k-5.55k、off 零差异（连 db 都不建）、fence 36 checks、compartments 9 行真实落库（mc1→mc8…mc27→mc39）、21 dropped、ctx_expand 恢复 5 tag 原文；E2E 隔离环境在父目录 .e2e-phase2a/（项目级 config 开 flag，用户级 config 路径硬编码不被 ZCODE_STORAGE_DIR 重定向——§2.1 记录）
+  final_gates: 全测试族（smoke36/config9/host30/transform35/historian16/ctxtools20/ctxcmd8/bootstrap10+8+6/adapters16+11+feature-flag11）；CLI turbo 27/27；根 TC 0；lint 71w/0e；knip 742 持平零命中；@zcode/cli build 修复后成功（28.4mb）；oxfmt 过检
+  key_fixes:
+    - "s24-fix: transform 首 pass usage 跨进程持久语义（hostProcessLifetime='one-process-per-turn'，缺席=上游逐字行为；偏离登记在 transform.ts 手术点）——ZCode 一进程一轮 prompt vs OpenCode 一进程一会话"
+    - "s24-fix: cli build 三件套（resolveBuildExternal 加包/sqlite.ts TLA 换同步 requireSqliteModule+process.getBuiltinModule/exports 补 require 条件）"
+    - "s24-fix2: raw-message 单读单权威（两半边两套 id 词汇表 mc<N> vs msg_*，跨半边校验致 stale no-op；live borrow 非空即整读，仅冷启动落 store）"
+    - "s21: Effect 204 sentinel 的替代=command-center 本地分派天然不转发 LLM；ctx-recomp 首版简化语义（runner 装配后自动切真实条数）"
+    - "s23: ConfigPort.observe 首用（签名 observe():ConfigObserver + subscribe(key,handler)，参数不透传防旧快照当新值）；port 第二参改 getConfig 按读生效"
+  deviations_added:
+    - "s24-fix: transform 首 pass usage 语义偏离（hostProcessLifetime 可选注入）"
+    - "s24-fix2: raw-message-provider 单读单权威（合并两半边被明令禁止）"
+    - "knip 口径勘误: s24-fix 实测 676 行（31+53+32+407+153 分类和），stash 对比法证明与 HEAD 零差异；此前 742 为另一统计口径——门禁判据统一为「与前一提交 stash 对比零新增 + 零 magic-context 命中」"
+    - "CLI lint（turbo run lint）非门禁（基线即红：根 .oxlintrc ignorePatterns 含 apps/zcode-cli）"
+  deferred_final: 23 条 FORK-NOT-PORTED 缝（E 组 prompt-surface/Batch2 memory·dreamer·note/event-resolvers 等）——S21 已清 FORK-DEFERRED(S21) 归零
+  phase2b_inputs: build:sea 验证；/ctx-flush 或 publishedHistory 独立来源；memory/mural Batch 2（<project-memory> m[0]）；UI 配置面（D-12 MagicContextSettingsSection + D-13 用量面板）；D-11 flag 翻 true 与压缩移除（Step 25-31）
+  methodology_added:
+    - "同步 agent 失败不回 agentId（无法 SendMessage 续）——长任务一律后台派+TaskOutput 阻塞等待（等效同步且失败可续）"
+    - "并发 agent 提交必须带 pathspec 或独占作用域（S16 曾卷走 S19a 暂存，事后 reset --soft 拆分修复）"
+    - "网络闪断期 WIP 检查点纪律（每内聚块一提交）在 S20 四连断下保住全部进度"
+    - "PowerShell ConvertTo-Json 会重排 package.json——依赖边用 node 字符串手术插入"
+  deviations:
+    - "s16: schema 落包内 src/host/config/schema.ts 而非 spec 所写 adapters（依赖方向：包消费者不得反向依赖根工作区包）；adapters 侧 S23 按需薄包装"
+    - "s16: historian 子形状缩减（opencode/pi/omp 扁平为 model/fallback_models/variant；去 thinking_level/runner——Pi/OMP 词汇与 Rust 路由，无读者）——主代理已接受"
+    - "s18: b1/b2 批次边界微调（read-session 家族被 b1 依赖同批落）；8 个闭包外溢文件按'不在不搬清单+无违禁依赖'规则搬运；project-docs-hash 额外搬（inject-compartments 闭包）"
+    - "s18-fix: knip.json 加 ignoreDependencies:[ai-tokenizer]（createRequire 动态加载致静态分析漏判）；knip 基线口径 741→742（+2 为 desktop/browserGuestManager 与 adapters/test-feature-flag.mjs 两个 unused file 既有漂移，非本包引入）"
+    - "s18-fix: Batch2 memory/mural 查询缝返回空集（fork 首版无记忆注入路径）；user-facing-codes/builtin-commands/event-resolvers 三缝逐字摘录非占位（错误码文案与命令谓词是安全相关承重面）"
+    - "环境: 根 .oxlintrc ignorePatterns 含 apps/zcode-cli（基线即如此）——CLI 子树不受根 lint 管，CLI turbo lint 在基线就是红的（contracts 5 个 max-lines 400 error 等），非本 fork 门禁；根 lint 71w/0e 为真基线（fx_verify 记 70w 系笔误，s13-lint.log 为证）"
+    - "s15/s16 临时项: .oxfmtrc ignore src/core/**（保持与上游可 diff）；knip ignore src/**（barrel 接线后移除）——均已登记待办"
+  handoffs:
+    - "S19b 独占 ZCode core/bootstrap + 包 index.ts barrel；S20 独占包 C 组 + host/hidden-completion-executor + scheduler——并发纪律已写入任务书"
+    - "S20 executor 硬约束: sidecarModelCall options.preserveProviderStreamBoundaries 为必填字面量类型 true（编译期强制；spec Step 25 硬约束的前移实现）"
+    - "s18-fix 给 S21 的缝替换指引在其报告 §7（deferred/user-facing-codes 等 5 缝 + 不搬缝的最终处置建议：删 import 而非留缝）"
+phase_status:
+  phase-baseline: dev-ready（EXEMPT-1 SEA host-only；T-B1 manual 部分挂用户，Phase 2b 前完成）
+  phase-telemetry-removal: dev-ready（cr-func-p1 两轮：round1 no→must-fix 闭合→round2 func-ready:yes；tag phase1/telemetry-removed=0e4c58d）
+phase1_commits: 9d91158/dbeffcb(s6) 024569b/d6fc8e6/1cda10a(s7) 9b8a856..662cbbf(s9×7) 6a19812..fb3ff4a(s10) 84e99fc..a481f5a(s11×8) fec1cee..5d69063(s12×5) 89e1fd7/855efa0(fix)
+phase1_metrics: 根typecheck 0err / CLI 25/25 / desktop门禁 61kinds·removed305·gateOK / lint 71w0e / arch 0viol / lockfile -47包 / notices -85条 / knip 719→718(唯一引入项已清) / T-T1白名单外代码级命中0 / desktop完整构建成功(6657文件133MB)
+phase1_accepted_deviations:
+  - s7: ModelApiErrorPhase/FailureExceptionKind 迁 model（错误归因词汇非遥测）
+  - s7: McpTelemetryTracker 保留只删 sink（本地资源链）
+  - s7: bash-resource-telemetry 保留（本地资源管理器族）
+  - s7: normalizer 收缩为 turn 事实（strict schema 所迫）
+  - s7: zcodeMcpTelemetry 资源采样 schema 部分保留（事件 schema 已删；adapters 已改用 ZCodeMcpResourceSample 索引，s6§4.2 警告的 typecheck 兜底风险已消）
+  - s9: @babel/runtime 删除（零消费者）；ingestMcpResourceSamples 链删除（纯 ARMS）；差分门禁键改 文件+错误码+消息
+  - s11: runUserAction codemod 拆包、SettingsPage 包装保留（Step 29 复用）
+  - s12: npm-overrides 删 9 条（rrweb 族+keyv 连带）；NOTICE :62 措辞；licenses EMFILE 坑（third-party-npm.mjs 临时串行后回滚）
+  - s10: desktop 门禁改差分模式（基线 216→705 含 s6 断链）
+phase1_resolved_deviations:
+  - "ReportRendererHeapSample 保留（s6 早期偏离）→ 已被 s12(1d25427) 按 spec 清单全链摘除回归 spec，HEAD 零命中"
+crfunc_p1_round1: func-ready:no——must-fix=fmt 不合规(89e1fd7 引入)+tag 缺失 → 均已闭合(0e4c58d+tag)；另登记 zcodeMcpTelemetry schema 偏离、knip 基线为 fix 后重采口径
+methodology_warnings:
+  - 本机 rg 多个排除 glob 组合（如 !out/** 与 !**/dist/** 同用）会静默返回零结果——后续扫描一律改用 git grep 或单 glob，关键符号做文件级 spot check
+  - %ERRORLEVEL% 链式回显是解析期展开假象——多命令链的退出码必须分段捕获
+pending_user_items:
+  - T-T4（真机运行时抓包零遥测出网——静态证据已足：外发通道探针零命中+SDK 零残留；建议下次真机用系统抓包复核，预期仅官方端点 443）
+  - TUI 全屏交互体验（可选，非阻塞——E2E 已覆盖登录/工具/持久化/resume/compact 全链路）
+e2e:
+  status: pass（2026-10-04，cache/e2e-report.md）
+  coverage: doctor / 真实会话+Bash 工具(yolo) / resume 续话 / /compact+压缩后记忆 / SQLite 直查(compaction part×2+boundaryId、timeline、tool part、本地 usage 表健全)
+  isolation: ZCODE_STORAGE_DIR/ZCODE_SESSION_DB_PATH 指向 .e2e 临时目录（复用共享登录，不污染现有会话库；.e2e 保留供 Phase 2b 前后比对）
+  t_b1: 自动+核心 manual 链路已闭合；Phase 2b 压缩对照基线证据已留存
+wave_plan: [[cr-func-p1]]
+node_status:
+  impl-p1-{s6,s7,s9,s10,s11,s12}: done
+  verify-p1: done
+  fix-p1-final: done
+  cr-func-p1: { status: done, func_ready: yes, rounds: 2 }
+open_must_fix: []
+spec_deviations: []  # 全部为已记录+已接受偏离（见 phase1_accepted_deviations）
+notes: 验收口径已 doc-fix（knip≤基线快照/T-T3 exporter口径/fmt 改动文件零新增）；%ERRORLEVEL% 假象已勘误
+desktop_long_session_perf:
+  repo: D:\Dev\Js\oh-my-zcode\omz
+  speccheck:
+    dag_version: 2
+    review_round: 2
+    prd_path: docs/iterations/desktop-long-session-perf/prd.md
+    spec_path: docs/iterations/desktop-long-session-perf/spec.md
+    mode: 两段式（evidence×3 → judge×1；r1 已完成，evidence 包复用）
+    evidence_packs:
+      - docs/iterations/desktop-long-session-perf/cache/sc-evidence-delta-apply.md
+      - docs/iterations/desktop-long-session-perf/cache/sc-evidence-turn-directory.md
+      - docs/iterations/desktop-long-session-perf/cache/sc-evidence-perf-probe-render-hot.md
+    r1: { verdict: No-Go, findings: P0×10+P1×16+P2×9, report: cache/sc-review-r1.md }
+    r1_fix: P0×10+P1×16+P2×9 全部 doc-fix（spec 整体重写：dev 启动契约/量化 72/RowShell 注册/startedAt 硬约束/分段内前缀截断/dirty 键补全/SessionPane 共用增量构建器/目录契约升序+realUserQueryTotal/可测性前置 Step 5；PRD 补 hover 摘要不变句；Step 重排 0-21）
+    r2: { verdict: No-Go, closed: 32/35, findings: 仍开放 P0-4/P0-5/P0-10 + 新 P1×3(N3/N4/N5) + P2×12, report: cache/sc-review-r2.md }
+    r2_fix: 三 P0 闭合（startedAt 取值链 fact 同源+header 兜底+liveNowMs state/interval 彻底删除；摘要改流式折叠逐字节等价方案+T-TD1 四类边界语料；Step 5 硬 gate 零 @/ 传递依赖+下沉 conversationProjectionCore.ts 方案写死+自检命令）+ N3 并入 P0-4 + N4 引 applyConversationDeltasMutable + N5 reconcile 系列读外壳 + P2 顺手清（RowShell 10 处+6 处说明/StrictMode 幂等/sessionId/turnKey=turnId 统一/二选一全部写死/SessionPane shareItems/shiki 异步竞态/scrollToQuery async+registry/无 header 兜底 empty/行号 409-416+333/5174 提示指 vite）
+    r3: { verdict: Go, mode: 手工审查降级（子代理两次未产出）， findings: P0×0/P1×1(当场闭合：startedAt 单段分支应为 header.startedAt 非 triggerRow.createdAt)/P2×0, report: cache/sc-review-r3.md }
+    open_must_fix: []
+    doc_fix_plan: []
+    status: execute-ready 用户已确认（调用 code-dev-loop 开工）
+  dev_exec:
+    mode: code-dev-loop
+    worktree: D:\Dev\worktree\desktop-long-session-perf（分支 feature/desktop-long-session-perf，base main=ba7c240；完整 pnpm install --prefer-offline 已装，未挂 junction）
+    toolchain_path: "set PATH=D:\Dev\worktree\desktop-long-session-perf\node_modules\.bin;D:\Dev\Js\oh-my-zcode\.tools\node-v24.14.0-win-x64;%PATH%"
+    step0: 完成（main 直改）——豁免：RowView/Timeline/TurnGroup/projectionStore/transport/App 首行 EXEMPT；SessionPane 第 4 行块注释豁免（首行检测漏报教训）；紧张 active：helpers 327/workSegments 222/Navigator 251/renderUnits 445 总行（有效行临界，S12 下沉新文件规避）/shiki 188/memDiag 95；max-lines=error 400 skipBlank+skipComments
+    dag_version: 1
+    wave_plan:
+      - [impl-perf-probe(S1+2), impl-cdp-script(S3), impl-testability(S5), impl-memory-guard(S20)]
+      - [baseline(S4)]
+      - [impl-apply-test(S10), impl-rh-timeline(S6+8), impl-rh-nav(S7)]
+      - [verify-early, cr-func-A(S1-8,10,20)]
+      - [impl-accumulator(S11), impl-turn-dir-contract(S13+14)]
+      - [impl-renderunits-inc(S12), impl-server(S15), impl-host-transport(S16)]
+      - [impl-store-directory(S17)]
+      - [impl-nav-merge(S18), impl-jump(S19)]
+      - [verify-all]
+      - [cr-func-B(S11-19+全量)]
+      - [verify-final(S21), cr-func-final]
+    node_status:
+      baseline: { status: blocked-user, partial: 工具链全通（隔离实例9333/独立profile/数据抽取/CDP驱动/采样脚本 exit0；baseline-before.json 已落但 rowCount=0 不可用）——sessionDbPath 未生效致 sessionNotFound；三根因已定位二（ZCODE_AGENT_SERVER_COMMAND 缺字段/数据根多一层 .omz）；临时件在 %TEMP%\zcode-perf* 可复用；待用户拍板：a)对用户 main dev 实例注入探针采（main=改动前基线且常量可采，零配置轻微打扰） b)关用户实例修隔离链 c)授权写 ~/.omz 现役 profile 造长会话 }
+      impl-perf-probe: { status: done, commits: 60695cb+c5d6c7a+b9d4381, tests: perfProbe 9/9, note: Node24 PerformanceObserver 不派发 longtask——T-PA1 双路径降级（真实条目或注入记录函数） }
+      impl-cdp-script: { status: done, commits: 28766b9, verify: node --check/help/错误路径 + 对真实 9229 实例端到端联调（exit 6 探针缺失 / 假探针全链路 exit 0）, note: 头部带 max-lines 豁免注释，全仓 lint 71w/0e 与基线一致 }
+      impl-testability: { status: done, commits: 32091ee, tests: core 5/5 + IMPORT-OK }
+      impl-memory-guard: { status: done, commits: 1bbdaa6, tests: shikiLru 4/4, note: 顺带把 memoryDiagnostics/shiki 的 @/ 改相对路径（传递依赖必需），存量 nonCliAcpRetirement.test.ts 的 @/ 红未动（非本期） }
+      impl-apply-test: { status: done, commits: 6efdef0(重写，首提47221d0被并发reset摘除), tests: apply 10/10, note: 变异测试验证断言有效性（临时删 rowIndexById 重建→用例红→还原） }
+      impl-rh-timeline: { status: done, commits: cc78926+e39b128, note: clearRowElementRegistry 按 isConnected 剪枝（React layout effect 时序：新行 ref 挂载先于 cleanup，无差别 clear 会自伤）——有意偏差已注释 }
+      impl-rh-nav: { status: done, commits: aff2cbf(恢复提交，原53bfcb7被 rh-timeline 的 reset --mixed 摘除；工作区内容与悬空提交逐字节一致后重提), tests: helpers 6/6 }
+    incident_w3: rh-timeline 为拆分混合提交做 reset --mixed 时摘掉他人 commit（53bfcb7/47221d0）；apply-test 与主代理各自恢复（6efdef0 重写 / aff2cbf 重提）；教训=并行节点禁止对共享分支做 reset，拆提交用 soft 或摘自己 pathspec
+    wave3_verify: { typecheck: OK, lint: 71w/0e 同基线, tests: 34/34 全绿（apply10+core5+helpers6+perfProbe9+shiki4）, architecture: OK }  # main 直改执行（verify-early 节点）
+    cr-func-A: { status: done, func_ready: yes, report: 对话内（矩阵 9Step 全过/4 blocking 测试 id 复核/五门禁独立复跑/5 deviations 全可接受） }
+    s12_cleanup_list: [M1=conversationTurnRenderUnits.ts:73 死形参 nowMs 及下游 4 处不可达分支一次删净, N1=ConversationTimeline.tsx:900-901 注释改「遍历序不参与判定，顺序由 normalize 的 start/rowId 排序兜底」]
+    pending_user: 基线三选项（a 对用户 main 实例注入采 / b 关实例修隔离链 / c 授权写 ~/.omz 造会话）——cr-func-B 前须结案
+    dag_reorder: dag_version 2——baseline 转「用户配合线」不阻塞开发（基线对照物=main 常量可后采），wave-3 提前
+    wave1_verify: { lint: 71w/0e 与基线同, typecheck: OK, architecture: OK（perf-probe 节点跑过） }
+    spec_deviations:
+      - "基线采集（S4）在 S20（shiki LRU）之后执行：内存类基线含 LRU 上限效果（更平），卡顿类指标（longtask）不受影响——spec 顺序为 S1-5→S4→S6+，并行 wave 打乱所致，影响可接受已登记"
+    commit_rule: 每节点 git commit 必须带 pathspec（仅本节点文件）；注释/commit 中文；写文件核对 LF
+    # ===== 代码开发收敛（wave-10 终态，HEAD=7964219）=====
+    wave6to8_nodes:
+      impl-renderunits-inc: { status: done, commits: d13258a+061b271+ea3c148, tests: core +T-AP4（含 fuzz 抓出 keep漏判dirty 与 phase迁移过期命中两真 bug 已修）, note: renderUnits 拆两层（Draft 新文件）规避 max-lines；@/→相对路径整链改造（renderUnits/workSegments/flowItems/cuaGroups/toolCallRowAdapter/lib 两文件）；SessionPane shareRenderUnits 新传 control.phase（M3 修正后与 Timeline 同源） }
+      impl-server: { status: done, commits: af8c129, tests: bootstrap test-turn-directory 13/13（tsx 跑，model-option-map 无 dist 不可裸 node——已注释）, note: getTurnDirectory turn 级聚合 assistant 摘要（与 buildAssistantPreview 同粒度，T-TD2 F2 钉死） }
+      impl-host-transport: { status: done, commits: 4b59b25, note: 7 文件接线零删除，跟 rowsRange 支 trusted }
+      impl-store-directory: { status: done, commits: ac6c71a+3695605+c5689cc+7fd8667, tests: T-TD3 7 例, note: 目录/正文终态缓存分离（防分享被目录短路）；atLogEpoch+跨页 atRevision 双闸陈旧丢弃 }
+      impl-nav-merge: { status: done, commits: 1208275, tests: directory 6 例, note: 新模块 conversationTurnNavigatorDirectory.ts 零导入；目录项 rowId>=windowFirstRowId 无已加载 item→丢弃（窗口权威） }
+      impl-jump: { status: done, commits: 1d18f36, note: findUnitIndexByRowId 反查（目录项 unitIndex 仅占位）；序号失效防重入；toast 双 locale；handleLoadOlder 加 limit 参数 }
+    verify_all: { 根TC: OK, CLI-TC: 27/27, lint: 71w/0e 同基线, tests: 73/73+13/13, arch: OK/0/0, commits: 26 个 ba7c240..1d18f36, 工作区: 干净 }  # main 直改执行
+    cr-func-B: { status: done, func_ready: no → must-fix M1(目录首查死链 blocking)/M2(日志双调用)/M3(phase 不对齐) }
+    fix-m1m2m3: { status: done, commits: 7964219, tests: 83/83（+4 门控用例：未取过放行/loaded<2 拦/终态拦/三前置闸） }
+    cr-func-fix: { status: done, func_ready: yes——M1 链路逐段验证（loaded=false→total undefined→落回 canLoadOlder→首查发出；terminal/retryable 不受影响；与旧 loadAllOlder 闸门口径等价无回退）；M2 单次调用读外壳；M3 phase/scopeKey 单一来源；无新回归 }
+    known_deviations_accepted:
+      - 单页目录结果无「查询发起时活 revision」比对闸（缓解链完整：append bump revision→250ms 去抖→单飞补跑；残余窗口 ≤250ms+在途，且被已加载优先遮蔽）
+      - renderUnits 缓存理论残留（上一末轮被 keep 过滤且变更全落该轮时新末轮 isLastTurn 可能沿用 false；T-AP4 未覆盖该形状；修法=锚点扩为本帧新末 unit，未做）
+      - timelineSnapshot===null 帧两侧 rows 不同源致缓存清空（纯性能退化无正确性）
+      - S9 中期采样未做（manual 非阻塞）
+    final_status: 代码开发全部收敛（22 Step 中 S0-S3/S5-S8/S10-S20 全闭合，门禁全绿）
+    baseline_final:
+      s4: 完成（E2E 全自动）——根因链：dev 实例数据根=.omz（空）而 158 会话在 .zcode（生产）→ 从 .zcode 只读导入 sess_edd74a25（979 msgs/10 表，title=PERF-基线导入-勿动-…，directory=default workspace；备份 %TEMP%\zcode-perf-backup\ VACUUM 快照）→ sessions-index publisher 按 workspace 永久缓存（外部导入不进侧栏）→ 命令面板搜索入口绕行（完整 pointer 序列）→ before=主仓 main 实例（9229，vite 5174 复活）采
+      s21_after: 完成——worktree 重建产物（**坑：out/zcode.cjs 早于 af8c129 静默过期**）+ vite 5188 + 独立 userData 隔离实例 9335（不动用户实例）同会话同口径采
+      compare: baseline-compare.md——longtask 121→43（2.8x）/12293ms→3553ms（3.5x）/行程归一 5.8x-7.1x/heap +81.8MB→−3.7MB（增长消除）/最大值 330→316ms 未动；**PRD「一个数量级(10x)」未达**——判定线本为待回填项，建议改「≥3x+heap 零增长」（本次满足），待用户拍板
+      acceptance_paths: 四条全过（跳转 Δ-62205px+active 迁移/hover 摘要双段正确/上滚分页 300→1719 每页 120/分享 19/19 与目录一致；console 零异常；turnDirectory 端到端 9.3ms）；保留点=data-jump-loading 翻转太快观测不到
+      cleanup_hints: .omz 导入会话保留（用户可实机体验；删除法或备份回滚见 agent 报告）；baseline-before.json 的 repo.head 字段=d11a97c 是脚本 cwd 误导（实际=main ba7c240）
+    pending_user:
+      - "验收线拍板：接受「次数与总耗时 ≥3x + 窗口内 heap 不增长」（本次满足）作为 S21 判定线并回填 PRD；或继续挖剩余瓶颈（最大值 316ms 未动，剩余 longtask 疑在 markdown/shiki/虚拟化测量等本期未覆盖面，可开 P3 迭代）"
+      - "导入会话（PERF-基线导入-勿动-…）保留在 dev 实例中供实机体验，不需要时按备份回滚或删除"
+  cr_loop:
+    mode: code-review-loop（两段式：evidence×4 → review-full）
+    base_sha: ba7c240
+    head_sha: d11a97c
+    diff_stat: 48 files +7193/−772, 28 commits
+    fix_spec_path: docs/iterations/desktop-long-session-perf/cr-fix-spec.md
+    dag_version: 4
+    review_round: 3
+    wave_plan: [[cr-ev-shared, cr-ev-data, cr-ev-render, cr-ev-server-infra], [review-full], [review-fixspec-r2], [review-fixspec-r3-定点]]
+    node_status:
+      cr-ev-shared: { done, 可疑点 11 }
+      cr-ev-data: { done, 可疑点 18 }
+      cr-ev-render: { done, 可疑点 11+1核对过 }
+      cr-ev-server-infra: { done, 可疑点 11 }
+      review-full: { done, verdict: 建议 fix-spec-ready:no, findings: P0×1(full/B-1 rowElementRegistry 跨 pane 撞号=本轮回归)+P1×8+P2×13=22 must-fix、open_questions×4、否决×10 }
+      review-fixspec-r2: { done, verdict: no——22/22 覆盖忠实+file:line 零错位，但 fix-spec 自身 4+1 处问题（J-2 改法与 :1890 不同源/C-5 验收与 :244-246 矛盾/B-1 悬空/E-1-C-1 依赖未标/E-4 缺验收）→ 主代理 spec-fix 闭合 }
+      review-fixspec-r3: { done, verdict: 5/6 闭合，唯一阻塞=J-2 需补 merge 上提单一真源（给出最小补丁）→ 主代理按补丁修入，r3 预置闭合条件满足 }
+    cr_result: fix-spec-ready（code-review-loop 3 轮）→ spec-check-loop 复审（用户指令：审 cr spec 本身）
+    speccheck_crfixspec:
+      dag_version: 5
+      review_round: 1
+      target: cr-fix-spec.md（对照业务 spec + 代码 d11a97c）
+      r1: { verdict: No-Go, findings: P0×2（C-5 改法 TDZ 必崩——shareRenderUnits:659 引用 :3577 声明的 timelineSnapshot；执行编排缺失——loadTurnDirectory 被 B-2/G-1/E-3 三改+B-4/J-2/B-5/C-1 重叠）+P1×6（G-1 签名不可测/B-2 验收不可执行+自恢复表述错/G-2 rootDir 实测必红/J-2 接口缺 loadedItems/J-1 finally 矛盾/行号基线缺失）+P2×8, 完备性核验: deviations#1-4 承载✓ QA 闭环✓ 业务契约无冲突✓ }
+      r2: { verdict: No-Go, findings: 13/16 闭合但 r1 修复引入新 P0——C-5 下移方案漏下游 eligibleShareRowIds:687/eligibleShareProductTurnIds:768 两消费点仍 TDZ；C-1 跨波次劈半；波次 4 反向排序；C-2/C-5 测试无落点+G-2 先于测试编写；B-2 验收跨层；P2×4 }
+      r3: { verdict: No-Go, findings: C-5 上提 :990 仍 TDZ（:990 在消费点 :659 之后——依赖就绪≠声明在消费点前，正解=双双上提至 :654 前）；C-5 无波次归属；B-1 单测无文件与 G-2 的 8 文件计数冲突；N4-N7 措辞 }
+      r4: { verdict: Go——C-5 TDZ 根上修正（消费点全在 :654 后/依赖齐备/非 hook/无重名，逐条实测），回填全对，仅 4 处措辞精度瑕疵（N-A 四个 useMemo+deps 须改/N-B 行号 1008/N-C null 短路/N-D 锚点语义）已顺手修入 }
+      status: execute-ready（4 轮收敛）用户已确认开工
+      fixspec_note: C-5 同一处 TDZ 连续三轮翻车（r1 引用型/r2 移动型/r3 落点仍错）——教训：修复「声明位置类」缺陷必须验证「声明 < 全部消费点」而非「依赖 < 插入点」
+  fix_exec:
+    mode: code-dev-loop（执行 cr-fix-spec，22 条/5 波次）
+    base_head: d11a97c
+    dag_version: 1
+    wave_plan:
+      - [fix-w1(C-1a→E-1→C-2→C-3→C-5→E-2)]
+      - [fix-w2(G-1→B-2→E-3)]
+      - [fix-w3(B-5→C-1b)]
+      - [fix-w4(B-4→J-2→B-1→J-1)]
+      - [fix-w5(renderUnits 测试+B-1 单测→G-3→G-2→F-1/F-2/C-4/E-4/D-1→K-1 门禁)]
+      - [cr-fixspec-func(22 条矩阵+门禁)]
+    node_status:
+      fix-w1: { done, commits: 1b43174+98f5723+92f8910+1b3e783+c9af3f2 }
+      fix-w2: { done, commits: 6001f08+b63f8cd+6c65e1a+10b247a }
+      fix-w3: { done, commits: adbeffb+1a22f60（重启后主代理补验证 99 测试/71w0e/arch OK） }
+      fix-w4: { done, commits: 126e84b(B-4)+70b3e25(J-2)+fbc4619(B-1)+4d74508(J-1), note: 子代理两次 provider rejected 降级主代理手工执行（用户重新授权派遣后再试仍拒绝）；门禁=typecheck OK/lint 71w0e 基线持平/arch 0 违规/全仓测试 0 失败（ui 85+services 10+shared 23，从包目录跑——根 cwd 下 tsx 拿不到 ui tsconfig paths 致 nonCliAcpRetirement ERR_MODULE_NOT_FOUND，即 G-2 要修的调用口径） }
+      fix-w5: { done, commits: ed4e8f1(renderUnits 测试 C-2/C-5)+047bc22(G-3 六项)+1efff40(G-2)+cade3a8(F-1)+541c33c(F-2)+aed34f3(C-4)+e623393(E-4)+34eacac(D-1)+7a03590(K-1 交叉注释), note: renderUnits 测试与 G-3 由主代理手工（派遣仍被拒），G-2 起用户修复 provider 后由子代理串行完成；G-2 deviations=ui test 工程需显式 references（extends 不继承）+5 个测试文件 noUncheckedIndexedAccess 类型修补（! 断言/hydrate 签名/toolId）；F-1 spec.md:53/:205 已同步收窄（workspace 文档不进 git）；K-1 登记=Draft 432 行余量风险、分享只读面 running 空 duration（存量）、deps 格式空动作、扫描量魔数不变 }
+      cr-fixspec-func: { done, verdict: func-ready:yes, report: 22+1 条矩阵全 pass（B-1/E-1/B-2/G-1/G-2/C-1a/C-1b/B-5/B-4/J-1/F-1/F-2/C-2/C-3/C-4/C-5/E-2/E-3/E-4/D-1/J-2/G-3/K-1），四门禁独立复跑全绿（typecheck 0 错/lint 71w0e/arch 0 违规/test:v4-perf 125 pass），零阻塞项，6 项已登记偏差复核全部可接受；manual_user 合并后 QA（B-1 双 pane/E-3 truncated/J-2 空档/E-1 采样复跑）标 manual-pending 不阻塞 }
+    discipline: 波次内串行（fix-spec 硬规定）；行号按符号锚点定位（d11a97c 基线）；pathspec 提交/中文 commit/禁 git reset
+    must_fix: []
+    spec_fix_plan: []
+    merge_exec: |
+      双分支合入 main：1dbe627(official-endpoints S1-S8)+339bafc(perf)。冲突 3 文件 7 块裁决——TurnGroup：删 OffPeakTurnCards（official 下线闲时）留 WorkingDurationText（perf）；Timeline：删 liveNowMs 全局 tick（perf 目标）与分享布局同步（official 整删），rail 挂载取 perf 单一真源并随 hideTurnNavigator 移除收窄条件；SessionPane：分享机器整体随 official 删除，isDraft/sessionLeaseReady/timelineSnapshot 保留 perf 上提位置，Timeline 传参走 sessionRenderPhase 单源，shareSelection prop 删；三处提已删 shareRenderUnits 的注释同步修正；新 lint 警告 handleLoadAllOlder（消费方随分享删除）一并清。
+      合并暴露 official 末梢潜伏缺陷 2 处并修复：3968844 bootstrap seedSharedContextImport 补 title 可选链（schema 全字段 optional 化后 TS18048，分支末梢未重跑构建）；2be607a agent spawn env 随附 Built-in 随包基线（bootstrap BUNDLED env 去 standalone 门槛、远端同步仍仅 standalone；services 下发 host 已解析基线路径）——升级用户旧 Active 缓存含已删字段 accountType/mode 时 provider 初始化不再整段判死（对齐 D-16 回落语义）。
+      合并后门禁全绿：typecheck 0 错（含 2 测试工程）/lint 71w0e 持平/arch 0 违规/i18n parity 5893 键/test:v4-perf 125 pass；bootstrap contracts dist 陈旧产物重建后消除 OFFICIAL_MCP_TOOL_ERROR_CODES 悬挂 import。
+      E2E（合并主干 dev 实例 test 模式）：启动零横幅/长会话 1160 行/rail 19 合并条目/hover tooltip 369 字符/上滚分页 300→1160/console 零异常全过；jump 无法断言=隐藏窗口 rAF 挂起冻住 smooth 滚动（代码与分支同、基线已 19/19，登记 harness 限制）；采样 stream+scroll 稳态零 longtask、rows 恒定（滚动仅 7 步因隐藏窗口节流，绝对值横向对比不成立；权威数字仍为分支终验 longtask 2.8x/时长 3.5x/heap −3.7MB）。
+      **E2E 环境教训：agent 会话跑在生产 ZCode 子进程内，shell 自带 ZCODE_BUILTIN_PROVIDER_CONFIG_FILE/ZCODE_ENV 等生产 env 会全链路污染 dev 实例（伪装成「模型配置加载失败」）——dev 启动前必须 Remove-Item Env:ZCODE_*（至少 BUILTIN/PERSONAL/APP_VERSION/BASE_URL/ENV/RUNTIME_ENV/PROCESS_LABEL）；CDP 功能测试在隐藏窗口下必须用驱动侧轮询（页内定时器被节流、rAF 挂起冻住 smooth 滚动与 HoverCard 收起）。**
+    status: 已合并+E2E+push+CR 收口——main=2be607a 已推 origin；合并面小范围 CR（diff 单轮 readonly 子代理）结论=通过（P0=P1=P2=0：冲突裁决保真逐块核验、已删标识符零残留、sessionPhase 链路单源、2be607a 三形态行为矩阵+env 污染防护全过），结论落盘 cr-fix-spec-merge.md。挂起待用户：①性能验收线拍板（≥3x+heap 零增长 vs 继续挖）②fix-spec deviations #1-#4 正式确认 ③合并后 manual QA（jump 实机/B-1 双 pane/E-3/J-2）④.omz 清理（导入会话+provider.stale-* 目录）⑤worktree 两分支引用清理时机
+official_endpoints_removal:
+  repo: D:\Dev\Js\oh-my-zcode\omz
+  baseline: main=ba7c240 (v0.1.1)
+  speccheck:
+    dag_version: 5
+    review_round: 5
+    prd_path: null  # 需求来源=用户口述（spec「需求来源」节）
+    spec_path: docs/iterations/official-endpoints-removal/spec.md
+    mode: 单 judge（evidence 复用 explore×4 证据包，judge 须回读代码抽查）
+    evidence_packs:
+      - docs/iterations/official-endpoints-removal/cache/explore-A-account-model-access.md
+      - docs/iterations/official-endpoints-removal/cache/explore-B-desktop-official-ui.md
+      - docs/iterations/official-endpoints-removal/cache/explore-C-marketplace-offpeak.md
+      - docs/iterations/official-endpoints-removal/cache/explore-D-endpoint-infra-gates.md
+    r1: { verdict: No-Go, findings: P0×4+P1×7+P2×3（D-2 存量 known record 仍出网/D-6 clientScenes+clientConfig 悬置「检视」/D-12 validateSelection 落点语义错误/S5-S9 并行在 i18n×2+accessor+zcodeAgentService 同文件打架；P1=offPeak UI 清单不全/telemetry.ts 漏列/composer 判定缺/i18n 91→90/轴一漏 z\.ai/D-13 family 计数错/测试族实际 14 套/门禁缺 licenses+arch） }
+    r1_fix: P0×4+P1×7+P2×3 全部 doc-fix（D-2 补存量收敛+T-MK1 升级场景/D-6 拍板 clientConfig 整删+clientScenes 本地化+apiEndpoints.ts 整删/D-12 落点改 createRegistrySelectionProtocolError+modelFactory 且先复现失败环/并发纪律重写为 4 Wave+i18n 单点归 S10/S7 补 UI 残留 8 文件+telemetry.ts+grep 判据/S10 承接 i18n 收口/D-13 改 2 family 删 6 字段+白名单登记/T-INF1 补 z\.ai/测试族 13 套口径/S12 八门禁/S13 补 :75/白名单 nodeApi 符号级/D-11 措辞）
+    r2: { verdict: No-Go, findings: 新P0×2（r1 修复方案自身与代码冲突：D-2「移除官方 known 记录」致商店页官方段全空——known 是商店条目唯一来源（bootstrap/plugins.ts:279-334 无二次兜底）；D-12 落点 createRegistrySelectionProtocolError provider-not-found 分支不可达+modelFactory 无默认 selection 入口）+P1×6（测试族口径不可复验/45 行 teamCodingPlanManageUrl 去向未定/family map 恒空降级未登记/T-INF1 白名单缺 5 处+注释口径/Wave3 漏 SettingsPage/并发名实不符）+P2×5（apiEndpoints re-export/usePluginStoreOrder 形态/desktopMenu 交叠/内置模板 cronExpr 校验/clientConfig 7 处 removal） }
+    r2_fix: 全部 doc-fix（D-2 改「就地改写 source 为本地 directory 源」保留记录/D-12 收敛唯一落点 modelFactory+ApiProviderModelRuntimeOptions 增 resolveFallbackSelection 注入/测试族改 cache 名单机制（S1 落盘 test-suite-inventory.md，T-R1 判据=名单全绿）/D-13 补 teamCodingPlanManageUrl 随 S5 删（providerFamilyConnectionVisibility 属删除面）+family map 恒空降级登记+CHANGELOG 口径/T-INF1 白名单补 constants.ts:83,90+legacyZCodeConfigProviderReader.ts:64（S10 复核）+剥离注释行口径+web 两处（webZaiOAuthConfig/ConversationShareLandingPage）纳入 S8 删除/Wave3 补 SettingsPage+settingsPageConfig/改称「执行顺序」允许 S2×S3 并行例外/S4 补 clientConfig 7 处 removal+apiEndpoints re-export 摘除+usePluginStoreOrder 保留 hook 返回 noop+builtin-templates.ts 落点+cronExpr 校验要求/desktopMenu 归 S2 删 S10 仅校验）
+    r3: { verdict: No-Go（收敛尾声——r2 修复机制全部代码级核实可行）， findings: 新P0×1（T-MK1「全新 profile 官方段非空」与 D-2「仅改写既有记录」互斥——全新 profile 无 known 记录可改写）+P1×2（D-12 回退未要求重跑 validateSelection→options!.reasoningLevel! TypeError 风险+注入来源措辞应为 ZCodeAppOptions.configuredDefaultModelSelection/T-INF1 白名单按行号登记了 S5 会删的 :35/:45）+P2×5（D-13 消费点约 20 处未点名+providerFamilyDomainMigration OAuth 分支/Wave3 挂了不相关的 settingsPageConfig+S5 作用域偏窄/clientConfig 计数 15 处 vs 清单/内置模板漏 scene="scheduled-task"+zh/en cronExpr 逐字相同两 reject 条件/directory 刷新经 addMarketplace 官方分支的替代形态） }
+    r3_fix: 全部 doc-fix（D-2 ensure 收敛双动作=既有改写+**缺失补录** directory-source 记录，T-MK1 理由改「bundled seed 写 manifest+ensure 补记录」/D-12 补「回退先过 registry.validateSelection(fallback)，ok 才替换否则保留抛错」+注入来源改 configuredDefaultModelSelection（已存在）/T-INF1+D-13 白名单改符号口径（rootDomain 两行，按符号不按行号）/D-13 补保留面 ?? 兜底结论+migration 整函数登记/Wave3 注明 settingsPageConfig 非交集+S5 作用域扩 :343-592+:701-716+:1452/:1555/:1759/clientConfig 改文件级 6 个/builtin-templates 补 scene 固定 scheduled-task+zh/en cronExpr 逐字相同/D-2 补 addMarketplace 官方分支替代形态=直接沿用 loaded.manifest）
+    r4: { verdict: No-Go（轻量——8 条 r3 must-fix 全部闭合并代码级核实可行，设计层无返工）， findings: P1×2 登记遗漏（featureSuggestedPrompts.ts:11 ASSETS 官方 CDN 孤儿（23 处 iconUrl 消费）；electron-builder.config.js:453/456/697 三处官方产品身份 homepage/author.email/deb.maintainer——fpm 硬校验只能改值不能删）+P2×5（D-13 保留面漏 modelSelectionGroups:76/StatusCards:249+useModelProviderNavigation 订阅面误归保留面/oauthProviderId 未声明保留字段+list-models 未用 import/行号陈旧+消费点 60 处 vs 20/D-2 ②补录判据 legacy-only 存量影子重复/S5 webview 守卫漏 desktopMainIpcRemote.ts:53-80） }
+    r4_fix: 全部 doc-fix（D-2 补两处 icon 资产消费（definitions:58+featureSuggestedPrompts:11×23）+②补录判据改「canonical 与 legacy 均不在 known 才补录；legacy 改写同时收敛 canonical」+T-MK1 加 legacy-only 场景与「官方 id 有且只有一条」判据/D-11 补 electron-builder 三处改值不得删/D-13 补保留字段集 {id,label,rootDomain,oauthProviderId}+保留面/订阅面按符号分类（60 处）+list-models 未用 import 摘除/S5 webview 四件套补 desktopMainIpcRemote:53-80）
+    r5: { verdict: No-Go（无 P0——7 条 r4 must-fix 全部落盘且 6 条代码级完全闭合；终查确认全仓官方端点命中已无「未登记」残留）， findings: P1×2 均在 D-13 保留面/订阅面分类（ModelProviderSection.tsx:193/:1104 读被删字段被标「零改动」内容为假；:168-177 shouldShowPresetProviderForActiveOAuth 是 preset provider 可见性过滤器非 codingPlan 守卫——family map 恒空后恒 false，升级用户内置 preset provider 全部消失且 T-AC3 首启场景测不出）+P2×4（T-INF1 漏登 :35 字面量/待拍板缺 fork 打包身份取值项→新增第 9 项/list-models 第二个 import 漏登/注释剥离规则不含行尾与块注释+magic-context schema.ts:16 陈旧官方前提注释）+P3×3 nit。judge 判定「补完 6 处约 10 行即转 Go，不触及任何 D-* 决策与实施顺序」 }
+    r5_fix: 全部 doc-fix 含 nit（D-13 保留面收敛为 :878 等真零改点+新增「须显式重写」类 :191-195/:1100-1111+新增「静默行为回归必须摘除」类 :168-177+:610；T-AC3 补升级 profile preset 可见判据/T-INF1 补 teamCodingPlanManageUrl 两处形态按字段符号+剥离规则写全三种注释+schema.ts:16 改写/待拍板新增第 9 项 fork 打包身份/D-11 引待拍板-9/list-models 双 import/featureSuggestedPrompts 23→22/D-2 ①补 legacy 除外）
+    equivalence_note: 轮次上限 5 已达；r5 无未闭合 P0，judge 预判修复后即 Go 且修复不触及决策层——主代理按 execute-ready 定义（P0=0，P1 已修复）认定等效 Go，待用户确认
+    pending_user: spec 末节 9 项已按推荐值执行（2026-10-06 code-dev-loop 开工确认，第 9 项占位值，spec 末节执行注记）
+    open_must_fix: []
+    doc_fix_plan: []
+    status: execute-ready 用户已确认（调用 code-dev-loop 开工）
+  dev_exec:
+    mode: code-dev-loop
+    worktree: D:\Dev\worktree\official-endpoints-removal（分支 feat/official-endpoints-removal，base main=ba7c240；pnpm install --prefer-offline 进行中，未挂 junction——RULE 教训）
+    toolchain_path: "set PATH=D:\Dev\worktree\official-endpoints-removal\node_modules\.bin;D:\Dev\Js\oh-my-zcode\.tools\node-v24.14.0-win-x64;%PATH%"
+    spec_defaults: 9 项待拍板按推荐值执行（第 9 项打包身份占位 oh-my-zcode <oh-my-zcode@users.noreply.github.com> + repo URL）
+    dag_version: 3
+    dag_note: r3 重排——impl-s3-s4 触达编排缺陷：账号域删除闭包横跨 S5（UI 25+ 文件消费 accessor 6 字段/useOAuth 族）与 S7（offPeak 凭据链），S4 末无法独立绿。重排为 S7 提前（无前置依赖）→ C+D+D-6+shared 协议+S5 UI 合并为 impl-s4-s5-account（末态全绿）。s3 已交付 A/A2/B/B2/D-12 预埋/D-16（aa12513+dac6be0 回退 C/D 保绿）
+    wave_plan:
+      - [impl-s1-gates-prep]
+      - [verify-s1(main), cr-func-s1]
+      - [impl-s2-autoupdate, impl-s3-s4-account]
+      - [verify-s2-partial(main): 清 provider 运行时缓存+desktop build 复跑]
+      - [impl-s7-offpeak]
+      - [verify-s7(main), cr-func-s7]                # T-OP1
+      - [impl-s4-s5-account]                         # C provider 单源化+D services+D-6+shared 协议+S5 UI 全量（含 model-provider-family 整族+D-13 三类消费点处置）
+      - [verify-s4-s5(main), cr-func-s4-s5]          # T-AC1/2/3
+      - [impl-s6-s8]                                 # 同 agent 内 S6→S8 顺序
+      - [verify-s6-s8(main), cr-func-s6-s8]          # T-SH1/T-HP1
+      - [impl-s9-marketplace]
+      - [verify-s9(main), cr-func-s9]                # T-MK1
+      - [impl-s10-infra-i18n]
+      - [verify-s10(main), cr-func-s10]            # T-INF1/T-G1
+      - [impl-s11-docs]
+      - [verify-s11(main), cr-func-s11]            # T-D1
+      - [impl-s12-regression]
+      - [cr-func-final]
+    node_status:
+      impl-s1-gates-prep: { status: done, head_sha: f871822, executor: subagent, note: parity 脚本+修齐 1 键（「21 键域内不对称」为探索期误报已勘误 spec）；测试名单 13 接线+7 未接线落盘 cache；desktop 基线留档 }
+      verify-s1: { status: done, executor: main, evidence: parity 复跑 exit 0（5891=5891）+ commit f871822 在分支顶 }
+      cr-func-s1: { status: done, func_ready: yes, note: 3 条非阻塞观察——脚本 report() 行号 bug 留 S10 顺手修/未接 CI 留 S12 考虑/GBK 乱码显示层 }
+      impl-s2-autoupdate: { status: done, head_sha: d752d8f（7 commits f06f198..d752d8f）, executor: subagent, note: S2 面全绿（typecheck 0err/T-AU1 白名单外 0/parity/fmt）；desktop build 红=S3 面运行时缓存旧 zcode-builtin.json 待清；额外处置 UpdateReleaseNotesTooltip+updateStatusButtonLayout/forceUpdatePrompt 孤儿/canOpenWorkspace+onWorkspaceBlocked 随 gate 删（desktopOAuthDeepLink 基线已变 S6 注意）；"ms" 删除若 S12 实打包报错回滚 1 行 }
+      impl-s3-s4-account: { status: partial-done, head_sha: dac6be0（aa12513+dac6be0）, executor: subagent, note: A adapters auth+A2 bootstrap+B 模型执行+B2 端口族+D-12 预埋+D-16 已交付 typecheck 绿；C+D+D-6+shared 协议曾实现因击穿 S5/S7 回退（代码在 aa12513）；偏离已登记：offPeakModelSelectionView/offPeakRuntimeModel 归 S7/ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV 承重保留（任务书笔误）/shared oauth.ts+plan-identity+coding-plan-reset+usage-stats accountAccess+zcodeProviderAccountAccessSchema+accessor 6 字段归 impl-s4-s5 }
+      impl-s7-offpeak: { status: done, head_sha: 23e6544（59e526c/3a6f02a/27e63a6 + fix 01fa24d/23e6544）, executor: subagent→main（16 项机械 must-fix 手工修）, note: offPeak 域闭包全绿；cr-func-s7 因子代理通道故障降级主代理手工审查 func-ready:yes }
+      impl-s4-s5-account: { status: done, head_sha: bc47780（29 commits f735e5f..bc47780）, executor: subagent（10 轮 SendMessage 续跑同 agent）, note: C provider 单源化+D services 账号面+D-6 clientConfig/clientScenes+shared 协议+S5 UI 全量+D-13 三类消费点处置+175f011 turn-model fix；八门禁绿（root typecheck 0/CLI 27 包/desktop-full 57kinds removed 310/desktop build/lint 73w 0e/parity 5891=5891/活代码扫描 0/T-AC2 ALL_PASS）；cr-func-s4-s5 通道故障降级主代理手工 func-ready:yes }
+      impl-s6-s8: { status: done, head_sha: 948e056（eaa9934 子代理 WIP 整删 37 文件 -11695 + 主代理收尾 f0da6e1/40463a1 s6 + a2741b5 s8 + 948e056 s4-s5 补漏，累计 -5275/-约5300 行）, executor: subagent（27min 死于 server error 留 -1497 未提交）→main 手工收尾, note: S6 分享消费点（SessionPane/Composer/RowView/TurnGroup shareSelection/Timeline/dock transition/shared-context-import 容错化/accessor+RPC 服务面/useRootPlatformEffects -251/ShareImport channel/deep link share 支路）+S8 帮助面（rollout 三件+ZCODE_DESKTOP_CONTEXT_PROMPT_ENABLED 跨包+presentationSurface 整 seam 恒关 D-14/config/default.json+extraResources/OpenFeedback/Community/Changelog/productDocs IPC 链+feedback 工单类型域+FeedbackLogArchive host 链+web auth 7 文件+communityUrl+desktopMenu whatsNew/feedback+quickpick 3 命令）+计划外 s4-s5 补漏（OAuth/支付 deep link 死管道、desktopOAuthDeepLink→desktopDeepLinkRouter 更名、oauth.ts 瘦身仅留 provider 标识+凭据解密契约、UI UserInfo/onLogin 死链、oauthCallbackBridge 删）；门禁：root typecheck 0/desktop-full 55 kinds removed 311 gate OK/desktop build 绿/lint 71w 0e（优于 73w 基线）/parity 5891=5891/工作区 diff 新增行官方端点 0；新增 desktop-product-identity.d.mts 修 TS7016 }
+    s6_s8_loose_ends: [cr-func-s6-s8 待做（可子代理或主代理手工）, i18n help/share/account 域 key 残留双语对称——S10 单点收口, web/src/share/shareHeaderLayout.ts 孤儿待 S10 复核, e2e/测试对 S6/S8 面引用已随 typecheck 间接验证无编译残留]
+    s2_loose_ends: [verify-s2-partial=清 %USERPROFILE%\.zcode\v2\runtime\provider 下 endpoint-* 缓存目录后复跑 pnpm --filter @zcode/desktop build, S12 重采 desktop baseline（removed 309 未 snapshot）, S12 考虑 parity 接 CI, S12 实打包验证 ms 删除]
+    commit_rule: 每 impl 节点 git commit 必须带 pathspec（仅本节点文件）；注释/commit 中文；写文件核对 LF；长任务后台派+TaskOutput 阻塞等+失败 SendMessage 续跑同 agent
+    pending_user_exec: S13 真机抓包（T-T4，manual_user）
+
+bugfix-batch-20261011:
+  repo: D:\Dev\Js\oh-my-zcode
+  speccheck:
+    dag_version: 1
+    review_round: 1
+    prd_path: null
+    spec_path: docs/iterations/bugfix-batch-20261011/spec.md
+    mode: 需求来源=用户口述（无 prd.md，spec 需求来源节已声明）
+    evidence_packs: [docs/iterations/bugfix-batch-20261011/cache/cdp-anchors.md, docs/iterations/bugfix-batch-20261011/cache/settle-chain.md(就绪,head=cfaf198e), docs/iterations/bugfix-batch-20261011/cache/model-live-chain.md(生成中,impl-model-main)]
+    r1: {verdict: No-Go, p0: [记忆写入链缺失→补D13 promotion+compartment-runner调用, 211段硬引用ctx_memory未裁定→D14做+Step18正则核查集], p1: [promote判据字段改admittedAt+写回不经pin, Step8闭包逐条+cues提前, blocking_steps补3, 设置面扩字段, Step4处置两处注释], p2: 8条全部应用}
+    open_must_fix: []
+    doc_fix_plan: []
+    r2: {verdict: No-Go, r1修复全部核实通过, new: [P0 Step8 对6-7个无缝文件不可git mv→二分(4缝rename+7件新移植FORK-NOTE), P1 Step17 compaction段整体退场(:573/:867-945/:953)非仅import, P1 N1收口点名不存在的缝→实际4缝, P1 ctx_search缺storage-memory-fts.ts(206行)闭包, P2 embedPromotedFacts删后3个失效import清理, P2 行数基线校准(269行/textOf:586)]}
+    r3: {verdict: No-Go, r2六项全部核销+r1无回归, remaining: [P0 Step15/D5/结构 mural 五件套 git mv 同款缺陷→render-trigger 1缝rename+5件新移植+inject-compartments 改指, P2×5(行数269→300/271/304, deferred 23缝对账表, compactionOff flag保留勿顺手清, :58复合引用拆分, mural-cues路径统一)]}
+    r4: {verdict: No-Go, findings: [P0-1 deferred 缝=壳非真身→三态口径(壳缝git mv+内容替换/全覆盖缝直接mv/无缝新移植)——Step8 实装已按正确姿势完成(RM状态核实), 后续波次12/13/15按新口径; P0-2 magic-context-schema/project-security 无落点→Step16 显式动作(deriveDefaultProtectedTokens→host schema+ProtectedTokensTierOverrides 内联+3处改指); P1-1 D9/D10 壳保留不搬真身; P1-2 light-descriptions 随行; P2 若干(38处/barrel改指/user-facing-codes/mural3件不搬登记)。r4 误判 embedAndStoreMemory 不存在——亲测存在于 promotion.ts:111-144, r3 口径正确未改], 备注: r4 分布数字 20+22+4+1=47≠38 自相矛盾, 已简化为总数}
+    r5: {verdict: No-Go, findings: [P0-1 D1/magic-context-prompt 211行真身无 Step 承担且 Step13 前提写错→挂入 Step12, P0-2 Step9 与已实盘 Step8 重复→改吸收说明+blocking_steps 去9, P1-1 Step16 user-facing-codes 与 944b4967 FORK-NOTE 决议冲突→改已闭合, P1-2 D7 model-resolution 无归属→挂入 Step12, P2×6(D9/D10 归属勘误/计数漂移改约80/import改指显式清单+落位路径/:109 划归 N6+hook-handlers 改指/Step15 相对路径勘误/THROW 替代契约 return false)], 备注: 全部为单点 doc-fix 零方案返工, 其中3项系主代理前轮 doc-fix 自误}
+    loop_closed_at_cap: true
+    status: 五轮上限已到, r5 十项已全部 doc-fix 落文, 不自动进 r6; 终态=待用户裁(execute-ready 确认或追加一轮); 实现波在用户先前指令下已并行推进且每波有 diff-CR 兜底
+  verdict_note: 裁定表 D1-D12 做 / N1-N6 不做（终局，用户已确认「没什么问题」）
+
+  dev_exec:
+    branch: bugfix-batch-20261011
+    base_sha: d69ef5e4
+    toolchain: 便携 Node 24（node:sqlite 需要 24；nvm node 22 会被 pnpm shim 选中）
+    dag_version: 3
+    wave_plan:
+      - [impl-settle(done), impl-model-main, impl-model-sub, impl-memory-port]
+      - [impl-model-main, impl-model-sub]
+      - [verify-settle-model, verify-e2e, cr-func-settle-model]
+      - [impl-memory-port]
+      - [impl-ctx-search-config]
+      - [impl-prompt-surface]
+      - [impl-mural]
+      - [impl-hook-closure]
+      - [verify-gates, cr-func-memory-hooks]
+    node_status:
+      impl-settle: { status: done, steps: [1,2,3], executor: subagent, head_sha: cfaf198e, commits: [67a48e96,2255ac5b,cfaf198e], verify: 56/56 pass + typecheck 27tasks 0err + oxfmt clean }
+      impl-model-main: { status: done, steps: [4,5], executor: subagent, commits: [8bb5a132,899cb577,+纪律修正39a4939f移证据包出追踪], verify: 7/7 model-live + v4-perf 全绿 + edit-retry 16/16 + typecheck 0 + arch 0 + oxlint 0w0e, r1更正全部采纳(admittedAt/不置pin/注释处置) }
+      impl-model-sub: { status: done, steps: [6], executor: subagent, commit: 48167077, verify: 4/4 subagent-live + typecheck 27/27 + 回归 5/5 + oxfmt 零差异 }
+      impl-memory-port: { status: done, steps: [8,9], executor: subagent, commits: [944b4967,d915d73b,62dceebe,a10e74a1], verify: test:all 全绿(transform 38 基线保持+memory-promotion 4/4 新增)+typecheck 27/27+arch 0+verbatim 逐字节自校验, note_done: D13 生效 T-MC0 真库有行; 两处上游偏差登记(identity fail-open/post-commit embed 不移植); 观察项 lint 门对该区不生效属既有形态待 Step 19, note: r1 修订——闭包=normalize-hash/visibility/embedding-cache/storage-memory-embeddings/promotion(D13)+storage-mural-cues 提前；cosine 不搬；恢复 compartment-runner-incremental 的 promoteSessionFactsDurable 调用 }
+      impl-ctx-search-config: { status: done, commits: [a187650c Step10, 285054a0 Step11], note: 中途reset重建+verify-e2e两提交重放(逐字节, 已复跑4/4), 观察项: insertMemoryIdempotent 唯一约束回退 node:sqlite 下不可达(三处登记待逐字区owner), evidence: cache/ctx-search-config-map.md, steps: [10,11], executor: subagent, note: r1 修订——ctx_memory(D14) 同批；设置面扩字段 MagicContextSettingsFields+form 勿重建 Section }
+      impl-prompt-surface: { status: done, commits: [bc7a20d7+09b52efe+e81dc870], steps: [12,13,14], executor: subagent }
+      impl-mural: { status: done, commits: [6d40a729+a0dc4704], steps: [15], executor: subagent }
+      impl-hook-closure: { status: done, commits: [a5618a3b+214823ce+145f8f2a], steps: [16,17,18], executor: subagent }
+      impl-hook-b: { status: done, steps: [18], executor: subagent,
+        verify: "T-P2 包侧闭合 6/6（128 组合矩阵+light 目录+mural 常量+豁免集钉死 [ctx_note]+强度自证）；core 侧降级适配 7/7（同矩阵+override 两路+OQ-PS 空串 null+contracts↔ACTIVE_TOOL_IDS 双侧真值）；T-P1 回归 10/10；magic-context test:all 全绿（smoke/config 11/host 30/transform 38 cases 0 fail/historian 18/ctx-tools 20/ctx-search-memory 10/prompt-surface 26/memory-promotion 4/mural-render 8/tool-name-closure 6/boot-busy-retry 7）；turbo 27/27；根 TC 0 err；architecture:check 0/0/0；oxfmt 三个代码文件归一后全 OK；根 lint 改动区零命中（并行未追踪目录污染外）",
+        notes: "ctx_note host 装配层最小适配落 core/src/context/sections/magic-context.ts（唯一漏斗 buildMagicContextSectionEntry，逐字 regex 替换托盘句为降级说明，包内逐字常量零改动）；OQ-PS 空串归 null 且先于 heading 校验；user-facing-codes/shared 无 spec 剩余动作（r5 P1-1 Step 8 已闭合）；barrel 无本节点需求（Step 15 mural 扩面已在其工作区、Step 16 event-resolvers 改指待其返回）；N1-N6 核对=Step 16/17 未返回前缝头/删除未落盘，已登记 cache/hook-b-map.md；顺手修复 Step 15 误把 bootstrap package.json 写入 magic-context/package.json 的事故（HEAD 恢复+mural-render/tool-name-closure 挂载）",
+        evidence: cache/hook-b-map.md }
+      impl-hook-c: { status: done, steps: [17], executor: subagent,
+        verify: "magic-context test:all 全绿（transform 38/38 零裁剪+smoke/config 11/host 30/historian 18/ctx-tools 20/ctx-search-memory 10/prompt-surface 26/memory-promotion 4/mural-render 8/tool-name-closure 6/boot-busy-retry 7）；turbo typecheck 27/27；根 tsc -b 0 err；architecture:check --changed 0/0/0；被删三缝全仓 import 零残留（git grep apps+packages）；src/index.ts oxfmt stdin 逐字节一致",
+        notes: "N5/N6/N1 三缝删除+完整级联：transform.ts compaction transition 段整体退场（import/hostCleanupCompactionMarkers 字段/reconcileCompactionMode 调用块+notice 投递+commitCompactionModeRecord+failPass/!compactionOff 附加条件逐项删）；4 个进程本地 Map alias 内联 live-session-state.ts；transform.ts LiveModelBySession import 改指 ./live-session-state.js；barrel src/index.ts 对外导出随删（全仓零外部消费者）；EmbedDrainUiStatus 本地化 format-embed-status.ts；N1-N4 七缝 FORK-NOTE 终局措辞；compactionOff 实测删除前 85 处/80 行/6 文件→删除后 78 行/5 文件（spec 82/38 与 r5 84/41 口径漂移以本步实测为准）；EXCLUDED_CONFIG_KEYS 条目与 deps.compactionOff flag 本体保留（spec：恒假、门控死代码无害、禁顺手清）；pass-outcome.ts transition-failure 死表项保留（删除清单外）；既有缺陷登记=本 yaml 第 33 行起 9 处 ** 起头值致整文件非合法 YAML，勿动既有行未修",
+        evidence: cache/hook-c-map.md }
+      verify-settle-model: { status: superseded, note: DAG v1 节点，被 verify-e2e（协议级四场景含 settle×model 叠加）+ 逐波 diff-CR 取代 }
+      verify-e2e: { status: done, commits: [d2cb3d8a+03b838e5格式归一], verdict: 4/4 全绿零阻塞项, note: 两任子代理均因 Model request failed 中断(66min零落盘/21min留骨架), 四场景由主代理接手完成, 初版三处失败均为测试构造问题(同毫秒时戳精度/真工厂冷启动1.4s), evidence: cache/verify-e2e-live-all.md, scope: 协议级 e2e 场景——一进程内 turn→入队→switchModelConfig→promote 断言新模型；编辑重发仍用快照；子代理 spawn 间隙改 agents-state.json 生效；与 settle 后台化叠加场景 }
+      cr-func-settle-model: { status: superseded, note: DAG v1 节点，被逐波 diff-CR（settle/模型/记忆/ctx/prompt-surface 五波）+ review-full 取代 }
+      verify-gates: { status: done, commits: [step19 ALL-GREEN 3d482b8f+P1收尾9182a420], steps: [19] }
+      cr-func-memory-hooks: { status: superseded, note: DAG v1 节点，被逐波 diff-CR（记忆/hook-a/hook-b 波）+ review-full 取代 }
+    spec_deviations: []
+    open_must_fix: []
+    note: speccheck r1 审查仍在后台跑，返回的 P0 将 doc-fix 后折入 DAG；热点文件 create-app.ts/bootstrap transform 已按 wave 串行化避免并行冲突
+
+  cr_exec:
+    fix_spec_path: docs/iterations/bugfix-batch-20261011/cr-fix-spec.md
+    mode: diff-per-wave（每 impl 波提交齐→readonly diff 审该波 base..head）+ 末轮 review-full（dev-ready 前，B-K 全维）
+    review_round: 0
+    wave_cr_status: { impl-memory-wave: 审查完成=需fix-spec(0P0/0P1/2P2 MF-MC-1 门半开覆盖+MF-MC-2 skip 日志; 特别核对7/7全过含verbatim逐行独立复验; 已追加 cr-fix-spec 波次③), impl-ctx-wave: 审查完成(波次④ 3P2), impl-prompt-surface-wave: 审查完成=可以合入(0P0/0P1/1P2 MF-PS-1 getToolSetHash闭包陈旧化-审计保真项; 四逐字保真声明独立复验成立; 波次⑤已追加; spec同步三件转fix节点), fix-spec: ready(波次①-⑤ 12条目全裁定), impl-model-wave: 审查完成=需fix-spec(0P0/1P1/4P2 已裁定: MF-ML-1=b登记收窄+Step7实机升级, MF-ML-4=两测试统一进根聚合; 五红线全过; 已追加进 cr-fix-spec 波次②节), impl-settle: 审查完成=需fix-spec(0P0/0P1/1P2 MF-1 已裁定混合方案a-lease单测+b-落库收窄; 主交付静态逐行核验无问题; fix执行折入wave-1.5 fix节点, fix-spec待独立spec-check一轮), impl-model-main: 未开始, impl-model-sub: 未开始, impl-memory-port: 未开始, impl-ctx-search-config: 未开始, impl-prompt-surface: 未开始, impl-mural: 未开始, impl-hook-closure: 未开始 }
+    spec_fix_plan: []
+    must_fix: []
+    spec_deviations: []
+    note: cr 发现的 must-fix 写入 fix-spec；fix-spec 产出后走独立 spec-check-loop（readonly 子代理审每条含文件/改法/验收、覆盖度与歧义 → 主代理 doc-fix → 循环至 fix-spec-ready → 用户确认后才折入 fix 节点执行）；cr-fix-spec 与开发 spec.md 两条文档回路独立收敛，不互相替代；code-dev-loop 的 cr-func（功能小检）与本 CR 并行不互斥
+
+  release:
+    target: 1.0.6
+    precondition_chain: [全部 impl waves done, verify+verify-e2e(func-ready), diff-CR per wave + fix-spec 独立 spec-check-loop 确认, review-full fix-spec-ready, 全门禁绿（typecheck/lint 71w0e/knip/architecture/oxfmt/desktop 差分/magic-context test:all/test:v4-perf）, 桌面实机 e2e（CDP：排队延迟/mural/切模型观感）, omz-changelog 写 Unreleased 条目, 用户最终放行]
+    publish_skill: .agents/skills/omz-publish
+    status: 未开始（等待 dev_exec 完成）
+
+  n1_n6_closure:
+    step: 17（impl-hook-c / 2026-10-11）
+    scope: spec 裁定表 N1-N6 终局收口（N5/N6 删缝+级联、N1 embed-session-state 删缝、N1-N4 七缝 FORK-NOTE 终局措辞；N2 ctx_note 211 段句适配已由 Step 18 闭合）
+    N1: embedding 运行时面终局不做——理由=三 provider 两家依赖外部服务或被排除依赖（subc-client=fork spec L114 依赖排除令、openai-compatible 需用户配 key）、本地 provider=@huggingface/transformers+onnxruntime-node/web（SEA 4 平台原生二进制+~90MB HF 模型下载离线必挂+import.meta.url cjs worker 路径坑）、上游 provider enum 本含 off 态；不影响使用=记忆链完整不依赖向量（D13 写入→ctx_memory pin（D14）→memory-selection 选择→m0/m1+mural cue 注入→ctx_search FTS5 检索）、format-embed-status 诚实显示 off；收口=embedding-status-tables/compartment-chunk-embedding/auto-search-runner 三缝改 FORK-NOTE 终局保留+embed-session-state 缝删除（EmbedDrainUiStatus 类型本地化 format-embed-status.ts、getEmbedDrainUiStatus 零消费者随删）
+    N2: ctx_note 工具+note-nudger 终局不做——理由=ZCode D 组工具面只登记 ctx_reduce/ctx_expand/ctx_search/ctx_memory、note 属上游交互笔记特性无 ZCode 工具宿主面；不影响使用=记忆主链（写/选/注/检）不经过 note、不阻断任何既有能力；收口=note-nudger 缝 FORK-NOTE + Step 18 核查 211 段 note 句（host 装配层最小适配+豁免集 [ctx_note] 测试钉死）
+    N3: dreamer 后台整理终局不做——理由=上游 cron 型后台记忆整理、ZCode agent 进程无对应宿主（desktopCronScheduler 属 Electron main 不属 agent 进程）；不影响使用=记忆质量由 selection 排序+读时强化维持、读写链完整；收口=dreamer-task-registry 缝 FORK-NOTE
+    N4: channel2-cycle+send-session-notification 终局不做——理由=上游走 OpenCode RPC pushNotification、等价缝 steerTurn 接入需干预 turn-loop、风险收益失衡；不影响使用=跳过折叠等信息由日志+时间线+ZCODE_MAGIC_CONTEXT_DEBUG_WIRE=1 覆盖、紧急拒绝 fail-visible throw 保持；收口=两缝 FORK-NOTE + TransformDeps.hostRefusalNotice 预留端口保持预留态
+    N5: compaction-off-transition 删除——理由=fork 无 compaction 域（D-7 已删原生压缩、compaction 在 EXCLUDED_CONFIG_KEYS 下 compactionOff 恒假）；不影响使用=语义域不存在、无使用者；收口=删缝+transform.ts compaction 模式段整体退场（import/hostCleanupCompactionMarkers 字段/reconcileCompactionMode 调用块+notice 投递+commitCompactionModeRecord+failPass/!compactionOff 附加条件逐项删）；保留=EXCLUDED_CONFIG_KEYS 条目、deps.compactionOff flag 本体、pass-outcome.ts 死表项（均超出本步删除清单）
+    N6: hook-handlers 删除——理由=OpenCode plugin 事件面 type-only 摘录、ZCode 事件走 appendEvent/SessionEventType、宿主适配职责在 host/hooks.ts；不影响使用=纯 type 缝无运行时语义；收口=删缝+4 个进程本地 Map alias 内联 live-session-state.ts+transform.ts LiveModelBySession import 改指+barrel 对外导出随删（全仓零外部消费者）
+    compactionOff_measured: 删除前 85 处/80 行/6 文件（git grep apps+packages）→ 删除后 78 行/5 文件；spec 82/38 与 r5 实测 84/41 口径与本步实测均有漂移，以本步实测为准
+    known_issue_preexisting: 本 yaml 第 33 行起共 9 处值以 ** 起头致整文件非合法 YAML（既有缺陷，按勿动既有行未修，待文件 owner/Step 19 处置；本 append 全部避开 ** 起头值）
+    fix-node: { status: done, commits: [ca42775c 08ac3966 1138d6d0 2021b5d9 41f756df b4f0b6f2 19490d3a 28c23a5c], verdict: 15/15 done incl MF-CTX-1 src fix, test-v4-perf 198/198, test-all 142/142, e2e 4/4, typecheck 27/27, evidence: cache/fix-node-map.md }
+    step19-gates: { status: done, verdict: ALL-GREEN, detail: typecheck root 0err+cli 27/27, lint 本批126文件零诊断(72w/0e环境基线71w/0e,cache-tmp草稿已清), knip 零新增+magic-context包0命中, oxfmt root/cli 本批零命中(3文件归一 3d482b8f, cli package.json基线既脏), desktop差分 OK 55vs366(-311), test:all 142/142, test:v4-perf 198/198, e2e 4/4 }
+    known-issue-inherited: browserGuestManager.ts 0字节 自 b0fa8e9a(上一迭代), 分支点d69ef5e4既有, 非本批引入, 桌面运行时风险待单独修复
+    review-full: { status: done, verdict: dev-ready, detail: 2P1 已闭合(9182a420: P1-1 ui测试挂载根链全绿, P1-2 六文件归一+typecheck 27/27+cli交叉0命中-原判定脚本相对路径失配已修), 7P2 文书全落(spec 提交数33/D9措辞/D13四import/Closure计数8/状态回填/FORK行数裁定不动逐字区), 三核对表全过(D1-D14达标+12+3条Closure全修对+集成面e2e双证) }
+    realdevice-e2e: { status: stopped, verdict: 4场景全blocked未开测, cause: 播种bug——代理把活库(134MB含WAL)直接拷贝作种子→副本不一致→host storage worker 打开即退(preparing_session_storage/transport_closed, attemptId 258dbe8a 在 e2e app.log 命中 pid:964), 非产品缺陷(fail-visible 符合预期), 非用户生产应用故障(其 pid:14732 全天在跑日志零错误), evidence: cache/realdevice-e2e.md + cache/e2e-collision-probe.mjs, 待重跑: 一致性快照播种(VACUUM INTO/backup API)或空库UI建会话 }
+
+# ===== upstream-v3.15.1-bugfix-backport（spec-check-loop）=====
+upstream_v3151_backport:
+  dag_version: 6
+  review_round: 5
+  spec_path: docs/iterations/upstream-v3.15.1-bugfix-backport/spec.md
+  prd_path: null  # 单文档迭代，无独立 PRD
+  open_must_fix: []
+  doc_fix_plan: []
+  status: execute-ready（五轮上限已到，主代理裁定收尾；待用户确认执行）
+  evidence_packs: [cache/exploration-reports.md]
+  baseline_refs: { fork_head: d4a6cb22, upstream_base: 29628c9, upstream_target: aac4755666d09fdcd70272fcf063c077a639015f }
+  r1_review: { verdict: No-Go, p0: 0, p1: 4, p2: 4, code_facts: 28 项移植抽查全吻合+不移植项理由全站得住+无游离项, closed: 全部 8 项 doc-fix 已闭合（P1: 26↔30 计数/#11 双Step并入Step3+#10同批注记/§6 残留#19/§5 Step号; P2: #12 行号/#14 import区/T-MEM-1 扩messageCount+T-XFRM-1+不配T说明/#29#31 措辞） }
+  r2_review: { verdict: No-Go, p0: 0, p1: 1, p2: 3, code_facts: r1 的 8 项全部核验闭合（P2-3 部分关闭）+20 余项事实复核一致；新发现 P1=#34 豁免判据在 adapters 落点被代码证伪（ModelInputMessage 无 metadata、core 投影显式剥离、合并仅条件触发而非每请求）, closed: 派 Explore 查证（canMergeAdjacentUserMessages=core 死开关恒 false、m0/m1 投影后 system-reminder 信封无固定前缀、SDK convertToAnthropicMessagesPrompt 无条件合并才是主威胁、fork anthropic-stream-compat.ts 存在上游同形空置挂载点）后 #34 重定向为 wire 层合并后拆分 restoreMagicContextMessageBoundaries；P2: #6/#9/#12/#26 补 T（T-PROC-3/T-EVT-1/脚本点名）+ #15/#16 port 类型形状钉死+偏离声明 + mcpUi 64 处/13 工程数字校准——全部闭合 }
+  r3_review: { verdict: 条件性 No-Go（主体已达 execute-ready）, p0: 0, p1: 2, p2: 3, code_facts: r2 四条全部实证闭合+#34 新方案扎实不触红线（adapters/src/model 不在逐字区且 fork 零漂移）；P1 全为验收声明失实——#3 的「T-NET 经调用链覆盖」不成立（post-fix proxy-fetch 与 http/index.ts 无调用关系）、#26 点名套件不覆盖 publisher 路径（红线②前置回归被架空）, closed: T-NET-1b 新增独立覆盖 #3（createNodeHttpClientAdapter+caCertFile 本地 999 断言）+ 新增 test-publisher-buffer-clamp.mjs（普通钳位+publishMagicContextUsage 路径）接线 test:v4-perf + Step6 前置回归三件套改写 + T-MC-1 补四段形态（reorderAttachmentLikeEntries 冒泡）与 cache_control 单断点断言 + seat.born :151 + 常量写全名 DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES——全部闭合 }
+  r4_review: { verdict: 条件性 No-Go（r3 五条中四条高质量闭合）, p0: 0, p1: 1, p2: 3, code_facts: judge 用便携 Node24 实测揭穿 r3 新写的 T-NET-1b 双重失实——http+caCertFile 走全局 fetch 捷径(:167-176)到不了 transport 回调；post-fix 终态=resolve 原样带回 999（readIncomingResponse）而非 reject（reject 仅属 proxy-fetch 路径 toWebResponse/UnsupportedHttpStatusError）, closed: T-NET-1b 重写=本地 https server（caCertFile 仅 https 生效强制走回调分支）+断言 resolve 且 status=999+无 unhandledException；「均不触碰 publisher」措辞改「不覆盖 subscriber buffer/fanOutDeltas 钳位路径（无 subscribe；test-turn-directory import 真 publisher 但只走 ingest/getTurnDirectory）」；#26 补第二调用点（resyncRollback :1159-1161）与 subscriberBufferLimits() 新私有方法+pluginUi 过滤 hunk 不搬；映射改「#1/#2 配 T-NET-1」+Step 9 接线规则完整化（落点=目标包 scripts/test-*.mjs+无聚合包进根 test:v4-perf 手工清单+交付 cache/test-wiring-map.md 登记表）——全部闭合 }
+  r5_review: { verdict: No-Go（终验，但仅 1 P1+4 不阻塞 P2；r4 四条全部真实闭合、无新增失实）, p0: 0, p1: 1, p2: 4, code_facts: T-NET-1b 重写后 7 句断言逐句核验全部属实；门禁 3「≤71w/0e」失实——实测 74w/0e 且 .reference/ 不在 .gitignore/.oxlintrc ignorePatterns，Step 1 更快照后根 lint 会被污染成 790w/307e（error 全在 .reference/**）, closed: 门禁 3 改为排除 .reference/** 后 ≤74w/0e+随 Step 1 把 .reference/** 补进 .oxlintrc.json ignorePatterns（一行配置修正）；顺手修 3 P2（services 测试形态按 test/*.test.ts 先例、#26 配套 hunk 两处点名+行号 :1160-1163 修正）；第 4 P2（T 映射 exhaustiveness）按 judge 裁定不阻塞保留。五轮上限已到，主代理裁定 execute-ready（20261009 先例） }
+

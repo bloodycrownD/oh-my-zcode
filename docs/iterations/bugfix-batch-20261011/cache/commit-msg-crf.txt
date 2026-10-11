@@ -1,0 +1,1 @@
+[bugfix-batch-20261011] 增量CR修复：P1-1 edit-retry测试随出队模型裁定重写（B组五例活值链+默认参陷阱修正）+挂根门禁；P2 全清（门禁排序mc-section-zh移build后/zh选路resolver直驱golden对比/C1英文缺席断言/三处过期注释/zh指令注释放宽依据/setImmediate预热）

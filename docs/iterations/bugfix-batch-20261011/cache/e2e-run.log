@@ -1,0 +1,16 @@
+(node:33000) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ T-E2E1: 长驻 App 下 turn A(M1) 在飞 → switchModelConfig(M2) → A 完成 → Q promote 用 M2 (6.4322ms)
+✔ T-E2E2: 入队 Q2(M1) → 切 M2 → 编辑重发 → 重发轮用 M2（出队模型；写回红线在叠加形态下不变） (2.2419ms)
+✔ T-E2E3: 长驻真工厂端口：N 个 model step 均不等在飞折叠，close() 的 drain 仍收口 (2868.3572ms)
+✔ T-E2E4: 同 App spawn(override=SUB_M1) → 改 agents-state.json(SUB_M2) → 再 spawn 用 SUB_M2 (35.628ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2917.1368
+
+TEST PASS — verify-e2e-live-all (T-E2E1..T-E2E4)

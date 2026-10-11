@@ -1,0 +1,9 @@
+packages\desktop\src\main\manifestUpdateProvider.ts:222:      ...(this.options.deviceMid?.trim() ? { "X-Device-Mid": this.options.deviceMid.trim() } : {}),
+packages\services\src\feedback\feedbackService.ts:93:        headers["X-Device-Mid"] = deviceMid;
+packages\services\src\feedback\feedbackHttpClient.ts:329:      hasDeviceMid: Boolean(getHeaderValue(headers, "X-Device-Mid")),
+packages\services\src\feedback\feedbackHttpClient.ts:424:    const deviceMid = getHeaderValue(authHeaders, "X-Device-Mid");
+packages\services\src\device\deviceMid.ts:191: * deviceMid 是跨端共享的设备身份：X-Device-Mid 计费 header、反馈、onboarding 都读它。
+packages\server\src\stdioDeviceMid.ts:14: * 远端自己查询，billing/balance 请求因缺 X-Device-Mid 被服务端拒绝为 parameter error，远程工作区
+packages\server\src\stdioDeviceMid.ts:29:      "deviceMid 初始化失败，ZCode endpoint 请求将不带 X-Device-Mid:",
+packages\server\src\entry-stdio.ts:55:  // 的请求缺 X-Device-Mid，Start Plan 的 billing/balance 被拒。远端 server 是本机设备身份的
+packages\shared\src\zcode-source-headers.ts:57:    ...(deviceMid ? { "X-Device-Mid": deviceMid } : {}),

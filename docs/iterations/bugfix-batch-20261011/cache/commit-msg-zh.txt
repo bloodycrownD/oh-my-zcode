@@ -1,0 +1,1 @@
+[bugfix-batch-20261011] 用户裁定：magic-context 系统段中英双语——zh 孪生逐分支镜像上游 11 参 builder（包内英文逐字零改动），resolver 按 isChinesePromptLanguage 选路；ctx_note 以降级语义直接撰写；16 例结构矩阵+选路测试挂载双门禁

@@ -1,0 +1,1240 @@
+{
+  "schema": "zcode-desktop-long-session-perf-sample/v1",
+  "startedAt": "2026-10-05T20:09:35.099Z",
+  "finishedAt": "2026-10-05T20:10:35.205Z",
+  "repo": {
+    "root": "D:\\Dev\\worktree\\desktop-long-session-perf",
+    "head": "d11a97c2ac736e53a12dc2eb7055a5a98b84dc06",
+    "branch": "feature/desktop-long-session-perf"
+  },
+  "params": {
+    "workspacePath": "C:\\Users\\BloodyCrown\\.omz\\workspace\\default",
+    "durationMs": 30000,
+    "scrollSelector": "[data-testid=v4-timeline]",
+    "devServerUrl": "http://localhost:5188",
+    "cdpPort": 9335,
+    "skipLaunch": true,
+    "mode": "reuse-skip-launch",
+    "spawnedPid": null,
+    "childExitInfo": null,
+    "childStillRunning": false,
+    "electronExecutable": null
+  },
+  "target": {
+    "id": "941FC59F0A57D931AEBDDAD9E54BE844",
+    "title": "ZCode",
+    "url": "http://localhost:5188/?restoreSession=true&supportsSettings=true&initialWorkspacePath=C%3A%5CUsers%5CBloodyCrown%5C.omz%5Cworkspace%5Cdefault&initialWorkspacePurpose=project&zcodeLaunchMarks=%7B%22createdAt%22%3A1791230743603.978%2C%22mainStart%22%3A1791230744475%2C%22appReady%22%3A1791230744811%2C%22loadUrl%22%3A1791230745217%7D",
+    "type": "page"
+  },
+  "segments": [
+    {
+      "name": "stream",
+      "startedAt": "2026-10-05T20:09:35.188Z",
+      "durationMs": 30000,
+      "driverInfo": null,
+      "rendererEnv": {
+        "url": "http://localhost:5188/?restoreSession=true&supportsSettings=true&initialWorkspacePath=C%3A%5CUsers%5CBloodyCrown%5C.omz%5Cworkspace%5Cdefault&initialWorkspacePurpose=project&zcodeLaunchMarks=%7B%22createdAt%22%3A1791230743603.978%2C%22mainStart%22%3A1791230744475%2C%22appReady%22%3A1791230744811%2C%22loadUrl%22%3A1791230745217%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 122,
+        "timelinePresent": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1719,
+        "maxScrollTop": 71264,
+        "now": "2026-10-05T20:10:05.199Z"
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1719,
+        "domRowCount": 122,
+        "maxScrollTop": 71264,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "probe": [
+        {
+          "startedAt": 10112.400000035763,
+          "longtasks": [
+            {
+              "start": 103.90000003576279,
+              "duration": 117
+            },
+            {
+              "start": 5369.300000011921,
+              "duration": 65
+            },
+            {
+              "start": 5434.800000011921,
+              "duration": 323
+            },
+            {
+              "start": 5800,
+              "duration": 669
+            },
+            {
+              "start": 9884,
+              "duration": 330
+            },
+            {
+              "start": 10298.300000011921,
+              "duration": 139
+            },
+            {
+              "start": 10449.900000035763,
+              "duration": 104
+            },
+            {
+              "start": 10751.300000011921,
+              "duration": 101
+            },
+            {
+              "start": 60571.40000003576,
+              "duration": 177
+            },
+            {
+              "start": 60781.30000001192,
+              "duration": 51
+            },
+            {
+              "start": 61505.5,
+              "duration": 433
+            },
+            {
+              "start": 61972.90000003576,
+              "duration": 80
+            },
+            {
+              "start": 62052.90000003576,
+              "duration": 59
+            },
+            {
+              "start": 62127.40000003576,
+              "duration": 322
+            },
+            {
+              "start": 62513.60000002384,
+              "duration": 109
+            },
+            {
+              "start": 62636,
+              "duration": 51
+            },
+            {
+              "start": 62696.60000002384,
+              "duration": 61
+            },
+            {
+              "start": 62767.60000002384,
+              "duration": 67
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 2,
+              "projection.rows": 300,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 164571,
+            "heapTotalKb": 208072
+          }
+        },
+        {
+          "startedAt": 68859.70000004768,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 300,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 148599,
+            "heapTotalKb": 151843
+          }
+        },
+        {
+          "startedAt": 98867.70000004768,
+          "longtasks": [
+            {
+              "start": 99004.70000004768,
+              "duration": 128
+            },
+            {
+              "start": 99134,
+              "duration": 64
+            },
+            {
+              "start": 99246.5,
+              "duration": 104
+            },
+            {
+              "start": 99351.20000004768,
+              "duration": 89
+            },
+            {
+              "start": 99548,
+              "duration": 52
+            },
+            {
+              "start": 99600.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 100700.60000002384,
+              "duration": 236
+            },
+            {
+              "start": 100966.20000004768,
+              "duration": 176
+            },
+            {
+              "start": 101188.80000001192,
+              "duration": 377
+            },
+            {
+              "start": 101630.30000001192,
+              "duration": 452
+            },
+            {
+              "start": 102111.20000004768,
+              "duration": 254
+            },
+            {
+              "start": 102402.20000004768,
+              "duration": 136
+            },
+            {
+              "start": 102569.20000004768,
+              "duration": 306
+            },
+            {
+              "start": 102927.10000002384,
+              "duration": 400
+            },
+            {
+              "start": 103367,
+              "duration": 232
+            },
+            {
+              "start": 103635.5,
+              "duration": 79
+            },
+            {
+              "start": 103717.20000004768,
+              "duration": 254
+            },
+            {
+              "start": 104004.5,
+              "duration": 287
+            },
+            {
+              "start": 104399.5,
+              "duration": 204
+            },
+            {
+              "start": 104871.60000002384,
+              "duration": 57
+            },
+            {
+              "start": 104929.5,
+              "duration": 57
+            },
+            {
+              "start": 104987.30000001192,
+              "duration": 67
+            },
+            {
+              "start": 105059.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 105142.70000004768,
+              "duration": 242
+            },
+            {
+              "start": 106230.70000004768,
+              "duration": 322
+            },
+            {
+              "start": 106589,
+              "duration": 168
+            },
+            {
+              "start": 106761.30000001192,
+              "duration": 384
+            },
+            {
+              "start": 107212,
+              "duration": 203
+            },
+            {
+              "start": 107447.90000003576,
+              "duration": 174
+            },
+            {
+              "start": 107643.30000001192,
+              "duration": 159
+            },
+            {
+              "start": 107827.80000001192,
+              "duration": 219
+            },
+            {
+              "start": 108099.90000003576,
+              "duration": 84
+            },
+            {
+              "start": 108770,
+              "duration": 90
+            },
+            {
+              "start": 109313.20000004768,
+              "duration": 65
+            },
+            {
+              "start": 109378.30000001192,
+              "duration": 69
+            },
+            {
+              "start": 109447.30000001192,
+              "duration": 153
+            },
+            {
+              "start": 109735.20000004768,
+              "duration": 50
+            },
+            {
+              "start": 109825.70000004768,
+              "duration": 115
+            },
+            {
+              "start": 109942.20000004768,
+              "duration": 52
+            },
+            {
+              "start": 110042.70000004768,
+              "duration": 96
+            },
+            {
+              "start": 110139.90000003576,
+              "duration": 60
+            },
+            {
+              "start": 110200.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 110655.60000002384,
+              "duration": 204
+            },
+            {
+              "start": 110904.30000001192,
+              "duration": 318
+            },
+            {
+              "start": 111234.70000004768,
+              "duration": 71
+            },
+            {
+              "start": 111318.30000001192,
+              "duration": 60
+            },
+            {
+              "start": 111378.70000004768,
+              "duration": 295
+            },
+            {
+              "start": 111686.70000004768,
+              "duration": 185
+            },
+            {
+              "start": 111881.60000002384,
+              "duration": 114
+            },
+            {
+              "start": 111996.30000001192,
+              "duration": 102
+            },
+            {
+              "start": 112099.60000002384,
+              "duration": 286
+            },
+            {
+              "start": 112393.5,
+              "duration": 118
+            },
+            {
+              "start": 112511.70000004768,
+              "duration": 54
+            },
+            {
+              "start": 112567.20000004768,
+              "duration": 196
+            },
+            {
+              "start": 112764.30000001192,
+              "duration": 92
+            },
+            {
+              "start": 112857.30000001192,
+              "duration": 70
+            },
+            {
+              "start": 113078.40000003576,
+              "duration": 79
+            },
+            {
+              "start": 113213.10000002384,
+              "duration": 80
+            },
+            {
+              "start": 113558.10000002384,
+              "duration": 52
+            },
+            {
+              "start": 115310.70000004768,
+              "duration": 63
+            },
+            {
+              "start": 115684.60000002384,
+              "duration": 65
+            },
+            {
+              "start": 117709.80000001192,
+              "duration": 66
+            },
+            {
+              "start": 118070.30000001192,
+              "duration": 69
+            },
+            {
+              "start": 120120,
+              "duration": 66
+            },
+            {
+              "start": 120244.5,
+              "duration": 51
+            },
+            {
+              "start": 120477.30000001192,
+              "duration": 65
+            },
+            {
+              "start": 122516.5,
+              "duration": 58
+            },
+            {
+              "start": 122643.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 122870.5,
+              "duration": 75
+            },
+            {
+              "start": 124919.10000002384,
+              "duration": 67
+            },
+            {
+              "start": 125030.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 125274.30000001192,
+              "duration": 68
+            },
+            {
+              "start": 125876,
+              "duration": 50
+            },
+            {
+              "start": 127322,
+              "duration": 67
+            },
+            {
+              "start": 127430.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 127680.40000003576,
+              "duration": 74
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1719,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 162324,
+            "heapTotalKb": 165991
+          }
+        },
+        {
+          "startedAt": 229969.70000004768,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1719,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 162229,
+            "heapTotalKb": 165479
+          }
+        }
+      ]
+    },
+    {
+      "name": "scroll",
+      "startedAt": "2026-10-05T20:10:05.201Z",
+      "durationMs": 30000,
+      "driverInfo": {
+        "ok": true,
+        "tag": "DIV",
+        "className": "min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] [--markdown-table-layout-left-inset:16px] [--",
+        "scrollHeight": 72007,
+        "clientHeight": 743,
+        "maxScrollTop": 71264,
+        "steps": 249,
+        "finalScrollTop": 70592.6640625
+      },
+      "rendererEnv": {
+        "url": "http://localhost:5188/?restoreSession=true&supportsSettings=true&initialWorkspacePath=C%3A%5CUsers%5CBloodyCrown%5C.omz%5Cworkspace%5Cdefault&initialWorkspacePurpose=project&zcodeLaunchMarks=%7B%22createdAt%22%3A1791230743603.978%2C%22mainStart%22%3A1791230744475%2C%22appReady%22%3A1791230744811%2C%22loadUrl%22%3A1791230745217%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 80,
+        "timelinePresent": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1719,
+        "maxScrollTop": 70592,
+        "now": "2026-10-05T20:10:35.205Z"
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 1719,
+        "windowRowCount": 1719,
+        "domRowCount": 80,
+        "maxScrollTop": 71264,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "probe": [
+        {
+          "startedAt": 10112.400000035763,
+          "longtasks": [
+            {
+              "start": 103.90000003576279,
+              "duration": 117
+            },
+            {
+              "start": 5369.300000011921,
+              "duration": 65
+            },
+            {
+              "start": 5434.800000011921,
+              "duration": 323
+            },
+            {
+              "start": 5800,
+              "duration": 669
+            },
+            {
+              "start": 9884,
+              "duration": 330
+            },
+            {
+              "start": 10298.300000011921,
+              "duration": 139
+            },
+            {
+              "start": 10449.900000035763,
+              "duration": 104
+            },
+            {
+              "start": 10751.300000011921,
+              "duration": 101
+            },
+            {
+              "start": 60571.40000003576,
+              "duration": 177
+            },
+            {
+              "start": 60781.30000001192,
+              "duration": 51
+            },
+            {
+              "start": 61505.5,
+              "duration": 433
+            },
+            {
+              "start": 61972.90000003576,
+              "duration": 80
+            },
+            {
+              "start": 62052.90000003576,
+              "duration": 59
+            },
+            {
+              "start": 62127.40000003576,
+              "duration": 322
+            },
+            {
+              "start": 62513.60000002384,
+              "duration": 109
+            },
+            {
+              "start": 62636,
+              "duration": 51
+            },
+            {
+              "start": 62696.60000002384,
+              "duration": 61
+            },
+            {
+              "start": 62767.60000002384,
+              "duration": 67
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 2,
+              "projection.rows": 300,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 164571,
+            "heapTotalKb": 208072
+          }
+        },
+        {
+          "startedAt": 68859.70000004768,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 300,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 148599,
+            "heapTotalKb": 151843
+          }
+        },
+        {
+          "startedAt": 98867.70000004768,
+          "longtasks": [
+            {
+              "start": 99004.70000004768,
+              "duration": 128
+            },
+            {
+              "start": 99134,
+              "duration": 64
+            },
+            {
+              "start": 99246.5,
+              "duration": 104
+            },
+            {
+              "start": 99351.20000004768,
+              "duration": 89
+            },
+            {
+              "start": 99548,
+              "duration": 52
+            },
+            {
+              "start": 99600.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 100700.60000002384,
+              "duration": 236
+            },
+            {
+              "start": 100966.20000004768,
+              "duration": 176
+            },
+            {
+              "start": 101188.80000001192,
+              "duration": 377
+            },
+            {
+              "start": 101630.30000001192,
+              "duration": 452
+            },
+            {
+              "start": 102111.20000004768,
+              "duration": 254
+            },
+            {
+              "start": 102402.20000004768,
+              "duration": 136
+            },
+            {
+              "start": 102569.20000004768,
+              "duration": 306
+            },
+            {
+              "start": 102927.10000002384,
+              "duration": 400
+            },
+            {
+              "start": 103367,
+              "duration": 232
+            },
+            {
+              "start": 103635.5,
+              "duration": 79
+            },
+            {
+              "start": 103717.20000004768,
+              "duration": 254
+            },
+            {
+              "start": 104004.5,
+              "duration": 287
+            },
+            {
+              "start": 104399.5,
+              "duration": 204
+            },
+            {
+              "start": 104871.60000002384,
+              "duration": 57
+            },
+            {
+              "start": 104929.5,
+              "duration": 57
+            },
+            {
+              "start": 104987.30000001192,
+              "duration": 67
+            },
+            {
+              "start": 105059.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 105142.70000004768,
+              "duration": 242
+            },
+            {
+              "start": 106230.70000004768,
+              "duration": 322
+            },
+            {
+              "start": 106589,
+              "duration": 168
+            },
+            {
+              "start": 106761.30000001192,
+              "duration": 384
+            },
+            {
+              "start": 107212,
+              "duration": 203
+            },
+            {
+              "start": 107447.90000003576,
+              "duration": 174
+            },
+            {
+              "start": 107643.30000001192,
+              "duration": 159
+            },
+            {
+              "start": 107827.80000001192,
+              "duration": 219
+            },
+            {
+              "start": 108099.90000003576,
+              "duration": 84
+            },
+            {
+              "start": 108770,
+              "duration": 90
+            },
+            {
+              "start": 109313.20000004768,
+              "duration": 65
+            },
+            {
+              "start": 109378.30000001192,
+              "duration": 69
+            },
+            {
+              "start": 109447.30000001192,
+              "duration": 153
+            },
+            {
+              "start": 109735.20000004768,
+              "duration": 50
+            },
+            {
+              "start": 109825.70000004768,
+              "duration": 115
+            },
+            {
+              "start": 109942.20000004768,
+              "duration": 52
+            },
+            {
+              "start": 110042.70000004768,
+              "duration": 96
+            },
+            {
+              "start": 110139.90000003576,
+              "duration": 60
+            },
+            {
+              "start": 110200.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 110655.60000002384,
+              "duration": 204
+            },
+            {
+              "start": 110904.30000001192,
+              "duration": 318
+            },
+            {
+              "start": 111234.70000004768,
+              "duration": 71
+            },
+            {
+              "start": 111318.30000001192,
+              "duration": 60
+            },
+            {
+              "start": 111378.70000004768,
+              "duration": 295
+            },
+            {
+              "start": 111686.70000004768,
+              "duration": 185
+            },
+            {
+              "start": 111881.60000002384,
+              "duration": 114
+            },
+            {
+              "start": 111996.30000001192,
+              "duration": 102
+            },
+            {
+              "start": 112099.60000002384,
+              "duration": 286
+            },
+            {
+              "start": 112393.5,
+              "duration": 118
+            },
+            {
+              "start": 112511.70000004768,
+              "duration": 54
+            },
+            {
+              "start": 112567.20000004768,
+              "duration": 196
+            },
+            {
+              "start": 112764.30000001192,
+              "duration": 92
+            },
+            {
+              "start": 112857.30000001192,
+              "duration": 70
+            },
+            {
+              "start": 113078.40000003576,
+              "duration": 79
+            },
+            {
+              "start": 113213.10000002384,
+              "duration": 80
+            },
+            {
+              "start": 113558.10000002384,
+              "duration": 52
+            },
+            {
+              "start": 115310.70000004768,
+              "duration": 63
+            },
+            {
+              "start": 115684.60000002384,
+              "duration": 65
+            },
+            {
+              "start": 117709.80000001192,
+              "duration": 66
+            },
+            {
+              "start": 118070.30000001192,
+              "duration": 69
+            },
+            {
+              "start": 120120,
+              "duration": 66
+            },
+            {
+              "start": 120244.5,
+              "duration": 51
+            },
+            {
+              "start": 120477.30000001192,
+              "duration": 65
+            },
+            {
+              "start": 122516.5,
+              "duration": 58
+            },
+            {
+              "start": 122643.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 122870.5,
+              "duration": 75
+            },
+            {
+              "start": 124919.10000002384,
+              "duration": 67
+            },
+            {
+              "start": 125030.20000004768,
+              "duration": 51
+            },
+            {
+              "start": 125274.30000001192,
+              "duration": 68
+            },
+            {
+              "start": 125876,
+              "duration": 50
+            },
+            {
+              "start": 127322,
+              "duration": 67
+            },
+            {
+              "start": 127430.90000003576,
+              "duration": 54
+            },
+            {
+              "start": 127680.40000003576,
+              "duration": 74
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1719,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 162324,
+            "heapTotalKb": 165991
+          }
+        },
+        {
+          "startedAt": 229969.70000004768,
+          "longtasks": [],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1719,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 162229,
+            "heapTotalKb": 165479
+          }
+        },
+        {
+          "startedAt": 259982.20000004768,
+          "longtasks": [
+            {
+              "start": 260117.5,
+              "duration": 56
+            },
+            {
+              "start": 260226.60000002384,
+              "duration": 65
+            },
+            {
+              "start": 260350.60000002384,
+              "duration": 54
+            },
+            {
+              "start": 260473,
+              "duration": 50
+            },
+            {
+              "start": 260598.70000004768,
+              "duration": 76
+            },
+            {
+              "start": 261311,
+              "duration": 60
+            },
+            {
+              "start": 261545.90000003576,
+              "duration": 55
+            },
+            {
+              "start": 262039.80000001192,
+              "duration": 57
+            },
+            {
+              "start": 262149.3000000119,
+              "duration": 68
+            },
+            {
+              "start": 262273.60000002384,
+              "duration": 62
+            },
+            {
+              "start": 262628.7000000477,
+              "duration": 54
+            },
+            {
+              "start": 262753.90000003576,
+              "duration": 67
+            },
+            {
+              "start": 262876.60000002384,
+              "duration": 77
+            },
+            {
+              "start": 263237.3000000119,
+              "duration": 50
+            },
+            {
+              "start": 263470.3000000119,
+              "duration": 80
+            },
+            {
+              "start": 263584.2000000477,
+              "duration": 66
+            },
+            {
+              "start": 263826.2000000477,
+              "duration": 195
+            },
+            {
+              "start": 264029.5,
+              "duration": 64
+            },
+            {
+              "start": 264306.2000000477,
+              "duration": 81
+            },
+            {
+              "start": 264427.7000000477,
+              "duration": 80
+            },
+            {
+              "start": 265269.40000003576,
+              "duration": 62
+            },
+            {
+              "start": 265390.3000000119,
+              "duration": 52
+            },
+            {
+              "start": 265505.90000003576,
+              "duration": 70
+            },
+            {
+              "start": 265874.40000003576,
+              "duration": 105
+            },
+            {
+              "start": 265999.10000002384,
+              "duration": 165
+            },
+            {
+              "start": 266167.90000003576,
+              "duration": 111
+            },
+            {
+              "start": 266344.60000002384,
+              "duration": 158
+            },
+            {
+              "start": 266586.10000002384,
+              "duration": 104
+            },
+            {
+              "start": 267069.40000003576,
+              "duration": 316
+            },
+            {
+              "start": 267396.60000002384,
+              "duration": 62
+            },
+            {
+              "start": 267787.3000000119,
+              "duration": 65
+            },
+            {
+              "start": 268269.5,
+              "duration": 73
+            },
+            {
+              "start": 268624.3000000119,
+              "duration": 98
+            },
+            {
+              "start": 269947.40000003576,
+              "duration": 55
+            },
+            {
+              "start": 270069.5,
+              "duration": 116
+            },
+            {
+              "start": 270188.8000000119,
+              "duration": 50
+            },
+            {
+              "start": 270307,
+              "duration": 53
+            },
+            {
+              "start": 270544.90000003576,
+              "duration": 80
+            },
+            {
+              "start": 270670.60000002384,
+              "duration": 62
+            },
+            {
+              "start": 270910.7000000477,
+              "duration": 67
+            },
+            {
+              "start": 271036,
+              "duration": 50
+            },
+            {
+              "start": 271147.10000002384,
+              "duration": 89
+            },
+            {
+              "start": 271509,
+              "duration": 73
+            }
+          ],
+          "memory": {
+            "role": "renderer",
+            "counters": {
+              "sessionStore.workspaces": 1,
+              "taskQueryCache.queryKeys": 3,
+              "taskQueryCache.taskMetas": 2,
+              "xterm.sessions": 0,
+              "taskSnapshotCache.entries": 0,
+              "taskSnapshotCache.persisted": 0,
+              "projection.stores": 1,
+              "projection.rows": 1719,
+              "toolLayout.openState": 0,
+              "shiki.tokensCache": 0,
+              "shiki.highlighters": 0,
+              "shiki.pendingSubscribers": 0
+            },
+            "heapUsedKb": 158437,
+            "heapTotalKb": 163694
+          }
+        }
+      ]
+    }
+  ]
+}

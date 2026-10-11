@@ -1,0 +1,1 @@
+[bugfix-batch-20261011] 用户裁定：首发消息卡顿优化——tokenizer(claude 2.3MB CJS ~850ms)与 git 身份解析预热搬进启动窗口；barrel 出 preloadTokenizer；实测首轮 pass 1401ms→57ms；附诊断脚本

@@ -1,0 +1,381 @@
+ WARN  Unsupported engine: wanted: {"node":">=24.0.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+
+> oh-my-zcode@1.0.5 test:v4-perf D:\Dev\Js\oh-my-zcode
+> tsx --test packages/ui/test/conversationProjectionCore.test.ts packages/ui/test/conversationTurnNavigatorDirectory.test.ts packages/ui/test/conversationTurnNavigatorHelpers.test.ts packages/ui/test/conversationTurnRenderUnits.test.ts packages/ui/test/perfProbe.test.ts packages/ui/test/shikiTokensCacheLru.test.ts packages/ui/test/conversationStatusPanelControlWorkFallback.test.ts packages/ui/test/timelineRowHeightCache.test.ts packages/ui/test/chatPromptEditorSubmitValue.test.ts packages/ui/test/subagentDirectoryCancel.test.ts packages/ui/test/storageCategoryCleanableGate.test.ts packages/shared/test/apply.test.ts packages/shared/test/previewText.test.ts && tsx --test packages/ui/test/magicContextPromptSurfaceOverrides.test.ts && pnpm --dir apps/zcode-cli/packages/bootstrap run test:turn-directory && pnpm --dir apps/zcode-cli/packages/bootstrap run test:edit-retry-model && pnpm --dir apps/zcode-cli/packages/core run test:subagent-sync-dispatch && pnpm --dir apps/zcode-cli/packages/core run test:ctx-tool-descriptions && pnpm --dir apps/zcode-cli --filter "@zcode/bootstrap..." build && pnpm --dir apps/zcode-cli/packages/bootstrap run test:mc-section-zh && pnpm --dir apps/zcode-cli/packages/bootstrap run test:model-live && pnpm --dir apps/zcode-cli/packages/bootstrap run test:subagent-live-model && pnpm --dir apps/zcode-cli/packages/bootstrap run test:prompt-surface-toolset-hash
+
+✔ G-3 守卫：PATCH_BUILDERS 键集合 == statePatchSchema 除 rows/seq/logEpoch 外的全部键 (2.2535ms)
+✔ T-AP1 随机序列：不可变 apply 与可变 accumulator 深相等 (90.5289ms)
+✔ T-AP1 随机序列覆盖到全部五类 op (19.1602ms)
+✔ 边界：removed 截断尾部后再 append (0.5754ms)
+✔ 边界：removed 砍掉整条活跃分支后 firstRowId/totalCount 归零，再 append 重建锚点 (0.4438ms)
+✔ 边界：state.updated 多帧累计 + 键级整体替换（绝不深合并） (0.6024ms)
+✔ 边界：同一 rowId 的连续 row.delta 按序拼接 (0.7805ms)
+✔ 边界：命中未加载 rowId 的 upsert/delta 都是 no-op (0.3027ms)
+✔ 隔离边界：createMutableConversationSnapshotAccumulator 不修改传入的已发布快照 (1.142ms)
+✔ C1 不变量：statePatchSchema 键集合不含 rows / seq / logEpoch (0.5683ms)
+✔ C1 不变量：state.updated 的 Object.assign 不会踩到 rows/seq/logEpoch (0.4151ms)
+✔ T-TD1 逐字节一致：超长空白前缀段：段首空白串远长于预算，且尾部仍超限 (2.2519ms)
+✔ T-TD1 逐字节一致：段间多空白：空行分隔符的各种宽度（含单换行不切分） (0.3049ms)
+✔ T-TD1 逐字节一致：截断边界落在空白串内：长空白串正中央放截断点 (0.3125ms)
+✔ T-TD1 逐字节一致：纯空白输入：空串、全空白、单换行、全角空白全部回落 fallback (0.2736ms)
+✔ T-TD1 逐字节一致：单换行不切分：折叠成一个空格而非分段 (0.1972ms)
+✔ T-TD1 逐字节一致：段上限为 0 / 负数：与 Math.max(1, n) 同语义 (0.1724ms)
+✔ T-TD1 逐字节一致：段上限放大：截断点落在第三段之内 (0.1691ms)
+✔ T-TD1 逐字节一致：空数组：与空串同语义 (0.1316ms)
+✔ T-TD1 逐字节一致：maxChars 扫描（截断点遍历段内/空白串/换行等位置） (8.04ms)
+✔ T-TD1 逐字节一致：确定性混合语料（空白/换行/多字节字符随机交织） (5.7093ms)
+✔ T-TD1 扫描量有界：1 MiB 输入只扫 maxChars 的常数倍 (55.3961ms)
+✔ T-TD1 扫描量有界：单条超长无空行正文在首段就收工 (0.7205ms)
+✔ T-TD1 纯空白输入：全量扫完（判定 fallback 的必要代价）但不产出正文 (0.3804ms)
+✔ A1: 编辑器已就绪时提交值恒为编辑器正文（不会回退到任何旧值） (1.1341ms)
+✔ A2: ref 未就绪窗口内回落的是最新镜像值，不是旧的已编辑值 (0.2259ms)
+✔ A3: 不变量——挂载回填后，任何编辑序列下两来源可读时值相同（回退拿不到旧值） (0.2961ms)
+✔ A4: 文档化——首帧回填前的窗口：回落提交的是未编辑原文，不是「旧的已编辑值」 (0.1676ms)
+✔ B1: 提交值仍以编辑器正文为权威来源，latestTextRef 仅作兜底 (0.294ms)
+✔ B2: Enter 主提交链仍直读编辑器状态（不经 form 的 ref 兜底） (0.1812ms)
+[v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+  cached: { scopeKey: 'sess-ap4', sessionPhase: 'running' },
+  next: { scopeKey: 'sess-ap4', sessionPhase: 'error' }
+}
+[v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+  cached: { scopeKey: 'sess-a', sessionPhase: undefined },
+  next: { scopeKey: 'sess-b', sessionPhase: undefined }
+}
+[v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+  cached: { scopeKey: 'sess-fuzz', sessionPhase: 'running' },
+  next: { scopeKey: 'sess-fuzz', sessionPhase: 'error' }
+}
+✔ 只并入窗口首行之前的行并按 rowId 升序前插 (2.1789ms)
+✔ 窗口内已存在的行不会被 fetched 重复引入 (0.1569ms)
+✔ 无可并入行时返回 null，调用方据此不换 window 引用 (0.162ms)
+✔ 空窗口时 fetched 全部算更早行（firstRowId 退化为正无穷） (0.1463ms)
+✔ 合并结果保留 fetched 原始相对顺序与窗口原有行序 (0.1361ms)
+✔ T-AP2 mergeOlderRows 后 rebuild：后续 row.delta 写入正确位置 (13.1598ms)
+✔ T-AP2 rebuild 之后 firstRowId / totalCount 随发布外壳带出 (0.4255ms)
+✔ T-AP2 rebuild 之后 row.removed 裁剪仍重建索引并把锚点归零 (0.7116ms)
+✔ T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换 (0.5626ms)
+✔ T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用保持不变 (1.5362ms)
+✔ T-AP3 无行变更帧的 rows 复用必须逐字段等价：窗口外的 row.removed 不动任何标量 (0.5145ms)
+✔ T-AP3 变更集为空但 rows 标量变了时必须换 rows 容器 (0.3233ms)
+✔ T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳 (0.4317ms)
+✔ C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTurnIds (4.9434ms)
+✔ C-3 改挂帧的脏集并入后：增量重建 ≡ 全量重建，与改挂无关的轮仍复用 (1.206ms)
+✔ C-3 未改挂的 upsert 不产生 detachedTurnIds，withDetachedTurnIds 原样返回入参引用 (0.2815ms)
+✔ T-AP4 场景一：追加新 turn 致 isLastTurn 翻转（增量 ≡ 全量） (0.8855ms)
+✔ T-AP4 场景二：末位 turn 被过滤，前一末轮接过 isLastTurn（增量 ≡ 全量） (0.4969ms)
+✔ T-AP4 场景二补：末位仍被过滤时，前一末轮的条目按 isLastTurn 段命中复用 (0.3326ms)
+✔ T-AP4 每次调用都返回新数组，未变更且非末位的轮复用同一个 unit 对象 (0.2235ms)
+✔ G-3 护栏：每帧物化数 ≤ 脏轮数 + 1（失效锚点） (0.6439ms)
+✔ T-AP4 场景三：sessionPhase 迁移改写 running 判定与展开态（增量 ≡ 全量） (3.3489ms)
+✔ T-AP4 无 lastMutation 时退化为全量重建，且不会把旧条目当成命中 (0.4918ms)
+✔ T-AP4 scopeKey 切换清空缓存：不同会话的同名 turnId 不会串号 (0.4495ms)
+✔ T-AP4 已裁剪出窗口的轮不会留在缓存里（缓存有界） (0.2805ms)
+✔ T-AP4 随机 delta 序列下增量 ≡ 全量（含 upsert / row.delta / 裁剪 / 追加） (32.9584ms)
+✔ T-TD3 三类失效帧各一例：append / upsert / removed 都让目录代际自增 (1.2943ms)
+✔ T-TD3 snapshot 整体替换同样让目录代际自增 (0.604ms)
+✔ T-TD3 与目录无关的帧不触发失效：非 realUser 输入与 assistantText 流式 (0.2659ms)
+✔ T-TD3 同一帧内多类失效只自增一次（代际是闸门，不是计数器） (0.1719ms)
+✔ T-TD3 重查去抖写死 250ms trailing (0.0806ms)
+✔ T-TD3 revision 连续变更的多次重查被合并为一次查询 (0.4248ms)
+✔ T-TD3 去抖 cancel 能掐掉未执行的重查（store close 时必须清得掉） (0.1056ms)
+✔ G-1 两页取齐：游标向更早方向翻，条目整体保持 queryRowId 升序 (0.4898ms)
+✔ G-1 单页就取齐：不再发第二次查询 (0.1604ms)
+✔ G-1 权威总数不足两条：首屏即终态，一条都不提交 (0.1235ms)
+✔ G-1 条目数对齐后 hasMore 收敛为 false：服务端仍报「更早方向还有」也不多翻一页 (0.1275ms)
+✔ G-1 跨 revision：第二页 revision 漂移即整批弃（游标按全量行现算，跨代拼接必漏） (0.1634ms)
+✔ G-1 纪元不匹配：本地活纪元已推进则整批弃 (0.1692ms)
+✔ G-1 纪元不匹配：服务端回执与本批不符（本地还没推进）也整批弃 (0.1053ms)
+✔ G-1 纪元缺失（会话快照已被清）同样按弃处理 (0.1005ms)
+✔ G-1 游标未推进：hasMore 为真却返回空页即判失败（否则死循环） (0.0962ms)
+✔ G-1 游标未推进：游标不后退（nextCursor >= 上一页游标）同样判失败 (0.1477ms)
+✔ G-1 页数上限：到顶以已取到的部分提交，并如实报 page-limit（不再多翻一页） (0.2107ms)
+✔ G-1 fetchPage 抛错：表达为 fetch-failed 并把原始错误带回（core 不打日志） (0.1479ms)
+✔ G-1 调用方中止（store close）不混同于失败 (0.1365ms)
+✔ G-1 翻页途中 store 关闭：第二页之前就停，已取到的第一页也不提交 (0.1912ms)
+✔ controlWork 未命中且 agentId 存在时回退到 agentId 作为 controlWorkId (1.5882ms)
+✔ status 为 waiting 时不回退，避免误停等待中的子智能体 (0.1943ms)
+✔ 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制 (0.1527ms)
+✔ 命中 controlWork 时仍走原联接路径，回退不抢场 (0.1825ms)
+✔ backgrounded 侧 cancel 入口在任何偏斜下都不许消失（既有语义不回退） (0.1632ms)
+✔ 重复 childSessionId 仍回退 agentId，可停性按组内 cancellable 聚合 (0.2545ms)
+✔ 合并：目录 + 已加载按 queryRowId 去重（已加载侧优先） (1.7385ms)
+✔ 合并：输出顺序稳定（目录未加载时与旧 items 逐项等价） (0.2579ms)
+✔ 合并：窗口范围内的未命中目录项被丢弃（窗口是那一段的权威源） (0.2498ms)
+✔ G-3 守卫：本地三态字面量与协议枚举逐字相同 (0.1357ms)
+✔ 降级 item：key/摘要三态/unitIndex 目录序口径 (0.2401ms)
+✔ 降级 item：queryPreview 空串时 userPreview 套 fallback 文案（full/B-4） (0.2266ms)
+✔ active 降级三态：已加载 / 未加载 / 混合（跨边界） (0.3346ms)
+✔ active 降级：未加载项与窗口首行同行/在窗口之下时不参与高亮 (0.21ms)
+✔ C-4 降级项 unitIndex 排序后重编号：交错语料下严格等于最终下标 (0.3436ms)
+✔ 传 itemByUnitIndex 与不传结果一致（已加载区间主循环） (1.1889ms)
+✔ 传 itemByUnitIndex 与不传结果一致（topVirtualIndex 兜底链） (0.3626ms)
+✔ 空 items 时返回 undefined（传/不传一致） (0.1747ms)
+✔ 量化边界：桶内稳定，跨桶才可能切换（量化单位 = 主时间线行高 72） (1.0444ms)
+✔ 量化与原始 offset 的偏差不超过一行（且行高量级对齐时完全一致） (1.0166ms)
+✔ ActiveQueryRowId：视口定位口径 + 空表返回 undefined (0.3188ms)
+✔ 目录门控：未取过目录（total 为 undefined）落回 canLoadOlder 放行首查 (0.2467ms)
+✔ 目录门控：已取过且权威总数不足两条 → 不放行（rail 不会出现） (0.1414ms)
+✔ 目录门控：终态 not-enough-queries 不被重新放行（total 是权威结论） (0.1299ms)
+✔ 目录门控：宽度 / 缺 handler / 在途 三道前置闸门不受门控影响 (0.1626ms)
+✔ pickOwnedRowElements：注册表条目不属于本容器时被跳过（full/B-1） (1.0113ms)
+✔ pickOwnedRowElements：全部不归属 / 空注册表 → 空 Map (0.1966ms)
+[v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+  cached: { scopeKey: 'sess-c2', sessionPhase: 'running' },
+  next: { scopeKey: 'sess-c2', sessionPhase: 'completedSuccess' }
+}
+✔ C-2：同一 turnId 多 phase 反复注入后分区数 ≤ MAX_PARTITIONS_PER_TURN (10.4161ms)
+✔ C-5：空 rows 的 build 不清空 scopeKey 下既有条目（锚点归零、缓存保留） (1.0836ms)
+✔ C-5：scopeKey/sessionPhase 与缓存内不一致时 DEV 告警恰一次 (0.528ms)
+✔ T-PA1: 同步 busy loop 注入长任务后 dump() 能解析出 longtask 条目 (186.8829ms)
+✔ T-PA2: 注入 7 个假 provider 后 collectRendererMemorySample 返回全部计数 + heap + role (0.5249ms)
+✔ T-PA2: 无 performance.memory 时样本只带计数，heap 字段省略 (0.1954ms)
+✔ T-PA2: 采集是纯读——多次调用不写盘也不改门控状态 (0.3788ms)
+✔ T-PA1: reset() 清空当前段并开启新段，旧段数据保留 (0.5334ms)
+✔ T-PA1: dump() 是 JSON 字符串且每段带 memory 样本（role=renderer） (0.2054ms)
+✔ T-PA1: 段数与单段条目数都按环形上限淘汰最旧 (0.4027ms)
+✔ T-PA1: sampleMemory() 走 collectRendererMemorySample 的注入出口 (0.1772ms)
+✔ T-PA1: stop() 之后 recordLongTask 不再进 dump（观察者已断开、缓冲已清） (0.2057ms)
+✔ T-PA1: 非 dev/无 window 环境下 startPerfProbe 是 no-op (0.364ms)
+✔ T-MG1 注入超上限条目后 tokensCache 被压到 500 以内 (1.1087ms)
+✔ T-MG1 命中会刷新 LRU 顺序，最久未命中的先被淘汰 (0.3172ms)
+✔ T-MG1 反复命中同一条不会挤出其它热条目 (0.2632ms)
+✔ T-MG1 满载（恰 500 条）时全部命中：既不增长也不误淘汰（full/G-3） (0.447ms)
+✔ T-MG1 订阅/退订对称，pending 计数回到 0 (0.3127ms)
+✔ safe / confirm 类别且有占用 → 放行（既有路径不变） (1.0752ms)
+✔ none 且无 cleanScope → 不放行，即使有占用（整组不可一键清理） (0.2042ms)
+✔ none + cleanScope=paths（toolOutputs → cli/exec）+ 有占用 → 放行 (0.1607ms)
+✔ none + cleanScope=paths 但零占用 → 不放行（点进去无可清理） (0.1413ms)
+✔ 带占用的 safe 类别即使 bytes 为 0 边界也按 cleanability 判定 (0.1681ms)
+✔ toolOutputs 跨根合并：bytes 相加、cleanScope=paths 透传 (0.4421ms)
+✔ 跨根合并取任一非空 cleanScope（旧快照缺字段的根不拖丢 override） (0.2198ms)
+✔ 跨根合并后无 override 类别 → cleanScope 保持 undefined (0.1824ms)
+✔ 合并结果按 bytes 降序（图例/列表顺序约定不变） (1.0405ms)
+✔ 上游放行 + running + agentId 存在 → workId 取 agentId（3c 停止按钮的数据源） (1.0877ms)
+✔ 上游未放行（父 pane 只读 / 无 handler 透传）→ 不渲染停止按钮 (0.1888ms)
+✔ waiting / blocked 不是可停的运行态（与状态面板回退同口径：仅 running） (0.1641ms)
+✔ 已结束行走目录查询分页，没有可停的后台工作 (0.1544ms)
+✔ 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制 (0.166ms)
+✔ guard：无滚动记忆时计划贴底 (1.4212ms)
+✔ guard：吸底记忆同样计划贴底 (0.1999ms)
+✔ guard：离底记忆计划恢复记忆位置且原样携带 (0.1404ms)
+✔ guard：无 measured 高度时反复尝试也不释放（落点不执行） (0.2885ms)
+✔ guard：rows 未到达（无虚拟行 key）时不释放 (0.155ms)
+✔ guard：measurementsCache 出现本会话首项才释放 (0.2182ms)
+✔ guard：释放后再次尝试返回 null（首次落点仅执行一次） (0.1576ms)
+✔ guard：切会话后旧会话的 measured 信号不再释放 (0.1561ms)
+✔ guard：tracksSession 在 arm 与释放后都成立（二次 restore effect 让位判据） (0.4396ms)
+✔ 纯函数：pendingSessionKey 与当前会话不一致时一律不释放 (0.2852ms)
+✔ tracker：空 tracker + armed → 不释放（uix/A-1 a：旧 measurementsCache 陈旧键不得参与） (0.3156ms)
+✔ tracker：首个 key 写入后恰好释放一次（uix/A-1 b） (0.2231ms)
+✔ tracker：跨分区键不串（uix/A-1 c：A 分区的写入不得释放 B） (0.2008ms)
+✔ tracker：A→B→A 重访——arm 后仅旧键在册不算数，本会话新写入才恰好释放一次（uix/A-1 d） (0.2364ms)
+✔ 缓存分区：同会话 set/get/estimate 命中 (0.2288ms)
+✔ 缓存分区：非正/非有限高度被忽略 (0.1647ms)
+✔ 缓存分区：不同 sessionKey 不串号 (0.1569ms)
+✔ 缓存分区：键中含分隔符的 session 与行键不产生拼接歧义 (0.1625ms)
+✔ 缓存分区：切走再切回命中（命中率 > 0） (0.3491ms)
+✔ 缓存分区：LRU 上限不放大且淘汰最久未写入 (3.5246ms)
+✔ 缓存分区：LRU 上限按自定义值生效 (0.2012ms)
+✔ 缓存分区：LRU 跨分区竞争——A 分区灌满容量上限挤掉 B 分区键（uix/G-3c） (2.7186ms)
+✔ 缓存分区：重复写入刷新淘汰顺序（活跃行不被淘汰） (0.1545ms)
+✔ 缓存分区：clearSession 只删本会话分区 (0.1552ms)
+✔ 缓存分区：clear() 全量重置（卸载/极端兜底语义） (0.1118ms)
+✔ 分区 + guard 组合：切会话不清缓存，切回即命中真实测高 (0.1556ms)
+ℹ tests 162
+ℹ suites 0
+ℹ pass 162
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1485.0877
+✔ per-model prompt-surface routes are presented as stable display strings (1.4346ms)
+✔ tool-description override keys are presented, values are not surfaced (0.1996ms)
+✔ bad values are shown as not configured, never as a selected preset (0.154ms)
+✔ no overrides at all yields two empty read-only lists (0.1361ms)
+✔ the read-only fields never reach the write path: overrides round-trip byte-for-byte (0.2769ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 670.5073
+
+> @zcode/bootstrap@0.1.0 test:turn-directory D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-turn-directory.mjs
+
+✔ A1: 真实事件链灌出的目录只有 realUser query，assistant 摘要是真正文 (8.5375ms)
+✔ B1: 只有 origin==='realUser' 的 userInput 成条，其余系统来源一律排除 (0.5887ms)
+✔ C1: entries 按 queryRowId 升序，与 getPlans 的降序方向无关 (0.5298ms)
+✔ D1: beforeQueryRowId 只取严格更小的更早条目 (0.4197ms)
+✔ D2: hasMore 判定的是「更早方向仍有条目」，不是「这页正好满 limit」 (0.7043ms)
+✔ D3: limit 受 turnDirectoryMaxEntries 封顶，缺省取满上限 (0.4078ms)
+✔ E1: realUserQueryTotal 从全量行现算，不受游标与 limit 影响 (0.5628ms)
+✔ F1: 三态判定——text / running / empty（已完成）/ empty（无 header 兜底） (0.3918ms)
+✔ F2: 同一 turn 的多条 steer query 各自成条，共享 turn 级 assistant 摘要 (0.2853ms)
+✔ G1: queryPreview / assistantPreview 与共享 buildPreviewText 逐字节一致 (0.3811ms)
+✔ G2: 纯空白 query 的 fallback 是空串（服务端不下发占位文案） (0.1546ms)
+✔ H1: 没有 realUser query 的会话返回空目录但仍是合法 result (0.2103ms)
+✔ H2: 全新会话（零行）同样返回合法空目录 (0.18ms)
+✔ I1: 负数 atSeq / queryRowId 被 schema 拒绝 (0.2609ms)
+✔ I2: limit 超 max 被 params schema 拒绝 (0.6976ms)
+
+TEST PASS — Step 15 turn directory derivation (T-TD2)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1091.993
+
+> @zcode/bootstrap@0.1.0 test:edit-retry-model D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-edit-retry-model.mjs
+
+(node:7400) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A1: editUserQuery payload 带/不带 modelSelection 均可解析 (2.944ms)
+✔ B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖（且不 pin） (1.2651ms)
+✔ B2: 会话有活值、缺省 payload → 用活值，不 pin (0.2787ms)
+✔ B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变） (0.266ms)
+✔ B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组） (0.2666ms)
+✔ B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin (0.2855ms)
+✔ C1: pin 的选择 → 写回 + 持久化 + emitModelSelected 三连 (0.6664ms)
+✔ C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用该选择执行 (0.2392ms)
+✔ C3: pin 且与会话选择相同 → 写回仍在，但不重复广播 (0.1813ms)
+✔ D1: sendGoalCommand 显式携带 modelSelection → pin + 写回生效 (1.1923ms)
+✔ D2: sendGoalCommand 缺省 modelSelection → 不 pin（不写回） (0.27ms)
+✔ D3: createSession firstInput 显式携带 modelSelection → pin + 写回生效 (0.555ms)
+✔ D4: createSession firstInput 缺省 modelSelection → 不 pin（不写回） (0.2108ms)
+✔ D5: legacy session/send 显式携带 modelSelection → pin + 写回生效 (7.3541ms)
+✔ E1: sendText 显式携带 modelSelection → pin + 写回生效 (0.7017ms)
+✔ E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回） (0.3133ms)
+✔ F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回） (0.2687ms)
+✔ F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回） (0.2161ms)
+
+TEST PASS — Step 6 edit-resend model selection (T-E1)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4435.5662
+
+> @zcode/core@0.1.0 test:subagent-sync-dispatch D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\core
+> tsx --test scripts/test-subagent-sync-dispatch.mjs
+
+✔ T-D1a: 同步派遣返回 childSessionId，且与 SubagentStopped 事件一致 (16.1046ms)
+✔ T-D1b: AgentOutputSchema strict 双校验（漏字段必须红） (8.2544ms)
+✔ T-D1c: 模型可见渲染与两个分支的 JSON schema 都带 childSessionId (0.7095ms)
+✔ T-S1a: 前台 stopTask 后 registry 终态 killed、失败收口不覆写 (8.0106ms)
+✔ T-S1b: 被停止时父通知 status=cancelled (6.5448ms)
+
+TEST PASS — T-D1 sync dispatch childSessionId / T-S1 foreground stop terminal state
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1208.3002
+
+> @zcode/core@0.1.0 test:ctx-tool-descriptions D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\core
+> tsx --test scripts/test-ctx-tool-descriptions.mjs
+
+✔ T-CTX-1: ctx_reduce 描述含主动声明引导句（mc/T-1） (0.6829ms)
+✔ T-CTX-2: ctx_expand 描述含 §N§ 标签主动找回引导句（mc/T-1） (0.1559ms)
+✔ T-CTX-3: 两侧描述的既有机制说明不被引导句覆盖（回归护栏） (0.1207ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 996.1996
+.                                        |  WARN  Unsupported engine: wanted: {"node":"24.14.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+Scope: 9 of 18 workspace projects
+packages/contracts build$ tsc
+packages/magic-context build$ tsc
+packages/dynamic-workflow build$ node scripts/generate-libs.mjs && tsc
+packages/shared-types build$ tsc
+packages/shared-types build: Done
+packages/dynamic-workflow build: Done
+packages/magic-context build: Done
+packages/contracts build: Done
+packages/adapters build$ tsc
+packages/dynamic-workflow-runtime build$ tsc
+packages/i18n build$ tsc
+packages/core build$ tsc
+packages/dynamic-workflow-runtime build: Done
+packages/i18n build: Done
+packages/adapters build: Done
+packages/core build: Done
+packages/bootstrap build$ tsc
+packages/bootstrap build: Done
+
+> @zcode/bootstrap@0.1.0 test:mc-section-zh D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> node scripts/test-magic-context-section-zh.mjs
+
+TEST PASS — magic-context-section-zh (16-case matrix + resolver routing)
+(node:14392) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> @zcode/bootstrap@0.1.0 test:model-live D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-model-live.mjs
+
+✔ T-ML1a: setSessionModelSelection 只在选型变值时记 lastModelSwitchAt (1.325ms)
+✔ T-ML1b: 切换后下一个新提交轮用新模型（admission 冻结活值 → 执行 → 写回不刷时间戳） (1.5653ms)
+✔ T-ML2a: 入队后切换 → 提升轮用活值且不 pin、不写回会话态 (0.9835ms)
+✔ T-ML2b: 出队模型规则直证——快照≠活值时，无论切换先后，提升一律用活值 (0.3702ms)
+✔ T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规则 (0.2848ms)
+✔ T-ML2d: item 缺 admittedAt（异常/跨版本投影）→ 提升仍用活值 (0.2385ms)
+✔ T-ML3: 编辑重发用会话活值（出队模型）且不写回会话态 (0.8823ms)
+✔ T-ML4: execution-scope 轮按 intent 选择执行但绝不写回会话态 (0.1731ms)
+
+TEST PASS — Step 4/5 model-live (T-ML1..T-ML4)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1156.753
+
+> @zcode/bootstrap@0.1.0 test:subagent-live-model D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-subagent-live-model.mjs
+
+✔ ① 同进程 spawn → 改 agents-state.json override → 再 spawn：第二次用新模型 (39.7404ms)
+✔ ② 无 override 时用 profile 默认；静态快照形态（旧装配）语义不变 (17.9646ms)
+✔ ③ agents-state.json 缺失/损坏/缺字段 → 回退冻结快照且 spawn 不炸，warn 去重 (22.6379ms)
+✔ ④ override 指向不存在的模型 id → 丢弃该 override 回退 profile 默认并 warn (12.9686ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1336.4617
+
+> @zcode/bootstrap@0.1.0 test:prompt-surface-toolset-hash D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-prompt-surface-toolset-hash.mjs
+
+(node:7492) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ MF-PS-1：preset 翻转后 getToolSetHash 读活值——审计列从 full 身份翻到 light 身份 (1456.9887ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 1
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4646.3562

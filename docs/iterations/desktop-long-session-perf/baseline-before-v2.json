@@ -1,0 +1,131 @@
+{
+  "schema": "zcode-desktop-long-session-perf-sample/v1",
+  "startedAt": "2026-10-05T19:34:33.594Z",
+  "finishedAt": "2026-10-05T19:35:03.695Z",
+  "repo": {
+    "root": "D:\\Dev\\worktree\\desktop-long-session-perf",
+    "head": "7964219ca9615272a7a568a58a6fd1034583de17",
+    "branch": "feature/desktop-long-session-perf"
+  },
+  "params": {
+    "workspacePath": "D:\\Dev\\Js\\oh-my-zcode\\omz",
+    "durationMs": 15000,
+    "scrollSelector": "[data-testid=\"v4-timeline\"]",
+    "devServerUrl": "http://localhost:5174",
+    "cdpPort": 9229,
+    "skipLaunch": true,
+    "mode": "reuse-skip-launch",
+    "spawnedPid": null,
+    "childExitInfo": null,
+    "childStillRunning": false,
+    "electronExecutable": null
+  },
+  "target": {
+    "id": "B52A60EC0572510487A51DEDA5CD77D8",
+    "title": "ZCode",
+    "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791200537767.344%2C%22mainStart%22%3A1791200538525%2C%22appReady%22%3A1791200538841%2C%22loadUrl%22%3A1791200539210%7D",
+    "type": "page"
+  },
+  "segments": [
+    {
+      "name": "stream",
+      "startedAt": "2026-10-05T19:34:33.672Z",
+      "durationMs": 15000,
+      "driverInfo": null,
+      "rendererEnv": {
+        "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791200537767.344%2C%22mainStart%22%3A1791200538525%2C%22appReady%22%3A1791200538841%2C%22loadUrl%22%3A1791200539210%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 2,
+        "now": "2026-10-05T19:34:48.685Z"
+      },
+      "probe": {
+        "segments": [
+          {
+            "startedAt": "2026-10-05T19:34:33.672Z",
+            "endedAt": null,
+            "longtasks": [],
+            "longtaskCount": 0,
+            "totalLongtaskMs": 0,
+            "maxLongtaskMs": 0,
+            "memory": {
+              "usedJSHeapSize": 144494477,
+              "totalJSHeapSize": 150832129,
+              "jsHeapSizeLimit": 4294967296
+            }
+          }
+        ],
+        "memory": {
+          "usedJSHeapSize": 145039645,
+          "totalJSHeapSize": 151618717,
+          "jsHeapSizeLimit": 4294967296
+        },
+        "rowCount": 2,
+        "dumpedAt": "2026-10-05T19:34:48.684Z"
+      }
+    },
+    {
+      "name": "scroll",
+      "startedAt": "2026-10-05T19:34:48.688Z",
+      "durationMs": 15000,
+      "driverInfo": {
+        "ok": true,
+        "tag": "DIV",
+        "className": "min-h-0 flex-1 overflow-x-hidden overflow-y-auto [scrollbar-gutter:stable] [--markdown-table-layout-left-inset:16px] [--",
+        "scrollHeight": 743,
+        "clientHeight": 743,
+        "maxScrollTop": 0,
+        "steps": 126,
+        "finalScrollTop": 0
+      },
+      "rendererEnv": {
+        "url": "http://localhost:5174/?restoreSession=true&supportsSettings=true&zcodeLaunchMarks=%7B%22createdAt%22%3A1791200537767.344%2C%22mainStart%22%3A1791200538525%2C%22appReady%22%3A1791200538841%2C%22loadUrl%22%3A1791200539210%7D",
+        "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) ZCodeDev/41.0.3 Chrome/146.0.7680.80 Electron/41.0.3 Safari/537.36",
+        "innerWidth": 1200,
+        "innerHeight": 800,
+        "devicePixelRatio": 1.5,
+        "rowCount": 2,
+        "now": "2026-10-05T19:35:03.694Z"
+      },
+      "probe": {
+        "segments": [
+          {
+            "startedAt": "2026-10-05T19:34:33.672Z",
+            "endedAt": null,
+            "longtasks": [],
+            "longtaskCount": 0,
+            "totalLongtaskMs": 0,
+            "maxLongtaskMs": 0,
+            "memory": {
+              "usedJSHeapSize": 144494477,
+              "totalJSHeapSize": 150832129,
+              "jsHeapSizeLimit": 4294967296
+            }
+          },
+          {
+            "startedAt": "2026-10-05T19:34:48.686Z",
+            "endedAt": null,
+            "longtasks": [],
+            "longtaskCount": 0,
+            "totalLongtaskMs": 0,
+            "maxLongtaskMs": 0,
+            "memory": {
+              "usedJSHeapSize": 145039645,
+              "totalJSHeapSize": 151618717,
+              "jsHeapSizeLimit": 4294967296
+            }
+          }
+        ],
+        "memory": {
+          "usedJSHeapSize": 145634478,
+          "totalJSHeapSize": 150832590,
+          "jsHeapSizeLimit": 4294967296
+        },
+        "rowCount": 2,
+        "dumpedAt": "2026-10-05T19:35:03.694Z"
+      }
+    }
+  ]
+}

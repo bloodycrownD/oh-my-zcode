@@ -1,0 +1,18 @@
+✔ T-ML1a: setSessionModelSelection 只在选型变值时记 lastModelSwitchAt (1.3844ms)
+✔ T-ML1b: 切换后下一个新提交轮用新模型（admission 冻结活值 → 执行 → 写回不刷时间戳） (1.5996ms)
+✔ T-ML2a: 入队后切换 → 提升轮用活值且不 pin、不写回会话态 (0.9883ms)
+✔ T-ML2b: 出队模型规则直证——快照≠活值时，无论切换先后，提升一律用活值 (0.3823ms)
+✔ T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规则 (0.2988ms)
+✔ T-ML2d: item 缺 admittedAt（异常/跨版本投影）→ 提升仍用活值 (0.2393ms)
+✔ T-ML3: 编辑重发用会话活值（出队模型）且不写回会话态 (0.9252ms)
+✔ T-ML4: execution-scope 轮按 intent 选择执行但绝不写回会话态 (0.1835ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 20.971
+
+TEST PASS — Step 4/5 model-live (T-ML1..T-ML4)

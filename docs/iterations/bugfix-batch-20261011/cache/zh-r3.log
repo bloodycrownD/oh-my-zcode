@@ -1,0 +1,7 @@
+
+> @zcode/bootstrap@0.1.0 test:mc-section-zh D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> node scripts/test-magic-context-section-zh.mjs
+
+TEST PASS — magic-context-section-zh (16-case matrix + resolver routing)
+(node:19532) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

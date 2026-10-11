@@ -1,0 +1,3 @@
+TEST PASS — magic-context-section-zh (16-case matrix + resolver routing)
+(node:11592) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)

@@ -1,0 +1,1 @@
+[bugfix-batch-20261011/Step5-r2] 出队模型规则（用户裁定 2026-10-11）：queue 提升与编辑重发一律读会话当前活值，废除 lastModelSwitchAt>admittedAt 时间戳判据与「编辑重发保旧快照」语义；写回会话态红线与 execution-scope 豁免不变；T-ML2b/T-ML3/T-E2E2 翻转直证

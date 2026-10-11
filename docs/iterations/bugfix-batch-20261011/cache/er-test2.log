@@ -1,0 +1,34 @@
+
+> @zcode/bootstrap@0.1.0 test:edit-retry-model D:\Dev\Js\oh-my-zcode\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-edit-retry-model.mjs
+
+(node:38144) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+✔ A1: editUserQuery payload 带/不带 modelSelection 均可解析 (2.9676ms)
+✔ B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖（且不 pin） (1.2228ms)
+✔ B2: 会话有活值、缺省 payload → 用活值，不 pin (0.2953ms)
+✔ B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变） (0.2596ms)
+✔ B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组） (0.246ms)
+✔ B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin (0.3735ms)
+✔ C1: pin 的选择 → 写回 + 持久化 + emitModelSelected 三连 (0.7591ms)
+✔ C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用该选择执行 (0.2649ms)
+✔ C3: pin 且与会话选择相同 → 写回仍在，但不重复广播 (0.1893ms)
+✔ D1: sendGoalCommand 显式携带 modelSelection → pin + 写回生效 (1.3982ms)
+✔ D2: sendGoalCommand 缺省 modelSelection → 不 pin（不写回） (0.2677ms)
+✔ D3: createSession firstInput 显式携带 modelSelection → pin + 写回生效 (0.6129ms)
+✔ D4: createSession firstInput 缺省 modelSelection → 不 pin（不写回） (0.3727ms)
+✔ D5: legacy session/send 显式携带 modelSelection → pin + 写回生效 (8.0384ms)
+✔ E1: sendText 显式携带 modelSelection → pin + 写回生效 (0.6675ms)
+✔ E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回） (0.3054ms)
+✔ F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回） (0.3741ms)
+✔ F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回） (0.2262ms)
+
+TEST PASS — Step 6 edit-resend model selection (T-E1)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4471.0624

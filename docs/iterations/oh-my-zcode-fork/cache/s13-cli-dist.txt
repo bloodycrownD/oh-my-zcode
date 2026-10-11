@@ -1,0 +1,8 @@
+ 驱动器 D 中的卷是 文件盘
+ 卷的序列号是 EED7-37B0
+
+ D:\Dev\Js\oh-my-zcode\omz\apps\zcode-cli\packages\cli\dist 的目录
+
+2026/10/04  05:11        29,760,537 zcode.cjs
+               1 个文件     29,760,537 字节
+               0 个目录 295,431,880,704 可用字节

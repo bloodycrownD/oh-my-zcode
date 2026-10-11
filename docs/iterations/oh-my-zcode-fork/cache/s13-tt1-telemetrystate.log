@@ -1,0 +1,13 @@
+packages\services\src\providers\sourceHeaders.ts:42:  const stateFile = join(getAppConfigDir(), "telemetry-state.json");
+packages\server\src\entry-stdio.ts:54:  // 远端主机没有 Desktop main，没人写 telemetry-state.json，services 发往 ZCode endpoint
+packages\services\src\onboarding\onboardingRecordService.ts:27:  // 与 telemetry-state.json 一致），不能学 setting.json 固定写 home——setting.json 留在 home
+packages\services\src\device\deviceMid.ts:21:// `telemetry-state.json` 是设备身份文件沿用至今的磁盘文件名：CLI、Desktop、远端 server 都读写同一
+packages\services\src\device\deviceMid.ts:25:    return join(homeDir, ".zcode", "v2", "telemetry-state.json");
+packages\services\src\device\deviceMid.ts:27:  return join(getAppConfigDir(), "telemetry-state.json");
+packages\services\src\device\deviceMid.ts:32:    return join(homeDir, ".zcode", "v2", "telemetry-state.lock");
+packages\services\src\device\deviceMid.ts:34:  return join(getAppConfigDir(), "telemetry-state.lock");
+packages\services\src\device\deviceMid.ts:168: * 调用方必须已持有设备身份文件锁（telemetry-state.lock）；只在 state 缺失 deviceMid 时生成并写回。
+packages\desktop\src\main\desktopDeviceMid.ts:15: * 同步确保设备身份文件（磁盘文件名沿用 telemetry-state.json，与 CLI / 远端 server 共享）里有 deviceMid，并返回该值。
+packages\desktop\src\main\desktopDeviceMid.ts:34:    const stateFile = join(configDir, "telemetry-state.json");
+apps/zcode-cli/packages\adapters\src\device\cli-device-mid.ts:60:  return join(resolveUserPath(baseDir), ".zcode", "v2", "telemetry-state.json");
+apps/zcode-cli/packages\adapters\src\device\cli-device-mid.ts:127:  const lockFile = join(dirname(stateFile), "telemetry-state.lock");

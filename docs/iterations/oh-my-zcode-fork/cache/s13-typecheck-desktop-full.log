@@ -1,0 +1,12 @@
+ WARN  Unsupported engine: wanted: {"node":">=24.0.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+
+> zcode@3.14.3 typecheck:desktop-full D:\Dev\Js\oh-my-zcode\omz
+> node scripts/typecheck-desktop-full.mjs
+
+desktop-full: 61 error kinds (baseline 366, removed 305)
+gate side-effect (regenerated artifacts, restore manually):
+  ?? packages/desktop/src/scheduler/schedulerProtocol.d.ts
+  ?? packages/desktop/src/scheduler/schedulerProtocol.d.ts.map
+  ?? packages/desktop/src/scheduler/schedulerProtocol.js
+  ?? packages/desktop/src/scheduler/schedulerProtocol.js.map
+gate OK: no new errors

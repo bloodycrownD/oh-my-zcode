@@ -1,0 +1,750 @@
+
+  ! eslint(no-unused-vars): Parameter 'labels' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/lib/modelSelectionGroups.ts:33:3]
+ 32 |   view: ModelSelectionView,
+ 33 |   labels: ModelProviderGroupLabelOptions = {},
+    :   ^^^|^^
+    :      `-- 'labels' is declared here
+ 34 | ): ModelSelectGroup[] {
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unsafe-finally): Unsafe `finally` block.
+    ,-[packages/services/src/session/tasksDatabase/startup.ts:94:21]
+ 93 |     } catch (error) {
+ 94 |       if (!failure) throw error;
+    :                     ^^^^^^^^^^^^
+ 95 |     }
+    `----
+  help: Control flow inside `try` or `catch` blocks will be overwritten by this statement.
+
+  ! eslint(no-unsafe-finally): Unsafe `finally` block.
+     ,-[packages/services/src/session/tasksDatabase/startup.ts:115:46]
+ 114 |     }
+ 115 |     if (!preparationFailure && closeFailure) throw closeFailure;
+     :                                              ^^^^^^^^^^^^^^^^^^^
+ 116 |   }
+     `----
+  help: Control flow inside `try` or `catch` blocks will be overwritten by this statement.
+
+  ! eslint(no-unused-vars): Interface 'AskUserQuestionAnswerDraft' is declared but never used.
+    ,-[packages/ui/src/lib/askUserQuestion.ts:26:11]
+ 25 | 
+ 26 | interface AskUserQuestionAnswerDraft {
+    :           ^^^^^^^^^^^^^|^^^^^^^^^^^^
+    :                        `-- 'AskUserQuestionAnswerDraft' is declared here
+ 27 |   selectedOptionIds: string[];
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Identifier 'Avatar' is imported but never used.
+    ,-[packages/ui/src/WorkspaceSidebarFooter.tsx:12:10]
+ 11 | import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+ 12 | import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
+    :          ^^^|^^
+    :             `-- 'Avatar' is imported here
+ 13 | import { cn } from "@/components/lib/utils.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'AvatarFallback' is imported but never used.
+    ,-[packages/ui/src/WorkspaceSidebarFooter.tsx:12:18]
+ 11 | import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+ 12 | import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
+    :                  ^^^^^^^|^^^^^^
+    :                         `-- 'AvatarFallback' is imported here
+ 13 | import { cn } from "@/components/lib/utils.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'AvatarImage' is imported but never used.
+    ,-[packages/ui/src/WorkspaceSidebarFooter.tsx:12:34]
+ 11 | import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+ 12 | import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
+    :                                  ^^^^^|^^^^^
+    :                                       `-- 'AvatarImage' is imported here
+ 13 | import { cn } from "@/components/lib/utils.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'getPathLeaf' is imported but never used.
+   ,-[packages/ui/src/lib/treemappingActivity.ts:3:10]
+ 2 | import type { TaskChatMessage, TaskChatToolCall } from "@/lib/taskChatMessageTypes.js";
+ 3 | import { getPathLeaf, isAbsoluteFilePath } from "@/lib/path.js";
+   :          ^^^^^|^^^^^
+   :               `-- 'getPathLeaf' is imported here
+ 4 | import { readRawToolCallFileSummaries } from "@/ToolCallBlocks/fileSummaries.js";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'useState' is imported but never used.
+   ,-[packages/ui/src/root/useRootPlatformEffects.ts:2:29]
+ 1 | /* oxlint-disable eslint(max-lines) -- 平台事件和分享导入共用同一生命周期。 */
+ 2 | import { useEffect, useRef, useState } from "react";
+   :                             ^^^^|^^^
+   :                                 `-- 'useState' is imported here
+ 3 | import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'seedImportedSessionDraft' is imported but never used.
+   ,-[packages/ui/src/root/useRootPlatformEffects.ts:8:10]
+ 7 | import { logger } from "@/logger.js";
+ 8 | import { seedImportedSessionDraft } from "@/v4/composer/newTaskDraft.js";
+   :          ^^^^^^^^^^^^|^^^^^^^^^^^
+   :                      `-- 'seedImportedSessionDraft' is imported here
+ 9 | import { dismissToast, toast, updateToast } from "@/components/ui/toast.js";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'dismissToast' is imported but never used.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:9:10]
+  8 | import { seedImportedSessionDraft } from "@/v4/composer/newTaskDraft.js";
+  9 | import { dismissToast, toast, updateToast } from "@/components/ui/toast.js";
+    :          ^^^^^^|^^^^^
+    :                `-- 'dismissToast' is imported here
+ 10 | import { matchesPrimaryShortcut } from "@/lib/keyboardShortcuts.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'toast' is imported but never used.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:9:24]
+  8 | import { seedImportedSessionDraft } from "@/v4/composer/newTaskDraft.js";
+  9 | import { dismissToast, toast, updateToast } from "@/components/ui/toast.js";
+    :                        ^^|^^
+    :                          `-- 'toast' is imported here
+ 10 | import { matchesPrimaryShortcut } from "@/lib/keyboardShortcuts.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'updateToast' is imported but never used.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:9:31]
+  8 | import { seedImportedSessionDraft } from "@/v4/composer/newTaskDraft.js";
+  9 | import { dismissToast, toast, updateToast } from "@/components/ui/toast.js";
+    :                               ^^^^^|^^^^^
+    :                                    `-- 'updateToast' is imported here
+ 10 | import { matchesPrimaryShortcut } from "@/lib/keyboardShortcuts.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Parameter 'reconnectingRemoteWorkspaceKeys' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:37:3]
+ 36 |   activeWorkspaceIdentity,
+ 37 |   reconnectingRemoteWorkspaceKeys = [],
+    :   ^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^
+    :                  `-- 'reconnectingRemoteWorkspaceKeys' is declared here
+ 38 |   remoteWorkspaceErrorByWorkspaceKey = {},
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'remoteWorkspaceErrorByWorkspaceKey' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:38:3]
+ 37 |   reconnectingRemoteWorkspaceKeys = [],
+ 38 |   remoteWorkspaceErrorByWorkspaceKey = {},
+    :   ^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^
+    :                    `-- 'remoteWorkspaceErrorByWorkspaceKey' is declared here
+ 39 |   totalUnreadTaskCount,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'intl' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:41:3]
+ 40 |   hasCompletedFullTabRestore = true,
+ 41 |   intl,
+    :   ^^|^
+    :     `-- 'intl' is declared here
+ 42 |   isRestoringOAuthSession,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'isRestoringOAuthSession' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:42:3]
+ 41 |   intl,
+ 42 |   isRestoringOAuthSession,
+    :   ^^^^^^^^^^^|^^^^^^^^^^^
+    :              `-- 'isRestoringOAuthSession' is declared here
+ 43 | }: {
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'baseServices' is declared but never used. Unused variables should start with a '_'.
+    ,-[packages/ui/src/root/useRootPlatformEffects.ts:78:9]
+ 77 |   const didBootstrapInitialWorkspaceRef = useRef(false);
+ 78 |   const baseServices = useOptionalBaseWorkspaceServices();
+    :         ^^^^^^|^^^^^
+    :               `-- 'baseServices' is declared here
+ 79 | 
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint-plugin-unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily.
+     ,-[packages/desktop/src/host/startupDiskSampler.ts:107:28]
+ 106 |     try {
+ 107 |       for (const scope of [...this.scopes.values()]) {
+     :                            ^^^
+ 108 |         if (this.stopped) break;
+     `----
+  help: `for…of` can iterate over iterable, it's unnecessary to convert to an array.
+
+  ! eslint(no-unused-vars): Identifier 'buildRuntimeZCodeApiUrl' is imported but never used.
+    ,-[packages/desktop/src/host/remoteWorkspaceServiceCollection.ts:52:3]
+ 51 | import {
+ 52 |   buildRuntimeZCodeApiUrl,
+    :   ^^^^^^^^^^^|^^^^^^^^^^^
+    :              `-- 'buildRuntimeZCodeApiUrl' is imported here
+ 53 |   DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Type 'WindowTabState' is imported but never used.
+   ,-[packages/ui/src/root/rootPlatformWorkspaceSync.ts:1:15]
+ 1 | import { type WindowTabState } from "@/store/tabStore.js";
+   :               ^^^^^^^|^^^^^^
+   :                      `-- 'WindowTabState' is imported here
+ 2 | 
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'lazy' is imported but never used.
+   ,-[packages/ui/src/Root.tsx:2:10]
+ 1 | /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
+ 2 | import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+   :          ^^|^
+   :            `-- 'lazy' is imported here
+ 3 | import { LucideProvider, RefreshCw } from "lucide-react";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'Suspense' is imported but never used.
+   ,-[packages/ui/src/Root.tsx:2:16]
+ 1 | /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
+ 2 | import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
+   :                ^^^^|^^^
+   :                    `-- 'Suspense' is imported here
+ 3 | import { LucideProvider, RefreshCw } from "lucide-react";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Type 'WorkspaceTabState' is imported but never used.
+    ,-[packages/ui/src/Root.tsx:35:46]
+ 34 | import { TabStoreProvider, useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
+ 35 | import { isSettingsTab, isWorkspaceTab, type WorkspaceTabState } from "@/store/tabStore.js";
+    :                                              ^^^^^^^^|^^^^^^^^
+    :                                                      `-- 'WorkspaceTabState' is imported here
+ 36 | import { logger } from "@/logger.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Variable 'providerFamilyDomainMigrationComplete' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/Root.tsx:152:10]
+ 151 |   } = useSettings();
+ 152 |   const [providerFamilyDomainMigrationComplete, setProviderFamilyDomainMigrationComplete] =
+     :          ^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^
+     :                            `-- 'providerFamilyDomainMigrationComplete' is declared here
+ 153 |     useState(false);
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'setProviderFamilyDomainMigrationComplete' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/Root.tsx:152:49]
+ 151 |   } = useSettings();
+ 152 |   const [providerFamilyDomainMigrationComplete, setProviderFamilyDomainMigrationComplete] =
+     :                                                 ^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^
+     :                                                                     `-- 'setProviderFamilyDomainMigrationComplete' is declared here
+ 153 |     useState(false);
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'readRootModelSelectionView' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/Root.tsx:169:9]
+ 168 |     ) : null;
+ 169 |   const readRootModelSelectionView = useCallback(
+     :         ^^^^^^^^^^^^^|^^^^^^^^^^^^
+     :                      `-- 'readRootModelSelectionView' is declared here
+ 170 |     () => services.modelSelectionService.getView(),
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'rootProviderAvailability' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/Root.tsx:348:9]
+ 347 |   const isResolvingStartupAuthState = false;
+ 348 |   const rootProviderAvailability = resolveProviderAvailabilityState({
+     :         ^^^^^^^^^^^^|^^^^^^^^^^^
+     :                     `-- 'rootProviderAvailability' is declared here
+ 349 |     modelSelectionView: rootModelSelectionView,
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Parameter 'allowOpenWorkspace' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/SettingsPage.tsx:160:3]
+ 159 | 
+ 160 |   allowOpenWorkspace = true,
+     :   ^^^^^^^^^|^^^^^^^^
+     :            `-- 'allowOpenWorkspace' is declared here
+ 161 | 
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint-plugin-unicorn(prefer-string-starts-ends-with): Prefer String#startsWith over a regex with a caret.
+    ,-[.sum.cjs:10:7]
+  9 |   }
+ 10 |   if (/^not ok /.test(line)) {
+    :       ^^^^^^^^^^^^^^^
+ 11 |     console.log(line);
+    `----
+  help: Replace `/^not ok /.test(line)` with `line.startsWith('not ok ')`.
+
+  ! eslint-plugin-unicorn(prefer-string-starts-ends-with): Prefer String#startsWith over a regex with a caret.
+    ,-[.sum.cjs:17:9]
+ 16 |   lines.forEach((line, index) => {
+ 17 |     if (/^not ok /.test(line)) {
+    :         ^^^^^^^^^^^^^^^
+ 18 |       console.log(lines.slice(index, index + 30).join("\n"));
+    `----
+  help: Replace `/^not ok /.test(line)` with `line.startsWith('not ok ')`.
+
+  ! eslint(no-unused-vars): Identifier 'RocketIcon' is imported but never used.
+    ,-[packages/ui/src/ChatErrorBanner.tsx:15:42]
+ 14 | } from "@zcode/shared";
+ 15 | import { AnchorIcon, CopyIcon, InfoIcon, RocketIcon, SettingsIcon, X } from "lucide-react";
+    :                                          ^^^^^|^^^^
+    :                                               `-- 'RocketIcon' is imported here
+ 16 | import { useZCodeIntl } from "./i18n/IntlProvider.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Parameter 'disposables' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/rpc/src/proxy-channel.ts:48:5]
+ 47 |     service: unknown,
+ 48 |     disposables?: DisposableStore,
+    :     ^^^^^|^^^^^
+    :          `-- 'disposables' is declared here
+ 49 |   ): IServerChannel<TContext> {
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Identifier 'useOptionalTabStore' is imported but never used.
+    ,-[packages/ui/src/chat-input-toolbar/contextUsage.tsx:26:10]
+ 25 | import { Progress } from "@/components/ui/progress.js";
+ 26 | import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
+    :          ^^^^^^^^^|^^^^^^^^^
+    :                   `-- 'useOptionalTabStore' is imported here
+ 27 | import { isSettingsTab } from "@/store/tabStore.js";
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'isSettingsTab' is imported but never used.
+    ,-[packages/ui/src/chat-input-toolbar/contextUsage.tsx:27:10]
+ 26 | import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
+ 27 | import { isSettingsTab } from "@/store/tabStore.js";
+    :          ^^^^^^|^^^^^^
+    :                `-- 'isSettingsTab' is imported here
+ 28 | import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+    `----
+  help: Consider removing this import.
+
+  ! typescript-eslint(no-this-alias): Unexpected aliasing of 'this' to local variable.
+     ,-[packages/rpc/src/ipc.ts:161:11]
+ 160 |   ): T {
+ 161 |     const that = this;
+     :           ^^^^
+ 162 |     const isFilter = typeof routerOrFilter === "function";
+     `----
+  help: Assigning a variable to this instead of properly using arrow lambdas may be a symptom of pre-ES2015 practices or not managing scope well.
+
+  ! typescript-eslint(no-this-alias): Unexpected aliasing of 'this' to local variable.
+     ,-[packages/rpc/src/ipc.ts:219:11]
+ 218 |   ): Event<T> {
+ 219 |     const that = this;
+     :           ^^^^
+ 220 |     let disposables: DisposableStore | undefined;
+     `----
+  help: Assigning a variable to this instead of properly using arrow lambdas may be a symptom of pre-ES2015 practices or not managing scope well.
+
+  ! eslint-plugin-unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily.
+     ,-[packages/rpc/src/foundation.ts:158:29]
+ 157 |     }
+ 158 |     for (const listener of [...this.listeners]) {
+     :                             ^^^
+ 159 |       listener(event);
+     `----
+  help: `for…of` can iterate over iterable, it's unnecessary to convert to an array.
+
+  ! eslint(no-unused-vars): Parameter 'connectTo' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/rpc/examples/04-remote-connection.ts:136:12]
+ 135 | class MockWebSocketFactory implements ISocketFactory<RemoteConnectionType.WebSocket> {
+ 136 |   supports(connectTo: RemoteConnection & { type: RemoteConnectionType.WebSocket }): boolean {
+     :            ^^^^|^^^^
+     :                `-- 'connectTo' is declared here
+ 137 |     return true;
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint-plugin-unicorn(no-useless-spread): Using a spread operator here creates a new array unnecessarily.
+    ,-[packages/ui/src/v4/taskListMembershipVersion.ts:13:27]
+ 12 |   version += 1;
+ 13 |   for (const listener of [...listeners]) {
+    :                           ^^^
+ 14 |     listener();
+    `----
+  help: `for…of` can iterate over iterable, it's unnecessary to convert to an array.
+
+  ! eslint(no-unused-vars): Identifier 'useRef' is imported but never used.
+   ,-[packages/ui/src/settings/AutomationsSection.tsx:2:34]
+ 1 | /* eslint-disable max-lines -- 定时任务主视图集中维护列表、创建/编辑整页路由与启停/删除操作，集中更利于交互一致。 */
+ 2 | import { useCallback, useEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
+   :                                  ^^^|^^
+   :                                     `-- 'useRef' is imported here
+ 3 | import { CircleCheck, RotateCcw, TriangleAlert } from "lucide-react";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-control-regex): Unexpected control character
+     ,-[packages/shared/src/zcode-protocol-v4/transport.ts:897:18]
+ 896 |       .max(255)
+ 897 |       .regex(/^[^\0\r\n]+$/),
+     :                  ^|
+     :                   `-- '\0' matches the null character (U+0000), which is a control character.
+ 898 |     mime: z
+     `----
+  help: Avoid matching control characters in regular expressions. If intentional, consider using a Unicode escape instead.
+
+  ! eslint(no-unused-vars): Type 'ProviderFamilyConnectionSelectionSettings' is imported but never used.
+    ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:27:8]
+ 26 |   type ProviderFamilyConnectionSelection,
+ 27 |   type ProviderFamilyConnectionSelectionSettings,
+    :        ^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^^
+    :                            `-- 'ProviderFamilyConnectionSelectionSettings' is imported here
+ 28 |   type ProviderFamilyDomain,
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Type alias 'V4ContextPlanConnection' is declared but never used.
+    ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:89:6]
+ 88 | 
+ 89 | type V4ContextPlanConnection =
+    :      ^^^^^^^^^^^|^^^^^^^^^^^
+    :                 `-- 'V4ContextPlanConnection' is declared here
+ 90 |   | { kind: "none" }
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Function 'resolveFamilyForPlanProviderId' is declared but never used.
+     ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:114:10]
+ 113 | 
+ 114 | function resolveFamilyForPlanProviderId(providerId: string | null | undefined): {
+     :          ^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^
+     :                         `-- 'resolveFamilyForPlanProviderId' is declared here
+ 115 |   family: ProviderFamilyDomain;
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Parameter 'isMobileViewport' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:185:3]
+ 184 |   provider,
+ 185 |   isMobileViewport = false,
+     :   ^^^^^^^^|^^^^^^^
+     :           `-- 'isMobileViewport' is declared here
+ 186 |   draftMode = false,
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'providerSettingsView' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:205:9]
+ 204 |   const providerSettingsRead = useProviderSettingsView();
+ 205 |   const providerSettingsView =
+     :         ^^^^^^^^^^|^^^^^^^^^
+     :                   `-- 'providerSettingsView' is declared here
+ 206 |     providerSettingsRead.state.status === "ready" ? providerSettingsRead.state.view : null;
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'handleUsageClick' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/v4/composer/V4ComposerToolbar.tsx:261:9]
+ 260 |     undefined;
+ 261 |   const handleUsageClick = useCallback(
+     :         ^^^^^^^^|^^^^^^^
+     :                 `-- 'handleUsageClick' is declared here
+ 262 |     () => handleOpenUsageDetails(contextCodingPlanUsageSelectedSourceId),
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Function 'resolveBuiltinPresetOAuthProvider' is declared but never used.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:140:10]
+ 139 | 
+ 140 | function resolveBuiltinPresetOAuthProvider(
+     :          ^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^
+     :                          `-- 'resolveBuiltinPresetOAuthProvider' is declared here
+ 141 |   presetId: BuiltinModelProviderId,
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'modelSelectionService' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:232:11]
+ 231 |   const platform = usePlatform();
+ 232 |   const { modelSelectionService, credentialService } = useServices();
+     :           ^^^^^^^^^^|^^^^^^^^^^
+     :                     `-- 'modelSelectionService' is declared here
+ 233 |   const {
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'setCodingPlanDisconnectProviderId' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:279:42]
+ 278 |     useState<BuiltinModelProviderId | null>(null);
+ 279 |   const [codingPlanDisconnectProviderId, setCodingPlanDisconnectProviderId] =
+     :                                          ^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^
+     :                                                          `-- 'setCodingPlanDisconnectProviderId' is declared here
+ 280 |     useState<BuiltinModelProviderId | null>(null);
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Variable 'refreshCodingPlanProducts' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:409:9]
+ 408 | 
+ 409 |   const refreshCodingPlanProducts = useCallback(() => {
+     :         ^^^^^^^^^^^^|^^^^^^^^^^^^
+     :                     `-- 'refreshCodingPlanProducts' is declared here
+ 410 |     setCodingPlanProductsRefreshToken((current) => current + 1);
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Parameter 'refreshReason' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:461:7]
+ 460 |       refreshPlanSnapshots = true,
+ 461 |       refreshReason = "auth",
+     :       ^^^^^^|^^^^^^
+     :             `-- 'refreshReason' is declared here
+ 462 |     }: {
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Variable 'selectedPlanAccessKey' is declared but never used. Unused variables should start with a '_'.
+     ,-[packages/ui/src/settings/ModelProviderSection.tsx:616:9]
+ 615 |     });
+ 616 |   const selectedPlanAccessKey =
+     :         ^^^^^^^^^^|^^^^^^^^^^
+     :                   `-- 'selectedPlanAccessKey' is declared here
+ 617 |     selectedNavItem?.type === "codingPlan" || selectedNavItem?.type === "teamPlan"
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint-plugin-unicorn(no-useless-fallback-in-spread): Empty fallbacks in spreads are unnecessary
+     ,-[packages/ui/src/settings/RemotePluginSyncDialog.tsx:331:19]
+ 330 |     configuredOptions: { ...configuredOptions },
+ 331 |     userConfig: { ...(plugin?.userConfig ?? {}) },
+     :                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 332 |   };
+     `----
+  help: Spreading falsy values in object literals won't add any unexpected properties, so it's unnecessary to add an empty object as fallback.
+
+  ! eslint-plugin-unicorn(no-useless-fallback-in-spread): Empty fallbacks in spreads are unnecessary
+     ,-[packages/ui/src/settings/RemotePluginSyncDialog.tsx:727:5]
+ 726 |   const mergedOptions = {
+ 727 |     ...(remotePlugin.configuredOptions ?? {}),
+     :     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+ 728 |     ...plan.options,
+     `----
+  help: Spreading falsy values in object literals won't add any unexpected properties, so it's unnecessary to add an empty object as fallback.
+
+  ! eslint(no-unused-vars): Parameter 'isMobileViewport' is declared but never used. Unused parameters should start with a '_'.
+      ,-[packages/ui/src/v4/ConversationStatusPanel.tsx:1724:3]
+ 1723 |   parentSessionId,
+ 1724 |   isMobileViewport = false,
+      :   ^^^^^^^^|^^^^^^^
+      :           `-- 'isMobileViewport' is declared here
+ 1725 |   layoutMode = "none",
+      `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'navigationItems' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/Detail.tsx:30:3]
+ 29 |   selectedNavItem,
+ 30 |   navigationItems = selectedNavItem ? [selectedNavItem] : [],
+    :   ^^^^^^^|^^^^^^^
+    :          `-- 'navigationItems' is declared here
+ 31 |   connectionSettingsFailed = false,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'connectionSettingsFailed' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/Detail.tsx:31:3]
+ 30 |   navigationItems = selectedNavItem ? [selectedNavItem] : [],
+ 31 |   connectionSettingsFailed = false,
+    :   ^^^^^^^^^^^^|^^^^^^^^^^^
+    :               `-- 'connectionSettingsFailed' is declared here
+ 32 | 
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'startPlanSubscriptionCount' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/Detail.tsx:33:3]
+ 32 | 
+ 33 |   startPlanSubscriptionCount = 0,
+    :   ^^^^^^^^^^^^^|^^^^^^^^^^^^
+    :                `-- 'startPlanSubscriptionCount' is declared here
+ 34 |   providerListLoading = false,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'entitledAccountProviderIds' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:53:3]
+ 52 |   modelProviders,
+ 53 |   entitledAccountProviderIds = new Set(),
+    :   ^^^^^^^^^^^^^|^^^^^^^^^^^^
+    :                `-- 'entitledAccountProviderIds' is declared here
+ 54 |   modelProvidersLoading = false,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'codingPlanEntitlements' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:56:3]
+ 55 |   displayOrder,
+ 56 |   codingPlanEntitlements = {},
+    :   ^^^^^^^^^^^|^^^^^^^^^^
+    :              `-- 'codingPlanEntitlements' is declared here
+ 57 |   providerFamilyDomain = null,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'providerFamilyDomain' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:57:3]
+ 56 |   codingPlanEntitlements = {},
+ 57 |   providerFamilyDomain = null,
+    :   ^^^^^^^^^^|^^^^^^^^^
+    :             `-- 'providerFamilyDomain' is declared here
+ 58 |   connectionSelections = {},
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'subscribedTeamProducts' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:62:3]
+ 61 |   familyConnectionSettingsFailed = false,
+ 62 |   subscribedTeamProducts = [],
+    :   ^^^^^^^^^^^|^^^^^^^^^^
+    :              `-- 'subscribedTeamProducts' is declared here
+ 63 |   showPurchasedTeamPlanFallback = false,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'showPurchasedTeamPlanFallback' is declared but never used. Unused parameters should start with a '_'.
+    ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:63:3]
+ 62 |   subscribedTeamProducts = [],
+ 63 |   showPurchasedTeamPlanFallback = false,
+    :   ^^^^^^^^^^^^^^|^^^^^^^^^^^^^^
+    :                 `-- 'showPurchasedTeamPlanFallback' is declared here
+ 64 |   selectedNodeKey,
+    `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Function 'shouldShowCodingPlanForProviderFamilyDomain' is declared but never used.
+     ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:189:12]
+ 188 | 
+ 189 |   function shouldShowCodingPlanForProviderFamilyDomain(
+     :            ^^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^^^
+     :                                 `-- 'shouldShowCodingPlanForProviderFamilyDomain' is declared here
+ 190 |   oauthProviderId: OAuthProviderId,
+     `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Parameter 'family' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:347:3]
+ 346 | export function connectionSelectionMatchesNavigationItem(
+ 347 |   family: ProviderFamilyDomain,
+     :   ^^^|^^
+     :      `-- 'family' is declared here
+ 348 |   selection: ProviderFamilyConnectionSelection,
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'selection' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:348:3]
+ 347 |   family: ProviderFamilyDomain,
+ 348 |   selection: ProviderFamilyConnectionSelection,
+     :   ^^^^|^^^^
+     :       `-- 'selection' is declared here
+ 349 |   item: Exclude<ModelProviderNavGroup["items"][number], { type: "codingPlanLoading" }>,
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint(no-unused-vars): Parameter 'item' is declared but never used. Unused parameters should start with a '_'.
+     ,-[packages/ui/src/settings/model-provider-section/useModelProviderNavigation.ts:349:3]
+ 348 |   selection: ProviderFamilyConnectionSelection,
+ 349 |   item: Exclude<ModelProviderNavGroup["items"][number], { type: "codingPlanLoading" }>,
+     :   ^^|^
+     :     `-- 'item' is declared here
+ 350 | ): boolean {
+     `----
+  help: Consider removing this parameter.
+
+  ! eslint-plugin-unicorn(no-empty-file): Empty files are not allowed.
+   ,-[packages/desktop/src/main/browserGuestManager.ts:1:1]
+   `----
+  help: Delete this file or add some code to it.
+
+  x eslint(max-lines): File has too many lines (1271).
+      ,-[cache-tmp/create-app-final.ts:1534:2]
+ 1533 |   }
+ 1534 | }
+      :  ^
+      `----
+  help: Maximum allowed is 400.
+
+  ! eslint(no-unused-vars): Type 'SessionEvent' is imported but never used.
+    ,-[cache-tmp/create-app-final.ts:31:8]
+ 30 |   type ModelUsage,
+ 31 |   type SessionEvent,
+    :        ^^^^^^|^^^^^
+    :              `-- 'SessionEvent' is imported here
+ 32 |   type SessionEventSink,
+    `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Identifier 'join' is imported but never used.
+   ,-[packages/desktop/scripts/node-pty-rebuild.mjs:3:19]
+ 2 | import { access } from "node:fs/promises";
+ 3 | import { dirname, join, normalize, posix as posixPath, sep } from "node:path";
+   :                   ^^|^
+   :                     `-- 'join' is imported here
+ 4 | import process from "node:process";
+   `----
+  help: Consider removing this import.
+
+  ! eslint(no-unused-vars): Variable 'adaptersRoot' is declared but never used. Unused variables should start with a '_'.
+    ,-[packages/desktop/scripts/prepare-agent-node-bundle.mjs:26:7]
+ 25 | const cliBundlePath = resolve(repoRoot, "apps/zcode-cli/packages/cli/dist/zcode.cjs");
+ 26 | const adaptersRoot = resolve(repoRoot, "apps/zcode-cli/packages/adapters");
+    :       ^^^^^^|^^^^^
+    :             `-- 'adaptersRoot' is declared here
+ 27 | const pnpmRunEnv = {
+    `----
+  help: Consider removing this declaration.
+
+  ! eslint(no-unused-vars): Function 'removeLines' is declared but never used.
+    ,-[cache-tmp/revert-step13.cjs:15:10]
+ 14 | 
+ 15 | function removeLines(fromLine, toLine) {
+    :          ^^^^^|^^^^^
+    :               `-- 'removeLines' is declared here
+ 16 |   const from = text.indexOf(`\n${fromLine}\n`);
+    `----
+  help: Consider removing this declaration.
+
+  x eslint(max-lines): File has too many lines (1007).
+      ,-[cache-tmp/mctt-head.ts:1872:2]
+ 1871 |   }
+ 1872 | }
+      :  ^
+      `----
+  help: Maximum allowed is 400.
+
+  x eslint(max-lines): File has too many lines (1076).
+      ,-[cache-tmp/mctt-final.ts:2021:2]
+ 2020 |   }
+ 2021 | }
+      :  ^
+      `----
+  help: Maximum allowed is 400.
+
+Found 74 warnings and 3 errors.
+Finished in 368ms on 2316 files using 16 threads.
