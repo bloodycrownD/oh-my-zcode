@@ -2201,12 +2201,11 @@ const enUS: Record<string, string> = {
   "settings.context.promptSurfaceOverrides.label": "Per-model overrides",
   "settings.context.promptSurfaceOverrides.description":
     "Model-keyed prompt-surface routes and tool-description overrides from config.json. They are presented read-only: this page has no per-model editor, and a save from here keeps them byte-for-byte.",
-  "settings.context.promptSurfaceOverrides.empty": "None configured",
   "settings.context.promptSurfaceOverrides.models": "Model routes:",
   "settings.context.promptSurfaceOverrides.toolDescriptions": "Tool descriptions:",
   "settings.context.muralEnabled.label": "Experimental memory mural",
   "settings.context.muralEnabled.description":
-    "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt. Experimental; off by default.",
+    "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt — but only when the current turn's model accepts image input. Experimental; off by default.",
   "settings.memory.workspaceMemory": "Workspace Memory",
   "settings.memoryDescription":
     "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",

@@ -2068,12 +2068,11 @@ const zhCN: Record<string, string> = {
   "settings.context.promptSurfaceOverrides.label": "按模型覆盖",
   "settings.context.promptSurfaceOverrides.description":
     "来自 config.json 的按模型 prompt-surface 路由与工具描述覆盖。此处只读呈现：本页没有按模型编辑入口，从这里保存会原样保留它们。",
-  "settings.context.promptSurfaceOverrides.empty": "未配置",
   "settings.context.promptSurfaceOverrides.models": "模型路由：",
   "settings.context.promptSurfaceOverrides.toolDescriptions": "工具描述：",
   "settings.context.muralEnabled.label": "实验性记忆画布",
   "settings.context.muralEnabled.description":
-    "开启后，未装入上下文预算的项目记忆会渲染成一张确定性的图片随提示词下发。实验特性，默认关闭。",
+    "开启后，未装入上下文预算的项目记忆会渲染成一张确定性的图片随提示词下发（还需当轮模型支持图片输入，否则不渲染）。实验特性，默认关闭。",
   "settings.memory.workspaceMemory": "工作区记忆",
   "settings.memoryDescription":
     "在工作区中保存并复用长期上下文，新会话生效。开启后可能增加模型调用和 Token 成本。",
