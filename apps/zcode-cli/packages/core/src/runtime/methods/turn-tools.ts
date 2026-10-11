@@ -291,7 +291,6 @@ export async function executeToolCallsForModelStep(
             content: modelContentForToolResult(result),
             sessionId: this.sessionId,
             sessionStore: this.sessionStore,
-            signal: state.turnAbortSignal,
             toolCallId: result.toolCallId,
             toolName: result.toolName,
             traceContext: options.modelTraceContext,

@@ -506,9 +506,16 @@ function protocolInstantValue(value: unknown): number | string | undefined {
 
 function mapModelRequestPayload(payload: unknown): Record<string, unknown> {
   const record = asRecord(payload);
-  const messages = Array.isArray(record.messages) ? record.messages : [];
+  // 内存 event store 淘汰 sealed turn 时把 messages 瘦身为 messageCount（session-event-store-retention.md），
+  // 两种形态都要映射出同一个 messageCount。
+  const messageCount =
+    typeof record.messageCount === "number"
+      ? record.messageCount
+      : Array.isArray(record.messages)
+        ? record.messages.length
+        : 0;
   const result: Record<string, unknown> = {
-    messageCount: messages.length,
+    messageCount,
   };
   for (const key of [
     "providerId",
