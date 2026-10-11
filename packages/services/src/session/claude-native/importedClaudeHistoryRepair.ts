@@ -89,7 +89,9 @@ function shouldRepairImportedClaudeSnapshot(
   return hasLegacyFixedMessageIds;
 }
 
-export async function readLegacyImportedClaudeHistory(
+// FORK (upstream-v3.15.1-backport #18)：原消费方 zcodeTaskServiceAdapter 的直接 import 已随 legacy ACP 恢复重构移除，
+// 现仅本文件内部使用；去 export 守 knip 零新增门禁。
+async function readLegacyImportedClaudeHistory(
   target: ImportedClaudeHistoryRepairTarget,
 ): Promise<ImportedClaudeHistoryRepairResult | null> {
   const snapshotPaths = [

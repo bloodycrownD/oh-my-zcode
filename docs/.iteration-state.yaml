@@ -498,3 +498,32 @@ upstream_v3151_backport:
   r4_review: { verdict: 条件性 No-Go（r3 五条中四条高质量闭合）, p0: 0, p1: 1, p2: 3, code_facts: judge 用便携 Node24 实测揭穿 r3 新写的 T-NET-1b 双重失实——http+caCertFile 走全局 fetch 捷径(:167-176)到不了 transport 回调；post-fix 终态=resolve 原样带回 999（readIncomingResponse）而非 reject（reject 仅属 proxy-fetch 路径 toWebResponse/UnsupportedHttpStatusError）, closed: T-NET-1b 重写=本地 https server（caCertFile 仅 https 生效强制走回调分支）+断言 resolve 且 status=999+无 unhandledException；「均不触碰 publisher」措辞改「不覆盖 subscriber buffer/fanOutDeltas 钳位路径（无 subscribe；test-turn-directory import 真 publisher 但只走 ingest/getTurnDirectory）」；#26 补第二调用点（resyncRollback :1159-1161）与 subscriberBufferLimits() 新私有方法+pluginUi 过滤 hunk 不搬；映射改「#1/#2 配 T-NET-1」+Step 9 接线规则完整化（落点=目标包 scripts/test-*.mjs+无聚合包进根 test:v4-perf 手工清单+交付 cache/test-wiring-map.md 登记表）——全部闭合 }
   r5_review: { verdict: No-Go（终验，但仅 1 P1+4 不阻塞 P2；r4 四条全部真实闭合、无新增失实）, p0: 0, p1: 1, p2: 4, code_facts: T-NET-1b 重写后 7 句断言逐句核验全部属实；门禁 3「≤71w/0e」失实——实测 74w/0e 且 .reference/ 不在 .gitignore/.oxlintrc ignorePatterns，Step 1 更快照后根 lint 会被污染成 790w/307e（error 全在 .reference/**）, closed: 门禁 3 改为排除 .reference/** 后 ≤74w/0e+随 Step 1 把 .reference/** 补进 .oxlintrc.json ignorePatterns（一行配置修正）；顺手修 3 P2（services 测试形态按 test/*.test.ts 先例、#26 配套 hunk 两处点名+行号 :1160-1163 修正）；第 4 P2（T 映射 exhaustiveness）按 judge 裁定不阻塞保留。五轮上限已到，主代理裁定 execute-ready（20261009 先例） }
 
+# ===== upstream-v3.15.1-bugfix-backport（code-dev-loop）=====
+dev_loop_v3151:
+  branch: upstream-v3.15.1-backport
+  base_sha: 39d1141b
+  dag_version: 1
+  wave_plan: [[s1-reference], [impl-s2, impl-s3, impl-s4, impl-s5], [commit-w1, verify-1], [cr-func-1], [impl-s6, impl-s7, impl-s8], [commit-w4, verify-2], [cr-func-2], [impl-s9-tests], [commit-s9, verify-3], [cr-func-3], [impl-s10-gates], [s11-changelog, dev-ready]]
+  node_status:
+    s1-reference: { status: pending, executor: main }
+    impl-s2: { status: pending, executor: subagent, spec_step: Step2, items: "#1-#7" }
+    impl-s3: { status: pending, executor: subagent, spec_step: Step3, items: "#8-#13" }
+    impl-s4: { status: pending, executor: subagent, spec_step: Step4, items: "#21/#23/#24/#25/#27/#28" }
+    impl-s5: { status: pending, executor: subagent, spec_step: Step5, items: "#14-#16" }
+    impl-s6: { status: pending, executor: subagent, spec_step: Step6, items: "#18/#20/#26" }
+    impl-s7: { status: pending, executor: subagent, spec_step: Step7, items: "#29-#32" }
+    impl-s8: { status: pending, executor: subagent, spec_step: Step8, items: "#34" }
+    impl-s9-tests: { status: pending, executor: subagent, spec_step: Step9 }
+    impl-s10-gates: { status: pending, executor: subagent, spec_step: Step10 }
+    s11-changelog: { status: pending, executor: main, spec_step: Step11 }
+  open_must_fix: []
+  spec_deviations: []
+  notes: "impl 子代理只编辑不 commit（并行同树避免 git index 冲突）；每波次后主代理按 Step pathspec 统一 commit；QA 模式见 spec §3（Step6/7/8 qa=manual_user 的波次以 cr-func 证据+wire dump 脚本替代，最终向用户汇报）"
+  cr_func_1: { verdict: func-ready-no, must_fix: "M1 #15 读放大未消除（observation:161 共享全量读+artifactsOf 全表解码，withResult:false 零调用）/ M2 四个未使用 export 破 knip 门禁（zcodeProtocolClient 3 符号+WORKFLOW_RUN_EVENTS_PAGE_LIMITS）/ M3 #12 合并后 </env>## Magic Context 缺换行 / M4 sequence-capture:33 丢 listNodes opts", deviations: "D1 introspection 纳入 #16=closed；D2 可选字段化=closed；D3 maxBytes 无消费方→裁定 closed（不实现字节界，常量随 M2 去 export）；D4 #5 export 化→并入 M2；D5/D6 closed", dag_v2: "fix-1(M1+M4) + fix-2(M2+M3) 与 impl-s6/s7/s8 五节点并行（文件集不相交）→ commit×5 → verify-2 + cr-func-1b/2 并行" }
+  cr_func_3_backlog:
+    - "dynamic-workflow-run-introspection.ts:224 roster 的 journal.listNodes(runId) 残余全量读（cr-func-1b 裁定可接受，留痕）：最小修法 = 改 {kinds:\"all\", withResult:false} 一行；判据 = roster 零 result 消费 + 非轮询详情面（introspection 详情读取，非高频轮询）；未做，登记为后续可选收窄。"
+  s10_gate_closure:
+    gates: "1 typecheck 0err / 2 v4-perf 309:0 / 3 mc 142 / 4 services 56:0 / 5 desktop fresh=0 / 6 lint 74w:0e / 7 oxfmt 本批文件全合规 / 8 knip 本批零新增 / 9 红线 0 命中（compact 散文已改写、~/.zcode 注释已改写）"
+    knip_residuals: "vs 20261011 快照仍余 3 条，均已实锤为前序迭代（403806ba 等）遗留、本批 diff 未触碰：ui/test/askQuestionDisplayAnswers.test.ts（未使用文件）、bootstrap/scripts/diag-first-send-latency.mjs（未使用文件）、magic-context-prompt-section-zh-cn.ts SELF_TAG_GUIDANCE_ZH（未使用导出，base 39d1141b 时即无跨文件消费方）。后续批次顺手回收。"
+    knip_fixes: "本批归一：incoming-response.ts 三符号与 proxy-fetch.ts NetworkFetch 去 export（FORK 注释）；readLegacyImportedClaudeHistory 去 export（impl-s10 曾误判为前序漂移，实为本批 impl-s6 删除消费方所致）；4 个无 workspace 归属的 Step9 测试脚本进 knip 全局 ignore"
+

@@ -68,9 +68,7 @@ function recordedAskRows() {
 function legacyRecordedCount(rows, ref) {
   return rows.filter(
     (row) =>
-      row.kind === "ask" &&
-      row.actorSiteId === ref.siteId &&
-      row.actorOrdinal === ref.ordinal,
+      row.kind === "ask" && row.actorSiteId === ref.siteId && row.actorOrdinal === ref.ordinal,
   ).length;
 }
 

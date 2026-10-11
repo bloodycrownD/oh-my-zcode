@@ -132,7 +132,7 @@ abstract: 将上游 v3.14.3→v3.15.1 增量中的 bug 修复（非新功能）�
 
 ## 4. 测试策略
 
-基线：`test:v4-perf` 198 pass；magic-context `test:all` 142 case。新增用例：
+基线：`test:v4-perf` 本批前 236 pass（198 为更早迭代口径，前序迭代 +38 已计入）；Step 9 接线后 309 pass（新增 73 例）；magic-context `test:all` 142 case。新增用例：
 
 - **T-NET-1**：proxy-fetch 对 999/异常状态码返回请求失败，进程不崩（node --test 新脚本）。
 - **T-NET-1b（#3，r4 修正）**：`createNodeHttpClientAdapter({ caCertFile })` 打本地 **https** server 返 999（caCertFile 仅对 https 生效、强制走 transport 回调分支——http 会走全局 fetch 捷径 `:167-176` 绕过修复点），断言 `request()` **resolve 且 status=999**（post-fix `readIncomingResponse` 原样带回非标准状态码、不 reject——reject 语义仅属 proxy-fetch 路径 T-NET-1 的 `toWebResponse`/`UnsupportedHttpStatusError`）、进程无 uncaughtException；修复前该路径回调 `new Response(...)` throw 直接打死进程。独立覆盖，不能由 T-NET-1/2 替代（post-fix 的 proxy-fetch 与 http/index.ts 无调用关系）。
@@ -150,8 +150,8 @@ abstract: 将上游 v3.14.3→v3.15.1 增量中的 bug 修复（非新功能）�
 - **T-SVC-1**：流式 turn 兜底：构造 streamedTurnText 有前缀的 turn.completed，补投 chunk 不含已流式前缀。
 - **T-SVC-2**：contentProfile=index 的 readSession 返回裁剪快照（无 raw/output 字段）且 full 行为不变。
 - **T-SVC-3**：subagentsService 对 EACCES 抛错而非返回空配置；ENOENT 仍回退空配置。
-- **T-MC-1**（manual_user 辅以 wire dump）：经 `restoreMagicContextMessageBoundaries` 后，wire 层 body 中 m0/m1 保持独立 user 消息（覆盖：m0 纯文本 / m0 带 mural image / m1 后紧跟本轮 user 输入的三段合并 / **m1 与用户输入间夹 `prompt_attachment` 等信封的四段以上合并（`reorderAttachmentLikeEntries` 会把其它 attachment 冒泡到当前输入之前）**；作用域=只拆 m0/m1 边界、其余段保持合并（对齐上游先例）；**断言拆分后仅最后一段末块携带 cache_control，不引入第二个缓存断点**；负例：真实用户输入含 `<system-reminder>` 或结构标签文本不被误拆）。
-- **T-WIN-1**：`SHELL=/usr/bin/bash` 环境下 stdio MCP spawn 使用 ComSpec/cmd.exe（单元级断言 buildEnv 输出）。
+- **T-MC-1**（manual_user 辅以 wire dump）：经 `restoreMagicContextMessageBoundaries` 后，wire 层 body 中 m0/m1 保持独立 user 消息（覆盖：m0 纯文本 / m0 带 mural image / m1 后紧跟本轮 user 输入的三段合并 / **m1 与用户输入间夹 `prompt_attachment` 等信封的四段以上合并（`reorderAttachmentLikeEntries` 会把其它 attachment 冒泡到当前输入之前）**；作用域=只拆 m0/m1 边界、其余段保持合并（对齐上游先例）；**断言拆分后仅最后一段末块携带 cache_control，不引入第二个缓存断点**；负例：真实用户输入含 `<system-reminder>` 或结构标签文本不被误拆）。Step 9 实跑 **10 用例**（原探针冒烟 17 PASS 行的转正版，登记见 `cache/test-wiring-map.md`）。
+- **T-WIN-1**（C2 口径）：`SHELL=/usr/bin/bash` 环境下 stdio MCP spawn 使用 ComSpec/cmd.exe。单元断言两处：`normalizeRuntimeProcessEnv(env, "win32")` 的返回值 + `initializeRuntimeProcessEnv` 对真实 `process.env` 的写回（win32 专属，非 win32 skip）；**不断言** `buildRuntimeProcessEnvPatch` 输出——SHELL 不在下发的 runtime 工具环境变量 patch 里。
 - **T-WIN-2**（manual_user）：Windows 注册表深链打开后 argv 末尾含 `--`，URL 注入参数被隔离；`--inspect-brk` 被 fuse 拒绝（打包后验证）。
 - **T-WIN-3**：托盘创建失败路径走确认退出（单测 fake tray 抛错）。
 - **T-X1**：全门禁回归（§5 全条目）。
@@ -169,7 +169,7 @@ T 覆盖说明：#1/#2 配 T-NET-1（proxy-fetch 主体验收，顺带覆盖 #1 
 6. `node scripts/typecheck-desktop-full.mjs` fresh=0（重采须 `--snapshot --accept-new` 显式确认）
 7. `pnpm architecture:check --changed`
 8. magic-context `pnpm run build && pnpm run test:all`（142 case 基线）
-9. `pnpm test:v4-perf`（198 pass 基线 + 本批新增接线项）
+9. `pnpm test:v4-perf`（本批前基线 236 pass（前序迭代 +38 已计入；198 为更早口径）+ Step 9 新增接线 73 例 = 309 pass）
 10. `pnpm --filter @zcode/cli build`
 11. `scripts/check-i18n-parity.mjs`（zh/en key 集合相等）
 12. 测试隔离红线：绝不写真实 `~/.omz`/`~/.zcode`；magic-context 测试显式 `MAGIC_CONTEXT_DB_DIR`/`MAGIC_CONTEXT_LOG_PATH`；exec 类 `ZCODE_STORAGE_DIR`（注意用户级 `~/.zcode/cli/config.json` 不受 ZCODE_STORAGE_DIR 重定向）

@@ -20,13 +20,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 const { snapshotOf } = await import("../src/app/dynamic-workflow-run-observation.ts");
-const { COLD_REPLAY_EVENT_READ, replayRunProgress } = await import(
-  "../src/app/dynamic-workflow-run-replay.ts"
-);
-const {
-  DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS,
-  DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES,
-} = await import("@zcode/contracts");
+const { COLD_REPLAY_EVENT_READ, replayRunProgress } =
+  await import("../src/app/dynamic-workflow-run-replay.ts");
+const { DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS, DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES } =
+  await import("@zcode/contracts");
 const { WORKFLOW_RUNS_LIMITS } = await import("@zcode/shared/zcode-protocol-v4");
 
 const RUN_ID = "run-t-dwf-1";
@@ -92,7 +89,9 @@ test("T-DWF-2 快照的 report 读是「前 256 条 + 8MiB + count(*)」，没�
   assert.ok(snapshot, "有 journal 行时必须给出快照");
   assert.equal(snapshot.status, "completed");
 
-  const reportRead = listNodeCalls.find((opts) => opts.kinds?.includes("report") && opts.withResult);
+  const reportRead = listNodeCalls.find(
+    (opts) => opts.kinds?.includes("report") && opts.withResult,
+  );
   assert.ok(reportRead, "report 读必须下推到端口");
   assert.equal(reportRead.limit, DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS);
   assert.equal(reportRead.limit, 256);
@@ -137,9 +136,7 @@ test("T-DWF-3 冷回放读事件带 reportItems 限 64（下推到存储层，�
     listEvents(runId, opts) {
       listEventsCalls.push({ runId, opts });
       // 模拟存储层已按 reportItems.limit 剥离：前 64 条 report 带 item，其余只留元数据。
-      const stored = [
-        { sequence: 1, event: { type: "run-launched", inputId: "input-1" } },
-      ];
+      const stored = [{ sequence: 1, event: { type: "run-launched", inputId: "input-1" } }];
       for (let index = 0; index < 200; index += 1) {
         stored.push({
           sequence: index + 2,

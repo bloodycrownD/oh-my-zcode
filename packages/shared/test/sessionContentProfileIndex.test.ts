@@ -134,11 +134,7 @@ test("T-SVC-2 裁剪不修改入参（full 侧继续读到原对象）", () => {
   // 未改动的 part 保持引用相等（不新建对象、不改入参）。
   assert.equal(elided.messages[0]?.parts[1], original.messages[0]?.parts[1]);
   assert.equal(partOf(elided, 3).url, "data:,", "index 侧看到空占位");
-  assert.equal(
-    partOf(original, 3).url,
-    "data:image/png;base64,AAAA",
-    "full 侧入参未被改写",
-  );
+  assert.equal(partOf(original, 3).url, "data:image/png;base64,AAAA", "full 侧入参未被改写");
   assert.equal(partOf(original, 0).text, "长推理文本");
   assert.equal(partOf(original, 2).state?.output, "巨型工具输出");
 });

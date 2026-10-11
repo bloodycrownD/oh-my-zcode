@@ -1258,7 +1258,7 @@ function resolvePromptToolDenylist(params: {
         // zcode-cli 的 sqlite session 表。新协议 resume 会把 taskId 当 sessionId
         // 直接报 Session not found；这里按旧快照恢复只读历史内容，并用 task index
         // 补齐用户改名、归档状态和终态 status，避免把旧 task 误当成可订阅的新 session。
-        // FORK (upstream-v3.15.1-backport): 上游原文为 ~/.zcode，fork 品牌为 ~/.omz，
+        // FORK (upstream-v3.15.1-backport): 上游原文使用原品牌目录，fork 品牌为 ~/.omz，
         // 与 packages/services/src/paths.ts 的实际落盘目录一致。
         taskId: params.taskId,
         workspacePath: params.workspacePath,

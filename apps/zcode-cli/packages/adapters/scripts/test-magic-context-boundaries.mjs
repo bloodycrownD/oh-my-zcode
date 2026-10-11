@@ -64,9 +64,7 @@ registerHooks({
 const { createAnthropic } = await import("@ai-sdk/anthropic");
 // FORK (upstream-v3.15.1-backport) T-MC-1: 被测符号经 compat fetch 挂载点进入
 // （model-execution.ts 的 createAnthropicCompatFetch 同形）。
-const { createAnthropicCompatFetch } = await import(
-  "../dist/model/anthropic-stream-compat.js"
-);
+const { createAnthropicCompatFetch } = await import("../dist/model/anthropic-stream-compat.js");
 
 const M0_ENVELOPE =
   "<system-reminder>\n<session-history>\n[compartment §1§] 旧会话摘要\n</session-history>\n</system-reminder>";
@@ -218,7 +216,10 @@ test('T-MC-1 形态 6：合并层尾随 "\\n" 容错', async () => {
     { role: "system", content: "system prompt" },
     {
       role: "user",
-      content: [{ type: "text", text: `${M0_ENVELOPE}\n` }, { type: "text", text: M1_ENVELOPE }],
+      content: [
+        { type: "text", text: `${M0_ENVELOPE}\n` },
+        { type: "text", text: M1_ENVELOPE },
+      ],
     },
   ]);
   assert.equal(body.messages.length, 2);
@@ -245,7 +246,10 @@ test("T-MC-1 负例 2：像 m0 但缺 session-history 结构的信封文本不�
     { role: "system", content: "system prompt" },
     {
       role: "user",
-      content: [{ type: "text", text: notM0Envelope }, { type: "text", text: "后半句" }],
+      content: [
+        { type: "text", text: notM0Envelope },
+        { type: "text", text: "后半句" },
+      ],
     },
   ]);
   assert.equal(body.messages.length, 1, String(body.messages.length));

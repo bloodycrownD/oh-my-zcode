@@ -23,9 +23,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-const { persistToolResultMediaAttachments } = await import(
-  "../src/runtime/helpers/tool-result-media-persistence.ts"
-);
+const { persistToolResultMediaAttachments } =
+  await import("../src/runtime/helpers/tool-result-media-persistence.ts");
 
 const TRACE_CONTEXT = { traceId: "trace-t-mem-2" };
 const BASE = {

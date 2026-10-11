@@ -20,9 +20,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { ensureSessionPersisted, isSessionPersisted } = await import(
-  "../src/runtime/methods/events.ts"
-);
+const { ensureSessionPersisted, isSessionPersisted } =
+  await import("../src/runtime/methods/events.ts");
 
 const TRACE_CONTEXT = { traceId: "trace-t-evt-1" };
 

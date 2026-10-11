@@ -90,10 +90,7 @@ async function startStatusServer({ tls = false, status, body = "", headers = {} 
     response.end(body);
   };
   const server = tls
-    ? https.createServer(
-        { key: TLS_TEST_KEY, cert: TLS_TEST_CERT },
-        handler,
-      )
+    ? https.createServer({ key: TLS_TEST_KEY, cert: TLS_TEST_CERT }, handler)
     : http.createServer(handler);
   await new Promise((resolve, reject) => {
     server.once("error", reject);
@@ -185,7 +182,12 @@ test("T-NET-2 null-body statuses are read as empty without arrayBuffer or a size
       },
     };
     // maxResponseBytes=0 也不许误判超限（正文为空，与上限无关）。
-    const body = await readResponseBody(guarded, 0, new AbortController().signal, "https://example.invalid/");
+    const body = await readResponseBody(
+      guarded,
+      0,
+      new AbortController().signal,
+      "https://example.invalid/",
+    );
     assert.equal(body.byteLength, 0);
   }
 });

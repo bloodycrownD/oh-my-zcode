@@ -8,7 +8,8 @@ import {
 } from "./http-config.js";
 import { readIncomingResponse, toWebResponse } from "./incoming-response.js";
 
-export type NetworkFetch = typeof globalThis.fetch;
+// FORK (upstream-v3.15.1-backport)：上游为 export（fork 无跨文件消费方，去 export 守 knip 零新增门禁）。
+type NetworkFetch = typeof globalThis.fetch;
 
 interface NetworkProxyFetchOptions {
   caCertFile?: string;
@@ -64,12 +65,7 @@ export function createNetworkProxyFetch(options: NetworkProxyFetchOptions): Netw
 }
 
 function hasNetworkFetchPolicy(options: NetworkProxyFetchOptions): boolean {
-  return Boolean(
-    options.caCertFile ||
-      options.env ||
-      options.httpProxy ||
-      options.noProxy,
-  );
+  return Boolean(options.caCertFile || options.env || options.httpProxy || options.noProxy);
 }
 
 function readFetchInputUrl(input: Parameters<NetworkFetch>[0]): URL | undefined {

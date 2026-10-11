@@ -12,7 +12,7 @@
 |---|---|---|---|---|---|
 | T-NET-1 / T-NET-1b / T-NET-2 | `apps/zcode-cli/packages/adapters/scripts/test-network-status-crash.mjs` | @zcode/adapters | `test:v4-perf` → `... @zcode/adapters run test:network-status-crash`（build 之后） | 5 | pass |
 | T-XFRM-1 | `apps/zcode-cli/packages/adapters/scripts/test-tool-result-cache-control.mjs` | @zcode/adapters | `test:v4-perf` → `... run test:tool-result-cache-control` | 3 | pass |
-| T-MC-1（C3 转正） | `apps/zcode-cli/packages/adapters/scripts/test-magic-context-boundaries.mjs` | @zcode/adapters | `test:v4-perf` → `... run test:magic-context-boundaries` | 10（17 断言） | pass |
+| T-MC-1（C3 转正） | `apps/zcode-cli/packages/adapters/scripts/test-magic-context-boundaries.mjs` | @zcode/adapters | `test:v4-perf` → `... run test:magic-context-boundaries` | 10 用例（原探针冒烟 17 PASS 行） | pass |
 | T-PROC-1 | `packages/services/test/zcodeProtocolClientDispose.test.ts` | @zcode/services | `test:v4-perf` 首个 `tsx --test` 组 | 2 | pass |
 | T-PROC-2 | `packages/services/test/zcodeStdioTransportFraming.test.ts` | @zcode/services | 同上 | 1 | pass |
 | T-PROC-3 | `packages/services/test/zcodeAgentProcessManagerCleanup.test.ts` | @zcode/services | 同上 | 3 | pass |
@@ -28,7 +28,7 @@
 | T-MEM-2 | `apps/zcode-cli/packages/core/scripts/test-tool-media-stop-signal.mjs` | @zcode/core | `test:v4-perf` → `... run test:tool-media-stop-signal` | 3 | pass |
 | T-MEM-1 | `apps/zcode-cli/packages/bootstrap/scripts/test-model-request-slim.mjs` | @zcode/bootstrap | `test:v4-perf` → `... run test:model-request-slim` | 4 | pass |
 | T-DWF-2 / T-DWF-3 | `apps/zcode-cli/packages/bootstrap/scripts/test-dwf-read-narrowing.mjs` | @zcode/bootstrap | `test:v4-perf` → `... run test:dwf-read-narrowing` | 3 | pass |
-| C1（#26 钳位） | `apps/zcode-cli/packages/bootstrap/scripts/test-publisher-buffer-clamp.mjs` | @zcode/bootstrap | `test:v4-perf` → `... run test:publisher-buffer-clamp` | 5（8 断言） | pass |
+| C1（#26 钳位） | `apps/zcode-cli/packages/bootstrap/scripts/test-publisher-buffer-clamp.mjs` | @zcode/bootstrap | `test:v4-perf` → `... run test:publisher-buffer-clamp` | 5（9 断言；含场景 C 真 cap 上下界） | pass |
 
 ## 2. 不接线 / 手工项（spec 允许的登记口径）
 

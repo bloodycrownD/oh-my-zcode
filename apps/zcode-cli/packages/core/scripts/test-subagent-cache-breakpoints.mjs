@@ -39,7 +39,11 @@ test("#12 systemMessages 合并成「稳定前缀 + 其余」两组，断点跟�
   const result = buildContext();
   const systemMessages = result.systemMessages;
 
-  assert.equal(systemMessages.length <= 2, true, `期望 ≤2 条 system message，实际 ${systemMessages.length}`);
+  assert.equal(
+    systemMessages.length <= 2,
+    true,
+    `期望 ≤2 条 system message，实际 ${systemMessages.length}`,
+  );
   // 合并前后内容不丢：所有 system 段正文都能在合并结果里找到。
   const merged = systemMessages.map((message) => message.content).join("");
   for (const section of result.sections) {

@@ -21,9 +21,8 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { createInMemorySessionEventStore, slimRetainedModelRequest, SessionEventType } = await import(
-  "@zcode/contracts"
-);
+const { createInMemorySessionEventStore, slimRetainedModelRequest, SessionEventType } =
+  await import("@zcode/contracts");
 const { mapSessionEvent } = await import("../src/zcode-protocol/session-mapper.ts");
 
 const SESSION_ID = "ses-t-mem-1";
@@ -93,7 +92,9 @@ test("T-MEM-1 store 淘汰同一节拍：驻留副本已是瘦身形态，瞬态
   await store.append(
     sessionEvent(SessionEventType.ModelStreaming, { kind: "text_delta", delta: "x" }, "turn-1"),
   );
-  await store.append(sessionEvent(SessionEventType.TurnComplete, { resultType: "complete" }, "turn-1"));
+  await store.append(
+    sessionEvent(SessionEventType.TurnComplete, { resultType: "complete" }, "turn-1"),
+  );
 
   // append 的返回值是 live sink 拿到的完整对象（debug JSONL 仍然全量）。
   assert.equal(Array.isArray(appended.payload.messages), true);
@@ -117,7 +118,9 @@ test("T-MEM-1 producer/consumer 同值：两种形态经 mapModelRequestPayload 
   const store = createInMemorySessionEventStore();
   await store.append(sessionEvent(SessionEventType.TurnStarted, { turnNumber: 1 }, "turn-1"));
   const full = await store.append(modelRequestEvent("turn-1"));
-  await store.append(sessionEvent(SessionEventType.TurnComplete, { resultType: "complete" }, "turn-1"));
+  await store.append(
+    sessionEvent(SessionEventType.TurnComplete, { resultType: "complete" }, "turn-1"),
+  );
   await store.append(sessionEvent(SessionEventType.TurnStarted, { turnNumber: 2 }, "turn-2"));
   const slim = (await store.getEvents(SESSION_ID)).find(
     (event) => event.type === SessionEventType.ModelRequest,
