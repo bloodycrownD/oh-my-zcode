@@ -203,7 +203,9 @@ async function runPass(port) {
 
 function readToolSetHashAudit() {
   const row = sharedDb
-    .prepare("SELECT cached_m0_tool_set_hash AS hash, cached_m0_bytes AS bytes FROM session_meta WHERE session_id = ?")
+    .prepare(
+      "SELECT cached_m0_tool_set_hash AS hash, cached_m0_bytes AS bytes FROM session_meta WHERE session_id = ?",
+    )
     .get(SESSION_ID);
   return row ?? null;
 }
@@ -260,7 +262,9 @@ test("MF-PS-1：preset 翻转后 getToolSetHash 读活值——审计列从 full
 
   // 清 baseline 强制 pass 2 再 materialize（first_render）——否则 no-op 的 pass
   // 不会刷新 markers，也就观察不到指纹变化。
-  sharedDb.prepare("UPDATE session_meta SET cached_m0_bytes = NULL WHERE session_id = ?").run(SESSION_ID);
+  sharedDb
+    .prepare("UPDATE session_meta SET cached_m0_bytes = NULL WHERE session_id = ?")
+    .run(SESSION_ID);
   const second = await runPass(port);
   assert.ok(
     second.outcome === "applied" || second.outcome === "unchanged",

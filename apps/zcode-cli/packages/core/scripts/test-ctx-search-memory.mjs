@@ -268,18 +268,13 @@ test("ctx_search resolves an id-shaped query directly and ignores other projects
   // 过滤，见 storage-memory.ts:980-986）——foreign 项目的同 id 行不得因
   // 「数字解析成功」漏回来。
   const foreignIdentity = magicContext.resolveProjectIdentityForSession(FOREIGN_WORK_DIR);
-  assert.ok(
-    foreignIdentity !== undefined,
-    "foreign 临时目录必须能解析 identity，否则本断言空转",
-  );
-  const foreign = magicContext
-    .insertMemoryIdempotent(sharedDb, {
-      projectPath: foreignIdentity,
-      category: "CONFIG_VALUES",
-      content: "Foreign project secret: rotate the build token every Friday.",
-      sourceType: "historian",
-    })
-    .memory.id;
+  assert.ok(foreignIdentity !== undefined, "foreign 临时目录必须能解析 identity，否则本断言空转");
+  const foreign = magicContext.insertMemoryIdempotent(sharedDb, {
+    projectPath: foreignIdentity,
+    category: "CONFIG_VALUES",
+    content: "Foreign project secret: rotate the build token every Friday.",
+    sourceType: "historian",
+  }).memory.id;
   const foreignById = await write(ctxSearchToolEntry.handler, { query: `#${foreign}` });
   assert.match(
     foreignById,
@@ -292,14 +287,12 @@ test("ctx_search resolves an id-shaped query directly and ignores other projects
   // active → 直查命中。
   const identity = magicContext.resolveProjectIdentityForSession(WORK_DIR);
   assert.ok(identity !== undefined, "本项目目录必须能解析 identity");
-  const archivedId = magicContext
-    .insertMemoryIdempotent(sharedDb, {
-      projectPath: identity,
-      category: "NAMING",
-      content: "Archived fact: legacy module layout naming.",
-      sourceType: "historian",
-    })
-    .memory.id;
+  const archivedId = magicContext.insertMemoryIdempotent(sharedDb, {
+    projectPath: identity,
+    category: "NAMING",
+    content: "Archived fact: legacy module layout naming.",
+    sourceType: "historian",
+  }).memory.id;
   sharedDb.prepare("UPDATE memories SET status = ? WHERE id = ?").run("archived", archivedId);
   assert.match(
     await write(ctxSearchToolEntry.handler, { query: `#${archivedId}` }),
@@ -307,15 +300,13 @@ test("ctx_search resolves an id-shaped query directly and ignores other projects
     "archived 记忆不得经 id 短路捞回（与 FTS 的 status 过滤一致）",
   );
 
-  const expiredId = magicContext
-    .insertMemoryIdempotent(sharedDb, {
-      projectPath: identity,
-      category: "NAMING",
-      content: "Expired fact: temporary naming during the migration.",
-      sourceType: "historian",
-      expiresAt: 1,
-    })
-    .memory.id;
+  const expiredId = magicContext.insertMemoryIdempotent(sharedDb, {
+    projectPath: identity,
+    category: "NAMING",
+    content: "Expired fact: temporary naming during the migration.",
+    sourceType: "historian",
+    expiresAt: 1,
+  }).memory.id;
   assert.match(
     await write(ctxSearchToolEntry.handler, { query: `#${expiredId}` }),
     /No results found/,

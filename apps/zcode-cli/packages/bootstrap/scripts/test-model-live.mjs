@@ -88,8 +88,9 @@ registerHooks({
 });
 
 // core 真实写点/读点（Step 5a 的落点：runtime/methods/config.ts）。
-const { setSessionModelSelection, getSessionModelSelection, getLastModelSwitchAt } =
-  await import(new URL("../../core/dist/runtime/methods/config.js", import.meta.url).href);
+const { setSessionModelSelection, getSessionModelSelection, getLastModelSwitchAt } = await import(
+  new URL("../../core/dist/runtime/methods/config.js", import.meta.url).href
+);
 // core 写回门（Step 5 的红线段：turn-model.ts 的 pin/execution-scope 门）。
 const { applySubmissionExecutionState } = await import(
   new URL("../../core/dist/runtime/methods/turn-model.js", import.meta.url).href

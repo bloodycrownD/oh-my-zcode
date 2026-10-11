@@ -395,11 +395,16 @@ test("T-MC0c：unanchored promotion skip 留可观测日志（discard-last，rea
   } catch {
     // 文件缺失时下面断言以空串失败，报出可比对的定位信息。
   }
-  const skipLine = logText
-    .split("\n")
-    .find((line) => line.includes("promotion skipped: reason="));
-  assert.ok(skipLine !== undefined, "sessionLog 必须记录 promotion skipped 行（reason+facts 在场）");
-  assert.match(skipLine, /reason=discarded_last/, "discard-last 场景的 reason 必须是 discarded_last");
+  const skipLine = logText.split("\n").find((line) => line.includes("promotion skipped: reason="));
+  assert.ok(
+    skipLine !== undefined,
+    "sessionLog 必须记录 promotion skipped 行（reason+facts 在场）",
+  );
+  assert.match(
+    skipLine,
+    /reason=discarded_last/,
+    "discard-last 场景的 reason 必须是 discarded_last",
+  );
   assert.match(skipLine, /facts=\d+/, "日志必须带 facts 计数");
   assert.match(skipLine, /facts=2\b/, "双舱 fixture 的 historian facts 为 2 条");
 });

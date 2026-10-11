@@ -65,9 +65,7 @@ test("idle-only: every one of the five conditions alone refuses the lease", () =
   for (const [condition, value] of Object.entries(occupied)) {
     // queue 条件改的是假队列的返回值，其余直接置字段。
     const queue = condition === "queue.hasPending()" ? { hasPending: () => true } : undefined;
-    const runtime = makeRuntime(
-      queue ? { runtimeCommandQueue: queue } : { [condition]: value },
-    );
+    const runtime = makeRuntime(queue ? { runtimeCommandQueue: queue } : { [condition]: value });
     const result = acquire(runtime, baseOptions);
     assert.deepEqual(
       result,
