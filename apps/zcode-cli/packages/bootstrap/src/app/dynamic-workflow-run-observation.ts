@@ -7,6 +7,8 @@
 import type { DwfRunListItem, DwfRunSessionListItem } from "@zcode/adapters/storage";
 import {
   boundDynamicWorkflowRunEventPayload,
+  DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES,
+  DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS,
   type DynamicWorkflowRunError,
   type DynamicWorkflowRunLogEntry,
   type DynamicWorkflowRunPendingQuestion,
@@ -207,7 +209,7 @@ export function snapshotOf(
     ...(error === undefined ? {} : { error }),
     // 零条时整字段缺席（与 reports 同规）：读侧据此让整块 pending 区消失，不渲染空节。
     ...(pendingQuestions.length === 0 ? {} : { pendingQuestions }),
-    ...reportsOf(nodes),
+    ...reportsOf(nodes, taskId, journal),
     // 用户面产物。⚠ 与紧邻的 `output`
     // （`entry.terminal.artifact` = 脚本顶层返回值，引擎内部也叫 artifact）是**两件不同的东西**：
     // 这里是脚本经 `artifact.*` 发布给用户看的产出，那里是给模型看的返回值。
@@ -265,24 +267,48 @@ export function runScriptPathField(scriptPath: string | undefined): { scriptPath
 }
 
 /**
- * 终态快照上的 `reports`：journal 里 `kind = "report"` 的节点行（一次写入、恒 `completed`、
- * 被报告的 item 就在 `result` 上），按插入顺序 = 报告顺序。
+ * 终态快照上的 `reports` 与 `reportCount`：journal 里 `kind = "report"` 的节点行（一次写入、恒
+ * `completed`、被报告的 item 就在 `result` 上），按插入顺序 = 报告顺序。
  *
  * 为什么从 journal 读而不是从投影读：`workflowRuns.reports` 是有界的 memory-only 展示面
  * （冷恢复后为空），而这些行是那些条目的**持久家**。完成通知要在 failed / cancelled 上
  * 一样携带产物——一个死在第 12 个 ask 上的 run 仍然做完了 11 个 ask 的活，捞回它正是
  * `report` 存在的理由——所以它读的必须是持久那一份。
  *
- * 只在**终态**读：`getTask` 会被后台追踪器反复轮询，而 `listNodes` 是一次全表扫（一个
- * 256 节点的 run 每次轮询都要解码 256 行）。唯一的消费者是终态通知与终态 TaskOutput，
- * 在飞时读它没有读者，只有成本。这条判据现在由调用方执行——`nodes` 缺席即「在飞，别读」，
- * 好让同一次扫描同时喂 {@link artifactsOf}。
+ * 只读前 {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS} 条、至多
+ * {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES} 字节的 item，总数是一次 `count(*)`
+ * （docs/execution-engine.md「Reading the journal」）。修复原因：此前这里跟着 `nodes` 把整张节点表
+ * 连同每条 report item 读进内存——一个报满的 run 在结算那一刻要解码 GiB 量级的 item，而通知
+ * 那一节的字符预算只容得下几十条。条数界单独也不够：单条上限 1 MiB 时 256 条就是 256 MiB。
+ * 零条时两个字段都缺席：通知端据此让整节 `<reports>` 消失，不发空节。
+ *
+ * **FORK 偏离**：`countNodes` 是端口上的可选方法，缺席（例如只读事件日志的窄替身）时
+ * `reportCount` 整个字段不出现——不知道总数比报一个错的总数诚实；`reports` 照读（长度仍被
+ * 条数与字节两道界钳住），读侧据「`reports` 在场而 `reportCount` 缺席」退回按条目数说事。
+ *
+ * 只在**终态**读：`getTask` 会被后台追踪器反复轮询，而节点表随 run 做过的一切增长。唯一的
+ * 消费者是终态通知与终态 TaskOutput，在飞时读它没有读者，只有成本。这条判据由调用方执行
+ * （`nodes` 缺席即「在飞，别读」），好让同一次扫描同时喂 {@link artifactsOf}。
  */
-function reportsOf(nodes: readonly NodeRecord[] | undefined): { reports?: readonly unknown[] } {
+function reportsOf(
+  nodes: readonly NodeRecord[] | undefined,
+  taskId: string,
+  journal: JournalStorePort,
+): { reports?: readonly unknown[]; reportCount?: number } {
   if (nodes === undefined) return {};
-  const items = nodes.filter((node) => node.kind === "report").map((node) => node.result);
-  // 零条时整字段缺席：通知端据此让整节 `<reports>` 消失，不发空节。
-  return items.length === 0 ? {} : { reports: items };
+  const reports = journal
+    .listNodes(taskId, {
+      kinds: ["report"],
+      withResult: true,
+      limit: DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS,
+      maxResultBytes: DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES,
+    })
+    .map((node) => node.result);
+  // 零条时两个字段都缺席：通知端据此让整节 `<reports>` 消失，不发空节。
+  if (reports.length === 0) return {};
+  const reportCount = journal.countNodes?.(taskId, "report");
+  // 计数缺席（可选方法没实现）即只省略 `reportCount`：条目本身没有理由跟着一起丢。
+  return reportCount === undefined ? { reports } : { reports, reportCount };
 }
 
 /**

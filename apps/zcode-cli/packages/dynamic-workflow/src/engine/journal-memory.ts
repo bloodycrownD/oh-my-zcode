@@ -10,6 +10,8 @@ import type {
   Caps,
   JournalStorePort,
   ListEventsOptions,
+  ListNodesOptions,
+  NodeKind,
   NodeRecord,
   RunEvent,
   RunRecord,
@@ -26,6 +28,26 @@ function clone<T>(value: T): T {
 /** actor / node 的复合键。 */
 function key(siteId: string, ordinal: number): string {
   return `${siteId}@${ordinal}`;
+}
+
+/** 一行 `result` 的 UTF-8 序列化字节数，与 SQLite 侧 `octet_length(result_json)` 同一把尺。 */
+function resultBytes(node: NodeRecord): number {
+  if (node.result === undefined) return 0;
+  const text = JSON.stringify(node.result);
+  return text === undefined ? 0 : new TextEncoder().encode(text).length;
+}
+
+/** `maxResultBytes` 的前缀规则：再加一行就超界时收尾，第一行总是带上（同 SQLite 侧）。 */
+function withinBytes(nodes: readonly NodeRecord[], maxResultBytes: number): NodeRecord[] {
+  const kept: NodeRecord[] = [];
+  let total = 0;
+  for (const node of nodes) {
+    const bytes = resultBytes(node);
+    if (kept.length > 0 && total + bytes > maxResultBytes) break;
+    kept.push(node);
+    total += bytes;
+  }
+  return kept;
 }
 
 export class InMemoryJournalStore implements JournalStorePort {
@@ -118,9 +140,33 @@ export class InMemoryJournalStore implements JournalStorePort {
     return n === undefined ? undefined : clone(n);
   }
 
-  listNodes(runId: string): NodeRecord[] {
+  listNodes(runId: string, opts?: ListNodesOptions): NodeRecord[] {
     const bucket = this.nodes.get(runId);
-    return bucket === undefined ? [] : [...bucket.values()].map(clone);
+    if (bucket === undefined) return [];
+    // Map 的迭代序 = 首次插入序，与 SQLite 侧的 `order by id` 同语义（upsert 不改 id，也不改
+    // Map 里的位置）。
+    if (opts === undefined) return [...bucket.values()].map(clone);
+    const kinds = opts.kinds;
+    const matched = [...bucket.values()].filter(
+      (node) => kinds === "all" || kinds.includes(node.kind),
+    );
+    const limited = opts.limit === undefined ? matched : matched.slice(0, Math.max(0, opts.limit));
+    const budgeted =
+      opts.maxResultBytes === undefined ? limited : withinBytes(limited, opts.maxResultBytes);
+    return budgeted.map((node) => {
+      const copy = clone(node);
+      // `withResult: false` 与 SQLite 侧不 select `result_json` 同语义：键缺席，而不是 null。
+      if (!opts.withResult) delete copy.result;
+      return copy;
+    });
+  }
+
+  countNodes(runId: string, kind: NodeKind): number {
+    const bucket = this.nodes.get(runId);
+    if (bucket === undefined) return 0;
+    let count = 0;
+    for (const node of bucket.values()) if (node.kind === kind) count += 1;
+    return count;
   }
 
   appendEvent(runId: string, event: RunEvent): StoredEvent {
@@ -142,14 +188,39 @@ export class InMemoryJournalStore implements JournalStorePort {
   listEvents(runId: string, opts?: ListEventsOptions): StoredEvent[] {
     const list = this.events.get(runId);
     if (list === undefined) return [];
+    // report 的排名按**全 run** 计（与 types / cursor / limit 无关），所以先在未过滤的序列上
+    // 给每条 report 事件定名次，再过滤——SQLite 侧的分界查询也一样开在过滤之前。
+    const reportLimit =
+      opts?.reportItems === undefined || opts.reportItems === "all"
+        ? undefined
+        : opts.reportItems.limit;
+    const stripped = new Set<number>();
+    if (reportLimit !== undefined) {
+      let rank = 0;
+      for (const stored of list) {
+        if (stored.event.type !== "report") continue;
+        rank += 1;
+        if (rank > reportLimit) stripped.add(stored.sequence);
+      }
+    }
     // sequence 与数组下标在内存实现里恒等（appendEvent 用 list.length 分配），但这里仍按
     // sequence 比较而不是按下标偏移：cursor 的语义是"严格大于该 sequence"，SQLite 侧也是
     // `where sequence > ?`。两侧共用同一份契约测，语义必须逐字相同。
+    const types = opts?.types;
     const after = opts?.afterSequence;
-    const filtered = after === undefined ? list : list.filter((e) => e.sequence > after);
+    const filtered = list.filter(
+      (e) =>
+        (types === undefined || types === "all" || types.includes(e.event.type)) &&
+        (after === undefined || e.sequence > after),
+    );
     const limited =
       opts?.limit === undefined ? filtered : filtered.slice(0, Math.max(0, opts.limit));
-    return limited.map(clone);
+    return limited.map((stored) => {
+      const copy = clone(stored);
+      // 剥离只删 `item`：实例、`artifactId`、出生阶段字段与时间都保留（同 SQLite 的 json_remove）。
+      if (stripped.has(stored.sequence)) delete (copy.event as { item?: unknown }).item;
+      return copy;
+    });
   }
 
   private requireActorBucket(runId: string): Map<string, ActorRecord> {

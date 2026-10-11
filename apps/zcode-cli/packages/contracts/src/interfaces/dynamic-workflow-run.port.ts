@@ -197,6 +197,20 @@ export type DynamicWorkflowRunAmendResult =
 export type DynamicWorkflowRunCancelInitiator = "user" | "model" | { superseded: string };
 
 /**
+ * 终态快照带的 report item 上限（`reports` 的长度上界）。取 256：比引擎的 run 级 report 上限
+ * 宽松，而通知那一节的字符预算（8,000）本来也只容得下几十条。超过此上限的 item 仍在 journal
+ * 的 `kind = "report"` 行里，只是不进快照——真实总数由 {@link DynamicWorkflowRunSnapshot.reportCount} 说出。
+ */
+export const DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS = 256;
+
+/**
+ * 终态快照带的 report item 的字节上界（按 journal 里 `result_json` 的字节计）。取 8 MiB。
+ * 条数界单独管不住字节：单条 report item 的上界是 1 MiB，256 条就是 256 MiB。取 8 MiB 之后
+ * 快照的内存不随单条上限涨。第一条总是带上，所以一条 1 MiB 的报告不会让快照一条都不带。
+ */
+export const DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES = 8 * 1024 * 1024;
+
+/**
  * run 快照：沿用 {@link WorkflowTaskSnapshot} 的形状（后台任务追踪器与通知管线按它读），
  * 只把 `output` 放宽——workflow run 的产物是脚本的顶层返回值，形状由脚本决定，不是 legacy
  * `Workflow` 工具的输出类型。legacy 端口本身不加宽（两套 workflow 机制不共用端口）。
@@ -205,6 +219,10 @@ export type DynamicWorkflowRunCancelInitiator = "user" | "model" | { superseded:
  * `kind = "report"` 节点行——那是这些条目的持久家（`workflowRuns.reports` 只是有界的
  * memory-only 展示面）。完成通知据此在 completed / failed / cancelled 三态下一律回投：
  * 一个死在第 12 个 ask 上的 run 仍然做完了 11 个 ask 的活，捞回它正是 `report` 存在的理由。
+ *
+ * 它只带**前** {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS} 条、且至多
+ * {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES} 字节；真实总数在
+ * {@link DynamicWorkflowRunSnapshot.reportCount}。
  */
 export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & {
   output?: unknown;
@@ -252,7 +270,20 @@ export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & 
    * 那是结算它的那个进程自己看到的一世，一个更保守但永不虚报的答案。
    */
   activeDurationMs?: number;
+  /**
+   * 前 {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS} 条 report item，按报告顺序、至多
+   * {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES} 字节；零条时缺席。
+   */
   reports?: readonly unknown[];
+  /**
+   * 本 run 的 report 真实总条数（journal 的 `count(*)`），与 `reports` 同在同缺：
+   * `reports` 被截在上限处时，`count > reports.length` 就是「还有更多」的信号。
+   *
+   * **可选**（FORK 偏离上游的必填形状）：计数要 journal 的 `countNodes` 端方法，而该方法是
+   * 可选的——缺席（例如只读事件日志的窄替身）时整个字段不出现，读侧据此不知道总数，
+   * 与 `reports` 零条时缺席是同一种诚实的说法。
+   */
+  reportCount?: number;
   /**
    * 此刻停驻在这个 run 上、等主代理作答的升级问题。
    *

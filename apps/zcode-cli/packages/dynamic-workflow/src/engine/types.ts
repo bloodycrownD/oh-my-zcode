@@ -848,12 +848,50 @@ export interface StoredEvent {
 /**
  * 事件分页参数（cursor = journal sequence）。app 侧的运行详情页据此增量拉取事件日志：
  * 一次返回全量意味着每翻一页都把整条 journal 读进内存。
+ *
+ * `types` 与 `reportItems` 都是**可选**的（FORK 偏离上游的必填形状）：端口上的既有测试替身
+ * 只实现无选项的整表读也能编译，而调用方想要收窄的读时必须显式带上它们。存储层据此下推
+ * SQL 过滤与 `report` 事件 `item` 的剥离（`json_remove`），**不得**取全量再切片。
  */
 export interface ListEventsOptions {
+  /** 只返回这些类型的事件（`type in (…)`）；`"all"` 或缺省即不过滤。空数组得到空列表。 */
+  types?: readonly RunEventType[] | "all";
+  /**
+   * `report` 事件的 `item` 读到哪里为止。`{limit: N}`：本 run 按 sequence 的**第 N 条之后**的
+   * 每条 `report` 事件照样返回，但不带 `item`——实例、`artifactId`、出生阶段字段与时间都保留。
+   * 被剥掉的 item 从不进入 JS 堆。缺省或 `"all"` 即不剥。
+   *
+   * 排名按**本 run 全部 report 事件** 的 sequence 计，与 `types` / cursor / `limit` 无关——
+   * 「第几条报告」是 run 的事实，不随一页从哪里开始而变。
+   */
+  reportItems?: "all" | { limit: number };
   /** 只返回 sequence **严格大于**该值的事件。cursor 是"已读到的最后一个 sequence"，不是偏移量。 */
   afterSequence?: number;
   /** 单页最多返回的条数；缺省不限。 */
   limit?: number;
+}
+
+/** 事件类型词（`dwf_event.type` 列）。 */
+export type RunEventType = RunEvent["type"];
+
+/**
+ * 节点列表读参数。**可选**（FORK 偏离上游的必填形状）：`listNodes(runId)` 的既有形态保持
+ * 「全量带结果」，新调用方用 `opts` 收窄。过滤、计数都在存储层做，不得取全量再切片——
+ * 一条 run 的表随它做过的一切增长，读放大正是本类型存在的理由。
+ */
+export interface ListNodesOptions {
+  /** 只返回这些 kind 的行（`kind in (…)`）；`"all"` = 不过滤。空数组得到空列表。 */
+  kinds: readonly NodeKind[] | "all";
+  /** false = 不读 `result_json`，返回的行上 `result` 缺席（其余列照常）。 */
+  withResult: boolean;
+  /** 最多返回的行数；缺省不限。 */
+  limit?: number;
+  /**
+   * 结果字节的上界：按行序取行，再加一行就会让已取各行 `result` 的序列化字节数之和超过它时
+   * 收尾；第一行总是带上。只在 `withResult: true` 时有意义。终态快照用它把「前 256 条报告」
+   * 同时限在 8 MiB 之内——条数上界单独管不住字节。
+   */
+  maxResultBytes?: number;
 }
 
 /**
@@ -898,12 +936,25 @@ export interface JournalStorePort {
 
   putNode(record: NodeRecord): void;
   getNode(runId: string, siteId: string, ordinal: number): NodeRecord | undefined;
-  listNodes(runId: string): NodeRecord[];
+  /**
+   * 列出本 run 的节点行（插入顺序 = 站点动作顺序）。`opts` 缺省即「全量、带结果」的历史形态；
+   * 带着时必须**下推到存储层**过滤/限量（`kind in (…)` / limit / 字节界），不得取全量再切片——
+   * 一次 `listNodes(runId)` 会把每条 ask 的回答与每条 report item 一起解码进内存。
+   */
+  listNodes(runId: string, opts?: ListNodesOptions): NodeRecord[];
+  /**
+   * 本 run 某 kind 的节点行数（`count(*)`，行一条都不读）。
+   *
+   * **可选**（FORK 偏离上游的必填形状）：缺席即调用方自己数（那会把整表读进来），读侧据此
+   * 省略那个字段——观察面的 `reportCount` 就是这样做的。
+   */
+  countNodes?(runId: string, kind: NodeKind): number;
 
   appendEvent(runId: string, event: RunEvent): StoredEvent;
   /**
-   * 按 sequence 升序列出事件。`opts` 缺省即全量（历史形态）；带 cursor / limit 时必须在
-   * 存储层过滤，不得取全量再切片——分页存在的理由就是不把整条 journal 读进内存。
+   * 按 sequence 升序列出事件。`opts` 缺省即全量（历史形态）；带 cursor / limit / `types` /
+   * `reportItems` 时必须在存储层过滤与剥离，不得取全量再切片——分页存在的理由就是不把整条
+   * journal 读进内存。
    * 未知 runId 与越界 cursor 一律返回空数组（不抛错）：投影与 journal 之间的竞态窗口里，
    * 客户端拿着一个尚未存在的 cursor 回来是正常时序。
    */

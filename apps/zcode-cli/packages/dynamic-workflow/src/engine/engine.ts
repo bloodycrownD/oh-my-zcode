@@ -348,8 +348,11 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
       }
       // resume：结算次序按本 run 自己的事件恢复（本闸是 replay 正确性的一部分，不是观察面：
       // 站点序号依调用到达顺序，而扇出的到达顺序只有首生的结算次序能复现）。节点行只读一次，
-      // 下面的报告计数与产物恢复共用它。
+      // 下面的 ask 行数建表、报告计数与产物恢复共用它。
       const nodes = this.journal.listNodes(this.runId);
+      // 每个 actor 已记录的 ask 行数一次建表（registerActor 不再每建一个 actor 就把整张
+      // 节点表读一遍再过滤——宽扇出下那是 O(actor × 行) 次解码）。
+      this.scheduler.seedRecordedAsks(nodes);
       this.replaySettleOrder = recoverSettleOrder(this.journal, this.runId, nodes);
       // 报告计数按 journal 里 kind:"report" 的行数恢复；用量从记录恢复（跨生命周期连续）。
       this.reportCount = nodes.filter((n) => n.kind === "report").length;

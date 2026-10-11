@@ -202,6 +202,8 @@ export {
   type InstanceRef,
   type JournalStorePort,
   type ListEventsOptions,
+  type ListNodesOptions,
+  type RunEventType,
   type NodeKind,
   type NodeOutcome,
   type NodeRecord,

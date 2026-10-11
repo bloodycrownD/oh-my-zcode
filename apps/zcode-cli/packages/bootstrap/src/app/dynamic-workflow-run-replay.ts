@@ -11,7 +11,13 @@
 
 import type { DwfRunSessionListItem } from "@zcode/adapters/storage";
 import type { DynamicWorkflowRunProgressPayload } from "@zcode/contracts";
-import type { JournalStorePort, RunEvent, StoredEvent } from "@zcode/dynamic-workflow";
+import type {
+  JournalStorePort,
+  ListEventsOptions,
+  RunEvent,
+  StoredEvent,
+} from "@zcode/dynamic-workflow";
+import { WORKFLOW_RUNS_LIMITS } from "@zcode/shared/zcode-protocol-v4";
 import { toProgressPayload } from "./dynamic-workflow-run-launch.js";
 import { TERMINAL_RUN_STATUSES } from "./dynamic-workflow-run-observation.js";
 
@@ -41,8 +47,28 @@ export function replayRunProgress(
   journal: Pick<JournalStorePort, "listEvents">,
   concurrencyCeiling: number,
 ): DynamicWorkflowRunProgressPayload[] {
-  return replayRunProgressFromEvents(row, journal.listEvents(row.runId, {}), concurrencyCeiling);
+  return replayRunProgressFromEvents(
+    row,
+    journal.listEvents(row.runId, COLD_REPLAY_EVENT_READ),
+    concurrencyCeiling,
+  );
 }
+
+/**
+ * 冷回放（与 GetWorkflowRun）读事件的形状：全部事件，但本 run 第
+ * {@link WORKFLOW_RUNS_LIMITS.maxReports} 条之后的 report 事件不带 `item`
+ * （docs/execution-engine.md「Reading the journal」）。
+ *
+ * 为什么归约结果与读全量逐字节相同：reducer 按实例 upsert report 条目、满 64 条后拒收新实例，
+ * `run-started` 不清表，而每个 report 实例只发一次事件（重放命中静默跳过）——所以前 64 条
+ * report 事件恰好就是 reducer 会为之生成预览的那些；之后的每一条它只读实例（置 `truncated`）
+ * 与标签（数看板条目）。修复原因：此前这里读全量，一个报了 65,536 条的 run 在会话打开时要把
+ * 约 2 GiB 的 item 解码进内存，而它们没有一条会被显示。
+ */
+export const COLD_REPLAY_EVENT_READ: ListEventsOptions = {
+  types: "all",
+  reportItems: { limit: WORKFLOW_RUNS_LIMITS.maxReports },
+};
 
 /**
  * 同一条铸造链，但事件由调用方**已经读好**递进来。
@@ -51,8 +77,9 @@ export function replayRunProgress(
  * 截面。让两边各 `listEvents` 一次，
  * 就是为同一份数据付两遍钱——而这条读面在长 run 上正是最贵的那一段。
  *
- * 递进来的必须是**该 run 的全量事件、sequence 升序**（即 `listEvents(runId, {})` 的返回），
- * 尾部结算的替换逻辑依赖「最后一条就是最后一条」。
+ * 递进来的必须是**该 run 的全量事件、sequence 升序**（即
+ * `listEvents(runId, COLD_REPLAY_EVENT_READ)` 的返回，report item 已被剥到第
+ * {@link WORKFLOW_RUNS_LIMITS.maxReports} 条），尾部结算的替换逻辑依赖「最后一条就是最后一条」。
  */
 export function replayRunProgressFromEvents(
   row: DwfRunSessionListItem,

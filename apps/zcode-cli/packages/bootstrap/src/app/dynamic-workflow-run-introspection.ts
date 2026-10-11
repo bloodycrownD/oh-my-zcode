@@ -32,7 +32,10 @@ import {
   TERMINAL_RUN_STATUSES,
   type RunRegistryEntry,
 } from "./dynamic-workflow-run-observation.js";
-import { replayRunProgressFromEvents } from "./dynamic-workflow-run-replay.js";
+import {
+  COLD_REPLAY_EVENT_READ,
+  replayRunProgressFromEvents,
+} from "./dynamic-workflow-run-replay.js";
 import { buildWorkflowRunRoster } from "./dynamic-workflow-run-roster.js";
 import type { WorkflowEscalationRegistry } from "./workflow-escalation-registry.js";
 
@@ -174,7 +177,9 @@ export function createRunIntrospectionMethods(
       // 事件**只读一遍**：同一份序列
       // 先经冷回放那条铸造链归约成 run 面板同款状态，再连同节点行 / actor 行喂给情势截面。
       // 两边各读一次就是为同一份数据付两遍钱，而这条查询在长 run 上正是最贵的一段。
-      const stored = journal.listEvents(runId, {});
+      // report item 只读到投影的界为止（与冷回放同一条读，见 dynamic-workflow-run-replay.ts）：
+      // 归约结果与读全量逐字节相同，省下的是整条 journal 里 report 载荷的那一大段。
+      const stored = journal.listEvents(runId, COLD_REPLAY_EVENT_READ);
       const pendingQuestions = pendingQuestionsOf(escalations, runId, summary.status, entry);
       return {
         ...summary,

@@ -16,6 +16,8 @@ import type {
   Caps,
   JournalStorePort,
   ListEventsOptions,
+  ListNodesOptions,
+  NodeKind,
   NodeRecord,
   RunEvent,
   RunRecord,
@@ -34,7 +36,6 @@ import {
 } from "./dwf-journal-artifacts.js";
 import {
   decodeActor,
-  decodeEvent,
   decodeNode,
   decodeRun,
   encodeResultJson,
@@ -48,6 +49,7 @@ import {
   type DwfRunRow,
   type DwfRunSessionListItem,
 } from "./dwf-journal-codecs.js";
+import { countNodeRows, listEventRows, listNodeRows } from "./dwf-journal-reads.js";
 import {
   countNodesByStatus,
   getRunRow,
@@ -360,11 +362,20 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
     return row ? decodeNode(row) : undefined;
   }
 
-  listNodes(runId: string): NodeRecord[] {
-    const rows = this.db
-      .prepare("select * from dwf_node where run_id = ? order by id")
-      .all(runId) as unknown as DwfNodeRow[];
-    return rows.map(decodeNode);
+  // ---- 节点 / 事件的列表读：SQL 与论证住在 dwf-journal-reads.ts（读面选项全部下推）。
+
+  /**
+   * 节点行列表。`opts` 缺省即全量带结果（历史形态）；带着时 kinds / withResult / limit /
+   * maxResultBytes 全部下推 SQLite——在这里取全量再过滤，等于把每条 ask 的回答与每条 report
+   * item 一起解码进内存，正是 `listNodes` 带选项的理由。
+   */
+  listNodes(runId: string, opts?: ListNodesOptions): NodeRecord[] {
+    return listNodeRows(this.db, runId, opts);
+  }
+
+  /** 本 run 某 kind 的节点行数（`count(*)`，一条结果都不读）。 */
+  countNodes(runId: string, kind: NodeKind): number {
+    return countNodeRows(this.db, runId, kind);
   }
 
   listArtifactRows(runId: string): NodeRecord[] {
@@ -410,18 +421,13 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
     return { sequence: row.sequence, event, timeCreated };
   }
 
+  /**
+   * 事件列表（sequence 升序）。`opts` 缺省即全量（历史形态）；带着时 cursor / limit / `types` /
+   * `reportItems` 全部下推 SQLite（`reportItems` 用 `json_remove` 在库里剥离 item）——在这里
+   * 取全量再切片，等于每翻一页、每次冷回放都把整条 journal 连同每条 report item 读进内存。
+   */
   listEvents(runId: string, opts?: ListEventsOptions): StoredEvent[] {
-    // cursor 与 limit 都下推到 SQL：在这里取全量再切片，等于每翻一页把整条 journal
-    // 读进内存——分页存在的理由就是不这么做。cursor 语义是"严格大于"（内存实现同）。
-    const after = opts?.afterSequence;
-    const limit = opts?.limit;
-    const where = after === undefined ? "run_id = ?" : "run_id = ? and sequence > ?";
-    const params: Array<string | number> = after === undefined ? [runId] : [runId, after];
-    // `limit -1` 是 SQLite 的"不限"写法，因此缺省与显式 limit 共用同一条语句形状。
-    const rows = this.db
-      .prepare(`select * from dwf_event where ${where} order by sequence limit ?`)
-      .all(...params, limit === undefined ? -1 : Math.max(0, limit)) as unknown as DwfEventRow[];
-    return rows.map(decodeEvent);
+    return listEventRows(this.db, runId, opts);
   }
 
   /** UPDATE 影响 0 行即"未知 run"——SQLite 不会为此报错，必须显式检出并大声失败。 */
