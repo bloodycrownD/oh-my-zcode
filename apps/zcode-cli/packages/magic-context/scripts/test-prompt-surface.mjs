@@ -202,7 +202,10 @@ it("a user tool_descriptions override outranks both catalogs", () => {
   });
   assert.equal(registration.descriptionFor("ctx_search", "FULL search"), "MINE");
   // untouched ids keep the preset catalog, not the full one.
-  assert.equal(registration.descriptionFor("ctx_reduce", "FULL reduce"), LIGHT_TOOL_DESCRIPTIONS.ctx_reduce);
+  assert.equal(
+    registration.descriptionFor("ctx_reduce", "FULL reduce"),
+    LIGHT_TOOL_DESCRIPTIONS.ctx_reduce,
+  );
   // blank overrides are ignored rather than served.
   const blank = runtime.resolveRegistration({
     default: "full",
@@ -254,9 +257,15 @@ it("guidance overrides that cannot own the section fall back and say so once", (
     mkdirSync(join(dir, "a-directory.md"));
     const { runtime, warnings } = runtimeFor(dir);
     // two markers
-    assert.equal(runtime.resolveGuidance({ guidance_override_path: "two.md" }).primaryOverride, undefined);
+    assert.equal(
+      runtime.resolveGuidance({ guidance_override_path: "two.md" }).primaryOverride,
+      undefined,
+    );
     // blank
-    assert.equal(runtime.resolveGuidance({ guidance_override_path: "empty.md" }).primaryOverride, undefined);
+    assert.equal(
+      runtime.resolveGuidance({ guidance_override_path: "empty.md" }).primaryOverride,
+      undefined,
+    );
     // path is a directory, not a file
     assert.equal(
       runtime.resolveGuidance({ guidance_override_path: "a-directory.md" }).primaryOverride,
@@ -318,11 +327,36 @@ it("memoryEnabled=false drops the memory guidance but keeps ctx_search", () => {
 });
 
 it("preset=light swaps the desk copy for the compact one", () => {
-  const full = buildMagicContextSection(null, 0, true, false, false, false, false, undefined, true, "full");
-  const light = buildMagicContextSection(null, 0, true, false, false, false, false, undefined, true, "light");
+  const full = buildMagicContextSection(
+    null,
+    0,
+    true,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    true,
+    "full",
+  );
+  const light = buildMagicContextSection(
+    null,
+    0,
+    true,
+    false,
+    false,
+    false,
+    false,
+    undefined,
+    true,
+    "light",
+  );
   assert.notEqual(full, light);
   assert.match(full, /Think of your context as a desk\. Every message and every tool output/);
-  assert.match(light, /Your context is a desk\. Every message and tool output lands on it with a §N§ tag/);
+  assert.match(
+    light,
+    /Your context is a desk\. Every message and tool output lands on it with a §N§ tag/,
+  );
   // both presets still teach the self-tag rule for reduce-callable sessions.
   assert.match(full, /Start the text of each reply with exactly §N§/);
   assert.match(light, /Start the text of each reply with exactly §N§/);
@@ -343,7 +377,18 @@ it("subagentMode reduces the section to the tag mechanics only", () => {
   assert.match(sub, /never blanket-stamp a range like "1-50"/);
   assert.doesNotMatch(sub, /long-term partner/);
   assert.doesNotMatch(sub, /`<project-memory>` is the pinboard/);
-  const subLight = buildMagicContextSection(null, 0, true, false, false, false, true, undefined, true, "light");
+  const subLight = buildMagicContextSection(
+    null,
+    0,
+    true,
+    false,
+    false,
+    false,
+    true,
+    undefined,
+    true,
+    "light",
+  );
   assert.notEqual(sub, subLight);
   assert.match(subLight, /stamp it with `ctx_reduce`/);
 });
@@ -372,7 +417,10 @@ it("a primaryOverride owns the section body while composer-owned clauses stay", 
 
 it("language unset emits no directive; a bad code emits none either", () => {
   assert.doesNotMatch(buildMagicContextSection(null, 0), /natural-language replies/);
-  assert.doesNotMatch(buildMagicContextSection(null, 0, true, false, false, false, false, "zzz"), /natural-language replies/);
+  assert.doesNotMatch(
+    buildMagicContextSection(null, 0, true, false, false, false, false, "zzz"),
+    /natural-language replies/,
+  );
 });
 
 it("caveman and temporal arms are off by default and change the text when on", () => {
@@ -417,7 +465,11 @@ it("light-description tool references close against the ZCode tool surface (T-P2
   // verbatim). Step 18 owes the same decision for the 211 行段's CTX_NOTE_GUIDANCE.
   assert.deepEqual(unknown, ["ctx_note"], JSON.stringify({ referenced: [...referenced], unknown }));
   const ctxMemory = LIGHT_TOOL_DESCRIPTIONS.ctx_memory;
-  assert.match(ctxMemory, /ctx_note/, "the ctx_note reference must be visible, not silently edited");
+  assert.match(
+    ctxMemory,
+    /ctx_note/,
+    "the ctx_note reference must be visible, not silently edited",
+  );
 });
 
 it("ctx_note is not part of the fork surface (N2 terminal decision)", () => {

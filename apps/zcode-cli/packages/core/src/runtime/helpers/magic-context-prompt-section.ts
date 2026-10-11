@@ -38,32 +38,32 @@ import type { AgentRuntimeInternal } from "../internal.js";
  * 没有任何理由比 bootstrap 更早知道它们。
  */
 export interface MagicContextPromptSectionInput {
-    /**
-     * 执行模型的 canonical key（`provider/model`）。缺席（还没有活模型）时 preset 只能
-     * 落到 configured default——此时段文案仍然是诚实值，因为 resolver 自己按同一把
-     * model-key walk 解析，分歧只会发生在 `${default}` 上，而那是配置的事实。
-     */
-    modelKey?: string;
-    /** 实际提示词语言（runtime config 的 `language`，"auto" 已由装配层解析掉）。 */
-    language?: string;
-    /**
-     * `ctx_reduce` 在**本次请求的工具表里真的注册了吗**。判据是注册事实而不是
-     * `magicContext.enabled` flag：后者开着而工具因 allowlist / workflow_child 结构禁用
-     * 缺席时，教模型「盖章」是在介绍一个它没有的工具。
-     */
-    ctxReduceCallable: boolean;
-    /** 子智能体 runtime：段只保留 §N§ 机制（上游 subagent 分支）。 */
-    subagentMode: boolean;
+  /**
+   * 执行模型的 canonical key（`provider/model`）。缺席（还没有活模型）时 preset 只能
+   * 落到 configured default——此时段文案仍然是诚实值，因为 resolver 自己按同一把
+   * model-key walk 解析，分歧只会发生在 `${default}` 上，而那是配置的事实。
+   */
+  modelKey?: string;
+  /** 实际提示词语言（runtime config 的 `language`，"auto" 已由装配层解析掉）。 */
+  language?: string;
+  /**
+   * `ctx_reduce` 在**本次请求的工具表里真的注册了吗**。判据是注册事实而不是
+   * `magicContext.enabled` flag：后者开着而工具因 allowlist / workflow_child 结构禁用
+   * 缺席时，教模型「盖章」是在介绍一个它没有的工具。
+   */
+  ctxReduceCallable: boolean;
+  /** 子智能体 runtime：段只保留 §N§ 机制（上游 subagent 分支）。 */
+  subagentMode: boolean;
 }
 
 /** 返回段文本，或 `null` = 本会话不注入（无端口 / flag 关 / resolver 决定不注入）。 */
 export type MagicContextPromptSectionResolver = (
-    input: MagicContextPromptSectionInput,
+  input: MagicContextPromptSectionInput,
 ) => string | null;
 
 /** 子智能体 runtime 的任务类型判定（与 `resolveRuntimeDisallowedTools` 用的同一个字面量）。 */
 function isSubagentRuntime(runtime: AgentRuntimeInternal): boolean {
-    return runtime.config.taskType === "subagent_child";
+  return runtime.config.taskType === "subagent_child";
 }
 
 /**
@@ -76,17 +76,17 @@ function isSubagentRuntime(runtime: AgentRuntimeInternal): boolean {
  * 三条都不该影响其余 context 段——原生 `# Memory` 段按既有规则照常注入。
  */
 export function resolveMagicContextPromptSection(
-    runtime: AgentRuntimeInternal,
-    model: Model | undefined,
+  runtime: AgentRuntimeInternal,
+  model: Model | undefined,
 ): string | null {
-    const resolver = runtime.magicContextPromptSection;
-    if (!resolver) return null;
-    if (runtime.config.magicContext?.enabled !== true) return null;
+  const resolver = runtime.magicContextPromptSection;
+  if (!resolver) return null;
+  if (runtime.config.magicContext?.enabled !== true) return null;
 
-    return resolver({
-        ...(model ? { modelKey: `${model.providerId}/${model.modelId}` } : {}),
-        ...(runtime.config.language === undefined ? {} : { language: runtime.config.language }),
-        ctxReduceCallable: runtime.getTools(model).some((tool) => tool.name === CTX_REDUCE_TOOL_NAME),
-        subagentMode: isSubagentRuntime(runtime),
-    });
+  return resolver({
+    ...(model ? { modelKey: `${model.providerId}/${model.modelId}` } : {}),
+    ...(runtime.config.language === undefined ? {} : { language: runtime.config.language }),
+    ctxReduceCallable: runtime.getTools(model).some((tool) => tool.name === CTX_REDUCE_TOOL_NAME),
+    subagentMode: isSubagentRuntime(runtime),
+  });
 }

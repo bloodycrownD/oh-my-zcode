@@ -148,7 +148,10 @@ test("B: full preset (and no option at all) leaves the descriptions byte-identic
   // 会悄悄变成 light。
   const noOption = collectEntries({ includeMagicContextTools: true });
   for (const toolId of CTX_TOOL_NAMES) {
-    assert.equal(noOption.get(toolId).metadata.description, baseline.get(toolId).metadata.description);
+    assert.equal(
+      noOption.get(toolId).metadata.description,
+      baseline.get(toolId).metadata.description,
+    );
   }
 });
 

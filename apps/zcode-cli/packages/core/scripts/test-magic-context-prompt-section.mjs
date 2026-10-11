@@ -153,7 +153,10 @@ test("A2: an absent magicContextSection injects nothing and keeps every other se
 });
 
 test("A3: a malformed section fails loudly instead of injecting prose without a heading", () => {
-  assert.throws(() => buildConfig({ magicContextSection: "### Your desk\n\nno heading" }).build(), /## Magic Context/);
+  assert.throws(
+    () => buildConfig({ magicContextSection: "### Your desk\n\nno heading" }).build(),
+    /## Magic Context/,
+  );
 });
 
 test("B1: the native # Memory section and MEMORY.md index both retire while the section is served", () => {
@@ -194,7 +197,14 @@ test("C1: no port / flag off / resolver null all mean no injection", () => {
     null,
   );
   assert.equal(
-    resolveMagicContextPromptSection({ ...base, config: { magicContext: { enabled: false } }, magicContextPromptSection: () => SECTION }, undefined),
+    resolveMagicContextPromptSection(
+      {
+        ...base,
+        config: { magicContext: { enabled: false } },
+        magicContextPromptSection: () => SECTION,
+      },
+      undefined,
+    ),
     null,
   );
   assert.equal(
@@ -215,9 +225,7 @@ test("C2: ctxReduceCallable comes from the real tool table, not the flag", () =>
   };
   const resolved = resolveMagicContextPromptSection(runtime, undefined);
   assert.equal(resolved, SECTION);
-  assert.deepEqual(seen, [
-    { language: "zh-CN", ctxReduceCallable: false, subagentMode: false },
-  ]);
+  assert.deepEqual(seen, [{ language: "zh-CN", ctxReduceCallable: false, subagentMode: false }]);
 });
 
 test("C3: model key and subagent mode reach the resolver as live facts", () => {
