@@ -2889,6 +2889,7 @@ export function createZCodeAgentService(
           deliveryKind: params.deliveryKind,
           messageLimit: params.messageLimit,
           afterSeq: params.afterSeq,
+          contentProfile: params.contentProfile,
         },
         zcodeSessionStateSnapshotSchema,
       );

@@ -1556,6 +1556,9 @@ export const zcodeSessionReadParamsSchema = z
     deliveryKind: zcodeDeliveryKindSchema.optional(),
     messageLimit: z.number().int().positive().optional(),
     afterSeq: z.number().int().nonnegative().optional(),
+    // "index"：仅 task index resync 使用，返回剥离 tool/reasoning/data URL 大载荷的同结构 snapshot，
+    // 结果禁止回写 UI 状态；缺省等同 "full"。
+    contentProfile: z.enum(["full", "index"]).optional(),
   })
   .strict();
 export type ZCodeSessionReadParams = z.infer<typeof zcodeSessionReadParamsSchema>;

@@ -45,6 +45,7 @@ import type {
   ZCodeProviderTestModelConnectivityResult,
   ZCodeUserInputRequestParams,
   ZCodeUserInputResponse,
+  ZCodeSessionContentProfile,
   ZCodeSessionEvent,
   ZCodeSessionInfo,
   ZCodeSessionMode,
@@ -237,6 +238,8 @@ export interface ZCodeAgentReadSessionParams extends ZCodeAgentSessionTarget {
   afterSeq?: number;
   /** 被动索引/观察者只能读取现有 runtime，禁止为了读快照拉起 session。 */
   runtimePolicy?: ZCodeAgentRuntimePolicy;
+  /** "index" 仅供 task index：返回剥离大载荷的同结构 snapshot，禁止回写 UI 状态。 */
+  contentProfile?: ZCodeSessionContentProfile;
 }
 
 export interface ZCodeAgentReadSessionMessagesParams extends ZCodeAgentSessionTarget {

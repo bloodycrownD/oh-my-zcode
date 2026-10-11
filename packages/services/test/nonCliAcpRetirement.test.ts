@@ -96,7 +96,7 @@ test("opening the task index leaves retired ACP IDs and user rows untouched", as
   }
 });
 
-test("missing sessions report the owner error even when a valid ACP snapshot exists", async () => {
+test("missing sessions fall back to the read-only legacy ACP snapshot", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zcode-acp-snapshot-"));
   setDataBaseDir(dir);
   const path = getLegacyTaskSessionSnapshotPath(meta.workspacePath, meta.taskId);
@@ -128,10 +128,12 @@ test("missing sessions report the owner error even when a valid ACP snapshot exi
   });
   try {
     for (const clientMode of ["desktop-continuous", "web-remote-replayable"] as const) {
-      await assert.rejects(
-        service.getTaskSnapshot({ ...meta, clientMode }),
-        (error) => error === ownerError,
-      );
+      // FORK (upstream-v3.15.1-backport): #18 legacy ACP 只读恢复后，该场景由「抛 owner error」
+      // 改为「按 legacy snapshot 恢复只读历史」（上游 v3.15.1 直接删除本用例，
+      // fork 保留覆盖并改断言新行为）。
+      const snapshot = await service.getTaskSnapshot({ ...meta, clientMode });
+      assert.equal(snapshot?.meta.taskId, meta.taskId);
+      assert.equal(snapshot?.meta.title, meta.title);
     }
     assert.equal(await readFile(path, "utf8"), content);
   } finally {

@@ -163,7 +163,10 @@ interface ConversationTopicPublisherOptions {
 
 interface ConversationSubscriberBufferLimits {
   maxOps?: number;
+  /** 字节下限（默认 1MiB）；实际上限见 conversationSubscriberBufferByteLimit。 */
   maxBytes?: number;
+  /** 当前 wire snapshot logical frame 的保守上界；缺省 0 = 只按下限裁决。 */
+  snapshotBytesUpperBound?: number;
 }
 
 export class ProjectionPayloadTooLargeError extends Error {
@@ -210,6 +213,27 @@ function nonNegativeHardBound(value: number | undefined, maximum: number, name: 
 }
 
 /**
+ * subscriber buffer 的实际字节上限 = min(max(下限, snapshot 上界), 16MiB - 64KiB)。
+ * 修复原因：overflow 的意义是用更小的 snapshot 换掉积压 delta；旧实现固定 1MiB，单条大
+ * delta（如 3MiB bash 输出的 tool row upsert）就会降级为 snapshot，而 snapshot 因同一行仍在
+ * 尾部窗口只会更大，还让客户端整份替换、丢掉已分页的历史行，turn navigator 随即全量重新
+ * 分页——长 session 中每轮循环一次。外层钳位给帧外壳留出 assembly 余量，deltas 帧仍 <=16MiB。
+ * FORK (upstream-v3.15.1-backport): 上游为配套新测试把这批符号（本函数及
+ * ConversationSubscriberBufferLimits / appendConversationSubscriberBuffer /
+ * PROJECTION_TERMINAL_RESERVE_BYTES / coldHydrationJsonByteLength 等）全部 export 化；
+ * fork 无生产消费方，保持非导出以守 knip 零新增门禁。
+ */
+function conversationSubscriberBufferByteLimit(
+  floorBytes: number,
+  snapshotBytesUpperBound: number,
+): number {
+  return Math.min(
+    Math.max(floorBytes, snapshotBytesUpperBound),
+    PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxBytes - PROJECTION_TERMINAL_RESERVE_BYTES,
+  );
+}
+
+/**
  * profile filter 后的 delta 进入此纯函数；先与现有 buffer 合并并 coalesce，
  * 再按 op/UTF-8 bytes 双限额裁决——限额必须真正执行，只存裸 delta[] 不裁决的话，
  * 慢订阅者会持续堆积并最终生成不可控的大帧。
@@ -229,10 +253,14 @@ function appendConversationSubscriberBuffer(
     PROTOCOL_V4_LIMITS.subscriberBufferMaxBytes,
     "maxBytes",
   );
+  const byteLimit = conversationSubscriberBufferByteLimit(
+    maxBytes,
+    limits.snapshotBytesUpperBound ?? 0,
+  );
   const deltas = coalesceConversationDeltas([...current, ...incoming]);
   if (deltas.length > maxOps) return { kind: "overflow" };
   const encodedBytes = utf8JsonByteLength({ kind: "deltas", deltas });
-  if (encodedBytes > maxBytes) return { kind: "overflow" };
+  if (encodedBytes > byteLimit) return { kind: "overflow" };
   return { kind: "buffered", deltas, encodedBytes };
 }
 
@@ -711,10 +739,11 @@ export class ConversationTopicPublisher {
     for (const subscription of this.subscriptions.values()) {
       if (subscription.resyncRequired) continue;
       const filtered = this.encodeDeltasForSubscription(deltas, subscription);
-      const next = appendConversationSubscriberBuffer(subscription.buffer, filtered, {
-        maxOps: this.subscriberBufferMaxOps,
-        maxBytes: this.subscriberBufferMaxBytes,
-      });
+      const next = appendConversationSubscriberBuffer(
+        subscription.buffer,
+        filtered,
+        this.subscriberBufferLimits(),
+      );
       if (next.kind === "overflow") {
         subscription.buffer = [];
         subscription.bufferBytes = 0;
@@ -1157,10 +1186,11 @@ export class ConversationTopicPublisher {
       }
       const recoveryBuffer = subscription.buffer;
       const recoveryResyncRequired = subscription.resyncRequired;
-      const merged = appendConversationSubscriberBuffer(previous.buffer, recoveryBuffer, {
-        maxOps: this.subscriberBufferMaxOps,
-        maxBytes: this.subscriberBufferMaxBytes,
-      });
+      const merged = appendConversationSubscriberBuffer(
+        previous.buffer,
+        recoveryBuffer,
+        this.subscriberBufferLimits(),
+      );
       if (merged.kind === "overflow" || previous.resyncRequired || recoveryResyncRequired) {
         subscription.buffer = [];
         subscription.bufferBytes = 0;
@@ -1174,6 +1204,14 @@ export class ConversationTopicPublisher {
       subscription.inFlight = previous.inFlight;
       rolledBack = true;
       return true;
+    };
+  }
+
+  private subscriberBufferLimits(): ConversationSubscriberBufferLimits {
+    return {
+      maxOps: this.subscriberBufferMaxOps,
+      maxBytes: this.subscriberBufferMaxBytes,
+      snapshotBytesUpperBound: this.wireSnapshotBytesUpperBound,
     };
   }
 

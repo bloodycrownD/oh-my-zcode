@@ -54,6 +54,7 @@ import {
   zcodeSessionListParamsSchema,
   zcodeSessionMessagesParamsSchema,
   zcodeSessionReadParamsSchema,
+  elideSessionSnapshotForIndex,
   zcodeSessionRuntimePreferencesResultSchema,
   zcodeSessionResumeParamsSchema,
   zcodeSessionSendParamsSchema,
@@ -1824,10 +1825,13 @@ export async function readSession(context: ZCodeProtocolAgentServerContext, rawP
     operation: "session_read",
   });
   record.deliveryKind = params.deliveryKind ?? record.deliveryKind;
-  return await snapshot(context, record, undefined, {
+  const result = await snapshot(context, record, undefined, {
     messageLimit: params.messageLimit,
     modelAvailability: "current",
   });
+  // task index resync 只需标题/搜索文本/可见性/状态，完整历史单行可达 ~15MB 会打满 host stdio；
+  // 先按 full 构建再裁剪大载荷，保证 index 派生字段与 full 同源一致。
+  return params.contentProfile === "index" ? elideSessionSnapshotForIndex(result) : result;
 }
 
 /**
