@@ -14,7 +14,6 @@ import {
 } from "react";
 import { Hand } from "lucide-react";
 import {
-
   buildCustomSupplierKey,
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
@@ -824,10 +823,7 @@ export function SessionPane({
     useZCodeSessionStore.getState().invalidateDraftRuntime(workspacePath, workspaceIdentity);
   }, [draftConfigRef, modelSelectionView?.revision, sessionId, workspaceIdentity, workspacePath]);
   // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
-  const recommendStartPlan = useCallback(
-    async <T,>(selection: T): Promise<T> => selection,
-    [],
-  );
+  const recommendStartPlan = useCallback(async <T,>(selection: T): Promise<T> => selection, []);
   const createSubmissionFromComposer = useCallback(
     () => createComposerSubmissionConfig(draftConfigRef.current, modelSelectionView),
     [draftConfigRef, modelSelectionView],
@@ -3492,7 +3488,9 @@ export function SessionPane({
     </>
   );
   const conversationBottomDock = conversationBottomDockContent ? (
-    <ConversationBottomDockTransition>{conversationBottomDockContent}</ConversationBottomDockTransition>
+    <ConversationBottomDockTransition>
+      {conversationBottomDockContent}
+    </ConversationBottomDockTransition>
   ) : null;
 
   return (

@@ -380,9 +380,7 @@ export function MagicContextSettingsFields({
                       id: "settings.context.promptSurfaceOverrides.models",
                     })}
                   </span>
-                  <span className="font-mono">
-                    {form.promptSurfaceModelRoutes.join(", ")}
-                  </span>
+                  <span className="font-mono">{form.promptSurfaceModelRoutes.join(", ")}</span>
                 </div>
               )}
               {form.promptSurfaceToolOverrides.length === 0 ? null : (

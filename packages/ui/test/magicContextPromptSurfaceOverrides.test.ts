@@ -129,7 +129,10 @@ test("bad values are shown as not configured, never as a selected preset", () =>
 });
 
 test("no overrides at all yields two empty read-only lists", () => {
-  const form = magicContextSettingsFormFromConfig({ prompt_surface: { default: "light" } }, FALLBACK);
+  const form = magicContextSettingsFormFromConfig(
+    { prompt_surface: { default: "light" } },
+    FALLBACK,
+  );
   assert.equal(form.promptSurfaceDefault, "light");
   assert.deepEqual(form.promptSurfaceModelRoutes, []);
   assert.deepEqual(form.promptSurfaceToolOverrides, []);
