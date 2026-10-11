@@ -36,5 +36,5 @@
       "ignoreDependencies": ["@zcode/magic-context"]
     }
   },
-  "ignore": [".agents/**", "docs/**", "packages/ui/src/components/**"]
+  "ignore": [".agents/**", "docs/**", "packages/ui/src/components/**", ".reference/**", ".tools/**"]
 }

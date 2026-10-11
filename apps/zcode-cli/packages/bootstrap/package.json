@@ -43,7 +43,10 @@
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src",
-    "test:mc-section-zh": "node scripts/test-magic-context-section-zh.mjs"
+    "test:mc-section-zh": "node scripts/test-magic-context-section-zh.mjs",
+    "test:publisher-buffer-clamp": "tsx --test scripts/test-publisher-buffer-clamp.mjs",
+    "test:model-request-slim": "tsx --test scripts/test-model-request-slim.mjs",
+    "test:dwf-read-narrowing": "tsx --test scripts/test-dwf-read-narrowing.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",
