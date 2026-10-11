@@ -660,6 +660,18 @@ export async function runCompartmentAgent(deps: HiddenCompartmentRunnerDeps): Pr
             // it relative to the boundary floor: a crash between COMMIT and a
             // later promotion could otherwise advance the floor past facts that
             // never became project memories.
+            // MF-MC-2（CR round 1）：unanchored promotion skip 必须留可观测日志。
+            // 没有这一行，「记忆没写」在日志里与「记忆功能被关」完全同形——
+            // 操作者无法区分 reason=discarded_last（historian 末舱边界不可信，
+            // 本舱 facts 与持久区间不可分离，下轮重导）与 memory.auto_promote=false。
+            // 上游 :957-967 同款 reason 枚举；fork 无 publishableEvents 计数面，
+            // 只强观测 reason + facts 两个量。
+            if (skipUnanchoredPromotion && promotionGateOpen && promotionProjectIdentity) {
+                sessionLog(
+                    sessionId,
+                    `promotion skipped: reason=${discardedLast ? "discarded_last" : "forced_final_keep"} facts=${(validatedPass.facts ?? []).length}`,
+                );
+            }
             if (promotionGateOpen && promotionProjectIdentity && !skipUnanchoredPromotion) {
                 try {
                     const promotion = promoteSessionFactsDurable(
