@@ -161,7 +161,12 @@ async function setFollowupMode(
  * - 未切换 → 维持 queue item 的旧快照语义，包含旧发送端 admission 兜底固定的快照。
  *   core 侧同值写回不记时间戳（desktop 每条 sendText 都 pin 当前选择），因此「入队后又
  *   提交了几条同模型消息」不会被误判成切换。
- * - 旧投影缺 `admittedAt` → `?? 0` 视为最老：任何真实切换都晚于它，活值胜出。
+ * - `?? 0` 仅防御异常/跨版本数据，不是真实缺场路径：TS/zod 层 `admittedAt` 必填
+ *   （`queueItemSchema` extends `conversationInputIntentSchema`——`admittedAt:
+ *   timestampSchema` 无 optional/default，shared/snapshot.ts:258），且 queue 不持久化
+ *   （snapshot.ts:257 裁决：CLI 进程死亡即丢，没有旧库反序列化路径能送进缺字段的旧投影）。
+ *   防御语义：`?? 0` 视为最老，任何真实切换都晚于 0，活值胜出
+ *   （test-model-live.mjs 有缺 admittedAt 用例直证）。
  * - 只覆盖 `intent.modelSelection`，**不置 pin、不写回会话态**：会话态已由
  *   switchModelConfig 写成新值，promote 不需要也不允许出现第二条模型写路径
  *   （v1.0.4「编辑重发/queue 提升不写回会话选择」语义原样保持）。

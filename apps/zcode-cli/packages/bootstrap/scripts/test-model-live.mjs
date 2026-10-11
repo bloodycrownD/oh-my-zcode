@@ -20,6 +20,8 @@
  *     - T-ML2a 入队后切换 → 提升轮用活值，且不 pin、不写回会话态。
  *     - T-ML2b 入队后未切换（含「切换发生在入队之前」）→ 提升轮用 item 旧快照。
  *     - T-ML2c auto-drain（v4-bridge 经同一 sendQueuedNow 路径）同规则。
+ *     - T-ML2d item 缺 `admittedAt`（异常/跨版本投影）+ 已切换 → 提升仍用活值
+ *              （`?? 0` 防御语义直证：缺字段不是保留旧快照的理由）。
  *     - T-ML3  编辑重发仍用被编辑轮快照且不写回会话态——即使切换发生在编辑之后
  *              （v1.0.4 回归红线：时间戳判据不得被编辑重发路径消费）。
  *     - T-ML4  execution-scope 轮豁免：仍按 intent 选择执行，但绝不写回会话态。
@@ -450,6 +452,21 @@ test("T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规�
   const { model, harness } = await executeWithIntent(intent, modelState.currentSelection());
   assert.equal(model.providerId, SELECTION_B.providerId);
   assert.deepEqual(writeBackKinds(harness.calls), [], "auto-drain 提升同样不得写回");
+});
+
+test("T-ML2d: item 缺 admittedAt（异常/跨版本投影）+ 已切换 → 提升仍用活值", async () => {
+  // `?? 0` 防御语义直证（CR MF-ML-3）：缺 admittedAt 不是真实路径——
+  // queueItemSchema extends conversationInputIntentSchema，admittedAt 必填，
+  // 且 queue 不持久化（snapshot.ts:257）；但一旦观测到缺字段的投影，
+  // `?? 0` 视为最老，任何真实切换（晚于 0）都必须胜出。
+  const modelState = createModelState(SELECTION_A);
+  modelState.switchModel(SELECTION_B);
+  const intent = await promoteQueueItem({
+    queueItem: createQueueItem({ admittedAt: undefined, modelSelection: SELECTION_A }),
+    modelState,
+  });
+  assert.deepEqual(intent.modelSelection, SELECTION_B, "缺 admittedAt 不构成保留旧快照的理由");
+  assert.equal(intent.modelSelectionPinned, false, "活值仍不得 pin");
 });
 
 // ── T-ML3：编辑重发回归（时间戳判据不得被编辑路径消费）───────────────────────
