@@ -126,6 +126,31 @@ export function countNodeRows(db: DatabaseSync, runId: string, kind: NodeKind): 
 }
 
 /**
+ * 本 run 打了产物标签的 `report` 行按 `artifact_id` 计数（产物投影的 `itemCount`）。`group by`
+ * 下推 SQLite，`dwf_node_artifact_idx (run_id, artifact_id)` 正是这个形状——行一条都不读出来。
+ *
+ * 修复原因（FORK 偏离上游：上游此查询在宿主的 `dwf-journal-artifacts.ts`，fork 落在引擎端口的
+ * 读实现里）：此前宿主把整张节点表连同每条 report item 读进内存再在 JS 里数，一个报了
+ * 65,536 条的 run 每查一次产物清单就解码一遍全部 item（docs/execution-engine.md
+ * 「Reading the journal」）。未打标签的 report 天然被排除：`artifact_id is not null`。
+ *
+ * `artifact_id` 非空但恰为空串的行照常计数——那是写入侧的形状问题，不该在读侧静默丢行。
+ */
+export function countTaggedReportRows(
+  db: DatabaseSync,
+  runId: string,
+): ReadonlyMap<string, number> {
+  const rows = db
+    .prepare(
+      `select artifact_id, count(*) as total from dwf_node
+       where run_id = ? and kind = 'report' and artifact_id is not null
+       group by artifact_id`,
+    )
+    .all(runId) as unknown as { artifact_id: string; total: number | bigint }[];
+  return new Map(rows.map((row) => [row.artifact_id, Number(row.total)]));
+}
+
+/**
  * 事件读。`types` / cursor / `limit` 下推成 WHERE 与 LIMIT；`reportItems: {limit: N}` 先取本 run
  * 第 N 条 report 事件的 sequence 作为分界（一条走 `(run_id, sequence)` 唯一索引、最多读 N 行的
  * 查询），主查询再把分界之后的 report 载荷交给 `json_remove(payload_json, '$.item')`。

@@ -15,6 +15,11 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
   sequenceOf: (event: RunEvent) => number;
 } {
   let lastStored: StoredEvent | undefined;
+  // 端口上的两个聚合计数是**可选**方法（FORK 偏离上游的必填形状）。转发必须保留「缺席即没有这个
+  // 能力」的语义：无条件挂一个 `(runId) => journal.countNodes(runId, …)`，能力探测会以为包装层
+  // 支持它，真调用时却 TypeError。`.bind(journal)` 同时把实现的 this 保住。
+  const countNodes = journal.countNodes?.bind(journal);
+  const countTaggedReports = journal.countTaggedReports?.bind(journal);
   // 逐方法显式转发而不是 `{...journal, appendEvent}`：两个实现都是 class，展开只拷贝自有属性，
   // 原型上的方法会全部丢掉（引擎随后调 getRun 就会 TypeError）。转发面**只有引擎端口**：
   // 孤儿收敛与枚举的窄查询刻意不在其中——它们发生在 service 侧、直接对 deps.journal，不经这一层。
@@ -30,7 +35,12 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
     listActors: (runId) => journal.listActors(runId),
     putNode: (record) => journal.putNode(record),
     getNode: (runId, siteId, ordinal) => journal.getNode(runId, siteId, ordinal),
-    listNodes: (runId) => journal.listNodes(runId),
+    // 读面选项必须原样转发（docs/execution-engine.md「Reading the journal」）：TS 允许实现的形参
+    // 比签名少，`(runId) => journal.listNodes(runId, <固定选项>)` 这种写法照样编译通过，却把调用方
+    // 的过滤悄悄换掉，引擎的窄读就退化回整表读。
+    listNodes: (runId, opts) => journal.listNodes(runId, opts),
+    ...(countNodes === undefined ? {} : { countNodes }),
+    ...(countTaggedReports === undefined ? {} : { countTaggedReports }),
     appendEvent: (runId, event) => {
       const stored = journal.appendEvent(runId, event);
       lastStored = stored;

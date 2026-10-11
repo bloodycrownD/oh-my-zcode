@@ -49,7 +49,12 @@ import {
   type DwfRunRow,
   type DwfRunSessionListItem,
 } from "./dwf-journal-codecs.js";
-import { countNodeRows, listEventRows, listNodeRows } from "./dwf-journal-reads.js";
+import {
+  countNodeRows,
+  countTaggedReportRows,
+  listEventRows,
+  listNodeRows,
+} from "./dwf-journal-reads.js";
 import {
   countNodesByStatus,
   getRunRow,
@@ -376,6 +381,11 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
   /** 本 run 某 kind 的节点行数（`count(*)`，一条结果都不读）。 */
   countNodes(runId: string, kind: NodeKind): number {
     return countNodeRows(this.db, runId, kind);
+  }
+
+  /** 打了产物标签的 report 行按 id 计数（`group by`，行一条都不读）。 */
+  countTaggedReports(runId: string): ReadonlyMap<string, number> {
+    return countTaggedReportRows(this.db, runId);
   }
 
   listArtifactRows(runId: string): NodeRecord[] {

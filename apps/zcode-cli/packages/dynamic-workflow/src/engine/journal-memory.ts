@@ -169,6 +169,21 @@ export class InMemoryJournalStore implements JournalStorePort {
     return count;
   }
 
+  /**
+   * 打了产物标签的 report 行的按 id 计数。与 SQLite 侧的 `group by` 给同一个数：
+   * 只数 `kind === "report"` 且带 `artifactId` 的行，**不碰 result**（内存里连克隆都只读元数据）。
+   */
+  countTaggedReports(runId: string): ReadonlyMap<string, number> {
+    const counts = new Map<string, number>();
+    const bucket = this.nodes.get(runId);
+    if (bucket === undefined) return counts;
+    for (const node of bucket.values()) {
+      if (node.kind !== "report" || node.artifactId === undefined) continue;
+      counts.set(node.artifactId, (counts.get(node.artifactId) ?? 0) + 1);
+    }
+    return counts;
+  }
+
   appendEvent(runId: string, event: RunEvent): StoredEvent {
     // 孤儿事件（run 尚未 createRun）与 putActor/putNode 一样是契约破坏：静默建桶
     // 会写出一批永远归属不到任何 run 的事件；SQLite 侧有 FK 兜底，内存侧靠这句。

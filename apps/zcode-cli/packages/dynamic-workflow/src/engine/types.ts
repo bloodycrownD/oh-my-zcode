@@ -949,6 +949,16 @@ export interface JournalStorePort {
    * 省略那个字段——观察面的 `reportCount` 就是这样做的。
    */
   countNodes?(runId: string, kind: NodeKind): number;
+  /**
+   * 本 run 打了产物标签的 `report` 行按 `artifact_id` 计数（`group by` 下推，行一条都不读）。
+   *
+   * 唯一消费者是产物投影的 `itemCount`（预置看板的数据量）。**可选**，与
+   * {@link countNodes} 逐条同规；此外它还是 **FORK 偏离上游**的一处：上游把它放在宿主内省
+   * 查询面 `DwfRunIntrospectionQueries` 上（引擎的内存实现不参与），fork 落在引擎端口上，
+   * 好让 SQLite 与内存两个实现都走同一道计数、缺席时调用方退回读 report 行的**元数据**
+   * （`withResult: false`，不碰 item）自己数。
+   */
+  countTaggedReports?(runId: string): ReadonlyMap<string, number>;
 
   appendEvent(runId: string, event: RunEvent): StoredEvent;
   /**

@@ -19,7 +19,6 @@ import {
 } from "@zcode/contracts";
 import type {
   JournalStorePort,
-  NodeRecord,
   RunRecord,
   RunSettlement,
   RunStatus,
@@ -156,13 +155,17 @@ export function snapshotOf(
     synthesizeRunStatus(entry, record?.status),
   );
 
-  // 节点行只扫**一次**，reports 与 artifacts 共用（两者都只在终态取数，见各自的注释）。
-  // 分别 listNodes 就是把一个 256 节点 run 的全表解码做两遍。
-  const nodes = status === "running" ? undefined : journal.listNodes(taskId);
+  // reports / artifacts / 活动时长只在**终态**取数：它们的唯一消费者是终态通知与终态
+  // TaskOutput，而快照被后台追踪器反复轮询——在飞时读它们没有读者，只有成本。
+  //
+  // FORK 偏离（上游同处的收窄）：这里此前先 `journal.listNodes(taskId)` 取一次无 opts 的
+  // 全量节点行（含每条 report item 的 result 解码），再分给 reports 与 artifacts 共用。
+  // 现在两个读面各自窄读——reports 只取前 256 条 / 8 MiB，artifacts 的标签计数走 `group by`
+  // 计数（见 {@link reportsOf} 与 artifactsOf）——快照路径上不再有任何全量节点读。
+  const settled = status !== "running";
 
-  // lineage 的活动时长：
-  // 与 nodes 同一道终态闸门、同一条论证——它的唯一消费者是终态通知，而快照被后台追踪器反复轮询。
-  const activeDurationMs = status === "running" ? undefined : runLineageActiveMs(journal, taskId);
+  // lineage 的活动时长：与上面同一道终态闸门、同一条论证。
+  const activeDurationMs = settled ? runLineageActiveMs(journal, taskId) : undefined;
 
   // 真实终态词 + 停止原因 + 结构化失败：快照基类的
   // `status` 是后台任务追踪器的通用词汇（stopped 折成 cancelled、errored 折成 failed），通知
@@ -209,11 +212,11 @@ export function snapshotOf(
     ...(error === undefined ? {} : { error }),
     // 零条时整字段缺席（与 reports 同规）：读侧据此让整块 pending 区消失，不渲染空节。
     ...(pendingQuestions.length === 0 ? {} : { pendingQuestions }),
-    ...reportsOf(nodes, taskId, journal),
+    ...(settled ? reportsOf(taskId, journal) : {}),
     // 用户面产物。⚠ 与紧邻的 `output`
     // （`entry.terminal.artifact` = 脚本顶层返回值，引擎内部也叫 artifact）是**两件不同的东西**：
     // 这里是脚本经 `artifact.*` 发布给用户看的产出，那里是给模型看的返回值。
-    ...(nodes === undefined ? {} : artifactsOf(taskId, journal, nodes)),
+    ...(settled ? artifactsOf(taskId, journal) : {}),
     ...(entry?.terminal?.status === "completed"
       ? { output: entry.terminal.artifact }
       : // 重启后本进程的注册表是空的，产物只能从 journal 记录取（journal 行的
@@ -277,8 +280,8 @@ export function runScriptPathField(scriptPath: string | undefined): { scriptPath
  *
  * 只读前 {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS} 条、至多
  * {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES} 字节的 item，总数是一次 `count(*)`
- * （docs/execution-engine.md「Reading the journal」）。修复原因：此前这里跟着 `nodes` 把整张节点表
- * 连同每条 report item 读进内存——一个报满的 run 在结算那一刻要解码 GiB 量级的 item，而通知
+ * （docs/execution-engine.md「Reading the journal」）。修复原因：此前这里跟着一次全量节点读把整张
+ * 节点表连同每条 report item 读进内存——一个报满的 run 在结算那一刻要解码 GiB 量级的 item，而通知
  * 那一节的字符预算只容得下几十条。条数界单独也不够：单条上限 1 MiB 时 256 条就是 256 MiB。
  * 零条时两个字段都缺席：通知端据此让整节 `<reports>` 消失，不发空节。
  *
@@ -288,14 +291,12 @@ export function runScriptPathField(scriptPath: string | undefined): { scriptPath
  *
  * 只在**终态**读：`getTask` 会被后台追踪器反复轮询，而节点表随 run 做过的一切增长。唯一的
  * 消费者是终态通知与终态 TaskOutput，在飞时读它没有读者，只有成本。这条判据由调用方执行
- * （`nodes` 缺席即「在飞，别读」），好让同一次扫描同时喂 {@link artifactsOf}。
+ * （调用方只在终态才调本函数），好让在飞路径上一条节点行都不读。
  */
 function reportsOf(
-  nodes: readonly NodeRecord[] | undefined,
   taskId: string,
   journal: JournalStorePort,
 ): { reports?: readonly unknown[]; reportCount?: number } {
-  if (nodes === undefined) return {};
   const reports = journal
     .listNodes(taskId, {
       kinds: ["report"],
