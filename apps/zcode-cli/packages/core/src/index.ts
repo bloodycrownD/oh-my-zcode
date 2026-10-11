@@ -9,6 +9,10 @@ export * from "./agent/index.js";
 export * from "./context/index.js";
 
 // Memory paths
+// FORK（用户裁定 2026-10-11）：magic-context 段中文孪生（bootstrap）需要同一份
+// 中文判定；与 identity/desktop 段的语言判定同源，不另造第二把尺子。
+export { isChinesePromptLanguage } from "./context/prompt-copy-zh-cn.js";
+
 export { resolveProjectMemoryRoot } from "./memory/project-root.js";
 
 // Tool components

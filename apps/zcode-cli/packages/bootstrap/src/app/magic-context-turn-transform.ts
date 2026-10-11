@@ -120,6 +120,8 @@ import type {
   RuntimeAttachmentEntry,
   RuntimeMessageEntry,
 } from "@zcode/core";
+import { isChinesePromptLanguage } from "@zcode/core";
+import { buildMagicContextSectionZhCn } from "./magic-context-prompt-section-zh-cn.js";
 import {
   getModelUsageContextTokens,
   type ModelMessageContent,
@@ -1221,7 +1223,14 @@ export function createMagicContextPromptSectionResolver(options: {
     // prompt-surface runtime 自己的告警去重），context 前缀重算本来就不是热路径。
     const selection = promptSurfaceRuntime.resolveGuidance(config.prompt_surface, input.modelKey);
 
-    return buildMagicContextSection(
+    // FORK（用户裁定 2026-10-11）：中文语言走 fork 侧 zh 孪生（结构与上游逐分支镜像，
+    // 见 magic-context-prompt-section-zh-cn.ts 头注维护契约）；其余值/缺席走上游英文
+    // 逐字实现，字节不变。preset/override 的解析两条路径共享（selection 不分语言）。
+    const sectionBuilder = isChinesePromptLanguage(input.language)
+      ? buildMagicContextSectionZhCn
+      : buildMagicContextSection;
+
+    return sectionBuilder(
       null,
       0,
       input.ctxReduceCallable,

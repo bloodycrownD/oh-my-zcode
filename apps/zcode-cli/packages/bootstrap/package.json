@@ -41,7 +41,8 @@
     "test:session-mapper-parts": "tsx --test scripts/test-session-mapper-parts.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
-    "lint:fix": "oxlint --write src"
+    "lint:fix": "oxlint --write src",
+    "test:mc-section-zh": "node scripts/test-magic-context-section-zh.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",
