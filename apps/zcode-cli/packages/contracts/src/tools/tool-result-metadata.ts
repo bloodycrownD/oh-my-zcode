@@ -96,6 +96,19 @@ export const taskStopToolResultDisplayPayloadSchema = z
   })
   .strict();
 
+export const ASK_USER_QUESTION_DISPLAY_MAX_ANSWER_CHARS = 16_384;
+
+// AskUserQuestion 的用户回答只存在于 display：v4 ToolOutput.text 是给模型的
+// 格式化文本，UI 无法从中恢复结构化 answers（见 docs/specs/ask-user-question-display-answers.md）。
+export const askUserQuestionToolResultDisplayPayloadSchema = z
+  .object({
+    kind: z.literal("ask_user_question"),
+    // answers 键为问题全文，值为用户选择的 label 或自定义文本；
+    // 空对象表示用户零作答（自动继续），必须可表达。
+    answers: z.record(z.string().max(ASK_USER_QUESTION_DISPLAY_MAX_ANSWER_CHARS)),
+  })
+  .strict();
+
 export const taskOutputToolResultDisplayPayloadSchema = z
   .object({
     kind: z.literal("task_output"),
@@ -228,6 +241,7 @@ export const toolResultDisplayPayloadSchema = z.discriminatedUnion("kind", [
   taskStopToolResultDisplayPayloadSchema,
   taskOutputToolResultDisplayPayloadSchema,
   respondToCoordinatorToolResultDisplayPayloadSchema,
+  askUserQuestionToolResultDisplayPayloadSchema,
   cuaToolResultDisplayPayloadSchema,
   nodeReplImageToolResultDisplayPayloadSchema,
   mcpToolResultDisplayPayloadSchema,
@@ -254,6 +268,9 @@ export type TaskOutputToolResultDisplayPayload = z.infer<
 >;
 export type RespondToCoordinatorToolResultDisplayPayload = z.infer<
   typeof respondToCoordinatorToolResultDisplayPayloadSchema
+>;
+export type AskUserQuestionToolResultDisplayPayload = z.infer<
+  typeof askUserQuestionToolResultDisplayPayloadSchema
 >;
 export type CuaToolResultDisplayPayload = z.infer<typeof cuaToolResultDisplayPayloadSchema>;
 export type ApplicationIconLocator = z.infer<typeof applicationIconLocatorSchema>;

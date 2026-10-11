@@ -1,4 +1,6 @@
 import {
+  ASK_USER_QUESTION_TOOL_NAME,
+  AskUserQuestionOutputSchema,
   RESPOND_TO_COORDINATOR_TOOL_NAME,
   RespondToCoordinatorOutputSchema,
   MCP_TOOL_DISPLAY_MAX_DESCRIPTION_CHARS,
@@ -168,6 +170,17 @@ export function createToolResultDisplay(
     return {
       kind: "respond_to_coordinator",
       status: parsed.data.status,
+    };
+  }
+
+  if (toolName === ASK_USER_QUESTION_TOOL_NAME) {
+    // 用户回答只随 display 通道下发：v4 ToolOutput.text 是给模型的格式化文本，
+    // UI 无法反向解析；这里从 handler 的结构化输出取 answers（空对象 = 零作答，照发）。
+    const parsed = AskUserQuestionOutputSchema.safeParse(output);
+    if (!parsed.success) return undefined;
+    return {
+      kind: "ask_user_question",
+      answers: parsed.data.answers,
     };
   }
 

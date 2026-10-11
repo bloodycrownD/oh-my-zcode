@@ -5259,6 +5259,9 @@ function toProtocolToolCallDisplay(
     case "node_repl_images":
     case "task_output":
     case "respond_to_coordinator":
+    // AskUserQuestion 的用户回答：不白名单的话实时投影丢 display，而 hydration
+    // 不过滤——桌面端冷恢复才看得到回答，实时反而是「未提供回答」。
+    case "ask_user_question":
     case "mcp_tool":
     case "create_workflow":
     // 观察类工作流工具的五个 display kind——shared 侧 toolCallDisplaySchema 已同步加

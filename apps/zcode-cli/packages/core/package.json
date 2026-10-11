@@ -27,6 +27,7 @@
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:prompt-language-context": "node --test scripts/test-prompt-language-context.mjs",
+    "test:ask-question-display": "tsx --test scripts/test-ask-question-display.mjs",
     "test:subagent-sync-dispatch": "tsx --test scripts/test-subagent-sync-dispatch.mjs",
     "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
     "test:ctx-search-memory": "tsx --test scripts/test-ctx-search-memory.mjs",

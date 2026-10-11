@@ -62,6 +62,13 @@ const toolResultDisplaySchema = z.discriminatedUnion("kind", [
     kind: z.literal("respond_to_coordinator"),
     status: z.enum(["success", "failed"]),
   }),
+  // AskUserQuestion 的用户回答投影：answers 键为问题全文，空对象 = 零作答（自动继续）。
+  // 与 contracts 侧 askUserQuestionToolResultDisplayPayloadSchema 同形同步
+  // （bound 16_384 亦两侧一致；shared 不依赖 app 侧 contracts，按 mcp_tool 先例复写字面量）。
+  z.object({
+    kind: z.literal("ask_user_question"),
+    answers: z.record(z.string(), z.string().max(16_384)),
+  }).strict(),
   z.object({
     kind: z.literal("cua"),
     schemaVersion: z.literal(1),
@@ -218,6 +225,15 @@ const toolCallRespondToCoordinatorDisplaySchema = z
   })
   .strict();
 
+// 同 toolResultDisplaySchema 的 ask_user_question 成员；row 顶层 display 与
+// output.display 双通道保持同集（toProtocolToolCallDisplay 白名单两处都会放行）。
+const toolCallAskUserQuestionDisplaySchema = z
+  .object({
+    kind: z.literal("ask_user_question"),
+    answers: z.record(z.string(), z.string().max(16_384)),
+  })
+  .strict();
+
 const toolCallMcpDisplaySchema = z
   .object({
     kind: z.literal("mcp_tool"),
@@ -235,6 +251,7 @@ export const toolCallDisplaySchema = z.discriminatedUnion("kind", [
   toolCallNodeReplImageDisplaySchema,
   toolCallTaskOutputDisplaySchema,
   toolCallRespondToCoordinatorDisplaySchema,
+  toolCallAskUserQuestionDisplaySchema,
   toolCallMcpDisplaySchema,
   toolCallCreateWorkflowDisplaySchema,
   toolCallGetWorkflowRunDisplaySchema,
