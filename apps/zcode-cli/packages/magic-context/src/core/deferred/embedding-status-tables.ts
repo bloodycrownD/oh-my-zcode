@@ -1,4 +1,4 @@
-// FORK-DEFERRED(E): `features/magic-context/memory/embedding-synapse.ts` 的 SynapseMaxTokensSource / SynapseLaneDescriptor / formatSynapseLaneDescriptor、`features/magic-context/project-embedding-registry.ts` 的 EmbeddingCoverageStatus、`features/magic-context/shadow-backfill-state.ts` 的 ShadowScope / ShadowBackfillStopReason / ShadowBackfillWriteRefusalReason / PersistedShadowBackfillState / ShadowBackfillStall / describeShadowBackfillWriteRefusal 摘录，S20 移植真身后删除本文件
+// FORK-DEFERRED(E)(N1 终局 / Step 17 / bugfix-batch-20261011): `features/magic-context/memory/embedding-synapse.ts` 的 SynapseMaxTokensSource / SynapseLaneDescriptor / formatSynapseLaneDescriptor、`features/magic-context/project-embedding-registry.ts` 的 EmbeddingCoverageStatus、`features/magic-context/shadow-backfill-state.ts` 的 ShadowScope / ShadowBackfillStopReason / ShadowBackfillWriteRefusalReason / PersistedShadowBackfillState / ShadowBackfillStall / describeShadowBackfillWriteRefusal 摘录，N1 终局不做，保留本壳并以此头注登记
 //
 // WHY A SEAM AND NOT THE MODULE. Three embedding-status modules, one seam. They
 // are grouped because they form a single closed type ring: the coverage status
@@ -19,10 +19,17 @@
 // `EmbeddingCoverageStatus.synapseDescriptor` and `.shadowBackfillStalls` keep
 // their exact shape.
 //
-// Step 20: delete this file and repoint `format-embed-status.ts` back at
-// `../../features/magic-context/memory/embedding-synapse.js`,
-// `../../features/magic-context/project-embedding-registry.js` and
-// `../../features/magic-context/shadow-backfill-state.js`.
+// N1 终局裁定（spec Step 17，不做）：embedding 运行时面终局不做——理由=三 provider
+// 两家依赖外部服务/被排除依赖（subc-client=fork spec L114 依赖排除令；
+// openai-compatible 需用户配 key），本地 provider=@huggingface/transformers+
+// onnxruntime-node/web（SEA 4 平台原生二进制+~90MB HF 模型下载离线必挂+
+// import.meta.url cjs worker 路径坑），上游 provider enum 本含 "off"、缺席=
+// 合法配置态；不影响使用=记忆链完整不依赖向量（D13 写入/ctx_memory pin（D14）、
+// memory-selection 选择、ctx_search FTS5 检索），format-embed-status 诚实显示
+// off。本壳保留：type 面 + `format-embed-status.ts` 消费的两个 formatter 运行
+// 时值（formatSynapseLaneDescriptor / describeShadowBackfillWriteRefusal）是
+// `/ctx-embed` 状态块的唯一载体；头注即终局登记，docs/.iteration-state.yaml
+// bugfix-batch-20261011 节同步。
 
 /** Verbatim: `embedding-synapse.ts:59-64`. */
 export type SynapseMaxTokensSource =

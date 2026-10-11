@@ -72,7 +72,6 @@ import { withoutSqliteTransformPass } from "../../shared/sqlite.js";
 import { canConsumeDeferredOnThisPass } from "./cache-busting-signals.js";
 import type { CavemanWordRules } from "./caveman.js";
 import { replayCavemanCompression } from "./caveman-cleanup.js";
-import { commitCompactionModeRecord, reconcileCompactionMode } from "../../deferred/compaction-off-transition.js";
 import { getActiveCompartmentRun, startCompartmentAgent } from "./compartment-runner.js";
 import { buildTriggerInMemoryTail, checkCompartmentTrigger } from "./compartment-trigger.js";
 import {
@@ -105,7 +104,7 @@ import {
     estimateFinalWireInputTokens,
     estimateMessageTokens,
 } from "./final-wire-token-estimate.js";
-import type { LiveModelBySession } from "../../deferred/hook-handlers.js";
+import type { LiveModelBySession } from "./live-session-state.js";
 import {
     capturePrefixTrimSourceOrder,
     findHostCompactionWindow,
@@ -579,7 +578,6 @@ export interface TransformDeps {
      * delivery.
      */
     compactionOff?: boolean;
-    hostCleanupCompactionMarkers?: Parameters<typeof reconcileCompactionMode>[0]["cleanupMarkers"];
     getNotificationParams?: (
         sessionId: string,
     ) => import("../../deferred/send-session-notification.js").NotificationParams;
@@ -870,88 +868,12 @@ export function createTransform(deps: TransformDeps) {
             return;
         }
 
-        // Compaction mode is session hygiene shared by both renderer authorities.
-        // Resolve it before either mode can return so stale markers and latches are
-        // reconciled even when Rust owns normal transform rendering.
+        // Compaction-off 模式标志（N5 终局裁定，spec Step 17）：transition 段已随
+        // `deferred/compaction-off-transition.ts` 整体退场——fork 无 compaction 域，
+        // `compaction` 在 EXCLUDED_CONFIG_KEYS 下该标志恒假，且上游 reconcile/commit
+        // 都以 OpenCode marker 行为前提（fork 从不写 marker）。标志本体保留：下方各
+        // mutating gate 仍读它，删字段会改变既有门控语义，超出本步删除清单。
         const compactionOff = deps.compactionOff === true;
-
-        // Mode-transition reconciliation runs on every pass and is a no-op
-        // once the session's durable record matches the boot-resolved mode —
-        // so the transition work (marker cleanup, latch/intent/pending-op
-        // clears, catch-up signal) happens exactly once per session, on the
-        // first pass after a restart that changed the resolved value. A notice
-        // transition first stages a durable pending record, then commits its
-        // settled value only after delivery; a failure therefore retries the
-        // same logical transition across process restarts.
-        try {
-            const transition = reconcileCompactionMode({
-                db,
-                sessionId,
-                compactionOff,
-                historianRunnable: deps.historianRunnable !== false,
-                compartmentInProgress: sessionMeta.compartmentInProgress,
-                cleanupMarkers: deps.hostCleanupCompactionMarkers,
-            });
-            const hasTransitionEffects =
-                transition.recordToWrite !== null ||
-                transition.notice !== null ||
-                transition.invalidatedM0Baseline ||
-                transition.clearedCompartmentInProgress ||
-                transition.historianCatchUpSignaled;
-            if (hasTransitionEffects) {
-                if (transition.invalidatedM0Baseline) {
-                    // The persisted baseline bytes were nulled; drop the
-                    // pass-local copies too so this pass re-materializes
-                    // instead of replaying the pre-flip render.
-                    sessionMeta = {
-                        ...sessionMeta,
-                        cachedM0Bytes: null,
-                        cachedM1Bytes: null,
-                        cachedM0MuralDataUrl: null,
-                        cachedM0MuralHash: null,
-                    };
-                }
-                if (transition.clearedCompartmentInProgress) {
-                    sessionMeta = { ...sessionMeta, compartmentInProgress: false };
-                }
-                if (transition.historianCatchUpSignaled) {
-                    sessionMeta = { ...sessionMeta, compartmentInProgress: true };
-                }
-                const notice = transition.notice;
-                // A missing client is the existing no-notification test/headless
-                // seam. Production OpenCode transforms always provide one; when
-                // present, its delivery result controls whether the settled record
-                // commits. The reconciler has already persisted a pending notice
-                // record, so a restart retries instead of losing this delivery.
-                let noticeDelivered = notice === null || deps.client === undefined;
-                if (notice && deps.client) {
-                    // Out-of-band only — never the message array or nudge
-                    // channels. A failed delivery leaves the durable pending
-                    // record in place, accepting a duplicate after a crash
-                    // rather than permanently losing the notice.
-                    noticeDelivered =
-                        (await sendStatusNotification(
-                            deps.client,
-                            sessionId,
-                            notice,
-                            runNotificationParams(sessionId) ?? {},
-                        )) === "sent";
-                }
-                if (noticeDelivered && transition.recordToWrite !== null) {
-                    commitCompactionModeRecord(db, sessionId, transition.recordToWrite);
-                } else if (!noticeDelivered) {
-                    sessionLog(
-                        sessionId,
-                        "compaction mode notice was not delivered; durable pending record will retry on the next pass",
-                    );
-                }
-            }
-        } catch (error) {
-            sessionLog(sessionId, "compaction mode transition failed (retrying next pass):", error);
-            // A half-applied transition leaves this pass on a stale m[0]/m[1]
-            // baseline or marker state that a completed one would have replaced.
-            failPass("compaction-mode-transition-failure", error);
-        }
 
         // Read the agent and session permissions for ctx_reduce before either
         // renderer freezes the ctx_reduce verdict below. OpenCode keeps those
@@ -959,7 +881,9 @@ export function createTransform(deps: TransformDeps) {
         // read a session whose agent denies ctx_reduce would still get §N§ tags,
         // reduce guidance, and nudges. This is a no-op once the verdict froze,
         // so a later permission change never flips provider-visible bytes.
-        if (deps.client !== undefined && !compactionOff) {
+        // N5 终局（spec Step 17）：原 `!compactionOff` 附加条件随 transition 段删除
+        // ——该标志恒假（`compaction` 在 EXCLUDED_CONFIG_KEYS），条件从未生效。
+        if (deps.client !== undefined) {
             await primeCtxReduceSpawnPermission(
                 deps.client,
                 sessionId,

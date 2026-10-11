@@ -163,7 +163,6 @@ export {
   resolveExecuteThreshold,
   resolveExecuteThresholdDetail,
 } from "./core/hooks/magic-context/event-resolvers.js";
-export type { LiveModelBySession } from "./core/deferred/hook-handlers.js";
 export type { NotificationParams } from "./core/deferred/send-session-notification.js";
 export type {
   ContextUsage,

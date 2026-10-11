@@ -1,12 +1,25 @@
 import type { DreamTaskProgress } from "../../deferred/dreamer-task-registry.js";
 import type { RecompProgress } from "./compartment-runner-types.js";
 import type { Channel1State } from "./ctx-reduce-nudge.js";
-import type {
-    AgentBySession,
-    LatestAssistantMessageIdBySession,
-    LiveModelBySession,
-    VariantBySession,
-} from "../../deferred/hook-handlers.js";
+
+// N6 终局（spec Step 17）：上游 `hooks/magic-context/hook-handlers.ts` 是 OpenCode
+// plugin 事件面，ZCode 事件走 appendEvent/SessionEventType、宿主适配职责在
+// host/hooks.ts——该 type 缝已删。下列进程本地 Map alias 按上游
+// `hook-handlers.ts:67-70` 逐字内联（N6 缝头原建议处置），`LiveSessionState`
+// 保持上游成员类型不变；`liveModelBySession` 对外导出供 `transform.ts` 消费。
+// 各集合的生命周期/语义文档见上游 `hooks/magic-context/hook-handlers.ts`。
+
+/** Verbatim: upstream `hook-handlers.ts:67`. */
+export type LiveModelBySession = Map<string, { providerID: string; modelID: string }>;
+
+/** Verbatim: upstream `hook-handlers.ts:68`. */
+type LatestAssistantMessageIdBySession = Map<string, string>;
+
+/** Verbatim: upstream `hook-handlers.ts:69`. */
+type VariantBySession = Map<string, string | undefined>;
+
+/** Verbatim: upstream `hook-handlers.ts:70`. */
+type AgentBySession = Map<string, string>;
 
 /**
  * Plugin-process-scoped shared state. Lives in `index.ts` and is threaded into
@@ -15,8 +28,8 @@ import type {
  *
  * The `*Sessions` sets are the cache-busting signal channels added in
  * the Oracle 2026-04-26 review (replaces the old single `flushedSessions`).
- * See `hook-handlers.ts` for the full lifetime/semantics doc-comment on
- * each set, and `system-prompt-hash.ts` / `transform.ts` /
+ * See upstream `hook-handlers.ts` for the full lifetime/semantics doc-comment
+ * on each set, and `system-prompt-hash.ts` / `transform.ts` /
  * `transform-postprocess-phase.ts` for the consumer drain points.
  *
  * Storing them here lets RPC-driven recomp (TUI command path) signal the

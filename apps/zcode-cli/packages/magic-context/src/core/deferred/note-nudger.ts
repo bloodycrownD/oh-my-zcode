@@ -1,4 +1,4 @@
-// FORK-NOT-PORTED: `hooks/magic-context/note-nudger.ts` 的 onNoteTrigger / peekNoteNudgeText / markNoteNudgeDelivered 与 `hooks/magic-context/note-visibility.ts` 的 hasVisibleNoteReadCall 摘录，Step 21 决定移植或删除后重写本文件
+// FORK-NOT-PORTED(N2 终局 / Step 17 / bugfix-batch-20261011): `hooks/magic-context/note-nudger.ts` 的 onNoteTrigger / peekNoteNudgeText / markNoteNudgeDelivered 与 `hooks/magic-context/note-visibility.ts` 的 hasVisibleNoteReadCall 摘录，N2 终局不做，保留本壳并以此头注登记
 //
 // WHY NOT PORTED. The note nudge surfaces `<ctx_note>` intentions to the agent
 // at a work boundary. The fork ships no `ctx_note` tool, so there is no note to
@@ -23,10 +23,14 @@
 //   - `onNoteTrigger` is a no-op: upstream's body only stages a durable
 //     `triggerPending` flag that the peek reads, and the peek no longer reads it.
 //
-// Step 21: delete this file and repoint
-// `transform-postprocess-phase.ts` back at `./note-nudger.js` /
-// `./note-visibility.js`, or — if ctx_note stays out of the fork — delete the
-// four imports outright.
+// N2 终局裁定（spec Step 17，不做）：ctx_note 工具 + note-nudger（+smart-notes）
+// 终局不做——理由=ZCode D 组工具面只登记 ctx_reduce/ctx_expand/ctx_search/
+// ctx_memory，note 属上游交互笔记特性、无 ZCode 工具宿主面；不影响使用=记忆
+// 主链（写/选/注/检）不经过 note，缺席=无笔记功能、不阻断任何既有能力。
+// 收口动作=本壳头注登记 + Step 18 已核查 211 行段 note 句处置（host 装配层
+// 最小适配 `core/src/context/sections/magic-context.ts`，包内逐字常量零改动，
+// 豁免集 [ctx_note] 钉死于 tool-name-closure 测试）；docs/.iteration-state.yaml
+// bugfix-batch-20261011 节同步。
 
 import { isRecord } from "../shared/record-type-guard.js";
 import type { Database } from "../shared/sqlite.js";

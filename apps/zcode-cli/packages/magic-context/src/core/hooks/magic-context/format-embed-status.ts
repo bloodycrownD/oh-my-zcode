@@ -1,7 +1,12 @@
 import { formatSynapseLaneDescriptor } from "../../deferred/embedding-status-tables.js";
 import type { EmbeddingCoverageStatus } from "../../deferred/embedding-status-tables.js";
 import { describeShadowBackfillWriteRefusal } from "../../deferred/embedding-status-tables.js";
-import type { EmbedDrainUiStatus } from "../../deferred/embed-session-state.js";
+
+// N1 终局（spec Step 17）：上游 `hooks/magic-context/embed-session-state.ts` 是
+// `/ctx-embed` 后台 drain 的进程本地状态（pause 集/AbortController/ledger），fork
+// 无 embedding provider、drain 永不启动——该 seam 已删。渲染器只 switch 这一个
+// 四成员并集体（上游 `embed-session-state.ts:19`），按缝头原建议本地声明。
+type EmbedDrainUiStatus = "idle" | "running" | "paused" | "stopped";
 
 export function formatEmbedStatusText(
     coverage: EmbeddingCoverageStatus,

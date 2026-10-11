@@ -1,4 +1,4 @@
-// FORK-NOT-PORTED: `hooks/magic-context/send-session-notification.ts` 的 NotificationParams / NotificationDeliveryDisposition 类型与 sendStatusNotification 函数摘录，Step 21 决定移植或删除后重写本文件
+// FORK-NOT-PORTED(N4 终局 / Step 17 / bugfix-batch-20261011): `hooks/magic-context/send-session-notification.ts` 的 NotificationParams / NotificationDeliveryDisposition 类型与 sendStatusNotification 函数摘录，N4 终局不做，保留本壳并以此头注登记
 //
 // WHY NOT PORTED. Status lines reach the user through OpenCode's RPC
 // `pushNotification("toast", …)` plus a queue that holds notifications until
@@ -18,10 +18,9 @@
 //     is correct: the fork cannot deliver an emergency refusal notice, and the
 //     caller at `:2829` must fail the turn rather than silently claim the user
 //     was told. The host adapter replaces this seam via `hostRefusalNotice`.
-//   - `transform.ts:910` (compaction-mode notice) compares `=== "sent"` before
-//     committing the settled mode record. `"skipped"` means the record is not
-//     committed and the transition retries next pass — the upstream at-least-once
-//     contract, preserved.
+//   - `transform.ts:910` (compaction-mode notice) — **已随 N5 终局删除**
+//     （Step 17：compaction-off transition 段整体退场，该 notice 投递点不复
+//     存在）；`"sent"`-gated 分支在 fork 当前无调用点。
 //   - `transform-compartment-phase.ts:503` discards the result.
 //
 // `"skipped"` is upstream's own disposition for "held nothing, delivered
@@ -29,11 +28,13 @@
 // three `void`-discarded sites into unhandled rejections and would break the
 // `"sent"`-gated branch differently, so `"skipped"` is the faithful answer.
 //
-// Step 21: delete this file and repoint `transform.ts` and
-// `transform-compartment-phase.ts` back at
-// `./send-session-notification.js`, or — once the ZCode host supplies its own
-// notification seam — delete the import and route every call through
-// `TransformDeps`.
+// N4 终局裁定（spec Step 17，不做）：send-session-notification（通知面）终局不
+// 做——理由=上游走 OpenCode RPC pushNotification，ZCode 等价缝 steerTurn 接入
+// 需干预 turn-loop，风险/收益失衡；不影响使用=「跳过折叠」等信息由日志 + 时间线
+// + `ZCODE_MAGIC_CONTEXT_DEBUG_WIRE=1` 覆盖；紧急拒绝路径保持 fail-visible
+// throw 是正确语义（本头注 SEMANTIC DECISION）。收口动作=本壳头注登记 +
+// `TransformDeps.hostRefusalNotice` 预留端口保持预留态并注释指向本裁定；
+// docs/.iteration-state.yaml bugfix-batch-20261011 节同步。
 
 // `TransformDeps` supplies the ZCode notification seam, so no host import is
 // needed here; the signature keeps `unknown` for the client exactly as upstream

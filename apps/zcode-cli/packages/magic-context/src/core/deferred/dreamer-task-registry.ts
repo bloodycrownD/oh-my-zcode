@@ -1,4 +1,4 @@
-// FORK-NOT-PORTED: `features/magic-context/dreamer/task-registry.ts` 的 DreamTaskName / CurateMemoryCategory / DreamTaskProgress 类型摘录，Step 21 决定移植或删除后重写本文件
+// FORK-NOT-PORTED(N3 终局 / Step 17 / bugfix-batch-20261011): `features/magic-context/dreamer/task-registry.ts` 的 DreamTaskName / CurateMemoryCategory / DreamTaskProgress 类型摘录，N3 终局不做，保留本壳并以此头注登记
 //
 // WHY NOT PORTED. The dreamer is the background maintenance agent (map memories,
 // curate, verify diffs, propose docs). It is C/E surface and the fork runs no
@@ -15,11 +15,15 @@
 // imported because upstream imports `CurateMemoryCategory` from
 // `../curate-category-rotation` (a dreamer module) and derives `DreamTaskName`
 // from the `CANONICAL_DREAM_TASKS` table. Only the members the progress shape
-// names are needed here; Step 21 replaces this file with the real module and the
-// unions come back in full.
+// names are needed here; N3 终局不做（Step 17）后该文件不会归位，两个 union
+// 保持裁剪态。
 //
-// Step 21: delete this file and repoint `live-session-state.ts` back at
-// `../../features/magic-context/dreamer/task-registry.js`.
+// N3 终局裁定（spec Step 17，不做）：dreamer 后台整理终局不做——理由=上游 cron
+// 型后台记忆整理，ZCode agent 进程无对应宿主（desktopCronScheduler 属 Electron
+// main，不属 agent 进程）；不影响使用=记忆质量由 selection 排序 + 读时强化维持，
+// 读写链完整、缺席不阻断。本壳保留（`live-session-state.ts` 的
+// `dreamerProgressByProject` 值类型唯一载体），头注即终局登记；
+// docs/.iteration-state.yaml bugfix-batch-20261011 节同步。
 
 /** Verbatim member set of upstream's `CurateMemoryCategory`. */
 export type CurateMemoryCategory =
