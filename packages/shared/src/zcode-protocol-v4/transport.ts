@@ -653,12 +653,13 @@ export type V4ConversationFileChangesResult = z.infer<typeof v4ConversationFileC
 // 刻意**不是** v4 command：command 的 ACK 结果是 commandResultSchema 那个封闭的「变更结果」
 // 判别联合，把一页只读事件塞进去等于把读放进写的词汇表，还要白背 baseRevision/幂等那套机制。
 
+// FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
 /**
  * 事件日志一页的两道界，网关按它们取数（apps/zcode-cli/packages/dynamic-workflow/docs/execution-engine.md
  * 「Reading the journal」）。字节按存储里的序列化字节计、取协议单帧上限的四分之一：条数单独
  * 管不住字节，500 条带着大 report item 的事件足以顶到单帧上限。
  */
-export const WORKFLOW_RUN_EVENTS_PAGE_LIMITS = {
+const WORKFLOW_RUN_EVENTS_PAGE_LIMITS = {
   maxEvents: 500,
   maxBytes: PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxBytes / 4,
 } as const;

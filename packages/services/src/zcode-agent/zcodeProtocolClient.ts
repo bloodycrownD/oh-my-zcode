@@ -12,15 +12,17 @@ import type { V4Method } from "@zcode/shared/zcode-protocol-v4";
 import type { z } from "zod";
 import type { ZCodeProtocolTransport } from "./zcodeProtocolTransport.js";
 
+// FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
 /** 客户端可发的方法名：旧 zcodeProtocolMethods + v4/*（M3 起并存，M5 波次 2 收敛为 v4）。 */
-export type ZCodeProtocolClientMethod = ZCodeProtocolMethod | V4Method;
+type ZCodeProtocolClientMethod = ZCodeProtocolMethod | V4Method;
 
 interface ZCodeProtocolClientOptions {
   requireStorageStartup?: boolean;
   requestTimeoutMs?: number;
 }
 
-export interface ZCodeProtocolRequestTimeoutEvent {
+// FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
+interface ZCodeProtocolRequestTimeoutEvent {
   method: ZCodeProtocolClientMethod;
   requestId: ZCodeProtocolRequestId;
   timeoutMs: number;
@@ -47,7 +49,8 @@ interface ZCodeProtocolClientRequestOptions {
   timeoutMs?: number;
 }
 
-export const DEFAULT_ZCODE_PROTOCOL_REQUEST_TIMEOUT_MS = 3 * 60_000;
+// FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
+const DEFAULT_ZCODE_PROTOCOL_REQUEST_TIMEOUT_MS = 3 * 60_000;
 
 class ZCodeProtocolClientError extends Error {
   constructor(

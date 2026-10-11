@@ -68,7 +68,7 @@ export class SubagentContextBuilder extends ContextBuilder {
       .map(
         (group): ModelInputMessage => ({
           role: "system",
-          content: group.map((section) => section.content).join(""),
+          content: joinSubagentSystemSectionContents(group),
           cacheControl: EPHEMERAL_CACHE_CONTROL,
         }),
       );
@@ -187,6 +187,24 @@ function orderSubagentSections(sections: ContextSection[]): ContextSection[] {
     ...sections.filter((section) => section.injectionTarget === "system"),
     ...sections.filter((section) => section.injectionTarget === "meta_user"),
   ];
+}
+
+/**
+ * FORK (upstream-v3.15.1-backport): 上游合并 system 段用 `join("")`，依赖各段自带边界
+ * 换行；fork 新增的 `## Magic Context` 段以 heading 起头（无前导换行），而它前面的
+ * Subagent Environment 段以 `</env>`/model 行收尾（无尾随换行），合并后出现
+ * `</env>## Magic Context` 粘连。这里按「段尾已有 / 无换行」两种情况归一相邻段边界：
+ * 前段尾或后段首自带换行时原样相接，两侧都不自带时补一个 "\n"；Notes/Environment 的
+ * 自带 "\n\n" 前导等既有字节不受影响（该函数对单段组是零操作）。
+ */
+function joinSubagentSystemSectionContents(sections: ContextSection[]): string {
+  return sections.reduce(
+    (merged, section) =>
+      merged.length === 0 || merged.endsWith("\n") || section.content.startsWith("\n")
+        ? `${merged}${section.content}`
+        : `${merged}\n${section.content}`,
+    "",
+  );
 }
 
 function createSubagentSection(input: {
