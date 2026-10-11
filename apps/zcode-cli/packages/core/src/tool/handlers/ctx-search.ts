@@ -22,9 +22,11 @@
 //     memory_embeddings（embedding 运行时 N1 终局不做）。
 //   - id 形状短路（`#7234` / `12, 34`）保留：<project-memory> 的 `#id: fact`
 //     行会让模型自然把 id 抄进 query，FTS 对裸数字没有语义，这一路是上游
-//     `parseIdShapedQuery` 的 fork 等价物（按身份过滤、排除已渲染 id，
-//     解析不到时落回 FTS，与上游「a numeric query with no matching memory
-//     still searches text」同语义）。
+//     `parseIdShapedQuery` 的 fork 等价物。**可见性谓词必须与 FTS 路逐条一致**
+//     （MF-CTX-1 修复）：status ∈ active/permanent、expires_at 未过、身份归属、
+//     排除已渲染 id——`getMemoriesByIds` 返回 whatever rows exist，过滤是调用方
+//     的责任（storage-memory.ts:980-986 注释同义）；解析不到时落回 FTS，与上游
+//     「a numeric query with no matching memory still searches text」同语义。
 //
 // **包是动态 import 的**，与 `ctx-context.ts` 同一理由：`features.magicContext`
 // 关闭时，CLI 启动不该把整棵 magic-context 模块图拉进内存；静态 import 会在
@@ -223,9 +225,14 @@ const ctxSearchHandler: ToolHandler = async (input, context) => {
     const hits: MemorySearchHit[] = [];
     for (const row of rows) {
       if (dateRange && (row.createdAt < dateRange.from || row.createdAt > dateRange.to)) continue;
-      if (row.status !== "active" && row.status !== "permanent" && row.status !== "archived") {
-        continue;
-      }
+      // MF-CTX-1（CR round 1）：id 直查的可见性必须与 FTS 路完全一致。旧实现
+      // 这里是「三值枚举恒真」守卫（archived 也放行），与 storage-memory-fts.ts
+      // 的 SQL 过滤（`status IN ('active','permanent') AND (expires_at IS NULL
+      // OR expires_at > now)`）分歧——模型抄进来的旧 id 会从短路路捞回已归档/
+      // 已过期的记忆。getMemoriesByIds 按上游注释「Returns whatever rows exist」
+      // 不做任何过滤，因此这里必须按同一谓词补齐。
+      if (row.status !== "active" && row.status !== "permanent") continue;
+      if (row.expiresAt !== null && row.expiresAt <= Date.now()) continue;
       if (!magicContext.storedPathBelongsToIdentity(row.projectPath, projectIdentity)) continue;
       if (isVisible(row.id)) continue;
       hits.push({
