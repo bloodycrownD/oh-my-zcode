@@ -19,8 +19,8 @@
  *   ③ settle 后台化：长驻形态下 model step 前无 settle 等待，turn 后 close
  *      的 drain 仍把后台折叠 pass 收口落库。
  *
- * 三者的交叉点只有全部同时在场才会暴露：promote 的活值判据依赖
- * `lastModelSwitchAt > item.admittedAt`，而 admittedAt 的推进又依赖 turn 完成
+ * 三者的交叉点只有全部同时在场才会暴露：promote 一律读会话当前活值（出队模型
+ * 裁定 2026-10-11，不再比对时间戳），而提升时机的推进依赖 turn 完成
  * 后 drain/foreground execution 不被 settle 拖住（恰恰本批把 settle 搬到了
  * 后台）。任何一环单独测过、合在一起却可能互相遮蔽，这里做叠加验证。
  *

@@ -11,17 +11,22 @@
  *   B. 更糟的是旧快照会被静默写回并持久化到 session_model_selection，把用户
  *      刚切换的模型还原成旧值（“编辑后模型也没切到最新”的根因之一）。
  *
+ * 用户裁定 2026-10-11（出队模型，de96549d）：编辑重发与 queue 提升同语义——
+ * **一律读会话当前活值**；显式 payload 仅在会话无活值时兜底；被编辑轮旧快照
+ * 最后兜底。pin 仅当最终选择确实来自显式 payload；写回会话态红线（不写回/
+ * 不持久化/不广播）与 execution-scope 豁免不变。
+ *
  * 修复闭环（ spec ① 变更点 1a/1c/1c'/1d ）：
- *   1a  editUserQuery payload 新增 modelSelection（显式携带 = 覆盖优先）；
- *   1c/1c'  intent 重建时 payload.modelSelection ?? 旧快照，并打 modelSelectionPinned；
+ *   1a  editUserQuery payload 新增 modelSelection（显式携带 = 无活值时兜底）；
+ *   1c/1c'  intent 重建时 liveSelection ?? explicit ?? 旧快照，pin 仅显式兜底成立；
  *   1d  runtime 仅对显式 pin 的选择执行「写回 + 持久化 + emitModelSelected」三连，
- *       继承快照不再覆盖会话选择，但本次执行仍按 intent 的 modelSelection 建 Model。
+ *       继承选择不再覆盖会话选择，但本次执行仍按 intent 的 modelSelection 建 Model。
  *
  * 本文件六组断言各对一处收口：
  *   A 协议面：editUserQuery payload 带/不带 modelSelection 均可解析（zod）。
- *   B 命令面：fork-edit-retry 显式覆盖优先 + pin 标记；缺省沿用旧快照但不 pin；
- *     retryTurn（故意重发原文）仍用旧快照且不 pin。
- *   C 运行时面：applySubmissionExecutionState 仅 pin 时写回三连；继承快照
+ *   B 命令面：fork-edit-retry 活值优先链（live ?? explicit ?? snapshot）与 pin 条件
+ *     （仅显式兜底时 true）；retryTurn（故意重发原文）同链、不 pin。
+ *   C 运行时面：applySubmissionExecutionState 仅 pin 时写回三连；继承选择
  *     不动 session_model_selection，但 turn 仍使用 intent 携带的选择。
  *   D pin 边界集（round-2 追加）：除 editUserQuery / fork-edit-retry 外，
  *     sendGoalCommand / createSession firstInput / legacy session/send 三条
@@ -89,7 +94,7 @@ process.on("exit", (code) => {
 const SESSION_ID = "ses_te1";
 const EPOCH = "epoch-te1";
 
-/** 用户在编辑前刚切换到的显式选择（提交时应覆盖旧快照）。 */
+/** 用户在编辑前刚切换到的显式选择（会话无活值时兜底）。 */
 const EXPLICIT_SELECTION = Object.freeze({
   providerId: "anthropic",
   modelId: "claude-sonnet-5",
@@ -99,6 +104,12 @@ const EXPLICIT_SELECTION = Object.freeze({
 const SNAPSHOT_SELECTION = Object.freeze({
   providerId: "openai",
   modelId: "gpt-5",
+  options: Object.freeze({ reasoningLevel: "medium" }),
+});
+/** 会话当前活值（出队模型裁定：编辑重发/queue 提升一律用它）。 */
+const LIVE_SELECTION = Object.freeze({
+  providerId: "google",
+  modelId: "gemini-3-pro",
   options: Object.freeze({ reasoningLevel: "medium" }),
 });
 
@@ -120,14 +131,19 @@ test("A1: editUserQuery payload 带/不带 modelSelection 均可解析", () => {
 
 // ── B: 命令面（fork-edit-retry intent 重建）─────────────────────────────────
 
-/** 一个最小可驱动的 v4 命令宿主/record；sendInput 捕获交给 core 的 intent。 */
-function createCommandHarness({ editTarget, payload }) {
+/** 一个最小可驱动的 v4 命令宿主/record；sendInput 捕获交给 core 的 intent。
+ * `liveSelection`：runtime.getSessionModelSelection 的返回值——**调用方必须显式传**
+ * （含 `undefined` 表示会话无活值；不用缺省参数，否则显式 undefined 会撞缺省值，
+ * B4/B5 的「无活值」就传不进去）。 */
+function createCommandHarness({ editTarget, payload, liveSelection }) {
   const captured = {};
   const record = {
     app: {
       sessionId: SESSION_ID,
       runtime: {
         rewindConversationToMessage: async () => ({ strategy: "active_chain" }),
+        // 出队模型裁定：fork-edit-retry 无条件读会话活值（fork-edit-retry.ts:361）。
+        getSessionModelSelection: () => liveSelection,
       },
       sendInput: async (input, options) => {
         captured.sendInput = input;
@@ -188,7 +204,7 @@ function editTargetWithSnapshot(snapshotSelection) {
   };
 }
 
-test("B1: 编辑重发显式携带 modelSelection → turn 用提交的选择且 pin", async () => {
+test("B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖（且不 pin）", async () => {
   const payload = {
     target: { rowId: 4, entityId: "ent-4" },
     newText: "edited text",
@@ -197,37 +213,40 @@ test("B1: 编辑重发显式携带 modelSelection → turn 用提交的选择且
   const { host, envelope, captured } = createCommandHarness({
     editTarget: editTargetWithSnapshot(SNAPSHOT_SELECTION),
     payload,
+    liveSelection: LIVE_SELECTION,
   });
   const result = await forkEditRetryHandlers.editUserQuery(host, envelope);
   assert.equal(result?.type, "editUserQuery");
   const intent = captured.sendInputOptions?.intent;
   assert.ok(intent, "core sendInput 必须收到 intent");
-  // 显式覆盖优先：不是旧快照。
-  assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
-  assert.equal(intent.modelSelectionPinned, true);
+  // 出队模型裁定：活值第一优先，显式 payload 仅无活值时兜底。
+  assert.deepEqual(intent.modelSelection, LIVE_SELECTION);
+  assert.equal(intent.modelSelectionPinned, false);
   // 编辑后的新文本照常重发。
   assert.equal(intent.text, "edited text");
   assert.equal(captured.sendInput.text, "edited text");
 });
 
-test("B2: 编辑重发缺省 modelSelection → 沿用旧快照但不 pin", async () => {
+test("B2: 会话有活值、缺省 payload → 用活值，不 pin", async () => {
   const payload = { target: { rowId: 4, entityId: "ent-4" }, newText: "edited text" };
   const { host, envelope, captured } = createCommandHarness({
     editTarget: editTargetWithSnapshot(SNAPSHOT_SELECTION),
     payload,
+    liveSelection: LIVE_SELECTION,
   });
   await forkEditRetryHandlers.editUserQuery(host, envelope);
   const intent = captured.sendInputOptions?.intent;
   assert.ok(intent, "core sendInput 必须收到 intent");
-  assert.deepEqual(intent.modelSelection, SNAPSHOT_SELECTION);
+  assert.deepEqual(intent.modelSelection, LIVE_SELECTION);
   assert.equal(intent.modelSelectionPinned, false);
 });
 
-test("B3: retryTurn 仍重发原文 + 旧快照，且不 pin（写回收敛外语义不变）", async () => {
+test("B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变）", async () => {
   const payload = { target: { rowId: 4, entityId: "ent-4" } };
   const { host, envelope, captured } = createCommandHarness({
     editTarget: editTargetWithSnapshot(SNAPSHOT_SELECTION),
     payload,
+    liveSelection: LIVE_SELECTION,
   });
   envelope.type = "retryTurn";
   await forkEditRetryHandlers.retryTurn(host, envelope);
@@ -235,6 +254,38 @@ test("B3: retryTurn 仍重发原文 + 旧快照，且不 pin（写回收敛外�
   assert.ok(intent, "core sendInput 必须收到 intent");
   assert.equal(intent.text, "original text");
   assert.equal(captured.sendInput.text, "original text");
+  assert.deepEqual(intent.modelSelection, LIVE_SELECTION);
+  assert.equal(intent.modelSelectionPinned, false);
+});
+
+test("B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组）", async () => {
+  const payload = {
+    target: { rowId: 4, entityId: "ent-4" },
+    newText: "edited text",
+    modelSelection: EXPLICIT_SELECTION,
+  };
+  const { host, envelope, captured } = createCommandHarness({
+    editTarget: editTargetWithSnapshot(SNAPSHOT_SELECTION),
+    payload,
+    liveSelection: undefined,
+  });
+  await forkEditRetryHandlers.editUserQuery(host, envelope);
+  const intent = captured.sendInputOptions?.intent;
+  assert.ok(intent, "core sendInput 必须收到 intent");
+  assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
+  assert.equal(intent.modelSelectionPinned, true, "仅显式兜底成立时 pin");
+});
+
+test("B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin", async () => {
+  const payload = { target: { rowId: 4, entityId: "ent-4" }, newText: "edited text" };
+  const { host, envelope, captured } = createCommandHarness({
+    editTarget: editTargetWithSnapshot(SNAPSHOT_SELECTION),
+    payload,
+    liveSelection: undefined,
+  });
+  await forkEditRetryHandlers.editUserQuery(host, envelope);
+  const intent = captured.sendInputOptions?.intent;
+  assert.ok(intent, "core sendInput 必须收到 intent");
   assert.deepEqual(intent.modelSelection, SNAPSHOT_SELECTION);
   assert.equal(intent.modelSelectionPinned, false);
 });
@@ -352,11 +403,7 @@ test("C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用�
 
 test("C3: pin 且与会话选择相同 → 写回仍在，但不重复广播", async () => {
   const harness = createRuntimeHarness(EXPLICIT_SELECTION);
-  await applySubmissionExecutionState(
-    harness.runtime,
-    intentWith(EXPLICIT_SELECTION, true),
-    TRACE,
-  );
+  await applySubmissionExecutionState(harness.runtime, intentWith(EXPLICIT_SELECTION, true), TRACE);
   const kinds = harness.calls.map((call) => call.kind);
   assert.ok(kinds.includes("setSessionModelSelection"));
   assert.ok(kinds.includes("persist"));

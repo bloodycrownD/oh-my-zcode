@@ -8,8 +8,7 @@
  * 与用户 dev 实测相位对照：admit→context.built 841ms；context.built→model.request ~1985ms。
  */
 
-import { existsSync } from "node:fs";
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { registerHooks } from "node:module";
 import { join } from "node:path";

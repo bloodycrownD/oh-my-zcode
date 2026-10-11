@@ -14,9 +14,42 @@
  */
 
 import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
+import { registerHooks } from "node:module";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
-// 本测试的两个被测入口都走包 exports/相对 dist 解析（@zcode/magic-context 有 dist
-// exports；zh 孪生经 ../dist/ 相对路径），不需要 test-model-live 的 TS→dist resolve 钩子。
+// resolver 直驱（第 4 节）要 import 完整 dist transform，它传递依赖「入口发布原始
+// TS 的 workspace 包」——与 test-model-live.mjs 同手法：这些包改指同布局 dist。
+// 必须放在任何顶层 await import 之前。
+const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+const TS_SOURCE_PACKAGES = new Set([
+  "@zcode/shared",
+  "@zcode/model-option-map",
+  "@zcode/provider",
+  "@zcode/provider-node",
+]);
+registerHooks({
+  resolve(specifier, context, nextResolve) {
+    const segments = specifier.split("/");
+    const packageName = TS_SOURCE_PACKAGES.has(specifier)
+      ? specifier
+      : TS_SOURCE_PACKAGES.has(segments.slice(0, 2).join("/"))
+        ? segments.slice(0, 2).join("/")
+        : null;
+    if (packageName !== null) {
+      const distRoot = `${REPO_ROOT}packages/${packageName.slice("@zcode/".length)}/dist/`;
+      const subpath = specifier === packageName ? "index" : specifier.slice(packageName.length + 1);
+      for (const candidate of [`${distRoot}${subpath}.js`, `${distRoot}${subpath}/index.js`]) {
+        if (existsSync(candidate)) {
+          return { url: pathToFileURL(candidate).href, shortCircuit: true };
+        }
+      }
+      throw new Error(`no compiled dist for "${specifier}" — build ${packageName} first`);
+    }
+    return nextResolve(specifier, context);
+  },
+});
+
 const { buildMagicContextSection } = await import("@zcode/magic-context");
 const { buildMagicContextSectionZhCn } =
   await import("../dist/app/magic-context-prompt-section-zh-cn.js");
@@ -135,10 +168,49 @@ assert.ok(cases === 16, `矩阵应有 16 组，实际 ${cases}`);
   assert.ok(zh.includes("除非用户明确要求其他语言"), "zh 语言指令应跟随 override 段");
 }
 
-// ── 4. resolver 选路（英文路径字节级不变）────────────────────────────────────
+// ── 4. resolver 选路（真装配路径 + 字节级 golden 对比）────────────────────────
+// CR P2-3：选路点在 createMagicContextPromptSectionResolver 的三元
+// （isChinesePromptLanguage ? zh 孪生 : 上游）。三元写反/传错 builder 只有靠真驱动
+// resolver 才能发现——直接调 builder 测不到这一层。golden = 同 11 参直调对应 builder，
+// 逐字节相等证明「选路正确 + 装配参数零漂移」。
+const { createMagicContextPromptSectionResolver } =
+  await import("../dist/app/magic-context-turn-transform.js");
+const resolver = createMagicContextPromptSectionResolver({ configDomain: {} });
+const resolverInput = (language) => ({
+  ctxReduceCallable: true,
+  subagentMode: false,
+  language,
+  modelKey: "zcode/glm-4.6",
+});
 
-for (const language of [undefined, "en-US", "zh", "zh-CN"]) {
-  const en = buildMagicContextSection(
+{
+  const viaResolver = resolver(resolverInput("zh-CN"));
+  const golden = buildMagicContextSectionZhCn(
+    null,
+    0,
+    true,
+    false,
+    false,
+    false,
+    false,
+    "zh-CN",
+    true,
+    "full",
+    undefined,
+  );
+  assert.equal(viaResolver, golden, "zh-CN 经 resolver 必须与 zh 孪生直调逐字节一致");
+  assert.match(viaResolver, /你的桌面/);
+}
+for (const language of ["zh", "zh-TW"]) {
+  assert.match(
+    resolver(resolverInput(language)),
+    /你的桌面/,
+    `zh 变体域（${language}）必须路由到 zh 孪生`,
+  );
+}
+for (const language of [undefined, "en-US"]) {
+  const viaResolver = resolver(resolverInput(language));
+  const golden = buildMagicContextSection(
     null,
     0,
     true,
@@ -151,25 +223,8 @@ for (const language of [undefined, "en-US", "zh", "zh-CN"]) {
     "full",
     undefined,
   );
-  const zh = buildMagicContextSectionZhCn(
-    null,
-    0,
-    true,
-    false,
-    false,
-    false,
-    false,
-    language,
-    true,
-    "full",
-    undefined,
-  );
-  if (language === undefined || language === "en-US") {
-    assert.ok(!/你的桌面/.test(en), `en 路径不得出现中文（${language}）`);
-  } else {
-    assert.ok(/你的桌面/.test(zh), `zh 路径必须是中文桌面（${language}）`);
-    assert.ok(en !== zh, `zh/en 必须是两份文本（${language}）`);
-  }
+  assert.equal(viaResolver, golden, `en/缺席（${language}）经 resolver 必须与上游直调逐字节一致`);
+  assert.ok(!/你的桌面/.test(viaResolver), `en 路径不得出现中文（${language}）`);
 }
 
 console.log("TEST PASS — magic-context-section-zh (16-case matrix + resolver routing)");

@@ -15,7 +15,8 @@
  *     CLI 侧钉死它依赖的那段事实：**会话态在选择时即更新**。
  *
  *   Step 5（promote 活值规则，handlers/queue.ts applyPromotedModelSelection）：
- *     runtime.lastModelSwitchAt > item.admittedAt → 提升轮改用会话活值。
+ *     出队模型裁定（2026-10-11）：提升轮一律读会话当前活值（不再比对
+ *     lastModelSwitchAt 时间戳；显式快照仅在会话无活值时兜底）。
  *     - T-ML1  切换后下一个新提交轮用新模型（admission 冻结活值 + 变值时间戳只记一次）。
  *     - T-ML2a 入队后切换 → 提升轮用活值，且不 pin、不写回会话态。
  *     - T-ML2b 出队模型规则直证：快照≠会话活值时，无论切换先后，提升一律用活值

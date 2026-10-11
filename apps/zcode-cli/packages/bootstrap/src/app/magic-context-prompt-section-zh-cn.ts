@@ -156,7 +156,10 @@ const CAVEMAN_COMPRESSION_WARNING_ZH = `\n**注意**：历史压缩已开启；�
 
 /** 回复语言指令（上游 buildPrimaryLanguageDirective 的中文镜像语义）。 */
 function primaryLanguageDirectiveZh(language?: string): string {
-  // 与上游同源判定：只有可解析的 2 字母码才发指令；中文码（zh）由本孪生承接。
+  // 判定域比上游 resolveLanguageName（仅裸 2 字母码）**有意放宽**：接受 zh-CN/zh-TW
+  // 等 BCP-47 变体——本孪生只在 isChinesePromptLanguage（域含变体）命中时被选用，
+  // 若这里沿用裸 2 字母判定，zh-TW 会走中文段却丢语言指令。zh 全域发「简体中文」
+  // 指令，与 core 其他 zh 段（identity/desktop）的口径同源。
   if (!language || !/^[a-zA-Z]{2}(-[a-zA-Z0-9]+)?$/.test(language.trim())) return "";
   const code = language.trim().toLowerCase();
   if (!code.startsWith("zh")) return "";

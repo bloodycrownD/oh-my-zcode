@@ -206,6 +206,12 @@ test("C1: en-US and undefined fall back to the English originals", () => {
     );
     assert.match(mustSection(result, "identity").content, /You are an interactive ZCode agent/);
     assert.match(mustSection(result, "identity").content, /^# Harness$/m);
+    // 安全段移除（用户裁定 2026-10-11）在英文侧同样成立：交互式身份不得再带
+    // IMPORTANT 安全段（防回归重新加回时只有 zh 侧会红）。
+    assert.doesNotMatch(
+      mustSection(result, "identity").content,
+      /IMPORTANT: Assist with authorized/,
+    );
     assert.match(mustSection(result, "dynamic_behavior").content, /# Communicating with the user/);
     assert.match(mustSection(result, "context_management").content, /# Context management/);
     assert.match(mustSection(result, "desktop_context").content, /# ZCode Desktop Context/);

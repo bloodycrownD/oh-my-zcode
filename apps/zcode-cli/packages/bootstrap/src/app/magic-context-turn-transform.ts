@@ -1479,18 +1479,19 @@ export async function createMagicContextTurnTransform(
   //      库上为 0，真实仓库上数百 ms）。
   // 两者原本都发生在「会话第一条消息」的 model step 前置段，直接计入首 token 延迟。
   //
-  // 这里在工厂建完后 fire-and-forget 预热：把成本搬进 app 启动窗口（desktop 长驻进程
-  // 在用户建会话/输入前有充裕空闲）。不 await——boot 15s 预算不为预热加码；失败不抛
-  // （identity 本就是非抛出语义，preloadTokenizer 内部自带 fallback 告警），未预热
-  // 成功时首轮 pass 按既有懒加载语义照旧，只是退回原行为。
-  queueMicrotask(() => {
+  // 这里在工厂建完后异步预热：把成本搬进 app 启动窗口（desktop 长驻进程在用户
+  // 建会话/输入前有充裕空闲）。用 setImmediate 而非 queueMicrotask：让已排队的
+  // 宏任务（如恰在启动尾已提交的首条消息）先走，预热不插队。不 await——boot 15s
+  // 预算不为预热加码；失败不抛（identity 本就是非抛出语义，preloadTokenizer 内部
+  // 自带 fallback 告警），未预热成功时首轮 pass 按既有懒加载语义照旧，只是退回原行为。
+  setImmediate(() => {
     try {
       resolveProjectIdentityForSession(options.workingDirectory);
     } catch {
       // 非抛出语义下的双保险：任何意外都不许影响启动路径。
     }
     void preloadTokenizer().catch(() => {
-      // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断微任务链。
+      // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断事件循环链。
     });
   });
 
