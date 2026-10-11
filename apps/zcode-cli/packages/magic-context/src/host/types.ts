@@ -183,10 +183,16 @@ export interface ZCodeRuntimeMessageEntry {
   queryScope?: "output_token_continuation";
 }
 
-/** FORK copy of `core/src/agent/message-history.ts:59-64`. */
+/**
+ * FORK copy of `core/src/agent/message-history.ts:59-77` — with the Step 15
+ * (bugfix-batch-20261011 / D5) `mediaBlocks` extension mirrored 1:1: attachments
+ * carry provider-neutral media blocks (the mural PNG the m0 path renders) next
+ * to their text. Same rules as core: optional, request-scoped, never persisted.
+ */
 export interface ZCodeRuntimeAttachmentEntry {
   kind: "attachment";
   content: string;
+  mediaBlocks?: readonly ZCodeModelMessageContentBlock[];
   cacheControl?: { type: "ephemeral"; ttl?: "5m" | "1h"; scope?: "global" | "org" };
   metadata: ZCodeRuntimeMessageMetadata;
 }
@@ -370,7 +376,16 @@ export function projectRuntimeEntry(
       // reach magic-context as synthetic text so the tag/drop machinery can see
       // and drop them like any other injected prose; `synthetic` mirrors OpenCode's
       // marker for "the host put this here, the user did not".
-      parts: [{ type: "text", text: entry.content, synthetic: true }],
+      //
+      // FORK（Step 15 / D5）：`mediaBlocks`（mural PNG 等图片块）随附件一起投影为
+      // synthetic part，正反投影对称——没有这一步，宿主侧已经渲染好的壁画会在
+      // 正投影里被静默丢掉，transform 看到的就只剩文本。块按原样透传
+      // （包内按 `type` 收窄，未知 type 惰性忽略），与 content blocks 的既有
+      // 透传语义一致。
+      parts: [
+        { type: "text", text: entry.content, synthetic: true },
+        ...(entry.mediaBlocks ?? []).map((block) => ({ ...block, synthetic: true })),
+      ],
     };
   }
 
@@ -492,7 +507,21 @@ export function projectMessageUnchanged(
   message: MessageLike,
   original: ZCodeRuntimeEntry,
 ): boolean {
-  if (isRuntimeAttachmentEntry(original)) return message.parts.length === 1;
+  // FORK（Step 15 / D5）：attachment 的正投影现在是「1 个 text part +
+  // 每条 mediaBlock 一个 synthetic part」。判定随之从「parts.length === 1」改为
+  // 「恰好一个 text part 且其余都是随附件透传的 media part」——否则宿主侧渲染过
+  // 壁画的附件每次 pass 都会被误判成「transform 改过它」，白白重建条目。
+  if (isRuntimeAttachmentEntry(original)) {
+    const expectedMediaCount = original.mediaBlocks?.length ?? 0;
+    if (message.parts.length !== 1 + expectedMediaCount) return false;
+    const head = message.parts[0];
+    if (!isRecord(head) || head.type !== "text") return false;
+    // 其余 part 必须是随附件透传的 media part（绝不能又是 text——那说明
+    // transform 往附件里追加了文本，条目已被改写）。
+    return message.parts.every(
+      (part, index) => index === 0 || !isRecord(part) || part.type !== "text",
+    );
+  }
   if (!isRuntimeMessageEntry(original)) return false;
   const role = message.info.role;
   // A `role: "tool"` entry projects onto a `user`-role message (OpenCode's

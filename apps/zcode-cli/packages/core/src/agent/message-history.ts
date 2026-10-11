@@ -59,6 +59,26 @@ export interface RuntimeMessageMessageEntry {
 export interface RuntimeAttachmentEntry {
   kind: "attachment";
   content: string;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 15，D5）：mural 等**图片**注入面的承载位。
+   *
+   * `content` 只能承载文本，而 magic-context 的 m[0] 注入口把项目记忆壁画渲染成
+   * 一枚 PNG data URL（上游 inject-compartments 以
+   * `{type:"file", mime:"image/png", url:dataUrl, synthetic:true}` part 注入）。
+   * 少了这个字段，反投影只能留下文本、把图片静默丢掉——于是「渲染了但模型永远
+   * 看不到」。字段语义与投影规则：
+   *   - 可选：缺席时本类型逐字节等价于改动前，投影/persist/比较逻辑全部走老路；
+   *   - 内容为 provider-neutral 的 {@link ModelMessageContentBlock}（image 块），
+   *     由 provider 请求投影（`renderProjectedEntryToModelMessage`）追加到
+   *     attachment 的 user message content 之后；
+   *   - **请求作用域**：壁画每 pass 从 DB 重渲染，因此不进入 canonical history、
+   *     不落 Session persistence（`addAttachment` 只收 content，水合路径天然
+   *     不带回图片）——与 `magic_context` source 的 per-request 生命周期一致；
+   *   - vision 判定（模型吃不吃图）在包内 render-trigger 由宿主注入的静态目录
+   *     probe 决定，非 vision 模型根本不会产生 mediaBlocks，provider 侧的
+   *     media-policy 过滤只是第二道闸。
+   */
+  mediaBlocks?: readonly ModelMessageContentBlock[];
   cacheControl?: ModelCacheControl;
   metadata: RuntimeMessageMetadata;
 }
@@ -411,6 +431,16 @@ export function cloneRuntimeMessageEntry(entry: RuntimeMessageEntry): RuntimeMes
     return {
       kind: "attachment",
       content: entry.content,
+      // Step 15 / D5：mediaBlocks 是请求作用域的图片承载位，clone 必须带上深拷贝，
+      // 否则 reset()/borrow 快照这条链路会把壁画静默降级成纯文本。块级 clone 与
+      // message content 共用同一个函数（含 source 深拷贝），只是这里入参必为数组。
+      ...(entry.mediaBlocks && entry.mediaBlocks.length > 0
+        ? {
+            mediaBlocks: entry.mediaBlocks.map(
+              (block) => cloneModelMessageContentBlock(block) as ModelMessageContentBlock,
+            ),
+          }
+        : {}),
       cacheControl: entry.cacheControl ? { ...entry.cacheControl } : undefined,
       metadata: cloneRuntimeMessageMetadata(entry.metadata)!,
     };

@@ -905,6 +905,28 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           ...(options.onMagicContextUsage === undefined
             ? {}
             : { onMagicContextUsage: options.onMagicContextUsage }),
+          // FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 vision 判定源。
+          // 包内 render-trigger 上游读 models-dev apiCache（本 fork 零生产者、恒
+          // false），判定改走**静态目录** `ModelInputFormatData.supportsImage`
+          // （packages/shared/src/model-config.ts:51-59，与 contracts
+          // media-policy.ts:40 同一源）；「provider/model → properties」的解析只有
+          // 这里持有的 provider Registry 做得到。未知模型/catalog 缺字段一律
+          // false（fail-closed，与上游「缺失 cache 条目不出图」同向）。冒号 tag
+          // 后缀（modelID:tag）与上游 `modelSupportsVision` 的 fallback 同款：
+          // 先整键、再去 tag 试一次。
+          muralVisionProbe: (modelKey: string) => {
+            const separator = modelKey.indexOf("/");
+            if (separator <= 0) return false;
+            const providerId = modelKey.slice(0, separator);
+            const modelId = modelKey.slice(separator + 1);
+            const accepts = (id: string): boolean => {
+              const model = options.providerRegistry.getModel(providerId, id);
+              return model?.config?.properties?.inputFormat?.supportsImage === true;
+            };
+            if (accepts(modelId)) return true;
+            const colon = modelId.lastIndexOf(":");
+            return colon > 0 ? accepts(modelId.slice(0, colon)) : false;
+          },
           // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
           // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
           // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类

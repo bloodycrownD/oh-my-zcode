@@ -189,10 +189,23 @@ function renderProjectedEntryToModelMessage(
     if (!isKnownSystemReminderSource(source)) {
       throw new Error(`Attachment source ${source} is not a system reminder source`);
     }
+    // FORK（bugfix-batch-20261011 / Step 15，D5）：attachment 的 mediaBlocks
+    // （mural PNG 等图片块）追加在 system-reminder 文本之后，同一条 user message
+    // 的 content 数组里。图片缺席时逐字节保持改动前的字符串 content——投影对
+    // 纯文本 attachment 零变化。 requestBytes / 容量与「模型吃不吃图」由
+    // Model 层的 media-policy（contracts media-policy.ts）+ media-budget 收口，
+    // 这里只负责把包内渲染产出的块递上路。
+    const body = wrapSystemReminderForSource(source, entry.content);
+    const mediaBlocks = entry.mediaBlocks ?? [];
     const message: ModelInputMessage = {
       role: "user",
       // incoming 载荷也可能含关闭标签；统一在 provider 包装时转义，canonical 原文不变。
-      content: wrapSystemReminderForSource(source, entry.content),
+      // 有 mediaBlocks 时文本进 content 数组首块（与裸字符串等价，provider 侧
+      // modelMessageContentToText 同解），图片块依序排在后面。
+      content:
+        mediaBlocks.length > 0
+          ? ([{ type: "text", text: body }, ...mediaBlocks] as ModelMessageContentBlock[])
+          : body,
     };
     if (entry.cacheControl) {
       message.cacheControl = { ...entry.cacheControl };

@@ -163,6 +163,7 @@ import {
   replayLkg,
   resolveLkgModelKeys,
   resolveModelKey,
+  setMuralVisionProbe,
   setRawMessageProvider,
   snapshotRuntimeEntries,
   updateSessionMeta,
@@ -229,6 +230,25 @@ export interface MagicContextTurnTransformOptions {
    * 进程，代价也只是一次多余的有界等待，而不是把在飞的折叠丢在半路。
    */
   processExitsAfterTurn?: boolean;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 **vision 判定源**。
+   *
+   * 为什么由宿主注入：包内 render-trigger 的 `modelKeyAcceptsImages` 上游读
+   * `models-dev-cache` 的 apiCache，而本 fork 那条链零生产者（refresh 零调用者）——
+   * 恒 false 会让整条移植的渲染路径成为死代码。判定改走**静态目录**
+   * `ModelInputFormatData.supportsImage`（packages/shared/src/model-config.ts:51-59，
+   * 与 contracts media-policy.ts:40 同一源），而「provider/model → properties」
+   * 的解析只有持有 provider Registry 的宿主做得到，包内零包依赖碰不到共享目录。
+   *
+   * 契约：入参是 canonical `provider/model` 键（包内已做 pi 前缀规范化），
+   * 返回 true 表示这个模型吃图。**未知即 false**（fail-closed，与上游「缺失
+   * cache 条目不出图」同向）；缺席（不传）时包内同样按 false 处理——即整个
+   * mural 渲染静默不触发，与 Step 15 之前的现场行为一致。
+   *
+   * 注入是进程级（包内 `setMuralVisionProbe`，与 `setRawMessageProvider` 同范式）：
+   * 模型目录与会话无关，多会话共享同一份 Registry 视图。
+   */
+  muralVisionProbe?: (canonicalModelKey: string) => boolean;
   /** 读历史的第二数据源；缺席时 raw-message provider 只服务内存历史。 */
   sessionStore?: SessionStorePort;
   logger: Logger;
@@ -596,6 +616,55 @@ function textOf(parts: readonly unknown[]): string {
     .join("\n\n");
 }
 
+/** m[0] 注入的壁画 part 形状（上游 inject-compartments.ts `prependM0M1Messages`）：
+ *  `{ type: "file", mime: "image/png", url: dataUrl, synthetic: true }`。 */
+function isSyntheticImageFilePart(
+  part: Record<string, unknown>,
+): part is Record<string, unknown> & { mime: string; url: string } {
+  return (
+    part.type === "file" &&
+    typeof part.mime === "string" &&
+    part.mime.startsWith("image/") &&
+    typeof part.url === "string" &&
+    part.url.length > 0
+  );
+}
+
+/**
+ * FORK（bugfix-batch-20261011 / Step 15，D5）：从 synthetic head 的 parts 里提取
+ * **图片**块，转成 provider-neutral 的 {@link ModelImageContentBlock}。
+ *
+ * 为什么需要它：mural 渲染链（本批 D5）把项目记忆壁画渲染成 PNG data URL，由包内
+ * `inject-compartments` 以上述 `file` part 注入 m[0] head。反投影原来只取 text
+ * part，图片会被静默丢掉——「渲染了但模型永远看不到」。这里把 image part 提出来
+ * 放进 attachment 的 `mediaBlocks`（core `RuntimeAttachmentEntry` 的本批新增字段），
+ * 由 core 的 provider 请求投影追加进 user message content。
+ *
+ * 无图片 part 时返回 undefined：attachment 形状与改动前逐字节一致（可选字段缺席），
+ * 所有既有比较/落盘路径零变化。
+ */
+function mediaBlocksOf(parts: readonly unknown[]): ModelMessageContentBlock[] | undefined {
+  const blocks: ModelMessageContentBlock[] = [];
+  for (const part of parts) {
+    if (!isRecord(part)) continue;
+    if (isSyntheticImageFilePart(part)) {
+      blocks.push({ type: "image", mediaType: part.mime, dataUrl: part.url });
+      continue;
+    }
+    // 直接的 image part（mediaType + dataUrl）同样接受：块联合是封闭的，多认一种
+    // 已注册形状不改变「未知 type 惰性忽略」的透传语义。
+    if (
+      part.type === "image" &&
+      typeof part.mediaType === "string" &&
+      typeof part.dataUrl === "string" &&
+      part.dataUrl.length > 0
+    ) {
+      blocks.push({ type: "image", mediaType: part.mediaType, dataUrl: part.dataUrl });
+    }
+  }
+  return blocks.length > 0 ? blocks : undefined;
+}
+
 function contentBlocksOf(parts: readonly unknown[]): ModelMessageContentBlock[] {
   const blocks: ModelMessageContentBlock[] = [];
   for (const part of parts) {
@@ -663,7 +732,19 @@ function toolOutputOf(part: ToolPart): string {
  * `rebuildEntry` 的严格镜像：任何"重建后与原消息不同"的情形都判定为已改动。
  */
 function isUnchanged(message: MessageLike, original: RuntimeMessageEntry): boolean {
-  if (isAttachment(original)) return message.parts.length === 1;
+  // FORK（Step 15 / D5）：attachment 的正投影是「text part + 每条 mediaBlock 一个
+  // synthetic part」（包侧 projectRuntimeEntry 同款）。计数规则与包侧
+  // `projectMessageUnchanged` 保持一致：1 个 text + N 个 media part 计入未改动。
+  // 纯文本附件（N=0）仍是 parts.length === 1，与改动前逐字节等价。
+  if (isAttachment(original)) {
+    const expectedMediaCount = original.mediaBlocks?.length ?? 0;
+    return (
+      message.parts.length === 1 + expectedMediaCount &&
+      isRecord(message.parts[0]) &&
+      message.parts[0]!.type === "text" &&
+      message.parts.every((part, index) => index === 0 || !isRecord(part) || part.type !== "text")
+    );
+  }
   const source = original.message;
   const parts = message.parts;
   const toolResults = parts.filter(isCompletedToolPart);
@@ -742,9 +823,12 @@ function rebuildEntry(
 }
 
 function magicContextAttachment(message: MessageLike): RuntimeMessageEntry {
+  const mediaBlocks = mediaBlocksOf(message.parts);
   return {
     kind: "attachment",
     content: textOf(message.parts),
+    // FORK（Step 15 / D5）：壁画 PNG 走 mediaBlocks 上路（见 mediaBlocksOf）。
+    ...(mediaBlocks === undefined ? {} : { mediaBlocks }),
     metadata: { source: "magic_context" },
   };
 }
@@ -1247,6 +1331,12 @@ export async function createMagicContextTurnTransform(
   // 都不该发生——那时不存在任何 magic-context DB 写，契约因此自动成立。
   initializeMagicContextHost();
 
+  // FORK（bugfix-batch-20261011 / Step 15，D5）：mural vision 判定源注入。必须在
+  // 任何 transform pass 之前——pass 内的 m0 物化会同步调 `resolveMuralWire`。
+  // 每次调用工厂都整份设置（含 undefined 清空）：多会话/重入场景下 probe 的归属
+  // 必须是「本次装配的宿主能力」，而不是第一个装配过的会话残留。
+  setMuralVisionProbe(options.muralVisionProbe);
+
   const bridge = createConfigBridge(createConfigSource(options), {
     // 写入了一个通不过 schema 的域值时，bridge 保留 last-known-good 并把原因交给
     // 这里——降级方向是「这次改动没生效」，而不是「功能被关掉」。
@@ -1561,6 +1651,15 @@ function applyConfigToDeps(deps: TransformDeps, config: MagicContextConfig): voi
     injectionBudgetTokens: MEMORY_INJECTION_BUDGET_TOKENS_DEFAULT,
     autoPromote: MEMORY_AUTO_PROMOTE_DEFAULT,
   };
+  // FORK（bugfix-batch-20261011 / Step 15，D5）：`mural.enabled` 的 transform 侧
+  // 消费点。包内 transform 把它带进 m0/m1 装配（`muralEnabled: deps.muralEnabled`，
+  // 见包内 transform.ts 的 materializeM0  pack options）；inject-compartments 的
+  // `resolveMuralForM0` 再以 `options.muralEnabled` 为门。Step 11 起
+  // `config.mural.enabled` 已能写进 config.json，但本字段此前从未被填过 → 恒
+  // undefined → 壁画在运行期是**关**的（OQ-CTX 登记的透传缺口，本步闭合）。
+  // 渲染真触发还需 vision 判定为真（宿主注入的 supportsImage probe，见
+  // `muralVisionProbe` 选项）；两者皆真的自然折叠上才会渲染 PNG。
+  deps.muralEnabled = config.mural.enabled;
 }
 
 function buildTransformDeps(
@@ -1627,6 +1726,10 @@ function buildTransformDeps(
       injectionBudgetTokens: MEMORY_INJECTION_BUDGET_TOKENS_DEFAULT,
       autoPromote: MEMORY_AUTO_PROMOTE_DEFAULT,
     },
+    // FORK（bugfix-batch-20261011 / Step 15，D5）：mural 总开关（`mural.enabled`，
+    // Step 11 白名单字段，默认 off）。与 memoryConfig 同一套「活对象原地改写」纪律：
+    // `applyConfigToDeps` 在配置变更时刷新它，下一个 pass 即生效。
+    muralEnabled: config.mural.enabled,
     smartDrops: config.smart_drops,
     historyBudgetPercentage: config.history_budget_percentage,
     executeThresholdPercentage: config.execute_threshold_percentage,
