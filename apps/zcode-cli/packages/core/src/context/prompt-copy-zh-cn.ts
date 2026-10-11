@@ -10,7 +10,8 @@
 // ── ZCode 的差异 ───────────────────────────────────────────────────────
 // 本文件是 Layer 1 提示词中文化的文案集中地：被改的英文段文件只做「按 language
 // 选文案」的最小 diff，英文原文全部保留为默认/回退，因此任何一段未覆盖的提示词都会
-// 自然回落英文。覆盖 cli-prefix、identity（intro / SECURITY_NOTICE / Harness）、
+// 自然回落英文。覆盖 cli-prefix、identity（intro / Harness；SECURITY_NOTICE 已按
+// 用户裁定 2026-10-11 整体移除）、
 // desktop 段、dynamic-sections（COMMUNICATION、动态行为尾段、context management、
 // session guidance 的 skill 行）；品牌统一用 omz（英文原文里的 ZCode 品牌名在中文
 // 语境换成 omz）。
@@ -48,10 +49,6 @@ export const IDENTITY_INTRO_ZH_CN = "你是 omz 的交互式编码代理，帮�
 /** identity intro：带 Output Style 时的身份。 */
 export const IDENTITY_INTRO_OUTPUT_STYLE_ZH_CN =
   "你按照下方生效的 Output Style 回应用户，同时使用 omz 的工具和指令。";
-
-/** 安全 IMPORTANT 行（与英文版逐段对应）。 */
-export const SECURITY_NOTICE_ZH_CN =
-  "重要：仅在获得明确授权的场景下协助安全测试、防御性安全、CTF 挑战与教学用途。拒绝破坏性技术、DoS 攻击、大规模定向攻击、供应链投毒，以及用于恶意目的的规避检测请求。双用途安全工具（C2 框架、凭据测试、漏洞利用开发）需要明确的授权背景：渗透测试项目、CTF 竞赛、安全研究或防御用途。";
 
 /** `# Harness` 块中文版：稳定运行时约束，与英文版逐条对应。 */
 export const HARNESS_BLOCK_ZH_CN = [

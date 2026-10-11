@@ -4,8 +4,9 @@
  *
  * 三组断言：
  *
- *   A. **zh-CN 装配**：cli_prefix（「你是 omz…」）、identity（intro / SECURITY_NOTICE /
- *      Harness 三段）、dynamic_behavior（含「与用户交流时使用简体中文」显式指令）、
+ *   A. **zh-CN 装配**：cli_prefix（「你是 omz…」）、identity（intro / Harness 两段；
+ *      SECURITY_NOTICE 已按用户裁定 2026-10-11 移除，断言两语均不再出现）、
+ *      dynamic_behavior（含「与用户交流时使用简体中文」显式指令）、
  *      context_management、session_guidance、desktop 段（仅 presentationSurface=
  *      zcode_desktop 输出）全部走中文文案。
  *
@@ -16,7 +17,7 @@
  *   C. **en-US / undefined 与工作流子代理分支**：en-US 与 undefined 下交互段全英文；
  *      desktop 段仅 desktop 表面输出；workflowActor 分支下交互式身份段（cli_prefix /
  *      identity / desktop / dynamic_behavior / session_guidance）全部缺席，
- *      workflow_actor_identity 的基座（契约 + SECURITY_NOTICE + Harness）保持英文
+ *      workflow_actor_identity 的基座（契约 + Harness）保持英文
  *      ——子代理面向程序，中文化留给后续层次评估（builder 刻意保留 context_management
  *      与其后各段，故该段随 language 走）。
  *
@@ -140,7 +141,8 @@ test("A1: zh-CN uses Chinese copy for cli_prefix / identity / desktop / dynamic 
 
   const identity = mustSection(result, "identity").content;
   assert.match(identity, /你是 omz 的交互式编码代理/);
-  assert.match(identity, /重要：仅在获得明确的授权场景|重要：仅在获得明确授权/);
+  // 安全 IMPORTANT 行已按用户裁定（2026-10-11）移除：中英两版都不得再出现。
+  assert.doesNotMatch(identity, /仅在获得明确授权|IMPORTANT: Assist with authorized/);
   assert.match(identity, /# Harness/);
   assert.match(identity, /工具调用之外输出的文本/);
 
@@ -240,7 +242,8 @@ test("C3: workflowActor drops the interactive segments; its base identity stays 
 
   const actorIdentity = mustSection(result, "workflow_actor_identity").content;
   assert.match(actorIdentity, /You are a subagent inside a dynamic workflow run/);
-  assert.match(actorIdentity, /IMPORTANT: Assist with authorized security testing/);
+  // 安全 IMPORTANT 行已按用户裁定（2026-10-11）移除，子代理身份同样不注入。
+  assert.doesNotMatch(actorIdentity, /IMPORTANT: Assist with authorized security testing/);
   assert.match(actorIdentity, /# Harness/);
   assert.match(actorIdentity, /# Working inside a workflow/);
   assert.doesNotMatch(actorIdentity, CJK, "子代理身份契约刻意保持英文");
