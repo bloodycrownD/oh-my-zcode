@@ -1675,7 +1675,9 @@ function buildTransformDeps(
   // inherit 模式的 live 绑定要等 turn 开始，由 `bindLiveModel` 原地改写这一位
   // （deps 是本工厂持有的活对象，包内 transform 每个 pass 现读它）。
   const historianModel = historian.getHistorianModel();
-  return {
+  // MF-PS-1：显式标注 TransformDeps（`satisfies` 不改变推断类型，构造后赋值
+  // getToolSetHash 需要字段在类型面上可选可见）。
+  const deps: TransformDeps = {
     db,
     tagger: createTagger(),
     scheduler: createZCodeScheduler(config),
@@ -1753,9 +1755,21 @@ function buildTransformDeps(
     // `tools` 数组字节随之改变，m[0] 的 baseline 与它记录的指纹必须能在审计里对上；
     // 继续回空串等于「本条路径的 tool-set 恒不变」的谎言（Step 11 之前这还算诚实——
     // `deps.promptSurface` 是 undefined、包内也不读它；Step 12 起它真的进 deps 了）。
-    getToolSetHash: () => promptSurfaceConfigIdentity(config.prompt_surface),
+    //
+    // FORK（bugfix-batch-20261011 / MF-PS-1，CR fix）：指纹闭包**现读
+    // `deps.promptSurface`**，不捕获装配期的 `config`。`applyConfigToDeps` 每次
+    // 配置刷新都换 `deps.promptSurface` 引用（config-bridge 每次 refresh 产新对象），
+    // 而闭包捕获的是当初构造时那个 config 对象——长驻进程（桌面/app-server/TUI）在
+    // 设置页翻转 preset 后，指纹会恒为装配期旧值，transform_decisions /
+    // cached_m0_tool_set_hash 的 prev==new 恒等，「预设翻转必须留得下审计操作数」
+    // 就此落空（CLI 一进程一轮无此问题，长驻才有）。字段在 TransformDeps 上是可选
+    // 的，构造后赋值过类型检查；「活对象 + 构造后赋值」与同文件 historianModel 的
+    // live 绑定同一范式。
     promptSurface: config.prompt_surface,
   } satisfies TransformDeps;
+  // MF-PS-1：构造后赋值（字段可选，过类型检查）——见上方 getToolSetHash 注释块。
+  deps.getToolSetHash = () => promptSurfaceConfigIdentity(deps.promptSurface);
+  return deps;
 }
 
 /**
