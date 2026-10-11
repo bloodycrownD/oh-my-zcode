@@ -5,10 +5,9 @@
  * scheduler.ts`（122 行），含此前缝里没有的 `createScheduler`。唯一改动：
  *
  *   - 相对导入加 `.js` 后缀；
- *   - `resolveExecuteThreshold` 来自 `../../deferred/event-resolvers.js` 而不是
- *     `../../hooks/magic-context/event-resolvers`。那个模块（OpenCode 事件解析层）
- *     按 SPEC 属于「不搬」，但它的成员已在包内逐字复现，`createScheduler` 因此可用；
- *     event-resolvers 若将来落地，只需改这一行。
+ *   - `resolveExecuteThreshold` 来自 `../../hooks/magic-context/event-resolvers.js`
+ *     （Step 16 / bugfix-batch-20261011：D9 真身归位后的事件解析模块落位；
+ *     此前以 `../../deferred/event-resolvers.js` 壳为源）。
  *
  * 为何值得逐字保真：`parseCacheTtl` 的文档契约（"Strict > matches the Rust
  * scheduler's predicate exactly"）让 `never` 哨兵与裸毫秒读法都是载荷语义。
@@ -16,7 +15,7 @@
  * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
-import { resolveExecuteThreshold } from "../../deferred/event-resolvers.js";
+import { resolveExecuteThreshold } from "../../hooks/magic-context/event-resolvers.js";
 import { log, sessionLog } from "../../shared/logger.js";
 import type { ContextUsage, SchedulerDecision, SessionMeta } from "./types.js";
 

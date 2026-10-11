@@ -162,7 +162,7 @@ export {
 export {
   resolveExecuteThreshold,
   resolveExecuteThresholdDetail,
-} from "./core/deferred/event-resolvers.js";
+} from "./core/hooks/magic-context/event-resolvers.js";
 export type { LiveModelBySession } from "./core/deferred/hook-handlers.js";
 export type { NotificationParams } from "./core/deferred/send-session-notification.js";
 export type {
@@ -298,7 +298,7 @@ export { loadPersistedUsage } from "./core/features/magic-context/storage-meta-p
  * `resolveModelKey(currentOutgoingModel)` 比。宿主自己拼字符串等于抄一份规范化规则，
  * provider 别名一改就会静默失配。
  */
-export { resolveModelKey } from "./core/deferred/event-resolvers.js";
+export { resolveModelKey } from "./core/hooks/magic-context/event-resolvers.js";
 
 // ── 4b. D 组 ctx 工具面 + 状态读取（Step 21） ──────────────────────────────────
 

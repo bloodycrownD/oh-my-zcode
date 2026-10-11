@@ -1,4 +1,3 @@
-import type { ProtectedTokensTierOverrides } from "../../deferred/project-security.js";
 import { getLastCompartmentEndMessage } from "../../features/magic-context/compartment-storage.js";
 import {
     resolveProjectIdentityForSession,
@@ -83,7 +82,7 @@ import {
     resolveTodowriteAvailabilityFromMessages,
     spawnAgentFromMessages,
     type ToolAvailabilityVerdict,
-} from "../../deferred/ctx-reduce-availability.js";
+} from "./ctx-reduce-availability.js";
 import {
     decideChannel1,
     evaluateChannel2,
@@ -100,7 +99,7 @@ import {
     resolveExecuteThreshold,
     resolveModelKey,
     resolveTrustedContextLimit,
-} from "../../deferred/event-resolvers.js";
+} from "./event-resolvers.js";
 import {
     describeFinalWireTail,
     estimateFinalWireInputTokens,
@@ -175,6 +174,16 @@ import { isClearlyOverWindow, UnmanagedOverWindowError } from "./unmanaged-over-
 import { UnresolvedHistoryBoundaryError } from "./unresolved-history-boundary.js";
 
 export { EmergencyFailClosedError } from "./emergency-fail-closed.js";
+
+// Step 16（bugfix-batch-20261011）：`ProtectedTokensTierOverrides` 原随
+// `deferred/project-security.ts` 壳 import，该壳按 spec 删除后此形状**内联**到
+// 两个使用处（本文件与 `storage-meta-persisted.ts`）。上游的 per-project
+// 安全策略面不搬（spec 裁定），这里只保留 `protected_tokens` 的 per-tier
+// 覆盖形状——仍由 storage-meta-persisted 的 meta 投影线程消费。
+type ProtectedTokensTierOverrides = {
+    readonly user?: number;
+    readonly project?: number;
+};
 
 // Per-session message token cache. Keyed by message ID, value is the token
 // contribution of that message split into conversation (text/reasoning/images)

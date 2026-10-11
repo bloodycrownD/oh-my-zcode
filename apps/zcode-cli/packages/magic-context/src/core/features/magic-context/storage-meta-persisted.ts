@@ -8,9 +8,8 @@ import { sessionLog } from "../../shared/logger.js";
 import type { Database } from "../../shared/sqlite.js";
 import { stableStringify } from "../../shared/stable-json.js";
 import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.js";
-import { deriveDefaultProtectedTokens } from "../../deferred/magic-context-schema.js";
+import { deriveDefaultProtectedTokens } from "../../shared/protected-tokens.js";
 import { readEpochFloorSnapshot } from "./protection-window.js";
-import type { ProtectedTokensTierOverrides } from "../../deferred/project-security.js";
 import {
     decodeMergedReasoningParts,
     readFrozenMergedReasoningParts,
@@ -29,6 +28,16 @@ import {
 export type { PersistedTrailingBlankDecision } from "./storage-replay-document.js";
 
 import type { ContextUsage } from "./types.js";
+
+// Step 16（bugfix-batch-20261011）：`ProtectedTokensTierOverrides` 原随
+// `deferred/project-security.ts` 壳 import，该壳按 spec 删除后此形状**内联**到
+// 两个使用处（本文件与 hooks/magic-context/transform.ts）。上游的 per-project
+// 安全策略面不搬（spec 裁定），这里只保留 protected_tokens 的 per-tier 覆盖
+// 形状——仍由本文件的 meta 投影线程消费。
+type ProtectedTokensTierOverrides = {
+    readonly user?: number;
+    readonly project?: number;
+};
 
 const emergencyRecoveryArmedSessions = new Set<string>();
 const emergencyRecoveryArmedAtBySession = new Map<string, number>();

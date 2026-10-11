@@ -1,61 +1,50 @@
-// FORK-NOT-PORTED: `hooks/magic-context/event-resolvers.ts` 的 escalationBands / MAX_EXECUTE_THRESHOLD / resolveModelKey / resolveExecuteThreshold / resolveExecuteThresholdDetail / historyBudgetPolicyIdentity / resolveContextWindowGeometry / resolveTrustedContextLimit 摘录，Step 21 决定移植或删除后重写本文件
-//
-// WHY NOT PORTED (BUT VERBATIM). `event-resolvers.ts` is the OpenCode
-// event-resolution layer: it maps an event's provider/model onto a context
-// window using the models.dev catalog, a user provider override, the detected
-// overflow limit, and the session's own measured high-water mark. The fork's
-// window resolution belongs to the host adapter. The SPEC nonetheless lists
-// `event-resolvers` under 不搬 — "not ported", not "not load-bearing".
-//
-// Because it is not ported BUT its members are already load-bearing in ported
-// code, this seam reproduces the resolvers VERBATIM rather than stubbing them.
-// Concretely, `transform.ts` calls, on every pass:
-//
-//   - `resolveExecuteThreshold` (:1524, :1647, :3204) to size the execute band,
-//   - `escalationBands` (:1534) to derive the force-materialization percentage,
-//   - `historyBudgetPolicyIdentity` (:1552) to key the cached m[0] prefix,
-//   - `resolveModelKey` (:1134) to compare the outgoing model against the last
-//     measured one,
-//   - `resolveContextWindowGeometry` / `resolveTrustedContextLimit` (:1418, :1424)
-//     to resolve the usable window,
-//   and `lkg-replay-fit.ts` calls `resolveTrustedContextLimit` for the replay
-//   fit bound.
-//
-// A stub at any of these would silently change which pass compacts and which
-// rows are protected. The full resolution chain is reproducible here because all
-// six of its dependencies are already in the package: `storage`'s
-// `ContextDatabase`/`updateSessionMeta`, `storage-meta-persisted`'s
-// `getOverflowState`/`loadPersistedUsage`, `shared/escalation-bands`,
-// `shared/harness-provider-map`, `shared/logger`, `shared/models-dev-cache` and
-// `shared/window-geometry`. Only `resolveModelCacheTtl` is deferred, and the two
-// members that need it (`resolveCacheTtl`, `resolveContextLimit`'s cache-ttl
-// sibling) are not referenced by any fork call site, so `resolveCacheTtl` is
-// omitted.
-//
-// Step 21: delete this file and repoint `transform.ts` and
-// `lkg-replay-fit.ts` back at `./event-resolvers.js`.
+/**
+ * Step 16 真身归位（D9 / bugfix-batch-20261011）：本文件原先是
+ * `core/deferred/event-resolvers.ts` 的「引用子集壳」（r4 P1-1 修正：该壳并非
+ * 逐字真身，而是按 fork 引用面裁剪的摘录），现按 spec 裁定 git mv 保 rename
+ * 轨迹 + 内容整体替换为上游真身，并在文件头登记差异。
+ *
+ * 上游：`.reference/magic-context/packages/plugin/src/hooks/magic-context/
+ * event-resolvers.ts`（550 行，路径与 fork 落位一致）。逐字保真的部分：
+ * `resolveContextWindowGeometry` / `resolveTrustedContextLimit` /
+ * `resolveExecuteThresholdDetail` / `resolveExecuteThreshold` /
+ * `resolveModelKey` / `historyBudgetPolicyIdentity` 及其全部私有助手
+ * （`modelMatchedPersistedUsage` / `applySessionProvenFloor` /
+ * `modelKeyLookupOrder` / `clampWarnSeen` …）。被调用函数体从上游原文取，
+ * 而非壳内摘录——壳的注释是压缩版，行号标注也更粗。
+ *
+ * 裁剪（壳中裁剪掉的 exports 按 fork 引用面不复活，spec D9）：
+ * `resolveContextLimit`、`resolveCacheTtl`、`resolveSessionId` 属 fork 未接
+ * 语义，随真身一并省略；连带删除 `shared/model-cache-ttl` 的
+ * `resolveModelCacheTtl` import（唯一使用者是 resolveCacheTtl）与
+ * `CacheTtlConfig` 本地类型。fork 引用面（改指后）：
+ *   - `transform.ts:96-103`（transform 每个 pass 调用 6 个成员）
+ *   - `scheduler.ts:19`（createScheduler 算 execute threshold）
+ *   - `lkg-replay-fit.ts:3`（replay fit 的 trusted limit）
+ *   - barrel `src/index.ts:162-165`、`:301`（对外 resolver 面）
+ * 上游的 `reservation: "none"` 臂只服务 `resolveContextLimit`，随之缺席。
+ *
+ * 相对导入一律补 `.js` 后缀（NodeNext）；其余与上游逐字一致。
+ *
+ * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
+ */
 
-import {
-    type ContextDatabase,
-    updateSessionMeta,
-} from "../features/magic-context/storage.js";
+import { type ContextDatabase, updateSessionMeta } from "../../features/magic-context/storage.js";
 import {
     getOverflowState,
     loadPersistedUsage,
-} from "../features/magic-context/storage-meta-persisted.js";
-import { escalationBands, MAX_EXECUTE_THRESHOLD } from "../shared/escalation-bands.js";
-import { modelRefLookupOrder, piModelRefToCanonical } from "../shared/harness-provider-map.js";
-import { log, sessionLog } from "../shared/logger.js";
+} from "../../features/magic-context/storage-meta-persisted.js";
+import { escalationBands, MAX_EXECUTE_THRESHOLD } from "../../shared/escalation-bands.js";
+import { modelRefLookupOrder, piModelRefToCanonical } from "../../shared/harness-provider-map.js";
+import { log, sessionLog } from "../../shared/logger.js";
 import {
     getSdkContextLimit,
     getSdkWindowGeometry,
     isSaneLimit,
-} from "../shared/models-dev-cache.js";
-import { applyProvenInputFloor, hasTrustedAbsoluteWall } from "../shared/window-geometry.js";
+} from "../../shared/models-dev-cache.js";
+import { applyProvenInputFloor, hasTrustedAbsoluteWall } from "../../shared/window-geometry.js";
 
 export { escalationBands, MAX_EXECUTE_THRESHOLD };
-
-/** Verbatim: `event-resolvers.ts:18`. */
 export const DEFAULT_CONTEXT_LIMIT = 200_000;
 
 function modelMatchedPersistedUsage(
@@ -118,7 +107,6 @@ function applySessionProvenFloor(
     return result.geometry;
 }
 
-/** Verbatim: `event-resolvers.ts:80-110`. */
 export function resolveContextWindowGeometry(
     providerID: string | undefined,
     modelID: string | undefined,
@@ -155,7 +143,20 @@ export function resolveContextWindowGeometry(
  * Like resolveContextLimit, but returns a limit ONLY when it is TRUSTED for the
  * current model, rather than the generic 200K `DEFAULT_CONTEXT_LIMIT`.
  *
- * Verbatim: `event-resolvers.ts:188-235`.
+ * Resolution precedence is:
+ *   1. models.dev or a user provider override.
+ *   2. A detected-overflow limit when it is smaller than the models.dev limit,
+ *      or whenever models.dev has no entry.
+ *   3. A sane persisted usage-reported limit when models.dev and overflow
+ *      detection are both unavailable, but only when its observed model key
+ *      matches the current model key.
+ *
+ * The history-budget resolver needs this distinction: deriving the decay budget
+ * from a bare 128K guess for an UNKNOWN model would shrink history below what
+ * the live-usage back-derivation would yield for a large-context model. So the
+ * budget resolver only trusts a real, detected, or model-matched usage-reported
+ * limit and otherwise falls back to live-usage. (resolveContextLimit itself must
+ * keep returning 128K for pressure math, which needs a positive denominator.)
  */
 export function resolveTrustedContextLimit(
     providerID: string | undefined,
@@ -206,13 +207,11 @@ export function resolveTrustedContextLimit(
         : undefined;
 }
 
-/** Verbatim: `event-resolvers.ts:241-244`. */
 type ExecuteThresholdConfig = number | { default: number; [modelKey: string]: number };
 type ExecuteThresholdTokensConfig =
     | { default?: number; [modelKey: string]: number | undefined }
     | undefined;
 
-/** Verbatim: `event-resolvers.ts:246-255`. */
 export interface ExecuteThresholdOptions {
     /** Optional tokens-based threshold config. When matched for the given modelKey,
      *  overrides the percentage-based threshold. */
@@ -224,10 +223,8 @@ export interface ExecuteThresholdOptions {
     sessionId?: string;
 }
 
-/** Verbatim: `event-resolvers.ts:257`. */
 export type ExecuteThresholdMode = "percentage" | "tokens";
 
-/** Verbatim: `event-resolvers.ts:259-282`. */
 export interface ExecuteThresholdDetail {
     /** Effective execute threshold as a percentage (0–90). Downstream math keys off this. */
     percentage: number;
@@ -239,13 +236,16 @@ export interface ExecuteThresholdDetail {
     matchedKey?: string;
     /**
      * True when the user's configured value exceeded the safe cap and was reduced.
-     * Display surfaces read this to tell the user their value was clamped instead of
-     * silently ignoring it (#241).
+     * Tokens mode: configured tokens > 90% × contextLimit. Percentage mode:
+     * configured percentage > MAX_EXECUTE_THRESHOLD (90). Display surfaces read this
+     * to tell the user their value was clamped instead of silently ignoring it (#241).
+     * Only present (true) when a clamp actually happened; absent otherwise.
      */
     clamped?: boolean;
     /**
      * The raw configured value before clamping — a token count in tokens mode, a
-     * percentage in percentage mode.
+     * percentage in percentage mode. Populated only alongside `clamped` so display
+     * surfaces can show the math (e.g. "190,000 > 90% of 128,000").
      */
     configuredValue?: number;
 }
@@ -253,13 +253,13 @@ export interface ExecuteThresholdDetail {
 // Module-level dedupe for clamp warnings. Key: `${sessionId}|${modelKey}|${tokenVal}|${cap}`.
 // The hot transform path may call resolveExecuteThreshold many times per second; without dedupe
 // an over-cap token config would spam the log file continuously until the user fixes it.
-/** Verbatim: `event-resolvers.ts:287`. */
 const clampWarnSeen = new Set<string>();
 
 /**
- * Return true iff `v` is a finite positive number.
- *
- * Verbatim: `event-resolvers.ts:295-297`.
+ * Return true iff `v` is a finite positive number. Schema normally forbids junk values, but
+ * runtime callers may derive contextLimit from `inputTokens / (percentage/100)` (NaN when
+ * percentage is 0) or accept externally-mutated configs. Guarding here keeps resolver
+ * output deterministic and within bounds.
  */
 function isFinitePositive(v: unknown): v is number {
     return typeof v === "number" && Number.isFinite(v) && v > 0;
@@ -268,7 +268,17 @@ function isFinitePositive(v: unknown): v is number {
 /**
  * Yield progressively-less-specific lookup keys for a given `provider/model`.
  *
- * Verbatim: `event-resolvers.ts:314-329`.
+ * OpenCode's `experimental.modes` feature derives model IDs like
+ * `gpt-5.4-fast` from a base model `gpt-5.4`. Users may put EITHER the
+ * derived key OR the base key in their per-model config. This generator
+ * returns keys in specificity order so we pick the most specific match
+ * the user actually wrote:
+ *
+ *   "openai/gpt-5.4-fast"  (exact)
+ *   "gpt-5.4-fast"         (bare, derived)
+ *   "openai/gpt-5.4"       (base, with provider)
+ *   "gpt-5.4"              (base, bare)
+ *   ...etc. stripping one "-segment" at a time
  */
 function* modelKeyLookupOrder(modelKey: string): Generator<string> {
     const slash = modelKey.indexOf("/");
@@ -288,9 +298,12 @@ function* modelKeyLookupOrder(modelKey: string): Generator<string> {
 }
 
 /**
- * Single source of truth for execute-threshold resolution.
- *
- * Verbatim: `event-resolvers.ts:339-452`.
+ * Single source of truth for execute-threshold resolution. Returns the effective
+ * percentage plus which config source was authoritative. Callers that only need
+ * the percentage can use `resolveExecuteThreshold` (thin wrapper below); callers
+ * that surface the mode to users (`/ctx-status`, TUI, RPC) must use this directly
+ * to avoid the "progressive lookup drift" bug where two call sites disagree on
+ * whether tokens mode is active.
  */
 export function resolveExecuteThresholdDetail(
     config: ExecuteThresholdConfig,
@@ -298,7 +311,12 @@ export function resolveExecuteThresholdDetail(
     fallback: number,
     options?: ExecuteThresholdOptions,
 ): ExecuteThresholdDetail {
-    // 1. Tokens-based resolution takes precedence when configured.
+    // 1. Tokens-based resolution takes precedence when configured. Token values
+    //    only make sense against a known context_limit — callers must supply it.
+    //    Guard: tokensConfig must exist, contextLimit must be finite + positive.
+    //    Junk values (NaN, negatives, zero) silently fall through to percentage;
+    //    zod normally blocks them at config-load but runtime derivations (e.g.
+    //    inputTokens/percentage) can produce NaN that must not poison the resolver.
     if (options?.tokensConfig && isFinitePositive(options.contextLimit)) {
         const contextLimit = options.contextLimit;
         const tokenMatch = resolveTokensMatchWithKey(options.tokensConfig, modelKey);
@@ -308,6 +326,7 @@ export function resolveExecuteThresholdDetail(
             const effectiveTokens = Math.min(tokenMatch.value, cap);
             if (effectiveTokens < tokenMatch.value) {
                 // Dedupe: only warn once per (session, modelKey, token value, cap) tuple.
+                // The hot transform path would otherwise spam the log until the user fixes config.
                 const dedupeKey = `${options.sessionId ?? "__global__"}|${modelKey ?? "__default__"}|${tokenMatch.value}|${cap}`;
                 if (!clampWarnSeen.has(dedupeKey)) {
                     clampWarnSeen.add(dedupeKey);
@@ -326,6 +345,9 @@ export function resolveExecuteThresholdDetail(
                 absoluteTokens: Math.floor(effectiveTokens),
                 matchedKey: tokenMatch.matchedKey,
             };
+            // effectiveTokens < requested means Math.min(value, cap) clamped the
+            // user's token budget down to MAX_EXECUTE_THRESHOLD × contextLimit. Record the original
+            // value so status surfaces can show "190000 > 90% of 128000" (#241).
             if (effectiveTokens < tokenMatch.value) {
                 detail.clamped = true;
                 detail.configuredValue = tokenMatch.value;
@@ -367,7 +389,9 @@ export function resolveExecuteThresholdDetail(
         resolved = fallback;
     }
 
-    // Cap at 90% of the output-reserved safe window.
+    // Cap at 90% of the output-reserved safe window. The escalation band is
+    // derived from this effective threshold, so it remains strictly above normal
+    // execution and below the absolute 95% provider wall.
     const cappedPercentage = Math.min(resolved, MAX_EXECUTE_THRESHOLD);
     const percentageClamped = cappedPercentage < resolved;
     if (percentageClamped) {
@@ -387,6 +411,8 @@ export function resolveExecuteThresholdDetail(
         mode: "percentage",
         matchedKey,
     };
+    // A runtime-derived percentage above the 90% cap was reduced. Record the
+    // original so status surfaces can show "95% > 90%" alongside the value (#241).
     if (percentageClamped) {
         detail.clamped = true;
         detail.configuredValue = resolved;
@@ -396,8 +422,7 @@ export function resolveExecuteThresholdDetail(
 
 /**
  * Backward-compatible wrapper around `resolveExecuteThresholdDetail`.
- *
- * Verbatim: `event-resolvers.ts:458-465`.
+ * Use the detail version when you also need the mode or absolute token value.
  */
 export function resolveExecuteThreshold(
     config: ExecuteThresholdConfig,
@@ -408,7 +433,7 @@ export function resolveExecuteThreshold(
     return resolveExecuteThresholdDetail(config, modelKey, fallback, options).percentage;
 }
 
-/** Verbatim: `event-resolvers.ts:468-490`. */
+// Variant of resolveTokensMatch that also returns which key matched, for mode display.
 function resolveTokensMatchWithKey(
     tokensConfig: ExecuteThresholdTokensConfig,
     modelKey: string | undefined,
@@ -433,7 +458,6 @@ function resolveTokensMatchWithKey(
     return undefined;
 }
 
-/** Verbatim: `event-resolvers.ts:492-501`. */
 export function resolveModelKey(
     providerID: string | undefined,
     modelID: string | undefined,
@@ -450,8 +474,6 @@ export function resolveModelKey(
  * to size history. Catalog refreshes and accepted-input measurements can change
  * the available window without a user config edit, so they must not invalidate
  * the cached m[0] prefix. Actual rendering still budgets against that live window.
- *
- * Verbatim: `event-resolvers.ts:532-549`.
  */
 export function historyBudgetPolicyIdentity(
     historyBudgetPercentage: number | undefined,

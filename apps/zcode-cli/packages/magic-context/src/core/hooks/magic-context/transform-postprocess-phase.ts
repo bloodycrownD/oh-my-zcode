@@ -89,14 +89,14 @@ import { getActiveCompartmentRun } from "./compartment-runner.js";
 import type {
     CtxReduceAvailabilityVerdict,
     ToolAvailabilityVerdict,
-} from "../../deferred/ctx-reduce-availability.js";
+} from "./ctx-reduce-availability.js";
 import {
     cachedToolPermissionDenied,
     hasLoggedCtxReducePermissionDeny,
     markCtxReducePermissionDenyLogged,
     resolveToolPermissionDenied,
     todowritePermissionDenied,
-} from "../../deferred/ctx-reduce-availability.js";
+} from "./ctx-reduce-availability.js";
 import type { Channel1State } from "./ctx-reduce-nudge.js";
 import { dropStaleReduceCalls } from "./drop-stale-reduce-calls.js";
 import {
