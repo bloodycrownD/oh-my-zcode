@@ -201,6 +201,11 @@ const linuxDesktopIntegrationIconPath =
     : iconPath;
 let currentApplicationLocale: Locale = DEFAULT_LOCALE;
 let closeToTrayOnWindows = true;
+// FORK (upstream-v3.15.1-backport): 托盘实例是否创建成功（Windows）。
+// 上游 v3.15.1 用 desktopTrayReady + resolveCloseToTraySupported 把「托盘真实可用」并入
+// 「关闭窗口是否隐藏到托盘」的裁决；fork 只取该裁决，不搬 Linux 能力探测。
+// 托盘创建失败时隐藏窗口=应用失联，必须落到确认退出（见 handleDesktopWindowCloseRequest）。
+let desktopTrayReady = false;
 // keep-awake：全局开关 keepAwakeWhileRunning。打开后主进程持有
 // powerSaveBlocker("prevent-app-suspension")，阻止系统闲置休眠（防不了合盖/手动睡眠）。
 // 不再绑定闲时任务活跃计数——设置页「常规」与 Automations 入口镜像同一配置。
@@ -972,6 +977,8 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         forceQuit: forceQuitRef.current,
         explicitQuitRequested: explicitQuitRef.current,
         closeToTrayOnWindows,
+        // 托盘没创建成功时关闭窗口必须走确认退出，不能隐藏成失联状态。
+        desktopTrayReady,
         isLastWindow: getMainApplicationWindows().length === 1,
         label,
         logger,
@@ -1283,17 +1290,18 @@ app.whenReady().then(async () => {
       ),
     () => showCurrentWindowFromDock(primaryWindowCoordinator),
   );
-  createWindowsDesktopTray({
-    getLocale: () => currentApplicationLocale,
-    showCurrentWindow: () =>
-      primaryWindowCoordinator.ensurePrimaryWindow("tray-show-current-window"),
-    executeDesktopCommand: executeDesktopCommandForApp,
-    quitApp: () => {
-      markExplicitQuit("tray-quit");
-      app.quit();
-    },
-    logger,
-  });
+  desktopTrayReady =
+    createWindowsDesktopTray({
+      getLocale: () => currentApplicationLocale,
+      showCurrentWindow: () =>
+        primaryWindowCoordinator.ensurePrimaryWindow("tray-show-current-window"),
+      executeDesktopCommand: executeDesktopCommandForApp,
+      quitApp: () => {
+        markExplicitQuit("tray-quit");
+        app.quit();
+      },
+      logger,
+    }) !== null;
 
   registerPlatformIpcHandlers({
     logger,

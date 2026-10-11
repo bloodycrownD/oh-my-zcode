@@ -342,6 +342,12 @@ export function handleDesktopWindowCloseRequest(options: {
   forceQuit: boolean;
   explicitQuitRequested?: boolean;
   closeToTrayOnWindows?: boolean;
+  /**
+   * 托盘实例是否已创建成功（Windows）。
+   * 托盘创建失败（图标缺失 / 会话未就绪抛错）时再把窗口隐藏，用户就没有任何可见入口，
+   * 应用等于失联；因此只有确认托盘就绪才允许隐藏，否则走下面的确认退出路径。
+   */
+  desktopTrayReady?: boolean;
   isLastWindow: boolean;
   label: string;
   logger: { info: (...args: unknown[]) => void };
@@ -350,12 +356,15 @@ export function handleDesktopWindowCloseRequest(options: {
   requestQuit: () => void;
   hideWindow?: () => void;
 }) {
-  if (
+  // FORK (upstream-v3.15.1-backport): 对应上游 aac4755 的 handleDesktopWindowCloseRequest——
+  // 把「托盘真实可用」并入隐藏裁决（上游用 closeToTray + closeToTraySupported，并含 Linux 能力探测）。
+  // 落点差异：fork 只保留 Windows-only 语义与 closeToTrayOnWindows 命名，Linux 能力探测不搬；
+  // desktopTrayReady 必须显式 true（fail-closed），否则隐藏窗口即失联，改由确认退出兜底。
+  const canHideToTray =
     options.platform === "win32" &&
     options.closeToTrayOnWindows &&
-    !options.forceQuit &&
-    !options.explicitQuitRequested
-  ) {
+    options.desktopTrayReady === true;
+  if (canHideToTray && !options.forceQuit && !options.explicitQuitRequested) {
     options.logger.info(`[createWindow] window close hidden to tray (${options.label})`);
     options.hideWindow?.();
     return true;
