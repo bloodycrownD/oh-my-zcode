@@ -496,10 +496,7 @@ export type {
  * `SELF_TAG_GUIDANCE` 单独导出：宿主 subagent 侧的引导需要它，而它与 11 参装配的完整段
  * 是两个生命周期。
  */
-export {
-  buildMagicContextSection,
-  SELF_TAG_GUIDANCE,
-} from "./core/agents/magic-context-prompt.js";
+export { buildMagicContextSection, SELF_TAG_GUIDANCE } from "./core/agents/magic-context-prompt.js";
 
 /**
  * prompt-surface 配置解析（壳缝①，git mv 自 `deferred/prompt-surface.ts`，上游 163 行
@@ -553,6 +550,48 @@ export type {
   ModelInput,
   ResolvedModelEntry,
 } from "./core/shared/model-resolution.js";
+
+// ── 4e. mural 渲染链公共面（Step 15 / D5） ──────────────────────────────────
+//
+// 【为什么要出这个面】mural 的**判定源**在宿主侧，渲染在包内。上游的 vision 判定
+// 走包内 `models-dev-cache` 的 apiCache，而那条链在本 fork 零生产者（refresh 零
+// 调用者）——恒 false 会让整条移植过来的渲染路径成为死代码。因此本 fork 把判定
+// 换成静态目录 `ModelInputFormatData.supportsImage`（packages/shared/src/
+// model-config.ts:51-59，与 contracts media-policy.ts:40 同一静态源），由宿主
+// （bootstrap，持有 provider Registry）经 `setMuralVisionProbe` 注入：
+//
+//   - `setMuralVisionProbe`：宿主注册「canonical provider/model 是否吃图」的
+//     解析器。进程级注入缝，与 `setRawMessageProvider` /
+//     `registerSlowWriteReporter` 同范式（目录与会话无关，故全局）。宿主不得
+//     自己包一层 vision 判断——那会与 provider 投影层的 media-policy 分叉。
+//   - `modelKeyAcceptsImages` / `resolveMuralWire` / `ensureMuralRendered` 出
+//     barrel 只为测试与诊断面（bootstrap 的实机验收 T-MU1/T-MU2 直断言它们）；
+//     运行期唯一调用方是包内 inject-compartments 的 m0 物化路径。
+//   - `MuralWireOptions` 等 type 面：宿主（bootstrap 的 transform 反投影）与
+//     包内共用同一份线格式定义，不第二处手抄。
+//
+// 【宿主不得自己抄】渲染、覆盖门（MIN_MURAL_CUED_MEMORIES / MIN_MURAL_COVERAGE）、
+// 文本哈希变更检测、PNG 编码全部在包内逐字层；宿主只提供「这个模型吃不吃图」
+// 这一个事实。N3（dreamer）不做 ⇒ compress-cues 三件不搬，cue 由
+// `storage-mural-cues`（Step 8 已落位）的既有列承载；cue 为空时覆盖门自然
+// 静默跳过——禁用/无 vision/无 cue 三种情形的终局都是「不渲染」，与上游一致。
+export {
+  type EnsureMuralResult,
+  type MuralVisionProbe,
+  DETERMINISTIC_MURAL_MODEL,
+  ensureMuralRendered,
+  MIN_MURAL_COVERAGE,
+  MIN_MURAL_CUED_MEMORIES,
+  modelKeyAcceptsImages,
+  muralCoverageGate,
+  resolveMuralWire,
+  setMuralVisionProbe,
+} from "./core/features/magic-context/mural/render-trigger.js";
+export type {
+  MuralCoverage,
+  MuralWireOptions,
+  ResolvedMuralEntry,
+} from "./core/features/magic-context/mural/resolve-mural.js";
 
 // ── 5. message 转换纯函数 ───────────────────────────────────────────────────
 

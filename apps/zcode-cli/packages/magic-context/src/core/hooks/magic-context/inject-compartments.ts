@@ -22,8 +22,12 @@ import {
     getMemoriesByProjects,
 } from "../../features/magic-context/memory/storage-memory.js";
 import type { Memory } from "../../features/magic-context/memory/types.js";
-import { resolveMuralWire } from "../../deferred/render-trigger.js";
-import type { MuralWireOptions } from "../../deferred/render-trigger.js";
+// FORK（bugfix-batch-20261011 / Step 15，D5 壳缝①）：mural 真身落位，
+// `../../deferred/render-trigger.js`（裁剪壳，resolveMuralWire 恒
+// supportsVision:false）改指上游同址文件。类型随上游从 render-trigger 改从
+// resolve-mural 导入（上游 inject-compartments.ts:25-26 即此两句，逐行一致）。
+import { resolveMuralWire } from "../../features/magic-context/mural/render-trigger.js";
+import type { MuralWireOptions } from "../../features/magic-context/mural/resolve-mural.js";
 import { isNoContentCompartment } from "../../features/magic-context/no-content-compartment.js";
 import {
     GLOBAL_USER_PROFILE_PROJECT_PATH,

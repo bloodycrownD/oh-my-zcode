@@ -53,9 +53,17 @@
 import { insertCompartmentEvents } from "../../features/magic-context/compartment-events.js";
 import { isCompartmentLeaseHeld } from "../../features/magic-context/compartment-lease.js";
 import { appendCompartments, getCompartments } from "../../features/magic-context/compartment-storage.js";
-import { promoteSessionFactsDurable } from "../../features/magic-context/memory/promotion.js";
+// FORK（bugfix-batch-20261011 / Step 15）：promotion / storage-memory 的两个
+// 符号改从 memory barrel 导入（原先直引文件路径）。barrel 是本步为 mural 移植
+// 闭包新建的 `memory/index.ts`，runner 与 mural 从此共享同一个导入面；
+// promoteSessionFactsDurable 与 ModuleMemoryAuthorityError 是同一条写入路径的
+// 组成部分（见 barrel 头注）。project-identity 刻意保持直引：barrel 按上游
+// 裁剪不导出它（fork 版带 test hooks 且会 spawn git，mural 路径不该继承该图）。
+import {
+    ModuleMemoryAuthorityError,
+    promoteSessionFactsDurable,
+} from "../../features/magic-context/memory/index.js";
 import { resolveProjectIdentityForSession } from "../../features/magic-context/memory/project-identity.js";
-import { ModuleMemoryAuthorityError } from "../../features/magic-context/memory/storage-memory.js";
 import {
     clearEmergencyDrainLatch,
     clearEmergencyRecovery,
