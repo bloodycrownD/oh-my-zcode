@@ -497,6 +497,14 @@ export type {
  */
 export { buildMagicContextSection, SELF_TAG_GUIDANCE } from "./core/agents/magic-context-prompt.js";
 
+// FORK（用户裁定 2026-10-11「首发消息卡顿优化」）：tokenizer 预热出口。
+// 上游把 ai-tokenizer（claude encoding，2.3MB CJS）刻意留在首个非空 estimateTokens
+// 调用时同步加载（read-session-formatting.ts 头注），实测首次编译 ~850ms——在 ZCode
+// desktop 形态下这一刻正好落在会话第一条消息的 transform pass 里，直接计入首 token
+// 延迟。宿主（bootstrap 工厂）在启动窗口 fire-and-forget 调一次本函数，把编译成本
+// 时移到空闲期；不改 estimateTokens 的既有懒加载语义（未预热时行为逐字不变）。
+export { preloadTokenizer } from "./core/hooks/magic-context/read-session-formatting.js";
+
 /**
  * prompt-surface 配置解析（壳缝①，git mv 自 `deferred/prompt-surface.ts`，上游 163 行
  * 真身）+ 每宿主 runtime（壳缝①，git mv 出 `deferred/prompt-surface-runtime.ts`，

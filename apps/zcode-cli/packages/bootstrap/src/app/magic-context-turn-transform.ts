@@ -159,12 +159,14 @@ import {
   MagicContextConfigSchema,
   noteEntry,
   openDatabase,
+  preloadTokenizer,
   projectRuntimeEntries,
   projectStoredMessage,
   promptSurfaceConfigIdentity,
   replayLkg,
   resolveLkgModelKeys,
   resolveModelKey,
+  resolveProjectIdentityForSession,
   setMuralVisionProbe,
   setRawMessageProvider,
   snapshotRuntimeEntries,
@@ -1464,6 +1466,34 @@ export async function createMagicContextTurnTransform(
   });
 
   const transform = createTransform(deps);
+
+  // FORK（用户裁定 2026-10-11「首发消息卡顿优化」）：首轮 pass 预热。
+  //
+  // 实测（diag-first-send-latency.mjs + t1 窗口 CPU profile，隔离临时库）：首轮 pass
+  // ~1.4s、热路径 13-19ms。差值两块——
+  //   ① 93%：ai-tokenizer 的 claude encoding（2.3MB CJS）首个非空 estimateTokens 时
+  //      同步加载/编译（~850ms，read-session-formatting.ts 上游刻意懒加载）；memory/
+  //      preset 配置二分不影响它，配置无关节。
+  //   ② 余量：`resolveProjectIdentityForSession` 的同步 git 子进程（git-dir / verify
+  //      HEAD / 根提交 rev-list）与冷文件探测，每目录每进程一次（无 git 目录的临时
+  //      库上为 0，真实仓库上数百 ms）。
+  // 两者原本都发生在「会话第一条消息」的 model step 前置段，直接计入首 token 延迟。
+  //
+  // 这里在工厂建完后 fire-and-forget 预热：把成本搬进 app 启动窗口（desktop 长驻进程
+  // 在用户建会话/输入前有充裕空闲）。不 await——boot 15s 预算不为预热加码；失败不抛
+  // （identity 本就是非抛出语义，preloadTokenizer 内部自带 fallback 告警），未预热
+  // 成功时首轮 pass 按既有懒加载语义照旧，只是退回原行为。
+  queueMicrotask(() => {
+    try {
+      resolveProjectIdentityForSession(options.workingDirectory);
+    } catch {
+      // 非抛出语义下的双保险：任何意外都不许影响启动路径。
+    }
+    void preloadTokenizer().catch(() => {
+      // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断微任务链。
+    });
+  });
+
   /**
    * FORK（e2e/R-2）：把本轮实际执行模型绑给两个消费者——后台 protected-tail 边界
    * 的输入，以及 usage recorder 的百分比分母（缺了分母，占比就永远算不出来）。
