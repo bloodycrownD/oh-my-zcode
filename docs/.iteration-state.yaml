@@ -505,17 +505,20 @@ dev_loop_v3151:
   dag_version: 1
   wave_plan: [[s1-reference], [impl-s2, impl-s3, impl-s4, impl-s5], [commit-w1, verify-1], [cr-func-1], [impl-s6, impl-s7, impl-s8], [commit-w4, verify-2], [cr-func-2], [impl-s9-tests], [commit-s9, verify-3], [cr-func-3], [impl-s10-gates], [s11-changelog, dev-ready]]
   node_status:
-    s1-reference: { status: pending, executor: main }
-    impl-s2: { status: pending, executor: subagent, spec_step: Step2, items: "#1-#7" }
-    impl-s3: { status: pending, executor: subagent, spec_step: Step3, items: "#8-#13" }
-    impl-s4: { status: pending, executor: subagent, spec_step: Step4, items: "#21/#23/#24/#25/#27/#28" }
-    impl-s5: { status: pending, executor: subagent, spec_step: Step5, items: "#14-#16" }
-    impl-s6: { status: pending, executor: subagent, spec_step: Step6, items: "#18/#20/#26" }
-    impl-s7: { status: pending, executor: subagent, spec_step: Step7, items: "#29-#32" }
-    impl-s8: { status: pending, executor: subagent, spec_step: Step8, items: "#34" }
-    impl-s9-tests: { status: pending, executor: subagent, spec_step: Step9 }
-    impl-s10-gates: { status: pending, executor: subagent, spec_step: Step10 }
-    s11-changelog: { status: pending, executor: main, spec_step: Step11 }
+    s1-reference: { status: completed, executor: main, commit: cf2dc6ae }
+    impl-s2: { status: completed, executor: subagent, spec_step: Step2, items: "#1-#7", commit: 23b8a094 }
+    impl-s3: { status: completed, executor: subagent, spec_step: Step3, items: "#8-#13", commit: bf893315 }
+    impl-s4: { status: completed, executor: subagent, spec_step: Step4, items: "#21/#23/#24/#25/#27/#28", commit: c478a0fb }
+    impl-s5: { status: completed, executor: subagent, spec_step: Step5, items: "#14-#16", commit: abf3be1d }
+    fix-1: { status: completed, executor: subagent, items: "M1+M4", commit: 0e35b9aa }
+    fix-2: { status: completed, executor: subagent, items: "M2+M3", commit: c4435a7a }
+    impl-s6: { status: completed, executor: subagent, spec_step: Step6, items: "#18/#20/#26", commit: 383e5b34 }
+    impl-s7: { status: completed, executor: subagent, spec_step: Step7, items: "#29-#32", commit: 5ce5842e }
+    impl-s8: { status: completed, executor: subagent, spec_step: Step8, items: "#34", commit: b21909e8 }
+    impl-s9-tests: { status: completed, executor: subagent, spec_step: Step9, commit: 79ef4ceb }
+    impl-s10-gates: { status: completed, executor: "subagent+main 归一", spec_step: Step10, commit: b5cf2e15 }
+    s11-changelog: { status: completed, executor: main, spec_step: Step11, commit: 23a150bf }
+  final_verdict: dev-ready（2026-10-12）——verify-1/2/3 全 pass、cr-func-1b/2/3 全 yes、9 门禁全过、四红线零回潮；分支 upstream-v3.15.1-backport HEAD=23a150bf，未合并 main、未发版（omz-publish 另行）
   open_must_fix: []
   spec_deviations: []
   notes: "impl 子代理只编辑不 commit（并行同树避免 git index 冲突）；每波次后主代理按 Step pathspec 统一 commit；QA 模式见 spec §3（Step6/7/8 qa=manual_user 的波次以 cr-func 证据+wire dump 脚本替代，最终向用户汇报）"
