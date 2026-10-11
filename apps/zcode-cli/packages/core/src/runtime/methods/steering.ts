@@ -866,7 +866,7 @@ export async function editPendingInputById(
         inputPreview: previewInput(options.newText),
         inputSize: measureUtf8Bytes(options.newText),
         ...(held.commandKind ? { commandKind: held.commandKind } : {}),
-        ...(held.intent ? { intent: held.intent } : {}),
+        ...(held.intent ? { intent: { ...held.intent, text: options.newText } } : {}),
         ...(held.toolDisallowlist ? { toolDisallowlist: held.toolDisallowlist } : {}),
         queueLength: projection.pendingSteerInputs.length,
         targetTurnId: held.targetTurnId,
@@ -881,6 +881,8 @@ export async function editPendingInputById(
   }
   await persistSessionInputUpdates(this, [{ id: pendingInput.id, text: options.newText }]);
   pendingInput.input = options.newText;
+  // 编辑正文后必须同步 canonical text，否则结构化引用恢复时会显示旧正文。
+  if (pendingInput.intent) pendingInput.intent = { ...pendingInput.intent, text: options.newText };
   const event = createSessionEvent(
     SessionEventType.TurnSteerQueued,
     this.sessionId,

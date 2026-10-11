@@ -179,8 +179,11 @@ async function readAgentStateFile(options?: SubagentsServiceOptions): Promise<Ag
           )
         : [],
     };
-  } catch {
-    return emptyAgentsState();
+  } catch (error) {
+    // 文件缺失/损坏沿用既有空覆盖语义；IO 失败不能伪装为空配置并重新启用已禁用 agent。
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT")
+      return emptyAgentsState();
+    throw error;
   }
 }
 
@@ -412,8 +415,11 @@ async function readPluginConfig(options?: SubagentStorageOptions): Promise<Plugi
         ? plugins.suppressedBuiltins.filter((id): id is string => typeof id === "string")
         : [],
     };
-  } catch {
-    return { enabledPlugins: {}, suppressedBuiltins: [] };
+  } catch (error) {
+    // 文件缺失/损坏沿用既有空配置语义；IO 失败不能伪装为空配置并复活被 suppression 压制的内置插件。
+    if (error instanceof SyntaxError || (error as NodeJS.ErrnoException).code === "ENOENT")
+      return { enabledPlugins: {}, suppressedBuiltins: [] };
+    throw error;
   }
 }
 
