@@ -124,7 +124,7 @@ phase2a:
   deferred_final: 23 条 FORK-NOT-PORTED 缝（E 组 prompt-surface/Batch2 memory·dreamer·note/event-resolvers 等）——S21 已清 FORK-DEFERRED(S21) 归零
   phase2b_inputs: build:sea 验证；/ctx-flush 或 publishedHistory 独立来源；memory/mural Batch 2（<project-memory> m[0]）；UI 配置面（D-12 MagicContextSettingsSection + D-13 用量面板）；D-11 flag 翻 true 与压缩移除（Step 25-31）
   methodology_added:
-    - "同步 agent 失败不回 agentId（无法 SendMessage 续）——长任务一律后台派+TaskOutput 阻塞等待（等效同步且失败可续）"
+    - "同步 agent 失败不回 agentId（无法 SendMessage 续）——长任务一律后台派+TaskOutput 阻塞等待（等效同步且失败可续）【已反转 2026-10-13 subagent-resume-visibility：前台失败经 C8/C1 收口透出 agentId 且 SendMessage 对全部终态可续（同会话内），方法论作废——前台/后台按任务性质选择即可】"
     - "并发 agent 提交必须带 pathspec 或独占作用域（S16 曾卷走 S19a 暂存，事后 reset --soft 拆分修复）"
     - "网络闪断期 WIP 检查点纪律（每内聚块一提交）在 S20 四连断下保住全部进度"
     - "PowerShell ConvertTo-Json 会重排 package.json——依赖边用 node 字符串手术插入"
