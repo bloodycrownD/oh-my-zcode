@@ -7,6 +7,8 @@
 - prd_path：未提供（需求用户口述，spec「需求来源」节记录）
 - spec_path：docs/iterations/subagent-resume-visibility/spec.md
 - review_round：1 / dag_version：1
+- fix-spec 文档校验：spec-check-loop 1 轮 Go（P0/P1=0，2 条 P2 表述精度已订正：
+  OQ-2 插值「新增/既有」归类、OQ-1 spec 引用改推论措辞）
 - 状态：**fix-spec-ready（待用户确认）**
 
 ## Must-fix（按 P0 → P1 → P2）
@@ -38,9 +40,10 @@
 - 现状：runner.ts:411-414——TaskStop 已把 registry 置终态后 CoreError 原样 rethrow
   （不带 agentId），C1 识别条件不命中 → 前台 tool result 无句柄。该 killed 任务
   实际仍可 SendMessage 续跑（T-RV4 已证）。
-- 定性：spec 第 3 轮审查显式核过「411-429 stopTask 短路与 C8 互斥」并钉死 C8 只做
-  458-460 单点，属**spec 内知情边界**而非实现遗漏；但对照口述需求「失败/停止都
-  透出 agentId」字面有 gap。
+- 定性：C8 被钉死为 458-460 单点（spec.md:49「主场景的唯一闭环路径」、:90 显式
+  取代「runner 其余不动」），411-429 的 TaskStop 短路分支由此推出在 C8 范围外，
+  属**spec 内知情边界**而非实现遗漏；但对照口述需求「失败/停止都透出 agentId」
+  字面有 gap。
 - 若拍板覆盖（三要素已备）：411-414 分支 rethrow 前同款浅拷贝合并 agentId context
   （C8 手法复用），T-RV1 补一组「TaskStop 形态」夹具；验收 = 该形态 handler 收口
   后 modelContent 信封含句柄。
@@ -48,11 +51,12 @@
 
 ### OQ-2（review-full/D-1）指引句/兜底句插值点未走 escapeXml（前瞻条件）
 
-- 三处新插值（agent.ts 收口 message、notification.ts:183 resumeSentence、
-  runner.ts:996 C6 兜底句）均未 escape。当前 agentId 生产路径为
-  `agent_${crypto.randomUUID()}`（runner.ts:881），无外部注入通道；指引句位于
-  `</task-notification>` 之后不破坏 XML；与同文件 workflowDeliveryGuidance 的
-  runId 插值同款既有范式。**生产不可达，不认定 must-fix。**
+- 三处插值（agent.ts 收口 message、notification.ts:183 resumeSentence——此两处为
+  本迭代**新增**；runner.ts:996 C6 兜底句的 `${request.to}` 插值为**既有**
+  （5c2d2234 基线 :981 已在），本迭代仅追加尾部边界文案）均未 escape。当前
+  agentId 生产路径为 `agent_${crypto.randomUUID()}`（runner.ts:881），无外部注入
+  通道；指引句位于 `</task-notification>` 之后不破坏 XML；与同文件
+  workflowDeliveryGuidance 的 runId 插值同款既有范式。**生产不可达，不认定 must-fix。**
 - 前瞻条件（登记即可）：未来若 `createAgentId` 开放外部可控值（如允许用户命名
   agent），三处须同步补 escapeXml。
 
