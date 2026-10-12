@@ -1,6 +1,7 @@
 /* oxlint-disable eslint(max-lines) -- 迁移期需要在一个门面里集中维护旧 task projection 到 ZCode session 的协议适配。 */
 import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
+import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { Emitter, Event } from "@zcode/rpc";
@@ -1239,7 +1240,7 @@ function resolvePromptToolDenylist(params: {
     }
 
     try {
-      const rawSnapshot = JSON.parse(readFileSync(snapshotPath, "utf-8")) as unknown;
+      const rawSnapshot = JSON.parse(await readFile(snapshotPath, "utf-8")) as unknown;
       const parsed = safeParseLegacyTaskSessionFile(rawSnapshot);
       if (!parsed.success) {
         logger.warn(
@@ -1280,7 +1281,6 @@ function resolvePromptToolDenylist(params: {
           pendingCommands: runtimeCommands.get(taskKey(params)) ?? [],
         },
       };
-      legacySnapshotTaskKeys.add(taskKey(params));
       rememberIndexedTaskMeta(snapshot.meta);
       return snapshot;
     } catch (error) {
@@ -1353,6 +1353,12 @@ function resolvePromptToolDenylist(params: {
         `ZCode Protocol session 缺失，已按 legacy task snapshot 恢复 taskId=${params.taskId}`,
         error,
       );
+      // FORK (upstream-v3.15.1-backport): fork 自有裁定——上游在 readLegacyTaskSnapshot 内部登记
+      // 该标记（上游 :1331），于是 claudeCode legacy 升级为 zcode-cli session 成功后标记仍不撤销，
+      // 该 task 永久退化为 local-only（bot channel 镜像收不到 live 流，直到重启才自愈）。
+      // 这里只在真正以 legacy 快照交付的路径登记（含升级失败回退）；升级成功路径提前 return，
+      // 不进入本行，onDynamicTaskEvent 的 legacy 守卫自然不生效。
+      legacySnapshotTaskKeys.add(taskKey(params));
       return { kind: "legacy", snapshot: legacySnapshot };
     }
   }
