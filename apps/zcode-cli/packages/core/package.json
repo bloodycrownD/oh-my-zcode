@@ -44,7 +44,8 @@
     "test:prompt-surface-tiering": "node --test scripts/test-prompt-surface-tiering.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src --no-ignore",
-    "lint:fix": "oxlint --fix src --no-ignore"
+    "lint:fix": "oxlint --fix src --no-ignore",
+    "test:e2e-subagent-resume": "tsx --test scripts/test-e2e-subagent-resume.mjs"
   },
   "dependencies": {
     "@zcode/contracts": "workspace:*",
