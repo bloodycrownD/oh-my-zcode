@@ -8,19 +8,19 @@ oh-my-zcode 是 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）的 for
 
 ## 1. 更新参照快照
 
-参照快照在**仓库外的同级目录**（`<repo>/../.reference/`），只读，禁止从本仓库反向写入。
+参照快照在**本仓库根目录下的 `.reference/`**（`<repo>/.reference/`），只读，禁止从本仓库反向写入。
 
-| 路径                       | 内容                                        | 本 fork 当前基线        |
-| -------------------------- | ------------------------------------------- | ----------------------- |
-| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.14.3 @ `29628c9`     |
-| `.reference/magic-context` | 上游 `@cortexkit/opencode-magic-context`    | 0.44.4                  |
-| `.reference/pi`            | 上游 Pi harness（magic-context 的宿主之一） | 随 magic-context 版本走 |
+| 路径                       | 内容                                        | 本 fork 当前基线                          |
+| -------------------------- | ------------------------------------------- | ----------------------------------------- |
+| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.15.1 @ `aac47556`                      |
+| `.reference/magic-context` | 上游 `@cortexkit/opencode-magic-context`    | 0.44.4                                    |
+| `.reference/pi`            | 上游 Pi harness（magic-context 的宿主之一） | 随 magic-context 版本走                   |
 
 更新方式：把整个目录替换为目标上游版本的干净 checkout（例如 `git clone` 后 `git checkout <tag>` / `git checkout <commit>`），不要在旧快照上增量改。随后记下 commit，写进本文件的基线表格。
 
 ```bash
-cd ../.reference/ZCode && git fetch --tags && git checkout <target>
-cd ../.reference/magic-context && git fetch --tags && git checkout <target>
+cd .reference/ZCode && git fetch --tags && git checkout <target>
+cd .reference/magic-context && git fetch --tags && git checkout <target>
 ```
 
 快照更新后**不要**立刻动 fork 代码，先做第 2 步的影响面评估。
@@ -94,7 +94,7 @@ cd ../.reference/magic-context && git fetch --tags && git checkout <target>
 | 根类型                          | `pnpm typecheck`                                                                                                                                                                                                                                                                                                                                                                                                                                  | 0 error                                                                                                          |
 | CLI 类型                        | `pnpm --dir apps/zcode-cli typecheck`（= `turbo run typecheck`）                                                                                                                                                                                                                                                                                                                                                                                  | 与基线同，无新增                                                                                                 |
 | desktop 类型                    | `pnpm typecheck:desktop-full`                                                                                                                                                                                                                                                                                                                                                                                                                     | 差分模式：只看 `removed` 与新增 kind，基线既有错误不算回归                                                       |
-| lint                            | `pnpm lint`                                                                                                                                                                                                                                                                                                                                                                                                                                       | 71 warnings / 0 errors（基线即如此；根 `.oxlintrc` ignorePatterns 含 `apps/zcode-cli`，CLI 子树另有 turbo lint） |
+| lint                            | `pnpm lint`                                                                                                                                                                                                                                                                                                                                                                                                                                       | 74 warnings / 0 errors（排除未跟踪快照 `.reference/**` 后；根 `.oxlintrc` ignorePatterns 含 `apps/zcode-cli`，CLI 子树另有 turbo lint） |
 | knip                            | `pnpm knip`                                                                                                                                                                                                                                                                                                                                                                                                                                       | 与前一提交 stash 对比**零新增**；且新增项不得命中 magic-context                                                  |
 | 格式                            | `pnpm fmt:check` / `oxfmt --check <改动文件>`                                                                                                                                                                                                                                                                                                                                                                                                     | 改动文件零新增不合规（`.oxfmtrc` 已忽略 THIRD-PARTY-NOTICES.md / inventory.json；markdown 不在 oxfmt 范围）      |
 | 三方许可                        | `node scripts/licenses.mjs notices` 后 `node scripts/licenses.mjs check`                                                                                                                                                                                                                                                                                                                                                                          | 包版本数变化 = 依赖真实变化；无 `Stale npm notice override`；check 通过（`reviewRequired` 15 项为既有基线）      |

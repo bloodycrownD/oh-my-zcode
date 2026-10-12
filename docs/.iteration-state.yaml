@@ -530,3 +530,34 @@ dev_loop_v3151:
     knip_residuals: "vs 20261011 快照仍余 3 条，均已实锤为前序迭代（403806ba 等）遗留、本批 diff 未触碰：ui/test/askQuestionDisplayAnswers.test.ts（未使用文件）、bootstrap/scripts/diag-first-send-latency.mjs（未使用文件）、magic-context-prompt-section-zh-cn.ts SELF_TAG_GUIDANCE_ZH（未使用导出，base 39d1141b 时即无跨文件消费方）。后续批次顺手回收。"
     knip_fixes: "本批归一：incoming-response.ts 三符号与 proxy-fetch.ts NetworkFetch 去 export（FORK 注释）；readLegacyImportedClaudeHistory 去 export（impl-s10 曾误判为前序漂移，实为本批 impl-s6 删除消费方所致）；4 个无 workspace 归属的 Step9 测试脚本进 knip 全局 ignore"
 
+- id: upstream-v3.15.1-backport-cr-fix
+  title: "CR 修复批（cr-fix-spec 18 条：5 P1 + 13 P2）执行"
+  date_start: 2026-10-12
+  date_end: 2026-10-12
+  base_commit: 24f7aee8
+  spec: docs/iterations/upstream-v3.15.1-bugfix-backport/cr-fix-spec.md（spec-check-loop r1-r3 收敛，用户开工）
+  dag_version: 8
+  wave_plan: [[w1: 直改×4(P2) + b/A-1 + c/B-1C-1 + desktop脚本], [w2: b/A-2], [w3: b/A-3 ∥ b/G-1], [w3.5: #25 UI预览入口 + recoverSettleOrder 收窄], [w4: wiring/docs 单写者]]
+  node_status:
+    w1_direct: { status: completed, executor: main, items: "a/G-1(64MiB)/a/C-1/d/C-1/c/C-2", commit: 5c309bd4 }
+    impl-bA1: { status: completed, executor: subagent, items: "b/A-1 reportCount", commit: 676af963 }
+    impl-cB1C1: { status: completed, executor: subagent, items: "c/B-1 守卫移位+c/C-1 异步IO", commit: 230e8597 }
+    impl-desk: { status: completed, executor: subagent, items: "d/G-2 深链+full/G-1 托盘", commit: a49b6a10 }
+    impl-bA2: { status: completed, executor: subagent, items: "b/A-2 事件分页字节界全链", commit: 5b1780c9 }
+    impl-bA3: { status: completed, executor: subagent, items: "b/A-3 sourceKind 字段链+两闸", commit: c90b2505 }
+    impl-bG1: { status: completed, executor: subagent, items: "b/G-1 契约脚本15例+resume收窄", commit: 0721f834 }
+    impl-w35: { status: completed, executor: subagent, items: "#25 UI 预览入口(裁定补面)+SETTLE_EVENT_TYPES 收窄", commit: 06de0a43 }
+    impl-w4: { status: completed, executor: "subagent(中断)+main 接手收尾", items: "接线(d/G-3×2+新脚本×4)+knip+wiring-map+CHANGELOG(d/K-3/K-4)+UPSTREAM-SYNC(d/K-1)+spec.md #25 补注+本登记" }
+  test_baseline: test:v4-perf 309 → 354 pass / 0 fail（CR 批 +45 例；登记表 cache/test-wiring-map.md §4）
+  gate_evidence_dA1:
+    architecture_check: "pnpm architecture:check --changed → OK 0 violations 0 new（impl-w35 波实跑）"
+    check_i18n_parity: "node scripts/check-i18n-parity.mjs → zh/en 各 5908 key（impl-w35 波实跑，含新 key chat.attachments.preview.openText）"
+    cli_build: "由 verify 波 + e2e 重建 CLI bundle 承担（bundle 带新修复签名后进 e2e）"
+    redline_scan: "各 impl 节点 diff 级扫描零命中（报告留痕）；verify 波全批 diff 终扫"
+  spec_deviations:
+    - "零拷贝预置 ref 传播 sourceKind = 上游超集（上游该路径不带；fork 为桌面长粘贴主路径可达性裁定补上；代码 FORK 注释+spec.md #25 补注登记）"
+    - "b/A-2 listEventPage 落引擎端口（上游住端口外、内存不陪跑）+ maxBytes 由 run-service 注入（上游 gateway）——FORK 偏离声明×2 已写入代码注释；理由=双实现契约测+countTaggedReports 端口先例+host 面最小改动"
+    - "b/A-3 projection-rows 无需改动：fork 该分支本就整对象透传（用测试断言真实投影行保留 sourceKind 作等价证明）；结果闸同步抽导出谓词（可测 seam 最小扩充）"
+    - "impl-w35 预览读 ref 用 previewRef ?? ref（fork 冷恢复行 ref 可能可变；与 image/video/pdf 预览同惯例；代码内声明）"
+  final_verdict: 待 verify 全门禁 + cr-func 复核后定（本文件由 wave-4 主代理接手收尾时回填）
+
