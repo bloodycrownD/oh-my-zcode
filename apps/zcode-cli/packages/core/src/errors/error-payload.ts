@@ -311,6 +311,10 @@ function formatContextDetail(context: Record<string, unknown> | undefined): stri
     formatContextPart("provider_code", context.providerCode),
     formatContextPart("model", context.modelId ?? context.model),
     formatContextPart("request", context.requestId),
+    // C2（subagent-resume-visibility）：条件投影 subagent 句柄。context 没有 agentId 时
+    // 不显示（formatContextPart 对空值返回 undefined，随后被 filter 剔除），当前仅
+    // subagent 链路使用该 key，不影响其它工具的 detail 面。
+    formatContextPart("agentId", context.agentId),
     formatContextPart("code", context.code),
     formatContextPart("reason", context.reason),
     formatContextPart("status", context.statusCode ?? context.status),

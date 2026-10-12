@@ -456,6 +456,19 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         );
 
         if (isCoreError(error)) {
+          // C8（subagent-resume-visibility 主场景闭环）：child 模型/provider 失败产出的
+          // CoreError（createTurnFailureError 链）context 不带 agentId，父侧 Agent
+          // handler 拿不到句柄，就无法告知模型「SendMessage 可续跑」。rethrow 前把身份
+          // 字段浅拷贝合并进 context（兼容 turn-errors.ts:95-99/113-117 产出的 context
+          // 为 undefined 的 CoreError，防二次 TypeError 吞掉 provider 根因；禁止原地
+          // mutation——原对象可能被 cause 链上的观测者共享）。只补身份，不动
+          // errorPayloadRole——投影出的 wrapper 结构与 primary frame 语义保持不变。
+          error.context = {
+            ...error.context,
+            agentId: lifecycle.agentId,
+            agentType: request.agentType,
+            parentToolCallId: request.parentToolCallId,
+          };
           throw error;
         }
 

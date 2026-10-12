@@ -10,15 +10,32 @@ import {
   AgentType,
   CoreErrorType,
   createCoreError,
+  isCoreError,
   type AgentInput,
   type AgentOutput,
   type TraceContext,
 } from "@zcode/contracts";
 import { TASK_TOOL_NAME } from "../compat.js";
-import type { ToolEntry, ToolHandler } from "../types.js";
+import type {
+  ToolExecutionContext,
+  ToolEntry,
+  ToolHandler,
+  ToolHandlerFailure,
+} from "../types.js";
+import { ErrorPayloadRole, withErrorPayloadRole } from "../../errors/error-payload.js";
 import { formatAgentProfilesForPrompt, type AgentProfile } from "../../subagent/profile.js";
 
 const MAX_AGENT_MODEL_BYTES = 120_000;
+
+/**
+ * Agent handler 收口失败（toolHandlerFailure 通道）的数值错误码，本文件局部域。
+ * executor 的 createErrorResult 对 toolHandlerFailure 一律用 `String(errorCode)` 覆盖
+ * projected code，取值必须避开既有数值域：EditErrorCode 占 1-13、TASK_OUTPUT 占 1-2、
+ * LIST_MODELS 占 31、SAVE_WORKFLOW 占 400，故本域从 1000 起，与其它工具互不撞码。
+ */
+const AGENT_TOOL_FAILURE_CODE = {
+  SUBAGENT_FAILED_RESUMABLE: 1000,
+} as const;
 
 const AGENT_TOOL_OUTPUT_SCHEMA = {
   $schema: "https://json-schema.org/draft/2020-12/schema",
@@ -135,6 +152,10 @@ function buildAgentProviderDescription(
     "Reach for this when the task matches an available agent type, when you have independent work to run in parallel, or when answering would mean reading across several files — delegate it and you keep the conclusion, not the file dumps. For a single-fact lookup where you already know the file, symbol, or value, search directly. Once you've delegated a search, don't also run it yourself — wait for the result.",
     "",
     "- The agent's final message is returned to you as the tool result; it is not shown to the user — relay what matters.",
+    // C1（subagent-resume-visibility 描述面）：补回上游漂移丢失的 bullet——父模型据此知道
+    // 失败/停止的已派生子 agent 可经 SendMessage 续跑（.reference/ZCode agent.ts:107 同款措辞；
+    // fork 已有的 "A new Agent call starts fresh" bullet 表达另一语义，不重复覆盖）。
+    "- Use SendMessage with the agent's ID to continue a previously spawned agent with its context intact.",
     "- A new Agent call starts fresh, so the prompt must be self-contained.",
     "- `run_in_background: true` runs the agent asynchronously; you'll be notified when it completes.",
     "- When you launch multiple agents for independent work, send them in a single message with multiple tool uses so they run concurrently.",
@@ -203,54 +224,99 @@ function formatAgentOutputForModel(output: unknown): string {
 }
 
 const agentHandler: ToolHandler = async (input, context) => {
-  const parsed = AgentInputSchema.parse(input) as AgentInput;
-  const agentType = parsed.subagent_type ?? AgentType.GeneralPurpose;
+  try {
+    const parsed = AgentInputSchema.parse(input) as AgentInput;
+    const agentType = parsed.subagent_type ?? AgentType.GeneralPurpose;
 
-  if (!context.subagentPort) {
-    throw createCoreError(
-      CoreErrorType.ConfigurationError,
-      "SubagentPort is not configured for Agent tool",
-      {
-        context: {
-          code: AgentErrorCode.SUBAGENT_UNAVAILABLE,
-          toolCallId: context.toolCallId,
-          toolName: "Agent",
+    if (!context.subagentPort) {
+      throw createCoreError(
+        CoreErrorType.ConfigurationError,
+        "SubagentPort is not configured for Agent tool",
+        {
+          context: {
+            code: AgentErrorCode.SUBAGENT_UNAVAILABLE,
+            toolCallId: context.toolCallId,
+            toolName: "Agent",
+          },
+          recoverable: false,
         },
-        recoverable: false,
-      },
-    );
-  }
+      );
+    }
 
-  const request = {
-    sessionId: context.sessionId,
-    turnId: context.turnId,
-    parentToolCallId: context.toolCallId,
-    agentType,
-    description: parsed.description,
-    prompt: parsed.prompt,
-    callerCanReadOutputFile: canReadBackgroundOutputFile(context.providerVisibleToolNames),
-    workingDirectory: context.workingDirectory,
-    workspaceRoot: context.workspaceRoot,
-    trace: {
-      traceId: context.traceId,
-      spanId: context.spanId,
-      parentSpanId: context.parentSpanId,
+    const request = {
       sessionId: context.sessionId,
       turnId: context.turnId,
-    } as TraceContext,
-  };
-  return context.subagentPort.launch(
-    {
-      ...request,
-      runInBackground: parsed.run_in_background === true,
-    },
-    {
-      signal: context.abortSignal,
-      ...(context.model ? { model: context.model } : {}),
-      ...(context.subagentModelOverride ? { modelOverride: context.subagentModelOverride } : {}),
-    },
-  );
+      parentToolCallId: context.toolCallId,
+      agentType,
+      description: parsed.description,
+      prompt: parsed.prompt,
+      callerCanReadOutputFile: canReadBackgroundOutputFile(context.providerVisibleToolNames),
+      workingDirectory: context.workingDirectory,
+      workspaceRoot: context.workspaceRoot,
+      trace: {
+        traceId: context.traceId,
+        spanId: context.spanId,
+        parentSpanId: context.parentSpanId,
+        sessionId: context.sessionId,
+        turnId: context.turnId,
+      } as TraceContext,
+    };
+    return context.subagentPort.launch(
+      {
+        ...request,
+        runInBackground: parsed.run_in_background === true,
+      },
+      {
+        signal: context.abortSignal,
+        ...(context.model ? { model: context.model } : {}),
+        ...(context.subagentModelOverride ? { modelOverride: context.subagentModelOverride } : {}),
+      },
+    );
+  } catch (error) {
+    // C1（spec 通道①）：前台失败收口。子 agent 模型/provider 失败的 CoreError 经 runner
+    // C8 合并已携带 agentId，这里转成增强版 CoreError 后 rethrow——只改这一层，catch 链
+    // 不吞错、不改 launch 之外的行为。
+    throw enhanceAgentSubagentFailure(error, context);
+  }
 };
+
+/**
+ * 前台失败的收口增强（spec 通道① / C1）。识别条件：CoreError 且 `context.agentId` 存在，
+ * 且 handler 第二参可达的 runtimeTaskRegistry 中 `get(agentId)` 在册——在册说明 child
+ * task 已建立（failed/killed 终态仍保留在册，SendMessage 可续）；setup 窗口取消的 task
+ * 已被 `registry.remove` 移除，不在册即排除，不产生空头指引。registry 缺席（非 runtime
+ * task 宿主）同样不合成。未命中一律原样返回，交由调用方 rethrow，不吞错。
+ *
+ * 命中时构造增强版 CoreError：message/cause 保持原错误链（provider 根因仍是投影
+ * primary frame），context 追加 `toolHandlerFailure`——executor 的 createErrorResult 会把
+ * 它的 message 包成 `<tool_use_error>` 信封作为父模型的 modelContent。只改 CoreError
+ * message 不进模型，那是 error.message 通道，会被 selectPrimaryErrorFrame 投影为 provider
+ * 根因，故续跑指引必须走 toolHandlerFailure 这条专用通道。
+ */
+function enhanceAgentSubagentFailure(error: unknown, context: ToolExecutionContext): unknown {
+  if (!isCoreError(error)) {
+    return error;
+  }
+  const agentId = error.context?.agentId;
+  if (typeof agentId !== "string" || !context.runtimeTaskRegistry?.get(agentId)) {
+    return error;
+  }
+  return createCoreError(CoreErrorType.ToolExecutionFailed, error.message, {
+    cause: error,
+    context: withErrorPayloadRole(
+      {
+        ...error.context,
+        toolHandlerFailure: {
+          result: false,
+          errorCode: AGENT_TOOL_FAILURE_CODE.SUBAGENT_FAILED_RESUMABLE,
+          message: `agentId: '${agentId}' (use SendMessage with to: '${agentId}' to continue this agent in this session)`,
+        } satisfies ToolHandlerFailure,
+      },
+      ErrorPayloadRole.Wrapper,
+    ),
+    recoverable: error.recoverable,
+  });
+}
 
 export const agentToolEntry: ToolEntry = {
   capability: "Launch a profile-backed subagent; background execution is runtime-configured",
