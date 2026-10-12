@@ -1,8 +1,8 @@
 ---
-date: 2026-10-13 03:30
+date: 2026-10-13 04:20
 title: 子 agent 失败/停止后无法继续会话——agentId 透出缺口调查与 A 方案 spec
 keywords: agentId, SendMessage, resume, 子代理, 失败, 停止, runner.ts, error-payload, subagent-resume-visibility
-abstract: 用户反馈失败的 agent 不返回 agentId、停止的任务无法 SendMessage 续跑；调查确认运行时 resume 机制覆盖所有终态，缺口在模型侧句柄透出。用户拍板 A 方案，spec 经 3 轮审查收敛；code-dev-loop 执行完毕 dev-ready（7 commit，全门禁绿，cr-func 2 处裁量级偏差均接受）。待合并/发版决策。
+abstract: 用户反馈失败的 agent 不返回 agentId、停止的任务无法 SendMessage 续跑；调查确认运行时 resume 机制覆盖所有终态，缺口在模型侧句柄透出。用户拍板 A 方案，spec 经 3 轮审查收敛；code-dev-loop 执行完毕 dev-ready（7 commit，全门禁绿，cr-func 2 处裁量级偏差均接受）。e2e 三幕真机验证通过（67800af1），待合并/发版决策。
 ---
 
 user:
@@ -42,3 +42,4 @@ user:
 
 assistant:
 code-dev-loop 执行（2026-10-13，worktree D:\\worktree\\subagent-resume-visibility，分支 subagent-resume-visibility 起点继 spec 提交 5c2d2234）：wave-0 impl-core(29e1a034+16df492b) ∥ impl-notify(aed551a9)；wave-1 impl-tests(15d79f7f+c9226430) + 主代理 verify-wave0；wave-2 docs(93519dc1) + verify-all；wave-3 cr-func-all。执行期发现并修复 wave-0 实现 bug：agent.ts:264 launch 缺显式 await 致 rejection 绕过 C1 catch（35c83202，T-RV1 三例转红后修复）。全门禁：typecheck 27/27、test:v4-perf 全链 26 段 0 fail（新段：sync-dispatch 扩到 10 例、notification-resume-hint 4、error-payload-agentid-projection 2、send-message-terminal-resume 2）、根 lint 74w/0e、knip 本迭代文件零命中（worktree 与主仓 knip 差集已归因 .reference 快照缺位，非代码回归）。cr-func：func-ready yes、must-fix 零；2 处接受型 deviation（CHANGELOG 分类用「新增」合并单条；C1 try 范围略宽但窄识别保证行为等价）。环境备忘：worktree 新检出需预构建 packages/{shared,model-option-map,provider} dist（测试自带 PACKAGE_DIST_ENTRY 兜底，主仓靠历史产物）；turbo 不在 pnpm --dir 的 PATH，用 pnpm exec 或直调根 .bin。旧方法论「同步 agent 失败不回 agentId→长任务一律后台派」已在 docs/.iteration-state.yaml 登记反转。分支未合并 main，发版未做。
+追加（e2e）：用户点名 e2e 验证后新增 scripts/test-e2e-subagent-resume.mjs 三幕剧情（真 handler→真 port.run→C8 合并→C1 收口→executor 投影，从 modelContent 正则提取 agentId→SendMessage(to) 真 resume 到 completed，port.start→stopTask→通知 text 含 <status>stopped</status>+指引句）；唯一注入点 runExploreAgent 剧情脚本（与单测同范式）。接线 test:v4-perf 后全链 27 段 0 fail、lint 74w/0e 不变。两个调试事实：后台 stopTask 的 registry 终态字面量是 killed 而 notificationStatus 才是 stopped；通知队列里 resume 完成的 completed 通知与 stopped 通知共存，断言须按 taskId 取。
