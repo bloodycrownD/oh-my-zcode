@@ -27,9 +27,9 @@ import {
   publishContentArtifact,
   rememberArtifactRow,
 } from "./engine-artifacts.js";
-import { publishReport } from "./engine-report.js";
+import { publishReport, countRecordedReports } from "./engine-report.js";
 import { closeImportCache, readWorld, recoverImportClosure } from "./engine-world.js";
-import { recoverSettleOrder, ReplaySettleOrder } from "./replay-order.js";
+import { recoverSettleOrder, readReplayRows, ReplaySettleOrder } from "./replay-order.js";
 import { settleCompleted, settleFailed, settleStopped } from "./engine-settlement.js";
 import type {
   ActorId,
@@ -347,19 +347,24 @@ export class WorkflowEngine implements WorkflowHostApi, WorkflowReportSink {
         );
       }
       // resume：结算次序按本 run 自己的事件恢复（本闸是 replay 正确性的一部分，不是观察面：
-      // 站点序号依调用到达顺序，而扇出的到达顺序只有首生的结算次序能复现）。节点行只读一次，
-      // 下面的 ask 行数建表、报告计数与产物恢复共用它。
-      const nodes = this.journal.listNodes(this.runId);
+      // 站点序号依调用到达顺序，而扇出的到达顺序只有首生的结算次序能复现）。节点行按用途
+      // **分两路窄读、一次读齐**（readReplayRows）：工作行不带结果，供结算次序闸与 ask 行数表
+      // 用；产物行带结果，供产物状态恢复。下列三处共用这两份行，谁都不再各自全表读一遍。
+      const { workRows, artifactRows } = readReplayRows(this.journal, this.runId);
       // 每个 actor 已记录的 ask 行数一次建表（registerActor 不再每建一个 actor 就把整张
       // 节点表读一遍再过滤——宽扇出下那是 O(actor × 行) 次解码）。
-      this.scheduler.seedRecordedAsks(nodes);
-      this.replaySettleOrder = recoverSettleOrder(this.journal, this.runId, nodes);
-      // 报告计数按 journal 里 kind:"report" 的行数恢复；用量从记录恢复（跨生命周期连续）。
-      this.reportCount = nodes.filter((n) => n.kind === "report").length;
+      this.scheduler.seedRecordedAsks(workRows);
+      this.replaySettleOrder = recoverSettleOrder(this.journal, this.runId, [
+        ...workRows,
+        ...artifactRows,
+      ]);
+      // 报告计数按 journal 里 kind:"report" 的行数恢复（count(*) 聚合，item 一条都不读；
+      // countNodes 缺席的窄替身退回元数据窄读），用量从记录恢复（跨生命周期连续）。
+      this.reportCount = countRecordedReports(this.journal, this.runId);
       // 产物状态与 reportCount 同席恢复：id 归属（种类、预置 spec）与已成功版本数全部由
       // journal 行派生，所以崩溃恢复后第 3 版仍然是第 3 版，而不是从 1 重新数起。
-      for (const node of nodes) {
-        if (node.kind !== "artifact" || node.status !== "completed") continue;
+      for (const node of artifactRows) {
+        if (node.status !== "completed") continue;
         rememberArtifactRow(this.state, node.artifactId, node.result);
       }
       this.spentTokens = existing.spentTokens;

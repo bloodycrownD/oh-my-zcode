@@ -13,8 +13,38 @@
  */
 
 import { isArtifactPresetOp } from "../facade/registry.js";
-import type { InstanceRef, JournalStorePort, NodeRecord, RunEvent } from "./types.js";
+import type { InstanceRef, JournalStorePort, NodeKind, NodeRecord, RunEvent } from "./types.js";
 import { refToString } from "./types.js";
+
+/**
+ * 重放时一定会兑现一个 promise 的节点 kind：除 `report`（void）与 `artifact`（要看成员族，
+ * 见 {@link claimsOnReplay}）之外的全部。
+ *
+ * FORK 偏离上游：上游从 `journal-read-types.ts` 的 `NODE_KINDS` 运行时集派生（新增 kind 默认
+ * 算进来），fork 没有那个常量、只有 types.ts 的 `NodeKind` 类型联合，所以这里按联合成员据实
+ * 列举（顺序与上游的派生值逐字相同）。上游把本表 export 出去是给它的 testing 包用，fork 没有
+ * 那个消费方，按本仓「不新增未使用导出」的惯例保持模块私有。新增 kind 时必须把本表随联合一并
+ * 补上，否则 resume 的窄读会漏掉新 kind 的既有行。
+ */
+const REPLAY_WORK_KINDS: readonly NodeKind[] = ["ask", "world-read", "world-run"];
+
+/**
+ * resume 要的节点行（FORK 偏离上游：上游同样形状，住在 `engine-resume.ts` 的
+ * `restoreFromJournal` 里；fork 没有那个模块，读形状落在这里）。工作行**不带结果**——结算
+ * 次序闸与 ask 行数表只看 kind / status / 坐标；产物行带结果——成员族与版本记录在 `result`
+ * 上，而产物行有界（32 个 id × 每 id 16 版）。报告行一条都不读：一个 run 可以有 65,536 条
+ * report，恢复它的计数是 `countNodes` 的聚合（或一次元数据窄读兜底，见 engine-report.ts 的
+ * `countRecordedReports`），而不是把每条 item 解码进内存。
+ */
+export function readReplayRows(
+  journal: JournalStorePort,
+  runId: string,
+): { workRows: NodeRecord[]; artifactRows: NodeRecord[] } {
+  return {
+    workRows: journal.listNodes(runId, { kinds: REPLAY_WORK_KINDS, withResult: false }),
+    artifactRows: journal.listNodes(runId, { kinds: ["artifact"], withResult: true }),
+  };
+}
 
 export class ReplaySettleOrder {
   /** 实例键 → 它在首生结算次序里的位置。 */
@@ -141,8 +171,11 @@ export class ReplaySettleOrder {
 export function recoverSettleOrder(
   journal: JournalStorePort,
   runId: string,
-  /** 已读好的节点行（引擎的 resume 分支本来就要读一次，传进来省掉第二次全表读）。 */
-  nodes: readonly NodeRecord[] = journal.listNodes(runId),
+  /**
+   * 已读好的节点行（引擎的 resume 分支本来就要读一次，传进来省掉第二次读）。缺省即
+   * {@link readReplayRows} 的窄读（工作行不带结果 + 产物行带结果），不再回落全量读。
+   */
+  nodes: readonly NodeRecord[] = Object.values(readReplayRows(journal, runId)).flat(),
 ): ReplaySettleOrder {
   const claimable = new Set<string>();
   for (const node of nodes) {

@@ -10,8 +10,24 @@ import { REPORT_CAPS } from "../facade/report-caps.js";
 import { declaredPresetIds, isDeclaredPreset } from "./engine-artifacts.js";
 import { hashMismatch } from "./scheduler.js";
 import type { EngineState } from "./engine-state.js";
-import type { InstanceRef } from "./types.js";
+import type { InstanceRef, JournalStorePort } from "./types.js";
 import { refToString, WorkflowError } from "./types.js";
+
+/**
+ * resume 时恢复本 run 已发布的报告条数（REPORT_CAPS.maxItemsPerRun 的 run 级计数器；上限
+ * 跨 resume 必须连续，否则一个反复 resume 的 run 可以无限报告）。
+ *
+ * `countNodes` 是端口上的可选成员（FORK 偏离上游的必填形状，types.ts 的
+ * `JournalStorePort.countNodes`）：缺席时退回一次**元数据窄读**——`{kinds:["report"],
+ * withResult:false}` 自己数行数，item 一条都不进 JS 堆。与观察面 `reportsOf` 的能力探测
+ * 同规（`countNodes?.(…)`，缺席即走退回路径）；绝不回落 `listNodes(runId)` 的全量带结果读，
+ * 那正是本次收窄要消掉的读放大：一个 run 可以有 65,536 条 report，恢复计数不需要把任何一条
+ * item 读进内存。
+ */
+export function countRecordedReports(journal: JournalStorePort, runId: string): number {
+  const counted = journal.countNodes?.(runId, "report");
+  return counted ?? journal.listNodes(runId, { kinds: ["report"], withResult: false }).length;
+}
 
 /**
  * 发布一条中间结果（Boundary A 的 `report`）。同步、无返回值、无 driver 往返：
