@@ -187,6 +187,17 @@ function spyListNodes(journal) {
   return reads;
 }
 
+/** 记下每一次 listEvents 的 opts（结算次序恢复的读形状是契约：只读结算类型 + 不带 item）。 */
+function spyListEvents(journal) {
+  const reads = [];
+  const original = journal.listEvents.bind(journal);
+  journal.listEvents = (runId, opts) => {
+    reads.push(opts);
+    return original(runId, opts);
+  };
+  return reads;
+}
+
 test("T-DWF-1 engine resume：ask 行数表来自窄读，fresh ask 被 hold 在既有 ask 之后", async () => {
   const journal = new InMemoryJournalStore();
   // 第一世：一个 actor 答一问，然后停下（journal 留下 ask#1@1 completed + 结算事件）。
@@ -201,6 +212,7 @@ test("T-DWF-1 engine resume：ask 行数表来自窄读，fresh ask 被 hold 在
 
   // 第二世：resume。构造期的节点读就是接线本身的证据。
   const reads = spyListNodes(journal);
+  const eventReads = spyListEvents(journal);
   const second = engineOn(journal);
   assert.deepEqual(
     reads,
@@ -210,6 +222,25 @@ test("T-DWF-1 engine resume：ask 行数表来自窄读，fresh ask 被 hold 在
     ],
     "resume 必须只做两次窄读：工作行不带结果（ask 行数表的来源）+ 产物行带结果",
   );
+  // 结算次序恢复（recoverSettleOrder）的读形状：只读三种结算事件，且 report item 一条都不带
+  // （全量读会把 65,536 条 report 的 item 解进内存）。改回 `listEvents(runId)` 这条断言即红。
+  const SETTLE_TYPES = ["node-settled", "artifact-published", "artifact-failed"];
+  assert.deepEqual(
+    eventReads,
+    [{ types: SETTLE_TYPES, reportItems: { limit: 0 } }],
+    "结算次序恢复必须只读三种结算事件、且不读 report item",
+  );
+  // 非空且等价：窄读 == 全量读按结算类型过滤。少列一种事件类型时这里的 diff 非空。
+  const settleTypes = new Set(SETTLE_TYPES);
+  const narrowed = journal.listEvents(ENGINE_RUN, {
+    types: SETTLE_TYPES,
+    reportItems: { limit: 0 },
+  });
+  const expectedSettle = journal
+    .listEvents(ENGINE_RUN, { types: "all", reportItems: "all" })
+    .filter((stored) => settleTypes.has(stored.event.type));
+  assert.ok(expectedSettle.length > 0, "前置：第一世必须已写入结算事件，本断言才非空");
+  assert.deepEqual(narrowed, expectedSettle, "结算次序的窄读必须与全量读按结算类型过滤逐字等价");
 
   // 同一个同步片里先发**全新** ask、再重放既有 ask：fresh 必须被 hold 在既有 ask 之后。
   // 判据就是 resume 种下的 recordedCount——seed 接线被删时它是 0，fresh 立即抢走 actorSeq 0，

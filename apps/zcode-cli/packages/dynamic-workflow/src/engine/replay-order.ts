@@ -13,7 +13,14 @@
  */
 
 import { isArtifactPresetOp } from "../facade/registry.js";
-import type { InstanceRef, JournalStorePort, NodeKind, NodeRecord, RunEvent } from "./types.js";
+import type {
+  InstanceRef,
+  JournalStorePort,
+  NodeKind,
+  NodeRecord,
+  RunEvent,
+  RunEventType,
+} from "./types.js";
 import { refToString } from "./types.js";
 
 /**
@@ -27,6 +34,19 @@ import { refToString } from "./types.js";
  * 补上，否则 resume 的窄读会漏掉新 kind 的既有行。
  */
 const REPLAY_WORK_KINDS: readonly NodeKind[] = ["ask", "world-read", "world-run"];
+
+/**
+ * 结算次序只看这三种事件（{@link settledInstanceKey}），其余事件不必读出来。
+ *
+ * FORK (upstream-v3.15.1-backport)：上游移植——上游 replay-order.ts:30-34 同形常量（模块私有，
+ * 未 export）。fork 侧同样不 export：本仓没有上游那个 testing 包消费方，按「不新增未使用导出」
+ * 的惯例留在模块内。
+ */
+const SETTLE_EVENT_TYPES: readonly RunEventType[] = [
+  "node-settled",
+  "artifact-published",
+  "artifact-failed",
+];
 
 /**
  * resume 要的节点行（FORK 偏离上游：上游同样形状，住在 `engine-resume.ts` 的
@@ -187,7 +207,14 @@ export function recoverSettleOrder(
 
   const order: string[] = [];
   const seen = new Set<string>();
-  for (const { event } of journal.listEvents(runId)) {
+  // FORK (upstream-v3.15.1-backport)：上游移植——按上游 replay-order.ts:189-192 收窄事件读，
+  // 只读三种结算事件类型，`reportItems: { limit: 0 }` 让存储层剥掉全部 report item（一条
+  // 65,536 条的 run 不再把整段事件日志连同 item 解进内存）。收窄与 {@link settledInstanceKey}
+  // 的类型集必须同步，少了哪一种类型都会让次序表悄悄缺项、重放退化成未受闸的释放顺序。
+  for (const { event } of journal.listEvents(runId, {
+    types: SETTLE_EVENT_TYPES,
+    reportItems: { limit: 0 },
+  })) {
     const key = settledInstanceKey(event);
     if (key === undefined || seen.has(key) || !claimable.has(key)) continue;
     seen.add(key);

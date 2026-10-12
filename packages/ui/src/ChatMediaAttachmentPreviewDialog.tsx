@@ -22,6 +22,12 @@ export interface ChatMediaAttachmentPreviewTarget {
   mediaType: string;
   url?: string;
   pdfSource?: PdfViewerSource;
+  /**
+   * text/plain 附件（长粘贴材料）读回的文本正文。
+   * FORK (upstream-v3.15.1-backport): 按上游 aac4755 同形移植（:25）——上游文本附件预览走
+   * 读取字节 + TextDecoder，而不是 URL / pdfSource，这里有值即渲染文本分支。
+   */
+  textContent?: string;
 }
 
 export function ChatMediaAttachmentPreviewDialog({
@@ -87,7 +93,17 @@ export function ChatMediaAttachmentPreviewDialog({
           </DialogDescription>
         </DialogHeader>
         <div className="flex max-h-[72vh] min-h-64 items-center justify-center bg-background-alt p-4">
-          {attachment?.pdfSource || attachment?.url ? (
+          {/* FORK (upstream-v3.15.1-backport): 文本分支按上游 aac4755 :91-97 移植。读取回的是
+              字节而不是 URL（attachmentRead 的 text/plain 走同一分块通道），有 textContent
+              时优先渲染纯文本，不让它落进下面的 URL/媒体分支。 */}
+          {attachment?.textContent !== undefined ? (
+            <pre
+              data-text-attachment-preview="true"
+              className="max-h-[calc(72vh-2rem)] w-full overflow-auto whitespace-pre-wrap break-words p-4 font-sans text-ui-base text-foreground"
+            >
+              {attachment.textContent}
+            </pre>
+          ) : attachment?.pdfSource || attachment?.url ? (
             isPdf ? (
               <Suspense
                 fallback={

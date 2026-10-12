@@ -355,6 +355,56 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
   const videoPreviewUrlRef = useRef<string | null>(null);
   const videoPreviewRequestRef = useRef(0);
   const videoPreviewAbortRef = useRef<AbortController | null>(null);
+  // FORK (upstream-v3.15.1-backport): 文本材料预览（#25 最后一公里）按上游 aac4755
+  // ConversationRowView :334-375 移植。上游读回的是字节而不是 URL，因此没有 Blob/object URL
+  // 生命周期：一次 attachmentRead → TextDecoder → textContent。这里保留上游的 AbortController
+  // 取消语义（切行/卸载即 abort），未采用下方 video/pdf 的 requestId 计数器。
+  const [textPreview, setTextPreview] = useState<ChatMediaAttachmentPreviewTarget | null>(null);
+  const [textLoading, setTextLoading] = useState(false);
+  const [textError, setTextError] = useState(false);
+  const textReadAbort = useRef<AbortController | null>(null);
+  useEffect(() => () => textReadAbort.current?.abort(), []);
+  const closeTextPreview = () => {
+    textReadAbort.current?.abort();
+    textReadAbort.current = null;
+    setTextPreview(null);
+  };
+  const openTextPreview = async (attachment: AttachmentRef, index: number) => {
+    // 授权闸只放行 sourceKind=clipboard-text 的 text/plain；这里不再自判类型，交给 CLI 权威判定。
+    if (!sessionId || !readAttachment) return;
+    textReadAbort.current?.abort();
+    const controller = new AbortController();
+    textReadAbort.current = controller;
+    setTextPreview({ filename: attachment.fileName, mediaType: "text/plain" });
+    setTextLoading(true);
+    setTextError(false);
+    try {
+      const result = await readAttachment({
+        sessionId,
+        // FORK (upstream-v3.15.1-backport): 上游此处取 attachment.ref；fork 与其余预览
+        // 一致取 previewRef ?? ref——冷恢复的行上 ref 仍可能是可变的原始路径，durable
+        // artifact（previewRef）才是不可变副本（见 v4-gateway 的授权注释）。
+        ref: attachment.previewRef ?? attachment.ref,
+        mediaType: attachment.mime,
+        ...(entityId ? { target: { rowId, entityId }, attachmentIndex: index } : {}),
+        signal: controller.signal,
+      });
+      if (controller.signal.aborted) return;
+      if (!("bytes" in result)) throw new Error("Text attachment bytes unavailable");
+      setTextPreview({
+        filename: attachment.fileName,
+        mediaType: "text/plain",
+        textContent: new TextDecoder().decode(result.bytes),
+      });
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setTextError(true);
+        logger.warn("[v4-attachment-preview] failed to read sent text attachment", error);
+      }
+    } finally {
+      if (!controller.signal.aborted) setTextLoading(false);
+    }
+  };
   const thumbnailUrlsRef = useRef<Map<string, string>>(new Map());
   const thumbnailObjectUrlsRef = useRef<Set<string>>(new Set());
   const previewOpenLabel = intl.formatMessage({
@@ -713,6 +763,10 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
     setPreviewOpen(true);
   };
   const items = visibleAttachments.map(({ attachment, index }) => {
+    // FORK (upstream-v3.15.1-backport): 文本材料按上游 aac4755 :744-745 判定，但只认
+    // clipboard-text——fork 无 topic-history 生产端/消费端（见 shared/src/attachment-source.ts
+    // 的 FORK 说明），上游还含 topic-history 一支。
+    const isTextMaterial = attachment.sourceKind === "clipboard-text";
     const ref = attachment.previewRef ?? attachment.ref;
     const isImage = attachment.mime.startsWith("image/");
     const isVideo = attachment.mime.startsWith("video/");
@@ -725,7 +779,10 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
     const thumbnailUrl = thumbnailUrls.get(ref) ?? "";
     const previewItemIndex = previewEntries.findIndex((entry) => entry.index === index);
     // 图片与视频共用当前消息的媒体 gallery；video 首次成为 active item 时再读取。
+    // 文本材料走独立的一次性字节读（openTextPreview），不进 gallery。
+    // FORK (upstream-v3.15.1-backport): canOpen 的文本支按上游 aac4755 :758-762 移植。
     const canOpen =
+      (isTextMaterial && Boolean(sessionId && readAttachment)) ||
       (isImage && !isUnavailable && previewItemIndex >= 0) ||
       (isVideo && Boolean(sessionId && readAttachment)) ||
       (isPdf && Boolean(sessionId && (readAttachment || readAttachmentRange)));
@@ -760,18 +817,22 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
         onOpen={
           canOpen
             ? () =>
-                isPdf
-                  ? void openPdfPreview(attachment, attachmentIndices?.[index] ?? index)
-                  : selectPreviewItem(previewItemIndex)
+                isTextMaterial
+                  ? void openTextPreview(attachment, attachmentIndices?.[index] ?? index)
+                  : isPdf
+                    ? void openPdfPreview(attachment, attachmentIndices?.[index] ?? index)
+                    : selectPreviewItem(previewItemIndex)
             : undefined
         }
         openLabel={
           canOpen
-            ? isVideo
-              ? previewVideoOpenLabel
-              : isPdf
-                ? previewPdfOpenLabel
-                : previewOpenLabel
+            ? isTextMaterial
+              ? intl.formatMessage({ id: "chat.attachments.preview.openText" })
+              : isVideo
+                ? previewVideoOpenLabel
+                : isPdf
+                  ? previewPdfOpenLabel
+                  : previewOpenLabel
             : undefined
         }
         title={isUnavailable ? previewUnavailableLabel : undefined}
@@ -847,6 +908,17 @@ const UserInputAttachmentList = memo(function UserInputAttachmentList({
           {items}
         </Attachments>
       )}
+      {/* FORK (upstream-v3.15.1-backport): 文本附件预览对话框按上游 aac4755 :892-900 移植，
+          排在媒体 gallery 之前（文本材料不参与 gallery 的 active item 语义）。 */}
+      <ChatMediaAttachmentPreviewDialog
+        attachment={textPreview}
+        open={textPreview !== null}
+        onOpenChange={(open) => {
+          if (!open) closeTextPreview();
+        }}
+        loading={textLoading}
+        error={textError}
+      />
       <ImagePreviewDialog
         initialIndex={previewIndex}
         items={previewItems}

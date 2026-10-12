@@ -5459,6 +5459,7 @@ const zhCN: Record<string, string> = {
   "chat.attachments.clipboardText.description": "{lineCount} 行",
   "chat.attachments.preview.open": "打开图片预览",
   "chat.attachments.preview.openVideo": "打开视频预览",
+  "chat.attachments.preview.openText": "打开文本附件",
   "chat.attachments.preview.openPdf": "打开 PDF 预览",
   "chat.attachments.preview.title": "图片预览",
   "chat.attachments.preview.pdfLoading": "正在加载 PDF 预览…",
