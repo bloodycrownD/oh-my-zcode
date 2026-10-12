@@ -683,7 +683,10 @@ export class BackgroundTaskTracker {
     // 条目来自 journal 的 kind="report" 行（run service 放在快照上），不是 memory-only 的投影。
     const isDynamicWorkflow = isDynamicWorkflowRunDispatchToolName(toolCall.name);
     const reports = isDynamicWorkflow
-      ? buildWorkflowReportsNotificationSection(workflowSnapshotReports(snapshot))
+      ? buildWorkflowReportsNotificationSection(
+          workflowSnapshotReports(snapshot),
+          workflowSnapshotReportCount(snapshot),
+        )
       : undefined;
     // 用户面产物同样只属于 dwf（legacy `Workflow` 没有这个概念，通知逐字节不变）。三个终态
     // 一律携带：一个失败的 run 已经发布的产物仍然摆在用户面前，通知不提它，模型就会重述一遍。
@@ -1046,7 +1049,10 @@ function buildWorkflowTerminalNotification(
   if (error !== undefined) meta.error = error.slice(0, WORKFLOW_NOTIFICATION_ERROR_MAX_CHARS);
 
   // 渐进产物三个终态一律携带：一个死在第 12 个 ask 上的 run 仍做完了 11 个 ask 的活。
-  const reports = buildWorkflowReportsManifestSection(workflowSnapshotReports(snapshot));
+  const reports = buildWorkflowReportsManifestSection(
+    workflowSnapshotReports(snapshot),
+    workflowSnapshotReportCount(snapshot),
+  );
   if (reports !== undefined) meta.reports = reports;
 
   // 用户面产物的 chips 载荷。这是通知行 chips 的
@@ -1148,6 +1154,14 @@ function workflowSnapshotReports(
 ): readonly unknown[] | undefined {
   if (snapshot === undefined || !("reports" in snapshot)) return undefined;
   return Array.isArray(snapshot.reports) ? snapshot.reports : undefined;
+}
+
+/** 快照上的 report 真实总数（`reports` 只带前 256 条）；缺席即老快照，读侧退回条目数。 */
+function workflowSnapshotReportCount(
+  snapshot: BackgroundTaskSnapshot | undefined,
+): number | undefined {
+  if (snapshot === undefined || !("reportCount" in snapshot)) return undefined;
+  return typeof snapshot.reportCount === "number" ? snapshot.reportCount : undefined;
 }
 
 /**
