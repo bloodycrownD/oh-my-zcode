@@ -35,7 +35,16 @@
 
 ## Open questions / 待拍板
 
-### OQ-1（review-full/B-1）前台同步等待中被 TaskStop 的子 agent 无句柄透出
+### OQ-1（review-full/B-1）前台同步等待中被 TaskStop 的子 agent 无句柄透出——**已拍板执行，落地 8ecece66（2026-10-13）**
+
+- **落地**：runner.ts 412-424（TaskStop 短路分支 CoreError rethrow 前与 C8 逐字同款
+  浅拷贝合并 agentId/agentType/parentToolCallId）+ T-RV1e 竞争窗口夹具
+  （makeGatedRejectingChild + registry.update 稳定化「child rejection 先 settle、
+  abort guard 未及转换、终态已置」的窗口）。真实 stopTask 的 abort 抢先路径
+  （guardSubagentPromiseWithAbort→ToolCancelled 自带句柄）不受影响；T-S1a 语义
+  不回归（killed 不被覆写）。验证：sync-dispatch 11/11、typecheck 27/27、
+  e2e 1/1、全量 test:v4-perf 0 fail 段；cr-func func-ready yes（含「移除修复
+  测试必红」无假绿推演）。
 
 - 现状：runner.ts:411-414——TaskStop 已把 registry 置终态后 CoreError 原样 rethrow
   （不带 agentId），C1 识别条件不命中 → 前台 tool result 无句柄。该 killed 任务
