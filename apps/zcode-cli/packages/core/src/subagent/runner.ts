@@ -989,9 +989,11 @@ async function sendMessageToLocalAgent(
 
   const task = registry.get(request.to);
   if (!task || task.type !== "local_agent") {
+    // C6（subagent-resume-visibility 描述面）：registry 纯内存，重启后 agentId 失效，
+    // SendMessage 必失败。兜底句带会话边界提示，避免把跨重启不可续的 handle 当成可用承诺。
     return createSendMessageFailure(
       request,
-      `No active local_agent task found for target ${request.to}.`,
+      `No active local_agent task found for target ${request.to}. Agent handles are only valid within the current session of this process; after a restart the agent can no longer be continued.`,
     );
   }
 

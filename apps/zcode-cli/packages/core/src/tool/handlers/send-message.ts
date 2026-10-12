@@ -31,7 +31,11 @@ const SEND_MESSAGE_PROVIDER_DESCRIPTION = [
   '{"to": "agent_<uuid>", "summary": "assign task 1", "message": "start on task #1"}',
   "```",
   "",
-  "Your plain text output is NOT visible to other agents — to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. Refer to local agents by the `agentId` returned in the Agent spawn result. To resume a completed agent, use its `agentId`; it resumes in the background and you'll be notified when it finishes.",
+  // C5（subagent-resume-visibility 描述面）：resume 语义从「仅 completed」扩为泛化终态
+  // ——运行时 resumeTerminalAgentInBackground 对 TERMINAL_STATUSES 全集
+  // （completed/failed/cancelled/killed/stopped/lost）均可续；并加 "within the current
+  // session" 限定：registry 纯内存，重启后句柄失效（runner.ts:981 兜底句同款语义）。
+  "Your plain text output is NOT visible to other agents — to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. Refer to local agents by the `agentId` returned in the Agent spawn result. To resume an agent that has finished or was stopped, use its `agentId` within the current session; it resumes in the background and you'll be notified when it finishes.",
 ].join("\n");
 
 const SEND_MESSAGE_TOOL_OUTPUT_SCHEMA = {
