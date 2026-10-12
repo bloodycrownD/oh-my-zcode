@@ -719,6 +719,76 @@ test("b/A-2 验收：大 payload 一页 ≤ maxBytes、第一条在、hasMore �
 });
 
 // ============================================================================
+// 16-17) run-service 注入钉子（cr-func MF-1）：上面 1-15 只钉存储双实现，不经过
+// `dynamic-workflow-run-service.ts` 的生产装配层——删掉那里的 maxBytes/limit 注入后
+// 契约脚本照样全绿（只有 tsc 的结构约束在挡）。这两条把承重一跳钉到运行期：
+//   16) 带 listEventPage 的探针 journal：断言 page 缺省时 maxBytes/maxEvents 真被注入、
+//       显式值原样透传；
+//   17) 无 listEventPage 的薄 journal：断言 count-only 回退读 limit+1（多取一条判 hasMore）。
+// 运行期走 tsx 直吃 TS 源（../src/...），与本脚本其余 dist import 互不影响。
+// ============================================================================
+test("run-service listEvents 注入协议缺省上限（maxBytes/maxEvents），显式值透传", async () => {
+  const { createDynamicWorkflowRunService } = await import("../src/app/dynamic-workflow-run-service.js");
+  const seen = [];
+  const probe = {
+    listEventPage(runId, page) {
+      seen.push({ runId, ...page });
+      return { events: [], hasMore: false };
+    },
+  };
+  const service = createDynamicWorkflowRunService({
+    journal: probe,
+    parentSessionId: "sess-contract",
+    fileSystemPort: {},
+    executionPort: {},
+    createActorRuntime: () => ({}),
+  });
+  await service.listEvents("run-inject", {});
+  await service.listEvents("run-inject", { limit: 3, maxBytes: 1024, afterSequence: 7 });
+  assert.equal(seen.length, 2);
+  assert.deepEqual(seen[0], {
+    runId: "run-inject",
+    limit: WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxEvents,
+    maxBytes: WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxBytes,
+  });
+  assert.deepEqual(seen[1], { runId: "run-inject", afterSequence: 7, limit: 3, maxBytes: 1024 });
+});
+
+test("run-service count-only 回退：无 listEventPage 的 journal 读 limit+1 判 hasMore", async () => {
+  const { createDynamicWorkflowRunService } = await import("../src/app/dynamic-workflow-run-service.js");
+  const seen = [];
+  const stored = (sequence) => ({ sequence, event: { type: "node-settled", runId: "run-fallback", siteId: `s${sequence}` } });
+  const thin = {
+    listEvents(runId, opts) {
+      seen.push({ runId, ...opts });
+      // 造 6 条（limit=5 时 count-only 应多取 1 条判 hasMore，再裁回 5）
+      return [1, 2, 3, 4, 5, 6].map(stored);
+    },
+  };
+  const service = createDynamicWorkflowRunService({
+    journal: thin,
+    parentSessionId: "sess-contract",
+    fileSystemPort: {},
+    executionPort: {},
+    createActorRuntime: () => ({}),
+  });
+  const page = await service.listEvents("run-fallback", { limit: 5 });
+  assert.equal(seen.length, 1);
+  assert.deepEqual(
+    seen[0],
+    {
+      runId: "run-fallback",
+      types: "all",
+      reportItems: "all",
+      limit: 5 + 1,
+    },
+    "count-only 回退必须多取一条（limit+1）并带全量读形状",
+  );
+  assert.equal(page.events.length, 5);
+  assert.equal(page.hasMore, true, "多取到的一条必须被用来判定 hasMore");
+});
+
+// ============================================================================
 // 变异自检（反假绿，手工执行、不入 CI 断言）：
 //
 //   1) 临时删掉 SQLite 侧 limit 分支——dwf-journal-reads.ts 的 `listNodeRows` 里

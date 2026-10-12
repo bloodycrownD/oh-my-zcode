@@ -550,10 +550,19 @@ dev_loop_v3151:
     impl-w4: { status: completed, executor: "subagent(中断)+main 接手收尾", items: "接线(d/G-3×2+新脚本×4)+knip+wiring-map+CHANGELOG(d/K-3/K-4)+UPSTREAM-SYNC(d/K-1)+spec.md #25 补注+本登记" }
   test_baseline: test:v4-perf 309 → 354 pass / 0 fail（CR 批 +45 例；登记表 cache/test-wiring-map.md §4）
   gate_evidence_dA1:
-    architecture_check: "pnpm architecture:check --changed → OK 0 violations 0 new（impl-w35 波实跑）"
-    check_i18n_parity: "node scripts/check-i18n-parity.mjs → zh/en 各 5908 key（impl-w35 波实跑，含新 key chat.attachments.preview.openText）"
-    cli_build: "由 verify 波 + e2e 重建 CLI bundle 承担（bundle 带新修复签名后进 e2e）"
-    redline_scan: "各 impl 节点 diff 级扫描零命中（报告留痕）；verify 波全批 diff 终扫"
+    architecture_check: "pnpm architecture:check --changed → OK 0 violations 0 new（impl-w35 与 cr-func 两波独立实跑）"
+    check_i18n_parity: "node scripts/check-i18n-parity.mjs → zh/en 各 5908 key（impl-w35 与 cr-func 两波独立实跑，含新 key chat.attachments.preview.openText）"
+    cli_build: "pnpm --filter @zcode/cli build → exit 0，dist/zcode.cjs 28.3MB（cr-func 波实跑记录；verify 波另跑 v4-perf 全链）"
+    redline_scan: "各 impl 节点 diff 级扫描零命中（报告留痕）；cr-func 波全批 diff 终扫零命中（telemetry/statusSink/emitNetworkTelemetry/zhipu-account/highspeed/~/.zcode 品牌回写）"
+  cr_func_mf1_closure:
+    problem: "b/A-2 生产注入点（dynamic-workflow-run-service.ts:556-560 maxBytes/limit 注入）无运行期钉子——契约脚本 15 例不经 run-service，删注入只有 tsc 拦"
+    fix: "契约脚本追加用例 16/17（run-service 探针）：缺省注入 maxBytes=4MiB/limit=500 且显式值透传；count-only 回退读 limit+1 判 hasMore。17/17 pass"
+    mutation: "变异自检（主代理实跑）：maxBytes 注入改 undefined → 用例 16 红；恢复 → 17/17 绿"
+    should_fix_absorbed: "sf-1 脚本头注释改已登记事实 / sf-3 T-PROC-3 注释补生产调用点事实 / sf-5 restore 路径断言补齐（attachment 脚本 9/9）/ sf-6 TurnAttachmentMeta sourceKind 观察项登记下方 backlog"
+  cr_func_backlog:
+    - "dynamic-workflow-run-introspection.ts:224 roster 的 journal.listNodes(runId) 残余全量读（cr-func-1b 裁定可接受，留痕）：最小修法 = 改 {kinds:\"all\", withResult:false} 一行；判据 = roster 零 result 消费 + 非轮询详情面；未做，登记为后续可选收窄。"
+    - "cr-func sf-6（观察，非缺陷）：buildUserInputRow 第二分支（payload.attachments→TurnAttachmentMeta，contracts/src/events/session.events.ts:203-209 无 sourceKind）不能带标记；现网走 intent.attachmentRefs 整对象透传可达。可选加固：TurnAttachmentMeta 加 sourceKind? 字段。"
+    - "lint 口径机制（cr-func sf-4）：.oxlintrc.json 的 .reference/** ignorePatterns 对 pnpm lint 默认遍历不生效（oxlint 1.60 就近配置机制）；带 --ignore-pattern \".reference/**\" --ignore-pattern \".tools/**\" 后恰为 74w/0e。UPSTREAM-SYNC 已注记；.tools/e2e-* 沙箱副本 e2e 后清理。"
   spec_deviations:
     - "零拷贝预置 ref 传播 sourceKind = 上游超集（上游该路径不带；fork 为桌面长粘贴主路径可达性裁定补上；代码 FORK 注释+spec.md #25 补注登记）"
     - "b/A-2 listEventPage 落引擎端口（上游住端口外、内存不陪跑）+ maxBytes 由 run-service 注入（上游 gateway）——FORK 偏离声明×2 已写入代码注释；理由=双实现契约测+countTaggedReports 端口先例+host 面最小改动"

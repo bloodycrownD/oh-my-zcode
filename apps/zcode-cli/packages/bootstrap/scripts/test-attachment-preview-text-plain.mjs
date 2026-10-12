@@ -28,10 +28,9 @@
  * 等价的 judge 口径（cwd=packages/ui）：
  *   npx tsx --tsconfig ../ui/tsconfig.json --test ../../apps/zcode-cli/packages/bootstrap/scripts/test-attachment-preview-text-plain.mjs
  *
- * 待 wave-4 登记（本节点不接 package.json / knip）：本脚本 import react / react-dom，而
- * @zcode/bootstrap 未声明这两个依赖，knip 会报 unlisted（react, react-dom）；与既有
- * packages/desktop/scripts/test-*.mjs 同法在 knip.json 的 ignore 清单登记，或加
- * package.json test 脚本使其成为入口。
+ * 登记（wave-4 已完成）：knip.json 的 ignore 清单已列本脚本（react / react-dom 是 UI 侧
+ * 传递依赖，@zcode/bootstrap 不声明）；根 test:v4-perf 末段与 bootstrap
+ * `test:attachment-preview-text-plain` 均已接线。
  */
 
 import assert from "node:assert/strict";
@@ -301,6 +300,30 @@ test("① UI 生产端：远端 staged 分支回写 sourceKind", async () => {
 
   const readyRefs = await api.prepareForSend();
   assert.equal(readyRefs[0].sourceKind, "clipboard-text");
+});
+
+test("① UI 生产端：会话恢复（restoreSessionOwnedAttachments）回写 sourceKind（cr-func sf-5）", async () => {
+  const api = renderComposerHook(localHookOptions("restore-scope"), stagedTransferService());
+  const accepted = api.restoreSessionOwnedAttachments([
+    {
+      ref: `${WORKSPACE_PATH}/restored-notes.txt`,
+      fileName: "restored-notes.txt",
+      mime: "text/plain",
+      bytes: PASTE_TEXT.length,
+      sourceKind: "clipboard-text",
+    },
+  ]);
+  assert.equal(accepted, true, "空 scope 下恢复应被接受");
+  const item = await waitFor(
+    () => readComposerAttachmentScope(scopeKeyOf("restore-scope"))[0],
+    "恢复附件入 store",
+  );
+  assert.equal(item.sourceKind, "clipboard-text", "恢复项的 composer 面必须回写标记");
+  assert.equal(item.attachmentRef.sourceKind, "clipboard-text", "恢复的 ref 必须原样保留标记");
+  assert.equal(item.uploadStatus, "ready");
+
+  const readyRefs = await api.prepareForSend();
+  assert.equal(readyRefs[0].sourceKind, "clipboard-text", "发送边界不能再丢字段");
 });
 
 test("① 命令 payload → 投影：sendText 校验后仍带 sourceKind，投影行可预览", async () => {

@@ -106,5 +106,8 @@ test("T-PROC-3 cleanupManagedProcess 返回的 promise 保持 reject（上报责
 
   const cleanup = seam.cleanupManagedProcess.call(manager, managed, "protocol-close", {});
   // 默认路径只写 error 日志；返回的 promise 仍会 reject（由调用方 await 决定如何上报）。
+  // 生产两个调用点（zcodeAgentProcessManager.ts:761/:777 的 shutdown 清扫）均传
+  // reportError:false——即真机路径只记日志、不向用户面上抛；本用例钉的是方法本体的
+  // reject 语义，不让它被某次「顺手 catch」改成静默吞。
   await assert.rejects(cleanup, /cleanup failed/);
 });
