@@ -1,8 +1,8 @@
 ---
-date: 2026-10-12 22:10
+date: 2026-10-13 03:30
 title: 子 agent 失败/停止后无法继续会话——agentId 透出缺口调查与 A 方案 spec
 keywords: agentId, SendMessage, resume, 子代理, 失败, 停止, runner.ts, error-payload, subagent-resume-visibility
-abstract: 用户反馈失败的 agent 不返回 agentId、停止的任务无法 SendMessage 续跑；调查确认运行时 resume 机制覆盖所有终态，缺口在模型侧句柄透出。用户拍板 A 方案，已完成 spec-generate（3 探索子代理 + spec 落盘 docs/iterations/subagent-resume-visibility/spec.md），待用户确认 spec。
+abstract: 用户反馈失败的 agent 不返回 agentId、停止的任务无法 SendMessage 续跑；调查确认运行时 resume 机制覆盖所有终态，缺口在模型侧句柄透出。用户拍板 A 方案，spec 经 3 轮审查收敛；code-dev-loop 执行完毕 dev-ready（7 commit，全门禁绿，cr-func 2 处裁量级偏差均接受）。待合并/发版决策。
 ---
 
 user:
@@ -36,3 +36,9 @@ assistant:
 第 1 轮 No-Go（2 P0+2 P1+3 P2）→ doc-fix：门禁改指 `pnpm --dir apps/zcode-cli typecheck`（根 typecheck 不含 CLI 子树）；C1 机制改写为 rethrow 增强版 CoreError（executor 契约只有 ToolHandlerFailure 转 throw 或 validateOutput 严格 union 两条路，handler 无法直接返回自定义 error+modelContent）；识别条件加 registry 在册校验。
 第 2 轮 No-Go（7/7 修复确认 + 新 P0）→ doc-fix：主场景（child 模型/provider 失败）到达 handler 的 CoreError 不带 agentId（runner.ts:458-460 原样 rethrow），registry 无反查接口、handler 无句柄来源——唯一闭环是 C8：runner rethrow 前把 agentId 合并进 CoreError context（不动 errorPayloadRole）；T-RV1 改双形态夹具（CoreError/非 CoreError）；getRuntimeTask→get(id)；error.code 漂移登记。进入第 3 轮审查。
 第 3 轮 **Go（execute-ready）**：C8 机制逐行核验吻合（458-460 行号、作用域、CoreError context 可变、投影 uniqueStrings 去重无冲突、411-429 stopTask 短路与 C8 互斥）；终修 P1-1（C8 钉死浅拷贝替换、兼容 undefined context、禁原地 mutation）+ 4 项 P2（detail.code 双轨说明 / T-RV1 负例钉死 handler 直调形态 / T-RV3 补截断次序断言 / 通道①现状措辞）。spec 终版：3 轮审查、0 P0、门禁=apps/zcode-cli typecheck + test:v4-perf + 根 lint + knip。待用户确认 execute-ready 后开工。
+
+user:
+（用户确认 execute-ready，派遣同步 agent 开发，新建 worktree）
+
+assistant:
+code-dev-loop 执行（2026-10-13，worktree D:\\worktree\\subagent-resume-visibility，分支 subagent-resume-visibility 起点继 spec 提交 5c2d2234）：wave-0 impl-core(29e1a034+16df492b) ∥ impl-notify(aed551a9)；wave-1 impl-tests(15d79f7f+c9226430) + 主代理 verify-wave0；wave-2 docs(93519dc1) + verify-all；wave-3 cr-func-all。执行期发现并修复 wave-0 实现 bug：agent.ts:264 launch 缺显式 await 致 rejection 绕过 C1 catch（35c83202，T-RV1 三例转红后修复）。全门禁：typecheck 27/27、test:v4-perf 全链 26 段 0 fail（新段：sync-dispatch 扩到 10 例、notification-resume-hint 4、error-payload-agentid-projection 2、send-message-terminal-resume 2）、根 lint 74w/0e、knip 本迭代文件零命中（worktree 与主仓 knip 差集已归因 .reference 快照缺位，非代码回归）。cr-func：func-ready yes、must-fix 零；2 处接受型 deviation（CHANGELOG 分类用「新增」合并单条；C1 try 范围略宽但窄识别保证行为等价）。环境备忘：worktree 新检出需预构建 packages/{shared,model-option-map,provider} dist（测试自带 PACKAGE_DIST_ENTRY 兜底，主仓靠历史产物）；turbo 不在 pnpm --dir 的 PATH，用 pnpm exec 或直调根 .bin。旧方法论「同步 agent 失败不回 agentId→长任务一律后台派」已在 docs/.iteration-state.yaml 登记反转。分支未合并 main，发版未做。
