@@ -46,6 +46,7 @@
     "packages/desktop/scripts/test-window-close-tray.mjs",
     "packages/shared/test/sessionContentProfileIndex.test.ts",
     "packages/shared/test/workflowRunsSeatBorn.test.ts",
+    "apps/zcode-cli/packages/bootstrap/scripts/test-attachment-preview-text-plain.mjs",
     "apps/zcode-cli/packages/dynamic-workflow/scripts/test-scheduler-recorded-asks.mjs"
   ]
 }
