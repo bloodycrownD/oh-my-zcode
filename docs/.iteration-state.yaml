@@ -568,5 +568,5 @@ dev_loop_v3151:
     - "b/A-2 listEventPage 落引擎端口（上游住端口外、内存不陪跑）+ maxBytes 由 run-service 注入（上游 gateway）——FORK 偏离声明×2 已写入代码注释；理由=双实现契约测+countTaggedReports 端口先例+host 面最小改动"
     - "b/A-3 projection-rows 无需改动：fork 该分支本就整对象透传（用测试断言真实投影行保留 sourceKind 作等价证明）；结果闸同步抽导出谓词（可测 seam 最小扩充）"
     - "impl-w35 预览读 ref 用 previewRef ?? ref（fork 冷恢复行 ref 可能可变；与 image/video/pdf 预览同惯例；代码内声明）"
-  final_verdict: 待 verify 全门禁 + cr-func 复核后定（本文件由 wave-4 主代理接手收尾时回填）
+  final_verdict: dev-ready（2026-10-12）——verify 12/12 PASS（在 HEAD=6a22ceaf 全量重跑：typecheck 0err、CLI turbo 27/27、test:v4-perf 357/357=354+MF-1×2+sf-5×1、mc 142/142、desktop 差分 fresh=0、lint 74w/0e（-c + --ignore .tools 口径）、knip NEW=0、fmt 零新增、四红线净 0、CLI bundle 28.3MB 含双签名、arch 0/0）；cr-func 18/18 closed（MF-1 处置=修法 a 补 run-service 运行期钉子，变异红自检）；HEAD=6a22ceaf 共 12 commit；e2e 复验另行。v4per 首跑一次环境态 FAIL（dist 落盘窗口）已归因并重跑全绿——CI 保持 build 后串行测试口径。
 
