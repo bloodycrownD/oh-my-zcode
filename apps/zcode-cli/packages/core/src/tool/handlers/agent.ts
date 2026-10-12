@@ -261,7 +261,8 @@ const agentHandler: ToolHandler = async (input, context) => {
         turnId: context.turnId,
       } as TraceContext,
     };
-    return context.subagentPort.launch(
+    // 必须显式 await：launch 的 rejection 才能进入下方 catch（C1 收口），裸 return 会绕过
+    return await context.subagentPort.launch(
       {
         ...request,
         runInBackground: parsed.run_in_background === true,

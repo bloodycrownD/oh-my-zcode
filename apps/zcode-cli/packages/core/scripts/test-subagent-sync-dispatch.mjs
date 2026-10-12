@@ -472,10 +472,12 @@ function makeToolContext({ subagentPort, registry }) {
  * T-RV1 两组夹具共用的投影断言：
  * 1. handler 抛出的增强 CoreError 带 toolHandlerFailure 指引句；
  * 2. 经 executor createErrorResult 投影后 modelContent 信封含同句；
- * 3. error.message 仍是注入根因原文（投影语义不变）；
+ * 3. 投影语义不变：projected.error.message 仍是注入根因原文（selectPrimaryErrorFrame
+ *    在 wrapper 场景选 cause 链的 provider 根因）；CoreError.message 属性本身仅在
+ *    CoreError 直通场景（a 组）等于根因，wrapper 场景（b 组）是 runner 包装文案；
  * 4. error.code 为数值字符串 "1000"（C1 局部常量 AGENT_TOOL_FAILURE_CODE 表面变化锁）。
  */
-function assertResumableFailure(thrown, rootCauseMessage) {
+function assertResumableFailure(thrown, rootCauseMessage, expectedThrownMessage = rootCauseMessage) {
   assert.ok(isCoreError(thrown), "handler 必须 reject CoreError");
   const failure = thrown.context?.toolHandlerFailure;
   assert.ok(failure, "增强版 CoreError 必须带 toolHandlerFailure");
@@ -485,7 +487,7 @@ function assertResumableFailure(thrown, rootCauseMessage) {
   assert.match(failure.message, new RegExp(`use SendMessage with to: '${AGENT_ID}'`));
   // 增强层标 Wrapper：投影 primary frame 仍落 cause 链上的 provider 根因。
   assert.equal(thrown.context?.errorPayloadRole, "wrapper");
-  assert.equal(thrown.message, rootCauseMessage);
+  assert.equal(thrown.message, expectedThrownMessage);
 
   const projected = createErrorResult(
     { id: `${TOOL_CALL_ID}_projection`, name: "Agent", input: {} },
@@ -574,10 +576,13 @@ test("T-RV1b: 前台失败（reject 非 CoreError，runner wrapper 分支）", a
         () => null,
         (error) => error,
       );
-    assertResumableFailure(thrown, rootCause);
-    // wrapper 分支的 cause 就是注入的原 error。
-    assert.ok(thrown.cause instanceof Error);
+    assertResumableFailure(thrown, rootCause, "Explore subagent failed");
+    // wrapper 分支：thrown.message 沿 runner 包装文案；cause 是 runner 的 wrapper CoreError
+    // （同为包装文案），注入的根因在第二层 cause 上——投影 primary 沿链选中的正是它。
+    assert.ok(isCoreError(thrown.cause));
     assert.equal(thrown.cause.message, "Explore subagent failed");
+    assert.ok(thrown.cause.cause instanceof Error);
+    assert.equal(thrown.cause.cause.message, rootCause);
   } finally {
     harness.dispose();
   }
