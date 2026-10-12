@@ -153,8 +153,40 @@ function formatLocalAgentTaskNotification(input: TaskNotificationInput): string 
   const usage = formatLocalAgentUsage(input.usage);
   if (usage) lines.push(usage);
   lines.push("</task-notification>");
+  // 续跑指引排在最后：120k 总截断先斩指引再斩正文——指引是补充动作，
+  // result/error 才是内容（与 workflow 呈现指引同款截断次序）。
+  const resumeGuidance = localAgentResumeGuidance(input.status, input.taskId);
+  if (resumeGuidance) {
+    lines.push("", resumeGuidance);
+  }
 
   return truncateTaskNotification(lines.join("\n"));
+}
+
+/**
+ * 失败/停止子 agent 的终态通知末尾的续跑指引：告诉主代理这个 agent 还能在本会话内接着跑，
+ * 句柄就是 `<task-id>` 行里的 agentId。completed 不出现——已跑完的 agent 没有「续」的语义，
+ * 对它说这句只会误导模型去重放一个没有下半场的 run。
+ *
+ * 只覆盖两个终态，且不区分是谁停的：stopped 的通知不带 stopReason（与 workflow 不同），
+ * 猜「用户停的不要动」会把模型自己 TaskStop 的场景也一起摁住，宁可给统一的「可续」指引。
+ *
+ * 句式与前台 agent 工具输出的续跑句一致（`agent.ts:174/182`：use SendMessage with to: …）；
+ * 会话边界是 registry 纯内存决定的——跨进程/重启后 agentId 不再在册，SendMessage 必失败，
+ * 所以指引限定 in this session 并附一句「发失败就说边界、别重试」的兜底。
+ */
+function localAgentResumeGuidance(status: string, taskId: string): string {
+  if (status !== "failed" && status !== "stopped") return "";
+  const stopped = status === "stopped";
+  // 续跑句两支共用：区别只在「怎么收场」那一行——failed 要解释失败对用户请求的影响，
+  // stopped 只呈现已抢救的部分，不代模型解释停止的原因。
+  const resumeSentence = `The agent it ran as is still resumable in this session: use SendMessage with to: '${taskId}' to continue this agent (the <task-id> above is its agentId). The handle does not survive a restart: if the send fails, tell the user the agent is limited to this session instead of retrying.`;
+  return [
+    stopped
+      ? "This subagent task was stopped before it finished. Present what it produced so far, then wait for the user to say what happens next."
+      : "This subagent task failed before it finished. Present what it produced so far, then explain the failure and what it means for the user's request.",
+    resumeSentence,
+  ].join("\n");
 }
 
 function formatLocalWorkflowTaskNotification(input: TaskNotificationInput): string {
