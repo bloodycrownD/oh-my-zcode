@@ -41,7 +41,7 @@
 import type { DwfRunSessionListItem } from "@zcode/adapters/storage";
 import type {
   TraceContext,
-  DynamicWorkflowRunEvent,
+  DynamicWorkflowRunEventsResult,
   DynamicWorkflowRunArtifact,
   DynamicWorkflowRunArtifactBytes,
   DynamicWorkflowRunArtifactItem,
@@ -74,13 +74,17 @@ import type {
   WorkflowSubmitPort,
 } from "@zcode/contracts";
 import type { AgentRuntime } from "@zcode/core";
-import { WORKFLOW_RUNS_LIMITS } from "@zcode/shared/zcode-protocol-v4";
+import {
+  WORKFLOW_RUN_EVENTS_PAGE_LIMITS,
+  WORKFLOW_RUNS_LIMITS,
+} from "@zcode/shared/zcode-protocol-v4";
 import type {
   ActorSubmitProfile,
   ActorRef,
   Caps,
   JournalStorePort,
   PersonaSpec,
+  StoredEvent,
 } from "@zcode/dynamic-workflow";
 import { toProtocolEvent } from "./dynamic-workflow-run-launch.js";
 import { readWorkflowArtifactBytes } from "./dynamic-workflow-run-artifact-read.js";
@@ -542,12 +546,27 @@ export function createDynamicWorkflowRunService(
     async listEvents(
       runId: string,
       options: DynamicWorkflowRunEventPage,
-    ): Promise<DynamicWorkflowRunEvent[]> {
-      const page = deps.journal.listEvents(runId, {
+    ): Promise<DynamicWorkflowRunEventsResult> {
+      // 审计面要的是逐字节的事件（report 的 item 也在内，线上再经载荷界裁剪），但一页的条数与
+      // 字节数都有界（docs/execution-engine.md「Reading the journal」）：调用方不给时取协议的
+      // 两道上限，绝不把 undefined 透传给存储——那是「不限」的旧行为。
+      //
+      // FORK 偏离上游：maxBytes 在这里注入（上游由 v4 网关注入，v4-gateway.ts:1654-1655），
+      // host/gateway 面因此不必加参数、改动面最小；limit 的缺省（= maxEvents）同样落在这里。
+      const page = {
         ...(options.afterSequence === undefined ? {} : { afterSequence: options.afterSequence }),
-        ...(options.limit === undefined ? {} : { limit: options.limit }),
-      });
-      return page.map((stored) => toProtocolEvent(stored.sequence, stored.event));
+        limit: options.limit ?? WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxEvents,
+        maxBytes: options.maxBytes ?? WORKFLOW_RUN_EVENTS_PAGE_LIMITS.maxBytes,
+      };
+      // 探测口径照上游 `supportsEventPages(deps.journal) ? listEventPage : pageByCountOnly`：
+      // 缺字节页读面的 journal（内存实现、只读替身）退回 count-only 分页，不实现字节界。
+      const { events, hasMore } = supportsEventPages(deps.journal)
+        ? deps.journal.listEventPage(runId, page)
+        : pageByCountOnly(deps.journal, runId, page);
+      return {
+        events: events.map((stored) => toProtocolEvent(stored.sequence, stored.event)),
+        hasMore,
+      };
     },
 
     /**
@@ -647,4 +666,35 @@ export function createDynamicWorkflowRunService(
           concurrencyCeiling,
         })),
   };
+}
+
+/**
+ * journal 是否带「按条数与字节两道界翻一页事件」的读面。**可选端口成员 + 能力探测**，探测口径
+ * 照上游 `supportsEventPages`；成员本身住引擎端口（FORK 偏离上游：上游住宿主内省查询，见
+ * `JournalStorePort.listEventPage` 的偏离声明），所以这里探测的是 `deps.journal` 自身。
+ */
+function supportsEventPages(
+  journal: JournalStorePort,
+): journal is JournalStorePort & Required<Pick<JournalStorePort, "listEventPage">> {
+  return typeof journal.listEventPage === "function";
+}
+
+/**
+ * 没有 {@link supportsEventPages} 读面的 journal 上的事件页：只按条数，多取一条判定 `hasMore`。
+ * 字节界在这里兑现不了——要知道一条事件多大就得先把它读出来——而这类 journal（内存实现、
+ * 只读替身）本来就攒不出大页（上游 run-service 同款口径）。
+ */
+function pageByCountOnly(
+  journal: JournalStorePort,
+  runId: string,
+  page: { afterSequence?: number; limit: number },
+): { events: StoredEvent[]; hasMore: boolean } {
+  const read = journal.listEvents(runId, {
+    types: "all",
+    reportItems: "all",
+    ...(page.afterSequence === undefined ? {} : { afterSequence: page.afterSequence }),
+    limit: page.limit + 1,
+  });
+  const hasMore = read.length > page.limit;
+  return { events: hasMore ? read.slice(0, page.limit) : read, hasMore };
 }

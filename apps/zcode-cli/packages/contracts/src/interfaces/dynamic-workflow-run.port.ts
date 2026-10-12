@@ -432,11 +432,24 @@ export interface DynamicWorkflowRunWaitOptions {
   signal?: AbortSignal;
 }
 
-/** 事件日志的分页参数；cursor = journal sequence（appendEvent 单调分配）。 */
+/**
+ * 事件日志的分页参数；cursor = journal sequence（appendEvent 单调分配）。
+ *
+ * 两道界同时生效：页在条数到 `limit`、或再加一条就会让存储里的序列化字节超过 `maxBytes`
+ * 时收尾；第一条总是带上，所以一条超过 `maxBytes` 的事件自成一页。
+ * 实现方缺省两者时各取一个有界的默认值——事件日志一页永远有界。
+ */
 export interface DynamicWorkflowRunEventPage {
   /** 只取 sequence 严格大于该值的事件；缺省从头取。 */
   afterSequence?: number;
   limit?: number;
+  maxBytes?: number;
+}
+
+/** 事件日志的一页。`hasMore` 由存储层判定：页之后是否还有事件。 */
+export interface DynamicWorkflowRunEventsResult {
+  events: DynamicWorkflowRunEvent[];
+  hasMore: boolean;
 }
 
 /**
@@ -630,11 +643,15 @@ export interface DynamicWorkflowRunPort {
    * 未知 runId 返回 false。
    */
   cancel(runId: string, initiator?: DynamicWorkflowRunCancelInitiator): Promise<boolean>;
-  /** 按 cursor 翻取事件日志；越界 cursor 返回空页而非报错。 */
+  /**
+   * 按 cursor 翻取事件日志；越界 cursor 返回空页而非报错。一页的条数与字节两道界见
+   * {@link DynamicWorkflowRunEventPage}；`hasMore` 由存储层判定（页可能因字节界提前收尾，
+   * 「取满 limit」不再是判据）。
+   */
   listEvents(
     runId: string,
     options: DynamicWorkflowRunEventPage,
-  ): Promise<DynamicWorkflowRunEvent[]>;
+  ): Promise<DynamicWorkflowRunEventsResult>;
   /**
    * 按项目（cwd）枚举 run，最近更新的在前。服务 `ListWorkflowRuns` 工具。
    *

@@ -969,6 +969,33 @@ export interface JournalStorePort {
    * 客户端拿着一个尚未存在的 cursor 回来是正常时序。
    */
   listEvents(runId: string, opts?: ListEventsOptions): StoredEvent[];
+  /**
+   * 按条数**与字节**两道界翻一页事件（详情页审计面）。页的规则：按 sequence 升序取行，条数到
+   * `limit`、或再加一行就会让本页载荷的序列化字节数之和超过 `maxBytes` 时收尾；**第一条总是
+   * 带上**（一行超过 `maxBytes` 的载荷自成一页，否则翻页永远卡住）。`hasMore` 由存储在这里
+   * 说准：收尾时后面那一行存在与否——页可能因字节提前收尾，所以「取满 limit」不是判据。
+   * 字节按存储里的序列化字节计（SQLite 的 `octet_length(payload_json)`，内存侧同一把 UTF-8 尺）。
+   * 未知 runId 与越界 cursor 回空页；`limit <= 0` 也是空页，翻页永远有界，没有「不限」这种写法。
+   *
+   * **可选成员**（FORK 偏离上游的必填形状，同 {@link countNodes} / {@link countTaggedReports}
+   * 的「可选端口成员 + 能力探测」约定）：上游这个读面住在宿主内省查询
+   * `DwfRunIntrospectionQueries` 上、引擎的内存实现不参与（.reference adapters
+   * dwf-journal-pages.ts:98-100「内存 journal 没有理由为它陪跑」）；fork 把它放进引擎端口，
+   * 并要求 SQLite 与内存两个实现**同语义**——理由 = b/G-1 要有双实现契约测，且 fork 已有
+   * `countTaggedReports` 落端口、内存实现一同陪跑的先例。缺席（例如只读事件日志的窄替身）时
+   * 调用方退回 {@link listEvents} 的 count-only 分页，不实现字节界。
+   */
+  listEventPage?(
+    runId: string,
+    page: {
+      /** 只取 sequence 严格大于该值的事件；缺省从头取。 */
+      afterSequence?: number;
+      /** 单页条数上界（必填：分页的调用方负责给出有界值）。 */
+      limit: number;
+      /** 单页载荷字节上界（必填，同上；第一条恒带上，故超界行不会把页卡死）。 */
+      maxBytes: number;
+    },
+  ): { events: StoredEvent[]; hasMore: boolean };
 }
 
 // driver 对 ask 的观察词汇表（用量 + 进度）住在 ask-observation-types.ts（同上），此处转出口以保持引用路径。

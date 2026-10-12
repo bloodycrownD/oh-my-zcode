@@ -18,7 +18,7 @@ import type {
   DynamicWorkflowRunArtifactItem,
   DynamicWorkflowRunWorkspaceNode,
   DynamicWorkflowRunWorkspaceNodeResult,
-  DynamicWorkflowRunEvent,
+  DynamicWorkflowRunEventsResult,
   DynamicWorkflowRunSessionSummary,
   MessageWithParts,
   SessionEvent,
@@ -376,11 +376,15 @@ export interface V4GatewayHost {
   /**
    * workflow run 的事件日志分页（详情页审计面）。缺席 = 该会话 runtime 没有这个能力
    * （dwf journal 不可用 → run service 整个没构造），gateway 据此回结构化能力不支持错误。
+   *
+   * 一页的两道界（条数与字节）在 CLI 侧注入：`limit` 缺省为协议上限、`maxBytes` 恒为协议上限
+   * （FORK 偏离上游：上游由本层注入，fork 定在 run-service——host 面改动最小）；
+   * `hasMore` 由存储判定，本层只透传（页可能因字节提前收尾，「取满 limit」不是判据）。
    */
   listDynamicWorkflowRunEvents?(
     sessionId: string,
     input: { runId: string; afterSequence?: number; limit?: number },
-  ): Promise<DynamicWorkflowRunEvent[]>;
+  ): Promise<DynamicWorkflowRunEventsResult>;
   /**
    * dwf run 的枚举面（重启后的发现查询）。
    * 缺席条件同 {@link listDynamicWorkflowRunEvents}。
@@ -1624,8 +1628,10 @@ export class ConversationV4Gateway {
    * 与 rows/range、plans 同族：只读、无状态、超时重发安全。刻意**不是** v4 command——
    * command 的 ACK 结果是那个封闭的「变更结果」判别联合，一页只读事件不属于那个词汇表。
    *
-   * `hasMore` 由「取满 limit」判定：多读一条来确认后面还有，比让 renderer 靠"这页正好满"
-   * 猜测更可靠（正好取尽时不会白翻一页空的）。
+   * 一页的条数与字节两道界都在 CLI 侧（run-service）注入（FORK 偏离上游：上游在本层注入
+   * maxBytes，fork 定在 run-service——host 面改动最小，见 v4-gateway 的
+   * `listDynamicWorkflowRunEvents`）；本层只透传调用方的 limit。`hasMore` 由存储层判定——
+   * 页可能因字节提前收尾，「取满 limit」不再是判据。
    */
   async workflowRunEvents(rawParams: unknown): Promise<V4ConversationWorkflowRunEventsResult> {
     const params = v4ConversationWorkflowRunEventsParamsSchema.parse(rawParams);
@@ -1633,18 +1639,12 @@ export class ConversationV4Gateway {
       throw new V4CapabilityUnsupportedError("listDynamicWorkflowRunEvents", params.sessionId);
     }
     await this.ensureHostRecordForJournalRead(params.sessionId);
-    const limit = params.limit;
-    const events = await this.host.listDynamicWorkflowRunEvents(params.sessionId, {
+    const page = await this.host.listDynamicWorkflowRunEvents(params.sessionId, {
       runId: params.runId,
       ...(params.afterSequence === undefined ? {} : { afterSequence: params.afterSequence }),
-      // 多取一条只为判定 hasMore；它不进结果页。
-      ...(limit === undefined ? {} : { limit: limit + 1 }),
+      ...(params.limit === undefined ? {} : { limit: params.limit }),
     });
-    const hasMore = limit !== undefined && events.length > limit;
-    return v4ConversationWorkflowRunEventsResultSchema.parse({
-      events: hasMore ? events.slice(0, limit) : events,
-      hasMore,
-    });
+    return v4ConversationWorkflowRunEventsResultSchema.parse(page);
   }
 
   /**

@@ -40,7 +40,7 @@ import type {
   DynamicWorkflowRunArtifactItem,
   DynamicWorkflowRunWorkspaceNode,
   DynamicWorkflowRunWorkspaceNodeResult,
-  DynamicWorkflowRunEvent,
+  DynamicWorkflowRunEventsResult,
   DynamicWorkflowRunResumeResult,
   DynamicWorkflowRunProgressPayload,
   DynamicWorkflowRunSessionSummary,
@@ -452,13 +452,15 @@ export interface ZCodeApp {
    * 「没有事件」与「这个会话没有这个能力」是两件事。
    *
    * cursor = journal sequence（`appendEvent` 单调分配），与 workflowRuns[].lastEventSequence
-   * 同一把尺；越界 cursor 返回空页而不报错。
+   * 同一把尺；越界 cursor 返回空页而不报错。一页的条数与字节两道界在 run service 注入
+   * （FORK 偏离上游：上游由网关注入 maxBytes，fork 定在 run-service——host 面改动最小）；
+   * `hasMore` 由存储判定，页可能因字节提前收尾。
    */
   listDynamicWorkflowRunEvents?(input: {
     runId: string;
     afterSequence?: number;
     limit?: number;
-  }): Promise<DynamicWorkflowRunEvent[]>;
+  }): Promise<DynamicWorkflowRunEventsResult>;
   /**
    * 恢复一个 dwf run。可选能力，缺席条件同
    * {@link listDynamicWorkflowRunEvents}。成功路径除了 port.resume 之外还负责**追踪重臂**

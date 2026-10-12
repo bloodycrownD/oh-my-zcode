@@ -1,6 +1,7 @@
 /**
  * `JournalStorePort` 读面的 SQL（docs/execution-engine.md「Reading the journal」）：kinds / types
- * 过滤、`withResult` 列裁剪、`countNodes`、`reportItems` 剥离，全部下推 SQLite。
+ * 过滤、`withResult` 列裁剪、`countNodes`、`reportItems` 剥离、事件页的条数 + 字节两道界，
+ * 全部下推 SQLite。
  *
  * 拆出原因：dwf-journal.ts 顶到 oxlint max-lines 上限；这几条读各自带着「为什么这样取数」的
  * 论证，与写入路径没有共享状态，只要一个 db 句柄。
@@ -218,4 +219,73 @@ function reportCutoff(
     )
     .get(runId, keep - 1) as { sequence: number } | undefined;
   return row?.sequence;
+}
+
+/**
+ * `listEventPage` 的分页袋（cursor 严格大于，两道界同时生效）。形状与引擎端口的
+ * `JournalStorePort.listEventPage` 成员逐字段一致——那是唯一契约来源，这里不另立语义。
+ */
+export interface DwfEventPageQuery {
+  afterSequence?: number;
+  limit: number;
+  maxBytes: number;
+}
+
+/**
+ * 事件日志一页：按 sequence 升序取行，条数到 `limit`、或再加一行就会让本页载荷的字节数超过
+ * `maxBytes` 时收尾；**第一条总是带上**（一行超过 `maxBytes` 的载荷自成一页，否则翻页永远
+ * 卡住）。`hasMore` 在这里就能说准：收尾时后面那一行存在与否——页可能因字节提前收尾，
+ * 「取满 limit」不是判据（详情页审计面读不出大页正是本条修复要解决的故障面）。
+ *
+ * 为什么是一条带窗口的查询而不是在 JS 里逐行累加：窗口只作用在 `octet_length(payload_json)`
+ * 上，而 SQLite 对 `octet_length` 只读行头里的长度、不碰载荷本身。于是「哪几行进页」在不读
+ * 任何载荷的前提下就定了；末尾那个 `case` 是惰性的，只有进页的行才真的把载荷读出来——收尾处
+ * 那一行（它的存在就是 `hasMore`）连同它可能 1 MiB 的 item 一个字节都不读。与同文件
+ * {@link listNodeRowsWithinBytes} 同习语（上游对照 dwf-journal-pages.ts 的
+ * `listEventPage` / `pageEventRows`）。
+ */
+export function listEventPageRows(
+  db: DatabaseSync,
+  runId: string,
+  page: DwfEventPageQuery,
+): { events: StoredEvent[]; hasMore: boolean } {
+  // limit ≤ 0 是空页：翻页永远有界，没有「-1 = 全量」这种写法（同上游）。
+  if (page.limit <= 0) return { events: [], hasMore: false };
+  const after = page.afterSequence;
+  const cursor = after === undefined ? "" : " and sequence > ?";
+  const found = db
+    .prepare(
+      `with sized as (
+         select sequence, octet_length(payload_json) as bytes
+         from dwf_event
+         where run_id = ?${cursor}
+         order by sequence
+         limit ?
+       ),
+       ranked as (
+         select sequence,
+                row_number() over (order by sequence) as rn,
+                sum(bytes) over (order by sequence rows unbounded preceding) as through
+         from sized
+       )
+       select r.sequence, e.type, e.time_created,
+              case when r.rn = 1 or (r.rn <= ? and r.through <= ?) then e.payload_json end
+                as payload_json
+       from ranked r
+       join dwf_event e on e.run_id = ? and e.sequence = r.sequence
+       order by r.sequence`,
+    )
+    .all(
+      runId,
+      ...(after === undefined ? [] : [after]),
+      // 多取一行：它不进页，它的存在就是 hasMore。
+      page.limit + 1,
+      page.limit,
+      Math.max(0, page.maxBytes),
+      runId,
+    ) as unknown as Array<Omit<DwfEventRow, "payload_json"> & { payload_json: string | null }>;
+  // `through` 单调不减，所以进页的行恰是一段前缀：第一行没有载荷之处就是页尾。
+  const end = found.findIndex((row) => row.payload_json === null);
+  const inPage = end === -1 ? found : found.slice(0, end);
+  return { events: inPage.map((row) => decodeEvent(row as DwfEventRow)), hasMore: end !== -1 };
 }

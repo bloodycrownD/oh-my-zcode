@@ -52,8 +52,10 @@ import {
 import {
   countNodeRows,
   countTaggedReportRows,
+  listEventPageRows,
   listEventRows,
   listNodeRows,
+  type DwfEventPageQuery,
 } from "./dwf-journal-reads.js";
 import {
   countNodesByStatus,
@@ -438,6 +440,18 @@ class SqliteDwfJournalStore implements JournalStorePort, DwfRunIntrospectionQuer
    */
   listEvents(runId: string, opts?: ListEventsOptions): StoredEvent[] {
     return listEventRows(this.db, runId, opts);
+  }
+
+  /**
+   * 事件日志一页（条数 + 字节两道界，第一条恒带上，hasMore 由存储说准）。SQL 与论证住在
+   * dwf-journal-reads.ts 的 `listEventPageRows`；这是 `JournalStorePort.listEventPage`
+   * （可选成员）的生产实现——详情页审计面读不出大页的故障面由字节界闭合。
+   */
+  listEventPage(
+    runId: string,
+    page: DwfEventPageQuery,
+  ): { events: StoredEvent[]; hasMore: boolean } {
+    return listEventPageRows(this.db, runId, page);
   }
 
   /** UPDATE 影响 0 行即"未知 run"——SQLite 不会为此报错，必须显式检出并大声失败。 */

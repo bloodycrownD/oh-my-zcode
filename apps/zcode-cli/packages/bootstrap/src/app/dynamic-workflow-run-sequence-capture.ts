@@ -15,11 +15,13 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
   sequenceOf: (event: RunEvent) => number;
 } {
   let lastStored: StoredEvent | undefined;
-  // 端口上的两个聚合计数是**可选**方法（FORK 偏离上游的必填形状）。转发必须保留「缺席即没有这个
-  // 能力」的语义：无条件挂一个 `(runId) => journal.countNodes(runId, …)`，能力探测会以为包装层
-  // 支持它，真调用时却 TypeError。`.bind(journal)` 同时把实现的 this 保住。
+  // 端口上的三个可选方法是**可选**成员（FORK 偏离上游的必填形状；`listEventPage` 见 types.ts
+  // 的偏离声明）。转发必须保留「缺席即没有这个能力」的语义：无条件挂一个
+  // `(runId) => journal.countNodes(runId, …)`，能力探测会以为包装层支持它，真调用时却
+  // TypeError。`.bind(journal)` 同时把实现的 this 保住。
   const countNodes = journal.countNodes?.bind(journal);
   const countTaggedReports = journal.countTaggedReports?.bind(journal);
+  const listEventPage = journal.listEventPage?.bind(journal);
   // 逐方法显式转发而不是 `{...journal, appendEvent}`：两个实现都是 class，展开只拷贝自有属性，
   // 原型上的方法会全部丢掉（引擎随后调 getRun 就会 TypeError）。转发面**只有引擎端口**：
   // 孤儿收敛与枚举的窄查询刻意不在其中——它们发生在 service 侧、直接对 deps.journal，不经这一层。
@@ -47,6 +49,9 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
       return stored;
     },
     listEvents: (runId, opts) => journal.listEvents(runId, opts),
+    // 事件页的字节读面：包装层不吞能力——run-service 探测的是 deps.journal（不经本层），
+    // 但引擎端口一旦被别处探测/复用，转发缺席就会静默降级成 count-only 分页。
+    ...(listEventPage === undefined ? {} : { listEventPage }),
   };
   return {
     journal: wrapped,

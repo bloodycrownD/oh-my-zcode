@@ -37,6 +37,12 @@ function resultBytes(node: NodeRecord): number {
   return text === undefined ? 0 : new TextEncoder().encode(text).length;
 }
 
+/** 一条事件的 UTF-8 序列化字节数，与 SQLite 侧 `octet_length(payload_json)` 同一把尺。 */
+function eventBytes(stored: StoredEvent): number {
+  const text = JSON.stringify(stored.event);
+  return new TextEncoder().encode(text).length;
+}
+
 /** `maxResultBytes` 的前缀规则：再加一行就超界时收尾，第一行总是带上（同 SQLite 侧）。 */
 function withinBytes(nodes: readonly NodeRecord[], maxResultBytes: number): NodeRecord[] {
   const kept: NodeRecord[] = [];
@@ -236,6 +242,39 @@ export class InMemoryJournalStore implements JournalStorePort {
       if (stripped.has(stored.sequence)) delete (copy.event as { item?: unknown }).item;
       return copy;
     });
+  }
+
+  /**
+   * 事件日志一页（条数 + 字节两道界，第一条恒带上）。语义逐字对齐 SQLite 侧的
+   * `listEventPageRows`（双实现同语义是 b/G-1 契约测的前提）：按 sequence 升序取行，条数到
+   * `limit`、或再加一行就会让本页载荷的序列化字节数之和超过 `maxBytes` 时收尾；第一条总是
+   * 带上，所以一条超过 `maxBytes` 的事件自成一页。`hasMore` 就是页后是否还有行——页可能因
+   * 字节提前收尾，「取满 limit」不是判据。
+   *
+   * 字节按 `JSON.stringify(event)` 的 UTF-8 长度计，与 SQLite 侧 `octet_length(payload_json)`
+   * 同一把尺（落库的就是同一份序列化）。
+   */
+  listEventPage(
+    runId: string,
+    page: { afterSequence?: number; limit: number; maxBytes: number },
+  ): { events: StoredEvent[]; hasMore: boolean } {
+    const list = this.events.get(runId);
+    // limit ≤ 0 是空页：翻页永远有界，没有「不限」这种写法（同 SQLite 侧）。
+    if (list === undefined || page.limit <= 0) return { events: [], hasMore: false };
+    const maxBytes = Math.max(0, page.maxBytes);
+    const after = page.afterSequence;
+    const matched = list.filter((stored) => after === undefined || stored.sequence > after);
+    const kept: StoredEvent[] = [];
+    let total = 0;
+    for (const stored of matched) {
+      if (kept.length >= page.limit) break;
+      const bytes = eventBytes(stored);
+      // 第一条恒带上：即便它自己就超过 maxBytes（自成一页），翻页也不会永远卡住。
+      if (kept.length > 0 && total + bytes > maxBytes) break;
+      kept.push(stored);
+      total += bytes;
+    }
+    return { events: kept.map(clone), hasMore: matched.length > kept.length };
   }
 
   private requireActorBucket(runId: string): Map<string, ActorRecord> {
