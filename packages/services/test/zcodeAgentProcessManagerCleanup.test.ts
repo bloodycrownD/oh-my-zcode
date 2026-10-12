@@ -99,7 +99,7 @@ test("T-PROC-3 同一次 cleanup 复用同一个 promise（幂等回收）", asy
   await assert.rejects(first, /cleanup failed/);
 });
 
-test("T-PROC-3 reportError 非 false 时不向上抛（告警语义不变）", async () => {
+test("T-PROC-3 cleanupManagedProcess 返回的 promise 保持 reject（上报责任在调用方，告警语义由调用方 reportError 决定）", async () => {
   const manager = new ZCodeAgentProcessManager({});
   const seam = ZCodeAgentProcessManager.prototype as unknown as CleanupSeam;
   const { managed } = createManagedStub(new Error("cleanup failed"));

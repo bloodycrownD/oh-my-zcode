@@ -31,8 +31,9 @@ function createFakeChild() {
 
 const FRAME_TEXT_BYTES = 15 * 1024 * 1024;
 const CHUNK_BYTES = 64 * 1024;
-/** 上界：本机实测修复后峰值堆增长 ≈20MiB；旧实现同口径 ≈161MiB（拍平分配量 GB 级）。 */
-const PEAK_HEAP_GROWTH_LIMIT_BYTES = 128 * 1024 * 1024;
+/** 上界：本机实测修复后峰值堆增长 ≈20MiB；旧实现同口径 ≈161MiB（拍平分配量 GB 级）。
+ * cr-fix-spec a/G-1：128MiB 对旧实现（实测 161~171.8MiB）仅 ~1.3x 余量，判别力不足，收紧到 64MiB。 */
+const PEAK_HEAP_GROWTH_LIMIT_BYTES = 64 * 1024 * 1024;
 
 test("T-PROC-2 15MB 单行帧线性成帧：帧完整且峰值内存有界", async () => {
   const child = createFakeChild();

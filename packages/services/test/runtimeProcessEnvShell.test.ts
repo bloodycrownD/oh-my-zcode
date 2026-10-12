@@ -4,7 +4,7 @@ import test from "node:test";
 import {
   initializeRuntimeProcessEnv,
   normalizeRuntimeProcessEnv,
-} from "../src/runtime-tools/runtimeCommandEnv.ts";
+} from "../src/runtime-tools/runtimeCommandEnv.js";
 
 // FORK (upstream-v3.15.1-backport) T-WIN-1（含 cr 携带项 C2）：spec §2.1 P5 #29——Windows 下
 // git-bash / WSL 注入的 `SHELL=/usr/bin/bash` 必须归一成 ComSpec/cmd.exe。

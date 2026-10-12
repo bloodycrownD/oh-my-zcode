@@ -3,7 +3,7 @@
 // 旧实现拿到的是完整历史（长 session 单行可达 ~15MB），host stdio 与 JSON 解析被打满，
 // 而 index 只需要 title / searchableText / hasUserVisibleContent / status / model。
 // 这里只剥离这些派生都不读取的大载荷字段，保持 message / part 数量、顺序、id、type、metadata 不变，
-// 以保证可见性与投影策略判定和 full snapshot 完全一致（spec：docs/task/task-sqlite-index.md「Index read profile」）。
+// 以保证可见性与投影策略判定和 full snapshot 完全一致（spec：docs/iterations/upstream-v3.15.1-bugfix-backport/spec.md §2.1 #20「Index read profile」）。
 // 不能改用 messageLimit：searchableText 取前 200K 字符、标题回退首条真实用户输入，都依赖历史开头。
 import type { ZCodeSessionStateSnapshot } from "./zcode-protocol/index.js";
 import type { ZCodeMessagePart, ZCodeMessageWithParts } from "./zcode-protocol-legacy-types.js";
