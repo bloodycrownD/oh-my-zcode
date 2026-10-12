@@ -78,6 +78,8 @@ export * from "./account-provider-state.js";
 // re-home：旧协议承重面的幸存文件（消费者继续走 barrel，零感知）
 export * from "./zcode-protocol-legacy-types.js";
 export * from "./zcode-task-types-core.js";
+// 附件来源词汇（clipboard-text 等）：协议引用与预览授权链共用，上游同形导出。
+export * from "./attachment-source.js";
 export * from "./task-realtime-core.js";
 export * from "./remote-workspace-identity.js";
 export * from "./zcode-api-retry-status.js";

@@ -23,11 +23,15 @@ function isUriAttachmentRef(ref: string): boolean {
 
 function displayMetaOf(
   ref: AttachmentRef,
-): Pick<TurnAttachment, "filename" | "mimeType" | "sizeBytes"> {
+): Pick<TurnAttachment, "filename" | "mimeType" | "sizeBytes" | "sourceKind"> {
   return {
     filename: ref.fileName,
     mimeType: ref.mime,
     sizeBytes: ref.bytes,
+    // FORK：上游 core 的 TurnAttachment.sourceKind 是 clipboard-text|topic-history，
+    // 本仓 core 只认 clipboard-text（apps/zcode-cli/packages/core/src/agent/turn-state.ts），
+    // 故按字面收窄后再透传；上游专属的 topic-history 不进入 core 输入。
+    ...(ref.sourceKind === "clipboard-text" ? { sourceKind: "clipboard-text" as const } : {}),
   };
 }
 

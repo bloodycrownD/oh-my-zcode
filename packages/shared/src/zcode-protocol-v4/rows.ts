@@ -2,6 +2,7 @@
 // 三条结构性规则：row 自包含（渲染任一行不需看别的行）；
 // 结构变化换整行（row.upserted），文本增长用 append（row.delta）；turn 是 row 上的标签不是容器。
 import { z } from "zod";
+import { attachmentSourceKindSchema } from "../attachment-source.js";
 import { executionOutputPreviewSchema } from "../execution-output-preview.js";
 import { timestampSchema } from "./core.js";
 import { backgroundResultOriginMetaSchema, workflowLaunchMetaSchema } from "./workflow-row-meta.js";
@@ -142,6 +143,9 @@ export const userInputRowSchema = z.object({
         fileName: z.string(),
         mime: z.string(),
         bytes: z.number(),
+        // 行附件同样必须保留来源标记：缺它会让 text/plain 附件在投影后丢掉预览授权依据
+        // （v4-gateway 的 isReadablePreviewAttachment 读 row.attachments[i].sourceKind）。
+        sourceKind: attachmentSourceKindSchema.optional(),
         previewRef: z.string().optional(),
       }),
     )

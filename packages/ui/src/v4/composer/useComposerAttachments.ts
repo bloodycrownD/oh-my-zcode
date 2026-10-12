@@ -362,6 +362,9 @@ export function useComposerAttachments(
               fileName: item.filename,
               mime: item.mimeType,
               bytes: result.bytes,
+              // 远端暂存分支同样要带来源：否则长粘贴文本附件在远端会话里
+              // 只会留下一个不可预览的 text/plain 引用。
+              ...(item.sourceKind ? { sourceKind: item.sourceKind } : {}),
             },
             result.staged,
           );
@@ -656,6 +659,11 @@ export function useComposerAttachments(
                   fileName: attachment.filename,
                   mime: attachment.mimeType,
                   bytes: attachment.sizeBytes,
+                  // FORK 超集：上游该零拷贝预置路径不带 sourceKind（上游桌面主路径走
+                  // uploadComposerAttachment 的 localPath 分支）；fork 的桌面零拷贝
+                  // 预置 ref 是长粘贴文本附件的主可达路径，缺它则 text/plain 在
+                  // 本地会话直接不可预览，故按可达性裁定在此补齐（spec_deviations 登记）。
+                  ...(attachment.sourceKind ? { sourceKind: attachment.sourceKind } : {}),
                 },
               }
             : {}),
@@ -1005,6 +1013,10 @@ export function useComposerAttachments(
         return {
           id,
           filename: attachmentRef.fileName,
+          // 按字面收窄：AttachmentRef.sourceKind 含上游专属取值，composer 项只认 clipboard-text。
+          ...(attachmentRef.sourceKind === "clipboard-text"
+            ? { sourceKind: "clipboard-text" as const }
+            : {}),
           mimeType: attachmentRef.mime,
           sizeBytes: attachmentRef.bytes,
           referenceOwnership: "session",

@@ -541,6 +541,51 @@ function artifactRefBelongsToSession(ref: string, sessionId: string): boolean {
   return ref.startsWith(`zcode-artifact://${encodeURIComponent(sessionId)}/`);
 }
 
+/**
+ * 附件是否允许走预览读取（attachmentRead / attachmentPreviewSource 的授权闸）。
+ *
+ * 根因：原判定只放行图片、视频和 PDF，长粘贴落盘的文本附件即使归属当前行也被拒绝；
+ * 文本只对「材料标记」（sourceKind）开放，后续仍须通过权威行、附件索引与 ref 归属校验。
+ * FORK：本仓没有 topic-history 生产端（见 shared/src/attachment-source.ts），故只取
+ * clipboard-text 一支；上游还放行 topic-history（.reference :2211-2222）。
+ *
+ * 抽为模块级纯谓词是为了可测：测试脚本直接驱动该判定，不再依赖网关实例。
+ */
+export function isReadablePreviewAttachment(
+  attachment: Pick<AttachmentRef, "mime" | "sourceKind">,
+): boolean {
+  const mime = attachment.mime.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return (
+    mime.startsWith("image/") ||
+    mime.startsWith("video/") ||
+    mime === "application/pdf" ||
+    (mime === "text/plain" && attachment.sourceKind === "clipboard-text")
+  );
+}
+
+/**
+ * 读取回执的媒体类型闸（attachmentPreviewSource / attachmentRead 的第二道闸）。
+ *
+ * 根因：授权闸已按 sourceKind 放行文本材料，结果闸仍只认媒体类型，使 text/plain
+ * 附件在读取回执处被 previewNotMedia 拦下。这里只做**对等豁免**：请求 mime 与结果
+ * mime 都是 text/plain 才放行，不允许靠结果类型升级授权（请求 image/* 拿到文本仍拒）。
+ *
+ * allowGeneric（share 读取）由调用方先行短路，不进入本判定。
+ */
+export function isReadablePreviewResultMediaType(
+  requestMime: string,
+  resultMediaType: string,
+): boolean {
+  const resultMime = resultMediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
+  return (
+    resultMime.startsWith("image/") ||
+    resultMime.startsWith("video/") ||
+    resultMime === "application/pdf" ||
+    (resultMime === "text/plain" &&
+      requestMime.split(";", 1)[0]?.trim().toLowerCase() === "text/plain")
+  );
+}
+
 /** 附件在文件系统层「确定不存在」的错误码集合。 */
 const MISSING_ATTACHMENT_FS_CODES = new Set<FileSystemErrorCode>([
   "not_found",
@@ -639,10 +684,7 @@ export class ConversationV4Gateway {
    * 预算随轮次变化），因此走 publisher 的扇出；`null` = 读不到了，投影层删掉该键。
    * publisher 缺席（会话还没建立 topic）时静默丢弃——下一轮 pass 会再推一次。
    */
-  updateMagicContextUsage(
-    sessionId: string,
-    usage: SessionMagicContextUsage | null,
-  ): void {
+  updateMagicContextUsage(sessionId: string, usage: SessionMagicContextUsage | null): void {
     const publisher = this.publishers.get(sessionId);
     if (!publisher) return;
     publisher.publishMagicContextUsage(usage);
@@ -2201,10 +2243,6 @@ export class ConversationV4Gateway {
     target?: { rowId: number; entityId: string },
     attachmentIndex?: number,
   ): { attachment: AttachmentRef; messageId?: string; attachmentIndex?: number } | null {
-    const isPreviewable = (attachment: AttachmentRef) => {
-      const mime = attachment.mime.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-      return mime.startsWith("image/") || mime.startsWith("video/") || mime === "application/pdf";
-    };
     const matchesRef = (attachment: AttachmentRef) =>
       attachment.ref === ref || attachment.previewRef === ref;
     if (target && attachmentIndex !== undefined) {
@@ -2215,7 +2253,7 @@ export class ConversationV4Gateway {
         );
       if (row?.kind !== "userInput") return null;
       const attachment = row.attachments?.[attachmentIndex];
-      if (!attachment || !isPreviewable(attachment) || !matchesRef(attachment)) {
+      if (!attachment || !isReadablePreviewAttachment(attachment) || !matchesRef(attachment)) {
         return null;
       }
       // 热态 renderer 可能还持有 original ref，而 hydrate 后的权威 row 已补
@@ -2233,7 +2271,7 @@ export class ConversationV4Gateway {
     for (const row of publisher.getSnapshot().rows.window) {
       if (row.kind === "userInput") {
         for (const attachment of row.attachments ?? []) {
-          if (!isPreviewable(attachment)) continue;
+          if (!isReadablePreviewAttachment(attachment)) continue;
           if ((attachment.previewRef ?? attachment.ref) === ref) return { attachment };
         }
       }
@@ -2303,13 +2341,8 @@ export class ConversationV4Gateway {
       ...(attachmentIndex !== undefined ? { attachmentIndex } : {}),
     })
       .then((result) => {
-        const resultMime = result.mediaType.split(";", 1)[0]?.trim().toLowerCase() ?? "";
-        if (
-          !allowGeneric &&
-          !resultMime.startsWith("image/") &&
-          !resultMime.startsWith("video/") &&
-          resultMime !== "application/pdf"
-        ) {
+        // 结果闸与授权闸共用同一组判定语义（见 isReadablePreviewResultMediaType）。
+        if (!allowGeneric && !isReadablePreviewResultMediaType(mime, result.mediaType)) {
           throw new ZCodeAttachmentFaultError(ZCODE_ATTACHMENT_FAULT_CODES.previewNotMedia);
         }
         if (result.bytes.byteLength > maxBytes) {

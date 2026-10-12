@@ -286,11 +286,10 @@ function admissionAttachmentRefs(
       attachment.ref
         ? [
             {
+              // 重试／编辑必须保留与原 row 相同的附件来源：逐字段枚举会丢掉
+              // sourceKind，text/plain 附件在再 admission 后失去预览授权依据。
+              ...attachment,
               ref: attachment.ref,
-              fileName: attachment.fileName,
-              mime: attachment.mime,
-              bytes: attachment.bytes,
-              ...(attachment.previewRef ? { previewRef: attachment.previewRef } : {}),
             },
           ]
         : [],

@@ -9,6 +9,7 @@ import type {
   WorkflowLaunchMeta,
 } from "@zcode/contracts";
 import { SessionEventType } from "@zcode/contracts";
+import type { AttachmentSourceKind } from "@zcode/shared";
 
 type CanonicalConversationVisibility = "visible" | "modelOnly" | "stateOnly";
 type CanonicalConversationOrigin =
@@ -100,6 +101,13 @@ export interface CanonicalTurnAttachment {
   fileName: string;
   mime: string;
   bytes: number;
+  /**
+   * 附件来源（clipboard-text = 长粘贴落盘的临时文本）。
+   * 上游用 `Omit<AttachmentRef, "ref">` 继承；本仓的手写形状需显式登记，
+   * 否则 normalizeAttachments 的 `{...attachment}` 透传在类型上不可见、
+   * 投影行 schema 也拿不到授权依据。
+   */
+  sourceKind?: AttachmentSourceKind;
   previewRef?: string;
 }
 

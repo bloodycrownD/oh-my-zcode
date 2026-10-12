@@ -45,6 +45,14 @@ export async function uploadComposerAttachment(
 ): Promise<AttachmentRef | null> {
   const fileName = attachment.filename;
   const mime = attachment.mimeType;
+  // 附件来源必须随引用一起过协议：预览授权闸（CLI v4-gateway）按 sourceKind 放行
+  // text/plain，丢了它长粘贴文本附件在 fork 完全不可预览。
+  // 必须带 `kind === "file"` 收窄——ZCodePromptAttachment 是 5 支联合，
+  // 只有 File 支声明了 sourceKind，照抄谓词会 TS2339。
+  const source =
+    attachment.kind === "file" && attachment.sourceKind === "clipboard-text"
+      ? { sourceKind: "clipboard-text" as const }
+      : {};
   // audio 变体无 sizeBytes 字段；统一经窄化读取。
   const sizeBytes =
     "sizeBytes" in attachment && typeof attachment.sizeBytes === "number"
@@ -52,6 +60,7 @@ export async function uploadComposerAttachment(
       : undefined;
   if (attachment.localPath) {
     return {
+      ...source,
       ref: attachment.localPath,
       fileName,
       mime,
@@ -72,6 +81,7 @@ export async function uploadComposerAttachment(
   }
   const { ref } = await put({ sessionId, fileName, mime, dataBase64 }, options);
   return {
+    ...source,
     ref,
     fileName,
     mime,
