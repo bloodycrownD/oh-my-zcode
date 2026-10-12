@@ -42,6 +42,7 @@
     "packages/ui/src/components/**",
     ".reference/**",
     ".tools/**",
+    "packages/desktop/scripts/test-deep-link-terminator.mjs",
     "packages/desktop/scripts/test-window-close-tray.mjs",
     "packages/shared/test/sessionContentProfileIndex.test.ts",
     "packages/shared/test/workflowRunsSeatBorn.test.ts",
