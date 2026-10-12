@@ -451,6 +451,26 @@ function makeFailingChild(error) {
   };
 }
 
+/**
+ * T-RV1e（OQ-1）夹具：挂起的 child，被外部放行后 reject——模拟「前台同步等待中
+ * TaskStop 置终态（killed）后 child 以 CoreError 收场」的形态，打进 runner 411-414
+ * 的 TaskStop 短路分支（与 makeGatedChild 的 resolve 放行互补）。
+ */
+function makeGatedRejectingChild(error) {
+  let release;
+  const gate = new Promise((resolve) => {
+    release = resolve;
+  });
+  return {
+    runExploreAgent: async (request) => {
+      await request.onSessionReady?.();
+      await gate;
+      throw error;
+    },
+    release: () => release(),
+  };
+}
+
 /** handler 直调所需的最小 ToolExecutionContext。 */
 function makeToolContext({ subagentPort, registry }) {
   return {
@@ -627,6 +647,57 @@ test("T-RV1d: 带 agentId 但 registry 不在册 → 原样 rethrow 不吞不增
 });
 
 // ── T-RV5（subagent-resume-visibility 工具描述面）───────────────────────────
+
+test("T-RV1e: 前台等待中被 TaskStop（killed）——短路 rethrow 同样带句柄（OQ-1）", async () => {
+  // 场景：TaskStop 置终态（killed）后 child 以 CoreError 收场，runner 411-414 短路
+  // 分支 rethrow。真实 stopTask 会经 abort guard（guardSubagentPromiseWithAbort
+  // 1383-1406）把 rejection 抢先转换成自带句柄的 ToolCancelled——本测要打的是
+  // **竞争窗口**的另一侧：child rejection 先 settle、abort guard 未及转换、终态
+  // 已置。用 registry.update 手工落 killed 终态稳定化该窗口（stopTask 已生效、
+  // guard 未抢先的形态）。修复前该分支原样 rethrow（无句柄）→ C1 拿不到
+  // agentId，模型看不见「killed 仍可 SendMessage 续跑」（T-RV4 已证可续）。
+  const rootCause = "child model call failed: aborted while awaiting provider stream";
+  const child = makeGatedRejectingChild(
+    createCoreError(CoreErrorType.ToolExecutionFailed, rootCause),
+  );
+  const harness = makePort({ runExploreAgent: child.runExploreAgent });
+  try {
+    const handlerPromise = agentToolEntry
+      .handler(
+        { description: "probe stopped mid-run", prompt: "probe", subagent_type: "general-purpose" },
+        makeToolContext({ subagentPort: harness.port, registry: harness.registry }),
+      )
+      .then(
+        () => null,
+        (error) => error,
+      );
+
+    // 等 registry 出现 running task（launch 已起 child、正挂起）。
+    for (let index = 0; index < 200 && !harness.registry.get(AGENT_ID); index += 1) {
+      await new Promise((resolve) => setImmediate(resolve));
+    }
+    assert.equal(harness.registry.get(AGENT_ID)?.status, "running");
+
+    // 落终态（stopTask 的 registry 效果）再放行 child reject——打进 411-414。
+    harness.registry.update(AGENT_ID, (task) => ({
+      ...task,
+      status: "killed",
+      completedAt: new Date(),
+      error: "Background agent task stopped.",
+    }));
+    child.release();
+    const thrown = await handlerPromise;
+    await flush();
+
+    // T-S1a 语义不回归：killed 终态保持，未被 failed 收口覆写。
+    assert.equal(harness.registry.get(AGENT_ID)?.status, "killed");
+    // OQ-1 断言面与 T-RV1 主场景同构（CoreError 直通：message=根因）：
+    // runner 合并句柄 → handler 收口 → 投影信封含续跑指引。
+    assertResumableFailure(thrown, rootCause);
+  } finally {
+    harness.dispose();
+  }
+});
 
 test("T-RV5: 工具描述含终态续跑语义与上游 continue bullet", () => {
   // Agent 侧：补回上游漂移丢失的「用 agentId 续跑已派生子 agent」bullet。

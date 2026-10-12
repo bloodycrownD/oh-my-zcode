@@ -410,6 +410,16 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         const currentTask = registry.get(lifecycle.agentId);
         if (currentTask && isTerminalRuntimeTask(currentTask)) {
           if (isCoreError(error)) {
+            // OQ-1（cr-fix-spec）：TaskStop 置终态（killed）后原样 rethrow 的 CoreError
+            // 同样不带句柄，而该任务仍可 SendMessage 续跑（T-RV4 已证 killed 可续）。
+            // 与下方 C8 同款浅拷贝合并身份字段，前台收口（C1 的「在册即命中」识别
+            // 条件）才能透出续跑指引。
+            error.context = {
+              ...error.context,
+              agentId: lifecycle.agentId,
+              agentType: request.agentType,
+              parentToolCallId: request.parentToolCallId,
+            };
             throw error;
           }
           throw createCoreError(
