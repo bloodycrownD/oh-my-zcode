@@ -76,18 +76,27 @@
 
 ## K 节建议（下游执行时闭合）
 
-- CHANGELOG Unreleased 在修复后补一行「修复排队项引导切换在真机不可用（core 查找域）」。
-- 修复 commit 建议单独一个（与功能提交分开，便于回溯本次 CR 结论）。
+- ~~CHANGELOG Unreleased 在修复后补一行「修复排队项引导切换在真机不可用（core 查找域）」~~ → 已闭合，措辞改为实际根因：baseRevision CAS stale 竞态。
+- ~~修复 commit 建议单独一个~~ → 已闭合（c1671fae + 2158c8ed 两个修复 commit，与功能提交分开）。
+
+## 开发落地记录（code-dev-loop，2026-10-13）
+
+- **wave-0（插桩定位）**：renderer hook + CLI handler/core + publisher 四层插桩、7 轮 e2e 对照。定位=分支丁 baseRevision CAS stale（见 P0-1 回填）。原 spec-check 的「两段式」第一段按计划执行完毕，甲/乙/丙全部排除（真机链路完整：held 回落命中、事件传播、投影消费全通）。
+- **wave-1（修复）**：c1671fae——hook stale 单次重试 + P0-2（handler core miss 显式 rejected `guard.queueItemDeliveryCoreMiss`，B5 测试同步新语义）+ P2-1（三处静默 return 补 console.debug）。首轮 e2e 复跑 1/3 → 单次重试读本地投影 revision 在流式高峰仍连续落后（本地 delta 滞后于 CLI 权威）。2158c8ed——重试升级：重发 revision 取 `max(本地, ack.revisionAtDecision)`、上限 2 次。
+- **wave-2（verify）**：bootstrap 测试 10/10（含 B5 新语义）、workspace typecheck 全绿（27 包）、改动文件 oxlint 0w0e。
+- **wave-3（e2e 验收）**：修复后真机 e2e S5 复跑 **3/3 全过**（升级前 1/3），v3 含 turn 提前结束但切换已在结束前完成的正向样本。S0/S4 同步全过。
+- **已知限制（P1 记录不阻塞）**：hook stale 重试无单测——ui 包无测试基建（零先例），为本 hook 单独建 vitest+@testing-library 超出本 cr-fix 范围；覆盖改由 e2e S5 承担。若后续 ui 包建测试基建，优先补「mock dispatchCommand 首回 stale 二回 accepted，断言重发用 revisionAtDecision、上限 2 次、连败走 onRejected」。
+- **备注**：`spec_deviations` 的 open 项（P0-1 修复时消费侧确认）已闭合——定位证据表明消费侧（guide 内联消费）无需改造。
 
 ## Fix-Spec Closure
 
 | 项 | 状态 |
 | --- | --- |
-| fix-spec-ready | yes（P0-1 为两段式：定位步骤可执行、三个修复分支均有明确改法与验收） |
+| fix-spec-ready | yes（spec-check 轮）；**dev-ready 已达成（2026-10-13，见「开发落地记录」）** |
 | fix_spec_path | docs/iterations/oh-my-zcode-fork/features/queue-item-guide-toggle/cr-fix-spec.md |
 | dag_version / review_round | 2 / 2（spec-check 轮修正原诊断） |
 | P0 / P1 / P2（已写入 fix-spec） | 2 / 0 / 1 |
 | 未写入的开放 must-fix | 0 |
-| spec_deviations | open: 1（随 P0-1 修复闭合，含消费侧确认） |
+| spec_deviations | open: 0（原 open 项随定位结论闭合） |
 | C-orch | P0-2 已覆盖命令面语义 |
 | C 类合并后 QA | 见「合并后 QA」 |
