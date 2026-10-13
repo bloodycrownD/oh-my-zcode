@@ -42,3 +42,10 @@
 - config.json 落点 = `os.homedir()/.omz/cli`（`file-config.adapter.ts` DEFAULT_BASE_DIR，Windows 读 USERPROFILE），**ZCODE_STORAGE_DIR 不控制它**——e2e 须用备份/恢复式验证（本包 v3+ 口径）。USERPROFILE 重定向不可用（Electron appData 解析失败）。
 - 真模型制造 busy：纯数数/作文任务在 GLM 上几秒完成，窗口不足；工具循环任务（ping×10）可制造 30s+ 稳定窗口。
 - e2e 结果 JSON 注意脱敏：绝不 dump 完整 config.json（含 MCP Bearer）。
+
+
+## 2026-10-13 code-dev-loop 验收（S5 根因修复后）
+
+- 定位手段：renderer hook + CLI handler/core + publisher 四层临时插桩，7 轮 e2e 对照 pass/fail；fail 轮 ack 实锤 status=stale / proto.staleRevision / revisionAtDecision=7 vs 发送 rev=6，CLI 零执行（命令在 gateway CAS 层被拒）。
+- 修复：c1671fae（hook stale 单次重试 + P0-2 rejected + P2-1 观测）→ 复跑 1/3（单次重试读本地滞后 revision 仍连败）；2158c8ed（重试升级：max(本地, ack.revisionAtDecision)，上限 2 次）。
+- 验收：修复后 S0/S4/S5 真机 3/3 全过（v3 含 turn 提前结束但切换已生效的正向样本）。fix-spec「开发落地记录」节留痕。
