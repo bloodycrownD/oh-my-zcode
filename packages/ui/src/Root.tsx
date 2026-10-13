@@ -65,6 +65,7 @@ import { useCodeCommentPreviewStore } from "@/store/codeCommentPreviewStore.js";
 import { RootStartupLoading } from "@/root/RootStartupLoading.js";
 import { resolveProviderAvailabilityState } from "@/lib/modelProviderAvailability.js";
 import { useSettings } from "@/hooks/useSettingService.js";
+import { useSystemLanguagePromptSync } from "@/hooks/useSystemLanguagePromptSync.js";
 import { CLOSE_ACTIVE_CONTEXT_REQUEST_EVENT } from "@/lib/closeActiveContext.js";
 import { AssistantCodeCommentFeatureProvider } from "@/AssistantCodeCommentFeatureProvider.js";
 
@@ -303,6 +304,13 @@ function RootInner({
     workspaceShellRemoteSessionId,
     workspaceShellIdentity,
   );
+
+  // FORK（system-language-unification）：界面语言确定/变化时把模型语言同步到同一 locale。
+  // 只由发起窗口执行（IntlProvider.localeChangeToken 不在广播接收侧递增），挂在 Root 是
+  // 为了同时覆盖设置页 select 与 footer 语言子菜单两条入口，并在 workspace 可用后兜底一次
+  // 存量迁移。载体用 workspaceShellPath：Settings tab 覆盖 workspace 时它仍指向被覆盖的
+  // 那个 workspace，与其它 root 级同步同源。
+  useSystemLanguagePromptSync({ workspacePath: workspaceShellPath });
 
   const localWorkspacePathForRemoteConnection = useTabStore((state) => {
     const activeTab = state.activeTabId

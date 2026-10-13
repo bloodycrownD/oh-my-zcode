@@ -132,6 +132,17 @@ interface IntlContextValue {
   localePreference: LocalePreference;
   setLocale: (locale: Locale) => void;
   setLocalePreference: (localePreference: LocalePreference) => void;
+  /**
+   * FORK（system-language-unification）：本窗口主动提交界面语言的序号（单调递增）。
+   *
+   * 界面语言与模型语言合并为「系统语言」后，模型语言（agent 提示词语言）跟随界面语言：
+   * 由发起变更的窗口在提交后把解析出的具体 locale 经 `workspace/updatePromptLanguage`
+   * 写入 CLI。只有能区分「本窗口是发起方」才能避免接收广播的窗口重复写同一份用户级
+   * 配置——广播接收侧直接改 state、不调用 `setLocalePreference`，因此序号不递增，
+   * 这里复用的正是 IntlProvider 既有的防回环语义，不新增第二条写路径。
+   * 初值为 0（尚未发生过主动提交）。
+   */
+  localeChangeToken: number;
 }
 
 const IntlContext = createContext<IntlContextValue | null>(null);
@@ -158,6 +169,7 @@ export function ZCodeIntlProvider({
   const applyingBroadcastRef = useRef(false);
   const ignoredLocalLocaleBroadcastPayloadRef = useRef<LocaleBroadcastPayload | null>(null);
   const localePreferenceOperationSeqRef = useRef(0);
+  const [localeChangeToken, setLocaleChangeToken] = useState(0);
   const resolveNavigatorSystemLocale = useCallback((): Locale => {
     const language = readNavigatorLanguage();
     if (!language) {
@@ -307,6 +319,11 @@ export function ZCodeIntlProvider({
             });
         }
         enqueueLocalePreferenceUpdate(operationSeq, resolvedLocale, newPreference);
+        // 本窗口是这次界面语言变更的发起方（两条入口——设置页 select 与 footer
+        // 语言子菜单——都收敛到 setLocalePreference，system 态的解析值回写也在同一
+        // 函数内完成），递增序号让联动方只在这里同步模型语言。seq 校验已在上方过滤
+        // 过期操作：连续切换时只有最后一次选择有权递增，同步不会互相踩。
+        setLocaleChangeToken((token) => token + 1);
       })();
     },
     [broadcastService, enqueueLocalePreferenceUpdate, persistLocalePreference, resolveSystemLocale],
@@ -357,8 +374,15 @@ export function ZCodeIntlProvider({
   const intl = useMemo(() => createIntl(locale), [locale]);
 
   const value = useMemo<IntlContextValue>(
-    () => ({ intl, locale, localePreference, setLocale, setLocalePreference }),
-    [intl, locale, localePreference, setLocale, setLocalePreference],
+    () => ({
+      intl,
+      locale,
+      localePreference,
+      setLocale,
+      setLocalePreference,
+      localeChangeToken,
+    }),
+    [intl, locale, localePreference, setLocale, setLocalePreference, localeChangeToken],
   );
 
   return <IntlContext value={value}>{children}</IntlContext>;
