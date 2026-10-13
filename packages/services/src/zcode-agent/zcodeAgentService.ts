@@ -3086,10 +3086,12 @@ export function createZCodeAgentService(
       }
     },
 
-    // FORK（prompt-language-option）：模型语言读回，供设置页渲染初值。
+    // FORK（prompt-language-option）：模型语言读回。
+    // FORK（system-language-unification）：合并为「系统语言」后，读侧服务于界面语言 →
+    // 模型语言的联动同步（useSystemLanguagePromptSync），不再有设置行初值。
     // 走与 magic-context 同一条 read-only 控制面（provider/model 未就绪也可用）。
     // 旧 CLI 不认识该方法（-32601）时按失败即降级：返回 supported:false + "auto"，
-    // 让设置页把该项显示为「当前 CLI 不支持」，而不是抛错卡住整个 General 分区。
+    // 让联动方静默跳过，而不是抛错影响界面语言主路径。
     async readPromptLanguage(params: ZCodeAgentWorkspaceTarget) {
       try {
         const client = await getReadOnlyClient(params);
@@ -3115,8 +3117,10 @@ export function createZCodeAgentService(
     },
 
     // FORK（prompt-language-option）：写模型语言。三段（校验→写盘→推送）都在 CLI 侧；
-    // 这里只负责转发。旧 CLI method-not-found 时给出可读错误——正常路径下 UI 已经
-    // 由 read 的 supported:false 提前禁用，这里是竞态兜底。
+    // 这里只负责转发。旧 CLI method-not-found 时给出可读错误——FORK
+    // （system-language-unification）后 UI 不再暴露模型语言行，该错误只作为联动同步
+    // （useSystemLanguagePromptSync）的日志上下文被消费；read 的 supported:false 已让
+    // 联动方在正常情况下静默跳过，这里是竞态兜底。
     async updatePromptLanguage(params: ZCodeAgentUpdatePromptLanguageParams) {
       const workspaceKey = resolveWorkspaceKey(params);
       try {

@@ -654,9 +654,12 @@ export interface IZCodeAgentService {
     params: ZCodeAgentWorkspaceTarget,
   ): Promise<ZCodeWorkspaceReadMagicContextConfigResult>;
   /**
-   * FORK（prompt-language-option）：读回 effective 的模型语言，作为设置页初值。
+   * FORK（prompt-language-option）：读回 effective 的模型语言。
+   * FORK（system-language-unification）：界面语言与模型语言已合并为一行「系统语言」，
+   * 该方法现在是「界面语言 → 模型语言」联动同步的读侧（`useSystemLanguagePromptSync`），
+   * 不再有设置行渲染初值。
    * 旧 CLI 不认识该方法时按 -32601 降级：返回 `supported:false` + "auto"，
-   * 调用方（设置页）据此禁用该选项而不是反复保存失败。
+   * 调用方据此静默跳过同步，而不是把错误抛给界面语言主路径。
    */
   readPromptLanguage(
     params: ZCodeAgentWorkspaceTarget,
@@ -664,7 +667,9 @@ export interface IZCodeAgentService {
   /**
    * FORK（prompt-language-option）：写「模型语言」——写盘 + ConfigPort 双写，
    * 并对运行中的 session 调 runtime.updateConfig({language})（下一轮生效）。
-   * 无 provider/model 就绪也能调用——设置页必须可用。
+   * FORK（system-language-unification）：写侧由界面语言变更联动触发，写入界面语言
+   * 解析出的具体 locale（config.json 的 promptLanguage 因此只是内部实现细节）。
+   * 无 provider/model 就绪也能调用——界面语言设置必须始终可用。
    */
   updatePromptLanguage(
     params: ZCodeAgentUpdatePromptLanguageParams,

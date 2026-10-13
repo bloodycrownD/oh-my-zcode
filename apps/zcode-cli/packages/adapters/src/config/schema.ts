@@ -322,8 +322,9 @@ export const ZCodeConfigFileSchema = z
     logging: loggingSchema.optional(),
     ui: uiSchema.optional(),
     // FORK（prompt-language-option）：agent 提示词语言（模型语言）顶层字段。
-    // 与 ui.locale 的值域刻意相同但相互独立：一个是应用界面语言，一个是喂给模型的
-    // system prompt 语言。optional 让缺席保持「没配置过」，装配层按 auto 处理。
+    // FORK（system-language-unification）：桌面/Web 宿主场景下该域跟随界面语言
+    // （「系统语言」）解析出的具体 locale 写入，auto 只保留给无桌面宿主的 TUI /
+    // 独立 CLI 兜底（env → Intl 探测）。optional 让缺席保持「没配置过」。
     promptLanguage: z.enum(["auto", "en-US", "zh-CN"]).optional(),
     toolConcurrency: toolConcurrencySchema.optional(),
     modelAnomalyGuard: modelAnomalyGuardSchema.optional(),

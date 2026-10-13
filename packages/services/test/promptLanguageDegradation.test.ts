@@ -5,10 +5,13 @@
  *
  *   - read：`-32601`（method not found）→ 不抛错，回
  *     `{supported:false, promptLanguage:"auto"}` 且**不带 path**（host 不伪造成
- *     自己读过的路径），让设置页把该项渲染成「当前 CLI 不支持」而不是卡住 General 分区；
- *   - update：`-32601` → 抛可读错误「当前 CLI 版本不支持『模型语言』设置…」，
- *     而不是把原始 -32601 结构化错误漏给 UI（正常路径由 read 的 supported:false
- *     提前禁用，这里是竞态兜底）。
+ *     自己读过的路径）；
+ *   - update：`-32601` → 抛可读错误，而不是把原始 -32601 结构化错误漏给 UI。
+ *
+ * 消费方口径（FORK system-language-unification）：界面语言与模型语言已合并为一行
+ * 「系统语言」，模型语言跟随界面语言解析值由 `useSystemLanguagePromptSync` 静默联动。
+ * read 的 `supported:false` 正是该联动「当前 CLI 不支持 ⇒ 静默跳过」的判据——合并后
+ * 不再有设置行可禁用，这条降级契约必须继续成立，否则联动会反复写失败。
  *
  * 用假 app-server 进程（node 直接跑，一行一条 JSON-RPC 帧，全方法回 -32601）走真实
  * 协议客户端，保证断言的正是线上降级链路而不是对内部函数的影子测试。
