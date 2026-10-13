@@ -146,6 +146,13 @@ export const commandPayloadSchemas = {
   }),
   sendQueuedNow: z.object({ queueItemId: z.string() }),
   editQueueItem: z.object({ queueItemId: z.string(), newText: z.string() }),
+  // 用户拍板：排队项投递车道 toggle——guide=引导至下一轮工具调用后运行（内联当前轮），
+  // queue=回到普通排队独立成轮；与「立即」（sendQueuedNow 抢占当前轮）语义区分。
+  // 只改既有 delivery.admitted 值，不扩展 schema 字段；重复提交同值 = noop。
+  setQueueItemDelivery: z.object({
+    queueItemId: z.string().min(1),
+    delivery: z.enum(["queue", "guide"]),
+  }),
   // beforeQueueItemId = null → 移到队尾。
   reorderQueueItem: z.object({
     queueItemId: z.string(),
@@ -300,6 +307,7 @@ export const COMMANDS_REQUIRING_BASE_REVISION: ReadonlySet<CommandType> = new Se
   "setAssistantFeedback",
   "sendQueuedNow",
   "editQueueItem",
+  "setQueueItemDelivery",
   "reorderQueueItem",
   "deleteQueueItem",
   "setAutoDrain",

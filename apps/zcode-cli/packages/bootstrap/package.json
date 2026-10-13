@@ -32,6 +32,7 @@
     "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
+    "test:queue-item-delivery-command": "tsx --test scripts/test-queue-item-delivery-command.mjs",
     "test:edit-retry": "tsx --test scripts/test-edit-retry.mjs",
     "test:edit-retry-model": "tsx --test scripts/test-edit-retry-model.mjs",
     "test:default-model-live": "tsx --test scripts/test-default-model-live.mjs",

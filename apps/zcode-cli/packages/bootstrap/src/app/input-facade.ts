@@ -32,6 +32,7 @@ type InputFacade = Pick<
   | "clearQueueItems"
   | "completeExternalQueueDrain"
   | "reorderQueueItem"
+  | "setQueueItemDelivery"
   | "setQueueAutoDrain"
   | "setFollowupMode"
   | "sendInput"
@@ -335,6 +336,15 @@ export function createInputFacade(deps: CreateInputFacadeDeps): InputFacade {
       return deps.runtime.reorderPendingInput({
         pendingInputId,
         beforePendingInputId,
+        traceContext: options?.traceContext ?? deps.traceContext,
+      });
+    },
+    setQueueItemDelivery: async (pendingInputId, delivery, options) => {
+      // v4 setQueueItemDelivery：用户拍板 toggle——排队项在 queue ↔ guide 间切换
+      // （guide=引导至下一轮工具调用后运行，与「立即」抢占语义区分）。
+      return deps.runtime.setPendingInputDelivery({
+        pendingInputId,
+        delivery,
         traceContext: options?.traceContext ?? deps.traceContext,
       });
     },

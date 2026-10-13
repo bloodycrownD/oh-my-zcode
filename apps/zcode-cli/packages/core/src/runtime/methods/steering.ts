@@ -1008,6 +1008,112 @@ export async function reorderPendingInput(
 }
 
 /**
+ * （v4 setQueueItemDelivery）：用户拍板 toggle——把排队项投递车道在 queue ↔ guide
+ * 间切换。guide = 引导至下一轮工具调用后运行（内联当前轮，与「立即」sendQueuedNow
+ * 抢占当前轮语义区分）；queue = 回到普通排队、消费时独立成轮。
+ *
+ * 消费侧无需同步索引：firstInlineGuideIndex 按 delivery 动态 findIndex 扫描
+ * （非入队时固化），切换后项自然进入/移出 guide 子序列——drain 只从该子序列取
+ * 最早一项，普通 queue 项不可偷跑。持久化也不在此处直写：appendEvent 进事件汇后
+ * 由 events.ts 的集中记账（TurnSteerDeliveryChanged → updateSessionInputs）
+ * 落 session_input 账本，与 core fallback 改投共用同一条路径。
+ */
+export async function setPendingInputDelivery(
+  this: AgentRuntimeInternal,
+  options: {
+    pendingInputId: string;
+    delivery: "queue" | "guide";
+    traceContext: TraceContext;
+  },
+): Promise<boolean> {
+  const activeTurn = this.activeTurn;
+  const pendingInput = activeTurn?.pendingInputs.find((item) => item.id === options.pendingInputId);
+  if (!activeTurn || !pendingInput) {
+    // held 回落：active turn 已结束，项只存在于投影/事件日志（同 edit 的处理）——
+    // 重发同 id TurnSteerDeliveryChanged，v4 reducer 原地更新该行 delivery。
+    const projection = await this.rebuildProjection();
+    const held = projection.pendingSteerInputs.find(
+      (item) => item.pendingInputId === options.pendingInputId,
+    );
+    if (!held) return false;
+    if (held.intent?.admittedDelivery === options.delivery) return true;
+    const event = createSessionEvent(
+      SessionEventType.TurnSteerDeliveryChanged,
+      this.sessionId,
+      {
+        pendingInputId: options.pendingInputId,
+        requestedDelivery:
+          held.intent?.requestedDelivery ?? held.intent?.admittedDelivery ?? options.delivery,
+        admittedDelivery: options.delivery,
+        targetTurnId: held.targetTurnId,
+        ...(held.intent ? { intent: { ...held.intent, admittedDelivery: options.delivery } } : {}),
+      },
+      {
+        traceId: options.traceContext.traceId,
+        turnId: held.targetTurnId,
+      },
+    );
+    await this.appendEvent(event, options.traceContext);
+    this.logger?.debug("Turn steer delivery toggled (held)", {
+      ...traceContextToLogContext(options.traceContext),
+      admittedDelivery: options.delivery,
+      event: "turn.steer.delivery_toggled",
+      module: "core.runtime",
+      pendingInputId: options.pendingInputId,
+      status: "completed",
+      targetTurnId: held.targetTurnId,
+    });
+    return true;
+  }
+  const currentDelivery = pendingInputDelivery(pendingInput);
+  // 同值 toggle = noop：幂等返回，不产事件（CommandInbox 重放/客户端重复点击）。
+  if (currentDelivery === options.delivery) return true;
+  // reserved/promoting 中的项归 sendQueuedNow promotion 主线所有；此时切 delivery
+  // 会与 reserve/promote 事务抢同一条 pendingInput，拒绝（CLI 侧另有 dispatch 门）。
+  if (this.pendingInputReservations.has(options.pendingInputId)) return false;
+  const requestedDelivery = pendingInput.intent?.requestedDelivery ?? currentDelivery;
+  const intent = pendingInput.intent
+    ? {
+        ...pendingInput.intent,
+        admittedDelivery: options.delivery,
+        // 用户显式 toggle 即新决策：清掉 admission 期 fallback 标记，
+        // 避免 ledger/reducer 把手动 guide 误判成回退项。
+        fallbackReasonCode: undefined,
+      }
+    : undefined;
+  const event = createSessionEvent(
+    SessionEventType.TurnSteerDeliveryChanged,
+    this.sessionId,
+    {
+      pendingInputId: options.pendingInputId,
+      requestedDelivery,
+      admittedDelivery: options.delivery,
+      targetTurnId: activeTurn.turnId,
+      ...(intent ? { intent } : {}),
+    },
+    {
+      traceId: activeTurn.traceContext.traceId,
+      turnId: activeTurn.turnId,
+    },
+  );
+  await this.appendEvent(event, options.traceContext);
+  pendingInput.delivery = options.delivery;
+  if (intent) pendingInput.intent = intent;
+  this.logger?.debug("Turn steer delivery toggled", {
+    ...traceContextToLogContext(activeTurn.traceContext),
+    admittedDelivery: options.delivery,
+    event: "turn.steer.delivery_toggled",
+    module: "core.runtime",
+    pendingInputId: options.pendingInputId,
+    previousDelivery: currentDelivery,
+    requestedDelivery,
+    status: "completed",
+    targetTurnId: activeTurn.turnId,
+  });
+  return true;
+}
+
+/**
  * （v4 setAutoDrain）：翻转 queue autoDrain 授权位（会话级配置，与 active turn 无关）。
  * 仅追加 QueueAutoDrainChanged 事件供 v4 投影消费；held 派生（completed+queue>0+autoDrain=false
  * → choice 路由）与后续 heldQueueDisposition 命令闭合发送语义。

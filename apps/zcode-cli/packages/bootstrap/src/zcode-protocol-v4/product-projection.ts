@@ -3488,6 +3488,14 @@ export class ProductProjection {
       return [];
     }
     this.deliveryByPendingInputId.set(payload.pendingInputId, payload.admittedDelivery);
+    // core fallback（guide 因 turn interrupted/no tool boundary 改投 queue）与用户手动
+    // toggle（setQueueItemDelivery，双向）共用本事件：前者 steer=fellBack 且必带
+    // reasonCode，后者是用户显式新决策，按新车道给 steering/notRequested。
+    const steer = payload.fallbackReasonCode
+      ? ({ state: "fellBack", reasonCode: payload.fallbackReasonCode } as const)
+      : payload.admittedDelivery === "guide"
+        ? ({ state: "steering" } as const)
+        : ({ state: "notRequested" } as const);
     return [
       {
         op: "state.updated",
@@ -3502,10 +3510,7 @@ export class ProductProjection {
                     admitted: payload.admittedDelivery,
                     fallbackReasonCode: payload.fallbackReasonCode,
                   },
-                  steer: {
-                    state: "fellBack",
-                    reasonCode: payload.fallbackReasonCode,
-                  },
+                  steer,
                 }
               : item,
           ),

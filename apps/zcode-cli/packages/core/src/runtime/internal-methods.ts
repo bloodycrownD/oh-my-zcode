@@ -219,6 +219,12 @@ export interface AgentRuntimeCoreMethods {
     beforePendingInputId: string | null;
     traceContext: TraceContext;
   }): Promise<boolean>;
+  /** v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。 */
+  setPendingInputDelivery(options: {
+    pendingInputId: string;
+    delivery: "queue" | "guide";
+    traceContext: TraceContext;
+  }): Promise<boolean>;
   setQueueAutoDrain(options: { autoDrain: boolean; traceContext: TraceContext }): Promise<void>;
   completeExternalQueueDrain(): void;
   setFollowupMode(options: { mode: "queue" | "guide"; traceContext: TraceContext }): Promise<void>;

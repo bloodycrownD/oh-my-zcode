@@ -71,6 +71,7 @@ import {
   reorderPendingInput,
   reservePendingInputById,
   setFollowupMode,
+  setPendingInputDelivery,
   setQueueAutoDrain,
 } from "./steering.js";
 import { discardPersistedPendingSteerInputs } from "./steering.js";
@@ -258,6 +259,7 @@ export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void 
   proto.releasePendingInputReservation = releasePendingInputReservation;
   proto.editPendingInputById = editPendingInputById;
   proto.reorderPendingInput = reorderPendingInput;
+  proto.setPendingInputDelivery = setPendingInputDelivery;
   proto.setQueueAutoDrain = setQueueAutoDrain;
   proto.completeExternalQueueDrain = completeExternalQueueDrain;
   proto.setFollowupMode = setFollowupMode;

@@ -1,8 +1,18 @@
 ## [Unreleased]
 
+### 新增
+
+- **排队消息可改「引导」**：消息排队后（上一条还在跑时发送），队列里每项新增「引导」按钮——点击后该项在当前轮的下一个工具调用边界插入执行（不打断当前轮），随即转入「等待引导」列表，可再点「恢复排队」改回普通排队。此前投递方式在提交时定下后不可更改。
+
 ### 变更
 
 - **界面语言与模型语言合并为「系统语言」**：设置页只保留一行「系统语言」（系统默认 / 简体中文 / English），agent 系统提示词语言跟随该设置同步，不再单独配置；原「模型语言」下拉移除。此前界面用中文、提示词却用英文（或相反）的分裂组合不再可能出现；切换语言对运行中会话下一轮生效，无需重启。
+
+### 修复
+
+- **修复排队项「引导」切换在会话繁忙时点击无效**：会话流式输出期间投影版本号快速前进，点击瞬间携带的版本号到达时已落后被拒，且此前的静默回滚让操作无痕丢失。现在切换命令在被拒后会带最新版本号自动重试（最多 2 次），重试仍失败会显式提示；被并发消费的极端竞态也从「假装成功」改为显式拒绝，便于观测。
+
+（待下一批改动。新条目由 omz-changelog skill 写入本段，发版时挪入版本号段。）
 
 ## [1.0.9](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.8...v1.0.9) (2026-10-13)
 
@@ -143,7 +153,7 @@ v1.0.1 发布 diff 全量代码评审（32 项）+ 三线实机 E2E 验证后的
 ### 变更
 
 - **桌面应用品牌由 ZCode 收敛为 omz**：打包身份（`productName` = `omz`、`appId` = `dev.omz.app`、Linux 可执行名/包名 = `omz`、Windows 开发态 AUMID）、运行时应用名（数据目录随之变为 `omz`/`omz Dev` 等，与旧 `ZCode` 安装互不干扰）、关于面板、深链确认文案、Linux 桌面项显示名、资源管理器右键项（新键 `omz.OpenInOmz` 并清理旧 `ZCode.OpenInZCode`）、界面 i18n 品牌词全部改为 omz，Windows 产物名随之变为 `omz-<version>-win-x64.exe`。`ZCODE_*` 环境变量、`@zcode/*` 包名、`zcode://` 深链 scheme 与 `~/.omz` 数据目录保持不变，详见 [docs/specs/desktop-app-rename-omz.md](docs/specs/desktop-app-rename-omz.md)。
-- **品牌标志 Z → OMZ**：应用内全部 Z 字标渲染点（启动壳/关于面板/引导页/侧栏与顶栏方标/空状态明暗两套/CLI TUI ASCII）与全平台二进制图标（Windows icon.ico×3 同源/九档 png/icon_windows/web favicon、macOS icon.icns×2/DMG 背景 dmg_background×2）替换为 OMZ 三字母字标（设计语言沿用原 Z：笔画比例、末端斜切、对角斜率；Z 字母逐字沿用原字形）；安装器图标（icon_installer.*，原“包裹箱插画”）统一复用应用方标；DMG 安装背景以 OMZ 字标重绘同构图；新增 `scripts/generate-omz-brand-assets.mjs` 作为可复用的再生成管线（纯 Node 栅格化 + ICO/ICNS 容器写入，无新依赖）。
+- **品牌标志 Z → OMZ**：应用内全部 Z 字标渲染点（启动壳/关于面板/引导页/侧栏与顶栏方标/空状态明暗两套/CLI TUI ASCII）与全平台二进制图标（Windows icon.ico×3 同源/九档 png/icon_windows/web favicon、macOS icon.icns×2/DMG 背景 dmg_background×2）替换为 OMZ 三字母字标（设计语言沿用原 Z：笔画比例、末端斜切、对角斜率；Z 字母逐字沿用原字形）；安装器图标（icon_installer.\*，原“包裹箱插画”）统一复用应用方标；DMG 安装背景以 OMZ 字标重绘同构图；新增 `scripts/generate-omz-brand-assets.mjs` 作为可复用的再生成管线（纯 Node 栅格化 + ICO/ICNS 容器写入，无新依赖）。
 - **模型语言选项与中文提示词**：`~/.omz/cli/config.json` 顶层新增 `promptLanguage: "auto" | "zh-CN" | "en-US"`（缺省 auto，中文环境自动中文），设置页「通用 → 模型语言」可切换（自动保存、热生效于下一轮对话）；agent 系统提示词的身份/沟通规范/行为段/桌面上下文段支持中文（文案集中在 `prompt-copy-zh-cn.ts`，英文原文保留为回退），中文提示词显式要求以简体中文交流、技术名词保持原文。协议 `workspace/read|updatePromptLanguage` 旧 CLI 自动降级。
 - **设置页移除 zai/bigmodel 预设可见面**：左栏「智谱」预设占位组（OAuth 早已删除的死占位卡）与「添加供应商」模板选择器的智谱分组（zai-api/zai-standard-api/bigmodel-api/bigmodel-standard-api 四张模板卡）整体移除；`config/provider/zcode-builtin.json` 的模板数据保留不动（存量用户从模板创建的 provider 依赖稀疏 overlay，删除数据属破坏性变更，登记为后续可选）。
 

@@ -38,6 +38,7 @@
     "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
     "test:ctx-search-memory": "tsx --test scripts/test-ctx-search-memory.mjs",
     "test:promotion-lease": "tsx --test scripts/test-promotion-lease.mjs",
+    "test:queue-item-delivery-toggle": "tsx --test scripts/test-queue-item-delivery-toggle.mjs",
     "test:magic-context-section": "node --test scripts/test-magic-context-prompt-section.mjs",
     "test:workflow-report-count": "node --test scripts/test-workflow-report-count.mjs",
     "test:magic-context-section-ctx-note": "node --test scripts/test-magic-context-section-ctx-note.mjs",
