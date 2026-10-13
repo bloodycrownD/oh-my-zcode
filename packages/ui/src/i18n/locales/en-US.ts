@@ -2120,8 +2120,9 @@ const enUS: Record<string, string> = {
     "Adjust interface text without changing icons or layout dimensions.",
   "settings.systemTitle": "General",
   "settings.systemDescription": "These preferences affect the current window experience.",
-  "settings.locale": "Language",
-  "settings.localeDescription": "Choose the display language used by the application UI.",
+  "settings.locale": "System language",
+  "settings.localeDescription":
+    "Choose the display language of the app UI; the agent's system prompt language follows it.",
   "settings.terminalProfile": "Inherit system terminal profile",
   "settings.terminalProfileDescription":
     "When launching the built-in terminal, inherit login shell environment, proxy, Kubernetes variables, and local terminal font when possible.",
@@ -2347,17 +2348,6 @@ const enUS: Record<string, string> = {
   "settings.locale.system": "System default",
   "settings.locale.zh-CN": "中文简体",
   "settings.locale.en-US": "English",
-  // FORK（prompt-language-option）：模型语言（agent 系统提示词语言），与界面语言相互独立。
-  "settings.modelLanguage": "Model language",
-  "settings.modelLanguageDescription":
-    "Choose the language the agent uses for its system prompt and replies.",
-  "settings.modelLanguage.auto": "Auto (follow the system language)",
-  "settings.modelLanguage.zh-CN": "中文简体",
-  "settings.modelLanguage.en-US": "English",
-  "settings.modelLanguage.unsupported":
-    "This CLI version does not support the model language setting.",
-  "settings.modelLanguage.saveFailed":
-    "Saving the model language failed; the previous value was kept.",
   "sidebar.settings.systemDefault": "System default",
   "sidebar.settings.locale.en-US": "English",
   "sidebar.settings.locale.zh-CN": "中文简体",
