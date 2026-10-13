@@ -29,15 +29,14 @@
   5. UI 投影：`projectPendingGuideQueue`（pendingGuideProjection.ts）按 `delivery.admitted` 分流，逻辑正确；SessionPane 挂载链在位。
   6. 事件记账：events.ts:357-387 对 TurnSteerDeliveryChanged 有 session_input 账本记账（仅持久化，不阻塞投影）。
 - 改法（两段式，第一段产出喂第二段）：
-  - **第一段（插桩定位，半天内）**：真机 busy 会话复跑 e2e S5 driver（cache/e2e-guide-toggle.mjs），在四个点加临时日志/断点后移除——①handler 拿到的 `changed` 返回值（queue.ts:194）；②core `setPendingInputDelivery` 实际走哪条 return（内存命中 / held 命中 / held miss false / reserved false / 同值 true）；③`appendEvent(TurnSteerDeliveryChanged)` 是否产生及 `eventStore.getEvents` 立即可读性（rebuildProjection 在 busy 中读到的事件流是否含该入队项——**时序/flush 嫌疑是当前首要候选**）；④publisher `ingest` 是否收到该事件（conversation-topic-publisher.ts:672）。定位结果回填本节后按下列分支执行：
-  - **分支甲（core held miss / false）**：修 `setPendingInputDelivery` 的查找域——若时序问题（rebuildProjection 读不到刚入队事件），改为从事件汇实时状态或账本查询；若域问题，补 queue 项查询并按 held 回落先例发事件。
-  - **分支乙（core 成功但事件未到投影/UI）**：修 publisher/事件订阅链——对照 v1.0.4 guide fallback（core fallback 改投在真机工作）的事件传播路径找差异。
-  - **分支丙（ack noop 吞掉）**：若 v11 捕获的 noop 即真实路径（同值判断 193 行误判或 in-flight 去重误吞），修 handler 门序数据源。
-  - 任一分支落地的共同要求：**core 回归测试必须走真 reducer**（真 EventReducer.reduce 或最小等价实现），禁止 mock 空投影——这正是本轮 CR 实验失真的教训；补「busy 入队 → 切换 → 事件+投影变化」端到端 core 用例。
+  - **第一段（插桩定位）已完成（2026-10-13 wave-0）**：renderer hook + CLI handler/core + publisher 四层插桩，多轮 e2e 对照 pass/fail。**定位结论=分支丁（甲/乙/丙之外）：baseRevision CAS stale 拒绝**。证据：fail 轮 renderer ack=`{"status":"stale","reasonCode":"proto.staleRevision","revisionAtDecision":7}` 而发送时 `rev=6`；**CLI 侧 handler/core 零执行**（命令在 gateway CAS 层被拒，从未到 handler）；pass 轮 `rev=7` 恰好新鲜，全链 8 条日志完整（handler.enter→core.enter→held-fallback hit→changed=true 双向）。机制：busy 流式期间投影 revision 随流式事件快速前进，hook 点击时读到的 baseRevision 落后 1 步即被 CAS 拒；hook 设计「stale 不重试、静默回滚」（useQueueItemDeliveryToggle.ts:34-35 注释）→ 操作丢失，UI 零反馈。fail 轮 turn 结束后 autoDrain 正常消费掉排队项（remainingQueue=[]），无数据损坏，纯操作丢失。pass/fail 约各半=点击瞬间 revision 新鲜度的竞态。**此前 CR 轮对 CAS 的怀疑（v11）被 pass 轮样本误排除；「查找域不含 queue 项」诊断亦作废（真 reducer 含，held 回落在真机正常命中）。**
+  - **第二段（修复，按分支丁执行）**：hook 级 stale 单次重试——`useQueueItemDeliveryToggle.ts` 的 then 分支收到 `status==="stale"` 时，重读 `getRevision()` 并用新 baseRevision 重发一次（队列命令幂等，重发安全；仅重试 1 次防循环）；重试后仍非 accepted/noop/duplicate → 走既有 onRejected 观测。配套：P2-1 三处静默 return（sessionId 空/pending 在途/revision null）补观测日志。
+  - 分支甲/乙/丙保留为已排除路径（插桩证据表明 core held 回落、事件传播、投影消费在真机全通）。
 - 验收/测试：
-  1. 定位结论回填本 fix-spec（分支甲/乙/丙 + 证据 file:line）；
-  2. 修复后 core 回归（真 reducer 路径）+ bootstrap 投影三态既有用例全绿；
-  3. 真机 e2e S5 复跑通过（driver 在 cache/e2e-guide-toggle.mjs，工具循环任务制 busy 窗口口径）。
+  1. ✅ 定位结论已回填（分支丁：baseRevision stale，见上）；
+  2. hook stale 重试的单测（mock dispatchCommand 首回 stale 二回 accepted，断言重发用新 revision、只重试一次、连败走 onRejected）；
+  3. 既有 core/bootstrap 回归全绿（本次修复不动 core/CLI 层）；
+  4. 真机 e2e S5 复跑 ≥3 轮全过（stale 竞态被重试吸收）。
 - 来源：CR round 1（手工）+ spec-check round 2（手工复核推翻原诊断，证据见上）
 
 ### guide/P0-2 [P0]（并入 P0-1 修复）core miss 时命令面静默 accepted——观测性缺失放大了 P0-1
