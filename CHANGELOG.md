@@ -1,4 +1,4 @@
-## [Unreleased]
+## [1.0.9](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.8...v1.0.9) (2026-10-13)
 
 ### 新增
 
