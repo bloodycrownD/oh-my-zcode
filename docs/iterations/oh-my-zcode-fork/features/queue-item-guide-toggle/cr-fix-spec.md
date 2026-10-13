@@ -5,49 +5,40 @@
 - repo: D:\Dev\Js\oh-my-zcode；branch: feature/queue-item-guide-toggle
 - base_sha: main → head_sha: e7599f5d
 - prd_path / spec_path: docs/iterations/oh-my-zcode-fork/features/queue-item-guide-toggle/{prd.md,spec.md}
-- review_round: 1 / dag_version: 1
-- 状态：**fix-spec-ready**（待用户确认后开工）
-- 评审方式：**主代理手工审查**（review 子代理两次 provider 限流，按 skill 失败纪律转手工，标注在此）；评审手段 = diff 通读 + 关键链路逐段回读 + core 决定性实验（真实 enqueueDeferredInput 路径复现）
+- review_round: 2 / dag_version: 2
+- 状态：**fix-spec-ready（P0-1 经 spec-check 修正为两段式：先插桩定位真断点，再按定位结果修复）**
+- 评审方式：**主代理手工审查**（review 子代理多次 provider 限流，按 skill 失败纪律转手工，标注在此）；CR 轮=diff 通读+链路回读+core 实验；spec-check 轮=对 cr-fix-spec 本身的 execute-ready 审查（含对本轮诊断的复核）
+
+> **spec-check 轮修正记录（round 2）**：CR 轮的 P0-1 诊断「查找域不含 queue 车道项」**被复核推翻**——CR 实验的 `rebuildProjection` mock 返回了空 `pendingSteerInputs`，而真 `EventReducer`（contracts/src/events/event-reducer.ts:326-348）对 `TurnSteerQueued` **不区分 delivery**，queue 车道项同样进 `pendingSteerInputs`，故 core held 回落（steering.ts:1034-1039）在真 reducer 下应能命中。教训：复现实验必须走真 reducer，不可 mock 投影。下文 P0-1 已按「已排除项 + 两段式定位修复」重写。
 
 ## Must-fix
 
-### guide/P0-1 [P0] setQueueItemDelivery 对 queue 车道项永远 miss——切换功能在真机不可用
+### guide/P0-1 [P0] setQueueItemDelivery 真机全链路静默失效——切换功能不可用（两段式：插桩定位 → 修复）
 
 - 维度：B（正确性）+ A（spec 核心承诺未兑现）
 - 文件：
-  - apps/zcode-cli/packages/core/src/runtime/methods/steering.ts（setPendingInputDelivery，~1021-1100）
-  - apps/zcode-cli/packages/core/scripts/test-queue-item-delivery-toggle.mjs（补回归）
-- 问题（证据链，全部实锤）：
-  1. busy 中以 queue 车道入队走 `enqueueDeferredInput`（prompt-admission.ts:71），该路径**只发 TurnSteerQueued 事件，不向 `activeTurn.pendingInputs` 内存 push 项**（对照 steerTurn 路径 steering.ts:147 有 push）——core 决定性实验输出 `pendingInputs 长度=0`；
-  2. `setPendingInputDelivery` 的查找域只有两个：①`activeTurn.pendingInputs.find(id)`（内存，仅 steer 车道项在此）②held 回落 `rebuildProjection().pendingSteerInputs`（仅 steer 项）——**queue 车道项两个域都不在**；
-  3. 实验复现：真实 enqueueDeferredInput（带 intent.queueItemId）入队后调 `setPendingInputDelivery(queueItemId → guide)` 返回 **false**、零事件——与真机 e2e S5 症状 100% 一致（ack accepted、无拒绝日志、UI 45s 零变化）；
-  4. handler（commands/handlers/queue.ts:197-203）把 `changed=false` 仅 warn 吞掉 → ack 仍 accepted → 用户侧无任何反馈；
-  5. 为什么单测/实现双双漏过：core 单测 makeRuntime **手工把 queue 项塞进 pendingInputs**（test-queue-item-delivery-toggle.mjs:63-81，id 人为对齐），从未走真实 admission 路径；bootstrap 投影测试直接喂构造事件。注释「queueItemId 与 pendingInputId 同一 id 空间，无需翻译」（handlers/queue.ts:4）的**id 对齐部分正确**（intent.queueItemId 经 inputIntentMetadata:45 → enqueueDeferredInput:238 落 pendingInputId），**错在域**：id 对齐了但项根本不进该方法查找的内存域。
-- 改法（方向 A：窄改 core 查找域，不动 admission 分层）：
-  1. `setPendingInputDelivery` 在「内存 miss 且 pendingSteerInputs miss」后增加第三查找域：queue fact 投影（`rebuildProjection()` 结果中承载普通排队项的集合——具体字段名实现时确认，即 pendingSteerInputs 的队列对应物；若 rebuildProjection 不含 queue 车道项则需提供等价查询）；
-  2. 命中后按既有 held 回落同款模式处理（steering.ts:1034-1066 先例）：同值 return true；否则 appendEvent(TurnSteerDeliveryChanged{ pendingInputId, requestedDelivery, admittedDelivery, targetTurnId, intent(含改写后的 admittedDelivery) })——bootstrap 投影 reducer `onTurnSteerDeliveryChanged`（product-projection.ts:3484-3520）的 3487 守卫查的正是 snapshot.queue.items 域，链路现成，bootstrap 侧零改动；
-  3. **消费侧打通验证（修复时必须确认的第二个隐藏断点）**：guide 车道的内联消费（firstInlineGuideIndex 动态扫描 steering.ts:445-454、turn-guide-drain 的取项来源）读的是内存 pendingInputs 还是含投影/账本项。若只读内存域，则投影域项切 guide 后永远不被内联消费——需让消费路径覆盖投影域项（如 drain 前重建内存项，或消费侧读 session_input 账本）。此项不定，修复即不完整；
-  4. 同步改 handler 注释口径（handlers/queue.ts:4 的「同一 id 空间」表述补充域差异说明）。
+  - apps/zcode-cli/packages/core/src/runtime/methods/steering.ts（setPendingInputDelivery ~1021-1100；按定位结果改）
+  - apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/commands/handlers/queue.ts:179-205（按定位结果改）
+  - apps/zcode-cli/packages/core/scripts/test-queue-item-delivery-toggle.mjs（补走真 reducer 的回归）
+- 症状（真机 e2e S5，已排除时序因素，45s 稳定 busy 窗口复现）：点击「引导」→ dispatchCommand ACK 正常（status ∈ {accepted, noop}）→ 队列项不动、待引导列表不出现、无 toast、renderer console 无拒绝日志。
+- **已排除项**（复核过的静态证据，下游勿重查）：
+  1. id 空间：`inputIntentMetadata`（input-intent.ts:45）把 `queueItemId=queue_<commandId>` 写进 intent → `enqueueDeferredInput`（steering.ts:236-239）用它当 pendingInputId → **id 对齐成立**；handler 注释「同一 id 空间」表述本身无误（域差异另见下）。
+  2. core 内存域：busy 中 queue 车道入队走 `enqueueDeferredInput` **不 push `activeTurn.pendingInputs`**（对照 steerTurn:147 有 push）——`setPendingInputDelivery:1030` 的内存 find 对 queue 车道项必 miss，随后进 held 回落（1031-1039）。
+  3. held 回落可达性：真 `EventReducer` 的 `TurnSteerQueued` case（contracts/src/events/event-reducer.ts:326-348）**不区分 delivery**，queue 车道项在 `rebuildProjection().pendingSteerInputs` 中——held find 应命中（**注意：CR 轮实验 mock 了空投影得出「miss」结论，已作废**）。
+  4. 投影消费：`onTurnSteerDeliveryChanged`（product-projection.ts:3484-3520）已注册（分发表 1432 行）、3487 守卫查 `snapshot.queue.items`（正是 queue 行所在域）、queuePatch 产出 state.updated。
+  5. UI 投影：`projectPendingGuideQueue`（pendingGuideProjection.ts）按 `delivery.admitted` 分流，逻辑正确；SessionPane 挂载链在位。
+  6. 事件记账：events.ts:357-387 对 TurnSteerDeliveryChanged 有 session_input 账本记账（仅持久化，不阻塞投影）。
+- 改法（两段式，第一段产出喂第二段）：
+  - **第一段（插桩定位，半天内）**：真机 busy 会话复跑 e2e S5 driver（cache/e2e-guide-toggle.mjs），在四个点加临时日志/断点后移除——①handler 拿到的 `changed` 返回值（queue.ts:194）；②core `setPendingInputDelivery` 实际走哪条 return（内存命中 / held 命中 / held miss false / reserved false / 同值 true）；③`appendEvent(TurnSteerDeliveryChanged)` 是否产生及 `eventStore.getEvents` 立即可读性（rebuildProjection 在 busy 中读到的事件流是否含该入队项——**时序/flush 嫌疑是当前首要候选**）；④publisher `ingest` 是否收到该事件（conversation-topic-publisher.ts:672）。定位结果回填本节后按下列分支执行：
+  - **分支甲（core held miss / false）**：修 `setPendingInputDelivery` 的查找域——若时序问题（rebuildProjection 读不到刚入队事件），改为从事件汇实时状态或账本查询；若域问题，补 queue 项查询并按 held 回落先例发事件。
+  - **分支乙（core 成功但事件未到投影/UI）**：修 publisher/事件订阅链——对照 v1.0.4 guide fallback（core fallback 改投在真机工作）的事件传播路径找差异。
+  - **分支丙（ack noop 吞掉）**：若 v11 捕获的 noop 即真实路径（同值判断 193 行误判或 in-flight 去重误吞），修 handler 门序数据源。
+  - 任一分支落地的共同要求：**core 回归测试必须走真 reducer**（真 EventReducer.reduce 或最小等价实现），禁止 mock 空投影——这正是本轮 CR 实验失真的教训；补「busy 入队 → 切换 → 事件+投影变化」端到端 core 用例。
 - 验收/测试：
-  1. core 回归测试：把本 CR 的复现实验固化为正式测试——走真实 `enqueueDeferredInput`（带 intent.queueItemId，模拟真机 busy admission 参数）入队 → `setPendingInputDelivery(queueItemId)` → 断言返回 true、TurnSteerDeliveryChanged 事件产生、事件 payload 的 intent.admittedDelivery 正确；同值二次调用返回 true 且零新事件；reserved 项仍拒绝（既有用例保持）；
-  2. bootstrap 回归：既有投影测试（steer=steering/notRequested/fellBack 三态）保持全绿；
-  3. 真机 e2e S5 复跑通过（driver 已在 cache/e2e-guide-toggle.mjs，工具循环任务制 busy 窗口口径）。
-- 来源：手工 CR round 1（实验脚本逻辑，可直接改造为上述回归测试）：
-
-```js
-// 复现要点（在 feature/queue-item-guide-toggle 工作区）：
-const rt = makeRuntime(); // steerable activeTurn + 空 pendingInputs + events 收集
-await enqueueDeferredInput.call(rt, {
-  input: "q1", delivery: "queue", inputId: "cmd-1111",
-  intent: { sourceCommandId: "cmd-1111", queueItemId: "queue_cmd-1111", /* ... */ },
-  traceContext,
-});
-rt.activeTurn.pendingInputs.length; // 0 —— 项不在内存域
-const changed = await setPendingInputDelivery.call(rt, {
-  pendingInputId: "queue_cmd-1111", delivery: "guide", traceContext,
-});
-changed; // false（bug）；修复后应为 true 且产生 TurnSteerDeliveryChanged
-```
+  1. 定位结论回填本 fix-spec（分支甲/乙/丙 + 证据 file:line）；
+  2. 修复后 core 回归（真 reducer 路径）+ bootstrap 投影三态既有用例全绿；
+  3. 真机 e2e S5 复跑通过（driver 在 cache/e2e-guide-toggle.mjs，工具循环任务制 busy 窗口口径）。
+- 来源：CR round 1（手工）+ spec-check round 2（手工复核推翻原诊断，证据见上）
 
 ### guide/P0-2 [P0]（并入 P0-1 修复）core miss 时命令面静默 accepted——观测性缺失放大了 P0-1
 
@@ -69,7 +60,7 @@ changed; // false（bug）；修复后应为 true 且产生 TurnSteerDeliveryCha
 
 ## Spec deviations
 
-- open：spec「关键设计定案」声称「firstInlineGuideIndex 动态扫描 → 切换后项自然进入/移出 guide 子序列，core 消费侧零改动」——**消费侧零改动属实，但写侧（setPendingInputDelivery）在真机路径不可达**（P0-1），spec 的核心行为承诺未兑现。修复 P0-1 并确认消费侧（P0-1 改法第 3 点）后置 fixed；若消费侧需要改动，须回写 spec 对应小节。
+- open：spec「关键设计定案」声称「firstInlineGuideIndex 动态扫描 → 切换后项自然进入/移出 guide 子序列，core 消费侧零改动」——**消费侧零改动属实，但切换链路在真机静默失效**（P0-1），spec 的核心行为承诺未兑现。修复定位+落地后置 fixed；消费域确认（原「改法第 3 点」）并入两段式第一段插桩范围。
 
 ## Open questions / 待拍板
 
@@ -93,9 +84,9 @@ changed; // false（bug）；修复后应为 true 且产生 TurnSteerDeliveryCha
 
 | 项 | 状态 |
 | --- | --- |
-| fix-spec-ready | yes |
+| fix-spec-ready | yes（P0-1 为两段式：定位步骤可执行、三个修复分支均有明确改法与验收） |
 | fix_spec_path | docs/iterations/oh-my-zcode-fork/features/queue-item-guide-toggle/cr-fix-spec.md |
-| dag_version / review_round | 1 / 1 |
+| dag_version / review_round | 2 / 2（spec-check 轮修正原诊断） |
 | P0 / P1 / P2（已写入 fix-spec） | 2 / 0 / 1 |
 | 未写入的开放 must-fix | 0 |
 | spec_deviations | open: 1（随 P0-1 修复闭合，含消费侧确认） |
