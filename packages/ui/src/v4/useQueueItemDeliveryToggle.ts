@@ -48,31 +48,50 @@ export function useQueueItemDeliveryToggle(
 
   const toggleDelivery = useCallback((queueItemId: string, delivery: "queue" | "guide") => {
     const current = optionsRef.current;
-    if (!current.sessionId || pendingRef.current !== null) return;
+    if (!current.sessionId || pendingRef.current !== null) {
+      // P2-1 观测：静默 return 不再无痕（区分无会话与在途去重，便于排查「点了没反应」）。
+      console.debug(
+        "[queueItemDeliveryToggle] dropped: %s",
+        !current.sessionId ? "no-session" : `in-flight(${pendingRef.current})`,
+      );
+      return;
+    }
     const baseRevision = current.getRevision();
-    if (baseRevision === null) return;
+    if (baseRevision === null) {
+      console.debug("[queueItemDeliveryToggle] dropped: revision-unavailable");
+      return;
+    }
     pendingRef.current = queueItemId;
     setPendingQueueItemId(queueItemId);
-    void current
-      .dispatchCommand(
-        "setQueueItemDelivery",
-        { queueItemId, delivery },
-        current.sessionId,
-        baseRevision,
-      )
-      .then((ack) => {
-        // noop = 同值 toggle / 并发已消费；duplicate = 命令面幂等重放，均非失败。
-        if (ack.status !== "accepted" && ack.status !== "noop" && ack.status !== "duplicate") {
-          current.onRejected?.(queueItemId, ack.status, ack.reasonCode);
-        }
-      })
-      .catch((error: unknown) => {
-        current.onRejected?.(queueItemId, "transport-error", String(error));
-      })
-      .finally(() => {
-        pendingRef.current = null;
-        setPendingQueueItemId(null);
-      });
+    // stale 重试：busy 流式期间投影 revision 随流式事件快速前进，点击瞬间读到的
+    // baseRevision 到达 CLI 时可能已落后一步，gateway CAS 以 proto.staleRevision 拒绝。
+    // 队列命令幂等（同值由 handler 门吸收），用新 revision 重发一次是安全的；仅重试
+    // 一次防循环，重试后仍非成功态走 onRejected 观测（不静默吞操作）。
+    const dispatch = (revision: number, allowRetry: boolean): Promise<void> =>
+      current
+        .dispatchCommand(
+          "setQueueItemDelivery",
+          { queueItemId, delivery },
+          current.sessionId!,
+          revision,
+        )
+        .then((ack) => {
+          // noop = 同值 toggle / 并发已消费；duplicate = 命令面幂等重放，均非失败。
+          if (ack.status === "stale" && allowRetry) {
+            const nextRevision = current.getRevision();
+            if (nextRevision !== null) return dispatch(nextRevision, false);
+          }
+          if (ack.status !== "accepted" && ack.status !== "noop" && ack.status !== "duplicate") {
+            current.onRejected?.(queueItemId, ack.status, ack.reasonCode);
+          }
+        })
+        .catch((error: unknown) => {
+          current.onRejected?.(queueItemId, "transport-error", String(error));
+        });
+    void dispatch(baseRevision, true).finally(() => {
+      pendingRef.current = null;
+      setPendingQueueItemId(null);
+    });
   }, []);
 
   return { pendingQueueItemId, toggleDelivery };

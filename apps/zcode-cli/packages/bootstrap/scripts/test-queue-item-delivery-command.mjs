@@ -11,7 +11,8 @@
  *   B. handler 门：dispatch.state !== "queued"（reserved/promoting）拒绝
  *      （guard.queueItemDeliveryLocked）、queueItemId 不存在拒绝
  *      （guard.queueItemDeliveryMissing）、同值 noop 不动 core、core 未命中时
- *      warn 但不伪造 accepted 之外的失败；
+ *      warn + 显式 rejected（guard.queueItemDeliveryCoreMiss，cr-fix-spec P0-2：
+ *      操作丢失必须可观测，不再静默 accepted）；
  *   C. 投影面：TurnSteerDeliveryChanged 双向 toggle 落入 queue 行——
  *      guide 时 steer=steering、queue 时 steer=notRequested；带 fallbackReasonCode
  *      的 core 改投仍必须是 steer=fellBack（回归红线：两种语义共用同一事件）。
@@ -181,9 +182,15 @@ test("B4: 同值 toggle = noop，不驱动 core", async () => {
   );
 });
 
-test("B5: core 未命中（并发 drain 竞态）时 warn 但不伪装失败", async () => {
+test("B5: core 未命中（并发 drain 竞态）时 warn + 显式 rejected（P0-2）", async () => {
   const host = makeHost({ queueItem: queueItem(), appResult: false });
-  assert.equal(await runHandler(host, makeEnvelope("guide")), undefined);
+  await assert.rejects(
+    () => runHandler(host, makeEnvelope("guide")),
+    (error) => {
+      assert.equal(error.reasonCode, "guard.queueItemDeliveryCoreMiss");
+      return true;
+    },
+  );
   assert.equal(
     host.calls.some((call) => call.kind === "warn"),
     true,

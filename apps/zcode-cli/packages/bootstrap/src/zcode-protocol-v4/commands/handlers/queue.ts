@@ -75,6 +75,19 @@ class V4QueueItemDeliveryLockedError extends Error {
   }
 }
 
+/**
+ * core setPendingInputDelivery 返回 false（并发 drain/reserve 竞态：项在门检查后、
+ * core 改写前被消费）。改为显式 rejected 而非静默 accepted——操作丢失必须可观测
+ * （cr-fix-spec P0-2：本次多轮 e2e 排查的放大器正是「ack accepted 但零效果无痕迹」）。
+ */
+class V4QueueItemDeliveryCoreMissError extends Error {
+  readonly reasonCode = "guard.queueItemDeliveryCoreMiss";
+  constructor(queueItemId: string) {
+    super(`v4 setQueueItemDelivery core missed concurrent drain/reserve: ${queueItemId}`);
+    this.name = "V4QueueItemDeliveryCoreMissError";
+  }
+}
+
 export class V4QueuePromotionLeaseUnavailableError extends Error {
   readonly reasonCode = "guard.queuePromotionBusy";
   constructor(activeLeaseId?: string) {
@@ -195,11 +208,13 @@ async function setQueueItemDelivery(
     traceContext: record.traceContext,
   });
   if (!changed) {
-    // 并发 drain/reserve 竞态：项已不在可切换集合，留 warn 供观测（同 edit 的竞态语义）。
+    // 并发 drain/reserve 竞态：项已不在可切换集合。显式拒绝（ack rejected）让 UI
+    // onRejected 可观测——静默 accepted 会让操作丢失无痕迹（cr-fix-spec P0-2）。
     host.logger?.warn?.("v4 setQueueItemDelivery missed", {
       queueItemId: payload.queueItemId,
       sessionId: record.app.sessionId,
     });
+    throw new V4QueueItemDeliveryCoreMissError(payload.queueItemId);
   }
   return undefined;
 }
