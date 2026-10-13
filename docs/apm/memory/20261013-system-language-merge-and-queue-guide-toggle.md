@@ -47,3 +47,8 @@ e2e 方法学教训（复用）：config.json 落点=os.homedir()/.omz/cli（ZCO
 - **修复两次迭代**：c1671fae（stale 单次重试+P0-2 handler core miss 改显式 rejected guard.queueItemDeliveryCoreMiss+P2-1 观测）复跑 1/3——单次重试读本地投影 revision 在流式高峰仍连续落后（本地 delta 滞后于 CLI 权威）；2158c8ed（重试升级：重发 revision=max(本地, ack.revisionAtDecision)，上限 2 次）复跑 **3/3 全过**。验收：bootstrap 10/10（B5 新语义）、typecheck 27 包、lint 0w0e、S0/S4/S5 e2e 3/3。分支②累计 commit 至 abeb3af7，未合并未 push。
 - **插桩方法学**：desktop fork host 进程 env 是 buildHostProcessEnv 白名单构造（desktopHostProcess.ts:237），自定义 OMZ_* 环境变量传不进 CLI——插桩日志必须写死绝对路径；core 包 tsc 严格，插桩回调参数须显式类型。
 - 已知限制：hook stale 重试无单测（ui 包无测试基建，建基建超 cr-fix 范围，e2e S5 承担覆盖，fix-spec 已记 P1 后续项）。
+
+
+【v1.0.10 发版终态（2026-10-14，tag v1.0.10 @ 7331191d，main 已合并推送）】
+
+合并方式：① system-language-unification ff-merge（7 commit 保 hash）→ ② queue-item-guide-toggle --no-ff merge（abdd9a32，13 commit 保 hash）→ e2e driver lint 清理（c158cd30）→ release commit（7331191d，CHANGELOG 定稿+version bump 1.0.10+APM 记忆入库）。门禁：test:v4-perf 全段 0 fail（**注意：Node 默认堆在本机内存紧张时会 OOM exit 134，须 NODE_OPTIONS=--max-old-space-size=4096 重跑，非测试失败**）、全仓 lint 74w/0e 基线（新入库的 docs/iterations cache e2e driver 需写干净，3 处 warning 已修）、typecheck-desktop-full OK、architecture 0 violations、magic-context 未涉及跳过。CI Release Desktop run 38470464610 成功，10 资产（Linux deb/pacman/AppImage/rpm + mac arm64/x64 dmg+zip + win exe+zip），Release 正文=CHANGELOG 1.0.10 段（新增/变更/修复三段）。gh CLI 注意：gh 在本仓解析默认 repo 为 zai-org/ZCode（上游），操作 bloodycrownD/oh-my-zcode 必须 -R 显式指定。
