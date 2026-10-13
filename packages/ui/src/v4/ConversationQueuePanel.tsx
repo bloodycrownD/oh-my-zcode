@@ -7,25 +7,14 @@ import {
   type DragEndEvent,
   type Modifier,
 } from "@dnd-kit/core";
-import { SortableContext, useSortable, verticalListSortingStrategy } from "@dnd-kit/sortable";
-import { CSS } from "@dnd-kit/utilities";
-import { memo, useCallback, useMemo, useState, type CSSProperties } from "react";
-import {
-  TID_V4_QUEUE,
-  TID_V4_QUEUE_ITEM,
-  TID_V4_QUEUE_ITEM_DELETE,
-  TID_V4_QUEUE_ITEM_EDIT,
-  TID_V4_QUEUE_ITEM_SEND_NOW,
-  TID_V4_QUEUE_PAUSED_BANNER,
-  TID_V4_QUEUE_RESUME,
-  testId,
-} from "@zcode/shared";
+import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
+import { memo, useCallback, useMemo, useState } from "react";
+import { TID_V4_QUEUE, TID_V4_QUEUE_PAUSED_BANNER, TID_V4_QUEUE_RESUME } from "@zcode/shared";
 import type { QueueState } from "@zcode/shared/zcode-protocol-v4";
-import { ArrowUpFromLine, GripVertical, PencilIcon, Trash2Icon } from "lucide-react";
-import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { QueueRow, type QueueItem } from "@/v4/ConversationQueueRow.js";
 
 interface ConversationQueuePanelProps {
   queue: QueueState;
@@ -37,13 +26,18 @@ interface ConversationQueuePanelProps {
   pendingEditQueueItemId?: string | null;
   /** 立即发送队列项（sendQueuedNow command，stop 当前 + 消费该项）。 */
   onSendNow?: (queueItemId: string) => void;
+  /**
+   * 用户拍板 toggle：queue→guide（setQueueItemDelivery，引导至下一轮工具调用后运行，
+   * 不抢占当前轮）。点击后该项从本面板消失转入 pendingGuide 列表——预期行为。
+   */
+  onGuideItem?: (queueItemId: string) => void;
+  /** setQueueItemDelivery ACK 在途的目标项；仅锁该 row。 */
+  pendingGuideQueueItemId?: string | null;
   /** 拖拽排序项（reorderQueueItem，移动到锚点前；null=队尾）。 */
   onMoveItem?: (queueItemId: string, beforeQueueItemId: string | null) => void;
   /** 暂停队列恢复：CLI setAutoDrain(true)，idle 立即消费、busy 仅武装。 */
   onResume?: () => Promise<void> | void;
 }
-
-type QueueItem = QueueState["items"][number];
 
 interface V4QueueReorderAnchor {
   beforeQueueItemId: string | null;
@@ -108,150 +102,6 @@ const restrictQueueDragToPanel: Modifier = ({
   };
 };
 
-interface QueueRowProps {
-  item: QueueItem;
-  index: number;
-  intl: ReturnType<typeof useZCodeIntl>["intl"];
-  sortable: boolean;
-  onDeleteItem?: (queueItemId: string) => void;
-  onEditItem?: (queueItemId: string) => Promise<void> | void;
-  editPending: boolean;
-  onSendNow?: (queueItemId: string) => void;
-}
-
-const QueueRow = memo(function QueueRow({
-  item,
-  index,
-  intl,
-  sortable,
-  onDeleteItem,
-  onEditItem,
-  onSendNow,
-  editPending,
-}: QueueRowProps) {
-  const dispatchLocked = item.dispatch.state !== "queued";
-  const rowLocked = dispatchLocked || editPending;
-  const {
-    attributes,
-    isDragging,
-    listeners,
-    setActivatorNodeRef,
-    setNodeRef,
-    transform,
-    transition,
-  } = useSortable({
-    disabled: !sortable || rowLocked,
-    id: item.queueItemId,
-  });
-
-  const style = useMemo<CSSProperties>(
-    () => ({
-      transform: CSS.Transform.toString(
-        transform
-          ? {
-              ...transform,
-              // dnd-kit 排序时会按 over 节点尺寸附带 scale；
-              // 队列行是固定触控目标，缩放会让拖拽中的按钮和文本短暂变形。
-              scaleX: 1,
-              scaleY: 1,
-            }
-          : null,
-      ),
-      transition,
-      zIndex: isDragging ? 10 : undefined,
-    }),
-    [isDragging, transition, transform],
-  );
-  return (
-    <li
-      ref={setNodeRef}
-      data-testid={testId(TID_V4_QUEUE_ITEM, item.queueItemId)}
-      data-queue-item-id={item.queueItemId}
-      data-index={index}
-      data-kind={item.kind}
-      data-dispatch-state={item.dispatch.state}
-      data-edit-pending={editPending ? "true" : "false"}
-      className={cn(
-        "relative flex items-center gap-2 rounded-xl px-1.5 py-1 pr-1 transition-colors hover:bg-hover/30",
-        isDragging ? "bg-hover/40 shadow-sm" : null,
-        editPending ? "opacity-60" : null,
-      )}
-      style={style}
-    >
-      <ControlHintTooltip title={intl.formatMessage({ id: "chat.queue.drag" })}>
-        <Button
-          ref={setActivatorNodeRef}
-          type="button"
-          variant="ghost"
-          size="icon-md"
-          data-v4-queue-drag-handle="true"
-          data-queue-item-id={item.queueItemId}
-          aria-label={intl.formatMessage({ id: "chat.queue.drag" })}
-          className="shrink-0 cursor-grab touch-none text-foreground-subtlest active:cursor-grabbing"
-          disabled={rowLocked}
-          {...attributes}
-          {...listeners}
-        >
-          <GripVertical className="size-4" />
-        </Button>
-      </ControlHintTooltip>
-      <span
-        className="flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground"
-        title={item.text}
-      >
-        <span className="truncate">{item.text}</span>
-      </span>
-      {onSendNow ? (
-        <Button
-          type="button"
-          variant="secondary"
-          size="default"
-          data-icon="inline-start"
-          data-testid={testId(TID_V4_QUEUE_ITEM_SEND_NOW, item.queueItemId)}
-          data-queue-item-id={item.queueItemId}
-          disabled={rowLocked}
-          onClick={() => onSendNow(item.queueItemId)}
-        >
-          <ArrowUpFromLine className="size-3.5" />
-          {intl.formatMessage({ id: "chat.queue.sendNow" })}
-        </Button>
-      ) : null}
-      {onEditItem ? (
-        <ControlHintTooltip title={intl.formatMessage({ id: "chat.queue.edit" })}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-md"
-            data-testid={testId(TID_V4_QUEUE_ITEM_EDIT, item.queueItemId)}
-            data-queue-item-id={item.queueItemId}
-            aria-label={intl.formatMessage({ id: "chat.queue.edit" })}
-            disabled={rowLocked}
-            onClick={() => void onEditItem(item.queueItemId)}
-          >
-            <PencilIcon className="size-4" />
-          </Button>
-        </ControlHintTooltip>
-      ) : null}
-      {onDeleteItem ? (
-        <ControlHintTooltip title={intl.formatMessage({ id: "chat.queue.remove" })}>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon-md"
-            data-testid={testId(TID_V4_QUEUE_ITEM_DELETE, item.queueItemId)}
-            data-queue-item-id={item.queueItemId}
-            aria-label={intl.formatMessage({ id: "chat.queue.remove" })}
-            disabled={rowLocked}
-            onClick={() => onDeleteItem(item.queueItemId)}
-          >
-            <Trash2Icon className="size-4" />
-          </Button>
-        </ControlHintTooltip>
-      ) : null}
-    </li>
-  );
-});
-
 /**
  * 竖切 queue 面板：渲染 projection.queue.items + 单项删除入口。
  * queue 在运行中的 turn 期间存在（sendText 排队），是 CLI 投影权威态（非 renderer-local）。
@@ -262,6 +112,8 @@ function ConversationQueuePanelImpl({
   onEditItem,
   pendingEditQueueItemId = null,
   onSendNow,
+  onGuideItem,
+  pendingGuideQueueItemId = null,
   onMoveItem,
   onResume,
 }: ConversationQueuePanelProps) {
@@ -358,6 +210,8 @@ function ConversationQueuePanelImpl({
                 onDeleteItem={onDeleteItem}
                 onEditItem={onEditItem}
                 onSendNow={onSendNow}
+                onGuideItem={onGuideItem}
+                guidePending={pendingGuideQueueItemId === item.queueItemId}
                 editPending={pendingEditQueueItemId === item.queueItemId}
               />
             ))}

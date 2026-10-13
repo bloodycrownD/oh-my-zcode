@@ -92,6 +92,7 @@ import { ConversationDraftSuggestedPromptsContainer } from "@/v4/ConversationDra
 import { ConversationHeader, type PaneWorkspaceBadge } from "@/v4/ConversationHeader.js";
 import { ConversationQueuePanel } from "@/v4/ConversationQueuePanel.js";
 import { projectPendingGuideQueue } from "@/v4/pendingGuideProjection.js";
+import { useQueueItemDeliveryToggle } from "@/v4/useQueueItemDeliveryToggle.js";
 import { PendingCommandRecoveryBanner } from "@/v4/PendingCommandRecoveryBanner.js";
 import { WorkspaceHookPendingBanner } from "@/v4/WorkspaceHookPendingBanner.js";
 import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
@@ -2684,6 +2685,37 @@ export function SessionPane({
     }
   }, [dispatchCommand, sessionId]);
 
+  // 排队项「引导/排队」toggle（setQueueItemDelivery）：用户拍板 guide=引导至下一轮
+  // 工具调用后运行（内联当前轮）、queue=普通排队；与「立即」（抢占）语义区分。
+  // 行级 ACK 等待态与 dispatchCommand 编排在独立 hook，避免继续堆大本文件。
+  const {
+    pendingQueueItemId: pendingDeliveryToggleItemId,
+    toggleDelivery: toggleQueueItemDelivery,
+  } = useQueueItemDeliveryToggle({
+    sessionId,
+    dispatchCommand,
+    getRevision: () =>
+      snapshotRef.current?.sessionId === sessionId ? snapshotRef.current.revision : null,
+    onRejected: (queueItemId, status, reasonCode) =>
+      logger.warn(
+        `[v4-pane] setQueueItemDelivery 被拒绝: ${queueItemId} ${status} ${reasonCode ?? ""}`,
+      ),
+  });
+  // 队列面板行内「引导」：queue→guide（项随后从面板消失转入 pendingGuide 列表）。
+  const handleGuideQueueItem = useCallback(
+    (queueItemId: string) => {
+      toggleQueueItemDelivery(queueItemId, "guide");
+    },
+    [toggleQueueItemDelivery],
+  );
+  // pendingGuide 行内「恢复排队」：guide→queue（项回队列面板原 FIFO 位）。
+  const handleRestoreGuideQueueItem = useCallback(
+    (queueItemId: string) => {
+      toggleQueueItemDelivery(queueItemId, "queue");
+    },
+    [toggleQueueItemDelivery],
+  );
+
   // 配置面 CAS 命令的 stale 重试。模型→思考深度→模式连续操作时，前一条命令的
   // revision bump 可能尚未回流到本地投影，直接用本地 revision 会被 CAS 判 stale。
   // stale ack 带 revisionAtDecision（CLI 当前 revision），用它重试即可收敛（有界 3 次）。
@@ -3451,6 +3483,8 @@ export function SessionPane({
             queueEditActiveForCurrentComposer ? queueEditOperation.queueItemId : null
           }
           onSendNow={handleSendQueuedNow}
+          onGuideItem={handleGuideQueueItem}
+          pendingGuideQueueItemId={pendingDeliveryToggleItemId}
           onMoveItem={handleReorderQueueItem}
           onResume={handleResumeQueue}
         />
@@ -3635,6 +3669,10 @@ export function SessionPane({
               scrollToQueryActionRef={timelineScrollToQueryRef}
               rows={timelineSnapshot?.rows.window ?? []}
               pendingGuides={timelineSnapshot ? pendingGuideProjection?.pendingGuides : []}
+              onRestorePendingGuideItem={
+                !readOnly && sessionId ? handleRestoreGuideQueueItem : undefined
+              }
+              pendingGuideRestoreQueueItemId={!readOnly ? pendingDeliveryToggleItemId : null}
               apiRetry={timelineSnapshot?.control.apiRetry ?? null}
               totalCount={timelineSnapshot?.rows.totalCount ?? 0}
               sessionKey={sessionId ?? "draft"}
