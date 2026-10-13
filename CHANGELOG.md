@@ -1,8 +1,14 @@
+## [Unreleased]
+
+（待下一批改动。新条目由 omz-changelog skill 写入本段，发版时挪入版本号段。）
+
 ## [1.0.9](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.8...v1.0.9) (2026-10-13)
 
 ### 新增
 
 - **失败/停止的子智能体可以继续对话**：子智能体失败或被停止后，结果里现在会带回它的 agentId——直接用 SendMessage 就能让它在原有上下文里继续跑（此前失败结果只有报错原文、句柄丢失，只能整个重开）；后台失败/停止的完成通知同样附带续跑提示；Agent 与 SendMessage 的工具说明也如实写明了终态续跑能力。句柄仅在当前会话内有效，重启应用后无法续跑（会如实提示）。
+
+## [1.0.8](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.7...v1.0.8) (2026-10-12)
 
 ### 修复
 
@@ -25,7 +31,7 @@
 
 - 上游 v3.15.1 修复批次同步：30 项崩溃/内存/协议/Windows/安全修复与配套重构移植，遥测、上下文记忆集成、品牌命名等本项目的既有差异全程保持不变；测试防线从 236 例扩到 357 例（补齐存储层读写契约、附件预览链、深链安全、托盘异常兜底等自动化钉子），桌面端类型错误面继续收敛。
 
-## [1.0.8](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.7...v1.0.8) (2026-10-12)
+## [1.0.7](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.6...v1.0.7) (2026-10-11)
 
 ### 修复
 
