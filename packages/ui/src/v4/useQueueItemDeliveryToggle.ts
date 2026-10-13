@@ -64,10 +64,14 @@ export function useQueueItemDeliveryToggle(
     pendingRef.current = queueItemId;
     setPendingQueueItemId(queueItemId);
     // stale 重试：busy 流式期间投影 revision 随流式事件快速前进，点击瞬间读到的
-    // baseRevision 到达 CLI 时可能已落后一步，gateway CAS 以 proto.staleRevision 拒绝。
-    // 队列命令幂等（同值由 handler 门吸收），用新 revision 重发一次是安全的；仅重试
-    // 一次防循环，重试后仍非成功态走 onRejected 观测（不静默吞操作）。
-    const dispatch = (revision: number, allowRetry: boolean): Promise<void> =>
+    // baseRevision 到达 CLI 时可能已落后，gateway CAS 以 proto.staleRevision 拒绝。
+    // 队列命令幂等（同值由 handler 门吸收），重发安全。重发 revision 取
+    // max(本地投影, ack.revisionAtDecision)——本地投影在流式高峰可能滞后于 CLI
+    // 权威值（delta 到达延迟），单靠本地重读会连续落后；决策点 revision 是 CLI
+    // 拒绝时告知的权威值，优先采用。上限 2 次防循环，仍失败走 onRejected 观测
+    // （不静默吞操作）。
+    const MAX_STALE_RETRIES = 2;
+    const dispatch = (revision: number, retriesLeft: number): Promise<void> =>
       current
         .dispatchCommand(
           "setQueueItemDelivery",
@@ -77,9 +81,10 @@ export function useQueueItemDeliveryToggle(
         )
         .then((ack) => {
           // noop = 同值 toggle / 并发已消费；duplicate = 命令面幂等重放，均非失败。
-          if (ack.status === "stale" && allowRetry) {
-            const nextRevision = current.getRevision();
-            if (nextRevision !== null) return dispatch(nextRevision, false);
+          if (ack.status === "stale" && retriesLeft > 0) {
+            const local = current.getRevision();
+            const nextRevision = Math.max(local ?? 0, ack.revisionAtDecision ?? 0);
+            if (nextRevision > 0) return dispatch(nextRevision, retriesLeft - 1);
           }
           if (ack.status !== "accepted" && ack.status !== "noop" && ack.status !== "duplicate") {
             current.onRejected?.(queueItemId, ack.status, ack.reasonCode);
@@ -88,7 +93,7 @@ export function useQueueItemDeliveryToggle(
         .catch((error: unknown) => {
           current.onRejected?.(queueItemId, "transport-error", String(error));
         });
-    void dispatch(baseRevision, true).finally(() => {
+    void dispatch(baseRevision, MAX_STALE_RETRIES).finally(() => {
       pendingRef.current = null;
       setPendingQueueItemId(null);
     });
