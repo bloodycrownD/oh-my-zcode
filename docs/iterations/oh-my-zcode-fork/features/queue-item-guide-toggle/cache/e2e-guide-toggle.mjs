@@ -50,7 +50,7 @@ async function cdpPage() {
       eval: (expression) => { const id = ++seq; return new Promise((res2, rej2) => { pending.set(id, { res: res2, rej: rej2 }); ws.send(JSON.stringify({ id, method: "Runtime.evaluate", params: { expression, awaitPromise: true, returnByValue: true } })); }); },
     });
     ws.onerror = () => reject(new Error("ws connect failed"));
-    ws.onmessage = (event) => { const msg = JSON.parse(event.data); if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); msg.error ? rej(new Error(msg.error.message)) : res(msg.result); } };
+    ws.onmessage = (event) => { const msg = JSON.parse(event.data); if (msg.id && pending.has(msg.id)) { const { res, rej } = pending.get(msg.id); pending.delete(msg.id); if (msg.error) rej(new Error(msg.error.message)); else res(msg.result); } };
   });
 }
 async function evalJs(cdp, expression) {
@@ -106,7 +106,6 @@ async function typeAndSend(text) {
   }).catch((e) => ({ ok: false, why: String(e).slice(0, 120) }));
 }
 const isBusy = () => evalJs(cdp, `Boolean(document.querySelector('[data-testid="v4-stop"]'))`).catch(() => false);
-const queueIds = () => evalJs(cdp, `(() => [...document.querySelectorAll('[data-testid^="v4-queue-item-"][data-testid$="-send-now"], [data-testid^="v4-queue-item-guide"]')].length)()`).catch(() => 0);
 const queueItemIds = () => evalJs(cdp, `(() => [...document.querySelectorAll('[data-testid^="v4-queue-item-queue_"]')].map(el => el.dataset.testid))()`).catch(() => []);
 
 if (wsOpen) {
