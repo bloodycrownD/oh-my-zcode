@@ -4710,6 +4710,11 @@ const enUS: Record<string, string> = {
     "Send or clear the current draft before editing a queued message.",
   "chat.queue.editRestoreFailed": "Couldn't return the queued message to the composer. Try again.",
   "chat.queue.remove": "Remove queued message",
+  "chat.queue.guide": "Guide",
+  "chat.queue.guide.description": "Run inline at the next tool call of the current turn",
+  "chat.queue.guideRestore": "Back to queue",
+  "chat.queue.guideRestore.description":
+    "Return to the ordinary queue and send as its own turn after this run",
   "chat.queue.turnSteer.steering": "Steering conversation",
   "chat.queue.paused.stopped": "The queue was paused because you stopped the current response",
   "chat.queue.paused.error": "The queue was paused because the response failed",
