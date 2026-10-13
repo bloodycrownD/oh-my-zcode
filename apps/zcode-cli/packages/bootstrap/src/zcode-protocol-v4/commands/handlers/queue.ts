@@ -1,5 +1,5 @@
 // queue 命令组：deleteQueueItem / editQueueItem / reorderQueueItem / setAutoDrain /
-// setFollowupMode / sendQueuedNow（原生重做，组文件样板见 session-flow.ts）。
+// setFollowupMode / setQueueItemDelivery / sendQueuedNow（原生重做，组文件样板见 session-flow.ts）。
 // 决策逻辑直驱 core（app 层 queue API，批1 已搬运）；queueItemId ≡ core 的
 // pendingInputId（同一 id 空间，无需翻译）。queue 变更的事件由 core runtime 自发，
 // 经 gateway ingest 推进 v4 投影——本组不需要 legacy 广播钩子。
@@ -54,6 +54,24 @@ class V4QueueItemNotEditableError extends Error {
   constructor(queueItemId: string) {
     super(`v4 queue item is not editable: ${queueItemId}`);
     this.name = "V4QueueItemNotEditableError";
+  }
+}
+
+/** setQueueItemDelivery 在投影里查不到该项（已被 drain/删除或 id 无效）→ 拒绝。 */
+class V4QueueItemDeliveryMissingError extends Error {
+  readonly reasonCode = "guard.queueItemDeliveryMissing";
+  constructor(queueItemId: string) {
+    super(`v4 setQueueItemDelivery queue item missing: ${queueItemId}`);
+    this.name = "V4QueueItemDeliveryMissingError";
+  }
+}
+
+/** reserved/promoting 中的项归 sendQueuedNow promotion 主线所有，禁止切投递车道。 */
+class V4QueueItemDeliveryLockedError extends Error {
+  readonly reasonCode = "guard.queueItemDeliveryLocked";
+  constructor(queueItemId: string) {
+    super(`v4 setQueueItemDelivery queue item is locked by promotion: ${queueItemId}`);
+    this.name = "V4QueueItemDeliveryLockedError";
   }
 }
 
@@ -146,6 +164,43 @@ async function setFollowupMode(
   const payload = envelope.payload as CommandPayloadMap["setFollowupMode"];
   const record = requireRecord(host, envelope.sessionId);
   await record.app.setFollowupMode(payload.mode);
+  return undefined;
+}
+
+/**
+ * setQueueItemDelivery：用户拍板 toggle——排队项在 queue ↔ guide 间切换投递车道。
+ * guide = 引导至下一轮工具调用后运行（内联当前轮）；queue = 回普通排队独立成轮。
+ * 与「立即」（sendQueuedNow 抢占当前轮）语义区分，不抢占、不新造调度优先级。
+ *
+ * 门（按序）：投影命中 → dispatch.state === "queued" → 同值 noop → core 改写。
+ * reserved/promoting 中的项归 sendQueuedNow promotion 主线所有（core
+ * pendingInputReservations 同设第二道门），切换会造成所有权竞态。
+ */
+async function setQueueItemDelivery(
+  host: V4CommandCoreHost,
+  envelope: CommandEnvelope,
+): Promise<CommandResult | undefined> {
+  const payload = envelope.payload as CommandPayloadMap["setQueueItemDelivery"];
+  const record = requireRecord(host, envelope.sessionId);
+  const queueItem = host.getQueueItem?.(record.app.sessionId, payload.queueItemId) ?? null;
+  if (queueItem === null) {
+    throw new V4QueueItemDeliveryMissingError(payload.queueItemId);
+  }
+  if (queueItem.dispatch.state !== "queued") {
+    throw new V4QueueItemDeliveryLockedError(payload.queueItemId);
+  }
+  // 同值 toggle = noop：幂等返回（客户端重放/重复点击），不驱动 core。
+  if (queueItem.delivery.admitted === payload.delivery) return undefined;
+  const changed = await record.app.setQueueItemDelivery(payload.queueItemId, payload.delivery, {
+    traceContext: record.traceContext,
+  });
+  if (!changed) {
+    // 并发 drain/reserve 竞态：项已不在可切换集合，留 warn 供观测（同 edit 的竞态语义）。
+    host.logger?.warn?.("v4 setQueueItemDelivery missed", {
+      queueItemId: payload.queueItemId,
+      sessionId: record.app.sessionId,
+    });
+  }
   return undefined;
 }
 
@@ -322,5 +377,6 @@ export const queueHandlers = {
   reorderQueueItem,
   setAutoDrain,
   setFollowupMode,
+  setQueueItemDelivery,
   sendQueuedNow,
 };

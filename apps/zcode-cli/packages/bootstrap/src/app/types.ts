@@ -770,6 +770,15 @@ export interface ZCodeApp {
     beforePendingInputId: string | null,
     options?: { traceContext?: TraceContext },
   ): Promise<boolean>;
+  /**
+   * v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。
+   * 用户拍板：guide=引导至下一轮工具调用后运行，与「立即」（抢占）语义区分。
+   */
+  setQueueItemDelivery(
+    pendingInputId: string,
+    delivery: "queue" | "guide",
+    options?: { traceContext?: TraceContext },
+  ): Promise<boolean>;
   /** v4 heldQueueDisposition=clearQueueAndSend：清空全部排队输入，返回丢弃条数。 */
   clearQueueItems(options?: { traceContext?: TraceContext }): Promise<number>;
   /** v4 setAutoDrain：翻转 queue autoDrain 授权位（会话级配置）。 */

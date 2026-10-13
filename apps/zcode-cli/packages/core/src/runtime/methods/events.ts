@@ -356,7 +356,9 @@ async function persistDurableSessionEvent(
   }
   if (event.type === SessionEventType.TurnSteerDeliveryChanged) {
     const payload = event.payload as {
-      admittedDelivery: "queue";
+      // 用户手动 toggle（setQueueItemDelivery）与 core fallback 共用本事件：
+      // 双向 queue ↔ guide 都要集中记账到 session_input 账本。
+      admittedDelivery: "queue" | "guide";
       intent?: TurnInputIntentMetadata;
       pendingInputId: string;
     };

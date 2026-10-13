@@ -471,6 +471,15 @@ export interface AgentRuntime {
     traceContext?: TraceContext;
   }): Promise<boolean>;
   /**
+   * v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。
+   * guide=引导至下一轮工具调用后运行；queue=普通排队。未命中/被 reserve 拒绝 → false。
+   */
+  setPendingInputDelivery(options: {
+    pendingInputId: string;
+    delivery: "queue" | "guide";
+    traceContext?: TraceContext;
+  }): Promise<boolean>;
+  /**
    * v4 heldQueueDisposition=clearQueueAndSend 执行件：
    * 清空全部排队输入（active turn 内存项 + held 投影残留），返回丢弃条数。
    */

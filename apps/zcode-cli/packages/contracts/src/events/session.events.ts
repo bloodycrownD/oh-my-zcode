@@ -473,9 +473,11 @@ export interface TurnSteerQueuedPayload {
 export interface TurnSteerDeliveryChangedPayload {
   pendingInputId: string;
   targetTurnId: TurnId;
-  requestedDelivery: "guide";
-  admittedDelivery: "queue";
-  fallbackReasonCode: string;
+  /** 用户拍板 toggle（setQueueItemDelivery）也复用本事件：双向 queue ↔ guide。 */
+  requestedDelivery: "auto" | "startNow" | "queue" | "guide";
+  admittedDelivery: "queue" | "guide";
+  /** 仅 core fallback（turn interrupted / no tool boundary）必带；用户手动 toggle 不带。 */
+  fallbackReasonCode?: string;
   /** 已改投后的完整 intent；reducer/cold replay 不从旁路状态猜 delivery。 */
   intent?: TurnInputIntentMetadata;
 }
