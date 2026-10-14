@@ -1,4 +1,5 @@
 import { grantPermissionFullAccess } from "../permission-full-access.js";
+import { refreshMcpServers } from "./mcp.js";
 import {
   getSessionShellSelection,
   initializeSessionShellEnvironmentIfNeeded,
@@ -191,6 +192,7 @@ type AgentRuntimeConstructor = { prototype: object };
 export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void {
   const proto = ctor.prototype as Record<string, unknown>;
   proto.updateConfig = updateConfig;
+  proto.refreshMcpServers = refreshMcpServers;
   proto.setExecutionState = setExecutionState;
   proto.grantPermissionFullAccess = grantPermissionFullAccess;
   proto.initializeSessionShellEnvironmentIfNeeded = initializeSessionShellEnvironmentIfNeeded;

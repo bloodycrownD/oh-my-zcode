@@ -37,6 +37,7 @@ import type {
 import type { BackgroundResultOriginMeta, ContextUsageBreakdownItem } from "@zcode/contracts";
 import type { RuntimeCommand, RuntimeCommandId } from "./command-queue.js";
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
+import type { McpServerConfig } from "../deps.js";
 import type {
   ActiveTurnInfo,
   AcquireForegroundPromotionLeaseResult,
@@ -279,6 +280,10 @@ export interface AgentRuntimeCoreMethods {
   ): Promise<void>;
   startMcpStartup(traceContext: TraceContext): Promise<McpConnectionSnapshot> | undefined;
   initializeMcp(traceContext: TraceContext): Promise<void>;
+  refreshMcpServers(
+    servers: Record<string, McpServerConfig>,
+    traceContext?: TraceContext,
+  ): Promise<{ serverCount: number; registeredToolCount: number; removedToolCount: number }>;
   discoverSkillsForContext(traceContext: TraceContext): Promise<SkillLoadOutcome | undefined>;
   createConfigOnlyContextSnapshot(workingDirectory: string): ContextSourceSnapshot;
   initializeMessageHistoryFromContext(

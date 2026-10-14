@@ -576,6 +576,7 @@ export function McpSettingsSection({
   );
   const platform = usePlatform();
   const baseServices = useBaseWorkspaceServices();
+  const { zcodeAgentService } = baseServices;
 
   const storedServers = useMcpStore((s) => s.servers);
   const storedStatusSnapshots = useMcpStore((s) => s.statusSnapshots);
@@ -1217,6 +1218,7 @@ export function McpSettingsSection({
 
   async function handleToggle(id: string, enabled: boolean) {
     await toggleServer(id, enabled);
+    void refreshRuntimeMcpTools();
 
     if (!enabled) {
       // 禁用后的 unknown 只是本地展示态；toggleServer 已经作废旧请求，
@@ -1241,6 +1243,26 @@ export function McpSettingsSection({
     });
     void requestMcpServerStatusList();
   }
+
+  /**
+   * FORK（mcp-hot-refresh）：MCP 增删改/启停落盘后，对当前 workspace 的活跃会话
+   * 热刷新 MCP 工具面（新建的工具立即可用、删除/禁用的即时消失），无需重启。
+   * 失败静默（旧 CLI method-not-found 已在 services 层吞掉，工具面保持旧集合）。
+   */
+  const refreshRuntimeMcpTools = useCallback(async () => {
+    if (!activeWorkspacePath) {
+      return;
+    }
+    try {
+      await zcodeAgentService.refreshMcpSessions({
+        workspacePath: activeWorkspacePath,
+        workspaceIdentity: activeWorkspaceIdentity,
+        mcpServers: useMcpStore.getState().getEnabledMcpServersForZCode("zcode"),
+      });
+    } catch {
+      // 静默：状态列表刷新链（mcp/list）会另行提示连接类错误。
+    }
+  }, [activeWorkspacePath, activeWorkspaceIdentity, zcodeAgentService]);
 
   async function handleSave(form: FormState, prev?: ZCodeMcpServer) {
     if (!activeWorkspacePath) {
@@ -1268,6 +1290,7 @@ export function McpSettingsSection({
       await addScopedMcpServer(DEFAULT_MCP_SOURCE, form.name, config, projectPath);
     }
 
+    void refreshRuntimeMcpTools();
     setShowForm(false);
     setEditingServer(null);
     onFormScopeKeyChange?.(null);
@@ -1290,6 +1313,7 @@ export function McpSettingsSection({
     }
 
     await deleteScopedMcpServer(server.source, server.name, server.projectPath);
+    void refreshRuntimeMcpTools();
     setEditingServer(null);
     setShowForm(false);
     setEditorMode("form");

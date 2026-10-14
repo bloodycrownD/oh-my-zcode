@@ -3,7 +3,10 @@ import type { Logger, McpConnectionSnapshot, McpPort, McpServerStatus } from "@z
 import {
   zcodeMcpListParamsSchema,
   zcodeMcpListResultSchema,
+  zcodeMcpRefreshSessionsParamsSchema,
+  zcodeMcpRefreshSessionsResultSchema,
   type ZCodeMcpListResult,
+  type ZCodeMcpRefreshSessionsResult,
 } from "@zcode/shared";
 import {
   listMcpServerStatuses,
@@ -165,6 +168,51 @@ async function waitForOAuthAuthorizationSnapshot(
 
 function hasPendingOAuthAuthorization(statuses: Record<string, McpServerStatus>): boolean {
   return Object.values(statuses).some((status) => Boolean(status.authorization?.authorizationUrl));
+}
+
+/**
+ * FORK（mcp-hot-refresh，2026-10-14）：设置页新建/改名/删除/启停 MCP 后的热刷新。
+ *
+ * 背景：MCP 是 runtime 启动期配置（createRecord 一次性写入 runtimeConfig.mcp），
+ * 此前配置变更对已存在会话永不生效（UI 重启才能用新工具）。本方法把 UI 解析的
+ * 全量 mcpServers（与 session create 同源——getEnabledMcpServersForZCode）下发到
+ * workspace 内全部 resident session：core 的 refreshMcpServers 做 connect replace +
+ * 工具面 diff 注册/反注册。写盘仍由 UI 侧 mcpStore 负责，这里只推运行时。
+ *
+ * 与 mcp/list 的分工：mcp/list 服务设置页状态探测（进程级连接池）；本方法服务
+ * 会话工具面（每个 session runtime 的 registry）。
+ */
+export async function refreshMcpSessions(
+  context: ZCodeProtocolAgentServerContext,
+  rawParams: unknown,
+): Promise<ZCodeMcpRefreshSessionsResult> {
+  const params = parseParams(zcodeMcpRefreshSessionsParamsSchema, rawParams);
+  const runtimeMcp = protocolMcpServersToRuntimeMcpConfig(params.mcpServers);
+  const servers = runtimeMcp?.servers ?? {};
+  const sessions: ZCodeMcpRefreshSessionsResult["sessions"] = [];
+  for (const record of context.sessions.values()) {
+    if (record.workspace.workspaceKey !== params.workspace.workspaceKey) continue;
+    const outcome = await record.app.runtime.refreshMcpServers(servers);
+    sessions.push({
+      sessionId: record.sessionId,
+      registeredToolCount: outcome.registeredToolCount,
+      removedToolCount: outcome.removedToolCount,
+      serverCount: outcome.serverCount,
+    });
+  }
+  context.logger?.info("MCP sessions refreshed", {
+    module: "bootstrap.zcode_protocol",
+    event: "zcode_protocol.mcp.refresh_sessions",
+    mcpServerCount: params.mcpServers.length,
+    updatedSessionCount: sessions.length,
+    workspaceKey: params.workspace.workspaceKey,
+    workspacePath: params.workspace.workspacePath,
+  });
+  return zcodeMcpRefreshSessionsResultSchema.parse({
+    workspace: params.workspace,
+    updatedSessionCount: sessions.length,
+    sessions,
+  });
 }
 
 function delay(ms: number): Promise<void> {

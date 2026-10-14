@@ -185,6 +185,7 @@ export class AgentRuntime {
   private residencyBlockingWorkCount = 0;
   private mcpInitialized = false;
   private mcpToolsRegistered = false;
+  private mcpRegisteredToolNames = new Set<string>();
   private subagentPort?: SubagentPort;
   private dynamicWorkflowRunPort?: DynamicWorkflowRunPort;
   private modelCatalogPort?: ModelCatalogPort;
@@ -350,6 +351,11 @@ export interface AgentRuntime {
   updateConfig(
     patch: Pick<AgentRuntimeConfig, "mode" | "planEnabled" | "language" | "outputStyle">,
   ): void;
+  /** MCP 热刷新：设置页新建/改名/删除后对 resident session 下发全量 servers。 */
+  refreshMcpServers(
+    servers: Record<string, McpServerConfig>,
+    traceContext?: TraceContext,
+  ): Promise<{ serverCount: number; registeredToolCount: number; removedToolCount: number }>;
   initializeSessionShellEnvironmentIfNeeded(
     selection: ExecutionShellSelection | (() => ExecutionShellSelection),
   ): boolean;

@@ -111,6 +111,8 @@ export interface AgentRuntimeInternal
   residencyBlockingWorkCount: number;
   mcpInitialized: boolean;
   mcpToolsRegistered: boolean;
+  /** 当前注册在 registry 的 MCP 工具名集合；refreshMcpServers 据此 diff 反注册。 */
+  mcpRegisteredToolNames: Set<string>;
   subagentPort?: SubagentPort;
   dynamicWorkflowRunPort?: DynamicWorkflowRunPort;
   modelCatalogPort?: ModelCatalogPort;

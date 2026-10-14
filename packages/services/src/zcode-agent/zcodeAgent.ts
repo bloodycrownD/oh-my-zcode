@@ -122,6 +122,7 @@ import type {
   ZCodeAgentDeleteAutomationRunParams,
   ZCodeAgentDescribePluginParams,
   ZCodeAgentInstallPluginParams,
+  ZCodeAgentRefreshMcpSessionsParams,
   ZCodeAgentListMcpServerStatusesParams,
   ZCodeAgentPluginViewParams,
   ZCodeAgentPluginReferenceCatalogParams,
@@ -271,6 +272,10 @@ export interface ZCodeAgentUpdateMagicContextConfigParams extends ZCodeAgentWork
  * 单标量而非整域：`promptLanguage` 就是 "auto" | "zh-CN" | "en-US" 三态本身，
  * 不需要先读后合并。
  */
+export interface ZCodeAgentRefreshMcpSessionsParams extends ZCodeAgentWorkspaceTarget {
+  mcpServers: ZCodeAgentMcpServer[];
+}
+
 export interface ZCodeAgentUpdatePromptLanguageParams extends ZCodeAgentWorkspaceTarget {
   promptLanguage: ZCodePromptLanguage;
 }
@@ -674,6 +679,11 @@ export interface IZCodeAgentService {
   updatePromptLanguage(
     params: ZCodeAgentUpdatePromptLanguageParams,
   ): Promise<ZCodeWorkspaceUpdatePromptLanguageResult>;
+  /**
+   * FORK（mcp-hot-refresh）：MCP 增删改/启停后对 workspace 内全部活跃 session
+   * 热刷新 MCP 工具面（core 的 connect replace + 工具 diff 注册/反注册）。
+   */
+  refreshMcpSessions(params: ZCodeAgentRefreshMcpSessionsParams): Promise<ZCodeMcpRefreshSessionsResult>;
   listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams): Promise<ZCodeMcpListResult>;
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**

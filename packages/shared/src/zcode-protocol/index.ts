@@ -2212,6 +2212,34 @@ export type ZCodeWorkspaceReadPromptLanguageResult = z.infer<
   typeof zcodeWorkspaceReadPromptLanguageResultSchema
 >;
 
+export const zcodeMcpRefreshSessionsParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    mcpServers: z.array(zcodeProtocolMcpServerSchema),
+  })
+  .strict();
+export type ZCodeMcpRefreshSessionsParams = z.infer<typeof zcodeMcpRefreshSessionsParamsSchema>;
+
+export const zcodeMcpRefreshSessionsResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 收到热刷新的 resident session 数。 */
+    updatedSessionCount: z.number().int().nonnegative(),
+    /** 各 session 的刷新统计（工具注册/反注册数）。 */
+    sessions: z.array(
+      z
+        .object({
+          sessionId: nonEmptyString,
+          registeredToolCount: z.number().int().nonnegative(),
+          removedToolCount: z.number().int().nonnegative(),
+          serverCount: z.number().int().nonnegative(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ZCodeMcpRefreshSessionsResult = z.infer<typeof zcodeMcpRefreshSessionsResultSchema>;
+
 export const zcodeWorkspaceUpdatePromptLanguageParamsSchema = z
   .object({
     workspace: zcodeWorkspaceRefSchema,
@@ -3470,6 +3498,9 @@ export const zcodeProtocolMethods = {
   workspaceCancelGenerateText: "workspace/cancelGenerateText",
   providerTestModelConnectivity: "provider/testModelConnectivity",
   mcpList: "mcp/list",
+  // FORK（mcp-hot-refresh）：设置页 MCP 增删改后对 workspace 内全部活跃 session
+  // 热刷新 MCP 工具面，无需重启会话/应用。
+  mcpRefreshSessions: "mcp/refreshSessions",
   pluginsList: "plugins/list",
   pluginsReferenceCatalog: "plugins/referenceCatalog",
   pluginsReferenceCatalogWithCategory: "plugins/referenceCatalogWithCategory",

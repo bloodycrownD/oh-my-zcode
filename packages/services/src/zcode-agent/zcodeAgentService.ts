@@ -1,5 +1,7 @@
 import { requestPluginReferenceCatalog } from "#src/zcode-agent/pluginReferenceCatalogRequest.js";
-import { sessionDebugSnapshotSchema } from "@zcode/shared";
+import { sessionDebugSnapshotSchema ,
+  zcodeMcpRefreshSessionsResultSchema,
+} from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
@@ -3140,6 +3142,35 @@ export function createZCodeAgentService(
             workspacePath: params.workspacePath,
           });
           throw new Error("当前 CLI 版本不支持「模型语言」设置，升级 CLI 后重试");
+        }
+        throw error;
+      }
+    },
+
+    async refreshMcpSessions(params: ZCodeAgentRefreshMcpSessionsParams) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      try {
+        const client = await getReadOnlyClient(params);
+        return await client.request(
+          zcodeProtocolMethods.mcpRefreshSessions,
+          {
+            workspace: buildWorkspaceRef(params),
+            mcpServers: params.mcpServers,
+          },
+          zcodeMcpRefreshSessionsResultSchema,
+        );
+      } catch (error) {
+        if (isProtocolMethodNotFoundError(error)) {
+          // 旧 CLI 无此方法：工具面保持旧集合，新会话仍会用新配置；不向 UI 抛错。
+          logger.info(undefined, "旧 Agent 不支持 MCP 会话热刷新，跳过", {
+            workspaceKey,
+            workspacePath: params.workspacePath,
+          });
+          return {
+            workspace: buildWorkspaceRef(params),
+            updatedSessionCount: 0,
+            sessions: [],
+          };
         }
         throw error;
       }

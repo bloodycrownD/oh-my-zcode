@@ -143,6 +143,7 @@ export async function initializeMcp(
         new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
       ),
     });
+    this.mcpRegisteredToolNames = new Set(registered);
     if (registered.length > 0) {
       this.invalidateToolCache();
     }
@@ -165,4 +166,90 @@ export async function initializeMcp(
     });
   }
   this.mcpToolsRegistered = true;
+}
+
+export interface McpRuntimeRefreshResult {
+  serverCount: number;
+  registeredToolCount: number;
+  removedToolCount: number;
+}
+
+/**
+ * MCP 热刷新（2026-10-14：设置页新建/改名/删除 MCP 后无需重启会话）。
+ *
+ * runtime 的 MCP 工具面是启动期一次性装配（initializeMcp 的 mcpToolsRegistered
+ * 单次门闩 + config.mcp.servers 创建时快照），此前配置变更只能重启进程生效。
+ * 本方法用 UI 下发的全量 servers 做：
+ *   ① config.mcp.servers 权威替换；
+ *   ② mcpPort.connectConfiguredServers（replace 语义：新增即连、消失即断）；
+ *   ③ 工具面 diff——旧集合中不在新注册结果的 unregister，新工具 register，
+ *      最后 invalidateToolCache 让下一轮模型请求看到新工具表。
+ * 并发：turn-loop 每次 await initializeMcp（门闩挡住），refresh 与 turn 之间的
+ * registry 竞态由 registry 自身同步语义兜底；busy turn 中刷新下一轮生效。
+ */
+export async function refreshMcpServers(
+  this: AgentRuntimeInternal,
+  servers: Record<string, McpServerConfig>,
+  traceContext?: TraceContext,
+): Promise<McpRuntimeRefreshResult> {
+  const effectiveTrace = traceContext ?? this.rootTraceContext;
+  if (!this.mcpPort || this.config.mcp?.enabled === false) {
+    return { serverCount: 0, registeredToolCount: 0, removedToolCount: 0 };
+  }
+  this.config.mcp = {
+    ...this.config.mcp,
+    servers,
+    trustedOfficialCuaServerNames: this.config.mcp?.trustedOfficialCuaServerNames ?? [],
+  };
+  this.mcpToolsRegistered = true;
+
+  const snapshot = await this.mcpPort
+    .connectConfiguredServers(servers, {
+      oauthAuthorizationTimeoutMs: MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS,
+      trace: effectiveTrace,
+      workingDirectory: this.workingDirectory,
+      workspaceIdentity: this.config.workspaceIdentity?.toString(),
+    })
+    .catch((error: unknown) => {
+      this.logger?.warn("MCP refresh connection failed", {
+        ...traceContextToLogContext(effectiveTrace),
+        error: error instanceof Error ? error.message : String(error),
+        event: "mcp.refresh.connect.failed",
+        module: "core.runtime",
+        status: "failed",
+      });
+      return { statuses: {}, tools: [] } satisfies McpConnectionSnapshot;
+    });
+
+  const registered = registerMcpTools(this.registry, this.mcpPort, snapshot.tools, {
+    allowedTools: this.config.toolAllowlist,
+    disallowedTools: this.config.toolDisallowlist,
+    officialCuaServerNames: computeOfficialCuaServerNames(
+      servers,
+      new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
+    ),
+  });
+  const desired = new Set(registered);
+  let removedToolCount = 0;
+  for (const name of this.mcpRegisteredToolNames) {
+    if (desired.has(name)) continue;
+    this.registry.unregister(name);
+    removedToolCount += 1;
+  }
+  this.mcpRegisteredToolNames = desired;
+  this.invalidateToolCache();
+  this.logger?.info("MCP tools refreshed", {
+    ...traceContextToLogContext(effectiveTrace),
+    event: "mcp.tools.refreshed",
+    module: "core.runtime",
+    registeredToolCount: registered.length,
+    removedToolCount,
+    serverCount: Object.keys(servers).length,
+    status: "completed",
+  });
+  return {
+    serverCount: Object.keys(servers).length,
+    registeredToolCount: registered.length,
+    removedToolCount,
+  };
 }

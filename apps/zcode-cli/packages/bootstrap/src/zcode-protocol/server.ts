@@ -80,7 +80,7 @@ import {
   moveSavedWorkflowOp,
   updateSavedWorkflowMetaOp,
 } from "./saved-workflows.js";
-import { listMcpServers } from "./mcp.js";
+import { listMcpServers, refreshMcpSessions } from "./mcp.js";
 import { updateInteractionPreferences } from "./interaction-preferences.js";
 import { readMagicContextConfig, updateMagicContextConfig } from "./magic-context-config.js";
 // FORK（prompt-language-option）：模型语言读写（写盘 + ConfigPort + runtime 热更新）。
@@ -643,6 +643,8 @@ export class ZCodeProtocolAgentServer {
         return await testProviderModelConnectivity(this.context, request.params);
       case zcodeProtocolMethods.mcpList:
         return await listMcpServers(this.context, request.params);
+      case zcodeProtocolMethods.mcpRefreshSessions:
+        return await refreshMcpSessions(this.context, request.params);
       case zcodeProtocolMethods.pluginsList:
         return await listPlugins(this.context, request.params);
       case zcodeProtocolMethods.pluginsReferenceCatalogWithCategory:
