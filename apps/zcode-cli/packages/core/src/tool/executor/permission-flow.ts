@@ -100,7 +100,8 @@ export async function resolveToolPermission(
     workspaceRoot: deps.getWorkspaceRoot(),
   });
 
-  // Doom loop 门（opencode 式）：同工具+同输入连续第 3 次调用在执行前拦截。
+  // Doom loop 门（opencode 式）：同工具+同输入重复调用的第 4 次（事不过三，
+  // 容忍 3 次；软提醒在第 3 次）在执行前拦截。
   // deny → 带停轮标记的错误结果（调用不执行）；ask → decision 改写为 doom_loop ask，
   // 走下方既有确认窗/broker/hook-race 链路；off/豁免/未达阈值 → 放行。
   const doom = deps.doomLoop

@@ -434,7 +434,9 @@ export interface ModelAnomalyGuardConfig {
   repeatedToolCallWarningThreshold: number;
   maxBudgetWarningsPerTurn: number;
   /**
-   * Doom loop 门（opencode 式）：同工具+同输入连续第 3 次调用在执行前拦截。
+   * Doom loop 门（opencode 式）：同工具+同输入连续重复的调用在执行前拦截。
+   * 事不过三——容忍 3 次，第 4 次拦截（与软提醒阈值 3 形成梯度：第 3 次提醒、
+   * 第 4 次硬拦）。
    * - "ask"（默认）：弹权限卡（允许一次 / 本会话总是允许 / 拒绝并停止本轮）
    * - "deny"：检测即拒，不弹卡，工具结果标错并停止本轮
    * - "off"：关闭门（软提醒照旧）

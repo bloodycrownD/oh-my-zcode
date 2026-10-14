@@ -2,7 +2,8 @@
 /**
  * Doom loop 门（opencode 式）纯函数防线（2026-10-14 用户拍板：streak=3 直接弹卡）。
  *
- * 覆盖：streak 计数与签名重置 / 阈值与三种模式（ask|deny|off）/ 会话级豁免 /
+ * 覆盖：streak 计数与签名重置 / 事不过三阈值（第 3 次放行、第 4 次触发）与三种
+ * 模式 / 会话级豁免 /
  * denied result 的停轮标记 / ask decision 改写 / sessionUpdates 豁免登记。
  * permission-flow 的链路集成（确认窗/broker/hook-race）由既有权限测试面覆盖，
  * 此处只钉 gate 纯函数契约。
@@ -25,20 +26,27 @@ import {
 
 const toolCall = { id: "call-1", name: "Read", input: { path: "a.ts" } };
 
-function threeIdenticalCalls(state, input = { path: "a.ts" }) {
+function repeatedIdenticalCalls(state, times, input = { path: "a.ts" }) {
   let last;
-  for (let i = 0; i < 3; i += 1) last = recordDoomLoopStreak(state, "Read", input);
+  for (let i = 0; i < times; i += 1) last = recordDoomLoopStreak(state, "Read", input);
   return last;
 }
 
-test("streak：同工具+同输入连续计数，第 3 次达阈值触发门", async () => {
+test("streak：事不过三——第 3 次仍放行（软提醒域），第 4 次触发门", async () => {
   const state = createDoomLoopGateState();
   assert.equal(recordDoomLoopStreak(state, "Read", { path: "a.ts" }).count, 1);
   assert.equal(recordDoomLoopStreak(state, "Read", { path: "a.ts" }).count, 2);
   const third = recordDoomLoopStreak(state, "Read", { path: "a.ts" });
   assert.equal(third.count, 3);
-  assert.equal(DOOM_LOOP_THRESHOLD, 3);
-  assert.equal(evaluateDoomLoopGate(state, "ask", "Read", third.count), "ask");
+  assert.equal(
+    evaluateDoomLoopGate(state, "ask", "Read", third.count),
+    "pass",
+    "第 3 次容忍（软提醒负责）",
+  );
+  const fourth = recordDoomLoopStreak(state, "Read", { path: "a.ts" });
+  assert.equal(fourth.count, 4);
+  assert.equal(DOOM_LOOP_THRESHOLD, 4);
+  assert.equal(evaluateDoomLoopGate(state, "ask", "Read", fourth.count), "ask");
 });
 
 test("签名键序无关：input 键顺序不同仍视为同一调用", async () => {
@@ -61,33 +69,33 @@ test("异签名重置：不同输入/工具打断 streak", async () => {
 
 test("off 模式与豁免工具：始终放行", async () => {
   const state = createDoomLoopGateState();
-  const third = threeIdenticalCalls(state);
-  assert.equal(evaluateDoomLoopGate(state, "off", "Read", third.count), "pass");
+  const fourth = repeatedIdenticalCalls(state, 4);
+  assert.equal(evaluateDoomLoopGate(state, "off", "Read", fourth.count), "pass");
   state.exemptTools.add("Read");
-  assert.equal(evaluateDoomLoopGate(state, "ask", "Read", third.count), "pass");
+  assert.equal(evaluateDoomLoopGate(state, "ask", "Read", fourth.count), "pass");
 });
 
-test("deny 模式：第 3 次直接 deny（不弹卡）", async () => {
+test("deny 模式：第 4 次直接 deny（不弹卡）", async () => {
   const state = createDoomLoopGateState();
-  const third = threeIdenticalCalls(state);
-  assert.equal(evaluateDoomLoopGate(state, "deny", "Read", third.count), "deny");
+  const fourth = repeatedIdenticalCalls(state, 4);
+  assert.equal(evaluateDoomLoopGate(state, "deny", "Read", fourth.count), "deny");
 });
 
 test("denied result：错误结果带 doom_loop 停轮标记与模型可见文案", async () => {
-  const result = buildDoomLoopDeniedResult(toolCall, "Read", 3, "reason-x");
+  const result = buildDoomLoopDeniedResult(toolCall, "Read", 4, "reason-x");
   assert.equal(result.success, false);
   assert.equal(result.turnControl?.reason, "doom_loop");
   assert.equal(result.turnControl?.stopTurnAfterResult, true);
   assert.match(String(result.modelContent), /doom loop detection/);
-  assert.match(String(result.modelContent), /3 times in a row/);
+  assert.match(String(result.modelContent), /4 times in a row/);
 });
 
 test("ask decision：改写为 doom_loop ask（reason 人类可读）", async () => {
-  const decision = buildDoomLoopAskDecision("Read", 3, "code");
+  const decision = buildDoomLoopAskDecision("Read", 4, "code");
   assert.equal(decision.decision, "ask");
   assert.equal(decision.allowed, false);
   assert.equal(decision.ruleId, "doom_loop");
-  assert.match(decision.reason, /Read has been called 3 times/);
+  assert.match(decision.reason, /Read has been called 4 times/);
 });
 
 test("withDoomLoopTurnStop：error 补停轮，success 不动", async () => {

@@ -4,15 +4,16 @@ import type { ExecutableToolCall } from "../types.js";
 import { createErrorResult } from "./errors.js";
 
 /**
- * Doom loop 门（opencode 式，2026-10-14 用户拍板）：同工具+同输入连续第
- * DOOM_LOOP_THRESHOLD 次调用在**执行前**拦截——ask 弹权限卡（复用 permission
- * flow 的整套确认窗/broker/hook race），deny 直接拒并停止本轮，off 关闭。
+ * Doom loop 门（opencode 式，2026-10-14 用户拍板：事不过三——容忍 3 次重复，
+ * 第 4 次调用执行前拦截）。同工具+同输入连续第 DOOM_LOOP_THRESHOLD 次调用在
+ * **执行前**拦截——ask 弹权限卡（复用 permission flow 的整套确认窗/broker/hook
+ * race），deny 直接拒并停止本轮，off 关闭。
  * 无权限客户端时 broker 请求自动失败（"No permission client configured"），
  * ask 降级为拒绝——规避 opencode #18108（子代理 ask 死锁）。
  *
- * 与 runtime/helpers/model-anomaly.ts 的软提醒（streak≥3 注入提示文本）并存：
- * 软提醒在工具执行后由 turn loop 注入，本门在执行前拦截；门触发时第 3 次调用
- * 不再执行，软提醒对该签名也就不再升级。两者签名算法相同（键序稳定化 JSON），
+ * 与 runtime/helpers/model-anomaly.ts 的软提醒并存成梯度：软提醒阈值 3
+ * （streak≥3 注入提示文本，由 turn loop 在工具执行后触发），本门阈值 4 在执行前
+ * 拦截——第 3 次提醒、第 4 次硬拦。两者签名算法相同（键序稳定化 JSON），
  * 各自独立计数，互不耦合——本文件不得 import runtime/helpers（分层方向）。
  */
 
@@ -30,7 +31,8 @@ export interface DoomLoopGateState {
   readonly exemptTools: Set<string>;
 }
 
-export const DOOM_LOOP_THRESHOLD = 3;
+/** 事不过三：容忍 3 次重复执行，第 4 次调用在执行前被拦（2026-10-14 用户拍板）。 */
+export const DOOM_LOOP_THRESHOLD = 4;
 
 export function createDoomLoopGateState(): DoomLoopGateState {
   return { streaks: new Map(), exemptTools: new Set() };
