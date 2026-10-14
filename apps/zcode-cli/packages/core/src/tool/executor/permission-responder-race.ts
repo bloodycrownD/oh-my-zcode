@@ -5,8 +5,23 @@
 // 阻塞等待外部点击的桥接程序）挂起期间，确认窗已对用户可见，但所有点击都被
 // resolveInteraction 按「未命中即幂等成功」丢弃——确认窗永久死亡，turn 永久挂起。
 // 修法：两个应答方并发启动、先到的决定生效、败者立即 abort 且不被等待。
-import type { PermissionBrokerResult } from "@zcode/contracts";
+import type {
+  CollaborationMode,
+  PermissionBrokerRequest,
+  PermissionBrokerResult,
+  PermissionRuleset,
+  PermissionUpdate,
+  TraceContext,
+} from "@zcode/contracts";
 import { linkAbortSignal } from "./timeout.js";
+import type { PermissionDecisionResult } from "../../permission/service.js";
+import { normalizeToolExecutionInput } from "../input-normalization.js";
+import { runPermissionRequestHooks } from "./hook-flow.js";
+import { recheckPermissionHookModifiedInput } from "./permission-input-recheck.js";
+import { validateInput } from "./validation.js";
+import type { ExecutableToolCall, ToolEntry } from "../types.js";
+import type { ToolExecutorDeps } from "./types.js";
+import type { resolveToolApproval } from "./approval-gate.js";
 
 interface PermissionResponderRaceInput {
   /**
@@ -90,4 +105,126 @@ export async function racePermissionResponders(
     unlinkHook();
     unlinkBroker();
   }
+}
+
+
+export interface PermissionAskRaceOptions {
+  deps: ToolExecutorDeps;
+  toolCall: ExecutableToolCall;
+  entry: ToolEntry;
+  executionInput: unknown;
+  permissionDecision: PermissionDecisionResult;
+  suggestedPermissionUpdates: PermissionUpdate[] | undefined;
+  approval: ReturnType<typeof resolveToolApproval>;
+  requestId: string;
+  mode: CollaborationMode;
+  projectRules: PermissionRuleset | null;
+  traceContext: TraceContext;
+  signal?: AbortSignal;
+}
+
+export interface PermissionAskRaceOutcome {
+  brokerResult: PermissionBrokerResult;
+  normalizedHookModifiedInput?: unknown;
+  useNormalizedHookModifiedInput: boolean;
+  permissionDecision: PermissionDecisionResult;
+}
+
+/**
+ * ask 应答内芯：hook 链与 broker 并发竞速 + PermissionRequest hook 的 modify
+ * 改写输入复核（recheck）。抽自 permission-flow（行数红线）；抛错语义不变——
+ * 由调用方的 catch 统一降级为 deny。hook 链故障只令其退赛的注释见上方
+ * racePermissionResponders 头注。
+ */
+export async function runPermissionAskRace(
+  options: PermissionAskRaceOptions,
+): Promise<PermissionAskRaceOutcome> {
+  const { deps, toolCall, entry, executionInput, permissionDecision, mode, traceContext } = options;
+  const raceOutcome = await racePermissionResponders({
+    onHookFailure: (error) => {
+      deps.logger?.warn("PermissionRequest hook chain failed; waiting for client decision", {
+        errorMessage: error instanceof Error ? error.message : String(error),
+        event: "tool.permission.hook_race_forfeited",
+        module: "core.tool.executor",
+        requestId: options.requestId,
+        status: "waiting",
+        toolCallId: toolCall.id,
+        toolName: toolCall.name,
+      });
+    },
+    requestBroker: (brokerSignal, claimResponse) =>
+      deps.permissionBroker.requestPermission(
+        {
+          input: executionInput,
+          mode,
+          reason: permissionDecision.reason ?? `Tool ${toolCall.name} requires approval`,
+          requestId: options.requestId,
+          requestedAt: new Date(),
+          riskLevel: permissionDecision.riskLevel,
+          ruleId: permissionDecision.ruleId,
+          sessionId: deps.sessionId,
+          sideEffectScope: permissionDecision.sideEffectScope,
+          suggestedPermissionUpdates: options.suggestedPermissionUpdates,
+          ...(options.approval.optionsPolicy
+            ? { optionsPolicy: options.approval.optionsPolicy }
+            : {}),
+          toolCallId: toolCall.id as PermissionBrokerRequest["toolCallId"],
+          toolName: toolCall.name,
+          traceId: traceContext.traceId,
+          turnId: traceContext.turnId ?? deps.turnId,
+        },
+        { signal: brokerSignal, claimResponse, timeoutMs: deps.permissionTimeoutMs },
+      ),
+    runHooks: (hookSignal) =>
+      runPermissionRequestHooks(
+        deps,
+        toolCall,
+        executionInput,
+        options.requestId,
+        permissionDecision,
+        mode,
+        traceContext,
+        hookSignal,
+      ),
+    ...(options.signal === undefined ? {} : { signal: options.signal }),
+  });
+  let brokerResult = raceOutcome.result;
+  let permissionDecisionNext = permissionDecision;
+  let normalizedHookModifiedInput: unknown;
+  let useNormalizedHookModifiedInput = false;
+  const permissionHookResult = raceOutcome.source === "hook" ? raceOutcome.result : undefined;
+  if (permissionHookResult?.decision === "modify") {
+    normalizedHookModifiedInput = normalizeToolExecutionInput({
+      entry,
+      input: permissionHookResult.modifiedInput ?? executionInput,
+      logger: deps.logger,
+      source: "permission",
+    });
+    useNormalizedHookModifiedInput = true;
+    if (!validateInput(normalizedHookModifiedInput, entry)) {
+      // PermissionRequest hook 可以改写目标路径，修改后的输入不能沿用修改前的权限结果。
+      const recheck = await recheckPermissionHookModifiedInput({
+        deps,
+        entry,
+        mode,
+        modifiedInput: normalizedHookModifiedInput,
+        projectRules: options.projectRules,
+        requestId: options.requestId,
+        signal: options.signal,
+        toolCall,
+        traceContext,
+      });
+      if (recheck.permissionDecision) permissionDecisionNext = recheck.permissionDecision;
+      if (recheck.brokerResult) {
+        brokerResult = recheck.brokerResult;
+        useNormalizedHookModifiedInput = brokerResult.decision === "allow";
+      }
+    }
+  }
+  return {
+    brokerResult,
+    normalizedHookModifiedInput,
+    useNormalizedHookModifiedInput,
+    permissionDecision: permissionDecisionNext,
+  };
 }

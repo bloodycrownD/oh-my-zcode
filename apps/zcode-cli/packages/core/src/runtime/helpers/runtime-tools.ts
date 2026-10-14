@@ -8,6 +8,7 @@ import {
   traceContextToLogContext,
 } from "../deps.js";
 import type { HookRunner, SessionId, ToolExecutor, TraceContext } from "../deps.js";
+import { createDoomLoopGateState } from "../../tool/executor/doom-loop-gate.js";
 import {
   CTX_EXPAND_TOOL_NAME,
   CTX_MEMORY_TOOL_NAME,
@@ -238,6 +239,10 @@ function createRuntimeToolExecutor(
     registry: runtime.registry,
     permissionService: runtime.permissionService,
     permissionBroker: runtime.permissionBroker,
+    // Doom loop 门：executor 会话级闭包状态 + 配置（默认 ask；无权限客户端时
+    // broker 请求自动失败，ask 降级为拒绝，规避子代理 ask 死锁）。
+    doomLoop: createDoomLoopGateState(),
+    doomLoopCheck: runtime.config.modelAnomalyGuard?.doomLoopCheck ?? "ask",
     emitEvent: async (event) => {
       await runtime.appendEvent(event, getCurrentTraceContext() ?? runtime.rootTraceContext);
     },

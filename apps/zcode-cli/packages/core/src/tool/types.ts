@@ -432,7 +432,12 @@ export interface ToolExecutionFollowUpUserInput {
 }
 
 export interface ToolExecutionTurnControl {
-  reason: "automation_create_limit" | "plan_exit_denied" | "subagent_terminal";
+  reason:
+    | "automation_create_limit"
+    | "plan_exit_denied"
+    | "subagent_terminal"
+    /** Doom loop 门拒绝（配置 deny / 用户拒绝 ask / 无权限客户端降级）→ 停整轮。 */
+    | "doom_loop";
   stopTurnAfterResult: boolean;
 }
 

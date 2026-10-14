@@ -73,6 +73,9 @@ export interface ToolExecutorOptions {
   registry: ToolRegistry;
   permissionService: PermissionService;
   permissionBroker?: PermissionBrokerPort;
+  /** Doom loop 门状态（executor 会话级闭包，runtime-tools 组装时创建）。 */
+  doomLoop?: import("./doom-loop-gate.js").DoomLoopGateState;
+  doomLoopCheck?: import("./doom-loop-gate.js").DoomLoopCheckMode;
   emitEvent: (event: SessionEvent) => Promise<void>;
   enqueueBackgroundTaskNotification?: EnqueueBackgroundTaskNotification;
   shouldEnqueueBackgroundTaskNotification?: ShouldEnqueueBackgroundTaskNotification;
@@ -176,6 +179,9 @@ export interface ToolExecutorDeps {
   registry: ToolRegistry;
   permissionService: PermissionService;
   permissionBroker: PermissionBrokerPort;
+  /** Doom loop 门状态（executor 会话级闭包，runtime-tools 组装时创建）。 */
+  doomLoop?: import("./doom-loop-gate.js").DoomLoopGateState;
+  doomLoopCheck?: import("./doom-loop-gate.js").DoomLoopCheckMode;
   emitEvent: (event: SessionEvent) => Promise<void>;
   enqueueBackgroundTaskNotification?: EnqueueBackgroundTaskNotification;
   shouldEnqueueBackgroundTaskNotification?: ShouldEnqueueBackgroundTaskNotification;

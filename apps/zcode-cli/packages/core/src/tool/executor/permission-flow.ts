@@ -4,7 +4,6 @@ import {
   isCoreError,
   traceContextToLogContext,
   type CollaborationMode,
-  type PermissionBrokerRequest,
   type PermissionBrokerResult,
   type PermissionRuleset,
   type TraceContext,
@@ -14,10 +13,15 @@ import type { PermissionContext } from "../../permission/service.js";
 import type { ExecutableToolCall, ToolEntry, ToolExecutionResult } from "../types.js";
 import { normalizeToolExecutionInput } from "../input-normalization.js";
 import { resolveToolApproval } from "./approval-gate.js";
+import {
+  applyDoomLoopSessionUpdates,
+  interveneDoomLoopGate,
+  withDoomLoopTurnStop,
+} from "./doom-loop-gate.js";
 import { createErrorResult, createPermissionErrorResult } from "./errors.js";
 import { emitPermissionDenied, emitPermissionRequested, emitPermissionResolved } from "./events.js";
-import { applyPreToolPermissionDecision, runPermissionRequestHooks } from "./hook-flow.js";
-import { racePermissionResponders } from "./permission-responder-race.js";
+import { applyPreToolPermissionDecision } from "./hook-flow.js";
+import { runPermissionAskRace } from "./permission-responder-race.js";
 import {
   loadProjectPermissionRuleset,
   persistProjectPermissionUpdates,
@@ -27,7 +31,6 @@ import {
   resolveRuntimePermissionContext,
 } from "./permission-capability.js";
 import { buildDefaultPermissionUpdates } from "./permission-suggestions.js";
-import { recheckPermissionHookModifiedInput } from "./permission-input-recheck.js";
 import type { ToolExecutorDeps } from "./types.js";
 import { summarizeInput } from "./utils.js";
 import { validateInput } from "./validation.js";
@@ -96,6 +99,18 @@ export async function resolveToolPermission(
     workingDirectory: deps.getWorkingDirectory(),
     workspaceRoot: deps.getWorkspaceRoot(),
   });
+
+  // Doom loop 门（opencode 式）：同工具+同输入连续第 3 次调用在执行前拦截。
+  // deny → 带停轮标记的错误结果（调用不执行）；ask → decision 改写为 doom_loop ask，
+  // 走下方既有确认窗/broker/hook-race 链路；off/豁免/未达阈值 → 放行。
+  const doom = deps.doomLoop
+    ? interveneDoomLoopGate(deps.doomLoop, deps.doomLoopCheck ?? "ask", toolCall, executionInput, mode)
+    : null;
+  if (doom?.verdict === "deny" && doom.deniedResult) {
+    return { allowed: false, result: doom.deniedResult };
+  }
+  const doomLoopActive = doom?.verdict === "ask";
+  if (doom?.verdict === "ask" && doom.askDecision) permissionDecision = doom.askDecision;
 
   deps.logger?.debug("Tool permission evaluated", {
     ...traceContextToLogContext(traceContext),
@@ -170,95 +185,26 @@ export async function resolveToolPermission(
   let useNormalizedHookModifiedInput = false;
   const permissionWaitStartedAt = Date.now();
   try {
-    // 这里曾经串行 `await runPermissionRequestHooks(...)`，
-    // broker 要等 hook 链返回才启动。同步 PermissionRequest hook（外部审批桥接）阻塞期间，
-    // 确认窗已经渲染（上面的 emitPermissionRequested），但应答 deferred 尚未注册，用户的
-    // 每一次点击都被 resolveInteraction 按幂等语义静默丢弃——确认窗永久死亡。
-    // 修法：hook 链与 broker 并发竞速，先到的决定生效，败者被 abort 且不被等待。
-    const raceOutcome = await racePermissionResponders({
-      onHookFailure: (error) => {
-        // hook 链故障只令其退赛：辅助应答方的基础设施故障不应替用户做拒绝决定，
-        // 确认窗继续等待 broker 应答。
-        deps.logger?.warn("PermissionRequest hook chain failed; waiting for client decision", {
-          ...traceContextToLogContext(traceContext),
-          errorMessage: error instanceof Error ? error.message : String(error),
-          event: "tool.permission.hook_race_forfeited",
-          module: "core.tool.executor",
-          requestId,
-          status: "waiting",
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-        });
-      },
-      requestBroker: (brokerSignal, claimResponse) =>
-        deps.permissionBroker.requestPermission(
-          {
-            input: executionInput,
-            mode,
-            reason: permissionDecision.reason ?? `Tool ${toolCall.name} requires approval`,
-            requestId,
-            requestedAt: new Date(),
-            riskLevel: permissionDecision.riskLevel,
-            ruleId: permissionDecision.ruleId,
-            sessionId: deps.sessionId,
-            sideEffectScope: permissionDecision.sideEffectScope,
-            suggestedPermissionUpdates,
-            ...(approval.optionsPolicy ? { optionsPolicy: approval.optionsPolicy } : {}),
-            toolCallId: toolCall.id as PermissionBrokerRequest["toolCallId"],
-            toolName: toolCall.name,
-            traceId: traceContext.traceId,
-            turnId: traceContext.turnId ?? deps.turnId,
-          },
-          {
-            signal: brokerSignal,
-            claimResponse,
-            timeoutMs: deps.permissionTimeoutMs,
-          },
-        ),
-      runHooks: (hookSignal) =>
-        runPermissionRequestHooks(
-          deps,
-          toolCall,
-          executionInput,
-          requestId,
-          permissionDecision,
-          mode,
-          traceContext,
-          hookSignal,
-        ),
+    // hook 链与 broker 并发竞速（内芯见 permission-responder-race.ts——串行 hook
+    // 曾致确认窗点击全部被幂等丢弃的死亡路径注释在那里）。
+    const raced = await runPermissionAskRace({
+      deps,
+      toolCall,
+      entry,
+      executionInput,
+      permissionDecision,
+      suggestedPermissionUpdates,
+      approval,
+      requestId,
+      mode,
+      projectRules,
+      traceContext,
       ...(signal === undefined ? {} : { signal }),
     });
-    brokerResult = raceOutcome.result;
-    const permissionHookResult = raceOutcome.source === "hook" ? raceOutcome.result : undefined;
-
-    if (permissionHookResult?.decision === "modify") {
-      normalizedHookModifiedInput = normalizeToolExecutionInput({
-        entry,
-        input: permissionHookResult.modifiedInput ?? executionInput,
-        logger: deps.logger,
-        source: "permission",
-      });
-      useNormalizedHookModifiedInput = true;
-      if (!validateInput(normalizedHookModifiedInput, entry)) {
-        // PermissionRequest hook 可以改写目标路径，修改后的输入不能沿用修改前的权限结果。
-        const recheck = await recheckPermissionHookModifiedInput({
-          deps,
-          entry,
-          mode,
-          modifiedInput: normalizedHookModifiedInput,
-          projectRules,
-          requestId,
-          signal,
-          toolCall,
-          traceContext,
-        });
-        if (recheck.permissionDecision) permissionDecision = recheck.permissionDecision;
-        if (recheck.brokerResult) {
-          brokerResult = recheck.brokerResult;
-          useNormalizedHookModifiedInput = brokerResult.decision === "allow";
-        }
-      }
-    }
+    brokerResult = raced.brokerResult;
+    normalizedHookModifiedInput = raced.normalizedHookModifiedInput;
+    useNormalizedHookModifiedInput = raced.useNormalizedHookModifiedInput;
+    permissionDecision = raced.permissionDecision;
   } catch (error) {
     const coreError = isCoreError(error)
       ? error
@@ -278,7 +224,13 @@ export async function resolveToolPermission(
       },
       traceContext,
     );
-    return { allowed: false, result: createErrorResult(toolCall, coreError) };
+    // Doom ask 无权限客户端/超时/故障：降级为拒绝；带停轮标记（防子代理死锁的
+    // opencode #18108 教训——ask 永远不会有人应答时不悬挂）。
+    const brokerFailedResult = createErrorResult(toolCall, coreError);
+    return {
+      allowed: false,
+      result: doomLoopActive ? withDoomLoopTurnStop(brokerFailedResult) : brokerFailedResult,
+    };
   }
 
   const resolvedPermission = {
@@ -287,6 +239,14 @@ export async function resolveToolPermission(
   };
   const permissionWaitMs = Math.max(0, Math.round(Date.now() - permissionWaitStartedAt));
   await emitPermissionResolved(deps, toolCall, requestId, resolvedPermission, traceContext);
+  // Doom ask 获允许且带「本会话总是允许」更新：登记会话级豁免，该工具不再触发门。
+  if (doomLoopActive && deps.doomLoop && resolvedPermission.decision === "allow") {
+    applyDoomLoopSessionUpdates(
+      deps.doomLoop,
+      toolCall.name,
+      resolvedPermission.sessionPermissionUpdates as never,
+    );
+  }
 
   deps.logger?.info("Tool permission resolved", {
     ...traceContextToLogContext(traceContext),
@@ -305,22 +265,24 @@ export async function resolveToolPermission(
   });
 
   if (resolvedPermission.decision === "deny") {
+    const deniedResult = createPermissionErrorResult(
+      toolCall,
+      resolvedPermission.reason,
+      {
+        decision: resolvedPermission.decision,
+        mode,
+        reasonSource: resolvedPermission.reasonSource,
+        requestId,
+        ruleId: permissionDecision.ruleId,
+      },
+      resolvedPermission.preserveReasonFormatting
+        ? { preserveReasonFormatting: true }
+        : undefined,
+    );
+    // Doom ask 被用户拒绝：停整轮（用户拍板语义）。
     return {
       allowed: false,
-      result: createPermissionErrorResult(
-        toolCall,
-        resolvedPermission.reason,
-        {
-          decision: resolvedPermission.decision,
-          mode,
-          reasonSource: resolvedPermission.reasonSource,
-          requestId,
-          ruleId: permissionDecision.ruleId,
-        },
-        resolvedPermission.preserveReasonFormatting
-          ? { preserveReasonFormatting: true }
-          : undefined,
-      ),
+      result: doomLoopActive ? withDoomLoopTurnStop(deniedResult) : deniedResult,
     };
   }
 

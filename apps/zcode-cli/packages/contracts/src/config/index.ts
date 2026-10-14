@@ -433,6 +433,14 @@ export interface ModelAnomalyGuardConfig {
   toolCallWarningThreshold?: number;
   repeatedToolCallWarningThreshold: number;
   maxBudgetWarningsPerTurn: number;
+  /**
+   * Doom loop 门（opencode 式）：同工具+同输入连续第 3 次调用在执行前拦截。
+   * - "ask"（默认）：弹权限卡（允许一次 / 本会话总是允许 / 拒绝并停止本轮）
+   * - "deny"：检测即拒，不弹卡，工具结果标错并停止本轮
+   * - "off"：关闭门（软提醒照旧）
+   * 无权限客户端（子代理无转发/headless）时 ask 自动降级为拒绝。
+   */
+  doomLoopCheck?: "ask" | "deny" | "off";
 }
 
 // ============================================================

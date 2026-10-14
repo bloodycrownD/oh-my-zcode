@@ -22,6 +22,8 @@ export class ToolExecutorImpl implements ToolExecutor {
       registry: options.registry,
       permissionService: options.permissionService,
       permissionBroker: options.permissionBroker ?? createDenyPermissionBroker(),
+      doomLoop: options.doomLoop,
+      doomLoopCheck: options.doomLoopCheck,
       emitEvent: options.emitEvent,
       enqueueBackgroundTaskNotification: options.enqueueBackgroundTaskNotification,
       shouldEnqueueBackgroundTaskNotification: options.shouldEnqueueBackgroundTaskNotification,
