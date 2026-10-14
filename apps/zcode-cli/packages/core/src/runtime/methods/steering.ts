@@ -1029,14 +1029,54 @@ export async function setPendingInputDelivery(
   const activeTurn = this.activeTurn;
   const pendingInput = activeTurn?.pendingInputs.find((item) => item.id === options.pendingInputId);
   if (!activeTurn || !pendingInput) {
-    // held 回落：active turn 已结束，项只存在于投影/事件日志（同 edit 的处理）——
-    // 重发同 id TurnSteerDeliveryChanged，v4 reducer 原地更新该行 delivery。
+    // held 回落：项只存在于投影/事件日志（同 edit 的处理）——重发同 id
+    // TurnSteerDeliveryChanged，v4 reducer 原地更新该行 delivery。
     const projection = await this.rebuildProjection();
     const held = projection.pendingSteerInputs.find(
       (item) => item.pendingInputId === options.pendingInputId,
     );
     if (!held) return false;
     if (held.intent?.admittedDelivery === options.delivery) return true;
+    if (
+      activeTurn &&
+      options.delivery === "guide" &&
+      !this.pendingInputReservations.has(options.pendingInputId)
+    ) {
+      // queue 车道项显式切 guide：仅改投影不够——注入消费侧
+      // （hasInlineGuidePendingInput/drainInlineGuideForNextRequest）只扫内存
+      // pendingInputs，queue 项从不入内存（enqueueDeferredInput 只发事件），导致
+      // v1.0.10「等待引导」只停在 UI、注入从未触发、turn 结束被 autoDrain 当普通
+      // 输入消费。这里把投影项物化进内存（delivery=guide），既有 tool 边界与
+      // text-only 收口两个注入点即可看见并内联执行（用户语义：当前 toolcall 或
+      // content 结束后直接执行引导排队的命令）。reserved 中的项归 promotion 主线，
+      // 不物化（与 sendQueuedNow 抢占互斥）。带附件的项暂不物化（投影不含完整
+      // attachment 载荷，物化会丢附件；保持投影切换、由 autoDrain 独立成轮兜底）。
+      if ((held.intent?.attachmentRefs?.length ?? 0) === 0) {
+        activeTurn.pendingInputs.push({
+          id: held.pendingInputId,
+          input: held.input,
+          queuedAt: held.queuedAt,
+          traceId: held.traceId,
+          commandKind: held.commandKind,
+          source: held.source,
+          inputPresentation: held.inputPresentation,
+          delivery: "guide",
+          intent: held.intent
+            ? { ...held.intent, admittedDelivery: "guide", fallbackReasonCode: undefined }
+            : undefined,
+          toolDisallowlist: held.toolDisallowlist,
+          turnId: held.targetTurnId,
+          materialized: true,
+        });
+      } else {
+        this.logger?.debug("Guide toggle skipped materialization (attachments)", {
+          event: "turn.steer.delivery_toggle.materialize_skipped",
+          module: "core.runtime",
+          pendingInputId: options.pendingInputId,
+          status: "completed",
+        });
+      }
+    }
     const event = createSessionEvent(
       SessionEventType.TurnSteerDeliveryChanged,
       this.sessionId,
@@ -1071,6 +1111,43 @@ export async function setPendingInputDelivery(
   // reserved/promoting 中的项归 sendQueuedNow promotion 主线所有；此时切 delivery
   // 会与 reserve/promote 事务抢同一条 pendingInput，拒绝（CLI 侧另有 dispatch 门）。
   if (this.pendingInputReservations.has(options.pendingInputId)) return false;
+  if (options.delivery === "queue" && pendingInput.materialized) {
+    // 反物化：物化项（queue 车道出身）切回 queue 时整体移出内存，权威回到
+    // queue 车道投影/事件（由 autoDrain 提升为独立轮）。留在内存会被空闲判定
+    // 误读为 pending 输入，也与 queue 车道的投影权威形成双写。
+    const index = activeTurn.pendingInputs.indexOf(pendingInput);
+    if (index >= 0) activeTurn.pendingInputs.splice(index, 1);
+    const event = createSessionEvent(
+      SessionEventType.TurnSteerDeliveryChanged,
+      this.sessionId,
+      {
+        pendingInputId: options.pendingInputId,
+        requestedDelivery:
+          pendingInput.intent?.requestedDelivery ?? pendingInput.intent?.admittedDelivery ?? "queue",
+        admittedDelivery: "queue",
+        targetTurnId: activeTurn.turnId,
+        ...(pendingInput.intent
+          ? { intent: { ...pendingInput.intent, admittedDelivery: "queue" as const } }
+          : {}),
+      },
+      {
+        traceId: activeTurn.traceContext.traceId,
+        turnId: activeTurn.turnId,
+      },
+    );
+    await this.appendEvent(event, options.traceContext);
+    this.logger?.debug("Turn steer delivery toggled (de-materialized)", {
+      ...traceContextToLogContext(activeTurn.traceContext),
+      admittedDelivery: "queue",
+      event: "turn.steer.delivery_toggled",
+      module: "core.runtime",
+      pendingInputId: options.pendingInputId,
+      previousDelivery: currentDelivery,
+      status: "completed",
+      targetTurnId: activeTurn.turnId,
+    });
+    return true;
+  }
   const requestedDelivery = pendingInput.intent?.requestedDelivery ?? currentDelivery;
   const intent = pendingInput.intent
     ? {

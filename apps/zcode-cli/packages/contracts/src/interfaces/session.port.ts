@@ -345,6 +345,12 @@ export interface PendingTurnInput {
   /** 当前 pending input drain 后不向 provider 暴露的工具名。 */
   toolDisallowlist?: readonly string[];
   turnId: TurnId;
+  /**
+   * queue 车道项被显式切到 guide 时物化进内存的标记（v4 setQueueItemDelivery）。
+   * steer 车道原生项不携带。切回 queue 时物化项整体从内存移除（权威回到
+   * queue 车道投影/事件），而非留在 pendingInputs 里被空闲判定误读。
+   */
+  materialized?: boolean;
 }
 
 export type TurnSteerResult =

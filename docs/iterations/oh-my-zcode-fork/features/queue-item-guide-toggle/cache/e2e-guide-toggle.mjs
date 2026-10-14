@@ -149,43 +149,36 @@ if (wsOpen) {
         return { ok: false, why: 'guide 按钮未出现或一直 disabled' };
       })()`).catch((e) => ({ ok: false, why: String(e).slice(0, 120) }));
       log("guide 点击:", JSON.stringify(clickGuide));
-      // 等待：项离开可见队列 + 待引导列表出现 restore 按钮
-      let gone = false; let restoreSel = null; const diag = [];
-      for (let i = 0; i < 45; i += 1) {
-        const snap = await evalJs(cdp, `(() => ({
-          busy: Boolean(document.querySelector('[data-testid="v4-stop"]')),
-          still: Boolean(document.querySelector('[data-testid="v4-queue-item-${targetId}"]')),
-          restore: (() => { const el = document.querySelector('[data-testid^="v4-queue-item-guide-restore"]'); return el ? el.dataset.testid : null; })(),
-          guideBtnDisabled: (() => { const el = document.querySelector('[data-testid="v4-queue-item-guide-${targetId}"]'); return el ? (el.disabled ?? el.getAttribute('aria-disabled')) : '(gone)'; })(),
-          restoreBtn: (() => { const el = document.querySelector('[data-testid^="v4-queue-item-guide-restore"]'); if (el) return el.dataset.testid; const byText = [...document.querySelectorAll('button')].find(b => (b.textContent || '').includes('恢复排队')); return byText ? 'byText:' + (byText.textContent || '').trim().slice(0, 20) : null; })(),
-          guideTrace: (() => { const b = document.body.textContent || ''; return b.includes('正在引导对话') ? 'steering' : b.includes('等待引导当前任务') ? 'pending' : null; })(),
-          toasts: [...document.querySelectorAll('[data-sonner-toast], [role="status"], [data-testid*="toast"]')].map(x => (x.textContent || '').trim().slice(0, 80)).slice(0, 3),
-        }))()`).catch((e) => ({ err: String(e).slice(0, 100) }));
+      // 等待：注入真实发生（物化修复后 tool 边界数秒内把排队内容以 user 消息内联进当前轮）
+      let injected = false; let modelReplied = false; const diag = [];
+      for (let i = 0; i < 60; i += 1) {
+        const snap = await evalJs(cdp, `(() => {
+          const b = document.body.textContent || '';
+          return {
+            busy: Boolean(document.querySelector('[data-testid="v4-stop"]')),
+            still: Boolean(document.querySelector('[data-testid="v4-queue-item-${targetId}"]')),
+            q1InTimeline: b.includes('1+1 等于几'),
+            modelReplied2: /等于\\s*2|=\\s*2|是\\s*2/.test(b),
+            restoreBtn: (() => { const el = document.querySelector('[data-testid^="v4-queue-item-guide-restore"]'); return el ? el.dataset.testid : null; })(),
+            guideTrace: b.includes('正在引导对话') ? 'steering' : b.includes('等待引导当前任务') ? 'pending' : null,
+          };
+        })()`).catch((e) => ({ err: String(e).slice(0, 100) }));
         diag.push(snap);
-        if (!snap.still && (snap.restoreBtn || snap.guideTrace)) { gone = true; restoreSel = snap.restoreBtn ?? ('trace:' + snap.guideTrace); break; }
+        if (!snap.still && snap.q1InTimeline && snap.modelReplied2) { injected = true; modelReplied = true; break; }
+        if (!snap.still && snap.q1InTimeline) { injected = true; }
         await sleep(1000);
       }
-      results.evidence.s5Diag = diag.filter((d, i) => i < 3 || !d.busy || d.restoreBtn || d.guideTrace || i === diag.length - 1).slice(0, 12);
+      results.evidence.s5Diag = diag.filter((d, i) => i < 2 || !d.still || i === diag.length - 1).slice(0, 10);
       results.evidence.s5Console = await evalJs(cdp, `(() => (window.__capErr || []).filter(x => /setQueueItemDelivery|queue|Queue|reject|cas|revision/i.test(x)).slice(0, 10))()`).catch(() => null);
       results.evidence.s5ConsoleAll = await evalJs(cdp, `(() => (window.__capErr || []).slice(0, 10))()`).catch(() => null);
-      log("S5 切guide后: gone=" + gone + " restore=" + restoreSel);
-      // 点「恢复排队」
-      let back = false;
-      if (gone && restoreSel) {
-        const clickRestore = await evalJs(cdp, `(() => { const btn = document.querySelector('[data-testid="${restoreSel}"]'); if (!btn) return { ok: false }; btn.click(); return { ok: true }; })()`).catch((e) => ({ ok: false, why: String(e).slice(0, 120) }));
-        for (let i = 0; i < 20; i += 1) {
-          const again = await evalJs(cdp, `Boolean(document.querySelector('[data-testid="v4-queue-item-${targetId}"]'))`).catch(() => false);
-          const restoreGone = !(await evalJs(cdp, `Boolean(document.querySelector('[data-testid="${restoreSel}"]'))`).catch(() => false));
-          if (again && restoreGone) { back = true; break; }
-          await sleep(1500);
-        }
-        results.scenarios.S5_toggle_roundtrip = {
-          status: gone && back ? "passed" : "failed",
-          detail: { clickGuide, leftQueue: gone, restoreSel, clickRestore, backToQueue: back, stillBusyAtEnd: await isBusy() },
-        };
-      } else {
-        results.scenarios.S5_toggle_roundtrip = { status: "failed", detail: { clickGuide, leftQueue: gone, note: "切 guide 后项未离开队列或未出现恢复排队按钮" } };
-      }
+      log("S5 注入验证: injected=" + injected + " modelReplied=" + modelReplied);
+      // 物化修复后注入在 tool 边界数秒内发生、restore 按钮随即消失，往返切换改由 core 单测覆盖。
+      // 硬断言=injected（面板项消失+全文进入时间线+项不再在队列=已被 drain 注入当前轮）；
+      // modelReplied 为软观察（模型响应文本在 ping 循环中格式不定）。
+      results.scenarios.S5_toggle_roundtrip = {
+        status: injected ? "passed" : "failed",
+        detail: { clickGuide, injected, modelReplied, note: injected ? "排队内容已注入当前轮时间线" : "注入未发生（物化断链或边界未到）" },
+      };
     } else {
       results.scenarios.S5_toggle_roundtrip = { status: "blocked", detail: "S4 未通过" };
     }

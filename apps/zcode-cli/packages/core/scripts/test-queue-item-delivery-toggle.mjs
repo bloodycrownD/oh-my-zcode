@@ -245,6 +245,98 @@ test("steer 无 intent 的旧格式项也支持切换（requestedDelivery 缺省
   assert.equal(payload.admittedDelivery, "guide");
 });
 
+// ── held 物化：queue 车道项切 guide 必须进内存，注入消费侧才看得见 ──────────
+// v1.0.10 真机缺陷回归钉：busy 中排队项走 enqueueDeferredInput 只发事件不进内存，
+// 旧实现仅改投影 → hasInlineGuidePendingInput（扫内存）永远 false → 注入从未
+// 触发 → turn 结束被 autoDrain 当普通输入消费。物化后两个注入点（tool 边界 +
+// text-only 收口续跑）即可内联执行。
+
+function makeHeldProjection(overrides = {}) {
+  return {
+    pendingSteerInputs: [
+      {
+        pendingInputId: "qi-held-1",
+        input: "引导排队的命令内容",
+        inputPreview: "引导排队的命令内容".slice(0, 30),
+        inputSize: 30,
+        commandKind: undefined,
+        source: undefined,
+        inputPresentation: undefined,
+        intent: {
+          admittedAt: Date.now(),
+          requestedDelivery: "queue",
+          admittedDelivery: "queue",
+        },
+        toolDisallowlist: undefined,
+        queuedAt: new Date("2026-10-14T00:00:00Z"),
+        targetTurnId: TURN_ID,
+        traceId: "trace_toggle",
+        ...overrides,
+      },
+    ],
+  };
+}
+
+test("held 物化：queue 车道项切 guide 进内存 pendingInputs，注入门可见", async () => {
+  const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 1, "必须物化进内存");
+  const materialized = runtime.activeTurn.pendingInputs[0];
+  assert.equal(materialized.input, "引导排队的命令内容");
+  assert.equal(materialized.delivery, "guide");
+  assert.equal(materialized.materialized, true);
+  assert.equal(materialized.intent.admittedDelivery, "guide");
+  assert.equal(runtime.events.length, 1, "投影同步事件照发");
+  assert.equal(
+    hasInlineGuidePendingInput.call(runtime, runtime.activeTurn),
+    true,
+    "注入消费门必须看得见物化项",
+  );
+});
+
+test("held 反物化：物化项切回 queue 整体移出内存，权威回 queue 车道投影", async () => {
+  const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  await setDelivery(runtime, "qi-held-1", "guide");
+  assert.equal(await setDelivery(runtime, "qi-held-1", "queue"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "物化项必须移出内存");
+  const last = runtime.events[runtime.events.length - 1].payload;
+  assert.equal(last.admittedDelivery, "queue", "投影同步回 queue");
+  assert.equal(
+    hasInlineGuidePendingInput.call(runtime, runtime.activeTurn),
+    false,
+    "切回后注入门关闭",
+  );
+});
+
+test("held 附件项跳过物化：投影不含完整附件载荷，物化会丢附件", async () => {
+  const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () =>
+    makeHeldProjection({
+      intent: {
+        admittedAt: Date.now(),
+        requestedDelivery: "queue",
+        admittedDelivery: "queue",
+        attachmentRefs: [{ ref: "att-1", fileName: "a.png", mime: "image/png", bytes: 1 }],
+      },
+    });
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "附件项不得物化");
+  assert.equal(runtime.events.length, 1, "投影事件照发（UI 仍显示切换）");
+});
+
+test("held reserved 项拒绝物化：与 sendQueuedNow promotion 互斥", async () => {
+  const runtime = makeRuntime({ pendingInputs: [], reservations: ["qi-held-1"] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "reserved 项不得物化");
+});
+
 process.on("exit", (code) => {
   console.log("");
   console.log(
