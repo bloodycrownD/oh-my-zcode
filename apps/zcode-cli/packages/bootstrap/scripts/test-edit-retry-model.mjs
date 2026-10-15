@@ -204,7 +204,7 @@ function editTargetWithSnapshot(snapshotSelection) {
   };
 }
 
-test("B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖（且不 pin）", async () => {
+test("B1: 换模型后编辑重发——显式 payload 优先于活值（Bug4 修复，2026-10-11 出队裁定）", async () => {
   const payload = {
     target: { rowId: 4, entityId: "ent-4" },
     newText: "edited text",
@@ -219,10 +219,11 @@ test("B1: 会话有活值时，编辑重发的显式 payload 也被活值覆盖�
   assert.equal(result?.type, "editUserQuery");
   const intent = captured.sendInputOptions?.intent;
   assert.ok(intent, "core sendInput 必须收到 intent");
-  // 出队模型裁定：活值第一优先，显式 payload 仅无活值时兜底。
-  assert.deepEqual(intent.modelSelection, LIVE_SELECTION);
-  assert.equal(intent.modelSelectionPinned, false);
-  // 编辑后的新文本照常重发。
+  // Bug4 修复后的优先级：显式 payload（编辑提交时的当前模型）?? 活值 ?? 旧快照。
+  // 旧行为（活值覆盖显式）正是「换模型后编辑重发报错」的根因，已反转。
+  assert.deepEqual(intent.modelSelection, EXPLICIT_SELECTION);
+  assert.equal(intent.modelSelectionPinned, true, "显式 payload 视为 pin");
+  // 编辑后的新文本照常重发（intent.text 与 content 一致，重启重建不吃旧文本）。
   assert.equal(intent.text, "edited text");
   assert.equal(captured.sendInput.text, "edited text");
 });
