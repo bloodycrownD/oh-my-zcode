@@ -146,6 +146,15 @@ export async function startPromptTurn(
   }
 
   if (admission.kind === "queued") {
+    // Bug C 定位日志（2026-10-15）：用户报「重启后编辑重发 UI 已改但 agent 未收到」，
+    // rejected 已有 toast 可见性，唯此分支静默返回。记录归因输入，复现时一锤定音。
+    host.logger?.info?.("v4 prompt admission queued (turn not started)", {
+      inputId: params.inputId,
+      pendingInputId: admission.pendingInputId,
+      queueLength: admission.queueLength,
+      turnId: admission.turnId,
+      sessionId: record.app.sessionId,
+    });
     clearPromptRecordState(
       record,
       previousAutomationId,
