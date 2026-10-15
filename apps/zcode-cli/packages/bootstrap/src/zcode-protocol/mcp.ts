@@ -194,7 +194,7 @@ export async function refreshMcpSessions(
     if (record.workspace.workspaceKey !== params.workspace.workspaceKey) continue;
     const outcome = await record.app.runtime.refreshMcpServers(servers);
     sessions.push({
-      sessionId: record.sessionId,
+      sessionId: record.app.sessionId,
       registeredToolCount: outcome.registeredToolCount,
       removedToolCount: outcome.removedToolCount,
       serverCount: outcome.serverCount,

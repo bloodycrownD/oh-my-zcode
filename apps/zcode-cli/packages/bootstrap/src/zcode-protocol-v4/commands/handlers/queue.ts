@@ -204,6 +204,22 @@ async function setQueueItemDelivery(
   }
   // 同值 toggle = noop：幂等返回（客户端重放/重复点击），不驱动 core。
   if (queueItem.delivery.admitted === payload.delivery) return undefined;
+  // turn 间隙（无前台执行、无外层 abort）时切 guide 会永久滞留：core 的物化
+  // 要求 activeTurn 存在（steering.ts held 回落），autoDrain 又只消费 queue
+  // 车道头项（guide 项已从 queue.items 分流），两个消费侧都看不见它——用户
+  // 观察为「第一轮引导无效，下一轮才出现」。引导语义（当前轮后的下一个边界
+  // 执行）在空闲态的自然延伸就是「立即执行」：转交 sendQueuedNow promotion，
+  // 复用其 idle-only 原子闸门、模型活值与提升链，不另造第三条调度路径。
+  if (
+    payload.delivery === "guide" &&
+    record.app.runtime.getActiveForegroundExecutionId() === undefined &&
+    !record.activeAbortController
+  ) {
+    return sendQueuedNow(host, {
+      ...envelope,
+      payload: { queueItemId: payload.queueItemId },
+    });
+  }
   const changed = await record.app.setQueueItemDelivery(payload.queueItemId, payload.delivery, {
     traceContext: record.traceContext,
   });

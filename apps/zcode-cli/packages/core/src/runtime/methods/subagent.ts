@@ -289,6 +289,13 @@ export function createDefaultSubagentPort(
             enabled: false,
           },
           mcp: childMcpAccess.config,
+          // FORK（magic-context-subagent，2026-10-15）：继承主会话的 magic 门。
+          // 此前 child config 缺该字段，三道门（ctx_* 注册门 runtime-tools、
+          // `## Magic Context` 段 resolver、turn-loop 压缩 transform）对子代理
+          // 全关——用户观察为「magic context 对 subagent 不生效」。端口透传见
+          // 下方 deps；features.magicContext 关闭时主 config 该字段本就 enabled
+          // 非真，继承保持零行为。
+          magicContext: this.config.magicContext,
         },
         {
           eventStore: this.eventStore,
@@ -326,6 +333,18 @@ export function createDefaultSubagentPort(
           mcpPort: childMcpAccess.port,
           skillPort: childSkillPort,
           artifactStore: deps.artifactStore,
+          // FORK（magic-context-subagent，2026-10-15）：三端口透传（transform/段
+          // resolver/工具描述）。resolver 是进程级单例、从 ConfigPort 现读配置，
+          // 主 deps 已持有；主装配 flag off 时不构造端口，判空展开保持零行为。
+          ...(deps.magicContextTurnTransform === undefined
+            ? {}
+            : { magicContextTurnTransform: deps.magicContextTurnTransform }),
+          ...(deps.magicContextPromptSection === undefined
+            ? {}
+            : { magicContextPromptSection: deps.magicContextPromptSection }),
+          ...(deps.magicContextToolDescription === undefined
+            ? {}
+            : { magicContextToolDescription: deps.magicContextToolDescription }),
           appVersion: this.appVersion,
           eventSink: {
             onSessionEvent: async (event) => {

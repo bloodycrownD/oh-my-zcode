@@ -2484,6 +2484,14 @@ export function SessionPane({
       );
       if (ack.status !== "accepted" && ack.status !== "duplicate") {
         logger.warn(`[v4-pane] edit 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+        // Bug C（2026-10-15）：rewind 已先行执行并广播（投影截断=消息看似消失），
+        // 但后续 turn 启动可能被拒（restoreWarning / admission 竞态）。静默 return
+        // 会让用户误以为编辑成功而 agent 无响应；至少把拒绝理由 toast 出来。
+        toast(ack.message ?? intl.formatMessage({ id: "chat.edit.rejected" }), {
+          dismissible: true,
+          position: "bottom-center",
+          variant: "warning",
+        });
         return false;
       }
       // fork ACK 只做旧协议解码兼容；新 edit 永不导航 child。blocked 由行内冲突弹窗处理。

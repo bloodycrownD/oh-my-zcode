@@ -358,9 +358,13 @@ async function startCanonicalIntent(
   // 用户裁定 2026-10-11（出队模型）：编辑重发与 queue 提升同语义——
   // 一律用会话当前活值；显式 payload 仅在会话无活值时兜底，被编辑轮旧快照最后兜底。
   // 仍不写回会话态（v1.0.4 写回红线不变）；pin 仅当最终选择确实来自显式 payload。
+  // 修正 2026-10-15（Bug D）：显式 payload 提到活值之前——它是 composer 编辑提交
+  // 时的当前模型（用户刚换的新模型），活值在 switchModelConfig 竞态/失败时可能
+  // 仍停旧模型，旧模型失效会让编辑重发直接报错。活值仍优先于旧快照，出队语义
+  // （活值 > 快照）保留在后两段；pin 只认显式 payload。
   const liveSelection = record.app.runtime.getSessionModelSelection();
   const resolvedSelection =
-    liveSelection ?? explicitModelSelection ?? editTarget.intent.modelSelection;
+    explicitModelSelection ?? liveSelection ?? editTarget.intent.modelSelection;
   const intent = inputIntentMetadataFromCanonical(
     envelope,
     {
@@ -373,7 +377,7 @@ async function startCanonicalIntent(
       admittedDelivery: editTarget.intent.admittedDelivery,
       fallbackReasonCode: editTarget.intent.fallbackReasonCode,
       modelSelection: resolvedSelection,
-      modelSelectionPinned: !liveSelection && explicitModelSelection !== undefined,
+      modelSelectionPinned: explicitModelSelection !== undefined,
       mode: editTarget.intent.mode,
       planEnabled: editTarget.intent.planEnabled,
       attachmentRefs,

@@ -543,8 +543,11 @@ function KeyboardPlugin({
           return true;
         }
 
-        // IME 正在组合中（如中文输入法），不拦截
-        if (event.isComposing) {
+        // IME 正在组合中（如中文输入法），不拦截。
+        // keyCode 229 兜底：Chromium 部分 IME 时序下 compositionend 先于 keydown
+        // 派发，此时 isComposing 已翻回 false，只有 keyCode=229 仍标识组合态；
+        // 缺了这层兜底会把「确认候选词的 Enter」误判为裸 Enter 发送。
+        if (event.isComposing || event.keyCode === 229) {
           return false;
         }
 
@@ -559,6 +562,12 @@ function KeyboardPlugin({
           return false;
         }
         if (scopedAction === "send") {
+          // IME 二次校验（纵深防御）：改绑层的 matchesShortcutBinding 噪声过滤
+          // 依赖同一组时序敏感标志，compositionend 先行时可能全部失效；发送分支
+          // 必须自带兜底，否则误判直达 onSubmit。
+          if (event.isComposing || event.keyCode === 229) {
+            return false;
+          }
           const modifiedScopedEnter = event.shiftKey || event.ctrlKey || event.metaKey;
           // 反转投递开启时带修饰组合让位主链（Ctrl+Enter = 反向 delivery，交付语义比键位更具体）
           if (!(modifiedScopedEnter && onModifiedSubmit)) {
@@ -730,7 +739,7 @@ function KeyboardPlugin({
     // 非 Enter 物理键不存在手机软键盘误发问题，send 不受 enterSubmits 视口门禁；
     // 与反转投递（仅响应 Ctrl/Meta+Enter）无交集，无需让位。
     const handleNonEnterScopedKeydown = (event: KeyboardEvent) => {
-      if (disabled || event.repeat || event.isComposing || event.key === "Enter") {
+      if (disabled || event.repeat || event.isComposing || event.keyCode === 229 || event.key === "Enter") {
         return;
       }
       const scopedAction = resolveComposerKeyAction(event, composerEffectiveRef.current);

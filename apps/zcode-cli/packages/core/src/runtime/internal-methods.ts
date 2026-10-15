@@ -37,7 +37,7 @@ import type {
 import type { BackgroundResultOriginMeta, ContextUsageBreakdownItem } from "@zcode/contracts";
 import type { RuntimeCommand, RuntimeCommandId } from "./command-queue.js";
 import type { RuntimeMessageEntry } from "../agent/message-history.js";
-import type { McpServerConfig } from "../deps.js";
+import type { McpServerConfig } from "./deps.js";
 import type {
   ActiveTurnInfo,
   AcquireForegroundPromotionLeaseResult,

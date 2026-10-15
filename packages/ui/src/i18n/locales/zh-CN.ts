@@ -4575,6 +4575,8 @@ const zhCN: Record<string, string> = {
   "chat.ctx.rejected": "Magic Context 命令被拒绝。",
   "chat.ctx.noResponse": "Magic Context 命令没有返回输出。",
   "chat.ctx.sessionRequired": "/ctx-* 需要一个已存在的会话，请先发送一条消息再试。",
+  // 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。
+  "chat.edit.rejected": "编辑重发被拒绝，会话状态可能未恢复完成，请重试或新发一条消息。",
   "chat.toolbar.mode.label": "切换模式",
   // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",
