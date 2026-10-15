@@ -369,7 +369,13 @@ async function startCanonicalIntent(
     envelope,
     {
       kind: editTarget.intent.kind,
-      text: editTarget.intent.text,
+      // Bug C 实锤修复（2026-10-15）：intent.text 必须用编辑后的新文本。持久化
+      // 事实（buildPersistedConversationInputIntent）取 `intent.text ?? text`，
+      // intent 元数据若保留被编辑轮的旧文本，落库/重启重建的 msg 就是旧文本
+      // ——用户症状「编辑后 agent 仍用编辑前的 msg」。在线路径模型用 sendInput
+      // 的 content（新文本）所以平时正常，重启后 messageHistory 从持久化 fact
+      // 重建才暴露。kind/queueItemId 等仍继承原轮（归因不变），仅 text 归一。
+      text,
       sourceCommandId: editTarget.intent.sourceCommandId,
       clientId: editTarget.intent.clientId,
       queueItemId: editTarget.intent.queueItemId,
