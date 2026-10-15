@@ -143,6 +143,7 @@ import type {
   ZCodeAgentReadSessionEventsParams,
   ZCodeAgentReadSessionMessagesParams,
   ZCodeAgentReadSessionParams,
+  ZCodeAgentRefreshMcpSessionsParams,
   ZCodeAgentRemovePluginMarketplaceParams,
   ZCodeAgentRespondSessionRuntimePreferencesParams,
   ZCodeAgentResumeSessionParams,
@@ -3147,6 +3148,14 @@ export function createZCodeAgentService(
       }
     },
 
+    /**
+     * MCP 会话热刷新（cr-fix-spec mcp/B-3 补实现处注释，语义与接口处 JSDoc 一致）：
+     * 把 UI 解析的全量 mcpServers 下发到 workspace 内全部 resident session——
+     * CLI 侧 core.refreshMcpServers 做 connect replace + 工具面 diff 注册/反注册。
+     * 兼容：旧 CLI 无 mcp/refreshSessions 方法时（method-not-found）静默降级返回
+     * updatedSessionCount=0（工具面保持旧集合，新会话仍用新配置），不向 UI 抛错。
+     * 触发方：设置页保存/删除/启停/导入/远端同步成功后（尽力而为，失败不打扰用户）。
+     */
     async refreshMcpSessions(params: ZCodeAgentRefreshMcpSessionsParams) {
       const workspaceKey = resolveWorkspaceKey(params);
       try {

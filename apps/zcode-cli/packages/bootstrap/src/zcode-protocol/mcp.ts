@@ -192,13 +192,26 @@ export async function refreshMcpSessions(
   const sessions: ZCodeMcpRefreshSessionsResult["sessions"] = [];
   for (const record of context.sessions.values()) {
     if (record.workspace.workspaceKey !== params.workspace.workspaceKey) continue;
-    const outcome = await record.app.runtime.refreshMcpServers(servers);
-    sessions.push({
-      sessionId: record.app.sessionId,
-      registeredToolCount: outcome.registeredToolCount,
-      removedToolCount: outcome.removedToolCount,
-      serverCount: outcome.serverCount,
-    });
+    // 容错（cr-fix-spec mcp/B-1）：单个 session 的 runtime 可能正在关闭或 mcpPort
+    // 已 dispose，一个 session 抛错不能中断整链——后续 session 仍要刷新。失败的
+    // session 记 warn 后跳过，结果列表只含成功项。
+    try {
+      const outcome = await record.app.runtime.refreshMcpServers(servers);
+      sessions.push({
+        sessionId: record.app.sessionId,
+        registeredToolCount: outcome.registeredToolCount,
+        removedToolCount: outcome.removedToolCount,
+        serverCount: outcome.serverCount,
+      });
+    } catch (error) {
+      context.logger?.warn("MCP session refresh failed", {
+        module: "bootstrap.zcode_protocol",
+        event: "zcode_protocol.mcp.refresh_sessions.session_failed",
+        error: error instanceof Error ? error.message : String(error),
+        sessionId: record.app.sessionId,
+        workspaceKey: params.workspace.workspaceKey,
+      });
+    }
   }
   context.logger?.info("MCP sessions refreshed", {
     module: "bootstrap.zcode_protocol",

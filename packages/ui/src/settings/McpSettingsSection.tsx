@@ -1588,6 +1588,9 @@ export function McpSettingsSection({
         onOpenChange={setImportDialogOpen}
         onImported={async () => {
           await loadMcpFromUserDirectory(services.mcpSyncService, activeWorkspaceIdentity);
+          // cr-fix-spec mcp/B-5：导入与保存/删除/启停同语义——配置落盘后立即刷新
+          // 已开会话的工具面（尽力而为，失败静默）。
+          void refreshRuntimeMcpTools();
         }}
       />
       <RemoteSyncDialogs
@@ -1611,6 +1614,8 @@ export function McpSettingsSection({
           );
           if (loaded) {
             await requestMcpServerStatusList();
+            // cr-fix-spec mcp/B-5：远端同步同导入——落盘后刷新已开会话工具面。
+            void refreshRuntimeMcpTools();
           }
         }}
       />

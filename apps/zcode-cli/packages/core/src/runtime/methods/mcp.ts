@@ -196,6 +196,14 @@ export async function refreshMcpServers(
   if (!this.mcpPort || this.config.mcp?.enabled === false) {
     return { serverCount: 0, registeredToolCount: 0, removedToolCount: 0 };
   }
+  // 竞态防护（cr-fix-spec mcp/B-2）：session 刚创建时 turn-loop 的 initializeMcp
+  // 可能仍在 await startup；若 refresh 抢先完成 diff 并置门闩，晚到的 initializeMcp
+  // 会用旧 snapshot.tools 重新注册旧工具并覆盖 mcpRegisteredToolNames（diff 基线
+  // 污染）。这里等待初始化先落定——initializeMcp 自身幂等（门闩挡重入），已初始化
+  // 完成时立即返回，不改变常规路径时序。
+  if (!this.mcpToolsRegistered) {
+    await this.initializeMcp(effectiveTrace);
+  }
   this.config.mcp = {
     ...this.config.mcp,
     servers,
