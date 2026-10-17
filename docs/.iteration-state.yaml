@@ -605,6 +605,8 @@ magic_context_memory_management:
       cr-func-final: { status: done, executor: subagent, func_ready: yes, dev_ready: yes, note: "11 Step 矩阵全 PASS（Step11=manual_user 待真机）；Step8 深检逐条过、零 must-fix；open deviations 0（六裁定+四静默裁定全登记）；P3 观察=跨页全选可超 100 条被 wire -32602 fail-visible 拒（后续 UX 收窄，非阻塞）" }
     wave1_verify: "worktree 新鲜树补建 workspace dist（shared/rpc/services/provider 手动 tsc -p；magic-context/contracts 等随 s2 build）后 services+ui typecheck 全绿"
     dev_outcome: "dev-ready（2026-10-18，HEAD caf66478，总 diff 2301debc..caf66478 = 30 文件 +3528/-747；core/** 逐字区与 magicContextSettingsForm.ts 零改动）；合并回 main 后执行 Step 11 T-E1 真机验收"
+    step11_auto_e2e: "PASS 17/0（2026-10-18，主代理实跑）：真实 cli/dist/zcode.cjs app-server 进程 + services 真实协议客户端 + resolveSpawnEnv USERPROFILE/HOME 重定向临时 home 全隔离（真实 ~/.omz 零触碰）；覆盖 list 空信封/惰性建库、6 行种子对账（entries+counts 五桶+跨项目隔离+supersededByMemoryId 通路）、archive 逐 id outcome+SQLite 直查成对 mutation 行+archive_reason 落 metadata、重复废弃 already-archived 幂等不增行、missing/ownership 不透明 was not found、注入读路径排除（storage-memory.ts:425 口径 SQL 等价）。排障登记：恒空列表根因=e2e 种子 category 误用小写词表（词表=UPPER_SNAKE：PROJECT_RULES/USER_PREFERENCES 等 12 值），isMemoryRow 读边界拒行而 counts 路径不校验——driver 种子锅，产品无缺陷；openDatabase 进程级单例跨请求/跨进程读新提交均正常。driver 为一次性脚本已删（未提交，如需固化可重建为 bootstrap/scripts/test-magic-context-memories-e2e.mjs）"
+    step11_manual_pending: "T-E1 余下桌面端人工项：面板视觉（徽章/对话框/分页）、onboarding 无记忆勾选、断开 CLI 后面板占位态（services 降级逻辑已由 T-R3 钉住）、真实会话注入面收敛观察"
     commit_id_corrections: "cr-func-final 以 git 实读订正：s4=6244bb7a / s9=3e517db7 / s3=11735c4b / s5=f1979e06 / s6=2449b3d5 / s8=fc49bf82（前轮子代理汇报口径互换过，以本行为准）"
     notes: "impl 子代理只编辑不 commit，主代理按 Step pathspec 统一 commit（中文 message）；依赖链 s1→s2→s3、s4→s5→s6→s7、s5→s8、s9 独立；Step 11 e2e=manual_user 非阻塞，dev-ready 后交用户真机验收"
 
