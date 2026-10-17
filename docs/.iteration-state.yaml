@@ -570,3 +570,26 @@ dev_loop_v3151:
     - "impl-w35 预览读 ref 用 previewRef ?? ref（fork 冷恢复行 ref 可能可变；与 image/video/pdf 预览同惯例；代码内声明）"
   final_verdict: dev-ready（2026-10-12）——verify 12/12 PASS（在 HEAD=6a22ceaf 全量重跑：typecheck 0err、CLI turbo 27/27、test:v4-perf 357/357=354+MF-1×2+sf-5×1、mc 142/142、desktop 差分 fresh=0、lint 74w/0e（-c + --ignore .tools 口径）、knip NEW=0、fmt 零新增、四红线净 0、CLI bundle 28.3MB 含双签名、arch 0/0）；cr-func 18/18 closed（MF-1 处置=修法 a 补 run-service 运行期钉子，变异红自检）；HEAD=6a22ceaf 共 12 commit；e2e 复验另行。v4per 首跑一次环境态 FAIL（dist 落盘窗口）已归因并重跑全绿——CI 保持 build 后串行测试口径。
 
+# ===== magic-context-memory-management（spec-check-loop）=====
+magic_context_memory_management:
+  dag_version: 1
+  review_round: 4
+  spec_path: docs/iterations/magic-context-memory-management/spec.md
+  prd_path: null  # 单文档迭代（需求来源=用户口述 2026-10-16 + brainstorm 归档 docs/apm/memory/20261016-memory-settings-brainstorm.md）
+  open_must_fix: []
+  status: execute-ready（r4 全项闭合 Go；待用户确认开工 code-dev-loop Step 1→11）
+  r1_review: { verdict: No-Go, p0: 1, p1: 4, p2: 7, core: "P0-1 ctx_memory 重复废弃三面语义矛盾（组合函数 skipped/工具面 inactive 拒绝/RPC already-archived 无生产者，T-A1/T-A2/T-R2 三 blocking 按字面互斥）+ P1-1 换号 syncSettingsFromRecord 复活路径 + P1-2 onboarding record 停写方式未裁定 + P1-3 Step10 门禁不含三个新测试 + P1-4 /ctx-status 无 memory 桶不可作对账依据", closed: "doc-fix r1（15 处）：outcome 四值枚举单一事实源+三面统一；OnboardingSettingsSyncPatch/syncSettingsFromRecord 摘键；schema 改 nullable().optional() 省略传；门禁补三测试+parity 脚本；对账改 SQLite 直查；P2×7 随修" }
+  r2_review: { verdict: "No-Go（r1 全部闭合，doc-fix 自身引入 3P1+4P2）", p0: 0, p1: 3, p2: 4, core: "parity 路径写成 packages/ui/scripts（实为仓库根 scripts/，packages/ui 无 scripts 目录）；merged 口径方向写反；rejected 文案两态未裁定（ownership→须不透明 was not found，上游 tools.ts:949-958 + storage-memory.ts:979-986 防泄漏纪律）", closed: "doc-fix r2（11 处）；主代理独立核 SQL（storage-memory.ts:425 列表 /:572 counts）纠偏了 r1 审查建议的 merged 方向" }
+  r3_review: { verdict: "No-Go（6/7 闭合，r3 修订后即可 Go）", p0: 0, p1: 3, p2: 3, core: "r2 只改 Step10 漏改 T-U1 路径；entries 缺 supersededByMemoryId 使「已合并」徽章无数据通路；phase B「可选/可裁剪」标签与 D4 拍板冲突（遗留）", closed: "doc-fix r3（10 处）：T-U1 同步；entries+合并徽章+T-R1 断言闭环（COLUMN_MAP:66 实证带出）；拍板标签订正；onboardingRecord.ts 路径笔误；观察项指代；rejected 子因区分写明" }
+  r4_review: { verdict: "Go（execute-ready）", p0: 0, p1: 0, p2: 0, core: "r3 六项全落地一致闭合；代码抽查（supersededByMemoryId 带出链）与行号精确匹配；五关键词全量扫描无残留" }
+  notes: "每轮全新 readonly 审查子代理；教训两条：①主代理 doc-fix 后必须全文 grep 同款旧写法（r2 只改 Step10 漏 T-U1 被 r3 抓回）；②审查员方向性结论须抽验（r1 建议的 merged 口径方向反了，主代理核 SQL 纠偏后才落 r2）"
+  dev_loop:
+    mode: code-dev-loop（2026-10-18 用户确认开工）
+    branch: magic-context-memory-management
+    worktree: D:\worktree\magic-context-memory-management
+    base_sha: 44302c2c
+    dag_version: 1
+    wave_plan: "[[impl-s1-barrel], [impl-s2-ctx-memory, impl-s4-proto, impl-s9-onboarding], [impl-s3-core-test, impl-s5-services], [impl-s6-cli-handler, impl-s8-ui], [impl-s7-rpc-test], [cr-func-a], [verify-gates], [cr-func-final]]"
+    node_status: {}
+    notes: "impl 子代理只编辑不 commit，主代理按 Step pathspec 统一 commit（中文 message）；依赖链 s1→s2→s3、s4→s5→s6→s7、s5→s8、s9 独立；Step 11 e2e=manual_user 非阻塞，dev-ready 后交用户真机验收"
+
