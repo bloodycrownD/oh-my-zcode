@@ -2174,6 +2174,163 @@ export type ZCodeWorkspaceReadMagicContextConfigResult = z.infer<
 >;
 
 /**
+ * FORK（magic-context-memory-management / 变更点 5 · Step 4）：设置页「记忆」分区
+ * 管理面板的 workspace RPC——列取当前项目的 magic-context 跨会话项目记忆。
+ *
+ * 这是 fork 自有的管理面（上游没有对应 RPC）：数据源是 magic-context 的 SQLite
+ * `memories` 表；原生文件式工作区记忆（`appSettings.memoryEnabled` 那条线）本轮
+ * UI 退场、协议字段保留，与本对方法无关。
+ *
+ * 四处手工对齐（spec 变更点 5；本节点只落 ①②，③④ 是后续节点的交付物——改动任一处
+ * 时必须同步检查全部四处）：
+ *   ① schema 导出——本文件（本对 + 下方 archive 对）；
+ *   ② 方法名表——本文件 `zcodeProtocolMethods.workspaceListMagicContextMemories` /
+ *      `workspaceArchiveMagicContextMemories`；
+ *   ③ CLI switch case——Step 6：`bootstrap/src/zcode-protocol/server.ts` dispatch +
+ *      新 handler `bootstrap/src/zcode-protocol/magic-context-memories.ts`；
+ *   ④ services 方法——Step 5：`packages/services/src/zcode-agent/zcodeAgent.ts` /
+ *      `zcodeAgentService.ts`。
+ *
+ * 降级语义（spec D6）：旧 CLI 回 -32601 时由 services 合成 `supported:false` 的
+ * 零值结果；magicContext 关闭 / 库打不开时 CLI 回 `available:false` + `reason`
+ * （不建库不落盘），面板走占位态。
+ *
+ * `category` 过滤由 CLI handler（Step 6）施加——host 层列表薄封装不接收该参数；
+ * 协议层不复刻分类词表（权威在 magic-context 包 `memory/types.ts` 的
+ * `MemoryCategory`，13 值 accept-both：v2 五类 + legacy 九类桥接）。
+ */
+export const zcodeWorkspaceListMagicContextMemoriesParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    category: z.string().optional(),
+    /** 单次拉取上限；host 层按同值截断，被截断时 result.truncated=true。 */
+    limit: z.number().int().positive().max(200).default(200),
+    offset: z.number().int().nonnegative().optional(),
+  })
+  .strict();
+export type ZCodeWorkspaceListMagicContextMemoriesParams = z.infer<
+  typeof zcodeWorkspaceListMagicContextMemoriesParamsSchema
+>;
+
+/**
+ * 条目字段是 `memories` 行的管理视图投影（host 层 `toMemory` 产物）：
+ *
+ * - `category` / `status` 以字符串过线：存储读边界（`isMemoryRow`）已保证落在
+ *   `MemoryCategory`（13 值）/ `MemoryStatus`（active|permanent|archived）域内；
+ *   协议层不复刻词表，上游新增分类时不至于整表 parse 失败。
+ * - `expiresAt` 可为 NULL（无 TTL 类目，promotion.ts:60-63 的写入侧只产 null 或
+ *   now+ttl）——列表 SQL 的 `expires_at IS NULL` 行照常回，协议层必须接受 null。
+ * - `archiveReason` 从 `metadata_json.archive_reason` 提出（spec D5：reason 存
+ *   metadata，mutation 行只记 mutation_type）；缺席＝无 reason。
+ * - `supersededByMemoryId` 非空＝被后继记忆合并取代（merged）行——写路径把它们的
+ *   status 也置 'archived'，故 merged 行同样进列表，徽章展示用本字段区分。
+ */
+const zcodeMagicContextMemoryEntrySchema = z
+  .object({
+    id: z.number().int(),
+    category: z.string(),
+    content: z.string(),
+    importance: z.number(),
+    status: z.string(),
+    seenCount: z.number(),
+    createdAt: z.number(),
+    updatedAt: z.number(),
+    expiresAt: z.number().nullable(),
+    archiveReason: z.string().optional(),
+    supersededByMemoryId: z.number().int().nullable(),
+  })
+  .strict();
+
+export const zcodeWorkspaceListMagicContextMemoriesResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 旧 CLI 不支持该方法时为 false（services 侧按 -32601 合成的降级标记；缺省 true）。 */
+    supported: z.boolean().default(true),
+    /** magicContext 关闭 / 库打不开 → false（零值条目，不建库不落盘）。 */
+    available: z.boolean(),
+    /** available=false 的原因："disabled" | "unavailable"，供 UI 占位文案。 */
+    reason: z.string().optional(),
+    entries: z.array(zcodeMagicContextMemoryEntrySchema),
+    /**
+     * 汇总计数（`getMemoryCountsByStatus` 口径）：merged 行归 merged 桶、不进
+     * archived 桶，且无过期过滤——与列表口径存在登记在案的差（spec 兼容性节），
+     * 面板以列表为准、counts 仅作汇总参考。
+     */
+    counts: z
+      .object({
+        total: z.number().int().nonnegative(),
+        active: z.number().int().nonnegative(),
+        permanent: z.number().int().nonnegative(),
+        archived: z.number().int().nonnegative(),
+        merged: z.number().int().nonnegative(),
+      })
+      .strict(),
+    /** limit/offset 截断标记：本页之后该项目还有未返回的条目。 */
+    truncated: z.boolean(),
+  })
+  .strict();
+export type ZCodeWorkspaceListMagicContextMemoriesResult = z.infer<
+  typeof zcodeWorkspaceListMagicContextMemoriesResultSchema
+>;
+
+/**
+ * FORK（magic-context-memory-management / 变更点 5 · Step 4）：批量废弃（archive
+ * 软删）当前项目的 magic-context 记忆。四处手工对齐坐标见上方 list 对注释。
+ *
+ * `reason` 上限 4096 与工具面契约（变更点 4 的 `CtxMemoryInputSchema.reason`）
+ * 一致——UI 按钮与对话内 `ctx_memory action:"archive"` 是同一组合函数的两条入口，
+ * 契约上限不允分叉。reason 由 `archiveMemory` trim 后存入
+ * `metadata_json.archive_reason`，空串等同不传。
+ */
+export const zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 目标记忆 id（1..100；host 层按首见序去重后逐条处理）。 */
+    memoryIds: z.array(z.number().int()).min(1).max(100),
+    reason: z.string().max(4096).optional(),
+  })
+  .strict();
+export type ZCodeWorkspaceArchiveMagicContextMemoriesParams = z.infer<
+  typeof zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema
+>;
+
+/**
+ * 四值枚举 = 组合函数 outcome 单一事实源（`host/memory-admin.ts` 的
+ * `archiveProjectMemories`）的直通，不得在别处重新分类：
+ *   archived         预验证通过，本次事务内成对写（archiveMemory + mutation 行）
+ *   already-archived status=archived 且未 superseded——跳过，不二次写 mutation 行
+ *   rejected         ownership 不符或已被 superseded（拒绝子因不进 wire；message
+ *                    已按两态给出可读文案：superseded→inactive 风格 / ownership→
+ *                    不透明 was not found）
+ *   missing          id 不存在
+ */
+const zcodeMagicContextMemoryArchiveOutcomeSchema = z.enum([
+  "archived",
+  "already-archived",
+  "missing",
+  "rejected",
+]);
+
+export const zcodeWorkspaceArchiveMagicContextMemoriesResultSchema = z
+  .object({
+    workspace: zcodeWorkspaceRefSchema,
+    /** 逐 id 一条（host 组合函数按首见序去重后产出）；message 供 toast 直显。 */
+    outcomes: z.array(
+      z
+        .object({
+          id: z.number().int(),
+          outcome: zcodeMagicContextMemoryArchiveOutcomeSchema,
+          message: z.string().optional(),
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type ZCodeWorkspaceArchiveMagicContextMemoriesResult = z.infer<
+  typeof zcodeWorkspaceArchiveMagicContextMemoriesResultSchema
+>;
+
+/**
  * FORK（prompt-language-option）：模型语言（agent 系统提示词语言）。
  *
  * 与 magicContext 的关键差异：这是**单个标量**（"auto" | "zh-CN" | "en-US"），
@@ -3483,6 +3640,14 @@ export const zcodeProtocolMethods = {
   // FORK（Step 29 / D-12）：update 的配对读方法。设置分区渲染表单初值必须先读
   // effective 域——update 是整域覆盖，UI 不先读就会在首次保存时抹掉其余字段。
   workspaceReadMagicContextConfig: "workspace/readMagicContextConfig",
+  // FORK（magic-context-memory-management / 变更点 5）：设置页「记忆」分区的
+  // magic-context 项目记忆管理面（list 结构化条目+计数 / archive 批量软删+reason）。
+  // 四处手工对齐（schema 导出/方法名/CLI case/services 方法）——schema 对在本文件
+  // `zcodeWorkspace{List,Archive}MagicContextMemories*`；CLI dispatch = Step 6，
+  // services 方法 = Step 5。降级：旧 CLI -32601 → list 由 services 合成
+  // supported:false 零值 / archive 抛可读错误。additive，旧 Host 不受影响。
+  workspaceListMagicContextMemories: "workspace/listMagicContextMemories",
+  workspaceArchiveMagicContextMemories: "workspace/archiveMagicContextMemories",
   // FORK（prompt-language-option）：模型语言（agent 提示词语言）读写。
   // 写盘 + ConfigPort 双写 + 运行中 session 热更新（下一轮生效）。
   // 旧 CLI method-not-found → host 侧降级（read 返回 supported:false）。
