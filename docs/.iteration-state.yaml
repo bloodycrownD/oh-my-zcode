@@ -626,5 +626,6 @@ magic_context_memory_management:
         cr-func-fixwave: { status: done, executor: subagent, func_ready: yes, note: "10+1 矩阵全 ✅、必重跑四绿（19/19、13/13、5914/5914、tsc）、G-1 独立红绿复算、MF-2 命中集精确等于白名单；0 must-fix" }
       deviations: none（三处保留均 spec 授权/结构保证：B-1 manual 系 spec 明文；drift wire 侧反向红证由 contracts 侧+绝对期望值结构覆盖；MF-1 失败后 load(0) 清勾选为 spec 字面+注释登记）
       leftovers: "MF-1 >100 全选与部分失败无 UI 自动化（无组件测试基建）→ 并入合并后 QA；open questions ×10 待拍板未决（含 OQ10 过滤空态文案）"
+    e2e_fix_verify: "PASS 18/0（2026-10-18，主代理实跑一次性 driver 后已删）：真机形态=重建 cli bundle（补 @zcode/tui dist 与根 shared junction dist）+ services 真实协议客户端 spawn zcode.cjs app-server + USERPROFILE/HOME 临时重定向全隔离。覆盖：Step11 回归面（T1 空信封/惰性建库、T3 六行种子对账+merged supersededByMemoryId 通路+counts 五桶、T4 跨项目隔离、T5 archive reason 落库+mutation 成对、T6 already-archived 幂等不增行、T7 missing 不透明 was not found、T8 管理视图含 archived 行带状态）+ cr-fix 面（T9 全量 active 108 整批 wire -32602 拒且零部分落库、T10 分批 100+8 全 archived+终态 counts {0,1,109,1,111}、T11/T11b 家目录身份解析失败真机形态=list unavailable 信封 / archive -32010 no usable project identity）。driver 侧三修正留档：①custom commandResolver 返回完整 argv（app-server --stdio 不自动追加）；②对照 workspace 的 git root commit 必须不同（同秒空 commit 同 author 同 message 会撞 hash → 同 git 身份，产品语义如此非缺陷）；③管理面板 RPC list 含 archived 行（管理视图），排除 archived 是注入读路径（storage-memory.ts:425）——两读路径口径勿混"
     outcome: "dev-ready（2026-10-18，HEAD b8d52900；cr-fix 10/10 落地，func-ready yes）"
 
