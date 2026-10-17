@@ -68,9 +68,17 @@ type MemoryCounts = ZCodeWorkspaceListMagicContextMemoriesResult["counts"];
 const PAGE_SIZE = 200;
 /** 与工具面 `CtxMemoryInputSchema.reason` / wire schema 的上限一致。 */
 const REASON_MAX_LENGTH = 4096;
+/**
+ * 单批废弃的 id 上限 100：wire `memoryIds` 为 `int[] 1..100`（shared
+ * `zcode-protocol/index.ts:2289` 的 `max(100)`），与工具面契约 `CtxMemoryInputSchema.ids`
+ * 同值。UI 依赖方向不能 import contracts，只能在此本地锚定；超过即整批 -32602，
+ * 故 `submitArchive` 按本值分片提交（勾选上限=已加载条目数，跨页可 >100）。
+ */
+const ARCHIVE_BATCH_MAX = 100;
 
 /**
- * 分类显示标签（magic-context `MemoryCategory` 12 值：v2 五类 + legacy 七类）。
+ * 分类显示标签（magic-context `MemoryCategory` 12 值 accept-both：v2 五类 + legacy 九类，
+ * 重叠 CONSTRAINTS/NAMING 去重后唯一值 12）。
  * 未知分类回退原样回显——上游新增分类时不至于让徽章变成空白。
  */
 const CATEGORY_LABEL_KEY: Readonly<Record<string, string>> = {
@@ -267,17 +275,32 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
     if (memoryIds.length === 0) return;
     const trimmedReason = reason.trim();
     setArchiving(true);
+    // 按 ARCHIVE_BATCH_MAX 分片顺序提交：单批 >100 会被 wire 整批拒（-32602），
+    // 串行而非并行是为了让「已成功归档的条数」与「失败发生在第几片」都确定可比。
+    const batches: number[][] = [];
+    for (let start = 0; start < memoryIds.length; start += ARCHIVE_BATCH_MAX) {
+      batches.push(memoryIds.slice(start, start + ARCHIVE_BATCH_MAX));
+    }
+    let archivedCount = 0;
+    let alreadyCount = 0;
+    let failedCount = 0;
     try {
-      const result = await services.zcodeAgentService.archiveMagicContextMemories({
-        workspacePath: targetWorkspacePath,
-        memoryIds,
-        ...(trimmedReason.length > 0 ? { reason: trimmedReason } : {}),
-      });
-      const archivedCount = result.outcomes.filter((item) => item.outcome === "archived").length;
-      const alreadyCount = result.outcomes.filter(
-        (item) => item.outcome === "already-archived",
-      ).length;
-      const failedCount = result.outcomes.length - archivedCount - alreadyCount;
+      for (const batch of batches) {
+        const result = await services.zcodeAgentService.archiveMagicContextMemories({
+          workspacePath: targetWorkspacePath,
+          memoryIds: batch,
+          ...(trimmedReason.length > 0 ? { reason: trimmedReason } : {}),
+        });
+        const batchArchivedCount = result.outcomes.filter(
+          (item) => item.outcome === "archived",
+        ).length;
+        const batchAlreadyCount = result.outcomes.filter(
+          (item) => item.outcome === "already-archived",
+        ).length;
+        archivedCount += batchArchivedCount;
+        alreadyCount += batchAlreadyCount;
+        failedCount += result.outcomes.length - batchArchivedCount - batchAlreadyCount;
+      }
       const parts: string[] = [];
       if (archivedCount > 0) {
         parts.push(
@@ -306,15 +329,27 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
       if (parts.length > 0) toast(parts.join(" "));
       setDialogOpen(false);
       setReason("");
-      // 废弃后刷新列表与 counts（同一 load 回填两者），已选中的行随之退役。
-      await load(0);
     } catch (error) {
       // services 已把 -32601 与 SQLITE_BUSY 转译成可读中文：原样进 toast，弹窗保留以便重试。
       logger.warn("[MemoryManagementSection] 废弃项目记忆失败", {
         error: errorMessage(error),
       });
-      toast(errorMessage(error));
+      // 失败即停：本片之后的分片不再提交，已成功分片的 archived 条数照常回报，失败原文附后。
+      const failureParts: string[] = [];
+      if (archivedCount > 0) {
+        failureParts.push(
+          intl.formatMessage(
+            { id: "settings.memory.management.archive.toastArchived" },
+            { count: archivedCount },
+          ),
+        );
+      }
+      failureParts.push(errorMessage(error));
+      toast(failureParts.join(" "));
     } finally {
+      // 无论成败都刷新：失败前已归档的分片必须反映到列表与 counts。刷新会同时清空勾选
+      //（load(0) 的既有语义），故失败后重试需重新勾选——弹窗保持打开只表示本次提交未走完。
+      await load(0);
       setArchiving(false);
     }
   }, [intl, load, reason, selectedEntries, services, targetWorkspacePath]);
@@ -322,7 +357,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   if (!targetWorkspacePath) {
     return (
       <p className="text-ui-base leading-6 text-foreground-subtle">
-        {intl.formatMessage({ id: "settings.context.noWorkspace" })}
+        {intl.formatMessage({ id: "settings.memory.management.noWorkspace" })}
       </p>
     );
   }
@@ -330,6 +365,12 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   const sectionDescription = intl.formatMessage({
     id: "settings.memory.management.description",
   });
+
+  /**
+   * 读取失败且没有任何已加载数据：主区留给上方错误横幅与重试，不渲染空态 EMPTY——
+   * 「暂无项目记忆」是对数据的肯定断言，此刻并未读到数据（counts 徽章保留最近成功值）。
+   */
+  const errorWithoutData = loadError !== null && entries.length === 0;
 
   return (
     <div className="space-y-4">
@@ -450,7 +491,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
             <div className="rounded-xl border border-dashed border-border bg-transparent px-4 py-8 text-center text-ui-base text-foreground-subtle">
               {intl.formatMessage({ id: "settings.memory.management.loading" })}
             </div>
-          ) : visibleEntries.length === 0 ? (
+          ) : errorWithoutData ? null : visibleEntries.length === 0 ? (
             <div
               data-testid={TID_SETTINGS_MCM_EMPTY}
               className="rounded-xl border border-dashed border-border bg-transparent px-4 py-8 text-center text-ui-base text-foreground-subtle"

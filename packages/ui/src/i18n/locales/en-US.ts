@@ -2209,6 +2209,7 @@ const enUS: Record<string, string> = {
   // FORK（magic-context-memory-management / Step 8）：原生「工作区记忆」viewer 与开关
   // 退场（内存测试文件与设置页入口一并删除），「记忆」分区改挂 magic-context 跨会话
   // 项目记忆管理面板：分类/状态徽章、计数汇总、批量废弃（软删除）。
+  "settings.memory.management.noWorkspace": "Open a workspace before managing project memories.",
   "settings.memory.management.description":
     "Manage the cross-session project memories stored by the local CLI (a remote workspace still manages local data). Archiving is a soft delete: memories leave the injection surface of later turns and keep an auditable archive record.",
   "settings.memory.management.loading": "Loading project memories…",

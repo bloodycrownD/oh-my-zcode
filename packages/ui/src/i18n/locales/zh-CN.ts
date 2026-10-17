@@ -2075,6 +2075,7 @@ const zhCN: Record<string, string> = {
   // FORK（magic-context-memory-management / Step 8）：原生「工作区记忆」viewer 与开关
   // 退场（内存测试文件与设置页入口一并删除），「记忆」分区改挂 magic-context 跨会话
   // 项目记忆管理面板：分类/状态徽章、计数汇总、批量废弃（软删除）。
+  "settings.memory.management.noWorkspace": "请先打开一个工作区，再管理项目记忆。",
   "settings.memory.management.description":
     "管理本机 CLI 保存的跨会话项目记忆（远程工作区时同样管理本机数据）。废弃是软删除：记忆会从后续对话的注入面移除，并保留可审计的废弃记录。",
   "settings.memory.management.loading": "正在加载项目记忆…",
