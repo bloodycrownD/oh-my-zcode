@@ -457,8 +457,21 @@ export {
   updateMemorySeenCount,
   ModuleMemoryAuthorityError,
   type InsertMemoryResult,
+  // Step 1（memory-management 迭代）：记忆管理面（设置页 list/counts + 人工/工具
+  // 废弃）的 storage 原语。管理组合函数见本段末的 host/memory-admin.js 块。
+  archiveMemory,
+  getMemoriesByProject,
+  getMemoryCountsByStatus,
+  type MemoryCountsByStatus,
 } from "./core/features/magic-context/memory/storage-memory.js";
 export { computeNormalizedHash } from "./core/features/magic-context/memory/normalize-hash.js";
+/**
+ * Step 1（memory-management 迭代）：废弃的 mutation 行写入口。它必须与
+ * `archiveMemory` 在同一事务成对出现（m1 的 `<removed/>` 渲染读 mutation 行），
+ * 出 barrel 是为了让 host/memory-admin.ts 的组合函数复用同一写入口，而不是
+ * 让调用方各自拼 INSERT。
+ */
+export { queueMemoryMutation } from "./core/features/magic-context/storage-memory-mutation-log.js";
 /**
  * v2 五分类：写入面唯一接受的分类集（V2_MEMORY_CATEGORIES 与契约层
  * `CTX_MEMORY_CATEGORIES` 一一对应，drift guard 测试钉住两边一致）。出 barrel
@@ -472,13 +485,36 @@ export {
 export {
   resolveProjectIdentityForSession,
   storedPathBelongsToIdentity,
+  // Step 1（memory-management 迭代）：管理组合函数的 ownership 判据两边归一
+  // （legacy 裸路径 vs 解析身份），见 host/memory-admin.ts 的 archiveProjectMemories。
+  normalizeStoredProjectPath,
 } from "./core/features/magic-context/memory/project-identity.js";
 export { getVisibleMemoryIds } from "./core/hooks/magic-context/inject-compartments.js";
 export type {
   Memory,
   MemoryCategory,
   MemoryInput,
+  MemoryStatus,
 } from "./core/features/magic-context/memory/types.js";
+
+/**
+ * FORK（memory-management 迭代 / Step 1）：记忆管理组合函数（host 适配层）。
+ *
+ * 唯一能保证「`archiveMemory` + `queueMemoryMutation` 同事务成对写」的入口——
+ * 设置页 RPC（bootstrap 的 magic-context-memories handler）与 agent 工具
+ * （core 的 ctx-memory archive 分支）两条写路径都经它落库，不在调用方重新
+ * 拼写。outcome 四值枚举（archived / already-archived / rejected / missing，
+ * rejected 带 ownership|superseded 子因）以 host/memory-admin.ts 的导出类型为
+ * 单一事实源，RPC 契约与工具文案只做直通/映射。
+ */
+export {
+  archiveProjectMemories,
+  getProjectMemoryCountsForAdmin,
+  listProjectMemoriesForAdmin,
+  type MemoryArchiveOutcome,
+  type MemoryArchiveOutcomeEntry,
+  type MemoryArchiveRejectionReason,
+} from "./host/memory-admin.js";
 
 // ── 4d. 211 行段 + prompt-surface 解析面（Step 12 / D1+D6+D7） ─────────────────
 
