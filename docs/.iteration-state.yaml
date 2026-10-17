@@ -593,8 +593,8 @@ magic_context_memory_management:
     node_status:
       impl-s1-barrel: { status: done, executor: subagent, commit: 50ed0057 }
       impl-s2-ctx-memory: { status: done, executor: subagent, commit: 6b7175e7, note: "临时冒烟 6/6 + 既有 test-ctx-search-memory 10/10 回归绿" }
-      impl-s4-proto: { status: done, executor: subagent, commit: 3e517db7, note: "三处静默裁定已注释：expiresAt number|null / reason max4096 / category+status 以 string 过线" }
-      impl-s9-onboarding: { status: done, executor: subagent, commit: 6244bb7a, note: "T-O1 断言1 用 UI 源守卫（无渲染级测试入口）；T-O1 4/4 + parity 5904/5904" }
+      impl-s4-proto: { status: done, executor: subagent, commit: 6244bb7a, note: "三处静默裁定已注释：expiresAt number|null / reason max4096 / category+status 以 string 过线" }
+      impl-s9-onboarding: { status: done, executor: subagent, commit: 3e517db7, note: "T-O1 断言1 用 UI 源守卫（无渲染级测试入口）；T-O1 4/4 + parity 5904/5904" }
       impl-s3-core-test: { status: done, executor: subagent, note: "10/10 + 既有回归 10/10；登记事实：ids 空数组在契约层被 min(1) Zod 拒（非文本错误）" }
       impl-s5-services: { status: done, executor: subagent, note: "降级 4/4 + tsc 0 + arch 0；给 s6 的协调点=wire 转发 category/limit/offset 须 CLI 落实、BUSY message 保原文、降级 reason 第三值 unsupported" }
       impl-s6-cli-handler: { status: done, executor: subagent, note: "冒烟 8/8 + bootstrap tsc 0；裁定=disabled 时 archive 抛 -32010 可读错而非空信封、effective 门不用 isMagicContextEnabled 冷冻结值、list 开库失败（含 BUSY）收敛 unavailable 信封而 archive 保原文透传" }
@@ -602,6 +602,9 @@ magic_context_memory_management:
       impl-s7-rpc-test: { status: done, executor: subagent, note: "契约测试 15/15 + 同包 ui-config 14/14 共存；登记口径=expires_at=0 死行进 counts 不进列表、authority 整批回滚、ConfigPort 双方向优先" }
       cr-func-a: { status: done, executor: subagent, func_ready: yes, note: "Step1-7+9 矩阵全 PASS，blocking 测试 id 全落位，三测实拍 10/15/4 绿；零 must-fix；提醒 CHANGELOG 待办" }
       verify-gates: { status: done, executor: main, note: "T-G1 全绿：root tsc -b 0 错；oxlint 0e/74w 基线；architecture 0；test:v4-perf exit0；config-rpc 10 + ui-config 14 + memories-rpc 15 + ctx-search 10 + ctx-archive 10 + tool-name-closure 6 + services 降级 4 + T-O1 4；parity 5913/5913；CHANGELOG Unreleased 已写" }
+      cr-func-final: { status: done, executor: subagent, func_ready: yes, dev_ready: yes, note: "11 Step 矩阵全 PASS（Step11=manual_user 待真机）；Step8 深检逐条过、零 must-fix；open deviations 0（六裁定+四静默裁定全登记）；P3 观察=跨页全选可超 100 条被 wire -32602 fail-visible 拒（后续 UX 收窄，非阻塞）" }
     wave1_verify: "worktree 新鲜树补建 workspace dist（shared/rpc/services/provider 手动 tsc -p；magic-context/contracts 等随 s2 build）后 services+ui typecheck 全绿"
+    dev_outcome: "dev-ready（2026-10-18，HEAD caf66478，总 diff 2301debc..caf66478 = 30 文件 +3528/-747；core/** 逐字区与 magicContextSettingsForm.ts 零改动）；合并回 main 后执行 Step 11 T-E1 真机验收"
+    commit_id_corrections: "cr-func-final 以 git 实读订正：s4=6244bb7a / s9=3e517db7 / s3=11735c4b / s5=f1979e06 / s6=2449b3d5 / s8=fc49bf82（前轮子代理汇报口径互换过，以本行为准）"
     notes: "impl 子代理只编辑不 commit，主代理按 Step pathspec 统一 commit（中文 message）；依赖链 s1→s2→s3、s4→s5→s6→s7、s5→s8、s9 独立；Step 11 e2e=manual_user 非阻塞，dev-ready 后交用户真机验收"
 
