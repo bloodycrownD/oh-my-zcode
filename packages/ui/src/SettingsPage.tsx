@@ -29,7 +29,6 @@ import { toast } from "@/components/ui/toast.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
-import { getPathLeaf } from "@/lib/path.js";
 
 import {
   addPendingSettingsSectionListener,
@@ -55,7 +54,7 @@ import { AutomationsSection } from "@/settings/AutomationsSection.js";
 import { PluginsSection } from "@/settings/PluginsSection.js";
 import { HooksSection } from "@/settings/HooksSection.js";
 import { WorkspaceFileSearchSection } from "@/settings/WorkspaceFileSearchSection.js";
-import { MemorySettingsSection } from "@/settings/MemorySettingsSection.js";
+import { MemoryManagementSection } from "@/settings/MemoryManagementSection.js";
 import { MagicContextSettingsSection } from "@/settings/MagicContextSettingsSection.js";
 import { BrowserSettingsSection } from "@/settings/BrowserSettingsSection.js";
 import { ComputerUseSection } from "@/settings/ComputerUseSection.js";
@@ -292,24 +291,8 @@ export function SettingsPage({
   );
   const selectDirectory = useSelectDirectory();
   const services = useServices();
-  const onboardingRecordService = services.onboardingRecordService;
   const localHostServices = useBaseWorkspaceServices();
   const { settings: sharedSettings, update: updateSharedSettings } = useSettings();
-  const memoryWorkspaceDisplayNames = useMemo(() => {
-    const names = new Set<string>();
-    // Memory Scope 的项目顺序以 settings.json recentProjects 为准；打开中的
-    // Workspace 只补充尚未持久化的项目，不能抢占最近项目排序。
-    for (const path of sharedSettings?.recentProjects ?? []) {
-      const name = getPathLeaf(path).trim();
-      if (name) names.add(name);
-    }
-    for (const tab of workspaceTabs) {
-      const name = tab.label.trim() || getPathLeaf(tab.workspacePath).trim();
-      if (name) names.add(name);
-    }
-    return [...names];
-  }, [sharedSettings?.recentProjects, workspaceTabs]);
-  const memoryEnabled = sharedSettings?.memoryEnabled === true;
   const nativeSearchEnhancementsEnabled = sharedSettings?.nativeSearchEnhancementsEnabled !== false;
   const askUserQuestionAutoResolutionEnabled =
     sharedSettings?.askUserQuestionAutoResolutionEnabled !== false;
@@ -548,29 +531,24 @@ export function SettingsPage({
     },
     [updateSharedSettings],
   );
-  const handleMemoryEnabledChange = useCallback(
-    async (enabled: boolean) => {
-      await runSettingsActionAsync({
-        featureId: "settings.memory",
-        action: "toggle_memory",
-        trigger: "switch",
-        operation: async () => {
-          await updateSharedSettings({ memoryEnabled: enabled });
-          // 手动修改反向回写 record，换号同步不会复活旧值；失败不阻塞开关。
-          await onboardingRecordService
-            ?.updateRecordPreferences({ memoryEnabled: enabled })
-            .catch((cause: unknown) => {
-              console.warn("[settings] 回写引导记录失败", String(cause));
-            });
-        },
-        completed: {
-          resultSource: "shared_settings",
-          stateAfter: enabled ? "enabled" : "disabled",
-        },
-      });
-    },
-    [updateSharedSettings],
-  );
+  // FORK（magic-context-memory-management / 变更点 10 · Step 8）：存量迁移。
+  // 原生「工作区记忆」开关已从 UI 退场（分区改挂 magic-context 项目记忆管理面板），
+  // 但协议字段 memoryEnabled 保留照发（strict 兼容窗口 + 压制 CLI 原生记忆提取），
+  // 因此存量 true 必须在这里归零——这是隐形开关的唯一出口。onboarding 侧已停写该键
+  // （Step 9），这里写回 false 后不会被换号同步复活。
+  useEffect(() => {
+    if (activeSection !== "memory") return;
+    if (sharedSettings?.memoryEnabled !== true) return;
+    void (async () => {
+      try {
+        await updateSharedSettings({ memoryEnabled: false });
+        toast(intl.formatMessage({ id: "settings.memory.management.legacySwitchRetired" }));
+      } catch (error) {
+        // 归零失败不阻塞分区渲染：下次进入分区会重试，面板本身不依赖该字段。
+        console.warn("[settings] 关闭遗留的原生记忆开关失败", String(error));
+      }
+    })();
+  }, [activeSection, intl, sharedSettings?.memoryEnabled, updateSharedSettings]);
   const handleHttpProxyChange = useCallback(
     async (proxy: string) => {
       const normalizedProxy = proxy.trim();
@@ -1279,13 +1257,10 @@ export function SettingsPage({
                           </ServiceProvider>
                         ) : activeSection === "memory" ? (
                           <ServiceProvider services={localHostServices}>
-                            {/* Memory catalog 始终使用本地 Host，避免远程 workspace 误读本机数据。 */}
-                            <MemorySettingsSection
-                              memoryEnabled={memoryEnabled}
-                              memoryService={localHostServices.memoryService}
-                              onMemoryEnabledChange={handleMemoryEnabledChange}
-                              projectMemoryViewerAvailable={Boolean(isDesktop)}
-                              workspaceDisplayNames={memoryWorkspaceDisplayNames}
+                            {/* 项目记忆管理面板始终使用本地 Host 的 CLI 记忆库，
+                                避免远程 workspace 误读远端数据（占位文案里已注明）。 */}
+                            <MemoryManagementSection
+                              workspacePath={activeWorkspacePath ?? captionWorkspacePath}
                             />
                           </ServiceProvider>
                         ) : activeSection === "context" ? (

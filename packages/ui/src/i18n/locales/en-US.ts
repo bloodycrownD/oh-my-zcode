@@ -2135,7 +2135,8 @@ const enUS: Record<string, string> = {
   "settings.nativeSearchEnhancements": "Enhanced Find and Grep",
   "settings.nativeSearchEnhancementsDescription":
     "Use enhanced Find and Grep in new sessions and sessions restored after an app restart. Active sessions keep their current setting; Find remains unchanged on Windows.",
-  "settings.memory": "Memory",
+  // FORK（magic-context-memory-management / Step 8）：分区语义切换为跨会话「项目记忆」。
+  "settings.memory": "Project memory",
   // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
   "settings.context.title": "Context Management",
   "settings.context.description":
@@ -2205,48 +2206,64 @@ const enUS: Record<string, string> = {
   "settings.context.muralEnabled.label": "Experimental memory mural",
   "settings.context.muralEnabled.description":
     "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt — but only when the current turn's model accepts image input. Experimental; off by default.",
-  "settings.memory.workspaceMemory": "Workspace Memory",
-  "settings.memoryDescription":
-    "Save and reuse long-term context in workspaces. Applies to new sessions and may increase model requests and token costs.",
-  "settings.memory.viewer.localOnly":
-    "Memory details are available only in the local desktop app. Open Memory settings there to view them.",
-  "settings.memory.viewer.title": "Saved workspace memories",
-  "settings.memory.viewer.description": "Browse memories saved by workspace on this device.",
-  "settings.memory.viewer.projectsDescription":
-    "Select a project to view all of its saved memories.",
-  "settings.memory.viewer.refresh": "Refresh",
-  "settings.memory.viewer.loading": "Loading memories…",
-  "settings.memory.viewer.empty": "No saved workspace memories",
-  "settings.memory.viewer.workspaces": "Workspaces",
-  "settings.memory.viewer.files": "Files",
-  "settings.memory.viewer.searchPlaceholder": "Search memory files…",
-  "settings.memory.viewer.searchEmpty": "No memory files found.",
-  "settings.memory.viewer.workspaceSearchPlaceholder": "Search workspaces…",
-  "settings.memory.viewer.workspaceSearchEmpty": "No workspaces found.",
-  "settings.memory.viewer.itemCount.one": "{count} item",
-  "settings.memory.viewer.itemCount.other": "{count} items",
-  "settings.memory.viewer.memoryCount.one": "{count} memory",
-  "settings.memory.viewer.memoryCount.other": "{count} memories",
-  "settings.memory.viewer.updated.justNow": "Just now",
-  "settings.memory.viewer.updated.minutesAgo": "{count} min ago",
-  "settings.memory.viewer.updated.today": "Today {time}",
-  "settings.memory.viewer.updated.yesterday": "Yesterday {time}",
-  "settings.memory.viewer.updated.weekday": "{weekday} {time}",
-  "settings.memory.viewer.updated.weekdayZh": "周{weekday}",
-  "settings.memory.viewer.updated.date": "{date} {time}",
-  "settings.memory.viewer.updated.dateMonthDay": "{month}/{day}",
-  "settings.memory.viewer.updated.dateYearMonthDay": "{year}/{month}/{day}",
-  "settings.memory.viewer.tree": "Memory files",
-  "settings.memory.viewer.indexMissing": "MEMORY.md (not generated)",
-  "settings.memory.viewer.collapse": "Collapse memory items",
-  "settings.memory.viewer.expand": "Expand memory items",
-  "settings.memory.viewer.fileLoading": "Loading file…",
-  "settings.memory.viewer.fileDeleted":
-    "This memory file has been deleted. Refresh the file list to update it.",
-  "settings.memory.viewer.fileTooLarge": "This memory file exceeds the 5 MiB preview limit.",
-  "settings.memory.viewer.fileChanged":
-    "This memory file was updated while being read. Reopen it or refresh the file list.",
-  "settings.memory.viewer.noSelection": "Select a memory file to preview it.",
+  // FORK（magic-context-memory-management / Step 8）：原生「工作区记忆」viewer 与开关
+  // 退场（内存测试文件与设置页入口一并删除），「记忆」分区改挂 magic-context 跨会话
+  // 项目记忆管理面板：分类/状态徽章、计数汇总、批量废弃（软删除）。
+  "settings.memory.management.description":
+    "Manage the cross-session project memories stored by the local CLI (a remote workspace still manages local data). Archiving is a soft delete: memories leave the injection surface of later turns and keep an auditable archive record.",
+  "settings.memory.management.loading": "Loading project memories…",
+  "settings.memory.management.loadFailed": "Failed to load project memories",
+  "settings.memory.management.empty": "This project has no project memories yet.",
+  "settings.memory.management.unsupported":
+    "This CLI version does not support project memory management. Update the CLI and try again.",
+  "settings.memory.management.unavailable.disabled":
+    "Cross-session project memory is off. Enable it in the Context management section and try again.",
+  "settings.memory.management.unavailable.unavailable":
+    "The local memory store is unavailable right now. Try again later.",
+  "settings.memory.management.counts.total": "{count} total",
+  "settings.memory.management.counts.active": "{count} active",
+  "settings.memory.management.counts.permanent": "{count} permanent",
+  "settings.memory.management.counts.archived": "{count} archived",
+  "settings.memory.management.counts.merged": "{count} merged",
+  "settings.memory.management.filter.all": "All categories",
+  "settings.memory.management.status.active": "Active",
+  "settings.memory.management.status.permanent": "Permanent",
+  "settings.memory.management.status.archived": "Archived",
+  "settings.memory.management.badge.merged": "Merged",
+  "settings.memory.management.updatedAt": "Updated {time}",
+  "settings.memory.management.importance": "Importance {value}",
+  "settings.memory.management.archiveReason": "Archive reason: {reason}",
+  "settings.memory.management.selectAll": "Select all in the current list",
+  "settings.memory.management.selectedCount": "{count} selected",
+  "settings.memory.management.archiveSelected": "Archive selected",
+  "settings.memory.management.archive.dialogTitle": "Archive the selected project memories?",
+  "settings.memory.management.archive.dialogDescription":
+    "This archives {count} memories. Archiving is a soft delete: they leave the injection surface of later turns and an auditable archive record is written.",
+  "settings.memory.management.archive.reasonLabel": "Archive reason (optional)",
+  "settings.memory.management.archive.reasonPlaceholder":
+    "e.g. superseded by a newer architecture decision",
+  "settings.memory.management.archive.confirm": "Archive",
+  "settings.memory.management.archive.toastArchived":
+    "Archived {count} memories. The change applies to later conversation turns.",
+  "settings.memory.management.archive.toastAlready": "{count} were already archived.",
+  "settings.memory.management.archive.toastFailed":
+    "{count} could not be archived (missing or already merged).",
+  "settings.memory.management.truncated": "The list is truncated; showing the first {count} entries.",
+  "settings.memory.management.loadMore": "Load more",
+  "settings.memory.management.legacySwitchRetired":
+    "The legacy workspace memory switch was retired and turned off automatically; cross-session project memory is managed on this page.",
+  "settings.memory.management.category.PROJECT_RULES": "Project rules",
+  "settings.memory.management.category.ARCHITECTURE": "Architecture",
+  "settings.memory.management.category.CONSTRAINTS": "Constraints",
+  "settings.memory.management.category.CONFIG_VALUES": "Config values",
+  "settings.memory.management.category.NAMING": "Naming",
+  "settings.memory.management.category.ARCHITECTURE_DECISIONS": "Architecture decisions (legacy)",
+  "settings.memory.management.category.CONFIG_DEFAULTS": "Config defaults (legacy)",
+  "settings.memory.management.category.USER_PREFERENCES": "User preferences (legacy)",
+  "settings.memory.management.category.USER_DIRECTIVES": "User directives (legacy)",
+  "settings.memory.management.category.ENVIRONMENT": "Environment (legacy)",
+  "settings.memory.management.category.WORKFLOW_RULES": "Workflow rules (legacy)",
+  "settings.memory.management.category.KNOWN_ISSUES": "Known issues (legacy)",
   "settings.httpProxy": "HTTP Proxy",
   "settings.httpProxyDescription":
     "Route model, MCP, command-tool, and app renderer egress traffic through this proxy; system environment variables are not read. Leave blank and that traffic connects directly, while the embedded browser follows your system proxy settings. Restart the app to take effect.",

@@ -363,39 +363,40 @@ export const TID_RESOURCE_MANAGER_STORAGE_CONFIRM_ACCEPT =
 /** 资源管理器「存储」tab：清理确认框取消按钮 */
 export const TID_RESOURCE_MANAGER_STORAGE_CONFIRM_CANCEL =
   "resource-manager-storage-confirm-cancel";
-/** Memory 设置模块中的总开关 */
-export const TID_SETTINGS_MEMORY_SWITCH = "settings-memory-switch";
-/** Memory 设置模块刷新按钮 */
-export const TID_SETTINGS_MEMORY_REFRESH = "settings-memory-refresh";
-/** Memory Workspace Scope 菜单触发器 */
-export const TID_SETTINGS_MEMORY_SCOPE_TRIGGER = "settings-memory-scope-trigger";
-/** Memory Workspace Scope 图标 */
-export const TID_SETTINGS_MEMORY_SCOPE_ICON = "settings-memory-scope-icon";
-/** Memory 当前 Workspace 文件数量 */
-export const TID_SETTINGS_MEMORY_COUNT = "settings-memory-count";
-/** Memory 文件名搜索输入框 */
-export const TID_SETTINGS_MEMORY_SEARCH_INPUT = "settings-memory-search-input";
-/** Memory 文件名搜索清空按钮 */
-export const TID_SETTINGS_MEMORY_SEARCH_CLEAR = "settings-memory-search-clear";
-/** Memory 项目文件列表返回项目列表按钮 */
-export const TID_SETTINGS_MEMORY_BACK_PROJECTS = "settings-memory-back-projects";
-/** Memory 文件正文返回项目文件列表按钮 */
-export const TID_SETTINGS_MEMORY_BACK_MEMORIES = "settings-memory-back-memories";
-/** Memory workspace 行（动态后缀为 workspace id） */
-export const TID_SETTINGS_MEMORY_WORKSPACE = "settings-memory-workspace";
-
-/** Memory 文件行（动态后缀为文件名） */
-export const TID_SETTINGS_MEMORY_FILE = "settings-memory-file";
-/** Memory 文件类型图标（动态后缀为文件名） */
-export const TID_SETTINGS_MEMORY_FILE_ICON = "settings-memory-file-icon";
-/** Memory 文件名称（动态后缀为文件名） */
-export const TID_SETTINGS_MEMORY_FILE_NAME = "settings-memory-file-name";
-/** Memory 文件更新时间（动态后缀为文件名） */
-export const TID_SETTINGS_MEMORY_FILE_UPDATED_AT = "settings-memory-file-updated-at";
-/** Memory 文件编辑器按钮组（动态后缀为文件名） */
-export const TID_SETTINGS_MEMORY_FILE_EDITOR_ACTIONS = "settings-memory-file-editor-actions";
-/** Memory 原始 Markdown 预览 */
-export const TID_SETTINGS_MEMORY_PREVIEW = "settings-memory-preview";
+// FORK（magic-context-memory-management / Step 8）：「记忆」分区改挂 magic-context
+// 跨会话项目记忆管理面板，原原生工作区记忆 viewer 的 settings-memory-* 钩子族随之退场
+// （零消费方后删除）。settings-mcm-* = settings 页 magic-context memories 的缩写，
+// 与「上下文管理」分区的 magic-context-* 本地钩子风格保持一致。
+/** 「项目记忆」管理面板刷新按钮 */
+export const TID_SETTINGS_MCM_REFRESH = "settings-mcm-refresh";
+/** 「项目记忆」管理面板计数汇总 */
+export const TID_SETTINGS_MCM_COUNTS = "settings-mcm-counts";
+/** 「项目记忆」管理面板分类过滤徽章（动态后缀为分类，`all` 为全部分类） */
+export const TID_SETTINGS_MCM_CATEGORY_FILTER = "settings-mcm-category-filter";
+/** 「项目记忆」管理面板记忆条目行（动态后缀为记忆 id） */
+export const TID_SETTINGS_MCM_ITEM = "settings-mcm-item";
+/** 「项目记忆」管理面板条目勾选框（动态后缀为记忆 id） */
+export const TID_SETTINGS_MCM_ITEM_SELECT = "settings-mcm-item-select";
+/** 「项目记忆」管理面板全选勾选框 */
+export const TID_SETTINGS_MCM_SELECT_ALL = "settings-mcm-select-all";
+/** 「项目记忆」管理面板批量废弃按钮 */
+export const TID_SETTINGS_MCM_ARCHIVE_SELECTED = "settings-mcm-archive-selected";
+/** 「项目记忆」管理面板废弃确认对话框 */
+export const TID_SETTINGS_MCM_ARCHIVE_DIALOG = "settings-mcm-archive-dialog";
+/** 「项目记忆」管理面板废弃原因输入框 */
+export const TID_SETTINGS_MCM_ARCHIVE_REASON = "settings-mcm-archive-reason";
+/** 「项目记忆」管理面板废弃确认按钮 */
+export const TID_SETTINGS_MCM_ARCHIVE_CONFIRM = "settings-mcm-archive-confirm";
+/** 「项目记忆」管理面板废弃取消按钮 */
+export const TID_SETTINGS_MCM_ARCHIVE_CANCEL = "settings-mcm-archive-cancel";
+/** 「项目记忆」管理面板空态占位（该项目暂无记忆） */
+export const TID_SETTINGS_MCM_EMPTY = "settings-mcm-empty";
+/** 「项目记忆」管理面板不可用占位（CLI 过旧 / 记忆功能未启用） */
+export const TID_SETTINGS_MCM_UNAVAILABLE = "settings-mcm-unavailable";
+/** 「项目记忆」管理面板加载失败横幅 */
+export const TID_SETTINGS_MCM_LOAD_ERROR = "settings-mcm-load-error";
+/** 「项目记忆」管理面板加载更多按钮 */
+export const TID_SETTINGS_MCM_LOAD_MORE = "settings-mcm-load-more";
 /** 常规设置中的 AskUserQuestion 自动继续开关 */
 export const TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH =
   "settings-ask-user-question-auto-resolution-switch";

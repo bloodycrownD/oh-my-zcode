@@ -74,6 +74,9 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     titleId: "settings.modelProviderTitle",
     groupId: "basics",
   },
+  // FORK（magic-context-memory-management / Step 8）：分区 id 保持 "memory"（导航锚点
+  // 与本地偏好稳定），语义改为 magic-context 跨会话「项目记忆」管理面板；标题文案随
+  // i18n 键 `settings.memory` 更新为「项目记忆」/「Project memory」。
   {
     id: "memory",
     icon: Brain,
