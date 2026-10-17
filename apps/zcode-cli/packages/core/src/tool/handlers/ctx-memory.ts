@@ -19,9 +19,10 @@
 //      的竞争写由 `insertMemoryIdempotent` 的唯一约束 + seen_count 递增收口。
 //      **复用 Step 8 已移植的 storage-memory 真身**，不在宿主侧重写去重规则。
 //
-// fork 首版只有 `write` 一个动作：上游的 update/archive/merge/get 读写锁与
-// 工作区可见性规则更重，本批注入链只消费「写入 + 检索」闭环（详见契约文件的
-// 裁定注释）。
+// fork 的动作面：`write`（默认）与 `archive`（迭代 magic-context-memory-
+// management 解锁的批量废弃——逐 id outcome、允许部分成功；文案映射见下方
+// `formatMemoryArchiveText`）。上游其余动作（update/merge/get）的读写锁与工作区
+// 可见性规则更重，不做（详见契约文件的裁定注释）。
 //
 // 包是**动态 import** 的，与 ctx-context.ts / ctx-search.ts 同一理由：
 // `features.magicContext` 关闭时整棵 magic-context 模块图不进内存。
@@ -51,6 +52,9 @@ const CTX_MAGIC_CONTEXT_UNAVAILABLE =
 
 type MagicContextModule = typeof import("@zcode/magic-context");
 
+/** `archiveProjectMemories` 的逐 id outcome（单一事实源在包侧 host/memory-admin）。 */
+type MemoryArchiveOutcomeEntry = ReturnType<MagicContextModule["archiveProjectMemories"]>[number];
+
 /**
  * 动态加载 magic-context 包。**永不抛**：加载失败等价于「本会话没有 magic-context」。
  */
@@ -71,6 +75,105 @@ async function openMagicContextDatabase(
   } catch {
     return null;
   }
+}
+
+/**
+ * write / archive 共用的会话前置三件套：加载包 → 打开库 → 解析项目身份。
+ * 任一环失败返回**用户可见文本**（write 路径原有的三段文本原样迁入），
+ * 成功则给出后续细则所需的三个句柄/身份。
+ */
+type MagicContextSession =
+  | {
+      magicContext: MagicContextModule;
+      db: Awaited<ReturnType<MagicContextModule["openDatabase"]>>;
+      projectIdentity: string;
+    }
+  | { errorText: string };
+
+async function openMagicContextSession(workingDirectory: string): Promise<MagicContextSession> {
+  const magicContext = await loadMagicContext();
+  if (!magicContext) return { errorText: CTX_MAGIC_CONTEXT_UNAVAILABLE };
+
+  const db = await openMagicContextDatabase(magicContext);
+  if (!db) return { errorText: CTX_MAGIC_CONTEXT_UNAVAILABLE };
+
+  // 身份解析与 promotion / ctx_search 共用同一个非抛错入口；undefined = 这个
+  // 目录当前不参与记忆特性（家目录未授权 / git 身份暂不可用），写入同样不适用。
+  const projectIdentity = magicContext.resolveProjectIdentityForSession(workingDirectory);
+  if (!projectIdentity) {
+    return {
+      errorText: `Error: Memory features are paused for ${workingDirectory} (no usable project identity).`,
+    };
+  }
+
+  return { magicContext, db, projectIdentity };
+}
+
+/**
+ * write / archive 共用的失败文案（原 write 路径的 catch 语义原样收进这里）。
+ * 两类文本都按 action 分叉：authority 拒绝的措辞与「失败动词」不同。
+ */
+function magicContextFailureText(
+  magicContext: MagicContextModule,
+  error: unknown,
+  action: "write" | "archive",
+): string {
+  // Rust 模块托管项目的写入权威在上游 ck-mc 模块（fork 不移植，D-6）：命中即
+  // 明确拒绝，而不是绕过 authority 表写坏双源。这是 fail-visible，不是故障。
+  if (error instanceof magicContext.ModuleMemoryAuthorityError) {
+    return action === "archive"
+      ? `Error: Memory archives for this project are managed by the memory module (${error.code}); refusing the TypeScript-side archive.`
+      : `Error: Memory writes for this project are managed by the memory module (${error.code}); refusing the TypeScript-side write.`;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return action === "archive"
+    ? `Error: Failed to archive memories. ${message}`
+    : `Error: Failed to save memory. ${message}`;
+}
+
+/**
+ * 「未归档」outcome 的单行文案（spec 变更点 4 的映射表）：
+ *   - `already-archived`：幂等回执（该 id 本就归档且未 superseded，没有二次写
+ *     mutation 行）；
+ *   - `rejected`/superseded：上游 inactiveMemoryError 风格（上游 tools.ts:
+ *     349-351 的 "archived or superseded; restore it before archiving"）；
+ *   - `rejected`/ownership 与 `missing`：**共用同一条不透明「was not found」**
+ *     ——不暴露外部项目记忆 id 的存在性（上游 tools.ts:949-958 与本仓
+ *     storage-memory.ts:979-986 的防泄漏纪律）。
+ * `archived` 行不经过本函数（由确认行统一覆盖）。
+ */
+function archiveOutcomeLine(entry: MemoryArchiveOutcomeEntry): string {
+  if (entry.outcome === "already-archived") return entry.message;
+  if (entry.outcome === "rejected" && entry.rejectionReason === "superseded") {
+    return `Error: ${entry.message}`;
+  }
+  return `Error: Memory with ID ${entry.id} was not found.`;
+}
+
+/**
+ * 批量归档的工具面文案：全部成功 → 上游同款确认文案（上游 tools.ts:997-1001，
+ * reason 非空才带括号）；混合批次（fork 的逐 id 语义允许部分成功）→ 确认行 +
+ * 逐 id 文案行。
+ */
+function formatMemoryArchiveText(outcomes: MemoryArchiveOutcomeEntry[], reason?: string): string {
+  const archivedIds = outcomes
+    .filter((entry) => entry.outcome === "archived")
+    .map((entry) => entry.id);
+  const lines: string[] = [];
+  if (archivedIds.length > 0) {
+    const plural = archivedIds.length > 1 ? "memories" : "memory";
+    const trimmedReason = reason?.trim();
+    lines.push(
+      trimmedReason
+        ? `Archived ${plural} [ID: ${archivedIds.join(", ")}] (${trimmedReason}).`
+        : `Archived ${plural} [ID: ${archivedIds.join(", ")}].`,
+    );
+  }
+  for (const entry of outcomes) {
+    if (entry.outcome === "archived") continue;
+    lines.push(archiveOutcomeLine(entry));
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -113,18 +216,58 @@ function settleCommand(commandId: string, text: string): string {
 
 const ctxMemoryHandler: ToolHandler = async (input, context) => {
   const parsed = CtxMemoryInputSchema.parse(input) as CtxMemoryInput;
-  // action 契约层已限定为 `"write"`（optional，缺省即 write）：显式带
-  // action:"write" 与「不带 action」在 schema 层就是同一个合法形状，确认文案
-  // 也因此完全一致，这里不再读取它。
+  // action 契约层 optional：缺省即 `"write"`（显式带 action:"write" 与「不带
+  // action」在 schema 层就是同一个合法形状，确认文案也因此完全一致）；
+  // `"archive"` 走下面的批量废弃分支。
+  const action = parsed.action ?? "write";
 
   // 幂等闸门在参数校验之后、取任何 db 写之前：一次已确认过的 commandId 重放
-  // 上次的确认文本，memories 一行都不多、seen_count 一次都不涨。
+  // 上次的确认文本，memories 一行都不多、seen_count 一次都不涨（两个 action
+  // 共用同一本账）。
   const commandId = commandIdForInvocation(context.sessionId, context);
   const settled = commandIdLedger.get(commandId);
   if (settled !== undefined) {
     return { text: settled } satisfies CtxToolTextOutput;
   }
 
+  // ── archive：批量废弃（软删，spec 变更点 4）───────────────────────────────
+  if (action === "archive") {
+    const archiveIds = parsed.ids;
+    if (!archiveIds || archiveIds.length === 0) {
+      // 与上游同款的可自我纠正错误（上游 tools.ts:934-939）；契约层 optional 是
+      // 刻意的：缺失字段回普通错误，而不是 provider 侧 schema 拒绝。
+      return {
+        text: "Error: 'ids' must contain at least one integer memory ID when action is 'archive'.",
+      } satisfies CtxToolTextOutput;
+    }
+
+    const session = await openMagicContextSession(context.workingDirectory);
+    if ("errorText" in session) {
+      return { text: session.errorText } satisfies CtxToolTextOutput;
+    }
+    const { magicContext, db, projectIdentity } = session;
+
+    try {
+      // 首见序去重（上游 tools.ts:941-943）：`ids:[42,42]` 只归档一次、只写一条
+      // mutation 行（组合函数 host/memory-admin 内亦有同款防御，这里不重写规则）。
+      const dedupedIds = [...new Set(archiveIds)];
+      const outcomes = magicContext.archiveProjectMemories(
+        db,
+        projectIdentity,
+        dedupedIds,
+        parsed.reason,
+      );
+      return {
+        text: settleCommand(commandId, formatMemoryArchiveText(outcomes, parsed.reason)),
+      } satisfies CtxToolTextOutput;
+    } catch (error) {
+      return {
+        text: magicContextFailureText(magicContext, error, "archive"),
+      } satisfies CtxToolTextOutput;
+    }
+  }
+
+  // ── write：钉一条新事实（D14 原有路径）───────────────────────────────────
   const content = parsed.content?.trim();
   if (!content) {
     return {
@@ -139,20 +282,11 @@ const ctxMemoryHandler: ToolHandler = async (input, context) => {
     } satisfies CtxToolTextOutput;
   }
 
-  const magicContext = await loadMagicContext();
-  if (!magicContext) return { text: CTX_MAGIC_CONTEXT_UNAVAILABLE } satisfies CtxToolTextOutput;
-
-  const db = await openMagicContextDatabase(magicContext);
-  if (!db) return { text: CTX_MAGIC_CONTEXT_UNAVAILABLE } satisfies CtxToolTextOutput;
-
-  // 身份解析与 promotion / ctx_search 共用同一个非抛错入口；undefined = 这个
-  // 目录当前不参与记忆特性（家目录未授权 / git 身份暂不可用），写入同样不适用。
-  const projectIdentity = magicContext.resolveProjectIdentityForSession(context.workingDirectory);
-  if (!projectIdentity) {
-    return {
-      text: `Error: Memory features are paused for ${context.workingDirectory} (no usable project identity).`,
-    } satisfies CtxToolTextOutput;
+  const session = await openMagicContextSession(context.workingDirectory);
+  if ("errorText" in session) {
+    return { text: session.errorText } satisfies CtxToolTextOutput;
   }
+  const { magicContext, db, projectIdentity } = session;
 
   try {
     // sourceType "agent"：这是模型/工具发起的写入（上游同名语义；"user" 被
@@ -184,22 +318,15 @@ const ctxMemoryHandler: ToolHandler = async (input, context) => {
       : `Memory already exists [ID: ${result.memory.id}] in ${category} (seen count incremented).`;
     return { text: settleCommand(commandId, text) } satisfies CtxToolTextOutput;
   } catch (error) {
-    // Rust 模块托管项目的写入权威在上游 ck-mc 模块（fork 不移植，D-6）：命中即
-    // 明确拒绝，而不是绕过 authority 表写坏双源。这是 fail-visible，不是故障。
-    if (error instanceof magicContext.ModuleMemoryAuthorityError) {
-      return {
-        text: `Error: Memory writes for this project are managed by the memory module (${error.code}); refusing the TypeScript-side write.`,
-      } satisfies CtxToolTextOutput;
-    }
-    const message = error instanceof Error ? error.message : String(error);
     return {
-      text: `Error: Failed to save memory. ${message}`,
+      text: magicContextFailureText(magicContext, error, "write"),
     } satisfies CtxToolTextOutput;
   }
 };
 
 /**
- * `ctx_memory`：把一条值得跨会话保留的事实钉进项目记忆库。
+ * `ctx_memory`：把一条值得跨会话保留的事实钉进项目记忆库（write），或按 id
+ * 批量废弃已有记忆（archive，软删）。
  *
  * permission 归类：与 `ctx_reduce` 同档——写的是**用户自己的记忆库**（位于
  * `~/.omz/cli/db`，不是工作区文件，因此 `sideEffectScope: "session"` 不构成
@@ -217,7 +344,7 @@ export const ctxMemoryToolEntry: ToolEntry = {
       ``,
       `Your active memories are already visible in your context as \`#id: fact\` lines. Write one when you learn something that must not have to be found again — a project rule, an architectural fact, a hard-won constraint, a config value, a naming convention — and especially when it cost you turns to find. One standalone fact per memory, phrased to make sense on its own. A pending intention with its evidence ("do X later, here is what we know") is not a memory.`,
       ``,
-      `The only action is \`write\`: it needs \`content\` (the one fact) and \`category\` (PROJECT_RULES, ARCHITECTURE, CONSTRAINTS, CONFIG_VALUES, or NAMING). Writing a fact that already exists creates no duplicate — the existing memory's seen count is incremented instead.`,
+      `The \`action\` argument defaults to \`write\` — it needs \`content\` (the one fact) and \`category\` (PROJECT_RULES, ARCHITECTURE, CONSTRAINTS, CONFIG_VALUES, or NAMING). Writing a fact that already exists creates no duplicate — the existing memory's seen count is incremented instead. Pass \`action: "archive"\` with \`ids\` (one or more memory IDs, up to 100) and an optional \`reason\` (at most 4096 characters) to retire memories that are wrong or no longer true; archiving is a soft delete, so the memory stops being injected into later sessions.`,
       ``,
       `Use it proactively: the moment you hit a fact you had to dig for and will not want to dig for again, that is what this tool is for — you do not have to wait to be asked.`,
     ].join("\n"),

@@ -21,7 +21,8 @@
 //     来源**（上游另有 message / git_commit / primer / note 四路，向量与 note 面按
 //     N1/N2 终局不做），因此 schema 不声明 `sources`——声明了就必须实现，否则是
 //     对模型说谎。
-//   - `ctx_memory` 写本项目记忆库一行（insertMemoryIdempotent，幂等）。它写的是
+//   - `ctx_memory` 写本项目记忆库一行（insertMemoryIdempotent，幂等），或按 id
+//     批量软删（archive，迭代 magic-context-memory-management 解锁）。它写的是
 //     **用户级数据目录**（`~/.omz/cli/db/magic-context.db`）里本项目自己的记忆，
 //     不是工作区文件，因此 `sideEffectScope: "session"`（协议内作用域，非工作区
 //     改写）、`needsApproval: false`——与 ctx_reduce 同档：写的是用户自己的记忆库，
@@ -128,13 +129,14 @@ export type CtxSearchInput = z.infer<typeof CtxSearchInputSchema>;
 export const CtxSearchInputJsonSchema = toToolJsonSchema(CtxSearchInputSchema);
 
 /**
- * `ctx_memory`（D14）：把一条值得跨会话保留的事实钉进项目记忆库。
+ * `ctx_memory`（D14）：把一条值得跨会话保留的事实钉进项目记忆库；迭代
+ * magic-context-memory-management 起亦支持批量废弃（`archive`）。
  *
- * 首版 fork 面**只有 `write` 一个动作**（上游还有 update/archive/merge/get；那些
- * 面的读写锁与工作区可见性规则更重，且本批的记忆注入只消费写入+检索闭环）。
- * `action` 声明为 optional 的 `"write"` 字面量：见过上游形状的模型带
- * `action:"write"` 调用时照常工作，带其它值则在解析层得到可自我纠正的错误，
- * 而不是被 provider schema 静默丢掉。
+ * `action` 声明为 optional 的 `z.enum(["write","archive"])`：缺省即 `"write"`
+ * （显式 `"write"` 与省略是同一个合法形状，确认文案完全一致）；`"archive"` 用
+ * `ids`（1–100 个 id）与可选 `reason` 做批量软删（逐 id outcome）。上游其余动作
+ * （update/merge/get）的读写锁与工作区可见性规则更重，fork 不做；未知 action
+ * 值在解析层得到可自我纠正的错误，而不是被 provider schema 静默丢掉。
  *
  * `category` 的五个取值与 magic-context 包内 `V2_MEMORY_CATEGORIES` 一一对应
  * （historian 分舱写入的同五个分类）。**drift guard**：core 的
@@ -151,9 +153,9 @@ export const CTX_MEMORY_CATEGORIES = [
 export const CtxMemoryInputSchema = z
   .object({
     action: z
-      .literal("write")
+      .enum(["write", "archive"])
       .optional()
-      .describe('Must be "write" when present; it is the only action this tool supports.'),
+      .describe('Either "write" (default when omitted) or "archive".'),
     content: z
       .string()
       .optional()
@@ -164,6 +166,17 @@ export const CtxMemoryInputSchema = z
       .describe(
         "Kind of fact (required): project rule, architecture, constraint, config value, or naming.",
       ),
+    ids: z
+      .array(z.number().int())
+      .min(1)
+      .max(100)
+      .optional()
+      .describe("Memory IDs to archive (required when action is 'archive'): 1–100 ids."),
+    reason: z
+      .string()
+      .max(4096)
+      .optional()
+      .describe("Why the memories are being archived (optional; at most 4096 characters)."),
   })
   .strict();
 
