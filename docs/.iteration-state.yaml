@@ -590,6 +590,18 @@ magic_context_memory_management:
     base_sha: 44302c2c
     dag_version: 1
     wave_plan: "[[impl-s1-barrel], [impl-s2-ctx-memory, impl-s4-proto, impl-s9-onboarding], [impl-s3-core-test, impl-s5-services], [impl-s6-cli-handler, impl-s8-ui], [impl-s7-rpc-test], [cr-func-a], [verify-gates], [cr-func-final]]"
-    node_status: {}
+    node_status:
+      impl-s1-barrel: { status: done, executor: subagent, commit: 50ed0057 }
+      impl-s2-ctx-memory: { status: done, executor: subagent, commit: 6b7175e7, note: "临时冒烟 6/6 + 既有 test-ctx-search-memory 10/10 回归绿" }
+      impl-s4-proto: { status: done, executor: subagent, commit: 3e517db7, note: "三处静默裁定已注释：expiresAt number|null / reason max4096 / category+status 以 string 过线" }
+      impl-s9-onboarding: { status: done, executor: subagent, commit: 6244bb7a, note: "T-O1 断言1 用 UI 源守卫（无渲染级测试入口）；T-O1 4/4 + parity 5904/5904" }
+      impl-s3-core-test: { status: done, executor: subagent, note: "10/10 + 既有回归 10/10；登记事实：ids 空数组在契约层被 min(1) Zod 拒（非文本错误）" }
+      impl-s5-services: { status: done, executor: subagent, note: "降级 4/4 + tsc 0 + arch 0；给 s6 的协调点=wire 转发 category/limit/offset 须 CLI 落实、BUSY message 保原文、降级 reason 第三值 unsupported" }
+      impl-s6-cli-handler: { status: done, executor: subagent, note: "冒烟 8/8 + bootstrap tsc 0；裁定=disabled 时 archive 抛 -32010 可读错而非空信封、effective 门不用 isMagicContextEnabled 冷冻结值、list 开库失败（含 BUSY）收敛 unavailable 信封而 archive 保原文透传" }
+      impl-s8-ui: { status: done, executor: subagent, note: "parity 5913/5913 + T-U1 14/14 + ui tsc 0；观察项=分类过滤为客户端过滤已加载条目（协议 category 参数 UI 未消费，可选收窄传参服务端）；IMemoryService 保留（UI 外 5 处消费者）；组件名按 spec 结构节=MemoryManagementSection" }
+      impl-s7-rpc-test: { status: done, executor: subagent, note: "契约测试 15/15 + 同包 ui-config 14/14 共存；登记口径=expires_at=0 死行进 counts 不进列表、authority 整批回滚、ConfigPort 双方向优先" }
+      cr-func-a: { status: done, executor: subagent, func_ready: yes, note: "Step1-7+9 矩阵全 PASS，blocking 测试 id 全落位，三测实拍 10/15/4 绿；零 must-fix；提醒 CHANGELOG 待办" }
+      verify-gates: { status: done, executor: main, note: "T-G1 全绿：root tsc -b 0 错；oxlint 0e/74w 基线；architecture 0；test:v4-perf exit0；config-rpc 10 + ui-config 14 + memories-rpc 15 + ctx-search 10 + ctx-archive 10 + tool-name-closure 6 + services 降级 4 + T-O1 4；parity 5913/5913；CHANGELOG Unreleased 已写" }
+    wave1_verify: "worktree 新鲜树补建 workspace dist（shared/rpc/services/provider 手动 tsc -p；magic-context/contracts 等随 s2 build）后 services+ui typecheck 全绿"
     notes: "impl 子代理只编辑不 commit，主代理按 Step pathspec 统一 commit（中文 message）；依赖链 s1→s2→s3、s4→s5→s6→s7、s5→s8、s9 独立；Step 11 e2e=manual_user 非阻塞，dev-ready 后交用户真机验收"
 

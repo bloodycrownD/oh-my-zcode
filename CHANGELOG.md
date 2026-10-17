@@ -24,7 +24,15 @@
 
 ## [Unreleased]
 
-（待下一批改动。新条目由 omz-changelog skill 写入本段，发版时挪入版本号段。）
+### 新增
+
+- **项目记忆管理面板**：设置页「记忆」分区从原生工作区记忆开关改为 magic-context 跨会话项目记忆管理——列表带分类/状态/已合并徽章与计数汇总（分页加载），支持勾选多条批量废弃（确认对话框可填原因，≤4096 字）；旧 CLI 不支持时显示升级占位。面板经新增 `workspace/listMagicContextMemories`/`workspace/archiveMagicContextMemories` RPC 直连本机记忆库；废弃与 mutation 日志在同一事务成对落盘，保证后续对话轮次注入面收敛。
+- **对话内废弃记忆**：`ctx_memory` 工具新增 `archive` action（`ids`+`reason`），agent 可在对话中直接废弃项目记忆；与设置面板共用同一组合函数，逐 id 返回「已废弃/已归档/不存在/拒绝」四态（跨项目与不存在的 id 统一不透明文案，防探测）。
+
+### 变更
+
+- **原生工作区记忆入口退场**：设置页移除原生记忆开关、引导页移除记忆勾选，存量 `memoryEnabled=true` 打开设置页时自动归零并一次性提示；协议字段全链保留（默认 false 照发）保兼容，旧版文件式记忆目录不迁移不删除。
+- **换号不再复活记忆开关**：onboarding 记录停写 `memoryEnabled`（schema 改为可省略），换号/重装同步不再把该开关回写。
 
 ## [1.0.11](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.10...v1.0.11) (2026-10-14)
 
