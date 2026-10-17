@@ -65,7 +65,6 @@ export function OccupationOnboarding({
   const preferences = step === 2;
   const requestOnboardingDialog = useZCodeStore((state) => state.requestOnboardingDialog);
   const [migration, setMigration] = useState(false);
-  const [memory, setMemory] = useState(savedInterfaceMode === "office");
   const [suggestions, setSuggestions] = useState(savedInterfaceMode === "office");
   const suggestionsEditedRef = useRef(false);
   const [saving, setSaving] = useState(false);
@@ -107,7 +106,6 @@ export function OccupationOnboarding({
         setInterfaceMode(nextMode);
         setMode(nextMode);
         if (nextMode !== mode) {
-          setMemory(nextMode === "office");
           if (nextMode === "office" && !suggestionsEditedRef.current) setSuggestions(true);
         }
         return;
@@ -179,8 +177,6 @@ export function OccupationOnboarding({
     );
     const initialMode = entry?.interfaceMode ?? savedInterfaceMode;
     setMode(initialMode);
-    // 编程模式默认关闭主动工作记忆；办公模式才恢复该用户之前的勾选。
-    setMemory(initialMode === "office" && (entry?.memoryEnabled ?? true));
     setSuggestions(entry?.proactiveSuggestionsEnabled ?? initialMode === "office");
     setMigration(false);
     setError(false);
@@ -215,7 +211,6 @@ export function OccupationOnboarding({
         // settings 侧保持既有语义：跳过落保守默认值（职业 other / 偏好关），
         // "跳过也算答案"的区分度只体现在 onboarding-record.json 里。
         onboardingOccupation: occupation ?? "other",
-        memoryEnabled: skip ? false : memory,
         proactiveSuggestionsEnabled: !skip && mode === "office" && suggestions,
       });
       // 保存成功就是本次引导的终点；本地记录失败不应留下可再次上报的引导页面。
@@ -229,11 +224,11 @@ export function OccupationOnboarding({
           // 追加本地引导记录（userId 由 host 按登录态补全），后续上传服务器。
           // appendRecord 走 RPC，channel 缺失时会挂起导致保存按钮永远转圈，加超时保护。
           // 跳过是显式答案：该页被跳过时记 null（occupation 在第 1 步跳过时已是 null，
-          // mode 在第 2 步跳过时置 null，偏好页整体跳过时两个布尔记 null）。
+          // mode 在第 2 步跳过时置 null，偏好页整体跳过时 proactiveSuggestionsEnabled 记 null）。
+          // memoryEnabled 已停写：原生工作区记忆入口退场，该键由调用方省略传（旧记录照常解析）。
           await appendOnboardingRecord(onboardingRecord, platform.getDeviceId(), {
             occupation,
             interfaceMode: mode,
-            memoryEnabled: skip ? null : memory,
             proactiveSuggestionsEnabled: skip ? null : mode === "office" && suggestions,
             completedAt: new Date().toISOString(),
           });
@@ -296,8 +291,6 @@ export function OccupationOnboarding({
                       saving={saving}
                       onSelect={(value) => {
                         markUserEdited();
-                        // 重选当前编程模式也应清除旧记录带来的默认勾选。
-                        setMemory(value === "office");
                         if (value !== mode) {
                           if (value === "office" && !suggestionsEditedRef.current)
                             setSuggestions(true);
@@ -309,7 +302,7 @@ export function OccupationOnboarding({
                     />
                   ) : preferences ? (
                     <div className="mt-8 space-y-3">
-                      {(["suggestions", "memory", "migration"] as const)
+                      {(["suggestions", "migration"] as const)
                         .filter((key) => key !== "suggestions" || mode === "office")
                         .map((key) => (
                           <label
@@ -317,18 +310,11 @@ export function OccupationOnboarding({
                             className="grid cursor-pointer grid-cols-[auto_1fr] items-center gap-x-4 gap-y-2 rounded-xl border border-card-border bg-card dark:bg-surface/40 p-5 text-ui-base transition-colors hover:bg-surface-hover"
                           >
                             <Checkbox
-                              checked={
-                                key === "migration"
-                                  ? migration
-                                  : key === "memory"
-                                    ? memory
-                                    : suggestions
-                              }
+                              checked={key === "migration" ? migration : suggestions}
                               disabled={saving}
                               onCheckedChange={(checked) => {
                                 markUserEdited();
                                 if (key === "migration") setMigration(checked === true);
-                                else if (key === "memory") setMemory(checked === true);
                                 else {
                                   suggestionsEditedRef.current = true;
                                   setSuggestions(checked === true);

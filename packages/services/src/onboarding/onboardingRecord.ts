@@ -11,7 +11,7 @@ import { createServiceDescriptor } from "../descriptors.js";
 export interface OnboardingSettingsSyncPatch {
   onboardingOccupation?: AppSettingsPatchOccupation;
   proactiveSuggestionsEnabled?: boolean;
-  memoryEnabled?: boolean;
+  // memoryEnabled 不回填：原生记忆入口退场后引导已停写该键，换号同步不得把已归零的开关写回 true。
 }
 
 type AppSettingsPatchOccupation = NonNullable<AppSettings["onboardingOccupation"]>;

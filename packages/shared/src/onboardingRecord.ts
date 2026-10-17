@@ -19,7 +19,9 @@ export const onboardingRecordEntrySchema = z.object({
   userId: z.string().min(1).nullable(),
   occupation: onboardingOccupationSchema,
   interfaceMode: onboardingInterfaceModeSchema,
-  memoryEnabled: z.boolean().nullable(),
+  // FORK（magic-context-memory-management）：原生工作区记忆入口退场，onboarding 调用方
+  // 默认省略传该键（后续上传载荷缺键按缺省处理）；旧记录带 true/false/null 仍照常解析。
+  memoryEnabled: z.boolean().nullable().optional(),
   proactiveSuggestionsEnabled: z.boolean().nullable(),
   completedAt: z.string().min(1),
   uploadState: z.literal("pending"),

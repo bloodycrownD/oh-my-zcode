@@ -58,8 +58,6 @@ const zhCN: Record<string, string> = {
   "occupationOnboarding.preferencesDescription": "按需开启以下功能。",
   "occupationOnboarding.migration": "迁移会话数据",
   "occupationOnboarding.migrationDescription": "从 Claude Code 迁移历史会话数据",
-  "occupationOnboarding.memory": "开启工作区记忆",
-  "occupationOnboarding.memoryDescription": "让 omz 记住你的偏好与工作上下文。",
   "occupationOnboarding.suggestions": "开启主动任务推荐",
   "occupationOnboarding.suggestionsDescription": "在新对话中显示任务建议，点击后填入输入框。",
   "occupationOnboarding.close": "退出引导",

@@ -209,7 +209,6 @@ export function createOnboardingRecordService(
       return {
         onboardingOccupation: (occupation.success ? occupation.data : null) ?? "other",
         proactiveSuggestionsEnabled: latest.proactiveSuggestionsEnabled ?? false,
-        memoryEnabled: latest.memoryEnabled ?? false,
       };
     },
 
