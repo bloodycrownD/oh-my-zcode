@@ -25,13 +25,27 @@
  *     - `rejectionReason`（宿主内部子因）不得出现在 wire entry 上（schema strict +
  *       运行时断言双保险）；authority 托管项目 → 可读 ProtocolRequestError。
  *
+ *   T-R3 —— 降级/失败分支常驻覆盖（G-2）：
+ *     - 身份解析失败 ×2：list → `available:false, reason:"unavailable"` 信封；
+ *       archive → -32010 可读错误（fail-visible，无 outcomes 无 mutation 行）；
+ *     - openDatabase 回 null（schema fence）×2：list → unavailable 信封；
+ *       archive → 可读 -32010（与开库 **throw** 的原文透传是两种可观察行为）。
+ *
+ *   T-R4 —— dispatch 源守卫（G-1，四处手工对齐坐标 ③）：
+ *     - server.ts 剥注释后必须各有且仅有一处 list/archive 的 `case`，且紧跟
+ *       对应 handler 的 `return await …(this.context, request.params);` 字面量
+ *       （契约测试直调 handler、services 降级测试走假 app-server，均不经本层
+ *       dispatch——本断言是这条路由的常驻自动化证据）。
+ *
  * 隔离：全部磁盘写入落在 `mkdtemp` 临时树——数据库经 `MAGIC_CONTEXT_DB_PATH`
  * （绝对路径覆盖，优先级最高）注入，日志经 `MAGIC_CONTEXT_LOG_PATH`；config.json
  * 走 `dependencies.configPath` 注入口。**绝不触碰真实 `~/.omz`**。
  *
- * 前置构建：`@zcode/shared`（schema 出口）、`@zcode/magic-context`（组合函数/存储
- * 原语）、`@zcode/contracts`/`@zcode/adapters` 与 `bootstrap` 自身的 dist（本脚本
- * import 的是 `../dist/zcode-protocol/magic-context-memories.js`）。
+ * 前置构建：`@zcode/shared`（schema 出口）、`@zcode/model-option-map`（shared dist
+ * 运行时会 import 它，registerHooks 直读其 dist；缺了会抛 `no compiled dist`）、
+ * `@zcode/magic-context`（组合函数/存储原语）、`@zcode/contracts`/`@zcode/adapters`
+ * 与 `bootstrap` 自身的 dist（本脚本 import 的是
+ * `../dist/zcode-protocol/magic-context-memories.js`）。
  *
  * 运行方式：`node scripts/test-magic-context-memories-rpc.mjs`（同
  * `test-magic-context-ui-config.mjs` 的先例：不经 `--test` 聚合器，脚本自带
@@ -39,10 +53,11 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { registerHooks } from "node:module";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { basename, join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
@@ -114,6 +129,7 @@ const DIRS = {
   mix: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-mix-")),
   authority: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-authority-")),
   foreign: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-foreign-")),
+  fence: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-fence-")),
 };
 
 magicContext.initializeMagicContextHost();
@@ -244,6 +260,11 @@ function mutationRowsFor(ids) {
         WHERE target_memory_id IN (${placeholders}) ORDER BY id`,
     )
     .all(...ids);
+}
+
+/** 全表 mutation 行数（失败分支「零持久化」断言的读面，不新增任何行）。 */
+function mutationRowCount() {
+  return seedDb.prepare("SELECT COUNT(*) AS count FROM memory_mutation_log").get().count;
 }
 
 /** archiveMemory(reason) 把 reason trim 后并入 metadata_json.archive_reason（D5）。 */
@@ -795,4 +816,151 @@ test("降级：关闭态 archive 反射式拒绝（-32010 可读错误）且不�
     () => archiveRpc(DIRS.archive, []),
     (error) => error.name === "ProtocolRequestError" && error.code === -32602,
   );
+});
+
+// ══ D2. 降级/失败分支（G-2）：身份解析失败 ×2 与 openDatabase null ×2 ═════════
+
+test("降级：身份解析失败——list 收敛 unavailable 信封（家目录不视为项目，只读探测不写盘）", async () => {
+  // 家目录是 resolveProjectIdentityForSession 刻意拒绝的目录：homeProjectPermission
+  // 默认 false，且全仓无 setHomeProjectPermission 调用者（project-identity.ts:717-747）。
+  const home = homedir();
+  assert.equal(
+    magicContext.resolveProjectIdentityForSession(home),
+    undefined,
+    "构造前提：家目录必须解析不出项目身份（否则本用例测的不是该分支）",
+  );
+
+  const result = await listRpc(home);
+  assert.equal(result.supported, true, "supported 说的是「CLI 有这个能力」，与失败分支无关");
+  assert.equal(result.available, false, "身份解析不出 → 占位态；回空列表会误导成「本项目没有记忆」");
+  assert.equal(result.reason, "unavailable");
+  assert.deepEqual(result.entries, []);
+  assert.deepEqual(result.counts, ZERO_COUNTS);
+  assert.equal(result.truncated, false);
+});
+
+test("降级：身份解析失败——archive fail-visible（-32010 可读错误，无 outcomes、零 mutation 行）", async () => {
+  const mutationsBefore = mutationRowCount();
+
+  await assert.rejects(
+    () => archiveRpc(homedir(), [1, 2], { reason: "must not land" }),
+    (error) => {
+      assert.equal(error.name, "ProtocolRequestError");
+      assert.equal(error.code, -32010);
+      assert.match(error.message, /no usable project identity/);
+      assert.equal(
+        "outcomes" in error,
+        false,
+        "拒绝必须是错误而不是空 outcomes 结果（空 outcomes 会被 UI 读成「什么都没发生」）",
+      );
+      return true;
+    },
+  );
+  assert.equal(mutationRowCount(), mutationsBefore, "身份解析失败必须在任何持久化之前拒绝（零 mutation 行）");
+});
+
+test("降级：openDatabase 回 null（schema fence）→ list 收敛 unavailable 信封；archive 给可读错误（null 分支，区别于 throw 的原文透传）", async () => {
+  const fenceDbPath = join(TEMP_ROOT, "schema-fence.db");
+  await withDatabasePath(fenceDbPath, async () => {
+    // 专用库 P：先正常建库并挂进进程级句柄缓存（与生产长活进程复用句柄同语义）。
+    const fenceDb = magicContext.openDatabase(magicContext.getMagicContextDatabasePath());
+    assert.ok(fenceDb, "构造前提：专用库 P 必须能正常建起来");
+
+    // node:sqlite 直连 P，只把读窗口（version < 10000 = FORK_MIGRATION_VERSION_FLOOR
+    // 的 legacy 行）内的 MAX 版本 +1——getPersistedSchemaVersion 正是读这一行，越过
+    // LATEST_SUPPORTED_VERSION 即触发 fence；>=10000 的 fork lane 行不动。
+    const raw = new DatabaseSync(fenceDbPath);
+    const readMaxLegacyVersion = () =>
+      raw
+        .prepare(
+          "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations WHERE version < 10000",
+        )
+        .get().version;
+    let versionBefore;
+    let versionAfter;
+    try {
+      versionBefore = readMaxLegacyVersion();
+      raw.exec(
+        "UPDATE schema_migrations SET version = version + 1 WHERE version = (SELECT MAX(version) FROM schema_migrations WHERE version < 10000)",
+      );
+      versionAfter = readMaxLegacyVersion();
+    } finally {
+      raw.close();
+    }
+    assert.equal(versionAfter, versionBefore + 1, "构造前提：必须改到读窗口内的 MAX 行");
+
+    // 仍以同一路径 P 调 list：existing 分支（storage-db.ts:2689-2692）再次 fence → null，
+    // 有 available:false 信封承载，收敛 unavailable（不是抛 -32603 冒泡）。
+    const listed = await listRpc(DIRS.fence);
+    assert.equal(listed.supported, true);
+    assert.equal(listed.available, false);
+    assert.equal(listed.reason, "unavailable");
+    assert.deepEqual(listed.entries, []);
+    assert.deepEqual(listed.counts, ZERO_COUNTS);
+    assert.equal(listed.truncated, false);
+
+    const fence = magicContext.getSchemaFenceRejection();
+    assert.ok(fence, "list 的 unavailable 必须来自 schema fence 拒绝（而不是别的开库失败）");
+    assert.equal(fence.persistedVersion, versionAfter);
+    assert.equal(fence.supportedVersion, versionBefore);
+    assert.equal(fence.persistedVersion > fence.supportedVersion, true);
+
+    // archive 同路径同分支：null 是确定性打不开 → 可读 -32010；与「openDatabase throw
+    // （BUSY/不可写）原文透传」是两种可观察行为（throw 分支在「库打不开」用例已钉住）。
+    await assert.rejects(
+      () => archiveRpc(DIRS.fence, [1]),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /storage is unavailable right now/i);
+        return true;
+      },
+    );
+
+    try {
+      fenceDb.close();
+    } catch {
+      // 关闭失败只影响临时树清理，不改变测试结论。
+    }
+  });
+});
+
+// ══ E. 源守卫：dispatch 路由（四处手工对齐坐标 ③ 的常驻证据，G-1） ══════════
+
+test("源守卫：server.ts dispatch 必须保留两条 case 与 return 字面量（四处手工对齐坐标 ③）", () => {
+  const serverPath = fileURLToPath(new URL("../src/zcode-protocol/server.ts", import.meta.url));
+  // 剥注释再匹配（T-O1 先例）：块注释与 `// case …` 行注释都不得误命中。
+  const source = readFileSync(serverPath, "utf-8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/.*$/gm, "");
+
+  const caseFamilies = [
+    ...source.matchAll(
+      /^\s*case zcodeProtocolMethods\.workspace(List|Archive)MagicContextMemories:\s*$/gm,
+    ),
+  ].map((match) => match[1]);
+  assert.deepEqual(
+    caseFamilies.sort(),
+    ["Archive", "List"],
+    "四处手工对齐坐标 ③（CLI switch case）失守：server.ts 剥注释后必须各有且仅有一处 list/archive 的 case",
+  );
+
+  for (const [family, handlerName] of [
+    ["List", "listMagicContextMemories"],
+    ["Archive", "archiveMagicContextMemories"],
+  ]) {
+    const call = `return await ${handlerName}(this.context, request.params);`;
+    assert.ok(
+      source.includes(call),
+      `四处手工对齐坐标 ③（CLI switch case）失守：server.ts 缺少字面量「${call}」`,
+    );
+    assert.match(
+      source,
+      new RegExp(
+        `case zcodeProtocolMethods\\.workspace${family}MagicContextMemories:\\s+` +
+          call.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"),
+      ),
+      `四处手工对齐坐标 ③（CLI switch case）失守：workspace${family}MagicContextMemories 的 case 后必须直接 return「${call}」`,
+    );
+  }
 });

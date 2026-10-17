@@ -43,7 +43,8 @@
  * - 列表 = `listProjectMemoriesForAdmin`（三 status 全回、expiryCutoff=0 的管理
  *   视图；merged 行 status 也是 archived、靠 supersededByMemoryId 区分展示）。
  * - `category` 过滤在 CLI 侧施加（协议层不复刻词表，权威在包侧 memory/types.ts
- *   的 13 值 accept-both 域），按 string 全等。
+ *   的 12 值 accept-both 域：v2 五类 + legacy 九类，重叠 CONSTRAINTS/NAMING 去重后
+ *   唯一值 12），按 string 全等。
  * - `offset`/`limit` 分页在过滤后的集合上切片；`truncated` = 本页之后还有未返回
  *   的条目（offset + 本页长度 < 过滤后总数），与 shared 侧字段注释一致。
  * - entries 是 `memories` 行管理视图投影的直通：`expiresAt`/`supersededByMemoryId`
@@ -63,10 +64,11 @@
  *   的 message 在组合函数里就是不透明的「was not found」，防泄漏纪律）。
  * - 组合函数可能抛 `ModuleMemoryAuthorityError`（module authority 托管的项目）：
  *   捕获转可读的 ProtocolRequestError（fail-visible，不是降级）。
- * - 开库抛错（如 `SQLITE_BUSY` / `database is locked`）**原文透传**：services 的
- *   可重试转译靠 message 匹配（Step 5 的 isSqliteBusyError），这里重新包一层会把
- *   可重试信号吃掉。list 侧相反：它有 available:false 信封可承载「打不开」，吞掉
- *   原文收敛成 `reason:"unavailable"`（与 ctx-status 的 openStore 同款）。
+ * - 开库抛错（如 `SQLITE_BUSY` / `database is locked`）在 archive 侧**原文透传**：
+ *   services 的可重试转译靠 message 匹配（Step 5 的 isSqliteBusyError），这里重新
+ *   包一层会把可重试信号吃掉；null（确定性打不开）给可读的 -32010。list 侧：开库段
+ *   与身份解析段失败收敛为 unavailable 信封（与 ctx-status 的 openStore 同款）；
+ *   读段错误冒泡 -32603，由 services 层转译为可重试文案。
  * - 身份解析不出（家目录未授权 / git 身份暂不可用）与工具面同款措辞；这是正常
  *   状态不是故障，但用户点的是「本项目记忆」，回空列表是误导，故 fail-visible。
  *
