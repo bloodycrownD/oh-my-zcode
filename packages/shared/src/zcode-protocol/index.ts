@@ -2197,13 +2197,14 @@ export type ZCodeWorkspaceReadMagicContextConfigResult = z.infer<
  *
  * `category` 过滤由 CLI handler（Step 6）施加——host 层列表薄封装不接收该参数；
  * 协议层不复刻分类词表（权威在 magic-context 包 `memory/types.ts` 的
- * `MemoryCategory`，13 值 accept-both：v2 五类 + legacy 九类桥接）。
+ * `MemoryCategory`，12 值 accept-both：v2 五类 + legacy 九类，重叠
+ * CONSTRAINTS/NAMING 去重后唯一值 12）。
  */
 export const zcodeWorkspaceListMagicContextMemoriesParamsSchema = z
   .object({
     workspace: zcodeWorkspaceRefSchema,
     category: z.string().optional(),
-    /** 单次拉取上限；host 层按同值截断，被截断时 result.truncated=true。 */
+    /** 单次拉取上限；CLI host（bootstrap handler）按同值截断，被截断时 result.truncated=true。 */
     limit: z.number().int().positive().max(200).default(200),
     offset: z.number().int().nonnegative().optional(),
   })
@@ -2216,7 +2217,7 @@ export type ZCodeWorkspaceListMagicContextMemoriesParams = z.infer<
  * 条目字段是 `memories` 行的管理视图投影（host 层 `toMemory` 产物）：
  *
  * - `category` / `status` 以字符串过线：存储读边界（`isMemoryRow`）已保证落在
- *   `MemoryCategory`（13 值）/ `MemoryStatus`（active|permanent|archived）域内；
+ *   `MemoryCategory`（12 值，v2 五类 + legacy 九类去重）/ `MemoryStatus`（active|permanent|archived）域内；
  *   协议层不复刻词表，上游新增分类时不至于整表 parse 失败。
  * - `expiresAt` 可为 NULL（无 TTL 类目，promotion.ts:60-63 的写入侧只产 null 或
  *   now+ttl）——列表 SQL 的 `expires_at IS NULL` 行照常回，协议层必须接受 null。
@@ -2248,7 +2249,7 @@ export const zcodeWorkspaceListMagicContextMemoriesResultSchema = z
     supported: z.boolean().default(true),
     /** magicContext 关闭 / 库打不开 → false（零值条目，不建库不落盘）。 */
     available: z.boolean(),
-    /** available=false 的原因："disabled" | "unavailable"，供 UI 占位文案。 */
+    /** available=false 的原因："disabled" | "unavailable"；旧 CLI 降级时 services 另用 "unsupported"（UI 以 supported:false 为主判据）。供 UI 占位文案。 */
     reason: z.string().optional(),
     entries: z.array(zcodeMagicContextMemoryEntrySchema),
     /**
