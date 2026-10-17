@@ -832,7 +832,11 @@ test("降级：身份解析失败——list 收敛 unavailable 信封（家目�
 
   const result = await listRpc(home);
   assert.equal(result.supported, true, "supported 说的是「CLI 有这个能力」，与失败分支无关");
-  assert.equal(result.available, false, "身份解析不出 → 占位态；回空列表会误导成「本项目没有记忆」");
+  assert.equal(
+    result.available,
+    false,
+    "身份解析不出 → 占位态；回空列表会误导成「本项目没有记忆」",
+  );
   assert.equal(result.reason, "unavailable");
   assert.deepEqual(result.entries, []);
   assert.deepEqual(result.counts, ZERO_COUNTS);
@@ -856,7 +860,11 @@ test("降级：身份解析失败——archive fail-visible（-32010 可读错�
       return true;
     },
   );
-  assert.equal(mutationRowCount(), mutationsBefore, "身份解析失败必须在任何持久化之前拒绝（零 mutation 行）");
+  assert.equal(
+    mutationRowCount(),
+    mutationsBefore,
+    "身份解析失败必须在任何持久化之前拒绝（零 mutation 行）",
+  );
 });
 
 test("降级：openDatabase 回 null（schema fence）→ list 收敛 unavailable 信封；archive 给可读错误（null 分支，区别于 throw 的原文透传）", async () => {
