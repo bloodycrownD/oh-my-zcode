@@ -16,13 +16,18 @@
  *   - 混合批次：archived + already + rejected + missing 一次投递，部分成功合法，
  *     mutation 行只对真正归档的 id 新增；
  *   - 边界与回归 smoke：`ids` 缺失的可自我纠正错误、重复 id 只写一条 mutation 行、
- *     action 缺省 = write 照旧（主回归在 test-ctx-search-memory）。
+ *     action 缺省 = write 照旧（主回归在 test-ctx-search-memory）；
+ *   - **契约层守卫（cr-fix-spec scope-b/G-1）**：`CtxMemoryInputSchema`（contracts
+ *     dist）的 strict / action 枚举 / ids·reason 边界与缺省 action 口径断言；外加与
+ *     shared wire 契约 `zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema`
+ *     （packages/shared/dist）的边界 drift 探针——100/101 与 4096/4097 两侧同判。
  *
  * 运行方式：`tsx --test scripts/test-ctx-memory-archive.mjs`
  * （必须 tsx：被测 handler 是 TypeScript 源码，与同目录 ctx-search-memory 测试
  *  同范式）。**前置构建**：`@zcode/contracts` 与 `@zcode/magic-context` 的 dist
  *  必须存在——handler 动态 import 的是包侧编译产物（barrel 的
- *  `archiveProjectMemories` 出口来自 Step 1）。
+ *  `archiveProjectMemories` 出口来自 Step 1）；drift 探针另直读 packages/shared/dist
+ *  的 zcode-protocol 编译产物（shared 无 build 脚本，dist 随仓库常备）。
  *
  * 隔离：`mkdtemp` + 显式 `MAGIC_CONTEXT_DB_DIR` / `MAGIC_CONTEXT_LOG_PATH`，
  * `delete process.env.NODE_ENV`（node --test 会把 NODE_ENV 置为 test，包侧
@@ -43,6 +48,17 @@ delete process.env.NODE_ENV;
 
 const { ctxMemoryToolEntry } = await import("../src/tool/handlers/ctx-memory.js");
 const magicContext = await import("@zcode/magic-context");
+
+// 契约层守卫的读取面（同包 test-ctx-search-memory 的既有 `@zcode/contracts` import
+// 路径：tsx 下经包 exports 落到 contracts dist）。
+const { CtxMemoryInputSchema, CTX_MEMORY_IDS_MAX, CTX_MEMORY_REASON_MAX_LENGTH } =
+  await import("@zcode/contracts");
+// wire 侧刻意直读 packages/shared/dist 的编译产物：本测试跑在 tsx 下，`@zcode/shared`
+// 的 exports 直指 src/*.ts，走包名拿到的是 TS 源码；drift 探针要锁的是**运行时上线
+// 的 dist 面**（与 bootstrap RPC 契约测试 registerHooks 重定向到的是同一份产物）。
+const { zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema } = await import(
+  new URL("../../../../../packages/shared/dist/zcode-protocol/index.js", import.meta.url).href
+);
 
 magicContext.initializeMagicContextHost();
 
@@ -345,4 +361,96 @@ test("write stays the default action (regression smoke)", async () => {
     category: "CONSTRAINTS",
   });
   assert.match(explicit, /^Saved memory \[ID: \d+\] in CONSTRAINTS\.$/);
+});
+
+// ── 契约层边界守卫与 drift 探针（cr-fix-spec scope-b/G-1） ────────────────────
+// 工具契约（contracts 的 CtxMemoryInputSchema）与 shared wire 契约
+// （zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema）各自独立声明同一组上限：
+// ids/memoryIds 1..100、reason ≤4096。shared 侧按依赖方向保持字面量（不得反向
+// import @zcode/contracts），两处数值不靠注释对齐而靠下面的边界探针锁死同判——
+// 任一侧数值漂移，本组断言必须红。
+
+/** 1..n 的 id 序列（探针样本；数组字面量太长）。 */
+function idsWithin(n) {
+  return Array.from({ length: n }, (_, index) => index + 1);
+}
+
+test("tool contract guards (scope-b/G-1): strict shape, action enum, ids/reason boundaries", () => {
+  // .strict()：未知键必须被拒（provider 传错字段不得被静默吞掉）。
+  assert.equal(CtxMemoryInputSchema.safeParse({ action: "write", bogus: 1 }).success, false);
+  // action 枚举只有 write/archive；未知值在解析层拒（handler 另有可自我纠正文案）。
+  assert.equal(CtxMemoryInputSchema.safeParse({ action: "bogus" }).success, false);
+  // ids：至少 1 个、至多 100 个（min(1) 只防空数组；ids 缺失的 handler 文案另有专测）。
+  assert.equal(CtxMemoryInputSchema.safeParse({ action: "archive", ids: [] }).success, false);
+  assert.equal(
+    CtxMemoryInputSchema.safeParse({ action: "archive", ids: idsWithin(100) }).success,
+    true,
+  );
+  assert.equal(
+    CtxMemoryInputSchema.safeParse({ action: "archive", ids: idsWithin(101) }).success,
+    false,
+  );
+  // reason：4096 字符通过、4097 拒。上限引用常量 CTX_MEMORY_REASON_MAX_LENGTH。
+  assert.equal(
+    CtxMemoryInputSchema.safeParse({ action: "archive", ids: [1], reason: "x".repeat(4096) })
+      .success,
+    true,
+  );
+  assert.equal(
+    CtxMemoryInputSchema.safeParse({ action: "archive", ids: [1], reason: "x".repeat(4097) })
+      .success,
+    false,
+  );
+});
+
+test("tool contract default action (scope-b/G-1): omitted action stays undefined at parse time", () => {
+  const parsed = CtxMemoryInputSchema.safeParse({
+    content: "Contract guard: an omitted action must stay undefined at parse time.",
+    category: "ARCHITECTURE",
+  });
+  assert.equal(parsed.success, true);
+  // 契约层刻意没有 .default("write")：write 等价性在 handler 层 `parsed.action ?? "write"`
+  // （src/tool/handlers/ctx-memory.ts）。缺省路径的行为回归由本文件上方
+  //「write stays the default action (regression smoke)」用例覆盖，两处互指。
+  assert.equal(parsed.data.action, undefined);
+});
+
+test("drift probe (scope-b/G-1): tool contract and shared wire contract judge boundaries alike", () => {
+  // wire 样本需要合法 workspace（zcodeWorkspaceRefSchema：workspacePath + workspaceKey）。
+  const wireWorkspace = { workspacePath: "C:/drift-probe", workspaceKey: "drift-probe" };
+  const toolJudges = (sample) => CtxMemoryInputSchema.safeParse(sample).success;
+  const wireJudges = (overrides) =>
+    zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema.safeParse({
+      workspace: wireWorkspace,
+      ...overrides,
+    }).success;
+
+  // ids / memoryIds：两侧同为 1..100（不内省 zod 内部结构，只看 safeParse 判定）。
+  for (const [count, expected] of [
+    [100, true],
+    [101, false],
+  ]) {
+    const toolSide = toolJudges({ action: "archive", ids: idsWithin(count) });
+    const wireSide = wireJudges({ memoryIds: idsWithin(count) });
+    assert.equal(toolSide, expected, `工具契约对 ids=${count} 的判定`);
+    assert.equal(wireSide, expected, `wire 契约对 memoryIds=${count} 的判定`);
+    assert.equal(toolSide, wireSide, `两侧对 ids=${count} 必须同判`);
+  }
+
+  // reason：两侧同为 ≤4096。
+  for (const [length, expected] of [
+    [4096, true],
+    [4097, false],
+  ]) {
+    const toolSide = toolJudges({ action: "archive", ids: [1], reason: "x".repeat(length) });
+    const wireSide = wireJudges({ memoryIds: [1], reason: "x".repeat(length) });
+    assert.equal(toolSide, expected, `工具契约对 reason 长度=${length} 的判定`);
+    assert.equal(wireSide, expected, `wire 契约对 reason 长度=${length} 的判定`);
+    assert.equal(toolSide, wireSide, `两侧对 reason 长度=${length} 必须同判`);
+  }
+
+  // 探针锚定导出的上限常量（本测试里的 100/4096/101/4097 是两侧都必须满足的绝对
+  // 口径；常量被改而 shared 未同步时，上面的同判断言先红）。
+  assert.equal(CTX_MEMORY_IDS_MAX, 100);
+  assert.equal(CTX_MEMORY_REASON_MAX_LENGTH, 4096);
 });

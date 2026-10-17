@@ -150,6 +150,19 @@ export const CTX_MEMORY_CATEGORIES = [
   "NAMING",
 ] as const;
 
+/**
+ * `ctx_memory` 的 `ids` 数量上限与 `reason` 字符上限：**与 shared wire 契约同步
+ * 维护**的单一常量锚点（cr-fix scope-b/G-1）。
+ *
+ * 协议侧 `zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema`（`packages/shared/src/
+ * zcode-protocol/index.ts`）用同值字面量声明 `memoryIds` / `reason`——依赖方向上
+ * shared 不得反向 import 本包，因此两处数值靠 core `scripts/test-ctx-memory-archive.mjs`
+ * 的边界 drift 探针锁死同判：改任一处必须同步另一处，否则那里的断言必须红。
+ * UI 侧另有第四处本地常量（依赖方向同样不能 import 本包），保持注释锚定。
+ */
+export const CTX_MEMORY_IDS_MAX = 100;
+export const CTX_MEMORY_REASON_MAX_LENGTH = 4096;
+
 export const CtxMemoryInputSchema = z
   .object({
     action: z
@@ -166,15 +179,17 @@ export const CtxMemoryInputSchema = z
       .describe(
         "Kind of fact (required): project rule, architecture, constraint, config value, or naming.",
       ),
+    // ids / reason 的 describe 文案里保留数字（1–100 / 4096），它们锚定
+    // CTX_MEMORY_IDS_MAX / CTX_MEMORY_REASON_MAX_LENGTH：改上限必须同步改文案。
     ids: z
       .array(z.number().int())
       .min(1)
-      .max(100)
+      .max(CTX_MEMORY_IDS_MAX)
       .optional()
       .describe("Memory IDs to archive (required when action is 'archive'): 1–100 ids."),
     reason: z
       .string()
-      .max(4096)
+      .max(CTX_MEMORY_REASON_MAX_LENGTH)
       .optional()
       .describe("Why the memories are being archived (optional; at most 4096 characters)."),
   })
