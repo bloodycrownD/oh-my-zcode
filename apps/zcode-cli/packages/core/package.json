@@ -37,6 +37,7 @@
     "test:subagent-cache-breakpoints": "tsx --test scripts/test-subagent-cache-breakpoints.mjs",
     "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
     "test:ctx-search-memory": "tsx --test scripts/test-ctx-search-memory.mjs",
+    "test:ctx-memory-archive": "tsx --test scripts/test-ctx-memory-archive.mjs",
     "test:promotion-lease": "tsx --test scripts/test-promotion-lease.mjs",
     "test:queue-item-delivery-toggle": "tsx --test scripts/test-queue-item-delivery-toggle.mjs",
     "test:magic-context-section": "node --test scripts/test-magic-context-prompt-section.mjs",
