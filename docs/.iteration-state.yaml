@@ -609,4 +609,22 @@ magic_context_memory_management:
     step11_manual_pending: "T-E1 余下桌面端人工项：面板视觉（徽章/对话框/分页）、onboarding 无记忆勾选、断开 CLI 后面板占位态（services 降级逻辑已由 T-R3 钉住）、真实会话注入面收敛观察"
     commit_id_corrections: "cr-func-final 以 git 实读订正：s4=6244bb7a / s9=3e517db7 / s3=11735c4b / s5=f1979e06 / s6=2449b3d5 / s8=fc49bf82（前轮子代理汇报口径互换过，以本行为准）"
     notes: "impl 子代理只编辑不 commit，主代理按 Step pathspec 统一 commit（中文 message）；依赖链 s1→s2→s3、s4→s5→s6→s7、s5→s8、s9 独立；Step 11 e2e=manual_user 非阻塞，dev-ready 后交用户真机验收"
+  cr_loop:
+    scope: "2301debc..33c23274 全量 diff（30 文件 +3528/−747）"
+    mode: code-review-loop（wave-1 五路 review-scope 并行 → review-full 终审）
+    findings: 8×P2、0×P0/P1（MF-1 批量>100 上限原 P3 观察按「已认定+改法明确」升格；MF-2 unsupported 注释）；spec_deviations none
+    fix_spec: docs/iterations/magic-context-memory-management/cr-fix-spec.md
+    spec_check: "对 cr-fix-spec 本体再过 spec-check-loop 3 轮（r1 3P1+8P2→doc-fix；r2 1P1+4P2→doc-fix，含 G-2 fence 构造法实证重写；r3 4/5 闭合+3 行照单落 → 等效 Go execute-ready）；must-fix 8→10 条（OQ6/K 节 2 条同族注释升格 C-2/C-3）"
+    fix_exec:
+      mode: code-dev-loop（dag v7；wave-0 四节点并行，文件集互斥）
+      node_status:
+        fix-shared-annotations: { status: done, executor: main, commit: 78e17a39, note: "C-1×2 + MF-2 + C-3 四处注释；「13 值」shared 侧归零、unsupported 白名单面符合" }
+        fix-contract-drift: { status: done, executor: subagent, commit: 9a080743, note: "CTX_MEMORY_IDS_MAX/REASON_MAX_LENGTH 导出+schema 引用；core 13/13（行为断言+缺省 action===undefined+双侧边界探针）；contracts 侧红绿自证；ctx-search 回归 10/10" }
+        fix-ui-panel: { status: done, executor: subagent, commit: 8fc33440, note: "J-1 新键 settings.memory.management.noWorkspace（parity 5914/5914）/B-1 errorWithoutData 空态门/MF-1 分片 100 串行+失败即停+toastArchived 计数/C-1 第4处口径；tsc -b ui 0 错" }
+        fix-bootstrap-tests: { status: done, executor: subagent, commit: 355ec460, note: "G-1 源守卫（剥注释+行锚定+return 字面量，红绿自证①）/G-2 四分支（身份失败×2 + fence 构造×2 含 getSchemaFenceRejection 佐证，红绿自证②）/C-1:46/C-2/K-1；契约 19/19 + ui-config 14/14" }
+        fmt-fold: { status: done, executor: main, commit: b8d52900, note: "cr-func 观察项：本波新增 2 条断言按 oxfmt 折行（不动 120/30 既有基线漂移）" }
+        cr-func-fixwave: { status: done, executor: subagent, func_ready: yes, note: "10+1 矩阵全 ✅、必重跑四绿（19/19、13/13、5914/5914、tsc）、G-1 独立红绿复算、MF-2 命中集精确等于白名单；0 must-fix" }
+      deviations: none（三处保留均 spec 授权/结构保证：B-1 manual 系 spec 明文；drift wire 侧反向红证由 contracts 侧+绝对期望值结构覆盖；MF-1 失败后 load(0) 清勾选为 spec 字面+注释登记）
+      leftovers: "MF-1 >100 全选与部分失败无 UI 自动化（无组件测试基建）→ 并入合并后 QA；open questions ×10 待拍板未决（含 OQ10 过滤空态文案）"
+    outcome: "dev-ready（2026-10-18，HEAD b8d52900；cr-fix 10/10 落地，func-ready yes）"
 
