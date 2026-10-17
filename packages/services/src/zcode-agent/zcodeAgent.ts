@@ -65,6 +65,9 @@ import type {
   ZCodeWorkspaceHookTrustGrantResult,
   ZCodeWorkspaceUpdateMagicContextConfigResult,
   ZCodeWorkspaceReadMagicContextConfigResult,
+  // FORK（magic-context-memory-management / D2）：记忆管理面板两侧结果（shared schema infer）。
+  ZCodeWorkspaceListMagicContextMemoriesResult,
+  ZCodeWorkspaceArchiveMagicContextMemoriesResult,
   // FORK（prompt-language-option）：模型语言（agent 提示词语言）。
   ZCodePromptLanguage,
   ZCodeWorkspaceReadPromptLanguageResult,
@@ -264,6 +267,34 @@ export type ZCodeAgentReadWorkspacePresentationParams = ZCodeAgentWorkspaceTarge
  */
 export interface ZCodeAgentUpdateMagicContextConfigParams extends ZCodeAgentWorkspaceTarget {
   config: unknown;
+}
+
+/**
+ * FORK（magic-context-memory-management / D2 · Step 5）：列取当前 workspace 的
+ * magic-context 跨会话项目记忆（设置页「记忆」分区管理面板的数据源）。
+ *
+ * 字段是 wire schema（`zcodeWorkspaceListMagicContextMemoriesParamsSchema`）减去
+ * `workspace` 的部分：`workspace` 由 services 从 `ZCodeAgentWorkspaceTarget` 构造
+ * （`buildWorkspaceRef`）后下发，调用方不自己拼协议信封。`limit` 缺省由 CLI 侧按
+ * 200 补齐（wire schema 的 `.default(200)`）；这里保持可选，不复制上限值。
+ */
+export interface ZCodeAgentListMagicContextMemoriesParams extends ZCodeAgentWorkspaceTarget {
+  /** 分类过滤；词表权威在 magic-context 包（协议层不复刻）。 */
+  category?: string;
+  /** 单次拉取上限（wire 侧 1..200）；不传等价于 200。 */
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * FORK（magic-context-memory-management / D2 · Step 5）：批量废弃（archive 软删）
+ * 当前项目的 magic-context 记忆；与 wire schema 同形（减去 `workspace`）。
+ */
+export interface ZCodeAgentArchiveMagicContextMemoriesParams extends ZCodeAgentWorkspaceTarget {
+  /** 目标记忆 id（wire 侧 1..100）。 */
+  memoryIds: number[];
+  /** 废弃原因；上限 4096 与工具面 `ctx_memory` 契约一致，写入 metadata。 */
+  reason?: string;
 }
 
 /**
@@ -658,6 +689,33 @@ export interface IZCodeAgentService {
   readMagicContextConfig(
     params: ZCodeAgentWorkspaceTarget,
   ): Promise<ZCodeWorkspaceReadMagicContextConfigResult>;
+  /**
+   * FORK（magic-context-memory-management / D2 · Step 5）：列取当前 workspace 的
+   * magic-context 项目记忆（设置页「记忆」分区管理面板）。走与 readMagicContextConfig
+   * 同一条 read-only 控制面——provider/model 未就绪时面板也必须可读。
+   *
+   * 降级（D6，readPromptLanguage 口径）：旧 CLI 不认识该方法（-32601）时返回
+   * `supported:false` 的零值信封（`available:false`、`reason:"unsupported"`、
+   * `entries:[]`、counts 全零、`truncated:false`），调用方据此渲染占位态而不是把
+   * 错误抛给设置页；magicContext 关闭 / 库打不开时 CLI 以 `available:false` +
+   * `reason:"disabled"|"unavailable"` 结构化返回，services 原样透传。
+   */
+  listMagicContextMemories(
+    params: ZCodeAgentListMagicContextMemoriesParams,
+  ): Promise<ZCodeWorkspaceListMagicContextMemoriesResult>;
+  /**
+   * FORK（magic-context-memory-management / D2 · Step 5）：批量废弃（archive 软删）
+   * 项目记忆，逐 id 回 outcome（archived / already-archived / missing / rejected，
+   * message 供 UI toast 直显）。与对话内 `ctx_memory action:"archive"` 共享 CLI 侧
+   * 同一组合函数，archive 与 mutation 日志成对写。
+   *
+   * 降级（D6，readMagicContextConfig 口径）：旧 CLI 不认识该方法（-32601）时抛
+   * 可读错误（提示升级 CLI），不把原始 -32601 漏给 UI；记忆库忙（SQLITE_BUSY）
+   * 转译为可重试提示。
+   */
+  archiveMagicContextMemories(
+    params: ZCodeAgentArchiveMagicContextMemoriesParams,
+  ): Promise<ZCodeWorkspaceArchiveMagicContextMemoriesResult>;
   /**
    * FORK（prompt-language-option）：读回 effective 的模型语言。
    * FORK（system-language-unification）：界面语言与模型语言已合并为一行「系统语言」，

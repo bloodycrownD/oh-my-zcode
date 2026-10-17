@@ -86,6 +86,9 @@ import {
   zcodeWorkspaceUpdateInteractionPreferencesResultSchema,
   zcodeWorkspaceUpdateMagicContextConfigResultSchema,
   zcodeWorkspaceReadMagicContextConfigResultSchema,
+  // FORK（magic-context-memory-management / D2）：记忆管理面板 list/archive 结果信封。
+  zcodeWorkspaceListMagicContextMemoriesResultSchema,
+  zcodeWorkspaceArchiveMagicContextMemoriesResultSchema,
   // FORK（prompt-language-option）：模型语言读写。
   zcodeWorkspaceReadPromptLanguageResultSchema,
   zcodeWorkspaceUpdatePromptLanguageResultSchema,
@@ -134,6 +137,9 @@ import type {
   ZCodeAgentGoalParams,
   ZCodeAgentGrantWorkspaceHookTrustParams,
   ZCodeAgentUpdateMagicContextConfigParams,
+  // FORK（magic-context-memory-management / D2）：记忆管理面板 list/archive 入参。
+  ZCodeAgentListMagicContextMemoriesParams,
+  ZCodeAgentArchiveMagicContextMemoriesParams,
   // FORK（prompt-language-option）：模型语言写参数。
   ZCodeAgentUpdatePromptLanguageParams,
   ZCodeAgentInitializeResult,
@@ -407,6 +413,29 @@ function isProtocolMethodNotFoundError(error: unknown): boolean {
     "code" in error &&
     (error as { code?: unknown }).code === -32601
   );
+}
+
+// FORK（magic-context-memory-management / D2 · Step 5）：SQLITE_BUSY 是面板读/废弃与
+// CLI 写通道竞争的短暂冲突（archive 本身是幂等 UPDATE，重试即恢复）。CLI 侧可能抛
+// `SqliteAcquisitionBusyError`（message "SQLite writer acquisition remained busy"、
+// 自有 code "SQLITE_BUSY"，magic-context `core/shared/sqlite.ts`）或原生
+// better-sqlite3 的 "database is locked"；过线后协议信封只剩 numeric code + message，
+// 因此在 services 出口按 message 识别并转译为可重试提示——否则 UI toast 直显英文
+// 驱动原文，用户不知道「重试」是正确动作。
+const SQLITE_BUSY_MESSAGE_PATTERN = /SQLITE_BUSY|database is locked|writer acquisition remained busy/i;
+
+function isSqliteBusyError(error: unknown): boolean {
+  const message =
+    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  return SQLITE_BUSY_MESSAGE_PATTERN.test(message);
+}
+
+/** 把 SQLITE_BUSY 转成可重试提示；其余错误原样返回（保持调用方既有 catch 语义）。 */
+function toRetryableMagicContextError(error: unknown, action: string): unknown {
+  if (!isSqliteBusyError(error)) return error;
+  return new Error(`${action}失败：记忆库正忙（有其他写入进行中），请稍后重试。`, {
+    cause: error,
+  });
 }
 
 function buildWorkspaceRef(params: ZCodeAgentWorkspaceTarget): ZCodeWorkspaceRef {
@@ -3086,6 +3115,121 @@ export function createZCodeAgentService(
           workspacePath: params.workspacePath,
         });
         throw error;
+      }
+    },
+
+    // FORK（magic-context-memory-management / D2 · Step 5）：列取当前项目的
+    // magic-context 记忆（设置页「记忆」分区管理面板数据源）。走与
+    // readMagicContextConfig 同一条 read-only 控制面：provider/model 未就绪时
+    // 面板也必须可读。CLI 侧 effective 门/库不可达会结构化回 available:false
+    // （不建库不落盘），services 原样透传；旧 CLI（-32601）按 D6 降级成
+    // supported:false 零值信封（readPromptLanguage 口径）。
+    async listMagicContextMemories(params: ZCodeAgentListMagicContextMemoriesParams) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      const startedAt = Date.now();
+      logger.info(undefined, "开始请求 ZCode Protocol workspace/listMagicContextMemories", {
+        workspaceKey,
+        workspacePath: params.workspacePath,
+      });
+      try {
+        const client = await getReadOnlyClient(params);
+        const result = await client.request(
+          zcodeProtocolMethods.workspaceListMagicContextMemories,
+          {
+            workspace: buildWorkspaceRef(params),
+            ...(params.category === undefined ? {} : { category: params.category }),
+            ...(params.limit === undefined ? {} : { limit: params.limit }),
+            ...(params.offset === undefined ? {} : { offset: params.offset }),
+          },
+          zcodeWorkspaceListMagicContextMemoriesResultSchema,
+        );
+        logger.info(undefined, "ZCode Protocol workspace/listMagicContextMemories 完成", {
+          entryCount: result.entries.length,
+          supported: result.supported,
+          available: result.available,
+          truncated: result.truncated,
+          durationMs: Date.now() - startedAt,
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        return result;
+      } catch (error) {
+        if (isProtocolMethodNotFoundError(error)) {
+          logger.info(undefined, "旧 Agent 不支持 magic-context 记忆列表，按不支持降级", {
+            workspaceKey,
+            workspacePath: params.workspacePath,
+          });
+          // 过一遍同一 schema，保证降级信封与线上信封同形（supported:false 是
+          // UI 占位态的判据；reason 与 available:false 的 disabled/unavailable
+          // 区分开，说明「方法不存在」而非「功能被关」）。
+          return zcodeWorkspaceListMagicContextMemoriesResultSchema.parse({
+            workspace: buildWorkspaceRef(params),
+            supported: false,
+            available: false,
+            reason: "unsupported",
+            entries: [],
+            counts: { total: 0, active: 0, permanent: 0, archived: 0, merged: 0 },
+            truncated: false,
+          });
+        }
+        logger.warn(undefined, "ZCode Protocol workspace/listMagicContextMemories 失败", {
+          durationMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : String(error),
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        throw toRetryableMagicContextError(error, "读取记忆列表");
+      }
+    },
+
+    // FORK（magic-context-memory-management / D2 · Step 5）：批量废弃（archive 软删）
+    // 项目记忆。CLI 侧与对话内 `ctx_memory action:"archive"` 共享同一组合函数
+    // （单事务成对写 archive + mutation 行），services 只转发；逐 id outcome 原样
+    // 回给 UI 组 toast。旧 CLI（-32601）按 D6 抛可读错误（readMagicContextConfig
+    // 口径），UI 消费 message 即可——桌面与 CLI 同包发布，该窗口极短。
+    async archiveMagicContextMemories(params: ZCodeAgentArchiveMagicContextMemoriesParams) {
+      const workspaceKey = resolveWorkspaceKey(params);
+      const startedAt = Date.now();
+      logger.info(undefined, "开始请求 ZCode Protocol workspace/archiveMagicContextMemories", {
+        memoryIdCount: params.memoryIds.length,
+        hasReason: params.reason !== undefined,
+        workspaceKey,
+        workspacePath: params.workspacePath,
+      });
+      try {
+        const client = await getReadOnlyClient(params);
+        const result = await client.request(
+          zcodeProtocolMethods.workspaceArchiveMagicContextMemories,
+          {
+            workspace: buildWorkspaceRef(params),
+            memoryIds: params.memoryIds,
+            ...(params.reason === undefined ? {} : { reason: params.reason }),
+          },
+          zcodeWorkspaceArchiveMagicContextMemoriesResultSchema,
+        );
+        logger.info(undefined, "ZCode Protocol workspace/archiveMagicContextMemories 完成", {
+          archivedCount: result.outcomes.filter((item) => item.outcome === "archived").length,
+          outcomeCount: result.outcomes.length,
+          durationMs: Date.now() - startedAt,
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        return result;
+      } catch (error) {
+        if (isProtocolMethodNotFoundError(error)) {
+          logger.info(undefined, "旧 Agent 不支持 magic-context 记忆废弃", {
+            workspaceKey,
+            workspacePath: params.workspacePath,
+          });
+          throw new Error("当前 CLI 版本不支持废弃项目记忆，升级 CLI 后重试");
+        }
+        logger.warn(undefined, "ZCode Protocol workspace/archiveMagicContextMemories 失败", {
+          durationMs: Date.now() - startedAt,
+          message: error instanceof Error ? error.message : String(error),
+          workspaceKey,
+          workspacePath: params.workspacePath,
+        });
+        throw toRetryableMagicContextError(error, "废弃项目记忆");
       }
     },
 
