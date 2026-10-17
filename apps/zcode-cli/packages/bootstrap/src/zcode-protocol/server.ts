@@ -83,6 +83,12 @@ import {
 import { listMcpServers, refreshMcpSessions } from "./mcp.js";
 import { updateInteractionPreferences } from "./interaction-preferences.js";
 import { readMagicContextConfig, updateMagicContextConfig } from "./magic-context-config.js";
+// FORK（magic-context-memory-management / 变更点 7 · Step 6）：设置页「记忆」分区的
+// 管理面板数据面（列表 / 批量废弃）。
+import {
+  archiveMagicContextMemories,
+  listMagicContextMemories,
+} from "./magic-context-memories.js";
 // FORK（prompt-language-option）：模型语言读写（写盘 + ConfigPort + runtime 热更新）。
 import { readPromptLanguage, updatePromptLanguage } from "./prompt-language.js";
 import { updateModelIoPreferences } from "./model-io-preferences.js";
@@ -623,6 +629,13 @@ export class ZCodeProtocolAgentServer {
       // 因为它与 update 共用同一个 ConfigPort 读取约定与同一个 schema 对象。
       case zcodeProtocolMethods.workspaceReadMagicContextConfig:
         return await readMagicContextConfig(this.context, request.params);
+      // FORK（magic-context-memory-management / Step 6）：设置页「记忆」分区的管理
+      // 面板数据面。list 的降级（disabled/unavailable）在 handler 内收敛成
+      // available:false 信封；archive 的错误（authority/BUSY）走本层统一错误响应。
+      case zcodeProtocolMethods.workspaceListMagicContextMemories:
+        return await listMagicContextMemories(this.context, request.params);
+      case zcodeProtocolMethods.workspaceArchiveMagicContextMemories:
+        return await archiveMagicContextMemories(this.context, request.params);
       // FORK（prompt-language-option）：模型语言。除写盘与 ConfigPort 外，还会对
       // 每个 resident session 调 runtime.updateConfig({language}) 做下一轮生效。
       case zcodeProtocolMethods.workspaceUpdatePromptLanguage:
