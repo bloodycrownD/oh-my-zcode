@@ -29,6 +29,7 @@
     "test:magic-context-absent-event": "node --test scripts/test-magic-context-absent-event.mjs",
     "test:magic-context-historian": "node --test scripts/test-magic-context-historian.mjs",
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
+    "test:magic-context-memories-rpc": "node scripts/test-magic-context-memories-rpc.mjs",
     "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
