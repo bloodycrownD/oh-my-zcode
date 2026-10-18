@@ -1,6 +1,7 @@
-# session-memory-and-context spec（P2+P3，v2）
+# session-memory-and-context spec（P2+P3，v3 · execute-ready）
 
 doc-fix r1（2026-10-18，闭合第 1 轮审查 2 P1 + 8 P2）：cleanup 改 clearSession 方案（逐会话事务+预查归因，P1-1）；workspaceSessions 枚举源/时间列/强制入列钉死（last_response_time，P1-2）；F7/F8 事实纠偏（返回值语义、tab union 真实锚点、rebaseStatus、clearSession 跨 harness 语义入非目标）；恢复按钮剪贴板定稿；Step 6 fixture 补齐与 T-S3/T-S7 载体补全。
+r2 复审（Go/execute-ready）P3 三条顺手闭合：workspace-global 归属登记（五处注册）、F8 锚点精确化、恢复命令主形态 start-end。
 
 基线：session-memory-and-context 分支（brainstorm c7e9adb0 + P1 已交付 02fe6385/92016fa5）。
 前置调研事实全部实读核实（brainstorm §三 + 本文件 §零），行号锚定 worktree HEAD。
@@ -16,7 +17,7 @@ doc-fix r1（2026-10-18，闭合第 1 轮审查 2 P1 + 8 P2）：cleanup 改 cle
 | F5 | compartments 表自带 title/content/p1-p4/importance（纯 db 预览可行）；tags 表无原文列，原文在会话文件 | storage-db.ts:1191-1209/:1157-1171 |
 | F6 | `getCompartments` / `readMagicContextStatusSnapshot` 已导出 | barrel index.ts:275/:391-397 |
 | F7 | `deleteSessionScopedRows(db, sessionIds, harness, {rustModuleCleanupAcknowledged})`：33 表依赖安全序删除、内置 Rust marker 保护（pending_session_cleanup harness LIKE '%:rust'）、**返回值=通过 marker 过滤后的会话数而非实删行数**（零行会话也计 1）；不排除普通活动会话（组合层责任）。`clearSession(db, sessionId, ack=false)`（storage-meta-session.ts:287-306）是其单会话正确包装：`db.transaction().immediate()` + `withSqliteBackgroundWriter` 写协调 + 慢事务日志；**签名不带 harness → 该 session 全部 harness 行整删**（单 CLI harness 场景无实际差异，登记为已知语义） | storage-session-tables.ts:16-134 |
-| F8 | 侧边栏标签 = `OpenTabLauncherItemId` 枚举 + `resolveOpenTabLauncherItemIds`（animatedSidePanePanelModel.ts:3-42，:23-25 条件式样板 `shouldOfferSelectionSideConversation({activeTaskId})`）；tab union 在 **lib/workspaceSidePane.ts:516-535**；新 tab 须同时定义归属（ownerTaskId 默认收窄 :1105-1133）与会话可见性（parentSessionId 样板 :1900-1927） | 见左 |
+| F8 | 侧边栏标签 = `OpenTabLauncherItemId` 枚举 + `resolveOpenTabLauncherItemIds`（animatedSidePanePanelModel.ts:3-50，:23-25 条件式 push 样板、shouldOffer 定义 :44-50）；tab union 在 **lib/workspaceSidePane.ts:516-535**；新 tab 须同时定义归属（workspace-global 登记 WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES :1054-1058，否则 ownerTaskId 默认收窄 :1090-1133）与会话可见性（parentSessionId 样板 :1900-1927） | 见左 |
 | F9 | tag 恢复走会话文件（renderItemByTag 混合 db+raw session），RPC 化成本高 | ctx-expand/tools.ts:81/render.ts:285-315 |
 
 ## 一、目标
@@ -93,7 +94,7 @@ doc-fix r1（2026-10-18，闭合第 1 轮审查 2 P1 + 8 P2）：cleanup 改 cle
   - 段②「丢弃标签摘要」：total/dropped/tokenCount 三徽章。
   - 段③「工作区会话残留」：session 清单表格（last_response_time 倒序、isCurrent 置顶禁勾、每行 compartment/tag/token 统计）+ 勾选 +「清理所选」确认对话框（列出将删除的会话数与 token 量预估、文案键含「不可恢复」字样——T-S7 以 i18n 键存在性 + 组件引用该键做断言）+ 逐批 outcome toast（deleted N / protected M）；清理失败（-32010）toast 原文。
 - 清理后刷新：重拉 listMagicContextSessionContext。
-- **tab 归属语义**（F8 纠偏后钉死）：两新 tab 的数据面=「打开标签时的当前活动会话」快照（tab 内容随其渲染时的 activeTaskId 取数；不加 ownerTaskId/parentSessionId 收窄——残留清理与跨会话浏览本来就不属于单一会话私有；切换活动会话不自动关 tab，数据在下次刷新时跟随新活动会话）。「会话记忆」tab 同理（列表=当前活动会话的写入集）。T-S3 的 launcher 条件式= activeTaskId 存在时才出现两标签。
+- **tab 归属语义**（F8 纠偏后钉死）：两新 tab 的数据面=「打开标签时的当前活动会话」快照（tab 内容随其渲染时的 activeTaskId 取数；不加 ownerTaskId/parentSessionId 收窄——残留清理与跨会话浏览本来就不属于单一会话私有；切换活动会话不自动关 tab，数据在下次刷新时跟随新活动会话）。「会话记忆」tab 同理（列表=当前活动会话的写入集）。**归属登记为 workspace-global**：两 tab id 加入 `WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES`（workspaceSidePane.ts:1054-1058），否则 `stampSidePaneTabsOwnership` 会把开启方 ownerTaskId 冻结进 tab、切会话后被默认收窄隐藏。T-S3 的 launcher 条件式= activeTaskId 存在时才出现两标签。
 
 ## 五、步骤分解（实施顺序）
 
@@ -102,7 +103,7 @@ doc-fix r1（2026-10-18，闭合第 1 轮审查 2 P1 + 8 P2）：cleanup 改 cle
 - **Step 2**：magic-context barrel 导出 `clearSession`（+注释：供宿主会话残留清理；事务/写协调/marker 兜底语义见 F7；**不导出 deleteSessionScopedRows**——宿主直调会丢事务包装）。
 - **Step 3**：bootstrap：list handler 过滤串联 + 新 handler 文件（sessionContext/cleanup 可同文件两导出）+ dispatch 2 case + 源守卫用例。
 - **Step 4**：services 透传（list 加参 + 2 新方法）+ 类型。
-- **Step 5**：UI：MemoryManagementSection props 化 + 侧边栏两标签注册（枚举/launcher/union/TabsContent 四处，F8 纠偏锚点）+ SessionContextSection + i18n（zh/en 双侧，parity 门禁；「不可恢复」文案键名登记）。
+- **Step 5**：UI：MemoryManagementSection props 化 + 侧边栏两标签注册（枚举/launcher/union/**WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES 归属登记**/TabsContent 五处，F8 纠偏锚点）+ SessionContextSection + i18n（zh/en 双侧，parity 门禁；「不可恢复」文案键名登记）。恢复按钮复制命令主形态 `/ctx-expand <startMessage>-<endMessage>`（compartment 行身份是序数区间，非 tag）。
 - **Step 6**：契约测试新文件 test-magic-context-session-context-rpc.mjs（①：正常/降级三分支/分页截断/isCurrent 标记与强制入列；②：currentSessionId 混入整批拒/deleted/protected（预查谓词）/幂等复清/降级 fail-visible）；list sourceSessionId 过滤 + total 口径用例。**既有 19 例需 fixture 补齐**（entry 新增必填 sourceSessionId，手工 entry 构造 test-magic-context-memories-rpc.mjs:357-374 逐条补键）+ 新增「entry 缺 sourceSessionId 拒」负例——回归口径=更新后 19 例全绿。launcher 条件式（T-S3）以 packages/ui dist 直测 `resolveOpenTabLauncherItemIds`/`shouldOffer*` 纯函数（ui-config 测试同款 import 基建）；对话框文案/禁勾（T-S7）以 i18n 键存在性 + 组件源引用断言（源守卫式）。
 - **Step 7**：门禁（tsc 全链/lint/arch/parity/契约更新后全绿/ui-config 14）+ CHANGELOG + 迭代登记。
 - **Step 8**：真机 e2e（可选，对齐 Step 11 形态）：spawn + 协议直调 ①② + SQLite 对账（清理后 compartments/tags 行消失、memories 行数不变、protected 会话行保留）。

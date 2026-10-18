@@ -629,3 +629,18 @@ magic_context_memory_management:
     e2e_fix_verify: "PASS 18/0（2026-10-18，主代理实跑一次性 driver 后已删）：真机形态=重建 cli bundle（补 @zcode/tui dist 与根 shared junction dist）+ services 真实协议客户端 spawn zcode.cjs app-server + USERPROFILE/HOME 临时重定向全隔离。覆盖：Step11 回归面（T1 空信封/惰性建库、T3 六行种子对账+merged supersededByMemoryId 通路+counts 五桶、T4 跨项目隔离、T5 archive reason 落库+mutation 成对、T6 already-archived 幂等不增行、T7 missing 不透明 was not found、T8 管理视图含 archived 行带状态）+ cr-fix 面（T9 全量 active 108 整批 wire -32602 拒且零部分落库、T10 分批 100+8 全 archived+终态 counts {0,1,109,1,111}、T11/T11b 家目录身份解析失败真机形态=list unavailable 信封 / archive -32010 no usable project identity）。driver 侧三修正留档：①custom commandResolver 返回完整 argv（app-server --stdio 不自动追加）；②对照 workspace 的 git root commit 必须不同（同秒空 commit 同 author 同 message 会撞 hash → 同 git 身份，产品语义如此非缺陷）；③管理面板 RPC list 含 archived 行（管理视图），排除 archived 是注入读路径（storage-memory.ts:425）——两读路径口径勿混"
     outcome: "dev-ready（2026-10-18，HEAD b8d52900；cr-fix 10/10 落地，func-ready yes）"
 
+
+
+# ===== session-memory-and-context（P1 分页 + P2/P3 会话记忆与会话上下文）=====
+session_memory_and_context:
+  brainstorm_path: docs/iterations/session-memory-and-context/brainstorm.md
+  p1_pagination: { status: done, commits: "02fe6385 首版 → 92016fa5 返工（用户实测反馈：真分页页码跳转+页大小选择器默认20+行两行省略展开；wire 加 total 过滤后总数；契约 19/19；parity 5918/5918）", note: "桌面 dev 已切新协议链（bundle 重建+app 重启）；用户确认 OK" }
+  spec_check:
+    review_round: 2
+    spec_path: docs/iterations/session-memory-and-context/spec.md
+    spec_version: v3（652aec11 v2 + r2 三条 P3 顺手闭合）
+    r1_review: { verdict: "No-Go（轻）", p0: 0, p1: 2, p2: 8, core: "P1-1 cleanup 归因/事务 → clearSession 方案；P1-2 workspaceSessions 枚举源/时间列（last_response_time）/current 强制入列；F7 返回值语义与 F8 tab union 锚点纠偏；P2×8 含 fixture 补齐/T-S3 T-S7 载体/恢复通道 gate 实证", closed: "doc-fix r1 全采纳（含主代理亲核 clearSession：事务+写协调+跨 harness 整删语义入非目标）" }
+    r2_review: { verdict: "Go（execute-ready）", p0: 0, p1: 0, p2: 0, core: "r1 修复面全闭合：预查谓词逐字一致/ZCODE_HARNESS_ID 与写侧严格匹配/19 例 fixture 需补键属实/旧口径 grep 零残句", p3_closed: "workspace-global 归属登记（五处注册）/F8 锚点精确化/恢复命令主形态 start-end" }
+    status: execute-ready（待用户确认开工 code-dev-loop Step 0→8）
+  open_must_fix: []
+  notes: "调研事实 F1-F9 两轮审查交叉核实；P2 主轴=source_session_id 过滤复用 list（notes 零写入者实锤）；Step 0 两核对项已预挖实证只待复核"
