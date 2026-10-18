@@ -395,8 +395,16 @@ export const TID_SETTINGS_MCM_EMPTY = "settings-mcm-empty";
 export const TID_SETTINGS_MCM_UNAVAILABLE = "settings-mcm-unavailable";
 /** 「项目记忆」管理面板加载失败横幅 */
 export const TID_SETTINGS_MCM_LOAD_ERROR = "settings-mcm-load-error";
-/** 「项目记忆」管理面板加载更多按钮 */
+/**
+ * 「项目记忆」管理面板加载更多按钮（旧版累加模式遗留；session-memory-and-context P1
+ * 起数字分页替换，UI 不再使用，常量保留防外部定位面断裂）。
+ */
 export const TID_SETTINGS_MCM_LOAD_MORE = "settings-mcm-load-more";
+// FORK（session-memory-and-context / P1）：数字分页控件（上一页/下一页 + 页码指示）。
+/** 「项目记忆」管理面板分页上一页按钮 */
+export const TID_SETTINGS_MCM_PAGE_PREV = "settings-mcm-page-prev";
+/** 「项目记忆」管理面板分页下一页按钮 */
+export const TID_SETTINGS_MCM_PAGE_NEXT = "settings-mcm-page-next";
 /** 常规设置中的 AskUserQuestion 自动继续开关 */
 export const TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH =
   "settings-ask-user-question-auto-resolution-switch";

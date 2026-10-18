@@ -2234,7 +2234,7 @@ const enUS: Record<string, string> = {
   "settings.memory.management.updatedAt": "Updated {time}",
   "settings.memory.management.importance": "Importance {value}",
   "settings.memory.management.archiveReason": "Archive reason: {reason}",
-  "settings.memory.management.selectAll": "Select all in the current list",
+  "settings.memory.management.selectAll": "Select all on this page",
   "settings.memory.management.selectedCount": "{count} selected",
   "settings.memory.management.archiveSelected": "Archive selected",
   "settings.memory.management.archive.dialogTitle": "Archive the selected project memories?",
@@ -2249,8 +2249,10 @@ const enUS: Record<string, string> = {
   "settings.memory.management.archive.toastAlready": "{count} were already archived.",
   "settings.memory.management.archive.toastFailed":
     "{count} could not be archived (missing or already merged).",
-  "settings.memory.management.truncated": "The list is truncated; showing the first {count} entries.",
-  "settings.memory.management.loadMore": "Load more",
+  "settings.memory.management.page.prev": "Previous page",
+  "settings.memory.management.page.next": "Next page",
+  "settings.memory.management.page.indicator": "Page {page}",
+  "settings.memory.management.page.range": "Entries {start}–{end}",
   "settings.memory.management.legacySwitchRetired":
     "The legacy workspace memory switch was retired and turned off automatically; cross-session project memory is managed on this page.",
   "settings.memory.management.category.PROJECT_RULES": "Project rules",

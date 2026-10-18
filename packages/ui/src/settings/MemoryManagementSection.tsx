@@ -3,6 +3,10 @@
  * FORK（magic-context-memory-management / Step 8 · 变更点 9）：「记忆」分区的
  * magic-context 跨会话项目记忆管理面板。
  *
+ * FORK（session-memory-and-context / P1）：数字分页（PAGE_SIZE 50 + 服务端 truncated
+ * 判定下一页）+ 分类过滤切到服务端 `category` 参数（词表静态全量，不再从已加载条目
+ * 派生）；勾选跨页累计（翻页保留、刷新/废弃后清空），批量废弃仍按 100 分片。
+ *
  * 数据链：`services.zcodeAgentService.listMagicContextMemories / archiveMagicContextMemories`
  * → workspace RPC（`workspace/listMagicContextMemories` 等）→ CLI handler → magic-context
  * `host/memory-admin.ts`。写路径与对话内 `ctx_memory action:"archive"` 共享同一组合函数
@@ -34,7 +38,8 @@ import {
   TID_SETTINGS_MCM_ITEM,
   TID_SETTINGS_MCM_ITEM_SELECT,
   TID_SETTINGS_MCM_LOAD_ERROR,
-  TID_SETTINGS_MCM_LOAD_MORE,
+  TID_SETTINGS_MCM_PAGE_NEXT,
+  TID_SETTINGS_MCM_PAGE_PREV,
   TID_SETTINGS_MCM_REFRESH,
   TID_SETTINGS_MCM_SELECT_ALL,
   TID_SETTINGS_MCM_UNAVAILABLE,
@@ -64,8 +69,13 @@ import { SettingsResourceHeaderActions } from "@/settings/SettingsResourceHeader
 type MemoryEntry = ZCodeWorkspaceListMagicContextMemoriesResult["entries"][number];
 type MemoryCounts = ZCodeWorkspaceListMagicContextMemoriesResult["counts"];
 
-/** 单次拉取上限与 wire schema 的上限（200）一致；截断由 truncated 标记 + 加载更多承接。 */
-const PAGE_SIZE = 200;
+/**
+ * 数字分页的页大小（session-memory-and-context P1）：单页条目上限，取 50——
+ * wire 上限 200 内的舒适页；「有下一页」由服务端 `truncated` 精确判定
+ * （`offset + page.length < filtered.length`），分类过滤同样在服务端完成
+ * （`category` 只裁 entries，counts 保持全项目五桶口径）。
+ */
+const PAGE_SIZE = 50;
 /** 与工具面 `CtxMemoryInputSchema.reason` / wire schema 的上限一致。 */
 const REASON_MAX_LENGTH = 4096;
 /**
@@ -145,90 +155,106 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   const [supported, setSupported] = useState(true);
   const [available, setAvailable] = useState(true);
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
-  const [truncated, setTruncated] = useState(false);
+  /** 服务端 truncated：本页之后还有未返回条目 = 精确的「有下一页」。 */
+  const [hasNextPage, setHasNextPage] = useState(false);
+  /** 当前页码（0 基）。分类切换会整体回到第 1 页（load 变化触发 effect）。 */
+  const [page, setPage] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<ReadonlySet<number>>(new Set());
   const [dialogOpen, setDialogOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [archiving, setArchiving] = useState(false);
-  /** 丢弃过期响应：刷新与加载更多并发时只有最后一次有权回填列表。 */
+  /** 丢弃过期响应：翻页与过滤并发时只有最后一次有权回填列表。 */
   const requestVersionRef = useRef(0);
 
+  /**
+   * 拉取一页，成功返回本页 entries（供调用方判断「回填后是否空页」），失败/过期返回
+   * undefined。`resetSelection`：刷新/分类切换/废弃完成后清空勾选；纯翻页保留勾选
+   * （跨页累计挑选后批量废弃是合法用法，selectedCount 徽章持续显示累计数）。
+   */
   const load = useCallback(
-    async (offset: number) => {
+    async (targetPage: number, options?: { resetSelection?: boolean }): Promise<MemoryEntry[] | undefined> => {
       if (!targetWorkspacePath) {
         setLoading(false);
-        return;
+        return undefined;
       }
       const version = requestVersionRef.current + 1;
       requestVersionRef.current = version;
-      if (offset === 0) {
-        setLoading(true);
-      } else {
-        setLoadingMore(true);
-      }
+      setLoading(true);
       setLoadError(null);
       try {
         const result = await services.zcodeAgentService.listMagicContextMemories({
           workspacePath: targetWorkspacePath,
           limit: PAGE_SIZE,
-          offset,
+          offset: targetPage * PAGE_SIZE,
+          ...(categoryFilter ? { category: categoryFilter } : {}),
         });
-        if (requestVersionRef.current !== version) return;
+        if (requestVersionRef.current !== version) return undefined;
         setSupported(result.supported);
         setAvailable(result.available);
         setUnavailableReason(result.reason ?? null);
         setCounts(result.counts);
-        setTruncated(result.truncated);
-        setEntries((current) => (offset === 0 ? result.entries : [...current, ...result.entries]));
-        if (offset === 0) setSelectedIds(new Set());
+        setHasNextPage(result.truncated);
+        setEntries(result.entries);
+        setPage(targetPage);
+        if (options?.resetSelection) setSelectedIds(new Set());
+        return result.entries;
       } catch (error) {
-        if (requestVersionRef.current !== version) return;
+        if (requestVersionRef.current !== version) return undefined;
         logger.warn("[MemoryManagementSection] 读取项目记忆失败", {
           error: errorMessage(error),
         });
         setLoadError(errorMessage(error));
-        if (offset === 0) setEntries([]);
+        setEntries([]);
+        setHasNextPage(false);
+        return undefined;
       } finally {
         if (requestVersionRef.current === version) {
           setLoading(false);
-          setLoadingMore(false);
         }
       }
     },
-    [services, targetWorkspacePath],
+    [categoryFilter, services, targetWorkspacePath],
   );
 
+  // 初次加载 + 分类切换（categoryFilter 变化 → load 重建 → 回第 1 页重新拉取）。
   useEffect(() => {
-    void load(0);
+    void load(0, { resetSelection: true });
   }, [load]);
 
-  const categoryOptions = useMemo(() => {
-    const seen = new Set<string>();
-    const options: string[] = [];
-    for (const entry of entries) {
-      if (seen.has(entry.category)) continue;
-      seen.add(entry.category);
-      options.push(entry.category);
-    }
-    return options;
-  }, [entries]);
-
-  const visibleEntries = useMemo(
-    () => (categoryFilter ? entries.filter((entry) => entry.category === categoryFilter) : entries),
-    [categoryFilter, entries],
+  /** 翻页（保留勾选）；失败不跳页（load 内 version 守卫）。 */
+  const goToPage = useCallback(
+    (targetPage: number) => {
+      void load(targetPage);
+    },
+    [load],
   );
 
-  // 过滤命中项可能在刷新后整体消失（例如该类目被全部废弃）：此时过滤条件会把用户锁在
-  // 空列表里，而对应的过滤徽章也已退场、无法手动切回——自动回到「全部分类」。
-  useEffect(() => {
-    if (categoryFilter !== null && !categoryOptions.includes(categoryFilter)) {
-      setCategoryFilter(null);
-    }
-  }, [categoryFilter, categoryOptions]);
+  /**
+   * 废弃完成后的回填：停在当前页；回填后当前页被清空（本页条目已全部废弃）且不是
+   * 第 1 页时，自动回退一页，避免用户面对空页手动点「上一页」。读取失败不回退
+   * （load 返回 undefined，错误横幅已由 load 呈现）。
+   */
+  const reloadAfterArchive = useCallback(
+    async (currentPage: number) => {
+      const nextEntries = await load(currentPage, { resetSelection: true });
+      if (currentPage > 0 && nextEntries !== undefined && nextEntries.length === 0) {
+        await load(currentPage - 1, { resetSelection: true });
+      }
+    },
+    [load],
+  );
+
+  /**
+   * 分类选项为静态全词表（CATEGORY_LABEL_KEY 的 12 值）：服务端过滤下「从已加载条目
+   * 派生选项」只反映当前页，词表是权威面且恒定，某分类无条目时服务端返回空列表走空态。
+   */
+  const categoryOptions = useMemo(() => Object.keys(CATEGORY_LABEL_KEY), []);
+
+  // 服务端已按 category 过滤：本页 entries 即可见集合，无需客户端再过滤。
+  const visibleEntries = entries;
 
   // 已归档/已合并行不可再废弃（会得到 already-archived / rejected 回执），勾选框直接禁用。
   const selectableVisibleIds = useMemo(
@@ -236,10 +262,12 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
     [visibleEntries],
   );
   const selectedVisibleCount = selectableVisibleIds.filter((id) => selectedIds.has(id)).length;
-  const selectedEntries = useMemo(
-    () => entries.filter((entry) => selectedIds.has(entry.id)),
-    [entries, selectedIds],
-  );
+  /**
+   * 勾选以 id 集合为准（跨页累计）：翻页保留，selectedCount 显示累计数。旧页条目不在
+   * 当前 entries 里也不影响废弃——memoryIds 直接取 [...selectedIds]；若其中部分 id 已被
+   * 其他入口废弃，服务端按 already-archived 幂等回报，不构成错误。
+   */
+  const selectedCount = selectedIds.size;
 
   const toggleSelection = useCallback((id: number, checked: boolean) => {
     setSelectedIds((current) => {
@@ -271,7 +299,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   );
 
   const submitArchive = useCallback(async () => {
-    const memoryIds = selectedEntries.map((entry) => entry.id);
+    const memoryIds = [...selectedIds];
     if (memoryIds.length === 0) return;
     const trimmedReason = reason.trim();
     setArchiving(true);
@@ -347,12 +375,12 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
       failureParts.push(errorMessage(error));
       toast(failureParts.join(" "));
     } finally {
-      // 无论成败都刷新：失败前已归档的分片必须反映到列表与 counts。刷新会同时清空勾选
-      //（load(0) 的既有语义），故失败后重试需重新勾选——弹窗保持打开只表示本次提交未走完。
-      await load(0);
+      // 无论成败都刷新：失败前已归档的分片必须反映到列表与 counts；刷新清空勾选，
+      // 停在当前页（本页被清空则自动回退一页），失败后重试需重新勾选。
+      await reloadAfterArchive(page);
       setArchiving(false);
     }
-  }, [intl, load, reason, selectedEntries, services, targetWorkspacePath]);
+  }, [intl, page, reason, reloadAfterArchive, selectedIds, services, targetWorkspacePath]);
 
   if (!targetWorkspacePath) {
     return (
@@ -437,7 +465,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
               <span className="text-ui-sm text-foreground-subtle">
                 {intl.formatMessage(
                   { id: "settings.memory.management.selectedCount" },
-                  { count: selectedEntries.length },
+                  { count: selectedCount },
                 )}
               </span>
               <Button
@@ -445,7 +473,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
                 variant="destructive"
                 size="sm"
                 data-testid={TID_SETTINGS_MCM_ARCHIVE_SELECTED}
-                disabled={selectedEntries.length === 0 || archiving}
+                disabled={selectedCount === 0 || archiving}
                 onClick={() => {
                   setReason("");
                   setDialogOpen(true);
@@ -454,7 +482,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
                 {intl.formatMessage({ id: "settings.memory.management.archiveSelected" })}
               </Button>
               <SettingsResourceHeaderActions
-                onRefresh={() => void load(0)}
+                onRefresh={() => void load(page, { resetSelection: true })}
                 refreshing={loading}
                 refreshTestId={TID_SETTINGS_MCM_REFRESH}
                 refreshLabel={intl.formatMessage({ id: "common.refresh" })}
@@ -462,30 +490,29 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
             </div>
           </div>
 
-          {categoryOptions.length > 0 ? (
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              {[null, ...categoryOptions].map((category) => {
-                const active = categoryFilter === category;
-                return (
-                  <button
-                    key={category ?? "all"}
-                    type="button"
-                    aria-pressed={active}
-                    data-testid={testId(TID_SETTINGS_MCM_CATEGORY_FILTER, category ?? "all")}
-                    className={cn(
-                      "rounded-full px-3 py-1 text-ui-xs font-medium transition-colors",
-                      active
-                        ? "bg-selected text-foreground"
-                        : "bg-surface text-foreground-subtle hover:bg-hover",
-                    )}
-                    onClick={() => setCategoryFilter(category)}
-                  >
-                    {resolveCategoryLabel(intl, category)}
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+          {/* 分类过滤为静态全词表（服务端过滤，切换即回第 1 页——load 依赖变化触发 effect）。 */}
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            {[null, ...categoryOptions].map((category) => {
+              const active = categoryFilter === category;
+              return (
+                <button
+                  key={category ?? "all"}
+                  type="button"
+                  aria-pressed={active}
+                  data-testid={testId(TID_SETTINGS_MCM_CATEGORY_FILTER, category ?? "all")}
+                  className={cn(
+                    "rounded-full px-3 py-1 text-ui-xs font-medium transition-colors",
+                    active
+                      ? "bg-selected text-foreground"
+                      : "bg-surface text-foreground-subtle hover:bg-hover",
+                  )}
+                  onClick={() => setCategoryFilter(category)}
+                >
+                  {resolveCategoryLabel(intl, category)}
+                </button>
+              );
+            })}
+          </div>
 
           {loading && entries.length === 0 ? (
             <div className="rounded-xl border border-dashed border-border bg-transparent px-4 py-8 text-center text-ui-base text-foreground-subtle">
@@ -589,26 +616,39 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
                 })}
               </div>
 
-              {truncated ? (
-                <div className="flex flex-col items-center gap-2">
-                  <div className="text-ui-sm text-foreground-subtle">
-                    {intl.formatMessage(
-                      { id: "settings.memory.management.truncated" },
-                      { count: entries.length },
-                    )}
-                  </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    data-testid={TID_SETTINGS_MCM_LOAD_MORE}
-                    disabled={loadingMore}
-                    onClick={() => void load(entries.length)}
-                  >
-                    {intl.formatMessage({ id: "settings.memory.management.loadMore" })}
-                  </Button>
-                </div>
-              ) : null}
+              {/* 数字分页：上一页（第 1 页禁用）/ 页码与当前条目区间 / 下一页（服务端
+                  truncated 精确判定，无下一页禁用）。勾选跨页保留。 */}
+              <div className="flex items-center justify-center gap-3 pt-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid={TID_SETTINGS_MCM_PAGE_PREV}
+                  disabled={page === 0 || loading}
+                  onClick={() => goToPage(page - 1)}
+                >
+                  {intl.formatMessage({ id: "settings.memory.management.page.prev" })}
+                </Button>
+                <span className="text-ui-sm text-foreground-subtle">
+                  {intl.formatMessage(
+                    { id: "settings.memory.management.page.range" },
+                    {
+                      start: page * PAGE_SIZE + 1,
+                      end: page * PAGE_SIZE + visibleEntries.length,
+                    },
+                  )}
+                </span>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  data-testid={TID_SETTINGS_MCM_PAGE_NEXT}
+                  disabled={!hasNextPage || loading}
+                  onClick={() => goToPage(page + 1)}
+                >
+                  {intl.formatMessage({ id: "settings.memory.management.page.next" })}
+                </Button>
+              </div>
             </>
           )}
         </>
@@ -628,7 +668,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
             <AlertDialogDescription>
               {intl.formatMessage(
                 { id: "settings.memory.management.archive.dialogDescription" },
-                { count: selectedEntries.length },
+                { count: selectedCount },
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -668,7 +708,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
               variant="destructive"
               size="sm"
               data-testid={TID_SETTINGS_MCM_ARCHIVE_CONFIRM}
-              disabled={archiving || selectedEntries.length === 0}
+              disabled={archiving || selectedCount === 0}
               onClick={(event) => {
                 // 阻止 Radix 默认关闭：废弃是异步操作，等请求返回后再由 submitArchive 收起。
                 event.preventDefault();
