@@ -61,6 +61,13 @@ import {
 import { Badge } from "@/components/ui/badge.js";
 import { Button } from "@/components/ui/button.js";
 import { Checkbox } from "@/components/ui/checkbox.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
 import { cn } from "@/components/lib/utils.js";
@@ -756,24 +763,36 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
                         },
                       )}
                     </span>
-                    <select
-                      data-testid={TID_SETTINGS_MCM_PAGE_SIZE}
-                      aria-label={intl.formatMessage({ id: "settings.memory.management.page.sizeLabel" })}
-                      value={pageSize}
+                    <Select
+                      value={String(pageSize)}
                       disabled={loading}
-                      className="rounded-md border border-border bg-surface px-2 py-1 text-ui-sm text-foreground"
                       // 页大小变化 → load 重建（依赖 pageSize）→ effect 回第 1 页重新拉取。
-                      onChange={(event) => {
-                        const next = Number(event.target.value);
+                      onValueChange={(value) => {
+                        const next = Number(value);
                         if (Number.isFinite(next) && next > 0) setPageSize(next);
                       }}
                     >
-                      {PAGE_SIZE_OPTIONS.map((size) => (
-                        <option key={size} value={size}>
-                          {size} / {intl.formatMessage({ id: "settings.memory.management.page.sizeLabel" })}
-                        </option>
-                      ))}
-                    </select>
+                      <SelectTrigger
+                        size="sm"
+                        className="h-7 w-auto gap-1 text-ui-sm"
+                        data-testid={TID_SETTINGS_MCM_PAGE_SIZE}
+                        aria-label={intl.formatMessage({
+                          id: "settings.memory.management.page.sizeLabel",
+                        })}
+                      >
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAGE_SIZE_OPTIONS.map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size} /{" "}
+                            {intl.formatMessage({
+                              id: "settings.memory.management.page.sizeLabel",
+                            })}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                 );
               })()}
