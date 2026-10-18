@@ -35,11 +35,14 @@ import {
   TID_SETTINGS_MCM_CATEGORY_FILTER,
   TID_SETTINGS_MCM_COUNTS,
   TID_SETTINGS_MCM_EMPTY,
+  TID_SETTINGS_MCM_ENTRY_EXPAND,
   TID_SETTINGS_MCM_ITEM,
   TID_SETTINGS_MCM_ITEM_SELECT,
   TID_SETTINGS_MCM_LOAD_ERROR,
   TID_SETTINGS_MCM_PAGE_NEXT,
+  TID_SETTINGS_MCM_PAGE_NUMBER,
   TID_SETTINGS_MCM_PAGE_PREV,
+  TID_SETTINGS_MCM_PAGE_SIZE,
   TID_SETTINGS_MCM_REFRESH,
   TID_SETTINGS_MCM_SELECT_ALL,
   TID_SETTINGS_MCM_UNAVAILABLE,
@@ -70,12 +73,13 @@ type MemoryEntry = ZCodeWorkspaceListMagicContextMemoriesResult["entries"][numbe
 type MemoryCounts = ZCodeWorkspaceListMagicContextMemoriesResult["counts"];
 
 /**
- * 数字分页的页大小（session-memory-and-context P1）：单页条目上限，取 50——
- * wire 上限 200 内的舒适页；「有下一页」由服务端 `truncated` 精确判定
- * （`offset + page.length < filtered.length`），分类过滤同样在服务端完成
- * （`category` 只裁 entries，counts 保持全项目五桶口径）。
+ * 数字分页（session-memory-and-context P1 返工）：可调页大小（10/20/50/100，默认 20——
+ * 用户实测 50 偏大），页码窗口可跳转；「过滤后总数」由 wire `total` 精确给出（P1 首版
+ * 仅 truncated 只能做 prev/next 的假分页）；分类过滤在服务端完成（`category` 只裁
+ * entries，counts 保持全项目五桶口径）。
  */
-const PAGE_SIZE = 50;
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const;
+const DEFAULT_PAGE_SIZE = 20;
 /** 与工具面 `CtxMemoryInputSchema.reason` / wire schema 的上限一致。 */
 const REASON_MAX_LENGTH = 4096;
 /**
@@ -135,6 +139,24 @@ function isMergedEntry(entry: MemoryEntry): boolean {
   return entry.supersededByMemoryId !== null;
 }
 
+/**
+ * 标准页码窗口（0 基页码）：首页/尾页恒显、当前页 ±1、间隔 >1 折叠为 "…"。
+ * pageCount ≤ 7 时全量直出，不再制造无意义省略号。
+ */
+function computePageWindow(current: number, pageCount: number): Array<number | "ellipsis"> {
+  if (pageCount <= 7) {
+    return Array.from({ length: pageCount }, (_, index) => index);
+  }
+  const window: Array<number | "ellipsis"> = [0];
+  const from = Math.max(1, current - 1);
+  const to = Math.min(pageCount - 2, current + 1);
+  if (from > 1) window.push("ellipsis");
+  for (let index = from; index <= to; index += 1) window.push(index);
+  if (to < pageCount - 2) window.push("ellipsis");
+  window.push(pageCount - 1);
+  return window;
+}
+
 /** 分类徽章/过滤徽章的显示文本；`null` = 「全部分类」，未知分类原样回显。 */
 function resolveCategoryLabel(intl: IntlInstance, category: string | null): string {
   if (category === null) {
@@ -142,6 +164,111 @@ function resolveCategoryLabel(intl: IntlInstance, category: string | null): stri
   }
   const labelKey = CATEGORY_LABEL_KEY[category];
   return labelKey ? intl.formatMessage({ id: labelKey }) : category;
+}
+
+/**
+ * 单条记忆行（P1 返工）：content 默认两行省略（`line-clamp-2`），检测到溢出才显示
+ * 「展开/收起」（scrollHeight/clientHeight 比对，短内容不挂按钮）。行内局部展开态
+ * 不进父组件——翻页/刷新时随行卸载自然复位。
+ */
+function MemoryEntryRow({
+  entry,
+  selected,
+  onToggleSelection,
+  updatedAtFormatter,
+}: {
+  entry: MemoryEntry;
+  selected: boolean;
+  onToggleSelection: (id: number, checked: boolean) => void;
+  updatedAtFormatter: Intl.DateTimeFormat;
+}) {
+  const { intl } = useZCodeIntl();
+  const [expanded, setExpanded] = useState(false);
+  const [needsToggle, setNeedsToggle] = useState(false);
+  const contentRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const element = contentRef.current;
+    setNeedsToggle(element !== null && element.scrollHeight > element.clientHeight + 1);
+  }, [entry.content]);
+
+  const merged = isMergedEntry(entry);
+  const statusLabelKey =
+    STATUS_LABEL_KEY[entry.status] ?? "settings.memory.management.status.archived";
+  return (
+    <div
+      data-testid={testId(TID_SETTINGS_MCM_ITEM, String(entry.id))}
+      className="flex min-w-0 gap-3 px-4 py-3"
+    >
+      <Checkbox
+        className="mt-0.5"
+        checked={selected}
+        disabled={entry.status === "archived"}
+        data-testid={testId(TID_SETTINGS_MCM_ITEM_SELECT, String(entry.id))}
+        aria-label={`#${entry.id}`}
+        onCheckedChange={(checked) => onToggleSelection(entry.id, checked === true)}
+      />
+      <div className="min-w-0 flex-1 space-y-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <Badge variant="outline">{resolveCategoryLabel(intl, entry.category)}</Badge>
+          <Badge variant={entry.status === "permanent" ? "default" : "secondary"}>
+            {intl.formatMessage({ id: statusLabelKey })}
+          </Badge>
+          {merged ? (
+            <Badge variant="outline">
+              {intl.formatMessage({ id: "settings.memory.management.badge.merged" })}
+            </Badge>
+          ) : null}
+          <span className="text-ui-xs text-foreground-subtle">
+            {intl.formatMessage(
+              { id: "settings.memory.management.updatedAt" },
+              { time: updatedAtFormatter.format(new Date(entry.updatedAt)) },
+            )}
+          </span>
+          <span className="text-ui-xs text-foreground-subtle">
+            {intl.formatMessage(
+              { id: "settings.memory.management.importance" },
+              { value: entry.importance },
+            )}
+          </span>
+        </div>
+        <div
+          ref={contentRef}
+          className={cn(
+            "break-words text-ui-base leading-6 whitespace-pre-wrap text-foreground",
+            !expanded && "line-clamp-2",
+          )}
+        >
+          {entry.content}
+        </div>
+        {needsToggle ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            className="h-6 px-2 text-ui-xs"
+            data-testid={testId(TID_SETTINGS_MCM_ENTRY_EXPAND, String(entry.id))}
+            aria-expanded={expanded}
+            onClick={() => setExpanded((current) => !current)}
+          >
+            {intl.formatMessage({
+              id: expanded
+                ? "settings.memory.management.entry.collapse"
+                : "settings.memory.management.entry.expand",
+            })}
+          </Button>
+        ) : null}
+        {entry.status === "archived" && entry.archiveReason ? (
+          <div className="text-ui-sm text-foreground-subtle">
+            {intl.formatMessage(
+              { id: "settings.memory.management.archiveReason" },
+              { reason: entry.archiveReason },
+            )}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export function MemoryManagementSection({ workspacePath }: { workspacePath?: string | null }) {
@@ -157,8 +284,12 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   const [unavailableReason, setUnavailableReason] = useState<string | null>(null);
   /** 服务端 truncated：本页之后还有未返回条目 = 精确的「有下一页」。 */
   const [hasNextPage, setHasNextPage] = useState(false);
-  /** 当前页码（0 基）。分类切换会整体回到第 1 页（load 变化触发 effect）。 */
+  /** 服务端 total：当前过滤条件命中后的集合总数（页码窗口与「共 X 条」以此为准）。 */
+  const [total, setTotal] = useState(0);
+  /** 当前页码（0 基）。分类/页大小切换会整体回到第 1 页（load 变化触发 effect）。 */
   const [page, setPage] = useState(0);
+  /** 每页条数（可调）；变化经 load 依赖链同样回到第 1 页。 */
+  const [pageSize, setPageSize] = useState<number>(DEFAULT_PAGE_SIZE);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null);
@@ -187,8 +318,8 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
       try {
         const result = await services.zcodeAgentService.listMagicContextMemories({
           workspacePath: targetWorkspacePath,
-          limit: PAGE_SIZE,
-          offset: targetPage * PAGE_SIZE,
+          limit: pageSize,
+          offset: targetPage * pageSize,
           ...(categoryFilter ? { category: categoryFilter } : {}),
         });
         if (requestVersionRef.current !== version) return undefined;
@@ -197,6 +328,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
         setUnavailableReason(result.reason ?? null);
         setCounts(result.counts);
         setHasNextPage(result.truncated);
+        setTotal(result.total);
         setEntries(result.entries);
         setPage(targetPage);
         if (options?.resetSelection) setSelectedIds(new Set());
@@ -216,7 +348,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
         }
       }
     },
-    [categoryFilter, services, targetWorkspacePath],
+    [categoryFilter, pageSize, services, targetWorkspacePath],
   );
 
   // 初次加载 + 分类切换（categoryFilter 变化 → load 重建 → 回第 1 页重新拉取）。
@@ -551,104 +683,100 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
               ) : null}
 
               <div className="overflow-hidden rounded-xl bg-surface">
-                {visibleEntries.map((entry, index) => {
-                  const merged = isMergedEntry(entry);
-                  const statusLabelKey =
-                    STATUS_LABEL_KEY[entry.status] ?? "settings.memory.management.status.archived";
-                  return (
-                    <Fragment key={entry.id}>
-                      {index > 0 ? <div className="h-px bg-border/50" aria-hidden="true" /> : null}
-                      <div
-                        data-testid={testId(TID_SETTINGS_MCM_ITEM, String(entry.id))}
-                        className="flex min-w-0 gap-3 px-4 py-3"
-                      >
-                        <Checkbox
-                          className="mt-0.5"
-                          checked={selectedIds.has(entry.id)}
-                          disabled={entry.status === "archived"}
-                          data-testid={testId(TID_SETTINGS_MCM_ITEM_SELECT, String(entry.id))}
-                          aria-label={`#${entry.id}`}
-                          onCheckedChange={(checked) => toggleSelection(entry.id, checked === true)}
-                        />
-                        <div className="min-w-0 flex-1 space-y-1.5">
-                          <div className="flex min-w-0 flex-wrap items-center gap-2">
-                            <Badge variant="outline">
-                              {resolveCategoryLabel(intl, entry.category)}
-                            </Badge>
-                            <Badge variant={entry.status === "permanent" ? "default" : "secondary"}>
-                              {intl.formatMessage({ id: statusLabelKey })}
-                            </Badge>
-                            {merged ? (
-                              <Badge variant="outline">
-                                {intl.formatMessage({
-                                  id: "settings.memory.management.badge.merged",
-                                })}
-                              </Badge>
-                            ) : null}
-                            <span className="text-ui-xs text-foreground-subtle">
-                              {intl.formatMessage(
-                                { id: "settings.memory.management.updatedAt" },
-                                { time: updatedAtFormatter.format(new Date(entry.updatedAt)) },
-                              )}
-                            </span>
-                            <span className="text-ui-xs text-foreground-subtle">
-                              {intl.formatMessage(
-                                { id: "settings.memory.management.importance" },
-                                { value: entry.importance },
-                              )}
-                            </span>
-                          </div>
-                          <div className="break-words text-ui-base leading-6 whitespace-pre-wrap text-foreground">
-                            {entry.content}
-                          </div>
-                          {entry.status === "archived" && entry.archiveReason ? (
-                            <div className="text-ui-sm text-foreground-subtle">
-                              {intl.formatMessage(
-                                { id: "settings.memory.management.archiveReason" },
-                                { reason: entry.archiveReason },
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </Fragment>
-                  );
-                })}
+                {visibleEntries.map((entry, index) => (
+                  <Fragment key={entry.id}>
+                    {index > 0 ? <div className="h-px bg-border/50" aria-hidden="true" /> : null}
+                    <MemoryEntryRow
+                      entry={entry}
+                      selected={selectedIds.has(entry.id)}
+                      onToggleSelection={toggleSelection}
+                      updatedAtFormatter={updatedAtFormatter}
+                    />
+                  </Fragment>
+                ))}
               </div>
 
-              {/* 数字分页：上一页（第 1 页禁用）/ 页码与当前条目区间 / 下一页（服务端
-                  truncated 精确判定，无下一页禁用）。勾选跨页保留。 */}
-              <div className="flex items-center justify-center gap-3 pt-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={TID_SETTINGS_MCM_PAGE_PREV}
-                  disabled={page === 0 || loading}
-                  onClick={() => goToPage(page - 1)}
-                >
-                  {intl.formatMessage({ id: "settings.memory.management.page.prev" })}
-                </Button>
-                <span className="text-ui-sm text-foreground-subtle">
-                  {intl.formatMessage(
-                    { id: "settings.memory.management.page.range" },
-                    {
-                      start: page * PAGE_SIZE + 1,
-                      end: page * PAGE_SIZE + visibleEntries.length,
-                    },
-                  )}
-                </span>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  data-testid={TID_SETTINGS_MCM_PAGE_NEXT}
-                  disabled={!hasNextPage || loading}
-                  onClick={() => goToPage(page + 1)}
-                >
-                  {intl.formatMessage({ id: "settings.memory.management.page.next" })}
-                </Button>
-              </div>
+              {/* 真分页（P1 返工）：页码窗口可跳转 + 可调页大小 + 过滤后总数区间。
+                  页码总数由服务端 total 精确给出；勾选跨页保留。 */}
+              {(() => {
+                const pageCount = Math.max(1, Math.ceil(total / pageSize));
+                return (
+                  <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid={TID_SETTINGS_MCM_PAGE_PREV}
+                      disabled={page === 0 || loading}
+                      onClick={() => goToPage(page - 1)}
+                    >
+                      {intl.formatMessage({ id: "settings.memory.management.page.prev" })}
+                    </Button>
+                    {computePageWindow(page, pageCount).map((item, index) =>
+                      item === "ellipsis" ? (
+                        <span key={`ellipsis-${index}`} className="px-1 text-ui-sm text-foreground-subtle">
+                          …
+                        </span>
+                      ) : (
+                        <button
+                          key={item}
+                          type="button"
+                          aria-current={item === page ? "page" : undefined}
+                          data-testid={testId(TID_SETTINGS_MCM_PAGE_NUMBER, String(item + 1))}
+                          className={cn(
+                            "min-w-7 rounded-md px-2 py-1 text-ui-sm transition-colors",
+                            item === page
+                              ? "bg-selected font-medium text-foreground"
+                              : "text-foreground-subtle hover:bg-hover",
+                          )}
+                          disabled={loading}
+                          onClick={() => goToPage(item)}
+                        >
+                          {item + 1}
+                        </button>
+                      ),
+                    )}
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      data-testid={TID_SETTINGS_MCM_PAGE_NEXT}
+                      disabled={!hasNextPage || loading}
+                      onClick={() => goToPage(page + 1)}
+                    >
+                      {intl.formatMessage({ id: "settings.memory.management.page.next" })}
+                    </Button>
+                    <span className="px-1 text-ui-sm text-foreground-subtle">
+                      {intl.formatMessage(
+                        { id: "settings.memory.management.page.range" },
+                        {
+                          start: total === 0 ? 0 : page * pageSize + 1,
+                          end: page * pageSize + visibleEntries.length,
+                          total,
+                        },
+                      )}
+                    </span>
+                    <select
+                      data-testid={TID_SETTINGS_MCM_PAGE_SIZE}
+                      aria-label={intl.formatMessage({ id: "settings.memory.management.page.sizeLabel" })}
+                      value={pageSize}
+                      disabled={loading}
+                      className="rounded-md border border-border bg-surface px-2 py-1 text-ui-sm text-foreground"
+                      // 页大小变化 → load 重建（依赖 pageSize）→ effect 回第 1 页重新拉取。
+                      onChange={(event) => {
+                        const next = Number(event.target.value);
+                        if (Number.isFinite(next) && next > 0) setPageSize(next);
+                      }}
+                    >
+                      {PAGE_SIZE_OPTIONS.map((size) => (
+                        <option key={size} value={size}>
+                          {size} / {intl.formatMessage({ id: "settings.memory.management.page.sizeLabel" })}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                );
+              })()}
             </>
           )}
         </>

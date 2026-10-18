@@ -2268,6 +2268,12 @@ export const zcodeWorkspaceListMagicContextMemoriesResultSchema = z
       .strict(),
     /** limit/offset 截断标记：本页之后该项目还有未返回的条目。 */
     truncated: z.boolean(),
+    /**
+     * 当前过滤条件（category）命中后的集合总数（session-memory-and-context P1 返工）：
+     * 与 counts.total（全项目口径）刻意分开——页码计算以本字段为准；available=false
+     * 的降级信封恒为 0。
+     */
+    total: z.number().int().nonnegative(),
   })
   .strict();
 export type ZCodeWorkspaceListMagicContextMemoriesResult = z.infer<

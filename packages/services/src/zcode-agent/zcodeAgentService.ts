@@ -3170,6 +3170,7 @@ export function createZCodeAgentService(
             entries: [],
             counts: { total: 0, active: 0, permanent: 0, archived: 0, merged: 0 },
             truncated: false,
+            total: 0,
           });
         }
         logger.warn(undefined, "ZCode Protocol workspace/listMagicContextMemories 失败", {

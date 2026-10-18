@@ -2112,8 +2112,10 @@ const zhCN: Record<string, string> = {
   "settings.memory.management.archive.toastFailed": "{count} 条未能废弃（不存在或已被合并）。",
   "settings.memory.management.page.prev": "上一页",
   "settings.memory.management.page.next": "下一页",
-  "settings.memory.management.page.indicator": "第 {page} 页",
-  "settings.memory.management.page.range": "第 {start}–{end} 条",
+  "settings.memory.management.page.sizeLabel": "每页条数",
+  "settings.memory.management.page.range": "第 {start}–{end} 条，共 {total} 条",
+  "settings.memory.management.entry.expand": "展开",
+  "settings.memory.management.entry.collapse": "收起",
   "settings.memory.management.legacySwitchRetired":
     "原生「工作区记忆」开关已停用并自动关闭；跨会话项目记忆改由本页管理。",
   "settings.memory.management.category.PROJECT_RULES": "项目规则",

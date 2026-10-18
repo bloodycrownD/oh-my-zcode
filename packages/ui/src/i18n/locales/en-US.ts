@@ -2251,8 +2251,10 @@ const enUS: Record<string, string> = {
     "{count} could not be archived (missing or already merged).",
   "settings.memory.management.page.prev": "Previous page",
   "settings.memory.management.page.next": "Next page",
-  "settings.memory.management.page.indicator": "Page {page}",
-  "settings.memory.management.page.range": "Entries {start}–{end}",
+  "settings.memory.management.page.sizeLabel": "Entries per page",
+  "settings.memory.management.page.range": "Entries {start}–{end} of {total}",
+  "settings.memory.management.entry.expand": "Expand",
+  "settings.memory.management.entry.collapse": "Collapse",
   "settings.memory.management.legacySwitchRetired":
     "The legacy workspace memory switch was retired and turned off automatically; cross-session project memory is managed on this page.",
   "settings.memory.management.category.PROJECT_RULES": "Project rules",

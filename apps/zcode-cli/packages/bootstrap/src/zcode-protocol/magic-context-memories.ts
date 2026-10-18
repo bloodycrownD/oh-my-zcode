@@ -171,6 +171,7 @@ function unavailableListResult(
     entries: [],
     counts: { ...ZERO_MEMORY_COUNTS },
     truncated: false,
+    total: 0,
   });
 }
 
@@ -295,6 +296,7 @@ export async function listMagicContextMemories(
       merged: counts.merged,
     },
     truncated,
+    total: filtered.length,
   });
   context.logger?.info("magicContext memories listed", {
     module: "bootstrap.zcode_protocol",

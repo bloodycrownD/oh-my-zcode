@@ -405,6 +405,12 @@ export const TID_SETTINGS_MCM_LOAD_MORE = "settings-mcm-load-more";
 export const TID_SETTINGS_MCM_PAGE_PREV = "settings-mcm-page-prev";
 /** 「项目记忆」管理面板分页下一页按钮 */
 export const TID_SETTINGS_MCM_PAGE_NEXT = "settings-mcm-page-next";
+/** 「项目记忆」管理面板分页页码按钮（动态后缀为页码，1 基） */
+export const TID_SETTINGS_MCM_PAGE_NUMBER = "settings-mcm-page-number";
+/** 「项目记忆」管理面板每页条数选择器 */
+export const TID_SETTINGS_MCM_PAGE_SIZE = "settings-mcm-page-size";
+/** 「项目记忆」管理面板条目展开/收起按钮（动态后缀为记忆 id） */
+export const TID_SETTINGS_MCM_ENTRY_EXPAND = "settings-mcm-entry-expand";
 /** 常规设置中的 AskUserQuestion 自动继续开关 */
 export const TID_SETTINGS_ASK_USER_QUESTION_AUTO_RESOLUTION_SWITCH =
   "settings-ask-user-question-auto-resolution-switch";

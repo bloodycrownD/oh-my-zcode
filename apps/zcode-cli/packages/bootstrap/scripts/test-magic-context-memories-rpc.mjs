@@ -335,6 +335,7 @@ test("T-R1（schema）：list 结果信封——supported 缺省 true、entry st
     entries: [],
     counts: ZERO_COUNTS,
     truncated: false,
+    total: 0,
   };
   assert.equal(schema.parse(base).supported, true, "supported 缺省必须解析为 true");
   assert.equal(
@@ -373,7 +374,13 @@ test("T-R1（schema）：list 结果信封——supported 缺省 true、entry st
     ["entry 缺 expiresAt", { ...base, entries: [{ ...entry, expiresAt: undefined }] }],
     ["counts 未知键", { ...base, counts: { ...ZERO_COUNTS, bogus: 1 } }],
     ["counts 负数", { ...base, counts: { ...ZERO_COUNTS, merged: -1 } }],
-    ["truncated 缺席", { workspace: SCHEMA_WORKSPACE, available: true, entries: [], counts: ZERO_COUNTS }],
+    [
+      "truncated 缺席",
+      { workspace: SCHEMA_WORKSPACE, available: true, entries: [], counts: ZERO_COUNTS, total: 0 },
+    ],
+    ["total 缺席", { ...base, total: undefined }],
+    ["total 负数", { ...base, total: -1 }],
+    ["total 非整数", { ...base, total: 1.5 }],
     ["available 缺席", { ...base, available: undefined }],
   ]) {
     assert.equal(schema.safeParse(bad).success, false, `必须拒绝：${label}`);
@@ -499,8 +506,10 @@ test("T-R1：category 过滤只裁 entries，counts 保持项目级汇总", asyn
 
   const all = await listRpc(DIRS.filter);
   assert.equal(all.entries.length, 3);
+  assert.equal(all.total, 3, "无过滤时 total = 全集合");
 
   const filtered = await listRpc(DIRS.filter, { category: "ARCHITECTURE" });
+  assert.equal(filtered.total, 2, "total 随 category 过滤收窄（区别于 counts.total）");
   assert.deepEqual(
     filtered.entries.map((entry) => entry.id).sort((left, right) => left - right),
     [archA.id, archB.id].sort((left, right) => left - right),
@@ -513,11 +522,13 @@ test("T-R1：category 过滤只裁 entries，counts 保持项目级汇总", asyn
   const empty = await listRpc(DIRS.filter, { category: "USER_DIRECTIVES" });
   assert.deepEqual(empty.entries, [], "无行分类回空页而不是空项目");
   assert.equal(empty.truncated, false);
+  assert.equal(empty.total, 0, "过滤后零命中 → total 0");
   assert.equal(empty.counts.total, 3);
 
   const paged = await listRpc(DIRS.filter, { category: "ARCHITECTURE", limit: 1 });
   assert.equal(paged.entries.length, 1);
   assert.equal(paged.truncated, true, "truncated 按过滤后的集合算");
+  assert.equal(paged.total, 2, "total 不受 limit/offset 影响");
 });
 
 test("T-R1：offset/limit 分页与 truncated 语义（当页取尽 → false）", async () => {
