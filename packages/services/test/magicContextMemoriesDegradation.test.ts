@@ -121,11 +121,13 @@ test("listMagicContextMemories degrades to a supported:false zero envelope on -3
   // 降级信封必须与线上信封同形（schema 外键一个都不多），UI 才能共用同一套取值。
   assert.deepEqual(
     Object.keys(result).sort(),
-    ["available", "counts", "entries", "reason", "supported", "truncated", "workspace"],
+    ["available", "counts", "entries", "reason", "supported", "total", "truncated", "workspace"],
   );
   assert.equal(result.reason, "unsupported");
   assert.deepEqual(result.entries, []);
   assert.deepEqual(result.counts, { total: 0, active: 0, permanent: 0, archived: 0, merged: 0 });
+  // total（P1 真分页 additive 字段）：降级信封同样补零，缺键会被 strict parse 拒。
+  assert.equal(result.total, 0);
   assert.equal(result.truncated, false);
   assert.equal(result.workspace.workspacePath, WORKSPACE.workspacePath);
   assert.equal(result.workspace.workspaceKey, WORKSPACE.workspacePath);

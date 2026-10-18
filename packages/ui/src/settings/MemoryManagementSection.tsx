@@ -3,9 +3,10 @@
  * FORK（magic-context-memory-management / Step 8 · 变更点 9）：「记忆」分区的
  * magic-context 跨会话项目记忆管理面板。
  *
- * FORK（session-memory-and-context / P1）：数字分页（PAGE_SIZE 50 + 服务端 truncated
- * 判定下一页）+ 分类过滤切到服务端 `category` 参数（词表静态全量，不再从已加载条目
- * 派生）；勾选跨页累计（翻页保留、刷新/废弃后清空），批量废弃仍按 100 分片。
+ * FORK（session-memory-and-context / P1 真分页返工）：数字分页（PAGE_SIZE_OPTIONS
+ * 10/20/50/100 默认 20 + 服务端 total 推导页数）+ 分类过滤切到服务端 `category` 参数
+ * （词表静态全量，不再从已加载条目派生）；勾选跨页累计（翻页保留、刷新/废弃后清空），
+ * 批量废弃仍按 100 分片。
  *
  * 数据链：`services.zcodeAgentService.listMagicContextMemories / archiveMagicContextMemories`
  * → workspace RPC（`workspace/listMagicContextMemories` 等）→ CLI handler → magic-context
@@ -308,12 +309,15 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   const requestVersionRef = useRef(0);
 
   /**
-   * 拉取一页，成功返回本页 entries（供调用方判断「回填后是否空页」），失败/过期返回
-   * undefined。`resetSelection`：刷新/分类切换/废弃完成后清空勾选；纯翻页保留勾选
-   * （跨页累计挑选后批量废弃是合法用法，selectedCount 徽章持续显示累计数）。
+   * 拉取一页，成功返回本页 entries 与服务端 total（供调用方做越界收敛），失败/过期
+   * 返回 undefined。`resetSelection`：刷新/分类切换/废弃完成后清空勾选；纯翻页保留
+   * 勾选（跨页累计挑选后批量废弃是合法用法，selectedCount 徽章持续显示累计数）。
    */
   const load = useCallback(
-    async (targetPage: number, options?: { resetSelection?: boolean }): Promise<MemoryEntry[] | undefined> => {
+    async (
+      targetPage: number,
+      options?: { resetSelection?: boolean },
+    ): Promise<{ entries: MemoryEntry[]; total: number } | undefined> => {
       if (!targetWorkspacePath) {
         setLoading(false);
         return undefined;
@@ -339,7 +343,7 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
         setEntries(result.entries);
         setPage(targetPage);
         if (options?.resetSelection) setSelectedIds(new Set());
-        return result.entries;
+        return { entries: result.entries, total: result.total };
       } catch (error) {
         if (requestVersionRef.current !== version) return undefined;
         logger.warn("[MemoryManagementSection] 读取项目记忆失败", {
@@ -372,15 +376,23 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
   );
 
   /**
-   * 废弃完成后的回填：停在当前页；回填后当前页被清空（本页条目已全部废弃）且不是
-   * 第 1 页时，自动回退一页，避免用户面对空页手动点「上一页」。读取失败不回退
-   * （load 返回 undefined，错误横幅已由 load 呈现）。
+   * 废弃完成后的回填：停在当前页；回填后当前页被清空时，按最新 total 收敛到最后一
+   * 个合法页（total 骤降≥2 页时 page-1 仍越界；archived 行在管理视图不消失、行不真删，
+   * 该分支目前不可达，收敛是防御——空态分支不渲染分页条，停在越界空页没有控件可返回）。
+   * 读取失败不收敛（load 返回 undefined，错误横幅已由 load 呈现）。
    */
   const reloadAfterArchive = useCallback(
-    async (currentPage: number) => {
-      const nextEntries = await load(currentPage, { resetSelection: true });
-      if (currentPage > 0 && nextEntries !== undefined && nextEntries.length === 0) {
-        await load(currentPage - 1, { resetSelection: true });
+    async (currentPage: number, pageSizeAfterReload: number) => {
+      const reloaded = await load(currentPage, { resetSelection: true });
+      if (
+        reloaded !== undefined &&
+        reloaded.entries.length === 0 &&
+        reloaded.total > 0
+      ) {
+        const maxPage = Math.max(0, Math.ceil(reloaded.total / pageSizeAfterReload) - 1);
+        if (maxPage < currentPage) {
+          await load(maxPage, { resetSelection: true });
+        }
       }
     },
     [load],
@@ -515,11 +527,11 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
       toast(failureParts.join(" "));
     } finally {
       // 无论成败都刷新：失败前已归档的分片必须反映到列表与 counts；刷新清空勾选，
-      // 停在当前页（本页被清空则自动回退一页），失败后重试需重新勾选。
-      await reloadAfterArchive(page);
+      // 停在当前页（越界空页按最新 total 收敛），失败后重试需重新勾选。
+      await reloadAfterArchive(page, pageSize);
       setArchiving(false);
     }
-  }, [intl, page, reason, reloadAfterArchive, selectedIds, services, targetWorkspacePath]);
+  }, [intl, page, pageSize, reason, reloadAfterArchive, selectedIds, services, targetWorkspacePath]);
 
   if (!targetWorkspacePath) {
     return (
@@ -766,10 +778,14 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
                     <Select
                       value={String(pageSize)}
                       disabled={loading}
-                      // 页大小变化 → load 重建（依赖 pageSize）→ effect 回第 1 页重新拉取。
+                      // 页大小变化 → 立即回第 1 页（否则新 pageSize + 旧 page 会瞬时渲染
+                      // 越界区间），load 重建（依赖 pageSize）→ effect 重新拉取。
                       onValueChange={(value) => {
                         const next = Number(value);
-                        if (Number.isFinite(next) && next > 0) setPageSize(next);
+                        if (Number.isFinite(next) && next > 0) {
+                          setPage(0);
+                          setPageSize(next);
+                        }
                       }}
                     >
                       <SelectTrigger
