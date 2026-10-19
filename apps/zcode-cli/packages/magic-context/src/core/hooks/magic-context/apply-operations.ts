@@ -315,6 +315,13 @@ export function applyPendingOperations(
             const tagById = new Map(tags.map((tag) => [tag.tagNumber, tag] as const));
             const tagStatusById = new Map(tags.map((tag) => [tag.tagNumber, tag.status] as const));
             const tagTypeById = new Map(tags.map((tag) => [tag.tagNumber, tag.type] as const));
+            // FORK（magic-context-system-prompt-guard 防线二）：上游没有 role 概念，
+            // 这里的 `message_role` 列是 fork 车道 v10000 的持久判据。升级过渡期列
+            // 尚为 NULL 时，循环内再用 target.message.info.role 做内存兜底（system
+            // 段恒在 wire 上，target 存在即可判）。
+            const tagMessageRoleById = new Map(
+                tags.map((tag) => [tag.tagNumber, tag.messageRole ?? null] as const),
+            );
             const pendingOps = preloadedPendingOps ?? getPendingOps(db, sessionId);
             const opsToApply: Array<{ op: PendingOp; synthetic: boolean }> = [
                 ...pendingOps.map((op) => ({ op, synthetic: false })),
@@ -360,6 +367,21 @@ export function applyPendingOperations(
 
                 const target = targets.get(pendingOp.tagId);
                 const isToolTag = tagTypeById.get(pendingOp.tagId) === "tool";
+
+                // FORK（magic-context-system-prompt-guard 防线二）：上游对任何 role
+                // 统一落 dropped（sess_8a943109 事故：三条 system 段被整段盖掉）。
+                // system 段（列判据或 target 内存兜底任一命中）在此整体拒绝：不写
+                // dropped、不改 wire；非 synthetic 的队列项一并删除，避免每 pass 重
+                // 试。兜住旧版本已入队的 op、compartment-runner-drop-queue 这类非
+                // ctx_reduce 生产者，以及 /ctx-flush 的 explicitFlush 真实消费路径。
+                if (
+                    tagMessageRoleById.get(pendingOp.tagId) === "system" ||
+                    target?.message?.info.role === "system"
+                ) {
+                    reject("system_protected");
+                    if (!synthetic) removePendingOp(db, sessionId, pendingOp.tagId);
+                    continue;
+                }
 
                 if (synthetic) {
                     // Synthetic two-pass reclaim must never persist a DB-only drop for
@@ -514,6 +536,15 @@ export function applyFlushedStatuses(
     for (const tag of tags) {
         if (tag.status === "dropped") {
             const target = targets.get(tag.tagNumber);
+            // FORK（magic-context-system-prompt-guard 防线三）：上游对 dropped 的
+            // message tag 无条件重放占位符。system 段改为自愈：修回 active 并跳过
+            // setContent——tagMessages 已从 source_contents 恢复 pristine 原文，wire
+            // 保持原文即为恢复目标（一次 cache bust 修好受损会话）。Pi 折叠等不经
+            // pending_ops 的 dropped 写点同样由这一层兜底。
+            if (tag.messageRole === "system" || target?.message?.info.role === "system") {
+                updateTagStatus(db, sessionId, tag.tagNumber, "active");
+                continue;
+            }
             if (tag.type === "tool") {
                 if (tag.dropMode === "edit_marker_stripped") {
                     const result = target?.editMarkerStripped?.() ?? "absent";
