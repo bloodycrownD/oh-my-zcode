@@ -109,7 +109,9 @@ for (const required of [
   join(PKG, "dist", "core", "features", "magic-context", "storage-db.js"),
 ]) {
   if (!existsSync(required)) {
-    fatal(`dist 不完整，先执行 pnpm --dir apps/zcode-cli --filter @zcode/magic-context build（缺 ${required}）`);
+    fatal(
+      `dist 不完整，先执行 pnpm --dir apps/zcode-cli --filter @zcode/magic-context build（缺 ${required}）`,
+    );
   }
 }
 
@@ -161,7 +163,13 @@ console.log(
 );
 
 console.log("\n[E2E-0] 老库迁移 + 读侧");
-check("E2E-0", "0-pre-1", "迁移前 tags 无 message_role 列", false, preColumns.includes("message_role"));
+check(
+  "E2E-0",
+  "0-pre-1",
+  "迁移前 tags 无 message_role 列",
+  false,
+  preColumns.includes("message_role"),
+);
 check("E2E-0", "0-pre-2", "迁移前 MAX(version) = 94", 94, preMaxVersion);
 
 // ── 加载 dist（env 已就位） ──────────────────────────────────────────────────
@@ -175,7 +183,13 @@ const { getMagicContextDatabasePath } = await import(dist("host/storage-dir.js")
 
 let db = null;
 try {
-  check("E2E-0", "0-1", "getMagicContextDatabasePath 指向隔离目录", dbPath, getMagicContextDatabasePath());
+  check(
+    "E2E-0",
+    "0-1",
+    "getMagicContextDatabasePath 指向隔离目录",
+    dbPath,
+    getMagicContextDatabasePath(),
+  );
   db = openDatabase(getMagicContextDatabasePath());
 } catch (error) {
   fatal("openDatabase() 抛错", error);
@@ -219,7 +233,13 @@ check(
   preCounts.source_contents,
   postCounts.source_contents,
 );
-check("E2E-0", "0-8", "真实数据无损：session_meta 行数", preCounts.session_meta, postCounts.session_meta);
+check(
+  "E2E-0",
+  "0-8",
+  "真实数据无损：session_meta 行数",
+  preCounts.session_meta,
+  postCounts.session_meta,
+);
 
 // 关库重开：证明迁移幂等（不新增 ledger 行、不报错、版本不回退）。
 closeDatabase();
@@ -261,7 +281,13 @@ check(
   preCounts.source_contents,
   reopenCounts.source_contents,
 );
-check("E2E-0", "0-14", "重开后 session_meta 行数不变", preCounts.session_meta, reopenCounts.session_meta);
+check(
+  "E2E-0",
+  "0-14",
+  "重开后 session_meta 行数不变",
+  preCounts.session_meta,
+  reopenCounts.session_meta,
+);
 
 db = reopened;
 
@@ -418,7 +444,13 @@ check(
   ["system", "system", "system"],
   [1, 2, 3].map(tagRole),
 );
-check("E2E-1", "1-3", "system wire 为原文（带 §N§ 前缀，非占位符）", expectedSystemWire, systemWire);
+check(
+  "E2E-1",
+  "1-3",
+  "system wire 为原文（带 §N§ 前缀，非占位符）",
+  expectedSystemWire,
+  systemWire,
+);
 check(
   "E2E-1",
   "1-4",
@@ -426,13 +458,7 @@ check(
   [false, false, false],
   systemWire.map((text) => text.includes("[dropped")),
 );
-check(
-  "E2E-1",
-  "1-5",
-  "对照组 tag 4/5 仍为 dropped",
-  ["dropped", "dropped"],
-  [4, 5].map(tagStatus),
-);
+check("E2E-1", "1-5", "对照组 tag 4/5 仍为 dropped", ["dropped", "dropped"], [4, 5].map(tagStatus));
 check(
   "E2E-1",
   "1-6",
@@ -440,15 +466,15 @@ check(
   ["[dropped §4§]", "[dropped §5§]"],
   controlWire,
 );
+check("E2E-1", "1-7", "对照组 message_role 回填为 user", ["user", "user"], [4, 5].map(tagRole));
+check("E2E-1", "1-8", "首 pass 确实改写了 wire（对照组走占位符替换）", true, firstPass.mutated);
 check(
   "E2E-1",
-  "1-7",
-  "对照组 message_role 回填为 user",
-  ["user", "user"],
-  [4, 5].map(tagRole),
+  "1-9",
+  "打标缓存：tag 1..5 全部进入 targets",
+  5,
+  [1, 2, 3, 4, 5].filter((n) => firstTargets.has(n)).length,
 );
-check("E2E-1", "1-8", "首 pass 确实改写了 wire（对照组走占位符替换）", true, firstPass.mutated);
-check("E2E-1", "1-9", "打标缓存：tag 1..5 全部进入 targets", 5, [1, 2, 3, 4, 5].filter((n) => firstTargets.has(n)).length);
 
 const tagsAfterFirstPass = tagCount();
 const firstSystemWireSnapshot = [1, 2, 3].map((n) => firstTargets.get(n)?.getContent?.() ?? null);
@@ -456,7 +482,9 @@ const firstSystemWireSnapshot = [1, 2, 3].map((n) => firstTargets.get(n)?.getCon
 // 第二个 pass：模拟下一轮进程/请求。wire 已是 §N§ 原文（system）与占位符（对照组）。
 const secondPass = runPass();
 const secondTargets = secondPass.result.targets;
-const secondSystemWire = [1, 2, 3].map((n) => secondTargets.get(n)?.getContent?.() ?? "(no target)");
+const secondSystemWire = [1, 2, 3].map(
+  (n) => secondTargets.get(n)?.getContent?.() ?? "(no target)",
+);
 const secondControlWire = [4, 5].map((n) => secondTargets.get(n)?.getContent?.() ?? "(no target)");
 
 check(
@@ -491,8 +519,18 @@ check(
   "E2E-1",
   "1-14",
   "第二 pass：true 仅来自对照组占位符重放（设计内 replay 语义）",
-  { mutated: true, controlBefore: [4, 5].map((n) => `§${n}§ ${TAG_SPECS.find((spec) => spec.tagNumber === n).text}`), controlAfter: ["[dropped §4§]", "[dropped §5§]"] },
-  { mutated: secondPass.mutated, controlBefore: secondPass.preApplyControlWire, controlAfter: secondControlWire },
+  {
+    mutated: true,
+    controlBefore: [4, 5].map(
+      (n) => `§${n}§ ${TAG_SPECS.find((spec) => spec.tagNumber === n).text}`,
+    ),
+    controlAfter: ["[dropped §4§]", "[dropped §5§]"],
+  },
+  {
+    mutated: secondPass.mutated,
+    controlBefore: secondPass.preApplyControlWire,
+    controlAfter: secondControlWire,
+  },
 );
 check("E2E-1", "1-15", "第二 pass 不新增 tag 行", tagsAfterFirstPass, tagCount());
 check(
