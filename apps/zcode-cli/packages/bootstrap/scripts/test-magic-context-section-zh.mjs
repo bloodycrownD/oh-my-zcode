@@ -173,8 +173,16 @@ assert.ok(cases === 16, `矩阵应有 16 组，实际 ${cases}`);
 // ── 3b. 系统提示词禁律句（spec 变更点 14）─────────────────────────────────────
 // 与 tags.message_role 四层防线配套的教育句：只落在含盖章指引的四个变体上。
 // no-reduce 两变体没有 ctx_reduce 指引，出现该句即说明加错了变体。
+// FORK（promptdoc/G-1+G-2）：禁用 matchAll（无 g 的 GUARD 调 matchAll 会抛 TypeError，
+// 加 g 又与 assert.match 的 lastIndex 残留冲突），改用整句字面量 split 计数——「各出现
+// 一次」才是真正锁死的断言；EN 四正两反复用同一 countOf，非中文会话的教育层不再只靠
+// zh↔en 同源对比（那样两边同步丢失时仍绿）。
 {
   const GUARD = /绝不给系统提示词段盖章——system（提示词）消息上的标签受保护、永不归档。/;
+  const GUARD_TEXT = "绝不给系统提示词段盖章——system（提示词）消息上的标签受保护、永不归档。";
+  const EN_GUARD_TEXT =
+    "Never stamp a system prompt segment — tags on system (prompt) messages are protected and never archivable.";
+  const countOf = (text, needle) => text.split(needle).length - 1;
   const guarded = [
     { subagentMode: false, preset: "full", label: "主档" },
     { subagentMode: false, preset: "light", label: "light 主档" },
@@ -195,7 +203,7 @@ assert.ok(cases === 16, `矩阵应有 16 组，实际 ${cases}`);
       preset,
       undefined,
     );
-    assert.match(zh, GUARD, `zh ${label}必须含系统提示词禁律句`);
+    assert.equal(countOf(zh, GUARD_TEXT), 1, `zh ${label}必须恰好出现一次系统提示词禁律句`);
   }
   for (const preset of ["full", "light"]) {
     const noReduce = buildMagicContextSectionZhCn(
@@ -211,7 +219,45 @@ assert.ok(cases === 16, `矩阵应有 16 组，实际 ${cases}`);
       preset,
       undefined,
     );
+    assert.equal(countOf(noReduce, GUARD_TEXT), 0, `zh no-reduce（${preset}）不得含禁律句`);
     assert.doesNotMatch(noReduce, GUARD, `zh no-reduce（${preset}）不得含禁律句`);
+  }
+  // EN 侧同批四变体：禁句在源文件中逐字相同，出现次数同样是 1；no-reduce 为 0。
+  for (const { subagentMode, preset, label } of guarded) {
+    const en = buildMagicContextSection(
+      null,
+      0,
+      true,
+      false,
+      false,
+      false,
+      subagentMode,
+      undefined,
+      true,
+      preset,
+      undefined,
+    );
+    assert.equal(countOf(en, EN_GUARD_TEXT), 1, `en ${label} must carry the guard exactly once`);
+  }
+  for (const preset of ["full", "light"]) {
+    const enNoReduce = buildMagicContextSection(
+      null,
+      0,
+      false,
+      false,
+      false,
+      false,
+      false,
+      undefined,
+      true,
+      preset,
+      undefined,
+    );
+    assert.equal(
+      countOf(enNoReduce, EN_GUARD_TEXT),
+      0,
+      `en no-reduce (${preset}) must not carry the guard`,
+    );
   }
 }
 

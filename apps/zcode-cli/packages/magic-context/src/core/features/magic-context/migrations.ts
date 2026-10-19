@@ -3438,11 +3438,12 @@ export function runMigrations(db: Database): void {
     }
 
     if (loggedPlan) {
-        // FORK（magic-context-system-prompt-guard）：数组尾部现在是 fork 车道的
-        // v10000，这里报告的已是「上游车道 + fork 车道」的 effective head，不再是
-        // 纯 upstream lane 读数。
+        // FORK（magic-context-system-prompt-guard）：head 取
+        // LATEST_MIGRATION_VERSION=max(version)，不依赖数组尾序——上游后续把 v95/v96
+        // 追加到数组尾部时，尾元素不再是 head，这里报告的仍是「上游车道 + fork 车道」
+        // 的 effective head，而非纯 upstream lane 读数。
         log(
-            `[migrations] effective migration head now (upstream + fork lanes): v${MIGRATIONS[MIGRATIONS.length - 1].version}`,
+            `[migrations] effective migration head now (upstream + fork lanes): v${LATEST_MIGRATION_VERSION}`,
         );
     }
 }

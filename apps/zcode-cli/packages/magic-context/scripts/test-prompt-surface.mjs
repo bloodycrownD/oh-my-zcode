@@ -194,6 +194,19 @@ it("light preset swaps in the compact catalog", () => {
   }
 });
 
+it("the light ctx_reduce description carries the system-prompt guard semantics", () => {
+  // FORK（magic-context-system-prompt-guard，guards/G-1）：light 描述是 light preset 的
+  // 模型实际视野。宿主 full 侧已有 T-CTX-4 锁定，这里按语义（不要求逐字同句）钉死
+  // 三个关键短语——任一句被上游同步覆盖丢失时本用例变红。
+  const description = LIGHT_TOOL_DESCRIPTIONS.ctx_reduce;
+  for (const phrase of ["Never stamp a system prompt segment", "never archivable", "refused"]) {
+    assert.ok(
+      description.includes(phrase),
+      `light ctx_reduce description lost the guard phrase: ${JSON.stringify(phrase)}`,
+    );
+  }
+});
+
 it("a user tool_descriptions override outranks both catalogs", () => {
   const { runtime, warnings } = runtimeFor(undefined);
   const registration = runtime.resolveRegistration({

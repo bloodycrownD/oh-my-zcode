@@ -37,8 +37,10 @@ export function executeFlush(db: Database, sessionId: string): string {
             }
         }).immediate();
 
-        const parts: string[] = [];
-        if (dropped > 0) parts.push(`${dropped} dropped`);
+        // FORK（magic-context-system-prompt-guard，guards/B-1）：系统提示词守卫让
+        // 全 system 队列的 dropped 保持 0；无条件输出计数，避免出现
+        // `Flushed: . Changes take effect...` 的畸形确认文案（守卫前不可达）。
+        const parts: string[] = [`${dropped} dropped`];
 
         return `Flushed: ${parts.join(", ")}. Changes take effect on next message.`;
     } catch (error) {

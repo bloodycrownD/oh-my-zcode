@@ -17,12 +17,14 @@
  *
  * 已知差异（不在本步处置）：段文案无条件引用 `ctx_note`（`CTX_NOTE_GUIDANCE` 及其 light
  * 变体），而 ctx_note 工具按 spec N2 终局不做。该句不受任何 flag 控制，按 spec Step 18
- * 的口径在 **host 装配层**做最小适配（不改动本逐字常量），并在 FORK 注释登记差异；本文件
- * 作为逐字移植区保持上游原文。
+ * 的口径在 **host 装配层**做最小适配（不改动本逐字常量），并在 FORK 注释登记差异；
+ * 除本注与下方 FORK 登记所述四处系统提示词禁句外，本文件保持上游原文。
  *
- * `src/core/**` 是上游逐字移植区，除本注与下方 FORK 登记以外零改动。
+ * `src/core/**` 是上游逐字移植区：除本注与下方 FORK 登记所述四处系统提示词禁句外，
+ * 本文件保持上游原文。
  *
- * FORK（magic-context-system-prompt-guard，2026-10-19）：四个含 stamping 指引的变体
+ * FORK（magic-context-system-prompt-guard，2026-10-19）：正文改动仅限这四个变体各一句。
+ * 四个含 stamping 指引的变体
  * （BASE_INTRO / BASE_INTRO_LIGHT / SUBAGENT_REDUCE_INTRO / SUBAGENT_REDUCE_INTRO_LIGHT）
  * 各加一句系统提示词禁令，与 tags.message_role 四层防线配套——读侧拒绝对 system 消息的
  * 盖章请求，教育句让模型一开始就不去盖。NO_REDUCE 两变体无 ctx_reduce 指引、

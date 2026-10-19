@@ -1354,6 +1354,26 @@ test("T-G14 executeFlush skips pending ops that target a system tag", () => {
     throw new Error("the non-system control was not dropped");
 });
 
+test("T-G14b executeFlush reports 0 dropped for an all-system queue", () => {
+  const sessionId = "ses_tg14_flush_system_only";
+  insertTag(b4Db, sessionId, "msg_tg14b_sys:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "system");
+  queuePendingOp(b4Db, sessionId, 1, "drop");
+
+  const message = executeFlushModule.executeFlush(b4Db, sessionId);
+
+  // 守卫前该路径不可达：parts 为空会输出 `Flushed: . Changes ...`。文案必须始终带计数。
+  if (message !== "Flushed: 0 dropped. Changes take effect on next message.") {
+    throw new Error(`unexpected flush result: ${JSON.stringify(message)}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("executeFlush changed the system tag status");
+  const remaining = getPendingOps(b4Db, sessionId).map((op) => op.tagId);
+  if (remaining.length !== 1 || remaining[0] !== 1) {
+    throw new Error(`remaining pending ops: ${JSON.stringify(remaining)}`);
+  }
+});
+
 test("T-G16 stampTagMessageRole is a no-op on the second pass for system and null roles", () => {
   const sessionId = "ses_tg16_stamp";
 

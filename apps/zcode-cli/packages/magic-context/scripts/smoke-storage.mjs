@@ -302,7 +302,14 @@ try {
   }
 
   const realDb = new sqlite.Database(siblingPath);
+  let conflictInjected = false;
   try {
+    // 空转防护：DELETE 若因路径/事务/版本号写错而未生效，下面的注入用例仍可能全绿。
+    check(
+      "T-G15 fixture: v10000 row absent before run",
+      realDb.prepare("SELECT 1 FROM schema_migrations WHERE version = 10000").get() == null,
+      true,
+    );
     const injectSiblingRow = () => {
       const side = new sqlite.Database(siblingPath);
       try {
@@ -323,6 +330,9 @@ try {
               // 只拦迁移记账 INSERT：事务体其余语句照常执行。
               return {
                 run() {
+                  // 先记账「注入确实发生」，再抛冲突：注入匹配一旦失效（SQL 改写），
+                  // 下方断言会变红而不是静默空转。
+                  conflictInjected = true;
                   throw new Error("UNIQUE constraint failed: schema_migrations.version");
                 },
               };
@@ -363,6 +373,7 @@ try {
     } catch (error) {
       siblingError = error;
     }
+    check("T-G15: crafted sibling PK conflict was injected", conflictInjected, true);
     check("T-G15: sibling conflict does not throw", siblingError, null);
     check(
       "T-G15: v10000 row is present after the conflict",
