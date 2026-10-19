@@ -11,6 +11,8 @@
  *      不出现 ctx_note（zh 以降级语义直接撰写，见孪生头注④）。
  *   4. resolver 选路：language=zh-CN → zh 文案；en-US/undefined → 上游英文实现
  *      （对同一 11 参做字节级对比，证明英文路径零改动）。
+ *   5. 系统提示词禁律句（spec 变更点 14）：四个含盖章指引的变体各出现一次；no-reduce
+ *      两变体不含（EN 侧同批只加这四个变体，中文孪生镜像）。
  */
 
 import assert from "node:assert/strict";
@@ -168,6 +170,51 @@ assert.ok(cases === 16, `矩阵应有 16 组，实际 ${cases}`);
   assert.ok(zh.includes("除非用户明确要求其他语言"), "zh 语言指令应跟随 override 段");
 }
 
+// ── 3b. 系统提示词禁律句（spec 变更点 14）─────────────────────────────────────
+// 与 tags.message_role 四层防线配套的教育句：只落在含盖章指引的四个变体上。
+// no-reduce 两变体没有 ctx_reduce 指引，出现该句即说明加错了变体。
+{
+  const GUARD = /绝不给系统提示词段盖章——system（提示词）消息上的标签受保护、永不归档。/;
+  const guarded = [
+    { subagentMode: false, preset: "full", label: "主档" },
+    { subagentMode: false, preset: "light", label: "light 主档" },
+    { subagentMode: true, preset: "full", label: "子代理档" },
+    { subagentMode: true, preset: "light", label: "子代理 light" },
+  ];
+  for (const { subagentMode, preset, label } of guarded) {
+    const zh = buildMagicContextSectionZhCn(
+      null,
+      0,
+      true,
+      false,
+      false,
+      false,
+      subagentMode,
+      "zh-CN",
+      true,
+      preset,
+      undefined,
+    );
+    assert.match(zh, GUARD, `zh ${label}必须含系统提示词禁律句`);
+  }
+  for (const preset of ["full", "light"]) {
+    const noReduce = buildMagicContextSectionZhCn(
+      null,
+      0,
+      false,
+      false,
+      false,
+      false,
+      false,
+      "zh-CN",
+      true,
+      preset,
+      undefined,
+    );
+    assert.doesNotMatch(noReduce, GUARD, `zh no-reduce（${preset}）不得含禁律句`);
+  }
+}
+
 // ── 4. resolver 选路（真装配路径 + 字节级 golden 对比）────────────────────────
 // CR P2-3：选路点在 createMagicContextPromptSectionResolver 的三元
 // （isChinesePromptLanguage ? zh 孪生 : 上游）。三元写反/传错 builder 只有靠真驱动
@@ -227,4 +274,6 @@ for (const language of [undefined, "en-US"]) {
   assert.ok(!/你的桌面/.test(viaResolver), `en 路径不得出现中文（${language}）`);
 }
 
-console.log("TEST PASS — magic-context-section-zh (16-case matrix + resolver routing)");
+console.log(
+  "TEST PASS — magic-context-section-zh (16-case matrix + resolver routing + prompt guard)",
+);
