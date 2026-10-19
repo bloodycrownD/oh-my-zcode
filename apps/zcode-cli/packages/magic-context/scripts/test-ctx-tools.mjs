@@ -38,7 +38,9 @@ const { initializeMagicContextHost } = await import(dist("host/harness.js"));
 initializeMagicContextHost();
 
 const { openDatabase } = await import(dist("core/features/magic-context/storage-db.js"));
-const { insertTag } = await import(dist("core/features/magic-context/storage-tags.js"));
+const { insertTag, stampTagMessageRole } = await import(
+  dist("core/features/magic-context/storage-tags.js")
+);
 const { getPendingOps } = await import(dist("core/features/magic-context/storage-ops.js"));
 const { createCtxReduceTools } = await import(dist("core/tools/ctx-reduce/tools.js"));
 const { createCtxExpandTools } = await import(dist("core/tools/ctx-expand/tools.js"));
@@ -122,6 +124,61 @@ test("ctx_reduce queues pending ops for known tags", async () => {
   assert.deepEqual(
     getPendingOps(db, sessionId).map((op) => op.tagId),
     [1, 2],
+  );
+});
+
+// ── 防线一：system prompt 段禁盖（magic-context-system-prompt-guard） ─────────
+
+test("T-G1: ctx_reduce refuses to drop a system-role tag", async () => {
+  const sessionId = "sess_reduce_system";
+  insertTag(db, sessionId, `msg_${sessionId}_1`, "message", 128, 1);
+  stampTagMessageRole(db, sessionId, 1, "system");
+  const tools = createCtxReduceTools({ db, protectedSet: new Set() });
+
+  const text = await tools.ctx_reduce.execute(
+    { drop: "1" },
+    { callID: "call-system", sessionID: sessionId },
+  );
+
+  assert.match(
+    text,
+    /^Error: Refusing to drop §1§ — system prompt segments are protected and never archivable\.$/,
+  );
+  assert.equal(getPendingOps(db, sessionId).length, 0);
+});
+
+test("T-G2: a mixed request is refused whole and names only the system tags", async () => {
+  const sessionId = "sess_reduce_system_mixed";
+  seedTags(sessionId, 8);
+  stampTagMessageRole(db, sessionId, 1, "system");
+  const tools = createCtxReduceTools({ db, protectedSet: new Set() });
+
+  const text = await tools.ctx_reduce.execute(
+    { drop: "1,8" },
+    { callID: "call-system-mixed", sessionID: sessionId },
+  );
+
+  // 交集口径：整体拒绝，文案只点名 system 段；合法的 §8§ 既不出现也不入队。
+  assert.match(text, /^Error: Refusing to drop §1§ — /);
+  assert.doesNotMatch(text, /§8§/);
+  assert.equal(getPendingOps(db, sessionId).length, 0);
+});
+
+test("T-G3: non-system tags keep the ordinary queue path", async () => {
+  const sessionId = "sess_reduce_nonsystem";
+  insertTag(db, sessionId, `msg_${sessionId}_1`, "message", 128, 1);
+  stampTagMessageRole(db, sessionId, 1, "user");
+  const tools = createCtxReduceTools({ db, protectedSet: new Set() });
+
+  const text = await tools.ctx_reduce.execute(
+    { drop: "1" },
+    { callID: "call-nonsystem", sessionID: sessionId },
+  );
+
+  assert.match(text, /^Queued: drop §1§\./);
+  assert.deepEqual(
+    getPendingOps(db, sessionId).map((op) => op.tagId),
+    [1],
   );
 });
 

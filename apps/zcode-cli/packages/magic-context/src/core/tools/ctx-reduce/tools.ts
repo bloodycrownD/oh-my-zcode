@@ -195,6 +195,21 @@ function createCtxReduceTool(deps: CtxReduceToolDeps): CtxToolDefinition<CtxRedu
                 return `Error: Conflicting operations — ${conflicts.join("; ")}.`;
             }
 
+            // FORK（magic-context-system-prompt-guard）：防线一——system prompt 段
+            // 永不可清扫（上游无 message_role 概念，fork 车道 v10000 新增）。
+            // 命中即整体拒绝、不部分入队；文案只列「请求 ∩ system 集」，混合请求
+            // 下让 agent 看清具体哪几个是 system 段（能盖到 system 段必是
+            // blanket-stamp 失误，应停下重看，而不是让其余请求静默通过）。
+            const systemTagNumbers = new Set(
+                allTags
+                    .filter((tag) => tag.messageRole === "system")
+                    .map((tag) => tag.tagNumber),
+            );
+            const requestedSystemIds = allIds.filter((id) => systemTagNumbers.has(id));
+            if (requestedSystemIds.length > 0) {
+                return `Error: Refusing to drop ${formatIds(requestedSystemIds)} — system prompt segments are protected and never archivable.`;
+            }
+
             const preFilterDropCount = dropIds.length;
             dropIds = dropIds.filter(
                 (id) =>
