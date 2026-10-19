@@ -80,6 +80,7 @@ const SUBJECT = [
   "hooks/magic-context/system-injection-stripper.ts",
   "hooks/magic-context/reasoning-removal.ts",
   "hooks/magic-context/heuristic-cleanup.ts",
+  "hooks/magic-context/execute-flush.ts",
   "hooks/magic-context/caveman.ts",
   "hooks/magic-context/caveman-cleanup.ts",
   "hooks/magic-context/emergency-drop.ts",
@@ -941,6 +942,438 @@ test("b4 a host that does not declare its process model keeps upstream's reset",
   const after = b4ReadPersistedPct();
   if (after.pct !== 0 || after.tokens !== 0) {
     throw new Error(`upstream's first-pass reset no longer fires: ${JSON.stringify(after)}`);
+  }
+});
+
+// --- g: system prompt guard（magic-context-system-prompt-guard，Step 8 收口） ---
+//
+// spec §六 的 T-G4–T-G16（T-G1/G2/G3 在 test-ctx-tools.mjs，T-G9/T-G15 在
+// smoke-storage.mjs）。全部用例驱动真实持久层：复用 b4 已打开的临时库
+// （MAGIC_CONTEXT_DB_DIR），每个用例独立 session id，不碰用户真实库。
+// 关注点不是「函数可调用」，而是「system 段在每条清扫路径上都不改变 wire 字节」。
+
+const storage = await load("features/magic-context/storage.js");
+const storageTags = await load("features/magic-context/storage-tags.js");
+const tagMessagesModule = await load("hooks/magic-context/tag-messages.js");
+const sentinelModule = await load("hooks/magic-context/sentinel.js");
+const stripContentModule = await load("hooks/magic-context/strip-content.js");
+const heuristicModule = await load("hooks/magic-context/heuristic-cleanup.js");
+const cavemanCleanupModule = await load("hooks/magic-context/caveman-cleanup.js");
+const executeFlushModule = await load("hooks/magic-context/execute-flush.js");
+
+const { getTagById, insertTag, stampTagMessageRole, updateCavemanDepth, updateTagStatus } =
+  storageTags;
+const { getActiveTagsBySession, getPendingOps, queuePendingOp, saveSourceContent } = storage;
+
+/** OpenCode 形状的单条消息：`info.role` 是 strip/heuristic/caveman 的判据面。 */
+function guardMessage(id, role, text) {
+  return {
+    info: { id, role, sessionID: "ses_guard_fixture" },
+    parts: [{ type: "text", text }],
+  };
+}
+
+/**
+ * 最小 TagTarget：只实现 message/getContent/setContent/textPrefix。
+ * `content` 由闭包持有，断言直接读它，才能看出防线是否真的改了 wire 字节。
+ */
+function guardTarget(role, text, tagNumber) {
+  let content = text;
+  return {
+    message: guardMessage(`msg_guard_target_${tagNumber}`, role, text),
+    textPrefix: `${SECTION}${tagNumber}${SECTION} `,
+    getContent: () => content,
+    setContent: (next) => {
+      if (content === next) return false;
+      content = next;
+      return true;
+    },
+  };
+}
+
+test("T-G4 applyPendingOperations keeps a system tag active and drains its pending op", () => {
+  const sessionId = "ses_tg4_apply_column";
+  insertTag(b4Db, sessionId, "msg_tg4:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "system");
+  queuePendingOp(b4Db, sessionId, 1, "drop");
+  // target 的 role 故意是 assistant：命中只能来自持久列，证明列判据独立生效。
+  const target = guardTarget("assistant", "system prompt body", 1);
+
+  const mutated = applyOps.applyPendingOperations(
+    sessionId,
+    b4Db,
+    new Map([[1, target]]),
+    new Set(),
+  );
+
+  if (mutated) throw new Error("the protected drop reported a wire mutation");
+  if (target.getContent() !== "system prompt body") {
+    throw new Error(`target content changed: ${JSON.stringify(target.getContent())}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("the system tag left active");
+  if (getPendingOps(b4Db, sessionId).length !== 0)
+    throw new Error("the rejected pending op was left in the queue");
+});
+
+test("T-G5 the in-memory target role guards rows whose message_role is still NULL", () => {
+  const sessionId = "ses_tg5_apply_target_role";
+  // 列保持 NULL：升级过渡期（首个 tagMessages pass 回填前）的真实形态。
+  insertTag(b4Db, sessionId, "msg_tg5:p0", "message", 16, 1);
+  queuePendingOp(b4Db, sessionId, 1, "drop");
+  const target = guardTarget("system", "system prompt body", 1);
+
+  const mutated = applyOps.applyPendingOperations(
+    sessionId,
+    b4Db,
+    new Map([[1, target]]),
+    new Set(),
+  );
+
+  if (mutated) throw new Error("the protected drop reported a wire mutation");
+  if (target.getContent() !== "system prompt body") {
+    throw new Error(`target content changed: ${JSON.stringify(target.getContent())}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("the system tag left active");
+  if (getPendingOps(b4Db, sessionId).length !== 0)
+    throw new Error("the rejected pending op was left in the queue");
+});
+
+test("T-G6 applyFlushedStatuses heals a dropped system tag back to active", () => {
+  const sessionId = "ses_tg6_replay_heal";
+  insertTag(b4Db, sessionId, "msg_tg6_sys:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "system");
+  updateTagStatus(b4Db, sessionId, 1, "dropped");
+  insertTag(b4Db, sessionId, "msg_tg6_user:p0", "message", 16, 2);
+  updateTagStatus(b4Db, sessionId, 2, "dropped");
+
+  const systemTarget = guardTarget("assistant", "system prompt body", 1);
+  const controlTarget = guardTarget("user", "old user text", 2);
+  const mutated = applyOps.applyFlushedStatuses(
+    sessionId,
+    b4Db,
+    new Map([
+      [1, systemTarget],
+      [2, controlTarget],
+    ]),
+  );
+
+  // 对照组证明本 pass 的 replay 真的在跑，而不是整条路径空转。
+  if (!mutated) throw new Error("the non-system control did not mutate");
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("the dropped system tag was not healed");
+  if (systemTarget.getContent() !== "system prompt body") {
+    throw new Error(`system wire was rewritten: ${JSON.stringify(systemTarget.getContent())}`);
+  }
+  if (getTagById(b4Db, sessionId, 2)?.status !== "dropped")
+    throw new Error("the non-system control left dropped");
+  if (controlTarget.getContent() !== dropped(2)) {
+    throw new Error(
+      `control did not replay its placeholder: ${JSON.stringify(controlTarget.getContent())}`,
+    );
+  }
+});
+
+test("T-G7 marker-only system messages survive dropped-placeholder stripping", () => {
+  const marker = dropped(9);
+  const system = guardMessage("msg_tg7_sys", "system", marker);
+  const assistant = guardMessage("msg_tg7_asst", "assistant", marker);
+
+  const result = stripContentModule.stripDroppedPlaceholderMessages([system, assistant]);
+
+  if (result.stripped !== 1) throw new Error(`stripped=${result.stripped}`);
+  if (system.parts.length !== 1 || system.parts[0].text !== marker) {
+    throw new Error(`system message was neutralized: ${JSON.stringify(system.parts)}`);
+  }
+  if (result.sentineledIds.includes("msg_tg7_sys")) {
+    throw new Error(`system id was sentineled: ${JSON.stringify(result.sentineledIds)}`);
+  }
+  if (assistant.parts[0].text !== "[dropped]") {
+    throw new Error(`assistant control was not neutralized: ${JSON.stringify(assistant.parts)}`);
+  }
+});
+
+test("T-G8 replaySentinelByMessageIds skips system ids but still counts them as seen", () => {
+  const system = guardMessage("msg_tg8_sys", "system", "system prompt body");
+  const assistant = guardMessage("msg_tg8_asst", "assistant", "an answer");
+  const ids = new Set(["msg_tg8_sys", "msg_tg8_asst"]);
+
+  const result = sentinelModule.replaySentinelByMessageIds([system, assistant], ids);
+
+  if (result.replayed !== 1) throw new Error(`replayed=${result.replayed}`);
+  // system 计入 seen：frozen set 里的 id 若在 wire 上，就不该报 missing。
+  if (result.missingIds.length !== 0) {
+    throw new Error(`unexpected missing ids: ${JSON.stringify(result.missingIds)}`);
+  }
+  if (system.parts[0].text !== "system prompt body") {
+    throw new Error(`system message was neutralized: ${JSON.stringify(system.parts)}`);
+  }
+  if (assistant.parts[0].text !== "[dropped]") {
+    throw new Error(`assistant control was not neutralized: ${JSON.stringify(assistant.parts)}`);
+  }
+});
+
+test("T-G10 heuristic routine leaves a fully injected system message alone", () => {
+  const sessionId = "ses_tg10_heuristic";
+  const injected = "<system-reminder>todo reminder</system-reminder>";
+  insertTag(b4Db, sessionId, "msg_tg10_sys:p0", "message", injected.length, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "system");
+  insertTag(b4Db, sessionId, "msg_tg10_user:p0", "message", injected.length, 2);
+  stampTagMessageRole(b4Db, sessionId, 2, "user");
+
+  const systemTarget = guardTarget("system", injected, 1);
+  const userTarget = guardTarget("user", injected, 2);
+  const result = heuristicModule.applyHeuristicCleanup(
+    sessionId,
+    b4Db,
+    new Map([
+      [1, systemTarget],
+      [2, userTarget],
+    ]),
+    new Map(),
+    { protectedTagNumbers: new Set(), protectedCutoff: null, routine: true },
+  );
+
+  if (result.droppedInjections !== 1) {
+    throw new Error(
+      `droppedInjections=${result.droppedInjections} (expected only the user control)`,
+    );
+  }
+  if (systemTarget.getContent() !== injected) {
+    throw new Error(`system content was stripped: ${JSON.stringify(systemTarget.getContent())}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("the system tag was dropped");
+  if (userTarget.getContent() !== dropped(2)) {
+    throw new Error(`user control was not dropped: ${JSON.stringify(userTarget.getContent())}`);
+  }
+  if (getTagById(b4Db, sessionId, 2)?.status !== "dropped")
+    throw new Error("the user control stayed active");
+});
+
+test("T-G11 tagMessages backfills message_role on existing content-id tags", () => {
+  // ① 生产路径：tagMessages 前先 initFromDb（transform.ts 同款），resolver 经
+  //    contentId 精确命中已有的 message_id='msg:...:p0' 行。
+  const productionSession = "ses_tg11_production";
+  insertTag(b4Db, productionSession, "msg_tg11a:p0", "message", 16, 1);
+  const productionTagger = taggerModule.createTagger();
+  productionTagger.initFromDb(productionSession, b4Db);
+  const productionMessages = [guardMessage("msg_tg11a", "system", "system prompt body")];
+  tagMessagesModule.tagMessages(productionSession, productionMessages, productionTagger, b4Db);
+
+  if (getTagById(b4Db, productionSession, 1)?.messageRole !== "system") {
+    throw new Error("the existing tag was not stamped on the initFromDb path");
+  }
+  if (productionMessages[0].parts[0].text !== `${SECTION}1${SECTION} system prompt body`) {
+    throw new Error(
+      `the existing tag was not reused: ${JSON.stringify(productionMessages[0].parts[0].text)}`,
+    );
+  }
+
+  // ② 冷 tagger：不 initFromDb，assignTag 的 dbExistingLookup 收养同一行。
+  const coldSession = "ses_tg11_cold";
+  insertTag(b4Db, coldSession, "msg_tg11b:p0", "message", 16, 1);
+  const coldTagger = taggerModule.createTagger();
+  const coldMessages = [guardMessage("msg_tg11b", "system", "system prompt body")];
+  tagMessagesModule.tagMessages(coldSession, coldMessages, coldTagger, b4Db);
+
+  if (getTagById(b4Db, coldSession, 1)?.messageRole !== "system") {
+    throw new Error("the adopted existing tag was not stamped on the cold path");
+  }
+  if (coldMessages[0].parts[0].text !== `${SECTION}1${SECTION} system prompt body`) {
+    throw new Error(
+      `cold adoption did not reuse tag 1: ${JSON.stringify(coldMessages[0].parts[0].text)}`,
+    );
+  }
+  if (storage.getTagsBySession(b4Db, coldSession).length !== 1) {
+    throw new Error("the cold path allocated a second tag instead of adopting the row");
+  }
+});
+
+test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", () => {
+  const original = "The user is just really very happy that this simple thing works well for them.";
+  const cavemanConfig = { enabled: true, minChars: 10, protectedCutoff: null };
+
+  // ① eligibility：列判据与 target 兜底判据各自命中；非 system 对照组正常压缩。
+  const eligibilitySession = "ses_tg12_eligibility";
+  insertTag(b4Db, eligibilitySession, "msg_tg12a:p0", "message", original.length, 1);
+  stampTagMessageRole(b4Db, eligibilitySession, 1, "system");
+  insertTag(b4Db, eligibilitySession, "msg_tg12a:p1", "message", original.length, 2);
+  insertTag(b4Db, eligibilitySession, "msg_tg12a:p2", "message", original.length, 3);
+  stampTagMessageRole(b4Db, eligibilitySession, 3, "user");
+  for (const tagNumber of [1, 2, 3]) {
+    saveSourceContent(b4Db, eligibilitySession, tagNumber, original);
+  }
+  const eligibilityByColumn = guardTarget("assistant", original, 1);
+  const eligibilityByTarget = guardTarget("system", original, 2);
+  const eligibilityControl = guardTarget("user", original, 3);
+  const eligibilityResult = cavemanCleanupModule.applyCavemanCleanup(
+    eligibilitySession,
+    b4Db,
+    new Map([
+      [1, eligibilityByColumn],
+      [2, eligibilityByTarget],
+      [3, eligibilityControl],
+    ]),
+    getActiveTagsBySession(b4Db, eligibilitySession),
+    cavemanConfig,
+  );
+
+  if (eligibilityResult.compressedToUltra !== 1) {
+    throw new Error(
+      `eligibility compressed ${eligibilityResult.compressedToUltra} tags (expected only the user control)`,
+    );
+  }
+  if (eligibilityByColumn.getContent() !== original)
+    throw new Error("eligibility compressed a system tag matched by message_role");
+  if (eligibilityByTarget.getContent() !== original)
+    throw new Error("eligibility compressed a system tag matched by target.message.info.role");
+  if (eligibilityControl.getContent() === original)
+    throw new Error("the non-system control was not compressed");
+
+  // ② rules-switch：已压缩 system 行不在重写清单；普通行按新规则重写。
+  const switchSession = "ses_tg12_rules_switch";
+  insertTag(b4Db, switchSession, "msg_tg12b:p0", "message", original.length, 1);
+  stampTagMessageRole(b4Db, switchSession, 1, "system");
+  updateCavemanDepth(b4Db, switchSession, 1, 1);
+  insertTag(b4Db, switchSession, "msg_tg12b:p1", "message", original.length, 2);
+  updateCavemanDepth(b4Db, switchSession, 2, 1);
+  insertTag(b4Db, switchSession, "msg_tg12b:p2", "message", original.length, 3);
+  stampTagMessageRole(b4Db, switchSession, 3, "user");
+  updateCavemanDepth(b4Db, switchSession, 3, 3);
+  for (const tagNumber of [1, 2, 3]) {
+    saveSourceContent(b4Db, switchSession, tagNumber, original);
+  }
+  const switchByColumn = guardTarget("assistant", original, 1);
+  const switchByTarget = guardTarget("system", original, 2);
+  const switchControl = guardTarget("user", original, 3);
+  const switchResult = cavemanCleanupModule.applyCavemanCleanup(
+    switchSession,
+    b4Db,
+    new Map([
+      [1, switchByColumn],
+      [2, switchByTarget],
+      [3, switchControl],
+    ]),
+    getActiveTagsBySession(b4Db, switchSession),
+    cavemanConfig,
+  );
+
+  if (switchResult.mutatedTextTags !== 1) {
+    throw new Error(
+      `rules-switch rewrote ${switchResult.mutatedTextTags} tags (expected only the control)`,
+    );
+  }
+  if (switchByColumn.getContent() !== original)
+    throw new Error("rules-switch rewrote a system tag matched by message_role");
+  if (switchByTarget.getContent() !== original)
+    throw new Error("rules-switch rewrote a system tag matched by target.message.info.role");
+  if (switchControl.getContent() === original)
+    throw new Error("the non-system control was not rewritten");
+
+  // ③ replay：已压缩 system 行不重放压缩字节；普通行照常重放。
+  const replaySession = "ses_tg12_replay";
+  insertTag(b4Db, replaySession, "msg_tg12c:p0", "message", original.length, 1);
+  stampTagMessageRole(b4Db, replaySession, 1, "system");
+  updateCavemanDepth(b4Db, replaySession, 1, 2);
+  insertTag(b4Db, replaySession, "msg_tg12c:p1", "message", original.length, 2);
+  updateCavemanDepth(b4Db, replaySession, 2, 2);
+  insertTag(b4Db, replaySession, "msg_tg12c:p2", "message", original.length, 3);
+  stampTagMessageRole(b4Db, replaySession, 3, "user");
+  updateCavemanDepth(b4Db, replaySession, 3, 2);
+  for (const tagNumber of [1, 2, 3]) {
+    saveSourceContent(b4Db, replaySession, tagNumber, original);
+  }
+  const replayByColumn = guardTarget("assistant", original, 1);
+  const replayByTarget = guardTarget("system", original, 2);
+  const replayControl = guardTarget("user", original, 3);
+  const replayed = cavemanCleanupModule.replayCavemanCompression(
+    replaySession,
+    b4Db,
+    new Map([
+      [1, replayByColumn],
+      [2, replayByTarget],
+      [3, replayControl],
+    ]),
+    getActiveTagsBySession(b4Db, replaySession),
+  );
+
+  if (replayed !== 1) throw new Error(`replayed=${replayed} (expected only the control)`);
+  if (replayByColumn.getContent() !== original)
+    throw new Error("replay rewrote a system tag matched by message_role");
+  if (replayByTarget.getContent() !== original)
+    throw new Error("replay rewrote a system tag matched by target.message.info.role");
+  if (replayControl.getContent() === original) {
+    throw new Error("the non-system control was not replayed");
+  }
+});
+
+test("T-G13 stripSystemInjectedMessages never neutralizes a system message", () => {
+  const injected = "<system-reminder>todo reminder</system-reminder>";
+  const system = guardMessage("msg_tg13_sys", "system", injected);
+  const assistant = guardMessage("msg_tg13_asst", "assistant", injected);
+
+  // protectedTailStart 放到数组末尾：两条都在可中和区间内。
+  const result = stripContentModule.stripSystemInjectedMessages([system, assistant], 2);
+
+  if (result.stripped !== 1) throw new Error(`stripped=${result.stripped}`);
+  if (system.parts.length !== 1 || system.parts[0].text !== injected) {
+    throw new Error(`system message was neutralized: ${JSON.stringify(system.parts)}`);
+  }
+  if (result.sentineledIds.includes("msg_tg13_sys")) {
+    throw new Error(`system id was sentineled: ${JSON.stringify(result.sentineledIds)}`);
+  }
+  if (assistant.parts[0].text !== "[dropped]") {
+    throw new Error(`assistant control was not neutralized: ${JSON.stringify(assistant.parts)}`);
+  }
+});
+
+test("T-G14 executeFlush skips pending ops that target a system tag", () => {
+  const sessionId = "ses_tg14_flush";
+  insertTag(b4Db, sessionId, "msg_tg14_sys:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "system");
+  insertTag(b4Db, sessionId, "msg_tg14_user:p0", "message", 16, 2);
+  stampTagMessageRole(b4Db, sessionId, 2, "user");
+  queuePendingOp(b4Db, sessionId, 1, "drop");
+  queuePendingOp(b4Db, sessionId, 2, "drop");
+
+  const message = executeFlushModule.executeFlush(b4Db, sessionId);
+
+  if (!/^Flushed: 1 dropped\. Changes take effect on next message\.$/.test(message)) {
+    throw new Error(`unexpected flush result: ${JSON.stringify(message)}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.status !== "active")
+    throw new Error("executeFlush dropped the system tag");
+  // system op 留队，交给 applyPendingOperations 的 system_protected 语义处理。
+  const remaining = getPendingOps(b4Db, sessionId).map((op) => op.tagId);
+  if (remaining.length !== 1 || remaining[0] !== 1) {
+    throw new Error(`remaining pending ops: ${JSON.stringify(remaining)}`);
+  }
+  if (getTagById(b4Db, sessionId, 2)?.status !== "dropped")
+    throw new Error("the non-system control was not dropped");
+});
+
+test("T-G16 stampTagMessageRole is a no-op on the second pass for system and null roles", () => {
+  const sessionId = "ses_tg16_stamp";
+
+  insertTag(b4Db, sessionId, "msg_tg16_sys:p0", "message", 16, 1);
+  const first = stampTagMessageRole(b4Db, sessionId, 1, "system");
+  const second = stampTagMessageRole(b4Db, sessionId, 1, "system");
+  if (first !== 1) throw new Error(`first stamp changed ${first} rows (expected 1)`);
+  if (second !== 0) throw new Error(`second stamp changed ${second} rows (expected 0)`);
+  if (getTagById(b4Db, sessionId, 1)?.messageRole !== "system") {
+    throw new Error("the stamped role drifted");
+  }
+
+  // role=null：初始 NULL 与目标 role 相同，IS NOT 比较应让两次都是 0 行。
+  insertTag(b4Db, sessionId, "msg_tg16_null:p0", "message", 16, 2);
+  const nullFirst = stampTagMessageRole(b4Db, sessionId, 2, null);
+  const nullSecond = stampTagMessageRole(b4Db, sessionId, 2, null);
+  if (nullFirst !== 0) throw new Error(`first null stamp changed ${nullFirst} rows`);
+  if (nullSecond !== 0) throw new Error(`second null stamp changed ${nullSecond} rows`);
+  if (getTagById(b4Db, sessionId, 2)?.messageRole !== null) {
+    throw new Error("the null role drifted");
   }
 });
 
