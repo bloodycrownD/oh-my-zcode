@@ -236,6 +236,12 @@ export function applyHeuristicCleanup(
                 const target = targets.get(tag.tagNumber);
                 if (!target) continue;
 
+                // FORK（magic-context-system-prompt-guard）：防御性豁免——system 段
+                // 是系统提示词，routine 注入剥离不得触碰。上游 routine 的触发条件是
+                // 整条内容被 stripSystemInjection 吃光，对纯文本 system 段本就够不到；
+                // 这里为未来注入匹配器扩面（或 system 段内含 marker）兜底。
+                if (target.message?.info.role === "system") continue;
+
                 const content = target.getContent?.();
                 if (!content) continue;
 

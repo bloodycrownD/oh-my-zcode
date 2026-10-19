@@ -75,7 +75,10 @@ export function stripSystemInjectedMessages(
 
         // Never neutralize user-role messages — they anchor turn boundaries
         // that AI SDK depends on to avoid merging consecutive assistants.
-        if (msg.info.role === "user") continue;
+        // FORK（magic-context-system-prompt-guard）：system 消息是系统提示词段，
+        // 永不可被中和。上游只豁免 user；ZCode 把 0–3 条 system 段投影为运行时
+        // 条目（mcN），一旦被中和整条消失，事故见 sess_8a943109。
+        if (msg.info.role === "user" || msg.info.role === "system") continue;
 
         // Skip messages already reduced to a lone sentinel — idempotent on replay
         if (msg.parts.length === 1 && isSentinel(msg.parts[0])) continue;
@@ -187,7 +190,10 @@ export function stripDroppedPlaceholderMessages(
 
         // Never neutralize user-role messages — they anchor turn boundaries
         // that AI SDK depends on to avoid merging consecutive assistants.
-        if (msg.info.role === "user") continue;
+        // FORK（magic-context-system-prompt-guard）：system 消息是系统提示词段，
+        // 即使其全部内容只剩 [dropped §N§] 占位符也不能中和——中和会让 wire 上
+        // 的提示词段整条消失（事故 sess_8a943109）。原文由防线三 replay 自愈。
+        if (msg.info.role === "user" || msg.info.role === "system") continue;
 
         // Skip messages already reduced to a lone sentinel — idempotent on replay
         if (msg.parts.length === 1 && isSentinel(msg.parts[0])) continue;

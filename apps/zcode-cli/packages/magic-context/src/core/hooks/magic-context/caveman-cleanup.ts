@@ -138,11 +138,22 @@ export function applyCavemanCleanup(
     // a byte_size at least min_chars. byte_size is the current length in
     // bytes; for short/long-text discrimination this is a close enough proxy
     // for character count (UTF-8 prose averages ~1.05 bytes/char).
+    // FORK（magic-context-system-prompt-guard）：system 段承重豁免——caveman 的
+    // eligibility 只看 type/status/byteSize，上游会把系统提示词段照进压缩集，
+    // experimental 开启时 applyCompressedText 会改写提示词文本。判据用双保险：
+    // 列判据 `tag.messageRole`（持久判据，stamp 每 pass 回填）+ target 兜底
+    // `targets.get(...)?.message?.info.role`（升级过渡期列尚 NULL 时 system 段
+    // 仍在 wire 上，target 恒存在）。存量自愈链：已压缩的 system 行不再进本集，
+    // rules-switch/replay 两处过滤同样豁免；tagMessages 每 pass 从 source_contents
+    // 恢复 pristine 原文 → wire 一个 pass 即恢复原文；cavemanDepth 残留值不清零
+    // （无害：三处入口均已豁免）。
     const eligible = tags
         .filter(
             (tag) =>
                 tag.type === "message" &&
                 tag.status === "active" &&
+                tag.messageRole !== "system" &&
+                targets.get(tag.tagNumber)?.message?.info.role !== "system" &&
                 (protectedCutoff === null || tag.tagNumber < protectedCutoff) &&
                 tag.byteSize >= config.minChars,
         )
@@ -169,8 +180,17 @@ export function applyCavemanCleanup(
     const englishWordRules = (config.wordRules ?? "english") === "english";
     let state = getCavemanReplayState(db, sessionId);
     if (!state.currentRules || state.englishWordRules !== englishWordRules) {
+        // FORK（magic-context-system-prompt-guard）：rules-switch 重写同样跳过
+        // system 段（列判据 + target 兜底），避免切换规则时把压缩字节重放到
+        // 系统提示词上；未进 compressedBefore 的 system 行也就不会记入
+        // recordCavemanCurrentRules 的重写清单。
         const compressedBefore = tags.filter(
-            (tag) => tag.type === "message" && tag.status === "active" && tag.cavemanDepth > 0,
+            (tag) =>
+                tag.type === "message" &&
+                tag.status === "active" &&
+                tag.cavemanDepth > 0 &&
+                tag.messageRole !== "system" &&
+                targets.get(tag.tagNumber)?.message?.info.role !== "system",
         );
         const switched = recordCavemanCurrentRules(
             db,
@@ -357,11 +377,17 @@ export function replayCavemanCompression(
 ): number {
     // Pre-filter to only tags that need replay so we avoid loading source
     // contents for everything in the session.
+    // FORK（magic-context-system-prompt-guard）：replay 是存量自愈的关键一环——
+    // 已压缩的 system 行（含升级前写入的 cavemanDepth）不再重放压缩字节，
+    // tagMessages 每 pass 已恢复 pristine 原文，wire 一个 pass 即恢复提示词全文。
+    // 判据同为列判据 + target 兜底双保险。
     const compressedTags = tags.filter(
         (tag) =>
             tag.type === "message" &&
             tag.status === "active" &&
             tag.cavemanDepth > 0 &&
+            tag.messageRole !== "system" &&
+            targets.get(tag.tagNumber)?.message?.info.role !== "system" &&
             targets.has(tag.tagNumber),
     );
 
