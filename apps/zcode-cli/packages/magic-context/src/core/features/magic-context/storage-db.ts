@@ -167,7 +167,7 @@ export function __resetSchemaFenceStateForTests(): void {
  */
 export const MAGIC_CONTEXT_DB_FILE_NAME = "magic-context.db";
 
-export const LATEST_SUPPORTED_VERSION = 94;
+export const LATEST_SUPPORTED_VERSION = 10000;
 
 /**
  * Every runtime backend receives the same finite wait before the first schema
@@ -381,6 +381,20 @@ function migrateLegacyStorageIfNeeded(targetDbPath: string, targetDbDir: string)
     }
 }
 
+/**
+ * Ledger head across both migration lanes.
+ *
+ * FORK（magic-context-system-prompt-guard / v4）：上游语义是 upstream-lane 读数
+ * （`WHERE version < FORK_MIGRATION_VERSION_FLOOR`）。fork 车道 v10000 落地后，
+ * 过滤会让本函数永久返回 94，从而：schema fence 拒绝不了更新的库、
+ * enforceMigrationOnOpenGuard 永不早退（每次进程首开都探测兄弟进程，多进程常驻
+ * 场景永久 storage_unavailable）、smoke 断言链全红。故改为 ledger 全量 MAX。
+ *
+ * 职责自此分明：`getCurrentVersion`（migrations.ts）保持「上游车道游标」，供
+ * pending 选择推进；本函数是 fence/guard/boot log 使用的 effective head。
+ * 注意 formatSchemaFenceBootLog 的 "upstream migration lane" 文案因之不再精确
+ * （显示的是含 fork 车道的 head），属登记在案的已知偏差。
+ */
 export function getPersistedSchemaVersion(db: Database): number {
     const hasMigrationsTable = db
         .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'schema_migrations'")
@@ -389,10 +403,8 @@ export function getPersistedSchemaVersion(db: Database): number {
         return 0;
     }
     const row = db
-        .prepare(
-            "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations WHERE version < ?",
-        )
-        .get(FORK_MIGRATION_VERSION_FLOOR) as { version: number } | undefined;
+        .prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations")
+        .get() as { version: number } | undefined;
     return row?.version ?? 0;
 }
 
@@ -1167,6 +1179,7 @@ export function initializeDatabase(
       token_count INTEGER,
       input_token_count INTEGER,
       reasoning_token_count INTEGER,
+      message_role TEXT, -- FORK(system-prompt-guard): v10000，system 段保护判据
       UNIQUE(session_id, tag_number)
     );
 
@@ -2240,6 +2253,11 @@ CREATE INDEX IF NOT EXISTS idx_dream_queue_pending ON dream_queue(started_at, en
     ensureColumn(db, "tags", "token_count", "INTEGER");
     ensureColumn(db, "tags", "input_token_count", "INTEGER");
     ensureColumn(db, "tags", "reasoning_token_count", "INTEGER");
+    // FORK（magic-context-system-prompt-guard）：fork 车道 v10000 给 tags 加的
+    // role 判据列（上游没有 role 概念）。migrations 的同名 ensureColumn 覆盖正常
+    // 升级路径；这里覆盖绕过 runMigrations 的 fresh-DB / 测试初始化路径，语义与
+    // 其它漂移自愈列一致。
+    ensureColumn(db, "tags", "message_role", "TEXT");
     // Dreamer v2: the cron string next_due_at was computed from, so the scheduler
     // can detect a config schedule change and recompute (config-authoritative).
     ensureColumn(db, "task_schedule_state", "schedule", "TEXT");

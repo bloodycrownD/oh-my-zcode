@@ -3179,6 +3179,27 @@ export const MIGRATIONS: Migration[] = [
             splitReplayDecisions(db);
         },
     },
+    {
+        // FORK（magic-context-system-prompt-guard）：本迁移占 fork 车道的首号
+        // （FORK_MIGRATION_VERSION_FLOOR = 10_000，上游版本保持 < 10000）。上游
+        // 没有 role 概念；ZCode 把 system prompt 段投影成 role=system 的运行时
+        // 消息并照常打 tag，这些 tag 必须永不归档，因此需要 tags 上的持久判据。
+        //
+        // 上游语义与 ZCode 差异：getCurrentVersion（本文件 runMigrations 上方）
+        // 只数 `< floor` 的行，所以本行不会被算进上游车道游标，上游车道的版本推进
+        // 判定不受影响；runMigrations 的 pending 选择在「版本 > 游标」之外还有
+        // isMigrationApplied 行级判重，本行只执行一次。
+        //
+        // 只加列、不改既有列：回滚代码后残留列无消费方，无害。
+        version: 10000,
+        description: "tags.message_role for protected system prompt segments",
+        up(db: Database): void {
+            // 与 v27/v92 同风格：partial fixture 可能没有 tags 表（此时没有可
+            // 保护的行），有表才 ensureColumn。
+            if (!tableExists(db, "tags")) return;
+            ensureColumn(db, "tags", "message_role", "TEXT");
+        },
+    },
 ];
 
 /**
@@ -3375,10 +3396,16 @@ export function runMigrations(db: Database): void {
                 // BEGIN IMMEDIATE prevents the normal race, but retain the narrow
                 // PK-conflict tolerance for unusual SQLite adapters or callers.
                 log(
-                    `[migrations] v${migration.version} already applied by sibling instance — resuming with re-read version`,
+                    `[migrations] v${migration.version} already applied by sibling instance — resuming`,
                 );
-                const reReadVersion = getCurrentVersion(db);
-                if (reReadVersion > currentVersion) continue;
+                // FORK（magic-context-system-prompt-guard）：上游此处用 re-read 的
+                // upstream-lane 版本是否前进判断兄弟是否已应用，而 getCurrentVersion
+                // 过滤掉 >= FORK_MIGRATION_VERSION_FLOOR 的行。fork 车道的 v10000
+                // 被该读数过滤：兄弟抢先写行后 re-read 仍是 94（不大于旧值），会误抛
+                // "version did not advance … manual repair" fatal（本路径随本迁移首次
+                // 可达）。改为直接确认本版本行已存在——与上方 pending 选择使用同一个
+                // isMigrationApplied 判据。
+                if (isMigrationApplied(db, migration.version)) continue;
                 throw new Error(
                     `Migration v${migration.version} failed: sibling conflict reported but version did not advance. Database may need manual repair.`,
                 );
@@ -3411,8 +3438,11 @@ export function runMigrations(db: Database): void {
     }
 
     if (loggedPlan) {
+        // FORK（magic-context-system-prompt-guard）：数组尾部现在是 fork 车道的
+        // v10000，这里报告的已是「上游车道 + fork 车道」的 effective head，不再是
+        // 纯 upstream lane 读数。
         log(
-            `[migrations] upstream migration lane now: ${MIGRATIONS[MIGRATIONS.length - 1].version}`,
+            `[migrations] effective migration head now (upstream + fork lanes): v${MIGRATIONS[MIGRATIONS.length - 1].version}`,
         );
     }
 }
