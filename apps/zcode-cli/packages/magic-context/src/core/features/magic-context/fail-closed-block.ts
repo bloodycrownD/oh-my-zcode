@@ -230,7 +230,7 @@ export function formatFailClosedBlockingMessage(reason: FailClosedReason): strin
     }
     if (reason.kind === "schema_fence") {
         return [
-            `Magic Context cannot operate: this Magic Context build is older than the database; upgrade/restart this harness (upstream migration lane v${reason.persistedVersion}, build supports through v${reason.supportedVersion}).`,
+            `Magic Context cannot operate: this Magic Context build is older than the database; upgrade/restart this harness (database ledger head v${reason.persistedVersion}, build supports through v${reason.supportedVersion}).`,
             `Recovery: ${FAIL_CLOSED_DOCTOR_COMMAND}`,
         ].join(" ");
     }

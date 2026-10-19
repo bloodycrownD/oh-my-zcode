@@ -392,8 +392,8 @@ function migrateLegacyStorageIfNeeded(targetDbPath: string, targetDbDir: string)
  *
  * 职责自此分明：`getCurrentVersion`（migrations.ts）保持「上游车道游标」，供
  * pending 选择推进；本函数是 fence/guard/boot log 使用的 effective head。
- * 注意 formatSchemaFenceBootLog 的 "upstream migration lane" 文案因之不再精确
- * （显示的是含 fork 车道的 head），属登记在案的已知偏差。
+ * 文案口径：boot log、fence 拒绝日志与 fail-closed 报错统一称 "ledger head"
+ * （全量 max(version)，含 fork 车道），不再使用 upstream-lane 的说法。
  */
 export function getPersistedSchemaVersion(db: Database): number {
     const hasMigrationsTable = db
@@ -415,12 +415,12 @@ export function schemaVersionIsSupported(
     return getPersistedSchemaVersion(db) <= latestSupportedVersion;
 }
 
-/** Log the upstream-lane version so operators can compare it to this build's fence. */
+/** Log the persisted ledger head (max(version) across both lanes) so operators can compare it to this build's fence. */
 export function formatSchemaFenceBootLog(
     persistedVersion: number,
     supportedVersion: number,
 ): string {
-    return `[magic-context] upstream migration lane at boot: database=v${persistedVersion}, supported_fence=v${supportedVersion}`;
+    return `[magic-context] ledger head at boot: database=v${persistedVersion}, supported_fence=v${supportedVersion}`;
 }
 
 function getRuntimeLatestSupportedVersion(options?: OpenDatabaseOptions): number {
@@ -449,7 +449,7 @@ export function enforceSchemaFence(
     }
     lastSchemaFenceRejection = { persistedVersion, supportedVersion: latestSupportedVersion };
     log(
-        `[magic-context] storage fatal: refusing to open ${dbPath}; upstream migration lane v${persistedVersion} is newer than this binary supports (max v${latestSupportedVersion}). A pinned or stale plugin is likely sharing this database with a newer instance; update or unpin Magic Context with 'npx @cortexkit/magic-context@latest doctor --force', then restart.`,
+        `[magic-context] storage fatal: refusing to open ${dbPath}; persisted ledger head v${persistedVersion} is newer than this binary supports (max v${latestSupportedVersion}). A pinned or stale plugin is likely sharing this database with a newer instance; update or unpin Magic Context with 'npx @cortexkit/magic-context@latest doctor --force', then restart.`,
     );
     return false;
 }

@@ -301,6 +301,11 @@ export function applyPendingOperations(
 ): boolean {
     let didMutateMessage = false;
     let diagnostics: PendingOperationBatchDiagnostics | undefined;
+    // FORK（magic-context-system-prompt-guard 防线二）：混合批（部分 op 落盘、
+    // 部分被 system 保护拒绝）原本完全静默——只有整批 mutated===0 时才打印
+    // reasons。这里单独累积被拒 tag 号，事务提交后打一条汇总，供事故复盘确认
+    // 防线确实生效。
+    const systemProtectedTagIds: number[] = [];
     const reject = (reason: string): void => {
         if (!diagnostics) return;
         diagnostics.reasons[reason] = (diagnostics.reasons[reason] ?? 0) + 1;
@@ -379,6 +384,7 @@ export function applyPendingOperations(
                     target?.message?.info.role === "system"
                 ) {
                     reject("system_protected");
+                    systemProtectedTagIds.push(pendingOp.tagId);
                     if (!synthetic) removePendingOp(db, sessionId, pendingOp.tagId);
                     continue;
                 }
@@ -508,6 +514,13 @@ export function applyPendingOperations(
     }
     if (diagnostics) {
         onBatchComplete?.(diagnostics);
+        // 防线二汇总：与下方 no-op 行独立——混合批里 mutated>0 时也必须留痕。
+        if (systemProtectedTagIds.length > 0) {
+            sessionLog(
+                sessionId,
+                `pending operations rejected system tags: source=${diagnostics.source} total=${diagnostics.total} rejected=${systemProtectedTagIds.length} tags=${systemProtectedTagIds.join(",")} reason=system_protected`,
+            );
+        }
         if (diagnostics.total > 0 && diagnostics.mutated === 0) {
             const reasons = Object.entries(diagnostics.reasons)
                 .sort(([left], [right]) => left.localeCompare(right))
@@ -543,6 +556,11 @@ export function applyFlushedStatuses(
             // pending_ops 的 dropped 写点同样由这一层兜底。
             if (tag.messageRole === "system" || target?.message?.info.role === "system") {
                 updateTagStatus(db, sessionId, tag.tagNumber, "active");
+                // 防线三原本完全静默：事故复盘无法从日志确认自愈发生过。
+                sessionLog(
+                    sessionId,
+                    `applyFlushedStatuses healed system tag ${tag.tagNumber} back to active`,
+                );
                 continue;
             }
             if (tag.type === "tool") {
