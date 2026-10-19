@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* oxlint-disable max-lines -- e2e 过程产物：单文件三场景断言矩阵，拆分无收益 */
 /**
  * e2e-heal — magic-context-system-prompt-guard 真机语义验证。
  *
@@ -66,11 +67,6 @@ function check(scenario, id, name, expected, actual) {
     console.log(`        实际: ${truncate(actualText)}`);
   }
   return pass;
-}
-
-/** 直接按布尔条件记录断言（用于谓词型判断）。 */
-function checkThat(scenario, id, name, pass, expectedText, actualText) {
-  return check(scenario, id, name, expectedText, pass ? expectedText : actualText);
 }
 
 function formatValue(value) {
