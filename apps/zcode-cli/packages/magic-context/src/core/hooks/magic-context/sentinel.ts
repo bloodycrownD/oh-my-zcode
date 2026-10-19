@@ -255,7 +255,7 @@ export function isSentinel(part: unknown): boolean {
  * were absent on the fold pass, so removal is the only byte-identical replay.
  */
 export function replaySentinelByMessageIds(
-    messages: Array<{ info: { id?: string }; parts: unknown[] }>,
+    messages: Array<{ info: { id?: string; role?: string }; parts: unknown[] }>,
     ids: Set<string>,
     providerID?: string,
     hiddenSeamIds: ReadonlySet<string> = new Set(),
@@ -268,6 +268,12 @@ export function replaySentinelByMessageIds(
         const id = msg.info.id;
         if (!id || !ids.has(id)) continue;
         seen.add(id);
+        // FORK（magic-context-system-prompt-guard 防线三）：上游对 frozen set 中的
+        // 消息一律中和成整消息哨兵，system 段一经中和即丢失提示词文本（事故形态）。
+        // system 消息只计入 seen、不中和：frozen set 残留无害，懒处理不动持久化。
+        // 参数类型同时放宽 `info.role`（唯一调用方 transform-postprocess-phase.ts
+        // 以 args.messages 赋值，MessageLike.info.role 本来兼容）。
+        if (msg.info.role === "system") continue;
         if (!modelAcceptsEmptyContent(providerID) && hiddenSeamIds.has(id)) {
             messages.splice(index, 1);
             replayed += 1;
