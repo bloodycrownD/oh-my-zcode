@@ -207,7 +207,10 @@ function whenHolderExits(child) {
   return new Promise((resolve) => child.on("exit", resolve));
 }
 
-/** 伪造成「库比本 build 新」：schema_migrations 里放一条高于 fence(94) 的上游 lane 版本。 */
+/**
+ * 伪造成「库比本 build 新」：schema_migrations 里放一条高于 fence(10000) 的版本。
+ * 读侧改为 ledger 全量 MAX 后，10001 是 fence 能看见的 future head。
+ */
 function seedFencedDatabase(dbPath) {
   const db = new DatabaseSync(dbPath);
   try {
@@ -215,7 +218,7 @@ function seedFencedDatabase(dbPath) {
       "CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, description TEXT NOT NULL, applied_at INTEGER NOT NULL)",
     );
     db.exec(
-      "INSERT INTO schema_migrations (version, description, applied_at) VALUES (94, 'fork-test baseline', 0), (95, 'fork-test future version', 0)",
+      "INSERT INTO schema_migrations (version, description, applied_at) VALUES (94, 'fork-test baseline', 0), (10001, 'fork-test future version', 0)",
     );
   } finally {
     db.close();

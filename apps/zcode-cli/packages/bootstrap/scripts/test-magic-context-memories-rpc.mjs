@@ -885,28 +885,27 @@ test("降级：openDatabase 回 null（schema fence）→ list 收敛 unavailabl
     const fenceDb = magicContext.openDatabase(magicContext.getMagicContextDatabasePath());
     assert.ok(fenceDb, "构造前提：专用库 P 必须能正常建起来");
 
-    // node:sqlite 直连 P，只把读窗口（version < 10000 = FORK_MIGRATION_VERSION_FLOOR
-    // 的 legacy 行）内的 MAX 版本 +1——getPersistedSchemaVersion 正是读这一行，越过
-    // LATEST_SUPPORTED_VERSION 即触发 fence；>=10000 的 fork lane 行不动。
+    // node:sqlite 直连 P，把 ledger 全量 MAX（本 build 的 head = fork 车道 10000）
+    // 整体 +1。读侧修复后 getPersistedSchemaVersion 读全量 MAX（不再过滤
+    // version < 10000），伪造的 10001 越过 LATEST_SUPPORTED_VERSION=10000 即触发
+    // fence；旧的「只抬 <10000 窗口 MAX」构造会被 v10000 行淹没而恒放行。
     const raw = new DatabaseSync(fenceDbPath);
-    const readMaxLegacyVersion = () =>
-      raw
-        .prepare(
-          "SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations WHERE version < 10000",
-        )
-        .get().version;
+    const readMaxVersion = () =>
+      raw.prepare("SELECT COALESCE(MAX(version), 0) AS version FROM schema_migrations").get()
+        .version;
     let versionBefore;
     let versionAfter;
     try {
-      versionBefore = readMaxLegacyVersion();
+      versionBefore = readMaxVersion();
       raw.exec(
-        "UPDATE schema_migrations SET version = version + 1 WHERE version = (SELECT MAX(version) FROM schema_migrations WHERE version < 10000)",
+        "UPDATE schema_migrations SET version = version + 1 WHERE version = (SELECT MAX(version) FROM schema_migrations)",
       );
-      versionAfter = readMaxLegacyVersion();
+      versionAfter = readMaxVersion();
     } finally {
       raw.close();
     }
-    assert.equal(versionAfter, versionBefore + 1, "构造前提：必须改到读窗口内的 MAX 行");
+    assert.equal(versionBefore, 10000, "构造前提：本 build 的 ledger head 是 fork 车道 v10000");
+    assert.equal(versionAfter, 10001, "构造前提：必须把全量 MAX 行抬到 fence 之上");
 
     // 仍以同一路径 P 调 list：existing 分支（storage-db.ts:2689-2692）再次 fence → null，
     // 有 available:false 信封承载，收敛 unavailable（不是抛 -32603 冒泡）。

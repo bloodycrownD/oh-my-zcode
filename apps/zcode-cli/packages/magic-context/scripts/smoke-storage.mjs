@@ -83,7 +83,9 @@ try {
   check("db file name", resolved.dbPath, join(dbDir, "magic-context.db"));
 
   console.log("== fence / migration ledger agreement");
-  check("LATEST_SUPPORTED_VERSION", storageDb.LATEST_SUPPORTED_VERSION, 94);
+  // fork 车道 v10000（tags.message_role）落地后，fence ceiling 与 migration head
+  // 都必须抬到 10000；两者不锁步会让升级后开库被自己的 fence 拒绝。
+  check("LATEST_SUPPORTED_VERSION", storageDb.LATEST_SUPPORTED_VERSION, 10000);
   check(
     "LATEST_MIGRATION_VERSION",
     migrations.LATEST_MIGRATION_VERSION,
@@ -144,7 +146,9 @@ try {
   check(
     "applied body count equals the migration count",
     bodiesAfterFirstOpen,
-    migrations.LATEST_MIGRATION_VERSION - 2,
+    // 上游 v85/v87 是空号，`LATEST_MIGRATION_VERSION - 2` 只在「纯上游车道」下
+    // 成立；fork 车道 v10000 入数组后必须按实际条目数断言。
+    migrations.MIGRATIONS.length,
   );
   const ledgerRowsFirst = first
     .prepare("SELECT COUNT(*) AS count FROM schema_migrations")
@@ -172,6 +176,203 @@ try {
     .get().count;
   check("ledger row count unchanged", ledgerRowsSecond, ledgerRowsFirst);
   storageDb.closeDatabase();
+
+  const tagColumnNames = (db) =>
+    db
+      .prepare("PRAGMA table_info(tags)")
+      .all()
+      .map((row) => row.name);
+
+  console.log("== T-G9: fork-lane v10000 migration (tags.message_role)");
+  // fixture 构造法①（spec v4）：先正常建库（完整 ledger + tags 表 + v10000），
+  // 再 ALTER DROP 列 + 删 ledger 行，即得「v94 老库」；tags 表天然保留，v10000
+  // 的 tableExists 守卫不会跳过。
+  const forkDbPath = join(dbDir, "t-g9-fork-lane.db");
+  let forkDb = storageDb.openDatabase({ dbPath: forkDbPath });
+  assert("T-G9 fixture: baseline database opened", forkDb !== null);
+  storageDb.closeDatabase();
+  {
+    const fixture = new sqlite.Database(forkDbPath);
+    try {
+      fixture.exec("ALTER TABLE tags DROP COLUMN message_role");
+      fixture.exec("DELETE FROM schema_migrations WHERE version = 10000");
+      check(
+        "T-G9 fixture: message_role column removed",
+        tagColumnNames(fixture).includes("message_role"),
+        false,
+      );
+      // 读侧全量 MAX 修复后，删掉 v10000 行即回落到上游车道 head。
+      check(
+        "T-G9 fixture: persisted version falls back to 94",
+        storageDb.getPersistedSchemaVersion(fixture),
+        94,
+      );
+    } finally {
+      fixture.close();
+    }
+  }
+
+  forkDb = storageDb.openDatabase({ dbPath: forkDbPath });
+  assert("T-G9: openDatabase applies the fork-lane migration", forkDb !== null);
+  check(
+    "T-G9: message_role column exists after migration",
+    tagColumnNames(forkDb).includes("message_role"),
+    true,
+  );
+  check(
+    "T-G9: ledger contains v10000",
+    forkDb.prepare("SELECT version FROM schema_migrations WHERE version = 10000").get()?.version ??
+      null,
+    10000,
+  );
+  check(
+    "T-G9: getPersistedSchemaVersion reads the full ledger head",
+    storageDb.getPersistedSchemaVersion(forkDb),
+    10000,
+  );
+  storageDb.closeDatabase();
+
+  forkDb = storageDb.openDatabase({ dbPath: forkDbPath });
+  assert("T-G9: idempotent reopen returned a handle", forkDb !== null);
+  check(
+    "T-G9: v10000 row is not duplicated",
+    forkDb.prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 10000").get()
+      .count,
+    1,
+  );
+  check("T-G9: nothing left to migrate", migrations.hasPendingMigrations(forkDb), false);
+  storageDb.closeDatabase();
+
+  console.log("== T-G9b: runMigrations alone adds the column (no initializeDatabase)");
+  // 漂移自愈块只在 initializeDatabase 里跑；仅 runMigrations 也必须由 v10000 补列。
+  const runOnlyPath = join(dbDir, "t-g9b-run-only.db");
+  let runOnlyDb = storageDb.openDatabase({ dbPath: runOnlyPath });
+  assert("T-G9b fixture: baseline database opened", runOnlyDb !== null);
+  storageDb.closeDatabase();
+  {
+    const fixture = new sqlite.Database(runOnlyPath);
+    try {
+      fixture.exec("ALTER TABLE tags DROP COLUMN message_role");
+      fixture.exec("DELETE FROM schema_migrations WHERE version = 10000");
+    } finally {
+      fixture.close();
+    }
+  }
+  runOnlyDb = new sqlite.Database(runOnlyPath);
+  try {
+    migrations.runMigrations(runOnlyDb);
+    check(
+      "T-G9b: runMigrations alone adds message_role",
+      tagColumnNames(runOnlyDb).includes("message_role"),
+      true,
+    );
+    check(
+      "T-G9b: ledger contains v10000",
+      runOnlyDb.prepare("SELECT 1 FROM schema_migrations WHERE version = 10000").get() != null,
+      true,
+    );
+    migrations.runMigrations(runOnlyDb);
+    check(
+      "T-G9b: second runMigrations is a no-op",
+      runOnlyDb
+        .prepare("SELECT COUNT(*) AS count FROM schema_migrations WHERE version = 10000")
+        .get().count,
+      1,
+    );
+  } finally {
+    runOnlyDb.close();
+  }
+
+  console.log("== T-G15: sibling PK-conflict uses isMigrationApplied (fork lane)");
+  // 真实 SQLite 上该分支不可确定性触发（事务内先 isMigrationApplied 重查、
+  // BEGIN IMMEDIATE 下无第二连接并发），因此用 Proxy 包裹真实 Database：在迁移
+  // 记账 INSERT 处注入 isSiblingMigrationConflict 认得的 PK 冲突错误；事务回滚
+  // 释放写锁后，用壳外连接补落 v10000 行（兄弟进程抢先提交的等价状态）。
+  const siblingPath = join(dbDir, "t-g15-sibling-conflict.db");
+  let siblingDb = storageDb.openDatabase({ dbPath: siblingPath });
+  assert("T-G15 fixture: baseline database opened", siblingDb !== null);
+  storageDb.closeDatabase();
+  {
+    const fixture = new sqlite.Database(siblingPath);
+    try {
+      fixture.exec("DELETE FROM schema_migrations WHERE version = 10000");
+    } finally {
+      fixture.close();
+    }
+  }
+
+  const realDb = new sqlite.Database(siblingPath);
+  try {
+    const injectSiblingRow = () => {
+      const side = new sqlite.Database(siblingPath);
+      try {
+        side
+          .prepare(
+            "INSERT OR IGNORE INTO schema_migrations (version, description, applied_at) VALUES (?, ?, ?)",
+          )
+          .run(10000, "sibling-applied", 0);
+      } finally {
+        side.close();
+      }
+    };
+    const siblingProxy = new Proxy(realDb, {
+      get(target, prop) {
+        if (prop === "prepare") {
+          return (sql) => {
+            if (sql.includes("INSERT INTO schema_migrations")) {
+              // 只拦迁移记账 INSERT：事务体其余语句照常执行。
+              return {
+                run() {
+                  throw new Error("UNIQUE constraint failed: schema_migrations.version");
+                },
+              };
+            }
+            return target.prepare(sql);
+          };
+        }
+        if (prop === "transaction") {
+          return (fn) => {
+            const tx = target.transaction(fn);
+            const wrapVariant = (variant) =>
+              function (...args) {
+                try {
+                  return variant.apply(this, args);
+                } catch (error) {
+                  // 事务包装器已 ROLLBACK；此刻补落兄弟行，再原样抛出。
+                  if (error instanceof Error && error.message.includes("schema_migrations")) {
+                    injectSiblingRow();
+                  }
+                  throw error;
+                }
+              };
+            const immediate = wrapVariant(tx.immediate);
+            immediate.immediate = immediate;
+            immediate.default = immediate;
+            immediate.deferred = wrapVariant(tx.deferred);
+            immediate.exclusive = wrapVariant(tx.exclusive);
+            return immediate;
+          };
+        }
+        const value = Reflect.get(target, prop, target);
+        return typeof value === "function" ? value.bind(target) : value;
+      },
+    });
+    let siblingError = null;
+    try {
+      migrations.runMigrations(siblingProxy);
+    } catch (error) {
+      siblingError = error;
+    }
+    check("T-G15: sibling conflict does not throw", siblingError, null);
+    check(
+      "T-G15: v10000 row is present after the conflict",
+      realDb.prepare("SELECT 1 FROM schema_migrations WHERE version = 10000").get() != null,
+      true,
+    );
+    check("T-G15: no pending migration remains", migrations.hasPendingMigrations(realDb), false);
+  } finally {
+    realDb.close();
+  }
 
   console.log("== schema fence negative (T-M7)");
   // T-M7 的判据是**双向**的，而正向的那一半（两个常量相等）上面已经断言过了。
@@ -202,6 +403,9 @@ try {
   );
   // The rejected attempt must not have cached a handle: a later, legitimate open
   // has to be a clean open rather than a cache hit on the refused connection.
+  // 基准必须在本段就近取：前面的 T-G9/T-G15 fixture 各自建了新库，migration body
+  // 计数已被它们推进，不能再拿首次开库时的快照比较。
+  const bodiesBeforeNewerFence = migrations.__getMainThreadMigrationBodyCountForTests();
   const newerFence = storageDb.openDatabase({
     latestSupportedVersion: storageDb.LATEST_SUPPORTED_VERSION + 1,
   });
@@ -209,7 +413,7 @@ try {
   check(
     "the newer-fence open did not run any migration",
     migrations.__getMainThreadMigrationBodyCountForTests(),
-    bodiesAfterFirstOpen,
+    bodiesBeforeNewerFence,
   );
   check("no schema-fence rejection after a legal open", storageDb.getSchemaFenceRejection(), null);
   storageDb.closeDatabase();
