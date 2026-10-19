@@ -960,6 +960,7 @@ const stripContentModule = await load("hooks/magic-context/strip-content.js");
 const heuristicModule = await load("hooks/magic-context/heuristic-cleanup.js");
 const cavemanCleanupModule = await load("hooks/magic-context/caveman-cleanup.js");
 const executeFlushModule = await load("hooks/magic-context/execute-flush.js");
+const cloneStorageModule = await load("features/magic-context/storage-clone.js");
 
 const { getTagById, insertTag, stampTagMessageRole, updateCavemanDepth, updateTagStatus } =
   storageTags;
@@ -989,6 +990,27 @@ function guardTarget(role, text, tagNumber) {
       return true;
     },
   };
+}
+
+/** 记录 system 行的 caveman_depth（oqfix/3：三入口豁免后档位必须原地不动）。 */
+function guardCavemanDepths(sessionId, tagNumbers) {
+  return new Map(
+    tagNumbers.map((tagNumber) => [
+      tagNumber,
+      getTagById(b4Db, sessionId, tagNumber)?.cavemanDepth,
+    ]),
+  );
+}
+
+function assertGuardCavemanDepthsUnchanged(sessionId, before, label) {
+  for (const [tagNumber, depth] of before) {
+    const after = getTagById(b4Db, sessionId, tagNumber)?.cavemanDepth;
+    if (after !== depth) {
+      throw new Error(
+        `${label} changed system tag ${tagNumber} caveman_depth ${depth} -> ${after}`,
+      );
+    }
+  }
 }
 
 test("T-G4 applyPendingOperations keeps a system tag active and drains its pending op", () => {
@@ -1208,6 +1230,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
   const eligibilityByColumn = guardTarget("assistant", original, 1);
   const eligibilityByTarget = guardTarget("system", original, 2);
   const eligibilityControl = guardTarget("user", original, 3);
+  const eligibilityDepths = guardCavemanDepths(eligibilitySession, [1, 2]);
   const eligibilityResult = cavemanCleanupModule.applyCavemanCleanup(
     eligibilitySession,
     b4Db,
@@ -1231,6 +1254,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
     throw new Error("eligibility compressed a system tag matched by target.message.info.role");
   if (eligibilityControl.getContent() === original)
     throw new Error("the non-system control was not compressed");
+  assertGuardCavemanDepthsUnchanged(eligibilitySession, eligibilityDepths, "eligibility");
 
   // ② rules-switch：已压缩 system 行不在重写清单；普通行按新规则重写。
   const switchSession = "ses_tg12_rules_switch";
@@ -1248,6 +1272,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
   const switchByColumn = guardTarget("assistant", original, 1);
   const switchByTarget = guardTarget("system", original, 2);
   const switchControl = guardTarget("user", original, 3);
+  const switchDepths = guardCavemanDepths(switchSession, [1, 2]);
   const switchResult = cavemanCleanupModule.applyCavemanCleanup(
     switchSession,
     b4Db,
@@ -1271,6 +1296,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
     throw new Error("rules-switch rewrote a system tag matched by target.message.info.role");
   if (switchControl.getContent() === original)
     throw new Error("the non-system control was not rewritten");
+  assertGuardCavemanDepthsUnchanged(switchSession, switchDepths, "rules-switch");
 
   // ③ replay：已压缩 system 行不重放压缩字节；普通行照常重放。
   const replaySession = "ses_tg12_replay";
@@ -1288,6 +1314,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
   const replayByColumn = guardTarget("assistant", original, 1);
   const replayByTarget = guardTarget("system", original, 2);
   const replayControl = guardTarget("user", original, 3);
+  const replayDepths = guardCavemanDepths(replaySession, [1, 2]);
   const replayed = cavemanCleanupModule.replayCavemanCompression(
     replaySession,
     b4Db,
@@ -1307,6 +1334,7 @@ test("T-G12 caveman skips system tags in eligibility, rules-switch and replay", 
   if (replayControl.getContent() === original) {
     throw new Error("the non-system control was not replayed");
   }
+  assertGuardCavemanDepthsUnchanged(replaySession, replayDepths, "replay");
 });
 
 test("T-G13 stripSystemInjectedMessages never neutralizes a system message", () => {
@@ -1394,6 +1422,102 @@ test("T-G16 stampTagMessageRole is a no-op on the second pass for system and nul
   if (nullSecond !== 0) throw new Error(`second null stamp changed ${nullSecond} rows`);
   if (getTagById(b4Db, sessionId, 2)?.messageRole !== null) {
     throw new Error("the null role drifted");
+  }
+});
+
+test("oqfix/4 storage-clone copies message_role with every other tag column", () => {
+  const sourceSession = "ses_oqfix4_clone_source";
+  const destinationSession = "ses_oqfix4_clone_destination";
+  // 克隆 INSERT 的 18 列（含 session_id）；逐列写入可区分值，任一列丢失或被
+  // 改写都会让下面的逐列对比变红。message_role 是本 fork 车道新增列。
+  const cloneColumns = [
+    "session_id",
+    "message_id",
+    "type",
+    "status",
+    "byte_size",
+    "tag_number",
+    "harness",
+    "entry_fingerprint",
+    "token_count",
+    "input_token_count",
+    "reasoning_token_count",
+    "reasoning_byte_size",
+    "drop_mode",
+    "tool_name",
+    "input_byte_size",
+    "caveman_depth",
+    "tool_owner_message_id",
+    "message_role",
+  ];
+  if (cloneColumns.length !== 18)
+    throw new Error(`clone contract covers ${cloneColumns.length} columns`);
+  const projection = cloneColumns.join(", ");
+
+  insertTag(b4Db, sourceSession, "msg_oqfix4_src:p0", "file", 4096, 1);
+  b4Db
+    .prepare(
+      `UPDATE tags
+          SET message_id = ?, type = ?, status = ?, byte_size = ?, tag_number = ?,
+              harness = ?, entry_fingerprint = ?, token_count = ?, input_token_count = ?,
+              reasoning_token_count = ?, reasoning_byte_size = ?, drop_mode = ?, tool_name = ?,
+              input_byte_size = ?, caveman_depth = ?, tool_owner_message_id = ?, message_role = ?
+        WHERE session_id = ? AND tag_number = ?`,
+    )
+    .run(
+      "msg_oqfix4_src:p0",
+      "file",
+      "active",
+      4096,
+      1,
+      "pi",
+      "fingerprint-oqfix4",
+      77,
+      11,
+      5,
+      19,
+      "edit_marker_stripped",
+      "read",
+      3000,
+      2,
+      null,
+      "system",
+      sourceSession,
+      1,
+    );
+
+  const sourceRow = b4Db
+    .prepare(`SELECT ${projection} FROM tags WHERE session_id = ? AND tag_number = 1`)
+    .get(sourceSession);
+  if (!sourceRow) throw new Error("the source tag row was not written");
+
+  const result = cloneStorageModule.copySessionStateForClone(
+    b4Db,
+    sourceSession,
+    destinationSession,
+    {
+      resolveBoundaryOrdinal: () => 0,
+      includeTag: () => true,
+      includeMessageId: () => true,
+      selectPendingPiMarker: () => null,
+    },
+  );
+  if (result.kind !== "migrated" || result.tagsCopied !== 1) {
+    throw new Error(`clone result: ${JSON.stringify(result)}`);
+  }
+
+  const clonedRow = b4Db
+    .prepare(`SELECT ${projection} FROM tags WHERE session_id = ? AND tag_number = 1`)
+    .get(destinationSession);
+  if (!clonedRow) throw new Error("the clone did not copy the tag row");
+  if (clonedRow.message_role !== "system") {
+    throw new Error(`message_role was not copied: ${JSON.stringify(clonedRow.message_role)}`);
+  }
+  const expected = { ...sourceRow, session_id: destinationSession };
+  if (JSON.stringify(clonedRow) !== JSON.stringify(expected)) {
+    throw new Error(
+      `cloned tag columns drifted:\n  expected=${JSON.stringify(expected)}\n  actual  =${JSON.stringify(clonedRow)}`,
+    );
   }
 });
 
