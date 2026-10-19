@@ -24,10 +24,15 @@
  * 「light-description tool references close against the ZCode tool surface」断言把这条
  * 豁免显式钉成 `["ctx_note"]`——豁免集长大时那里会红。
  *
+ * FORK（magic-context-system-prompt-guard）：`CTX_REDUCE_LIGHT_DESCRIPTION` 尾部追加
+ * 一句 system prompt 段禁盖句。上游没有 role 判据；fork 的 system 段受四层防线保护，
+ * 教育句须出现在模型实际看到的 light 描述里。宿主 full 描述
+ * （`packages/core/src/tool/handlers/ctx-context.ts`）与 `ctx-reduce/constants.ts` 三落点同步。
+ *
  * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
  */
 
-export const CTX_REDUCE_LIGHT_DESCRIPTION = `Stamp an item as no longer needed for the work ahead. Not a delete: stamping QUEUES it, the item stays readable until Magic Context clears stamped items in one sweep, newest tags are protected, and a cleared item goes to the archive (recent: a [dropped §N§] placeholder; older: removed) recoverable via ctx_expand(tag=N). The question is "does this need to stay on my desk for what comes next?" — a file you keep editing stays, the grep that found it goes. Stamp used reads/searches/outputs, acted-on build/test output, redundant dumps, extracted pasted payloads; keep user messages, your own text, unresolved errors, raw evidence, exact wording that may matter. Look at each tag; never blanket-stamp "1-50". Grammar: "3-5", "1,2,9", "1-5,8,12-15".`;
+export const CTX_REDUCE_LIGHT_DESCRIPTION = `Stamp an item as no longer needed for the work ahead. Not a delete: stamping QUEUES it, the item stays readable until Magic Context clears stamped items in one sweep, newest tags are protected, and a cleared item goes to the archive (recent: a [dropped §N§] placeholder; older: removed) recoverable via ctx_expand(tag=N). The question is "does this need to stay on my desk for what comes next?" — a file you keep editing stays, the grep that found it goes. Stamp used reads/searches/outputs, acted-on build/test output, redundant dumps, extracted pasted payloads; keep user messages, your own text, unresolved errors, raw evidence, exact wording that may matter. Look at each tag; never blanket-stamp "1-50". Never stamp a system prompt segment — their tags are protected and never archivable; a drop request containing them is refused. Grammar: "3-5", "1,2,9", "1-5,8,12-15".`;
 
 export const CTX_EXPAND_LIGHT_DESCRIPTION =
     "Recover one item with tag=N (a §N§ or dropped placeholder number), not a message ordinal; text or one tool call with full input/output. message=N and start/end are whole-message ordinals from history/search, never tag numbers. Recover raw conversation behind a <session-history> heading or around a ctx_search hit: ctx_expand(start, end) returns [N] U:/A: lines (~15K-token cap; oversized ranges return the head and where to continue). verbose=true lists messages with per-part previews to pick one; message=N returns that message in full, including a tool output released with ctx_reduce. Ranges after the last compartment are your live tail, not expandable.";

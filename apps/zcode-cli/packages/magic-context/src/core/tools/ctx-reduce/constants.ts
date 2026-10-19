@@ -8,5 +8,6 @@ export const CTX_REDUCE_DESCRIPTION = `Stamp an item on your desk as no longer n
 
 Stamp: file reads, search results and tool outputs the work ahead no longer needs; build/test output after you acted on it; repeated or redundant dumps; data written to disk; status/log output that only confirmed what you expected; a large block pasted inside a user message once you have used it.
 Keep: user messages (never stamp one for its directive), your own conversation text, unresolved errors, raw evidence you haven't extracted yet, and outputs whose exact wording may still matter.
+Never stamp a system prompt segment — tags on system (prompt) messages are protected and never archivable; a drop request containing them is refused.
 
 Look at each tag before stamping it; never blanket-stamp a range like "1-50". Many small targeted stamps beat one sweep. \`drop\` accepts "3-5", "1,2,9", "1-5,8,12-15".`;

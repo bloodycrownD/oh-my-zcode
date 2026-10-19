@@ -56,3 +56,15 @@ test("T-CTX-3: 两侧描述的既有机制说明不被引导句覆盖（回归�
   assert.match(expandDescription, /they are never interchangeable/);
   assert.match(expandDescription, /capped at ~15K tokens/);
 });
+
+test("T-CTX-4: ctx_reduce 宿主 full 描述含 system prompt 段禁盖句（system-prompt-guard）", () => {
+  // 模型可见的 ctx_reduce 描述有两份：宿主 full（本测试钉的这份）与包内 light
+  // （magic-context/src/core/tools/light-descriptions.ts）。禁盖句落错对象
+  // （例如只写进包内 constants.ts 的死文案）时，模型实际视野没有约束——
+  // 这里锁死宿主这份的存在性。
+  assert.match(
+    reduceDescription,
+    /Never stamp a system prompt segment — tags on system \(prompt\) messages are protected and never archivable; a drop request containing them is refused\./,
+    "ctx_reduce 宿主 full 描述缺 system prompt 段禁盖句——magic-context-system-prompt-guard 的防线一教育层被回退",
+  );
+});
