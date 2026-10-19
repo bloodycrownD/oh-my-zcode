@@ -10,6 +10,7 @@ import {
     getToolTagNumberByOwner,
     markWhitespaceAssistantTagInert,
     pickNearestPriorOwner,
+    stampTagMessageRole,
 } from "../../features/magic-context/storage-tags.js";
 import { makeToolCompositeKey, type Tagger } from "../../features/magic-context/tagger.js";
 import { textMentionsRecentCommit } from "../../shared/commit-detection.js";
@@ -892,6 +893,15 @@ export function tagMessages(
                         }),
                     );
                 accAssignTag += performance.now() - _tAssignText;
+                // FORK（magic-context-system-prompt-guard）：把消息 role 落到
+                // tags.message_role，供 queue/apply/replay 三层识别 system 提示词段
+                // （上游无此列，fork 车道 v10000 新增）。
+                // 必须挂在 tagId 解析之后无条件执行：existingTagId 命中的存量 tag 与
+                // assignTag 新分配的 tag 同样要写。每 pass 都写——mcN 是序数 id，system
+                // 段数量变化会让同一 tag 改绑 role，重写兼做纠正；SQL 侧 `IS NOT` 守卫
+                // 保证 role 稳定后零写。tool 打标点不写（tool part 不会出现在
+                // role=system 消息上）。
+                stampTagMessageRole(db, sessionId, tagId, message.info.role ?? null);
                 // Prefer persisted source_contents over the existingTagId
                 // signal: even if we just allocated a fresh tag (because in-
                 // memory state was lost), the DB may still have the original
@@ -1048,6 +1058,9 @@ export function tagMessages(
                         }),
                     );
                 accAssignTag += performance.now() - _tAssignFile;
+                // FORK（magic-context-system-prompt-guard）：与 text 打标点同口径——
+                // tagId 解析后无条件写 message_role（存量命中与新分配都写，每 pass 纠正）。
+                stampTagMessageRole(db, sessionId, tagId, message.info.role ?? null);
                 if (existingTagId === undefined) {
                     const sourceContent = buildFileSourceContent(message.parts);
                     if (sourceContent) {
