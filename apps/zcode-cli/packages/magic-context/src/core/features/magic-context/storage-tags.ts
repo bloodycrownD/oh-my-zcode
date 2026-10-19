@@ -16,6 +16,7 @@ export type { TagEntry } from "./types.js";
 
 const insertTagStatements = new WeakMap<Database, PreparedStatement>();
 const updateTagStatusStatements = new WeakMap<Database, PreparedStatement>();
+const stampTagMessageRoleStatements = new WeakMap<Database, PreparedStatement>();
 const updateTagDropModeStatements = new WeakMap<Database, PreparedStatement>();
 const updateTagMessageIdStatements = new WeakMap<Database, PreparedStatement>();
 const getTagNumbersByMessageIdStatements = new WeakMap<Database, PreparedStatement>();
@@ -44,6 +45,22 @@ function getUpdateTagStatusStatement(db: Database): PreparedStatement {
     if (!stmt) {
         stmt = db.prepare("UPDATE tags SET status = ? WHERE session_id = ? AND tag_number = ?");
         updateTagStatusStatements.set(db, stmt);
+    }
+    return stmt;
+}
+
+function getStampTagMessageRoleStatement(db: Database): PreparedStatement {
+    let stmt = stampTagMessageRoleStatements.get(db);
+    if (!stmt) {
+        // `IS NOT` 是 SQLite 的 NULL 安全比较：当 message_role 与目标 role 相同
+        // （含双方都是 NULL）时 WHERE 不匹配，run() 返回 changes=0——role 稳定后
+        // 每个 transform pass 都是零行匹配、零 WAL 写。不要改写成
+        // `message_role IS NULL OR message_role <> ?1`：role 为 NULL 时该条件恒真，
+        // 每 pass 都会重写 NULL，与「稳定后零写」的契约冲突。
+        stmt = db.prepare(
+            "UPDATE tags SET message_role = ?1 WHERE session_id = ?2 AND tag_number = ?3 AND message_role IS NOT ?1",
+        );
+        stampTagMessageRoleStatements.set(db, stmt);
     }
     return stmt;
 }
@@ -801,6 +818,10 @@ interface TagRow {
     caveman_depth: number | null;
     tool_owner_message_id: string | null;
     token_count?: number | null;
+    // FORK（magic-context-system-prompt-guard）：fork 车道 v10000 的列。NULL 是
+    // 合法值（存量行、tool 型 tag、provider 未给 role 的 message），因此
+    // isTagRow 不做严格类型断言；读侧一律按 string | null 解释。
+    message_role?: string | null;
 }
 
 interface TagNumberRow {
@@ -866,6 +887,9 @@ function toTagEntry(row: TagRow): TagEntry {
         toolOwnerMessageId:
             typeof row.tool_owner_message_id === "string" ? row.tool_owner_message_id : null,
         tokenCount: typeof row.token_count === "number" ? row.token_count : null,
+        // FORK（magic-context-system-prompt-guard）：NULL/缺失都表示 role 未知；
+        // 下游只把 "system" 当作保护判据。
+        messageRole: typeof row.message_role === "string" ? row.message_role : null,
     };
 }
 
@@ -937,6 +961,27 @@ export function updateTagStatus(
     status: TagEntry["status"],
 ): void {
     getUpdateTagStatusStatement(db).run(status, sessionId, tagId);
+}
+
+/**
+ * Record which provider role a message/file tag belongs to (`null` when the
+ * provider omitted it).
+ *
+ * FORK（magic-context-system-prompt-guard）：`tags.message_role` 是 fork 车道
+ * v10000 新增列，上游没有 role 概念。message/file 打标点在每个 pass 都无条件
+ * 调用本函数（新分配与存量命中一视同仁），既承担升级存量回填，也承担 mcN 序数
+ * id 改绑后的纠正；tool 型 tag 不写（tool part 不会出现在 role=system 消息上）。
+ *
+ * 返回 `run()` 的 changes 数：SQL 层用 `IS NOT`（NULL 安全）做变化守卫，role
+ * 未变时返回 0 且不产生写；调用方无需再读列做二次判断。
+ */
+export function stampTagMessageRole(
+    db: Database,
+    sessionId: string,
+    tagNumber: number,
+    role: string | null,
+): number {
+    return getStampTagMessageRoleStatement(db).run(role, sessionId, tagNumber).changes;
 }
 
 export interface InertWhitespaceAssistantTag {
@@ -2043,7 +2088,7 @@ export function deriveTagLoadFloor(
 // reader must include the new column or downstream callers will see
 // undefined where they expect a typed field.
 export const TAG_SELECT_COLUMNS =
-    "id, message_id, type, status, drop_mode, tool_name, input_byte_size, byte_size, reasoning_byte_size, session_id, tag_number, caveman_depth, tool_owner_message_id, token_count";
+    "id, message_id, type, status, drop_mode, tool_name, input_byte_size, byte_size, reasoning_byte_size, session_id, tag_number, caveman_depth, tool_owner_message_id, token_count, message_role";
 
 export function getTagsBySession(db: Database, sessionId: string): TagEntry[] {
     const rows = db

@@ -101,6 +101,10 @@ type RawTagRow = {
     input_byte_size: number;
     caveman_depth: number;
     tool_owner_message_id: string | null;
+    // FORK（magic-context-system-prompt-guard）：fork 车道 v10000 的列，克隆时
+    // 必须随行复制——否则克隆瞬间 system tag 以 NULL 进新会话，持久判据丢失
+    // （只能等下一个 transform pass 由 stampTagMessageRole 回填）。
+    message_role: string | null;
 };
 
 type RawSessionMetaRow = {
@@ -542,7 +546,7 @@ export function copySessionStateForClone(
                 `SELECT id, message_id, type, status, byte_size, tag_number, harness,
                         entry_fingerprint, token_count, input_token_count,
                         reasoning_token_count, reasoning_byte_size, drop_mode, tool_name,
-                        input_byte_size, caveman_depth, tool_owner_message_id
+                        input_byte_size, caveman_depth, tool_owner_message_id, message_role
                    FROM tags WHERE session_id = ? ORDER BY tag_number ASC`,
             )
             .all(sourceSessionId) as RawTagRow[];
@@ -551,8 +555,8 @@ export function copySessionStateForClone(
                 (session_id, message_id, type, status, byte_size, tag_number, harness,
                  entry_fingerprint, token_count, input_token_count, reasoning_token_count,
                  reasoning_byte_size, drop_mode, tool_name, input_byte_size,
-                 caveman_depth, tool_owner_message_id)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                 caveman_depth, tool_owner_message_id, message_role)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         );
         const copiedTagNumbers: number[] = [];
         const copiedTagIds = new Map<number, number>();
@@ -586,6 +590,8 @@ export function copySessionStateForClone(
                 row.input_byte_size,
                 row.caveman_depth,
                 mapMessageId(filter, row.tool_owner_message_id),
+                // FORK（system-prompt-guard）：role 判据随行复制，不经 filter 改写。
+                row.message_role,
             );
             const insertedTagId = Number(insertResult.lastInsertRowid);
             if (!Number.isSafeInteger(insertedTagId) || insertedTagId <= 0) {

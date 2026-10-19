@@ -56,6 +56,12 @@ export interface TagEntry {
      * See plan v3.3.1 in `.alfonso/plans/tag-owner-fix-plan.md`.
      */
     toolOwnerMessageId: string | null;
+    /**
+     * FORK（magic-context-system-prompt-guard）：tag 所属消息的 provider role
+     * （fork 车道 v10000 的 `tags.message_role`）。`"system"` 的 tag 受保护、
+     * 永不归档；`null`/缺失表示未知（存量行、tool 型 tag、provider 未给 role）。
+     */
+    messageRole?: string | null;
 }
 
 export interface PendingOp {

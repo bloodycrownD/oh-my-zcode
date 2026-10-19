@@ -24,7 +24,8 @@
 // `memory/embedding.ts` / `memory/storage-memory-embeddings.ts`) are not
 // invoked by this module; what this file touches is pure SQLite over the
 // `memories` / `memory_embeddings` tables the fork schema already creates
-// (LATEST_MIGRATION_VERSION=94, schema-complete — no new migration).
+// (LATEST_MIGRATION_VERSION=10000, schema-complete — no new migration for the
+// memory store itself; v10000 adds only `tags.message_role`).
 import type { Database, Statement as PreparedStatement } from "../../../shared/sqlite.js";
 import { hasMuralCueColumns, hasMuralCueRejectionCountColumn } from "../mural/storage-mural-cues.js";
 import { MEMORY_CATEGORY_ORDER_SQL } from "./constants.js";
