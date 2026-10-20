@@ -14,6 +14,7 @@
   "scripts": {
     "test:ctx-commands": "node --import tsx scripts/test-ctx-commands.mjs",
     "test:provider-runtime-env": "node --import tsx --test test/provider-runtime-env.test.ts",
+    "test:run-ui-locale": "node --import tsx --test test/runUiLocale.test.ts",
     "build": "node scripts/build.mjs",
     "build:desktop-agent": "node scripts/build.mjs --desktop-agent",
     "build:sea": "pnpm --dir ../../../.. exec turbo --skip-infer --cwd apps/zcode-cli run build --filter=!@zcode/cli --force && pnpm build && node scripts/build-sea.mjs --all",

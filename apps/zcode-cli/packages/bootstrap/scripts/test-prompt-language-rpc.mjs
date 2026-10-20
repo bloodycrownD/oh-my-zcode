@@ -22,6 +22,12 @@
  *      显式值透传不受探测影响；同一 (env, intlLocale) 输入下热路径
  *      （updatePromptLanguage）与冷启动装配（resolveEffectiveLocale）输出一致。
  *
+ *   E. **A7/A8 接线后的冷启动消费语义（T-L1 / T-L3）**：走真实装配入口
+ *      `resolveAppRuntimeConfig`（配置域 `createConfig` + app options），断言
+ *      ① 宿主 uiDetectedLocale 优先于子进程 env 探测（T-L1，含无宿主值的 env 回落对照）；
+ *      ② 显式 promptLanguage 优先于 uiDetectedLocale（T-L3，防接线越权）。
+ *      既有 D 组只断言解析器本身，无法证明 A7/A8 的接线存在与否。
+ *
  * 依赖已构建的 dist：`pnpm --filter @zcode/adapters build`、
  * `pnpm --filter @zcode/bootstrap build`（以及 @zcode/shared 的 dist 兜底，见
  * 下方 resolve 钩子——与 test-magic-context-config-rpc.mjs 同一范式）。
@@ -37,7 +43,10 @@ import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
-const TS_SOURCE_PACKAGES = new Set(["@zcode/shared", "@zcode/model-option-map"]);
+// A7/A8（Step 4）：E 组经 dist 的 `resolveAppRuntimeConfig` 装配，该模块静态导入
+// `@zcode/provider`（其 exports 直指 src/*.ts，裸 node 无法解析内部的 .js 后缀）；
+// 与 @zcode/shared 同样固定到已构建 dist，保持 `node --test` 载体不变。
+const TS_SOURCE_PACKAGES = new Set(["@zcode/shared", "@zcode/model-option-map", "@zcode/provider"]);
 
 registerHooks({
   resolve(specifier, context, nextResolve) {
@@ -61,7 +70,7 @@ registerHooks({
 });
 
 const { ConfigKey } = await import("@zcode/contracts");
-const { createConfigPort } = await import("@zcode/adapters/config");
+const { createConfig, createConfigPort } = await import("@zcode/adapters/config");
 const {
   zcodeWorkspaceReadPromptLanguageParamsSchema,
   zcodeWorkspaceReadPromptLanguageResultSchema,
@@ -70,6 +79,9 @@ const {
 } = await import("@zcode/shared");
 const { resolveEffectiveLocale, resolveIntlLocale, resolvePromptLanguage } = await import(
   new URL("../dist/app/app-config-options.js", import.meta.url).href
+);
+const { resolveAppRuntimeConfig } = await import(
+  new URL("../dist/app/runtime-config.js", import.meta.url).href
 );
 const { readPromptLanguage, updatePromptLanguage } = await import(
   new URL("../dist/zcode-protocol/prompt-language.js", import.meta.url).href
@@ -465,4 +477,78 @@ test("D3: cold assembly and hot handler agree for the same (env, intl) input", a
     assert.equal(effective(), coldFromHost);
     assert.equal(coldFromHost, "en-US");
   });
+});
+
+// ── E: A7/A8 接线后的冷启动消费语义（T-L1 / T-L3）────────────────────────────
+
+/** 静默 LoggerFactory：装配解析不能把测试输出刷成 JSONL 诊断。 */
+const silentLogger = {
+  info() {},
+  warn() {},
+  error() {},
+  debug() {},
+  child() {
+    return silentLogger;
+  },
+};
+const silentLoggerFactory = {
+  createLogger: () => silentLogger,
+  withContext: () => silentLogger,
+  setLevel() {},
+};
+
+/**
+ * 走真实冷启动装配入口：`createConfig` 产出配置域（含 promptLanguage 设置），
+ * 再由 `resolveAppRuntimeConfig` 解析出 `runtimeConfig.language`。
+ *
+ * 配置一律落在临时目录（显式 userConfigPath），绝不读取用户真实 ~/.omz。
+ */
+async function resolveColdStartLanguage(options, config) {
+  return await withTempDir(async (dir) => {
+    const configPath = join(dir, "config.json");
+    await writeConfig(configPath, config);
+    const configResult = createConfig({
+      userConfigPath: configPath,
+      workingDirectory: dir,
+      env: {},
+      loggerFactory: silentLoggerFactory,
+    });
+    const { runtimeConfig } = resolveAppRuntimeConfig({
+      cliStorageRoot: join(dir, "cli-storage"),
+      configResult,
+      options,
+      subagentOutputRootDir: join(dir, "subagents"),
+      workingDirectory: dir,
+    });
+    return runtimeConfig.language;
+  });
+}
+
+test("E1: 冷启动 uiDetectedLocale 优先于 env 探测（T-L1）", async () => {
+  // 宿主显式探明 zh-CN：即使子进程 env 写着 en_US（GUI 进程常见缺位/误导），也必须中文。
+  assert.equal(
+    await resolveColdStartLanguage({ uiDetectedLocale: "zh-CN", env: { LANG: "en_US.UTF-8" } }, {}),
+    "zh-CN",
+  );
+  // 对照：无宿主值时才回落到 env 探测（证明上一条不是「恒为 zh-CN」的假断言）。
+  assert.equal(await resolveColdStartLanguage({ env: { LANG: "en_US.UTF-8" } }, {}), "en-US");
+  assert.equal(await resolveColdStartLanguage({ env: { LANG: "zh_CN.UTF-8" } }, {}), "zh-CN");
+});
+
+test("E2: 显式 promptLanguage 优先于 uiDetectedLocale（T-L3，防接线越权）", async () => {
+  // 用户显式选了 en-US：宿主探明的 zh-CN 与中文 env 都不得翻盘。
+  assert.equal(
+    await resolveColdStartLanguage(
+      { uiDetectedLocale: "zh-CN", env: { LANG: "zh_CN.UTF-8" } },
+      { promptLanguage: "en-US" },
+    ),
+    "en-US",
+  );
+  assert.equal(
+    await resolveColdStartLanguage(
+      { uiDetectedLocale: "en-US", env: { LANG: "en_US.UTF-8" } },
+      { promptLanguage: "zh-CN" },
+    ),
+    "zh-CN",
+  );
 });
