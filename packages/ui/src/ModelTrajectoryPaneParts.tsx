@@ -4,10 +4,10 @@ import type {
   ZCodeModelTrajectoryUsage,
 } from "@zcode/services";
 import { Fragment } from "react";
-import { cn } from "@/components/lib/utils.js";
 import { Badge } from "@/components/ui/badge.js";
 import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { ContentPartView, EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneDetails.js";
+import { CallInputSection, TrajectoryRowDivider } from "@/ModelTrajectoryCallInput.js";
+import { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneDetails.js";
 import { ExpandableTrajectoryMessage } from "@/ModelTrajectoryExpandableMessage.js";
 import { ModelTrajectoryErrorBlock } from "@/ModelTrajectoryErrorBlock.js";
 import {
@@ -15,7 +15,6 @@ import {
   formatTrajectoryDateTime,
   formatTrajectoryDuration,
 } from "@/ModelTrajectoryFormat.js";
-import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
 
 export { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneDetails.js";
@@ -69,30 +68,13 @@ export function CallCard({
         className="col-span-full grid grid-cols-subgrid gap-y-2 p-2"
       >
         {hasInput ? (
-          <section
-            data-trajectory-section=""
-            className="col-span-full grid grid-cols-subgrid overflow-hidden rounded-lg border border-card-border"
-          >
-            <TrajectorySectionTitle
-              kind="input"
-              label={intl.formatMessage({ id: "modelTrajectory.inputSection" })}
-            />
-            {inputMessages.map((message, messageIndex) => (
-              <Fragment key={`${index}:${messageIndex}`}>
-                <TrajectoryRowDivider />
-                <MessageBlock
-                  message={message}
-                  callStartedAt={record.startedAt}
-                  callDurationMs={record.durationMs}
-                  isAlt={messageIndex % 2 === 1}
-                  expansionKey={
-                    expansionKeyPrefix ? `${expansionKeyPrefix}:input:${messageIndex}` : undefined
-                  }
-                  intl={intl}
-                />
-              </Fragment>
-            ))}
-          </section>
+          <CallInputSection
+            index={index}
+            record={record}
+            inputMessages={inputMessages}
+            expansionKeyPrefix={expansionKeyPrefix}
+            intl={intl}
+          />
         ) : null}
 
         {response ? (
@@ -159,89 +141,6 @@ function sourceLabelId(callSource: NonNullable<ZCodeModelTrajectoryRecord["callS
     case "unknown":
       return "modelTrajectory.source.unknown";
   }
-}
-
-function MessageBlock({
-  message,
-  callStartedAt,
-  callDurationMs,
-  isAlt,
-  expansionKey,
-  intl,
-}: {
-  message: ZCodeModelTrajectoryMessage;
-  callStartedAt: string;
-  callDurationMs?: number;
-  isAlt: boolean;
-  expansionKey?: string;
-  intl: IntlShape;
-}) {
-  // 只有已知角色才有 i18n key，未知角色直接展示原始 role，避免触发缺失 key。
-  const knownRole = ["system", "user", "assistant", "tool"].includes(message.role);
-  const roleLabel = knownRole
-    ? intl.formatMessage({ id: `modelTrajectory.role.${message.role}` })
-    : message.role;
-
-  if (
-    (message.role === "system" || message.role === "user" || message.role === "tool") &&
-    message.parts.length > 0
-  ) {
-    return (
-      <ExpandableTrajectoryMessage
-        message={message}
-        role={message.role}
-        roleLabel={roleLabel}
-        callDurationLabel={
-          typeof callDurationMs === "number" ? formatTrajectoryDuration(callDurationMs) : "—"
-        }
-        callDatetimeLabel={formatTrajectoryDateTime(callStartedAt)}
-        callDatetimeTitle={callStartedAt}
-        isAlt={isAlt}
-        expansionKey={expansionKey}
-        intl={intl}
-      />
-    );
-  }
-
-  return (
-    <div
-      data-trajectory-message-role={message.role}
-      data-trajectory-search-target-key={expansionKey}
-      data-trajectory-row-alt={isAlt || undefined}
-      className={cn(
-        "col-span-full grid min-h-8 min-w-0 grid-cols-subgrid px-3",
-        isAlt && "bg-surface/30",
-      )}
-    >
-      <span
-        data-trajectory-role-label={knownRole ? message.role : "unknown"}
-        className={cn(
-          "pr-1 pt-0.5 font-mono text-ui-sm uppercase",
-          knownRole
-            ? trajectoryRoleTextClass(
-                message.role === "tool"
-                  ? "tool-result"
-                  : (message.role as "system" | "user" | "assistant"),
-              )
-            : "text-foreground-subtlest",
-        )}
-      >
-        {roleLabel}
-      </span>
-      <div
-        data-trajectory-search-field="content"
-        className="col-span-2 flex min-w-0 flex-col gap-1.5"
-      >
-        {message.parts.length === 0 ? (
-          <span className="text-ui-sm text-foreground-subtlest">—</span>
-        ) : (
-          message.parts.map((part, partIndex) => (
-            <ContentPartView key={partIndex} part={part} intl={intl} />
-          ))
-        )}
-      </div>
-    </div>
-  );
 }
 
 function ResponseBlock({
@@ -324,10 +223,6 @@ function ResponseBlock({
       ))}
     </section>
   );
-}
-
-function TrajectoryRowDivider() {
-  return <div data-trajectory-row-divider="" className="col-span-full h-px bg-border/50" />;
 }
 
 function ResponseMessageRow({

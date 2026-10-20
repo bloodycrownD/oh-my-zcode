@@ -1075,6 +1075,8 @@ const enUS: Record<string, string> = {
   "modelTrajectory.turn.croppedHint":
     "Context gap for this call: {count} messages cropped in the middle",
   "modelTrajectory.turn.hiddenCount": "{count} hidden",
+  "modelTrajectory.turn.showPlaceholderRows": "Show placeholder rows",
+  "modelTrajectory.turn.hidePlaceholderRows": "Hide placeholder rows",
   "modelTrajectory.message": "Message",
   "modelTrajectory.expand": "Expand",
   "modelTrajectory.collapse": "Collapse",
@@ -4909,7 +4911,8 @@ const enUS: Record<string, string> = {
   "chat.ctx.rejected": "Magic Context command was rejected.",
   "chat.ctx.noResponse": "Magic Context command returned no output.",
   // 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。
-  "chat.edit.rejected": "Edit resend was rejected; session state may still be restoring. Retry or send a new message.",
+  "chat.edit.rejected":
+    "Edit resend was rejected; session state may still be restoring. Retry or send a new message.",
   "chat.ctx.sessionRequired":
     "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",

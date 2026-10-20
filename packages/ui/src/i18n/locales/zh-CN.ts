@@ -994,6 +994,8 @@ const zhCN: Record<string, string> = {
   "modelTrajectory.turn.noUserInput": "（无用户输入）",
   "modelTrajectory.turn.croppedHint": "该次调用的上下文缺口：中间已裁剪 {count} 条",
   "modelTrajectory.turn.hiddenCount": "已隐藏 {count} 条",
+  "modelTrajectory.turn.showPlaceholderRows": "显示占位行",
+  "modelTrajectory.turn.hidePlaceholderRows": "隐藏占位行",
   "modelTrajectory.message": "消息",
   "modelTrajectory.expand": "展开",
   "modelTrajectory.collapse": "收起",
@@ -2112,7 +2114,8 @@ const zhCN: Record<string, string> = {
   "settings.memory.management.archive.reasonLabel": "废弃原因（可选）",
   "settings.memory.management.archive.reasonPlaceholder": "例如：已被新的架构决策取代",
   "settings.memory.management.archive.confirm": "废弃",
-  "settings.memory.management.archive.toastArchived": "已废弃 {count} 条记忆，将在后续对话轮次生效。",
+  "settings.memory.management.archive.toastArchived":
+    "已废弃 {count} 条记忆，将在后续对话轮次生效。",
   "settings.memory.management.archive.toastAlready": "{count} 条此前已废弃。",
   "settings.memory.management.archive.toastFailed": "{count} 条未能废弃（不存在或已被合并）。",
   "settings.memory.management.page.prev": "上一页",

@@ -36,6 +36,7 @@ import {
   resolveTrajectorySearchItems,
 } from "@/ModelTrajectoryTimeline.js";
 import type { TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
+import { TrajectoryWireFilterContext } from "@/ModelTrajectoryCallInput.js";
 import { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneParts.js";
 import { resolveTrajectoryTurnGroups, stripTrajectoryReasoning } from "@/ModelTrajectoryTurns.js";
 
@@ -68,6 +69,15 @@ export function ModelTrajectoryPane({
     const sourceRecords = data?.records ?? [];
     return showReasoning ? sourceRecords : stripTrajectoryReasoning(sourceRecords);
   }, [data?.records, showReasoning]);
+  // B-4 占位行过滤开关：唯一所有者是 Pane（局部 state、默认隐藏、不持久化、不进设置页）。
+  const [hidePlaceholderRows, setHidePlaceholderRows] = useState(true);
+  const wireFilterContextValue = useMemo(
+    () => ({
+      hidePlaceholders: hidePlaceholderRows,
+      setHidePlaceholders: setHidePlaceholderRows,
+    }),
+    [hidePlaceholderRows],
+  );
   const sourceFiles = data?.sourceFiles;
   const sourceDirectory = useMemo(
     () => getModelTrajectorySourceDirectory(sourceFiles),
@@ -333,14 +343,16 @@ export function ModelTrajectoryPane({
                 <TrajectorySearchRevealTurnContext.Provider
                   value={activeSearchMatch?.turnKey ?? null}
                 >
-                  <ModelTrajectoryTimeline
-                    turnGroups={turnGroups}
-                    searchQuery={searchIndex.query}
-                    searchMatches={searchIndex.matches}
-                    activeSearchMatch={activeSearchMatch}
-                    intl={intl}
-                    scrollContainerRef={scrollContainerRef}
-                  />
+                  <TrajectoryWireFilterContext.Provider value={wireFilterContextValue}>
+                    <ModelTrajectoryTimeline
+                      turnGroups={turnGroups}
+                      searchQuery={searchIndex.query}
+                      searchMatches={searchIndex.matches}
+                      activeSearchMatch={activeSearchMatch}
+                      intl={intl}
+                      scrollContainerRef={scrollContainerRef}
+                    />
+                  </TrajectoryWireFilterContext.Provider>
                 </TrajectorySearchRevealTurnContext.Provider>
               </TrajectorySearchRevealContext.Provider>
             </TrajectoryExpansionRegistryContext.Provider>
