@@ -18,6 +18,7 @@
     "smoke": "node scripts/smoke-storage.mjs",
     "test": "node scripts/test-config.mjs",
     "test:host": "node scripts/test-host.mjs",
+    "test:ctx-status-diagnostics": "node scripts/test-ctx-status-diagnostics.mjs",
     "test:transform": "node scripts/test-transform.mjs",
     "test:historian": "node scripts/test-historian.mjs",
     "test:ctx-tools": "node scripts/test-ctx-tools.mjs",
@@ -27,7 +28,7 @@
     "test:mural-render": "node --test scripts/test-mural-render.mjs",
     "test:tool-name-closure": "node scripts/test-tool-name-closure.mjs",
     "test:boot-busy-retry": "node --test scripts/test-boot-busy-retry.mjs",
-    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:transform && npm run test:historian && npm run test:ctx-tools && npm run test:ctx-search-memory && npm run test:prompt-surface && npm run test:memory-promotion && npm run test:mural-render && npm run test:tool-name-closure && npm run test:boot-busy-retry",
+    "test:all": "npm run build && npm run smoke && npm run test && npm run test:host && npm run test:ctx-status-diagnostics && npm run test:transform && npm run test:historian && npm run test:ctx-tools && npm run test:ctx-search-memory && npm run test:prompt-surface && npm run test:memory-promotion && npm run test:mural-render && npm run test:tool-name-closure && npm run test:boot-busy-retry",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

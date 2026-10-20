@@ -88,6 +88,8 @@ test("readMagicContextStatusSnapshot reads budget / compartments / dropped from 
   updateSessionMeta(db, SESSION, {
     lastContextPercentage: 42,
     lastInputTokens: 12_345,
+    // C 章（impl-s10）：最近一次占用读数使用的 context limit，诊断字段透传。
+    lastUsageContextLimit: 200_000,
   });
   db.prepare("UPDATE session_meta SET protected_tokens_effective = 4096 WHERE session_id = ?").run(
     SESSION,
@@ -131,6 +133,8 @@ test("readMagicContextStatusSnapshot reads budget / compartments / dropped from 
   assert.equal(snapshot.protectedTokensFloor, 4096);
   assert.equal(snapshot.contextPercentage, 42);
   assert.equal(snapshot.lastInputTokens, 12_345);
+  // C 章（impl-s10）：快照带上那次读数的分母。
+  assert.equal(snapshot.lastUsageContextLimit, 200_000);
   assert.equal(snapshot.compartmentCount, 2);
   assert.equal(snapshot.lastCompartmentEndMessage, 40);
   assert.deepEqual(snapshot.tags.active, { count: 4, tokens: 400 });
@@ -140,16 +144,18 @@ test("readMagicContextStatusSnapshot reads budget / compartments / dropped from 
 
   const text = formatMagicContextStatusSnapshot(snapshot);
   const lines = text.split("\n");
-  // 段序固定：标题 / Budget / Compartments / Tags。
+  // 段序固定：标题 / Budget / Compartments / Tags（Budget 自 impl-s10 起多一行
+  // 「last usage context limit」，段首行号随之下移）。
   assert.equal(lines[0], "Magic Context status");
   assert.equal(lines[1], `session: ${SESSION}`);
   assert.equal(lines[3], "Budget");
-  assert.equal(lines[8], "Compartments");
-  assert.equal(lines[12], "Tags");
+  assert.equal(lines[9], "Compartments");
+  assert.equal(lines[13], "Tags");
   // 每段的数字逐条断言——这就是 T-M11 后半要的东西。
   assert.ok(lines.includes("  protected floor: 4096"));
   assert.ok(lines.includes("  last context usage: 42%"));
   assert.ok(lines.includes("  last input tokens: 12345"));
+  assert.ok(lines.includes("  last usage context limit: 200000"));
   assert.ok(lines.includes("  count: 2"));
   assert.ok(lines.includes("  last compacted message: 40"));
   assert.ok(lines.includes("  active: 4 (400 tokens)"));
@@ -187,9 +193,10 @@ test("formatCtxStatus renders the same snapshot in aligned sections", async () =
   assert.deepEqual(titles, ["BUDGET", "COMPARTMENTS", "TAGS"]);
 
   // 数字与包侧渲染逐条一致，只是加了千分位并按段对齐。
-  assert.ok(lines.includes("  protected floor     4,096"));
-  assert.ok(lines.includes("  last context usage  42%"));
-  assert.ok(lines.includes("  last input tokens   12,345"));
+  assert.ok(lines.includes("  protected floor           4,096"));
+  assert.ok(lines.includes("  last context usage        42%"));
+  assert.ok(lines.includes("  last input tokens         12,345"));
+  assert.ok(lines.includes("  last usage context limit  200,000"));
   assert.ok(lines.includes("  count                   2"));
   assert.ok(lines.includes("  last compacted message  40"));
   assert.ok(lines.includes("  pending operations      1"));
@@ -213,7 +220,7 @@ test("formatCtxStatus prints an em-dash-style unknown and one line when nothing 
   assert.ok(snapshot);
   assert.equal(snapshot.protectedTokensFloor, null);
   const lines = formatCtxStatus(snapshot).split("\n");
-  assert.ok(lines.includes("  protected floor     -"), "未知值统一渲染成 -");
+  assert.ok(lines.includes("  protected floor           -"), "未知值统一渲染成 -");
   assert.ok(lines.includes("  last compacted message  -1"), "从未压缩过的会话是 -1，不是 0");
 
   const unavailable = formatCtxStatus(null);

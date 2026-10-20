@@ -16,7 +16,8 @@
  * 这份快照回答的是「现在这台机器上的 magic-context 处于什么状态」，三段内容：
  *
  *   1. **预算**（budget）：`session_meta` 里冻结的 protected floor、上一次 pass 的
- *      context 占用百分比与 input tokens。逐字取自 A 组已落地的 `session_meta` 行。
+ *      context 占用百分比与 input tokens、以及那次读数使用的 context limit。逐字取自
+ *      A 组已落地的 `session_meta` 行。
  *   2. **Compartments**：数量、最后一条覆盖到的 message ordinal（压缩历史与 live
  *      tail 的分界）、以及是否还有 pending materialization。
  *   3. **Dropped 统计**：按 `tags.status` 分桶（active / dropped / compacted）的行数
@@ -54,6 +55,18 @@ export interface MagicContextStatusSnapshot {
   contextPercentage: number;
   /** 上一次 pass 的 input tokens。 */
   lastInputTokens: number;
+  /**
+   * 最近一次占用读数使用的 context limit（`session_meta.last_usage_context_limit`
+   * 的持久值），也就是 `contextPercentage` 的分母。
+   *
+   * 语义：**最近一次**读数当时用的 limit——通常是模型原始上下文窗口（bootstrap 的
+   * usage recorder 写 `contextWindow`，见 `magic-context-turn-transform.ts`）；floor
+   * 拒绝路径可能写 usableSoft（`event-resolvers.ts`），因此它不一定等于当前模型的
+   * 原始窗口。列是 `NOT NULL DEFAULT 0`，**0 = 该会话还没有任何占用读数**，这里统一
+   * 映射成 `null`（与 `protectedTokensFloor` 的「未观测」语义一致），不让 0 冒充一个
+   * 真实的 limit。
+   */
+  lastUsageContextLimit: number | null;
   /** 已压缩的 compartment 条数。 */
   compartmentCount: number;
   /** 最后一条 compartment 覆盖到的 message ordinal；-1 = 还没有任何 compartment。 */
@@ -100,6 +113,7 @@ export async function readMagicContextStatusSnapshot(
     contextPercentage: meta.lastContextPercentage,
     lastCompartmentEndMessage,
     lastInputTokens: meta.lastInputTokens,
+    lastUsageContextLimit: toObservedContextLimit(meta.lastUsageContextLimit),
     pendingOps: getPendingOpsCount(db, sessionId),
     protectedTokensFloor: readProtectedTokensFloor(db, sessionId),
     sessionId,
@@ -132,6 +146,9 @@ export function formatMagicContextStatusSnapshot(
     `  protected floor: ${formatNumber(snapshot.protectedTokensFloor)}`,
     `  last context usage: ${formatNumber(snapshot.contextPercentage)}%`,
     `  last input tokens: ${formatNumber(snapshot.lastInputTokens)}`,
+    // 上面那个百分比的分母。读者要判断「20% 是低还是高」必须先知道分母是原始窗口
+    // 还是 usableSoft 之类的收窄值——这一行就是给它。
+    `  last usage context limit: ${formatNumber(snapshot.lastUsageContextLimit)}`,
     "",
     "Compartments",
     `  count: ${snapshot.compartmentCount}`,
@@ -148,6 +165,16 @@ export function formatMagicContextStatusSnapshot(
 
 function formatNumber(value: number | null | undefined): string {
   return typeof value === "number" && Number.isFinite(value) ? String(Math.trunc(value)) : "-";
+}
+
+/**
+ * `session_meta.last_usage_context_limit` 是 `NOT NULL DEFAULT 0` 的列：0 表示「这条
+ * 会话还没有任何占用读数」（新建行 / 旧库补列），不是一个真实的 limit。快照把 0
+ * 映射成 `null`，与 `protectedTokensFloor` 的「未观测」同义，避免把 0 当成 0 token
+ * 的窗口去算百分比。
+ */
+function toObservedContextLimit(value: number | null | undefined): number | null {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : null;
 }
 
 /** `session_meta.protected_tokens_effective`；列不存在（迁移前）时返回 null。 */

@@ -31,6 +31,10 @@ export function formatCtxStatus(
       ["protected floor", formatNumber(snapshot.protectedTokensFloor)],
       ["last context usage", `${formatNumber(snapshot.contextPercentage)}%`],
       ["last input tokens", formatNumber(snapshot.lastInputTokens)],
+      // 「last context usage」那一行的分母：最近一次占用读数使用的 context limit
+      // （通常是模型原始窗口，floor 拒绝路径可能是 usableSoft）。`-` = 该会话还没有
+      // 任何占用读数（持久列 0 已由包侧映射成 null）。
+      ["last usage context limit", formatNumber(snapshot.lastUsageContextLimit)],
     ]),
     section("COMPARTMENTS", [
       ["count", formatNumber(snapshot.compartmentCount)],
