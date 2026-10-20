@@ -17,13 +17,17 @@ import type { TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
 export function ModelTrajectoryExpansionMenu({
   commands,
   onToggle,
+  reasoningEnabled = true,
   intl,
 }: {
   commands: TrajectoryExpansionCommands;
   onToggle: (kind: TrajectoryVisualRole) => void;
+  /** 全局「显示思考过程」开关（B-3）：关闭时 reasoning 项禁用，且面板已做去 reasoning 投影。 */
+  reasoningEnabled?: boolean;
   intl: IntlShape;
 }) {
   const label = intl.formatMessage({ id: "modelTrajectory.customExpansion" });
+  const reasoningDisabledTitle = intl.formatMessage({ id: "modelTrajectory.reasoningDisabled" });
 
   return (
     <DropdownMenu>
@@ -41,26 +45,34 @@ export function ModelTrajectoryExpansionMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-52">
-        {TRAJECTORY_EXPANSION_KINDS.map((kind) => (
-          <DropdownMenuItem
-            key={kind}
-            data-trajectory-expansion-kind={kind}
-            className="justify-between"
-            onSelect={(event) => {
-              event.preventDefault();
-              onToggle(kind);
-            }}
-          >
-            <span>{expansionKindLabel(kind, intl)}</span>
-            <Switch
-              size="sm"
-              checked={commands[kind].expanded}
-              className="pointer-events-none"
-              aria-hidden="true"
-              tabIndex={-1}
-            />
-          </DropdownMenuItem>
-        ))}
+        {TRAJECTORY_EXPANSION_KINDS.map((kind) => {
+          const disabled = kind === "reasoning" && !reasoningEnabled;
+          return (
+            <DropdownMenuItem
+              key={kind}
+              data-trajectory-expansion-kind={kind}
+              data-trajectory-expansion-disabled={disabled || undefined}
+              className="justify-between"
+              disabled={disabled}
+              title={disabled ? reasoningDisabledTitle : undefined}
+              onSelect={(event) => {
+                event.preventDefault();
+                if (disabled) return;
+                onToggle(kind);
+              }}
+            >
+              <span>{expansionKindLabel(kind, intl)}</span>
+              <Switch
+                size="sm"
+                checked={commands[kind].expanded}
+                disabled={disabled}
+                className="pointer-events-none"
+                aria-hidden="true"
+                tabIndex={-1}
+              />
+            </DropdownMenuItem>
+          );
+        })}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -68,6 +80,8 @@ export function ModelTrajectoryExpansionMenu({
 
 function expansionKindLabel(kind: TrajectoryVisualRole, intl: IntlShape): string {
   switch (kind) {
+    case "turn":
+      return intl.formatMessage({ id: "modelTrajectory.turn" });
     case "system":
     case "user":
     case "assistant":

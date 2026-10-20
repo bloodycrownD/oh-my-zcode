@@ -1,6 +1,5 @@
 import type { ZCodeModelTrajectoryMessage } from "@zcode/services";
 import { ArrowRightIcon, ChevronRightIcon, CircleAlertIcon, CopyIcon } from "lucide-react";
-import { useContext, useState } from "react";
 import { Badge } from "@/components/ui/badge.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
@@ -11,12 +10,8 @@ import {
 } from "@/components/ui/collapsible.js";
 import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
-import {
-  TrajectoryExpansionCommandContext,
-  TrajectoryExpansionRegistryContext,
-} from "@/ModelTrajectoryExpansion.js";
 import { TrajectoryExpandedContent } from "@/ModelTrajectoryExpandedContent.js";
-import { TrajectorySearchRevealContext } from "@/ModelTrajectorySearch.js";
+import { useTrajectoryExpansion } from "@/ModelTrajectoryExpansion.js";
 import { trajectoryRoleTextClass, type TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
 import {
   trajectoryToolHasError,
@@ -50,10 +45,6 @@ export function ExpandableTrajectoryMessage({
   intl: IntlShape;
   expansionKey?: string;
 }) {
-  const expansionCommands = useContext(TrajectoryExpansionCommandContext);
-  const expansionRegistry = useContext(TrajectoryExpansionRegistryContext);
-  const searchRevealKey = useContext(TrajectorySearchRevealContext);
-  const [localExpansion, setLocalExpansion] = useState({ open: true, commandVersion: 0 });
   const copyLabel = intl.formatMessage({ id: "chat.message.copy" });
   const copyText = messageClipboardText(message);
   const toolResultMeta = trajectoryToolMetadata(message);
@@ -72,35 +63,17 @@ export function ExpandableTrajectoryMessage({
         : role === "tool"
           ? "tool-result"
           : role);
-  const expansionCommand = expansionCommands?.[resolvedVisualRole];
-  const persistedExpansion = expansionKey
-    ? expansionRegistry?.overrides.get(expansionKey)
-    : undefined;
-  const rowExpansion = persistedExpansion ?? localExpansion;
-  const userOpen =
-    expansionCommand && expansionCommand.version > rowExpansion.commandVersion
-      ? expansionCommand.expanded
-      : rowExpansion.open;
-  const searchRevealed = Boolean(expansionKey && expansionKey === searchRevealKey);
-  const open = userOpen || searchRevealed;
+  // B-9：命令槽/面板 override/搜索命中的展开计算统一走回合外壳共用的 hook。
+  const { open, searchRevealed, handleOpenChange } = useTrajectoryExpansion({
+    key: expansionKey,
+    commandKind: resolvedVisualRole,
+  });
 
   const handleCopy = () => {
     if (!copyText || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(copyText).catch((error: unknown) => {
       logger.warn("[ModelTrajectory] copy expanded content failed", error);
     });
-  };
-
-  const handleOpenChange = (nextOpen: boolean) => {
-    const override = {
-      open: nextOpen,
-      commandVersion: expansionCommand?.version ?? rowExpansion.commandVersion,
-    };
-    if (expansionKey && expansionRegistry) {
-      expansionRegistry.setOverride(expansionKey, override);
-    } else {
-      setLocalExpansion(override);
-    }
   };
 
   return (

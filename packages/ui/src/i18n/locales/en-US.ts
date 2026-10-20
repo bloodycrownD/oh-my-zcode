@@ -1069,6 +1069,12 @@ const enUS: Record<string, string> = {
   "modelTrajectory.inputSection": "Input",
   "modelTrajectory.outputSection": "Output",
   "modelTrajectory.reasoning": "Reasoning",
+  "modelTrajectory.reasoningDisabled": "Reasoning is turned off in settings",
+  "modelTrajectory.turn": "Turn",
+  "modelTrajectory.turn.noUserInput": "(no user input)",
+  "modelTrajectory.turn.croppedHint":
+    "Context gap for this call: {count} messages cropped in the middle",
+  "modelTrajectory.turn.hiddenCount": "{count} hidden",
   "modelTrajectory.message": "Message",
   "modelTrajectory.expand": "Expand",
   "modelTrajectory.collapse": "Collapse",

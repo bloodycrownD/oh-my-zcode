@@ -13,12 +13,13 @@ import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useModelTrajectory } from "@/hooks/useModelTrajectory.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
+import { useSettings } from "@/hooks/useSettingService.js";
 import { getContainingDirectoryPath } from "@/lib/path.js";
 import { logger } from "@/logger.js";
 import {
   TrajectoryExpansionCommandContext,
   TrajectoryExpansionRegistryContext,
-  TRAJECTORY_EXPANSION_KINDS,
+  TRAJECTORY_TURN_EXPANSION_KEY_PREFIX,
   createTrajectoryExpansionCommands,
   type TrajectoryExpansionOverride,
 } from "@/ModelTrajectoryExpansion.js";
@@ -26,15 +27,17 @@ import { ModelTrajectoryExpansionMenu } from "@/ModelTrajectoryExpansionMenu.js"
 import {
   buildTrajectorySearchIndex,
   TrajectorySearchRevealContext,
+  TrajectorySearchRevealTurnContext,
 } from "@/ModelTrajectorySearch.js";
 import { ModelTrajectorySearchBar } from "@/ModelTrajectorySearchBar.js";
 import { clearTrajectorySearchHighlights } from "@/ModelTrajectorySearchHighlight.js";
 import {
   ModelTrajectoryTimeline,
-  resolveTrajectoryTimelineItems,
+  resolveTrajectorySearchItems,
 } from "@/ModelTrajectoryTimeline.js";
 import type { TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
 import { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneParts.js";
+import { resolveTrajectoryTurnGroups, stripTrajectoryReasoning } from "@/ModelTrajectoryTurns.js";
 
 export function ModelTrajectoryPane({
   taskId,
@@ -51,27 +54,42 @@ export function ModelTrajectoryPane({
 }) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
+  // Step 8 / B-3：轨迹面板此前从未读取全局「显示思考过程」开关（聊天页 SessionPane 消费同一字段）。
+  // 关闭时对 records 做去 reasoning 投影：搜索索引与复制文本随之自然剔除，消息条数不变。
+  const { settings } = useSettings();
+  const showReasoning = settings?.messageStreamShowReasoning ?? true;
   const { loading, data, error, refresh } = useModelTrajectory(
     workspacePath,
     taskId,
     workspaceIdentity,
   );
 
-  const records = data?.records ?? [];
+  const records = useMemo(() => {
+    const sourceRecords = data?.records ?? [];
+    return showReasoning ? sourceRecords : stripTrajectoryReasoning(sourceRecords);
+  }, [data?.records, showReasoning]);
   const sourceFiles = data?.sourceFiles;
   const sourceDirectory = useMemo(
     () => getModelTrajectorySourceDirectory(sourceFiles),
     [sourceFiles],
   );
   const summary = useMemo(() => summarizeRecords(records), [records]);
-  const timelineItems = useMemo(() => resolveTrajectoryTimelineItems(records), [records]);
+  // B-1/B-6：按 turnId 聚合成回合，虚拟化单位与搜索索引都以回合为准。
+  const turnGroups = useMemo(
+    () =>
+      resolveTrajectoryTurnGroups(records, {
+        emptyUserPreview: intl.formatMessage({ id: "modelTrajectory.turn.noUserInput" }),
+      }),
+    [intl, records],
+  );
+  const searchItems = useMemo(() => resolveTrajectorySearchItems(turnGroups), [turnGroups]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
   const deferredSearchQuery = useDeferredValue(searchQuery);
   const searchIndex = useMemo(
-    () => buildTrajectorySearchIndex(timelineItems, deferredSearchQuery),
-    [deferredSearchQuery, timelineItems],
+    () => buildTrajectorySearchIndex(searchItems, deferredSearchQuery),
+    [deferredSearchQuery, searchItems],
   );
   const resolvedSearchActiveIndex =
     searchIndex.matches.length === 0
@@ -87,23 +105,25 @@ export function ModelTrajectoryPane({
     () => new Map<string, TrajectoryExpansionOverride>(),
   );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const willExpandAll = TRAJECTORY_EXPANSION_KINDS.some(
-    (kind) => !expansionCommands[kind].expanded,
-  );
+  // B-6：全部展开/收起改为回合级（消息行在展开的回合内默认展开，无需逐类展开）。
+  const willExpandAll = !expansionCommands.turn.expanded;
   const toggleAllLabel = intl.formatMessage({
     id: willExpandAll ? "modelTrajectory.expandAll" : "modelTrajectory.collapseAll",
   });
   const handleToggleAll = useCallback(() => {
-    const expanded = TRAJECTORY_EXPANSION_KINDS.some((kind) => !expansionCommands[kind].expanded);
+    const expanded = !expansionCommands.turn.expanded;
     expansionVersionRef.current += 1;
     const version = expansionVersionRef.current;
-    setExpansionOverrides(new Map());
-    setExpansionCommands(
-      Object.fromEntries(
-        TRAJECTORY_EXPANSION_KINDS.map((kind) => [kind, { expanded, version }]),
-      ) as ReturnType<typeof createTrajectoryExpansionCommands>,
-    );
-  }, [expansionCommands]);
+    // 只清回合命名空间的 override：消息行上用户单独做过的展开选择保持不变。
+    setExpansionOverrides((previous) => {
+      const next = new Map<string, TrajectoryExpansionOverride>();
+      for (const [key, override] of previous) {
+        if (!key.startsWith(TRAJECTORY_TURN_EXPANSION_KEY_PREFIX)) next.set(key, override);
+      }
+      return next;
+    });
+    setExpansionCommands((previous) => ({ ...previous, turn: { expanded, version } }));
+  }, [expansionCommands.turn.expanded]);
   const handleToggleExpansionKind = useCallback((kind: TrajectoryVisualRole) => {
     expansionVersionRef.current += 1;
     const version = expansionVersionRef.current;
@@ -200,6 +220,7 @@ export function ModelTrajectoryPane({
             <ModelTrajectoryExpansionMenu
               commands={expansionCommands}
               onToggle={handleToggleExpansionKind}
+              reasoningEnabled={showReasoning}
               intl={intl}
             />
           ) : null}
@@ -309,14 +330,18 @@ export function ModelTrajectoryPane({
               <TrajectorySearchRevealContext.Provider
                 value={activeSearchMatch?.expansionKey ?? null}
               >
-                <ModelTrajectoryTimeline
-                  items={timelineItems}
-                  searchQuery={searchIndex.query}
-                  searchMatches={searchIndex.matches}
-                  activeSearchMatch={activeSearchMatch}
-                  intl={intl}
-                  scrollContainerRef={scrollContainerRef}
-                />
+                <TrajectorySearchRevealTurnContext.Provider
+                  value={activeSearchMatch?.turnKey ?? null}
+                >
+                  <ModelTrajectoryTimeline
+                    turnGroups={turnGroups}
+                    searchQuery={searchIndex.query}
+                    searchMatches={searchIndex.matches}
+                    activeSearchMatch={activeSearchMatch}
+                    intl={intl}
+                    scrollContainerRef={scrollContainerRef}
+                  />
+                </TrajectorySearchRevealTurnContext.Provider>
               </TrajectorySearchRevealContext.Provider>
             </TrajectoryExpansionRegistryContext.Provider>
           </TrajectoryExpansionCommandContext.Provider>
@@ -331,11 +356,6 @@ export function ModelTrajectoryPane({
     </div>
   );
 }
-
-export {
-  resolveTrajectoryInputMessages,
-  resolveTrajectoryTimelineItems,
-} from "@/ModelTrajectoryTimeline.js";
 
 function getModelTrajectorySourceDirectory(
   sourceFiles: readonly string[] | undefined,

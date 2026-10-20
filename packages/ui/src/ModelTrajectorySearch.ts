@@ -11,7 +11,14 @@ export type TrajectorySearchField = "content" | "tool-name" | "tool-id";
 export interface TrajectorySearchMatch {
   key: string;
   callKey: string;
+  /** 展平后的全局调用下标（= recordIndex，与 CallCard 编号一致）。 */
   callIndex: number;
+  /** 回合内序号（B-7：索引/定位同时携带回合坐标）。 */
+  callIndexInTurn: number;
+  /** 命中所在的回合展开键（`turn:<turnId>` / `turn:fallback:<requestId>`）。 */
+  turnKey: string;
+  /** 命中所在的回合下标（虚拟化单位已是回合，滚动定位用它）。 */
+  turnIndex: number;
   expansionKey: string;
   field: TrajectorySearchField;
   fieldMatchIndex: number;
@@ -25,21 +32,36 @@ interface TrajectorySearchIndex {
   matches: TrajectorySearchMatch[];
 }
 
+/** 搜索索引的输入：回合内的一次调用（展平后按记录顺序）。 */
 export interface TrajectorySearchTimelineItem {
   key: string;
   record: ZCodeModelTrajectoryRecord;
   inputMessages: ZCodeModelTrajectoryMessage[];
+  turnKey: string;
+  turnIndex: number;
+  callIndexInTurn: number;
 }
 
 interface SearchTarget {
   callKey: string;
   callIndex: number;
+  callIndexInTurn: number;
+  turnKey: string;
+  turnIndex: number;
   expansionKey: string;
   field: TrajectorySearchField;
   text: string;
 }
 
+/** 当前激活命中的消息展开键（由该消息行自己消费，命中即强制展开）。 */
 export const TrajectorySearchRevealContext = createContext<string | null>(null);
+
+/**
+ * 当前激活命中所在的回合键（B-7「命中自动展开对应回合」）。
+ * 回合外壳未经消息行渲染，拿不到消息级 reveal 键，因此单独给一条回合命名空间通道；
+ * 两个命名空间（`turn:` vs `<requestId>:<index>`）不重叠，可同时参与同一判定。
+ */
+export const TrajectorySearchRevealTurnContext = createContext<string | null>(null);
 
 export function buildTrajectorySearchIndex(
   items: readonly TrajectorySearchTimelineItem[],
@@ -67,27 +89,30 @@ export function buildTrajectorySearchIndex(
 
 function buildSearchTargets(items: readonly TrajectorySearchTimelineItem[]): SearchTarget[] {
   return items.flatMap((item, callIndex) => {
+    const position = {
+      callKey: item.key,
+      callIndex,
+      callIndexInTurn: item.callIndexInTurn,
+      turnKey: item.turnKey,
+      turnIndex: item.turnIndex,
+    };
     const targets = item.inputMessages.flatMap((message, messageIndex) =>
-      messageTargets(item.key, callIndex, `${item.key}:input:${messageIndex}`, message),
+      messageTargets(position, `${item.key}:input:${messageIndex}`, message),
     );
     const response = item.record.response;
     if (!response) return targets;
     if (response.reasoningText) {
-      targets.push(
-        contentTarget(item.key, callIndex, `${item.key}:output:reasoning`, response.reasoningText),
-      );
+      targets.push(contentTarget(position, `${item.key}:output:reasoning`, response.reasoningText));
     }
     if (response.text) {
-      targets.push(contentTarget(item.key, callIndex, `${item.key}:output:message`, response.text));
+      targets.push(contentTarget(position, `${item.key}:output:message`, response.text));
     }
     response.toolCalls.forEach((toolCall, toolCallIndex) => {
       targets.push(
-        ...messageTargets(
-          item.key,
-          callIndex,
-          `${item.key}:output:${toolCall.kind}:${toolCallIndex}`,
-          { role: "assistant", parts: [toolCall] },
-        ),
+        ...messageTargets(position, `${item.key}:output:${toolCall.kind}:${toolCallIndex}`, {
+          role: "assistant",
+          parts: [toolCall],
+        }),
       );
     });
     return targets;
@@ -95,8 +120,7 @@ function buildSearchTargets(items: readonly TrajectorySearchTimelineItem[]): Sea
 }
 
 function messageTargets(
-  callKey: string,
-  callIndex: number,
+  position: Omit<SearchTarget, "expansionKey" | "field" | "text">,
   expansionKey: string,
   message: ZCodeModelTrajectoryMessage,
 ): SearchTarget[] {
@@ -109,23 +133,22 @@ function messageTargets(
           .flatMap((part) => ("text" in part && typeof part.text === "string" ? [part.text] : []))
           .join("\n\n");
   return [
-    ...(content ? [contentTarget(callKey, callIndex, expansionKey, content)] : []),
+    ...(content ? [contentTarget(position, expansionKey, content)] : []),
     ...(metadata.names
-      ? [{ callKey, callIndex, expansionKey, field: "tool-name" as const, text: metadata.names }]
+      ? [{ ...position, expansionKey, field: "tool-name" as const, text: metadata.names }]
       : []),
     ...(metadata.ids
-      ? [{ callKey, callIndex, expansionKey, field: "tool-id" as const, text: metadata.ids }]
+      ? [{ ...position, expansionKey, field: "tool-id" as const, text: metadata.ids }]
       : []),
   ];
 }
 
 function contentTarget(
-  callKey: string,
-  callIndex: number,
+  position: Omit<SearchTarget, "expansionKey" | "field" | "text">,
   expansionKey: string,
   text: string,
 ): SearchTarget {
-  return { callKey, callIndex, expansionKey, field: "content", text };
+  return { ...position, expansionKey, field: "content", text };
 }
 
 export function findTrajectoryTextMatches(

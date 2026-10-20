@@ -1,6 +1,5 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, type RefObject } from "react";
-import type { ZCodeModelTrajectoryRecord } from "@zcode/services";
 import {
   type TrajectorySearchMatch,
   type TrajectorySearchTimelineItem,
@@ -11,17 +10,20 @@ import {
   isTrajectorySearchTargetMounted,
   scrollTrajectorySearchRangeIntoView,
 } from "@/ModelTrajectorySearchHighlight.js";
-import { CallCard, type IntlShape } from "@/ModelTrajectoryPaneParts.js";
+import type { IntlShape } from "@/ModelTrajectoryPaneParts.js";
+import { ModelTrajectoryTurnGroup } from "@/ModelTrajectoryTurnGroup.js";
+import type { TrajectoryTurnGroup } from "@/ModelTrajectoryTurns.js";
 
 export function ModelTrajectoryTimeline({
-  items,
+  turnGroups,
   searchQuery,
   searchMatches,
   activeSearchMatch,
   intl,
   scrollContainerRef,
 }: {
-  items: TrajectorySearchTimelineItem[];
+  /** 虚拟化单位（B-5）：一行 = 一个回合，展开后行内渲染该回合的 CallCard 列表。 */
+  turnGroups: TrajectoryTurnGroup[];
   searchQuery: string;
   searchMatches: TrajectorySearchMatch[];
   activeSearchMatch: TrajectorySearchMatch | null;
@@ -29,10 +31,11 @@ export function ModelTrajectoryTimeline({
   scrollContainerRef: RefObject<HTMLDivElement | null>;
 }) {
   const virtualizer = useVirtualizer({
-    count: items.length,
+    count: turnGroups.length,
     getScrollElement: () => scrollContainerRef.current,
-    getItemKey: (index) => items[index]?.key ?? index,
-    estimateSize: () => 240,
+    getItemKey: (index) => turnGroups[index]?.key ?? index,
+    // 回合外壳默认收起，估算值按「表头一行」给；展开后由 measureElement 实测修正。
+    estimateSize: () => 44,
     overscan: 3,
   });
   // 搜索切换会同时收起旧命中并展开新命中；此时禁止 virtualizer 根据每次测高回调连续
@@ -60,8 +63,9 @@ export function ModelTrajectoryTimeline({
     ) {
       return;
     }
-    // 目标已经挂载时跳过 Call 级预滚动，否则随后文本级定位会造成连续两次跳动。
-    virtualizer.scrollToIndex(activeSearchMatch.callIndex, { align: "center" });
+    // 虚拟化单位已是回合：先滚到命中回合（回合由 reveal 上下文强制展开），
+    // 再由文本级定位完成消息内的一次性精确定位。
+    virtualizer.scrollToIndex(activeSearchMatch.turnIndex, { align: "center" });
   }, [activeSearchMatch, scrollContainerRef, virtualizer]);
 
   useEffect(() => {
@@ -114,23 +118,17 @@ export function ModelTrajectoryTimeline({
         <li aria-hidden="true" className="col-span-full" style={{ height: topSpacerHeight }} />
       ) : null}
       {virtualItems.map((virtualItem) => {
-        const item = items[virtualItem.index];
-        if (!item) return null;
+        const group = turnGroups[virtualItem.index];
+        if (!group) return null;
         return (
           <li
-            key={item.key}
+            key={group.key}
             ref={virtualizer.measureElement}
             data-index={virtualItem.index}
             data-trajectory-virtual-row=""
             className="col-span-full grid w-full grid-cols-subgrid"
           >
-            <CallCard
-              record={item.record}
-              index={virtualItem.index}
-              inputMessages={item.inputMessages}
-              expansionKeyPrefix={item.key}
-              intl={intl}
-            />
+            <ModelTrajectoryTurnGroup group={group} intl={intl} />
           </li>
         );
       })}
@@ -141,69 +139,21 @@ export function ModelTrajectoryTimeline({
   );
 }
 
-export function resolveTrajectoryTimelineItems(records: ZCodeModelTrajectoryRecord[]) {
-  let previousConversationMessageCount = 0;
-
-  return records.map((record, index) => {
-    const resolvedInput = resolveTrajectoryInputMessages({
-      index,
-      previousConversationMessageCount,
-      record,
-    });
-    previousConversationMessageCount = resolvedInput.nextConversationMessageCount;
-
-    return {
-      key: `${record.requestId}:${index}`,
-      record,
-      inputMessages: resolvedInput.inputMessages,
-    };
-  });
-}
-
-export function resolveTrajectoryInputMessages({
-  record,
-  index,
-  previousConversationMessageCount,
-}: {
-  record: ZCodeModelTrajectoryRecord;
-  index: number;
-  previousConversationMessageCount: number;
-}): {
-  inputMessages: ZCodeModelTrajectoryRecord["request"]["messages"];
-  nextConversationMessageCount: number;
-} {
-  const messages = record.request.messages;
-  const usesConversationDelta = shouldUseConversationDelta(record);
-  const deltaMessages = usesConversationDelta
-    ? computeDeltaMessages(messages, previousConversationMessageCount, index)
-    : messages;
-
-  return {
-    // 首条展示完整起始上下文；后续主会话只展示非 assistant 的新增（assistant 由上一条 Output 呈现）。
-    // sidecar/compact 等辅助请求有独立 prompt，不能套用主会话的消息数 delta，否则会隐藏标题生成 prompt。
-    inputMessages: usesConversationDelta
-      ? index === 0
-        ? deltaMessages
-        : deltaMessages.filter((message) => message.role !== "assistant")
-      : deltaMessages,
-    nextConversationMessageCount: usesConversationDelta
-      ? messages.length
-      : previousConversationMessageCount,
-  };
-}
-
-function shouldUseConversationDelta(record: ZCodeModelTrajectoryRecord): boolean {
-  const kind = record.callSource?.kind;
-  return kind === undefined || kind === "main" || kind === "subagent";
-}
-
-function computeDeltaMessages(
-  messages: ZCodeModelTrajectoryRecord["request"]["messages"],
-  previousMessageCount: number,
-  index: number,
-): ZCodeModelTrajectoryRecord["request"]["messages"] {
-  if (index === 0) return messages;
-  if (messages.length > previousMessageCount) return messages.slice(previousMessageCount);
-  if (messages.length < previousMessageCount) return messages;
-  return [];
+/**
+ * 把回合分组展平成搜索索引输入（B-7）：key 与 CallCard 的 expansionKeyPrefix 同源
+ * （`<requestId>:<recordIndex>`），额外携带回合坐标供滚动定位与「命中展开回合」。
+ */
+export function resolveTrajectorySearchItems(
+  turnGroups: readonly TrajectoryTurnGroup[],
+): TrajectorySearchTimelineItem[] {
+  return turnGroups.flatMap((group) =>
+    group.calls.map((call) => ({
+      key: `${call.record.requestId}:${call.recordIndex}`,
+      record: call.record,
+      inputMessages: call.inputMessages,
+      turnKey: group.key,
+      turnIndex: group.turnIndex,
+      callIndexInTurn: call.callIndexInTurn,
+    })),
+  );
 }
