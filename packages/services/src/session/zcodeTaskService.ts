@@ -119,6 +119,15 @@ export interface ZCodeModelTrajectoryRecord {
   request: {
     messages: ZCodeModelTrajectoryMessage[];
     toolNames: string[];
+    // FORK (agent-lang-trace-usage-batch / B-2)：model-io 压缩元数据。
+    // messageCount 是压缩前的全量条数；messageOffset/messagesKind 描述落盘的窗口形态（tail/delta/full）；
+    // headMessageCount 是落盘时额外保留的前缀条数；croppedCount 是展开后仍缺失的条数
+    //（= messageCount − 展开后可见条数，tail 与 delta 同口径）。
+    messageCount?: number;
+    messageOffset?: number;
+    messagesKind?: string;
+    headMessageCount?: number;
+    croppedCount: number;
   };
   response?: {
     finishReason?: string;

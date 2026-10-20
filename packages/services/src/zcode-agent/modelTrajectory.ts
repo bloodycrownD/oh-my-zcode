@@ -75,25 +75,19 @@ export async function readModelTrajectory(
       let matchedInFile = false;
       for (const line of tail.text.split("\n")) {
         const trimmed = line.trim();
-        if (!trimmed) {
-          continue;
-        }
+        if (!trimmed) continue;
         let parsed: Record<string, unknown>;
         try {
           parsed = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
           continue;
         }
-        if (parsed.type !== "model_io" || parsed.sessionId !== taskId) {
-          continue;
-        }
+        if (parsed.type !== "model_io" || parsed.sessionId !== taskId) continue;
         rawRecords.push(parsed);
         matchedInFile = true;
       }
 
-      if (matchedInFile) {
-        sourceFiles.push(filePath);
-      }
+      if (matchedInFile) sourceFiles.push(filePath);
     }
   }
 
@@ -106,7 +100,7 @@ export async function readModelTrajectory(
     return (asString(left.requestId) ?? "").localeCompare(asString(right.requestId) ?? "");
   });
 
-  const records = expandModelIODeltaRecords(rawRecords).map((record) => mapRecord(record));
+  const records = expandModelIODeltaRecords(rawRecords).map(mapTrajectoryRecord);
   const truncated = inputTruncated || records.length > safeLimit;
   const trimmedRecords = truncated ? records.slice(records.length - safeLimit) : records;
 
@@ -120,20 +114,24 @@ export async function readModelTrajectory(
 }
 
 function toTime(value?: string): number {
-  if (!value) {
-    return 0;
-  }
+  if (!value) return 0;
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
 
-function mapRecord(record: Record<string, unknown>): ZCodeModelTrajectoryRecord {
+// FORK (agent-lang-trace-usage-batch / B-2)：纯函数区导出，供 T-T2/T-T6 单测直接断言
+// （services 无 vitest，用 tsx --test 直吃 TS 源）。
+export function mapTrajectoryRecord(record: Record<string, unknown>): ZCodeModelTrajectoryRecord {
   const request = asObject(record.request);
   const response = asObject(record.response);
   const model = asObject(record.model);
   const error = asObject(record.error);
   const querySource = asString(record.querySource) ?? inferQuerySourceFromRequest(request);
   const modelRole = asString(model?.role);
+  const messages = mapTrajectoryMessages(request?.messages);
+  // 落盘的 messageCount 是全量条数契约（tail 时为压缩前的完整长度）。
+  // full-retention 全量直写分支不带压缩元数据，用可见条数兜底。
+  const messageCount = asNonNegativeInteger(request?.messageCount) ?? messages.length;
 
   const mapped: ZCodeModelTrajectoryRecord = {
     requestId: asString(record.requestId) ?? "",
@@ -151,8 +149,15 @@ function mapRecord(record: Record<string, unknown>): ZCodeModelTrajectoryRecord 
       source: asString(model?.source),
     },
     request: {
-      messages: mapMessages(request?.messages),
+      messages,
       toolNames: asStringArray(request?.toolNames),
+      messageCount,
+      // 展开后可见条数与全量条数之差即「中间被裁剪的条数」；tail 与 delta 都按此口径。
+      // 不用 offset − K：delta 展开保留前序窗口时该公式失真。
+      croppedCount: Math.max(0, messageCount - messages.length),
+      messageOffset: asNonNegativeInteger(request?.messageOffset),
+      messagesKind: asString(request?.messagesKind),
+      headMessageCount: asNonNegativeInteger(request?.headMessageCount),
     },
   };
 
@@ -214,7 +219,9 @@ function classifyCallSource(
   return { kind: "main" };
 }
 
-function expandModelIODeltaRecords(records: Record<string, unknown>[]): Record<string, unknown>[] {
+export function expandModelIODeltaRecords(
+  records: Record<string, unknown>[],
+): Record<string, unknown>[] {
   const expanded: Record<string, unknown>[] = [];
   let previous: Record<string, unknown> | undefined;
   for (const record of records) {
@@ -275,7 +282,7 @@ function expandModelIORequest(
   return next;
 }
 
-function expandMessageCollection(
+export function expandMessageCollection(
   target: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
   keys: {
@@ -288,6 +295,22 @@ function expandMessageCollection(
   if (metadataSource[keys.kindKey] === "tail") {
     // model-io 文件超限或进程内缓存丢失后会写最近窗口 baseline。
     // tail 是新的展开起点，不能继续拼接更早历史，否则又会把已裁剪的巨大上下文带回 UI 读取链路。
+    // FORK (agent-lang-trace-usage-batch / B-2)：tail 记录在写入侧补了前 K 条 messagesHead，
+    // 这里把 head 接回 tail 前面（tail = [...head.slice(0, min(headMessageCount, offset)), ...tail]），
+    // 恢复被裁掉的系统段/首轮注入；head 截到 offset 防与 tail 窗口头部重复。
+    // 门是 metadataSource === target（canonical request.messages）：body.messages 复用本函数
+    //（collectionKey 同为 "messages"）且 sdkMessages 走默认 metadataSource，二者都不能拼 head。
+    // 旧记录没有 messagesHead / headMessageCount 时跳过（防 undefined → NaN 的切片）。
+    if (metadataSource === target && keys.collectionKey === "messages") {
+      const head = target.messagesHead;
+      const tailMessages = target[keys.collectionKey];
+      const headMessageCount = asNonNegativeInteger(metadataSource.headMessageCount) ?? 0;
+      if (Array.isArray(head) && Array.isArray(tailMessages) && headMessageCount > 0) {
+        const offset = asNonNegativeInteger(metadataSource[keys.offsetKey]) ?? headMessageCount;
+        const headLength = Math.min(headMessageCount, offset, head.length);
+        target[keys.collectionKey] = [...head.slice(0, headLength), ...tailMessages];
+      }
+    }
     return;
   }
   if (metadataSource[keys.kindKey] !== "delta") {
@@ -300,27 +323,31 @@ function expandMessageCollection(
     return;
   }
   // 新 model-io 为了避免同一 session 内完整上下文梯度重复，只保存 delta；服务层读出时还原给 UI。
+  // delta 记录不套 head：previous 已是展开后的完整前序窗口，套 head 会丢前序上下文。
   target[keys.collectionKey] = [...previousMessages.slice(0, offset), ...deltaMessages];
 }
 
-function mapMessages(value: unknown): ZCodeModelTrajectoryMessage[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
+// FORK (agent-lang-trace-usage-batch / B-4)：model-io 的 request.messages 是 ModelInputMessage，
+// assistant 的工具调用挂在消息顶层 toolCalls（ModelToolCall{id,name,input}）而非 content 块里。
+// 过去只映射 content，导致所有「纯工具调用」的 assistant 行在轨迹面板里是空消息（真实样本 554 条）。
+export function mapTrajectoryMessages(value: unknown): ZCodeModelTrajectoryMessage[] {
+  if (!Array.isArray(value)) return [];
   return value.map((entry) => {
     const message = asObject(entry) ?? {};
     const role = asString(message.role) ?? "unknown";
-    return {
-      role,
-      parts: mapContent(message.content, role, {
-        toolCallId:
-          asString(message.toolCallId) ??
-          asString(message.tool_call_id) ??
-          asString(message.tool_use_id),
-        toolName: asString(message.toolName) ?? asString(message.name),
-        isError: message.isError === true || message.is_error === true,
-      }),
-    };
+    const parts = mapContent(message.content, role, {
+      toolCallId:
+        asString(message.toolCallId) ??
+        asString(message.tool_call_id) ??
+        asString(message.tool_use_id),
+      toolName: asString(message.toolName) ?? asString(message.name),
+      isError: message.isError === true || message.is_error === true,
+    });
+    // content 的联合类型不含 tool-call 块，顶层 toolCalls 追加到 content parts 之后不会重复。
+    for (const toolCall of Array.isArray(message.toolCalls) ? message.toolCalls : []) {
+      parts.push(mapResponseToolCall(toolCall));
+    }
+    return { role, parts };
   });
 }
 
@@ -349,9 +376,7 @@ function mapContent(
     return [{ kind: "text", text: content }];
   }
 
-  if (!Array.isArray(content)) {
-    return [];
-  }
+  if (!Array.isArray(content)) return [];
 
   return content.map((rawPart) => mapPart(rawPart, role === "tool" ? messageTool : undefined));
 }
@@ -361,9 +386,7 @@ function mapPart(
   messageTool?: { toolCallId?: string; toolName?: string; isError?: boolean },
 ): ZCodeModelTrajectoryContentPart {
   const part = asObject(rawPart);
-  if (!part) {
-    return { kind: "unknown", raw: rawPart };
-  }
+  if (!part) return { kind: "unknown", raw: rawPart };
 
   switch (part.type) {
     case "text":
