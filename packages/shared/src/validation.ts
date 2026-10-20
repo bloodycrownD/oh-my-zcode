@@ -152,6 +152,14 @@ export const hostInitLocalMessageSchema = z.object({
   deviceMid: z.string().optional(),
   workspacePath: nonEmptyStringSchema.optional(),
   workspaceIdentity: nonEmptyStringSchema.optional(),
+  /**
+   * Desktop 宿主探测到的界面语言（如 `zh-CN` / `en-US`），经 host → services 的 spawn env
+   * 传给 CLI 作为冷启动 `uiDetectedLocale`。缺席时回落现有的 env/Intl 探测，保持旧载荷兼容。
+   *
+   * 必须是本 schema 的显式字段：`hostIncomingMessageSchema` 复用本 schema 且 zod 默认
+   * strip 未知键，漏加字段会被宿主侧静默丢弃（本协议唯一的 init-local 入口）。
+   */
+  uiLocale: nonEmptyStringSchema.optional(),
   agentWarmupTargets: z.array(hostAgentWarmupTargetSchema).max(3).optional(),
   agentSpawnFallbackCwd: nonEmptyStringSchema.optional(),
   zcodeBuiltinProviderConfigFilePath: nonEmptyStringSchema,

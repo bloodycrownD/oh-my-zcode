@@ -19,6 +19,17 @@ export const ZCODE_CUA_NODE_REPL_HOST_ENV_KEY = "ZCODE_CUA_NODE_REPL_HOST";
 // incantation. 这些开关只在未打包本地构建生效；正式 desktop/Helper bundle 会在编译期关闭并在
 // main→host 边界删除，不能用于 signed release 的 runtime override。
 export const ZCODE_CUA_DEV_MODE_ENV_KEY = "ZCODE_CUA_DEV_MODE";
+/**
+ * Desktop 主进程探测到的界面语言（`zh-CN` / `en-US`）。Host 在 spawn agent 时注入，
+ * CLI 在 app-server 冷启动路径读取并作为 `uiDetectedLocale` 传给 app——GUI 进程的
+ * `LANG`/`LC_*` 常缺位，不能让 Node Intl 在无头环境把中文系统解析成 en。
+ *
+ * 注意：这是一个**载荷键**，绝不能加入 `SANITIZED_RUNTIME_ENV_KEYS` 或
+ * `NON_TOOL_PASSTHROUGH_RUNTIME_ENV_KEYS`。那两个名单是「从子进程 env 中剔除」的
+ * 黑名单（`prepareCliRuntimeEnv` 在 `run.ts` 读取之前执行），未列入即原样存活；
+ * 列入会让本键在消费端读到之前被删掉。
+ */
+export const ZCODE_UI_LOCALE_ENV_KEY = "ZCODE_UI_LOCALE";
 
 export type ZCodeRuntimeEnv = "development" | "production" | "test";
 
