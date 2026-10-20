@@ -75,14 +75,35 @@ export interface TrajectoryWireFilterResult<T extends ZCodeModelTrajectoryMessag
 export function filterTrajectoryWireMessages<T extends ZCodeModelTrajectoryMessage>(
   messages: readonly T[],
 ): TrajectoryWireFilterResult<T> {
-  const visible: T[] = [];
+  const { rows, hiddenCount } = classifyTrajectoryWireRows(messages);
+  return {
+    visible: rows.filter((row) => !row.placeholder).map((row) => row.message),
+    hiddenCount,
+  };
+}
+
+/** 带原始下标的行级分类结果：UI 渲染以 messageIndex 构造 expansionKey 与奇偶底色。 */
+export interface TrajectoryWireRow<T extends ZCodeModelTrajectoryMessage> {
+  message: T;
+  messageIndex: number;
+  placeholder: boolean;
+}
+
+/**
+ * 行级分类（UI 的唯一渲染输入）：保留原始 messageIndex，UI 不再自行 map+计数，
+ * 消除分类逻辑双轨（cr-func-all P2-3）。
+ */
+export function classifyTrajectoryWireRows<T extends ZCodeModelTrajectoryMessage>(
+  messages: readonly T[],
+): { rows: TrajectoryWireRow<T>[]; hiddenCount: number } {
+  const rows: TrajectoryWireRow<T>[] = [];
   let hiddenCount = 0;
-  for (const message of messages) {
-    if (classifyTrajectoryWireMessage(message) === "placeholder") {
+  for (const [messageIndex, message] of messages.entries()) {
+    const placeholder = classifyTrajectoryWireMessage(message) === "placeholder";
+    if (placeholder) {
       hiddenCount += 1;
-      continue;
     }
-    visible.push(message);
+    rows.push({ message, messageIndex, placeholder });
   }
-  return { visible, hiddenCount };
+  return { rows, hiddenCount };
 }

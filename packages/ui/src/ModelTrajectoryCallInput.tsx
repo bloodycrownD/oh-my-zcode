@@ -14,7 +14,7 @@ import { formatTrajectoryDateTime, formatTrajectoryDuration } from "@/ModelTraje
 import { ContentPartView } from "@/ModelTrajectoryPaneDetails.js";
 import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
-import { classifyTrajectoryWireMessage } from "@/ModelTrajectoryWireFilter.js";
+import { classifyTrajectoryWireRows } from "@/ModelTrajectoryWireFilter.js";
 
 type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
 
@@ -50,22 +50,15 @@ export function CallInputSection({
   intl: IntlShape;
 }) {
   const { hidePlaceholders, setHidePlaceholders } = useContext(TrajectoryWireFilterContext);
-  const inputRows = useMemo(
-    () =>
-      inputMessages.map((message, messageIndex) => ({
-        message,
-        messageIndex,
-        placeholder: classifyTrajectoryWireMessage(message) === "placeholder",
-      })),
+  // 行级分类来自 WireFilter 纯函数（唯一分类实现，防双轨漂移）；
+  // messageIndex 保留原始下标——expansionKey 与奇偶底色不随开关切换变化。
+  const { rows: classifiedRows, hiddenCount: placeholderCount } = useMemo(
+    () => classifyTrajectoryWireRows(inputMessages),
     [inputMessages],
   );
-  const placeholderCount = inputRows.reduce(
-    (total, row) => (row.placeholder ? total + 1 : total),
-    0,
-  );
   const visibleInputRows = hidePlaceholders
-    ? inputRows.filter((row) => !row.placeholder)
-    : inputRows;
+    ? classifiedRows.filter((row) => !row.placeholder)
+    : classifiedRows;
   const hiddenCount = hidePlaceholders ? placeholderCount : 0;
 
   return (

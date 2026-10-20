@@ -9,6 +9,7 @@ import test from "node:test";
 import type { ZCodeModelTrajectoryMessage } from "@zcode/services";
 import {
   classifyTrajectoryWireMessage,
+  classifyTrajectoryWireRows,
   filterTrajectoryWireMessages,
 } from "../src/ModelTrajectoryWireFilter.js";
 
@@ -128,4 +129,33 @@ test("T-T6 wire-filter：空列表与全占位列表", () => {
   const filtered = filterTrajectoryWireMessages(allPlaceholders);
   assert.deepEqual(filtered.visible, []);
   assert.equal(filtered.hiddenCount, 2);
+});
+
+test("T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标并与聚合计数一致（UI 渲染唯一输入）", () => {
+  const normalUser = textMessage("user", "帮我看看这个 bug");
+  const droppedAssistant = textMessage("assistant", "[dropped §4§]");
+  const emptyAssistant: ZCodeModelTrajectoryMessage = { role: "assistant", parts: [] };
+  const normalAssistant = textMessage("assistant", "已经定位到根因");
+  const messages = [normalUser, droppedAssistant, emptyAssistant, normalAssistant];
+
+  const { rows, hiddenCount } = classifyTrajectoryWireRows(messages);
+
+  assert.equal(hiddenCount, 2);
+  assert.deepEqual(
+    rows.map((row) => [row.messageIndex, row.placeholder]),
+    [
+      [0, false],
+      [1, true],
+      [2, true],
+      [3, false],
+    ],
+  );
+  assert.equal(rows[0].message, normalUser);
+  // 与 filterTrajectoryWireMessages 聚合口径一致（单一分类实现，防双轨漂移）。
+  const aggregated = filterTrajectoryWireMessages(messages);
+  assert.equal(aggregated.hiddenCount, hiddenCount);
+  assert.deepEqual(
+    rows.filter((row) => !row.placeholder).map((row) => row.message),
+    aggregated.visible,
+  );
 });
