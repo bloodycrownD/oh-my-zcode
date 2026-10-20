@@ -1145,6 +1145,11 @@ export function createLocalServices(options: {
   zcodeAgentCommandResolver?: ZCodeAgentCommandResolver;
   /** Desktop Main 提前异步采集的本机 runtime 环境；Local Host 注入后不再同步启动 login shell。 */
   runtimeProcessEnvPatch?: Record<string, string>;
+  /**
+   * Desktop Main 当前应用 UI 语言（`zh-CN` / `en-US`），由 Host 从 InitLocal 载荷透传。
+   * Agent spawn 时注入冷启动 locale 探测所需 env；缺席时保持现有探测链路。
+   */
+  uiLocale?: string;
   /** 本地桌面上次 workspace 缺失时，仅用于 Agent 子进程 spawn.cwd 兜底。 */
   zcodeAgentSpawnFallbackCwd?: string;
   /** desktop-attached remote server 从 Desktop Host 收到的一次性 Agent 网络配置。 */

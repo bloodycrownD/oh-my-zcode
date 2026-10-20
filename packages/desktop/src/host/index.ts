@@ -2312,6 +2312,7 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
               hostApiNetworkTransport,
               authorizeLocalMediaPreviewPath,
               runtimeProcessEnvPatch: msg.runtimeProcessEnvPatch,
+              uiLocale: msg.uiLocale,
               agentRuntimeContext: {
                 getDeviceMid: () => msg.deviceMid,
                 runtimeSurface: "desktop_local_host",
