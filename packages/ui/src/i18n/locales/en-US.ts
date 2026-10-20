@@ -2152,7 +2152,7 @@ const enUS: Record<string, string> = {
     "When off, the transform passes messages through untouched — no budget management and no history folding. The other settings have no effect until it is turned back on.",
   "settings.context.executeThreshold.label": "Execute threshold",
   "settings.context.executeThreshold.description":
-    "Once context usage reaches this percentage, queued context operations are forced to execute. Higher values execute later and leave less room for output and mid-turn growth; the input keeps itself inside the range the schema allows.",
+    "Once context usage reaches this percentage, queued context operations are forced to execute. This is not where folding starts: size-triggered folding also happens at very low usage — the threshold only decides when already-queued operations are forced through. Higher values execute later and leave less room for output and mid-turn growth; the input keeps itself inside the range the schema allows.",
   "settings.context.executeThresholdTokens.label": "Execute threshold (token override)",
   "settings.context.executeThresholdTokens.description":
     "Override the percentage threshold above with an absolute token count. Leave empty for no override. Only useful when models on the same machine have very different context windows.",
@@ -2163,7 +2163,7 @@ const enUS: Record<string, string> = {
   "settings.context.protectedTokens.placeholder": "No extra protection",
   "settings.context.historyBudget.label": "History budget share",
   "settings.context.historyBudget.description":
-    "Share of (usable context × execute threshold) reserved for the session history block. Larger values leave less room for tool output and compartments.",
+    "Share of (usable context × execute threshold) reserved for the session history block. The steady-state context usage is mainly driven by this budget: at the default 0.15 it settles around 30%, at 0.30 around 40%, and at 0.50 it approaches 50% (the exact figure also depends on the baseline, compartments and the protected-tail clamp — measure to confirm). Valid range 0.05–0.5; larger values leave less room for tool output and compartments.",
   "settings.context.cacheTtl.label": "Prefix cache lifetime",
   "settings.context.cacheTtl.description":
     "How long the provider's cached prefix is assumed to stay valid, e.g. 5m or 1h. Use never to make no expiry assumption.",
@@ -4771,6 +4771,10 @@ const enUS: Record<string, string> = {
   "chat.contextUsage.magicContext.cacheMiss": "rebuilt",
   "chat.contextUsage.magicContext.cacheSegment1": "System segment",
   "chat.contextUsage.magicContext.cacheSegment2": "History segment",
+  // C chapter (impl-s10): clarifies that the steady state is driven by the history
+  // budget, and that size-triggered folding is independent of the execute threshold.
+  "chat.contextUsage.steadyStateHint":
+    "Usage periodically settles back to a steady state set by the history budget (about 30% by default); size-triggered folding also happens at very low usage. Adjust it in Settings → Context Management → History budget share.",
   "tokenDebug.open": "Open token debug",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription":

@@ -2019,7 +2019,7 @@ const zhCN: Record<string, string> = {
     "关闭后 transform 直通原始消息，不做任何预算管理与历史折叠；其余参数在重新开启前不生效。",
   "settings.context.executeThreshold.label": "执行阈值",
   "settings.context.executeThreshold.description":
-    "上下文占用达到该百分比时，强制执行已排队的上下文操作。越高越晚执行，留给输出与突发增长的空间越小；输入框会自行限死在 schema 允许的区间内。",
+    "上下文占用达到该百分比时，强制执行已排队的上下文操作。这不是压缩起点：体积触发的折叠在占用很低时也会发生，本阈值只决定已排队的操作何时被强制落地。越高越晚执行，留给输出与突发增长的空间越小；输入框会自行限死在 schema 允许的区间内。",
   "settings.context.executeThresholdTokens.label": "执行阈值（Token 覆盖）",
   "settings.context.executeThresholdTokens.description":
     "按绝对 Token 数覆盖上面的百分比阈值，留空表示不覆盖。仅用于同一台机器上模型上下文窗口差异很大的场景。",
@@ -2030,7 +2030,7 @@ const zhCN: Record<string, string> = {
   "settings.context.protectedTokens.placeholder": "不额外保护",
   "settings.context.historyBudget.label": "历史预算占比",
   "settings.context.historyBudget.description":
-    "会话历史块占「可用上下文 × 执行阈值」的比例。占比越大留给工具输出与分舱的空间越小。",
+    "会话历史块占「可用上下文 × 执行阈值」的比例。上下文占用的稳态水平主要由这项预算决定：默认 0.15 时约占三成，调到 0.30 约四成、0.50 逼近五成（精确值还受基线、分舱与保护尾夹取影响，以实测为准）。可调范围 0.05–0.5；占比越大留给工具输出与分舱的空间越小。",
   "settings.context.cacheTtl.label": "前缀缓存有效期",
   "settings.context.cacheTtl.description":
     "假定服务端前缀缓存仍然有效的时长，例如 5m、1h；填 never 表示不做有效期假设。",
@@ -4464,6 +4464,10 @@ const zhCN: Record<string, string> = {
   "chat.contextUsage.magicContext.cacheMiss": "重建",
   "chat.contextUsage.magicContext.cacheSegment1": "系统段",
   "chat.contextUsage.magicContext.cacheSegment2": "历史段",
+  // C 章（impl-s10）：占用面板的语义澄清行——稳态占用由历史块预算主导，体积触发的
+  // 折叠与执行阈值无关（阈值只决定已排队操作何时被强制落地）。
+  "chat.contextUsage.steadyStateHint":
+    "占用会周期性回落到稳态，这是历史块预算在起作用（默认约占三成）；体积触发的折叠在占用很低时也会发生。可在「设置 → 上下文管理 → 历史预算占比」调节。",
   "tokenDebug.open": "打开 Token 调试",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription": "Output tokens ÷ 首个输出 token 到请求结束的秒数",
