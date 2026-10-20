@@ -15,6 +15,7 @@ import {
   buildLocalMediaPreviewUrl,
   isProviderProvisioningAccountCredentialKey,
   type ProviderProvisioningTrigger,
+  ZCODE_UI_LOCALE_ENV_KEY,
 } from "@zcode/shared";
 
 export {
@@ -1111,6 +1112,24 @@ function cuaHelperStartErrorDetail(error: unknown): string {
 }
 
 /**
+ * A6（agent-lang-trace-usage-batch / Step 3）：把 Host 当前应用 UI 语言注入 Agent 子进程 env。
+ *
+ * 契约是「有值才产键」，不是「产一个可能为空的键」：
+ * - `uiLocale` 缺席（老 Main、远端 workspace、未接线宿主）或为空串时返回空对象，CLI 侧继续按
+ *   env → Node Intl 回落到系统语言；
+ * - 绝不能写 `undefined`/空串值。CLI 的 `runtime-config` 用 `uiDetectedLocale !== undefined`
+ *   判定「宿主显式指定」，写入 undefined/空串会让缺省场景被当成显式语言，压掉 env 与 Intl 探测
+ *   （即 Desktop 界面中文、Agent 提示词却英文的原始失效形态）。
+ *
+ * resolveSpawnEnv 是 createLocalServices 的内部闭包、不可直测，因此把这段判定抽成纯函数，
+ * 由 test/buildUiLocaleSpawnEnv.test.ts 锁定正反两向；调用点本身由手工验收覆盖。
+ */
+export function buildUiLocaleSpawnEnv(uiLocale: string | undefined): Record<string, string> {
+  const normalized = uiLocale?.trim();
+  return normalized ? { [ZCODE_UI_LOCALE_ENV_KEY]: normalized } : {};
+}
+
+/**
  * 创建包含所有本地服务的 ServiceCollection
  *
  * @param options.parentPort - Electron host process 的 parentPort，
@@ -1838,6 +1857,9 @@ export function createLocalServices(options: {
         // 把 host 解析出的权威 origin（含 settings 覆盖）下发给 agent，否则 agent 侧只按
         // env 推导，test env + 自定义端点时两侧信任判定的输入分叉、官方 MCP 整体 fail closed。
         ...buildAgentEndpointOriginEnv(await resolveCurrentZCodeEndpointOrigin()),
+        // A6：Host 探测到的应用 UI 语言（`zh-CN`/`en-US`）随 spawn 下发，CLI 冷启动据此决定
+        // Agent 系统提示词语言；缺席时不产键，保持 env → Intl 的既有回落。
+        ...buildUiLocaleSpawnEnv(options?.uiLocale),
         // broker 凭据（socket/token）注入 agent spawn env，让内置 zcode-cua plugin 的
         // computer-use MCP server 经 __zcode-plugin-host 恢复 token 后连上 broker。
         // 上面 cuaProductHelperEnv 已完成代际校验与 unavailable 兜底，取代 staging 侧
