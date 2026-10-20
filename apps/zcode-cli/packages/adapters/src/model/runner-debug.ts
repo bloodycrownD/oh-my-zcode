@@ -41,6 +41,12 @@ const MAX_DEBUG_SESSION_BYTES = 256 * 1024 * 1024;
 const MAX_ROLLOUT_BASELINE_MESSAGES = 64;
 const MAX_DEBUG_BASELINE_MESSAGES = 256;
 const FINGERPRINT_STRING_LIMIT = 512;
+// FORK (agent-lang-trace-usage-batch / B-2 head 消息保留)：
+// tail 记录只保留最近窗口，offset 之前的内容磁盘上不存在（系统段、首轮注入全在头部），
+// 轨迹面板因此「系统消息加载不出来」。这里额外保留前 K 条消息作为 head。
+const MESSAGES_HEAD_MAX_COUNT = 12;
+// head 字节预算；按整条消息截断（不砍消息内文本），首条豁免（首条超限允许突破）。
+const MESSAGES_HEAD_MAX_BYTES = 64 * 1024;
 
 interface ModelIOCollectionState {
   count: number;
@@ -667,6 +673,10 @@ function compactModelIORequest(
   options: { maxBaselineMessages: number; preserveFullBodyMessages?: boolean },
 ): Record<string, unknown> {
   const next = { ...request };
+  // FORK (agent-lang-trace-usage-batch / B-2)：head 只能在 canonical request.messages 的
+  // tail 组装点挂载。compactMessageCollection 同时服务 messages / sdkMessages / body.messages
+  // 三份集合且共用 target=request，若在通用函数内挂载，后一次调用（body）会覆盖前一次的 head。
+  const canonicalMessages = next.messages;
   compactMessageCollection(
     next,
     previousState?.messages,
@@ -678,6 +688,7 @@ function compactModelIORequest(
     },
     options,
   );
+  attachMessagesHeadForTail(next, canonicalMessages);
   compactMessageCollection(
     next,
     previousState?.sdkMessages,
@@ -758,6 +769,57 @@ function compactMessageCollection(
 
   metadataTarget[keys.kindKey] = "full";
   metadataTarget[keys.offsetKey] = 0;
+}
+
+// FORK (agent-lang-trace-usage-batch / Step 5 B1)：
+// tail 记录补一份「被裁掉的前缀」——canonical request.messages 专用键 messagesHead。
+//
+// - 只写 tail：full 记录本身完整，delta 记录由前一条展开（且带 head 会与 delta 合并公式冲突）。
+// - 只写 canonical request.messages：sdkMessages / body.messages 是同一上下文的重复拷贝，
+//   轨迹 UI 不消费，写了只会放大文件。
+// - 条数上限 12 是设计常量，不计入 messagesHeadTruncated；该标志只表示**字节预算**把 head
+//   截短了（UI 侧据此判断 head 本身也不完整，缺口统一并入 croppedCount）。
+// - 首条豁免：第一条消息（系统段/首轮注入）即便超过 64KB 也必须保留，否则 head 失去意义。
+function attachMessagesHeadForTail(
+  target: Record<string, unknown>,
+  fullMessages: unknown,
+): void {
+  if (target.messagesKind !== "tail" || !Array.isArray(fullMessages)) {
+    return;
+  }
+
+  const candidateCount = Math.min(MESSAGES_HEAD_MAX_COUNT, fullMessages.length);
+  const head: unknown[] = [];
+  // 预算按 head 数组的真实序列化字节计（含方括号与逗号），保证落盘 head ≤64KB。
+  let headBytes = 2;
+  let truncatedByByteBudget = false;
+  for (let index = 0; index < candidateCount; index += 1) {
+    const message = fullMessages[index];
+    const separatorBytes = head.length === 0 ? 0 : 1;
+    const messageBytes = byteLengthOfJson(message);
+    if (
+      index > 0 &&
+      headBytes + separatorBytes + messageBytes > MESSAGES_HEAD_MAX_BYTES
+    ) {
+      truncatedByByteBudget = true;
+      break;
+    }
+    head.push(message);
+    headBytes += separatorBytes + messageBytes;
+  }
+
+  target.messagesHead = head;
+  target.headMessageCount = head.length;
+  target.messagesHeadTruncated = truncatedByByteBudget;
+}
+
+function byteLengthOfJson(value: unknown): number {
+  try {
+    return Buffer.byteLength(JSON.stringify(value) ?? "", "utf8");
+  } catch {
+    // 循环引用等极端输入不能阻断诊断落盘；按 0 计会低估预算，但仍有条数上限兜底。
+    return 0;
+  }
 }
 
 function canStoreDeltaFromState(
