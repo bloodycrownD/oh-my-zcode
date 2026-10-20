@@ -193,6 +193,13 @@ export async function runZCodeProtocolAgent(
             // startup 快照会让桌面长驻进程里的默认模型变更永远不生效。
             () => activeProviderRegistryRuntime.getConfiguredDefaultModelSelection(),
           ),
+          // A8（agent-lang-trace-usage-batch / Step 4）：Host 探明的界面语言随冷启动
+          // options 进来后，经本闭包透传给每个新建 app——runtime-config 只认
+          // `uiDetectedLocale !== undefined`，缺席时不写键，保持 env→Intl 回落。
+          // 每个 app 自己的 options 若已显式携带该字段（更具体来源）则不覆盖。
+          ...(options.uiDetectedLocale !== undefined && appOptions.uiDetectedLocale === undefined
+            ? { uiDetectedLocale: options.uiDetectedLocale }
+            : {}),
           // 只读同进程已应用快照；不为子任务另发 Host RPC，也不在 ModelFactory 偷换模型。
           resolveEffectiveModelSelection: (selection) => {
             const view = modelSelectionFacade.getView(undefined, undefined, { selection });

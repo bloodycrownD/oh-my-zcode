@@ -4,6 +4,7 @@ import { getRuntimeInfo, type PresentationSurface } from "@zcode/core";
 import { color, formatJson, supportsColor } from "@zcode/core";
 import { getZCodeCopy, isUiLocale, type UiLocale } from "@zcode/i18n";
 import type { RunContext, GlobalOptions, GlobalOutputFormat } from "@zcode/shared-types";
+import { ZCODE_UI_LOCALE_ENV_KEY } from "@zcode/shared/runtime-env";
 import {
   applyCliRuntimeEnvSanitization,
   loadCliDotenv,
@@ -264,6 +265,12 @@ const runZCodeProtocolCommand = async (
 
     const runProtocolAgent =
       deps.runZCodeProtocolAgent ?? (await loadBootstrapModule()).runZCodeProtocolAgent;
+    // A7（agent-lang-trace-usage-batch / Step 4）：Desktop Host 探明的界面语言只经
+    // 子进程 env 通道抵达 app-server 冷启动（`ZCODE_UI_LOCALE` 是载荷键，不在
+    // sanitize 黑名单里）。只转发非空值；**缺失时绝不传该键（不是传 null/undefined）**——
+    // `runtime-config.ts` 用 `uiDetectedLocale !== undefined` 判定「宿主显式指定」，
+    // 传 null 会让本该回落 env→Intl 的 auto 态被当成已探明值。
+    const uiDetectedLocale = env[ZCODE_UI_LOCALE_ENV_KEY]?.trim();
     await runProtocolAgent({
       lifecycle: deps.protocolLifecycle,
       cwd: workingDirectory,
@@ -273,6 +280,7 @@ const runZCodeProtocolCommand = async (
       presentationSurface,
       prepareStorageOnly,
       version,
+      ...(uiDetectedLocale ? { uiDetectedLocale } : {}),
     });
     return 0;
   } catch (error) {

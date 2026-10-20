@@ -818,6 +818,11 @@ export interface RunZCodeProtocolAgentOptions {
   prepareStorageOnly?: boolean;
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  /**
+   * 冷启动宿主探明的界面语言（Desktop Main 经 `ZCODE_UI_LOCALE` 子进程 env 传入）。
+   * 缺席表示宿主未探明，由 app 的 runtime-config 回落 env→Intl 探测。
+   */
+  uiDetectedLocale?: string;
   input?: NodeJS.ReadableStream;
   output?: NodeJS.WritableStream;
   presentationSurface?: PresentationSurface;
