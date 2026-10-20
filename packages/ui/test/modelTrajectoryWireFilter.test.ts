@@ -150,7 +150,7 @@ test("T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标并与聚�
       [3, false],
     ],
   );
-  assert.equal(rows[0].message, normalUser);
+  assert.equal(rows[0]?.message, normalUser);
   // 与 filterTrajectoryWireMessages 聚合口径一致（单一分类实现，防双轨漂移）。
   const aggregated = filterTrajectoryWireMessages(messages);
   assert.equal(aggregated.hiddenCount, hiddenCount);

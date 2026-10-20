@@ -13,8 +13,8 @@ import { test } from "node:test";
 import {
   hostIncomingMessageSchema,
   hostInitLocalMessageSchema,
-} from "../src/validation";
-import { ZCODE_UI_LOCALE_ENV_KEY } from "../src/runtimeEnv";
+} from "../src/validation.js";
+import { ZCODE_UI_LOCALE_ENV_KEY } from "../src/runtimeEnv.js";
 
 /** 最小可解析 init-local 载荷（schema 必填仅 type 与内置 provider 配置路径）。 */
 function makeInitLocalPayload(overrides: Record<string, unknown> = {}): Record<string, unknown> {
