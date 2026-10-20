@@ -69,6 +69,12 @@ export interface HostInitMessage {
     workspaceIdentity?: string;
   }>;
   agentSpawnFallbackCwd?: string;
+  /**
+   * Main 进程在 InitLocal 时捕获的应用 UI 语言（`zh-CN` / `en-US`）。
+   * Host 透传给 services，由 Agent spawn env 注入 CLI 冷启动的 `uiDetectedLocale`；
+   * 缺席时回落现有 env/Intl 探测（旧载荷兼容）。
+   */
+  uiLocale?: string;
   /** Main 解析后的 ZCode Built-in Provider Config 路径；Host/Services 不感知 Electron 安装布局。 */
   zcodeBuiltinProviderConfigFilePath: string;
   /** 上一路径无效（如显式 env 覆盖指向旧版本缓存）时的随包回落路径。 */

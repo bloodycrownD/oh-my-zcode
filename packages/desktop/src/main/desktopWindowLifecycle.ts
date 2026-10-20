@@ -20,6 +20,13 @@ import {
 
 const DEFAULT_RUNTIME_PROCESS_ENV_WAIT_TIMEOUT_MS = 4_500;
 
+/**
+ * 窗口生命周期构造的 Local Host init 载荷：`zcodeBuiltinProviderConfigFilePath` 由 Main 的
+ * `spawnHostProcess` 包装层（`main/index.ts`）在真正 fork 前补齐，窗口层不感知安装布局。
+ * 这里用 Omit 显式表达该注入契约，避免构造载荷时命中「缺必填字段」的假阳性类型错误。
+ */
+type LocalHostInitMessage = Omit<HostInitMessage, "zcodeBuiltinProviderConfigFilePath">;
+
 export function createWindow(options: {
   iconPath: string;
   preloadPath: string;
@@ -30,7 +37,7 @@ export function createWindow(options: {
   spawnHostProcess: (
     win: BrowserWindow,
     label: string,
-    initMessage: HostInitMessage,
+    initMessage: LocalHostInitMessage,
   ) => ElectronUtilityProcess;
   disposeHostProcess: (
     child: ElectronUtilityProcess,
@@ -169,6 +176,11 @@ export function createWindow(options: {
       const child = options.spawnHostProcess(win, label, {
         type: HostMessageTypes.InitLocal,
         deviceMid: options.deviceMid,
+        // 在 InitLocal 时捕获当前应用语言：语言切换对新建 Host/窗口生效，
+        // 同 Host 内新 spawn 仍沿用本次捕获值（运行中切换由既有 promptLanguage 同步链兜底）。
+        ...(options.currentApplicationLocale
+          ? { uiLocale: options.currentApplicationLocale() }
+          : {}),
         workspacePath: primaryWarmupTarget?.workspacePath,
         workspaceIdentity: primaryWarmupTarget?.workspaceIdentity,
         ...(options.agentWarmupTargets && options.agentWarmupTargets.length > 0
