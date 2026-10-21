@@ -56,13 +56,22 @@ export interface TrajectoryToolCallBadgeText {
  *
  * 渲染（ModelTrajectoryToolPairCard 的徽标）与搜索索引（ModelTrajectorySearch 的
  * tool-name/tool-id target）必须逐字同源，否则搜工具名会「计数前进、画面不动」。
+ *
+ * 口径（CR A-P2-1）：result 侧用 `||` 回退——result part 的 toolName 若是空串
+ * （旧数据里出现过空工具名），也要回退到 call 侧的名字，而不是渲染出空徽标。
+ * call 侧名字本身已由 services 映射层做过 `?? "tool"` 兜底
+ * （packages/services/src/zcode-agent/modelTrajectory.ts:423/450），
+ * 所以无结果时徽标显示的就是那个兜底名「tool」。
  */
 export function trajectoryToolCallBadgeText(
   info: TrajectoryToolCallInfo,
 ): TrajectoryToolCallBadgeText {
   const callPart = info.part;
+  // 名：result 侧真实名优先（空串也回退），无 result 时取 call 侧名；
+  // call 侧无名时兜底为服务层同款 "tool"（services modelTrajectory.ts 的 `?? "tool"`，
+  // 服务层只对 undefined 兜底，空串会原样穿过，故 UI 侧再兜一次）。
   const name =
-    info.pairedResultToolName ?? (callPart.kind === "tool-call" ? callPart.toolName : "");
+    info.pairedResultToolName || (callPart.kind === "tool-call" ? callPart.toolName || "tool" : "");
   const rawId =
     info.pairedResultToolId ?? (callPart.kind === "tool-call" ? callPart.toolCallId : undefined);
   return { name: name ?? "", id: rawId ? displayTrajectoryToolCallId(rawId) : "" };
@@ -128,15 +137,44 @@ function pairedResultText(result: TrajectoryPairedToolResult): string {
 }
 
 /**
+ * unknown 条目的 raw 原文（回退渲染 + 复制/全屏正文共用）；非 unknown 返回 undefined。
+ *
+ * 迁入本模块的原因：ToolPairCard.tsx 原本私有一份 rawPartText/formatRawPart，
+ * 而 displayText（复制/全屏正文）也需要同一份原文——两份实现漂移会让
+ * 「卡上显示的原文」与「复制到的文本」不一致。迁入后渲染与复制共用单源。
+ */
+export function trajectoryToolCallRawText(
+  part: ZCodeModelTrajectoryContentPart,
+): string | undefined {
+  if (part.kind !== "unknown") return undefined;
+  return formatRawPart(part.raw);
+}
+
+/** unknown 条目的 raw 原文（JSON 缩进形式；序列化失败回退 String）。 */
+function formatRawPart(raw: unknown): string {
+  try {
+    return JSON.stringify(raw, null, 2) ?? String(raw);
+  } catch {
+    return String(raw);
+  }
+}
+
+/**
  * 索引 / 配对卡 DOM / 复制按钮三方共用的拼接文本：
  * use 段（trajectoryToolCallInputs 的 join 口径）+ 结果段，空段不拼、无尾分隔。
+ *
+ * unknown 条目（CR A-P2-6）：trajectoryToolCallInputs 只认 kind:"tool-call" 的 part，
+ * 因此 unknown 的 use 段恒为空——复制按钮被禁用、全屏正文空白。
+ * 这里把 raw 原文并入 use 段（回退渲染与复制/全屏同源），使 unknown 也有可复制、可全屏的正文。
  */
 export function trajectoryToolCallDisplayText(info: TrajectoryToolCallInfo): string {
   const inputText = trajectoryToolCallInputs({ role: "assistant", parts: [info.part] }).join(
     "\n\n",
   );
-  if (!info.pairedResultText) return inputText;
-  return inputText ? `${inputText}\n\n${info.pairedResultText}` : info.pairedResultText;
+  const useText =
+    inputText || (info.part.kind === "unknown" ? (trajectoryToolCallRawText(info.part) ?? "") : "");
+  if (!info.pairedResultText) return useText;
+  return useText ? `${useText}\n\n${info.pairedResultText}` : info.pairedResultText;
 }
 
 /**
@@ -237,7 +275,9 @@ export function filterTrajectoryInputRows(
   pairedIds: ReadonlySet<string>,
 ): { visibleRows: TrajectoryWireRow<ZCodeModelTrajectoryMessage>[]; pairedRemovedCount: number } {
   if (pairedIds.size === 0) {
-    return { visibleRows: rows, pairedRemovedCount: 0 };
+    // 返回副本而非入参引用（CR A-P2-2）：调用方拿到 visibleRows 后若就地改写，
+    // 不能反向污染原始 rows（下游拿到的就是同一份 inputMessages 行数组）。
+    return { visibleRows: rows.slice(), pairedRemovedCount: 0 };
   }
   const visibleRows: TrajectoryWireRow<ZCodeModelTrajectoryMessage>[] = [];
   let pairedRemovedCount = 0;

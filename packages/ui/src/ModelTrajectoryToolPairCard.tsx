@@ -10,7 +10,6 @@
 // （跨记录 join，见 ModelTrajectoryToolJoin.ts）。因此本卡的「结果格」内容来自 join 产物，
 // 卡片自身不关心结果出现在哪条记录。
 import { ChevronRightIcon, CopyIcon, ExpandIcon, Maximize2Icon, Minimize2Icon } from "lucide-react";
-import type { ZCodeModelTrajectoryContentPart } from "@zcode/services";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge.js";
 import { Button } from "@/components/ui/button.js";
@@ -29,16 +28,17 @@ import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import {
   trajectoryToolCallBadgeText,
   trajectoryToolCallDisplayText,
+  trajectoryToolCallRawText,
   trajectoryToolCallTargetKey,
   type TrajectoryToolCallInfo,
   type TrajectoryToolCallStatus,
 } from "@/ModelTrajectoryToolJoin.js";
-import { trajectoryToolCallInputs } from "@/ModelTrajectoryToolPayload.js";
+import { trajectoryToolCallInputs, trajectoryToolHasError } from "@/ModelTrajectoryToolPayload.js";
 
 type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
 
 /**
- * 一次工具调用的配对卡：左「use」格（调用输入）+ 右「result」格（配对结果）+ 状态点。
+ * 一次工具调用的配对卡：上「use」格（调用输入）+ 下「result」格（配对结果）+ 状态点。
  *
  * 契约要点（spec「配对卡 DOM / 搜索 / 展开契约」）：
  * - target key 逐字取 trajectoryToolCallTargetKey（渲染与搜索索引共用单源）；
@@ -71,11 +71,16 @@ export function TrajectoryToolPairCard({
   });
 
   const isUnknown = info.part.kind === "unknown";
-  const rawText = rawPartText(info.part);
+  // unknown 条目的 raw 原文（回退渲染 + 复制/全屏正文共用单源，见 ToolJoin 的 rawText helper）。
+  const rawText = trajectoryToolCallRawText(info.part);
   const badge = trajectoryToolCallBadgeText(info);
   const copyText = trajectoryToolCallDisplayText(info);
   const useText = trajectoryToolCallInputs({ role: "assistant", parts: [info.part] }).join("\n\n");
   const resultText = info.pairedResultText;
+  // call 侧 input 错误红标（实现注 7 的 input 分支在配对卡路径落地）：
+  // 配对卡把 use 格与 result 格分列展示，status 只看 result 的 output，
+  // 故 call 侧 input 内的结构化 error 必须单独判定，否则红标会丢。
+  const useHasError = trajectoryToolHasError({ role: "assistant", parts: [info.part] });
   const copyLabel = intl.formatMessage({ id: "chat.message.copy" });
   const fullContentLabel = intl.formatMessage({ id: "modelTrajectory.viewFullContent" });
   const fullContentTitle = intl.formatMessage({ id: "modelTrajectory.fullContentTitle" });
@@ -187,8 +192,11 @@ export function TrajectoryToolPairCard({
           <TrajectoryPairCell
             label={intl.formatMessage({ id: "modelTrajectory.toolInput" })}
             text={useText}
-            // unknown 条目回退渲染 raw 原文（不进索引：索引文本为空）。
+            // unknown 条目回退渲染 raw 原文（原始载荷形状未知，不进索引字段）。
             rawText={rawText}
+            // call 侧 input 的结构化错误红标（实现注 7 的 input 分支在配对卡路径落地）。
+            error={useHasError}
+            open={open}
             revealed={searchRevealed}
             intl={intl}
           />
@@ -197,12 +205,16 @@ export function TrajectoryToolPairCard({
             text={resultText}
             placeholder={resultPlaceholder(info.status, intl)}
             error={info.status === "error"}
+            open={open}
             revealed={searchRevealed}
             intl={intl}
           />
           <div className="flex min-w-0 justify-end">
             {/* 全屏入口（Step 5 接线）：正文与卡片复制按钮同源（trajectoryToolCallDisplayText），
-                标题优先用工具名（徽标同源），无工具名时回退「消息全文」。 */}
+                标题优先用工具名（徽标同源），无工具名时回退「消息全文」。
+                口径说明（CR B-P2-6）：本入口**恒渲染**——配对卡的主要内容区（两格）恒有内容，
+                「查看全文」是主要内容的常驻入口；与路径 A（折叠行）用 overflowEver 门控不同，
+                路径 A 的内容可被折叠行整体收起，故按溢出态才给入口。 */}
             <Button
               data-trajectory-full-content-trigger=""
               data-trajectory-tool-pair-full-content-trigger=""
@@ -265,17 +277,20 @@ function TrajectoryPairCell({
   rawText,
   placeholder,
   error = false,
+  open,
   revealed,
   intl,
 }: {
   label: string;
   /** 载荷文本（与索引同源，逐字一致）。 */
   text: string;
-  /** unknown 条目的 raw 原文（回退渲染，不进索引）。 */
+  /** unknown 条目的 raw 原文（回退渲染，不进索引字段）。 */
   rawText?: string;
   /** 无结果时的灰化占位文案（不参与索引）。 */
   placeholder?: string;
   error?: boolean;
+  /** 配对卡（Collapsible）的展开态：收起时复位本格的「展开全部」。 */
+  open: boolean;
   revealed: boolean;
   intl: IntlShape;
 }) {
@@ -296,9 +311,11 @@ function TrajectoryPairCell({
     if (overflowing) setOverflowEver(true);
   }, [showAll]);
 
+  // 依赖内容：pending→ok（结果段从占位文案变成真实正文）时内容高度变化，必须重测溢出，
+  // 否则「展开全部」胶囊不出现（CR B-P2-2）。
   useLayoutEffect(() => {
     measureOverflow();
-  }, [measureOverflow]);
+  }, [measureOverflow, text, rawText, placeholder]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -312,6 +329,12 @@ function TrajectoryPairCell({
       window.removeEventListener("resize", measureOverflow);
     };
   }, [measureOverflow]);
+
+  // 卡片收起时复位「展开全部」（CR B-P2-1，对齐 ModelTrajectoryExpandedContent.tsx:88-90）：
+  // 否则重开卡片仍停在「展开全部」态，与新内容的长度不符。
+  useEffect(() => {
+    if (!open) setShowAll(false);
+  }, [open]);
 
   const capsuleVisible = overflowEver && (isOverflowing || showAll);
 
@@ -338,7 +361,12 @@ function TrajectoryPairCell({
             {placeholder}
           </span>
         ) : rawText !== undefined ? (
-          <pre className="min-w-0 whitespace-pre-wrap break-words font-mono text-ui-sm text-foreground">
+          // unknown 条目的 raw 原文：挂 content 搜索字段与索引同源
+          // （displayText 已把 raw 并入 use 段，索引侧文本逐字等于此处渲染文本）。
+          <pre
+            data-trajectory-search-field="content"
+            className="min-w-0 whitespace-pre-wrap break-words font-mono text-ui-sm text-foreground"
+          >
             {rawText}
           </pre>
         ) : (
@@ -387,19 +415,4 @@ function previewText(useText: string, resultText: string): string {
   const compact = source.replaceAll(/\s+/g, " ").trim();
   if (!compact) return "—";
   return compact.length > 120 ? `${compact.slice(0, 120)}…` : compact;
-}
-
-/** unknown 条目的 raw 原文（回退渲染）；非 unknown 返回 undefined。 */
-function rawPartText(part: ZCodeModelTrajectoryContentPart): string | undefined {
-  if (part.kind !== "unknown") return undefined;
-  return formatRawPart(part.raw);
-}
-
-/** unknown 条目的 raw 原文（回退渲染）。 */
-function formatRawPart(raw: unknown): string {
-  try {
-    return JSON.stringify(raw, null, 2) ?? String(raw);
-  } catch {
-    return String(raw);
-  }
 }

@@ -16,6 +16,7 @@ import {
   joinTrajectoryToolResults,
   trajectoryCallKey,
   trajectoryInputRowKey,
+  trajectoryToolCallBadgeText,
   trajectoryToolCallDisplayText,
   trajectoryToolCallTargetKey,
   type TrajectoryToolCallInfo,
@@ -52,6 +53,8 @@ function record(spec: {
   messages: ZCodeModelTrajectoryMessage[];
   messageCount?: number;
   toolCalls?: ZCodeModelTrajectoryContentPart[];
+  /** 调用来源（默认 main）；实现注 5 的 sidecar 尾部场景需要显式指定。 */
+  callSource?: "main" | "sidecar";
 }): ZCodeModelTrajectoryRecord {
   return {
     requestId: spec.requestId,
@@ -59,7 +62,7 @@ function record(spec: {
     startedAt: "2026-10-21T00:00:00.000Z",
     completedAt: "2026-10-21T00:00:02.000Z",
     durationMs: 1_000,
-    callSource: { kind: "main" },
+    callSource: { kind: spec.callSource ?? "main" },
     model: { modelId: "test-model" },
     request: {
       messages: spec.messages,
@@ -265,6 +268,8 @@ test("T-N1 ③ 无配对集合时行全部保留", () => {
     visibleRows.map((row) => row.messageIndex),
     [0],
   );
+  // 空集合分支返回副本，不把入参数组引用直接抛出去（调用方改写产物不得污染原始行数组）。
+  assert.notEqual(visibleRows, rows);
 });
 
 // ── T-N1 ④ 多 result part 不串文本 / id 缺失不入 map ──────────────────────
@@ -319,6 +324,9 @@ test("T-N1 ④ id 缺失不入 map：无 id 的 call 永远配不上，无 id �
 
 test("T-N1 ⑤ key 家族迁移后逐字同值（call key / input row key / tool-call target key）", () => {
   // 迁移前的旧模板（逐字照抄），迁移后必须完全一致。
+  // 旧模板来源：c7478032（spec v3 落盘那次提交）的
+  // packages/ui/src/ModelTrajectoryTurns.ts —— trajectoryCallKey / trajectoryInputRowKey
+  // 当时定义在 Turns.ts，Step 1 把它们迁到 ModelTrajectoryToolJoin.ts 作单源。
   assert.equal(trajectoryCallKey("req-1", 7), `${"req-1"}:${7}`);
   assert.equal(trajectoryInputRowKey("req-1:7", 3), `${"req-1:7"}:input:${3}`);
   // 旧 PaneParts 模板：${expansionKeyPrefix}:output:${toolCall.kind}:${toolCallIndex}
@@ -355,10 +363,115 @@ test("T-N1 ⑥ displayText：use 段 + 结果段，空结果不拼分隔符", ()
   assert.equal(withoutResult, "读 a.txt");
   assert.equal(withoutResult.endsWith("\n\n"), false, "空结果不拼分隔符");
 
-  // unknown 条目回退：没有 use 段时只给结果文本（不产生前导分隔符）。
+  // unknown 条目回退：use 段并入 raw 原文（不产生前导分隔符，详见 T-N1 ⑨）。
   assert.equal(
     trajectoryToolCallDisplayText({ part: unknownNoId, status: "missing", pairedResultText: "" }),
-    "",
+    JSON.stringify({ legacy: true }, null, 2),
+  );
+});
+
+// ── T-N1 ⑧ 徽标文本四分支（A-P1-1 / A-P2-1） ──────────────────────────────
+
+test("T-N1 ⑧ badgeText ① result 侧工具名优先于 call 侧名", () => {
+  const badge = trajectoryToolCallBadgeText({
+    part: toolCall("call_ok", "call_side_name", "读 a.txt"),
+    status: "ok",
+    pairedResultText: "内容A",
+    pairedResultToolName: "真实工具名",
+    pairedResultToolId: "call_ok",
+  });
+  assert.equal(badge.name, "真实工具名", "result 侧真实名优先");
+  assert.equal(badge.id, "ok", "id 去 call_ 前缀");
+});
+
+test("T-N1 ⑧ badgeText ② 无 result 时回退 call 侧名；call 侧无名时用兜底名 tool", () => {
+  const callSide = trajectoryToolCallBadgeText({
+    part: toolCall("call_ok", "read", "读 a.txt"),
+    status: "pending",
+    pairedResultText: "",
+  });
+  assert.equal(callSide.name, "read", "无 result 回退 call 侧名");
+  assert.equal(callSide.id, "ok");
+
+  // call 侧无工具名（wire 上 toolName 为空）：服务层 `?? "tool"` 兜底名在此出现。
+  const fallback = trajectoryToolCallBadgeText({
+    part: toolCall("call_ok", "", "读 a.txt"),
+    status: "pending",
+    pairedResultText: "",
+  });
+  assert.equal(fallback.name, "tool", "call 侧无名时兜底名为 tool");
+});
+
+test("T-N1 ⑧ badgeText ③ result 侧 toolName 为 undefined 时回退 call 侧名", () => {
+  const badge = trajectoryToolCallBadgeText({
+    part: toolCall("call_ok", "read", "读 a.txt"),
+    status: "ok",
+    pairedResultText: "内容A",
+    pairedResultToolName: undefined,
+    pairedResultToolId: "call_ok",
+  });
+  assert.equal(badge.name, "read", "result 侧名 undefined → 回退 call 侧名");
+});
+
+test("T-N1 ⑧ badgeText ①' result 侧工具名为空串时回退 call 侧名（A-P2-1）", () => {
+  const badge = trajectoryToolCallBadgeText({
+    part: toolCall("call_ok", "read", "读 a.txt"),
+    status: "ok",
+    pairedResultText: "内容A",
+    pairedResultToolName: "",
+    pairedResultToolId: "call_ok",
+  });
+  assert.equal(badge.name, "read", "result 侧名为空串也回退 call 侧名（|| 而非 ??）");
+});
+
+test("T-N1 ⑧ badgeText ④ unknown 条目无徽标（name/id 均为空串）", () => {
+  const badge = trajectoryToolCallBadgeText({
+    part: unknownNoId,
+    status: "missing",
+    pairedResultText: "",
+  });
+  assert.equal(badge.name, "", "unknown 条目无工具名徽标");
+  assert.equal(badge.id, "", "unknown 条目无 id 徽标");
+});
+
+// ── T-N1 ⑨ unknown 条目的 displayText 并入 raw 原文（A-P2-6） ──────────────
+
+test("T-N1 ⑨ unknown 条目的 displayText 并入 raw 原文：复制/全屏不再空白", () => {
+  const text = trajectoryToolCallDisplayText({
+    part: unknownNoId,
+    status: "missing",
+    pairedResultText: "",
+  });
+  assert.notEqual(text, "", "unknown 条目的 displayText 恒空会让复制禁用/全屏空白");
+  assert.equal(text, JSON.stringify({ legacy: true }, null, 2));
+});
+
+// ── T-N1 ⑩ 末条 record 为 sidecar 时前一条主调用判 missing（A-P2-3） ────────
+
+test("T-N1 ⑩ 末条 record 为 sidecar 时，前一条主调用的未配对 call 判 missing", () => {
+  const records = [
+    record({
+      requestId: "r0",
+      messages: [textMessage("user", "问")],
+      messageCount: 1,
+      toolCalls: [toolCall("call_no_result", "read", "读")],
+    }),
+    // 末条是 sidecar：主调用在它之前，未配对的 call 不再享有「尾部在途」的 pending 语义。
+    record({
+      requestId: "r1",
+      callSource: "sidecar",
+      messages: [textMessage("user", "问")],
+      messageCount: 1,
+      toolCalls: [],
+    }),
+  ];
+
+  const join = joinTrajectoryToolResults(records);
+
+  assert.deepEqual(
+    infos(join, "r0", 0).map((info) => info.status),
+    ["missing"],
+    "前一条主调用的未配对 call 判 missing 而非 pending",
   );
 });
 
