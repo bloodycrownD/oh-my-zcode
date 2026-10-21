@@ -24,6 +24,7 @@ import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { isClampOverflow } from "@/ModelTrajectoryClamp.js";
 import { useTrajectoryExpansion } from "@/ModelTrajectoryExpansion.js";
+import { useTrajectoryMessageView } from "@/ModelTrajectoryMessageView.js";
 import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import {
   trajectoryToolCallBadgeText,
@@ -77,6 +78,8 @@ export function TrajectoryToolPairCard({
   const resultText = info.pairedResultText;
   const copyLabel = intl.formatMessage({ id: "chat.message.copy" });
   const fullContentLabel = intl.formatMessage({ id: "modelTrajectory.viewFullContent" });
+  const fullContentTitle = intl.formatMessage({ id: "modelTrajectory.fullContentTitle" });
+  const { open: openFullContent } = useTrajectoryMessageView();
 
   const handleCopy = () => {
     if (!copyText || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
@@ -198,7 +201,8 @@ export function TrajectoryToolPairCard({
             intl={intl}
           />
           <div className="flex min-w-0 justify-end">
-            {/* Step 3 只渲染入口（disabled）；打开全屏 Modal 的接线归 Step 5（同路径 A/B 范式）。 */}
+            {/* 全屏入口（Step 5 接线）：正文与卡片复制按钮同源（trajectoryToolCallDisplayText），
+                标题优先用工具名（徽标同源），无工具名时回退「消息全文」。 */}
             <Button
               data-trajectory-full-content-trigger=""
               data-trajectory-tool-pair-full-content-trigger=""
@@ -208,7 +212,12 @@ export function TrajectoryToolPairCard({
               className="h-5 gap-1 rounded-full px-2 text-ui-xs text-foreground-subtle"
               aria-label={fullContentLabel}
               title={fullContentLabel}
-              disabled
+              onClick={() =>
+                openFullContent({
+                  title: badge.name || fullContentTitle,
+                  text: copyText,
+                })
+              }
             >
               <ExpandIcon className="size-3" />
               {fullContentLabel}

@@ -14,6 +14,7 @@ import { cn } from "@/components/lib/utils.js";
 import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { isClampOverflow } from "@/ModelTrajectoryClamp.js";
 import { useTrajectorySearchRevealed } from "@/ModelTrajectoryExpansion.js";
+import { useTrajectoryMessageView } from "@/ModelTrajectoryMessageView.js";
 
 type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
 
@@ -22,15 +23,18 @@ type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
  *
  * - clamp：内容超过 6 行（max-h-[6lh]）时裁剪；
  * - 搜索命中：本行被搜索命中时解除 clamp（否则高亮落在被裁区域里看不见）；
- * - 全屏入口：溢出后出现「查看全文」按钮（Step 4 只渲染、disabled；接线归 Step 5）。
+ * - 全屏入口：溢出后出现「查看全文」按钮，打开全屏只读 Modal（Step 5 接线）。
  */
 export function TrajectoryClampedPreview({
   expansionKey,
+  fullContentText,
   intl,
   children,
 }: {
   /** 本行展开键：搜索命中判定按它匹配（与搜索索引的 input row key 同源）。 */
   expansionKey?: string;
+  /** 全屏视图的正文（由调用方按消息的复制文本口径给出，容器本身不解析消息结构）。 */
+  fullContentText?: string;
   intl: IntlShape;
   children: ReactNode;
 }) {
@@ -68,6 +72,8 @@ export function TrajectoryClampedPreview({
   }, [measureOverflow]);
 
   const fullContentLabel = intl.formatMessage({ id: "modelTrajectory.viewFullContent" });
+  const fullContentTitle = intl.formatMessage({ id: "modelTrajectory.fullContentTitle" });
+  const { open: openFullContent } = useTrajectoryMessageView();
 
   return (
     <div data-trajectory-clamped-preview="" className="col-span-2 flex min-w-0 flex-col gap-1">
@@ -85,7 +91,6 @@ export function TrajectoryClampedPreview({
       </div>
       {overflowEver ? (
         <div className="flex min-w-0 justify-end">
-          {/* Step 4 只渲染入口（disabled）；打开全屏 Modal 的接线归 Step 5。 */}
           <Button
             data-trajectory-full-content-trigger=""
             type="button"
@@ -94,7 +99,9 @@ export function TrajectoryClampedPreview({
             className="h-5 gap-1 rounded-full px-2 text-ui-xs text-foreground-subtle"
             aria-label={fullContentLabel}
             title={fullContentLabel}
-            disabled
+            onClick={() =>
+              openFullContent({ title: fullContentTitle, text: fullContentText ?? "" })
+            }
           >
             <ExpandIcon className="size-3" />
             {fullContentLabel}

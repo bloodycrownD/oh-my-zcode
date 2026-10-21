@@ -12,6 +12,7 @@ import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { TrajectoryClampedPreview } from "@/ModelTrajectoryClampedPreview.js";
 import { ExpandableTrajectoryMessage } from "@/ModelTrajectoryExpandableMessage.js";
 import { formatTrajectoryDateTime, formatTrajectoryDuration } from "@/ModelTrajectoryFormat.js";
+import { messageClipboardText } from "@/ModelTrajectoryMessageView.js";
 import { ContentPartView } from "@/ModelTrajectoryPaneDetails.js";
 import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
@@ -229,8 +230,13 @@ function MessageBlock({
         {roleLabel}
       </span>
       {/* 路径 B（spec N-5）：扁平行内容走 clamp 容器（6 行封顶 + 全屏入口）。
-          搜索命中时容器解除 clamp，保证高亮不被裁掉。 */}
-      <TrajectoryClampedPreview expansionKey={expansionKey} intl={intl}>
+          搜索命中时容器解除 clamp，保证高亮不被裁掉。
+          fullContentText 按消息的复制文本口径给出，全屏视图与复制按钮内容一致。 */}
+      <TrajectoryClampedPreview
+        expansionKey={expansionKey}
+        fullContentText={messageClipboardText(message)}
+        intl={intl}
+      >
         <div data-trajectory-search-field="content" className="flex min-w-0 flex-col gap-1.5">
           {message.parts.length === 0 ? (
             <span className="text-ui-sm text-foreground-subtlest">—</span>

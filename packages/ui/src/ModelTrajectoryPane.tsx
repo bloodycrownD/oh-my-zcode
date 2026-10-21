@@ -24,6 +24,7 @@ import {
   type TrajectoryExpansionOverride,
 } from "@/ModelTrajectoryExpansion.js";
 import { ModelTrajectoryExpansionMenu } from "@/ModelTrajectoryExpansionMenu.js";
+import { ModelTrajectoryMessageViewHost } from "@/ModelTrajectoryMessageViewHost.js";
 import {
   buildTrajectorySearchIndex,
   TrajectorySearchRevealContext,
@@ -364,14 +365,18 @@ export function ModelTrajectoryPane({
                   value={activeSearchMatch?.turnKey ?? null}
                 >
                   <TrajectoryWireFilterContext.Provider value={wireFilterContextValue}>
-                    <ModelTrajectoryTimeline
-                      turnGroups={turnGroups}
-                      searchQuery={searchIndex.query}
-                      searchMatches={searchIndex.matches}
-                      activeSearchMatch={activeSearchMatch}
-                      intl={intl}
-                      scrollContainerRef={scrollContainerRef}
-                    />
+                    {/* 全屏只读视图的宿主挂在时间线外层（spec N-6）：
+                        入口按钮在虚拟化行内，Modal 状态必须活回合之外，行回收不影响已打开的视图。 */}
+                    <ModelTrajectoryMessageViewHost>
+                      <ModelTrajectoryTimeline
+                        turnGroups={turnGroups}
+                        searchQuery={searchIndex.query}
+                        searchMatches={searchIndex.matches}
+                        activeSearchMatch={activeSearchMatch}
+                        intl={intl}
+                        scrollContainerRef={scrollContainerRef}
+                      />
+                    </ModelTrajectoryMessageViewHost>
                   </TrajectoryWireFilterContext.Provider>
                 </TrajectorySearchRevealTurnContext.Provider>
               </TrajectorySearchRevealContext.Provider>

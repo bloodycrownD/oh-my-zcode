@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { clampOverflowPx, isClampOverflow } from "@/ModelTrajectoryClamp.js";
+import { messageClipboardText, useTrajectoryMessageView } from "@/ModelTrajectoryMessageView.js";
 import { ContentPartView } from "@/ModelTrajectoryPaneDetails.js";
 import {
   trajectoryToolCallInputs,
@@ -22,7 +23,7 @@ type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
  * - clamp：内容超过 6 行（max-h-[6lh]）时裁剪，底部渐隐提示还有下文；
  * - 溢出胶囊：维持现状条件（isOverflowing && !searchRevealed），点开即解除 clamp；
  * - 全屏入口：条件是持久态 overflowEver（搜索命中解除 clamp 后测量回落也不消失），
- *   本步只渲染 disabled 按钮，打开全屏 Modal 的接线归 Step 5。
+ *   打开全屏只读 Modal（Step 5 接线：状态挂在回合外层的 MessageViewHost）。
  */
 export function TrajectoryExpandedContent({
   message,
@@ -96,6 +97,10 @@ export function TrajectoryExpandedContent({
     ? `linear-gradient(to bottom, black 0%, black calc(100% - ${Math.min(overflowPx, 24)}px), transparent 100%)`
     : undefined;
   const fullContentLabel = intl.formatMessage({ id: "modelTrajectory.viewFullContent" });
+  // 全屏视图的标题与正文：正文取复制文本口径（与行内展示同源，避免两处内容漂移）。
+  const fullContentTitle = intl.formatMessage({ id: "modelTrajectory.fullContentTitle" });
+  const fullContentText = messageClipboardText(message);
+  const { open: openFullContent } = useTrajectoryMessageView();
 
   return (
     <div data-trajectory-expanded-content-shell="" className="relative min-w-0">
@@ -194,7 +199,6 @@ export function TrajectoryExpandedContent({
         ) : null}
         {overflowEver ? (
           <div className="absolute bottom-3 right-3">
-            {/* Step 4 只渲染入口（disabled）；打开全屏 Modal 的接线归 Step 5。 */}
             <Button
               data-trajectory-full-content-trigger=""
               type="button"
@@ -203,7 +207,7 @@ export function TrajectoryExpandedContent({
               className="rounded-full bg-surface/90 text-foreground-subtle shadow-sm supports-[backdrop-filter]:bg-surface/70 supports-[backdrop-filter]:backdrop-blur-md"
               aria-label={fullContentLabel}
               title={fullContentLabel}
-              disabled
+              onClick={() => openFullContent({ title: fullContentTitle, text: fullContentText })}
             >
               <ExpandIcon className="size-3.5" />
             </Button>

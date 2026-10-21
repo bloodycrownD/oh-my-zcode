@@ -12,6 +12,9 @@ import type { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
 import { TrajectoryExpandedContent } from "@/ModelTrajectoryExpandedContent.js";
 import { useTrajectoryExpansion } from "@/ModelTrajectoryExpansion.js";
+// messageClipboardText 已迁至 ModelTrajectoryMessageView.ts（spec N-9）：
+// 复制按钮与全屏视图共用同一份文本口径。
+import { messageClipboardText } from "@/ModelTrajectoryMessageView.js";
 import { trajectoryRoleTextClass, type TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
 import {
   trajectoryToolHasError,
@@ -294,15 +297,4 @@ function firstLinePreview(message: ZCodeModelTrajectoryMessage): string {
     }
   }
   return "—";
-}
-
-function messageClipboardText(message: ZCodeModelTrajectoryMessage): string {
-  if (message.role === "tool") return trajectoryToolOutputs(message).join("\n\n");
-  return message.parts
-    .map((part) => {
-      if ("text" in part && typeof part.text === "string") return part.text;
-      return JSON.stringify(part, null, 2);
-    })
-    .filter(Boolean)
-    .join("\n\n");
 }
