@@ -50,13 +50,13 @@ node_status:
       status: done,
       head_sha: "14032fea",
       executor: subagent,
-      note: "真实数据 25/25：配对率 96.15%、error 对齐 13=13（当时数据量）、下标 0 违例、剔除 97=97、孤立 321 保留、pending 仅尾部；J2-5 计数口径随数据增长失配，SC-P1-1 已改集合包含断言（778d2929）后复跑 25/25；脚本未登记 package.json（待拍板）",
+      note: "真实数据 25/25：配对率 96.15%、error 对齐 13=13（当时数据量）、下标 0 违例、剔除 97=97、孤立 321 保留、pending 仅尾部；J2-5 计数口径随数据增长失配，SC-P1-1 先改集合包含（778d2929）、r3 期数据再漂移后终降级为登记行（24 断言 + 差异登记，动态真库两口径不可方向断言）；脚本未登记 package.json（待拍板）",
     }
 cr:
   {
     status: done,
     fix_spec_ready: yes,
-    note: "修复链 68e5a57a + d350d3a0 + 52de0f2d + bd7c29bf（r1 四 scope 0P0/4P1/35P2 → fix 两批+doc 批 → review-full RF-P1-1+6P2 → 收口批）；455/455 全绿；后续 doc 提交见 cr-fix-spec 执行记录",
+    note: "修复链 68e5a57a + d350d3a0 + 52de0f2d + bd7c29bf + 778d2929（J2-5 口径修正）（r1 四 scope 0P0/4P1/35P2 → fix 两批+doc 批 → review-full RF-P1-1+6P2 → 收口批）；455/455 全绿；后续 doc 提交见 cr-fix-spec 执行记录",
   }
 spec-check:
   {

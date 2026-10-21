@@ -1,7 +1,7 @@
 # trace-nm-borrow CR fix spec
 
 > CR 收敛对象（开发 spec `spec.md` 冻结，仅作 readonly 对照）。
-> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正）+ `5e9320d6`（spec-check r1 doc-fix，含本文档入库）；HEAD 以 `.iteration-state.yaml` head_sha 为准。
+> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正）+ `5e9320d6`（spec-check r1 doc-fix，含本文档入库）+ `4db237ae`（spec-check r2 doc-fix，含本文档附录）。分支头 = `git rev-parse trace-nm-borrow`（记账时点 4db237ae）；`.iteration-state.yaml` head_sha 为记账基线、滞后一格，仅供回溯。
 > 纪律：review 子代理只读；must-fix 落本文件；主代理核验后派 fix 节点或直改；fix 后重跑 verify + 复审。
 
 ## 元信息
@@ -23,18 +23,19 @@
 
 ## must-fix 总表（条目 → 状态 → 证据）
 
-### P1（4 条，全 landed）
+### P1 总表（r1 四条 P1 + review-full 轮 RF-P1-1，全 landed）
 
-| 编号    | 内容                                                                                        | 状态   | 证据                                                             |
-| ------- | ------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------- |
-| A-P1-1  | badgeText 零断言 → 补 6 用例（badgeText 5：四分支+空串回退+unknown 无徽标；sidecar-last 1） | landed | modelTrajectoryToolJoin.test.ts:375-435 + :449-462（`68e5a57a`） |
-| B-P1-1  | 配对卡丢 call 侧 input 错误红标 → use 格接 trajectoryToolHasError                           | landed | ToolPairCard.tsx:83→198→377（`68e5a57a`）                        |
-| D-P1-1  | 行 2 truncate 裁掉失败标识 → shrink-0 前缀 + title 兜底                                     | landed | TurnGroup.tsx:129-134/:127（`d350d3a0`）                         |
-| RF-P1-1 | C-P2-10 复位后无重测（RO 钳住盒子不触发）→ measuredText 入 layout effect deps               | landed | ExpandedContent.tsx:92 / ClampedPreview.tsx:73（`bd7c29bf`）     |
+| 编号    | 内容                                                                                        | 状态            | 证据                                                                                                |
+| ------- | ------------------------------------------------------------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------- |
+| A-P1-1  | badgeText 零断言 → 补 6 用例（badgeText 5：四分支+空串回退+unknown 无徽标；sidecar-last 1） | landed          | modelTrajectoryToolJoin.test.ts:375-435 + :449-462（`68e5a57a`）                                    |
+| B-P1-1  | 配对卡丢 call 侧 input 错误红标 → use 格接 trajectoryToolHasError                           | landed          | ToolPairCard.tsx:83→198→377（`68e5a57a`）                                                           |
+| B-P1-2  | spec 措辞缺口（跨分隔符搜索高亮误落 ranges[0]）→ 实现注 8 补全措辞                          | doc 修复 landed | spec.md 实现注 8（`52de0f2d`）；代码锚点 ModelTrajectorySearch.ts:158-177、SearchHighlight.ts:88-99 |
+| D-P1-1  | 行 2 truncate 裁掉失败标识 → shrink-0 前缀 + title 兜底                                     | landed          | TurnGroup.tsx:129-134/:127（`d350d3a0`）                                                            |
+| RF-P1-1 | C-P2-10 复位后无重测（RO 钳住盒子不触发）→ measuredText 入 layout effect deps               | landed          | ExpandedContent.tsx:92 / ClampedPreview.tsx:73（`bd7c29bf`）                                        |
 
 ### P2 代码修（18 条，全 landed；commit 归属见执行记录；其余 17 条为 doc 登记 / OQ / 发布挂账，见附录归属表）
 
-A-P2-1（badgeText `||` + call 侧 `|| "tool"` 双兜底，ToolJoin.ts:73-74）、A-P2-2（filterTrajectoryInputRows slice，ToolJoin.ts:277-281）、A-P2-3（sidecar 尾部判 missing 用例，test:449-462）、A-P2-4（key 家族来源注释，ToolJoin.ts:102/:113）、A-P2-6（unknown displayText 并入 raw + raw pre 补挂 content 字段 + rawText helper 单源迁入，ToolJoin.ts:138-178 + ToolPairCard.tsx:73-75/:363-371）、B-P2-1（showAll 收起复位，ToolPairCard.tsx:332-337）、B-P2-2（溢出测量依赖补 text/rawText/placeholder，:313-318）、B-P2-7（注释上/下，:41）、C-P2-2（遮罩现算清零，ExpandedContent.tsx:42-48/:117）、C-P2-3（容差回 2px，Clamp.ts:23——spec T-N3 已补 2px 锚点）、C-P2-4（内容盒 pb-0 + 外层 pb-2/pb-12，ExpandedContent.tsx:129-139）、C-P2-5（焦点归位 capture/restore，MessageView.ts:78-95 + MessageDialog.tsx:42-44）、C-P2-6（标题 aria-hidden）、C-P2-7（Dialog w-[calc(100%-2rem)] max-w-3xl）、C-P2-8（空正文入口不渲染，trim 口径）、C-P2-9（删死属性）、C-P2-10（溢出态随内容重置 + measuredText 重测，渲染期 setState）、D-P2-3（en 去冒号，en-US.ts:1080）。
+A-P2-1（badgeText `||` + call 侧 `|| "tool"` 双兜底，ToolJoin.ts:73-74）、A-P2-2（filterTrajectoryInputRows slice，ToolJoin.ts:277-281）、A-P2-3（sidecar 尾部判 missing 用例，test:449-462）、A-P2-4（key 家族来源注释，modelTrajectoryToolJoin.test.ts:327-329）、A-P2-6（unknown displayText 并入 raw + raw pre 补挂 content 字段 + rawText helper 单源迁入，ToolJoin.ts:138-178 + ToolPairCard.tsx:73-75/:363-371）、B-P2-1（showAll 收起复位，ToolPairCard.tsx:332-337）、B-P2-2（溢出测量依赖补 text/rawText/placeholder，:313-318）、B-P2-7（注释上/下，:41）、C-P2-2（遮罩现算清零，ExpandedContent.tsx:42-48/:117）、C-P2-3（容差回 2px，Clamp.ts:23——spec T-N3 已补 2px 锚点）、C-P2-4（内容盒 pb-0 + 外层 pb-2/pb-12，ExpandedContent.tsx:129-139）、C-P2-5（焦点归位 capture/restore，MessageView.ts:78-95 + MessageDialog.tsx:42-44）、C-P2-6（标题 aria-hidden）、C-P2-7（Dialog w-[calc(100%-2rem)] max-w-3xl）、C-P2-8（空正文入口不渲染，trim 口径）、C-P2-9（删死属性）、C-P2-10（溢出态随内容重置 + measuredText 重测，渲染期 setState）、D-P2-3（en 去冒号，en-US.ts:1080）。
 
 ### RF-P2（6 条，全 landed 或注释化收口）
 
@@ -53,7 +54,7 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 3. **D-P2-8 DOM 锚点替换**：`data-trajectory-turn-stats` → `data-trajectory-turn-meta`（外部脚本若有依赖需同步）。
 4. 新增功能条目：工具配对卡 / 回合头计数行 / 6 行 clamp + 查看全文全屏 / 搜索自动展开定位（对应用户向描述）。
 
-其他：真机 manual T-N4 清单（含窄侧栏失败标识可见）；e2e 脚本是否登记 package.json（待拍板）。
+其他：真机 manual T-N4 清单（含窄侧栏失败标识可见）；e2e 脚本是否登记 package.json（待拍板）。附录中 4 条「原文佚失」条目（A-P2-7/B-P2-4/B-P2-8/D-P2-4）按推定归类，未经 r1 原文实证——若后续找回 r1 原始报告需重核。
 
 ## 附录：r1 35 条 P2 逐条归属表（SC2-P1-2 落表）
 
@@ -98,7 +99,7 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 | D-P2-7  | 错误标识口径变更                            | 发布挂账 + 注 2       | TurnCounts.ts:26/:30-31/:111、TurnGroup.tsx:219-223  |
 | D-P2-8  | DOM 锚点替换                                | 发布挂账              | TurnGroup.tsx:125（8847aeca）                        |
 
-合计：代码修 18 + spec 注 6（A-P2-5/6 重复计数去重后：A-P2-5、B-P2-5、B-P2-6、C-P2-11、D-P2-1、D-P2-2）+ OQ 5（B-P2-3/9、C-P2-12、D-P2-5/6）+ 发布挂账 2（D-P2-7/8，A-P2-1 代码修兼挂账）+ 原文佚失 4（A-P2-7、B-P2-4、B-P2-8、D-P2-4）= 35 ✓（C-P2-1 为未签发空号不在表内）。
+合计：代码修 18 + spec 注 6（A-P2-5 与 D-P2-1 同为实现注 14；余为 B-P2-5、B-P2-6、C-P2-11、D-P2-2）+ OQ 5（B-P2-3/9、C-P2-12、D-P2-5/6）+ 发布挂账 2（D-P2-7/8，A-P2-1 代码修兼挂账）+ 原文佚失 4（A-P2-7、B-P2-4、B-P2-8、D-P2-4）= 35 ✓（C-P2-1 为未签发空号不在表内）。
 
 ## open questions（不阻塞）
 
@@ -116,7 +117,8 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 - doc 批 `52de0f2d`：spec 实现注修订 + Turns.ts errorCount 死字段注释
 - review-full 末轮：16/16 P2 + 3/3 P1 landed；判 no——RF-P1-1（fix 引入）+ 6 P2 + doc 登记遗漏
 - 收口批 `bd7c29bf`：RF-P1-1 + RF-P2-2/4/5 + RF-P2-1/3/6 登记 + spec 注 15–18
-- spec-check r1（对本文档）：4 P1 + 6 P2，全记账层——SC-P1-1 e2e J2-5 实跑红（raw 28 vs mapped 35：**计数为跨 session 重复相加**，集合级一致）；SC-P1-2 T-N4 缺窄侧栏条目；SC-P1-3 发布挂账分散；SC-P1-4 数量口径自相矛盾。doc-fix：J2-5 改集合包含断言（raw ⊆ mapped，差集=0；`778d2929`）、本文档重构（总表+编号规则+发布挂账集中+口径统一）、spec T-N4 补条目、iteration-state 同步
+- spec-check r1（对本文档）：4 P1 + 6 P2，全记账层——SC-P1-1 e2e J2-5 实跑红（raw 28 vs mapped 35：**计数为跨 session 重复相加**，集合级一致）；SC-P1-2 T-N4 缺窄侧栏条目；SC-P1-3 发布挂账分散；SC-P1-4 数量口径自相矛盾。doc-fix：J2-5 改集合包含断言（`778d2929`，当时复跑 25/25；后见 r3 段——数据继续漂移证明两口径无稳定包含关系，最终降级为登记）、本文档重构（总表+编号规则+发布挂账集中+口径统一）、spec T-N4 补条目、iteration-state 同步
 - spec-check r2：代码/行为层全部独立验证过（typecheck 0 / lint 0 / parity 5936 / v4-perf 455/455 / e2e 25/25 / 5 锚点抽查成立），判 No-Go 仍为记账层——SC2-P1-1 iteration-state 重复键（严格解析失败）；SC2-P1-2 数量口径未真闭合（16 vs 18、10 条无归属）。doc-fix：重复键已修（YAML 可解析）；P2 代码修改口径 18 条；附录新增 35 条逐条归属表（r1 原始报告未入库不可恢复，按编号空间重建，4 条原文佚失显式标注）；B-D1/D1 悬空 ID 替换；锚点订正（MessageView.ts 78-95、A-P1-1 6 用例）；v4-perf 双口径注明；文件简称规则说明
-- 最终验证：typecheck 0 错、test:v4-perf 455/455、e2e-tool-join 25/25（J2-5 集合包含口径：raw ⊆ mapped，差集=0）、oxlint 0err；oxfmt 本迭代源码干净 + yaml/cr-fix-spec 已对齐；spec.md 冻结不做 oxfmt（其对嵌套代码围栏有重排，语义等价但保持入库原样）
+- 最终验证：typecheck 0 错、test:v4-perf 455/455、e2e-tool-join 24/24 + J2-5 口径差异登记行（两口径无稳定包含关系，非缺陷信号）、oxlint 0err；oxfmt 本迭代源码干净 + yaml/cr-fix-spec 已对齐；spec.md 冻结不做 oxfmt（其对嵌套代码围栏有重排，语义等价但保持入库原样）
+- spec-check r3：代码层零缺陷、7 门禁实跑全绿（typecheck 0 / lint 0err / parity 5936 / v4-perf 455/455 / architecture 0 / e2e 25/25 / oxfmt 干净），No-Go 仅 3 P1 + 4 P2 单行文本：HEAD 指针口径、P1 总表缺 B-P1-2 行、A-P2-4 锚错文件（ToolJoin.ts:102/:113 → test:327-329）。doc-fix 全项闭合（本轮提交）：HEAD 口径改 git rev-parse、P1 总表补 B-P1-2（5 行）、附录/正文 A-P2-4 订正、合计行括注改写、yaml cr 链补 778d2929、e2e 括注条件式、佚失条目推定声明入发布期待办。r3 doc-fix 复跑时数据又漂移（records 430→437，raw=33 > mapped=30 反向）——三次实测三方向证明两层口径（消息级 isError vs output error-text）在动态真库上不可方向断言，J2-5 最终降级为信息登记行（双向差集计数，非缺陷信号），断言总数 25→24；「services 映射未丢 isError」由 J2-4 与 join 单测覆盖
 - **fix-spec-ready: yes**
