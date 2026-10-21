@@ -144,13 +144,18 @@ test("readMagicContextStatusSnapshot reads budget / compartments / dropped from 
 
   const text = formatMagicContextStatusSnapshot(snapshot);
   const lines = text.split("\n");
-  // 段序固定：标题 / Budget / Compartments / Tags（Budget 自 impl-s10 起多一行
-  // 「last usage context limit」，段首行号随之下移）。
+  // 段序固定：标题 / Budget / Compartments / Tags。这里断言**相对顺序**而不是固定
+  // 行号：任一段内部增删行（Budget 自 impl-s10 起就多了一行「last usage context
+  // limit」）都不该让段序用例假红（cr-fix-spec usage/G-1）。
   assert.equal(lines[0], "Magic Context status");
   assert.equal(lines[1], `session: ${SESSION}`);
-  assert.equal(lines[3], "Budget");
-  assert.equal(lines[9], "Compartments");
-  assert.equal(lines[13], "Tags");
+  const budgetAt = lines.indexOf("Budget");
+  const compartmentsAt = lines.indexOf("Compartments");
+  const tagsAt = lines.indexOf("Tags");
+  assert.ok(
+    budgetAt > 0 && budgetAt < compartmentsAt && compartmentsAt < tagsAt,
+    `段序必须是 Budget → Compartments → Tags（实际行号 ${budgetAt}/${compartmentsAt}/${tagsAt}）`,
+  );
   // 每段的数字逐条断言——这就是 T-M11 后半要的东西。
   assert.ok(lines.includes("  protected floor: 4096"));
   assert.ok(lines.includes("  last context usage: 42%"));

@@ -17,8 +17,9 @@
  *          三条记录分别覆盖 tail / delta / full 三种落盘形态与 messageCount 三分支。
  *
  *   E2E-C  ctx-status 隔离库真机
- *          真实库（~148MiB + WAL）三件套只读拷贝到临时目录，MAGIC_CONTEXT_DB_DIR
- *          指过去，走 bootstrap 的 `runCtxCommand("ctx-status")` 真实命令链
+ *          真实库（~148MiB）主库 + 源库实际存在的 WAL/SHM 只读拷贝到临时目录，
+ *          MAGIC_CONTEXT_DB_DIR 指过去，走 bootstrap 的 `runCtxCommand("ctx-status")`
+ *          真实命令链
  *          （→ @zcode/magic-context 快照 → formatCtxStatus 排版），断言：
  *            - 输出含 `last usage context limit` 行；
  *            - 真实 session 的持久值原样透传（分子/分母成对）；
@@ -33,8 +34,8 @@
  * 隔离与清理：
  *   - 所有写入只发生在 mkdtemp 生成的临时目录；E2E-B 通过 ZCODE_DATA_BASE_DIR /
  *     USERPROFILE / HOME 把 homedir 解析整体改指临时目录，读取路径不会碰到真实 rollout；
- *   - E2E-C 的真实库只作为 copyFileSync 的源，绝不 open/write（脚本另外断言源库
- *     stat 在拷贝窗口内未变）；
+ *   - E2E-C 的真实库只作为 copyFileSync 的源，绝不 open/write（源库仍存在的断言见
+ *     C-0-4/C-3-1；mtime/大小的并发变化只提示不判红）；
  *   - 结束前关闭 sqlite 句柄并删临时目录（MC_E2E_KEEP=1 保留现场）。
  *
  * 前置：adapters / bootstrap / magic-context 的 dist 已构建且不早于对应源码（脚本自检）；
@@ -647,31 +648,53 @@ if (!existsSync(REAL_MC_DB)) {
 
 const sourceStatBefore = statSync(REAL_MC_DB);
 const copyDbPath = join(MC_DB_DIR, "magic-context.db");
+// 主库必拷；-wal/-shm 是 SQLite 的运行时伴生文件——干净关闭（或随后被 checkpoint 合并
+// 回主库）后源库上可能根本不存在，拷贝时只拷源库实际存在的件（cr-fix-spec usage/G-2）。
+const sourceParts = [];
 const copiedParts = [];
 for (const suffix of ["", "-wal", "-shm"]) {
   const source = `${REAL_MC_DB}${suffix}`;
   if (!existsSync(source)) continue;
+  sourceParts.push(suffix || "(main)");
   copyFileSync(source, `${copyDbPath}${suffix}`);
   copiedParts.push(suffix || "(main)");
 }
-const sourceStatAfterCopy = statSync(REAL_MC_DB);
+for (const suffix of ["-wal", "-shm"]) {
+  if (!sourceParts.includes(suffix)) {
+    console.log(
+      `  提示: 源库当前不存在 ${suffix}（SQLite 干净关闭后伴生文件可能已被清理），跳过该件`,
+    );
+  }
+}
+const sourceStillExistsAfterCopy = existsSync(REAL_MC_DB);
+const sourceStatAfterCopy = sourceStillExistsAfterCopy ? statSync(REAL_MC_DB) : null;
 
 check("E2E-C", "C-0-1", "真实库存在且非空", true, sourceStatBefore.size > 0);
 check(
   "E2E-C",
   "C-0-2",
-  "三件套只读拷贝（主库 + WAL + SHM）",
-  ["(main)", "-wal", "-shm"],
+  "拷贝（主库必拷；源库实际存在的 wal/shm 必在）",
+  ["(main)", ...["-wal", "-shm"].filter((suffix) => sourceParts.includes(suffix))],
   copiedParts,
 );
 check("E2E-C", "C-0-3", "拷贝主文件大小与源一致", sourceStatBefore.size, statSync(copyDbPath).size);
+// 「未写源库」的硬证据是 C-1-1 的隔离路径 + 脚本全程只做 copyFileSync；这里不比较
+// mtime/大小——真实 CLI 并发写入（含 VACUUM）会改动二者，严格相等会假红
+// （cr-fix-spec usage/G-2）。只断言源库仍在，变化仅提示。
 check(
   "E2E-C",
   "C-0-4",
-  "源库在拷贝窗口内未被改动（脚本只做 copyFileSync）",
-  { size: sourceStatBefore.size, mtimeMs: sourceStatBefore.mtimeMs },
-  { size: sourceStatAfterCopy.size, mtimeMs: sourceStatAfterCopy.mtimeMs },
+  "拷贝窗口结束后源库仍存在（未被本脚本删除/替换）",
+  true,
+  sourceStillExistsAfterCopy,
 );
+if (
+  sourceStatAfterCopy &&
+  (sourceStatAfterCopy.size !== sourceStatBefore.size ||
+    sourceStatAfterCopy.mtimeMs !== sourceStatBefore.mtimeMs)
+) {
+  console.log("  提示: 源库在拷贝窗口内 mtime/大小变化，来源是外部 CLI 并发写入（本脚本只读）");
+}
 
 const ctxCommands = await import(pathToFileURL(join(BOOTSTRAP_DIST, "ctx-commands/index.js")).href);
 const { getMagicContextDatabasePath } = await import(
@@ -753,7 +776,15 @@ check(
   true,
   copyColumns.includes("last_usage_context_limit"),
 );
-check("E2E-C", "C-2-2", "隔离拷贝 schema 版本 = 10000", 10000, schemaVersion);
+// 期望值取实现导出的常量，不硬编码 10000：下一次 migration 落库后这里自动跟随
+// （cr-fix-spec usage/G-3）。
+check(
+  "E2E-C",
+  "C-2-2",
+  `隔离拷贝 schema 版本 = LATEST_SUPPORTED_VERSION(${mcStorageDb.LATEST_SUPPORTED_VERSION})`,
+  mcStorageDb.LATEST_SUPPORTED_VERSION,
+  schemaVersion,
+);
 
 let observedRow = copyDb
   .prepare(
@@ -815,17 +846,24 @@ check(
     : null,
 );
 
-// 结束时复查源库：脚本对源库只做 copyFileSync；若外部 CLI 并发写入会改 mtime，单独提示。
-const sourceStatAfterRun = statSync(REAL_MC_DB);
+// 结束时复查源库：脚本对源库只做 copyFileSync；外部 CLI 并发写入会改 mtime/大小，
+// 因此这里同样只断言源库仍在（硬证据是 C-1-1 的隔离路径），变化仅提示
+// （cr-fix-spec usage/G-2：不做大小比较，避免并发 VACUUM 假红）。
+const sourceStillExistsAfterRun = existsSync(REAL_MC_DB);
+const sourceStatAfterRun = sourceStillExistsAfterRun ? statSync(REAL_MC_DB) : null;
 check(
   "E2E-C",
   "C-3-1",
-  "全程结束时源库主文件大小未变（未被本脚本写入）",
-  sourceStatBefore.size,
-  sourceStatAfterRun.size,
+  "全程结束时源库仍存在（未被本脚本写入/删除）",
+  true,
+  sourceStillExistsAfterRun,
 );
-if (sourceStatAfterRun.mtimeMs !== sourceStatBefore.mtimeMs) {
-  console.log("  提示: 源库 mtime 在运行期间变化，来源是外部 CLI 并发写入（本脚本只读）");
+if (
+  sourceStatAfterRun &&
+  (sourceStatAfterRun.size !== sourceStatBefore.size ||
+    sourceStatAfterRun.mtimeMs !== sourceStatBefore.mtimeMs)
+) {
+  console.log("  提示: 源库 mtime/大小在运行期间变化，来源是外部 CLI 并发写入（本脚本只读）");
 }
 
 // ── 汇总 ────────────────────────────────────────────────────────────────────
