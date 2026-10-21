@@ -1,7 +1,7 @@
 # trace-nm-borrow CR fix spec
 
 > CR 收敛对象（开发 spec `spec.md` 冻结，仅作 readonly 对照）。
-> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正），HEAD `778d2929`。
+> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正）+ `5e9320d6`（spec-check r1 doc-fix，含本文档入库）；HEAD 以 `.iteration-state.yaml` head_sha 为准。
 > 纪律：review 子代理只读；must-fix 落本文件；主代理核验后派 fix 节点或直改；fix 后重跑 verify + 复审。
 
 ## 元信息

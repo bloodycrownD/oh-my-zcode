@@ -1,7 +1,7 @@
 spec_path: docs/iterations/trace-nm-borrow/spec.md
 branch: trace-nm-borrow
 base_sha: e4d3a63e
-head_sha: "778d2929"
+head_sha: "5e9320d6"
 dag_version: 1
 wave_plan: [[impl-s1], [impl-s2, impl-s4], [impl-s3], [impl-s5, impl-s6], [verify-all], [cr-func-all], [e2e-ext]]
 status: dev-ready
