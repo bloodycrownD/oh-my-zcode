@@ -24,10 +24,12 @@ export const ZCODE_CUA_DEV_MODE_ENV_KEY = "ZCODE_CUA_DEV_MODE";
  * CLI 在 app-server 冷启动路径读取并作为 `uiDetectedLocale` 传给 app——GUI 进程的
  * `LANG`/`LC_*` 常缺位，不能让 Node Intl 在无头环境把中文系统解析成 en。
  *
- * 注意：这是一个**载荷键**，绝不能加入 `SANITIZED_RUNTIME_ENV_KEYS` 或
- * `NON_TOOL_PASSTHROUGH_RUNTIME_ENV_KEYS`。那两个名单是「从子进程 env 中剔除」的
- * 黑名单（`prepareCliRuntimeEnv` 在 `run.ts` 读取之前执行），未列入即原样存活；
- * 列入会让本键在消费端读到之前被删掉。
+ * 注意：这是一个**载荷键**，两个名单都不要加。`SANITIZED_RUNTIME_ENV_KEYS` 是
+ * 「从子进程 env 中剔除」的黑名单（`sanitizeZCodeRuntimeEnv(InPlace)` 在
+ * `run.ts` 读取之前执行），列入会让本键在消费端读到之前被删掉；
+ * `NON_TOOL_PASSTHROUGH_RUNTIME_ENV_KEYS` 不删键，只把键排除出
+ * `ZCODE_TOOL_ENV_PASSTHROUGH_JSON` 的工具子进程恢复集合——本键不在 passthrough
+ * 采集范围（只采集 SANITIZED 键），列入无实际效果，但同样不应列入以免误导。
  */
 export const ZCODE_UI_LOCALE_ENV_KEY = "ZCODE_UI_LOCALE";
 

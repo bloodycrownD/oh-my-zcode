@@ -28,9 +28,10 @@
  *      ② 显式 promptLanguage 优先于 uiDetectedLocale（T-L3，防接线越权）。
  *      既有 D 组只断言解析器本身，无法证明 A7/A8 的接线存在与否。
  *
- * 依赖已构建的 dist：`pnpm --filter @zcode/adapters build`、
- * `pnpm --filter @zcode/bootstrap build`（以及 @zcode/shared 的 dist 兜底，见
- * 下方 resolve 钩子——与 test-magic-context-config-rpc.mjs 同一范式）。
+ * 依赖已构建的 dist：`pnpm --dir apps/zcode-cli --filter "@zcode/bootstrap..." build`
+ * （带 `...` 一并构建依赖，含 @zcode/adapters 与 E 组静态导入的 @zcode/provider；
+ * @zcode/shared 另有 dist 兜底见下方 resolve 钩子——与
+ * test-magic-context-config-rpc.mjs 同一范式）。
  */
 
 import assert from "node:assert/strict";
