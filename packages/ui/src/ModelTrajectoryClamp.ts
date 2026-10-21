@@ -20,7 +20,7 @@ export interface ClampOverflowInput {
 }
 
 /** 默认容差（px）：吸收亚像素抖动。 */
-export const DEFAULT_CLAMP_TOLERANCE_PX = 1;
+export const DEFAULT_CLAMP_TOLERANCE_PX = 2;
 
 /**
  * 是否溢出：溢出像素数（scrollHeight - clientHeight）严格大于容差才判定为溢出。

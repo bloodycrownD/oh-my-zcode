@@ -6,7 +6,7 @@
 // 依赖方向：本模块 → React（createContext）+ services 类型 + ToolPayload（复制文本口径）。
 // 不反向依赖 PaneParts / TurnGroup / Timeline 等渲染模块，避免循环导入（AGENTS.md）。
 import type { ZCodeModelTrajectoryMessage } from "@zcode/services";
-import { createContext, useContext } from "react";
+import { createContext, useCallback, useContext, useMemo } from "react";
 import { trajectoryToolOutputs } from "@/ModelTrajectoryToolPayload.js";
 
 /**
@@ -45,12 +45,49 @@ export const TrajectoryMessageViewContext = createContext<TrajectoryMessageViewC
 /** 读取全屏视图上下文；缺少 Provider 说明挂载点漏了 Host，直接报错优于静默失效。 */
 export function useTrajectoryMessageView(): TrajectoryMessageViewContextValue {
   const value = useContext(TrajectoryMessageViewContext);
+  // 打开时记录焦点归位目标，关闭时归还（Radix Dialog 没有 trigger，关闭后焦点会丢到 body 上）。
+  const open = useCallback(
+    (request: TrajectoryMessageViewRequest) => {
+      captureTrajectoryFocusReturn();
+      value?.open(request);
+    },
+    [value],
+  );
+  const close = useCallback(() => {
+    restoreTrajectoryFocusReturn();
+    value?.close();
+  }, [value]);
+  const result = useMemo<TrajectoryMessageViewContextValue>(() => ({ open, close }), [close, open]);
   if (!value) {
     throw new Error(
       "useTrajectoryMessageView 必须在 ModelTrajectoryMessageViewHost 内使用（轨迹面板挂载点缺失）",
     );
   }
-  return value;
+  return result;
+}
+
+// ── 焦点归位（打开前记录 → 关闭时归还） ──
+//
+// 全屏视图是程序化打开的（没有 Radix trigger 元素），Radix 自己的焦点归位兜不住；
+// 入口按钮又在虚拟化行内，关闭后焦点若丢到 body，键盘用户会从头 Tab。
+// 记录放在模块级：轨迹面板同一时刻只有一个全屏视图，模块级单例足够。
+
+/** 打开前正在获得焦点的元素（HTMLElement；无则 null）。 */
+let focusReturnTarget: HTMLElement | null = null;
+
+/** 记录打开全屏视图前的焦点元素（open 时调用）。 */
+export function captureTrajectoryFocusReturn(): void {
+  if (typeof document === "undefined") return;
+  const active = document.activeElement;
+  focusReturnTarget = active instanceof HTMLElement ? active : null;
+}
+
+/** 关闭时把焦点还给打开前的元素（元素已卸载 / 不可聚焦则放弃）。 */
+export function restoreTrajectoryFocusReturn(): void {
+  const target = focusReturnTarget;
+  focusReturnTarget = null;
+  if (!target || !target.isConnected) return;
+  target.focus();
 }
 
 /**

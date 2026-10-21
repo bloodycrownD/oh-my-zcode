@@ -4,11 +4,15 @@
 // 因此不嵌在行内的 Collapsible 里，Esc / 遮罩关闭 / 焦点圈定全部开箱即用，
 // 也天然不与聊天页的「Esc 停止生成」监听冲突（不新增任何 window 级 Esc 监听）。
 import { CopyIcon } from "lucide-react";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button.js";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
-import type { TrajectoryMessageViewRequest } from "@/ModelTrajectoryMessageView.js";
+import {
+  restoreTrajectoryFocusReturn,
+  type TrajectoryMessageViewRequest,
+} from "@/ModelTrajectoryMessageView.js";
 
 /**
  * 全屏只读视图：等宽 pre-wrap 全文 + 复制按钮。
@@ -33,6 +37,12 @@ export function ModelTrajectoryMessageDialog({
   const title = request?.title.trim() || fallbackTitle;
   const text = request?.text ?? "";
 
+  // 焦点归位：全屏视图是程序化打开的（无 Radix trigger），
+  // Esc / 遮罩关闭时把焦点还给打开前的元素（Radix onCloseAutoFocus 的补偿）。
+  useEffect(() => {
+    if (!open) restoreTrajectoryFocusReturn();
+  }, [open]);
+
   const handleCopy = () => {
     if (!text || typeof navigator === "undefined" || !navigator.clipboard?.writeText) return;
     void navigator.clipboard.writeText(text).catch((error: unknown) => {
@@ -47,11 +57,17 @@ export function ModelTrajectoryMessageDialog({
         if (!nextOpen) onClose();
       }}
     >
-      <DialogContent aria-describedby={undefined} className="max-w-3xl">
+      <DialogContent
+        aria-describedby={undefined}
+        // 窄视口不贴边：w 覆盖底座的 w-full，max-w 覆盖底座的 max-w-[calc(100%-2rem)]。
+        className="w-[calc(100%-2rem)] max-w-3xl"
+      >
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <div className="flex min-w-0 items-center justify-between gap-2 pr-8">
           <span
             data-trajectory-message-view-title=""
+            // 可见标题与 sr-only 标题同文：读屏只念一次（aria-hidden 交给 sr-only 标题）。
+            aria-hidden="true"
             className="min-w-0 truncate text-ui-sm font-medium text-foreground"
           >
             {title}

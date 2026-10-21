@@ -1077,7 +1077,7 @@ const enUS: Record<string, string> = {
   "modelTrajectory.turn.hiddenCount": "{count} hidden",
   "modelTrajectory.turn.showPlaceholderRows": "Show placeholder rows",
   "modelTrajectory.turn.hidePlaceholderRows": "Hide placeholder rows",
-  "modelTrajectory.turn.toolCalls": "Tool calls: {count}",
+  "modelTrajectory.turn.toolCalls": "Tool calls {count}",
   "modelTrajectory.turn.charCount": "{count} chars",
   "modelTrajectory.turn.failureCount": "{count} failed",
   "modelTrajectory.message": "Message",

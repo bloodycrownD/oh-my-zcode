@@ -13,21 +13,22 @@ import {
   isClampOverflow,
 } from "../src/ModelTrajectoryClamp.js";
 
-test("默认容差为 1px（吸收亚像素抖动）", () => {
-  assert.equal(DEFAULT_CLAMP_TOLERANCE_PX, 1);
+test("默认容差为 2px（吸收亚像素抖动）", () => {
+  assert.equal(DEFAULT_CLAMP_TOLERANCE_PX, 2);
 });
 
 test("scrollHeight 等于 clientHeight 不溢出", () => {
   assert.equal(isClampOverflow({ scrollHeight: 100, clientHeight: 100 }), false);
 });
 
-test("溢出差值恰好等于容差不算溢出", () => {
+test("溢出差值不超过容差不算溢出", () => {
   // 容差是「允许的误差」，差值必须严格大于容差才判定溢出。
   assert.equal(isClampOverflow({ scrollHeight: 101, clientHeight: 100 }), false);
+  assert.equal(isClampOverflow({ scrollHeight: 102, clientHeight: 100 }), false);
 });
 
-test("溢出差值超出容差 1px 判定溢出", () => {
-  assert.equal(isClampOverflow({ scrollHeight: 102, clientHeight: 100 }), true);
+test("溢出差值超出容差判定溢出", () => {
+  assert.equal(isClampOverflow({ scrollHeight: 103, clientHeight: 100 }), true);
 });
 
 test("显式传入容差时按该容差判定", () => {

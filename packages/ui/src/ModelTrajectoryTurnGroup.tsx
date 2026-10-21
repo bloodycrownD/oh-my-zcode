@@ -50,6 +50,26 @@ export function ModelTrajectoryTurnGroup({
   // 计数行段序列：summaryCalls / toolCalls / charCount / failureCount / 时长 / 每来源一段，
   // 省略规则与顺序由纯函数决定，本层只负责渲染与插入分隔符。
   const metaSegments = useMemo(() => formatTurnCounts(group.stats, counts), [group.stats, counts]);
+  // D-P1-1：失败段（图标 + 数字）移出 truncate 容器作 shrink-0 前缀——
+  // 窄侧栏下 truncate 会把行尾的失败标识整段裁掉，失败信息必须始终可见。
+  // 纯函数 formatTurnCounts 与其用例（T-N6）不动，只在组件层提取与重排。
+  const failureSegment = useMemo(
+    () => metaSegments.find((segment) => isFailureSegment(segment)) ?? null,
+    [metaSegments],
+  );
+  const visibleSegments = useMemo(
+    () => metaSegments.filter((segment) => !isFailureSegment(segment)),
+    [metaSegments],
+  );
+  // 行 2 的完整文本（title 兜底）：truncate 后仍可悬停查看全部计数段。
+  const metaTitle = useMemo(
+    () =>
+      [
+        ...(failureSegment ? [segmentText(failureSegment, intl)] : []),
+        ...visibleSegments.map((segment) => segmentText(segment, intl)),
+      ].join(" · "),
+    [failureSegment, intl, visibleSegments],
+  );
 
   // 回合根挂**命名组** `group/turn`：TurnGroup 自身的 open 态变体只认它。
   // 裸 `group` 会污染回合内消息行——Tailwind 的 group-data 变体匹配任意祖先的
@@ -99,17 +119,27 @@ export function ModelTrajectoryTurnGroup({
               </span>
             ) : null}
           </span>
-          {/* 行 2 = 计数行：失败段整段红色，图标与失败数字同源（counts.failureCount）。 */}
+          {/* 行 2 = 计数行：失败段整段红色，图标与失败数字同源（counts.failureCount）。
+              失败段是 shrink-0 前缀（不进 truncate），其余段照旧 truncate。 */}
           <span
             data-trajectory-turn-meta=""
-            className="block w-full min-w-0 truncate font-mono text-ui-xs text-foreground-subtlest"
+            className="flex w-full min-w-0 items-center font-mono text-ui-xs text-foreground-subtlest"
+            title={metaTitle}
           >
-            {metaSegments.map((segment, index) => (
-              <Fragment key={segmentKey(segment, index)}>
-                {index > 0 ? <span aria-hidden="true"> · </span> : null}
-                <TurnMetaSegment segment={segment} intl={intl} />
-              </Fragment>
-            ))}
+            {failureSegment ? (
+              <span className="shrink-0">
+                <TurnMetaSegment segment={failureSegment} intl={intl} />
+                {visibleSegments.length > 0 ? <span aria-hidden="true"> · </span> : null}
+              </span>
+            ) : null}
+            <span className="min-w-0 flex-1 truncate">
+              {visibleSegments.map((segment, index) => (
+                <Fragment key={segmentKey(segment, index)}>
+                  {index > 0 ? <span aria-hidden="true"> · </span> : null}
+                  <TurnMetaSegment segment={segment} intl={intl} />
+                </Fragment>
+              ))}
+            </span>
           </span>
         </CollapsibleTrigger>
         <span className="relative -ml-1 mr-1 flex items-center justify-end">
@@ -204,4 +234,15 @@ function TurnMetaSegment({
 /** 段渲染 key：i18n 段用 id，原样字符串段用文本（同一段序列内 id 唯一）。 */
 function segmentKey(segment: TrajectoryTurnCountSegment, index: number): string {
   return typeof segment === "string" ? `text-${index}-${segment}` : `i18n-${index}-${segment.id}`;
+}
+
+/** 是否失败计数段（i18n 段 id 匹配；原样字符串段不是失败段）。 */
+function isFailureSegment(segment: TrajectoryTurnCountSegment): boolean {
+  return typeof segment !== "string" && segment.id === FAILURE_COUNT_SEGMENT_ID;
+}
+
+/** 段的纯文本（title 兜底用；图标不在文本里）。 */
+function segmentText(segment: TrajectoryTurnCountSegment, intl: IntlShape): string {
+  if (typeof segment === "string") return segment;
+  return intl.formatMessage({ id: segment.id }, segment.values);
 }

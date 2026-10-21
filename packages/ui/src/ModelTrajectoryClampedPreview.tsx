@@ -43,6 +43,17 @@ export function TrajectoryClampedPreview({
   // 入口若跟着回落就会在搜索命中期间凭空消失——这里只置位、不回退。
   const [overflowEver, setOverflowEver] = useState(false);
   const searchRevealed = useTrajectorySearchRevealed(expansionKey);
+  // 全屏视图的正文（调用方按复制文本口径给出）：为空时不提供全屏入口。
+  const contentText = fullContentText ?? "";
+
+  // C-P2-10：正文变化时重置溢出态——沿用旧正文的「曾经溢出」对新正文是错的。
+  // 用「渲染期调整 state」而非 useEffect：useEffect 复位会与 ResizeObserver 重测竞态
+  // （RO 先回调置位、复位后到 → 全屏入口被误清），渲染期调整保证复位先于本次提交后的测量。
+  const [measuredText, setMeasuredText] = useState(contentText);
+  if (measuredText !== contentText) {
+    setMeasuredText(contentText);
+    setOverflowEver(false);
+  }
 
   const measureOverflow = useCallback(() => {
     const element = contentRef.current;
@@ -80,7 +91,6 @@ export function TrajectoryClampedPreview({
       <div
         ref={contentRef}
         data-trajectory-clamped-content=""
-        data-trajectory-clamp-revealed={searchRevealed ? "" : undefined}
         className={cn(
           // text-ui-sm/leading-relaxed 让 max-h-[6lh] 的「6 行」与正文行高对齐。
           "flex min-w-0 flex-col gap-1.5 overflow-hidden text-ui-sm leading-relaxed",
@@ -89,7 +99,7 @@ export function TrajectoryClampedPreview({
       >
         {children}
       </div>
-      {overflowEver ? (
+      {overflowEver && contentText.trim() !== "" ? (
         <div className="flex min-w-0 justify-end">
           <Button
             data-trajectory-full-content-trigger=""
@@ -99,9 +109,7 @@ export function TrajectoryClampedPreview({
             className="h-5 gap-1 rounded-full px-2 text-ui-xs text-foreground-subtle"
             aria-label={fullContentLabel}
             title={fullContentLabel}
-            onClick={() =>
-              openFullContent({ title: fullContentTitle, text: fullContentText ?? "" })
-            }
+            onClick={() => openFullContent({ title: fullContentTitle, text: contentText })}
           >
             <ExpandIcon className="size-3" />
             {fullContentLabel}

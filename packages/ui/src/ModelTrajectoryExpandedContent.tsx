@@ -40,8 +40,10 @@ export function TrajectoryExpandedContent({
 }) {
   const contentRef = useRef<HTMLDivElement>(null);
   const [isOverflowing, setIsOverflowing] = useState(false);
-  // 溢出像素数：底部渐隐的宽度按真实溢出量取（上限 24px），裁得越多、渐隐越明显。
-  const [overflowPx, setOverflowPx] = useState(0);
+  // 最近一次测量的高度（scrollHeight / clientHeight）：
+  // 底部渐隐的宽度按真实溢出量现算（上限 24px），裁得越多、渐隐越明显；
+  // 不溢出时宽度取 0，不留旧值（遮罩残留）。
+  const [overflowMetrics, setOverflowMetrics] = useState({ scrollHeight: 0, clientHeight: 0 });
   // 持久态「曾经溢出」：searchRevealed 会摘掉 max-h，此时重新测量只会得到「不再溢出」，
   // 全屏入口若跟着回落就会在搜索命中期间凭空消失——所以这里只置位、不回退。
   const [overflowEver, setOverflowEver] = useState(false);
@@ -51,19 +53,33 @@ export function TrajectoryExpandedContent({
   const toolPayloads = message.parts.some((part) => part.kind === "tool-result")
     ? trajectoryToolOutputs(message)
     : trajectoryToolCallInputs(message);
+  // 全屏视图的正文：取复制文本口径（与行内展示同源，避免两处内容漂移）。
+  const fullContentText = messageClipboardText(message);
+
+  // C-P2-10：正文变化时重置展开态与溢出态——沿用旧正文的「展开全部 / 曾经溢出」对新正文是错的。
+  // 用「渲染期调整 state」而非 useEffect：useEffect 复位会与 ResizeObserver 重测竞态
+  // （RO 先回调置位、复位后到 → 全屏入口被误清），渲染期调整保证复位先于本次提交后的测量。
+  const [measuredText, setMeasuredText] = useState(fullContentText);
+  if (measuredText !== fullContentText) {
+    setMeasuredText(fullContentText);
+    setShowAll(false);
+    setOverflowEver(false);
+    setIsOverflowing(false);
+  }
 
   const measureOverflow = useCallback(() => {
     const element = contentRef.current;
     if (!element || showAll) return;
-    const overflowing = isClampOverflow({
-      scrollHeight: element.scrollHeight,
-      clientHeight: element.clientHeight,
-    });
+    const scrollHeight = element.scrollHeight;
+    const clientHeight = element.clientHeight;
+    setOverflowMetrics((previous) =>
+      previous.scrollHeight === scrollHeight && previous.clientHeight === clientHeight
+        ? previous
+        : { scrollHeight, clientHeight },
+    );
+    const overflowing = isClampOverflow({ scrollHeight, clientHeight });
     setIsOverflowing(overflowing);
     if (overflowing) {
-      setOverflowPx(
-        clampOverflowPx({ scrollHeight: element.scrollHeight, clientHeight: element.clientHeight }),
-      );
       setOverflowEver(true);
     }
   }, [showAll]);
@@ -93,13 +109,17 @@ export function TrajectoryExpandedContent({
   const clipped = isOverflowing && !contentExpanded;
   // 溢出胶囊的可见条件维持现状（isOverflowing && !searchRevealed）。
   const capsuleVisible = isOverflowing && !searchRevealed;
+  // 渐隐遮罩宽度现算：溢出像素数取最近一次测量值（上限 24px），不溢出时为 0——
+  // 旧实现把宽度存进 state，内容变化后会残留上一次的渐隐高度。
+  const overflowPx = clipped ? Math.min(clampOverflowPx(overflowMetrics), 24) : 0;
   const maskImage = clipped
-    ? `linear-gradient(to bottom, black 0%, black calc(100% - ${Math.min(overflowPx, 24)}px), transparent 100%)`
+    ? `linear-gradient(to bottom, black 0%, black calc(100% - ${overflowPx}px), transparent 100%)`
     : undefined;
   const fullContentLabel = intl.formatMessage({ id: "modelTrajectory.viewFullContent" });
-  // 全屏视图的标题与正文：正文取复制文本口径（与行内展示同源，避免两处内容漂移）。
+  // 全屏视图的标题：与正文同源的标题行。
   const fullContentTitle = intl.formatMessage({ id: "modelTrajectory.fullContentTitle" });
-  const fullContentText = messageClipboardText(message);
+  // 正文为空时不提供全屏入口（打开也是空白）。
+  const hasFullContent = fullContentText.trim() !== "";
   const { open: openFullContent } = useTrajectoryMessageView();
 
   return (
@@ -114,8 +134,9 @@ export function TrajectoryExpandedContent({
           data-trajectory-user-content-card={role === "user" ? "" : undefined}
           data-overflow-clipped={clipped || undefined}
           className={cn(
-            // text-ui-sm/leading-relaxed 让 max-h-[6lh] 的「6 行」与正文行高对齐。
-            "flex w-full min-w-0 flex-col gap-1.5 overflow-hidden px-3 pt-0 pb-2 text-ui-sm leading-relaxed",
+            // text-ui-sm/leading-relaxed 让 max-h-[6lh] 的「6 行」与正文行高对齐；
+            // 内容盒不留 pb（留白由盒外的 pb-12 浮动按钮带承担），否则 6 行里只有 5 行半可见。
+            "flex w-full min-w-0 flex-col gap-1.5 overflow-hidden px-3 pt-0 text-ui-sm leading-relaxed",
             !contentExpanded && "max-h-[6lh]",
           )}
           style={{ maskImage, WebkitMaskImage: maskImage }}
@@ -197,7 +218,7 @@ export function TrajectoryExpandedContent({
             </Button>
           </div>
         ) : null}
-        {overflowEver ? (
+        {overflowEver && hasFullContent ? (
           <div className="absolute bottom-3 right-3">
             <Button
               data-trajectory-full-content-trigger=""
