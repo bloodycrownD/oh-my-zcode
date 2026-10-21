@@ -31,8 +31,9 @@ export function ModelTrajectoryTimeline({
     count: turnGroups.length,
     getScrollElement: () => scrollContainerRef.current,
     getItemKey: (index) => turnGroups[index]?.key ?? index,
-    // 回合外壳默认收起，估算值按「表头一行」给；展开后由 measureElement 实测修正。
-    estimateSize: () => 44,
+    // 回合外壳默认收起，估算值按「表头两行」给（序号行 + 计数行）；
+    // 展开后由 measureElement 实测修正。
+    estimateSize: () => 64,
     overscan: 3,
   });
   // 搜索切换会同时收起旧命中并展开新命中；此时禁止 virtualizer 根据每次测高回调连续

@@ -1,6 +1,5 @@
-import type { ZCodeModelTrajectoryCallSourceKind } from "@zcode/services";
 import { ChevronRightIcon, CircleAlertIcon } from "lucide-react";
-import { Fragment } from "react";
+import { Fragment, useMemo } from "react";
 import { Button } from "@/components/ui/button.js";
 import {
   Collapsible,
@@ -8,18 +7,25 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible.js";
 import { useTrajectoryExpansion } from "@/ModelTrajectoryExpansion.js";
-import { formatTrajectoryDuration } from "@/ModelTrajectoryFormat.js";
 import { CallCard, type IntlShape } from "@/ModelTrajectoryPaneParts.js";
 import {
-  trajectoryCallKey,
-  type TrajectoryTurnGroup,
-  type TrajectoryTurnStats,
-} from "@/ModelTrajectoryTurns.js";
+  formatTurnCounts,
+  resolveTrajectoryTurnCounts,
+  type TrajectoryTurnCountSegment,
+} from "@/ModelTrajectoryTurnCounts.js";
+import { trajectoryCallKey, type TrajectoryTurnGroup } from "@/ModelTrajectoryTurns.js";
+
+/** 失败计数段（整段红色 + 同源告警图标）的 i18n id。 */
+const FAILURE_COUNT_SEGMENT_ID = "modelTrajectory.turn.failureCount";
 
 /**
  * 回合外壳（spec B-4）：顶层 IA 的一个单元，默认收起。
  *
- * 头部 = 回合序号 + 用户输入预览 + assistant 预览（收起态）+ stats（N 次调用 · 时长 · 来源）。
+ * 头部两行（spec N-7 后半）：
+ * - 行 1 = 回合序号 + 用户输入预览 + assistant 预览；
+ * - 行 2 = 计数行（`data-trajectory-turn-meta`）：调用次数 / 工具调用数 / 输出字数 /
+ *   失败数（红色）/ 时长 / 来源，段序列由 `formatTurnCounts` 产出，分隔符在本层插入。
+ *
  * 展开 = 该回合的 CallCard 列表（既有 CallCard 渲染逻辑原样保留在回合内部）。
  * 聊天页 ConversationTurnGroup 与本组件共享的只是「折叠外壳 + 预览摘要」范式，
  * 其渲染上下文与对话投影深耦合，不复用代码。
@@ -39,6 +45,12 @@ export function ModelTrajectoryTurnGroup({
     defaultOpen: false,
   });
 
+  // 回合计数（spec N-7）：口径集中在 ModelTrajectoryTurnCounts，group 引用变化时重算。
+  const counts = useMemo(() => resolveTrajectoryTurnCounts(group), [group]);
+  // 计数行段序列：summaryCalls / toolCalls / charCount / failureCount / 时长 / 每来源一段，
+  // 省略规则与顺序由纯函数决定，本层只负责渲染与插入分隔符。
+  const metaSegments = useMemo(() => formatTurnCounts(group.stats, counts), [group.stats, counts]);
+
   // 回合根挂**命名组** `group/turn`：TurnGroup 自身的 open 态变体只认它。
   // 裸 `group` 会污染回合内消息行——Tailwind 的 group-data 变体匹配任意祖先的
   // .group[data-state=open]，回合展开后消息行（自身 closed）的摘要/箭头也会被翻转（B-1）。
@@ -55,48 +67,49 @@ export function ModelTrajectoryTurnGroup({
       <div className="col-span-full grid min-h-8 w-full min-w-0 grid-cols-subgrid items-center">
         <CollapsibleTrigger
           data-trajectory-turn-trigger=""
-          className="col-span-2 flex min-h-8 min-w-0 items-center gap-2 py-1 pl-3 pr-2 text-left text-ui-sm text-foreground-subtle"
+          className="col-span-2 flex min-w-0 flex-col items-stretch gap-0.5 py-1 pl-3 pr-2 text-left text-ui-sm text-foreground-subtle"
         >
-          <span
-            data-trajectory-turn-number=""
-            className="shrink-0 font-mono text-ui-xs text-foreground-subtlest"
-          >
-            {String(group.turnIndex + 1).padStart(2, "0")}
-          </span>
-          <span
-            data-trajectory-turn-label=""
-            className="shrink-0 font-mono text-ui-xs uppercase text-foreground-subtle"
-          >
-            {intl.formatMessage({ id: "modelTrajectory.turn" })}
-          </span>
-          <span
-            data-trajectory-turn-user-preview=""
-            className="min-w-0 flex-1 truncate font-mono text-foreground"
-            title={group.userPreview}
-          >
-            {group.userPreview}
-          </span>
-          {group.assistantPreview && group.userPreviewKind === "user" ? (
+          <span className="flex min-h-6 w-full min-w-0 items-center gap-2">
             <span
-              data-trajectory-turn-assistant-preview=""
-              className="hidden min-w-0 max-w-[40%] shrink truncate font-mono text-ui-xs text-foreground-subtlest group-data-[state=open]/turn:hidden lg:inline"
-              title={group.assistantPreview}
+              data-trajectory-turn-number=""
+              className="shrink-0 font-mono text-ui-xs text-foreground-subtlest"
             >
-              → {group.assistantPreview}
+              {String(group.turnIndex + 1).padStart(2, "0")}
             </span>
-          ) : null}
-          <span
-            data-trajectory-turn-stats=""
-            className="ml-auto flex shrink-0 items-center gap-1 font-mono text-ui-xs text-foreground-subtlest"
-          >
-            {group.stats.errorCount > 0 ? (
-              <CircleAlertIcon
-                data-trajectory-turn-error-icon=""
-                aria-hidden="true"
-                className="size-3 shrink-0 text-destructive"
-              />
+            <span
+              data-trajectory-turn-label=""
+              className="shrink-0 font-mono text-ui-xs uppercase text-foreground-subtle"
+            >
+              {intl.formatMessage({ id: "modelTrajectory.turn" })}
+            </span>
+            <span
+              data-trajectory-turn-user-preview=""
+              className="min-w-0 flex-1 truncate font-mono text-foreground"
+              title={group.userPreview}
+            >
+              {group.userPreview}
+            </span>
+            {group.assistantPreview && group.userPreviewKind === "user" ? (
+              <span
+                data-trajectory-turn-assistant-preview=""
+                className="hidden min-w-0 max-w-[40%] shrink truncate font-mono text-ui-xs text-foreground-subtlest group-data-[state=open]/turn:hidden lg:inline"
+                title={group.assistantPreview}
+              >
+                → {group.assistantPreview}
+              </span>
             ) : null}
-            <span>{formatTurnStats(group.stats, intl)}</span>
+          </span>
+          {/* 行 2 = 计数行：失败段整段红色，图标与失败数字同源（counts.failureCount）。 */}
+          <span
+            data-trajectory-turn-meta=""
+            className="block w-full min-w-0 truncate font-mono text-ui-xs text-foreground-subtlest"
+          >
+            {metaSegments.map((segment, index) => (
+              <Fragment key={segmentKey(segment, index)}>
+                {index > 0 ? <span aria-hidden="true"> · </span> : null}
+                <TurnMetaSegment segment={segment} intl={intl} />
+              </Fragment>
+            ))}
           </span>
         </CollapsibleTrigger>
         <span className="relative -ml-1 mr-1 flex items-center justify-end">
@@ -162,26 +175,33 @@ export function ModelTrajectoryTurnGroup({
   );
 }
 
-/** 来源标签（回合级只按 callSource.kind 归类，querySource 细分留在 CallCard 内）。 */
-const TURN_SOURCE_LABEL_KEYS: Record<ZCodeModelTrajectoryCallSourceKind, string> = {
-  main: "modelTrajectory.source.main",
-  subagent: "modelTrajectory.source.subagent",
-  sidecar: "modelTrajectory.source.sidecar",
-  unknown: "modelTrajectory.source.unknown",
-};
-
-/** 头部 stats：「N 次调用 · 时长 · 来源」，缺失项自动省略。 */
-function formatTurnStats(stats: TrajectoryTurnStats, intl: IntlShape): string {
-  const parts = [
-    intl.formatMessage({ id: "modelTrajectory.summaryCalls" }, { count: String(stats.callCount) }),
-  ];
-  if (stats.durationMs > 0) parts.push(formatTrajectoryDuration(stats.durationMs));
-  if (stats.sourceKinds.length > 0) {
-    parts.push(
-      stats.sourceKinds
-        .map((kind) => intl.formatMessage({ id: TURN_SOURCE_LABEL_KEYS[kind] }))
-        .join(", "),
+/** 计数行单段渲染：i18n 段走 formatMessage；失败段整段红色并带同源告警图标。 */
+function TurnMetaSegment({
+  segment,
+  intl,
+}: {
+  segment: TrajectoryTurnCountSegment;
+  intl: IntlShape;
+}) {
+  if (typeof segment === "string") {
+    return <span>{segment}</span>;
+  }
+  if (segment.id === FAILURE_COUNT_SEGMENT_ID) {
+    return (
+      <span className="text-destructive">
+        <CircleAlertIcon
+          data-trajectory-turn-error-icon=""
+          aria-hidden="true"
+          className="mr-0.5 inline size-3 align-middle text-destructive"
+        />
+        {intl.formatMessage({ id: segment.id }, segment.values)}
+      </span>
     );
   }
-  return parts.join(" · ");
+  return <span>{intl.formatMessage({ id: segment.id }, segment.values)}</span>;
+}
+
+/** 段渲染 key：i18n 段用 id，原样字符串段用文本（同一段序列内 id 唯一）。 */
+function segmentKey(segment: TrajectoryTurnCountSegment, index: number): string {
+  return typeof segment === "string" ? `text-${index}-${segment}` : `i18n-${index}-${segment.id}`;
 }
