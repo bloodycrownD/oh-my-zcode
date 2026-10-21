@@ -31,14 +31,15 @@ import {
 } from "@/ModelTrajectorySearch.js";
 import { ModelTrajectorySearchBar } from "@/ModelTrajectorySearchBar.js";
 import { clearTrajectorySearchHighlights } from "@/ModelTrajectorySearchHighlight.js";
-import {
-  ModelTrajectoryTimeline,
-  resolveTrajectorySearchItems,
-} from "@/ModelTrajectoryTimeline.js";
+import { ModelTrajectoryTimeline } from "@/ModelTrajectoryTimeline.js";
 import type { TrajectoryVisualRole } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectoryWireFilterContext } from "@/ModelTrajectoryCallInput.js";
 import { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneParts.js";
-import { resolveTrajectoryTurnGroups, stripTrajectoryReasoning } from "@/ModelTrajectoryTurns.js";
+import {
+  resolveTrajectorySearchItems,
+  resolveTrajectoryTurnGroups,
+  stripTrajectoryReasoning,
+} from "@/ModelTrajectoryTurns.js";
 
 export function ModelTrajectoryPane({
   taskId,
@@ -92,7 +93,12 @@ export function ModelTrajectoryPane({
       }),
     [intl, records],
   );
-  const searchItems = useMemo(() => resolveTrajectorySearchItems(turnGroups), [turnGroups]);
+  // B-2：搜索索引必须与渲染一致——占位行被隐藏时不进索引（否则命中不在 DOM 的行，
+  // 计数前进但高亮/滚动不动作），开关切换即重建。
+  const searchItems = useMemo(
+    () => resolveTrajectorySearchItems(turnGroups, hidePlaceholderRows),
+    [hidePlaceholderRows, turnGroups],
+  );
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchActiveIndex, setSearchActiveIndex] = useState(0);
@@ -120,8 +126,10 @@ export function ModelTrajectoryPane({
   const toggleAllLabel = intl.formatMessage({
     id: willExpandAll ? "modelTrajectory.expandAll" : "modelTrajectory.collapseAll",
   });
-  const handleToggleAll = useCallback(() => {
-    const expanded = !expansionCommands.turn.expanded;
+  // 回合展开的唯一写入口（C-orch-1）：「全部展开/收起」按钮与「turn」菜单项共用。
+  // 必须函数式更新——闭包取值在同一 tick 连点两次时读到旧值，会丢一次翻转；
+  // override 清理也走这里，另外两条入口不得各写一份。
+  const toggleTurnExpansion = useCallback(() => {
     expansionVersionRef.current += 1;
     const version = expansionVersionRef.current;
     // 只清回合命名空间的 override：消息行上用户单独做过的展开选择保持不变。
@@ -132,16 +140,28 @@ export function ModelTrajectoryPane({
       }
       return next;
     });
-    setExpansionCommands((previous) => ({ ...previous, turn: { expanded, version } }));
-  }, [expansionCommands.turn.expanded]);
-  const handleToggleExpansionKind = useCallback((kind: TrajectoryVisualRole) => {
-    expansionVersionRef.current += 1;
-    const version = expansionVersionRef.current;
     setExpansionCommands((previous) => ({
       ...previous,
-      [kind]: { expanded: !previous[kind].expanded, version },
+      turn: { expanded: !previous.turn.expanded, version },
     }));
   }, []);
+  const handleToggleExpansionKind = useCallback(
+    (kind: TrajectoryVisualRole) => {
+      // 回合（也就是 B-6 的「全部展开/收起」）统一走 toggleTurnExpansion：
+      // 该入口要清回合 override，且两条路径都必须是函数式翻转。
+      if (kind === "turn") {
+        toggleTurnExpansion();
+        return;
+      }
+      expansionVersionRef.current += 1;
+      const version = expansionVersionRef.current;
+      setExpansionCommands((previous) => ({
+        ...previous,
+        [kind]: { expanded: !previous[kind].expanded, version },
+      }));
+    },
+    [toggleTurnExpansion],
+  );
   const handleSearchQueryChange = useCallback((query: string) => {
     setSearchQuery(query);
     setSearchActiveIndex(0);
@@ -241,7 +261,7 @@ export function ModelTrajectoryPane({
               variant="ghost"
               size="icon-sm"
               className="shrink-0 text-foreground"
-              onClick={handleToggleAll}
+              onClick={toggleTurnExpansion}
               aria-label={toggleAllLabel}
               title={toggleAllLabel}
             >

@@ -14,6 +14,7 @@ import { formatTrajectoryDateTime, formatTrajectoryDuration } from "@/ModelTraje
 import { ContentPartView } from "@/ModelTrajectoryPaneDetails.js";
 import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
+import { trajectoryInputRowKey } from "@/ModelTrajectoryTurns.js";
 import { classifyTrajectoryWireRows } from "@/ModelTrajectoryWireFilter.js";
 
 type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
@@ -87,7 +88,9 @@ export function CallInputSection({
             callDurationMs={record.durationMs}
             isAlt={row.messageIndex % 2 === 1}
             expansionKey={
-              expansionKeyPrefix ? `${expansionKeyPrefix}:input:${row.messageIndex}` : undefined
+              expansionKeyPrefix
+                ? trajectoryInputRowKey(expansionKeyPrefix, row.messageIndex)
+                : undefined
             }
             intl={intl}
           />

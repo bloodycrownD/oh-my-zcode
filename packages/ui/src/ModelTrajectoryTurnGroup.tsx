@@ -10,7 +10,11 @@ import {
 import { useTrajectoryExpansion } from "@/ModelTrajectoryExpansion.js";
 import { formatTrajectoryDuration } from "@/ModelTrajectoryFormat.js";
 import { CallCard, type IntlShape } from "@/ModelTrajectoryPaneParts.js";
-import type { TrajectoryTurnGroup, TrajectoryTurnStats } from "@/ModelTrajectoryTurns.js";
+import {
+  trajectoryCallKey,
+  type TrajectoryTurnGroup,
+  type TrajectoryTurnStats,
+} from "@/ModelTrajectoryTurns.js";
 
 /**
  * 回合外壳（spec B-4）：顶层 IA 的一个单元，默认收起。
@@ -35,6 +39,9 @@ export function ModelTrajectoryTurnGroup({
     defaultOpen: false,
   });
 
+  // 回合根挂**命名组** `group/turn`：TurnGroup 自身的 open 态变体只认它。
+  // 裸 `group` 会污染回合内消息行——Tailwind 的 group-data 变体匹配任意祖先的
+  // .group[data-state=open]，回合展开后消息行（自身 closed）的摘要/箭头也会被翻转（B-1）。
   return (
     <Collapsible
       open={open}
@@ -43,7 +50,7 @@ export function ModelTrajectoryTurnGroup({
       data-trajectory-turn-key={group.key}
       data-trajectory-turn-id={group.turnId ?? undefined}
       data-trajectory-turn-index={group.turnIndex}
-      className="col-span-full grid w-full min-w-0 grid-cols-subgrid"
+      className="group/turn col-span-full grid w-full min-w-0 grid-cols-subgrid"
     >
       <div className="col-span-full grid min-h-8 w-full min-w-0 grid-cols-subgrid items-center">
         <CollapsibleTrigger
@@ -72,7 +79,7 @@ export function ModelTrajectoryTurnGroup({
           {group.assistantPreview && group.userPreviewKind === "user" ? (
             <span
               data-trajectory-turn-assistant-preview=""
-              className="hidden min-w-0 max-w-[40%] shrink truncate font-mono text-ui-xs text-foreground-subtlest group-data-[state=open]:hidden lg:inline"
+              className="hidden min-w-0 max-w-[40%] shrink truncate font-mono text-ui-xs text-foreground-subtlest group-data-[state=open]/turn:hidden lg:inline"
               title={group.assistantPreview}
             >
               → {group.assistantPreview}
@@ -106,7 +113,7 @@ export function ModelTrajectoryTurnGroup({
             >
               <ChevronRightIcon
                 aria-hidden="true"
-                className="size-3 transition-transform group-data-[state=open]:rotate-90"
+                className="size-3 transition-transform group-data-[state=open]/turn:rotate-90"
               />
             </Button>
           </CollapsibleTrigger>
@@ -124,7 +131,7 @@ export function ModelTrajectoryTurnGroup({
             // 行内 delta 切片（本回合相对上一回合新增的消息）不参与计数。
             const croppedCount = call.record.request.croppedCount;
             return (
-              <Fragment key={`${call.record.requestId}:${call.recordIndex}`}>
+              <Fragment key={trajectoryCallKey(call.record.requestId, call.recordIndex)}>
                 {croppedCount > 0 ? (
                   <p
                     data-trajectory-cropped-hint=""
@@ -141,7 +148,7 @@ export function ModelTrajectoryTurnGroup({
                   record={call.record}
                   index={call.recordIndex}
                   inputMessages={call.inputMessages}
-                  expansionKeyPrefix={`${call.record.requestId}:${call.recordIndex}`}
+                  expansionKeyPrefix={trajectoryCallKey(call.record.requestId, call.recordIndex)}
                   intl={intl}
                 />
               </Fragment>

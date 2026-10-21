@@ -10,7 +10,6 @@ import type { ZCodeModelTrajectoryMessage } from "@zcode/services";
 import {
   classifyTrajectoryWireMessage,
   classifyTrajectoryWireRows,
-  filterTrajectoryWireMessages,
 } from "../src/ModelTrajectoryWireFilter.js";
 
 function textMessage(role: string, text: string): ZCodeModelTrajectoryMessage {
@@ -109,9 +108,12 @@ test("T-T6 wire-filter：hiddenCount 计数正确且保持顺序", () => {
   const markerOnlyTool = textMessage("tool", "§15§");
   const messages = [normalUser, droppedAssistant, emptyAssistant, normalAssistant, markerOnlyTool];
 
-  const { visible, hiddenCount } = filterTrajectoryWireMessages(messages);
+  const { rows, hiddenCount } = classifyTrajectoryWireRows(messages);
 
   assert.equal(hiddenCount, 3);
+  // UI 侧聚合口径：visible = 非占位行按原顺序投影（分类只有 classifyTrajectoryWireRows
+  // 一条路径，测试自行聚合断言）。
+  const visible = rows.filter((row) => !row.placeholder).map((row) => row.message);
   assert.deepEqual(visible, [normalUser, normalAssistant]);
   // 返回原对象引用，且不修改入参。
   assert.equal(visible[0], normalUser);
@@ -120,18 +122,23 @@ test("T-T6 wire-filter：hiddenCount 计数正确且保持顺序", () => {
 });
 
 test("T-T6 wire-filter：空列表与全占位列表", () => {
-  assert.deepEqual(filterTrajectoryWireMessages([]), { visible: [], hiddenCount: 0 });
+  const empty = classifyTrajectoryWireRows([]);
+  assert.deepEqual(empty.rows, []);
+  assert.equal(empty.hiddenCount, 0);
 
   const allPlaceholders = [
     textMessage("assistant", "[dropped]"),
     textMessage("assistant", "[cleared]"),
   ];
-  const filtered = filterTrajectoryWireMessages(allPlaceholders);
-  assert.deepEqual(filtered.visible, []);
-  assert.equal(filtered.hiddenCount, 2);
+  const classified = classifyTrajectoryWireRows(allPlaceholders);
+  assert.deepEqual(
+    classified.rows.filter((row) => !row.placeholder).map((row) => row.message),
+    [],
+  );
+  assert.equal(classified.hiddenCount, 2);
 });
 
-test("T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标并与聚合计数一致（UI 渲染唯一输入）", () => {
+test("T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标（UI 渲染与搜索索引共用）", () => {
   const normalUser = textMessage("user", "帮我看看这个 bug");
   const droppedAssistant = textMessage("assistant", "[dropped §4§]");
   const emptyAssistant: ZCodeModelTrajectoryMessage = { role: "assistant", parts: [] };
@@ -151,11 +158,8 @@ test("T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标并与聚�
     ],
   );
   assert.equal(rows[0]?.message, normalUser);
-  // 与 filterTrajectoryWireMessages 聚合口径一致（单一分类实现，防双轨漂移）。
-  const aggregated = filterTrajectoryWireMessages(messages);
-  assert.equal(aggregated.hiddenCount, hiddenCount);
   assert.deepEqual(
     rows.filter((row) => !row.placeholder).map((row) => row.message),
-    aggregated.visible,
+    [normalUser, normalAssistant],
   );
 });

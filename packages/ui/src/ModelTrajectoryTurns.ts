@@ -18,9 +18,33 @@ import type {
   ZCodeModelTrajectoryMessage,
   ZCodeModelTrajectoryRecord,
 } from "@zcode/services";
+// 纯类型导入（verbatimModuleSyntax 下被完全擦除）：本模块运行时不会加载 Search.ts
+// （它依赖 React 的 createContext，不属于零 React 的纯函数区）。
+import type { TrajectorySearchTimelineItem } from "./ModelTrajectorySearch.js";
+import { classifyTrajectoryWireRows } from "./ModelTrajectoryWireFilter.js";
 
 /** 回合头部在没有真实用户输入、也没有 assistant 文本时的占位文案（UI 可传 i18n 文本覆盖）。 */
 export const TRAJECTORY_EMPTY_USER_PREVIEW = "（无用户输入）";
+
+/**
+ * 调用级 key 的唯一来源（ui/C-1-r2）：`<requestId>:<recordIndex>`。
+ *
+ * 它同时是 CallCard 的 `expansionKeyPrefix`、回合内调用列表的 Fragment key 与搜索项的 key；
+ * 三处必须逐字一致——搜索命中靠它找回渲染节点，任一处漂移都会让定位静默失效。
+ * `recordIndex` 是记录在入参数组里的全局下标，不是回合内序号。
+ */
+export function trajectoryCallKey(requestId: string, recordIndex: number): string {
+  return `${requestId}:${recordIndex}`;
+}
+
+/**
+ * 输入行展开键的唯一来源（ui/C-1-r2）：`<前缀>:input:<messageIndex>`。
+ * 前缀由 trajectoryCallKey 产生；`messageIndex` 始终是 wire 原始下标
+ * （占位行被隐藏也不重排，保证开关切换不丢行级展开状态）。
+ */
+export function trajectoryInputRowKey(prefix: string, messageIndex: number): string {
+  return `${prefix}:input:${messageIndex}`;
+}
 
 /**
  * 非真实用户输入的消息前缀（判定前先剥 `§N§` 标签并 trimStart）。
@@ -160,7 +184,7 @@ export type TrajectoryTurnUserPreviewKind = "user" | "assistantFallback" | "empt
 /** 回合内的一次模型调用。 */
 export interface TrajectoryTurnCall {
   record: ZCodeModelTrajectoryRecord;
-  /** 该记录在入参数组里的下标（与 Pane 的 callIndex / 搜索定位对齐）。 */
+  /** 该记录在入参 records 数组中的全局下标，用于 `<requestId>:<recordIndex>` expansionKey 与搜索键。 */
   recordIndex: number;
   /** 回合内序号（0-based）。 */
   callIndexInTurn: number;
@@ -392,4 +416,34 @@ export function stripTrajectoryReasoning(
     if (!messagesChanged && response === record.response) return record;
     return { ...record, request: { ...record.request, messages }, response };
   });
+}
+
+/**
+ * 把回合分组展平成搜索索引输入（B-7，自 ModelTrajectoryTimeline.tsx 迁入纯函数区）：
+ * key 与 CallCard 的 expansionKeyPrefix 同源（trajectoryCallKey），额外携带回合坐标
+ * 供滚动定位与「命中展开回合」。
+ *
+ * `hidePlaceholders` 必须与渲染时的占位过滤开关一致：CallInputSection 默认隐藏占位行，
+ * 索引若仍包含它们，搜 `dropped` / `truncated` 会命中不在 DOM 里的行——计数前进但高亮
+ * 与滚动都不动作（B-2）。过滤只丢行、**不按下标重排**：messageIndex 仍是 wire 原始下标，
+ * 与渲染 expansionKey 逐字对齐。
+ */
+export function resolveTrajectorySearchItems(
+  turnGroups: readonly TrajectoryTurnGroup[],
+  hidePlaceholders: boolean,
+): TrajectorySearchTimelineItem[] {
+  return turnGroups.flatMap((group) =>
+    group.calls.map((call) => {
+      const key = trajectoryCallKey(call.record.requestId, call.recordIndex);
+      const { rows } = classifyTrajectoryWireRows(call.inputMessages);
+      return {
+        key,
+        record: call.record,
+        inputRows: hidePlaceholders ? rows.filter((row) => !row.placeholder) : rows,
+        turnKey: group.key,
+        turnIndex: group.turnIndex,
+        callIndexInTurn: call.callIndexInTurn,
+      };
+    }),
+  );
 }

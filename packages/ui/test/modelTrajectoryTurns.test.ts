@@ -12,15 +12,19 @@ import type {
   ZCodeModelTrajectoryRecord,
 } from "@zcode/services";
 import { DEFAULT_MAX_PREVIEW_CHARS } from "@zcode/shared/zcode-protocol-v4";
+import { buildTrajectorySearchIndex } from "../src/ModelTrajectorySearch.js";
 import type { TrajectoryTurnGroup } from "../src/ModelTrajectoryTurns.js";
 import {
   computeDeltaMessages,
   isTrajectoryRealUserMessage,
   resolveTrajectoryInputMessages,
+  resolveTrajectorySearchItems,
   resolveTrajectoryTurnGroups,
   shouldUseConversationDelta,
   stripTrajectoryReasoning,
   TRAJECTORY_EMPTY_USER_PREVIEW,
+  trajectoryCallKey,
+  trajectoryInputRowKey,
 } from "../src/ModelTrajectoryTurns.js";
 
 let requestSeq = 0;
@@ -508,4 +512,82 @@ test("T-T9 ④ full-retention（无 messageCount）按可见条数走全量分�
       .length,
     100,
   );
+});
+
+// ── C-1 搜索索引输入（自 Timeline.tsx 迁入纯函数区后直测） ──────────────────
+
+test("C-1 搜索项按回合首现、回合内 recordIndex 升序展开（交错 turnId 不等于全局下标）", () => {
+  const groups = resolveTrajectoryTurnGroups([
+    record({
+      turnId: "turn-a",
+      requestId: "reqA",
+      messages: [textMessage("user", "a0")],
+      messageCount: 1,
+    }),
+    record({
+      turnId: "turn-b",
+      requestId: "reqB",
+      messages: [textMessage("user", "b1")],
+      messageCount: 2,
+    }),
+    record({
+      turnId: "turn-a",
+      requestId: "reqA",
+      messages: [textMessage("user", "a2")],
+      messageCount: 3,
+    }),
+  ]);
+
+  const items = resolveTrajectorySearchItems(groups, false);
+
+  // 分组按首现顺序：turn-a 先出现 → 它的两次调用（record 0/2）先展开，再是 record 1 的 turn-b。
+  assert.deepEqual(
+    items.map((item) => item.key),
+    ["reqA:0", "reqA:2", "reqB:1"],
+  );
+  assert.deepEqual(
+    items.map((item) => item.turnKey),
+    ["turn:turn-a", "turn:turn-a", "turn:turn-b"],
+  );
+  assert.deepEqual(
+    items.map((item) => item.turnIndex),
+    [0, 0, 1],
+  );
+  assert.deepEqual(
+    items.map((item) => item.callIndexInTurn),
+    [0, 1, 0],
+  );
+});
+
+test("B-2 搜索索引随占位过滤开关变化：隐藏时零命中，显示时命中且 key 等于渲染 expansionKey", () => {
+  const groups = resolveTrajectoryTurnGroups([
+    record({
+      turnId: "t1",
+      requestId: "req",
+      messages: [
+        textMessage("user", "问题"),
+        textMessage("assistant", "[dropped §4§]"),
+        textMessage("assistant", "回答"),
+      ],
+      messageCount: 3,
+    }),
+  ]);
+
+  // 渲染默认隐藏占位行：索引里也不能有它，否则命中不在 DOM 的行（计数前进但画面不动）。
+  const hiddenIndex = buildTrajectorySearchIndex(
+    resolveTrajectorySearchItems(groups, true),
+    "dropped",
+  );
+  assert.equal(hiddenIndex.matches.length, 0);
+
+  // 打开「显示占位行」后命中；expansionKey 与 CallInputSection 渲染时用同一对 helper 生成。
+  const shownItems = resolveTrajectorySearchItems(groups, false);
+  const shownIndex = buildTrajectorySearchIndex(shownItems, "dropped");
+  assert.equal(shownIndex.matches.length, 1);
+  const match = shownIndex.matches[0];
+  assert.ok(match);
+  assert.equal(match.expansionKey, trajectoryInputRowKey(trajectoryCallKey("req", 0), 1));
+  assert.equal(match.expansionKey, "req:0:input:1");
+  assert.equal(match.turnKey, "turn:t1");
+  assert.equal(match.turnIndex, 0);
 });

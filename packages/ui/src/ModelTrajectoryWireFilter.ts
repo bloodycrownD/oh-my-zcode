@@ -62,26 +62,6 @@ export function classifyTrajectoryWireMessage(
   return "placeholder";
 }
 
-export interface TrajectoryWireFilterResult<T extends ZCodeModelTrajectoryMessage> {
-  visible: T[];
-  /** 被判定为空占位行的条数（UI「已隐藏 N 条」的唯一计数来源）。 */
-  hiddenCount: number;
-}
-
-/**
- * 按占位分类拆分消息列表（默认隐藏开关打开时 UI 的渲染输入）。
- * 保持原数组顺序，不修改入参，返回的 visible 是原对象引用。
- */
-export function filterTrajectoryWireMessages<T extends ZCodeModelTrajectoryMessage>(
-  messages: readonly T[],
-): TrajectoryWireFilterResult<T> {
-  const { rows, hiddenCount } = classifyTrajectoryWireRows(messages);
-  return {
-    visible: rows.filter((row) => !row.placeholder).map((row) => row.message),
-    hiddenCount,
-  };
-}
-
 /** 带原始下标的行级分类结果：UI 渲染以 messageIndex 构造 expansionKey 与奇偶底色。 */
 export interface TrajectoryWireRow<T extends ZCodeModelTrajectoryMessage> {
   message: T;

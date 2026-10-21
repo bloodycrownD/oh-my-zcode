@@ -1,9 +1,6 @@
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useEffect, type RefObject } from "react";
-import {
-  type TrajectorySearchMatch,
-  type TrajectorySearchTimelineItem,
-} from "@/ModelTrajectorySearch.js";
+import type { TrajectorySearchMatch } from "@/ModelTrajectorySearch.js";
 import {
   applyTrajectorySearchHighlights,
   clearTrajectorySearchHighlights,
@@ -136,24 +133,5 @@ export function ModelTrajectoryTimeline({
         <li aria-hidden="true" className="col-span-full" style={{ height: bottomSpacerHeight }} />
       ) : null}
     </ol>
-  );
-}
-
-/**
- * 把回合分组展平成搜索索引输入（B-7）：key 与 CallCard 的 expansionKeyPrefix 同源
- * （`<requestId>:<recordIndex>`），额外携带回合坐标供滚动定位与「命中展开回合」。
- */
-export function resolveTrajectorySearchItems(
-  turnGroups: readonly TrajectoryTurnGroup[],
-): TrajectorySearchTimelineItem[] {
-  return turnGroups.flatMap((group) =>
-    group.calls.map((call) => ({
-      key: `${call.record.requestId}:${call.recordIndex}`,
-      record: call.record,
-      inputMessages: call.inputMessages,
-      turnKey: group.key,
-      turnIndex: group.turnIndex,
-      callIndexInTurn: call.callIndexInTurn,
-    })),
   );
 }

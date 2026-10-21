@@ -1,18 +1,19 @@
 import { createContext } from "react";
 import type { ZCodeModelTrajectoryMessage, ZCodeModelTrajectoryRecord } from "@zcode/services";
+// 包内导入一律相对路径（而非 `@/`）：本模块被 modelTrajectoryTurns.test.ts 经
+// buildTrajectorySearchIndex 以 node:test 直测，tsx 从仓库根运行时不解析 `@/` 别名。
+// 反向依赖（Turns → 本模块）是 `import type`，verbatimModuleSyntax 下被擦除，无运行时环。
+import { trajectoryInputRowKey } from "./ModelTrajectoryTurns.js";
 import {
   trajectoryToolCallInputs,
   trajectoryToolMetadata,
   trajectoryToolOutputs,
-} from "@/ModelTrajectoryToolPayload.js";
+} from "./ModelTrajectoryToolPayload.js";
 
 export type TrajectorySearchField = "content" | "tool-name" | "tool-id";
 
 export interface TrajectorySearchMatch {
   key: string;
-  callKey: string;
-  /** 展平后的全局调用下标（= recordIndex，与 CallCard 编号一致）。 */
-  callIndex: number;
   /** 回合内序号（B-7：索引/定位同时携带回合坐标）。 */
   callIndexInTurn: number;
   /** 命中所在的回合展开键（`turn:<turnId>` / `turn:fallback:<requestId>`）。 */
@@ -32,19 +33,24 @@ interface TrajectorySearchIndex {
   matches: TrajectorySearchMatch[];
 }
 
+/** 搜索索引的输入行：wire 原始下标 + 消息（占位行是否保留由调用方先行过滤）。 */
+interface TrajectorySearchInputRow {
+  message: ZCodeModelTrajectoryMessage;
+  messageIndex: number;
+}
+
 /** 搜索索引的输入：回合内的一次调用（展平后按记录顺序）。 */
 export interface TrajectorySearchTimelineItem {
   key: string;
   record: ZCodeModelTrajectoryRecord;
-  inputMessages: ZCodeModelTrajectoryMessage[];
+  /** 可见输入行；messageIndex 是 wire 原始下标，与渲染的 expansionKey 对齐（B-2）。 */
+  inputRows: TrajectorySearchInputRow[];
   turnKey: string;
   turnIndex: number;
   callIndexInTurn: number;
 }
 
 interface SearchTarget {
-  callKey: string;
-  callIndex: number;
   callIndexInTurn: number;
   turnKey: string;
   turnIndex: number;
@@ -59,7 +65,7 @@ export const TrajectorySearchRevealContext = createContext<string | null>(null);
 /**
  * 当前激活命中所在的回合键（B-7「命中自动展开对应回合」）。
  * 回合外壳未经消息行渲染，拿不到消息级 reveal 键，因此单独给一条回合命名空间通道；
- * 两个命名空间（`turn:` vs `<requestId>:<index>`）不重叠，可同时参与同一判定。
+ * 两个命名空间（`turn:` 前缀 vs trajectoryCallKey 产物）不重叠，可同时参与同一判定。
  */
 export const TrajectorySearchRevealTurnContext = createContext<string | null>(null);
 
@@ -88,16 +94,14 @@ export function buildTrajectorySearchIndex(
 }
 
 function buildSearchTargets(items: readonly TrajectorySearchTimelineItem[]): SearchTarget[] {
-  return items.flatMap((item, callIndex) => {
+  return items.flatMap((item) => {
     const position = {
-      callKey: item.key,
-      callIndex,
       callIndexInTurn: item.callIndexInTurn,
       turnKey: item.turnKey,
       turnIndex: item.turnIndex,
     };
-    const targets = item.inputMessages.flatMap((message, messageIndex) =>
-      messageTargets(position, `${item.key}:input:${messageIndex}`, message),
+    const targets = item.inputRows.flatMap((row) =>
+      messageTargets(position, trajectoryInputRowKey(item.key, row.messageIndex), row.message),
     );
     const response = item.record.response;
     if (!response) return targets;
