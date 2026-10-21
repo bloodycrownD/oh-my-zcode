@@ -199,6 +199,10 @@ export interface TrajectoryTurnStats {
   durationMs: number;
   /** 去重后的调用来源，保持首次出现顺序；未标注按 main 计。 */
   sourceKinds: ZCodeModelTrajectoryCallSourceKind[];
+  /**
+   * 已无生产消费者（trace-nm-borrow 后 UI 错误判定以 `counts.failureCount` 为准，
+   * 不含 sidecar 且含工具失败）。字段保留仅为 T-T3 deepEqual 契约与上迭代 e2e 脚本兼容。
+   */
   errorCount: number;
   startedAt?: string;
   completedAt?: string;

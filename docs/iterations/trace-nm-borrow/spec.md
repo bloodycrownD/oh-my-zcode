@@ -46,6 +46,8 @@ export interface TrajectoryToolCallInfo {
   part: ZCodeModelTrajectoryContentPart;   // 原 response.toolCalls[i]，原样引用
   status: "ok" | "error" | "pending" | "missing";
   pairedResultText: string;                // trajectoryToolOutputs 同源口径；未配对为 ""
+  pairedResultToolName?: string;           // 配对 result part 的真实工具名（r1 CR D-1 补登记；徽标单源用）
+  pairedResultToolId?: string;             // 配对 result part 的真实 call id（同上）
 }
 export interface TrajectoryToolJoinResult {
   /** 每条 call（key = trajectoryCallKey(requestId, recordIndex)）的配对信息。
@@ -95,7 +97,7 @@ content 文本 = trajectoryToolCallDisplayText(info)   // 新增纯函数于 Too
 
 1. target key 逐字 = `trajectoryToolCallTargetKey(...)`（渲染 DOM 与搜索索引共用，单源）。
 2. 卡根必须是 Radix `Collapsible`（高亮判定读 `data-state`，`ModelTrajectorySearchHighlight.ts:84-99`）；展开内容外层包 `data-trajectory-message-expanded` 包装层。
-3. 卡内必须保留 `data-trajectory-search-field="tool-name"` 与 `"tool-id"` 元素（文本取自 `trajectoryToolMetadata`，与索引同源——r2 P1-3，否则搜工具名计数前进画面不动）；use 格与 result 格各挂 `data-trajectory-search-field="content"`，**use 在 result 之前**（与索引拼接顺序一致）。
+3. 卡内必须保留 `data-trajectory-search-field="tool-name"` 与 `"tool-id"` 元素（徽标文本单源 = `trajectoryToolCallBadgeText(info)`（ToolJoin 导出，result 侧真名优先、`||` 空串回退 call 侧），与索引同源——r2 P1-3 + r1 CR D-6 措辞统一，取代早期「取自 trajectoryToolMetadata」的表述；否则搜工具名计数前进画面不动）；use 格与 result 格各挂 `data-trajectory-search-field="content"`，**use 在 result 之前**（与索引拼接顺序一致；unknown 回退 raw `<pre>` 同样挂 content 字段——r1 CR 修复批补齐，否则索引命中 DOM 无高亮位）。
 4. 展开状态走 `useTrajectoryExpansion({ key, commandKind: "tool-call" })`——**不新增 `TRAJECTORY_EXPANSION_KINDS` 条目**，沿用 `"tool-call"` 命令槽与视觉角色（新增 kind 会联动 `ModelTrajectoryRoleStyles.ts`、`ModelTrajectoryExpansionMenu.tsx:48`，本迭代明确不做）；命令默认展开语义不变（非 turn 命令初始 open=true）。
 5. 搜索 reveal 链复用：命中 result 文本 → 该卡 key 被强制展开（现有 searchRevealed 机制）。
 6. 上述 DOM 断言列入 manual 清单（T-N4，无 DOM 测试基建）。
@@ -121,8 +123,8 @@ content 文本 = trajectoryToolCallDisplayText(info)   // 新增纯函数于 Too
 export interface TrajectoryTurnCounts {
   toolCallCount: number;    // Σ toolCalls 中 kind==="tool-call" 的条数（计数过滤，不动数组）
   charCount: number;        // 输出侧：Σ (response.text?.length ?? 0) + (reasoningText?.length ?? 0)
-                            //        + trajectoryToolCallInputs({role:"assistant",parts:[part]}).join("\n\n").length
-                            //        （参数按真实签名收 message 形态，r3 P2-6；只覆盖 use 段不含结果正文——与 OQ1 口径一致）
+                            //        + 全部 use 段一次 join("\n\n") 后的长度（分隔符计入，见实现注 11；
+                            //        只覆盖 use 段不含结果正文——与 OQ1 口径一致）
   failureCount: number;     // modelErrorCount + toolErrorCount
   modelErrorCount: number;  // record.error 真值条数
   toolErrorCount: number;   // 配对 status === "error" 条数（按 callId 天然去重、归属发起回合）
@@ -236,14 +238,19 @@ T-T3 stats deepEqual 不动（counts 独立模块）；T-T9 增量三分支不�
 ## 实现注（已知限制）
 
 1. legacy array-content tool-result 不判 error（services 零改动代价；实测未出现该形态）。
-2. 图标口径变化：sidecar error 不再点亮回合错误图标（counts 基于 primaryCalls）。
+2. 图标口径变化（两条，均需进 CHANGELOG）：sidecar error 不再点亮回合错误图标（counts 基于 primaryCalls）；**工具失败（配对 status==="error"）新增点亮图标与失败计数**（旧实现仅 record.error 亮）。
 3. charCount 随 reasoning 开关投影变化（所见即所得）。
 4. 被放弃 attempt 的未配对 calls 显示 missing（「未返回结果」）。
 5. records 最后一条为 sidecar 时，其前主调用的尾部 pending 判 missing（sidecar 请求通常无 toolCalls 且主调用在前，实际影响极小）。
 6. 混合 part（已配对+未配对 result 同消息）整行保留不剔（保守不丢内容；实测 1364/1364 单 part）。
-7. `trajectoryToolHasError` 的 tool-call input 检查分支保留（显示侧红标）；status 判定只看 output。
-8. 跨分隔符查询（use 末词 + result 首词的组合）在索引命中但 DOM 无连续 Range，高亮回落 ranges[0]（`ModelTrajectorySearch.ts:158-177` 空白折叠 + `SearchHighlight.ts:88-99` fieldMatchIndex 机制的固有限制，接受）。
-9. 配对结果行被剔除后其 input 侧 tool-name/tool-id 索引项随之消失；卡片徽标优先取 result part 的真实名（r3 P2-11），call 侧 `?? "tool"` 兜底名只在无结果时出现。
+7. `trajectoryToolHasError` 的 tool-call input 检查分支保留（显示侧红标）；status 判定只看 output。配对卡 use 格经 `trajectoryToolHasError({role:"assistant",parts:[info.part]})` 接同款红标（r1 CR B-P1-1 修复后两侧语义对齐）。
+8. 跨分隔符查询（use 末词 + result 首词的组合）在索引命中但 DOM 无连续 Range，高亮回落 `ranges[0]`——**ranges 非空但该序号越界时会误高亮到第一处**（r1 CR B-P1-2 措辞补全：`ModelTrajectorySearch.ts:158-177` 空白折叠 + `SearchHighlight.ts:88-99` fieldMatchIndex 机制的固有限制，接受；ranges 为空时不误高亮）。
+9. 配对结果行被剔除后其 input 侧 tool-name/tool-id 索引项随之消失；卡片徽标优先取 result part 的真实名（r3 P2-11），call 侧兜底名只在无结果时出现（badgeText 用 `||`：result 侧空串也回退；call 侧 `|| "tool"` 双兜底覆盖服务层 `??` 只兜 undefined 的缝隙——r1 CR A-P2-1）。
+10. `trajectoryToolCallDisplayText` 空 use 段不拼前导分隔符（spec 早期公式的字面值会产出前导 `\n\n`；实现与 r3 P2-2「不无条件加分隔符」一致——r1 CR D-2 登记）。unknown 条目 displayText 并入 raw 原文（r1 CR A-P2-6 修复），复制/全屏不再空白。
+11. charCount 的 use 段口径：同一 record 的全部 tool-call part 合并后**一次** `join("\n\n")` 取长（跨调用的分隔符 `2×(n-1)` 字符计入；spec 早期「逐 part join 再求和」表述作废——r1 CR D-3/D-P2-2 登记，已被单测锁定）。
+12. 配对卡「查看全文」入口**恒渲染**（配对卡是主要内容区，恒有全屏入口是既定口径）；路径 A/B 的入口维持 `overflowEver` 门控——两条口径并存是有意设计（r1 CR B-P2-6 裁定）。
+13. unknown（malformed）条目的展开命令槽沿用 `"tool-call"`（契约 4 不新增 kind 的副作用；旧行为按 visualRole 归 `assistant` 槽）——「全部展开/收起」对 unknown 行的作用对象变化，实测 unknown 罕见，接受（r1 CR B-P2-5 登记）。
+14. `stats.errorCount` 已无生产消费者（图标口径迁至 `counts.failureCount`，不含 sidecar）；字段保留仅为 T-T3 deepEqual 契约与上迭代 e2e 脚本兼容（r1 CR A-P2-5/D-P2-1 登记，Turns.ts 字段注释同款说明）。
 
 ## 开放问题（不阻塞）
 
