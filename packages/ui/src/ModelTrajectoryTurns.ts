@@ -267,6 +267,24 @@ function firstAssistantInputText(calls: readonly TrajectoryTurnCall[]): string |
   return undefined;
 }
 
+/**
+ * 回合的主调用集合（单一实现）：排除 sidecar（标题生成等辅助调用）；全 sidecar 时回退为全部调用。
+ *
+ * 回合预览与回合计数（ModelTrajectoryTurnCounts.ts）共用此口径，避免两处派生逻辑漂移。
+ */
+function pickPrimaryCalls(calls: readonly TrajectoryTurnCall[]): TrajectoryTurnCall[] {
+  const primary = calls.filter((call) => call.record.callSource?.kind !== "sidecar");
+  return primary.length > 0 ? primary : [...calls];
+}
+
+/**
+ * 回合的主调用集合（对外共享入口）：回合计数模块复用同一派生逻辑。
+ * 语义见 pickPrimaryCalls——排除 sidecar；全 sidecar 时回退为全部调用。
+ */
+export function resolveTrajectoryPrimaryCalls(group: TrajectoryTurnGroup): TrajectoryTurnCall[] {
+  return pickPrimaryCalls(group.calls);
+}
+
 function buildTrajectoryTurnGroup(
   pending: PendingTrajectoryTurnGroup,
   turnIndex: number,
@@ -275,9 +293,7 @@ function buildTrajectoryTurnGroup(
 ): TrajectoryTurnGroup {
   // 预览只取主调用（非 sidecar）的可见输入：sidecar 是标题生成，其 request.messages 是
   // 完整上下文，用它扫真实用户消息会把上一回合的用户输入误当成本回合输入。
-  const primaryCalls = pending.calls.some((call) => call.record.callSource?.kind !== "sidecar")
-    ? pending.calls.filter((call) => call.record.callSource?.kind !== "sidecar")
-    : pending.calls;
+  const primaryCalls = pickPrimaryCalls(pending.calls);
 
   const userInputText = primaryCalls
     .flatMap((call) => call.inputMessages)
