@@ -15,6 +15,7 @@ import { formatTrajectoryDateTime, formatTrajectoryDuration } from "@/ModelTraje
 import { ContentPartView } from "@/ModelTrajectoryPaneDetails.js";
 import { trajectoryRoleTextClass } from "@/ModelTrajectoryRoleStyles.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
+import { filterTrajectoryInputRows } from "@/ModelTrajectoryToolJoin.js";
 import { trajectoryInputRowKey } from "@/ModelTrajectoryTurns.js";
 import { classifyTrajectoryWireRows } from "@/ModelTrajectoryWireFilter.js";
 
@@ -34,6 +35,9 @@ export const TrajectoryWireFilterContext = createContext<TrajectoryWireFilterCon
   hidePlaceholders: true,
 });
 
+/** 无配对信息时的空集合常量（保持 memo 依赖稳定）。 */
+const EMPTY_TOOL_CALL_IDS: ReadonlySet<string> = new Set<string>();
+
 /**
  * 一次调用的输入区（spec B-4）：wire 占位行默认隐藏，行内显示「已隐藏 N 条」。
  * 隐藏行不改变 expansionKey 与奇偶底色——原始下标始终参与 key，开关切换不会丢展开状态。
@@ -43,24 +47,31 @@ export function CallInputSection({
   record,
   inputMessages,
   expansionKeyPrefix,
+  pairedResultToolCallIdsInInput,
   intl,
 }: {
   index: number;
   record: ZCodeModelTrajectoryRecord;
   inputMessages: ZCodeModelTrajectoryMessage[];
   expansionKeyPrefix?: string;
+  /** 该 record 输入消息里已被配对消费的 tool-result id 集合（配对卡已展示结果，行不再重复）。 */
+  pairedResultToolCallIdsInInput?: ReadonlySet<string>;
   intl: IntlShape;
 }) {
   const { hidePlaceholders, setHidePlaceholders } = useContext(TrajectoryWireFilterContext);
   // 行级分类来自 WireFilter 纯函数（唯一分类实现，防双轨漂移）；
   // messageIndex 保留原始下标——expansionKey 与奇偶底色不随开关切换变化。
-  const { rows: classifiedRows, hiddenCount: placeholderCount } = useMemo(
-    () => classifyTrajectoryWireRows(inputMessages),
-    [inputMessages],
-  );
-  const visibleInputRows = hidePlaceholders
-    ? classifiedRows.filter((row) => !row.placeholder)
-    : classifiedRows;
+  // N-3：已被配对消费的 tool-result 行不再重复展示（结果已在配对卡的 result 格）——
+  // 剔除只发生在渲染产物上，inputMessages 本身不动，占位计数与 hasInput 判定均不受影响。
+  const { rows: visibleInputRows, hiddenCount: placeholderCount } = useMemo(() => {
+    const { rows, hiddenCount } = classifyTrajectoryWireRows(inputMessages);
+    const visible = hidePlaceholders ? rows.filter((row) => !row.placeholder) : rows;
+    const { visibleRows } = filterTrajectoryInputRows(
+      visible,
+      pairedResultToolCallIdsInInput ?? EMPTY_TOOL_CALL_IDS,
+    );
+    return { rows: visibleRows, hiddenCount };
+  }, [inputMessages, hidePlaceholders, pairedResultToolCallIdsInInput]);
   const hiddenCount = hidePlaceholders ? placeholderCount : 0;
 
   return (

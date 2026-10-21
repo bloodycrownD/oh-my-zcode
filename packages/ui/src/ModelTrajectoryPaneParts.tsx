@@ -16,6 +16,8 @@ import {
   formatTrajectoryDuration,
 } from "@/ModelTrajectoryFormat.js";
 import { TrajectorySectionTitle } from "@/ModelTrajectorySectionTitle.js";
+import { TrajectoryToolPairCard } from "@/ModelTrajectoryToolPairCard.js";
+import type { TrajectoryToolCallInfo } from "@/ModelTrajectoryToolJoin.js";
 
 export { EmptyState, summarizeRecords } from "@/ModelTrajectoryPaneDetails.js";
 
@@ -26,12 +28,18 @@ export function CallCard({
   index,
   inputMessages,
   expansionKeyPrefix,
+  toolCalls,
+  pairedResultToolCallIdsInInput,
   intl,
 }: {
   record: ZCodeModelTrajectoryRecord;
   index: number;
   inputMessages: ZCodeModelTrajectoryMessage[];
   expansionKeyPrefix?: string;
+  /** 工具调用的跨记录配对信息（与 record.response.toolCalls 下标对齐）。 */
+  toolCalls?: TrajectoryToolCallInfo[];
+  /** 该 record 输入消息里已被配对消费的 tool-result id 集合（渲染侧剔除用）。 */
+  pairedResultToolCallIdsInInput?: ReadonlySet<string>;
   intl: IntlShape;
 }) {
   const response = record.response;
@@ -73,6 +81,7 @@ export function CallCard({
             record={record}
             inputMessages={inputMessages}
             expansionKeyPrefix={expansionKeyPrefix}
+            pairedResultToolCallIdsInInput={pairedResultToolCallIdsInInput}
             intl={intl}
           />
         ) : null}
@@ -80,6 +89,7 @@ export function CallCard({
         {response ? (
           <ResponseBlock
             response={response}
+            toolCalls={toolCalls ?? []}
             callStartedAt={record.startedAt}
             callDurationMs={record.durationMs}
             startRowIndex={inputMessages.length}
@@ -145,6 +155,7 @@ function sourceLabelId(callSource: NonNullable<ZCodeModelTrajectoryRecord["callS
 
 function ResponseBlock({
   response,
+  toolCalls,
   callStartedAt,
   callDurationMs,
   startRowIndex,
@@ -152,6 +163,8 @@ function ResponseBlock({
   intl,
 }: {
   response: NonNullable<ZCodeModelTrajectoryRecord["response"]>;
+  /** 工具调用的跨记录配对信息（与 response.toolCalls 下标对齐）。 */
+  toolCalls: TrajectoryToolCallInfo[];
   callStartedAt: string;
   callDurationMs?: number;
   startRowIndex: number;
@@ -170,6 +183,9 @@ function ResponseBlock({
     roleLabel: string;
     key: string;
     visualRole?: "reasoning";
+    /** 工具调用行：配对信息（缺配对信息时回退成普通行，见渲染分支）。 */
+    toolCallInfo?: TrajectoryToolCallInfo;
+    toolCallIndex?: number;
   }> = [];
   if (response.reasoningText) {
     rows.push({
@@ -191,6 +207,8 @@ function ResponseBlock({
       key: `${toolCall.kind}:${toolCallIndex}`,
       message: { role: "assistant", parts: [toolCall] },
       roleLabel: intl.formatMessage({ id: "modelTrajectory.toolCall" }),
+      toolCallInfo: toolCalls[toolCallIndex],
+      toolCallIndex,
     });
   });
 
@@ -207,18 +225,29 @@ function ResponseBlock({
       {rows.map((row, rowIndex) => (
         <Fragment key={row.key}>
           <TrajectoryRowDivider />
-          <ResponseMessageRow
-            message={row.message}
-            roleLabel={row.roleLabel}
-            visualRole={row.visualRole}
-            callStartedAt={callStartedAt}
-            callDurationMs={callDurationMs}
-            isAlt={(startRowIndex + rowIndex) % 2 === 1}
-            expansionKey={
-              expansionKeyPrefix ? `${expansionKeyPrefix}:output:${row.key}` : undefined
-            }
-            intl={intl}
-          />
+          {row.toolCallInfo && expansionKeyPrefix && row.toolCallIndex !== undefined ? (
+            // 工具调用行升级为配对卡（use 格 + result 格 + 状态点）。
+            <TrajectoryToolPairCard
+              info={row.toolCallInfo}
+              toolCallIndex={row.toolCallIndex}
+              callKey={expansionKeyPrefix}
+              isAlt={(startRowIndex + rowIndex) % 2 === 1}
+              intl={intl}
+            />
+          ) : (
+            <ResponseMessageRow
+              message={row.message}
+              roleLabel={row.roleLabel}
+              visualRole={row.visualRole}
+              callStartedAt={callStartedAt}
+              callDurationMs={callDurationMs}
+              isAlt={(startRowIndex + rowIndex) % 2 === 1}
+              expansionKey={
+                expansionKeyPrefix ? `${expansionKeyPrefix}:output:${row.key}` : undefined
+              }
+              intl={intl}
+            />
+          )}
         </Fragment>
       ))}
     </section>

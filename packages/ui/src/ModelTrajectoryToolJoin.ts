@@ -16,6 +16,7 @@ import type {
   ZCodeModelTrajectoryRecord,
 } from "@zcode/services";
 import {
+  displayTrajectoryToolCallId,
   trajectoryToolCallInputs,
   trajectoryToolOutputs,
   trajectoryToolPayloadErrorText,
@@ -32,6 +33,39 @@ export interface TrajectoryToolCallInfo {
   status: TrajectoryToolCallStatus;
   /** 配对 result 的展示文本（trajectoryToolOutputs 同源口径）；未配对为 ""。 */
   pairedResultText: string;
+  /**
+   * 配对 result part 的工具名（未配对时为 undefined）。
+   * call 侧的服务映射用 `?? "tool"` 兜底名，结果侧才是真实工具名——
+   * 徽标与搜索索引一律优先取它（spec 契约 3 / 实现注 9）。
+   */
+  pairedResultToolName?: string;
+  /** 配对 result part 的调用 id（原始值，展示态的 "call_" 前缀裁剪由 helper 负责）。 */
+  pairedResultToolId?: string;
+}
+
+/** 配对卡的徽标文本（工具名 + 调用 id）：DOM 与搜索索引共用同一份计算。 */
+export interface TrajectoryToolCallBadgeText {
+  /** 工具名；两侧都没有时为空串。 */
+  name: string;
+  /** 调用 id 展示态（去掉 "call_" 前缀，与既有 tool-id 徽标同口径）；没有时为空串。 */
+  id: string;
+}
+
+/**
+ * 配对卡徽标文本单源：优先取配对 result part 的真实工具名/id，回退 call part。
+ *
+ * 渲染（ModelTrajectoryToolPairCard 的徽标）与搜索索引（ModelTrajectorySearch 的
+ * tool-name/tool-id target）必须逐字同源，否则搜工具名会「计数前进、画面不动」。
+ */
+export function trajectoryToolCallBadgeText(
+  info: TrajectoryToolCallInfo,
+): TrajectoryToolCallBadgeText {
+  const callPart = info.part;
+  const name =
+    info.pairedResultToolName ?? (callPart.kind === "tool-call" ? callPart.toolName : "");
+  const rawId =
+    info.pairedResultToolId ?? (callPart.kind === "tool-call" ? callPart.toolCallId : undefined);
+  return { name: name ?? "", id: rawId ? displayTrajectoryToolCallId(rawId) : "" };
 }
 
 export interface TrajectoryToolJoinResult {
@@ -154,6 +188,8 @@ export function joinTrajectoryToolResults(
           part,
           status: trajectoryToolPayloadErrorText(result.part.output) !== undefined ? "error" : "ok",
           pairedResultText: pairedResultText(result),
+          pairedResultToolName: result.part.toolName,
+          pairedResultToolId: result.part.toolCallId,
         };
       }),
     );

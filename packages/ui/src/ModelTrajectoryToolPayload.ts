@@ -40,7 +40,11 @@ export function trajectoryToolMetadata(message: ZCodeModelTrajectoryMessage): {
   };
 }
 
-function displayTrajectoryToolCallId(toolCallId: string): string {
+/**
+ * 调用 id 的展示态（裁掉 "call_" 前缀）。
+ * 徽标与搜索索引共用（ModelTrajectoryToolJoin 的徽标单源也走这里），避免两处口径漂移。
+ */
+export function displayTrajectoryToolCallId(toolCallId: string): string {
   return toolCallId.startsWith("call_") ? toolCallId.slice("call_".length) : toolCallId;
 }
 

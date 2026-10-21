@@ -149,6 +149,8 @@ export function ModelTrajectoryTurnGroup({
                   index={call.recordIndex}
                   inputMessages={call.inputMessages}
                   expansionKeyPrefix={trajectoryCallKey(call.record.requestId, call.recordIndex)}
+                  toolCalls={call.toolCalls}
+                  pairedResultToolCallIdsInInput={call.pairedResultToolCallIdsInInput}
                   intl={intl}
                 />
               </Fragment>
