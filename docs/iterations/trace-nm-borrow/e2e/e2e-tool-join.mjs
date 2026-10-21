@@ -239,6 +239,13 @@ function isFullyPairedRowIndependent(message, pairedIds) {
 
 // ── 全量统计 ────────────────────────────────────────────────────────────────
 
+// J2-5 集合级断言载体（r1 CR spec-check P1-1）：数据增长后 raw（消息级 isError 标记）
+// 与 mapped（output 结构化 error-text 判定）两口径不再 1:1——mapped 更灵敏（provider 把
+// 错误放 output 内容而消息顶层标志缺失的形态）。正确断言是集合包含：raw ⊆ mapped
+// （services 映射未丢 isError）；mapped − raw 的差集作为口径差异数据点打印登记。
+const globalRawIsErrorIds = new Set();
+const globalMappedErrorIds = new Set();
+
 const totals = {
   sessions: 0,
   records: 0,
@@ -476,6 +483,8 @@ for (const item of copied) {
   totals.resultPartsWithId += resultPartsWithId;
   totals.resultPartsWithoutId += resultPartsWithoutId;
   totals.rawIsErrorMessages += rawIsErrorMessages;
+  for (const id of rawIsErrorCallIds) globalRawIsErrorIds.add(id);
+  for (const id of errorCallIds) globalMappedErrorIds.add(id);
   totals.distinctErrorCallIds += errorCallIds.size;
   totals.pairedErrorCallIds += pairedErrorCallIds;
   totals.orphanErrorCallIds += orphanErrorCallIds.length;
@@ -630,9 +639,14 @@ check(
 check(
   "E2E-J2",
   "J2-5",
-  "映射后的错误 id 数 = 原始 JSONL isError 标记去重 id 数（services 映射未丢 isError）",
-  perSession.reduce((sum, row) => sum + row.rawIsErrorCallIds, 0),
-  totals.distinctErrorCallIds,
+  "原始 isError 标记的 callId 全部被映射后错误判定覆盖（services 映射未丢 isError；raw ⊆ mapped）",
+  0,
+  [...globalRawIsErrorIds].filter((id) => !globalMappedErrorIds.has(id)).length,
+);
+console.log(
+  `      [口径差异登记] raw(消息级 isError)=${globalRawIsErrorIds.size}，` +
+    `mapped(output error-text)=${globalMappedErrorIds.size}，` +
+    `mapped−raw=${globalMappedErrorIds.size - globalRawIsErrorIds.size}（output 判错但消息级未标，provider 差异形态）`,
 );
 
 console.log("\n[E2E-J3] 下标对齐");
