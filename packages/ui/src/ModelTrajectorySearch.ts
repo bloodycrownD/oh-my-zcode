@@ -3,6 +3,12 @@ import type { ZCodeModelTrajectoryMessage, ZCodeModelTrajectoryRecord } from "@z
 // 包内导入一律相对路径（而非 `@/`）：本模块被 modelTrajectoryTurns.test.ts 经
 // buildTrajectorySearchIndex 以 node:test 直测，tsx 从仓库根运行时不解析 `@/` 别名。
 // 反向依赖（Turns → 本模块）是 `import type`，verbatimModuleSyntax 下被擦除，无运行时环。
+import {
+  trajectoryToolCallBadgeText,
+  trajectoryToolCallDisplayText,
+  trajectoryToolCallTargetKey,
+  type TrajectoryToolCallInfo,
+} from "./ModelTrajectoryToolJoin.js";
 import { trajectoryInputRowKey } from "./ModelTrajectoryTurns.js";
 import {
   trajectoryToolCallInputs,
@@ -45,6 +51,12 @@ export interface TrajectorySearchTimelineItem {
   record: ZCodeModelTrajectoryRecord;
   /** 可见输入行；messageIndex 是 wire 原始下标，与渲染的 expansionKey 对齐（B-2）。 */
   inputRows: TrajectorySearchInputRow[];
+  /**
+   * 工具调用的跨记录配对信息（与 record.response.toolCalls 下标对齐）。
+   * tool-call 的 content target 文本取 trajectoryToolCallDisplayText（与配对卡 DOM 同源），
+   * 徽标文本取 trajectoryToolCallBadgeText（真实工具名优先）。
+   */
+  toolCalls: TrajectoryToolCallInfo[];
   turnKey: string;
   turnIndex: number;
   callIndexInTurn: number;
@@ -112,8 +124,17 @@ function buildSearchTargets(items: readonly TrajectorySearchTimelineItem[]): Sea
       targets.push(contentTarget(position, `${item.key}:output:message`, response.text));
     }
     response.toolCalls.forEach((toolCall, toolCallIndex) => {
+      // target key 与配对卡 DOM 逐字同源（ModelTrajectoryToolPairCard 用同一 helper）。
+      const expansionKey = trajectoryToolCallTargetKey(item.key, toolCall.kind, toolCallIndex);
+      const info = item.toolCalls[toolCallIndex];
+      if (info) {
+        // 配对形态：content 文本 = displayText（use 段 + 结果段），徽标文本取真实工具名。
+        targets.push(...toolCallTargets(position, expansionKey, info));
+        return;
+      }
+      // 兜底（无配对信息）：退回单段调用输入文本。
       targets.push(
-        ...messageTargets(position, `${item.key}:output:${toolCall.kind}:${toolCallIndex}`, {
+        ...messageTargets(position, expansionKey, {
           role: "assistant",
           parts: [toolCall],
         }),
@@ -121,6 +142,23 @@ function buildSearchTargets(items: readonly TrajectorySearchTimelineItem[]): Sea
     });
     return targets;
   });
+}
+
+/** 工具调用行的搜索 target：content（use + 结果）+ tool-name + tool-id。 */
+function toolCallTargets(
+  position: Omit<SearchTarget, "expansionKey" | "field" | "text">,
+  expansionKey: string,
+  info: TrajectoryToolCallInfo,
+): SearchTarget[] {
+  const badge = trajectoryToolCallBadgeText(info);
+  const content = trajectoryToolCallDisplayText(info);
+  return [
+    ...(content ? [contentTarget(position, expansionKey, content)] : []),
+    ...(badge.name
+      ? [{ ...position, expansionKey, field: "tool-name" as const, text: badge.name }]
+      : []),
+    ...(badge.id ? [{ ...position, expansionKey, field: "tool-id" as const, text: badge.id }] : []),
+  ];
 }
 
 function messageTargets(

@@ -22,6 +22,7 @@ import type {
 // （它依赖 React 的 createContext，不属于零 React 的纯函数区）。
 import type { TrajectorySearchTimelineItem } from "./ModelTrajectorySearch.js";
 import {
+  filterTrajectoryInputRows,
   joinTrajectoryToolResults,
   trajectoryCallKey,
   trajectoryInputRowKey,
@@ -457,10 +458,17 @@ export function resolveTrajectorySearchItems(
     group.calls.map((call) => {
       const key = trajectoryCallKey(call.record.requestId, call.recordIndex);
       const { rows } = classifyTrajectoryWireRows(call.inputMessages);
+      const visibleRows = hidePlaceholders ? rows.filter((row) => !row.placeholder) : rows;
+      // N-3：已配对的 tool-result 行从索引剔除（与渲染同源，避免命中不在 DOM 的行）。
+      const { visibleRows: pairedFilteredRows } = filterTrajectoryInputRows(
+        visibleRows,
+        call.pairedResultToolCallIdsInInput,
+      );
       return {
         key,
         record: call.record,
-        inputRows: hidePlaceholders ? rows.filter((row) => !row.placeholder) : rows,
+        inputRows: pairedFilteredRows,
+        toolCalls: call.toolCalls,
         turnKey: group.key,
         turnIndex: group.turnIndex,
         callIndexInTurn: call.callIndexInTurn,
