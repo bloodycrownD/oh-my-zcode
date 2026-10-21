@@ -21,30 +21,20 @@ import type {
 // 纯类型导入（verbatimModuleSyntax 下被完全擦除）：本模块运行时不会加载 Search.ts
 // （它依赖 React 的 createContext，不属于零 React 的纯函数区）。
 import type { TrajectorySearchTimelineItem } from "./ModelTrajectorySearch.js";
+import {
+  joinTrajectoryToolResults,
+  trajectoryCallKey,
+  trajectoryInputRowKey,
+  type TrajectoryToolCallInfo,
+} from "./ModelTrajectoryToolJoin.js";
 import { classifyTrajectoryWireRows } from "./ModelTrajectoryWireFilter.js";
 
 /** 回合头部在没有真实用户输入、也没有 assistant 文本时的占位文案（UI 可传 i18n 文本覆盖）。 */
 export const TRAJECTORY_EMPTY_USER_PREVIEW = "（无用户输入）";
 
-/**
- * 调用级 key 的唯一来源（ui/C-1-r2）：`<requestId>:<recordIndex>`。
- *
- * 它同时是 CallCard 的 `expansionKeyPrefix`、回合内调用列表的 Fragment key 与搜索项的 key；
- * 三处必须逐字一致——搜索命中靠它找回渲染节点，任一处漂移都会让定位静默失效。
- * `recordIndex` 是记录在入参数组里的全局下标，不是回合内序号。
- */
-export function trajectoryCallKey(requestId: string, recordIndex: number): string {
-  return `${requestId}:${recordIndex}`;
-}
-
-/**
- * 输入行展开键的唯一来源（ui/C-1-r2）：`<前缀>:input:<messageIndex>`。
- * 前缀由 trajectoryCallKey 产生；`messageIndex` 始终是 wire 原始下标
- * （占位行被隐藏也不重排，保证开关切换不丢行级展开状态）。
- */
-export function trajectoryInputRowKey(prefix: string, messageIndex: number): string {
-  return `${prefix}:input:${messageIndex}`;
-}
+// 调用级 key 家族自本迭代起由 ModelTrajectoryToolJoin.ts 单源持有（spec N-1）：
+// 本模块继续 re-export，既有引用点（Search / CallInput / PaneParts）零改动。
+export { trajectoryCallKey, trajectoryInputRowKey };
 
 /**
  * 非真实用户输入的消息前缀（判定前先剥 `§N§` 标签并 trimStart）。
@@ -190,6 +180,16 @@ export interface TrajectoryTurnCall {
   callIndexInTurn: number;
   /** 该次调用的可见输入（messageCount 三分支）；首条记录与 sidecar 记录为全部可见消息。 */
   inputMessages: ZCodeModelTrajectoryMessage[];
+  /**
+   * 工具调用与结果的配对信息（spec N-1）：与 record.response.toolCalls 严格同长度同顺序
+   * （含 kind:"unknown" 的 malformed 条目），response 缺失时为空数组。
+   */
+  toolCalls: TrajectoryToolCallInfo[];
+  /**
+   * 该 record 输入消息里「已被全局配对消费」的 tool-result id 集合。
+   * 用于把已配对的结果行从渲染与索引中剔除（不改动 inputMessages 本身）。
+   */
+  pairedResultToolCallIdsInInput: Set<string>;
 }
 
 export interface TrajectoryTurnStats {
@@ -349,6 +349,8 @@ export function resolveTrajectoryTurnGroups(
 
   const pendingGroups: PendingTrajectoryTurnGroup[] = [];
   const pendingByKey = new Map<string, PendingTrajectoryTurnGroup>();
+  // 工具配对只算一次（spec N-1）：跨记录 join 结果按 call key 分发到各次调用。
+  const toolJoin = joinTrajectoryToolResults(records);
   // 全局 prevCount 链跨回合不重置：判据是「本次调用相对上一次调用新增了多少条上下文」，
   // sidecar/full 调用不推进这条链（与 resolveTrajectoryInputMessages 的返回值一致）。
   let previousConversationMessageCount = 0;
@@ -371,11 +373,14 @@ export function resolveTrajectoryTurnGroups(
       previousConversationMessageCount,
     });
     previousConversationMessageCount = resolved.nextConversationMessageCount;
+    const callKey = trajectoryCallKey(record.requestId, recordIndex);
     pending.calls.push({
       record,
       recordIndex,
       callIndexInTurn: pending.calls.length,
       inputMessages: resolved.inputMessages,
+      toolCalls: toolJoin.callToolCalls.get(callKey) ?? [],
+      pairedResultToolCallIdsInInput: toolJoin.pairedResultToolCallIds.get(callKey) ?? new Set(),
     });
   });
 

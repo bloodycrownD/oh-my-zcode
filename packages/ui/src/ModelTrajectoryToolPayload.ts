@@ -12,11 +12,16 @@ export function trajectoryToolCallInputs(message: ZCodeModelTrajectoryMessage): 
   );
 }
 
+/**
+ * 该消息是否含错误（显示侧红标）：tool-result 的 output 与 tool-call 的 input 两侧都查。
+ * 复用 trajectoryToolPayloadErrorText（结构化 error-text 判定单源），
+ * 状态判定（join）只看 output，input 分支的语义在此保持原样。
+ */
 export function trajectoryToolHasError(message: ZCodeModelTrajectoryMessage): boolean {
   return message.parts.some(
     (part) =>
-      (part.kind === "tool-result" && isErrorTextObject(part.output)) ||
-      (part.kind === "tool-call" && isErrorTextObject(part.input)),
+      (part.kind === "tool-result" && trajectoryToolPayloadErrorText(part.output) !== undefined) ||
+      (part.kind === "tool-call" && trajectoryToolPayloadErrorText(part.input) !== undefined),
   );
 }
 
