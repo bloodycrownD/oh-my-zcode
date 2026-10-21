@@ -147,10 +147,18 @@ test("T-T1 tail 记录携带前 12 条 messagesHead（未触发字节预算）",
   assert.deepEqual(request.sdkMessages, messages.slice(44));
   assert.equal(request.bodyMessagesKind, "tail");
   assert.deepEqual(request.body.messages, messages.slice(44));
-  assert.equal("messagesHead" in request.sdkMessages, false);
-  assert.equal("messagesHead" in request.body, false);
-  assert.equal("sdkMessagesHead" in request, false);
-  assert.equal("headMessageCount" in request.body, false);
+  // 顶层 head* 键集合精确比对：新增或漂移任一键都会红。`headers` 是真实请求头字段，
+  // 只是与 messagesHead 同含 "head" 子串，显式排除（sdk 侧数组属性经 JSON 序列化本就丢弃，
+  // 其防线是上面的 deepEqual）。
+  assert.deepEqual(
+    Object.keys(request)
+      .filter((key) => /head/i.test(key) && key !== "headers")
+      .sort(),
+    ["headMessageCount", "messagesHead", "messagesHeadTruncated"],
+  );
+  assert.equal(Object.hasOwn(request.body, "messagesHead"), false);
+  assert.equal(Object.hasOwn(request, "sdkMessagesHead"), false);
+  assert.equal(Object.hasOwn(request.body, "headMessageCount"), false);
 });
 
 test("T-T1 head 字节预算按整条消息截断，messagesHeadTruncated 置位", async () => {

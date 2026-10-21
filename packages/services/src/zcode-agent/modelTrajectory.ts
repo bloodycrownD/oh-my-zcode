@@ -1,3 +1,4 @@
+/* oxlint-disable max-lines -- FORK (agent-lang-trace-usage-batch / head/C-2)：还原原花括号后计数 410 行；model-io 记录到轨迹的映射契约（delta/head 展开 + toolCalls 映射）需同文件维护，拆分会割裂读取契约。 */
 import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import type {
@@ -75,19 +76,25 @@ export async function readModelTrajectory(
       let matchedInFile = false;
       for (const line of tail.text.split("\n")) {
         const trimmed = line.trim();
-        if (!trimmed) continue;
+        if (!trimmed) {
+          continue;
+        }
         let parsed: Record<string, unknown>;
         try {
           parsed = JSON.parse(trimmed) as Record<string, unknown>;
         } catch {
           continue;
         }
-        if (parsed.type !== "model_io" || parsed.sessionId !== taskId) continue;
+        if (parsed.type !== "model_io" || parsed.sessionId !== taskId) {
+          continue;
+        }
         rawRecords.push(parsed);
         matchedInFile = true;
       }
 
-      if (matchedInFile) sourceFiles.push(filePath);
+      if (matchedInFile) {
+        sourceFiles.push(filePath);
+      }
     }
   }
 
@@ -114,7 +121,9 @@ export async function readModelTrajectory(
 }
 
 function toTime(value?: string): number {
-  if (!value) return 0;
+  if (!value) {
+    return 0;
+  }
   const time = Date.parse(value);
   return Number.isNaN(time) ? 0 : time;
 }
@@ -219,6 +228,10 @@ function classifyCallSource(
   return { kind: "main" };
 }
 
+/**
+ * 轨迹读取入口：按写入顺序把模型调用记录里的 delta 消息集合还原成完整窗口。
+ * 只读入参 records，不改入参记录与内部 previous（每次都用新对象续接），返回新数组。
+ */
 export function expandModelIODeltaRecords(
   records: Record<string, unknown>[],
 ): Record<string, unknown>[] {
@@ -282,6 +295,11 @@ function expandModelIORequest(
   return next;
 }
 
+/**
+ * 把单个消息集合（messages / sdkMessages / body.messages）展开到 target 上——**原地修改 target**。
+ * tail 记录仅在双条件门（metadataSource === target 且 collectionKey === "messages"）下把
+ * messagesHead 接回窗口前；delta 记录用 previous 的前序窗口还原，previous 本身不被修改。
+ */
 export function expandMessageCollection(
   target: Record<string, unknown>,
   previous: Record<string, unknown> | undefined,
@@ -298,8 +316,9 @@ export function expandMessageCollection(
     // FORK (agent-lang-trace-usage-batch / B-2)：tail 记录在写入侧补了前 K 条 messagesHead，
     // 这里把 head 接回 tail 前面（tail = [...head.slice(0, min(headMessageCount, offset)), ...tail]），
     // 恢复被裁掉的系统段/首轮注入；head 截到 offset 防与 tail 窗口头部重复。
-    // 门是 metadataSource === target（canonical request.messages）：body.messages 复用本函数
-    //（collectionKey 同为 "messages"）且 sdkMessages 走默认 metadataSource，二者都不能拼 head。
+    // 双条件门：①metadataSource === target 排除 body.messages（复用本函数但传入显式 metadataSource）；
+    // ②keys.collectionKey === "messages" 排除 sdkMessages——它的 metadataSource 默认就是 target，
+    // 与 canonical 共用 target，只能靠集合键排除；head / tailMessages 取值同出 canonical 集合。
     // 旧记录没有 messagesHead / headMessageCount 时跳过（防 undefined → NaN 的切片）。
     if (metadataSource === target && keys.collectionKey === "messages") {
       const head = target.messagesHead;
@@ -376,7 +395,9 @@ function mapContent(
     return [{ kind: "text", text: content }];
   }
 
-  if (!Array.isArray(content)) return [];
+  if (!Array.isArray(content)) {
+    return [];
+  }
 
   return content.map((rawPart) => mapPart(rawPart, role === "tool" ? messageTool : undefined));
 }
@@ -386,7 +407,9 @@ function mapPart(
   messageTool?: { toolCallId?: string; toolName?: string; isError?: boolean },
 ): ZCodeModelTrajectoryContentPart {
   const part = asObject(rawPart);
-  if (!part) return { kind: "unknown", raw: rawPart };
+  if (!part) {
+    return { kind: "unknown", raw: rawPart };
+  }
 
   switch (part.type) {
     case "text":
