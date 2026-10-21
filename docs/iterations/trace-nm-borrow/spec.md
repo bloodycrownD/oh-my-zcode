@@ -213,7 +213,7 @@ services / adapters / shared / bootstrap：**零改动**。`TRAJECTORY_EXPANSION
 
 - T-N1 — blocking: yes — join：配对成功/四态判定（error 经既有 errorText、ok、pending 仅尾部、missing 含放弃 attempt 与 unknown 无 id）/孤立 result 保留/混合 part 消息整行保留/croppedCount 边界/delta 空数组不误判/多 result part 不串文本/id 缺失不入 map/key 家族单源（trajectoryCallKey 迁移后逐字同值）/displayText 拼接（空结果不拼分隔）。fixture：T-N1 自带最小构造（toolCalls 非空即创建 response，r3 P2-14；Turns 测试 fixture 扩展仅服务 T-N2）。
 - T-N2 — blocking: yes — 搜索协同：result 词→tool-call key（trajectoryToolCallTargetKey 逐字）；孤立→input row key；hiddenCount 不变；配对行不出现在 visibleRows；fixture 构造 call 在 record N、result 在 record N+1（Step 3）。
-- T-N3 — blocking: yes — 溢出判定纯逻辑（tolerance 边界）（Step 4）。
+- T-N3 — blocking: yes — 溢出判定纯逻辑（tolerance 边界；**默认容差 2px，判定为 `overflowPx > 2`**——r1 CR P2-6 数值锚点，防止 1↔2 静默回归）（Step 4）。
 - T-N5 — blocking: yes — counts：toolCallCount 求和（kind 过滤计数）含 response undefined 调用/charCount 输出侧公式（不 trim、undefined→0、use 段 join 同源分隔符、reasoning 随投影变化）/failureCount 拆分合计/sidecar 排除与全 sidecar 回退（Step 2）。
 - T-N6 — blocking: yes — formatTurnCounts 段序列数组形态（summaryCalls/toolCalls?/charCount/failureCount?/duration string 段?/每来源一段；省略规则）（Step 2）。
 - T-N4 — blocking: no — manual_user：配对卡契约 1–8 DOM 断言（含 tool-name/tool-id 字段可搜可高亮、两格 6lh、pending/missing 占位、复制文本、卡片全屏入口、状态点 aria、unknown 回退——r3 P2-1）+ Modal Esc/遮罩/复制/切 tab + 6 行 clamp 视觉 + 搜索命中配对卡自动展开定位 + overflowEver 入口在 searchRevealed 时保持可见 + 窄侧栏（<lg）布局 + 回合头两行对齐与 chevron（Step 5/8 真机清单）。
@@ -251,6 +251,10 @@ T-T3 stats deepEqual 不动（counts 独立模块）；T-T9 增量三分支不�
 12. 配对卡「查看全文」入口**恒渲染**（配对卡是主要内容区，恒有全屏入口是既定口径）；路径 A/B 的入口维持 `overflowEver` 门控——两条口径并存是有意设计（r1 CR B-P2-6 裁定）。
 13. unknown（malformed）条目的展开命令槽沿用 `"tool-call"`（契约 4 不新增 kind 的副作用；旧行为按 visualRole 归 `assistant` 槽）——「全部展开/收起」对 unknown 行的作用对象变化，实测 unknown 罕见，接受（r1 CR B-P2-5 登记）。
 14. `stats.errorCount` 已无生产消费者（图标口径迁至 `counts.failureCount`，不含 sidecar）；字段保留仅为 T-T3 deepEqual 契约与上迭代 e2e 脚本兼容（r1 CR A-P2-5/D-P2-1 登记，Turns.ts 字段注释同款说明）。
+15. 失败段**渲染前置**（r1 CR D-P1-1 修复的副作用）：组件层把 failureCount 段提取为 truncate 容器前的 shrink-0 前缀（窄侧栏可见性优先），渲染序「失败 · 调用数 · …」与纯函数数组序「调用数 · … · 失败 · …」不同；T-N6 锁的是纯函数数组形态，不受影响。
+16. clamp 内容变化的重测由 layout effect 承担（r1 CR P1-1 修复）：渲染期复位溢出态后，RO 观察的是被 6lh 钳住的盒子（外框高度不变、RO 不触发），`measuredText` 必须进 layout effect deps 重测，否则入口被永久抹掉。路径 A 外层留白 `pb-2` 无条件 + `pb-12` 溢出时（短内容也有底部留白——r1 CR P2-2）；Modal 宽屏下收窄至 max-w-3xl/48rem（窄视口不贴边——r1 CR P2-7/观察）。
+17. `useTrajectoryMessageView` 的 Provider 是硬前置（缺 Host 直接 throw，fail-fast 优于静默失效——r1 CR C-P2-11 登记）；焦点归位 capture 排除 `document.body`（程序化打开时 activeElement 常在 body，归位到 body 会重置滚动——r1 CR P2-4）；归位实际由 Dialog 的 `useEffect([open])` 完成（context close 包装为将来程序化关闭保留——r1 CR P2-5）。
+18. 徽标 result 侧空串档位（r1 CR P2-1）：badgeText 用 `||`，result 侧 toolName 为空串时回退 **call 侧名**——两者本就是同一工具调用的名字，语义无损且保住「搜工具名」可达；显示口径即 call 侧名。全屏入口判空用剪贴板口径文本（`messageClipboardText`），「剪贴板空白但可见非空」的极端组合入口会隐藏（概率极低，接受——r1 CR 观察）。路径 A 正文盒 `text-ui-sm` 为 6lh 行高口径连带（较旧字号 -2px，真机观感确认项）。
 
 ## 开放问题（不阻塞）
 

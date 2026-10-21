@@ -86,7 +86,10 @@ export function TrajectoryExpandedContent({
 
   useLayoutEffect(() => {
     measureOverflow();
-  }, [measureOverflow]);
+    // measuredText 入 deps（r1 CR P1-1）：内容变化时上面的渲染期复位会清掉溢出态，
+    // 但 RO 观察的是被 6lh 钳住的盒子（外框高度不变、RO 不触发）——必须由本 effect 重测，
+    // 否则「查看全文」入口与溢出胶囊在内容变化后被永久抹掉。
+  }, [measureOverflow, measuredText]);
 
   useEffect(() => {
     const element = contentRef.current;
@@ -126,7 +129,8 @@ export function TrajectoryExpandedContent({
     <div data-trajectory-expanded-content-shell="" className="relative min-w-0">
       <div
         // 浮动按钮的占位留白放在 clamp 盒之外：留白若在盒内会挤占 6 行的可视高度。
-        className={cn("relative min-w-0", overflowEver && "pb-12")}
+        // pb-2 无条件保留（r1 CR P2-2：短内容也需底部留白）；溢出时升级为 pb-12 给浮动按钮带让位。
+        className={cn("relative min-w-0 pb-2", overflowEver && "pb-12")}
       >
         <div
           ref={contentRef}

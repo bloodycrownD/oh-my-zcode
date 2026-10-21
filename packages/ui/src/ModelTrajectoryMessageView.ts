@@ -57,6 +57,9 @@ export function useTrajectoryMessageView(): TrajectoryMessageViewContextValue {
     restoreTrajectoryFocusReturn();
     value?.close();
   }, [value]);
+  // 注（r1 CR P2-5）：当前所有关闭路径（Esc/遮罩/关闭按钮）都走 Host 的 raw close，
+  // 不经过本包装 close——焦点归位实际由 MessageDialog 的 useEffect([open]) 调
+  // restoreTrajectoryFocusReturn 完成。此处保留包装是为将来程序化关闭时归位不失。
   const result = useMemo<TrajectoryMessageViewContextValue>(() => ({ open, close }), [close, open]);
   if (!value) {
     throw new Error(
@@ -75,11 +78,12 @@ export function useTrajectoryMessageView(): TrajectoryMessageViewContextValue {
 /** 打开前正在获得焦点的元素（HTMLElement；无则 null）。 */
 let focusReturnTarget: HTMLElement | null = null;
 
-/** 记录打开全屏视图前的焦点元素（open 时调用）。 */
+/** 记录打开全屏视图前的焦点元素（open 时调用）。body 不算有效目标（r1 CR P2-4：
+ *  程序化打开时 activeElement 常落在 body，restore 到 body 会重置根滚动位置）。 */
 export function captureTrajectoryFocusReturn(): void {
   if (typeof document === "undefined") return;
   const active = document.activeElement;
-  focusReturnTarget = active instanceof HTMLElement ? active : null;
+  focusReturnTarget = active instanceof HTMLElement && active !== document.body ? active : null;
 }
 
 /** 关闭时把焦点还给打开前的元素（元素已卸载 / 不可聚焦则放弃）。 */
