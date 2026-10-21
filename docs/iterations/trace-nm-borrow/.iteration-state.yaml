@@ -1,9 +1,22 @@
 spec_path: docs/iterations/trace-nm-borrow/spec.md
 branch: trace-nm-borrow
 base_sha: e4d3a63e
-head_sha: "0f8e76b0"
+# head_sha 语义：最近一次「含代码/文档内容变更」的实质 commit；本文件自身的记账性提交不计。
+# 分支头以 `git rev-parse trace-nm-borrow` 为准（本文件提交会滞后一格）。
+head_sha: "5e9320d6"
 dag_version: 1
-wave_plan: [[impl-s1], [impl-s2, impl-s4], [impl-s3], [impl-s5, impl-s6], [verify-all], [cr-func-all], [e2e-ext]]
+wave_plan:
+  [
+    [impl-s1],
+    [impl-s2, impl-s4],
+    [impl-s3],
+    [impl-s5, impl-s6],
+    [verify-all],
+    [cr-func-all],
+    [e2e-ext],
+  ]
+# status 语义：dev-ready = 实现门禁（typecheck/lint/v4-perf/parity/architecture/e2e-ext）全绿；
+# 后续阶段见下方 cr / spec-check 节点。
 status: dev-ready
 node_status:
   impl-s1: { status: done, head_sha: "868edf2a+f2470d93", executor: subagent }
@@ -11,19 +24,59 @@ node_status:
   impl-s4: { status: done, head_sha: "fb44c605+87779f6d", executor: subagent }
   registry-n10: { status: done, head_sha: "bb2c2744", executor: main }
   impl-s3: { status: done, head_sha: "b46d5a2e+d3f13d22+ee6cc7d4", executor: subagent }
-  impl-s5: { status: done, head_sha: "808545ed", executor: subagent, note: "偏差A-1：Host 包 Timeline 作 Provider 祖先（+3 行）而非挂兄弟——必要性成立" }
+  impl-s5:
+    {
+      status: done,
+      head_sha: "808545ed",
+      executor: subagent,
+      note: "偏差A-1：Host 包 Timeline 作 Provider 祖先（+3 行）而非挂兄弟——必要性成立",
+    }
   impl-s6: { status: done, head_sha: "8847aeca", executor: subagent }
-  verify-all: { status: done, executor: main, note: "typecheck OK / parity 5936 / lint 0err / v4-perf 28组 448/448" }
-  cr-func-all: { status: done, func_ready: yes, executor: subagent, note: "0P0/0P1；P2-1 行内胶囊经用户实测判接受（与查看全文两级递进不重叠，已关闭）；P2-2 收起态无 content 字段（激活命中主路径正常，留观察）；deviations 全 accepted；O-3 徽标真名优先需进 CHANGELOG" }
-  e2e-ext: { status: done, head_sha: "14032fea", executor: subagent, note: "真实数据 25/25：配对率 96.15%、error 对齐 13=13（当时数据量）、下标 0 违例、剔除 97=97、孤立 321 保留、pending 仅尾部；J2-5 计数口径随数据增长失配，SC-P1-1 已改集合包含断言（778d2929）后复跑 25/25；脚本未登记 package.json（待拍板）" }
-cr: { status: done, fix_spec_ready: yes, head_sha: bd7c29bf, commits: "68e5a57a + d350d3a0 + 52de0f2d + bd7c29bf", note: "r1 四 scope（0P0/4P1/35P2）→ fix 两批+doc 批 → review-full（RF-P1-1 复位缺重测 + 6 P2 + doc 遗漏）→ 收口批；455/455 全绿" }
-spec-check: { status: in_progress, target: cr-fix-spec.md, review_round: 2, dag_version: 3, open_must_fix: [], doc_fix_plan: [], note: "r1 No-Go（4P1+6P2 全记账层）已 doc-fix：SC-P1-1 J2-5 改集合包含断言（778d2929，25/25）、SC-P1-2 T-N4 补窄侧栏、SC-P1-3 发布挂账集中清单（CHANGELOG 4 条见 cr-fix-spec「发布期待办」）、SC-P1-4 口径统一+总表；待 r2" }
-publish_pending: { changelog: "4 条用户向条目（O-3 徽标真名优先+搜索行为 / D-P2-7 错误图标口径 / D-P2-8 锚点替换 / 新增功能条目）——见 cr-fix-spec「发布期待办」", manual_tn4: "真机清单含窄侧栏失败标识可见（发布后）", e2e_registry: "e2e-tool-join.mjs 是否登记 package.json 待拍板" }
+  verify-all:
+    {
+      status: done,
+      executor: main,
+      note: "typecheck OK / parity 5936 / lint 0err / v4-perf 28组 448/448（dev 期口径；CR 修复新增 7 例后为 455/455）",
+    }
+  cr-func-all:
+    {
+      status: done,
+      func_ready: yes,
+      executor: subagent,
+      note: "0P0/0P1；P2-1 行内胶囊经用户实测判接受（与查看全文两级递进不重叠，已关闭）；P2-2 收起态无 content 字段（激活命中主路径正常，留观察）；deviations 全 accepted；O-3 徽标真名优先需进 CHANGELOG",
+    }
+  e2e-ext:
+    {
+      status: done,
+      head_sha: "14032fea",
+      executor: subagent,
+      note: "真实数据 25/25：配对率 96.15%、error 对齐 13=13（当时数据量）、下标 0 违例、剔除 97=97、孤立 321 保留、pending 仅尾部；J2-5 计数口径随数据增长失配，SC-P1-1 已改集合包含断言（778d2929）后复跑 25/25；脚本未登记 package.json（待拍板）",
+    }
+cr:
+  {
+    status: done,
+    fix_spec_ready: yes,
+    note: "修复链 68e5a57a + d350d3a0 + 52de0f2d + bd7c29bf（r1 四 scope 0P0/4P1/35P2 → fix 两批+doc 批 → review-full RF-P1-1+6P2 → 收口批）；455/455 全绿；后续 doc 提交见 cr-fix-spec 执行记录",
+  }
+spec-check:
+  {
+    status: in_progress,
+    target: cr-fix-spec.md,
+    review_round: 2,
+    dag_version: 3,
+    open_must_fix: [],
+    doc_fix_plan: [],
+    note: "r1 No-Go（4P1+6P2 全记账层）已 doc-fix：SC-P1-1 J2-5 改集合包含断言（778d2929，25/25）、SC-P1-2 T-N4 补窄侧栏、SC-P1-3 发布挂账集中清单、SC-P1-4 口径统一+总表（5e9320d6）；r2 No-Go（2P1+7P2）：SC2-P1-1 重复键已修、SC2-P1-2 归属表落表中",
+  }
+publish_pending:
+  {
+    changelog: "4 条用户向条目（O-3 徽标真名优先+搜索行为 / D-P2-7 错误图标口径 / D-P2-8 锚点替换 / 新增功能条目）——见 cr-fix-spec「发布期待办」",
+    manual_tn4: "真机清单含窄侧栏失败标识可见（发布后）",
+    e2e_registry: "e2e-tool-join.mjs 是否登记 package.json 待拍板",
+  }
 open_must_fix: []
 spec_deviations: []
-dev_ready_evidence: "8 impl commits + registry + e2e；门禁 typecheck/parity 5936/lint 0err/v4-perf 448/448；cr-func func-ready；剩余：真机 manual T-N4（发布后）+ CHANGELOG 覆盖 O-3 行为变化（徽标真名优先）"
-open_must_fix: []
-spec_deviations: []
+dev_ready_evidence: "8 impl commits + registry + e2e；门禁 typecheck/parity 5936/lint 0err/v4-perf 448/448（dev 期口径，CR 后 455/455）；cr-func func-ready；剩余：真机 manual T-N4（发布后）+ CHANGELOG 覆盖 O-3 行为变化（徽标真名优先）"
 notes: >-
   wave-0 s1=tool-join（ToolJoin.ts+Turns 接线+ToolPayload 复用+T-N1）；
   wave-1 s2=turn-counts（TurnCounts.ts+T-N5/N6）、s4=clamp（Clamp.ts+ExpandedContent 6lh/overflowEver+ClampedPreview 骨架+viewFullContent/fullContentTitle i18n+T-N3）；

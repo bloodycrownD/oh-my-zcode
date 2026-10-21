@@ -8,35 +8,33 @@
 
 - iteration: trace-nm-borrow（v1.0.18 候选）
 - 开发 spec: docs/iterations/trace-nm-borrow/spec.md（v3 + 实现注 1–18，spec-check 3 轮 Go）
-- dev-ready: 14032fea（typecheck 0 / parity 5936 / lint 0err / v4-perf 448/448 / architecture 0 / e2e-ext 25/25 / cr-func func-ready）
+- dev-ready: 14032fea（typecheck 0 / parity 5936 / lint 0err / v4-perf 448/448【dev 期口径，CR 修复新增 7 例后为 455/455】/ architecture 0 / e2e-ext 25/25 / cr-func func-ready）
 - 用户真机预验收：配对卡/回合头/新数据路径 OK；「展开」胶囊判接受；旧代际数据回退路径为设计内
 
-## r1 审查结论（4 scope 并行，编号规则：scope 前缀 = 首轮审查；RF- 前缀 = review-full 轮；SC- 前缀 = spec-check 轮）
+## r1 审查结论（4 scope 并行，编号规则：scope 前缀 = 首轮审查；RF- 前缀 = review-full 轮；SC- 前缀 = spec-check 轮；spec 实现注中「r1 CR D-1/D-2/D-3/D-6」等为历史遗留写法，同义。文件简称 = `ModelTrajectory` 前缀省略）
 
-| scope | ready | P0/P1/P2 |
-|---|---|---|
-| A 纯函数 | no | 0/1/7 |
-| B 配对卡+搜索 | yes | 0/2/9 |
-| C clamp+Modal | yes | 0/0/11 |
-| D 回合头+i18n | no | 0/1/8 |
-| 合计 | — | **0 / 4 / 35**（B-P1-2 实为 spec 措辞缺口，归 doc 修复） |
+| scope         | ready | P0/P1/P2                                                                    |
+| ------------- | ----- | --------------------------------------------------------------------------- |
+| A 纯函数      | no    | 0/1/7                                                                       |
+| B 配对卡+搜索 | yes   | 0/2/9                                                                       |
+| C clamp+Modal | yes   | 0/0/11（编号自 C-P2-2 起，C-P2-1 为未签发空号）                             |
+| D 回合头+i18n | no    | 0/1/8                                                                       |
+| 合计          | —     | **0 / 4 / 35**（B-P1-2 为 spec 措辞缺口，归 doc 修复；35 条逐条归属见附录） |
 
 ## must-fix 总表（条目 → 状态 → 证据）
 
 ### P1（4 条，全 landed）
 
-| 编号 | 内容 | 状态 | 证据 |
-|---|---|---|---|
-| A-P1-1 | badgeText 零断言 → 补 7 用例（四分支+空串+unknown+sidecar-last） | landed | modelTrajectoryToolJoin.test.ts:375-435 + sidecar 用例（`68e5a57a`） |
-| B-P1-1 | 配对卡丢 call 侧 input 错误红标 → use 格接 trajectoryToolHasError | landed | ToolPairCard.tsx:83→198→377（`68e5a57a`） |
-| D-P1-1 | 行 2 truncate 裁掉失败标识 → shrink-0 前缀 + title 兜底 | landed | TurnGroup.tsx:129-134/:127（`d350d3a0`） |
-| RF-P1-1 | C-P2-10 复位后无重测（RO 钳住盒子不触发）→ measuredText 入 layout effect deps | landed | ExpandedContent.tsx:92 / ClampedPreview.tsx:73（`bd7c29bf`） |
+| 编号    | 内容                                                                                        | 状态   | 证据                                                             |
+| ------- | ------------------------------------------------------------------------------------------- | ------ | ---------------------------------------------------------------- |
+| A-P1-1  | badgeText 零断言 → 补 6 用例（badgeText 5：四分支+空串回退+unknown 无徽标；sidecar-last 1） | landed | modelTrajectoryToolJoin.test.ts:375-435 + :449-462（`68e5a57a`） |
+| B-P1-1  | 配对卡丢 call 侧 input 错误红标 → use 格接 trajectoryToolHasError                           | landed | ToolPairCard.tsx:83→198→377（`68e5a57a`）                        |
+| D-P1-1  | 行 2 truncate 裁掉失败标识 → shrink-0 前缀 + title 兜底                                     | landed | TurnGroup.tsx:129-134/:127（`d350d3a0`）                         |
+| RF-P1-1 | C-P2-10 复位后无重测（RO 钳住盒子不触发）→ measuredText 入 layout effect deps               | landed | ExpandedContent.tsx:92 / ClampedPreview.tsx:73（`bd7c29bf`）     |
 
-### P2 代码修（16 条，全 landed；commit 归属见执行记录）
+### P2 代码修（18 条，全 landed；commit 归属见执行记录；其余 17 条为 doc 登记 / OQ / 发布挂账，见附录归属表）
 
-A-P2-1（badgeText `||` + call 侧 `|| "tool"` 双兜底，ToolJoin.ts:73-74）、A-P2-2（filterTrajectoryInputRows slice，ToolJoin.ts:280）、A-P2-6（unknown displayText 并入 raw + raw pre 补挂 content 字段，ToolJoin.ts:146-178 + ToolPairCard.tsx:367）、A-P2-3（sidecar 尾部判 missing 用例）、A-P2-4（旧模板来源注释）、B-P2-1（showAll 收起复位，ToolPairCard.tsx:333-337）、B-P2-2（溢出测量依赖补 text，:314-318）、B-P2-7（注释上/下，:41）、C-P2-2（遮罩现算清零，ExpandedContent.tsx:117）、C-P2-3（容差回 2px，Clamp.ts:23——spec T-N3 已补 2px 锚点）、C-P2-4（内容盒 pb-0，:139）、C-P2-5（焦点归位 capture/restore，MessageView.ts:76-91 + MessageDialog.tsx:42-44）、C-P2-6（标题 aria-hidden）、C-P2-7（Dialog w-[calc(100%-2rem)] max-w-3xl）、C-P2-8（空正文入口不渲染，trim 口径）、C-P2-9（删死属性）、C-P2-10（溢出态随内容重置，渲染期 setState）、D-P2-3（en 去冒号，en-US.ts:1080）。
-
-> 注：上表 16 条含 A-P2-3/A-P2-4（原在 must-fix 段外、随 fix-ab 落地，此处收编入表）。
+A-P2-1（badgeText `||` + call 侧 `|| "tool"` 双兜底，ToolJoin.ts:73-74）、A-P2-2（filterTrajectoryInputRows slice，ToolJoin.ts:277-281）、A-P2-3（sidecar 尾部判 missing 用例，test:449-462）、A-P2-4（key 家族来源注释，ToolJoin.ts:102/:113）、A-P2-6（unknown displayText 并入 raw + raw pre 补挂 content 字段 + rawText helper 单源迁入，ToolJoin.ts:138-178 + ToolPairCard.tsx:73-75/:363-371）、B-P2-1（showAll 收起复位，ToolPairCard.tsx:332-337）、B-P2-2（溢出测量依赖补 text/rawText/placeholder，:313-318）、B-P2-7（注释上/下，:41）、C-P2-2（遮罩现算清零，ExpandedContent.tsx:42-48/:117）、C-P2-3（容差回 2px，Clamp.ts:23——spec T-N3 已补 2px 锚点）、C-P2-4（内容盒 pb-0 + 外层 pb-2/pb-12，ExpandedContent.tsx:129-139）、C-P2-5（焦点归位 capture/restore，MessageView.ts:78-95 + MessageDialog.tsx:42-44）、C-P2-6（标题 aria-hidden）、C-P2-7（Dialog w-[calc(100%-2rem)] max-w-3xl）、C-P2-8（空正文入口不渲染，trim 口径）、C-P2-9（删死属性）、C-P2-10（溢出态随内容重置 + measuredText 重测，渲染期 setState）、D-P2-3（en 去冒号，en-US.ts:1080）。
 
 ### RF-P2（6 条，全 landed 或注释化收口）
 
@@ -49,12 +47,58 @@ RF-P2-1（badgeText result 侧空串档位语义 → 实现注 18 登记）、RF
 ## 发布期待办（独立挂账，发布链按此执行；SC-P1-3 集中）
 
 CHANGELOG v1.0.18 用户向条目（4 条）：
-1. **O-3 徽标真名优先**：配对卡徽标优先取 result part 真实工具名；兜底名（"tool"）仅无结果时出现——搜兜底名不再命中已配对调用（B-D1/D1 搜索行为变化并此条说明）。
+
+1. **O-3 徽标真名优先**：配对卡徽标优先取 result part 真实工具名；兜底名（"tool"）仅无结果时出现——搜兜底名不再命中已配对调用（搜索行为变化，A-P2-1/实现注 9）。
 2. **D-P2-7 错误标识口径变更**：回合错误图标不再含 sidecar 辅助调用失败；工具调用失败（status=error）新增点亮图标与「N 失败」计数。
 3. **D-P2-8 DOM 锚点替换**：`data-trajectory-turn-stats` → `data-trajectory-turn-meta`（外部脚本若有依赖需同步）。
 4. 新增功能条目：工具配对卡 / 回合头计数行 / 6 行 clamp + 查看全文全屏 / 搜索自动展开定位（对应用户向描述）。
 
 其他：真机 manual T-N4 清单（含窄侧栏失败标识可见）；e2e 脚本是否登记 package.json（待拍板）。
+
+## 附录：r1 35 条 P2 逐条归属表（SC2-P1-2 落表）
+
+> r1 四 scope 原始报告未入库且不可恢复（git 全历史检索无更早来源）；下表按编号空间重建（7+9+11+8=35，C scope 编号自 2 起），「原文摘要」为二手痕迹（CR 摘要/spec 实现注/源码注释）复原。
+> 处置类别：代码修 = 现仓库文件:行核到；spec 注 = 仅实现注登记；OQ = open questions 留观；发布挂账 = CHANGELOG/发布清单。
+
+| ID      | scope 原文摘要                              | 处置                  | 落点                                                 |
+| ------- | ------------------------------------------- | --------------------- | ---------------------------------------------------- |
+| A-P2-1  | badgeText `\|\|` 双兜底                     | 代码修                | ToolJoin.ts:73-74 + 注 9 + 发布挂账条目 1            |
+| A-P2-2  | filterTrajectoryInputRows 返回副本          | 代码修                | ToolJoin.ts:277-281                                  |
+| A-P2-3  | sidecar 尾部判 missing 用例                 | 代码修（测试）        | modelTrajectoryToolJoin.test.ts:449-462              |
+| A-P2-4  | key 家族来源注释                            | 代码修（注释）        | ToolJoin.ts:102/:113                                 |
+| A-P2-5  | stats.errorCount 无生产消费者               | spec 注 14 + 代码注释 | Turns.ts:201-206                                     |
+| A-P2-6  | unknown displayText 并入 raw + content 字段 | 代码修 + 注 10        | ToolJoin.ts:138-178、ToolPairCard.tsx:363-371        |
+| A-P2-7  | **scope 原文佚失（不可恢复）**              | 以处置为准            | 推定：被 A-P2-1/2/6 与注 9/10 吸收或原为观察项       |
+| B-P2-1  | 收起复位 showAll                            | 代码修                | ToolPairCard.tsx:332-337                             |
+| B-P2-2  | 溢出测量依赖补内容                          | 代码修                | ToolPairCard.tsx:313-318                             |
+| B-P2-3  | observer 量性能观察                         | OQ                    | open questions 第 1 条                               |
+| B-P2-4  | **scope 原文佚失（不可恢复）**              | 以处置为准            | 推定：被契约 1–9 或相邻 P2 吸收                      |
+| B-P2-5  | unknown 命令槽沿用 tool-call                | spec 注 13            | 判定接受                                             |
+| B-P2-6  | 配对卡查看全文恒渲染口径                    | spec 注 12 + 代码注释 | ToolPairCard.tsx:213-217                             |
+| B-P2-7  | 注释左右→上下                               | 代码修（注释）        | ToolPairCard.tsx:41                                  |
+| B-P2-8  | **scope 原文佚失（不可恢复）**              | 以处置为准            | 推定：被相邻 P2 或 spec 契约吸收                     |
+| B-P2-9  | 默认展开回合高度观感                        | OQ                    | open questions 第 2 条                               |
+| C-P2-2  | 渐隐遮罩现算清零                            | 代码修                | ExpandedContent.tsx:42-48/:117                       |
+| C-P2-3  | clamp 容差回 2px                            | 代码修 + T-N3 锚点    | Clamp.ts:23                                          |
+| C-P2-4  | 内容盒 pb-0 + 外层留白                      | 代码修                | ExpandedContent.tsx:129-139                          |
+| C-P2-5  | 全屏焦点归位                                | 代码修                | MessageView.ts:78-95、MessageDialog.tsx:42-44        |
+| C-P2-6  | 可见标题 aria-hidden                        | 代码修                | MessageDialog.tsx:70                                 |
+| C-P2-7  | Dialog 窄视口宽度                           | 代码修 + 注 16        | MessageDialog.tsx:60-64                              |
+| C-P2-8  | 空正文入口不渲染                            | 代码修                | ExpandedContent.tsx:125/:220、ClampedPreview.tsx:105 |
+| C-P2-9  | 删死属性                                    | 代码修                | 已移除（全仓零命中）                                 |
+| C-P2-10 | 溢出态随内容重置                            | 代码修 + 注 16        | ExpandedContent.tsx:59-68、ClampedPreview.tsx:49-56  |
+| C-P2-11 | Provider 硬前置 throw                       | spec 注 17 + 代码     | MessageView.ts:64-68                                 |
+| C-P2-12 | useZCodeIntl 风格不动                       | 判定不修              | OQ 第 5 条                                           |
+| D-P2-1  | stats.errorCount 死字段（同 A-P2-5 落点）   | spec 注 14            | Turns.ts:201-206                                     |
+| D-P2-2  | charCount use 段一次 join 口径              | spec 注 11 + 单测锁定 | TurnCounts.ts:55-59/:83、test:150-177                |
+| D-P2-3  | en-US 去冒号                                | 代码修                | en-US.ts:1080                                        |
+| D-P2-4  | **scope 原文佚失（不可恢复）**              | 以处置为准            | 推定：被相邻 P2 或实现注吸收                         |
+| D-P2-5  | estimateSize 64 vs ~50                      | OQ                    | open questions 第 3 条                               |
+| D-P2-6  | charCount stringify 成本                    | OQ                    | open questions 第 4 条                               |
+| D-P2-7  | 错误标识口径变更                            | 发布挂账 + 注 2       | TurnCounts.ts:26/:30-31/:111、TurnGroup.tsx:219-223  |
+| D-P2-8  | DOM 锚点替换                                | 发布挂账              | TurnGroup.tsx:125（8847aeca）                        |
+
+合计：代码修 18 + spec 注 6（A-P2-5/6 重复计数去重后：A-P2-5、B-P2-5、B-P2-6、C-P2-11、D-P2-1、D-P2-2）+ OQ 5（B-P2-3/9、C-P2-12、D-P2-5/6）+ 发布挂账 2（D-P2-7/8，A-P2-1 代码修兼挂账）+ 原文佚失 4（A-P2-7、B-P2-4、B-P2-8、D-P2-4）= 35 ✓（C-P2-1 为未签发空号不在表内）。
 
 ## open questions（不阻塞）
 
@@ -73,5 +117,6 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 - review-full 末轮：16/16 P2 + 3/3 P1 landed；判 no——RF-P1-1（fix 引入）+ 6 P2 + doc 登记遗漏
 - 收口批 `bd7c29bf`：RF-P1-1 + RF-P2-2/4/5 + RF-P2-1/3/6 登记 + spec 注 15–18
 - spec-check r1（对本文档）：4 P1 + 6 P2，全记账层——SC-P1-1 e2e J2-5 实跑红（raw 28 vs mapped 35：**计数为跨 session 重复相加**，集合级一致）；SC-P1-2 T-N4 缺窄侧栏条目；SC-P1-3 发布挂账分散；SC-P1-4 数量口径自相矛盾。doc-fix：J2-5 改集合包含断言（raw ⊆ mapped，差集=0；`778d2929`）、本文档重构（总表+编号规则+发布挂账集中+口径统一）、spec T-N4 补条目、iteration-state 同步
-- 最终验证：typecheck 0 错、test:v4-perf 455/455、e2e-tool-join 25/25（J2-5 修正后口径：集合包含，raw=mapped=28）、oxlint/oxfmt 干净
+- spec-check r2：代码/行为层全部独立验证过（typecheck 0 / lint 0 / parity 5936 / v4-perf 455/455 / e2e 25/25 / 5 锚点抽查成立），判 No-Go 仍为记账层——SC2-P1-1 iteration-state 重复键（严格解析失败）；SC2-P1-2 数量口径未真闭合（16 vs 18、10 条无归属）。doc-fix：重复键已修（YAML 可解析）；P2 代码修改口径 18 条；附录新增 35 条逐条归属表（r1 原始报告未入库不可恢复，按编号空间重建，4 条原文佚失显式标注）；B-D1/D1 悬空 ID 替换；锚点订正（MessageView.ts 78-95、A-P1-1 6 用例）；v4-perf 双口径注明；文件简称规则说明
+- 最终验证：typecheck 0 错、test:v4-perf 455/455、e2e-tool-join 25/25（J2-5 集合包含口径：raw ⊆ mapped，差集=0）、oxlint 0err；oxfmt 本迭代源码干净 + yaml/cr-fix-spec 已对齐；spec.md 冻结不做 oxfmt（其对嵌套代码围栏有重排，语义等价但保持入库原样）
 - **fix-spec-ready: yes**
