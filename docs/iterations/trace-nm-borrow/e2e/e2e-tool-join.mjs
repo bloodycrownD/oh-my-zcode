@@ -239,10 +239,10 @@ function isFullyPairedRowIndependent(message, pairedIds) {
 
 // ── 全量统计 ────────────────────────────────────────────────────────────────
 
-// J2-5 集合级断言载体（r1 CR spec-check P1-1）：数据增长后 raw（消息级 isError 标记）
-// 与 mapped（output 结构化 error-text 判定）两口径不再 1:1——mapped 更灵敏（provider 把
-// 错误放 output 内容而消息顶层标志缺失的形态）。正确断言是集合包含：raw ⊆ mapped
-// （services 映射未丢 isError）；mapped − raw 的差集作为口径差异数据点打印登记。
+// J2-5 断言演变（spec-check 轮）：计数相等断言 → 集合包含断言（SC-P1-1）→ 最终降级为信息
+// 登记行——真库数据持续写入，三次实测三种方向（相等/mapped 多/raw 多），两层口径（消息级
+// isError vs output error-text）在动态数据上无稳定包含关系，不可方向断言。详见脚本尾部
+// J2-5 登记行处注释；「services 映射未丢 isError」由 J2-4 与 join 单测覆盖。
 const globalRawIsErrorIds = new Set();
 const globalMappedErrorIds = new Set();
 
