@@ -1091,6 +1091,8 @@ const enUS: Record<string, string> = {
   "modelTrajectory.copyContent": "Copy content",
   "modelTrajectory.showAll": "Expand",
   "modelTrajectory.collapseContent": "Collapse",
+  "modelTrajectory.viewFullContent": "View full content",
+  "modelTrajectory.fullContentTitle": "Full message",
   "modelTrajectory.toolCall": "Tool call",
   "modelTrajectory.toolId": "ID",
   "modelTrajectory.toolInput": "Input",

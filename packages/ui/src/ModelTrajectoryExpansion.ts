@@ -36,10 +36,7 @@ export function createTrajectoryExpansionCommands(): TrajectoryExpansionCommands
   return Object.fromEntries(
     // 回合外壳默认收起（与 useTrajectoryExpansion 的 defaultOpen 对齐），
     // 消息行默认展开——命令初始值必须与各自的首屏展开态一致，否则菜单开关会与实际相反。
-    TRAJECTORY_EXPANSION_KINDS.map((kind) => [
-      kind,
-      { expanded: kind !== "turn", version: 0 },
-    ]),
+    TRAJECTORY_EXPANSION_KINDS.map((kind) => [kind, { expanded: kind !== "turn", version: 0 }]),
   ) as TrajectoryExpansionCommands;
 }
 
@@ -71,6 +68,19 @@ export interface TrajectoryExpansionState {
 }
 
 /**
+ * 行级「搜索命中强制展开」判定（消息键 + 回合键两个命名空间，命中任一即为真）。
+ *
+ * 与 useTrajectoryExpansion 内的 searchRevealed 口径完全一致，抽成独立 hook 是为了让
+ * 非折叠行（如输入区 assistant 扁平行）也能复用同一判定来源——它们没有展开态，
+ * 只需要知道「本行是否被搜索命中」以决定是否跳过 clamp。
+ */
+export function useTrajectorySearchRevealed(key?: string): boolean {
+  const messageRevealKey = useContext(TrajectorySearchRevealContext);
+  const turnRevealKey = useContext(TrajectorySearchRevealTurnContext);
+  return Boolean(key && (key === messageRevealKey || key === turnRevealKey));
+}
+
+/**
  * 轨迹行/回合外壳共用的展开状态（B-9，从 ExpandableMessage 内联实现抽出）。
  *
  * 优先级（与抽出前逐字一致）：面板 override > 命令版本（「自定义展开」/全部展开）
@@ -91,8 +101,6 @@ export function useTrajectoryExpansion({
 }): TrajectoryExpansionState {
   const expansionCommands = useContext(TrajectoryExpansionCommandContext);
   const expansionRegistry = useContext(TrajectoryExpansionRegistryContext);
-  const messageRevealKey = useContext(TrajectorySearchRevealContext);
-  const turnRevealKey = useContext(TrajectorySearchRevealTurnContext);
   const [localExpansion, setLocalExpansion] = useState({
     open: defaultOpen,
     commandVersion: 0,
@@ -105,7 +113,7 @@ export function useTrajectoryExpansion({
     expansionCommand && expansionCommand.version > rowExpansion.commandVersion
       ? expansionCommand.expanded
       : rowExpansion.open;
-  const searchRevealed = Boolean(key && (key === messageRevealKey || key === turnRevealKey));
+  const searchRevealed = useTrajectorySearchRevealed(key);
 
   const commandVersion = expansionCommand?.version;
   const rowCommandVersion = rowExpansion.commandVersion;

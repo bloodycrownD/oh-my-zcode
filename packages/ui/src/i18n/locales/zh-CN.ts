@@ -1010,6 +1010,8 @@ const zhCN: Record<string, string> = {
   "modelTrajectory.copyContent": "复制内容",
   "modelTrajectory.showAll": "展开",
   "modelTrajectory.collapseContent": "收起",
+  "modelTrajectory.viewFullContent": "查看全文",
+  "modelTrajectory.fullContentTitle": "消息全文",
   "modelTrajectory.toolCall": "工具调用",
   "modelTrajectory.toolId": "ID",
   "modelTrajectory.toolInput": "输入",
