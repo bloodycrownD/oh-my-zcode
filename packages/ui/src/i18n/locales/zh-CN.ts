@@ -4472,10 +4472,6 @@ const zhCN: Record<string, string> = {
   "chat.contextUsage.magicContext.cacheMiss": "重建",
   "chat.contextUsage.magicContext.cacheSegment1": "系统段",
   "chat.contextUsage.magicContext.cacheSegment2": "历史段",
-  // C 章（impl-s10）：占用面板的语义澄清行——稳态占用由历史块预算主导，体积触发的
-  // 折叠与执行阈值无关（阈值只决定已排队操作何时被强制落地）。
-  "chat.contextUsage.steadyStateHint":
-    "占用会周期性回落到稳态，这是历史块预算在起作用（默认约占三成）；体积触发的折叠在占用很低时也会发生。可在「设置 → 上下文管理 → 历史预算占比」调节。",
   "tokenDebug.open": "打开 Token 调试",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription": "Output tokens ÷ 首个输出 token 到请求结束的秒数",

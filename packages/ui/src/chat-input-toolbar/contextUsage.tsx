@@ -464,13 +464,6 @@ export function ChatContextUsage({
               ))}
             </div>
           ) : null}
-          {/* C 章（impl-s10）：占用语义澄清行。只在 magic-context 段有数据时出现——
-              没有历史块预算就没有「稳态占用」这回事，此时说这句反而是误导。 */}
-          {magicContextRows.length > 0 ? (
-            <div className="border-t border-border pt-3 text-ui-sm text-foreground-subtle">
-              {intl.formatMessage({ id: "chat.contextUsage.steadyStateHint" })}
-            </div>
-          ) : null}
           {/* FORK（D-4）：Coding Plan 剩余额度与 Start Plan 余额面板随订阅面整删；
               context 面板只保留 Context windows / Magic Context / cache / breakdown 通用区。 */}
         </ContextContentBody>

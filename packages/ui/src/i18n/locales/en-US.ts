@@ -4779,10 +4779,6 @@ const enUS: Record<string, string> = {
   "chat.contextUsage.magicContext.cacheMiss": "rebuilt",
   "chat.contextUsage.magicContext.cacheSegment1": "System segment",
   "chat.contextUsage.magicContext.cacheSegment2": "History segment",
-  // C chapter (impl-s10): clarifies that the steady state is driven by the history
-  // budget, and that size-triggered folding is independent of the execute threshold.
-  "chat.contextUsage.steadyStateHint":
-    "Usage periodically settles back to a steady state set by the history budget (about 30% by default); size-triggered folding also happens at very low usage. Adjust it in Settings → Context Management → History budget share.",
   "tokenDebug.open": "Open token debug",
   "tokenDebug.column.tps": "TPS (tokens/s)",
   "tokenDebug.tpsDescription":
