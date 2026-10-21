@@ -8,11 +8,13 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import type {
   ZCodeModelTrajectoryCallSourceKind,
+  ZCodeModelTrajectoryContentPart,
   ZCodeModelTrajectoryMessage,
   ZCodeModelTrajectoryRecord,
 } from "@zcode/services";
 import { DEFAULT_MAX_PREVIEW_CHARS } from "@zcode/shared/zcode-protocol-v4";
 import { buildTrajectorySearchIndex } from "../src/ModelTrajectorySearch.js";
+import { trajectoryToolCallTargetKey } from "../src/ModelTrajectoryToolJoin.js";
 import type { TrajectoryTurnGroup } from "../src/ModelTrajectoryTurns.js";
 import {
   computeDeltaMessages,
@@ -26,11 +28,30 @@ import {
   trajectoryCallKey,
   trajectoryInputRowKey,
 } from "../src/ModelTrajectoryTurns.js";
+import { classifyTrajectoryWireRows } from "../src/ModelTrajectoryWireFilter.js";
 
 let requestSeq = 0;
 
 function textMessage(role: string, text: string): ZCodeModelTrajectoryMessage {
   return { role, parts: [{ kind: "text", text }] };
+}
+
+/** 工具调用 part（response.toolCalls 的一条）。 */
+function toolCallPart(
+  toolCallId: string,
+  toolName: string,
+  input: unknown,
+): ZCodeModelTrajectoryContentPart {
+  return { kind: "tool-call", toolCallId, toolName, input };
+}
+
+/** 工具结果消息（出现在**后续** record 的 request.messages 里）。 */
+function toolResultMessage(
+  toolCallId: string,
+  toolName: string,
+  output: unknown,
+): ZCodeModelTrajectoryMessage {
+  return { role: "tool", parts: [{ kind: "tool-result", toolCallId, toolName, output }] };
 }
 
 function numberedMessages(
@@ -49,14 +70,23 @@ function record(spec: {
   messageCount?: number;
   responseText?: string;
   reasoningText?: string;
+  toolCalls?: ZCodeModelTrajectoryContentPart[];
   durationMs?: number;
   error?: boolean;
 }): ZCodeModelTrajectoryRecord {
   requestSeq += 1;
-  const response =
-    spec.responseText === undefined && spec.reasoningText === undefined
-      ? undefined
-      : { text: spec.responseText, reasoningText: spec.reasoningText, toolCalls: [] };
+  // toolCalls 非空即创建 response（工具调用必须挂在 response 上才有配对面）。
+  const hasResponse =
+    spec.responseText !== undefined ||
+    spec.reasoningText !== undefined ||
+    (spec.toolCalls?.length ?? 0) > 0;
+  const response = hasResponse
+    ? {
+        text: spec.responseText,
+        reasoningText: spec.reasoningText,
+        toolCalls: spec.toolCalls ?? [],
+      }
+    : undefined;
   return {
     requestId: spec.requestId ?? `req-${requestSeq}`,
     attempt: 1,
@@ -590,4 +620,118 @@ test("B-2 搜索索引随占位过滤开关变化：隐藏时零命中，显示�
   assert.equal(match.expansionKey, "req:0:input:1");
   assert.equal(match.turnKey, "turn:t1");
   assert.equal(match.turnIndex, 0);
+});
+
+// ── T-N2 搜索协同（工具配对卡数据面） ───────────────────────────────────────
+
+test("T-N2 ① result 词命中 tool-call target key（恰一条、不含任何 input row key）", () => {
+  const groups = resolveTrajectoryTurnGroups([
+    record({
+      turnId: "t1",
+      requestId: "reqA",
+      messages: [textMessage("user", "问题")],
+      messageCount: 1,
+      toolCalls: [toolCallPart("call_1", "read", "读取 a.txt")],
+    }),
+    // 工具结果不在发起调用的 record 里，而在下一条 record 的 request.messages。
+    record({
+      turnId: "t1",
+      requestId: "reqB",
+      messages: [textMessage("user", "问题"), toolResultMessage("call_1", "read", "结果正文")],
+      messageCount: 2,
+    }),
+  ]);
+
+  // 跨记录消歧锁定：call 在 record N、result 在 record N+1 → N+1 的集合含该结果 id。
+  const secondCall = groupAt(groups, 0).calls[1];
+  assert.ok(secondCall);
+  assert.equal(
+    secondCall.pairedResultToolCallIdsInInput.has("call_1"),
+    true,
+    "N+1 的消息里的 result 被消费 → 入集合",
+  );
+  assert.equal(secondCall.inputMessages.length, 1, "该 tool 消息在增量投影里仍可见");
+
+  const items = resolveTrajectorySearchItems(groups, true);
+  // 已配对的 result 行从索引剔除（结果已在配对卡的 result 格展示）。
+  const secondItem = items.find((item) => item.key === "reqB:1");
+  assert.deepEqual(secondItem?.inputRows, []);
+
+  const index = buildTrajectorySearchIndex(items, "结果正文");
+  assert.equal(index.matches.length, 1);
+  const match = index.matches[0];
+  assert.ok(match);
+  assert.equal(match.expansionKey, trajectoryToolCallTargetKey("reqA:0", "tool-call", 0));
+  assert.equal(match.expansionKey, "reqA:0:output:tool-call:0");
+  assert.equal(match.field, "content");
+  // 命中集合恰为 [trajectoryToolCallTargetKey]：不含任何 input row key。
+  assert.deepEqual(
+    [...new Set(index.matches.map((item) => item.expansionKey))],
+    [trajectoryToolCallTargetKey("reqA:0", "tool-call", 0)],
+  );
+  assert.equal(
+    index.matches.some((item) => item.expansionKey.includes(":input:")),
+    false,
+  );
+});
+
+test("T-N2 ② 孤立 result（有结果无调用）仍命中 input row key", () => {
+  const groups = resolveTrajectoryTurnGroups([
+    record({
+      turnId: "t1",
+      requestId: "reqA",
+      messages: [
+        textMessage("user", "问题"),
+        toolResultMessage("call_orphan", "read", "孤立结果正文"),
+      ],
+      messageCount: 2,
+    }),
+  ]);
+
+  const items = resolveTrajectorySearchItems(groups, true);
+  const index = buildTrajectorySearchIndex(items, "孤立结果正文");
+  assert.equal(index.matches.length, 1);
+  assert.equal(index.matches[0]?.expansionKey, trajectoryInputRowKey("reqA:0", 1));
+  assert.equal(index.matches[0]?.expansionKey, "reqA:0:input:1");
+});
+
+test("T-N2 ③ 占位计数不变：配对剔除不计入 hiddenCount，配对行不进可见行", () => {
+  const groups = resolveTrajectoryTurnGroups([
+    record({
+      turnId: "t1",
+      requestId: "reqA",
+      messages: [
+        textMessage("user", "问题"),
+        textMessage("assistant", "[dropped §4§]"),
+        toolResultMessage("call_1", "read", "结果正文"),
+      ],
+      messageCount: 3,
+      toolCalls: [toolCallPart("call_1", "read", "读取 a.txt")],
+    }),
+  ]);
+
+  const call = groupAt(groups, 0).calls[0];
+  assert.ok(call);
+  // 占位计数只由占位分类决定：配对剔除不改变它。
+  const classified = classifyTrajectoryWireRows(call.inputMessages);
+  assert.equal(classified.hiddenCount, 1);
+  assert.equal(classified.rows.length, 3);
+  // 数据层零改动：输入消息本身不被删改。
+  assert.equal(call.inputMessages.length, 3);
+
+  const items = resolveTrajectorySearchItems(groups, true);
+  const item = items[0];
+  assert.ok(item);
+  // 占位行按开关过滤 + 已配对的 tool 行被剔除 → 只剩用户输入行。
+  assert.deepEqual(
+    item.inputRows.map((row) => row.messageIndex),
+    [0],
+  );
+
+  // 结果文本只挂在配对卡上（content target 逐字取 displayText）。
+  const index = buildTrajectorySearchIndex(items, "结果正文");
+  assert.deepEqual(
+    [...new Set(index.matches.map((match) => match.expansionKey))],
+    [trajectoryToolCallTargetKey("reqA:0", "tool-call", 0)],
+  );
 });
