@@ -216,7 +216,7 @@ services / adapters / shared / bootstrap：**零改动**。`TRAJECTORY_EXPANSION
 - T-N3 — blocking: yes — 溢出判定纯逻辑（tolerance 边界；**默认容差 2px，判定为 `overflowPx > 2`**——r1 CR P2-6 数值锚点，防止 1↔2 静默回归）（Step 4）。
 - T-N5 — blocking: yes — counts：toolCallCount 求和（kind 过滤计数）含 response undefined 调用/charCount 输出侧公式（不 trim、undefined→0、use 段 join 同源分隔符、reasoning 随投影变化）/failureCount 拆分合计/sidecar 排除与全 sidecar 回退（Step 2）。
 - T-N6 — blocking: yes — formatTurnCounts 段序列数组形态（summaryCalls/toolCalls?/charCount/failureCount?/duration string 段?/每来源一段；省略规则）（Step 2）。
-- T-N4 — blocking: no — manual_user：配对卡契约 1–8 DOM 断言（含 tool-name/tool-id 字段可搜可高亮、两格 6lh、pending/missing 占位、复制文本、卡片全屏入口、状态点 aria、unknown 回退——r3 P2-1）+ Modal Esc/遮罩/复制/切 tab + 6 行 clamp 视觉 + 搜索命中配对卡自动展开定位 + overflowEver 入口在 searchRevealed 时保持可见 + 窄侧栏（<lg）布局 + 回合头两行对齐与 chevron（Step 5/8 真机清单）。
+- T-N4 — blocking: no — manual_user：配对卡契约 1–8 DOM 断言（含 tool-name/tool-id 字段可搜可高亮、两格 6lh、pending/missing 占位、复制文本、卡片全屏入口、状态点 aria、unknown 回退——r3 P2-1）+ Modal Esc/遮罩/复制/切 tab + 6 行 clamp 视觉 + 搜索命中配对卡自动展开定位 + overflowEver 入口在 searchRevealed 时保持可见 + 窄侧栏（<lg）布局 + **窄侧栏下回合失败标识仍可见**（D-P1-1 防裁回归）+ 回合头两行对齐与 chevron（Step 5/8 真机清单）。
 
 ### 既有契约回归
 
