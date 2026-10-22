@@ -2,43 +2,12 @@ import { realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { Worker } from "node:worker_threads";
 import { createInterface } from "node:readline";
-import { z } from "zod";
-import {
-  databaseStartupErrorCodeSchema,
-  databaseMigrationFactsSchema,
-  type DatabaseMigrationFacts,
-  databaseStartupErrorDetailsSchema,
-  zcodeStoragePreparationFrameSchema,
-  type DatabaseStartupState,
-} from "@zcode/shared";
+import { zcodeStoragePreparationFrameSchema, type DatabaseStartupState } from "@zcode/shared";
 import { resolveDefaultZCodeAgentCommand } from "@zcode/services/storage-startup";
+// 旧摆放迁移：worker 消息 schema 抽取进本目录 contract.ts（上游同款端口）。
+import { workerMessageSchema } from "./contract.js";
 
 type Phase = NonNullable<DatabaseStartupState["databasePhase"]>;
-const workerMessageSchema = z.discriminatedUnion("type", [
-  z
-    .object({
-      type: z.literal("progress"),
-      migration: databaseMigrationFactsSchema.optional(),
-      phase: z.enum([
-        "checking",
-        "waiting_for_lock",
-        "migrating",
-        "committing",
-        "maintaining",
-        "ready",
-      ]),
-    })
-    .strict(),
-  z.object({ type: z.literal("done") }).strict(),
-  z
-    .object({
-      type: z.literal("failed"),
-      errorCode: databaseStartupErrorCodeSchema,
-      migration: databaseMigrationFactsSchema.optional(),
-      ...databaseStartupErrorDetailsSchema.shape,
-    })
-    .strict(),
-]);
 const statusError = (
   kind: string,
   details?: {

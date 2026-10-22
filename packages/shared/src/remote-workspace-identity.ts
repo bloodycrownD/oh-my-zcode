@@ -111,3 +111,17 @@ export function parseRemoteWorkspaceIdentity(
 export function isRemoteWorkspaceIdentity(identity: string): boolean {
   return parseRemoteWorkspaceIdentity(identity) !== null;
 }
+
+/** 虚拟项目的 host 身份；只在统一 identity 模块裁剪路径，业务层不得自行拆 authority。 */
+export function remoteHostIdFromWorkspaceIdentity(identity: string): string | null {
+  const parsed = parseRemoteWorkspaceIdentity(identity);
+  return parsed ? identity.slice(0, -(parsed.workspacePath.length + 1)) : null;
+}
+
+/** 从已登记的 Host 身份构造目录身份；不让业务模块拼接或解析 authority。 */
+export function buildRemoteHostWorkspaceIdentity(hostId: string, workspacePath: string): string {
+  const identity = `${hostId}:${normalizeWorkspacePathForIdentity(workspacePath)}`;
+  if (remoteHostIdFromWorkspaceIdentity(identity) !== hostId)
+    throw new Error("Invalid remote host identity");
+  return identity;
+}

@@ -187,6 +187,8 @@ export interface LocalWorkspaceSessionEntry {
 
 export interface RemoteWorkspaceSessionEntry extends RemoteWorkspaceSessionSnapshot {
   kind: "remote";
+  /** app-owned workspace 分类；与本地条目同语义，项目迁移按 conversation 排除系统对话目录。 */
+  workspacePurpose?: WorkspacePurpose;
 }
 
 export type PersistedWorkspaceSessionEntry =

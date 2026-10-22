@@ -313,6 +313,13 @@ export interface ZCodeTaskMeta {
    * 共同使用，避免字段已持久化却无法经类型契约访问。
    */
   cronAutomationId?: string;
+  /**
+   * off-peak 闲时任务身份标记（冻结 schema 的 off_peak_task_id 列对应字段）。
+   *
+   * omz 闲时任务运行链已退役，新写入恒为空；保留可选字段是为了 task-groups 登记面
+   * 的 systemKind 分类与冻结 schema 投影保持上游同构，删掉会让旧库存量行无法表述。
+   */
+  offPeakTaskId?: string;
   /** fork 产物保留来源 taskId，供 UI 做本地化标题兜底和后续追溯。 */
   forkedFromTaskId?: string;
   /** 未读任务记录最近一次标记/产生未读的时间，用于跨重启保留蓝点状态。 */

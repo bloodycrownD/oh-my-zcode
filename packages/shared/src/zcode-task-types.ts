@@ -45,6 +45,15 @@ export function createQueryId(): QueryId {
 /** cron 定时任务生成的 session 默认归入的系统分组固定 id。 */
 export const CRON_DEFAULT_GROUP_ID = "zcode-default-group-cron";
 
+/**
+ * off-peak 闲时任务默认分组固定 id。
+ *
+ * omz 闲时任务运行链已随「官方端点全清」退役，但冻结的 schema 仍保留 off_peak_tasks
+ * 表结构，task-groups 登记面的 systemKind 分类也按上游口径保留 "off-peak" 分支；
+ * 该常量仅供分组登记兼容使用，omz 新写入不会产生 off-peak 分类任务。
+ */
+export const OFF_PEAK_DEFAULT_GROUP_ID = "zcode-default-group-off-peak";
+
 type CronTaskIdentity = Pick<ZCodeTaskMeta, "cronAutomationId"> & {
   automationId?: string;
 };

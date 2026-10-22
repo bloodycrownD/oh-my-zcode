@@ -4,8 +4,10 @@ import {
   resolveZCodeAgentSpawnCwd,
 } from "@zcode/services/storage-startup";
 import type { DatabaseStartupState } from "@zcode/shared";
-import { DatabaseStartupCoordinator } from "./databaseStartupCoordinator.js";
-import { StartupDiskSampler } from "./startupDiskSampler.js";
+// 旧摆放迁移：hostDatabaseStartup/storagePreparationProcesses/tasksStorageWorker 随上游
+// database-startup 模块收拢进本目录；coordinator 与 sampler 仍按上游留在 host 根（../）。
+import { DatabaseStartupCoordinator } from "../databaseStartupCoordinator.js";
+import { StartupDiskSampler } from "../startupDiskSampler.js";
 import { prepareHostStorage, prepareSessionStorage } from "./storagePreparationProcesses.js";
 
 const BASELINE_BUDGET_MS = 250;

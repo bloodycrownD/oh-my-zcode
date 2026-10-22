@@ -82,6 +82,16 @@ export const ServiceChannels = {
   ZCodeAgent: "zcode-agent",
   /** ZCode session 应用服务 */
   ZCodeSession: "zcode-session",
+  /** 虚拟项目服务（project-storage 之上的项目树/编排契约） */
+  Project: "project",
+  /** 任务分组组织服务（task-groups 仓库之上的服务契约） */
+  TaskGroups: "task-groups",
+  /** 本机远端项目入口目录服务（ssh/wsl/docker 成员投影） */
+  RemoteProjects: "remote-projects",
+  /** 手机 replayable attachment 的窗口级项目目录整组能力 */
+  WindowProject: "window-project",
+  WindowRemoteProjects: "window-remote-projects",
+  WindowProjectChanges: "window-project-changes",
   /** 文件系统监视服务 */
   FileWatcher: "file-watcher",
   /** OAuth 认证服务 */

@@ -37,6 +37,8 @@ export const sessionSummarySchema = z.object({
   titleSource: sessionMetaStateSchema.shape.titleSource.optional(),
   phase: sessionPhaseSchema,
   sessionEnded: z.boolean(),
+  // CLI 终态事实（task-facts 摄入用）；旧 frame / 摘要缺席，不参与 phase 推导。
+  lastOutcome: z.enum(["completed", "error", "interrupted"]).optional(),
   // 列表小圆点用（此处保留布尔，避免为侧栏订阅整个 backgroundWorks）。
   hasBackgroundWork: z.boolean(),
   // 侧栏工作流运行行：有界的 run 摘要，
@@ -71,6 +73,41 @@ export const sessionsIndexDeltaSchema = z.discriminatedUnion("op", [
   z.object({ op: z.literal("session.removed"), sessionId: z.string() }),
 ]);
 export type SessionsIndexDelta = z.infer<typeof sessionsIndexDeltaSchema>;
+
+/** snapshot 缺席不是删除；按明确 ID 查询持久事实，不会创建或恢复运行实例。 */
+export const sessionsIndexReconcileParamsSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    sessionIds: z.array(z.string().min(1)).max(256),
+  })
+  .strict();
+export type SessionsIndexReconcileParams = z.infer<typeof sessionsIndexReconcileParamsSchema>;
+export const sessionsIndexReconcileResultSchema = z
+  .object({
+    sessions: z
+      .array(
+        z.discriminatedUnion("exists", [
+          z
+            .object({ sessionId: z.string(), exists: z.literal(false), deleted: z.literal(false) })
+            .strict(),
+          z
+            .object({
+              sessionId: z.string(),
+              exists: z.literal(true),
+              deleted: z.boolean(),
+              title: z.string(),
+              titleSource: sessionMetaStateSchema.shape.titleSource,
+              createdAt: timestampSchema,
+              updatedAt: timestampSchema,
+              lastOutcome: z.enum(["completed", "error", "interrupted"]).optional(),
+            })
+            .strict(),
+        ]),
+      )
+      .max(256),
+  })
+  .strict();
+export type SessionsIndexReconcileResult = z.infer<typeof sessionsIndexReconcileResultSchema>;
 
 /** sessions-index topic key 构造（与 parseSessionsIndexTopic 对偶）。 */
 export function sessionsIndexTopic(workspaceId: string): string {

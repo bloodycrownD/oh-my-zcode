@@ -89,6 +89,15 @@ export const zcodeSessionKindSchema = z.enum([
   "subagent_child",
   "nested_workflow_child",
 ]);
+
+/** 辅助对话可继续输入；只有由 Agent / 工作流驱动的子会话对用户只读。 */
+export function isReadonlyAgentSessionKind(kind: string | undefined): boolean {
+  return kind === "subagent_child" || kind === "workflow_child" || kind === "nested_workflow_child";
+}
+/** 辅助会话（含 selection_side_chat）；冷恢复索引修复只清理这一族派生索引行。 */
+export function isAuxiliarySessionKind(kind: string | undefined): boolean {
+  return isReadonlyAgentSessionKind(kind) || kind === "selection_side_chat";
+}
 export const zcodeSessionGoalSchema = z
   .object({
     sessionId: nonEmptyString,
