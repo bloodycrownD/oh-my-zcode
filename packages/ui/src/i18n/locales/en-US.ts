@@ -281,6 +281,7 @@ const enUS: Record<string, string> = {
   "confirmDialog.archivedTaskDeleteDescription":
     "Tasks will be removed from the task list and Archive.",
   "taskList.deleteAllArchived": "Delete all archived tasks",
+  "taskList.title": "Task list",
   "taskList.archivedActions": "Archive actions",
   "taskList.archivedTaskCount": "{count} archived tasks",
   "taskList.deleteAllArchivedMenu": "Delete all archived tasks…",

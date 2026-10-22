@@ -268,6 +268,7 @@ const zhCN: Record<string, string> = {
   "confirmDialog.archivedTaskDeleteTitle": "删除这个归档任务？",
   "confirmDialog.archivedTaskDeleteDescription": "任务将从任务列表和归档列表中移除。",
   "taskList.deleteAllArchived": "删除所有归档任务",
+  "taskList.title": "任务列表",
   "taskList.archivedActions": "归档操作",
   "taskList.archivedTaskCount": "{count} 个归档任务",
   "taskList.deleteAllArchivedMenu": "删除所有归档任务…",
