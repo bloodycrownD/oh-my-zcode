@@ -4,6 +4,7 @@
 
 import {
   type RuntimeInputPresentation,
+  type FilePart,
   modelMessageContentToText,
   type ModelCacheControl,
   type ModelMessageContent,
@@ -12,6 +13,10 @@ import {
   type ModelReasoningContentBlock,
   type TokenUsageInfo,
 } from "@zcode/contracts";
+import {
+  buildPromptAttachmentReminderBodies,
+  type PromptAttachmentReminderInput,
+} from "../system-reminder/prompt-attachment.js";
 import { SYSTEM_REMINDER_SOURCES, type SystemReminderSource } from "../system-reminder/source.js";
 
 // Tool call from model (simple type, no brand)
@@ -553,4 +558,157 @@ function cloneModelMessageContentBlock(block: ModelMessageContentBlock): ModelMe
 
 export function createMessageHistory(): MessageHistory {
   return new MessageHistoryImpl();
+}
+
+// ============================================================
+// User Message Assembly（C2 组包统一：首发、队列消费与冷恢复共用）
+// 上游 v3.16 形态；omz 不带 D4 字段（modelCallWrapper/toModelToolCall/
+// compactBoundary/toolSearchAnnouncement 一律不迁，随 phase-toolsearch 再议）。
+// ============================================================
+
+/** 用户附件的已解析内容及持久化来源；不依赖 runtime 或文件读取。 */
+export type UserMessageAttachment = Pick<FilePart, "filename" | "mime" | "source" | "metadata"> & {
+  contentBlock: ModelMessageContentBlock;
+};
+
+// 首发、队列消费和恢复曾分别组装，导致正文、PDF、路径引用顺序及文本附件语义漂移。
+// 统一在消息历史边界组装；调用方只负责解析内容，不再各自分组。
+export function buildUserMessageEntries(
+  input: ModelMessageContent,
+  attachments: readonly UserMessageAttachment[],
+): [RuntimeMessageMessageEntry, ...RuntimeAttachmentEntry[]] {
+  const realUserBlocks: ModelMessageContentBlock[] = [];
+  const pastedImageBlocks: ModelMessageContentBlock[] = [];
+  const promptAttachmentEntries: RuntimeAttachmentEntry[] = [];
+
+  for (const attachment of attachments) {
+    if (isPastedInlineImageAttachment(attachment)) {
+      pastedImageBlocks.push(attachment.contentBlock);
+      continue;
+    }
+
+    const promptAttachmentInput = promptAttachmentInputForResolvedAttachment(attachment);
+    if (promptAttachmentInput) {
+      const reminderBody = buildPromptAttachmentReminderBodies(promptAttachmentInput).join("\n");
+      promptAttachmentEntries.push(
+        systemReminderAttachmentEntry("prompt_attachment", reminderBody),
+      );
+      continue;
+    }
+
+    if (isFailedTextAttachmentPlaceholder(attachment)) {
+      continue;
+    }
+
+    realUserBlocks.push(attachment.contentBlock);
+  }
+
+  const blocks: ModelMessageContentBlock[] = [];
+  if (typeof input === "string") {
+    if (input.length > 0) blocks.push({ type: "text", text: input });
+  } else {
+    blocks.push(...input.filter((block) => block.type !== "text" || block.text.length > 0));
+  }
+  blocks.push(...realUserBlocks, ...pastedImageBlocks);
+
+  return [
+    {
+      message: {
+        role: "user",
+        content: normalizeRealUserContent(blocks),
+      },
+      metadata: realUserRuntimeMetadata(),
+    },
+    ...promptAttachmentEntries,
+  ];
+}
+
+function normalizeRealUserContent(
+  blocks: readonly ModelMessageContentBlock[],
+): ModelMessageContent {
+  if (blocks.length === 0) return "";
+  if (blocks.length === 1 && blocks[0]!.type === "text") {
+    return blocks[0]!.text;
+  }
+  return blocks.map((block) => ({ ...block })) as ModelMessageContentBlock[];
+}
+
+export function isPastedInlineImageAttachment(attachment: UserMessageAttachment): boolean {
+  if (attachment.contentBlock.type === "image") {
+    // omz 保真（等价性红线）：沿用 omz 内联装配原判定，不加上游后来补的
+    // `!attachment.source` 检查——上游加它服务于其恢复侧本地媒体重建为 inline
+    // 之后的顺序修正；omz 恢复侧图片本就统一后置组，采纳反而会改变 omz
+    // live/restore 的既有分组行为。若未来对齐上游顺序语义，须连同 T-AS 快照一起改。
+    return attachment.contentBlock.source?.kind === "inline";
+  }
+  return (
+    attachment.contentBlock.type === "text" &&
+    attachment.mime.startsWith("image/") &&
+    /^\[Attached image\/[^:]+: \[image #\d+\]\]$/u.test(attachment.contentBlock.text)
+  );
+}
+
+function shouldAddReadLikePromptAttachmentReminder(
+  attachment: UserMessageAttachment,
+): attachment is UserMessageAttachment & {
+  contentBlock: Extract<ModelMessageContentBlock, { type: "text" }>;
+  source: NonNullable<UserMessageAttachment["source"]>;
+} {
+  if (attachment.contentBlock.type !== "text") return false;
+  if (!attachment.mime.startsWith("text/")) return false;
+  if (!attachment.source) return false;
+  if (attachment.metadata?.storageKind !== "inline") return false;
+  if (
+    attachment.metadata?.recoverability !== "provider_ready" &&
+    attachment.metadata?.recoverability !== "preview_only"
+  ) {
+    return false;
+  }
+  return attachment.metadata?.preview?.text === attachment.contentBlock.text;
+}
+
+export function promptAttachmentInputForResolvedAttachment(
+  attachment: UserMessageAttachment,
+): (PromptAttachmentReminderInput & { content: string; kind: "file" | "inline_text" }) | undefined {
+  if (shouldAddReadLikePromptAttachmentReminder(attachment)) {
+    return {
+      content: attachment.contentBlock.text,
+      kind: "file",
+      // provider-visible 的 Read 输入要和用户提交的附件引用一致。
+      // local file 的 filename 只是展示名；只有缺少 source 时才用它兜底，避免 live/hydrate 轨迹漂移。
+      label: attachment.source.text.value ?? attachment.filename,
+      preview: attachment.metadata?.preview,
+    };
+  }
+
+  if (shouldAddInlinePromptAttachmentReminder(attachment)) {
+    return {
+      content: attachment.contentBlock.text,
+      kind: "inline_text",
+      label: attachment.filename,
+      preview: attachment.metadata?.preview,
+    };
+  }
+
+  return undefined;
+}
+
+function shouldAddInlinePromptAttachmentReminder(
+  attachment: UserMessageAttachment,
+): attachment is UserMessageAttachment & {
+  contentBlock: Extract<ModelMessageContentBlock, { type: "text" }>;
+} {
+  return (
+    attachment.contentBlock.type === "text" &&
+    attachment.mime.startsWith("text/") &&
+    !attachment.source
+  );
+}
+
+export function isFailedTextAttachmentPlaceholder(attachment: UserMessageAttachment): boolean {
+  return (
+    attachment.contentBlock.type === "text" &&
+    attachment.mime.startsWith("text/") &&
+    attachment.metadata?.errorCode === "attachment_read_failed"
+  );
 }
