@@ -1384,7 +1384,8 @@ export function createConversationV4Gateway(
       }
       const stored = await context.deps.sessionStore.listSessions({
         directory: persistedWorkspacePath,
-        includeArchived: false,
+        // includeArchived 已随 membership 语义退役；sessions-index 投影包含归档行，
+        // pinned/archived 成员资格由任务索引与行级 membership 投影裁决。
         limit: 200,
         // parentID 只表达会话层级，不能作为左侧任务 membership。
         // 显式 fork 必然带 parentID，但重启后仍应由 taskType 投影进 sessions-index。

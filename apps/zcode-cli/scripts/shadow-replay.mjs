@@ -62,7 +62,8 @@ const store = createSqliteSessionStore({ dbPath });
 
 const sessions = args.session
   ? [{ id: args.session }]
-  : await store.listSessions({ includeArchived: true, limit: 100000 });
+  // includeArchived 已随 membership 语义退役：store 列表不再按归档过滤。
+  : await store.listSessions({ limit: 100000 });
 
 const totals = {
   sessions: 0,

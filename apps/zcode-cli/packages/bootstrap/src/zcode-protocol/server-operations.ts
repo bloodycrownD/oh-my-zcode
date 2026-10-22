@@ -1628,18 +1628,17 @@ export async function listSessions(context: ZCodeProtocolAgentServerContext, raw
       : store
         ? await store.listSessions({
             directory: params.workspace?.workspacePath,
-            includeArchived: params.includeArchived,
             limit: params.limit ?? 50,
             taskTypes: [...TASK_LIST_SESSION_TYPES],
           })
         : []
   ).filter((session): session is SessionInfo => {
     if (!session) return false;
+    // includeArchived 过滤已随 membership 语义退役：归档可见性由任务索引 kind 查询裁决。
     return (
-      (params.includeArchived || session.time.archived === undefined) &&
-      (!params.workspace ||
-        (session.workspaceID?.trim() || session.path || session.directory) ===
-          (params.workspace.workspaceIdentity?.trim() || params.workspace.workspacePath))
+      !params.workspace ||
+      (session.workspaceID?.trim() || session.path || session.directory) ===
+        (params.workspace.workspaceIdentity?.trim() || params.workspace.workspacePath)
     );
   });
   const storedIds = new Set(stored.map((session) => String(session.id)));

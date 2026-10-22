@@ -214,9 +214,8 @@ export async function listSessions(
     values.push(...taskTypes);
   }
 
-  if (!input.includeArchived) {
-    clauses.push("time_archived is null");
-  }
+  // includeArchived 过滤已随 membership 语义退役（上游同批删除）：store 层不再按
+  // time_archived 过滤，归档/时间线/置顶可见性由 host 任务索引的 membership kind 查询裁决。
 
   const where = clauses.length > 0 ? `where ${clauses.join(" and ")}` : "";
   const limitValue = input.limit && input.limit > 0 ? input.limit : undefined;

@@ -1467,6 +1467,23 @@ export class TaskIndexRepo {
     });
   }
 
+  /**
+   * 冷恢复 child 派生索引行的硬删（task-facts 修复专用，上游同款端口）：只删 CLI 权威
+   * 身份确认的 subagent/workflow 索引行，不删除 Agent 转录；删除事实由 tasks 行移除表达。
+   */
+  async removeSubagentIndexRow(target: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+    taskId: string;
+  }): Promise<void> {
+    await this.ensureReady();
+    return this.enqueueWrite(target, () => {
+      this.getDatabase()
+        .prepare("DELETE FROM tasks WHERE workspace_key=? AND task_id=?")
+        .run(workspaceKey(target), target.taskId);
+    });
+  }
+
   async updateTaskState(params: {
     workspacePath: string;
     workspaceIdentity?: string;

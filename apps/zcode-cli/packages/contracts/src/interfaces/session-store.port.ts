@@ -292,7 +292,8 @@ export interface ListSessionsInput {
   path?: string;
   roots?: boolean;
   taskTypes?: SessionTaskType[];
-  includeArchived?: boolean;
+  // includeArchived 已随 membership 语义退役（上游同批删除）：列表不再按归档过滤，
+  // 归档/时间线/置顶可见性由 host 任务索引的 membership kind 查询裁决。
   limit?: number;
 }
 

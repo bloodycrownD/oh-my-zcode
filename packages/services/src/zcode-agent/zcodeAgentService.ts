@@ -2851,7 +2851,7 @@ export function createZCodeAgentService(
         zcodeProtocolMethods.sessionList,
         {
           workspace: buildWorkspaceRef(params),
-          includeArchived: params.includeArchived ?? false,
+          // includeArchived 已随 membership 语义退役；普通列表返回全部会话，归档由任务索引裁决。
           limit: params.limit,
           ...(params.sessionIds ? { sessionIds: params.sessionIds } : {}),
         },

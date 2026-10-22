@@ -8,6 +8,8 @@ import {
 } from "#src/session/tasksDatabase/schema-v1.js";
 import { importLegacyAutomationSelections } from "#src/session/tasksDatabase/provider-selection-v2.js";
 import { OFFICIAL_GLM_SELECTION_MIGRATION_SQL } from "#src/session/tasksDatabase/official-glm-selection-v3.js";
+// 0006 冻结 SQL 与上游同源（task-groups/migration-v6.ts 逐字节拷贝，含首尾换行）。
+import { TASK_GROUP_ADMISSIONS_SQL } from "#src/task-groups/migration-v6.js";
 
 // 冻结历史列声明，不能以实时 Repo/schema 代替，否则新版构建会改变已应用 checksum。
 const columns = [
@@ -40,6 +42,16 @@ const indexes = `
 const terminalStatuses = "'completed','failed','cancelled'";
 const activePredicate = `session_id IS NOT NULL AND status NOT IN (${terminalStatuses})`;
 const boundIndex = `CREATE UNIQUE INDEX IF NOT EXISTS idx_off_peak_bound_active ON off_peak_tasks(workspace_key,session_id) WHERE ${activePredicate}`;
+// 0004 的冻结输入：与上游 migrations.ts 逐字节一致（表/列对数组 + "nullable-text-v1"），
+// 追加后 sha256(JSON.stringify(checksumInput)) 必须与上游同库账本可互换（老库升级不 mismatch）。
+const executionColumns = [
+  ["automations", "project_id"],
+  ["automations", "host_id"],
+  ["automations", "additional_directories"],
+  ["off_peak_tasks", "project_id"],
+  ["off_peak_tasks", "host_id"],
+  ["off_peak_tasks", "additional_directories"],
+] as const;
 
 // 与 Agent 同样是库级串行事务，但不跨域依赖其具体 adapter。TS 转换使用冻结语义版本，
 // 禁用 function.toString 哈希：Electron/SEA 打包会改变函数文本而非迁移语义。
@@ -63,6 +75,17 @@ const definitions = [
   {
     id: "0003_official_glm_selection",
     checksumInput: [OFFICIAL_GLM_SELECTION_MIGRATION_SQL],
+  },
+  {
+    id: "0004_project_execution_scopes",
+    // 项目执行域（project/host/additional_directories）冻结输入；omz 侧不附带上游的
+    // controller-remote/source-server 专属 scope，编号沿用上游原号避免同库账本撞号。
+    checksumInput: [executionColumns, "nullable-text-v1"],
+  },
+  {
+    id: "0006_task_group_admissions",
+    // 分组登记表（task_group_admissions）冻结输入；0005 为 source-server scope，omz 不带。
+    checksumInput: [TASK_GROUP_ADMISSIONS_SQL],
   },
 ] as const;
 
@@ -113,7 +136,10 @@ export function runTasksDatabaseMigrations(
       options.onProgress?.("migrating", { ...migrationFacts });
       if (migration.id === "0001_adopt_task_schema") adoptSchema(db);
       else if (migration.id === "0002_provider_selection") importLegacyAutomationSelections(db);
-      else db.exec(OFFICIAL_GLM_SELECTION_MIGRATION_SQL);
+      else if (migration.id === "0003_official_glm_selection")
+        db.exec(OFFICIAL_GLM_SELECTION_MIGRATION_SQL);
+      else if (migration.id === "0004_project_execution_scopes") adoptExecutionScopes(db);
+      else if (migration.id === "0006_task_group_admissions") db.exec(TASK_GROUP_ADMISSIONS_SQL);
       migrationFacts.executedCount++;
       db.prepare("INSERT INTO tasks_schema_migration VALUES(?,?,?)").run(
         migration.id,
@@ -154,6 +180,19 @@ function adoptSchema(db: DatabaseSync): void {
     GROUP BY workspace_key, session_id HAVING count(*)>1 LIMIT 1`)
     .get();
   if (!duplicate) db.exec(boundIndex);
+}
+
+/** 0004 执行域加列：调度器可独立打开 Repo，不能等待项目归属转换，也不能把新列写进上游冻结 schema。 */
+function adoptExecutionScopes(db: DatabaseSync): void {
+  for (const [table, column] of executionColumns) {
+    if (
+      !db
+        .prepare(`PRAGMA table_info(${table})`)
+        .all()
+        .some((entry) => entry.name === column)
+    )
+      db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} TEXT`);
+  }
 }
 
 /** 交接只复用已完成初始化；每个新连接仍按冻结账本确认，替换/清空文件不能假 ready。 */

@@ -1,5 +1,7 @@
 /* eslint-disable max-lines -- task index 的 v4 帧摄入、snapshot upsert 和 workspace 广播必须共享同一份闭包状态。 */
-import { repairSubagentTaskIndex } from "#src/zcode-agent/repairSubagentTaskIndex.js";
+// 修复函数随上游迁移进 task-facts 模块（membership 语义：不再按 includeArchived 查询，
+// 只按 CLI 权威身份裁决辅助会话并硬删派生索引行）。
+import { repairSubagentTaskIndex } from "#src/task-facts/repairSubagentTaskIndex.js";
 import {
   deriveZCodeTaskStatusFromSessionSnapshot,
   generateTraceId,

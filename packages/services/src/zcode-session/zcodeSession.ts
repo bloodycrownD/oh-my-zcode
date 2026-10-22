@@ -56,7 +56,7 @@ export interface ZCodeSessionResumeParams extends ZCodeTaskTarget {
 }
 
 export interface ZCodeSessionListParams extends ZCodeSessionWorkspaceTarget {
-  includeArchived?: boolean;
+  /** includeArchived 已随 membership 语义退役；归档可见性由任务索引 kind 查询裁决。 */
   limit?: number;
 }
 
