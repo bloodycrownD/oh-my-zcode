@@ -9,7 +9,8 @@ interface TaskListSortableItem {
   updatedAt: number;
 }
 
-function compareTaskListItemsByTime(
+// upstream-v316-fullsync P4：项目侧栏时间线视角与列表 owner 共用同一比较器（原私有改导出）。
+export function compareTaskListItemsByTime(
   left: TaskListSortableItem,
   right: TaskListSortableItem,
   sortBy: TaskListTimeSortBy,

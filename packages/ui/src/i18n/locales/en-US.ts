@@ -1409,6 +1409,8 @@ const enUS: Record<string, string> = {
   "workspaceSidebar.hideSidebar": "Toggle sidebar",
   "workspaceSidebar.toggleSidebar": "Toggle sidebar",
   "workspaceSidebar.resizeSidebar": "Resize sidebar",
+  "workspaceSidebar.projectTreeView": "Project tree view",
+  "workspaceSidebar.classicSidebarView": "Classic task list view",
   "workspaceSidebar.toggleArchivedTasks": "Archived",
   "workspaceSidebar.showFileTree": "Show files",
   "workspaceSidebar.sshConnectionTitle": "SSH connection",

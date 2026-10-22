@@ -56,6 +56,12 @@ export interface WorkspaceShellZCodeState {
 }
 
 export interface CreateTaskOptions {
+  /**
+   * 虚拟项目（upstream-v316-fullsync P4）：项目树入口携带归属创建；
+   * host 侧 prepareProjectExecution 链注册前由现有入口忽略（任务落活动 workspace）。
+   */
+  projectId?: string | null;
+  taskGroupId?: string | null;
   /** 异步预填只能提交到解析 Skill 时的同一新任务目标。 */
   expectedWorkspaceKey?: string;
   provider?: ZCodeProvider;

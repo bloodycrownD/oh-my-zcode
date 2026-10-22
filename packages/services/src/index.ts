@@ -98,6 +98,36 @@ export type {
   WindowHostControllerTaskListResult,
 } from "./window-controller/windowController.js";
 
+// Virtual project service（upstream-v316-fullsync P4 消费链）：project-storage/project 契约
+// 全部为 type-only 或字符串常量（node:sqlite 仅 import type），浏览器安全；
+// 实现工厂（createProjectService 等）留在 #src/project/index.js，由 host 侧 node.ts 装配。
+export { IProjectService, LEGACY_SINGLE_ROOT_PROJECT_PREFIX } from "./project/contract.js";
+export type {
+  ProjectDirectories,
+  ProjectRoot,
+  ProjectTask,
+  ProjectTaskRef,
+  ProjectTree,
+  SaveProjectInput,
+  VirtualProject,
+} from "./project/contract.js";
+export { ITaskGroupService } from "./task-groups/contract.js";
+export type {
+  GroupNode,
+  GroupTaskRef,
+  MoveGroupNode,
+  TaskGroup,
+  TaskGroupColor,
+  TaskGroupStructure,
+} from "./task-groups/contract.js";
+// 远端项目目录契约（类型面；服务实现随 source-server 三期接入，当前 omz 不注册）。
+export { IRemoteProjectService } from "./remote-projects/contract.js";
+export type {
+  RemoteProjectDirectory,
+  RemoteProjectEntry,
+  RemoteProjectHost,
+} from "./remote-projects/contract.js";
+
 // ZCode agent service — IZCodeAgentService is both a type (interface) and value (descriptor)
 export {
   IZCodeAgentService,

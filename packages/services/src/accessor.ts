@@ -33,6 +33,7 @@ import type { ISettingsSyncService } from "./settings-sync/settingsSync.js";
 import type { IPromptAttachmentTransferService } from "./prompt-attachment-transfer/promptAttachmentTransfer.js";
 import type { IWindowControllerService } from "./window-controller/windowController.js";
 import type { IOnboardingRecordService } from "./onboarding/onboardingRecord.js";
+import type { IProjectService } from "./project/contract.js";
 
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
@@ -52,6 +53,12 @@ export interface IServiceAccessor {
   readonly windowControllerService?: IWindowControllerService;
   readonly zcodeAgentService: IZCodeAgentService;
   readonly zcodeSessionService: IZCodeSessionService;
+  /**
+   * 虚拟项目服务（upstream-v316-fullsync P4）：契约与消费链先行，host 侧注册
+   * （node.ts createProjectService 装配 + zcodeAgentService prepareProjectExecution）
+   * 尚未接线，故为可选；UI 消费方须按缺席降级（project.service-unavailable）。
+   */
+  readonly projectService?: IProjectService;
   // CUA 是 opt-in 内测特性：local macOS host 提供，远端 等 host 没有。可选避免连锁必填。
   readonly cuaPermissionService?: ICuaPermissionService;
   readonly botsService: IBotsService;
