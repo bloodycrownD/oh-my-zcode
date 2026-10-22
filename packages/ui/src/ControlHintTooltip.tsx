@@ -1,11 +1,15 @@
 import {
   cloneElement,
+  createContext,
   isValidElement,
+  useContext,
   useCallback,
   type ComponentProps,
+  type ReactElement,
   type ReactNode,
   type Ref,
 } from "react";
+import { Slot } from "radix-ui";
 import { cn } from "@/components/lib/utils.js";
 import {
   Tooltip,
@@ -159,4 +163,49 @@ export function ControlHintTooltip({
   // 少数组件需要支持脱离 Root 的 SSR/单测渲染；由封装按需补 Provider，
   // 避免业务层重新组合 Tooltip primitives，同时不让列表中的常规提示重复创建上下文。
   return standalone ? <TooltipProvider>{tooltip}</TooltipProvider> : tooltip;
+}
+
+// ── 侧栏提示域（upstream-v316-fullsync P4.1 随 grouped 视角照搬）──────────────
+
+const SidebarTooltipContext = createContext(false);
+
+export function SidebarTooltipProvider({ children }: { children: ReactNode }) {
+  // 侧栏原先继承全局零延迟，且连续划过按钮会跳过等待；在边界统一配置，每个提示都等待 300ms。
+  // omz：当前 radix-ui Provider 无 alwaysDelay/disableHoverableContent 两 props，不传（行为近似）。
+  return (
+    <SidebarTooltipContext.Provider value>
+      <TooltipProvider delayDuration={300} skipDelayDuration={0}>
+        {children}
+      </TooltipProvider>
+    </SidebarTooltipContext.Provider>
+  );
+}
+
+/** 原生 title 无法配置延迟；只在侧栏范围内替换，复用组件在其它页面的行为不变。 */
+export function SidebarNativeTooltip({
+  children,
+  ...triggerProps
+}: Omit<ComponentProps<typeof Slot.Root>, "children"> & {
+  children: ReactElement<{ title?: string; disabled?: boolean; className?: string }>;
+}) {
+  const inSidebar = useContext(SidebarTooltipContext);
+  if (!inSidebar || !children.props.title)
+    return <Slot.Root {...triggerProps}>{children}</Slot.Root>;
+  const trigger = cloneElement(children, { title: undefined });
+  return (
+    <ControlHintTooltip
+      title={children.props.title}
+      // 原生标题所在元素可能需要收缩；不能继承图标按钮提示的 shrink-0。
+      triggerClassName={cn("shrink", children.props.className)}
+    >
+      {/* 菜单/树行的 asChild 会把事件和 ref 注入这个适配层，必须通过 Slot 合并回真实触发器。 */}
+      {children.props.disabled ? (
+        <span className="block min-w-0">
+          <Slot.Root {...triggerProps}>{trigger}</Slot.Root>
+        </span>
+      ) : (
+        <Slot.Root {...triggerProps}>{trigger}</Slot.Root>
+      )}
+    </ControlHintTooltip>
+  );
 }

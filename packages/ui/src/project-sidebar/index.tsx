@@ -9,6 +9,7 @@
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { TID_SIDEBAR } from "@zcode/shared/test-ids";
+import { SidebarTooltipProvider } from "@/ControlHintTooltip.js";
 import type { ProjectSidebarProps, VirtualProject } from "@/project-sidebar/contract.js";
 import { useProjectPinIntent } from "@/project-sidebar/useProjectPinIntent.js";
 import { ProjectTaskListContext } from "@/project-sidebar/ProjectTaskListContext.js";
@@ -31,6 +32,7 @@ import { ProjectSidebarListHeader } from "@/project-sidebar/ProjectSidebarListHe
 import { ProjectComposerMenu } from "@/project-sidebar/ProjectComposerMenu.js";
 import { ProjectCreation } from "@/project-sidebar/ProjectCreation.js";
 import { ProjectEditor } from "@/project-sidebar/ProjectEditor.js";
+import { TaskGroupedView } from "@/project-sidebar/TaskGroupedView.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
 
@@ -62,10 +64,15 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   // P4.1：编辑/新建对话框 owner 自 toast 占位升级为真组件（上游 index.tsx 同款状态）。
   const [editor, setEditor] = useState<{ project: VirtualProject | null } | null>(null);
   const [creating, setCreating] = useState(false);
-  const start = async (projectId?: string) => {
+  // grouped 视角的工具栏/吸顶组头 portal 目标（上游 groupedToolbar/groupedSticky 同职责）。
+  const [groupedToolbar, setGroupedToolbar] = useState<HTMLDivElement | null>(null);
+  const [groupedSticky, setGroupedSticky] = useState<HTMLDivElement | null>(null);
+  const start = async (projectId?: string, taskGroupId?: string | null) => {
+    // omz：CreateTaskOptions.taskGroupId 增字段消费链随 P4.2（UI 提交链）接；
+    // 先把 grouped 视角的分组归属显式带上，缺省仍为 null。
     props.onCreateTask({
       projectId: projectId ?? null,
-      taskGroupId: null,
+      taskGroupId: taskGroupId ?? null,
     });
   };
   const projects = preferences.sort(selectSortedProjects(tree));
@@ -113,35 +120,40 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   );
   return (
     <ProjectTaskListContext.Provider value={taskPresentation}>
-      <aside data-testid={TID_SIDEBAR} className="flex h-full min-h-0 flex-col overflow-hidden">
-        <div className="h-12 shrink-0 [app-region:drag]" />
-        {/* 内联改名聚焦曾把 hidden 容器横向滚动，导致手机整栏左移；滑动面板只裁切，不允许焦点滚动。 */}
-        <div className="relative min-h-0 flex-1 overflow-clip">
-          <div
-            data-project-sidebar-panel="navigation"
-            className="absolute inset-0 flex min-h-0 flex-col"
-          >
+      {/* 侧栏提示域（上游同款）：grouped 行内 SidebarNativeTooltip 统一 300ms 延迟。 */}
+      <SidebarTooltipProvider>
+        <aside data-testid={TID_SIDEBAR} className="flex h-full min-h-0 flex-col overflow-hidden">
+          <div className="h-12 shrink-0 [app-region:drag]" />
+          {/* 内联改名聚焦曾把 hidden 容器横向滚动，导致手机整栏左移；滑动面板只裁切，不允许焦点滚动。 */}
+          <div className="relative min-h-0 flex-1 overflow-clip">
             <div
-              data-testid="sidebar-task-list-region"
-              className="flex min-h-0 flex-1 flex-col border-t border-border/50 pt-3 [anchor-name:--sidebar-task-list-divider]"
+              data-project-sidebar-panel="navigation"
+              className="absolute inset-0 flex min-h-0 flex-col"
             >
-              <ProjectSidebarListHeader
-                onOpenCommandCenter={props.onOpenCommandCenter}
-                view={view}
-                onViewChange={setView}
+              <div
+                data-testid="sidebar-task-list-region"
+                className="flex min-h-0 flex-1 flex-col border-t border-border/50 pt-3 [anchor-name:--sidebar-task-list-divider]"
               >
-                {/* 拍板②：项目树内「新建项目」入口（项目 chip 菜单），omz 聊天空态菜单不替换。 */}
-                <ProjectComposerMenu
-                  workspacePath={props.workspacePath}
-                  workspaceIdentity={props.workspaceIdentity}
-                  onCreateTask={props.onCreateTask}
-                  onSelectConversationWorkspace={props.onCreateConversationTask}
-                  triggerClassName="max-w-40 pl-2.5 pr-1.5"
-                />
-              </ProjectSidebarListHeader>
-              {/* 原因：仅设 overflow-y:auto 会让拖拽位移打开水平滚动；列表始终只允许纵向滚动。 */}
-              <div className="relative flex min-h-0 flex-1 flex-col">
-                <ScrollFadeViewport ref={scrollRef} className="overflow-x-hidden">
+                <ProjectSidebarListHeader
+                  onOpenCommandCenter={props.onOpenCommandCenter}
+                  view={view}
+                  onViewChange={setView}
+                  actionsRef={setGroupedToolbar}
+                >
+                  {/* 拍板②：项目树内「新建项目」入口（项目 chip 菜单），omz 聊天空态菜单不替换。 */}
+                  <ProjectComposerMenu
+                    workspacePath={props.workspacePath}
+                    workspaceIdentity={props.workspaceIdentity}
+                    onCreateTask={props.onCreateTask}
+                    onSelectConversationWorkspace={props.onCreateConversationTask}
+                    triggerClassName="max-w-40 pl-2.5 pr-1.5"
+                  />
+                </ProjectSidebarListHeader>
+                {/* 原因：仅设 overflow-y:auto 会让拖拽位移打开水平滚动；列表始终只允许纵向滚动。 */}
+                <div className="relative flex min-h-0 flex-1 flex-col">
+                  {/* grouped 视角吸顶组头 portal 目标（上游同款）。 */}
+                  <div ref={setGroupedSticky} />
+                  <ScrollFadeViewport ref={scrollRef} className="overflow-x-hidden">
                   <div className="flex flex-col gap-3 pb-3">
                     {view === "projects" ? (
                       <>
@@ -179,14 +191,34 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                           }
                         />
                       </>
+                    ) : view === "grouped" ? (
+                      <>
+                        <ProjectTaskRows
+                          kind="pinned"
+                          tasks={selectProjectRows(tree, { kind: "pinned" })}
+                          onSelect={onSelectTask}
+                          refresh={refresh}
+                        />
+                        {/* P4.1：上游 grouped 视角（折叠/建组/拖拽分组）；omz 分组内草稿
+                            继承与旧侧栏 organizeGrouped 并存不删。 */}
+                        <TaskGroupedView
+                          tasks={tree.tasks}
+                          onSelect={onSelectTask}
+                          refresh={refresh}
+                          scrollRef={scrollRef}
+                          toolbarTarget={groupedToolbar}
+                          stickyTarget={groupedSticky}
+                          workspacePath={props.workspacePath}
+                          workspaceIdentity={props.workspaceIdentity}
+                          onOpenAutomations={props.onOpenAutomations}
+                          onCreate={(groupId) => action(() => start(undefined, groupId))}
+                        />
+                      </>
                     ) : (
                       <ProjectTaskRows
                         key="timeline"
                         kind="timeline"
-                        // grouped 仅作存储兼容枚举保留；视角未挂前旧偏好值回落时间线。
-                        tasks={selectProjectRows(tree, {
-                          kind: view === "grouped" ? "timeline" : view,
-                        })}
+                        tasks={selectProjectRows(tree, { kind: view })}
                         onSelect={onSelectTask}
                         refresh={refresh}
                       />
@@ -202,7 +234,7 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                       </p>
                     ) : null}
                   </div>
-                </ScrollFadeViewport>
+                  </ScrollFadeViewport>
               </div>
             </div>
           </div>
@@ -230,13 +262,15 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
             onDeleted={refresh}
           />
         ) : null}
-      </aside>
+        </aside>
+      </SidebarTooltipProvider>
     </ProjectTaskListContext.Provider>
   );
 });
 
 export { readProjectSidebarView } from "@/project-sidebar/view-preference.js";
 export { ProjectComposerMenu } from "@/project-sidebar/ProjectComposerMenu.js";
+export { SidebarTooltipProvider } from "@/ControlHintTooltip.js";
 export {
   ProjectDirectoryProvider,
   useOptionalProjectDirectory,

@@ -65,6 +65,12 @@ export function isCronTask(task: CronTaskIdentity): boolean {
   return Boolean(task.cronAutomationId || task.automationId);
 }
 
+/** 判断一个 task/幻影行是否属于闲时任务（只看持久 meta 标记，UI 不反查 off-peak store）。
+ *  upstream-v316-fullsync P4.1 随 grouped 视角照搬；omz 闲时链已退役，仅分组登记兼容。 */
+export function isOffPeakTask(task: Pick<ZCodeTaskMeta, "offPeakTaskId">): boolean {
+  return Boolean(task.offPeakTaskId);
+}
+
 // ---- ZCode Provider ----
 export type ZCodeTaskTarget = ZCodeTaskGoal;
 // ---- ZCode task 模式 ----

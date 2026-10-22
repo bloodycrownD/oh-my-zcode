@@ -6,7 +6,9 @@ import {
   type WorkspaceServiceResolverState,
 } from "@/lib/workspaceServiceResolver.js";
 
-function resolveRemoteWorkspaceSessionIdForTarget<TServices>(params: {
+// upstream-v316-fullsync P4.1：grouped 视角按任务粒度解析远端 session，需要模块级纯函数；
+// 原为 hook 文件私有实现，这里导出复用（行为不变）。
+export function resolveRemoteWorkspaceSessionIdForTarget<TServices>(params: {
   workspacePath: string | null | undefined;
   preferredRemoteSessionId?: string | null;
   workspaceIdentity?: string | null;
