@@ -1,7 +1,7 @@
 # trace-nm-borrow CR fix spec
 
 > CR 收敛对象（开发 spec `spec.md` 冻结，仅作 readonly 对照）。
-> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正）+ `5e9320d6`（spec-check r1 doc-fix，含本文档入库）+ `4db237ae`（spec-check r2 doc-fix，含本文档附录）。权威分支头以 `git rev-parse trace-nm-borrow` 为准；`.iteration-state.yaml` head_sha 为记账基线（可能滞后多个 doc 提交），仅供回溯。
+> 分支：trace-nm-borrow；审查基线：`c7478032..14032fea`（12 commits）；CR 修复链：`d350d3a0` + `68e5a57a` + `52de0f2d` + `bd7c29bf` + `778d2929`（J2-5 口径修正）+ `5e9320d6`（spec-check r1 doc-fix，含本文档入库）+ `4db237ae`（spec-check r2 doc-fix，含本文档附录）+ `5d273d97`（spec-check r3 doc-fix，J2-5 降级登记）+ `ea5ea327`（spec-check r4 doc-fix）。权威分支头以 `git rev-parse trace-nm-borrow` 为准；`.iteration-state.yaml` head_sha 为记账基线（可能滞后多个 doc 提交），仅供回溯。
 > 纪律：review 子代理只读；must-fix 落本文件；主代理核验后派 fix 节点或直改；fix 后重跑 verify + 复审。
 
 ## 元信息
@@ -27,9 +27,9 @@
 
 | 编号    | 内容                                                                                        | 状态            | 证据                                                                                                                                                                                              |
 | ------- | ------------------------------------------------------------------------------------------- | --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| A-P1-1  | badgeText 零断言 → 补 6 用例（badgeText 5：四分支+空串回退+unknown 无徽标；sidecar-last 1） | landed          | modelTrajectoryToolJoin.test.ts:375-435 + :449-462（`68e5a57a`）                                                                                                                                  |
+| A-P1-1  | badgeText 零断言 → 补 6 用例（badgeText 5：四分支+空串回退+unknown 无徽标；sidecar-last 1） | landed          | modelTrajectoryToolJoin.test.ts:375-435 + :449-476（`68e5a57a`）                                                                                                                                  |
 | B-P1-1  | 配对卡丢 call 侧 input 错误红标 → use 格接 trajectoryToolHasError                           | landed          | ToolPairCard.tsx:83→198→377（`68e5a57a`）                                                                                                                                                         |
-| B-P1-2  | spec 措辞缺口（跨分隔符搜索高亮误落 ranges[0]）→ 实现注 8 补全措辞                          | doc 修复 landed | spec.md 实现注 8（`52de0f2d`）；代码锚点 Search.ts:158-177（target 构造区；折叠实现实际在 Search.ts:217-248 normalizeTrajectorySearchText，spec 原文锚点措辞差异挂 OQ）、SearchHighlight.ts:88-99 |
+| B-P1-2  | spec 措辞缺口（跨分隔符搜索高亮误落 ranges[0]）→ 实现注 8 补全措辞                          | doc 修复 landed | spec.md 实现注 8（`52de0f2d`）；代码锚点 Search.ts:158-177（target 构造区；折叠实现实际在 Search.ts:217-248 normalizeTrajectorySearchText，spec 原文锚点措辞差异已知、记于此行备查——spec 冻结不改）、SearchHighlight.ts:88-99 |
 | D-P1-1  | 行 2 truncate 裁掉失败标识 → shrink-0 前缀 + title 兜底                                     | landed          | TurnGroup.tsx:129-134/:127（`d350d3a0`）                                                                                                                                                          |
 | RF-P1-1 | C-P2-10 复位后无重测（RO 钳住盒子不触发）→ measuredText 入 layout effect deps               | landed          | ExpandedContent.tsx:92 / ClampedPreview.tsx:73（`bd7c29bf`）                                                                                                                                      |
 
@@ -65,7 +65,7 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 | ------- | ------------------------------------------- | --------------------- | ---------------------------------------------------- |
 | A-P2-1  | badgeText `\|\|` 双兜底                     | 代码修                | ToolJoin.ts:73-74 + 注 9 + 发布挂账条目 1            |
 | A-P2-2  | filterTrajectoryInputRows 返回副本          | 代码修                | ToolJoin.ts:277-281                                  |
-| A-P2-3  | sidecar 尾部判 missing 用例                 | 代码修（测试）        | modelTrajectoryToolJoin.test.ts:449-462              |
+| A-P2-3  | sidecar 尾部判 missing 用例                 | 代码修（测试）        | modelTrajectoryToolJoin.test.ts:449-476              |
 | A-P2-4  | key 家族来源注释（手抄旧模板处）            | 代码修（测试注释）    | modelTrajectoryToolJoin.test.ts:327-329（68e5a57a）  |
 | A-P2-5  | stats.errorCount 无生产消费者               | spec 注 14 + 代码注释 | Turns.ts:201-206                                     |
 | A-P2-6  | unknown displayText 并入 raw + content 字段 | 代码修 + 注 10        | ToolJoin.ts:138-178、ToolPairCard.tsx:363-371        |
@@ -118,8 +118,9 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 - review-full 末轮：16/16 P2 + 3/3 P1 landed；判 no——RF-P1-1（fix 引入）+ 6 P2 + doc 登记遗漏
 - 收口批 `bd7c29bf`：RF-P1-1 + RF-P2-2/4/5 + RF-P2-1/3/6 登记 + spec 注 15–18
 - spec-check r1（对本文档）：4 P1 + 6 P2，全记账层——SC-P1-1 e2e J2-5 实跑红（raw 28 vs mapped 35：**计数为跨 session 重复相加**，集合级一致）；SC-P1-2 T-N4 缺窄侧栏条目；SC-P1-3 发布挂账分散；SC-P1-4 数量口径自相矛盾。doc-fix：J2-5 改集合包含断言（`778d2929`，当时复跑 25/25；后见 r3 段——数据继续漂移证明两口径无稳定包含关系，最终降级为登记）、本文档重构（总表+编号规则+发布挂账集中+口径统一）、spec T-N4 补条目、iteration-state 同步
-- spec-check r2：代码/行为层全部独立验证过（typecheck 0 / lint 0 / parity 5936 / v4-perf 455/455 / e2e 25/25 / 5 锚点抽查成立），判 No-Go 仍为记账层——SC2-P1-1 iteration-state 重复键（严格解析失败）；SC2-P1-2 数量口径未真闭合（16 vs 18、10 条无归属）。doc-fix：重复键已修（YAML 可解析）；P2 代码修改口径 18 条；附录新增 35 条逐条归属表（r1 原始报告未入库不可恢复，按编号空间重建，4 条原文佚失显式标注）；B-D1/D1 悬空 ID 替换；锚点订正（MessageView.ts 78-95、A-P1-1 6 用例）；v4-perf 双口径注明；文件简称规则说明
+- spec-check r2：代码/行为层全部独立验证过（typecheck 0 / lint 0 / parity 5936 / v4-perf 455/455 / e2e 25/25【当时口径】/ 5 锚点抽查成立），判 No-Go 仍为记账层——SC2-P1-1 iteration-state 重复键（严格解析失败）；SC2-P1-2 数量口径未真闭合（16 vs 18、10 条无归属）。doc-fix：重复键已修（YAML 可解析）；P2 代码修改口径 18 条；附录新增 35 条逐条归属表（r1 原始报告未入库不可恢复，按编号空间重建，4 条原文佚失显式标注）；B-D1/D1 悬空 ID 替换；锚点订正（MessageView.ts 78-95、A-P1-1 6 用例）；v4-perf 双口径注明；文件简称规则说明
 - 最终验证：typecheck 0 错、test:v4-perf 455/455、e2e-tool-join 24/24 + J2-5 口径差异登记行（两口径无稳定包含关系，非缺陷信号）、oxlint 0err；oxfmt 本迭代源码干净 + yaml/cr-fix-spec 已对齐；spec.md 冻结不做 oxfmt（其对嵌套代码围栏有重排，语义等价但保持入库原样）
-- spec-check r3：代码层零缺陷、7 门禁实跑全绿（typecheck 0 / lint 0err / parity 5936 / v4-perf 455/455 / architecture 0 / e2e 25/25【当时口径】/ oxfmt 干净），No-Go 仅 3 P1 + 4 P2 单行文本：HEAD 指针口径、P1 总表缺 B-P1-2 行、A-P2-4 锚错文件（ToolJoin.ts:102/:113 → test:327-329）。doc-fix：HEAD 口径改 git rev-parse、P1 总表补 B-P1-2（5 行）、正文 A-P2-4 落点订正为 test:327-329（附录行当时漏改，r4 补）、合计行括注改写、yaml cr 链补 778d2929、佚失条目推定声明入发布期待办。r3 doc-fix 复跑时数据又漂移（records 430→437，raw=33 > mapped=30 反向）——三次实测三方向证明两层口径（消息级 isError vs output error-text）在动态真库上不可方向断言，J2-5 最终降级为信息登记行（双向差集计数，非缺陷信号），断言总数 25→24；「services 映射未丢 isError」由 J2-4 与 join 单测覆盖
-- spec-check r4：r3 六项中五项闭合，判 No-Go 仅 1 P1——附录 A-P2-4 行漏改（r3 只改正文）+ 执行记录「附录/正文」不实陈述；另 6 P2（e2e 脚本新旧注释矛盾、yaml head_sha 滞后量词、25/25 口径括注、B-P1-2 锚点措辞、yaml spec-check 轮次、简称混用）。doc-fix（本轮）：附录 A-P2-4 补订正、r3 段措辞如实化、L4 滞后量词删除、25/25 补【当时口径】、B-P1-2 证据行补折叠实现真实锚点（Search.ts:217-248 normalizeTrajectorySearchText，spec 原文锚点 158-177 指 target 构造区）、e2e 旧注释改一致口径、yaml spec-check 推 r4
+- spec-check r3：代码层零缺陷、7 门禁实跑全绿（typecheck 0 / lint 0err / parity 5936 / v4-perf 455/455 / architecture 0 / e2e 25/25【当时口径】/ oxfmt 干净），No-Go 仅 3 P1 + 4 P2 单行文本：HEAD 指针口径、P1 总表缺 B-P1-2 行、A-P2-4 锚错文件（ToolJoin.ts:102/:113 → test:327-329）。doc-fix：HEAD 口径改 git rev-parse、P1 总表补 B-P1-2（5 行）、正文 A-P2-4 落点订正为 test:327-329（附录行当时漏改，r4 补）、合计行括注改写、yaml cr 链补 778d2929、e2e 括注条件式（后随 J2-5 降级被取代）、佚失条目推定声明入发布期待办。r3 doc-fix 复跑时数据又漂移（records 430→437，raw=33 > mapped=30 反向）——三次实测三方向证明两层口径（消息级 isError vs output error-text）在动态真库上不可方向断言，J2-5 最终降级为信息登记行（双向差集计数，非缺陷信号），断言总数 25→24；「services 映射未丢 isError」由 J2-4 与 join 单测覆盖
+- spec-check r4：r3 七项（3P1+4P2）中六项闭合，判 No-Go 仅 1 P1——附录 A-P2-4 行漏改（r3 只改正文）+ 执行记录「附录/正文」不实陈述；另 6 P2（e2e 脚本新旧注释矛盾、yaml head_sha 滞后量词、25/25 口径括注、B-P1-2 锚点措辞、yaml spec-check 轮次、简称混用）。doc-fix（`ea5ea327`）：附录 A-P2-4 补订正、r3 段措辞如实化（七项口径）、L4 滞后量词删除、25/25 补【当时口径】、B-P1-2 证据行补折叠实现真实锚点（Search.ts:217-248 normalizeTrajectorySearchText，spec 原文锚点 158-177 指 target 构造区）、e2e 旧注释改一致口径、yaml spec-check 推 r4
+- spec-check r5（最终轮）：**Go（execute-ready）**——r4 八项实质闭合（七项完全、一项主体闭合），本轮独立实跑零缺陷（typecheck 0 / lint 0err / parity 5936 / v4-perf 455/455 / architecture 0 / e2e 24/24 + J2-5 登记行 / oxfmt 迭代文件全清），35 条附录锚点逐行回读全部命中真实代码；剩 4+1 条 P2 全为一行文本（OQ 悬空指针、r3 计数六/七、锚点 449-462 截断、修复链漏 5d273d97、历史 25/25 括注），审查者判定无需 r6，随本批 doc-fix 趁热清零
 - **fix-spec-ready: yes**

@@ -60,13 +60,14 @@ cr:
   }
 spec-check:
   {
-    status: in_progress,
+    status: done,
+    verdict: "Go（execute-ready）",
     target: cr-fix-spec.md,
-    review_round: 4,
-    dag_version: 5,
+    review_round: 5,
+    dag_version: 6,
     open_must_fix: [],
     doc_fix_plan: [],
-    note: "r1 No-Go（4P1+6P2）doc-fix 5e9320d6（J2-5 先改集合包含断言）；r2 No-Go（2P1+7P2）doc-fix 4db237ae（重复键+附录 35 条归属表）；r3 No-Go（3P1+4P2）doc-fix 5d273d97（HEAD 口径/P1 总表补 B-P1-2/J2-5 终降级登记行，24 断言）但附录 A-P2-4 漏改；r4 No-Go（1P1 附录漏改+不实陈述；6P2）doc-fix 本批：附录补订、措辞如实化、e2e 旧注释统一、head_sha 推进；待 r5",
+    note: "r1 No-Go（4P1+6P2）doc-fix 5e9320d6；r2 No-Go（2P1+7P2）doc-fix 4db237ae（重复键+附录 35 条归属表）；r3 No-Go（3P1+4P2）doc-fix 5d273d97（附录 A-P2-4 漏改，J2-5 终降级登记）；r4 No-Go（1P1+6P2）doc-fix ea5ea327；r5 Go——独立实跑零缺陷，35 条附录锚点逐行命中，剩 4+1 P2 一行文本趁热清零（同批提交）",
   }
 publish_pending:
   {
