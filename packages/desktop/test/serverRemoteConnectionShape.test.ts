@@ -1,9 +1,11 @@
-// T-RD3（upstream-v316-fullsync §phase-remote-daemon Step 16）：desktop daemon 隧道握手面。
+// T-RD3（upstream-v316-fullsync §phase-remote-daemon Step 16；Step 17 更新裁量语义）：
+// desktop daemon 隧道握手面。
 //
 // 锁死三件事：
-// 1) 裁剪守卫：serverRemoteConnection.ts 一期只取 duplex 形态 connectServerRemoteOverDuplex，
-//    上游 WS 形态（connectServerRemote 及 fetchServerInfo/fetchHostCapability/authenticatedUrl/
-//    ServerConnectOptions 面）整段缺席，随 Step 17 回填。
+// 1) 终局守卫：serverRemoteConnection.ts 恒为 duplex-only——上游 WS 形态（connectServerRemote
+//    及 fetchServerInfo/fetchHostCapability/authenticatedUrl/ServerConnectOptions 面）的
+//    唯一消费方是 target.kind === "server" 直连分支，omz 无该 target（deployServer 旧链承载），
+//    二期 ConnectionManager 落地后裁决不回填，终局缺席断言防回归。
 // 2) resolveServerRemoteEndpoints 四端点推导与协议翻转。
 // 3) 握手三请求复用同一条 Duplex（T-RM1 的纯逻辑面）：reusable agent 第二次建连即抛；
 //    requestJsonOverDuplex 在人造 Duplex 上完成一次 HTTP 往返并解析 JSON。
@@ -20,7 +22,7 @@ import {
 } from "../src/host/serverRemoteDuplexTransport.js";
 import { resolveServerRemoteEndpoints } from "../src/host/serverRemoteConnection.js";
 
-test("T-RD3 裁剪守卫：仅 duplex 形态在位，WS 形态整段缺席", async () => {
+test("T-RD3 终局守卫：仅 duplex 形态在位，WS 形态终局缺席", async () => {
   const source = await readFile(
     fileURLToPath(new URL("../src/host/serverRemoteConnection.ts", import.meta.url)),
     "utf8",
@@ -31,7 +33,7 @@ test("T-RD3 裁剪守卫：仅 duplex 形态在位，WS 形态整段缺席", asy
   );
   assert.ok(
     !/export async function connectServerRemote\(/.test(source),
-    "WS 形态 connectServerRemote 不得随一期落地",
+    "WS 形态 connectServerRemote 不得落地",
   );
   for (const wsOnlySymbol of [
     "function fetchServerInfo",
@@ -40,17 +42,20 @@ test("T-RD3 裁剪守卫：仅 duplex 形态在位，WS 形态整段缺席", asy
     "ServerConnectOptions",
     "function authenticatedUrl",
   ]) {
-    // 断言函数定义形态而非裸符号：顶部裁剪注释允许提及二期回填面。
-    assert.ok(!source.includes(wsOnlySymbol), `WS 形态专属符号 ${wsOnlySymbol} 不得随一期落地`);
+    // 断言函数定义形态而非裸符号：顶部裁量注释允许提及缺席缘由。
+    assert.ok(!source.includes(wsOnlySymbol), `WS 形态专属符号 ${wsOnlySymbol} 不得落地`);
   }
-  assert.ok(source.includes("随 phase-remote-core"), "裁剪边界必须留二期回填注释");
+  assert.ok(source.includes("二期终局裁量"), "duplex-only 定案必须留终局裁量注释");
 });
 
 test("T-RD3 端点推导：http(s)→ws(s) 翻转与路径归一", () => {
   const endpoints = resolveServerRemoteEndpoints("https://relay.example.com/base/");
   assert.equal(endpoints.infoUrl, "https://relay.example.com/base/api/server-info");
   assert.equal(endpoints.wsUrl, "wss://relay.example.com/base/ws");
-  assert.equal(endpoints.hostCapabilityUrl, "https://relay.example.com/base/api/rpc-host-capability");
+  assert.equal(
+    endpoints.hostCapabilityUrl,
+    "https://relay.example.com/base/api/rpc-host-capability",
+  );
   assert.equal(endpoints.hostWsUrl, "wss://relay.example.com/base/ws/host");
 
   const wsInput = resolveServerRemoteEndpoints("ws://host:9/base/ws/host");
@@ -94,7 +99,10 @@ test("T-RD3 reusable agent：首次建连返回隧道，第二次立即抛错（
     options: unknown,
     callback: () => void,
   ) => unknown;
-  assert.ok(createConnection({}, () => undefined), "首次调用必须交出已建立的隧道");
+  assert.ok(
+    createConnection({}, () => undefined),
+    "首次调用必须交出已建立的隧道",
+  );
   assert.throws(
     () => createConnection({}, () => undefined),
     /attempted to create a second connection/,
