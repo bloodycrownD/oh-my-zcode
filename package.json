@@ -48,7 +48,10 @@
     "architecture:report": "node scripts/architecture/architecture-check.mjs report",
     "architecture:baseline:update": "node scripts/architecture/architecture-check.mjs baseline:update",
     "architecture:context": "node scripts/architecture/architecture-check.mjs context",
-    "test:e2e-tool-join": "node --import tsx docs/iterations/trace-nm-borrow/e2e/e2e-tool-join.mjs"
+    "test:e2e-tool-join": "node --import tsx docs/iterations/trace-nm-borrow/e2e/e2e-tool-join.mjs",
+    "test:cli-backport": "pnpm --dir apps/zcode-cli/packages/bootstrap run test:legacy-cli-provider-config-import && node --test apps/zcode-cli/packages/bootstrap/scripts/test-dynamic-workflows-skill.mjs && pnpm --dir apps/zcode-cli/packages/bootstrap run test:late-tool-input-guard && pnpm --dir apps/zcode-cli/packages/core run test:model-creation-failure",
+    "test:ui-backport": "node -e \"console.log([test:ui-backport] 占位：w3 起接入 T-U 用例)\"",
+    "test:desktop-backport": "node -e \"console.log([test:desktop-backport] 占位：w9 起接入 T-D 用例)\""
   },
   "dependencies": {
     "border-beam": "^1.0.1",
