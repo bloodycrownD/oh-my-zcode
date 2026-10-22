@@ -52,7 +52,8 @@
     "test:model-request-slim": "tsx --test scripts/test-model-request-slim.mjs",
     "test:dwf-read-narrowing": "tsx --test scripts/test-dwf-read-narrowing.mjs",
     "test:dwf-journal-contract": "tsx --test scripts/test-dwf-journal-contract.mjs",
-    "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs"
+    "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs",
+    "test:held-queue-routing": "tsx --test scripts/test-held-queue-routing.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",
