@@ -2,6 +2,7 @@
 import { Client as SSHClient } from "ssh2";
 import type { ConnectConfig } from "ssh2";
 import { createReadStream } from "node:fs";
+import type { Duplex } from "node:stream";
 import { posix } from "node:path";
 import { Emitter } from "@zcode/rpc";
 import { resolveZCodeRuntimeEnv } from "@zcode/shared";
@@ -312,6 +313,23 @@ export class SSHBackend implements IRemoteBackend {
           stderr: channel.stderr,
           onClose: onClose.event,
         });
+      });
+    });
+  }
+
+  /**
+   * R3 source-server 直连隧道：SSH direct-tcpip 把本机 Duplex 转发到远端 daemon 的
+   * loopback ingress 端口；不可用时上层自动回退 `server proxy-stdio`。
+   */
+  async openDirectTcpChannel(port: number): Promise<Duplex> {
+    if (!Number.isInteger(port) || port <= 0 || port > 65_535) {
+      throw new Error(`Invalid remote TCP port: ${port}`);
+    }
+    await this.ensureConnected();
+    return await new Promise<Duplex>((resolve, reject) => {
+      this.client.forwardOut("127.0.0.1", 0, "127.0.0.1", port, (error, channel) => {
+        if (error) reject(error);
+        else resolve(channel as unknown as Duplex);
       });
     });
   }
