@@ -183,3 +183,45 @@ test("T-C4: 模型创建失败 → TurnStarted + 用户消息落库 + model_crea
   // beginActiveTurn 的 steerable 参数必须为 false（上游语义：失败轮不可 steer）。
   assert.equal(recorder.beginActiveTurnCalls[0]?.steerable, false, "创建失败轮 steerable=false");
 });
+
+test("T-C4b: 落库失败只 warn 不覆盖创建错误（CR-P2-1，上游 CR-01 另一半语义）", async () => {
+  const recorder = {
+    warns: [],
+    reservedTurnIds: [],
+    releasedTurnIds: [],
+    finishedActiveTurns: [],
+    beginActiveTurnCalls: [],
+    createdEvents: [],
+    appendedEvents: [],
+    persistedUserPrompts: [],
+  };
+  const runtime = buildRuntimeStub(recorder);
+  // CR-P2-1 钉死的覆写机制：用例内覆写（不改 buildRuntimeStub 签名）。
+  runtime.persistUserPrompt = () => Promise.reject(new Error("persist-boom"));
+  const input = "落库失败场景下的用户输入";
+
+  await assert.rejects(
+    executeTurnCommand.call(runtime, input, undefined, { inputId: "input-tc4b" }),
+  );
+
+  // 断言 1：落库失败被守卫捕获并只记 warn（不覆盖、不再抛出层穿透）。
+  assert.ok(
+    recorder.warns.some((entry) =>
+      String(entry.message).includes("Accepted input persistence failed after model creation failed"),
+    ),
+    "必须出现「落库失败只 warn」守卫日志",
+  );
+
+  // 断言 2+3：终态仍为创建错误 + model_creation（persist-boom 不得成为终态错误）。
+  const turnError = [...recorder.appendedEvents]
+    .reverse()
+    .find((event) => String(event.type).includes("turn_error"));
+  assert.ok(turnError, "必须写入 TurnError 终态事件");
+  assert.equal(turnError.info?.turnPhase, "model_creation", "终态 turnPhase 必须是 model_creation");
+  const outcomeText = JSON.stringify(turnError);
+  assert.ok(
+    outcomeText.includes(CREATION_MARKER),
+    `终态必须携带创建错误 marker 而非 persist-boom，实际: ${outcomeText.slice(0, 400)}`,
+  );
+  assert.ok(!outcomeText.includes("persist-boom"), "persist-boom 不得出现在终态错误里");
+});
