@@ -158,6 +158,9 @@ export function ChatPromptEditor({
   const resolvedTriggerPanelContainer = triggerPanelContainer ?? internalTriggerPanelContainer;
   const latestTextRef = useRef(initialValue ?? "");
   const hasSyncedInitialValueRef = useRef(false);
+  // 首帧回填竞态哨兵（bug A 残留窗口，2026-10-23）：程序化 setText 排队期间用户已打字时，
+  // rAF 回调不得再用 initialValue 覆盖用户输入。
+  const textChangeSerialRef = useRef(0);
   const {
     externalFileDragging,
     internalDragging,
@@ -190,9 +193,14 @@ export function ChatPromptEditor({
     hasSyncedInitialValueRef.current = true;
 
     latestTextRef.current = initialValue;
+    const scheduledSerial = textChangeSerialRef.current;
     runAfterFrame(() => {
       // task 草稿恢复时外层 input state 已经更新，但 Lexical 内部文本不会自动跟随 props。
       // 同时普通打字也会更新 input prop，必须先比较当前编辑器文本，避免每个字符都程序化重写编辑器。
+      if (textChangeSerialRef.current !== scheduledSerial) {
+        // 排队期间已有新文本变更（用户首帧内打字）：用户输入优先，放弃本次程序化回填。
+        return;
+      }
       if (resolvedInputApiRef.current?.getMarkdown() === initialValue) {
         return;
       }
@@ -202,6 +210,7 @@ export function ChatPromptEditor({
 
   const handleTextChange = useCallback(
     (value: string) => {
+      textChangeSerialRef.current += 1;
       latestTextRef.current = value;
       onChange?.(value);
     },

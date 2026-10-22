@@ -1108,6 +1108,13 @@ const UserInputRowView = memo(function UserInputRowView({
           return;
         }
         if (result !== false) {
+          // bug A 观测对账（2026-10-23）：编辑提交成功时记录新文本指纹，供与 CLI
+          // `v4 editUserQuery completed` 日志对账，区分「在线退队」与「持久化旧 intent.text」。
+          logger.debug("[v4-row] edit submitted", {
+            rowId: row.rowId,
+            textLength: nextText.length,
+            textHead: nextText.slice(0, 32),
+          });
           setEditing(false);
           setConflictOpen(false);
         }
