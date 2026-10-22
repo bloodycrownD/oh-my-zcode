@@ -229,7 +229,7 @@ function MessageBlock({
       >
         {roleLabel}
       </span>
-      {/* 路径 B（spec N-5）：扁平行内容走 clamp 容器（6 行封顶 + 全屏入口）。
+      {/* 路径 B（spec N-5，v1.0.19 收紧）：扁平行内容走 clamp 容器（单行截断 + 全屏入口）。
           搜索命中时容器解除 clamp，保证高亮不被裁掉。
           fullContentText 按消息的复制文本口径给出，全屏视图与复制按钮内容一致。 */}
       <TrajectoryClampedPreview

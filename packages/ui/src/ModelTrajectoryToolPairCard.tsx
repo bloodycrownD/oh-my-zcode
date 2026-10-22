@@ -65,9 +65,12 @@ export function TrajectoryToolPairCard({
 }) {
   const targetKey = trajectoryToolCallTargetKey(callKey, info.part.kind, toolCallIndex);
   // 契约 4：沿用既有 "tool-call" 命令槽与视觉角色，不新增 TRAJECTORY_EXPANSION_KINDS 条目。
+  // v1.0.19：配对卡默认收起（单行头部：状态点 + 单行预览 + 徽标），点击展开两格——
+  // 回合点开后整屏是单行行列表，DOM 量骤减（用户拍板「配对卡收成单行头部」）。
   const { open, searchRevealed, handleOpenChange } = useTrajectoryExpansion({
     key: targetKey,
     commandKind: "tool-call",
+    defaultOpen: false,
   });
 
   const isUnknown = info.part.kind === "unknown";

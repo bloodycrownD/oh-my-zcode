@@ -11,7 +11,7 @@ date: 2026-10-21
 ## 设计目标
 
 1. **① 工具组卡**：CallCard 的每个工具调用行从「孤立调用行」升级为「调用+结果配对卡」——use/result 两格 + 状态点（ok/error/pending/missing），结果不再错位显示在下一条调用的 Input 区。
-2. **② 长文本 clamp**：展开内容从 `max-h-64`（≈13 行）收紧到 6 行（`max-h-[6lh]`，仓库既有范式）；assistant 扁平输入行（路径 B，当前无 clamp 无复制）补 clamp + 「查看全文」入口。
+2. **② 长文本 clamp**：展开内容从 `max-h-64`（≈13 行）收紧到 6 行（`max-h-[6lh]`，仓库既有范式）；assistant 扁平输入行（路径 B，当前无 clamp 无复制）补 clamp + 「查看全文」入口。〔v1.0.19 失效标注：本条「收紧到 6 行」指路径 A，仍成立（:110 保留）；路径 B 已改单行截断（1lh）——trace-3fix-v119，见 docs/iterations/trace-3fix-v119/cr-fix-spec.md〕
 3. **③ 全屏只读 Modal**：新增消息原文全屏层（Esc/遮罩关闭、等宽 pre-wrap、复制），承接 clamp 后的「看全文」终点。
 4. **④ 回合头摘要分层**：回合头从单行改两行——行 1 序号+预览、行 2 计数行，失败数与红色图标同源。
 
@@ -98,7 +98,7 @@ content 文本 = trajectoryToolCallDisplayText(info)   // 新增纯函数于 Too
 1. target key 逐字 = `trajectoryToolCallTargetKey(...)`（渲染 DOM 与搜索索引共用，单源）。
 2. 卡根必须是 Radix `Collapsible`（高亮判定读 `data-state`，`ModelTrajectorySearchHighlight.ts:84-99`）；展开内容外层包 `data-trajectory-message-expanded` 包装层。
 3. 卡内必须保留 `data-trajectory-search-field="tool-name"` 与 `"tool-id"` 元素（徽标文本单源 = `trajectoryToolCallBadgeText(info)`（ToolJoin 导出，result 侧真名优先、`||` 空串回退 call 侧），与索引同源——r2 P1-3 + r1 CR D-6 措辞统一，取代早期「取自 trajectoryToolMetadata」的表述；否则搜工具名计数前进画面不动）；use 格与 result 格各挂 `data-trajectory-search-field="content"`，**use 在 result 之前**（与索引拼接顺序一致；unknown 回退 raw `<pre>` 同样挂 content 字段——r1 CR 修复批补齐，否则索引命中 DOM 无高亮位）。
-4. 展开状态走 `useTrajectoryExpansion({ key, commandKind: "tool-call" })`——**不新增 `TRAJECTORY_EXPANSION_KINDS` 条目**，沿用 `"tool-call"` 命令槽与视觉角色（新增 kind 会联动 `ModelTrajectoryRoleStyles.ts`、`ModelTrajectoryExpansionMenu.tsx:48`，本迭代明确不做）；命令默认展开语义不变（非 turn 命令初始 open=true）。
+4. 展开状态走 `useTrajectoryExpansion({ key, commandKind: "tool-call" })`——**不新增 `TRAJECTORY_EXPANSION_KINDS` 条目**，沿用 `"tool-call"` 命令槽与视觉角色（新增 kind 会联动 `ModelTrajectoryRoleStyles.ts`、`ModelTrajectoryExpansionMenu.tsx:48`，本迭代明确不做）；命令默认展开语义不变（非 turn 命令初始 open=true）。〔v1.0.19 失效标注：末句已失效——trace-3fix-v119 用户拍板「所有内容默认折叠」，全部命令槽初始 open=false（见 trace-3fix-v119/cr-fix-spec.md P2-2）〕
 5. 搜索 reveal 链复用：命中 result 文本 → 该卡 key 被强制展开（现有 searchRevealed 机制）。
 6. 上述 DOM 断言列入 manual 清单（T-N4，无 DOM 测试基建）。
 7. **两格内容**（r2 P1-1）：use 格 = `trajectoryToolCallInputs(message)` 以 `<pre>` 等宽渲染、result 格 = `pairedResultText` 同款；两格各自 `max-h-[6lh]` clamp，`searchRevealed` 时跳过 clamp；missing 时 result 格渲染 `modelTrajectory.toolResultMissing` 灰化占位、pending 时渲染 `modelTrajectory.toolResultPending` 灰化占位（尾部在途常态，r3 P2-3），两者均不参与索引；`kind:"unknown"` 条目**回退渲染**：raw `<pre>` 原文、无状态点、复制走 displayText（r3 P2-5）。
@@ -109,7 +109,7 @@ content 文本 = trajectoryToolCallDisplayText(info)   // 新增纯函数于 Too
 
 - 路径 A（折叠行）：`ModelTrajectoryExpandedContent.tsx` 的 `max-h-64` → `max-h-[6lh]`（先例：`ElicitationDialog.tsx:863` 等 `max-h-[5lh]`）。
 - **全屏入口可见性（r2 P1-6，与胶囊分离）**：入口条件用持久态 `overflowEver`（首次 `isOverflowing` 测得 true 后置位、永不回退），不受 `searchRevealed` 展开后 `isOverflowing` 回落影响；溢出胶囊维持现状条件 `isOverflowing && !searchRevealed`。图标用 `ExpandIcon` + aria-label=`modelTrajectory.viewFullContent`（胶囊已占 `Maximize2Icon` 表「展开」，避免同形相邻——r2 P2-5）。**Step 4 只渲染入口按钮（disabled），接线（打开 Modal）归 Step 5**（r2 P2-6 顺序修正）。
-- 路径 B（assistant 扁平行）：`ModelTrajectoryCallInput.tsx` 的 **MessageBlock 扁平分支**（覆盖所有非 system/user/tool 角色及 tool 空 parts，r3 P2-15）包新组件 `TrajectoryClampedPreview`（`max-h-[6lh]` + 溢出检测 + 底部「查看全文」入口，**按钮渲染归 Step 4、接线归 Step 5**；不做行内展开）。**搜索命中跳过 clamp**：ClampedPreview 读该行 expansionKey 的 searchRevealed 上下文，命中时跳过 clamp（与路径 A 同范式），否则高亮落在被裁区域。
+- 路径 B（assistant 扁平行）：`ModelTrajectoryCallInput.tsx` 的 **MessageBlock 扁平分支**（覆盖所有非 system/user/tool 角色及 tool 空 parts，r3 P2-15）包新组件 `TrajectoryClampedPreview`（`max-h-[6lh]` + 溢出检测 + 底部「查看全文」入口，**按钮渲染归 Step 4、接线归 Step 5**；不做行内展开）。**搜索命中跳过 clamp**：ClampedPreview 读该行 expansionKey 的 searchRevealed 上下文，命中时跳过 clamp（与路径 A 同范式），否则高亮落在被裁区域。〔v1.0.19 失效标注：路径 B clamp 高度 6lh→1lh（单行截断，用户拍板与用户消息预览一致）；命中跳过 clamp 语义不变——trace-3fix-v119〕
 - 溢出判定纯逻辑抽到新纯模块 `ModelTrajectoryClamp.ts`（`isClampOverflow({scrollHeight, clientHeight, tolerance})` 等，零 React 可直测）；hook 部分留组件文件。
 - Modal：新文件 `ModelTrajectoryMessageDialog.tsx`，底座 `components/ui/dialog.tsx`（Radix，Portal 默认 body、Esc/遮罩/焦点圈定开箱即用——Esc 与聊天页停止生成的冲突由 `shouldIgnoreEscapeForStopGeneration` 的 path 判定天然免疫，**不新增任何 window Esc 监听**）。sr-only 标题 + `aria-describedby={undefined}`（先例 `image-preview-dialog.tsx:396`）。
 - **循环导入规避**：新中性模块 `ModelTrajectoryMessageView.ts`（零 JSX 的 .ts）承载——`TrajectoryMessageViewRequest` 描述类型、`TrajectoryMessageViewContext`（createContext）、`messageClipboardText`（**从 ExpandableMessage 迁移至此**，其依赖仅 ToolPayload，纯函数可迁；旧处改 re-export 或直接改引用点）。Dialog 组件只接 props 不回流；Pane 提供 context 值。
@@ -186,7 +186,7 @@ services / adapters / shared / bootstrap：**零改动**。`TRAJECTORY_EXPANSION
 | # | 变更 | 文件 | 风险 |
 |---|---|---|---|
 | N-1 | callId→result join 纯模块 + status + key 家族单源迁移 + filterTrajectoryInputRows | ToolJoin 新文件、Turns（re-export）、ToolPayload | 中（裁剪/重试边界） |
-| N-2 | 工具配对卡（契约 1–8：key 单源/搜索字段含 tool-name、tool-id/两格 6lh/复制/全屏入口/missing 占位/默认展开） | ToolPairCard 新文件、PaneParts、TurnGroup（props 透传） | **高**（B-2 同型） |
+| N-2 | 工具配对卡（契约 1–8：key 单源/搜索字段含 tool-name、tool-id/两格 6lh/复制/全屏入口/missing 占位/默认展开〔v1.0.19 失效：默认展开→默认收起〕） | ToolPairCard 新文件、PaneParts、TurnGroup（props 透传） | **高**（B-2 同型） |
 | N-3 | Input 区已配对行剔除（渲染+索引共用纯函数，不动 inputMessages，hasInput 判定不变，占位开关保留） | CallInput、Turns(searchItems)、PaneParts（ResponseBlock 剔配对） | **高**（B-2 同型） |
 | N-4 | 搜索侧数据面：TimelineItem.toolCalls 字段 + content target 拼接口径（displayText 单源）+ key helper 接入 | Search.ts、Turns | 中 |
 | N-5 | clamp：路径 A 6lh + overflowEver 全屏入口（ExpandIcon）；路径 B ClampedPreview（命中跳过 clamp） | ExpandedContent、ClampedPreview/Clamp 新文件、CallInput | 低 |
