@@ -19,8 +19,10 @@ import { logger } from "@/logger.js";
 import {
   TrajectoryExpansionCommandContext,
   TrajectoryExpansionRegistryContext,
-  TRAJECTORY_TURN_EXPANSION_KEY_PREFIX,
+  areAllTrajectoryExpansionKindsExpanded,
   createTrajectoryExpansionCommands,
+  setAllTrajectoryExpansionKinds,
+  withoutTrajectoryTurnOverrides,
   type TrajectoryExpansionOverride,
 } from "@/ModelTrajectoryExpansion.js";
 import { ModelTrajectoryExpansionMenu } from "@/ModelTrajectoryExpansionMenu.js";
@@ -116,52 +118,71 @@ export function ModelTrajectoryPane({
     resolvedSearchActiveIndex >= 0
       ? (searchIndex.matches[resolvedSearchActiveIndex] ?? null)
       : null;
+  // v1.0.19 P1-5：搜索命中的强制展开集合覆盖**全部**命中（不再只有 active 命中），
+  // 否则默认收起时其余命中行的 content 字段不在 DOM → 计数前进但高亮不可见。
+  // 必须在 useMemo 里构造集合——渲染体内直接 new Set 会让 Context 值每帧变化，
+  // 令全部消费行（useTrajectorySearchRevealed 的调用方）反复重渲染。
+  const revealMessageKeys = useMemo(
+    () => new Set(searchIndex.matches.map((match) => match.expansionKey)),
+    [searchIndex.matches],
+  );
+  const revealTurnKeys = useMemo(
+    () => new Set(searchIndex.matches.map((match) => match.turnKey)),
+    [searchIndex.matches],
+  );
   const [expansionCommands, setExpansionCommands] = useState(createTrajectoryExpansionCommands);
   const expansionVersionRef = useRef(0);
   const [expansionOverrides, setExpansionOverrides] = useState(
     () => new Map<string, TrajectoryExpansionOverride>(),
   );
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // B-6：全部展开/收起改为回合级（消息行在展开的回合内默认展开，无需逐类展开）。
-  const willExpandAll = !expansionCommands.turn.expanded;
+  // v1.0.19 P1-4：工具栏「全部展开/收起」按全部 7 个命令槽聚合判定，
+  // 只看命令槽的 expanded 值，per-row override 不参与聚合。
+  const willExpandAll = !areAllTrajectoryExpansionKindsExpanded(expansionCommands);
   const toggleAllLabel = intl.formatMessage({
     id: willExpandAll ? "modelTrajectory.expandAll" : "modelTrajectory.collapseAll",
   });
-  // 回合展开的唯一写入口（C-orch-1）：「全部展开/收起」按钮与「turn」菜单项共用。
-  // 必须函数式更新——闭包取值在同一 tick 连点两次时读到旧值，会丢一次翻转；
-  // override 清理也走这里，另外两条入口不得各写一份。
-  const toggleTurnExpansion = useCallback(() => {
+  // 回合展开的两个写入口：①工具栏「全部展开/收起」（批量写 7 槽）
+  // ②「自定义展开」菜单的「回合」项（只写 turn 槽）。
+  // 两者都必须在写 turn 槽前清理 `turn:` 命名空间的 override——
+  // 否则被 override 钉住的回合对翻转无响应（现状语义保留）；非 turn 行 override 不清理。
+  const clearTurnOverrides = useCallback(() => {
+    setExpansionOverrides((previous) => withoutTrajectoryTurnOverrides(previous));
+  }, []);
+  // 工具栏全量入口：批量写全部 7 槽，目标态 = 7 槽是否全展开的取反
+  // （全展开→收起；任一未展开→展开）。必须函数式更新——闭包取值在同一 tick
+  // 连点两次时读到旧值，会丢一次翻转。
+  const toggleAllExpansion = useCallback(() => {
     expansionVersionRef.current += 1;
     const version = expansionVersionRef.current;
-    // 只清回合命名空间的 override：消息行上用户单独做过的展开选择保持不变。
-    setExpansionOverrides((previous) => {
-      const next = new Map<string, TrajectoryExpansionOverride>();
-      for (const [key, override] of previous) {
-        if (!key.startsWith(TRAJECTORY_TURN_EXPANSION_KEY_PREFIX)) next.set(key, override);
-      }
-      return next;
-    });
-    setExpansionCommands((previous) => ({
-      ...previous,
-      turn: { expanded: !previous.turn.expanded, version },
-    }));
-  }, []);
+    clearTurnOverrides();
+    setExpansionCommands((previous) =>
+      setAllTrajectoryExpansionKinds(
+        previous,
+        !areAllTrajectoryExpansionKindsExpanded(previous),
+        version,
+      ),
+    );
+  }, [clearTurnOverrides]);
   const handleToggleExpansionKind = useCallback(
     (kind: TrajectoryVisualRole) => {
-      // 回合（也就是 B-6 的「全部展开/收起」）统一走 toggleTurnExpansion：
-      // 该入口要清回合 override，且两条路径都必须是函数式翻转。
-      if (kind === "turn") {
-        toggleTurnExpansion();
-        return;
-      }
       expansionVersionRef.current += 1;
       const version = expansionVersionRef.current;
+      // 菜单「回合」项：只翻转回合级，不连带其它类开关（与工具栏全量入口语义分离）。
+      if (kind === "turn") {
+        clearTurnOverrides();
+        setExpansionCommands((previous) => ({
+          ...previous,
+          turn: { expanded: !previous.turn.expanded, version },
+        }));
+        return;
+      }
       setExpansionCommands((previous) => ({
         ...previous,
         [kind]: { expanded: !previous[kind].expanded, version },
       }));
     },
-    [toggleTurnExpansion],
+    [clearTurnOverrides],
   );
   const handleSearchQueryChange = useCallback((query: string) => {
     setSearchQuery(query);
@@ -262,7 +283,7 @@ export function ModelTrajectoryPane({
               variant="ghost"
               size="icon-sm"
               className="shrink-0 text-foreground"
-              onClick={toggleTurnExpansion}
+              onClick={toggleAllExpansion}
               aria-label={toggleAllLabel}
               title={toggleAllLabel}
             >
@@ -358,12 +379,8 @@ export function ModelTrajectoryPane({
         ) : (
           <TrajectoryExpansionCommandContext.Provider value={expansionCommands}>
             <TrajectoryExpansionRegistryContext.Provider value={expansionRegistry}>
-              <TrajectorySearchRevealContext.Provider
-                value={activeSearchMatch?.expansionKey ?? null}
-              >
-                <TrajectorySearchRevealTurnContext.Provider
-                  value={activeSearchMatch?.turnKey ?? null}
-                >
+              <TrajectorySearchRevealContext.Provider value={revealMessageKeys}>
+                <TrajectorySearchRevealTurnContext.Provider value={revealTurnKeys}>
                   <TrajectoryWireFilterContext.Provider value={wireFilterContextValue}>
                     {/* 全屏只读视图的宿主挂在时间线外层（spec N-6）：
                         入口按钮在虚拟化行内，Modal 状态必须活回合之外，行回收不影响已打开的视图。 */}

@@ -71,15 +71,36 @@ interface SearchTarget {
   text: string;
 }
 
-/** 当前激活命中的消息展开键（由该消息行自己消费，命中即强制展开）。 */
-export const TrajectorySearchRevealContext = createContext<string | null>(null);
+/**
+ * 搜索命中展开键的集合类型（v1.0.19 P1-5）。
+ * 由「当前激活命中的单个键」放宽为「本次查询的全部命中键」——
+ * 默认收起时若只展开 active 命中，其余命中行的 content 字段不在 DOM，
+ * 计数前进但高亮不可见（命中 N 处只见 1 处高亮）。
+ */
+export type TrajectorySearchRevealSet = ReadonlySet<string>;
 
 /**
- * 当前激活命中所在的回合键（B-7「命中自动展开对应回合」）。
+ * 空集合常量：作为 Context 默认值复用，避免每次渲染新建 Set。
+ * Context 值每帧变化会让全部消费行反复重渲染（Provider 侧必须 useMemo 构造）。
+ */
+export const EMPTY_TRAJECTORY_SEARCH_REVEAL_SET: TrajectorySearchRevealSet = new Set<string>();
+
+/**
+ * 命中消息展开键的集合（由该消息行自己消费，命中即强制展开）。
+ * 消费方：useTrajectoryExpansion（Expansion.ts）与 TrajectoryClampedPreview（经 hook 间接消费）。
+ */
+export const TrajectorySearchRevealContext = createContext<TrajectorySearchRevealSet>(
+  EMPTY_TRAJECTORY_SEARCH_REVEAL_SET,
+);
+
+/**
+ * 命中所在回合键的集合（B-7「命中自动展开对应回合」）。
  * 回合外壳未经消息行渲染，拿不到消息级 reveal 键，因此单独给一条回合命名空间通道；
  * 两个命名空间（`turn:` 前缀 vs trajectoryCallKey 产物）不重叠，可同时参与同一判定。
  */
-export const TrajectorySearchRevealTurnContext = createContext<string | null>(null);
+export const TrajectorySearchRevealTurnContext = createContext<TrajectorySearchRevealSet>(
+  EMPTY_TRAJECTORY_SEARCH_REVEAL_SET,
+);
 
 export function buildTrajectorySearchIndex(
   items: readonly TrajectorySearchTimelineItem[],

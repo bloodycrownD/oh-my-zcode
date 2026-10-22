@@ -36,9 +36,9 @@ export function applyTrajectorySearchHighlights({
   if (!support) return null;
   ensureStyle();
   const ranges = matches
-    .map((match) => getMatchRange(root, query, match, false))
+    .map((match) => getMatchRange(root, query, match))
     .filter((range): range is Range => range !== null);
-  const activeRange = activeMatch ? getMatchRange(root, query, activeMatch, true) : null;
+  const activeRange = activeMatch ? getMatchRange(root, query, activeMatch) : null;
   support.registry.set(HIGHLIGHT_NAME, new support.Highlight(...ranges));
   support.registry.set(
     ACTIVE_HIGHLIGHT_NAME,
@@ -79,7 +79,6 @@ function getMatchRange(
   root: HTMLElement,
   query: string,
   match: TrajectorySearchMatch,
-  preferExpanded: boolean,
 ): Range | null {
   const target = [
     ...root.querySelectorAll<HTMLElement>("[data-trajectory-search-target-key]"),
@@ -88,7 +87,11 @@ function getMatchRange(
   let fields = [
     ...target.querySelectorAll<HTMLElement>(`[data-trajectory-search-field="${match.field}"]`),
   ];
-  if (preferExpanded && target.dataset.state === "open") {
+  // v1.0.19（P1-5）：选段口径从「仅 active 命中优先取展开区字段」放宽为「命中行已展开即优先」。
+  // 行 Collapsible 根的 data-state=open 时，折叠预览 span（group-data-[state=open]:hidden）
+  // 已被视觉隐藏，命中必须落在 [data-trajectory-message-expanded] 内的展开字段上，
+  // 否则高亮不可见、且 fieldMatchIndex 在两段文本之间错位。
+  if (target.dataset.state === "open") {
     const expandedFields = fields.filter((element) =>
       element.closest("[data-trajectory-message-expanded]"),
     );
