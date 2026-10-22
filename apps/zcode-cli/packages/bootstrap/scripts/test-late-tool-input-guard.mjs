@@ -27,23 +27,91 @@
  *   3. `onToolCallScheduled`：existing-upsert 补写 toolName——因为第 2 条守卫
  *      挡住了「靠迟到原始流补身份」，工具名只能由 scheduled 这个权威事实落。
  *
- * 运行方式（必须 tsx）：
- *   `pnpm --dir apps/zcode-cli/packages/bootstrap run test:late-tool-input-guard`
- *   （等价于 `npx tsx --test scripts/test-late-tool-input-guard.mjs`）
+ * ============================================================================
+ * 被测模块怎么载入（两种都支持，行为等价）
+ * ============================================================================
  *
- * 为什么不能是裸 `node --test`：被测模块是 TypeScript 源码，且本仓的 `@zcode/shared`
- * 直接导出 `src/*.ts`（package.json exports 指向源码），源码内部相对导入写成
- * "./x.js" 而磁盘上是 ".ts"——裸 node 无法解析，必须由 tsx 兜住。
- * 与 test-ask-question-projection / test-turn-directory 同范式。
+ * - **tsx 在场**（`tsx --test` / `node --import tsx --test`）：直接载入
+ *   `src/.../product-projection.ts`，测的永远是当前工作区代码。
+ * - **裸 node**（`node --test`）：源码里相对导入写成 "./x.js" 而磁盘上是 ".ts"，
+ *   且 `@zcode/shared` 的包入口发布的是原始 TypeScript（`exports["."] =
+ *   "./src/index.ts"`），裸 node 两者都解析不了；因此改从构建产物
+ *   `dist/.../product-projection.js` 载入，并用 `registerHooks` 只把
+ *   `@zcode/shared` 的解析改指到它自己的 dist（只改解析，不桩被测逻辑）。
+ *   前置条件：`pnpm --filter @zcode/bootstrap build`（与 T-C1 同款约束）。
+ *   构建产物若陈旧，用例第 0 条断言会直接点名要求重建。
  */
 
 import assert from "node:assert/strict";
+import { existsSync, readFileSync } from "node:fs";
+import { registerHooks } from "node:module";
+import { join } from "node:path";
 import test from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
+const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
+
+const TSX_ACTIVE =
+  process.execArgv.some((arg) => arg.includes("tsx")) ||
+  (process.env.NODE_OPTIONS ?? "").includes("tsx");
+
+/** 裸 node 路径：把「入口发布原始 TypeScript」的包解析改指到它自己的构建产物。 */
+function redirectSharedPackageToDist() {
+  const tsSourcePackages = new Set(["@zcode/shared", "@zcode/model-option-map", "@zcode/provider"]);
+  registerHooks({
+    resolve(specifier, context, nextResolve) {
+      const segments = specifier.split("/");
+      const packageName = tsSourcePackages.has(specifier)
+        ? specifier
+        : segments.length >= 2 && tsSourcePackages.has(segments.slice(0, 2).join("/"))
+          ? segments.slice(0, 2).join("/")
+          : null;
+      if (packageName === null) return nextResolve(specifier, context);
+      const distRoot = join(REPO_ROOT, "packages", packageName.slice("@zcode/".length), "dist");
+      const subpath = specifier === packageName ? "index" : specifier.slice(packageName.length + 1);
+      for (const candidate of [
+        join(distRoot, `${subpath}.js`),
+        join(distRoot, subpath, "index.js"),
+      ]) {
+        if (existsSync(candidate)) {
+          return { url: pathToFileURL(candidate).href, shortCircuit: true };
+        }
+      }
+      throw new Error(`no compiled dist for "${specifier}" — build ${packageName} first`);
+    },
+  });
+}
+
+/**
+ * 返回 { ProductProjection, implementationPath }——implementationPath 用于校验
+ * 载入的到底是新实现还是陈旧构建产物。
+ */
+async function loadProductProjection() {
+  if (TSX_ACTIVE) {
+    const sourcePath = fileURLToPath(
+      new URL("../src/zcode-protocol-v4/product-projection.ts", import.meta.url),
+    );
+    return {
+      module: await import(pathToFileURL(sourcePath).href),
+      implementationPath: sourcePath,
+    };
+  }
+  redirectSharedPackageToDist();
+  const distPath = fileURLToPath(
+    new URL("../dist/zcode-protocol-v4/product-projection.js", import.meta.url),
+  );
+  if (!existsSync(distPath)) {
+    throw new Error(`missing ${distPath} — run \`pnpm --filter @zcode/bootstrap build\` first`);
+  }
+  return {
+    module: await import(pathToFileURL(distPath).href),
+    implementationPath: distPath,
+  };
+}
+
+const { module: projectionModule, implementationPath } = await loadProductProjection();
+const { ProductProjection } = projectionModule;
 const { SessionEventType } = await import("@zcode/contracts");
-const { ProductProjection } = await import(
-  new URL("../src/zcode-protocol-v4/product-projection.ts", import.meta.url).href
-);
 
 const SESSION_ID = "ses_late_tool_input";
 const EPOCH = "epoch-late";
@@ -95,6 +163,15 @@ function toolRow(projection, toolCallId) {
   assert.ok(row, `工具行 ${toolCallId} 必须被投影出来`);
   return row;
 }
+
+test("0: 载入的实现确实带着 U3 守卫（裸 node 路径用于识别陈旧构建产物）", () => {
+  const source = readFileSync(implementationPath, "utf8");
+  assert.ok(
+    source.includes("existing?.input !== undefined"),
+    `${implementationPath} 不含 U3 守卫——构建产物陈旧，请先 ` +
+      "`pnpm --filter @zcode/bootstrap build`",
+  );
+});
 
 test("1: scheduled 已定稿输入后，迟到的 tool_call 不覆盖 input/inputText", () => {
   const projection = new ProductProjection(SESSION_ID, EPOCH);
