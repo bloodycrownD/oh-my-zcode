@@ -17,6 +17,7 @@ import type {
   HookRunResult,
   MessageId,
   MessagePart,
+  Model,
   QueryId,
   SessionEvent,
   SessionGoal,
@@ -31,6 +32,7 @@ import {
   buildDateChangeReminderBody,
   buildRuntimeUserEntriesFromTurn,
   buildUserContentFromTurn,
+  isTurnCancellationError,
   logResolvedTurnAttachments,
   resolveTurnAttachments,
   summarizeTurnAttachmentsForEvent,
@@ -63,6 +65,10 @@ import { applySubmissionExecutionState, createTurnModel } from "./turn-model.js"
 import { rebuildContextPrefix } from "./context-refresh.js";
 
 const TARGET_RUN_HEARTBEAT_MS = 15_000;
+// FORK (upstream-v3.16-backport U4): 创建失败轮的终态口径常量（与上游 v3.16.2 对齐）。
+const MODEL_CREATION_FAILED_MESSAGE = "Model creation failed";
+const MODEL_CREATION_TURN_PHASE = "model_creation";
+const TURN_EXECUTION_FAILED_MESSAGE = "Turn execution failed";
 
 export async function executeTurn(
   this: AgentRuntimeInternal,
@@ -160,7 +166,10 @@ export async function executeTurnCommand(
     runWithContextAsync(turnTraceContext, async () => {
       const executionStartedAt = performance.timeOrigin + performance.now();
       throwIfTurnAborted(turnAbortSignal);
-      let admittedModel;
+      let admittedModel: Model | undefined;
+      // FORK (upstream-v3.16-backport U4): 普通轮创建模型失败后仍要保留已接纳输入；
+      // 这里只记下原始错误，由主生命周期落库并收尾（上游 CR-01 语义）。
+      let creationFailure: { error: unknown } | undefined;
       try {
         admittedModel =
           rewindCommand === null
@@ -170,47 +179,42 @@ export async function executeTurnCommand(
               })
             : undefined;
       } catch (error) {
-        // 同步滞后/模型失效可在内层 Turn try 之前创建失败。只写日志会让已接纳输入
-        // 没有终态、桌面与手机都看不到错误；复用 outcome，不等待同步、不改原选择。
-        turnFailureHandled = true;
-        const coreError = createTurnFailureError(error, turnAbortSignal, "Model creation failed");
-        await appendTurnOutcomeEvent(this, {
-          coreError,
-          events,
-          durationMs: Date.now() - turnStartedAtMs,
-          turnPhase: "model_creation",
-          inputId: options?.inputId,
-          traceContext: turnTraceContext,
-          fallbackMessage: "Model creation failed",
-          logEvent: "turn.failed",
-          logLabel: "Turn",
-        });
-        throw coreError;
+        // FORK (upstream-v3.16-backport U4): Provider/Model 在 Registry 中短暂缺失时，
+        // 旧逻辑在请求前直接结束 Turn，已接纳输入只剩历史截断、重启也无法恢复文本。
+        // 现在只记下错误，落库（TurnStarted + 用户消息）与终态交给主链统一收尾。
+        // （上游对 /compact 轮保留直接写终态的分支；omz 的 compact 不经本文件，无需该分支。）
+        creationFailure = { error };
       }
-      let phaseStartedAt = startTurnPhase("context_initialization");
-      if (this.contextInitialized) {
-        // 每个后续 model step 都按该步骤实际持有的 Model 重新投影 Context；
-        // Session Selection 只决定未来创建哪个 Model，不能充当执行事实。
-        rebuildContextPrefix(this, { model: admittedModel });
-      } else {
-        // 首轮初始化已经用 admitted Model 构造并安装完整 Context，随后再 rebuild
-        // 会把同一 Prefix 连续构造两次。未初始化与已初始化分支互斥，每个 model step 只构造一次。
-        await this.ensureContextInitialized(turnTraceContext, admittedModel);
+      let phaseStartedAt: number;
+      // FORK (upstream-v3.16-backport U4): 创建错误确定后仍执行 Context/SessionStart，
+      // 会在 TurnStarted 前被二次 I/O 错误覆盖，并提前消费一次性 SessionStart。
+      // 失败轮跳过它们，只复用后续输入持久化与终态主链。
+      if (!creationFailure) {
+        phaseStartedAt = startTurnPhase("context_initialization");
+        if (this.contextInitialized) {
+          // 每个后续 model step 都按该步骤实际持有的 Model 重新投影 Context；
+          // Session Selection 只决定未来创建哪个 Model，不能充当执行事实。
+          rebuildContextPrefix(this, { model: admittedModel });
+        } else {
+          // 首轮初始化已经用 admitted Model 构造并安装完整 Context，随后再 rebuild
+          // 会把同一 Prefix 连续构造两次。未初始化与已初始化分支互斥，每个 model step 只构造一次。
+          await this.ensureContextInitialized(turnTraceContext, admittedModel);
+        }
+        completeTurnPhase("context_initialization", phaseStartedAt);
+        throwIfTurnAborted(turnAbortSignal);
+        phaseStartedAt = startTurnPhase("session_start_hooks");
+        const sessionStartHookResult = await this.runSessionStartHooks(
+          "startup",
+          turnTraceContext,
+          turnAbortSignal,
+          admittedModel,
+        );
+        completeTurnPhase("session_start_hooks", phaseStartedAt);
+        this.injectHookAdditionalContextIntoMessageHistory(
+          HookEventName.SessionStart,
+          sessionStartHookResult.additionalContexts,
+        );
       }
-      completeTurnPhase("context_initialization", phaseStartedAt);
-      throwIfTurnAborted(turnAbortSignal);
-      phaseStartedAt = startTurnPhase("session_start_hooks");
-      const sessionStartHookResult = await this.runSessionStartHooks(
-        "startup",
-        turnTraceContext,
-        turnAbortSignal,
-        admittedModel,
-      );
-      completeTurnPhase("session_start_hooks", phaseStartedAt);
-      this.injectHookAdditionalContextIntoMessageHistory(
-        HookEventName.SessionStart,
-        sessionStartHookResult.additionalContexts,
-      );
 
       if (rewindCommand !== null) {
         return this.executeRewindCommand(
@@ -222,7 +226,8 @@ export async function executeTurnCommand(
           options?.inputId,
         );
       }
-      activeTurn = this.beginActiveTurn(turnId, turnTraceContext, "regular", true, {
+      // FORK (upstream-v3.16-backport U4): 创建失败轮不会进入 model step，guide 无法被消费。
+      activeTurn = this.beginActiveTurn(turnId, turnTraceContext, "regular", creationFailure === undefined, {
         ...(options?.inputId === undefined ? {} : { inputId: options.inputId }),
       });
       this.logger?.info("Turn started", {
@@ -238,14 +243,18 @@ export async function executeTurnCommand(
       await this.ensureSessionPersisted(displayInput, turnTraceContext);
       // execution-scoped 临时 Provider（例如闲时任务）拥有本轮自己的模型，不改写
       // Session Selection；普通 Submission 才在真正开跑时应用其原子选择。
-      const submissionModel = await applySubmissionExecutionState(
-        this,
-        options?.intent,
-        turnTraceContext,
-        options?.modelExecution,
-        admittedModel,
-      );
-      startedTarget = await this.readSessionTargetForContext(turnTraceContext);
+      // FORK (upstream-v3.16-backport U4): 创建失败轮不再应用——重复建模会在主 try 之外
+      // 再次抛错；也不改写选择、mode、plan，不占用目标轮次。
+      const submissionModel = creationFailure
+        ? undefined
+        : await applySubmissionExecutionState(
+            this,
+            options?.intent,
+            turnTraceContext,
+            options?.modelExecution,
+            admittedModel,
+          );
+      startedTarget = creationFailure ? null : await this.readSessionTargetForContext(turnTraceContext);
       completeTurnPhase("target_read", phaseStartedAt);
       if (startedTarget?.status !== "active") {
         startedTarget = null;
@@ -501,6 +510,11 @@ export async function executeTurnCommand(
         }
 
         this.messageHistory.setCacheMiss();
+        // FORK (upstream-v3.16-backport U4): 已接纳输入已随 TurnStarted 和用户消息落库；
+        // 创建失败轮不准备 Agent、不生成标题、不请求模型，终态由外层 catch 统一写入。
+        if (creationFailure) {
+          throw creationFailure.error;
+        }
         const loopModel = submissionModel ?? admittedModel;
         if (!loopModel) {
           throw new Error("Turn model was not created before execution");
@@ -658,7 +672,30 @@ export async function executeTurnCommand(
         return result;
       } catch (error) {
         turnFailureHandled = true;
-        const coreError = createTurnFailureError(error, turnAbortSignal, "Turn execution failed");
+        // FORK (upstream-v3.16-backport U4, 上游 CR-01): 创建失败轮进入主链只为保留已接纳输入。
+        // 落库中的普通失败不能覆盖模型创建错误，只记 warn。用户取消仍收口为 cancelled；
+        // 宿主 fault 只经 abort signal 传入，createTurnFailureError 会先于创建错误识别它。
+        const reportedCreationFailure =
+          creationFailure && !isTurnCancellationError(error, turnAbortSignal)
+            ? creationFailure
+            : undefined;
+        if (reportedCreationFailure && error !== reportedCreationFailure.error) {
+          this.logger?.warn("Accepted input persistence failed after model creation failed", {
+            ...traceContextToLogContext(turnTraceContext),
+            errorMessage: error instanceof Error ? error.message : String(error),
+            event: "turn.model_creation.input_persistence_failed",
+            module: "core.runtime",
+            status: "failed",
+          });
+        }
+        const fallbackMessage = reportedCreationFailure
+          ? MODEL_CREATION_FAILED_MESSAGE
+          : TURN_EXECUTION_FAILED_MESSAGE;
+        const coreError = createTurnFailureError(
+          reportedCreationFailure ? reportedCreationFailure.error : error,
+          turnAbortSignal,
+          fallbackMessage,
+        );
         const preserveQueueAutoDrainOnCancel =
           coreError.type === CoreErrorType.TurnCancelled &&
           this.activeForegroundExecution?.preserveQueueAutoDrainOnCancel === true;
@@ -715,10 +752,10 @@ export async function executeTurnCommand(
           coreError,
           events,
           durationMs: Date.now() - turnMachine.state.startedAt.getTime(),
-          turnPhase: turnMachine.state.phase,
+          turnPhase: reportedCreationFailure ? MODEL_CREATION_TURN_PHASE : turnMachine.state.phase,
           inputId: options?.inputId,
           traceContext: turnTraceContext,
-          fallbackMessage: "Turn execution failed",
+          fallbackMessage,
           logEvent: "turn.failed",
           logLabel: "Turn",
           preserveQueueAutoDrainOnCancel,
