@@ -1,0 +1,56 @@
+# .iteration-state.yaml — upstream-v316-fullsync（code-dev-loop）
+# spec-check-loop 已收口：r1 Go（0P0/5P1/7P2 全清，dag_version 2，execute-ready 用户已确认 2026-10-23）
+spec_path: docs/iterations/upstream-v316-fullsync/spec.md
+prd_path: null
+evidence_packs: [docs/iterations/upstream-v316-fullsync/cache/exploration-reports.md]
+branch: upstream-v316-fullsync
+worktree: D:\worktree\fullsync
+base_sha: 1ff8cad9
+head_sha: 1ff8cad9
+dag_version: 1
+wave_plan:
+  - [impl-i18n]                    # Step 1+2：键级挑拣脚本+合并+断言+仲裁表+报告
+  - [verify-i18n]                  # T-I1/T-I2 复跑+抽查（executor: main 轻量）
+  - [cr-func-i18n]
+  - [impl-c1a, impl-c1b]           # Step 3 外提(main)；Step 4 组件+ModelConfigSelect(subagent)
+  - [impl-c1c]                     # Step 5 V4ComposerToolbar 接线+i18n 4 键（main）
+  - [verify-c1]                    # T-CP1/T-CP2
+  - [cr-func-c1]
+  - [impl-c2]                      # Step 6+7：装配统一+hydrator+新测试（subagent）
+  - [verify-c2]                    # T-AS1/2/3（MC 全套）
+  - [cr-func-c2]
+  - [impl-vps-a]                   # Step 9 sqlite-migrations+exports+architecture-policy
+  - [impl-vps-b]                   # Step 10 存储7目录+host挂载+测试重写（依赖 vps-a）
+  - [impl-vps-c]                   # Step 11+12 迁移追加+includeArchived 9 文件（同 migrations.ts 串行）
+  - [verify-vps]                   # T-VS1-4
+  - [cr-func-vps]
+  - [impl-vui-a]                   # Step 13 壳层融合
+  - [impl-vui-b, impl-vui-c]       # Step 14 组件 omz 化；Step 15 workbench 消解（文件不相交）
+  - [verify-vui]                   # T-VU1（T-VU2 manual_user 挂账）
+  - [cr-func-vui]
+  - [impl-r3-1]                    # Step 16 daemon 地基
+  - [verify-r3-1]                  # T-RM1（T-RM3 manual 挂账）
+  - [cr-func-r3-1]
+  - [impl-r3-2]                    # Step 17 连接核心+registry 状态机（B5 吞并）
+  - [verify-r3-2]                  # T-RM2（T-RM4 manual 挂账）
+  - [cr-func-r3-2]
+  - [impl-r3-3]                    # Step 18 UX/身份/alias
+  - [impl-r3-retire]               # Step 19 deployServer 退役（blocking: no）
+  - [verify-r3-3, cr-func-r3-3]
+  - [impl-ts-equivalence, impl-relay-cleanup]  # Step 20a 缝推演文档；Step 20c relay v1 清理（不相交）
+  - [impl-ts-impl]                 # Step 20b ToolSearch 搬入（依赖 20a 通过）
+  - [verify-ts]                    # T-TS1/2+MC 全套复跑
+  - [cr-func-ts-relay]             # 含 T-RV1
+  - [gates]                        # Step 21 T-G1 全门禁聚合（executor: main）
+node_status: {}
+open_must_fix: []
+spec_deviations: []
+manual_user_pending: []            # T-CP3/T-VU2/T-RM3/T-RM4 真机项随各 phase 挂账
+blocking_steps: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20a,20b,20c,21]  # 19 blocking:no
+notes: >
+  工作树引导（2026-10-23）：git worktree add --no-checkout -b upstream-v316-fullsync main
+  （注意：本地 main ref=e34ab16a 未 ff，reset --hard origin/main=1ff8cad9 修正）→ robocopy
+  /XD .git node_modules .reference .turbo（31495 文件）→ 分批 git checkout 还原 robocopy
+  带来的主检出脏文件 268（含 untracked 垃圾误入批次，过滤状态码修复）→ 删主检出垃圾
+  → pnpm install 23.5s（shared store）。上游快照不在工作树内：用绝对路径
+  D:\Dev\Js\oh-my-zcode\.reference\ZCode（@3c5b2276）。
