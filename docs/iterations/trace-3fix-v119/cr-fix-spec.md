@@ -4,10 +4,10 @@
 
 - repo: D:\Dev\Js\oh-my-zcode
 - base_sha: b952d749（v1.0.18 发布点）
-- head_sha: 95bb4ecb（分支 trace-3fix-v119）
+- head_sha: 本文件最新提交（实现基线 95bb4ecb）
 - prd_path / spec_path: 未提供（真机反馈三修复，需求=用户拍板三条）
-- review_round: 1 / dag_version: 1
-- 状态: fix-spec-ready
+- review_round: 3 / dag_version: 2（CR diff 评审 1 轮 + spec-check r1/r2 doc-fix）
+- 状态: draft（待 spec-check r3 复验）
 
 需求基线（用户拍板）：
 
@@ -23,10 +23,10 @@
 - 文件：packages/ui/src/hooks/useModelTrajectory.ts（现状 :21-22, :56-70, :115-122）
 - 问题：`startModelSwitch` / `updateModelSwitchStage` / `finishModelSwitch` 全仓零调用点（仅类型声明 + 实现，grep 实锤），`modelSwitchStage` 恒 "idle"，"非 idle→idle 转变 refresh" 永不发生。
 - 改法：
-  1. 移除 modelSwitchStage 订阅 effect 与相关 import（selectWorkspaceZCodeSessionStore 部分的 selectWorkspaceZCodeState/useZCodeSessionStore）。
-  2. 改订阅**活的**运行时换代信号：`zcodeAgentService.onAgentRuntimeRestarted` 事件 → `refresh()`。接线形态参照 `packages/ui/src/hooks/useSkills.ts:54,63-68` 同款用法（事件回调里按 `event.workspaceKey === (workspaceIdentity?.trim() || workspacePath)` 过滤本 workspace）。获取 service 用既有 `useServices()`（或经 services accessor），注意在 effect cleanup 里退订。
-  3. 注释写明自愈机制全景：「恢复路径 = ①empty/error 双路径退避重试（P1-2/P2-3，有界 3×5s）②onAgentRuntimeRestarted → refresh（runtime 重启后代际切换，含 custom provider 恢复分支）③手动刷新（refresh 重置预算，P1-3）」。**不得**写「服务换代由 zcodeTaskService 引用变化触发」——`useZCodeTaskService` 走 WeakMap 缓存代理（useZCodeTaskService.ts:304-310），renderer 侧引用稳定，该陈述不成立（r1 P1-D 实证）。
-- 边界（如实登记）：常规换模型（`dispatchConfigCas("switchModelConfig")`，SessionPane.tsx:2882）不重启运行时、不触发 ②；其空白窗口由 ①③ 覆盖（≤15s 有界退避 + 手动刷新）。`restartWorkspaceProcess` 仅 custom provider 恢复分支（:2951）调用，恰走 ②。
+  1. 移除 modelSwitchStage 订阅 effect 与相关 import（`@/store/zcodeSessionStore.js` 的 `selectWorkspaceZCodeState` / `useZCodeSessionStore`，r2 P2-8 修正模块名）。
+  2. 改订阅**活的**运行时换代信号：`zcodeAgentService.onAgentRuntimeRestarted` 事件 → `refresh()`。接线形态参照 `packages/ui/src/hooks/useSkills.ts:54,63-68` 同款用法（事件回调里按 `event.workspaceKey === (workspaceIdentity?.trim() || workspacePath)` 过滤本 workspace）。**service 获取口径写死（r2 P1-4）：`useWorkspaceServices(workspacePath, undefined, workspaceIdentity).zcodeAgentService`——与 useZCodeTaskService（useZCodeTaskService.ts:297-299）同源解析的 workspace 作用域 services；禁止裸 `useServices()`（断连代理下该事件返回空订阅，② 会静默失效，见 useWorkspaceServices.tsx:35-37）**。在 effect cleanup 里退订。
+  3. 注释写明自愈机制全景：「恢复路径 = ①empty/error 双路径退避重试（P1-2/P2-3，有界 3×5s）②onAgentRuntimeRestarted → refresh（runtime 重启后代际切换）③手动刷新（refresh 重置预算，P1-3）」。**不得**写「服务换代由 zcodeTaskService 引用变化触发」——`useZCodeTaskService` 走 WeakMap 缓存代理（useZCodeTaskService.ts:304-310），renderer 侧引用稳定，该陈述不成立（r1 P1-D 实证）。
+- 边界（如实登记，r2 P1-3 修正）：常规换模型（`dispatchConfigCas("switchModelConfig")`，SessionPane.tsx:2882）不重启运行时、不触发 ②；其空白窗口由 ①③ 覆盖（≤15s 有界退避 + 手动刷新）。`restartWorkspaceProcess` 有**两处**调用：SessionPane.tsx:2951（custom provider 恢复）与 useWorkspaceSessionReload.ts:87（会话重建），两处均重启运行时、均触发 ②。
 - 验收：useModelTrajectory.ts 无 store 订阅残留；typecheck 绿；custom provider 换模型（runtime 重启）后面板无需手动刷新即恢复。
 - 来源：review r1（agent_ac3b05b0）/ spec-check r1 P1-D（agent_51b522d2）
 
@@ -36,7 +36,7 @@
 - 文件：packages/ui/src/hooks/useModelTrajectory.ts；参照 packages/services/src/zcode-agent/modelTrajectory.ts:46-99
 - 问题：`readModelTrajectory` 对目录不存在（:49-53）、读文件错误（:70-73）catch 后 continue、对 `sessionId !== taskId` 过滤（:88）——这些"读不到"路径返回 `records: []` 而非 reject。重试只挂在 `.catch`，empty 态永不重试，钉死在 EmptyState。这正是"换模型后面板空白"的主形态。
 - 改法（预算语义必须按此执行，r1 P1-B：现码 `.then` 顶部无条件 `retryCountRef.current = 0`，照旧写法=空响应无限重试死循环）：
-  1. `.then` 分支：`retryCountRef.current = 0` **只在 `records.length > 0` 的成功分支执行**；`records.length === 0` 视同 error 路径——不重置预算、消耗一次预算并排 5s 退避重试、预算未耗尽时不落 empty 终态（保持 loading，见 P2-3）。
+  1. `.then` 分支：`retryCountRef.current = 0` **只在 `records.length > 0` 的成功分支执行**；`records.length === 0` 视同 error 路径——不重置预算、消耗一次预算并排 5s 退避重试、预算未耗尽时不落 empty 终态（保持 loading，见 P2-3）。**empty/error 的自动重试一律经 `setReloadToken` 触发，禁止经 `refresh()`**（r2 P2-1：refresh 按 P1-3 会重置预算，经它重试=无限循环）。
   2. 预算耗尽后正常落 empty/error 终态。
   3. 判定逻辑全部走 P2-4 抽取的纯函数（success/empty/error 三分支统一入口），禁止在 hook 里二次实现预算判定。
 - 合法空 task（真零调用）会经历至多 3×5s loading 后停在 empty——可接受（新 task 极少打开轨迹面板）。
@@ -58,16 +58,16 @@
 - 文件：packages/ui/src/ModelTrajectoryPane.tsx:126-148（toggleTurnExpansion / willExpandAll）+ :130-132 注释 + :149-165（handleToggleExpansionKind）
 - 问题：v1.0.18 行默认展开时「全部展开」实际呈现全部内容；默认收起后只写 turn 槽 → 回合开、行收起，与 i18n「全部展开」文案及用户预期直接冲突。
 - 改法（OQ-1 拍板：全部展开=展开所有内容；r1 P1-C：`toggleTurnExpansion` 是「工具栏按钮 + 菜单回合项」**两入口共用**写路径（Pane:130-132 注释明示），批量写全部槽必须先拆入口，否则菜单「回合」开关会连带翻转用户逐类设置）：
-  1. **拆入口**：工具栏「全部展开/收起」按钮（经 `toggleTurnExpansion`）批量写**全部**命令槽（turn + 6 个非 turn）为 `{expanded: 目标态, version: 同一递增 version}`；菜单「回合」项（`handleToggleExpansionKind("turn")` 路径）保持**只写 turn 槽**（回合级语义）。同步修正 Pane:130-132「唯一写入口」注释为「工具栏全量入口 + 菜单按类入口」双写者表述。
+  1. **拆入口**：工具栏「全部展开/收起」按钮（经 `toggleTurnExpansion`）批量写**全部**命令槽（turn + 6 个非 turn）。**目标态定义（r2 P1-1）：7 槽是否全展开的取反**——全展开 → 收起；任一槽未展开 → 展开；7 槽写同一 `{expanded: 目标态, version: 同一递增 version}`。**按钮 label/图标口径同步改为按全部槽聚合判定**（`willExpandAll` 从单看 `turn.expanded` 改为 7 槽全展开才显示「全部收起」）。菜单「回合」项（`handleToggleExpansionKind("turn")` 路径）保持**只写 turn 槽**（回合级语义）。同步修正 Pane:130-132「唯一写入口」注释为「工具栏全量入口 + 菜单按类入口」双写者表述。
   2. 版本覆盖机制（r1 P2-B：Expansion.ts:88-89 JSDoc 把优先级写反了，实现以 :114-117 为准）：**命令 version 新于 per-row override 记录的 commandVersion 时以命令为准**——批量 toggle 后再单独收起某行（写 override、commandVersion=当前），下次全量 toggle 因 version 递增而重新覆盖。
   3. 「turn override 清理」逻辑不变（Pane 只重置 `turn:` 命名空间的 override，非 turn 行 override 不动）。
-- 验收：①点「全部展开」→ 所有回合内消息行与配对卡均展开（DOM 可见 content）；点「全部收起」全收起；②收起某行 → 工具栏连点两次（收起→展开），末态该行展开（version 递增覆盖 per-row override）；③「自定义展开」菜单「回合」项只翻转回合级、不连带改其它类开关。
-- 来源：review r1 / spec-check r1 P1-C、P2-B、P2-C / OQ-1 拍板 a 方案
+- 验收：①点「全部展开」→ 所有回合内消息行与配对卡均展开（DOM 可见 content）；点「全部收起」全收起；混合态用例：菜单单独开「回合」后（非 turn 槽仍收起）点工具栏 → 目标态为展开其余 6 槽、turn 保持展开；②先点「全部展开」，再收起某行 → 工具栏连点两次（收起→展开），末态该行展开（version 递增覆盖 per-row override）；③「自定义展开」菜单「回合」项只翻转回合级、不连带改其它类开关。
+- 来源：review r1 / spec-check r1 P1-C、P2-B、P2-C；spec-check r2 P1-1、P2-6 / OQ-1 拍板 a 方案
 
 ### P1-5 [P1] 搜索多命中：非 active 命中正文不在 DOM → 无高亮、计数与可见高亮不一致
 
 - 维度：A / G
-- 文件：packages/ui/src/ModelTrajectoryPane.tsx:361-366（reveal 上下文单键）；ModelTrajectoryExpansion.ts:77-83（useTrajectorySearchRevealed 单键比对）；ModelTrajectorySearchHighlight.ts:38-46, 78-99（getMatchRange 选段）；ModelTrajectoryExpandableMessage.tsx:146（折叠预览 content 字段）
+- 文件：packages/ui/src/ModelTrajectoryPane.tsx:361-366（reveal 上下文单键）；ModelTrajectorySearch.ts:75,82（两个 RevealContext 类型声明处，r2 P2-4 补）；ModelTrajectoryExpansion.ts:77-83（useTrajectorySearchRevealed 单键比对）；ModelTrajectorySearchHighlight.ts:38-46, 78-99（getMatchRange 选段）；ModelTrajectoryExpandableMessage.tsx:146（折叠预览 content 字段）
 - 问题（两层，r1 P1-A：只改 reveal 集合不够，高亮**选段**还会落在隐藏预览上）：
   1. reveal 层：默认收起后仅 active 命中被强制展开，其余命中行收起 → content 搜索字段不在 DOM → 无高亮；搜索计数来自索引不受影响 → "命中 N 处只见 1 处高亮"。
   2. 选段层：非 active 命中走 `getMatchRange(root, query, match, /* preferExpanded */ false)`，fields 按 DOM 顺序收集——折叠预览 span（ExpandableMessage:146，展开时被 `group-data-[state=open]:hidden` 隐藏）排在展开内容前，预览文本含查询词时 `ranges[0]` 命中**隐藏**预览 → 高亮不可见且 fieldMatchIndex 跨两段文本错位。active 命中正常只因它单独传了 `preferExpanded=true`。
@@ -78,14 +78,14 @@
 - 验收：搜索命中 ≥2 处时全部命中行展开且**非 active 命中的高亮可见**（不落在折叠预览行）；next/prev 时 active 强调跟随移动。
 - 来源：review r1 / spec-check r1 P1-A / OQ-3 拍板 a 方案
 
-### P2-1 [P2] 注释漂移：仍写「6 行封顶」
+### P2-1 [P2] 注释漂移：仍写「6 行封顶」+ Expansion JSDoc 优先级写反
 
 - 维度：F / C
-- 文件：packages/ui/src/ModelTrajectoryCallInput.tsx:232-234；packages/ui/src/ModelTrajectoryClampedPreview.tsx:71（r1 P2-A：同文件 :98/:101 已是 1lh，:71 仍写「6lh 钳住的盒子」）
-- 问题：注释仍描述 6lh clamp，实现已改 1lh。
-- 改法：两处均改为「单行截断（max-h-[1lh]）+ 搜索命中解除 clamp」口径。
-- 验收：注释与 ClampedPreview 实现一致，全文件无 6lh 残留表述。
-- 来源：review r1 / spec-check r1 P2-A
+- 文件：packages/ui/src/ModelTrajectoryCallInput.tsx:232-234；packages/ui/src/ModelTrajectoryClampedPreview.tsx:71（r1 P2-A：同文件 :98/:101 已是 1lh，:71 仍写「6lh 钳住的盒子」）；packages/ui/src/ModelTrajectoryExpansion.ts:88-90（r2 P2-3：JSDoc 优先级「面板 override > 命令版本 > 局部状态」与实现 :114-117 相反，一并修正为「命令 version 新于 override 的 commandVersion 时以命令为准」）
+- 问题：注释仍描述 6lh clamp（实现已改 1lh）；Expansion 优先级注释与实现相反。
+- 改法：前两处改为「单行截断（max-h-[1lh]）+ 搜索命中解除 clamp」口径；第三处按实现改写优先级表述。
+- 验收：本次涉及文件（CallInput.tsx、ClampedPreview.tsx）内无 6lh 残留表述；路径 A 与配对卡两格的 6lh 属既有设计、不在本次范围（r2 P2-2 限定）；Expansion JSDoc 与 :114-117 实现一致。
+- 来源：review r1 / spec-check r1 P2-A、r2 P2-2、P2-3
 
 ### P2-2 [P2] useTrajectoryExpansion 默认 defaultOpen=true 成反向陷阱
 
@@ -112,18 +112,19 @@
 - 问题：本批唯一逻辑变更（自愈重试）无自动化覆盖；useModelTrajectory.ts 含 React 依赖不可 node:test 直测。
 - 改法：抽纯函数，签名与返回**显式定义**（r1 P2-I）：
   ```ts
-  interface TrajectoryRetryInput {
+  export interface TrajectoryRetryInput {
     kind: "success" | "empty" | "error";
     retryCount: number; // 当前已消耗预算
     limit: number; // ERROR_RETRY_LIMIT
   }
-  interface TrajectoryRetryDecision {
+  export interface TrajectoryRetryDecision {
     resetBudget: boolean; // 仅 success（非空成功）为 true
     retry: boolean; // 本次是否排退避重试
     terminal: boolean; // 本次是否落终态（empty/error 终态）
   }
   export function decideTrajectoryRetry(input: TrajectoryRetryInput): TrajectoryRetryDecision;
   ```
+  （r2 P2-5：两个 interface 均 export，测试侧构造入参。）
   语义：success → `{resetBudget:true, retry:false, terminal:false}`；empty/error 且 retryCount < limit → `{resetBudget:false, retry:true, terminal:false}`（保持 loading）；retryCount ≥ limit → `{resetBudget:false, retry:false, terminal:true}`。hook 的 success/empty/error **三分支都走它**，禁止 hook 内二次实现预算判定（这是 P1-2 死循环的结构性防线）。
   测试用例 ≥6：矩阵全覆盖（含「连续 empty 不重置预算、第 limit+1 次空读落 empty 终态」），登记进根 package.json `test:v4-perf` 聚合（参照 ModelTrajectoryClamp.ts + 既有测试登记形态）。
 - 验收：测试用例 ≥6 通过并进聚合。
@@ -145,7 +146,7 @@
 
 ## 合并后 QA（manual_user）
 
-1. 换模型后轨迹面板自动恢复（不手动点刷新）。custom provider 路径（runtime 重启）即时恢复；常规换模型的读取窗口由 ≤15s 有界退避覆盖，窗口外可手动刷新恢复（边界见 P1-1）。
+1. 换模型后轨迹面板自动恢复（不手动点刷新）。custom provider 换模型（runtime 重启，SessionPane 路径）与会话重建（useWorkspaceSessionReload 路径）均即时恢复；常规换模型的读取窗口由 ≤15s 有界退避覆盖，窗口外可手动刷新恢复（边界见 P1-1）。
 2. 轨迹默认全折叠：回合收起；点开回合=单行行列表（消息行单行预览、配对卡单行头部）；点行/卡展开。
 3. 助手思考/长内容单行截断；「查看全文」与全屏可用。
 4. 「全部展开/收起」展开所有内容（非仅回合壳）；「自定义展开」菜单「回合」项只翻转回合级、不连带其它类（P1-4 验收③）。
@@ -156,18 +157,18 @@
 ## K 节建议（下游执行时闭合）
 
 1. CHANGELOG v1.0.19：三条用户可见变化 + 显式行为变更标注（消息行/配对卡此前默认展开）。
-2. `docs/iterations/trace-nm-borrow/spec.md` 失效标注——锚点全集（r1 P2-D）：`:101`（非 turn 命令初始 open=true）、`:104`（两格 max-h-[6lh]）、`:110`（路径 A max-h-[6lh]）、`:189`（N-2 默认展开）、`:192`（N-5 clamp 6lh），统一标「v1.0.19 起默认收起/单行截断，用户拍板」。
-3. 门禁：根 typecheck、lint、fmt:check、test:v4-perf（455+新增全绿）、architecture:check --changed。
-4. DOM 级 e2e 不新增（本批 DOM 态靠 manual 清单 1-6 覆盖，登记留痕）。
+2. `docs/iterations/trace-nm-borrow/spec.md` 失效标注——**失效锚点集合（r2 P1-2 修正，r1 版把仍成立的标了）**：`:101`（非 turn 命令初始 open=true）、`:112`（路径 B TrajectoryClampedPreview 6lh→1lh）、`:14` 的「收紧到 6 行」口径部分、`:189` 中「默认展开」部分、`:192` 中路径 B clamp 部分。**保留不标**：`:104`（配对卡两格 6lh——ToolPairCard.tsx:356 仍成立）、`:110`（路径 A 6lh——ExpandedContent.tsx:144 仍成立）。
+3. 门禁：根 typecheck、lint、fmt:check、test:v4-perf（455+新增全绿）、architecture:check --changed。Pane.tsx 现约 380/400 行（oxlint max-lines 400），P1-4 拆入口若触线，把批量写逻辑下沉到 `ModelTrajectoryExpansion.ts`（r2 P2-9）。
+4. DOM 级 e2e 不新增（本批 DOM 态靠 manual 清单 1-7 覆盖，登记留痕）。
 
 ## Fix-Spec Closure
 
 | 项 | 状态 |
-| fix-spec-ready | yes |
+| fix-spec-ready | yes（r2 doc-fix 后，待 r3 复验） |
 | fix_spec_path | docs/iterations/trace-3fix-v119/cr-fix-spec.md |
-| dag_version / review_round | 1 / 1（diff 单轮模式） |
-| P0 / P1 / P2（已写入） | 0 / 5 / 4 |
+| dag_version / review_round | 2 / 2（diff 评审 1 轮 + spec-check 2 轮） |
+| P0 / P1 / P2（已写入） | 0 / 5 / 4（r1 全并入；r1/r2 审查追加项已并入各条改法与验收） |
 | 未写入的开放 must-fix | 0 |
 | spec_deviations | none |
-| C-orch | ✅（P1-1 死通道收敛） |
-| C 类合并后 QA | manual 1-6 |
+| C-orch | ✅（P1-1 死通道收敛 + P1-4 拆入口） |
+| C 类合并后 QA | manual 1-7 |
