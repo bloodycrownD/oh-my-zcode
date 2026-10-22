@@ -37,6 +37,8 @@ import type {
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import { getTasksIndexDatabasePath } from "#src/paths.js";
 import { runTasksDatabaseMigrations } from "#src/session/tasksDatabase/migrations.js";
+import { projectStorage } from "#src/project-storage/index.js";
+import type { ProjectRepositoryContract } from "#src/project-storage/contract.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -579,6 +581,21 @@ export class TaskIndexRepo {
       throw new Error("task index sqlite 尚未初始化");
     }
     return this.db;
+  }
+
+  /**
+   * 组织库原始句柄（upstream-v316-fullsync P4 对齐上游同名方法）：project-storage 与
+   * task-groups 仓库共用 tasks-index sqlite；先 ensureReady 保证迁移完成，再交付连接。
+   */
+  async getOrganizationDatabase(): Promise<DatabaseSyncInstance> {
+    await this.ensureReady();
+    return this.getDatabase();
+  }
+
+  /** 项目树仓库工厂（对齐上游 getProjectRepository）；本机 Host 持库身份固定 local。 */
+  async getProjectRepository(): Promise<ProjectRepositoryContract> {
+    await this.ensureReady();
+    return projectStorage.repository(this.getDatabase(), "local");
   }
 
   private writeKey(params: {

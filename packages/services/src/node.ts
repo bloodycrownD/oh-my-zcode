@@ -10,7 +10,7 @@ import {
   NodeModelSelectionConfigRepository,
   PERSONAL_PROVIDER_CONFIG_FILE_NAME,
 } from "@zcode/provider-node";
-import { getAppConfigDir as resolveAppConfigDir } from "./paths.js";
+import { getAppConfigDir as resolveAppConfigDir, getZCodeDataRootDir } from "./paths.js";
 import {
   buildLocalMediaPreviewUrl,
   isProviderProvisioningAccountCredentialKey,
@@ -269,6 +269,10 @@ import { createZCodeTaskServiceAdapter } from "./zcode-agent/zcodeTaskServiceAda
 import { createZCodeSessionService } from "./zcode-session/zcodeSessionService.js";
 import { createZCodeTaskIndexSyncer } from "./zcode-agent/zcodeTaskIndexSyncer.js";
 import { TaskIndexRepo } from "./session/taskIndexRepo.js";
+import { createProjectService } from "./project/index.js";
+import { IProjectService } from "./project/contract.js";
+import { createTaskGroupService, groupTaskKey } from "./task-groups/index.js";
+import { ITaskGroupService } from "./task-groups/contract.js";
 import { createBotsService } from "./bots/botsService.js";
 import { createBotRemoteWorkspaceService } from "./bots/botRemoteWorkspaceBridge.js";
 import type { SessionMessageSendRequested } from "#src/session/sessionMailbox.js";
@@ -1748,9 +1752,32 @@ export function createLocalServices(options: {
       }
     },
   };
+  // 虚拟项目服务（upstream-v316-fullsync P4 拍板①）：zcodeAgent 三选项需要闭包引用，
+  // 而目录读取依赖的 fileService 在 zcodeAgentService 之后才创建——实例延后到 fileService
+  // 就绪处装配；三个选项都是运行期调用，构造期不解引用，TDZ 安全。
+  let projectService: IProjectService;
+  let taskGroupService: ITaskGroupService;
   const zcodeAgentService = createZCodeAgentService({
     ...(modelSelectionReadinessSource ? { modelSelectionReadinessSource } : {}),
     authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
+    // 虚拟项目执行预解析三选项（omz 本机 Host 持库身份固定 local，无跨 Host 路由面）。
+    prepareProjectExecution: async (projectId) => ({
+      ...(await projectService.prepareSession({ projectId })),
+      hostId: "local",
+      workspaceIdentity: undefined,
+    }),
+    prepareSessionCreation: async (target) =>
+      (
+        await taskIndexRepo.getProjectRepository()
+      ).reserveCreatedTask({
+        task: { ...target, taskId: target.sessionId },
+        projectId: target.projectId,
+        additionalDirectories: target.additionalDirectories,
+      }).additionalDirectories,
+    resolveSessionDirectories: async (target) =>
+      (
+        await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId })
+      ).additionalDirectories,
     // FORK（D-20）：动态工作流远端灰度已下线，改读本地默认（alwaysOn，可用
     // ZCODE_DYNAMIC_WORKFLOW_MODE 覆盖）。这里不按 serviceAuthorityMode 裁剪——
     // SSH/WSL/Docker 的 desktop-attached-remote Host 是它自己那些 workspace 的唯一裁决者。
@@ -1979,6 +2006,41 @@ export function createLocalServices(options: {
   const fileService = createFileService({
     workspaceFileSearchFilter: options?.workspaceFileSearchFilter,
   });
+  // 虚拟项目服务装配（upstream-v316-fullsync P4 拍板①）：本机 Host 唯一持库（ownerHostId
+  // 缺省 local），无跨 Host resolveHost 路由面（随 R3 三期回补）。设置投影
+  // （上游 setWorkspaceProjection → projectWorkspaceSettings）omz 未搬，变更通知只发广播。
+  const publishProjectChange = async () => {
+    await broadcastService.send({ channel: "state:projects", payload: {} });
+  };
+  projectService = createProjectService({
+    directories: {
+      home: async () => (await systemService.info()).homedir,
+      read: (params) => fileService.readdir(params),
+    },
+    repository: () => taskIndexRepo.getProjectRepository(),
+    workspaceDirectory: join(getZCodeDataRootDir(), "workspace"),
+    afterChange: publishProjectChange,
+  });
+  taskGroupService = createTaskGroupService({
+    database: () => taskIndexRepo.getOrganizationDatabase(),
+    resolveTasks: async (refs) => {
+      // 只读本机权威目录；项目路由不为分组建立连接或启动 Agent。
+      const tree = await projectService.readTree({ includeDeletedTasks: true });
+      const facts = new Map(
+        [
+          ...tree.tasks,
+          ...(tree.deletedTasks ?? []).map((task) => ({ ...task, deleted: true })),
+        ].map((task) => [groupTaskKey(task), task]),
+      );
+      return refs.flatMap((ref) => {
+        const fact = facts.get(groupTaskKey(ref));
+        return fact && fact.hostId === ref.hostId && fact.workspacePath === ref.workspacePath
+          ? [{ ...fact, ...ref }]
+          : [];
+      });
+    },
+    afterChange: () => broadcastService.send({ channel: "state:task-groups", payload: {} }),
+  });
   const mediaPreviewService = createMediaPreviewService({
     fileService,
     authorizeLocalMediaPreviewPath: options?.authorizeLocalMediaPreviewPath,
@@ -2001,6 +2063,10 @@ export function createLocalServices(options: {
     .register(IZCodeTaskService, zcodeTaskService)
     .register(IZCodeAgentService, zcodeAgentService)
     .register(IZCodeSessionService, zcodeSessionService)
+    // 虚拟项目两服务（upstream-v316-fullsync P4 拍板①）：注册即经 exposeOnChannelServer
+    // 自动暴露 project / task-groups 通道；RemoteServiceAccess 侧 getter 对应补齐。
+    .register(IProjectService, projectService)
+    .register(ITaskGroupService, taskGroupService)
     .register(ICuaPermissionService, cuaPermissionService)
     .register(ICuaPipSessionService, cuaPipSessionService)
     .register(

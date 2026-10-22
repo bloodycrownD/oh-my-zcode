@@ -156,6 +156,8 @@ export interface ZCodeAgentSessionTarget extends ZCodeAgentWorkspaceTarget {
 }
 
 export interface ZCodeAgentResumeSessionParams extends ZCodeAgentSessionTarget {
+  /** 虚拟项目附加目录（upstream-v316-fullsync P4）；缺省由 Host 经 resolveSessionDirectories 解析。 */
+  additionalDirectories?: string[];
   model?: ModelSelection;
   thoughtLevel?: string;
   mcpServers?: ZCodeAgentMcpServer[];
@@ -200,6 +202,13 @@ export type ZCodeAgentCuaPermissionObservation = CuaPermissionObservation &
   ZCodeAgentWorkspaceTarget;
 
 export interface ZCodeAgentCreateSessionParams extends ZCodeAgentWorkspaceTarget {
+  /**
+   * 虚拟项目归属（upstream-v316-fullsync P4）。仅 Host 消费：undefined=沿用活动 workspace；
+   * 显式 null=无项目全局任务；非空=Host 经 prepareSessionCreation 预解析目录后再创建。
+   */
+  projectId?: string | null;
+  /** 虚拟项目附加目录；缺省由 Host 经 prepareSessionCreation 解析。 */
+  additionalDirectories?: string[];
   sessionId?: string;
   sessionTraceId?: TraceId;
   parentSessionId?: string;
@@ -518,6 +527,8 @@ export interface ZCodeAgentConversationFileRewindPreviewParams extends ZCodeAgen
 }
 
 export interface ZCodeAgentConversationCommandParams extends ZCodeAgentWorkspaceTarget {
+  /** 仅 Host 消费；显式 NULL 表示全局任务，不向 CLI 发送项目概念。 */
+  projectId?: string | null;
   envelope: CommandEnvelope;
   /** 仅 host 内部用于 Browser Use runtime 边界，不进入 v4 wire envelope。 */
   clientMode?: ZCodeTaskClientMode;

@@ -3,7 +3,7 @@ import { sessionDebugSnapshotSchema ,
   zcodeMcpRefreshSessionsResultSchema,
 } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
-import { randomUUID } from "node:crypto";
+import { randomUUID, createHash } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
@@ -19,6 +19,7 @@ import {
   formatLogPrefix,
   resolveWorkspaceKey,
   type TraceId,
+  type ProjectExecutionSnapshot,
   ZCODE_AGENT_PROVIDER,
   ZCODE_AGENT_PROVIDER_NOT_READY_CODE,
   ZCODE_AGENT_PROVIDER_NOT_READY_REASON,
@@ -620,6 +621,11 @@ function buildSessionCreateParams(
     parentSessionId: params.parentSessionId,
     mode: params.mode,
     model: params.model,
+    // 虚拟项目附加目录（upstream-v316-fullsync P4）：createSession 入口已经过
+    // prepareSessionCreation 预解析，这里只透传；undefined 时不写字段保持旧 wire 形状。
+    ...(params.additionalDirectories !== undefined
+      ? { additionalDirectories: params.additionalDirectories }
+      : {}),
     ...(params.persistence !== undefined && !omittedFields.has("persistence")
       ? { persistence: params.persistence }
       : {}),
@@ -662,6 +668,10 @@ function buildSessionResumeParams(
   return {
     sessionId: params.sessionId,
     workspace: buildWorkspaceRef(params),
+    // 虚拟项目附加目录：resumeSession 入口已经过 resolveSessionDirectories 解析，这里只透传。
+    ...(params.additionalDirectories !== undefined
+      ? { additionalDirectories: params.additionalDirectories }
+      : {}),
     ...(params.thoughtLevel !== undefined && !omittedFields.has("thoughtLevel")
       ? { thoughtLevel: params.thoughtLevel }
       : {}),
@@ -831,6 +841,23 @@ interface CreateZCodeAgentServiceOptions extends Omit<
 > {
   /** 仅供 MCP 状态探测进程使用，不能把空闲回收传给 chat。 */
   mcpStatusIdleTimeoutMs?: number;
+  /**
+   * 虚拟项目执行预解析（upstream-v316-fullsync P4）：projectId 非空时解析归属项目目录，
+   * 空目录项目惰性初始化主 root；失败（project.not-found / primaryRootMissing）直接拒绝创建。
+   */
+  prepareProjectExecution?: (projectId: string) => Promise<ProjectExecutionSnapshot>;
+  /**
+   * 会话创建前的归属预写（reserveCreatedTask）：新任务行先落项目树，避免「任务已出现在
+   * 列表但尚未归属」。返回值作为 session 的附加目录随 create/resume 下发。
+   */
+  prepareSessionCreation?: (
+    target: ZCodeAgentSessionTarget & {
+      projectId: string | null;
+      additionalDirectories?: string[];
+    },
+  ) => Promise<string[]>;
+  /** 恢复/重订阅时按任务身份补齐附加目录；Host 缺省不注入时保持旧行为。 */
+  resolveSessionDirectories?: (target: ZCodeAgentSessionTarget) => Promise<string[]>;
   /** Desktop Host 请求 Main 登记 Agent 已授权的精确本地视频路径。 */
   authorizeLocalMediaPreviewPath?: (path: string) => Promise<string>;
   modelSelectionReadinessSource?: ModelSelectionReadinessSource;
@@ -2549,9 +2576,36 @@ export function createZCodeAgentService(
     if (envelope.type === "createSession") {
       // V4 createSession 绕过 legacy session/create 的参数构造，工具面 flag 必须在
       // 信封处同源注入；门禁 false 时不写字段（缺省即 fail-closed，与 legacy 一致）。
+      // 注意：不能在 parse 前按灰度早退——虚拟项目的 sessionId/附加目录无论灰度都必须落信封。
       const dynamicWorkflowEnabled = await resolveDynamicWorkflowGate();
-      if (!dynamicWorkflowEnabled) return envelope;
       const payload = commandPayloadSchemas.createSession.parse(envelope.payload);
+      // 虚拟项目归属（upstream-v316-fullsync P4）：带 projectId 或装配了 prepareSessionCreation
+      // 时按 workspaceKey+clientId+commandId 派生稳定 sessionId，重试/回包丢失不会重复预留归属。
+      const sessionId =
+        params.projectId !== undefined || options?.prepareSessionCreation
+          ? `session_${createHash("sha256")
+              .update(
+                JSON.stringify([
+                  resolveWorkspaceKey(params),
+                  envelope.clientId,
+                  envelope.commandId,
+                ]),
+              )
+              .digest("hex")
+              .slice(0, 32)}`
+          : payload.sessionId;
+      const additionalDirectories =
+        params.projectId !== undefined || options?.prepareSessionCreation
+          ? await options?.prepareSessionCreation?.({
+              ...params,
+              sessionId: sessionId!,
+              projectId: params.projectId ?? null,
+              additionalDirectories: payload.additionalDirectories,
+            })
+          : payload.additionalDirectories;
+      // 装配缺 prepareSessionCreation 时带 projectId 的创建直接拒绝，不能静默落成无归属任务。
+      if (params.projectId !== undefined && !options?.prepareSessionCreation)
+        throw new Error("project.creation-unavailable");
       return {
         ...envelope,
         payload: {
@@ -2559,6 +2613,8 @@ export function createZCodeAgentService(
           // 动态工作流灰度：V4 createSession 是桌面新会话的实际创建路径，不透传则九个工具
           // 永不注册。
           ...(dynamicWorkflowEnabled ? { dynamicWorkflowEnabled: true } : {}),
+          ...(sessionId ? { sessionId } : {}),
+          ...(additionalDirectories !== undefined ? { additionalDirectories } : {}),
         },
       };
     }
@@ -2673,6 +2729,24 @@ export function createZCodeAgentService(
     },
 
     async createSession(params: ZCodeAgentCreateSessionParams) {
+      // 虚拟项目归属预写（upstream-v316-fullsync P4）：先落 reserveCreatedTask 再创建，
+      // 避免「任务已出现在列表但尚未归属」。装配缺 prepareSessionCreation 时带 projectId
+      // 的调用直接拒绝，不能静默把项目任务落成无归属（与上游 project.creation-unavailable 同口径）。
+      if (options?.prepareSessionCreation) {
+        const sessionId = params.sessionId ?? `session_${randomUUID()}`;
+        const directories = await options.prepareSessionCreation({
+          ...params,
+          sessionId,
+          projectId: params.projectId ?? null,
+        });
+        params = {
+          ...params,
+          sessionId,
+          additionalDirectories: params.additionalDirectories ?? directories,
+        };
+      } else if (params.projectId !== undefined) {
+        throw new Error("project.creation-unavailable");
+      }
       const startedAt = Date.now();
       const client = await getClient(params);
       const sessionTraceId = params.sessionTraceId;
@@ -2778,6 +2852,13 @@ export function createZCodeAgentService(
     },
 
     async resumeSession(params: ZCodeAgentResumeSessionParams) {
+      // 虚拟项目附加目录补齐（upstream-v316-fullsync P4）：调用方未显式携带时按任务身份
+      // 现读归属；装配未注入 resolveSessionDirectories 时保持旧形状（不写字段）。
+      params = {
+        ...params,
+        additionalDirectories:
+          params.additionalDirectories ?? (await options?.resolveSessionDirectories?.(params)),
+      };
       const startedAt = Date.now();
       const client = await getClient(params);
       const cachedTraceId = getSessionTraceId(params);

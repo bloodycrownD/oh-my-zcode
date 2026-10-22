@@ -43,6 +43,11 @@ const createSessionRequestedConfigSchema = z.object({
 export const commandPayloadSchemas = {
   // firstInput 缺省 → phase=draft 空会话；携带 → 直接 turnHeader+userInput rows。
   createSession: z.object({
+    // Host 预留归属使用稳定 ID；CLI 仍负责拒绝覆盖既有会话。
+    sessionId: z.string().min(1).optional(),
+    // 虚拟项目附加目录（upstream-v316-fullsync P4）：Host 在信封处经 prepareSessionCreation
+    // 预解析后写入；renderer 不直接携带。旧 CLI 的 z.object 会静默丢弃该键（fail-closed）。
+    additionalDirectories: z.array(z.string().min(1)).max(256).optional(),
     workspaceId: z.string(),
     firstInput: z
       .object({

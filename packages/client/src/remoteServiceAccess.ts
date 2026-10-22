@@ -34,6 +34,8 @@ import {
   ISettingsSyncService,
   IPromptAttachmentTransferService,
   IWindowControllerService,
+  IProjectService,
+  ITaskGroupService,
   type IServiceAccessor,
 } from "@zcode/services";
 
@@ -80,6 +82,10 @@ export class RemoteServiceAccess implements IServiceAccessor {
   readonly memoryService: IMemoryService;
   readonly settingsSyncService: ISettingsSyncService;
   readonly promptAttachmentTransferService: IPromptAttachmentTransferService;
+  // 虚拟项目两通道（upstream-v316-fullsync P4 拍板①）：本地桌面 Host 已注册，lazy proxy
+  // 在此安全建代理；旧 server wire / 测试 double 无通道时 UI 仍按 accessor 可选缺席降级。
+  readonly projectService: IProjectService;
+  readonly taskGroupService: ITaskGroupService;
 
   constructor(channelClient: IChannelClient) {
     this.fileService = ProxyChannel.toService<IFileService>(
@@ -188,6 +194,12 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.promptAttachmentTransferService = ProxyChannel.toService<IPromptAttachmentTransferService>(
       channelClient.getChannel(IPromptAttachmentTransferService.channelName),
+    );
+    this.projectService = ProxyChannel.toService<IProjectService>(
+      channelClient.getChannel(IProjectService.channelName),
+    );
+    this.taskGroupService = ProxyChannel.toService<ITaskGroupService>(
+      channelClient.getChannel(ITaskGroupService.channelName),
     );
   }
 }

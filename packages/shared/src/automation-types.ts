@@ -200,3 +200,15 @@ export interface ZCodeAutomationUpdateParams {
   /** 仅由管理页在用户实际修改调度时写入；undefined=保留原来源状态。 */
   scheduleEditedByUser?: boolean;
 }
+
+/**
+ * 虚拟项目执行预解析快照（upstream-v316-fullsync P4：照搬上游 automation-types 同名类型）。
+ * Host 在创建任务前解析归属项目与附加目录；projectId=null 表示无项目全局任务。
+ */
+export interface ProjectExecutionSnapshot {
+  projectId: string | null;
+  hostId: string;
+  workspacePath: string;
+  workspaceIdentity?: string;
+  additionalDirectories: string[];
+}
