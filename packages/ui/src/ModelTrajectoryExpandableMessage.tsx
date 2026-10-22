@@ -67,9 +67,12 @@ export function ExpandableTrajectoryMessage({
           ? "tool-result"
           : role);
   // B-9：命令槽/面板 override/搜索命中的展开计算统一走回合外壳共用的 hook。
+  // v1.0.19：消息行默认收起（单行预览行），与配对卡/回合外壳一致——回合点开后
+  // 整屏单行行列表；点击行展开（内容 clamp + 查看全文），搜索命中仍强制展开。
   const { open, searchRevealed, handleOpenChange } = useTrajectoryExpansion({
     key: expansionKey,
     commandKind: resolvedVisualRole,
+    defaultOpen: false,
   });
 
   const handleCopy = () => {

@@ -21,7 +21,7 @@ type IntlShape = ReturnType<typeof useZCodeIntl>["intl"];
 /**
  * 输入区扁平行（assistant 等非折叠角色的消息行）的内容容器。
  *
- * - clamp：内容超过 6 行（max-h-[6lh]）时裁剪；
+ * - clamp：v1.0.19 起单行截断（max-h-[1lh]，与用户消息预览形态一致）；
  * - 搜索命中：本行被搜索命中时解除 clamp（否则高亮落在被裁区域里看不见）；
  * - 全屏入口：溢出后出现「查看全文」按钮，打开全屏只读 Modal（Step 5 接线）。
  */
@@ -95,9 +95,10 @@ export function TrajectoryClampedPreview({
         ref={contentRef}
         data-trajectory-clamped-content=""
         className={cn(
-          // text-ui-sm/leading-relaxed 让 max-h-[6lh] 的「6 行」与正文行高对齐。
+          // v1.0.19：单行截断（用户拍板「与用户消息同为单行」）——max-h-[1lh] 只露首行，
+          // 全文走「查看全文」全屏。text-ui-sm/leading-relaxed 与正文行高对齐。
           "flex min-w-0 flex-col gap-1.5 overflow-hidden text-ui-sm leading-relaxed",
-          !searchRevealed && "max-h-[6lh]",
+          !searchRevealed && "max-h-[1lh]",
         )}
       >
         {children}

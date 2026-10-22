@@ -34,9 +34,11 @@ export const TRAJECTORY_TURN_EXPANSION_KEY_PREFIX = "turn:";
 
 export function createTrajectoryExpansionCommands(): TrajectoryExpansionCommands {
   return Object.fromEntries(
-    // 回合外壳默认收起（与 useTrajectoryExpansion 的 defaultOpen 对齐），
-    // 消息行默认展开——命令初始值必须与各自的首屏展开态一致，否则菜单开关会与实际相反。
-    TRAJECTORY_EXPANSION_KINDS.map((kind) => [kind, { expanded: kind !== "turn", version: 0 }]),
+    // v1.0.19：全部默认收起（用户拍板「trace 中所有内容均折叠」）。
+    // 回合点开后是单行行列表（消息行单行预览、配对卡单行头部），点击展开；
+    // 「全部展开/收起」工具栏按钮与搜索命中强制展开不受默认值影响。
+    // 命令初始值必须与各自的首屏展开态一致，否则菜单开关会与实际相反。
+    TRAJECTORY_EXPANSION_KINDS.map((kind) => [kind, { expanded: false, version: 0 }]),
   ) as TrajectoryExpansionCommands;
 }
 
