@@ -398,9 +398,9 @@ function nonNegativeInteger(value: number, fallback: number): number {
  * 写一个 `magicContext: undefined` 的键在 JSON 序列化后同样消失，但在**内存**里会让
  * `usage.magicContext !== undefined` 判据说谎。宁可显式 spread。
  */
-function magicContextUsageField(
-  usage: SessionMagicContextUsage | undefined,
-): { magicContext?: SessionMagicContextUsage } {
+function magicContextUsageField(usage: SessionMagicContextUsage | undefined): {
+  magicContext?: SessionMagicContextUsage;
+} {
   return usage === undefined ? {} : { magicContext: usage };
 }
 

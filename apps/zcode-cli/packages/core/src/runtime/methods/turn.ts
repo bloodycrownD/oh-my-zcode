@@ -227,9 +227,15 @@ export async function executeTurnCommand(
         );
       }
       // FORK (upstream-v3.16-backport U4): 创建失败轮不会进入 model step，guide 无法被消费。
-      activeTurn = this.beginActiveTurn(turnId, turnTraceContext, "regular", creationFailure === undefined, {
-        ...(options?.inputId === undefined ? {} : { inputId: options.inputId }),
-      });
+      activeTurn = this.beginActiveTurn(
+        turnId,
+        turnTraceContext,
+        "regular",
+        creationFailure === undefined,
+        {
+          ...(options?.inputId === undefined ? {} : { inputId: options.inputId }),
+        },
+      );
       this.logger?.info("Turn started", {
         ...traceContextToLogContext(turnTraceContext),
         event: "turn.started",
@@ -254,7 +260,9 @@ export async function executeTurnCommand(
             options?.modelExecution,
             admittedModel,
           );
-      startedTarget = creationFailure ? null : await this.readSessionTargetForContext(turnTraceContext);
+      startedTarget = creationFailure
+        ? null
+        : await this.readSessionTargetForContext(turnTraceContext);
       completeTurnPhase("target_read", phaseStartedAt);
       if (startedTarget?.status !== "active") {
         startedTarget = null;

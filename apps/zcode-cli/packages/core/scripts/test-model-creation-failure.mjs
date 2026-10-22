@@ -145,8 +145,8 @@ test("T-C4: 模型创建失败 → TurnStarted + 用户消息落库 + model_crea
 
   // 断言 1：TurnStarted 已发（事件同时进了 appendEvent 与 events 推送链——
   // 桩里两条链都落 recorder.createdEvents/recorded append；按 type 断言）。
-  const turnStarted = recorder.appendedEvents.find(
-    (event) => String(event.type).includes("turn_started"),
+  const turnStarted = recorder.appendedEvents.find((event) =>
+    String(event.type).includes("turn_started"),
   );
   assert.ok(turnStarted, "TurnStarted 事件必须在创建失败后仍然发出");
 
@@ -207,7 +207,9 @@ test("T-C4b: 落库失败只 warn 不覆盖创建错误（CR-P2-1，上游 CR-01
   // 断言 1：落库失败被守卫捕获并只记 warn（不覆盖、不再抛出层穿透）。
   assert.ok(
     recorder.warns.some((entry) =>
-      String(entry.message).includes("Accepted input persistence failed after model creation failed"),
+      String(entry.message).includes(
+        "Accepted input persistence failed after model creation failed",
+      ),
     ),
     "必须出现「落库失败只 warn」守卫日志",
   );
