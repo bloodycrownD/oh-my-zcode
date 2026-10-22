@@ -38,7 +38,6 @@ const zhCN: Record<string, string> = {
   "occupationOnboarding.accounting": "财务/审计/税务",
   "occupationOnboarding.legal": "法律/行政/人力资源",
   "occupationOnboarding.skip": "跳过",
-  // 引导组件直接引用这些 key；缺失时会显示原始 key，并影响复用该文案的界面。
   "occupationOnboarding.start": "开始使用",
   "occupationOnboarding.continue": "下一步",
   "occupationOnboarding.saving": "正在保存…",
@@ -104,7 +103,6 @@ const zhCN: Record<string, string> = {
     "数据准备进程意外退出或连接中断。请退出并重新打开 omz，应用会重新检查迁移记录。",
   "startup.global.error.unsupported_runtime":
     "当前配置的 Agent 不支持独立存储准备。请恢复配套的 Agent 后重新打开 omz。",
-
   "startup.database.checking": "正在检查历史数据",
   "startup.database.waiting_for_lock": "数据库正被其他进程使用，正在等待",
   "startup.database.migrating": "正在升级历史数据",
@@ -124,7 +122,6 @@ const zhCN: Record<string, string> = {
   "bashOutput.error.unsupported": "当前运行时不支持查看后台输出",
   "bashOutput.error.read_failed": "无法读取输出文件",
   "bashOutput.error.query_failed": "无法连接到任务运行时",
-
   "purchase.entry.loading": "正在查询套餐…",
   "purchase.entry.retry": "套餐查询失败，重试",
   "bots.runtime.deliveryFailed": "机器人回复发送失败",
@@ -161,7 +158,6 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.connectionUnavailable": "原连接方式已不可用，请重新选择。",
   "settings.modelProvider.navigationUnavailable": "要查看的供应商不可用，请选择其他供应商。",
   "workspace.context.lastActivity": "最近活动 {time}",
-  // 通用
   "common.loading": "加载中...",
   "common.listSeparator": "、",
   "common.generating": "生成中...",
@@ -169,7 +165,7 @@ const zhCN: Record<string, string> = {
   "common.cancel": "取消",
   "common.retry": "重试",
   "common.close": "关闭",
-  "chat.plan.removeMarker": "关闭计划模式",
+  "chat.plan.removeMarker": "取消下一次提交的计划模式",
   "common.confirm": "确认",
   "common.more": "更多",
   "common.refresh": "刷新",
@@ -177,216 +173,6 @@ const zhCN: Record<string, string> = {
   "common.save": "保存",
   "common.saving": "保存中...",
   "common.delete": "删除",
-  "conversationShare.trigger": "分享",
-  "conversationShare.shareTitle": "分享标题",
-  "conversationShare.permissionLabel": "访问权限",
-  "conversationShare.permission.private": "仅自己可见",
-  "conversationShare.permission.privateHint": "适合个人留档",
-  "conversationShare.permission.linkViewer": "拥有链接的人都可查看",
-  "conversationShare.permission.linkViewerHint": "不能导入继续",
-  "conversationShare.permission.linkViewerSummary": "链接持有者可查看",
-  "conversationShare.permission.linkEditor": "拥有链接的人可导入并继续",
-  "conversationShare.permission.linkEditorHint": "可导入到 omz",
-  "conversationShare.permission.linkEditorSummary": "链接持有者可导入并继续",
-  "conversationShare.permission.privateSummary": "仅自己可见",
-  "conversationShare.openLink": "打开分享页",
-  "conversationShare.result.title": "分享已创建",
-  "conversationShare.result.description": "链接已准备好，可以复制或在浏览器中查看。",
-  "conversationShare.result.openInBrowser": "去浏览器查看",
-  "conversationShare.result.dismiss": "关闭分享结果",
-  "conversationShare.generatingLink": "正在生成分享链接",
-  "conversationShare.copyLink": "复制链接",
-  "conversationShare.copySucceeded": "分享链接已复制",
-  "conversationShare.publishSucceeded": "分享链接已生成",
-  "conversationShare.publishSucceededWithSkips": "分享链接已生成，有 {count} 个文件被跳过",
-  "conversationShare.copyFailed": "复制分享链接失败",
-  "conversationShare.publishFailed": "生成分享链接失败，请重试",
-  "conversationShare.error.authenticationRequired":
-    "分享功能仅对已登录用户开放。登录状态已失效，请重新登录后再试。",
-  "conversationShare.error.featureDisabled": "当前工作区或连接类型暂不支持分享。",
-  "conversationShare.error.artifactNotAllowed":
-    "某个预览文件的类型暂不支持分享，请取消选择对应对话后重试。",
-  "conversationShare.error.limitExceeded": "所选对话或文件超过分享限制，请减少选择的对话数量。",
-  "conversationShare.error.rateLimited": "分享操作过于频繁，请稍后再试。",
-  "conversationShare.error.network": "无法连接分享服务，请检查网络后重试。",
-  "conversationShare.error.safetyCheckTimeout": "分享安全检查超时，请稍后重试。",
-  "conversationShare.error.invalidSelection": "所选对话已发生变化，请重新打开分享面板并选择。",
-  "conversationShare.error.invalidConversation":
-    "所选内容包含当前版本暂不支持的结构。请取消仍在运行或包含内嵌图片的轮次，确认预览文件已完成后重试。",
-  "conversationShare.error.runningTurn":
-    "所选对话仍在运行，请取消选择运行中的轮次，等待完成后再分享。",
-  "conversationShare.error.streamingRow": "所选对话仍在生成中，请等待本轮输出完成后再分享。",
-  "conversationShare.error.activeToolCall": "所选对话仍有工具调用未完成，请等待工具结束后再分享。",
-  "conversationShare.error.activeSubagent":
-    "所选对话包含仍在运行的子任务，请等待子任务结束后再分享。",
-  "conversationShare.error.inputAttachment":
-    "用户输入附件当前无法完成分享，请确认附件仍存在后重试。",
-  "conversationShare.error.inlineToolImage":
-    "所选对话包含暂不支持的内嵌工具图片，请取消对应轮次后重试。",
-  "conversationShare.error.unsupportedTimeline":
-    "所选对话包含暂不支持的分支或恢复记录，请取消对应轮次后重试。",
-  "conversationShare.error.unsafeUrl": "所选内容包含本地或内联文件地址，请移除后再分享。",
-  "conversationShare.error.missingProductTurn":
-    "所选对话结构不完整，请重新打开分享面板并重新选择轮次。",
-  "conversationShare.error.artifactTypeNotAllowed":
-    "某个预览文件类型暂不支持分享，请取消对应轮次后重试。",
-  "conversationShare.error.artifactExtensionMissing":
-    "某个预览文件缺少有效扩展名，请检查文件后重试。",
-  "conversationShare.error.artifactOutsideWorkspace":
-    "某个预览文件不在当前工作区内，请重新生成或移动文件后重试。",
-  "conversationShare.error.artifactChanged":
-    "某个预览文件在分享前发生变化，请重新生成预览文件后重试。",
-  "conversationShare.error.artifactReadFailed":
-    "某个预览文件读取失败，请确认文件仍存在且可访问后重试。",
-  "conversationShare.error.artifactSizeLimit":
-    "某个文件超过单文件大小上限，请取消该轮或改用更小的文件后重试。",
-  "conversationShare.error.artifactManifest":
-    "预览文件清单不完整，请重新生成文件并刷新分享面板后重试。",
-  "conversationShare.error.payloadLimit": "所选对话或文件超过分享限制，请减少选择后重试。",
-  "conversationShare.error.disclosureRequired": "请先检查并确认分享内容，再生成链接。",
-  "conversationShare.error.uploadFailed": "文件未能完整上传，请确认文件仍然存在后重试。",
-  "conversationShare.error.connectionUnavailable": "桌面连接尚未就绪，请重新打开分享面板后重试。",
-  "conversationShare.error.noShareableContent":
-    "当前选择没有可分享内容，请重新选择需要分享的轮次。",
-  "conversationShare.error.summary": "分享失败：发现 {count} 个问题，详情见分享面板。",
-  "conversationShare.issue.artifactTypeNotAllowed":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName}（{artifactType}）暂不支持分享，将被跳过。当前支持：{allowedFormats}。",
-  "conversationShare.issue.artifactExtensionMissing":
-    "第 {turnOrdinal} 轮的预览文件缺少有效扩展名，请检查文件名后重试。",
-  "conversationShare.issue.artifactOutsideWorkspace":
-    "第 {turnOrdinal} 轮的预览文件不在当前工作区内，请重新生成或移动文件后重试。",
-  "conversationShare.issue.artifactChanged":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName} 在读取期间发生变化，请重新生成文件后重试。",
-  "conversationShare.issue.artifactReadFailed":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName} 无法读取，请确认文件仍存在且可访问。",
-  "conversationShare.issue.inputAttachment":
-    "第 {turnOrdinal} 轮包含用户输入附件，当前版本不支持，请取消该轮。",
-  "conversationShare.issue.inputAttachmentUnavailable":
-    "第 {turnOrdinal} 轮的用户输入附件已不存在或无法读取。",
-  "conversationShare.issue.inlineToolImage": "第 {turnOrdinal} 轮包含无法公开承载的内嵌工具图片。",
-  "conversationShare.issue.runningTurn": "第 {turnOrdinal} 轮仍在运行，请等待完成或取消该轮。",
-  "conversationShare.issue.streamingRow": "第 {turnOrdinal} 轮仍在生成，请等待完成或取消该轮。",
-  "conversationShare.issue.activeToolCall": "第 {turnOrdinal} 轮仍有工具调用未完成，请取消该轮。",
-  "conversationShare.issue.activeSubagent":
-    "第 {turnOrdinal} 轮仍有子任务运行，请等待完成或取消该轮。",
-  "conversationShare.issue.unsupportedTimeline":
-    "第 {turnOrdinal} 轮包含当前无法公开承载的时间线记录。",
-  "conversationShare.issue.noShareableContent":
-    "当前选择没有可分享内容，请重新选择需要分享的轮次。",
-  "conversationShare.issue.unsafeUrl":
-    "第 {turnOrdinal} 轮包含本地或内联文件地址，当前版本不支持，请移除后重试。",
-  "conversationShare.issue.missingProductTurn": "所选内容缺少完整轮次身份，请重新选择对话。",
-  "conversationShare.issue.invalidSelection": "所选轮次已发生变化，请返回选择并重新勾选。",
-  "conversationShare.issue.invalidConversation": "所选对话结构不完整，请取消问题轮次后重试。",
-  "conversationShare.issue.staleConversation": "会话在准备分享期间发生变化，请返回选择后重试。",
-  "conversationShare.issue.rowsLimit": "对话行数为 {actual}，超过上限 {limit}，请减少选择的轮次。",
-  "conversationShare.issue.artifactCountLimit":
-    "产物数量为 {actual}，超过上限 {limit}，请减少选择的轮次。",
-  "conversationShare.issue.artifactSizeLimit":
-    "{artifactDisplayName} 大小为 {actual}，超过单文件上限 {limit}，请取消该轮或重新生成较小文件。",
-  "conversationShare.issue.artifactTotalSizeLimit":
-    "产物总大小为 {actual}，超过上限 {limit}，请减少产物或取消对应轮次。",
-  "conversationShare.issue.payloadSizeLimit":
-    "分享请求大小为 {actual}，超过上限 {limit}，请减少选择的轮次或产物。",
-  "conversationShare.issue.artifactManifest":
-    "预览文件清单存在重复或缺失，请重新生成文件并刷新分享面板。",
-  "conversationShare.issue.uploadIncomplete":
-    "{artifactDisplayName} 上传回执与文件不一致，请确认文件未变化后重试。",
-  "conversationShare.issue.unknown":
-    "分享在 {phase} 阶段失败，服务端未返回可定位详情，请稍后重试。",
-  "conversationShare.issue.details": "错误详情",
-  "conversationShare.issue.requestIdLabel": "服务端请求 ID",
-  "conversationShare.issue.requestId": "服务端请求 ID：{requestId}",
-  "conversationShare.issue.requestIdMissing": "未收到服务端 request-id。",
-  "conversationShare.issue.copyRequestId": "复制 request-id",
-  "conversationShare.issue.deselectTurn": "取消选择此轮",
-  "conversationShare.issue.retryPreflight": "重新检查",
-  "conversationShare.issue.more": "还有 {count} 个问题未展开。",
-  "conversationShare.warning.summary": "分享已完成，有 {count} 个文件被跳过，未包含在链接中。",
-  "conversationShare.warning.artifactSkipped":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName} 无法读取，已跳过。如果确实需要分享该文件，请重新生成后再分享。",
-  "conversationShare.warning.inputAttachmentSkipped":
-    "第 {turnOrdinal} 轮的用户输入附件未包含在分享中，该轮文字内容照常分享。",
-  "conversationShare.warning.inputAttachmentUnavailable":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName} 已不存在或无法读取，已跳过。",
-  "conversationShare.warning.artifactTypeSkipped":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName}（{artifactType}）暂不支持分享，已跳过。当前支持：{allowedFormats}。",
-  "conversationShare.warning.artifactChangedSkipped":
-    "第 {turnOrdinal} 轮的 {artifactDisplayName} 在分享前发生变化，已跳过。",
-  "conversationShare.partial.panelLabel": "选择要分享的对话",
-  "conversationShare.selection.reopen": "重新打开选择面板",
-  "conversationShare.partial.empty": "当前没有已完成、可分享的对话",
-  "conversationShare.partial.selectionStageHint": "勾选要分享的已完成会话，点击下一步继续。",
-  "conversationShare.partial.preflightChecking": "正在检查分享内容…",
-  "conversationShare.partial.preflightBlocked": "发现无法分享的内容，请先处理下方问题。",
-  "conversationShare.partial.preflightSkipped":
-    "发现 {count} 个文件不会加入分享链接，继续后会跳过。",
-  "conversationShare.partial.preflightDeferred": "部分文件暂时无法检查，发布时会再次确认。",
-  "conversationShare.partial.continueWithSkips": "继续下一步（将跳过 {count} 个文件）",
-  "conversationShare.partial.selectionHint": "检查标题、访问权限和敏感信息确认后生成链接。",
-  "conversationShare.partial.confirmationTitle": "确认分享内容",
-  "conversationShare.publish.failedTitle": "分享发布失败",
-  "conversationShare.publish.failedDescription": "请根据下方提示修正后重试。",
-  "conversationShare.publish.retry": "重试生成链接",
-  "conversationShare.publish.footerMeta": "分享 {selected} 个对话轮次，{access}",
-  "conversationShare.publish.failedFooter": "内容需要调整后再发布",
-  "conversationShare.partial.selectAll": "全选",
-  "conversationShare.partial.deselectAll": "取消全选",
-  "conversationShare.partial.selectionCount": "{selected}/{total}",
-  "conversationShare.partial.selectedSummary": "已选择 {selected} / {total}",
-  "conversationShare.partial.cancel": "取消",
-  "conversationShare.partial.next": "下一步",
-  "conversationShare.partial.back": "上一步",
-  "conversationShare.partial.confirm": "生成分享链接",
-  "conversationShare.partial.publishing": "生成中…",
-  "conversationShare.progress.collecting": "正在整理会话和产物…",
-  "conversationShare.progress.uploading": "正在上传产物…",
-  "conversationShare.progress.checking": "正在等待安全检查完成…",
-  "conversationShare.progress.collectingFailed": "整理会话和产物失败",
-  "conversationShare.progress.uploadingFailed": "上传产物失败",
-  "conversationShare.progress.checkingFailed": "安全检查失败",
-  "conversationShare.phase.collecting": "整理内容",
-  "conversationShare.phase.uploading": "上传产物",
-  "conversationShare.phase.checking": "安全检查",
-  "conversationShare.phase.collectingComplete": "会话和产物已准备",
-  "conversationShare.phase.uploadingComplete": "产物上传完成",
-  "conversationShare.phase.uploadingActive": "正在上传 {completed} / {total}",
-  "conversationShare.phase.collectingPending": "等待开始",
-  "conversationShare.phase.uploadingPending": "等待整理完成",
-  "conversationShare.phase.checkingPending": "等待上传完成",
-  "conversationShare.phase.failed": "失败",
-  "conversationShare.publicWarning": "公开前请检查对话、工具输入输出和产物中的敏感信息。",
-  "conversationShare.disclosure.description": "系统不会自动检测敏感信息。",
-  "conversationShare.disclosure.checkbox": "我已检查分享内容，确认不包含敏感信息。",
-  "conversationShare.disclosure.scope.trigger": "查看检查范围",
-  "conversationShare.disclosure.scope.title": "检查范围",
-  "conversationShare.disclosure.scope.reviewLabel": "需要查看",
-  "conversationShare.disclosure.scope.conversation": "会话内容：用户消息、助手回复、任务标题",
-  "conversationShare.disclosure.scope.tools": "工具输入与输出：命令、参数、返回结果",
-  "conversationShare.disclosure.scope.generated": "生成内容：代码、文件、预览内容",
-  "conversationShare.disclosure.scope.sensitiveLabel": "重点排查",
-  "conversationShare.disclosure.scope.sensitive": "凭证、Token、密码、私钥、内部地址、个人信息",
-  "conversationShare.disclosure.scope.note": "系统不会自动扫描或脱敏，请逐项确认。",
-  "conversationShare.import.source": "已从分享导入：{title}",
-  "conversationShare.import.dividerLabel": "已从分享导入",
-  "conversationShare.import.fallbackRemoteWorkspace":
-    "已从分享导入：{title}。当前工作区是远程的，暂不支持导入，会话已创建在本地工作区 {workspacePath}。",
-  "conversationShare.import.fallbackDefaultWorkspace":
-    "已从分享导入：{title}。没有可用的目标工作区，会话已创建在默认工作区 {workspacePath}。",
-  "conversationShare.import.downloading": "正在下载分享文件：{completed}/{total}",
-  "conversationShare.import.installing": "正在安装分享文件",
-  "conversationShare.import.committing": "正在创建分享会话",
-  "conversationShare.import.complete": "分享导入完成",
-  "conversationShare.import.loginRequired": "该分享暂不支持匿名导入，请登录 omz 后重试",
-  "conversationShare.import.notFound": "分享不存在或当前账号无权访问",
-  "conversationShare.import.expired": "分享已过期，请让分享者重新生成",
-  "conversationShare.import.integrityFailed": "分享文件校验失败，已停止导入",
-  "conversationShare.import.failed": "分享导入失败，请检查网络后重试",
-  "conversationShare.import.integrityFailedWithArtifact":
-    "分享文件 {artifactDisplayName} 校验失败，已停止导入，请让分享者重新生成链接。",
-  "conversationShare.import.failedWithArtifact":
-    "分享文件 {artifactDisplayName} 在下载阶段失败，请检查网络后重试。",
-  "conversationShare.import.retry": "重试",
   "settings.resourceGroup.item.one": "{count} 项",
   "settings.resourceGroup.item.other": "{count} 项",
   "pluginCreator.add": "添加",
@@ -732,12 +518,12 @@ const zhCN: Record<string, string> = {
   "bots.unbound": "未绑定",
   "bots.generateBindCode": "生成绑定码",
   "bots.resetState": "重置状态",
-  "bots.allowedWorkspaces": "工作区访问范围",
+  "bots.allowedWorkspaces": "项目访问范围",
   "bots.allowedWorkspaces.all": "全部",
-  "bots.allowedWorkspaces.mode.all": "所有工作区",
-  "bots.allowedWorkspaces.mode.selected": "指定工作区",
-  "bots.allowedWorkspaces.allDescription": "这个机器人可以使用所有已配置的工作区。",
-  "bots.allowedWorkspaces.selectedDescription": "这个机器人可以使用 {count} 个指定工作区。",
+  "bots.allowedWorkspaces.mode.all": "所有项目",
+  "bots.allowedWorkspaces.mode.selected": "指定项目",
+  "bots.allowedWorkspaces.allDescription": "这个机器人可以使用所有已配置的项目。",
+  "bots.allowedWorkspaces.selectedDescription": "这个机器人可以使用 {count} 个指定项目。",
   "bots.botMeta": "{users} 个已绑定用户 · 工作区 {workspace}",
   "bots.botSummary": "{users} 个用户 · {workspaces} 个工作区 · {workspace}",
   "bots.userCount": "{count} 个用户",
@@ -774,8 +560,6 @@ const zhCN: Record<string, string> = {
   "bots.unbindSuccess": "机器人已解绑",
   "bots.unbindFailed": "解绑机器人失败：{error}",
   "bots.deleteFailed": "删除机器人失败：{error}",
-
-  // 登录
   "welcome.title": "Welcome to omz",
   "welcome.username": "用户名",
   "welcome.password": "密码",
@@ -818,8 +602,6 @@ const zhCN: Record<string, string> = {
   "settings.onboardingDescription":
     "重新选择职业、界面模式和使用偏好。数据迁移可在迁移设置中操作。",
   "settings.onboardingOpen": "打开引导",
-
-  // 应用头部
   "app.currentTheme": "当前: {theme}",
   "app.login": "连接使用",
   "app.logout": "断开连接",
@@ -883,7 +665,7 @@ const zhCN: Record<string, string> = {
   "sidePane.maximize": "扩大面板",
   "sidePane.restoreSize": "恢复面板宽度",
   "sidePane.addTab": "新增标签",
-  "sidePane.openTab": "打开标签页",
+  "sidePane.openTab": "新标签页",
   "sidePane.subagent": "子智能体",
   "sidePane.subagentDirectory": "子智能体目录",
   "sidePane.selectionChat": "辅助对话",
@@ -906,11 +688,6 @@ const zhCN: Record<string, string> = {
   "subagentDirectory.status.cancelled": "已取消",
   "subagentDirectory.status.lost": "已丢失",
   "chat.statusPanel.endedAgents": "已结束",
-  // workflow run 目录（任务页脚行 → 这一页 → 详情页）。状态词复用
-  // chat.toolCall.workflow.run.status.*，这里只有页面自己的结构文案。
-  //
-  // 页脚行刻意是「已结束的工作流」而不是「已完成」：这个桶里也有失败与取消的 run，
-  // 而恰恰是它们最值得回去看（可恢复的那些）。
   "chat.statusPanel.endedWorkflows": "已结束的工作流",
   "workflowDirectory.title": "工作流实例",
   "workflowDirectory.running": "正在运行",
@@ -1423,19 +1200,15 @@ const zhCN: Record<string, string> = {
   "titleBar.menu.help.resourceManager": "资源管理器",
   "titleBar.menu.help.toggleZCodeStdioTap": "抓取 Agent stdio 通信",
   "titleBar.menu.help.clearAllData": "清除所有数据",
-
-  // 目录浏览
-  "directoryBrowser.title": "浏览文件夹",
+  "directoryBrowser.title": "选择目录",
   "directoryBrowser.pathPlaceholder": "输入路径",
-  "directoryBrowser.go": "前往",
+  "directoryBrowser.go": "跳转",
   "directoryBrowser.showHidden": "显示隐藏目录",
   "directoryBrowser.hideHidden": "收起隐藏目录",
   "directoryBrowser.noSubdirs": "无子目录",
-  "directoryBrowser.selectDir": "选择此目录",
+  "directoryBrowser.selectDir": "在此目录打开工作区",
   "directoryBrowser.errorSystem": "无法获取系统信息",
   "directoryBrowser.errorReadDir": "无法读取目录：{error}",
-
-  // 更新按钮
   "updateReady.shortTitle": "更新",
   "updateReady.title": "更新 v{version}",
   "updateReady.releaseNotesTitle": "v{version} 更新日志",
@@ -1497,8 +1270,6 @@ const zhCN: Record<string, string> = {
     "错误已经限制在当前区域，其它功能可以继续使用。你可以先重试这个区域；如果问题持续，再刷新应用。",
   "appError.sectionRetry": "重试此区域",
   "appError.sectionHint": "错误详情已记录到诊断日志里，方便继续排查。",
-
-  // Workspace
   "workspace.openWorkspace": "打开工作区",
   "workspace.addNewWorkspace": "添加新工作区",
   "workspace.startFromScratch": "从空目录开始",
@@ -1574,8 +1345,6 @@ const zhCN: Record<string, string> = {
   "workspaceFileTree.openFailed": "无法打开该条目",
   "workspaceFileTree.addToChat": "添加到聊天",
   "workspaceFileTree.gitStatus.ignored": "已忽略",
-
-  // SSH 对话框
   "ssh.trigger": "SSH 连接",
   "ssh.title": "SSH 远程连接",
   "ssh.host": "主机",
@@ -1603,7 +1372,8 @@ const zhCN: Record<string, string> = {
   "ssh.configAliasSearchPlaceholder": "搜索 SSH 配置别名",
   "ssh.configAliasEmpty": "当前机器未发现可用的 SSH 配置别名。",
   "ssh.configAliasLoadFailed": "SSH 配置别名读取失败，仍可手动输入连接信息。",
-  "ssh.configAliasDescription": "选择别名后会自动填充主机、端口、用户名和私钥路径。",
+  "ssh.configAliasDescription":
+    "已从 ~/.ssh/config 填充主机、端口、用户名和私钥路径；手动修改任一字段将解除关联。",
   "ssh.connect": "连接",
   "ssh.cancel": "取消",
   "ssh.connecting": "正在连接...",
@@ -1615,21 +1385,21 @@ const zhCN: Record<string, string> = {
   "common.next": "下一步",
   "remote.trigger": "远程连接",
   "remote.wizard": "远程连接",
-  "remoteConnection.feedback": "去反馈",
+  "remoteConnection.feedback": "反馈",
   "remote.step.kind": "选择方式",
   "remote.step.settings": "填写配置",
   "remote.step.connecting": "连接中",
   "remote.step.directory": "选择目录",
   "remote.kindStepTitle": "选择连接方式",
   "remote.kindStepDescription": "选择进入当前工作区的连接方式，然后继续填写对应的连接配置。",
-  "remote.settingsStepTitle": "填写连接配置",
+  "remote.settingsStepTitle": "新建连接",
   "remote.settingsStepDescription": "填写建立 {method} 连接所需的信息，我们会据此准备远程会话。",
   "remote.history.empty": "没有匹配的历史连接",
-  "remote.connectingStepTitle": "正在建立连接",
-  "remote.connectingStepDescription": "正在建立 {method} 连接，你可以在这里查看实时的连接进度。",
+  "remote.connectingStepTitle": "建立连接",
+  "remote.connectingStepDescription": "正在通过 {method} 连接…",
   "webRemoteControl.trigger": "移动端远程控制",
   "webRemoteControl.title": "移动端远程控制",
-  "webRemoteControl.description": "通过聊天机器人控制 omz 工作区。",
+  "webRemoteControl.description": "扫码或在手机上打开链接，即可远程控制当前工作区。",
   "webRemoteControl.botChannel.title": "使用 Bot Channel",
   "webRemoteControl.botChannel.description": "连接聊天 Bot，适合更长时间的移动端访问。",
   "webRemoteControl.botChannel.weixin.title": "微信",
@@ -1647,9 +1417,9 @@ const zhCN: Record<string, string> = {
     "通过 SSH、Server、WSL 或 Docker 连接远程工作区，并在当前窗口中继续选择目录。",
   "remote.step.connect": "连接环境",
   "remote.step.selectDirectory": "选择目录",
-  "remote.selectDirectoryTitle": "选择远程目录",
-  "remote.selectDirectoryDescription": "远程连接就绪后，选择要在当前窗口中打开的目录。",
-  "remote.backToConnection": "返回连接配置",
+  "remote.selectDirectoryTitle": "选择目录",
+  "remote.selectDirectoryDescription": "在 {method} 上选择一个目录作为工作区。",
+  "remote.backToConnection": "返回配置",
   "remote.selectedMethod": "当前连接方式",
   "remote.methods": "连接方式",
   "remote.kind.ssh": "SSH",
@@ -1660,8 +1430,8 @@ const zhCN: Record<string, string> = {
   "remote.kind.docker.wizardDescription": "本地容器",
   "remote.connect": "连接",
   "remote.connecting": "正在连接...",
-  "remote.minimize": "收起远程连接窗口",
-  "remote.startConnection": "开始连接",
+  "remote.minimize": "收起 — 连接将继续进行",
+  "remote.startConnection": "建立连接",
   "remote.retryConnection": "重新连接",
   "remote.connectingHint": "正在通过 {method} 建立连接。",
   "remote.connectionLog": "连接日志",
@@ -1683,36 +1453,30 @@ const zhCN: Record<string, string> = {
   "remote.log.sessionReady": "远程 session 已创建完成，接下来可以选择目录。",
   "wsl.description": "连接默认 distro，或选择这台设备上已安装的指定 distro。",
   "wsl.distro": "发行版",
-  "wsl.defaultDistro": "默认 distro",
+  "wsl.defaultDistro": "默认发行版",
   "wsl.user": "Linux 用户",
   "wsl.defaultUser": "默认用户",
   "wsl.userDescription":
-    "留空使用 distro 默认用户；填写 root 或其他已存在的 Linux 用户后，将以该用户运行 WSL 命令。",
+    "留空使用 发行版 默认用户；填写 root 或其他已存在的 Linux 用户后，将以该用户运行 WSL 命令。",
   "wsl.rootWarning":
     "Root 模式会以 root 运行远程 host、agent 和终端；本次会话创建的文件可能归 root 所有。",
   "wsl.validation.invalidUser":
     "Linux 用户名不能包含控制字符、冒号、斜杠或反斜杠，且长度不能超过 64 个字符。",
   "wsl.loading": "正在检测 WSL 发行版...",
-  "wsl.detectedCount": "当前设备检测到 {count} 个 distro。",
-  "wsl.noDistros": "暂未检测到 WSL 发行版；如果本机已安装 WSL，仍可继续连接默认 distro。",
+  "wsl.detectedCount": "当前设备检测到 {count} 个 发行版。",
+  "wsl.noDistros": "暂未检测到 WSL 发行版；如果本机已安装 WSL，仍可继续连接默认发行版。",
   "docker.description": "通过 docker exec 和 docker cp 连接本机容器。",
   "docker.container": "容器",
   "docker.containerPlaceholder": "输入容器名或 ID，例如 my-container",
   "docker.manualContainerHint": "如果运行中的容器列表不完整，可以手动输入容器名或 ID 连接。",
   "docker.selectContainer": "选择正在运行的容器",
   "docker.loading": "正在检测运行中的容器...",
-  "docker.unavailable": "未检测到运行中容器",
-  "docker.noContainers": "未检测到运行中容器",
+  "docker.unavailable": "Docker 不可用",
+  "docker.noContainers": "没有运行中的容器",
   "docker.validation.required": "容器名或 ID 不能为空",
-
-  // 语言切换
   "locale.switchLanguage": "切换语言",
-
-  // 文件树
   "fileTree.loading": "加载中...",
   "fileTree.error": "加载失败",
-
-  // 终端
   "terminal.exited": "[进程已退出]",
   "terminal.title": "终端",
   "terminal.show": "打开终端",
@@ -1728,12 +1492,9 @@ const zhCN: Record<string, string> = {
   "chat.pendingCommand.discarded": "CLI 重启前已提交的输入没有进入对话。请确认是否重新发送。",
   "chat.pendingCommand.resend": "重新发送",
   "chat.pendingCommand.dismiss": "稍后",
-  // 软门禁：工作区 Hook 待审核时底部常驻提示条
   "chat.workspaceHookPending.message": "{count} 个工作区 Hook 待审核，本会话暂未启用",
   "chat.workspaceHookPending.review": "去审核",
   "chat.workspaceHookPending.dismiss": "忽略",
-
-  // 任务列表
   "taskList.newTask": "新建任务",
   "taskList.cronTaskLabel": "定时任务",
   "taskList.offPeakTaskLabel": "闲时任务",
@@ -1801,7 +1562,7 @@ const zhCN: Record<string, string> = {
   "taskList.changeStats": "+{added} -{removed}",
   "taskGroup.newGroup": "新建分组",
   "taskGroup.cronGroupName": "定时任务",
-  "taskGroup.newTask": "新建任务",
+  "taskGroup.newTask": "在分组中新建任务",
   "taskGroup.emptyDropZoneAction": "新建任务，或拖拽到这里。",
   "taskGroup.rename": "重命名分组",
   "taskGroup.renameAction": "重命名",
@@ -1817,7 +1578,7 @@ const zhCN: Record<string, string> = {
   "taskGroup.color.green": "绿色",
   "taskGroup.color.blue": "蓝色",
   "taskGroup.color.purple": "紫色",
-  "taskGroup.ungroup": "取消分组并删除",
+  "taskGroup.ungroup": "取消分组",
   "taskGroup.createFailed": "创建分组失败",
   "taskGroup.renameFailed": "重命名分组失败",
   "taskGroup.colorFailed": "更新分组颜色失败",
@@ -1846,7 +1607,6 @@ const zhCN: Record<string, string> = {
   "chat.changeSummary.collapse": "收起已更改文件",
   "chat.changeSummary.diffUnavailable": "暂时无法预览这份 Diff。",
   "chat.changeSummary.review": "审查",
-  // 该中文词条新增时误复制了英文值，导致预览面板在未选择编辑器时显示英文提示。
   "chat.changeSummary.openInEditor": "在编辑器中打开",
   "chat.changeSummary.rewind": "撤销",
   "chat.changeSummary.reapply": "重新应用",
@@ -1877,7 +1637,7 @@ const zhCN: Record<string, string> = {
   "chat.edit.resetConversationAndFiles.noFiles": "本轮没有可安全恢复的文件改动",
   "chat.edit.resetConversationAndFiles.reverted": "本轮文件改动已经撤销",
   "chat.edit.resetConversationAndFiles.running": "请等待当前工作停止",
-  "chat.edit.resetConversationAndFiles.unavailable": "有待处理交互时不能重置文件",
+  "chat.edit.resetConversationAndFiles.unavailable": "压缩中或有待处理交互时不能重置文件",
   "chat.edit.workspaceConflict.title": "文件无法安全重置",
   "chat.edit.workspaceConflict.description":
     "对话尚未裁剪。请检查冲突或忽略的文件，然后仅重置对话并发送，或取消。",
@@ -1912,8 +1672,6 @@ const zhCN: Record<string, string> = {
   "sidebar.exportLogs.pending": "正在导出日志中",
   "sidebar.exportLogs.error": "导出日志失败：{error}",
   "sidebar.newTask": "新建任务",
-
-  // 设置页
   "settings.title": "设置",
   "settings.breadcrumbLabel": "设置路径",
   "settings.subtitle": "从左侧切换主要设置项，右侧查看详细配置。",
@@ -2005,8 +1763,8 @@ const zhCN: Record<string, string> = {
   "settings.uiFontSizeDescription": "调整应用界面的文字大小，图标和布局尺寸不受影响。",
   "settings.systemTitle": "常规",
   "settings.systemDescription": "这些设置会影响当前窗口的显示与交互。",
-  "settings.locale": "系统语言",
-  "settings.localeDescription": "选择界面语言；agent 系统提示词的语言会跟随该设置。",
+  "settings.locale": "界面语言",
+  "settings.localeDescription": "选择应用 UI 的显示语言。",
   "settings.terminalProfile": "继承系统终端 Profile",
   "settings.terminalProfileDescription":
     "启动内置终端时尽量继承登录 shell 环境、代理、Kube 变量和本机终端字体。",
@@ -2021,9 +1779,7 @@ const zhCN: Record<string, string> = {
   "settings.nativeSearchEnhancements": "增强 Find 和 Grep",
   "settings.nativeSearchEnhancementsDescription":
     "在新建会话或应用重启后恢复的会话中使用增强 Find 和 Grep。当前会话保持现有设置；Windows 的 Find 保持不变。",
-  // FORK（magic-context-memory-management / Step 8）：分区语义切换为跨会话「项目记忆」。
-  "settings.memory": "项目记忆",
-  // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
+  "settings.memory": "记忆",
   "settings.context.title": "上下文管理",
   "settings.context.description":
     "上下文管理（magic-context）负责在每轮请求前裁剪、折叠并分舱会话历史。修改会自动保存，并立即对正在运行的会话生效，无需重启。",
@@ -2066,7 +1822,6 @@ const zhCN: Record<string, string> = {
   "settings.context.failClosedBlocking.label": "故障时阻断请求",
   "settings.context.failClosedBlocking.description":
     "上下文管理无法工作时（存储打开失败、schema 不匹配）直接阻断请求并给出可恢复的错误，而不是静默降级为原样透传。",
-  // FORK（Step 11 / bugfix-batch-20261011）：E 组白名单扩字段的设置面文案。
   "settings.context.memoryEnabled.label": "跨会话项目记忆",
   "settings.context.memoryEnabled.description":
     "开启后，会话中沉淀的项目事实会写入记忆库，在后续会话与 ctx_search 检索中对所有 agent 可见，模型也可用 ctx_memory 主动钉入记忆。关闭后记忆读写与相关指引全部退场；上下文回收（折叠、分舱、ctx_reduce/ctx_expand）不受影响。",
@@ -2079,9 +1834,6 @@ const zhCN: Record<string, string> = {
   "settings.context.promptSurfaceGuidancePath.description":
     "指向一个包含完整指导段文本的文件，读取后替代内置指导段。留空表示使用内置指导段。",
   "settings.context.promptSurfaceGuidancePath.placeholder": "未配置",
-  // FORK（Step 14 / bugfix-batch-20261011）：per-model prompt-surface 路由的只读呈现。
-  // 刻意不建编辑入口（与 execute_threshold per-model 分支同款先例）；目的是让已配置的
-  // 覆盖可见，而不是继续隐形。
   "settings.context.promptSurfaceOverrides.label": "按模型覆盖",
   "settings.context.promptSurfaceOverrides.description":
     "来自 config.json 的按模型 prompt-surface 路由与工具描述覆盖。此处只读呈现：本页没有按模型编辑入口，从这里保存会原样保留它们。",
@@ -2090,9 +1842,6 @@ const zhCN: Record<string, string> = {
   "settings.context.muralEnabled.label": "实验性记忆画布",
   "settings.context.muralEnabled.description":
     "开启后，未装入上下文预算的项目记忆会渲染成一张确定性的图片随提示词下发（还需当轮模型支持图片输入，否则不渲染）。实验特性，默认关闭。",
-  // FORK（magic-context-memory-management / Step 8）：原生「工作区记忆」viewer 与开关
-  // 退场（内存测试文件与设置页入口一并删除），「记忆」分区改挂 magic-context 跨会话
-  // 项目记忆管理面板：分类/状态徽章、计数汇总、批量废弃（软删除）。
   "settings.memory.management.noWorkspace": "请先打开一个工作区，再管理项目记忆。",
   "settings.memory.management.description":
     "管理本机 CLI 保存的跨会话项目记忆（远程工作区时同样管理本机数据）。废弃是软删除：记忆会从后续对话的注入面移除，并保留可审计的废弃记录。",
@@ -2153,8 +1902,6 @@ const zhCN: Record<string, string> = {
   "settings.httpProxyDescription":
     "模型、MCP、命令工具与应用渲染层的出口流量将经此代理，不读取系统环境变量。留空时这些流量直连，内置浏览器则跟随系统代理设置。修改后需重启应用生效。",
   "settings.httpProxyPlaceholder": "留空则内置浏览器跟随系统代理，例如 http://127.0.0.1:7890",
-  // 中文词条曾在批量文案调整中被误改为英文，导致中文设置页混入未翻译标签。
-  // 文案原因：「代理例外」含义模糊，沿用 Windows 系统代理的标准表述「不使用代理的地址」。
   "settings.httpProxyNoProxy": "不使用代理的地址",
   "settings.httpProxyNoProxyDescription":
     "匹配这些主机的请求将直连，不经过 HTTP 代理。多个规则用英文逗号分隔。修改后需重启应用生效。",
@@ -2192,7 +1939,7 @@ const zhCN: Record<string, string> = {
   "notification.file": "文件：{paths}",
   "settings.closeToTrayOnWindows": "关闭窗口时隐藏到托盘",
   "settings.closeToTrayOnWindowsDescription":
-    "仅 Windows 生效。点击关闭按钮或关闭窗口快捷键时隐藏窗口，托盘中的退出仍会完全退出应用。",
+    "点击关闭按钮或关闭窗口快捷键时隐藏窗口，托盘中的退出仍会完全退出应用。Windows 默认开启；Linux 上取决于桌面环境是否提供系统托盘。",
   "settings.keepAwakeWhileRunning": "保持电脑运行",
   "settings.keepAwakeWhileRunningDescription":
     "打开后阻止系统因空闲进入休眠（仍可手动睡眠/合盖休眠）。桌面端全局生效。",
@@ -2221,11 +1968,11 @@ const zhCN: Record<string, string> = {
     "保留完整的模型请求和响应，不自动压缩、限制大小或删除旧记录。",
   "settings.performanceMode": "性能模式",
   "settings.performanceModeDescription": "精简渲染输出，提高性能。",
-  "settings.taskAutoArchive": "自动归档旧任务",
+  "settings.taskAutoArchive": "自动归档旧会话",
   "settings.taskAutoArchiveDescription":
-    "定时扫描最近打开过的工作区，将已完成、无未读、未置顶且超过保留期的任务自动归档。",
+    "定时扫描，将最后活动时间超过保留期的会话自动归档；置顶和运行中的会话不受影响。",
   "settings.taskAutoArchiveDays": "归档保留时长",
-  "settings.taskAutoArchiveDaysDescription": "任务最后更新时间早于该时长后，才会进入自动归档候选。",
+  "settings.taskAutoArchiveDaysDescription": "会话最后更新时间早于该时长后，才会进入自动归档候选。",
   "settings.taskAutoArchiveDays.option.3": "3 天后归档",
   "settings.taskAutoArchiveDays.option.7": "7 天后归档",
   "settings.taskAutoArchiveDays.option.14": "14 天后归档",
@@ -2349,7 +2096,7 @@ const zhCN: Record<string, string> = {
   "resourceManager.storage.categoryDescription.subagentTranscripts":
     "子代理运行的完整对话记录（transcript.jsonl），单文件可达数十 MB；最近 24 小时有活动的会话会保留。",
   "resourceManager.storage.categoryDescription.toolOutputs":
-    "工具结果留档、命令完整输出、图片缓存与临时文件；清理仅覆盖 cli/exec 下的命令输出日志。",
+    "工具结果留档、命令完整输出、图片缓存与临时文件；暂不提供清理。",
   "resourceManager.storage.categoryDescription.modelTrajectory":
     "模型请求与响应的完整记录，用于查看调用轨迹。",
   "resourceManager.storage.categoryDescription.devTraces": "开发态协议抓包与已退役的诊断目录。",
@@ -2488,7 +2235,6 @@ const zhCN: Record<string, string> = {
   "settings.mcp.remoteSync.selectionCount": "已选 {selected}/{total}",
   "settings.mcp.remoteSync.noSelection": "请至少选择一个远端缺失的 MCP 服务器。",
   "settings.plugins.remoteContext": "当前远端工作区：{target}",
-  // 远程同步入口由独立文案演进，曾混用小写；并排展示时统一为 Skill/MCP/Plugin。
   "settings.plugins.remoteSync.open": "同步 Plugin",
   "settings.plugins.remoteSync.title": "同步 Plugins 到远端目标",
   "settings.plugins.remoteSync.warningTitle": "远端执行提醒",
@@ -2537,7 +2283,7 @@ const zhCN: Record<string, string> = {
     "打开授权后即可完成该插件 MCP 服务器连接。",
   "settings.mcp.oauth.openAuthorization": "打开授权",
   "settings.mcp.statusOnlyUnsupported":
-    "当前 ZCode Agent 不支持 OAuth 状态刷新。请升级或重启 omz，然后重新打开 MCP 设置进行完整刷新。",
+    "当前 omz Agent 不支持 OAuth 状态刷新。请升级或重启 omz，然后重新打开 MCP 设置进行完整刷新。",
   "settings.mcp.refreshFailed": "刷新 MCP 状态失败：{error}",
   "settings.mcp.status.toolCount": "{count} 个工具",
   "settings.mcp.status.connectedReason": "已连接并可用。",
@@ -2755,7 +2501,6 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.codingPlan.status.teamExpired": "团队套餐已过期，请联系团队管理员。",
   "settings.modelProvider.codingPlan.status.teamUnavailable": "团队套餐未分配，请联系团队管理员。",
   "settings.modelProvider.codingPlan.status.unsupported": "暂未支持",
-  // Coding Plan 卡片直接使用这些 id，中文漏配会把 key 原样渲染到界面。
   "settings.modelProvider.codingPlan.description.disconnected": "请连接后查看 Coding Plan 权益。",
   "settings.modelProvider.codingPlan.description.checking":
     "正在使用当前供应商 API Key 查询 Coding Plan 权益。",
@@ -3160,7 +2905,7 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.codingPlan.product.firstPromo": "首购优惠",
   "settings.modelProvider.codingPlan.product.delay": "{time} 生效",
   "settings.modelProvider.codingPlan.zai.plan.lite.name": "Lite",
-  "settings.modelProvider.codingPlan.zai.plan.lite.summary": "Claude Pro 用量额度的 3 倍",
+  "settings.modelProvider.codingPlan.zai.plan.lite.summary": "基础用量额度",
   "settings.modelProvider.codingPlan.zai.plan.pro.name": "Pro",
   "settings.modelProvider.codingPlan.zai.plan.pro.summary":
     "包含 Lite 全部权益，外加 5 倍 Lite 用量",
@@ -3168,7 +2913,7 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.codingPlan.zai.plan.max.summary":
     "包含 Pro 全部权益，外加 20 倍 Lite 用量",
   "settings.modelProvider.codingPlan.bigmodel.plan.lite.name": "Lite",
-  "settings.modelProvider.codingPlan.bigmodel.plan.lite.summary": "Claude Pro 用量额度的 3 倍",
+  "settings.modelProvider.codingPlan.bigmodel.plan.lite.summary": "基础用量额度",
   "settings.modelProvider.codingPlan.bigmodel.plan.pro.name": "Pro",
   "settings.modelProvider.codingPlan.bigmodel.plan.pro.summary":
     "Lite 用量额度的 5 倍 + Lite 全量权益",
@@ -3633,7 +3378,6 @@ const zhCN: Record<string, string> = {
   "settings.skills.import.resultEmpty": "暂无技能导入结果。",
   "settings.skills.import.completeDescription": "技能列表已刷新。同名技能会保留现有版本。",
   "settings.skills.import.finish": "完成",
-  // skill 入口曾保留小写，与 MCP/Plugin 并排时不一致；统一技术名词首字母大写。
   "settings.skills.remoteSync.open": "同步 Skill",
   "settings.skills.remoteSync.title": "同步 Skills 到远端目标",
   "settings.skills.remoteSync.warningTitle": "数据和环境可用性提醒",
@@ -3830,7 +3574,7 @@ const zhCN: Record<string, string> = {
   "settings.plugins.store.searchResults": "搜索结果（{count}）",
   "settings.plugins.store.searchEmpty": "没有匹配的插件",
   "settings.plugins.store.installedStrip": "已安装",
-  "settings.plugins.store.manageInstalled": "管理已安装",
+  "settings.plugins.store.manageInstalled": "插件管理",
   "settings.plugins.store.segment.public": "公开",
   "settings.plugins.store.segment.personal": "个人",
   "settings.plugins.store.featured": "Featured",
@@ -4102,7 +3846,6 @@ const zhCN: Record<string, string> = {
   "settings.commands.import.resultList": "命令导入结果",
   "settings.commands.import.resultEmpty": "暂无命令导入结果。",
   "settings.commands.import.finish": "完成",
-
   "settings.hooks.review.trust": "信任",
   "settings.hooks.review.notice": "钩子可在沙盒外运行，因此，请审查最近安装或修改的所有钩子",
   "settings.hooks.review.unavailable": "当前连接不支持信任此 Hook。",
@@ -4301,8 +4044,6 @@ const zhCN: Record<string, string> = {
   "onboarding.finish.summary.agentsFile": "AGENTS.md",
   "onboarding.finish.summary.settings.detail":
     "已导入 {imported}，已跳过 {skipped}，失败 {failed}。",
-
-  // 对话
   "chat.empty.title": "开始对话",
   "chat.empty.description": "开始在 {workspace} 项目新建任务",
   "chat.empty.description.beforeWorkspace": "开始在",
@@ -4338,8 +4079,8 @@ const zhCN: Record<string, string> = {
   "chat.empty.selectProject": "选择项目",
   "chat.empty.workOutsideProject": "不在项目中工作",
   "chat.empty.detachProject": "取消选择当前项目",
-  "chat.empty.workspaceSearchPlaceholder": "搜索工作区",
-  "chat.empty.workspaceSearchEmpty": "没有匹配的工作区",
+  "chat.empty.workspaceSearchPlaceholder": "搜索项目或设备",
+  "chat.empty.workspaceSearchEmpty": "没有匹配的项目",
   "chat.empty.cliMenu": "选择 CLI",
   "chat.empty.home": "主目录",
   "chat.empty.createWorkspace.title": "创建工作区",
@@ -4391,7 +4132,6 @@ const zhCN: Record<string, string> = {
   "chat.message.mailbox.from": "来自 {sessionId} 的新消息",
   "chat.message.expand": "展开",
   "chat.message.collapse": "收起",
-  // 子代理 transcript 里折起来的引擎尾注。
   "chat.userInput.epilogue.label": "工作流引擎附加说明",
   "chat.message.bodyPreview.notice":
     "这条回复较大，当前只显示预览（{previewBytes} / {fullBytes}）。",
@@ -4553,10 +4293,7 @@ const zhCN: Record<string, string> = {
   "chat.summaryPanel.openRunningSubagentSession": "打开子智能体会话",
   "chat.composer.backgroundWorks.tooltipTerminal": "运行中的终端",
   "chat.composer.backgroundWorks.tooltipAgent": "打开运行中的智能体",
-  // workflow 从 bash 拆出后 badge 有三类：
-  // 恰好一类时用该类文案，混合仍走 tooltipMixed——三类两两组合再各写一句只会堆出六条同义句。
   "chat.composer.backgroundWorks.tooltipWorkflow": "打开运行中的工作流",
-  // 唯一在跑的工作流直达详情页时，徽标如实说出落点。
   "chat.composer.backgroundWorks.tooltipWorkflowDetails": "打开工作流详情",
   "chat.composer.backgroundWorks.tooltipMixed": "打开运行中的终端与智能体",
   "chat.composer.backgroundWorks.ariaLabel":
@@ -4582,8 +4319,6 @@ const zhCN: Record<string, string> = {
   "chat.statusPanel.todoWaitingFold": "待处理 {count} 项",
   "chat.statusPanel.terminals": "终端",
   "chat.statusPanel.agents": "智能体",
-  // Workflows 分区：与 Terminals / Agents 并列的
-  // 第三类实时活动。行内的状态词与步数复用 chat.toolCall.workflow.* 那一组，不另造词汇。
   "chat.statusPanel.workflows": "工作流",
   "chat.statusPanel.runningStatusValue": "{count} 个后台运行",
   "chat.statusPanel.runningStatusValuePlural": "{count} 个后台运行",
@@ -4607,15 +4342,11 @@ const zhCN: Record<string, string> = {
   "chat.goal.runningBlocked": "请结束任务后设定目标。",
   "chat.goal.planModeBlocked": "Goal 无法在 Plan 模式下使用，请切换模式。",
   "chat.plan.attachmentsBlocked": "首版 /plan 仅支持纯文本，请移除附件或上下文后重试。",
-  // /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的
-  // 三种提示——命令被拒、回执没带文本、draft 还没有会话可作用。
   "chat.ctx.rejected": "Magic Context 命令被拒绝。",
   "chat.ctx.noResponse": "Magic Context 命令没有返回输出。",
   "chat.ctx.sessionRequired": "/ctx-* 需要一个已存在的会话，请先发送一条消息再试。",
-  // 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。
   "chat.edit.rejected": "编辑重发被拒绝，会话状态可能未恢复完成，请重试或新发一条消息。",
   "chat.toolbar.mode.label": "切换模式",
-  // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",
   "chat.toolbar.computerUse.tooltip.idle": "电脑操作空闲——首次使用时自动启动",
   "chat.toolbar.computerUse.tooltip.starting": "正在启用电脑操作插件…",
@@ -4777,13 +4508,10 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.skill.args": "参数",
   "chat.toolCall.skill.unknown": "未知技能",
   "chat.toolCall.skill.noOutput": "没有输出。",
-  // kind 文案按行状态分相：「校验」只在 running 相成立（脚本早在确认弹窗前就被
-  // analyze 过），模型写脚本与等用户确认各有自己的说法。
   "chat.toolCall.workflow.writing": "正在编写工作流",
   "chat.toolCall.workflow.revising": "正在修改工作流",
   "chat.toolCall.workflow.draft": "工作流草稿",
   "chat.toolCall.workflow.draftOrdinal": "第 {ordinal} 稿",
-  // ── AmendWorkflow 行的修订词汇──
   "chat.toolCall.workflow.amend.writing": "正在调整工作流",
   "chat.toolCall.workflow.amend.revising": "正在修改工作流调整",
   "chat.toolCall.workflow.amend.draft": "工作流调整草稿",
@@ -4810,28 +4538,18 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.truncated": "部分诊断已省略。",
   "chat.toolCall.workflow.noScript": "未提供工作流脚本。",
   "chat.toolCall.workflow.graph.truncated": "图过大，部分参与者已省略。",
-  // 车道与药丸的文案。车道名是结构，作者原词原样显示。
   "chat.toolCall.workflow.graph.lane.script": "脚本",
   "chat.toolCall.workflow.graph.lane.unresolved": "未解析",
-  // 分析拿不到名字时的兜底：站点 id（actor#3）是身份，不能当名字显示。并存多条才编号。
   "chat.toolCall.workflow.graph.lane.anonymous": "未命名子代理",
   "chat.toolCall.workflow.graph.lane.anonymousIndexed": "未命名子代理 {index}",
-  // 侧栏子代理行的计数：一枚药丸代表该子代理在阶段内的全部 ask；脚本药丸数读取。
-  // 展示词是「任务」：脚本里的 .ask() 是派给子代理的任务，
-  // 「问题」只留给 escalate（子代理向主代理提问），两者不能同用一个词。
   "chat.toolCall.workflow.graph.card.tasks": "{count} 个任务",
   "chat.toolCall.workflow.graph.card.reads": "{count} 次读取",
-  // 药丸状态标记的 aria-label：状态永不只靠颜色或图形。
   "chat.toolCall.workflow.graph.status.running": "运行中",
   "chat.toolCall.workflow.graph.status.done": "已完成",
   "chat.toolCall.workflow.graph.status.failed": "已失败",
   "chat.toolCall.workflow.graph.status.pending": "待开始",
-  // ── 阶段名兜底──
-  // `unphased` 是合成阶段：它装的是首个 `phase()` 标记之前的 step，不是作者写下的名字。
   "chat.toolCall.workflow.graph.phase.unphased": "未分组",
-  // 无 `phase()` 标记的脚本的隐式唯一阶段：整个脚本就是一个阶段。
   "chat.toolCall.workflow.graph.phase.workflow": "工作流",
-  // ── 时间线──
   "chat.toolCall.workflow.timeline.rounds": "已到访 {count} 次",
   "chat.toolCall.workflow.timeline.openAgent": "打开 {name} 的会话记录",
   "chat.toolCall.workflow.timeline.openScript": "打开 {phase} 处的脚本步骤",
@@ -4844,22 +4562,17 @@ const zhCN: Record<string, string> = {
     "还有 {count} 个子代理 · 在运行侧栏里列出全部",
   "chat.toolCall.workflow.timeline.roster.door.list": "还有 {count} 个子代理 · 在这里列出",
   "chat.toolCall.workflow.timeline.roster.door.fold": "还有 {count} 个子代理 · 收起",
-  // 门后名单末尾的那一行：被淘汰的子代理没有行，差额在这里说明。
   "chat.toolCall.workflow.timeline.roster.unlisted.one": "另有 1 个子代理未列出",
   "chat.toolCall.workflow.timeline.roster.unlisted.many": "另有 {count} 个子代理未列出",
   "chat.toolCall.workflow.timeline.ledge.earlier": "{count} 个更早的阶段已滚出视野",
   "chat.toolCall.workflow.timeline.ledge.later": "{count} 个更晚的阶段已滚出视野",
   "chat.toolCall.workflow.timeline.scrollbar": "时间线滚动位置",
-  // ── 工具卡表头 / 页脚──
-  // 种类词按实例状态说话；steps 读作「已排程的里结算了几个」——动态工作流没有静态总数。
   "chat.toolCall.workflow.card.started": "工作流已启动",
   "chat.toolCall.workflow.card.running": "工作流运行中",
   "chat.toolCall.workflow.card.completed": "工作流已完成",
   "chat.toolCall.workflow.card.errored": "工作流出错",
   "chat.toolCall.workflow.card.stopped": "工作流已停止",
-  // lineage：被修订替代的 run 与修订出来的 run。
   "chat.toolCall.workflow.card.superseded": "工作流已被替代",
-  // run 不在活投影里（八条上限淘汰 / 冷恢复无 journal 命中）的中性种类词：不冒充某个终态。
   "chat.toolCall.workflow.card.ended": "工作流已结束",
   "chat.toolCall.workflow.card.steps": "{done}/{total} 步",
   "chat.toolCall.workflow.card.phase": "{count} 个阶段",
@@ -4871,41 +4584,29 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.card.tokens": "{count} tokens",
   "chat.toolCall.workflow.card.round": "第 {count} 轮",
   "chat.toolCall.workflow.card.rounds": "{count} 轮",
-  // 末段数产物（脚本经 artifact.* 交付给用户的产出），不是 report 条目——Results 区已撤走。
   "chat.toolCall.workflow.card.artifact": "{count} 个产物",
   "chat.toolCall.workflow.card.artifacts": "{count} 个产物",
-  // ── 轮尾摘要──
-  // 种类词、状态词与计数复用上面的 run 卡词汇表；这里只有芯片与 chevron 的文案。
   "chat.toolCall.workflow.digest.question": "{count} 个待答问题",
   "chat.toolCall.workflow.digest.questions": "{count} 个待答问题",
   "chat.toolCall.workflow.digest.showAgents": "显示子代理",
   "chat.toolCall.workflow.digest.hideAgents": "隐藏子代理",
-  // ── 完成卡──
-  // 种类词、状态词与产物文案复用既有词汇表；这里只有四格的标签与「拿不到」的无障碍名。
   "chat.toolCall.workflow.completion.time": "时间",
   "chat.toolCall.workflow.completion.tokens": "tokens",
   "chat.toolCall.workflow.completion.subagents": "子代理",
   "chat.toolCall.workflow.completion.phases": "阶段",
   "chat.toolCall.workflow.completion.unavailable": "暂无数据",
-  // 交付物行之后放不下的其余产物：`+N` 格的说明行；点开实例侧板看全部（title 复用 openRunDetails）。
   "chat.toolCall.workflow.completion.moreArtifacts": "还有 {count} 个",
-  // ── 侧栏阶段清单──
   "chat.toolCall.workflow.run.phase.expand": "展开阶段 {name}",
   "chat.toolCall.workflow.run.phase.collapse": "收起阶段 {name}",
-  // ── 直接启动的来龙去脉：run 详情侧板的 provenance 节。
   "chat.workflowLaunch.scope.project": "项目",
   "chat.workflowLaunch.scope.global": "全局",
   "chat.workflowLaunch.startedByYou": "由你从工作流中枢启动",
-  // 「配置」修订出来的 run 的来龙去脉块。
   "chat.workflowLaunch.settingsChangedByYou": "由你调整设置",
   "chat.workflowLaunch.settings.model": "子代理模型",
-  "chat.workflowLaunch.settings.limit": "同时运行上限",
+  "chat.workflowLaunch.settings.limit": "最大并发数",
   "chat.workflowLaunch.settings.sessionModel": "会话模型",
   "chat.workflowLaunch.settings.machineLimit": "本机上限",
   "chat.workflowLaunch.settings.machineLimitValue": "{n}（本机上限）",
-  // ── 可复用工作流：SaveWorkflow / ListSavedWorkflows
-  // 的聊天卡。「覆盖」这个词由保存确认窗共用——同一次保存在两个面上必须同名，
-  // 照 run 卡复用 chat.toolCall.workflow.run.status.* 词汇表的同一条先例。
   "chat.toolCall.workflow.save.saving": "正在保存工作流",
   "chat.toolCall.workflow.save.saved": "已保存工作流",
   "chat.toolCall.workflow.save.overwrite": "覆盖",
@@ -4922,7 +4623,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.list.empty": "这个项目里还没有保存过工作流",
   "chat.toolCall.workflow.list.invalid": "{count} 个文件无法解析",
   "chat.toolCall.workflow.list.invalidOne": "{count} 个文件无法解析",
-  // ListModels 的目录卡。
   "chat.toolCall.workflow.models.listing": "正在列出模型",
   "chat.toolCall.workflow.models.listed": "可用模型",
   "chat.toolCall.workflow.models.count": "{count} 个模型",
@@ -4934,9 +4634,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.models.levelsNoDefault": "思考强度：{levels}",
   "chat.toolCall.workflow.models.noLevels": "没有思考强度档位",
   "chat.toolCall.workflow.models.truncated": "未显示全部模型",
-
-  // ── 已保存工作流的 GUI 中枢：自动化页「工作流」标签、
-  // 卡片、实参窗、详情页、运行历史。术语（run = 实例）。
   "automations.pageTab.ariaLabel": "自动化页面",
   "automations.pageTab.automation": "自动化",
   "automations.pageTab.workflow": "工作流",
@@ -5040,8 +4737,6 @@ const zhCN: Record<string, string> = {
   "workflows.hub.history.note":
     "运行记录来自本项目的工作流日志，重启后仍然保留；「查看实例」会回到发起它的对话并打开实例详情。",
   "workflows.hub.history.tokens": "{tokens} tokens",
-  // 中枢的产物条：详情页头部那条「最近产物」。
-  // 取的是**最近一次 completed run** 的产物，所以措辞不能读成"这个工作流的产物"。
   "workflows.hub.artifacts.latest": "最近产物",
   "workflows.hub.reason.invalid_name": "名字不合法",
   "workflows.hub.reason.not_found": "文件不存在",
@@ -5049,7 +4744,6 @@ const zhCN: Record<string, string> = {
   "workflows.hub.reason.read_error": "文件无法读取",
   "workflows.hub.time.duration.seconds": "{seconds} 秒",
   "workflows.hub.time.duration.minutes": "{minutes} 分 {seconds} 秒",
-  // ── 观察类工具卡──
   "chat.toolCall.workflow.getRun.fetching": "正在获取工作流状态",
   "chat.toolCall.workflow.getRun.runningNodes": "{count} 个节点运行中",
   "chat.toolCall.workflow.getRun.fetched": "工作流状态",
@@ -5062,8 +4756,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.getRun.logEmpty": "还没有日志",
   "chat.toolCall.workflow.getRun.interruptedHint":
     "本会话无法证实这个实例仍在运行：它可能已被中断。",
-  // 情势截面的词与读数（「Their cards」）。
-  // 词表与运行侧栏一致：子代理、阶段、运行中、已完成、等待槽位；年龄是裸时长 + 「前」。
   "chat.toolCall.workflow.getRun.age": "{age} 前",
   "chat.toolCall.workflow.getRun.truncated": "卡上省略了部分行。",
   "chat.toolCall.workflow.getRun.questionsUnknown":
@@ -5135,75 +4827,55 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.snippet.section.logs": "日志",
   "chat.toolCall.workflow.snippet.section.response": "返回值",
   "chat.toolCall.workflow.snippet.logsEmpty": "没有日志",
-  // ── Workflow 通知行──
-  // 后台 workflow 通知走既有工具卡语法（ToolLayout 行），这里只有 kindLabel：终态三状态 +
-  // 升级三态（按 pendingQuestions 联查活翻转）。run 名 / 问题正文 / 结果都不需要新键——
-  // 结果面板复用 submit-result 惯例，问题/背景标题复用 escalate 的 question/context，
-  // 侧板入口复用 chat.toolCall.workflow.openRunDetails。
   "chat.backgroundResult.workflow.completed": "工作流已完成",
   "chat.backgroundResult.workflow.errored": "工作流出错",
   "chat.backgroundResult.workflow.stopped": "工作流已停止",
-  // run 级停滞通知：run 还在跑，只是没有进展。
   "chat.backgroundResult.workflow.stall": "工作流等待模型",
   "chat.backgroundResult.workflow.stall.body":
     "本实例已有 {minutes} 分钟没有一次成功的模型请求。它仍在运行并按退避重试；不再需要时可在运行卡上停止。",
   "chat.backgroundResult.workflow.stall.reason": "重试原因",
-  "chat.backgroundResult.workflow.stall.cap": "当前并发数",
+  "chat.backgroundResult.workflow.stall.cap": "最大并发数",
   "chat.backgroundResult.workflow.waiting": "子代理正在等待回答",
   "chat.backgroundResult.workflow.answered": "子代理的问题已回答",
   "chat.backgroundResult.workflow.asked": "子代理提出了问题",
-  // 通知行折叠头部的产物 chips 溢出计数（≤ 3 枚 chip + 「+N」）。
   "chat.backgroundResult.workflow.artifacts.more": "+{count}",
-  // ── 升级问答工具卡 ──
-  // escalate：子代理把阻塞问题升级给主代理，停驻等答案。asking 相可能持续很久，措辞要平静。
   "chat.toolCall.workflow.escalate.asking": "正在询问主代理",
   "chat.toolCall.workflow.escalate.asked": "已询问主代理",
   "chat.toolCall.workflow.escalate.question": "问题",
   "chat.toolCall.workflow.escalate.context": "背景",
   "chat.toolCall.workflow.escalate.answer": "答复",
   "chat.toolCall.workflow.escalate.fallbackName": "问题",
-  // ResolveWorkflowQuestion：主代理按 qid 作答。outcome 段既承载成功确认，也承载结构化拒绝。
   "chat.toolCall.workflow.resolveQuestion.answering": "正在回答问题",
   "chat.toolCall.workflow.resolveQuestion.answered": "已回答问题",
   "chat.toolCall.workflow.resolveQuestion.questionId": "问题 ID",
   "chat.toolCall.workflow.resolveQuestion.answer": "答复",
   "chat.toolCall.workflow.resolveQuestion.outcome": "结果",
   "chat.toolCall.workflow.resolveQuestion.fallbackName": "回答",
-  // ── workflow run 详情页──
   "chat.toolCall.workflow.openRunDetails": "查看实例详情",
   "chat.toolCall.workflow.run.status.pending": "待启动",
   "chat.toolCall.workflow.run.status.running": "运行中",
   "chat.toolCall.workflow.run.status.completed": "已完成",
   "chat.toolCall.workflow.run.status.errored": "出错",
   "chat.toolCall.workflow.run.status.stopped": "已停止",
-  // stopped 的原因词，跟在状态词后。
   "chat.toolCall.workflow.run.stopReason.user": "你停止的",
   "chat.toolCall.workflow.run.stopReason.model": "代理停止的",
   "chat.toolCall.workflow.run.stopReason.provider": "模型侧错误",
   "chat.toolCall.workflow.run.stopReason.interrupted": "进程已退出",
   "chat.toolCall.workflow.run.stopReason.superseded": "已被替代",
-  // 状态词与原因词之后的第三个词：由 CLI 用
-  // `resumable` 状态位发过来，UI 绝不自行推导——它是「停止 ≠ 丢弃」在状态行上的那一半。
   "chat.toolCall.workflow.run.resumable": "可恢复",
-  // 详情页状态头下的 lineage 行。
   "chat.toolCall.workflow.run.amends": "调整自 run",
   "chat.toolCall.workflow.run.supersededBy": "已被替代，后继 run",
   "chat.toolCall.workflow.run.outcome.ok": "成功",
   "chat.toolCall.workflow.run.outcome.failed": "失败",
   "chat.toolCall.workflow.run.outcome.cancelled": "取消",
-  // 用量是观察面，没有上限：只报已花 token 与步数。
   "chat.toolCall.workflow.run.usage.label": "用量",
   "chat.toolCall.workflow.run.usage.tokens": "{tokens} tokens",
   "chat.toolCall.workflow.run.usage.value": "{tokens} tokens · {steps} 步",
-  // 实例表撞界后卡与详情页各有的那一句：停的是每一步的**详情**，不是 run，
-  // 它上面那些计数已经把表外的实例算进来了。
   "chat.toolCall.workflow.run.truncated": "仅展示 {shown}/{total} 步的详情",
   "chat.toolCall.workflow.run.cancel": "停止运行",
   "chat.toolCall.workflow.run.cancelling": "正在停止…",
   "chat.toolCall.workflow.run.cancelDisabled": "只有正在运行的工作流可以停止。",
-  // 停止钮提示的第二行：在做决定的那一刻就说清楚——停下的运行可以恢复。
   "chat.toolCall.workflow.run.stopHint": "停止后可以随时恢复，已完成的步骤会保留。",
-  // Stop / Resume 被拒时状态头下的一句话。
   "chat.toolCall.workflow.run.rejection.cancel.not_found":
     "这个运行并不在当前 agent 里执行，没有任何东西被停止。",
   "chat.toolCall.workflow.run.rejection.cancel.not_running":
@@ -5225,8 +4897,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.run.resume": "恢复运行",
   "chat.toolCall.workflow.run.resumeHint":
     "从停下的地方继续：已完成的步骤直接复用，被打断的步骤重新执行。",
-  // 「配置」弹层：改子代理模型与同时运行上限，
-  // 应用即一次 GUI 修订（新 run 接着跑，旧 run 停下，已完成的步骤作缓存带过去）。
   "chat.toolCall.workflow.run.configure": "配置",
   "chat.toolCall.workflow.run.settings.title": "配置工作流",
   "chat.toolCall.workflow.run.settings.model": "子代理模型",
@@ -5235,11 +4905,11 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.run.settings.model.unavailable": "不可用",
   "chat.toolCall.workflow.run.settings.model.noCatalog":
     "当前 agent 没有可选的模型目录，子代理沿用会话模型。",
-  "chat.toolCall.workflow.run.settings.limit": "同时运行的子代理上限",
+  "chat.toolCall.workflow.run.settings.limit": "最大并发数",
   "chat.toolCall.workflow.run.settings.limit.ceiling": "本机上限 {n}",
   "chat.toolCall.workflow.run.settings.limit.atCeiling": "= 本机上限",
-  "chat.toolCall.workflow.run.settings.limit.decrease": "减少同时运行数",
-  "chat.toolCall.workflow.run.settings.limit.increase": "增加同时运行数",
+  "chat.toolCall.workflow.run.settings.limit.decrease": "降低最大并发数",
+  "chat.toolCall.workflow.run.settings.limit.increase": "提高最大并发数",
   "chat.toolCall.workflow.run.settings.consequence.running":
     "将停止当前运行，以新设置另起一次运行，已完成的步骤会保留。",
   "chat.toolCall.workflow.run.settings.consequence.pending":
@@ -5248,7 +4918,6 @@ const zhCN: Record<string, string> = {
     "将以新设置另起一次运行接着跑，已完成的步骤会保留。",
   "chat.toolCall.workflow.run.settings.consequence.errored":
     "将以新设置另起一次运行重试，已完成的步骤会保留。",
-  // 只改并发上限、而且运行正在跑：就地生效。
   "chat.toolCall.workflow.run.settings.consequence.concurrencyLive":
     "立即应用到当前运行，不会新起一次运行。",
   "chat.toolCall.workflow.run.settings.apply": "应用",
@@ -5268,80 +4937,54 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.run.settings.rejection.unsupported":
     "当前 agent 不支持从这里调整工作流设置。",
   "chat.toolCall.workflow.run.settings.rejection.generic": "设置没能调整（{code}）。",
-  // 设置轮在转写里的那一行。
   "chat.toolCall.workflow.settingsChange.kind": "已调整设置",
   "chat.toolCall.workflow.settingsChange.model": "子代理改用 {model}",
   "chat.toolCall.workflow.settingsChange.modelSession": "子代理改回会话模型",
   "chat.toolCall.workflow.settingsChange.limit": "最多 {n} 个同时运行",
   "chat.toolCall.workflow.settingsChange.limitCeiling": "上限恢复为本机默认",
   "chat.toolCall.workflow.run.result.title": "结果",
-  // resultPreview 本阶段恒缺席：产物只在 RunSettlement.artifact 里，不在事件也不在 journal。
-  // 所以完成态只能指路，绝不编造一个结果视图。
   "chat.toolCall.workflow.run.result.completedHint":
     "本实例已完成，结果以后台结果消息的形式投递到会话里。",
   "chat.toolCall.workflow.run.result.erroredTitle": "实例出错",
   "chat.toolCall.workflow.run.result.stoppedTitle": "实例已停止",
   "chat.toolCall.workflow.run.result.noError": "没有记录到错误详情。",
-  // Artifacts 区（用户面产物）：与上面那个「结果」
-  // **不是同一件事**——`result.title`（结果）是脚本的顶层返回值（给模型的），这一节（产物）
-  // 是脚本用 `artifact.*` 交付给**用户**的产出。两者在屏幕上必须可区分，措辞刻意不重叠。
   "chat.toolCall.workflow.run.artifacts.title": "产物",
-  // 折叠 aria-label。这一节**默认展开**（产物是交付物，紧贴图之下常开）。
   "chat.toolCall.workflow.run.artifacts.expand": "展开产物",
   "chat.toolCall.workflow.run.artifacts.collapse": "收起产物",
-  // 六个 kind 词 = facade `artifact.*` 的六个成员。file/markdown 是内容产物（有字节与版本），
-  // 其余四个是 journal 投影出来的看板（没有字节）。
   "chat.toolCall.workflow.run.artifacts.kind.file": "文件",
   "chat.toolCall.workflow.run.artifacts.kind.markdown": "文档",
   "chat.toolCall.workflow.run.artifacts.kind.chart": "图表",
   "chat.toolCall.workflow.run.artifacts.kind.table": "表格",
   "chat.toolCall.workflow.run.artifacts.kind.metrics": "指标",
   "chat.toolCall.workflow.run.artifacts.kind.board": "看板",
-  // 版本号。中文用「第 {n} 版」，英文用紧凑的 v{n}——两边各自读起来自然，不强行同形。
   "chat.toolCall.workflow.run.artifacts.version": "第 {version} 版",
-  // 药丸尾槽里的紧凑版号（14px 的格子；长写在 tooltip 里）。
   "chat.toolCall.workflow.run.artifacts.versionTail": "v{version}",
   "chat.toolCall.workflow.run.artifacts.versionOf": "第 {version} 版 / 共 {total} 版",
   "chat.toolCall.workflow.run.artifacts.previousVersion": "上一版",
   "chat.toolCall.workflow.run.artifacts.nextVersion": "下一版",
   "chat.toolCall.workflow.run.artifacts.open": "打开产物",
-  // 动作。「下载」刻意缺席：packages/ui 没有任何保存文件的宿主能力。
   "chat.toolCall.workflow.run.artifacts.reveal": "在工作区显示",
   "chat.toolCall.workflow.run.artifacts.copy": "复制",
   "chat.toolCall.workflow.run.artifacts.copied": "已复制",
   "chat.toolCall.workflow.run.artifacts.openInBrowser": "在浏览器中打开",
-  // 打开的是**工作区里的原文件**，不是这一版被钉住的字节（协议不给 renderer store 路径）。
-  // 卡上必须写明这件事，否则用户会以为自己在看历史版本。
   "chat.toolCall.workflow.run.artifacts.openInBrowserNote":
     "打开的是工作区里的那一份，不是这一版钉住的字节。",
-  // 远程工作区（SSH/WSL/Docker）拿不到本地文件路径，html 预览与「在工作区显示」都不可用。
   "chat.toolCall.workflow.run.artifacts.localOnly": "仅本地工作区可预览。",
   "chat.toolCall.workflow.run.artifacts.loading": "正在读取产物…",
-  // 元数据读完了但这个 id 不在清单里（run 的记录已被清理 / chip 指向一个不存在的产物）。
   "chat.toolCall.workflow.run.artifacts.missing": "这个产物已经不在了。",
   "chat.toolCall.workflow.run.artifacts.loadError": "这个产物读取失败。",
-  // 没有任何查看器认得这个类型时的兜底卡：只报事实（类型 / 大小），不假装能渲染。
   "chat.toolCall.workflow.run.artifacts.unsupported":
     "这个文件类型没有内置预览，它仍然留在工作区里。",
-  // 看板 spec 解析不出来（老 CLI 写的形状 / 手工改坏的 journal 行）时的降级卡。
   "chat.toolCall.workflow.run.artifacts.presetInvalid": "这个看板的定义无法渲染。",
-  // 产物元数据整个读不到（老 CLI 没有 workflowRunArtifacts 查询）时，预置卡退回这句。
   "chat.toolCall.workflow.run.artifacts.unavailable": "当前会话读不到产物详情。",
-  // 三句喂给预置渲染器的译文（PresetLabels）。渲染器自己不查 i18n。
   "chat.toolCall.workflow.run.artifacts.preset.otherColumn": "其他",
   "chat.toolCall.workflow.run.artifacts.preset.empty": "暂无数据",
   "chat.toolCall.workflow.run.artifacts.preset.items": "{count} 条",
-  // 待答问题区（升级问答）：actor 停驻在自己那次 ask 里等
-  // 主代理回话。只读——应答者是主代理，不是用户，所以文案不能读起来像在请用户作答。
   "chat.toolCall.workflow.run.questions.title": "待答问题",
   "chat.toolCall.workflow.run.graph.unavailable": "当前会话的可见历史里没有这张工作流图。",
-  // 被 8-run 上限淘汰后的措辞必须诚实：丢的是实时状态，run 本身与它的记录都还在。
   "chat.toolCall.workflow.run.untracked.title": "已不在实时跟踪范围内",
   "chat.toolCall.workflow.run.untracked.body":
     "这个实例不在保留实时状态的最近若干实例之内，但它的运行记录仍然完整。",
-  // Transcript 的未启动态：actor 会话在首个 ask 派发时才创建，提前订阅只会失败。
-  // 措辞不能说「没有会话记录」——它只是还没开始，而且面板会自己接上。
-  // ── 脚本步骤（脚本 transcript）──
   "chat.toolCall.workflow.script.title": "脚本",
   "chat.toolCall.workflow.script.notStarted.title": "脚本还没执行任何步骤",
   "chat.toolCall.workflow.script.notStarted.body":
@@ -5378,9 +5021,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.run.actor.notStarted.title": "尚未启动",
   "chat.toolCall.workflow.run.actor.notStarted.body":
     "这个子代理还没有被问过任何问题。它的首个步骤一派发，会话记录就会出现在这里。",
-  // 逐条引擎事件的标签（`workflowRunEventLines` 的词汇表）。run 侧板的事件日志区已撤走，
-  // 分区自己的表头与空/错文案随之删除；这一族**保留**——它是
-  // journal 事件的展示规则，回放导出桶（replay.ts）仍在静态数据上用它。
   "chat.toolCall.workflow.run.event.runStarted": "实例启动",
   "chat.toolCall.workflow.run.event.actorCreated": "创建子代理",
   "chat.toolCall.workflow.run.event.nodeQueued": "入队",
@@ -5391,39 +5031,27 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.workflow.run.event.nodeSettledCached": "结算 · {outcome}（命中缓存）",
   "chat.toolCall.workflow.run.event.usageUpdated": "用量更新",
   "chat.toolCall.workflow.run.event.log": "日志",
-  // amend-resume：第一笔工作区写入关闭了前驱缓存，此后的步骤全部实跑。
   "chat.toolCall.workflow.run.event.importCacheClosed": "工作区写入，前驱缓存已关闭",
-  // report 与 log 都是 fire-and-forget，但 report 有 site 身份、进 journal，所以自成一类。
   "chat.toolCall.workflow.run.event.report": "报告",
   "chat.toolCall.workflow.run.event.phaseEntered": "进入阶段",
-  // 升级问答：两行都以 qid 打头（它们通常隔着几十行，qid 是唯一的关联键）。措辞与专用工具卡
-  // （chat.toolCall.workflow.escalate.* / resolveQuestion.*）对齐：日志行与卡面说同一件事。
   "chat.toolCall.workflow.run.event.escalationRaised": "询问主代理",
   "chat.toolCall.workflow.run.event.escalationResolved": "已回答",
   "chat.toolCall.workflow.run.event.runSettled": "实例结算 · {status}",
   "chat.toolCall.workflow.run.event.unknown": "{type}",
-  // 自适应并发：被限流的 ask 与进程级并发闸门。
   "chat.toolCall.workflow.run.event.nodeWaitingSlot": "等待槽位",
   "chat.toolCall.workflow.run.event.nodeWaitingBackoff":
     "等待 provider（{reason}）· {seconds}s 后重试",
   "chat.toolCall.workflow.run.event.nodeExecuting": "请求已发出",
   "chat.toolCall.workflow.run.event.concurrencyChanged": "并发 {previous} → {next}",
-  // 上一条是治理器在压共享桶；这一条是用户改了这次 run 自己的上限（就地生效，不另起一次运行）。
   "chat.toolCall.workflow.run.event.runCapsChanged": "并发上限 {previous} → {next}",
   "chat.toolCall.workflow.run.throttle.reason.rateLimited": "限流",
   "chat.toolCall.workflow.run.throttle.reason.overloaded": "过载",
   "chat.toolCall.workflow.run.throttle.reason.offpeak": "闲时排队",
   "chat.toolCall.workflow.run.throttle.reason.transient": "瞬态错误",
-  "chat.toolCall.workflow.run.concurrency.label": "并发数 {cap}",
+  "chat.toolCall.workflow.run.concurrency.label": "最大并发数 {cap}",
   "chat.toolCall.workflow.run.concurrency.cooldown": "冷却至 {time}",
-  // 子代理模型：只在这次 run 被指定过模型时在场。
-  // 详情侧板摘要行的第一段——这一行本来就是「这条 run 的几个数」，模型是它的第一个词。
-  // `{model}` 是**解析过的模型名**（describeWorkflowSubagentModel），不是规范串：规范串里的
-  // providerId 可能是一个 UUID，它只住在 tooltip 里。
   "chat.toolCall.workflow.run.subagentModel.label": "子代理 {model}",
-  // 模型名 + 思考强度：确认窗与 tooltip 说整句，卡与侧板只取模型名。
   "chat.toolCall.workflow.subagentModel.withLevel": "{model} · 思考 {level}",
-  // 三个面共用的 tooltip：一句解释 + 换行 + 规范串（规范串由代码接在后面，不进词条）。
   "chat.toolCall.workflow.subagentModel.tooltip": "子代理运行在 {model}。主代理仍使用会话模型。",
   "chat.toolCall.todo.updating": "正在更新待办",
   "chat.toolCall.todo.updated": "已更新待办",
@@ -5451,7 +5079,6 @@ const zhCN: Record<string, string> = {
   "chat.toolCall.explore.bucket.items": "项",
   "chat.toolCall.explore.emptySummary": "0 个文件",
   "chat.toolCall.source.subAgent": "子智能体",
-  // agent 工具块缺少 fallback 文案时会把内部 i18n id 直接渲染到界面。
   "chat.toolCall.agent.label": "子智能体",
   "chat.toolCall.agent.prompt": "提示词",
   "chat.toolCall.agent.fallback": "子智能体",
@@ -5506,7 +5133,7 @@ const zhCN: Record<string, string> = {
   "markdownImage.download": "下载图片",
   "markdownImage.downloadFailed": "下载图片失败",
   "markdownImage.downloadStarted": "图片下载已开始",
-  "markdownImage.downloadSucceeded": "图片已保存到 {path}",
+  "markdownImage.downloadSucceeded": "下载成功",
   "chat.attachments.preview.loading": "正在加载图片预览…",
   "chat.attachments.preview.videoLoading": "正在加载视频预览…",
   "chat.attachments.preview.unavailable": "这张图片已无法预览。",
@@ -5570,7 +5197,6 @@ const zhCN: Record<string, string> = {
   "chat.slash.subagents.empty": "没有匹配的子智能体",
   "chat.slash.emptyUnavailable": "没有匹配的命令",
   "chat.slash.emptyResults": "没有匹配的 slash command",
-  // 错误
   "chat.error.connectionLost": "与代理的连接已断开",
   "chat.error.processExited": "代理进程意外退出",
   "chat.error.dismiss": "关闭错误提示",
@@ -5592,8 +5218,6 @@ const zhCN: Record<string, string> = {
   "chat.error.sendFailed": "发送失败，请稍后重试。",
   "chat.error.modelSettings": "模型设置",
   "chat.error.setModels": "配置",
-
-  // Start Plan 单桶额度提醒
   "chat.quota.startPlan.bucketDailyLow": "{model} 今日额度剩余 {percent}（{remaining} tokens）。",
   "chat.quota.startPlan.bucketActivityLow":
     "{model} 活动额度剩余 {percent}（{remaining} tokens）。",
@@ -5614,8 +5238,6 @@ const zhCN: Record<string, string> = {
   "chat.quota.action.switchModel": "切换模型",
   "chat.quota.action.switchProvider": "切换供应商",
   "chat.quota.action.refresh": "刷新额度",
-
-  // 权限请求
   "chat.permission.title": "需要权限",
   "chat.permission.awaitingApproval": "等待确认",
   "chat.permission.approve": "允许",
@@ -5640,30 +5262,17 @@ const zhCN: Record<string, string> = {
   "chat.permission.workflow.hideScript": "收起完整脚本",
   "chat.permission.workflow.refine": "提出修改",
   "chat.permission.workflow.refine.placeholder": "描述这个工作流应该怎么改…",
-  // 会话免确认：只活在本次会话，重启后再问。
   "chat.permission.workflow.allowForSession": "本会话内始终允许",
   "chat.permission.workflow.allowForSession.description": "本会话内运行工作流不再询问",
-  // ── 修订──
-  // 修订的确认窗只对别的会话的 run 出现：问句换词，多一行 lineage（前驱还在跑时再多一句）。
-  // 不导入预览、不放脚本 diff。
   "chat.permission.workflow.amend.title": "调整此工作流？",
   "chat.permission.workflow.amends": "调整 run",
   "chat.permission.workflow.amends.running": "仍在运行，将被停止",
   "chat.permission.workflow.amends.scriptUnchanged": "脚本不变",
-  // 并发上限：模型只在用户要求时才写
-  // 这个字段，所以这一行说的是用户自己提的条件。单位是「同时在跑的子代理」，不是请求数。
   "chat.permission.workflow.maxConcurrency": "最多 {count} 个子代理同时运行",
-  // 子代理模型：模型只在用户开口要求时才写 `subagent_model`，
-  // 所以这一行也是用户自己提的条件。只说子代理——主代理无论如何都留在会话模型上。
-  // `{model}` 是解析过的模型名（必要时带思考强度），不是规范串；规范串在这一行的 tooltip 里。
   "chat.permission.workflow.subagentModel": "子代理运行在 {model}",
-  // ── 可复用工作流──
-  // saved 来源徽标（运行确认窗）：只说明脚本来自哪个文件、带了什么实参。
-  // 它不表达任何信任——保存不产生信任，已保存的工作流照样过完整的运行确认。
   "chat.permission.workflow.saved.badge": "已保存的工作流",
   "chat.permission.workflow.saved.scope.project": "project",
   "chat.permission.workflow.saved.args": "实参",
-  // 保存确认窗：覆盖与新建是两句不同的问句，不是同一句话加个标记。
   "chat.permission.workflow.save.title": "把这个工作流保存到项目里？",
   "chat.permission.workflow.save.overwriteTitle": "覆盖已保存的同名工作流？",
   "chat.permission.workflow.save.overwriteHint":
@@ -5684,8 +5293,6 @@ const zhCN: Record<string, string> = {
   "chat.cuaPermission.openScreenRecording": "打开屏幕录制设置",
   "chat.cuaPermission.opening": "正在打开...",
   "chat.cuaPermission.openFailed": "无法打开 CUA 权限引导：{error}",
-
-  // 用户问答
   "chat.elicitation.title": "需要确认",
   "chat.elicitation.keyboardHint": "使用 Tab / 上下键选择，回车或空格选中",
   "chat.elicitation.customAnswer": "自定义回答",
@@ -5723,8 +5330,6 @@ const zhCN: Record<string, string> = {
   "chat.permission.fileChange.addMany": "创建 {count} 个文件",
   "chat.permission.fileChange.updateMany": "编辑 {count} 个文件",
   "chat.permission.fileChange.mixedMany": "更新 {count} 个文件",
-
-  // 模式
   "mode.plan": "计划",
   "mode.label.glm.build": "变更前确认",
   "mode.label.glm.edit": "自动编辑",
@@ -5754,8 +5359,6 @@ const zhCN: Record<string, string> = {
   "planTool.panel.syncing": "正在同步计划…",
   "planTool.guidance.enterMode": "已开启 Plan Mode",
   "chat.permission.switchMode.placeholder": "实施计划",
-
-  // ZCode Agent
   "zcode.unavailable": "AI 代理不可用",
   "zcode.initFailed": "启动 AI 代理失败",
   "zcode.error.TASK_OWNED_BY_OTHER_HOST": "该任务正在另一个已连接视图中运行。",
@@ -5786,15 +5389,11 @@ const zhCN: Record<string, string> = {
   "zcode.error.modelSuspiciousEmpty": "模型未返回任何内容。",
   "zcode.error.providerBusiness.2007": "上游服务暂时不可用，请稍后重试。",
   "zcode.error.providerBusiness.429": "请求过于频繁，请稍后重试。",
-
-  // 调试信息栏
   "debugInfo.taskId": "Task ID",
   "debugInfo.traceId": "Trace ID",
   "debugInfo.sessionId": "Session ID",
   "debugInfo.provider": "Provider",
   "debugInfo.copied": "已复制",
-
-  // 资源管理器
   "resourceManager.title": "资源管理器",
   "resourceManager.loading": "正在读取资源占用...",
   "resourceManager.unavailable": "资源管理器接口不可用",
@@ -5811,8 +5410,6 @@ const zhCN: Record<string, string> = {
   "resourceManager.sampling": "指标采集中",
   "resourceManager.column.process": "进程",
   "resourceManager.column.pid": "PID",
-
-  // 反馈
   "feedback.center.title": "问题上报",
   "feedback.center.description": "描述问题即可，提交后可查看处理进展。",
   "feedback.center.submitTitle": "提交反馈",
@@ -6064,7 +5661,7 @@ const zhCN: Record<string, string> = {
   "feedback.submit.simple.logsTitle": "日志",
   "feedback.submit.simple.logsLabel": "上传诊断日志",
   "feedback.submit.simple.logsHint":
-    "默认关闭。勾选后上传当天的诊断日志，不含数据库、配置文件或模型对话轨迹。已进行自动脱敏，仍可能包含业务信息，请谨慎选择。",
+    "默认开启，可取消勾选。勾选后上传当天的诊断日志、CLI 配置中的安全投影和当天模型调用轨迹；不含数据库。已进行自动脱敏，但仍可能包含业务信息，请谨慎选择。",
   "feedback.submit.simple.footerHint": "提交后可在“我的反馈”查看处理进展。",
   "feedback.submit.missingDescription": "请先描述问题",
   "feedback.submit.addScreenshot": "添加截图",
@@ -6118,7 +5715,6 @@ const zhCN: Record<string, string> = {
   "feedback.submission.logUploadPausedLabel": "已暂停日志上传",
   "feedback.submission.logUploadPausedDetail": "日志是定位问题的必需材料，请继续上传。",
   "feedback.submission.preparingUploadDetail": "准备上传",
-  // 表单通用
   "forms.labels.name": "名称",
   "forms.labels.description": "描述",
   "forms.labels.color": "颜色",
@@ -6136,16 +5732,12 @@ const zhCN: Record<string, string> = {
   "forms.validation.agentDescriptionHint": "简要描述子智能体的功能",
   "forms.validation.agentSystemPromptHint": "定义子智能体的行为和能力",
   "forms.validation.fileExists": "文件 {fileName} 已存在",
-
-  // ---- 自动化 / Automations ----
-  // Automations 同时包含定时任务和闲时任务，顶层入口不能误用其中一个子类型的名称。
   "workspace.openScheduledSettings": "自动化",
   "settings.automations.title": "自动化",
   "automations.breadcrumbLabel": "自动化路径",
   "settings.automations.betaBadge": "Beta",
   "automations.noWorkspace": "打开一个工作区以管理它的定时任务。",
   "automations.workspace.label": "项目",
-  // 页头只说明任务创建方式，避免把服务端滚动配额频次固化在全局空态文案中。
   "automations.description": "创建定时任务，或排队在闲时算力空闲时后台执行。",
   "automations.description.populated": "按计划运行任务，或在需要时随时执行。",
   "automations.refresh": "刷新",
@@ -6318,7 +5910,6 @@ const zhCN: Record<string, string> = {
   "automations.schedule.customMonthlyWeekday": "每 {interval} 个月的第一个周{day}，{time}",
   "automations.schedule.customYearly": "每 {interval} 年的 {month} 月 {day} 日，{time}",
   "automations.schedule.once": "一次性",
-  // 该值会填入“下次运行”模板；使用明确时间短语，避免拼成不通顺的“下次运行 即将”。
   "automations.time.soon": "1 分钟内",
   "automations.time.justNow": "刚刚",
   "automations.time.minutes": "{value} 分钟",
@@ -6403,7 +5994,6 @@ const zhCN: Record<string, string> = {
   "automations.runs.delete": "删除记录",
   "automations.runs.prevPage": "上一页",
   "automations.runs.nextPage": "下一页",
-  // CUA (Computer Use)
   "chat.cuaReadiness.toolsNotLoaded":
     "omz 电脑控制仍在准备中——工具尚未加载（已加载 {count} 个）。请先授予下方权限，Helper 就绪后工具会自动出现。",
   "chat.cuaReadiness.toolsPreparing":
@@ -6579,6 +6169,440 @@ const zhCN: Record<string, string> = {
   "scheduledPreview.toast.running": "正在运行“{title}”…",
   "scheduledPreview.toast.view": "查看",
   "scheduledPreview.addSchedule": "添加计划",
+  "preview.image.copy": "复制图片",
+  "preview.image.actions": "图片操作",
+  "preview.image.added": "已添加到聊天",
+  "preview.image.addFailed": "添加失败，请先打开此工作区的可编辑聊天。",
+  "preview.image.copied": "图片已复制",
+  "preview.image.copyFailed": "复制图片失败，请检查剪贴板权限后重试。",
+  "archives.nav": "归档管理",
+  "archives.title": "已归档的会话",
+  "archives.deleteAll": "全部删除",
+  "archives.search": "搜索已归档会话",
+  "archives.clearSearch": "清除搜索",
+  "archives.sortLabel": "排序方式",
+  "archives.sort.updated": "更新时间",
+  "archives.sort.created": "创建时间",
+  "archives.projectLabel": "项目",
+  "archives.allProjects": "所有项目",
+  "archives.unclassified": "未归类",
+  "archives.removedProject": "已移除项目",
+  "archives.removed": "已移除",
+  "archives.count": "{count} 个会话",
+  "archives.groupActions": "{name}的归档操作",
+  "archives.delete": "删除",
+  "archives.deleteTask": "删除“{title}”",
+  "archives.unarchive": "取消归档",
+  "archives.unarchiveAll": "全部取消归档",
+  "archives.showMore": "显示更多",
+  "archives.deleteTitle": "删除这 {count} 个归档会话？",
+  "archives.deleteDescription": "只删除当前确认范围内的会话。删除后无法在应用中恢复。",
+  "archives.working": "正在处理…",
+  "archives.result": "成功 {succeeded} 项，失败 {failed} 项，已变化跳过 {skipped} 项",
+  "archives.loadFailed": "无法读取归档会话",
+  "archives.retry": "重试",
+  "archives.loading": "正在加载归档会话…",
+  "archives.empty": "暂无已归档会话",
+  "archives.noResults": "没有匹配的归档会话",
+  "project.switchDevice": "切换设备？",
+  "project.switchDeviceDescription": "将清除已选文件夹，项目名称保留。",
+  "project.connectAndBrowse": "连接并选择文件夹",
+  "project.hostRemoved": "此设备已从项目列表移除，请重新选择设备。",
+  "project.connectionUnavailable": "此设备不可用，请在设置中重新连接。",
+  "project.addRemoteDevice": "添加远程设备…",
+  "project.deviceStatus.online": "在线",
+  "project.deviceStatus.offline": "离线",
+  "project.deviceStatus.connecting": "连接中",
+  "project.deviceStatus.pending": "需要处理",
+  "project.deviceStatus.failed": "连接失败",
+  "project.device": "设备",
+  "project.thisComputer": "此电脑",
+  "project.hasUnread": "项目有未读任务",
+  "project.projectOrder": "项目排序",
+  "project.taskOrder": "任务排序",
+  "project.browseHint": "omz 可读取和编辑这些文件夹",
+  "project.connectAndBrowseHint": "设备当前{status}，点击后先连接",
+  "project.selectHost": "选择远程连接",
+  "project.back": "返回",
+  "project.next": "下一步",
+  "project.remoteDescription": "选择已连接计算机上的文件夹",
+  "project.localDescription": "在你的电脑上编辑、运行和测试文件",
+  "project.remote": "远程",
+  "project.local": "本地",
+  "project.type": "项目类型",
+  "project.create": "创建项目",
+  "project.trustFolderTitle": "信任此文件夹吗？",
+  "project.trustFoldersTitle": "信任这些文件夹吗？",
+  "project.trustFoldersDescription":
+    "omz 可在当前权限设置允许的范围内读取、编辑这些文件夹中的文件，并运行命令。请仅在你信任列出的所有文件夹时继续。",
+  "project.trustFoldersAndCreate": "信任文件夹并创建",
+  "project.trustFoldersAndRestore": "信任文件夹并恢复",
+  "project.existingOnDeviceHint": "这台设备上已有项目？",
+  "project.existingOnDeviceAction": "添加到侧栏",
+  "project.backToCreate": "返回新建项目",
+  "project.noExistingProjects": "此设备上没有已有项目",
+  "project.addRemoteProject": "添加远程项目",
+  "project.connect": "连接",
+  "project.removeHost": "移除连接",
+  "project.addHost": "添加连接",
+  "project.offline": "离线",
+  "project.legacySingleRoot": "单目录",
+  "project.legacyUpgradeRequired": "升级服务端后可创建和编辑项目",
+  "project.unresolved": "请选择项目",
+  "project.removeEntry": "从本机移除",
+  "project.edit": "编辑项目",
+  "project.deviceSettings": "远程设备设置",
+  "project.expandAll": "展开全部项目",
+  "project.collapseAll": "收起全部项目",
+  "project.new": "新项目",
+  "project.description": "组织同一主机上的文件夹。已有任务保留原工作目录。",
+  "project.name": "项目名称",
+  "project.folders": "源文件夹",
+  "project.primary": "主要目录",
+  "project.primaryBadge": "主要",
+  "project.setPrimary": "设为主要",
+  "project.addSourceFolder": "添加文件夹",
+  "project.removeFolder": "移除文件夹",
+  "project.folderPath": "文件夹路径",
+  "project.add": "添加",
+  "project.browse": "选择文件夹",
+  "project.noFolders": "项目尚未添加源文件夹",
+  "project.primaryRootMissing": "该项目主文件夹已被删除或移动",
+  "project.primaryRootUnavailable": "无法访问该项目主文件夹",
+  "project.cancel": "取消",
+  "project.save": "保存",
+  "project.restore": "恢复项目",
+  "project.restoreDescription": "发现已删除的项目 {name} 使用相同文件夹，是否恢复？",
+  "project.createTask": "新建任务",
+  "project.actions": "项目操作",
+  "project.unpin": "取消置顶",
+  "project.pin": "置顶",
+  "project.delete": "删除项目",
+  "project.showMore": "显示更多",
+  "project.addFolder": "将文件夹加入项目",
+  "project.projects": "项目",
+  "project.timeline": "时间线",
+  "project.view": "筛选视图",
+  "taskGroup.view": "按分组",
+  "taskGroup.add": "新建分组",
+  "taskGroup.defaultTitle": "新分组",
+  "taskGroup.move": "移到分组",
+  "taskGroup.remove": "移出分组",
+  "taskGroup.noGroups": "暂无分组",
+  "taskGroup.failed": "分组操作失败，请重试",
+  "taskGroup.retryPlacement": "重试加入分组",
+  "taskGroup.expandAll": "展开全部分组",
+  "taskGroup.collapseAll": "收起全部分组",
+  "taskGroup.expand": "展开分组",
+  "taskGroup.collapse": "收起分组",
+  "taskGroup.reorder": "拖动排序",
+  "taskGroup.menu": "分组操作",
+  "taskGroup.empty": "拖动任务到此分组",
+  "taskGroup.cron": "定时任务",
+  "taskGroup.offPeak": "闲时任务",
+  "project.viewByProject": "按项目",
+  "project.viewRecentlyUpdated": "最近更新",
+  "project.archived": "已归档",
+  "project.sort": "项目排序",
+  "project.manual": "按项目排序",
+  "project.recent": "按活动时间",
+  "project.tasks": "任务",
+  "browser.permission.promptAriaLabel": "站点权限请求",
+  "browser.permission.wantsToUse": "想要使用",
+  "browser.permission.siteInfo": "查看网站信息",
+  "browser.permission.settings": "站点权限",
+  "browser.permission.close": "关闭",
+  "browser.permission.saved": "权限已更新。请刷新网页以使改动应用到已有资源。",
+  "browser.permission.readError": "无法读取权限。",
+  "browser.permission.saveError": "未能保存权限修改。",
+  "browser.permission.resetError": "未能完成权限重置。",
+  "browser.permission.retry": "重试",
+  "browser.permission.unsupported": "请在桌面内置浏览器中管理站点权限。",
+  "browser.permission.reset": "重置站点权限",
+  "browser.permission.resetDone": "已重置。刷新页面后可重新申请权限。",
+  "browser.permission.allowOnce": "仅本次允许",
+  "browser.permission.allowAlways": "访问此网站时允许",
+  "browser.permission.blockAlways": "阻止",
+  "browser.permission.cancel": "取消",
+  "browser.permission.share": "共享",
+  "browser.permission.media": "摄像头和麦克风",
+  "browser.permission.mediaVideo": "摄像头",
+  "browser.permission.mediaAudio": "麦克风",
+  "browser.permission.mediaBoth": "摄像头和麦克风",
+  "browser.permission.clipboardRead": "读取剪贴板",
+  "browser.permission.geolocation": "位置信息",
+  "browser.permission.notifications": "通知",
+  "browser.permission.midi": "MIDI 设备",
+  "browser.permission.idleDetection": "空闲检测",
+  "browser.permission.speakerSelection": "选择音频输出设备",
+  "browser.permission.windowManagement": "窗口管理",
+  "browser.permission.storageAccess": "存储访问",
+  "browser.permission.keyboardLock": "键盘锁定",
+  "browser.permission.fileSystem": "文件访问",
+  "browser.permission.deviceHid": "HID 设备",
+  "browser.permission.deviceUsb": "USB 设备",
+  "browser.permission.deviceSerial": "串口设备",
+  "browser.permission.deviceBluetooth": "蓝牙设备",
+  "browser.permission.unknownCapability": "未知能力",
+  "browser.permission.screenShareTitle": "{origin} 想要共享你的屏幕",
+  "browser.permission.screenShareDescription": "选择要共享的屏幕或窗口；该选择仅对本次共享生效。",
+  "browser.permission.deviceTitle": "{origin} 想要连接设备",
+  "browser.permission.connect": "连接",
+  "browser.permission.screenGroup.screen": "整个屏幕",
+  "browser.permission.screenGroup.window": "窗口",
+  "browser.permission.stateAllow": "允许",
+  "browser.permission.stateDeny": "阻止",
+  "browser.permission.stateAsk": "询问",
+  "sidePane.fullView.enter": "进入完整视图",
+  "sidePane.fullView.exit": "退出完整视图",
+  "sidePane.fullView.openAnswer": "展开消息",
+  "sidePane.fullView.minimize": "最小化编辑器",
+  "sidePane.fullView.restore": "展开编辑器",
+  "sidePane.fullView.openConversation": "在完整视图中打开",
+  "sidePane.fullView.handle": "拖动以移动 · 点击查看选项",
+  "sidePane.fullView.expandMessages": "展开消息",
+  "sidePane.fullView.collapseMessages": "收起消息",
+  "sidePane.fullView.statusRunning": "运行中",
+  "sidePane.fullView.statusIdle": "空闲",
+  "sidePane.newTab": "新标签页",
+  "sidePane.launcher.selection-side-conversation": "在侧边面板中继续对话。",
+  "sidePane.launcher.review": "查看代码变更与差异。",
+  "sidePane.launcher.terminal": "运行命令和查看输出。",
+  "sidePane.launcher.browser": "浏览网页和预览应用。",
+  "sidePane.launcher.developer-tools": "检查和调试应用。",
+  "sidePane.launcher.viewAllPlugins": "查看所有插件",
+  "sidePane.launcher.empty": "暂无推荐的应用插件",
+  "sidePane.pluginUi": "插件",
+  "fileManager.resizeNavigation": "调整文件目录宽度",
+  "fileManager.title": "文件",
+  "fileManager.showNavigation": "显示文件导航",
+  "fileManager.hideNavigation": "收起文件导航",
+  "fileManager.empty": "从目录中选择一个文件",
+  "workspaceSidebar.sourceTaskUnavailable": "该设备尚未完成连接，请先重连",
+  "workspaceSidebar.connectIdentifyTitle": "连接此设备",
+  "workspaceSidebar.connectionOffline": "离线",
+  "workspaceSidebar.openRemoteProject": "打开远程项目",
+  "workspaceSidebar.remoteProject": "远程项目",
+  "workspaceSidebar.connectionDetails": "查看 {device} 的连接详情",
+  "workspaceSidebar.openProjectHint": "点击项目名打开此项目",
+  "workspaceSidebar.reconnectProjectHint": "点击项目名，连接设备后打开此目录",
+  "workspaceSidebar.projectPath": "目录",
+  "workspaceSidebar.projectDevice": "设备",
+  "workspaceSidebar.projectLine": "连接",
+  "workspaceSidebar.recoveringAutomatic": "正在自动恢复连接",
+  "workspaceSidebar.recoveringAutomaticShort": "自动恢复 {attempt}/{limit}",
+  "workspaceSidebar.manageDevice": "在设置中管理",
+  "workspaceSidebar.newRemoteConnection": "新建远程连接…",
+  "workspaceSidebar.recoveringAutomaticAttempt": "正在自动恢复连接（{attempt}/{limit}）",
+  "workspaceSidebar.reconnectingManual": "正在手动重新连接",
+  "ssh.advancedOptions": "高级选项",
+  "ssh.validation.hostRequired": "请输入主机",
+  "ssh.validation.usernameRequired": "请输入用户名",
+  "ssh.importFromConfig": "从 SSH config 导入",
+  "ssh.importEmpty": "未发现 SSH config Host",
+  "ssh.configAliasLinked": "已关联 Host {alias}",
+  "ssh.configAliasUnlink": "解除关联",
+  "ssh.configAliasLinkedHint": "修改任一字段会自动解除关联",
+  "ssh.pasteRecognized": "已识别 {target}",
+  "ssh.validation.port": "端口须为 1–65535 的整数",
+  "ssh.showPassword": "显示密码",
+  "ssh.hidePassword": "隐藏密码",
+  "docker.inputMode.select": "选择运行中的容器",
+  "docker.inputMode.manual": "手动输入容器",
+  "settings.toolSearch.auto": "自动",
+  "settings.toolSearch.local": "本地",
+  "settings.toolSearch.off": "关闭",
+  "settings.memory.workspaceMemory": "工作区记忆",
+  "settings.memory.viewer.localOnly":
+    "记忆详情仅支持在本地桌面端查看，请前往本地桌面端的“记忆”设置。",
+  "settings.memory.viewer.title": "已保存的工作区记忆",
+  "settings.memory.viewer.description": "查看此设备上按工作区保存的记忆。",
+  "settings.memory.viewer.projectsDescription": "选择一个项目，查看该项目保存的全部记忆。",
+  "settings.memory.viewer.refresh": "刷新",
+  "settings.memory.viewer.loading": "正在加载记忆…",
+  "settings.memory.viewer.empty": "暂无已保存的工作区记忆",
+  "settings.memory.viewer.workspaces": "工作区",
+  "settings.memory.viewer.files": "文件",
+  "settings.memory.viewer.searchPlaceholder": "搜索记忆文件…",
+  "settings.memory.viewer.searchEmpty": "没有匹配的记忆文件。",
+  "settings.memory.viewer.workspaceSearchPlaceholder": "搜索工作区…",
+  "settings.memory.viewer.workspaceSearchEmpty": "没有匹配的工作区。",
+  "settings.memory.viewer.itemCount.one": "{count} 条",
+  "settings.memory.viewer.itemCount.other": "{count} 条",
+  "settings.memory.viewer.memoryCount.one": "{count} 条记忆",
+  "settings.memory.viewer.memoryCount.other": "{count} 条记忆",
+  "settings.memory.viewer.updated.justNow": "刚刚",
+  "settings.memory.viewer.updated.minutesAgo": "{count} 分钟前",
+  "settings.memory.viewer.updated.today": "今天 {time}",
+  "settings.memory.viewer.updated.yesterday": "昨天 {time}",
+  "settings.memory.viewer.updated.weekday": "{weekday} {time}",
+  "settings.memory.viewer.updated.weekdayZh": "周{weekday}",
+  "settings.memory.viewer.updated.date": "{date} {time}",
+  "settings.memory.viewer.updated.dateMonthDay": "{month} 月 {day} 日",
+  "settings.memory.viewer.updated.dateYearMonthDay": "{year} 年 {month} 月 {day} 日",
+  "settings.memory.viewer.tree": "记忆文件",
+  "settings.memory.viewer.indexMissing": "MEMORY.md（未生成）",
+  "settings.memory.viewer.collapse": "收起记忆条目",
+  "settings.memory.viewer.expand": "展开记忆条目",
+  "settings.memory.viewer.fileLoading": "正在加载文件…",
+  "settings.memory.viewer.fileDeleted": "该记忆文件已被删除，请刷新文件列表。",
+  "settings.memory.viewer.fileTooLarge": "该记忆文件超过 5 MiB 预览上限。",
+  "settings.memory.viewer.fileChanged": "该记忆文件在读取期间已更新，请重新打开或刷新文件列表。",
+  "settings.memory.viewer.noSelection": "选择一个记忆文件以查看内容。",
+  "settings.dynamicWorkflow.option.disabled": "关闭",
+  "settings.dynamicWorkflow.option.disabled.description":
+    "禁用动态工作流。不能创建新的工作流，自动化页也不再显示「工作流」；对话历史中已有的工作流仍可正常查看。",
+  "settings.dynamicWorkflow.option.onDemand": "通过命令启用",
+  "settings.dynamicWorkflow.option.onDemand.description":
+    "只有输入 /workflow 命令才会运行新的工作流。",
+  "settings.dynamicWorkflow.option.alwaysOn": "始终开启",
+  "settings.dynamicWorkflow.option.alwaysOn.description":
+    "除了 /workflow 命令，模型也会根据你的意图主动运行工作流。",
+  "settings.dynamicWorkflow.defaultTag": "默认",
+  "settings.dynamicWorkflow.saveError": "保存动态工作流设置失败",
+  "settings.modelProvider.templateGroup.zhipu": "智谱",
+  "settings.modelProvider.anthropicEndpoint": "Anthropic 接口地址",
+  "settings.modelProvider.anthropicEndpointPlaceholder":
+    "如：https://open.bigmodel.cn/api/anthropic",
+  "settings.modelProvider.openaiEndpoint": "OpenAI 接口地址",
+  "settings.modelProvider.openaiEndpointPlaceholder": "如：https://api.openai.com/v1",
+  "settings.modelProvider.geminiEndpoint": "Gemini 接口地址",
+  "settings.modelProvider.geminiEndpointPlaceholder":
+    "如：https://generativelanguage.googleapis.com",
+  "settings.modelProvider.endpointNoMatch": "没有匹配的接口地址",
+  "settings.modelProvider.startPlan.quotaSectionTitle": "体验套餐",
+  "settings.modelProvider.startPlan.eligibleNewUser": "新用户体验",
+  "settings.modelProvider.startPlan.preview.unit.tokens": "tokens",
+  "settings.modelProvider.startPlan.preview.period.daily": "{unit}/日",
+  "settings.modelProvider.startPlan.preview.entitlementSummary.daily": "每日额度 · {details}",
+  "settings.modelProvider.startPlan.preview.entitlementSummary.generic": "额度 · {details}",
+  "settings.modelProvider.startPlan.preview.entitlementGroup.single": "{model} {quota}",
+  "settings.modelProvider.startPlan.preview.entitlementGroup.each": "{models} 各{quota}",
+  "settings.modelProvider.remoteOAuthNotReady":
+    "远端 Source 不能直接发起 OAuth 登录。请配置 API Key，或从本机 Source 一键同步当前登录账号。",
+  "settings.modelProvider.codingPlan.bigmodel.unregisteredHint":
+    "该 BigModel 账号尚未注册，请先完成注册。",
+  "settings.modelProvider.codingPlan.bigmodel.registerAction": "去注册",
+  "settings.modelProvider.codingPlan.billingDiscountInfo.open": "查看 150% 配额活动说明",
+  "settings.modelProvider.claudeMapping": "Claude 模型映射",
+  "settings.modelProvider.claudeMappingDescription": "为 Claude 的各模型槽位选择对应的模型",
+  "settings.modelProvider.slot.haiku": "Haiku（轻量任务）",
+  "settings.modelProvider.slot.sonnet": "Sonnet（常规任务）",
+  "settings.modelProvider.slot.opus": "Opus（复杂任务）",
+  "settings.modelProvider.slot.reasoning": "Reasoning（推理任务）",
+  "settings.modelProvider.mappingNotSet": "未设置",
+  "settings.modelProvider.presetTitle": "智谱",
+  "settings.modelProvider.presetDescription":
+    "内置 Z.ai 与 BigModel 供应商，支持通过 OAuth 辅助完成配置。",
+  "settings.modelProvider.presetEmpty": "尚未同步，请先完成 OAuth 登录。",
+  "settings.plugins.store.segment.community": "社区",
+  "settings.plugins.store.communityEmpty": "暂无社区插件",
+  "settings.plugins.store.ui.open": "打开",
+  "settings.plugins.store.ui.unsupported": "当前环境暂不支持打开插件界面，请在桌面本地项目中使用。",
+  "settings.plugins.store.ui.needsSession": "请在当前项目的可用会话中打开插件界面。",
+  "settings.plugins.store.ui.unavailable": "当前项目没有可用的插件界面，请检查启用状态。",
+  "settings.plugins.store.ui.chooseSurface": "选择插件界面",
+  "settings.plugins.store.ui.preview": "放大效果图",
+  "settings.plugins.store.ui.capability": "提供可在侧边面板打开的交互界面。",
+  "settings.plugins.store.ui.title": "应用插件",
+  "settings.plugins.store.browseAll": "浏览全部插件",
+  "settings.plugins.marketplace.claudeCodePlugins": "Claude Code 插件",
+  "settings.plugins.zcodeOnly": "仅支持 omz Agent",
+  "chat.toolCall.previewFailed": "预览加载失败",
+  "chat.toolCall.previewUnavailable": "预览不可用",
+  "chat.toolCall.explore.bucket.fetch.one": "次网页抓取",
+  "chat.toolCall.explore.bucket.fetch.other": "次网页抓取",
+  "chat.toolCall.kind.webFetch": "网页抓取",
+  "chat.toolCall.webFetch.fetching": "正在抓取",
+  "chat.toolCall.execute.expandCommand": "展开命令",
+  "chat.toolCall.execute.collapseCommand": "收起",
+  "chat.toolCall.workflow.digest.hole": "{count} 处留白待补全",
+  "chat.toolCall.workflow.digest.holes": "{count} 处留白待补全",
+  "chat.toolCall.workflow.card.hole": "{count} 处留白",
+  "chat.toolCall.workflow.card.holes": "{count} 处留白",
+  "chat.toolCall.workflow.hole.waiting": "等待补全",
+  "chat.toolCall.workflow.hole.head.title": "留白「{name}」· 由主代理补全 · {time}",
+  "chat.toolCall.workflow.hole.head.title.untimed": "留白「{name}」· 由主代理补全",
+  "chat.toolCall.workflow.hole.open": "打开补全「{name}」",
+  "chat.toolCall.workflow.hole.writing": "正在补全留白",
+  "chat.toolCall.workflow.hole.revising": "正在修改留白补全",
+  "chat.toolCall.workflow.hole.draft": "留白补全草稿",
+  "chat.toolCall.workflow.hole.awaitingConfirmation": "留白补全待确认",
+  "chat.toolCall.workflow.hole.ran": "留白补全",
+  "chat.toolCall.workflow.hole.filled": "留白已补全",
+  "chat.toolCall.workflow.hole.phasesAdded": "{count} 个阶段",
+  "chat.toolCall.workflow.hole.stands.between": "留白位于「{before}」之后、「{after}」之前；",
+  "chat.toolCall.workflow.hole.stands.after": "留白位于「{before}」之后；",
+  "chat.toolCall.workflow.hole.stands.before": "留白位于「{after}」之前；",
+  "chat.toolCall.workflow.hole.draftPath": "草稿",
+  "chat.toolCall.workflow.hole.waited": "等待中 · {time}",
+  "chat.toolCall.workflow.run.hole.waitingFor": "等待主代理补全",
+  "chat.toolCall.workflow.run.hole.filledAt": "已补全 · {time}",
+  "chat.permission.workflow.hole.title": "补全此留白？",
+  "chat.permission.workflow.holes.label": "留白",
+  "chat.permission.workflow.holes.note": "运行到留白处会暂停，等主代理补全后继续。",
+  "chat.toolCall.workflow.saveRun.action": "保存",
+  "chat.toolCall.workflow.saveRun.runAgain": "再次运行",
+  "chat.toolCall.workflow.saveRun.starting": "启动中…",
+  "chat.toolCall.workflow.saveRun.chip": "已保存",
+  "chat.toolCall.workflow.saveRun.chip.hint": "在工作流中枢查看",
+  "chat.toolCall.workflow.saveRun.announce.project": "已保存到项目",
+  "chat.toolCall.workflow.saveRun.announce.global": "已保存为全局工作流",
+  "chat.toolCall.workflow.saveRun.title": "保存工作流",
+  "chat.toolCall.workflow.saveRun.lead": "让 omz 帮我提炼保存",
+  "chat.toolCall.workflow.saveRun.lead.hint": "omz 会帮你提炼出可复用的工作流，再交你确认。",
+  "chat.toolCall.workflow.saveRun.lead.sending": "已交给 omz…",
+  "chat.toolCall.workflow.saveRun.lead.unsupported": "当前 agent 不支持直接保存。",
+  "chat.toolCall.workflow.saveRun.or": "或按原样直接保存",
+  "chat.toolCall.workflow.saveRun.name": "名称",
+  "chat.toolCall.workflow.saveRun.name.placeholder": "pr-layered-review",
+  "chat.toolCall.workflow.saveRun.name.helper": "字母、数字、- _ .，最多 64 个字符",
+  "chat.toolCall.workflow.saveRun.name.invalid": "名字只能用字母、数字和 - _ .",
+  "chat.toolCall.workflow.saveRun.scope.remoteOnly": "远程项目只能保存到项目里。",
+  "chat.toolCall.workflow.saveRun.description": "说明",
+  "chat.toolCall.workflow.saveRun.description.helper":
+    "「何时使用」和参数可以之后在工作流中枢里补。",
+  "chat.toolCall.workflow.saveRun.consequence":
+    "将写入 {path}；之后可在「自动化 › 工作流」按名字再次运行。",
+  "chat.toolCall.workflow.saveRun.overwrite":
+    "本项目已有同名工作流，保存会覆盖它；已有的运行记录保留。",
+  "chat.toolCall.workflow.saveRun.shadowing": "{text}。",
+  "chat.toolCall.workflow.saveRun.submit": "直接保存",
+  "chat.toolCall.workflow.saveRun.submit.overwrite": "覆盖并直接保存",
+  "chat.toolCall.workflow.saveRun.submit.saving": "保存中…",
+  "chat.toolCall.workflow.saveRun.error.invalid_name": "名字只能用字母、数字和 - _ .。",
+  "chat.toolCall.workflow.saveRun.error.run_not_found": "找不到这次运行的记录，无法直接保存。",
+  "chat.toolCall.workflow.saveRun.error.script_missing":
+    "这次运行没有留下脚本原文，请改用上面那条路。",
+  "chat.toolCall.workflow.saveRun.error.target_exists": "已有同名工作流，确认覆盖后再保存。",
+  "chat.toolCall.workflow.saveRun.error.compile_failed": "脚本没有通过类型检查，没有写入任何文件。",
+  "chat.toolCall.workflow.saveRun.error.write_error": "写入失败，没有保存。",
+  "chat.toolCall.workflow.saveRun.error.generic": "保存失败。",
+  "chat.toolCall.workflow.run.settings.limit.default": "默认 {n}",
+  "chat.toolCall.workflow.run.settings.limit.atDefault": "= 默认",
+  "chat.toolCall.workflow.settingsChange.limitDefault": "上限恢复为默认",
+  "chat.toolCall.workflow.run.artifacts.openAsFile": "作为文件打开",
+  "chat.toolCall.workflow.run.artifacts.openAsFileFailed": "无法作为文件打开此产物",
+  "chat.toolCall.search.tools": "搜索工具",
+  "chat.toolCall.search.toolsWithQuery": "搜索工具：{query}",
+  "chat.permission.workflow.subagentModelDefault": "子代理默认运行在 {model}",
+  "chat.permission.workflow.settings.model.lead": "子代理运行在",
+  "chat.permission.workflow.settings.model.noCatalog": "子代理沿用会话模型",
+  "chat.permission.workflow.settings.model.noCatalogReason": "当前 agent 没有模型目录",
+  "chat.permission.workflow.settings.model.leadDefault": "子代理默认运行在",
+  "chat.permission.workflow.settings.model.noCatalogDefault": "子代理默认沿用会话模型",
+  "chat.permission.workflow.settings.limit.lead": "最多",
+  "chat.permission.workflow.settings.limit.trail": "个子代理同时运行",
+  "chat.permission.workflow.settings.limit.none": "不设上限",
+  "chat.permission.workflow.settings.was": "原为 {value}",
+  "chat.permission.workflow.settings.reset": "恢复原值",
+  "chat.permission.workflow.allowOnce.adjusted": "按调整后的设置运行一次",
+  "chat.permission.workflow.allowForSession.adjusted":
+    "本次按调整后的设置运行；之后的工作流不再询问，各用各的设置",
+  "chat.permission.workflow.save.args.showAll": "显示全部 {count} 个参数",
+  "chat.permission.workflow.save.args.showFewer": "收起参数",
+  "chat.permission.workflow.save.showMore": "展开",
+  "chat.permission.workflow.save.showLess": "收起",
 };
 
 export default zhCN;

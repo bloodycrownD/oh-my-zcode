@@ -109,7 +109,6 @@ const enUS: Record<string, string> = {
     "The preparation process exited or disconnected. Exit and reopen omz to check the migration records again.",
   "startup.global.error.unsupported_runtime":
     "The configured Agent does not support storage preparation. Restore the bundled Agent, then reopen omz.",
-
   "startup.database.checking": "Checking history",
   "startup.database.waiting_for_lock": "Waiting for another window to prepare data",
   "startup.database.migrating": "Upgrading history",
@@ -131,7 +130,6 @@ const enUS: Record<string, string> = {
   "bashOutput.error.unsupported": "This runtime does not support background output",
   "bashOutput.error.read_failed": "Could not read the output file",
   "bashOutput.error.query_failed": "Could not connect to the task runtime",
-
   "purchase.entry.loading": "Loading plans…",
   "purchase.entry.retry": "Could not load plans. Retry",
   "bots.runtime.deliveryFailed": "Bot reply delivery failed",
@@ -171,7 +169,6 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.navigationUnavailable":
     "The requested provider is unavailable. Please choose another provider.",
   "workspace.context.lastActivity": "Last active {time}",
-  // Common
   "common.loading": "Loading...",
   "common.listSeparator": ", ",
   "common.generating": "Generating...",
@@ -179,7 +176,7 @@ const enUS: Record<string, string> = {
   "common.cancel": "Cancel",
   "common.retry": "Retry",
   "common.close": "Close",
-  "chat.plan.removeMarker": "Turn off Plan mode",
+  "chat.plan.removeMarker": "Remove Plan from the next submission",
   "common.confirm": "Confirm",
   "common.more": "More",
   "common.refresh": "Refresh",
@@ -187,252 +184,6 @@ const enUS: Record<string, string> = {
   "common.save": "Save",
   "common.saving": "Saving...",
   "common.delete": "Delete",
-  "conversationShare.trigger": "Share",
-  "conversationShare.shareTitle": "Share title",
-  "conversationShare.permissionLabel": "Access",
-  "conversationShare.permission.private": "Only me",
-  "conversationShare.permission.privateHint": "For personal notes",
-  "conversationShare.permission.linkViewer": "Anyone with the link can view",
-  "conversationShare.permission.linkViewerHint": "Cannot import and continue",
-  "conversationShare.permission.linkViewerSummary": "Link holders can view",
-  "conversationShare.permission.linkEditor": "Anyone with the link can import and continue",
-  "conversationShare.permission.linkEditorHint": "Import into omz",
-  "conversationShare.permission.linkEditorSummary": "Link holders can import and continue",
-  "conversationShare.permission.privateSummary": "Only me",
-  "conversationShare.openLink": "Open share page",
-  "conversationShare.result.title": "Share created",
-  "conversationShare.result.description": "Your link is ready to copy or view in a browser.",
-  "conversationShare.result.openInBrowser": "View in browser",
-  "conversationShare.result.dismiss": "Close share result",
-  "conversationShare.generatingLink": "Generating share link",
-  "conversationShare.copyLink": "Copy link",
-  "conversationShare.copySucceeded": "Share link copied",
-  "conversationShare.publishSucceeded": "Share link created",
-  "conversationShare.publishSucceededWithSkips": "Share link created; {count} file(s) were skipped",
-  "conversationShare.copyFailed": "Could not copy share link",
-  "conversationShare.publishFailed": "Could not generate the share link. Try again.",
-  "conversationShare.error.authenticationRequired":
-    "Sharing is available only when you are signed in. Your sign-in has expired; sign in again, then retry.",
-  "conversationShare.error.featureDisabled":
-    "Sharing is not available for this workspace or connection type.",
-  "conversationShare.error.artifactNotAllowed":
-    "A previewed file type is not supported for sharing. Deselect that conversation and retry.",
-  "conversationShare.error.limitExceeded":
-    "The selected conversation or its files exceed the sharing limit. Select fewer conversations.",
-  "conversationShare.error.rateLimited": "Too many share attempts. Wait a moment, then try again.",
-  "conversationShare.error.network":
-    "Could not reach the sharing service. Check your connection and try again.",
-  "conversationShare.error.safetyCheckTimeout":
-    "The share safety check took too long. Try again later.",
-  "conversationShare.error.invalidSelection":
-    "The selected conversation changed. Reopen the share panel and select it again.",
-  "conversationShare.error.invalidConversation":
-    "The selection contains a structure that is not shareable yet. Deselect active turns or inline images, confirm preview files are complete, and retry.",
-  "conversationShare.error.runningTurn":
-    "A selected turn is still running. Deselect it and wait for it to finish before sharing.",
-  "conversationShare.error.streamingRow":
-    "A selected response is still streaming. Wait for the turn to finish before sharing.",
-  "conversationShare.error.activeToolCall":
-    "A selected tool call is still active. Wait for it to finish before sharing.",
-  "conversationShare.error.activeSubagent":
-    "A selected subtask is still running. Wait for it to finish before sharing.",
-  "conversationShare.error.inputAttachment":
-    "A user-input attachment could not be shared. Check that it still exists and try again.",
-  "conversationShare.error.inlineToolImage":
-    "A selected turn contains an unsupported inline tool image. Deselect that turn and retry.",
-  "conversationShare.error.unsupportedTimeline":
-    "A selected turn contains an unsupported branch or restore record. Deselect that turn and retry.",
-  "conversationShare.error.unsafeUrl":
-    "The selected content contains a local or inline file URL. Remove it before sharing.",
-  "conversationShare.error.missingProductTurn":
-    "The selected conversation is incomplete. Reopen the share panel and select the turn again.",
-  "conversationShare.error.artifactTypeNotAllowed":
-    "A previewed file type is not allowed for sharing. Deselect its turn and retry.",
-  "conversationShare.error.artifactExtensionMissing":
-    "A previewed file has no valid extension. Check the file and retry.",
-  "conversationShare.error.artifactOutsideWorkspace":
-    "A previewed file is outside the current workspace. Regenerate or move it, then retry.",
-  "conversationShare.error.artifactChanged":
-    "A previewed file changed before sharing. Regenerate the preview file and retry.",
-  "conversationShare.error.artifactReadFailed":
-    "A previewed file could not be read. Check that it still exists and is accessible, then retry.",
-  "conversationShare.error.artifactSizeLimit":
-    "A file exceeds the per-file size limit. Deselect that turn or use a smaller file, then retry.",
-  "conversationShare.error.artifactManifest":
-    "The preview file manifest is incomplete. Regenerate the file and refresh the share panel.",
-  "conversationShare.error.payloadLimit":
-    "The selected conversation or files exceed the sharing limit. Select less and retry.",
-  "conversationShare.error.disclosureRequired":
-    "Review and confirm the shared content before creating the link.",
-  "conversationShare.error.uploadFailed":
-    "A file could not be uploaded completely. Check that it still exists, then retry.",
-  "conversationShare.error.connectionUnavailable":
-    "Desktop connection is not ready. Reopen the share panel and try again.",
-  "conversationShare.error.noShareableContent":
-    "The current selection has no shareable content. Select different turns.",
-  "conversationShare.error.summary":
-    "Share failed: {count} issue(s) found. See the share panel for details.",
-  "conversationShare.issue.artifactTypeNotAllowed":
-    "Turn {turnOrdinal}: {artifactDisplayName} ({artifactType}) cannot be shared and will be skipped. Supported types: {allowedFormats}.",
-  "conversationShare.issue.artifactExtensionMissing":
-    "Turn {turnOrdinal}: the preview file has no valid extension. Check the file name and try again.",
-  "conversationShare.issue.artifactOutsideWorkspace":
-    "Turn {turnOrdinal}: the preview file is outside the current workspace. Move or regenerate it and try again.",
-  "conversationShare.issue.artifactChanged":
-    "Turn {turnOrdinal}: {artifactDisplayName} changed while it was being read. Regenerate the file and try again.",
-  "conversationShare.issue.artifactReadFailed":
-    "Turn {turnOrdinal}: {artifactDisplayName} could not be read. Check that it still exists and is accessible.",
-  "conversationShare.issue.inputAttachment":
-    "Turn {turnOrdinal} contains a user-input attachment, which is not supported in this version. Deselect this turn.",
-  "conversationShare.issue.inputAttachmentUnavailable":
-    "Turn {turnOrdinal} contains a user-input attachment that no longer exists or cannot be read.",
-  "conversationShare.issue.inlineToolImage":
-    "Turn {turnOrdinal} contains an inline tool image that cannot be included in a public share.",
-  "conversationShare.issue.runningTurn":
-    "Turn {turnOrdinal} is still running. Wait for it to finish or deselect it.",
-  "conversationShare.issue.streamingRow":
-    "Turn {turnOrdinal} is still generating. Wait for it to finish or deselect it.",
-  "conversationShare.issue.activeToolCall":
-    "Turn {turnOrdinal} has an unfinished tool call. Deselect this turn.",
-  "conversationShare.issue.activeSubagent":
-    "Turn {turnOrdinal} has a running subtask. Wait for it to finish or deselect it.",
-  "conversationShare.issue.unsupportedTimeline":
-    "Turn {turnOrdinal} contains a timeline record that cannot be included in a public share.",
-  "conversationShare.issue.noShareableContent":
-    "The current selection has no shareable content. Select different turns.",
-  "conversationShare.issue.unsafeUrl":
-    "Turn {turnOrdinal} contains a local or inline file address, which is not supported. Remove it and try again.",
-  "conversationShare.issue.missingProductTurn":
-    "The selection is missing a complete turn identity. Re-select the conversation.",
-  "conversationShare.issue.invalidSelection":
-    "The selected turns changed. Return to selection and choose them again.",
-  "conversationShare.issue.invalidConversation":
-    "The selected conversation is incomplete. Deselect the affected turn(s) and try again.",
-  "conversationShare.issue.staleConversation":
-    "The conversation changed while the share was prepared. Return to selection and try again.",
-  "conversationShare.issue.rowsLimit":
-    "The conversation has {actual} rows, above the limit of {limit}. Reduce the selected turns.",
-  "conversationShare.issue.artifactCountLimit":
-    "The conversation has {actual} artifacts, above the limit of {limit}. Reduce the selected turns.",
-  "conversationShare.issue.artifactSizeLimit":
-    "{artifactDisplayName} is {actual}, above the per-file limit of {limit}. Deselect the turn or regenerate a smaller file.",
-  "conversationShare.issue.artifactTotalSizeLimit":
-    "Artifacts total {actual}, above the limit of {limit}. Reduce artifacts or deselect the affected turn(s).",
-  "conversationShare.issue.payloadSizeLimit":
-    "The share request is {actual}, above the limit of {limit}. Reduce the selected turns or artifacts.",
-  "conversationShare.issue.artifactManifest":
-    "The preview artifact manifest is duplicated or incomplete. Regenerate files and refresh the share panel.",
-  "conversationShare.issue.uploadIncomplete":
-    "The upload acknowledgement for {artifactDisplayName} does not match the file. Ensure it did not change and try again.",
-  "conversationShare.issue.unknown":
-    "Share failed during {phase}; the server returned no actionable details. Try again later.",
-  "conversationShare.issue.details": "Error details",
-  "conversationShare.issue.requestIdLabel": "Server request ID",
-  "conversationShare.issue.requestId": "Server request ID: {requestId}",
-  "conversationShare.issue.requestIdMissing": "No server request ID was received.",
-  "conversationShare.issue.copyRequestId": "Copy request ID",
-  "conversationShare.issue.deselectTurn": "Deselect this turn",
-  "conversationShare.issue.retryPreflight": "Check again",
-  "conversationShare.issue.more": "{count} more issue(s) not shown.",
-  "conversationShare.warning.summary":
-    "Shared successfully. {count} file(s) were skipped and are not included in the link.",
-  "conversationShare.warning.artifactSkipped":
-    "Turn {turnOrdinal}: {artifactDisplayName} could not be read, so it was skipped. If it should have been shared, regenerate the file and share again.",
-  "conversationShare.warning.inputAttachmentSkipped":
-    "Turn {turnOrdinal}: the input attachment is not included in the share; the turn's text is still shared.",
-  "conversationShare.warning.inputAttachmentUnavailable":
-    "Turn {turnOrdinal}: {artifactDisplayName} no longer exists or cannot be read and was skipped.",
-  "conversationShare.warning.artifactTypeSkipped":
-    "Turn {turnOrdinal}: {artifactDisplayName} ({artifactType}) is not supported and was skipped. Supported types: {allowedFormats}.",
-  "conversationShare.warning.artifactChangedSkipped":
-    "Turn {turnOrdinal}: {artifactDisplayName} changed before sharing and was skipped.",
-  "conversationShare.partial.panelLabel": "Select conversations to share",
-  "conversationShare.selection.reopen": "Reopen selection panel",
-  "conversationShare.partial.empty": "There are no completed conversations to share",
-  "conversationShare.partial.selectionStageHint":
-    "Select completed conversations to share, then continue to the next step.",
-  "conversationShare.partial.preflightChecking": "Checking share content…",
-  "conversationShare.partial.preflightBlocked":
-    "Some content cannot be shared. Fix the issues below first.",
-  "conversationShare.partial.preflightSkipped":
-    "{count} file(s) will not be included in the share. They will be skipped if you continue.",
-  "conversationShare.partial.preflightDeferred":
-    "Some files cannot be checked yet. They will be verified again when publishing.",
-  "conversationShare.partial.continueWithSkips": "Continue (skip {count} file(s))",
-  "conversationShare.partial.selectionHint":
-    "Review the title, access, and sensitive-content acknowledgement, then create the link.",
-  "conversationShare.partial.confirmationTitle": "Confirm shared content",
-  "conversationShare.publish.failedTitle": "Share publication failed",
-  "conversationShare.publish.failedDescription": "Fix the issue below, then retry.",
-  "conversationShare.publish.retry": "Retry generation",
-  "conversationShare.publish.footerMeta": "Share {selected} conversation turn(s), {access}",
-  "conversationShare.publish.failedFooter": "Adjust the content before publishing again",
-  "conversationShare.partial.selectAll": "Select all",
-  "conversationShare.partial.deselectAll": "Deselect all",
-  "conversationShare.partial.selectionCount": "{selected}/{total}",
-  "conversationShare.partial.selectedSummary": "Selected {selected} / {total}",
-  "conversationShare.partial.cancel": "Cancel",
-  "conversationShare.partial.next": "Next",
-  "conversationShare.partial.back": "Back",
-  "conversationShare.partial.confirm": "Create share link",
-  "conversationShare.partial.publishing": "Generating…",
-  "conversationShare.progress.collecting": "Collecting conversation and artifacts…",
-  "conversationShare.progress.uploading": "Uploading artifacts…",
-  "conversationShare.progress.checking": "Waiting for safety checks to finish…",
-  "conversationShare.progress.collectingFailed": "Collecting conversation and artifacts failed",
-  "conversationShare.progress.uploadingFailed": "Uploading artifacts failed",
-  "conversationShare.progress.checkingFailed": "Safety checks failed",
-  "conversationShare.phase.collecting": "Prepare content",
-  "conversationShare.phase.uploading": "Upload artifacts",
-  "conversationShare.phase.checking": "Safety checks",
-  "conversationShare.phase.collectingComplete": "Conversation and artifacts ready",
-  "conversationShare.phase.uploadingComplete": "Artifacts uploaded",
-  "conversationShare.phase.uploadingActive": "Uploading {completed} / {total}",
-  "conversationShare.phase.collectingPending": "Waiting to start",
-  "conversationShare.phase.uploadingPending": "Waiting for preparation",
-  "conversationShare.phase.checkingPending": "Waiting for upload",
-  "conversationShare.phase.failed": "Failed",
-  "conversationShare.publicWarning":
-    "Check conversations, tool inputs and outputs, and artifacts for sensitive information.",
-  "conversationShare.disclosure.description":
-    "The system does not automatically detect sensitive information.",
-  "conversationShare.disclosure.checkbox":
-    "I reviewed the shared content and confirm it contains no sensitive information.",
-  "conversationShare.disclosure.scope.trigger": "View review scope",
-  "conversationShare.disclosure.scope.title": "Review scope",
-  "conversationShare.disclosure.scope.reviewLabel": "Review these areas",
-  "conversationShare.disclosure.scope.conversation":
-    "Conversation content: user messages, assistant replies, and task titles",
-  "conversationShare.disclosure.scope.tools":
-    "Tool inputs and outputs: commands, parameters, and results",
-  "conversationShare.disclosure.scope.generated":
-    "Generated content: code, files, and preview content",
-  "conversationShare.disclosure.scope.sensitiveLabel": "Check carefully",
-  "conversationShare.disclosure.scope.sensitive":
-    "Credentials, tokens, passwords, private keys, internal addresses, and personal information",
-  "conversationShare.disclosure.scope.note":
-    "The system does not scan or redact this content automatically. Review each item before sharing.",
-  "conversationShare.import.source": "Imported from share: {title}",
-  "conversationShare.import.dividerLabel": "Imported from share",
-  "conversationShare.import.fallbackRemoteWorkspace":
-    "Imported from share: {title}. The current workspace is remote, which import does not support yet, so the session was created in the local workspace {workspacePath}.",
-  "conversationShare.import.fallbackDefaultWorkspace":
-    "Imported from share: {title}. No target workspace was available, so the session was created in the default workspace {workspacePath}.",
-  "conversationShare.import.downloading": "Downloading shared files: {completed}/{total}",
-  "conversationShare.import.installing": "Installing shared files",
-  "conversationShare.import.committing": "Creating the shared conversation",
-  "conversationShare.import.complete": "Share import complete",
-  "conversationShare.import.loginRequired":
-    "This share cannot be imported anonymously. Sign in to omz and try again",
-  "conversationShare.import.notFound": "The share is unavailable for this account",
-  "conversationShare.import.expired": "The share expired. Ask the author to create a new one",
-  "conversationShare.import.integrityFailed": "Share file verification failed; import stopped",
-  "conversationShare.import.failed": "Share import failed. Check your network and retry",
-  "conversationShare.import.integrityFailedWithArtifact":
-    "Verification failed for shared file {artifactDisplayName}; import stopped. Ask the author to create a new link.",
-  "conversationShare.import.failedWithArtifact":
-    "Downloading shared file {artifactDisplayName} failed. Check your network and retry.",
-  "conversationShare.import.retry": "Retry",
   "settings.resourceGroup.item.one": "{count} item",
   "settings.resourceGroup.item.other": "{count} items",
   "pluginCreator.add": "Add",
@@ -805,12 +556,12 @@ const enUS: Record<string, string> = {
   "bots.unbound": "Not bound",
   "bots.generateBindCode": "Generate bind code",
   "bots.resetState": "Reset state",
-  "bots.allowedWorkspaces": "Workspace access",
+  "bots.allowedWorkspaces": "Project access",
   "bots.allowedWorkspaces.all": "All",
-  "bots.allowedWorkspaces.mode.all": "All workspaces",
-  "bots.allowedWorkspaces.mode.selected": "Selected workspaces",
-  "bots.allowedWorkspaces.allDescription": "This bot can use any configured workspace.",
-  "bots.allowedWorkspaces.selectedDescription": "This bot can use {count} selected workspaces.",
+  "bots.allowedWorkspaces.mode.all": "All projects",
+  "bots.allowedWorkspaces.mode.selected": "Selected projects",
+  "bots.allowedWorkspaces.allDescription": "This bot can use any configured project.",
+  "bots.allowedWorkspaces.selectedDescription": "This bot can use {count} selected projects.",
   "bots.botMeta": "{users} bound users · workspace {workspace}",
   "bots.botSummary": "{users} users · {workspaces} workspaces · {workspace}",
   "bots.userCount": "{count} users",
@@ -851,8 +602,6 @@ const enUS: Record<string, string> = {
   "bots.unbindSuccess": "Bot unbound",
   "bots.unbindFailed": "Failed to unbind bot: {error}",
   "bots.deleteFailed": "Failed to delete bot: {error}",
-
-  // Welcome / Login
   "welcome.title": "Welcome to omz",
   "welcome.username": "Username",
   "welcome.password": "Password",
@@ -898,8 +647,6 @@ const enUS: Record<string, string> = {
   "settings.onboardingDescription":
     "Choose your role, interface mode, and preferences again. Use Migration settings to import data.",
   "settings.onboardingOpen": "Open onboarding",
-
-  // App header
   "app.currentTheme": "Current: {theme}",
   "app.login": "Connect",
   "app.logout": "Disconnect",
@@ -966,7 +713,7 @@ const enUS: Record<string, string> = {
   "sidePane.maximize": "Expand panel",
   "sidePane.restoreSize": "Restore panel width",
   "sidePane.addTab": "Add tab",
-  "sidePane.openTab": "Open tab",
+  "sidePane.openTab": "New tab",
   "sidePane.subagent": "Subagent",
   "sidePane.subagentDirectory": "Subagents",
   "sidePane.selectionChat": "Side conversation",
@@ -1538,19 +1285,15 @@ const enUS: Record<string, string> = {
   "titleBar.menu.help.resourceManager": "Resource manager",
   "titleBar.menu.help.toggleZCodeStdioTap": "Capture agent stdio traffic",
   "titleBar.menu.help.clearAllData": "Clear all data",
-
-  // Directory browser
-  "directoryBrowser.title": "Browse folder",
+  "directoryBrowser.title": "Choose directory",
   "directoryBrowser.pathPlaceholder": "Enter path",
-  "directoryBrowser.go": "Go",
+  "directoryBrowser.go": "Jump",
   "directoryBrowser.showHidden": "Show hidden directories",
   "directoryBrowser.hideHidden": "Hide hidden directories",
   "directoryBrowser.noSubdirs": "No subdirectories",
-  "directoryBrowser.selectDir": "Select this directory",
+  "directoryBrowser.selectDir": "Open workspace here",
   "directoryBrowser.errorSystem": "Failed to get system info",
   "directoryBrowser.errorReadDir": "Failed to read directory: {error}",
-
-  // Update ready button
   "updateReady.shortTitle": "Update",
   "updateReady.title": "Update v{version}",
   "updateReady.releaseNotesTitle": "v{version} Release Notes",
@@ -1598,7 +1341,6 @@ const enUS: Record<string, string> = {
   "desktopMenu.help.restartToUpdate": "Restart to update ({version})",
   "postUpdateReleaseNotes.title": "Release notes",
   "postUpdateReleaseNotes.acknowledge": "I know",
-
   "projectSelector.heroTitle": "Open fast. Stay focused.",
   "projectSelector.heroDescription": "Pick a workspace, jump back in, and keep the surface clean.",
   "appError.title": "The app ran into a problem",
@@ -1614,8 +1356,6 @@ const enUS: Record<string, string> = {
     "The error is isolated to this section, so the rest of the app can keep running. Try this section again first, and refresh the app if the issue keeps happening.",
   "appError.sectionRetry": "Try this section again",
   "appError.sectionHint": "Diagnostic details have been recorded to help investigation.",
-
-  // Workspace
   "workspace.openWorkspace": "Open workspace",
   "workspace.addNewWorkspace": "Add new workspace",
   "workspace.startFromScratch": "Start from scratch",
@@ -1691,8 +1431,6 @@ const enUS: Record<string, string> = {
   "workspaceFileTree.openFailed": "Could not open this item",
   "workspaceFileTree.addToChat": "Add to chat",
   "workspaceFileTree.gitStatus.ignored": "Ignored",
-
-  // SSH dialog
   "ssh.trigger": "SSH Connection",
   "ssh.title": "SSH Remote connection",
   "ssh.host": "Host",
@@ -1721,7 +1459,8 @@ const enUS: Record<string, string> = {
   "ssh.configAliasEmpty": "No SSH config aliases available on this machine.",
   "ssh.configAliasLoadFailed":
     "Failed to load SSH config aliases. You can still enter connection info manually.",
-  "ssh.configAliasDescription": "Select an alias to prefill host, port, username, and private key.",
+  "ssh.configAliasDescription":
+    "Prefilled host, port, username, and private key from ~/.ssh/config; editing any field detaches the alias.",
   "ssh.connect": "Connect",
   "ssh.cancel": "Cancel",
   "ssh.connecting": "Connecting...",
@@ -1741,16 +1480,16 @@ const enUS: Record<string, string> = {
   "remote.kindStepTitle": "Choose method",
   "remote.kindStepDescription":
     "Choose how you want to access this workspace, then continue with the matching connection settings.",
-  "remote.settingsStepTitle": "Connection settings",
+  "remote.settingsStepTitle": "New connection",
   "remote.settingsStepDescription":
     "Enter the details needed for your {method} connection so we can prepare the remote session.",
   "remote.history.empty": "No matching saved connections",
-  "remote.connectingStepTitle": "Connecting",
-  "remote.connectingStepDescription":
-    "We are establishing the {method} connection. You can follow the live setup progress here.",
+  "remote.connectingStepTitle": "Establish link",
+  "remote.connectingStepDescription": "Connecting through {method}…",
   "webRemoteControl.trigger": "Mobile remote control",
   "webRemoteControl.title": "Mobile remote control",
-  "webRemoteControl.description": "Control omz workspaces through chat bots.",
+  "webRemoteControl.description":
+    "Scan the QR code or open the link on your phone to control this workspace.",
   "webRemoteControl.botChannel.title": "Use a bot channel",
   "webRemoteControl.botChannel.description": "Connect a chat bot for longer-running mobile access.",
   "webRemoteControl.botChannel.weixin.title": "Weixin",
@@ -1768,10 +1507,9 @@ const enUS: Record<string, string> = {
     "Connect to a remote workspace over SSH, Server, WSL, or Docker, then choose a directory in the current window.",
   "remote.step.connect": "Connect",
   "remote.step.selectDirectory": "Choose directory",
-  "remote.selectDirectoryTitle": "Choose remote directory",
-  "remote.selectDirectoryDescription":
-    "Choose which directory to open in this window after the remote connection is ready.",
-  "remote.backToConnection": "Back to connection settings",
+  "remote.selectDirectoryTitle": "Choose directory",
+  "remote.selectDirectoryDescription": "Choose a directory on {method} as the workspace.",
+  "remote.backToConnection": "Back to configuration",
   "remote.selectedMethod": "Selected method",
   "remote.methods": "Connection method",
   "remote.kind.ssh": "SSH",
@@ -1782,8 +1520,8 @@ const enUS: Record<string, string> = {
   "remote.kind.docker.wizardDescription": "Local container",
   "remote.connect": "Connect",
   "remote.connecting": "Connecting...",
-  "remote.minimize": "Minimize remote connection window",
-  "remote.startConnection": "Start connection",
+  "remote.minimize": "Collapse — connection will continue",
+  "remote.startConnection": "Establish link",
   "remote.retryConnection": "Retry connection",
   "remote.connectingHint": "Connecting with {method}.",
   "remote.connectionLog": "Connection log",
@@ -1808,19 +1546,19 @@ const enUS: Record<string, string> = {
   "wsl.description":
     "Connect to the default distro, or choose a specific distro installed on this device.",
   "wsl.distro": "Distribution",
-  "wsl.defaultDistro": "Default distro",
+  "wsl.defaultDistro": "Default distribution",
   "wsl.user": "Linux user",
   "wsl.defaultUser": "Default user",
   "wsl.userDescription":
-    "Leave empty to use the distro default user. Enter root or another existing Linux user to run WSL commands as that user.",
+    "Leave empty to use the distribution default user. Enter root or another existing Linux user to run WSL commands as that user.",
   "wsl.rootWarning":
     "Root mode runs the remote host, agent, and terminal as root. Files created during the session may be owned by root.",
   "wsl.validation.invalidUser":
     "Linux user names cannot contain control characters, colons, slashes, or backslashes, and must be 64 characters or fewer.",
-  "wsl.loading": "Detecting WSL distros...",
-  "wsl.detectedCount": "{count} distros detected on this device.",
+  "wsl.loading": "Detecting WSL distribution...",
+  "wsl.detectedCount": "{count} distribution detected on this device.",
   "wsl.noDistros":
-    "No WSL distros were detected. You can still connect to the default distro if WSL is installed.",
+    "No WSL distribution were detected. You can still connect to the default distribution if WSL is installed.",
   "docker.description": "Connect to a local container using docker exec and docker cp.",
   "docker.container": "Container",
   "docker.containerPlaceholder": "Enter container name or ID, e.g. my-container",
@@ -1828,18 +1566,12 @@ const enUS: Record<string, string> = {
     "If the running container list is incomplete, enter a container name or ID manually to connect.",
   "docker.selectContainer": "Choose a running container",
   "docker.loading": "Detecting running containers...",
-  "docker.unavailable": "No running containers detected.",
-  "docker.noContainers": "No running containers detected.",
+  "docker.unavailable": "Docker is unavailable",
+  "docker.noContainers": "No running containers",
   "docker.validation.required": "Container name or ID is required",
-
-  // Locale switch
   "locale.switchLanguage": "Switch language",
-
-  // File tree
   "fileTree.loading": "Loading...",
   "fileTree.error": "Failed to load",
-
-  // Terminal
   "terminal.exited": "[Process exited]",
   "terminal.title": "Terminal",
   "terminal.show": "Toggle terminal",
@@ -1856,13 +1588,10 @@ const enUS: Record<string, string> = {
     "An input submitted before the CLI restarted did not reach the conversation. Confirm whether to send it again.",
   "chat.pendingCommand.resend": "Send again",
   "chat.pendingCommand.dismiss": "Later",
-  // Soft gate: persistent banner when workspace hooks are pending review
   "chat.workspaceHookPending.message":
     "{count} workspace hook(s) pending review; disabled for this session",
   "chat.workspaceHookPending.review": "Review",
   "chat.workspaceHookPending.dismiss": "Dismiss",
-
-  // Task list
   "taskList.newTask": "New task",
   "taskList.newThread": "New task",
   "taskList.forkedUntitled": "New task",
@@ -1923,7 +1652,7 @@ const enUS: Record<string, string> = {
   "taskList.mobileActive": "Phone is using this task",
   "taskList.changeStats": "+{added} -{removed}",
   "taskGroup.newGroup": "New group",
-  "taskGroup.newTask": "New task",
+  "taskGroup.newTask": "New task in group",
   "taskGroup.emptyDropZoneAction": "New task, or drag here.",
   "taskGroup.rename": "Rename group",
   "taskGroup.renameAction": "Rename",
@@ -1939,7 +1668,7 @@ const enUS: Record<string, string> = {
   "taskGroup.color.green": "Green",
   "taskGroup.color.blue": "Blue",
   "taskGroup.color.purple": "Purple",
-  "taskGroup.ungroup": "Ungroup and delete",
+  "taskGroup.ungroup": "Ungroup",
   "taskGroup.createFailed": "Could not create group",
   "taskGroup.renameFailed": "Could not rename group",
   "taskGroup.colorFailed": "Could not update group color",
@@ -2002,7 +1731,7 @@ const enUS: Record<string, string> = {
   "chat.edit.resetConversationAndFiles.reverted": "This turn's file changes are already undone",
   "chat.edit.resetConversationAndFiles.running": "Wait for the current work to stop",
   "chat.edit.resetConversationAndFiles.unavailable":
-    "File reset is unavailable while an interaction is pending",
+    "File reset is unavailable while compacting or an interaction is pending",
   "chat.edit.workspaceConflict.title": "Files could not be safely reset",
   "chat.edit.workspaceConflict.description":
     "No conversation history was changed. Review the conflicting or ignored files, then reset only the conversation or cancel.",
@@ -2025,7 +1754,6 @@ const enUS: Record<string, string> = {
   "chat.turnNavigator.runningAssistant": "Assistant is still working",
   "chat.turnNavigator.userFallback": "User query",
   "chat.turnNavigator.jumpTargetUnavailable": "This question is too far back to load right now",
-  // 纯 {key} 占位替换（见 IntlProvider.createIntl），不支持 ICU plural 语法。
   "chat.turnNavigator.olderEntriesNotLoaded": "{count} earlier questions were not loaded",
   "chat.rewind.conflictConfirm":
     "These files changed outside this turn. Force rewinding may create conflicts:\n\n{paths}",
@@ -2039,8 +1767,6 @@ const enUS: Record<string, string> = {
   "sidebar.exportLogs.pending": "Exporting logs...",
   "sidebar.exportLogs.error": "Failed to export logs: {error}",
   "sidebar.newTask": "New task",
-
-  // Settings
   "settings.title": "Settings",
   "settings.breadcrumbLabel": "Settings path",
   "settings.subtitle":
@@ -2137,9 +1863,8 @@ const enUS: Record<string, string> = {
     "Adjust interface text without changing icons or layout dimensions.",
   "settings.systemTitle": "General",
   "settings.systemDescription": "These preferences affect the current window experience.",
-  "settings.locale": "System language",
-  "settings.localeDescription":
-    "Choose the display language of the app UI; the agent's system prompt language follows it.",
+  "settings.locale": "Language",
+  "settings.localeDescription": "Choose the display language used by the application UI.",
   "settings.terminalProfile": "Inherit system terminal profile",
   "settings.terminalProfileDescription":
     "When launching the built-in terminal, inherit login shell environment, proxy, Kubernetes variables, and local terminal font when possible.",
@@ -2154,9 +1879,7 @@ const enUS: Record<string, string> = {
   "settings.nativeSearchEnhancements": "Enhanced Find and Grep",
   "settings.nativeSearchEnhancementsDescription":
     "Use enhanced Find and Grep in new sessions and sessions restored after an app restart. Active sessions keep their current setting; Find remains unchanged on Windows.",
-  // FORK（magic-context-memory-management / Step 8）：分区语义切换为跨会话「项目记忆」。
-  "settings.memory": "Project memory",
-  // FORK（Step 29 / D-12）：magic-context 参数域设置分区。
+  "settings.memory": "Memory",
   "settings.context.title": "Context Management",
   "settings.context.description":
     "Context Management (magic-context) trims, folds and compartments conversation history before each request. Changes save automatically and take effect on running sessions immediately — no restart needed.",
@@ -2200,7 +1923,6 @@ const enUS: Record<string, string> = {
   "settings.context.failClosedBlocking.label": "Block requests on failure",
   "settings.context.failClosedBlocking.description":
     "When context management cannot operate (storage open failure, schema fence mismatch), block the request with a loud recovery error instead of silently degrading to pass-through.",
-  // FORK (Step 11 / bugfix-batch-20261011): settings copy for the E-group whitelist additions.
   "settings.context.memoryEnabled.label": "Cross-session project memory",
   "settings.context.memoryEnabled.description":
     "When on, project facts settled during sessions are written to the memory store, visible to every agent in later sessions and in ctx_search, and the model can pin facts with ctx_memory. Turning it off retires all memory reads, writes and guidance; context reclamation (folding, compartments, ctx_reduce/ctx_expand) keeps working.",
@@ -2213,10 +1935,6 @@ const enUS: Record<string, string> = {
   "settings.context.promptSurfaceGuidancePath.description":
     "Path to a file whose contents replace the built-in guidance section. Empty means the built-in guidance is used.",
   "settings.context.promptSurfaceGuidancePath.placeholder": "Not configured",
-  // FORK (Step 14 / bugfix-batch-20261011): read-only presentation of the per-model
-  // prompt-surface routes. No edit entry by design (same precedent as the
-  // execute_threshold per-model branch); the point is that a configured override is
-  // visible instead of invisible.
   "settings.context.promptSurfaceOverrides.label": "Per-model overrides",
   "settings.context.promptSurfaceOverrides.description":
     "Model-keyed prompt-surface routes and tool-description overrides from config.json. They are presented read-only: this page has no per-model editor, and a save from here keeps them byte-for-byte.",
@@ -2225,9 +1943,6 @@ const enUS: Record<string, string> = {
   "settings.context.muralEnabled.label": "Experimental memory mural",
   "settings.context.muralEnabled.description":
     "When on, project memories that did not fit the context budget are rendered into a single deterministic image served with the prompt — but only when the current turn's model accepts image input. Experimental; off by default.",
-  // FORK（magic-context-memory-management / Step 8）：原生「工作区记忆」viewer 与开关
-  // 退场（内存测试文件与设置页入口一并删除），「记忆」分区改挂 magic-context 跨会话
-  // 项目记忆管理面板：分类/状态徽章、计数汇总、批量废弃（软删除）。
   "settings.memory.management.noWorkspace": "Open a workspace before managing project memories.",
   "settings.memory.management.description":
     "Manage the cross-session project memories stored by the local CLI (a remote workspace still manages local data). Archiving is a soft delete: memories leave the injection surface of later turns and keep an auditable archive record.",
@@ -2332,7 +2047,7 @@ const enUS: Record<string, string> = {
   "notification.file": "File: {paths}",
   "settings.closeToTrayOnWindows": "Hide to tray when closing window",
   "settings.closeToTrayOnWindowsDescription":
-    "Windows only. The close button and close-window shortcut hide the window, while Quit from the tray still exits the app.",
+    "The close button and close-window shortcut hide the window, while Quit from the tray still exits the app. On by default on Windows; on Linux it depends on whether the desktop environment provides a system tray.",
   "settings.keepAwakeWhileRunning": "Keep computer running",
   "settings.keepAwakeWhileRunningDescription":
     "Prevent the system from sleeping due to idle. You can still sleep manually or by closing the lid. Desktop only.",
@@ -2363,12 +2078,12 @@ const enUS: Record<string, string> = {
     "Keep complete model requests and responses without compression, size limits, or automatic deletion.",
   "settings.performanceMode": "Performance mode",
   "settings.performanceModeDescription": "Simplify rendered output to improve performance.",
-  "settings.taskAutoArchive": "Auto-archive old tasks",
+  "settings.taskAutoArchive": "Auto-archive old sessions",
   "settings.taskAutoArchiveDescription":
-    "Periodically scan recently opened workspaces and automatically archive completed, unread-free, unpinned tasks after the retention window.",
+    "Periodically archive sessions whose last activity is older than the retention window; pinned and running sessions are never affected.",
   "settings.taskAutoArchiveDays": "Archive retention",
   "settings.taskAutoArchiveDaysDescription":
-    "A task becomes eligible for auto-archive only after its last update is older than this window.",
+    "A session becomes eligible for auto-archive only after its last update is older than this window.",
   "settings.taskAutoArchiveDays.option.3": "Archive after 3 days",
   "settings.taskAutoArchiveDays.option.7": "Archive after 7 days",
   "settings.taskAutoArchiveDays.option.14": "Archive after 14 days",
@@ -2495,7 +2210,7 @@ const enUS: Record<string, string> = {
   "resourceManager.storage.categoryDescription.subagentTranscripts":
     "Full conversation records of subagent runs (transcript.jsonl), up to tens of MB each; sessions active in the last 24 hours are kept.",
   "resourceManager.storage.categoryDescription.toolOutputs":
-    "Archived tool results, full command outputs, image caches and temporary files; cleanup only covers cli/exec command output logs.",
+    "Archived tool results, full command outputs, image caches and temporary files; not cleanable yet.",
   "resourceManager.storage.categoryDescription.modelTrajectory":
     "Full model request/response records used by the trajectory viewer.",
   "resourceManager.storage.categoryDescription.devTraces":
@@ -2699,7 +2414,7 @@ const enUS: Record<string, string> = {
     "Open authorization to finish connecting this plugin MCP server.",
   "settings.mcp.oauth.openAuthorization": "Open authorization",
   "settings.mcp.statusOnlyUnsupported":
-    "This ZCode Agent cannot refresh OAuth status. Upgrade or restart omz, then reopen MCP settings to run a full refresh.",
+    "This omz Agent cannot refresh OAuth status. Upgrade or restart omz, then reopen MCP settings to run a full refresh.",
   "settings.mcp.refreshFailed": "Failed to refresh MCP status: {error}",
   "settings.mcp.status.toolCount": "{count} tools",
   "settings.mcp.status.connectedReason": "Connected and available.",
@@ -2847,7 +2562,7 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.modelSaveFailure": "Failed to save {provider} / {model}: {error}",
   "settings.modelProvider.cancel": "Cancel",
   "settings.modelProvider.name": "Name",
-  "settings.modelProvider.namePlaceholder": "e.g. DeepSeek",
+  "settings.modelProvider.namePlaceholder": "e.g. Z.ai GLM",
   "settings.modelProvider.addProviderTitle": "Add model provider",
   "settings.modelProvider.addProviderDescription":
     "Configure a custom API endpoint and initial model.",
@@ -3377,7 +3092,7 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.codingPlan.product.firstPromo": "First-time subscription discount",
   "settings.modelProvider.codingPlan.product.delay": "Effective {time}",
   "settings.modelProvider.codingPlan.zai.plan.lite.name": "Lite",
-  "settings.modelProvider.codingPlan.zai.plan.lite.summary": "3x higher Claude Pro usage limits",
+  "settings.modelProvider.codingPlan.zai.plan.lite.summary": "Base usage limits",
   "settings.modelProvider.codingPlan.zai.plan.pro.name": "Pro",
   "settings.modelProvider.codingPlan.zai.plan.pro.summary":
     "Everything in Lite, plus 5x Lite usage",
@@ -3385,7 +3100,7 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.codingPlan.zai.plan.max.summary":
     "Everything in Pro, plus 20x Lite usage",
   "settings.modelProvider.codingPlan.bigmodel.plan.lite.name": "Lite",
-  "settings.modelProvider.codingPlan.bigmodel.plan.lite.summary": "3x Claude Pro usage quota",
+  "settings.modelProvider.codingPlan.bigmodel.plan.lite.summary": "Base usage quota",
   "settings.modelProvider.codingPlan.bigmodel.plan.pro.name": "Pro",
   "settings.modelProvider.codingPlan.bigmodel.plan.pro.summary":
     "5x Lite usage quota + all Lite benefits",
@@ -4096,7 +3811,7 @@ const enUS: Record<string, string> = {
   "settings.plugins.store.searchResults": "Search results ({count})",
   "settings.plugins.store.searchEmpty": "No plugins match your search",
   "settings.plugins.store.installedStrip": "Installed",
-  "settings.plugins.store.manageInstalled": "Manage installed",
+  "settings.plugins.store.manageInstalled": "Manage plugins",
   "settings.plugins.store.segment.public": "Public",
   "settings.plugins.store.segment.personal": "Personal",
   "settings.plugins.store.featured": "Featured",
@@ -4382,7 +4097,6 @@ const enUS: Record<string, string> = {
   "settings.commands.import.resultList": "Command results",
   "settings.commands.import.resultEmpty": "No command results were returned.",
   "settings.commands.import.finish": "Done",
-
   "settings.hooks.review.trust": "Trust",
   "settings.hooks.review.notice":
     "Hooks can run outside of the sandbox so we ask you to review any recently installed or modified hooks",
@@ -4598,8 +4312,6 @@ const enUS: Record<string, string> = {
   "onboarding.finish.summary.agentsFile": "AGENTS.md",
   "onboarding.finish.summary.settings.detail":
     "Imported {imported}, skipped {skipped}, failed {failed}.",
-
-  // Chat
   "chat.empty.title": "Start a Conversation",
   "chat.empty.description": "Start a new task in {workspace}",
   "chat.empty.description.beforeWorkspace": "Start a new task in",
@@ -4638,8 +4350,8 @@ const enUS: Record<string, string> = {
   "chat.empty.selectProject": "Select project",
   "chat.empty.workOutsideProject": "Work outside a project",
   "chat.empty.detachProject": "Remove current project selection",
-  "chat.empty.workspaceSearchPlaceholder": "Search workspaces",
-  "chat.empty.workspaceSearchEmpty": "No matching workspaces",
+  "chat.empty.workspaceSearchPlaceholder": "Search projects or devices",
+  "chat.empty.workspaceSearchEmpty": "No matching projects",
   "chat.empty.cliMenu": "Choose CLI",
   "chat.empty.home": "Home",
   "chat.empty.createWorkspace.title": "Create workspace",
@@ -4913,17 +4625,13 @@ const enUS: Record<string, string> = {
   "chat.goal.planModeBlocked": "Goal is unavailable in Plan mode. Switch modes to continue.",
   "chat.plan.attachmentsBlocked":
     "The /plan shortcut supports text only for now. Remove attachments or context and try again.",
-  // /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的
-  // 三种提示——命令被拒、回执没带文本、draft 还没有会话可作用。
   "chat.ctx.rejected": "Magic Context command was rejected.",
   "chat.ctx.noResponse": "Magic Context command returned no output.",
-  // 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。
   "chat.edit.rejected":
     "Edit resend was rejected; session state may still be restoring. Retry or send a new message.",
   "chat.ctx.sessionRequired":
     "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",
-  // CUA composer entry button
   "chat.toolbar.computerUse.label": "Computer Use",
   "chat.toolbar.computerUse.tooltip.idle":
     "Computer Use is idle — it will start automatically on first use",
@@ -5143,7 +4851,6 @@ const enUS: Record<string, string> = {
     "{count} more subagents · list everyone in the run pane",
   "chat.toolCall.workflow.timeline.roster.door.list": "{count} more subagents · list them here",
   "chat.toolCall.workflow.timeline.roster.door.fold": "{count} more subagents · fold",
-  // 门后名单末尾的那一行：被淘汰的子代理没有行，差额在这里说明（本仓的轻量 intl 无 ICU 复数）。
   "chat.toolCall.workflow.timeline.roster.unlisted.one": "1 more agent not listed",
   "chat.toolCall.workflow.timeline.roster.unlisted.many": "{count} more agents not listed",
   "chat.toolCall.workflow.timeline.ledge.earlier": "{count} earlier phase(s), scrolled out of view",
@@ -5185,7 +4892,7 @@ const enUS: Record<string, string> = {
   "chat.workflowLaunch.startedByYou": "Started by you from the workflows hub",
   "chat.workflowLaunch.settingsChangedByYou": "Settings changed by you",
   "chat.workflowLaunch.settings.model": "Subagent model",
-  "chat.workflowLaunch.settings.limit": "At once, at most",
+  "chat.workflowLaunch.settings.limit": "Max concurrency",
   "chat.workflowLaunch.settings.sessionModel": "session model",
   "chat.workflowLaunch.settings.machineLimit": "this machine's limit",
   "chat.workflowLaunch.settings.machineLimitValue": "{n} (this machine's limit)",
@@ -5218,7 +4925,6 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.models.levelsNoDefault": "Thinking levels: {levels}",
   "chat.toolCall.workflow.models.noLevels": "No thinking levels",
   "chat.toolCall.workflow.models.truncated": "Not all models are shown",
-
   "automations.pageTab.ariaLabel": "Automations page",
   "automations.pageTab.automation": "Automations",
   "automations.pageTab.workflow": "Workflows",
@@ -5337,7 +5043,6 @@ const enUS: Record<string, string> = {
   "workflows.hub.reason.read_error": "File could not be read",
   "workflows.hub.time.duration.seconds": "{seconds}s",
   "workflows.hub.time.duration.minutes": "{minutes}m {seconds}s",
-  // ── Observation tool cards  ──
   "chat.toolCall.workflow.getRun.fetching": "Checking workflow status",
   "chat.toolCall.workflow.getRun.runningNodes": "{count} running nodes",
   "chat.toolCall.workflow.getRun.fetched": "Workflow status",
@@ -5424,18 +5129,15 @@ const enUS: Record<string, string> = {
   "chat.backgroundResult.workflow.completed": "Workflow completed",
   "chat.backgroundResult.workflow.errored": "Workflow errored",
   "chat.backgroundResult.workflow.stopped": "Workflow stopped",
-  // run 级停滞通知：run 还在跑，只是没有进展。
   "chat.backgroundResult.workflow.stall": "Workflow waiting on the model",
   "chat.backgroundResult.workflow.stall.body":
     "No model request in this run has succeeded for {minutes} min. It is still running and retrying with backoff; stop it from the run card if you no longer need it.",
   "chat.backgroundResult.workflow.stall.reason": "Retry reason",
-  "chat.backgroundResult.workflow.stall.cap": "Current fan-out",
+  "chat.backgroundResult.workflow.stall.cap": "Max concurrency",
   "chat.backgroundResult.workflow.waiting": "Subagent is waiting for an answer",
   "chat.backgroundResult.workflow.answered": "Subagent question answered",
   "chat.backgroundResult.workflow.asked": "Subagent asked a question",
   "chat.backgroundResult.workflow.artifacts.more": "+{count}",
-  // ── Escalation tool cards ──
-  // escalate：子代理把阻塞问题升级给主代理，停驻等答案。asking 相可能持续很久，措辞要平静。
   "chat.toolCall.workflow.escalate.asking": "Asking the main agent",
   "chat.toolCall.workflow.escalate.asked": "Asked the main agent",
   "chat.toolCall.workflow.escalate.question": "Question",
@@ -5454,7 +5156,6 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.run.status.completed": "Completed",
   "chat.toolCall.workflow.run.status.errored": "Errored",
   "chat.toolCall.workflow.run.status.stopped": "Stopped",
-  // stopped 的原因词，跟在状态词后。
   "chat.toolCall.workflow.run.stopReason.user": "by you",
   "chat.toolCall.workflow.run.stopReason.model": "by the agent",
   "chat.toolCall.workflow.run.stopReason.provider": "model error",
@@ -5469,8 +5170,6 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.run.usage.label": "Usage",
   "chat.toolCall.workflow.run.usage.tokens": "{tokens} tokens",
   "chat.toolCall.workflow.run.usage.value": "{tokens} tokens · {steps} steps",
-  // 实例表撞界后卡与详情页各有的那一句：停的是每一步的**详情**，不是 run，
-  // 它上面那些计数已经把表外的实例算进来了。
   "chat.toolCall.workflow.run.truncated": "Details shown for {shown} of {total} steps",
   "chat.toolCall.workflow.run.cancel": "Stop run",
   "chat.toolCall.workflow.run.cancelling": "Stopping…",
@@ -5511,11 +5210,11 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.run.settings.model.unavailable": "unavailable",
   "chat.toolCall.workflow.run.settings.model.noCatalog":
     "This agent has no model catalog; subagents stay on the session model.",
-  "chat.toolCall.workflow.run.settings.limit": "Subagents at once, at most",
+  "chat.toolCall.workflow.run.settings.limit": "Max concurrency",
   "chat.toolCall.workflow.run.settings.limit.ceiling": "this machine allows up to {n}",
   "chat.toolCall.workflow.run.settings.limit.atCeiling": "= this machine's limit",
-  "chat.toolCall.workflow.run.settings.limit.decrease": "Fewer at once",
-  "chat.toolCall.workflow.run.settings.limit.increase": "More at once",
+  "chat.toolCall.workflow.run.settings.limit.decrease": "Lower max concurrency",
+  "chat.toolCall.workflow.run.settings.limit.increase": "Raise max concurrency",
   "chat.toolCall.workflow.run.settings.consequence.running":
     "Stops this run and starts a new one with these settings; finished steps are kept.",
   "chat.toolCall.workflow.run.settings.consequence.pending":
@@ -5524,7 +5223,6 @@ const enUS: Record<string, string> = {
     "Continues as a new run with these settings; finished steps are kept.",
   "chat.toolCall.workflow.run.settings.consequence.errored":
     "Retries as a new run with these settings; finished steps are kept.",
-  // 只改并发上限、而且运行正在跑：就地生效。
   "chat.toolCall.workflow.run.settings.consequence.concurrencyLive":
     "Applies to this run right away; no new run is started.",
   "chat.toolCall.workflow.run.settings.apply": "Apply",
@@ -5595,8 +5293,6 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.run.artifacts.preset.otherColumn": "Other",
   "chat.toolCall.workflow.run.artifacts.preset.empty": "No data yet",
   "chat.toolCall.workflow.run.artifacts.preset.items": "{count} items",
-  // 待答问题区（升级问答）：actor 停驻在自己那次 ask 里等
-  // 主代理回话。只读——应答者是主代理，不是用户，所以文案不能读起来像在请用户作答。
   "chat.toolCall.workflow.run.questions.title": "Waiting on an answer",
   "chat.toolCall.workflow.run.graph.unavailable":
     "The workflow graph is not in this conversation's visible history.",
@@ -5650,7 +5346,6 @@ const enUS: Record<string, string> = {
   "chat.toolCall.workflow.run.event.nodeSettledCached": "Settled · {outcome} (cached)",
   "chat.toolCall.workflow.run.event.usageUpdated": "Usage updated",
   "chat.toolCall.workflow.run.event.log": "Log",
-  // amend-resume: the first workspace write closed the predecessor cache; later steps run live.
   "chat.toolCall.workflow.run.event.importCacheClosed": "Cache closed by a workspace write",
   "chat.toolCall.workflow.run.event.report": "Reported",
   "chat.toolCall.workflow.run.event.phaseEntered": "Entered phase",
@@ -5663,13 +5358,12 @@ const enUS: Record<string, string> = {
     "Waiting for provider ({reason}) · retry in {seconds}s",
   "chat.toolCall.workflow.run.event.nodeExecuting": "Request sent",
   "chat.toolCall.workflow.run.event.concurrencyChanged": "Concurrency {previous} → {next}",
-  // 上一条是治理器在压共享桶；这一条是用户改了这次 run 自己的上限（就地生效，不另起一次运行）。
   "chat.toolCall.workflow.run.event.runCapsChanged": "Concurrency limit {previous} → {next}",
   "chat.toolCall.workflow.run.throttle.reason.rateLimited": "rate limited",
   "chat.toolCall.workflow.run.throttle.reason.overloaded": "overloaded",
   "chat.toolCall.workflow.run.throttle.reason.offpeak": "off-peak queue",
   "chat.toolCall.workflow.run.throttle.reason.transient": "transient error",
-  "chat.toolCall.workflow.run.concurrency.label": "Concurrency {cap}",
+  "chat.toolCall.workflow.run.concurrency.label": "Max concurrency {cap}",
   "chat.toolCall.workflow.run.concurrency.cooldown": "cooling down until {time}",
   "chat.toolCall.workflow.run.subagentModel.label": "Subagents {model}",
   "chat.toolCall.workflow.subagentModel.withLevel": "{model} · thinking {level}",
@@ -5761,7 +5455,7 @@ const enUS: Record<string, string> = {
   "markdownImage.download": "Download image",
   "markdownImage.downloadFailed": "Failed to download image",
   "markdownImage.downloadStarted": "Image download started",
-  "markdownImage.downloadSucceeded": "Image saved to {path}",
+  "markdownImage.downloadSucceeded": "Download complete",
   "chat.attachments.preview.loading": "Loading image preview…",
   "chat.attachments.preview.videoLoading": "Loading video preview…",
   "chat.attachments.preview.unavailable": "This image is no longer available to preview.",
@@ -5829,7 +5523,6 @@ const enUS: Record<string, string> = {
   "chat.slash.emptyUnavailable":
     "No slash commands have been broadcast for the current ZCode Agent session",
   "chat.slash.emptyResults": "No matching slash commands",
-  // Errors
   "chat.error.connectionLost": "Connection to agent lost",
   "chat.error.processExited": "Agent process exited unexpectedly",
   "chat.error.dismiss": "Dismiss error",
@@ -5851,8 +5544,6 @@ const enUS: Record<string, string> = {
   "chat.error.sendFailed": "Failed to send. Try again later.",
   "chat.error.modelSettings": "Model settings",
   "chat.error.setModels": "Set",
-
-  // Start Plan per-bucket quota reminders
   "chat.quota.startPlan.bucketDailyLow":
     "{model} has {percent} of its daily quota remaining ({remaining} tokens).",
   "chat.quota.startPlan.bucketActivityLow":
@@ -5880,8 +5571,6 @@ const enUS: Record<string, string> = {
   "chat.quota.action.switchModel": "Switch model",
   "chat.quota.action.switchProvider": "Switch provider",
   "chat.quota.action.refresh": "Refresh quota",
-
-  // Permissions
   "chat.permission.title": "Permission required",
   "chat.permission.awaitingApproval": "Awaiting approval",
   "chat.permission.approve": "Allow",
@@ -5941,8 +5630,6 @@ const enUS: Record<string, string> = {
   "chat.cuaPermission.openScreenRecording": "Open Screen Recording",
   "chat.cuaPermission.opening": "Opening...",
   "chat.cuaPermission.openFailed": "Could not open CUA permissions: {error}",
-
-  // Elicitation
   "chat.elicitation.title": "Input required",
   "chat.elicitation.keyboardHint": "Use Tab / arrow keys to choose, then Enter or Space to select",
   "chat.elicitation.customAnswer": "Custom answer",
@@ -5983,8 +5670,6 @@ const enUS: Record<string, string> = {
   "chat.permission.fileChange.addMany": "Creates {count} files",
   "chat.permission.fileChange.updateMany": "Updates {count} files",
   "chat.permission.fileChange.mixedMany": "Update {count} files",
-
-  // Modes
   "mode.plan": "Plan",
   "mode.label.glm.build": "Ask before changes",
   "mode.label.glm.edit": "Edit automatically",
@@ -6014,8 +5699,6 @@ const enUS: Record<string, string> = {
   "planTool.panel.syncing": "Syncing plan…",
   "planTool.guidance.enterMode": "Entered plan mode",
   "chat.permission.switchMode.placeholder": "Implementation plan",
-
-  // ZCode Agent
   "zcode.unavailable": "AI agent not available",
   "zcode.initFailed": "Failed to start AI agent",
   "zcode.error.TASK_OWNED_BY_OTHER_HOST": "This task is already running in another connected view.",
@@ -6057,15 +5740,11 @@ const enUS: Record<string, string> = {
     "The upstream service is temporarily unavailable. Please try again later.",
   "zcode.error.providerBusiness.429":
     "You're sending requests too quickly. Please try again later.",
-
-  // Debug info bar
   "debugInfo.taskId": "Task ID",
   "debugInfo.traceId": "Trace ID",
   "debugInfo.sessionId": "Session ID",
   "debugInfo.provider": "Provider",
   "debugInfo.copied": "Copied",
-
-  // Resource manager
   "resourceManager.title": "Resource manager",
   "resourceManager.loading": "Reading resource usage...",
   "resourceManager.unavailable": "Resource manager bridge is unavailable",
@@ -6082,8 +5761,6 @@ const enUS: Record<string, string> = {
   "resourceManager.sampling": "Sampling metrics",
   "resourceManager.column.process": "Process",
   "resourceManager.column.pid": "PID",
-
-  // Feedback
   "feedback.center.title": "Feedback",
   "feedback.center.description": "Describe the issue and track progress after submitting.",
   "feedback.center.submitTitle": "Submit feedback",
@@ -6353,7 +6030,7 @@ const enUS: Record<string, string> = {
   "feedback.submit.simple.logsTitle": "Logs",
   "feedback.submit.simple.logsLabel": "Upload diagnostic logs",
   "feedback.submit.simple.logsHint":
-    "Off by default. Uploads today's diagnostic logs, excluding databases, configuration files and model conversation traces. Automatic redaction may not remove all business information. Please choose carefully.",
+    "On by default; you can turn it off. Uploads today's diagnostic logs, a safe projection of CLI configuration, and today's model-call traces; databases are excluded. Automatic redaction may not remove all business information. Please choose carefully.",
   "feedback.submit.simple.footerHint": "Track progress later in My feedback.",
   "feedback.submit.missingDescription": "Please describe the issue first",
   "feedback.submit.addScreenshot": "Add screenshot",
@@ -6413,7 +6090,6 @@ const enUS: Record<string, string> = {
   "feedback.submission.logUploadPausedDetail":
     "Logs are required for investigation. Please continue the upload.",
   "feedback.submission.preparingUploadDetail": "Preparing upload",
-  // Forms
   "forms.labels.name": "Name",
   "forms.labels.description": "Description",
   "forms.labels.color": "Color",
@@ -6431,7 +6107,6 @@ const enUS: Record<string, string> = {
   "forms.validation.agentDescriptionHint": "Briefly describe the subagent's purpose",
   "forms.validation.agentSystemPromptHint": "Define the subagent's behavior and capabilities",
   "forms.validation.fileExists": "File {fileName} already exists",
-  // ---- Scheduled tasks / Automations ----
   "taskList.cronTaskLabel": "Scheduled task",
   "taskList.offPeakTaskLabel": "Idle-time task",
   "taskList.workflowRun.ariaLabel": "Workflow run {name}: {status}",
@@ -6727,7 +6402,6 @@ const enUS: Record<string, string> = {
   "automations.runs.delete": "Delete run",
   "automations.runs.prevPage": "Previous",
   "automations.runs.nextPage": "Next",
-  // CUA (Computer Use)
   "chat.cuaReadiness.toolsNotLoaded":
     "omz Computer Use is still preparing — its tools aren't loaded yet ({count} loaded). Grant the permissions below; tools appear once the helper is ready.",
   "chat.cuaReadiness.toolsPreparing":
@@ -6910,6 +6584,461 @@ const enUS: Record<string, string> = {
   "scheduledPreview.toast.running": "Running “{title}”…",
   "scheduledPreview.toast.view": "View",
   "scheduledPreview.addSchedule": "Add schedule",
+  "preview.image.copy": "Copy image",
+  "preview.image.actions": "Image actions",
+  "preview.image.added": "Added to chat",
+  "preview.image.addFailed":
+    "Could not add the image. Open an editable chat in this workspace first.",
+  "preview.image.copied": "Image copied",
+  "preview.image.copyFailed": "Could not copy image. Check clipboard access and try again.",
+  "archives.nav": "Archive management",
+  "archives.title": "Archived sessions",
+  "archives.deleteAll": "Delete all",
+  "archives.search": "Search archived sessions",
+  "archives.clearSearch": "Clear search",
+  "archives.sortLabel": "Sort by",
+  "archives.sort.updated": "Updated time",
+  "archives.sort.created": "Created time",
+  "archives.projectLabel": "Project",
+  "archives.allProjects": "All projects",
+  "archives.unclassified": "Unclassified",
+  "archives.removedProject": "Removed project",
+  "archives.removed": "Removed",
+  "archives.count": "{count} sessions",
+  "archives.groupActions": "Archive actions for {name}",
+  "archives.delete": "Delete",
+  "archives.deleteTask": "Delete “{title}”",
+  "archives.unarchive": "Unarchive",
+  "archives.unarchiveAll": "Unarchive all",
+  "archives.showMore": "Show more",
+  "archives.deleteTitle": "Delete {count} archived sessions?",
+  "archives.deleteDescription":
+    "Only the sessions in this confirmed selection will be deleted. You cannot restore them in the app.",
+  "archives.working": "Processing…",
+  "archives.result": "Succeeded: {succeeded}; failed: {failed}; skipped after changes: {skipped}",
+  "archives.loadFailed": "Could not load archived sessions",
+  "archives.retry": "Retry",
+  "archives.loading": "Loading archived sessions…",
+  "archives.empty": "No archived sessions",
+  "archives.noResults": "No matching archived sessions",
+  "project.switchDevice": "Switch device?",
+  "project.switchDeviceDescription":
+    "The selected folders will be cleared. The project name will be kept.",
+  "project.connectAndBrowse": "Connect and choose folder",
+  "project.hostRemoved": "This device was removed from the project list. Select a device again.",
+  "project.connectionUnavailable": "This device is unavailable. Reconnect it in settings.",
+  "project.addRemoteDevice": "Add remote device…",
+  "project.deviceStatus.online": "Online",
+  "project.deviceStatus.offline": "Offline",
+  "project.deviceStatus.connecting": "Connecting",
+  "project.deviceStatus.pending": "Needs attention",
+  "project.deviceStatus.failed": "Failed",
+  "project.device": "Device",
+  "project.thisComputer": "This computer",
+  "project.hasUnread": "Project has unread tasks",
+  "project.projectOrder": "Project order",
+  "project.taskOrder": "Task order",
+  "project.browseHint": "omz can read and edit these folders",
+  "project.connectAndBrowseHint": "Device status: {status}. omz connects first.",
+  "project.selectHost": "Choose a remote connection",
+  "project.back": "Back",
+  "project.next": "Next",
+  "project.remoteDescription": "Choose folders on a connected computer",
+  "project.localDescription": "Edit, run, and test files on your computer",
+  "project.remote": "Remote",
+  "project.local": "Local",
+  "project.type": "Project type",
+  "project.create": "Create project",
+  "project.trustFolderTitle": "Trust this folder?",
+  "project.trustFoldersTitle": "Trust these folders?",
+  "project.trustFoldersDescription":
+    "omz can read and edit files in these folders and run commands within your current permission settings. Continue only if you trust every folder listed.",
+  "project.trustFoldersAndCreate": "Trust folders and create",
+  "project.trustFoldersAndRestore": "Trust folders and restore",
+  "project.existingOnDeviceHint": "Already have projects on this device?",
+  "project.existingOnDeviceAction": "Add to sidebar",
+  "project.backToCreate": "Back to new project",
+  "project.noExistingProjects": "No existing projects on this device",
+  "project.addRemoteProject": "Add remote project",
+  "project.connect": "Connect",
+  "project.removeHost": "Remove connection",
+  "project.addHost": "Add connection",
+  "project.offline": "Offline",
+  "project.legacySingleRoot": "Single folder",
+  "project.legacyUpgradeRequired": "Upgrade the server to create and edit projects",
+  "project.unresolved": "Select a project",
+  "project.removeEntry": "Remove from this device",
+  "project.addFolder": "Add folder to project",
+  "project.projects": "Projects",
+  "project.timeline": "Timeline",
+  "project.view": "Filter view",
+  "taskGroup.view": "By group",
+  "taskGroup.add": "New group",
+  "taskGroup.defaultTitle": "New group",
+  "taskGroup.move": "Move to group",
+  "taskGroup.remove": "Remove from group",
+  "taskGroup.noGroups": "No groups",
+  "taskGroup.failed": "Group action failed. Please retry.",
+  "taskGroup.retryPlacement": "Retry group placement",
+  "taskGroup.expandAll": "Expand all groups",
+  "taskGroup.collapseAll": "Collapse all groups",
+  "taskGroup.expand": "Expand group",
+  "taskGroup.collapse": "Collapse group",
+  "taskGroup.reorder": "Drag to reorder",
+  "taskGroup.menu": "Group actions",
+  "taskGroup.empty": "Drag tasks into this group",
+  "taskGroup.cron": "Scheduled tasks",
+  "taskGroup.offPeak": "Off-peak tasks",
+  "project.viewByProject": "By project",
+  "project.viewRecentlyUpdated": "Recently updated",
+  "project.archived": "Archived",
+  "project.sort": "Sort projects",
+  "project.manual": "Project order",
+  "project.recent": "Recent activity",
+  "project.expandAll": "Expand all projects",
+  "project.collapseAll": "Collapse all projects",
+  "project.new": "New project",
+  "project.tasks": "Tasks",
+  "project.createTask": "New task",
+  "project.showMore": "Show more",
+  "project.restore": "Restore project",
+  "project.edit": "Edit project",
+  "project.deviceSettings": "Remote device settings",
+  "project.description":
+    "Group folders on the same host. Existing tasks keep their working directory.",
+  "project.name": "Project name",
+  "project.folders": "Source folders",
+  "project.primary": "Primary folder",
+  "project.primaryBadge": "Primary",
+  "project.setPrimary": "Set as primary",
+  "project.addSourceFolder": "Add folder",
+  "project.removeFolder": "Remove folder",
+  "project.folderPath": "Folder path",
+  "project.add": "Add",
+  "project.browse": "Choose folder",
+  "project.noFolders": "No source folders in this project",
+  "project.primaryRootMissing": "This project's main folder has been deleted or moved",
+  "project.primaryRootUnavailable": "This project's main folder cannot be accessed",
+  "project.cancel": "Cancel",
+  "project.save": "Save",
+  "project.restoreDescription": "A deleted project {name} uses the same folders. Restore it?",
+  "project.actions": "Project actions",
+  "project.unpin": "Unpin",
+  "project.pin": "Pin",
+  "project.delete": "Delete project",
+  "browser.permission.promptAriaLabel": "Site permission request",
+  "browser.permission.wantsToUse": "wants to use",
+  "browser.permission.siteInfo": "View site information",
+  "browser.permission.settings": "Site permissions",
+  "browser.permission.close": "Close",
+  "browser.permission.saved":
+    "Permissions updated. Reload the page to apply changes to active resources.",
+  "browser.permission.readError": "Could not load permissions.",
+  "browser.permission.saveError": "Could not save permission changes.",
+  "browser.permission.resetError": "Could not complete the permission reset.",
+  "browser.permission.retry": "Retry",
+  "browser.permission.unsupported": "Site permissions are available in the desktop browser.",
+  "browser.permission.reset": "Reset site permissions",
+  "browser.permission.resetDone": "Permissions reset. Reload the page to request access again.",
+  "browser.permission.allowOnce": "Allow once",
+  "browser.permission.allowAlways": "Allow on this site",
+  "browser.permission.blockAlways": "Block",
+  "browser.permission.cancel": "Cancel",
+  "browser.permission.share": "Share",
+  "browser.permission.media": "camera and microphone",
+  "browser.permission.mediaVideo": "camera",
+  "browser.permission.mediaAudio": "microphone",
+  "browser.permission.mediaBoth": "camera and microphone",
+  "browser.permission.clipboardRead": "clipboard reading",
+  "browser.permission.geolocation": "location",
+  "browser.permission.notifications": "notifications",
+  "browser.permission.midi": "MIDI devices",
+  "browser.permission.idleDetection": "idle detection",
+  "browser.permission.speakerSelection": "audio output selection",
+  "browser.permission.windowManagement": "window management",
+  "browser.permission.storageAccess": "storage access",
+  "browser.permission.keyboardLock": "keyboard lock",
+  "browser.permission.fileSystem": "file access",
+  "browser.permission.deviceHid": "HID devices",
+  "browser.permission.deviceUsb": "USB devices",
+  "browser.permission.deviceSerial": "serial devices",
+  "browser.permission.deviceBluetooth": "Bluetooth devices",
+  "browser.permission.unknownCapability": "an unknown capability",
+  "browser.permission.screenShareTitle": "{origin} wants to share your screen",
+  "browser.permission.screenShareDescription":
+    "Choose the screen or window to share. This choice applies only to this session.",
+  "browser.permission.deviceTitle": "{origin} wants to connect a device",
+  "browser.permission.connect": "Connect",
+  "browser.permission.screenGroup.screen": "Entire Screen",
+  "browser.permission.screenGroup.window": "Window",
+  "browser.permission.stateAllow": "Allow",
+  "browser.permission.stateDeny": "Block",
+  "browser.permission.stateAsk": "Ask",
+  "sidePane.fullView.enter": "Enter full view",
+  "sidePane.fullView.exit": "Exit full view",
+  "sidePane.fullView.openAnswer": "Show messages",
+  "sidePane.fullView.minimize": "Minimize editor",
+  "sidePane.fullView.restore": "Restore editor",
+  "sidePane.fullView.openConversation": "Open in full view",
+  "sidePane.fullView.handle": "Drag to move · Click for options",
+  "sidePane.fullView.expandMessages": "Expand messages",
+  "sidePane.fullView.collapseMessages": "Collapse messages",
+  "sidePane.fullView.statusRunning": "Running",
+  "sidePane.fullView.statusIdle": "Idle",
+  "sidePane.newTab": "New tab",
+  "sidePane.launcher.selection-side-conversation": "Continue a conversation in the side pane.",
+  "sidePane.launcher.review": "Review code changes and diffs.",
+  "sidePane.launcher.terminal": "Run commands and view output.",
+  "sidePane.launcher.browser": "Browse websites and preview apps.",
+  "sidePane.launcher.developer-tools": "Inspect and debug the app.",
+  "sidePane.launcher.viewAllPlugins": "View all plugins",
+  "sidePane.launcher.empty": "No recommended app plugins yet",
+  "sidePane.pluginUi": "Plugin",
+  "fileManager.resizeNavigation": "Resize file navigation",
+  "fileManager.title": "Files",
+  "fileManager.showNavigation": "Show file navigation",
+  "fileManager.hideNavigation": "Hide file navigation",
+  "fileManager.empty": "Select a file from the navigation",
+  "workspaceSidebar.sourceTaskUnavailable": "This device is not ready. Reconnect it first.",
+  "workspaceSidebar.connectIdentifyTitle": "Connect this device",
+  "workspaceSidebar.connectionOffline": "Offline",
+  "workspaceSidebar.openRemoteProject": "Open remote project",
+  "workspaceSidebar.remoteProject": "Remote project",
+  "workspaceSidebar.connectionDetails": "View connection details for {device}",
+  "workspaceSidebar.openProjectHint": "Click the project name to open it",
+  "workspaceSidebar.reconnectProjectHint":
+    "Click the project name to reconnect and open this directory",
+  "workspaceSidebar.projectPath": "Directory",
+  "workspaceSidebar.projectDevice": "Device",
+  "workspaceSidebar.projectLine": "Connection",
+  "workspaceSidebar.recoveringAutomatic": "Recovering connection automatically",
+  "workspaceSidebar.recoveringAutomaticShort": "Recovering {attempt}/{limit}",
+  "workspaceSidebar.manageDevice": "Manage in settings",
+  "workspaceSidebar.newRemoteConnection": "New remote connection…",
+  "workspaceSidebar.recoveringAutomaticAttempt":
+    "Recovering connection automatically ({attempt}/{limit})",
+  "workspaceSidebar.reconnectingManual": "Reconnecting manually",
+  "ssh.advancedOptions": "Advanced options",
+  "ssh.validation.hostRequired": "Enter a host",
+  "ssh.validation.usernameRequired": "Enter a username",
+  "ssh.importFromConfig": "Import from SSH config",
+  "ssh.importEmpty": "No SSH config hosts found",
+  "ssh.configAliasLinked": "Linked to Host {alias}",
+  "ssh.configAliasUnlink": "Unlink",
+  "ssh.configAliasLinkedHint": "Editing any field unlinks it",
+  "ssh.pasteRecognized": "Recognized {target}",
+  "ssh.validation.port": "Port must be an integer from 1 to 65535",
+  "ssh.showPassword": "Show password",
+  "ssh.hidePassword": "Hide password",
+  "docker.inputMode.select": "Select a running container",
+  "docker.inputMode.manual": "Enter a container manually",
+  "settings.toolSearch.auto": "Auto",
+  "settings.toolSearch.local": "Local",
+  "settings.toolSearch.off": "Off",
+  "settings.memory.workspaceMemory": "Workspace Memory",
+  "settings.memory.viewer.localOnly":
+    "Memory details are available only in the local desktop app. Open Memory settings there to view them.",
+  "settings.memory.viewer.title": "Saved workspace memories",
+  "settings.memory.viewer.description": "Browse memories saved by workspace on this device.",
+  "settings.memory.viewer.projectsDescription":
+    "Select a project to view all of its saved memories.",
+  "settings.memory.viewer.refresh": "Refresh",
+  "settings.memory.viewer.loading": "Loading memories…",
+  "settings.memory.viewer.empty": "No saved workspace memories",
+  "settings.memory.viewer.workspaces": "Workspaces",
+  "settings.memory.viewer.files": "Files",
+  "settings.memory.viewer.searchPlaceholder": "Search memory files…",
+  "settings.memory.viewer.searchEmpty": "No memory files found.",
+  "settings.memory.viewer.workspaceSearchPlaceholder": "Search workspaces…",
+  "settings.memory.viewer.workspaceSearchEmpty": "No workspaces found.",
+  "settings.memory.viewer.itemCount.one": "{count} item",
+  "settings.memory.viewer.itemCount.other": "{count} items",
+  "settings.memory.viewer.memoryCount.one": "{count} memory",
+  "settings.memory.viewer.memoryCount.other": "{count} memories",
+  "settings.memory.viewer.updated.justNow": "Just now",
+  "settings.memory.viewer.updated.minutesAgo": "{count} min ago",
+  "settings.memory.viewer.updated.today": "Today {time}",
+  "settings.memory.viewer.updated.yesterday": "Yesterday {time}",
+  "settings.memory.viewer.updated.weekday": "{weekday} {time}",
+  "settings.memory.viewer.updated.weekdayZh": "周{weekday}",
+  "settings.memory.viewer.updated.date": "{date} {time}",
+  "settings.memory.viewer.updated.dateMonthDay": "{month}/{day}",
+  "settings.memory.viewer.updated.dateYearMonthDay": "{year}/{month}/{day}",
+  "settings.memory.viewer.tree": "Memory files",
+  "settings.memory.viewer.indexMissing": "MEMORY.md (not generated)",
+  "settings.memory.viewer.collapse": "Collapse memory items",
+  "settings.memory.viewer.expand": "Expand memory items",
+  "settings.memory.viewer.fileLoading": "Loading file…",
+  "settings.memory.viewer.fileDeleted":
+    "This memory file has been deleted. Refresh the file list to update it.",
+  "settings.memory.viewer.fileTooLarge": "This memory file exceeds the 5 MiB preview limit.",
+  "settings.memory.viewer.fileChanged":
+    "This memory file was updated while being read. Reopen it or refresh the file list.",
+  "settings.memory.viewer.noSelection": "Select a memory file to preview it.",
+  "settings.dynamicWorkflow.option.disabled": "Off",
+  "settings.dynamicWorkflow.option.disabled.description":
+    "Turn workflows off. The model cannot start new ones, and the Workflows tab leaves the Automations page. Workflows already in your conversations stay readable.",
+  "settings.dynamicWorkflow.option.onDemand": "On command",
+  "settings.dynamicWorkflow.option.onDemand.description":
+    "The model starts a workflow only when you type /workflow.",
+  "settings.dynamicWorkflow.option.alwaysOn": "Always on",
+  "settings.dynamicWorkflow.option.alwaysOn.description":
+    "You can type /workflow, and the model can also start a workflow on its own when your request calls for one.",
+  "settings.dynamicWorkflow.defaultTag": "Default",
+  "settings.dynamicWorkflow.saveError": "Could not save the dynamic workflow setting",
+  "settings.modelProvider.templateGroup.zhipu": "Zhipu",
+  "settings.modelProvider.anthropicEndpoint": "Anthropic endpoint",
+  "settings.modelProvider.anthropicEndpointPlaceholder": "e.g. https://api.anthropic.com",
+  "settings.modelProvider.openaiEndpoint": "OpenAI endpoint",
+  "settings.modelProvider.openaiEndpointPlaceholder": "e.g. https://api.openai.com/v1",
+  "settings.modelProvider.geminiEndpoint": "Gemini endpoint",
+  "settings.modelProvider.geminiEndpointPlaceholder":
+    "e.g. https://generativelanguage.googleapis.com",
+  "settings.modelProvider.endpointNoMatch": "No matching endpoint",
+  "settings.modelProvider.startPlan.quotaSectionTitle": "Trial plan",
+  "settings.modelProvider.startPlan.eligibleNewUser": "New User",
+  "settings.modelProvider.startPlan.preview.unit.tokens": "tokens",
+  "settings.modelProvider.startPlan.preview.period.daily": "{unit} per day",
+  "settings.modelProvider.startPlan.preview.entitlementSummary.daily": "Daily quota · {details}",
+  "settings.modelProvider.startPlan.preview.entitlementSummary.generic": "Quota · {details}",
+  "settings.modelProvider.startPlan.preview.entitlementGroup.single": "{model} {quota}",
+  "settings.modelProvider.startPlan.preview.entitlementGroup.each": "{models} {quota} each",
+  "settings.modelProvider.remoteOAuthNotReady":
+    "OAuth sign-in cannot be started directly on a remote Source. Configure an API key or sync the signed-in account from the local Source.",
+  "settings.modelProvider.codingPlan.bigmodel.unregisteredHint":
+    "This BigModel account is not registered yet. Register first.",
+  "settings.modelProvider.codingPlan.bigmodel.registerAction": "Register",
+  "settings.modelProvider.codingPlan.billingDiscountInfo.open": "View 150% quota campaign details",
+  "settings.modelProvider.claudeMapping": "Claude model mapping",
+  "settings.modelProvider.claudeMappingDescription":
+    "Choose a matching model for each Claude model slot",
+  "settings.modelProvider.slot.haiku": "Haiku (light tasks)",
+  "settings.modelProvider.slot.sonnet": "Sonnet (general tasks)",
+  "settings.modelProvider.slot.opus": "Opus (complex tasks)",
+  "settings.modelProvider.slot.reasoning": "Reasoning (reasoning tasks)",
+  "settings.modelProvider.mappingNotSet": "Not set",
+  "settings.modelProvider.presetTitle": "Providers",
+  "settings.modelProvider.presetDescription":
+    "Built-in Z.ai and BigModel providers with OAuth-assisted configuration.",
+  "settings.modelProvider.presetEmpty": "Not synced yet. Complete OAuth login first.",
+  "settings.plugins.store.segment.community": "Community",
+  "settings.plugins.store.communityEmpty": "No community plugins yet",
+  "settings.plugins.store.ui.open": "Open",
+  "settings.plugins.store.ui.unsupported": "Plugin UI is available in local desktop projects only.",
+  "settings.plugins.store.ui.needsSession":
+    "Open this plugin in an available session of the current project.",
+  "settings.plugins.store.ui.unavailable":
+    "No plugin UI is available in this project. Check whether the plugin is enabled.",
+  "settings.plugins.store.ui.chooseSurface": "Choose a plugin interface",
+  "settings.plugins.store.ui.preview": "Enlarge preview",
+  "settings.plugins.store.ui.capability":
+    "Provides interactive interfaces that open in the side pane.",
+  "settings.plugins.store.ui.title": "App plugins",
+  "settings.plugins.store.browseAll": "Browse all plugins",
+  "settings.plugins.marketplace.claudeCodePlugins": "Claude Code Plugins",
+  "settings.plugins.zcodeOnly": "omz Agent only",
+  "chat.toolCall.previewFailed": "Could not load preview",
+  "chat.toolCall.previewUnavailable": "Preview unavailable",
+  "chat.toolCall.explore.bucket.fetch.one": "fetch",
+  "chat.toolCall.explore.bucket.fetch.other": "fetches",
+  "chat.toolCall.kind.webFetch": "Fetch",
+  "chat.toolCall.webFetch.fetching": "Fetching",
+  "chat.toolCall.execute.expandCommand": "Show full command",
+  "chat.toolCall.execute.collapseCommand": "Collapse",
+  "chat.toolCall.workflow.digest.hole": "{count} hole to fill",
+  "chat.toolCall.workflow.digest.holes": "{count} holes to fill",
+  "chat.toolCall.workflow.card.hole": "{count} hole",
+  "chat.toolCall.workflow.card.holes": "{count} holes",
+  "chat.toolCall.workflow.hole.waiting": "waiting",
+  "chat.toolCall.workflow.hole.head.title": "Hole “{name}” · filled by the agent · {time}",
+  "chat.toolCall.workflow.hole.head.title.untimed": "Hole “{name}” · filled by the agent",
+  "chat.toolCall.workflow.hole.open": "Open the fill of “{name}”",
+  "chat.toolCall.workflow.hole.writing": "Filling hole",
+  "chat.toolCall.workflow.hole.revising": "Revising hole fill",
+  "chat.toolCall.workflow.hole.draft": "Hole draft",
+  "chat.toolCall.workflow.hole.awaitingConfirmation": "Hole fill awaiting confirmation",
+  "chat.toolCall.workflow.hole.ran": "Hole fill",
+  "chat.toolCall.workflow.hole.filled": "Hole filled",
+  "chat.toolCall.workflow.hole.phasesAdded": "{count} phases",
+  "chat.toolCall.workflow.hole.stands.between":
+    "The hole stands after “{before}” and before “{after}”;",
+  "chat.toolCall.workflow.hole.stands.after": "The hole stands after “{before}”;",
+  "chat.toolCall.workflow.hole.stands.before": "The hole stands before “{after}”;",
+  "chat.toolCall.workflow.hole.draftPath": "Draft",
+  "chat.toolCall.workflow.hole.waited": "Waiting · {time}",
+  "chat.toolCall.workflow.run.hole.waitingFor": "Waiting for the agent to fill it",
+  "chat.toolCall.workflow.run.hole.filledAt": "Filled · {time}",
+  "chat.permission.workflow.hole.title": "Fill this hole?",
+  "chat.permission.workflow.holes.label": "Holes",
+  "chat.permission.workflow.holes.note": "The run pauses at a hole until the agent fills it.",
+  "chat.toolCall.workflow.saveRun.action": "Save",
+  "chat.toolCall.workflow.saveRun.runAgain": "Run again",
+  "chat.toolCall.workflow.saveRun.starting": "Starting…",
+  "chat.toolCall.workflow.saveRun.chip": "Saved",
+  "chat.toolCall.workflow.saveRun.chip.hint": "View in the workflow hub",
+  "chat.toolCall.workflow.saveRun.announce.project": "Saved to the project",
+  "chat.toolCall.workflow.saveRun.announce.global": "Saved as a global workflow",
+  "chat.toolCall.workflow.saveRun.title": "Save workflow",
+  "chat.toolCall.workflow.saveRun.lead": "Let omz refine and save it",
+  "chat.toolCall.workflow.saveRun.lead.hint":
+    "omz distills a reusable workflow for you, then asks you to confirm.",
+  "chat.toolCall.workflow.saveRun.lead.sending": "Handed to omz…",
+  "chat.toolCall.workflow.saveRun.lead.unsupported": "This agent cannot save directly.",
+  "chat.toolCall.workflow.saveRun.or": "or save it as is",
+  "chat.toolCall.workflow.saveRun.name": "Name",
+  "chat.toolCall.workflow.saveRun.name.placeholder": "pr-layered-review",
+  "chat.toolCall.workflow.saveRun.name.helper": "Letters, digits, - _ . ; 64 characters at most",
+  "chat.toolCall.workflow.saveRun.name.invalid": "Only letters, digits and - _ .",
+  "chat.toolCall.workflow.saveRun.scope.remoteOnly":
+    "A remote project can only save into the project.",
+  "chat.toolCall.workflow.saveRun.description": "Description",
+  "chat.toolCall.workflow.saveRun.description.helper":
+    "When-to-use and arguments can be added later in the workflow hub.",
+  "chat.toolCall.workflow.saveRun.consequence":
+    "Writes {path}; afterwards it runs again by name from Automations › Workflows.",
+  "chat.toolCall.workflow.saveRun.overwrite":
+    "This project already has a workflow of this name; saving overwrites it. Its run records stay.",
+  "chat.toolCall.workflow.saveRun.shadowing": "{text}.",
+  "chat.toolCall.workflow.saveRun.submit": "Save as is",
+  "chat.toolCall.workflow.saveRun.submit.overwrite": "Overwrite and save as is",
+  "chat.toolCall.workflow.saveRun.submit.saving": "Saving…",
+  "chat.toolCall.workflow.saveRun.error.invalid_name": "Only letters, digits and - _ .",
+  "chat.toolCall.workflow.saveRun.error.run_not_found":
+    "This run has no record here, so it cannot be saved directly.",
+  "chat.toolCall.workflow.saveRun.error.script_missing":
+    "This run did not keep its script, so use the path above.",
+  "chat.toolCall.workflow.saveRun.error.target_exists":
+    "A workflow of this name exists; confirm the overwrite and save again.",
+  "chat.toolCall.workflow.saveRun.error.compile_failed":
+    "The script did not pass typecheck; nothing was written.",
+  "chat.toolCall.workflow.saveRun.error.write_error": "Writing failed; nothing was saved.",
+  "chat.toolCall.workflow.saveRun.error.generic": "Saving failed.",
+  "chat.toolCall.workflow.run.settings.limit.default": "default {n}",
+  "chat.toolCall.workflow.run.settings.limit.atDefault": "= default",
+  "chat.toolCall.workflow.settingsChange.limitDefault": "limit back to the default",
+  "chat.toolCall.workflow.run.artifacts.openAsFile": "Open as file",
+  "chat.toolCall.workflow.run.artifacts.openAsFileFailed": "Could not open this artifact as a file",
+  "chat.toolCall.search.tools": "Search tools",
+  "chat.toolCall.search.toolsWithQuery": "Search tools: {query}",
+  "chat.permission.workflow.subagentModelDefault": "By default, subagents run on {model}",
+  "chat.permission.workflow.settings.model.lead": "Subagents run on",
+  "chat.permission.workflow.settings.model.noCatalog": "Subagents stay on the session model",
+  "chat.permission.workflow.settings.model.noCatalogReason": "this agent has no model catalog",
+  "chat.permission.workflow.settings.model.leadDefault": "By default, subagents run on",
+  "chat.permission.workflow.settings.model.noCatalogDefault":
+    "By default, subagents stay on the session model",
+  "chat.permission.workflow.settings.limit.lead": "At most",
+  "chat.permission.workflow.settings.limit.trail": "subagents at once",
+  "chat.permission.workflow.settings.limit.none": "no limit of its own",
+  "chat.permission.workflow.settings.was": "was {value}",
+  "chat.permission.workflow.settings.reset": "Back to the proposed value",
+  "chat.permission.workflow.allowOnce.adjusted": "Run once with the adjusted settings",
+  "chat.permission.workflow.allowForSession.adjusted":
+    "This run with the adjusted settings; later runs are not asked and carry their own",
+  "chat.permission.workflow.save.args.showAll": "Show all {count} arguments",
+  "chat.permission.workflow.save.args.showFewer": "Show fewer arguments",
+  "chat.permission.workflow.save.showMore": "Show more",
+  "chat.permission.workflow.save.showLess": "Show less",
 };
 
 export default enUS;
