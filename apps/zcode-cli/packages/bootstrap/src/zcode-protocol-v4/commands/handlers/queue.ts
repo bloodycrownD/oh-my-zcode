@@ -387,9 +387,19 @@ async function sendQueuedNow(
     if (!removed) throw new V4QueuePromotionCommitError(payload.queueItemId);
     // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
     // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
+    // 此项已在 promoted 完成之后：恢复步骤失败不得把命令误报为失败（重试会撞
+    // queueItem 不存在），降级 warn 让下一次「继续」/turn 完成钩子补放行。
     if (!autoDrainPromotion) {
-      await record.app.setQueueAutoDrain(true);
-      await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
+      try {
+        await record.app.setQueueAutoDrain(true);
+        await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
+      } catch (error) {
+        host.logger?.warn?.("v4 sendQueuedNow resume autoDrain failed", {
+          error: String(error),
+          queueItemId: payload.queueItemId,
+          sessionId: record.app.sessionId,
+        });
+      }
     }
     return undefined;
   } finally {

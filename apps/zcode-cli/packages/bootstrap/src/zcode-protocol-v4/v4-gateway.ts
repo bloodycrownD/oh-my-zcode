@@ -2644,12 +2644,21 @@ export class ConversationV4Gateway {
 
   /**
    * 当前输入路由模式（v4 原生能力，供命令层 host.getInputRoutingMode 使用）：
-   * held choice 裁决（heldQueueInputRequiresChoice）读投影 inputRouting.mode。
+   * held 裁决与 omz 暂停入队语义读投影 inputRouting.mode。
    */
   getInputRoutingMode(
     sessionId: string,
   ): "startNow" | "enqueue" | "guide" | "reject" | "choice" | null {
     return this.publishers.get(sessionId)?.getSnapshot().inputRouting.mode ?? null;
+  }
+
+  /**
+   * 输入路由全量（含 reasonCode）：sendText 执行层用 reasonCode=heldQueuePausesButAcceptsInput
+   * 区分「held 暂停入队」与「busy 入队」（后者仍走 startPromptTurn 的 Core busy admission）。
+   */
+  getInputRouting(sessionId: string): { mode: string; reasonCode?: string } | null {
+    const routing = this.publishers.get(sessionId)?.getSnapshot().inputRouting;
+    return routing ? { mode: routing.mode, ...(routing.reasonCode ? { reasonCode: routing.reasonCode } : {}) } : null;
   }
 
   getSessionFollowupMode(sessionId: string): "queue" | "guide" | null {

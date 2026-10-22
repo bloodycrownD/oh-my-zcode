@@ -255,6 +255,33 @@ async function sendText(
       payload.expectedHeldQueueItemIds,
     );
   }
+  // omz 拍板（2026-10-23，bug B）：held 暂停（completed+queue>0+autoDrain=false）期间输入
+  // **照常入队**，等「继续」（setAutoDrain）按 FIFO 放行。执行层与 /goal 车道对称：不能走
+  // startPromptTurn——idle admission 会立即起轮插队于暂停队列之前。busy 入队（reasonCode
+  // 缺席的 enqueue）不走此分支，保留 Core busy admission 的 steer/queue 语义。
+  const heldRoutingReason =
+    host.getInputRouting?.(envelope.sessionId ?? "")?.reasonCode ?? null;
+  if (!forceStartNow && heldRoutingReason === "heldQueuePausesButAcceptsInput") {
+    const queued = await enqueueDeferredInputForBusyWork(record, payload.text, {
+      inputId: envelope.commandId,
+      queryId: envelope.commandId as SteerTurnOptions["queryId"],
+      intent: submissionIntent({
+        text: payload.text,
+        requestedDelivery: "queue",
+        attachmentRefs: payload.attachments,
+        sharedContextRefs: payload.context_refs,
+      }),
+      ...(attachments ? { attachments } : {}),
+      ...(payload.toolDisallowlist ? { toolDisallowlist: payload.toolDisallowlist } : {}),
+    });
+    if (!queued) {
+      throw new V4InputAdmissionRejectedError(
+        "fault.command.inputRejected",
+        "held queue enqueue rejected",
+      );
+    }
+    return { type: "inputAccepted", delivery: "queue", inputId: envelope.commandId };
+  }
   let started;
   // 附件命令面：AttachmentRef → TurnAttachment 在闸门后映射（active turn 已排除）。
   try {

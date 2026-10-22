@@ -82,8 +82,28 @@ test("tripwire：sendQueuedNow 手动提升成功后恢复 autoDrain（立即发
     join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "queue.ts"),
     "utf8",
   );
-  assert.match(source, /if \(!autoDrainPromotion\) \{\s*\n\s*await record\.app\.setQueueAutoDrain\(true\)/);
+  assert.match(source, /if \(!autoDrainPromotion\) \{\s*\n\s*try \{\s*\n\s*await record\.app\.setQueueAutoDrain\(true\)/);
   assert.match(source, /queue_auto_drain_resumed/);
+  // P2-4：恢复步骤失败降级 warn，不得把已 promoted 的命令误报失败
+  assert.match(source, /v4 sendQueuedNow resume autoDrain failed/);
+});
+
+test("tripwire：sendText 执行层在 held 暂停走 deferred 入队（不 idle 起轮插队）", () => {
+  const source = readFileSync(
+    join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "session-flow.ts"),
+    "utf8",
+  );
+  // held 分支必须以 reasonCode 判定（区分 busy enqueue），且经 enqueueDeferredInputForBusyWork
+  const heldIdx = source.indexOf('heldRoutingReason === "heldQueuePausesButAcceptsInput"');
+  assert.ok(heldIdx > 0, "sendText 含 held reasonCode 判定");
+  const branchBody = source.slice(heldIdx, source.indexOf("return { type: \"inputAccepted\", delivery: \"queue\"", heldIdx));
+  assert.match(branchBody, /enqueueDeferredInputForBusyWork/);
+  // gateway 侧提供 reasonCode 全量路由
+  const gateway = readFileSync(
+    join(srcRoot, "zcode-protocol-v4", "v4-gateway.ts"),
+    "utf8",
+  );
+  assert.match(gateway, /getInputRouting\(sessionId: string\)/);
 });
 
 test("防御面：choice 裁决（applyHeldQueueDisposition）保留为兜底", () => {

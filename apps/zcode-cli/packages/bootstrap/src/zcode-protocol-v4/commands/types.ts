@@ -111,6 +111,12 @@ export interface V4CommandCoreHost {
   getInputRoutingMode?(
     sessionId: string,
   ): "startNow" | "enqueue" | "guide" | "reject" | "choice" | null;
+  /**
+   * 输入路由全量（含 reasonCode）。sendText 执行层据此把 held 暂停
+   * （reasonCode=heldQueuePausesButAcceptsInput，omz 拍板：暂停期间输入照常入队）
+   * 与 busy 入队（走 Core busy admission 的 steer/queue 语义）区分开。
+   */
+  getInputRouting?(sessionId: string): { mode: string; reasonCode?: string } | null;
   /** runtime event notification 后，等待目标 event 真正完成 reorder drain + projection apply。 */
   waitForProjectionEventCommit?(
     sessionId: string,

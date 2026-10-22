@@ -1193,7 +1193,7 @@ export async function setPendingInputDelivery(
 /**
  * （v4 setAutoDrain）：翻转 queue autoDrain 授权位（会话级配置，与 active turn 无关）。
  * 仅追加 QueueAutoDrainChanged 事件供 v4 投影消费；held 派生（completed+queue>0+autoDrain=false
- * → choice 路由）与后续 heldQueueDisposition 命令闭合发送语义。
+ * → omz 拍板 enqueue 路由，暂停期间输入照常入队）与后续「继续」放行语义在此闭合。
  */
 export async function setQueueAutoDrain(
   this: AgentRuntimeInternal,

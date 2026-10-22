@@ -958,8 +958,9 @@ export function createConversationV4Gateway(
         ack,
       );
     },
-    // held choice 裁决（heldQueueInputRequiresChoice）：读投影 inputRouting.mode。
+    // held 暂停路由（heldQueuePausesButAcceptsInput）：读投影 inputRouting 全量（含 reasonCode）。
     getInputRoutingMode: (sessionId) => context.v4Gateway?.getInputRoutingMode(sessionId) ?? null,
+    getInputRouting: (sessionId) => context.v4Gateway?.getInputRouting(sessionId) ?? null,
     // rowId→messageId 翻译面（fork/edit/retry 的定位决策，数据源 = v4 投影）：
     // 惰性走 gateway 的投影查表。
     getMessageIdForRow: (sessionId, rowId) =>
