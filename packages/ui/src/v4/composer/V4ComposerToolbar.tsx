@@ -18,15 +18,12 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
-
-
   TID_V4_MODEL_CONFIG,
   TID_V4_COMPOSER_INPUT,
   ZCODE_AGENT_PROVIDER,
   type ProviderFamilyConnectionSelection,
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
-
   type ZCodeConfigOption,
   type ZCodeProvider,
 } from "@zcode/shared";
@@ -39,7 +36,11 @@ import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js
 import { Button } from "@/components/ui/button.js";
 import { ChatContextUsage } from "@/chat-input-toolbar/display.js";
 import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
-import { getNextThoughtLevelValue } from "@/chat-input-toolbar/thoughtLevelOptions.js";
+import {
+  getNextThoughtLevelValue,
+  getThoughtLevelLabel,
+} from "@/chat-input-toolbar/thoughtLevelOptions.js";
+import type { ComposerModelOptions } from "@/chat-input-toolbar/ComposerModelMenu.js";
 import type { V4ComposerConfigPicker } from "@/v4/composer/configPickerState.js";
 import { useToolbarShortcutBindings } from "@/v4/composer/toolbarShortcuts.js";
 import {
@@ -62,9 +63,7 @@ import { useShortcutCommandLabel } from "@/shortcuts/useShortcutBindings.js";
 import { logger } from "@/logger.js";
 import { decodeCustomModelValue, encodeCustomModelValue } from "@/lib/zcodeCustomModelValue.js";
 import { buildRegistryModelSelectGroups } from "@/lib/modelSelectionGroups.js";
-import {
-  type SidebarUsageCodingPlanSourceId,
-} from "@/lib/sidebarUsageCodingPlanProviderPreference.js";
+import { type SidebarUsageCodingPlanSourceId } from "@/lib/sidebarUsageCodingPlanProviderPreference.js";
 import {
   resolveDraftDisplayedConfig,
   resolveDraftModelThoughtOption,
@@ -132,7 +131,6 @@ function resolveFamilyForPlanProviderId(providerId: string | null | undefined): 
       return null;
   }
 }
-
 
 export interface V4ComposerToolbarProps {
   workspacePath: string;
@@ -253,7 +251,7 @@ function V4ComposerModelControlsImpl({
   );
 
   // FORK（D-4）：连接方式选择随订阅面整删，恒为无连接形态。
-// FORK（D-4）：账号访问判定、Start Plan 余额、团队套餐产品目录、团队 usage source、
+  // FORK（D-4）：账号访问判定、Start Plan 余额、团队套餐产品目录、团队 usage source、
   // Coding Plan 权益与个人额度余额全部随订阅面整删。context 区只保留通用用量
   // （contextWindow / magicContext / taskUsage），由 ChatContextUsage 继续渲染。
   const contextCodingPlanUsageSelectedSourceId: SidebarUsageCodingPlanSourceId | undefined =
@@ -517,6 +515,35 @@ function V4ComposerModelControlsImpl({
   // 有可选组时正常显示；无组但有「管理模型」入口时也显示，避免用户零模型入口。
   const modelMenuVisible = modelSelectGroups.length > 0 || showManageModelsAction;
   const providerSubmenuClassName = undefined;
+
+  // C1 合并入口：模型 + 思考档位合成一个选择器（上游 v3.16 ComposerModelMenu）。
+  // omz 拍板：不传 providerMenu（无 CodingPlan 套餐目录），走 ComposerModelMenu 的浏览回退链路。
+  // 仅在合并控件真正渲染（modelMenuVisible）时生效，否则保底独立 ThoughtLevelCycleControl，
+  // 防止「模型入口不可见 → 档位控件被吞」的死角。
+  const composerOptions = useMemo<ComposerModelOptions | null>(() => {
+    if (!modelMenuVisible) return null;
+    if (!thoughtOption || thoughtOption.type !== "select") return null;
+    return {
+      providerLabel: intl.formatMessage({ id: "chat.toolbar.combined.provider" }),
+      modelsLabel: intl.formatMessage({ id: "chat.toolbar.combined.models" }),
+      effortLabel: intl.formatMessage({ id: "chat.toolbar.combined.effort" }),
+      selectModelLabel: intl.formatMessage({ id: "chat.toolbar.combined.selectModel" }),
+      effortShortcutLabel: thoughtShortcutLabel,
+      levels: (thoughtOption.options ?? []).map((entry) => ({
+        value: entry.value,
+        label: getThoughtLevelLabel(intl, displayProvider, thoughtOption, entry),
+      })),
+      value: String(thoughtOption.currentValue ?? ""),
+      onValueChange: handleThoughtValueChange,
+    };
+  }, [
+    displayProvider,
+    handleThoughtValueChange,
+    intl,
+    modelMenuVisible,
+    thoughtOption,
+    thoughtShortcutLabel,
+  ]);
   useToolbarShortcutBindings({
     hasAnyOption: Boolean(modelOption) || Boolean(thoughtOption),
     toolbarDisabled: disabled || recoveryPending,
@@ -587,6 +614,7 @@ function V4ComposerModelControlsImpl({
         <ModelConfigSelect
           modelGroups={modelSelectGroups}
           normalizedValue={normalizedModelValue}
+          composerOptions={composerOptions ?? undefined}
           triggerLabel={modelTriggerDisplay.fullLabel}
           triggerLabelPrefix={modelTriggerDisplay.providerPrefix}
           triggerLabelValue={modelTriggerDisplay.modelLabel}
@@ -615,7 +643,8 @@ function V4ComposerModelControlsImpl({
           providerSubmenuClassName={providerSubmenuClassName}
         />
       ) : null}
-      {thoughtOption ? (
+      {/* 合并入口在场时独立档位控件退场（上游 v3.16 语义：ThoughtLevelCycleControl 仅兜底）；Ctrl+T 循环热键不受影响 */}
+      {!composerOptions && thoughtOption ? (
         <ThoughtLevelCycleControl
           composerCollapsePriority={3}
           labelVisibilityClassName="inline-flex"
