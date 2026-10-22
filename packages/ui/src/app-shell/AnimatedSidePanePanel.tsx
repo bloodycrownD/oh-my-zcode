@@ -1272,6 +1272,16 @@ export function AnimatedSidePanePanel({
                             isWindowsDesktop={isWindowsDesktop}
                             onOpenBrowserUrl={onOpenBrowserUrl}
                           />
+                        ) : tab.type === "new-tab" ? (
+                          // upstream-v316-fullsync P4.1：「新建标签页」入口空态；真实工具
+                          // 由 commitOpenedSidePaneState 就地替换为对应 tab（本批未接
+                          // plugin-market/file-manager，占位仅承载关闭/排序交互）。
+                          <div
+                            className="flex flex-1 items-center justify-center text-ui-sm text-foreground-subtle"
+                            data-testid="side-pane-new-tab-placeholder"
+                          >
+                            {intl.formatMessage({ id: "sidePane.newTab" })}
+                          </div>
                         ) : (
                           <HumanBrowserView
                             browserKey={tab.id}

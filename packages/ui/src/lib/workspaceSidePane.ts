@@ -513,7 +513,18 @@ export interface OpenScopedSubagentSideTabRequest extends OpenSubagentSideTabReq
   remoteSessionId?: string;
 }
 
+/** 「新建标签页」入口占位（upstream-v316-fullsync P4.1 随作用域化搬入；omz 无
+ *  file-manager/plugin-market 面板，不引入其类型）。展开空面板时确保存在真实标签。 */
+export interface NewTabSidePaneTab {
+  id: string;
+  type: "new-tab";
+  ownerTaskId?: string | null;
+  workspaceKey?: string | null;
+  openedAt?: number;
+}
+
 export type WorkspaceSidePaneTab =
+  | NewTabSidePaneTab
   | BackgroundBashSidePaneTab
   | BrowserSidePaneTab
   | GitSidePaneTab
@@ -1061,10 +1072,8 @@ function isWorkspaceGlobalSidePaneTab(tab: WorkspaceSidePaneTab): boolean {
   return WORKSPACE_GLOBAL_SIDE_PANE_TAB_TYPES.has(tab.type);
 }
 
-interface SidePaneVisibilityScope {
-  workspaceKey: string | null;
-  ownerTaskId: string | null;
-}
+// SidePaneVisibilityScope / isSidePaneTabVisibleInScope 见下方 closeSidePaneTab 前的
+// 作用域化公开 API 区（upstream-v316-fullsync P4.1）。
 
 function sidePaneTabMatchesWorkspace(
   tab: WorkspaceSidePaneTab,
@@ -2013,6 +2022,118 @@ export function closeSidePaneTabForParent(
 ): WorkspaceSidePaneState | null {
   const next = closeSidePaneTab(current, tabId);
   return selectSidePaneTabsForParent(next, parentSessionId, preferredTabId);
+}
+
+// upstream-v316-fullsync P4.1（挂账3）：side-pane tab 作用域化——scope 接口与单 tab 判定
+// 自本文件既有私有机件（getVisibleSidePaneTabsByScope）提升为公开 API，供 useAppPanels
+// 关闭族与折叠记忆统一按 scope 解析；上游同名 API 的 file-manager/plugin-market 分支
+// 不搬（omz 无这两类面板）。
+export interface SidePaneVisibilityScope {
+  workspaceKey: string | null;
+  ownerTaskId: string | null;
+}
+
+/** 显示与操作必须共用归属判断；旧 parent-only 分支会把新类型误当成公共 tab。 */
+export function isSidePaneTabVisibleInScope(
+  tab: WorkspaceSidePaneTab,
+  scope: SidePaneVisibilityScope,
+): boolean {
+  if (!sidePaneTabMatchesWorkspace(tab, scope.workspaceKey)) return false;
+  if (isWorkspaceGlobalSidePaneTab(tab)) return true;
+  if (tab.type === "browser-use") return tab.sessionId === scope.ownerTaskId;
+  if (
+    tab.type === "subagent-session" ||
+    tab.type === "subagent-directory" ||
+    tab.type === "bash-output"
+  ) {
+    return tab.rootSessionId === scope.ownerTaskId;
+  }
+  if (
+    tab.type === "selection-side-chat" ||
+    tab.type === "plan-detail" ||
+    tab.type === "workflow-run" ||
+    tab.type === "workflow-directory" ||
+    tab.type === "workflow-actor-session" ||
+    tab.type === "workflow-workspace" ||
+    tab.type === "workflow-artifact"
+  ) {
+    return tab.parentSessionId === scope.ownerTaskId;
+  }
+  return sidePaneOwnerKey(tab.ownerTaskId) === sidePaneOwnerKey(scope.ownerTaskId);
+}
+
+function selectSidePaneTabsForScope(
+  current: WorkspaceSidePaneState | null,
+  scope: SidePaneVisibilityScope,
+  preferredTabId?: string | null,
+): WorkspaceSidePaneState | null {
+  if (!current) return null;
+  const visibleTabs = getVisibleSidePaneTabsByScope(current.tabs, scope);
+  if (visibleTabs.length === 0) {
+    return current.activeTabId === "" ? current : { ...current, activeTabId: "" };
+  }
+  const preferred = preferredTabId
+    ? visibleTabs.find((tab) => tab.id === preferredTabId)
+    : undefined;
+  const currentActive = visibleTabs.find((tab) => tab.id === current.activeTabId);
+  const nextActive =
+    currentActive ??
+    preferred ??
+    visibleTabs.findLast(
+      (tab) =>
+        tab.type === "subagent-session" ||
+        tab.type === "subagent-directory" ||
+        tab.type === "selection-side-chat" ||
+        tab.type === "plan-detail" ||
+        tab.type === "workflow-run" ||
+        tab.type === "workflow-actor-session" ||
+        tab.type === "workflow-workspace" ||
+        tab.type === "workflow-artifact",
+    ) ??
+    visibleTabs.at(-1);
+  return nextActive && nextActive.id !== current.activeTabId
+    ? { ...current, activeTabId: nextActive.id }
+    : current;
+}
+
+/** 关闭时只处理已选中的 id，避免异步 authority 返回后误关新打开的标签。 */
+export function closeSidePaneTabs(
+  current: WorkspaceSidePaneState | null,
+  tabIds: readonly string[],
+  scope: SidePaneVisibilityScope,
+  preferredTabId?: string | null,
+): WorkspaceSidePaneState | null {
+  const next = tabIds.reduce(closeSidePaneTab, current);
+  return selectSidePaneTabsForScope(next, scope, preferredTabId);
+}
+
+export function closeSidePaneTabForScope(
+  current: WorkspaceSidePaneState | null,
+  tabId: string,
+  scope: SidePaneVisibilityScope,
+  preferredTabId?: string | null,
+): WorkspaceSidePaneState | null {
+  return closeSidePaneTabs(current, [tabId], scope, preferredTabId);
+}
+
+export function activateNewTabSidePane(
+  current: WorkspaceSidePaneState | null,
+): WorkspaceSidePaneState {
+  return activateSidePaneTab(current, { id: createUuid(), type: "new-tab", openedAt: Date.now() });
+}
+
+/** 展开面板始终有真实标签；只为当前对话补入口，不改变其他对话的标签。 */
+export function ensureSidePaneTab(
+  current: WorkspaceSidePaneState | null,
+  scope: SidePaneVisibilityScope,
+): WorkspaceSidePaneState {
+  if (current && getVisibleSidePaneTabsByScope(current.tabs, scope).length > 0) return current;
+  return activateSidePaneTab(current, {
+    id: createUuid(),
+    type: "new-tab",
+    openedAt: Date.now(),
+    ...scope,
+  });
 }
 
 export function closeSidePaneTab(

@@ -15,6 +15,7 @@ import {
   PackageIcon,
   PaletteIcon,
   SquareTerminalIcon,
+  SquarePlusIcon,
   TerminalIcon,
   WaypointsIcon,
   Workflow as WorkflowIcon,
@@ -340,6 +341,11 @@ export function SidePaneTabIcon({ tab }: { tab: WorkspaceSidePaneTab }) {
     return <BrowserUseTabIcon tab={tab} />;
   }
 
+  // upstream-v316-fullsync P4.1：new-tab 入口占位无 source，用通用加号图标。
+  if (tab.type === "new-tab") {
+    return <SquarePlusIcon className="size-3.5" />;
+  }
+
   if (tab.source.type === "patch") {
     const fileDisplayTarget = getPatchFileDisplayTarget(tab.source);
     if (fileDisplayTarget) {
@@ -545,6 +551,11 @@ export function getSidePaneTabTitle(
   // 用页面标题（agent 导航后由 getState 回填），缺省复用 browser.title 文案。
   if (tab.type === "browser-use") {
     return tab.title?.trim() || formatMessage({ id: "browser.title" });
+  }
+
+  // upstream-v316-fullsync P4.1：new-tab 入口占位标题。
+  if (tab.type === "new-tab") {
+    return formatMessage({ id: "sidePane.newTab" });
   }
 
   return tab.source.title || formatMessage({ id: "codeViewer.title" });

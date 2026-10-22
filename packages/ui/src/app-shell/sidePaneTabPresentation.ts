@@ -66,6 +66,8 @@ export function getSidePaneTabSearchHint(tab: WorkspaceSidePaneTab): string {
   }
   if (tab.type === "terminal" || tab.type === "bash-output")
     return `${tab.title} terminal shell command`;
+  // upstream-v316-fullsync P4.1：new-tab 入口占位无检索内容。
+  if (tab.type === "new-tab") return "new tab";
   return tab.source.path ?? tab.source.title;
 }
 
