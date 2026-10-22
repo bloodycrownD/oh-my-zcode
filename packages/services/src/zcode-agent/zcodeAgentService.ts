@@ -1,7 +1,5 @@
 import { requestPluginReferenceCatalog } from "#src/zcode-agent/pluginReferenceCatalogRequest.js";
-import { sessionDebugSnapshotSchema ,
-  zcodeMcpRefreshSessionsResultSchema,
-} from "@zcode/shared";
+import { sessionDebugSnapshotSchema, zcodeMcpRefreshSessionsResultSchema } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID, createHash } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
@@ -9,11 +7,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
 import type { IDisposable } from "@zcode/rpc";
-import type {
-
-  ModelSelectionView,
-
-} from "@zcode/provider";
+import type { ModelSelectionView } from "@zcode/provider";
 import {
   ZCODE_SESSION_RUNTIME_PREFERENCES_REQUEST_TIMEOUT_MS,
   formatLogPrefix,
@@ -25,6 +19,7 @@ import {
   ZCODE_AGENT_PROVIDER_NOT_READY_REASON,
   ZCODE_MODEL_REASONING_SEPARATOR,
   isRemoteWorkspaceIdentity,
+  isAuxiliarySessionKind,
   ZCODE_PROTOCOL_NAME,
   ZCODE_PROTOCOL_VERSION,
   zcodeMcpListResultSchema,
@@ -94,7 +89,6 @@ import {
   zcodeWorkspaceReadPromptLanguageResultSchema,
   zcodeWorkspaceUpdatePromptLanguageResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
-
   type ZCodeSessionStateSnapshot,
   type ZCodeAutomation,
   type ZCodeAutomationRun,
@@ -423,11 +417,11 @@ function isProtocolMethodNotFoundError(error: unknown): boolean {
 // better-sqlite3 的 "database is locked"；过线后协议信封只剩 numeric code + message，
 // 因此在 services 出口按 message 识别并转译为可重试提示——否则 UI toast 直显英文
 // 驱动原文，用户不知道「重试」是正确动作。
-const SQLITE_BUSY_MESSAGE_PATTERN = /SQLITE_BUSY|database is locked|writer acquisition remained busy/i;
+const SQLITE_BUSY_MESSAGE_PATTERN =
+  /SQLITE_BUSY|database is locked|writer acquisition remained busy/i;
 
 function isSqliteBusyError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return SQLITE_BUSY_MESSAGE_PATTERN.test(message);
 }
 
@@ -4523,6 +4517,40 @@ export function createZCodeAgentService(
           return undefined;
         });
       const taskMetaReadMs = Math.max(0, Math.round(performance.now() - taskMetaStartedAt));
+      // 附加目录 lineage walk（upstream-v316-fullsync P4.2，接 P4.1 resolveSessionDirectories 契约）：
+      // 子会话按设计不进主任务索引；直接查 child 的项目会被远端必选项目校验拒绝。
+      // 旧 child 索引也不能证明主任务身份；只信 Agent 持久化父链，再执行原项目校验。
+      let directorySessionId = params.sessionId;
+      if (options?.resolveSessionDirectories) {
+        const visited = new Set<string>();
+        while (true) {
+          if (visited.has(directorySessionId)) throw new Error("project.session-lineage-invalid");
+          visited.add(directorySessionId);
+          const { sessions } = await client.request(
+            zcodeProtocolMethods.sessionList,
+            { workspace: buildWorkspaceRef(params), sessionIds: [directorySessionId] },
+            zcodeSessionListResultSchema,
+          );
+          const session = sessions.find((entry) => entry.sessionId === directorySessionId);
+          if (!session) {
+            if (directorySessionId !== params.sessionId)
+              throw new Error("project.session-lineage-invalid");
+            break;
+          }
+          if (
+            resolveWorkspaceKey(session.workspace) !== resolveWorkspaceKey(params) ||
+            session.workspace.workspacePath !== params.workspacePath
+          )
+            throw new Error("project.session-lineage-invalid");
+          if (!isAuxiliarySessionKind(session.sessionKind)) break;
+          if (!session.parentSessionId) throw new Error("project.session-lineage-invalid");
+          directorySessionId = session.parentSessionId;
+        }
+      }
+      const additionalDirectories = await options?.resolveSessionDirectories?.({
+        ...params,
+        sessionId: directorySessionId,
+      });
       const cliRequestStartedAt = performance.now();
       const result = await client.request(
         V4_METHODS.conversationSubscribe,
@@ -4537,6 +4565,9 @@ export function createZCodeAgentService(
           // Bug 根因：冷订阅过去只传 sessionId，CLI 只能从历史 session.path 反推
           // workspace 身份；该路径已可能被 path.resolve 改写。当前 attachment 才是权威来源。
           workspace: buildWorkspaceRef(params),
+          // 附加目录：装配注入 resolveSessionDirectories 时按 lineage 主会话解析；
+          // undefined 不写字段保持旧 wire 形状（与 createSession/resume 面一致）。
+          ...(additionalDirectories !== undefined ? { additionalDirectories } : {}),
           ...(resumeThoughtLevel ? { resumeThoughtLevel } : {}),
           ...(params.base ? { base: params.base } : {}),
           ...(params.visibility ? { visibility: params.visibility } : {}),

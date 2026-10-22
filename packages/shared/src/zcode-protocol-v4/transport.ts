@@ -191,10 +191,10 @@ export const conversationTopicFrameSchema = createTopicFrameSchema(
   conversationSnapshotSchema,
   conversationDeltaSchema,
 ).superRefine((frame, context) => {
-    if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
-      context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
-    }
-  });
+  if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
+    context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+  }
+});
 export type ConversationTopicFrame = z.infer<typeof conversationTopicFrameSchema>;
 export const conversationTopicWireFrameSchema = createTopicWireFrameSchema(
   conversationTopicFrameSchema,
@@ -417,6 +417,9 @@ export const MAX_LEGACY_TASK_IDS_PER_SUBSCRIBE = 200;
 // subscribe 请求 = 通用 SubscribeParams + connectionId（重订阅替换按
 // (connectionId, topic) 判定；stdio 单管道场景由 host 为每个下游客户端分配）。
 export const v4ConversationSubscribeParamsSchema = subscribeParamsSchema.extend({
+  // 附加目录（upstream-v316-fullsync P4.2）：host 经 lineage walk 解析主会话后按
+  // resolveSessionDirectories 注入；仅 host→CLI cold resume 消费，缺席保持旧 wire 形状。
+  additionalDirectories: z.array(z.string().trim().min(1)).max(256).optional(),
   connectionId: z.string(),
   clientMode: z.enum(["desktop-continuous", "web-remote-replayable"]),
   // 当前可信 attachment 的 workspace；cold resume 优先使用它恢复身份，live 不消费。
@@ -539,7 +542,13 @@ export const v4ConversationTurnDirectoryParamsSchema = z.object({
   // 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。
   beforeQueryRowId: z.number().int().nonnegative().optional(),
   // 缺省 = 服务端取 PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries。
-  limit: z.number().int().nonnegative().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
+  limit: z
+    .number()
+    .int()
+    .nonnegative()
+    .min(1)
+    .max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries)
+    .optional(),
 });
 export type V4ConversationTurnDirectoryParams = z.infer<
   typeof v4ConversationTurnDirectoryParamsSchema
