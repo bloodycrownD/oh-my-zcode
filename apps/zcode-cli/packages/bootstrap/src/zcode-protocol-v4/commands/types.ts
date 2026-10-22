@@ -116,7 +116,9 @@ export interface V4CommandCoreHost {
    * （reasonCode=heldQueuePausesButAcceptsInput，omz 拍板：暂停期间输入照常入队）
    * 与 busy 入队（走 Core busy admission 的 steer/queue 语义）区分开。
    */
-  getInputRouting?(sessionId: string): { mode: string; reasonCode?: string } | null;
+  getInputRouting?(
+    sessionId: string,
+  ): { mode: "startNow" | "enqueue" | "guide" | "reject" | "choice"; reasonCode?: string } | null;
   /** runtime event notification 后，等待目标 event 真正完成 reorder drain + projection apply。 */
   waitForProjectionEventCommit?(
     sessionId: string,

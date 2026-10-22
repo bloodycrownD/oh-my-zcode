@@ -71,8 +71,9 @@ export const commandPayloadSchemas = {
       .optional(),
   }),
   // 按 inputRouting 裁决：startNow / enqueue / guide / choice。
-  // heldQueueDisposition：held 状态（inputRouting.mode=choice）下必带；
-  // clear→清空 queue 后 startNow，keep→保留 queue 立即 startNow。
+  // heldQueueDisposition：上游 choice 语义（omz 已弃用，held 态实际路由 enqueue
+  // 入队；该字段保留为兜底，choice 不可达时无消费者），clear→清空 queue 后
+  // startNow，keep→保留 queue 立即 startNow。
   sendText: z
     .object({
       text: z.string(),

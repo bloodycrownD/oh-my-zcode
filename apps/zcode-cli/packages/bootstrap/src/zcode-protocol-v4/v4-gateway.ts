@@ -2656,9 +2656,13 @@ export class ConversationV4Gateway {
    * 输入路由全量（含 reasonCode）：sendText 执行层用 reasonCode=heldQueuePausesButAcceptsInput
    * 区分「held 暂停入队」与「busy 入队」（后者仍走 startPromptTurn 的 Core busy admission）。
    */
-  getInputRouting(sessionId: string): { mode: string; reasonCode?: string } | null {
+  getInputRouting(
+    sessionId: string,
+  ): { mode: "startNow" | "enqueue" | "guide" | "reject" | "choice"; reasonCode?: string } | null {
     const routing = this.publishers.get(sessionId)?.getSnapshot().inputRouting;
-    return routing ? { mode: routing.mode, ...(routing.reasonCode ? { reasonCode: routing.reasonCode } : {}) } : null;
+    return routing
+      ? { mode: routing.mode, ...(routing.reasonCode ? { reasonCode: routing.reasonCode } : {}) }
+      : null;
   }
 
   getSessionFollowupMode(sessionId: string): "queue" | "guide" | null {

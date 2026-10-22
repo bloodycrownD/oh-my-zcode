@@ -103,7 +103,7 @@ test("tripwire：sendText 执行层在 held 暂停走 deferred 入队（不 idle
     join(srcRoot, "zcode-protocol-v4", "v4-gateway.ts"),
     "utf8",
   );
-  assert.match(gateway, /getInputRouting\(sessionId: string\)/);
+  assert.match(gateway, /getInputRouting\([\s\S]{0,60}sessionId: string/);
 });
 
 test("防御面：choice 裁决（applyHeldQueueDisposition）保留为兜底", () => {
