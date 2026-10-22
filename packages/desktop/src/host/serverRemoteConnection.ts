@@ -44,10 +44,12 @@ export interface ServerRemoteDuplexConnectionOptions {
   onClose?: (event: { code: number; reason: string }) => void;
 }
 
-// 一期裁剪说明（R3 二期随 ConnectionManager 回填）：上游 v3.16.2 同文件另有 WS 形态
-// connectServerRemote（直连 URL 的握手：token 鉴权 fetch server-info/host capability + 裸
-// WebSocket upgrade + commitMembership），其四个私有辅助与专属 options 类型一并省略。
-// 一期只消费 daemon 隧道的 duplex 形态，WS 形态整段不取，随 phase-remote-core（Step 17）一起落。
+// 二期终局裁量（phase-remote-core Step 17）：WS 形态不回填，duplex-only 定案。
+// 上游 v3.16.2 同文件的 WS 形态 connectServerRemote（直连 URL 握手：token 鉴权 fetch
+// server-info/host capability + 裸 WebSocket upgrade + commitMembership）唯一消费方是
+// target.kind === "server" 的直连分支（上游 host/index:1938）；omz 的 RemoteTarget 联合
+// 不含 server kind，该直连面由既有 deployServer 旧链承载（共存政策，退役见 spec Step 19）。
+// daemon 链的 connectServer 默认实现恒为 connectServerRemoteOverDuplex，WS 形态无消费方。
 
 function appendEndpointPath(basePath: string, endpointPath: string): string {
   const normalizedBase = basePath.replace(/\/+$/g, "");

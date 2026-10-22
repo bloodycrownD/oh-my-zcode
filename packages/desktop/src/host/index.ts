@@ -61,6 +61,7 @@ import {
   isRemoteWorkspaceIdentity,
   resolveWorkspaceKey,
   formatModelPickerValue,
+  buildSshRemoteHostKey,
   type ZCodePromptAttachment,
   type ZCodeStreamEvent,
   type ZCodeTaskMeta,
@@ -121,10 +122,18 @@ import {
 import { createWindowHostAttachmentRegistry } from "./windowHostAttachmentRegistry.js";
 import {
   createWindowRemoteConnectionRegistry,
+  WindowRemoteConnectionUnavailableError,
   type WindowRemoteConnectionCloseEvent,
   type WindowRemoteConnectionHandle,
 } from "./windowRemoteConnectionRegistry.js";
+import {
+  SourceServerConnectionManager,
+  type ManagedSourceServerConnection,
+  type SourceServerConnectProfile,
+} from "./sourceServerConnectionManager.js";
+import { createSourceServerRecoveryCloseEvent } from "./sourceServerRecoveryPolicy.js";
 import { createWindowHostControllerRuntime } from "./windowHostControllerService.js";
+import { prepareRemoteWorkspaceIdentity } from "./remoteWorkspacePreparation.js";
 import { resolveAutomationSubmissionModelSelection } from "./automationModelSelection.js";
 import { createRemoteConnectionProgressContext } from "@zcode/server/remote/remoteConnectionProgressContext.js";
 type RemoteBackendHostConnection = RemoteConnection & {
@@ -133,6 +142,10 @@ type RemoteBackendHostConnection = RemoteConnection & {
 type HostRemoteConnection = RemoteBackendHostConnection;
 interface HostRemoteConnectionCapabilities {
   browserRecordingUploader?: Pick<IRemoteBackend, "upload">;
+  /** Source Server 握手身份（install.json installationId）；registry 按它收敛同一 Source。 */
+  sourceServerId?: string;
+  /** 物理连接归 SourceServerConnectionManager；registry 只持有 logical wrapper。 */
+  persistentSourceConnection?: boolean;
   remoteMediaPreviewFactory?: (
     scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>,
   ) => RemoteMediaPreviewProxy;
@@ -1215,21 +1228,241 @@ async function disposeHostRemoteConnection(connection: HostRemoteConnection): Pr
   await connection.disposeAndWait({ timeoutMs: 5_000 });
 }
 
-async function createWindowRemoteConnectionHandle(params: {
+/**
+ * Source Server 连接的 profileId 稳定键（薄层）：同一 target 的重试/重连/恢复必须复用同一
+ * profile，否则 Manager 的 connectFlights/reconnectInputs 会把同一线路拆成多个恢复意图。
+ * 键规则与 registry buildConnectionKey 同构（ssh 复用 buildSshRemoteHostKey 归一）。
+ */
+function buildSourceServerProfileKey(target: RemoteTarget): string {
+  switch (target.kind) {
+    case "ssh":
+      return `ssh:${buildSshRemoteHostKey(target)}`;
+    case "wsl":
+      return `wsl:${target.distro?.trim() || "<default>"}\0${target.user?.trim() || "<default>"}`;
+    case "docker":
+      return `docker:${target.container.trim()}`;
+  }
+}
+
+let sourceServerConnectionManager: SourceServerConnectionManager | null = null;
+function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
+  if (sourceServerConnectionManager) return sourceServerConnectionManager;
+  // 薄 owner 层实例化（Step 17 裁量）：无 Directory/admission（三期面），身份对回依赖
+  // 调用方 profile.sourceServerId 与远端 install.json installationId（设计见
+  // SourceServerConnectProfile）。connectServer 走一期 duplex 隧道形态。
+  sourceServerConnectionManager = new SourceServerConnectionManager({
+    logWarn: (message, error) => logger.warn(message, error),
+  });
+  return sourceServerConnectionManager;
+}
+
+/**
+ * R3 daemon 分支：经 SourceServerConnectionManager（恢复 owner）建立 ssh/wsl/docker 连接。
+ *
+ * 二期可达面：existingSourceServerId 在场时（registry.connectSource/三期切换入口）。
+ * Coexistence 政策：本期 Renderer 的 ConnectRemoteWorkspace 主链仍走下方 deployServer
+ * 旧链（packages/ui 零触碰红线；三期 remote-connection-flow 切换后 daemon 分支成为主链，
+ * deployServer 退役见 spec Step 19）。
+ *
+ * Manager 三事件接线（照上游形态）：
+ * - onDidChangeState → 投影为 recoverable close 事件（恢复进度 1/3..3/3 与预算终态）
+ * - onDidInvalidateConnection → update 可恢复失效 / profile-removed 终态
+ * - onDidReconnect → 重建 services 集合并向 registry handle 发 reconnectListeners
+ */
+async function connectManagedSourceServerHandle(params: {
   target: RemoteTarget;
+  existingSourceServerId?: string;
+  membershipIntent?: "add" | "retain";
   remoteAssets: RemoteAssetDirs;
   signal: AbortSignal;
+  confirmSourceServerInstall?: boolean;
+  closeListeners: Set<(event: WindowRemoteConnectionCloseEvent) => void>;
+  reconnectListeners: Set<() => void>;
+  notifyClose: (event: WindowRemoteConnectionCloseEvent) => void;
+}): Promise<WindowRemoteConnectionHandle<ServiceCollection, HostRemoteConnectionCapabilities>> {
+  const manager = ensureSourceServerConnectionManager();
+  const profile: SourceServerConnectProfile = {
+    profileId: buildSourceServerProfileKey(params.target),
+    transport: params.target.kind,
+    ...(params.existingSourceServerId ? { sourceServerId: params.existingSourceServerId } : {}),
+  };
+  let lastNotifiedRecoveryAttempt = 0;
+  let disposed = false;
+  const existingConnection = params.existingSourceServerId
+    ? manager.getOnlineConnection(params.existingSourceServerId)
+    : undefined;
+  if (params.existingSourceServerId && !existingConnection) {
+    throw new WindowRemoteConnectionUnavailableError(params.existingSourceServerId);
+  }
+  const managed: ManagedSourceServerConnection =
+    existingConnection ??
+    (await manager.connect({
+      profile,
+      target: params.target,
+      allowInstall: params.confirmSourceServerInstall === true,
+      context: {
+        signal: params.signal,
+        onLog: (event) => {
+          const progress =
+            event.progress == null
+              ? ""
+              : ` ${(Math.max(0, Math.min(1, event.progress)) * 100).toFixed(1)}%`;
+          const message =
+            event.progress == null || event.message.startsWith("upload progress:")
+              ? `[source-server:${event.phase}] ${event.message}`
+              : `[source-server:${event.phase}] upload progress (${event.message}):${progress}`;
+          remoteConnectionProgressContext.report(event.level ?? "info", [message]);
+        },
+      },
+    }));
+
+  const buildServices = (source: ManagedSourceServerConnection): ServiceCollection =>
+    createRemoteWorkspaceServiceCollection({
+      connectionServices: source.services,
+      sourceServices: activeServices ?? undefined,
+      parentPort,
+      // daemon 分支没有 deployServer backend：上报与附件物化 wrappers 透传服务本体，
+      // 附件直传面由 Manager fileTransfer（generation 守卫）承载，随三期 identity 面补全。
+      createReportingRemoteZCodeTaskService: (service) => service,
+      createRemotePromptAttachmentTaskService: (service) => service,
+      createRemotePromptAttachmentSessionService: (service) => service,
+      promptAttachmentTransferService: createRemotePromptAttachmentTransferService(
+        manager.getFileTransfer(source.sourceServerId),
+        {
+          onJanitorError: (error: unknown) =>
+            logger.warn("remote prompt attachment janitor failed", error),
+        },
+      ),
+      runtimePreferencesBridge: {
+        onError: (error: unknown) => logger.warn("remote runtime preferences bridge failed", error),
+      },
+    });
+
+  let connection = {
+    serverInfo: managed.serverInfo,
+    services: managed.services,
+    dispose() {
+      // Bug 原因：Window registry handle 是 logical/attachment lease，不是 Source connection owner。
+      // 旧 entry 取消或迟到恢复时若调用 manager.disconnect，会拆掉新 entry 正在共享的
+      // Source。真实物理连接由 SourceServerConnectionManager 在显式断开或 Host shutdown 回收。
+    },
+  };
+  let services = buildServices(managed);
+  const stateSubscription = manager.onDidChangeState((state) => {
+    if (state.profileId !== profile.profileId || disposed) return;
+    if (state.state === "online") {
+      lastNotifiedRecoveryAttempt = 0;
+      return;
+    }
+    const closeEvent = createSourceServerRecoveryCloseEvent(state);
+    if (!closeEvent) return;
+    if (state.state === "retrying" && state.recoveryAttempt === lastNotifiedRecoveryAttempt) {
+      return;
+    }
+    if (state.state === "retrying") {
+      lastNotifiedRecoveryAttempt = state.recoveryAttempt ?? lastNotifiedRecoveryAttempt;
+    }
+    params.notifyClose(closeEvent);
+  });
+  const invalidatedSubscription = manager.onDidInvalidateConnection((event) => {
+    if (event.sourceServerId !== managed.sourceServerId || disposed) return;
+    // Bug 原因：物理 Source connection 被更新或其当前 Profile 被删除时，若不先按
+    // Source 通知 Registry，已有 logical workspace 会继续以 online 状态持有失效 services。
+    // 更新允许恢复；删除当前 Profile 属于用户显式断开，必须发布 terminal close。
+    params.notifyClose({
+      exitCode: null,
+      signal: null,
+      recoverable: event.reason === "update",
+    });
+  });
+  const reconnectSubscription = manager.onDidReconnect((reconnected) => {
+    if (reconnected.sourceServerId !== managed.sourceServerId || disposed) return;
+    connection = {
+      serverInfo: reconnected.serverInfo,
+      services: reconnected.services,
+      dispose() {
+        // 同上：只释放当前 wrapper 的订阅，不跨 lease 关闭共享 Source。
+      },
+    };
+    services = buildServices(reconnected);
+    lastNotifiedRecoveryAttempt = 0;
+    for (const listener of params.reconnectListeners) listener();
+  });
+
+  if (params.signal.aborted) {
+    stateSubscription.dispose();
+    invalidatedSubscription.dispose();
+    reconnectSubscription.dispose();
+    throw new Error("远程连接已取消");
+  }
+
+  return {
+    get services() {
+      return services;
+    },
+    capabilities: {
+      sourceServerId: connection.serverInfo.serverId,
+      persistentSourceConnection: true,
+    },
+    onDidClose(listener) {
+      params.closeListeners.add(listener);
+      return { dispose: () => params.closeListeners.delete(listener) };
+    },
+    onDidReconnect(listener) {
+      params.reconnectListeners.add(listener);
+      return { dispose: () => params.reconnectListeners.delete(listener) };
+    },
+    async dispose() {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+      params.closeListeners.clear();
+      params.reconnectListeners.clear();
+      stateSubscription.dispose();
+      invalidatedSubscription.dispose();
+      reconnectSubscription.dispose();
+      connection.dispose();
+    },
+  };
+}
+
+async function createWindowRemoteConnectionHandle(params: {
+  target: RemoteTarget;
+  membershipIntent?: "add" | "retain";
+  existingSourceServerId?: string;
+  remoteAssets: RemoteAssetDirs;
+  signal: AbortSignal;
+  confirmSourceServerInstall?: boolean;
 }): Promise<WindowRemoteConnectionHandle<ServiceCollection, HostRemoteConnectionCapabilities>> {
   if (!activeServices) throw new Error("Local Host services are not initialized.");
   if (params.signal.aborted) {
     throw new Error("远程连接已取消");
   }
   const closeListeners = new Set<(event: WindowRemoteConnectionCloseEvent) => void>();
+  const reconnectListeners = new Set<() => void>();
   const notifyClose = (event: WindowRemoteConnectionCloseEvent) => {
     for (const listener of closeListeners) {
       listener(event);
     }
   };
+  if (params.existingSourceServerId) {
+    return await connectManagedSourceServerHandle({
+      target: params.target,
+      ...(params.existingSourceServerId
+        ? { existingSourceServerId: params.existingSourceServerId }
+        : {}),
+      ...(params.membershipIntent ? { membershipIntent: params.membershipIntent } : {}),
+      remoteAssets: params.remoteAssets,
+      signal: params.signal,
+      ...(params.confirmSourceServerInstall
+        ? { confirmSourceServerInstall: params.confirmSourceServerInstall }
+        : {}),
+      closeListeners,
+      reconnectListeners,
+      notifyClose,
+    });
+  }
   const connection = await setupRemoteConnection(
     params.target,
     params.remoteAssets,
@@ -1314,12 +1547,19 @@ async function createWindowRemoteConnectionHandle(params: {
       closeListeners.add(listener);
       return { dispose: () => closeListeners.delete(listener) };
     },
+    // deployServer 旧链没有自动重连事件；接口保持与 daemon 分支一致，恢复语义由
+    // 恢复状态机对 recoverable close 的处理承载（断线即 terminal，无 recovering 阶段）。
+    onDidReconnect(listener) {
+      reconnectListeners.add(listener);
+      return { dispose: () => reconnectListeners.delete(listener) };
+    },
     async dispose() {
       if (disposed) {
         return;
       }
       disposed = true;
       closeListeners.clear();
+      reconnectListeners.clear();
       await disposeServiceResourcesAndWait(services);
       await disposeHostRemoteConnection(connection);
     },
@@ -1332,6 +1572,13 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
 >({
   connect: (request) => createWindowRemoteConnectionHandle(request),
   createId: randomUUID,
+  resolveSourceServerId: (handle) => handle.capabilities?.sourceServerId,
+  shouldKeepConnectionAlive: (handle) => handle.capabilities?.persistentSourceConnection === true,
+  prepareWorkspaceIdentity: async (handle, input) => {
+    // daemon 分支的远端目录校验（readdir 权限探测）；identity 绑定回执
+    // （sourceServerWorkspaceService.resolveWorkspace）随三期 daemon services 面接入。
+    await prepareRemoteWorkspaceIdentity(handle.services.get(IFileService), input);
+  },
   releaseWorkspace: async (services, context) => {
     await services.get(IZCodeTaskService).releaseWorkspacePreparation({
       workspacePath: context.workspacePath,
@@ -1367,9 +1614,69 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
       reason: "connection-closed",
       exitCode: event.exitCode,
       signal: event.signal,
+      ...(event.recoverable !== undefined ? { recoverable: event.recoverable } : {}),
       ...(event.error ? { error: event.error } : {}),
+      ...(event.recoveryAttempt ? { recoveryAttempt: event.recoveryAttempt } : {}),
+      ...(event.recoveryLimit ? { recoveryLimit: event.recoveryLimit } : {}),
+      ...(event.recoveryBudgetExhausted !== undefined
+        ? { recoveryBudgetExhausted: event.recoveryBudgetExhausted }
+        : {}),
+      ...(event.reasonCode ? { reasonCode: event.reasonCode } : {}),
+      ...(event.retryable !== undefined ? { retryable: event.retryable } : {}),
     });
     logWindowHostTopology("remote-connection-closed");
+  },
+  // 恢复换代主流程（B5/replaceDisconnectedSessions 消解落点）：物理 Source 自动重连后，
+  // 由 registry 状态机为每个 disconnected workspace 建 provisional replacement 并在此
+  // 提交 Controller 投影换代；omz 旧的手动替换流（connect 成功后扫描 disconnected 会话）
+  // 已退役，由本回调唯一承载。
+  onSessionReconnected: async ({
+    previous,
+    current,
+    services: currentServices,
+    isCurrent,
+    commit,
+  }) => {
+    if (!previous.workspacePath || !previous.workspaceIdentity) {
+      throw new Error("Source 重连换代缺少 workspace scope");
+    }
+    if (!current.workspacePath || !current.workspaceIdentity) {
+      throw new Error("Source 重连换代缺少 workspace scope");
+    }
+    const previousScope = {
+      kind: "remote" as const,
+      remoteSessionId: previous.remoteSessionId,
+      workspacePath: previous.workspacePath,
+      workspaceIdentity: previous.workspaceIdentity,
+    };
+    const currentScope = {
+      kind: "remote" as const,
+      remoteSessionId: current.remoteSessionId,
+      workspacePath: current.workspacePath,
+      workspaceIdentity: current.workspaceIdentity,
+    };
+    await windowHostControllerRuntime.replaceDisconnectedSource(
+      previousScope,
+      {
+        scope: currentScope,
+        taskService: currentServices.get(IZCodeTaskService),
+        agentService: currentServices.getOptional(IZCodeAgentService),
+        sourceAvailability: "online",
+      },
+      {
+        canCommit: isCurrent,
+        rollbackOnFailure: true,
+      },
+    );
+    if (!commit()) {
+      throw new Error("Source 重连换代在 Controller 提交后失去 Registry owner");
+    }
+    // 换代通知（RemoteWorkspaceReconnected 协议行 + Renderer 侧刷新）随三期
+    // remote-connection-flow UX 一起落；此处 Controller 投影已原子换代。
+    logWindowHostTopology("remote-connection-reconnected");
+  },
+  onSessionReconnectError: (error) => {
+    logger.warn("failed to replace Source Server logical sessions after reconnect", error);
   },
 });
 
@@ -1691,12 +1998,22 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
     const servicesToDispose = activeServices;
     activeServices = null;
     // Registry 是全部远端 connection 的唯一 owner；释放失败不能阻塞本地服务继续收口。
+    // Manager（daemon 链物理 owner）在 registry 之后释放：registry dispose 会先摘掉全部
+    // logical wrapper 订阅，Manager 再中止在途 flight/timer 并回收物理连接。
     const shutdownResult = await runHostShutdownPhases(
       [
         {
           name: "remote-registry-dispose",
           run: () => windowRemoteConnectionRegistry.dispose(),
           timeoutMs: 6_000,
+        },
+        {
+          name: "source-server-manager-dispose",
+          run: async () => {
+            sourceServerConnectionManager?.dispose();
+            sourceServerConnectionManager = null;
+          },
+          timeoutMs: 3_000,
         },
         ...(servicesToDispose
           ? [
@@ -1745,6 +2062,8 @@ function disposeHostResourcesBestEffort(reason: string): void {
   }
   cronAutomationRepo.close();
   void windowRemoteConnectionRegistry.dispose();
+  sourceServerConnectionManager?.dispose();
+  sourceServerConnectionManager = null;
 
   if (activeServices) {
     try {
@@ -2044,52 +2363,10 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         }),
       )
       .then(async (descriptor) => {
-        const replacedOfflineSessions = windowRemoteConnectionRegistry
-          .listSessions()
-          .filter(
-            (session) =>
-              session.remoteSessionId !== descriptor.remoteSessionId &&
-              session.state === "disconnected" &&
-              session.workspacePath === descriptor.workspacePath &&
-              session.workspaceIdentity === descriptor.workspaceIdentity,
-          );
-        for (const replaced of replacedOfflineSessions) {
-          if (replaced.workspacePath && replaced.workspaceIdentity) {
-            const previousScope = {
-              kind: "remote",
-              remoteSessionId: replaced.remoteSessionId,
-              workspacePath: replaced.workspacePath,
-              workspaceIdentity: replaced.workspaceIdentity,
-            } as const;
-            const nextScope = {
-              kind: "remote",
-              remoteSessionId: descriptor.remoteSessionId,
-              workspacePath: replaced.workspacePath,
-              workspaceIdentity: replaced.workspaceIdentity,
-            } as const;
-            try {
-              const services = windowRemoteConnectionRegistry.resolveScopedServices(nextScope);
-              await windowHostControllerRuntime.replaceDisconnectedSource(previousScope, {
-                scope: nextScope,
-                taskService: services.get(IZCodeTaskService),
-                sourceAvailability: "online",
-              });
-            } catch (error) {
-              // source 已连接但 task-index 暂时不可读时不能回滚 transport，也不能删除上一代
-              // 离线可信投影。Controller 会保留 pending replacement，后续 query 成功后原子替换。
-              logger.warn("failed to atomically replace disconnected Controller source", error);
-            }
-          }
-          windowHostAttachmentRegistry.detachRemoteSessionAttachments(replaced.remoteSessionId);
-          await windowRemoteConnectionRegistry.disposeSession(replaced.remoteSessionId);
-          // 重连替换后旧 remoteSessionId 已不再可 attachment；同步清理 Main 的端口请求关联，
-          // 但不向 Renderer 伪报一次新的 transport failure。
-          parentPort.postMessage({
-            type: HostResponseTypes.RemoteWorkspaceClosed,
-            remoteSessionId: replaced.remoteSessionId,
-            reason: "disposed",
-          });
-        }
+        // 冲突消解（Step 17）：旧「connect 成功后扫描 disconnected 会话手动替换」流程退役。
+        // 离线 workspace 的换代由 registry 恢复状态机（replaceDisconnectedSessions →
+        // onSessionReconnected）原子承载：带 epoch 捕获-校验、commit 不可逆边界与失败回滚，
+        // 手动扫描路径无原子性也无代际守卫（上游 R3-ISSUE-011 同款缺陷），不再并行存在。
         parentPort.postMessage({
           type: HostResponseTypes.RemoteWorkspaceConnected,
           requestId: msg.requestId,
