@@ -96,6 +96,7 @@ export type {
   WindowHostControllerMutation,
   WindowHostControllerTaskListItem,
   WindowHostControllerTaskListResult,
+  WindowHostTaskUnreadSignal,
 } from "./window-controller/windowController.js";
 
 // Virtual project service（upstream-v316-fullsync P4 消费链）：project-storage/project 契约

@@ -45,6 +45,13 @@ export type WindowHostControllerFrame =
   | WindowHostControllerTaskFrame
   | WindowHostControllerWorkspaceFrame;
 
+/** 仅实时发送；列表快照与重同步不能重放一次完成提醒。（upstream-v316-fullsync P4.1 挂账4） */
+export interface WindowHostTaskUnreadSignal {
+  address: WindowHostTaskAddress;
+  updatedAt: number;
+  status: "completed" | "error";
+}
+
 /**
  * 窗口级 Controller 服务只承载列表投影与跨 source 路由。
  * conversation/file/git/terminal 仍由 attachment 对应的 scoped facade 提供。
@@ -64,6 +71,11 @@ export interface IWindowControllerService {
   resyncControllerV4(params: ControllerResyncParams): Promise<ControllerResyncResult>;
   unsubscribeControllerV4(params: ControllerUnsubscribeParams): Promise<void>;
   onDynamicControllerFrame(): Event<WindowHostControllerFrame>;
+  /**
+   * 未读信号通道（契约面先行）：Host 发射链随 P4.2（useProjectUnreadSignals 挂载 +
+   * 完成态发射点）接线；当前仅暴露通道。
+   */
+  onDynamicTaskUnreadSignal(): Event<WindowHostTaskUnreadSignal>;
 }
 
 export const IWindowControllerService = createServiceDescriptor<IWindowControllerService>(

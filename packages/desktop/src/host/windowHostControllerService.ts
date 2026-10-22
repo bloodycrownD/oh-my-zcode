@@ -14,6 +14,7 @@ import type {
   WindowHostControllerFrame,
   WindowHostControllerTaskListItem,
   WindowHostControllerTaskListResult,
+  WindowHostTaskUnreadSignal,
   ZCodeTaskListQuery,
   ZCodeTaskListWorkspaceScope,
 } from "@zcode/services";
@@ -585,6 +586,9 @@ export function createWindowHostControllerRuntime(options: {
 
   function createAttachmentService(): IWindowControllerService & { dispose(): void } {
     const frameEmitter = new Emitter<WindowHostControllerFrame>();
+    // 未读信号发射器（upstream-v316-fullsync P4.1 挂账4 契约面先行）：完成态发射点随
+    // P4.2（useProjectUnreadSignals 消费链）接线；当前仅暴露空流通道。
+    const taskUnreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>();
     const subscriptions = new Map<string, { dispose(): void }>();
     return {
       listTaskList,
@@ -661,12 +665,16 @@ export function createWindowHostControllerRuntime(options: {
       onDynamicControllerFrame() {
         return frameEmitter.event;
       },
+      onDynamicTaskUnreadSignal() {
+        return taskUnreadSignalEmitter.event;
+      },
       dispose() {
         for (const subscription of subscriptions.values()) {
           subscription.dispose();
         }
         subscriptions.clear();
         frameEmitter.dispose();
+        taskUnreadSignalEmitter.dispose();
       },
     };
   }
