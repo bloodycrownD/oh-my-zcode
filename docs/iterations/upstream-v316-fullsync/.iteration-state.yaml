@@ -24,6 +24,12 @@ node_status:
   impl-vps: { status: done, head_sha: 52a99a96, executor: subagent, commits: [ba41a10f, b4f03cc2, 67f7c517, 52a99a96], note: "存储 7 目录 44+1 shim；sqlite-migrations 10 文件；0004/0006 冻结追加（sha256 基准五条内置于 T-VS3）；includeArchived→membership 9 文件+1 脚本；品牌 5 处 .omz；挂账：source-server 恢复项随 P5/TaskIndexRepo 四参随 P4/P5" }
   verify-vps: { status: done, executor: main, evidence: "T-VS 15/15 独立复跑（4 脚本 tsx --test 形态）；diff 面 90 文件 0 误碰（ui/magic-context 0）；test:v4-perf 尾部挂载 4 脚本在场；品牌扫描仅 1 注释提及（非功能）" }
   cr-func-vps: { status: done, func_ready: yes, agent: agent_7d28036e, note: "0 P0/P1；sha256 五基准独立重建复算 5/5（上游 git 对象/源码字面量重建，非自证）；0001-0003 零触碰 diff 证实；repair 与上游逐字一致；O1-O4 P2 观察（P5 补注释/P4 收敛双 re-export/跨版本 strict 拒真机 QA/CHANGELOG 行为变更）" }
+  impl-vui: { status: done, head_sha: 045d5a3c, executor: subagent, commits: [849cc80b, bb247893, 045d5a3c], note: "P4 首批：project-sidebar 26 组件（只读树）+壳层视角切换并存+T-VU 8/8" }
+  verify-vui-b41: { status: done, executor: main, evidence: "T-VU 8/8+8/8 复跑；ui tsc 0 错" }
+  impl-vui-b: { status: done, head_sha: 0ac06002, executor: subagent, commits: [98b7d9c1, 2614539f, 70240aeb, a22c39cd, 634ef3a3, 0ac06002], note: "P4.1：host 注册链+编辑/新建/归档真组件化+grouped 23 文件+useAppPanels 挑拣+UnreadSignal 协议先行；T-VU3 8/8" }
+  impl-vui-c: { status: done, head_sha: a8e129e7, executor: subagent, commits: [092c5183, e7172371, a8e129e7], note: "P4.2：UI 提交链落项目/分组+tabStore 键统一（读旧写新）+unread 信号链全接+lineage walk；T-VU4 11/11；回归 305/305" }
+  verify-vui: { status: done, executor: main, evidence: "T-VU 27 用例三套独立复跑全绿；ui tsc 0 错；P4 三批 diff 111 文件" }
+  cr-func-vui: { status: done, func_ready: yes, agent: agent_162e3306, note: "附条件 P1=taskList.title 双键缺（已修 13aaaeda）；P2 挂账两条（createSession parse 无条件执行行为面/每新会话进项目树语义启用真机 QA）；host 注册链与 UI 提交链读码贯通证实；nuance=WorkspaceSidebar 10 零触碰+2 键统一必改" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
