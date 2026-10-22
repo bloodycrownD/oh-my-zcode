@@ -111,12 +111,14 @@ and simply always start with an empty context.
 subagent contract — citing `path:line`, never reporting a check it did not run, saying
 plainly what it could not do, escalating instead of faking — so write the role and the
 standard of judgement, and leave those rules out; they are already there. Every subagent
-has the same tools — reading, searching, editing, running commands — and runs on the
-session's model; there is no per-subagent tool profile or model choice. What a subagent may
-do with its tools is said in the ask: a reviewer that must not touch the code is told "do not
-edit any file", a judge of a string is handed the string and told to judge it as given. A
-subagent asked to run a check runs it; one told not to edit does not. None of this can
-change after `agent()` — there is no per-task override.
+has the same tools — reading, searching, editing, running commands — and there is no
+per-subagent tool profile. The model is not chosen per subagent either: the one lever is
+the run-level `subagent_model` (§16.1, §16.4), which every subagent of that run shares;
+with it unset they run on the session's model. What a subagent may do with its tools is
+said in the ask: a reviewer that must not touch the code is told "do not edit any file", a
+judge of a string is handed the string and told to judge it as given. A subagent asked to
+run a check runs it; one told not to edit does not. None of this can change after
+`agent()` — there is no per-task override.
 
 **Loops.** Bound every loop with a round cap, and carry the feedback forward:
 
@@ -959,8 +961,13 @@ Either way the user confirms the run, and the confirmation shows the actual scri
   the runtime's decision, not the script's.
 - `subagent_model`: the model the subagents run on, as `providerId/modelId` or a bare
   model id (optionally `$reasoningLevel`). Set it only when the user asks for a specific
-  model; pass the name the user used, and if the tool cannot resolve it, pick from the ids
-  it lists or call `ListModels`. You stay on the session model either way.
+  model; pass the name they used, and if the tool cannot resolve it, pick from the ids it
+  lists or `ListModels`. NEVER set a model under another provider the user did not ask
+  for: a bare name resolves only within the session's provider, and crossing to another
+  one is written as the full `providerId/modelId`, which you write only when the user
+  named that model. If you think a cheaper or faster model elsewhere would serve the run,
+  ask the user before calling — model, provider, what it saves — and treat their yes as
+  the request. You stay on the session model either way.
 
 This tool starts a new run. To change a run that exists — errored, completed, stopped or
 still running — call `AmendWorkflow` (§13, §16.4), never `CreateWorkflow` again.
@@ -1424,8 +1431,9 @@ same call, so never `TaskStop` it first and never rewrite it from scratch with
   `max_concurrency`, against a run that is still going, retunes that run in place instead of
   starting a new one: same run, nothing stopped, nothing re-run.
 - `subagent_model`: omit to keep the predecessor's choice, pass `null` to put the subagents
-  back on the session model, pass a model id to change it (only when the user asks).
-  `ListModels` lists the ids.
+  back on the session model, pass a model id to change it (only when the user asks; never
+  a model under another provider the user did not name — ask them first if you think one
+  would help). `ListModels` lists the ids.
 
 Changing only a setting on a running run still stops it; what it had in flight runs again in
 the new run, except that a named subagent whose unfinished ask you did not change picks that
@@ -1446,9 +1454,12 @@ names and call again with `path` — nothing was stopped and nothing was started
 **Confirmation.** A run this session started (through `CreateWorkflow`, a previous
 `AmendWorkflow` or the workflows hub) is amended without a confirmation window, even while
 it is running. A run the user stopped, or a run another session started, asks the user
-first. The result names the run that was superseded (if one was stopped) and the new run's
-id. The superseded run sends no notification of its own; the new run notifies when it
-settles. Do not wait for it or poll it with `TaskOutput`.
+first, and so does an amendment that would put subagents on a provider neither the session
+nor the run used (a model you name under another provider, in `subagent_model` or in the
+script): that choice is the user's, and the window is where they make it. The result names
+the run that was superseded (if one was stopped) and the new run's id. The superseded run
+sends no notification of its own; the new run notifies when it settles. Do not wait for it
+or poll it with `TaskOutput`.
 
 ### 16.5 `SaveWorkflow`
 
