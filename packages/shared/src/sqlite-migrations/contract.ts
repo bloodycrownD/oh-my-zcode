@@ -71,6 +71,9 @@ export interface SqliteMigrationsContract {
 }
 
 /** 建窗前的一次性 CLI 命令；不进入会话/消息协议。 */
+// cr-func-vps O1 挂账：startup-storage 执行器（host 侧消费本常量触发离线迁移的命令分支）
+// 尚未接线，当前只有协议常量与 report schema。执行器随三期 aliasRepo（Step 18，Phase 3
+// vproj-storage 的 SourceServerWorkspaceAliasRepo 迁移链）一并落地，届时 host 启动链补消费点。
 export const STORAGE_MIGRATION_COMMAND = "storage-migrate";
 export const storageMigrationReportSchema = z
   .object({
