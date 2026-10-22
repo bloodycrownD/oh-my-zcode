@@ -21,6 +21,8 @@ node_status:
   impl-c2: { status: done, head_sha: 6d514792, executor: subagent, commits: [b59d9154, b70be647, 6d514792], note: "MC 全套 19 套绿由 impl 提前跑绿（含 Step 8 面）；omz 保真差异 5 项待 cr-func 对照（见记忆 #124）" }
   verify-c2: { status: done, executor: main, evidence: "T-AS 30/30 独立复跑（worktree 根 node --import tsx --test 形态）；diff 面=6 文件（3 src+2 pkg+root）；MC 三端口/挂点零触碰 git diff 断言 0 命中" }
   cr-func-c2: { status: done, func_ready: yes, agent: agent_5847d60e, note: "0 must-fix；6 差异全 closed（含 P2 漂移④空 text 块过滤——已补登 spec 漂移登记）；oracle 忠实性 3 分支抽查过；LCS 机械对照无未报漂移" }
+  impl-vps: { status: done, head_sha: 52a99a96, executor: subagent, commits: [ba41a10f, b4f03cc2, 67f7c517, 52a99a96], note: "存储 7 目录 44+1 shim；sqlite-migrations 10 文件；0004/0006 冻结追加（sha256 基准五条内置于 T-VS3）；includeArchived→membership 9 文件+1 脚本；品牌 5 处 .omz；挂账：source-server 恢复项随 P5/TaskIndexRepo 四参随 P4/P5" }
+  verify-vps: { status: done, executor: main, evidence: "T-VS 15/15 独立复跑（4 脚本 tsx --test 形态）；diff 面 90 文件 0 误碰（ui/magic-context 0）；test:v4-perf 尾部挂载 4 脚本在场；品牌扫描仅 1 注释提及（非功能）" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
