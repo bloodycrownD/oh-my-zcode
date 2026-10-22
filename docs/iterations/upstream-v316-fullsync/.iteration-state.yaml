@@ -6,7 +6,7 @@ evidence_packs: [docs/iterations/upstream-v316-fullsync/cache/exploration-report
 branch: upstream-v316-fullsync
 worktree: D:\worktree\fullsync
 base_sha: 1ff8cad9
-head_sha: b95d2dd5
+head_sha: 6d514792
 dag_version: 1
 node_status:
   impl-i18n: { status: done, head_sha: 7556d7d2, executor: subagent, commits: [50e5ee0e, c972b5d4, c3c99d5b, 7556d7d2] }
@@ -16,7 +16,9 @@ node_status:
   impl-c1b: { status: done, head_sha: 5c4e0ece, executor: subagent, commits: [18e04d81, 8905703a, e65b9e6e, 5c4e0ece] }
   impl-c1c: { status: done, head_sha: b95d2dd5, executor: main }
   verify-c1: { status: done, executor: main, evidence: "T-CP2 7/7；T-CP1 四消费方零改动 diff 断言；test:v4-perf 29 suites/471/0 fail（cache/verify-c1-v4perf.log）；tsc 0 错" }
-  cr-func-c1: { status: done, func_ready: yes, agent: agent_e3ecd398, note: "0 must-fix；5 deviations 闭-接受；P2 spec 文本同步已落（ThoughtLevelCycleControl 退场/保底语义）" }
+  cr-func-c1: { status: done, func_ready: yes, head_sha: 3aa48309, agent: agent_e3ecd398, note: "0 must-fix；5 deviations 闭-接受；P2 spec 文本同步已落（ThoughtLevelCycleControl 退场/保底语义）" }
+  impl-c2: { status: done, head_sha: 6d514792, executor: subagent, commits: [b59d9154, b70be647, 6d514792], note: "MC 全套 19 套绿由 impl 提前跑绿（含 Step 8 面）；omz 保真差异 5 项待 cr-func 对照（见记忆 #124）" }
+  verify-c2: { status: done, executor: main, evidence: "T-AS 30/30 独立复跑（worktree 根 node --import tsx --test 形态）；diff 面=6 文件（3 src+2 pkg+root）；MC 三端口/挂点零触碰 git diff 断言 0 命中" }
 open_must_fix: []
 manual_user_pending:
   - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
