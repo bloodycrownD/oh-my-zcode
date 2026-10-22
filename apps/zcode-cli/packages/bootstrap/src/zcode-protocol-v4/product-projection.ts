@@ -2832,7 +2832,8 @@ export class ProductProjection {
   ): ConversationDelta[] {
     const toolCallId = String(payload.toolCallId ?? "");
     const rowId = this.toolRowIdByCallId.get(toolCallId);
-    if (rowId === undefined) return [];
+    // scheduled 或完整 tool_call 已定稿输入；迟到的原始流 delta 不得再改写它。
+    if (rowId === undefined || this.findToolRow(toolCallId)?.input !== undefined) return [];
     const state = this.fileToolInputPreviewByCallId.get(toolCallId);
     if (!state) {
       return [{ op: "row.delta", rowId, path: "inputText", append: payload.delta }];
@@ -2876,6 +2877,8 @@ export class ProductProjection {
     if (shouldHideInvalidToolCallFromProduct(payload.toolName)) return [];
     const inputText = stringifyToolInput(payload.input);
     const existing = this.findToolRow(toolCallId);
+    // scheduled 或完整 tool_call 已定稿输入；迟到原始流不能覆盖执行身份。
+    if (existing?.input !== undefined) return [];
     if (existing) {
       return [
         {
@@ -2936,6 +2939,7 @@ export class ProductProjection {
           op: "row.upserted",
           row: {
             ...existing,
+            toolName: payload.toolName,
             ...(payload.assistantMessageId
               ? { assistantResponseId: String(payload.assistantMessageId) }
               : {}),
