@@ -21,9 +21,6 @@ import { SettingsPage } from "@/SettingsPage.js";
 import { setDefaultFileDisplayBasePath } from "@/lib/fileDisplay.js";
 import { countAllUnreadTasks } from "@/lib/unreadTaskCount.js";
 import {
-
-
-
   shouldBlockRootRender,
   shouldShowRootStartupLoading,
   shouldOpenFallbackWorkspaceAfterCreate,
@@ -564,6 +561,8 @@ function RootInner({
     activeWorkspaceTab,
     platform,
     onRemoteWorkspaceTabsClosed: handleRemoteWorkspaceTabsClosed,
+    // lastClosedWorkspaceEvent 语义（P4.2）：只有 user-close 才触发解绑/释放。
+    tabStoreApi,
   });
 
   useEffect(() => {

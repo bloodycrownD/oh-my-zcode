@@ -7,6 +7,8 @@ interface WorkspaceTabIdentityLike {
 interface WorkspaceTabMatchOptions {
   remoteSessionId?: string;
   workspaceIdentity?: string;
+  /** Host stable identity 换代前的 route identity；rekey 时允许按旧 identity 命中同一 tab。 */
+  previousWorkspaceIdentity?: string;
 }
 
 function hasRemoteTabIdentity(tab: WorkspaceTabIdentityLike): boolean {
@@ -27,7 +29,11 @@ export function isSameWorkspaceTab(
   }
 
   if (options?.workspaceIdentity) {
-    return tab.workspaceIdentity === options.workspaceIdentity;
+    return (
+      tab.workspaceIdentity === options.workspaceIdentity ||
+      (Boolean(options.previousWorkspaceIdentity) &&
+        tab.workspaceIdentity === options.previousWorkspaceIdentity)
+    );
   }
 
   if (options?.remoteSessionId) {

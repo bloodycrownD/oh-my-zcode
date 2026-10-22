@@ -8,7 +8,12 @@ import {
   unbindRemoteWorkspacePath,
   unregisterRemoteWorkspaceSession,
 } from "@/store/remoteWorkspaceSessionStore.js";
-import { isWorkspaceTab, type WindowTabState, type WorkspaceTabState } from "@/store/tabStore.js";
+import {
+  isWorkspaceTab,
+  type TabStoreState,
+  type WindowTabState,
+  type WorkspaceTabState,
+} from "@/store/tabStore.js";
 
 function remoteWorkspaceKey(tab: WorkspaceTabState): string | null {
   if (!tab.workspaceIdentity?.trim() && !tab.remoteSessionId && !tab.remoteTarget) {
@@ -18,7 +23,7 @@ function remoteWorkspaceKey(tab: WorkspaceTabState): string | null {
   return tab.workspaceIdentity?.trim() || tab.workspacePath;
 }
 
-function collectClosedRemoteWorkspaceKeys(
+export function collectClosedRemoteWorkspaceKeys(
   previousWorkspaceTabs: WorkspaceTabState[],
   nextWorkspaceTabs: WorkspaceTabState[],
 ): string[] {
@@ -32,7 +37,18 @@ function collectClosedRemoteWorkspaceKeys(
 
   for (const previousTab of previousWorkspaceTabs) {
     const workspaceKey = remoteWorkspaceKey(previousTab);
-    if (!workspaceKey || nextRemoteWorkspaceKeys.has(workspaceKey)) {
+    const sameTab = nextWorkspaceTabs.find((tab) => tab.id === previousTab.id);
+    // Host stable identity rekey 会替换 tab identity；previousWorkspaceIdentity 命中
+    // 说明是同一条远端连接换代，不算关闭（upstream-v316-fullsync P4.2）。
+    const rekeyedTab = nextWorkspaceTabs.find(
+      (tab) => tab.previousWorkspaceIdentity?.trim() === workspaceKey,
+    );
+    if (
+      !workspaceKey ||
+      nextRemoteWorkspaceKeys.has(workspaceKey) ||
+      Boolean(sameTab) ||
+      Boolean(rekeyedTab)
+    ) {
       continue;
     }
     closedRemoteWorkspaceKeys.add(workspaceKey);
@@ -67,14 +83,25 @@ export function useRemoteWorkspaceTabLifecycle({
   activeWorkspaceTab,
   platform,
   onRemoteWorkspaceTabsClosed,
+  tabStoreApi,
 }: {
   tabs: WindowTabState[];
   activeWorkspaceTab: WorkspaceTabState | null;
   platform: IPlatformService;
   onRemoteWorkspaceTabsClosed?: (workspaceKeys: string[]) => void;
+  /** 传入后按 lastClosedWorkspaceEvent 区分显式关闭；缺省保持旧 tab-diff 语义。 */
+  tabStoreApi?: {
+    subscribe(
+      listener: (state: {
+        lastClosedWorkspaceEvent: TabStoreState["lastClosedWorkspaceEvent"];
+      }) => void,
+    ): () => void;
+  };
 }) {
   const previousWorkspaceTabsRef = useRef<WindowTabState[]>([]);
   const rememberedSessionIdsByWorkspaceKeyRef = useRef<Map<string, string>>(new Map());
+  // 显式关闭（user-close）才允许触发解绑/释放；rekey、恢复重建与断连换源不再误判为关闭。
+  const explicitlyClosedWorkspaceKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     const previousWorkspaceTabs = previousWorkspaceTabsRef.current.filter(isWorkspaceTab);
@@ -88,7 +115,7 @@ export function useRemoteWorkspaceTabLifecycle({
       nextWorkspaceTabs,
       rememberedSessionIdsByWorkspaceKeyRef.current,
     );
-    if (closedRemoteWorkspaceKeys.length > 0) {
+    if (!tabStoreApi && closedRemoteWorkspaceKeys.length > 0) {
       onRemoteWorkspaceTabsClosed?.(closedRemoteWorkspaceKeys);
       for (const workspaceKey of closedRemoteWorkspaceKeys) {
         rememberedSessionIdsByWorkspaceKeyRef.current.delete(workspaceKey);
@@ -102,6 +129,17 @@ export function useRemoteWorkspaceTabLifecycle({
     }
 
     for (const sessionId of closedRemoteSessionIds) {
+      // 事件语义在场时，只有用户显式关闭的 workspace 才允许补释放；
+      // rekey/恢复重建产生的瞬时消失不再误 dispose（与上游一致）。
+      if (
+        tabStoreApi &&
+        ![...explicitlyClosedWorkspaceKeysRef.current].some(
+          (workspaceKey) =>
+            rememberedSessionIdsByWorkspaceKeyRef.current.get(workspaceKey) === sessionId,
+        )
+      ) {
+        continue;
+      }
       void (async () => {
         try {
           // 断连事件会先清掉 tab 上的 remoteSessionId，导致下方正常移除流程
@@ -170,6 +208,13 @@ export function useRemoteWorkspaceTabLifecycle({
       if (!sessionId || nextRemoteSessionIds.has(sessionId) || disposedSessionIds.has(sessionId)) {
         continue;
       }
+      // 同补释放路径：事件语义在场时只认显式关闭的 workspace（与上游一致）。
+      if (
+        tabStoreApi &&
+        !explicitlyClosedWorkspaceKeysRef.current.has(remoteWorkspaceKey(previousTab) ?? "")
+      ) {
+        continue;
+      }
 
       disposedSessionIds.add(sessionId);
       const workspacePath = previousTab.workspacePath;
@@ -193,7 +238,24 @@ export function useRemoteWorkspaceTabLifecycle({
     }
 
     previousWorkspaceTabsRef.current = nextWorkspaceTabs;
-  }, [onRemoteWorkspaceTabsClosed, platform, tabs]);
+    explicitlyClosedWorkspaceKeysRef.current.clear();
+  }, [onRemoteWorkspaceTabsClosed, platform, tabStoreApi, tabs]);
+
+  useEffect(() => {
+    // lastClosedWorkspaceEvent 消费（upstream-v316-fullsync P4.2）：只有 user-close 才是
+    // 显式关闭事实；restore/rekey 产生的 tab 消失不能触发解绑与释放。
+    if (!tabStoreApi || !onRemoteWorkspaceTabsClosed) return;
+    let lastSequence = 0;
+    return tabStoreApi.subscribe((state) => {
+      const event = state.lastClosedWorkspaceEvent;
+      if (!event || event.sequence <= lastSequence) return;
+      lastSequence = event.sequence;
+      if (event.origin === "user-close") {
+        explicitlyClosedWorkspaceKeysRef.current.add(event.workspaceKey);
+        onRemoteWorkspaceTabsClosed([event.workspaceKey]);
+      }
+    });
+  }, [onRemoteWorkspaceTabsClosed, tabStoreApi]);
 
   useEffect(() => {
     if (!activeWorkspaceTab?.remoteSessionId) {

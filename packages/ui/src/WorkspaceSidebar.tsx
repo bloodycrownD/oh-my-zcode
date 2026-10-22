@@ -49,6 +49,7 @@ import {
 import type { Locale, RemoteTarget, ZCodeTaskMeta } from "@zcode/shared";
 
 import {
+  resolveWorkspaceKey,
   TID_CONVERSATION_NEW_TASK,
   TID_CONVERSATION_SECTION,
   TID_AUTOMATIONS_OPEN,
@@ -366,7 +367,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
     [workspaceTabs],
   );
   const workspacePaths = useMemo(
-    () => projectWorkspaceTabs.map((tab) => tab.workspacePath),
+    // 键统一（P4.2）：expandedWorkspacePaths 以 resolveWorkspaceKey 为键，identity workspace 不再共享 path 键。
+    () => projectWorkspaceTabs.map((tab) => resolveWorkspaceKey(tab)),
     [projectWorkspaceTabs],
   );
   const areAllWorkspaceGroupsExpanded = useMemo(
@@ -1504,7 +1506,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebarComponent({
                                             isExpanded={resolveWorkspaceDragExpanded({
                                               activeDragId: activeWorkspaceDragId,
                                               expanded: expandedWorkspacePaths.has(
-                                                tab.workspacePath,
+                                                resolveWorkspaceKey(tab),
                                               ),
                                               tabId: tab.id,
                                             })}

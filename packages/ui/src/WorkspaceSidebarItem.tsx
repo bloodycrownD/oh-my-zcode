@@ -300,7 +300,9 @@ export const WorkspaceSidebarItem = memo(function WorkspaceSidebarItem({
           onStartDraftInWorkspace(tab.workspacePath, tab.workspaceIdentity);
         }
       } else if (isExpanded) {
-        toggleWorkspaceExpanded(tab.workspacePath);
+        // 键统一（P4.2）：expandedWorkspacePaths 以 resolveWorkspaceKey(tab) 为键，
+        // identity workspace 的展开态不再与同 path 的其它远端共享。
+        toggleWorkspaceExpanded(tab.workspaceIdentity?.trim() || tab.workspacePath);
       }
     },
     [

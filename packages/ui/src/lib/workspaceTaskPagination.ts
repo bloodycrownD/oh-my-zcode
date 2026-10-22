@@ -1,3 +1,4 @@
+import { resolveWorkspaceKey } from "@zcode/shared";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 
 export const WORKSPACE_TASK_PAGE_SIZE = 5;
@@ -6,6 +7,7 @@ export type WorkspaceTaskVisibleLimitByKey = Record<string, number>;
 
 export function resolveVisibleWorkspaceTaskKeys(params: {
   enabled: boolean;
+  /** 键统一（P4.2）：以 resolveWorkspaceKey(workspace)（identity || path）为展开键。 */
   expandedWorkspacePaths: ReadonlySet<string>;
   workspaces: ReadonlyArray<{ workspacePath: string; workspaceIdentity?: string }>;
 }): Set<string> {
@@ -14,7 +16,7 @@ export function resolveVisibleWorkspaceTaskKeys(params: {
   }
   return new Set(
     params.workspaces
-      .filter((workspace) => params.expandedWorkspacePaths.has(workspace.workspacePath))
+      .filter((workspace) => params.expandedWorkspacePaths.has(resolveWorkspaceKey(workspace)))
       .map((workspace) =>
         buildTaskWorkspaceKey(workspace.workspacePath, workspace.workspaceIdentity),
       ),
