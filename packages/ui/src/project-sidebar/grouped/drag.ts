@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 照搬上游 dnd 手势纯函数集，不拆散上游同源实现 */
 // 照搬上游 v3.16.2 project-sidebar/grouped/drag.ts（upstream-v316-fullsync P4.1 分组视角批；omz 化差异见文件内注释）
 // 恢复自分组删除前的碰撞、落点与动画实现；不包含旧数据服务。
 import {

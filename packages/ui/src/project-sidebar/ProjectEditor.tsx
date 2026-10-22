@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 照搬上游编辑器（本机形态），不拆散上游同源实现 */
 // 照搬上游 v3.16.2 ProjectEditor.tsx 并 omz 化（upstream-v316-fullsync P4.1，Remote* 剔除）：
 // ①设备选择器/RemoteProjectList/browseExisting/onConnectDevice/onAddDevice/remoteService
 //   整组剔除（source-server 三期回补，随 phase-remote-ux 再议）——本机单 Host 形态；

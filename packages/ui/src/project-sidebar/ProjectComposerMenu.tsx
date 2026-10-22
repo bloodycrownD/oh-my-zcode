@@ -7,7 +7,7 @@
 // ④omz store 草稿态无 draftProjectId/draftTaskGroupId 字段：当前项目勾选态与分组继承
 //   暂缺（chip 回退「选择项目」文案），随 UI 提交链（P4.2）补 store 字段后恢复。
 import type { ReactNode } from "react";
-import { useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -91,17 +91,12 @@ export function ProjectComposerMenu({
   const draftVersion = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.draftFocusVersion,
   );
-  // 草稿重建和聊天切换都会使旧返回意图失效，即使后来又回到同一路径也不能复活旧操作。
+  // 草稿重建和聊天切换都会使旧返回意图失效；omz 远端连接流剔除后无返回意图写入方，
+  // 保留 chatKey/pending 的失效重置语义（omz 化：restoredChat/returnFocus 随 R3 回补）。
   const chatKey = JSON.stringify([workspaceKey, activeTaskId, draftVersion]);
-  const currentChat = useRef({ key: chatKey });
-  if (currentChat.current.key !== chatKey) currentChat.current = { key: chatKey };
-  const chat = currentChat.current;
-  const mounted = useRef(true);
-  const operation = useRef(0);
   const trigger = useRef<HTMLButtonElement>(null);
   const setSubmissionPending = useContext(ComposerSubmissionPendingContext);
   const [pending, setPending] = useState(false);
-  const [restoredChat, setRestoredChat] = useState<typeof chat | null>(null);
   useEffect(() => {
     setSubmissionPending?.(pending);
     return () => setSubmissionPending?.(false);
@@ -109,32 +104,7 @@ export function ProjectComposerMenu({
   useEffect(() => {
     setPending(false);
   }, [chatKey]);
-  const cancelSelection = () => {
-    setRestoredChat(chat);
-    operation.current++;
-    setPending(false);
-    setSubmissionPending?.(false);
-    setReturnFocus((version) => version + 1);
-  };
   const [creating, setCreating] = useState(false);
-  const [returnFocus, setReturnFocus] = useState(0);
-  // 旧连接弹窗在被动 effect 中释放焦点锁；layout 阶段聚焦会被拉回即将卸载的按钮。
-  // 同轮清理结束后恢复原菜单焦点，不依赖延时，也不移动聊天草稿。
-  useEffect(() => {
-    if (returnFocus) {
-      trigger.current?.focus();
-      logger.debug("[ProjectComposerMenu] 返回聊天焦点", {
-        restored: document.activeElement === trigger.current,
-        inert: Boolean(trigger.current?.closest("[inert]")),
-      });
-    }
-  }, [returnFocus]);
-  useLayoutEffect(() => {
-    mounted.current = true;
-    return () => {
-      mounted.current = false;
-    };
-  }, []);
   // omz：store 无 draftProjectId（P4.2）；当前项目身份在菜单内暂不勾选，仅提供切换/新建。
   const currentProject = undefined as VirtualProject | undefined;
   const isConversationWorkspace = !currentProject;
@@ -302,22 +272,6 @@ export function ProjectComposerMenu({
           </div>
         </div>
       </DropdownMenuContent>
-      {restoredChat === chat ? (
-        <span
-          role="status"
-          data-testid="chat-restored-target"
-          className="max-w-full break-words px-2 text-ui-sm text-foreground-subtle"
-        >
-          {intl.formatMessage(
-            { id: "chat.remoteFolder.restored" },
-            {
-              device: intl.formatMessage({ id: "project.thisComputer" }),
-              project:
-                currentProject?.name ?? intl.formatMessage({ id: "chat.empty.workOutsideProject" }),
-            },
-          )}
-        </span>
-      ) : null}
       {/* 连接成功仍由目录流程交付聊天；普通创建在同一草稿中选中保存后的项目。 */}
       {creating && service ? (
         <ProjectCreation

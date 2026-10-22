@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 照搬上游组组件（747 行），不拆散上游同源实现 */
 // 照搬上游 v3.16.2 project-sidebar/grouped/group-item.tsx（upstream-v316-fullsync P4.1 分组视角批；omz 化差异见文件内注释）
 import { SidebarNativeTooltip, ControlHintTooltip } from "@/ControlHintTooltip.js";
 import type { ProjectTask as ZCodeTaskMeta } from "@/project-sidebar/contract.js";

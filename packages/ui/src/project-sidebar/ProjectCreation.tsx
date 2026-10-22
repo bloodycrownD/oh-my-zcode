@@ -59,6 +59,8 @@ export function ProjectCreation({
   }, []);
   const saved = async (project: VirtualProject) => {
     if (!active.current) return;
+    // 本机项目创建成功即置顶入口列表；远端入口登记随 R3 三期（omz 无 remoteService 面）。
+    sidebar?.preferences.prepend(project);
     await onSaved();
     const draft = useZCodeSessionStore
       .getState()

@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 照搬上游 v3.16.2 整文件（480 行）收口，不拆散上游同源实现 */
 // 照搬上游 v3.16.2 project-sidebar/TaskGroupedView.tsx（upstream-v316-fullsync P4.1 分组视角批）
 // omz 化：①分组内草稿继承面剔除——omz store 无 draftTaskGroupId/draftProjectId、composer
 // 草稿无 taskGroupId 字段（P4.2 随 UI 提交链接），draftGroupId 恒 undefined：分组内草稿行

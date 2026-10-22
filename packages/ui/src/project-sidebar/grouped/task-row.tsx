@@ -1,3 +1,4 @@
+/* oxlint-disable eslint(max-lines) -- 照搬上游 grouped 行组件，不拆散上游同源实现 */
 // 照搬上游 v3.16.2 project-sidebar/grouped/task-row.tsx（upstream-v316-fullsync P4.1 分组视角批）
 // omz 化：①反馈工单面剔除（lib/taskFeedbackDraft + feedback/feedbackStore + 右键「反馈」项，
 // omz 无 feedback ticket UI）；②provider-config 打开面剔除（omz useTaskListItemContextActions

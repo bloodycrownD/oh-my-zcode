@@ -60,7 +60,6 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
     }),
     [props.workspacePath, props.workspaceIdentity, pin],
   );
-  const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
   // P4.1：编辑/新建对话框 owner 自 toast 占位升级为真组件（上游 index.tsx 同款状态）。
   const [editor, setEditor] = useState<{ project: VirtualProject | null } | null>(null);
   const [creating, setCreating] = useState(false);
