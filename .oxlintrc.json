@@ -64,7 +64,9 @@
     "docs/electron",
     // FORK (upstream-v3.15.1-backport Step1): 上游快照参考仓未跟踪但会随迭代切换版本，
     // 其源码不属于本仓 lint 范围，排除以免污染根计数（实测污染可达 790w/307e）。
-    ".reference/**",
+    // FORK (upstream-v3.16-backport Step1): 实测 oxlint 的 glob 形式 ".reference/**" 不生效，
+    // 只有目录形式才被识别，改写如下。
+    ".reference",
     // 本地未跟踪工具目录（迭代过程产物，不入库），排除以免 max-lines 误报拖红根 lint。
     ".tools/**"
   ]
