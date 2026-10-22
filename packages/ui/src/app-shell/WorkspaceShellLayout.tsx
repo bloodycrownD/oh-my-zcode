@@ -6,8 +6,8 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 
-
 import { TID_APP_HEADER } from "@zcode/shared";
+import { FolderTree, Rows3 } from "lucide-react";
 // 保活：workspace tab 真正关闭时，按 workspaceKey 回收 side pane terminal 的常驻 PTY/xterm。
 // 对称下侧 Terminal.tsx 的 openWorkspaceKeys 回收。
 import { sidePaneTerminalSessionRegistry } from "@/terminal/sidePaneTerminalSessionRegistry.js";
@@ -49,6 +49,9 @@ import { PluginStorePage } from "@/settings/PluginStorePage.js";
 import { TaskFindDialog } from "@/quickpick/TaskFindDialog.js";
 import { WorkspaceHeader } from "@/WorkspaceHeader.js";
 import { WorkspaceSidebar, type SidebarFileTreeOpenRequest } from "@/WorkspaceSidebar.js";
+// 虚拟项目（upstream-v316-fullsync P4）：项目树视角与 omz 经典侧栏并存（spec 默认拍板），
+// 目录读取经 ProjectDirectoryProvider → useProjectTree → IProjectService，壳层不持有第二份目录。
+import { ProjectDirectoryProvider, ProjectSidebar } from "@/project-sidebar/index.js";
 import { AnimatedSidePanePanel } from "@/app-shell/AnimatedSidePanePanel.js";
 import {
   findScreenshotSurfaceTabForRender,
@@ -184,6 +187,23 @@ function persistWorkspaceSidebarWidthPx(widthPx: number) {
     window.localStorage.setItem(WORKSPACE_SIDEBAR_WIDTH_STORAGE_KEY, String(Math.round(widthPx)));
   } catch {
     // ignore
+  }
+}
+
+// 项目树视角偏好：与上游 readProjectSidebarView 的 zcode-project-sidebar-preferences.view 解耦，
+// 壳层只记录「经典侧栏 vs 项目树」这一层并存开关；视角内 projects/timeline 归项目侧栏自管。
+const WORKSPACE_SIDEBAR_VIEW_MODE_STORAGE_KEY = "zcode:workspace-shell:sidebar-view-mode";
+type WorkspaceSidebarViewMode = "classic" | "projects";
+function readWorkspaceSidebarViewMode(): WorkspaceSidebarViewMode {
+  if (typeof window === "undefined") {
+    return "classic";
+  }
+  try {
+    return window.localStorage.getItem(WORKSPACE_SIDEBAR_VIEW_MODE_STORAGE_KEY) === "projects"
+      ? "projects"
+      : "classic";
+  } catch {
+    return "classic";
   }
 }
 
@@ -354,6 +374,21 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
     null,
   );
   const [isSidebarFileTreeOpen, setIsSidebarFileTreeOpen] = useState(false);
+  // 项目树/经典侧栏并存开关（spec 默认：保留 omz 时间线/置顶视角，新增项目树入口并存）。
+  const [sidebarViewMode, setSidebarViewMode] = useState<WorkspaceSidebarViewMode>(() =>
+    readWorkspaceSidebarViewMode(),
+  );
+  const toggleSidebarViewMode = useCallback(() => {
+    setSidebarViewMode((current) => {
+      const next = current === "classic" ? "projects" : "classic";
+      try {
+        window.localStorage.setItem(WORKSPACE_SIDEBAR_VIEW_MODE_STORAGE_KEY, next);
+      } catch {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
   const workspaceKey = workspaceIdentity?.trim() || workspaceAbsPath;
   const screenshotSurfaceRequest = useBrowserScreenshotSurfaceRequest(sidePaneState?.tabs ?? []);
   const screenshotSurfaceTab = screenshotSurfaceRequest
@@ -1533,7 +1568,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
         >
           <aside
             ref={sidebarContainerRef}
-            className="h-full overflow-hidden select-none"
+            className="group/sidebar relative h-full overflow-hidden select-none"
             aria-hidden={!isSidebarPanelVisible}
           >
             <ScopedErrorBoundary
@@ -1549,48 +1584,118 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                 onOpenSession={handleOpenSessionInSplitPane}
               >
                 <WorkflowRunOpenProvider onOpenRun={handleOpenSidebarWorkflowRun}>
-                  <WorkspaceSidebar
-                    workspacePath={workspaceAbsPath}
-                    workspaceRemoteSessionId={workspaceRemoteSessionId}
-                    activePreviewPath={activePreviewPath}
-                    onSelectTask={handleSelectTaskInChat}
-                    onStartDraftInWorkspace={handleCreateProjectDraft}
-                    onOpenCodeViewer={handleOpenCodeViewer}
-                    onOpenBrowserUrl={handleOpenBrowserUrl}
-                    fileTreeOpenRequest={fileTreeOpenRequest}
-                    onCreateTask={handleCreateTaskInChat}
-                    onCreateConversationTask={onCreateConversationTask ?? handleCreateTaskInChat}
-                    onOpenFolderFromWorkspaceMenu={onOpenFolderFromWorkspaceMenu}
-                    onOpenRemoteWorkspace={onOpenRemoteWorkspace}
-                    theme={theme}
-                    onConnectRemote={onConnectRemote}
-                    onSelectRemoteProject={onSelectRemoteProject}
-                    onCancelRemoteProject={onCancelRemoteProject}
-                    onReconnectRemoteWorkspace={onReconnectRemoteWorkspace}
-                    reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
-                    remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
-                    reconnectingRemoteWorkspaceLogsByWorkspaceKey={
-                      reconnectingRemoteWorkspaceLogsByWorkspaceKey
-                    }
-                    isDesktop={isDesktop}
-                    isMacDesktop={isMacDesktop}
-                    isWindowsDesktop={isWindowsDesktop}
-                    isSidebarVisible={isSidebarVisible}
-                    onToggleSidebar={handleToggleSidebar}
-                    toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
-                    canGoBack={canPrimaryNavigationBack}
-                    canGoForward={canTaskNavForward}
-                    onGoBack={primaryNavigationBack}
-                    onGoForward={handleTaskNavForward}
-                    goBackShortcutLabel={goBackShortcutLabel}
-                    goForwardShortcutLabel={goForwardShortcutLabel}
-                    onOpenCommandCenter={handleOpenCommandCenter}
-                    onOpenAutomations={handleOpenAutomations}
-                    automationsActive={workspaceMainView === "automations"}
-                    onOpenPluginStore={handleOpenPluginStore}
-                    pluginStoreActive={workspaceMainView === "plugin-store"}
-                    onFileTreeOpenChange={setIsSidebarFileTreeOpen}
-                  />
+                  {sidebarViewMode === "projects" ? (
+                    /* 项目树视角：目录 owner 挂载点（上游 WorkspaceShellLayout :269 形态），
+                       只包裹项目侧栏子树，不改变 omz 布局结构。 */
+                    <ProjectDirectoryProvider isDesktop={isDesktop}>
+                      <div className="relative h-full">
+                        <button
+                          type="button"
+                          data-testid="sidebar-view-mode-toggle"
+                          aria-label={intl.formatMessage({
+                            id: "workspaceSidebar.classicSidebarView",
+                          })}
+                          title={intl.formatMessage({ id: "workspaceSidebar.classicSidebarView" })}
+                          onClick={toggleSidebarViewMode}
+                          className="absolute right-2 top-2 z-10 rounded-lg p-1.5 text-foreground-subtle opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
+                        >
+                          {sidebarViewMode === "projects" ? (
+                            <Rows3 className="size-4" />
+                          ) : (
+                            <FolderTree className="size-4" />
+                          )}
+                        </button>
+                        <ProjectSidebar
+                          workspacePath={workspaceAbsPath}
+                          workspaceIdentity={workspaceIdentity}
+                          workspaceRemoteSessionId={workspaceRemoteSessionId}
+                          onSelectTask={handleSelectTaskInChat}
+                          onStartDraftInWorkspace={handleCreateProjectDraft}
+                          onCreateTask={handleCreateTaskInChat}
+                          onCreateConversationTask={
+                            onCreateConversationTask ?? handleCreateTaskInChat
+                          }
+                          onOpenFolderFromWorkspaceMenu={onOpenFolderFromWorkspaceMenu}
+                          onOpenRemoteWorkspace={onOpenRemoteWorkspace}
+                          theme={theme}
+                          onConnectRemote={onConnectRemote}
+                          onSelectRemoteProject={onSelectRemoteProject}
+                          onCancelRemoteProject={onCancelRemoteProject}
+                          onReconnectRemoteWorkspace={onReconnectRemoteWorkspace}
+                          remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
+                          isDesktop={isDesktop}
+                          isMacDesktop={isMacDesktop}
+                          isWindowsDesktop={isWindowsDesktop}
+                          isSidebarVisible={isSidebarVisible}
+                          onToggleSidebar={handleToggleSidebar}
+                          toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
+                          onOpenCommandCenter={handleOpenCommandCenter}
+                          onOpenAutomations={handleOpenAutomations}
+                          automationsActive={workspaceMainView === "automations"}
+                          onOpenPluginStore={handleOpenPluginStore}
+                          pluginStoreActive={workspaceMainView === "plugin-store"}
+                        />
+                      </div>
+                    </ProjectDirectoryProvider>
+                  ) : (
+                    <>
+                      <WorkspaceSidebar
+                        workspacePath={workspaceAbsPath}
+                        workspaceRemoteSessionId={workspaceRemoteSessionId}
+                        activePreviewPath={activePreviewPath}
+                        onSelectTask={handleSelectTaskInChat}
+                        onStartDraftInWorkspace={handleCreateProjectDraft}
+                        onOpenCodeViewer={handleOpenCodeViewer}
+                        onOpenBrowserUrl={handleOpenBrowserUrl}
+                        fileTreeOpenRequest={fileTreeOpenRequest}
+                        onCreateTask={handleCreateTaskInChat}
+                        onCreateConversationTask={
+                          onCreateConversationTask ?? handleCreateTaskInChat
+                        }
+                        onOpenFolderFromWorkspaceMenu={onOpenFolderFromWorkspaceMenu}
+                        onOpenRemoteWorkspace={onOpenRemoteWorkspace}
+                        theme={theme}
+                        onConnectRemote={onConnectRemote}
+                        onSelectRemoteProject={onSelectRemoteProject}
+                        onCancelRemoteProject={onCancelRemoteProject}
+                        onReconnectRemoteWorkspace={onReconnectRemoteWorkspace}
+                        reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
+                        remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
+                        reconnectingRemoteWorkspaceLogsByWorkspaceKey={
+                          reconnectingRemoteWorkspaceLogsByWorkspaceKey
+                        }
+                        isDesktop={isDesktop}
+                        isMacDesktop={isMacDesktop}
+                        isWindowsDesktop={isWindowsDesktop}
+                        isSidebarVisible={isSidebarVisible}
+                        onToggleSidebar={handleToggleSidebar}
+                        toggleSidebarShortcutLabel={toggleSidebarShortcutLabel}
+                        canGoBack={canPrimaryNavigationBack}
+                        canGoForward={canTaskNavForward}
+                        onGoBack={primaryNavigationBack}
+                        onGoForward={handleTaskNavForward}
+                        goBackShortcutLabel={goBackShortcutLabel}
+                        goForwardShortcutLabel={goForwardShortcutLabel}
+                        onOpenCommandCenter={handleOpenCommandCenter}
+                        onOpenAutomations={handleOpenAutomations}
+                        automationsActive={workspaceMainView === "automations"}
+                        onOpenPluginStore={handleOpenPluginStore}
+                        pluginStoreActive={workspaceMainView === "plugin-store"}
+                        onFileTreeOpenChange={setIsSidebarFileTreeOpen}
+                      />
+                      {/* 经典视角下同位提供项目树入口切换钮。 */}
+                      <button
+                        type="button"
+                        data-testid="sidebar-view-mode-toggle"
+                        aria-label={intl.formatMessage({ id: "workspaceSidebar.projectTreeView" })}
+                        title={intl.formatMessage({ id: "workspaceSidebar.projectTreeView" })}
+                        onClick={toggleSidebarViewMode}
+                        className="absolute right-2 top-2 z-10 rounded-lg p-1.5 text-foreground-subtle opacity-0 transition-opacity hover:bg-surface-hover hover:text-foreground focus-visible:opacity-100 group-hover/sidebar:opacity-100"
+                      >
+                        <FolderTree className="size-4" />
+                      </button>
+                    </>
+                  )}
                 </WorkflowRunOpenProvider>
               </V4SplitPaneEntryProvider>
             </ScopedErrorBoundary>
