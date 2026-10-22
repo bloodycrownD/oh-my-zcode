@@ -1,0 +1,968 @@
+# i18n 键级合并报告（上游 v3.16 → omz）
+
+> 由 `scripts/i18n-key-merge.mjs` 自动生成；复跑 `node scripts/i18n-key-merge.mjs --verify` 可只跑断言。
+> 生成时间：2026-10-22T11:59:54.348Z。
+
+## 四栏总表
+
+| 栏 | 定义 | zh-CN | en-US |
+| --- | --- | --- | --- |
+| added | 上游独有白名单键采纳 | 419 | 419 |
+| kept | 双方都有且值相同 | 5423 | 5420 |
+| changed | 值冲突采上游（含品牌改写） | 134 | 136 |
+| kept(omz) | 值冲突保 omz（轨迹桶） | 0 | 0 |
+| dropped | omz 死键清除（conversationShare.* 全量，见仲裁表附录 B 口径说明） | 165 | 165 |
+| 合并后总键数 | - | 6190 | 6190 |
+
+## zh-CN 明细摘要
+
+### added（上游独有采纳 419，按前缀桶）
+
+- chat.*：90
+- settings.*：90
+- project.*：85
+- browser.*：46
+- archives.*：29
+- sidePane.*：20
+- taskGroup.*：17
+- workspaceSidebar.*：17
+- ssh.*：12
+- preview.*：6
+- fileManager.*：5
+- docker.*：2
+
+### 上游单侧键跳过（保 zh/en parity，1）
+
+- `browser.permission.denyThisTime`
+
+### 上游独有不采（死桶 0 进入，共 1004，按前缀桶）
+
+- remote.*：245
+- conversationShare.*：205
+- settings.*：184
+- chat.*：78
+- webRemoteControl.*：73
+- manualClaimPlan.*：49
+- bots.*：32
+- genUi.*：21
+- globalNotice.*：19
+- pluginUi.*：14
+- resourceManager.*：13
+- server.*：12
+- appHeader.*：8
+- marketingTouch.*：7
+- common.*：6
+- mode.*：6
+- sourceServer.*：6
+- rewards.*：5
+- onboarding.*：4
+- sidebar.*：4
+- taskList.*：4
+- directoryBrowser.*：2
+- occupationOnboarding.*：2
+- zcode.*：2
+- modelTrajectory.*：1
+- workflows.*：1
+- workspaceHeader.*：1
+
+### changed（值冲突采上游 134）
+
+<details><summary>键清单（134）</summary>
+
+- `taskGroup.newTask`
+- `taskGroup.ungroup`
+- `occupationOnboarding.modeDescription`
+- `occupationOnboarding.description`
+- `startup.global.silent`
+- `startup.global.servicesFailed`
+- `startup.global.starting_services`
+- `startup.global.help`
+- `startup.global.error.lock_timeout`
+- `startup.global.error.startup_status_timeout`
+- `startup.global.error.transport_closed`
+- `startup.global.error.unsupported_runtime`
+- `settings.computerUse.disabledToast`
+- `chat.plan.removeMarker`
+- `bots.description`
+- `bots.setup.guide.weixin.create.2`
+- `bots.setup.guide.weixin.create.3`
+- `bots.setup.guide.webhook.create.1`
+- `bots.setup.guide.webhook.bind.1`
+- `bots.runtime.telegramLongPollingHandledElsewhere`
+- `bots.allowedWorkspaces`
+- `bots.allowedWorkspaces.mode.all`
+- `bots.allowedWorkspaces.mode.selected`
+- `bots.allowedWorkspaces.allDescription`
+- `bots.allowedWorkspaces.selectedDescription`
+- `welcome.title`
+- `login.title`
+- `login.description`
+- `logout.confirm.title`
+- `sidePane.openTab`
+- `titleBar.menu.help.about`
+- `directoryBrowser.title`
+- `directoryBrowser.go`
+- `directoryBrowser.selectDir`
+- `forceUpdate.title`
+- `workspaceSidebar.unavailableLocalDirectory`
+- `ssh.assetInstallModeDescription`
+- `ssh.configAliasDescription`
+- `remoteConnection.feedback`
+- `remote.settingsStepTitle`
+- `remote.connectingStepTitle`
+- `remote.connectingStepDescription`
+- `webRemoteControl.description`
+- `remote.selectDirectoryTitle`
+- `remote.selectDirectoryDescription`
+- `remote.backToConnection`
+- `remote.minimize`
+- `remote.startConnection`
+- `wsl.defaultDistro`
+- `wsl.userDescription`
+- `wsl.detectedCount`
+- `wsl.noDistros`
+- `docker.unavailable`
+- `docker.noContainers`
+- `chat.edit.resetConversationAndFiles.unavailable`
+- `settings.locale`
+- `settings.localeDescription`
+- `settings.terminalFontFamilyDescription`
+- `settings.memory`
+- `settings.closeToTrayOnWindowsDescription`
+- `settings.zcodeInteractionBehaviorDescription`
+- `settings.taskAutoArchive`
+- `settings.taskAutoArchiveDescription`
+- `settings.taskAutoArchiveDaysDescription`
+- `settings.dataBaseDirDescription`
+- `settings.dataBaseDirForbiddenInstallDir`
+- `settings.migration.sectionDescription`
+- `resourceManager.storage.summaryTotal`
+- `resourceManager.storage.diskUsage`
+- `resourceManager.storage.categoryDescription.toolOutputs`
+- `settings.browser.desktopOnly`
+- `settings.browser.import.helperVerificationFailed`
+- `settings.browser.import.adminConfirmDescription`
+- `settings.mcp.host.activeDescription`
+- `settings.mcp.statusOnlyUnsupported`
+- `settings.mcp.failure.not_authenticated`
+- `settings.mcpServers.import.importing`
+- `settings.modelProvider.startPlan.highlight.trial.description`
+- `settings.modelProvider.startPlan.compatibility`
+- `settings.modelProvider.codingPlan.purchase.teamMemberNoticeDescription`
+- `settings.modelProvider.codingPlan.zai.plan.lite.summary`
+- `settings.modelProvider.codingPlan.bigmodel.plan.lite.summary`
+- `settings.modelProvider.help.contextWindow`
+- `settings.modelProvider.help.followRecommendedConfig`
+- `settings.usage.billingBanner.description`
+- `settings.usage.entitlementServerMcpUsage`
+- `sidebar.usage.plan.mcp`
+- `sidebar.usage.plan.zcodeMcp`
+- `sidebar.usage.plan.zcodeMcpDescription`
+- `settings.skills.import.mode.copy.description`
+- `settings.skills.import.mode.symlink.description`
+- `settings.skills.import.importing`
+- `settings.plugins.store.manageInstalled`
+- `settings.plugins.import.mode.copy.description`
+- `settings.plugins.import.mode.symlink.description`
+- `settings.plugins.import.importing`
+- `settings.commands.import.mode.copy.description`
+- `settings.commands.import.mode.symlink.description`
+- `settings.commands.import.importing`
+- `settingsSync.discovery.helper`
+- `onboarding.dialog.title`
+- `onboarding.welcome.title`
+- `onboarding.welcome.start`
+- `onboarding.stepDescription.migration`
+- `onboarding.agentsFile.confirmDescription`
+- `chat.empty.workspaceSearchPlaceholder`
+- `chat.empty.workspaceSearchEmpty`
+- `chat.placeholder.newTask`
+- `chat.placeholder.newTaskMobile`
+- `chat.toolbar.computerUse.tooltip.ready`
+- `chat.toolbar.computerUse.tooltip.error`
+- `chat.workflowLaunch.settings.limit`
+- `workflows.hub.empty.hint`
+- `workflows.hub.detail.whenToUse.help`
+- `workflows.hub.detail.script.note`
+- `chat.backgroundResult.workflow.stall.cap`
+- `chat.toolCall.workflow.run.settings.limit`
+- `chat.toolCall.workflow.run.settings.limit.decrease`
+- `chat.toolCall.workflow.run.settings.limit.increase`
+- `chat.toolCall.workflow.run.concurrency.label`
+- `markdownImage.downloadSucceeded`
+- `chat.quota.mcp.quotaExhausted`
+- `chat.quota.mcp.codingPlanRequired`
+- `resourceManager.appUsage`
+- `feedback.submit.template.section.copyErrorHeading`
+- `feedback.submit.simple.logsHint`
+- `offPeak.keepAwakeBanner`
+- `offPeak.form.instructionsPlaceholder`
+- `chat.cuaReadiness.toolsNotLoaded`
+- `chat.cuaReadiness.toolsPreparing`
+- `cuaPermission.modal.relaunchAppButton`
+- `cuaPermission.modal.relaunchAppHint`
+- `cuaPermission.tools.untrustedRuntime`
+- `cuaPermission.ready.sessionValidationHint`
+
+</details>
+
+### kept(omz)（值冲突保 omz 0）
+
+（无——轨迹桶键均为 omz 独有，无值冲突）
+
+### dropped（死键清除 165）
+
+- `conversationShare.trigger`
+- `conversationShare.shareTitle`
+- `conversationShare.permissionLabel`
+- `conversationShare.permission.private`
+- `conversationShare.permission.privateHint`
+- `conversationShare.permission.linkViewer`
+- `conversationShare.permission.linkViewerHint`
+- `conversationShare.permission.linkViewerSummary`
+- `conversationShare.permission.linkEditor`
+- `conversationShare.permission.linkEditorHint`
+- `conversationShare.permission.linkEditorSummary`
+- `conversationShare.permission.privateSummary`
+- `conversationShare.openLink`
+- `conversationShare.result.title`
+- `conversationShare.result.description`
+- `conversationShare.result.openInBrowser`
+- `conversationShare.result.dismiss`
+- `conversationShare.generatingLink`
+- `conversationShare.copyLink`
+- `conversationShare.copySucceeded`
+- `conversationShare.publishSucceeded`
+- `conversationShare.publishSucceededWithSkips`
+- `conversationShare.copyFailed`
+- `conversationShare.publishFailed`
+- `conversationShare.error.authenticationRequired`
+- `conversationShare.error.featureDisabled`
+- `conversationShare.error.artifactNotAllowed`
+- `conversationShare.error.limitExceeded`
+- `conversationShare.error.rateLimited`
+- `conversationShare.error.network`
+- `conversationShare.error.safetyCheckTimeout`
+- `conversationShare.error.invalidSelection`
+- `conversationShare.error.invalidConversation`
+- `conversationShare.error.runningTurn`
+- `conversationShare.error.streamingRow`
+- `conversationShare.error.activeToolCall`
+- `conversationShare.error.activeSubagent`
+- `conversationShare.error.inputAttachment`
+- `conversationShare.error.inlineToolImage`
+- `conversationShare.error.unsupportedTimeline`
+- `conversationShare.error.unsafeUrl`
+- `conversationShare.error.missingProductTurn`
+- `conversationShare.error.artifactTypeNotAllowed`
+- `conversationShare.error.artifactExtensionMissing`
+- `conversationShare.error.artifactOutsideWorkspace`
+- `conversationShare.error.artifactChanged`
+- `conversationShare.error.artifactReadFailed`
+- `conversationShare.error.artifactSizeLimit`
+- `conversationShare.error.artifactManifest`
+- `conversationShare.error.payloadLimit`
+- `conversationShare.error.disclosureRequired`
+- `conversationShare.error.uploadFailed`
+- `conversationShare.error.connectionUnavailable`
+- `conversationShare.error.noShareableContent`
+- `conversationShare.error.summary`
+- `conversationShare.issue.artifactTypeNotAllowed`
+- `conversationShare.issue.artifactExtensionMissing`
+- `conversationShare.issue.artifactOutsideWorkspace`
+- `conversationShare.issue.artifactChanged`
+- `conversationShare.issue.artifactReadFailed`
+- `conversationShare.issue.inputAttachment`
+- `conversationShare.issue.inputAttachmentUnavailable`
+- `conversationShare.issue.inlineToolImage`
+- `conversationShare.issue.runningTurn`
+- `conversationShare.issue.streamingRow`
+- `conversationShare.issue.activeToolCall`
+- `conversationShare.issue.activeSubagent`
+- `conversationShare.issue.unsupportedTimeline`
+- `conversationShare.issue.noShareableContent`
+- `conversationShare.issue.unsafeUrl`
+- `conversationShare.issue.missingProductTurn`
+- `conversationShare.issue.invalidSelection`
+- `conversationShare.issue.invalidConversation`
+- `conversationShare.issue.staleConversation`
+- `conversationShare.issue.rowsLimit`
+- `conversationShare.issue.artifactCountLimit`
+- `conversationShare.issue.artifactSizeLimit`
+- `conversationShare.issue.artifactTotalSizeLimit`
+- `conversationShare.issue.payloadSizeLimit`
+- `conversationShare.issue.artifactManifest`
+- `conversationShare.issue.uploadIncomplete`
+- `conversationShare.issue.unknown`
+- `conversationShare.issue.details`
+- `conversationShare.issue.requestIdLabel`
+- `conversationShare.issue.requestId`
+- `conversationShare.issue.requestIdMissing`
+- `conversationShare.issue.copyRequestId`
+- `conversationShare.issue.deselectTurn`
+- `conversationShare.issue.retryPreflight`
+- `conversationShare.issue.more`
+- `conversationShare.warning.summary`
+- `conversationShare.warning.artifactSkipped`
+- `conversationShare.warning.inputAttachmentSkipped`
+- `conversationShare.warning.inputAttachmentUnavailable`
+- `conversationShare.warning.artifactTypeSkipped`
+- `conversationShare.warning.artifactChangedSkipped`
+- `conversationShare.partial.panelLabel`
+- `conversationShare.selection.reopen`
+- `conversationShare.partial.empty`
+- `conversationShare.partial.selectionStageHint`
+- `conversationShare.partial.preflightChecking`
+- `conversationShare.partial.preflightBlocked`
+- `conversationShare.partial.preflightSkipped`
+- `conversationShare.partial.preflightDeferred`
+- `conversationShare.partial.continueWithSkips`
+- `conversationShare.partial.selectionHint`
+- `conversationShare.partial.confirmationTitle`
+- `conversationShare.publish.failedTitle`
+- `conversationShare.publish.failedDescription`
+- `conversationShare.publish.retry`
+- `conversationShare.publish.footerMeta`
+- `conversationShare.publish.failedFooter`
+- `conversationShare.partial.selectAll`
+- `conversationShare.partial.deselectAll`
+- `conversationShare.partial.selectionCount`
+- `conversationShare.partial.selectedSummary`
+- `conversationShare.partial.cancel`
+- `conversationShare.partial.next`
+- `conversationShare.partial.back`
+- `conversationShare.partial.confirm`
+- `conversationShare.partial.publishing`
+- `conversationShare.progress.collecting`
+- `conversationShare.progress.uploading`
+- `conversationShare.progress.checking`
+- `conversationShare.progress.collectingFailed`
+- `conversationShare.progress.uploadingFailed`
+- `conversationShare.progress.checkingFailed`
+- `conversationShare.phase.collecting`
+- `conversationShare.phase.uploading`
+- `conversationShare.phase.checking`
+- `conversationShare.phase.collectingComplete`
+- `conversationShare.phase.uploadingComplete`
+- `conversationShare.phase.uploadingActive`
+- `conversationShare.phase.collectingPending`
+- `conversationShare.phase.uploadingPending`
+- `conversationShare.phase.checkingPending`
+- `conversationShare.phase.failed`
+- `conversationShare.publicWarning`
+- `conversationShare.disclosure.description`
+- `conversationShare.disclosure.checkbox`
+- `conversationShare.disclosure.scope.trigger`
+- `conversationShare.disclosure.scope.title`
+- `conversationShare.disclosure.scope.reviewLabel`
+- `conversationShare.disclosure.scope.conversation`
+- `conversationShare.disclosure.scope.tools`
+- `conversationShare.disclosure.scope.generated`
+- `conversationShare.disclosure.scope.sensitiveLabel`
+- `conversationShare.disclosure.scope.sensitive`
+- `conversationShare.disclosure.scope.note`
+- `conversationShare.import.source`
+- `conversationShare.import.dividerLabel`
+- `conversationShare.import.fallbackRemoteWorkspace`
+- `conversationShare.import.fallbackDefaultWorkspace`
+- `conversationShare.import.downloading`
+- `conversationShare.import.installing`
+- `conversationShare.import.committing`
+- `conversationShare.import.complete`
+- `conversationShare.import.loginRequired`
+- `conversationShare.import.notFound`
+- `conversationShare.import.expired`
+- `conversationShare.import.integrityFailed`
+- `conversationShare.import.failed`
+- `conversationShare.import.integrityFailedWithArtifact`
+- `conversationShare.import.failedWithArtifact`
+- `conversationShare.import.retry`
+
+### 品牌改写（采纳值内 89 处）
+
+- `project.browseHint`："ZCode 可读取和编辑这些文件夹" → "omz 可读取和编辑这些文件夹"
+- `project.trustFoldersDescription`："ZCode 可在当前权限设置允许的范围内读取、编辑这些文件夹中的文件，并运行命令。请仅在你信任列出的所有文件夹时继续。" → "omz 可在当前权限设置允许的范围内读取、编辑这些文件夹中的文件，并运行命令。请仅在你信任列出的所有文件夹时继续。"
+- `occupationOnboarding.modeDescription`："你希望 ZCode 如何呈现工作过程？" → "你希望 omz 如何呈现工作过程？"
+- `occupationOnboarding.description`："选择最接近你日常工作的一项，让 ZCode 更懂你的工作。" → "选择最接近你日常工作的一项，让 omz 更懂你的工作。"
+- `startup.global.silent`："正在启动 ZCode" → "正在启动 omz"
+- `startup.global.servicesFailed`："本地数据准备已完成，但应用服务启动失败。请复制诊断信息，退出并重新打开 ZCode。" → "本地数据准备已完成，但应用服务启动失败。请复制诊断信息，退出并重新打开 omz。"
+- `startup.global.starting_services`："正在启动 ZCode" → "正在启动 omz"
+- `startup.global.help`："准备完成后将自动进入 ZCode。历史记录较多时可能需要较长时间，请保持应用运行。" → "准备完成后将自动进入 omz。历史记录较多时可能需要较长时间，请保持应用运行。"
+- `startup.global.error.lock_timeout`："等待数据库写锁超时。请检查其他 ZCode 或 CLI 进程是否仍在更新数据，待其完成后点击重试。" → "等待数据库写锁超时。请检查其他 omz 或 CLI 进程是否仍在更新数据，待其完成后点击重试。"
+- `startup.global.error.startup_status_timeout`："未能收到启动状态。请退出并重新打开 ZCode；如果仍失败，请提供诊断信息。" → "未能收到启动状态。请退出并重新打开 omz；如果仍失败，请提供诊断信息。"
+- `startup.global.error.transport_closed`："数据准备进程意外退出或连接中断。请退出并重新打开 ZCode，应用会重新检查迁移记录。" → "数据准备进程意外退出或连接中断。请退出并重新打开 omz，应用会重新检查迁移记录。"
+- `startup.global.error.unsupported_runtime`："当前配置的 Agent 不支持独立存储准备。请恢复配套的 Agent 后重新打开 ZCode。" → "当前配置的 Agent 不支持独立存储准备。请恢复配套的 Agent 后重新打开 omz。"
+- `settings.computerUse.disabledToast`："电脑控制已关闭，已有对话需重启 ZCode 后生效。" → "电脑控制已关闭，已有对话需重启 omz 后生效。"
+- `bots.description`："把外部聊天工具和 Webhook 接入 ZCode 机器人。" → "把外部聊天工具和 Webhook 接入 omz 机器人。"
+- `bots.setup.guide.weixin.create.2`："ZCode 会直接保存 iLink 返回的 bot_token；扫码后请在微信里向 Bot 发送任意消息完成会话激活。" → "omz 会直接保存 iLink 返回的 bot_token；扫码后请在微信里向 Bot 发送任意消息完成会话激活。"
+- `bots.setup.guide.weixin.create.3`："ZCode 内置 iLink 客户端，通过 `/ilink/bot/getupdates` 长轮询收消息，通过 `/ilink/bot/sendmessage` 回复。" → "omz 内置 iLink 客户端，通过 `/ilink/bot/getupdates` 长轮询收消息，通过 `/ilink/bot/sendmessage` 回复。"
+- `bots.setup.guide.webhook.create.1`："Webhook 模式不需要先在第三方平台创建原生机器人；你的系统只需要能向 ZCode 回调接口发消息。" → "Webhook 模式不需要先在第三方平台创建原生机器人；你的系统只需要能向 omz 回调接口发消息。"
+- `bots.setup.guide.webhook.bind.1`："向 ZCode 的 `/api/bots/webhook` 发送一条私聊消息回调。" → "向 omz 的 `/api/bots/webhook` 发送一条私聊消息回调。"
+- `bots.runtime.telegramLongPollingHandledElsewhere`："Telegram 长轮询由另一个 ZCode 窗口处理。" → "Telegram 长轮询由另一个 omz 窗口处理。"
+- `welcome.title`："Welcome to ZCode" → "Welcome to omz"
+- `login.title`："欢迎来到 ZCode" → "欢迎来到 omz"
+- `login.description`："连接账号，开始使用 ZCode" → "连接账号，开始使用 omz"
+- `logout.confirm.title`："断开连接并重启 ZCode？" → "断开连接并重启 omz？"
+- `titleBar.menu.help.about`："关于 ZCode" → "关于 omz"
+- `forceUpdate.title`："需要升级 ZCode 后继续使用" → "需要升级 omz 后继续使用"
+- `workspaceSidebar.unavailableLocalDirectory`："工作区目录不存在或无法访问，当前仅可查看历史记录。恢复该目录后重启 ZCode 即可继续使用。" → "工作区目录不存在或无法访问，当前仅可查看历史记录。恢复该目录后重启 omz 即可继续使用。"
+- `ssh.assetInstallModeDescription`："远端服务器下载可减少上传等待，但服务器需要能访问 ZCode CDN，并具备下载、解压和校验工具。" → "远端服务器下载可减少上传等待，但服务器需要能访问 omz CDN，并具备下载、解压和校验工具。"
+- `settings.terminalFontFamilyDescription`："留空时自动探测系统终端配置；填写后作为 ZCode 终端的字体覆盖。" → "留空时自动探测系统终端配置；填写后作为 omz 终端的字体覆盖。"
+- `settings.zcodeInteractionBehaviorDescription`："在 ZCode 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。" → "在 omz 运行时将后续操作加入队列，或引导至下一轮工具调用后运行。"
+- `settings.dataBaseDirDescription`："应用数据的根目录（默认为用户主目录），修改后会将现有数据复制到新位置。路径后缀 .zcode/v2 不可更改。" → "应用数据的根目录（默认为用户主目录），修改后会将现有数据复制到新位置。路径后缀 .omz/v2 不可更改。"
+- `settings.dataBaseDirForbiddenInstallDir`："不能选择 ZCode 安装目录作为数据存储路径。请选择安装目录之外的文件夹。" → "不能选择 omz 安装目录作为数据存储路径。请选择安装目录之外的文件夹。"
+- `settings.migration.sectionDescription`："扫描本机 Claude Code 原生历史，可按 workspace 和时间范围筛选，再把选中的会话导入到对应的 ZCode 任务列表。" → "扫描本机 Claude Code 原生历史，可按 workspace 和时间范围筛选，再把选中的会话导入到对应的 omz 任务列表。"
+- `resourceManager.storage.summaryTotal`："ZCode 总占用" → "omz 总占用"
+- `resourceManager.storage.diskUsage`："ZCode 占用 {used}" → "omz 占用 {used}"
+- `settings.browser.desktopOnly`："浏览器数据只能在 ZCode 桌面端管理。" → "浏览器数据只能在 omz 桌面端管理。"
+- `settings.browser.import.helperVerificationFailed`："ZCode 的 Windows 安全导入组件校验失败，Cookie 未导入。请重新安装或更新 ZCode。" → "omz 的 Windows 安全导入组件校验失败，Cookie 未导入。请重新安装或更新 omz。"
+- `settings.browser.import.adminConfirmDescription`："Chrome 在 Windows 上使用 App-Bound 加密保护 Cookie。ZCode 将为本次导入请求管理员权限，临时启动系统服务，完成后立即删除。不会读取或导入 Chrome 密码。" → "Chrome 在 Windows 上使用 App-Bound 加密保护 Cookie。omz 将为本次导入请求管理员权限，临时启动系统服务，完成后立即删除。不会读取或导入 Chrome 密码。"
+- `settings.mcp.host.activeDescription`："该 MCP 服务器由 ZCode 宿主为 {pluginName} 插件提供，运行时身份由宿主管理。" → "该 MCP 服务器由 omz 宿主为 {pluginName} 插件提供，运行时身份由宿主管理。"
+- `settings.mcp.statusOnlyUnsupported`："当前 ZCode Agent 不支持 OAuth 状态刷新。请升级或重启 ZCode，然后重新打开 MCP 设置进行完整刷新。" → "当前 omz Agent 不支持 OAuth 状态刷新。请升级或重启 omz，然后重新打开 MCP 设置进行完整刷新。"
+- `settings.mcp.failure.not_authenticated`："当前未登录，请先登录 ZCode。" → "当前未登录，请先登录 omz。"
+- `settings.mcpServers.import.importing`："正在导入 MCP 服务器到 ZCode" → "正在导入 MCP 服务器到 omz"
+- `settings.modelProvider.startPlan.highlight.trial.description`："登录 ZCode 3.x 后开始计时。" → "登录 omz 3.x 后开始计时。"
+- `settings.modelProvider.startPlan.compatibility`："支持 BYOK、BYOA；Base URL、API Format 和 API Key 由 ZCode 自动维护，无需手动配置。" → "支持 BYOK、BYOA；Base URL、API Format 和 API Key 由 omz 自动维护，无需手动配置。"
+- `settings.modelProvider.codingPlan.purchase.teamMemberNoticeDescription`："请先在 BigModel 团队套餐管理页添加自己或其他成员，完成后即可在 ZCode 使用团队额度。" → "请先在 BigModel 团队套餐管理页添加自己或其他成员，完成后即可在 omz 使用团队额度。"
+- `settings.modelProvider.help.contextWindow`："模型一次可处理的上下文容量，单位为 Token。ZCode 会据此管理上下文。\n请勿超过模型的实际上限。" → "模型一次可处理的上下文容量，单位为 Token。omz 会据此管理上下文。\n请勿超过模型的实际上限。"
+- `settings.modelProvider.help.followRecommendedConfig`："根据模型 ID、Base URL 和 API 格式，为您智能匹配推荐配置。ZCode 会持续更新推荐配置，并自动同步给您。\n如果手动修改某项配置，该项将转为手动管理，不再跟随推荐更新；其他配置仍由智能配置管理。" → "根据模型 ID、Base URL 和 API 格式，为您智能匹配推荐配置。omz 会持续更新推荐配置，并自动同步给您。\n如果手动修改某项配置，该项将转为手动管理，不再跟随推荐更新；其他配置仍由智能配置管理。"
+- `settings.usage.billingBanner.description`："连接 {provider} 账号后查询编程套餐权益，购买或配置后回到 ZCode 即可继续编码。" → "连接 {provider} 账号后查询编程套餐权益，购买或配置后回到 omz 即可继续编码。"
+- `settings.usage.entitlementServerMcpUsage`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.mcp`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.zcodeMcp`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.zcodeMcpDescription`："ZCode 预置插件 MCP 每日合计额度" → "omz 预置插件 MCP 每日合计额度"
+- `settings.skills.import.mode.copy.description`："将完整技能目录复制到 ZCode。外部 Agent 目录后续变更不会自动同步。" → "将完整技能目录复制到 omz。外部 Agent 目录后续变更不会自动同步。"
+- `settings.skills.import.mode.symlink.description`："创建指向外部 Agent 技能目录的链接。ZCode 会跟随来源目录后续变更，但该技能依赖来源路径持续可用。" → "创建指向外部 Agent 技能目录的链接。omz 会跟随来源目录后续变更，但该技能依赖来源路径持续可用。"
+- `settings.skills.import.importing`："正在导入技能到 ZCode" → "正在导入技能到 omz"
+- `settings.plugins.import.mode.copy.description`："将完整插件目录复制到 ZCode，并注册到 plugins.dirs。外部 Agent 目录后续变更不会自动同步。" → "将完整插件目录复制到 omz，并注册到 plugins.dirs。外部 Agent 目录后续变更不会自动同步。"
+- `settings.plugins.import.mode.symlink.description`："创建指向外部 Agent 插件目录的链接，并注册到 plugins.dirs。ZCode 会跟随来源目录后续变更，但该插件依赖来源路径持续可用。" → "创建指向外部 Agent 插件目录的链接，并注册到 plugins.dirs。omz 会跟随来源目录后续变更，但该插件依赖来源路径持续可用。"
+- `settings.plugins.import.importing`："正在导入插件到 ZCode" → "正在导入插件到 omz"
+- `settings.commands.import.mode.copy.description`："将命令文件复制到 ZCode。外部 Agent 文件后续变更不会自动同步。" → "将命令文件复制到 omz。外部 Agent 文件后续变更不会自动同步。"
+- `settings.commands.import.mode.symlink.description`："创建指向外部 Agent 命令文件的链接。ZCode 会跟随来源文件后续变更，但该命令依赖来源路径持续可用。" → "创建指向外部 Agent 命令文件的链接。omz 会跟随来源文件后续变更，但该命令依赖来源路径持续可用。"
+- `settings.commands.import.importing`："正在导入命令到 ZCode" → "正在导入命令到 omz"
+- `settings.plugins.zcodeOnly`："仅支持 ZCode Agent" → "仅支持 omz Agent"
+- `settingsSync.discovery.helper`："仅导入缺失项，不会覆盖当前 ZCode 中已存在的配置。" → "仅导入缺失项，不会覆盖当前 omz 中已存在的配置。"
+- `onboarding.dialog.title`："欢迎使用 ZCode" → "欢迎使用 omz"
+- `onboarding.welcome.title`："欢迎使用 ZCode" → "欢迎使用 omz"
+- `onboarding.welcome.start`："开始使用 ZCode" → "开始使用 omz"
+- `onboarding.stepDescription.migration`："开始迁移并等待 ZCode 完成导入。" → "开始迁移并等待 omz 完成导入。"
+- `onboarding.agentsFile.confirmDescription`："将从 {source} 复制到 {target}。\n如果目标文件已存在，ZCode 默认 AGENTS 配置会被覆盖。" → "将从 {source} 复制到 {target}。\n如果目标文件已存在，omz 默认 AGENTS 配置会被覆盖。"
+- `chat.placeholder.newTask`："向 ZCode 提问，使用 @ 添加上下文，使用 / 选择命令或能力" → "向 omz 提问，使用 @ 添加上下文，使用 / 选择命令或能力"
+- `chat.placeholder.newTaskMobile`："向 ZCode 提问…" → "向 omz 提问…"
+- `chat.toolbar.computerUse.tooltip.ready`："电脑操作已就绪 · 直接描述你想让 ZCode 做的事" → "电脑操作已就绪 · 直接描述你想让 omz 做的事"
+- `chat.toolbar.computerUse.tooltip.error`："电脑操作启用失败 · 重启 ZCode 应用后重试，或让 ZCode 排查日志" → "电脑操作启用失败 · 重启 omz 应用后重试，或让 omz 排查日志"
+- `workflows.hub.empty.hint`："在对话里让 ZCode 设计工作流，跑通之后再让它保存到项目里。未打开的项目不会出现在这里。" → "在对话里让 omz 设计工作流，跑通之后再让它保存到项目里。未打开的项目不会出现在这里。"
+- `workflows.hub.detail.whenToUse.help`："给 ZCode 的路由提示：什么场景该选这个工作流。" → "给 omz 的路由提示：什么场景该选这个工作流。"
+- `workflows.hub.detail.script.note`："脚本只读。要改脚本，在对话里让 ZCode 修订后另存一版。" → "脚本只读。要改脚本，在对话里让 omz 修订后另存一版。"
+- `chat.toolCall.workflow.saveRun.lead`："让 ZCode 帮我提炼保存" → "让 omz 帮我提炼保存"
+- `chat.toolCall.workflow.saveRun.lead.hint`："ZCode 会帮你提炼出可复用的工作流，再交你确认。" → "omz 会帮你提炼出可复用的工作流，再交你确认。"
+- `chat.toolCall.workflow.saveRun.lead.sending`："已交给 ZCode…" → "已交给 omz…"
+- `chat.quota.mcp.quotaExhausted`："ZCode MCP「{server}」今日额度已用完，明天自动恢复。" → "omz MCP「{server}」今日额度已用完，明天自动恢复。"
+- `chat.quota.mcp.codingPlanRequired`："当前无 ZCode MCP「{server}」额度，请登录或开通 Coding Plan 使用。" → "当前无 omz MCP「{server}」额度，请登录或开通 Coding Plan 使用。"
+- `resourceManager.appUsage`："ZCode" → "omz"
+- `feedback.submit.template.section.copyErrorHeading`："ZCode 报错信息" → "omz 报错信息"
+- `offPeak.keepAwakeBanner`："ZCode 运行会话时保持电脑唤醒。" → "omz 运行会话时保持电脑唤醒。"
+- `offPeak.form.instructionsPlaceholder`："描述希望 ZCode 在后台完成的工作、预期结果和约束，例如整理本周代码改动并生成站会摘要…" → "描述希望 omz 在后台完成的工作、预期结果和约束，例如整理本周代码改动并生成站会摘要…"
+- `chat.cuaReadiness.toolsNotLoaded`："ZCode 电脑控制仍在准备中——工具尚未加载（已加载 {count} 个）。请先授予下方权限，Helper 就绪后工具会自动出现。" → "omz 电脑控制仍在准备中——工具尚未加载（已加载 {count} 个）。请先授予下方权限，Helper 就绪后工具会自动出现。"
+- `chat.cuaReadiness.toolsPreparing`："ZCode 电脑控制仍在准备中——工具尚未加载。请先授予下方权限，Helper 就绪后工具会自动出现。" → "omz 电脑控制仍在准备中——工具尚未加载。请先授予下方权限，Helper 就绪后工具会自动出现。"
+- `cuaPermission.modal.relaunchAppButton`："重启 ZCode" → "重启 omz"
+- `cuaPermission.modal.relaunchAppHint`："重启 Helper 后仍未生效？重启 ZCode 可彻底重载 Helper 进程。" → "重启 Helper 后仍未生效？重启 omz 可彻底重载 Helper 进程。"
+- `cuaPermission.tools.untrustedRuntime`："检测到电脑控制工具，但它们并非来自已校验的 ZCode 官方插件。请检查插件安装后重新验证。" → "检测到电脑控制工具，但它们并非来自已校验的 omz 官方插件。请检查插件安装后重新验证。"
+- `cuaPermission.ready.sessionValidationHint`："首个会话启动时，ZCode 会针对该会话精确验证电脑控制工具。" → "首个会话启动时，omz 会针对该会话精确验证电脑控制工具。"
+
+### 基线未触碰键中的品牌残留（登记不改，10）
+
+- `bots.setup.guide.webhook.bind.3`："如果配置了 secret，请同时在请求头里带上 `x-zcode-bot-secret`；绑定成功后再回到这里完成设置。"
+- `modelTrajectory.empty`："暂无模型调用记录（仅 ZCode Agent 会落盘 model-io）"
+- `settings.mcp.description`："管理 ZCode Agent 使用的 MCP 服务器配置。"
+- `settings.subagents.description`："管理 ZCode Agent 运行时消费的用户级子智能体 Markdown 文件。"
+- `settings.commands.description`："管理 ZCode Agent 的 .md 命令文件。命令可通过 /command-name 在聊天中调用。"
+- `settings.commands.source.zcodeAgent`："ZCode Agent"
+- `settings.workspaceFileSearch.description`："编辑 .zcodeignore 忽略规则（语法与 .gitignore 一致），控制工作区文件搜索的范围。保存后下次搜索生效。"
+- `settings.workspaceFileSearch.templateHint`：".zcodeignore 尚未创建：下方为初始内容预览（.gitignore 拷贝 + 默认排除规则），保存后才会写入工作区。"
+- `settings.workspaceFileSearch.revealHint`："保存后即可在工作区根目录找到 .zcodeignore"
+- `settingsSync.agent.zcode`："ZCode Agent"
+
+## en-US 明细摘要
+
+### added（上游独有采纳 419，按前缀桶）
+
+- chat.*：90
+- settings.*：90
+- project.*：85
+- browser.*：46
+- archives.*：29
+- sidePane.*：20
+- taskGroup.*：17
+- workspaceSidebar.*：17
+- ssh.*：12
+- preview.*：6
+- fileManager.*：5
+- docker.*：2
+
+### 上游单侧键跳过（保 zh/en parity，2）
+
+- `settings.memory.viewer.disabled`
+- `settings.plugins.marketplace.recommendTitle`
+
+### 上游独有不采（死桶 0 进入，共 1007，按前缀桶）
+
+- remote.*：245
+- conversationShare.*：205
+- settings.*：184
+- chat.*：78
+- webRemoteControl.*：73
+- manualClaimPlan.*：52
+- bots.*：32
+- genUi.*：21
+- globalNotice.*：19
+- pluginUi.*：14
+- resourceManager.*：13
+- server.*：12
+- appHeader.*：8
+- marketingTouch.*：7
+- common.*：6
+- mode.*：6
+- sourceServer.*：6
+- rewards.*：5
+- onboarding.*：4
+- sidebar.*：4
+- taskList.*：4
+- directoryBrowser.*：2
+- occupationOnboarding.*：2
+- zcode.*：2
+- modelTrajectory.*：1
+- workflows.*：1
+- workspaceHeader.*：1
+
+### changed（值冲突采上游 136）
+
+<details><summary>键清单（136）</summary>
+
+- `taskGroup.newTask`
+- `taskGroup.ungroup`
+- `occupationOnboarding.modeDescription`
+- `startup.global.silent`
+- `startup.global.servicesFailed`
+- `startup.global.starting_services`
+- `startup.global.help`
+- `startup.global.error.lock_timeout`
+- `startup.global.error.startup_status_timeout`
+- `startup.global.error.transport_closed`
+- `startup.global.error.unsupported_runtime`
+- `settings.computerUse.disabledToast`
+- `chat.plan.removeMarker`
+- `bots.description`
+- `bots.setup.guide.weixin.create.2`
+- `bots.setup.guide.weixin.create.3`
+- `bots.setup.guide.webhook.create.1`
+- `bots.setup.guide.webhook.bind.1`
+- `bots.runtime.telegramLongPollingHandledElsewhere`
+- `bots.allowedWorkspaces`
+- `bots.allowedWorkspaces.mode.all`
+- `bots.allowedWorkspaces.mode.selected`
+- `bots.allowedWorkspaces.allDescription`
+- `bots.allowedWorkspaces.selectedDescription`
+- `welcome.title`
+- `login.title`
+- `login.description`
+- `logout.confirm.title`
+- `sidePane.openTab`
+- `titleBar.menu.help.about`
+- `directoryBrowser.title`
+- `directoryBrowser.go`
+- `directoryBrowser.selectDir`
+- `forceUpdate.title`
+- `workspaceSidebar.unavailableLocalDirectory`
+- `ssh.assetInstallModeDescription`
+- `ssh.configAliasDescription`
+- `remote.settingsStepTitle`
+- `remote.connectingStepTitle`
+- `remote.connectingStepDescription`
+- `webRemoteControl.description`
+- `remote.selectDirectoryTitle`
+- `remote.selectDirectoryDescription`
+- `remote.backToConnection`
+- `remote.minimize`
+- `remote.startConnection`
+- `wsl.defaultDistro`
+- `wsl.userDescription`
+- `wsl.loading`
+- `wsl.detectedCount`
+- `wsl.noDistros`
+- `docker.unavailable`
+- `docker.noContainers`
+- `chat.changeSummary.rewindDialog.description`
+- `chat.edit.resetConversationAndFiles.unavailable`
+- `settings.locale`
+- `settings.localeDescription`
+- `settings.terminalFontFamilyDescription`
+- `settings.memory`
+- `settings.closeToTrayOnWindowsDescription`
+- `settings.zcodeInteractionBehaviorDescription`
+- `settings.taskAutoArchive`
+- `settings.taskAutoArchiveDescription`
+- `settings.taskAutoArchiveDaysDescription`
+- `settings.dataBaseDirDescription`
+- `settings.dataBaseDirForbiddenInstallDir`
+- `settings.migration.sectionDescription`
+- `resourceManager.storage.summaryTotal`
+- `resourceManager.storage.diskUsage`
+- `resourceManager.storage.categoryDescription.toolOutputs`
+- `settings.browser.desktopOnly`
+- `settings.browser.import.helperVerificationFailed`
+- `settings.browser.import.adminConfirmDescription`
+- `settings.mcp.host.activeDescription`
+- `settings.mcp.statusOnlyUnsupported`
+- `settings.mcp.failure.not_authenticated`
+- `settings.mcpServers.import.importing`
+- `settings.modelProvider.namePlaceholder`
+- `settings.modelProvider.startPlan.highlight.trial.description`
+- `settings.modelProvider.startPlan.compatibility`
+- `settings.modelProvider.codingPlan.purchase.teamMemberNoticeDescription`
+- `settings.modelProvider.codingPlan.zai.plan.lite.summary`
+- `settings.modelProvider.codingPlan.bigmodel.plan.lite.summary`
+- `settings.modelProvider.help.contextWindow`
+- `settings.modelProvider.help.followRecommendedConfig`
+- `settings.usage.billingBanner.description`
+- `settings.usage.entitlementServerMcpUsage`
+- `sidebar.usage.plan.mcp`
+- `sidebar.usage.plan.zcodeMcp`
+- `sidebar.usage.plan.zcodeMcpDescription`
+- `settings.skills.import.mode.copy.description`
+- `settings.skills.import.mode.symlink.description`
+- `settings.skills.import.importing`
+- `settings.plugins.store.manageInstalled`
+- `settings.plugins.import.mode.copy.description`
+- `settings.plugins.import.mode.symlink.description`
+- `settings.plugins.import.importing`
+- `settings.commands.import.mode.copy.description`
+- `settings.commands.import.mode.symlink.description`
+- `settings.commands.import.importing`
+- `settingsSync.action.finish`
+- `settingsSync.discovery.helper`
+- `onboarding.dialog.title`
+- `onboarding.welcome.title`
+- `onboarding.welcome.start`
+- `onboarding.stepDescription.migration`
+- `onboarding.agentsFile.confirmDescription`
+- `chat.empty.workspaceSearchPlaceholder`
+- `chat.empty.workspaceSearchEmpty`
+- `chat.placeholder.newTask`
+- `chat.placeholder.newTaskMobile`
+- `chat.toolbar.computerUse.tooltip.ready`
+- `chat.toolbar.computerUse.tooltip.error`
+- `chat.workflowLaunch.settings.limit`
+- `workflows.hub.empty.hint`
+- `workflows.hub.detail.whenToUse.help`
+- `workflows.hub.detail.script.note`
+- `chat.backgroundResult.workflow.stall.cap`
+- `chat.toolCall.workflow.run.settings.limit`
+- `chat.toolCall.workflow.run.settings.limit.decrease`
+- `chat.toolCall.workflow.run.settings.limit.increase`
+- `chat.toolCall.workflow.run.concurrency.label`
+- `markdownImage.downloadSucceeded`
+- `chat.quota.mcp.quotaExhausted`
+- `chat.quota.mcp.codingPlanRequired`
+- `resourceManager.appUsage`
+- `feedback.submit.template.section.copyErrorHeading`
+- `feedback.submit.simple.logsHint`
+- `offPeak.keepAwakeBanner`
+- `offPeak.form.instructionsPlaceholder`
+- `chat.cuaReadiness.toolsNotLoaded`
+- `chat.cuaReadiness.toolsPreparing`
+- `cuaPermission.modal.relaunchAppButton`
+- `cuaPermission.modal.relaunchAppHint`
+- `cuaPermission.tools.untrustedRuntime`
+- `cuaPermission.ready.sessionValidationHint`
+
+</details>
+
+### kept(omz)（值冲突保 omz 0）
+
+（无——轨迹桶键均为 omz 独有，无值冲突）
+
+### dropped（死键清除 165）
+
+- `conversationShare.trigger`
+- `conversationShare.shareTitle`
+- `conversationShare.permissionLabel`
+- `conversationShare.permission.private`
+- `conversationShare.permission.privateHint`
+- `conversationShare.permission.linkViewer`
+- `conversationShare.permission.linkViewerHint`
+- `conversationShare.permission.linkViewerSummary`
+- `conversationShare.permission.linkEditor`
+- `conversationShare.permission.linkEditorHint`
+- `conversationShare.permission.linkEditorSummary`
+- `conversationShare.permission.privateSummary`
+- `conversationShare.openLink`
+- `conversationShare.result.title`
+- `conversationShare.result.description`
+- `conversationShare.result.openInBrowser`
+- `conversationShare.result.dismiss`
+- `conversationShare.generatingLink`
+- `conversationShare.copyLink`
+- `conversationShare.copySucceeded`
+- `conversationShare.publishSucceeded`
+- `conversationShare.publishSucceededWithSkips`
+- `conversationShare.copyFailed`
+- `conversationShare.publishFailed`
+- `conversationShare.error.authenticationRequired`
+- `conversationShare.error.featureDisabled`
+- `conversationShare.error.artifactNotAllowed`
+- `conversationShare.error.limitExceeded`
+- `conversationShare.error.rateLimited`
+- `conversationShare.error.network`
+- `conversationShare.error.safetyCheckTimeout`
+- `conversationShare.error.invalidSelection`
+- `conversationShare.error.invalidConversation`
+- `conversationShare.error.runningTurn`
+- `conversationShare.error.streamingRow`
+- `conversationShare.error.activeToolCall`
+- `conversationShare.error.activeSubagent`
+- `conversationShare.error.inputAttachment`
+- `conversationShare.error.inlineToolImage`
+- `conversationShare.error.unsupportedTimeline`
+- `conversationShare.error.unsafeUrl`
+- `conversationShare.error.missingProductTurn`
+- `conversationShare.error.artifactTypeNotAllowed`
+- `conversationShare.error.artifactExtensionMissing`
+- `conversationShare.error.artifactOutsideWorkspace`
+- `conversationShare.error.artifactChanged`
+- `conversationShare.error.artifactReadFailed`
+- `conversationShare.error.artifactSizeLimit`
+- `conversationShare.error.artifactManifest`
+- `conversationShare.error.payloadLimit`
+- `conversationShare.error.disclosureRequired`
+- `conversationShare.error.uploadFailed`
+- `conversationShare.error.connectionUnavailable`
+- `conversationShare.error.noShareableContent`
+- `conversationShare.error.summary`
+- `conversationShare.issue.artifactTypeNotAllowed`
+- `conversationShare.issue.artifactExtensionMissing`
+- `conversationShare.issue.artifactOutsideWorkspace`
+- `conversationShare.issue.artifactChanged`
+- `conversationShare.issue.artifactReadFailed`
+- `conversationShare.issue.inputAttachment`
+- `conversationShare.issue.inputAttachmentUnavailable`
+- `conversationShare.issue.inlineToolImage`
+- `conversationShare.issue.runningTurn`
+- `conversationShare.issue.streamingRow`
+- `conversationShare.issue.activeToolCall`
+- `conversationShare.issue.activeSubagent`
+- `conversationShare.issue.unsupportedTimeline`
+- `conversationShare.issue.noShareableContent`
+- `conversationShare.issue.unsafeUrl`
+- `conversationShare.issue.missingProductTurn`
+- `conversationShare.issue.invalidSelection`
+- `conversationShare.issue.invalidConversation`
+- `conversationShare.issue.staleConversation`
+- `conversationShare.issue.rowsLimit`
+- `conversationShare.issue.artifactCountLimit`
+- `conversationShare.issue.artifactSizeLimit`
+- `conversationShare.issue.artifactTotalSizeLimit`
+- `conversationShare.issue.payloadSizeLimit`
+- `conversationShare.issue.artifactManifest`
+- `conversationShare.issue.uploadIncomplete`
+- `conversationShare.issue.unknown`
+- `conversationShare.issue.details`
+- `conversationShare.issue.requestIdLabel`
+- `conversationShare.issue.requestId`
+- `conversationShare.issue.requestIdMissing`
+- `conversationShare.issue.copyRequestId`
+- `conversationShare.issue.deselectTurn`
+- `conversationShare.issue.retryPreflight`
+- `conversationShare.issue.more`
+- `conversationShare.warning.summary`
+- `conversationShare.warning.artifactSkipped`
+- `conversationShare.warning.inputAttachmentSkipped`
+- `conversationShare.warning.inputAttachmentUnavailable`
+- `conversationShare.warning.artifactTypeSkipped`
+- `conversationShare.warning.artifactChangedSkipped`
+- `conversationShare.partial.panelLabel`
+- `conversationShare.selection.reopen`
+- `conversationShare.partial.empty`
+- `conversationShare.partial.selectionStageHint`
+- `conversationShare.partial.preflightChecking`
+- `conversationShare.partial.preflightBlocked`
+- `conversationShare.partial.preflightSkipped`
+- `conversationShare.partial.preflightDeferred`
+- `conversationShare.partial.continueWithSkips`
+- `conversationShare.partial.selectionHint`
+- `conversationShare.partial.confirmationTitle`
+- `conversationShare.publish.failedTitle`
+- `conversationShare.publish.failedDescription`
+- `conversationShare.publish.retry`
+- `conversationShare.publish.footerMeta`
+- `conversationShare.publish.failedFooter`
+- `conversationShare.partial.selectAll`
+- `conversationShare.partial.deselectAll`
+- `conversationShare.partial.selectionCount`
+- `conversationShare.partial.selectedSummary`
+- `conversationShare.partial.cancel`
+- `conversationShare.partial.next`
+- `conversationShare.partial.back`
+- `conversationShare.partial.confirm`
+- `conversationShare.partial.publishing`
+- `conversationShare.progress.collecting`
+- `conversationShare.progress.uploading`
+- `conversationShare.progress.checking`
+- `conversationShare.progress.collectingFailed`
+- `conversationShare.progress.uploadingFailed`
+- `conversationShare.progress.checkingFailed`
+- `conversationShare.phase.collecting`
+- `conversationShare.phase.uploading`
+- `conversationShare.phase.checking`
+- `conversationShare.phase.collectingComplete`
+- `conversationShare.phase.uploadingComplete`
+- `conversationShare.phase.uploadingActive`
+- `conversationShare.phase.collectingPending`
+- `conversationShare.phase.uploadingPending`
+- `conversationShare.phase.checkingPending`
+- `conversationShare.phase.failed`
+- `conversationShare.publicWarning`
+- `conversationShare.disclosure.description`
+- `conversationShare.disclosure.checkbox`
+- `conversationShare.disclosure.scope.trigger`
+- `conversationShare.disclosure.scope.title`
+- `conversationShare.disclosure.scope.reviewLabel`
+- `conversationShare.disclosure.scope.conversation`
+- `conversationShare.disclosure.scope.tools`
+- `conversationShare.disclosure.scope.generated`
+- `conversationShare.disclosure.scope.sensitiveLabel`
+- `conversationShare.disclosure.scope.sensitive`
+- `conversationShare.disclosure.scope.note`
+- `conversationShare.import.source`
+- `conversationShare.import.dividerLabel`
+- `conversationShare.import.fallbackRemoteWorkspace`
+- `conversationShare.import.fallbackDefaultWorkspace`
+- `conversationShare.import.downloading`
+- `conversationShare.import.installing`
+- `conversationShare.import.committing`
+- `conversationShare.import.complete`
+- `conversationShare.import.loginRequired`
+- `conversationShare.import.notFound`
+- `conversationShare.import.expired`
+- `conversationShare.import.integrityFailed`
+- `conversationShare.import.failed`
+- `conversationShare.import.integrityFailedWithArtifact`
+- `conversationShare.import.failedWithArtifact`
+- `conversationShare.import.retry`
+
+### 品牌改写（采纳值内 91 处）
+
+- `project.browseHint`："ZCode can read and edit these folders" → "omz can read and edit these folders"
+- `project.connectAndBrowseHint`："Device status: {status}. ZCode connects first." → "Device status: {status}. omz connects first."
+- `project.trustFoldersDescription`："ZCode can read and edit files in these folders and run commands within your current permission settings. Continue only if you trust every folder listed." → "omz can read and edit files in these folders and run commands within your current permission settings. Continue only if you trust every folder listed."
+- `occupationOnboarding.modeDescription`："How would you like ZCode to show its work?" → "How would you like omz to show its work?"
+- `startup.global.silent`："Starting ZCode" → "Starting omz"
+- `startup.global.servicesFailed`："Local data is ready, but app services failed to start. Copy the diagnostics, then exit and reopen ZCode." → "Local data is ready, but app services failed to start. Copy the diagnostics, then exit and reopen omz."
+- `startup.global.starting_services`："Starting ZCode" → "Starting omz"
+- `startup.global.help`："ZCode will open when preparation finishes. Large histories may take longer. Please keep the app running." → "omz will open when preparation finishes. Large histories may take longer. Please keep the app running."
+- `startup.global.error.lock_timeout`："Waiting for the database write lock timed out. Another ZCode or CLI process may be updating data. Retry after it finishes." → "Waiting for the database write lock timed out. Another omz or CLI process may be updating data. Retry after it finishes."
+- `startup.global.error.startup_status_timeout`："No startup status was received. Exit and reopen ZCode. If it fails again, provide the diagnostics to support." → "No startup status was received. Exit and reopen omz. If it fails again, provide the diagnostics to support."
+- `startup.global.error.transport_closed`："The preparation process exited or disconnected. Exit and reopen ZCode to check the migration records again." → "The preparation process exited or disconnected. Exit and reopen omz to check the migration records again."
+- `startup.global.error.unsupported_runtime`："The configured Agent does not support storage preparation. Restore the bundled Agent, then reopen ZCode." → "The configured Agent does not support storage preparation. Restore the bundled Agent, then reopen omz."
+- `settings.computerUse.disabledToast`："Computer Use is disabled. Existing conversations require a ZCode restart to take effect." → "Computer Use is disabled. Existing conversations require a omz restart to take effect."
+- `bots.description`："Connect external chats and webhooks to ZCode bots." → "Connect external chats and webhooks to omz bots."
+- `bots.setup.guide.weixin.create.2`："ZCode saves the bot_token returned by iLink automatically; after scanning, send any message to the bot in Weixin to activate the chat." → "omz saves the bot_token returned by iLink automatically; after scanning, send any message to the bot in Weixin to activate the chat."
+- `bots.setup.guide.weixin.create.3`："ZCode uses a built-in iLink client: `/ilink/bot/getupdates` for long polling and `/ilink/bot/sendmessage` for replies." → "omz uses a built-in iLink client: `/ilink/bot/getupdates` for long polling and `/ilink/bot/sendmessage` for replies."
+- `bots.setup.guide.webhook.create.1`："Webhook mode does not require a native bot in the third-party product; your integration only needs to POST messages to ZCode." → "Webhook mode does not require a native bot in the third-party product; your integration only needs to POST messages to omz."
+- `bots.setup.guide.webhook.bind.1`："POST a private-message callback to ZCode's `/api/bots/webhook` endpoint." → "POST a private-message callback to omz's `/api/bots/webhook` endpoint."
+- `bots.runtime.telegramLongPollingHandledElsewhere`："Telegram long polling is handled by another ZCode window." → "Telegram long polling is handled by another omz window."
+- `welcome.title`："Welcome to ZCode" → "Welcome to omz"
+- `login.title`："Welcome to ZCode" → "Welcome to omz"
+- `login.description`："Connect your account to start using ZCode" → "Connect your account to start using omz"
+- `logout.confirm.title`："Disconnect and restart ZCode?" → "Disconnect and restart omz?"
+- `titleBar.menu.help.about`："About ZCode" → "About omz"
+- `forceUpdate.title`："Update ZCode to continue" → "Update omz to continue"
+- `workspaceSidebar.unavailableLocalDirectory`："The workspace directory does not exist or cannot be accessed. You can only view history for now. Restore the directory and restart ZCode to continue." → "The workspace directory does not exist or cannot be accessed. You can only view history for now. Restore the directory and restart omz to continue."
+- `ssh.assetInstallModeDescription`："Remote server download reduces upload waiting, but the server must reach the ZCode CDN and have download, extract, and checksum tools." → "Remote server download reduces upload waiting, but the server must reach the omz CDN and have download, extract, and checksum tools."
+- `chat.changeSummary.rewindDialog.description`："ZCode checks current file content again before writing. If another process changed a file, no files will be written." → "omz checks current file content again before writing. If another process changed a file, no files will be written."
+- `settings.terminalFontFamilyDescription`："Leave blank to auto-detect system terminal settings; set a value to override the ZCode terminal font." → "Leave blank to auto-detect system terminal settings; set a value to override the omz terminal font."
+- `settings.zcodeInteractionBehaviorDescription`："While ZCode is running, add follow-up actions to the queue or guide them to run after the next tool call." → "While omz is running, add follow-up actions to the queue or guide them to run after the next tool call."
+- `settings.dataBaseDirDescription`："Root directory for app data (defaults to user home directory). Existing data will be copied to the new location. The .zcode/v2 suffix cannot be changed." → "Root directory for app data (defaults to user home directory). Existing data will be copied to the new location. The .omz/v2 suffix cannot be changed."
+- `settings.dataBaseDirForbiddenInstallDir`："The data directory cannot be the ZCode installation folder on Windows. Choose a folder outside the app install location." → "The data directory cannot be the omz installation folder on Windows. Choose a folder outside the app install location."
+- `settings.migration.sectionDescription`："Scan native Claude Code history on this machine, optionally filter by workspace and activity window, then import the selected sessions into their matching ZCode task lists." → "Scan native Claude Code history on this machine, optionally filter by workspace and activity window, then import the selected sessions into their matching omz task lists."
+- `resourceManager.storage.summaryTotal`："Total used by ZCode" → "Total used by omz"
+- `resourceManager.storage.diskUsage`："ZCode uses {used}" → "omz uses {used}"
+- `settings.browser.desktopOnly`："Browser data can only be managed in the ZCode desktop app." → "Browser data can only be managed in the omz desktop app."
+- `settings.browser.import.helperVerificationFailed`："ZCode could not verify its Windows secure import component. Reinstall or update ZCode before importing cookies." → "omz could not verify its Windows secure import component. Reinstall or update omz before importing cookies."
+- `settings.browser.import.adminConfirmDescription`："Chrome protects cookies with App-Bound encryption on Windows. For this import only, ZCode will request administrator access, start a temporary system service, and delete it immediately afterward. Chrome passwords are never read or imported." → "Chrome protects cookies with App-Bound encryption on Windows. For this import only, omz will request administrator access, start a temporary system service, and delete it immediately afterward. Chrome passwords are never read or imported."
+- `settings.mcp.host.activeDescription`："ZCode provides this MCP server for the {pluginName} plugin. Its runtime identity is managed by the host." → "omz provides this MCP server for the {pluginName} plugin. Its runtime identity is managed by the host."
+- `settings.mcp.statusOnlyUnsupported`："This ZCode Agent cannot refresh OAuth status. Upgrade or restart ZCode, then reopen MCP settings to run a full refresh." → "This omz Agent cannot refresh OAuth status. Upgrade or restart omz, then reopen MCP settings to run a full refresh."
+- `settings.mcp.failure.not_authenticated`："You are not signed in. Sign in to ZCode to use this MCP server." → "You are not signed in. Sign in to omz to use this MCP server."
+- `settings.mcpServers.import.importing`："Importing MCP servers into ZCode" → "Importing MCP servers into omz"
+- `settings.modelProvider.startPlan.highlight.trial.description`："Timing starts after signing in to ZCode 3.x." → "Timing starts after signing in to omz 3.x."
+- `settings.modelProvider.startPlan.compatibility`："Supports BYOK and BYOA. Base URL, API format, and API Key are maintained by ZCode automatically." → "Supports BYOK and BYOA. Base URL, API format, and API Key are maintained by omz automatically."
+- `settings.modelProvider.codingPlan.purchase.teamMemberNoticeDescription`："Add yourself or other members on the BigModel team plan management page. Once assigned, the team quota will be available in ZCode." → "Add yourself or other members on the BigModel team plan management page. Once assigned, the team quota will be available in omz."
+- `settings.modelProvider.help.contextWindow`："The context capacity the model can process at once, in tokens. ZCode uses this to manage context.\nDo not exceed the model's actual limit." → "The context capacity the model can process at once, in tokens. omz uses this to manage context.\nDo not exceed the model's actual limit."
+- `settings.modelProvider.help.followRecommendedConfig`："Matches recommended configuration using the model ID, Base URL, and API format. ZCode continually updates recommendations and automatically syncs them to you.\nWhen you manually change a setting, that setting becomes manually managed and stops following recommendation updates; other settings remain managed by smart configuration." → "Matches recommended configuration using the model ID, Base URL, and API format. omz continually updates recommendations and automatically syncs them to you.\nWhen you manually change a setting, that setting becomes manually managed and stops following recommendation updates; other settings remain managed by smart configuration."
+- `settings.usage.billingBanner.description`："Connect your {provider} account to query Coding Plan entitlement, then keep coding in ZCode after purchase or setup." → "Connect your {provider} account to query Coding Plan entitlement, then keep coding in omz after purchase or setup."
+- `settings.usage.entitlementServerMcpUsage`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.mcp`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.zcodeMcp`："ZCode MCP" → "omz MCP"
+- `sidebar.usage.plan.zcodeMcpDescription`："Daily aggregate quota for ZCode built-in plugin MCPs" → "Daily aggregate quota for omz built-in plugin MCPs"
+- `settings.skills.import.mode.copy.description`："Copy the full skill directory into ZCode. Later changes in the external agent directory will not sync automatically." → "Copy the full skill directory into omz. Later changes in the external agent directory will not sync automatically."
+- `settings.skills.import.mode.symlink.description`："Create a directory link to the external agent skill. ZCode follows later source changes, but the skill depends on that source path remaining available." → "Create a directory link to the external agent skill. omz follows later source changes, but the skill depends on that source path remaining available."
+- `settings.skills.import.importing`："Importing skills into ZCode" → "Importing skills into omz"
+- `settings.plugins.import.mode.copy.description`："Copy the full plugin directory into ZCode and register it in plugins.dirs. Later changes in the external agent directory will not sync automatically." → "Copy the full plugin directory into omz and register it in plugins.dirs. Later changes in the external agent directory will not sync automatically."
+- `settings.plugins.import.mode.symlink.description`："Create a directory link to the external agent plugin and register it in plugins.dirs. ZCode follows later source changes, but the plugin depends on that source path remaining available." → "Create a directory link to the external agent plugin and register it in plugins.dirs. omz follows later source changes, but the plugin depends on that source path remaining available."
+- `settings.plugins.import.importing`："Importing plugins into ZCode" → "Importing plugins into omz"
+- `settings.commands.import.mode.copy.description`："Copy the command file into ZCode. Later changes in the external agent file will not sync automatically." → "Copy the command file into omz. Later changes in the external agent file will not sync automatically."
+- `settings.commands.import.mode.symlink.description`："Create a file link to the external agent command. ZCode follows later source changes, but the command depends on that source path remaining available." → "Create a file link to the external agent command. omz follows later source changes, but the command depends on that source path remaining available."
+- `settings.commands.import.importing`："Importing commands into ZCode" → "Importing commands into omz"
+- `settings.plugins.zcodeOnly`："ZCode Agent only" → "omz Agent only"
+- `settingsSync.action.finish`："Start using ZCode" → "Start using omz"
+- `settingsSync.discovery.helper`："Only missing items will be imported and your current ZCode settings will not be overwritten." → "Only missing items will be imported and your current omz settings will not be overwritten."
+- `onboarding.dialog.title`："Welcome to ZCode" → "Welcome to omz"
+- `onboarding.welcome.title`："Welcome to ZCode" → "Welcome to omz"
+- `onboarding.welcome.start`："Start ZCode" → "Start omz"
+- `onboarding.stepDescription.migration`："Start migration and wait while ZCode imports your selections." → "Start migration and wait while omz imports your selections."
+- `onboarding.agentsFile.confirmDescription`："ZCode will copy {source} to {target}.\nIf the target file already exists, the ZCode default AGENTS configuration will be overwritten." → "omz will copy {source} to {target}.\nIf the target file already exists, the omz default AGENTS configuration will be overwritten."
+- `chat.placeholder.newTask`："Ask ZCode anything, @ to add context, / for commands or capabilities" → "Ask omz anything, @ to add context, / for commands or capabilities"
+- `chat.placeholder.newTaskMobile`："Ask ZCode anything…" → "Ask omz anything…"
+- `chat.toolbar.computerUse.tooltip.ready`："Computer Use ready — just describe what you want ZCode to do" → "Computer Use ready — just describe what you want omz to do"
+- `chat.toolbar.computerUse.tooltip.error`："Computer Use enablement failed. Please restart ZCode app and retry, or ask ZCode to investigate the logs" → "Computer Use enablement failed. Please restart omz app and retry, or ask omz to investigate the logs"
+- `workflows.hub.empty.hint`："Design a workflow with ZCode in chat, then have it save the workflow to a project once it works. Projects that aren't open don't appear here." → "Design a workflow with omz in chat, then have it save the workflow to a project once it works. Projects that aren't open don't appear here."
+- `workflows.hub.detail.whenToUse.help`："A routing hint for ZCode: when this workflow is the right pick." → "A routing hint for omz: when this workflow is the right pick."
+- `workflows.hub.detail.script.note`："The script is read-only. To change it, revise it with ZCode in chat and save a new version." → "The script is read-only. To change it, revise it with omz in chat and save a new version."
+- `chat.toolCall.workflow.saveRun.lead`："Let ZCode refine and save it" → "Let omz refine and save it"
+- `chat.toolCall.workflow.saveRun.lead.hint`："ZCode distills a reusable workflow for you, then asks you to confirm." → "omz distills a reusable workflow for you, then asks you to confirm."
+- `chat.toolCall.workflow.saveRun.lead.sending`："Handed to ZCode…" → "Handed to omz…"
+- `chat.quota.mcp.quotaExhausted`："ZCode MCP \"{server}\" has used up today's quota. It resets tomorrow." → "omz MCP \"{server}\" has used up today's quota. It resets tomorrow."
+- `chat.quota.mcp.codingPlanRequired`："No ZCode MCP \"{server}\" quota. Sign in or get a Coding Plan to use it." → "No omz MCP \"{server}\" quota. Sign in or get a Coding Plan to use it."
+- `resourceManager.appUsage`："ZCode" → "omz"
+- `feedback.submit.template.section.copyErrorHeading`："ZCode Error Info" → "omz Error Info"
+- `offPeak.keepAwakeBanner`："Keep your computer awake while ZCode is running a chat." → "Keep your computer awake while omz is running a chat."
+- `offPeak.form.instructionsPlaceholder`："Describe a task ZCode can work on in the background, including the expected result and any constraints…" → "Describe a task omz can work on in the background, including the expected result and any constraints…"
+- `chat.cuaReadiness.toolsNotLoaded`："ZCode Computer Use is still preparing — its tools aren't loaded yet ({count} loaded). Grant the permissions below; tools appear once the helper is ready." → "omz Computer Use is still preparing — its tools aren't loaded yet ({count} loaded). Grant the permissions below; tools appear once the helper is ready."
+- `chat.cuaReadiness.toolsPreparing`："ZCode Computer Use is still preparing — its tools aren't loaded yet. Grant the permissions below; tools appear once the helper is ready." → "omz Computer Use is still preparing — its tools aren't loaded yet. Grant the permissions below; tools appear once the helper is ready."
+- `cuaPermission.modal.relaunchAppButton`："Restart ZCode" → "Restart omz"
+- `cuaPermission.modal.relaunchAppHint`："Still not working after restarting Helper? Restart ZCode to fully reload the Helper process." → "Still not working after restarting Helper? Restart omz to fully reload the Helper process."
+- `cuaPermission.tools.untrustedRuntime`："Computer Use tools were found, but they did not come from the verified ZCode plugin. Review the plugin installation, then check again." → "Computer Use tools were found, but they did not come from the verified omz plugin. Review the plugin installation, then check again."
+- `cuaPermission.ready.sessionValidationHint`："ZCode will verify the Computer Use tools against the exact session when your first session starts." → "omz will verify the Computer Use tools against the exact session when your first session starts."
+
+### 基线未触碰键中的品牌残留（登记不改，11）
+
+- `bots.setup.guide.webhook.bind.3`："If the bot uses a secret, also send `x-zcode-bot-secret`; then return here after the bind succeeds."
+- `modelTrajectory.empty`："No model calls recorded (only ZCode Agent writes model-io)"
+- `settings.mcp.description`："Manage MCP server configurations used by ZCode Agent."
+- `settings.subagents.description`："Manage user-level subagent Markdown files consumed by ZCode Agent."
+- `settings.commands.description`："Manage ZCode Agent .md command files. Commands can be invoked with /command-name in chat."
+- `settings.commands.source.zcodeAgent`："ZCode Agent"
+- `settings.workspaceFileSearch.description`："Edit .zcodeignore rules (gitignore syntax) that scope workspace file search. Takes effect on the next search after saving."
+- `settings.workspaceFileSearch.templateHint`：".zcodeignore does not exist yet: the content below is the initial preview (.gitignore copy + default exclusions); it is written to the workspace only after saving."
+- `settings.workspaceFileSearch.revealHint`："Save first; .zcodeignore lives at the workspace root"
+- `settingsSync.agent.zcode`："ZCode Agent"
+- `chat.slash.emptyUnavailable`："No slash commands have been broadcast for the current ZCode Agent session"
+
+## 断言口径（与脚本内置断言一致）
+
+1. omz 独有键（动态全量枚举，conversationShare.* 除外）合并后逐键存在；
+2. 白名单桶上游独有键（∩ 上游 zh/en 交集）全进；死桶键 0 进入（added ⊆ 白名单）；
+3. 采纳值（added+changed）内 0 处 `zcode/ZCode`（强断言）；基线未触碰键中的既有残留与含品牌键名（代码标识符）仅登记不改，清单见仲裁表附录 C；
+4. `modelTrajectory.*` 全在且值不变；
+5. zh/en 合并后键集合一致（check-i18n-parity 同口径）。
+
