@@ -6,9 +6,10 @@ evidence_packs: [docs/iterations/upstream-v316-fullsync/cache/exploration-report
 branch: upstream-v316-fullsync
 worktree: D:\worktree\fullsync
 base_sha: 1ff8cad9
-head_sha: 6d514792
+head_sha: 5febfb3e
 dag_version: 1
 node_status:
+  hotfix-bugs: { status: done, func_ready: yes, head_sha: 5febfb3e, commits: [3d082228, bf69ee92, 4eac0827, f6769b8d, 5febfb3e], note: "spec 外用户报障波次：bug A 编辑历史消息（rAF 首帧哨兵+观测日志，链路三轮修复已在库）+ bug B 中断队列（held→enqueue 路由/执行层 deferred 入队/sendQueuedNow=恢复语义/return; 恢复）；cr-func 两轮 r2 func-ready" }
   impl-i18n: { status: done, head_sha: 7556d7d2, executor: subagent, commits: [50e5ee0e, c972b5d4, c3c99d5b, 7556d7d2] }
   verify-i18n: { status: done, executor: main, evidence: "test:i18n-merge --verify 绿（6190×2/仲裁89,91/品牌0/死桶0/幂等）；check-i18n-parity 绿；抽查 6/6 PASS（cache/verify-i18n-spotcheck.cjs）" }
   cr-func-i18n: { status: done, func_ready: yes, head_sha: 28a9dc98, agent: agent_4324e169 }
@@ -21,6 +22,14 @@ node_status:
   verify-c2: { status: done, executor: main, evidence: "T-AS 30/30 独立复跑（worktree 根 node --import tsx --test 形态）；diff 面=6 文件（3 src+2 pkg+root）；MC 三端口/挂点零触碰 git diff 断言 0 命中" }
   cr-func-c2: { status: done, func_ready: yes, agent: agent_5847d60e, note: "0 must-fix；6 差异全 closed（含 P2 漂移④空 text 块过滤——已补登 spec 漂移登记）；oracle 忠实性 3 分支抽查过；LCS 机械对照无未报漂移" }
 open_must_fix: []
+spec_deviations:
+  - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
+  - "DEV-bugB-2【开·拍板】sendQueuedNow 手动提升=恢复语义（上游不触碰 autoDrain）"
+  - "DEV-bugB-3【开·拍板】r1-P2-3：editUserQuery/retryTurn 在 held 态仍立即起轮+沿用被编辑轮陈旧 delivery 账本（编辑固有「立即重发」预期 vs 账本重算，待拍板）"
+  - "DEV-bugB-4【开·拍板】N1：held 分支对 modelExecution/botDeliveryTarget/automationId 静默降级入队（busy 车道显式拒绝 modelExecution）；窄场景=automation 派发撞人工暂停队列"
+manual_user_pending:
+  - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
+  - "T-QA-bugAB（bug A 编辑旧消息真机复测——重点修复前旧会话的持久化 intent.text fact；bug B 中断后输入入队/继续/立即发送三动作真机验收）"
 manual_user_pending:
   - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
 spec_deviations:
