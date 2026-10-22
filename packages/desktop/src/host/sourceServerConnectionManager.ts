@@ -168,6 +168,8 @@ export interface SourceServerConnectionManagerOptions {
 export interface ConnectSourceServerOptions {
   profile: SourceServerConnectProfile;
   target: RemoteTarget;
+  /** 三期 Directory admission 意图（上游默认 add/retry=retain）；omz 消费面随 P7 主链切换接线。 */
+  membershipIntent?: "add" | "retain";
   release?: ServerReleaseAsset;
   allowInstall?: boolean;
   confirmIdentityChange?: boolean;

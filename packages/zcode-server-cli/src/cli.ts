@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import { isPublicZCodeErrorCode, ZCODE_VERSION } from "@zcode/shared";
+import { SourceServerWorkspaceAliasRepo } from "@zcode/services/node";
 import {
   CORE_KILL_TIMEOUT_MS,
   CORE_READY_TIMEOUT_MS,
@@ -56,6 +57,8 @@ export interface CliIO {
 export interface ServerCliRuntimeOptions {
   bundledAgentWiring?: BundledAgentWiring | null;
   proxyStdioStreams?: { input: Readable; output: Writable };
+  /** migrate retry 的别名仓库边界；测试可注入受控实现。 */
+  workspaceAliasRepo?: Pick<SourceServerWorkspaceAliasRepo, "retryFailedWorkspace">;
   /** process/service manager 是更新协调器的外部边界；测试可注入受控实现。 */
   updateDaemonHandoff?: UpdateDaemonHandoff;
 }
@@ -124,11 +127,13 @@ export async function runServerCli(
     }
     // 同一物理 data-root 的符号链接别名会派生不同 control endpoint 和 OS service
     // identity。生命周期命令统一在 IO 前收敛 root，避免第二个 Supervisor 绕过探测重复注册。
-    // （排除面：上游的 migrate retry 分支依赖 SourceServerWorkspaceAliasRepo，属三期
-    // Step 18 面，一期不随；serve 主链不消费。）
-    const layout = ["serve", "status", "stop", "restart", "update", "uninstall"].includes(command)
-      ? await resolveCanonicalServerLayout(parsed.layout.serverRoot)
-      : parsed.layout;
+    const migrateRetryRequested = command === "migrate" && parsed.argv[1] === "retry";
+    const layout =
+      ["serve", "status", "stop", "restart", "update", "uninstall"].includes(command) ||
+      proxyStdioRequested ||
+      migrateRetryRequested
+        ? await resolveCanonicalServerLayout(parsed.layout.serverRoot)
+        : parsed.layout;
     if (proxyStdioRequested) {
       try {
         await runProxyStdio({
@@ -144,6 +149,17 @@ export async function runServerCli(
         );
         return 1;
       }
+    }
+    if (migrateRetryRequested) {
+      const pathIndex = parsed.argv.indexOf("--path");
+      const workspacePath = pathIndex >= 0 ? parsed.argv[pathIndex + 1] : undefined;
+      if (!workspacePath) throw new Error("migrate retry requires --path");
+      if (!isAbsolute(workspacePath)) throw new Error("migrate retry --path must be absolute");
+      const result = await (
+        runtimeOptions.workspaceAliasRepo ?? new SourceServerWorkspaceAliasRepo()
+      ).retryFailedWorkspace(workspacePath);
+      stdout(io, json ? { ok: true, ...result } : `Migration recovered: ${result.canonicalKey}`);
+      return 0;
     }
     switch (command) {
       case "serve":
@@ -284,7 +300,10 @@ async function runServe(
       // Bug 原因：stop-failed 的 Supervisor 观察到迟到的 Core 终态后仍持有锁和 control socket，
       // 直接启动只会让新 Supervisor 锁冲突，设备在手工 stop 前无法恢复。已无存活 Core 时由
       // 原 owner 按 stop 契约收口；pid 仍存在则不发 stop，继续由锁 fail-closed。
-      await stopExistingSupervisor(layout, "Cannot verify stop-failed Server status before restart");
+      await stopExistingSupervisor(
+        layout,
+        "Cannot verify stop-failed Server status before restart",
+      );
     }
     const baselineUpdatedAt = (await readPersistedStatus(layout))?.updatedAt ?? 0;
     let serviceStarted = false;

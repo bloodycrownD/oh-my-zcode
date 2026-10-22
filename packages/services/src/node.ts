@@ -71,6 +71,27 @@ export {
   validateDataBaseDirTarget,
   ZCODE_WINDOWS_APP_INSTALL_DIR_ENV,
 } from "./paths.js";
+// R3 三期（Step 18）：Source Server 目录/别名存储的 node 侧出口（desktop host 与
+// zcode-server-cli migrate retry 消费；浏览器面禁入）。
+export { SourceServerWorkspaceAliasRepo } from "./session/sourceServerWorkspaceAliasRepo.js";
+export type {
+  SourceServerWorkspaceAliasRepoOptions,
+  ResolveCanonicalWorkspaceKeyInput,
+  ResolveCanonicalWorkspaceKeyResult,
+  WorkspaceMigrationPhase,
+} from "./session/sourceServerWorkspaceAliasRepo.js";
+export {
+  SourceServerWorkspaceIdentityConflictError,
+  SourceServerWorkspaceConfigConflictError,
+  SourceServerWorkspaceMigrationPlanDivergedError,
+  SourceServerWorkspaceSessionGenerationChangedError,
+} from "./session/sourceServerWorkspaceAliasRepo.js";
+export {
+  migrateControllerRemoteWorkspaceIdentity,
+  type ControllerRemoteIdentityMigrationOptions,
+  type ControllerRemoteIdentityMigrationReport,
+} from "./session/controllerRemoteIdentityMigration.js";
+export type { UpdateConnectionProfileInput } from "./source-server-management/sourceServerManagement.js";
 export { createGitService } from "./git/gitService.js";
 export { GitCommitMessageGenerator } from "./git/gitCommitMessageGenerator.js";
 export { createGitCheckpointService } from "./git/gitCheckpointService.js";
@@ -372,13 +393,7 @@ import { DEV_HELPER_APP_NAME, HELPER_APP_NAME } from "@zcode/zcode-cua/broker/he
 import { resolveBrokerSocketPath } from "@zcode/zcode-cua/broker/socketPath";
 import {
   DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
-
-
   formatLogPrefix,
-
-
-
-
   type ServiceAuthorityMode,
   resolveRuntimeZCodeEndpointOrigin,
   type BrowserBackendDescriptor,
@@ -1767,17 +1782,14 @@ export function createLocalServices(options: {
       workspaceIdentity: undefined,
     }),
     prepareSessionCreation: async (target) =>
-      (
-        await taskIndexRepo.getProjectRepository()
-      ).reserveCreatedTask({
+      (await taskIndexRepo.getProjectRepository()).reserveCreatedTask({
         task: { ...target, taskId: target.sessionId },
         projectId: target.projectId,
         additionalDirectories: target.additionalDirectories,
       }).additionalDirectories,
     resolveSessionDirectories: async (target) =>
-      (
-        await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId })
-      ).additionalDirectories,
+      (await projectService.resolveSessionDirectories({ ...target, taskId: target.sessionId }))
+        .additionalDirectories,
     // FORK（D-20）：动态工作流远端灰度已下线，改读本地默认（alwaysOn，可用
     // ZCODE_DYNAMIC_WORKFLOW_MODE 覆盖）。这里不按 serviceAuthorityMode 裁剪——
     // SSH/WSL/Docker 的 desktop-attached-remote Host 是它自己那些 workspace 的唯一裁决者。

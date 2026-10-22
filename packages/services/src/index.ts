@@ -40,6 +40,10 @@ export { ISettingService } from "./setting/setting.js";
 // Credential service — ICredentialService is both a type (interface) and value (descriptor)
 export { ICredentialService } from "./credential/credential.js";
 
+// R3 Source Server 目录层的 Profile 编辑输入契约（node 侧实现在 node.ts 出口；
+// 管理服务频道面随 P9 设置页批）。
+export type { UpdateConnectionProfileInput } from "./source-server-management/sourceServerManagement.js";
+
 // Broadcast service — IBroadcastService is both a type (interface) and value (descriptor)
 export { IBroadcastService } from "./broadcast/broadcast.js";
 

@@ -5,17 +5,23 @@
 //   remote:ssh:<host>:<port>:<username>:<posixPath>
 //   remote:wsl:<distro>[:<user>]:<posixPath>
 //   remote:docker:<container>:<posixPath>
+//   remote:server:<sourceServerId>:<posixPath>   ← R3 daemon 分支（source-server）
 // path 段经 normalizeWorkspacePathForIdentity 归一（分隔符 → "/"，去收尾斜杠，
 // 空 → "/"），因此恒以 "/" 开头；authority 各段不含 "/"（host 小写、port 数字、
 // docker 容器名/wsl 发行版名的合法字符集均不含 ":" 与 "/"）。
+// server 形态的 serverId 经 normalizeServerIdForIdentity 收敛为 identity 安全字符集。
 // 消费方：CLI v4 createSession 的 workspaceId（远程 pane 里 workspaceKey =
 // identity）需要还原出真实 workspacePath 作为会话 workingDirectory。
 import type { RemoteTarget } from "./remoteTarget.js";
 
-export type RemoteWorkspaceIdentityKind = "ssh" | "wsl" | "docker";
+// kind 仅含 identity 形态；上游 ServerConnectOptions（kind:"server" 直连 URL 传输）
+// 不随本期——R3 daemon 分支只用 buildServerRemoteWorkspaceIdentity 构造身份键。
+export type RemoteWorkspaceIdentityKind = "ssh" | "wsl" | "docker" | "server";
 
 export interface ParsedRemoteWorkspaceIdentity {
   kind: RemoteWorkspaceIdentityKind;
+  /** kind=server 时的稳定 Source Server id。 */
+  sourceServerId?: string;
   /** 远端真实路径（posix 归一形态）。 */
   workspacePath: string;
 }
@@ -27,16 +33,43 @@ const AUTHORITY_SEGMENTS: Record<RemoteWorkspaceIdentityKind, number> = {
   ssh: 3,
   wsl: 1,
   docker: 1,
+  server: 1,
 };
 
 function isRemoteWorkspaceIdentityKind(value: string): value is RemoteWorkspaceIdentityKind {
-  return value === "ssh" || value === "wsl" || value === "docker";
+  return value === "ssh" || value === "wsl" || value === "docker" || value === "server";
 }
 
 function normalizeWorkspacePathForIdentity(workspacePath: string): string {
   const normalized = workspacePath.replace(/\\/g, "/").replace(/\/+/g, "/");
   const trimmed = normalized.replace(/^\/+|\/+$/g, "");
   return `/${trimmed}`;
+}
+
+function normalizeServerIdForIdentity(serverId: string): string {
+  const normalized = serverId
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9._-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  if (!normalized) {
+    throw new Error("serverId must contain at least one identity-safe character");
+  }
+  return normalized;
+}
+
+export interface BuildServerRemoteWorkspaceIdentityOptions {
+  serverId: string;
+  workspacePath: string;
+}
+
+/** R3 daemon 分支身份键：remote:server:<sourceServerId>:<posixPath>（omz 拍板：本机键规则不变，远端经 workspaceIdentity 携带该形态）。 */
+export function buildServerRemoteWorkspaceIdentity(
+  options: BuildServerRemoteWorkspaceIdentityOptions,
+): string {
+  const serverId = normalizeServerIdForIdentity(options.serverId);
+  const workspacePath = normalizeWorkspacePathForIdentity(options.workspacePath);
+  return `${REMOTE_IDENTITY_PREFIX}server:${serverId}:${workspacePath}`;
 }
 
 /**
@@ -83,11 +116,13 @@ export function parseRemoteWorkspaceIdentity(
   // 逐段消费 authority；path 段可能含 ":"（理论上 posix 路径允许），
   // 因此不能整体 split——按段推进后取剩余整段为 path。
   let cursor = kindEnd + 1;
+  let sourceServerId: string | undefined;
   for (let i = 0; i < AUTHORITY_SEGMENTS[kind]; i++) {
     const next = rest.indexOf(":", cursor);
     if (next <= cursor) {
       return null;
     }
+    if (kind === "server" && i === 0) sourceServerId = rest.slice(cursor, next);
     cursor = next + 1;
   }
   // WSL identity 为区分默认用户与显式用户增加了可选 user 段，旧解析器
@@ -104,7 +139,7 @@ export function parseRemoteWorkspaceIdentity(
   if (!workspacePath.startsWith("/")) {
     return null;
   }
-  return { kind, workspacePath };
+  return { kind, workspacePath, ...(sourceServerId ? { sourceServerId } : {}) };
 }
 
 /** identity 是否是远程 workspace identity（可被 parseRemoteWorkspaceIdentity 解析）。 */

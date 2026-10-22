@@ -66,7 +66,7 @@ test("T-VS3: 新库迁移链账本与上游冻结基准逐字节一致；0004/00
     assert.deepEqual(
       rows.map((row) => row.id),
       Object.keys(FROZEN_CHECKSUMS),
-      "迁移 id 序列保持上游原号（无 0005：source-server scope 不随本阶段）",
+      "迁移 id 序列保持上游原号（base scope 无 0005：source-server 专属迁移走同名 scope 清单，见 remoteSchemaMigrations.test.ts）",
     );
     for (const row of rows) {
       assert.equal(

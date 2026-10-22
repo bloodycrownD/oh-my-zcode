@@ -316,7 +316,7 @@ export interface AppSettings {
   /** 设置页中每个 Provider Family 当前唯一的结构化连接选择。 */
   providerFamilyConnectionSelections?: ProviderFamilyConnectionSelectionSettings;
   /** 历史字段：账号连接时代确认的 ZAI / BigModel provider family 运行域。 */
-providerFamilyDomain?: ProviderFamilyDomain;
+  providerFamilyDomain?: ProviderFamilyDomain;
   /** 最近一次设置或清空 providerFamilyDomain 的时间。 */
   providerFamilyDomainUpdatedAt?: number;
   /** 旧 oauth/provider 状态是否已经尝试迁移到 providerFamilyDomain。 */
@@ -342,8 +342,28 @@ providerFamilyDomain?: ProviderFamilyDomain;
     | "other"
     | null;
   proactiveSuggestionsEnabled?: boolean;
-  /** 上次关闭时的完整 workspace 会话（含本地与远端 workspace） */
+  /** 新版只保存活动执行目录；不表达项目/连接成员，null 表示明确清空。 */
+  lastActiveWorkspace?: PersistedWorkspaceSessionEntry | null;
+  /** 上次关闭时的完整 workspace 会话（含本地与远端 workspace）；Host 从项目/本机入口派生，供旧版降级读取。 */
   lastWorkspaceSession?: PersistedWorkspaceSessionEntry[];
+  /** 每个 Source Server 已解析的 canonical conversation backing workspace（R3 daemon 分支）。 */
+  remoteConversationWorkspaceBySourceServerId?: Record<
+    string,
+    {
+      workspacePath: string;
+      lastResolvedAt: number;
+    }
+  >;
+  /** R3 控制端已识别的 Source Server；运行态仍由远端 Server 权威提供。 */
+  sourceServers?: import("./source-server/contracts.js").SourceServerRecord[];
+  /** R3 到达 Source Server 的线路；只保存 credential key，不保存 secret。 */
+  connectionProfiles?: import("./source-server/contracts.js").ConnectionProfile[];
+  /** R3 workspace 打开历史；连接线路与 workspace 实体分离。 */
+  sourceServerWorkspaceHistory?: import("./source-server/contracts.js").SourceServerWorkspaceHistoryEntry[];
+  /** 桌面端启动时是否执行 Source Server 静默重连；缺失按 true 兼容旧设置。 */
+  remoteStartupAutoReconnectEnabled?: boolean;
+  /** Source Server Directory 的设置面迁移水位（一次性 profile/identity 重排标记）。 */
+  sourceServerDirectoryMigrationVersion?: 1;
   /** 上次关闭时激活的 tab 索引 */
   lastActiveTabIndex?: number;
   /** 每个 workspace 的最后活跃 taskId，下次打开自动恢复 */

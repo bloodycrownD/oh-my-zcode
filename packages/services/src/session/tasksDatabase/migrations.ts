@@ -10,6 +10,13 @@ import { importLegacyAutomationSelections } from "#src/session/tasksDatabase/pro
 import { OFFICIAL_GLM_SELECTION_MIGRATION_SQL } from "#src/session/tasksDatabase/official-glm-selection-v3.js";
 // 0006 冻结 SQL 与上游同源（task-groups/migration-v6.ts 逐字节拷贝，含首尾换行）。
 import { TASK_GROUP_ADMISSIONS_SQL } from "#src/task-groups/migration-v6.js";
+// 两支专属 scope（R3 三期 Step 18）：SQL/冻结输入与上游同库账本逐字节可互换，
+// 老库升级不得因品牌或实现差异触发 checksum mismatch。
+import { CONTROLLER_REMOTE_SCHEMA_SQL } from "#src/session/tasksDatabase/controller-remote-schema-v4.js";
+import {
+  adoptSourceServerWorkspaceSchema,
+  SOURCE_SERVER_SCHEMA_CHECKSUM_INPUT,
+} from "#src/session/tasksDatabase/source-server-schema-v5.js";
 
 // 冻结历史列声明，不能以实时 Repo/schema 代替，否则新版构建会改变已应用 checksum。
 const columns = [
@@ -53,9 +60,18 @@ const executionColumns = [
   ["off_peak_tasks", "additional_directories"],
 ] as const;
 
+export type TasksDatabaseMigrationScope = "base" | "controller-remote" | "source-server";
+
+interface TasksDatabaseMigrationDefinition {
+  readonly id: string;
+  readonly checksumInput: readonly unknown[];
+  readonly touchedTables?: readonly string[];
+  readonly apply: (db: DatabaseSync) => void;
+}
+
 // 与 Agent 同样是库级串行事务，但不跨域依赖其具体 adapter。TS 转换使用冻结语义版本，
 // 禁用 function.toString 哈希：Electron/SEA 打包会改变函数文本而非迁移语义。
-const definitions = [
+const definitions: readonly TasksDatabaseMigrationDefinition[] = [
   {
     id: "0001_adopt_task_schema",
     checksumInput: [
@@ -67,36 +83,105 @@ const definitions = [
       boundIndex,
       "scheduled-count-backfill-v1",
     ],
+    apply: adoptSchema,
   },
   {
     id: "0002_provider_selection",
     checksumInput: ["legacy-automation-selection-v1", "no-provider-for-legacy-off-peak-v1"],
+    apply: importLegacyAutomationSelections,
   },
   {
     id: "0003_official_glm_selection",
     checksumInput: [OFFICIAL_GLM_SELECTION_MIGRATION_SQL],
+    apply: (db) => db.exec(OFFICIAL_GLM_SELECTION_MIGRATION_SQL),
   },
   {
     id: "0004_project_execution_scopes",
     // 项目执行域（project/host/additional_directories）冻结输入；omz 侧不附带上游的
     // controller-remote/source-server 专属 scope，编号沿用上游原号避免同库账本撞号。
     checksumInput: [executionColumns, "nullable-text-v1"],
+    apply: adoptExecutionScopes,
   },
   {
     id: "0006_task_group_admissions",
     // 分组登记表（task_group_admissions）冻结输入；0005 为 source-server scope，omz 不带。
     checksumInput: [TASK_GROUP_ADMISSIONS_SQL],
+    apply: (db) => db.exec(TASK_GROUP_ADMISSIONS_SQL),
   },
-] as const;
+];
+
+// 两端专属迁移仍归同库账本（tasks_schema_migration）协调；scope 只裁剪本端清单，
+// 不会为另一端创建无关表（对齐上游 prepareMigrations 语义）。
+function prepareMigrations(
+  scope: TasksDatabaseMigrationScope,
+): readonly TasksDatabaseMigrationDefinition[] {
+  if (scope === "base") return definitions;
+  if (scope === "controller-remote") {
+    return [
+      {
+        id: "0004_controller_remote_identity",
+        checksumInput: [CONTROLLER_REMOTE_SCHEMA_SQL],
+        touchedTables: ["controller_remote_identity_migrations"],
+        apply: (db) => db.exec(CONTROLLER_REMOTE_SCHEMA_SQL),
+      },
+    ];
+  }
+  return [
+    {
+      id: "0005_source_server_workspace_schema",
+      checksumInput: SOURCE_SERVER_SCHEMA_CHECKSUM_INPUT,
+      touchedTables: [
+        "workspace_alias",
+        "workspace_migration_schema_version",
+        "workspace_migration_ledger",
+        "workspace_migration_conflicts",
+        "workspace_migration_ledger_v2",
+        "workspace_migration_conflicts_v2",
+      ],
+      apply: adoptSourceServerWorkspaceSchema,
+    },
+  ];
+}
+
+function resolveMigrationScope(
+  scope: string | TasksDatabaseMigrationScope | undefined,
+): TasksDatabaseMigrationScope {
+  return scope === "controller-remote" || scope === "source-server" ? scope : "base";
+}
+
+function migrationChecksum(checksumInput: readonly unknown[]): string {
+  return createHash("sha256").update(JSON.stringify(checksumInput)).digest("hex");
+}
+
+/** 冻结基准出口（测试与诊断用）：scope 清单的 id→sha256 投影，不触库。 */
+export function prepareTasksDatabaseMigrationDigests(
+  scope: TasksDatabaseMigrationScope = "base",
+): Map<string, string> {
+  return new Map(
+    prepareMigrations(resolveMigrationScope(scope)).map((migration) => [
+      migration.id,
+      migrationChecksum(migration.checksumInput),
+    ]),
+  );
+}
 
 export function runTasksDatabaseMigrations(
   db: DatabaseSync,
-  options: {
-    transactionOpen?: boolean;
-    migration?: DatabaseMigrationFacts;
-    onProgress?: (phase: "migrating" | "committing", migration: DatabaseMigrationFacts) => void;
-  } = {},
+  scopeOrOptions?:
+    | TasksDatabaseMigrationScope
+    | {
+        scope?: TasksDatabaseMigrationScope;
+        transactionOpen?: boolean;
+        migration?: DatabaseMigrationFacts;
+        onProgress?: (phase: "migrating" | "committing", migration: DatabaseMigrationFacts) => void;
+      },
 ): void {
+  const options =
+    typeof scopeOrOptions === "string"
+      ? { scope: resolveMigrationScope(scopeOrOptions) }
+      : (scopeOrOptions ?? {});
+  const scope = resolveMigrationScope(options.scope);
+  const scopedDefinitions = prepareMigrations(scope);
   if (!options.transactionOpen) db.exec("BEGIN IMMEDIATE");
   const migrationFacts: DatabaseMigrationFacts = options.migration ?? {
     kind: "none",
@@ -105,7 +190,7 @@ export function runTasksDatabaseMigrations(
   };
   let currentMigrationId: string | undefined;
   try {
-    if (!options.migration) migrationFacts.kind = inspectTasksMigrationKind(db);
+    if (!options.migration) migrationFacts.kind = inspectTasksMigrationKind(db, scope);
     db.exec(`CREATE TABLE IF NOT EXISTS tasks_schema_migration (
       id TEXT PRIMARY KEY, checksum TEXT NOT NULL, time_applied INTEGER NOT NULL
     )`);
@@ -116,11 +201,9 @@ export function runTasksDatabaseMigrations(
     migrationFacts.lastAppliedMigrationId = baseline
       ? databaseMigrationIdSchema.safeParse(baseline.id).data
       : null;
-    for (const migration of definitions) {
+    for (const migration of scopedDefinitions) {
       currentMigrationId = migration.id;
-      const checksum = createHash("sha256")
-        .update(JSON.stringify(migration.checksumInput))
-        .digest("hex");
+      const checksum = migrationChecksum(migration.checksumInput);
       const applied = db
         .prepare("SELECT checksum FROM tasks_schema_migration WHERE id=?")
         .get(migration.id);
@@ -134,12 +217,7 @@ export function runTasksDatabaseMigrations(
       }
       if (migrationFacts.kind === "none") migrationFacts.kind = "upgrade";
       options.onProgress?.("migrating", { ...migrationFacts });
-      if (migration.id === "0001_adopt_task_schema") adoptSchema(db);
-      else if (migration.id === "0002_provider_selection") importLegacyAutomationSelections(db);
-      else if (migration.id === "0003_official_glm_selection")
-        db.exec(OFFICIAL_GLM_SELECTION_MIGRATION_SQL);
-      else if (migration.id === "0004_project_execution_scopes") adoptExecutionScopes(db);
-      else if (migration.id === "0006_task_group_admissions") db.exec(TASK_GROUP_ADMISSIONS_SQL);
+      migration.apply(db);
       migrationFacts.executedCount++;
       db.prepare("INSERT INTO tasks_schema_migration VALUES(?,?,?)").run(
         migration.id,
@@ -196,22 +274,23 @@ function adoptExecutionScopes(db: DatabaseSync): void {
 }
 
 /** 交接只复用已完成初始化；每个新连接仍按冻结账本确认，替换/清空文件不能假 ready。 */
-export function areTasksDatabaseMigrationsApplied(db: DatabaseSync): boolean {
+export function areTasksDatabaseMigrationsApplied(
+  db: DatabaseSync,
+  scopeOrOptions: TasksDatabaseMigrationScope = "base",
+): boolean {
+  const scope = resolveMigrationScope(scopeOrOptions);
   if (
     !db
       .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_schema_migration'")
       .get()
   )
     return false;
-  for (const migration of definitions) {
+  for (const migration of prepareMigrations(scope)) {
     const row = db
       .prepare("SELECT checksum FROM tasks_schema_migration WHERE id=?")
       .get(migration.id);
     if (!row) return false;
-    const expected = createHash("sha256")
-      .update(JSON.stringify(migration.checksumInput))
-      .digest("hex");
-    if (row.checksum !== expected)
+    if (row.checksum !== migrationChecksum(migration.checksumInput))
       throw Object.assign(new Error(`Task database migration checksum mismatch: ${migration.id}`), {
         kind: "checksum_mismatch",
       });
@@ -220,20 +299,21 @@ export function areTasksDatabaseMigrationsApplied(db: DatabaseSync): boolean {
 }
 
 /** 只读账本的展示预检，不授权执行；迁移 runner 拿锁后仍复查每一项。 */
-export function inspectTasksMigrationKind(db: DatabaseSync): DatabaseMigrationFacts["kind"] {
+export function inspectTasksMigrationKind(
+  db: DatabaseSync,
+  scopeOrOptions: TasksDatabaseMigrationScope = "base",
+): DatabaseMigrationFacts["kind"] {
+  const scope = resolveMigrationScope(scopeOrOptions);
   const hasLedger = db
     .prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks_schema_migration'")
     .get();
   let pending = false;
-  for (const migration of definitions) {
+  for (const migration of prepareMigrations(scope)) {
     const row = hasLedger
       ? db.prepare("SELECT checksum FROM tasks_schema_migration WHERE id=?").get(migration.id)
       : undefined;
     if (!row) pending = true;
-    else if (
-      row.checksum !==
-      createHash("sha256").update(JSON.stringify(migration.checksumInput)).digest("hex")
-    )
+    else if (row.checksum !== migrationChecksum(migration.checksumInput))
       throw Object.assign(new Error(`Task database migration checksum mismatch: ${migration.id}`), {
         kind: "checksum_mismatch",
         migrationId: migration.id,
