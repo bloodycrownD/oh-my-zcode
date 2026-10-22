@@ -6,8 +6,25 @@ evidence_packs: [docs/iterations/upstream-v316-fullsync/cache/exploration-report
 branch: upstream-v316-fullsync
 worktree: D:\worktree\fullsync
 base_sha: 1ff8cad9
-head_sha: 1ff8cad9
+head_sha: b95d2dd5
 dag_version: 1
+node_status:
+  impl-i18n: { status: done, head_sha: 7556d7d2, executor: subagent, commits: [50e5ee0e, c972b5d4, c3c99d5b, 7556d7d2] }
+  verify-i18n: { status: done, executor: main, evidence: "test:i18n-merge --verify 绿（6190×2/仲裁89,91/品牌0/死桶0/幂等）；check-i18n-parity 绿；抽查 6/6 PASS（cache/verify-i18n-spotcheck.cjs）" }
+  cr-func-i18n: { status: done, func_ready: yes, head_sha: 28a9dc98, agent: agent_4324e169 }
+  impl-c1a: { status: done, head_sha: 9e49a1c2, executor: main }
+  impl-c1b: { status: done, head_sha: 5c4e0ece, executor: subagent, commits: [18e04d81, 8905703a, e65b9e6e, 5c4e0ece] }
+  impl-c1c: { status: done, head_sha: b95d2dd5, executor: main }
+  verify-c1: { status: done, executor: main, evidence: "T-CP2 7/7；T-CP1 四消费方零改动 diff 断言；test:v4-perf 29 suites/471/0 fail（cache/verify-c1-v4perf.log）；tsc 0 错" }
+  cr-func-c1: { status: done, func_ready: yes, agent: agent_e3ecd398, note: "0 must-fix；5 deviations 闭-接受；P2 spec 文本同步已落（ThoughtLevelCycleControl 退场/保底语义）" }
+open_must_fix: []
+manual_user_pending:
+  - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
+spec_deviations:
+  - { id: DEV-i18n-1, desc: 死键清除口径 14→165（omz 基线 conversationShare.* 全量，零引用实测）, status: closed, 落盘: 仲裁表附录 B }
+  - { id: DEV-i18n-2, desc: 上游 zh/en 单侧 3 键不采（parity 门禁），待后续 phase UI 移植双侧补齐, status: closed, 落盘: 仲裁表第二节 }
+  - { id: DEV-i18n-3, desc: 品牌断言口径收窄到采纳值（基线受保护键值/协议字面量登记不改）, status: closed, 落盘: 仲裁表附录 C + 报告断言口径 }
+  - { id: DEV-i18n-4, desc: 值冲突 138 非 159（zh 全量 159→union 163→死键 25 先清→138；impl 早期「v1.0.20 收敛」理由有误已更正）, status: closed, 落盘: 仲裁表一口径桥接（28a9dc98） }
 wave_plan:
   - [impl-i18n]                    # Step 1+2：键级挑拣脚本+合并+断言+仲裁表+报告
   - [verify-i18n]                  # T-I1/T-I2 复跑+抽查（executor: main 轻量）
@@ -48,6 +65,8 @@ spec_deviations: []
 manual_user_pending: []            # T-CP3/T-VU2/T-RM3/T-RM4 真机项随各 phase 挂账
 blocking_steps: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20a,20b,20c,21]  # 19 blocking:no
 notes: >
+  phase-i18n 完成备注：settings.toolSearch.* 本轮仅采 auto/local/off 三枚举值键——父键/描述/
+  ExperimentalNotice 留给 phase-toolsearch（Step 20b）随 UI 双侧补齐，勿误判已齐。
   工作树引导（2026-10-23）：git worktree add --no-checkout -b upstream-v316-fullsync main
   （注意：本地 main ref=e34ab16a 未 ff，reset --hard origin/main=1ff8cad9 修正）→ robocopy
   /XD .git node_modules .reference .turbo（31495 文件）→ 分批 git checkout 还原 robocopy

@@ -1,0 +1,3545 @@
+ WARN  Unsupported engine: wanted: {"node":">=24.0.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+
+> oh-my-zcode@1.0.20 test:v4-perf D:\worktree\fullsync
+> tsx --test packages/ui/test/conversationProjectionCore.test.ts packages/ui/test/conversationTurnNavigatorDirectory.test.ts packages/ui/test/conversationTurnNavigatorHelpers.test.ts packages/ui/test/conversationTurnRenderUnits.test.ts packages/ui/test/perfProbe.test.ts packages/ui/test/shikiTokensCacheLru.test.ts packages/ui/test/conversationStatusPanelControlWorkFallback.test.ts packages/ui/test/timelineRowHeightCache.test.ts packages/ui/test/chatPromptEditorSubmitValue.test.ts packages/ui/test/subagentDirectoryCancel.test.ts packages/ui/test/storageCategoryCleanableGate.test.ts packages/ui/test/askQuestionDisplayAnswers.test.ts packages/ui/test/modelTrajectoryTurns.test.ts packages/ui/test/modelTrajectoryToolJoin.test.ts packages/ui/test/modelTrajectoryTurnCounts.test.ts packages/ui/test/modelTrajectoryClamp.test.ts packages/ui/test/modelTrajectoryRetry.test.ts packages/shared/test/uiLocaleContract.test.ts packages/shared/test/apply.test.ts packages/shared/test/previewText.test.ts packages/shared/test/sessionContentProfileIndex.test.ts packages/shared/test/workflowRunsSeatBorn.test.ts packages/services/test/zcodeProtocolClientDispose.test.ts packages/services/test/zcodeStdioTransportFraming.test.ts packages/services/test/zcodeAgentProcessManagerCleanup.test.ts packages/services/test/zcodeTaskServiceAdapterStreamFallback.test.ts packages/services/test/subagentsServiceIoErrors.test.ts packages/services/test/runtimeProcessEnvShell.test.ts packages/services/test/nonCliAcpRetirement.test.ts packages/services/test/importedClaudeRecovery.test.ts packages/services/test/modelTrajectoryHead.test.ts packages/services/test/buildUiLocaleSpawnEnv.test.ts packages/desktop/scripts/test-deep-link-terminator.mjs packages/desktop/scripts/test-window-close-tray.mjs apps/zcode-cli/packages/dynamic-workflow/scripts/test-scheduler-recorded-asks.mjs apps/zcode-cli/packages/cli/test/runUiLocale.test.ts packages/ui/test/modelTrajectoryWireFilter.test.ts && tsx --test packages/ui/test/magicContextPromptSurfaceOverrides.test.ts && pnpm --dir apps/zcode-cli/packages/bootstrap run test:turn-directory && pnpm --dir apps/zcode-cli/packages/bootstrap run test:edit-retry-model && pnpm --dir apps/zcode-cli/packages/bootstrap run test:ask-question-projection && pnpm --dir apps/zcode-cli/packages/core run test:ask-question-display && pnpm --dir apps/zcode-cli/packages/core run test:subagent-sync-dispatch && pnpm --dir apps/zcode-cli/packages/core run test:subagent-notification-resume-hint && pnpm --dir apps/zcode-cli/packages/core run test:error-payload-agentid-projection && pnpm --dir apps/zcode-cli/packages/core run test:send-message-terminal-resume && pnpm --dir apps/zcode-cli/packages/core run test:e2e-subagent-resume && pnpm --dir apps/zcode-cli/packages/core run test:session-persistence-dedupe && pnpm --dir apps/zcode-cli/packages/core run test:tool-media-stop-signal && pnpm --dir apps/zcode-cli/packages/core run test:subagent-cache-breakpoints && pnpm --dir apps/zcode-cli/packages/core run test:ctx-tool-descriptions && pnpm --dir apps/zcode-cli --filter "@zcode/bootstrap..." build && pnpm --dir apps/zcode-cli/packages/core run test:workflow-report-count && pnpm --dir apps/zcode-cli/packages/adapters run test:network-status-crash && pnpm --dir apps/zcode-cli/packages/adapters run test:tool-result-cache-control && pnpm --dir apps/zcode-cli/packages/adapters run test:magic-context-boundaries && pnpm --dir apps/zcode-cli/packages/adapters run test:runner-debug-head && pnpm --dir apps/zcode-cli/packages/bootstrap run test:publisher-buffer-clamp && pnpm --dir apps/zcode-cli/packages/bootstrap run test:model-request-slim && pnpm --dir apps/zcode-cli/packages/bootstrap run test:dwf-read-narrowing && pnpm --dir apps/zcode-cli/packages/bootstrap run test:dwf-journal-contract && pnpm --dir apps/zcode-cli/packages/bootstrap run test:mc-section-zh && pnpm --dir apps/zcode-cli/packages/bootstrap run test:model-live && pnpm --dir apps/zcode-cli/packages/bootstrap run test:subagent-live-model && pnpm --dir apps/zcode-cli/packages/bootstrap run test:prompt-surface-toolset-hash && tsx --tsconfig packages/ui/tsconfig.json --test apps/zcode-cli/packages/bootstrap/scripts/test-attachment-preview-text-plain.mjs && node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/modelConfigSelect-composer.test.ts
+
+TAP version 13
+# (node:31052) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: run() 转发宿主 UI 语言（A7）
+    # Subtest: env 携带 ZCODE_UI_LOCALE 时以 uiDetectedLocale 原样转发
+    ok 1 - env 携带 ZCODE_UI_LOCALE 时以 uiDetectedLocale 原样转发
+      ---
+      duration_ms: 9.4473
+      type: 'test'
+      ...
+    # Subtest: env 缺失该键时 options 不含 uiDetectedLocale（不得传 null/undefined 覆盖）
+    ok 2 - env 缺失该键时 options 不含 uiDetectedLocale（不得传 null/undefined 覆盖）
+      ---
+      duration_ms: 1.3173
+      type: 'test'
+      ...
+    # Subtest: env 值为空白串时同样不传该键（非空才转发）
+    ok 3 - env 值为空白串时同样不传该键（非空才转发）
+      ---
+      duration_ms: 1.2
+      type: 'test'
+      ...
+    1..3
+ok 1 - run() 转发宿主 UI 语言（A7）
+  ---
+  duration_ms: 12.983
+  type: 'suite'
+  ...
+# Subtest: T-DWF-1 seedRecordedAsks 的 recordedCount 与旧全表扫描逐 actor 相同，且不读 journal
+ok 2 - T-DWF-1 seedRecordedAsks 的 recordedCount 与旧全表扫描逐 actor 相同，且不读 journal
+  ---
+  duration_ms: 3.8438
+  type: 'test'
+  ...
+# Subtest: T-DWF-1 全新 run（未种表）每个 actor 的 recordedCount 都是 0
+ok 3 - T-DWF-1 全新 run（未种表）每个 actor 的 recordedCount 都是 0
+  ---
+  duration_ms: 0.2689
+  type: 'test'
+  ...
+# Subtest: T-DWF-1 种表只认有主人的 ask 行（其它 kind / 缺主人一律不计）
+ok 4 - T-DWF-1 种表只认有主人的 ask 行（其它 kind / 缺主人一律不计）
+  ---
+  duration_ms: 0.2909
+  type: 'test'
+  ...
+# Subtest: T-DWF-1 engine resume：ask 行数表来自窄读，fresh ask 被 hold 在既有 ask 之后
+ok 5 - T-DWF-1 engine resume：ask 行数表来自窄读，fresh ask 被 hold 在既有 ask 之后
+  ---
+  duration_ms: 7.1553
+  type: 'test'
+  ...
+# Subtest: T-DWF-1 engine resume：countNodes 缺席时 report 计数退回元数据窄读，不回落全量带结果读
+ok 6 - T-DWF-1 engine resume：countNodes 缺席时 report 计数退回元数据窄读，不回落全量带结果读
+  ---
+  duration_ms: 1.2397
+  type: 'test'
+  ...
+# Subtest: d/G-2 深链注册 win32 开发态（defaultApp）：args 以 -- 收尾，URL 进不了启动开关位
+ok 7 - d/G-2 深链注册 win32 开发态（defaultApp）：args 以 -- 收尾，URL 进不了启动开关位
+  ---
+  duration_ms: 3.3662
+  type: 'test'
+  ...
+# Subtest: d/G-2 深链注册 win32 打包态（非 defaultApp）：args 恰为 ["--"]
+ok 8 - d/G-2 深链注册 win32 打包态（非 defaultApp）：args 恰为 ["--"]
+  ---
+  duration_ms: 0.3067
+  type: 'test'
+  ...
+# Subtest: d/G-2 深链注册非 win32（darwin/linux）：一律不追加 --
+ok 9 - d/G-2 深链注册非 win32（darwin/linux）：一律不追加 --
+  ---
+  duration_ms: 0.47
+  type: 'test'
+  ...
+# Subtest: d/G-2 注册失败只记警告、不抛出（返回契约不变）
+ok 10 - d/G-2 注册失败只记警告、不抛出（返回契约不变）
+  ---
+  duration_ms: 0.2646
+  type: 'test'
+  ...
+# Subtest: d/G-2 electron-builder win32 分支关闭原生 Inspector 参数（fuses 配置断言）
+ok 11 - d/G-2 electron-builder win32 分支关闭原生 Inspector 参数（fuses 配置断言）
+  ---
+  duration_ms: 2264.1623
+  type: 'test'
+  ...
+# (node:23724) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T-WIN-3 托盘未就绪（创建失败）→ 不隐藏窗口，走确认退出
+ok 12 - T-WIN-3 托盘未就绪（创建失败）→ 不隐藏窗口，走确认退出
+  ---
+  duration_ms: 1.7489
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 托盘未就绪且用户取消确认 → 什么都不做（窗口仍在）
+ok 13 - T-WIN-3 托盘未就绪且用户取消确认 → 什么都不做（窗口仍在）
+  ---
+  duration_ms: 0.1926
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 托盘就绪才允许隐藏（且必须显式 true）
+ok 14 - T-WIN-3 托盘就绪才允许隐藏（且必须显式 true）
+  ---
+  duration_ms: 0.1762
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 托盘就绪但已显式退出 / 强制退出时不隐藏
+ok 15 - T-WIN-3 托盘就绪但已显式退出 / 强制退出时不隐藏
+  ---
+  duration_ms: 0.1379
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 非 Windows 与多窗口场景不走托盘裁决
+ok 16 - T-WIN-3 非 Windows 与多窗口场景不走托盘裁决
+  ---
+  duration_ms: 0.2174
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 fake tray 抛错 → createWindowsDesktopTray 返回 null（desktopTrayReady=false 的来源）
+ok 17 - T-WIN-3 fake tray 抛错 → createWindowsDesktopTray 返回 null（desktopTrayReady=false 的来源）
+  ---
+  duration_ms: 0.5717
+  type: 'test'
+  ...
+# Subtest: T-WIN-3 托盘正常创建 → 返回非 null，且上下文菜单/提示已绑定并命中缓存
+ok 18 - T-WIN-3 托盘正常创建 → 返回非 null，且上下文菜单/提示已绑定并命中缓存
+  ---
+  duration_ms: 0.6653
+  type: 'test'
+  ...
+# (node:32104) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: buildUiLocaleSpawnEnv 正向注入 Host UI 语言
+ok 19 - buildUiLocaleSpawnEnv 正向注入 Host UI 语言
+  ---
+  duration_ms: 2.3678
+  type: 'test'
+  ...
+# Subtest: buildUiLocaleSpawnEnv 正向注入其它语言值
+ok 20 - buildUiLocaleSpawnEnv 正向注入其它语言值
+  ---
+  duration_ms: 0.2474
+  type: 'test'
+  ...
+# Subtest: buildUiLocaleSpawnEnv 缺省时不产键（防 undefined 值破坏 CLI env 回落）
+ok 21 - buildUiLocaleSpawnEnv 缺省时不产键（防 undefined 值破坏 CLI env 回落）
+  ---
+  duration_ms: 0.1695
+  type: 'test'
+  ...
+# Subtest: buildUiLocaleSpawnEnv 空串与空白等同缺省
+ok 22 - buildUiLocaleSpawnEnv 空串与空白等同缺省
+  ---
+  duration_ms: 0.1374
+  type: 'test'
+  ...
+# (node:32484) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# [2026-10-22 21:34:47.590] [pid:32484] [zcode-task-service] legacy Claude 导入 task 已升级为 ZCode session taskId=claude-import-example
+# [2026-10-22 21:34:47.595] [pid:32484] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'desktop-continuous',
+#   durationMs: 21,
+#   indexDurationMs: 0,
+#   messageLimit: null,
+#   projectionDurationMs: 2,
+#   resumeDurationMs: 18,
+#   snapshotKind: 'session',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'claude-import-example',
+#   workspaceIdentity: 'example-remote-workspace',
+#   workspacePath: '/example/workspace'
+# }
+# Subtest: previously imported Claude history becomes a real session for desktop-continuous
+ok 23 - previously imported Claude history becomes a real session for desktop-continuous
+  ---
+  duration_ms: 131.5618
+  type: 'test'
+  ...
+# [2026-10-22 21:34:47.668] [pid:32484] [zcode-task-service] legacy Claude 导入 task 已升级为 ZCode session taskId=claude-import-example
+# [2026-10-22 21:34:47.670] [pid:32484] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'web-remote-replayable',
+#   durationMs: 9,
+#   indexDurationMs: 1,
+#   messageLimit: null,
+#   projectionDurationMs: 0,
+#   resumeDurationMs: 8,
+#   snapshotKind: 'session',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'claude-import-example',
+#   workspaceIdentity: 'example-remote-workspace',
+#   workspacePath: '/example/workspace'
+# }
+# Subtest: previously imported Claude history becomes a real session for web-remote-replayable
+ok 24 - previously imported Claude history becomes a real session for web-remote-replayable
+  ---
+  duration_ms: 86.4715
+  type: 'test'
+  ...
+# Subtest: T-T2 offset ≥ headMessageCount：head 接回 tail，缺口按可见条数计
+ok 25 - T-T2 offset ≥ headMessageCount：head 接回 tail，缺口按可见条数计
+  ---
+  duration_ms: 3.9439
+  type: 'test'
+  ...
+# Subtest: T-T2 offset < headMessageCount：head 截到 offset，整体无重复
+ok 26 - T-T2 offset < headMessageCount：head 截到 offset，整体无重复
+  ---
+  duration_ms: 0.4783
+  type: 'test'
+  ...
+# Subtest: T-T2 head 被字节预算截断、不足 offset：缺口并入 croppedCount
+ok 27 - T-T2 head 被字节预算截断、不足 offset：缺口并入 croppedCount
+  ---
+  duration_ms: 0.3848
+  type: 'test'
+  ...
+# Subtest: T-T2 delta 不套 head：前序窗口用 previous 展开结果，后续 delta 不污染
+ok 28 - T-T2 delta 不套 head：前序窗口用 previous 展开结果，后续 delta 不污染
+  ---
+  duration_ms: 0.2743
+  type: 'test'
+  ...
+# Subtest: T-T2 旧 tail 记录无 head / headMessageCount：跳过合并、不产生 NaN
+ok 29 - T-T2 旧 tail 记录无 head / headMessageCount：跳过合并、不产生 NaN
+  ---
+  duration_ms: 0.5169
+  type: 'test'
+  ...
+# Subtest: T-T2 full-retention 记录（无 messageCount）：croppedCount = 0
+ok 30 - T-T2 full-retention 记录（无 messageCount）：croppedCount = 0
+  ---
+  duration_ms: 0.2363
+  type: 'test'
+  ...
+# Subtest: T-T2 head 合并以 metadataSource === target 为门：body.messages 与 sdkMessages 不拼 head
+ok 31 - T-T2 head 合并以 metadataSource === target 为门：body.messages 与 sdkMessages 不拼 head
+  ---
+  duration_ms: 0.3538
+  type: 'test'
+  ...
+# Subtest: T-T6 mapTrajectoryMessages 映射顶层 toolCalls：纯工具调用 assistant 行不再为空
+ok 32 - T-T6 mapTrajectoryMessages 映射顶层 toolCalls：纯工具调用 assistant 行不再为空
+  ---
+  duration_ms: 1.0305
+  type: 'test'
+  ...
+# (node:1760) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: current Project Memory catalog and files remain readable
+ok 33 - current Project Memory catalog and files remain readable
+  ---
+  duration_ms: 71.3433
+  type: 'test'
+  ...
+# Subtest: opening the task index leaves retired ACP IDs and user rows untouched
+ok 34 - opening the task index leaves retired ACP IDs and user rows untouched
+  ---
+  duration_ms: 78.9637
+  type: 'test'
+  ...
+# [2026-10-22 21:34:47.828] [pid:1760] [zcode-task-service] ZCode Protocol session 缺失，已按 legacy task snapshot 恢复 taskId=wrapper-example Error: Session not found: wrapper-example
+#     at TestContext.<anonymous> (D:\\worktree\\fullsync\\packages\\services\\test\\nonCliAcpRetirement.test.ts:107:22)
+#     at async Test.run (node:internal/test_runner/test:1054:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# [2026-10-22 21:34:47.833] [pid:1760] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'desktop-continuous',
+#   durationMs: 9,
+#   indexDurationMs: 0,
+#   limitDurationMs: 0,
+#   messageLimit: null,
+#   resumeDurationMs: 9,
+#   snapshotKind: 'legacy',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'wrapper-example',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/workspace'
+# }
+# [2026-10-22 21:34:47.836] [pid:1760] [zcode-task-service] ZCode Protocol session 缺失，已按 legacy task snapshot 恢复 taskId=wrapper-example Error: Session not found: wrapper-example
+#     at TestContext.<anonymous> (D:\\worktree\\fullsync\\packages\\services\\test\\nonCliAcpRetirement.test.ts:107:22)
+#     at async Test.run (node:internal/test_runner/test:1054:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# [2026-10-22 21:34:47.836] [pid:1760] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'web-remote-replayable',
+#   durationMs: 2,
+#   indexDurationMs: 0,
+#   limitDurationMs: 0,
+#   messageLimit: null,
+#   resumeDurationMs: 2,
+#   snapshotKind: 'legacy',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'wrapper-example',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/workspace'
+# }
+# [2026-10-22 21:34:47.872] [pid:1760] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'desktop-continuous',
+#   durationMs: 3,
+#   indexDurationMs: 1,
+#   messageLimit: null,
+#   projectionDurationMs: 1,
+#   resumeDurationMs: 1,
+#   snapshotKind: 'session',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 1,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'wrapper-example',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/workspace'
+# }
+# [2026-10-22 21:34:47.872] [pid:1760] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'web-remote-replayable',
+#   durationMs: 0,
+#   indexDurationMs: 0,
+#   messageLimit: null,
+#   projectionDurationMs: 0,
+#   resumeDurationMs: 0,
+#   snapshotKind: 'session',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 1,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 'wrapper-example',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/workspace'
+# }
+# Subtest: missing sessions fall back to the read-only legacy ACP snapshot
+ok 35 - missing sessions fall back to the read-only legacy ACP snapshot
+  ---
+  duration_ms: 44.9435
+  type: 'test'
+  ...
+# Subtest: current session recovery preserves Desktop and replayable projections
+ok 36 - current session recovery preserves Desktop and replayable projections
+  ---
+  duration_ms: 18.1603
+  type: 'test'
+  ...
+# Subtest: current Provider configuration starts without an old config migration callback
+ok 37 - current Provider configuration starts without an old config migration callback
+  ---
+  duration_ms: 138.4438
+  type: 'test'
+  ...
+# Subtest: T-WIN-1 normalizeRuntimeProcessEnv：无效 POSIX SHELL 回退 ComSpec / cmd.exe
+ok 38 - T-WIN-1 normalizeRuntimeProcessEnv：无效 POSIX SHELL 回退 ComSpec / cmd.exe
+  ---
+  duration_ms: 3.14
+  type: 'test'
+  ...
+# Subtest: T-WIN-1 真实 Windows 路径与其它平台不受影响
+ok 39 - T-WIN-1 真实 Windows 路径与其它平台不受影响
+  ---
+  duration_ms: 1.1588
+  type: 'test'
+  ...
+# Subtest: T-WIN-1 initializeRuntimeProcessEnv 把归一结果写回真实 process.env（Windows 专属）
+ok 40 - T-WIN-1 initializeRuntimeProcessEnv 把归一结果写回真实 process.env（Windows 专属）
+  ---
+  duration_ms: 7.6242
+  type: 'test'
+  ...
+# Subtest: T-SVC-3 ENOENT 仍回退空配置（首次启动/文件不存在）
+ok 41 - T-SVC-3 ENOENT 仍回退空配置（首次启动/文件不存在）
+  ---
+  duration_ms: 50.3957
+  type: 'test'
+  ...
+# Subtest: T-SVC-3 agents-state.json 读不动时上抛 IO 错误，不伪装成空配置
+ok 42 - T-SVC-3 agents-state.json 读不动时上抛 IO 错误，不伪装成空配置
+  ---
+  duration_ms: 67.7398
+  type: 'test'
+  ...
+# Subtest: T-SVC-3 配置读不动时上抛 IO 错误，不伪装成空插件配置
+ok 43 - T-SVC-3 配置读不动时上抛 IO 错误，不伪装成空插件配置
+  ---
+  duration_ms: 86.9758
+  type: 'test'
+  ...
+# Subtest: T-SVC-3 内容损坏（SyntaxError）仍沿用空配置，不回退为抛错
+ok 44 - T-SVC-3 内容损坏（SyntaxError）仍沿用空配置，不回退为抛错
+  ---
+  duration_ms: 77.7681
+  type: 'test'
+  ...
+# [2026-10-22 21:34:47.576] [pid:25556] [zcode-agent] ZCode agent process cleanup failed {
+#   workspaceKey: '/tmp/t-proc-3',
+#   pid: 4242,
+#   runtimeIdentity: '/tmp/t-proc-3:1:4242',
+#   reason: 'protocol-close',
+#   error: Error: cleanup failed
+#       at TestContext.<anonymous> (D:\\worktree\\fullsync\\packages\\services\\test\\zcodeAgentProcessManagerCleanup.test.ts:105:41)
+#       at Test.runInAsyncScope (node:async_hooks:214:14)
+#       at Test.run (node:internal/test_runner/test:1047:25)
+#       at Test.processPendingSubtests (node:internal/test_runner/test:744:18)
+#       at Test.postRun (node:internal/test_runner/test:1173:19)
+#       at Test.run (node:internal/test_runner/test:1101:12)
+#       at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# }
+# Subtest: T-PROC-3 reportError:false 的 cleanup rejection 不产生 unhandledRejection
+ok 45 - T-PROC-3 reportError:false 的 cleanup rejection 不产生 unhandledRejection
+  ---
+  duration_ms: 37.0437
+  type: 'test'
+  ...
+# Subtest: T-PROC-3 同一次 cleanup 复用同一个 promise（幂等回收）
+ok 46 - T-PROC-3 同一次 cleanup 复用同一个 promise（幂等回收）
+  ---
+  duration_ms: 1.0896
+  type: 'test'
+  ...
+# Subtest: T-PROC-3 cleanupManagedProcess 返回的 promise 保持 reject（上报责任在调用方，告警语义由调用方 reportError 决定）
+ok 47 - T-PROC-3 cleanupManagedProcess 返回的 promise 保持 reject（上报责任在调用方，告警语义由调用方 reportError 决定）
+  ---
+  duration_ms: 21.6056
+  type: 'test'
+  ...
+# Subtest: T-PROC-1 dispose 批量拒绝不产生 unhandledRejection，且真实 awaiter 仍收到 rejection
+ok 48 - T-PROC-1 dispose 批量拒绝不产生 unhandledRejection，且真实 awaiter 仍收到 rejection
+  ---
+  duration_ms: 51.8637
+  type: 'test'
+  ...
+# Subtest: T-PROC-1 transport close 的批量拒绝同样静默（观测不参与 pending 计数语义不回归）
+ok 49 - T-PROC-1 transport close 的批量拒绝同样静默（观测不参与 pending 计数语义不回归）
+  ---
+  duration_ms: 43.8834
+  type: 'test'
+  ...
+#   [T-PROC-2] frame=15.0MiB chunks=241 peakHeapGrowth=24.8MiB peakRssGrowth=31.8MiB
+# Subtest: T-PROC-2 15MB 单行帧线性成帧：帧完整且峰值内存有界
+ok 50 - T-PROC-2 15MB 单行帧线性成帧：帧完整且峰值内存有界
+  ---
+  duration_ms: 153.0567
+  type: 'test'
+  ...
+# (node:2052) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T-SVC-1 turn.completed 只补投未流式的后缀
+ok 51 - T-SVC-1 turn.completed 只补投未流式的后缀
+  ---
+  duration_ms: 7.0105
+  type: 'test'
+  ...
+# Subtest: T-SVC-1 response 与已流式文本完全一致时不补投空 chunk
+ok 52 - T-SVC-1 response 与已流式文本完全一致时不补投空 chunk
+  ---
+  duration_ms: 0.6314
+  type: 'test'
+  ...
+# Subtest: T-SVC-1 response 不以已流式文本开头时按完整正文兜底（不吞内容）
+ok 53 - T-SVC-1 response 不以已流式文本开头时按完整正文兜底（不吞内容）
+  ---
+  duration_ms: 1.3502
+  type: 'test'
+  ...
+# [2026-10-22 21:34:47.919] [pid:2052] [zcode-task-service] legacy Claude 导入 task 已升级为 ZCode session taskId=t-svc-2
+# [2026-10-22 21:34:47.923] [pid:2052] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'desktop-continuous',
+#   durationMs: 18,
+#   indexDurationMs: 0,
+#   messageLimit: null,
+#   projectionDurationMs: 1,
+#   resumeDurationMs: 17,
+#   snapshotKind: 'session',
+#   stats: {
+#     assistantMessages: 0,
+#     bodyRefs: 0,
+#     contentChars: 0,
+#     fileChanges: 0,
+#     historyTotalMessages: 0,
+#     messages: 0,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 0
+#   },
+#   taskId: 't-svc-2',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/t-svc-2'
+# }
+# Subtest: T-SVC-2 claudeCode legacy 升级成功后 onDynamicTaskEvent 挂上 protocol 订阅面
+ok 54 - T-SVC-2 claudeCode legacy 升级成功后 onDynamicTaskEvent 挂上 protocol 订阅面
+  ---
+  duration_ms: 75.0035
+  type: 'test'
+  ...
+# [2026-10-22 21:34:47.970] [pid:2052] [zcode-task-service] ZCode Protocol session 缺失，已按 legacy task snapshot 恢复 taskId=t-svc-2 Error: Session not found: t-svc-2
+#     at Object.resumeSession (D:\\worktree\\fullsync\\packages\\services\\test\\zcodeTaskServiceAdapterStreamFallback.test.ts:246:15)
+#     at resumeSnapshot (D:\\worktree\\fullsync\\packages\\services\\src\\zcode-agent\\zcodeTaskServiceAdapter.ts:1130:38)
+#     at async resumeSnapshotOrLegacy (D:\\worktree\\fullsync\\packages\\services\\src\\zcode-agent\\zcodeTaskServiceAdapter.ts:1299:24)
+#     at async Object.getTaskSnapshot (D:\\worktree\\fullsync\\packages\\services\\src\\zcode-agent\\zcodeTaskServiceAdapter.ts:2564:24)
+#     at async TestContext.<anonymous> (D:\\worktree\\fullsync\\packages\\services\\test\\zcodeTaskServiceAdapterStreamFallback.test.ts:394:22)
+#     at async Test.run (node:internal/test_runner/test:1054:7)
+#     at async Test.processPendingSubtests (node:internal/test_runner/test:744:7)
+# [2026-10-22 21:34:47.983] [pid:2052] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+#   clientMode: 'desktop-continuous',
+#   durationMs: 15,
+#   indexDurationMs: 0,
+#   limitDurationMs: 0,
+#   messageLimit: null,
+#   resumeDurationMs: 15,
+#   snapshotKind: 'legacy',
+#   stats: {
+#     assistantMessages: 1,
+#     bodyRefs: 0,
+#     contentChars: 6,
+#     fileChanges: 0,
+#     historyTotalMessages: 2,
+#     messages: 2,
+#     slashCommands: 0,
+#     thoughtChars: 0,
+#     toolCalls: 0,
+#     toolSliceMessages: 0,
+#     truncatedBefore: false,
+#     userMessages: 1
+#   },
+#   taskId: 't-svc-2',
+#   workspaceIdentity: null,
+#   workspacePath: '/example/t-svc-2'
+# }
+# Subtest: T-SVC-2 非 claudeCode legacy 仍 local-only，不挂 protocol 订阅
+ok 55 - T-SVC-2 非 claudeCode legacy 仍 local-only，不挂 protocol 订阅
+  ---
+  duration_ms: 69.6864
+  type: 'test'
+  ...
+# Subtest: G-3 守卫：PATCH_BUILDERS 键集合 == statePatchSchema 除 rows/seq/logEpoch 外的全部键
+ok 56 - G-3 守卫：PATCH_BUILDERS 键集合 == statePatchSchema 除 rows/seq/logEpoch 外的全部键
+  ---
+  duration_ms: 2.2332
+  type: 'test'
+  ...
+# Subtest: T-AP1 随机序列：不可变 apply 与可变 accumulator 深相等
+ok 57 - T-AP1 随机序列：不可变 apply 与可变 accumulator 深相等
+  ---
+  duration_ms: 126.2716
+  type: 'test'
+  ...
+# Subtest: T-AP1 随机序列覆盖到全部五类 op
+ok 58 - T-AP1 随机序列覆盖到全部五类 op
+  ---
+  duration_ms: 31.9807
+  type: 'test'
+  ...
+# Subtest: 边界：removed 截断尾部后再 append
+ok 59 - 边界：removed 截断尾部后再 append
+  ---
+  duration_ms: 0.6289
+  type: 'test'
+  ...
+# Subtest: 边界：removed 砍掉整条活跃分支后 firstRowId/totalCount 归零，再 append 重建锚点
+ok 60 - 边界：removed 砍掉整条活跃分支后 firstRowId/totalCount 归零，再 append 重建锚点
+  ---
+  duration_ms: 0.3959
+  type: 'test'
+  ...
+# Subtest: 边界：state.updated 多帧累计 + 键级整体替换（绝不深合并）
+ok 61 - 边界：state.updated 多帧累计 + 键级整体替换（绝不深合并）
+  ---
+  duration_ms: 0.4608
+  type: 'test'
+  ...
+# Subtest: 边界：同一 rowId 的连续 row.delta 按序拼接
+ok 62 - 边界：同一 rowId 的连续 row.delta 按序拼接
+  ---
+  duration_ms: 0.8471
+  type: 'test'
+  ...
+# Subtest: 边界：命中未加载 rowId 的 upsert/delta 都是 no-op
+ok 63 - 边界：命中未加载 rowId 的 upsert/delta 都是 no-op
+  ---
+  duration_ms: 0.5004
+  type: 'test'
+  ...
+# Subtest: 隔离边界：createMutableConversationSnapshotAccumulator 不修改传入的已发布快照
+ok 64 - 隔离边界：createMutableConversationSnapshotAccumulator 不修改传入的已发布快照
+  ---
+  duration_ms: 1.4653
+  type: 'test'
+  ...
+# Subtest: C1 不变量：statePatchSchema 键集合不含 rows / seq / logEpoch
+ok 65 - C1 不变量：statePatchSchema 键集合不含 rows / seq / logEpoch
+  ---
+  duration_ms: 0.8191
+  type: 'test'
+  ...
+# Subtest: C1 不变量：state.updated 的 Object.assign 不会踩到 rows/seq/logEpoch
+ok 66 - C1 不变量：state.updated 的 Object.assign 不会踩到 rows/seq/logEpoch
+  ---
+  duration_ms: 0.3791
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：超长空白前缀段：段首空白串远长于预算，且尾部仍超限
+ok 67 - T-TD1 逐字节一致：超长空白前缀段：段首空白串远长于预算，且尾部仍超限
+  ---
+  duration_ms: 2.7438
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：段间多空白：空行分隔符的各种宽度（含单换行不切分）
+ok 68 - T-TD1 逐字节一致：段间多空白：空行分隔符的各种宽度（含单换行不切分）
+  ---
+  duration_ms: 0.2665
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：截断边界落在空白串内：长空白串正中央放截断点
+ok 69 - T-TD1 逐字节一致：截断边界落在空白串内：长空白串正中央放截断点
+  ---
+  duration_ms: 0.1781
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：纯空白输入：空串、全空白、单换行、全角空白全部回落 fallback
+ok 70 - T-TD1 逐字节一致：纯空白输入：空串、全空白、单换行、全角空白全部回落 fallback
+  ---
+  duration_ms: 0.2131
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：单换行不切分：折叠成一个空格而非分段
+ok 71 - T-TD1 逐字节一致：单换行不切分：折叠成一个空格而非分段
+  ---
+  duration_ms: 0.2616
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：段上限为 0 / 负数：与 Math.max(1, n) 同语义
+ok 72 - T-TD1 逐字节一致：段上限为 0 / 负数：与 Math.max(1, n) 同语义
+  ---
+  duration_ms: 0.1345
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：段上限放大：截断点落在第三段之内
+ok 73 - T-TD1 逐字节一致：段上限放大：截断点落在第三段之内
+  ---
+  duration_ms: 0.2264
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：空数组：与空串同语义
+ok 74 - T-TD1 逐字节一致：空数组：与空串同语义
+  ---
+  duration_ms: 0.186
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：maxChars 扫描（截断点遍历段内/空白串/换行等位置）
+ok 75 - T-TD1 逐字节一致：maxChars 扫描（截断点遍历段内/空白串/换行等位置）
+  ---
+  duration_ms: 12.1484
+  type: 'test'
+  ...
+# Subtest: T-TD1 逐字节一致：确定性混合语料（空白/换行/多字节字符随机交织）
+ok 76 - T-TD1 逐字节一致：确定性混合语料（空白/换行/多字节字符随机交织）
+  ---
+  duration_ms: 8.548
+  type: 'test'
+  ...
+# Subtest: T-TD1 扫描量有界：1 MiB 输入只扫 maxChars 的常数倍
+ok 77 - T-TD1 扫描量有界：1 MiB 输入只扫 maxChars 的常数倍
+  ---
+  duration_ms: 99.635
+  type: 'test'
+  ...
+# Subtest: T-TD1 扫描量有界：单条超长无空行正文在首段就收工
+ok 78 - T-TD1 扫描量有界：单条超长无空行正文在首段就收工
+  ---
+  duration_ms: 0.4224
+  type: 'test'
+  ...
+# Subtest: T-TD1 纯空白输入：全量扫完（判定 fallback 的必要代价）但不产出正文
+ok 79 - T-TD1 纯空白输入：全量扫完（判定 fallback 的必要代价）但不产出正文
+  ---
+  duration_ms: 0.2995
+  type: 'test'
+  ...
+# Subtest: T-SVC-2 index 裁剪剥离 tool/reasoning/data-url 大载荷
+ok 80 - T-SVC-2 index 裁剪剥离 tool/reasoning/data-url 大载荷
+  ---
+  duration_ms: 2.2904
+  type: 'test'
+  ...
+# Subtest: T-SVC-2 index 裁剪不改变结构面（数量/顺序/id/type/metadata 键）
+ok 81 - T-SVC-2 index 裁剪不改变结构面（数量/顺序/id/type/metadata 键）
+  ---
+  duration_ms: 9.3028
+  type: 'test'
+  ...
+# Subtest: T-SVC-2 裁剪不修改入参（full 侧继续读到原对象）
+ok 82 - T-SVC-2 裁剪不修改入参（full 侧继续读到原对象）
+  ---
+  duration_ms: 1.5884
+  type: 'test'
+  ...
+# Subtest: T-SVC-2 contentProfile 在协议参数 schema 上：仅 full|index，缺省等同 full
+ok 83 - T-SVC-2 contentProfile 在协议参数 schema 上：仅 full|index，缺省等同 full
+  ---
+  duration_ms: 16.5478
+  type: 'test'
+  ...
+# Subtest: init-local schema 解析携带 uiLocale 的载荷并保留字段
+ok 84 - init-local schema 解析携带 uiLocale 的载荷并保留字段
+  ---
+  duration_ms: 5.7116
+  type: 'test'
+  ...
+# Subtest: init-local schema 不含 uiLocale 的旧载荷照常通过（向后兼容）
+ok 85 - init-local schema 不含 uiLocale 的旧载荷照常通过（向后兼容）
+  ---
+  duration_ms: 0.3012
+  type: 'test'
+  ...
+# Subtest: hostIncomingMessageSchema（port guard 判别联合）不 strip uiLocale
+ok 86 - hostIncomingMessageSchema（port guard 判别联合）不 strip uiLocale
+  ---
+  duration_ms: 1.8464
+  type: 'test'
+  ...
+# Subtest: ZCODE_UI_LOCALE_ENV_KEY 常量契约
+ok 87 - ZCODE_UI_LOCALE_ENV_KEY 常量契约
+  ---
+  duration_ms: 0.16
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 缓存结算的出生（node-settled, born）在溢出 run 里被 B2 拒，run 原样不动
+ok 88 - T-EVICT-1 缓存结算的出生（node-settled, born）在溢出 run 里被 B2 拒，run 原样不动
+  ---
+  duration_ms: 1.3634
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 node-queued 出生的拒新规则不回归
+ok 89 - T-EVICT-1 node-queued 出生的拒新规则不回归
+  ---
+  duration_ms: 0.2174
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 主人已在表上时不适用 B2（拒新只针对认不出主人的出生）
+ok 90 - T-EVICT-1 主人已在表上时不适用 B2（拒新只针对认不出主人的出生）
+  ---
+  duration_ms: 0.2725
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 未溢出（truncated 缺席）时出生照常入座
+ok 91 - T-EVICT-1 未溢出（truncated 缺席）时出生照常入座
+  ---
+  duration_ms: 3.6535
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 重放事件（advancesWaterMark=false）既不腾位也不入座
+ok 92 - T-EVICT-1 重放事件（advancesWaterMark=false）既不腾位也不入座
+  ---
+  duration_ms: 0.6124
+  type: 'test'
+  ...
+# Subtest: T-EVICT-1 admitsNewEntry 的两支判据
+ok 93 - T-EVICT-1 admitsNewEntry 的两支判据
+  ---
+  duration_ms: 0.2199
+  type: 'test'
+  ...
+# Subtest: display.answers 桥接后 renderer 解析命中：显示所选 label，而非「未提供回答」
+ok 94 - display.answers 桥接后 renderer 解析命中：显示所选 label，而非「未提供回答」
+  ---
+  duration_ms: 3.19
+  type: 'test'
+  ...
+# Subtest: 空对象 answers（零作答/自动继续）必须原样桥接：{} ≠ 缺席
+ok 95 - 空对象 answers（零作答/自动继续）必须原样桥接：{} ≠ 缺席
+  ---
+  duration_ms: 0.5059
+  type: 'test'
+  ...
+# Subtest: 无 display 的历史行（修复前会话/降级）不回归：维持「未提供回答」
+ok 96 - 无 display 的历史行（修复前会话/降级）不回归：维持「未提供回答」
+  ---
+  duration_ms: 0.3862
+  type: 'test'
+  ...
+# Subtest: 其它 display kind 不串道：output 仍桥接纯文本
+ok 97 - 其它 display kind 不串道：output 仍桥接纯文本
+  ---
+  duration_ms: 0.211
+  type: 'test'
+  ...
+# Subtest: A1: 编辑器已就绪时提交值恒为编辑器正文（不会回退到任何旧值）
+ok 98 - A1: 编辑器已就绪时提交值恒为编辑器正文（不会回退到任何旧值）
+  ---
+  duration_ms: 1.3069
+  type: 'test'
+  ...
+# Subtest: A2: ref 未就绪窗口内回落的是最新镜像值，不是旧的已编辑值
+ok 99 - A2: ref 未就绪窗口内回落的是最新镜像值，不是旧的已编辑值
+  ---
+  duration_ms: 0.2316
+  type: 'test'
+  ...
+# Subtest: A3: 不变量——挂载回填后，任何编辑序列下两来源可读时值相同（回退拿不到旧值）
+ok 100 - A3: 不变量——挂载回填后，任何编辑序列下两来源可读时值相同（回退拿不到旧值）
+  ---
+  duration_ms: 0.4437
+  type: 'test'
+  ...
+# Subtest: A4: 文档化——首帧回填前的窗口：回落提交的是未编辑原文，不是「旧的已编辑值」
+ok 101 - A4: 文档化——首帧回填前的窗口：回落提交的是未编辑原文，不是「旧的已编辑值」
+  ---
+  duration_ms: 0.2406
+  type: 'test'
+  ...
+# Subtest: B1: 提交值仍以编辑器正文为权威来源，latestTextRef 仅作兜底
+ok 102 - B1: 提交值仍以编辑器正文为权威来源，latestTextRef 仅作兜底
+  ---
+  duration_ms: 0.3349
+  type: 'test'
+  ...
+# Subtest: B2: Enter 主提交链仍直读编辑器状态（不经 form 的 ref 兜底）
+ok 103 - B2: Enter 主提交链仍直读编辑器状态（不经 form 的 ref 兜底）
+  ---
+  duration_ms: 0.1784
+  type: 'test'
+  ...
+# [v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+#   cached: { scopeKey: 'sess-ap4', sessionPhase: 'running' },
+#   next: { scopeKey: 'sess-ap4', sessionPhase: 'error' }
+# }
+# [v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+#   cached: { scopeKey: 'sess-a', sessionPhase: undefined },
+#   next: { scopeKey: 'sess-b', sessionPhase: undefined }
+# }
+# [v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+#   cached: { scopeKey: 'sess-fuzz', sessionPhase: 'running' },
+#   next: { scopeKey: 'sess-fuzz', sessionPhase: 'error' }
+# }
+# Subtest: 只并入窗口首行之前的行并按 rowId 升序前插
+ok 104 - 只并入窗口首行之前的行并按 rowId 升序前插
+  ---
+  duration_ms: 3.3189
+  type: 'test'
+  ...
+# Subtest: 窗口内已存在的行不会被 fetched 重复引入
+ok 105 - 窗口内已存在的行不会被 fetched 重复引入
+  ---
+  duration_ms: 5.2813
+  type: 'test'
+  ...
+# Subtest: 无可并入行时返回 null，调用方据此不换 window 引用
+ok 106 - 无可并入行时返回 null，调用方据此不换 window 引用
+  ---
+  duration_ms: 0.5367
+  type: 'test'
+  ...
+# Subtest: 空窗口时 fetched 全部算更早行（firstRowId 退化为正无穷）
+ok 107 - 空窗口时 fetched 全部算更早行（firstRowId 退化为正无穷）
+  ---
+  duration_ms: 0.7663
+  type: 'test'
+  ...
+# Subtest: 合并结果保留 fetched 原始相对顺序与窗口原有行序
+ok 108 - 合并结果保留 fetched 原始相对顺序与窗口原有行序
+  ---
+  duration_ms: 0.3535
+  type: 'test'
+  ...
+# Subtest: T-AP2 mergeOlderRows 后 rebuild：后续 row.delta 写入正确位置
+ok 109 - T-AP2 mergeOlderRows 后 rebuild：后续 row.delta 写入正确位置
+  ---
+  duration_ms: 51.1469
+  type: 'test'
+  ...
+# Subtest: T-AP2 rebuild 之后 firstRowId / totalCount 随发布外壳带出
+ok 110 - T-AP2 rebuild 之后 firstRowId / totalCount 随发布外壳带出
+  ---
+  duration_ms: 0.8943
+  type: 'test'
+  ...
+# Subtest: T-AP2 rebuild 之后 row.removed 裁剪仍重建索引并把锚点归零
+ok 111 - T-AP2 rebuild 之后 row.removed 裁剪仍重建索引并把锚点归零
+  ---
+  duration_ms: 1.5767
+  type: 'test'
+  ...
+# Subtest: T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换
+ok 112 - T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换
+  ---
+  duration_ms: 1.0923
+  type: 'test'
+  ...
+# Subtest: T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用保持不变
+ok 113 - T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用保持不变
+  ---
+  duration_ms: 7.9561
+  type: 'test'
+  ...
+# Subtest: T-AP3 无行变更帧的 rows 复用必须逐字段等价：窗口外的 row.removed 不动任何标量
+ok 114 - T-AP3 无行变更帧的 rows 复用必须逐字段等价：窗口外的 row.removed 不动任何标量
+  ---
+  duration_ms: 0.6506
+  type: 'test'
+  ...
+# Subtest: T-AP3 变更集为空但 rows 标量变了时必须换 rows 容器
+ok 115 - T-AP3 变更集为空但 rows 标量变了时必须换 rows 容器
+  ---
+  duration_ms: 0.4297
+  type: 'test'
+  ...
+# Subtest: T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳
+ok 116 - T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳
+  ---
+  duration_ms: 2.6313
+  type: 'test'
+  ...
+# Subtest: C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTurnIds
+ok 117 - C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTurnIds
+  ---
+  duration_ms: 12.2651
+  type: 'test'
+  ...
+# Subtest: C-3 改挂帧的脏集并入后：增量重建 ≡ 全量重建，与改挂无关的轮仍复用
+ok 118 - C-3 改挂帧的脏集并入后：增量重建 ≡ 全量重建，与改挂无关的轮仍复用
+  ---
+  duration_ms: 2.465
+  type: 'test'
+  ...
+# Subtest: C-3 未改挂的 upsert 不产生 detachedTurnIds，withDetachedTurnIds 原样返回入参引用
+ok 119 - C-3 未改挂的 upsert 不产生 detachedTurnIds，withDetachedTurnIds 原样返回入参引用
+  ---
+  duration_ms: 0.4688
+  type: 'test'
+  ...
+# Subtest: T-AP4 场景一：追加新 turn 致 isLastTurn 翻转（增量 ≡ 全量）
+ok 120 - T-AP4 场景一：追加新 turn 致 isLastTurn 翻转（增量 ≡ 全量）
+  ---
+  duration_ms: 2.4606
+  type: 'test'
+  ...
+# Subtest: T-AP4 场景二：末位 turn 被过滤，前一末轮接过 isLastTurn（增量 ≡ 全量）
+ok 121 - T-AP4 场景二：末位 turn 被过滤，前一末轮接过 isLastTurn（增量 ≡ 全量）
+  ---
+  duration_ms: 0.8629
+  type: 'test'
+  ...
+# Subtest: T-AP4 场景二补：末位仍被过滤时，前一末轮的条目按 isLastTurn 段命中复用
+ok 122 - T-AP4 场景二补：末位仍被过滤时，前一末轮的条目按 isLastTurn 段命中复用
+  ---
+  duration_ms: 0.5656
+  type: 'test'
+  ...
+# Subtest: T-AP4 每次调用都返回新数组，未变更且非末位的轮复用同一个 unit 对象
+ok 123 - T-AP4 每次调用都返回新数组，未变更且非末位的轮复用同一个 unit 对象
+  ---
+  duration_ms: 0.3809
+  type: 'test'
+  ...
+# Subtest: G-3 护栏：每帧物化数 ≤ 脏轮数 + 1（失效锚点）
+ok 124 - G-3 护栏：每帧物化数 ≤ 脏轮数 + 1（失效锚点）
+  ---
+  duration_ms: 0.7992
+  type: 'test'
+  ...
+# Subtest: T-AP4 场景三：sessionPhase 迁移改写 running 判定与展开态（增量 ≡ 全量）
+ok 125 - T-AP4 场景三：sessionPhase 迁移改写 running 判定与展开态（增量 ≡ 全量）
+  ---
+  duration_ms: 4.9578
+  type: 'test'
+  ...
+# Subtest: T-AP4 无 lastMutation 时退化为全量重建，且不会把旧条目当成命中
+ok 126 - T-AP4 无 lastMutation 时退化为全量重建，且不会把旧条目当成命中
+  ---
+  duration_ms: 0.7405
+  type: 'test'
+  ...
+# Subtest: T-AP4 scopeKey 切换清空缓存：不同会话的同名 turnId 不会串号
+ok 127 - T-AP4 scopeKey 切换清空缓存：不同会话的同名 turnId 不会串号
+  ---
+  duration_ms: 1.0287
+  type: 'test'
+  ...
+# Subtest: T-AP4 已裁剪出窗口的轮不会留在缓存里（缓存有界）
+ok 128 - T-AP4 已裁剪出窗口的轮不会留在缓存里（缓存有界）
+  ---
+  duration_ms: 1.0037
+  type: 'test'
+  ...
+# Subtest: T-AP4 随机 delta 序列下增量 ≡ 全量（含 upsert / row.delta / 裁剪 / 追加）
+ok 129 - T-AP4 随机 delta 序列下增量 ≡ 全量（含 upsert / row.delta / 裁剪 / 追加）
+  ---
+  duration_ms: 66.6639
+  type: 'test'
+  ...
+# Subtest: T-TD3 三类失效帧各一例：append / upsert / removed 都让目录代际自增
+ok 130 - T-TD3 三类失效帧各一例：append / upsert / removed 都让目录代际自增
+  ---
+  duration_ms: 3.5702
+  type: 'test'
+  ...
+# Subtest: T-TD3 snapshot 整体替换同样让目录代际自增
+ok 131 - T-TD3 snapshot 整体替换同样让目录代际自增
+  ---
+  duration_ms: 1.4613
+  type: 'test'
+  ...
+# Subtest: T-TD3 与目录无关的帧不触发失效：非 realUser 输入与 assistantText 流式
+ok 132 - T-TD3 与目录无关的帧不触发失效：非 realUser 输入与 assistantText 流式
+  ---
+  duration_ms: 0.5327
+  type: 'test'
+  ...
+# Subtest: T-TD3 同一帧内多类失效只自增一次（代际是闸门，不是计数器）
+ok 133 - T-TD3 同一帧内多类失效只自增一次（代际是闸门，不是计数器）
+  ---
+  duration_ms: 0.3309
+  type: 'test'
+  ...
+# Subtest: T-TD3 重查去抖写死 250ms trailing
+ok 134 - T-TD3 重查去抖写死 250ms trailing
+  ---
+  duration_ms: 0.1259
+  type: 'test'
+  ...
+# Subtest: T-TD3 revision 连续变更的多次重查被合并为一次查询
+ok 135 - T-TD3 revision 连续变更的多次重查被合并为一次查询
+  ---
+  duration_ms: 2.5219
+  type: 'test'
+  ...
+# Subtest: T-TD3 去抖 cancel 能掐掉未执行的重查（store close 时必须清得掉）
+ok 136 - T-TD3 去抖 cancel 能掐掉未执行的重查（store close 时必须清得掉）
+  ---
+  duration_ms: 0.2054
+  type: 'test'
+  ...
+# Subtest: G-1 两页取齐：游标向更早方向翻，条目整体保持 queryRowId 升序
+ok 137 - G-1 两页取齐：游标向更早方向翻，条目整体保持 queryRowId 升序
+  ---
+  duration_ms: 0.7487
+  type: 'test'
+  ...
+# Subtest: G-1 单页就取齐：不再发第二次查询
+ok 138 - G-1 单页就取齐：不再发第二次查询
+  ---
+  duration_ms: 0.2353
+  type: 'test'
+  ...
+# Subtest: G-1 权威总数不足两条：首屏即终态，一条都不提交
+ok 139 - G-1 权威总数不足两条：首屏即终态，一条都不提交
+  ---
+  duration_ms: 0.2076
+  type: 'test'
+  ...
+# Subtest: G-1 条目数对齐后 hasMore 收敛为 false：服务端仍报「更早方向还有」也不多翻一页
+ok 140 - G-1 条目数对齐后 hasMore 收敛为 false：服务端仍报「更早方向还有」也不多翻一页
+  ---
+  duration_ms: 0.187
+  type: 'test'
+  ...
+# Subtest: G-1 跨 revision：第二页 revision 漂移即整批弃（游标按全量行现算，跨代拼接必漏）
+ok 141 - G-1 跨 revision：第二页 revision 漂移即整批弃（游标按全量行现算，跨代拼接必漏）
+  ---
+  duration_ms: 0.2754
+  type: 'test'
+  ...
+# Subtest: G-1 纪元不匹配：本地活纪元已推进则整批弃
+ok 142 - G-1 纪元不匹配：本地活纪元已推进则整批弃
+  ---
+  duration_ms: 0.291
+  type: 'test'
+  ...
+# Subtest: G-1 纪元不匹配：服务端回执与本批不符（本地还没推进）也整批弃
+ok 143 - G-1 纪元不匹配：服务端回执与本批不符（本地还没推进）也整批弃
+  ---
+  duration_ms: 0.1808
+  type: 'test'
+  ...
+# Subtest: G-1 纪元缺失（会话快照已被清）同样按弃处理
+ok 144 - G-1 纪元缺失（会话快照已被清）同样按弃处理
+  ---
+  duration_ms: 0.1843
+  type: 'test'
+  ...
+# Subtest: G-1 游标未推进：hasMore 为真却返回空页即判失败（否则死循环）
+ok 145 - G-1 游标未推进：hasMore 为真却返回空页即判失败（否则死循环）
+  ---
+  duration_ms: 0.1774
+  type: 'test'
+  ...
+# Subtest: G-1 游标未推进：游标不后退（nextCursor >= 上一页游标）同样判失败
+ok 146 - G-1 游标未推进：游标不后退（nextCursor >= 上一页游标）同样判失败
+  ---
+  duration_ms: 0.3
+  type: 'test'
+  ...
+# Subtest: G-1 页数上限：到顶以已取到的部分提交，并如实报 page-limit（不再多翻一页）
+ok 147 - G-1 页数上限：到顶以已取到的部分提交，并如实报 page-limit（不再多翻一页）
+  ---
+  duration_ms: 0.3395
+  type: 'test'
+  ...
+# Subtest: G-1 fetchPage 抛错：表达为 fetch-failed 并把原始错误带回（core 不打日志）
+ok 148 - G-1 fetchPage 抛错：表达为 fetch-failed 并把原始错误带回（core 不打日志）
+  ---
+  duration_ms: 0.2979
+  type: 'test'
+  ...
+# Subtest: G-1 调用方中止（store close）不混同于失败
+ok 149 - G-1 调用方中止（store close）不混同于失败
+  ---
+  duration_ms: 0.2515
+  type: 'test'
+  ...
+# Subtest: G-1 翻页途中 store 关闭：第二页之前就停，已取到的第一页也不提交
+ok 150 - G-1 翻页途中 store 关闭：第二页之前就停，已取到的第一页也不提交
+  ---
+  duration_ms: 0.4433
+  type: 'test'
+  ...
+# Subtest: controlWork 未命中且 agentId 存在时回退到 agentId 作为 controlWorkId
+ok 151 - controlWork 未命中且 agentId 存在时回退到 agentId 作为 controlWorkId
+  ---
+  duration_ms: 2.317
+  type: 'test'
+  ...
+# Subtest: status 为 waiting 时不回退，避免误停等待中的子智能体
+ok 152 - status 为 waiting 时不回退，避免误停等待中的子智能体
+  ---
+  duration_ms: 0.2758
+  type: 'test'
+  ...
+# Subtest: 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制
+ok 153 - 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制
+  ---
+  duration_ms: 0.2192
+  type: 'test'
+  ...
+# Subtest: 命中 controlWork 时仍走原联接路径，回退不抢场
+ok 154 - 命中 controlWork 时仍走原联接路径，回退不抢场
+  ---
+  duration_ms: 0.2575
+  type: 'test'
+  ...
+# Subtest: backgrounded 侧 cancel 入口在任何偏斜下都不许消失（既有语义不回退）
+ok 155 - backgrounded 侧 cancel 入口在任何偏斜下都不许消失（既有语义不回退）
+  ---
+  duration_ms: 0.2992
+  type: 'test'
+  ...
+# Subtest: 重复 childSessionId 仍回退 agentId，可停性按组内 cancellable 聚合
+ok 156 - 重复 childSessionId 仍回退 agentId，可停性按组内 cancellable 聚合
+  ---
+  duration_ms: 0.6307
+  type: 'test'
+  ...
+# Subtest: 合并：目录 + 已加载按 queryRowId 去重（已加载侧优先）
+ok 157 - 合并：目录 + 已加载按 queryRowId 去重（已加载侧优先）
+  ---
+  duration_ms: 3.3094
+  type: 'test'
+  ...
+# Subtest: 合并：输出顺序稳定（目录未加载时与旧 items 逐项等价）
+ok 158 - 合并：输出顺序稳定（目录未加载时与旧 items 逐项等价）
+  ---
+  duration_ms: 0.8116
+  type: 'test'
+  ...
+# Subtest: 合并：窗口范围内的未命中目录项被丢弃（窗口是那一段的权威源）
+ok 159 - 合并：窗口范围内的未命中目录项被丢弃（窗口是那一段的权威源）
+  ---
+  duration_ms: 0.2916
+  type: 'test'
+  ...
+# Subtest: G-3 守卫：本地三态字面量与协议枚举逐字相同
+ok 160 - G-3 守卫：本地三态字面量与协议枚举逐字相同
+  ---
+  duration_ms: 0.2774
+  type: 'test'
+  ...
+# Subtest: 降级 item：key/摘要三态/unitIndex 目录序口径
+ok 161 - 降级 item：key/摘要三态/unitIndex 目录序口径
+  ---
+  duration_ms: 0.3456
+  type: 'test'
+  ...
+# Subtest: 降级 item：queryPreview 空串时 userPreview 套 fallback 文案（full/B-4）
+ok 162 - 降级 item：queryPreview 空串时 userPreview 套 fallback 文案（full/B-4）
+  ---
+  duration_ms: 0.2159
+  type: 'test'
+  ...
+# Subtest: active 降级三态：已加载 / 未加载 / 混合（跨边界）
+ok 163 - active 降级三态：已加载 / 未加载 / 混合（跨边界）
+  ---
+  duration_ms: 0.4055
+  type: 'test'
+  ...
+# Subtest: active 降级：未加载项与窗口首行同行/在窗口之下时不参与高亮
+ok 164 - active 降级：未加载项与窗口首行同行/在窗口之下时不参与高亮
+  ---
+  duration_ms: 0.1854
+  type: 'test'
+  ...
+# Subtest: C-4 降级项 unitIndex 排序后重编号：交错语料下严格等于最终下标
+ok 165 - C-4 降级项 unitIndex 排序后重编号：交错语料下严格等于最终下标
+  ---
+  duration_ms: 0.5206
+  type: 'test'
+  ...
+# Subtest: 传 itemByUnitIndex 与不传结果一致（已加载区间主循环）
+ok 166 - 传 itemByUnitIndex 与不传结果一致（已加载区间主循环）
+  ---
+  duration_ms: 2.3251
+  type: 'test'
+  ...
+# Subtest: 传 itemByUnitIndex 与不传结果一致（topVirtualIndex 兜底链）
+ok 167 - 传 itemByUnitIndex 与不传结果一致（topVirtualIndex 兜底链）
+  ---
+  duration_ms: 0.5495
+  type: 'test'
+  ...
+# Subtest: 空 items 时返回 undefined（传/不传一致）
+ok 168 - 空 items 时返回 undefined（传/不传一致）
+  ---
+  duration_ms: 0.2024
+  type: 'test'
+  ...
+# Subtest: 量化边界：桶内稳定，跨桶才可能切换（量化单位 = 主时间线行高 72）
+ok 169 - 量化边界：桶内稳定，跨桶才可能切换（量化单位 = 主时间线行高 72）
+  ---
+  duration_ms: 1.3413
+  type: 'test'
+  ...
+# Subtest: 量化与原始 offset 的偏差不超过一行（且行高量级对齐时完全一致）
+ok 170 - 量化与原始 offset 的偏差不超过一行（且行高量级对齐时完全一致）
+  ---
+  duration_ms: 1.6303
+  type: 'test'
+  ...
+# Subtest: ActiveQueryRowId：视口定位口径 + 空表返回 undefined
+ok 171 - ActiveQueryRowId：视口定位口径 + 空表返回 undefined
+  ---
+  duration_ms: 0.4495
+  type: 'test'
+  ...
+# Subtest: 目录门控：未取过目录（total 为 undefined）落回 canLoadOlder 放行首查
+ok 172 - 目录门控：未取过目录（total 为 undefined）落回 canLoadOlder 放行首查
+  ---
+  duration_ms: 0.4412
+  type: 'test'
+  ...
+# Subtest: 目录门控：已取过且权威总数不足两条 → 不放行（rail 不会出现）
+ok 173 - 目录门控：已取过且权威总数不足两条 → 不放行（rail 不会出现）
+  ---
+  duration_ms: 0.2377
+  type: 'test'
+  ...
+# Subtest: 目录门控：终态 not-enough-queries 不被重新放行（total 是权威结论）
+ok 174 - 目录门控：终态 not-enough-queries 不被重新放行（total 是权威结论）
+  ---
+  duration_ms: 0.4425
+  type: 'test'
+  ...
+# Subtest: 目录门控：宽度 / 缺 handler / 在途 三道前置闸门不受门控影响
+ok 175 - 目录门控：宽度 / 缺 handler / 在途 三道前置闸门不受门控影响
+  ---
+  duration_ms: 0.6417
+  type: 'test'
+  ...
+# Subtest: pickOwnedRowElements：注册表条目不属于本容器时被跳过（full/B-1）
+ok 176 - pickOwnedRowElements：注册表条目不属于本容器时被跳过（full/B-1）
+  ---
+  duration_ms: 1.1333
+  type: 'test'
+  ...
+# Subtest: pickOwnedRowElements：全部不归属 / 空注册表 → 空 Map
+ok 177 - pickOwnedRowElements：全部不归属 / 空注册表 → 空 Map
+  ---
+  duration_ms: 0.1751
+  type: 'test'
+  ...
+# [v4-renderUnits] 共享缓存的 (scopeKey, sessionPhase) 与缓存内不一致： ConversationTimeline 与 SessionPane 必须喂同一组值，否则两侧会互相把对方的条目冲掉。 {
+#   cached: { scopeKey: 'sess-c2', sessionPhase: 'running' },
+#   next: { scopeKey: 'sess-c2', sessionPhase: 'completedSuccess' }
+# }
+# Subtest: C-2：同一 turnId 多 phase 反复注入后分区数 ≤ MAX_PARTITIONS_PER_TURN
+ok 178 - C-2：同一 turnId 多 phase 反复注入后分区数 ≤ MAX_PARTITIONS_PER_TURN
+  ---
+  duration_ms: 17.9826
+  type: 'test'
+  ...
+# Subtest: C-5：空 rows 的 build 不清空 scopeKey 下既有条目（锚点归零、缓存保留）
+ok 179 - C-5：空 rows 的 build 不清空 scopeKey 下既有条目（锚点归零、缓存保留）
+  ---
+  duration_ms: 1.7873
+  type: 'test'
+  ...
+# Subtest: C-5：scopeKey/sessionPhase 与缓存内不一致时 DEV 告警恰一次
+ok 180 - C-5：scopeKey/sessionPhase 与缓存内不一致时 DEV 告警恰一次
+  ---
+  duration_ms: 0.9067
+  type: 'test'
+  ...
+# Subtest: 默认容差为 2px（吸收亚像素抖动）
+ok 181 - 默认容差为 2px（吸收亚像素抖动）
+  ---
+  duration_ms: 1.0768
+  type: 'test'
+  ...
+# Subtest: scrollHeight 等于 clientHeight 不溢出
+ok 182 - scrollHeight 等于 clientHeight 不溢出
+  ---
+  duration_ms: 0.2274
+  type: 'test'
+  ...
+# Subtest: 溢出差值不超过容差不算溢出
+ok 183 - 溢出差值不超过容差不算溢出
+  ---
+  duration_ms: 0.1536
+  type: 'test'
+  ...
+# Subtest: 溢出差值超出容差判定溢出
+ok 184 - 溢出差值超出容差判定溢出
+  ---
+  duration_ms: 0.1277
+  type: 'test'
+  ...
+# Subtest: 显式传入容差时按该容差判定
+ok 185 - 显式传入容差时按该容差判定
+  ---
+  duration_ms: 0.1759
+  type: 'test'
+  ...
+# Subtest: 容差为 0 时差值相等仍不溢出
+ok 186 - 容差为 0 时差值相等仍不溢出
+  ---
+  duration_ms: 0.1428
+  type: 'test'
+  ...
+# Subtest: clampOverflowPx 返回溢出像素数且不为负
+ok 187 - clampOverflowPx 返回溢出像素数且不为负
+  ---
+  duration_ms: 0.1389
+  type: 'test'
+  ...
+# Subtest: success：重置预算、不重试、不落终态
+ok 188 - success：重置预算、不重试、不落终态
+  ---
+  duration_ms: 2.0847
+  type: 'test'
+  ...
+# Subtest: success：即使预算已耗尽也仍然重置预算并正常返回
+ok 189 - success：即使预算已耗尽也仍然重置预算并正常返回
+  ---
+  duration_ms: 0.1782
+  type: 'test'
+  ...
+# Subtest: error：预算未耗尽时排一次退避重试，不落终态
+ok 190 - error：预算未耗尽时排一次退避重试，不落终态
+  ---
+  duration_ms: 0.1518
+  type: 'test'
+  ...
+# Subtest: empty：预算未耗尽时排一次退避重试，不落终态
+ok 191 - empty：预算未耗尽时排一次退避重试，不落终态
+  ---
+  duration_ms: 0.2844
+  type: 'test'
+  ...
+# Subtest: 连续 empty：不重置预算，持续消耗预算直至耗尽
+ok 192 - 连续 empty：不重置预算，持续消耗预算直至耗尽
+  ---
+  duration_ms: 0.2432
+  type: 'test'
+  ...
+# Subtest: 第 limit+1 次空读落 empty 终态（预算耗尽）
+ok 193 - 第 limit+1 次空读落 empty 终态（预算耗尽）
+  ---
+  duration_ms: 0.2085
+  type: 'test'
+  ...
+# Subtest: 预算耗尽时 error 落终态且不再重试
+ok 194 - 预算耗尽时 error 落终态且不再重试
+  ---
+  duration_ms: 0.2088
+  type: 'test'
+  ...
+# Subtest: 边界：retryCount == limit - 1 仍可重试一次
+ok 195 - 边界：retryCount == limit - 1 仍可重试一次
+  ---
+  duration_ms: 0.2165
+  type: 'test'
+  ...
+# Subtest: 边界：limit 为 0 时第一次失败即落终态
+ok 196 - 边界：limit 为 0 时第一次失败即落终态
+  ---
+  duration_ms: 0.3373
+  type: 'test'
+  ...
+# Subtest: T-N1 ① 配对四态：ok/error/missing（被放弃 attempt 与 unknown 无 id）/pending 仅尾部
+ok 197 - T-N1 ① 配对四态：ok/error/missing（被放弃 attempt 与 unknown 无 id）/pending 仅尾部
+  ---
+  duration_ms: 3.2553
+  type: 'test'
+  ...
+# Subtest: T-N1 ① 被放弃 attempt 的未配对 call 判 missing，末条 attempt 判 pending
+ok 198 - T-N1 ① 被放弃 attempt 的未配对 call 判 missing，末条 attempt 判 pending
+  ---
+  duration_ms: 0.9133
+  type: 'test'
+  ...
+# Subtest: T-N1 ② 跨记录配对：call 在 record N、result 在 record N+1 时 N+1 的集合含该 id
+ok 199 - T-N1 ② 跨记录配对：call 在 record N、result 在 record N+1 时 N+1 的集合含该 id
+  ---
+  duration_ms: 0.4426
+  type: 'test'
+  ...
+# Subtest: T-N1 ② 孤立 result（有结果无调用）不剔除：不入配对集合、行照旧保留
+ok 200 - T-N1 ② 孤立 result（有结果无调用）不剔除：不入配对集合、行照旧保留
+  ---
+  duration_ms: 0.2708
+  type: 'test'
+  ...
+# Subtest: T-N1 ③ 剔除谓词：全部 part 都是已配对 result 才整行剔除，其余一律保留
+ok 201 - T-N1 ③ 剔除谓词：全部 part 都是已配对 result 才整行剔除，其余一律保留
+  ---
+  duration_ms: 0.5174
+  type: 'test'
+  ...
+# Subtest: T-N1 ③ 无配对集合时行全部保留
+ok 202 - T-N1 ③ 无配对集合时行全部保留
+  ---
+  duration_ms: 0.2697
+  type: 'test'
+  ...
+# Subtest: T-N1 ④ 一条消息多个 result part：按 part 配对，文本互不串联
+ok 203 - T-N1 ④ 一条消息多个 result part：按 part 配对，文本互不串联
+  ---
+  duration_ms: 0.3659
+  type: 'test'
+  ...
+# Subtest: T-N1 ④ id 缺失不入 map：无 id 的 call 永远配不上，无 id 的 result 不被消费
+ok 204 - T-N1 ④ id 缺失不入 map：无 id 的 call 永远配不上，无 id 的 result 不被消费
+  ---
+  duration_ms: 0.3965
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑤ key 家族迁移后逐字同值（call key / input row key / tool-call target key）
+ok 205 - T-N1 ⑤ key 家族迁移后逐字同值（call key / input row key / tool-call target key）
+  ---
+  duration_ms: 0.5879
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑥ displayText：use 段 + 结果段，空结果不拼分隔符
+ok 206 - T-N1 ⑥ displayText：use 段 + 结果段，空结果不拼分隔符
+  ---
+  duration_ms: 0.7454
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑧ badgeText ① result 侧工具名优先于 call 侧名
+ok 207 - T-N1 ⑧ badgeText ① result 侧工具名优先于 call 侧名
+  ---
+  duration_ms: 0.4123
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑧ badgeText ② 无 result 时回退 call 侧名；call 侧无名时用兜底名 tool
+ok 208 - T-N1 ⑧ badgeText ② 无 result 时回退 call 侧名；call 侧无名时用兜底名 tool
+  ---
+  duration_ms: 0.1669
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑧ badgeText ③ result 侧 toolName 为 undefined 时回退 call 侧名
+ok 209 - T-N1 ⑧ badgeText ③ result 侧 toolName 为 undefined 时回退 call 侧名
+  ---
+  duration_ms: 0.1361
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑧ badgeText ①' result 侧工具名为空串时回退 call 侧名（A-P2-1）
+ok 210 - T-N1 ⑧ badgeText ①' result 侧工具名为空串时回退 call 侧名（A-P2-1）
+  ---
+  duration_ms: 0.1223
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑧ badgeText ④ unknown 条目无徽标（name/id 均为空串）
+ok 211 - T-N1 ⑧ badgeText ④ unknown 条目无徽标（name/id 均为空串）
+  ---
+  duration_ms: 0.1234
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑨ unknown 条目的 displayText 并入 raw 原文：复制/全屏不再空白
+ok 212 - T-N1 ⑨ unknown 条目的 displayText 并入 raw 原文：复制/全屏不再空白
+  ---
+  duration_ms: 0.1299
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑩ 末条 record 为 sidecar 时，前一条主调用的未配对 call 判 missing
+ok 213 - T-N1 ⑩ 末条 record 为 sidecar 时，前一条主调用的未配对 call 判 missing
+  ---
+  duration_ms: 0.2281
+  type: 'test'
+  ...
+# Subtest: T-N1 ⑦ delta 投影为空时仍能配对：join 只用完整 request.messages
+ok 214 - T-N1 ⑦ delta 投影为空时仍能配对：join 只用完整 request.messages
+  ---
+  duration_ms: 0.4372
+  type: 'test'
+  ...
+# Subtest: T-N5 ① toolCallCount：只数 kind==='tool-call'，response undefined 与 unknown 条目不计
+ok 215 - T-N5 ① toolCallCount：只数 kind==='tool-call'，response undefined 与 unknown 条目不计
+  ---
+  duration_ms: 3.6261
+  type: 'test'
+  ...
+# Subtest: T-N5 ② charCount：text + reasoningText + use 段（join 分隔符计入，不 trim）
+ok 216 - T-N5 ② charCount：text + reasoningText + use 段（join 分隔符计入，不 trim）
+  ---
+  duration_ms: 1.2337
+  type: 'test'
+  ...
+# Subtest: T-N5 ② charCount 随 reasoning 投影变化（关闭思考过程后字数相应减小）
+ok 217 - T-N5 ② charCount 随 reasoning 投影变化（关闭思考过程后字数相应减小）
+  ---
+  duration_ms: 0.7366
+  type: 'test'
+  ...
+# Subtest: T-N5 ③ failureCount：模型报错数与工具报错数拆分并合计
+ok 218 - T-N5 ③ failureCount：模型报错数与工具报错数拆分并合计
+  ---
+  duration_ms: 0.7204
+  type: 'test'
+  ...
+# Subtest: T-N5 ④ sidecar 调用不进 counts；全 sidecar 回合回退为全部调用
+ok 219 - T-N5 ④ sidecar 调用不进 counts；全 sidecar 回合回退为全部调用
+  ---
+  duration_ms: 0.6295
+  type: 'test'
+  ...
+# Subtest: T-N6 段序列：全字段齐备时逐段锁定（含 duration 字符串段与每来源一段）
+ok 220 - T-N6 段序列：全字段齐备时逐段锁定（含 duration 字符串段与每来源一段）
+  ---
+  duration_ms: 1.6975
+  type: 'test'
+  ...
+# Subtest: T-N6 段序列：工具 0 / 失败 0 / 时长 0 / 无来源时对应段省略
+ok 221 - T-N6 段序列：工具 0 / 失败 0 / 时长 0 / 无来源时对应段省略
+  ---
+  duration_ms: 0.2412
+  type: 'test'
+  ...
+# Subtest: T-N6 段序列：多来源每来源一段，保持首次出现顺序
+ok 222 - T-N6 段序列：多来源每来源一段，保持首次出现顺序
+  ---
+  duration_ms: 0.2043
+  type: 'test'
+  ...
+# Subtest: T-N6 段序列：时长段是原样字符串（非 i18n 段），毫秒与秒两种形态
+ok 223 - T-N6 段序列：时长段是原样字符串（非 i18n 段），毫秒与秒两种形态
+  ---
+  duration_ms: 0.2427
+  type: 'test'
+  ...
+# Subtest: T-T3 按 turnId 稳定分组：同轮多 call 合并、sidecar 并入、fallback 独立成组
+ok 224 - T-T3 按 turnId 稳定分组：同轮多 call 合并、sidecar 并入、fallback 独立成组
+  ---
+  duration_ms: 6.0747
+  type: 'test'
+  ...
+# Subtest: T-T3 无 turnId 的记录即使 requestId 重复也各自独立成组，key 仍唯一
+ok 225 - T-T3 无 turnId 的记录即使 requestId 重复也各自独立成组，key 仍唯一
+  ---
+  duration_ms: 1.7189
+  type: 'test'
+  ...
+# Subtest: T-T4 真实用户输入判定：注入包裹/通知前缀排除、§N§ 剥离
+ok 226 - T-T4 真实用户输入判定：注入包裹/通知前缀排除、§N§ 剥离
+  ---
+  duration_ms: 0.5762
+  type: 'test'
+  ...
+# Subtest: T-T4 回合预览：跳过注入形态、按 buildPreviewText 口径截断
+ok 227 - T-T4 回合预览：跳过注入形态、按 buildPreviewText 口径截断
+  ---
+  duration_ms: 0.3996
+  type: 'test'
+  ...
+# Subtest: T-T4 回合预览：空白折叠为单空格、最多两段
+ok 228 - T-T4 回合预览：空白折叠为单空格、最多两段
+  ---
+  duration_ms: 0.2058
+  type: 'test'
+  ...
+# Subtest: T-T4 回合无真实 user：回落首条 assistant 文本，仍无则占位
+ok 229 - T-T4 回合无真实 user：回落首条 assistant 文本，仍无则占位
+  ---
+  duration_ms: 0.4147
+  type: 'test'
+  ...
+# Subtest: T-T5 reasoning 投影：删除 reasoningText 与 reasoning part，消息条数不变
+ok 230 - T-T5 reasoning 投影：删除 reasoningText 与 reasoning part，消息条数不变
+  ---
+  duration_ms: 0.679
+  type: 'test'
+  ...
+# Subtest: T-T8 delta 判据矩阵：main/subagent → delta，sidecar/unknown → full
+ok 231 - T-T8 delta 判据矩阵：main/subagent → delta，sidecar/unknown → full
+  ---
+  duration_ms: 0.4525
+  type: 'test'
+  ...
+# Subtest: T-T9 ① 正向平移：computeDeltaMessages 恰 curr−prev 条，resolve 去 assistant 后 = N−1
+ok 232 - T-T9 ① 正向平移：computeDeltaMessages 恰 curr−prev 条，resolve 去 assistant 后 = N−1
+  ---
+  duration_ms: 0.6666
+  type: 'test'
+  ...
+# Subtest: T-T9 ② 同计数重试：增量为空（锁定 slice(-0) 陷阱）
+ok 233 - T-T9 ② 同计数重试：增量为空（锁定 slice(-0) 陷阱）
+  ---
+  duration_ms: 0.7451
+  type: 'test'
+  ...
+# Subtest: T-T9 ③ 回合边界计数下降 234→182：整段展示 + prevCount 重置
+ok 234 - T-T9 ③ 回合边界计数下降 234→182：整段展示 + prevCount 重置
+  ---
+  duration_ms: 0.4489
+  type: 'test'
+  ...
+# Subtest: T-T9 ④ full-retention（无 messageCount）按可见条数走全量分支
+ok 235 - T-T9 ④ full-retention（无 messageCount）按可见条数走全量分支
+  ---
+  duration_ms: 0.4359
+  type: 'test'
+  ...
+# Subtest: C-1 搜索项按回合首现、回合内 recordIndex 升序展开（交错 turnId 不等于全局下标）
+ok 236 - C-1 搜索项按回合首现、回合内 recordIndex 升序展开（交错 turnId 不等于全局下标）
+  ---
+  duration_ms: 0.797
+  type: 'test'
+  ...
+# Subtest: B-2 搜索索引随占位过滤开关变化：隐藏时零命中，显示时命中且 key 等于渲染 expansionKey
+ok 237 - B-2 搜索索引随占位过滤开关变化：隐藏时零命中，显示时命中且 key 等于渲染 expansionKey
+  ---
+  duration_ms: 1.5522
+  type: 'test'
+  ...
+# Subtest: T-N2 ① result 词命中 tool-call target key（恰一条、不含任何 input row key）
+ok 238 - T-N2 ① result 词命中 tool-call target key（恰一条、不含任何 input row key）
+  ---
+  duration_ms: 1.0219
+  type: 'test'
+  ...
+# Subtest: T-N2 ② 孤立 result（有结果无调用）仍命中 input row key
+ok 239 - T-N2 ② 孤立 result（有结果无调用）仍命中 input row key
+  ---
+  duration_ms: 0.4644
+  type: 'test'
+  ...
+# Subtest: T-N2 ③ 占位计数不变：配对剔除不计入 hiddenCount，配对行不进可见行
+ok 240 - T-N2 ③ 占位计数不变：配对剔除不计入 hiddenCount，配对行不进可见行
+  ---
+  duration_ms: 0.3881
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：marker-only 文本（只剩 §N§ 标记）→ hidden
+ok 241 - T-T6 wire-filter：marker-only 文本（只剩 §N§ 标记）→ hidden
+  ---
+  duration_ms: 1.6745
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：空 parts 与全空文本 → hidden
+ok 242 - T-T6 wire-filter：空 parts 与全空文本 → hidden
+  ---
+  duration_ms: 0.2194
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：[dropped §4§] 单行及其它占位符形态 → hidden
+ok 243 - T-T6 wire-filter：[dropped §4§] 单行及其它占位符形态 → hidden
+  ---
+  duration_ms: 0.4045
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：system / user 角色强制 visible（含占位文本与空 parts）
+ok 244 - T-T6 wire-filter：system / user 角色强制 visible（含占位文本与空 parts）
+  ---
+  duration_ms: 0.1737
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：正常文本与结构化 part → visible
+ok 245 - T-T6 wire-filter：正常文本与结构化 part → visible
+  ---
+  duration_ms: 0.3401
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：hiddenCount 计数正确且保持顺序
+ok 246 - T-T6 wire-filter：hiddenCount 计数正确且保持顺序
+  ---
+  duration_ms: 1.2057
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：空列表与全占位列表
+ok 247 - T-T6 wire-filter：空列表与全占位列表
+  ---
+  duration_ms: 0.2965
+  type: 'test'
+  ...
+# Subtest: T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标（UI 渲染与搜索索引共用）
+ok 248 - T-T6 wire-filter：classifyTrajectoryWireRows 保留原始下标（UI 渲染与搜索索引共用）
+  ---
+  duration_ms: 0.4508
+  type: 'test'
+  ...
+# Subtest: T-PA1: 同步 busy loop 注入长任务后 dump() 能解析出 longtask 条目
+ok 249 - T-PA1: 同步 busy loop 注入长任务后 dump() 能解析出 longtask 条目
+  ---
+  duration_ms: 174.469
+  type: 'test'
+  ...
+# Subtest: T-PA2: 注入 7 个假 provider 后 collectRendererMemorySample 返回全部计数 + heap + role
+ok 250 - T-PA2: 注入 7 个假 provider 后 collectRendererMemorySample 返回全部计数 + heap + role
+  ---
+  duration_ms: 0.6573
+  type: 'test'
+  ...
+# Subtest: T-PA2: 无 performance.memory 时样本只带计数，heap 字段省略
+ok 251 - T-PA2: 无 performance.memory 时样本只带计数，heap 字段省略
+  ---
+  duration_ms: 0.204
+  type: 'test'
+  ...
+# Subtest: T-PA2: 采集是纯读——多次调用不写盘也不改门控状态
+ok 252 - T-PA2: 采集是纯读——多次调用不写盘也不改门控状态
+  ---
+  duration_ms: 0.3934
+  type: 'test'
+  ...
+# Subtest: T-PA1: reset() 清空当前段并开启新段，旧段数据保留
+ok 253 - T-PA1: reset() 清空当前段并开启新段，旧段数据保留
+  ---
+  duration_ms: 0.5996
+  type: 'test'
+  ...
+# Subtest: T-PA1: dump() 是 JSON 字符串且每段带 memory 样本（role=renderer）
+ok 254 - T-PA1: dump() 是 JSON 字符串且每段带 memory 样本（role=renderer）
+  ---
+  duration_ms: 0.2045
+  type: 'test'
+  ...
+# Subtest: T-PA1: 段数与单段条目数都按环形上限淘汰最旧
+ok 255 - T-PA1: 段数与单段条目数都按环形上限淘汰最旧
+  ---
+  duration_ms: 0.3824
+  type: 'test'
+  ...
+# Subtest: T-PA1: sampleMemory() 走 collectRendererMemorySample 的注入出口
+ok 256 - T-PA1: sampleMemory() 走 collectRendererMemorySample 的注入出口
+  ---
+  duration_ms: 0.2193
+  type: 'test'
+  ...
+# Subtest: T-PA1: stop() 之后 recordLongTask 不再进 dump（观察者已断开、缓冲已清）
+ok 257 - T-PA1: stop() 之后 recordLongTask 不再进 dump（观察者已断开、缓冲已清）
+  ---
+  duration_ms: 0.4244
+  type: 'test'
+  ...
+# Subtest: T-PA1: 非 dev/无 window 环境下 startPerfProbe 是 no-op
+ok 258 - T-PA1: 非 dev/无 window 环境下 startPerfProbe 是 no-op
+  ---
+  duration_ms: 0.4767
+  type: 'test'
+  ...
+# Subtest: T-MG1 注入超上限条目后 tokensCache 被压到 500 以内
+ok 259 - T-MG1 注入超上限条目后 tokensCache 被压到 500 以内
+  ---
+  duration_ms: 1.3111
+  type: 'test'
+  ...
+# Subtest: T-MG1 命中会刷新 LRU 顺序，最久未命中的先被淘汰
+ok 260 - T-MG1 命中会刷新 LRU 顺序，最久未命中的先被淘汰
+  ---
+  duration_ms: 0.4921
+  type: 'test'
+  ...
+# Subtest: T-MG1 反复命中同一条不会挤出其它热条目
+ok 261 - T-MG1 反复命中同一条不会挤出其它热条目
+  ---
+  duration_ms: 0.41
+  type: 'test'
+  ...
+# Subtest: T-MG1 满载（恰 500 条）时全部命中：既不增长也不误淘汰（full/G-3）
+ok 262 - T-MG1 满载（恰 500 条）时全部命中：既不增长也不误淘汰（full/G-3）
+  ---
+  duration_ms: 0.7299
+  type: 'test'
+  ...
+# Subtest: T-MG1 订阅/退订对称，pending 计数回到 0
+ok 263 - T-MG1 订阅/退订对称，pending 计数回到 0
+  ---
+  duration_ms: 0.2986
+  type: 'test'
+  ...
+# Subtest: safe / confirm 类别且有占用 → 放行（既有路径不变）
+ok 264 - safe / confirm 类别且有占用 → 放行（既有路径不变）
+  ---
+  duration_ms: 1.3296
+  type: 'test'
+  ...
+# Subtest: none 且无 cleanScope → 不放行，即使有占用（整组不可一键清理）
+ok 265 - none 且无 cleanScope → 不放行，即使有占用（整组不可一键清理）
+  ---
+  duration_ms: 0.2033
+  type: 'test'
+  ...
+# Subtest: none + cleanScope=paths（toolOutputs → cli/exec）+ 有占用 → 放行
+ok 266 - none + cleanScope=paths（toolOutputs → cli/exec）+ 有占用 → 放行
+  ---
+  duration_ms: 0.1556
+  type: 'test'
+  ...
+# Subtest: none + cleanScope=paths 但零占用 → 不放行（点进去无可清理）
+ok 267 - none + cleanScope=paths 但零占用 → 不放行（点进去无可清理）
+  ---
+  duration_ms: 0.236
+  type: 'test'
+  ...
+# Subtest: 带占用的 safe 类别即使 bytes 为 0 边界也按 cleanability 判定
+ok 268 - 带占用的 safe 类别即使 bytes 为 0 边界也按 cleanability 判定
+  ---
+  duration_ms: 0.1398
+  type: 'test'
+  ...
+# Subtest: toolOutputs 跨根合并：bytes 相加、cleanScope=paths 透传
+ok 269 - toolOutputs 跨根合并：bytes 相加、cleanScope=paths 透传
+  ---
+  duration_ms: 0.4942
+  type: 'test'
+  ...
+# Subtest: 跨根合并取任一非空 cleanScope（旧快照缺字段的根不拖丢 override）
+ok 270 - 跨根合并取任一非空 cleanScope（旧快照缺字段的根不拖丢 override）
+  ---
+  duration_ms: 0.3152
+  type: 'test'
+  ...
+# Subtest: 跨根合并后无 override 类别 → cleanScope 保持 undefined
+ok 271 - 跨根合并后无 override 类别 → cleanScope 保持 undefined
+  ---
+  duration_ms: 0.3018
+  type: 'test'
+  ...
+# Subtest: 合并结果按 bytes 降序（图例/列表顺序约定不变）
+ok 272 - 合并结果按 bytes 降序（图例/列表顺序约定不变）
+  ---
+  duration_ms: 1.2228
+  type: 'test'
+  ...
+# Subtest: 上游放行 + running + agentId 存在 → workId 取 agentId（3c 停止按钮的数据源）
+ok 273 - 上游放行 + running + agentId 存在 → workId 取 agentId（3c 停止按钮的数据源）
+  ---
+  duration_ms: 0.8225
+  type: 'test'
+  ...
+# Subtest: 上游未放行（父 pane 只读 / 无 handler 透传）→ 不渲染停止按钮
+ok 274 - 上游未放行（父 pane 只读 / 无 handler 透传）→ 不渲染停止按钮
+  ---
+  duration_ms: 0.1911
+  type: 'test'
+  ...
+# Subtest: waiting / blocked 不是可停的运行态（与状态面板回退同口径：仅 running）
+ok 275 - waiting / blocked 不是可停的运行态（与状态面板回退同口径：仅 running）
+  ---
+  duration_ms: 0.1769
+  type: 'test'
+  ...
+# Subtest: 已结束行走目录查询分页，没有可停的后台工作
+ok 276 - 已结束行走目录查询分页，没有可停的后台工作
+  ---
+  duration_ms: 0.1727
+  type: 'test'
+  ...
+# Subtest: 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制
+ok 277 - 缺 agentId 时构造不出 stopTask 的 taskId，宁可不给控制
+  ---
+  duration_ms: 0.236
+  type: 'test'
+  ...
+# Subtest: guard：无滚动记忆时计划贴底
+ok 278 - guard：无滚动记忆时计划贴底
+  ---
+  duration_ms: 1.5577
+  type: 'test'
+  ...
+# Subtest: guard：吸底记忆同样计划贴底
+ok 279 - guard：吸底记忆同样计划贴底
+  ---
+  duration_ms: 0.3054
+  type: 'test'
+  ...
+# Subtest: guard：离底记忆计划恢复记忆位置且原样携带
+ok 280 - guard：离底记忆计划恢复记忆位置且原样携带
+  ---
+  duration_ms: 0.1597
+  type: 'test'
+  ...
+# Subtest: guard：无 measured 高度时反复尝试也不释放（落点不执行）
+ok 281 - guard：无 measured 高度时反复尝试也不释放（落点不执行）
+  ---
+  duration_ms: 0.3097
+  type: 'test'
+  ...
+# Subtest: guard：rows 未到达（无虚拟行 key）时不释放
+ok 282 - guard：rows 未到达（无虚拟行 key）时不释放
+  ---
+  duration_ms: 0.1925
+  type: 'test'
+  ...
+# Subtest: guard：measurementsCache 出现本会话首项才释放
+ok 283 - guard：measurementsCache 出现本会话首项才释放
+  ---
+  duration_ms: 0.2437
+  type: 'test'
+  ...
+# Subtest: guard：释放后再次尝试返回 null（首次落点仅执行一次）
+ok 284 - guard：释放后再次尝试返回 null（首次落点仅执行一次）
+  ---
+  duration_ms: 0.1451
+  type: 'test'
+  ...
+# Subtest: guard：切会话后旧会话的 measured 信号不再释放
+ok 285 - guard：切会话后旧会话的 measured 信号不再释放
+  ---
+  duration_ms: 0.3066
+  type: 'test'
+  ...
+# Subtest: guard：tracksSession 在 arm 与释放后都成立（二次 restore effect 让位判据）
+ok 286 - guard：tracksSession 在 arm 与释放后都成立（二次 restore effect 让位判据）
+  ---
+  duration_ms: 0.3828
+  type: 'test'
+  ...
+# Subtest: 纯函数：pendingSessionKey 与当前会话不一致时一律不释放
+ok 287 - 纯函数：pendingSessionKey 与当前会话不一致时一律不释放
+  ---
+  duration_ms: 0.4628
+  type: 'test'
+  ...
+# Subtest: tracker：空 tracker + armed → 不释放（uix/A-1 a：旧 measurementsCache 陈旧键不得参与）
+ok 288 - tracker：空 tracker + armed → 不释放（uix/A-1 a：旧 measurementsCache 陈旧键不得参与）
+  ---
+  duration_ms: 0.2128
+  type: 'test'
+  ...
+# Subtest: tracker：首个 key 写入后恰好释放一次（uix/A-1 b）
+ok 289 - tracker：首个 key 写入后恰好释放一次（uix/A-1 b）
+  ---
+  duration_ms: 0.1733
+  type: 'test'
+  ...
+# Subtest: tracker：跨分区键不串（uix/A-1 c：A 分区的写入不得释放 B）
+ok 290 - tracker：跨分区键不串（uix/A-1 c：A 分区的写入不得释放 B）
+  ---
+  duration_ms: 0.125
+  type: 'test'
+  ...
+# Subtest: tracker：A→B→A 重访——arm 后仅旧键在册不算数，本会话新写入才恰好释放一次（uix/A-1 d）
+ok 291 - tracker：A→B→A 重访——arm 后仅旧键在册不算数，本会话新写入才恰好释放一次（uix/A-1 d）
+  ---
+  duration_ms: 0.1193
+  type: 'test'
+  ...
+# Subtest: 缓存分区：同会话 set/get/estimate 命中
+ok 292 - 缓存分区：同会话 set/get/estimate 命中
+  ---
+  duration_ms: 0.1753
+  type: 'test'
+  ...
+# Subtest: 缓存分区：非正/非有限高度被忽略
+ok 293 - 缓存分区：非正/非有限高度被忽略
+  ---
+  duration_ms: 0.0958
+  type: 'test'
+  ...
+# Subtest: 缓存分区：不同 sessionKey 不串号
+ok 294 - 缓存分区：不同 sessionKey 不串号
+  ---
+  duration_ms: 0.084
+  type: 'test'
+  ...
+# Subtest: 缓存分区：键中含分隔符的 session 与行键不产生拼接歧义
+ok 295 - 缓存分区：键中含分隔符的 session 与行键不产生拼接歧义
+  ---
+  duration_ms: 0.0766
+  type: 'test'
+  ...
+# Subtest: 缓存分区：切走再切回命中（命中率 > 0）
+ok 296 - 缓存分区：切走再切回命中（命中率 > 0）
+  ---
+  duration_ms: 0.3415
+  type: 'test'
+  ...
+# Subtest: 缓存分区：LRU 上限不放大且淘汰最久未写入
+ok 297 - 缓存分区：LRU 上限不放大且淘汰最久未写入
+  ---
+  duration_ms: 4.0441
+  type: 'test'
+  ...
+# Subtest: 缓存分区：LRU 上限按自定义值生效
+ok 298 - 缓存分区：LRU 上限按自定义值生效
+  ---
+  duration_ms: 0.2068
+  type: 'test'
+  ...
+# Subtest: 缓存分区：LRU 跨分区竞争——A 分区灌满容量上限挤掉 B 分区键（uix/G-3c）
+ok 299 - 缓存分区：LRU 跨分区竞争——A 分区灌满容量上限挤掉 B 分区键（uix/G-3c）
+  ---
+  duration_ms: 3.1406
+  type: 'test'
+  ...
+# Subtest: 缓存分区：重复写入刷新淘汰顺序（活跃行不被淘汰）
+ok 300 - 缓存分区：重复写入刷新淘汰顺序（活跃行不被淘汰）
+  ---
+  duration_ms: 0.183
+  type: 'test'
+  ...
+# Subtest: 缓存分区：clearSession 只删本会话分区
+ok 301 - 缓存分区：clearSession 只删本会话分区
+  ---
+  duration_ms: 0.1784
+  type: 'test'
+  ...
+# Subtest: 缓存分区：clear() 全量重置（卸载/极端兜底语义）
+ok 302 - 缓存分区：clear() 全量重置（卸载/极端兜底语义）
+  ---
+  duration_ms: 0.1263
+  type: 'test'
+  ...
+# Subtest: 分区 + guard 组合：切会话不清缓存，切回即命中真实测高
+ok 303 - 分区 + guard 组合：切会话不清缓存，切回即命中真实测高
+  ---
+  duration_ms: 0.1825
+  type: 'test'
+  ...
+1..303
+# tests 305
+# suites 1
+# pass 305
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5393.8372
+TAP version 13
+# Subtest: per-model prompt-surface routes are presented as stable display strings
+ok 1 - per-model prompt-surface routes are presented as stable display strings
+  ---
+  duration_ms: 1.4763
+  type: 'test'
+  ...
+# Subtest: tool-description override keys are presented, values are not surfaced
+ok 2 - tool-description override keys are presented, values are not surfaced
+  ---
+  duration_ms: 0.169
+  type: 'test'
+  ...
+# Subtest: bad values are shown as not configured, never as a selected preset
+ok 3 - bad values are shown as not configured, never as a selected preset
+  ---
+  duration_ms: 0.1461
+  type: 'test'
+  ...
+# Subtest: no overrides at all yields two empty read-only lists
+ok 4 - no overrides at all yields two empty read-only lists
+  ---
+  duration_ms: 0.2174
+  type: 'test'
+  ...
+# Subtest: the read-only fields never reach the write path: overrides round-trip byte-for-byte
+ok 5 - the read-only fields never reach the write path: overrides round-trip byte-for-byte
+  ---
+  duration_ms: 0.3288
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 655.0622
+
+> @zcode/bootstrap@0.1.0 test:turn-directory D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-turn-directory.mjs
+
+TAP version 13
+# Subtest: A1: 真实事件链灌出的目录只有 realUser query，assistant 摘要是真正文
+ok 1 - A1: 真实事件链灌出的目录只有 realUser query，assistant 摘要是真正文
+  ---
+  duration_ms: 9.0739
+  type: 'test'
+  ...
+# Subtest: B1: 只有 origin==='realUser' 的 userInput 成条，其余系统来源一律排除
+ok 2 - B1: 只有 origin==='realUser' 的 userInput 成条，其余系统来源一律排除
+  ---
+  duration_ms: 0.5957
+  type: 'test'
+  ...
+# Subtest: C1: entries 按 queryRowId 升序，与 getPlans 的降序方向无关
+ok 3 - C1: entries 按 queryRowId 升序，与 getPlans 的降序方向无关
+  ---
+  duration_ms: 0.6564
+  type: 'test'
+  ...
+# Subtest: D1: beforeQueryRowId 只取严格更小的更早条目
+ok 4 - D1: beforeQueryRowId 只取严格更小的更早条目
+  ---
+  duration_ms: 0.5261
+  type: 'test'
+  ...
+# Subtest: D2: hasMore 判定的是「更早方向仍有条目」，不是「这页正好满 limit」
+ok 5 - D2: hasMore 判定的是「更早方向仍有条目」，不是「这页正好满 limit」
+  ---
+  duration_ms: 0.4958
+  type: 'test'
+  ...
+# Subtest: D3: limit 受 turnDirectoryMaxEntries 封顶，缺省取满上限
+ok 6 - D3: limit 受 turnDirectoryMaxEntries 封顶，缺省取满上限
+  ---
+  duration_ms: 0.2858
+  type: 'test'
+  ...
+# Subtest: E1: realUserQueryTotal 从全量行现算，不受游标与 limit 影响
+ok 7 - E1: realUserQueryTotal 从全量行现算，不受游标与 limit 影响
+  ---
+  duration_ms: 0.4652
+  type: 'test'
+  ...
+# Subtest: F1: 三态判定——text / running / empty（已完成）/ empty（无 header 兜底）
+ok 8 - F1: 三态判定——text / running / empty（已完成）/ empty（无 header 兜底）
+  ---
+  duration_ms: 0.3565
+  type: 'test'
+  ...
+# Subtest: F2: 同一 turn 的多条 steer query 各自成条，共享 turn 级 assistant 摘要
+ok 9 - F2: 同一 turn 的多条 steer query 各自成条，共享 turn 级 assistant 摘要
+  ---
+  duration_ms: 0.4434
+  type: 'test'
+  ...
+# Subtest: G1: queryPreview / assistantPreview 与共享 buildPreviewText 逐字节一致
+ok 10 - G1: queryPreview / assistantPreview 与共享 buildPreviewText 逐字节一致
+  ---
+  duration_ms: 0.6079
+  type: 'test'
+  ...
+# Subtest: G2: 纯空白 query 的 fallback 是空串（服务端不下发占位文案）
+ok 11 - G2: 纯空白 query 的 fallback 是空串（服务端不下发占位文案）
+  ---
+  duration_ms: 0.1702
+  type: 'test'
+  ...
+# Subtest: H1: 没有 realUser query 的会话返回空目录但仍是合法 result
+ok 12 - H1: 没有 realUser query 的会话返回空目录但仍是合法 result
+  ---
+  duration_ms: 0.2143
+  type: 'test'
+  ...
+# Subtest: H2: 全新会话（零行）同样返回合法空目录
+ok 13 - H2: 全新会话（零行）同样返回合法空目录
+  ---
+  duration_ms: 0.2351
+  type: 'test'
+  ...
+# Subtest: I1: 负数 atSeq / queryRowId 被 schema 拒绝
+ok 14 - I1: 负数 atSeq / queryRowId 被 schema 拒绝
+  ---
+  duration_ms: 0.2331
+  type: 'test'
+  ...
+# Subtest: I2: limit 超 max 被 params schema 拒绝
+ok 15 - I2: limit 超 max 被 params schema 拒绝
+  ---
+  duration_ms: 0.8037
+  type: 'test'
+  ...
+# TEST PASS — Step 15 turn directory derivation (T-TD2)
+1..15
+# tests 15
+# suites 0
+# pass 15
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 997.537
+
+> @zcode/bootstrap@0.1.0 test:edit-retry-model D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-edit-retry-model.mjs
+
+TAP version 13
+# (node:20184) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: A1: editUserQuery payload 带/不带 modelSelection 均可解析
+ok 1 - A1: editUserQuery payload 带/不带 modelSelection 均可解析
+  ---
+  duration_ms: 3.2672
+  type: 'test'
+  ...
+# Subtest: B1: 换模型后编辑重发——显式 payload 优先于活值（Bug4 修复，2026-10-11 出队裁定）
+ok 2 - B1: 换模型后编辑重发——显式 payload 优先于活值（Bug4 修复，2026-10-11 出队裁定）
+  ---
+  duration_ms: 1.3858
+  type: 'test'
+  ...
+# Subtest: B2: 会话有活值、缺省 payload → 用活值，不 pin
+ok 3 - B2: 会话有活值、缺省 payload → 用活值，不 pin
+  ---
+  duration_ms: 0.2555
+  type: 'test'
+  ...
+# Subtest: B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变）
+ok 4 - B3: retryTurn 重发原文，用活值，不 pin（写回收敛外语义不变）
+  ---
+  duration_ms: 0.2739
+  type: 'test'
+  ...
+# Subtest: B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组）
+ok 5 - B4: 会话无活值 + 显式 payload → 显式兜底胜出且 pin（写回闭环留给 C 组）
+  ---
+  duration_ms: 0.2462
+  type: 'test'
+  ...
+# Subtest: B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin
+ok 6 - B5: 会话无活值、缺省 payload → 被编辑轮旧快照最后兜底，不 pin
+  ---
+  duration_ms: 0.2281
+  type: 'test'
+  ...
+# Subtest: C1: pin 的选择 → 写回 + 持久化 + emitModelSelected 三连
+ok 7 - C1: pin 的选择 → 写回 + 持久化 + emitModelSelected 三连
+  ---
+  duration_ms: 0.659
+  type: 'test'
+  ...
+# Subtest: C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用该选择执行
+ok 8 - C2: 继承快照（无 pin）→ 不写回不持久化，但 turn 仍用该选择执行
+  ---
+  duration_ms: 0.3137
+  type: 'test'
+  ...
+# Subtest: C3: pin 且与会话选择相同 → 写回仍在，但不重复广播
+ok 9 - C3: pin 且与会话选择相同 → 写回仍在，但不重复广播
+  ---
+  duration_ms: 0.3242
+  type: 'test'
+  ...
+# Subtest: D1: sendGoalCommand 显式携带 modelSelection → pin + 写回生效
+ok 10 - D1: sendGoalCommand 显式携带 modelSelection → pin + 写回生效
+  ---
+  duration_ms: 1.4566
+  type: 'test'
+  ...
+# Subtest: D2: sendGoalCommand 缺省 modelSelection → 不 pin（不写回）
+ok 11 - D2: sendGoalCommand 缺省 modelSelection → 不 pin（不写回）
+  ---
+  duration_ms: 0.3057
+  type: 'test'
+  ...
+# Subtest: D3: createSession firstInput 显式携带 modelSelection → pin + 写回生效
+ok 12 - D3: createSession firstInput 显式携带 modelSelection → pin + 写回生效
+  ---
+  duration_ms: 0.6983
+  type: 'test'
+  ...
+# Subtest: D4: createSession firstInput 缺省 modelSelection → 不 pin（不写回）
+ok 13 - D4: createSession firstInput 缺省 modelSelection → 不 pin（不写回）
+  ---
+  duration_ms: 0.2555
+  type: 'test'
+  ...
+# Subtest: D5: legacy session/send 显式携带 modelSelection → pin + 写回生效
+ok 14 - D5: legacy session/send 显式携带 modelSelection → pin + 写回生效
+  ---
+  duration_ms: 8.2009
+  type: 'test'
+  ...
+# Subtest: E1: sendText 显式携带 modelSelection → pin + 写回生效
+ok 15 - E1: sendText 显式携带 modelSelection → pin + 写回生效
+  ---
+  duration_ms: 0.8481
+  type: 'test'
+  ...
+# Subtest: E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回）
+ok 16 - E2: sendText 缺省 modelSelection → 沿用 Session 快照，不 pin（不写回）
+  ---
+  duration_ms: 0.4427
+  type: 'test'
+  ...
+# Subtest: F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回）
+ok 17 - F1: buildPersistedConversationInputIntent 剥离 modelSelectionPinned（喂回不写回）
+  ---
+  duration_ms: 0.3356
+  type: 'test'
+  ...
+# Subtest: F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回）
+ok 18 - F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写回）
+  ---
+  duration_ms: 0.2466
+  type: 'test'
+  ...
+# TEST PASS — Step 6 edit-resend model selection (T-E1)
+1..18
+# tests 18
+# suites 0
+# pass 18
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3843.0352
+
+> @zcode/bootstrap@0.1.0 test:ask-question-projection D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-ask-question-projection.mjs
+
+TAP version 13
+# Subtest: A: 实时投影把 ask_user_question display 写上 row（顶层 + output 两处）
+ok 1 - A: 实时投影把 ask_user_question display 写上 row（顶层 + output 两处）
+  ---
+  duration_ms: 4.4258
+  type: 'test'
+  ...
+# Subtest: B: 冷恢复 hydration 重放与实时投影产出相同的 display
+ok 2 - B: 冷恢复 hydration 重放与实时投影产出相同的 display
+  ---
+  duration_ms: 1.3136
+  type: 'test'
+  ...
+# Subtest: C: 投影出的 toolCall row 过 shared 侧 strict row schema（wire 合法性）
+ok 3 - C: 投影出的 toolCall row 过 shared 侧 strict row schema（wire 合法性）
+  ---
+  duration_ms: 6.3077
+  type: 'test'
+  ...
+# Subtest: D: 无 display 的历史事件（修复前会话）投影不回归
+ok 4 - D: 无 display 的历史事件（修复前会话）投影不回归
+  ---
+  duration_ms: 0.3639
+  type: 'test'
+  ...
+# TEST PASS — AskUserQuestion display projection
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 998.4661
+
+> @zcode/core@0.1.0 test:ask-question-display D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-ask-question-display.mjs
+
+TAP version 13
+# Subtest: A1: AskUserQuestion 输出派生 {kind, answers} display
+ok 1 - A1: AskUserQuestion 输出派生 {kind, answers} display
+  ---
+  duration_ms: 2.7803
+  type: 'test'
+  ...
+# Subtest: A2: 空对象 answers（用户零作答/自动继续）照发，不吞 display
+ok 2 - A2: 空对象 answers（用户零作答/自动继续）照发，不吞 display
+  ---
+  duration_ms: 0.2938
+  type: 'test'
+  ...
+# Subtest: A3: annotations 与多余键不进 display——投影只承载 UI 需要的 answers
+ok 3 - A3: annotations 与多余键不进 display——投影只承载 UI 需要的 answers
+  ---
+  duration_ms: 0.3234
+  type: 'test'
+  ...
+# Subtest: A4: 形状不符的 output（缺 questions）返回 undefined，不产半截 display
+ok 4 - A4: 形状不符的 output（缺 questions）返回 undefined，不产半截 display
+  ---
+  duration_ms: 0.2024
+  type: 'test'
+  ...
+# Subtest: B: 派生 payload 过 contracts 的 strict 判别 union（持久化/投影的统一卡点）
+ok 5 - B: 派生 payload 过 contracts 的 strict 判别 union（持久化/投影的统一卡点）
+  ---
+  duration_ms: 0.4975
+  type: 'test'
+  ...
+# Subtest: C: answers 值超过 16K 边界时整块 display 被拒（降级语义，不做静默截断）
+ok 6 - C: answers 值超过 16K 边界时整块 display 被拒（降级语义，不做静默截断）
+  ---
+  duration_ms: 0.2616
+  type: 'test'
+  ...
+# Subtest: D: 其他工具名不进 ask_user_question 分支
+ok 7 - D: 其他工具名不进 ask_user_question 分支
+  ---
+  duration_ms: 0.1928
+  type: 'test'
+  ...
+# TEST PASS — AskUserQuestion display derivation
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 986.194
+
+> @zcode/core@0.1.0 test:subagent-sync-dispatch D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-subagent-sync-dispatch.mjs
+
+TAP version 13
+# Subtest: T-D1a: 同步派遣返回 childSessionId，且与 SubagentStopped 事件一致
+ok 1 - T-D1a: 同步派遣返回 childSessionId，且与 SubagentStopped 事件一致
+  ---
+  duration_ms: 16.946
+  type: 'test'
+  ...
+# Subtest: T-D1b: AgentOutputSchema strict 双校验（漏字段必须红）
+ok 2 - T-D1b: AgentOutputSchema strict 双校验（漏字段必须红）
+  ---
+  duration_ms: 9.8866
+  type: 'test'
+  ...
+# Subtest: T-D1c: 模型可见渲染与两个分支的 JSON schema 都带 childSessionId
+ok 3 - T-D1c: 模型可见渲染与两个分支的 JSON schema 都带 childSessionId
+  ---
+  duration_ms: 0.74
+  type: 'test'
+  ...
+# Subtest: T-S1a: 前台 stopTask 后 registry 终态 killed、失败收口不覆写
+ok 4 - T-S1a: 前台 stopTask 后 registry 终态 killed、失败收口不覆写
+  ---
+  duration_ms: 9.807
+  type: 'test'
+  ...
+# Subtest: T-S1b: 被停止时父通知 status=cancelled
+ok 5 - T-S1b: 被停止时父通知 status=cancelled
+  ---
+  duration_ms: 8.4514
+  type: 'test'
+  ...
+# Subtest: T-RV1a1: 前台失败（reject context 为 undefined 的 CoreError，主场景）
+ok 6 - T-RV1a1: 前台失败（reject context 为 undefined 的 CoreError，主场景）
+  ---
+  duration_ms: 15.7395
+  type: 'test'
+  ...
+# Subtest: T-RV1a2: 前台失败（reject 带 context 的 CoreError，主场景）
+ok 7 - T-RV1a2: 前台失败（reject 带 context 的 CoreError，主场景）
+  ---
+  duration_ms: 9.2633
+  type: 'test'
+  ...
+# Subtest: T-RV1b: 前台失败（reject 非 CoreError，runner wrapper 分支）
+ok 8 - T-RV1b: 前台失败（reject 非 CoreError，runner wrapper 分支）
+  ---
+  duration_ms: 8.5856
+  type: 'test'
+  ...
+# Subtest: T-RV1d: 带 agentId 但 registry 不在册 → 原样 rethrow 不吞不增强
+ok 9 - T-RV1d: 带 agentId 但 registry 不在册 → 原样 rethrow 不吞不增强
+  ---
+  duration_ms: 1.1962
+  type: 'test'
+  ...
+# Subtest: T-RV1e: 前台等待中被 TaskStop（killed）——短路 rethrow 同样带句柄（OQ-1）
+ok 10 - T-RV1e: 前台等待中被 TaskStop（killed）——短路 rethrow 同样带句柄（OQ-1）
+  ---
+  duration_ms: 7.1847
+  type: 'test'
+  ...
+# Subtest: T-RV5: 工具描述含终态续跑语义与上游 continue bullet
+ok 11 - T-RV5: 工具描述含终态续跑语义与上游 continue bullet
+  ---
+  duration_ms: 0.1914
+  type: 'test'
+  ...
+# TEST PASS — T-D1 sync dispatch childSessionId / T-S1 foreground stop terminal state / T-RV1 T-RV5
+1..11
+# tests 11
+# suites 0
+# pass 11
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1211.0556
+
+> @zcode/core@0.1.0 test:subagent-notification-resume-hint D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-subagent-notification-resume-hint.mjs
+
+TAP version 13
+# Subtest: T-RV3a: failed 通知含指引句、task-id 即 agentId、summary 前缀逐字节不变
+ok 1 - T-RV3a: failed 通知含指引句、task-id 即 agentId、summary 前缀逐字节不变
+  ---
+  duration_ms: 1.8583
+  type: 'test'
+  ...
+# Subtest: T-RV3b: stopped 通知含 stopped 版指引且不含 failed 版措辞
+ok 2 - T-RV3b: stopped 通知含 stopped 版指引且不含 failed 版措辞
+  ---
+  duration_ms: 0.1873
+  type: 'test'
+  ...
+# Subtest: T-RV3c: completed 通知反向不含续跑指引
+ok 3 - T-RV3c: completed 通知反向不含续跑指引
+  ---
+  duration_ms: 0.2275
+  type: 'test'
+  ...
+# Subtest: T-RV3d: 超长 result（>120k）指引先于正文被斩
+ok 4 - T-RV3d: 超长 result（>120k）指引先于正文被斩
+  ---
+  duration_ms: 0.3422
+  type: 'test'
+  ...
+# TEST PASS — T-RV3 通知续跑指引三态与截断次序
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 311.1634
+
+> @zcode/core@0.1.0 test:error-payload-agentid-projection D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-error-payload-agentid-projection.mjs
+
+TAP version 13
+# Subtest: T-RV2a: 带 context.agentId 的 wrapper CoreError detail 含 agentId=<id>
+ok 1 - T-RV2a: 带 context.agentId 的 wrapper CoreError detail 含 agentId=<id>
+  ---
+  duration_ms: 1.7517
+  type: 'test'
+  ...
+# Subtest: T-RV2b: 无 agentId 的错误 detail 不多字段（逐字节）
+ok 2 - T-RV2b: 无 agentId 的错误 detail 不多字段（逐字节）
+  ---
+  duration_ms: 0.3103
+  type: 'test'
+  ...
+# TEST PASS — T-RV2 formatContextDetail agentId 投影
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1058.7353
+
+> @zcode/core@0.1.0 test:send-message-terminal-resume D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-send-message-terminal-resume.mjs
+
+TAP version 13
+# Subtest: T-RV4[failed]: 终态任务经 SendMessage 恢复为 resumed_background
+ok 1 - T-RV4[failed]: 终态任务经 SendMessage 恢复为 resumed_background
+  ---
+  duration_ms: 17.6567
+  type: 'test'
+  ...
+# Subtest: T-RV4[killed]: 终态任务经 SendMessage 恢复为 resumed_background
+ok 2 - T-RV4[killed]: 终态任务经 SendMessage 恢复为 resumed_background
+  ---
+  duration_ms: 8.866
+  type: 'test'
+  ...
+# TEST PASS — T-RV4 终态 SendMessage resume（failed / killed → resumed_background）
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1110.788
+
+> @zcode/core@0.1.0 test:e2e-subagent-resume D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-e2e-subagent-resume.mjs
+
+TAP version 13
+# Subtest: e2e 三幕：前台失败透出句柄 → SendMessage 续跑成功 → 后台停止通知带指引
+ok 1 - e2e 三幕：前台失败透出句柄 → SendMessage 续跑成功 → 后台停止通知带指引
+  ---
+  duration_ms: 38.7059
+  type: 'test'
+  ...
+# TEST PASS — e2e 子智能体终态续跑三幕（失败透出 → SendMessage 消费 → 停止通知指引）
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1126.407
+
+> @zcode/core@0.1.0 test:session-persistence-dedupe D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-session-persistence-dedupe.mjs
+
+TAP version 13
+# Subtest: T-EVT-1 并发两次 ensureSessionPersisted 只建一次会话
+ok 1 - T-EVT-1 并发两次 ensureSessionPersisted 只建一次会话
+  ---
+  duration_ms: 3.1975
+  type: 'test'
+  ...
+# Subtest: T-EVT-1 失败后不残留 in-flight（下一次可重试）且不置位
+ok 2 - T-EVT-1 失败后不残留 in-flight（下一次可重试）且不置位
+  ---
+  duration_ms: 0.8038
+  type: 'test'
+  ...
+1..2
+# tests 2
+# suites 0
+# pass 2
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2229.7567
+
+> @zcode/core@0.1.0 test:tool-media-stop-signal D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-tool-media-stop-signal.mjs
+
+TAP version 13
+# Subtest: T-MEM-2 落盘调用不带 signal，且两个媒体块都完整写出
+ok 1 - T-MEM-2 落盘调用不带 signal，且两个媒体块都完整写出
+  ---
+  duration_ms: 2.0904
+  type: 'test'
+  ...
+# Subtest: T-MEM-2 已落盘（zcode-artifact://）的块不重复写
+ok 2 - T-MEM-2 已落盘（zcode-artifact://）的块不重复写
+  ---
+  duration_ms: 0.188
+  type: 'test'
+  ...
+# Subtest: T-MEM-2 调用点不再传 signal（源码级防回潮）
+ok 3 - T-MEM-2 调用点不再传 signal（源码级防回潮）
+  ---
+  duration_ms: 0.5356
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2105.5242
+
+> @zcode/core@0.1.0 test:subagent-cache-breakpoints D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-subagent-cache-breakpoints.mjs
+
+TAP version 13
+# Subtest: \#12 systemMessages 合并成「稳定前缀 + 其余」两组，断点跟着组走而不是逐段
+ok 1 - \#12 systemMessages 合并成「稳定前缀 + 其余」两组，断点跟着组走而不是逐段
+  ---
+  duration_ms: 1.6274
+  type: 'test'
+  ...
+# Subtest: \#12 每条 system message 都带 ephemeral 缓存断点，且第一组是稳定的 cli_prefix
+ok 2 - \#12 每条 system message 都带 ephemeral 缓存断点，且第一组是稳定的 cli_prefix
+  ---
+  duration_ms: 0.8677
+  type: 'test'
+  ...
+# Subtest: \#12 合并后相邻段边界有换行（不出现 `</env>\#\# Magic Context` 粘连）
+ok 3 - \#12 合并后相邻段边界有换行（不出现 `</env>\#\# Magic Context` 粘连）
+  ---
+  duration_ms: 0.3204
+  type: 'test'
+  ...
+# Subtest: \#12 无 magic-context 段时形态不变（单段组零操作）
+ok 4 - \#12 无 magic-context 段时形态不变（单段组零操作）
+  ---
+  duration_ms: 0.2224
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 713.2608
+
+> @zcode/core@0.1.0 test:ctx-tool-descriptions D:\worktree\fullsync\apps\zcode-cli\packages\core
+> tsx --test scripts/test-ctx-tool-descriptions.mjs
+
+TAP version 13
+# Subtest: T-CTX-1: ctx_reduce 描述含主动声明引导句（mc/T-1）
+ok 1 - T-CTX-1: ctx_reduce 描述含主动声明引导句（mc/T-1）
+  ---
+  duration_ms: 0.8895
+  type: 'test'
+  ...
+# Subtest: T-CTX-2: ctx_expand 描述含 §N§ 标签主动找回引导句（mc/T-1）
+ok 2 - T-CTX-2: ctx_expand 描述含 §N§ 标签主动找回引导句（mc/T-1）
+  ---
+  duration_ms: 0.1537
+  type: 'test'
+  ...
+# Subtest: T-CTX-3: 两侧描述的既有机制说明不被引导句覆盖（回归护栏）
+ok 3 - T-CTX-3: 两侧描述的既有机制说明不被引导句覆盖（回归护栏）
+  ---
+  duration_ms: 0.1134
+  type: 'test'
+  ...
+# Subtest: T-CTX-4: ctx_reduce 宿主 full 描述含 system prompt 段禁盖句（system-prompt-guard）
+ok 4 - T-CTX-4: ctx_reduce 宿主 full 描述含 system prompt 段禁盖句（system-prompt-guard）
+  ---
+  duration_ms: 0.161
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 940.0193
+.                                        |  WARN  Unsupported engine: wanted: {"node":"24.14.0"} (current: {"node":"v22.22.0","pnpm":"10.33.2"})
+Scope: 9 of 18 workspace projects
+packages/contracts build$ tsc
+packages/dynamic-workflow build$ node scripts/generate-libs.mjs && tsc
+packages/magic-context build$ tsc
+packages/shared-types build$ tsc
+packages/shared-types build: Done
+packages/dynamic-workflow build: Done
+packages/magic-context build: Done
+packages/contracts build: Done
+packages/adapters build$ tsc
+packages/core build$ tsc
+packages/dynamic-workflow-runtime build$ tsc
+packages/i18n build$ tsc
+packages/dynamic-workflow-runtime build: Done
+packages/i18n build: Done
+packages/adapters build: Done
+packages/core build: Done
+packages/bootstrap build$ tsc
+packages/bootstrap build: Done
+
+> @zcode/core@0.1.0 test:workflow-report-count D:\worktree\fullsync\apps\zcode-cli\packages\core
+> node --test scripts/test-workflow-report-count.mjs
+
+TAP version 13
+# Subtest: A: 通知节 count 读 reportCount：快照截在 256 条时仍报真实总数
+ok 1 - A: 通知节 count 读 reportCount：快照截在 256 条时仍报真实总数
+  ---
+  duration_ms: 1.0996
+  type: 'test'
+  ...
+# Subtest: B: manifest count 读 reportCount：preview 仍最多 8 条
+ok 2 - B: manifest count 读 reportCount：preview 仍最多 8 条
+  ---
+  duration_ms: 0.1841
+  type: 'test'
+  ...
+# Subtest: C: 没有 reportCount 的老快照退回条目数
+ok 3 - C: 没有 reportCount 的老快照退回条目数
+  ---
+  duration_ms: 0.407
+  type: 'test'
+  ...
+# Subtest: D: 通知文本按真实总数渲染 <reports count>（shown 小于 count 才出现）
+ok 4 - D: 通知文本按真实总数渲染 <reports count>（shown 小于 count 才出现）
+  ---
+  duration_ms: 0.3306
+  type: 'test'
+  ...
+# TEST PASS — workflow reports count reads the snapshot reportCount (b/A-1)
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 547.4893
+
+> @zcode/adapters@0.1.0 test:network-status-crash D:\worktree\fullsync\apps\zcode-cli\packages\adapters
+> node --test scripts/test-network-status-crash.mjs
+
+TAP version 13
+# Subtest: T-NET-1 proxy-fetch rejects an unsupported status instead of killing the process
+ok 1 - T-NET-1 proxy-fetch rejects an unsupported status instead of killing the process
+  ---
+  duration_ms: 29.6193
+  type: 'test'
+  ...
+# Subtest: T-NET-1b node http adapter resolves with status 999 through the transport callback
+ok 2 - T-NET-1b node http adapter resolves with status 999 through the transport callback
+  ---
+  duration_ms: 24.6515
+  type: 'test'
+  ...
+# Subtest: T-NET-2 null-body statuses are read as empty without arrayBuffer or a size verdict
+ok 3 - T-NET-2 null-body statuses are read as empty without arrayBuffer or a size verdict
+  ---
+  duration_ms: 0.5906
+  type: 'test'
+  ...
+# Subtest: T-NET-2 the size limit still applies to responses that do carry a body
+ok 4 - T-NET-2 the size limit still applies to responses that do carry a body
+  ---
+  duration_ms: 2.3107
+  type: 'test'
+  ...
+# Subtest: T-NET/NET-1b: no uncaughtException or unhandledRejection during the run
+ok 5 - T-NET/NET-1b: no uncaughtException or unhandledRejection during the run
+  ---
+  duration_ms: 0.6586
+  type: 'test'
+  ...
+# TEST PASS — unsupported/non-standard HTTP status no longer kills the agent process (T-NET-1 / T-NET-1b / T-NET-2)
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 661.4845
+
+> @zcode/adapters@0.1.0 test:tool-result-cache-control D:\worktree\fullsync\apps\zcode-cli\packages\adapters
+> node --test scripts/test-tool-result-cache-control.mjs
+
+TAP version 13
+# Subtest: T-XFRM-1 cacheControl rides the tool-result block, not the tool message
+ok 1 - T-XFRM-1 cacheControl rides the tool-result block, not the tool message
+  ---
+  duration_ms: 1.636
+  type: 'test'
+  ...
+# Subtest: T-XFRM-1 a tool result without cacheControl stays free of providerOptions
+ok 2 - T-XFRM-1 a tool result without cacheControl stays free of providerOptions
+  ---
+  duration_ms: 0.1408
+  type: 'test'
+  ...
+# Subtest: T-XFRM-1 user/system/assistant message-level cacheControl is unchanged
+ok 3 - T-XFRM-1 user/system/assistant message-level cacheControl is unchanged
+  ---
+  duration_ms: 0.1932
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 537.4705
+
+> @zcode/adapters@0.1.0 test:magic-context-boundaries D:\worktree\fullsync\apps\zcode-cli\packages\adapters
+> node --test scripts/test-magic-context-boundaries.mjs
+
+TAP version 13
+# Subtest: T-MC-1 形态 1：三段合并体（m0 纯文本 / m1 / 本轮输入）拆回三条 user 消息
+ok 1 - T-MC-1 形态 1：三段合并体（m0 纯文本 / m1 / 本轮输入）拆回三条 user 消息
+  ---
+  duration_ms: 31.5902
+  type: 'test'
+  ...
+# Subtest: T-MC-1 形态 2：m0 带 mural image——image 块跟随 m0 独立成条
+ok 2 - T-MC-1 形态 2：m0 带 mural image——image 块跟随 m0 独立成条
+  ---
+  duration_ms: 3.8501
+  type: 'test'
+  ...
+# Subtest: T-MC-1 形态 3：四段合并体——只拆 m0/m1 边界，其余段保持合并
+ok 3 - T-MC-1 形态 3：四段合并体——只拆 m0/m1 边界，其余段保持合并
+  ---
+  duration_ms: 1.8256
+  type: 'test'
+  ...
+# Subtest: T-MC-1 形态 4：拆分不新增 cache_control 断点（仅最后一段末块）
+ok 4 - T-MC-1 形态 4：拆分不新增 cache_control 断点（仅最后一段末块）
+  ---
+  duration_ms: 2.9657
+  type: 'test'
+  ...
+# Subtest: T-MC-1 形态 5：合并体前存在 system role 消息——跳过它仍拆首个 user 合并体
+ok 5 - T-MC-1 形态 5：合并体前存在 system role 消息——跳过它仍拆首个 user 合并体
+  ---
+  duration_ms: 0.9328
+  type: 'test'
+  ...
+# Subtest: T-MC-1 形态 6：合并层尾随 "\\n" 容错
+ok 6 - T-MC-1 形态 6：合并层尾随 "\\n" 容错
+  ---
+  duration_ms: 1.4364
+  type: 'test'
+  ...
+# Subtest: T-MC-1 负例 1：真实用户输入含 <system-reminder> 文本不被误拆
+ok 7 - T-MC-1 负例 1：真实用户输入含 <system-reminder> 文本不被误拆
+  ---
+  duration_ms: 1.631
+  type: 'test'
+  ...
+# Subtest: T-MC-1 负例 2：像 m0 但缺 session-history 结构的信封文本不拆
+ok 8 - T-MC-1 负例 2：像 m0 但缺 session-history 结构的信封文本不拆
+  ---
+  duration_ms: 1.5081
+  type: 'test'
+  ...
+# Subtest: T-MC-1 负例 3：已分离的 m0/m1 wire 消息逐字节不变
+ok 9 - T-MC-1 负例 3：已分离的 m0/m1 wire 消息逐字节不变
+  ---
+  duration_ms: 1.9562
+  type: 'test'
+  ...
+# Subtest: T-MC-1 负例 4：首条 user 不是 m0（保守不动）
+ok 10 - T-MC-1 负例 4：首条 user 不是 m0（保守不动）
+  ---
+  duration_ms: 0.8456
+  type: 'test'
+  ...
+1..10
+# tests 10
+# suites 0
+# pass 10
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 264.204
+
+> @zcode/adapters@0.1.0 test:runner-debug-head D:\worktree\fullsync\apps\zcode-cli\packages\adapters
+> node --test scripts/test-runner-debug-head.mjs
+
+TAP version 13
+# Subtest: T-T1 tail 记录携带前 12 条 messagesHead（未触发字节预算）
+ok 1 - T-T1 tail 记录携带前 12 条 messagesHead（未触发字节预算）
+  ---
+  duration_ms: 11.6861
+  type: 'test'
+  ...
+# Subtest: T-T1 head 字节预算按整条消息截断，messagesHeadTruncated 置位
+ok 2 - T-T1 head 字节预算按整条消息截断，messagesHeadTruncated 置位
+  ---
+  duration_ms: 10.8647
+  type: 'test'
+  ...
+# Subtest: T-T1 首条超预算时豁免（允许突破 64KB）
+ok 3 - T-T1 首条超预算时豁免（允许突破 64KB）
+  ---
+  duration_ms: 5.169
+  type: 'test'
+  ...
+# Subtest: T-T1 full 记录不写 head，messageCount 等于可见条数
+ok 4 - T-T1 full 记录不写 head，messageCount 等于可见条数
+  ---
+  duration_ms: 3.6454
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 715.4842
+
+> @zcode/bootstrap@0.1.0 test:publisher-buffer-clamp D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-publisher-buffer-clamp.mjs
+
+TAP version 13
+# Subtest: 场景 A：ingest 先抬升 bound，>1MiB 单条 delta 被缓冲（旧 1MiB 硬限会溢出降级）
+ok 1 - 场景 A：ingest 先抬升 bound，>1MiB 单条 delta 被缓冲（旧 1MiB 硬限会溢出降级）
+  ---
+  duration_ms: 14.4108
+  type: 'test'
+  ...
+# Subtest: 场景 B：snapshot 上界 3MiB——同一条 delta 被缓冲，bufferBytes 突破旧 1MiB 下限
+ok 2 - 场景 B：snapshot 上界 3MiB——同一条 delta 被缓冲，bufferBytes 突破旧 1MiB 下限
+  ---
+  duration_ms: 10.324
+  type: 'test'
+  ...
+# Subtest: 场景 C：上界超大时按 16MiB-64KiB 封顶——cap 真实执行（不是无界缓冲）
+ok 3 - 场景 C：上界超大时按 16MiB-64KiB 封顶——cap 真实执行（不是无界缓冲）
+  ---
+  duration_ms: 98.8269
+  type: 'test'
+  ...
+# Subtest: 场景 D：publishMagicContextUsage 经同一 fanOutDeltas——钳位路径生效且不抛错
+ok 4 - 场景 D：publishMagicContextUsage 经同一 fanOutDeltas——钳位路径生效且不抛错
+  ---
+  duration_ms: 0.6146
+  type: 'test'
+  ...
+# Subtest: 场景 E：积压超过当前 bound——上限真实执行（溢出降级，不是无界缓冲）
+ok 5 - 场景 E：积压超过当前 bound——上限真实执行（溢出降级，不是无界缓冲）
+  ---
+  duration_ms: 23.3335
+  type: 'test'
+  ...
+1..5
+# tests 5
+# suites 0
+# pass 5
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1175.0423
+
+> @zcode/bootstrap@0.1.0 test:model-request-slim D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-model-request-slim.mjs
+
+TAP version 13
+# (node:27744) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: T-MEM-1 瘦身只把 messages 换成 messageCount，其余 payload 与事件字段不变
+ok 1 - T-MEM-1 瘦身只把 messages 换成 messageCount，其余 payload 与事件字段不变
+  ---
+  duration_ms: 1.3233
+  type: 'test'
+  ...
+# Subtest: T-MEM-1 非 model_request / 无 messages 数组的事件原样返回
+ok 2 - T-MEM-1 非 model_request / 无 messages 数组的事件原样返回
+  ---
+  duration_ms: 0.1782
+  type: 'test'
+  ...
+# Subtest: T-MEM-1 store 淘汰同一节拍：驻留副本已是瘦身形态，瞬态事件被回收
+ok 3 - T-MEM-1 store 淘汰同一节拍：驻留副本已是瘦身形态，瞬态事件被回收
+  ---
+  duration_ms: 0.5271
+  type: 'test'
+  ...
+# Subtest: T-MEM-1 producer/consumer 同值：两种形态经 mapModelRequestPayload 映射出同一个 messageCount
+ok 4 - T-MEM-1 producer/consumer 同值：两种形态经 mapModelRequestPayload 映射出同一个 messageCount
+  ---
+  duration_ms: 0.5006
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3136.6896
+
+> @zcode/bootstrap@0.1.0 test:dwf-read-narrowing D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-dwf-read-narrowing.mjs
+
+TAP version 13
+# Subtest: T-DWF-2 快照的 report 读是「前 256 条 + 8MiB + count(*)」，没有全量节点读
+ok 1 - T-DWF-2 快照的 report 读是「前 256 条 + 8MiB + count(*)」，没有全量节点读
+  ---
+  duration_ms: 2.3704
+  type: 'test'
+  ...
+# Subtest: T-DWF-2 countTaggedReports 缺席时退回 withResult:false 窄读（仍不读 item 正文）
+ok 2 - T-DWF-2 countTaggedReports 缺席时退回 withResult:false 窄读（仍不读 item 正文）
+  ---
+  duration_ms: 0.5518
+  type: 'test'
+  ...
+# Subtest: T-DWF-3 冷回放读事件带 reportItems 限 64（下推到存储层，不是读完再切片）
+ok 3 - T-DWF-3 冷回放读事件带 reportItems 限 64（下推到存储层，不是读完再切片）
+  ---
+  duration_ms: 1.6076
+  type: 'test'
+  ...
+1..3
+# tests 3
+# suites 0
+# pass 3
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 2484.0133
+
+> @zcode/bootstrap@0.1.0 test:dwf-journal-contract D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> tsx --test scripts/test-dwf-journal-contract.mjs
+
+TAP version 13
+# (node:3468) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: 契约前提：两个实现都实现了 countNodes / countTaggedReports / listEventPage
+ok 1 - 契约前提：两个实现都实现了 countNodes / countTaggedReports / listEventPage
+  ---
+  duration_ms: 19.118
+  type: 'test'
+  ...
+# Subtest: listNodes：kinds 过滤按插入顺序、all / [] 语义，两实现逐字一致
+ok 2 - listNodes：kinds 过滤按插入顺序、all / [] 语义，两实现逐字一致
+  ---
+  duration_ms: 18.9431
+  type: 'test'
+  ...
+# Subtest: listNodes：withResult:false 只剥 result，其余列逐字保留（upsert 不挪行）
+ok 3 - listNodes：withResult:false 只剥 result，其余列逐字保留（upsert 不挪行）
+  ---
+  duration_ms: 17.1886
+  type: 'test'
+  ...
+# Subtest: listNodes：limit 在 kind 过滤之后生效，limit=0 是空页（真下推）
+ok 4 - listNodes：limit 在 kind 过滤之后生效，limit=0 是空页（真下推）
+  ---
+  duration_ms: 16.8449
+  type: 'test'
+  ...
+# Subtest: listNodes：maxResultBytes 前缀窗口——再加一行超界即收尾、第一条恒带上、0 也带第一条
+ok 5 - listNodes：maxResultBytes 前缀窗口——再加一行超界即收尾、第一条恒带上、0 也带第一条
+  ---
+  duration_ms: 18.346
+  type: 'test'
+  ...
+# Subtest: listNodes：无 opts 的历史形态仍全量带结果，两实现一致
+ok 6 - listNodes：无 opts 的历史形态仍全量带结果，两实现一致
+  ---
+  duration_ms: 16.7542
+  type: 'test'
+  ...
+# Subtest: countNodes：count(*) 与全量扫描逐 kind 等价，两实现同一张数表
+ok 7 - countNodes：count(*) 与全量扫描逐 kind 等价，两实现同一张数表
+  ---
+  duration_ms: 16.8875
+  type: 'test'
+  ...
+# Subtest: countTaggedReports：group by 只数打了标签的 report 行，两实现同一张映射
+ok 8 - countTaggedReports：group by 只数打了标签的 report 行，两实现同一张映射
+  ---
+  duration_ms: 25.5263
+  type: 'test'
+  ...
+# Subtest: listEvents：types 过滤先于 cursor 与 limit，两实现逐字一致
+ok 9 - listEvents：types 过滤先于 cursor 与 limit，两实现逐字一致
+  ---
+  duration_ms: 17.2447
+  type: 'test'
+  ...
+# Subtest: listEvents：reportItems 按全 run 排名剥离 item，其余字段逐字保留
+ok 10 - listEvents：reportItems 按全 run 排名剥离 item，其余字段逐字保留
+  ---
+  duration_ms: 17.1994
+  type: 'test'
+  ...
+# Subtest: listEvents：被剥的大 payload 一行都不进 JS（剥离后的事件序列化只有几百字节）
+ok 11 - listEvents：被剥的大 payload 一行都不进 JS（剥离后的事件序列化只有几百字节）
+  ---
+  duration_ms: 33.3806
+  type: 'test'
+  ...
+# Subtest: listEventPage：条数页 + cursor 翻页 + limit=0 空页，两实现逐字一致
+ok 12 - listEventPage：条数页 + cursor 翻页 + limit=0 空页，两实现逐字一致
+  ---
+  duration_ms: 17.3316
+  type: 'test'
+  ...
+# Subtest: listEventPage：字节窗按序列化字节收尾，第一条恒带上（含自己就超界的情形）
+ok 13 - listEventPage：字节窗按序列化字节收尾，第一条恒带上（含自己就超界的情形）
+  ---
+  duration_ms: 16.8711
+  type: 'test'
+  ...
+# Subtest: listEventPage：整页逐字节翻完不丢行不重复（翻页永远有界、不卡死）
+ok 14 - listEventPage：整页逐字节翻完不丢行不重复（翻页永远有界、不卡死）
+  ---
+  duration_ms: 16.8116
+  type: 'test'
+  ...
+# Subtest: b/A-2 验收：大 payload 一页 ≤ maxBytes、第一条在、hasMore 正确，且经 encodeTopicWireFrames 不抛
+ok 15 - b/A-2 验收：大 payload 一页 ≤ maxBytes、第一条在、hasMore 正确，且经 encodeTopicWireFrames 不抛
+  ---
+  duration_ms: 718.9054
+  type: 'test'
+  ...
+# Subtest: run-service listEvents 注入协议缺省上限（maxBytes/maxEvents），显式值透传
+ok 16 - run-service listEvents 注入协议缺省上限（maxBytes/maxEvents），显式值透传
+  ---
+  duration_ms: 903.4418
+  type: 'test'
+  ...
+# Subtest: run-service count-only 回退：无 listEventPage 的 journal 读 limit+1 判 hasMore
+ok 17 - run-service count-only 回退：无 listEventPage 的 journal 读 limit+1 判 hasMore
+  ---
+  duration_ms: 7.8093
+  type: 'test'
+  ...
+1..17
+# tests 17
+# suites 0
+# pass 17
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 3518.8647
+
+> @zcode/bootstrap@0.1.0 test:mc-section-zh D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> node scripts/test-magic-context-section-zh.mjs
+
+TEST PASS — magic-context-section-zh (16-case matrix + resolver routing + prompt guard)
+(node:29024) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+> @zcode/bootstrap@0.1.0 test:model-live D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-model-live.mjs
+
+TAP version 13
+# Subtest: T-ML1a: setSessionModelSelection 只在选型变值时记 lastModelSwitchAt
+ok 1 - T-ML1a: setSessionModelSelection 只在选型变值时记 lastModelSwitchAt
+  ---
+  duration_ms: 1.5468
+  type: 'test'
+  ...
+# Subtest: T-ML1b: 切换后下一个新提交轮用新模型（admission 冻结活值 → 执行 → 写回不刷时间戳）
+ok 2 - T-ML1b: 切换后下一个新提交轮用新模型（admission 冻结活值 → 执行 → 写回不刷时间戳）
+  ---
+  duration_ms: 1.7892
+  type: 'test'
+  ...
+# Subtest: T-ML2a: 入队后切换 → 提升轮用活值且不 pin、不写回会话态
+ok 3 - T-ML2a: 入队后切换 → 提升轮用活值且不 pin、不写回会话态
+  ---
+  duration_ms: 1.1052
+  type: 'test'
+  ...
+# Subtest: T-ML2b: 出队模型规则直证——快照≠活值时，无论切换先后，提升一律用活值
+ok 4 - T-ML2b: 出队模型规则直证——快照≠活值时，无论切换先后，提升一律用活值
+  ---
+  duration_ms: 0.3918
+  type: 'test'
+  ...
+# Subtest: T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规则
+ok 5 - T-ML2c: auto-drain 提升（内部 sendQueuedNow）与手动提升同规则
+  ---
+  duration_ms: 0.3642
+  type: 'test'
+  ...
+# Subtest: T-ML2d: item 缺 admittedAt（异常/跨版本投影）→ 提升仍用活值
+ok 6 - T-ML2d: item 缺 admittedAt（异常/跨版本投影）→ 提升仍用活值
+  ---
+  duration_ms: 0.2503
+  type: 'test'
+  ...
+# Subtest: T-ML3: 编辑重发用会话活值（出队模型）且不写回会话态
+ok 7 - T-ML3: 编辑重发用会话活值（出队模型）且不写回会话态
+  ---
+  duration_ms: 0.9927
+  type: 'test'
+  ...
+# Subtest: T-ML4: execution-scope 轮按 intent 选择执行但绝不写回会话态
+ok 8 - T-ML4: execution-scope 轮按 intent 选择执行但绝不写回会话态
+  ---
+  duration_ms: 0.1831
+  type: 'test'
+  ...
+# TEST PASS — Step 4/5 model-live (T-ML1..T-ML4)
+1..8
+# tests 8
+# suites 0
+# pass 8
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1485.1214
+
+> @zcode/bootstrap@0.1.0 test:subagent-live-model D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-subagent-live-model.mjs
+
+TAP version 13
+# Subtest: ① 同进程 spawn → 改 agents-state.json override → 再 spawn：第二次用新模型
+ok 1 - ① 同进程 spawn → 改 agents-state.json override → 再 spawn：第二次用新模型
+  ---
+  duration_ms: 38.6758
+  type: 'test'
+  ...
+# Subtest: ② 无 override 时用 profile 默认；静态快照形态（旧装配）语义不变
+ok 2 - ② 无 override 时用 profile 默认；静态快照形态（旧装配）语义不变
+  ---
+  duration_ms: 17.1373
+  type: 'test'
+  ...
+# Subtest: ③ agents-state.json 缺失/损坏/缺字段 → 回退冻结快照且 spawn 不炸，warn 去重
+ok 3 - ③ agents-state.json 缺失/损坏/缺字段 → 回退冻结快照且 spawn 不炸，warn 去重
+  ---
+  duration_ms: 23.7139
+  type: 'test'
+  ...
+# Subtest: ④ override 指向不存在的模型 id → 丢弃该 override 回退 profile 默认并 warn
+ok 4 - ④ override 指向不存在的模型 id → 丢弃该 override 回退 profile 默认并 warn
+  ---
+  duration_ms: 14.2715
+  type: 'test'
+  ...
+1..4
+# tests 4
+# suites 0
+# pass 4
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1691.5809
+
+> @zcode/bootstrap@0.1.0 test:prompt-surface-toolset-hash D:\worktree\fullsync\apps\zcode-cli\packages\bootstrap
+> node --test scripts/test-prompt-surface-toolset-hash.mjs
+
+TAP version 13
+# (node:31928) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: MF-PS-1：preset 翻转后 getToolSetHash 读活值——审计列从 full 身份翻到 light 身份
+ok 1 - MF-PS-1：preset 翻转后 getToolSetHash 读活值——审计列从 full 身份翻到 light 身份
+  ---
+  duration_ms: 1594.2277
+  type: 'test'
+  ...
+1..1
+# tests 1
+# suites 0
+# pass 1
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5087.9235
+TAP version 13
+# Subtest: ① UI 生产端：serialize+upload 两个 return 分支都带 sourceKind
+ok 1 - ① UI 生产端：serialize+upload 两个 return 分支都带 sourceKind
+  ---
+  duration_ms: 3.4586
+  type: 'test'
+  ...
+# Subtest: ①③ UI 生产端：零拷贝预置 ref 传播 sourceKind（本地 target 长粘贴）
+ok 2 - ①③ UI 生产端：零拷贝预置 ref 传播 sourceKind（本地 target 长粘贴）
+  ---
+  duration_ms: 28.8965
+  type: 'test'
+  ...
+# Subtest: ① UI 生产端：远端 staged 分支回写 sourceKind
+ok 3 - ① UI 生产端：远端 staged 分支回写 sourceKind
+  ---
+  duration_ms: 15.1243
+  type: 'test'
+  ...
+# Subtest: ① UI 生产端：会话恢复（restoreSessionOwnedAttachments）回写 sourceKind（cr-func sf-5）
+ok 4 - ① UI 生产端：会话恢复（restoreSessionOwnedAttachments）回写 sourceKind（cr-func sf-5）
+  ---
+  duration_ms: 1.242
+  type: 'test'
+  ...
+# Subtest: ① 命令 payload → 投影：sendText 校验后仍带 sourceKind，投影行可预览
+ok 5 - ① 命令 payload → 投影：sendText 校验后仍带 sourceKind，投影行可预览
+  ---
+  duration_ms: 20.8914
+  type: 'test'
+  ...
+# Subtest: ⑤ 冷路径：persisted conversationInputIntent → 投影行带 sourceKind
+ok 6 - ⑤ 冷路径：persisted conversationInputIntent → 投影行带 sourceKind
+  ---
+  duration_ms: 2.8141
+  type: 'test'
+  ...
+# Subtest: ① 授权闸判定矩阵：clipboard-text+text/plain 命中，无标记 text/plain 拒绝
+ok 7 - ① 授权闸判定矩阵：clipboard-text+text/plain 命中，无标记 text/plain 拒绝
+  ---
+  duration_ms: 0.2194
+  type: 'test'
+  ...
+# Subtest: ② 结果闸：text/plain 对等豁免两态
+ok 8 - ② 结果闸：text/plain 对等豁免两态
+  ---
+  duration_ms: 0.1198
+  type: 'test'
+  ...
+# Subtest: ③ transport：attachmentRead 响应 schema 放行 text/plain、仍拒非文本
+ok 9 - ③ transport：attachmentRead 响应 schema 放行 text/plain、仍拒非文本
+  ---
+  duration_ms: 1.3124
+  type: 'test'
+  ...
+1..9
+# tests 9
+# suites 0
+# pass 9
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1628.6338
+TAP version 13
+# Subtest: composerOptions 缺席：关闭态触发器保持旧版面（fullLabel+ChevronDown，无 combined 标记）
+ok 1 - composerOptions 缺席：关闭态触发器保持旧版面（fullLabel+ChevronDown，无 combined 标记）
+  ---
+  duration_ms: 26.2298
+  type: 'test'
+  ...
+# Subtest: composerOptions 缺席：旧菜单装配层渲染 provider 分组 + 吸底 footer，无合并菜单内容
+ok 2 - composerOptions 缺席：旧菜单装配层渲染 provider 分组 + 吸底 footer，无合并菜单内容
+  ---
+  duration_ms: 16.8581
+  type: 'test'
+  ...
+# Subtest: composerOptions 缺席：扁平列表（showProviderLevel=false）仍渲染第一组模型项
+ok 3 - composerOptions 缺席：扁平列表（showProviderLevel=false）仍渲染第一组模型项
+  ---
+  duration_ms: 5.6212
+  type: 'test'
+  ...
+# Subtest: composerOptions 在场：触发器进入 combined 形态并携带折叠优先级 3
+ok 4 - composerOptions 在场：触发器进入 combined 形态并携带折叠优先级 3
+  ---
+  duration_ms: 4.6939
+  type: 'test'
+  ...
+# Subtest: composerOptions 在场：合并菜单装配层内容来自 ComposerModelMenu（供应商/模型/滑杆/管理入口）
+ok 5 - composerOptions 在场：合并菜单装配层内容来自 ComposerModelMenu（供应商/模型/滑杆/管理入口）
+  ---
+  duration_ms: 12.8565
+  type: 'test'
+  ...
+# Subtest: 合并入口纯函数：isGlmHighspeedModel 只按显示名命中 GLM Highspeed/FlashX
+ok 6 - 合并入口纯函数：isGlmHighspeedModel 只按显示名命中 GLM Highspeed/FlashX
+  ---
+  duration_ms: 0.1645
+  type: 'test'
+  ...
+# Subtest: 合并入口纯函数：getComposerThoughtDisplay 的进度把无思考档位排除在分母外
+ok 7 - 合并入口纯函数：getComposerThoughtDisplay 的进度把无思考档位排除在分母外
+  ---
+  duration_ms: 0.1759
+  type: 'test'
+  ...
+1..7
+# tests 7
+# suites 0
+# pass 7
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 1708.6679

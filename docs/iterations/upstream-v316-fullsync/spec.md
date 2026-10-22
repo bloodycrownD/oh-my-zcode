@@ -75,7 +75,7 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - Step A（S 纯重构）：新增 `packages/ui/src/chat-input-toolbar/thoughtLevelLabels.ts`（照上游 35 行）；`thoughtLevelOptions.ts` 改 import+re-export；`getThoughtLevelLabel` 改查外提函数；`isNoThoughtLevel` 参数收窄；消费方 `subagent-model-label.ts`/`list-models.tsx` 靠 re-export 零改动
 - Step B（M）：新增 `ComposerModelMenu/ComposerProviderMenu/ComposerEffortHeading/ComposerTriggerTransition.tsx`+`composer-thought-slider.css`+`ControlShortcutBadge.tsx`；`ModelConfigSelect.tsx` 合入 composerOptions 可选分支（触发器三态 :538-593/锁宽 :599-605/pending 冻结 :244-264/选模型不关菜单 :407-412/挂载 :712-735）；`V4ComposerToolbar.tsx` 构造 composerOptions（无 providerMenu——走上游 `options.providerMenu?.groups ?? groups` 浏览回退 :123）并传入 :587
 - **不动**：`contextUsage.tsx`（474 行 fork 面板原样）、`magicContextUsageRows.ts`、其余 ModelConfigSelect 消费点（composerOptions 缺席=旧行为）
-- 产品决策（spec 默认）：ThoughtLevelCycleControl 保留为 omz 版面第二入口（上游仅锁定态兜底——omz 两态均无；保留避免触屏/窄侧栏无档位控件，Ctrl+T 循环保留）
+- 产品决策（cr-func-c1 后精确化）：ThoughtLevelCycleControl **合并入口在场时退场、缺席（模型入口不可见）或档位非 select 时保底**（上游仅锁定态兜底——omz 两态均无；保底防触屏/窄侧栏无档位控件死角，Ctrl+T 循环保留；实现语义见 commit b95d2dd5）
 - i18n：`chat.toolbar.combined.{provider,models,effort,selectModel}` 4 键×2 locale
 - max-lines：ModelConfigSelect 预计超 400——按 fork 纪律（constraint #112）**拆分**（Composer 分支抽子组件）或沿用上游文件内 disable，spec 默认拆分
 
@@ -146,7 +146,7 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - Step 2 — phase-i18n — blocking: yes — qa: auto — check-i18n-parity（若 omz 有该脚本）过 + 轨迹面板 key 抽查真机文案；合并报告入库
 - Step 3 — phase-c1-composer — blocking: yes — qa: auto — thoughtLevelLabels.ts 外提 + thoughtLevelOptions.ts re-export 化（纯重构，消费方零改动验证）
 - Step 4 — phase-c1-composer — blocking: yes — qa: auto — 新增 4 Composer 组件 + CSS + ControlShortcutBadge（若前迭代 U5 已落则复用）；ModelConfigSelect 合入 composerOptions 分支（拆分控 max-lines）；`useComposerToolbarFit` 在 U10 落地结果上追加 `[data-composer-combined-model]` 分支（上游 :47-59——合并入口末级折叠时保绿条、跳过 provider-prefix/thought 图标压缩段；omz 现文件无此分支；政策 6 后到方融合）
-- Step 5 — phase-c1-composer — blocking: yes — qa: manual_user — V4ComposerToolbar 接线（composerOptions 构造+传入；ThoughtLevelCycleControl 保留双入口）；真机验收合并入口交互（选模型不关菜单/滑杆调档/窄屏 back 模式/触屏）
+- Step 5 — phase-c1-composer — blocking: yes — qa: manual_user — V4ComposerToolbar 接线（composerOptions 构造+传入；ThoughtLevelCycleControl 合并入口在场退场/缺席保底）；真机验收合并入口交互（选模型不关菜单/滑杆调档/窄屏 back 模式/触屏）
 - Step 6 — phase-c2-assembly — blocking: yes — qa: auto — message-history.ts 增 buildUserMessageEntries+谓词（不带 D4 字段）；conversation.ts 内联装配删除改薄包装（video 分支保留）
 - Step 7 — phase-c2-assembly — blocking: yes — qa: auto — hydrator :229-301 装配替换（只圈装配子集）；新增 scripts/test-session-hydrator-assembly.mjs
 - Step 8 — phase-c2-assembly — blocking: yes — qa: auto — **MC 全套门禁跑绿**（§phase-c2-assembly 清单）；core typecheck
