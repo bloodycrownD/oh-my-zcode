@@ -19,6 +19,7 @@ node_status:
   cr-func-c1: { status: done, func_ready: yes, head_sha: 3aa48309, agent: agent_e3ecd398, note: "0 must-fix；5 deviations 闭-接受；P2 spec 文本同步已落（ThoughtLevelCycleControl 退场/保底语义）" }
   impl-c2: { status: done, head_sha: 6d514792, executor: subagent, commits: [b59d9154, b70be647, 6d514792], note: "MC 全套 19 套绿由 impl 提前跑绿（含 Step 8 面）；omz 保真差异 5 项待 cr-func 对照（见记忆 #124）" }
   verify-c2: { status: done, executor: main, evidence: "T-AS 30/30 独立复跑（worktree 根 node --import tsx --test 形态）；diff 面=6 文件（3 src+2 pkg+root）；MC 三端口/挂点零触碰 git diff 断言 0 命中" }
+  cr-func-c2: { status: done, func_ready: yes, agent: agent_5847d60e, note: "0 must-fix；6 差异全 closed（含 P2 漂移④空 text 块过滤——已补登 spec 漂移登记）；oracle 忠实性 3 分支抽查过；LCS 机械对照无未报漂移" }
 open_must_fix: []
 manual_user_pending:
   - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
