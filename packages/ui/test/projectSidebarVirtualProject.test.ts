@@ -18,6 +18,7 @@ import {
 } from "../src/project-sidebar/archive-view.js";
 import { moveProjectOrder, reconcileProjectOrder } from "../src/project-sidebar/projectOrder.js";
 import { timelineDateHeadings } from "../src/project-sidebar/timelineDates.js";
+import type { ProjectTask, VirtualProject } from "../src/project-sidebar/contract.js";
 
 const srcRoot = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "src");
 
@@ -68,20 +69,23 @@ test("T-VU1: services 公开出口暴露 IProjectService 契约且 accessor 为�
 
 // ---------- T-VU2：纯逻辑 ----------
 
-const task = (overrides: Record<string, unknown>) => ({
+// ZCodeTaskMeta 必填面（traceId/mode）按最小 mock 值补齐；deleted 是
+// VirtualProject 侧字段而非 ProjectTask 契约字段，投影函数不消费，不注入。
+const task = (overrides: Partial<ProjectTask>): ProjectTask => ({
   taskId: "t1",
+  traceId: "trace-1",
   title: "task",
   workspacePath: "/w",
   hostId: "local",
+  mode: "yolo",
   projectId: null,
   pinned: false,
   archived: true,
-  deleted: false,
   createdAt: 1,
   updatedAt: 2,
   ...overrides,
 });
-const project = (overrides: Record<string, unknown>) => ({
+const project = (overrides: Partial<VirtualProject>): VirtualProject => ({
   id: "p1",
   hostId: "local",
   name: "proj",
@@ -118,7 +122,7 @@ test("T-VU2: buildArchiveGroups 只收 archived 任务并按项目分组", () =>
     ["c"],
   );
   // updatedAt 降序：组间与组内都成立。
-  assert.ok(named.tasks[0].updatedAt >= unclassified.tasks[0].updatedAt);
+  assert.ok(named.tasks[0]!.updatedAt >= unclassified.tasks[0]!.updatedAt);
 });
 
 test("T-VU2: buildArchiveGroups 查询过滤不区分大小写；项目筛选保留身份", () => {

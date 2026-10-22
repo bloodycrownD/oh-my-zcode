@@ -15,7 +15,7 @@
 //   --test packages/ui/test/modelConfigSelect-composer.test.ts
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createElement } from "react";
+import { createElement, type ReactElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { TID_CHAT_MODEL_SELECT_GROUP, TID_CHAT_MODEL_SELECT_ITEM, testId } from "@zcode/shared";
@@ -69,15 +69,15 @@ const composerOptions: ComposerModelOptions = {
 
 function renderSelect(props: Parameters<typeof ModelConfigSelect>[0]): string {
   // 应用壳在根层提供 TooltipProvider；SSR 渲染这里补齐同一上下文。
+  // ZCodeIntlProvider 的 children 是必填 prop，createElement 需经 props 携带（运行等价）。
   return renderToStaticMarkup(
     createElement(
       TooltipProvider,
       null,
-      createElement(
-        ZCodeIntlProvider,
-        { initialLocale: "zh-CN" },
-        createElement(ModelConfigSelect, props),
-      ),
+      createElement(ZCodeIntlProvider, {
+        initialLocale: "zh-CN",
+        children: createElement(ModelConfigSelect, props),
+      }),
     ),
   );
 }
@@ -87,20 +87,19 @@ function renderSelect(props: Parameters<typeof ModelConfigSelect>[0]): string {
  * DropdownMenuContent 提供，但它内部包 Portal 在 SSR 恒不输出，故这里绕开
  * Portal、直用与组件同模块实例的 dropdown-menu 原语）。
  */
-function renderInsideMenuContent(children: Parameters<typeof createElement>[0]): string {
+function renderInsideMenuContent(children: ReactElement): string {
   return renderToStaticMarkup(
     createElement(
       TooltipProvider,
       null,
-      createElement(
-        ZCodeIntlProvider,
-        { initialLocale: "zh-CN" },
-        createElement(
+      createElement(ZCodeIntlProvider, {
+        initialLocale: "zh-CN",
+        children: createElement(
           DropdownMenuPrimitive.Root,
           { open: true },
           createElement(DropdownMenuPrimitive.Content, null, children),
         ),
-      ),
+      }),
     ),
   );
 }

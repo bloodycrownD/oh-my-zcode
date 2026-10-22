@@ -16,36 +16,52 @@ import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
 
-import { createTabStore } from "../src/store/tabStore.js";
+import { createTabStore, type WorkspaceTabState } from "../src/store/tabStore.js";
 import { isSameWorkspaceTab } from "../src/store/tabWorkspaceIdentity.js";
 import { collectClosedRemoteWorkspaceKeys } from "../src/root/useRemoteWorkspaceTabLifecycle.js";
 import { createWorkspaceSlice } from "../src/store/zcodeSessionStoreWorkspaceSlice.js";
 import { getWorkspaceState } from "../src/store/zcodeSessionStoreSelectors.js";
+import type { ZCodeSessionStoreState } from "../src/store/zcodeSessionStoreTypes.js";
 import {
   onTaskNavigationCommitted,
   notifyTaskNavigationCommitted,
 } from "../src/store/zcodeSessionStoreNavigation.js";
+import type { TaskNavEntry } from "../src/lib/taskNavigationHistory.js";
 import { getWindowControllerTaskListRegistry } from "../src/v4/windowControllerTaskListRegistry.js";
-import { CONTROLLER_WORKSPACES_TOPIC } from "@zcode/shared/zcode-protocol-v4";
+import type { IWindowControllerService } from "@zcode/services";
+import type { WindowHostControllerFrame } from "@zcode/services";
+import type {
+  WindowHostControllerTaskFrame,
+  WindowHostControllerTaskRow,
+} from "@zcode/shared/zcode-protocol-v4";
+import {
+  CONTROLLER_TASKS_INDEX_TOPIC,
+  CONTROLLER_WORKSPACES_TOPIC,
+} from "@zcode/shared/zcode-protocol-v4";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const uiSrc = path.join(root, "packages", "ui", "src");
 const desktopSrc = path.join(root, "packages", "desktop", "src");
 const servicesSrc = path.join(root, "packages", "services", "src");
-const read = (...parts) => readFileSync(path.join(...parts), "utf8");
+const read = (...parts: string[]) => readFileSync(path.join(...parts), "utf8");
 
 // ---------- ①store 草稿归属意图（UI 提交链源头） ----------
 
 function makeSliceHarness() {
-  let state = { workspaces: {}, taskNavHistory: { entries: [], cursor: -1 } };
+  // harness 只挂 store 的数据桶（workspaces/taskNavHistory）；actions 面由
+  // createWorkspaceSlice 自身提供，按 Pick 断言补全类型，不为 50 个无关 action 造 stub。
+  let state = {
+    workspaces: {},
+    taskNavHistory: { entries: [], cursor: -1 },
+  } as Pick<ZCodeSessionStoreState, "workspaces" | "taskNavHistory">;
   const slice = createWorkspaceSlice((partial) => {
-    const next = typeof partial === "function" ? partial(state) : partial;
+    const next = typeof partial === "function" ? partial(state as ZCodeSessionStoreState) : partial;
     state = { ...state, ...next };
   });
   return {
     slice,
-    stateOf: (workspacePath, workspaceIdentity) =>
-      getWorkspaceState({ workspaces: {}, ...state }, workspacePath, workspaceIdentity),
+    stateOf: (workspacePath: string, workspaceIdentity?: string) =>
+      getWorkspaceState(state as ZCodeSessionStoreState, workspacePath, workspaceIdentity),
   };
 }
 
@@ -82,21 +98,21 @@ test("T-VU4: clearDraftTaskGroup 只撤销分组意图，不动项目归属", ()
 
 test("T-VU4: setActiveTaskId 发布导航提交事实（onTaskNavigationCommitted）", () => {
   const { slice } = makeSliceHarness();
-  const received = [];
+  const received: TaskNavEntry[] = [];
   const subscription = onTaskNavigationCommitted((entry) => received.push(entry));
   const dispose = () =>
-    typeof subscription === "function" ? subscription() : subscription.dispose();
+    typeof subscription === "function" ? (subscription as () => void)() : subscription.dispose();
   try {
     slice.setActiveTaskId("W:/proj", "task-1", "identity-1");
     slice.setActiveTaskId("W:/proj", null, "identity-1");
     assert.equal(received.length, 1);
-    assert.equal(received[0].kind, "task");
-    assert.equal(received[0].taskId, "task-1");
-    assert.equal(received[0].workspaceIdentity, "identity-1");
+    assert.equal(received[0]!.kind, "task");
+    assert.equal(received[0]!.taskId, "task-1");
+    assert.equal(received[0]!.workspaceIdentity, "identity-1");
     // 模块级发射器：notify 直接驱动同一事件面（草稿外的导航方共用）。
     notifyTaskNavigationCommitted({ workspacePath: "W:/other", taskId: "task-2" });
     assert.equal(received.length, 2);
-    assert.equal(received[1].workspaceIdentity, undefined);
+    assert.equal(received[1]!.workspaceIdentity, undefined);
   } finally {
     dispose();
   }
@@ -120,10 +136,10 @@ test("T-VU4: 展开键统一为 resolveWorkspaceKey（identity||path），identi
 });
 
 test("T-VU4: 持久化读旧写新——旧 path 键对本机 workspace 仍生效，identity workspace 写新键", () => {
-  const backing = new Map();
+  const backing = new Map<string, string>();
   const storage = {
-    getItem: (key) => backing.get(key) ?? null,
-    setItem: (key, value) => backing.set(key, value),
+    getItem: (key: string) => backing.get(key) ?? null,
+    setItem: (key: string, value: string) => backing.set(key, value),
   };
   // 预置旧格式：裸 path 键。
   storage.setItem("zcode-workspace-expansion", JSON.stringify({ "W:/legacy": false }));
@@ -134,7 +150,7 @@ test("T-VU4: 持久化读旧写新——旧 path 键对本机 workspace 仍生�
   assert.ok(!store.getState().expandedWorkspacePaths.has("W:/legacy"));
   // 写新：带 identity 的 tab 以 identity 键落盘，旧 path 键不被删除（无害孤儿）。
   state().addTab("W:/remote2", { workspaceIdentity: "ssh:host2:/w" });
-  const persisted = JSON.parse(backing.get("zcode-workspace-expansion"));
+  const persisted = JSON.parse(backing.get("zcode-workspace-expansion")!);
   assert.equal(persisted["ssh:host2:/w"], true);
   assert.equal(persisted["W:/legacy"], false);
 });
@@ -158,9 +174,9 @@ test("T-VU4: lastClosedWorkspaceEvent 只对 identity/远端 workspace 发射，
   const identityId = state().addTab("W:/remote2", { workspaceIdentity: "ssh:h2:/w" });
   state().closeTab(identityId, "rekey");
   const second = store.getState().lastClosedWorkspaceEvent;
-  assert.equal(second.sequence, first.sequence + 1);
-  assert.equal(second.workspaceKey, "ssh:h2:/w");
-  assert.equal(second.origin, "rekey");
+  assert.equal(second!.sequence, first!.sequence + 1);
+  assert.equal(second!.workspaceKey, "ssh:h2:/w");
+  assert.equal(second!.origin, "rekey");
 });
 
 test("T-VU4: isSameWorkspaceTab 接受 previousWorkspaceIdentity 命中；lifecycle rekey 不算关闭", () => {
@@ -179,9 +195,11 @@ test("T-VU4: isSameWorkspaceTab 接受 previousWorkspaceIdentity 命中；lifecy
     // 旧 identity 命中同一 tab：ensureWorkspaceTab rekey 复用行。
     isSameWorkspaceTab(tab, "W:/remote", { workspaceIdentity: "ssh:host-old:/w" }) === false,
   );
+  // mock 只构造 lifecycle 判定消费的字段（workspaceIdentity/remoteSessionId/previousWorkspaceIdentity）；
+  // kind/id/label 属 tabStore 壳层，不在本断言面，按断言收窄补齐类型。
   const previous = [
     { workspacePath: "W:/remote", workspaceIdentity: "ssh:host-old:/w", remoteSessionId: "rs-1" },
-  ];
+  ] as unknown as WorkspaceTabState[];
   const next = [
     {
       workspacePath: "W:/remote",
@@ -189,7 +207,7 @@ test("T-VU4: isSameWorkspaceTab 接受 previousWorkspaceIdentity 命中；lifecy
       remoteSessionId: "rs-2",
       previousWorkspaceIdentity: "ssh:host-old:/w",
     },
-  ];
+  ] as unknown as WorkspaceTabState[];
   // Host stable identity 换代：previousWorkspaceIdentity 命中 → 不产生关闭事实。
   assert.deepEqual(collectClosedRemoteWorkspaceKeys(previous, next), []);
   // 无 rekey 证据的真实关闭仍照常产生事实。
@@ -209,10 +227,23 @@ test("T-VU4: mergeWorkspaceTabOptions 等值元数据保持原引用（避免侧
 
 // ---------- ③windowControllerTaskListRegistry 快路径 ----------
 
-function row(taskId, overrides = {}) {
+// ZCodeTaskMeta 必填面（traceId/title/mode/createdAt）按最小 mock 值补齐。
+function row(
+  taskId: string,
+  overrides: Partial<WindowHostControllerTaskRow> = {},
+): WindowHostControllerTaskRow {
   return {
     address: { workspacePath: "W:/proj", taskId },
-    meta: { taskId, workspacePath: "W:/proj", status: "running", updatedAt: 1, title: taskId },
+    meta: {
+      taskId,
+      traceId: `trace-${taskId}`,
+      title: taskId,
+      workspacePath: "W:/proj",
+      mode: "yolo",
+      status: "running",
+      updatedAt: 1,
+      createdAt: 1,
+    },
     membership: { pinned: false, archived: false, active: true },
     sourceAvailability: "online",
     liveStatus: "running",
@@ -220,8 +251,13 @@ function row(taskId, overrides = {}) {
   };
 }
 
-function makeFakeController() {
-  let frameHandler = null;
+type FakeWindowController = IWindowControllerService & {
+  /** 测试辅助：直驱 onDynamicControllerFrame 的回调（registry 消费面之外的驱动口）。 */
+  fire(frame: WindowHostControllerFrame): void;
+};
+
+function makeFakeController(): FakeWindowController {
+  let frameHandler: ((frame: WindowHostControllerFrame) => void) | null = null;
   const controller = {
     async subscribeControllerV4() {
       return { ack: { subscriptionId: "sub-1" } };
@@ -234,26 +270,34 @@ function makeFakeController() {
       return { items: [], total: 0, hasMore: false };
     },
     onDynamicControllerFrame() {
-      return (handler) => {
+      return (handler: (frame: WindowHostControllerFrame) => void) => {
         frameHandler = handler;
         return { dispose: () => (frameHandler = null) };
       };
     },
-    fire(frame) {
+    fire(frame: WindowHostControllerFrame) {
       frameHandler?.(frame);
     },
   };
-  return controller;
+  // mock 只实现 registry 消费的 5 个方法；其余接口方法在断言路径中不会触达。
+  return controller as unknown as FakeWindowController;
 }
 
-function snapshotFrame(tasks, seq = { from: 0, to: 1 }) {
+function snapshotFrame(
+  tasks: WindowHostControllerTaskRow[],
+  seq = { from: 0, to: 1 },
+): WindowHostControllerTaskFrame {
   return {
     subscriptionId: "sub-1",
     logEpoch: "e1",
     fromSeq: seq.from,
     toSeq: seq.to,
-    topic: "tasks-index",
-    payload: { kind: "snapshot", snapshot: { tasks } },
+    sentAt: 0,
+    topic: CONTROLLER_TASKS_INDEX_TOPIC,
+    payload: {
+      kind: "snapshot",
+      snapshot: { protocolVersion: 1, logEpoch: "e1", tasks },
+    },
   };
 }
 
@@ -273,7 +317,7 @@ test("T-VU4: registry readActivities 快路径与目录/Source 修订号语义",
   assert.ok(registry.getRevision() > revisionBefore);
   // readActivities 只回在线 + 有活动行（快路径替代逐 scope sessions-index 订阅）。
   assert.equal(registry.readActivities().length, 1);
-  assert.equal(registry.readActivities()[0].address.taskId, "t1");
+  assert.equal(registry.readActivities()[0]!.address.taskId, "t1");
   const directoryBefore = registry.getDirectoryRevision();
   // snapshot = 全量重建，恒递增目录与 Source 修订号（活动噪声不豁免 snapshot 重建）。
   controller.fire(
@@ -290,7 +334,8 @@ test("T-VU4: registry readActivities 快路径与目录/Source 修订号语义",
     logEpoch: "e1",
     fromSeq: 2,
     toSeq: 3,
-    topic: "tasks-index",
+    sentAt: 0,
+    topic: CONTROLLER_TASKS_INDEX_TOPIC,
     payload: {
       kind: "deltas",
       deltas: [
@@ -309,7 +354,8 @@ test("T-VU4: registry readActivities 快路径与目录/Source 修订号语义",
     logEpoch: "e1",
     fromSeq: 3,
     toSeq: 4,
-    topic: "tasks-index",
+    sentAt: 0,
+    topic: CONTROLLER_TASKS_INDEX_TOPIC,
     payload: {
       kind: "deltas",
       deltas: [
@@ -329,8 +375,12 @@ test("T-VU4: registry readActivities 快路径与目录/Source 修订号语义",
     logEpoch: "e1",
     fromSeq: 4,
     toSeq: 5,
+    sentAt: 0,
     topic: CONTROLLER_WORKSPACES_TOPIC,
-    payload: { kind: "snapshot", snapshot: { hosts: [] } },
+    payload: {
+      kind: "snapshot",
+      snapshot: { protocolVersion: 1, logEpoch: "e1", workspaces: [] },
+    },
   });
   await settle();
   assert.equal(registry.getSourceRevision(), sourceBefore + 1);

@@ -17,22 +17,30 @@ import {
   projectGroupedNodes,
   taskGroupKey,
   taskGroupTitleMessageId,
+  type GroupedRow,
 } from "../src/project-sidebar/grouped-view.js";
 import {
   closeSidePaneTabForScope,
   ensureSidePaneTab,
   isSidePaneTabVisibleInScope,
+  type WorkspaceSidePaneState,
+  type WorkspaceSidePaneTab,
 } from "../src/lib/workspaceSidePane.js";
+import type { ProjectTask, TaskGroupStructure } from "../src/project-sidebar/contract.js";
 import { CRON_DEFAULT_GROUP_ID } from "@zcode/shared";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const uiSrc = path.join(root, "packages", "ui", "src");
-const read = (...parts) => readFileSync(path.join(uiSrc, ...parts), "utf8");
+const read = (...parts: string[]) => readFileSync(path.join(uiSrc, ...parts), "utf8");
 
-const task = (taskId, overrides = {}) => ({
+// ZCodeTaskMeta 必填面（traceId/title/mode）按最小 mock 值补齐，投影纯函数不消费这些字段。
+const task = (taskId: string, overrides: Partial<ProjectTask> = {}): ProjectTask => ({
   taskId,
+  traceId: `trace-${taskId}`,
+  title: taskId,
   workspacePath: "W:/proj",
   hostId: "local",
+  mode: "yolo",
   status: "completed",
   updatedAt: 1,
   createdAt: 1,
@@ -45,18 +53,21 @@ const task = (taskId, overrides = {}) => ({
 // ---------- T-VU3：grouped-view 分组投影 ----------
 
 test("T-VU3: projectGroupedNodes 按 structure 投影组头/成员/未分组任务，折叠组隐藏成员", () => {
-  const structure = {
+  const structure: TaskGroupStructure = {
     groups: [{ id: "g1", title: "组一", color: "blue", createdAt: 1, updatedAt: 1 }],
-    members: [
-      { groupId: "g1", workspaceKey: "W:/proj", taskId: "t1", sortOrder: 0 },
-    ],
+    members: [{ groupId: "g1", workspaceKey: "W:/proj", taskId: "t1", sortOrder: 0 }],
     order: [
       { type: "group", key: "g1", sortOrder: 0 },
       { type: "task", key: taskGroupKey(task("t2")), sortOrder: 1 },
     ],
   };
   const tasks = [task("t1"), task("t2")];
-  const expanded = projectGroupedNodes(tasks, structure, new Set());
+  // 行形状已由下方 map 断言锁定；按断言面收窄判别联合，避免逐行重复守卫。
+  const expanded = projectGroupedNodes(tasks, structure, new Set()) as [
+    Extract<GroupedRow, { type: "group" }>,
+    Extract<GroupedRow, { type: "task" }>,
+    Extract<GroupedRow, { type: "task" }>,
+  ];
   assert.deepEqual(
     expanded.map((row) => row.type),
     ["group", "task", "task"],
@@ -66,12 +77,15 @@ test("T-VU3: projectGroupedNodes 按 structure 投影组头/成员/未分组任�
   assert.equal(expanded[1].groupId, "g1");
   assert.equal(expanded[2].groupId, null);
   const collapsed = projectGroupedNodes(tasks, structure, new Set(["g1"]));
-  assert.deepEqual(collapsed.map((row) => row.type), ["group", "task"]);
+  assert.deepEqual(
+    collapsed.map((row) => row.type),
+    ["group", "task"],
+  );
   assert.ok(!collapsed.some((row) => row.type === "task" && row.task.taskId === "t1"));
 });
 
 test("T-VU3: 折叠空组显示 empty 占位；系统分组标题走 i18n 键", () => {
-  const structure = {
+  const structure: TaskGroupStructure = {
     groups: [
       { id: "g1", title: "空组", color: "gray", createdAt: 1, updatedAt: 1 },
       { id: CRON_DEFAULT_GROUP_ID, title: "cron", color: "gray", createdAt: 1, updatedAt: 1 },
@@ -87,8 +101,8 @@ test("T-VU3: 折叠空组显示 empty 占位；系统分组标题走 i18n 键", 
     rows.map((row) => row.type),
     ["group", "empty", "group", "empty"],
   );
-  assert.equal(taskGroupTitleMessageId(structure.groups[0]), undefined);
-  assert.equal(taskGroupTitleMessageId(structure.groups[1]), "taskGroup.cron");
+  assert.equal(taskGroupTitleMessageId(structure.groups[0]!), undefined);
+  assert.equal(taskGroupTitleMessageId(structure.groups[1]!), "taskGroup.cron");
   assert.deepEqual(groupTaskRef(task("t9")), {
     hostId: "local",
     taskId: "t9",
@@ -98,7 +112,7 @@ test("T-VU3: 折叠空组显示 empty 占位；系统分组标题走 i18n 键", 
 
 // ---------- T-VU3：workspaceSidePane 作用域化 ----------
 
-const browserTab = {
+const browserTab: WorkspaceSidePaneTab = {
   id: "b1",
   type: "browser",
   ownerTaskId: "task-a",
@@ -116,12 +130,17 @@ test("T-VU3: isSidePaneTabVisibleInScope 按 workspace+owner 收窄；new-tab �
     isSidePaneTabVisibleInScope(browserTab, { workspaceKey: "W:/proj", ownerTaskId: "task-b" }),
     false,
   );
-  const newTab = { id: "n1", type: "new-tab", ownerTaskId: "task-b", workspaceKey: "W:/proj" };
+  const newTab: WorkspaceSidePaneTab = {
+    id: "n1",
+    type: "new-tab",
+    ownerTaskId: "task-b",
+    workspaceKey: "W:/proj",
+  };
   assert.equal(isSidePaneTabVisibleInScope(newTab, { ...scope, ownerTaskId: "task-b" }), true);
 });
 
 test("T-VU3: closeSidePaneTabForScope 关闭后 active 收敛到可见 tab；末标签触发收起由 hook 承担", () => {
-  const state = {
+  const state: WorkspaceSidePaneState = {
     tabs: [
       browserTab,
       { id: "b2", type: "browser", ownerTaskId: "task-a", workspaceKey: "W:/proj" },
@@ -130,8 +149,8 @@ test("T-VU3: closeSidePaneTabForScope 关闭后 active 收敛到可见 tab；末
   };
   const scope = { workspaceKey: "W:/proj", ownerTaskId: "task-a" };
   const next = closeSidePaneTabForScope(state, "b1", scope);
-  assert.equal(next.tabs.length, 1);
-  assert.equal(next.activeTabId, "b2");
+  assert.equal(next!.tabs.length, 1);
+  assert.equal(next!.activeTabId, "b2");
   const emptied = closeSidePaneTabForScope(next, "b2", scope);
   assert.equal(emptied, null);
 });
@@ -140,8 +159,8 @@ test("T-VU3: ensureSidePaneTab 只为无可见标签的 scope 补 new-tab 入口
   const scope = { workspaceKey: "W:/proj", ownerTaskId: "task-a" };
   const ensured = ensureSidePaneTab(null, scope);
   assert.equal(ensured.tabs.length, 1);
-  assert.equal(ensured.tabs[0].type, "new-tab");
-  assert.equal(ensured.tabs[0].ownerTaskId, "task-a");
+  assert.equal(ensured.tabs[0]?.type, "new-tab");
+  assert.equal(ensured.tabs[0]?.ownerTaskId, "task-a");
   const again = ensureSidePaneTab(ensured, scope);
   assert.equal(again, ensured, "已有可见标签时不得重复补入口");
 });
@@ -149,10 +168,7 @@ test("T-VU3: ensureSidePaneTab 只为无可见标签的 scope 补 new-tab 入口
 // ---------- T-VU3：P4.1 接线形状守卫 ----------
 
 test("T-VU3: host 注册链——node.ts 注册 project/task-groups 通道 + zcodeAgent 三选项", () => {
-  const nodeTs = readFileSync(
-    path.join(root, "packages", "services", "src", "node.ts"),
-    "utf8",
-  );
+  const nodeTs = readFileSync(path.join(root, "packages", "services", "src", "node.ts"), "utf8");
   assert.match(nodeTs, /\.register\(IProjectService, projectService\)/);
   assert.match(nodeTs, /\.register\(ITaskGroupService, taskGroupService\)/);
   assert.match(nodeTs, /prepareProjectExecution:/);
@@ -199,5 +215,8 @@ test("T-VU3: 未读信号契约面先行——协议行/事件方法/host 空流
     "utf8",
   );
   assert.match(hostService, /taskUnreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>/);
-  assert.match(hostService, /onDynamicTaskUnreadSignal\(\) \{[\s\S]*?taskUnreadSignalEmitter\.event/);
+  assert.match(
+    hostService,
+    /onDynamicTaskUnreadSignal\(\) \{[\s\S]*?taskUnreadSignalEmitter\.event/,
+  );
 });
