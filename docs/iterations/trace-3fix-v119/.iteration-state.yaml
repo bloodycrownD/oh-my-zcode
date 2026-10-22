@@ -1,0 +1,21 @@
+# trace-3fix-v119 迭代编排状态
+spec_path: docs/iterations/trace-3fix-v119/cr-fix-spec.md
+branch: trace-3fix-v119
+base_sha: b952d749
+impl_base: 95bb4ecb
+head_sha: 0eccbddf
+dag_version: 2
+wave_plan:
+  - [fix-hook, fix-expand, fix-comment]
+  - [verify-all]
+  - [cr-func]
+node_status:
+  fix-hook: { status: done, executor: subagent, commits: [7282df92, a19e63f7], items: [P1-1, P1-2, P1-3, P2-3, P2-4] }
+  fix-expand: { status: done, executor: mixed, note: "派遣三次瞬时失败（Model request failed）；子代理挂前完成主体编辑，主代理逐条对照 spec 验收后接管收尾", commits: [911288a5], items: [P1-4, P1-5, P2-1-第三处, P2-2] }
+  fix-comment: { status: done, executor: main, commits: [0eccbddf], items: [P2-1-前两处] }
+  verify-all: { status: done, executor: main, evidence: "typecheck 0 错 / oxlint 6 文件 0w0e（Pane 未触 400 行）/ test:v4-perf 28 组 464 pass 0 fail（含新增 trajectoryRetry 9 用例）/ oxfmt 已过" }
+  cr-func: { status: done, executor: main, note: "手工审查（派遣通道持续故障，按 skill 失败处理纪律）", func_ready: yes }
+open_must_fix: []
+spec_deviations: []
+dev_ready: yes（2026-10-23，HEAD 0eccbddf）
+next: e2e（等用户编排）→ 发布链 v1.0.19
