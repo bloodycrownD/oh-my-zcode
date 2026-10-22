@@ -468,6 +468,12 @@ export function createWindowHostControllerProjection(options: { createId: () => 
       ]);
     },
 
+    discardSource(scope: WindowHostControllerSourceScope): void {
+      // provisional source 尚未发布过 snapshot；CAS 失效时只应撤销内部注册，不能向订阅者
+      // 伪造一次 workspace.removed，也不能触碰仍在展示的上一代离线 source。
+      sources.delete(sourceKey(scope));
+    },
+
     getTasks: allRows,
     getGroupedTaskFacts(): WindowHostControllerTaskRow[] {
       return allRows().filter((task) => !task.address.remoteSessionId);

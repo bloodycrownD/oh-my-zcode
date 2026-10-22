@@ -431,6 +431,7 @@ export function createWindowHostControllerRuntime(options: {
   async function refreshSource(
     resolved: ResolvedWindowHostControllerSource,
     force = false,
+    beforeCommit?: () => void,
   ): Promise<void> {
     registerResolvedSource(resolved);
     if (!resolved.taskService || resolved.sourceAvailability !== "online") {
@@ -448,6 +449,7 @@ export function createWindowHostControllerRuntime(options: {
       if (sourceRefreshGenerations.get(key) !== generation) {
         throw new Error("Controller source refresh generation 已失效");
       }
+      beforeCommit?.();
       const previousScope = pendingReplacementByNextSourceKey.get(key);
       projection.replaceSourceSnapshot({
         scope: resolved.scope,
@@ -476,6 +478,10 @@ export function createWindowHostControllerRuntime(options: {
   async function replaceDisconnectedSource(
     previousScope: WindowHostControllerSourceScope,
     resolved: ResolvedWindowHostControllerSource,
+    transaction?: {
+      canCommit?: () => boolean;
+      rollbackOnFailure?: boolean;
+    },
   ): Promise<void> {
     if (!resolved.taskService || resolved.sourceAvailability !== "online") {
       throw new Error("重连 source 尚未 online，不能替换离线投影");
@@ -492,7 +498,25 @@ export function createWindowHostControllerRuntime(options: {
       projection.removeSource(previousScope);
     }
     pendingReplacementByNextSourceKey.set(sourceKey(resolved.scope), retainedPreviousScope);
-    await refreshSource(resolved, true);
+    try {
+      await refreshSource(resolved, true, () => {
+        if (transaction?.canCommit?.() === false) {
+          throw new Error("Controller source replacement generation 已失效");
+        }
+      });
+    } catch (error) {
+      if (transaction?.rollbackOnFailure) {
+        const key = sourceKey(resolved.scope);
+        if (pendingReplacementByNextSourceKey.has(key)) {
+          // Bug 原因：Registry 已回滚 provisional logical session 时，Controller 曾继续保留
+          // 新 generation 的 pending source/订阅，下一轮又从旧 session 重试，最终泄漏孤儿 owner。
+          pendingReplacementByNextSourceKey.delete(key);
+          forgetRegisteredSource(resolved.scope);
+          projection.discardSource(resolved.scope);
+        }
+      }
+      throw error;
+    }
   }
 
   function resolveQuerySources(
