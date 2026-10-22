@@ -68,7 +68,7 @@ export function TrajectoryClampedPreview({
   useLayoutEffect(() => {
     measureOverflow();
     // measuredText 入 deps（r1 CR P1-1）：内容变化时上面的渲染期复位会清掉溢出态，
-    // 但 RO 观察的是被 6lh 钳住的盒子（外框高度不变、RO 不触发）——必须由本 effect 重测，
+    // 但 RO 观察的是被钳住的盒子（v1.0.19 起单行截断；外框高度不变、RO 不触发）——必须由本 effect 重测，
     // 否则「查看全文」入口（路径 B 唯一出口）在内容变化后被永久抹掉。
   }, [measureOverflow, measuredText]);
 
