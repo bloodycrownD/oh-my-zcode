@@ -2,7 +2,11 @@ import { realpath } from "node:fs/promises";
 import { resolve as resolvePath } from "node:path";
 import { Worker } from "node:worker_threads";
 import { createInterface } from "node:readline";
-import { zcodeStoragePreparationFrameSchema, type DatabaseStartupState } from "@zcode/shared";
+import {
+  zcodeStoragePreparationFrameSchema,
+  type DatabaseMigrationFacts,
+  type DatabaseStartupState,
+} from "@zcode/shared";
 import { resolveDefaultZCodeAgentCommand } from "@zcode/services/storage-startup";
 // 旧摆放迁移：worker 消息 schema 抽取进本目录 contract.ts（上游同款端口）。
 import { workerMessageSchema } from "./contract.js";

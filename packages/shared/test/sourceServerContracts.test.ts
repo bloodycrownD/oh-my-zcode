@@ -24,7 +24,6 @@ import {
   publicZCodeErrorCodeSchema,
   remoteConnectionFailureLogLevel,
   sanitizeRemoteConnectionLog,
-  serverRemoteInfoOutputSchema,
   sourceServerConnectionStateSnapshotSchema,
   sourceServerInstallProgressSchema,
   sourceServerOperationLogSchema,
