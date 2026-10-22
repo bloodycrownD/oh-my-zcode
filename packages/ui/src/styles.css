@@ -4,6 +4,8 @@
 @import "shadcn/tailwind.css";
 @import "@xterm/xterm/css/xterm.css";
 @import "katex/dist/katex.min.css";
+/* Composer 合并入口的思考强度滑杆样式（自上游 v3.16 移植；组件内不 import css，统一在此挂载）。 */
+@import "./chat-input-toolbar/composer-thought-slider.css";
 @source "../../../node_modules/streamdown/dist/*.js"; /* 显式扫描 streamdown 的运行时类名 */
 
 @plugin "@tailwindcss/typography";
