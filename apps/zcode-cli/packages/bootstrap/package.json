@@ -42,6 +42,7 @@
     "test:subagent-live-model": "node --test scripts/test-subagent-live-model.mjs",
     "test:prompt-language-rpc": "node --test scripts/test-prompt-language-rpc.mjs",
     "test:session-mapper-parts": "tsx --test scripts/test-session-mapper-parts.mjs",
+    "test:late-tool-input-guard": "node --import tsx --test scripts/test-late-tool-input-guard.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src",
