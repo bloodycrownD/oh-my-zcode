@@ -122,6 +122,8 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - `sourceServerDirectory`（1487）+ `aliasRepo`（2355）+ controllerRemoteIdentityMigration（318）+ entriesBySourceServerId 归属模型 + ui `remote-connection-flow`（index 2185 行）+ `remoteWorkspaceController` intent 模型 + `RemoteConnectionDialogContent/Fields` 重写
 - **UI 以 omz 为准**：上游 project-sidebar Remote* 7 组件此期回填（omz 化）；workspaceIdentity 冲突评审（上游 `remote:server:<sourceServerId>:<path>` 强制改写 vs omz `workspaceIdentity?.trim() || workspacePath` 键规则）——过 Workspace Identity 契约评审后拍板
 - schema 迁移两支（230 行，controller-remote/source-server scope）随本期采纳（omz sqlite-migrations 框架三期后已具备）
+- 测试用例别名注记（cr-func-r3b）：二期 T-RC 载体（windowRemoteConnectionRegistryRecovery.test.ts 8 用例）=本表 T-RM2 的自动化部分；T-RM3/T-RM4 真机矩阵不变
+- 三期承接核对（cr-func-r3b P2-2）：replaceDisconnectedSource 旧手动流退役带走的 attachment 租约清理（detachRemoteSessionAttachments）与 Renderer 旧 sessionId 失效通知（RemoteWorkspaceClosed(reason:disposed)/RemoteWorkspaceReconnected postMessage）——remote-connection-flow 切换主链时显式核对，防换代后悬空
 - 真机验收：SSH/WSL/Docker 三通道 × 断连恢复/换代/升级矩阵
 
 ### phase-toolsearch（P8；依赖 phase-c2-assembly 完成后再动 message-history/turn-loop 面）

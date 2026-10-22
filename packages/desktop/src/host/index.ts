@@ -1272,6 +1272,8 @@ function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
 async function connectManagedSourceServerHandle(params: {
   target: RemoteTarget;
   existingSourceServerId?: string;
+  // 三期 Directory admission 占位：omz Manager 的 ConnectSourceServerOptions 已裁该字段，
+  // 此处保留签名以对齐上游形态，P7 接 Directory.recordHandshake 后恢复消费（cr-func-r3b P2-1）。
   membershipIntent?: "add" | "retain";
   remoteAssets: RemoteAssetDirs;
   signal: AbortSignal;
