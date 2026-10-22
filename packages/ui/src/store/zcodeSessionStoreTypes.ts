@@ -191,6 +191,10 @@ export interface WorkspaceZCodeUIState {
   groupedDraftTask: GroupedDraftTaskState | null;
   /** 用户发起当前草稿的入口；预热不改变来源。 */
   draftCreateSource: SessionCreateSource;
+  /** 未提交草稿的项目选择（upstream-v316-fullsync P4.2）；已提交归属只在 Host。 */
+  draftProjectId?: string | null;
+  /** 未提交任务的分组意图；无文字时仅保留在当前 Renderer 内存。 */
+  draftTaskGroupId?: string | null;
   /** 首发创建后、grouped sqlite order 落地前，真实 task 继承草稿锚点的本地定位。 */
   promotedGroupedDraftTaskByTaskId: Record<string, GroupedDraftTaskState>;
   /** 当前 workspace 选中的 ZCode Agent provider */
@@ -266,10 +270,16 @@ export interface ZCodeSessionStoreState {
     workspaceIdentity?: string,
     options?: {
       groupedDraftPlacement?: GroupedDraftTaskPlacement;
+      /** 虚拟项目归属意图（upstream-v316-fullsync P4.2）；undefined=沿用活动 workspace。 */
+      projectId?: string | null;
+      /** 分组归属意图；首发 ACK 后由 SessionPane 经 taskGroupService.admit 提交。 */
+      taskGroupId?: string | null;
       createSource?: SessionCreateSource;
     },
   ) => void;
   clearGroupedDraftTask: (workspacePath: string, workspaceIdentity?: string) => void;
+  /** 只撤销草稿的分组归属意图，不重置预热/配置/焦点。 */
+  clearDraftTaskGroup: (workspacePath: string, workspaceIdentity?: string) => void;
   bindRuntimeProvider: (
     workspacePath: string,
     provider: ZCodeProvider,

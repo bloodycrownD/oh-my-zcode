@@ -43,7 +43,11 @@ import type { AttachmentUploadOptions } from "@/v4/attachmentUploadTransaction.j
 
 export interface V4ConversationContextValue {
   layer: SessionDataLayer;
-  sendCommand(envelope: CommandEnvelope): Promise<CommandAck>;
+  /** context.projectId 仅 Host 消费（createSession 归属预留），不进 CLI envelope。 */
+  sendCommand(
+    envelope: CommandEnvelope,
+    context?: { projectId?: string | null },
+  ): Promise<CommandAck>;
   fileChanges(params: V4ConversationFileChangesParams): Promise<V4ConversationFileChangesResult>;
   fileRewindPreview(
     params: V4ConversationFileRewindPreviewParams,
@@ -131,7 +135,8 @@ function ReadyV4ConversationProvider({
     const layer = new SessionDataLayer({ transport });
     return {
       layer,
-      sendCommand: (envelope: CommandEnvelope) => transport.sendCommand(envelope),
+      sendCommand: (envelope: CommandEnvelope, context?: { projectId?: string | null }) =>
+        transport.sendCommand(envelope, context),
       fileChanges: (params: V4ConversationFileChangesParams) => transport.fileChanges(params),
       fileRewindPreview: (params: V4ConversationFileRewindPreviewParams) =>
         transport.fileRewindPreview(params),
@@ -294,7 +299,8 @@ function ReadyV4PaneConversationProvider({
       lease,
       value: {
         layer: lease.layer,
-        sendCommand: (envelope: CommandEnvelope) => lease.transport.sendCommand(envelope),
+        sendCommand: (envelope: CommandEnvelope, context?: { projectId?: string | null }) =>
+          lease.transport.sendCommand(envelope, context),
         fileChanges: (params: V4ConversationFileChangesParams) =>
           lease.transport.fileChanges(params),
         fileRewindPreview: (params: V4ConversationFileRewindPreviewParams) =>

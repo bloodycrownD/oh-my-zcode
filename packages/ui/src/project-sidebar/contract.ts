@@ -32,8 +32,9 @@ export type {
   WindowHostTaskAddress,
   WindowHostControllerTaskActivity,
 } from "@zcode/shared/zcode-protocol-v4";
-// omz：WindowHostControllerMutation 定义在 services 侧 windowController.ts（非 shared 协议行）。
-export type { WindowHostControllerMutation } from "@zcode/services";
+// omz：WindowHostControllerMutation / WindowHostTaskUnreadSignal 定义在 services 侧
+// windowController.ts（非 shared 协议行）。
+export type { WindowHostControllerMutation, WindowHostTaskUnreadSignal } from "@zcode/services";
 export type {
   TaskGroup,
   TaskGroupColor,

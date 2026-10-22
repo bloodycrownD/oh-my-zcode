@@ -15,6 +15,7 @@ import {
 import { Hand } from "lucide-react";
 import {
   buildCustomSupplierKey,
+  remoteHostIdFromWorkspaceIdentity,
   TID_CHAT_EMPTY,
   TID_V4_SESSION_PANE,
   testId,
@@ -47,6 +48,7 @@ import { WORKSPACE_FILE_DRAG_MIME } from "@/lib/workspaceFileDrag.js";
 import { buildChatSessionScrollMemoryKey } from "@/lib/chatSessionScrollMemory.js";
 import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js";
 import { useServices } from "@/hooks/useServices.js";
+import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useDynamicWorkflowAvailability } from "@/hooks/useDynamicWorkflowAvailability.js";
 import { resolveWorkflowResumeHandler } from "@/v4/workflowResumeGate.js";
 import {
@@ -836,8 +838,13 @@ export function SessionPane({
   // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
   const promoteGroupedDraftTask = useZCodeSessionStore((state) => state.promoteGroupedDraftTask);
+  const baseWorkspaceServices = useBaseWorkspaceServices();
   const handleDraftSessionCreated = useCallback(
-    (createdSessionId: string, groupedDraftTask: GroupedDraftTaskState | null | undefined) => {
+    (
+      createdSessionId: string,
+      groupedDraftTask: GroupedDraftTaskState | null | undefined,
+      taskGroupId?: string | null,
+    ) => {
       newlyCreatedSessionIdRef.current = createdSessionId;
       promoteComposerDraft(createdSessionId);
       // 只有 draft create/promote 的 accepted 边界能继承 grouped placement。
@@ -854,6 +861,35 @@ export function SessionPane({
           draftId: groupedDraftTask.draftId,
         });
       }
+      // 分组归属意图（upstream-v316-fullsync P4.2）：会话已创建，组织失败不能向发送层
+      // 抛错诱导重发；重试闭包只持有本次创建的地址与 placement，绝不重放 createSession。
+      if (taskGroupId) {
+        const task = {
+          taskId: createdSessionId,
+          workspacePath,
+          ...(workspaceIdentity ? { workspaceIdentity } : {}),
+          hostId: remoteHostIdFromWorkspaceIdentity(workspaceIdentity ?? "") ?? "local",
+        };
+        const attempt = async () => {
+          try {
+            if (!baseWorkspaceServices.taskGroupService)
+              throw new Error("task-group.service-unavailable");
+            await baseWorkspaceServices.taskGroupService.admit({
+              tasks: [task],
+              placement: { task, groupId: taskGroupId, creationId: createdSessionId },
+            });
+          } catch (cause) {
+            logger.error("[task-groups] 新任务归属提交失败", cause);
+            toast(intl.formatMessage({ id: "taskGroup.failed" }), {
+              durationMs: 0,
+              actionLabel: intl.formatMessage({ id: "taskGroup.retryPlacement" }),
+              onAction: () => void attempt(),
+              dedupeKey: `task-group:${createdSessionId}`,
+            });
+          }
+        };
+        void attempt();
+      }
       onSessionCreated?.(createdSessionId);
     },
     [
@@ -861,6 +897,8 @@ export function SessionPane({
       onSessionCreated,
       promoteComposerDraft,
       promoteGroupedDraftTask,
+      baseWorkspaceServices,
+      intl,
       workspaceIdentity,
       workspacePath,
     ],
@@ -904,6 +942,9 @@ export function SessionPane({
       baseLogEpoch?: string,
       onEnvelopeCreated?: (envelope: CommandEnvelope) => void,
       sessionCreateSource?: SessionCreateSource,
+      /** 重放时优先于当前 store 草稿（upstream-v316-fullsync P4.2）；undefined=读当前草稿。 */
+      creationProjectId?: string | null,
+      creationTaskGroupId?: string | null,
     ): Promise<CommandAck> => {
       const submission = submissionConfigFromCommand(type, payload);
       const acceptRecent = submission
@@ -922,11 +963,25 @@ export function SessionPane({
       });
       onEnvelopeCreated?.(envelope);
       // 必须早于第一次上行：transport error/renderer refresh 后仍有可查询线索。
+      // 项目/分组归属同样在 createSession 边界冻结（upstream-v316-fullsync P4.2）：
+      // ACK 期间切页或开新草稿不得改写本次创建的目标归属。
+      const workspaceStateAtSend = useZCodeSessionStore
+        .getState()
+        .getWorkspaceState(workspacePath, workspaceIdentity);
       const groupedDraftTask =
+        type === "createSession" ? workspaceStateAtSend.groupedDraftTask : null;
+      const draftProjectIdAtSend =
         type === "createSession"
-          ? useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-              .groupedDraftTask
-          : null;
+          ? creationProjectId !== undefined
+            ? creationProjectId
+            : workspaceStateAtSend.draftProjectId
+          : undefined;
+      const draftTaskGroupIdAtSend =
+        type === "createSession"
+          ? creationTaskGroupId !== undefined
+            ? creationTaskGroupId
+            : workspaceStateAtSend.draftTaskGroupId
+          : undefined;
       pendingCommandRegistry.record(
         envelope,
         type === "createSession"
@@ -936,10 +991,11 @@ export function SessionPane({
                 ...(workspaceIdentity ? { workspaceIdentity } : {}),
               },
               ...(groupedDraftTask ? { groupedDraftTask } : {}),
-              sessionCreateSource:
-                sessionCreateSource ??
-                useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-                  .draftCreateSource,
+              ...(draftProjectIdAtSend !== undefined ? { projectId: draftProjectIdAtSend } : {}),
+              ...(draftTaskGroupIdAtSend !== undefined
+                ? { taskGroupId: draftTaskGroupIdAtSend }
+                : {}),
+              sessionCreateSource: sessionCreateSource ?? workspaceStateAtSend.draftCreateSource,
             }
           : undefined,
       );
@@ -952,7 +1008,12 @@ export function SessionPane({
       }
       let ack: CommandAck;
       try {
-        ack = await sendCommand(envelope);
+        // projectId 只在 params 层由 Host 消费（归属预留），不进 CLI envelope；
+        // undefined 不写字段保持旧 wire 形状（upstream-v316-fullsync P4.2）。
+        ack = await sendCommand(
+          envelope,
+          draftProjectIdAtSend !== undefined ? { projectId: draftProjectIdAtSend } : undefined,
+        );
       } catch (error) {
         if (lease?.store) {
           lease.store.settleCommand(envelope.commandId);
@@ -2016,12 +2077,13 @@ export function SessionPane({
         slashCommand = null;
       }
       // create/send ACK 期间用户可能切换任务或创建另一份 draft。
-      // placement 必须绑定发送开始时的稳定 identity，不能在完成回调里读取当前 workspace 草稿。
-      const groupedDraftTaskAtSend =
+      // placement 与分组归属必须绑定发送开始时的稳定 identity，不能在完成回调里读取当前 workspace 草稿。
+      const draftStateAtSend =
         sessionId === null
           ? useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-              .groupedDraftTask
           : null;
+      const groupedDraftTaskAtSend = draftStateAtSend?.groupedDraftTask ?? null;
+      const taskGroupIdAtSend = draftStateAtSend?.draftTaskGroupId;
       const selectionSideSlashCommand =
         sessionId && (appSlashCommands?.length ?? 0) > 0
           ? parseSelectionSideSlashCommand(text, readyAttachments, {
@@ -2133,7 +2195,11 @@ export function SessionPane({
             if (consumed) {
               onAcceptedSelection?.();
               prewarm.promote();
-              handleDraftSessionCreated(prewarm.sessionId, groupedDraftTaskAtSend);
+              handleDraftSessionCreated(
+                prewarm.sessionId,
+                groupedDraftTaskAtSend,
+                taskGroupIdAtSend,
+              );
               return;
             }
           } catch (error) {
@@ -2163,7 +2229,7 @@ export function SessionPane({
           throw new Error("createSession 缺少 sessionId");
         }
         const newSessionId = createResult.sessionId;
-        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend);
+        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend, taskGroupIdAtSend);
         await dispatchSlashCommand(
           draftSlashCommand,
           newSessionId,
@@ -2191,7 +2257,11 @@ export function SessionPane({
             );
             if (ack.status === "accepted") {
               prewarm.promote();
-              handleDraftSessionCreated(prewarm.sessionId, groupedDraftTaskAtSend);
+              handleDraftSessionCreated(
+                prewarm.sessionId,
+                groupedDraftTaskAtSend,
+                taskGroupIdAtSend,
+              );
               return;
             }
             // failed ACK 也可能发生在 runtime 已启动、但 TurnStarted projection commit
@@ -2238,7 +2308,7 @@ export function SessionPane({
           if (!result || result.type !== "createSession") {
             throw new Error("createSession 缺少 sessionId");
           }
-          handleDraftSessionCreated(result.sessionId, groupedDraftTaskAtSend);
+          handleDraftSessionCreated(result.sessionId, groupedDraftTaskAtSend, taskGroupIdAtSend);
           return;
         }
         // 本地 desktop localPath 是零拷贝 ready，不依赖 attachment transaction；极短窗口内
@@ -2269,7 +2339,7 @@ export function SessionPane({
         if (sendAck.status !== "accepted") {
           throw new Error(sendAck.reasonCode ?? "sendText 被拒绝");
         }
-        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend);
+        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend, taskGroupIdAtSend);
         return;
       }
       // 附件 ref 已在 composer 预传状态机中收口。
@@ -3363,7 +3433,17 @@ export function SessionPane({
       commandId: recoverableCommand.commandId,
     });
     if (!replay) return;
-    void dispatchCommand(replay.type, replay.payload, replay.sessionId, replay.baseRevision)
+    void dispatchCommand(
+      replay.type,
+      replay.payload,
+      replay.sessionId,
+      replay.baseRevision,
+      undefined,
+      undefined,
+      replay.clientContext?.sessionCreateSource,
+      replay.clientContext?.projectId,
+      replay.clientContext?.taskGroupId,
+    )
       .then((ack) => {
         if (
           replay.type === "createSession" &&
@@ -3381,7 +3461,12 @@ export function SessionPane({
             });
             return;
           }
-          handleDraftSessionCreated(ack.result.sessionId, replay.clientContext?.groupedDraftTask);
+          // 重放沿用首发捕获的归属；组织链在创建边界重新提交，迟到重放不改归属目标。
+          handleDraftSessionCreated(
+            ack.result.sessionId,
+            replay.clientContext?.groupedDraftTask,
+            replay.clientContext?.taskGroupId,
+          );
         }
       })
       .catch((error) => {

@@ -7,6 +7,10 @@ export interface PendingCommandClientContext {
     workspaceIdentity?: string;
   };
   groupedDraftTask?: GroupedDraftTaskState;
+  /** 首发捕获的虚拟项目归属（upstream-v316-fullsync P4.2）；重放时随命令重发，防迟到 ACK 丢归属。 */
+  projectId?: string | null;
+  /** 首发捕获的分组归属意图；重放后由 admit 组织链重新提交。 */
+  taskGroupId?: string | null;
   sessionCreateSource?: SessionCreateSource;
 }
 

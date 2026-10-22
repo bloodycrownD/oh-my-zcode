@@ -145,6 +145,9 @@ export function createWindowHostControllerRuntime(options: {
   ) => void;
 }) {
   const projection = createWindowHostControllerProjection({ createId: options.createId });
+  // 未读信号发射器（P4.2 接线）：挂在 runtime 作用域，source 的 workspace 事件监听
+  // 过滤 background_terminal 完成态后立即 fire；createAttachmentService 只暴露 event。
+  const taskUnreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>();
   const registeredScopes = new Map<string, WindowHostControllerSourceScope>();
   const sourceAvailability = new Map<string, "online" | "offline">();
   const sourceTaskServices = new Map<string, IZCodeTaskService>();
@@ -315,15 +318,51 @@ export function createWindowHostControllerRuntime(options: {
       sourceTaskServices.get(key) !== resolved.taskService
     ) {
       sourceEventSubscriptions.get(key)?.dispose();
-      sourceTaskServices.set(key, resolved.taskService);
+      const taskService = resolved.taskService;
+      // Bug 根因：Controller 接管观察后只刷新列表，丢掉了 Host 的明确完成信号。
+      // 沿现有 source 监听转发实时事实；旧连接、离线 source 和普通快照都不能制造未读。
+      const isCurrentSource = () => {
+        const current = resolveCurrentSource(resolved.scope);
+        return (
+          sourceTaskServices.get(key) === taskService &&
+          sourceAvailability.get(key) === "online" &&
+          current?.taskService === taskService &&
+          current?.sourceAvailability === "online"
+        );
+      };
+      sourceTaskServices.set(key, taskService);
       sourceEventSubscriptions.set(
         key,
-        resolved.taskService.onDynamicWorkspaceEvent({
+        taskService.onDynamicWorkspaceEvent({
           workspacePath: resolved.scope.workspacePath,
           ...(resolved.scope.workspaceIdentity
             ? { workspaceIdentity: resolved.scope.workspaceIdentity }
             : {}),
-        })(() => {
+        })((event) => {
+          // 完成信号是已收到的事实，等列表 IO 后才通知会漏记期间的查看；立即交给窗口记录。
+          if (
+            isCurrentSource() &&
+            event.type === "workspace_task_list_changed" &&
+            event.reason === "task_status_changed" &&
+            event.unreadSignal === "background_terminal" &&
+            event.taskMeta &&
+            (event.taskMeta.status === "completed" || event.taskMeta.status === "error")
+          ) {
+            taskUnreadSignalEmitter.fire({
+              address: {
+                taskId: event.taskId ?? event.taskMeta.taskId,
+                workspacePath: resolved.scope.workspacePath,
+                ...(resolved.scope.workspaceIdentity
+                  ? { workspaceIdentity: resolved.scope.workspaceIdentity }
+                  : {}),
+                ...(resolved.scope.kind === "remote" && resolved.scope.remoteSessionId
+                  ? { remoteSessionId: resolved.scope.remoteSessionId }
+                  : {}),
+              },
+              updatedAt: event.taskMeta.updatedAt,
+              status: event.taskMeta.status,
+            });
+          }
           // workspace event 可能在列表首轮 refresh 读取途中到达；直接复用
           // single-flight 会把事件吞掉。先等在途读取结束，再把多个事件合并成下一轮 refresh。
           const inFlight = sourceRefreshFlights.get(key)?.promise;
@@ -586,9 +625,8 @@ export function createWindowHostControllerRuntime(options: {
 
   function createAttachmentService(): IWindowControllerService & { dispose(): void } {
     const frameEmitter = new Emitter<WindowHostControllerFrame>();
-    // 未读信号发射器（upstream-v316-fullsync P4.1 挂账4 契约面先行）：完成态发射点随
-    // P4.2（useProjectUnreadSignals 消费链）接线；当前仅暴露空流通道。
-    const taskUnreadSignalEmitter = new Emitter<WindowHostTaskUnreadSignal>();
+    // taskUnreadSignalEmitter 已上移 runtime 作用域（P4.2 发射链：source workspace 事件
+    // 过滤 background_terminal 完成态后 fire）；这里只暴露 event 面。
     const subscriptions = new Map<string, { dispose(): void }>();
     return {
       listTaskList,
@@ -793,6 +831,7 @@ export function createWindowHostControllerRuntime(options: {
       for (const subscription of sourceEventSubscriptions.values()) {
         subscription.dispose();
       }
+      taskUnreadSignalEmitter.dispose();
       registeredScopes.clear();
       sourceAvailability.clear();
       sourceTaskServices.clear();

@@ -4,8 +4,7 @@
 // ②Remote* 整组剔除：ChatRemoteFolderSelection/RemoteIdentityHoverCard/remoteHostLabel/
 //   useRemoteConnectionEntryVisibility/onOpenRemoteWorkspace/addDevice 连接流（三期回补）；
 // ③遥测面剔除：runUserAction/runUserActionAsync 直接调用操作（omz 无 userActionTelemetry）；
-// ④omz store 草稿态无 draftProjectId/draftTaskGroupId 字段：当前项目勾选态与分组继承
-//   暂缺（chip 回退「选择项目」文案），随 UI 提交链（P4.2）补 store 字段后恢复。
+// ④P4.2 起 store 有 draftProjectId/draftTaskGroupId：当前项目勾选态与分组继承已接。
 import type { ReactNode } from "react";
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@/components/ui/button.js";
@@ -18,23 +17,17 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
 import { InputGroup, InputGroupAddon } from "@/components/ui/input-group.js";
-import {
-  ChevronDownIcon,
-  FolderPlus,
-  MessageCircle,
-  SearchIcon,
-  X,
-} from "lucide-react";
+import { ChevronDownIcon, FolderPlus, MessageCircle, SearchIcon, X } from "lucide-react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { cn } from "@/components/lib/utils.js";
 import { logger } from "@/logger.js";
 import {
+  remoteHostIdFromWorkspaceIdentity,
   TID_COMPOSER_PROJECT_DETACH,
   TID_COMPOSER_WORKSPACE_TRIGGER,
 } from "@zcode/shared";
 
 import type { ProjectSidebarProps } from "@/project-sidebar/contract.js";
-import type { VirtualProject } from "@/project-sidebar/contract.js";
 import { ComposerSubmissionPendingContext } from "@/project-sidebar/ComposerSubmissionPendingContext.js";
 import { ProjectCreation } from "@/project-sidebar/ProjectCreation.js";
 import { ProjectFolderIcon } from "@/project-sidebar/ProjectFolderIcon.js";
@@ -74,17 +67,22 @@ export function ProjectComposerMenu({
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
   const { tree, projects, error, service, refresh } = useProjectDirectory();
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
+  const hostId = workspaceIdentity ? remoteHostIdFromWorkspaceIdentity(workspaceIdentity) : null;
+  // 草稿项目身份（upstream-v316-fullsync P4.2）：未提交草稿的项目选择是唯一勾选事实源。
+  const projectId = useZCodeSessionStore((state) => state.workspaces[workspaceKey]?.draftProjectId);
   const activeTaskId = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.activeTaskId,
   );
-  // omz：CreateTaskOptions 已有 projectId/taskGroupId 增字段（前批 WorkspaceShellLayout 定形）；
-  // 分组继承依赖 store draftTaskGroupId（P4.2），当前传 null 保持显式无归属。
+  // 两个项目入口必须从同一草稿 owner 读取组织意图；查看会话时入口创建的是普通新任务。
   const createProjectTask: ProjectSidebarProps["onCreateTask"] = (request) =>
     onCreateTask(
       typeof request === "object"
         ? {
             ...request,
-            taskGroupId: null,
+            taskGroupId: !activeTaskId
+              ? useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
+                  .draftTaskGroupId
+              : null,
           }
         : request,
     );
@@ -105,11 +103,17 @@ export function ProjectComposerMenu({
     setPending(false);
   }, [chatKey]);
   const [creating, setCreating] = useState(false);
-  // omz：store 无 draftProjectId（P4.2）；当前项目身份在菜单内暂不勾选，仅提供切换/新建。
-  const currentProject = undefined as VirtualProject | undefined;
+  // 原因：目录可以属于多个项目，tab/cwd 不能决定归属；只读草稿的项目身份。
+  // omz：availability 的 entryId 是远端目录 face（随 R3 回补），本机退化只按 hostId 匹配。
+  const currentProject = useMemo(
+    () =>
+      projects.find(
+        (project) => project.id === projectId && (!hostId || project.hostId === hostId),
+      ),
+    [projects, projectId, hostId],
+  );
   const isConversationWorkspace = !currentProject;
-  const canDetachProject =
-    allowConversationWorkspaceSelection && allowConversationWorkspaceDetach;
+  const canDetachProject = allowConversationWorkspaceSelection && allowConversationWorkspaceDetach;
   const visibleProjects = useMemo(() => {
     const query = workspaceSearchQuery.trim().toLowerCase();
     return projects.filter((project) =>

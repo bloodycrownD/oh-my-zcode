@@ -1,11 +1,9 @@
 /* eslint-disable max-lines -- Root workspace action hook 集中编排项目、远程和 conversation 入口；合并期保持动作边界完整，后续按领域拆分。 */
 import { useCallback, useEffect, useState } from "react";
 import {
-
   type AppSettings,
   type IPlatformService,
   type RemoteTarget,
-
   type ZCodeTaskClientMode,
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
@@ -79,7 +77,6 @@ export function useRootWorkspaceActions({
   allowOpenWorkspace,
   preferDirectoryBrowser,
   openDirectoryBrowser,
-
 
   onOpenRemoteConnection,
   workbenchGroupClientMode = "desktop-continuous",
@@ -225,6 +222,10 @@ export function useRootWorkspaceActions({
       const provider = typeof request === "string" ? request : request?.provider;
       const groupedDraftPlacement =
         typeof request === "string" ? undefined : request?.groupedDraftPlacement;
+      // 虚拟项目/分组归属意图（upstream-v316-fullsync P4.2）：项目树与分组入口携带的
+      // 创建目标不再被入口忽略；首发时由 SessionPane 捕获并落 Host 归属。
+      const createProjectId = typeof request === "string" ? undefined : request?.projectId;
+      const createTaskGroupId = typeof request === "string" ? undefined : request?.taskGroupId;
       const rawInitialPrompt = typeof request === "string" ? undefined : request?.initialPrompt;
       // Skill mention 后的尾空格决定光标落在 chip 之后；直接 trim 后再保存
       // 会把结构化 mention 的可编辑间隔吞掉。这里只用 trim 判空，非空草稿保留调用方原文。
@@ -244,6 +245,8 @@ export function useRootWorkspaceActions({
           newTaskTarget.workspaceIdentity ?? undefined,
           {
             groupedDraftPlacement,
+            ...(createProjectId !== undefined ? { projectId: createProjectId } : {}),
+            ...(createTaskGroupId !== undefined ? { taskGroupId: createTaskGroupId } : {}),
             createSource: typeof request === "string" ? undefined : request?.createSource,
           },
         );

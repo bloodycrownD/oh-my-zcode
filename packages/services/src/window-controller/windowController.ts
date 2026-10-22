@@ -72,8 +72,8 @@ export interface IWindowControllerService {
   unsubscribeControllerV4(params: ControllerUnsubscribeParams): Promise<void>;
   onDynamicControllerFrame(): Event<WindowHostControllerFrame>;
   /**
-   * 未读信号通道（契约面先行）：Host 发射链随 P4.2（useProjectUnreadSignals 挂载 +
-   * 完成态发射点）接线；当前仅暴露通道。
+   * 未读信号通道（P4.2 已接线）：Host 沿 source 的 workspace 事件过滤
+   * background_terminal 完成态立即发射；消费方 useProjectUnreadSignals。
    */
   onDynamicTaskUnreadSignal(): Event<WindowHostTaskUnreadSignal>;
 }

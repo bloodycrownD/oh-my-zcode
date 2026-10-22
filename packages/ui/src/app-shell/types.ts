@@ -8,8 +8,7 @@ import type {
   DesktopWindowChromeState,
   IPlatformService,
   RemoteTarget,
-RemoteWorkspaceSessionEntry,
-
+  RemoteWorkspaceSessionEntry,
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import type { BrowserNavigationRequest, RecentClosedSidePaneTab } from "@/hooks/useAppPanels.js";
@@ -58,9 +57,10 @@ export interface WorkspaceShellZCodeState {
 export interface CreateTaskOptions {
   /**
    * 虚拟项目（upstream-v316-fullsync P4）：项目树入口携带归属创建；
-   * host 侧 prepareProjectExecution 链注册前由现有入口忽略（任务落活动 workspace）。
+   * P4.2 起入口经 startDraft(options.projectId) 写草稿意图，首发 createSession 携带 Host 落归属。
    */
   projectId?: string | null;
+  /** 分组归属意图；P4.2 起随入口→startDraft→SessionPane admit 链真实落分组。 */
   taskGroupId?: string | null;
   /** 异步预填只能提交到解析 Skill 时的同一新任务目标。 */
   expectedWorkspaceKey?: string;

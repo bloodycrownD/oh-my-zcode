@@ -101,9 +101,13 @@ export function TaskGroupedView({
   const draftFocusVersion = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.draftFocusVersion,
   );
-  // omz：分组内草稿归属链（store draftTaskGroupId / composer 草稿 taskGroupId）随 P4.2 接；
-  // undefined = 无分组草稿信息：分组内草稿行不渲染，空列表走 noTasks 分支。
-  const draftGroupId = undefined as string | null | undefined;
+  // 分组草稿归属（upstream-v316-fullsync P4.2）：订阅 store 未提交分组意图。
+  // omz：composer 正文草稿暂无 taskGroupId 字段，查看会话时不渲染分组内草稿行；
+  // 草稿态（activeTaskId=null）按 store 意图渲染，发送后由 SessionPane admit 收口为真实行。
+  const currentDraftGroupId = useZCodeSessionStore(
+    (state) => state.workspaces[workspaceKey]?.draftTaskGroupId,
+  );
+  const draftGroupId = activeTaskId ? undefined : currentDraftGroupId;
   const [collapsed, setCollapsed] = useState(readGroupedTaskCollapsedGroupIds);
   const changeCollapsed = useCallback<Dispatch<SetStateAction<Set<string>>>>((update) => {
     setCollapsed((current) => (typeof update === "function" ? update(current) : update));
@@ -192,7 +196,8 @@ export function TaskGroupedView({
     onCreate(groupId);
   };
   const closeDraft = () => {
-    // omz：分组草稿归属链未接（P4.2），无可清理事实；保留空实现供 GroupItem 回调形状。
+    // 关闭分组行只撤销组织意图（omz：composer 草稿无 taskGroupId 字段，仅清 store 面）。
+    useZCodeSessionStore.getState().clearDraftTaskGroup(workspacePath, workspaceIdentity);
   };
   useEffect(() => {
     if (draftGroupId !== null || !drag.root.current) return;

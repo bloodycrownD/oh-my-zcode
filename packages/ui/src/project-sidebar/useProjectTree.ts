@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- 项目树读取编排单文件收口（照搬上游 v3.16.2，omz 化差异见各注释） */
 import { flushSync } from "react-dom";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type {
   ProjectTree,
   ProjectTaskRef,
@@ -15,24 +15,38 @@ import { isWorkspaceTab } from "@/store/tabStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { useWorkspaceSessionsIndexItems } from "@/v4/useWorkspaceSessionsIndexItems.js";
 import { getTaskListRowActivity } from "@/v4/taskListRowActivity.js";
+import { getWindowControllerTaskListRegistry } from "@/v4/windowControllerTaskListRegistry.js";
 import { logger } from "@/logger.js";
 import { areStabilizedValuesEquivalent } from "@/v4/taskListItemStabilization.js";
+import { useProjectUnreadSignals } from "@/project-sidebar/useProjectUnreadSignals.js";
 
+const subscribeToNothing = () => () => {};
+const zeroRevision = () => 0;
 // omz 化差异（对照上游 useProjectTree.ts）：
-// ①windowControllerTaskListRegistry 快路径不接（omz registry 无 getDirectoryRevision/
-//   readActivities 面，且 IWindowControllerService 订阅链随 R3 三期回补）——活动态统一走
-//   useWorkspaceSessionsIndexItems + getTaskListRowActivity 非注册表路径；
-// ②useProjectUnreadSignals 不搬（依赖 omz 暂缺的 WindowHostTaskUnreadSignal 协议行），
-//   未读信号仍由 Host 事件刷新路径覆盖；
-// ③remoteProjectService/windowProjectDirectory 缺席：P4 只接本机 Host，目录投影为空集。
+// ①windowProjectDirectory/remoteProjectService/projectChanges 缺席：P4 只接本机 Host，
+//   目录投影为空集；项目写事件仍走 broadcastService "state:projects"；
+// ②registry 快路径（P4.2）：Controller 在场时活动态改读 readActivities()（行已随 frame
+//   常驻内存，不再按 scope 逐个订阅 sessions-index）；目录失效由 directoryRevision 驱动；
+// ③useProjectUnreadSignals（P4.2）：Host onDynamicTaskUnreadSignal 完成态 → 前台离开补记/
+//   导航清零，见 useProjectUnreadSignals.ts。
 const EMPTY: ProjectTree = { projects: [], tasks: [] };
 export function useProjectTree(isDesktop = false) {
-  void isDesktop;
   const services = useBaseWorkspaceServices();
   // 远端 bridge 的 base 服务属于 Source；侧栏读写与失效流必须整组来自窗口目录。
   // omz：窗口目录服务随 source-server 三期接入，当前恒为本机 base services。
   const service = services.projectService;
   const remoteService = undefined;
+  const controller = services.windowControllerService;
+  const registry = useMemo(
+    () => (controller ? getWindowControllerTaskListRegistry(controller) : null),
+    [controller],
+  );
+  const revision = useSyncExternalStore(
+    registry?.subscribe ?? subscribeToNothing,
+    registry?.getRevision ?? zeroRevision,
+    registry?.getRevision ?? zeroRevision,
+  );
+  const directoryRevision = registry?.getDirectoryRevision() ?? 0;
   const tabs = useTabStore((state) => state.tabs);
   const version = useZCodeSessionStore((state) =>
     Object.values(state.workspaces).reduce((n, workspace) => n + workspace.taskListVersion, 0),
@@ -224,7 +238,9 @@ export function useProjectTree(isDesktop = false) {
   );
   useEffect(() => {
     void refresh();
-  }, [refresh, version, tabs]);
+    // directoryRevision（P4.2）：目录事实变化（归属/成员/持久 meta/快照重建）驱动整树重读；
+    // 普通 timeline live delta 只递增 revision，不打目录读取。
+  }, [refresh, version, tabs, directoryRevision]);
   const scopes = useMemo(() => {
     const byKey = new Map<string, { workspacePath: string; workspaceIdentity?: string }>();
     for (const task of tree.tasks) byKey.set(task.workspaceIdentity || task.workspacePath, task);
@@ -241,6 +257,8 @@ export function useProjectTree(isDesktop = false) {
       }));
   }, [tree, tabs]);
   const scopeKey = JSON.stringify(scopes);
+  // 未读信号链（P4.2）：Host 完成态 → 前台离开补记 / 导航清零；放在 scopes 定形之后挂载。
+  useProjectUnreadSignals(scopes, refresh, isDesktop);
   const refreshDirectory = useCallback(async () => {
     await refresh();
   }, [refresh]);
@@ -251,7 +269,9 @@ export function useProjectTree(isDesktop = false) {
     return () => window.removeEventListener("focus", onFocus);
   }, [refreshDirectory]);
   useEffect(() => {
-    const subscriptions = (service ? [] : scopes).map((scope) =>
+    // registry 在场时列表活性由 Controller frame 驱动（readActivities + directoryRevision），
+    // 不再按 scope 逐个订阅 sessions-index（与上游同构）；仅 web/旧 wire 回退 scope 订阅。
+    const subscriptions = (registry ? [] : scopes).map((scope) =>
       services.zcodeTaskService.onDynamicWorkspaceEvent(scope)((event) => {
         if (event.type === "workspace_task_list_changed") void refresh();
       }),
@@ -266,29 +286,31 @@ export function useProjectTree(isDesktop = false) {
     };
     // scopeKey 变化才重挂订阅，避免每次 refresh 重建事件流。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scopeKey, services, refresh]);
-  const activity = useWorkspaceSessionsIndexItems(scopes);
+  }, [scopeKey, services, refresh, registry]);
+  const activity = useWorkspaceSessionsIndexItems(registry ? [] : scopes);
   const lastDisplay = useRef<ProjectTree>(EMPTY);
   const displayedTree = useMemo(() => {
-    const activities = activity.items.flatMap((task) => {
-      const live = getTaskListRowActivity(task);
-      return live
-        ? [
-            {
-              address: {
-                taskId: task.taskId,
-                workspacePath: task.workspacePath,
-                workspaceIdentity: task.workspaceIdentity,
-              },
-              activity: live,
-            },
-          ]
-        : [];
-    });
+    const activities = registry
+      ? registry.readActivities()
+      : activity.items.flatMap((task) => {
+          const live = getTaskListRowActivity(task);
+          return live
+            ? [
+                {
+                  address: {
+                    taskId: task.taskId,
+                    workspacePath: task.workspacePath,
+                    workspaceIdentity: task.workspaceIdentity,
+                  },
+                  activity: live,
+                },
+              ]
+            : [];
+        });
     const next = applyProjectTaskActivities(tree, activities);
     lastDisplay.current = stabilizeProjectTree(lastDisplay.current, next);
     return lastDisplay.current;
-  }, [tree, activity.items]);
+  }, [tree, activity.items, registry, revision]);
   return useMemo(
     () => ({
       tree: displayedTree,

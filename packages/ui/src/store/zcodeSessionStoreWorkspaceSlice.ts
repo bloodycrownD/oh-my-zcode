@@ -15,6 +15,7 @@ import { areConfigOptionsEquivalent } from "@/lib/configOptionsEquality.js";
 import type { ZCodeUiError } from "@/lib/zcodeUiError.js";
 import { pushNavEntry } from "@/lib/taskNavigationHistory.js";
 import { resolveTaskRestorePreloadConfigOptions } from "@/lib/taskModelRecovery.js";
+import { notifyTaskNavigationCommitted } from "@/store/zcodeSessionStoreNavigation.js";
 import type {
   ZCodeSessionStoreState,
   ConfigOptionsStatus,
@@ -298,6 +299,14 @@ export function createWorkspaceSlice(set: SetFn) {
 
         return { ...workspaceUpdate, ...navUpdate };
       });
+      // 查看事实只在导航提交边界发布（upstream-v316-fullsync P4.2）：useProjectUnreadSignals
+      // 消费该事件做「正在查看的任务不写未读」判定；tab 激活与游标移动不算提交。
+      if (id)
+        notifyTaskNavigationCommitted({
+          workspacePath,
+          ...(workspaceIdentity ? { workspaceIdentity } : {}),
+          taskId: id,
+        });
     },
 
     promoteGroupedDraftTask: (
@@ -513,6 +522,10 @@ export function createWorkspaceSlice(set: SetFn) {
       workspaceIdentity?: string,
       options?: {
         groupedDraftPlacement?: GroupedDraftTaskPlacement;
+        /** 虚拟项目归属意图（upstream-v316-fullsync P4.2）；undefined=沿用活动 workspace。 */
+        projectId?: string | null;
+        /** 分组归属意图；首发 ACK 后由 SessionPane 经 taskGroupService.admit 提交。 */
+        taskGroupId?: string | null;
         createSource?: SessionCreateSource;
       },
     ) => {
@@ -591,6 +604,14 @@ export function createWorkspaceSlice(set: SetFn) {
               ...current,
               activeTaskId: null,
               groupedDraftTask: nextGroupedDraftTask,
+              // 未提交草稿的项目/分组意图（upstream-v316-fullsync P4.2）：SessionPane 首发
+              // createSession 时捕获并携带 projectId，分组归属在创建成功后经 admit 提交。
+              draftProjectId: options?.projectId,
+              draftTaskGroupId: options?.taskGroupId,
+              // 同 cwd 可属于多个项目；换项目不能复用前一个项目的预热 runtime 目录范围。
+              draftRuntimeInvalidationVersion:
+                current.draftRuntimeInvalidationVersion +
+                Number(current.draftProjectId !== options?.projectId),
               draftCreateSource:
                 options?.createSource ?? (options?.groupedDraftPlacement ? "group" : "session"),
               draftRuntime: { status: "idle", error: null },
@@ -646,6 +667,22 @@ export function createWorkspaceSlice(set: SetFn) {
           workspacePath,
           (current) =>
             current.groupedDraftTask ? { ...current, groupedDraftTask: null } : current,
+          workspaceIdentity,
+        ),
+      );
+    },
+
+    clearDraftTaskGroup: (workspacePath: string, workspaceIdentity?: string) => {
+      // 关闭分组行只撤销组织意图（upstream-v316-fullsync P4.2）；调用 startDraft 会重置
+      // 预热、配置和焦点，撤销分组归属不能付出这些代价。
+      set((state) =>
+        updateWorkspaceState(
+          state,
+          workspacePath,
+          (current) =>
+            current.draftTaskGroupId === undefined
+              ? current
+              : { ...current, draftTaskGroupId: undefined },
           workspaceIdentity,
         ),
       );

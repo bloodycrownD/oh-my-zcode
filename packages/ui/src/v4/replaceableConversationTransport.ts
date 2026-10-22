@@ -116,9 +116,11 @@ export class ReplaceableConversationTransport implements ConversationTransport {
   }
 
   sendCommand(
-    envelope: Parameters<ConversationTransport["sendCommand"]>[0],
+    ...params: Parameters<ConversationTransport["sendCommand"]>
   ): ReturnType<ConversationTransport["sendCommand"]> {
-    return this.current.sendCommand(envelope);
+    // Bug 原因：旧代理只转发 envelope，丢失 projectId（upstream-v316-fullsync P4.2），
+    // 草稿项目归属会在 transport 换代后预留成空归属。
+    return this.current.sendCommand(...params);
   }
 
   queryCommands(
