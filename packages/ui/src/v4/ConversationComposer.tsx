@@ -1265,6 +1265,10 @@ function ConversationComposerImpl({
             queueItemIds:
               latestQueueItemIds.length > 0 ? latestQueueItemIds : submittedQueueItemIds,
           });
+          // 24af3955 拆遥测时误删了本分支的 return：确认框被下行的 setHeldQueueConfirmation(null)
+          // 同步覆盖（React 后写胜出）→ 弹窗永不出现，且后续清空/adopt 逻辑照跑，用户输入被吞
+          // （bug B 症状）。omz 拍板路由已改 held→enqueue，此分支现仅兜底防御，但 return 必须在。
+          return;
         }
         setHeldQueueConfirmation(null);
         // 暂存内容只有在发送成功后才移交给 task；失败仍保留为可重试草稿。

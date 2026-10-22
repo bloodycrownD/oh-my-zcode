@@ -385,6 +385,12 @@ async function sendQueuedNow(
       ...traceOptions,
     });
     if (!removed) throw new V4QueuePromotionCommitError(payload.queueItemId);
+    // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
+    // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
+    if (!autoDrainPromotion) {
+      await record.app.setQueueAutoDrain(true);
+      await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
+    }
     return undefined;
   } finally {
     if (foregroundPromotionLeaseAcquired && !leaseReleaseOwnedByBackground) {

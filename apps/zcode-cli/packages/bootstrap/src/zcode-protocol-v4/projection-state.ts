@@ -154,12 +154,13 @@ export function computeInputRouting(
   if (context.phase === "running" || context.phase === "prewarming") {
     return { mode: followupMode === "guide" ? "guide" : "enqueue" };
   }
-  // completed + queue>0 + autoDrain=false 时，输入不静默入队；
-  // 客户端呈现 clear/keep 选择，disposition 随 command 上行。
+  // completed + queue>0 + autoDrain=false（中断暂停队列）时：
+  // omz 拍板（2026-10-23，bug B）：暂停期间输入**照常入队**（等「继续」按 FIFO 放行），
+  // 弃用上游 choice（clear/keep 确认框）路由。confirmationRequired 分支保留为兜底防御。
   const completed =
     context.phase === "completedSuccess" || context.phase === "completedInterrupted";
   if (completed && context.queueLength > 0 && !context.autoDrain) {
-    return { mode: "choice", reasonCode: "heldQueueInputRequiresChoice" };
+    return { mode: "enqueue", reasonCode: "heldQueuePausesButAcceptsInput" };
   }
   return { mode: "startNow" };
 }
