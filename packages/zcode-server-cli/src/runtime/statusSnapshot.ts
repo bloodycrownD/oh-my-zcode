@@ -2,7 +2,7 @@ import { readFile, rename, writeFile } from "node:fs/promises";
 import { serverStatusSchema, type ServerStatus } from "../contracts.js";
 import { resolveServerLayout, type ServerLayout } from "./paths.js";
 
-type PersistedStatusRead =
+export type PersistedStatusRead =
   | { state: "valid"; status: ServerStatus }
   | { state: "missing"; status: null }
   | { state: "invalid" | "unreadable"; status: null; error: unknown };

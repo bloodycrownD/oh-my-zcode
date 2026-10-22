@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import {
   createLocalServices,
   disposeServiceResourcesAndWait,
@@ -8,9 +9,11 @@ import {
 import { IZCodeAgentService } from "@zcode/services";
 import { ZCODE_VERSION } from "@zcode/shared";
 import { createCoreHttpServer } from "./http.js";
+import { createIngressToken } from "./ingressToken.js";
 import { installParentDisconnectHandler } from "./parentDisconnect.js";
 import { resolveCoreServerId } from "./serverIdentity.js";
 import { createTaskActivityTracker } from "./taskActivityTracker.js";
+import { resolveServerLayout } from "../runtime/paths.js";
 
 declare const __ZCODE_BUILTIN_PROVIDER_CONFIG_JSON__: string | undefined;
 
@@ -22,6 +25,10 @@ export async function runServerCore(generation: number): Promise<void> {
     if (shutdown) void shutdown("parent-disconnected");
     else parentDisconnected = true;
   });
+  // R3 三期挂账（Step 18）：上游此处换用 createServerHostServices（sourceServerId + aliasRepo
+  // 工作区身份映射 + 迁移失败计数 + topicResourceRelayChannel），依赖 services/source-server-workspace
+  // 三期面，一期保持 createLocalServices；migrationFailedPathCount 一期恒为 0。
+  const layout = resolveServerLayout(process.env.ZCODE_SERVER_ROOT?.trim());
   const explicitZCodeBuiltinProviderConfigFilePath =
     process.env[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]?.trim();
   const zcodeBuiltinProviderConfigFilePath = explicitZCodeBuiltinProviderConfigFilePath
@@ -42,7 +49,13 @@ export async function runServerCore(generation: number): Promise<void> {
     serviceAuthorityMode: "standalone-server",
   });
   const taskActivityTracker = createTaskActivityTracker(services.getOptional(IZCodeAgentService));
-  const http = await createCoreHttpServer(services, { serverId: await resolveCoreServerId() });
+  const ingressToken = await createIngressToken(layout);
+  const sourceServerId = (await resolveCoreServerId()) ?? hostname() ?? "omz-server";
+  const http = await createCoreHttpServer(services, {
+    serverId: sourceServerId,
+    ingressToken,
+    migrationFailedPathCount: 0,
+  });
   const send = (message: unknown): Promise<void> => {
     if (typeof process.send !== "function" || process.connected === false) return Promise.resolve();
     return new Promise((resolve) => {
@@ -61,6 +74,9 @@ export async function runServerCore(generation: number): Promise<void> {
     host: http.host,
     port: http.port,
     version: ZCODE_VERSION,
+    ...(process.env.ZCODE_SERVER_RELEASE_ID?.trim()
+      ? { releaseId: process.env.ZCODE_SERVER_RELEASE_ID.trim() }
+      : {}),
     generation,
   });
   let shutdownStarted = false;
@@ -68,7 +84,11 @@ export async function runServerCore(generation: number): Promise<void> {
   const activitySubscription = taskActivityTracker.onDidChangeRunningTaskCount(
     (runningTaskCount) => {
       lastRunningTaskCount = runningTaskCount;
-      void send({ type: "task-activity", runningTaskCount });
+      void send({
+        type: "task-activity",
+        runningTasks: taskActivityTracker.readRunningTasks(),
+        runningTaskCount,
+      });
     },
   );
   let heartbeatInFlight: Promise<void> | undefined;
@@ -78,12 +98,26 @@ export async function runServerCore(generation: number): Promise<void> {
       .then((runningTaskCount) => {
         if (runningTaskCount !== lastRunningTaskCount) {
           lastRunningTaskCount = runningTaskCount;
-          void send({ type: "task-activity", runningTaskCount });
+          void send({
+            type: "task-activity",
+            runningTasks: taskActivityTracker.readRunningTasks(),
+            runningTaskCount,
+          });
         }
-        void send({ type: "heartbeat", at: Date.now(), runningTaskCount });
+        void send({
+          type: "heartbeat",
+          runningTasks: taskActivityTracker.readRunningTasks(),
+          at: Date.now(),
+          runningTaskCount,
+        });
       })
       .catch(() => {
-        void send({ type: "heartbeat", at: Date.now(), runningTaskCount: lastRunningTaskCount });
+        void send({
+          type: "heartbeat",
+          runningTasks: taskActivityTracker.readRunningTasks(),
+          at: Date.now(),
+          runningTaskCount: lastRunningTaskCount,
+        });
       })
       .finally(() => {
         heartbeatInFlight = undefined;

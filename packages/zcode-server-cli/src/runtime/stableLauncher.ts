@@ -4,7 +4,7 @@ import { join } from "node:path";
 import type { ServicePlatform } from "../platform/serviceManager.js";
 import type { ServerLayout } from "./paths.js";
 
-interface StableLauncherBootstrap {
+export interface StableLauncherBootstrap {
   command: string;
   entry: string;
 }
@@ -18,7 +18,11 @@ function stablePosixLauncher(bootstrap?: StableLauncherBootstrap): string {
     ? `exec ${quoteShell(bootstrap.command)} ${quoteShell(bootstrap.entry)} "$@"`
     : 'echo "No current ZCode Server release" >&2; exit 1';
   return `#!/bin/sh
-ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+# Bug 原因：远端以 "$HOME/.omz/server/bin/zcode" 调用本脚本，NAS 等环境的 $HOME 经过符号链接
+# （/var/services/homes -> /volume1/homes）。update 写 current.json 时 releaseDir 基于 realpath 后的
+# canonical root，这里原来用逻辑 cd/pwd 计算 ROOT，前缀不同使合法 release 被判越界。改用 cd -P/pwd -P，
+# 与写入方比较同一种物理路径；越界 releaseDir 仍然 fail-closed。
+ROOT=$(CDPATH= cd -P -- "$(dirname -- "$0")/.." && pwd -P)
 RELEASE_DIR=$(sed -n 's/.*"releaseDir"[[:space:]]*:[[:space:]]*"\\([^"\\]*\\)".*/\\1/p' "$ROOT/current.json")
 if [ -n "$RELEASE_DIR" ]; then
   case "$RELEASE_DIR" in
