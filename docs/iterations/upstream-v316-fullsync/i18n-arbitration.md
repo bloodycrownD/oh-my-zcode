@@ -13,6 +13,8 @@
 
 ## 一、值冲突仲裁（zh/en union 138 条，全覆盖）
 
+> 口径桥接（cr-func r1 补）：探索报告与 spec 初稿的「159」= zh 侧全量值冲突数（HEAD 1ff8cad9 精确复现）；双侧 union 全量 163（zh 159 / en 158），其中 25 条 `conversationShare.*` 死键的值冲突因「死键先清」（规则 5）不进本表 → **幸存 138 条全覆盖仲裁**。impl 报告早期所述「v1.0.20 locale 修复后收敛」理由有误，以本桥接为准。
+
 | 键 | 决策 | 理由 |
 | --- | --- | --- |
 | bots.allowedWorkspaces | 采上游 | 上游 v3.16 新文案（zh=changed/en=changed） |
@@ -160,9 +162,9 @@
 
 | 键 | 决策 | 理由 |
 | --- | --- | --- |
-| browser.permission.denyThisTime | 不采 | 上游仅 zh单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
-| settings.memory.viewer.disabled | 不采 | 上游仅 en单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
-| settings.plugins.marketplace.recommendTitle | 不采 | 上游仅 en单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
+| browser.permission.denyThisTime | 不采 | 上游仅 zh 单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
+| settings.memory.viewer.disabled | 不采 | 上游仅 en 单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
+| settings.plugins.marketplace.recommendTitle | 不采 | 上游仅 en 单侧键（对方 locale 缺失），采入会打破 zh/en 键集合 parity 门禁；待后续迭代随 UI 移植时双侧补齐 |
 | modelTrajectory.source.compact | 不采 | 上游轨迹「compact」扩展键，对应 UI 未随本迭代移植，保 omz 轨迹键集不变 |
 
 ## 附录 A：品牌改写清单（采纳值内 zcode/ZCode → omz）
