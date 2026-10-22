@@ -1,5 +1,4 @@
 import { useEffect, useState, useRef } from "react";
-import type { IServiceAccessor } from "@zcode/services";
 import type { FileEntry } from "@zcode/shared";
 import { FolderIcon, FolderSymlinkIcon } from "lucide-react";
 import { Button } from "./components/ui/button.js";
@@ -45,6 +44,15 @@ function createDirectoryBrowserRequestGuard(): {
  * 通过 fileService.readdir 浏览远程/本地服务器的目录结构，
  * 适用于 web 端无法调用系统原生文件选择器的场景。
  */
+/** 目录浏览最小服务面（upstream-v316-fullsync P4.1）：项目侧栏经 useProjectDirectoryServices
+ *  把 IProjectService.readDirectory 适配成同形状；结构化最小面，不要求整份 IServiceAccessor。 */
+interface DirectoryBrowserServices {
+  systemService: { info(): Promise<{ homedir: string }> };
+  fileService: {
+    readdir(params: { path: string; includeHidden?: boolean }): Promise<FileEntry[]>;
+  };
+}
+
 export function DirectoryBrowser({
   services,
   onSelect,
@@ -52,7 +60,7 @@ export function DirectoryBrowser({
   onPathChange,
   embedded = false,
 }: {
-  services: IServiceAccessor;
+  services: DirectoryBrowserServices;
   onSelect: (path: string) => void;
   onCancel: () => void;
   onPathChange?: (path: string) => void;

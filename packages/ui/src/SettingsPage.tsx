@@ -1,5 +1,6 @@
 /* oxlint-disable eslint(max-lines) */
 import { ArrowLeft, Rocket, type LucideIcon } from "lucide-react";
+import { ArchiveManagement } from "@/project-sidebar/ArchiveManagement.js";
 import {
   useCallback,
   useEffect,
@@ -1229,7 +1230,11 @@ export function SettingsPage({
                             }
                             onOpenOnboardingDialog={() => requestOnboardingDialog()}
                           />
-                        ) : activeSection === "appearance" ? (
+                        ) : null}
+                        {/* 归档管理（upstream-v316-fullsync P4.1）：与任务自动归档设置同区段；
+                            自带 ProjectDirectoryProvider，不依赖侧栏挂载。 */}
+                        {activeSection === "general" ? <ArchiveManagement /> : null}
+                        {activeSection === "appearance" ? (
                           <AppearanceSectionContent
                             codePreviewSettings={codePreviewSettings}
                             setCodePreviewSettings={handleCodePreviewSettingsChange}

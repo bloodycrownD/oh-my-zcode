@@ -1,5 +1,7 @@
-// 照搬上游 v3.16.2；grouped 视角项暂不渲染（上游 TaskGroupedView 随 P5 回补，
-// omz 旧侧栏 organizeGrouped 分组视角并存），枚举与存储形状保持兼容。
+// 照搬上游 v3.16.2；grouped 视角项随 P4.1 grouped 批回补。
+// omz 化（P4.1 拍板②）：新增 children 槽——项目树内「新建项目」入口（ProjectComposerMenu
+// chip）挂在本行，不替换 omz 聊天空态菜单。
+import type { ReactNode } from "react";
 import type { ProjectSidebarProps, ProjectSidebarView } from "@/project-sidebar/contract.js";
 import { Clock, Folder, ListFilter, Search } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
@@ -19,10 +21,13 @@ export function ProjectSidebarListHeader({
   onOpenCommandCenter,
   view,
   onViewChange,
+  children,
 }: {
   onOpenCommandCenter: ProjectSidebarProps["onOpenCommandCenter"];
   view: ProjectSidebarView;
   onViewChange(view: ProjectSidebarView): void;
+  /** 头部左侧功能槽（upstream-v316-fullsync P4.1 拍板②：项目 chip 入口）。 */
+  children?: ReactNode;
 }) {
   const { intl } = useZCodeIntl();
   return (
@@ -36,6 +41,7 @@ export function ProjectSidebarListHeader({
       >
         {intl.formatMessage({ id: "taskList.title" })}
       </span>
+      {children}
       <ControlHintTooltip
         // 原因：快捷键拼入标题会继承标题样式；用独立 shortcut 复用标准键帽。
         title={intl.formatMessage({ id: "commandCenter.open" })}

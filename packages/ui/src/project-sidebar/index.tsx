@@ -1,14 +1,14 @@
-// 照搬上游 v3.16.2 project-sidebar/index.tsx 并 omz 化（P4 首批范围收口）：
+// 照搬上游 v3.16.2 project-sidebar/index.tsx 并 omz 化（P4 首批范围收口 + P4.1 补全批）：
 // ①Remote* 全家/useProjectRemoteSync/useProjectConnectionDiagnostics/web-remote-control 面剔除
 //   （随 phase-remote-ux 三期回补）；
-// ②ProjectCreation/ProjectEditor/RemoteProjectPicker 对话框与 ProjectSidebarNavigation 挂 P4.1
-//   （编辑/新建入口缺席时项目树为只读组织视图：展开/导航/归档语义完整）；
-// ③HomeOnlyWorkspaceRows（手机远控）与归档入口不挂（ArchiveManagement 组件已入库，入口随 P4.1）；
-// ④TaskGroupedView 分组视角不挂（omz 旧侧栏 organizeGrouped 并存，上游 grouped/ 随 P5 回补）。
-import { memo, useCallback, useMemo, useRef, type ReactNode } from "react";
+// ②P4.1：ProjectCreation/ProjectEditor 真组件挂载（编辑/新建入口自 toast 占位换真，
+//   上游 index.tsx 同款 creating/editor state）；归档管理入口挂设置页（ArchiveManagement）；
+// ③P4.1 拍板②：ProjectComposerMenu chip 挂项目树头部作为「新建项目」入口，
+//   不替换 omz ChatEmptyWorkspacePreviewMenu；
+// ④TaskGroupedView 分组视角随 grouped 批接入。
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { TID_SIDEBAR } from "@zcode/shared/test-ids";
-import { toast } from "@/components/ui/toast.js";
 import type { ProjectSidebarProps, VirtualProject } from "@/project-sidebar/contract.js";
 import { useProjectPinIntent } from "@/project-sidebar/useProjectPinIntent.js";
 import { ProjectTaskListContext } from "@/project-sidebar/ProjectTaskListContext.js";
@@ -28,13 +28,11 @@ import {
 } from "@/project-sidebar/ProjectSidebarNode.js";
 import { ProjectSections } from "@/project-sidebar/ProjectSections.js";
 import { ProjectSidebarListHeader } from "@/project-sidebar/ProjectSidebarListHeader.js";
+import { ProjectComposerMenu } from "@/project-sidebar/ProjectComposerMenu.js";
+import { ProjectCreation } from "@/project-sidebar/ProjectCreation.js";
+import { ProjectEditor } from "@/project-sidebar/ProjectEditor.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
-
-// P4.1 前的占位反馈：入口可见、动作未接，不静默吞点击。
-function runProjectActionNotice(label: string) {
-  toast(label);
-}
 
 // 右侧面板显隐曾让所有项目的菜单和 Tooltip 重渲染；只隔离无关父更新，保留目录/context 订阅。
 export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) {
@@ -61,6 +59,9 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
     [props.workspacePath, props.workspaceIdentity, pin],
   );
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
+  // P4.1：编辑/新建对话框 owner 自 toast 占位升级为真组件（上游 index.tsx 同款状态）。
+  const [editor, setEditor] = useState<{ project: VirtualProject | null } | null>(null);
+  const [creating, setCreating] = useState(false);
   const start = async (projectId?: string) => {
     props.onCreateTask({
       projectId: projectId ?? null,
@@ -105,10 +106,7 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
       service={service}
       isDesktop={props.isDesktop}
       onCreateTask={props.onCreateTask}
-      onEdit={() => {
-        // P4.1 挂账：ProjectEditor 编辑对话框随编辑/新建批回补；当前以提示兜底。
-        runProjectActionNotice(msg("edit"));
-      }}
+      onEdit={setEditor}
       onViewFiles={undefined}
       remoteActions={() => []}
     />
@@ -131,7 +129,16 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                 onOpenCommandCenter={props.onOpenCommandCenter}
                 view={view}
                 onViewChange={setView}
-              />
+              >
+                {/* 拍板②：项目树内「新建项目」入口（项目 chip 菜单），omz 聊天空态菜单不替换。 */}
+                <ProjectComposerMenu
+                  workspacePath={props.workspacePath}
+                  workspaceIdentity={props.workspaceIdentity}
+                  onCreateTask={props.onCreateTask}
+                  onSelectConversationWorkspace={props.onCreateConversationTask}
+                  triggerClassName="max-w-40 pl-2.5 pr-1.5"
+                />
+              </ProjectSidebarListHeader>
               {/* 原因：仅设 overflow-y:auto 会让拖拽位移打开水平滚动；列表始终只允许纵向滚动。 */}
               <div className="relative flex min-h-0 flex-1 flex-col">
                 <ScrollFadeViewport ref={scrollRef} className="overflow-x-hidden">
@@ -162,8 +169,8 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                           refresh={refresh}
                           onCreate={() => action(() => start())}
                           onAddProject={() => {
-                            // P4.1 挂账：ProjectCreation 新建对话框随编辑/新建批回补。
-                            runProjectActionNotice(msg("addProject"));
+                            // P4.1：新建入口换真组件（ProjectCreation 对话框）。
+                            setCreating(true);
                           }}
                           hasExpandedProjects={hasExpandedProjects}
                           canToggleProjects={expandableProjects.length > 0}
@@ -200,12 +207,36 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
             </div>
           </div>
         </div>
+        {/* P4.1：编辑/新建对话框挂侧栏根部（上游 index.tsx 同款）；omz 本机形态无远端设备面。 */}
+        {creating && service ? (
+          <ProjectCreation
+            workspacePath={props.workspacePath}
+            workspaceIdentity={props.workspaceIdentity}
+            onCreateTask={props.onCreateTask}
+            projects={tree.projects}
+            service={service}
+            onClose={() => setCreating(false)}
+            onSaved={refresh}
+          />
+        ) : null}
+        {editor && service ? (
+          <ProjectEditor
+            key={editor.project?.id ?? "new"}
+            project={editor.project}
+            projects={tree.projects}
+            service={service}
+            onClose={() => setEditor(null)}
+            onSaved={refresh}
+            onDeleted={refresh}
+          />
+        ) : null}
       </aside>
     </ProjectTaskListContext.Provider>
   );
 });
 
 export { readProjectSidebarView } from "@/project-sidebar/view-preference.js";
+export { ProjectComposerMenu } from "@/project-sidebar/ProjectComposerMenu.js";
 export {
   ProjectDirectoryProvider,
   useOptionalProjectDirectory,

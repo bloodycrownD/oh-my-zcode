@@ -1,15 +1,18 @@
 // 照搬上游 v3.16.2 并 omz 化：
 // ①useSourceServerDisplayNames 不搬（source-server 三期回补），deviceNames 恒为空表；
-// ②useTaskGroups 不搬（上游 grouped 视角随 P5 回补，omz 旧侧栏 organizeGrouped 并存），groups 恒为空结构。
+// ②useTaskGroups 已随 P4.1 接真（ITaskGroupService 由 node.ts 注册 + client 出代理；
+//   accessor 缺席时 available=false 降级空结构）。omz 旧侧栏 organizeGrouped 并存不删。
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
 import { useOptionalPlatform } from "@/hooks/usePlatform.js";
 import { countProjectTreeUnreadTasks, selectSortedProjects } from "@/project-sidebar/view.js";
 import { useProjectTree } from "@/project-sidebar/useProjectTree.js";
 import { useProjectSidebarPreferences } from "@/project-sidebar/useProjectSidebarPreferences.js";
+import { useTaskGroups } from "@/project-sidebar/useTaskGroups.js";
 import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 
 function useDirectoryState(isDesktop: boolean) {
   const result = useProjectTree(isDesktop);
+  const groups = useTaskGroups(result.factTree);
   const sortedProjects = useMemo(
     () => selectSortedProjects(result.factTree),
     [result.factTree.projects],
@@ -29,10 +32,10 @@ function useDirectoryState(isDesktop: boolean) {
       ...result,
       preferences,
       projects,
-      groups: { parents: new Map(), order: [] },
+      groups,
       deviceNames: new Map<string, string>(),
     }),
-    [result, preferences, projects],
+    [result, preferences, projects, groups],
   );
 }
 const Context = createContext<ReturnType<typeof useDirectoryState> | null>(null);
