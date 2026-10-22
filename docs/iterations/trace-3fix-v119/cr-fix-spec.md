@@ -6,8 +6,8 @@
 - base_sha: b952d749（v1.0.18 发布点）
 - head_sha: 本文件最新提交（实现基线 95bb4ecb）
 - prd_path / spec_path: 未提供（真机反馈三修复，需求=用户拍板三条）
-- review_round: 3 / dag_version: 2（CR diff 评审 1 轮 + spec-check r1/r2 doc-fix）
-- 状态: draft（待 spec-check r3 复验）
+- review_round: 3 / dag_version: 2（CR diff 评审 1 轮 + spec-check r1/r2/r3，r3 Go 后 6 条 P2 趁热清零）
+- 状态: execute-ready（r3 Go，待用户确认开工）
 
 需求基线（用户拍板）：
 
@@ -39,7 +39,7 @@
   1. `.then` 分支：`retryCountRef.current = 0` **只在 `records.length > 0` 的成功分支执行**；`records.length === 0` 视同 error 路径——不重置预算、消耗一次预算并排 5s 退避重试、预算未耗尽时不落 empty 终态（保持 loading，见 P2-3）。**empty/error 的自动重试一律经 `setReloadToken` 触发，禁止经 `refresh()`**（r2 P2-1：refresh 按 P1-3 会重置预算，经它重试=无限循环）。
   2. 预算耗尽后正常落 empty/error 终态。
   3. 判定逻辑全部走 P2-4 抽取的纯函数（success/empty/error 三分支统一入口），禁止在 hook 里二次实现预算判定。
-- 合法空 task（真零调用）会经历至多 3×5s loading 后停在 empty——可接受（新 task 极少打开轨迹面板）。
+- 合法空 task（真零调用）会经历至多 3×5s loading 后停在 empty——可接受（新 task 极少打开轨迹面板）。**empty 判定层级（r3 P2-4 写死）：以 hook 侧 `data.records.length === 0` 为准（原始 records）**；Pane 侧 reasoning 投影（showReasoning 关闭时 stripTrajectoryReasoning，Pane.tsx:70-73）造成的用户可见空不纳入重试范围（真机 QA 覆盖）。
 - 验收：单测（P2-4）覆盖「error 重试 / empty 重试 / **连续 empty 不重置预算、第 4 次空读落 empty 终态** / 成功归零」矩阵；真机换模型后空白自动恢复。
 - 来源：review r1 / spec-check r1 P1-B
 
@@ -60,7 +60,7 @@
 - 改法（OQ-1 拍板：全部展开=展开所有内容；r1 P1-C：`toggleTurnExpansion` 是「工具栏按钮 + 菜单回合项」**两入口共用**写路径（Pane:130-132 注释明示），批量写全部槽必须先拆入口，否则菜单「回合」开关会连带翻转用户逐类设置）：
   1. **拆入口**：工具栏「全部展开/收起」按钮（经 `toggleTurnExpansion`）批量写**全部**命令槽（turn + 6 个非 turn）。**目标态定义（r2 P1-1）：7 槽是否全展开的取反**——全展开 → 收起；任一槽未展开 → 展开；7 槽写同一 `{expanded: 目标态, version: 同一递增 version}`。**按钮 label/图标口径同步改为按全部槽聚合判定**（`willExpandAll` 从单看 `turn.expanded` 改为 7 槽全展开才显示「全部收起」）。菜单「回合」项（`handleToggleExpansionKind("turn")` 路径）保持**只写 turn 槽**（回合级语义）。同步修正 Pane:130-132「唯一写入口」注释为「工具栏全量入口 + 菜单按类入口」双写者表述。
   2. 版本覆盖机制（r1 P2-B：Expansion.ts:88-89 JSDoc 把优先级写反了，实现以 :114-117 为准）：**命令 version 新于 per-row override 记录的 commandVersion 时以命令为准**——批量 toggle 后再单独收起某行（写 override、commandVersion=当前），下次全量 toggle 因 version 递增而重新覆盖。
-  3. 「turn override 清理」逻辑不变（Pane 只重置 `turn:` 命名空间的 override，非 turn 行 override 不动）。
+  3. 「turn override 清理」归属（r3 P2-3 写死）：**两个回合写入口（工具栏全量、菜单「回合」项）均在写 turn 槽前清理 `turn:` 命名空间 override**——现状语义保留（不清理则被 override 钉住的回合对翻转无响应）；非 turn 行 override 不清理（由 version 比较自然覆盖，见改法 2）。聚合口径（r3 P2-6）：`willExpandAll` 的「全展开」判定**只看 7 个命令槽的 expanded 值，per-row override 不参与聚合**（override 命中与否由 version 比较决定）。
 - 验收：①点「全部展开」→ 所有回合内消息行与配对卡均展开（DOM 可见 content）；点「全部收起」全收起；混合态用例：菜单单独开「回合」后（非 turn 槽仍收起）点工具栏 → 目标态为展开其余 6 槽、turn 保持展开；②先点「全部展开」，再收起某行 → 工具栏连点两次（收起→展开），末态该行展开（version 递增覆盖 per-row override）；③「自定义展开」菜单「回合」项只翻转回合级、不连带改其它类开关。
 - 来源：review r1 / spec-check r1 P1-C、P2-B、P2-C；spec-check r2 P1-1、P2-6 / OQ-1 拍板 a 方案
 
@@ -72,7 +72,7 @@
   1. reveal 层：默认收起后仅 active 命中被强制展开，其余命中行收起 → content 搜索字段不在 DOM → 无高亮；搜索计数来自索引不受影响 → "命中 N 处只见 1 处高亮"。
   2. 选段层：非 active 命中走 `getMatchRange(root, query, match, /* preferExpanded */ false)`，fields 按 DOM 顺序收集——折叠预览 span（ExpandableMessage:146，展开时被 `group-data-[state=open]:hidden` 隐藏）排在展开内容前，预览文本含查询词时 `ranges[0]` 命中**隐藏**预览 → 高亮不可见且 fieldMatchIndex 跨两段文本错位。active 命中正常只因它单独传了 `preferExpanded=true`。
 - 改法（OQ-3 拍板：全部命中同时展开高亮）：
-  1. reveal 上下文从单 activeKey 扩展为**命中 key 集合**（`TrajectorySearchRevealContext: string` → `ReadonlySet<string>`，回合级 `TrajectorySearchRevealTurnContext` 同理）；`useTrajectorySearchRevealed` 改集合判定（`set.has(key)`），消息键与回合键两命名空间保持不重叠。消费方已列全：Pane:361-366（提供）与 Expansion.ts:79-83（消费）两处，ClampedPreview.tsx:45 经 hook 间接消费。
+  1. reveal 上下文从单 activeKey 扩展为**命中 key 集合**（`TrajectorySearchRevealContext: string | null` → `ReadonlySet<string>`（默认空集常量），回合级 `TrajectorySearchRevealTurnContext` 同理，r3 P2-5 精化类型）；`useTrajectorySearchRevealed` 改集合判定（`set.has(key)`），消息键与回合键两命名空间保持不重叠。**Provider 值构造（r3 P2-5）：`useMemo(() => new Set(matches.map((m) => m.expansionKey)), [matches])`，回合级同构；禁止在渲染体内直接 new Set（Context 值每帧变化会令全部消费行反复重渲染）**。消费方已列全：Pane:361-366（提供）与 Expansion.ts:79-83（消费）两处，ClampedPreview.tsx:45 经 hook 间接消费。
   2. **选段层配套**：`getMatchRange` 的 `preferExpanded` 从「仅 active 命中」放宽为「行已展开即优先」——非 active 命中在其所在行已被 reveal 展开（open）时，同样优先取 `[data-trajectory-message-expanded]` 内的字段，跳过被 `group-data-[state=open]:hidden` 隐藏的折叠预览 span。
   3. active 命中的视觉强调沿用现有通道（SearchHighlight 的 ACTIVE_HIGHLIGHT_NAME + Timeline 滚动，均由 activeSearchMatch 派生）不变。
 - 验收：搜索命中 ≥2 处时全部命中行展开且**非 active 命中的高亮可见**（不落在折叠预览行）；next/prev 时 active 强调跟随移动。
@@ -157,16 +157,16 @@
 ## K 节建议（下游执行时闭合）
 
 1. CHANGELOG v1.0.19：三条用户可见变化 + 显式行为变更标注（消息行/配对卡此前默认展开）。
-2. `docs/iterations/trace-nm-borrow/spec.md` 失效标注——**失效锚点集合（r2 P1-2 修正，r1 版把仍成立的标了）**：`:101`（非 turn 命令初始 open=true）、`:112`（路径 B TrajectoryClampedPreview 6lh→1lh）、`:14` 的「收紧到 6 行」口径部分、`:189` 中「默认展开」部分、`:192` 中路径 B clamp 部分。**保留不标**：`:104`（配对卡两格 6lh——ToolPairCard.tsx:356 仍成立）、`:110`（路径 A 6lh——ExpandedContent.tsx:144 仍成立）。
+2. `docs/iterations/trace-nm-borrow/spec.md` 失效标注——**失效锚点集合（r2 P1-2 修正，r3 P2-2 措辞精化）**：`:101`（非 turn 命令初始 open=true）、`:112`（路径 B TrajectoryClampedPreview 6lh→1lh）、`:14` 仅其路径 B 相关表述（「收紧到 6 行」字面指路径 A、仍成立，见 :110 保留）、`:189` 中「默认展开」部分。`:192` 行文字面（路径 B 命中跳过 clamp）仍成立，不标；高度变化由 :112 标注覆盖。**保留不标**：`:104`（配对卡两格 6lh——ToolPairCard.tsx:356 仍成立）、`:110`（路径 A 6lh——ExpandedContent.tsx:144 仍成立）。
 3. 门禁：根 typecheck、lint、fmt:check、test:v4-perf（455+新增全绿）、architecture:check --changed。Pane.tsx 现约 380/400 行（oxlint max-lines 400），P1-4 拆入口若触线，把批量写逻辑下沉到 `ModelTrajectoryExpansion.ts`（r2 P2-9）。
 4. DOM 级 e2e 不新增（本批 DOM 态靠 manual 清单 1-7 覆盖，登记留痕）。
 
 ## Fix-Spec Closure
 
 | 项 | 状态 |
-| fix-spec-ready | yes（r2 doc-fix 后，待 r3 复验） |
+| fix-spec-ready | yes（r3 Go + 6 条 P2 趁热清零） |
 | fix_spec_path | docs/iterations/trace-3fix-v119/cr-fix-spec.md |
-| dag_version / review_round | 2 / 2（diff 评审 1 轮 + spec-check 2 轮） |
+| dag_version / review_round | 2 / 3（diff 评审 1 轮 + spec-check 3 轮） |
 | P0 / P1 / P2（已写入） | 0 / 5 / 4（r1 全并入；r1/r2 审查追加项已并入各条改法与验收） |
 | 未写入的开放 must-fix | 0 |
 | spec_deviations | none |
