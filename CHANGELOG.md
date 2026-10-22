@@ -1,3 +1,12 @@
+## [1.0.20](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.19...v1.0.20) (2026-10-23)
+
+### 修复
+
+- **修复旧 CLI config.json 导入丢失输出上限**：导入 `~/.omz/cli/config.json` 旧格式时只迁移带 contextWindow 的模型且丢掉 maxOutputTokens——只设输出上限的模型被整段跳过，`limit.output`/`options.max_tokens`/顶层 `maxOutputTokens` 三种形态的取值也不落库。现在三种形态按优先级全部迁移（limit.output > options.max_tokens > 顶层），无 contextWindow 的纯输出上限模型不再被跳过（上游 v3.16.2 backport U1）。
+- **修复 V4 迟到原始流覆盖已定稿工具输入**（行为变化）：`tool_call`（带完整 input）已定稿后，迟到的 `tool_input_delta` 与迟到 `tool_call` 不再覆盖已定稿的 input/inputText，工具名只由权威的 scheduled 事件落——此前断流恢复的二次投递可乱序覆盖工具配对卡「调用参数」格的数据源（上游 v3.16.2 backport U3）。
+- **修复模型创建失败时已发送消息无终态**（行为变化）：Provider/Model 在 Registry 短暂缺失时，创建失败不再在 TurnStarted 之前直接夭折——已接纳输入先提升为 TurnStarted + 持久化用户消息，再以原始创建错误写 `model_creation` 终态；落库链失败只记 warn 不覆盖创建错误。重启后文本可恢复、桌面端可见错误（上游 v3.16.2 backport U4）。
+- **加固 dynamic-workflows 提示词跨 provider 模型纪律**：CreateWorkflow/AmendWorkflow 的 `subagent_model` 参数说明与 Confirmation 段明确「不得在用户未要求时把子代理设到另一 provider 的模型，应先询问」；技能文档 §2 与 run 级 `subagent_model` 语义统一（模型选择唯一杠杆是 run 级参数，无 per-subagent 开关）（上游 v3.16.2 backport U2）。
+
 ## [1.0.12](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.11...v1.0.12) (2026-10-15)
 
 ### 修复
