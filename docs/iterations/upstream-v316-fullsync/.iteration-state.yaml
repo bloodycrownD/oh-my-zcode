@@ -30,6 +30,10 @@ node_status:
   impl-vui-c: { status: done, head_sha: a8e129e7, executor: subagent, commits: [092c5183, e7172371, a8e129e7], note: "P4.2：UI 提交链落项目/分组+tabStore 键统一（读旧写新）+unread 信号链全接+lineage walk；T-VU4 11/11；回归 305/305" }
   verify-vui: { status: done, executor: main, evidence: "T-VU 27 用例三套独立复跑全绿；ui tsc 0 错；P4 三批 diff 111 文件" }
   cr-func-vui: { status: done, func_ready: yes, agent: agent_162e3306, note: "附条件 P1=taskList.title 双键缺（已修 13aaaeda）；P2 挂账两条（createSession parse 无条件执行行为面/每新会话进项目树语义启用真机 QA）；host 注册链与 UI 提交链读码贯通证实；nuance=WorkspaceSidebar 10 零触碰+2 键统一必改" }
+  fix-uitest-types: { status: done, head_sha: 7d7e22d5, executor: subagent, note: "门禁洞：根 typecheck 含 ui/tsconfig.test.json 而波次门禁只跑包级 tsc；71 类型错清零（4 测试文件，零 src 零语义变化）；复跑 34/34 绿" }
+  impl-r3a: { status: done, head_sha: 5c172055, executor: subagent, commits: [73a6fc3e, 799852cf, 80605ac5, c0f16190, 48d3594a, 9a2d89b6, 5c172055], note: "R3 一期 52 文件 +3914/−108；12 文件 8 个与上游逐字节一致；品牌改写三处成套+五族保留；deployServer 共存零触碰" }
+  verify-r3a: { status: done, executor: main, evidence: "T-RD 20/20 三套独立复跑（shared 10+cli 6+desktop 4）；根 typecheck 全绿；junk 清理" }
+  cr-func-r3a: { status: done, func_ready: yes, agent: agent_94230fe2, note: "0 P1；P2 两条已闭（spec 品牌拍板回写+T-RM1 缩小形态登记）；P3 三条已清（junk/注释矛盾/脚手架登记）；品牌全链一致性深查通过" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"

@@ -3772,6 +3772,6 @@ export const zcodeStoragePathReadySchema = z
   .strict();
 
 // 远程历史附件仅通过现有连接的私有反向频道传输，单块保持在 RPC 帧预算内。
-// （R3 一期先落频道名常量供 desktop duplex 反向通道注册；chunk 常量与 relay 请求面随二三期。）
+// （R3 一期随契约面一并落 chunk 常量与频道名；relay 请求面（拉取协议/消费者）随二三期接线。）
 export const TOPIC_RESOURCE_RELAY_CHUNK_BYTES = 384 * 1024;
 export const TOPIC_RESOURCE_RELAY_CHANNEL = "host-topic-resource";

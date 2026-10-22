@@ -107,6 +107,8 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - 产出「远端常驻 daemon + 安装/升级 + 隧道握手」，**无 UX、不动 deployServer 旧主链**（共存政策：一期并行、二三期切换、终态退役 deployServer——退役计划写入 Step）
 - Transport Adapter 接口（probe/installOrUpdate/ensureDaemon/openChannel/exec/createFileTransfer）照搬；SSH 走 ssh2 forwardOut、WSL/Docker 走 `zcode server proxy-stdio`
 - 品牌面：`zcode server` 命令名/SOURCE_SERVER_RELEASE_DESCRIPTOR_FILE_NAME/`~/.zcode` 路径→omz 成套改写；`serverRemoteInfoOutputSchema.parse` 强校验值同步改
+- **品牌拍板（cr-func-r3a 回写）**：命令名/bin/zcode/归档名 zcode-server-<target>.tar.gz/ZCODE_* env/__ZCODE_PROBE_/com.zhipu.zcode.server 服务名与「ZCode Server」文案**成套保留**（远端机器侧 daemon CLI 侧存量生态，代码注释三处声明）；改写面=RELEASE_DESCRIPTOR（omz-server-release.json）/serverId fallback（omz-server）/数据根 ~/.omz/server 三处成套。上游 schema 本无品牌字面量，强校验改写自然满足
+- **T-RM1 缩小形态登记（cr-func-r3a）**：T-RD 载体覆盖=命令注册/预算常量/裁剪守卫/单 Duplex 合同（agent 层）；connectServerRemoteOverDuplex 三请求同隧道端到端用例与 daemon 生命周期执行流并入 T-RM3 真机 SSH 验收（fake-duplex 端到端冒烟随二期 ConnectionManager 接线补）
 - 验证：`verify-remote-ssh.mjs` 类脚本（真机 SSH 到测试机）
 
 ### phase-remote-core（P6=R3 二期）
