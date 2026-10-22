@@ -47,7 +47,8 @@
     "architecture:check": "node scripts/architecture/architecture-check.mjs check",
     "architecture:report": "node scripts/architecture/architecture-check.mjs report",
     "architecture:baseline:update": "node scripts/architecture/architecture-check.mjs baseline:update",
-    "architecture:context": "node scripts/architecture/architecture-check.mjs context"
+    "architecture:context": "node scripts/architecture/architecture-check.mjs context",
+    "test:e2e-tool-join": "node --import tsx docs/iterations/trace-nm-borrow/e2e/e2e-tool-join.mjs"
   },
   "dependencies": {
     "border-beam": "^1.0.1",

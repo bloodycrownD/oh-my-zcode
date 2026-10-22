@@ -73,7 +73,7 @@ publish_pending:
   {
     changelog: "4 条用户向条目（O-3 徽标真名优先+搜索行为 / D-P2-7 错误图标口径 / D-P2-8 锚点替换 / 新增功能条目）——见 cr-fix-spec「发布期待办」",
     manual_tn4: "真机清单含窄侧栏失败标识可见（发布后）",
-    e2e_registry: "e2e-tool-join.mjs 是否登记 package.json 待拍板",
+    e2e_registry: "已登记 test:e2e-tool-join（独立 script + 空数据 SKIP）",
   }
 open_must_fix: []
 spec_deviations: []

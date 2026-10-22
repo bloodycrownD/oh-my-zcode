@@ -156,6 +156,18 @@ for (const sub of SOURCE_SUBDIRS) {
 }
 
 console.log(`已拷贝真实 model-io 文件 ${copied.length} 个（源文件只读）`);
+// 空数据保护：本脚本断言依赖真实落盘数据（比率/剔除一致性等在 0 数据下必红）。
+// 无数据的机器（CI/新环境）跳过而非失败；通过 TRACE_JOIN_E2E_REAL_DIR 指向含
+// debug/rollout 的目录即可启用。登记为独立 script test:e2e-tool-join（不进默认链）。
+if (copied.length === 0) {
+  console.log(
+    "\n[SKIP] 真实 model-io 数据为 0（REAL_DIR=" +
+      REAL_OMZ_CLI_DIR +
+      "），跳过断言并以 exit 0 结束。\n" +
+      "       如需运行：设置 TRACE_JOIN_E2E_REAL_DIR 指向含 debug/rollout 的 ~/.omz/cli 目录。",
+  );
+  process.exit(0);
+}
 for (const item of copied) {
   console.log(`  ${item.sub}/${item.name} ${item.bytes} bytes`);
 }

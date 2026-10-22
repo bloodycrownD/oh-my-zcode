@@ -54,7 +54,7 @@ CHANGELOG v1.0.18 用户向条目（4 条）：
 3. **D-P2-8 DOM 锚点替换**：`data-trajectory-turn-stats` → `data-trajectory-turn-meta`（外部脚本若有依赖需同步）。
 4. 新增功能条目：工具配对卡 / 回合头计数行 / 6 行 clamp + 查看全文全屏 / 搜索自动展开定位（对应用户向描述）。
 
-其他：真机 manual T-N4 清单（含窄侧栏失败标识可见）；e2e 脚本是否登记 package.json（待拍板）。附录中 4 条「原文佚失」条目（A-P2-7/B-P2-4/B-P2-8/D-P2-4）按推定归类，未经 r1 原文实证——若后续找回 r1 原始报告需重核。
+其他：真机 manual T-N4 清单（含窄侧栏失败标识可见）；e2e 脚本已登记为独立 script `test:e2e-tool-join`（不进默认链；空数据环境 SKIP + exit 0，`TRACE_JOIN_E2E_REAL_DIR` 可重定向；双环境验证真数据 24/24、空数据 SKIP）。附录中 4 条「原文佚失」条目（A-P2-7/B-P2-4/B-P2-8/D-P2-4）按推定归类，未经 r1 原文实证——若后续找回 r1 原始报告需重核。
 
 ## 附录：r1 35 条 P2 逐条归属表（SC2-P1-2 落表）
 
