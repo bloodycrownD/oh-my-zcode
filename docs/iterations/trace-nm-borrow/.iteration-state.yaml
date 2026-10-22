@@ -3,7 +3,7 @@ branch: trace-nm-borrow
 base_sha: e4d3a63e
 # head_sha 语义：记账基线（最近一次内容变更 commit，可能滞后多个 doc 提交）。
 # 权威分支头以 `git rev-parse trace-nm-borrow` 为准。
-head_sha: "e3333521"
+head_sha: "65e97958"
 dag_version: 1
 wave_plan:
   [
