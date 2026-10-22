@@ -43,6 +43,7 @@
     "test:prompt-language-rpc": "node --test scripts/test-prompt-language-rpc.mjs",
     "test:session-mapper-parts": "tsx --test scripts/test-session-mapper-parts.mjs",
     "test:late-tool-input-guard": "node --import tsx --test scripts/test-late-tool-input-guard.mjs",
+    "test:legacy-cli-provider-config-import": "node --test scripts/test-legacy-cli-provider-config-import.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src",

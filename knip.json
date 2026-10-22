@@ -48,6 +48,7 @@
     "packages/shared/test/workflowRunsSeatBorn.test.ts",
     "apps/zcode-cli/packages/bootstrap/scripts/test-attachment-preview-text-plain.mjs",
     "apps/zcode-cli/packages/bootstrap/scripts/test-late-tool-input-guard.mjs",
+    "apps/zcode-cli/packages/bootstrap/scripts/test-legacy-cli-provider-config-import.mjs",
     "apps/zcode-cli/packages/dynamic-workflow/scripts/test-scheduler-recorded-asks.mjs"
   ]
 }
