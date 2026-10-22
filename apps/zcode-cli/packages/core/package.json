@@ -33,6 +33,7 @@
     "test:error-payload-agentid-projection": "tsx --test scripts/test-error-payload-agentid-projection.mjs",
     "test:send-message-terminal-resume": "tsx --test scripts/test-send-message-terminal-resume.mjs",
     "test:session-persistence-dedupe": "tsx --test scripts/test-session-persistence-dedupe.mjs",
+    "test:session-hydrator-assembly": "tsx --test scripts/test-session-hydrator-assembly.mjs",
     "test:tool-media-stop-signal": "tsx --test scripts/test-tool-media-stop-signal.mjs",
     "test:subagent-cache-breakpoints": "tsx --test scripts/test-subagent-cache-breakpoints.mjs",
     "test:ctx-tool-descriptions": "tsx --test scripts/test-ctx-tool-descriptions.mjs",
