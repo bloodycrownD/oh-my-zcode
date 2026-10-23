@@ -248,11 +248,25 @@ test("T-RP1: remote host 上限 20 条", async () => {
   });
 });
 
+/** G-1：捕获 admission 入参 intent——直调面证明调用方传值，manager 面证明默认值。 */
+function captureAdmissionIntents(
+  admission: ReturnType<typeof createRemoteProjectConnectionAdmission>,
+) {
+  const intents: Array<"add" | "retain"> = [];
+  const wrapped: typeof admission = async (input) => {
+    intents.push(input.intent);
+    return admission(input);
+  };
+  return { admission: wrapped, intents };
+}
+
 test("T-RP6: 空 hosts 库首连全链（saveHost→广播→bindHost→稳定 server host）", async () => {
   await withRemoteProjects(async ({ changes, service }) => {
     assert.deepEqual((await service.readDirectory()).hosts, []);
     // 首连：profile 尚未握手，host 身份按连接地址派生。
-    const admission = createRemoteProjectConnectionAdmission(service);
+    const { admission, intents } = captureAdmissionIntents(
+      createRemoteProjectConnectionAdmission(service),
+    );
     const commit = await admission({
       profile: {
         profileId: "22222222-2222-4222-8222-222222222222",
@@ -264,6 +278,7 @@ test("T-RP6: 空 hosts 库首连全链（saveHost→广播→bindHost→稳定 s
       intent: "add",
       confirmIdentityChange: false,
     });
+    assert.deepEqual(intents, ["add"], "首连必须显式走 add 意图");
     const admissionId = remoteProjectHostIdForTarget(SSH_TARGET);
     const pending = (await service.readDirectory()).hosts;
     assert.deepEqual(
@@ -284,7 +299,9 @@ test("T-RP6: 空 hosts 库首连全链（saveHost→广播→bindHost→稳定 s
 
 test("T-RP6: retain 意图对已移除成员显式拒绝（不重建入口）", async () => {
   await withRemoteProjects(async ({ service }) => {
-    const admission = createRemoteProjectConnectionAdmission(service);
+    const { admission, intents } = captureAdmissionIntents(
+      createRemoteProjectConnectionAdmission(service),
+    );
     await assert.rejects(
       () =>
         admission({
@@ -300,6 +317,7 @@ test("T-RP6: retain 意图对已移除成员显式拒绝（不重建入口）", 
         }),
       /remote-project\.host-removed/,
     );
+    assert.deepEqual(intents, ["retain"], "被动重连必须显式走 retain 意图");
     assert.deepEqual((await service.readDirectory()).hosts, []);
     assert.equal(
       remoteProjectHostIdForProfile({
@@ -500,14 +518,22 @@ test("T-RP4: resolveServerProjectService 两分支（virtual 转发 / legacy 只
  * P2-1（backlog-sweep fix-svc）：Directory 换代确认后旧 Profile 已退役，Manager 的在线发布
  * 必须挂到 handshake 回执的 effectiveProfile；回执缺席（测试 double）时回落入参 Profile。
  * manager 的 adapter/connectServer/directory/admission 都是构造参数，这里驱动真实发布链。
+ * G-1：admission 入参必须被捕获——裸调 connect() 与显式 membershipIntent 的 intent 差异
+ * 只有在断言入参时才具备区分力（把 connect() 的 `?? "add"` 改成 `?? "retain"` 必须转红）。
  */
+const CONNECTED_SERVER_ID = "99999999-9999-4999-8999-999999999999";
+
 function createConnectedManager(options: {
-  recordHandshake: (profileId: string) => Promise<unknown>;
+  recordHandshake?: (profileId: string) => Promise<unknown>;
   onCommit?: () => void;
+  admitConnection?: ReturnType<typeof createRemoteProjectConnectionAdmission>;
 }): {
   manager: SourceServerConnectionManager;
   states: Array<{ profileId: string; state: string }>;
+  admissions: Array<{ profileId: string; intent: "add" | "retain" }>;
 } {
+  const admissions: Array<{ profileId: string; intent: "add" | "retain" }> = [];
+  const injectedAdmission = options.admitConnection;
   const manager = new SourceServerConnectionManager({
     createAdapter: () =>
       ({
@@ -531,7 +557,7 @@ function createConnectedManager(options: {
     connectServer: async () =>
       ({
         serverInfo: {
-          serverId: "99999999-9999-4999-8999-999999999999",
+          serverId: CONNECTED_SERVER_ID,
           version: ZCODE_COMPATIBILITY_MANIFEST.productVersion,
           protocolVersion: 1,
           authRequired: false,
@@ -542,23 +568,29 @@ function createConnectedManager(options: {
         services: {},
         dispose() {},
       }) as never,
-    directory: { recordHandshake: options.recordHandshake as never },
-    admitConnection: async () => async () => {
-      options.onCommit?.();
+    ...(options.recordHandshake
+      ? { directory: { recordHandshake: options.recordHandshake as never } }
+      : {}),
+    admitConnection: async (input) => {
+      admissions.push({ profileId: input.profile.profileId, intent: input.intent });
+      if (injectedAdmission) return injectedAdmission(input);
+      return async () => {
+        options.onCommit?.();
+      };
     },
   });
   const states: Array<{ profileId: string; state: string }> = [];
   manager.onDidChangeState((state) =>
     states.push({ profileId: state.profileId, state: state.state }),
   );
-  return { manager, states };
+  return { manager, states, admissions };
 }
 
 test("P2-1: 换代确认后在线发布改挂 effectiveProfile（旧 Profile 收敛 offline）", async () => {
   const OLD_PROFILE_ID = "11111111-1111-4111-8111-111111111111";
   const NEW_PROFILE_ID = "22222222-2222-4222-8222-222222222222";
   let commits = 0;
-  const { manager, states } = createConnectedManager({
+  const { manager, states, admissions } = createConnectedManager({
     recordHandshake: async () => ({
       identityChanged: true,
       migrationFailures: [],
@@ -579,6 +611,11 @@ test("P2-1: 换代确认后在线发布改挂 effectiveProfile（旧 Profile 收
   });
   assert.equal(managed.profileId, NEW_PROFILE_ID, "在线发布必须挂新 Profile");
   assert.equal(commits, 1, "身份收敛后仍需完成成员 commit");
+  assert.deepEqual(
+    admissions.map((entry) => entry.intent),
+    ["add"],
+    "裸调 connect() 必须补默认 intent add（上游 :348），否则空库首连被 retain 判 host-removed",
+  );
   assert.equal(manager.getStateByProfile(NEW_PROFILE_ID).state, "online");
   assert.equal(
     manager.getStateByProfile(OLD_PROFILE_ID).state,
@@ -593,14 +630,54 @@ test("P2-1: 换代确认后在线发布改挂 effectiveProfile（旧 Profile 收
 
 test("P2-1: handshake 回执缺 effectiveProfile 时回落入参 Profile（测试 double 路径）", async () => {
   const PROFILE_ID = "33333333-3333-4333-8333-333333333333";
-  const { manager } = createConnectedManager({
+  const { manager, admissions } = createConnectedManager({
     recordHandshake: async () => ({ identityChanged: false, migrationFailures: [] }),
   });
   const managed = await manager.connect({
     profile: { profileId: PROFILE_ID, transport: "ssh", sourceServerId: "source-before-reinstall" },
     target: SSH_TARGET,
+    // 启动静默重连显式传 retain：admission 必须收到 retain 而非被默认值覆盖。
+    membershipIntent: "retain",
     confirmIdentityChange: true,
   });
   assert.equal(managed.profileId, PROFILE_ID);
+  assert.deepEqual(
+    admissions.map((entry) => entry.intent),
+    ["retain"],
+    "显式 membershipIntent 必须原样到达 admission",
+  );
   assert.equal(manager.getStateByProfile(PROFILE_ID).state, "online");
+});
+
+test("T-RP6: 裸调 connect() 默认 intent add，真实 admission 端到端收敛出 remote:server:<id>", async () => {
+  await withRemoteProjects(async ({ service }) => {
+    assert.deepEqual((await service.readDirectory()).hosts, []);
+    const { admission, intents } = captureAdmissionIntents(
+      createRemoteProjectConnectionAdmission(service),
+    );
+    const { manager, admissions } = createConnectedManager({ admitConnection: admission });
+    const managed = await manager.connect({
+      profile: {
+        profileId: "44444444-4444-4444-8444-444444444444",
+        transport: "ssh",
+      },
+      target: SSH_TARGET,
+    });
+    // connect() 不传 membershipIntent 时必须补 add：空 hosts 库上 retain 会直接抛 host-removed。
+    assert.deepEqual(
+      admissions.map((entry) => entry.intent),
+      ["add"],
+      "裸调 connect() 必须补默认 intent add（上游 :348）",
+    );
+    assert.deepEqual(intents, ["add"], "真实 admission 收到的 intent 也是 add");
+    assert.equal(managed.sourceServerId, CONNECTED_SERVER_ID);
+    const hosts = (await service.readDirectory()).hosts;
+    assert.equal(hosts.length, 1, "同一设备只保留稳定身份一行");
+    assert.equal(
+      hosts[0]?.id,
+      remoteProjectHostIdForTarget(SSH_TARGET, CONNECTED_SERVER_ID),
+      "连接提交后 readDirectory 必须出现 remote:server:<id> 稳定行（端到端闭环）",
+    );
+    assert.match(hosts[0]!.id, /^remote:server:/);
+  });
 });
