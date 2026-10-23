@@ -71,6 +71,16 @@ const GLYPH_SCALE = 2;
 // 避免 16×16 实际显示时观感过大压住应用图标。
 const BADGE_PADDING = 3;
 
+// ---- 数字徽章渲染器：生产零调用，仅上游测试兼容，接线待产品确认 ----
+//
+// `renderTaskbarBadgePixels`（含下面的点阵字体与字形常量）目前没有任何生产调用方：
+// Windows 任务栏与托盘最终都用纯红圆点（`renderTaskbarStatusDotPixels` /
+// `renderAntialiasedStatusDotPixels`），因为 16px 显示尺寸下数字不可读（见 TRAY/overlay 注释）。
+// 上一迭代已裁决「生产零调用不迁」（docs/iterations/upstream-v3.16-sync/spec.md），
+// 本轮整件移植带回后按 C-1 终局取「注释保留」：删除会连带删掉已通过的像素用例，
+// 且这段是上游测试兼容面。产品若决定恢复数字角标，接线点应为
+// createWindowsTaskbarOverlayApplier 的 createBadgeImage（当前只喂红点）。
+
 // 5×7 点阵字体，每行 5 bit，最高位在左；只覆盖角标会用到的字符。
 const BADGE_FONT: Record<string, number[]> = {
   "0": [0b01110, 0b10001, 0b10011, 0b10101, 0b11001, 0b10001, 0b01110],

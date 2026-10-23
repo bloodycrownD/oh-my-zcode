@@ -327,6 +327,25 @@ test("T-UF4+H-1 两个调用点都按 locale 组装 description（不允许硬�
   );
 });
 
+test("T-UF4+C-1 数字徽章渲染器：生产零调用，注释保留口径", async () => {
+  const unreadBadge = await readFile(mainSrc("unreadBadge.ts"), "utf8");
+  assert.ok(
+    unreadBadge.includes("生产零调用") && unreadBadge.includes("接线待产品确认"),
+    "数字徽章段首必须注明「生产零调用，仅上游测试兼容，接线待产品确认」",
+  );
+  // 生产装配（任务栏 overlay / 托盘）只能消费圆点渲染器，不能把数字徽章接回生产。
+  for (const name of ["desktopWindowLifecycle.ts", "desktopTray.ts"]) {
+    const source = await readFile(mainSrc(name), "utf8");
+    assert.equal(
+      source.includes("renderTaskbarBadgePixels"),
+      false,
+      `${name} 不得调用数字徽章渲染器（当前生产形态是纯红圆点）`,
+    );
+  }
+  // 渲染器本体仍导出（上游测试兼容 + 后续接线入口），像素用例由 T-UF4 覆盖。
+  assert.equal(typeof renderTaskbarBadgePixels, "function");
+});
+
 test("T-UF4 chromeState 常量：Tahoe 版本跳跃映射 + 非 darwin 返回 null", () => {
   // Darwin 24 = macOS 15；Darwin 25 起产品版本从 15 跳到 26，不能再套 -9。
   assert.equal(resolveMacOSMajorVersion("darwin", "24.6.0"), 15);
