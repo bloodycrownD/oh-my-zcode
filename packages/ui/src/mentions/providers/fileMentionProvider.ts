@@ -6,7 +6,12 @@ import { WORKSPACE_FILE_SEARCH_DISPLAY_CAP } from "@zcode/shared/workspaceFileSe
 import { getMentionGroupLimitForQuery } from "@/mentions/mentionSearch.js";
 import type { MentionCategoryResult, MentionItem } from "@/mentions/mentionTypes.js";
 
-function mapWorkspaceFileToMentionItem(entry: WorkspaceFileEntry): MentionItem {
+/**
+ * 工作区文件条目 → mention 候选。
+ * 导出是为了让「恢复态 chip」的字段口径能对着 provider 产出做同形断言
+ * （markdown 反解析出的目录 chip 必须与这里产出的 kind/path/relativePath/value 一致）。
+ */
+export function mapWorkspaceFileToMentionItem(entry: WorkspaceFileEntry): MentionItem {
   return {
     id: `file:${entry.relativePath}`,
     category: "files",

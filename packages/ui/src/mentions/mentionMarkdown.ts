@@ -267,19 +267,35 @@ function isRichMentionFileDestination(destination: string): boolean {
   return /^[a-zA-Z]:[\\/]/.test(destination);
 }
 
+/**
+ * 目录 mention 的 markdown 目的地必须以斜杠结尾（这是「目录」在正文里唯一的载体），
+ * 但 file provider 产出的 `relativePath` / `path` / `value` 都不带尾分隔符
+ * （目录语义由 `data.kind` 承载）。恢复态必须与 provider 同形：chip 去重键是
+ * `category + value`，带斜杠的恢复态与不带斜杠的 provider 条目永远互不相等，
+ * 同一目录会出两枚 chip（composer/B-4）。
+ *
+ * 例外：仓库根的 destination 就是 `/`，剥掉尾分隔符会变成空串、丢失身份，故原样保留。
+ */
+function stripDirectoryTrailingSeparator(target: string, kind: "file" | "directory"): string {
+  if (kind !== "directory") return target;
+  const stripped = target.replace(/[\\/]+$/, "");
+  return stripped || target;
+}
+
 function resolveRichMentionFileData(
   destination: string,
   kind: "file" | "directory",
 ): MentionItemData {
   // 相对路径按 file provider 的口径去掉 `./` 前缀；绝对路径（POSIX / 盘符）进 path。
+  // 目录还要再去掉尾分隔符（只留在 markdown 里），见 stripDirectoryTrailingSeparator。
   if (destination.startsWith("./")) {
-    const relativePath = destination.slice(2);
+    const relativePath = stripDirectoryTrailingSeparator(destination.slice(2), kind);
     return relativePath ? { kind, relativePath } : { kind };
   }
   if (destination.startsWith("../")) {
-    return { kind, relativePath: destination };
+    return { kind, relativePath: stripDirectoryTrailingSeparator(destination, kind) };
   }
-  return { kind, path: destination };
+  return { kind, path: stripDirectoryTrailingSeparator(destination, kind) };
 }
 
 function resolveRichMentionPart(

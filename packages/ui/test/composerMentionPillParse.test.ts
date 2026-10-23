@@ -24,6 +24,7 @@ import {
   splitRichMentionParagraphs,
   type RichMentionSegment,
 } from "../src/mentions/mentionMarkdown.js";
+import { mapWorkspaceFileToMentionItem } from "../src/mentions/providers/fileMentionProvider.js";
 
 const FENCE = "`".repeat(3);
 const TILDE_FENCE = "~".repeat(3);
@@ -158,29 +159,58 @@ test("T-PR1-3: 转义——label 的 \\] / \\\\ 还原，destination 转义按�
   assert.equal(mentionsOf(ambiguousSegments).length, 0, "歧义 destination 不得猜成 chip");
 });
 
-test("T-PR1-4: 目录尾斜杠保留 directory 语义（不能退化成 file）", () => {
+test("T-PR1-4: 目录尾斜杠只留在 markdown，chip 字段与 file provider 同形", () => {
+  // ① 相对目录：尾斜杠是目录语义的唯一载体（markdown 保留），
+  //    但 chip 的 kind/relativePath/value 必须与 provider 产出同形（不带尾斜杠）。
   const relativeDir = buildFileMentionMarkdown("src/lib", "lib", "directory");
   assert.ok(relativeDir.endsWith("/)"), "目录 mention 的 destination 必须以斜杠结尾");
   const relativeSegments = parseMentionMarkdownRich(relativeDir);
   assertRoundTrip(relativeDir, relativeSegments);
   const relativeMention = mentionsOf(relativeSegments)[0];
   assert.equal(relativeMention?.category, "files");
-  assert.equal(relativeMention?.value, "src/lib/", "目录 value 保留尾斜杠");
-  assert.deepEqual(relativeMention?.data, { kind: "directory", relativePath: "src/lib/" });
+  const providerDir = mapWorkspaceFileToMentionItem({
+    name: "lib",
+    path: "/workspace/src/lib",
+    relativePath: "src/lib",
+    type: "directory",
+  });
+  assert.equal(relativeMention?.data?.kind, providerDir.data?.kind, "kind 与 provider 一致");
+  assert.equal(
+    relativeMention?.data?.relativePath,
+    providerDir.data?.relativePath,
+    "relativePath 与 provider 一致（provider 不带尾斜杠）",
+  );
+  assert.equal(relativeMention?.value, providerDir.value, "value 与 provider 一致");
+  assert.deepEqual(relativeMention?.data, { kind: "directory", relativePath: "src/lib" });
 
-  // POSIX 绝对目录与 Windows 绝对目录同样保留尾斜杠（都用 builder 的真实产出）。
+  // ② POSIX 绝对目录：绝对分支同去尾斜杠，path/value 对照。
   const posixDirMarkdown = buildFileMentionMarkdown("/workspace/src", "src", "directory");
   const posixDir = parseMentionMarkdownRich(posixDirMarkdown);
   assertRoundTrip(posixDirMarkdown, posixDir);
-  assert.deepEqual(mentionsOf(posixDir)[0]?.data, { kind: "directory", path: "/workspace/src/" });
+  const posixMention = mentionsOf(posixDir)[0];
+  assert.equal(posixMention?.data?.kind, "directory");
+  assert.equal(posixMention?.data?.path, "/workspace/src", "绝对目录 path 不带尾斜杠");
+  assert.equal(posixMention?.value, "/workspace/src", "绝对目录 value 不带尾斜杠");
 
+  // ③ Windows 绝对目录：盘符分支同样去尾斜杠（不能因为反斜杠口径被漏掉）。
   const windowsDirMarkdown = buildFileMentionMarkdown("D:\\work\\lib", "lib", "directory");
   const windowsDir = parseMentionMarkdownRich(windowsDirMarkdown);
   assertRoundTrip(windowsDirMarkdown, windowsDir);
-  assert.deepEqual(mentionsOf(windowsDir)[0]?.data, {
-    kind: "directory",
-    path: "D:\\work\\lib/",
-  });
+  const windowsMention = mentionsOf(windowsDir)[0];
+  assert.equal(windowsMention?.data?.kind, "directory");
+  assert.equal(windowsMention?.data?.path, "D:\\work\\lib", "Windows 绝对目录 path 不带尾分隔符");
+  assert.equal(windowsMention?.value, "D:\\work\\lib");
+
+  // ④ 仓库根：builder 产出 `[root](/)`（走绝对分支）。根路径剥尾斜杠会变空串、
+  //    丢失身份，故 path/value 原样保留 `/`；markdown 侧仍是 `/`，往返恒等不破。
+  const rootMarkdown = buildFileMentionMarkdown("", "root", "directory");
+  assert.equal(rootMarkdown, "[root](/)", "仓库根的 markdown 就是 `/`");
+  const rootSegments = parseMentionMarkdownRich(rootMarkdown);
+  assertRoundTrip(rootMarkdown, rootSegments);
+  const rootMention = mentionsOf(rootSegments)[0];
+  assert.equal(rootMention?.data?.kind, "directory");
+  assert.equal(rootMention?.data?.path, "/", "仓库根保留 `/` 身份（去斜杠为空会丢根）");
+  assert.equal(rootMention?.value, "/");
 });
 
 test("T-PR1-5: 白名单外目的地一律不转（http/mailto/未知协议/协议相对 URL/裸相对路径）", () => {
