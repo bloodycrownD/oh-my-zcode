@@ -30,6 +30,7 @@ import {
   IFileService,
   IMediaPreviewService,
   IModelSelectionService,
+  IRemoteProjectService,
   ISettingService,
   IWindowControllerService,
   IZCodeAgentService,
@@ -39,6 +40,7 @@ import {
   createZCodeAgentConnectionScope,
   type ZCodeAgentV4ClientMode,
 } from "@zcode/services";
+import { createDirectoryRemoteProjectService } from "./remoteProjectDirectoryService.js";
 import {
   createLocalServices,
   disposeServiceResources,
@@ -2739,6 +2741,17 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
             return initializedServices;
           },
         });
+        // 远端项目入口目录（upstream-v316-fullsync P7 末批）：Local Host 数据面=
+        // sourceServerDirectory 投影（hosts=已握手 Source 设备+Manager 在线态；entries
+        // 恒空随 P3 持久化批）。directory/manager 均为既有单例惰性取用，注册时机先于
+        // base attachment expose（windowHostAttachmentRegistry.attach 枚举全集合暴露）。
+        services.register(
+          IRemoteProjectService,
+          createDirectoryRemoteProjectService({
+            directory: ensureSourceServerDirectory,
+            manager: ensureSourceServerConnectionManager,
+          }),
+        );
         const zcodeTaskService = services.getOptional(IZCodeTaskService);
         if (zcodeTaskService) {
           const reportingZCodeTaskService = createReportingRemoteZCodeTaskService(

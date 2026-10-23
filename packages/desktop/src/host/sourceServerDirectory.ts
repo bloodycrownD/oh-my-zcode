@@ -348,6 +348,22 @@ export class SourceServerDirectory {
     return candidates;
   }
 
+  /**
+   * 按 profileId 解析可静默连接的真实凭据 target（IRemoteProjectService.connectHost 复用
+   * listStartupReconnectCandidates 的同一凭据链）。解析不出完整认证链返回 null，由调用方
+   * 转为显式错误；不在此处发起网络或回退交互式凭据。
+   */
+  public async resolveSilentConnectionTarget(
+    profileId: string,
+  ): Promise<Exclude<RemoteTarget, { kind: "server" }> | null> {
+    await this.initialize();
+    const profile = ((await this.options.settingService.get()).connectionProfiles ?? []).find(
+      (candidate) => candidate.profileId === profileId,
+    );
+    if (!profile || !isActiveProfile(profile)) return null;
+    return await this.resolveSilentTarget(profile);
+  }
+
   public async recordLastOnline(sourceServerId: string, timestamp: number): Promise<void> {
     await this.initialize();
     await this.enqueue(async () => {
