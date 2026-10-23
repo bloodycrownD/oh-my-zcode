@@ -1,16 +1,21 @@
 import { getDatabaseStartupPortPayload } from "./databaseStartupRelay.js";
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, Menu, MessageChannelMain } from "electron";
+import { release as readPlatformRelease } from "node:os";
+import { app, BrowserWindow, Menu, MessageChannelMain, nativeImage } from "electron";
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { HostMessageTypes, InternalChannels, PlatformChannels, type Locale } from "@zcode/shared";
 import { createBrowserWindow } from "./desktopWindowChrome.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
+import { supportsNativeWindowsRoundedCorners } from "./desktopWindowChromeState.js";
+import { applyDesktopTrayUnreadBadge } from "./desktopTray.js";
 import {
+  createWindowsTaskbarOverlayApplier,
+  maxWindowUnreadCounts,
   parseWindowUnreadCount,
-  sumWindowUnreadCounts,
-  syncAppUnreadBadge,
+  renderTaskbarStatusDotPixels,
+  syncUnreadBadgeForPlatform,
 } from "./unreadBadge.js";
 import { attachDesktopWindowSizePersistence, type DesktopWindowSize } from "./desktopWindowSize.js";
 import {
@@ -299,14 +304,51 @@ export function focusWorkspaceInExistingWindow(
   return { activated: false };
 }
 
+// Windows 任务栏 overlay 的 electron 侧装配：像素渲染在 unreadBadge.ts（纯逻辑，可单测），
+// 这里只负责 BrowserWindow 枚举与 nativeImage 构造。
+const windowsTaskbarOverlayLayout = supportsNativeWindowsRoundedCorners(
+  process.platform,
+  readPlatformRelease(),
+)
+  ? "windows-11"
+  : "windows-10";
+
+const applyWindowsTaskbarOverlay = createWindowsTaskbarOverlayApplier({
+  getAllWindows: () => BrowserWindow.getAllWindows(),
+  // Windows 固定把 overlay 显示为 16×16。直接传硬边 32px 圆再让 Shell 缩放会发糊、
+  // 边缘像缺口；这里提供原生 1x(16px) + 2x(32px) 纯红抗锯齿表示。
+  // label 只用于无障碍 description，屏幕阅读器仍播报具体数量。
+  createBadgeImage: () => {
+    const image = nativeImage.createEmpty();
+    image.addRepresentation({
+      scaleFactor: 1,
+      width: 16,
+      height: 16,
+      buffer: Buffer.from(renderTaskbarStatusDotPixels(1, windowsTaskbarOverlayLayout)),
+    });
+    image.addRepresentation({
+      scaleFactor: 2,
+      width: 32,
+      height: 32,
+      buffer: Buffer.from(renderTaskbarStatusDotPixels(2, windowsTaskbarOverlayLayout)),
+    });
+    return image;
+  },
+});
+
 export function syncApplicationUnreadBadge(windowUnreadCountMap: Map<number, number>) {
-  syncAppUnreadBadge({
+  // 多窗口上报的是同一份全局计数：取 max，求和会让角标随窗口数翻倍。
+  const totalUnreadCount = maxWindowUnreadCounts(windowUnreadCountMap);
+  syncUnreadBadgeForPlatform({
     platform: process.platform,
-    totalUnreadCount: sumWindowUnreadCounts(windowUnreadCountMap),
+    totalUnreadCount,
     setBadgeCount: (count) => {
       app.setBadgeCount(count);
     },
+    applyOverlay: applyWindowsTaskbarOverlay,
   });
+  // 托盘角标：Windows 托盘右上角小徽章（macOS 无托盘，由 Dock 角标承担）。
+  applyDesktopTrayUnreadBadge(totalUnreadCount);
 }
 
 export function handleWindowUnreadCountSync(
