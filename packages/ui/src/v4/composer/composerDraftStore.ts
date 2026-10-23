@@ -56,9 +56,18 @@ export interface V4ComposerDraft {
  * composer 内容局部更新：`text` 在场即正文写入，编辑器结构与 mention 必须重算；
  * 只写上下文载体（chip 增删/发送清空）时不得顺手清掉 mention 与 editorState。
  */
-export type V4ComposerDraftContentUpdate = Partial<
+export type V4ComposerDraftContentPatch = Partial<
   Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention" | "promptContexts">
 >;
+
+/**
+ * 值形态或函数形态的内容更新（composer/B-2）。
+ * 函数形态让「同一 tick 内连续两次 chip 增删」基于 store 中最新草稿累积，
+ * 不再需要组件内 `restoredPromptContextsRef` 渲染期镜像。
+ */
+export type V4ComposerDraftContentUpdate =
+  | V4ComposerDraftContentPatch
+  | ((current: V4ComposerDraft) => V4ComposerDraftContentPatch);
 
 interface V4DraftFile {
   version: 1;

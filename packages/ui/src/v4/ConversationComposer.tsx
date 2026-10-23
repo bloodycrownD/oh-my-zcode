@@ -785,18 +785,18 @@ function ConversationComposerImpl({
   // 由草稿重建 chip，否则尾块会在切 scope 的瞬间静默丢失。
   const restoredPromptContexts: RestoredPromptContexts =
     composerDraft.promptContexts ?? EMPTY_RESTORED_PROMPT_CONTEXTS;
-  // 草稿载体是唯一事实源，这里只镜像一份最新值：同一 tick 内连续移除 chip（含发送成功后
-  // 按类逐条清理）必须能累积，不能拿渲染闭包里的旧数组互相覆盖。
-  const restoredPromptContextsRef = useRef(restoredPromptContexts);
-  restoredPromptContextsRef.current = restoredPromptContexts;
   // chip 增删是草稿内容变更：写回载体后组件随 composerDraft 重渲染。
+  // composer/B-2：这里只做转发，**不再保留渲染期 ref 镜像**。函数形态更新交给草稿 store，
+  // 在 scope guard 之后基于 store 最新草稿执行，同一 tick 内连续移除才能累积；
+  // 旧 scope 的延迟回调会整条被丢弃，不会把旧载体写进新 scope。
   const updateRestoredPromptContexts = useCallback(
     (update: RestoredPromptContextsUpdate) => {
-      const next =
-        typeof update === "function" ? update(restoredPromptContextsRef.current) : update;
-      restoredPromptContextsRef.current = next;
-      updateComposerContent({
-        promptContexts: countComposerPromptContexts(next) > 0 ? next : undefined,
+      updateComposerContent((currentDraft) => {
+        const current = currentDraft.promptContexts ?? EMPTY_RESTORED_PROMPT_CONTEXTS;
+        const next = typeof update === "function" ? update(current) : update;
+        return {
+          promptContexts: countComposerPromptContexts(next) > 0 ? next : undefined,
+        };
       });
     },
     [updateComposerContent],

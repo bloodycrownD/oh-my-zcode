@@ -39,6 +39,7 @@ import {
 } from "@/v4/composer/composerDraftStore.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import { resolveAppFollowupMode } from "@/v4/composer/followupModeSettings.js";
+import { applyScopedDraftContentUpdate } from "@/v4/composer/scopedDraftContentUpdate.js";
 import { logger } from "@/logger.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 
@@ -323,15 +324,19 @@ export function useDraftConfigControl(params: {
 
   const updateComposerContent = useCallback(
     (content: V4ComposerDraftContentUpdate) => {
-      updateComposerDraft((current) => ({
-        ...current,
-        // 正文写入必须重算编辑器结构；只写上下文载体（撤回 chip 增删、发送后清空）时
-        // 不能顺手清掉 mention/editorStateJson，否则草稿会降级成纯文本。
-        ...(content.text !== undefined ? { editorStateJson: undefined, mention: undefined } : {}),
-        ...content,
-      }));
+      // composer/B-2：scope 判定与 updater 执行必须在同一处、基于 store 当前草稿。
+      // 旧实现先写组件内 ref 再被 guard 丢弃，会让 ref 与草稿分叉；函数形态更新也因读的是
+      // 渲染期镜像而非最新草稿，同 tick 连续增删会互相覆盖。
+      const applied = applyScopedDraftContentUpdate({
+        scopeKey,
+        currentScopeKey: stateRef.current.scopeKey,
+        draft: stateRef.current.draft,
+        update: content,
+      });
+      if (applied.dropped) return;
+      updateComposerDraft(() => applied.draft);
     },
-    [updateComposerDraft],
+    [scopeKey, updateComposerDraft],
   );
   const replaceComposerDraft = useCallback(
     (replacement: Omit<V4ComposerDraft, "updatedAt">) => {

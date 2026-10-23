@@ -594,3 +594,70 @@ test("composer/B-1: 三处判定与 SessionPane 门禁同源消费 merged 载体
   assert.match(COMPOSER_SOURCE, /hasContent: hasComposerDraftContent/);
 });
 
+// ── composer/B-2：scope guard + 函数形态内容更新 ──────────────────────────────
+
+test("composer/B-2: 旧 scope 更新整条丢弃，函数式 updater 基于传入草稿累积", () => {
+  const EMPTY_DRAFT_CONTEXTS = {
+    codeComments: [],
+    conversationSelections: [],
+    webElements: [],
+    pptxElements: [],
+  } as const;
+  const mention = {
+    id: "mention-1",
+    category: "files" as const,
+    label: "a.ts",
+    value: "src/a.ts",
+    markdown: "[a.ts](./src/a.ts)",
+  };
+  const draft: V4ComposerDraft = { text: "hi", promptContexts: EMPTY_DRAFT_CONTEXTS, updatedAt: 0 };
+
+  // ① scope 不同 → 原样返回且 dropped
+  const dropped = applyScopedDraftContentUpdate({
+    scopeKey: "session-b",
+    currentScopeKey: "session-a",
+    draft,
+    update: { promptContexts: undefined },
+  });
+  assert.equal(dropped.dropped, true);
+  assert.equal(dropped.draft, draft, "旧 scope 更新不得基于旧闭包写入");
+
+  // ② 同 scope → 应用 updater，且以传入 draft 为基底；③ 同 tick 连续两次累积
+  let current: V4ComposerDraft = draft;
+  for (const suffix of ["1", "2"]) {
+    const result = applyScopedDraftContentUpdate({
+      scopeKey: "session-a",
+      currentScopeKey: "session-a",
+      draft: current,
+      update: (latest) => ({ text: `${latest.text}${suffix}` }),
+    });
+    assert.equal(result.dropped, false);
+    current = result.draft;
+  }
+  assert.equal(current.text, "hi12", "连续函数式更新必须累积，不得互相覆盖");
+
+  // 只写上下文载体不得清编辑器结构；写正文才清
+  const withEditor = { ...draft, editorStateJson: "{}", mention };
+  const carrierOnly = applyScopedDraftContentUpdate({
+    scopeKey: "session-a",
+    currentScopeKey: "session-a",
+    draft: withEditor,
+    update: { promptContexts: undefined },
+  }).draft;
+  assert.equal(carrierOnly.editorStateJson, "{}");
+  assert.equal(carrierOnly.mention, mention);
+  const textWrite = applyScopedDraftContentUpdate({
+    scopeKey: "session-a",
+    currentScopeKey: "session-a",
+    draft: withEditor,
+    update: { text: "next" },
+  }).draft;
+  assert.equal(textWrite.editorStateJson, undefined);
+  assert.equal(textWrite.mention, undefined);
+
+  // 形状守卫：组件不再保留渲染期 ref 镜像，只做函数式转发
+  assert.doesNotMatch(COMPOSER_SOURCE, /restoredPromptContextsRef/);
+  assert.match(COMPOSER_SOURCE, /updateComposerContent\(\(currentDraft\) =>/);
+  assert.match(COMPOSER_SOURCE, /currentDraft\.promptContexts \?\? EMPTY_RESTORED_PROMPT_CONTEXTS/);
+});
+
