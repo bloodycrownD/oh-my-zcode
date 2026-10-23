@@ -134,6 +134,7 @@ import { CodeCommentAttachmentChip } from "@/v4/composer/CodeCommentAttachmentCh
 import { removeCodeCommentPreview } from "@/v4/composer/codeCommentPreviewSync.js";
 import {
   countComposerPromptContexts,
+  parseComposerPromptContexts,
   serializeComposerPromptContexts,
 } from "@/v4/composer/composerPromptContexts.js";
 import { useCodeCommentContexts } from "@/v4/composer/useCodeCommentContexts.js";
@@ -143,6 +144,7 @@ import { PptxElementReferenceChip } from "@/v4/composer/PptxElementReferenceChip
 import { useOpenPptxElementReference } from "@/v4/composer/useOpenPptxElementReference.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { useConversationSelectionReferences } from "@/v4/composer/useConversationSelectionReferences.js";
+import type { ConversationSelectionDisplayReference } from "@/lib/conversationSelectionReference.js";
 import { ConversationBackgroundWorkTrigger } from "@/v4/composer/ConversationBackgroundWorkTrigger.js";
 import { V4ComposerCuaEntry } from "@/v4/composer/V4ComposerCuaEntry.js";
 import {
@@ -201,7 +203,7 @@ function restorePersistedComposerDraftIntoInput({
   draft: Pick<V4ComposerDraft, "editorStateJson" | "mention" | "text">;
   inputApi: Pick<
     LexicalChatInputHandle,
-    "getMarkdown" | "setEditorStateJson" | "setMention" | "setText"
+    "getMarkdown" | "setEditorStateJson" | "setMention" | "setTextWithMentions"
   >;
   onEditorStateError?: (error: unknown) => void;
 }): string {
@@ -219,7 +221,8 @@ function restorePersistedComposerDraftIntoInput({
     inputApi.setMention(draft.mention, draft.text.slice(draft.mention.markdown.length));
     return draft.text;
   }
-  inputApi.setText(draft.text);
+  // 纯文本草稿同样可能带 canonical mention，草稿恢复必须保胶囊（刷新后不降级）。
+  inputApi.setTextWithMentions(draft.text);
   return draft.text;
 }
 
@@ -237,7 +240,7 @@ function applyExternalTextInsertRequestToComposer({
     | "getMarkdown"
     | "prependMentionIfMissing"
     | "setMention"
-    | "setText"
+    | "setTextWithMentions"
     | "setTextWithPluginMentions"
   > | null;
   request: ExternalTextInsertRequest | null | undefined;
@@ -270,12 +273,68 @@ function applyExternalTextInsertRequestToComposer({
     // 推荐任务可在正文中组合多个插件；按原位置构造成真实提及节点。
     inputApi.setTextWithPluginMentions(request.text);
   } else {
-    inputApi.setText(request.text);
+    // 外部预填正文里的 file/skill/session 引用同样要还原成 chip（不只 plugin）。
+    inputApi.setTextWithMentions(request.text);
   }
   updateText(request.text);
   scheduleDraftPersist();
   requestFocus();
   return request.requestId;
+}
+
+/** composer 上下文四类 chip；与 parseComposerPromptContexts 的产出一致（去掉可见正文）。 */
+type RestoredPromptContexts = Omit<
+  ReturnType<typeof parseComposerPromptContexts>,
+  "visibleContent"
+>;
+
+const EMPTY_RESTORED_PROMPT_CONTEXTS: RestoredPromptContexts = {
+  codeComments: [],
+  conversationSelections: [],
+  webElements: [],
+  pptxElements: [],
+};
+
+/**
+ * 队列撤回的 item.text 是发送时序列化过的完整 prompt（可见正文 + 四类上下文尾块）。
+ * 撤回必须按「编辑历史」同一口径拆开：正文进编辑器（并保胶囊），尾块还原成 chip；
+ * 若把整段原文原样塞进编辑器，尾块会变成可见文本，chip 也一并丢失。
+ */
+function resolveRestoredComposerContent(
+  text: string,
+  workspace: { workspacePath: string; workspaceIdentity?: string },
+): { visibleContent: string; contexts: RestoredPromptContexts } {
+  const parsed = parseComposerPromptContexts(text, workspace);
+  return {
+    visibleContent: parsed.visibleContent,
+    contexts: {
+      codeComments: parsed.codeComments,
+      conversationSelections: parsed.conversationSelections,
+      webElements: parsed.webElements,
+      pptxElements: parsed.pptxElements,
+    },
+  };
+}
+
+/** 撤回 chip 与 composer 现存 chip 合并：live 侧同 key 覆盖 restored，避免重复序列化。 */
+function mergeContextList<T>(
+  restored: readonly T[],
+  live: readonly T[],
+  keyOf: (item: T) => string,
+): readonly T[] {
+  if (restored.length === 0) return live;
+  if (live.length === 0) return restored;
+  const liveKeys = new Set(live.map(keyOf));
+  return [...restored.filter((item) => !liveKeys.has(keyOf(item))), ...live];
+}
+
+/**
+ * 会话选区引用是 union：文本选区没有 id（纯展示态）。撤回产物来自 parser，
+ * 一定有 id；展示态用「路径 + 正文」兜底做 key，避免把两类条目错误去重。
+ */
+function conversationSelectionContextKey(reference: ConversationSelectionDisplayReference): string {
+  if ("id" in reference && reference.id) return reference.id;
+  return `${reference.path ?? ""}\u0000${reference.text}`;
 }
 
 export interface ComposerRestoreRequest {
@@ -294,8 +353,10 @@ function applyComposerRestoreRequestToComposer({
   currentWorkspaceKey,
   hasDraftContent,
   inputApi,
+  onPromptContextsRestored,
   request,
   requestFocus,
+  restoredPromptContexts,
   restoreSessionOwnedAttachments,
   restoreDraftConfig,
   scheduleDraftPersist,
@@ -305,9 +366,11 @@ function applyComposerRestoreRequestToComposer({
   currentSessionId: string | null;
   currentWorkspaceKey: string;
   hasDraftContent: boolean;
-  inputApi: Pick<LexicalChatInputHandle, "setText"> | null;
+  inputApi: Pick<LexicalChatInputHandle, "setTextWithMentions"> | null;
+  onPromptContextsRestored?: (contexts: RestoredPromptContexts) => void;
   request: ComposerRestoreRequest | null | undefined;
   requestFocus: () => void;
+  restoredPromptContexts?: RestoredPromptContexts;
   restoreSessionOwnedAttachments: (attachments: readonly AttachmentRef[]) => boolean;
   restoreDraftConfig?: (config: NonNullable<ComposerRestoreRequest["config"]>) => void;
   scheduleDraftPersist: () => void;
@@ -327,8 +390,13 @@ function applyComposerRestoreRequestToComposer({
   if (!restoreSessionOwnedAttachments(request.attachments)) {
     return appliedRequestId;
   }
-  inputApi.setText(request.text);
+  // request.text 已被宿主拆成「可见正文 + 四类上下文尾块」（见 resolveRestoredComposerContent）：
+  // 编辑器只装可见正文并保胶囊，尾块还原成 composer 上方的 chip（与编辑历史路径对称）。
+  inputApi.setTextWithMentions(request.text);
   updateText(request.text);
+  if (restoredPromptContexts && countComposerPromptContexts(restoredPromptContexts) > 0) {
+    onPromptContextsRestored?.(restoredPromptContexts);
+  }
   if (request.config) restoreDraftConfig?.(request.config);
   scheduleDraftPersist();
   requestFocus();
@@ -713,6 +781,82 @@ function ConversationComposerImpl({
   } = useConversationSelectionReferences({ sessionId, workspaceKey });
   const hasConversationSelectionReferences = conversationSelectionReferences.length > 0;
 
+  // ── 队列撤回的上下文 chip（与编辑历史路径对称）──
+  // 队列项的 text 是发送时序列化过的完整 prompt：可见正文 + 四类上下文尾块。撤回时
+  // parseComposerPromptContexts 把尾块拆出来存在这里，再与 live hook 状态合并参与渲染与
+  // 发送序列化；只把正文塞回编辑器会让 chip 丢失、重发字节也少掉尾块（T-PR2/T-PR3）。
+  const [restoredPromptContexts, setRestoredPromptContexts] = useState<RestoredPromptContexts>(
+    EMPTY_RESTORED_PROMPT_CONTEXTS,
+  );
+  const mergedWebElementContexts = useMemo(
+    () =>
+      mergeContextList(restoredPromptContexts.webElements, webElementContexts, (item) => item.id),
+    [restoredPromptContexts.webElements, webElementContexts],
+  );
+  const mergedPptxElementReferences = useMemo(
+    () =>
+      mergeContextList(
+        restoredPromptContexts.pptxElements,
+        pptxElementReferences,
+        (item) => item.id,
+      ),
+    [pptxElementReferences, restoredPromptContexts.pptxElements],
+  );
+  const mergedConversationSelections = useMemo(
+    () =>
+      mergeContextList(
+        restoredPromptContexts.conversationSelections,
+        conversationSelectionReferences,
+        conversationSelectionContextKey,
+      ),
+    [conversationSelectionReferences, restoredPromptContexts.conversationSelections],
+  );
+  // 撤回 chip 的移除/清空必须同时作用于 restored 与 live 两侧：同一个 chip 只可能存在于一侧。
+  const removeMergedWebElementContext = useCallback(
+    (id: string) => {
+      setRestoredPromptContexts((current) => ({
+        ...current,
+        webElements: current.webElements.filter((item) => item.id !== id),
+      }));
+      removeWebElementContext(id);
+    },
+    [removeWebElementContext],
+  );
+  const clearMergedWebElementContexts = useCallback(() => {
+    setRestoredPromptContexts((current) => ({ ...current, webElements: [] }));
+    clearWebElementContexts();
+  }, [clearWebElementContexts]);
+  const removeMergedPptxElementReference = useCallback(
+    (id: string) => {
+      setRestoredPromptContexts((current) => ({
+        ...current,
+        pptxElements: current.pptxElements.filter((item) => item.id !== id),
+      }));
+      removePptxElementReference(id);
+    },
+    [removePptxElementReference],
+  );
+  const clearMergedPptxElementReferences = useCallback(() => {
+    setRestoredPromptContexts((current) => ({ ...current, pptxElements: [] }));
+    clearPptxElementReferences();
+  }, [clearPptxElementReferences]);
+  const removeMergedConversationSelectionReference = useCallback(
+    (id: string) => {
+      setRestoredPromptContexts((current) => ({
+        ...current,
+        conversationSelections: current.conversationSelections.filter(
+          (item) => conversationSelectionContextKey(item) !== id,
+        ),
+      }));
+      removeConversationSelectionReference(id);
+    },
+    [removeConversationSelectionReference],
+  );
+  const clearMergedConversationSelectionReferences = useCallback(() => {
+    setRestoredPromptContexts((current) => ({ ...current, conversationSelections: [] }));
+    clearConversationSelectionReferences();
+  }, [clearConversationSelectionReferences]);
+
   // ── 草稿 per-session 持久化（切会话/刷新不丢；mention pill 经 editorStateJson 保真）──
   const draftScopeRef = useRef(draftScopeId);
   const draftTargetRef = useRef({
@@ -835,10 +979,41 @@ function ConversationComposerImpl({
     requestFocus: requestComposerFocus,
     scopeKey: `${workspaceKey}\0${draftScopeId}`,
   });
+  const mergedCodeCommentContexts = useMemo(
+    () =>
+      mergeContextList(restoredPromptContexts.codeComments, codeCommentContexts, (item) => item.id),
+    [codeCommentContexts, restoredPromptContexts.codeComments],
+  );
+  const removeMergedCodeCommentContext = useCallback(
+    (context: Parameters<typeof removeCodeCommentContext>[0]) => {
+      setRestoredPromptContexts((current) => ({
+        ...current,
+        codeComments: current.codeComments.filter((item) => item.id !== context.id),
+      }));
+      removeCodeCommentContext(context);
+    },
+    [removeCodeCommentContext],
+  );
+  const clearMergedCodeCommentContexts = useCallback(() => {
+    setRestoredPromptContexts((current) => ({ ...current, codeComments: [] }));
+    clearCodeCommentContexts();
+  }, [clearCodeCommentContexts]);
+
+  // 切 scope（会话/草稿/工作区）时撤回 chip 必须跟 live 上下文一起作废：
+  // 队列撤回只在原 session 有效，残留会让下一次发送带上别的会话的尾块。
+  useEffect(() => {
+    setRestoredPromptContexts(EMPTY_RESTORED_PROMPT_CONTEXTS);
+  }, [draftScopeId, sessionId, workspaceIdentity, workspaceKey]);
 
   useEffect(() => {
     if (!composerRestoreRequest) return;
     const applyRequest = () => {
+      // 队列撤回把发送时序列化的完整 prompt 还原成「正文 + 四类上下文尾块」，
+      // 与编辑历史路径同口径；正文进编辑器时仍走富装填保胶囊。
+      const restoredContent = resolveRestoredComposerContent(composerRestoreRequest.text, {
+        workspacePath,
+        workspaceIdentity,
+      });
       const nextAppliedRequestId = applyComposerRestoreRequestToComposer({
         appliedRequestId: appliedComposerRestoreRequestRef.current,
         currentSessionId: sessionId,
@@ -846,20 +1021,23 @@ function ConversationComposerImpl({
         hasDraftContent:
           textRef.current.length > 0 ||
           attachmentsApi.attachments.length > 0 ||
-          codeCommentContexts.length > 0 ||
-          webElementContexts.length > 0 ||
-          pptxElementReferences.length > 0 ||
-          conversationSelectionReferences.length > 0,
+          mergedCodeCommentContexts.length > 0 ||
+          mergedWebElementContexts.length > 0 ||
+          mergedPptxElementReferences.length > 0 ||
+          mergedConversationSelections.length > 0,
         inputApi: inputApiRef.current,
-        request: composerRestoreRequest,
+        onPromptContextsRestored: setRestoredPromptContexts,
+        request: { ...composerRestoreRequest, text: restoredContent.visibleContent },
         requestFocus: requestComposerFocus,
+        restoredPromptContexts: restoredContent.contexts,
         restoreSessionOwnedAttachments: attachmentsApi.restoreSessionOwnedAttachments,
         // 撤回项携带独立 Submission 配置；沿用草稿 owner，一次恢复且保留已处理授权标记。
         restoreDraftConfig: (config) =>
           replaceComposerDraft({
             ...ownerDraftRef.current.draft,
             ...config,
-            text: composerRestoreRequest.text,
+            // 草稿只存可见正文：尾块由 chip 持有，发送时再序列化回去（字节不变）。
+            text: restoredContent.visibleContent,
             editorStateJson: undefined,
             mention: undefined,
           }),
@@ -880,18 +1058,20 @@ function ConversationComposerImpl({
   }, [
     attachmentsApi.attachments.length,
     attachmentsApi.restoreSessionOwnedAttachments,
-    codeCommentContexts.length,
     composerRestoreRequest,
-    conversationSelectionReferences.length,
+    mergedCodeCommentContexts.length,
+    mergedConversationSelections.length,
+    mergedPptxElementReferences.length,
+    mergedWebElementContexts.length,
     onComposerRestoreApplied,
     replaceComposerDraft,
     requestComposerFocus,
     scheduleDraftPersist,
     sessionId,
     updateText,
-    webElementContexts.length,
-    pptxElementReferences.length,
+    workspaceIdentity,
     workspaceKey,
+    workspacePath,
   ]);
 
   // scope 切换：先落旧 scope 草稿，再恢复新 scope（editorStateJson 优先，退纯文本）。
@@ -1111,13 +1291,19 @@ function ConversationComposerImpl({
       const submittedQueueItemIds =
         snapshotRef.current?.queue.items.map((item) => item.queueItemId) ?? [];
       const hasPendingAttachments = attachmentsApi.attachments.length > 0;
-      const currentCodeCommentContexts = getCodeCommentContexts();
+      // 队列撤回恢复的上下文 chip 与 live hook 状态合并：发送时必须一起序列化，
+      // 否则撤回项重发会丢尾块（与编辑历史路径同口径）。
+      const currentCodeCommentContexts = mergeContextList(
+        restoredPromptContexts.codeComments,
+        getCodeCommentContexts(),
+        (item) => item.id,
+      );
       const hasPendingCodeCommentContexts = currentCodeCommentContexts.length > 0;
-      const currentWebElementContexts = webElementContexts;
+      const currentWebElementContexts = mergedWebElementContexts;
       const hasPendingWebElementContexts = currentWebElementContexts.length > 0;
-      const currentPptxElementReferences = pptxElementReferences;
+      const currentPptxElementReferences = mergedPptxElementReferences;
       const hasPendingPptxElementReferences = currentPptxElementReferences.length > 0;
-      const currentConversationSelections = conversationSelectionReferences;
+      const currentConversationSelections = mergedConversationSelections;
       const hasPendingConversationSelections = currentConversationSelections.length > 0;
       // 草稿首发 accepted 后同一 composer 会原地从 __draft__ promotion 到
       // session scope；若成功清理时再读可变 ref，会误清新 scope，并把首条输入残留在
@@ -1173,7 +1359,9 @@ function ConversationComposerImpl({
           if (submittedDraft.editorStateJson) {
             inputApiRef.current?.setEditorStateJson(submittedDraft.editorStateJson);
           } else {
-            inputApiRef.current?.setText(submittedDraft.text);
+            // 发送失败回滚正文同样是装填路径：canonical mention 必须还原成 chip，
+            // 否则「失败重试」一次就把胶囊降级成纯文本。
+            inputApiRef.current?.setTextWithMentions(submittedDraft.text);
           }
           updateText(submittedDraft.text);
           editorClearedOptimistically = false;
@@ -1279,14 +1467,16 @@ function ConversationComposerImpl({
         }
         attachmentsApi.clearAttachments(submittedAttachmentIds);
         // 与附件相同，只移除本次冻结的引用；等待期间新加入的引用属于下一条消息。
-        currentCodeCommentContexts.forEach(removeCodeCommentContext);
-        currentWebElementContexts.forEach((context) => removeWebElementContext(context.id));
+        currentCodeCommentContexts.forEach(removeMergedCodeCommentContext);
+        currentWebElementContexts.forEach((context) => removeMergedWebElementContext(context.id));
         currentPptxElementReferences.forEach((reference) =>
-          removePptxElementReference(reference.id),
+          removeMergedPptxElementReference(reference.id),
         );
         currentConversationSelections.forEach((reference) =>
-          removeConversationSelectionReference(reference.id),
+          removeMergedConversationSelectionReference(conversationSelectionContextKey(reference)),
         );
+        // 撤回恢复的上下文已随这次发送交出去；清空残留，避免下一条消息再带一遍。
+        setRestoredPromptContexts(EMPTY_RESTORED_PROMPT_CONTEXTS);
         // 发送成功：清本次提交捕获的 scope 草稿；prompt history 已在真实发送前同步写盘，
         // 避免首发 promote 丢失或误清 promotion 后的新 scope。
         finalizeSubmittedDraft();
@@ -1302,25 +1492,27 @@ function ConversationComposerImpl({
     },
     [
       attachmentsApi,
-      conversationSelectionReferences,
       draftConfig,
       createSubmissionFromComposer,
       submissionReady,
       getCodeCommentContexts,
+      mergedCodeCommentContexts,
+      mergedConversationSelections,
+      mergedPptxElementReferences,
+      mergedWebElementContexts,
       modelSelectionView,
       onSendText,
       provider,
       readPlanIdentitySnapshot,
-      removeCodeCommentContext,
-      removeConversationSelectionReference,
-      removePptxElementReference,
-      removeWebElementContext,
+      removeMergedCodeCommentContext,
+      removeMergedConversationSelectionReference,
+      removeMergedPptxElementReference,
+      removeMergedWebElementContext,
+      restoredPromptContexts.codeComments,
       sessionId,
       snapshotDraftOfEditor,
       updateText,
       updateComposerContent,
-      webElementContexts,
-      pptxElementReferences,
       workspaceIdentity,
       workspacePath,
     ],
@@ -1496,10 +1688,10 @@ function ConversationComposerImpl({
   const topContentNode = useMemo(() => {
     if (
       composerAttachments.length === 0 &&
-      codeCommentContexts.length === 0 &&
-      webElementContexts.length === 0 &&
-      pptxElementReferences.length === 0 &&
-      conversationSelectionReferences.length === 0
+      mergedCodeCommentContexts.length === 0 &&
+      mergedWebElementContexts.length === 0 &&
+      mergedPptxElementReferences.length === 0 &&
+      mergedConversationSelections.length === 0
     ) {
       return null;
     }
@@ -1764,34 +1956,34 @@ function ConversationComposerImpl({
             })}
           </Attachments>
         ) : null}
-        {codeCommentContexts.length > 0 ||
-        webElementContexts.length > 0 ||
-        pptxElementReferences.length > 0 ||
-        conversationSelectionReferences.length > 0 ? (
+        {mergedCodeCommentContexts.length > 0 ||
+        mergedWebElementContexts.length > 0 ||
+        mergedPptxElementReferences.length > 0 ||
+        mergedConversationSelections.length > 0 ? (
           <div
             className="flex max-w-full flex-wrap items-center gap-2"
             data-composer-context-attachments-row="true"
           >
             <CodeCommentAttachmentChip
-              comments={codeCommentContexts}
-              onRemove={removeCodeCommentContext}
-              onRemoveAll={clearCodeCommentContexts}
+              comments={mergedCodeCommentContexts}
+              onRemove={removeMergedCodeCommentContext}
+              onRemoveAll={clearMergedCodeCommentContexts}
             />
             <WebElementContextAttachmentChip
-              contexts={webElementContexts}
-              onRemove={removeWebElementContext}
-              onRemoveAll={clearWebElementContexts}
+              contexts={mergedWebElementContexts}
+              onRemove={removeMergedWebElementContext}
+              onRemoveAll={clearMergedWebElementContexts}
             />
             <PptxElementReferenceChip
-              references={pptxElementReferences}
+              references={mergedPptxElementReferences}
               onOpen={onOpenCodeViewer ? openPptxElementReference : undefined}
-              onRemove={removePptxElementReference}
-              onRemoveAll={clearPptxElementReferences}
+              onRemove={removeMergedPptxElementReference}
+              onRemoveAll={clearMergedPptxElementReferences}
             />
             <ConversationSelectionReferenceChip
-              references={conversationSelectionReferences}
-              onRemove={removeConversationSelectionReference}
-              onRemoveAll={clearConversationSelectionReferences}
+              references={mergedConversationSelections}
+              onRemove={removeMergedConversationSelectionReference}
+              onRemoveAll={clearMergedConversationSelectionReferences}
             />
           </div>
         ) : null}
@@ -1800,23 +1992,23 @@ function ConversationComposerImpl({
   }, [
     attachmentPreviewTitle,
     attachmentsApi,
-    clearCodeCommentContexts,
-    clearConversationSelectionReferences,
-    clearWebElementContexts,
-    clearPptxElementReferences,
-    codeCommentContexts,
+    clearMergedCodeCommentContexts,
+    clearMergedConversationSelectionReferences,
+    clearMergedWebElementContexts,
+    clearMergedPptxElementReferences,
+    mergedCodeCommentContexts,
     composerAttachments,
     composerMediaPreviewItems,
     orderedComposerAttachments,
     intl,
     locale,
-    removeCodeCommentContext,
-    removeConversationSelectionReference,
-    removeWebElementContext,
-    removePptxElementReference,
-    conversationSelectionReferences,
-    webElementContexts,
-    pptxElementReferences,
+    removeMergedCodeCommentContext,
+    removeMergedConversationSelectionReference,
+    removeMergedWebElementContext,
+    removeMergedPptxElementReference,
+    mergedConversationSelections,
+    mergedWebElementContexts,
+    mergedPptxElementReferences,
     onOpenCodeViewer,
     openPptxElementReference,
   ]);

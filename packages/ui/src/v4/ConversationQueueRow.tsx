@@ -15,6 +15,7 @@ import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { ConversationUserInputContent } from "@/v4/ConversationUserInputContent.js";
 
 export type QueueItem = QueueState["items"][number];
 
@@ -120,7 +121,13 @@ const QueueRow = memo(function QueueRow({
         className="flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground"
         title={item.text}
       >
-        <span className="truncate">{item.text}</span>
+        {/*
+          队列预览与用户消息气泡共用同一渲染器：队列项落库后就是一条 user row，
+          两处解析口径必须一致，否则撤回后重发的胶囊和预览对不上。
+        */}
+        <span className="truncate" data-v4-queue-item-preview="true">
+          <ConversationUserInputContent text={item.text} />
+        </span>
       </span>
       {onSendNow ? (
         <Button
