@@ -96,6 +96,24 @@ dev_dag:
     severity: { p0: 0, p1: 2, p2: 24 }
     spec_fix_plan: []
     status: fix-spec-ready（r4 review-full: yes；待用户确认后执行）
+  cr_fix_dag:
+    spec_path: docs/iterations/backlog-sweep/cr-fix-spec.md
+    base_sha: 41f66023
+    dag_version: 1
+    wave_plan:
+      - [impl-composer, impl-desktop, impl-provider, impl-svc]
+      - [register-tests]
+      - [verify-composer, verify-desktop, verify-provider, verify-svc]
+      - [cr-func-composer, cr-func-desktop, cr-func-provider, cr-func-svc]
+      - [gates-and-spec-writeback]
+    node_status:
+      impl-composer: { status: pending, scope: "9 条：B-1,B-2,B-3,B-4,B-5,B-6,C-1,G-1,A-1" }
+      impl-desktop: { status: pending, scope: "7 条：B-1,B-2,B-3,C-1,F-1,G-1,H-1" }
+      impl-provider: { status: pending, scope: "5 条：B-1,B-2,B-3,A-1,G-1" }
+      impl-svc: { status: pending, scope: "5 条：B-1,C-1,F-1,F-2,G-1" }
+      register-tests: { status: pending, executor: main }
+      gates-and-spec-writeback: { status: pending, executor: main, note: "K节回写 spec + 风险表 + 门禁" }
+    open_must_fix: []
   spec_check_loop:
     target: docs/iterations/backlog-sweep/cr-fix-spec.md
     dag_version: 4
