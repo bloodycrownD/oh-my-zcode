@@ -301,6 +301,23 @@ test("6 个孤儿 i18n 键全部在新弹窗中复用", () => {
   }
 });
 
+test("模板路径与自定义路径的描述文案分开：模板不再复用「完全自定义端点」描述", () => {
+  // 模板路径的端点与模型由模板基线提供，描述必须按 pick.templateId 选键。
+  assert.match(
+    dialogSource,
+    /pick\?\.templateId\s*\?\s*"settings\.modelProvider\.addProviderFromCatalogDescription"\s*:\s*"settings\.modelProvider\.addProviderDescription"/,
+    "弹窗描述必须按 pick.templateId 选键",
+  );
+  assert.match(
+    zhLocaleSource,
+    /"settings\.modelProvider\.addProviderFromCatalogDescription":\s*"[^"]*供应商目录模板/,
+  );
+  assert.match(
+    enLocaleSource,
+    /"settings\.modelProvider\.addProviderFromCatalogDescription":\s*"[^"]*catalog template/,
+  );
+});
+
 test("点击命名：名称渲染为 button，单击进入命名态且重复点击幂等", () => {
   const triggerButton = cardSectionsSource.slice(
     cardSectionsSource.indexOf("data-testid={TID_MODEL_PROVIDER_NAME_TRIGGER}"),

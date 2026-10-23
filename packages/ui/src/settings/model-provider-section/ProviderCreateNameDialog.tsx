@@ -125,7 +125,12 @@ export function ProviderCreateNameDialog({
             {intl.formatMessage({ id: "settings.modelProvider.addProviderTitle" })}
           </DialogTitle>
           <DialogDescription>
-            {intl.formatMessage({ id: "settings.modelProvider.addProviderDescription" })}
+            {/* 模板路径的端点与模型由模板基线提供，描述不能再说「配置完全自定义端点」。 */}
+            {intl.formatMessage({
+              id: pick?.templateId
+                ? "settings.modelProvider.addProviderFromCatalogDescription"
+                : "settings.modelProvider.addProviderDescription",
+            })}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">

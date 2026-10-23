@@ -2737,6 +2737,8 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.addProviderTitle": "Add model provider",
   "settings.modelProvider.addProviderDescription":
     "Configure a custom API endpoint and initial model.",
+  "settings.modelProvider.addProviderFromCatalogDescription":
+    "Create from a provider catalog template, then adjust the connection and models.",
   "settings.modelProvider.nameExists": "Provider name already exists",
   "settings.modelProvider.addFromCatalog": "Provider catalog",
   "settings.modelProvider.addPureCustom": "Custom endpoint",
