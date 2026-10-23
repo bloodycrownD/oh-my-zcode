@@ -20,7 +20,7 @@ export interface ProviderTemplatePick {
   suggestedName: string;
 }
 
-export type CreateProviderNameResolution =
+type CreateProviderNameResolution =
   | { status: "ok"; name: string }
   | { status: "empty" }
   | { status: "duplicate"; name: string };
