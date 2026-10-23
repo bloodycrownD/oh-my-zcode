@@ -74,6 +74,17 @@ dev_dag:
     impl-u9u7: { status: pending, spec_steps: "16,14" }
     impl-u10: { status: pending, spec_steps: "19" }
     gates: { status: pending, spec_steps: "26-27" }
+  e2e_evidence:
+    date: "2026-10-23"
+    head: "2cf16af6"
+    items:
+      - "production bundle 构建（pnpm --filter @zcode/desktop run build）：exit 0，out/renderer 与 main/host 产物齐"
+      - "打包后启动冒烟 desktop-launch-smoke：PASS（退出码 0 + stderr 干净，60s 兜底未触发）"
+      - "产物说明符扫描 verify:bundle-imports：PASS（50 文件，external 8 + deps 26 + 内建 68，@zcode/* 反白名单生效）"
+      - "test:v4-perf 全量聚合：712 pass / 0 fail（49 批，含新增 T-RP1-6/T-PR1-3/T-PV1-2/T-UF1/4/6）"
+      - "root typecheck：exit 0（含 shared/ui test 工程与 desktop host 工程）"
+      - "ui test 工程 tsc -b packages/ui/tsconfig.test.json：OK"
+    manual_gate: "T-QA3（胶囊撤回观感）、T-QA5（服务商三交互）、T-QA6（文件应用拉起/角标/托盘）仍需真机手测"
   spec_deviations:
     - "D1 六值导出落 services/src/node.ts 而非 index.ts（root barrel 是 renderer 面，value 导入会把 node:crypto 链拉进浏览器包）— 接受"
     - "D2 TaskIndexRepo 调用点 11 处/9 文件，非 spec 的 8 处；3/4 参签名全部兼容 — 接受"
