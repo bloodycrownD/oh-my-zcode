@@ -9,10 +9,10 @@
 - spec_path: `docs/iterations/backlog-sweep/spec.md`
 - review_round: CR 侧 4 轮已收口（r1 首诊 → r4 review-full: yes）；spec-check-loop 轮次见 `.iteration-state.yaml` 的 `spec_check_loop` 段
 - dag_version: 5（CR 侧）
-- 状态：CR 侧 fix-spec-ready；spec-check-loop r1 = No-Go（2 P0 / 12 P1），已 doc-fix 待 r2 复审
+- 状态：CR 侧 fix-spec-ready（r4 yes）；spec-check-loop r1 No-Go（2 P0 / 12 P1）→ r2 No-Go（R-A 与 K1 互斥、B-5 漏编辑态第二调用点）→ **r3 Go**（两条阻塞全闭、5 条观察 4 修 1 残留已补，commit 74e15b90 后）
 - 本轮结论（**指 CR 对实现的判定，不是本文档状态**）：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 `composer/A-1`、`composer/B-6`）
 
-评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（CR r1 首诊，readonly 非自审）+ `review-full`（CR r2 覆核 + r3/r4 回归）+ `spec-check-loop` r1（对 fix-spec 本身的首诊，产出 2 P0 / 12 P1，已 doc-fix）。修复轨迹：CR r1 出 24 条 → r2 补 2 条 → r3 修正 `composer/A-1` 依据（气泡侧同为缺陷）+ 收窄 `composer/B-6` → r4 yes → spec-check r1 收口 P0-1（B-5 合成 id 无效，改走 key 回调）与 P0-2（B-1/B-3 文案契约冲突）、12 条 P1（验收载体统一为纯函数/形状守卫）。
+评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（CR r1 首诊，readonly 非自审）+ `review-full`（CR r2 覆核 + r3/r4 回归）+ `spec-check-loop` r1-r3（对 fix-spec 本身：r1 出 2 P0 / 12 P1 → r2 收敛到 2 条 → r3 Go）。修复轨迹：CR r1 出 24 条 → r2 补 2 条 → r3 修正 `composer/A-1` 依据（气泡侧同为缺陷）+ 收窄 `composer/B-6` → r4 yes → spec-check r1 收口 P0-1（B-5 合成 id 无效，改走 key 回调）与 P0-2（B-1/B-3 文案契约冲突）+ 12 条 P1（验收载体统一为纯函数/形状守卫）→ spec-check r2 补 B-5 编辑态第二调用点 + R-A 条件式 → r3 Go。
 
 ---
 
@@ -109,7 +109,7 @@
 - 文件：`packages/ui/src/mentions/mentionMarkdown.ts:267-280`；对照 `packages/ui/src/mentions/providers/fileMentionProvider.ts:10-26`
 - 问题：`./src/lib/` → `relativePath: "src/lib/"`，而 provider 产出无尾斜杠（尾斜杠只在 markdown）。**且绝对路径分支同样带尾斜杠**（`data.path`/`value` 取 `relativePath || path`），`T-PR1-4` 现在把 `/workspace/src/`、`D:\work\lib/` 的带斜杠 data 钉成期望。
 - 改法：`data.relativePath`、`data.path`、`value` **三条都去尾斜杠**（目录语义由 `data.kind` 承载），仅 `markdown` 保留斜杠；`mapWorkspaceFileToMentionItem`（`fileMentionProvider.ts:9`，当前未导出）**导出**以便同形对照；同步改 `T-PR1-4` 三类期望（相对目录 / 绝对目录 / 仓库根）。
-- 验收/测试：T-PR1-4 断言三类（相对目录 / 绝对目录 / 仓库根）的**可推导字段一致**——相对目录对照 `kind/relativePath/value`，绝对目录与仓库根对照 `kind/path/value`（markdown 侧相对分支本就没有绝对 `path`，不做全字段等值）；往返恒等不破。
+- 验收/测试：T-PR1-4 断言**四类**（相对目录 / POSIX 绝对目录 / Windows 绝对目录 / **仓库根（新增例，`buildFileMentionMarkdown("", "root", "directory")` → `[root](/)`，走绝对分支）**）的**可推导字段一致**——相对目录对照 `kind/relativePath/value`，绝对目录与仓库根对照 `kind/path/value`（markdown 侧相对分支本就没有绝对 `path`，不做全字段等值）；**不得用仓库根替换现有 Windows 绝对目录例**（会丢 Windows 覆盖）；往返恒等不破。
 - 来源：review-scope-composer round 1
 
 ### composer/B-5 [P2] 恢复出的「会话选区」chip 无单条删除按钮（`onRemove` 不可达）
@@ -199,8 +199,8 @@
 - 维度：H 兼容性 / J UI / I 可观测性
 - 文件：`packages/desktop/src/main/unreadBadge.ts:304`
 - 问题：`${options.label} unread tasks` 是 Windows 任务栏 tooltip/读屏描述，zh-CN 用户见英文；主进程其余原生文案均走 `formatDesktopMenuMessage`（`packages/shared/src/desktopMenu.ts:144-164`，已支持 `{count}`），只有这里绕过。
-- 改法（**定案一条路**）：`desktopMenuMessageIds` 增 `taskbarUnreadTasks`，`desktopMenuMessages` 增 zh/en 两语；`applyTaskbarOverlayToWindows` 的 options 改收**已格式化 `description`**（不做 formatter 注入）；locale 来源写死为 `desktopMainIpcPlatform.ts:70`（该处已可注入 locale）→ `handleWindowUnreadCountSync`（`:246`）→ `syncApplicationUnreadBadge`（`desktopWindowLifecycle.ts:339`，该函数当前只收 `windowUnreadCountMap`，**需增可选的已格式化 `description` 入参**，不要给它加 locale 概念），内部用 `formatDesktopMenuMessage(id, locale, { count })` 在 caller 侧生成。
-- 验收/测试：`formatDesktopMenuMessage("taskbarUnreadTasks", "zh-CN", {count: 3})` 产出中文、`en-US` 产出 `"3 unread tasks"`（纯逻辑用例）；T-UF4 的 description 断言改为从注入的 description 取值。
+- 改法（**定案一条路**）：`desktopMenuMessageIds` 增 `taskbarUnreadTasks`，`desktopMenuMessages` 增 zh/en 两语；`applyTaskbarOverlayToWindows` 的 options 改收**已格式化 `description`**（不做 formatter 注入）。locale 源为 `desktopMainIpcPlatform.ts:70`（`currentApplicationLocale`），链路 `:245-250` → `handleWindowUnreadCountSync` → `syncApplicationUnreadBadge`（`desktopWindowLifecycle.ts:339`，当前只收 `windowUnreadCountMap`）→ **应把 `description` 设为必填入参**，让 typecheck 强制覆盖两个调用点：①`desktopMainIpcPlatform` 同步路径 ②`index.ts:1446`（关窗清理时重算 max）。文案由 **caller 侧**生成：`formatDesktopMenuMessage(locale, "taskbarUnreadTasks", { count })`（签名是 `(locale, id, values)`，勿倒序）。前提说明：主进程现有文案走 `getDesktopMenuMessage`（`desktopApplicationMenu.ts:28`/`desktopTray.ts:58`/`desktopWindowChrome.ts:320`），`formatDesktopMenuMessage` 目前零生产调用，本条首次接线。
+- 验收/测试：`formatDesktopMenuMessage("zh-CN", "taskbarUnreadTasks", { count: 3 })` 产出中文、`"en-US"` 产出 `"3 unread tasks"`（纯逻辑用例）；T-UF4 的 description 断言改为从注入的 description 取值；typecheck 必须因必填入参而强制两个调用点都传值。
 - 来源：review-scope-desktop round 1
 
 ### desktop/F-1 [P2] 两处注释声明了本仓不存在的生产者
