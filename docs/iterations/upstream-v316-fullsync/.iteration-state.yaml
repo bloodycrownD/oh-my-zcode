@@ -37,6 +37,11 @@ node_status:
   impl-r3b: { status: done, head_sha: 126918c7, executor: subagent, commits: [2106d084, ec85925f, ff72aa5e, 126918c7], note: "registry 换代 786→1736（对拍上游 8 差异块全归声明裁剪）；Manager 薄层 1408 行；B5 七判裁决链；replaceDisconnectedSource transaction 化；duplex-only 终局；sourceServerId=omz install.json installationId" }
   verify-r3b: { status: done, executor: main, evidence: "T-RC 8/8+T-RD3 4/4 复跑；13 文件 0 ui 误碰" }
   cr-func-r3b: { status: done, func_ready: yes, agent: agent_30a179a5, note: "0 P0/P1；registry/Manager/preparation 三文件对拍差异全归声明裁剪（重点三段逐字一致）；B5 用例真实判别力确认；P2 两条已闭（membershipIntent 占位注释+P7 承接登记）；已知风险=上游原生时序（open issues 005-024 族）按 spec 登记" }
+  impl-r3c: { status: done, head_sha: fe9f1cb0, executor: subagent, commits: [570c0f3e, 5df39270, 165dec1b, 7ff22e91, 2cbbdbe7, fe9f1cb0], note: "P7 存储+目录+identity 拍板+schema 两支冻结+UI 纯逻辑层+换代通知链；workspaceIdentity 拍板=本机键规则不变+remote:server: identity" }
+  impl-r3d: { status: done, head_sha: e856cc4f, executor: subagent, commits: [919cc8c9, e65a7fa8, a7676061, e856cc4f], note: "主链切换（daemon 全量+ZCODE_REMOTE_DEPLOY_SERVER_LEGACY 逃生；deployServer 零删除）+identity 绑定回执五层+Directory admission+composerDraftStore 深度重写+三缝数据面" }
+  impl-r3e: { status: done, head_sha: 310f7d91, executor: subagent, commits: [1acbeba7, 50f8af7e, a2f4e7f7, 73b78e98, 310f7d91], note: "host IRemoteProjectService 注册链+Remote* 19 文件回填+占位拆除+拍板 A（向导壳/Dialog 不搬，UI 保 omz）；admitConnection 裁量不补；fmt 事故 2141 文件已回滚重验" }
+  verify-r3cde: { status: done, executor: main, evidence: "T-RU1/2 5/5+T-RU3 5/5（tsx 形态）+T-RU9 6/6；95 文件 mc 误碰 0" }
+  cr-func-r3cde: { status: done, func_ready: yes, agent: agent_43d0fe3d, note: "0 P1/P2；schema 两支从上游 git 对象独立复算吻合；主链切换五层核实+无双重连接；61/61 独立复跑；P3 三条已闭（用例表补登/术语勘误/格式残留纪律登记）；拍板 A/B 均接受" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
