@@ -1368,7 +1368,9 @@ function ConversationComposerImpl({
         // 若仍允许旧 scope effect 落盘，新 Composer 会把已经发送的正文当草稿恢复。
         // 提交前先占用并隐藏该草稿；失败路径再恢复，避免用等待时间掩盖竞态。
         suppressDraftPersistRef.current = true;
-        updateComposerContent({ text: "" });
+        // 载体与正文同口径清空：正文已 claim 时若崩溃/关窗，磁盘上不得残留「空正文+旧 chip」草稿，
+        // 否则重开后再发送会把已发出的上下文尾块重复拼一次。失败路径由 restoreSubmittedDraft 一并回滚。
+        updateComposerContent({ text: "", promptContexts: undefined });
         draftSubmissionClaimed = true;
       };
       const restoreSubmittedDraft = () => {
