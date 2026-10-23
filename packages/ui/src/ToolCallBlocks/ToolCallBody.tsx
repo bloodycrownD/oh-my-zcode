@@ -14,6 +14,7 @@ import type { CodePreviewSettings } from "@/lib/codePreviewSettings.js";
 import type { TaskChatToolCallTreeNode } from "@/lib/toolCallTree.js";
 import type { ToolDisplayModel, ToolInlinePreview } from "@/lib/toolDisplay.js";
 import type { Theme } from "@/useTheme.js";
+import { resolveInlineImageResult } from "./inlineImageResult.js";
 
 export function ToolCallBody({
   childToolList,
@@ -150,7 +151,9 @@ function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
       try {
         const mediaPreview = await fileService.readMediaPreview({ path: preview.path });
         if (!cancelled) {
-          setResult({ path: preview.path, src: mediaPreview?.dataBase64 });
+          // 读取成功也可能没有内容（0 字节图片 → dataBase64=""）；统一走归一化，
+          // 让空图源落进 previewFailed，不再永久停在 loading。
+          setResult({ path: preview.path, ...resolveInlineImageResult(mediaPreview) });
         }
       } catch (error) {
         if (cancelled) {
