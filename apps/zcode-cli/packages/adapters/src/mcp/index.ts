@@ -853,6 +853,7 @@ class NodeMcpAdapter implements McpPort {
           // FORK（D-4）：官方 Server MCP 鉴权链整删，结果不再携带需信任的结构化标识，
           // 因此没有"官方来源"这一档。
           false,
+          config.alwaysLoad,
         ),
       );
       const negotiatedProtocolEra = client.getProtocolEra();

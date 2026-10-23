@@ -9,11 +9,19 @@ export function normalizeMcpToolDescriptor(
   tool: unknown,
   timeoutMs?: number,
   official?: boolean,
+  alwaysLoad?: boolean,
 ): McpToolDescriptor {
   const record = isRecord(tool) ? tool : {};
+  const meta = isRecord(record._meta) ? record._meta : {};
   const toolName = typeof record.name === "string" ? record.name : "unknown";
   return {
     serverName,
+    // ToolSearch defer 豁免：server 配置级 alwaysLoad 或工具 _meta 声明任一命中即常驻。
+    alwaysLoad: alwaysLoad === true || meta["anthropic/alwaysLoad"] === true,
+    searchHint:
+      typeof meta["anthropic/searchHint"] === "string"
+        ? meta["anthropic/searchHint"].replace(/\s+/g, " ").trim()
+        : undefined,
     toolName,
     name: `mcp__${sanitizeMcpName(serverName)}__${sanitizeMcpName(toolName)}`,
     description: typeof record.description === "string" ? record.description : undefined,

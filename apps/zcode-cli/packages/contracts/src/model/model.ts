@@ -7,6 +7,7 @@ import type {
   ModelTextResult,
   ModelToolContract,
 } from "./index.js";
+import type { ToolSearchCapability } from "../tools/tool-search.js";
 import { modelSelectionSchema, type ModelSelection } from "@zcode/shared/model-selection";
 import type { ModelPropertiesData, ModelOptionSpecsData } from "@zcode/shared/model-config";
 
@@ -29,6 +30,7 @@ export interface ModelOptions {
 }
 
 export interface ModelRequest {
+  toolSearchEnabled?: boolean;
   messages: ModelInputMessage[];
   tools?: ModelToolContract[];
   responseJsonSchema?: JsonSchema;
@@ -42,6 +44,8 @@ export type ModelResult = ModelTextResult;
 export type ModelEvent = ModelStreamEvent;
 
 export interface Model {
+  /** provider 侧协议能力（由 adapter 装配）；ToolSearch 的 native/auto 判定读这里。 */
+  readonly requestCapabilities?: { readonly toolSearch?: ToolSearchCapability };
   readonly providerId: ModelProviderId;
   readonly modelId: ModelId;
   readonly displayName?: string;

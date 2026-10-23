@@ -57,6 +57,10 @@ export * from "./resolve-workflow-question.js";
 export * from "./workflow-observation-display.js";
 export * from "./tool-result-metadata.js";
 export * from "./performance.js";
+// ToolSearch/DeferredToolCall：名字常量与 schema 被 core 的 search/ 面、两 handler 与
+// runtime 暴露决策读走；漏掉这组导出会打断 core 编译（照 list-models 的同款注释）。
+export * from "./tool-search.js";
+export * from "./deferred-tool-call.js";
 
 // Shared types (only once to avoid duplicates)
 export type { DiffHunk, GitDiff } from "./write.js";

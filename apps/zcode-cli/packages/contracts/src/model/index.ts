@@ -9,6 +9,9 @@ import type {
   ToolPermissionSpec,
   ToolResultBudget,
 } from "../tools/contract.js";
+// ToolSearch 引用块定义在 tools/tool-search.ts（与 schema 同源）；这里只并入联合，
+// 不重复导出（barrel 同时展开 tools/ 与 model/，重名会触发 TS2308）。
+import type { ModelToolReferenceContentBlock } from "../tools/tool-search.js";
 import type { TraceContext } from "../tracing/tracer.js";
 
 export * from "./image-media.js";
@@ -400,7 +403,8 @@ export type ModelMessageContentBlock =
   | ModelImageContentBlock
   | ModelVideoContentBlock
   | ModelFileContentBlock
-  | ModelResourceLinkContentBlock;
+  | ModelResourceLinkContentBlock
+  | ModelToolReferenceContentBlock;
 
 export type ModelMessageContent = string | ModelMessageContentBlock[];
 
@@ -434,6 +438,8 @@ export function modelMessageContentBlockToText(block: ModelMessageContentBlock):
       return block.text;
     case "reasoning":
       return "";
+    case "tool_reference":
+      return block.toolName;
     case "image":
       return attachmentPlaceholder("Attached", block.mediaType, block.source?.placeholder);
     case "video":
@@ -471,6 +477,8 @@ export type ModelToolSideEffectScope =
   | "userInteraction";
 
 export interface ModelToolContract {
+  /** ToolSearch native 模式的延迟加载标记：仅在请求内有效，off 模式由暴露决策剥离。 */
+  deferLoading?: boolean;
   name: string;
   description?: string;
   capability?: string;
@@ -645,6 +653,8 @@ export interface ModelRequestSettings {
 }
 
 export interface ModelTextRequest extends ModelRequestSettings {
+  /** ToolSearch native 模式开关：adapter 据此附协议 beta header；不进 JSON schema。 */
+  toolSearchEnabled?: boolean;
   messages: ModelInputMessage[];
   tools?: ModelToolContract[];
   toolChoice?: ModelToolChoice;
@@ -853,6 +863,15 @@ const attachmentRefJsonSchema = {
 
 const modelMessageContentBlockJsonSchema = {
   oneOf: [
+    {
+      type: "object",
+      required: ["type", "toolName"],
+      additionalProperties: false,
+      properties: {
+        type: { enum: ["tool_reference"] },
+        toolName: { type: "string", minLength: 1 },
+      },
+    },
     {
       type: "object",
       required: ["type", "text"],

@@ -2,6 +2,7 @@
 // Vercel AI SDK model runner
 // ============================================================
 
+import { resolveToolSearchCapability } from "./tool-search.js";
 import {
   ModelErrorCode,
   ModelProtocolError,
@@ -173,6 +174,12 @@ export class AiSdkModelAdapter {
           });
     };
     return createModel({
+      requestCapabilities: {
+        toolSearch: resolveToolSearchCapability(
+          options.providerConfig.api.type,
+          options.providerConfig.access,
+        ),
+      },
       providerId: resolved.providerId,
       modelId: resolved.modelId,
       displayName: options.displayName,

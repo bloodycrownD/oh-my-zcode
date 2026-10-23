@@ -65,6 +65,7 @@ const memorySchema = z.object({
 const magicContextDomainSchema = MagicContextConfigSchema.optional();
 
 const mcpServerBaseSchema = {
+  alwaysLoad: z.boolean().optional(),
   // 设置页和 MCP adapter 已支持协议选择；配置入口漏掉该字段会因 strict 校验丢弃整个 server。
   protocolVersion: z.enum(["auto", "legacy", "2026-07-28"]).optional(),
   enabled: z.boolean().optional(),
