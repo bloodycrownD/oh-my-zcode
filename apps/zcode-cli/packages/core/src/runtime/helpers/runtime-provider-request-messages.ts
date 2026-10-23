@@ -1,7 +1,4 @@
-import { buildToolExposure } from "../../tool/search/exposure.js";
-import type { ModelToolContract } from "@zcode/contracts";
 import type { RuntimeMessageEntry } from "../../agent/message-history.js";
-import type { ToolRegistry } from "../../tool/registry.js";
 import type { Model } from "../deps.js";
 import type { AgentRuntimeConfig } from "../types.js";
 import {
@@ -38,39 +35,4 @@ export function buildRuntimeProviderRequestMessages(
     ...input,
     useMidConversationSystem,
   });
-}
-
-export function prepareRuntimeProviderRequest(
-  runtime: RequestRuntime,
-  input: MessageProjectionInput & {
-    tools: readonly ModelToolContract[];
-    registry?: Pick<ToolRegistry, "get">;
-  },
-) {
-  const exposure = buildToolExposure({
-    model: input.model,
-    mode: runtime.config.toolSearch?.mode,
-    tools: input.tools,
-    registry: input.registry,
-    entries: input.entries,
-  });
-  const projection = buildRuntimeProviderRequestMessages(runtime, {
-    entries: exposure.entries,
-    model: input.model,
-    loadedToolCallIds: exposure.loadedToolCallIds,
-    applyCacheControl: input.applyCacheControl,
-  });
-  return {
-    request: {
-      messages: projection.messages,
-      tools: exposure.tools,
-      toolSearchEnabled: exposure.context.mode === "native",
-    },
-    projection,
-    entries: exposure.entries,
-    // 记录过滤 Continue 后会重新渲染，需复用本次有效引用，避免遗漏成功提示或重复扫描历史。
-    loadedToolCallIds: exposure.loadedToolCallIds,
-    toolSearch: exposure.context,
-    reason: exposure.reason,
-  };
 }

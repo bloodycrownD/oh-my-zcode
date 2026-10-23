@@ -248,13 +248,6 @@ function mergeAdjacentUserMessages(messages: readonly ModelInputMessage[]): Mess
   return { messages: merged, indexMap };
 }
 
-function skipAdjacentUserMessageMerge(messages: readonly ModelInputMessage[]): MessageMergeResult {
-  return {
-    messages: [...messages],
-    indexMap: messages.map((_, index) => index),
-  };
-}
-
 /**
  * ToolSearch native 命中提示（phase-toolsearch，上游同款）：整批连续 tool result 之后
  * 追加 "Tool loaded." user 提示。只在最终投影派生——canonical 历史与持久层零渗入。

@@ -154,6 +154,7 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - 上游 turn-loop diff 混入物隔离：refreshOffPeakTurnAfterTakeover/persistRuntimeReminderMessage/buildProjectionAnchor 一律不迁
 - UI 侧：settings.toolSearch 4 键设置面 + T08 resolveRenderer 分流按 omz 现状最小接入
 - 测试：精简冒烟集 5-8 条（defer 决策纯函数/按需 hydration/公告块投影/tool_reference 卡渲染/MC 全套仍绿），不重写上游 28 用例
+- **D4 口径登记（cr-func-ts-relay）**：RuntimeMessageMetadata 增内存可选 toolSearchAnnouncement 字段作为公告载体（持久层/hydrator 0 触碰，落盘字段仍不迁）——「公告块只在投影层生成不进 message-history」以「内存元数据载体」口径实现；另清两死函数（skipAdjacentUserMessageMerge/prepareRuntimeProviderRequest）
 
 ### phase-relay-v1-cleanup（P9，独立小项可先行）
 
