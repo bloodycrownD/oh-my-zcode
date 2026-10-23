@@ -87,15 +87,15 @@ dev_dag:
     manual_gate: "T-QA3（胶囊撤回观感）、T-QA5（服务商三交互）、T-QA6（文件应用拉起/角标/托盘）仍需真机手测"
   cr_loop:
     mode: scope
-    dag_version: 4
-    review_round: 3
+    dag_version: 5
+    review_round: 4
     fix_spec_path: docs/iterations/backlog-sweep/cr-fix-spec.md
     wave_plan: [[review-scope-svc, review-scope-composer, review-scope-desktop, review-scope-provider], [review-full]]
     node_status: { review-scope-svc: done, review-scope-composer: done, review-scope-desktop: done, review-scope-provider: done, review-full: done }
     must_fix_open: 26
     severity: { p0: 0, p1: 2, p2: 24 }
     spec_fix_plan: []
-    status: r3-not-ready__spec-fix-done__waiting-r4-review-full
+    status: fix-spec-ready（r4 review-full: yes；待用户确认后执行）
   spec_deviations:
     - "D1 六值导出落 services/src/node.ts 而非 index.ts（root barrel 是 renderer 面，value 导入会把 node:crypto 链拉进浏览器包）— 接受"
     - "D2 TaskIndexRepo 调用点 11 处/9 文件，非 spec 的 8 处；3/4 参签名全部兼容 — 接受"
