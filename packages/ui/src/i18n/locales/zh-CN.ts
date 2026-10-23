@@ -2555,6 +2555,7 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.namePlaceholder": "如：智谱 GLM",
   "settings.modelProvider.addProviderTitle": "添加模型供应商",
   "settings.modelProvider.addProviderDescription": "配置一个完全自定义的 API 端点和初始模型。",
+  "settings.modelProvider.nameExists": "Provider 名称已存在",
   "settings.modelProvider.addFromCatalog": "供应商目录",
   "settings.modelProvider.addPureCustom": "自定义端点",
   "settings.modelProvider.catalogProviderSelect": "选择供应商",

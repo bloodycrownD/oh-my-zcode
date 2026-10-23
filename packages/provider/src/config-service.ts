@@ -583,6 +583,13 @@ function isStructurallyEmpty(value: unknown): boolean {
   return Object.values(value).every(isStructurallyEmpty);
 }
 
+/**
+ * 重名报错文案前缀：`assertProviderLabelMutationIsUnique` 抛出的错误固定为
+ * `${PROVIDER_NAME_EXISTS_MESSAGE_PREFIX}: {name}`。服务层与 UI 共用同一前缀
+ * （UI 只做前缀匹配判定、不展示原始串），避免两边各写一份文案后静默漂移。
+ */
+export const PROVIDER_NAME_EXISTS_MESSAGE_PREFIX = "Provider 名称已存在";
+
 function assertProviderLabelMutationIsUnique(
   providerId: ProviderId,
   currentProviders: ProviderConfigMap,
@@ -597,7 +604,7 @@ function assertProviderLabelMutationIsUnique(
     const candidateId = candidate.providerId;
     if (candidateId === providerId) continue;
     if (candidate.providerName?.trim().toLocaleLowerCase() === nextKey) {
-      throw new Error(`Provider 名称已存在: ${nextLabel}`);
+      throw new Error(`${PROVIDER_NAME_EXISTS_MESSAGE_PREFIX}: ${nextLabel}`);
     }
   }
 }

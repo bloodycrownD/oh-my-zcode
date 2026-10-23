@@ -854,18 +854,17 @@ export function ModelProviderSection({
         setTemplatePickerOpen(false);
         setCreatePick(null);
       } catch (error) {
-        // 失败留在名称弹窗：复用 templateCreateFailed 文案与重试动作，避免用户重选模板。
+        // 失败留在名称弹窗：原始错误只交给弹窗做分类（命中重名前缀 → 重名键，
+        // 其余 → templateCreateFailed），服务层原始串不上屏，避免内部细节/中文串泄漏。
         logger.error("[ModelProviderSection] 创建模型供应商失败", error);
         setPendingCreatedProviderId(null);
-        setCreateProviderError(
-          intl.formatMessage({ id: "settings.modelProvider.templateCreateFailed" }),
-        );
+        setCreateProviderError(error instanceof Error ? error.message : String(error));
       } finally {
         createProviderInFlightRef.current = false;
         setCreatingProvider(false);
       }
     },
-    [createPersonalProvider, intl, locale],
+    [createPersonalProvider, locale],
   );
 
   const handleReorderProviderIds = useCallback(

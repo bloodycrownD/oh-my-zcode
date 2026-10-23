@@ -15,8 +15,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { test } from "node:test";
 
+import { PROVIDER_NAME_EXISTS_MESSAGE_PREFIX } from "@zcode/provider";
+
 import {
-  PROVIDER_NAME_EXISTS_MESSAGE,
+  isProviderNameExistsError,
+  resolveCreateProviderBanner,
   resolveCreateProviderName,
   resolveCreateProviderPrefillName,
 } from "../src/settings/model-provider-section/createProviderNameDialog.js";
@@ -36,6 +39,13 @@ const dialogSource = readFileSync(
   join(uiSrc, "settings", "model-provider-section", "ProviderCreateNameDialog.tsx"),
   "utf8",
 );
+const nameDialogLogicSource = readFileSync(
+  join(uiSrc, "settings", "model-provider-section", "createProviderNameDialog.ts"),
+  "utf8",
+);
+const localesDir = join(uiSrc, "i18n", "locales");
+const zhLocaleSource = readFileSync(join(localesDir, "zh-CN.ts"), "utf8");
+const enLocaleSource = readFileSync(join(localesDir, "en-US.ts"), "utf8");
 const cardSectionsSource = readFileSync(
   join(uiSrc, "settings", "model-provider-section", "ProviderCardSections.tsx"),
   "utf8",
@@ -58,7 +68,7 @@ test("resolveCreateProviderName：空/纯空白名称拦截，不进入创建链
   });
 });
 
-test("resolveCreateProviderName：重名按 trim + 大小写不敏感拦截，文案与重命名一致", () => {
+test("resolveCreateProviderName：重名按 trim + 大小写不敏感拦截", () => {
   const existingNames = ["Z.ai GLM", "My Provider"];
   // 大小写与首尾空白都不应绕过拦截：服务层用同一口径比较。
   assert.deepEqual(resolveCreateProviderName({ rawName: "  z.ai glm  ", existingNames }), {
@@ -69,7 +79,32 @@ test("resolveCreateProviderName：重名按 trim + 大小写不敏感拦截，�
     status: "duplicate",
     name: "MY PROVIDER",
   });
-  assert.equal(PROVIDER_NAME_EXISTS_MESSAGE, "Provider 名称已存在");
+});
+
+test("重名文案单一定义：UI 引用服务层前缀常量，展示走 nameExists i18n 键", () => {
+  // 文案唯一定义处在 @zcode/provider（服务层抛错拼接）与 i18n 键（展示）各一处：
+  // UI 只引用前缀常量做匹配判定，不再自带中文副本。
+  assert.equal(PROVIDER_NAME_EXISTS_MESSAGE_PREFIX, "Provider 名称已存在");
+  assert.match(
+    nameDialogLogicSource,
+    /import \{ PROVIDER_NAME_EXISTS_MESSAGE_PREFIX \} from "@zcode\/provider"/,
+    "UI 重名前缀必须引用 @zcode/provider 导出常量",
+  );
+  assert.ok(
+    !nameDialogLogicSource.includes("Provider 名称已存在"),
+    "UI 纯逻辑模块不得再复制重名文案字面量",
+  );
+  assert.ok(
+    !dialogSource.includes("Provider 名称已存在"),
+    "弹窗不得直接渲染服务层重名文案（en-US 会掉回中文）",
+  );
+  assert.match(zhLocaleSource, /"settings\.modelProvider\.nameExists": "Provider 名称已存在"/);
+  assert.match(
+    enLocaleSource,
+    /"settings\.modelProvider\.nameExists": "Provider name already exists"/,
+  );
+  assert.equal(isProviderNameExistsError("Provider 名称已存在: 新供应商"), true);
+  assert.equal(isProviderNameExistsError("个人供应商配置格式无效"), false);
 });
 
 test("resolveCreateProviderName：通过时返回 trim 后的名称", () => {
@@ -77,6 +112,66 @@ test("resolveCreateProviderName：通过时返回 trim 后的名称", () => {
     resolveCreateProviderName({ rawName: "  新供应商  ", existingNames: ["Z.ai GLM"] }),
     { status: "ok", name: "新供应商" },
   );
+});
+
+test("resolveCreateProviderBanner：优先级 duplicate > empty > create，只有创建失败给重试", () => {
+  const duplicate = { status: "duplicate", name: "Z.ai GLM" } as const;
+  const empty = { status: "empty" } as const;
+  const ok = { status: "ok", name: "新供应商" } as const;
+
+  // ①重名与服务端错误并存：重名优先，且不给重试（重试必然再次撞名）。
+  assert.deepEqual(resolveCreateProviderBanner({ resolution: duplicate, errorMessage: "boom" }), {
+    kind: "duplicate",
+    showRetry: false,
+  });
+  // ②空名与服务端错误并存：必填优先于任何服务端错误。
+  assert.deepEqual(resolveCreateProviderBanner({ resolution: empty, errorMessage: "boom" }), {
+    kind: "empty",
+    showRetry: false,
+  });
+  // ③仅服务端错误：创建失败，提供重试。
+  assert.deepEqual(resolveCreateProviderBanner({ resolution: ok, errorMessage: "boom" }), {
+    kind: "create",
+    showRetry: true,
+  });
+  // ④全空：无横幅。
+  assert.deepEqual(resolveCreateProviderBanner({ resolution: ok, errorMessage: null }), {
+    kind: null,
+    showRetry: false,
+  });
+  // 无服务端错误时，前端校验自身也要能出对应提示。
+  assert.equal(
+    resolveCreateProviderBanner({ resolution: duplicate, errorMessage: null }).kind,
+    "duplicate",
+  );
+  assert.equal(
+    resolveCreateProviderBanner({ resolution: empty, errorMessage: null }).kind,
+    "empty",
+  );
+  // 服务层并发兜底：原始错误命中前缀也算重名（前端已拦截，仍可能被并发创建撞上），
+  // 只做分类、不上屏，也不给重试。
+  assert.deepEqual(
+    resolveCreateProviderBanner({
+      resolution: ok,
+      errorMessage: `${PROVIDER_NAME_EXISTS_MESSAGE_PREFIX}: 新供应商`,
+    }),
+    { kind: "duplicate", showRetry: false },
+  );
+});
+
+test("空名/纯空白必须给必填提示：kind === empty 分支复用 forms.validation.nameRequired", () => {
+  assert.equal(
+    resolveCreateProviderName({ rawName: "\u3000\t\n ", existingNames: [] }).status,
+    "empty",
+  );
+  assert.match(
+    dialogSource,
+    /banner\.kind === "empty"\s*\?\s*"forms\.validation\.nameRequired"/,
+    "kind === empty 分支必须渲染 forms.validation.nameRequired（不新增键）",
+  );
+  // 原始服务层错误串不上屏：data 属性直接取 kind。
+  assert.match(dialogSource, /data-provider-create-error=\{banner\.kind\}/);
+  assert.doesNotMatch(dialogSource, /PROVIDER_NAME_EXISTS_MESSAGE/);
 });
 
 test("resolveCreateProviderPrefillName：模板路径预填模板名，自定义路径预填通用名", () => {
@@ -184,11 +279,13 @@ test("弹窗三 TID 在位，失败复用 templateCreateFailed 与重试动作",
     );
     assert.ok(dialogSource.includes(tid), `弹窗必须挂载 ${tid}`);
   }
-  assert.match(sectionSource, /settings\.modelProvider\.templateCreateFailed/);
+  // 展示统一在弹窗内按 kind 映射：Section 只回填原始错误，不再自带展示文案。
+  assert.match(dialogSource, /settings\.modelProvider\.templateCreateFailed/);
+  assert.doesNotMatch(sectionSource, /settings\.modelProvider\.templateCreateFailed/);
   assert.match(dialogSource, /settings\.modelProvider\.templateCreateRetry/);
   // 必填/重名在前端拦截：弹窗自身解析名称，非法值不进提交。
   assert.match(dialogSource, /resolveCreateProviderName/);
-  assert.match(dialogSource, /PROVIDER_NAME_EXISTS_MESSAGE/);
+  assert.match(dialogSource, /settings\.modelProvider\.nameExists/);
 });
 
 test("6 个孤儿 i18n 键全部在新弹窗中复用", () => {

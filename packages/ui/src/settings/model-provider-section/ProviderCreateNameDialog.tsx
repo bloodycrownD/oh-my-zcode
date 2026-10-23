@@ -25,7 +25,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { isImeComposingKeyEvent } from "@/lib/imeComposition.js";
 import { TECHNICAL_INPUT_ATTRIBUTES } from "@/lib/technicalInputAttributes.js";
 import {
-  PROVIDER_NAME_EXISTS_MESSAGE,
+  resolveCreateProviderBanner,
   resolveCreateProviderName,
   type ProviderTemplatePick,
 } from "./createProviderNameDialog.js";
@@ -33,10 +33,11 @@ import {
 /**
  * 新建供应商名称弹窗：Template 选择页（或「自定义」）之后、真正创建之前的一次确认。
  *
- * 名称校验落在本组件（`resolveCreateProviderName`）：空/纯空白不进提交，重名直接提示
- * 与重命名相同的「Provider 名称已存在」；通过后由 Section 调既有
- * `createPersonalProvider` 链路。服务层失败（schema 等）由 Section 回填
- * `errorMessage`，这里复用 templateCreateFailed 文案与重试动作。
+ * 名称校验落在本组件（`resolveCreateProviderName`）：空/纯空白与重名都在前端拦截
+ * （对齐重命名路径报错文案；创建路径服务层会自动加序号，前端拦截更严格）。通过后由
+ * Section 调既有 `createPersonalProvider` 链路，服务层失败时把原始错误回填到
+ * `errorMessage`。横幅只按 `resolveCreateProviderBanner` 的 `kind` 选 i18n 键，
+ * 服务层原始串不上屏。
  */
 export function ProviderCreateNameDialog({
   open,
@@ -54,7 +55,10 @@ export function ProviderCreateNameDialog({
   prefillName: string;
   existingNames: readonly string[];
   creating: boolean;
-  /** 服务层失败的统一提示（templateCreateFailed）；前端校验失败不走这里。 */
+  /**
+   * 服务层失败的原始错误串（仅用于分类，不直接上屏）：命中重名前缀按重名提示，
+   * 其余按 templateCreateFailed；前端校验失败不走这里。
+   */
   errorMessage: string | null;
   onCancel: () => void;
   onSubmit: (name: string) => void;
@@ -72,8 +76,17 @@ export function ProviderCreateNameDialog({
   }, [open, prefillName]);
 
   const resolution = resolveCreateProviderName({ rawName: nameValue, existingNames });
-  const duplicateMessage = resolution.status === "duplicate" ? PROVIDER_NAME_EXISTS_MESSAGE : null;
-  const blockingMessage = duplicateMessage ?? errorMessage;
+  const banner = resolveCreateProviderBanner({ resolution, errorMessage });
+  // 文案统一由 kind 映射到 i18n 键：服务层原始错误串不上屏，en-US 也不会掉回中文。
+  const bannerMessageId =
+    banner.kind === "duplicate"
+      ? "settings.modelProvider.nameExists"
+      : banner.kind === "empty"
+        ? "forms.validation.nameRequired"
+        : banner.kind === "create"
+          ? "settings.modelProvider.templateCreateFailed"
+          : null;
+  const bannerMessage = bannerMessageId ? intl.formatMessage({ id: bannerMessageId }) : null;
   const canSubmit = !creating && resolution.status === "ok";
 
   const submit = () => {
@@ -147,7 +160,7 @@ export function ProviderCreateNameDialog({
               placeholder={intl.formatMessage({
                 id: "settings.modelProvider.namePlaceholder",
               })}
-              aria-invalid={Boolean(blockingMessage)}
+              aria-invalid={banner.kind !== null}
               onChange={(event) => setNameValue(event.target.value)}
               onKeyDown={handleKeyDown}
               onCompositionStart={() => {
@@ -157,15 +170,15 @@ export function ProviderCreateNameDialog({
                 compositionActiveRef.current = false;
               }}
             />
-            {blockingMessage ? (
+            {bannerMessage ? (
               <div
                 role="alert"
                 className="mt-2 flex items-center gap-2 text-ui-sm text-destructive"
-                data-provider-create-error={errorMessage ? "create" : "duplicate"}
+                data-provider-create-error={banner.kind}
               >
                 <CircleAlertIcon className="size-4 shrink-0" aria-hidden="true" />
-                <span className="min-w-0 flex-1">{blockingMessage}</span>
-                {errorMessage ? (
+                <span className="min-w-0 flex-1">{bannerMessage}</span>
+                {banner.showRetry ? (
                   <Button
                     type="button"
                     variant="ghost"
