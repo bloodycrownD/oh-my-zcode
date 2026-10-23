@@ -342,3 +342,42 @@ test("点击命名：名称渲染为 button，单击进入命名态且重复点�
   assert.match(editableCardSource, /resolveProviderNameEditKeyAction\(/);
   assert.match(editableCardSource, /commitPendingDraft\("name-blur", true\)/);
 });
+
+test("创建在途互斥与清错时序：ref 置位与清错都在 await 之前", () => {
+  const start = sectionSource.indexOf("const handleCreateProvider = useCallback(");
+  const end = sectionSource.indexOf("[createPersonalProvider", start);
+  assert.ok(start >= 0 && end > start, "必须能定位 handleCreateProvider 实现");
+  const body = sectionSource.slice(start, end);
+
+  const inFlightAt = body.indexOf("createProviderInFlightRef.current = true");
+  const clearErrorAt = body.indexOf("setCreateProviderError(null)");
+  const awaitAt = body.indexOf("await createPersonalProvider");
+  assert.ok(
+    inFlightAt >= 0,
+    "创建前必须同步置位 createProviderInFlightRef（弹窗按钮态异步更新，双击仍可能并发两次创建）",
+  );
+  assert.ok(clearErrorAt >= 0, "提交前必须清空上一轮创建错误");
+  assert.ok(awaitAt >= 0, "创建必须走 await createPersonalProvider");
+  assert.ok(inFlightAt < awaitAt, "互斥标记必须在 await 之前同步置位");
+  assert.ok(clearErrorAt < awaitAt, "清错必须在 await 之前，否则首帧仍会显示上一轮失败横幅");
+
+  // 互斥命中必须早返回，不能再往下走到创建链路。
+  assert.match(
+    body,
+    /if \(!providerName \|\| createProviderInFlightRef\.current\) \{\s*return;\s*\}/,
+    "在途/空名必须早返回",
+  );
+  // finally 复位互斥，避免一次失败后永久锁死创建入口。
+  assert.match(
+    body,
+    /finally \{\s*createProviderInFlightRef\.current = false;/,
+    "finally 必须复位互斥标记",
+  );
+});
+
+test("弹窗创建在途禁止关闭：onOpenChange 守卫 creating", () => {
+  // 在途关闭会让请求成功后的 setCreatePick(null) 与「重新打开」竞争，出现弹窗复活或重复提交。
+  assert.match(dialogSource, /if \(!next && !creating\) onCancel\(\);/);
+  // 横幅重试按钮只由分类结果驱动（kind === create 才给重试）。
+  assert.match(dialogSource, /\{banner\.showRetry \? \(/);
+});
