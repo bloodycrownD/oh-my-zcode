@@ -120,6 +120,9 @@ import type {
   RuntimeAttachmentEntry,
   RuntimeMessageEntry,
 } from "@zcode/core";
+
+/** 从 entry 联合反推 metadata 类型（core 未从 barrel 导出该接口，不为此扩公共面）。 */
+type EntryMetadata = NonNullable<RuntimeMessageEntry["metadata"]>;
 import { isChinesePromptLanguage } from "@zcode/core";
 import { buildMagicContextSectionZhCn } from "./magic-context-prompt-section-zh-cn.js";
 import {
@@ -780,12 +783,38 @@ function isUnchanged(message: MessageLike, original: RuntimeMessageEntry): boole
   });
 }
 
+/**
+ * 剥离重建条目继承来的「注入身份」元数据（幽灵消息事故 2026-10-23）。
+ *
+ * `inputPresentation` 的语义是「这段内容就是被准入的那条输入，request 组装要按
+ * mid-turn 注入包装（"The user sent a new message"）」；重建条目内容已与被准入
+ * 输入不同（isUnchanged 为 false 才走重建），继承即伪造注入身份——事故里一段
+ * assistant 旁白借此被当作用户新消息注入运行中的轮。
+ *
+ * `source`（real_user 气泡身份）**保留**：§N§ 打标（tag-messages）是日常合法改写，
+ * user 气泡在 provider projection 的身份与 cache 锚定依赖它（见既有测试 #4）。
+ */
+function sanitizeRebuiltMetadata(metadata: EntryMetadata | undefined): EntryMetadata | undefined {
+  if (metadata === undefined || metadata.inputPresentation === undefined) return metadata;
+  const next: EntryMetadata = { ...metadata };
+  delete next.inputPresentation;
+  return next;
+}
+
 function rebuildEntry(
   message: MessageLike,
   original: RuntimeMessageEntry | undefined,
 ): RuntimeMessageEntry {
   const parts = message.parts;
-  const metadata = original && !isAttachment(original) ? original.metadata : undefined;
+  // FORK（幽灵消息事故 2026-10-23）：重建条目按定义与「被准入的那条输入」不再是
+  // 同一字节（isUnchanged 为 false 才走重建），不得继承输入身份元数据
+  // （inputPresentation / source:"real_user"）。这类元数据一旦被嫁接到无关内容上，
+  // request 组装（projectIncomingMessageEntries）会把该内容包装成
+  // "The user sent a new message" 的真实用户注入。原样保留的条目（isUnchanged 通过）
+  // 不经过这里，身份链不受影响。
+  const metadata = sanitizeRebuiltMetadata(
+    original && !isAttachment(original) ? original.metadata : undefined,
+  );
   const toolResults = parts.filter(isCompletedToolPart);
   // magic-context 把 tool 结果挂在一条 user 消息上，ZCode 建模为独立
   // `role:"tool"` entry —— 按 OpenCode 的 `toModelMessages` 规则拆回去。
@@ -885,14 +914,31 @@ function projectMagicContextEntries(
       flat.push(magicContextAttachment(message));
       continue;
     }
+    // FORK（幽灵消息事故 2026-10-23）：originals 按 MC 消息 id 查找；MC 压缩重排
+    // 会让 id 与构建期快照错位，把「真实 user_steer 输入」的元数据嫁接到无关内容
+    // （实测：一段 assistant 旁白被包装成 "The user sent a new message" 注入）。
+    // role 不符的配对一律断开，重建走无模板路径。
     const original =
       typeof message.info.id === "string" ? originals.get(message.info.id) : undefined;
-    flat.push(
-      original && isUnchanged(message, original) ? original : rebuildEntry(message, original),
-    );
+    const paired =
+      original !== undefined && originalPairsWithMessage(original, message) ? original : undefined;
+    flat.push(paired && isUnchanged(message, paired) ? paired : rebuildEntry(message, paired));
   }
   const { entries, headPositions } = hoistHeadsAfterSystemPrefix(flat);
   return { entries, syntheticHeadPositions: headPositions };
+}
+
+/**
+ * 配对守卫（幽灵消息事故 2026-10-23）：只有 role 一致的 original 才允许作为
+ * 重建模板/原样保留的依据。ZCode 的 tool entry 在 MC 投影里是带 tool part 的
+ * user 消息（见 `isUnchanged` 的 tool 分支），这一对组合同样合法。
+ */
+function originalPairsWithMessage(original: RuntimeMessageEntry, message: MessageLike): boolean {
+  if (isAttachment(original)) return false;
+  const originalRole = original.message.role;
+  const messageRole = message.info.role ?? "user";
+  if (originalRole === messageRole) return true;
+  return originalRole === "tool" && messageRole === "user";
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

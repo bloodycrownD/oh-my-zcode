@@ -428,6 +428,19 @@ type TurnModelBaseline =
   | { kind: "sourceLess" }
   | { kind: "known"; provider: string; model: string; thought: string };
 
+/** 单轮的投影侧运行时状态（并发轮各持一份，互不踩踏）。 */
+interface ActiveTurnContext {
+  runtimeTurnId: string;
+  /** 该轮是否由 model-only TurnStarted 建立（goal continuation 等维护轮）。 */
+  startedModelOnly: boolean;
+  startedAtMs: number;
+  streamingTextRowId: number | null;
+  streamingReasoningRowId: number | null;
+  // output-token Continue 是同一 product turn 内的请求级恢复，不应泄漏成新的正文行。
+  // 这里只保留上一条满足 length/zero-tool/视觉紧邻条件的 text row，任何真实边界都会清空。
+  outputContinuationTextRowId: number | null;
+}
+
 export class ProductProjection {
   private snapshot: ConversationSnapshot;
   // reducer 内部的 rowId 查找必须与 rows.window 同步；冷恢复过去每次 find 都扫描全表，
@@ -435,11 +448,14 @@ export class ProductProjection {
   private rowIndexById = new Map<number, number>();
   private hydrationAccumulator: MutableConversationSnapshotAccumulator | null = null;
   private nextRowId = 1;
-  private streamingTextRowId: number | null = null;
-  private streamingReasoningRowId: number | null = null;
-  // output-token Continue 是同一 product turn 内的请求级恢复，不应泄漏成新的正文行。
-  // 这里只保留上一条满足 length/zero-tool/视觉紧邻条件的 text row，任何真实边界都会清空。
-  private outputContinuationTextRowId: number | null = null;
+  // 每轮上下文（幽灵消息事故 B 线根修，2026-10-23）：并发轮（前台轮 + 队列提升的
+  // 后台轮）各自持有自己的流式锚点。旧实现用单槽位（streamingTextRowId 等）挂在
+  // projection 上，任何一轮的 TurnStarted 都会清空别的轮的流式锚点、任何一轮的终态
+  // 都会误收口别的轮的行。行本身早已带 turnId，状态侧却单写者——这是并发轮互踩的根。
+  private activeTurnContexts = new Map<string, ActiveTurnContext>();
+  // 前台轮（最近一次 user-visible TurnStarted 的 runtime turn）：全局 phase/control
+  // 的归属者。后台轮（并发轮）拥有自己的行与终态，但不得迁移会话全局态。
+  private primaryTurnId: string | null = null;
   private toolRowIdByCallId = new Map<string, number>();
   private latestListAppsSnapshot = new Map<number, CuaAppIdentity>();
   // snapshot 是权威状态；该 Set 只是 TurnComplete 缺终态兜底的派生索引，避免每轮扫描全表。
@@ -479,15 +495,21 @@ export class ProductProjection {
   private productTurnIdByRuntimeTurnId = new Map<string, string>();
   private runtimeTurnIdByProductTurnId = new Map<string, string>();
   private productTurnSplitOrdinalByRuntimeTurnId = new Map<string, number>();
-  private currentProductTurnStartedAtMs: number | null = null;
+  // queue drain 切段后的最后一段起点（按 runtime turn 分键；并发轮根修后不得用单值）。
+  private productTurnStartedAtByRuntimeTurnId = new Map<string, number>();
   // 投递语义侧表：TurnSteerQueued 时按事件 payload（或 followupMode 兜底）记录，
   // drain 时决定切轮 vs 内联；账本落地后以账本为准。
   private deliveryByPendingInputId = new Map<string, "guide" | "queue">();
-  private currentTurnId: string | null = null;
-  // 当前 runtime turn 是否由 model-only TurnStarted 建立（goal continuation
-  // 等维护 turn）。SessionStart 摘要的 pending 归位不得以维护
-  // turn 为收口目标，必须等下一条 user-visible 真实 turn。
-  private currentTurnStartedModelOnly = false;
+  /** 前台轮 runtime turn id（全局 phase/control 归属）；无前台轮时为 null。 */
+  private get currentTurnId(): string | null {
+    return this.primaryTurnId;
+  }
+  /** 前台轮是否由 model-only TurnStarted 建立（SessionStart pending 归位判据）。 */
+  private get currentTurnStartedModelOnly(): boolean {
+    return this.primaryTurnId === null
+      ? false
+      : (this.activeTurnContexts.get(this.primaryTurnId)?.startedModelOnly ?? false);
+  }
   // contextWindow=null 时协议不暴露分母与已用量，但 reducer 仍需保留最新 context 用量，
   // 以便 registry 后续恢复已知容量时原子重建 usage，而不是错误归零。
   private contextWindowState: ContextWindowProjectionState = {
@@ -531,8 +553,11 @@ export class ProductProjection {
   establishedStreamingAppend(event: SessionEvent): string | null {
     if (event.type !== SessionEventType.ModelStreaming || !this.isRunning()) return null;
     const payload = event.payload as ModelStreamingPayload;
-    if (payload.kind === "text_delta" && this.streamingTextRowId !== null) return payload.delta;
-    if (payload.kind === "reasoning_delta" && this.streamingReasoningRowId !== null) {
+    const ctx = this.ctxForEvent(event);
+    if (payload.kind === "text_delta" && (ctx?.streamingTextRowId ?? null) !== null) {
+      return payload.delta;
+    }
+    if (payload.kind === "reasoning_delta" && (ctx?.streamingReasoningRowId ?? null) !== null) {
       return payload.delta;
     }
     if (
@@ -1123,9 +1148,11 @@ export class ProductProjection {
     clone.rowIndexById = new Map(this.rowIndexById);
     clone.hydrationAccumulator = null;
     clone.nextRowId = this.nextRowId;
-    clone.streamingTextRowId = this.streamingTextRowId;
-    clone.streamingReasoningRowId = this.streamingReasoningRowId;
-    clone.outputContinuationTextRowId = this.outputContinuationTextRowId;
+    // 每轮上下文按对象深拷：clone 上继续归约不得回写活跃投影的轮内锚点。
+    clone.activeTurnContexts = new Map(
+      [...this.activeTurnContexts].map(([turnId, ctx]) => [turnId, { ...ctx }]),
+    );
+    clone.primaryTurnId = this.primaryTurnId;
     clone.toolRowIdByCallId = new Map(this.toolRowIdByCallId);
     // 实时发布逐事件走原子 clone；遗漏该侧表会让成功的 list_apps 快照在提交时丢失。
     clone.latestListAppsSnapshot = new Map(this.latestListAppsSnapshot);
@@ -1164,10 +1191,8 @@ export class ProductProjection {
     clone.productTurnSplitOrdinalByRuntimeTurnId = new Map(
       this.productTurnSplitOrdinalByRuntimeTurnId,
     );
-    clone.currentProductTurnStartedAtMs = this.currentProductTurnStartedAtMs;
+    clone.productTurnStartedAtByRuntimeTurnId = new Map(this.productTurnStartedAtByRuntimeTurnId);
     clone.deliveryByPendingInputId = new Map(this.deliveryByPendingInputId);
-    clone.currentTurnId = this.currentTurnId;
-    clone.currentTurnStartedModelOnly = this.currentTurnStartedModelOnly;
     clone.contextWindowState = { ...this.contextWindowState };
     clone.lastTurnModel = { ...this.lastTurnModel };
     clone.configModelTouchedByEvent = this.configModelTouchedByEvent;
@@ -1183,9 +1208,8 @@ export class ProductProjection {
     this.rowIndexById = candidate.rowIndexById;
     this.hydrationAccumulator = null;
     this.nextRowId = candidate.nextRowId;
-    this.streamingTextRowId = candidate.streamingTextRowId;
-    this.streamingReasoningRowId = candidate.streamingReasoningRowId;
-    this.outputContinuationTextRowId = candidate.outputContinuationTextRowId;
+    this.activeTurnContexts = candidate.activeTurnContexts;
+    this.primaryTurnId = candidate.primaryTurnId;
     this.toolRowIdByCallId = candidate.toolRowIdByCallId;
     this.latestListAppsSnapshot = candidate.latestListAppsSnapshot;
     this.openForegroundToolCallIds = candidate.openForegroundToolCallIds;
@@ -1205,10 +1229,8 @@ export class ProductProjection {
     this.productTurnIdByRuntimeTurnId = candidate.productTurnIdByRuntimeTurnId;
     this.runtimeTurnIdByProductTurnId = candidate.runtimeTurnIdByProductTurnId;
     this.productTurnSplitOrdinalByRuntimeTurnId = candidate.productTurnSplitOrdinalByRuntimeTurnId;
-    this.currentProductTurnStartedAtMs = candidate.currentProductTurnStartedAtMs;
+    this.productTurnStartedAtByRuntimeTurnId = candidate.productTurnStartedAtByRuntimeTurnId;
     this.deliveryByPendingInputId = candidate.deliveryByPendingInputId;
-    this.currentTurnId = candidate.currentTurnId;
-    this.currentTurnStartedModelOnly = candidate.currentTurnStartedModelOnly;
     this.contextWindowState = candidate.contextWindowState;
     this.lastTurnModel = candidate.lastTurnModel;
     this.configModelTouchedByEvent = candidate.configModelTouchedByEvent;
@@ -1947,17 +1969,26 @@ export class ProductProjection {
     const event = fact.event;
     const runtimeTurnId = fact.runtimeTurnId;
     const turnId = fact.productTurnId;
-    this.currentTurnId = runtimeTurnId;
-    this.currentTurnStartedModelOnly = fact.visibility === "modelOnly";
+    // 幽灵消息事故 B 线根修（2026-10-23）：每轮建自己的上下文。旧实现把单槽位的
+    // streaming 锚点在这里全局清空——后台轮一起轮就吃掉前台轮未收口的流式行。
+    // 上下文按 runtimeTurnId 分键，重复 TurnStarted（重放）时整体复位该轮。
+    this.activeTurnContexts.set(runtimeTurnId, {
+      runtimeTurnId,
+      startedModelOnly: fact.visibility === "modelOnly",
+      startedAtMs: this.ms(event),
+      streamingTextRowId: null,
+      streamingReasoningRowId: null,
+      outputContinuationTextRowId: null,
+    });
+    // 前台轮 = 最近一次 user-visible 起点轮；model-only 维护轮不得抢占全局归属。
+    if (fact.visibility !== "modelOnly") {
+      this.primaryTurnId = runtimeTurnId;
+    }
     // 新 runtimeTurn：product turn 映射归零（1:1），工时基准 = 本轮起点。
     this.productTurnIdByRuntimeTurnId.delete(runtimeTurnId);
     if (turnId !== runtimeTurnId) this.productTurnIdByRuntimeTurnId.set(runtimeTurnId, turnId);
     this.runtimeTurnIdByProductTurnId.set(turnId, runtimeTurnId);
     this.productTurnSplitOrdinalByRuntimeTurnId.delete(runtimeTurnId);
-    this.currentProductTurnStartedAtMs = this.ms(event);
-    this.streamingTextRowId = null;
-    this.streamingReasoningRowId = null;
-    this.outputContinuationTextRowId = null;
 
     // background Agent 的 ToolCallResult 只是 launch ACK，先把工具行收口成
     // success；子 Agent 的真实终态随后只作为 model-only task-notification 开新轮。
@@ -2183,8 +2214,26 @@ export class ProductProjection {
 
   private onTurnComplete(event: SessionEvent): ConversationDelta[] {
     const payload = event.payload as TurnCompletePayload;
-    this.outputContinuationTextRowId = null;
     const headerState = mapTurnResultToHeaderState(payload.resultType);
+    // 幽灵消息事故 B 线根修（2026-10-23）：终态按事件轮归属，不再问「是否当前轮」。
+    // 先收口**该轮自己的**流式行与上下文；全局 phase/control 只由前台轮迁移。
+    const runtimeTurnId = this.runtimeTurnIdOfEvent(event);
+    const ctx = this.ctxForEvent(event);
+    if (ctx) ctx.outputContinuationTextRowId = null;
+    const isPrimary =
+      runtimeTurnId === null || runtimeTurnId === this.primaryTurnId || ctx === undefined;
+    if (!isPrimary) {
+      const deltas = [
+        ...this.closeStreamingRowsFor(
+          ctx,
+          payload.resultType === "success" ? "complete" : "interrupted",
+        ),
+        ...this.upsertTurnHeader(event, headerState, undefined, payload.historyRoundCount),
+      ];
+      this.activeTurnContexts.delete(runtimeTurnId as string);
+      this.releasePrimaryTurn(runtimeTurnId as string);
+      return deltas;
+    }
     const header = this.turnHeaderForEvent(event);
     if (header?.executionKind === "controlOnly") {
       // controlOnly 没有 Agent 工时；尤其不能把 duration=0 下发给旧 UI，后者会为了
@@ -2196,9 +2245,8 @@ export class ProductProjection {
           payload.resultType === "success" ? "completedSuccess" : "completedInterrupted",
         ),
       ];
-      this.currentTurnId = null;
-      // turn 收口后 model-only 标记随之失效，避免影响下一次归属判断。
-      this.currentTurnStartedModelOnly = false;
+      if (runtimeTurnId !== null) this.activeTurnContexts.delete(runtimeTurnId);
+      this.releasePrimaryTurn(runtimeTurnId ?? "");
       return deltas;
     }
     const phase: SessionControl["phase"] =
@@ -2233,7 +2281,7 @@ export class ProductProjection {
         : undefined;
 
     const deltas: ConversationDelta[] = [
-      ...this.closeStreamingRows(streamClose),
+      ...this.closeStreamingRowsFor(ctx, streamClose),
       // turn 终态一并收口在飞的 foreground tool row（收口不变量：被 profile
       // 过滤的 inputText 流必须被不可过滤的 row.upserted 蕴含，见 profiles.ts）。
       ...this.closeOpenToolRows(event, payload.resultType === "cancelled" ? "cancelled" : "error"),
@@ -2263,9 +2311,8 @@ export class ProductProjection {
         ),
       },
     ];
-    this.currentTurnId = null;
-    // turn 收口后 model-only 标记随之失效，避免影响下一次归属判断。
-    this.currentTurnStartedModelOnly = false;
+    if (runtimeTurnId !== null) this.activeTurnContexts.delete(runtimeTurnId);
+    this.releasePrimaryTurn(runtimeTurnId ?? "");
     return deltas;
   }
 
@@ -2299,15 +2346,30 @@ export class ProductProjection {
 
   private onTurnError(event: SessionEvent): ConversationDelta[] {
     const payload = event.payload as TurnErrorPayload;
-    this.outputContinuationTextRowId = null;
+    // 幽灵消息事故 B 线根修（2026-10-23）：终态按事件轮归属。先收口该轮自己的
+    // 流式行；全局 phase/lastError/heldQueue 只由前台轮迁移——后台轮失败对用户
+    // 可见（自己的 failed header），但不再连坐前台轮与会话全局态。
+    const runtimeTurnId = this.runtimeTurnIdOfEvent(event);
+    const ctx = this.ctxForEvent(event);
+    if (ctx) ctx.outputContinuationTextRowId = null;
+    const isPrimary =
+      runtimeTurnId === null || runtimeTurnId === this.primaryTurnId || ctx === undefined;
+    if (!isPrimary) {
+      const deltas = [
+        ...this.closeStreamingRowsFor(ctx, "interrupted"),
+        ...this.upsertTurnHeader(event, "failed"),
+      ];
+      this.activeTurnContexts.delete(runtimeTurnId as string);
+      this.releasePrimaryTurn(runtimeTurnId as string);
+      return deltas;
+    }
     if (this.turnHeaderForEvent(event)?.executionKind === "controlOnly") {
       const deltas = [
         ...this.upsertTurnHeader(event, "failed"),
         ...this.leaveDraftAfterControlOnlyTurn("error"),
       ];
-      this.currentTurnId = null;
-      // turn 收口后 model-only 标记随之失效，避免影响下一次归属判断。
-      this.currentTurnStartedModelOnly = false;
+      if (runtimeTurnId !== null) this.activeTurnContexts.delete(runtimeTurnId);
+      this.releasePrimaryTurn(runtimeTurnId ?? "");
       return deltas;
     }
     // TurnError 结束的是当前 turn，
@@ -2322,8 +2384,8 @@ export class ProductProjection {
             pauseReason: "error" as const,
           }
         : undefined;
-    return [
-      ...this.closeStreamingRows("interrupted"),
+    const errorDeltas: ConversationDelta[] = [
+      ...this.closeStreamingRowsFor(ctx, "interrupted"),
       ...this.closeOpenToolRows(event, "error"),
       ...this.upsertTurnHeader(event, "failed"),
       {
@@ -2362,6 +2424,9 @@ export class ProductProjection {
         ),
       },
     ];
+    if (runtimeTurnId !== null) this.activeTurnContexts.delete(runtimeTurnId);
+    this.releasePrimaryTurn(runtimeTurnId ?? "");
+    return errorDeltas;
   }
 
   // ── 流式输出 ──
@@ -2433,7 +2498,7 @@ export class ProductProjection {
     // toolCallId 再开一行，UI 于是并排出现两张「正在编写工作流」。已提交（running /
     // pendingApproval）的行不在此列，它们的终态由 executor 自己发布。
     return [
-      ...this.closeStreamingRows("interrupted"),
+      ...this.closeStreamingRowsFor(this.ctxForEvent(event), "interrupted"),
       ...this.closeOpenToolRows(event, "cancelled", (row) => row.status === "inputStreaming"),
     ];
   }
@@ -2491,12 +2556,14 @@ export class ProductProjection {
   private acceptsActiveModelEvent(event: SessionEvent): boolean {
     if (!this.isRunning()) return false;
     // stop/新一轮后旧请求可能迟到；仅凭 session 级状态会让旧 turn 的
-    // retry/progress 覆盖当前输入栏。当前 runtime turn 已知时必须按 turnId 隔离。
-    return (
-      this.currentTurnId === null ||
-      event.turnId === undefined ||
-      String(event.turnId) === this.currentTurnId
-    );
+    // retry/progress 覆盖当前输入栏。并发轮根修（幽灵消息事故 B 线，2026-10-23）：
+    // 归属按「事件轮是否有活跃上下文」判定，任何一活跃轮的模型事件都接受；
+    // 已收口轮的迟到事件仍然拒收。无任何活跃上下文（冷订阅打包迟到）时保持
+    // 旧的宽容语义，交给懒建上下文接住。
+    if (event.turnId === undefined || event.turnId === null) return true;
+    const turnId = String(event.turnId);
+    if (this.activeTurnContexts.has(turnId)) return true;
+    return this.activeTurnContexts.size === 0;
   }
 
   private onModelStreaming(fact: CanonicalAssistantSegmentFact): ConversationDelta[] {
@@ -2519,40 +2586,41 @@ export class ProductProjection {
       return [];
     }
     const payload = fact.stream;
+    const ctx = this.ensureTurnContext(event);
     switch (payload.kind) {
       case "text_start":
-        return this.openTextRow(event, fact);
+        return this.openTextRow(event, fact, ctx);
       case "text_delta": {
-        const open = this.streamingTextRowId === null ? this.openTextRow(event, fact) : [];
+        const open = ctx.streamingTextRowId === null ? this.openTextRow(event, fact, ctx) : [];
         return [
           ...open,
           {
             op: "row.delta",
-            rowId: this.streamingTextRowId as number,
+            rowId: ctx.streamingTextRowId as number,
             path: "text",
             append: payload.delta,
           },
         ];
       }
       case "text_end":
-        return this.closeTextRow("complete");
+        return this.closeTextRow(ctx, "complete");
       case "reasoning_start":
-        return this.openReasoningRow(event, fact);
+        return this.openReasoningRow(event, fact, ctx);
       case "reasoning_delta": {
         const open =
-          this.streamingReasoningRowId === null ? this.openReasoningRow(event, fact) : [];
+          ctx.streamingReasoningRowId === null ? this.openReasoningRow(event, fact, ctx) : [];
         return [
           ...open,
           {
             op: "row.delta",
-            rowId: this.streamingReasoningRowId as number,
+            rowId: ctx.streamingReasoningRowId as number,
             path: "text",
             append: payload.delta,
           },
         ];
       }
       case "reasoning_end":
-        return this.closeReasoningRow();
+        return this.closeReasoningRow(ctx);
       case "tool_input_start":
         return this.openToolRow(event, payload, fact.entityId);
       case "tool_input_delta": {
@@ -2570,10 +2638,11 @@ export class ProductProjection {
   private openTextRow(
     event: SessionEvent,
     fact: CanonicalAssistantSegmentFact,
+    ctx: ActiveTurnContext,
   ): ConversationDelta[] {
-    const close = this.closeTextRow("complete");
-    const continuationRowId = this.outputContinuationTextRowId;
-    this.outputContinuationTextRowId = null;
+    const close = this.closeTextRow(ctx, "complete");
+    const continuationRowId = ctx.outputContinuationTextRowId;
+    ctx.outputContinuationTextRowId = null;
     const continuationRow =
       continuationRowId === null ? undefined : this.findRow(continuationRowId);
     const currentTurnId = this.turnIdOf(event);
@@ -2601,7 +2670,7 @@ export class ProductProjection {
           : {}),
         state: "streaming",
       };
-      this.streamingTextRowId = row.rowId;
+      ctx.streamingTextRowId = row.rowId;
       this.entityIdByRowId.set(row.rowId, fact.entityId);
       const previousMessageId = this.messageIdByRowId.get(row.rowId);
       if (previousMessageId) {
@@ -2623,7 +2692,7 @@ export class ProductProjection {
       text: "",
       state: "streaming",
     };
-    this.streamingTextRowId = row.rowId;
+    ctx.streamingTextRowId = row.rowId;
     this.entityIdByRowId.set(row.rowId, fact.entityId);
     // forkAssistant 锚点：assistant 行 → 权威 messageId（provider 流首帧即带）。
     if (fact.transcriptMessageId) {
@@ -2632,10 +2701,13 @@ export class ProductProjection {
     return [...close, { op: "row.appended", row }];
   }
 
-  private closeTextRow(state: "complete" | "interrupted"): ConversationDelta[] {
-    if (this.streamingTextRowId === null) return [];
-    const row = this.findRow(this.streamingTextRowId);
-    this.streamingTextRowId = null;
+  private closeTextRow(
+    ctx: ActiveTurnContext,
+    state: "complete" | "interrupted",
+  ): ConversationDelta[] {
+    if (ctx.streamingTextRowId === null) return [];
+    const row = this.findRow(ctx.streamingTextRowId);
+    ctx.streamingTextRowId = null;
     if (row?.kind !== "assistantText") return [];
     return [{ op: "row.upserted", row: { ...row, state } }];
   }
@@ -2659,8 +2731,9 @@ export class ProductProjection {
   private openReasoningRow(
     event: SessionEvent,
     fact: CanonicalAssistantSegmentFact,
+    ctx: ActiveTurnContext,
   ): ConversationDelta[] {
-    const close = this.closeReasoningRow();
+    const close = this.closeReasoningRow(ctx);
     const row: ReasoningRow = {
       ...this.rowBase(event, this.turnIdOf(event), fact.entityId),
       kind: "reasoning",
@@ -2672,21 +2745,29 @@ export class ProductProjection {
       text: "",
       state: "streaming",
     };
-    this.streamingReasoningRowId = row.rowId;
+    ctx.streamingReasoningRowId = row.rowId;
     this.entityIdByRowId.set(row.rowId, fact.entityId);
     return [...close, { op: "row.appended", row }];
   }
 
-  private closeReasoningRow(state: "complete" | "interrupted" = "complete"): ConversationDelta[] {
-    if (this.streamingReasoningRowId === null) return [];
-    const row = this.findRow(this.streamingReasoningRowId);
-    this.streamingReasoningRowId = null;
+  private closeReasoningRow(
+    ctx: ActiveTurnContext,
+    state: "complete" | "interrupted" = "complete",
+  ): ConversationDelta[] {
+    if (ctx.streamingReasoningRowId === null) return [];
+    const row = this.findRow(ctx.streamingReasoningRowId);
+    ctx.streamingReasoningRowId = null;
     if (row?.kind !== "reasoning") return [];
     return [{ op: "row.upserted", row: { ...row, state } }];
   }
 
-  private closeStreamingRows(state: "complete" | "interrupted"): ConversationDelta[] {
-    return [...this.closeTextRow(state), ...this.closeReasoningRow(state)];
+  /** 收口该轮自己的流式行（并发轮根修：绝不触碰别的轮的锚点）。 */
+  private closeStreamingRowsFor(
+    ctx: ActiveTurnContext | undefined,
+    state: "complete" | "interrupted",
+  ): ConversationDelta[] {
+    if (ctx === undefined) return [];
+    return [...this.closeTextRow(ctx, state), ...this.closeReasoningRow(ctx, state)];
   }
 
   // turn 终态收口所有 foreground 未终态 tool row（迟到终态不复活由 isRunning 闸保证）；
@@ -3682,7 +3763,8 @@ export class ProductProjection {
           endedAt,
           activeMs: Math.max(
             0,
-            endedAt - (this.currentProductTurnStartedAtMs ?? headerRow.startedAt),
+            endedAt -
+              (this.productTurnStartedAtByRuntimeTurnId.get(runtimeTurnId) ?? headerRow.startedAt),
           ),
           ...(headerRow.workSegments
             ? {
@@ -3701,13 +3783,13 @@ export class ProductProjection {
     const productTurnId = promotedUserMessageId ?? `${runtimeTurnId}~q${ordinal}`;
     this.productTurnIdByRuntimeTurnId.set(runtimeTurnId, productTurnId);
     this.runtimeTurnIdByProductTurnId.set(productTurnId, runtimeTurnId);
-    this.currentProductTurnStartedAtMs = this.ms(event);
     const header = buildTurnHeaderRow(this.rowBase(event, productTurnId, productTurnId), {
       turnNumber: 0,
       input: "",
     });
     this.turnHeaderRowIdByTurnId.set(productTurnId, header.rowId);
     deltas.push({ op: "row.appended", row: header });
+    this.productTurnStartedAtByRuntimeTurnId.set(runtimeTurnId, this.ms(event));
     return deltas;
   }
 
@@ -3719,8 +3801,9 @@ export class ProductProjection {
     // 存在时才按边界时间计算最后一段工时。否则 cold 合成事件的展示时间戳跨度很小，
     // 会错误覆盖 transcript 已计算好的整轮 duration。
     if (!this.productTurnSplitOrdinalByRuntimeTurnId.has(runtimeTurnId)) return runtimeDuration;
-    if (this.currentProductTurnStartedAtMs === null) return runtimeDuration;
-    return Math.max(0, this.ms(event) - this.currentProductTurnStartedAtMs);
+    const segmentStartedAt = this.productTurnStartedAtByRuntimeTurnId.get(runtimeTurnId);
+    if (segmentStartedAt === undefined) return runtimeDuration;
+    return Math.max(0, this.ms(event) - segmentStartedAt);
   }
 
   private onTurnSteerDiscarded(event: SessionEvent): ConversationDelta[] {
@@ -4520,7 +4603,10 @@ export class ProductProjection {
       payload.querySource !== undefined
         ? payload.querySource === "main_turn"
         : payload.stopReason !== "tool_internal";
-    if (isMainTurn) this.outputContinuationTextRowId = null;
+    // 并发轮根修（幽灵消息事故 B 线，2026-10-23）：continuation 锚点按事件轮存放，
+    // 后台轮的 ModelComplete 不得改写前台轮的接着写资格。
+    const ctx = this.ensureTurnContext(event);
+    if (isMainTurn) ctx.outputContinuationTextRowId = null;
     if (
       isMainTurn &&
       payload.stopReason?.trim().toLowerCase() === "length" &&
@@ -4532,7 +4618,7 @@ export class ProductProjection {
         lastVisibleRow.turnId === this.turnIdOf(event) &&
         lastVisibleRow.state === "complete"
       ) {
-        this.outputContinuationTextRowId = lastVisibleRow.rowId;
+        ctx.outputContinuationTextRowId = lastVisibleRow.rowId;
       }
     }
     // subagent ModelComplete 的 usage 仍不是主会话水位，但它携带的
@@ -5120,10 +5206,17 @@ export class ProductProjection {
     Record<"text" | "reasoning", CanonicalOpenSegmentIdentity>
   > {
     const segments: Partial<Record<"text" | "reasoning", CanonicalOpenSegmentIdentity>> = {};
-    const text = this.openSegmentIdentity(this.streamingTextRowId);
-    const reasoning = this.openSegmentIdentity(this.streamingReasoningRowId);
-    if (text) segments.text = text;
-    if (reasoning) segments.reasoning = reasoning;
+    // 并发轮根修：任一活跃轮的未收口段都算「开着的」，不同轮各取其一。
+    for (const ctx of this.activeTurnContexts.values()) {
+      if (segments.text === undefined) {
+        const text = this.openSegmentIdentity(ctx.streamingTextRowId);
+        if (text) segments.text = text;
+      }
+      if (segments.reasoning === undefined) {
+        const reasoning = this.openSegmentIdentity(ctx.streamingReasoningRowId);
+        if (reasoning) segments.reasoning = reasoning;
+      }
+    }
     return segments;
   }
 
@@ -5155,6 +5248,52 @@ export class ProductProjection {
     const runtimeTurnId = String(event.turnId ?? this.currentTurnId ?? "turn-unknown");
     // queue drain 切轮后，同一 runtimeTurn 的后续事件行归入最新 productTurn。
     return this.productTurnIdByRuntimeTurnId.get(runtimeTurnId) ?? runtimeTurnId;
+  }
+
+  /**
+   * 事件的 runtime turn id：优先事件自带的 turnId；缺省时退回前台轮（旧语义）。
+   * 并发轮（队列提升的后台轮）事件必须按自带 turnId 归属，绝不落到「当前轮」。
+   */
+  private runtimeTurnIdOfEvent(event: SessionEvent): string | null {
+    if (event.turnId !== undefined && event.turnId !== null) return String(event.turnId);
+    return this.primaryTurnId;
+  }
+
+  /** 事件的轮上下文（懒建见 ensureTurnContext；此处只读）。 */
+  private ctxForEvent(event: SessionEvent): ActiveTurnContext | undefined {
+    const turnId = this.runtimeTurnIdOfEvent(event);
+    return turnId === null ? undefined : this.activeTurnContexts.get(turnId);
+  }
+
+  /**
+   * 取事件的轮上下文；缺 TurnStarted 的冷订阅/中途建 publisher 场景懒建一份，
+   * 保持旧实现「无轮登记也接受流式」的宽容语义，同时让该轮的锚点独立存放。
+   */
+  private ensureTurnContext(event: SessionEvent): ActiveTurnContext {
+    const turnId = this.runtimeTurnIdOfEvent(event) ?? this.turnIdOf(event);
+    const existing = this.activeTurnContexts.get(turnId);
+    if (existing !== undefined) return existing;
+    const created: ActiveTurnContext = {
+      runtimeTurnId: turnId,
+      startedModelOnly: false,
+      startedAtMs: this.ms(event),
+      streamingTextRowId: null,
+      streamingReasoningRowId: null,
+      outputContinuationTextRowId: null,
+    };
+    this.activeTurnContexts.set(turnId, created);
+    return created;
+  }
+
+  /** 轮收口后的前台轮让位：其他可见轮存在时提升最近开始的一条，否则清空。 */
+  private releasePrimaryTurn(turnId: string): void {
+    if (this.primaryTurnId !== turnId) return;
+    let next: ActiveTurnContext | undefined;
+    for (const ctx of this.activeTurnContexts.values()) {
+      if (ctx.runtimeTurnId === turnId || ctx.startedModelOnly) continue;
+      if (next === undefined || ctx.startedAtMs > next.startedAtMs) next = ctx;
+    }
+    this.primaryTurnId = next?.runtimeTurnId ?? null;
   }
 
   private ms(event: SessionEvent): number {
