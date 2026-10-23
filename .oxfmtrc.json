@@ -5,6 +5,10 @@
     "third-party/inventory.json",
     "third-party/upstream/**",
     "third-party/native-search/licenses/**",
-    "third-party/runtime/*.txt"
+    "third-party/runtime/*.txt",
+    // docs/ 是迭代文档与工作工件（PRD/spec/cache 脚本、上游 locale 快照等），非产品代码：
+    // 与 .oxlintrc.json 同理由——其质量由各迭代流程自管，不参与产品格式门禁，
+    // 使 fmt:check 门禁聚焦产品面并消除 docs 内 YAML/MD 的解析噪音。
+    "docs/**"
   ]
 }

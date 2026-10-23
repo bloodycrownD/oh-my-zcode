@@ -46,10 +46,7 @@ export function ProjectSidebarListHeader({
       </span>
       {children}
       {/* grouped 工具栏挂点：TaskGroupedView 经 portal 把折叠/建组按钮投进本行（仅 grouped 视角可见）。 */}
-      <div
-        ref={actionsRef}
-        className={view === "grouped" ? "flex items-center gap-1" : "hidden"}
-      />
+      <div ref={actionsRef} className={view === "grouped" ? "flex items-center gap-1" : "hidden"} />
       <ControlHintTooltip
         // 原因：快捷键拼入标题会继承标题样式；用独立 shortcut 复用标准键帽。
         title={intl.formatMessage({ id: "commandCenter.open" })}

@@ -11,12 +11,22 @@ import type { ToolCallBlockRenderContext } from "@/ToolCallBlocks/shared.js";
  */
 
 // 分流是纯查表：fixture 只需携带 dispatch 读取的 toolName/kind 字段。
-function contextOf(toolCall: { kind: string; toolName?: string; toolId: string; input: unknown }): ToolCallBlockRenderContext {
+function contextOf(toolCall: {
+  kind: string;
+  toolName?: string;
+  toolId: string;
+  input: unknown;
+}): ToolCallBlockRenderContext {
   return { toolCallNode: { toolCall } } as unknown as ToolCallBlockRenderContext;
 }
 
 test("T-TS-UI1: resolveToolCallRenderer 对 ToolSearch 工具名分流到 ToolSearchToolCallBlock", () => {
-  const context = contextOf({ kind: "tool", toolName: "ToolSearch", toolId: "t1", input: { query: "select:Read,Edit" } });
+  const context = contextOf({
+    kind: "tool",
+    toolName: "ToolSearch",
+    toolId: "t1",
+    input: { query: "select:Read,Edit" },
+  });
   assert.equal(resolveToolCallRenderer(context), ToolSearchToolCallBlock);
 });
 

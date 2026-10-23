@@ -56,8 +56,7 @@ export function RemoteConnectionProgressSection({
   const sourceServerId = sourceServerIdForHost(host);
   const device = useRemoteDevicePresentationInput(sourceServerId);
   // URL Server 直连没有 Source 管理域，也就没有阶段日志可投影，连接中只保留标题状态。
-  const connecting =
-    managementEnabled && status === "connecting" && sourceServerId !== undefined;
+  const connecting = managementEnabled && status === "connecting" && sourceServerId !== undefined;
   // Hooks 规则：无条件挂载；management 缺席时 hook 内部静默降级。
   useSourceServerOperationLogs(undefined, []);
   const now = useNow(connecting);

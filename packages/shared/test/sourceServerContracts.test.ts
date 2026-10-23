@@ -108,12 +108,17 @@ test("T-RD1 状态快照 strict：接受公共错误码，拒绝未知字段", (
 
 test("T-RD1 安装进度与操作日志 schema 往返", () => {
   assert.equal(
-    sourceServerInstallProgressSchema.parse({ type: "source-server-install-progress", phase: "extract" })
-      .phase,
+    sourceServerInstallProgressSchema.parse({
+      type: "source-server-install-progress",
+      phase: "extract",
+    }).phase,
     "extract",
   );
   assert.throws(() =>
-    sourceServerInstallProgressSchema.parse({ type: "source-server-install-progress", phase: "nope" }),
+    sourceServerInstallProgressSchema.parse({
+      type: "source-server-install-progress",
+      phase: "nope",
+    }),
   );
   const log = sourceServerOperationLogSchema.parse({
     profileId: "9b2f5a1e-0000-4000-8000-000000000006",
@@ -213,20 +218,30 @@ test("T-RD1 connectionLog：Bearer/UUID/token 字段/路径 脱敏", () => {
   assert.ok(!sanitized.includes("3fa85f64"));
   assert.ok(!sanitized.includes("host/path"));
   assert.ok(!sanitized.includes("[one]"));
-  assert.ok(sanitizeRemoteConnectionLog("-----BEGIN RSA PRIVATE KEY-----x-----END RSA PRIVATE KEY-----").includes("[redacted]"));
+  assert.ok(
+    sanitizeRemoteConnectionLog(
+      "-----BEGIN RSA PRIVATE KEY-----x-----END RSA PRIVATE KEY-----",
+    ).includes("[redacted]"),
+  );
   assert.equal(remoteConnectionFailureLogLevel("remote-connection-canceled"), "info");
   assert.equal(remoteConnectionFailureLogLevel("remote-host-unreachable"), "error");
 });
 
 test("T-RD1 connectionErrors：系统码归一与阶段兜底", () => {
-  assert.equal(normalizeRemoteConnectionError({ code: "ECONNRESET" }).code, "remote-host-unreachable");
+  assert.equal(
+    normalizeRemoteConnectionError({ code: "ECONNRESET" }).code,
+    "remote-host-unreachable",
+  );
   assert.equal(normalizeRemoteConnectionError({ code: "EACCES" }).code, "remote-permission-denied");
   assert.equal(
     normalizeRemoteConnectionError(new Error("all configured authentication methods failed")).code,
     "remote-authentication-failed",
   );
   // 无码无文本命中时借阶段兜底
-  assert.equal(normalizeRemoteConnectionError(new Error("boom"), "extract").code, "remote-install-failed");
+  assert.equal(
+    normalizeRemoteConnectionError(new Error("boom"), "extract").code,
+    "remote-install-failed",
+  );
   assert.equal(
     normalizeRemoteConnectionError(new AggregateError([])).code,
     "remote-connection-unknown",

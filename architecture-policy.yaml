@@ -27,25 +27,40 @@ modules:
     roots: [packages/shared/src/sqlite-migrations]
     managed: false
     requires: [shared]
-    publicEntrypoints: [packages/shared/src/sqlite-migrations/index.ts, packages/shared/src/sqlite-migrations/contract.ts]
+    publicEntrypoints:
+      [
+        packages/shared/src/sqlite-migrations/index.ts,
+        packages/shared/src/sqlite-migrations/contract.ts,
+      ]
     owner: conversation
   - id: project-storage
     roots: [packages/services/src/project-storage]
     managed: false
     requires: [shared, sqlite-migrations, services, session]
-    publicEntrypoints: [packages/services/src/project-storage/index.ts, packages/services/src/project-storage/contract.ts, packages/services/src/project-storage/startup.ts, packages/services/src/project-storage/startup-entry.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/project-storage/index.ts,
+        packages/services/src/project-storage/contract.ts,
+        packages/services/src/project-storage/startup.ts,
+        packages/services/src/project-storage/startup-entry.ts,
+      ]
     owner: conversation
   - id: project
     roots: [packages/services/src/project]
     managed: false
     requires: [shared, project-storage, project-catalog]
-    publicEntrypoints: [packages/services/src/project/index.ts, packages/services/src/project/contract.ts]
+    publicEntrypoints:
+      [packages/services/src/project/index.ts, packages/services/src/project/contract.ts]
     owner: conversation
   - id: project-catalog
     roots: [packages/services/src/project-catalog]
     managed: false
     requires: [project, remote-projects]
-    publicEntrypoints: [packages/services/src/project-catalog/index.ts, packages/services/src/project-catalog/contract.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/project-catalog/index.ts,
+        packages/services/src/project-catalog/contract.ts,
+      ]
     owner: conversation
   - id: remote-projects
     roots: [packages/services/src/remote-projects]
@@ -57,25 +72,35 @@ modules:
     roots: [packages/services/src/task-groups]
     managed: false
     requires: [shared, services]
-    publicEntrypoints: [packages/services/src/task-groups/index.ts, packages/services/src/task-groups/contract.ts]
+    publicEntrypoints:
+      [packages/services/src/task-groups/index.ts, packages/services/src/task-groups/contract.ts]
     owner: conversation
   - id: task-facts
     roots: [packages/services/src/task-facts]
     managed: false
     requires: [shared, services]
-    publicEntrypoints: [packages/services/src/task-facts/index.ts, packages/services/src/task-facts/contract.ts]
+    publicEntrypoints:
+      [packages/services/src/task-facts/index.ts, packages/services/src/task-facts/contract.ts]
     owner: conversation
   - id: project-workspace-navigation
     roots: [packages/services/src/project-workspace-navigation]
     managed: false
     requires: [shared, project, project-catalog, remote-projects]
-    publicEntrypoints: [packages/services/src/project-workspace-navigation/index.ts, packages/services/src/project-workspace-navigation/contract.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/project-workspace-navigation/index.ts,
+        packages/services/src/project-workspace-navigation/contract.ts,
+      ]
     owner: conversation
   - id: window-project-directory
     roots: [packages/services/src/window-project-directory]
     managed: false
     requires: [project, remote-projects, rpc, services, shared]
-    publicEntrypoints: [packages/services/src/window-project-directory/index.ts, packages/services/src/window-project-directory/contract.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/window-project-directory/index.ts,
+        packages/services/src/window-project-directory/contract.ts,
+      ]
     owner: conversation
   - id: storage
     roots: [packages/services/src/storage]

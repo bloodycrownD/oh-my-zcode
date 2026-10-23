@@ -226,17 +226,14 @@ export function useAppPanels(options: {
 
   // 折叠态参与同一批事件的后续决策，统一同步 ref，避免 React 提交前读到旧值。
   // （upstream-v316-fullsync P4.1 挂账3：折叠记忆重构——上游同款包装。）
-  const setIsSidePaneCollapsed = useCallback(
-    (value: boolean | ((current: boolean) => boolean)) => {
-      const next =
-        typeof value === "function"
-          ? value(latestSidePaneMemoryRef.current.isSidePaneCollapsed)
-          : value;
-      latestSidePaneMemoryRef.current.isSidePaneCollapsed = next;
-      setIsSidePaneCollapsedState(next);
-    },
-    [],
-  );
+  const setIsSidePaneCollapsed = useCallback((value: boolean | ((current: boolean) => boolean)) => {
+    const next =
+      typeof value === "function"
+        ? value(latestSidePaneMemoryRef.current.isSidePaneCollapsed)
+        : value;
+    latestSidePaneMemoryRef.current.isSidePaneCollapsed = next;
+    setIsSidePaneCollapsedState(next);
+  }, []);
 
   const currentSidePaneScope = useCallback(
     () => ({

@@ -58,12 +58,10 @@ export function RemoteProjectMenu({
               {intl.formatMessage({ id: "workspaceSidebar.openRemoteProject" })}
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-64 max-w-[calc(100vw-24px)]">
-            {(devices ?? []).map((device) => {
-              // omz ProjectDevice.status 为 string；连接状态枚举在此收敛，非法值落 offline。
-              const state = sourceServerConnectionStateSchema.safeParse(device.status).data;
-              const presentation = resolveRemoteConnectionPresentation(
-                state ? { state } : {},
-              );
+              {(devices ?? []).map((device) => {
+                // omz ProjectDevice.status 为 string；连接状态枚举在此收敛，非法值落 offline。
+                const state = sourceServerConnectionStateSchema.safeParse(device.status).data;
+                const presentation = resolveRemoteConnectionPresentation(state ? { state } : {});
                 return (
                   <DropdownMenuItem
                     key={device.id}

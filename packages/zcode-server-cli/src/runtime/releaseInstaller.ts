@@ -51,10 +51,7 @@ export class ReleaseInstaller {
   public constructor(private readonly layout: ServerLayout) {}
 
   public async installArchive(options: InstallArchiveOptions): Promise<ReleaseManifest> {
-    if (
-      options.version !== undefined &&
-      !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(options.version)
-    ) {
+    if (options.version !== undefined && !/^[A-Za-z0-9][A-Za-z0-9._+-]*$/u.test(options.version)) {
       throw new Error(`Invalid release version: ${options.version}`);
     }
     options.onProgress?.("verify-archive");

@@ -436,7 +436,9 @@ class BackendSourceServerTransportAdapter implements SourceServerTransportAdapte
       }
     }
     return duplexFromStdio(
-      await backend.exec(`${SERVER_BIN_SHELL} server proxy-stdio --server-root ${SERVER_ROOT_SHELL}`),
+      await backend.exec(
+        `${SERVER_BIN_SHELL} server proxy-stdio --server-root ${SERVER_ROOT_SHELL}`,
+      ),
     );
   }
 

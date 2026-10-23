@@ -1487,7 +1487,8 @@ const zhCN: Record<string, string> = {
   "remote.error.hostUnreachable.reason": "检查设备地址和端口，确认设备已启动并可访问。",
   "remote.error.connectionTimeout.reason": "设备未及时响应，请检查网络后重试。",
   "remote.error.hostNotFound.reason": "检查主机名是否正确，或尝试使用 IP 地址。",
-  "remote.error.hostKeyChanged.reason": "设备身份与保存的记录不一致。请向设备管理员核实后再修改本机的已知主机记录。",
+  "remote.error.hostKeyChanged.reason":
+    "设备身份与保存的记录不一致。请向设备管理员核实后再修改本机的已知主机记录。",
   "remote.error.downloadFailed.reason": "下载安装包失败。请检查网络后重试。",
   "remote.error.uploadFailed.reason": "安装包未能传送到设备，请检查连接后重试。",
   "remote.error.preflightFailed.reason": "设备环境不满足安装要求，请查看详细信息。",
@@ -1540,23 +1541,32 @@ const zhCN: Record<string, string> = {
   "remote.error.workspaceSessionGenerationChanged.reason": "请查看详细信息并按提示处理后重试。",
   "remote.error.retryableHint.reason": "请查看详细信息并按提示处理后重试。",
   "remote.error.connectionClosed.reason": "请查看详细信息并按提示处理后重试。",
-  "settings.source.error.source-server-remove-callback-missing.reason": "请查看详细信息并按提示处理后重试。",
-  "settings.source.error.source-server-remove-callback-failed.reason": "请查看详细信息并按提示处理后重试。",
-  "settings.source.error.source-server-remove-persist-failed.reason": "请查看详细信息并按提示处理后重试。",
+  "settings.source.error.source-server-remove-callback-missing.reason":
+    "请查看详细信息并按提示处理后重试。",
+  "settings.source.error.source-server-remove-callback-failed.reason":
+    "请查看详细信息并按提示处理后重试。",
+  "settings.source.error.source-server-remove-persist-failed.reason":
+    "请查看详细信息并按提示处理后重试。",
   "remote.status.connected": "已连接",
   "remote.error.sourceServerInstallRequired": "远程设备尚未安装 ZCode Server，需要先确认安装。",
-  "remote.error.sourceServerIdentityChangePending": "连接目标的身份已变化，请确认是否作为新设备使用。",
+  "remote.error.sourceServerIdentityChangePending":
+    "连接目标的身份已变化，请确认是否作为新设备使用。",
   "remote.error.credentialsRequired": "没有可用的 SSH 密码或私钥凭据，请返回配置后补充。",
-  "remote.error.sourceServerUpgradeRequired": "远程设备与当前 ZCode Desktop 版本不兼容，需要先升级。",
+  "remote.error.sourceServerUpgradeRequired":
+    "远程设备与当前 ZCode Desktop 版本不兼容，需要先升级。",
   "remote.error.sourceServerRunningTasks": "远程设备仍有运行中的任务，请等待结束或确认强制更新。",
   "remote.error.workspaceTaskIdentityConflict": "该远端目录存在无法自动合并的任务身份冲突。",
   "remote.error.workspaceConfigConflict": "该远端目录存在无法自动合并的配置文件冲突。",
   "remote.error.bindCanceled": "远端工作区附着已取消。",
   "remote.error.bindSessionMissing": "远端工作区会话已失效，请重新连接后再试。",
-  "remote.error.workspaceDirectoryUnavailable": "远程项目目录不存在、不是文件夹或无法访问。请检查目录和权限后重试。",
-  "remote.error.recoveryBudgetExhausted": "自动恢复已在第 {attempt}/{limit} 次尝试后停止，请手动重连后再试。",
-  "remote.error.workspaceMigrationPlanDiverged": "迁移暂停期间出现了新的工作区身份，请检查迁移报告后重试。",
-  "remote.error.workspaceSessionGenerationChanged": "迁移暂停期间会话数据库代际发生变化，请恢复报告记录的代际后再重试。",
+  "remote.error.workspaceDirectoryUnavailable":
+    "远程项目目录不存在、不是文件夹或无法访问。请检查目录和权限后重试。",
+  "remote.error.recoveryBudgetExhausted":
+    "自动恢复已在第 {attempt}/{limit} 次尝试后停止，请手动重连后再试。",
+  "remote.error.workspaceMigrationPlanDiverged":
+    "迁移暂停期间出现了新的工作区身份，请检查迁移报告后重试。",
+  "remote.error.workspaceSessionGenerationChanged":
+    "迁移暂停期间会话数据库代际发生变化，请恢复报告记录的代际后再重试。",
   "remote.error.hostUnreachable": "无法连接到主机",
   "remote.error.connectionTimeout": "连接超时",
   "remote.error.hostNotFound": "找不到主机",
@@ -1571,9 +1581,12 @@ const zhCN: Record<string, string> = {
   "remote.error.unknown": "连接失败",
   "remote.error.retryableHint": "你可以稍后重试。",
   "remote.error.connectionClosed": "远程连接已断开",
-  "settings.source.error.source-server-remove-callback-missing": "无法移除设备：桌面连接清理未就绪。",
-  "settings.source.error.source-server-remove-callback-failed": "无法移除设备：连接清理失败，设备记录未删除。",
-  "settings.source.error.source-server-remove-persist-failed": "设备已断开，但本机记录未能完整删除，请稍后重试。",
+  "settings.source.error.source-server-remove-callback-missing":
+    "无法移除设备：桌面连接清理未就绪。",
+  "settings.source.error.source-server-remove-callback-failed":
+    "无法移除设备：连接清理失败，设备记录未删除。",
+  "settings.source.error.source-server-remove-persist-failed":
+    "设备已断开，但本机记录未能完整删除，请稍后重试。",
   "wsl.description": "连接默认 distro，或选择这台设备上已安装的指定 distro。",
   "wsl.distro": "发行版",
   "wsl.defaultDistro": "默认发行版",
