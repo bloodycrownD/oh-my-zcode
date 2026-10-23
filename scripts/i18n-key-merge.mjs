@@ -29,6 +29,7 @@ import {
   BRAND_RE,
   LOCALES,
   inWhitelist,
+  isDroppedKey,
   isDroppedOmz,
   isKeepOmz,
   paths,
@@ -160,8 +161,9 @@ for (const { id } of LOCALES) {
   );
 
   // C. 白名单桶键全进：上游独有 ∩ 白名单 ∩ 上游 zh/en 交集 ⊆ merged
+  //    显式丢弃键（DROP_KEYS）不参与「必须采纳」断言——它们是 omz 侧已删、上游仍存的特例。
   const whitelistUpOnly = diffSet(upKeys, omzKeys).filter(
-    (k) => inWhitelist(k) && upstreamCommon.has(k),
+    (k) => inWhitelist(k) && upstreamCommon.has(k) && !isDroppedKey(k),
   );
   const missedWhitelist = whitelistUpOnly.filter((k) => !mergedKeys.has(k));
   assert(

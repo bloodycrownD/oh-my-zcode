@@ -2,7 +2,7 @@
  * i18n 键级合并核心：白名单挑拣 + 值冲突仲裁 + 死键清除。
  */
 
-import { BRAND_RE, inWhitelist, isDroppedOmz, isKeepOmz, rewriteBrand } from "./config.mjs";
+import { BRAND_RE, inWhitelist, isDroppedKey, isDroppedOmz, isKeepOmz, rewriteBrand } from "./config.mjs";
 
 /**
  * 单 locale 合并。
@@ -15,7 +15,7 @@ export function mergeOne({ omzEntries, upstreamEntries, canAdopt }) {
   const order = [];
   const dropped = [];
   for (const [k, v] of omzEntries) {
-    if (isDroppedOmz(k)) {
+    if (isDroppedOmz(k) || isDroppedKey(k)) {
       dropped.push(k);
       continue;
     }
@@ -33,6 +33,10 @@ export function mergeOne({ omzEntries, upstreamEntries, canAdopt }) {
 
   for (const [k, upstreamValue] of upstreamEntries) {
     if (!resultMap.has(k)) {
+      if (isDroppedKey(k)) {
+        dropped.push(k);
+        continue;
+      }
       if (inWhitelist(k)) {
         if (!canAdopt(k)) {
           singleSidedSkipped.push(k);

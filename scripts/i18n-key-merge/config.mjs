@@ -35,6 +35,13 @@ const KEEP_OMZ_PREFIXES = ["modelTrajectory."];
 /** omz 死键：顺手清除（rg 全仓核实零代码引用，见仲裁表附录 B）。 */
 const DROP_OMZ_PREFIXES = ["conversationShare."];
 
+/**
+ * 显式丢弃键（精确匹配）：omz 侧已删除、且上游快照仍有同名的键。
+ * 单靠前缀桶拦不住——上游独有白名单键会被无条件采纳（如 settings.modelProvider.renameProvider
+ * 在「更多菜单整删」后必须保持删除态，不能被 merge --verify 重新采回）。
+ */
+const DROP_KEYS = new Set(["settings.modelProvider.renameProvider"]);
+
 /** 品牌残留匹配（大小写不敏感）。 */
 export const BRAND_RE = /zcode/i;
 
@@ -53,6 +60,10 @@ export function isKeepOmz(key) {
 
 export function isDroppedOmz(key) {
   return DROP_OMZ_PREFIXES.some((p) => key.startsWith(p));
+}
+
+export function isDroppedKey(key) {
+  return DROP_KEYS.has(key);
 }
 
 export const LOCALES = [
