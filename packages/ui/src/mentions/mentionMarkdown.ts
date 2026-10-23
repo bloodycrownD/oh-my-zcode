@@ -1,3 +1,5 @@
+import type { MentionItemData } from "./mentionTypes.js";
+
 const LINK_MENTION_MARKDOWN_PATTERN =
   /\[((?:\\.|[^\\\]])*)\]\((?:<((?:\\.|[^>])*?)>|((?:\\.|[^)])*))\)/g;
 const INLINE_MENTION_TOKEN_PATTERN =
@@ -100,6 +102,25 @@ type MentionTextPart =
   | { type: "subagent"; label: string }
   | { type: "session"; label: string }
   | { type: "plugin"; label: string; pluginId?: string };
+
+/** 富反解析产出的 mention 种类：装填面只承认这四类 canonical 链接。 */
+type RichMentionCategory = "files" | "skills" | "sessions" | "plugins";
+
+/**
+ * 装填用 mention 事实：`markdown` 恒等于原文链接子串（fullMatch），
+ * 供 PromptMentionNode 原样序列化回正文，保证往返字节不变。
+ */
+export interface RichMentionPart {
+  category: RichMentionCategory;
+  label: string;
+  value: string;
+  markdown: string;
+  data?: MentionItemData;
+}
+
+export type RichMentionSegment =
+  | { type: "text"; text: string }
+  | ({ type: "mention" } & RichMentionPart);
 
 const PLUGIN_STABLE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*@[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
@@ -217,4 +238,188 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
   }
 
   return parts;
+}
+
+// ── 富反解析（胶囊装填面） ────────────────────────────────────────────────────
+//
+// 上面 parseMentionMarkdown 面向「展示」：label 前缀决定类型、inline 裸 token 也画胶囊，
+// 因为气泡只需要看起来对。输入框装填必须更严格：
+// 1) 只有 canonical 链接（目的地命中白名单）才还原成 chip —— 正文里的 http 链接、
+//    自定义协议、普通 Markdown 都必须逐字留在正文里（R7：胶囊误伤正文链接）；
+// 2) inline 裸 token（@name / $slug / /cmd / #sess_x）一律不转 —— 用户手打的文本
+//    往返一次就变成不可编辑 token 是不可接受的（用户拍板）；
+// 3) 代码块 fence 内整段跳过 —— 里面的 ``` 示例不能被解析成 chip。
+
+const RICH_MENTION_LINK_PATTERN =
+  /\[((?:\\.|[^\\\]])*)\]\((?:<((?:\\.|[^>])*?)>|((?:\\.|[^)])*))\)/g;
+const FENCE_LINE_PATTERN = /^\s*(`{3,}|~{3,})/;
+
+/**
+ * 装填白名单：`plugin://`（合法 stable id）、`#sess_*`、`./`、`../`、`/`、盘符绝对路径。
+ * 其余目的地（`https:`、`mailto:`、未知协议、裸相对路径以外的一切）都不是 mention。
+ */
+function isRichMentionFileDestination(destination: string): boolean {
+  if (destination.startsWith("./") || destination.startsWith("../")) return true;
+  if (destination.startsWith("/")) return true;
+  return /^[a-zA-Z]:[\\/]/.test(destination);
+}
+
+function resolveRichMentionFileData(
+  destination: string,
+  kind: "file" | "directory",
+): MentionItemData {
+  // 相对路径按 file provider 的口径去掉 `./` 前缀；绝对路径（POSIX / 盘符）进 path。
+  if (destination.startsWith("./")) {
+    const relativePath = destination.slice(2);
+    return relativePath ? { kind, relativePath } : { kind };
+  }
+  if (destination.startsWith("../")) {
+    return { kind, relativePath: destination };
+  }
+  return { kind, path: destination };
+}
+
+function resolveRichMentionPart(
+  label: string,
+  destination: string,
+  markdown: string,
+): RichMentionPart | null {
+  if (!destination) return null;
+
+  if (destination.startsWith("plugin://")) {
+    // 身份只在 destination；非法 stable id 不造身份，宁可保留正文。
+    const pluginId = parsePluginStableId(destination);
+    if (!pluginId) return null;
+    return {
+      category: "plugins",
+      label: label.startsWith("@") ? label.slice(1) : label,
+      value: pluginId,
+      markdown,
+      data: { pluginId },
+    };
+  }
+
+  if (/^#sess_[a-zA-Z0-9._-]+$/.test(destination)) {
+    return {
+      category: "sessions",
+      label: label.startsWith("#") ? label.slice(1) : label,
+      value: destination.slice(1),
+      markdown,
+    };
+  }
+
+  if (!isRichMentionFileDestination(destination)) return null;
+
+  if (label.startsWith("$")) {
+    return { category: "skills", label: label.slice(1), value: destination, markdown };
+  }
+
+  const kind = isDirectoryMentionDestination(destination) ? "directory" : "file";
+  const data = resolveRichMentionFileData(destination, kind);
+  return {
+    category: "files",
+    label: label.startsWith("@") ? label.slice(1) : label,
+    value: data.relativePath || data.path || destination,
+    markdown,
+    data,
+  };
+}
+
+/**
+ * 按代码块 fence 切段：fence 内（含 fence 行）整段是正文，不做任何链接解析。
+ * 未闭合 fence 一直吃到文末，避免「开了半个代码块」时把后文当正文解析。
+ */
+function splitMarkdownFenceSegments(content: string): { fenced: boolean; text: string }[] {
+  const segments: { fenced: boolean; text: string }[] = [];
+  const lines = content.split("\n");
+  let fenced = false;
+  let fenceMarker = "";
+  let buffer = "";
+  const flush = () => {
+    if (!buffer) return;
+    segments.push({ fenced, text: buffer });
+    buffer = "";
+  };
+
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index] ?? "";
+    // 逐行拼回原文：除末行外都带换行，保证文本段拼接后与输入逐字节相同。
+    const lineWithBreak = index < lines.length - 1 ? `${line}\n` : line;
+    const fenceChar = FENCE_LINE_PATTERN.exec(line)?.[1]?.[0];
+    if (!fenced && fenceChar) {
+      flush();
+      fenced = true;
+      fenceMarker = fenceChar;
+      buffer += lineWithBreak;
+      continue;
+    }
+    if (fenced && fenceChar === fenceMarker) {
+      buffer += lineWithBreak;
+      flush();
+      fenced = false;
+      fenceMarker = "";
+      continue;
+    }
+    buffer += lineWithBreak;
+  }
+  flush();
+  return segments;
+}
+
+function parseRichMentionPlainSegment(text: string, segments: RichMentionSegment[]): void {
+  const pushText = (chunk: string) => {
+    if (!chunk) return;
+    const last = segments.at(-1);
+    if (last?.type === "text") {
+      // 相邻文本段合并：装填时少造 TextNode，也便于调用方按段断言。
+      segments[segments.length - 1] = { type: "text", text: last.text + chunk };
+      return;
+    }
+    segments.push({ type: "text", text: chunk });
+  };
+
+  let cursor = 0;
+  RICH_MENTION_LINK_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(RICH_MENTION_LINK_PATTERN)) {
+    const fullMatch = match[0] ?? "";
+    const rawLabel = match[1] ?? "";
+    const rawDestination = match[2] ?? match[3] ?? "";
+    const part = resolveRichMentionPart(
+      unescapeMarkdownText(rawLabel),
+      // 目的地可能被 escapeMarkdownDestination 转义（Windows 路径的 `\`）；白名单按还原值判定。
+      unescapeMarkdownText(rawDestination),
+      fullMatch,
+    );
+    // 白名单外的链接不是 mention：整段（含 fullMatch 原文）留在正文里。
+    if (!part) continue;
+    const matchStart = match.index ?? 0;
+    if (matchStart > cursor) pushText(text.slice(cursor, matchStart));
+    segments.push({ type: "mention", ...part });
+    cursor = matchStart + fullMatch.length;
+  }
+  pushText(text.slice(cursor));
+}
+
+/**
+ * 富反解析：把 canonical mention markdown 还原成「文本段 + mention 段」序列。
+ *
+ * 不变量（T-PR1 钉住）：`text` 段与 `markdown` 段按序拼接恒等于输入原文，
+ * 即编辑器 getMarkdown() 往返字节不变。
+ */
+export function parseMentionMarkdownRich(content: string): RichMentionSegment[] {
+  const segments: RichMentionSegment[] = [];
+  for (const chunk of splitMarkdownFenceSegments(content)) {
+    if (chunk.fenced) {
+      // fence 内不解析；与相邻文本段合并（fence 行是正文的一部分）。
+      const last = segments.at(-1);
+      if (last?.type === "text") {
+        segments[segments.length - 1] = { type: "text", text: last.text + chunk.text };
+      } else {
+        segments.push({ type: "text", text: chunk.text });
+      }
+      continue;
+    }
+    parseRichMentionPlainSegment(chunk.text, segments);
+  }
+  return segments;
 }
