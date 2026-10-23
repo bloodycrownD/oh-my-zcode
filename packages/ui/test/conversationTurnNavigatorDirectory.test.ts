@@ -84,7 +84,10 @@ test("合并：输出顺序稳定（目录未加载时与旧 items 逐项等价�
   const loaded = [makeLoadedItem(10), makeLoadedItem(20), makeLoadedItem(30)];
 
   const withoutDirectory = mergeTurnNavigatorItems([], loaded, 10, I18N);
-  assert.deepEqual(withoutDirectory, loaded.map((item) => ({ ...item, isDirectoryFallback: false })));
+  assert.deepEqual(
+    withoutDirectory,
+    loaded.map((item) => ({ ...item, isDirectoryFallback: false })),
+  );
 
   // 目录已取但条目全部落在窗口内且都已被加载覆盖 → 与纯已加载结果同序。
   const covered = mergeTurnNavigatorItems(
@@ -180,7 +183,12 @@ test("降级 item：queryPreview 空串时 userPreview 套 fallback 文案（ful
   assert.equal(withFallback[1]?.userPreview, "q20", "非空 queryPreview 直传不套 fallback");
 
   // 未传 fallback 维持旧语义（空串直出），调用方缺省不改变行为。
-  const withoutFallback = mergeTurnNavigatorItems([makeEntry(10, { queryPreview: "" })], [], 30, I18N);
+  const withoutFallback = mergeTurnNavigatorItems(
+    [makeEntry(10, { queryPreview: "" })],
+    [],
+    30,
+    I18N,
+  );
   assert.equal(withoutFallback[0]?.userPreview, "");
 });
 
@@ -214,7 +222,12 @@ test("active 降级三态：已加载 / 未加载 / 混合（跨边界）", () =
   assert.equal(unloaded, 0, "未加载区高亮第一个未加载目录项（升序最早的那条）");
 
   // 3. 纯已加载区间（目录未取过）→ 只有主循环能判定，且不产生降级项。
-  const loadedOnly = mergeTurnNavigatorItems([], [makeLoadedItem(30), makeLoadedItem(40)], 30, I18N);
+  const loadedOnly = mergeTurnNavigatorItems(
+    [],
+    [makeLoadedItem(30), makeLoadedItem(40)],
+    30,
+    I18N,
+  );
   assert.equal(
     resolveTurnNavigatorActiveItemIndex({
       items: loadedOnly,

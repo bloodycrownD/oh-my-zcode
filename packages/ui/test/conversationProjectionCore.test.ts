@@ -166,7 +166,8 @@ function buildSnapshot(
   });
 }
 
-const delta = (raw: Record<string, unknown>): ConversationDelta => conversationDeltaSchema.parse(raw);
+const delta = (raw: Record<string, unknown>): ConversationDelta =>
+  conversationDeltaSchema.parse(raw);
 
 /** 行文本按 rowId 建索引：错位断言要能直接指出「文本跑到了哪一行」。 */
 const textsByRowId = (rows: readonly ConversationRow[]): Map<number, string> =>
@@ -187,7 +188,10 @@ test("T-AP2 mergeOlderRows 后 rebuild：后续 row.delta 写入正确位置", (
   const published = accumulator.publish();
 
   // store 的 loadOlder / loadAllOlder 收口：mergeOlderRows 换掉 window 数组 → 必须 rebuild。
-  const window = mergeOlderRows(published.rows.window, [streamRow(8, "turn-a", "a"), streamRow(9, "turn-b", "b")]);
+  const window = mergeOlderRows(published.rows.window, [
+    streamRow(8, "turn-a", "a"),
+    streamRow(9, "turn-b", "b"),
+  ]);
   assert.ok(window, "前插补拉必须产出新窗口");
   const merged = { ...published, rows: { ...published.rows, window } };
 
@@ -270,7 +274,10 @@ test("T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换", () =>
   const base = buildSnapshot([streamRow(1, "turn-0", "甲"), streamRow(2, "turn-0", "乙")]);
   const accumulator = createConversationProjectionAccumulator(base);
   const p0 = accumulator.publish();
-  const p1 = accumulator.applyDeltas([delta({ op: "row.delta", rowId: 1, path: "text", append: "A" })], 101);
+  const p1 = accumulator.applyDeltas(
+    [delta({ op: "row.delta", rowId: 1, path: "text", append: "A" })],
+    101,
+  );
   const p2 = accumulator.applyDeltas(
     [
       delta({ op: "row.delta", rowId: 1, path: "text", append: "B" }),
@@ -282,7 +289,11 @@ test("T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换", () =>
   // 三层各自换新：少换一层，下游对应的那类 memo / effect 就静默不更新。
   assert.notStrictEqual(p1, p0, "snapshot 外壳必须换（[snapshot] effect 依赖）");
   assert.notStrictEqual(p1.rows, p0.rows, "rows 对象必须换");
-  assert.notStrictEqual(p1.rows.window, p0.rows.window, "window 数组必须换（[rows.window] memo 依赖）");
+  assert.notStrictEqual(
+    p1.rows.window,
+    p0.rows.window,
+    "window 数组必须换（[rows.window] memo 依赖）",
+  );
   assert.notStrictEqual(p2, p1);
   assert.notStrictEqual(p2.rows, p1.rows);
   assert.notStrictEqual(p2.rows.window, p1.rows.window);
@@ -306,17 +317,17 @@ test("T-AP3 copy-on-notify：window / rows / snapshot 三层引用全换", () =>
     delta({ op: "row.appended", row: streamRow(3, "turn-0", "丙") }),
   ];
   assert.deepStrictEqual(p1, { ...applyConversationDeltas(base, step1), seq: 101 });
-  assert.deepStrictEqual(p2, { ...applyConversationDeltas(applyConversationDeltas(base, step1), step2), seq: 102 });
+  assert.deepStrictEqual(p2, {
+    ...applyConversationDeltas(applyConversationDeltas(base, step1), step2),
+    seq: 102,
+  });
 });
 
 test("T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用保持不变", () => {
   const base = buildSnapshot([streamRow(1, "turn-0", "甲"), streamRow(2, "turn-0", "乙")]);
   const accumulator = createConversationProjectionAccumulator(base);
   const p0 = accumulator.publish();
-  const p1 = accumulator.applyDeltas(
-    [delta({ op: "state.updated", patch: { revision: 6 } })],
-    101,
-  );
+  const p1 = accumulator.applyDeltas([delta({ op: "state.updated", patch: { revision: 6 } })], 101);
 
   // 只换 snapshot 外壳（[snapshot] effect 依赖）；下面两层是本轮收窄掉的：
   // 内容逐行相同的帧每帧换引用，等于让长会话里那批 [rows.window] memo 白失效。
@@ -340,10 +351,9 @@ test("T-AP3 纯 state.updated 帧只换 snapshot 外壳：window / rows 引用�
 test("T-AP3 无行变更帧的 rows 复用必须逐字段等价：窗口外的 row.removed 不动任何标量", () => {
   // fromRowId 落在窗口末行之后 → 一行都没裁掉（变更集为空），apply 也不会改
   // totalCount（removed 按实际裁掉的行数算）。此时 window 与 rows 都可整份复用。
-  const base = buildSnapshot(
-    [streamRow(10, "turn-c", "c"), streamRow(11, "turn-d", "d")],
-    { totalCount: 40 },
-  );
+  const base = buildSnapshot([streamRow(10, "turn-c", "c"), streamRow(11, "turn-d", "d")], {
+    totalCount: 40,
+  });
   const accumulator = createConversationProjectionAccumulator(base);
   const p0 = accumulator.publish();
   const p1 = accumulator.applyDeltas([delta({ op: "row.removed", fromRowId: 99 })], 101);
@@ -386,9 +396,7 @@ test("T-AP3 publish() 是纯只读：连取两次拿不到会变的外壳", () =
 // ---------------------------------------------------------------------------
 
 test("C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTurnIds", () => {
-  const base = buildSnapshot(
-    [streamRow(1, "turn-a", "甲"), streamRow(2, "turn-a", "乙")],
-  );
+  const base = buildSnapshot([streamRow(1, "turn-a", "甲"), streamRow(2, "turn-a", "乙")]);
   const accumulator = createConversationProjectionAccumulator(base);
   accumulator.publish();
 
@@ -420,9 +428,16 @@ test("C-3 同一 rowId 改挂到别的 turnId 时旧 turnId 出现在 detachedTu
 test("C-3 改挂帧的脏集并入后：增量重建 ≡ 全量重建，与改挂无关的轮仍复用", () => {
   const cache = createConversationTurnRenderUnitsCache();
   const options = { scopeKey: "sess-c3" };
-  const before = [...visibleTurn(1, "turn-a"), ...visibleTurn(4, "turn-b"), ...visibleTurn(7, "turn-c")];
+  const before = [
+    ...visibleTurn(1, "turn-a"),
+    ...visibleTurn(4, "turn-b"),
+    ...visibleTurn(7, "turn-c"),
+  ];
   const first = cache.build(before, options, undefined);
-  assert.deepEqual(first.map((unit) => unit.turnId), ["turn-a", "turn-b", "turn-c"]);
+  assert.deepEqual(
+    first.map((unit) => unit.turnId),
+    ["turn-a", "turn-b", "turn-c"],
+  );
 
   // turn-b 的 header（rowId 4）被改挂到 turn-b2，其余两行留在 turn-b：
   // 脏集 = {turn-b2（新落点）} ∪ {turn-b（被改挂掉的旧轮）}，两者都得重算。
@@ -447,12 +462,19 @@ test("C-3 未改挂的 upsert 不产生 detachedTurnIds，withDetachedTurnIds �
   const base = buildSnapshot([streamRow(1, "turn-a", "甲")]);
   const accumulator = createConversationProjectionAccumulator(base);
   accumulator.publish();
-  accumulator.applyDeltas([delta({ op: "row.upserted", row: streamRow(1, "turn-a", "甲改") })], 101);
+  accumulator.applyDeltas(
+    [delta({ op: "row.upserted", row: streamRow(1, "turn-a", "甲改") })],
+    101,
+  );
 
   const mutation = accumulator.lastMutation();
   assert.equal(mutation?.detachedTurnIds, undefined, "同 turnId 的 upsert 不是改挂");
   const turnIdByRowId = new Map([[1, "turn-a"]]);
-  assert.strictEqual(withDetachedTurnIds(turnIdByRowId, undefined), turnIdByRowId, "memo 依赖不得被打掉");
+  assert.strictEqual(
+    withDetachedTurnIds(turnIdByRowId, undefined),
+    turnIdByRowId,
+    "memo 依赖不得被打掉",
+  );
   assert.strictEqual(withDetachedTurnIds(turnIdByRowId, new Set<string>()), turnIdByRowId);
   assert.deepEqual(
     [...withDetachedTurnIds(turnIdByRowId, new Set(["turn-old"])).values()],
@@ -573,7 +595,15 @@ test("T-AP4 场景一：追加新 turn 致 isLastTurn 翻转（增量 ≡ 全量
 
   // 追加第三轮：新轮是 dirty，旧末轮 turn-b 只因 isLastTurn 翻转而必须重算。
   const after = [...before, ...visibleTurn(7, "turn-c")];
-  const second = cache.build(after, options, mutation([[7, "turn-c"], [8, "turn-c"], [9, "turn-c"]]));
+  const second = cache.build(
+    after,
+    options,
+    mutation([
+      [7, "turn-c"],
+      [8, "turn-c"],
+      [9, "turn-c"],
+    ]),
+  );
   assertIncrementalEqualsFull(second, after, options);
   assert.deepStrictEqual(
     second.map((unit) => unit.isLastTurn),
@@ -589,7 +619,10 @@ test("T-AP4 场景二：末位 turn 被过滤，前一末轮接过 isLastTurn（
   const cache = createConversationTurnRenderUnitsCache();
   const options = { sessionPhase: "running" as SessionPhase, scopeKey: "sess-ap4" };
   // turn-a 可渲染；turn-b 只是一个 controlOnly header，没有可见行、非 running → 被过滤。
-  const before = [...visibleTurn(1, "turn-a"), turnHeader(4, "turn-b", "completedSuccess", "controlOnly")];
+  const before = [
+    ...visibleTurn(1, "turn-a"),
+    turnHeader(4, "turn-b", "completedSuccess", "controlOnly"),
+  ];
   const first = cache.build(before, options, mutation([[4, "turn-b"]]));
   assertIncrementalEqualsFull(first, before, options);
   assert.deepStrictEqual(
@@ -606,7 +639,14 @@ test("T-AP4 场景二：末位 turn 被过滤，前一末轮接过 isLastTurn（
   // lastMutation 只点了 turn-b，turn-a 靠「上一帧最后一个 unit 的 turnId」这条锚点失效——
   // 少写这条锚点，这里就会命中 turn-a 的旧条目、末位展开态错一帧。
   const after = [...visibleTurn(1, "turn-a"), ...visibleTurn(4, "turn-b")];
-  const second = cache.build(after, options, mutation([[5, "turn-b"], [6, "turn-b"]]));
+  const second = cache.build(
+    after,
+    options,
+    mutation([
+      [5, "turn-b"],
+      [6, "turn-b"],
+    ]),
+  );
   assertIncrementalEqualsFull(second, after, options);
   assert.deepStrictEqual(
     second.map((unit) => unit.turnId),
@@ -659,7 +699,15 @@ test("G-3 护栏：每帧物化数 ≤ 脏轮数 + 1（失效锚点）", () => {
 
   // 追加 turn-d（脏轮=1）：只有 turn-d 与锚点 turn-c 物化 ≤ 1+1。
   const fourTurns = [...threeTurns, ...visibleTurn(10, "turn-d")];
-  cache.build(fourTurns, options, mutation([[10, "turn-d"], [11, "turn-d"], [12, "turn-d"]]));
+  cache.build(
+    fourTurns,
+    options,
+    mutation([
+      [10, "turn-d"],
+      [11, "turn-d"],
+      [12, "turn-d"],
+    ]),
+  );
   const appended = cache.__materializeCountForTest() - afterFirst;
   assert.ok(appended <= 2, `追加一帧物化了 ${appended} 轮，超出 脏轮1+锚点1 的界`);
 
@@ -718,7 +766,10 @@ test("T-AP4 scopeKey 切换清空缓存：不同会话的同名 turnId 不会串
   // 第二个会话同名 turnId，但行内容不同：若缓存没按 scopeKey 清空就会命中上一家的条目。
   const second = cache.build(rowsB, { scopeKey: "sess-b" }, mutation([]));
   assert.equal(second.length, 2);
-  assert.deepStrictEqual(second.map((unit) => unit.turnId), ["turn-shared", "turn-other"]);
+  assert.deepStrictEqual(
+    second.map((unit) => unit.turnId),
+    ["turn-shared", "turn-other"],
+  );
   assert.notStrictEqual(second[0], first[0]);
   assert.equal(cache.size(), 2);
 });
@@ -726,12 +777,24 @@ test("T-AP4 scopeKey 切换清空缓存：不同会话的同名 turnId 不会串
 test("T-AP4 已裁剪出窗口的轮不会留在缓存里（缓存有界）", () => {
   const cache = createConversationTurnRenderUnitsCache();
   const options = { scopeKey: "sess-ap4" };
-  const rows = [...visibleTurn(1, "turn-a"), ...visibleTurn(4, "turn-b"), ...visibleTurn(7, "turn-c")];
+  const rows = [
+    ...visibleTurn(1, "turn-a"),
+    ...visibleTurn(4, "turn-b"),
+    ...visibleTurn(7, "turn-c"),
+  ];
   cache.build(rows, options, mutation([]));
   assert.equal(cache.size(), 3);
   // row.removed 裁掉 turn-c：缓存必须跟着收缩，否则长会话里缓存无上界增长。
   const trimmed = rows.slice(0, 6);
-  cache.build(trimmed, options, mutation([[6, "turn-c"], [7, "turn-c"], [8, "turn-c"]]));
+  cache.build(
+    trimmed,
+    options,
+    mutation([
+      [6, "turn-c"],
+      [7, "turn-c"],
+      [8, "turn-c"],
+    ]),
+  );
   assert.equal(cache.size(), 2);
 });
 

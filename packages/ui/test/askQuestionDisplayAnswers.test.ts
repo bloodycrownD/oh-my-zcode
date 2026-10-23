@@ -69,10 +69,7 @@ test("display.answers 桥接后 renderer 解析命中：显示所选 label，而
   // 桥接产物就是旧形态 {answers}；模型文本退到 raw.rawOutput，其他通道不动。
   assert.deepEqual(node.toolCall.output, { answers: { [QUESTION]: "测试通过" } });
   const raw = node.toolCall.raw as { rawOutput?: unknown } | undefined;
-  assert.equal(
-    typeof raw?.rawOutput === "string" && raw.rawOutput.includes("测试通过"),
-    true,
-  );
+  assert.equal(typeof raw?.rawOutput === "string" && raw.rawOutput.includes("测试通过"), true);
   const { text } = renderAnswerText(node.toolCall);
   assert.equal(text, "测试通过");
 });
@@ -94,9 +91,7 @@ test("空对象 answers（零作答/自动继续）必须原样桥接：{} ≠ �
 });
 
 test("无 display 的历史行（修复前会话/降级）不回归：维持「未提供回答」", () => {
-  const node = toolCallRowToLegacyNode(
-    askRow({ text: "User has answered your questions: ..." }),
-  );
+  const node = toolCallRowToLegacyNode(askRow({ text: "User has answered your questions: ..." }));
   assert.equal(node.toolCall.output, "User has answered your questions: ...");
   const { answers, text } = renderAnswerText(node.toolCall);
   assert.equal(answers, undefined);

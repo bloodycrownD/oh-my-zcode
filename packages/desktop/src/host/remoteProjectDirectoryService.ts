@@ -40,11 +40,15 @@ export function remoteProjectHostIdForSourceServer(sourceServerId: string): stri
 /** 从 Host 级目录身份提取 sourceServerId；非 server Host 返回 null。 */
 export function sourceServerIdFromRemoteProjectHostId(hostId: string): string | null {
   // Host 级身份无 path 段，直接 parse 会失败；借 buildRemoteHostWorkspaceIdentity 补
-  // path 段后走统一解析器提取（上游 bindHost 同款技巧）。
-  const parsed = parseRemoteWorkspaceIdentity(
-    buildRemoteHostWorkspaceIdentity(hostId, "/"),
-  );
-  return parsed?.kind === "server" ? (parsed.sourceServerId ?? null) : null;
+  // path 段后走统一解析器提取（上游 bindHost 同款技巧）。非 remote: 前缀（local/本地
+  // 路径）与不完整 remote 身份（迟到回执等）都判负，不向上抛构造错误。
+  if (!hostId.startsWith("remote:")) return null;
+  try {
+    const parsed = parseRemoteWorkspaceIdentity(buildRemoteHostWorkspaceIdentity(hostId, "/"));
+    return parsed?.kind === "server" ? (parsed.sourceServerId ?? null) : null;
+  } catch {
+    return null;
+  }
 }
 
 /** 仅接受本服务投影出的 server Host 身份；其余形状在写边界显式拒绝。 */
@@ -56,9 +60,7 @@ export function createDirectoryRemoteProjectService(options: {
   directory(): SourceServerDirectory;
   manager(): SourceServerConnectionManager;
 }): IRemoteProjectService {
-  const projectHost = async (
-    sourceServerId: string,
-  ): Promise<RemoteProjectHost | null> => {
+  const projectHost = async (sourceServerId: string): Promise<RemoteProjectHost | null> => {
     const snapshot = await options.directory().snapshot();
     const server = snapshot.servers.find((entry) => entry.sourceServerId === sourceServerId);
     if (!server) return null;
@@ -129,7 +131,9 @@ export function createDirectoryRemoteProjectService(options: {
       const server = snapshot.servers.find((entry) => entry.sourceServerId === sourceServerId);
       const profile =
         profiles.find((candidate) => candidate.profileId === server?.preferredProfileId) ??
-        [...profiles].sort((left, right) => (right.lastConnectedAt ?? 0) - (left.lastConnectedAt ?? 0))[0];
+        [...profiles].sort(
+          (left, right) => (right.lastConnectedAt ?? 0) - (left.lastConnectedAt ?? 0),
+        )[0];
       if (!profile) throw new Error("remote-project.connector-unavailable");
       // 复用启动重连的同一凭据链；解析不出完整认证链=需要交互凭据，不静默降级。
       const target = await directory.resolveSilentConnectionTarget(profile.profileId);

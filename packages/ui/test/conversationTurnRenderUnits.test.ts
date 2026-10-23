@@ -14,7 +14,11 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
-import { conversationRowSchema, type ConversationRow, type SessionPhase } from "@zcode/shared/zcode-protocol-v4";
+import {
+  conversationRowSchema,
+  type ConversationRow,
+  type SessionPhase,
+} from "@zcode/shared/zcode-protocol-v4";
 import {
   createConversationTurnRenderUnitsCache,
   MAX_PARTITIONS_PER_TURN,
@@ -83,7 +87,11 @@ test("C-2：同一 turnId 多 phase 反复注入后分区数 ≤ MAX_PARTITIONS_
   // 同一 scopeKey 下轮换 phase（每次换代合法清表）+ isLastTurn 恒真，注入远超上限的
   // 次数；无论清表路径还是 LRU 路径，单轮分区数都必须被 MAX_PARTITIONS_PER_TURN 封顶。
   for (let i = 0; i < PHASES.length * 4; i += 1) {
-    cache.build(rows, { scopeKey: "sess-c2", sessionPhase: PHASES[i % PHASES.length]! }, mutation([]));
+    cache.build(
+      rows,
+      { scopeKey: "sess-c2", sessionPhase: PHASES[i % PHASES.length]! },
+      mutation([]),
+    );
   }
   assert.ok(
     cache.__partitionCountForTest("turn-a") <= MAX_PARTITIONS_PER_TURN,
@@ -124,13 +132,25 @@ test("C-5：scopeKey/sessionPhase 与缓存内不一致时 DEV 告警恰一次",
     warnings.push(args);
   };
   try {
-    cache.build(visibleTurn(1, "turn-a"), { scopeKey: "sess-a", sessionPhase: "running" }, mutation([]));
+    cache.build(
+      visibleTurn(1, "turn-a"),
+      { scopeKey: "sess-a", sessionPhase: "running" },
+      mutation([]),
+    );
     assert.equal(warnings.length, 0, "首帧建表不算冲突");
 
-    cache.build(visibleTurn(10, "turn-z"), { scopeKey: "sess-b", sessionPhase: "running" }, mutation([]));
+    cache.build(
+      visibleTurn(10, "turn-z"),
+      { scopeKey: "sess-b", sessionPhase: "running" },
+      mutation([]),
+    );
     assert.equal(warnings.length, 1, "缓存非空时换 scopeKey 必须告警一次");
 
-    cache.build(visibleTurn(20, "turn-y"), { scopeKey: "sess-c", sessionPhase: "running" }, mutation([]));
+    cache.build(
+      visibleTurn(20, "turn-y"),
+      { scopeKey: "sess-c", sessionPhase: "running" },
+      mutation([]),
+    );
     assert.equal(warnings.length, 1, "告警 latch：同一代内只报一次");
   } finally {
     console.warn = originalWarn;

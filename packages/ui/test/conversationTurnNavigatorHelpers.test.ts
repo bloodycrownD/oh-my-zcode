@@ -305,7 +305,10 @@ function buildDirectoryView(facts: StoreDirectoryFacts): ConversationTurnNavigat
 }
 
 /** 组件侧喂给判定函数的入参（ConversationTimeline.tsx 的展开形状）。 */
-function hydrate(directory: ConversationTurnNavigatorDirectoryView | undefined, canLoadOlder: boolean) {
+function hydrate(
+  directory: ConversationTurnNavigatorDirectoryView | undefined,
+  canLoadOlder: boolean,
+) {
   return shouldHydrateConversationTurnNavigatorDirectory({
     canLoadOlder,
     containerWidthPx: WIDE_CONTAINER_PX,
@@ -434,7 +437,10 @@ test("pickOwnedRowElements：注册表条目不属于本容器时被跳过（ful
 
   const owned = pickOwnedRowElements(registry, container);
 
-  assert.deepEqual([...owned.keys()].sort((a, b) => a - b), [10, 30]);
+  assert.deepEqual(
+    [...owned.keys()].sort((a, b) => a - b),
+    [10, 30],
+  );
   assert.equal(owned.get(10), ownedElement);
   assert.equal(owned.has(20), false, "别家 pane 的活元素（contains 不命中）必须被过滤");
 });
