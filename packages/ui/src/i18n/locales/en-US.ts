@@ -3317,7 +3317,6 @@ const enUS: Record<string, string> = {
   "settings.modelProvider.readyStatus": "Ready",
   "settings.modelProvider.enableProvider": "Enable provider",
   "settings.modelProvider.disableProvider": "Disable provider",
-  "settings.modelProvider.renameProvider": "Rename",
   "settings.modelProvider.enableCurrentPlan": "Enable current plan",
   "settings.modelProvider.enableAction": "Enable",
   "settings.modelProvider.disableAction": "Disable",

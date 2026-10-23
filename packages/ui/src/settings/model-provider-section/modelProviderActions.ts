@@ -3,6 +3,19 @@ import type { ProviderSettingsFormProvider } from "@/lib/providerSettingsFormTyp
 import { getProviderFormLabel } from "@/lib/providerSettingsFormTypes.js";
 import type { IntlInstance } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+/**
+ * 详情卡是否渲染删除入口：服务层只允许删除 personal provider（group = standard-personal），
+ * 这里把同一条约束前置到 UI，避免出现「按钮可点但服务层拒绝」的死路。
+ *
+ * FORK（D-13/D-4）：zai-family / bigmodel-family 预设面整删后，导航与投影只暴露
+ * standard-personal；原 family 早退守卫已无命中对象，保留只会让自定义供应商静默无法删除。
+ */
+export function canDeleteModelProvider(
+  provider: Pick<ProviderSettingsFormProvider, "config">,
+): boolean {
+  return provider.config.group === "standard-personal";
+}
+
 export async function confirmAndDeleteModelProvider({
   provider,
   confirmDialog,
@@ -14,10 +27,6 @@ export async function confirmAndDeleteModelProvider({
   intl: IntlInstance;
   deleteProvider: (providerId: string) => Promise<void>;
 }) {
-  if (provider.config.group === "zai-family" || provider.config.group === "bigmodel-family") {
-    return;
-  }
-
   logger.info("[ModelProviderSection] 请求删除自定义模型供应商", {
     providerId: provider.providerId,
     providerName: getProviderFormLabel(provider),
@@ -35,6 +44,8 @@ export async function confirmAndDeleteModelProvider({
       id: "settings.modelProvider.deleteConfirmAction",
     }),
     cancelLabel: intl.formatMessage({ id: "common.cancel" }),
+    // 删除不可撤销：确认按钮用破坏性变体，与其它删除入口一致。
+    confirmVariant: "destructive",
   });
   if (!confirmed) {
     logger.info("[ModelProviderSection] 用户取消删除自定义模型供应商", {

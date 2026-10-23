@@ -1,14 +1,7 @@
 /* eslint-disable max-lines -- Model Provider 详情页当前集中编排 Plan Card、API Key 表单和 OAuth 套餐态；后续稳定后再按 family/API/OAuth 拆分。 */
 import {
-
-
-
   type BuiltinModelProviderId,
   type ProviderFamilyConnectionSelectionSettings,
-
-
-
-
   type ModelConnectivityResult,
   type OAuthProviderId,
 } from "@zcode/shared";
@@ -19,6 +12,7 @@ import {
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { type CodingPlanStatus, type ModelProviderNavItem } from "./constants.js";
 import { InlineEditableProviderCard } from "./InlineEditableProviderCard.js";
+import { canDeleteModelProvider } from "./modelProviderActions.js";
 import { ModelProviderLoadingCard } from "./ProviderPlaceholderCards.js";
 import { type CodingPlanLoginOptions } from "./codingPlanPricingCards.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
@@ -33,10 +27,6 @@ export function ModelProviderSectionDetail({
   startPlanSubscriptionCount = 0,
   providerListLoading = false,
 
-
-
-
-
   onSave,
   onAddPersonalModel,
   onSavePersonalModelDraft,
@@ -46,11 +36,7 @@ export function ModelProviderSectionDetail({
   onReorderProviderModels,
   onTestModel,
 
-
-
   onOpenApiKeyUrl,
-
-
 
   providerSettingsView: providerSettingsViewOverride,
 }: {
@@ -145,13 +131,15 @@ export function ModelProviderSectionDetail({
   const customApiKeyUrl = customProvider.templateId
     ? getProviderFormApiKeyManagementUrl(customProvider)
     : undefined;
+  // 删除入口跟随服务层约束：仅 personal provider 可删，其余供应商不渲染标题栏删除按钮。
+  const deletable = canDeleteModelProvider(customProvider);
   return (
     // 仅展示预设模板声明的入口，不根据地址猜测自定义 Provider 的 Key 控制台。
     <InlineEditableProviderCard
       provider={customProvider}
       onSave={onSave}
       {...modelEditingProps}
-      onDelete={() => onDelete(customProvider)}
+      onDelete={deletable ? () => onDelete(customProvider) : undefined}
       onReorderModelIds={
         onReorderProviderModels
           ? (modelIds) => onReorderProviderModels(customProvider.providerId, modelIds)

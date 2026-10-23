@@ -465,10 +465,10 @@ export const TID_MODEL_PROVIDER_START_PLAN_SWITCH_PREFIX =
 export const TID_MODEL_PROVIDER_CONNECTION_MODE_ITEM = "model-provider-connection-mode-item";
 /** 模型供应商详情 API Key 输入框 */
 export const TID_MODEL_PROVIDER_API_KEY_INPUT = "model-provider-api-key-input";
-/** 模型供应商名称编辑按钮 */
-export const TID_MODEL_PROVIDER_NAME_EDIT_BUTTON = "model-provider-name-edit-button";
 /** 模型供应商详情名称触发按钮（点击进入命名态） */
 export const TID_MODEL_PROVIDER_NAME_TRIGGER = "model-provider-name-trigger";
+/** 模型供应商详情删除按钮（标题栏右侧，仅自定义供应商渲染） */
+export const TID_MODEL_PROVIDER_DELETE_BUTTON = "model-provider-delete-button";
 /** 模型供应商名称编辑输入框 */
 export const TID_MODEL_PROVIDER_NAME_INPUT = "model-provider-name-input";
 /** 模型供应商 Base URL 输入框 */

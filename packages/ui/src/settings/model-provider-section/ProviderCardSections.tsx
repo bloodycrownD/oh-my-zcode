@@ -16,23 +16,16 @@ import type { ProviderApiType } from "@zcode/provider";
 import {
   TID_MODEL_PROVIDER_ADD_MODEL_BUTTON,
   TID_MODEL_PROVIDER_BASE_URL_INPUT,
+  TID_MODEL_PROVIDER_DELETE_BUTTON,
   TID_MODEL_PROVIDER_MODEL_DELETE_BUTTON,
   TID_MODEL_PROVIDER_MODEL_INPUT,
-  TID_MODEL_PROVIDER_NAME_EDIT_BUTTON,
   TID_MODEL_PROVIDER_NAME_INPUT,
   TID_MODEL_PROVIDER_NAME_TRIGGER,
   testId,
 } from "@zcode/shared";
-import { InfoIcon, LockKeyholeIcon, Plus, Pencil, Trash2, MoreHorizontal } from "lucide-react";
+import { InfoIcon, LockKeyholeIcon, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
-import {
-  DropdownMenu,
-  DropdownMenuTrigger,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-} from "@/components/ui/dropdown-menu.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useServices } from "@/hooks/useServices.js";
 import { TECHNICAL_INPUT_ATTRIBUTES } from "@/lib/technicalInputAttributes.js";
@@ -76,7 +69,6 @@ export function ProviderCardHeader({
   onNameCompositionStart,
   onStartEditName,
   onDelete,
-  actionsVisible = true,
   providerToggle,
 }: {
   providerName: string;
@@ -92,12 +84,10 @@ export function ProviderCardHeader({
   onNameCompositionStart?: () => void;
   onStartEditName: () => void;
   onDelete?: () => void;
-  actionsVisible?: boolean;
   providerToggle?: ReactNode;
 }) {
   const { intl } = useZCodeIntl();
-  const renameRequestedRef = useRef(false);
-  const secondaryActionsVisible = actionsVisible && (nameEditable || Boolean(onDelete));
+  const deleteLabel = intl.formatMessage({ id: "common.delete" });
 
   return (
     <div className="flex items-center justify-between gap-3" data-testid="model-provider-header">
@@ -131,59 +121,25 @@ export function ProviderCardHeader({
             {providerName}
           </button>
         ) : (
-          <>
-            <div className="min-w-0 truncate text-ui-lg font-semibold text-foreground">
-              {providerName}
-            </div>
-          </>
+          <div className="min-w-0 truncate text-ui-lg font-semibold text-foreground">
+            {providerName}
+          </div>
         )}
       </div>
       <div className="flex shrink-0 items-center gap-2">
         {providerToggle}
-        {secondaryActionsVisible ? (
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon-sm"
-                data-testid="model-provider-actions-button"
-                aria-label={intl.formatMessage({ id: "common.more" })}
-              >
-                <MoreHorizontal className="size-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              onCloseAutoFocus={(event) => {
-                // 重命名后的焦点交给输入框，不能被菜单关闭时重新抢回触发按钮。
-                if (renameRequestedRef.current) {
-                  event.preventDefault();
-                  renameRequestedRef.current = false;
-                }
-              }}
-            >
-              {nameEditable ? (
-                <DropdownMenuItem
-                  data-testid={TID_MODEL_PROVIDER_NAME_EDIT_BUTTON}
-                  onSelect={() => {
-                    renameRequestedRef.current = true;
-                    onStartEditName();
-                  }}
-                >
-                  <Pencil className="size-3.5" />
-                  {intl.formatMessage({ id: "settings.modelProvider.renameProvider" })}
-                </DropdownMenuItem>
-              ) : null}
-              {nameEditable && onDelete ? <DropdownMenuSeparator /> : null}
-              {onDelete ? (
-                <DropdownMenuItem variant="destructive" onSelect={onDelete}>
-                  <Trash2 className="size-3.5" />
-                  {intl.formatMessage({ id: "common.delete" })}
-                </DropdownMenuItem>
-              ) : null}
-            </DropdownMenuContent>
-          </DropdownMenu>
+        {onDelete ? (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon-sm"
+            data-testid={TID_MODEL_PROVIDER_DELETE_BUTTON}
+            aria-label={deleteLabel}
+            title={deleteLabel}
+            onClick={onDelete}
+          >
+            <Trash2 className="size-3.5" aria-hidden="true" />
+          </Button>
         ) : null}
       </div>
     </div>

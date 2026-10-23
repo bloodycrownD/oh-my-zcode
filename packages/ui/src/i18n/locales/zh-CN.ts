@@ -3092,7 +3092,6 @@ const zhCN: Record<string, string> = {
   "settings.modelProvider.readyStatus": "就绪",
   "settings.modelProvider.enableProvider": "启用供应商",
   "settings.modelProvider.disableProvider": "禁用供应商",
-  "settings.modelProvider.renameProvider": "重命名",
   "settings.modelProvider.enableCurrentPlan": "启用当前套餐",
   "settings.modelProvider.enableAction": "启用",
   "settings.modelProvider.disableAction": "禁用",
