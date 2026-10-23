@@ -15,6 +15,8 @@ export function createDesktopPlatform(options: {
     createTempTextAttachment: (payload) => window.zcode.createTempTextAttachment(payload),
     onRemoteConnectionLog: (handler) => window.zcode.onRemoteConnectionLog(handler),
     onRemoteSessionClosed: (handler) => window.zcode.onRemoteSessionClosed(handler),
+    onRemoteSessionReconnected: (handler) =>
+      window.zcode.onRemoteSessionReconnected?.(handler) ?? (() => {}),
     onBotRemoteWorkspaceReconnected: (handler) =>
       window.zcode.onBotRemoteWorkspaceReconnected(handler),
     activateOrSetWorkspace: (path) =>

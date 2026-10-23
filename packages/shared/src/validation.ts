@@ -486,6 +486,14 @@ export const hostRemoteWorkspaceClosedResponseSchema = z
   })
   .strict();
 
+export const hostRemoteWorkspaceReconnectedResponseSchema = z
+  .object({
+    type: z.literal("remote-workspace-reconnected"),
+    previousRemoteSessionId: nonEmptyStringSchema,
+    descriptor: windowHostRemoteWorkspaceDescriptorSchema,
+  })
+  .strict();
+
 export const hostLogResponseSchema = z.object({
   type: z.literal("log"),
   level: z.enum(["info", "warn", "error"]),
@@ -863,6 +871,7 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostRemoteWorkspaceConnectedResponseSchema,
   hostRemoteWorkspaceConnectFailedResponseSchema,
   hostRemoteWorkspaceClosedResponseSchema,
+  hostRemoteWorkspaceReconnectedResponseSchema,
   hostLogResponseSchema,
   hostAgentProcessSpawnedResponseSchema,
   hostAgentProcessReadyResponseSchema,

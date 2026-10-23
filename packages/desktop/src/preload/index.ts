@@ -43,10 +43,11 @@ import type {
   Locale,
   OpenInEditorOptions,
   RemoteTarget,
-TaskNotificationPayload,
-RemoteSessionClosedEvent,
-BotRemoteWorkspaceReconnectedEvent,
-ZCodeStdioTapDevState,
+  TaskNotificationPayload,
+  RemoteSessionClosedEvent,
+  RemoteSessionReconnectedEvent,
+  BotRemoteWorkspaceReconnectedEvent,
+  ZCodeStdioTapDevState,
   LoadCliMcpFromUserDirectoryRequest,
   MigrateLegacyCommonMcpRequest,
   SaveCliMcpToUserDirectoryRequest,
@@ -246,6 +247,13 @@ contextBridge.exposeInMainWorld("zcode", {
       callback(payload as RemoteSessionClosedEvent);
     ipcRenderer.on(PlatformChannels.RemoteSessionClosed, handler);
     return () => ipcRenderer.removeListener(PlatformChannels.RemoteSessionClosed, handler);
+  },
+  /** 订阅远程 workspace 断连后自动恢复换代事件（旧 sessionId → 新 sessionId），返回 disposer */
+  onRemoteSessionReconnected: (callback: (event: RemoteSessionReconnectedEvent) => void) => {
+    const handler = (_event: unknown, payload: unknown) =>
+      callback(payload as RemoteSessionReconnectedEvent);
+    ipcRenderer.on(PlatformChannels.RemoteSessionReconnected, handler);
+    return () => ipcRenderer.removeListener(PlatformChannels.RemoteSessionReconnected, handler);
   },
   /** 订阅 Bot 触发的远程 workspace 重连成功事件，返回 disposer */
   onBotRemoteWorkspaceReconnected: (

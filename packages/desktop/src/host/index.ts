@@ -1673,8 +1673,24 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
     if (!commit()) {
       throw new Error("Source 重连换代在 Controller 提交后失去 Registry owner");
     }
-    // 换代通知（RemoteWorkspaceReconnected 协议行 + Renderer 侧刷新）随三期
-    // remote-connection-flow UX 一起落；此处 Controller 投影已原子换代。
+    try {
+      // 换代通知（cr-func-r3b 三期承接核对①-2）：Controller 投影已原子换代后，向 Main 发
+      // RemoteWorkspaceReconnected——Main 重挂 attachment 路由并广播 Renderer 换 sessionId，
+      // 防止旧 sessionId 在 Renderer/attachment 面悬空。parentPort 失效交给既有 shutdown 回收。
+      parentPort?.postMessage({
+        type: HostResponseTypes.RemoteWorkspaceReconnected,
+        previousRemoteSessionId: previous.remoteSessionId,
+        descriptor: {
+          remoteSessionId: current.remoteSessionId,
+          target: current.target,
+          workspacePath: current.workspacePath,
+          workspaceIdentity: current.workspaceIdentity,
+          generation: current.generation,
+        },
+      });
+    } catch (error) {
+      logger.error("failed to publish committed remote workspace replacement", error);
+    }
     logWindowHostTopology("remote-connection-reconnected");
   },
   onSessionReconnectError: (error) => {

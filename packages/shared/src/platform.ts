@@ -422,6 +422,14 @@ export interface RemoteSessionClosedEvent {
   signal: string | null;
 }
 
+/** R3 daemon 分支恢复换代通知：旧 logical session 已原子换到新 sessionId（Registry commit 后发射）。 */
+export interface RemoteSessionReconnectedEvent {
+  previousSessionId: string;
+  sessionId: string;
+  workspacePath: string;
+  workspaceIdentity: string;
+}
+
 export interface EmbeddedBrowserOpenUrlRequest {
   url: string;
   disposition: "default" | "foreground-tab" | "background-tab" | "new-window" | "other";
@@ -554,6 +562,12 @@ export interface IPlatformService {
 
   /** 订阅远程 workspace session 关闭事件，返回 disposer */
   onRemoteSessionClosed(handler: (event: RemoteSessionClosedEvent) => void): () => void;
+
+  /**
+   * 订阅远程 workspace 断连后自动恢复换代事件（旧 sessionId → 新 sessionId）。
+   * 只在 Source Server daemon 分支恢复状态机原子换代后发射；Web 端与旧 deployServer 链无此事件。
+   */
+  onRemoteSessionReconnected?(handler: (event: RemoteSessionReconnectedEvent) => void): () => void;
 
   /** 订阅 Bot 触发的远程 workspace 重连成功事件，返回 disposer */
   onBotRemoteWorkspaceReconnected(

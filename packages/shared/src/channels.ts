@@ -13,6 +13,7 @@ import type {
   CancelPendingRemoteConnectionRequest,
   BindRemoteWorkspaceSessionContextRequest,
   BotRemoteWorkspaceReconnectedEvent,
+  RemoteSessionReconnectedEvent,
   BrowserViewScreenshotSurfacePreparePayload,
   BrowserViewScreenshotSurfaceReadyPayload,
   BrowserViewScreenshotSurfaceReleasePayload,
@@ -164,6 +165,8 @@ export const PlatformChannels = {
   RemoteConnectionLog: "zcode:remote-connection-log",
   /** Main → Renderer：远程 workspace session 已关闭 */
   RemoteSessionClosed: "zcode:remote-session-closed",
+  /** Main → Renderer：断连 workspace 自动恢复换代（旧 sessionId → 新 sessionId） */
+  RemoteSessionReconnected: "zcode:remote-session-reconnected",
   /** Main → Renderer：Bot 已触发远端 workspace 重连成功 */
   BotRemoteWorkspaceReconnected: "zcode:bot-remote-workspace-reconnected",
   /** 检查目录是否已在其他窗口打开，如果是则激活该窗口 */
@@ -483,6 +486,8 @@ export const HostResponseTypes = {
   RemoteWorkspaceConnectFailed: "remote-workspace-connect-failed",
   /** window Host → main：已连接的远程 logical session 关闭 */
   RemoteWorkspaceClosed: "remote-workspace-closed",
+  /** window Host → main：断连 workspace 经恢复状态机原子换代到新 sessionId */
+  RemoteWorkspaceReconnected: "remote-workspace-reconnected",
   /** host 进程日志上报 */
   Log: "log",
   /** host 内拉起新的 agent 子进程 */
@@ -600,6 +605,10 @@ export interface PlatformChannelMap {
   };
   [PlatformChannels.RemoteSessionClosed]: {
     request: RemoteSessionClosedEvent;
+    response: void;
+  };
+  [PlatformChannels.RemoteSessionReconnected]: {
+    request: RemoteSessionReconnectedEvent;
     response: void;
   };
   [PlatformChannels.BotRemoteWorkspaceReconnected]: {

@@ -6,6 +6,7 @@ import type {
   BotRemoteWorkspaceReconnectedEvent,
   IPlatformService,
   RemoteSessionClosedEvent,
+  RemoteSessionReconnectedEvent,
   RemoteWorkspaceSessionEntry,
 } from "@zcode/shared";
 import { buildSshRemoteHostKey, createUuid, stripRemoteTargetSecrets } from "@zcode/shared";
@@ -1211,6 +1212,49 @@ export function useRemoteWorkspaceHistory({
     [commitRemoteWorkspaceSessionMutation, tabStoreApi],
   );
 
+  // R3 daemon 分支恢复换代（cr-func-r3b 三期承接核对①-2 的 Renderer 侧）：
+  // Host 恢复状态机原子换代后 Main 广播新 sessionId；这里把匹配 tab（同 path+identity
+  // 且 remoteSessionId 缺失或仍是旧 id）换绑到新 sessionId，并清掉重连中标记与旧注册。
+  const handleRemoteWorkspaceSessionReconnected = useCallback(
+    (event: RemoteSessionReconnectedEvent) => {
+      const matchedTabs = tabStoreApi
+        .getState()
+        .tabs.filter(
+          (tab): tab is import("@/store/tabStore.js").WorkspaceTabState =>
+            isWorkspaceTab(tab) &&
+            tab.workspacePath === event.workspacePath &&
+            tab.workspaceIdentity === event.workspaceIdentity &&
+            (!tab.remoteSessionId || tab.remoteSessionId === event.previousSessionId),
+        );
+      if (matchedTabs.length === 0) return;
+      const matchedWorkspaceKeys = [
+        ...new Set(matchedTabs.map((tab) => buildWorkspaceSessionKey(tab))),
+      ];
+      setReconnectingRemoteWorkspaceKeys((currentKeys) =>
+        currentKeys.filter((key) => !matchedWorkspaceKeys.includes(key)),
+      );
+      unregisterRemoteWorkspaceSession(event.previousSessionId);
+      bindRemoteWorkspacePath(event.workspacePath, event.sessionId);
+      bindRemoteWorkspaceIdentity(event.workspaceIdentity, event.sessionId);
+      tabStoreApi.setState((state) => ({
+        tabs: state.tabs.map((tab) =>
+          isWorkspaceTab(tab) &&
+          tab.workspacePath === event.workspacePath &&
+          tab.workspaceIdentity === event.workspaceIdentity &&
+          (!tab.remoteSessionId || tab.remoteSessionId === event.previousSessionId)
+            ? { ...tab, remoteSessionId: event.sessionId }
+            : tab,
+        ),
+      }));
+      logger.info("[Root] 远程 workspace session 已自动重连换代", {
+        previousSessionId: event.previousSessionId,
+        sessionId: event.sessionId,
+        matchedWorkspaceKeys,
+      });
+    },
+    [tabStoreApi],
+  );
+
   const handleBotRemoteWorkspaceReconnected = useCallback(
     async (event: BotRemoteWorkspaceReconnectedEvent) => {
       if (!canUseRemoteWorkspace) {
@@ -1298,6 +1342,15 @@ export function useRemoteWorkspaceHistory({
       void handleRemoteWorkspaceSessionClosed(event);
     });
   }, [handleRemoteWorkspaceSessionClosed, platform]);
+
+  useEffect(() => {
+    // 恢复换代面只在 Desktop preload 暴露；Web/旧 preload 缺 bridge 时保持 no-op。
+    return (
+      platform.onRemoteSessionReconnected?.((event) => {
+        handleRemoteWorkspaceSessionReconnected(event);
+      }) ?? (() => {})
+    );
+  }, [handleRemoteWorkspaceSessionReconnected, platform]);
 
   useEffect(() => {
     return platform.onBotRemoteWorkspaceReconnected((event) => {

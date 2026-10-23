@@ -485,6 +485,85 @@ export function createRemoteWorkspaceSessionManager(options: {
     }
   }
 
+  function handleReconnected(
+    child: ElectronUtilityProcess,
+    webContentsId: number,
+    previousRemoteSessionId: string,
+    descriptor: WindowHostRemoteWorkspaceDescriptor,
+  ): void {
+    const route = routesBySessionId.get(previousRemoteSessionId);
+    const win = BrowserWindow.getAllWindows().find(
+      (candidate) => candidate.webContents.id === webContentsId,
+    );
+    if (!route || route.webContentsId !== webContentsId || !win) {
+      // Main 已无旧 route（窗口关闭/会话已释放）：Host 侧换代产物无人接收，直接回收。
+      child.postMessage({
+        type: HostMessageTypes.DisposeRemoteWorkspaceSession,
+        requestId: randomUUID(),
+        remoteSessionId: descriptor.remoteSessionId,
+      });
+      return;
+    }
+    routesBySessionId.delete(previousRemoteSessionId);
+    route.descriptor = descriptor;
+    route.attachmentState = "attachable";
+    routesBySessionId.set(descriptor.remoteSessionId, route);
+    // Bug 原因：Provisioning lane 以 remoteSessionId 登记，execute 闭包也绑定旧 sessionId；
+    // Source 重连换代后若不重新登记，后续下发都会命中 Host 已失效的旧 session，远端再也收不到配置。
+    // 先摘掉旧登记再登记新 session，让 lane 按 Environment 重新上线整份重下发（离线期间的本机
+    // 配置变更由此补齐）；重连不是首连发布屏障，失败只记录 warning，不拆除已恢复的 Workspace。
+    route.providerProvisioningDispose?.();
+    const environmentKey = buildRemoteEnvironmentKey(descriptor.target);
+    const registration = providerProvisioningCoordinator.register(
+      environmentKey,
+      descriptor.remoteSessionId,
+      (trigger) =>
+        executeProviderProvisioning(child, descriptor.remoteSessionId, environmentKey, trigger),
+    );
+    route.providerProvisioningDispose = registration.dispose;
+    registration.initialSync.catch((error: unknown) => {
+      options.logger.warn(
+        "[provider-provisioning] Environment resync after reconnect did not apply",
+        {
+          environmentKey,
+          remoteSessionId: descriptor.remoteSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        },
+      );
+    });
+    void attachRendererPort(win, route, "source-server-reconnected")
+      .then(() => {
+        if (!descriptor.workspacePath || !descriptor.workspaceIdentity) return;
+        // omz：上游此处还有 webRemoteControlManager.replaceRemoteSession（relay v2 手机桥
+        // 换代）；relay v2 不随本期，换代挂账随 P9 relay 批回补。
+        win.webContents.send(PlatformChannels.RemoteSessionReconnected, {
+          previousSessionId: previousRemoteSessionId,
+          sessionId: descriptor.remoteSessionId,
+          workspacePath: descriptor.workspacePath,
+          workspaceIdentity: descriptor.workspaceIdentity,
+        });
+        emitConnectionLog(win, {
+          sessionId: descriptor.remoteSessionId,
+          level: "info",
+          message: `远程 ${descriptor.target.kind} workspace 已自动重连`,
+        });
+      })
+      .catch((error: unknown) => {
+        route.providerProvisioningDispose?.();
+        routesBySessionId.delete(descriptor.remoteSessionId);
+        child.postMessage({
+          type: HostMessageTypes.DisposeRemoteWorkspaceSession,
+          requestId: randomUUID(),
+          remoteSessionId: descriptor.remoteSessionId,
+        });
+        options.logger.warn("[window-host-remote] renderer re-attachment after reconnect failed", {
+          previousRemoteSessionId,
+          remoteSessionId: descriptor.remoteSessionId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }
+
   function ensureHostListener(child: ElectronUtilityProcess, webContentsId: number): void {
     if (listenedHosts.has(child)) return;
     listenedHosts.add(child);
@@ -533,6 +612,15 @@ export function createRemoteWorkspaceSessionManager(options: {
       }
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceConnected) {
         handleConnected(child, webContentsId, parsed.data.requestId, parsed.data.descriptor);
+        return;
+      }
+      if (parsed.data.type === HostResponseTypes.RemoteWorkspaceReconnected) {
+        handleReconnected(
+          child,
+          webContentsId,
+          parsed.data.previousRemoteSessionId,
+          parsed.data.descriptor,
+        );
         return;
       }
       if (parsed.data.type === HostResponseTypes.RemoteWorkspaceConnectFailed) {
