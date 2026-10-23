@@ -115,6 +115,7 @@ import { WebElementContextAttachmentChip } from "@/v4/composer/WebElementContext
 import { ConversationSelectionReferenceChip } from "@/v4/composer/ConversationSelectionReferenceChip.js";
 import { PptxElementReferenceChip } from "@/v4/composer/PptxElementReferenceChip.js";
 import { useOpenPptxElementReference } from "@/v4/composer/useOpenPptxElementReference.js";
+import { conversationSelectionContextKey } from "@/lib/conversationSelectionReference.js";
 import { ConversationFileRewindDialog } from "@/v4/ConversationFileRewindDialog.js";
 import { ConversationUserInputBody } from "@/v4/ConversationUserInputBody.js";
 import { ConversationUserInputContent } from "@/v4/ConversationUserInputContent.js";
@@ -1224,14 +1225,17 @@ const UserInputRowView = memo(function UserInputRowView({
                     />
                     <ConversationSelectionReferenceChip
                       references={editPromptContexts.conversationSelections}
-                      onRemove={(id) =>
+                      onRemove={(reference) => {
+                        // composer/B-5：恢复出的选区没有 id，旧谓词 `!("id" in item) || ...`
+                        // 对无 id 项恒真 → 点删除无反应（死按钮）。按 key 精确匹配删除。
+                        const removedKey = conversationSelectionContextKey(reference);
                         setEditPromptContexts((current) => ({
                           ...current,
                           conversationSelections: current.conversationSelections.filter(
-                            (item) => !("id" in item) || item.id !== id,
+                            (item) => conversationSelectionContextKey(item) !== removedKey,
                           ),
-                        }))
-                      }
+                        }));
+                      }}
                       onRemoveAll={() =>
                         setEditPromptContexts((current) => ({
                           ...current,

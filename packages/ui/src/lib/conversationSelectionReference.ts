@@ -36,6 +36,20 @@ export type ConversationSelectionDisplayReference =
   | ConversationSelectionText
   | ConversationSelectionReference;
 
+/**
+ * 会话选区 chip 的稳定身份键。
+ *
+ * `parsePromptConversationSelections` 对现代 `# userselect:` 块产出 `{ path?, text }`，**没有 id**；
+ * 而 live 选区一定有 id。去重（mergeContextList）与单条删除都必须走本函数，
+ * 不能给恢复项塞合成 id —— 否则 live 与 restored 永不相等，同一选区会渲染成两枚 chip。
+ */
+export function conversationSelectionContextKey(
+  reference: ConversationSelectionDisplayReference,
+): string {
+  if ("id" in reference && reference.id) return reference.id;
+  return `${reference.path ?? ""}\u0000${reference.text}`;
+}
+
 interface ConversationSelectionAddEventDetail {
   targetSessionId: string | null;
   workspaceKey: string;

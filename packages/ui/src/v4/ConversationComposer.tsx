@@ -154,7 +154,10 @@ import { PptxElementReferenceChip } from "@/v4/composer/PptxElementReferenceChip
 import { useOpenPptxElementReference } from "@/v4/composer/useOpenPptxElementReference.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { useConversationSelectionReferences } from "@/v4/composer/useConversationSelectionReferences.js";
-import type { ConversationSelectionDisplayReference } from "@/lib/conversationSelectionReference.js";
+import {
+  conversationSelectionContextKey,
+  type ConversationSelectionDisplayReference,
+} from "@/lib/conversationSelectionReference.js";
 import { ConversationBackgroundWorkTrigger } from "@/v4/composer/ConversationBackgroundWorkTrigger.js";
 import { V4ComposerCuaEntry } from "@/v4/composer/V4ComposerCuaEntry.js";
 import {
@@ -854,14 +857,20 @@ function ConversationComposerImpl({
     clearPptxElementReferences();
   }, [clearPptxElementReferences, updateRestoredPromptContexts]);
   const removeMergedConversationSelectionReference = useCallback(
-    (id: string) => {
+    (reference: ConversationSelectionDisplayReference) => {
+      // 恢复出的选区没有 id：删除必须按 key（id 或 path+text）精确匹配，
+      // 否则「无 id 项恒不匹配」会留死按钮（composer/B-5）。
+      const key = conversationSelectionContextKey(reference);
       updateRestoredPromptContexts((current) => ({
         ...current,
         conversationSelections: current.conversationSelections.filter(
-          (item) => conversationSelectionContextKey(item) !== id,
+          (item) => conversationSelectionContextKey(item) !== key,
         ),
       }));
-      removeConversationSelectionReference(id);
+      // live 侧条目一定有 id；恢复项只存在于载体，不需要也不应该反向写 live。
+      if ("id" in reference && reference.id) {
+        removeConversationSelectionReference(reference.id);
+      }
     },
     [removeConversationSelectionReference, updateRestoredPromptContexts],
   );

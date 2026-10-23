@@ -661,3 +661,94 @@ test("composer/B-2: 旧 scope 更新整条丢弃，函数式 updater 基于传�
   assert.match(COMPOSER_SOURCE, /currentDraft\.promptContexts \?\? EMPTY_RESTORED_PROMPT_CONTEXTS/);
 });
 
+// ── composer/B-5：会话选区 chip 单条删除 ──────────────────────────────────────
+
+test("composer/B-5: 无 id 会话选区可单条删除，key 归一去重与删除同源", () => {
+  const restoredA = { path: "src/a.ts", text: "片段 A" };
+  const restoredA2 = { path: "src/a.ts", text: "片段 A" };
+  const restoredB = { text: "片段 B" };
+
+  // ① 无 id 选区的 key 稳定
+  assert.equal(
+    conversationSelectionContextKey(restoredA),
+    conversationSelectionContextKey(restoredA2),
+    "同 path/同 text 必须得到同一 key",
+  );
+  // 与四类通用 key 同义（两处实现不得漂移）
+  assert.equal(
+    resolveComposerSubmitContextKey(restoredA),
+    conversationSelectionContextKey(restoredA),
+  );
+
+  // legacy 块解析出的带 id 选区按 id 归键
+  const legacyItem = {
+    id: "sel-1",
+    contentType: "user",
+    sourceSessionId: "s1",
+    sourceRowId: 3,
+    text: "旧选区",
+  };
+  const legacyText = `正文\n\n# Conversation selections:\n\`\`\`zcode-conversation-selections\n${JSON.stringify([legacyItem])}\n\`\`\``;
+  const legacyParsed = parsePromptConversationSelections(legacyText);
+  assert.equal(legacyParsed.references.length, 1);
+  const legacyReference = legacyParsed.references[0]!;
+  assert.equal(conversationSelectionContextKey(legacyReference), "sel-1");
+
+  // ② restored 与 live 同 key 去重后只 1 条
+  assert.equal(
+    mergeContextList([restoredA], [restoredA2], conversationSelectionContextKey).length,
+    1,
+    "同 key 的 live/restored 只能出一条 chip",
+  );
+
+  // ③ 删除按 key 精确移除，其他条目不受影响
+  const all = [restoredA, restoredB, legacyReference];
+  const afterRemoveB = all.filter(
+    (item) => conversationSelectionContextKey(item) !== conversationSelectionContextKey(restoredB),
+  );
+  assert.deepEqual(afterRemoveB, [restoredA, legacyReference]);
+
+  // ④ 编辑态无 id 选区可单删（与 chip 的 onRemove 同一 key 谓词）
+  const afterRemoveA = all.filter(
+    (item) => conversationSelectionContextKey(item) !== conversationSelectionContextKey(restoredA),
+  );
+  assert.deepEqual(afterRemoveA, [restoredB, legacyReference]);
+  assert.doesNotMatch(
+    ROW_VIEW_SOURCE,
+    /!\("id" in item\) \|\| item\.id !== id/,
+    "编辑态旧谓词对无 id 项恒真，必须换成 key 过滤",
+  );
+  assert.match(ROW_VIEW_SOURCE, /conversationSelectionContextKey\(item\) !== removedKey/);
+  assert.match(ROW_VIEW_SOURCE, /onRemove=\{\(reference\) => \{/);
+
+  // chip：删除按钮不再被 isConversationSelectionReference 守卫掉，且回调传 reference
+  assert.doesNotMatch(
+    SELECTION_CHIP_SOURCE,
+    /onRemove && isConversationSelectionReference\(reference\)/,
+    "旧守卫会让恢复项永远没有删除按钮",
+  );
+  assert.match(SELECTION_CHIP_SOURCE, /\{onRemove \? \(/);
+  assert.match(SELECTION_CHIP_SOURCE, /onClick=\{\(\) => onRemove\(reference\)\}/);
+  assert.doesNotMatch(
+    SELECTION_CHIP_SOURCE,
+    /onRemove\(reference\.id\)/,
+    "不得只传 id（恢复项没有 id）",
+  );
+
+  // 两个调用点同批改：Composer 以 reference 形态接线，编辑态以 key 过滤
+  assert.match(
+    COMPOSER_SOURCE,
+    /const removeMergedConversationSelectionReference = useCallback\(\s*\(reference: ConversationSelectionDisplayReference\)/,
+  );
+  assert.match(COMPOSER_SOURCE, /onRemove=\{removeMergedConversationSelectionReference\}/);
+  assert.match(
+    COMPOSER_SOURCE,
+    /conversationSelections\.filter\(\s*\(item\) => conversationSelectionContextKey\(item\) !== key/,
+  );
+  assert.doesNotMatch(
+    COMPOSER_SOURCE,
+    /item\) => !\("id" in item\) \|\| item\.id !== id/,
+    "Composer 侧同样不得用恒真谓词",
+  );
+});
+

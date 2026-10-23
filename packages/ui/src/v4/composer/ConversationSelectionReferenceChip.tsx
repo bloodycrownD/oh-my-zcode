@@ -16,7 +16,11 @@ export function ConversationSelectionReferenceChip({
 }: {
   references: readonly ConversationSelectionDisplayReference[];
   contentAlign?: AttachmentHoverCardContentProps["align"];
-  onRemove?: (id: string) => void;
+  /**
+   * 单条删除。入参是完整 reference（不是 id）：恢复出的会话选区没有 id，
+   * 调用方必须用 `conversationSelectionContextKey` 归一化后比较，见 composer/B-5。
+   */
+  onRemove?: (reference: ConversationSelectionDisplayReference) => void;
   onRemoveAll?: () => void;
 }) {
   const { intl } = useZCodeIntl();
@@ -77,14 +81,19 @@ export function ConversationSelectionReferenceChip({
               </div>
             ) : null}
           </div>
-          {onRemove && isConversationSelectionReference(reference) ? (
+          {/*
+            单条删除不再受 `isConversationSelectionReference` 守卫：恢复出的会话选区没有 id，
+            旧守卫会让删除按钮对该类条目永不可达（composer/B-5）。是否可删只由调用方是否传
+            onRemove 决定；删除按 key 精确匹配。
+          */}
+          {onRemove ? (
             <Button
               type="button"
               variant="ghost"
               size="icon-xs"
               className="size-5 shrink-0 text-foreground-subtle opacity-0 group-hover/reference:opacity-100"
               aria-label={removeLabel}
-              onClick={() => onRemove(reference.id)}
+              onClick={() => onRemove(reference)}
             >
               <Trash2Icon className="size-3.5" />
             </Button>
