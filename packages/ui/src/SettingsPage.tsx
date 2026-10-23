@@ -14,15 +14,12 @@ import type {
   IntegratedTerminalShellOption,
   IntegratedTerminalShellSelection,
   Locale,
-
   ZCodeInteractionBehavior,
 } from "@zcode/shared";
 import {
-
   TID_SETTINGS_BACK_BUTTON,
   TID_SETTINGS_PAGE,
   TID_SETTINGS_SECTION_NAV,
-
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
@@ -40,7 +37,6 @@ import {
   consumePendingSettingsPluginScopeKey,
   consumePendingSettingsPluginTab,
   consumePendingSettingsModelProviderTarget,
-
   resolveSettingsSection,
   shouldFallbackSettingsUsageTabToApp,
   writeLastSettingsSectionPreference,
@@ -106,8 +102,6 @@ function runSettingsActionAsync<T>(options: {
   return options.operation();
 }
 
-
-
 function SettingsSidebarButton({
   icon: Icon,
   label,
@@ -157,10 +151,7 @@ export function SettingsPage({
   onBack,
   onCreateTask,
 
-  allowOpenWorkspace = true,
-
-
-
+  allowOpenWorkspace: _allowOpenWorkspace = true,
 }: {
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
@@ -225,7 +216,7 @@ export function SettingsPage({
   const setNotificationEnabled = useZCodeStore((state) => state.setNotificationEnabled);
   const notificationSoundEnabled = useZCodeStore((state) => state.notificationSoundEnabled);
   const setNotificationSoundEnabled = useZCodeStore((state) => state.setNotificationSoundEnabled);
-// FORK（D-4）：Coding Plan 使用统计（账号来源、权益、团队商品、tab 切换、
+  // FORK（D-4）：Coding Plan 使用统计（账号来源、权益、团队商品、tab 切换、
   // 购买入口）随订阅面整删。usage 分区只剩 App Usage（本地 agent 数据库统计）。
   const usageActiveTab = "app" as const;
   const checkingUsageCodingPlanTab = false;

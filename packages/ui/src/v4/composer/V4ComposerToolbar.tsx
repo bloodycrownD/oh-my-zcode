@@ -17,13 +17,9 @@
  */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  BUILTIN_MODEL_PROVIDER_IDS,
   TID_V4_MODEL_CONFIG,
   TID_V4_COMPOSER_INPUT,
   ZCODE_AGENT_PROVIDER,
-  type ProviderFamilyConnectionSelection,
-  type ProviderFamilyConnectionSelectionSettings,
-  type ProviderFamilyDomain,
   type ZCodeConfigOption,
   type ZCodeProvider,
 } from "@zcode/shared";
@@ -85,53 +81,6 @@ export interface ModelSelectionSource {
   model: string;
 }
 
-type V4ContextPlanConnection =
-  | { kind: "none" }
-  | {
-      family: ProviderFamilyDomain;
-      kind: "personalCoding";
-      providerId:
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan;
-    }
-  | {
-      family: ProviderFamilyDomain;
-      kind: "teamCoding";
-      providerId:
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiTeamCodingPlan
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan;
-      selection: Extract<ProviderFamilyConnectionSelection, { kind: "team-coding-plan" }>;
-    }
-  | {
-      family: ProviderFamilyDomain;
-      kind: "start";
-      providerId:
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan
-        | typeof BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan;
-    };
-
-function resolveFamilyForPlanProviderId(providerId: string | null | undefined): {
-  family: ProviderFamilyDomain;
-  kind: "personalCoding" | "teamCoding" | "start";
-} | null {
-  switch (providerId?.trim()) {
-    case BUILTIN_MODEL_PROVIDER_IDS.zaiIndividualCodingPlan:
-      return { family: "zai", kind: "personalCoding" };
-    case BUILTIN_MODEL_PROVIDER_IDS.zaiTeamCodingPlan:
-      return { family: "zai", kind: "teamCoding" };
-    case BUILTIN_MODEL_PROVIDER_IDS.zaiStartPlan:
-      return { family: "zai", kind: "start" };
-    case BUILTIN_MODEL_PROVIDER_IDS.bigmodelIndividualCodingPlan:
-      return { family: "bigmodel", kind: "personalCoding" };
-    case BUILTIN_MODEL_PROVIDER_IDS.bigmodelTeamCodingPlan:
-      return { family: "bigmodel", kind: "teamCoding" };
-    case BUILTIN_MODEL_PROVIDER_IDS.bigmodelStartPlan:
-      return { family: "bigmodel", kind: "start" };
-    default:
-      return null;
-  }
-}
-
 export interface V4ComposerToolbarProps {
   workspacePath: string;
   workspaceIdentity?: string;
@@ -180,7 +129,7 @@ function V4ComposerModelControlsImpl({
   modelSelectionState = MODEL_SELECTION_LOADING_STATE,
   modelSelectionReload,
   provider,
-  isMobileViewport = false,
+  isMobileViewport: _isMobileViewport = false,
   draftMode = false,
   draftConfig,
   usage,
@@ -200,7 +149,7 @@ function V4ComposerModelControlsImpl({
     workspaceIdentity,
   );
   const providerSettingsRead = useProviderSettingsView();
-  const providerSettingsView =
+  const _providerSettingsView =
     providerSettingsRead.state.status === "ready" ? providerSettingsRead.state.view : null;
   const openSettingsTab = useTabStore((state) => state.openSettingsTab);
   const modelTriggerRef = useRef<HTMLSpanElement | null>(null);
@@ -256,7 +205,7 @@ function V4ComposerModelControlsImpl({
   // （contextWindow / magicContext / taskUsage），由 ChatContextUsage 继续渲染。
   const contextCodingPlanUsageSelectedSourceId: SidebarUsageCodingPlanSourceId | undefined =
     undefined;
-  const handleUsageClick = useCallback(
+  const _handleUsageClick = useCallback(
     () => handleOpenUsageDetails(contextCodingPlanUsageSelectedSourceId),
     [contextCodingPlanUsageSelectedSourceId, handleOpenUsageDetails],
   );

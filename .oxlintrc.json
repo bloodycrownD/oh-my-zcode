@@ -68,6 +68,9 @@
     // 只有目录形式才被识别，改写如下。
     ".reference",
     // 本地未跟踪工具目录（迭代过程产物，不入库），排除以免 max-lines 误报拖红根 lint。
-    ".tools/**"
+    ".tools/**",
+    // docs/ 是迭代文档与工作工件（PRD/spec/cache 脚本、上游 locale 快照等），非产品代码：
+    // 其质量由各迭代流程自管，不参与产品 lint 门禁（含基线计数与 max-lines）。
+    "docs/**"
   ]
 }

@@ -48,7 +48,6 @@ import {
   createMemoryService,
 } from "@zcode/services/node";
 import {
-  buildRuntimeZCodeApiUrl,
   DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
   type ZCodeSessionRuntimePreferencesResult,
 } from "@zcode/shared";

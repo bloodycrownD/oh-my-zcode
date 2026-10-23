@@ -917,6 +917,9 @@ export const v4AttachmentBeginParamsSchema = z
       .string()
       .min(1)
       .max(255)
+      // 协议校验语义：文件名显式禁止 NUL/CR/LF 控制字符（防止路径分隔与分帧破坏），
+      // 属有意为之，非误用；控制字符只能以转义形式出现在正则中，豁免本条误报。
+      // oxlint-disable-next-line eslint(no-control-regex)
       .regex(/^[^\0\r\n]+$/),
     mime: z
       .string()

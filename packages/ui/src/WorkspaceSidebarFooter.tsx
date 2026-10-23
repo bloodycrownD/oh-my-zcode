@@ -1,15 +1,8 @@
 /* oxlint-disable eslint(max-lines) -- footer 聚合账户、主题、模式和快捷键菜单。 */
 import type { Locale } from "@zcode/shared";
 import { memo, useCallback, useEffect, useState } from "react";
-import {
-  DesktopCommandIds,
-
-
-
-  TID_TASK_SETTINGS_BUTTON,
-} from "@zcode/shared";
+import { DesktopCommandIds, TID_TASK_SETTINGS_BUTTON } from "@zcode/shared";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
-import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar.js";
 import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -18,26 +11,13 @@ import {
   DropdownMenuItem,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-
   DropdownMenuShortcut,
   DropdownMenuSub,
   DropdownMenuSubContent,
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
-import {
-  PencilRuler,
-  Globe,
-
-
-
-  Maximize,
-  Palette,
-  Settings,
-
-  ZoomIn,
-  ZoomOut,
-} from "lucide-react";
+import { PencilRuler, Globe, Maximize, Palette, Settings, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useShortcutCommandLabel } from "@/shortcuts/useShortcutBindings.js";
