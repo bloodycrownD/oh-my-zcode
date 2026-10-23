@@ -1,5 +1,5 @@
-dag_version: 4
-review_round: 4
+dag_version: 5
+review_round: 5
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
@@ -11,19 +11,23 @@ rounds:
     p0: 6
     p1: 9
     p2: 9
-    closed: "报告落盘/阀=闸门/数据所有者裁定/例外范围/Picker 签名/Step1 三依赖 全闭合"
   - round: 2
     verdict: No-Go
     p0: 5
     p1: 10
     p2: 12
-    closed: "迁移生产链四接线点/remoteProjectConnection/Picker host+initialRoots/EditConnectionProfileDialog/tripwire 同步清单；P1 全修"
   - round: 3
     verdict: No-Go
     p0: 2
     p1: 10
     p2: 11
-    closed: "P0-1 connectHost 两段落地（Step2 directory 版→Step7 management 版，R2 登记）；P0-2 test:v4-perf 白名单统一要求（Step 1 ⑥）；P1 全修（TaskIndexRepo 四参+9 调用点/purpose 方案 a（SSHDialog workspacePurpose prop+双挂载点）/tripwire :139-143+:149-152/hostId 消费分支/alias 死文件簇+boundary hook 依赖/进度日志接线+sourceServerStatusRegistry/localUsageEvidence 消费/createHasExistingLocalTask/死 import 2 项/onLegacyCapability 并入 Step4）；P2 顺手（setText 5 个统一/行数 381/307/134/300/472/100/i18n 两键 T-SB3+T-PV2/§2.2/openWithFileApplication 更正/Fields 措辞/Step2 register+导出面）"
+  - round: 4
+    verdict: No-Go
+    p0: 2
+    p1: 6
+    p2: 11
+    closed: "P0-1 admitConnection/prepareRemoteServerConnection 成员登记链+onProjectChange（Step 2）；P0-2 migrateConnectionHosts 独立迁移 0008_connection_hosts+存量库 T-RP5；P1-1 isInvalidPort 并入 Step 9；P1-2 数据所有者 §3 修正（host_id 派生/membership_id randomUUID/remote-project.source-identity-changed）；P1-3 createRemoteProjectService 三选项+register；P1-4 Step 7 connectHost management 替换+Step 2 server-target 分支；P1-5 四 token 死 import；P1-6 Root 语义切换登记；P2 全部（8 处调用点/可选事件 onDidAppendOperationLog/清单补 3 文件/行号/Picker onClose/薄包装/T-D4→T-UF4/目录注记）"
 notes:
   - "关联事故文档：docs/iterations/backlog-sweep/incident-ghost-message.md（v1.0.22 已修）"
   - "v1.0.22 已发布：Release run 39968021166 success"
+  - "轮次上限 5；r5 为末轮，若仍 No-Go 向用户汇报未闭合 P0 请拍板"
