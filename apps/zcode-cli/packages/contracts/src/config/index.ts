@@ -271,10 +271,6 @@ export interface RuntimeConfig {
   toolSearch?: {
     mode?: ToolSearchMode;
   };
-  /** ToolSearch 模式域（phase-toolsearch）：config.json 顶层的会话级默认；缺席=off。 */
-  toolSearch?: {
-    mode?: ToolSearchMode;
-  };
   /**
    * FORK（S23 / D-12）：magic-context 参数域。承载类型 `unknown` 的理由与
    * `ConfigValue<"magicContext">` 分支同源（见上方注释）：唯一权威结构是包内
