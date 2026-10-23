@@ -1613,6 +1613,8 @@ export const zcodeSessionRuntimePreferencesResultSchema = z
     memoryEnabled: z.boolean().default(false),
     askUserQuestionAutoResolutionEnabled: z.boolean().default(true),
     integratedTerminalShell: integratedTerminalShellSelectionSchema.optional(),
+    // ToolSearch 模式（phase-toolsearch）：兼容旧 Host，缺席按 off 解析。
+    toolSearchMode: z.enum(["auto", "local", "off"]).default("off"),
     // 兼容旧 Host：缺少字段时在协议解析边界使用当前默认策略。
     modelContextBudgetStrategy: zcodeModelContextBudgetStrategySchema.default(
       DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,

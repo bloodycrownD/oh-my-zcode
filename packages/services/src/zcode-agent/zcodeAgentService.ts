@@ -1770,6 +1770,7 @@ export function createZCodeAgentService(
                     askUserQuestionAutoResolutionEnabled: true,
                     nativeSearchEnhancementsEnabled: true,
                     memoryEnabled: false,
+                    toolSearchMode: "off",
                   },
                 );
               } catch (error) {

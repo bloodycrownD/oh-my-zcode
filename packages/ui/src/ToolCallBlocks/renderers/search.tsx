@@ -88,9 +88,48 @@ export function getSearchPrimaryText(intl: IntlLike, input: unknown): string {
 
 export function SearchToolCallBlock(context: ToolCallBlockRenderContext) {
   const { intl } = useZCodeIntl();
+  return (
+    <SearchToolCallLayout
+      {...context}
+      searchPrimaryText={getSearchPrimaryText(intl, context.toolCallNode.toolCall.input)}
+    />
+  );
+}
+
+// ToolSearch 卡（phase-toolsearch / T08 分流）：select: 查询展示命中名单，关键词查询
+// 展示原 query；隐藏快照字段提示（结果只是引用块，没有可展开的完整字段）。
+export function ToolSearchToolCallBlock(context: ToolCallBlockRenderContext) {
+  const { intl } = useZCodeIntl();
+  const { input } = context.toolCallNode.toolCall;
+  const query = isPlainRecord(input) && typeof input.query === "string" ? input.query.trim() : "";
+  const selection = /^select:(.+)$/i.exec(query);
+  const label = selection
+    ? selection[1]!
+        .split(",")
+        .map((name) => name.trim())
+        .filter(Boolean)
+        .join(", ")
+    : query;
+  const searchPrimaryText = label
+    ? intl.formatMessage({ id: "chat.toolCall.search.toolsWithQuery" }, { query: label })
+    : intl.formatMessage({ id: "chat.toolCall.search.tools" });
+  return (
+    <SearchToolCallLayout
+      {...context}
+      searchPrimaryText={searchPrimaryText}
+      kindLabelOverride=""
+      hideSnapshotNotice
+    />
+  );
+}
+
+function SearchToolCallLayout(
+  context: ToolCallBlockRenderContext & { searchPrimaryText: string; hideSnapshotNotice?: boolean },
+) {
+  const { intl } = useZCodeIntl();
   const { toolCallNode, isRunning, statusLabel, errorText } = context;
   const { toolCall } = toolCallNode;
-  const searchPrimaryText = getSearchPrimaryText(intl, toolCall.input);
+  const searchPrimaryText = context.searchPrimaryText;
   const primaryText = useMemo(
     () => <span className="truncate">{searchPrimaryText}</span>,
     [searchPrimaryText],
@@ -120,14 +159,16 @@ export function SearchToolCallBlock(context: ToolCallBlockRenderContext) {
         title={toolCall.title}
         content={null}
       />
-      <ToolSnapshotFieldNotice
-        refs={toolCall.snapshotRefs ?? []}
-        onLoadFullToolCallFields={
-          context.onLoadFullToolCallFields
-            ? () => context.onLoadFullToolCallFields?.(toolCall.toolId)
-            : undefined
-        }
-      />
+      {!context.hideSnapshotNotice && (
+        <ToolSnapshotFieldNotice
+          refs={toolCall.snapshotRefs ?? []}
+          onLoadFullToolCallFields={
+            context.onLoadFullToolCallFields
+              ? () => context.onLoadFullToolCallFields?.(toolCall.toolId)
+              : undefined
+          }
+        />
+      )}
       {/* <pre>{JSON.stringify(toolCall, null, 2)}</pre> */}
     </>
   );

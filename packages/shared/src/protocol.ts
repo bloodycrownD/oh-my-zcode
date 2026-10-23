@@ -325,6 +325,8 @@ export interface AppSettings {
   nativeSearchEnhancementsEnabled?: boolean;
   /** 新建或冷恢复 Session 是否启用 Memory；默认关闭。 */
   memoryEnabled?: boolean;
+  /** ToolSearch 模式（phase-toolsearch）；auto 按模型能力降级，off=完整工具目录。 */
+  toolSearchMode?: "auto" | "local" | "off";
   onboardingOccupation?:
     | "office"
     | "developer"

@@ -60,6 +60,7 @@ export function GeneralSectionContent({
   integratedTerminalShell = { mode: "auto" },
   integratedTerminalShellOptions = [],
   nativeSearchEnhancementsEnabled,
+  toolSearchMode = "off",
   httpProxy = "",
   httpProxyNoProxy = "",
   httpProxyCaCertPath = "",
@@ -86,6 +87,7 @@ export function GeneralSectionContent({
   onTerminalFontFamilyChange = async () => {},
   onIntegratedTerminalShellChange = async () => {},
   onNativeSearchEnhancementsEnabledChange,
+  onToolSearchModeChange,
   onHttpProxyChange = async () => {},
   onHttpProxyNoProxyChange = async () => {},
   onHttpProxyCaCertPathChange = async () => {},
@@ -118,6 +120,8 @@ export function GeneralSectionContent({
   integratedTerminalShell?: IntegratedTerminalShellSelection;
   integratedTerminalShellOptions?: IntegratedTerminalShellOption[];
   nativeSearchEnhancementsEnabled: boolean;
+  /** ToolSearch 模式（phase-toolsearch）；auto 按模型能力自动选 native/local。 */
+  toolSearchMode?: "auto" | "local" | "off";
   httpProxy?: string;
   httpProxyNoProxy?: string;
   httpProxyCaCertPath?: string;
@@ -145,6 +149,7 @@ export function GeneralSectionContent({
   onTerminalFontFamilyChange: (fontFamily: string) => Promise<void>;
   onIntegratedTerminalShellChange?: (selection: IntegratedTerminalShellSelection) => Promise<void>;
   onNativeSearchEnhancementsEnabledChange: (enabled: boolean) => Promise<void>;
+  onToolSearchModeChange: (mode: "auto" | "local" | "off") => Promise<void>;
   onHttpProxyChange?: (httpProxy: string) => Promise<void>;
   onHttpProxyNoProxyChange?: (noProxy: string) => Promise<void>;
   onHttpProxyCaCertPathChange?: (caCertPath: string) => Promise<void>;
@@ -435,6 +440,32 @@ export function GeneralSectionContent({
                 void onNativeSearchEnhancementsEnabledChange(checked);
               }}
             />
+          }
+        />
+        <SettingsRow
+          label={intl.formatMessage({ id: "settings.toolSearch" })}
+          description={intl.formatMessage({ id: "settings.toolSearchDescription" })}
+          detail={
+            <span className="text-xs text-[var(--color-text-muted)]">
+              {intl.formatMessage({ id: "settings.toolSearchExperimentalNotice" })}
+            </span>
+          }
+          control={
+            <Select
+              value={toolSearchMode}
+              onValueChange={(value) => {
+                void onToolSearchModeChange(value as "auto" | "local" | "off");
+              }}
+            >
+              <SelectTrigger aria-label={intl.formatMessage({ id: "settings.toolSearch" })} />
+              <SelectContent>
+                {(["auto", "local", "off"] as const).map((mode) => (
+                  <SelectItem key={mode} value={mode}>
+                    {intl.formatMessage({ id: `settings.toolSearch.${mode}` })}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           }
         />
       </SettingsGroupCard>

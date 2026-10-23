@@ -2015,6 +2015,11 @@ const enUS: Record<string, string> = {
   "settings.nativeSearchEnhancements": "Enhanced Find and Grep",
   "settings.nativeSearchEnhancementsDescription":
     "Use enhanced Find and Grep in new sessions and sessions restored after an app restart. Active sessions keep their current setting; Find remains unchanged on Windows.",
+  "settings.toolSearch": "Tool search",
+  "settings.toolSearchDescription":
+    "Auto selects native or local search for the model. Local loads tools on demand. Off sends the full tool catalog. Applies to new sessions and sessions restored after an app restart; active sessions keep their settings.",
+  "settings.toolSearchExperimentalNotice":
+    "Experimental feature. Using native mode with a model provider that does not fully support native ToolSearch may invalidate prompt caching and increase token usage.",
   "settings.memory": "Memory",
   "settings.context.title": "Context Management",
   "settings.context.description":

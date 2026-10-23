@@ -1954,6 +1954,8 @@ export function createLocalServices(options: {
                 settings.askUserQuestionAutoResolutionEnabled !== false,
               nativeSearchEnhancementsEnabled: settings.nativeSearchEnhancementsEnabled !== false,
               memoryEnabled: settings.memoryEnabled === true,
+              // ToolSearch 模式（phase-toolsearch）：桌面设置域直答给 CLI runtime。
+              toolSearchMode: settings.toolSearchMode ?? "off",
               modelContextBudgetStrategy,
               // user-execution 只消费 Shell；共享默认策略是统一 result schema 的兼容占位，
               // 不会覆盖 runtime-materialization 阶段已经固定的 strategy。

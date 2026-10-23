@@ -1915,6 +1915,11 @@ const zhCN: Record<string, string> = {
   "settings.nativeSearchEnhancements": "增强 Find 和 Grep",
   "settings.nativeSearchEnhancementsDescription":
     "在新建会话或应用重启后恢复的会话中使用增强 Find 和 Grep。当前会话保持现有设置；Windows 的 Find 保持不变。",
+  "settings.toolSearch": "工具搜索",
+  "settings.toolSearchDescription":
+    "自动：按模型选择原生或本地搜索；本地：通过本地搜索按需加载工具；关闭：发送完整工具目录。新建会话或应用重启后恢复会话时生效，当前会话保持原设置。",
+  "settings.toolSearchExperimentalNotice":
+    "实验性功能。若模型供应商未完整支持原生 ToolSearch，使用原生模式可能导致缓存失效并增加 Token 用量。",
   "settings.memory": "记忆",
   "settings.context.title": "上下文管理",
   "settings.context.description":

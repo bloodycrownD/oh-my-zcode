@@ -441,6 +441,9 @@ const appSettingsObjectSchema = z.object({
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().default(false),
   nativeSearchEnhancementsEnabled: z.boolean().default(true),
+  // ToolSearch 模式（phase-toolsearch）：默认 off=完整工具目录；不含 native——
+  // native 只经 auto 按模型能力自动选择（与上游 AppToolSearchMode 同形）。
+  toolSearchMode: z.enum(["auto", "local", "off"]).default("off"),
   onboardingOccupation: appSettingsOccupationSchema.nullish(),
   proactiveSuggestionsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().default(false),
@@ -505,6 +508,7 @@ export const appSettingsPatchSchema = z.object({
   providerFamilyDomainUpdatedAt: z.number().int().nonnegative().optional(),
   providerFamilyDomainMigrated: z.boolean().optional(),
   nativeSearchEnhancementsEnabled: z.boolean().optional(),
+  toolSearchMode: z.enum(["auto", "local", "off"]).optional(),
   onboardingOccupation: z
     .enum([
       "office",

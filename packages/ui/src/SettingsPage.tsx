@@ -295,6 +295,7 @@ export function SettingsPage({
   const localHostServices = useBaseWorkspaceServices();
   const { settings: sharedSettings, update: updateSharedSettings } = useSettings();
   const nativeSearchEnhancementsEnabled = sharedSettings?.nativeSearchEnhancementsEnabled !== false;
+  const toolSearchMode = sharedSettings?.toolSearchMode ?? "off";
   const askUserQuestionAutoResolutionEnabled =
     sharedSettings?.askUserQuestionAutoResolutionEnabled !== false;
   const modelIoFullRetentionEnabled = sharedSettings?.modelIoFullRetentionEnabled === true;
@@ -497,6 +498,21 @@ export function SettingsPage({
         completed: {
           resultSource: "shared_settings",
           stateAfter: enabled ? "enabled" : "disabled",
+        },
+      });
+    },
+    [updateSharedSettings],
+  );
+  const handleToolSearchModeChange = useCallback(
+    async (mode: "auto" | "local" | "off") => {
+      await runSettingsActionAsync({
+        featureId: "settings.search",
+        action: "select_tool_search_mode",
+        trigger: "select",
+        operation: () => updateSharedSettings({ toolSearchMode: mode }),
+        completed: {
+          resultSource: "shared_settings",
+          stateAfter: mode,
         },
       });
     },
@@ -1164,6 +1180,8 @@ export function SettingsPage({
                             integratedTerminalShell={integratedTerminalShell}
                             integratedTerminalShellOptions={integratedTerminalShellOptions}
                             nativeSearchEnhancementsEnabled={nativeSearchEnhancementsEnabled}
+                            toolSearchMode={toolSearchMode}
+                            onToolSearchModeChange={handleToolSearchModeChange}
                             httpProxy={httpProxy}
                             httpProxyNoProxy={httpProxyNoProxy}
                             httpProxyCaCertPath={httpProxyCaCertPath}
