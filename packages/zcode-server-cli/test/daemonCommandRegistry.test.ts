@@ -29,7 +29,10 @@ import {
 } from "../src/cli.js";
 
 test("T-RD2 control 命令注册表：新命令与变体字段在位", () => {
-  assert.equal(controlRequestSchema.parse({ id: "cli", command: "running-tasks" }).command, "running-tasks");
+  assert.equal(
+    controlRequestSchema.parse({ id: "cli", command: "running-tasks" }).command,
+    "running-tasks",
+  );
   assert.equal(
     controlRequestSchema.parse({ id: "cli", command: "runtime-identity" }).command,
     "runtime-identity",
@@ -117,7 +120,9 @@ test("T-RD2 排除面守卫（三期解禁后口径）：cli.ts migrate retry �
     "cli.ts 缺少三期 aliasRepo import（解禁面）",
   );
   assert.ok(
-    /runtimeOptions\.workspaceAliasRepo \?\? new SourceServerWorkspaceAliasRepo\(\)/.test(cliSource),
+    /runtimeOptions\.workspaceAliasRepo \?\? new SourceServerWorkspaceAliasRepo\(\)/.test(
+      cliSource,
+    ),
     "migrate retry 必须经 workspaceAliasRepo 注入口，不允许绕过测试边界直接实例化",
   );
   assert.ok(cliSource.includes("migrateRetryRequested"), "cli.ts 缺少 migrate retry 分支");
@@ -125,7 +130,15 @@ test("T-RD2 排除面守卫（三期解禁后口径）：cli.ts migrate retry �
     cliSource.includes('"migrate"') && cliSource.includes('"retry"'),
     "cli.ts 缺少 migrate retry 命令识别",
   );
-  for (const command of ["serve", "status", "running-tasks", "stop", "restart", "update", "uninstall"]) {
+  for (const command of [
+    "serve",
+    "status",
+    "running-tasks",
+    "stop",
+    "restart",
+    "update",
+    "uninstall",
+  ]) {
     assert.ok(cliSource.includes(`"${command}"`), `cli.ts 缺少 ${command} 命令分支`);
   }
   assert.ok(cliSource.includes("proxy-stdio"), "cli.ts 缺少 proxy-stdio 子命令");
