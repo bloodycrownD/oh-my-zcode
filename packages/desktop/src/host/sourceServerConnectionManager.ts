@@ -1099,6 +1099,9 @@ export class SourceServerConnectionManager {
         );
       }
       const sourceServerId = connection.serverInfo.serverId;
+      // P2-1：Directory 换代确认后旧 Profile 已退役、回执携带新 profileId；发布必须挂到
+      // 有效 Profile 上，否则设备卡继续指向已退役的旧 profileId。Directory 缺席时保持入参。
+      let effectiveProfile = profile;
       options.onDiagnosticPhase?.("identity-reconcile");
       // 薄层身份对回（设计说明见 SourceServerConnectProfile）：Directory.recordHandshake
       // （P7 续批注入）是持久判定权威；内存对回保留为 Directory 缺席时（测试 double）的
@@ -1146,6 +1149,8 @@ export class SourceServerConnectionManager {
           });
           throw new SourceServerIdentityChangePendingError(profile.profileId, sourceServerId);
         }
+        // 换代确认路径：Directory 回执给出新 Profile（旧 Profile 已退役），发布与状态全部改挂它。
+        effectiveProfile = handshakeResult.effectiveProfile ?? profile;
       }
       // 关闭发生于身份对回时不能再提交成员；健康 sibling owner 可继续承接本次 admission。
       if (closedBeforePublish !== undefined && !this.onlineBySourceServerId.has(sourceServerId))
@@ -1155,12 +1160,19 @@ export class SourceServerConnectionManager {
       await commitMembership?.(sourceServerId);
       throwIfAborted();
       options.onDiagnosticPhase?.("publish-online");
+      if (effectiveProfile.profileId !== profile.profileId) {
+        // 旧 Profile 已退役，不能停留在 connecting；先显式收敛为 offline 再发布新 Profile online。
+        this.setState(profile.profileId, {
+          state: "offline",
+          ...(profile.sourceServerId ? { sourceServerId: profile.sourceServerId } : {}),
+        });
+      }
 
       const existing = this.onlineBySourceServerId.get(sourceServerId);
       if (existing) {
-        existing.profileIds.add(profile.profileId);
+        existing.profileIds.add(effectiveProfile.profileId);
         this.rememberSourceProfiles(sourceServerId, existing.profileIds);
-        this.setState(profile.profileId, {
+        this.setState(effectiveProfile.profileId, {
           state: "online",
           sourceServerId,
           ...compatibilityState,
@@ -1174,11 +1186,11 @@ export class SourceServerConnectionManager {
       }
       const managed: OnlineConnection = {
         sourceServerId,
-        profileId: profile.profileId,
+        profileId: effectiveProfile.profileId,
         serverInfo: connection.serverInfo,
         services: connection.services,
         connection,
-        profileIds: new Set([profile.profileId]),
+        profileIds: new Set([effectiveProfile.profileId]),
       };
       if (this.options.onProjectChange) {
         managed.projectSubscription = connection.services.broadcastService.onMessage((event) => {
@@ -1203,12 +1215,12 @@ export class SourceServerConnectionManager {
       this.rememberSourceProfiles(sourceServerId, managed.profileIds);
       this.clearRecoveryTimers(sourceServerId);
       this.reconnectInputs.set(sourceServerId, {
-        profile,
+        profile: effectiveProfile,
         target,
         // 操作级 onLog 捕获本次日志及凭据；恢复不得持有旧闭包，下一次操作会重新建日志上下文。
         context: {},
       });
-      this.setState(profile.profileId, {
+      this.setState(effectiveProfile.profileId, {
         state: "online",
         sourceServerId,
         ...compatibilityState,
