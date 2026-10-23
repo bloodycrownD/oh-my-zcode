@@ -260,7 +260,10 @@ const FENCE_LINE_PATTERN = /^\s*(`{3,}|~{3,})/;
  */
 function isRichMentionFileDestination(destination: string): boolean {
   if (destination.startsWith("./") || destination.startsWith("../")) return true;
-  if (destination.startsWith("/")) return true;
+  // 协议相对 URL（`//cdn.example.com/a.ts`）同样以 `/` 开头，但它是网络地址而不是工作区路径。
+  // 无条件命中绝对路径白名单会把 `[doc](//cdn.example.com/a.ts)` 还原成本地文件胶囊，
+  // 违反 R7「白名单外目的地一律逐字留在正文」。
+  if (destination.startsWith("/") && !destination.startsWith("//")) return true;
   return /^[a-zA-Z]:[\\/]/.test(destination);
 }
 

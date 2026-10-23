@@ -183,7 +183,7 @@ test("T-PR1-4: 目录尾斜杠保留 directory 语义（不能退化成 file）"
   });
 });
 
-test("T-PR1-5: 白名单外目的地一律不转（http/mailto/未知协议/裸相对路径）", () => {
+test("T-PR1-5: 白名单外目的地一律不转（http/mailto/未知协议/协议相对 URL/裸相对路径）", () => {
   const input = [
     "[docs](https://example.com/a.ts)",
     "[mail](mailto:dev@example.com)",
@@ -196,6 +196,19 @@ test("T-PR1-5: 白名单外目的地一律不转（http/mailto/未知协议/裸�
   assertRoundTrip(input, segments);
   assert.equal(segments.length, 1, "白名单外链接必须整体留在正文，不产生 mention 段");
   assert.equal(segments[0]?.type, "text");
+
+  // 协议相对 URL（`//host/x`）首字符也是 `/`：旧实现按前缀命中绝对路径白名单，
+  // 把网络地址误还原成本地文件胶囊（composer/B-3）。它必须留在正文。
+  const protocolRelative = "[proto](//cdn.example.com/x)";
+  const protocolRelativeSegments = parseMentionMarkdownRich(protocolRelative);
+  assertRoundTrip(protocolRelative, protocolRelativeSegments);
+  assert.equal(protocolRelativeSegments.length, 1, "协议相对 URL 不得产生 mention 段");
+  assert.equal(protocolRelativeSegments[0]?.type, "text");
+  assert.equal(mentionsOf(protocolRelativeSegments).length, 0);
+  // 对照组：真正的 POSIX 绝对路径仍必须还原（否则修复会把目录/文件引用一起打死）。
+  const posixAbsolute = parseMentionMarkdownRich("[abs](/workspace/src/a.ts)");
+  assert.equal(mentionsOf(posixAbsolute).length, 1, "单斜杠绝对路径仍在白名单内");
+  assert.equal(mentionsOf(posixAbsolute)[0]?.value, "/workspace/src/a.ts");
 
   // plugin:// 但 stable id 非法：不造身份，保留正文。
   const invalidPlugin = "[@bad](plugin://not-a-stable-id)";
