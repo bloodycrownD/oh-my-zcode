@@ -1,6 +1,6 @@
-dag_version: 6
+dag_version: 1
 review_round: 5
-status: 5 轮审查完成，r5 doc-fix 已落（轮次上限已达，待用户拍板是否接受或加轮）
+status: code-dev-loop 启动（spec-check-loop 5 轮收口；分支 backlog-sweep）
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
@@ -26,8 +26,80 @@ rounds:
     p0: 2
     p1: 6
     p2: 11
-    closed: "P0-1 admitConnection/prepareRemoteServerConnection 成员登记链+onProjectChange（Step 2）；P0-2 migrateConnectionHosts 独立迁移 0008_connection_hosts+存量库 T-RP5；P1-1 isInvalidPort 并入 Step 9；P1-2 数据所有者 §3 修正（host_id 派生/membership_id randomUUID/remote-project.source-identity-changed）；P1-3 createRemoteProjectService 三选项+register；P1-4 Step 7 connectHost management 替换+Step 2 server-target 分支；P1-5 四 token 死 import；P1-6 Root 语义切换登记；P2 全部（8 处调用点/可选事件 onDidAppendOperationLog/清单补 3 文件/行号/Picker onClose/薄包装/T-D4→T-UF4/目录注记）"
+  - round: 5
+    verdict: No-Go
+    p0: 2
+    p1: 5
+    p2: 10
+    closed: "r5 P0-1 server 分支不移植裁定；P0-2 首连 intent ?? add+admission commit+T-RP6；P1-1..5 全落；P2 全落（commit 6f5ba008）"
 notes:
   - "关联事故文档：docs/iterations/backlog-sweep/incident-ghost-message.md（v1.0.22 已修）"
   - "v1.0.22 已发布：Release run 39968021166 success"
-  - "轮次上限 5；r5 为末轮，若仍 No-Go 向用户汇报未闭合 P0 请拍板"
+dev_dag:
+  branch: backlog-sweep
+  base_sha: 6f5ba008
+  wave_plan:
+    - [impl-svc, impl-pill, impl-provider, impl-u-a]
+    - [verify-svc, verify-pill, verify-provider, verify-u-a]
+    - [cr-func-svc-u-a, cr-func-pill-provider]
+    - [impl-sidebar, impl-u8]
+    - [verify-sidebar, verify-u8]
+    - [cr-func-sidebar-u8]
+    - [impl-p9]
+    - [verify-p9]
+    - [cr-func-p9]
+    - [impl-u9u7, impl-u10]
+    - [verify-u9u7-u10]
+    - [cr-func-u9u7-u10]
+    - [gates]
+  node_status:
+    impl-svc: { status: done, spec_steps: "1-2", executor: subagent, commits: "44728ff0,913903f5,ea91d58d" }
+    impl-pill: { status: done, spec_steps: "20-22", executor: subagent, commits: "2ba738c2,d07aef3f,1a4bfc82" }
+    impl-provider: { status: done, spec_steps: "23-25", executor: subagent, commits: "420dff0e,97d59498,b9fd461b,67ded1de" }
+    impl-u-a: { status: done, spec_steps: "12,13,17,18", executor: subagent, commits: "a9fc1d61,a86d4aa8,8dec5015,68d8410c,6ce5b508" }
+    wave0-register: { status: done, executor: main, commits: "b04c0e3c", note: "9 测试登记 + i18n DROP_KEYS 守卫（6317×2 绿）" }
+    verify-svc: { status: passed, executor: subagent, note: "T-RP 13/13、desktop-full 0 新增、arch 0；抓 P1 T-RP3/T-RP4 缺失 + P2 effectiveProfile 未接" }
+    verify-pill: { status: passed, executor: subagent, note: "T-PR 15/15；抓 P1 跨 scope 丢上下文、P2 fence 段间状态、P2 死断言" }
+    verify-provider: { status: passed, executor: subagent, commits: "59cddf3e,8ad717f4", note: "14/14；2 P2 验证侧已修" }
+    verify-u-a: { status: passed, executor: subagent, note: "21/21 + 回归 23 项；3 P2 观察" }
+    fix-svc: { status: done, executor: subagent, commits: "ebed9413,2b7a38ed,ee870c66", note: "T-RP3/T-RP4 行为用例 + effectiveProfile 接线" }
+    fix-pill: { status: done, executor: subagent, commits: "95e53bd3,afce89ae,2d31d1e5", note: "撤回恢复态随草稿持久化（根修）+ fence 整篇解析 + 死断言" }
+    verify-svc2: { status: passed, executor: subagent, note: "must-fix 全闭，T-RP 16/16，desktop-full 0 新增" }
+    verify-pill2: { status: passed, executor: "subagent+main", note: "fix 三项全闭；判 fail 因 test:v4-perf 批启动器（非 fix 引入），主代理 b15e0278 修正并复跑 29/29" }
+    cr-func-a: { status: passed, executor: readonly-subagent, verdict: "func-ready yes；D1-D12 偏差待登记" }
+    cr-func-b: { status: passed, executor: readonly-subagent, verdict: "func-ready no→P1 src-only 图片不可达，主代理 b5b3afab 收口并补可达用例" }
+    impl-sidebar: { status: pending, spec_steps: "3-6" }
+    impl-u8: { status: pending, spec_steps: "15" }
+    impl-p9: { status: pending, spec_steps: "7-11" }
+    impl-u9u7: { status: pending, spec_steps: "16,14" }
+    impl-u10: { status: pending, spec_steps: "19" }
+    gates: { status: pending, spec_steps: "26-27" }
+  spec_deviations:
+    - "D1 六值导出落 services/src/node.ts 而非 index.ts（root barrel 是 renderer 面，value 导入会把 node:crypto 链拉进浏览器包）— 接受"
+    - "D2 TaskIndexRepo 调用点 11 处/9 文件，非 spec 的 8 处；3/4 参签名全部兼容 — 接受"
+    - "D3 effectiveProfile 已按 spec Step 2 接线（ebed9413 + 2 用例）— 已闭合"
+    - "D4 knip services 面 4 条休眠导出（IRemoteProjectService/projectWorkspaceSettings/readRemoteProjectDirectory 等，照搬保真+settings 投影本轮不搬）— 待 Step 26 落基线豁免"
+    - "D5 T-RP3/T-RP4 宿主落 services/test 但 import desktop host 模块（desktop 无测试入口；services 无 tsconfig.test 工程）— 登记，Step 26 评估补 test 工程"
+    - "D6 新增第 5 文件 remote-projects/contract.ts（上游同形，避免 index↔contract 循环）— 接受"
+    - "D7 0008 用 ensureHost(INSERT OR IGNORE)+UPDATE 而非字面 ON CONFLICT（幂等语义等价，T-RP5 覆盖）— 接受"
+    - "D8 spec 补 T-RP6 用例行（b5b3afab）— 已闭合"
+    - "D9 composerHeldQueueGuard 补 T-PR3 字面标签（b5b3afab）— 已闭合"
+    - "D10 队列行预览改复用 ConversationUserInputContent（气泡同源渲染器，一致性强于独立富解析）— 接受"
+    - "D11 verify-svc 报「T-RP 16/16」与当树不符（实测 13/13，fix 后 16/16）— evidence 口径已修正"
+    - "D12 admission 20 host 上限进入真实连接路径（上游策略）— 纳入 T-QA1 观测量"
+    - "D13 服务商删除按钮取 icon-sm（Step 25 文本与 SubagentsSection 实际 icon-md 内部矛盾）— 按 spec 明文实现"
+    - "D14 服务商创建失败横幅落弹窗内 role=alert+重试（详情栏横幅被模态遮住不可见）— 有意偏差"
+    - "D15 Step 23 提交直调 createPersonalProvider（ProviderDraftSave 无创建入口）— spec 措辞修正"
+    - "D16 Step 17 fileApplications 335 行（spec 记 321L，差 14 行中文注释，逻辑逐字一致）"
+    - "D17 OpenSplitButton 上游右键菜单族未搬（依赖新 i18n 键）/ 上游 editorRequest 序号守卫未搬（当前挂载点按 path 做 key 不可达）— 登记 P2"
+    - "D18 Step 13 额外改 lib/nodeReplToolDisplay.ts 透传 src（必要依赖）；其 visit 门 P1 已由 b5b3afab 收口"
+    - "D19 U12 托盘红点仅 Windows（omz 托盘本就 Windows-only）— fork 平台范围"
+    - "D20 T-UF1 的 isInvalidPort 断言归 U7/Step 14 节点（跨节点覆盖边界）"
+  open_observations:
+    - "P2 host/index.ts:1574/1641/1654 在 reusedConnectionTarget 命中时沿用入参 profile（上游同形态）— P9 收口"
+    - "P2 0008 迁移同名项目唯一索引风险（projects UNIQUE(host_id,name) WHERE deleted=0）— T-QA1 覆盖或补迁移用例"
+    - "P2 membership_id 在 0008 会重新 randomUUID（Picker key 换代一次，启动期无在途请求）"
+    - "P2 reconnectOnStartup 全仓零调用（pre-existing），开机自动重连不走 admission"
+    - "P2 Provider 重名文案硬编码中文 + 创建失败横幅不随输入清除 — 待 P9 或后续批"
+    - "P2 hasDraftToSubmit 不含 restored 载体（纯上下文撤回项在空正文时发送键不亮）"
+    - "P2 services 无 tsconfig.test.json，T-RP3/T-RP4 仅运行期兜底 — Step 26 评估"
