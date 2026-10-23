@@ -1,10 +1,10 @@
-dag_version: 5
+dag_version: 6
 review_round: 5
+status: 5 轮审查完成，r5 doc-fix 已落（轮次上限已达，待用户拍板是否接受或加轮）
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
 doc_fix_plan: []
-status: 待下轮审查
 rounds:
   - round: 1
     verdict: No-Go
