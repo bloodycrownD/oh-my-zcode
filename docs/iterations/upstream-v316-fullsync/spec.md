@@ -125,6 +125,13 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - 测试用例别名注记（cr-func-r3b）：二期 T-RC 载体（windowRemoteConnectionRegistryRecovery.test.ts 8 用例）=本表 T-RM2 的自动化部分；T-RM3/T-RM4 真机矩阵不变
 - 三期承接核对（cr-func-r3b P2-2）：replaceDisconnectedSource 旧手动流退役带走的 attachment 租约清理（detachRemoteSessionAttachments）与 Renderer 旧 sessionId 失效通知（RemoteWorkspaceClosed(reason:disposed)/RemoteWorkspaceReconnected postMessage）——remote-connection-flow 切换主链时显式核对，防换代后悬空
 - 真机验收：SSH/WSL/Docker 三通道 × 断连恢复/换代/升级矩阵
+- **实施拍板（Step 18/19a 落地回写，2026-10-24）**：
+  - ①Step 18 存储与目录已落（570c0f3e）：`sourceServerDirectory`+`connectSourceServerTarget` helper+`aliasRepo`+`controllerRemoteIdentityMigration`+`offPeakWorkspaceIdentityMigration`（上游 35 行，OFF_PEAK_TERMINAL_STATUSES 内联冻结字面量——D6 off-peak 家族不随本期）+migrations scope 三分（base/controller-remote/source-server，omz 同步 runner 保留）。两支 schema 文件（controller-remote-schema-v4/source-server-schema-v5）与上游**逐字节一致**，冻结基准 sha256(JSON.stringify(checksumInput))：0004_controller_remote_identity=`16dc0d2c…c09a`、0005_source_server_workspace_schema=`f9b295f5…ed8c`（T-RU1 断言）。品牌口径：数据目录 `.zcode`→`.omz`、审计表 `zcode_database_identity`→`omz_database_identity`（沿 P3 legacy 口径）。aliasRepo 一期排除面解禁：zcode-server-cli `migrate retry` 分支+`workspaceAliasRepo` 注入口回接。`UpdateConnectionProfileInput` 契约出口落 `source-server-management/`（ISourceServerManagementService 频道面随 P9 设置页批挂账）；`sourceServerMigrationCounts`（管理统计投影）随 P9。
+  - ②**server 直连传输不随本期**：上游 RemoteTarget `kind:"server"`（ServerConnectOptions 直连 URL）在 24 文件深植，omz RemoteTarget 维持 ssh/wsl/docker 三形态；sourceServerDirectory routeKey/legacy 排除面的 server 分支按 omz 裁剪并留注释（server 传输批回补时连同上游语义恢复）；shared identity 层仍落全 `remote:server:` 构造/解析（身份形态与传输形态解耦）。
+  - ③**workspaceIdentity 契约拍板**：本机键规则不变（`workspaceIdentity?.trim() || workspacePath`）；daemon 远端 workspace 用上游 `remote:server:<sourceServerId>:<path>` 形态 identity，经既有 workspaceIdentity 字段参与 omz 键规则——两契约可调和，无强制改写冲突。依据：①omz 键规则只定义「有 identity 用 identity、无 identity 用 path」，上游 remote:server: 形态恰是 daemon workspace 的 identity 值，不要求改写本机键；②tabStore P4.2 已支持 identity 键（resolveWorkspaceKey 读旧写新无迁移）；③deployServer 旧链继续用 `remote:ssh/wsl/docker:` route identity，两链并行键面不交叉；④`buildServerRemoteWorkspaceIdentity`/`parseRemoteWorkspaceIdentity(kind=server)`/`remoteHostIdFromWorkspaceIdentity`+`buildRemoteHostWorkspaceIdentity` 统一工具已落 shared（P4 死导出 `projectSourceServerId` 的消费工具就位，接通随 Remote* 回填批）。
+  - ④Step 19a 阶段落（5df39270+165dec1b）：UI 纯逻辑层（`remote/remoteWorkspaceController`+`useRemoteWorkspaceController`、`remote/remoteWorkspaceProjection`、`lib/remoteConnectionPresentation{,Types,Errors}`+`remoteConnectionEntryBehavior`）+ i18n `remote.status.*/remote.error.*/remote.action.*/remote.conversation.sendUnavailable/settings.source.error.*` 117 键×zh/en 成对落键；**恢复换代通知链闭合**（cr-func-r3b 承接核对①-2）：HostResponseTypes.RemoteWorkspaceReconnected+schema+PlatformChannels.RemoteSessionReconnected+RemoteSessionReconnectedEvent 全协议行 → host onSessionReconnected commit 后 postMessage → main handleReconnected（路由换代重登记+Provisioning lane 按 Environment 重上线+attachRendererPort(source-server-reconnected)+广播；webRemoteControlManager.replaceRemoteSession 随 relay v2 挂账 P9）→ preload/renderer `onRemoteSessionReconnected` → useRemoteWorkspaceHistory 换绑 tab+清重连中标记+session registry 重绑。承接核对①-1（attachment 租约清理）核对结论：omz onSessionClosed 在失效源头统一 detach（host/index onSessionClosed→detachRemoteSessionAttachments），换代路径旧 close 事件先于 commit，无需 connect 时补 detach——无悬空。
+  - ⑤挂账回补核对：daemon services 通道核对结论=legacy 19 通道断言（assertLegacyRemoteWorkspaceRpcContract）在 createRemoteWorkspaceServiceCollection 入口对 daemon 分支同样生效（同 collector），上游 daemon 38 通道全集不采纳（omz 窄面政策），`ISourceServerWorkspaceService` 通道（resolveWorkspace/bindWorkspaceIdentity 回执）随 identity 绑定回执批；composer 正文草稿 taskGroupId 面=composerDraftStore 深度重写（omz 213L→上游 429L，分组草稿继承），非独立字段可回补——随 TaskGroupedView 草稿行批挂账；remote-viewing 状态回填（observeRemoteViewing 缝）属主=relay v2 手机查看态，挂账 P9 relay 批。
+  - ⑥剩余挂账（Step 19a 后续批）：remote-connection-flow 向导壳（WizardChrome/app-shell preference/目录选择流）、RemoteConnectionDialogContent/Fields 重写、Remote* 7 组件+useProjectRemoteSync 回填、useProjectTree 三缝（remoteService/isRemoteViewing/sourceServerId）真接通、主链切换（deployServer→connectSourceServerTarget，Directory 实例化+membershipIntent 消费）、identity 绑定回执（prepareWorkspaceIdentity 第三参）、`projectSourceServerId`/`view.ts` 消费接线、remoteConversationWorkspaceBySourceServerId 消费。deployServer 旧链共存退役拍板留 P9/发布轮（Step 19）。
 
 ### phase-toolsearch（P8；依赖 phase-c2-assembly 完成后再动 message-history/turn-loop 面）
 - 搬入 `core/src/tool/search/`（5 文件 531 行）+ deferred 2 文件（tool/deferred-call.ts 59L + handlers/deferred-tool-call.ts 57L）+ contracts（94）+ adapters model/tool-search.ts（31）+ hydration（29）+ `handlers/tool-search.ts`（81）
@@ -196,6 +203,11 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 - T-RM2 — blocking: yes — registry 状态机：closePhase 三态流转/epoch 违例抛 StaleError/recovery 屏障/换代回滚单测（→Step 17）
 - T-RM3 — blocking: no — SSH 真机：安装→连接→断连→自动恢复→换代（→Step 16/17/18 各自真机节）
 - T-RM4 — blocking: no — WSL/Docker 通道真机+cancelConnect 迟到 completion 防护（→Step 17）
+- T-RU1 — blocking: yes — 两支专属 scope 迁移 checksum 冻结基准（0004c/0005s）+scope 三分互斥（base 链无专属迁移）+落表断言（→Step 18）
+- T-RU2 — blocking: yes — controller-remote 身份迁移改写（workspace_key/identity/meta_json/审计账本）+remote:server identity 形态构造/解析/hostId 往返+aliasRepo 空目录解析与失败统计（→Step 18）
+- T-RU3 — blocking: yes — remoteWorkspaceController intent 分发/拒绝 + projection 设备×历史×attachment 联接（identity 隔离/本地 tab 不冒充）+presentation 错误分类矩阵与状态机（→Step 19a）
+- T-RU4 — blocking: yes — 恢复换代通知链五层形状守卫（协议行/host commit 后必发/main 重挂+回收/renderer 换绑）（→Step 19a）
+- T-RU5 — blocking: no — remote-connection-flow 向导+Remote* 7 组件回填+主链切换后真机 manual（并入 T-RM3/T-RM4 真机矩阵）（→Step 19a 后续批）
 - T-TS0 — blocking: yes — 缝等价性推演文档评审通过（MC transform→暴露决策→投影，含反例分析）（→Step 20a）
 - T-TS1 — blocking: yes — defer 决策纯函数（内置不 defer/MCP defer 分类表）+按需 hydration 单测（→Step 20b）
 - T-TS2 — blocking: yes — 公告块投影+tool_reference 卡冒烟 + MC 全套仍绿（顺序等价门禁）（→Step 20b）
@@ -213,6 +225,7 @@ apps/zcode-cli/packages/core/src/tool/search/     # ToolSearch 全家（P8）
 | 13-14 | T-VU1/T-VU2 | auto+manual |
 | 15 | 并入 T-G1（typecheck/门禁面验证） | auto |
 | 16-19 | T-RM1-4 | auto+manual |
+| 18-19 | T-RU1-4（T-RU5 真机并入 T-RM3/4） | auto+manual |
 | 20a-20c | T-TS0/TS1/TS2、T-RV1 | auto |
 | 21 | T-G1 | auto |
 
