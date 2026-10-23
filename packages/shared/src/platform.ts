@@ -199,6 +199,12 @@ export interface EditorInfo {
   name: string;
   /** 图标 base64 data URL */
   iconDataUrl: string;
+  /**
+   * 该项是「按文件类型匹配」的文件应用（Preview/Acrobat/Word 等），不是工作区级 IDE/终端。
+   * 文件应用只对当前文件的一次打开有意义，不能写进全局「上次选择的编辑器」偏好，
+   * 否则 PDF 选过一次 Preview 就会把工作区头/预览头从 IDE 挤成 Finder/资源管理器。
+   */
+  fileApplication?: boolean;
 }
 
 export interface ApplicationIconInfo {

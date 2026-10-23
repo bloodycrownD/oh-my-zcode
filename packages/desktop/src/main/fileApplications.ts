@@ -102,6 +102,37 @@ function linux(
   };
 }
 
+/** 打开方式候选的最小形状：IDE/终端/文件管理器与文件应用共用。 */
+export interface EditorDefLike {
+  id: string;
+  name: string;
+  appPath: string;
+  command: string | null;
+}
+
+/**
+ * 按「是否按扩展名匹配」把打开方式候选分成两段：
+ * `base` = 工作区级 IDE/终端/文件管理器（不带 `fileExtensions`），
+ * `fileApplications` = 只对具体文件生效的文件应用（PDF/Office/音视频）。
+ *
+ * 工作区头与无文件路径的 `getInstalledEditors()` 只能消费 `base`：
+ * 文件应用混进去会让「上次选择的编辑器」偏好在工作区面被覆盖成 Preview/Finder。
+ */
+export function partitionEditorDefs<T extends EditorDefLike>(
+  defs: readonly T[],
+): { base: T[]; fileApplications: T[] } {
+  const base: T[] = [];
+  const fileApplications: T[] = [];
+  for (const def of defs) {
+    if ("fileExtensions" in def) {
+      fileApplications.push(def);
+    } else {
+      base.push(def);
+    }
+  }
+  return { base, fileApplications };
+}
+
 export function getFileApplicationDefs(
   platform: NodeJS.Platform = process.platform,
 ): FileApplicationDef[] {

@@ -17,9 +17,11 @@ import test from "node:test";
 import {
   getFileApplicationDefs,
   matchesFileApplication,
+  partitionEditorDefs,
   resolveFileApplicationPath,
   type FileApplicationDef,
 } from "../src/main/fileApplications.js";
+import { getEditorDefsForPlatform } from "../src/main/editorDefinitions.js";
 
 const desktopSrc = (relative: string) =>
   fileURLToPath(new URL(`../src/${relative}`, import.meta.url));
@@ -190,16 +192,16 @@ test("T-UF6 解析：appPath 命中即返回，PATH 目录按 executableNames �
 test("T-UF6 归并与接线形状：IDE 基座过滤文件应用、打开链路透传 path", async () => {
   const editors = await readFile(desktopSrc(join("main", "editors.ts")), "utf8");
   assert.ok(
-    editors.includes("...getFileApplicationDefs()"),
-    "三平台都必须把文件应用并入打开方式候选",
-  );
-  assert.ok(
-    editors.includes('filter((def) => !("fileExtensions" in def))'),
-    "工作区编辑器列表必须过滤掉文件应用（只按文件类型出）",
+    editors.includes("partitionEditorDefs(getEditorDefsForCurrentPlatform())"),
+    "工作区编辑器列表必须复用 partitionEditorDefs 的 base 段（只按工作区入口出）",
   );
   assert.ok(editors.includes("export async function getInstalledEditors(filePath?: string)"));
   assert.ok(editors.includes("matchesFileApplication(def, filePath)"));
   assert.ok(editors.includes("cachedFileApps"), "文件应用探测结果要按 id 缓存");
+  assert.ok(
+    editors.includes("fileApplication: true"),
+    "文件应用条目必须带 fileApplication 旗标，否则 UI 会把它的 id 写进全局偏好",
+  );
 
   const openInEditor = await readFile(desktopSrc(join("main", "openInEditor.ts")), "utf8");
   assert.ok(openInEditor.includes("const fileApp = getFileApplicationDefs().find("));
@@ -225,4 +227,71 @@ test("T-UF6 归并与接线形状：IDE 基座过滤文件应用、打开链路�
     ),
     "IPC 层必须把 filePath 透传到探测并丢弃非字符串载荷",
   );
+});
+
+/**
+ * G-1（CR fix-spec desktop/G-1）：U11 归并/过滤的语义不能再只靠源码字符串兜住。
+ * 平台可注入的 `getEditorDefsForPlatform(platform)` + `getFileApplicationDefs(platform)`
+ * 让三平台都能断言：基座段不含任何文件应用、文件应用段全含、`.pdf` 命中集合与登记顺序一致。
+ */
+test("T-UF6-G1 三平台归并：base 不含文件应用、fileApplications 全含、.pdf 命中与前缀首选项一致", () => {
+  const platforms: NodeJS.Platform[] = ["darwin", "win32", "linux"];
+
+  for (const platform of platforms) {
+    const defs = getEditorDefsForPlatform(platform);
+    const { base, fileApplications } = partitionEditorDefs(defs);
+    const fileAppDefs = getFileApplicationDefs(platform);
+
+    assert.equal(
+      base.length + fileApplications.length,
+      defs.length,
+      `${platform} 分区必须是全覆盖且不重叠的划分`,
+    );
+    assert.ok(
+      base.every((def) => !("fileExtensions" in def)),
+      `${platform} 基座列表不得出现带 fileExtensions 的文件应用`,
+    );
+    assert.deepEqual(
+      fileApplications.map((def) => def.id),
+      fileAppDefs.map((def) => def.id),
+      `${platform} 文件应用段必须与登记表逐项一致（顺序也保持一致）`,
+    );
+
+    // `.pdf` 命中集合：文件应用段里声明 pdf 的入口 = 登记表里声明 pdf 的全部应用。
+    const pdfCandidates = fileApplications
+      .filter((def) => matchesFileApplication(def as FileApplicationDef, "/tmp/report.pdf"))
+      .map((def) => def.id);
+    assert.deepEqual(
+      pdfCandidates,
+      fileAppDefs.filter((def) => matchesFileApplication(def, "/tmp/report.pdf")).map((d) => d.id),
+      `${platform} 的 .pdf 候选必须与文件应用登记表一致`,
+    );
+    assert.ok(pdfCandidates.length > 0, `${platform} 至少有一个 PDF 应用`);
+    // 首选项：登记顺序第一个即「默认打开方式」，关闭 UI 有偏好时用它。
+    const firstPdf = fileAppDefs.find((def) => matchesFileApplication(def, "/tmp/report.pdf"));
+    assert.equal(pdfCandidates[0], firstPdf?.id, `${platform} .pdf 首选项必须取登记表第一个`);
+  }
+});
+
+test("T-UF6-G1 分区谓词：只按 fileExtensions 存在性分段，未知平台无文件应用", () => {
+  const { base, fileApplications } = partitionEditorDefs([
+    { id: "vscode", name: "VS Code", appPath: "/x", command: "code" },
+    { id: "preview", name: "Preview", appPath: "/y", command: null, fileExtensions: ["pdf"] },
+  ]);
+  assert.deepEqual(
+    base.map((def) => def.id),
+    ["vscode"],
+  );
+  assert.deepEqual(
+    fileApplications.map((def) => def.id),
+    ["preview"],
+  );
+
+  const aix = getEditorDefsForPlatform("aix");
+  assert.deepEqual(
+    partitionEditorDefs(aix).base.map((def) => def.id),
+    [],
+    "未知平台没有 IDE 登记，也不得有文件应用混进基座",
+  );
+  assert.deepEqual(getFileApplicationDefs("aix"), [], "未知平台文件应用登记为空");
 });

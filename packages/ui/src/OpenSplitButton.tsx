@@ -15,7 +15,11 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useFileContextActions } from "@/hooks/useFileContextActions.js";
 import { useWorkspaceOpenInEditorTarget } from "@/hooks/useWorkspaceOpenInEditorTarget.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { persistLastSelectedEditorId, readLastSelectedEditorId } from "@/lib/editorPreference.js";
+import {
+  persistLastSelectedEditorId,
+  readLastSelectedEditorId,
+  shouldPersistEditorSelection,
+} from "@/lib/editorPreference.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { getWorkspaceFileRelativePath } from "@/workspace-file-tree/model.js";
 import { resolveWorkspaceEditorSelection } from "@/lib/workspaceEditorSelection.js";
@@ -151,7 +155,11 @@ export function OpenSplitButton({
       return;
     }
 
-    persistLastSelectedEditorId(editor.id);
+    // 这里的 editors 含按扩展名补进来的文件应用（Preview/Acrobat/Word 等）；
+    // 文件应用的选择只对当前文件这次打开有效，写进全局偏好会把工作区头挤成 Finder/资源管理器。
+    if (shouldPersistEditorSelection(editor)) {
+      persistLastSelectedEditorId(editor.id);
+    }
     void platform
       .openInEditor(editor.id, target.path, {
         pathKind: "file",
