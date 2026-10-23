@@ -1416,21 +1416,8 @@ const zhCN: Record<string, string> = {
   "remote.history.empty": "没有匹配的历史连接",
   "remote.connectingStepTitle": "建立连接",
   "remote.connectingStepDescription": "正在通过 {method} 连接…",
-  "webRemoteControl.trigger": "移动端远程控制",
-  "webRemoteControl.title": "移动端远程控制",
-  "webRemoteControl.description": "扫码或在手机上打开链接，即可远程控制当前工作区。",
-  "webRemoteControl.botChannel.title": "使用 Bot Channel",
-  "webRemoteControl.botChannel.description": "连接聊天 Bot，适合更长时间的移动端访问。",
-  "webRemoteControl.botChannel.weixin.title": "微信",
-  "webRemoteControl.botChannel.weixin.description": "从微信会话打开这个工作区。",
-  "webRemoteControl.botChannel.feishu.title": "飞书",
-  "webRemoteControl.botChannel.feishu.description": "从飞书打开这个工作区。",
-  "webRemoteControl.botChannel.lark.title": "Lark",
-  "webRemoteControl.botChannel.lark.description": "从 Lark 打开这个工作区。",
-  "webRemoteControl.botChannel.telegram.title": "Telegram",
-  "webRemoteControl.botChannel.telegram.description": "从 Telegram 打开这个工作区。",
-  "webRemoteControl.botChannel.configure": "去 Bot Channels 配置",
-  "webRemoteControl.botChannel.manageBots": "机器人管理",
+  // relay v1 清理（phase-relay-v1-cleanup）：移动端远程控制对话框/触发器的 15 个文案键
+  // 已删除；Bot Channels 死链（configure/manageBots 指向的设置面）一并出清。
   "remote.title": "连接远程环境",
   "remote.description":
     "通过 SSH、Server、WSL 或 Docker 连接远程工作区，并在当前窗口中继续选择目录。",

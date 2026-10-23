@@ -1,17 +1,15 @@
-// 照搬上游 v3.16.2；isWebRemoteControl 恒 false（relay v1 面 P9 清理），保留 Context 读取形状。
-import { useContext, useEffect, useMemo, useRef, useState } from "react";
+// 照搬上游 v3.16.2；手机远控项目侧栏面已随 relay v1 清理删除（phase-relay-v1-cleanup）。
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useSortable } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
 import { Collapsible } from "@/components/ui/collapsible.js";
 import { ProjectNodeContent, type ProjectNodeProps } from "@/project-sidebar/ProjectNodeContent.js";
 import { buildRemoteHostWorkspaceIdentity } from "@/project-sidebar/contract.js";
-import { ProjectTaskListContext } from "@/project-sidebar/ProjectTaskListContext.js";
 import { projectKey } from "@/project-sidebar/view.js";
 import { parseWorkbenchSessionDragPayload } from "@/v4/workbenchDragDrop.js";
 
 export function ProjectNode(props: ProjectNodeProps) {
   const { project, expanded, onExpandedChange, onMove } = props;
-  const { isWebRemoteControl = false } = useContext(ProjectTaskListContext);
   const online = props.availability?.online ?? true;
   const editable = online && !project.legacySingleRoot;
   const [sessionDropOver, setSessionDropOver] = useState(false);
@@ -57,7 +55,7 @@ export function ProjectNode(props: ProjectNodeProps) {
   } = useSortable({
     id: projectKey(project),
     // 修复原因：共享项目行曾在手机注册排序手势，滑动列表会误拖；由入口统一禁用。
-    disabled: isWebRemoteControl,
+    disabled: false,
     data,
   });
   // 原因：仅有排序位移无法明确落点；直接读取同一拖拽状态，避免提示与提交目标分叉。
@@ -152,7 +150,7 @@ export function ProjectNode(props: ProjectNodeProps) {
         <ProjectNodeContent
           {...props}
           editable={editable}
-          dragEnabled={!isWebRemoteControl}
+          dragEnabled
           canOpen={canOpen}
           isOpen={isOpen}
           attributes={attributes}

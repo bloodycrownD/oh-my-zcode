@@ -1,7 +1,7 @@
 // 照搬上游 v3.16.2 并 omz 化（P7 末批 Remote* 回填接线）：
 // ①connect/onRemoveEntry/设备设置跳转——前两者本批接真（IRemoteProjectService 已注册），
 //   设备设置跳转随 P9 设置页批（omz 设置无 remoteDevices 段）挂账；
-// ②isWebRemoteControl 恒 false（omz 无手机远控项目侧栏）。
+// ②手机远控项目侧栏位已随 relay v1 清理删除（omz 无该面）。
 import { memo } from "react";
 import { shallow } from "zustand/shallow";
 import { Plug } from "lucide-react";

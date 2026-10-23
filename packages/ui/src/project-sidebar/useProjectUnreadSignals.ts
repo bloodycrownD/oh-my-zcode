@@ -1,7 +1,7 @@
 // 照搬上游 v3.16.2 useProjectUnreadSignals.ts（upstream-v316-fullsync P4.2）并 omz 化：
-// ①remote-viewing face 整组剔除——omz IPlatformService 无 onWebRemoteControlStatusChanged/
-//   getWebRemoteControlStatus（手机查看状态回填随 P7 remote-ux 再议；WebRemoteControl 触发器
-//   本体已列入 P9 relay-v1 清理），observeRemoteViewing 仅保留调用形状，恒按无远端查看处理；
+// ①remote-viewing face 整组剔除——omz IPlatformService 无手机查看状态事件与状态读取接口
+//   （手机查看状态回填随 P7 remote-ux 再议；触发器本体已随 relay v1 清理删除），
+//   observeRemoteViewing 仅保留调用形状，恒按无远端查看处理；
 // ②Host 发射链：desktop windowHostControllerService 沿 source 的 onDynamicWorkspaceEvent
 //   过滤 background_terminal 完成态转发 onDynamicTaskUnreadSignal（同批接线）；
 //   web/旧 wire 走 fallback 的 zcodeTaskService.onDynamicWorkspaceEvent 过滤路径。

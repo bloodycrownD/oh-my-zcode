@@ -35,7 +35,7 @@ interface SyncTarget {
 
 /** 同步菜单只适配已有 workspace attachment；不因展示菜单创建 tab、连接或 Agent。 */
 export function useProjectRemoteSync(directory: RemoteProjectDirectory) {
-  // omz 化：上游首参 props.isWebRemoteControl 决定 clientMode（web-remote-replayable /
+  // omz 化：上游首参的手机侧栏开关决定 clientMode（web-remote-replayable /
   // desktop-continuous）；omz 项目侧栏无手机远控面（relay v1 剔除），恒 desktop-continuous，
   // 故收掉该形参；shouldShowRemoteSyncActions 走 omz ssh/wsl 现状口径。
   const base = useBaseWorkspaceServices();

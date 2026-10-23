@@ -534,7 +534,7 @@ export function createRemoteWorkspaceSessionManager(options: {
     void attachRendererPort(win, route, "source-server-reconnected")
       .then(() => {
         if (!descriptor.workspacePath || !descriptor.workspaceIdentity) return;
-        // omz：上游此处还有 webRemoteControlManager.replaceRemoteSession（relay v2 手机桥
+        // omz：上游此处还有手机桥 manager 的 replaceRemoteSession（relay v2 手机桥
         // 换代）；relay v2 不随本期，换代挂账随 P9 relay 批回补。
         win.webContents.send(PlatformChannels.RemoteSessionReconnected, {
           previousSessionId: previousRemoteSessionId,

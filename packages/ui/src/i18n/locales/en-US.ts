@@ -1505,22 +1505,8 @@ const enUS: Record<string, string> = {
   "remote.history.empty": "No matching saved connections",
   "remote.connectingStepTitle": "Establish link",
   "remote.connectingStepDescription": "Connecting through {method}…",
-  "webRemoteControl.trigger": "Mobile remote control",
-  "webRemoteControl.title": "Mobile remote control",
-  "webRemoteControl.description":
-    "Scan the QR code or open the link on your phone to control this workspace.",
-  "webRemoteControl.botChannel.title": "Use a bot channel",
-  "webRemoteControl.botChannel.description": "Connect a chat bot for longer-running mobile access.",
-  "webRemoteControl.botChannel.weixin.title": "Weixin",
-  "webRemoteControl.botChannel.weixin.description": "Open this workspace from Weixin chat.",
-  "webRemoteControl.botChannel.feishu.title": "Feishu",
-  "webRemoteControl.botChannel.feishu.description": "Open this workspace from Feishu.",
-  "webRemoteControl.botChannel.lark.title": "Lark",
-  "webRemoteControl.botChannel.lark.description": "Open this workspace from Lark.",
-  "webRemoteControl.botChannel.telegram.title": "Telegram",
-  "webRemoteControl.botChannel.telegram.description": "Open this workspace from Telegram.",
-  "webRemoteControl.botChannel.configure": "Configure in bot channels",
-  "webRemoteControl.botChannel.manageBots": "Manage bots",
+  // relay v1 清理（phase-relay-v1-cleanup）：移动端远程控制对话框/触发器的 15 个文案键
+  // 已删除；Bot Channels 死链（configure/manageBots 指向的设置面）一并出清。
   "remote.title": "Connect remote environment",
   "remote.description":
     "Connect to a remote workspace over SSH, Server, WSL, or Docker, then choose a directory in the current window.",

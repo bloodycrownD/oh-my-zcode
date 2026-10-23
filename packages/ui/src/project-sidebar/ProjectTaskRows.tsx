@@ -1,6 +1,6 @@
 // 照搬上游 v3.16.2 并按 omz TaskList 面 omz 化：
 // omz TaskList 无 organizationActions/taskRowVariant/hoverEnabled/onOpenFileTree/
-// mobileActiveTaskKey/isWebRemoteControl 面（分组菜单随 P5、文件入口随文件树 hook 回补）。
+// mobileActiveTaskKey 与手机侧栏位面（分组菜单随 P5、文件入口随文件树 hook 回补）。
 import { Fragment, memo, useCallback, useContext, useMemo, useState } from "react";
 import type { ProjectTask, ProjectSidebarProps } from "@/project-sidebar/contract.js";
 import { TaskList } from "@/TaskList.js";
