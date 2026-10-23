@@ -1,5 +1,5 @@
-dag_version: 2
-review_round: 2
+dag_version: 3
+review_round: 3
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
@@ -11,7 +11,13 @@ rounds:
     p0: 6
     p1: 9
     p2: 9
-    closed: "P0-1 报告落盘 cache/exploration-reports.md（含 4.2 表）；P0-2 阀=闸门裁定（Step 11/C10/R5/拍板 1 四处对齐）；P0-3 数据所有者裁定节（directory 服务删除/hosts 写入者/membershipId/settings 投影）；P0-4 P9-3 例外真实范围；P0-5 Picker 新签名+useRemoteWorkspaceHistory 落点+stale-intent；P0-6 Step 1 三依赖文件；P1-1..9 全修；P2 顺手 9 条全修"
+    closed: "报告落盘/阀=闸门/数据所有者裁定/例外范围/Picker 签名/Step1 三依赖 全闭合"
+  - round: 2
+    verdict: No-Go
+    p0: 5
+    p1: 10
+    p2: 12
+    closed: "P0-1 迁移生产链四接线点+T-RP5；P0-2 remoteProjectConnection 两 hook+调用点；P0-3 Picker host/initialRoots/hostId 派生+T-SB4 新建测试；P0-4 EditConnectionProfileDialog 306L+依赖 hunk 并入 Step9+managementEnabled 翻转；P0-5 tripwire/脚本同步清单（VirtualProject:48-54/RemoteBackfill:112-135+:145-148/package.json:32）；P1 全修（独有面可核对清单/P9 消费缝/services 契约/hostId 消费链/purpose 来源/顺序倒挂/props 8 个/死 import/测试引用）；P2 顺手（380L/entries 已存在/行数/§2.2/第5 setText/TID/i18n 孤儿键/alias 两行）"
 notes:
   - "关联事故文档：docs/iterations/backlog-sweep/incident-ghost-message.md（v1.0.22 已修）"
   - "v1.0.22 已发布：Release run 39968021166 success"
