@@ -8,6 +8,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 ) as typeof import("node:sqlite");
 import { TaskIndexRepo } from "#src/session/taskIndexRepo.js";
 import { AutomationRepo } from "#src/session/automationRepo.js";
+import type { ProjectMigrationContext } from "#src/project-storage/contract.js";
 import {
   runTasksDatabaseMigrations,
   inspectTasksMigrationKind,
@@ -29,13 +30,14 @@ const LOCK_WAIT_MS = 60 * 60_000;
 /**
  * 由 Host Worker 调用，SQL 和迁移后修复与旧 Repo 共用，只有获取写锁异步等待。
  *
- * omz 口径：上游形态在此追加 settings 入参并构造 OffPeakTaskRepo / TaskIndexRepo(settings,…)，
- * 分别依赖 omz 已退役的闲时运行链与未随本阶段移植的 TaskIndexRepo 换代构造器；omz 维持
- * 两参 Repo 形态，settings 注入随 P4/P5 项目迁移接线时一并恢复。
+ * omz 口径：上游形态在此追加 settings 入参并构造 OffPeakTaskRepo / TaskIndexRepo(settings,…)；
+ * omz 已退役闲时运行链（无 OffPeakTaskRepo），TaskIndexRepo 四参构造器已随 Step 1 对齐，
+ * settings 由 Worker 侧 createSettingService() 读取后传入，项目迁移按旧设置建种子。
  */
 export async function prepareTasksIndexStorage(
   path: string,
   onProgress: (phase: TasksStoragePhase, migration?: DatabaseMigrationFacts) => void,
+  settings?: ProjectMigrationContext["settings"],
 ): Promise<void> {
   // 回调拿到的是当时事实，不共享后续执行会继续递增的内部对象。
   const report = (phase: TasksStoragePhase, migration?: DatabaseMigrationFacts) =>
@@ -107,7 +109,10 @@ export async function prepareTasksIndexStorage(
   }
   if (closeFailure) throw closeFailure;
   markTasksStorageMigrated(path);
-  const repos = [new TaskIndexRepo(path, LOCK_WAIT_MS), new AutomationRepo(path, LOCK_WAIT_MS)];
+  const repos = [
+    new TaskIndexRepo(settings, undefined, path, LOCK_WAIT_MS),
+    new AutomationRepo(path, LOCK_WAIT_MS),
+  ];
   let preparationFailure: unknown;
   let repoCloseFailure: unknown;
   try {

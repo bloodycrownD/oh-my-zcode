@@ -301,6 +301,22 @@ import { createZCodeTaskIndexSyncer } from "./zcode-agent/zcodeTaskIndexSyncer.j
 import { TaskIndexRepo } from "./session/taskIndexRepo.js";
 import { createProjectService } from "./project/index.js";
 import { IProjectService } from "./project/contract.js";
+import { createRemoteProjectService } from "./remote-projects/index.js";
+import { IRemoteProjectService } from "./remote-projects/contract.js";
+// remote-projects 的 node 侧导出面（backlog-sweep Step 2）：全部实现工厂只经本入口
+// 暴露——根 index.ts 是 renderer 可见的 barrel，value 导出 node:crypto 链会导致浏览器黑屏。
+// `bindRemoteProjectIdentities` 与上游 node.ts:3214 同位置。
+export {
+  createRemoteProjectConnectionAdmission,
+  remoteProjectHostIdForProfile,
+  remoteProjectHostIdForTarget,
+  prepareRemoteServerConnection,
+} from "./remote-projects/index.js";
+export { createRemoteProjectService } from "./remote-projects/index.js";
+export { bindRemoteProjectIdentities } from "./project/index.js";
+// legacy 单根退回服务（上游 node.ts:19 同位置）：desktop 的 resolveServerProjectService
+// 在 Server 未声明 virtualProjects 时用它构造只读投影。
+export { createLegacySingleRootProjectService } from "./project/index.js";
 import { createTaskGroupService, groupTaskKey } from "./task-groups/index.js";
 import { ITaskGroupService } from "./task-groups/contract.js";
 import { createBotsService } from "./bots/botsService.js";
@@ -1220,6 +1236,15 @@ export function createLocalServices(options: {
     trigger: Exclude<ProviderProvisioningTrigger, "environment-online">,
   ) => void;
   serviceAuthorityMode?: ServiceAuthorityMode;
+  /** 可信 Server Core 注入，区分物理持库 Host 与历史 workspace canonical route（上游同键）。 */
+  projectStorageHostId?: string;
+  /** 项目路由：远端 Host 只能经既有连接解析，缺席时跨 Host 请求一律 project.host-offline。 */
+  resolveProjectHostService?: (hostId: string) => Promise<IProjectService>;
+  /** desktop Host 注入的远端项目连接器（上游 node.ts:1256-1259）；daemon 侧不传。 */
+  remoteProjectConnection?: Pick<
+    Parameters<typeof createRemoteProjectService>[0],
+    "connectHost" | "readConnectionStates"
+  >;
   cuaProductMcpServerResolver?: CuaProductMcpServerResolver;
   agentRuntimeContext?: {
     getDeviceMid?: () => string | undefined;
@@ -1308,8 +1333,9 @@ export function createLocalServices(options: {
   // FORK（D-4）：JWT 失效重启钩子随登录面整删；ApiClient 装配也已随账号面移除。
   const systemService = createSystemService();
   // onboarding 资格与任务列表共用同一份全局 tasks-index；repo 懒加载数据库，提前构造不会
-  // 增加启动 I/O，后续 session syncer 也继续复用这一实例。
-  const taskIndexRepo = new TaskIndexRepo();
+  // 增加启动 I/O，后续 session syncer 也继续复用这一实例。持库身份来自 Host 注入
+  // （daemon/remote workspace 为远端 Host），缺省 undefined 即本机 local（对照上游 :1375）。
+  const taskIndexRepo = new TaskIndexRepo(undefined, options?.projectStorageHostId);
   // onboarding 完成记录：登录面整删后不再有 userId，恒为 null（匿名）。
   const onboardingRecordService = createOnboardingRecordService({
     loadUserId: async () => null,
@@ -2040,17 +2066,31 @@ export function createLocalServices(options: {
   const fileService = createFileService({
     workspaceFileSearchFilter: options?.workspaceFileSearchFilter,
   });
-  // 虚拟项目服务装配（upstream-v316-fullsync P4 拍板①）：本机 Host 唯一持库（ownerHostId
-  // 缺省 local），无跨 Host resolveHost 路由面（随 R3 三期回补）。设置投影
-  // （上游 setWorkspaceProjection → projectWorkspaceSettings）omz 未搬，变更通知只发广播。
+  // 虚拟项目服务装配（upstream-v316-fullsync P4 拍板① + backlog-sweep Step 2）：
+  // 本机 Host 唯一持库（ownerHostId 缺省 local），跨 Host 路由经 Host 注入的
+  // resolveProjectHostService（上游 node.ts:2173-2183 同形态）。设置投影
+  // （上游 setWorkspaceProjection → projectWorkspaceSettings）omz 本批仍未搬（spec §4），
+  // 变更通知只发广播。
   const publishProjectChange = async () => {
     await broadcastService.send({ channel: "state:projects", payload: {} });
   };
+  // 远端项目入口/hosts 服务（backlog-sweep Step 2，C1）：唯一写入者=SQLite 组织库；
+  // controller 仅在物理持库 Host（local）为真，daemon/replica 侧只读且拒绝写。
+  const remoteProjectService = createRemoteProjectService({
+    ...options?.remoteProjectConnection,
+    controller: !options?.projectStorageHostId || options.projectStorageHostId === "local",
+    database: () => taskIndexRepo.getOrganizationDatabase(),
+    // 缺 afterChange 时 state:projects 不广播、useProjectTree 不刷新（spec P1-3）。
+    afterChange: publishProjectChange,
+  });
   projectService = createProjectService({
     directories: {
       home: async () => (await systemService.info()).homedir,
       read: (params) => fileService.readdir(params),
     },
+    // 本机 Host 缺省 local；daemon 以可信 storageHostId 为准，跨 Host 走 resolveHost。
+    ownerHostId: options?.projectStorageHostId,
+    resolveHost: options?.resolveProjectHostService,
     repository: () => taskIndexRepo.getProjectRepository(),
     workspaceDirectory: join(getZCodeDataRootDir(), "workspace"),
     afterChange: publishProjectChange,
@@ -2100,6 +2140,7 @@ export function createLocalServices(options: {
     // 虚拟项目两服务（upstream-v316-fullsync P4 拍板①）：注册即经 exposeOnChannelServer
     // 自动暴露 project / task-groups 通道；RemoteServiceAccess 侧 getter 对应补齐。
     .register(IProjectService, projectService)
+    .register(IRemoteProjectService, remoteProjectService)
     .register(ITaskGroupService, taskGroupService)
     // Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon 由
     // createServerHostServices 注入 aliasRepo 装配实例；本机 Host 落默认实现占位。

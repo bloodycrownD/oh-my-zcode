@@ -66,7 +66,11 @@ modules:
     roots: [packages/services/src/remote-projects]
     managed: false
     requires: [shared, project-storage, services]
-    publicEntrypoints: [packages/services/src/remote-projects/contract.ts]
+    publicEntrypoints:
+      [
+        packages/services/src/remote-projects/index.ts,
+        packages/services/src/remote-projects/contract.ts,
+      ]
     owner: conversation
   - id: task-groups
     roots: [packages/services/src/task-groups]

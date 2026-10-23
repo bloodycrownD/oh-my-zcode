@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { posix, win32 } from "node:path";
 import type { DatabaseSync } from "node:sqlite";
-import { buildRemoteWorkspaceIdentity } from "@zcode/shared";
+import { buildRemoteWorkspaceIdentity, buildServerRemoteWorkspaceIdentity } from "@zcode/shared";
 import type { ProjectMigrationContext } from "#src/project-storage/contract.js";
 import {
   ensureHost,
@@ -54,6 +54,76 @@ function createProject(
   return id;
 }
 
+/**
+ * 旧 connectionProfiles → hosts 稳定身份归并（照搬上游 migrate-projects.ts:57-91）。
+ *
+ * 返回 `地址派生 hostId → 稳定 hostId` 别名表：无 sourceServerId 的 profile 两者相同；
+ * 已握手的 profile 收敛到 `remote:server:<sourceServerId>`。别名表必须供同一事务内的
+ * entries 循环消费——只写 hosts 行不改写 alias 顺序，会让同一设备出现两行 host 且
+ * entries 仍挂地址派生行（spec r5 P1-1）。
+ */
+function migrateConnectionHosts(
+  db: DatabaseSync,
+  settings: ProjectMigrationContext["settings"],
+): Map<string, string> {
+  const aliases = new Map<string, string>();
+  const preferred = new Set(settings?.sourceServers?.map((source) => source.preferredProfileId));
+  const profiles = [...(settings?.connectionProfiles ?? [])]
+    .filter((profile) => profile.lifecycleState !== "retired")
+    .sort((a, b) => Number(preferred.has(b.profileId)) - Number(preferred.has(a.profileId)));
+  const written = new Set<string>();
+  for (const profile of profiles) {
+    const addressIdentity = buildRemoteWorkspaceIdentity("/", profile.target);
+    const addressId = hostForWorkspace(addressIdentity).hostId;
+    const stableId = profile.sourceServerId
+      ? hostForWorkspace(
+          buildServerRemoteWorkspaceIdentity({
+            serverId: profile.sourceServerId,
+            workspacePath: "/",
+          }),
+        ).hostId
+      : addressId;
+    aliases.set(addressId, stableId);
+    aliases.set(stableId, stableId);
+    if (written.has(stableId)) continue;
+    written.add(stableId);
+    ensureHost(db, addressIdentity, stableId);
+    db.prepare(
+      "UPDATE hosts SET kind=?,target_json=?,membership_id=?,last_opened_at=? WHERE host_id=?",
+    ).run(
+      profile.target.kind,
+      JSON.stringify(profile.target),
+      randomUUID(),
+      profile.lastConnectedAt ?? null,
+      stableId,
+    );
+  }
+  return aliases;
+}
+
+/**
+ * 0008 存量库回填（spec r5 P1-1 两段式第二段）：0005 应用时未做 profile 归并的库，
+ * 启动时把地址派生 host 行收敛到稳定 Source 身份，并显式重写 projects /
+ * remote_project_entries 的 host_id 后清理旧行。幂等：第二次运行 alias 已无旧行可改。
+ */
+export function migrateConnectionHostsOnUpgrade(
+  db: DatabaseSync,
+  context: ProjectMigrationContext,
+): void {
+  // 远端持库身份（daemon）不读取控制端连接 settings；本机表也不应含远端权威项目。
+  if ((context.hostId ?? "local") !== "local") return;
+  for (const [legacyId, stableId] of migrateConnectionHosts(db, context.settings)) {
+    if (legacyId === stableId) continue;
+    db.prepare("UPDATE projects SET host_id=? WHERE host_id=?").run(stableId, legacyId);
+    db.prepare("UPDATE remote_project_entries SET host_id=? WHERE host_id=?").run(
+      stableId,
+      legacyId,
+    );
+    // 旧行在被引用关系搬走后删除；local 行与已收敛的行不受影响。
+    db.prepare("DELETE FROM hosts WHERE host_id=? AND host_id<>'local'").run(legacyId);
+  }
+}
+
 export function migrateProjects(db: DatabaseSync, context: ProjectMigrationContext): void {
   const now = (context.now ?? Date.now)();
   addProjectSchema(db);
@@ -61,10 +131,11 @@ export function migrateProjects(db: DatabaseSync, context: ProjectMigrationConte
   initializeLegacyTaskIdentity(db, false, context.hostId);
   const settings = context.settings;
   const remoteOwner = (context.hostId ?? "local") !== "local";
-  // omz 口径：上游在此按 settings.sourceServers/connectionProfiles 把连接 profile 归并成
-  // 稳定 server host 身份（buildServerRemoteWorkspaceIdentity 别名链）。source-server 设置域
-  // 随 P5 阶段落地，omz 先按连接地址身份直写，落地后在此恢复 aliases 归并。
-  const hostAliases = new Map<string, string>();
+  // 本机持库身份才消费控制端 settings 的连接 profile；别名表供下方 entries 循环按稳定
+  // 身份落 cursor，避免同一设备出现两行 host。
+  const hostAliases = remoteOwner
+    ? new Map<string, string>()
+    : migrateConnectionHosts(db, settings);
   const workspaces = new Map<string, { path: string; hostId: string }>();
   // Bug 原因：历史任务目录不代表用户仍保留该工作区，扫描 tasks 会复活已移除的项目入口。
   // 首次项目集合与顺序只取旧 settings；其他历史任务保留原目录，按现有规则保持未归类。

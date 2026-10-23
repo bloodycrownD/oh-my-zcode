@@ -46,7 +46,7 @@ for (const clientMode of ["desktop-continuous", "web-remote-replayable"] as cons
     const content = JSON.stringify(legacy);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, content);
-    const taskIndexRepo = new TaskIndexRepo(join(dir, "tasks.sqlite"));
+    const taskIndexRepo = new TaskIndexRepo(undefined, undefined, join(dir, "tasks.sqlite"));
     await taskIndexRepo.syncTaskMeta({ meta });
     type Options = Parameters<typeof createZCodeTaskServiceAdapter>[0];
     type CreateInput = Parameters<Options["zcodeAgentService"]["createSession"]>[0];

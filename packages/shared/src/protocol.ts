@@ -356,9 +356,17 @@ export interface AppSettings {
       lastResolvedAt: number;
     }
   >;
-  /** R3 控制端已识别的 Source Server；运行态仍由远端 Server 权威提供。 */
+  /**
+   * R3 控制端已识别的 Source Server；运行态仍由远端 Server 权威提供。
+   * 启动项目迁移（project-storage migrateConnectionHosts）消费本键的 preferredProfileId
+   * 决定同一设备优先归并哪条线路。
+   */
   sourceServers?: import("./source-server/contracts.js").SourceServerRecord[];
-  /** R3 到达 Source Server 的线路；只保存 credential key，不保存 secret。 */
+  /**
+   * R3 到达 Source Server 的线路；只保存 credential key，不保存 secret。
+   * 启动项目迁移按本键把连接 profile 归并成稳定 `remote:server:<id>` host 身份
+   * （无 sourceServerId 的线路保持地址派生身份）。
+   */
   connectionProfiles?: import("./source-server/contracts.js").ConnectionProfile[];
   /** R3 workspace 打开历史；连接线路与 workspace 实体分离。 */
   sourceServerWorkspaceHistory?: import("./source-server/contracts.js").SourceServerWorkspaceHistoryEntry[];

@@ -2,7 +2,10 @@ import { ProjectRepository } from "#src/project-storage/project-repository.js";
 import { sqliteMigrations } from "@zcode/shared/sqlite-migrations";
 import type { ProjectStorageContract } from "#src/project-storage/contract.js";
 import { reconcileLegacy, admitTaskIdentity } from "#src/project-storage/legacy-tasks.js";
-import { migrateProjects } from "#src/project-storage/migrate-projects.js";
+import {
+  migrateProjects,
+  migrateConnectionHostsOnUpgrade,
+} from "#src/project-storage/migrate-projects.js";
 import {
   INITIAL_WORKSPACE_ORDER_SQL,
   migrateInitialWorkspaceOrder,
@@ -53,6 +56,20 @@ export const projectStorage: ProjectStorageContract = {
           apply: (database) => {
             database.exec(INITIAL_WORKSPACE_ORDER_SQL);
             if (firstProjectMigration) migrateInitialWorkspaceOrder(database, context);
+          },
+        },
+        {
+          // 两段式迁移（spec r5 P1-1）：0005 的 apply 内继续调 migrateConnectionHosts，保证
+          // 全新库按 alias 顺序一次性落稳定 host；本迁移只收敛已应用 0005 的存量库（apply
+          // 变化不进 checksum，账本按上面各条 sql 校验）。
+          id: "0008_connection_hosts",
+          appVersion: "3.16.2",
+          touchedTables: ["hosts", "projects", "remote_project_entries"],
+          sql: `-- existing databases: merge legacy connectionProfiles into stable remote:server:<id> hosts
+-- and rewrite projects.host_id / remote_project_entries.host_id before dropping address-derived rows`,
+          apply: (database) => {
+            if (firstProjectMigration) return;
+            migrateConnectionHostsOnUpgrade(database, context);
           },
         },
       ],

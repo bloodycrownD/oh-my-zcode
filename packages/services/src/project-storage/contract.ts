@@ -7,10 +7,13 @@ export interface ProjectMigrationContext {
   hostId?: string;
   backupDirectories: readonly string[];
   /**
-   * omz 口径：上游还 Pick 了 sourceServers/connectionProfiles（source-server 设置面），
-   * 该设置域随 P5 source-server 阶段落地后再扩展；当前 omz AppSettings 无这两键。
+   * 启动迁移消费的旧设置投影（对齐上游四键）：lastWorkspaceSession 供项目/入口种子，
+   * sourceServers + connectionProfiles 供 connectionProfile→稳定 Source host 身份归并。
    */
-  settings?: Pick<AppSettings, "lastWorkspaceSession">;
+  settings?: Pick<
+    AppSettings,
+    "lastWorkspaceSession" | "recentProjects" | "sourceServers" | "connectionProfiles"
+  >;
   now?: () => number;
   warn?: (message: string, details?: Record<string, unknown>) => void;
 }

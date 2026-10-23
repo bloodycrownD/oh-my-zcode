@@ -277,7 +277,10 @@ export function createProjectService(options: {
   return service;
 }
 
-/** 对外树使用 attachment 已登记的稳定身份；实际 cwd 与远端 canonical key 不改写。 */
+/**
+ * 照搬上游 v3.16.2 `project/index.ts:281-330`（backlog-sweep Step 2）：对外树使用
+ * attachment 已登记的稳定身份；实际 cwd 与远端 canonical key 不改写。
+ */
 export function bindRemoteProjectIdentities(
   service: IProjectService,
   resolveIdentity: (workspacePath: string) => Promise<string>,

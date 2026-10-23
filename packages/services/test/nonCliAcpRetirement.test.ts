@@ -67,7 +67,7 @@ test("current Project Memory catalog and files remain readable", async () => {
 test("opening the task index leaves retired ACP IDs and user rows untouched", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zcode-acp-index-"));
   const path = join(dir, "tasks.sqlite");
-  const repo = new TaskIndexRepo(path);
+  const repo = new TaskIndexRepo(undefined, undefined, path);
   try {
     await repo.syncTaskMeta({ meta });
     repo.close();

@@ -6,7 +6,7 @@ import {
 import { mkdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import {
   isRemoteWorkspaceIdentity,
   ZCODE_AGENT_PROVIDER,
@@ -35,10 +35,13 @@ import type {
   ZCodeTaskGroupColor,
 } from "#src/session/zcodeTaskListTypes.js";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
-import { getTasksIndexDatabasePath } from "#src/paths.js";
+import { getTasksIndexDatabasePath, getZCodeDataRootDir } from "#src/paths.js";
 import { runTasksDatabaseMigrations } from "#src/session/tasksDatabase/migrations.js";
 import { projectStorage } from "#src/project-storage/index.js";
-import type { ProjectRepositoryContract } from "#src/project-storage/contract.js";
+import type {
+  ProjectMigrationContext,
+  ProjectRepositoryContract,
+} from "#src/project-storage/contract.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -477,7 +480,13 @@ function compareGroupTasks(
 }
 
 export class TaskIndexRepo {
+  /** 启动迁移结果，供 main 提示；不参与任务事实或组织状态。 */
+  migrationBackupSkipped = false;
+  // 构造器对齐上游四参（Step 1-⑤）：首个参数是旧设置投影（项目/连接身份种子），
+  // 第二个是可信持库 Host 身份，路径与锁等待顺延到第三/四位。
   constructor(
+    private readonly migrationSettings?: ProjectMigrationContext["settings"],
+    private readonly storageHostId?: string,
     private readonly startupDbPath?: string,
     private readonly startupBusyTimeoutMs = 5000,
   ) {}
@@ -530,6 +539,17 @@ export class TaskIndexRepo {
     // Worker 已完成该路径的原始准备，业务连接不再重复全表修复。
     if (isTasksStoragePrepared(path, this.db)) return;
     if (!isTasksStorageMigrated(path, this.db)) runTasksDatabaseMigrations(this.db);
+    // 项目/连接迁移的生产接线（Step 1-③，对照上游 :396-402）：业务连接每次启动都跑
+    // 版本化迁移，0005/0008 的 apply 只在账本缺席时执行，因此这里幂等。prepared 仅是
+    // 进程内 Set（Host 进程不命中），早退分支不会吞掉本迁移。
+    const migration = await projectStorage.migrate(this.getDatabase(), {
+      settings: this.migrationSettings,
+      hostId: this.storageHostId,
+      // 缺省会触发 runner「Migration requires a backup directory」；数据根 backup 与上游一致。
+      backupDirectories: [join(getZCodeDataRootDir(), "backup")],
+      warn: (message, details) => createServiceLogger("project-migration").warn(message, details),
+    });
+    this.migrationBackupSkipped = migration.backupSkipped;
     this.cleanupDeletedTaskGroupingReferences();
   }
 

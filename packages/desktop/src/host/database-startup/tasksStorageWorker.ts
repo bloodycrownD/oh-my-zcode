@@ -1,6 +1,6 @@
 import { parentPort, workerData } from "node:worker_threads";
 import { tasksStorageWorkerDataSchema } from "./contract.js";
-import { prepareTasksIndexStorage } from "@zcode/services/storage-startup";
+import { createSettingService, prepareTasksIndexStorage } from "@zcode/services/storage-startup";
 import {
   classifyDatabaseStartupError,
   databaseStartupErrorDetails,
@@ -9,10 +9,12 @@ import {
 
 const data = tasksStorageWorkerDataSchema.parse(workerData);
 try {
-  // omz 口径：上游在此携带旧 settings 完成项目迁移（prepareTasksIndexStorage 三参形态）；
-  // omz 的 TaskIndexRepo 换代构造器未随本阶段移植，仍为两参形态，settings 注入随 P4/P5 接线恢复。
-  await prepareTasksIndexStorage(data.path, (phase, migration) =>
-    parentPort?.postMessage({ type: "progress", phase, migration }),
+  // Worker 必须携带旧设置完成项目迁移，否则后续 Host 只能看到已记账的空项目种子（上游同形态）。
+  const settings = await createSettingService().get();
+  await prepareTasksIndexStorage(
+    data.path,
+    (phase, migration) => parentPort?.postMessage({ type: "progress", phase, migration }),
+    settings,
   );
   parentPort?.postMessage({ type: "done" });
 } catch (error) {

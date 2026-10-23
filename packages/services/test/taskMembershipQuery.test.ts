@@ -35,7 +35,7 @@ async function withTempIndex(
   try {
     runTasksDatabaseMigrations(db);
     db.close();
-    const repo = new TaskIndexRepo(path, 5000);
+    const repo = new TaskIndexRepo(undefined, undefined, path, 5000);
     await repo.ensureReady();
     await run(repo, join(dir, "workspace-a"));
     repo.close();

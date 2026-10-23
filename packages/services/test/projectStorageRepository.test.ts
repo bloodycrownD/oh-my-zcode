@@ -43,7 +43,12 @@ async function withTempWorkspace(
     runTasksDatabaseMigrations(db);
     // CLI 事实行必须在项目迁移之前存在：0005 的 reconcileLegacy 只为 host_id IS NULL 的
     // 存量行一次性补写 cli_* 镜像，之后的行走 admitTaskIdentity（不再生成 CLI 事实）。
-    const indexRepo = new TaskIndexRepo(join(dir, "tasks-index.sqlite"), 5000);
+    const indexRepo = new TaskIndexRepo(
+      undefined,
+      undefined,
+      join(dir, "tasks-index.sqlite"),
+      5000,
+    );
     await indexRepo.ensureReady();
     await seed?.(indexRepo, dir);
     indexRepo.close();
