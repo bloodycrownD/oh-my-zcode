@@ -7,8 +7,9 @@
  *    state（React 后写胜出）→ 弹窗永不出现且输入被吞。现路由已改 held→enqueue，
  *    该分支仅兜底，但 return 若再丢，防御面即破。
  * 2) bug A：ChatPromptEditor 首帧回填竞态哨兵——runAfterFrame 回调必须检查
- *    textChangeSerialRef，排队期间用户已打字时放弃程序化 setText(initialValue)，
- *    否则挂载首帧内输入被 initialValue 覆盖（编辑历史消息「发旧文本」的残留窗口）。
+ *    textChangeSerialRef，排队期间用户已打字时放弃程序化装填，否则挂载首帧内输入被
+ *    initialValue 覆盖（编辑历史消息「发旧文本」的残留窗口）。Step 21 起装填入口
+ *    改为 setTextWithMentions（保胶囊），哨兵语义不变。
  *
  * 运行形态：node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/composerHeldQueueGuard.test.ts
  */
@@ -41,14 +42,17 @@ test("bug B：confirmationRequired 分支以 return 结束（确认框不被 nul
 
 test("bug A：首帧回填带竞态哨兵（用户首帧打字不被 initialValue 覆盖）", () => {
   assert.match(editorSource, /textChangeSerialRef/, "哨兵 ref 存在");
-  // runAfterFrame 回调内：先比 serial 再 setText
+  // runAfterFrame 回调内：先比 serial 再装填
   const rafIdx = editorSource.indexOf("runAfterFrame(() => {");
   assert.ok(rafIdx > 0, "runAfterFrame 回调存在");
   const rafBody = editorSource.slice(rafIdx, editorSource.indexOf("});", rafIdx));
   const serialCheck = rafBody.indexOf("textChangeSerialRef.current !== scheduledSerial");
-  const setTextIdx = rafBody.indexOf("setText(initialValue)");
+  // Step 21（胶囊恢复）：首帧回填改走富装填 API——编辑历史正文来自 canonical markdown，
+  // 纯文本 setText 会把 file/plugin/skill/session 引用降级。哨兵语义不变，只换装填入口。
+  const fillIdx = rafBody.indexOf("setTextWithMentions(initialValue)");
   assert.ok(serialCheck > -1, "回调内有序列号检查");
-  assert.ok(setTextIdx > serialCheck, "序列号检查先于 setText");
+  assert.ok(fillIdx > serialCheck, "序列号检查先于富装填");
+  assert.equal(rafBody.indexOf(".setText("), -1, "首帧回填不得退回纯文本 setText");
   // handleTextChange 递增序列号
   assert.match(editorSource, /textChangeSerialRef\.current \+= 1/);
 });

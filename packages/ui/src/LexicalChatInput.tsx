@@ -56,6 +56,7 @@ import {
 } from "./mentions/nodes/PromptMentionNode.js";
 import { logger } from "./logger.js";
 import { navigatePromptHistory } from "./lib/promptHistory.js";
+import { parseMentionMarkdownRich, type RichMentionPart } from "@/mentions/mentionMarkdown.js";
 import type { MentionItemData } from "@/mentions/mentionTypes.js";
 import type { ComposerMentionPrefill } from "@/store/zcodeSessionStoreTypes.js";
 
@@ -83,7 +84,14 @@ export interface LexicalChatInputHandle {
   prependMentionIfMissing: (mention: ComposerMentionPrefill) => boolean;
   setMention: (mention: ComposerMentionPrefill, trailingText?: string) => void;
   insertMention: (mention: ComposerMentionPrefill, selectionState?: EditorState) => void;
+  /** 纯文本装填：不做 mention 还原。装填路径一律走 setTextWithMentions。 */
   setText: (text: string) => void;
+  /**
+   * 富装填：canonical mention markdown 还原成真实 chip 节点，其余正文逐字保留。
+   * 往返不变量：写入后 getMarkdown() 与入参逐字节相同（详见 mentionMarkdown.ts 白名单）。
+   */
+  setTextWithMentions: (text: string) => void;
+  /** 历史 API，保留为富装填的薄包装（插件推荐任务等多 mention 预填共用同一条路径）。 */
   setTextWithPluginMentions: (text: string) => void;
   setEditorStateJson: (editorStateJson: string) => void;
   setSkillMention: (skillName: string, markdown?: string, trailingText?: string) => void;
@@ -205,40 +213,50 @@ function replaceEditorText(editor: LexicalEditor, text: string) {
   );
 }
 
-const INLINE_PLUGIN_MENTION_PATTERN =
-  /\[@((?:\\.|[^\]])+)\]\(plugin:\/\/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)\)/g;
+/** 反解析产出的 mention → PromptMentionNode 身份（沿用各 provider 的 id 口径）。 */
+function richMentionNodeId(part: RichMentionPart): string {
+  if (part.category === "plugins") return `plugin:${part.value}`;
+  if (part.category === "sessions") return `session:${part.value}`;
+  if (part.category === "skills") return `skill:${part.value}`;
+  return `file:${part.value}`;
+}
 
-function replaceEditorTextWithPluginMentions(editor: LexicalEditor, text: string) {
+/**
+ * 富装填：段落切分与 replaceEditorText 保持一致，段内把白名单内的 mention markdown
+ * 还原成 chip 节点、其余文本原样写入；`markdown` 字段保留 fullMatch，序列化后字节不变。
+ */
+function replaceEditorTextWithMentions(editor: LexicalEditor, text: string) {
   editor.update(
     () => {
       const root = $getRoot();
       root.clear();
+
+      // Lexical getTextContent() 用 \n\n 分隔段落，对称处理防止换行翻倍
       for (const line of text.split("\n\n")) {
         const paragraph = $createParagraphNode();
-        let cursor = 0;
-        for (const match of line.matchAll(INLINE_PLUGIN_MENTION_PATTERN)) {
-          const start = match.index ?? 0;
-          if (start > cursor) paragraph.append($createTextNode(line.slice(cursor, start)));
-          const markdown = match[0];
-          const label = match[1]?.replaceAll("\\]", "]").replaceAll("\\[", "[") ?? "";
-          const pluginId = match[2] ?? "";
+        for (const segment of parseMentionMarkdownRich(line)) {
+          if (segment.type === "text") {
+            if (segment.text) paragraph.append($createTextNode(segment.text));
+            continue;
+          }
           paragraph.append(
             $createPromptMentionNode({
-              id: `plugin:${pluginId}`,
-              category: "plugins",
-              label,
-              value: pluginId,
-              markdown,
-              data: { pluginId },
+              id: richMentionNodeId(segment),
+              category: segment.category,
+              label: segment.label,
+              value: segment.value,
+              markdown: segment.markdown,
+              ...(segment.data ? { data: segment.data } : {}),
             }),
           );
-          cursor = start + markdown.length;
         }
-        if (cursor < line.length || paragraph.getChildrenSize() === 0) {
-          paragraph.append($createTextNode(line.slice(cursor)));
+        // 空行也要保留一个空段落（否则段落数变化会让正文的 \n\n 结构塌陷）。
+        if (paragraph.getChildrenSize() === 0) {
+          paragraph.append($createTextNode(""));
         }
         root.append(paragraph);
       }
+
       root.getLastChild()?.selectEnd();
     },
     { tag: PROGRAMMATIC_UPDATE_TAG },
@@ -739,7 +757,13 @@ function KeyboardPlugin({
     // 非 Enter 物理键不存在手机软键盘误发问题，send 不受 enterSubmits 视口门禁；
     // 与反转投递（仅响应 Ctrl/Meta+Enter）无交集，无需让位。
     const handleNonEnterScopedKeydown = (event: KeyboardEvent) => {
-      if (disabled || event.repeat || event.isComposing || event.keyCode === 229 || event.key === "Enter") {
+      if (
+        disabled ||
+        event.repeat ||
+        event.isComposing ||
+        event.keyCode === 229 ||
+        event.key === "Enter"
+      ) {
         return;
       }
       const scopedAction = resolveComposerKeyAction(event, composerEffectiveRef.current);
@@ -901,8 +925,8 @@ function E2ELexicalInputBridgePlugin({ inputTestId }: { inputTestId?: string }) 
       getEditorState: () => editor.getEditorState(),
       getText: () => getEditorMarkdown(editor.getEditorState()),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithMentions: (text: string) => replaceEditorTextWithMentions(editor, text),
+      setTextWithPluginMentions: (text: string) => replaceEditorTextWithMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
     };
@@ -1282,8 +1306,9 @@ function EditorApiPlugin({
       setMention: (mention, trailingText) =>
         replaceEditorWithMention(editor, mention, trailingText),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithMentions: (text: string) => replaceEditorTextWithMentions(editor, text),
+      // 历史 API：保留为富装填的薄包装，调用面（插件推荐任务预填）无需改动。
+      setTextWithPluginMentions: (text: string) => replaceEditorTextWithMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
       setSkillMention: (skillName: string, markdown = `$${skillName}`, trailingText = " ") =>

@@ -204,7 +204,9 @@ export function ChatPromptEditor({
       if (resolvedInputApiRef.current?.getMarkdown() === initialValue) {
         return;
       }
-      resolvedInputApiRef.current?.setText(initialValue);
+      // 编辑历史消息的正文来自用户消息 row.text（canonical markdown），必须走富装填，
+      // 否则 file/plugin/skill/session 引用会降级成纯文本，重发时丢胶囊。
+      resolvedInputApiRef.current?.setTextWithMentions(initialValue);
     });
   }, [initialValue, resolvedInputApiRef, syncInitialValueOnMount]);
 
