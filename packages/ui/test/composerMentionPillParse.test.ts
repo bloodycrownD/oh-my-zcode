@@ -21,6 +21,7 @@ import {
   buildSessionMentionMarkdown,
   buildSkillMentionMarkdown,
   parseMentionMarkdownRich,
+  splitRichMentionParagraphs,
   type RichMentionSegment,
 } from "../src/mentions/mentionMarkdown.js";
 
@@ -254,4 +255,51 @@ test("T-PR1-8: 空输入与纯文本边界", () => {
   const segments = parseMentionMarkdownRich(plain);
   assertRoundTrip(plain, segments);
   assert.equal(segments.length, 1);
+});
+
+/** 段落内按序拼接、段间补 \n\n —— 编辑器 getMarkdown 与输入字节相同。 */
+function joinParagraphs(paragraphs: readonly (readonly RichMentionSegment[])[]): string {
+  return paragraphs
+    .map((paragraph) =>
+      paragraph
+        .map((segment) => (segment.type === "text" ? segment.text : segment.markdown))
+        .join(""),
+    )
+    .join("\n\n");
+}
+
+test("T-PR1-9: 段落装配——整篇先解析，fence 跨空行不被误转 chip（P2-1）", () => {
+  const pluginLink = buildPluginMentionMarkdown("alpha", "alpha@market");
+  // 代码块内含空行：旧实现先按 \n\n 切段再逐段解析，第二段的 fence 状态丢失，
+  // 代码块（以及其后的真实正文）判定都会跑偏，fence 内的链接会被误转成 chip。
+  const input = ["正文 [x](./x.ts)", FENCE, "ts", pluginLink, "", pluginLink, FENCE, "结尾"].join(
+    "\n",
+  );
+
+  const paragraphs = splitRichMentionParagraphs(parseMentionMarkdownRich(input));
+  assert.equal(joinParagraphs(paragraphs), input, "段落拼接必须与输入逐字节相同");
+  assert.ok(paragraphs.length >= 2, "空行必须切出多个段落");
+
+  const mentions = paragraphs
+    .flat()
+    .flatMap((segment) => (segment.type === "mention" ? [segment] : []));
+  assert.deepEqual(
+    mentions.map((mention) => mention.category),
+    ["files"],
+    "fence 内的链接一律不转，只有 fence 外的 canonical 链接还原成 chip",
+  );
+
+  // 对照组：旧口径（先切段再逐段解析）确实会把 fence 后半段的链接误转 chip，
+  // 证明本用例对回归有区分力，不是恒真断言。
+  const legacyMentions = input
+    .split("\n\n")
+    .flatMap((chunk) => parseMentionMarkdownRich(chunk))
+    .flatMap((segment) => (segment.type === "mention" ? [segment] : []));
+  assert.ok(
+    legacyMentions.length > mentions.length,
+    "旧口径必须复现误转 chip 的 bug（否则用例没有区分力）",
+  );
+
+  // 空输入仍然装配成一个空段落（与 replaceEditorText 的 split 结果一致）。
+  assert.deepEqual(splitRichMentionParagraphs([]), [[]]);
 });

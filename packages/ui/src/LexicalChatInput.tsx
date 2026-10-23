@@ -56,7 +56,11 @@ import {
 } from "./mentions/nodes/PromptMentionNode.js";
 import { logger } from "./logger.js";
 import { navigatePromptHistory } from "./lib/promptHistory.js";
-import { parseMentionMarkdownRich, type RichMentionPart } from "@/mentions/mentionMarkdown.js";
+import {
+  parseMentionMarkdownRich,
+  splitRichMentionParagraphs,
+  type RichMentionPart,
+} from "@/mentions/mentionMarkdown.js";
 import type { MentionItemData } from "@/mentions/mentionTypes.js";
 import type { ComposerMentionPrefill } from "@/store/zcodeSessionStoreTypes.js";
 
@@ -222,19 +226,22 @@ function richMentionNodeId(part: RichMentionPart): string {
 }
 
 /**
- * 富装填：段落切分与 replaceEditorText 保持一致，段内把白名单内的 mention markdown
- * 还原成 chip 节点、其余文本原样写入；`markdown` 字段保留 fullMatch，序列化后字节不变。
+ * 富装填：先整篇做富反解析，再按编辑器段落契约（`\n\n`）装配。
+ *
+ * 不能先 `text.split("\n\n")` 再逐段解析：fence 状态会在段间丢失，代码块内含空行时
+ * 后半段的 mention 链接会被误转成 chip（P2-1），编辑器视觉与解析器判定必须一致。
+ * 段内白名单外的文本逐字保留，`markdown` 字段保留 fullMatch，序列化后字节不变。
  */
 function replaceEditorTextWithMentions(editor: LexicalEditor, text: string) {
+  const paragraphs = splitRichMentionParagraphs(parseMentionMarkdownRich(text));
   editor.update(
     () => {
       const root = $getRoot();
       root.clear();
 
-      // Lexical getTextContent() 用 \n\n 分隔段落，对称处理防止换行翻倍
-      for (const line of text.split("\n\n")) {
+      for (const segments of paragraphs) {
         const paragraph = $createParagraphNode();
-        for (const segment of parseMentionMarkdownRich(line)) {
+        for (const segment of segments) {
           if (segment.type === "text") {
             if (segment.text) paragraph.append($createTextNode(segment.text));
             continue;

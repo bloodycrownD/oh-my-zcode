@@ -28,6 +28,7 @@ const LEXICAL_INPUT_SOURCE = readSource("../src/LexicalChatInput.tsx");
 const CHAT_PROMPT_EDITOR_SOURCE = readSource("../src/prompt-editor/ChatPromptEditor.tsx");
 const COMPOSER_SOURCE = readSource("../src/v4/ConversationComposer.tsx");
 const QUEUE_ROW_SOURCE = readSource("../src/v4/ConversationQueueRow.tsx");
+const MENTION_MARKDOWN_SOURCE = readSource("../src/mentions/mentionMarkdown.ts");
 
 function countOccurrences(source: string, pattern: RegExp): number {
   return [...source.matchAll(new RegExp(pattern.source, `${pattern.flags.replace("g", "")}g`))]
@@ -65,15 +66,28 @@ test("T-PR2-1: LexicalChatInput 富装填 API 在位，setTextWithPluginMentions
     "旧插件专用装填实现必须已被富装填吸收",
   );
 
-  // 富装填实现：解析器 + 段落切分 + selectEnd 与 replaceEditorText 对齐
+  // 富装填实现：整篇解析 + 段落装配 + selectEnd 与 replaceEditorText 对齐
   const start = LEXICAL_INPUT_SOURCE.indexOf("function replaceEditorTextWithMentions");
   assert.ok(start > 0, "replaceEditorTextWithMentions 存在");
   const body = LEXICAL_INPUT_SOURCE.slice(
     start,
     LEXICAL_INPUT_SOURCE.indexOf("\nfunction ", start),
   );
-  assert.match(body, /parseMentionMarkdownRich\(line\)/, "必须用富反解析切段");
-  assert.match(body, /text\.split\("\\n\\n"\)/, "段落切分必须与 replaceEditorText 一致");
+  assert.match(
+    body,
+    /splitRichMentionParagraphs\(parseMentionMarkdownRich\(text\)\)/,
+    "必须整篇先解析再按段装配（fence 状态跨段落保留，P2-1）",
+  );
+  assert.doesNotMatch(
+    body,
+    /parseMentionMarkdownRich\(line\)/,
+    "不得先按 \\n\\n 切段再逐段解析：fence 状态会在段间丢失",
+  );
+  assert.match(
+    MENTION_MARKDOWN_SOURCE,
+    /export function splitRichMentionParagraphs\(/,
+    "段落装配必须是可测的纯函数",
+  );
   assert.match(body, /root\.getLastChild\(\)\?\.selectEnd\(\)/, "装填后光标必须落尾");
   assert.match(body, /markdown: segment\.markdown/, "chip 的 markdown 必须取原文 fullMatch");
 });

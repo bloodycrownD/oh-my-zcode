@@ -423,3 +423,38 @@ export function parseMentionMarkdownRich(content: string): RichMentionSegment[] 
   }
   return segments;
 }
+
+/**
+ * 按编辑器段落契约（Lexical getTextContent 用 `\n\n` 分隔段落）把富反解析结果装配成段落。
+ *
+ * 必须先整篇 `parseMentionMarkdownRich` 再调本函数：fence 状态跨段落有效，
+ * 代码块内含空行时后半段依然属于 fence 内正文。先 `text.split("\n\n")` 再逐段解析会让
+ * fence 状态在段间丢失，把代码块里的 mention 误转成 chip（编辑器视觉与解析器判定不一致）。
+ * 段落拼接不变量：段内各段按序拼接、段间补 `\n\n`，恒等于输入原文。
+ */
+export function splitRichMentionParagraphs(
+  segments: readonly RichMentionSegment[],
+): RichMentionSegment[][] {
+  const paragraphs: RichMentionSegment[][] = [];
+  let current: RichMentionSegment[] = [];
+  const startNextParagraph = () => {
+    paragraphs.push(current);
+    current = [];
+  };
+  for (const segment of segments) {
+    if (segment.type === "mention") {
+      current.push(segment);
+      continue;
+    }
+    // mention markdown 不含空行：段落边界只会出现在文本段内部。
+    const chunks = segment.text.split("\n\n");
+    for (let index = 0; index < chunks.length; index += 1) {
+      if (index > 0) startNextParagraph();
+      const chunk = chunks[index] ?? "";
+      if (chunk) current.push({ type: "text", text: chunk });
+    }
+  }
+  // 末尾段落（可能为空）同样是真实段落：与 replaceEditorText 的 split 结果保持同段落数。
+  paragraphs.push(current);
+  return paragraphs;
+}
