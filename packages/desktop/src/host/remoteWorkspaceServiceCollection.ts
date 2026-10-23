@@ -2,7 +2,6 @@
 import {
   ServiceCollection,
   IFileService,
-
   IGitService,
   IGitCheckpointService,
   ISystemService,
@@ -31,6 +30,7 @@ import {
   IMemoryService,
   ISettingsSyncService,
   IPromptAttachmentTransferService,
+  ISourceServerWorkspaceService,
   type IServiceAccessor,
 } from "@zcode/services";
 import {
@@ -42,7 +42,6 @@ import {
   createSettingsSyncService,
   createBotsService,
   createUsageStatsService,
-
   createClientScenesService,
   createServiceLogger,
   createSubagentsService,
@@ -258,6 +257,13 @@ export function createRemoteWorkspaceServiceCollection(params: {
       createSettingsSyncService({ settingService: localSettingService }),
     )
     .register(IPromptAttachmentTransferService, params.promptAttachmentTransferService);
+  // Source 端 workspace 身份解析（upstream-v316-fullsync P7 续批）：identity 绑定回执通道。
+  // daemon Source 已提供；旧 deployServer backend 无此通道，缺席时不注册——
+  // 不能为对齐上游必选形态造坏 proxy 挡旧链共存（legacy 断言保持 19 通道）。
+  const sourceServerWorkspaceService = params.connectionServices.sourceServerWorkspaceService;
+  if (sourceServerWorkspaceService) {
+    services.register(ISourceServerWorkspaceService, sourceServerWorkspaceService);
+  }
   registerHostApiNetworkTransportForDispose(services, hostApiNetworkTransport);
   registerRemoteProviderProvisioningExecutor(services, remoteProviderProvisioningService);
   return services;

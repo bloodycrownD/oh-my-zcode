@@ -34,6 +34,7 @@ import {
   type ServerRemoteConnection,
   type ServerRemoteDuplexConnectionOptions,
 } from "./serverRemoteConnection.js";
+import type { SourceServerDirectory } from "./sourceServerDirectory.js";
 import { isSourceServerAutomaticRecoveryTerminalState } from "./sourceServerRecoveryPolicy.js";
 
 export type {
@@ -158,6 +159,13 @@ export interface SourceServerConnectionManagerOptions {
   onProjectChange?: (sourceServerId: string) => void;
   compatibilityManifest?: CompatibilityManifest;
   sourceServerArtifactPolicy?: SourceServerArtifactPolicy;
+  /**
+   * Directory 窄接口（upstream-v316-fullsync P7 续批）：握手落盘 + 持久 identityChanged
+   * 判定（与内存对回并行，Directory 判定为权威）；缺席时保持薄层内存对回语义（测试 double）。
+   */
+  directory?: {
+    recordHandshake: SourceServerDirectory["recordHandshake"];
+  };
   resolveRelease?: (
     probe: Awaited<ReturnType<SourceServerTransportAdapter["probe"]>>,
     target: Exclude<RemoteTarget, { kind: "server" }>,
@@ -1040,12 +1048,43 @@ export class SourceServerConnectionManager {
       }
       const sourceServerId = connection.serverInfo.serverId;
       options.onDiagnosticPhase?.("identity-reconcile");
-      // 薄层身份对回（设计说明见 SourceServerConnectProfile）：上游 identityChanged 由三期
-      // Directory.recordHandshake 持久化判定；薄层用 profile.sourceServerId 与本次握手
-      // serverId 的内存对回等价替代——同一安装（install.json installationId 不变）重连时
-      // 两者恒等，重装换代时进入 identity-change-pending 等待用户确认。
+      // 薄层身份对回（设计说明见 SourceServerConnectProfile）：Directory.recordHandshake
+      // （P7 续批注入）是持久判定权威；内存对回保留为 Directory 缺席时（测试 double）的
+      // 等价替代——同一安装（install.json installationId 不变）重连时两者恒等，重装换代
+      // 时进入 identity-change-pending 等待用户确认。
       if (profile.sourceServerId && profile.sourceServerId !== sourceServerId) {
         if (options.confirmIdentityChange !== true) {
+          this.setState(profile.profileId, {
+            state: "identity-change-pending",
+            sourceServerId: profile.sourceServerId,
+            pendingSourceServerId: sourceServerId,
+            errorCode: SOURCE_SERVER_IDENTITY_CHANGE_PENDING_ERROR_CODE,
+            retryable: false,
+          });
+          throw new SourceServerIdentityChangePendingError(profile.profileId, sourceServerId);
+        }
+      }
+      if (this.options.directory) {
+        // Directory admission（P7 续批）：握手落盘（设备名/lastOnline/workspaceHistory 与
+        // Profile→Source 绑定持久化）。membershipIntent（add/retain）语义在上游由
+        // membership repo 的 admitConnection 承担；omz 无该服务面，intent 随 options 透传
+        // 并在此统一落盘，repo 层随后续 IRemoteProjectService 批回补。
+        options.onDiagnosticPhase?.("directory-record");
+        const handshakeResult = await this.options.directory.recordHandshake(
+          profile.profileId,
+          {
+            sourceServerId,
+            osUser: connection.serverInfo.identity?.osUser,
+            hostname: connection.serverInfo.identity?.hostname,
+            version:
+              connection.serverInfo.compatibility?.productVersion ?? connection.serverInfo.version,
+            connectedAt: this.now(),
+            workspaces: connection.serverInfo.workspaces,
+          },
+          ...(options.confirmIdentityChange ? [{ confirmIdentityChange: true }] : []),
+        );
+        throwIfAborted();
+        if (handshakeResult.identityChanged && options.confirmIdentityChange !== true) {
           this.setState(profile.profileId, {
             state: "identity-change-pending",
             sourceServerId: profile.sourceServerId,

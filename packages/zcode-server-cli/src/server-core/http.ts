@@ -18,7 +18,11 @@ import {
   IZCodeAgentService,
   ServiceCollection,
 } from "@zcode/services";
-import { createServiceLogger } from "@zcode/services/node";
+import {
+  createServiceLogger,
+  SourceServerWorkspaceIdentityChannelServer,
+  type SourceServerWorkspaceIdentityMapper,
+} from "@zcode/services/node";
 import {
   SERVER_REMOTE_PROTOCOL_VERSION,
   ZCODE_COMPATIBILITY_MANIFEST,
@@ -91,15 +95,22 @@ function exposeWebSocket(
   ws: WebSocket,
   services: ServiceCollection,
   clientMode: "desktop-continuous" | "web-remote-replayable",
+  workspaceIdentityMapper?: SourceServerWorkspaceIdentityMapper,
 ): void {
-  // R3 三期接线挂账（phase-remote-ux，Step 18）：上游此处还包 SourceServerWorkspaceIdentityChannelServer
-  // （workspaceIdentityMapper）与 desktop-continuous 反向 topicResourcePeers，二者依赖
-  // services/source-server-workspace（aliasRepo 三期面），一期不引入；ConversationShare 附件
-  // scope 与 ProviderProvisioning 受信护栏同样随三期补齐。
+  // R3 三期接线（upstream-v316-fullsync P7 续批）：workspace identity wire seam——
+  // Source 内部 canonical storage identity 与对外 stable identity 的唯一映射点
+  // （SourceServerWorkspace 通道旁路，其余 channel 出入双向映射）。
+  // 仍挂账：desktop-continuous 反向 topicResourcePeers、ConversationShare 附件 scope
+  // 与 ProviderProvisioning 受信护栏（随后续批/relay 批补齐）。
   const socket = wrapWebSocket(ws);
   const protocol = new SocketProtocol(socket);
   const rawServer = new ChannelServer(protocol, "server");
-  const server = new LoggingChannelServer(rawServer, (...args) => log.debug(undefined, ...args));
+  const loggingServer = new LoggingChannelServer(rawServer, (...args) =>
+    log.debug(undefined, ...args),
+  );
+  const server = workspaceIdentityMapper
+    ? new SourceServerWorkspaceIdentityChannelServer(loggingServer, workspaceIdentityMapper)
+    : loggingServer;
   const agentService = services.getOptional(IZCodeAgentService);
   const scope = agentService
     ? createZCodeAgentConnectionScope(agentService, {
@@ -126,6 +137,8 @@ export async function createCoreHttpServer(
     serverId?: string;
     ingressToken?: string;
     migrationFailedPathCount?: number;
+    /** workspace identity wire seam（P7 续批）；缺席时通道不包映射层。 */
+    workspaceIdentityMapper?: SourceServerWorkspaceIdentityMapper;
     hostCapabilityStore?: HostCapabilityStore;
   } = {},
 ): Promise<CoreHttpServer> {
@@ -195,7 +208,12 @@ export async function createCoreHttpServer(
     "/ws",
     upgradeWebSocket(() => ({
       onOpen(_event, socket) {
-        exposeWebSocket(socket.raw as WebSocket, services, "web-remote-replayable");
+        exposeWebSocket(
+          socket.raw as WebSocket,
+          services,
+          "web-remote-replayable",
+          options.workspaceIdentityMapper,
+        );
       },
     })),
   );
@@ -210,7 +228,12 @@ export async function createCoreHttpServer(
     "/ws/host",
     upgradeWebSocket(() => ({
       onOpen(_event, socket) {
-        exposeWebSocket(socket.raw as WebSocket, services, "desktop-continuous");
+        exposeWebSocket(
+          socket.raw as WebSocket,
+          services,
+          "desktop-continuous",
+          options.workspaceIdentityMapper,
+        );
       },
     })),
   );

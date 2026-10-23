@@ -93,6 +93,8 @@ export const ServiceChannels = {
   WindowProject: "window-project",
   WindowRemoteProjects: "window-remote-projects",
   WindowProjectChanges: "window-project-changes",
+  /** Source 端 workspace 身份解析/迁移通道（identity 绑定回执） */
+  SourceServerWorkspace: "source-server-workspace",
   /** 文件系统监视服务 */
   FileWatcher: "file-watcher",
   /** OAuth 认证服务 */

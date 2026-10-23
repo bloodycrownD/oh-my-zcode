@@ -1,6 +1,6 @@
 import { hostname } from "node:os";
 import {
-  createLocalServices,
+  createServerHostServices,
   disposeServiceResourcesAndWait,
   materializeZCodeBuiltinProviderConfig,
   getAppConfigDir,
@@ -25,9 +25,9 @@ export async function runServerCore(generation: number): Promise<void> {
     if (shutdown) void shutdown("parent-disconnected");
     else parentDisconnected = true;
   });
-  // R3 三期挂账（Step 18）：上游此处换用 createServerHostServices（sourceServerId + aliasRepo
-  // 工作区身份映射 + 迁移失败计数 + topicResourceRelayChannel），依赖 services/source-server-workspace
-  // 三期面，一期保持 createLocalServices；migrationFailedPathCount 一期恒为 0。
+  // R3 三期换装（upstream-v316-fullsync P7 续批）：上游 createServerHostServices 形态——
+  // sourceServerId + aliasRepo 工作区身份映射 + 迁移失败计数 + workspace identity wire seam。
+  // omz 裁量：topicResourceRelayChannel/projectStorageHostId 不随本期（见 createServerHostServices 注）。
   const layout = resolveServerLayout(process.env.ZCODE_SERVER_ROOT?.trim());
   const explicitZCodeBuiltinProviderConfigFilePath =
     process.env[ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV]?.trim();
@@ -44,17 +44,19 @@ export async function runServerCore(generation: number): Promise<void> {
       `当前构建未嵌入 ZCode Built-in Provider Config，且未设置 ${ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV}`,
     );
   }
-  const services = createLocalServices({
-    zcodeBuiltinProviderConfigFilePath,
-    serviceAuthorityMode: "standalone-server",
-  });
+  const sourceServerId = (await resolveCoreServerId()) ?? hostname() ?? "omz-server";
+  const { services, workspaceIdentityMapper, migrationFailedPathCount } =
+    await createServerHostServices({
+      sourceServerId,
+      zcodeBuiltinProviderConfigFilePath,
+    });
   const taskActivityTracker = createTaskActivityTracker(services.getOptional(IZCodeAgentService));
   const ingressToken = await createIngressToken(layout);
-  const sourceServerId = (await resolveCoreServerId()) ?? hostname() ?? "omz-server";
   const http = await createCoreHttpServer(services, {
     serverId: sourceServerId,
     ingressToken,
-    migrationFailedPathCount: 0,
+    migrationFailedPathCount,
+    workspaceIdentityMapper,
   });
   const send = (message: unknown): Promise<void> => {
     if (typeof process.send !== "function" || process.connected === false) return Promise.resolve();

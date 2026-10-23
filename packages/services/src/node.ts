@@ -92,6 +92,15 @@ export {
   type ControllerRemoteIdentityMigrationReport,
 } from "./session/controllerRemoteIdentityMigration.js";
 export type { UpdateConnectionProfileInput } from "./source-server-management/sourceServerManagement.js";
+// R3 三期（P7 续批）：Source 端 workspace 身份解析通道——契约、服务实现与唯一 wire
+// 映射 seam（daemon serve 换装 createServerHostServices 后经 http 包 ChannelServer）。
+export { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
+export { createSourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspaceService.js";
+export {
+  SourceServerWorkspaceIdentityChannelServer,
+  SourceServerWorkspaceIdentityMapper,
+  type SourceServerWorkspaceIdentityMapping,
+} from "./source-server-workspace/sourceServerWorkspaceIdentityChannelServer.js";
 export { createGitService } from "./git/gitService.js";
 export { GitCommitMessageGenerator } from "./git/gitCommitMessageGenerator.js";
 export { createGitCheckpointService } from "./git/gitCheckpointService.js";
@@ -389,6 +398,10 @@ import {
 } from "#src/cua-permission-broker/windowsCuaDevRuntime.js";
 import { createCanonicalCuaHelperInstaller } from "./cua-permission-broker/cuaHelperInstaller.js";
 import { WindowsCuaHelperHost } from "#src/cua-permission-broker/windowsCuaDevHelperHost.js";
+import { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
+import { createSourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspaceService.js";
+import { SourceServerWorkspaceIdentityMapper } from "./source-server-workspace/sourceServerWorkspaceIdentityChannelServer.js";
+import { SourceServerWorkspaceAliasRepo } from "./session/sourceServerWorkspaceAliasRepo.js";
 import { DEV_HELPER_APP_NAME, HELPER_APP_NAME } from "@zcode/zcode-cua/broker/helperConstants";
 import { resolveBrokerSocketPath } from "@zcode/zcode-cua/broker/socketPath";
 import {
@@ -396,6 +409,7 @@ import {
   formatLogPrefix,
   type ServiceAuthorityMode,
   resolveRuntimeZCodeEndpointOrigin,
+  buildServerRemoteWorkspaceIdentity,
   type BrowserBackendDescriptor,
   type BrowserClientMode,
   type BrowserCommand,
@@ -1241,6 +1255,12 @@ export function createLocalServices(options: {
   };
   /** Windows desktop-local Host 的 CUA turn 状态投影；其它 authority 会在装配层拒绝。 */
   cuaOperationStateReporter?: CuaOperationStateReporter;
+  /**
+   * Source 端 workspace 身份解析服务（upstream-v316-fullsync P7 续批）：
+   * standalone-server（daemon serve）经 createServerHostServices 注入 aliasRepo 装配实例；
+   * 缺省（desktop 本机 Host）落默认实现，仅作通道面占位，本机不存在 legacy 身份合并流。
+   */
+  sourceServerWorkspaceService?: ISourceServerWorkspaceService;
 }): ServiceCollection {
   const isDesktopAttachedRemote = options?.serviceAuthorityMode === "desktop-attached-remote";
   // host / remote server 以前直接沿用当前进程环境启动后续服务。
@@ -2079,6 +2099,12 @@ export function createLocalServices(options: {
     // 自动暴露 project / task-groups 通道；RemoteServiceAccess 侧 getter 对应补齐。
     .register(IProjectService, projectService)
     .register(ITaskGroupService, taskGroupService)
+    // Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon 由
+    // createServerHostServices 注入 aliasRepo 装配实例；本机 Host 落默认实现占位。
+    .register(
+      ISourceServerWorkspaceService,
+      options?.sourceServerWorkspaceService ?? createSourceServerWorkspaceService(),
+    )
     .register(ICuaPermissionService, cuaPermissionService)
     .register(ICuaPipSessionService, cuaPipSessionService)
     .register(
@@ -2249,4 +2275,44 @@ export async function disposeServiceResourcesAndWait(services: ServiceCollection
     .get(services)
     ?.disposeAndWait()
     .catch(() => {});
+}
+
+/** 独立 Server 共用身份装配；daemon serve 换装入口（上游 v3.16.2 createServerHostServices）。
+ *
+ * omz 裁量（upstream-v316-fullsync P7 续批）：
+ * - 只接 identity 面（SourceServerWorkspaceAliasRepo + ISourceServerWorkspaceService +
+ *   SourceServerWorkspaceIdentityMapper）；上游的 topicResourceRelayChannel（v4 topic 反向
+ *   relay）与 projectStorageHostId（tasks repo 跨 Host 存储身份）不随本期——前者属独立
+ *   topic 面，后者牵 tasksDatabase schema 冻结纪律（0004/0006 逐字节冻结），随后续批回补。
+ * - migrateApplicationStorage 上游形态依赖 storageHostId 迁移屏障；omz 迁移仍走
+ *   tasksDatabase/migrations 同步 runner，aliasRepo 首次 resolveCanonicalWorkspaceKey 时自迁移。
+ */
+export async function createServerHostServices(options: {
+  sourceServerId: string;
+  zcodeBuiltinProviderConfigFilePath: string;
+  providerProvisioningTargetEnabled?: boolean;
+}) {
+  const workspaceAliasRepo = new SourceServerWorkspaceAliasRepo();
+  const workspaceIdentityMapper = new SourceServerWorkspaceIdentityMapper();
+  const sourceServerWorkspaceService = createSourceServerWorkspaceService(workspaceAliasRepo, {
+    defaultWorkspaceIdentity: (workspacePath) =>
+      buildServerRemoteWorkspaceIdentity({ serverId: options.sourceServerId, workspacePath }),
+    onResolved: ({ workspacePath, canonicalWorkspaceKey }) => {
+      workspaceIdentityMapper.register({
+        stableIdentity: buildServerRemoteWorkspaceIdentity({
+          serverId: options.sourceServerId,
+          workspacePath,
+        }),
+        canonicalIdentity: canonicalWorkspaceKey,
+      });
+    },
+  });
+  const migrationFailedPathCount = await workspaceAliasRepo.getFailedPathCount();
+  const services = createLocalServices({
+    zcodeBuiltinProviderConfigFilePath: options.zcodeBuiltinProviderConfigFilePath,
+    providerProvisioningTargetEnabled: options.providerProvisioningTargetEnabled,
+    serviceAuthorityMode: "standalone-server",
+    sourceServerWorkspaceService,
+  });
+  return { services, workspaceIdentityMapper, migrationFailedPathCount };
 }

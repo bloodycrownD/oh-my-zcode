@@ -132,6 +132,8 @@ export type {
   RemoteProjectEntry,
   RemoteProjectHost,
 } from "./remote-projects/contract.js";
+// Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批，identity 绑定回执）。
+export { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
 
 // ZCode agent service — IZCodeAgentService is both a type (interface) and value (descriptor)
 export {

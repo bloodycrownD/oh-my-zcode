@@ -35,6 +35,7 @@ import type { IWindowControllerService } from "./window-controller/windowControl
 import type { IOnboardingRecordService } from "./onboarding/onboardingRecord.js";
 import type { IProjectService } from "./project/contract.js";
 import type { ITaskGroupService } from "./task-groups/contract.js";
+import type { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
 
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
@@ -62,6 +63,12 @@ export interface IServiceAccessor {
   readonly projectService?: IProjectService;
   /** 任务分组组织服务（与 projectService 同批注册）；缺席时分组视角降级为空结构。 */
   readonly taskGroupService?: ITaskGroupService;
+  /**
+   * Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon serve 已
+   * 换装 createServerHostServices 并注册；旧 deployServer backend / 测试 double 无此通道，
+   * 消费方（identity 绑定回执）按缺席降级跳过绑定，旧链共存不受影响。
+   */
+  readonly sourceServerWorkspaceService?: ISourceServerWorkspaceService;
   // CUA 是 opt-in 内测特性：local macOS host 提供，远端 等 host 没有。可选避免连锁必填。
   readonly cuaPermissionService?: ICuaPermissionService;
   readonly botsService: IBotsService;

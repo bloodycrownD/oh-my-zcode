@@ -26,6 +26,7 @@ import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactM
 import {
   ServiceCollection,
   IBotsService,
+  ICredentialService,
   IFileService,
   IMediaPreviewService,
   IModelSelectionService,
@@ -61,7 +62,6 @@ import {
   isRemoteWorkspaceIdentity,
   resolveWorkspaceKey,
   formatModelPickerValue,
-  buildSshRemoteHostKey,
   type ZCodePromptAttachment,
   type ZCodeStreamEvent,
   type ZCodeTaskMeta,
@@ -131,6 +131,8 @@ import {
   type ManagedSourceServerConnection,
   type SourceServerConnectProfile,
 } from "./sourceServerConnectionManager.js";
+import { SourceServerDirectory } from "./sourceServerDirectory.js";
+import { connectSourceServerTarget } from "./connectSourceServerTarget.js";
 import { createSourceServerRecoveryCloseEvent } from "./sourceServerRecoveryPolicy.js";
 import { createWindowHostControllerRuntime } from "./windowHostControllerService.js";
 import { prepareRemoteWorkspaceIdentity } from "./remoteWorkspacePreparation.js";
@@ -140,6 +142,18 @@ type RemoteBackendHostConnection = RemoteConnection & {
   backend: IRemoteBackend;
 };
 type HostRemoteConnection = RemoteBackendHostConnection;
+/**
+ * identity 绑定回执（upstream-v316-fullsync P7 续批）：prepareWorkspaceIdentity 尾段调用，
+ * 经 Source 端 sourceServerWorkspaceService.resolveWorkspace 完成 stable→canonical
+ * 身份合并登记；旧 deployServer backend 无通道时 capability 缺席，绑定跳过（共存不破）。
+ */
+interface WorkspaceIdentityBindingInput {
+  workspacePath: string;
+  stableWorkspaceIdentity: string;
+  legacyRouteHint?: string;
+  signal?: AbortSignal;
+}
+
 interface HostRemoteConnectionCapabilities {
   browserRecordingUploader?: Pick<IRemoteBackend, "upload">;
   /** Source Server 握手身份（install.json installationId）；registry 按它收敛同一 Source。 */
@@ -149,6 +163,14 @@ interface HostRemoteConnectionCapabilities {
   remoteMediaPreviewFactory?: (
     scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>,
   ) => RemoteMediaPreviewProxy;
+  bindWorkspaceIdentity?: (input: WorkspaceIdentityBindingInput) => Promise<void>;
+  /** 目录打开事实（workspaceHistory 排序源）；Directory 在场时登记。 */
+  recordWorkspaceOpen?: (input: {
+    workspacePath: string;
+    workspaceIdentity: string;
+    workspacePurpose?: "project" | "conversation";
+    legacyWorkspaceIdentity?: string;
+  }) => Promise<void>;
 }
 
 let activeRemoteMediaRequests = 0;
@@ -1228,41 +1250,51 @@ async function disposeHostRemoteConnection(connection: HostRemoteConnection): Pr
   await connection.disposeAndWait({ timeoutMs: 5_000 });
 }
 
-/**
- * Source Server 连接的 profileId 稳定键（薄层）：同一 target 的重试/重连/恢复必须复用同一
- * profile，否则 Manager 的 connectFlights/reconnectInputs 会把同一线路拆成多个恢复意图。
- * 键规则与 registry buildConnectionKey 同构（ssh 复用 buildSshRemoteHostKey 归一）。
- */
-function buildSourceServerProfileKey(target: RemoteTarget): string {
-  switch (target.kind) {
-    case "ssh":
-      return `ssh:${buildSshRemoteHostKey(target)}`;
-    case "wsl":
-      return `wsl:${target.distro?.trim() || "<default>"}\0${target.user?.trim() || "<default>"}`;
-    case "docker":
-      return `docker:${target.container.trim()}`;
-  }
-}
-
 let sourceServerConnectionManager: SourceServerConnectionManager | null = null;
 function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
   if (sourceServerConnectionManager) return sourceServerConnectionManager;
-  // 薄 owner 层实例化（Step 17 裁量）：无 Directory/admission（三期面），身份对回依赖
-  // 调用方 profile.sourceServerId 与远端 install.json installationId（设计见
-  // SourceServerConnectProfile）。connectServer 走一期 duplex 隧道形态。
+  // 薄 owner 层实例化（Step 17 裁量 + P7 续批增强）：Directory 窄接口注入（recordHandshake
+  // 握手落盘 + identityChanged 判定），admission repo 面（上游 admitConnection/commitMembership）
+  // 仍挂账——omz 无 membership 服务面，intent 语义随 directory-record 注释登记。
+  // connectServer 走一期 duplex 隧道形态。
   sourceServerConnectionManager = new SourceServerConnectionManager({
     logWarn: (message, error) => logger.warn(message, error),
+    directory: {
+      recordHandshake: (...args) => ensureSourceServerDirectory().recordHandshake(...args),
+    },
   });
   return sourceServerConnectionManager;
+}
+
+let sourceServerDirectoryInstance: SourceServerDirectory | null = null;
+/**
+ * Source Server 目录单例（upstream-v316-fullsync P7 续批实例化）：设备/线路/工作区历史
+ * 持久化权威。设置与凭据来自本机 Host 服务集合；controller-remote 身份迁移不随 host 域
+ * 接入（上游同构——迁移属 zcode-server-cli migrate retry 面，Profile 改绑的旧身份改写由
+ * legacyRouteHint 解析链在 resolveWorkspace 侧完成）。
+ */
+function ensureSourceServerDirectory(): SourceServerDirectory {
+  if (sourceServerDirectoryInstance) return sourceServerDirectoryInstance;
+  if (!activeServices) throw new Error("Local Host services are not initialized.");
+  sourceServerDirectoryInstance = new SourceServerDirectory({
+    settingService: activeServices.get(ISettingService),
+    credentialService: activeServices.get(ICredentialService),
+    // host 域无 debug 日志通道；按 debug 语义仅在非生产输出，生产 no-op 防止刷盘。
+    logDebug: (message) => {
+      if (process.env.NODE_ENV !== "production") logger.info(message);
+    },
+  });
+  return sourceServerDirectoryInstance;
 }
 
 /**
  * R3 daemon 分支：经 SourceServerConnectionManager（恢复 owner）建立 ssh/wsl/docker 连接。
  *
- * 二期可达面：existingSourceServerId 在场时（registry.connectSource/三期切换入口）。
- * Coexistence 政策：本期 Renderer 的 ConnectRemoteWorkspace 主链仍走下方 deployServer
- * 旧链（packages/ui 零触碰红线；三期 remote-connection-flow 切换后 daemon 分支成为主链，
- * deployServer 退役见 spec Step 19）。
+ * P7 续批主链化：无 existingSourceServerId 的手动连接也走本分支（Renderer
+ * ConnectRemoteWorkspace 主链切换）；Profile 由 Directory.ensureProfile 建/复用，
+ * 握手经 Directory.recordHandshake 落盘（membershipIntent 随 options 透传）。
+ * Coexistence 政策：deployServer 旧链（setupRemoteConnection）保留共存零删除，
+ * 退役拍板留 P9/发布轮（spec Step 19）。
  *
  * Manager 三事件接线（照上游形态）：
  * - onDidChangeState → 投影为 recoverable close 事件（恢复进度 1/3..3/3 与预算终态）
@@ -1272,8 +1304,7 @@ function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
 async function connectManagedSourceServerHandle(params: {
   target: RemoteTarget;
   existingSourceServerId?: string;
-  // 三期 Directory admission 占位：omz Manager 的 ConnectSourceServerOptions 已裁该字段，
-  // 此处保留签名以对齐上游形态，P7 接 Directory.recordHandshake 后恢复消费（cr-func-r3b P2-1）。
+  /** Directory admission 意图（上游默认 add/retry=retain）；随 connect 链透传 Manager。 */
   membershipIntent?: "add" | "retain";
   remoteAssets: RemoteAssetDirs;
   signal: AbortSignal;
@@ -1282,24 +1313,34 @@ async function connectManagedSourceServerHandle(params: {
   reconnectListeners: Set<() => void>;
   notifyClose: (event: WindowRemoteConnectionCloseEvent) => void;
 }): Promise<WindowRemoteConnectionHandle<ServiceCollection, HostRemoteConnectionCapabilities>> {
+  if (!activeServices) throw new Error("Local Host services are not initialized.");
   const manager = ensureSourceServerConnectionManager();
-  const profile: SourceServerConnectProfile = {
-    profileId: buildSourceServerProfileKey(params.target),
-    transport: params.target.kind,
-    ...(params.existingSourceServerId ? { sourceServerId: params.existingSourceServerId } : {}),
-  };
+  const directory = ensureSourceServerDirectory();
   let lastNotifiedRecoveryAttempt = 0;
   let disposed = false;
-  const existingConnection = params.existingSourceServerId
-    ? manager.getOnlineConnection(params.existingSourceServerId)
-    : undefined;
-  if (params.existingSourceServerId && !existingConnection) {
-    throw new WindowRemoteConnectionUnavailableError(params.existingSourceServerId);
-  }
-  const managed: ManagedSourceServerConnection =
-    existingConnection ??
-    (await manager.connect({
-      profile,
+  let profile: SourceServerConnectProfile;
+  let managed: ManagedSourceServerConnection;
+  if (params.existingSourceServerId) {
+    // 三期入口（registry.connectSource/恢复）：只接受 Directory 已登记且 Manager 在线的
+    // Source；缺席按不可用拒绝，不能静默新建连接冒充已恢复的 Source。
+    const existingProfile = (await directory.snapshot()).profiles.find(
+      (item) => item.sourceServerId === params.existingSourceServerId,
+    );
+    const existingConnection = manager.getOnlineConnection(params.existingSourceServerId);
+    if (!existingProfile || !existingConnection) {
+      throw new WindowRemoteConnectionUnavailableError(params.existingSourceServerId);
+    }
+    profile = {
+      profileId: existingProfile.profileId,
+      transport: existingProfile.target.kind,
+      sourceServerId: params.existingSourceServerId,
+    };
+    managed = existingConnection;
+  } else {
+    // 主链：连接结果尚未确定时先以 deferCredentials 建/复用 Profile；真实 profileId 落
+    // Directory（同一 target 重试/恢复复用同一线路），握手经 Manager 内 directory-record 落盘。
+    const result = await connectSourceServerTarget(directory, manager, {
+      membershipIntent: params.membershipIntent,
       target: params.target,
       allowInstall: params.confirmSourceServerInstall === true,
       context: {
@@ -1316,7 +1357,16 @@ async function connectManagedSourceServerHandle(params: {
           remoteConnectionProgressContext.report(event.level ?? "info", [message]);
         },
       },
-    }));
+    });
+    profile = {
+      profileId: result.profile.profileId,
+      transport: params.target.kind,
+      ...(result.connection.sourceServerId
+        ? { sourceServerId: result.connection.sourceServerId }
+        : {}),
+    };
+    managed = result.connection;
+  }
 
   const buildServices = (source: ManagedSourceServerConnection): ServiceCollection =>
     createRemoteWorkspaceServiceCollection({
@@ -1405,6 +1455,38 @@ async function connectManagedSourceServerHandle(params: {
     capabilities: {
       sourceServerId: connection.serverInfo.serverId,
       persistentSourceConnection: true,
+      ...(directory
+        ? {
+            // identity 绑定回执（P7 续批）：prepareWorkspaceIdentity 尾段调用。旧 Source
+            // （deployServer backend / 未升级 daemon）无通道时按缺席降级跳过绑定；
+            // legacyRouteHint 让首次接通把旧 route 身份合并进 canonical（T-RU2 迁移链）。
+            bindWorkspaceIdentity: async (input) => {
+              input.signal?.throwIfAborted();
+              const currentRouteHint = buildRemoteWorkspaceIdentity(
+                input.workspacePath,
+                params.target,
+              );
+              const legacyRouteHint = await directory.resolveLegacyWorkspaceIdentity({
+                profileId: profile.profileId,
+                workspacePath: input.workspacePath,
+                fallback: input.legacyRouteHint ?? currentRouteHint,
+              });
+              input.signal?.throwIfAborted();
+              // services 换代由 getter 语义保证：闭包读当前 wrapper 的 Source services。
+              await managed.services.sourceServerWorkspaceService?.resolveWorkspace({
+                workspacePath: input.workspacePath,
+                legacyRouteHint,
+              });
+            },
+            recordWorkspaceOpen: async (input) => {
+              await directory.recordWorkspaceOpen({
+                profileId: profile.profileId,
+                sourceServerId: connection.serverInfo.serverId,
+                ...input,
+              });
+            },
+          }
+        : {}),
     },
     onDidClose(listener) {
       params.closeListeners.add(listener);
@@ -1441,14 +1523,12 @@ async function createWindowRemoteConnectionHandle(params: {
   if (params.signal.aborted) {
     throw new Error("远程连接已取消");
   }
-  const closeListeners = new Set<(event: WindowRemoteConnectionCloseEvent) => void>();
-  const reconnectListeners = new Set<() => void>();
-  const notifyClose = (event: WindowRemoteConnectionCloseEvent) => {
-    for (const listener of closeListeners) {
-      listener(event);
-    }
-  };
-  if (params.existingSourceServerId) {
+  // 主链切换（upstream-v316-fullsync P7 续批）：ssh/wsl/docker 的 ConnectRemoteWorkspace
+  // 全量走 daemon 分支（SourceServerConnectionManager 恢复 owner + Directory Profile/握手
+  // 落盘 + identity 绑定回执）。deployServer 旧链（下方 setupRemoteConnection 函数体）
+  // 保留共存零删除：ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1 环境开关可回退（回滚预案），
+  // 退役清单归 P9/发布轮（spec Step 19）。
+  if (process.env.ZCODE_REMOTE_DEPLOY_SERVER_LEGACY !== "1") {
     return await connectManagedSourceServerHandle({
       target: params.target,
       ...(params.existingSourceServerId
@@ -1460,11 +1540,21 @@ async function createWindowRemoteConnectionHandle(params: {
       ...(params.confirmSourceServerInstall
         ? { confirmSourceServerInstall: params.confirmSourceServerInstall }
         : {}),
-      closeListeners,
-      reconnectListeners,
-      notifyClose,
+      closeListeners: new Set<(event: WindowRemoteConnectionCloseEvent) => void>(),
+      reconnectListeners: new Set<() => void>(),
+      notifyClose: () => {
+        // daemon 分支经 manager 事件自行投影 close；registry 侧 onDidClose 订阅由
+        // connectManagedSourceServerHandle 返回的 handle 承载，无需再转发。
+      },
     });
   }
+  const closeListeners = new Set<(event: WindowRemoteConnectionCloseEvent) => void>();
+  const reconnectListeners = new Set<() => void>();
+  const notifyClose = (event: WindowRemoteConnectionCloseEvent) => {
+    for (const listener of closeListeners) {
+      listener(event);
+    }
+  };
   const connection = await setupRemoteConnection(
     params.target,
     params.remoteAssets,
@@ -1577,9 +1667,14 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
   resolveSourceServerId: (handle) => handle.capabilities?.sourceServerId,
   shouldKeepConnectionAlive: (handle) => handle.capabilities?.persistentSourceConnection === true,
   prepareWorkspaceIdentity: async (handle, input) => {
-    // daemon 分支的远端目录校验（readdir 权限探测）；identity 绑定回执
-    // （sourceServerWorkspaceService.resolveWorkspace）随三期 daemon services 面接入。
-    await prepareRemoteWorkspaceIdentity(handle.services.get(IFileService), input);
+    // 远端目录校验（readdir 权限探测）+ identity 绑定回执（P7 续批）：daemon 分支的
+    // capabilities.bindWorkspaceIdentity 经 Source 端 sourceServerWorkspaceService.resolveWorkspace
+    // 完成 stable→canonical 合并登记；旧链/旧 Source 无 capability 时尾参缺席，仅做目录校验。
+    await prepareRemoteWorkspaceIdentity(
+      handle.services.get(IFileService),
+      input,
+      handle.capabilities?.bindWorkspaceIdentity,
+    );
   },
   releaseWorkspace: async (services, context) => {
     await services.get(IZCodeTaskService).releaseWorkspacePreparation({

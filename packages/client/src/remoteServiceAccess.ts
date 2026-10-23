@@ -36,6 +36,7 @@ import {
   IWindowControllerService,
   IProjectService,
   ITaskGroupService,
+  ISourceServerWorkspaceService,
   type IServiceAccessor,
 } from "@zcode/services";
 
@@ -86,6 +87,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
   // 在此安全建代理；旧 server wire / 测试 double 无通道时 UI 仍按 accessor 可选缺席降级。
   readonly projectService: IProjectService;
   readonly taskGroupService: ITaskGroupService;
+  // Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon serve 已换装
+  // createServerHostServices 并注册；旧 Source（未升级 wire）无通道时消费方按 absent 降级。
+  readonly sourceServerWorkspaceService: ISourceServerWorkspaceService;
 
   constructor(channelClient: IChannelClient) {
     this.fileService = ProxyChannel.toService<IFileService>(
@@ -200,6 +204,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.taskGroupService = ProxyChannel.toService<ITaskGroupService>(
       channelClient.getChannel(ITaskGroupService.channelName),
+    );
+    this.sourceServerWorkspaceService = ProxyChannel.toService<ISourceServerWorkspaceService>(
+      channelClient.getChannel(ISourceServerWorkspaceService.channelName),
     );
   }
 }
