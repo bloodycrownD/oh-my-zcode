@@ -1,5 +1,6 @@
 # .iteration-state.yaml — upstream-v316-fullsync（code-dev-loop）
 # spec-check-loop 已收口：r1 Go（0P0/5P1/7P2 全清，dag_version 2，execute-ready 用户已确认 2026-10-23）
+# auto-dev-loop 流水线段见文末（阶段 1-10+发布自定义阶段）
 spec_path: docs/iterations/upstream-v316-fullsync/spec.md
 prd_path: null
 evidence_packs: [docs/iterations/upstream-v316-fullsync/cache/exploration-reports.md]
@@ -103,3 +104,25 @@ notes: >
   带来的主检出脏文件 268（含 untracked 垃圾误入批次，过滤状态码修复）→ 删主检出垃圾
   → pnpm install 23.5s（shared store）。上游快照不在工作树内：用绝对路径
   D:\Dev\Js\oh-my-zcode\.reference\ZCode（@3c5b2276）。
+
+pipeline:
+  stages:
+    - { id: 1, name: PRD, skill: prd-generate, status: exempt, artifact: null }
+    - { id: 2, name: SPEC, skill: spec-generate, status: done, artifact: docs/iterations/upstream-v316-fullsync/spec.md }
+    - { id: 3, name: 文档核验, skill: spec-check-loop, status: done, artifact: docs/iterations/upstream-v316-fullsync/spec.md }
+    - { id: 4, name: 开发, skill: code-dev-loop, status: done, artifact: docs/iterations/upstream-v316-fullsync/dev-ready.md }
+    - { id: 5, name: 测试, skill: 主代理全量, status: done, artifact: dev-ready.md#2 }
+    - { id: 6, name: 评审, skill: code-review-loop, status: done, artifact: 终审报告 0 must-fix GO（agent_e78dd361，7 项抽查全 PASS） }
+    - { id: 7, name: 复检文档, skill: spec-check-loop, status: exempt, note: 阶段6无文档修订 }
+    - { id: 8, name: 修复, skill: code-dev-loop, status: exempt, note: 0 must-fix 无 fix-spec }
+    - { id: 9, name: 复测, skill: 主代理全量, status: exempt, note: 无修复 }
+    - { id: 10, name: 记忆, skill: apm-record, status: done, artifact: docs/apm/memory/20261023-upstream-v316-fullsync-close.md }
+  exemptions:
+    - { stage: 1, reason: 无独立 PRD，需求由用户多轮拍板直接进 spec（含三条产品政策）, quote: 「剩下的12345我觉得没有砍的必要吧，都做吧」 }
+    - { stage: 7, reason: 阶段6无文档修订（终审0 must-fix）, quote: 自动跳过规则 }
+    - { stage: 8, reason: 0 must-fix 无 fix-spec, quote: 自动跳过规则 }
+    - { stage: 9, reason: 无修复轮, quote: 自动跳过规则 }
+    - { stage: 5, reason: 用户拍板跳过真机 QA 矩阵直接发版（自动化门禁全量已跑）, quote: 「按照skill走完剩下的流程，然后publish吧」 }
+  custom_stages:
+    - { position: after-stage-10, name: 发布, instruction: 用户要求 omz-publish 发版 v1.0.21（+0.0.1 规则） }
+  current: 11
