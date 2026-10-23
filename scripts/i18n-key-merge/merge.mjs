@@ -2,7 +2,14 @@
  * i18n 键级合并核心：白名单挑拣 + 值冲突仲裁 + 死键清除。
  */
 
-import { BRAND_RE, inWhitelist, isDroppedKey, isDroppedOmz, isKeepOmz, rewriteBrand } from "./config.mjs";
+import {
+  BRAND_RE,
+  inWhitelist,
+  isDroppedKey,
+  isDroppedOmz,
+  isKeepOmz,
+  rewriteBrand,
+} from "./config.mjs";
 
 /**
  * 单 locale 合并。
