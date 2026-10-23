@@ -250,8 +250,9 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
 //    往返一次就变成不可编辑 token 是不可接受的（用户拍板）；
 // 3) 代码块 fence 内整段跳过 —— 里面的 ``` 示例不能被解析成 chip。
 
-const RICH_MENTION_LINK_PATTERN =
-  /\[((?:\\.|[^\\\]])*)\]\((?:<((?:\\.|[^>])*?)>|((?:\\.|[^)])*))\)/g;
+// 展示面与装填面共用同一个链接正则：两边解析的是同一种 `[label](destination)` 语法，
+// 语义分叉在「命中后怎么归类/是否放行」，不在正则本身。
+// `String.prototype.matchAll` 会克隆正则并沿用原对象的 `lastIndex`，故调用前仍统一清零。
 const FENCE_LINE_PATTERN = /^\s*(`{3,}|~{3,})/;
 
 /**
@@ -411,8 +412,8 @@ function parseRichMentionPlainSegment(text: string, segments: RichMentionSegment
   };
 
   let cursor = 0;
-  RICH_MENTION_LINK_PATTERN.lastIndex = 0;
-  for (const match of text.matchAll(RICH_MENTION_LINK_PATTERN)) {
+  LINK_MENTION_MARKDOWN_PATTERN.lastIndex = 0;
+  for (const match of text.matchAll(LINK_MENTION_MARKDOWN_PATTERN)) {
     const fullMatch = match[0] ?? "";
     const rawLabel = match[1] ?? "";
     const rawDestination = match[2] ?? match[3] ?? "";

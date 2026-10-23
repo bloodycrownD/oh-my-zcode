@@ -14,6 +14,8 @@
  */
 import assert from "node:assert/strict";
 import test from "node:test";
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import {
   buildFileMentionMarkdown,
@@ -400,4 +402,23 @@ test("T-PR1-10: skill chip 与 skills provider 同形，去重键 category+value
 
   // 恢复态推不出的两处必须显式留白（不是遗漏）：id 只能到 skill:<name>，data 没有 scope。
   assert.equal("scope" in (restored.data ?? {}), false, "markdown 推不出 scope，data 只保证 path");
+});
+
+test("T-PR1-11: 链接正则只有单一定义处，展示面与装填面共用（C-1）", () => {
+  const source = readFileSync(
+    fileURLToPath(new URL("../src/mentions/mentionMarkdown.ts", import.meta.url)),
+    "utf8",
+  );
+  // 链接语法本体（`/\[((?:...` 开头的字面量）只允许出现一次 ——
+  // 展示/装填的语义分叉在「命中后怎么归类」，不需要各自复制一份正则。
+  assert.equal(
+    source.split("/\\[((?:").length - 1,
+    1,
+    "`[label](destination)` 正则只允许有一个定义处（两处 matchAll 共用它）",
+  );
+  assert.equal(
+    (source.match(/matchAll\(LINK_MENTION_MARKDOWN_PATTERN\)/g) ?? []).length,
+    2,
+    "展示面 parseMentionMarkdown 与装填面 parseRichMentionPlainSegment 都走同一个正则",
+  );
 });
