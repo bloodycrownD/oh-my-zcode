@@ -311,7 +311,8 @@ function extractImages(values: unknown[]): NodeReplDisplayImage[] {
       return;
     }
     if (!isRecord(value)) return;
-    if (value.type === "image" || "base64" in value) addImage(value);
+    // src-only 图片（资源链接下发、不带内嵌 base64）也必须能进入 addImage，否则整张图被静默丢弃。
+    if (value.type === "image" || "base64" in value || "src" in value) addImage(value);
     for (const child of Object.values(value)) visit(child);
   };
 

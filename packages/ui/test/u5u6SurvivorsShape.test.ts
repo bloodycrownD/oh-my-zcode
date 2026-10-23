@@ -17,6 +17,7 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 import test from "node:test";
+import { buildNodeReplDisplayModel } from "../src/lib/nodeReplToolDisplay.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const uiSrc = path.join(root, "packages", "ui", "src");
@@ -112,4 +113,16 @@ test("T-UF1 U6：nodeRepl 图片 src 优先（renderer 与 display 提取两侧�
   assert.ok(nodeReplDisplay.includes("const src = readNonEmptyString(value.src);"));
   assert.ok(nodeReplDisplay.includes("(!base64 && !src)"), "仅有 src 的图片也应入列");
   assert.ok(nodeReplDisplay.includes("...(src ? { src } : {})"), "src 必须透传到 display image");
+});
+
+test("T-UF1 U6：src-only 图片真实可达（不只是 addImage 内部条件）", () => {
+  // 事故形态：visit 门只认 type/base64，src-only 对象根本到不了 addImage，大图被静默丢弃。
+  const model = buildNodeReplDisplayModel({
+    kind: "node_repl",
+    input: {},
+    output: { images: [{ src: "https://example.test/big.png", mimeType: "image/png" }] },
+  } as never);
+  assert.equal(model.images.length, 1, "src-only 图片必须入列");
+  assert.equal(model.images[0]?.src, "https://example.test/big.png");
+  assert.equal(model.images[0]?.base64, "", "src-only 图片 base64 为空");
 });

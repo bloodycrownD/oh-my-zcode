@@ -143,6 +143,7 @@ packages/ui/src/project-sidebar/useProjectFileTree.ts      # Q2 顺手补：100L
 - T-RP5 — blocking: yes — 迁移生产链接线：全新库经 `TaskIndexRepo.initialize` 后 hosts/projects/project_roots/remote_project_entries 四表存在+迁移账本 0005_projects 在册（Step 1，抓「迁移只在测试里被调」的缺口）
 - T-RP3 — blocking: yes — resolveHost 路由：hostId 不符时 resolveHost 在/不在的两态（project.host-offline 抛出）（Step 2）
 - T-RP4 — blocking: yes — `resolveServerProjectService` 两分支（virtualProjects/legacy 单根退回）（Step 2）
+- T-RP6 — blocking: yes — 空 hosts 库首连：`connect()` 默认 intent `"add"` → saveHost → bindHost → admission 主路径 commit → readDirectory 稳定 host（Step 2，抓「首连不建 host 行 / membership 不 submit」缺项）
 - T-SB1 — blocking: yes — 骨架形状守卫：nav/footer/banner 槽在位 + `WorkspaceSidebar` alias 在位 + **独有面逐项有归宿（r5 P1-3 判据）：tab 列表=由项目树取代且 0 残留、拖拽层=骨架内可断言、CollapsedRail=已删除（全仓 0 命中）、tooltip=骨架新建入口复用**（Step 3/5）
 - T-SB2 — blocking: yes — 既有 5 个侧栏 tripwire 套件全绿（P41/P42/RemoteBackfill/RemoteSeams/VirtualProject）（Step 3-6）
 - T-SB3 — blocking: yes — 双视角移除守卫：`sidebarViewMode`/切换钮/持久化键全仓 0 残留（含 i18n 两键 classicSidebarView/projectTreeView）+ alias 后零功能残留（独有面逐项归宿：tab 列表 0 残留/拖拽层在位/rail 已删/tooltip 复用；死文件簇处置到 knip 基线）（Step 5）

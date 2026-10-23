@@ -1,4 +1,6 @@
 /**
+ * T-PR3（backlog-sweep Step 21-22）：装填必须走 setTextWithMentions 富装填，且 serial 检查在前。
+ *
  * bug A/B UI 侧回归 tripwire（2026-10-23）。
  *
  * 钉住两处源码形状（本仓 UI 测试基建为纯逻辑/形状测试，无 jsdom）：
