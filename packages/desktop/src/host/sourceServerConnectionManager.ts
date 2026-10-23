@@ -1121,9 +1121,9 @@ export class SourceServerConnectionManager {
       }
       if (this.options.directory) {
         // Directory admission（P7 续批）：握手落盘（设备名/lastOnline/workspaceHistory 与
-        // Profile→Source 绑定持久化）。membershipIntent（add/retain）语义在上游由
-        // membership repo 的 admitConnection 承担；omz 无该服务面，intent 随 options 透传
-        // 并在此统一落盘，repo 层随后续 IRemoteProjectService 批回补。
+        // Profile→Source 绑定持久化）。recordHandshake 只落 Profile→Source 绑定；成员（hosts
+        // 表）由注入的 admitConnection 在 :866-900 登记、:1160 提交，membershipIntent
+        // （add/retain）在那里生效。
         options.onDiagnosticPhase?.("directory-record");
         const handshakeResult = await this.options.directory.recordHandshake(
           profile.profileId,

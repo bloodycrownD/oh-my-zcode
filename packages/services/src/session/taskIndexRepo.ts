@@ -480,8 +480,6 @@ function compareGroupTasks(
 }
 
 export class TaskIndexRepo {
-  /** 启动迁移结果，供 main 提示；不参与任务事实或组织状态。 */
-  migrationBackupSkipped = false;
   // 构造器对齐上游四参（Step 1-⑤）：首个参数是旧设置投影（项目/连接身份种子），
   // 第二个是可信持库 Host 身份，路径与锁等待顺延到第三/四位。
   constructor(
@@ -540,16 +538,17 @@ export class TaskIndexRepo {
     if (isTasksStoragePrepared(path, this.db)) return;
     if (!isTasksStorageMigrated(path, this.db)) runTasksDatabaseMigrations(this.db);
     // 项目/连接迁移的生产接线（Step 1-③，对照上游 :396-402）：业务连接每次启动都跑
-    // 版本化迁移，0005/0008 的 apply 只在账本缺席时执行，因此这里幂等。prepared 仅是
-    // 进程内 Set（Host 进程不命中），早退分支不会吞掉本迁移。
-    const migration = await projectStorage.migrate(this.getDatabase(), {
+    // 版本化迁移，0005/0008 的 apply 只在账本缺席时执行，因此这里幂等。desktop 由
+    // tasksStorageWorker 带 settings 完成 0005/0008；Host 主线程已被 hostDatabaseStartup
+    // 标记 prepared（hostDatabaseStartup.ts:58、prepared.ts:16-18 同进程 Set），故上面的
+    // 早退必命中——新增迁移接点必须落在 worker 侧或显式绕过该早退。
+    await projectStorage.migrate(this.getDatabase(), {
       settings: this.migrationSettings,
       hostId: this.storageHostId,
       // 缺省会触发 runner「Migration requires a backup directory」；数据根 backup 与上游一致。
       backupDirectories: [join(getZCodeDataRootDir(), "backup")],
       warn: (message, details) => createServiceLogger("project-migration").warn(message, details),
     });
-    this.migrationBackupSkipped = migration.backupSkipped;
     this.cleanupDeletedTaskGroupingReferences();
   }
 
