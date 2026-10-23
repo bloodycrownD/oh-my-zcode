@@ -1,3 +1,36 @@
+## [未发布]（upstream-v316-fullsync 迭代）
+
+### 新增
+
+- **i18n 键级全量合并**（P0）：zh/en 6318 键对称；采纳上游 419 键、值冲突仲裁 138 条、清理死键 165 个、品牌改写 89/91 处；`pnpm run test:i18n-merge -- --verify` 幂等门禁常驻。
+- **模型/Think 合并选择入口**（P1，上游 C1）：composer 工具栏单一控件同时选模型与思考等级，末级折叠自适应（useComposerToolbarFit）；ThoughtLevelCycleControl 语义=合并入口在场退场/缺席保底；ModelConfigSelect 拆分共享 thoughtLevel 模块（663→365 行）。Magic Context contextUsage 面板零触碰。
+- **消息装配统一 buildUserMessageEntries**（P2，上游 C2）：live/恢复/hydrator 全链单一装配函数；T-AS 30/30 oracle 物理复刻对拍；MC 三端口（turn transform/提示词段/工具描述）零改动，19 套件 MC 回归绿。
+- **虚拟项目存储与组织**（P3/P4）：project-catalog/task-facts/task-groups/project-workspace-navigation/window-project-directory 等 7 存储目录+sqlite-migrations scope 三分（0004/0005 两支 schema 与上游逐字节冻结，checksum 基准测试锁死）；任务落项目/分组全链（SessionPane/ConversationTransport/store draftProjectId/composer taskGroupId 继承+TaskGroupedView 草稿行）；tabStore 键统一（resolveWorkspaceKey/lastClosedWorkspaceEvent/previousWorkspaceIdentity）；未读信号链（onTaskNavigationCommitted/useProjectUnreadSignals/registry 双修订号快照）；lineage walk（subscribeConversationV4 父链上溯+project.session-lineage-invalid 三态拒绝）。
+- **远程开发 R3 三期**（P5-P7）：source-server 契约/transport/daemon 链；ConnectionManager 薄层+registry 恢复状态机+换代通知链（RemoteWorkspaceReconnected 五层）；sourceServerDirectory/aliasRepo/身份迁移（workspaceIdentity 拍板：本机键规则不变，daemon 远端用 `remote:server:<id>:<path>` identity）；**主链切换**——ssh/wsl/docker 全量走 daemon 分支（`ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1` 逃生开关，旧链代码保留共存）；host IRemoteProjectService 投影+注册链；Remote* 7 组件+useProjectRemoteSync 回填（19 文件）+侧栏 Remote 缝真接通；identity 绑定回执+membershipIntent 透传+Directory admission。
+- **ToolSearch 按需工具加载**（P8）：deferred 清单+tool_reference 卡+按需 hydration+公告块（默认 off，设置面可切 auto/local）；**落地序=暴露决策→公告→MC transform→双投影**（推演文档 toolsearch-seam-proof.md：MC transform 无 tools 通道零影响，off 模式逐字节恒等）；shouldDefer 分类=内置自研工具恒常驻、MCP 工具默认 defer（alwaysLoad 豁免）；D4 持久层零渗入；MC 全套 654/0。
+- **composer 分组草稿继承**：composerDraftStore 深度重写（ComposerScope 三元分 key/taskGroupId 继承/PendingTaskDraft 家族/工作区 scope 记忆）。
+
+### 修复
+
+- **编辑历史消息发送旧内容**（bug A）：rAF 首帧竞态修复+ConversationRowView 观测日志。
+- **中断后队列不收新输入**（bug B，行为变化）：根因=omz 拆遥测时误删 `return;`（commit 24af3955）导致确认框被 null 覆盖且输入被吞。现在暂停态照常入队（held 路由 choice→enqueue）；「立即发送」=恢复语义（sendQueuedNow 后 autoDrain）；执行层对称修复（held 态普通 sendText 入队不再插队）。
+- **cli turbo lint/typecheck/desktop 全量门禁**：ui 测试工程漏进批量 typecheck 的门禁洞修复（tsc -b 不含 tsconfig.test.json）。
+
+### 移除
+
+- **relay v1 死 UI**：WebRemoteControlDialog/WorkspaceWebRemoteControlTrigger/侧栏入口+i18n `webRemoteControl.*` 15 键×2 locale+Bot Channels（微信/飞书/Lark/Telegram）死链全清，全仓零残留。
+
+### 门禁与基线
+
+- 根 typecheck 0 错；desktop-full 54 error kinds（基线 366 无新增）；lint 49w/0e（docs/** 出产品 lint 范围+触碰面 unused 清零，零新增）；oxfmt 触碰面 0 违规（基线存量 96 登记）；knip 终态基线落盘（`docs/iterations/upstream-v316-fullsync/cache/gate-knip.json`：豁免 222 项 14 组+存量 42）；test:v4-perf 46 段 654/0；test:cli-backport 全绿；i18n verify 双语对称。
+
+### 已知限制与挂账（真机 QA 待验收）
+
+- native ToolSearch×MC：native 引用块会被 MC 文本化丢失（MC 包红线禁改），local 为 omz 主形态。
+- 真机挂账：T-CP3 合并入口/T-VU2 项目树/T-RM3 SSH 端到端/T-RM4 WSL-Docker 断连恢复/换代矩阵/T-QA-bugAB 复测。
+- P3/P9 挂账：entries 表+resolveHost 路由+RemoteProjectPicker 挂载；management 服务+registry+设置设备卡；deployServer 旧链退役拍板留发布轮；向导壳族按「UI 保 omz」政策关闭。
+- U5-U12 仍在 `upstream-v3.16-backport` 分支待续。
+
 ## [1.0.20](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.19...v1.0.20) (2026-10-23)
 
 ### 修复

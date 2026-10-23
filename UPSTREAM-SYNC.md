@@ -12,7 +12,7 @@ oh-my-zcode 是 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）的 for
 
 | 路径                       | 内容                                        | 本 fork 当前基线                          |
 | -------------------------- | ------------------------------------------- | ----------------------------------------- |
-| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.15.1 @ `aac47556`                      |
+| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.16.2 @ `3c5b2276`（fullsync 后；产品面全量纳入，缓行/排除面见 `docs/iterations/upstream-v316-fullsync/spec.md` 排除清单） |
 | `.reference/magic-context` | 上游 `@cortexkit/opencode-magic-context`    | 0.44.4                                    |
 | `.reference/pi`            | 上游 Pi harness（magic-context 的宿主之一） | 随 magic-context 版本走                   |
 
