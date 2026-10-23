@@ -49,7 +49,8 @@
     "lint": "oxlint src --no-ignore",
     "lint:fix": "oxlint --fix src --no-ignore",
     "test:e2e-subagent-resume": "tsx --test scripts/test-e2e-subagent-resume.mjs",
-    "test:model-creation-failure": "node --import tsx --test scripts/test-model-creation-failure.mjs"
+    "test:model-creation-failure": "node --import tsx --test scripts/test-model-creation-failure.mjs",
+    "test:toolsearch-smoke": "tsx --test scripts/test-toolsearch-smoke.mjs"
   },
   "dependencies": {
     "@zcode/contracts": "workspace:*",
