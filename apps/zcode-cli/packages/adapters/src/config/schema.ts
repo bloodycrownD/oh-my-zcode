@@ -48,6 +48,14 @@ const memorySchema = z.object({
   use: z.boolean().optional(),
 });
 
+// ToolSearch 模式域（phase-toolsearch）：config.json 顶层的会话级默认；
+// off（默认）=完整工具目录。UI 设置链写入后也归一到这一域。
+const toolSearchSchema = z
+  .object({
+    mode: z.enum(["auto", "native", "local", "off"]).optional(),
+  })
+  .strict();
+
 /**
  * FORK（S23 / D-12）：`magicContext` 参数域**直接复用包内 schema**，
  * 不在本文件复制第二份白名单。权威结构与全部默认值都由
@@ -314,6 +322,7 @@ export const ZCodeConfigFileSchema = z
     network: networkSchema.optional(),
     features: featuresSchema.optional(),
     memory: memorySchema.optional(),
+    toolSearch: toolSearchSchema.optional(),
     magicContext: magicContextDomainSchema,
     mcp: mcpSchema.optional(),
     plugins: pluginsSchema.optional(),

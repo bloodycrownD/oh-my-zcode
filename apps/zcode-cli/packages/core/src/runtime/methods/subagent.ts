@@ -261,6 +261,9 @@ export function createDefaultSubagentPort(
           modelStreaming: this.config.modelStreaming,
           bashTimeoutPolicy: this.config.bashTimeoutPolicy,
           midConversationSystem: this.config.midConversationSystem,
+          // ToolSearch 模式随父 runtime 结构性继承：child 的 provider 请求暴露决策
+          // 与主链路必须同一份配置，否则子代理会拿到完整工具目录而主会话是 defer 目录。
+          toolSearch: this.config.toolSearch,
           bashShellSelection,
           // child 只复用父 runtime 已解析的 instructions snapshot；Project Context 仍不继承。
           currentDate: this.contextSourceSnapshot?.currentDate ?? this.config.currentDate,

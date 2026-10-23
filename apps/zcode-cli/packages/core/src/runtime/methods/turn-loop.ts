@@ -1,4 +1,6 @@
 import { createMessageId, traceContextToLogContext, TurnMachineImpl } from "../deps.js";
+import { buildToolExposure, buildToolSearchAnnouncement } from "../../tool/search/exposure.js";
+import type { RuntimeMessageEntry } from "../../agent/message-history.js";
 import {
   buildRuntimeModeReminderBody,
   buildPlanModeExitReminderBody,
@@ -112,6 +114,46 @@ export async function runRegularTurnLoop(
       ]);
     }
     const providerEntries = [...state.turnRequestState.entries];
+    // ── phase-toolsearch 插入缝（落地序与等价性证明见
+    // docs/iterations/upstream-v316-fullsync/toolsearch-seam-proof.md）──
+    // 落地序=「工具暴露决策 → 公告提交 → MC transform → 双投影」。与 spec 预定序
+    // （MC 在前）的偏差是推演反例决定的：MC 正投影会把 role:"tool" 的块数组文本化、
+    // tool_reference 块直接丢失，暴露决策若在 MC 之后跑，local 模式的定义展开永不发生。
+    // 暴露决策读 canonical entries（块完整），展开后的 text 块经 MC 文本化仍存活。
+    // mode off（omz 默认）时 buildToolExposure 为恒等、无公告，本缝与改动前逐字节等价。
+    const toolExposure = buildToolExposure({
+      model: state.model,
+      mode: this.config.toolSearch?.mode,
+      tools,
+      registry: this.registry,
+      entries: providerEntries,
+    });
+    if (this.logger !== undefined) {
+      this.logger.debug("ToolSearch request exposure", {
+        ...traceContextToLogContext(state.turnTraceContext),
+        event: "tool.search.exposure",
+        module: "core.runtime",
+        enabled: toolExposure.enabled,
+        mode: toolExposure.context.mode,
+        reason: toolExposure.reason,
+        catalogSize: toolExposure.context.catalog.length,
+      });
+    }
+    let toolSearchAnnouncement: RuntimeMessageEntry | undefined;
+    if (!outputTokenRecoveryActive) {
+      toolSearchAnnouncement = buildToolSearchAnnouncement({
+        model: state.model,
+        mode: this.config.toolSearch?.mode,
+        tools,
+        registry: this.registry,
+        entries: providerEntries,
+      });
+      // 公告与上游混入物 persistRuntimeReminderMessage 不同：只 commit 进内存
+      // turnRequestState（下一轮公告 delta 扫描的事实源），不落 session、不进 hydrator。
+      if (toolSearchAnnouncement) {
+        commitTurnRequestEntries(this, state.turnRequestState, [toolSearchAnnouncement]);
+      }
+    }
     // Step 19b：magic-context transform 前置到双投影之前——messages 与
     // recordedMessages 同源于 requestEntries，transform 在投影前跑一次，两条投影
     // 因此必然看到同一份字节（否则 m[0]/m[1] 与 drop 只进其中一条）。
@@ -119,7 +161,9 @@ export async function runRegularTurnLoop(
     const requestEntries = await runMagicContextTurnTransform(
       this,
       {
-        entries: providerEntries,
+        entries: toolSearchAnnouncement
+          ? [...toolExposure.entries, toolSearchAnnouncement]
+          : toolExposure.entries,
         model: state.model,
         sessionId: this.sessionId,
         workingDirectory: this.workspaceRoot,
@@ -132,6 +176,7 @@ export async function runRegularTurnLoop(
       entries: requestEntries,
       applyCacheControl: true,
       model: state.model,
+      loadedToolCallIds: toolExposure.loadedToolCallIds,
     });
     const { messages } = providerProjection;
     const recordableEntries = filterOutputTokenContinuationEntries(requestEntries);
@@ -142,6 +187,7 @@ export async function runRegularTurnLoop(
             entries: recordableEntries,
             applyCacheControl: true,
             model: state.model,
+            loadedToolCallIds: toolExposure.loadedToolCallIds,
           });
     state.turnMachine = new TurnMachineImpl(
       state.turnMachine.startModelRequest(
@@ -168,7 +214,9 @@ export async function runRegularTurnLoop(
       sourceEntries: providerProjection.sourceEntries,
       requestEntries,
       recordedMessages: recordableProjection.messages,
-      tools,
+      tools: toolExposure.tools,
+      toolSearchEnabled: toolExposure.context.mode === "native",
+      toolSearch: toolExposure.context,
     });
 
     if (result === "break") {

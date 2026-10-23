@@ -40,6 +40,9 @@ export interface ProviderRequestMessageProjectionResult {
 // MCS/provider projection 保持 provider-neutral，避免影响 OpenAI-compatible 请求形态。
 const ENABLE_MCS_ADJACENT_USER_MERGE = false;
 
+// ToolSearch native 命中提示（phase-toolsearch）：仅派生在最终投影，不进 canonical。
+const TOOL_SEARCH_LOADED_MESSAGE = "Tool loaded.";
+
 // State changes must keep their causal position relative to older target continuations.
 const NON_BUBBLING_ATTACHMENT_SOURCES: ReadonlySet<SystemReminderSource> = new Set([
   "goal_state_change",
@@ -50,6 +53,8 @@ export function buildProviderRequestMessages(input: {
   applyCacheControl?: boolean;
   skipCacheWrite?: boolean;
   useMidConversationSystem?: boolean;
+  /** ToolSearch native 命中的 tool result id 集合；命中结果后补 "Tool loaded." 提示。 */
+  loadedToolCallIds?: ReadonlySet<string>;
 }): ProviderRequestMessageProjectionResult {
   const useMidConversationSystem = input.useMidConversationSystem !== false;
   const origins = new ProviderEntryOrigins();
@@ -66,7 +71,7 @@ export function buildProviderRequestMessages(input: {
   const renderedMessages = projectedEntries.map(renderProjectedEntryToModelMessage);
   const mergeResult = ENABLE_MCS_ADJACENT_USER_MERGE
     ? mergeAdjacentUserMessages(renderedMessages)
-    : skipAdjacentUserMessageMerge(renderedMessages);
+    : appendToolSearchSuccessMessages(renderedMessages, input.loadedToolCallIds);
   const messages = mergeResult.messages;
   const sourceEntries: Array<RuntimeMessageEntry | undefined> = [];
   for (const [projectedIndex, mergedIndex] of mergeResult.indexMap.entries()) {
@@ -89,7 +94,9 @@ export function buildProviderRequestMessages(input: {
     diagnostics: {
       bubbledAttachmentEntryCount: reorderResult.bubbledAttachmentEntryCount,
       // 新标记能证明“没有真实用户”；省略索引会让媒体预算按 user role 重新猜来源。
-      ...(finalLatestRealUserMessageIndex >= 0 || input.entries.some(isPresentedInput)
+      ...(finalLatestRealUserMessageIndex >= 0 ||
+      input.entries.some(isPresentedInput) ||
+      input.loadedToolCallIds?.size
         ? { latestRealUserMessageIndex: finalLatestRealUserMessageIndex }
         : {}),
       strippedRuntimeMetaCount: input.entries.filter((entry) => entry.metadata).length,
@@ -246,6 +253,35 @@ function skipAdjacentUserMessageMerge(messages: readonly ModelInputMessage[]): M
     messages: [...messages],
     indexMap: messages.map((_, index) => index),
   };
+}
+
+/**
+ * ToolSearch native 命中提示（phase-toolsearch，上游同款）：整批连续 tool result 之后
+ * 追加 "Tool loaded." user 提示。只在最终投影派生——canonical 历史与持久层零渗入。
+ */
+function appendToolSearchSuccessMessages(
+  messages: readonly ModelInputMessage[],
+  loadedToolCallIds?: ReadonlySet<string>,
+): MessageMergeResult {
+  if (!loadedToolCallIds?.size)
+    return { messages: [...messages], indexMap: messages.map((_, index) => index) };
+  const result: ModelInputMessage[] = [];
+  const indexMap: number[] = [];
+  let pendingLoaded = 0;
+  for (const [index, message] of messages.entries()) {
+    indexMap.push(result.length);
+    result.push(message);
+    if (message.role === "tool" && message.toolCallId && loadedToolCallIds.has(message.toolCallId))
+      pendingLoaded++;
+    // 成功提示只在最终投影中派生；整批 tool result 必须连续，不能被提示拆开。
+    if (messages[index + 1]?.role !== "tool") {
+      while (pendingLoaded > 0) {
+        result.push({ role: "user", content: TOOL_SEARCH_LOADED_MESSAGE });
+        pendingLoaded--;
+      }
+    }
+  }
+  return { messages: result, indexMap };
 }
 
 function canMergeAdjacentUserMessages(

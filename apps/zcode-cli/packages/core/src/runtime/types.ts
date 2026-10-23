@@ -109,6 +109,8 @@ import type { WorkspaceHookRuntimeAdmissionPort } from "../hooks/workspace-hook-
 // -----------------------------------------------
 
 export interface AgentRuntimeConfig {
+  /** ToolSearch 模式（phase-toolsearch）；off=完整工具目录（omz 默认）。 */
+  toolSearch?: { mode?: import("@zcode/contracts").ToolSearchMode };
   /** shared-host CUA request routing metadata; desktop is the safe default. */
   clientMode?: "desktop-continuous" | "web-remote-replayable";
   deliveryKind?: "desktop-continuous" | "web-remote-replayable";
@@ -740,6 +742,8 @@ export interface PermissionDecisionResult {
 }
 
 export interface ExecuteToolsOptions {
+  /** 本请求的 ToolSearch 执行上下文；executor 准入与 ToolSearch/DeferredToolCall handler 读它。 */
+  toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   automationTurn?: boolean;
   /** 本轮是否为无值班次派发轮（无用户在场交互的执行）；SendMessage/Bash 纵深守卫读它。 */
   unattendedDispatchTurn?: boolean;
@@ -828,6 +832,8 @@ export interface ProviderContextUsageSnapshot {
 }
 
 export interface RunModelTextRequestOptions {
+  /** ToolSearch native 模式开关；经 runModelTextRequest 透传到 ModelRequest。 */
+  toolSearchEnabled?: boolean;
   abortSignal?: AbortSignal;
   assistantMessageId: MessageId;
   events: SessionEvent[];

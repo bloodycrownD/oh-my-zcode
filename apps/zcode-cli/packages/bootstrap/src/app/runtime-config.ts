@@ -121,6 +121,13 @@ export function resolveAppRuntimeConfig(input: {
     options.runtimeConfig?.subagents?.builtInModelSelectionOverrides ?? {};
   const runtimeConfig: AgentRuntimeConfig = {
     ...options.runtimeConfig,
+    // ToolSearch 模式（phase-toolsearch）：协议/嵌入调用方显式传入优先；否则读
+    // config.json 顶层 toolSearch 域（桌面设置页写入同一域）。缺席即 off。
+    toolSearch:
+      options.runtimeConfig?.toolSearch ??
+      (configResult.config.toolSearch?.mode
+        ? { mode: configResult.config.toolSearch.mode }
+        : undefined),
     bashTimeoutPolicy:
       options.runtimeConfig?.bashTimeoutPolicy ??
       resolveBashTimeoutPolicy(options.env ?? process.env),

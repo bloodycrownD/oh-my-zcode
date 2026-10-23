@@ -96,6 +96,8 @@ export async function runModelTextRequest(
   const modelRequest = {
     messages: projectedOptions.messages,
     tools: projectedOptions.tools,
+    // ToolSearch native 模式：adapter 据此给 anthropic-messages 请求附 beta header。
+    ...(projectedOptions.toolSearchEnabled ? { toolSearchEnabled: true } : {}),
     abortSignal: projectedOptions.abortSignal,
     ...(projectedOptions.maxOutputTokens !== undefined
       ? { options: { maxOutputTokens: projectedOptions.maxOutputTokens } }

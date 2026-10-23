@@ -58,6 +58,8 @@ export function createStreamingToolCoordinator(
     assistantMessageId: MessageId;
     model: Model;
     traceContext: TraceContext;
+    /** 本请求的 ToolSearch 执行上下文；during-stream 执行也要透传给 executor。 */
+    toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   },
 ): StreamingToolCoordinator {
   const abortController = new AbortController();
@@ -85,6 +87,7 @@ export function createStreamingToolCoordinator(
         declarationIndex: acceptedToolCalls.size - 1,
         model: options.model,
         toolCall: normalizedToolCall,
+        toolSearch: options.toolSearch,
         traceContext: options.traceContext,
       }).catch(async (error) => {
         runtime.logger?.warn("Streaming tool execution fell back to end-of-stream execution", {
@@ -228,6 +231,7 @@ async function executeDuringStream(
     declarationIndex: number;
     model: Model;
     toolCall: ModelToolCall;
+    toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
     traceContext: TraceContext;
   },
 ): Promise<StreamedToolExecutionResult | undefined> {
@@ -285,6 +289,7 @@ async function executeDuringStream(
   });
 
   const execution = await runtime.executeTools([toolCall], schedule, {
+    toolSearch: options.toolSearch,
     subagentModelOverride: state.subagentModelOverride,
     model: state.model,
     automationTurn: isAutomationMutationRestrictedTurn(state),

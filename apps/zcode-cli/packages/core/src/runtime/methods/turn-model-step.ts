@@ -86,6 +86,10 @@ export async function runModelBackedTurnStep(
     recordedMessages: RunModelTextRequestOptions["messages"];
     requestEntries: readonly RuntimeMessageEntry[];
     tools: ModelToolContract[];
+    /** ToolSearch native 模式开关；透传到 ModelRequest（adapter 附 beta header）。 */
+    toolSearchEnabled?: boolean;
+    /** 本请求的 ToolSearch 执行上下文；透传到工具执行链（准入+handler）。 */
+    toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   },
 ): Promise<ModelStepResult> {
   const assistantMessageId = createMessageId();
@@ -152,6 +156,7 @@ export async function runModelBackedTurnStep(
   const streamingToolCoordinator = createStreamingToolCoordinator(this, state, {
     assistantMessageId,
     model,
+    toolSearch: options.toolSearch,
     traceContext: modelTraceContext,
   });
   const networkEventStartIndex = state.events.length;
@@ -200,6 +205,7 @@ export async function runModelBackedTurnStep(
       onStreamTextDelta: (text) => streamingToolCoordinator.recordTextDelta(text),
       onStreamToolCall: (toolCall) => streamingToolCoordinator.accept(toolCall),
       streamRecovery: streamRecoveryRequest,
+      toolSearchEnabled: options.toolSearchEnabled,
       tools: options.tools,
       traceContext: modelTraceContext,
     });
@@ -647,6 +653,7 @@ export async function runModelBackedTurnStep(
     result,
     toolCalls: executableToolCalls,
     streamedToolResults,
+    toolSearch: options.toolSearch,
   });
   return toolStepResult;
 }

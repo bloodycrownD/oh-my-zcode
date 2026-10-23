@@ -81,6 +81,8 @@ export interface ZCodeProtocolSessionRecord {
   app: ZCodeApp;
   memoryEnabled: boolean;
   nativeSearchEnhancementsEnabled: boolean;
+  /** ToolSearch 模式（phase-toolsearch）；inherit 子会话据此结构性继承。 */
+  toolSearchMode: "auto" | "local" | "off";
   modelContextBudgetStrategy: ZCodeModelContextBudgetStrategy;
   createdAt: number;
   deliveryKind?: ZCodeDeliveryKind;

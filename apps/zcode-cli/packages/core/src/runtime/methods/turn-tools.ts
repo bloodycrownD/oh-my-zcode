@@ -49,6 +49,8 @@ export async function executeToolCallsForModelStep(
     result: RuntimeModelTextResult;
     streamedToolResults?: StreamedToolExecutionResult[];
     toolCalls: ModelToolCall[];
+    /** 本请求的 ToolSearch 执行上下文；透传给 executor（准入+handler）。 */
+    toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   },
 ): Promise<"continue" | "break"> {
   const model = state.model;
@@ -177,6 +179,7 @@ export async function executeToolCallsForModelStep(
       tools: pendingToolCalls.map((tc) => tc.name),
     });
     const execution = await this.executeTools(pendingToolCalls, pendingSchedule, {
+      toolSearch: options.toolSearch,
       automationTurn: isAutomationMutationRestrictedTurn(state),
       unattendedDispatchTurn: isUnattendedDispatchTurn(state),
       signal: state.turnAbortSignal,

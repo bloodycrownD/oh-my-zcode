@@ -80,6 +80,7 @@ export async function executeTools(
   });
 
   const generator = this.executor.executeSchedule(executableCalls, schedule, {
+    toolSearch: options?.toolSearch,
     automationTurn: options?.automationTurn,
     unattendedDispatchTurn: options?.unattendedDispatchTurn,
     signal: options?.signal,
