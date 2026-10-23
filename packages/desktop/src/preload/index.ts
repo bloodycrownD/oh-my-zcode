@@ -585,8 +585,9 @@ contextBridge.exposeInMainWorld("zcode", {
     return () => ipcRenderer.removeListener(PlatformChannels.ApplicationLocaleChanged, handler);
   },
   getDesktopSessionActivity: () => ipcRenderer.invoke(PlatformChannels.GetDesktopSessionActivity),
-  /** 获取已安装的编辑器/终端列表（含图标） */
-  getInstalledEditors: () => ipcRenderer.invoke(PlatformChannels.GetInstalledEditors),
+  /** 获取已安装的编辑器/终端列表（含图标）；传文件路径时按扩展名补文件应用 */
+  getInstalledEditors: (filePath?: string) =>
+    ipcRenderer.invoke(PlatformChannels.GetInstalledEditors, filePath),
   getApplicationIcon: (request: string | ApplicationIconRequest) =>
     ipcRenderer.invoke(PlatformChannels.GetApplicationIcon, request),
   /** 用指定编辑器打开路径 */

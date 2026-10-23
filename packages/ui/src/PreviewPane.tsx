@@ -546,7 +546,17 @@ export function PreviewPane({
   const [validatedPptxReferenceNavigationRequestId, setValidatedPptxReferenceNavigationRequestId] =
     useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [installedEditors, setInstalledEditors] = useState<EditorInfo[]>([]);
+  const editorFilePath = source?.type !== "code-review" ? source?.path : undefined;
+  const [installedEditorQuery, setInstalledEditorQuery] = useState<{
+    path: string | undefined;
+    editors: EditorInfo[];
+  } | null>(null);
+  // 文件类型变化后不能沿用上一份应用列表；查询结果与路径绑定，旧请求由 effect 清理失效。
+  const installedEditors = useMemo(
+    () =>
+      installedEditorQuery?.path === editorFilePath ? (installedEditorQuery?.editors ?? []) : [],
+    [installedEditorQuery, editorFilePath],
+  );
   const [preferredEditorId] = useState<string | null>(() => readLastSelectedEditorId());
   const [markdownViewMode, setMarkdownViewMode] = useState<"preview" | "code">("preview");
   const [svgViewMode, setSvgViewMode] = useState<"preview" | "code">("preview");
@@ -668,13 +678,13 @@ export function PreviewPane({
     let disposed = false;
 
     platform
-      .getInstalledEditors()
+      .getInstalledEditors(editorFilePath)
       .then((editors) => {
         if (disposed) {
           return;
         }
 
-        setInstalledEditors(editors);
+        setInstalledEditorQuery({ path: editorFilePath, editors });
       })
       .catch((platformError) => {
         logger.warn("[PreviewPane] 获取已安装编辑器列表失败", {
@@ -685,7 +695,7 @@ export function PreviewPane({
     return () => {
       disposed = true;
     };
-  }, [platform]);
+  }, [platform, editorFilePath]);
 
   useEffect(() => {
     if (!source) {

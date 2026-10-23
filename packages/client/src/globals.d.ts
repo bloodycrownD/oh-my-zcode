@@ -27,7 +27,7 @@ import type {
   ApplicationIconInfo,
   ApplicationIconRequest,
   Locale,
-RemoteConnectionRuntimeLog,
+  RemoteConnectionRuntimeLog,
   RemoteSessionClosedEvent,
   BotRemoteWorkspaceReconnectedEvent,
   RemoteTarget,
@@ -35,8 +35,8 @@ RemoteConnectionRuntimeLog,
   TaskNotificationPayload,
   WindowScreenshotResult,
   EmbeddedBrowserDataClearResult,
-WSLDistro,
-OpenInEditorOptions,
+  WSLDistro,
+  OpenInEditorOptions,
 } from "@zcode/shared";
 
 /**
@@ -239,8 +239,8 @@ declare global {
       getDesktopSessionActivity?(): Promise<{
         runningAgentSessionCount: number;
       }>;
-      /** 获取已安装的编辑器/终端列表（含图标） */
-      getInstalledEditors(): Promise<EditorInfo[]>;
+      /** 获取已安装的编辑器/终端列表（含图标）；传文件路径时按扩展名补文件应用 */
+      getInstalledEditors(filePath?: string): Promise<EditorInfo[]>;
       /** 按兼容 bundle id 或结构化 locator 获取系统应用图标 */
       getApplicationIcon?(
         request: string | ApplicationIconRequest,

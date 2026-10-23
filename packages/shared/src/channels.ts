@@ -924,7 +924,7 @@ export interface PlatformChannelMap {
     response: void;
   };
   [PlatformChannels.GetInstalledEditors]: {
-    request: void;
+    request: string | undefined;
     response: EditorInfo[];
   };
   [PlatformChannels.GetApplicationIcon]: {

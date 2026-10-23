@@ -106,7 +106,8 @@ export function OpenSplitButton({
 
     setLoadingEditors(true);
     try {
-      setEditors(await platform.getInstalledEditors());
+      // 传文件路径：主进程据此按扩展名补 PDF/Office/音视频应用，不传只有 IDE 列表。
+      setEditors(await platform.getInstalledEditors(target.path));
       setEditorsLoaded(true);
     } catch (error) {
       logger.warn("[OpenSplitButton] 获取第三方打开方式失败", {

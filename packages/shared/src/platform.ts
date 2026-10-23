@@ -853,8 +853,8 @@ export interface IPlatformService {
   /** 宿主系统语言；桌面端由 main 进程读取，Web 端可回退到 navigator.language。 */
   getSystemLocale?(): Promise<Locale>;
 
-  /** 获取系统中已安装的编辑器/终端列表（含图标） */
-  getInstalledEditors(): Promise<EditorInfo[]>;
+  /** 获取系统中已安装的编辑器/终端列表（含图标）；传 filePath 时按扩展名补文件应用 */
+  getInstalledEditors(filePath?: string): Promise<EditorInfo[]>;
 
   /** 用指定编辑器打开路径 */
   openInEditor(
