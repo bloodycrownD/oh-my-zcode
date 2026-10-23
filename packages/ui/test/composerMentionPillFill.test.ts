@@ -18,12 +18,26 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 import {
+  mergeContextList,
   parseComposerPromptContexts,
+  resolveQueuePreview,
   serializeComposerPromptContexts,
 } from "../src/v4/composer/composerPromptContexts.js";
 import {
+  composerSubmitMachine,
+  resolveComposerSubmitAvailability,
+  resolveComposerSubmitContextKey,
+  type ComposerSubmitContexts,
+} from "../src/v4/composer/composerSubmitMachine.js";
+import { applyScopedDraftContentUpdate } from "../src/v4/composer/scopedDraftContentUpdate.js";
+import {
+  conversationSelectionContextKey,
+  parsePromptConversationSelections,
+} from "../src/lib/conversationSelectionReference.js";
+import {
   persistV4ComposerDraft,
   readV4ComposerDraft,
+  type V4ComposerDraft,
 } from "../src/v4/composer/composerDraftStore.js";
 
 const readSource = (relativePath: string) =>
@@ -32,9 +46,20 @@ const readSource = (relativePath: string) =>
 const LEXICAL_INPUT_SOURCE = readSource("../src/LexicalChatInput.tsx");
 const CHAT_PROMPT_EDITOR_SOURCE = readSource("../src/prompt-editor/ChatPromptEditor.tsx");
 const COMPOSER_SOURCE = readSource("../src/v4/ConversationComposer.tsx");
+const ROW_VIEW_SOURCE = readSource("../src/v4/ConversationRowView.tsx");
 const QUEUE_ROW_SOURCE = readSource("../src/v4/ConversationQueueRow.tsx");
+const QUEUE_PANEL_SOURCE = readSource("../src/v4/ConversationQueuePanel.tsx");
+const SESSION_PANE_SOURCE = readSource("../src/v4/SessionPane.tsx");
+const SELECTION_CHIP_SOURCE = readSource(
+  "../src/v4/composer/ConversationSelectionReferenceChip.tsx",
+);
 const DRAFT_CONTROL_SOURCE = readSource("../src/v4/composer/useDraftConfigControl.ts");
 const MENTION_MARKDOWN_SOURCE = readSource("../src/mentions/mentionMarkdown.ts");
+
+/** 四类上下文都为空的最小载体。 */
+function emptyContexts(): ComposerSubmitContexts {
+  return { codeComments: [], conversationSelections: [], webElements: [], pptxElements: [] };
+}
 
 // composerDraftStore 只用 window.localStorage 的读/写/删，测试侧给最小 stub。
 function installStorageStub() {
@@ -67,22 +92,18 @@ test("T-PR2-1: LexicalChatInput 富装填 API 在位，setTextWithPluginMentions
     /setTextWithMentions: \(text: string\) => void;/,
     "LexicalChatInputHandle 必须暴露 setTextWithMentions",
   );
-  // 两个 handle 构造点（E2E bridge + EditorApiPlugin）都要接线
-  assert.equal(
+  // 两个 handle 构造点（E2E bridge + EditorApiPlugin）都要接线。
+  // S4：不再锁字面量次数（纯格式化即红），只保证至少一处真实接线 + 旧的插件专用实现已消失。
+  assert.ok(
     countOccurrences(
       LEXICAL_INPUT_SOURCE,
       /setTextWithMentions: \(text: string\) => replaceEditorTextWithMentions\(editor, text\)/,
-    ),
-    2,
-    "E2E bridge 与 EditorApiPlugin 都必须复用同一条富装填实现",
+    ) >= 1,
+    "E2E bridge / EditorApiPlugin 必须复用同一条富装填实现",
   );
-  // 历史 API 保留为薄包装（ConversationComposer.tsx:271 调用面不动）
-  assert.equal(
-    countOccurrences(
-      LEXICAL_INPUT_SOURCE,
-      /setTextWithPluginMentions: \(text: string\) => replaceEditorTextWithMentions\(editor, text\)/,
-    ),
-    2,
+  assert.match(
+    LEXICAL_INPUT_SOURCE,
+    /setTextWithPluginMentions: \(text: string\) => replaceEditorTextWithMentions\(editor, text\)/,
     "setTextWithPluginMentions 必须是富装填的薄包装",
   );
   assert.doesNotMatch(
@@ -136,10 +157,9 @@ test("T-PR2-2: 5 个装填点全部走富 API，装填路径不再出现纯文�
     /inputApi\.setTextWithMentions\(draft\.text\)/,
     "草稿 editorState 回退必须走富装填",
   );
-  assert.equal(
-    countOccurrences(COMPOSER_SOURCE, /inputApi\.setTextWithMentions\(request\.text\)/),
-    2,
-    "外部预填与队列撤回两条 request.text 装填都必须走富装填",
+  assert.ok(
+    countOccurrences(COMPOSER_SOURCE, /inputApi\.setTextWithMentions\(request\.text\)/) >= 1,
+    "外部预填与队列撤回 request.text 装填必须走富装填（S4：不锁字面量次数）",
   );
   assert.match(
     COMPOSER_SOURCE,
@@ -232,14 +252,25 @@ test("T-PR2-4: 队列撤回 chip 恢复链在位（正文进编辑器 + 尾块�
     COMPOSER_SOURCE,
     /mergeContextList\(\s*restoredPromptContexts\.codeComments,\s*getCodeCommentContexts\(\),/,
   );
-  // 发送成功清空载体（避免下一条消息/切回来重复携带）；失败按发送前快照回滚两侧
+  // 发送成功清空载体（避免下一条消息/切回来重复携带）；失败按提交时的载体快照回滚
   assert.match(COMPOSER_SOURCE, /updateComposerContent\(\{ promptContexts: undefined \}\)/);
-  assert.match(COMPOSER_SOURCE, /promptContexts: submittedPromptContexts/);
-  // 草稿写入口径：只在正文写入时重算编辑器结构；纯载体内更新不能清掉 mention/editorState
+  assert.match(
+    COMPOSER_SOURCE,
+    /promptContexts: submittedCarrierContexts/,
+    "失败回滚必须写回提交时的载体（四类 chip 全保留）",
+  );
+  // 草稿写入口径：只在正文写入时重算编辑器结构；纯载体内更新不能清掉 mention/editorState。
+  // 该规则已随 composer/B-2 收进纯函数 applyScopedDraftContentUpdate，行为由 composer/B-2 用例覆盖，
+  // 这里只锁宿主仍只经该函数写内容（不得回到内联展开）。
   assert.match(
     DRAFT_CONTROL_SOURCE,
-    /content\.text !== undefined[\s\S]{0,140}editorStateJson: undefined/,
-    "只写上下文载体不得顺手清掉编辑器结构",
+    /applyScopedDraftContentUpdate\(\{[\s\S]{0,260}currentScopeKey: stateRef\.current\.scopeKey/,
+    "updateComposerContent 必须在 scope guard 之后基于 store 最新草稿执行",
+  );
+  assert.doesNotMatch(
+    DRAFT_CONTROL_SOURCE,
+    /content\.text !== undefined/,
+    "正文写入清编辑器结构的规则只能有一处实现（applyScopedDraftContentUpdate）",
   );
   assert.match(
     DRAFT_CONTROL_SOURCE,
@@ -394,3 +425,172 @@ test("T-PR2-6: 撤回→切 scope→切回→重发，四类上下文仍齐全�
   const contextOnly = readV4ComposerDraft(workspacePath, undefined, "session-c");
   assert.equal(contextOnly?.promptContexts?.codeComments.length, 1, "空正文 + chip 载体必须可恢复");
 });
+
+// ── composer/G-1：撤回→发送状态机行为用例（T-PR2-7/8/9）──────────────────────────
+
+test("T-PR2-7: mergeContextList 参数顺序 restored 在前，同 key 由 live 覆盖", () => {
+  const restored = [{ id: "a" }, { id: "b" }];
+  const live = [
+    { id: "b", mark: "live" },
+    { id: "c", mark: "live-c" },
+  ];
+  const merged = mergeContextList<{ id: string; mark?: string }>(restored, live, (item) => item.id);
+  assert.deepEqual(
+    merged.map((item) => item.id),
+    ["a", "b", "c"],
+    "restored 在前、live 在后；同 key 只留一条",
+  );
+  assert.equal(merged[1]?.mark, "live", "同 key 必须由 live 覆盖 restored（live 是最新事实）");
+  // 参数倒序会让 restored 反过来覆盖 live：契约钉死顺序，防静默反转
+  assert.deepEqual(
+    mergeContextList<{ id: string; mark?: string }>(live, restored, (item) => item.id).map(
+      (item) => item.id,
+    ),
+    ["c", "a", "b"],
+  );
+  // 空侧短路（保留引用，避免无谓重渲染）
+  assert.equal(
+    mergeContextList([], live, (item) => item.id),
+    live,
+  );
+  assert.equal(
+    mergeContextList(restored, [], (item) => item.id),
+    restored,
+  );
+});
+
+test("T-PR2-8: fail 回滚后四类 chip 全保留", () => {
+  const contexts: ComposerSubmitContexts = {
+    codeComments: [{ id: "cc-1" }],
+    conversationSelections: [{ path: "src/a.ts", text: "片段" }],
+    webElements: [{ id: "web-1" }],
+    pptxElements: [{ id: "pptx-1" }],
+  };
+  const claimed = composerSubmitMachine.reduce(
+    { phase: "idle", frozenContexts: emptyContexts(), liveContexts: contexts },
+    { type: "claim" },
+  );
+  assert.equal(claimed.phase, "claimed");
+  assert.equal(claimed.frozenContexts.codeComments.length, 1);
+  assert.equal(claimed.frozenContexts.conversationSelections.length, 1);
+  // 等待期用户把四类全删光：失败回滚必须把冻结面全部补回
+  const failed = composerSubmitMachine.reduce(
+    { ...claimed, liveContexts: emptyContexts() },
+    { type: "fail" },
+  );
+  assert.equal(failed.phase, "failed");
+  assert.equal(failed.liveContexts.codeComments.length, 1);
+  assert.equal(failed.liveContexts.conversationSelections.length, 1);
+  assert.equal(failed.liveContexts.webElements.length, 1);
+  assert.equal(failed.liveContexts.pptxElements.length, 1);
+  // 冻结面本身不变（失败后可原样重试再 claim）
+  assert.equal(failed.frozenContexts, claimed.frozenContexts);
+});
+
+test("T-PR2-9: claimed 期间新增 chip 不被 succeed 清除", () => {
+  const claimed = composerSubmitMachine.reduce(
+    {
+      phase: "idle",
+      frozenContexts: emptyContexts(),
+      liveContexts: { ...emptyContexts(), codeComments: [{ id: "cc-submitted" }] },
+    },
+    { type: "claim" },
+  );
+  // 等待期间用户新加一枚（属于下一条消息）
+  const grown = {
+    ...claimed,
+    liveContexts: {
+      ...claimed.liveContexts,
+      codeComments: [...claimed.liveContexts.codeComments, { id: "cc-new" }],
+    },
+  };
+  const succeeded = composerSubmitMachine.reduce(grown, { type: "succeed" });
+  assert.equal(succeeded.phase, "idle");
+  assert.deepEqual(
+    succeeded.liveContexts.codeComments.map((item) => item.id),
+    ["cc-new"],
+    "只清冻结面；等待期新增必须保留",
+  );
+  assert.equal(succeeded.liveContexts.webElements.length, 0);
+});
+
+test("T-PR2-10 / composer/B-1: 纯上下文（恢复态载体）输入可提交", () => {
+  const contextOnly = resolveComposerSubmitAvailability({
+    text: "",
+    attachments: [],
+    contexts: {
+      codeComments: [{ id: "cc-restored" }],
+      conversationSelections: [],
+      webElements: [],
+      pptxElements: [],
+    },
+  });
+  assert.equal(contextOnly.canSubmit, true, "纯上下文必须可提交（发送键要亮）");
+  assert.equal(contextOnly.allowSubmitWhenEmpty, true, "空正文必须允许 Enter");
+  assert.equal(contextOnly.hasContent, true, "载体必须算草稿占用（队列编辑门禁）");
+  assert.equal(contextOnly.contextCount, 1);
+
+  // 红判据：contexts 只传 live 侧（纯上下文场景恒空）时三项全 false ——
+  // 这正是修复前的行为，任何把入参改回 live-only 的回归都会在这里转红。
+  const liveOnly = resolveComposerSubmitAvailability({
+    text: "",
+    attachments: [],
+    contexts: emptyContexts(),
+  });
+  assert.equal(liveOnly.canSubmit, false);
+  assert.equal(liveOnly.allowSubmitWhenEmpty, false);
+  assert.equal(liveOnly.hasContent, false);
+
+  // 纯空白正文：占用 composer 但不可提交
+  const whitespace = resolveComposerSubmitAvailability({
+    text: "  \n ",
+    attachments: [],
+    contexts: emptyContexts(),
+  });
+  assert.equal(whitespace.hasContent, true);
+  assert.equal(whitespace.canSubmit, false);
+  assert.equal(whitespace.allowSubmitWhenEmpty, false);
+
+  // 附件路径保持原语义
+  const withAttachment = resolveComposerSubmitAvailability({
+    text: "",
+    attachments: [{ id: "att-1" }],
+    contexts: emptyContexts(),
+  });
+  assert.equal(withAttachment.canSubmit, true);
+  assert.equal(withAttachment.allowSubmitWhenEmpty, true);
+});
+
+test("composer/B-1: 三处判定与 SessionPane 门禁同源消费 merged 载体", () => {
+  assert.match(
+    COMPOSER_SOURCE,
+    /resolveComposerSubmitAvailability\(\{\s*text,\s*attachments: attachmentsApi\.attachments,\s*contexts: \{\s*codeComments: mergedCodeCommentContexts,\s*conversationSelections: mergedConversationSelections,\s*webElements: mergedWebElementContexts,\s*pptxElements: mergedPptxElementReferences,/,
+    "三处判定的入参必须是 merged 四类（restored + live）",
+  );
+  assert.match(COMPOSER_SOURCE, /const hasDraftToSubmit = submitAvailability\.canSubmit;/);
+  assert.match(COMPOSER_SOURCE, /const hasComposerDraftContent = submitAvailability\.hasContent;/);
+  assert.match(
+    COMPOSER_SOURCE,
+    /allowSubmitWhenEmpty=\{[\s\S]{0,300}submitAvailability\.allowSubmitWhenEmpty\s*\}/,
+    "Enter 空正文放行必须与发送键同源",
+  );
+  // 任一改回 live-only 即红
+  assert.doesNotMatch(
+    COMPOSER_SOURCE,
+    /hasCodeCommentContexts|hasWebElementContexts|hasPptxElementReferences|hasConversationSelectionReferences/,
+    "三处表达式不得再引用 live hook 的布尔别名",
+  );
+  // 撤回静默挂起是 B-1 难以察觉的根因：必须留 warn
+  assert.match(
+    COMPOSER_SOURCE,
+    /logger\.warn\("\[v4-composer\] queue 撤回未应用：composer 仍有草稿内容"/,
+  );
+  // SessionPane 队列编辑冲突门禁由 composer 上报的同一 hasContent 驱动
+  assert.match(
+    SESSION_PANE_SOURCE,
+    /if \(composerDraftStateRef\.current\.hasContent \|\| composerDraftStateRef\.current\.busy\)/,
+    "SessionPane 撤回门禁必须读 composer 上报的 hasContent",
+  );
+  assert.match(COMPOSER_SOURCE, /hasContent: hasComposerDraftContent/);
+});
+

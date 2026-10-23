@@ -138,10 +138,15 @@ import { CodeCommentAttachmentChip } from "@/v4/composer/CodeCommentAttachmentCh
 import { removeCodeCommentPreview } from "@/v4/composer/codeCommentPreviewSync.js";
 import {
   countComposerPromptContexts,
+  mergeContextList,
   parseComposerPromptContexts,
   serializeComposerPromptContexts,
   type ComposerPromptContexts,
 } from "@/v4/composer/composerPromptContexts.js";
+import {
+  composerSubmitMachine,
+  resolveComposerSubmitAvailability,
+} from "@/v4/composer/composerSubmitMachine.js";
 import { useCodeCommentContexts } from "@/v4/composer/useCodeCommentContexts.js";
 import { useWebElementContexts } from "@/v4/composer/useWebElementContexts.js";
 import { usePptxElementReferences } from "@/v4/composer/usePptxElementReferences.js";
@@ -327,27 +332,6 @@ function resolveRestoredComposerContent(
   };
 }
 
-/** 撤回 chip 与 composer 现存 chip 合并：live 侧同 key 覆盖 restored，避免重复序列化。 */
-function mergeContextList<T>(
-  restored: readonly T[],
-  live: readonly T[],
-  keyOf: (item: T) => string,
-): readonly T[] {
-  if (restored.length === 0) return live;
-  if (live.length === 0) return restored;
-  const liveKeys = new Set(live.map(keyOf));
-  return [...restored.filter((item) => !liveKeys.has(keyOf(item))), ...live];
-}
-
-/**
- * 会话选区引用是 union：文本选区没有 id（纯展示态）。撤回产物来自 parser，
- * 一定有 id；展示态用「路径 + 正文」兜底做 key，避免把两类条目错误去重。
- */
-function conversationSelectionContextKey(reference: ConversationSelectionDisplayReference): string {
-  if ("id" in reference && reference.id) return reference.id;
-  return `${reference.path ?? ""}\u0000${reference.text}`;
-}
-
 export interface ComposerRestoreRequest {
   requestId: number;
   sessionId: string;
@@ -396,6 +380,16 @@ function applyComposerRestoreRequestToComposer({
     hasDraftContent ||
     !inputApi
   ) {
+    // composer/B-1 根因：这条静默返回会让「队列项已从 Host 删除、本地却拒绝恢复」完全不可见，
+    // 并让 SessionPane 的 queueEditOperation 永不清空（该会话此后无法编辑任何队列项）。
+    // 纯上下文撤回草稿（visibleContent === ""）正是最容易被判成"空"的形态，必须留 warn。
+    if (hasDraftContent) {
+      logger.warn("[v4-composer] queue 撤回未应用：composer 仍有草稿内容", {
+        requestId: request.requestId,
+        sessionId: request.sessionId,
+        workspaceKey: request.workspaceKey,
+      });
+    }
     return appliedRequestId;
   }
   if (!restoreSessionOwnedAttachments(request.attachments)) {
@@ -747,10 +741,8 @@ function ConversationComposerImpl({
   const videoAttachmentPreviewTitle = intl.formatMessage({
     id: "chat.attachments.preview.openVideo",
   });
-  const hasAttachments = attachmentsApi.hasAttachments;
   const {
     contexts: webElementContexts,
-    hasContexts: hasWebElementContexts,
     removeContext: removeWebElementContext,
     clearContexts: clearWebElementContexts,
   } = useWebElementContexts({
@@ -763,7 +755,6 @@ function ConversationComposerImpl({
   });
   const {
     references: pptxElementReferences,
-    hasReferences: hasPptxElementReferences,
     removeReference: removePptxElementReference,
     clearReferences: clearPptxElementReferences,
   } = usePptxElementReferences({
@@ -785,7 +776,6 @@ function ConversationComposerImpl({
     removeReference: removeConversationSelectionReference,
     clearReferences: clearConversationSelectionReferences,
   } = useConversationSelectionReferences({ sessionId, workspaceKey });
-  const hasConversationSelectionReferences = conversationSelectionReferences.length > 0;
 
   // ── 队列撤回的上下文 chip（与编辑历史路径对称）──
   // 队列项的 text 是发送时序列化过的完整 prompt：可见正文 + 四类上下文尾块。撤回时
@@ -991,7 +981,6 @@ function ConversationComposerImpl({
   );
   const {
     contexts: codeCommentContexts,
-    hasContexts: hasCodeCommentContexts,
     removeContext: removeCodeCommentContext,
     clearContexts: clearCodeCommentContexts,
     getContexts: getCodeCommentContexts,
@@ -1262,21 +1251,22 @@ function ConversationComposerImpl({
   });
   const canStop = Boolean(snapshot?.control.canStop);
   const modifiedEnterReversesDelivery = modifiedEnterSubmits && canStop;
-  const hasText = text.trim().length > 0;
-  const hasDraftToSubmit =
-    hasText ||
-    hasAttachments ||
-    hasCodeCommentContexts ||
-    hasWebElementContexts ||
-    hasPptxElementReferences ||
-    hasConversationSelectionReferences;
-  const hasComposerDraftContent =
-    text.length > 0 ||
-    hasAttachments ||
-    hasCodeCommentContexts ||
-    hasWebElementContexts ||
-    hasPptxElementReferences ||
-    hasConversationSelectionReferences;
+  // composer/B-1：三处判定共用同一份「merged 四类上下文」入参（restored 载体 + live hook），
+  // 与发送序列化同源。只用 live hook 会让纯上下文队列项（visibleContent === ""、
+  // chip 只在草稿载体里）被判成空：发送键不亮、Enter 被判空，且 SessionPane 的撤回冲突
+  // 门禁放行后 Composer 内部仍判有草稿 → 队列项已删除却永不恢复、编辑链卡死。
+  const submitAvailability = resolveComposerSubmitAvailability({
+    text,
+    attachments: attachmentsApi.attachments,
+    contexts: {
+      codeComments: mergedCodeCommentContexts,
+      conversationSelections: mergedConversationSelections,
+      webElements: mergedWebElementContexts,
+      pptxElements: mergedPptxElementReferences,
+    },
+  });
+  const hasDraftToSubmit = submitAvailability.canSubmit;
+  const hasComposerDraftContent = submitAvailability.hasContent;
   useEffect(() => {
     onDraftStateChange?.({
       hasContent: hasComposerDraftContent,
@@ -1314,35 +1304,42 @@ function ConversationComposerImpl({
       const hasPendingAttachments = attachmentsApi.attachments.length > 0;
       // 队列撤回恢复的上下文 chip 与 live hook 状态合并：发送时必须一起序列化，
       // 否则撤回项重发会丢尾块（与编辑历史路径同口径）。
-      const currentCodeCommentContexts = mergeContextList(
+      const liveCodeCommentContexts = mergeContextList(
         restoredPromptContexts.codeComments,
         getCodeCommentContexts(),
         (item) => item.id,
       );
-      const hasPendingCodeCommentContexts = currentCodeCommentContexts.length > 0;
-      const currentWebElementContexts = mergedWebElementContexts;
-      const hasPendingWebElementContexts = currentWebElementContexts.length > 0;
-      const currentPptxElementReferences = mergedPptxElementReferences;
-      const hasPendingPptxElementReferences = currentPptxElementReferences.length > 0;
-      const currentConversationSelections = mergedConversationSelections;
-      const hasPendingConversationSelections = currentConversationSelections.length > 0;
+      const submitContexts: ComposerPromptContexts = {
+        codeComments: liveCodeCommentContexts,
+        conversationSelections: mergedConversationSelections,
+        webElements: mergedWebElementContexts,
+        pptxElements: mergedPptxElementReferences,
+      };
+      // composer/G-1：claim 把本次提交要交出的 chip（merged = restored 载体 + live）冻结成
+      // 显式状态；序列化与成功逐项移除都只认这份冻结面（等待期新增属于下一条消息）。
+      const submittedSubmitState = composerSubmitMachine.reduce(
+        {
+          phase: "idle",
+          frozenContexts: EMPTY_RESTORED_PROMPT_CONTEXTS,
+          liveContexts: submitContexts,
+        },
+        { type: "claim" },
+      );
+      const submittedPromptContexts = submittedSubmitState.frozenContexts;
+      const submittedContextCount = countComposerPromptContexts(submittedPromptContexts);
+      // 失败回滚只写回「载体侧」冻结面：live hook 状态本次提交从未移除，无需也不应回写
+      // （否则 live chip 会被写进载体，切 scope 后变成幽灵 chip）。
+      // 合并视图的 fail 语义（frozen ∪ live 全保留）由 composerSubmitMachine 的 T-PR2-8 覆盖。
+      const submittedCarrierContexts = restoredPromptContexts;
       // 草稿首发 accepted 后同一 composer 会原地从 __draft__ promotion 到
       // session scope；若成功清理时再读可变 ref，会误清新 scope，并把首条输入残留在
       // __draft__，下次新建任务又恢复。发送开始时冻结真正提交的 scope。
       const submittedDraft = snapshotDraftOfEditor();
-      // 撤回恢复的上下文载体同样在发送开始时冻结：成功清空、失败原样回滚，
-      // 等待期间用户新加的 chip 属于下一条消息，不能被旧回包覆盖。
-      const submittedPromptContexts = restoredPromptContexts;
       let cleanupRevision = contentRevisionRef.current;
       const submission = createSubmissionFromComposer?.() ?? null;
       const submittedAttachmentIds = attachmentsApi.attachments.map((item) => item.id);
       if (
-        (!trimmed &&
-          !hasPendingAttachments &&
-          !hasPendingCodeCommentContexts &&
-          !hasPendingWebElementContexts &&
-          !hasPendingPptxElementReferences &&
-          !hasPendingConversationSelections) ||
+        (!trimmed && !hasPendingAttachments && submittedContextCount === 0) ||
         pendingRef.current ||
         !submissionReady ||
         (createSubmissionFromComposer !== undefined && submission === null) ||
@@ -1378,7 +1375,10 @@ function ConversationComposerImpl({
         // 用户在等待期间已经产生更新时，当前完整正文是更新后的事实；旧失败回包不能覆盖。
         if (contentRevisionRef.current === cleanupRevision) {
           // 正文与撤回上下文载体一起回滚：失败重试必须保留原 chip，否则重发少尾块。
-          updateComposerContent({ ...submittedDraft, promptContexts: submittedPromptContexts });
+          updateComposerContent({
+            ...submittedDraft,
+            promptContexts: submittedCarrierContexts,
+          });
         }
         suppressDraftPersistRef.current = false;
         draftSubmissionClaimed = false;
@@ -1419,18 +1419,9 @@ function ConversationComposerImpl({
         }
         // 外部上下文不走协议附件；按 selection -> code comment -> web -> PPTX 的固定尾块顺序
         // 序列化，历史 user row 才能按相反顺序无损解析并隐藏内部 prompt block。
-        const promptText = serializeComposerPromptContexts(trimmed, {
-          codeComments: currentCodeCommentContexts,
-          conversationSelections: currentConversationSelections,
-          webElements: currentWebElementContexts,
-          pptxElements: currentPptxElementReferences,
-        });
-        const contextAttachmentCount = countComposerPromptContexts({
-          codeComments: currentCodeCommentContexts,
-          conversationSelections: currentConversationSelections,
-          webElements: currentWebElementContexts,
-          pptxElements: currentPptxElementReferences,
-        });
+        // 序列化只认 claim 冻结面（composer/G-1），保证发出的字节与成功清理/失败回滚同一份事实。
+        const promptText = serializeComposerPromptContexts(trimmed, submittedPromptContexts);
+        const contextAttachmentCount = submittedContextCount;
         if (trimmed) {
           promptHistoryBeforeSend = readPromptHistoryEntries(workspacePath);
           promptHistoryAfterAppend = appendPromptHistoryEntry(promptHistoryBeforeSend, trimmed);
@@ -1493,18 +1484,27 @@ function ConversationComposerImpl({
           updateText("");
         }
         attachmentsApi.clearAttachments(submittedAttachmentIds);
-        // 与附件相同，只移除本次冻结的引用；等待期间新加入的引用属于下一条消息。
-        currentCodeCommentContexts.forEach(removeMergedCodeCommentContext);
-        currentWebElementContexts.forEach((context) => removeMergedWebElementContext(context.id));
-        currentPptxElementReferences.forEach((reference) =>
+        // 与附件相同，只移除 claim 冻结的引用；等待期间新加入的引用属于下一条消息。
+        submittedPromptContexts.codeComments.forEach(removeMergedCodeCommentContext);
+        submittedPromptContexts.webElements.forEach((context) =>
+          removeMergedWebElementContext(context.id),
+        );
+        submittedPromptContexts.pptxElements.forEach((reference) =>
           removeMergedPptxElementReference(reference.id),
         );
-        currentConversationSelections.forEach((reference) =>
-          removeMergedConversationSelectionReference(conversationSelectionContextKey(reference)),
+        // 会话选区删除按 key（恢复项无 id），与 chip 的 onRemove 同一入口。
+        submittedPromptContexts.conversationSelections.forEach(
+          removeMergedConversationSelectionReference,
         );
-        // 撤回恢复的上下文已随这次发送交出去；清空草稿载体，避免切回来或下一条消息再带一遍。
-        // 与正文同口径：等待期间用户已产生更新时，新 chip 属于下一条消息，不被旧 ACK 清掉。
-        if (contentRevisionRef.current === cleanupRevision) {
+        // composer/G-1 succeed：只移除冻结面。冻结面全部移除后载体应为空；
+        // 等待期用户新加的 chip 属于下一条消息，revision 变化时整条不清。
+        const succeededSubmitState = composerSubmitMachine.reduce(submittedSubmitState, {
+          type: "succeed",
+        });
+        if (
+          contentRevisionRef.current === cleanupRevision &&
+          countComposerPromptContexts(succeededSubmitState.liveContexts) === 0
+        ) {
           updateComposerContent({ promptContexts: undefined });
         }
         // 发送成功：清本次提交捕获的 scope 草稿；prompt history 已在真实发送前同步写盘，
@@ -2273,13 +2273,9 @@ function ConversationComposerImpl({
           submitting={pending}
           submitDisabled={pending || !routingAllowsSend || !attachmentsReady || !submissionReady}
           allowSubmitWhenEmpty={
-            // 发送按钮已把代码评论视为可发送上下文，但这里曾漏掉同一状态，
-            // 导致空文本仅附代码评论时 Enter 被编辑器判为空，必须改点发送按钮。
-            hasCodeCommentContexts ||
-            hasAttachments ||
-            hasWebElementContexts ||
-            hasPptxElementReferences ||
-            hasConversationSelectionReferences
+            // 与发送键共用 resolveComposerSubmitAvailability（composer/B-1）：空正文只有
+            // 附件或上下文（含队列撤回恢复态载体）时 Enter 必须放行，否则纯上下文项无法二次发送。
+            submitAvailability.allowSubmitWhenEmpty
           }
           enterSubmits={enterSubmits}
           onModifiedSubmit={modifiedEnterSubmits ? handleModifiedEditorSubmit : undefined}

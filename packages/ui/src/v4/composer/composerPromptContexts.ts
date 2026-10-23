@@ -46,6 +46,41 @@ export function countComposerPromptContexts(contexts: {
 }
 
 /**
+ * 撤回 chip（restored，随 composerDraft.promptContexts 载体）与 live hook 状态的合并。
+ *
+ * 参数顺序固定为 **restored 在前、live 在后**：同 key 时 live 覆盖 restored——live 是用户
+ * 刚加/正在操作的最新事实，restored 只是撤回快照。倒序会让恢复态反向覆盖用户输入。
+ */
+export function mergeContextList<T>(
+  restored: readonly T[],
+  live: readonly T[],
+  keyOf: (item: T) => string,
+): readonly T[] {
+  if (restored.length === 0) return live;
+  if (live.length === 0) return restored;
+  const liveKeys = new Set(live.map(keyOf));
+  return [...restored.filter((item) => !liveKeys.has(keyOf(item))), ...live];
+}
+
+/**
+ * 队列项 → 预览正文 + 上下文条数。
+ *
+ * `item.text` 是发送时序列化过的完整 prompt（可见正文 + 四类上下文尾块）；队列行必须与
+ * 气泡/编辑态同口径先剥离尾块再渲染，否则用户会在预览里看到 `# Code comments:` 等内部块，
+ * 纯上下文队列项更是只剩块。解析失败/无尾块时原样返回正文。
+ */
+export function resolveQueuePreview(
+  item: { text: string },
+  workspace: { workspacePath: string; workspaceIdentity?: string },
+): { previewText: string; contextCount: number } {
+  const parsed = parseComposerPromptContexts(item.text, workspace);
+  return {
+    previewText: parsed.visibleContent,
+    contextCount: countComposerPromptContexts(parsed),
+  };
+}
+
+/**
  * 四类 context parser 都只识别 prompt 尾块，因此序列化顺序和解析顺序必须严格相反。
  */
 export function serializeComposerPromptContexts(
