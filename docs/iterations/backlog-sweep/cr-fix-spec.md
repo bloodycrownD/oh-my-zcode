@@ -7,12 +7,12 @@
 - head_sha: `09286069`
 - prd_path: 未提供
 - spec_path: `docs/iterations/backlog-sweep/spec.md`
-- review_round: 1（首诊，mode=scope，4 个 readonly 节点）
-- dag_version: 2
+- review_round: 2（r1 首诊 4 scope + r2 末轮 review-full 覆核）
+- dag_version: 3
 - 状态：draft
-- 本轮结论：**not-ready**（P0=0 / P1=2 / P2=19；另 spec_deviations open 若干）
+- 本轮结论：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 full/A-1、full/B-1）
 
-评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（均 readonly 非自审，各自新鲜读 diff + 上游对照）。
+评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（r1 首诊，readonly 非自审）+ `review-full`（r2 末轮全局覆核，逐条对代码回读）。r2 结论：24 条中 20 条可直接执行，2 条改法不足（composer/B-1、provider/B-3，本轮已补齐），2 条引用需修正（svc/C-1 验收措辞、provider/G-1 行号），并新增 2 条 must-fix。
 
 ---
 
@@ -21,10 +21,10 @@
 ### composer/B-1 [P1] 恢复态载体未进入 `hasDraftToSubmit` / `hasComposerDraftContent`——纯上下文队列项二次撤回丢消息且队列编辑永久卡死
 
 - 维度：B 正确性 / C-orch（「restored 是否算草稿内容」两套口径）
-- 文件：`packages/ui/src/v4/ConversationComposer.tsx:1266-1285`、`packages/ui/src/v4/SessionPane.tsx:2655`
-- 问题：`submit` 允许「空正文 + 仅四类上下文」发送；该队列项撤回后 `visibleContent === ""`，chip 只存在于 `composerDraft.promptContexts`，live hooks 恒空 → 两个 has 表达式为 false。后果：(a) 发送键不亮/Enter 不可发；(b) `hasContent=false` 使 SessionPane 撤回冲突门禁放行，`deleteQueueItem` 已 ACK 删除后，Composer 内部 `hasDraftContent`（`:1038-1044`，含 merged 载体）判 true 而拒绝应用 → 队列项已从 Host 删除却永不恢复，`onComposerRestoreApplied` 不触发 → `queueEditOperationRef` 永不清空，该会话此后无法编辑任何队列项。改动前不可达（旧实现把尾块塞进可见正文 → text 非空），属本轮引入的回归。
-- 改法：`hasDraftToSubmit` 与 `hasComposerDraftContent` 的四类判断改用已算好的 `mergedCodeCommentContexts / mergedWebElementContexts / mergedPptxElementReferences / mergedConversationSelections`（与发送序列化同源），不再只看 live hooks；在 `applyComposerRestoreRequestToComposer` 因 `hasDraftContent` 提前返回处补 `logger.warn`（静默挂起是 B-1 难以察觉的根因）。
-- 验收/测试：①纯上下文队列项撤回后发送键可点、点击后 `promptText` 含四类尾块；②同会话再点另一队列项「编辑」→ 出 `chat.queue.editDraftConflict` toast 且不发生 `deleteQueueItem`；③状态文件 `P2 hasDraftToSubmit 不含 restored 载体` 随之关闭。
+- 文件：`packages/ui/src/v4/ConversationComposer.tsx:1266-1285`、`:2275-2283`（`allowSubmitWhenEmpty`）、`packages/ui/src/LexicalChatInput.tsx:795`（`shouldSubmitLexicalEnter`）、`packages/ui/src/v4/SessionPane.tsx:2655`
+- 问题：`submit` 允许「空正文 + 仅四类上下文」发送；该队列项撤回后 `visibleContent === ""`，chip 只存在于 `composerDraft.promptContexts`，live hooks 恒空 → 三个表达式全为 false：`hasDraftToSubmit`、`hasComposerDraftContent`、**`allowSubmitWhenEmpty`**（后者决定 Enter 是否放行）。后果：(a) 发送键不亮且 Enter 被判空；(b) `hasContent=false` 使 SessionPane 撤回冲突门禁放行，`deleteQueueItem` 已 ACK 删除后，Composer 内部 `hasDraftContent`（`:1038-1044`，含 merged 载体）判 true 而拒绝应用 → 队列项已从 Host 删除却永不恢复，`onComposerRestoreApplied` 不触发 → `queueEditOperationRef` 永不清空，该会话此后无法编辑任何队列项。改动前不可达（旧实现把尾块塞进可见正文 → text 非空），属本轮引入的回归。
+- 改法：**三处表达式**（`hasDraftToSubmit`、`hasComposerDraftContent`、`allowSubmitWhenEmpty`）的四类判断统一改用已算好的 `mergedCodeCommentContexts / mergedWebElementContexts / mergedPptxElementReferences / mergedConversationSelections`（与发送序列化同源），口径对齐 `ConversationRowView.tsx:1153` 的 `editContextCount`；在 `applyComposerRestoreRequestToComposer` 因 `hasDraftContent` 提前返回处补 `logger.warn`（静默挂起是 B-1 难以察觉的根因）。
+- 验收/测试：①纯上下文队列项撤回后**发送键可点且 Enter 可发**（两条入路分别断言），发送后 `promptText` 含四类尾块；②同会话再点另一队列项「编辑」→ 出 `chat.queue.editDraftConflict` toast 且不发生 `deleteQueueItem`；③把三处任一表达式改回 live-only，新用例必须转红；④状态文件 `P2 hasDraftToSubmit 不含 restored 载体` 随之关闭。
 - 来源：review-scope-composer round 1
 
 ### desktop/B-1 [P1] 文件应用 id 污染全局「上次选择的编辑器」偏好，工作区头/预览头回落到 Finder/Explorer
@@ -53,9 +53,9 @@
 
 - 维度：C 质量
 - 文件：`packages/services/src/session/taskIndexRepo.ts:483-484,545-552`
-- 问题：`git grep` 仅这两处；上游在 `node.ts:3203-3205` 消费做 main 提示，omz 无消费方，且 Host 侧实例因早退永不赋值 → 田野双死。
+- 问题：`migrationBackupSkipped` 全仓零读取方（`git grep` 仅这两处）；上游在 `node.ts:3203-3205` 消费做 main 提示，omz 无消费方，且 Host 侧实例因早退永不赋值 → 字段与实际双死。
 - 改法：删除字段与 `:545` 的 `const migration =` / `:552` 赋值（保留 `await projectStorage.migrate(...)`）；或按上游在 main 提示面接线。二选一，不留死状态。
-- 验收/测试：`pnpm typecheck` 绿；knip 该条消失。
+- 验收/测试：`pnpm typecheck` 绿；`git grep migrationBackupSkipped` 归零（注：knip 不检查类字段，不能作为验收手段）。
 - 来源：review-scope-svc round 1
 
 ### svc/F-1 [P2] `taskIndexRepo.ts:542-544` 注释与事实相反（Host 主线程必走早退）
@@ -139,6 +139,24 @@
 - 验收/测试：把 `hasDraftToSubmit` 改回旧表达式时新用例转红。
 - 来源：review-scope-composer round 1
 
+### composer/A-1 [P2] 队列行预览未剥离上下文尾块，「与气泡同口径」声明不成立
+
+- 维度：A 需求符合性 / B 正确性（r2 新增）
+- 文件：`packages/ui/src/v4/ConversationQueueRow.tsx:129`；对照 `packages/ui/src/.../ConversationRowView.tsx:1360-1365`、`ConversationUserInputContent.tsx:184-193`
+- 问题：队列行把 `item.text`（发送时序列化的「可见正文 + 四类上下文尾块」）直接交给 `ConversationUserInputContent`，后者只做 mention 解析、不剥离尾块；真实气泡是先 `parseComposerPromptContexts` 取 `visibleContent` 再渲染。结果：纯上下文队列项预览显示 `# Code comments:` / `# userselect:` 等内部块，普通项行尾也可能露出块首。本轮新注释明确声称「预览与落库消息同口径」，Step 22 该子项实际未达成。
+- 改法：`QueueRow` 增 `previewText?: string` / `contextCount?: number` prop，由 `ConversationQueuePanel`/`ConversationComposer` 用 `parseComposerPromptContexts(item.text, { workspacePath, workspaceIdentity }).visibleContent` 计算后传入，`title` 同步用可见正文；纯上下文项给 chip 数量标记（复用 `countComposerPromptContexts`）。
+- 验收/测试：构造「仅 code comment 尾块」队列项，DOM 预览不含 `# Code comments:`；带正文+尾块项预览等于可见正文；`data-v4-queue-item-preview` 断言迁移到新 prop 后仍绿。
+- 来源：review-full round 2
+
+### composer/B-6 [P2] 恢复出的 skill chip 的 `value`/`data` 与 provider 契约不一致
+
+- 维度：B 正确性（一致性；与 composer/B-4 同类，r2 新增）
+- 文件：`packages/ui/src/mentions/mentionMarkdown.ts:313-315`；对照 `packages/ui/src/mentions/providers/skillsMentionProvider.ts:44-55`；消费点 `packages/ui/src/LexicalChatInput.tsx:221-226,312-313`
+- 问题：富反解析 skills 分支产出 `value: destination`（技能**路径**）且不产 `data`；provider 口径是 `value: skill.name`、`data: { path, scope }`。`prependMentionIfMissing` 按 `category+value` 去重 → 恢复出的技能 chip 与同技能 live/prefill chip 无法互识，会重复插入；`richMentionNodeId` 随之给出 `skill:<path>` 而非 `skill:<name>`。发送字节不受影响（序列化用 `markdown`），属一致性缺陷。
+- 改法：skills 分支改 `value: label.slice(1)`（技能名，与 provider 一致）并补 `data: { path: destination }`；同步改 `composerMentionPillParse.test.ts` T-PR1-2 的 skill 期望值（当前断言 `value === "./skills/cr.md"`）。若产品要求路径入 value，则须在 `prependMentionIfMissing` 的 key 里对 skills 特判，二选一并在注释写明。
+- 验收/测试：`resolveRichMentionPart` 的 skills 段与 `skillsMentionProvider` 的 id/value/data 同形（纯逻辑用例）；`prependMentionIfMissing` 对同一技能不再重复插入（行为用例）。
+- 来源：review-full round 2
+
 ### desktop/B-2 [P2] ToolCallBody 读成功但 `dataBase64` 为空时仍永久 Loading
 
 - 维度：B 正确性（本次要收口的形态只堵了 reject 路径）
@@ -220,19 +238,19 @@
 - 验收/测试：两种 pick 的弹窗描述分别正确，两语言对称。
 - 来源：review-scope-provider round 1
 
-### provider/B-3 [P2] 重名文案跨包字面量复制，注释声称同源且对创建路径不成立
+### provider/B-3 [P2] 重名文案跨包字面量复制，注释声称同源且对创建路径不成立；且 en-US 界面显示中文
 
-- 维度：C 质量（DRY）/ F 注释
+- 维度：C 质量（DRY）/ F 注释 / J i18n 对称
 - 文件：`packages/ui/src/settings/model-provider-section/createProviderNameDialog.ts:8-13`；`packages/provider/src/config-service.ts:600`
-- 问题：UI 常量是复制而非引用；且注释暗示「创建失败会抛重名错」，实际 `createPersonalProvider` 走 `nextPersonalProviderLabel` 自动加序号（`config-service.ts:232-238,734-747`）。
-- 改法：在 `@zcode/provider` 导出文案前缀常量两侧共用；注释改为「对齐重命名路径报错文案；创建路径服务层自动加序号，前端拦截更严格」。
-- 验收/测试：文案单一定义处；一条断言保证 UI 展示值包含该常量。
+- 问题：两件独立缺陷——(1) UI 常量是复制而非引用，服务层改文案即静默漂移；注释暗示「创建失败会抛重名错」，实际 `createPersonalProvider` 走 `nextPersonalProviderLabel` 自动加序号（`config-service.ts:232-238,734-747`）。(2) 弹窗与重命名侧都直接渲染该中文常量 → **en-US 用户看到中文**，违反 AGENTS.md i18n 对称。只统一常量定义并不能解决 (2)。
+- 改法：(1) 在 `@zcode/provider` 导出文案前缀常量，服务层与 UI 共用（UI 只需前缀匹配）；注释改为「对齐重命名路径报错文案；创建路径服务层自动加序号，前端拦截更严格」。(2) 前端展示改走 i18n：新增对称键 `settings.modelProvider.nameExists`（zh「Provider 名称已存在」/ en「Provider name already exists」），UI 用该键渲染，服务层错误串仅用于**判定**（按导出前缀匹配）不用于展示；若重命名侧也存在同样问题，同批改到同一键。
+- 验收/测试：文案单一定义处（服务层常量 + i18n 键各一处）；`i18n-key-merge --verify` 绿；en-US 下重名提示为英文（断言 `nameExists` 两语言齐备）；一条断言保证 UI 展示值来自 i18n 键而非服务层原始串。
 - 来源：review-scope-provider round 1
 
 ### provider/G-1 [P2] 创建在途互斥、清错时机、横幅分支缺少守卫
 
 - 维度：G 测试（缺口）
-- 文件：`packages/ui/test/modelProviderNameDialog.test.ts`（缺项）；`packages/ui/src/settings/ModelProviderSection.tsx:278,844-849`
+- 文件：`packages/ui/test/modelProviderNameDialog.test.ts`（缺项）；`packages/ui/src/settings/ModelProviderSection.tsx:290,844-849`
 - 问题：`createProviderInFlightRef` 双击互斥、提交前 `setCreateProviderError(null)`、B-1/B-2 的横幅分支都是本轮新行为，T-PV1 只覆盖纯校验与挂载点形状（AGENTS.md 要求行为改动补测）。
 - 改法：B-1 纯函数落单测；形状守卫补三条：`createProviderInFlightRef.current` 在 await 前同步置位、`setCreateProviderError(null)` 在 await 之前、弹窗禁用在途关闭（`if (!next && !creating)`）。
 - 验收/测试：抽掉互斥或清错任一处，对应用例红灯。
@@ -253,7 +271,19 @@
 | S5 | `services` 六值导出落 `node.ts` 而非 spec 写的 `index.ts`（renderer barrel 不得引 `node:crypto`） | `services/src/index.ts:128-132` 禁令注释 | 接受；Step 26 回写 spec 正文 |
 | S6 | 0008 的「幂等」仅行级成立，`membership_id` 每次重跑换新 UUID | `migrate-projects.ts:91-99` | 记入 spec 风险表，不作「完全幂等」引用 |
 | S7 | `migrateConnectionHostsOnUpgrade` 不动 `tasks.host_id`（上游同形） | `migrate-projects.ts` 全文 | 接受；spec 明确「收敛范围=projects/entries」 |
-| S8 | 数字徽章渲染段带入（生产零调用） | `unreadBadge.ts:61,76-180` | 与 desktop/C-1 同批决定（删 or 注释保留） |
+| S8 | 数字徽章渲染段带入（生产零调用） | `unreadBadge.ts:61,76-180` | **终局：取 (b) 注释保留**——删除会连带删掉已通过的像素用例，且该段是上游测试兼容面；段首注明「生产零调用，仅上游测试兼容，接线待产品确认」，spec Step 18 同步写明 |
+| S15 | `TaskIndexRepo` 调用点 11 处 / 9 文件（spec 记 8 处），3/4 参签名全兼容 | `taskIndexRepo.ts:487-492` 等 | 接受；Step 26 回写 spec 计数 |
+| S16 | T-RP3/T-RP4 宿主落 `services/test` 却 import `desktop/src/host/*`（services 无 test 工程） | `remoteProjectsService.test.ts:38,41` | 接受（登记 D5）；Step 26 评估补 services test 工程或拆纯函数 |
+| S17 | 0008 用 `ensureHost(INSERT OR IGNORE)+UPDATE` 而非 spec 字面 `ON CONFLICT`（语义等价，T-RP5 覆盖） | `migrate-projects.ts:88-99,115-124` | 接受；spec 措辞改为「幂等 upsert」 |
+| S18 | 队列行预览复用 `ConversationUserInputContent`（与 composer/A-1 同源） | `ConversationQueueRow.tsx:129` | 接受实现路径，但须按 composer/A-1 补尾块剥离 |
+| S19 | admission 20 host 上限进入真实连接路径；`remote-project.host-limit` 全仓无 i18n/错误码映射（第 21 台设备见裸错误码） | `remote-projects/index.ts:41-50` | spec 风险表 + CHANGELOG 登记；建议与 open Q3 同批补键 |
+| S20 | Step 13 额外改 `packages/ui/src/lib/nodeReplToolDisplay.ts`（spec 只列 3 文件） | 该文件 | 接受（必要依赖，已登记 D18）；spec Step 13 补文件 |
+| S21 | 托盘红点仅 Windows（fork 平台范围） | `desktopTray.ts` | 接受（D19）；spec Step 18 补平台范围 |
+| S22 | T-UF1 的 `isInvalidPort` 断言跨节点归 Step 14 | `u5u6SurvivorsShape.test.ts` | 接受（D20）；Step 26 补映射说明 |
+| S23 | `GetInstalledEditors` IPC 契约放宽：request 由 `void` 变 `string \| undefined`，全链改签名（window/preload/renderer/main/client） | `channels.ts:926`、`preload/index.ts:589`、`desktopMainIpcPlatform.ts:332`、`platform.ts:857`、`client/src/globals.d.ts:243` | 向后兼容（可选参）；Step 17 补「平台契约变更」 |
+| S24 | `unreadBadge` 公共面改名/转导出（`syncAppUnreadBadge→syncUnreadBadgeForPlatform`、`sumWindowUnreadCounts→maxWindowUnreadCounts`，另 3 个函数私有转导出 → knip 面变化） | `unreadBadge.ts` | 接受；Step 18 与 D4 knip 基线一并登记 |
+| S25 | 草稿恢复第 6 处富装填（`restorePersistedComposerDraftIntoInput` 也切到 `setTextWithMentions`，刷新后恢复的草稿也会转 chip） | `ConversationComposer.tsx:229-231` | 并入 S2 证据；spec Step 21 的「5 个 setText 点」改为「5 个 setText 点 + 1 个草稿恢复入口」 |
+| S26 | `getEditorDefsForCurrentPlatform()` 语义扩大为 `[...IDE, ...getFileApplicationDefs()]`（Linux 只返回文件应用），基座过滤改在函数外 | `editors.ts:676-702` | 接受；spec Step 17 注明「文件应用只经 filePath 附加」 |
 | S9 | `sharedImageSrc` / `image.src` 在本仓无生产者，属预埋兼容 | `cuaScreenshotDetails.ts`、`nodeReplToolDisplay.ts` | 接受；与 desktop/F-1 注释同批 |
 | S10 | T-PV2 的「名称提交归一化」纯逻辑实际落在 T-PV1 宿主 | `modelProviderNameDialog.test.ts:150-183` | 修正 spec 用例→宿主映射 |
 | S11 | 新增 `DROP_KEYS` i18n 工具链机制未在 spec/CHANGELOG 登记 | `scripts/i18n-key-merge/config.mjs:38-43,65-67`；`merge.mjs:25,43` | Step 26 补 spec i18n 段落 + CHANGELOG |
@@ -265,7 +295,7 @@
 
 ## Open questions（不阻塞 fix-spec-ready，需用户/后续节点拍板）
 
-1. **（最高价值）非桌面入口用空 settings 抢先烧掉 0005/0008 账本**：`TaskIndexRepo.initialize` 无条件跑 `projectStorage.migrate`，`createLocalServices` 固定传 `undefined` settings（`node.ts:1338`）；若升级后先起 web/server 入口（`packages/server/src/entry-http.ts:17`、`stdioServices.ts:38`，共用同一 `~/.omz/tasks-index.sqlite`），会以空 settings 应用 0005 并记账 → desktop Worker 跳过后**旧项目与入口永久不迁移**。上游同形（继承风险）。可选：非桌面入口自带 settings，或 0005 seed 改成「账本在但 seed 空时补跑」。
+1. **（最高价值，r2 复评为 P1 级静默数据丢失）非桌面入口用空 settings 抢先烧掉 0005/0008 账本**：`TaskIndexRepo.initialize` 无条件跑 `projectStorage.migrate`，`createLocalServices` 固定传 `undefined` settings（`node.ts:1338`）；若升级后先起 web/server 入口（`packages/server/src/entry-http.ts:17`、`stdioServices.ts:38`，共用同一 `~/.omz/tasks-index.sqlite`），会以空 settings 应用 0005 并记账 → desktop Worker 跳过后**旧项目与入口永久不迁移**。上游同形（继承风险）。三选一需拍板：①非桌面入口自带 settings（上游 `createServerHostServices` 形态）；②0005 seed 改成「账本在但 seed 空时补跑」；③接受现状但**必须在 spec 风险表 + CHANGELOG 明写「升级后必须先启动一次桌面端」**。
 2. 未读信号双源（`root/useRootPlatformEffects.ts:270-274` 无门控 vs `project-sidebar/ProjectDirectoryProvider.tsx:72-74` 带 `notificationEnabled` 门控）→ 关闭通知后计数变化仍点亮角标；U12 让其在任务栏/托盘可见。需产品拍板单一 owner。
 3. 文件应用打开失败无可见反馈（`OpenSplitButton.tsx:161-171`、`PreviewPane.tsx:1502-1510` 仅 warn；omz 缺 `chat.previewCards.openFileFailed` 键）→ 是否补键。
 4. `chatPromptEditorSubmitValue.test.ts:29/53/107` 注释仍称 `setText(initialValue)` 回填，与实现脱节；`LexicalChatInputHandle.setText` 已零内部消费点 → 是否退役。
@@ -295,7 +325,8 @@
 
 ## K 节建议（下游执行时闭合）
 
-1. spec 回写：S1-S14 全部落 `docs/iterations/backlog-sweep/spec.md`（Step 2/21/22/23/25/26 + 风险表 + 用例→宿主映射）
-2. CHANGELOG：`setTextWithPluginMentions` 语义扩大、草稿 schema 新增载体、DROP_KEYS 工具链
-3. `test:v4-perf` 分组一致性：纯 node 测试（modelProviderNameDialog/CardActions）挂在带 `setup-ui-component-test.mjs` 的 UI 批末组，语义上更接近 `tsx --test` 批
-4. 调试残留已清（`+m.length+`/`Close'))hits.push(p)` 等工程垃圾已删；`.reference/`、`.tools/` 属工具目录，保持 untracked
+1. spec 回写：S1-S26 全部落 `docs/iterations/backlog-sweep/spec.md`（Step 2/13/17/18/21/22/23/25/26 + 风险表 + 用例→宿主映射），其中 **S19（host-limit 裸错误码）与 open Q1 的三选一结论必须进风险表**
+2. CHANGELOG：`setTextWithPluginMentions` 语义扩大（含草稿恢复入口 S25）、草稿 schema 新增载体、DROP_KEYS 工具链、`GetInstalledEditors` 契约放宽、unreadBadge 导出面变化
+3. `host/index.ts:1701` 注释仍引「spec Step 19」（本轮 Step 19 = U10，deployServer 退役属 Step 11）→ 顺手改正（上一轮遗留）
+4. `test:v4-perf` 分组一致性：纯 node 测试（modelProviderNameDialog/CardActions）挂在带 `setup-ui-component-test.mjs` 的 UI 批末组，语义上更接近 `tsx --test` 批
+5. 调试残留已清（`+m.length+`/`Close'))hits.push(p)` 等工程垃圾已删）；`.reference/`、`.tools/` 属工具目录，保持 untracked
