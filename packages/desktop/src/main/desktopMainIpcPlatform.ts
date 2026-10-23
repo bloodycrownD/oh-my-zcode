@@ -4,6 +4,8 @@ import { readZCodeStdioTapDevState } from "@zcode/services/node";
 import {
   DesktopCommandIds,
   appSettingsPatchSchema,
+  desktopMenuMessageIds,
+  formatDesktopMenuMessage,
   formatZodError,
   localeSchema,
   nonEmptyStringSchema,
@@ -248,6 +250,16 @@ export function registerPlatformIpcHandlers(options: {
       payload,
       options.windowUnreadCountMap,
       options.logger,
+      // 任务栏 overlay 的无障碍描述随 UI 语言走：locale 源就是本模块注入的
+      // currentApplicationLocale（切换语言后下一次未读变化即生效）。
+      {
+        description: (totalUnreadCount) =>
+          formatDesktopMenuMessage(
+            options.currentApplicationLocale(),
+            desktopMenuMessageIds.taskbarUnreadTasks,
+            { count: totalUnreadCount },
+          ),
+      },
     );
   });
   registerCuaPipActiveSessionIpc({

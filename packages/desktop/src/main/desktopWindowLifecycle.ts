@@ -317,7 +317,7 @@ const applyWindowsTaskbarOverlay = createWindowsTaskbarOverlayApplier({
   getAllWindows: () => BrowserWindow.getAllWindows(),
   // Windows 固定把 overlay 显示为 16×16。直接传硬边 32px 圆再让 Shell 缩放会发糊、
   // 边缘像缺口；这里提供原生 1x(16px) + 2x(32px) 纯红抗锯齿表示。
-  // label 只用于无障碍 description，屏幕阅读器仍播报具体数量。
+  // 图与 label 无关（单槽缓存），数量只进 caller 格式化的无障碍 description。
   createBadgeImage: () => {
     const image = nativeImage.createEmpty();
     image.addRepresentation({
@@ -336,16 +336,28 @@ const applyWindowsTaskbarOverlay = createWindowsTaskbarOverlayApplier({
   },
 });
 
-export function syncApplicationUnreadBadge(windowUnreadCountMap: Map<number, number>) {
+export function syncApplicationUnreadBadge(
+  windowUnreadCountMap: Map<number, number>,
+  options: {
+    /**
+     * 任务栏 overlay 的无障碍描述。必填，且由 caller 按当前 locale 组装
+     * （`formatDesktopMenuMessage(locale, "taskbarUnreadTasks", { count })`）：
+     * 一是文案必须随语言切换，二是 typecheck 会强制每个调用点显式给值，
+     * 不会再出现某条清理路径硬编码英文或漏传。
+     */
+    description: (totalUnreadCount: number) => string;
+  },
+) {
   // 多窗口上报的是同一份全局计数：取 max，求和会让角标随窗口数翻倍。
   const totalUnreadCount = maxWindowUnreadCounts(windowUnreadCountMap);
+  const description = options.description(totalUnreadCount);
   syncUnreadBadgeForPlatform({
     platform: process.platform,
     totalUnreadCount,
     setBadgeCount: (count) => {
       app.setBadgeCount(count);
     },
-    applyOverlay: applyWindowsTaskbarOverlay,
+    applyOverlay: (label) => applyWindowsTaskbarOverlay(label, description),
   });
   // 托盘角标：Windows 托盘右上角小徽章（macOS 无托盘，由 Dock 角标承担）。
   applyDesktopTrayUnreadBadge(totalUnreadCount);
@@ -356,6 +368,7 @@ export function handleWindowUnreadCountSync(
   payload: unknown,
   windowUnreadCountMap: Map<number, number>,
   logger: { warn: (...args: unknown[]) => void },
+  options: { description: (totalUnreadCount: number) => string },
 ) {
   const unreadCount = parseWindowUnreadCount(payload);
   if (unreadCount == null) {
@@ -372,7 +385,7 @@ export function handleWindowUnreadCountSync(
   } else {
     windowUnreadCountMap.set(win.id, unreadCount);
   }
-  syncApplicationUnreadBadge(windowUnreadCountMap);
+  syncApplicationUnreadBadge(windowUnreadCountMap, options);
   return true;
 }
 

@@ -295,13 +295,22 @@ export type TaskbarOverlayWindow = {
   setOverlayIcon(overlay: unknown, description: string): void;
 };
 
+/**
+ * Windows 任务栏 overlay 下发。
+ *
+ * `description` 必须是 caller 已按当前 locale 格式化好的文案（见 shared/desktopMenu
+ * 的 `taskbarUnreadTasks`），这里不做 formatter 注入：主进程其余原生文案
+ * （菜单/托盘/chrome）同样是 caller 取 `getDesktopMenuMessage`，保持一处口径。
+ * `label` 为 null 表示清除角标，此时描述强制为空串，避免读屏播报残留数字。
+ */
 export function applyTaskbarOverlayToWindows(options: {
   label: string | null;
+  description: string;
   windows: Iterable<TaskbarOverlayWindow>;
-  badgeImageForLabel: (label: string) => unknown;
+  badgeImage: unknown;
 }): void {
-  const image = options.label ? options.badgeImageForLabel(options.label) : null;
-  const description = options.label ? `${options.label} unread tasks` : "";
+  const image = options.label ? options.badgeImage : null;
+  const description = options.label ? options.description : "";
 
   for (const win of options.windows) {
     if (win.isDestroyed()) {
@@ -312,28 +321,31 @@ export function applyTaskbarOverlayToWindows(options: {
   }
 }
 
-// 角标只在任务完成/查看任务时变化，更新频率为事件级；徽章图按 label 缓存避免重复渲染。
-// electron 侧（BrowserWindow.getAllWindows / nativeImage.createFromBitmap）由 desktopWindowLifecycle 注入。
+/**
+ * 角标只在任务完成/查看任务时变化，更新频率为事件级；徽章图与 label 无关
+ * （固定渲染一颗红点，数字只进 description），因此缓存收敛为单槽：首次渲染后
+ * 无论 label 怎么变都复用同一张图，不再按 label 存多份视觉等价的 nativeImage。
+ *
+ * electron 侧（BrowserWindow.getAllWindows / nativeImage.createFromBitmap）由 desktopWindowLifecycle 注入。
+ */
 export function createWindowsTaskbarOverlayApplier(deps: {
   getAllWindows: () => Iterable<TaskbarOverlayWindow>;
-  createBadgeImage: (label: string) => unknown;
-}): (label: string | null) => void {
-  const badgeImageCache = new Map<string, unknown>();
+  createBadgeImage: () => unknown;
+}): (label: string | null, description: string) => void {
+  let badgeImage: unknown = null;
+  let badgeImageCreated = false;
 
-  return (label) => {
+  return (label, description) => {
+    if (label && !badgeImageCreated) {
+      badgeImage = deps.createBadgeImage();
+      badgeImageCreated = true;
+    }
+
     applyTaskbarOverlayToWindows({
       label,
+      description,
       windows: deps.getAllWindows(),
-      badgeImageForLabel: (cachedLabel) => {
-        const cachedImage = badgeImageCache.get(cachedLabel);
-        if (cachedImage) {
-          return cachedImage;
-        }
-
-        const image = deps.createBadgeImage(cachedLabel);
-        badgeImageCache.set(cachedLabel, image);
-        return image;
-      },
+      badgeImage,
     });
   };
 }

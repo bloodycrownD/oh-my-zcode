@@ -23,7 +23,9 @@ let trayLogger: { warn: (...args: unknown[]) => void } | null = null;
 const TRAY_LOGICAL_SIZE = 16;
 
 let trayBaseImage: NativeImage | null = null;
-const trayBadgeImageCache = new Map<string, NativeImage>();
+// 单槽缓存：红点图形与 label 无关（数量只进无障碍/Tooltip 文案），
+// 之前按 label 存 10 张视觉等价的 nativeImage，纯属重复渲染。
+let trayBadgeImage: NativeImage | null = null;
 
 function resolveDesktopTrayIconPath() {
   return app.isPackaged
@@ -129,11 +131,7 @@ function loadTrayBaseImage(): NativeImage | null {
   return trayBaseImage.isEmpty() ? null : trayBaseImage;
 }
 
-function composeTrayBadgeRepresentation(
-  label: string,
-  baseImage: NativeImage,
-  scale: 1 | 2,
-): Buffer | null {
+function composeTrayBadgeRepresentation(baseImage: NativeImage, scale: 1 | 2): Buffer | null {
   const size = TRAY_LOGICAL_SIZE * scale;
   const resized = baseImage.resize({ width: size, height: size });
   const bitmap = resized.toBitmap();
@@ -164,12 +162,11 @@ function composeTrayBadgeRepresentation(
   return Buffer.from(canvas);
 }
 
-function composeTrayBadgeImage(label: string, baseImage: NativeImage): NativeImage | null {
-  const cached = trayBadgeImageCache.get(label);
-  if (cached) return cached;
+function composeTrayBadgeImage(baseImage: NativeImage): NativeImage | null {
+  if (trayBadgeImage) return trayBadgeImage;
 
-  const oneX = composeTrayBadgeRepresentation(label, baseImage, 1);
-  const twoX = composeTrayBadgeRepresentation(label, baseImage, 2);
+  const oneX = composeTrayBadgeRepresentation(baseImage, 1);
+  const twoX = composeTrayBadgeRepresentation(baseImage, 2);
   if (!oneX || !twoX) return null;
 
   const image = nativeImage.createEmpty();
@@ -185,7 +182,7 @@ function composeTrayBadgeImage(label: string, baseImage: NativeImage): NativeIma
     height: 32,
     buffer: twoX,
   });
-  trayBadgeImageCache.set(label, image);
+  trayBadgeImage = image;
   return image;
 }
 
@@ -210,7 +207,7 @@ export function applyDesktopTrayUnreadBadge(totalUnreadCount: number): void {
     return;
   }
 
-  const image = composeTrayBadgeImage(label, base);
+  const image = composeTrayBadgeImage(base);
   if (image) {
     desktopTray.setImage(image);
   }

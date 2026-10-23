@@ -31,6 +31,7 @@ import {
   type TaskbarOverlayWindow,
 } from "../src/main/unreadBadge.js";
 import { resolveMacOSMajorVersion } from "../src/main/desktopWindowChromeState.js";
+import { formatDesktopMenuMessage, desktopMenuMessageIds } from "../../shared/src/desktopMenu.js";
 
 const mainSrc = (name: string) => fileURLToPath(new URL(`../src/main/${name}`, import.meta.url));
 
@@ -173,30 +174,84 @@ test("T-UF4 数字徽章像素：尺寸契约 + 圆外透明 + 笔画白色", ()
   assert.deepEqual(pixelAt(pixels, TASKBAR_BADGE_IMAGE_SIZE, 0, 0), [0, 0, 0, 0]);
 });
 
-test("T-UF4 overlay 下发：跳过已销毁窗口 + 徽章图按 label 缓存", () => {
+test("T-UF4 overlay 下发：跳过已销毁窗口 + description 由 caller 注入", () => {
   const alive = createFakeWindow();
   const destroyed = createFakeWindow({ destroyed: true });
   const image = { badge: true };
 
   applyTaskbarOverlayToWindows({
     label: "3",
+    description: "3 个未读任务",
     windows: [destroyed, alive],
-    badgeImageForLabel: () => image,
+    badgeImage: image,
   });
   assert.equal(destroyed.overlays.length, 0, "已销毁窗口不得 setOverlayIcon");
-  assert.deepEqual(alive.overlays, [{ image, description: "3 unread tasks" }]);
+  assert.deepEqual(
+    alive.overlays,
+    [{ image, description: "3 个未读任务" }],
+    "描述必须原样使用 caller 已格式化的文案（不再拼英文）",
+  );
 
-  const createBadgeImageCalls: string[] = [];
+  // 清除角标：图与描述都要回到空，读屏不能播报残留数字。
+  applyTaskbarOverlayToWindows({
+    label: null,
+    description: "3 个未读任务",
+    windows: [alive],
+    badgeImage: image,
+  });
+  assert.deepEqual(alive.overlays.at(-1), { image: null, description: "" });
+});
+
+test("T-UF4+H-1 单槽缓存：同 label 只建一次，换 label 复用同一槽", () => {
+  const alive = createFakeWindow();
+  let createBadgeImageCalls = 0;
   const applier = createWindowsTaskbarOverlayApplier({
     getAllWindows: () => [alive],
-    createBadgeImage: (label) => {
-      createBadgeImageCalls.push(label);
-      return { label };
+    createBadgeImage: () => {
+      createBadgeImageCalls += 1;
+      return { badge: createBadgeImageCalls };
     },
   });
-  applier("2");
-  applier("2");
-  assert.deepEqual(createBadgeImageCalls, ["2"], "同一 label 只渲染一次徽章图");
+
+  applier("2", "2 个未读任务");
+  applier("2", "2 个未读任务");
+  assert.equal(createBadgeImageCalls, 1, "连续两次同 label 只允许构建一次徽章图");
+
+  // 单槽语义：不同 label 视觉等价（红点），换 label 不得再建新图。
+  applier("9+", "9+ 个未读任务");
+  assert.equal(createBadgeImageCalls, 1, "换 label 必须复用同一槽");
+  assert.deepEqual(
+    alive.overlays.map((entry) => entry.description),
+    ["2 个未读任务", "2 个未读任务", "9+ 个未读任务"],
+    "label 只影响描述文案，不参与图构建",
+  );
+  assert.equal(
+    new Set(alive.overlays.map((entry) => entry.image)).size,
+    1,
+    "三次下发必须是同一张图实例",
+  );
+});
+
+test("T-UF4+B-3 托盘缓存收敛为单槽（不再按 label 存多份等价图）", async () => {
+  const tray = await readFile(mainSrc("desktopTray.ts"), "utf8");
+  assert.ok(
+    !tray.includes("Map<string, NativeImage>"),
+    "托盘徽章缓存必须是单槽变量，不能是按 label 的 Map",
+  );
+  assert.ok(
+    tray.includes("let trayBadgeImage: NativeImage | null = null;"),
+    "托盘徽章必须只有一个缓存槽",
+  );
+  assert.equal(
+    /function composeTrayBadgeImage\([^)]*label/u.test(tray),
+    false,
+    "composeTrayBadgeImage 不得再收 label（图与 label 无关）",
+  );
+  assert.equal(
+    /function composeTrayBadgeRepresentation\([^)]*label/u.test(tray),
+    false,
+    "composeTrayBadgeRepresentation 不得再收 label",
+  );
 });
 
 test("T-UF4 接线形状：lifecycle 用 max + overlay + 托盘，tray/chromeState 导出在位", async () => {
@@ -206,9 +261,16 @@ test("T-UF4 接线形状：lifecycle 用 max + overlay + 托盘，tray/chromeSta
     "lifecycle 必须用 max 聚合窗口未读",
   );
   assert.ok(!lifecycle.includes("sumWindowUnreadCounts"), "sum 形态必须零残留");
-  assert.ok(lifecycle.includes("applyOverlay: applyWindowsTaskbarOverlay"));
   assert.ok(lifecycle.includes("applyDesktopTrayUnreadBadge(totalUnreadCount)"));
   assert.ok(lifecycle.includes("BrowserWindow.getAllWindows()"), "overlay 必须下发所有窗口");
+  assert.ok(
+    lifecycle.includes("applyOverlay: (label) => applyWindowsTaskbarOverlay(label, description)"),
+    "overlay 的 description 必须与 label 一起下发（caller 侧格式化）",
+  );
+  assert.ok(
+    lifecycle.includes("description: (totalUnreadCount: number) => string"),
+    "syncApplicationUnreadBadge 必须把 description 设为必填入参",
+  );
   assert.ok(
     lifecycle.includes("supportsNativeWindowsRoundedCorners("),
     "overlay 圆心布局必须按 Win11 圆角能力分代",
@@ -222,6 +284,47 @@ test("T-UF4 接线形状：lifecycle 用 max + overlay + 托盘，tray/chromeSta
   const chromeState = await readFile(mainSrc("desktopWindowChromeState.ts"), "utf8");
   assert.ok(chromeState.includes("export function supportsNativeWindowsRoundedCorners("));
   assert.ok(chromeState.includes("export function resolveMacOSMajorVersion("));
+});
+
+test("T-UF4+H-1 两个调用点都按 locale 组装 description（不允许硬编码英文）", async () => {
+  // 纯逻辑：文案本体随语言切换，{count} 占位符替换正确。
+  // 注：DesktopMenuMessageId 是 i18n key 联合（值形如 titleBar.menu.file），
+  // 因此这里用同源常量定位新键 taskbarUnreadTasks → "taskbar.unreadTasks"。
+  assert.equal(
+    formatDesktopMenuMessage("zh-CN", desktopMenuMessageIds.taskbarUnreadTasks, { count: 3 }),
+    "3 个未读任务",
+  );
+  assert.equal(
+    formatDesktopMenuMessage("en-US", desktopMenuMessageIds.taskbarUnreadTasks, { count: 3 }),
+    "3 unread tasks",
+  );
+
+  // 调用点 ①：renderer 上报未读的 IPC 路径。
+  const ipcPlatform = await readFile(mainSrc("desktopMainIpcPlatform.ts"), "utf8");
+  assert.ok(
+    ipcPlatform.includes("formatDesktopMenuMessage(") &&
+      ipcPlatform.includes("options.currentApplicationLocale(),") &&
+      ipcPlatform.includes("desktopMenuMessageIds.taskbarUnreadTasks,"),
+    "IPC 同步路径必须用注入的 currentApplicationLocale 格式化 description",
+  );
+  assert.equal(ipcPlatform.includes("unread tasks"), false, "IPC 路径不得残留硬编码英文描述");
+
+  // 调用点 ②：关窗清理后重算 max。
+  const index = await readFile(mainSrc("index.ts"), "utf8");
+  const closeStart = index.indexOf("if (windowUnreadCountMap.delete(win.id))");
+  const closeBlock = index.slice(closeStart, closeStart + 600);
+  assert.ok(
+    closeBlock.includes("formatDesktopMenuMessage(") &&
+      closeBlock.includes("currentApplicationLocale,") &&
+      closeBlock.includes("desktopMenuMessageIds.taskbarUnreadTasks,"),
+    "关窗清理路径必须同样按 locale 格式化 description",
+  );
+
+  // 两处都必须显式给值（description 是必填入参，由 typecheck 兜底）。
+  assert.ok(
+    !index.includes("syncApplicationUnreadBadge(windowUnreadCountMap);"),
+    "不得再出现省略 description 的旧调用",
+  );
 });
 
 test("T-UF4 chromeState 常量：Tahoe 版本跳跃映射 + 非 darwin 返回 null", () => {

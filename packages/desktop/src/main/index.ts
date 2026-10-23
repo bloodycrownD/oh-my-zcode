@@ -54,6 +54,7 @@ import {
   ZCODE_PRODUCT_FLAVOR,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
+  formatDesktopMenuMessage,
   resolveZCodeEndpointOrigin,
   HostMessageTypes,
 } from "@zcode/shared";
@@ -1443,7 +1444,16 @@ app.on("browser-window-created", (_, win) => {
     windowWorkspaceMap.delete(win.id);
     windowTaskRealtimeHostIdMap.delete(win.id);
     if (windowUnreadCountMap.delete(win.id)) {
-      syncApplicationUnreadBadge(windowUnreadCountMap);
+      // 关窗后重算 max 时的第二调用点：description 同样按当前 UI 语言生成，
+      // 与 SyncWindowUnreadCount 路径共用同一个 formatter 口径。
+      syncApplicationUnreadBadge(windowUnreadCountMap, {
+        description: (totalUnreadCount) =>
+          formatDesktopMenuMessage(
+            currentApplicationLocale,
+            desktopMenuMessageIds.taskbarUnreadTasks,
+            { count: totalUnreadCount },
+          ),
+      });
     }
     // Electron 进入 closed 回调时，win.webContents 可能已经被销毁。
     // 之前这里现取 win.webContents.id，会在关窗收尾阶段抛出 "Object has been destroyed"。

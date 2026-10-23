@@ -43,6 +43,11 @@ export const desktopMenuMessageIds = {
   trayTooltip: "tray.tooltip",
   trayOpenZCode: "tray.menu.openZCode",
   trayQuit: "tray.menu.quit",
+  /**
+   * Windows 任务栏 overlay 的无障碍描述（读屏播报 + 悬停 tooltip）。
+   * 必须走 locale 文案：这里曾硬编码英文 "N unread tasks"，zh-CN 用户会看到英文。
+   */
+  taskbarUnreadTasks: "taskbar.unreadTasks",
 } as const;
 
 export type DesktopMenuMessageId =
@@ -94,6 +99,7 @@ export const desktopMenuMessages: Record<Locale, DesktopMenuLocaleMessages> = {
     "tray.tooltip": "omz",
     "tray.menu.openZCode": "打开 omz",
     "tray.menu.quit": "退出",
+    "taskbar.unreadTasks": "{count} 个未读任务",
   },
   "en-US": {
     "titleBar.menu.file": "File",
@@ -138,6 +144,7 @@ export const desktopMenuMessages: Record<Locale, DesktopMenuLocaleMessages> = {
     "tray.tooltip": "omz",
     "tray.menu.openZCode": "Open omz",
     "tray.menu.quit": "Quit",
+    "taskbar.unreadTasks": "{count} unread tasks",
   },
 };
 
