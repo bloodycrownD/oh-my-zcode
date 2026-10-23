@@ -264,6 +264,21 @@ body {
   --color-idle-task-surface: var(--color-violet-50);
   --color-destructive: var(--color-red-600);
   --color-destructive-foreground: var(--color-foreground-inverse);
+  /* 远端连接域 token（upstream-v316-fullsync P7 Remote* 回填批，取值沿上游 light 段）。 */
+  --color-progress-surface: var(--color-blue-50);
+  --color-progress-surface-foreground: var(--color-blue-700);
+  --color-remote-foreground-muted: #595959;
+  --color-destructive-surface: color-mix(in srgb, var(--color-destructive) 10%, transparent);
+  --color-destructive-surface-foreground: var(--color-red-800);
+  --color-remote-ssh-surface: var(--color-sky-50);
+  --color-remote-ssh-foreground: var(--color-sky-700);
+  --color-remote-ssh-border: var(--color-sky-200);
+  --color-remote-wsl-surface: var(--color-green-50);
+  --color-remote-wsl-foreground: var(--color-green-700);
+  --color-remote-wsl-border: var(--color-green-200);
+  --color-remote-docker-surface: var(--color-violet-50);
+  --color-remote-docker-foreground: var(--color-violet-700);
+  --color-remote-docker-border: var(--color-violet-200);
   --color-warning: var(--color-yellow-600);
   --color-feedback-privacy-hint: var(--color-yellow-600);
   --color-warning-foreground: var(--color-foreground-inverse);
@@ -417,6 +432,21 @@ body {
   --color-idle-task-surface: color-mix(in oklab, var(--color-violet-950) 50%, transparent);
   --color-destructive: var(--color-red-500);
   --color-destructive-foreground: var(--color-foreground-inverse);
+  /* 远端连接域 token（dark 段，取值沿上游 .dark）。 */
+  --color-progress-surface: var(--color-blue-950);
+  --color-progress-surface-foreground: var(--color-blue-300);
+  --color-remote-foreground-muted: #b3b3b3;
+  --color-destructive-surface: color-mix(in srgb, var(--color-destructive) 16%, transparent);
+  --color-destructive-surface-foreground: var(--color-red-300);
+  --color-remote-ssh-surface: color-mix(in oklab, var(--color-sky-500) 18%, transparent);
+  --color-remote-ssh-foreground: var(--color-sky-300);
+  --color-remote-ssh-border: var(--color-sky-700);
+  --color-remote-wsl-surface: color-mix(in oklab, var(--color-green-500) 18%, transparent);
+  --color-remote-wsl-foreground: var(--color-green-300);
+  --color-remote-wsl-border: var(--color-green-700);
+  --color-remote-docker-surface: color-mix(in oklab, var(--color-violet-500) 18%, transparent);
+  --color-remote-docker-foreground: var(--color-violet-300);
+  --color-remote-docker-border: var(--color-violet-700);
   --color-warning: var(--color-yellow-500);
   --color-feedback-privacy-hint: var(--color-yellow-300);
   --color-warning-foreground: var(--color-foreground-inverse);
@@ -562,6 +592,21 @@ body {
   --color-idle-task-surface: #f5f3ff;
   --color-destructive: #e03131;
   --color-destructive-foreground: #ffffff;
+  /* 远端连接域 token（高对比 light 段，取值沿上游）。 */
+  --color-progress-surface: var(--color-blue-50);
+  --color-progress-surface-foreground: var(--color-blue-700);
+  --color-remote-foreground-muted: #595959;
+  --color-destructive-surface: color-mix(in srgb, var(--color-destructive) 10%, transparent);
+  --color-destructive-surface-foreground: #b42020;
+  --color-remote-ssh-surface: #ebf4ff;
+  --color-remote-ssh-foreground: #0867ce;
+  --color-remote-ssh-border: #bad9ff;
+  --color-remote-wsl-surface: #eaf7ee;
+  --color-remote-wsl-foreground: #166b32;
+  --color-remote-wsl-border: #b7e0c2;
+  --color-remote-docker-surface: #f2efff;
+  --color-remote-docker-foreground: #6047b4;
+  --color-remote-docker-border: #d4caff;
   --color-warning: #e07b00;
   --color-feedback-privacy-hint: var(--color-yellow-600);
   --color-warning-foreground: #ffffff;
@@ -708,6 +753,21 @@ body {
   --color-destructive: #ff5c5c;
   /* Zai Dark 曾把 destructive 前景设为黑色，与红色危险按钮的固定白字设计冲突。 */
   --color-destructive-foreground: #ffffff;
+  /* 远端连接域 token（高对比 dark 段，取值沿上游）。 */
+  --color-progress-surface: rgba(70, 130, 240, 0.16);
+  --color-progress-surface-foreground: var(--color-blue-300);
+  --color-remote-foreground-muted: #b3b3b3;
+  --color-destructive-surface: color-mix(in srgb, var(--color-destructive) 16%, transparent);
+  --color-destructive-surface-foreground: #ff8585;
+  --color-remote-ssh-surface: rgba(64, 153, 255, 0.16);
+  --color-remote-ssh-foreground: #8fc0ff;
+  --color-remote-ssh-border: rgba(64, 153, 255, 0.42);
+  --color-remote-wsl-surface: rgba(70, 191, 114, 0.16);
+  --color-remote-wsl-foreground: #87d9a4;
+  --color-remote-wsl-border: rgba(70, 191, 114, 0.42);
+  --color-remote-docker-surface: rgba(159, 132, 255, 0.16);
+  --color-remote-docker-foreground: #bfaaff;
+  --color-remote-docker-border: rgba(159, 132, 255, 0.42);
   --color-warning: #ff8a30;
   --color-feedback-privacy-hint: var(--color-yellow-300);
   --color-warning-foreground: #000000;

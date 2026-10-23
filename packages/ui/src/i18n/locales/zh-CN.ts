@@ -1,5 +1,21 @@
 /** 中文翻译 */
 const zhCN: Record<string, string> = {
+  "remote.conversation.draft": "未发送的草稿",
+  "remote.conversation.placeholder": "设备未连接，连接后继续此会话",
+  "remote.conversation.reconnect": "重新连接",
+  "remote.conversation.tasksContinue": "已经在远端运行的任务会继续运行。",
+  "remote.conversation.unavailable": "连接恢复后可以继续操作。",
+  "remote.phase.channel": "连接设备",
+  "remote.phase.deploy": "安装 ZCode Server",
+  "remote.phase.handshake": "启动并检查兼容性",
+  "remote.phase.identify": "识别设备",
+  "remote.progress.copied": "已复制",
+  "remote.progress.copyError": "复制错误详情",
+  "remote.progress.elapsedMinutesSeconds": "已用 {minutes} 分 {seconds} 秒",
+  "remote.progress.elapsedSeconds": "已用 {seconds} 秒",
+  "remote.progress.step": "第 {current}/{total} 步",
+  "settings.source.connectionAddress": "地址",
+  "settings.source.editConnectionTitle": "编辑连接",
   "startPlan.recommendation.subagentDescription":
     "你的体验套餐中，{model} 仍有可用额度，是否将此子智能体的模型切换到体验套餐？",
   "startPlan.recommendation.preferenceSaveFailed": "未能保存“不再提示”，本次仍按你的选择继续。",

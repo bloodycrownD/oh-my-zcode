@@ -189,6 +189,8 @@ export const TID_SSH_CANCEL_BUTTON = "ssh-cancel-button";
 // Sidebar
 /** 侧边栏容器 */
 export const TID_SIDEBAR = "sidebar";
+/** 项目树「新建项目」触发按钮（上游 virtual-project-add 同形状；P7 Remote* 回填批引入） */
+export const TID_VIRTUAL_PROJECT_ADD = "virtual-project-add";
 /** 侧边栏打开工作区按钮 */
 export const TID_WORKSPACE_OPEN_BUTTON = "workspace-open-button";
 /** 侧边栏工作区列表 */

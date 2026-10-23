@@ -1,5 +1,21 @@
 /** English translations */
 const enUS: Record<string, string> = {
+  "remote.conversation.draft": "Unsent draft",
+  "remote.conversation.placeholder": "Device disconnected. Reconnect to continue this conversation.",
+  "remote.conversation.reconnect": "Reconnect",
+  "remote.conversation.tasksContinue": "Tasks already running on the device will continue.",
+  "remote.conversation.unavailable": "Reconnect to continue working.",
+  "remote.phase.channel": "Connect to device",
+  "remote.phase.deploy": "Install ZCode Server",
+  "remote.phase.handshake": "Start and check compatibility",
+  "remote.phase.identify": "Identify device",
+  "remote.progress.copied": "Copied",
+  "remote.progress.copyError": "Copy error details",
+  "remote.progress.elapsedMinutesSeconds": "{minutes}m {seconds}s elapsed",
+  "remote.progress.elapsedSeconds": "{seconds}s elapsed",
+  "remote.progress.step": "Step {current}/{total}",
+  "settings.source.connectionAddress": "Address",
+  "settings.source.editConnectionTitle": "Edit connection",
   "startPlan.recommendation.subagentDescription":
     "Your Start Plan has quota available for {model}. Switch this subagent’s model to the Start Plan?",
   "startPlan.recommendation.preferenceSaveFailed":
