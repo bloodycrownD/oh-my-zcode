@@ -24,7 +24,8 @@ export function NodeReplImageGrid({
       images.map((image, index) => ({
         alt: `${resultImageLabel} ${index + 1}`,
         filename: `result-image-${index + 1}`,
-        src: `data:${image.mimeType};base64,${image.base64}`,
+        // 图源优先用 display 下发的 src（大图走资源链接，不进 base64 体积），回退到内嵌 base64。
+        src: image.src ?? `data:${image.mimeType};base64,${image.base64}`,
       })),
     [images, resultImageLabel],
   );

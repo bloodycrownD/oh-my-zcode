@@ -1,10 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
-import type { FileMediaPreview } from "@zcode/shared";
 import { CodeBlock } from "@/components/ai-elements/code-block.js";
 import { MessageResponse, type MessageFileLinkTarget } from "@/components/ai-elements/message.js";
 import { ToolInput, ToolOutput } from "@/components/ai-elements/tool.js";
 import { useServices } from "@/hooks/useServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { logger } from "@/logger.js";
 import type {
   CodeViewerSource,
   ImageCodeViewerSource,
@@ -135,26 +135,55 @@ function InlineCodeContent({
 function InlineImageContent({ preview }: { preview: ImageCodeViewerSource }) {
   const { fileService } = useServices();
   const { intl } = useZCodeIntl();
-  const [imagePreview, setImagePreview] = useState<FileMediaPreview | null>(null);
+  const [result, setResult] = useState<{
+    path: string;
+    src?: string;
+    failed?: boolean;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    void fileService.readMediaPreview({ path: preview.path }).then((mediaPreview) => {
-      if (!cancelled) {
-        setImagePreview(mediaPreview);
+    // 路径变更后立刻清态：旧图既不能继续显示，旧失败态也不能带到新文件上。
+    setResult(null);
+    // 图片读取失败曾留下永久 loading 和未处理的 rejection；终态必须收口。
+    void (async () => {
+      try {
+        const mediaPreview = await fileService.readMediaPreview({ path: preview.path });
+        if (!cancelled) {
+          setResult({ path: preview.path, src: mediaPreview?.dataBase64 });
+        }
+      } catch (error) {
+        if (cancelled) {
+          return;
+        }
+        logger.warn("[ToolCallBody] 内嵌图片读取失败", {
+          path: preview.path,
+          error: String(error),
+        });
+        setResult({ path: preview.path, failed: true });
       }
-    });
+    })();
 
     return () => {
       cancelled = true;
     };
   }, [fileService, preview.path]);
 
-  if (!imagePreview) {
-    return <p>{intl.formatMessage({ id: "chat.toolCall.loading" })}</p>;
+  // effect 清理生效前也不能显示旧路径的读取结果。
+  const current = result?.path === preview.path ? result : null;
+  if (!current?.src) {
+    return (
+      <p>
+        {intl.formatMessage({
+          // omz 口径：fileService 恒可用，没有上游 resourceUrl / 可选 reader 的能力面，
+          // 因此 previewUnavailable 分支不可达（已登记），只保留 previewFailed 主路径。
+          id: current?.failed ? "chat.toolCall.previewFailed" : "chat.toolCall.loading",
+        })}
+      </p>
+    );
   }
 
-  return <img src={imagePreview.dataBase64} alt={preview.title} />;
+  return <img src={current.src} alt={preview.title} />;
 }
 
 function InlinePlanResult({
