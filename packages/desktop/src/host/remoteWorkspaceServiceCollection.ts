@@ -31,6 +31,8 @@ import {
   ISettingsSyncService,
   IPromptAttachmentTransferService,
   ISourceServerWorkspaceService,
+  IProjectService,
+  IRemoteProjectService,
   type IServiceAccessor,
 } from "@zcode/services";
 import {
@@ -46,8 +48,12 @@ import {
   createServiceLogger,
   createSubagentsService,
   createMemoryService,
+  createLegacySingleRootProjectService,
+  createRemoteProjectService,
 } from "@zcode/services/node";
 import {
+  buildServerRemoteWorkspaceIdentity,
+  remoteHostIdFromWorkspaceIdentity,
   DEFAULT_ZCODE_MODEL_CONTEXT_BUDGET_STRATEGY,
   type ZCodeSessionRuntimePreferencesResult,
 } from "@zcode/shared";
@@ -59,9 +65,72 @@ import {
 
 const runtimePreferencesLogger = createServiceLogger("remote-runtime-preferences");
 
+/**
+ * Server 远端 workspace 的项目服务解析（照搬上游 remoteWorkspaceServiceCollection.ts:122-174，
+ * backlog-sweep Step 2）：握手声明 virtualProjects 才转发远端权威项目通道；旧 Server 缺该
+ * 能力时退回 legacy 单 root 只读投影（omz daemon 当前未下发该能力，真实连接恒走 legacy）。
+ */
+export function resolveServerProjectService(params: {
+  connectionServices: IServiceAccessor;
+  serverId: string;
+  virtualProjects?: boolean;
+  sourceServices?: ServiceCollection;
+}): IProjectService {
+  if (params.virtualProjects) {
+    if (!params.connectionServices.projectService)
+      throw new Error("Remote virtual-project RPC registration incomplete");
+    return params.connectionServices.projectService;
+  }
+  const hostId = remoteHostIdFromWorkspaceIdentity(
+    buildServerRemoteWorkspaceIdentity({ serverId: params.serverId, workspacePath: "/" }),
+  )!;
+  return createLegacySingleRootProjectService({
+    hostId,
+    directories: {
+      info: () => params.connectionServices.systemService.info(),
+      read: (input) => params.connectionServices.fileService.readdir(input),
+    },
+    readSettings: () => params.connectionServices.settingService.get(),
+    readKnownWorkspaces: async () => {
+      const directory = await params.sourceServices
+        ?.getOptional(IRemoteProjectService)
+        ?.readDirectory();
+      return (directory?.entries ?? [])
+        .filter((entry) => entry.hostId === hostId)
+        .flatMap((entry) =>
+          entry.roots.length
+            ? entry.roots.map((root) => ({ workspacePath: root.rootPath }))
+            : entry.legacyWorkspace
+              ? [
+                  {
+                    workspacePath: entry.legacyWorkspace.workspacePath,
+                    workspacePurpose: entry.legacyWorkspace.workspacePurpose,
+                  },
+                ]
+              : [],
+        );
+    },
+    readTasks: ({ workspacePath, kind }) => {
+      const tasks = params.connectionServices.zcodeTaskService;
+      const scope = { workspacePath };
+      return kind === "pinned"
+        ? tasks.listPinnedTasks(scope)
+        : kind === "archived"
+          ? tasks.listArchivedTasks(scope)
+          : tasks.listTasks(scope);
+    },
+    ensureConversation: async () =>
+      (await params.connectionServices.fileService.ensureConversationWorkspace()).path,
+  });
+}
+
 export function createRemoteWorkspaceServiceCollection(params: {
   connectionServices: IServiceAccessor;
   sourceServices?: ServiceCollection;
+  /** Source Server 稳定 id（daemon 分支）；旧 deployServer 链无该字段。 */
+  serverId?: string;
+  /** 握手声明的 virtualProjects 能力；缺席时项目通道退回 legacy 只读投影。 */
+  virtualProjects?: boolean;
   parentPort: Parameters<typeof createBroadcastService>[0];
   createReportingRemoteZCodeTaskService: <T extends object>(service: T) => T;
   createRemotePromptAttachmentTaskService: <T extends object>(service: T) => T;
@@ -264,6 +333,32 @@ export function createRemoteWorkspaceServiceCollection(params: {
   const sourceServerWorkspaceService = params.connectionServices.sourceServerWorkspaceService;
   if (sourceServerWorkspaceService) {
     services.register(ISourceServerWorkspaceService, sourceServerWorkspaceService);
+  }
+  // 项目通道两分支（上游 :249-271）：virtualProjects 转发远端权威项目/入口服务；
+  // 旧 Server 只提供单 root 只读投影 + 恒拒绝写入的 replica 入口服务。
+  if (params.virtualProjects) {
+    if (
+      !params.connectionServices.projectService ||
+      !params.connectionServices.remoteProjectService
+    )
+      throw new Error("Remote virtual-project RPC registration incomplete");
+    services.register(IProjectService, params.connectionServices.projectService);
+    services.register(IRemoteProjectService, params.connectionServices.remoteProjectService);
+  } else if (params.serverId) {
+    services.register(
+      IProjectService,
+      resolveServerProjectService({ ...params, serverId: params.serverId }),
+    );
+    services.register(
+      IRemoteProjectService,
+      createRemoteProjectService({
+        // 远端 workspace Host 不是入口持久化 owner；写面显式拒绝（上游同形态）。
+        controller: false,
+        database: async () => {
+          throw new Error("remote-project.controller-only");
+        },
+      }),
+    );
   }
   registerHostApiNetworkTransportForDispose(services, hostApiNetworkTransport);
   registerRemoteProviderProvisioningExecutor(services, remoteProviderProvisioningService);

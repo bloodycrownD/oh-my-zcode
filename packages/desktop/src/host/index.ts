@@ -26,10 +26,12 @@ import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactM
 import {
   ServiceCollection,
   IBotsService,
+  IBroadcastService,
   ICredentialService,
   IFileService,
   IMediaPreviewService,
   IModelSelectionService,
+  IProjectService,
   IRemoteProjectService,
   ISettingService,
   IWindowControllerService,
@@ -38,17 +40,20 @@ import {
   IZCodeSessionService,
   ICuaPipSessionService,
   createZCodeAgentConnectionScope,
+  type RemoteProjectHost,
   type ZCodeAgentV4ClientMode,
 } from "@zcode/services";
-import { createDirectoryRemoteProjectService } from "./remoteProjectDirectoryService.js";
 import {
+  bindRemoteProjectIdentities,
   createLocalServices,
+  createRemoteProjectConnectionAdmission,
   disposeServiceResources,
   disposeServiceResourcesAndWait,
   AutomationRepo,
   createServiceLogger,
   createHostApiNetworkTransport,
   createSettingServiceWithMigrations,
+  remoteProjectHostIdForProfile,
   type HostApiNetworkTransport,
 } from "@zcode/services/node";
 import { createHostResourceUsageResponder } from "./hostResourceUsage.js";
@@ -61,7 +66,11 @@ import {
   formatZodError,
   buildRemoteWorkspaceIdentity,
   buildRemoteEnvironmentKey,
+  buildRemoteHostWorkspaceIdentity,
+  buildServerRemoteWorkspaceIdentity,
   isRemoteWorkspaceIdentity,
+  parseRemoteWorkspaceIdentity,
+  remoteHostIdFromWorkspaceIdentity,
   resolveWorkspaceKey,
   formatModelPickerValue,
   type ZCodePromptAttachment,
@@ -102,7 +111,10 @@ import {
 } from "./remoteMediaPreviewProxy.js";
 import { watchCronRunBotDelivery } from "./cronBotDelivery.js";
 import { createHostRemoteWorkspaceProxyState } from "./hostRemoteWorkspaceProxyState.js";
-import { createRemoteWorkspaceServiceCollection } from "./remoteWorkspaceServiceCollection.js";
+import {
+  createRemoteWorkspaceServiceCollection,
+  resolveServerProjectService,
+} from "./remoteWorkspaceServiceCollection.js";
 import { getRemoteProviderProvisioningExecutor } from "./remoteProviderProvisioningService.js";
 import { createRemotePromptAttachmentTransferService } from "./promptAttachmentTransferService.js";
 import { shouldReportHostConsoleError, stringifyHostLogArg } from "./hostLog.js";
@@ -1252,20 +1264,173 @@ async function disposeHostRemoteConnection(connection: HostRemoteConnection): Pr
   await connection.disposeAndWait({ timeoutMs: 5_000 });
 }
 
+/** 项目/入口变更广播（上游 host/index.ts:1758-1763）：Source 广播→本机 state:projects。 */
+function notifyProjectChange(): void {
+  void activeServices
+    ?.get(IBroadcastService)
+    .send({ channel: "state:projects", payload: {} })
+    .catch((error) => logger.warn("failed to notify project change", error));
+}
+
+/** hosts 表唯一写入者；Manager 单例长于服务集合换代，故每次 admission 惰性取用。 */
+function requireRemoteProjectService(): IRemoteProjectService {
+  if (!activeServices) throw new Error("Local Host services are not initialized.");
+  return activeServices.get(IRemoteProjectService);
+}
+
 let sourceServerConnectionManager: SourceServerConnectionManager | null = null;
 function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
   if (sourceServerConnectionManager) return sourceServerConnectionManager;
-  // 薄 owner 层实例化（Step 17 裁量 + P7 续批增强）：Directory 窄接口注入（recordHandshake
-  // 握手落盘 + identityChanged 判定），admission repo 面（上游 admitConnection/commitMembership）
-  // 仍挂账——omz 无 membership 服务面，intent 语义随 directory-record 注释登记。
-  // connectServer 走一期 duplex 隧道形态。
+  // 薄 owner 层实例化（Step 17 裁量 + P7 续批 + backlog-sweep Step 2 成员登记链）：
+  // Directory 窄接口注入（recordHandshake 握手落盘 + identityChanged 判定）；
+  // admitConnection 交给 remote-projects 服务（连接管理器只管 admission/commit 时序）；
+  // onProjectChange 只转发变更事实，迟到的 Source 广播由 Manager 按 ownership 过滤。
   sourceServerConnectionManager = new SourceServerConnectionManager({
     logWarn: (message, error) => logger.warn(message, error),
     directory: {
       recordHandshake: (...args) => ensureSourceServerDirectory().recordHandshake(...args),
     },
+    admitConnection: (input) =>
+      createRemoteProjectConnectionAdmission(requireRemoteProjectService())(input),
+    onProjectChange: notifyProjectChange,
   });
   return sourceServerConnectionManager;
+}
+
+/**
+ * 远端项目 Host 重连（Step 2 directory 版；P9 切上游 management 版时整体替换）：
+ * 只重连已登记成员——Profile 由 Directory 持有，凭据经 resolveSilentConnectionTarget
+ * 复用启动重连链路，Manager 以 retain 意图复用/恢复物理连接，返回稳定 host 身份。
+ */
+async function connectRemoteProjectHost(host: RemoteProjectHost): Promise<string> {
+  if (!host.target) throw new Error("remote-project.connector-unavailable");
+  const directory = ensureSourceServerDirectory();
+  const snapshot = await directory.snapshot();
+  const profiles = snapshot.profiles.filter(
+    (profile) =>
+      profile.lifecycleState !== "retired" && remoteProjectHostIdForProfile(profile) === host.id,
+  );
+  const preferred = new Set(snapshot.servers.map((server) => server.preferredProfileId));
+  const profile = profiles.find((item) => preferred.has(item.profileId)) ?? profiles[0];
+  if (!profile) throw new Error("remote-project.profile-not-found");
+  const target = await directory.resolveSilentConnectionTarget(profile.profileId);
+  if (!target) throw new Error("remote-project.connector-unavailable");
+  const connected = await ensureSourceServerConnectionManager().connect({
+    profile: {
+      profileId: profile.profileId,
+      ...(profile.sourceServerId ? { sourceServerId: profile.sourceServerId } : {}),
+      transport: profile.transport,
+    },
+    target,
+    // retain：connectHost 只重连已登记成员，不新增成员（上游同语义）。
+    membershipIntent: "retain",
+  });
+  return remoteProjectHostIdForProfile({
+    ...profile,
+    sourceServerId: connected.sourceServerId,
+  });
+}
+
+/** 目录投影的连接态（Manager 事件唯一来源；恢复后不再显示旧持久错误）。 */
+async function readRemoteProjectConnectionStates(): Promise<
+  ReadonlyMap<
+    string,
+    Pick<
+      RemoteProjectHost,
+      "connectionStatus" | "lastConnectionError" | "lastConnectionStatus" | "upgradeTarget"
+    >
+  >
+> {
+  const result = new Map<
+    string,
+    Pick<
+      RemoteProjectHost,
+      "connectionStatus" | "lastConnectionError" | "lastConnectionStatus" | "upgradeTarget"
+    >
+  >();
+  const manager = ensureSourceServerConnectionManager();
+  const snapshot = await ensureSourceServerDirectory().snapshot();
+  const inFlight: readonly string[] = ["bootstrapping", "retrying", "updating"];
+  for (const state of manager.listStates()) {
+    const profile = snapshot.profiles.find((item) => item.profileId === state.profileId);
+    if (!profile) continue;
+    const id = remoteProjectHostIdForProfile(profile);
+    const value: NonNullable<RemoteProjectHost["connectionStatus"]> =
+      state.state === "online"
+        ? "online"
+        : inFlight.includes(state.state)
+          ? "connecting"
+          : "offline";
+    // 同一设备多条线路时 online > connecting > offline，先到的高优先态不被覆盖。
+    if (
+      result.get(id)?.connectionStatus !== "online" &&
+      (result.get(id)?.connectionStatus !== "connecting" || value === "online")
+    )
+      result.set(id, {
+        connectionStatus: value,
+        lastConnectionError: state.error,
+        lastConnectionStatus: state.state,
+        ...(state.upgradeTarget ? { upgradeTarget: state.upgradeTarget } : {}),
+      });
+  }
+  return result;
+}
+
+/**
+ * 跨 Host 项目服务路由（照搬上游 host/index.ts:3864-3918）：只解析现有连接，
+ * 连接缺失一律 project.host-offline；远端树先经 Source 绑定稳定 workspace 身份再发布。
+ */
+async function resolveProjectHostService(hostId: string): Promise<IProjectService> {
+  const serverId = parseRemoteWorkspaceIdentity(
+    buildRemoteHostWorkspaceIdentity(hostId, "/"),
+  )?.sourceServerId;
+  const registered = serverId
+    ? windowRemoteConnectionRegistry.getOnlineSource(serverId)
+    : undefined;
+  if (registered && serverId)
+    return bindRemoteProjectIdentities(
+      registered.services.get(IProjectService),
+      async (workspacePath) => {
+        const workspaceIdentity = buildServerRemoteWorkspaceIdentity({ serverId, workspacePath });
+        await registered.capabilities?.bindWorkspaceIdentity?.({
+          workspacePath,
+          stableWorkspaceIdentity: workspaceIdentity,
+        });
+        return workspaceIdentity;
+      },
+    );
+  const manager = sourceServerConnectionManager;
+  const source = manager?.listStates().find(
+    (state) =>
+      state.sourceServerId &&
+      remoteHostIdFromWorkspaceIdentity(
+        buildServerRemoteWorkspaceIdentity({
+          serverId: state.sourceServerId,
+          workspacePath: "/",
+        }),
+      ) === hostId,
+  );
+  const connection =
+    manager && source?.sourceServerId
+      ? manager.getOnlineConnection(source.sourceServerId)
+      : undefined;
+  if (!connection || !source?.sourceServerId) throw new Error("project.host-offline");
+  const sourceServerId = source.sourceServerId;
+  const sourceWorkspaceService = connection.services.sourceServerWorkspaceService;
+  // 旧 deployServer 链没有身份绑定通道：拿不到稳定 workspace 身份就不发布远端树。
+  if (!sourceWorkspaceService) throw new Error("project.host-offline");
+  return bindRemoteProjectIdentities(
+    resolveServerProjectService({
+      connectionServices: connection.services,
+      serverId: sourceServerId,
+      virtualProjects: connection.serverInfo.capabilities?.virtualProjects === true,
+      sourceServices: activeServices ?? undefined,
+    }),
+    async (workspacePath) => {
+      await sourceWorkspaceService.resolveWorkspace({ workspacePath });
+      return buildServerRemoteWorkspaceIdentity({ serverId: sourceServerId, workspacePath });
+    },
+  );
 }
 
 let sourceServerDirectoryInstance: SourceServerDirectory | null = null;
@@ -1374,6 +1539,10 @@ async function connectManagedSourceServerHandle(params: {
     createRemoteWorkspaceServiceCollection({
       connectionServices: source.services,
       sourceServices: activeServices ?? undefined,
+      // 项目通道两分支的握手事实：daemon 能力声明当前未下发 virtualProjects，
+      // 故真实连接恒走 legacy 单根只读分支（spec r5 P1-5 登记）。
+      serverId: source.sourceServerId,
+      virtualProjects: source.serverInfo.capabilities?.virtualProjects === true,
       parentPort,
       // daemon 分支没有 deployServer backend：上报与附件物化 wrappers 透传服务本体，
       // 附件直传面由 Manager fileTransfer（generation 守卫）承载，随三期 identity 面补全。
@@ -1594,6 +1763,9 @@ async function createWindowRemoteConnectionHandle(params: {
   const services = createRemoteWorkspaceServiceCollection({
     connectionServices: backendConnection.services,
     sourceServices: activeServices ?? undefined,
+    // LEGACY deployServer 链没有握手 serverId（RemoteConnection 类型不含），项目通道保持
+    // 缺席=现状不变；daemon 分支才登记远端项目服务（spec Step 2 两调用点差异）。
+    virtualProjects: false,
     parentPort,
     createRemotePromptAttachmentSessionService: (service) =>
       createRemotePromptAttachmentSessionService(service, {
@@ -2710,6 +2882,14 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
                 runtimeSurface: "desktop_local_host",
               },
               serviceAuthorityMode: "desktop-local",
+              // 远端项目连接器（backlog-sweep Step 2 directory 版，不依赖 management）：
+              // connectHost 只重连已登记成员；readConnectionStates 由 Manager 事件投影。
+              remoteProjectConnection: {
+                connectHost: connectRemoteProjectHost,
+                readConnectionStates: readRemoteProjectConnectionStates,
+              },
+              // 跨 Host 项目路由：只解析现有连接，缺失时 project.host-offline。
+              resolveProjectHostService,
               zcodeAgentSpawnFallbackCwd: msg.agentSpawnFallbackCwd,
               zcodeBuiltinProviderConfigFilePath: msg.zcodeBuiltinProviderConfigFilePath,
               zcodeBuiltinProviderConfigFallbackFilePath:
@@ -2741,17 +2921,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
             return initializedServices;
           },
         });
-        // 远端项目入口目录（upstream-v316-fullsync P7 末批）：Local Host 数据面=
-        // sourceServerDirectory 投影（hosts=已握手 Source 设备+Manager 在线态；entries
-        // 恒空随 P3 持久化批）。directory/manager 均为既有单例惰性取用，注册时机先于
-        // base attachment expose（windowHostAttachmentRegistry.attach 枚举全集合暴露）。
-        services.register(
-          IRemoteProjectService,
-          createDirectoryRemoteProjectService({
-            directory: ensureSourceServerDirectory,
-            manager: ensureSourceServerConnectionManager,
-          }),
-        );
+        // 远端项目入口持久化（backlog-sweep Step 1-2）：唯一写入者=SQLite
+        // createRemoteProjectService（由 createLocalServices 注册）；P7 末批的
+        // directory 投影服务与注册已按数据所有者裁定删除，不再二次注册。
         const zcodeTaskService = services.getOptional(IZCodeTaskService);
         if (zcodeTaskService) {
           const reportingZCodeTaskService = createReportingRemoteZCodeTaskService(

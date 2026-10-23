@@ -6,6 +6,7 @@ import type {
   RemoteTarget,
   ServerRemoteInfo,
   CompatibilityManifest,
+  ConnectionProfile,
   SourceServerArtifactPolicy,
   SourceServerConnectionStateSnapshot,
 } from "@zcode/shared";
@@ -152,6 +153,16 @@ class SourceServerHandshakeClosedError extends Error {
 }
 
 export interface SourceServerConnectionManagerOptions {
+  /**
+   * 成员关系归持久化端口（照搬上游 v3.16.2 :133-137 的 admission 契约）：连接管理器只负责
+   * admission 与握手提交的时序，hosts 表的写入由注入方（remote-projects 服务）完成。
+   * omz 注入的是 `createRemoteProjectConnectionAdmission(IRemoteProjectService)`。
+   */
+  admitConnection?: (input: {
+    profile: ConnectionProfile;
+    intent: "add" | "retain";
+    confirmIdentityChange: boolean;
+  }) => Promise<(sourceServerId: string) => Promise<void>>;
   createAdapter?: (kind: "ssh" | "wsl" | "docker") => SourceServerTransportAdapter;
   connectServer?: (options: ServerRemoteDuplexConnectionOptions) => Promise<ServerRemoteConnection>;
   now?: () => number;
@@ -359,7 +370,12 @@ export class SourceServerConnectionManager {
   public async connect(
     options: ConnectSourceServerOptions,
   ): Promise<ManagedSourceServerConnection> {
-    return await this.connectForSource(options, options.profile.sourceServerId);
+    // 首连 intent 默认 add（上游 :348）：renderer/protocol 全链不携带该字段，不补默认值会
+    // 落 connectOnce 的 retain 兜底——空 hosts 库上 admission 直接抛 host-removed。
+    return await this.connectForSource(
+      { ...options, membershipIntent: options.membershipIntent ?? "add" },
+      options.profile.sourceServerId,
+    );
   }
 
   private reusedConnection(
@@ -464,6 +480,8 @@ export class SourceServerConnectionManager {
           this.connect({
             profile: candidate.profile,
             target: candidate.target,
+            // 启动静默重连只恢复已登记成员，不新增成员（上游 :455）。
+            membershipIntent: "retain",
             context: { signal: abortController.signal },
             onDiagnosticPhase: (phase) => {
               diagnosticPhase = phase;
@@ -835,9 +853,43 @@ export class SourceServerConnectionManager {
       signal?.throwIfAborted();
     };
     throwIfAborted();
+    // 成员 admission（上游 :825-844）：先登记/校验成员，再探针握手；失败只标记本线路 failed。
+    // omz 的薄 profile 不带 target/createdAt，这里按当前脱敏目标投影成上游 ConnectionProfile
+    // 形状交给端口——只消费 target 与 sourceServerId，字段不落库。
+    let commitMembership: ((sourceServerId: string) => Promise<void>) | undefined;
+    if (this.options.admitConnection) {
+      try {
+        // omz 的薄 profile 不带 target/createdAt：按当前脱敏目标补成上游 ConnectionProfile
+        // 形状。transport 已在上面校验与 target.kind 一致，故这里是安全的形状补齐。
+        const admissionProfile = {
+          ...profile,
+          target: stripRemoteTargetSecrets(target),
+          createdAt: 0,
+          lifecycleState: "active",
+        } as unknown as ConnectionProfile;
+        commitMembership = await this.options.admitConnection({
+          profile: admissionProfile,
+          intent: options.membershipIntent ?? "retain",
+          confirmIdentityChange: options.confirmIdentityChange === true,
+        });
+      } catch (error) {
+        // 线路已移除时，迟到 admission 错误不再有权重建 failed 展示行。
+        throwIfAborted();
+        this.setState(profile.profileId, {
+          state: "failed",
+          error: error instanceof Error ? error.message : String(error),
+          retryable: false,
+        });
+        throw error;
+      }
+    }
+    throwIfAborted();
     if (profile.sourceServerId) {
       const existing = this.onlineBySourceServerId.get(profile.sourceServerId);
       if (existing) {
+        await commitMembership?.(profile.sourceServerId);
+        // 复用也经过异步成员提交；这段等待可能已被用户断开，不能返回旧 socket。
+        throwIfAborted();
         if (this.onlineBySourceServerId.get(profile.sourceServerId) !== existing)
           throw new Error("Source Server connection changed during admission");
         existing.profileIds.add(profile.profileId);
@@ -1098,6 +1150,9 @@ export class SourceServerConnectionManager {
       // 关闭发生于身份对回时不能再提交成员；健康 sibling owner 可继续承接本次 admission。
       if (closedBeforePublish !== undefined && !this.onlineBySourceServerId.has(sourceServerId))
         throw new SourceServerHandshakeClosedError(closedBeforePublish);
+      // 主路径 commit（上游 :1094）：握手把 serverId 对回后收敛到稳定 host 身份，缺这段
+      // 则 saveHost 后永不 bindHost，remote:server:<id> 行永不生成。
+      await commitMembership?.(sourceServerId);
       throwIfAborted();
       options.onDiagnosticPhase?.("publish-online");
 

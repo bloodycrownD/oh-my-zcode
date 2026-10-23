@@ -111,27 +111,39 @@ test("ProjectDirectoryProvider：deviceNames 改 directory.hosts 投影", () => 
 
 test("host 注册链：Local Host services.register + client getter + accessor 缺席降级注释", () => {
   const host = read(root, "packages", "desktop", "src", "host", "index.ts");
-  assert.match(
+  // backlog-sweep Step 2：入口持久化唯一写入者切到 SQLite createRemoteProjectService，
+  // 由 createLocalServices 注册；desktop host 只注入连接器与跨 Host 路由，directory 投影服务已删除。
+  assert.doesNotMatch(
     host,
-    /services\.register\(\s*IRemoteProjectService,\s*createDirectoryRemoteProjectService/,
+    /createDirectoryRemoteProjectService/,
+    "P7 末批的 directory 投影服务必须退役（数据所有者裁定 §1）",
   );
   assert.match(
     host,
-    /directory: ensureSourceServerDirectory,\s*manager: ensureSourceServerConnectionManager,/,
-    "注册必须复用既有 Directory/Manager 单例惰性取用",
+    /remoteProjectConnection: \{\s*connectHost: connectRemoteProjectHost,\s*readConnectionStates: readRemoteProjectConnectionStates,/,
+    "Local Host 必须注入 remote-projects 连接器（connectHost/readConnectionStates）",
+  );
+  assert.match(
+    host,
+    /resolveProjectHostService,\n/,
+    "跨 Host 项目路由必须注入 createLocalServices",
+  );
+  const services = read(root, "packages", "services", "src", "node.ts");
+  assert.match(
+    services,
+    /\.register\(IRemoteProjectService, remoteProjectService\)/,
+    "SQLite 入口服务由 createLocalServices 注册（hosts/entries 唯一写入者）",
+  );
+  assert.match(
+    services,
+    /afterChange: publishProjectChange/,
+    "缺 afterChange 则 state:projects 不广播",
   );
   const access = read(root, "packages", "client", "src", "remoteServiceAccess.ts");
   assert.match(access, /readonly remoteProjectService: IRemoteProjectService;/);
   assert.match(access, /channelClient\.getChannel\(IRemoteProjectService\.channelName\),/);
-  const service = read(
-    root,
-    "packages",
-    "desktop",
-    "src",
-    "host",
-    "remoteProjectDirectoryService.ts",
-  );
-  assert.match(service, /entries 恒空/, "P3 entries 挂账拍板必须登记在实现处");
+  const remoteProjects = read(root, "packages", "services", "src", "remote-projects", "index.ts");
+  assert.match(remoteProjects, /omz 漂移/, "server 直连目标裁剪必须登记在实现处");
 });
 
 // ---------- ④ 挂账面 ----------

@@ -23,6 +23,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 ) as typeof import("node:sqlite");
 import { generateTraceId, ZCODE_AGENT_PROVIDER } from "@zcode/shared";
 import { runTasksDatabaseMigrations } from "../src/session/tasksDatabase/migrations.js";
+import { markTasksStoragePrepared } from "../src/session/tasksDatabase/prepared.js";
 import { TaskIndexRepo } from "../src/session/taskIndexRepo.js";
 import { projectStorage } from "../src/project-storage/index.js";
 import type { ProjectTaskRef } from "../src/project-storage/contract.js";
@@ -43,6 +44,10 @@ async function withTempWorkspace(
     runTasksDatabaseMigrations(db);
     // CLI 事实行必须在项目迁移之前存在：0005 的 reconcileLegacy 只为 host_id IS NULL 的
     // 存量行一次性补写 cli_* 镜像，之后的行走 admitTaskIdentity（不再生成 CLI 事实）。
+    // 生产链（Step 1-③）已把项目迁移放进 TaskIndexRepo.initialize；本叠件要复现「先有
+    // CLI 事实、再跑 0005」的升级顺序，故进程内标记 tasks 存储已准备，让 ensureReady
+    // 早退到种子之后，再由下方显式 migrate 应用项目迁移。
+    markTasksStoragePrepared(join(dir, "tasks-index.sqlite"));
     const indexRepo = new TaskIndexRepo(
       undefined,
       undefined,
@@ -59,6 +64,7 @@ async function withTempWorkspace(
       "0005_projects",
       "0006_default_workspace_tasks",
       "0007_initial_workspace_order",
+      "0008_connection_hosts",
     ]);
     await run({ dir, db, repo: projectStorage.repository(db), indexRepo });
   } finally {
