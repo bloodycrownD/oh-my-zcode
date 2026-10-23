@@ -29,11 +29,14 @@ import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
 import { initializeNewTaskDraft } from "@/v4/composer/newTaskDraft.js";
 import {
   clearV4ComposerDraft,
+  composerScopeKey,
   persistV4ComposerDraft,
   readV4ComposerDraft,
+  resolveComposerScope,
   V4_DRAFT_SCOPE_ROOT,
   type V4ComposerDraft,
 } from "@/v4/composer/composerDraftStore.js";
+import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import { resolveAppFollowupMode } from "@/v4/composer/followupModeSettings.js";
 import { logger } from "@/logger.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -126,11 +129,25 @@ export function useDraftConfigControl(params: {
   const { settings: sharedSettings } = useSettings();
   const appFollowupMode = resolveAppFollowupMode(sharedSettings);
   const scopeId = sessionId ?? V4_DRAFT_SCOPE_ROOT;
-  const scopeKey = JSON.stringify([workspaceKey, scopeId]);
+  // 分组草稿继承（upstream-v316-fullsync P7 续批）：__draft__ 态按组织归属（namespace/host/project）
+  // 分 key 读取；store 的 draftProjectId 在场时以最新组织意图为准。
+  const clientNamespace = useComposerClientNamespace();
+  const draftProjectId = useZCodeSessionStore(
+    (state) => state.workspaces[workspaceKey]?.draftProjectId,
+  );
+  const rootScope = useMemo(
+    () => resolveComposerScope(draftProjectId, workspaceIdentity, clientNamespace),
+    [draftProjectId, workspaceIdentity, clientNamespace],
+  );
+  const scopeKey = JSON.stringify([
+    workspaceKey,
+    scopeId,
+    ...(scopeId === V4_DRAFT_SCOPE_ROOT ? [composerScopeKey(rootScope)] : []),
+  ]);
   const loadedScope = useMemo(
     () => ({
       scopeKey,
-      draft: readV4ComposerDraft(workspacePath, workspaceIdentity, scopeId) ?? {
+      draft: readV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, rootScope) ?? {
         text: "",
         updatedAt: 0,
       },
@@ -193,6 +210,33 @@ export function useDraftConfigControl(params: {
   const draftConfigRef = useRef(draftConfig);
   draftConfigRef.current = draftConfig;
   const lastPersistedDraftRef = useRef<V4ComposerDraft | null>(null);
+  // 分组草稿继承（upstream-v316-fullsync P7 续批）：__draft__ 态落盘前合入 store 最新组织
+  // 意图（draftProjectId/draftTaskGroupId 在场优先），并按 rootScope 分 key。
+  const persistComposerDraft = useCallback(
+    (value: V4ComposerDraft) => {
+      const workspace = useZCodeSessionStore
+        .getState()
+        .getWorkspaceState(workspacePath, workspaceIdentity);
+      return persistV4ComposerDraft(
+        workspacePath,
+        workspaceIdentity,
+        scopeId,
+        scopeId === V4_DRAFT_SCOPE_ROOT
+          ? {
+              ...value,
+              projectId:
+                workspace.draftProjectId !== undefined ? workspace.draftProjectId : value.projectId,
+              taskGroupId:
+                workspace.draftTaskGroupId !== undefined
+                  ? workspace.draftTaskGroupId
+                  : value.taskGroupId,
+            }
+          : value,
+        rootScope,
+      );
+    },
+    [scopeId, workspacePath, workspaceIdentity, rootScope],
+  );
   useEffect(() => {
     if (
       (draft.mode || draft.initializeFromNewTask) &&
@@ -200,10 +244,10 @@ export function useDraftConfigControl(params: {
       stateRef.current.draft === draft &&
       stateRef.current.scopeKey === scopeKey
     ) {
-      persistV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, draft);
+      persistComposerDraft(draft);
       lastPersistedDraftRef.current = draft;
     }
-  }, [draft, scopeKey]);
+  }, [draft, scopeKey, persistComposerDraft]);
   const updateComposerDraft = useCallback(
     (update: (current: V4ComposerDraft) => V4ComposerDraft) => {
       // 旧 scope 的延迟编辑器回调不能写入刚切换到的会话。
@@ -225,10 +269,10 @@ export function useDraftConfigControl(params: {
         thought: selection?.options?.reasoningLevel ?? "",
       };
       setStoredState(nextState);
-      persistV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, next);
+      persistComposerDraft(next);
       lastPersistedDraftRef.current = next;
     },
-    [scopeKey, workspacePath, workspaceIdentity, scopeId],
+    [scopeKey, persistComposerDraft],
   );
   const updateDraftConfig = useCallback(
     (update: (current: Partial<SessionConfigState>) => Partial<SessionConfigState>) => {
@@ -315,9 +359,10 @@ export function useDraftConfigControl(params: {
         stateRef.current.draft,
       );
       if (!written) return;
-      clearV4ComposerDraft(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT);
+      // 目标按组织 key 清理；正式 session 的草稿在 ROOT 外不落组织态（store 内已剥）。
+      clearV4ComposerDraft(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT, rootScope);
     },
-    [scopeId, scopeKey, workspaceIdentity, workspacePath],
+    [scopeId, scopeKey, workspaceIdentity, workspacePath, rootScope],
   );
 
   // ── workspace 目录水合（见文件头说明）──

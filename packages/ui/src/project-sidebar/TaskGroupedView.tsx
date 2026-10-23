@@ -1,9 +1,11 @@
 /* oxlint-disable eslint(max-lines) -- 照搬上游 v3.16.2 整文件（480 行）收口，不拆散上游同源实现 */
 // 照搬上游 v3.16.2 project-sidebar/TaskGroupedView.tsx（upstream-v316-fullsync P4.1 分组视角批）
-// omz 化：①分组内草稿继承面剔除——omz store 无 draftTaskGroupId/draftProjectId、composer
-// 草稿无 taskGroupId 字段（P4.2 随 UI 提交链接），draftGroupId 恒 undefined：分组内草稿行
-// 不渲染、空态走 noTasks 分支；②composer client namespace 面不搬（omz useServices 无该出口）；
-// ③mobileActiveTaskKey（手机远控）不接（omz ProjectTaskListContext 无此字段，R3 三期回补）。
+// omz 化：①分组内草稿继承面（upstream-v316-fullsync P7 续批接通）——composer 正文草稿带
+// taskGroupId 字段（composerDraftStore 深度重写），查看会话时从 __draft__ 草稿读分组归属，
+// 渲染分组内草稿行；②composer client namespace 面随 P7 续批落 useServices 出口；
+// ③mobileActiveTaskKey（手机远控）不接（omz ProjectTaskListContext 无此字段，relay v2/P9 回补）。
+import { useComposerClientNamespace } from "@/hooks/useServices.js";
+import { readComposerWorkspaceScope } from "@/v4/composer/composerDraftStore.js";
 import {
   useCallback,
   useContext,
@@ -61,6 +63,11 @@ import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { resolveRemoteWorkspaceSessionIdForTarget } from "@/hooks/useResolvedRemoteWorkspaceSessionId.js";
 import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
+import {
+  clearV4ComposerDraftTaskGroup,
+  readV4ComposerDraft,
+  V4_DRAFT_SCOPE_ROOT,
+} from "@/v4/composer/composerDraftStore.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { toast } from "@/components/ui/toast.js";
 import { logger } from "@/logger.js";
@@ -102,12 +109,22 @@ export function TaskGroupedView({
     (state) => state.workspaces[workspaceKey]?.draftFocusVersion,
   );
   // 分组草稿归属（upstream-v316-fullsync P4.2）：订阅 store 未提交分组意图。
-  // omz：composer 正文草稿暂无 taskGroupId 字段，查看会话时不渲染分组内草稿行；
-  // 草稿态（activeTaskId=null）按 store 意图渲染，发送后由 SessionPane admit 收口为真实行。
+  // P7 续批接通：composer 正文草稿已带 taskGroupId（按组织 key 持久化），查看会话时
+  // （activeTaskId 在场）从 __draft__ 草稿读分组归属渲染分组内草稿行。
+  const composerClientNamespace = useComposerClientNamespace();
+  const draftScope = readComposerWorkspaceScope(
+    workspacePath,
+    workspaceIdentity,
+    composerClientNamespace,
+  );
   const currentDraftGroupId = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.draftTaskGroupId,
   );
-  const draftGroupId = activeTaskId ? undefined : currentDraftGroupId;
+  // 查看会话时仅显示尚未提交的文字草稿；首发已移除保存记录，不能复活旧的内存 placement。
+  const draftGroupId = activeTaskId
+    ? readV4ComposerDraft(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT, draftScope)
+        ?.taskGroupId
+    : currentDraftGroupId;
   const [collapsed, setCollapsed] = useState(readGroupedTaskCollapsedGroupIds);
   const changeCollapsed = useCallback<Dispatch<SetStateAction<Set<string>>>>((update) => {
     setCollapsed((current) => (typeof update === "function" ? update(current) : update));
@@ -196,7 +213,9 @@ export function TaskGroupedView({
     onCreate(groupId);
   };
   const closeDraft = () => {
-    // 关闭分组行只撤销组织意图（omz：composer 草稿无 taskGroupId 字段，仅清 store 面）。
+    // 关闭分组行只撤销组织意图：先清 composer 草稿的 taskGroupId（正文与项目保留），
+    // 再清 store 内存 placement；不能连带清空正在编辑的内容。
+    clearV4ComposerDraftTaskGroup(workspacePath, workspaceIdentity, draftScope);
     useZCodeSessionStore.getState().clearDraftTaskGroup(workspacePath, workspaceIdentity);
   };
   useEffect(() => {

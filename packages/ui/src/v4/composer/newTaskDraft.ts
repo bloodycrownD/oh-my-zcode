@@ -3,6 +3,8 @@ import { readComposerRecent, resolveDraftInitialModelSelection } from "@/lib/com
 import {
   persistV4ComposerDraft,
   readV4ComposerDraft,
+  resolveComposerScope,
+  readComposerWorkspaceScope,
   V4_DRAFT_SCOPE_ROOT,
   type V4ComposerDraft,
 } from "@/v4/composer/composerDraftStore.js";
@@ -33,10 +35,19 @@ export function seedImportedSessionDraft(result: {
   workspaceIdentity?: string;
   sessionId: string;
   reused: boolean;
+  /** omz 分享入口无 namespace 注入面；desktop 默认值与 composerScopeKey 序列化对齐。 */
+  clientNamespace?: string;
 }): void {
   const { workspacePath, workspaceIdentity, sessionId, reused } = result;
   if (reused || readV4ComposerDraft(workspacePath, workspaceIdentity, sessionId)) return;
-  const root = readV4ComposerDraft(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT);
+  // 项目草稿按组织归属分 key；未登记 scope 的旧目录回落无项目身份，与上游 readComposerWorkspaceScope 一致。
+  const scope =
+    readComposerWorkspaceScope(
+      workspacePath,
+      workspaceIdentity,
+      result.clientNamespace ?? "desktop",
+    ) ?? resolveComposerScope(null, workspaceIdentity, result.clientNamespace ?? "desktop");
+  const root = readV4ComposerDraft(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT, scope);
   // 导入已创建真实 Session，旧初始化把空 snapshot 当成确定选择，跳过了新任务规则。
   // 显式标记首次导入来源，而非按“会话没模型”猜测；Root 的明确空选择也必须保留。
   persistV4ComposerDraft(

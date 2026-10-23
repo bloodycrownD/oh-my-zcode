@@ -26,7 +26,15 @@ import {
 import { resolveWorkbenchNewTaskTarget } from "@/v4/workbenchNewTaskTarget.js";
 import type { WorkbenchNewTaskTarget } from "@/v4/workbenchNewTaskTarget.js";
 import { useWorkbenchGroupStore } from "@/v4/workbenchGroupStore.js";
-import { persistV4ComposerDraft, V4_DRAFT_SCOPE_ROOT } from "@/v4/composer/composerDraftStore.js";
+import {
+  persistV4ComposerDraft,
+  readComposerWorkspaceScope,
+  readV4ComposerDraft,
+  rememberComposerWorkspaceScope,
+  resolveComposerScope,
+  V4_DRAFT_SCOPE_ROOT,
+} from "@/v4/composer/composerDraftStore.js";
+import { useComposerClientNamespace } from "@/hooks/useServices.js";
 
 interface OpenRemoteConnectionPreference {
   preferredKind?: RemoteTarget["kind"];
@@ -134,6 +142,10 @@ export function useRootWorkspaceActions({
       }
     }
   }, [workbenchGroupClientMode]);
+
+  // 分组草稿继承（upstream-v316-fullsync P7 续批）：__draft__ 草稿按 namespace/host/project
+  // 组织 key 落盘；手机同源多桌面时 namespace 区分设备身份。
+  const composerClientNamespaceValue = useComposerClientNamespace();
 
   const startDraftInWorkspace = useCallback(
     (workspacePath: string, workspaceIdentity?: string) => {
@@ -254,6 +266,39 @@ export function useRootWorkspaceActions({
         // insert request 被首个 composer 消费后会清空；如果随后因 pane/config
         // 切换 remount，新 composer 会从空的 __draft__ 恢复并覆盖预填。先写草稿事实源，
         // 再发即时插入请求：当前 composer 立即可见，后续 remount 也恢复同一文本。
+        //
+        // 分组草稿继承（upstream-v316-fullsync P7 续批，对照上游 startDraftInWorkspace）：
+        // 项目意图显式传入优先，缺省回退 workspace scope 记忆；__draft__ 按组织 key 落盘，
+        // 让 TaskGroupedView 在查看会话时也能渲染分组内草稿行。
+        const composerClientNamespace = composerClientNamespaceValue;
+        const draftProjectId =
+          createProjectId !== undefined
+            ? createProjectId
+            : (readComposerWorkspaceScope(
+                newTaskTarget.workspacePath,
+                newTaskTarget.workspaceIdentity ?? undefined,
+                composerClientNamespace,
+              )?.projectId ?? null);
+        const draftScope = resolveComposerScope(
+          draftProjectId,
+          newTaskTarget.workspaceIdentity ?? undefined,
+          composerClientNamespace,
+        );
+        const savedRootDraft = readV4ComposerDraft(
+          newTaskTarget.workspacePath,
+          newTaskTarget.workspaceIdentity ?? undefined,
+          V4_DRAFT_SCOPE_ROOT,
+          draftScope,
+        );
+        const draftTaskGroupId =
+          createTaskGroupId !== undefined
+            ? createTaskGroupId
+            : (savedRootDraft?.taskGroupId ?? null);
+        rememberComposerWorkspaceScope(
+          newTaskTarget.workspacePath,
+          newTaskTarget.workspaceIdentity ?? undefined,
+          draftScope,
+        );
         persistV4ComposerDraft(
           newTaskTarget.workspacePath,
           newTaskTarget.workspaceIdentity ?? undefined,
@@ -261,7 +306,10 @@ export function useRootWorkspaceActions({
           {
             text: initialPrompt,
             ...(initialPromptMention ? { mention: initialPromptMention } : {}),
+            projectId: draftProjectId,
+            taskGroupId: draftTaskGroupId,
           },
+          draftScope,
         );
         useZCodeSessionStore
           .getState()
@@ -273,7 +321,7 @@ export function useRootWorkspaceActions({
           );
       }
     },
-    [addTab, intl, tabStoreApi, workbenchGroupClientMode],
+    [addTab, intl, tabStoreApi, workbenchGroupClientMode, composerClientNamespaceValue],
   );
 
   const handleSelectProject = useCallback(
