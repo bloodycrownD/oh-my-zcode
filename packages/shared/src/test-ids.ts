@@ -446,6 +446,12 @@ export const TID_MODEL_PROVIDER_TEMPLATE_PICKER = "model-provider-template-picke
 export const TID_MODEL_PROVIDER_TEMPLATE_ITEM = "model-provider-template-item";
 /** 模型供应商 Template 选择页返回当前 Provider 详情的按钮 */
 export const TID_MODEL_PROVIDER_TEMPLATE_BACK_BUTTON = "model-provider-template-back-button";
+/** 新建供应商名称弹窗（选择模板或自定义后弹出，确认名称才真正创建） */
+export const TID_MODEL_PROVIDER_NAME_DIALOG = "model-provider-name-dialog";
+/** 新建供应商名称弹窗的名称输入框 */
+export const TID_MODEL_PROVIDER_NAME_DIALOG_INPUT = "model-provider-name-dialog-input";
+/** 新建供应商名称弹窗的确认按钮 */
+export const TID_MODEL_PROVIDER_NAME_DIALOG_CONFIRM = "model-provider-name-dialog-confirm";
 /** 模型供应商左侧导航条目（动态后缀为 provider node key） */
 export const TID_MODEL_PROVIDER_NAV_ITEM = "model-provider-nav-item";
 /** 模型供应商连接方式下拉触发器 */

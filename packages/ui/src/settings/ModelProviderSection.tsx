@@ -7,7 +7,6 @@ import {
 import {
   BIGMODEL_PROVIDER_ID,
   BUILTIN_MODEL_PROVIDER_IDS,
-
   isStartPlanModelProviderId,
   type BuiltinModelProviderId,
   type ModelConnectivityResult,
@@ -15,7 +14,6 @@ import {
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
   type OAuthProviderId,
-
   resolveModelProviderFamilySpecByProviderId,
   resolveProviderFamilyDomainFromOAuthProvider,
   ZAI_PROVIDER_ID,
@@ -35,14 +33,15 @@ import {
 } from "./model-provider-section/constants.js";
 import { ModelProviderSectionDetail } from "./model-provider-section/Detail.js";
 import { ModelProviderSectionLayout } from "./model-provider-section/SectionLayout.js";
+import { ProviderCreateNameDialog } from "./model-provider-section/ProviderCreateNameDialog.js";
 import { ProviderTemplatePicker } from "./model-provider-section/ProviderTemplatePicker.js";
+import {
+  resolveCreateProviderPrefillName,
+  type ProviderTemplatePick,
+} from "./model-provider-section/createProviderNameDialog.js";
 import type { CodingPlanLoginOptions } from "./model-provider-section/codingPlanPricingCards.js";
 import { useModelProviderNavigation } from "./model-provider-section/useModelProviderNavigation.js";
-import {
-
-  createCustomProviderNodeKey,
-
-} from "./model-provider-section/utils.js";
+import { createCustomProviderNodeKey } from "./model-provider-section/utils.js";
 import {
   confirmAndDeleteModelProvider,
   refreshModelProviderSection,
@@ -283,7 +282,19 @@ export function ModelProviderSection({
   const [, setCodingPlanProductsRefreshToken] = useState(0);
   const [pendingCreatedProviderId, setPendingCreatedProviderId] = useState<string | null>(null);
   const [templatePickerOpen, setTemplatePickerOpen] = useState(false);
+  // 名称弹窗的挂载点：选择模板/自定义只产生选中意图，确认名称后才创建供应商。
+  const [createPick, setCreatePick] = useState<ProviderTemplatePick | null>(null);
   const [creatingProvider, setCreatingProvider] = useState(false);
+  const [createProviderError, setCreateProviderError] = useState<string | null>(null);
+  // 创建在途的同步闸门：弹窗的按钮态是异步更新的，双击仍可能并发两次创建。
+  const createProviderInFlightRef = useRef(false);
+  const existingProviderNames = useMemo(
+    () =>
+      modelProviders.flatMap((provider) =>
+        provider.providerName?.trim() ? [provider.providerName] : [],
+      ),
+    [modelProviders],
+  );
 
   useEffect(() => {
     if (
@@ -827,21 +838,34 @@ export function ModelProviderSection({
   );
 
   const handleCreateProvider = useCallback(
-    async (input: { templateId?: string; providerName?: string }) => {
+    async (input: { templateId?: string; providerName: string }) => {
+      const providerName = input.providerName.trim();
+      // 名称已由弹窗校验；这里再兜一次空值与并发，避免绕过弹窗的调用点建出无名供应商。
+      if (!providerName || createProviderInFlightRef.current) {
+        return;
+      }
+      createProviderInFlightRef.current = true;
       setCreatingProvider(true);
+      setCreateProviderError(null);
       try {
-        const created = await createPersonalProvider({ ...input, locale });
+        const created = await createPersonalProvider({ ...input, providerName, locale });
         setPendingCreatedProviderId(created.providerId);
         setSelectedNodeKey(createCustomProviderNodeKey(created.providerId));
         setTemplatePickerOpen(false);
+        setCreatePick(null);
       } catch (error) {
+        // 失败留在名称弹窗：复用 templateCreateFailed 文案与重试动作，避免用户重选模板。
+        logger.error("[ModelProviderSection] 创建模型供应商失败", error);
         setPendingCreatedProviderId(null);
-        throw error;
+        setCreateProviderError(
+          intl.formatMessage({ id: "settings.modelProvider.templateCreateFailed" }),
+        );
       } finally {
+        createProviderInFlightRef.current = false;
         setCreatingProvider(false);
       }
     },
-    [createPersonalProvider, locale],
+    [createPersonalProvider, intl, locale],
   );
 
   const handleReorderProviderIds = useCallback(
@@ -925,13 +949,10 @@ export function ModelProviderSection({
       {templatePickerOpen ? (
         <ProviderTemplatePicker
           templates={providerTemplates}
-          creating={creatingProvider}
           onBack={() => setTemplatePickerOpen(false)}
-          onCreateFromTemplate={(templateId) => {
-            return handleCreateProvider({ templateId });
-          }}
-          onCreateCustom={(label) => {
-            return handleCreateProvider({ providerName: label });
+          onPicked={(pick) => {
+            setCreateProviderError(null);
+            setCreatePick(pick);
           }}
         />
       ) : (
@@ -969,6 +990,32 @@ export function ModelProviderSection({
           }}
         />
       )}
+      <ProviderCreateNameDialog
+        open={createPick !== null}
+        pick={createPick}
+        prefillName={
+          createPick
+            ? resolveCreateProviderPrefillName({
+                templateId: createPick.templateId,
+                templateName: createPick.templateId ? createPick.suggestedName : undefined,
+                fallbackName: intl.formatMessage({
+                  id: "settings.modelProvider.newProviderName",
+                }),
+              })
+            : ""
+        }
+        existingNames={existingProviderNames}
+        creating={creatingProvider}
+        errorMessage={createProviderError}
+        onCancel={() => {
+          if (creatingProvider) return;
+          setCreatePick(null);
+          setCreateProviderError(null);
+        }}
+        onSubmit={(providerName) => {
+          void handleCreateProvider({ templateId: createPick?.templateId, providerName });
+        }}
+      />
     </ModelProviderSectionLayout>
   );
 }

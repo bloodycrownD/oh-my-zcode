@@ -11,28 +11,24 @@ import {
 import { Button } from "@/components/ui/button.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { logger } from "@/logger.js";
 import { ProviderLogo } from "./ProviderLogo.js";
-import { useProviderDetailFeedback } from "./ProviderDetailFeedback.js";
+import type { ProviderTemplatePick } from "./createProviderNameDialog.js";
 
-type ProviderTemplateCreate = (templateId: string) => Promise<void>;
-type CustomProviderCreate = (label: string) => Promise<void>;
-
+/**
+ * Template 选择页只负责「选项 → 选择意图」：选中后把模板 ID 与预填名交给 Section，
+ * 由名称弹窗确认名称、再走 `createPersonalProvider`。这里不再直接创建供应商，
+ * 因此也不需要创建态与失败横幅。
+ */
 export function ProviderTemplatePicker({
   templates,
   onBack,
-  onCreateFromTemplate,
-  onCreateCustom,
-  creating,
+  onPicked,
 }: {
   templates: ProviderSettingsView["providerTemplates"];
   onBack: () => void;
-  onCreateFromTemplate: ProviderTemplateCreate;
-  onCreateCustom: CustomProviderCreate;
-  creating: boolean;
+  onPicked: (pick: ProviderTemplatePick) => void;
 }) {
   const { intl, locale } = useZCodeIntl();
-  const { dismissFeedback, showFeedback } = useProviderDetailFeedback();
   const customLabel = intl.formatMessage({ id: "settings.modelProvider.newProviderName" });
   // FORK（删除 zai/bigmodel 预设面）：选择器不再提供这 4 个智谱模板入口（Z.ai / BigModel API、Coding Plan），
   // 也不再单独分组。模板来源数据（config/provider/zcode-builtin.json 的 templateRules）保持不动，
@@ -52,27 +48,6 @@ export function ProviderTemplatePicker({
       templates: visibleTemplates,
     },
   ] as const;
-  const createWithFeedback = async (create: () => Promise<void>) => {
-    const feedbackKey = "provider-template-create";
-    dismissFeedback(feedbackKey);
-    try {
-      await create();
-    } catch (error) {
-      // Template 创建失败过去只写日志，用户留在选择页却看不到任何结果。
-      // 失败继续留在当前页，并复用详情栏底部反馈横幅提供同一次创建的重试入口。
-      // 完整 Schema issues 只进入统一 UI 日志；横幅保持可读摘要，避免原始数组撑满详情区。
-      logger.error("[ProviderTemplatePicker] 创建供应商失败", error);
-      const retry = () => void createWithFeedback(create);
-      showFeedback({
-        key: feedbackKey,
-        state: "failure",
-        message: intl.formatMessage({ id: "settings.modelProvider.templateCreateFailed" }),
-        actionLabel: intl.formatMessage({ id: "settings.modelProvider.templateCreateRetry" }),
-        onAction: retry,
-        dismissible: true,
-      });
-    }
-  };
   return (
     <section className="space-y-5" data-testid={TID_MODEL_PROVIDER_TEMPLATE_PICKER}>
       <div className="flex items-center gap-3">
@@ -101,14 +76,13 @@ export function ProviderTemplatePicker({
               {group.id === "other" ? (
                 <ProviderTemplateCard
                   label={intl.formatMessage({ id: "settings.modelProvider.createCustomProvider" })}
-                  disabled={creating}
                   testId={testId(TID_MODEL_PROVIDER_TEMPLATE_ITEM, "custom")}
                   icon={
                     <span className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-hover">
                       <PlusIcon className="size-4" aria-hidden="true" />
                     </span>
                   }
-                  onClick={() => void createWithFeedback(() => onCreateCustom(customLabel))}
+                  onClick={() => onPicked({ suggestedName: customLabel })}
                 />
               ) : null}
               {group.templates.map((template) => {
@@ -117,7 +91,6 @@ export function ProviderTemplatePicker({
                   <ProviderTemplateCard
                     key={template.templateId}
                     label={label}
-                    disabled={creating}
                     testId={testId(TID_MODEL_PROVIDER_TEMPLATE_ITEM, template.templateId)}
                     icon={
                       <span className="flex size-9 shrink-0 items-center justify-center">
@@ -125,7 +98,7 @@ export function ProviderTemplatePicker({
                       </span>
                     }
                     onClick={() =>
-                      void createWithFeedback(() => onCreateFromTemplate(template.templateId))
+                      onPicked({ templateId: template.templateId, suggestedName: label })
                     }
                   />
                 );
@@ -140,13 +113,11 @@ export function ProviderTemplatePicker({
 
 function ProviderTemplateCard({
   label,
-  disabled,
   testId: cardTestId,
   icon,
   onClick,
 }: {
   label: string;
-  disabled: boolean;
   testId: string;
   icon: ReactNode;
   onClick: () => void;
@@ -156,7 +127,6 @@ function ProviderTemplateCard({
       <button
         type="button"
         data-testid={cardTestId}
-        disabled={disabled}
         onClick={onClick}
         className="flex min-h-16 min-w-0 items-center gap-3 rounded-lg border border-border bg-surface px-4 py-3 text-left transition-colors outline-none hover:border-border-hover hover:bg-hover focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/20 disabled:opacity-60"
       >
