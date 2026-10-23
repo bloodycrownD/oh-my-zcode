@@ -17,14 +17,20 @@ import {
   createWindowsTaskbarOverlayApplier,
   maxWindowUnreadCounts,
   parseWindowUnreadCount,
+  renderAntialiasedStatusDotPixels,
   renderTaskbarBadgePixels,
   renderTaskbarStatusDotPixels,
   resolveBadgeOverlayLabel,
   supportsAppUnreadBadge,
+  supportsWindowOverlayBadge,
   syncUnreadBadgeForPlatform,
   TASKBAR_BADGE_IMAGE_SIZE,
+  type AntialiasedDotOptions,
+  type BadgePixelOptions,
+  type TaskbarOverlayLayout,
   type TaskbarOverlayWindow,
 } from "../src/main/unreadBadge.js";
+import { resolveMacOSMajorVersion } from "../src/main/desktopWindowChromeState.js";
 
 const mainSrc = (name: string) => fileURLToPath(new URL(`../src/main/${name}`, import.meta.url));
 
@@ -116,21 +122,45 @@ test("T-UF4 平台分叉：macOS/Linux 写 app badge 不碰 overlay，Windows �
     applyOverlay: (label) => windowsOverlay.push(label),
   });
   assert.deepEqual(windowsOverlay, [null], "未读归零必须下发 null 移除 overlay");
+
+  // 通道归属：Windows 走 overlay，macOS/Linux 走 app badge。
+  assert.equal(supportsWindowOverlayBadge("win32"), true);
+  assert.equal(supportsWindowOverlayBadge("darwin"), false);
+  assert.equal(supportsWindowOverlayBadge("linux"), false);
 });
 
 test("T-UF4 Windows overlay：16px 抗锯齿红点，两代布局圆心不同", () => {
-  const win11 = renderTaskbarStatusDotPixels(1, "windows-11");
+  const layouts: TaskbarOverlayLayout[] = ["windows-11", "windows-10"];
+  assert.deepEqual(layouts, ["windows-11", "windows-10"]);
+
+  const win11 = renderTaskbarStatusDotPixels(1, layouts[0]);
   assert.equal(win11.length, 16 * 16 * 4);
   assert.deepEqual(pixelAt(win11, 16, 8, 8), CIRCLE_RED_BGRA, "Win11 红点在画布内居中");
   assert.deepEqual(pixelAt(win11, 16, 0, 0), [0, 0, 0, 0]);
 
-  const win10 = renderTaskbarStatusDotPixels(1, "windows-10");
+  const win10 = renderTaskbarStatusDotPixels(1, layouts[1]);
   assert.deepEqual(pixelAt(win10, 16, 11, 11), CIRCLE_RED_BGRA, "Win10 红点在画布内右下锚定");
   assert.notDeepEqual(pixelAt(win10, 16, 8, 8), CIRCLE_RED_BGRA, "Win10 与 Win11 必须是两套圆心");
 
-  const highDpi = renderTaskbarStatusDotPixels(2, "windows-11");
+  const highDpi = renderTaskbarStatusDotPixels(2, layouts[0]);
   assert.equal(highDpi.length, 32 * 32 * 4);
   assert.deepEqual(pixelAt(highDpi, 32, 16, 16), CIRCLE_RED_BGRA);
+
+  // 托盘红点走同一渲染器但几何参数独立（小尺寸圆点 + 4× 超采样边缘半透明）。
+  const dotOptions: BadgePixelOptions = { size: 16, padding: 4, dot: true, anchor: "bottom-right" };
+  const dot = renderTaskbarBadgePixels("9+", dotOptions);
+  assert.equal(dot.length, 16 * 16 * 4);
+  assert.equal(
+    dot.some((value, index) => index % 4 === 0 && value > 0),
+    true,
+    "红点必须有可见像素",
+  );
+
+  const antialiasOptions: AntialiasedDotOptions = { size: 8, centerX: 4, centerY: 4, radius: 4 };
+  const antialiased = renderAntialiasedStatusDotPixels(antialiasOptions);
+  assert.equal(antialiased.length, 8 * 8 * 4);
+  assert.deepEqual(pixelAt(antialiased, 8, 4, 4), CIRCLE_RED_BGRA);
+  assert.deepEqual(pixelAt(antialiased, 8, 0, 0), [0, 0, 0, 0]);
 });
 
 test("T-UF4 数字徽章像素：尺寸契约 + 圆外透明 + 笔画白色", () => {
@@ -192,4 +222,13 @@ test("T-UF4 接线形状：lifecycle 用 max + overlay + 托盘，tray/chromeSta
   const chromeState = await readFile(mainSrc("desktopWindowChromeState.ts"), "utf8");
   assert.ok(chromeState.includes("export function supportsNativeWindowsRoundedCorners("));
   assert.ok(chromeState.includes("export function resolveMacOSMajorVersion("));
+});
+
+test("T-UF4 chromeState 常量：Tahoe 版本跳跃映射 + 非 darwin 返回 null", () => {
+  // Darwin 24 = macOS 15；Darwin 25 起产品版本从 15 跳到 26，不能再套 -9。
+  assert.equal(resolveMacOSMajorVersion("darwin", "24.6.0"), 15);
+  assert.equal(resolveMacOSMajorVersion("darwin", "23.5.0"), 14);
+  assert.equal(resolveMacOSMajorVersion("darwin", "25.0.0"), 26);
+  assert.equal(resolveMacOSMajorVersion("win32", "10.0.26200"), null);
+  assert.equal(resolveMacOSMajorVersion("darwin", "not-a-version"), null);
 });
