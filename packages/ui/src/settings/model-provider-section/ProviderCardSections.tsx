@@ -20,6 +20,7 @@ import {
   TID_MODEL_PROVIDER_MODEL_INPUT,
   TID_MODEL_PROVIDER_NAME_EDIT_BUTTON,
   TID_MODEL_PROVIDER_NAME_INPUT,
+  TID_MODEL_PROVIDER_NAME_TRIGGER,
   testId,
 } from "@zcode/shared";
 import { InfoIcon, LockKeyholeIcon, Plus, Pencil, Trash2, MoreHorizontal } from "lucide-react";
@@ -117,6 +118,18 @@ export function ProviderCardHeader({
             onBlur={onNameBlur}
             onKeyDown={onNameKeyDown}
           />
+        ) : nameEditable ? (
+          // 名称本身即重命名入口：单击进入命名态（Enter/失焦提交、Esc 取消沿用既有 IME 机器）。
+          // 用单个 onClick 而不是双击或切换语义，重复点击由父层 handleStartEditName 幂等拦下。
+          <button
+            type="button"
+            data-testid={TID_MODEL_PROVIDER_NAME_TRIGGER}
+            title={providerName}
+            onClick={onStartEditName}
+            className="min-w-0 truncate rounded-sm text-left text-ui-lg font-semibold text-foreground underline-offset-2 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/20"
+          >
+            {providerName}
+          </button>
         ) : (
           <>
             <div className="min-w-0 truncate text-ui-lg font-semibold text-foreground">

@@ -563,6 +563,11 @@ export function InlineEditableProviderCard({
   );
 
   const handleStartEditName = useCallback(() => {
+    // 名称本身就是重命名入口（单击进入命名态）。双击的第二下会再次派发 click，
+    // 此时已经处于命名态：不重置取词状态、不重排焦点，保持输入法候选与光标位置。
+    if (nameEditProviderIdRef.current === provider.providerId) {
+      return;
+    }
     nameEditProviderIdRef.current = provider.providerId;
     nameCompositionActiveRef.current = false;
     setEditingName(true);

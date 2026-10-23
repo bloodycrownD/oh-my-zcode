@@ -467,6 +467,8 @@ export const TID_MODEL_PROVIDER_CONNECTION_MODE_ITEM = "model-provider-connectio
 export const TID_MODEL_PROVIDER_API_KEY_INPUT = "model-provider-api-key-input";
 /** 模型供应商名称编辑按钮 */
 export const TID_MODEL_PROVIDER_NAME_EDIT_BUTTON = "model-provider-name-edit-button";
+/** 模型供应商详情名称触发按钮（点击进入命名态） */
+export const TID_MODEL_PROVIDER_NAME_TRIGGER = "model-provider-name-trigger";
 /** 模型供应商名称编辑输入框 */
 export const TID_MODEL_PROVIDER_NAME_INPUT = "model-provider-name-input";
 /** 模型供应商 Base URL 输入框 */
