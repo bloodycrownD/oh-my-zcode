@@ -32,6 +32,14 @@ interface QueueRowProps {
   onGuideItem?: (queueItemId: string) => void;
   /** 该行 setQueueItemDelivery ACK 在途；按钮自禁并压暗整行。 */
   guidePending: boolean;
+  /**
+   * 面板解析好的可见正文（`resolveQueuePreview` 已剥离四类上下文尾块）。
+   * composer/A-1：不能直接把 `item.text` 给渲染器，否则预览里会露出
+   * `# Code comments:` 等内部块。缺省时回落到原文，兼容未接线的宿主。
+   */
+  previewText?: string;
+  /** 同一次解析出的上下文条数：纯上下文队列项预览正文为空，用条数维持可读。 */
+  contextCount?: number;
 }
 
 /**
@@ -49,6 +57,8 @@ const QueueRow = memo(function QueueRow({
   onGuideItem,
   editPending,
   guidePending,
+  previewText,
+  contextCount = 0,
 }: QueueRowProps) {
   const dispatchLocked = item.dispatch.state !== "queued";
   const rowLocked = dispatchLocked || editPending || guidePending;
@@ -119,14 +129,25 @@ const QueueRow = memo(function QueueRow({
       </ControlHintTooltip>
       <span
         className="flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground"
-        title={item.text}
+        title={previewText ?? item.text}
       >
         {/*
           队列预览与用户消息气泡共用同一渲染器：队列项落库后就是一条 user row，
           两处解析口径必须一致，否则撤回后重发的胶囊和预览对不上。
+          composer/A-1：渲染的是面板解析好的可见正文（previewText），不是含四类上下文
+          尾块的 `item.text`；纯上下文项正文为空时用 +N 维持可读。
         */}
-        <span className="truncate" data-v4-queue-item-preview="true">
-          <ConversationUserInputContent text={item.text} />
+        <span
+          className="truncate"
+          data-v4-queue-item-preview="true"
+          data-v4-queue-item-context-count={contextCount}
+        >
+          <ConversationUserInputContent text={previewText ?? item.text} />
+          {!previewText && contextCount > 0 ? (
+            <span className="text-foreground-subtlest" aria-hidden="true">
+              {`+${contextCount}`}
+            </span>
+          ) : null}
         </span>
       </span>
       {onSendNow ? (

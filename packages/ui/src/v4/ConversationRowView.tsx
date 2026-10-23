@@ -1004,7 +1004,10 @@ const UserInputRowView = memo(function UserInputRowView({
       : intl.formatMessage({
           id: `chat.edit.resetConversationAndFiles.${editWorkspaceRewindAvailability?.reason ?? "noFiles"}`,
         });
-  const visibleText = bodyText;
+  // composer/A-1：气泡只展示可见正文。bodyText 是「正文 + 四类上下文尾块」原文，
+  // 直接上屏会把 `# Code comments:` / `# userselect:` 等内部块暴露给用户；
+  // 编辑态（:1150）本就消费 parsedPrompt.visibleContent，两处必须同源。
+  const visibleText = parsedPrompt.visibleContent;
   const codeCommentContexts = parsedPrompt.codeComments;
   const webElementContexts = parsedPrompt.webElements;
   const pptxElementReferences = parsedPrompt.pptxElements;
@@ -1038,7 +1041,7 @@ const UserInputRowView = memo(function UserInputRowView({
 
   useEffect(() => {
     if (!editing) {
-      setDraft(bodyText);
+      setDraft(parsedPrompt.visibleContent);
       setEditAttachments([...(row.attachments ?? [])]);
       setEditAttachmentIndices((row.attachments ?? []).map((_, index) => index));
       setEditPromptContexts(parsedPrompt);
@@ -1062,20 +1065,21 @@ const UserInputRowView = memo(function UserInputRowView({
   const handleOpenEdit = useCallback(() => {
     // v4 迁移时把 user query 编辑误接成“直接读取主 composer 提交”，
     // 主 composer 为空时点击只会 warn。这里恢复旧行内编辑态。
-    setDraft(bodyText);
+    // composer/A-1：草稿正文与编辑态 initialValue 同源（可见正文，不含四类上下文尾块）。
+    setDraft(parsedPrompt.visibleContent);
     setEditAttachments([...(row.attachments ?? [])]);
     setEditAttachmentIndices((row.attachments ?? []).map((_, index) => index));
     setEditPromptContexts(parsedPrompt);
     setEditing(true);
-  }, [parsedPrompt, bodyText, row.attachments]);
+  }, [parsedPrompt, row.attachments]);
 
   const handleCancelEdit = useCallback(() => {
-    setDraft(bodyText);
+    setDraft(parsedPrompt.visibleContent);
     setEditAttachments([...(row.attachments ?? [])]);
     setEditAttachmentIndices((row.attachments ?? []).map((_, index) => index));
     setEditPromptContexts(parsedPrompt);
     setEditing(false);
-  }, [parsedPrompt, bodyText, row.attachments]);
+  }, [parsedPrompt, row.attachments]);
 
   const handleRemoveEditAttachment = useCallback((index: number) => {
     setEditAttachments((current) => current.filter((_, itemIndex) => itemIndex !== index));

@@ -176,16 +176,23 @@ test("T-PR2-2: 5 个装填点全部走富 API，装填路径不再出现纯文�
   assert.doesNotMatch(COMPOSER_SOURCE, /inputApiRef\.current\?\.setText\(/);
 });
 
-test("T-PR2-3: 队列行胶囊预览复用消息气泡渲染器", () => {
+test("T-PR2-3: 队列行胶囊预览复用消息气泡渲染器（消费面板解析好的可见正文）", () => {
   assert.match(
     QUEUE_ROW_SOURCE,
     /import \{ ConversationUserInputContent \} from "@\/v4\/ConversationUserInputContent\.js";/,
     "队列行必须复用气泡渲染器，保证预览与落库消息同口径",
   );
+  // composer/A-1（S18）：渲染器接受的是面板解析好的可见正文（previewText），
+  // 不是含四类上下文尾块的 item.text；缺省时回落原文。
   assert.match(
     QUEUE_ROW_SOURCE,
-    /<ConversationUserInputContent text=\{item\.text\} \/>/,
-    "队列行必须把 item.text 交给富渲染器",
+    /<ConversationUserInputContent text=\{previewText \?\? item\.text\} \/>/,
+    "队列行必须把已剥离尾块的 previewText 交给富渲染器",
+  );
+  assert.match(
+    QUEUE_ROW_SOURCE,
+    /title=\{previewText \?\? item\.text\}/,
+    "title 同用可见正文，不能暴露内部块",
   );
   assert.doesNotMatch(
     QUEUE_ROW_SOURCE,
@@ -196,7 +203,7 @@ test("T-PR2-3: 队列行胶囊预览复用消息气泡渲染器", () => {
   // 而不是一个没人验证的孤立属性。
   assert.match(
     QUEUE_ROW_SOURCE,
-    /<span className="truncate" data-v4-queue-item-preview="true">\s*<ConversationUserInputContent text=\{item\.text\} \/>\s*<\/span>/,
+    /<span\s+className="truncate"\s+data-v4-queue-item-preview="true"\s+data-v4-queue-item-context-count=\{contextCount\}\s*>[\s\S]{0,200}<ConversationUserInputContent text=\{previewText \?\? item\.text\} \/>/,
     "预览容器必须带 data-v4-queue-item-preview 并承载富渲染器",
   );
 });
@@ -752,3 +759,63 @@ test("composer/B-5: 无 id 会话选区可单条删除，key 归一去重与删�
   );
 });
 
+// ── composer/A-1：气泡与队列行剥离上下文尾块 ──────────────────────────────────
+
+test("composer/A-1: 队列预览与气泡都消费可见正文（剥离四类尾块）", () => {
+  const workspacePath = "/workspace/demo";
+  const fixture = buildFourContextFixture(workspacePath);
+
+  // ① 仅 code comment 尾块：预览正文为空、上下文条数 1
+  const contextOnlyText = serializeComposerPromptContexts("", {
+    codeComments: [fixture.codeComment],
+    conversationSelections: [],
+    webElements: [],
+    pptxElements: [],
+  });
+  const contextOnly = resolveQueuePreview({ text: contextOnlyText }, { workspacePath });
+  assert.equal(contextOnly.previewText, "", "纯上下文队列项不得把尾块当正文");
+  assert.equal(contextOnly.contextCount, 1);
+
+  // ② 正文 + 两类尾块：预览只含正文，不含 `# ` 块首
+  const mixedText = serializeComposerPromptContexts("请看这段", {
+    codeComments: [fixture.codeComment],
+    conversationSelections: [fixture.conversationSelection],
+    webElements: [],
+    pptxElements: [],
+  });
+  const mixed = resolveQueuePreview({ text: mixedText }, { workspacePath });
+  assert.equal(mixed.previewText, "请看这段");
+  assert.equal(mixed.contextCount, 2);
+  assert.doesNotMatch(mixed.previewText, /^\s*#/m, "预览不得露出内部块标题");
+
+  // 无尾块时原样返回
+  assert.deepEqual(resolveQueuePreview({ text: "纯正文" }, { workspacePath }), {
+    previewText: "纯正文",
+    contextCount: 0,
+  });
+
+  // ③ 形状守卫：气泡消费 parsedPrompt.visibleContent（不再是 bodyText 原文）
+  assert.match(ROW_VIEW_SOURCE, /const visibleText = parsedPrompt\.visibleContent;/);
+  assert.doesNotMatch(ROW_VIEW_SOURCE, /const visibleText = bodyText;/);
+  assert.match(ROW_VIEW_SOURCE, /<ConversationUserInputContent\s+text=\{visibleText\}/);
+
+  // 状态同源：三处 setDraft 与编辑态 initialValue 一致（只做同源，不写「尾块重复」验收）
+  assert.equal(
+    countOccurrences(ROW_VIEW_SOURCE, /setDraft\(parsedPrompt\.visibleContent\)/),
+    3,
+    "effect/openEdit/cancelEdit 三处 setDraft 必须同源",
+  );
+  assert.doesNotMatch(ROW_VIEW_SOURCE, /setDraft\(bodyText\)/);
+  assert.match(ROW_VIEW_SOURCE, /initialValue=\{parsedPrompt\.visibleContent\}/);
+
+  // 面板在唯一挂载点拿到 workspace 上下文，并用纯函数解析预览
+  assert.match(
+    QUEUE_PANEL_SOURCE,
+    /resolveQueuePreview\(item, \{ workspacePath, workspaceIdentity \}\)/,
+  );
+  assert.match(
+    SESSION_PANE_SOURCE,
+    /<ConversationQueuePanel[\s\S]{0,300}workspacePath=\{workspacePath\}[\s\S]{0,120}workspaceIdentity=\{workspaceIdentity\}/,
+    "SessionPane 必须把 workspace 上下文透传给队列面板",
+  );
+});

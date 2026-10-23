@@ -3570,6 +3570,8 @@ export function SessionPane({
         <ConversationQueuePanel
           key="conversation-queue"
           queue={pendingGuideProjection?.visibleQueue ?? snapshot.queue}
+          workspacePath={workspacePath}
+          workspaceIdentity={workspaceIdentity}
           onDeleteItem={handleDeleteQueueItem}
           onEditItem={handleEditQueueItem}
           pendingEditQueueItemId={

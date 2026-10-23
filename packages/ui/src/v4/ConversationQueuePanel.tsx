@@ -15,9 +15,17 @@ import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { QueueRow, type QueueItem } from "@/v4/ConversationQueueRow.js";
+import { resolveQueuePreview } from "@/v4/composer/composerPromptContexts.js";
 
 interface ConversationQueuePanelProps {
   queue: QueueState;
+  /**
+   * 队列项预览的工作区上下文。composer/A-1：`item.text` 是发送时序列化过的完整 prompt，
+   * 预览必须走 `resolveQueuePreview` 剥离四类尾块；而 code-comments 段需要 workspacePath
+   * 才能解析出来，缺省会退化成「整段内部块上屏」。
+   */
+  workspacePath: string;
+  workspaceIdentity?: string;
   /** 删除队列项（deleteQueueItem command）。 */
   onDeleteItem?: (queueItemId: string) => void;
   /** 撤回队列项到发起端 composer；权威删除成功后才恢复草稿。 */
@@ -108,6 +116,8 @@ const restrictQueueDragToPanel: Modifier = ({
  */
 function ConversationQueuePanelImpl({
   queue,
+  workspacePath,
+  workspaceIdentity,
   onDeleteItem,
   onEditItem,
   pendingEditQueueItemId = null,
@@ -125,6 +135,17 @@ function ConversationQueuePanelImpl({
     }),
   );
   const itemIds = useMemo(() => queue.items.map((item) => item.queueItemId), [queue.items]);
+  // composer/A-1：预览正文/上下文条数在这里一次性解析，行组件只做渲染。
+  const previews = useMemo(
+    () =>
+      new Map(
+        queue.items.map((item) => [
+          item.queueItemId,
+          resolveQueuePreview(item, { workspacePath, workspaceIdentity }),
+        ]),
+      ),
+    [queue.items, workspacePath, workspaceIdentity],
+  );
   const handleDragEnd = useCallback(
     (event: DragEndEvent) => {
       const overId = event.over?.id;
@@ -207,6 +228,8 @@ function ConversationQueuePanelImpl({
                 index={index}
                 intl={intl}
                 sortable={Boolean(onMoveItem)}
+                previewText={previews.get(item.queueItemId)?.previewText}
+                contextCount={previews.get(item.queueItemId)?.contextCount}
                 onDeleteItem={onDeleteItem}
                 onEditItem={onEditItem}
                 onSendNow={onSendNow}
