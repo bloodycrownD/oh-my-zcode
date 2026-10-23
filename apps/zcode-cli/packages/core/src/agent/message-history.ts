@@ -49,6 +49,16 @@ export type RuntimeMessageSource =
 export interface RuntimeMessageMetadata {
   source: RuntimeMessageSource;
   inputPresentation?: RuntimeInputPresentation;
+  /**
+   * ToolSearch 公告的内存内增量事实（phase-toolsearch，D4）：只随 turnRequestState
+   * 内存历史多轮存续，用于下一轮公告 delta 计算；不落 session、不进 hydrator
+   * （结构校验面见 contracts ToolSearchAnnouncementSchema，恢复即重置重公告）。
+   */
+  toolSearchAnnouncement?: {
+    addedNames: readonly string[];
+    removedNames: readonly string[];
+    readdedNames: readonly string[];
+  };
 }
 
 export interface RuntimeMessageMessageEntry {

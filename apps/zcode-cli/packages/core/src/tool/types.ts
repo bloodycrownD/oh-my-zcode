@@ -68,6 +68,15 @@ export interface ToolMetadata {
   description?: string;
   modelInstructions?: readonly string[];
   allowedInPlanMode?: boolean;
+  /**
+   * ToolSearch defer 声明（判定入口见 tool/search/exposure.ts 头部分类表）：
+   * omz 政策=内置核心工具不声明（恒常驻）、MCP 工具由 mcp 注册点统一声明 true。
+   */
+  shouldDefer?: boolean;
+  /** ToolSearch defer 豁免：server 配置或 `_meta` 声明的常驻工具。 */
+  alwaysLoad?: boolean;
+  /** MCP 工具的检索提示；进入 ToolSearch 目录参与关键词打分。 */
+  searchHint?: string;
   readOnly: boolean;
   destructive: boolean;
   concurrentSafe: boolean;
@@ -125,6 +134,8 @@ export interface BackgroundTaskControlPort {
 }
 
 export interface ToolExecutionContext {
+  /** 本请求的 ToolSearch 执行上下文；ToolSearch/DeferredToolCall handler 读它裁决可用性。 */
+  toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   toolCallId: string;
   /** 当前工具调用是否属于 automation 派发轮；写工具 handler 用它做最终权限校验。 */
   automationTurn?: boolean;

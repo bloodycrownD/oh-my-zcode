@@ -167,6 +167,11 @@ function createMcpToolEntry(
     inputSchema: createModelFacingMcpInputSchema(descriptor, isCuaAppObservation),
     outputSchema: McpToolOutputJsonSchema,
     metadata: {
+      // ToolSearch defer 政策（见 tool/search/exposure.ts 分类表）：MCP 工具默认
+      // defer，alwaysLoad（server 配置或工具 _meta）豁免回常驻；searchHint 进目录打分。
+      shouldDefer: true,
+      alwaysLoad: descriptor.alwaysLoad,
+      searchHint: descriptor.searchHint,
       concurrentSafe: readOnly || descriptor.annotations?.idempotentHint === true,
       destructive,
       // 必须把 MCP tool 的 description 透传到 metadata，让 registry 把它带进模型输入，

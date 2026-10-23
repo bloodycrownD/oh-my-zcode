@@ -43,6 +43,11 @@ export const SYSTEM_REMINDER_PER_REQUEST_SOURCES = [
   "runtime_mode",
   "plan_mode_exit",
   "output_style",
+  // ToolSearch 公告块（phase-toolsearch）：只在投影层生成、随 turnRequestState 内存多轮
+  // 存续，D4 纪律下不落 session、不进 hydrator——归 per-request 组而非 PERSISTED 组
+  // （上游登记在 PERSISTED 是因为它落盘恢复，omz 公告状态跨重启即重置，见
+  // toolsearch-seam-proof.md §3.4）。
+  "tool_search_announcement",
   "date_change",
   "referenced_session_context",
   "model_anomaly",
@@ -106,6 +111,15 @@ const SYSTEM_REMINDER_DESCRIPTORS: Record<SystemReminderSource, DescriptorShape>
   runtime_mode: descriptor("current_turn", "per_current_turn", true, "sr.runtime_mode"),
   plan_mode_exit: descriptor("current_turn", "runtime_local", true, "sr.plan_mode_exit"),
   output_style: descriptor("current_turn", "per_current_turn", true, "sr.output_style"),
+  // ToolSearch 公告块：current_turn 通道（随当轮 reminder 族上路的 meta 附件），
+  // per_current_turn 生命周期=内存多轮、不落盘；isMeta 让 provider 投影按
+  // attachment-like 气泡重排而不当成真实用户轮。
+  tool_search_announcement: descriptor(
+    "current_turn",
+    "per_current_turn",
+    true,
+    "sr.tool_search_announcement",
+  ),
   date_change: descriptor("current_turn", "runtime_local", true, "sr.date_change"),
   referenced_session_context: descriptor(
     "current_turn",

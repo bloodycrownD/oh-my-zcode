@@ -2,6 +2,7 @@
 
 import type { CollaborationMode } from "../interfaces/session.port.js";
 import type { McpServerConfig } from "../interfaces/mcp.port.js";
+import type { ToolSearchMode } from "../tools/tool-search.js";
 import type { HooksRuntimeConfig, HooksRuntimeConfigPatch } from "../hooks/index.js";
 import type { PluginConfig, PluginOptionValues } from "../plugins/index.js";
 
@@ -265,6 +266,14 @@ export interface RuntimeConfig {
   };
   memory: {
     use: boolean;
+  };
+  /** ToolSearch 模式域（phase-toolsearch）：config.json 顶层的会话级默认；缺席=off。 */
+  toolSearch?: {
+    mode?: ToolSearchMode;
+  };
+  /** ToolSearch 模式域（phase-toolsearch）：config.json 顶层的会话级默认；缺席=off。 */
+  toolSearch?: {
+    mode?: ToolSearchMode;
   };
   /**
    * FORK（S23 / D-12）：magic-context 参数域。承载类型 `unknown` 的理由与

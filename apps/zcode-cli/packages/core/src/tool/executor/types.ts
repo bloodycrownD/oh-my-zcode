@@ -163,6 +163,8 @@ export interface ToolExecutor {
 }
 
 export interface ToolExecuteOptions {
+  /** 本请求的 ToolSearch 执行上下文；DeferredToolCall 准入与 ToolSearch handler 读它。 */
+  toolSearch?: import("@zcode/contracts").ToolSearchExecutionContext;
   automationTurn?: boolean;
   unattendedDispatchTurn?: boolean;
   signal?: AbortSignal;

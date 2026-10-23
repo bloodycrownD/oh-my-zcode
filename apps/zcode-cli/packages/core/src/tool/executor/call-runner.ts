@@ -55,6 +55,7 @@ import {
 import { mergeToolExecutionTelemetry, readToolExecutionTelemetry } from "../handlers/tool-perf.js";
 import type { ToolExecuteOptions, ToolExecutorDeps } from "./types.js";
 import { validateInitialModelToolInput, validateInput, validateOutput } from "./validation.js";
+import { resolveDeferredToolCall } from "../deferred-call.js";
 import type { ExecutableToolCall } from "../types.js";
 import { resolveEmbeddedSearchBranchCapability } from "../../embedded-search/capability.js";
 import { resolveToolEntryModelContract } from "../model-contract.js";
@@ -65,6 +66,24 @@ export async function executeToolCall(
   toolCall: ExecutableToolCall,
   options?: ToolExecuteOptions,
 ): Promise<ToolExecutionResult> {
+  // DeferredToolCall 准入（phase-toolsearch）：调度、流式准入与 executor 共用同一解析边界；
+  // 失败保持包装身份（原始 DeferredToolCall 名），不触发目标工具生命周期。
+  const admission = resolveDeferredToolCall(toolCall, options?.toolSearch, deps.registry);
+  if (admission.error) {
+    const result = createErrorResult(admission.call, admission.error);
+    await emitToolCallError(
+      deps,
+      toolCall.id,
+      options?.traceContext ??
+        deps.traceContext ??
+        createRootTraceContext({ sessionId: deps.sessionId, turnId: deps.turnId }),
+      deps.turnId,
+      result.error,
+    );
+    return result;
+  }
+  // 历史只保存一份原始目标参数；执行/Hook 可修改的对象在执行入口独立复制。
+  toolCall = admission.call;
   const totalStartedAt = Date.now();
   const parentTraceContext =
     options?.traceContext ??
@@ -330,6 +349,7 @@ export async function executeToolCall(
     });
     const context: ToolExecutionContext = {
       toolCallId: canonicalToolCall.id,
+      toolSearch: options?.toolSearch,
       automationTurn: options?.automationTurn,
       unattendedDispatchTurn: options?.unattendedDispatchTurn,
       traceContext,

@@ -75,11 +75,18 @@ import { getWorkflowRunToolEntry } from "./get-workflow-run.js";
 import { resumeWorkflowRunToolEntry } from "./resume-workflow-run.js";
 // import { workflowToolEntry } from "./workflow.js";
 import { createToolRuleNameSet } from "../tool-visibility.js";
+import { deferredToolCallEntry } from "./deferred-tool-call.js";
+import { toolSearchToolEntry } from "./tool-search.js";
 
 // direct 分支保留 Glob/Grep 工具实现；embedded search 分支由 registerBuiltInTools
 // 统一隐藏 Glob/Grep，并通过 Bash find/grep 接管搜索。
 
 export const builtInTools: ToolEntry[] = [
+  // ToolSearch 控制入口（phase-toolsearch）：恒注册、由请求级暴露决策按
+  // enabled/mode 隐藏（exposure.ts buildToolExposure），registry 侧不做门控——
+  // 与上游同形；mode off 时模型工具表看不到它们。
+  toolSearchToolEntry,
+  deferredToolCallEntry,
   readToolEntry,
   writeToolEntry,
   editToolEntry,
