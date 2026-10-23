@@ -10,7 +10,7 @@
 - review_round: CR 侧 4 轮已收口（r1 首诊 → r4 review-full: yes）；spec-check-loop 轮次见 `.iteration-state.yaml` 的 `spec_check_loop` 段
 - dag_version: 5（CR 侧）
 - 状态：CR 侧 fix-spec-ready；spec-check-loop r1 = No-Go（2 P0 / 12 P1），已 doc-fix 待 r2 复审
-- 本轮结论：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 `composer/A-1`、`composer/B-6`）
+- 本轮结论（**指 CR 对实现的判定，不是本文档状态**）：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 `composer/A-1`、`composer/B-6`）
 
 评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（CR r1 首诊，readonly 非自审）+ `review-full`（CR r2 覆核 + r3/r4 回归）+ `spec-check-loop` r1（对 fix-spec 本身的首诊，产出 2 P0 / 12 P1，已 doc-fix）。修复轨迹：CR r1 出 24 条 → r2 补 2 条 → r3 修正 `composer/A-1` 依据（气泡侧同为缺陷）+ 收窄 `composer/B-6` → r4 yes → spec-check r1 收口 P0-1（B-5 合成 id 无效，改走 key 回调）与 P0-2（B-1/B-3 文案契约冲突）、12 条 P1（验收载体统一为纯函数/形状守卫）。
 
@@ -109,20 +109,21 @@
 - 文件：`packages/ui/src/mentions/mentionMarkdown.ts:267-280`；对照 `packages/ui/src/mentions/providers/fileMentionProvider.ts:10-26`
 - 问题：`./src/lib/` → `relativePath: "src/lib/"`，而 provider 产出无尾斜杠（尾斜杠只在 markdown）。**且绝对路径分支同样带尾斜杠**（`data.path`/`value` 取 `relativePath || path`），`T-PR1-4` 现在把 `/workspace/src/`、`D:\work\lib/` 的带斜杠 data 钉成期望。
 - 改法：`data.relativePath`、`data.path`、`value` **三条都去尾斜杠**（目录语义由 `data.kind` 承载），仅 `markdown` 保留斜杠；`mapWorkspaceFileToMentionItem`（`fileMentionProvider.ts:9`，当前未导出）**导出**以便同形对照；同步改 `T-PR1-4` 三类期望（相对目录 / 绝对目录 / 仓库根）。
-- 验收/测试：T-PR1-4 断言三类的 `data`/`value` 与 `mapWorkspaceFileToMentionItem` 产出逐字段相等（不再手写期望串），往返恒等不破。
+- 验收/测试：T-PR1-4 断言三类（相对目录 / 绝对目录 / 仓库根）的**可推导字段一致**——相对目录对照 `kind/relativePath/value`，绝对目录与仓库根对照 `kind/path/value`（markdown 侧相对分支本就没有绝对 `path`，不做全字段等值）；往返恒等不破。
 - 来源：review-scope-composer round 1
 
 ### composer/B-5 [P2] 恢复出的「会话选区」chip 无单条删除按钮（`onRemove` 不可达）
 
 - 维度：B 正确性（功能缺口）
-- 文件：`packages/ui/src/v4/ConversationComposer.tsx:346-349,870-871,1503,2014`；`packages/ui/src/v4/composer/ConversationSelectionReferenceChip.tsx:80-91`；`packages/ui/src/lib/conversationSelectionReference.ts:9-28,164-170`
+- 文件：`packages/ui/src/v4/ConversationComposer.tsx:346-349,870-871,1503,2014`；`packages/ui/src/v4/composer/ConversationSelectionReferenceChip.tsx:19,80-91`；`packages/ui/src/v4/ConversationRowView.tsx:1225-1241`（**第二个 onRemove 调用点，编辑态**）；`packages/ui/src/lib/conversationSelectionReference.ts:9-28,164-170`
 - 问题：`parsePromptConversationSelections` 对现代 `# userselect:` 块产出 `{path?, text}` **无 id**；chip 的删除按钮渲染条件 `isConversationSelectionReference(reference)`（`:80`）要求 `id` + `contentType` + `sourceSessionId` + 数字 `sourceRowId`（markdown 型还需 `sourceKey/sourceTitle`，`conversationSelectionReference.ts:14-28`）→ 恢复项永不满足守卫，`onRemove` 对该类不可达，只能「全部清除」。
 - 改法（**不合成 id**——r1 已判定无效且会破坏去重）：
-  1. 删除 chip 的条件守卫：`{onRemove ? (<Button ... onClick={() => onRemove(reference)} />) : null}`
-  2. `onRemove` 签名由 `(id: string)` 改为 `(reference: ConversationSelectionDisplayReference)`；调用侧沿用既有 key 函数：`onRemove={(reference) => removeMergedConversationSelectionReference(conversationSelectionContextKey(reference))}`（`:1503` 已是这个形态，只是入参从 key 变 reference）
-  3. `conversationSelectionContextKey`（`:346-349`）已对无 id 项用 `${path}\0${text}` 兜底，去重（`mergeContextList` `:336-340`）与删除（`:870-871`）都走它 —— **不要给恢复项塞合成 id**，否则 live/restored 永不相等，同一选区会出两枚 chip
-- 验收/测试：纯逻辑用例 ①无 id 选区的 key 稳定（同 path/同 text → 同 key）②live 与 restored 同选区去重后只 1 条 ③删除按 key 精确移除、其他条目不受影响；形状守卫：chip 内不存在 `isConversationSelectionReference(reference) ? <Button` 分支。
-- 来源：review-scope-composer round 1（提出）+ spec-check round 1（P0-1 修正改法）
+  1. `conversationSelectionContextKey`（`ConversationComposer.tsx:346-349`）**上移到 `lib/conversationSelectionReference.ts` 并导出**（两处调用点都要用）
+  2. 删除 chip 的条件守卫：`{onRemove ? (<Button ... onClick={() => onRemove(reference)} />) : null}`；`onRemove` 签名 `(id: string)` → `(reference: ConversationSelectionDisplayReference)`
+  3. **两个调用点同批改**：Composer 侧 `onRemove={(reference) => removeMergedConversationSelectionReference(conversationSelectionContextKey(reference))}`（`:1503` 已是 key 形态）；**编辑态 `ConversationRowView.tsx:1227-1234` 的 `(item) => !("id" in item) || item.id !== id` 对无 id 项恒真**，守卫一删就会留下「点了没反应的死按钮」——必须改为 `(item) => conversationSelectionContextKey(item) !== conversationSelectionContextKey(reference)`
+  4. `conversationSelectionContextKey` 已对无 id 项用 `${path}\0${text}` 兜底，去重（`mergeContextList` `:331-340`）与删除（`:866-877`）都走它 —— **不要给恢复项塞合成 id**，否则 live/restored 永不相等，同一选区会出两枚 chip
+- 验收/测试：纯逻辑用例 ①无 id 选区的 key 稳定（同 path/同 text → 同 key）②live 与 restored 同选区去重后只 1 条 ③删除按 key 精确移除、其他条目不受影响 ④**编辑态无 id 选区可单删、其余条目不受影响**（`filter` 谓词用同一 key 函数）；形状守卫：chip 内不存在 `isConversationSelectionReference(reference) ? <Button` 分支，且两处 `onRemove` 均以 reference/key 形态传入。
+- 来源：review-scope-composer round 1（提出）+ spec-check round 1（P0-1 修正改法）+ spec-check round 2（补第二调用点与 key 上移）
 
 ### composer/C-1 [P2] 链接正则常量重复定义
 
@@ -140,7 +141,7 @@
 - 问题：`assert.match` 源码 + `countOccurrences === 2` 无法发现 B-1 这类「表达式写错来源」，也不覆盖失败回滚/等待期语义。
 - 改法（抽取契约写死，避免「抽成纯函数」空转）：
   1. `resolveComposerSubmitAvailability({ text, attachments, contexts }) => { canSubmit, allowSubmitWhenEmpty, hasContent }` —— **与 B-1 共用同一函数**（B-1 负责接线，本条负责测试）
-  2. `mergeContextList(live, restored, keyOf)`（已存在 `:336-340`，直接导出）
+  2. `mergeContextList(restored, live, keyOf)`（已存在 `ConversationComposer.tsx:331-340`，**参数顺序 restored 在前**、语义是 live 覆盖 restored，直接导出，勿倒序）
   3. claim/rollback/finalize 抽成显式 reducer：`composerSubmitMachine.reduce(state, action)`，`state = { phase: "idle"|"claimed"|"failed", frozenContexts, liveContexts }`，`action = { type: "claim" | "succeed" | "fail" }`
 - 验收/测试：T-PR2-7/8/9 —— ①restored+live 同 key 去重；②`fail` 后四类 chip 全保留；③`claimed` 期间新增 chip 不被 `succeed` 清除；④纯上下文输入 `canSubmit/allowSubmitWhenEmpty` 均为 true。**红判据**：把 `resolveComposerSubmitAvailability` 的 contexts 入参改成 live-only 时 ④ 必红（该函数是唯一判据，组件只转发）。
 - 来源：review-scope-composer round 1（提出）+ spec-check round 1（P1-5 修正契约与红判据）
@@ -198,7 +199,7 @@
 - 维度：H 兼容性 / J UI / I 可观测性
 - 文件：`packages/desktop/src/main/unreadBadge.ts:304`
 - 问题：`${options.label} unread tasks` 是 Windows 任务栏 tooltip/读屏描述，zh-CN 用户见英文；主进程其余原生文案均走 `formatDesktopMenuMessage`（`packages/shared/src/desktopMenu.ts:144-164`，已支持 `{count}`），只有这里绕过。
-- 改法（**定案一条路**）：`desktopMenuMessageIds` 增 `taskbarUnreadTasks`，`desktopMenuMessages` 增 zh/en 两语；`applyTaskbarOverlayToWindows` 的 options 改收**已格式化 `description`**（不做 formatter 注入）；locale 透传路径写死为 `desktopWindowLifecycle.ts:339` `syncApplicationUnreadBadge` 的 options 增加 `locale`（由 `index.ts` 的 `currentApplicationLocale` 传入），内部用 `formatDesktopMenuMessage(id, locale, { count })` 生成。
+- 改法（**定案一条路**）：`desktopMenuMessageIds` 增 `taskbarUnreadTasks`，`desktopMenuMessages` 增 zh/en 两语；`applyTaskbarOverlayToWindows` 的 options 改收**已格式化 `description`**（不做 formatter 注入）；locale 来源写死为 `desktopMainIpcPlatform.ts:70`（该处已可注入 locale）→ `handleWindowUnreadCountSync`（`:246`）→ `syncApplicationUnreadBadge`（`desktopWindowLifecycle.ts:339`，该函数当前只收 `windowUnreadCountMap`，**需增可选的已格式化 `description` 入参**，不要给它加 locale 概念），内部用 `formatDesktopMenuMessage(id, locale, { count })` 在 caller 侧生成。
 - 验收/测试：`formatDesktopMenuMessage("taskbarUnreadTasks", "zh-CN", {count: 3})` 产出中文、`en-US` 产出 `"3 unread tasks"`（纯逻辑用例）；T-UF4 的 description 断言改为从注入的 description 取值。
 - 来源：review-scope-desktop round 1
 
@@ -234,8 +235,8 @@
 - 维度：B 正确性
 - 文件：`packages/ui/src/settings/model-provider-section/ProviderCreateNameDialog.tsx:76,160-179`
 - 问题：`blockingMessage = duplicateMessage ?? errorMessage` 用重名掩盖 create 错误，但重试按钮（:168）与 `data-provider-create-error`（:164）仍按 `errorMessage` 判定 → 「Provider 名称已存在」+ 禁用的「重试」按钮 + 属性标成 `create`。
-- 改法：提纯 `resolveCreateProviderBanner({ resolution, errorMessage }) => { kind, showRetry }` —— **不返回展示串**（展示文案统一由 `kind` 映射到 i18n 键，见 provider/B-3，避免两处文案来源打架）：`kind ∈ "duplicate" | "create" | "empty" | null`，`showRetry = kind === "create"`；组件按 `kind` 渲染：`duplicate → settings.modelProvider.nameExists`、`create → settings.modelProvider.templateCreateFailed`、`empty → forms.validation.nameRequired`；`data-provider-create-error` 直接取 `kind`。
-- 验收/测试：duplicate+error 并存 → `kind === "duplicate"`、`showRetry === false`、属性为 `duplicate`；纯函数单测覆盖 4 分支（含 resolution 与 errorMessage 同时存在）。
+- 改法：提纯 `resolveCreateProviderBanner({ resolution, errorMessage }) => { kind, showRetry }` —— **不返回展示串**（展示文案统一由 `kind` 映射到 i18n 键，见 provider/B-3，避免两处文案来源打架）：`kind ∈ "duplicate" | "create" | "empty" | null`，优先级 **`duplicate > empty > create`**（`empty` 指 trim 后为空，优先于任何服务端错误；`create` 仅在有 `errorMessage` 时成立），`showRetry = kind === "create"`；组件按 `kind` 渲染：`duplicate → settings.modelProvider.nameExists`、`create → settings.modelProvider.templateCreateFailed`、`empty → forms.validation.nameRequired`；`data-provider-create-error` 直接取 `kind`。
+- 验收/测试：纯函数单测覆盖 4 分支 + 两个组合：①duplicate+error 并存 → `kind === "duplicate"`、`showRetry === false`；②empty+error 并存 → `kind === "empty"`、`showRetry === false`；③仅 error → `kind === "create"`、`showRetry === true`；④全空 → `kind === null`。属性断言：`data-provider-create-error` 取 `kind`。
 - 来源：review-scope-provider round 1
 
 ### provider/B-2 [P2] 空名/纯空白零反馈（静默拦截）
@@ -264,7 +265,6 @@
 - 改法：(1) 在 `@zcode/provider` 导出文案前缀常量，服务层与 UI 共用（UI 只做前缀匹配判定）；注释改为「对齐重命名路径报错文案；创建路径服务层自动加序号，前端拦截更严格」。(2) 展示改走 provider/B-1 的 `kind → i18n 键` 映射（`duplicate → settings.modelProvider.nameExists`，新增对称键 zh「Provider 名称已存在」/ en「Provider name already exists」），服务层原始串不再上屏。(3) **同批更新测试**：`modelProviderNameDialog.test.ts:72`（断言常量等值）、`:191`（断言 dialog 源码含 `PROVIDER_NAME_EXISTS_MESSAGE`）在此改动后必红，须一并改为断 `nameExists` 键。
 - 验收/测试：文案单一定义处（服务层导出前缀 + i18n 键各一处）；`i18n-key-merge --verify` 绿；`modelProviderNameDialog.test.ts` 两处断言已改且绿；形状守卫断言 dialog 不存在直接渲染 `PROVIDER_NAME_EXISTS_MESSAGE` 的分支。
 - 来源：review-scope-provider round 1（提出）+ spec-check round 1（P1-9 前提修正与测试清单）
-- 来源：review-scope-provider round 1
 
 ### provider/G-1 [P2] 创建在途互斥、清错时机、横幅分支缺少守卫
 
@@ -328,11 +328,11 @@
 
 ---
 
-## 风险登记（须写入 spec 风险表 + CHANGELOG，r3 要求先落行再放行）
+## 风险登记（按↓行内落点执行：R-A/R-B/R-C 均进 spec 风险表；CHANGELOG 见各行条件）
 
 | 风险 | 触发条件 | 后果 | 登记落点（逐字写入） |
 |---|---|---|---|
-| R-A 空 settings 抢烧迁移账本 | 升级后**先**启动 web/server 入口（`packages/server/src/entry-http.ts:17` / `stdioServices.ts:38`），再启桌面端 | 0005 以空 settings 应用并记账 → desktop Worker 跳过 → 旧项目/连接入口**永久不迁移** | spec 风险表 + CHANGELOG 发版说明：「升级后请先启动一次桌面端，再启动 web/服务器入口；否则旧项目与远端入口不会自动迁移（后续版本提供补跑）」 |
+| R-A 空 settings 抢烧迁移账本 | 升级后**先**启动 web/server 入口（`packages/server/src/entry-http.ts:17` / `stdioServices.ts:38`），再启桌面端 | 0005 以空 settings 应用并记账 → desktop Worker 跳过 → 旧项目/连接入口**永久不迁移** | spec 风险表必写；CHANGELOG **条件式**：仅当 open Q1 取③（接受现状）时逐字写入发版说明「升级后请先启动一次桌面端，再启动 web/服务器入口；否则旧项目与远端入口不会自动迁移（后续版本提供补跑）」；Q1 未拍板前**只落 spec 风险表、不发版说明**（取①/②时该句是错误承诺） |
 | R-B 未读角标双源 | 关闭通知后未读数变化 | 角标被另一路重新点亮，与门控语义矛盾 | spec 风险表（**仅 spec，不进 CHANGELOG**）：「未读角标当前有两个写入源（Root 无门控 / 项目树带 notificationEnabled 门控），U12 后于任务栏/托盘可见；单一 owner 待产品裁定」 |
 | R-C host 上限裸错误码 | 接入第 21 台设备 | 用户看到 `remote-project.host-limit` 原文 | spec 风险表：「远端设备成员上限 20，超限时错误码 `remote-project.host-limit` 尚无 i18n 映射，UI 以原文串展示」；CHANGELOG 已知问题逐字：「接入第 21 台远端设备时会显示 `remote-project.host-limit` 原始错误码（暂未本地化）」 |
 

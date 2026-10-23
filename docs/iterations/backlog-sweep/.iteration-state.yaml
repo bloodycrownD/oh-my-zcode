@@ -98,11 +98,11 @@ dev_dag:
     status: fix-spec-ready（r4 review-full: yes；待用户确认后执行）
   spec_check_loop:
     target: docs/iterations/backlog-sweep/cr-fix-spec.md
-    dag_version: 2
-    review_round: 2
+    dag_version: 3
+    review_round: 3
     open_must_fix: []
     doc_fix_plan: []
-    status: 待 r2 复审（r1 No-Go：2 P0 + 12 P1 已全部 doc-fix）
+    status: 待 r3 复审（r1 No-Go 2P0+12P1；r2 No-Go 2 条已 doc-fix：P-1 第二调用点、R-A 条件式）
   spec_deviations:
     - "D1 六值导出落 services/src/node.ts 而非 index.ts（root barrel 是 renderer 面，value 导入会把 node:crypto 链拉进浏览器包）— 接受"
     - "D2 TaskIndexRepo 调用点 11 处/9 文件，非 spec 的 8 处；3/4 参签名全部兼容 — 接受"
