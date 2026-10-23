@@ -103,22 +103,28 @@ test("T-RD2 停止预算常量化：三段预算来源唯一", () => {
   assert.equal(SERVER_STOP_WAIT_TIMEOUT_MS, 5_000 + 10_000 + 2_000 + 3_000);
 });
 
-test("T-RD2 排除面守卫：cli.ts 无 aliasRepo/migrate-retry，serve 主链与 proxy-stdio 在位", async () => {
+test("T-RD2 排除面守卫（三期解禁后口径）：cli.ts migrate retry 经注入边界回接，serve 主链与 proxy-stdio 在位", async () => {
   const cliSource = await readFile(
     fileURLToPath(new URL("../src/cli.ts", import.meta.url)),
     "utf8",
   );
-  // 注释可提及三期符号（排除说明）；import/实例化才是消费事实。
+  // P7（Step 18）起一期排除面解禁：migrate retry 经 SourceServerWorkspaceAliasRepo 回接，
+  // 但必须保持「runtimeOptions.workspaceAliasRepo 注入口优先」的可测试边界（缺省才落新实例）。
   assert.ok(
-    !/import\s+\{[^}]*SourceServerWorkspaceAliasRepo/.test(cliSource),
-    "cli.ts 不得消费三期 aliasRepo",
+    /import\s+\{[^}]*SourceServerWorkspaceAliasRepo[^}]*\} from "@zcode\/services\/node"/.test(
+      cliSource,
+    ),
+    "cli.ts 缺少三期 aliasRepo import（解禁面）",
   );
   assert.ok(
-    !cliSource.includes("new SourceServerWorkspaceAliasRepo"),
-    "cli.ts 不得实例化三期 aliasRepo",
+    /runtimeOptions\.workspaceAliasRepo \?\? new SourceServerWorkspaceAliasRepo\(\)/.test(cliSource),
+    "migrate retry 必须经 workspaceAliasRepo 注入口，不允许绕过测试边界直接实例化",
   );
-  assert.ok(!cliSource.includes("migrateRetryRequested"), "cli.ts 不得携带 migrate retry 分支");
-  assert.ok(!cliSource.includes("@zcode/services/node\""), "cli.ts 不得直接依赖 services/node");
+  assert.ok(cliSource.includes("migrateRetryRequested"), "cli.ts 缺少 migrate retry 分支");
+  assert.ok(
+    cliSource.includes('"migrate"') && cliSource.includes('"retry"'),
+    "cli.ts 缺少 migrate retry 命令识别",
+  );
   for (const command of ["serve", "status", "running-tasks", "stop", "restart", "update", "uninstall"]) {
     assert.ok(cliSource.includes(`"${command}"`), `cli.ts 缺少 ${command} 命令分支`);
   }
