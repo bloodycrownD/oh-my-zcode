@@ -19,7 +19,12 @@ import {
   type PptxElementReference,
 } from "@/lib/pptxElementReference.js";
 
-interface ComposerPromptContexts {
+/**
+ * 四类上下文 chip 的纯数据快照（与 parseComposerPromptContexts 的产出同形）。
+ * 队列撤回的恢复态以它为载体随 composer 草稿持久化：切 scope/刷新回来由草稿重建 chip，
+ * 否则重发会静默丢掉 code comments/选区/web/pptx 四类尾块。
+ */
+export interface ComposerPromptContexts {
   codeComments: readonly CodeCommentComposerAttachment[];
   conversationSelections: readonly ConversationSelectionDisplayReference[];
   webElements: readonly WebElementContextComposerAttachment[];

@@ -25,6 +25,7 @@ import {
 } from "@zcode/shared";
 import { submissionModeSchema, type SubmissionMode } from "@zcode/shared/zcode-protocol-v4";
 import type { ComposerMentionPrefill } from "@/store/zcodeSessionStoreTypes.js";
+import type { ComposerPromptContexts } from "@/v4/composer/composerPromptContexts.js";
 
 export interface V4ComposerDraft {
   text: string;
@@ -33,6 +34,12 @@ export interface V4ComposerDraft {
   taskGroupId?: string | null;
   editorStateJson?: string;
   mention?: ComposerMentionPrefill;
+  /**
+   * 队列撤回恢复的四类上下文 chip 载体（纯数据）。
+   * 撤回只在原 session 有效，但恢复态必须随草稿一起持久化：切 scope/刷新回来由草稿重建
+   * chip 再参与重发序列化，不能让尾块只活在组件 state（否则切走再回来就静默丢尾块）。
+   */
+  promptContexts?: ComposerPromptContexts;
   /** 有合法 mode 表示已经初始化；没有模型仍是明确空态，不能按旧文本草稿补默认。 */
   mode?: SubmissionMode;
   planEnabled?: boolean;
@@ -44,6 +51,14 @@ export interface V4ComposerDraft {
   initializeFromNewTask?: true;
   updatedAt: number;
 }
+
+/**
+ * composer 内容局部更新：`text` 在场即正文写入，编辑器结构与 mention 必须重算；
+ * 只写上下文载体（chip 增删/发送清空）时不得顺手清掉 mention 与 editorState。
+ */
+export type V4ComposerDraftContentUpdate = Partial<
+  Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention" | "promptContexts">
+>;
 
 interface V4DraftFile {
   version: 1;
@@ -266,8 +281,48 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+const PROMPT_CONTEXT_KEYS = [
+  "codeComments",
+  "conversationSelections",
+  "webElements",
+  "pptxElements",
+] as const;
+
+function hasPromptContexts(contexts: V4ComposerDraft["promptContexts"]): boolean {
+  return Boolean(
+    contexts &&
+    (contexts.codeComments.length > 0 ||
+      contexts.conversationSelections.length > 0 ||
+      contexts.webElements.length > 0 ||
+      contexts.pptxElements.length > 0),
+  );
+}
+
+/**
+ * 读取撤回上下文载体：四类数组必须齐备。
+ * 条目字段由本地 parser 产出，这里只校验到「对象数组」；坏记录整体丢弃，
+ * 避免 chip 渲染读到半截字段。
+ */
+function readDraftPromptContexts(value: unknown): ComposerPromptContexts | undefined {
+  if (!isRecord(value)) return undefined;
+  if (
+    !PROMPT_CONTEXT_KEYS.every((key) => {
+      const list = value[key];
+      return Array.isArray(list) && list.every((item) => isRecord(item));
+    })
+  ) {
+    return undefined;
+  }
+  return value as unknown as ComposerPromptContexts;
+}
+
 function readDraft(value: unknown): V4ComposerDraft | null {
-  if (!isRecord(value) || typeof value.text !== "string" || !value.text.trim()) return null;
+  if (!isRecord(value) || typeof value.text !== "string") return null;
+  const rawPromptContexts = readDraftPromptContexts(value.promptContexts);
+  const promptContexts = hasPromptContexts(rawPromptContexts) ? rawPromptContexts : undefined;
+  // 只有上下文没有正文的撤回草稿同样是真实内容（例如纯选区/纯代码注释队列项），
+  // 空正文且无上下文才按空草稿丢弃。
+  if (!value.text.trim() && !promptContexts) return null;
   const mode = submissionModeSchema.safeParse(value.mode);
   const selection = modelSelectionSchema.safeParse(value.modelSelection);
   // 坏 options 不应连带丢掉可确定的模型身份；不读取旧 provider/model/thought 别名。
@@ -293,6 +348,7 @@ function readDraft(value: unknown): V4ComposerDraft | null {
     );
   return {
     text: value.text,
+    ...(promptContexts ? { promptContexts } : {}),
     ...(value.taskGroupId === null || typeof value.taskGroupId === "string"
       ? { taskGroupId: value.taskGroupId as string | null }
       : {}),
@@ -392,12 +448,14 @@ export function persistV4ComposerDraft(
     delete next.projectId;
     delete next.taskGroupId;
   }
-  // omz：空白删除语义沿用本仓——结构化状态（editorState/mention/mode/model）在场不删 scope；
-  // 上游只看正文，会在保留编辑器结构时丢掉空正文草稿，omz Session 恢复链依赖这些结构字段。
+  // omz：空白删除语义沿用本仓——结构化状态（editorState/mention/上下文载体/mode/model）
+  // 在场不删 scope；上游只看正文，会在保留编辑器结构时丢掉空正文草稿，omz Session 恢复链
+  // 依赖这些结构字段。
   if (
     !next.text.trim() &&
     !next.editorStateJson &&
     !next.mention &&
+    !hasPromptContexts(next.promptContexts) &&
     !next.mode &&
     !next.modelSelection &&
     !next.initializeFromNewTask

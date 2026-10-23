@@ -118,7 +118,11 @@ import {
   resolveComposerAutoFocus,
   type ComposerAutoFocusOptions,
 } from "@/v4/composer/composerAutoFocus.js";
-import { V4_DRAFT_SCOPE_ROOT, type V4ComposerDraft } from "@/v4/composer/composerDraftStore.js";
+import {
+  V4_DRAFT_SCOPE_ROOT,
+  type V4ComposerDraft,
+  type V4ComposerDraftContentUpdate,
+} from "@/v4/composer/composerDraftStore.js";
 import {
   resolveOppositeFollowupDelivery,
   resolveFollowupModifierTooltip,
@@ -136,6 +140,7 @@ import {
   countComposerPromptContexts,
   parseComposerPromptContexts,
   serializeComposerPromptContexts,
+  type ComposerPromptContexts,
 } from "@/v4/composer/composerPromptContexts.js";
 import { useCodeCommentContexts } from "@/v4/composer/useCodeCommentContexts.js";
 import { useWebElementContexts } from "@/v4/composer/useWebElementContexts.js";
@@ -282,11 +287,17 @@ function applyExternalTextInsertRequestToComposer({
   return request.requestId;
 }
 
-/** composer 上下文四类 chip；与 parseComposerPromptContexts 的产出一致（去掉可见正文）。 */
-type RestoredPromptContexts = Omit<
-  ReturnType<typeof parseComposerPromptContexts>,
-  "visibleContent"
->;
+/**
+ * composer 上下文四类 chip；与 parseComposerPromptContexts 的产出一致（去掉可见正文）。
+ * 它不是组件私有状态：队列撤回的恢复态以 composerDraft.promptContexts 为唯一事实源，
+ * 这里只是同形的读取视图（切 scope/刷新回来都由草稿重建）。
+ */
+type RestoredPromptContexts = ComposerPromptContexts;
+
+/** 撤回 chip 的局部更新：函数式形态保证同一 tick 内连续移除可累积。 */
+type RestoredPromptContextsUpdate =
+  | RestoredPromptContexts
+  | ((current: RestoredPromptContexts) => RestoredPromptContexts);
 
 const EMPTY_RESTORED_PROMPT_CONTEXTS: RestoredPromptContexts = {
   codeComments: [],
@@ -353,12 +364,10 @@ function applyComposerRestoreRequestToComposer({
   currentWorkspaceKey,
   hasDraftContent,
   inputApi,
-  onPromptContextsRestored,
+  persistRestoredContent,
   request,
   requestFocus,
-  restoredPromptContexts,
   restoreSessionOwnedAttachments,
-  restoreDraftConfig,
   scheduleDraftPersist,
   updateText,
 }: {
@@ -367,12 +376,14 @@ function applyComposerRestoreRequestToComposer({
   currentWorkspaceKey: string;
   hasDraftContent: boolean;
   inputApi: Pick<LexicalChatInputHandle, "setTextWithMentions"> | null;
-  onPromptContextsRestored?: (contexts: RestoredPromptContexts) => void;
+  /**
+   * 把「正文 + 撤回项提交配置 + 四类上下文载体」一次写回草稿。
+   * 撤回恢复态必须随草稿持久化，因而这里负责落盘，组件内不再保留第二份事实源。
+   */
+  persistRestoredContent: () => void;
   request: ComposerRestoreRequest | null | undefined;
   requestFocus: () => void;
-  restoredPromptContexts?: RestoredPromptContexts;
   restoreSessionOwnedAttachments: (attachments: readonly AttachmentRef[]) => boolean;
-  restoreDraftConfig?: (config: NonNullable<ComposerRestoreRequest["config"]>) => void;
   scheduleDraftPersist: () => void;
   updateText: (text: string) => void;
 }): number | null {
@@ -391,13 +402,10 @@ function applyComposerRestoreRequestToComposer({
     return appliedRequestId;
   }
   // request.text 已被宿主拆成「可见正文 + 四类上下文尾块」（见 resolveRestoredComposerContent）：
-  // 编辑器只装可见正文并保胶囊，尾块还原成 composer 上方的 chip（与编辑历史路径对称）。
+  // 编辑器只装可见正文并保胶囊，尾块随草稿载体交给 chip 行重建（与编辑历史路径对称）。
   inputApi.setTextWithMentions(request.text);
   updateText(request.text);
-  if (restoredPromptContexts && countComposerPromptContexts(restoredPromptContexts) > 0) {
-    onPromptContextsRestored?.(restoredPromptContexts);
-  }
-  if (request.config) restoreDraftConfig?.(request.config);
+  persistRestoredContent();
   scheduleDraftPersist();
   requestFocus();
   return request.requestId;
@@ -419,9 +427,7 @@ interface ConversationComposerProps {
   draftConfig?: Partial<SessionConfigState>;
   /** SessionPane 注入的完整 Draft owner；生产路径不再由编辑器直接覆盖持久记录。 */
   composerDraft: V4ComposerDraft;
-  updateComposerContent: (
-    content: Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention">,
-  ) => void;
+  updateComposerContent: (content: V4ComposerDraftContentUpdate) => void;
   replaceComposerDraft: (draft: Omit<V4ComposerDraft, "updatedAt">) => void;
   /** 当前 Composer 是否能构造完整 Submission；空模型或空 Reasoning 时为 false。 */
   submissionReady?: boolean;
@@ -783,10 +789,27 @@ function ConversationComposerImpl({
 
   // ── 队列撤回的上下文 chip（与编辑历史路径对称）──
   // 队列项的 text 是发送时序列化过的完整 prompt：可见正文 + 四类上下文尾块。撤回时
-  // parseComposerPromptContexts 把尾块拆出来存在这里，再与 live hook 状态合并参与渲染与
-  // 发送序列化；只把正文塞回编辑器会让 chip 丢失、重发字节也少掉尾块（T-PR2/T-PR3）。
-  const [restoredPromptContexts, setRestoredPromptContexts] = useState<RestoredPromptContexts>(
-    EMPTY_RESTORED_PROMPT_CONTEXTS,
+  // parseComposerPromptContexts 把尾块拆出来存进草稿的 promptContexts 载体，再与 live
+  // hook 状态合并参与渲染与发送序列化；只把正文塞回编辑器会让 chip 丢失、重发字节也少掉
+  // 尾块（T-PR2/T-PR3）。恢复态跟随草稿而不是组件 state：切会话/切工作区再回来（含刷新）
+  // 由草稿重建 chip，否则尾块会在切 scope 的瞬间静默丢失。
+  const restoredPromptContexts: RestoredPromptContexts =
+    composerDraft.promptContexts ?? EMPTY_RESTORED_PROMPT_CONTEXTS;
+  // 草稿载体是唯一事实源，这里只镜像一份最新值：同一 tick 内连续移除 chip（含发送成功后
+  // 按类逐条清理）必须能累积，不能拿渲染闭包里的旧数组互相覆盖。
+  const restoredPromptContextsRef = useRef(restoredPromptContexts);
+  restoredPromptContextsRef.current = restoredPromptContexts;
+  // chip 增删是草稿内容变更：写回载体后组件随 composerDraft 重渲染。
+  const updateRestoredPromptContexts = useCallback(
+    (update: RestoredPromptContextsUpdate) => {
+      const next =
+        typeof update === "function" ? update(restoredPromptContextsRef.current) : update;
+      restoredPromptContextsRef.current = next;
+      updateComposerContent({
+        promptContexts: countComposerPromptContexts(next) > 0 ? next : undefined,
+      });
+    },
+    [updateComposerContent],
   );
   const mergedWebElementContexts = useMemo(
     () =>
@@ -814,35 +837,35 @@ function ConversationComposerImpl({
   // 撤回 chip 的移除/清空必须同时作用于 restored 与 live 两侧：同一个 chip 只可能存在于一侧。
   const removeMergedWebElementContext = useCallback(
     (id: string) => {
-      setRestoredPromptContexts((current) => ({
+      updateRestoredPromptContexts((current) => ({
         ...current,
         webElements: current.webElements.filter((item) => item.id !== id),
       }));
       removeWebElementContext(id);
     },
-    [removeWebElementContext],
+    [removeWebElementContext, updateRestoredPromptContexts],
   );
   const clearMergedWebElementContexts = useCallback(() => {
-    setRestoredPromptContexts((current) => ({ ...current, webElements: [] }));
+    updateRestoredPromptContexts((current) => ({ ...current, webElements: [] }));
     clearWebElementContexts();
-  }, [clearWebElementContexts]);
+  }, [clearWebElementContexts, updateRestoredPromptContexts]);
   const removeMergedPptxElementReference = useCallback(
     (id: string) => {
-      setRestoredPromptContexts((current) => ({
+      updateRestoredPromptContexts((current) => ({
         ...current,
         pptxElements: current.pptxElements.filter((item) => item.id !== id),
       }));
       removePptxElementReference(id);
     },
-    [removePptxElementReference],
+    [removePptxElementReference, updateRestoredPromptContexts],
   );
   const clearMergedPptxElementReferences = useCallback(() => {
-    setRestoredPromptContexts((current) => ({ ...current, pptxElements: [] }));
+    updateRestoredPromptContexts((current) => ({ ...current, pptxElements: [] }));
     clearPptxElementReferences();
-  }, [clearPptxElementReferences]);
+  }, [clearPptxElementReferences, updateRestoredPromptContexts]);
   const removeMergedConversationSelectionReference = useCallback(
     (id: string) => {
-      setRestoredPromptContexts((current) => ({
+      updateRestoredPromptContexts((current) => ({
         ...current,
         conversationSelections: current.conversationSelections.filter(
           (item) => conversationSelectionContextKey(item) !== id,
@@ -850,12 +873,12 @@ function ConversationComposerImpl({
       }));
       removeConversationSelectionReference(id);
     },
-    [removeConversationSelectionReference],
+    [removeConversationSelectionReference, updateRestoredPromptContexts],
   );
   const clearMergedConversationSelectionReferences = useCallback(() => {
-    setRestoredPromptContexts((current) => ({ ...current, conversationSelections: [] }));
+    updateRestoredPromptContexts((current) => ({ ...current, conversationSelections: [] }));
     clearConversationSelectionReferences();
-  }, [clearConversationSelectionReferences]);
+  }, [clearConversationSelectionReferences, updateRestoredPromptContexts]);
 
   // ── 草稿 per-session 持久化（切会话/刷新不丢；mention pill 经 editorStateJson 保真）──
   const draftScopeRef = useRef(draftScopeId);
@@ -986,24 +1009,18 @@ function ConversationComposerImpl({
   );
   const removeMergedCodeCommentContext = useCallback(
     (context: Parameters<typeof removeCodeCommentContext>[0]) => {
-      setRestoredPromptContexts((current) => ({
+      updateRestoredPromptContexts((current) => ({
         ...current,
         codeComments: current.codeComments.filter((item) => item.id !== context.id),
       }));
       removeCodeCommentContext(context);
     },
-    [removeCodeCommentContext],
+    [removeCodeCommentContext, updateRestoredPromptContexts],
   );
   const clearMergedCodeCommentContexts = useCallback(() => {
-    setRestoredPromptContexts((current) => ({ ...current, codeComments: [] }));
+    updateRestoredPromptContexts((current) => ({ ...current, codeComments: [] }));
     clearCodeCommentContexts();
-  }, [clearCodeCommentContexts]);
-
-  // 切 scope（会话/草稿/工作区）时撤回 chip 必须跟 live 上下文一起作废：
-  // 队列撤回只在原 session 有效，残留会让下一次发送带上别的会话的尾块。
-  useEffect(() => {
-    setRestoredPromptContexts(EMPTY_RESTORED_PROMPT_CONTEXTS);
-  }, [draftScopeId, sessionId, workspaceIdentity, workspaceKey]);
+  }, [clearCodeCommentContexts, updateRestoredPromptContexts]);
 
   useEffect(() => {
     if (!composerRestoreRequest) return;
@@ -1026,21 +1043,25 @@ function ConversationComposerImpl({
           mergedPptxElementReferences.length > 0 ||
           mergedConversationSelections.length > 0,
         inputApi: inputApiRef.current,
-        onPromptContextsRestored: setRestoredPromptContexts,
-        request: { ...composerRestoreRequest, text: restoredContent.visibleContent },
-        requestFocus: requestComposerFocus,
-        restoredPromptContexts: restoredContent.contexts,
-        restoreSessionOwnedAttachments: attachmentsApi.restoreSessionOwnedAttachments,
-        // 撤回项携带独立 Submission 配置；沿用草稿 owner，一次恢复且保留已处理授权标记。
-        restoreDraftConfig: (config) =>
+        // 撤回恢复态一次写回草稿：正文 + 独立 Submission 配置 + 四类上下文载体。
+        // 载体让 chip 随草稿跨 scope 存活（P1 根因：尾块不能只活在组件 state）。
+        // 沿用草稿 owner，一次恢复且保留已处理授权标记。
+        persistRestoredContent: () =>
           replaceComposerDraft({
             ...ownerDraftRef.current.draft,
-            ...config,
-            // 草稿只存可见正文：尾块由 chip 持有，发送时再序列化回去（字节不变）。
+            ...composerRestoreRequest.config,
+            // 草稿只存可见正文：尾块由载体持有，发送时再序列化回去（字节不变）。
             text: restoredContent.visibleContent,
             editorStateJson: undefined,
             mention: undefined,
+            promptContexts:
+              countComposerPromptContexts(restoredContent.contexts) > 0
+                ? restoredContent.contexts
+                : undefined,
           }),
+        request: { ...composerRestoreRequest, text: restoredContent.visibleContent },
+        requestFocus: requestComposerFocus,
+        restoreSessionOwnedAttachments: attachmentsApi.restoreSessionOwnedAttachments,
         scheduleDraftPersist,
         updateText,
       });
@@ -1309,6 +1330,9 @@ function ConversationComposerImpl({
       // session scope；若成功清理时再读可变 ref，会误清新 scope，并把首条输入残留在
       // __draft__，下次新建任务又恢复。发送开始时冻结真正提交的 scope。
       const submittedDraft = snapshotDraftOfEditor();
+      // 撤回恢复的上下文载体同样在发送开始时冻结：成功清空、失败原样回滚，
+      // 等待期间用户新加的 chip 属于下一条消息，不能被旧回包覆盖。
+      const submittedPromptContexts = restoredPromptContexts;
       let cleanupRevision = contentRevisionRef.current;
       const submission = createSubmissionFromComposer?.() ?? null;
       const submittedAttachmentIds = attachmentsApi.attachments.map((item) => item.id);
@@ -1351,7 +1375,8 @@ function ConversationComposerImpl({
         if (!draftSubmissionClaimed) return;
         // 用户在等待期间已经产生更新时，当前完整正文是更新后的事实；旧失败回包不能覆盖。
         if (contentRevisionRef.current === cleanupRevision) {
-          updateComposerContent(submittedDraft);
+          // 正文与撤回上下文载体一起回滚：失败重试必须保留原 chip，否则重发少尾块。
+          updateComposerContent({ ...submittedDraft, promptContexts: submittedPromptContexts });
         }
         suppressDraftPersistRef.current = false;
         draftSubmissionClaimed = false;
@@ -1475,8 +1500,11 @@ function ConversationComposerImpl({
         currentConversationSelections.forEach((reference) =>
           removeMergedConversationSelectionReference(conversationSelectionContextKey(reference)),
         );
-        // 撤回恢复的上下文已随这次发送交出去；清空残留，避免下一条消息再带一遍。
-        setRestoredPromptContexts(EMPTY_RESTORED_PROMPT_CONTEXTS);
+        // 撤回恢复的上下文已随这次发送交出去；清空草稿载体，避免切回来或下一条消息再带一遍。
+        // 与正文同口径：等待期间用户已产生更新时，新 chip 属于下一条消息，不被旧 ACK 清掉。
+        if (contentRevisionRef.current === cleanupRevision) {
+          updateComposerContent({ promptContexts: undefined });
+        }
         // 发送成功：清本次提交捕获的 scope 草稿；prompt history 已在真实发送前同步写盘，
         // 避免首发 promote 丢失或误清 promotion 后的新 scope。
         finalizeSubmittedDraft();
@@ -1508,6 +1536,7 @@ function ConversationComposerImpl({
       removeMergedConversationSelectionReference,
       removeMergedPptxElementReference,
       removeMergedWebElementContext,
+      restoredPromptContexts,
       restoredPromptContexts.codeComments,
       sessionId,
       snapshotDraftOfEditor,

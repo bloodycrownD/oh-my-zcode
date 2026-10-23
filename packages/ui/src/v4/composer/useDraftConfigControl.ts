@@ -35,6 +35,7 @@ import {
   resolveComposerScope,
   V4_DRAFT_SCOPE_ROOT,
   type V4ComposerDraft,
+  type V4ComposerDraftContentUpdate,
 } from "@/v4/composer/composerDraftStore.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import { resolveAppFollowupMode } from "@/v4/composer/followupModeSettings.js";
@@ -86,9 +87,7 @@ interface DraftConfigControl {
   /** 当前草稿生命周期冻结的初始化 config；只供 prewarm/createSession 建立时使用。 */
   resolveInitialDraftConfig: () => Partial<SessionConfigState> | undefined;
   composerDraft: V4ComposerDraft;
-  updateComposerContent: (
-    content: Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention">,
-  ) => void;
+  updateComposerContent: (content: V4ComposerDraftContentUpdate) => void;
   replaceComposerDraft: (draft: Omit<V4ComposerDraft, "updatedAt">) => void;
   /** 新任务被接纳后，把当前完整 Root Draft 原子式转移到真实 Session scope。 */
   promoteComposerDraft: (createdSessionId: string) => void;
@@ -323,11 +322,12 @@ export function useDraftConfigControl(params: {
   }, [appFollowupMode]);
 
   const updateComposerContent = useCallback(
-    (content: Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention">) => {
+    (content: V4ComposerDraftContentUpdate) => {
       updateComposerDraft((current) => ({
         ...current,
-        editorStateJson: undefined,
-        mention: undefined,
+        // 正文写入必须重算编辑器结构；只写上下文载体（撤回 chip 增删、发送后清空）时
+        // 不能顺手清掉 mention/editorStateJson，否则草稿会降级成纯文本。
+        ...(content.text !== undefined ? { editorStateJson: undefined, mention: undefined } : {}),
         ...content,
       }));
     },
@@ -350,13 +350,16 @@ export function useDraftConfigControl(params: {
       if (stateRef.current.scopeKey !== scopeKey || scopeId !== V4_DRAFT_SCOPE_ROOT) return;
       const targetSessionId = createdSessionId.trim();
       if (!targetSessionId) return;
-      // 首发成功曾直接删除 Root scope，真实 Session 没有 Composer Draft，
-      // 重挂载后又从 Snapshot 初始化。先写目标、再删来源，保留完整正文/模式/选择。
+      // 先写目标、再删来源，保留完整正文/模式/选择。
+      // 撤回恢复的上下文载体属于「刚提交的那条消息」：promote 发生在发送 ACK 内、
+      // 成功清空之前，原样带进新 session 会让会话草稿凭空多出 chip，必须剥离。
+      const promotedDraft: V4ComposerDraft = { ...stateRef.current.draft };
+      delete promotedDraft.promptContexts;
       const written = persistV4ComposerDraft(
         workspacePath,
         workspaceIdentity,
         targetSessionId,
-        stateRef.current.draft,
+        promotedDraft,
       );
       if (!written) return;
       // 目标按组织 key 清理；正式 session 的草稿在 ROOT 外不落组织态（store 内已剥）。
