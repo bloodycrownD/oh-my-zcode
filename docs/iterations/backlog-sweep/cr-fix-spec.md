@@ -10,9 +10,9 @@
 - review_round: 2（r1 首诊 4 scope + r2 末轮 review-full 覆核）
 - dag_version: 3
 - 状态：draft
-- 本轮结论：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 full/A-1、full/B-1）
+- 本轮结论：**not-ready**（P0=0 / P1=2 / P2=24，共 26 条 must-fix；P2 含 r2 新增 `composer/A-1`、`composer/B-6`）
 
-评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（r1 首诊，readonly 非自审）+ `review-full`（r2 末轮全局覆核，逐条对代码回读）。r2 结论：24 条中 20 条可直接执行，2 条改法不足（composer/B-1、provider/B-3，本轮已补齐），2 条引用需修正（svc/C-1 验收措辞、provider/G-1 行号），并新增 2 条 must-fix。
+评审来源：`review-scope-svc`、`review-scope-composer`、`review-scope-desktop`、`review-scope-provider`（r1 首诊，readonly 非自审）+ `review-full`（r2 末轮全局覆核 + r3 回归验证）。修复轨迹：r1 出 24 条 → r2 补 2 条并通过 20 条、指出 2 条改法不足 → r3 回归 6 项，闭合 4 项，修正 `composer/A-1` 依据（气泡侧同为缺陷）、收窄 `composer/B-6` 验收。
 
 ---
 
@@ -139,14 +139,21 @@
 - 验收/测试：把 `hasDraftToSubmit` 改回旧表达式时新用例转红。
 - 来源：review-scope-composer round 1
 
-### composer/A-1 [P2] 队列行预览未剥离上下文尾块，「与气泡同口径」声明不成立
+### composer/A-1 [P2] 上下文尾块在**气泡与队列行两处**都未剥离 —— 「同口径」注释在现状下反而成立，真实缺陷是双端都露内部块
 
-- 维度：A 需求符合性 / B 正确性（r2 新增）
-- 文件：`packages/ui/src/v4/ConversationQueueRow.tsx:129`；对照 `packages/ui/src/.../ConversationRowView.tsx:1360-1365`、`ConversationUserInputContent.tsx:184-193`
-- 问题：队列行把 `item.text`（发送时序列化的「可见正文 + 四类上下文尾块」）直接交给 `ConversationUserInputContent`，后者只做 mention 解析、不剥离尾块；真实气泡是先 `parseComposerPromptContexts` 取 `visibleContent` 再渲染。结果：纯上下文队列项预览显示 `# Code comments:` / `# userselect:` 等内部块，普通项行尾也可能露出块首。本轮新注释明确声称「预览与落库消息同口径」，Step 22 该子项实际未达成。
-- 改法：`QueueRow` 增 `previewText?: string` / `contextCount?: number` prop，由 `ConversationQueuePanel`/`ConversationComposer` 用 `parseComposerPromptContexts(item.text, { workspacePath, workspaceIdentity }).visibleContent` 计算后传入，`title` 同步用可见正文；纯上下文项给 chip 数量标记（复用 `countComposerPromptContexts`）。
-- 验收/测试：构造「仅 code comment 尾块」队列项，DOM 预览不含 `# Code comments:`；带正文+尾块项预览等于可见正文；`data-v4-queue-item-preview` 断言迁移到新 prop 后仍绿。
-- 来源：review-full round 2
+- 维度：A 需求符合性 / B 正确性（r2 提出、r3 修正依据，主代理已亲验裁决）
+- 文件：
+  - 气泡侧（根因）：`packages/ui/src/v4/ConversationRowView.tsx:1006` `const visibleText = bodyText;` → 应在 `:1360,1362` 消费 `parsedPrompt.visibleContent`
+  - 队列侧：`packages/ui/src/v4/ConversationQueueRow.tsx:129`
+  - 面板透传缺口：`packages/ui/src/v4/ConversationQueuePanel.tsx:19-40` 无 `workspacePath`/`workspaceIdentity` prop
+- 问题：`parseComposerPromptContexts` 已算出 `visibleContent`（`composerPromptContexts.ts:68-79`），但 `ConversationRowView.tsx:1006` 用的是 `bodyText`（原文，含四类尾块），只有编辑态 `:1150` 才用 `visibleContent`。`git log -S "const visibleText = bodyText;"` 指向 `f0da6e1d`（拆 share 链时把 `parsedShareContext.visibleContent` 退化回来），属基线既有缺陷。队列行 `:129` 直接把 `item.text` 交给 `ConversationUserInputContent`，同样不剥离 → **两处都显示 `# Code comments:` / `# userselect:` 等内部块**，纯上下文项预览更是只剩块。r2 认为「气泡已剥离」有误，r3 的判断经代码与 git 史核实成立。
+- 改法：
+  1. 气泡：`ConversationRowView.tsx:1006` 改为 `const visibleText = parsedPrompt.visibleContent;`（`parsedPrompt` 同作用域已有，`:1007-1010` 正在用；`:1150` 已是同口径）
+  2. 队列：`QueueRow` 增 `previewText?: string` / `contextCount?: number` prop，由面板用 `parseComposerPromptContexts(item.text, { workspacePath, workspaceIdentity }).visibleContent` 计算传入，`title` 同用可见正文
+  3. 面板：`ConversationQueuePanel` 补 `workspacePath` / `workspaceIdentity` prop 并从上游（`SessionPane`/`ConversationComposer` 调用点）透传 —— 无 `workspacePath` 时 code-comments 段解析不出来（`composerPromptContexts.ts:64-77`）
+  4. 可测性：把「队列项 → {预览正文, 上下文条数}」抽纯函数 `resolveQueuePreview(item, workspace)`，UI 只做渲染
+- 验收/测试：**不得依赖 jsdom**（本仓 ui 测试只有 `renderToStaticMarkup`，而 QueueRow 依赖 `useSortable`，无法 SSR）——改为纯逻辑用例：①`resolveQueuePreview` 对「仅 code comment 尾块」输入产出 `previewText === ""`、`contextCount === 1`；②带正文+尾块输入产出可见正文（不含 `# `块首）；③给 `ConversationRowView` 抽同源纯函数（或直接断言 `:1006` 消费 `parsedPrompt.visibleContent` 的形状守卫 + `parseComposerPromptContexts` 的 visibleContent 行为用例）；④既有 `data-v4-queue-item-preview` 断言迁移到新 prop 后仍绿。
+- 来源：review-full round 2（提出）+ review-full round 3（依据修正）+ 主代理亲验（`ConversationRowView.tsx:1006`、`git log -S`）
 
 ### composer/B-6 [P2] 恢复出的 skill chip 的 `value`/`data` 与 provider 契约不一致
 
@@ -154,8 +161,12 @@
 - 文件：`packages/ui/src/mentions/mentionMarkdown.ts:313-315`；对照 `packages/ui/src/mentions/providers/skillsMentionProvider.ts:44-55`；消费点 `packages/ui/src/LexicalChatInput.tsx:221-226,312-313`
 - 问题：富反解析 skills 分支产出 `value: destination`（技能**路径**）且不产 `data`；provider 口径是 `value: skill.name`、`data: { path, scope }`。`prependMentionIfMissing` 按 `category+value` 去重 → 恢复出的技能 chip 与同技能 live/prefill chip 无法互识，会重复插入；`richMentionNodeId` 随之给出 `skill:<path>` 而非 `skill:<name>`。发送字节不受影响（序列化用 `markdown`），属一致性缺陷。
 - 改法：skills 分支改 `value: label.slice(1)`（技能名，与 provider 一致）并补 `data: { path: destination }`；同步改 `composerMentionPillParse.test.ts` T-PR1-2 的 skill 期望值（当前断言 `value === "./skills/cr.md"`）。若产品要求路径入 value，则须在 `prependMentionIfMissing` 的 key 里对 skills 特判，二选一并在注释写明。
-- 验收/测试：`resolveRichMentionPart` 的 skills 段与 `skillsMentionProvider` 的 id/value/data 同形（纯逻辑用例）；`prependMentionIfMissing` 对同一技能不再重复插入（行为用例）。
-- 来源：review-full round 2
+- 验收/测试（r3 收窄，`id` 同形不可达）：
+  - 断言 ①`value === 技能名`（label 去 `$`）、②`data.path === destination`、③`label` 与 provider `label` 一致
+  - **不**断言 id 同形：provider id 是 `skill:${skill.id}`，`skill.id` 来自 `buildSkillId(provider/scope/name/path)`（`packages/services/src/skills/skillsService.ts:954-959`），markdown 只有 name/path 推不出；恢复态 id 只能到 `skill:<name>`，注释写明该限制
+  - `data.scope` 恢复态不可知（markdown 无 scope 信息），`data` 只保证 `{ path }`，与 provider 全形不同 —— 注释写明
+  - 行为用例：`prependMentionIfMissing` 对同一技能（恢复 chip + live chip）不再重复插入
+- 来源：review-full round 2（提出）+ review-full round 3（验收收窄）
 
 ### desktop/B-2 [P2] ToolCallBody 读成功但 `dataBase64` 为空时仍永久 Loading
 
@@ -171,8 +182,8 @@
 - 维度：C 质量 / A 需求符合性（与上一迭代裁决相反）
 - 文件：`packages/desktop/src/main/unreadBadge.ts:61,76-180`；唯一引用 `packages/desktop/test/unreadBadgeMaxSemantics.test.ts`
 - 问题：上一迭代已裁决「生产零调用不迁」（`docs/iterations/upstream-v3.16-sync/spec.md:123`），本轮整件移植带回；knip 因测试引用不报红。
-- 改法：二选一并落 spec_deviations —— (a) 删除该段 + 同步删测试「数字徽章像素」用例；(b) 保留但段首注明「生产零调用，仅上游测试兼容，接线待产品确认」。
-- 验收/测试：删除方案下 `rg renderTaskbarBadgePixels packages/*/src` 零命中；保留方案下注释在位且 T-UF4 全绿。
+- 改法：**取 (b) 注释保留**（与 S8 终局一致，r3 已对齐）——删除会连带删掉已通过的像素用例，且该段是上游测试兼容面；段首注明「生产零调用，仅上游测试兼容，接线待产品确认」，spec Step 18 同步写明。
+- 验收/测试：`rg renderTaskbarBadgePixels packages/*/src` 仍仅命中该文件本体（形状守卫即可）；T-UF4 全绿。
 - 来源：review-scope-desktop round 1
 
 ### desktop/H-1 [P2] 任务栏 overlay 无障碍描述硬编码英文
@@ -308,6 +319,16 @@
 
 ---
 
+## 风险登记（须写入 spec 风险表 + CHANGELOG，r3 要求先落行再放行）
+
+| 风险 | 触发条件 | 后果 | 登记落点（逐字写入） |
+|---|---|---|---|
+| R-A 空 settings 抢烧迁移账本 | 升级后**先**启动 web/server 入口（`packages/server/src/entry-http.ts:17` / `stdioServices.ts:38`），再启桌面端 | 0005 以空 settings 应用并记账 → desktop Worker 跳过 → 旧项目/连接入口**永久不迁移** | spec 风险表 + CHANGELOG 发版说明：「升级后请先启动一次桌面端，再启动 web/服务器入口；否则旧项目与远端入口不会自动迁移（后续版本提供补跑）」 |
+| R-B 未读角标双源 | 关闭通知后未读数变化 | 角标被另一路重新点亮，与门控语义矛盾 | spec 风险表：「未读角标当前有两个写入源（Root 无门控 / 项目树带 notificationEnabled 门控），U12 后于任务栏/托盘可见；单一 owner 待产品裁定」 |
+| R-C host 上限裸错误码 | 接入第 21 台设备 | 用户看到 `remote-project.host-limit` 原文 | spec 风险表 + CHANGELOG 已知问题；与 open Q3 同批补 i18n 键 |
+
+---
+
 ## 已豁免（用户确认不修）
 
 （暂无）
@@ -325,7 +346,7 @@
 
 ## K 节建议（下游执行时闭合）
 
-1. spec 回写：S1-S26 全部落 `docs/iterations/backlog-sweep/spec.md`（Step 2/13/17/18/21/22/23/25/26 + 风险表 + 用例→宿主映射），其中 **S19（host-limit 裸错误码）与 open Q1 的三选一结论必须进风险表**
+1. spec 回写：S1-S26 全部落 `docs/iterations/backlog-sweep/spec.md`（Step 2/13/17/18/21/22/23/25/26 + 风险表 + 用例→宿主映射），其中**「风险登记」表的 R-A/R-B/R-C 三行须逐字进 spec 风险表**，R-A 另须进 CHANGELOG 发版说明（open Q1 的最终方案待用户拍板，但风险行现在就要落）
 2. CHANGELOG：`setTextWithPluginMentions` 语义扩大（含草稿恢复入口 S25）、草稿 schema 新增载体、DROP_KEYS 工具链、`GetInstalledEditors` 契约放宽、unreadBadge 导出面变化
 3. `host/index.ts:1701` 注释仍引「spec Step 19」（本轮 Step 19 = U10，deployServer 退役属 Step 11）→ 顺手改正（上一轮遗留）
 4. `test:v4-perf` 分组一致性：纯 node 测试（modelProviderNameDialog/CardActions）挂在带 `setup-ui-component-test.mjs` 的 UI 批末组，语义上更接近 `tsx --test` 批
