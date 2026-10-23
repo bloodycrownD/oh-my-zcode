@@ -3,6 +3,8 @@
 //         refreshEntry CAS 与旧单根入口判重、initial_position 投影、controller-only 与 host 上限。
 // T-RP6 — 空 hosts 库首连全链：saveHost→afterChange 广播→bindHost→readDirectory
 //         出现稳定 `remote:server:<id>` host（admission 端口 commit 主路径）。
+// T-RP3 — createProjectService.resolveHost 路由两态（host 在→所属 Host 服务；不在→project.host-offline）。
+// T-RP4 — resolveServerProjectService 两分支（virtualProjects 转发 / legacy 单 root 只读投影）。
 // 运行形态：worktree 根 `node --import tsx --test packages/services/test/remoteProjectsService.test.ts`
 import assert from "node:assert/strict";
 import test from "node:test";
@@ -13,15 +15,26 @@ import { createRequire } from "node:module";
 const { DatabaseSync } = createRequire(import.meta.url)(
   "node:sqlite",
 ) as typeof import("node:sqlite");
-import type { RemoteTarget } from "@zcode/shared";
+import {
+  buildServerRemoteWorkspaceIdentity,
+  remoteHostIdFromWorkspaceIdentity,
+  type RemoteTarget,
+} from "@zcode/shared";
 import { LEGACY_SINGLE_ROOT_PROJECT_PREFIX } from "../src/project-storage/contract.js";
 import { addProjectSchema } from "../src/project-storage/schema.js";
+import type { ProjectRepositoryContract } from "../src/project-storage/contract.js";
+import type { IServiceAccessor } from "../src/accessor.js";
+import { createProjectService } from "../src/project/index.js";
+import type { IProjectService } from "../src/project/contract.js";
 import {
   createRemoteProjectService,
   createRemoteProjectConnectionAdmission,
   remoteProjectHostIdForProfile,
   remoteProjectHostIdForTarget,
 } from "../src/remote-projects/index.js";
+// resolveServerProjectService 的实现在 desktop Host 装配层（remoteWorkspaceServiceCollection.ts），
+// 本批未登记 desktop 测试入口，因此从 services 测试直接驱动同一实现，避免形状断言。
+import { resolveServerProjectService } from "../../desktop/src/host/remoteWorkspaceServiceCollection.js";
 
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 const SSH_TARGET: RemoteTarget = { kind: "ssh", host: "devbox", username: "omz", port: 22 };
@@ -295,4 +308,186 @@ test("T-RP6: retain 意图对已移除成员显式拒绝（不重建入口）", 
       remoteProjectHostIdForTarget({ kind: "ssh", host: "devbox", username: "omz" }),
     );
   });
+});
+
+/** T-RP3 的投影仓库 double：只统计「本机仓库是否被误读」，不提供真实存储语义。 */
+function readOnlyRepository(countLocalRead: () => void): ProjectRepositoryContract {
+  return {
+    readTree: () => {
+      countLocalRead();
+      return { projects: [], tasks: [] };
+    },
+  } as unknown as ProjectRepositoryContract;
+}
+
+test("T-RP3: resolveHost 在/不在两态（缺失时 project.host-offline，不回落本机）", async () => {
+  const remoteHostId = "remote:ssh:devbox:22:omz";
+  const delegated: string[] = [];
+  let localReads = 0;
+  const remoteProjects = [{ id: "p1", hostId: remoteHostId, roots: [] }] as unknown as Awaited<
+    ReturnType<IProjectService["readProjects"]>
+  >;
+  const remoteService = {
+    async readProjects() {
+      delegated.push("readProjects");
+      return remoteProjects;
+    },
+    async deleteProject(id: string) {
+      delegated.push(`deleteProject:${id}`);
+    },
+  } as unknown as IProjectService;
+
+  const routed = createProjectService({
+    repository: async () => readOnlyRepository(() => (localReads += 1)),
+    workspaceDirectory: join(tmpdir(), "omz-project-routing"),
+    ownerHostId: "local",
+    resolveHost: async (hostId) => {
+      delegated.push(`resolveHost:${hostId}`);
+      return remoteService;
+    },
+  });
+  // host 在：跨 Host 请求经 resolveHost 转发到所属 Host 服务。
+  assert.deepEqual(await routed.readProjects({ hostId: remoteHostId }), remoteProjects);
+  await routed.deleteProject("p1", remoteHostId);
+  assert.deepEqual(delegated, [
+    `resolveHost:${remoteHostId}`,
+    "readProjects",
+    `resolveHost:${remoteHostId}`,
+    "deleteProject:p1",
+  ]);
+  assert.equal(localReads, 0, "跨 Host 路由不得读取本机仓库");
+
+  // ownerHostId 命中的 hostId 仍属本机，不经过 resolveHost。
+  assert.deepEqual(await routed.readProjects({ hostId: "local" }), []);
+  assert.equal(localReads, 1);
+
+  // host 不在：未注入 resolveHost 时显式拒绝，不能静默回落到本机仓库。
+  const offline = createProjectService({
+    repository: async () => readOnlyRepository(() => (localReads += 1)),
+    workspaceDirectory: join(tmpdir(), "omz-project-routing"),
+  });
+  await assert.rejects(
+    () => offline.readProjects({ hostId: remoteHostId }),
+    /project\.host-offline/,
+  );
+  await assert.rejects(() => offline.deleteProject("p1", remoteHostId), /project\.host-offline/);
+  assert.equal(localReads, 1, "拒绝路径同样不得读取本机仓库");
+});
+
+/** T-RP4 的 IServiceAccessor double：只实现 legacy 投影实际读取的四个通道。 */
+function connectionServicesDouble(projectService?: IProjectService): {
+  accessor: IServiceAccessor;
+  readdirPaths: string[];
+} {
+  const readdirPaths: string[] = [];
+  const accessor = {
+    projectService,
+    fileService: {
+      async readdir(input: { path: string }) {
+        readdirPaths.push(input.path);
+        return [];
+      },
+    },
+    systemService: {
+      async info() {
+        return { platform: "linux", homedir: "/home/omz" };
+      },
+    },
+    settingService: {
+      async get() {
+        return {
+          lastWorkspaceSession: [
+            { kind: "local", workspacePath: "/srv/app" },
+            { kind: "local", workspacePath: "/srv/talk", workspacePurpose: "conversation" },
+          ],
+          recentProjects: ["/srv/other"],
+        };
+      },
+    },
+    zcodeTaskService: {
+      async listTasks() {
+        return [];
+      },
+      async listPinnedTasks() {
+        return [];
+      },
+      async listArchivedTasks() {
+        return [];
+      },
+    },
+  } as unknown as IServiceAccessor;
+  return { accessor, readdirPaths };
+}
+
+test("T-RP4: resolveServerProjectService 两分支（virtual 转发 / legacy 只读）", async () => {
+  const serverId = "9f7c1b2a-0000-4000-8000-000000000001";
+  const projectionHostId = remoteHostIdFromWorkspaceIdentity(
+    buildServerRemoteWorkspaceIdentity({ serverId, workspacePath: "/" }),
+  )!;
+  const virtualProjectService = {
+    async readProjects() {
+      return [{ id: "virtual", hostId: projectionHostId, roots: [] }];
+    },
+  } as unknown as IProjectService;
+  const { accessor, readdirPaths } = connectionServicesDouble(virtualProjectService);
+
+  // virtual 分支：握手声明 virtualProjects 时直接转发远端权威项目通道（同一实例）。
+  assert.equal(
+    resolveServerProjectService({ connectionServices: accessor, serverId, virtualProjects: true }),
+    virtualProjectService,
+  );
+  // 声明了能力但通道缺席：装配期显式拒绝，不静默退回 legacy。
+  assert.throws(
+    () =>
+      resolveServerProjectService({
+        connectionServices: connectionServicesDouble().accessor,
+        serverId,
+        virtualProjects: true,
+      }),
+    /Remote virtual-project RPC registration incomplete/,
+  );
+
+  // legacy 分支：false 与缺省同形态，返回单 root 只读投影。
+  for (const virtualProjects of [false, undefined]) {
+    const legacy = resolveServerProjectService({
+      connectionServices: accessor,
+      serverId,
+      ...(virtualProjects === undefined ? {} : { virtualProjects }),
+    });
+    assert.notEqual(legacy, virtualProjectService, "legacy 分支不得复用远端权威项目通道");
+    const projects = await legacy.readProjects();
+    // catalog 来自远端 settings 投影：本地 session 的 conversation 目录排除，recentProjects 参与合成。
+    assert.deepEqual(
+      projects.map((project) => project.roots[0]?.rootPath),
+      ["/srv/app", "/srv/other"],
+    );
+    assert.ok(projects.every((project) => project.hostId === projectionHostId));
+    assert.ok(projects.every((project) => project.legacySingleRoot === true));
+    assert.ok(
+      projects.every((project) => project.id.startsWith(LEGACY_SINGLE_ROOT_PROJECT_PREFIX)),
+    );
+    // host 归属校验：非本投影 hostId 直接拒绝。
+    await assert.rejects(
+      () => legacy.readProjects({ hostId: "remote:ssh:devbox:22:omz" }),
+      /project\.cross-host-move/,
+    );
+    // 目录读取走远端文件服务，路径按远端平台规则归一，不触碰本机文件系统。
+    const directory = await legacy.readDirectory({ path: "/srv/./app" });
+    assert.equal(directory.path, "/srv/app");
+    assert.deepEqual(readdirPaths.at(-1), "/srv/app");
+    // 未给路径时以远端 homedir 为起点，而不是本机主目录。
+    assert.equal((await legacy.readDirectory()).path, "/home/omz");
+    // 写面全部 project.legacy-read-only。
+    const writes: Array<() => Promise<unknown>> = [
+      () => legacy.saveProject({ name: "legacy-write" }),
+      () => legacy.deleteProject("project-a"),
+      () =>
+        legacy.moveTask({
+          task: { taskId: "task-a", workspacePath: "/srv/app" },
+          projectId: "project-a",
+        }),
+      () => legacy.reorderProjects([]),
+    ];
+    for (const write of writes) await assert.rejects(write, /project\.legacy-read-only/);
+  }
 });
