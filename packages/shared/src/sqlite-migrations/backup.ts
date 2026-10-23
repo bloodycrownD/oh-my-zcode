@@ -1,8 +1,15 @@
 import { discoverBackupVolumes } from "./backup-volumes.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readdir, readFile, rm, statfs, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+// fork 纪律：tsup 默认 removeNodeProtocol 会把值导入的 node:sqlite 改写为不存在的裸
+// npm 包 "sqlite"（该内建无裸别名），打包产物启动即 ERR_MODULE_NOT_FOUND——
+// createRequire 保真 node: 协议（惯例同 chromeCookieManager.ts:30 与 services 各 repo）。
+const { DatabaseSync: DatabaseSyncConstructor } = createRequire(import.meta.url)(
+  "node:sqlite",
+) as typeof import("node:sqlite");
 import type { MigrationBackup, MigrationOptions, SqliteMigration } from "./contract.js";
 import { identifier, insertSnapshot, snapshotTable, type TableSnapshot } from "./table-snapshot.js";
 
@@ -41,7 +48,7 @@ export async function createMigrationBackup(
       }
       path = join(directory, `${prefix}${(options.now ?? Date.now)()}-${randomUUID()}`);
       await mkdir(path, { mode: 0o700 });
-      const backup = new DatabaseSync(join(path, BACKUP_DATABASE_FILE));
+      const backup = new DatabaseSyncConstructor(join(path, BACKUP_DATABASE_FILE));
       try {
         backup.exec("begin");
         for (const table of tables) {

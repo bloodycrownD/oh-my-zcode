@@ -21,6 +21,8 @@
     "build:no-runtime-assets": "pnpm prepare:build-meta && node scripts/run-production-build.mjs",
     "build": "pnpm prepare:runtime-assets && pnpm run build:no-runtime-assets",
     "bundle": "node scripts/bundle.mjs",
+    "verify:bundle-imports": "node scripts/verify-bundle-imports.mjs",
+    "smoke:desktop": "node scripts/desktop-launch-smoke.mjs",
     "audit:bundle-size": "node scripts/audit-bundle-size.mjs",
     "postinstall": "node scripts/node-pty-rebuild.mjs",
     "lint": "oxlint",

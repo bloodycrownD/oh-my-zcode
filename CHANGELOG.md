@@ -12,6 +12,7 @@
 
 ### 修复
 
+- **打包产物启动即崩（P0 事故，重发包）**：tsup 默认 `removeNodeProtocol` 把 `node:sqlite` 剥成裸 `"sqlite"`（该内建无裸别名），main/host/scheduler 三进程 ESM 产物 `ERR_MODULE_NOT_FOUND`。修复=sqlite-migrations backup/restore 改 createRequire 惯例形；**新增产物级说明符门禁**（verify-bundle-imports，挂 tsup 四 target onSuccess：node: 前缀∪external 八项∪builtinModules∪deps 白名单，@zcode/* 反白名单）+**桌面启动 e2e 冒烟**（desktop-launch-smoke：ZCODE_DESKTOP_SMOKE 首窗 ready-to-show 退出 0+stderr 断言+60s 兜底；修复前红/修复后绿双向实证）。
 - **编辑历史消息发送旧内容**（bug A）：rAF 首帧竞态修复+ConversationRowView 观测日志。
 - **中断后队列不收新输入**（bug B，行为变化）：根因=omz 拆遥测时误删 `return;`（commit 24af3955）导致确认框被 null 覆盖且输入被吞。现在暂停态照常入队（held 路由 choice→enqueue）；「立即发送」=恢复语义（sendQueuedNow 后 autoDrain）；执行层对称修复（held 态普通 sendText 入队不再插队）。
 - **cli turbo lint/typecheck/desktop 全量门禁**：ui 测试工程漏进批量 typecheck 的门禁洞修复（tsc -b 不含 tsconfig.test.json）。

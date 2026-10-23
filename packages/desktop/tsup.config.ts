@@ -127,11 +127,14 @@ const desktopNodeRuntimeExternals = [
   "yauzl",
 ];
 
-function createDevReadyMarkerHook(target: "main" | "host" | "preload"): string {
+function createDevReadyMarkerHook(target: "main" | "host" | "preload" | "scheduler"): string {
   // CLI 级 --onSuccess 在多 config watch 模式下会被每个子构建分别触发。
   // 之前 preload 先成功时就提前写入 ready 标记，Electron 仍会在 main/host 未完成时启动。
   // 这里改成每个 config 自己在成功后写独立 marker，让 dev 启动脚本能精确等待全部构建完成。
-  return `node scripts/write-dev-ready-marker.mjs ${target}`;
+  // 2026-10-23 v1.0.21 启动即崩事故补位（cr-fix-spec CR-3）：marker 后串产物说明符门禁——
+  // tsup removeNodeProtocol 会把 node:sqlite 剥成裸 "sqlite"（该内建无裸别名）导致三进程启动即崩，
+  // 此类非法说明符必须在构建期判红；只扫本 target 自己的产物目录（其他 target 可能尚未产出）。
+  return `node scripts/write-dev-ready-marker.mjs ${target} && node scripts/verify-bundle-imports.mjs ${target}`;
 }
 
 export default defineConfig([

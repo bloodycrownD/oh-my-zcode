@@ -54,7 +54,6 @@ import {
   ZCODE_PRODUCT_FLAVOR,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
-
   resolveZCodeEndpointOrigin,
   HostMessageTypes,
 } from "@zcode/shared";
@@ -119,7 +118,6 @@ import {
   disposeHostProcess,
   disposeHostProcessAndWait,
   listDisposingHostProcesses,
-
   spawnHostProcess,
 } from "./desktopHostProcess.js";
 import { spawnCronScheduler, type CronSchedulerHandle } from "./desktopCronScheduler.js";
@@ -142,17 +140,10 @@ import {
 } from "./desktopDeepLinkUrl.js";
 import { createRemoteWorkspaceSessionManager } from "./desktopRemoteSessions.js";
 import { resolveCanonicalWslTarget } from "./desktopWslTargetResolver.js";
-import {
-
-  setBrowserUseGuestWebContentsIdsProvider,
-} from "./resourceManagerWindow.js";
+import { setBrowserUseGuestWebContentsIdsProvider } from "./resourceManagerWindow.js";
 
 import { registerPlatformIpcHandlers } from "./desktopMainIpcPlatform.js";
-import {
-
-
-
-} from "./mcpUserDirectory/index.js";
+import {} from "./mcpUserDirectory/index.js";
 import { registerRemoteIpcHandlers } from "./desktopMainIpcRemote.js";
 import { applyDesktopChromiumNetworkPolicies } from "./desktopNetworkPolicy.js";
 
@@ -1138,6 +1129,15 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
       await mainSettingService.update({ desktopWindowSize: state });
     },
   });
+  // 启动 e2e 冒烟（cr-fix-spec CR-4）：首窗 ready-to-show 即视为启动链全通（模块加载+主进程+首窗渲染），
+  // 直接退出 0；供 scripts/desktop-launch-smoke.mjs 在 production 产物上断言（v1.0.21 启动即崩事故补位）。
+  if (process.env.ZCODE_DESKTOP_SMOKE === "1") {
+    win.once("ready-to-show", () => {
+      logger.info("[desktop-smoke] first window ready-to-show, exiting 0");
+      markForceQuit("desktop-smoke");
+      app.exit(0);
+    });
+  }
   return win;
 }
 

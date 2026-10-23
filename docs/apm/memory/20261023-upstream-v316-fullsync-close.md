@@ -23,3 +23,13 @@
 - P3 挂账：entries 表+resolveHost 路由+RemoteProjectPicker 挂载+ProjectCreation 设备选择面。
 - P9/发布轮挂账：management 服务+registry+设置设备卡；deployServer 退役拍板；remote-viewing 回填（relay v2 缓行）。
 - U5-U12 仍在 upstream-v3.16-backport 待合流；i18n P3 卫生项（marketplace claudeCodePlugins 键消费点核对）。
+
+---
+
+## 追记：v1.0.21 发版事故与修复（2026-10-23）
+
+**事故**：v1.0.21 三平台安装包启动即崩（Cannot find package 'sqlite'）——根因=tsup 8.5.1 默认 removeNodeProtocol 把外部化 node:sqlite 剥成裸名，该内建无裸别名；源头=P3 照搬上游 sqlite-migrations 的 backup/restore.ts 值导入，违反 fork 成文规避惯例（chromeCookieManager.ts:30/startup.ts:5）。main/host/scheduler 三进程全崩。
+
+**流程罪与罚**：①发版前无打包启动验证（全门禁都是源码级）；②auto-dev-loop 阶段 6 用自拟终审替代 code-review-loop skill（未加载）；③fix-spec 未经复审轮即宣布 ready 且抢跑实现被用户两次叫停。
+
+**修复**：cr-fix-spec 3 轮 review loop 收口（r2 抓到落盘代码块 TS2440）→CR-1/2 源改（createRequire+构造值改名）/CR-3 产物说明符门禁（挂 tsup onSuccess×4，@zcode 反白名单，修复前 6 处零误报命中）/CR-4 启动 e2e 冒烟（红→绿双向）→force-retag 重发。

@@ -1,6 +1,13 @@
 import { readFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import type { DatabaseSync } from "node:sqlite";
+// fork 纪律：tsup 默认 removeNodeProtocol 会把值导入的 node:sqlite 改写为不存在的裸
+// npm 包 "sqlite"，打包产物启动即 ERR_MODULE_NOT_FOUND——createRequire 保真 node: 协议
+// （惯例同 chromeCookieManager.ts:30 / services 各 repo / backup.ts）。
+const { DatabaseSync: DatabaseSyncConstructor } = createRequire(import.meta.url)(
+  "node:sqlite",
+) as typeof import("node:sqlite");
 import { z } from "zod";
 import { BACKUP_DATABASE_FILE } from "./backup.js";
 import { identifier, insertSnapshot, snapshotTable } from "./table-snapshot.js";
@@ -27,7 +34,9 @@ export async function restore(db: DatabaseSync, backupPath: string): Promise<voi
     JSON.parse(await readFile(join(backupPath, "backup.json"), "utf8")),
   );
   if (metadata.skipped) throw new Error("Cannot restore a skipped backup");
-  const backup = new DatabaseSync(join(backupPath, BACKUP_DATABASE_FILE), { readOnly: true });
+  const backup = new DatabaseSyncConstructor(join(backupPath, BACKUP_DATABASE_FILE), {
+    readOnly: true,
+  });
   const foreignKeys = db.prepare("pragma foreign_keys").get()?.foreign_keys === 1;
   try {
     const tables = metadata.tables.map((table) => {

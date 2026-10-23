@@ -126,3 +126,11 @@ pipeline:
   custom_stages:
     - { position: after-stage-10, name: 发布, instruction: 用户要求 omz-publish 发版 v1.0.21（+0.0.1 规则） }
   current: 11
+
+  # v1.0.21 发版事故（启动即崩）修复波次
+  hotfix-release-crash:
+    status: done
+    fix_spec: docs/iterations/upstream-v316-fullsync/cr-fix-spec-release-crash.md
+    review: code-review-loop 3 轮（r1 diff→r2 抓 TS2440+2P2→r3 fix-spec-ready）
+    changes: sqlite-migrations backup/restore 改 createRequire；verify-bundle-imports 门禁挂 tsup onSuccess×4；desktop-launch-smoke e2e（红→绿双向实证）
+    evidence: 修复前扫描器红 6 处零误报+冒烟超时红；修复后 4/4 PASS+50 文件 PASS+冒烟 exit0 stderr 净+typecheck 0+migrationsRunner 绿
