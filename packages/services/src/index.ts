@@ -125,7 +125,12 @@ export type {
   TaskGroupColor,
   TaskGroupStructure,
 } from "./task-groups/contract.js";
-// 远端项目目录契约（类型面；服务实现随 source-server 三期接入，当前 omz 不注册）。
+// 远端项目目录契约（backlog-sweep Step 1-2 起为真实注册面，实现工厂在 node.ts）：
+// createRemoteProjectService / createRemoteProjectConnectionAdmission /
+// remoteProjectHostIdForProfile / remoteProjectHostIdForTarget /
+// prepareRemoteServerConnection / bindRemoteProjectIdentities 这 6 个值导出刻意留在
+// `#src/node.js`——根 index 是 renderer 可见 barrel，实现链引 node:crypto，value 导入
+// 会把 Node 链拉进浏览器包（见本文件 onboarding 段的同款事故注释）。
 export { IRemoteProjectService } from "./remote-projects/contract.js";
 export type {
   RemoteProjectDirectory,
