@@ -1,5 +1,5 @@
-dag_version: 3
-review_round: 3
+dag_version: 4
+review_round: 4
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
@@ -17,7 +17,13 @@ rounds:
     p0: 5
     p1: 10
     p2: 12
-    closed: "P0-1 迁移生产链四接线点+T-RP5；P0-2 remoteProjectConnection 两 hook+调用点；P0-3 Picker host/initialRoots/hostId 派生+T-SB4 新建测试；P0-4 EditConnectionProfileDialog 306L+依赖 hunk 并入 Step9+managementEnabled 翻转；P0-5 tripwire/脚本同步清单（VirtualProject:48-54/RemoteBackfill:112-135+:145-148/package.json:32）；P1 全修（独有面可核对清单/P9 消费缝/services 契约/hostId 消费链/purpose 来源/顺序倒挂/props 8 个/死 import/测试引用）；P2 顺手（380L/entries 已存在/行数/§2.2/第5 setText/TID/i18n 孤儿键/alias 两行）"
+    closed: "迁移生产链四接线点/remoteProjectConnection/Picker host+initialRoots/EditConnectionProfileDialog/tripwire 同步清单；P1 全修"
+  - round: 3
+    verdict: No-Go
+    p0: 2
+    p1: 10
+    p2: 11
+    closed: "P0-1 connectHost 两段落地（Step2 directory 版→Step7 management 版，R2 登记）；P0-2 test:v4-perf 白名单统一要求（Step 1 ⑥）；P1 全修（TaskIndexRepo 四参+9 调用点/purpose 方案 a（SSHDialog workspacePurpose prop+双挂载点）/tripwire :139-143+:149-152/hostId 消费分支/alias 死文件簇+boundary hook 依赖/进度日志接线+sourceServerStatusRegistry/localUsageEvidence 消费/createHasExistingLocalTask/死 import 2 项/onLegacyCapability 并入 Step4）；P2 顺手（setText 5 个统一/行数 381/307/134/300/472/100/i18n 两键 T-SB3+T-PV2/§2.2/openWithFileApplication 更正/Fields 措辞/Step2 register+导出面）"
 notes:
   - "关联事故文档：docs/iterations/backlog-sweep/incident-ghost-message.md（v1.0.22 已修）"
   - "v1.0.22 已发布：Release run 39968021166 success"
