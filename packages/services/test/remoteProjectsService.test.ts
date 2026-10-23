@@ -18,6 +18,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 import {
   buildServerRemoteWorkspaceIdentity,
   remoteHostIdFromWorkspaceIdentity,
+  ZCODE_COMPATIBILITY_MANIFEST,
   type RemoteTarget,
 } from "@zcode/shared";
 import { LEGACY_SINGLE_ROOT_PROJECT_PREFIX } from "../src/project-storage/contract.js";
@@ -35,6 +36,9 @@ import {
 // resolveServerProjectService 的实现在 desktop Host 装配层（remoteWorkspaceServiceCollection.ts），
 // 本批未登记 desktop 测试入口，因此从 services 测试直接驱动同一实现，避免形状断言。
 import { resolveServerProjectService } from "../../desktop/src/host/remoteWorkspaceServiceCollection.js";
+// 换代发布的实现在 desktop 连接管理器：adapter/connectServer/directory 都是构造参数，
+// 可用测试 double 直接驱动真实发布链，替代源码形状断言。
+import { SourceServerConnectionManager } from "../../desktop/src/host/sourceServerConnectionManager.js";
 
 const SERVER_ID = "11111111-1111-4111-8111-111111111111";
 const SSH_TARGET: RemoteTarget = { kind: "ssh", host: "devbox", username: "omz", port: 22 };
@@ -490,4 +494,113 @@ test("T-RP4: resolveServerProjectService 两分支（virtual 转发 / legacy 只
     ];
     for (const write of writes) await assert.rejects(write, /project\.legacy-read-only/);
   }
+});
+
+/**
+ * P2-1（backlog-sweep fix-svc）：Directory 换代确认后旧 Profile 已退役，Manager 的在线发布
+ * 必须挂到 handshake 回执的 effectiveProfile；回执缺席（测试 double）时回落入参 Profile。
+ * manager 的 adapter/connectServer/directory/admission 都是构造参数，这里驱动真实发布链。
+ */
+function createConnectedManager(options: {
+  recordHandshake: (profileId: string) => Promise<unknown>;
+  onCommit?: () => void;
+}): {
+  manager: SourceServerConnectionManager;
+  states: Array<{ profileId: string; state: string }>;
+} {
+  const manager = new SourceServerConnectionManager({
+    createAdapter: () =>
+      ({
+        async probe() {
+          return {
+            installed: true,
+            installedVersion: ZCODE_COMPATIBILITY_MANIFEST.productVersion,
+          };
+        },
+        async ensureDaemon() {
+          return { ingressToken: "ingress-token" };
+        },
+        // 注入 connectServer 后不会走到 openChannel/installOrUpdate；命中即视为夹具失效。
+        async openChannel() {
+          throw new Error("unexpected openChannel");
+        },
+        async installOrUpdate() {
+          throw new Error("unexpected installOrUpdate");
+        },
+      }) as never,
+    connectServer: async () =>
+      ({
+        serverInfo: {
+          serverId: "99999999-9999-4999-8999-999999999999",
+          version: ZCODE_COMPATIBILITY_MANIFEST.productVersion,
+          protocolVersion: 1,
+          authRequired: false,
+          workspaces: [],
+          compatibility: ZCODE_COMPATIBILITY_MANIFEST,
+          capabilities: { desktopContinuous: true, websocketRpc: true },
+        },
+        services: {},
+        dispose() {},
+      }) as never,
+    directory: { recordHandshake: options.recordHandshake as never },
+    admitConnection: async () => async () => {
+      options.onCommit?.();
+    },
+  });
+  const states: Array<{ profileId: string; state: string }> = [];
+  manager.onDidChangeState((state) =>
+    states.push({ profileId: state.profileId, state: state.state }),
+  );
+  return { manager, states };
+}
+
+test("P2-1: 换代确认后在线发布改挂 effectiveProfile（旧 Profile 收敛 offline）", async () => {
+  const OLD_PROFILE_ID = "11111111-1111-4111-8111-111111111111";
+  const NEW_PROFILE_ID = "22222222-2222-4222-8222-222222222222";
+  let commits = 0;
+  const { manager, states } = createConnectedManager({
+    recordHandshake: async () => ({
+      identityChanged: true,
+      migrationFailures: [],
+      effectiveProfileId: NEW_PROFILE_ID,
+      effectiveProfile: { profileId: NEW_PROFILE_ID },
+    }),
+    onCommit: () => (commits += 1),
+  });
+  const managed = await manager.connect({
+    profile: {
+      profileId: OLD_PROFILE_ID,
+      transport: "ssh",
+      sourceServerId: "source-before-reinstall",
+    },
+    target: SSH_TARGET,
+    // 用户已确认「重装后的 Source 是新设备」，Directory 才会提交换代。
+    confirmIdentityChange: true,
+  });
+  assert.equal(managed.profileId, NEW_PROFILE_ID, "在线发布必须挂新 Profile");
+  assert.equal(commits, 1, "身份收敛后仍需完成成员 commit");
+  assert.equal(manager.getStateByProfile(NEW_PROFILE_ID).state, "online");
+  assert.equal(
+    manager.getStateByProfile(OLD_PROFILE_ID).state,
+    "offline",
+    "退役 Profile 不得留在在线态",
+  );
+  assert.ok(
+    !states.some((event) => event.profileId === OLD_PROFILE_ID && event.state === "online"),
+    "旧 Profile 不得收到 online 事件（设备卡按 profileId 派生 Source 身份）",
+  );
+});
+
+test("P2-1: handshake 回执缺 effectiveProfile 时回落入参 Profile（测试 double 路径）", async () => {
+  const PROFILE_ID = "33333333-3333-4333-8333-333333333333";
+  const { manager } = createConnectedManager({
+    recordHandshake: async () => ({ identityChanged: false, migrationFailures: [] }),
+  });
+  const managed = await manager.connect({
+    profile: { profileId: PROFILE_ID, transport: "ssh", sourceServerId: "source-before-reinstall" },
+    target: SSH_TARGET,
+    confirmIdentityChange: true,
+  });
+  assert.equal(managed.profileId, PROFILE_ID);
+  assert.equal(manager.getStateByProfile(PROFILE_ID).state, "online");
 });
