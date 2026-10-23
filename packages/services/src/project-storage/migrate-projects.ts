@@ -112,9 +112,29 @@ export function migrateConnectionHostsOnUpgrade(
 ): void {
   // 远端持库身份（daemon）不读取控制端连接 settings；本机表也不应含远端权威项目。
   if ((context.hostId ?? "local") !== "local") return;
+  const now = (context.now ?? Date.now)();
   for (const [legacyId, stableId] of migrateConnectionHosts(db, context.settings)) {
     if (legacyId === stableId) continue;
+    // Bug 原因：地址派生 host 与稳定 Source host 可能各有一行同名未删项目，直接 UPDATE
+    // 会撞 idx_projects_host_name 部分唯一索引（schema.ts:16），runner 整体回滚导致 Host
+    // 起不来（runner.ts:109-112）。去重口径与 deleteProject 同形：保留稳定侧，软删 legacy
+    // 侧同名行；tasks.project_id 不改指，任务仍可读。
+    db.prepare(`UPDATE projects SET deleted=1,deleted_at=?,updated_at=?
+      WHERE host_id=? AND deleted=0
+      AND name IN (SELECT name FROM projects WHERE host_id=? AND deleted=0)`).run(
+      now,
+      now,
+      legacyId,
+      stableId,
+    );
     db.prepare("UPDATE projects SET host_id=? WHERE host_id=?").run(stableId, legacyId);
+    // 入口侧同理：UNIQUE(host_id,remote_project_id)（schema.ts:20）冲突会整体回滚。判定与
+    // remote-projects/index.ts:237-246 bindHost 一致——保留稳定侧入口，删 legacy 侧冲突行。
+    db.prepare(`DELETE FROM remote_project_entries WHERE host_id=? AND remote_project_id IS NOT NULL
+      AND remote_project_id IN (SELECT remote_project_id FROM remote_project_entries WHERE host_id=?)`).run(
+      legacyId,
+      stableId,
+    );
     db.prepare("UPDATE remote_project_entries SET host_id=? WHERE host_id=?").run(
       stableId,
       legacyId,
