@@ -1,4 +1,4 @@
-## [未发布]（upstream-v316-fullsync 迭代）
+## [1.0.21](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.20...v1.0.21) (2026-10-23)
 
 ### 新增
 
