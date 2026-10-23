@@ -4,7 +4,10 @@ export type NodeReplOperation = "run" | "reset" | "add-module-dir";
 
 export interface NodeReplDisplayImage {
   base64: string;
-  /** 大图由 display 直接下发的资源链接；存在时优先于 base64 内嵌。 */
+  /**
+   * 上游 display 的「资源链接」图源形态；本仓暂无生产者
+   * （CLI result-display 只产出 `{base64, mimeType}`），保留读取兼容。存在时优先于 base64 内嵌。
+   */
   src?: string;
   mimeType: string;
 }
@@ -291,7 +294,8 @@ function extractImages(values: unknown[]): NodeReplDisplayImage[] {
     // 使用 content 里的 {type:"image",data,mimeType}。专用 renderer 必须兼容两种历史形态。
     const base64 = readNonEmptyString(value.base64) ?? readNonEmptyString(value.data);
     const mimeType = readNonEmptyString(value.mimeType)?.trim();
-    // 带 src 的图片可以没有内嵌 base64：两者至少其一即可入列。
+    // 上游形态里存在只带 src 的图片（资源链接下发、不带内嵌 base64）；本仓暂无生产者，
+    // 这里保留读取兼容：两者至少其一即可入列。
     const src = readNonEmptyString(value.src);
     if ((!base64 && !src) || !mimeType || !IMAGE_MIME_TYPE_PATTERN.test(mimeType)) {
       return;
@@ -311,7 +315,8 @@ function extractImages(values: unknown[]): NodeReplDisplayImage[] {
       return;
     }
     if (!isRecord(value)) return;
-    // src-only 图片（资源链接下发、不带内嵌 base64）也必须能进入 addImage，否则整张图被静默丢弃。
+    // src-only 图片（上游资源链接形态、不带内嵌 base64；本仓暂无生产者，属保留兼容）
+    // 也必须能进入 addImage，否则整张图被静默丢弃。
     if (value.type === "image" || "base64" in value || "src" in value) addImage(value);
     for (const child of Object.values(value)) visit(child);
   };

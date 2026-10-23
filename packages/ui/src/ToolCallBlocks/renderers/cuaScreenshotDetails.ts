@@ -64,8 +64,9 @@ export function buildCuaScreenshotDetails(
   const text = `${collectText(toolCall.output)}\n${collectText(rawOutput)}`;
   const dimensions = /(?:(?:Full-screen\s+)?screenshot|Zoom image)\s+(\d+)x(\d+)px/iu.exec(text);
   const attachedMime = /\[Attached\s+(image\/[a-z0-9.+-]+):/iu.exec(text)?.[1] ?? null;
-  // 实时链路的截图图源由共享图源字段下发（与原生渲染同一份数据），
-  // 优先于历史形态里内嵌在 output/raw 的 base64 data URL。
+  // 上游共享只读时间线的时间线图源形态（sharedImageSrc，与原生渲染同一份数据）：
+  // 本仓暂无生产者（ConversationShareReadonlyTimeline 未移植），这里只保留读取兼容；
+  // 命中时仍优先于历史形态里内嵌在 output/raw 的 base64 data URL。
   const sharedImageSrc = asRecord(toolCall.raw)?.sharedImageSrc;
   const dataUrl =
     (typeof sharedImageSrc === "string" ? sharedImageSrc : null) ??
