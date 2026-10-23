@@ -62,6 +62,7 @@ import {
   type RichMentionPart,
 } from "@/mentions/mentionMarkdown.js";
 import type { MentionItemData } from "@/mentions/mentionTypes.js";
+import { isMentionAlreadyPresent } from "@/mentions/mentionTypes.js";
 import type { ComposerMentionPrefill } from "@/store/zcodeSessionStoreTypes.js";
 
 /** 旧 useChatComposer 已删；粘贴事件收口为最小结构类型（ClipboardEvent 结构兼容）。 */
@@ -308,9 +309,7 @@ function prependEditorMentionIfMissing(
         .getAllTextNodes()
         .some(
           (node) =>
-            $isPromptMentionNode(node) &&
-            node.getMention().category === mention.category &&
-            node.getMention().value === mention.value,
+            $isPromptMentionNode(node) && isMentionAlreadyPresent(node.getMention(), mention),
         );
       if (alreadyPresent) return;
 
