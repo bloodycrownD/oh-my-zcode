@@ -330,7 +330,20 @@ function resolveRichMentionPart(
   if (!isRichMentionFileDestination(destination)) return null;
 
   if (label.startsWith("$")) {
-    return { category: "skills", label: label.slice(1), value: destination, markdown };
+    // 与 skills provider 同形（`skillsMentionProvider`：`value: skill.name`、
+    // `data: { path, scope }`）。`value` 必须是技能名：`prependMentionIfMissing` 按
+    // `category + value` 去重，这里若放技能路径，恢复出的 chip 与同技能的 provider/prefill chip
+    // 永远互相认不出，同一技能会重复插入（composer/B-6）。
+    // 恢复态推不出的两处（markdown 只有 name/path），故与 provider 只保证部分同形：
+    // 1) id 只能是 `skill:<name>`（provider 是 `skill:${skill.id}`，id 由 buildSkillId 派生）；
+    // 2) `data.scope` 不可知，data 只给 `{ path }`。
+    return {
+      category: "skills",
+      label: label.slice(1),
+      value: label.slice(1),
+      markdown,
+      data: { path: destination },
+    };
   }
 
   const kind = isDirectoryMentionDestination(destination) ? "directory" : "file";

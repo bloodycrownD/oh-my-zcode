@@ -25,6 +25,8 @@ import {
   type RichMentionSegment,
 } from "../src/mentions/mentionMarkdown.js";
 import { mapWorkspaceFileToMentionItem } from "../src/mentions/providers/fileMentionProvider.js";
+import { mapSkillsToMentionItemsForTest } from "../src/mentions/providers/skillsMentionProvider.js";
+import { isMentionAlreadyPresent } from "../src/mentions/mentionTypes.js";
 
 const FENCE = "`".repeat(3);
 const TILDE_FENCE = "~".repeat(3);
@@ -114,7 +116,12 @@ test("T-PR1-2: 各分类的 label/value/data 还原口径", () => {
   )[0];
   assert.equal(skill?.category, "skills");
   assert.equal(skill?.label, "code-review", "skill label 去掉 $ 前缀");
-  assert.equal(skill?.value, "./skills/cr.md");
+  assert.equal(
+    skill?.value,
+    "code-review",
+    "skill value 是技能名（与 provider `value: skill.name` 同口径）",
+  );
+  assert.deepEqual(skill?.data, { path: "./skills/cr.md" }, "skill 的路径落 data.path");
 
   const session = mentionsOf(
     parseMentionMarkdownRich(buildSessionMentionMarkdown("sess_x9", "标题")),
@@ -345,4 +352,52 @@ test("T-PR1-9: 段落装配——整篇先解析，fence 跨空行不被误转 c
 
   // 空输入仍然装配成一个空段落（与 replaceEditorText 的 split 结果一致）。
   assert.deepEqual(splitRichMentionParagraphs([]), [[]]);
+});
+
+test("T-PR1-10: skill chip 与 skills provider 同形，去重键 category+value 互认（B-6）", () => {
+  const skillPath = "./skills/cr.md";
+  const restored = mentionsOf(
+    parseMentionMarkdownRich(buildSkillMentionMarkdown("code-review", skillPath)),
+  )[0];
+  assert.ok(restored, "恢复态 skill chip 必须还原");
+
+  // provider 侧同一技能：path 与 markdown 里的不同，但 name 相同即同一技能（身份是 name）。
+  const providerSkill = mapSkillsToMentionItemsForTest([
+    {
+      id: "skill-cr",
+      name: "code-review",
+      description: "代码评审",
+      path: "/home/user/.omz/skills/cr.md",
+      scope: "user",
+    },
+  ])[0];
+  assert.ok(providerSkill, "provider 必须产出该技能");
+
+  assert.equal(restored.value, "code-review", "① value 是技能名（provider `value: skill.name`）");
+  assert.equal(restored.data?.path, skillPath, "② 路径落 data.path（markdown 目的地）");
+  assert.equal(restored.label, providerSkill.label, "③ label 与 provider label 一致");
+
+  // 去重键 = category + value：同一技能（name 相同、path 不同）必须互认为已存在，
+  // 否则恢复态 chip 与同技能 provider/prefill chip 会重复插入。
+  assert.equal(isMentionAlreadyPresent(providerSkill, restored), true);
+  assert.equal(isMentionAlreadyPresent(restored, providerSkill), true);
+  assert.equal(
+    isMentionAlreadyPresent(providerSkill, { category: "skills", value: "code-review-pro" }),
+    false,
+    "不同技能不互认",
+  );
+  assert.equal(
+    isMentionAlreadyPresent(providerSkill, { category: "files", value: "code-review" }),
+    false,
+    "同名但跨 category 不互认",
+  );
+  // 反向守卫：把技能路径当身份（修复前的 value 口径）时，同技能会互不相认 —— 这正是 B-6 的病因。
+  assert.equal(
+    isMentionAlreadyPresent(providerSkill, { category: "skills", value: skillPath }),
+    false,
+    "路径不能当技能身份",
+  );
+
+  // 恢复态推不出的两处必须显式留白（不是遗漏）：id 只能到 skill:<name>，data 没有 scope。
+  assert.equal("scope" in (restored.data ?? {}), false, "markdown 推不出 scope，data 只保证 path");
 });

@@ -50,3 +50,18 @@ export interface MentionCategoryResult {
   title: string;
   refresh?: () => Promise<void>;
 }
+
+/**
+ * mention 去重键：`category + value`（与 `prependEditorMentionIfMissing` 的插入前判定同源）。
+ *
+ * 恢复态 chip 与 provider/prefill chip 必须是同一把尺子，否则同一引用会出两枚 chip：
+ * - skills：value 是技能名（provider `value: skill.name`，恢复态同口径）；
+ * - files：value 是去掉尾斜杠的相对路径或绝对路径（provider 与恢复态同口径）。
+ * 同一技能不同 path 仍视为同一条——名称才是技能身份，路径只是来源。
+ */
+export function isMentionAlreadyPresent(
+  existing: Pick<MentionItem, "category" | "value">,
+  candidate: Pick<MentionItem, "category" | "value">,
+): boolean {
+  return existing.category === candidate.category && existing.value === candidate.value;
+}
