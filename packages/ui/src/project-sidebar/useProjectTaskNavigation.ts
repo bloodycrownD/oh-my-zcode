@@ -1,12 +1,15 @@
-// 照搬上游 v3.16.2 并 omz 化：
+// 照搬上游 v3.16.2 并 omz 化（P7 末批接线）：
 // ①web-remote-control 快路径不搬（relay v1 面，P9 清理）；
-// ②远端项目 attach 分支不触发（IRemoteProjectService P4 恒缺席），保留参数形状兼容三期回补。
+// ②远端项目 attach 分支本批接真（IRemoteProjectService 已注册，attachRemoteProjectWorkspace
+//   消费 connectHost/readDirectory 投影面）。
 import { useCallback, useLayoutEffect, useRef } from "react";
 import type {
   ProjectSidebarProps,
   ProjectTree,
   IRemoteProjectService,
 } from "@/project-sidebar/contract.js";
+import { attachRemoteProjectWorkspace } from "@/project-sidebar/remote-navigation.js";
+import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { logger } from "@/logger.js";
 import { toast } from "@/components/ui/toast.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -56,12 +59,30 @@ export function useProjectTaskNavigation(
           item.taskId === taskId &&
           (item.workspaceIdentity || item.workspacePath) === (identity || path),
       );
-      // omz P4：仅本机 Host；identity/远端绑定分支随 source-server 三期回补。
       if (identity && task && remoteService) {
         const directory = await remoteService.readDirectory();
         if (!isCurrent()) return;
         if (directory.hosts.some((host) => host.id === task.hostId)) {
-          // 远端绑定链缺席：保持原样交由 onSelectTask 的现有 attachment 路由。
+          // 打开远端任务才申请/绑定 logical attachment；连接与绑定都会等待远端，
+          // 导航取消（isCurrent 失效）回收本次新建 attachment，不取消其他项目复用的连接。
+          remoteSessionId = await attachRemoteProjectWorkspace({
+            hostId: task.hostId,
+            workspacePath: path,
+            workspaceIdentity: identity,
+            remoteService,
+            isCurrent,
+            // omz 化：identity→session 走 store 的绑定索引（RemoteWorkspaceSession 无
+            // workspaceIdentity 字段，上游按会话字段过滤）。
+            findSession: (key) => {
+              const state = useRemoteWorkspaceSessionStore.getState();
+              const sessionId = state.sessionIdByWorkspaceIdentity[key];
+              return sessionId ? state.sessionsById[sessionId] : undefined;
+            },
+            connect: props.onConnectRemote,
+            bind: (sessionId, workspacePath, guard) =>
+              props.onSelectRemoteProject(sessionId, workspacePath, undefined, identity, guard),
+            cancel: props.onCancelRemoteProject,
+          });
         }
       }
       props.onSelectTask(path, taskId, identity, remoteSessionId, unreadAt);

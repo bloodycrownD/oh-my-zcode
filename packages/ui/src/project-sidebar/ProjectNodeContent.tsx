@@ -1,10 +1,11 @@
-// 照搬上游 v3.16.2 并 omz 化（remote 缝收拢，接口形状保留三期回补）：
-// ①RemoteIdentityHoverCard → 直通包装（远端身份悬浮卡随 source-server 三期回补）；
+// 照搬上游 v3.16.2 并 omz 化（P7 末批 Remote* 回填后的状态）：
+// ①RemoteIdentityHoverCard → 真组件（本批回填，消费 remoteHost/diagnostics/deviceLabel）；
 // ②RemoteHostSection.remoteHostLabel → 本地 hostId 兜底标签；
 // ③RemoteConnectionStateIcon + resolveRemoteConnectionPresentation → 本地图标分支恒走；
 // ④SidebarNativeTooltip → omz ControlHintTooltip 无此导出，legacy 徽标直出。
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
-import { memo, type ReactNode } from "react";
+import { memo } from "react";
+import { RemoteIdentityHoverCard } from "@/project-sidebar/RemoteIdentityHoverCard.js";
 import type { useSortable } from "@dnd-kit/sortable";
 import {
   Ellipsis,
@@ -73,11 +74,6 @@ export type ProjectNodeProps = {
   onOpenDeviceSettings?(): void;
 };
 
-/** 远端身份悬浮卡的 omz 缝：P4 无远端 Host，直接透传 children。 */
-function RemoteIdentityHoverCardSlot({ children }: { children: ReactNode }) {
-  return <>{children}</>;
-}
-
 // 原因：useSortable 的激活/测量/落点更新曾让 41 个项目的菜单和 Tooltip 连续重渲染。
 // 外壳只把稳定的激活器属性传入 memo 内容，位移和蓝线变化不穿透到整棵内容树。
 export const ProjectNodeContent = memo(function ProjectNodeContent({
@@ -114,8 +110,7 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
   const { intl } = useZCodeIntl();
   const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
   // 修复原因：新项目行曾无条件显示本地文件夹；远程图标只读 Host 现有投影，复用统一五态。
-  // omz：remoteHost 在场才会出现远端投影；P4 无远端服务，连接展示模型恒缺席。
-  void diagnostics;
+  // P7 末批：diagnostics/remoteHost 由 RemoteIdentityHoverCard 消费（连接错误与身份详情）。
   const primaryRootDisabledReason =
     project.primaryRootStatus === "missing"
       ? msg("primaryRootMissing")
@@ -180,7 +175,15 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
     <>
       <ContextMenu modal={false}>
         {/* 标题区域不含行尾按钮，作为锚点时浮层会遮住操作；以整行边界定位，保留更多/新建入口可点击。 */}
-        <RemoteIdentityHoverCardSlot>
+        <RemoteIdentityHoverCard
+          host={remoteHost}
+          title={project.name}
+          projectName={project.name}
+          deviceName={deviceLabel}
+          paths={project.roots.map((root) => root.rootPath)}
+          connectionError={diagnostics?.error}
+          onOpenDeviceSettings={onOpenDeviceSettings}
+        >
           <ContextMenuTrigger asChild>
             <div
               data-testid="virtual-project-row"
@@ -357,7 +360,7 @@ export const ProjectNodeContent = memo(function ProjectNodeContent({
               </div>
             </div>
           </ContextMenuTrigger>
-        </RemoteIdentityHoverCardSlot>
+        </RemoteIdentityHoverCard>
         {/* 非模态菜单只负责导航，避免退出动画与编辑弹窗交错后残留指针锁。 */}
         <ContextMenuContent>
           <ProjectMenuItems actions={contextActions} context />

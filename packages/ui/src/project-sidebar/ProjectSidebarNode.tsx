@@ -1,8 +1,10 @@
-// 照搬上游 v3.16.2 并 omz 化（remote 缝收拢）：
-// ①remoteActions/connect/onRemoveEntry/设备设置跳转不触发（远端服务 P4 恒缺席）；
-// ②isWebRemoteControl 恒 false。
+// 照搬上游 v3.16.2 并 omz 化（P7 末批 Remote* 回填接线）：
+// ①connect/onRemoveEntry/设备设置跳转——前两者本批接真（IRemoteProjectService 已注册），
+//   设备设置跳转随 P9 设置页批（omz 设置无 remoteDevices 段）挂账；
+// ②isWebRemoteControl 恒 false（omz 无手机远控项目侧栏）。
 import { memo } from "react";
 import { shallow } from "zustand/shallow";
+import { Plug } from "lucide-react";
 import type {
   IProjectService,
   IRemoteProjectService,
@@ -10,6 +12,7 @@ import type {
   ProjectSidebarProps,
   VirtualProject,
 } from "@/project-sidebar/contract.js";
+import { buildRemoteHostWorkspaceIdentity } from "@/project-sidebar/contract.js";
 import { ProjectNode } from "@/project-sidebar/ProjectNode.js";
 import type { ProjectNodeProps } from "@/project-sidebar/ProjectNodeContent.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
@@ -38,7 +41,7 @@ type Props = Pick<
   | "onSelect"
   | "refresh"
 > &
-  Pick<ProjectSidebarProps, "isDesktop" | "onCreateTask"> & {
+  Pick<ProjectSidebarProps, "isDesktop" | "onCreateTask" | "onReconnectRemoteWorkspace"> & {
     service?: IProjectService;
     remoteService?: IRemoteProjectService;
     onExpandedChange(project: VirtualProject, expanded: boolean): void;
@@ -52,8 +55,12 @@ type Props = Pick<
 export const ProjectSidebarNode = memo(
   function ProjectSidebarNode({
     project,
+    remoteHost,
     service,
+    remoteService,
+    isDesktop,
     onCreateTask,
+    onReconnectRemoteWorkspace,
     onExpandedChange,
     onEdit,
     onViewFiles,
@@ -64,19 +71,56 @@ export const ProjectSidebarNode = memo(
     const confirm = useConfirmDialog();
     useTabStoreApi();
     const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
-    const { refresh } = display;
+    // P9 挂账：设备设置跳转需 omz 设置「远程设备」段（setPendingSettingsSectionIntent
+    // "remoteDevices"）；段位就位前不注入该 action，悬浮卡 pending 态只有详情无跳转。
+    const { refresh, availability } = display;
     return (
       <ProjectNode
         {...display}
         project={project}
-        remoteHost={display.remoteHost}
-        additionalActions={[...remoteActions(project)]}
+        remoteHost={remoteHost}
+        additionalActions={[
+          ...remoteActions(project),
+          ...(remoteHost && remoteHost.connectionStatus !== "online"
+            ? [
+                {
+                  id: "connect",
+                  label: msg("connect"),
+                  icon: Plug,
+                  run: () =>
+                    runProjectAction(async () => {
+                      // 远端连接仍经现有意图分派，保留缺凭据、安装和升级流程。
+                      if (isDesktop && project.roots[0] && onReconnectRemoteWorkspace) {
+                        await onReconnectRemoteWorkspace(
+                          buildRemoteHostWorkspaceIdentity(
+                            project.hostId,
+                            project.roots[0].rootPath,
+                          ),
+                        );
+                      } else {
+                        await remoteService!.connectHost(project.hostId);
+                      }
+                      await refresh();
+                    }),
+                },
+              ]
+            : []),
+        ]}
         onExpandedChange={(expanded) => onExpandedChange(project, expanded)}
+        onRemoveEntry={() =>
+          runProjectAction(async () => {
+            const entryId = availability?.entryId;
+            if (!entryId || !remoteService) throw new Error("remote-project.entry-not-found");
+            await remoteService.removeEntry(entryId);
+            await refresh();
+          })
+        }
         onCreate={() =>
           runProjectAction(async () => {
             onCreateTask({
               projectId: project.id,
               taskGroupId: null,
+              ...(remoteHost ? { hostId: project.hostId } : {}),
             });
           })
         }

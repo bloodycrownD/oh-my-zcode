@@ -1,5 +1,6 @@
 // 照搬上游 v3.16.2 并 omz 化：
-// ①useSourceServerDisplayNames 不搬（source-server 三期回补），deviceNames 恒为空表；
+// ①P7 末批：deviceNames 改为 directory.hosts 投影（remoteHostLabel）——设备显示名权威
+//   （useSourceServerManagementSnapshot 的 displayName）随 P9 设置页批换装；
 // ②useTaskGroups 已随 P4.1 接真（ITaskGroupService 由 node.ts 注册 + client 出代理；
 //   accessor 缺席时 available=false 降级空结构）。omz 旧侧栏 organizeGrouped 并存不删。
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from "react";
@@ -8,6 +9,7 @@ import { countProjectTreeUnreadTasks, selectSortedProjects } from "@/project-sid
 import { useProjectTree } from "@/project-sidebar/useProjectTree.js";
 import { useProjectSidebarPreferences } from "@/project-sidebar/useProjectSidebarPreferences.js";
 import { useTaskGroups } from "@/project-sidebar/useTaskGroups.js";
+import { remoteHostLabel } from "@/project-sidebar/RemoteHostSection.js";
 import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 
 function useDirectoryState(isDesktop: boolean) {
@@ -26,6 +28,10 @@ function useDirectoryState(isDesktop: boolean) {
     const sorted = preferences.sort(sortedProjects);
     return [...sorted.filter((p) => p.pinned), ...sorted.filter((p) => !p.pinned)];
   }, [sortedProjects, preferences.order]);
+  const deviceNames = useMemo(
+    () => new Map(result.directory.hosts.map((host) => [host.id, remoteHostLabel(host)])),
+    [result.directory.hosts],
+  );
   // Context 不受消费方 memo 保护；父级更新 children 时，等价目录不能再次广播。
   return useMemo(
     () => ({
@@ -33,9 +39,9 @@ function useDirectoryState(isDesktop: boolean) {
       preferences,
       projects,
       groups,
-      deviceNames: new Map<string, string>(),
+      deviceNames,
     }),
-    [result, preferences, projects, groups],
+    [result, preferences, projects, groups, deviceNames],
   );
 }
 const Context = createContext<ReturnType<typeof useDirectoryState> | null>(null);

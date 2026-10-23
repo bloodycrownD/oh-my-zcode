@@ -1,6 +1,8 @@
-// 照搬上游 v3.16.2 project-sidebar/index.tsx 并 omz 化（P4 首批范围收口 + P4.1 补全批）：
-// ①Remote* 全家/useProjectRemoteSync/useProjectConnectionDiagnostics/web-remote-control 面剔除
-//   （随 phase-remote-ux 三期回补）；
+// 照搬上游 v3.16.2 project-sidebar/index.tsx 并 omz 化（P4 首批范围收口 + P4.1 补全批
+// + P7 末批 Remote* 接线）：
+// ①P7 末批：useProjectRemoteSync/useProjectConnectionDiagnostics/RemoteProjectPicker 消费
+//   面接线（remoteHost/deviceLabel/diagnostics/remoteActions/dialog 挂载）；remotePicker
+//   触发面（设备行入口）随 P3 持久化批挂账（omz 投影 entries 恒空，入口流不可达）；
 // ②P4.1：ProjectCreation/ProjectEditor 真组件挂载（编辑/新建入口自 toast 占位换真，
 //   上游 index.tsx 同款 creating/editor state）；归档管理入口挂设置页（ArchiveManagement）；
 // ③P4.1 拍板②：ProjectComposerMenu chip 挂项目树头部作为「新建项目」入口，
@@ -14,6 +16,8 @@ import type { ProjectSidebarProps, VirtualProject } from "@/project-sidebar/cont
 import { useProjectPinIntent } from "@/project-sidebar/useProjectPinIntent.js";
 import { ProjectTaskListContext } from "@/project-sidebar/ProjectTaskListContext.js";
 import { useProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
+import { useProjectRemoteSync } from "@/project-sidebar/useProjectRemoteSync.js";
+import { useProjectConnectionDiagnostics } from "@/project-sidebar/useProjectConnectionDiagnostics.js";
 import { useProjectTaskNavigation } from "@/project-sidebar/useProjectTaskNavigation.js";
 import { SortableProjects } from "@/project-sidebar/SortableProjects.js";
 import {
@@ -21,6 +25,7 @@ import {
   selectSortedProjects,
   projectKey,
   projectHasUnread,
+  projectSourceServerId,
 } from "@/project-sidebar/view.js";
 import { ProjectTaskRows } from "@/project-sidebar/ProjectTaskRows.js";
 import {
@@ -41,17 +46,21 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   const {
     tree: authoritativeTree,
     // P7 续批接通：目录投影来自 useProjectTree（sourceServerDirectory 数据面经
-    // IRemoteProjectService）；Remote* 组件挂载随后续批回补，此处先消除硬编码空集。
+    // IRemoteProjectService）；Remote* 组件挂载随 P7 末批接线。
     directory,
     service,
+    remoteService,
     availability,
     refresh,
     error,
     loading,
     preferences,
+    deviceNames,
   } = useProjectDirectory();
   const { tree, pin } = useProjectPinIntent(authoritativeTree);
-  const onSelectTask = useProjectTaskNavigation(props, tree);
+  const remoteSync = useProjectRemoteSync(directory);
+  const diagnostics = useProjectConnectionDiagnostics(directory, props);
+  const onSelectTask = useProjectTaskNavigation(props, tree, remoteService);
   const { intl } = useZCodeIntl();
   const tabStore = useTabStoreApi();
   const { view, setView } = preferences;
@@ -101,6 +110,9 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
     <ProjectSidebarNode
       key={projectKey(project)}
       project={project}
+      deviceLabel={deviceNames.get(projectSourceServerId(project) ?? "")}
+      remoteHost={directory.hosts.find((host) => host.id === project.hostId)}
+      diagnostics={diagnostics.get(project.hostId)}
       expanded={preferences.isExpanded(project)}
       onExpandedChange={preferences.setExpanded}
       hasUnread={projectHasUnread(authoritativeTree, project)}
@@ -113,11 +125,13 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
       onSelect={onSelectTask}
       refresh={refresh}
       service={service}
+      remoteService={remoteService}
       isDesktop={props.isDesktop}
       onCreateTask={props.onCreateTask}
+      onReconnectRemoteWorkspace={props.onReconnectRemoteWorkspace}
       onEdit={setEditor}
       onViewFiles={undefined}
-      remoteActions={() => []}
+      remoteActions={remoteSync.actions}
     />
   );
   return (
@@ -264,6 +278,8 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
               onDeleted={refresh}
             />
           ) : null}
+          {/* 远端同步菜单（skills/mcp/plugins）的对话框 owner；actions 由 ProjectSidebarNode 消费。 */}
+          {remoteSync.dialog}
         </aside>
       </SidebarTooltipProvider>
     </ProjectTaskListContext.Provider>

@@ -34,12 +34,10 @@ interface SyncTarget {
 }
 
 /** 同步菜单只适配已有 workspace attachment；不因展示菜单创建 tab、连接或 Agent。 */
-export function useProjectRemoteSync(
-  // omz 化：ProjectSidebarProps 无 isWebRemoteControl（relay 面剔除）——omz 项目侧栏
-  // 恒为 desktop-continuous 客户端；保留可选形参兼容上游调用形状。
-  props: { isWebRemoteControl?: boolean },
-  directory: RemoteProjectDirectory,
-) {
+export function useProjectRemoteSync(directory: RemoteProjectDirectory) {
+  // omz 化：上游首参 props.isWebRemoteControl 决定 clientMode（web-remote-replayable /
+  // desktop-continuous）；omz 项目侧栏无手机远控面（relay v1 剔除），恒 desktop-continuous，
+  // 故收掉该形参；shouldShowRemoteSyncActions 走 omz ssh/wsl 现状口径。
   const base = useBaseWorkspaceServices();
   // omz 化：RemoteWorkspaceSession 无 workspaceIdentity 字段（identity 绑定在
   // sessionIdByWorkspaceIdentity 映射），等价改读该索引。
@@ -63,8 +61,7 @@ export function useProjectRemoteSync(
     selection &&
     selectedHost &&
     sessionIdByWorkspaceIdentity[selection.identity] === selection.sessionId &&
-    selectedSession &&
-    !props.isWebRemoteControl
+    selectedSession
       ? selection
       : null;
   useEffect(() => {
@@ -85,7 +82,7 @@ export function useProjectRemoteSync(
           !shouldShowRemoteSyncActions({
             remoteSessionId: session?.sessionId,
             remoteTarget: host.target,
-            clientMode: props.isWebRemoteControl ? "web-remote-replayable" : "desktop-continuous",
+            clientMode: "desktop-continuous",
             hasLocalSourceService,
           }) ||
           !session
@@ -112,7 +109,7 @@ export function useProjectRemoteSync(
         }));
       });
     },
-    [directory.hosts, sessions, sessionIdByWorkspaceIdentity, props.isWebRemoteControl, hasLocalSourceService, tabs, intl],
+    [directory.hosts, sessions, sessionIdByWorkspaceIdentity, hasLocalSourceService, tabs, intl],
   );
   return {
     actions,
