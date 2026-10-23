@@ -42,6 +42,7 @@ node_status:
   impl-r3e: { status: done, head_sha: 310f7d91, executor: subagent, commits: [1acbeba7, 50f8af7e, a2f4e7f7, 73b78e98, 310f7d91], note: "host IRemoteProjectService 注册链+Remote* 19 文件回填+占位拆除+拍板 A（向导壳/Dialog 不搬，UI 保 omz）；admitConnection 裁量不补；fmt 事故 2141 文件已回滚重验" }
   verify-r3cde: { status: done, executor: main, evidence: "T-RU1/2 5/5+T-RU3 5/5（tsx 形态）+T-RU9 6/6；95 文件 mc 误碰 0" }
   cr-func-r3cde: { status: done, func_ready: yes, agent: agent_43d0fe3d, note: "0 P1/P2；schema 两支从上游 git 对象独立复算吻合；主链切换五层核实+无双重连接；61/61 独立复跑；P3 三条已闭（用例表补登/术语勘误/格式残留纪律登记）；拍板 A/B 均接受" }
+  impl-ts: { status: done, head_sha: 4987f5d1, executor: subagent, commits: [c472b29c, d41ce699, 20bd981b, d04fcf8e, 00c9f21d, 808825dc, 9462ff65, 4987f5d1], note: "推演通过且修正落地序（暴露决策→公告→MC transform→双投影；spec 预定序不可行因 MC 文本化丢 tool_reference）；shouldDefer=内置恒常驻/MCP 默认 defer+alwaysLoad 豁免；D4 渗入 0；MC 654/0；relay v1 清理全仓 0 命中；native×MC 降级面登记" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
@@ -51,9 +52,6 @@ spec_deviations:
 manual_user_pending:
   - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
   - "T-QA-bugAB（bug A 编辑旧消息真机复测——重点修复前旧会话的持久化 intent.text fact；bug B 中断后输入入队/继续/立即发送三动作真机验收）"
-manual_user_pending:
-  - "T-CP3（C1 合并入口真机验收：选模型不关菜单/滑杆/触发器三态/退场保底切换）"
-spec_deviations:
   - { id: DEV-i18n-1, desc: 死键清除口径 14→165（omz 基线 conversationShare.* 全量，零引用实测）, status: closed, 落盘: 仲裁表附录 B }
   - { id: DEV-i18n-2, desc: 上游 zh/en 单侧 3 键不采（parity 门禁），待后续 phase UI 移植双侧补齐, status: closed, 落盘: 仲裁表第二节 }
   - { id: DEV-i18n-3, desc: 品牌断言口径收窄到采纳值（基线受保护键值/协议字面量登记不改）, status: closed, 落盘: 仲裁表附录 C + 报告断言口径 }
@@ -92,10 +90,6 @@ wave_plan:
   - [verify-ts]                    # T-TS1/2+MC 全套复跑
   - [cr-func-ts-relay]             # 含 T-RV1
   - [gates]                        # Step 21 T-G1 全门禁聚合（executor: main）
-node_status: {}
-open_must_fix: []
-spec_deviations: []
-manual_user_pending: []            # T-CP3/T-VU2/T-RM3/T-RM4 真机项随各 phase 挂账
 blocking_steps: [1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,20a,20b,20c,21]  # 19 blocking:no
 notes: >
   phase-i18n 完成备注：settings.toolSearch.* 本轮仅采 auto/local/off 三枚举值键——父键/描述/
