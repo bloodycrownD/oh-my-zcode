@@ -147,6 +147,13 @@ test("T-PR2-3: 队列行胶囊预览复用消息气泡渲染器", () => {
     />\s*\{item\.text\}\s*</,
     "队列行不得再把原始 markdown 直接当子节点渲染",
   );
+  // 死断言面补齐：data-v4-queue-item-preview 必须真的包住富渲染器（证明胶囊预览渲染），
+  // 而不是一个没人验证的孤立属性。
+  assert.match(
+    QUEUE_ROW_SOURCE,
+    /<span className="truncate" data-v4-queue-item-preview="true">\s*<ConversationUserInputContent text=\{item\.text\} \/>\s*<\/span>/,
+    "预览容器必须带 data-v4-queue-item-preview 并承载富渲染器",
+  );
 });
 
 test("T-PR2-4: 队列撤回 chip 恢复链在位（正文进编辑器 + 尾块还原成 chip）", () => {
