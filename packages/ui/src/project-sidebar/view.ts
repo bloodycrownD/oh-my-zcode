@@ -8,6 +8,10 @@ import type {
   WindowHostTaskAddress,
   WindowHostControllerTaskActivity,
 } from "@/project-sidebar/contract.js";
+import {
+  buildRemoteHostWorkspaceIdentity,
+  parseRemoteWorkspaceIdentity,
+} from "@/project-sidebar/contract.js";
 import { attachTaskListRowActivity } from "@/v4/taskListRowActivity.js";
 import { compareTaskListItemsByTime, compareZCodeTaskListItems } from "@/lib/taskListOrdering.js";
 import { buildTaskEntityKey } from "@/lib/taskQueryCache.js";
@@ -248,9 +252,14 @@ export function selectSortedProjects(tree: ProjectTree): VirtualProject[] {
     .sort((a, b) => a.position - b.position);
 }
 
-// omz：sourceServerId 解析依赖 remote identity 的 server kind（三期回补）；P4 恒本机 Host。
+// P7 续批接通：sourceServerId 解析走 remote identity 的 server kind（upstream 同构）。
+// projectSourceServerId 为 entriesBySourceServerId 归属模型的消费入口（RemoteIdentityHoverCard 等）。
 export function projectSourceServerId(project: VirtualProject): string | undefined {
-  return project.hostId === "local" ? undefined : undefined;
+  return project.hostId === "local"
+    ? undefined
+    : parseRemoteWorkspaceIdentity(
+        buildRemoteHostWorkspaceIdentity(project.hostId, project.roots[0]?.rootPath ?? "/"),
+      )?.sourceServerId;
 }
 
 /** 内部错误码只用于判断；展示边界翻译已知状态，保留未知服务错误的诊断信息。 */

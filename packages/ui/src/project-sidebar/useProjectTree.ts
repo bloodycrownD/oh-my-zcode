@@ -16,6 +16,7 @@ import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { useWorkspaceSessionsIndexItems } from "@/v4/useWorkspaceSessionsIndexItems.js";
 import { getTaskListRowActivity } from "@/v4/taskListRowActivity.js";
 import { getWindowControllerTaskListRegistry } from "@/v4/windowControllerTaskListRegistry.js";
+import { buildRemoteHostWorkspaceIdentity } from "@/project-sidebar/contract.js";
 import { logger } from "@/logger.js";
 import { areStabilizedValuesEquivalent } from "@/v4/taskListItemStabilization.js";
 import { useProjectUnreadSignals } from "@/project-sidebar/useProjectUnreadSignals.js";
@@ -23,19 +24,22 @@ import { useProjectUnreadSignals } from "@/project-sidebar/useProjectUnreadSigna
 const subscribeToNothing = () => () => {};
 const zeroRevision = () => 0;
 // omz 化差异（对照上游 useProjectTree.ts）：
-// ①windowProjectDirectory/remoteProjectService/projectChanges 缺席：P4 只接本机 Host，
-//   目录投影为空集；项目写事件仍走 broadcastService "state:projects"；
+// ①windowProjectDirectory/remoteProjectService：P7 续批接通 remoteService（base accessor 的
+//   Source 端目录投影；desktop Local Host 注册，数据面=sourceServerDirectory）；
+//   windowProjectDirectory（web replayable 专面）与 projectChanges 不搬（relay v2 批），
+//   目录服务恒取本窗口 base 集合，项目写事件仍走 broadcastService "state:projects"；
 // ②registry 快路径（P4.2）：Controller 在场时活动态改读 readActivities()（行已随 frame
 //   常驻内存，不再按 scope 逐个订阅 sessions-index）；目录失效由 directoryRevision 驱动；
+//   Source 观察链（observeSources/workspaceSourceGenerationSignature）随 P7 续批照搬上游；
 // ③useProjectUnreadSignals（P4.2）：Host onDynamicTaskUnreadSignal 完成态 → 前台离开补记/
-//   导航清零，见 useProjectUnreadSignals.ts。
+//   导航清零，见 useProjectUnreadSignals.ts；isRemoteViewing 属主 relay v2（P9），恒 false。
 const EMPTY: ProjectTree = { projects: [], tasks: [] };
 export function useProjectTree(isDesktop = false) {
   const services = useBaseWorkspaceServices();
   // 远端 bridge 的 base 服务属于 Source；侧栏读写与失效流必须整组来自窗口目录。
-  // omz：窗口目录服务随 source-server 三期接入，当前恒为本机 base services。
+  // omz：windowProjectDirectory（web replayable 专面）不接，恒为本窗口 base services。
   const service = services.projectService;
-  const remoteService = undefined;
+  const remoteService = services.remoteProjectService;
   const controller = services.windowControllerService;
   const registry = useMemo(
     () => (controller ? getWindowControllerTaskListRegistry(controller) : null),
@@ -47,6 +51,7 @@ export function useProjectTree(isDesktop = false) {
     registry?.getRevision ?? zeroRevision,
   );
   const directoryRevision = registry?.getDirectoryRevision() ?? 0;
+  const sourceRevision = registry?.getSourceRevision() ?? 0;
   const tabs = useTabStore((state) => state.tabs);
   const version = useZCodeSessionStore((state) =>
     Object.values(state.workspaces).reduce((n, workspace) => n + workspace.taskListVersion, 0),
@@ -55,6 +60,7 @@ export function useProjectTree(isDesktop = false) {
   const [availability, setAvailability] = useState<ReadonlyMap<string, ProjectAvailability>>(
     new Map(),
   );
+  const [directory, setDirectory] = useState<RemoteProjectDirectory>({ hosts: [], entries: [] });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const serial = useRef(0);
@@ -70,6 +76,7 @@ export function useProjectTree(isDesktop = false) {
   const removeTaskState = useZCodeSessionStore((state) => state.removeTaskState);
   const accepted = useRef<{
     service: typeof service;
+    remote: typeof remoteService;
     tree: ProjectTree;
   } | null>(null);
   const readOnce = useCallback(async () => {
@@ -97,10 +104,10 @@ export function useProjectTree(isDesktop = false) {
             }
           }
         }
-        accepted.current = { service, tree: result.tree };
+        accepted.current = { service, remote: remoteService, tree: result.tree };
         // Bugfix: 自动归档只改 Host archived，未执行手动归档的 UI 清理，导致列表消失而详情残留。
         // 只处理已接受快照中的明确状态转换；首次已归档、离线缺行与迟到响应都不是归档事件。
-        if (previous?.service === service) {
+        if (previous?.service === service && previous.remote === remoteService) {
           const key = (task: ProjectTree["tasks"][number]) =>
             JSON.stringify([
               task.hostId,
@@ -146,6 +153,9 @@ export function useProjectTree(isDesktop = false) {
             )
               ? previous
               : result.availability,
+          );
+          setDirectory((previous) =>
+            areStabilizedValuesEquivalent(previous, result.directory) ? previous : result.directory,
           );
           setError(null);
           for (const pending of ready) {
@@ -245,7 +255,18 @@ export function useProjectTree(isDesktop = false) {
     const byKey = new Map<string, { workspacePath: string; workspaceIdentity?: string }>();
     for (const task of tree.tasks) byKey.set(task.workspaceIdentity || task.workspacePath, task);
     for (const project of tree.projects)
-      for (const root of project.roots) byKey.set(root.rootPath, { workspacePath: root.rootPath });
+      for (const root of project.roots) {
+        // P7 续批接通（上游同构）：Controller 在场且非本机 Host 的项目根按 remote identity
+        // 参与订阅与导航 scope，阻止同路径另一远端串线。
+        const identity =
+          registry && project.hostId !== "local"
+            ? buildRemoteHostWorkspaceIdentity(project.hostId, root.rootPath)
+            : undefined;
+        byKey.set(identity || root.rootPath, {
+          workspacePath: root.rootPath,
+          ...(identity ? { workspaceIdentity: identity } : {}),
+        });
+      }
     for (const tab of tabs)
       if (isWorkspaceTab(tab) && !tab.workspaceIdentity && !tab.remoteSessionId)
         byKey.set(tab.workspacePath, { workspacePath: tab.workspacePath });
@@ -255,13 +276,40 @@ export function useProjectTree(isDesktop = false) {
         workspacePath,
         ...(workspaceIdentity ? { workspaceIdentity } : {}),
       }));
-  }, [tree, tabs]);
+  }, [tree, tabs, registry]);
   const scopeKey = JSON.stringify(scopes);
   // 未读信号链（P4.2）：Host 完成态 → 前台离开补记 / 导航清零；放在 scopes 定形之后挂载。
   useProjectUnreadSignals(scopes, refresh, isDesktop);
+  const sourceVersion = JSON.stringify(
+    directory.hosts.map((host) => [host.id, host.membershipId, host.connectionStatus]).sort(),
+  );
+  const observeSources = useCallback(async () => {
+    if (!registry || !scopes.length) return;
+    // P7 续批照搬上游 Source 观察链：原来活动 revision 反复注册观察并重读目录；观察只随
+    // scope/Source 换代。返回行不进入项目树，显式刷新仍能重试失败的注册。
+    await registry
+      .list(
+        "project-sidebar-activity",
+        {
+          controllerRevision: sourceRevision,
+          taskListVersionSignature: scopeKey,
+          workspaceSourceGenerationSignature: `${sourceRevision}:${sourceVersion}`,
+        },
+        {
+          kind: "timeline",
+          workspaceScopes: JSON.parse(scopeKey),
+          sortBy: "updated",
+          limit: 0,
+        },
+      )
+      .catch((cause) => logger.warn("[project-sidebar] Controller 活动订阅失败", cause));
+  }, [registry, scopeKey, sourceRevision, sourceVersion]);
+  useEffect(() => {
+    void observeSources();
+  }, [observeSources]);
   const refreshDirectory = useCallback(async () => {
-    await refresh();
-  }, [refresh]);
+    await Promise.all([refresh(), observeSources()]);
+  }, [refresh, observeSources]);
   useEffect(() => {
     // Finder/终端移走或恢复目录不会产生项目写事件；回到窗口时重新检查。
     const onFocus = () => void refreshDirectory();
@@ -315,7 +363,7 @@ export function useProjectTree(isDesktop = false) {
     () => ({
       tree: displayedTree,
       factTree: tree,
-      directory: { hosts: [], entries: [] } as RemoteProjectDirectory,
+      directory,
       availability,
       service,
       remoteService,
@@ -327,6 +375,7 @@ export function useProjectTree(isDesktop = false) {
     [
       displayedTree,
       tree,
+      directory,
       availability,
       service,
       remoteService,

@@ -40,6 +40,9 @@ import { useTabStoreApi } from "@/store/TabStoreProvider.js";
 export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebarProps) {
   const {
     tree: authoritativeTree,
+    // P7 续批接通：目录投影来自 useProjectTree（sourceServerDirectory 数据面经
+    // IRemoteProjectService）；Remote* 组件挂载随后续批回补，此处先消除硬编码空集。
+    directory,
     service,
     availability,
     refresh,
@@ -153,114 +156,114 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                   {/* grouped 视角吸顶组头 portal 目标（上游同款）。 */}
                   <div ref={setGroupedSticky} />
                   <ScrollFadeViewport ref={scrollRef} className="overflow-x-hidden">
-                  <div className="flex flex-col gap-3 pb-3">
-                    {view === "projects" ? (
-                      <>
-                        <ProjectTaskRows
-                          kind="pinned"
-                          tasks={selectProjectRows(tree, { kind: "pinned" })}
-                          onSelect={onSelectTask}
-                          refresh={refresh}
-                        />
-                        {projects.filter((project) => project.pinned).length ? (
-                          <SortableProjects
-                            projects={projects.filter((project) => project.pinned)}
+                    <div className="flex flex-col gap-3 pb-3">
+                      {view === "projects" ? (
+                        <>
+                          <ProjectTaskRows
+                            kind="pinned"
+                            tasks={selectProjectRows(tree, { kind: "pinned" })}
+                            onSelect={onSelectTask}
+                            refresh={refresh}
+                          />
+                          {projects.filter((project) => project.pinned).length ? (
+                            <SortableProjects
+                              projects={projects.filter((project) => project.pinned)}
+                              renderProject={renderProject}
+                              onReorder={reorder}
+                            />
+                          ) : null}
+                          <ProjectSections
+                            tree={tree}
+                            projects={projects}
+                            directory={directory}
                             renderProject={renderProject}
                             onReorder={reorder}
+                            loading={loading}
+                            onSelect={onSelectTask}
+                            refresh={refresh}
+                            onCreate={() => action(() => start())}
+                            onAddProject={() => {
+                              // P4.1：新建入口换真组件（ProjectCreation 对话框）。
+                              setCreating(true);
+                            }}
+                            hasExpandedProjects={hasExpandedProjects}
+                            canToggleProjects={expandableProjects.length > 0}
+                            onToggleProjects={() =>
+                              preferences.setAllExpanded(expandableProjects, !hasExpandedProjects)
+                            }
                           />
-                        ) : null}
-                        <ProjectSections
-                          tree={tree}
-                          projects={projects}
-                          directory={{ hosts: [], entries: [] }}
-                          renderProject={renderProject}
-                          onReorder={reorder}
-                          loading={loading}
-                          onSelect={onSelectTask}
-                          refresh={refresh}
-                          onCreate={() => action(() => start())}
-                          onAddProject={() => {
-                            // P4.1：新建入口换真组件（ProjectCreation 对话框）。
-                            setCreating(true);
-                          }}
-                          hasExpandedProjects={hasExpandedProjects}
-                          canToggleProjects={expandableProjects.length > 0}
-                          onToggleProjects={() =>
-                            preferences.setAllExpanded(expandableProjects, !hasExpandedProjects)
-                          }
-                        />
-                      </>
-                    ) : view === "grouped" ? (
-                      <>
-                        <ProjectTaskRows
-                          kind="pinned"
-                          tasks={selectProjectRows(tree, { kind: "pinned" })}
-                          onSelect={onSelectTask}
-                          refresh={refresh}
-                        />
-                        {/* P4.1：上游 grouped 视角（折叠/建组/拖拽分组）；omz 分组内草稿
+                        </>
+                      ) : view === "grouped" ? (
+                        <>
+                          <ProjectTaskRows
+                            kind="pinned"
+                            tasks={selectProjectRows(tree, { kind: "pinned" })}
+                            onSelect={onSelectTask}
+                            refresh={refresh}
+                          />
+                          {/* P4.1：上游 grouped 视角（折叠/建组/拖拽分组）；omz 分组内草稿
                             继承与旧侧栏 organizeGrouped 并存不删。 */}
-                        <TaskGroupedView
-                          tasks={tree.tasks}
+                          <TaskGroupedView
+                            tasks={tree.tasks}
+                            onSelect={onSelectTask}
+                            refresh={refresh}
+                            scrollRef={scrollRef}
+                            toolbarTarget={groupedToolbar}
+                            stickyTarget={groupedSticky}
+                            workspacePath={props.workspacePath}
+                            workspaceIdentity={props.workspaceIdentity}
+                            onOpenAutomations={props.onOpenAutomations}
+                            onCreate={(groupId) => action(() => start(undefined, groupId))}
+                          />
+                        </>
+                      ) : (
+                        <ProjectTaskRows
+                          key="timeline"
+                          kind="timeline"
+                          tasks={selectProjectRows(tree, { kind: view })}
                           onSelect={onSelectTask}
                           refresh={refresh}
-                          scrollRef={scrollRef}
-                          toolbarTarget={groupedToolbar}
-                          stickyTarget={groupedSticky}
-                          workspacePath={props.workspacePath}
-                          workspaceIdentity={props.workspaceIdentity}
-                          onOpenAutomations={props.onOpenAutomations}
-                          onCreate={(groupId) => action(() => start(undefined, groupId))}
                         />
-                      </>
-                    ) : (
-                      <ProjectTaskRows
-                        key="timeline"
-                        kind="timeline"
-                        tasks={selectProjectRows(tree, { kind: view })}
-                        onSelect={onSelectTask}
-                        refresh={refresh}
-                      />
-                    )}
-                    {loading ? (
-                      <p className="px-4 text-ui-sm text-foreground-subtle">
-                        {intl.formatMessage({ id: "common.loading" })}
-                      </p>
-                    ) : null}
-                    {error ? (
-                      <p role="alert" className="px-4 text-ui-sm text-destructive">
-                        {error}
-                      </p>
-                    ) : null}
-                  </div>
+                      )}
+                      {loading ? (
+                        <p className="px-4 text-ui-sm text-foreground-subtle">
+                          {intl.formatMessage({ id: "common.loading" })}
+                        </p>
+                      ) : null}
+                      {error ? (
+                        <p role="alert" className="px-4 text-ui-sm text-destructive">
+                          {error}
+                        </p>
+                      ) : null}
+                    </div>
                   </ScrollFadeViewport>
+                </div>
               </div>
             </div>
           </div>
-        </div>
-        {/* P4.1：编辑/新建对话框挂侧栏根部（上游 index.tsx 同款）；omz 本机形态无远端设备面。 */}
-        {creating && service ? (
-          <ProjectCreation
-            workspacePath={props.workspacePath}
-            workspaceIdentity={props.workspaceIdentity}
-            onCreateTask={props.onCreateTask}
-            projects={tree.projects}
-            service={service}
-            onClose={() => setCreating(false)}
-            onSaved={refresh}
-          />
-        ) : null}
-        {editor && service ? (
-          <ProjectEditor
-            key={editor.project?.id ?? "new"}
-            project={editor.project}
-            projects={tree.projects}
-            service={service}
-            onClose={() => setEditor(null)}
-            onSaved={refresh}
-            onDeleted={refresh}
-          />
-        ) : null}
+          {/* P4.1：编辑/新建对话框挂侧栏根部（上游 index.tsx 同款）；omz 本机形态无远端设备面。 */}
+          {creating && service ? (
+            <ProjectCreation
+              workspacePath={props.workspacePath}
+              workspaceIdentity={props.workspaceIdentity}
+              onCreateTask={props.onCreateTask}
+              projects={tree.projects}
+              service={service}
+              onClose={() => setCreating(false)}
+              onSaved={refresh}
+            />
+          ) : null}
+          {editor && service ? (
+            <ProjectEditor
+              key={editor.project?.id ?? "new"}
+              project={editor.project}
+              projects={tree.projects}
+              service={service}
+              onClose={() => setEditor(null)}
+              onSaved={refresh}
+              onDeleted={refresh}
+            />
+          ) : null}
         </aside>
       </SidebarTooltipProvider>
     </ProjectTaskListContext.Provider>

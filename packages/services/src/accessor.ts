@@ -35,6 +35,7 @@ import type { IWindowControllerService } from "./window-controller/windowControl
 import type { IOnboardingRecordService } from "./onboarding/onboardingRecord.js";
 import type { IProjectService } from "./project/contract.js";
 import type { ITaskGroupService } from "./task-groups/contract.js";
+import type { IRemoteProjectService } from "./remote-projects/contract.js";
 import type { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
 
 /** UI 层消费的统一服务接口 */
@@ -63,6 +64,12 @@ export interface IServiceAccessor {
   readonly projectService?: IProjectService;
   /** 任务分组组织服务（与 projectService 同批注册）；缺席时分组视角降级为空结构。 */
   readonly taskGroupService?: ITaskGroupService;
+  /**
+   * 远端项目入口目录（upstream-v316-fullsync P7 续批）：desktop Local Host 数据面=
+   * sourceServerDirectory（设备+工作区历史投影）；注册链随后续批，缺席时 useProjectTree
+   * 目录投影为空集（P4 语义）。
+   */
+  readonly remoteProjectService?: IRemoteProjectService;
   /**
    * Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon serve 已
    * 换装 createServerHostServices 并注册；旧 deployServer backend / 测试 double 无此通道，
