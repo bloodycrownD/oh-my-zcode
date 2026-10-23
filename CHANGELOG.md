@@ -1,3 +1,10 @@
+## [1.0.22](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.21...v1.0.22) (2026-10-23)
+
+### 修复
+
+- **幽灵用户消息根修**（P0）：Magic Context 压缩重排的 id 错配曾把 assistant 旁白嫁接成 `user_steer` 身份、以「The user sent a new message」注入运行中的轮（落库实证：权威输入表无此输入、MC 镜像记成 role:user）。修复=MC 反投影双守卫：`originalPairsWithMessage` 配对守卫（role 不符断原 entry 配对，tool↔user 折叠例外）+ `sanitizeRebuiltMetadata`（重建条目永不继承 `inputPresentation`；`source` 气泡身份保留以兼容 §N§ 打标等合法改写）。新增回归套件 `test-mc-entry-identity-guard`（事故形状复刻/合法改写/role 翻转/原样往返 4 用例），既有 MC transform 套件 23 用例全绿。
+- **并发轮投影互踩根修**（P0）：product-projection 单写者模型（`currentTurnId` 最后写入者获胜、流式锚点全局单槽、终态无条件全局副作用）被队列提升的后台轮反复踩踏——前台轮的流式行被误收口、会话全局 phase/lastError/heldQueue 被误迁移。根修为每轮上下文表（`ActiveTurnContext` Map + `primaryTurnId`）：流式/continuation/终态全部按事件轮路由，全局态只由前台轮迁移、前台轮收口后自动提升下一可见轮；clone/adopt 深拷上下文表，queue 切段起点按轮分键。新增回归套件 `test-concurrent-turn-terminal-guard`（4 用例）。
+
 ## [1.0.21](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.20...v1.0.21) (2026-10-23)
 
 ### 新增
