@@ -43,6 +43,8 @@ node_status:
   verify-r3cde: { status: done, executor: main, evidence: "T-RU1/2 5/5+T-RU3 5/5（tsx 形态）+T-RU9 6/6；95 文件 mc 误碰 0" }
   cr-func-r3cde: { status: done, func_ready: yes, agent: agent_43d0fe3d, note: "0 P1/P2；schema 两支从上游 git 对象独立复算吻合；主链切换五层核实+无双重连接；61/61 独立复跑；P3 三条已闭（用例表补登/术语勘误/格式残留纪律登记）；拍板 A/B 均接受" }
   impl-ts: { status: done, head_sha: 4987f5d1, executor: subagent, commits: [c472b29c, d41ce699, 20bd981b, d04fcf8e, 00c9f21d, 808825dc, 9462ff65, 4987f5d1], note: "推演通过且修正落地序（暴露决策→公告→MC transform→双投影；spec 预定序不可行因 MC 文本化丢 tool_reference）；shouldDefer=内置恒常驻/MCP 默认 defer+alwaysLoad 豁免；D4 渗入 0；MC 654/0；relay v1 清理全仓 0 命中；native×MC 降级面登记" }
+  verify-ts: { status: done, executor: main, evidence: "冒烟 11/11（根 node --import tsx 形态）+T08 2/2+relay 0 命中独立复核；state 文件 YAML 重复键修复（23a21440）" }
+  cr-func-ts-relay: { status: done, func_ready: yes, agent: agent_fcea164e, note: "0 P1；P2 两死函数已清（850747fb）+D4 口径 spec 登记；MC 抽样 4 套 49/49 独立复跑；native×MC 降级=local 为主形态可接受；relay 15×2 删键无误伤" }
 open_must_fix: []
 spec_deviations:
   - "DEV-bugB-1【开·拍板】held 路由 choice→enqueue：omz 拍板弃用上游确认框设计（用户 2026-10-23）；执行层与 goal 车道对称已落地"
