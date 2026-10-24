@@ -79,9 +79,6 @@ import type { AssistantPreviewCardsAutoOpenRequest } from "@/lib/assistantPrevie
 import { startMemoryDiagnosticsLogger } from "@/lib/memoryDiagnostics.js";
 import { startPerfProbe, type PerfProbeDebugWindow } from "@/lib/perfProbe.js";
 
-const EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY: NonNullable<
-  AppProps["reconnectingRemoteWorkspaceLogsByWorkspaceKey"]
-> = {};
 const EMPTY_REMOTE_CONNECTION_LOGS: NonNullable<AppProps["remoteConnectionLogs"]> = [];
 const EMPTY_REMOTE_WORKSPACE_SESSIONS: NonNullable<AppProps["remoteWorkspaceSessions"]> = [];
 
@@ -91,9 +88,7 @@ export function App({
   onSelectRemoteProject,
   onCancelRemoteProject,
   onReconnectRemoteWorkspace,
-  reconnectingRemoteWorkspaceKeys,
   remoteWorkspaceErrorByWorkspaceKey,
-  reconnectingRemoteWorkspaceLogsByWorkspaceKey = EMPTY_RECONNECTING_REMOTE_WORKSPACE_LOGS_BY_WORKSPACE_KEY,
   remoteConnectionLogs = EMPTY_REMOTE_CONNECTION_LOGS,
   onCreateTask,
   onCreateConversationTask,
@@ -1062,11 +1057,7 @@ export function App({
         onSelectRemoteProject={onSelectRemoteProject}
         onCancelRemoteProject={onCancelRemoteProject}
         onReconnectRemoteWorkspace={onReconnectRemoteWorkspace}
-        reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
         remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
-        reconnectingRemoteWorkspaceLogsByWorkspaceKey={
-          reconnectingRemoteWorkspaceLogsByWorkspaceKey
-        }
         remoteConnectionLogs={remoteConnectionLogs}
         onCreateTask={handleCreateTaskIfWritable}
         onCreateConversationTask={onCreateConversationTask}

@@ -5,6 +5,7 @@ import { ServiceProvider } from "@/hooks/useServices.js";
 import { logger } from "@/logger.js";
 import { WorkspaceSettingsLayer } from "@/root/WorkspaceSettingsLayer.js";
 import type { AppProps } from "@/app-shell/types.js";
+import type { RemoteConnectionLogEntry } from "@/hooks/useRemoteConnectionLogs.js";
 import type { RootProps } from "@/root/types.js";
 import type { IServiceAccessor } from "@zcode/services";
 
@@ -32,9 +33,14 @@ interface RootWorkspaceContentProps {
   remoteWorkspaceSessions: NonNullable<AppProps["remoteWorkspaceSessions"]>;
   allowRemoteWorkspace: NonNullable<RootProps["allowRemoteWorkspace"]>;
   handleBackFromSettings: () => void;
-  reconnectingRemoteWorkspaceKeys: AppProps["reconnectingRemoteWorkspaceKeys"];
   remoteWorkspaceErrorByWorkspaceKey: AppProps["remoteWorkspaceErrorByWorkspaceKey"];
-  reconnectingRemoteWorkspaceLogsByWorkspaceKey: AppProps["reconnectingRemoteWorkspaceLogsByWorkspaceKey"];
+  /**
+   * 兼容缝（backlog-sweep Step 5）：Root 侧仍在传这两个集合（Root.tsx 归远端链路批），
+   * 但 AppProps 已不再声明、本组件也不再下传——经典侧栏的重连日志面由
+   * RemoteProjectConnectionDetails 承接。Root.tsx 的传参与这两行随 Step 4 合流删除。
+   */
+  reconnectingRemoteWorkspaceKeys?: string[];
+  reconnectingRemoteWorkspaceLogsByWorkspaceKey?: Record<string, RemoteConnectionLogEntry[]>;
   remoteConnectionLogs?: AppProps["remoteConnectionLogs"];
   allowOpenWorkspace: NonNullable<RootProps["allowOpenWorkspace"]>;
   isDesktop?: RootProps["isDesktop"];
@@ -66,9 +72,7 @@ export function RootWorkspaceContent({
   remoteWorkspaceSessions,
   allowRemoteWorkspace,
   handleBackFromSettings,
-  reconnectingRemoteWorkspaceKeys,
   remoteWorkspaceErrorByWorkspaceKey,
-  reconnectingRemoteWorkspaceLogsByWorkspaceKey,
   remoteConnectionLogs,
   allowOpenWorkspace,
   isDesktop,
@@ -125,11 +129,7 @@ export function RootWorkspaceContent({
               onSelectRemoteProject={handleSelectRemoteProject}
               onCancelRemoteProject={handleCancelRemoteProject}
               onReconnectRemoteWorkspace={handleReconnectRemoteWorkspace}
-              reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
               remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
-              reconnectingRemoteWorkspaceLogsByWorkspaceKey={
-                reconnectingRemoteWorkspaceLogsByWorkspaceKey
-              }
               remoteConnectionLogs={remoteConnectionLogs}
               workspaceAbsPath={workspaceShellPath}
               workspaceRemoteSessionId={workspaceRemoteSessionId}
