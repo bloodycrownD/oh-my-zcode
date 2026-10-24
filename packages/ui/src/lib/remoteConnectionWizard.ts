@@ -149,6 +149,75 @@ export function buildRemoteTarget(
   }
 }
 
+/** 表单内可显示内联错误的字段；顺序即页面从上到下的顺序。 */
+export type RemoteFormField =
+  | "host"
+  | "port"
+  | "username"
+  | "password"
+  | "privateKey"
+  | "docker"
+  | "wslUser";
+
+export interface RemoteFormFieldError {
+  field: RemoteFormField;
+  message: string;
+}
+
+/**
+ * 端口边界：空值等同未填写（默认 22），非纯数字或越界（0 / 65536 / NaN）为非法。
+ * 照搬上游 v3.16.2 remoteConnectionWizard.ts:141。
+ */
+export function isInvalidPort(port: string): boolean {
+  return Boolean(port) && (!/^\d+$/u.test(port) || Number(port) < 1 || Number(port) > 65535);
+}
+
+/**
+ * 表单校验的唯一规则来源：按页面顺序返回全部字段错误。
+ * 新建向导与编辑连接弹窗都用它渲染内联错误（照搬上游 remoteConnectionWizard.ts:145-201）。
+ * omz 适配：`RemoteTarget` 无 `server` 直连种类（拍板②），故上游 `serverUrl` 两条规则删除。
+ */
+export function collectRemoteFormFieldErrors(
+  intl: WizardIntlLike,
+  snapshot: RemoteConnectionFormSnapshot,
+  options: {
+    /** 编辑已保存密码的连接时，空密码表示沿用已保存凭据。 */
+    passwordOptional?: boolean;
+  } = {},
+): RemoteFormFieldError[] {
+  const errors: RemoteFormFieldError[] = [];
+  const add = (field: RemoteFormField, id: string) =>
+    errors.push({ field, message: intl.formatMessage({ id }) });
+  switch (snapshot.kind) {
+    case "ssh":
+      if (!snapshot.host.trim()) add("host", "ssh.validation.hostRequired");
+      if (isInvalidPort(snapshot.port.trim())) add("port", "ssh.validation.port");
+      if (!snapshot.username.trim()) add("username", "ssh.validation.usernameRequired");
+      if (
+        snapshot.sshAuthMethod === "password" &&
+        !snapshot.password &&
+        !options.passwordOptional
+      ) {
+        add("password", "ssh.validation.passwordRequired");
+      }
+      if (snapshot.sshAuthMethod === "privateKey" && !snapshot.privateKeyPath.trim()) {
+        add("privateKey", "ssh.validation.privateKeyRequired");
+      }
+      break;
+    case "docker":
+      if (!(snapshot.manualDockerContainer?.trim() || snapshot.dockerContainer.trim())) {
+        add("docker", "docker.validation.required");
+      }
+      break;
+    case "wsl": {
+      const wslUser = snapshot.wslUser?.trim();
+      if (wslUser && !isValidWslUser(wslUser)) add("wslUser", "wsl.validation.invalidUser");
+      break;
+    }
+  }
+  return errors;
+}
+
 export function withDefaultRemoteResourcePackages(target: RemoteTarget): RemoteTarget {
   if (target.kind !== "ssh") {
     return target;

@@ -35,11 +35,17 @@ export function useRemoteConnectionForm({
   isWindowsDesktop,
   preferredKind,
   preferredWslDistro,
+  savedSshConfigAlias,
+  preserveDraftOnOpen = false,
 }: {
   open: boolean;
   isWindowsDesktop: boolean;
   preferredKind?: RemoteKind;
   preferredWslDistro?: string;
+  /** 编辑已有连接时，保留历史别名，允许用户显式清除（backlog-sweep Step 9）。 */
+  savedSshConfigAlias?: string;
+  /** 编辑弹窗复用同一表单状态：打开时不重置草稿（backlog-sweep Step 9）。 */
+  preserveDraftOnOpen?: boolean;
 }) {
   const platform = usePlatform();
   const [kind, setKind] = useState<RemoteKind>("ssh");
@@ -99,7 +105,8 @@ export function useRemoteConnectionForm({
     setSshConfigAliasesLoading(false);
     setSshConfigAliasesLoaded(false);
     setSshConfigAliasesError("");
-    setSelectedSshConfigAlias(null);
+    // 编辑已有连接时保留上次的别名选择：打开即清空会让保存静默丢掉 sshConfigAlias。
+    if (!preserveDraftOnOpen) setSelectedSshConfigAlias(null);
     setWslOptionsLoaded(false);
     setWslOptionsLoading(false);
     setWslOptionsError("");
@@ -109,13 +116,13 @@ export function useRemoteConnectionForm({
     setDockerOptionsLoading(false);
     setDockerOptionsError("");
     setDockerContainers([]);
-    if (preferredKind && availableKinds.includes(preferredKind)) {
+    if (!preserveDraftOnOpen && preferredKind && availableKinds.includes(preferredKind)) {
       setKind(preferredKind);
     }
-    if (preferredWslDistro !== undefined) {
+    if (!preserveDraftOnOpen && preferredWslDistro !== undefined) {
       setWslDistro(preferredWslDistro);
     }
-  }, [availableKinds, open, preferredKind, preferredWslDistro]);
+  }, [availableKinds, open, preferredKind, preferredWslDistro, preserveDraftOnOpen]);
 
   const refreshDockerContainers = useCallback(
     ({ clearContainersOnError = true }: { clearContainersOnError?: boolean } = {}) => {
@@ -213,12 +220,17 @@ export function useRemoteConnectionForm({
       return;
     }
 
+    // 编辑已有连接：savedSshConfigAlias 是 profile 里已落盘的值，别名列表缺失它也不清除。
+    if (selectedSshConfigAlias === savedSshConfigAlias) {
+      return;
+    }
+
     if (sshConfigAliases.some((option) => option.alias === selectedSshConfigAlias)) {
       return;
     }
 
     setSelectedSshConfigAlias(null);
-  }, [selectedSshConfigAlias, sshConfigAliases]);
+  }, [selectedSshConfigAlias, sshConfigAliases, savedSshConfigAlias]);
 
   useEffect(() => {
     if (!open || kind !== "wsl" || !isWindowsDesktop || wslOptionsLoaded) {

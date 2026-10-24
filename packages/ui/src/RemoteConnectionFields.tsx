@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- 远程连接字段较多，SSH/WSL/Docker 分支暂集中在单文件维护。 */
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import type {
   DockerContainerInfo,
   RemoteAssetInstallMode,
@@ -8,7 +8,14 @@ import type {
   SSHConfigAliasOption,
   WSLDistro,
 } from "@zcode/shared";
-import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, LoaderIcon, Plus } from "lucide-react";
+import {
+  AlertCircleIcon,
+  AlertTriangleIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  LoaderIcon,
+  Plus,
+} from "lucide-react";
 import {
   TID_DOCKER_CONTAINER_INPUT,
   TID_DOCKER_CONTAINER_SELECT,
@@ -48,9 +55,21 @@ import {
   SelectValue,
 } from "@/components/ui/select.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import type { RemoteFormField, RemoteFormFieldError } from "@/lib/remoteConnectionWizard.js";
 
 const DEFAULT_WSL_DISTRO_VALUE = "__default_wsl_distro__";
 const NO_SSH_CONFIG_ALIAS_VALUE = "__ssh_config_alias_none__";
+
+/** 字段级内联错误（截图 RDUX-27）；与 `collectRemoteFormFieldErrors` 的 field 一一对应。 */
+function FieldError({ id, message }: { id: string; message?: string }) {
+  if (!message) return null;
+  return (
+    <p id={id} className="mt-1.5 flex items-start gap-1 text-ui-base text-destructive">
+      <AlertCircleIcon className="mt-0.5 size-3.5 shrink-0" />
+      <span>{message}</span>
+    </p>
+  );
+}
 
 function formatSshConfigAliasSummary(aliasOption: SSHConfigAliasOption): string {
   const host = aliasOption.host?.trim() || aliasOption.alias;
@@ -82,6 +101,12 @@ export function RemoteConnectionFields({
   selectedSshConfigAlias,
   runtimeOptionsLoading,
   remoteWorkspaceSessions = [],
+  focusCredentials,
+  autoFocusHost = false,
+  passwordPlaceholder,
+  privateKeyPassphrasePlaceholder,
+  fieldErrors = [],
+  focusField,
   refreshDockerContainers,
   applySshConfigAlias,
   clearSelectedSshConfigAlias,
@@ -120,6 +145,17 @@ export function RemoteConnectionFields({
   selectedSshConfigAlias: string | null;
   runtimeOptionsLoading: boolean;
   remoteWorkspaceSessions?: RemoteWorkspaceSessionEntry[];
+  /** 密码/私钥口令聚焦（「修改认证」入口打开时的默认落点）。 */
+  focusCredentials?: boolean;
+  /** 新建流程打开即聚焦主机输入。 */
+  autoFocusHost?: boolean;
+  /** 已保存凭据时用占位提示「留空即沿用」。 */
+  passwordPlaceholder?: string;
+  privateKeyPassphrasePlaceholder?: string;
+  /** 提交后显示的内联错误，来自 collectRemoteFormFieldErrors。 */
+  fieldErrors?: RemoteFormFieldError[];
+  /** 「修改主机/认证」入口：命中字段即使无错误也标 aria-invalid 作为提示。 */
+  focusField?: "host" | "auth";
   refreshDockerContainers?: () => void;
   applySshConfigAlias: (value: SSHConfigAliasOption) => void;
   clearSelectedSshConfigAlias: () => void;
@@ -138,10 +174,20 @@ export function RemoteConnectionFields({
 }) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
+  const fieldId = useId();
   const [sshAliasPopoverOpen, setSshAliasPopoverOpen] = useState(false);
   const [dockerContainerPopoverOpen, setDockerContainerPopoverOpen] = useState(false);
   const sshAliasListRef = useRef<HTMLDivElement | null>(null);
   const sshHistorySuggestions = buildSshConnectionHistorySuggestions(remoteWorkspaceSessions);
+  const errorOf = (field: RemoteFormField) =>
+    fieldErrors.find((error) => error.field === field)?.message;
+  const errorId = (field: RemoteFormField) => `${fieldId}-${field}-error`;
+  // 校验错误优先；focusField 只把「入口语义」标成 aria-invalid 提示，不关联 describedby，
+  // 这样编辑弹窗里 [aria-invalid="true"][aria-describedby] 能精确定位真正的第一个错误字段。
+  const invalidProps = (field: RemoteFormField, flagged = false) => ({
+    "aria-invalid": errorOf(field) || flagged ? true : undefined,
+    "aria-describedby": errorOf(field) ? errorId(field) : undefined,
+  });
   const selectedSshAliasOption =
     selectedSshConfigAlias == null
       ? null
@@ -339,7 +385,9 @@ export function RemoteConnectionFields({
               suggestionWidth="min(30ch, calc(100vw - 2rem))"
               autoCapitalize="none"
               spellCheck={false}
+              autoFocus={autoFocusHost || focusField === "host"}
               data-testid={TID_SSH_HOST_INPUT}
+              {...invalidProps("host", focusField === "host")}
             />
             <RemoteConnectionHistoryInput
               className="h-9 text-ui-base"
@@ -352,8 +400,11 @@ export function RemoteConnectionFields({
               suggestionWidth="min(8ch, calc(100vw - 2rem))"
               inputMode="numeric"
               data-testid={TID_SSH_PORT_INPUT}
+              {...invalidProps("port")}
             />
           </div>
+          <FieldError id={errorId("host")} message={errorOf("host")} />
+          <FieldError id={errorId("port")} message={errorOf("port")} />
 
           {/* 认证方式之前复用了端口的 6.5rem 窄列，两个选项扣除 padding 后会把中英文文案挤到换行或溢出。
               这里单独给认证方式保留 12rem，并禁止选项文字换行。 */}
@@ -370,7 +421,9 @@ export function RemoteConnectionFields({
               autoCapitalize="none"
               spellCheck={false}
               data-testid={TID_SSH_USERNAME_INPUT}
+              {...invalidProps("username")}
             />
+            <FieldError id={errorId("username")} message={errorOf("username")} />
 
             <div>
               <label className="mb-1 block text-ui-base text-foreground-subtle">
@@ -414,13 +467,19 @@ export function RemoteConnectionFields({
                 type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                placeholder={intl.formatMessage({
-                  id: "ssh.passwordPlaceholder",
-                })}
+                placeholder={
+                  passwordPlaceholder ??
+                  intl.formatMessage({
+                    id: "ssh.passwordPlaceholder",
+                  })
+                }
                 name="remote-ssh-password"
                 autoComplete="off"
                 data-testid={TID_SSH_PASSWORD_INPUT}
+                autoFocus={focusCredentials || focusField === "auth"}
+                {...invalidProps("password", focusField === "auth")}
               />
+              <FieldError id={errorId("password")} message={errorOf("password")} />
             </div>
           ) : (
             <div>
@@ -442,6 +501,8 @@ export function RemoteConnectionFields({
                   autoCapitalize="none"
                   spellCheck={false}
                   data-testid={TID_SSH_PRIVATE_KEY_INPUT}
+                  autoFocus={focusField === "auth"}
+                  {...invalidProps("privateKey", focusField === "auth")}
                 />
                 <Button
                   type="button"
@@ -461,6 +522,7 @@ export function RemoteConnectionFields({
                   <Plus className="size-4" />
                 </Button>
               </div>
+              <FieldError id={errorId("privateKey")} message={errorOf("privateKey")} />
               <label className="mb-1 block text-ui-base text-foreground-subtle">
                 {intl.formatMessage({ id: "ssh.privateKeyPassphrase" })}
               </label>
@@ -470,9 +532,12 @@ export function RemoteConnectionFields({
                 type="password"
                 value={privateKeyPassphrase}
                 onChange={(e) => setPrivateKeyPassphrase(e.target.value)}
-                placeholder={intl.formatMessage({
-                  id: "ssh.privateKeyPassphrasePlaceholder",
-                })}
+                placeholder={
+                  privateKeyPassphrasePlaceholder ??
+                  intl.formatMessage({
+                    id: "ssh.privateKeyPassphrasePlaceholder",
+                  })
+                }
                 name="remote-ssh-private-key-passphrase"
                 autoComplete="off"
               />
@@ -579,9 +644,10 @@ export function RemoteConnectionFields({
               placeholder={intl.formatMessage({ id: "wsl.defaultUser" })}
               autoCapitalize="none"
               spellCheck={false}
-              aria-invalid={wslUserIsInvalid}
               data-testid={TID_WSL_USER_INPUT}
+              {...invalidProps("wslUser", wslUserIsInvalid)}
             />
+            <FieldError id={errorId("wslUser")} message={errorOf("wslUser")} />
             <p
               className={cn(
                 "mt-1 text-ui-base",
@@ -701,7 +767,9 @@ export function RemoteConnectionFields({
               onChange={(event) => setManualDockerContainer(event.target.value)}
               placeholder={intl.formatMessage({ id: "docker.containerPlaceholder" })}
               data-testid={TID_DOCKER_CONTAINER_INPUT}
+              {...invalidProps("docker")}
             />
+            <FieldError id={errorId("docker")} message={errorOf("docker")} />
             {manualDockerContainerIsEmpty ? (
               <p className="mt-1 text-ui-base text-foreground-subtle">
                 {intl.formatMessage({ id: "docker.manualContainerHint" })}
