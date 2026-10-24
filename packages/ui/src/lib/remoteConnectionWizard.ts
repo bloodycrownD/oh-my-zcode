@@ -1,4 +1,9 @@
-import type { RemoteAssetInstallMode, RemoteTarget } from "@zcode/shared";
+import type {
+  ConnectionProfile,
+  RemoteAssetInstallMode,
+  RemoteTarget,
+  SourceServerManagementSnapshot,
+} from "@zcode/shared";
 import { isValidWslUser, normalizeRemoteResourcePackageSelection } from "@zcode/shared";
 import type { SSHAuthMethod } from "@/hooks/useRemoteConnectionForm.js";
 import type { RemoteWizardStep } from "@/RemoteConnectionWizardChrome.js";
@@ -157,4 +162,63 @@ export function withDefaultRemoteResourcePackages(target: RemoteTarget): RemoteT
       selectedPackageIds: normalizeRemoteResourcePackageSelection(),
     },
   };
+}
+
+// 照搬上游 v3.16.2 remoteConnectionWizard.ts:338-393（backlog-sweep Step 10 / P9-4 前置符号）：
+// 连接向导按目标找「必须升级」的 Profile，用于在 needs-upgrade 到达前就抑制重复更新提示。
+export function profileMatchesRemoteTarget(
+  profile: ConnectionProfile,
+  target: Exclude<RemoteTarget, { kind: "server" }>,
+): boolean {
+  if (profile.target.kind !== target.kind) return false;
+  switch (target.kind) {
+    case "ssh":
+      return (
+        profile.target.kind === "ssh" &&
+        profile.target.host === target.host &&
+        (profile.target.port ?? 22) === (target.port ?? 22) &&
+        profile.target.username === target.username &&
+        (profile.target.sshConfigAlias?.trim() ?? "") === (target.sshConfigAlias?.trim() ?? "")
+      );
+    case "wsl":
+      return (
+        profile.target.kind === "wsl" &&
+        (profile.target.distro?.trim() ?? "") === (target.distro?.trim() ?? "") &&
+        (profile.target.user?.trim() ?? "") === (target.user?.trim() ?? "")
+      );
+    case "docker":
+      return profile.target.kind === "docker" && profile.target.container === target.container;
+  }
+}
+
+export function findSourceServerUpgradeProfileId(
+  snapshot: SourceServerManagementSnapshot,
+  target: Exclude<RemoteTarget, { kind: "server" }>,
+  failedProfileId?: string,
+): string | null {
+  const requiredByProfileId = new Map(
+    snapshot.states
+      .filter(
+        (state) =>
+          state.state === "needs-upgrade" &&
+          state.upgradeTarget === "server" &&
+          state.updateAvailability === "required",
+      )
+      .map((state) => [state.profileId, state.updatedAt]),
+  );
+  return (
+    snapshot.profiles
+      .filter(
+        (profile) =>
+          (!failedProfileId || profile.profileId === failedProfileId) &&
+          profile.lifecycleState !== "retired" &&
+          requiredByProfileId.has(profile.profileId) &&
+          profileMatchesRemoteTarget(profile, target),
+      )
+      .toSorted(
+        (left, right) =>
+          (requiredByProfileId.get(right.profileId) ?? 0) -
+          (requiredByProfileId.get(left.profileId) ?? 0),
+      )[0]?.profileId ?? null
+  );
 }
