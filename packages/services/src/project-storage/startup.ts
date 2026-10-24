@@ -6,9 +6,9 @@ import { createRequire } from "node:module";
 const { DatabaseSync } = createRequire(import.meta.url)(
   "node:sqlite",
 ) as typeof import("node:sqlite");
+import type { ProjectMigrationContext } from "#src/project-storage/contract.js";
 import { TaskIndexRepo } from "#src/session/taskIndexRepo.js";
 import { AutomationRepo } from "#src/session/automationRepo.js";
-import type { ProjectMigrationContext } from "#src/project-storage/contract.js";
 import {
   runTasksDatabaseMigrations,
   inspectTasksMigrationKind,
@@ -33,6 +33,10 @@ const LOCK_WAIT_MS = 60 * 60_000;
  * omz 口径：上游形态在此追加 settings 入参并构造 OffPeakTaskRepo / TaskIndexRepo(settings,…)；
  * omz 已退役闲时运行链（无 OffPeakTaskRepo），TaskIndexRepo 四参构造器已随 Step 1 对齐，
  * settings 由 Worker 侧 createSettingService() 读取后传入，项目迁移按旧设置建种子。
+ *
+ * v1.0.22 事故（main 分线同修此点）：Worker 必须携带旧 settings 完成项目迁移（0005 的
+ * workspace 种子），否则老库只能看到「账本已写、种子为空」——随后老会话一律
+ * project.host-mismatch。
  */
 export async function prepareTasksIndexStorage(
   path: string,

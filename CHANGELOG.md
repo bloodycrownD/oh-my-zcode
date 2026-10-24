@@ -38,7 +38,21 @@
 - 未读角标存在双源（任务栏/托盘与侧栏门控语义不一致，R-B）待后续批；R-C（接入第 21 台远端设备时的裸错误码）已修，现在提示 `project.hostLimit` 的可读上限文案。
 - 真机验收清单见 `docs/iterations/backlog-sweep/qa-appendix.md`（T-QA1/2/3/4/5/6 + 侧栏骨架 + 升级路径）。
 - **native ToolSearch × MC 端到端已闭合**：bootstrap 反投影不再把块数组输出重建为空串——`apps/zcode-cli/packages/bootstrap/src/app/magic-context/projection.ts` 的 `toolOutputContentOf`(:176-193) 把纯文本块按 `"\n\n"` 还原为文本、含 `tool_reference` 的块数组按原序结构化保留（不文本化、不丢），`toolOutputOf`(:199-204) 字符串路径逐字节不变，`isUnchanged`(:242) 与 `rebuildEntry`(:304) 因此**端到端保住文本与引用**。剩余限制只有「native 仅 anthropic-messages 协议可用、local 仍是 omz 主形态」；升级 magic-context 需 rebase 正投影 FORK（`magic-context/src/host/types.ts` 的 `toolResultToPart`）与反投影 FORK（`app/magic-context/projection.ts:176-204`），详见 `docs/iterations/upstream-v316-fullsync/toolsearch-seam-proof.md` §3.3。
+## [1.0.23](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.22...v1.0.23) (2026-10-24)
 
+### 修复
+
+- **老项目全部打不开（P0，v1.0.22 引入）**：v1.0.22 把虚拟项目存储（`hosts`/`projects`/`tasks.host_id`）搬进 tasks-index，但**没有任何生产代码调用 `projectStorage.migrate`**——只有测试在跑迁移。存量库因此永远停在「无 hosts 表 + tasks 无 host_id 列」：打开任何老会话，`resolveDirectories` 读到 `host_id` 不存在 → 判成跨主机 → `project.host-mismatch`；新建/发送消息则在 `ensureHost` 撞 `no such table: hosts`。
+  三层修复：
+  1. `TaskIndexRepo.initialize` 在 tasksDatabase 迁移之后调用 `projectStorage.migrate`（账本驱动、每次启动幂等），这是 Host/Worker 打开 tasks-index 的唯一入口；
+  2. `tasksStorageWorker` 读旧 `settings` 传给 `prepareTasksIndexStorage`，保证 0005 的 workspace 种子不是空的（否则会出现「账本已写、种子为空」）；
+  3. `resolveDirectories` 只对「有明确归属但归属不同」报跨主机错误，**无归属**（列缺失 / NULL）的老行交给本机收养；路径回退 `root_path → workspace_path → 入参`。
+     新增回归 `T-MIG1`（3 条）：老库解析不抛 `project.host-mismatch`、迁移补齐 hosts/projects 并把存量行收养到本机、`ensureReady` 必须把 0005 落账（这条直接锁住「迁移函数有测试但没人从生产链调用」的事故形态）。
+
+### 升级说明
+
+- 从 v1.0.21 / v1.0.22 升级：**首次启动会执行一次数据库迁移并自动备份**（`~/.omz/backup`），耗时随任务数量增长；迁移完成后老项目/老会话即可正常打开。
+- 迁移是一次性账本：成功后再启动不会重复执行；如遇异常请保留备份目录并在 issue 里附日志。
 ## [1.0.22](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.21...v1.0.22) (2026-10-23)
 
 ### 修复
@@ -54,13 +68,13 @@
 - **模型/Think 合并选择入口**（P1，上游 C1）：composer 工具栏单一控件同时选模型与思考等级，末级折叠自适应（useComposerToolbarFit）；ThoughtLevelCycleControl 语义=合并入口在场退场/缺席保底；ModelConfigSelect 拆分共享 thoughtLevel 模块（663→365 行）。Magic Context contextUsage 面板零触碰。
 - **消息装配统一 buildUserMessageEntries**（P2，上游 C2）：live/恢复/hydrator 全链单一装配函数；T-AS 30/30 oracle 物理复刻对拍；MC 三端口（turn transform/提示词段/工具描述）零改动，19 套件 MC 回归绿。
 - **虚拟项目存储与组织**（P3/P4）：project-catalog/task-facts/task-groups/project-workspace-navigation/window-project-directory 等 7 存储目录+sqlite-migrations scope 三分（0004/0005 两支 schema 与上游逐字节冻结，checksum 基准测试锁死）；任务落项目/分组全链（SessionPane/ConversationTransport/store draftProjectId/composer taskGroupId 继承+TaskGroupedView 草稿行）；tabStore 键统一（resolveWorkspaceKey/lastClosedWorkspaceEvent/previousWorkspaceIdentity）；未读信号链（onTaskNavigationCommitted/useProjectUnreadSignals/registry 双修订号快照）；lineage walk（subscribeConversationV4 父链上溯+project.session-lineage-invalid 三态拒绝）。
-- **远程开发 R3 三期**（P5-P7）：source-server 契约/transport/daemon 链；ConnectionManager 薄层+registry 恢复状态机+换代通知链（RemoteWorkspaceReconnected 五层）；sourceServerDirectory/aliasRepo/身份迁移（workspaceIdentity 拍板：本机键规则不变，daemon 远端用 `remote:server:<id>:<path>` identity）；**主链切换**——ssh/wsl/docker 全量走 daemon 分支（`ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1` 逃生开关，旧链代码保留共存）；host IRemoteProjectService 投影+注册链；Remote* 7 组件+useProjectRemoteSync 回填（19 文件）+侧栏 Remote 缝真接通；identity 绑定回执+membershipIntent 透传+Directory admission。
+- **远程开发 R3 三期**（P5-P7）：source-server 契约/transport/daemon 链；ConnectionManager 薄层+registry 恢复状态机+换代通知链（RemoteWorkspaceReconnected 五层）；sourceServerDirectory/aliasRepo/身份迁移（workspaceIdentity 拍板：本机键规则不变，daemon 远端用 `remote:server:<id>:<path>` identity）；**主链切换**——ssh/wsl/docker 全量走 daemon 分支（`ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1` 逃生开关，旧链代码保留共存）；host IRemoteProjectService 投影+注册链；Remote\* 7 组件+useProjectRemoteSync 回填（19 文件）+侧栏 Remote 缝真接通；identity 绑定回执+membershipIntent 透传+Directory admission。
 - **ToolSearch 按需工具加载**（P8）：deferred 清单+tool_reference 卡+按需 hydration+公告块（默认 off，设置面可切 auto/local）；**落地序=暴露决策→公告→MC transform→双投影**（推演文档 toolsearch-seam-proof.md：MC transform 无 tools 通道零影响，off 模式逐字节恒等）；shouldDefer 分类=内置自研工具恒常驻、MCP 工具默认 defer（alwaysLoad 豁免）；D4 持久层零渗入；MC 全套 654/0。
 - **composer 分组草稿继承**：composerDraftStore 深度重写（ComposerScope 三元分 key/taskGroupId 继承/PendingTaskDraft 家族/工作区 scope 记忆）。
 
 ### 修复
 
-- **打包产物启动即崩（P0 事故，重发包）**：tsup 默认 `removeNodeProtocol` 把 `node:sqlite` 剥成裸 `"sqlite"`（该内建无裸别名），main/host/scheduler 三进程 ESM 产物 `ERR_MODULE_NOT_FOUND`。修复=sqlite-migrations backup/restore 改 createRequire 惯例形；**新增产物级说明符门禁**（verify-bundle-imports，挂 tsup 四 target onSuccess：node: 前缀∪external 八项∪builtinModules∪deps 白名单，@zcode/* 反白名单）+**桌面启动 e2e 冒烟**（desktop-launch-smoke：ZCODE_DESKTOP_SMOKE 首窗 ready-to-show 退出 0+stderr 断言+60s 兜底；修复前红/修复后绿双向实证）。
+- **打包产物启动即崩（P0 事故，重发包）**：tsup 默认 `removeNodeProtocol` 把 `node:sqlite` 剥成裸 `"sqlite"`（该内建无裸别名），main/host/scheduler 三进程 ESM 产物 `ERR_MODULE_NOT_FOUND`。修复=sqlite-migrations backup/restore 改 createRequire 惯例形；**新增产物级说明符门禁**（verify-bundle-imports，挂 tsup 四 target onSuccess：node: 前缀∪external 八项∪builtinModules∪deps 白名单，@zcode/\* 反白名单）+**桌面启动 e2e 冒烟**（desktop-launch-smoke：ZCODE_DESKTOP_SMOKE 首窗 ready-to-show 退出 0+stderr 断言+60s 兜底；修复前红/修复后绿双向实证）。
 - **编辑历史消息发送旧内容**（bug A）：rAF 首帧竞态修复+ConversationRowView 观测日志。
 - **中断后队列不收新输入**（bug B，行为变化）：根因=omz 拆遥测时误删 `return;`（commit 24af3955）导致确认框被 null 覆盖且输入被吞。现在暂停态照常入队（held 路由 choice→enqueue）；「立即发送」=恢复语义（sendQueuedNow 后 autoDrain）；执行层对称修复（held 态普通 sendText 入队不再插队）。
 - **cli turbo lint/typecheck/desktop 全量门禁**：ui 测试工程漏进批量 typecheck 的门禁洞修复（tsc -b 不含 tsconfig.test.json）。
@@ -71,7 +85,7 @@
 
 ### 门禁与基线
 
-- 根 typecheck 0 错；desktop-full 54 error kinds（基线 366 无新增）；lint 49w/0e（docs/** 出产品 lint 范围+触碰面 unused 清零，零新增）；oxfmt 触碰面 0 违规（基线存量 96 登记）；knip 终态基线落盘（`docs/iterations/upstream-v316-fullsync/cache/gate-knip.json`：豁免 222 项 14 组+存量 42）；test:v4-perf 46 段 654/0；test:cli-backport 全绿；i18n verify 双语对称。
+- 根 typecheck 0 错；desktop-full 54 error kinds（基线 366 无新增）；lint 49w/0e（docs/\*\* 出产品 lint 范围+触碰面 unused 清零，零新增）；oxfmt 触碰面 0 违规（基线存量 96 登记）；knip 终态基线落盘（`docs/iterations/upstream-v316-fullsync/cache/gate-knip.json`：豁免 222 项 14 组+存量 42）；test:v4-perf 46 段 654/0；test:cli-backport 全绿；i18n verify 双语对称。
 
 ### 已知限制与挂账（真机 QA 待验收）
 

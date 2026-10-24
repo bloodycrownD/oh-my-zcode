@@ -19,6 +19,7 @@ const { DatabaseSync } = createRequire(import.meta.url)(
 ) as typeof import("node:sqlite");
 import { ZCODE_AGENT_PROVIDER } from "@zcode/shared";
 import { runTasksDatabaseMigrations } from "../src/session/tasksDatabase/migrations.js";
+import { TaskIndexRepo } from "../src/session/taskIndexRepo.js";
 import { projectStorage } from "../src/project-storage/index.js";
 
 const LEGACY_WORKSPACE = "D:\\legacy\\workspace";
@@ -115,6 +116,48 @@ test("T-MIG1: 迁移补齐 hosts/projects 并把存量行收养到本机 host", 
     assert.equal(reserved.workspacePath, join(LEGACY_WORKSPACE, "sub"));
   } finally {
     db.close();
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+});
+
+// 这条是事故根因断言：迁移函数有测试、但没人断言它**从生产启动链被调用**。
+// TaskIndexRepo.ensureReady 是 Host/Worker 打开 tasks-index 的唯一入口，它必须在
+// 打开老库时把项目存储迁移落账（v1.0.22 缺失这一步 → 老项目全部打不开）。
+test("T-MIG1: 业务连接 ensureReady 会自行跑项目迁移（生产接线断言）", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "omz-legacy-db-"));
+  const path = join(dir, "tasks-index.sqlite");
+  const db = new DatabaseSync(path);
+  try {
+    db.exec("PRAGMA foreign_keys = ON");
+    seedLegacyDatabase(db);
+  } finally {
+    db.close();
+  }
+  // 四参顺序：(settings, hostId, path, busyTimeout)；老库无设置投影时前两参为空。
+  const indexRepo = new TaskIndexRepo(undefined, undefined, path, 5000);
+  try {
+    await indexRepo.ensureReady();
+    const verify = new DatabaseSync(path, { readOnly: true });
+    try {
+      const ledger = verify
+        .prepare("SELECT id FROM schema_migration")
+        .all()
+        .map((row) => String((row as { id: unknown }).id));
+      assert.ok(
+        ledger.includes("0005_projects"),
+        "ensureReady 必须把 0005_projects 落账（否则老库永远没有 hosts/projects）",
+      );
+      const hosts = verify.prepare("SELECT count(*) AS n FROM hosts").get() as { n: number };
+      assert.equal(hosts.n > 0, true);
+      const adopted = verify
+        .prepare("SELECT host_id FROM tasks WHERE task_id=?")
+        .get(LEGACY_TASK_ID) as { host_id: string | null };
+      assert.equal(adopted.host_id, "local");
+    } finally {
+      verify.close();
+    }
+  } finally {
+    indexRepo.close();
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 });

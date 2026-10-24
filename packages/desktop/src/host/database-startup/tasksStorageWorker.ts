@@ -9,7 +9,8 @@ import {
 
 const data = tasksStorageWorkerDataSchema.parse(workerData);
 try {
-  // Worker 必须携带旧设置完成项目迁移，否则后续 Host 只能看到已记账的空项目种子（上游同形态）。
+  // Worker 必须携带旧设置完成项目迁移，否则后续 Host 只能看到已记账的空项目种子（上游同形态）；
+  // v1.0.22 事故即此：账本已写、种子为空，老会话随后全部 project.host-mismatch。
   const settings = await createSettingService().get();
   await prepareTasksIndexStorage(
     data.path,

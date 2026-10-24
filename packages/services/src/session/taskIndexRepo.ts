@@ -482,6 +482,10 @@ function compareGroupTasks(
 export class TaskIndexRepo {
   // 构造器对齐上游四参（Step 1-⑤）：首个参数是旧设置投影（项目/连接身份种子），
   // 第二个是可信持库 Host 身份，路径与锁等待顺延到第三/四位。
+  //
+  // v1.0.22 事故（main 分线把 settings/hostId 追加到尾部，这里统一到四参顺序）：
+  // 项目存储（hosts/projects/tasks.host_id）必须经生产启动链迁移，否则老库永远停在
+  // 「无 hosts 表 + tasks 无 host_id 列」，老会话一律 project.host-mismatch。
   constructor(
     private readonly migrationSettings?: ProjectMigrationContext["settings"],
     private readonly storageHostId?: string,
@@ -543,6 +547,9 @@ export class TaskIndexRepo {
     // 0005/0008；Host 主线程已被 hostDatabaseStartup 标记 prepared（hostDatabaseStartup.ts:58、
     // prepared.ts:16-18 同进程 Set），故上面的早退必命中——新增迁移接点必须落在 worker 侧
     // 或显式绕过该早退。
+    //
+    // v1.0.22 事故复盘（main 分线同修此点）：Worker 若不携带旧 settings，0005 只写账本、
+    // 种子为空，老会话随后一律 project.host-mismatch。保留本线实现。
     await projectStorage.migrate(this.getDatabase(), {
       settings: this.migrationSettings,
       hostId: this.storageHostId,
