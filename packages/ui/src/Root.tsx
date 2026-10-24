@@ -47,6 +47,7 @@ import { useRootProviderSettingsSnapshot } from "@/root/useRootProviderSettingsS
 import { useDesktopNativeThemeSync } from "@/root/useDesktopNativeThemeSync.js";
 import { useRootPlatformEffects } from "@/root/useRootPlatformEffects.js";
 import { useRootWorkspaceActions } from "@/root/useRootWorkspaceActions.js";
+import { useSourceServerUpdateNotifications } from "@/root/sourceServerUpdateNotifications.js";
 import { useBotBroadcastEffects } from "@/root/useBotBroadcastEffects.js";
 import { registerBaseWorkspaceServices } from "@/store/remoteWorkspaceSessionStore.js";
 import type { RootProps } from "@/root/types.js";
@@ -143,6 +144,12 @@ function RootInner({
   useDynamicWorkflowAvailabilityLoader();
 
   const { intl, locale } = useZCodeIntl();
+  // P9-4：Source/Controller 更新提示的唯一挂载点（对照上游 Root.tsx:256）。
+  // 只有桌面端 enabled：更新动作要经 Host 的 management 服务，Web 面没有这条链。
+  const handleRemoteConnectionTargetChange = useSourceServerUpdateNotifications({
+    enabled: isDesktop === true,
+    management: services.sourceServerManagementService,
+  });
   const theme = useZCodeStore((state) => state.theme);
   const {
     settings: appSettings,
@@ -173,6 +180,12 @@ function RootInner({
     path: string;
     sessionId: string;
   } | null>(null);
+  // 向导接管更新提示的目标（P9-4）：omz 向导壳（SSHDialog）没有上游 onFlowTargetChange 出口
+  // （拍板 A：壳层不外扩），以项目创建流程持有的 host.target 作等价投影——该设备正在走
+  // 连接/目录步时不再叠加「有更新」提示，避免用户同屏看到两个并行动作。
+  useEffect(() => {
+    handleRemoteConnectionTargetChange(remoteProjectSelection?.host.target ?? null);
+  }, [handleRemoteConnectionTargetChange, remoteProjectSelection]);
   // 向导内部自己持有 connectedSessionId；项目流程彻底关闭后必须换代重挂，
   // 否则下次打开「远程工作区」会回到已被释放的目录步（shouldResetRemoteConnectionOnOpen 恒 false）。
   const [remoteConnectionDialogEpoch, setRemoteConnectionDialogEpoch] = useState(0);

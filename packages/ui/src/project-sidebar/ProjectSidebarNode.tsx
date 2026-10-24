@@ -1,6 +1,6 @@
-// 照搬上游 v3.16.2 并 omz 化（P7 末批 Remote* 回填接线）：
-// ①connect/onRemoveEntry/设备设置跳转——前两者本批接真（IRemoteProjectService 已注册），
-//   设备设置跳转随 P9 设置页批（omz 设置无 remoteDevices 段）挂账；
+// 照搬上游 v3.16.2 并 omz 化（P7 末批 Remote* 回填接线；P9-4 补齐设备设置跳转）：
+// ①connect/onRemoveEntry/设备设置跳转——本批全部接真（IRemoteProjectService 已注册，
+//   「远程设备」设置段随 P9 落地）；
 // ②手机远控项目侧栏位已随 relay v1 清理删除（omz 无该面）。
 import { memo } from "react";
 import { shallow } from "zustand/shallow";
@@ -15,9 +15,11 @@ import type {
 import { buildRemoteHostWorkspaceIdentity } from "@/project-sidebar/contract.js";
 import { ProjectNode } from "@/project-sidebar/ProjectNode.js";
 import type { ProjectNodeProps } from "@/project-sidebar/ProjectNodeContent.js";
+import { projectSourceServerId } from "@/project-sidebar/view.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { setPendingSettingsSectionIntent } from "@/lib/settingsNavigation.js";
 import { toast } from "@/components/ui/toast.js";
 import { logger } from "@/logger.js";
 
@@ -69,16 +71,23 @@ export const ProjectSidebarNode = memo(
   }: Props) {
     const { intl } = useZCodeIntl();
     const confirm = useConfirmDialog();
-    useTabStoreApi();
+    const tabStore = useTabStoreApi();
     const msg = (id: string) => intl.formatMessage({ id: `project.${id}` });
-    // P9 挂账：设备设置跳转需 omz 设置「远程设备」段（setPendingSettingsSectionIntent
-    // "remoteDevices"）；段位就位前不注入该 action，悬浮卡 pending 态只有详情无跳转。
+    const sourceServerId = projectSourceServerId(project);
     const { refresh, availability } = display;
     return (
       <ProjectNode
         {...display}
         project={project}
         remoteHost={remoteHost}
+        onOpenDeviceSettings={
+          isDesktop && sourceServerId
+            ? () => {
+                setPendingSettingsSectionIntent("remoteDevices", { sourceServerId });
+                tabStore.getState().openSettingsTab();
+              }
+            : undefined
+        }
         additionalActions={[
           ...remoteActions(project),
           ...(remoteHost && remoteHost.connectionStatus !== "online"
