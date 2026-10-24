@@ -253,7 +253,9 @@ export function applyHeuristicCleanup(
                     const dropResult = target.drop?.() ?? "absent";
                     const replacement = `[dropped §${tag.tagNumber}§]`;
                     const didReplace =
-                        dropResult === "absent" ? target.setContent(replacement) : false;
+                        dropResult === "absent"
+                            ? (target.setContent?.(replacement) ?? false)
+                            : false;
                     if (dropResult === "removed" || dropResult === "absent") {
                         replaceSourceContent(db, sessionId, tag.tagNumber, "");
                         updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
@@ -276,7 +278,7 @@ export function applyHeuristicCleanup(
                 } else {
                     // Only the injected reminder leaves; the message's own text
                     // and the reasoning that produced it stay.
-                    const didSet = target.setContent(stripped, { keepReasoning: true });
+                    const didSet = target.setContent?.(stripped, { keepReasoning: true }) ?? false;
                     if (didSet) {
                         replaceSourceContent(db, sessionId, tag.tagNumber, strippedSource);
                         droppedInjections++;

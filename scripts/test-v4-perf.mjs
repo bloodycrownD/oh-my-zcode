@@ -62,10 +62,14 @@ const COMMANDS = [
   "node --import tsx --test packages/services/test/sourceServerReleaseResolver.test.ts packages/services/test/sourceSettingsServiceCollection.test.ts",
   "node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/remoteConnectionProgressWiring.test.ts",
   "npx tsx --tsconfig packages/ui/tsconfig.json --test packages/ui/test/settingsSourceWorkspace.test.ts packages/ui/test/sourceSettingsServiceStore.test.ts",
+  "npx tsx --tsconfig packages/ui/tsconfig.json --test packages/ui/test/settingsSourceAttachmentRetry.test.ts",
+  "npx tsx --tsconfig packages/ui/tsconfig.json --test packages/ui/test/mcpDirectoryServiceOwnership.test.ts",
   "pnpm --dir apps/zcode-cli/packages/bootstrap run test:tool-reference-roundtrip",
   "node --import tsx --test packages/desktop/test/sourceSettingsAttachmentChannel.test.ts",
   "pnpm --dir apps/zcode-cli/packages/bootstrap run test:mc-zero-load",
   "pnpm --dir apps/zcode-cli/packages/adapters run test:magic-context-config-lazy",
+  "pnpm --dir apps/zcode-cli/packages/magic-context run test:tool-reference-projection",
+  "pnpm --dir apps/zcode-cli/packages/magic-context run test:tool-reference-governance",
 ];
 
 for (const [index, command] of COMMANDS.entries()) {

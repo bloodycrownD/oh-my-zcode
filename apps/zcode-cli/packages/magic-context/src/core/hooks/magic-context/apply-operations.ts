@@ -12,7 +12,7 @@ import { sessionLog } from "../../shared/logger.js";
 import { logSlowWriteTransaction } from "../../shared/write-transaction-timing.js";
 import type { DroppedTokenReduction } from "./dropped-token-estimate.js";
 import type { TagTarget } from "./tag-messages.js";
-import type { ToolDropResult } from "./tool-drop-target.js";
+import { toolTargetBypassesContentRewrite, type ToolDropResult } from "./tool-drop-target.js";
 import { SKELETON_REAL_INPUT_MAX_BYTES } from "./tool-input-size.js";
 
 // Max characters kept from the original user content when a user-message tag
@@ -65,7 +65,11 @@ export function buildReplacementContent(tagId: number): string {
 }
 export interface NewToolDropOutcome {
     result: ToolDropResult;
-    /** The drop mode to persist so every later pass replays the same bytes. */
+    /**
+     * The drop mode to persist so every later pass replays the same bytes.
+     * Meaningless when `result === "bypassed"`: nothing was rewritten, so
+     * callers MUST NOT persist a mode or mark the tag dropped.
+     */
     mode: "skeleton_real" | "skeleton_stripped" | "full";
 }
 
@@ -86,6 +90,13 @@ export function applyNewToolDrop(
     options: { inWindow: boolean; keepSkeleton?: boolean },
 ): NewToolDropOutcome {
     if (!target) return { result: "absent", mode: "full" };
+    // FORK（toolsearch / native tool references）：结构化结果整条弧对 MC 不透明。
+    // 必须在选择 skeleton/drop 之前返回：skeletonReal 会把 `state.output` 写成
+    // `[dropped §N§]`，而 tool_reference 块没有 text 字段，字符串化即删除 native
+    // 工具定义。`"bypassed"` 让调用方排空 pending op 而不落 drop 状态。
+    if (toolTargetBypassesContentRewrite(target)) {
+        return { result: "bypassed", mode: "full" };
+    }
     if (
         (options.inWindow && hasSmallToolInput(target)) ||
         options.keepSkeleton === true ||
@@ -227,6 +238,9 @@ export function convertLegacyToolSkeletons(
     const converted = new Map<number, ConvertedToolDropMode>();
     for (const row of rows) {
         const target = targets.get(row.tagNumber);
+        // FORK（toolsearch）：结构化结果弧的 canDrop 为 false，legacy marker
+        // 不会被「转换」成 skeleton_real——转换一定会写字符串哨兵，等于删除
+        // tool_reference 块；这类弧保持 host 给的原样。
         if (target?.canDrop?.() !== true) continue;
         const cannotRemove =
             target.cannotRemove?.() === true ||
@@ -415,7 +429,12 @@ export function applyPendingOperations(
                         const markResult =
                             (strip ? target?.editMarkerStripped?.() : target?.editMarker?.()) ??
                             "absent";
-                        if (markResult === "incomplete" || markResult === "absent") {
+                        if (markResult !== "truncated") {
+                            // absent / incomplete / bypassed 都是「本轮没有可写回的字节」：
+                            // 不改 wire、不落 drop 状态。结构化弧（bypassed）不会被生产
+                            // 选择器放进本集合——buildEditSupersessionReclaim 要求
+                            // canDrop() === true，而结构化弧恒为 false；这里统一按失败
+                            // 分支处理，避免把 bypass 当成成功写回。
                             reject(`edit_marker_${markResult}`);
                             continue;
                         }
@@ -438,6 +457,18 @@ export function applyPendingOperations(
                         const { result: dropResult, mode: appliedMode } = applyNewToolDrop(target, {
                             inWindow: skeletonWindow.has(pendingOp.tagId),
                         });
+                        if (dropResult === "bypassed") {
+                            // FORK（toolsearch / native tool references）：结构化结果
+                            // 是 MC 的不透明弧（tool_reference 块无 text 字段，任何
+                            // 字符串写回都等于删除 native 工具定义）。这里不落 drop
+                            // 状态、不改 wire：真实 pending op（compartment 发布 /
+                            // ctx_reduce）排空即可，避免每个 pass 重试。synthetic op
+                            // 走不到这里——上面的 canDrop 门已把它挡掉。tag 保持
+                            // active，让账本继续把这段字节算在 wire 上。
+                            reject("structured_output_bypass");
+                            removePendingOp(db, sessionId, pendingOp.tagId);
+                            continue;
+                        }
                         if (
                             dropResult === "incomplete" ||
                             (synthetic && dropResult !== "removed" && dropResult !== "truncated")
@@ -461,7 +492,7 @@ export function applyPendingOperations(
                 } else if (target) {
                     const replacement = buildReplacementContent(pendingOp.tagId);
                     const priorContent = target.getContent?.();
-                    const changed = target.setContent(replacement);
+                    const changed = target.setContent?.(replacement) ?? false;
                     if (changed) {
                         didMutateMessage = true;
                         operationMutated = true;
@@ -564,6 +595,28 @@ export function applyFlushedStatuses(
                 continue;
             }
             if (tag.type === "tool") {
+                // FORK（toolsearch / native tool references）：带块数组结果的弧
+                // 的每个 mutator 都返回 "bypassed"（见 tool-drop-target.ts），
+                // 所以下面所有 drop_mode 分支对这类 tag 都是 no-op：结构化结果
+                // 原样留在 wire 上，旧版本留下的 drop_mode 不会把它文本化。
+                //
+                // 但旧版本可能把这类 tag 记成 dropped，账本于是与 wire 矛盾：
+                // 急降级 floor 只统计 active tag（heuristic-cleanup.ts 的
+                // activeTags，floorTags 必须覆盖仍留在 wire 上的全部 tail 质量）。
+                // 少算的正是这条仍完整留在 wire 上的弧，fixedFloor 因此被高估，
+                // plan 会系统性少降级（under-evict，见 emergency-drop.ts 的
+                // fixedFloor 契约）。整弧既然永远不会被改写，就在恢复前把状态
+                // 修回 active，让账本与真实字节一致；drop_mode 保持原值（只有
+                // dropped 行会读它）。一次修复后该 tag 不再出现在
+                // getDroppedTagsByNumbers 的结果里，不会每 pass 重写。
+                if (toolTargetBypassesContentRewrite(target)) {
+                    updateTagStatus(db, sessionId, tag.tagNumber, "active");
+                    sessionLog(
+                        sessionId,
+                        `applyFlushedStatuses healed structured tool tag ${tag.tagNumber} back to active`,
+                    );
+                    continue;
+                }
                 if (tag.dropMode === "edit_marker_stripped") {
                     const result = target?.editMarkerStripped?.() ?? "absent";
                     if (result === "truncated") didMutateMessage = true;
@@ -594,7 +647,8 @@ export function applyFlushedStatuses(
                     }
                 }
             } else if (target) {
-                const changed = target.setContent(buildReplacementContent(tag.tagNumber));
+                const changed =
+                    target.setContent?.(buildReplacementContent(tag.tagNumber)) ?? false;
                 if (changed) didMutateMessage = true;
             }
         }

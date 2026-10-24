@@ -276,8 +276,13 @@ export type TagTarget = {
      * system-injection strip): the reasoning stays, because removing it would
      * leave a gap in the middle of the history that prefix-bound models reject
      * for every later thinking block.
+     *
+     * Message/file targets only. Tool targets have no string replacement: a
+     * structured block-array result cannot be faithfully rewritten as text
+     * (FORK toolsearch — see `tool-drop-target.ts`), and call sites that reach
+     * this method are already narrowed to `tag.type !== "tool"`.
      */
-    setContent: (content: string, options?: { keepReasoning?: boolean }) => boolean;
+    setContent?: (content: string, options?: { keepReasoning?: boolean }) => boolean;
     getContent?: () => string | null;
     /**
      * Text targets: the `§N§ ` prefix this pass puts in front of the text, or

@@ -276,14 +276,32 @@ export interface ToolLikePart {
      * （`packages/adapters/src/model/transform.ts:174-192`：只要块数组含
      * tool_reference 就跳过文本化）。
      *
-     * 包内按 `typeof output === "string"` 判断「结果可打标/可 drop」的地方会自然
-     * 跳过这类 part（引用既不该被 §N§ 打标，也不该被压成 `[dropped §N§]`）；
-     * 需要字符串的下游（read-session-formatting / tail-hygiene / ctx-expand /
-     * final-wire-token-estimate）已有 non-string 兜底（JSON.stringify 或忽略）。
+     * 包内按 `typeof output === "string"` 判断「结果可打标/可 drop」的地方会
+     * **有意**跳过这类 part——这不是遗漏，而是 fork 的绕过策略：块数组结果对
+     * Magic Context 整体不透明（opaque）。
+     *
+     *   - 打标：`tag-part-guards.ts` 的 `isToolPartWithOutput` 只认字符串
+     *     （改它之前先读该函数的注释：下游 byteSize/stripTagPrefix/prependTag
+     *     全是字符串面，放宽会在打标点写坏块数组）；
+     *   - 治理：`tool-drop-target.ts` 的 `entryHasStructuredOutput` 把整条 tool
+     *     弧标记为 `structuredOutputOpaque`，drop / skeleton / edit_marker
+     *     全部返回 `"bypassed"`、`canDrop()` 为 false、tool target 不提供 `setContent`；
+     *     `apply-operations.ts` 对真实 pending op 只排空队列，不落 drop 状态。
+     *
+     * 为什么必须绕过而不是「度量后 clamp」：`tool_reference` 块没有 text/content
+     * 字段，任何字符串写回（哪怕只是 `[dropped §N§]`）都等于删除引用，native
+     * ToolSearch 的定义随后无法在服务端展开；这类结果本身很小，压缩它没有收益。
+     * 唯一写回点是宿主本侧反投影
+     * （`apps/zcode-cli/packages/bootstrap/src/app/magic-context/projection.ts` 的
+     * `toolOutputOf` / `toolOutputContentOf`），它按原序把块数组写回
+     * `role:"tool"` entry。需要字符串的下游（read-session-formatting /
+     * tail-hygiene / ctx-expand / final-wire-token-estimate）已有 non-string
+     * 兜底（JSON.stringify 或忽略）。
      *
      * 升级 magic-context 时**必须 rebase 本改动**：上游若把 tool part 的 output
-     * 改成别的承载形状，这里的联合类型与 `toolResultToPart` 的结构保留逻辑要一起
-     * 迁移，否则 native 引用会被上游的文本化语义重新吃掉。
+     * 改成别的承载形状或引入结构化 output，上面的「块数组 = 绕过」不变量与
+     * `toolResultToPart` 的结构保留逻辑要一起迁移；若改为治理，则必须同时
+     * 实现块感知的度量与反投影写回，不能退化成字符串哨兵。
      */
     output?: string | readonly ZCodeModelMessageContentBlock[];
     error?: string;
@@ -362,6 +380,10 @@ function isToolReferenceBlock(block: unknown): boolean {
  * 其余输入（字符串、纯文本块数组、媒体块数组、不含 tool_reference 的错误结果）
  * 行为与改动前逐字节相同；没有 ToolSearch 时永远不会出现 `tool_reference`，
  * 因此 mode off 零差异。与 adapters `transform.ts:174-192` 的保护同构。
+ *
+ * 保留成块数组即意味着该 arc 对 MC 不透明：它仍按闭合结果参与 pairing
+ * （`partHasCompletedResult`），但打标/治理侧整体绕过（见 `ToolLikePart.state.output`
+ * 的注释），写回只发生在宿主反投影的 `toolOutputOf`。
  * 升级 magic-context 时 rebase。
  */
 function toolResultToPart(message: ZCodeModelInputMessage): ToolLikePart | null {

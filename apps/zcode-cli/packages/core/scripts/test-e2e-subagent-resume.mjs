@@ -102,11 +102,19 @@ const AGENT_1 = "agent_e2e_1";
 const AGENT_2 = "agent_e2e_2";
 const ROOT_CAUSE = "child model call failed: 502 bad gateway from upstream provider";
 
-/** 轮询等待 registry 终态（后台 finalize 有真实异步文件 IO）。 */
-async function waitFor(predicate, label, spins = 500) {
-  for (let index = 0; index < spins; index += 1) {
+/**
+ * 轮询等待 registry 终态（后台 finalize 有真实异步文件 IO）。
+ *
+ * 修复：原先按固定 500 次 setImmediate 轮数等待，一轮只有 ~0.1ms，磁盘写入
+ * 稍有抖动（Windows 临时目录 3 次写文件）就会在 finalize 落终态前耗尽轮数，
+ * 造成「resume 后台 turn 收口 completed」偶发超时。轮数不是时间，改为固定
+ * 时间预算，断言本身保持不变。
+ */
+async function waitFor(predicate, label, timeoutMs = 10_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (predicate()) return;
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 5));
   }
   assert.ok(predicate(), `等待超时：${label}`);
 }

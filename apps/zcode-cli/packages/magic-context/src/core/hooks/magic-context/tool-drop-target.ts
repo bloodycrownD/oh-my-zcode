@@ -4,11 +4,20 @@ import { droppedInputMarker } from "./dropped-input-guard.js";
 import { applyEditMarkerToInput } from "./edit-marker.js";
 import { estimateMessageTokens } from "./final-wire-token-estimate.js";
 import { neutralizeDroppedReasoningPart } from "./sentinel.js";
+import { hasStructuredToolOutput } from "./tag-part-guards.js";
 import { stripTagPrefix } from "./tag-content-primitives.js";
 import type { MessageLike, ThinkingLikePart } from "./tag-messages.js";
 import { toolInputStringBytes } from "./tool-input-size.js";
 
-export type ToolDropResult = "removed" | "truncated" | "absent" | "incomplete";
+/**
+ * `"bypassed"`: the arc carries a structured (block-array) tool result, so no
+ * content rewrite may touch it. Distinct from `"absent"`/`"incomplete"` — those
+ * mean "not on this pass's wire"/"arc still open", and callers keep their
+ * pending op queued for a later pass. A bypass is final: the arc is on the wire
+ * and must stay byte-identical, so callers drain the op without persisting a
+ * drop mode/status (see apply-operations.ts).
+ */
+export type ToolDropResult = "removed" | "truncated" | "absent" | "incomplete" | "bypassed";
 
 interface ToolCallObservation {
     callId: string;
@@ -36,7 +45,6 @@ export interface ToolCallIndexEntry {
 
 export type ToolCallIndex = Map<string, ToolCallIndexEntry>;
 
-const DROP_PREFIX = "[dropped";
 const IGNORE_PART_TYPES = new Set([
     "thinking",
     "reasoning",
@@ -48,28 +56,6 @@ const IGNORE_PART_TYPES = new Set([
 
 function isToolCallId(value: unknown): value is string {
     return typeof value === "string" && value.length > 0;
-}
-
-function getToolContent(part: unknown): string | undefined {
-    if (!isRecord(part)) return undefined;
-    if (part.type === "tool" && isRecord(part.state)) {
-        return typeof part.state.output === "string" ? part.state.output : undefined;
-    }
-    if (part.type === "tool_result") {
-        return typeof part.content === "string" ? part.content : undefined;
-    }
-    return undefined;
-}
-
-function setToolContent(part: unknown, content: string): void {
-    if (!isRecord(part)) return;
-    if (part.type === "tool" && isRecord(part.state)) {
-        part.state.output = content;
-        return;
-    }
-    if (part.type === "tool_result") {
-        part.content = content;
-    }
 }
 
 /**
@@ -292,6 +278,9 @@ export function partHasCompletedResult(part: unknown): boolean {
         // 它仍然是**闭合的完成结果**：只看字符串会把这类 part 误判成 invocation，
         // 导致 assistant 调用侧与 user 结果侧落进两个 composite key（参见
         // docs/specs/magic-context-tool-arc-pairing.md 记录的孤儿 invocation 事故）。
+        // 注意：这里只负责**配对/是否闭合**；块数组结果的内容改写由
+        // `entryHasStructuredOutput` 整弧拦截（drop/skeleton/truncate 全部
+        // `"bypassed"`），两者是两件事，不要合并成一个判定。
         // 升级 magic-context 时 rebase：上游若引入结构化 output，按其类型收口。
         return (
             typeof part.state.output === "string" ||
@@ -330,8 +319,27 @@ export function extractToolCallObservation(part: unknown): ToolCallObservation |
     return null;
 }
 
-function isDropContent(content: string): boolean {
-    return content.startsWith(DROP_PREFIX);
+/**
+ * True when any occurrence of the arc carries a structured (block-array)
+ * result. Such an arc is opaque to Magic Context: `tool_reference` blocks have
+ * no text field, so every string rewrite (drop sentinel, skeleton, legacy
+ * truncate, edit marker) would silently delete the reference and
+ * the provider could no longer expand the native tool definitions. The arc is
+ * still PAIRED (see `partHasCompletedResult`) so a drop never removes only one
+ * side and strands the other; it simply never rewrites content.
+ */
+function entryHasStructuredOutput(entry: ToolCallIndexEntry | undefined): boolean {
+    return entry?.occurrences.some(({ part }) => hasStructuredToolOutput(part)) ?? false;
+}
+
+/**
+ * Non-mutating check for `applyNewToolDrop`: this target's arc is on the wire
+ * but may not be rewritten. Exported because `apply-operations.ts` must report
+ * the bypass separately from `absent`/`incomplete` (a real pending op is
+ * drained instead of retried, and no drop mode/status is persisted).
+ */
+export function toolTargetBypassesContentRewrite(target: unknown): boolean {
+    return isRecord(target) && target.structuredOutputOpaque === true;
 }
 
 /**
@@ -481,7 +489,6 @@ export function createToolDropTarget(
     batch: ToolMutationBatch,
     tagId: number,
 ): {
-    setContent: (content: string) => boolean;
     drop: () => ToolDropResult;
     truncate: () => ToolDropResult;
     skeletonReal: () => ToolDropResult;
@@ -500,6 +507,14 @@ export function createToolDropTarget(
      * makes the plan stop early and under-evict below the ceiling.
      */
     canDrop: () => boolean;
+    /**
+     * True when the arc carries a structured (block-array) result and must pass
+     * through Magic Context byte-identically (see `entryHasStructuredOutput`).
+     * Consumed by `toolTargetBypassesContentRewrite`; every mutator above also
+     * returns `"bypassed"` on its own so no caller can rewrite it. There is no
+     * string `setContent` on tool targets at all (see `TagTarget`).
+     */
+    structuredOutputOpaque: boolean;
     requiresToolArcSkeleton: boolean;
     readInput: () => Record<string, unknown> | null;
     measureReclaim: (skeleton: boolean) => {
@@ -512,6 +527,7 @@ export function createToolDropTarget(
     const drop = (): ToolDropResult => {
         const entry = index.get(compositeKey);
         if (!entry || entry.occurrences.length === 0) return "absent";
+        if (entryHasStructuredOutput(entry)) return "bypassed";
         if (!entry.hasResult) return "incomplete";
         // If removing this call's result would leave the provider request ending
         // on an assistant turn, keep the call with its REAL arguments plus the
@@ -531,6 +547,7 @@ export function createToolDropTarget(
     const truncate = (): ToolDropResult => {
         const entry = index.get(compositeKey);
         if (!entry || entry.occurrences.length === 0) return "absent";
+        if (entryHasStructuredOutput(entry)) return "bypassed";
         if (!entry.hasResult) return "incomplete";
 
         for (const occurrence of entry.occurrences) {
@@ -546,6 +563,7 @@ export function createToolDropTarget(
     const skeletonReal = (): ToolDropResult => {
         const entry = index.get(compositeKey);
         if (!entry || entry.occurrences.length === 0) return "absent";
+        if (entryHasStructuredOutput(entry)) return "bypassed";
         if (!entry.hasResult) return "incomplete";
 
         for (const occurrence of entry.occurrences) {
@@ -560,6 +578,7 @@ export function createToolDropTarget(
     const skeletonStripped = (): ToolDropResult => {
         const entry = index.get(compositeKey);
         if (!entry || entry.occurrences.length === 0) return "absent";
+        if (entryHasStructuredOutput(entry)) return "bypassed";
         if (!entry.hasResult) return "incomplete";
         for (const occurrence of entry.occurrences) {
             clampCloneInPlace(occurrence, (part) => skeletonRealToolPart(part, tagId, true));
@@ -592,6 +611,7 @@ export function createToolDropTarget(
     const applyEditMarker = (stripAttachments: boolean): ToolDropResult => {
         const entry = index.get(compositeKey);
         if (!entry || entry.occurrences.length === 0) return "absent";
+        if (entryHasStructuredOutput(entry)) return "bypassed";
         if (!entry.hasResult) return "incomplete";
 
         for (const occurrence of entry.occurrences) {
@@ -615,6 +635,17 @@ export function createToolDropTarget(
                     parts,
                 } as MessageLike);
             const before = count(parts);
+            if (entryHasStructuredOutput(entry)) {
+                // Opaque arc: it stays on the wire verbatim. Report the metric's
+                // current value as both before and after so the emergency floor
+                // keeps accounting for the arc while crediting zero reclaim.
+                return {
+                    beforeTools: before.toolCall,
+                    afterTools: before.toolCall,
+                    beforeProse: 0,
+                    afterProse: 0,
+                };
+            }
             const retained = skeleton ? structuredClone(parts) : [];
             for (const part of retained) skeletonRealToolPart(part, tagId);
             const after = count(retained);
@@ -625,26 +656,6 @@ export function createToolDropTarget(
                 beforeProse: 0,
                 afterProse: 0,
             };
-        },
-        setContent: (content: string): boolean => {
-            if (isDropContent(content)) {
-                drop();
-                return true;
-            }
-
-            const entry = index.get(compositeKey);
-            if (!entry) return false;
-
-            let changed = false;
-            for (const occurrence of entry.occurrences) {
-                if (occurrence.kind !== "result") continue;
-                const prevContent = getToolContent(occurrence.part);
-                if (prevContent !== content) {
-                    setToolContent(occurrence.part, content);
-                    changed = true;
-                }
-            }
-            return changed;
         },
         drop,
         truncate,
@@ -669,9 +680,11 @@ export function createToolDropTarget(
                 !!entry &&
                 entry.occurrences.length > 0 &&
                 entry.hasResult &&
+                !entryHasStructuredOutput(entry) &&
                 !entry.occurrences.some((occurrence) => toolPartHasUserAnswer(occurrence.part))
             );
         },
+        structuredOutputOpaque: entryHasStructuredOutput(index.get(compositeKey)),
         requiresToolArcSkeleton:
             thinkingParts.length > 0 ||
             (index

@@ -335,8 +335,8 @@ function applyCompressedText(
     const before = target.getContent?.();
     if (!state.currentRules || state.legacyReasoningTags.has(tagNumber)) {
         const legacy = cavemanCompress(originalText, level, "ascii-v1");
-        if (!state.currentRules) return legacy.length > 0 && target.setContent(legacy);
-        if (legacy.length > 0) target.setContent(legacy);
+        if (!state.currentRules) return legacy.length > 0 && (target.setContent?.(legacy) ?? false);
+        if (legacy.length > 0) target.setContent?.(legacy);
     }
     const compressed = cavemanCompress(
         originalText,
@@ -345,7 +345,7 @@ function applyCompressedText(
         wordRulesFor(state),
     );
     if (compressed.length === 0) return false;
-    target.setContent(`${target.textPrefix ?? ""}${compressed}`, { keepReasoning: true });
+    target.setContent?.(`${target.textPrefix ?? ""}${compressed}`, { keepReasoning: true });
     return target.getContent ? target.getContent() !== before : true;
 }
 
