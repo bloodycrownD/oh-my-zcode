@@ -6788,6 +6788,7 @@ const zhCN: Record<string, string> = {
   "settings.source.editConnectionDescription":
     "连接信息将在下次连接时生效，不会改变已有项目和任务。",
   "settings.source.empty": "还没有远程设备连接。",
+  "settings.source.updateNow": "立即更新",
   "settings.source.forceUpdate": "强制更新",
   "settings.source.forceUpdateDescription":
     "强制更新会中断此设备上仍在运行的任务。请确认这些任务可以停止。",
@@ -6842,6 +6843,12 @@ const zhCN: Record<string, string> = {
   "settings.source.updateRequired": "连接前需要更新 omz Server。",
   "settings.source.versionDetails":
     "当前 v{current} · 最低兼容 v{minimum} · 更新期间远程任务会短暂中断",
+  "sourceServer.updateAvailableToast": "{source} 有可用更新\n设备 {current} → {available}。",
+  "sourceServer.updateRequiredToast":
+    "{source} 必须更新后才能连接\n当前 {current}，需要 {available}。",
+  "sourceServer.updateStartedToast": "正在更新 {source}…",
+  "sourceServer.controllerUpdateAvailableToast":
+    "{source} 需要更新 ZCode\nDesktop {current} → {available}，请更新 ZCode 后重新连接。",
   "sourceServer.updateCompletedToast": "{source} 已更新并重新连接。",
   "sourceServer.updateFailedToast": "{source} 更新失败，请在远程设备中查看日志并重试。",
   "settings.source.controllerUpdateUnavailable":

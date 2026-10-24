@@ -7258,6 +7258,7 @@ const enUS: Record<string, string> = {
   "settings.source.editConnectionDescription":
     "Connection changes take effect the next time you connect. Existing projects and tasks are unchanged.",
   "settings.source.empty": "No remote device connections yet.",
+  "settings.source.updateNow": "Update now",
   "settings.source.forceUpdate": "Force update",
   "settings.source.forceUpdateDescription":
     "A forced update stops tasks that are still running on this device. Confirm that those tasks may be interrupted.",
@@ -7314,6 +7315,12 @@ const enUS: Record<string, string> = {
   "settings.source.updateRequired": "Update the remote component before connecting.",
   "settings.source.versionDetails":
     "Current v{current} · Minimum compatible v{minimum} · Remote tasks pause briefly during the update",
+  "sourceServer.updateAvailableToast": "{source} has an update\nDevice {current} → {available}.",
+  "sourceServer.updateRequiredToast":
+    "{source} must be updated before it can connect\nCurrent {current}; required {available}.",
+  "sourceServer.updateStartedToast": "Updating {source}…",
+  "sourceServer.controllerUpdateAvailableToast":
+    "ZCode has an update for {source}\nDesktop {current} → {available}; update ZCode to match this Source.",
   "sourceServer.updateCompletedToast": "{source} was updated and reconnected.",
   "sourceServer.updateFailedToast":
     "{source} could not be updated. Review the log under Remote devices and try again.",
