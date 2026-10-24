@@ -106,6 +106,8 @@ export * from "./markdown-artifact-images.js";
 export * from "./serviceAuthority.js";
 export * from "./server-remote.js";
 export * from "./source-server/index.js";
+// Source 设置面 attachment 的跨进程契约与结构化错误码（desktop preload/main/host 共用）。
+export * from "./source-settings-attachment.js";
 
 export interface ICredentialStore {
   get(key: string): Promise<string | null>;

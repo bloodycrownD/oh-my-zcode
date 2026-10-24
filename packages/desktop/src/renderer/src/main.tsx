@@ -33,6 +33,7 @@ import {
   parseRemoteWorkspaceServicePortMessage,
   type RemoteWorkspaceServicePortRegistration,
 } from "./remoteWorkspaceServicePortBridge.js";
+import { handleSourceSettingsServicePortMessage } from "./sourceSettingsServicePortBridge.js";
 
 type DesktopRendererImportMetaEnv = {
   VITE_ZCODE_E2E_STORE_BRIDGE?: string;
@@ -243,6 +244,10 @@ function StartupReadyNotifier() {
 }
 
 function handleServicePortMessage(event: MessageEvent): void {
+  // Source 设置面端口随窗口启动就注册监听：设置页选中 Source 时才由 main 投递端口，
+  // 这里消费并登记后，UI 才读得到远端配置；失败（端口缺失/载荷无效）由桥关闭端口。
+  if (handleSourceSettingsServicePortMessage(event)) return;
+
   if (event.source === window && event.data?.type === InternalChannels.DatabaseStartupState) {
     const result = databaseStartupStateSchema.safeParse(event.data.state);
     if (!result.success || appInitialized) return;

@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- 远程连接、workspace deep link 投递和通知 IPC 共用窗口级上下文，集中注册避免跨文件状态漂移。 */
-import { app, BrowserWindow, ipcMain, shell } from "electron";
+import { app, BrowserWindow, ipcMain, MessageChannelMain, shell } from "electron";
+import type { UtilityProcess } from "electron";
 import {
   formatZodError,
   normalizeUnknownError,
@@ -9,11 +10,9 @@ import {
   type RemoteTarget,
 } from "@zcode/shared";
 import { dispatchTaskNotification } from "./desktopNotifications.js";
-import {
-  clearDeepLinkRoutesForWindow,
-  deliverPendingDeepLink,
-} from "./desktopDeepLinkRouter.js";
+import { clearDeepLinkRoutesForWindow, deliverPendingDeepLink } from "./desktopDeepLinkRouter.js";
 import { openPathInDefaultApp } from "./desktopMainIpcHelpers.js";
+import { createSourceSettingsAttachmentBroker } from "./sourceSettingsAttachmentBroker.js";
 
 function isAllowedExternalOpenUrl(value: string): boolean {
   try {
@@ -77,11 +76,29 @@ export function registerRemoteIpcHandlers(options: {
     webContentsId: number,
     payload: { sessionId: string; attachmentId: string },
   ) => void;
+  /** 窗口 → Local Host 进程映射；source-settings attachment 与 ScopedServicePort 共用同一 Host。 */
+  windowHostProcessMap: Map<number, UtilityProcess>;
   isDockerDaemonAvailable: () => Promise<boolean>;
   listAvailableWSLDistros: () => Promise<unknown[]>;
   listAvailableDockerContainers: () => Promise<unknown[]>;
   listSSHConfigAliases: () => Promise<unknown[]>;
 }) {
+  // Source 设置 attachment：main 只做「窗口 Host 通道 + renderer 端口投递」，
+  // 设备存在/在线/服务集装配的判定全在 Host（Directory 与 Manager 的权威在那边）。
+  const sourceSettingsAttachment = createSourceSettingsAttachmentBroker({
+    getHost: (webContentsId) => options.windowHostProcessMap.get(webContentsId),
+    createPorts: () => {
+      const { port1, port2 } = new MessageChannelMain();
+      return {
+        rendererPort: port1,
+        hostPort: port2,
+        closeRendererPort: () => port1.close(),
+        closeHostPort: () => port2.close(),
+      };
+    },
+  });
+  app.once("before-quit", () => sourceSettingsAttachment.dispose());
+
   ipcMain.on(InternalChannels.ScopedServicePortReady, (event, rawPayload: unknown) => {
     if (!rawPayload || typeof rawPayload !== "object") return;
     const payload = rawPayload as { sessionId?: unknown; attachmentId?: unknown };
@@ -205,6 +222,12 @@ export function registerRemoteIpcHandlers(options: {
       return { success: false, error: normalizedError.message };
     }
   });
+
+  ipcMain.handle(
+    PlatformChannels.RequestSourceSettingsAttachment,
+    async (event, rawPayload: unknown) =>
+      sourceSettingsAttachment.request(event.sender, rawPayload),
+  );
 
   ipcMain.handle(
     PlatformChannels.CancelPendingRemoteConnection,

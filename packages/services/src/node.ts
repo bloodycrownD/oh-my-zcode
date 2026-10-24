@@ -104,7 +104,10 @@ export type {
 } from "./source-server-management/sourceServerManagementService.js";
 // Source settings attachment 的远端配置服务集（backlog-sweep Step 8）：host 用在线
 // Source 的 accessor 装配，services 侧不反向依赖 desktop。
-export { createSourceSettingsServiceCollection } from "./source-server-management/sourceSettingsServiceCollection.js";
+export {
+  createSourceSettingsServiceCollection,
+  SOURCE_SETTINGS_UNAVAILABLE_ERROR_CODE,
+} from "./source-server-management/sourceSettingsServiceCollection.js";
 export {
   SourceServerMigrationCounts,
   sumMigrationCounts,

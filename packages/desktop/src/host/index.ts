@@ -51,6 +51,7 @@ import {
   createSourceServerManagementService,
   createSourceServerReleaseResolver,
   createSourceSettingsServiceCollection,
+  SOURCE_SETTINGS_UNAVAILABLE_ERROR_CODE,
   disposeServiceResources,
   disposeServiceResourcesAndWait,
   AutomationRepo,
@@ -66,6 +67,9 @@ import { createHostResourceUsageResponder } from "./hostResourceUsage.js";
 import {
   HostMessageTypes,
   HostResponseTypes,
+  SourceSettingsAttachmentError,
+  SourceSettingsAttachmentErrorCodes,
+  type SourceSettingsAttachmentErrorCode,
   ZCODE_VERSION,
   formatLogPrefix,
   formatZCodeHostProcessName,
@@ -95,6 +99,11 @@ import {
   parseHostIncomingMessageEvent,
   rejectUnavailableAttachedServicePort,
 } from "./hostMessagePortGuard.js";
+import {
+  requireSourceSettingsOnlineConnection,
+  resolveSourceSettingsAttachmentAvailability,
+  toSourceSettingsAttachmentFailure,
+} from "./sourceSettingsAttachmentScope.js";
 // remote backend 相关模块延迟加载：ssh2 的 CJS 依赖链（asn1 等）在 asar 打包后路径断裂，
 // 静态 import 会导致 local 模式的 host process 也崩溃。
 // 改为动态 import，仅 remote 模式时才加载。
@@ -2301,15 +2310,31 @@ const windowHostAttachmentRegistry = createWindowHostAttachmentRegistry<
       // 远端配置。这里刻意不回退到 windowRemoteConnectionRegistry 的 workspace 服务集——
       // 后者按 workspace 语义把 setting/credential/settings-sync 换成本机权威，拿它冒充
       // 远端配置会让设备面板读写本机设置。
-      const connection = sourceServerConnectionManager?.getOnlineConnection(scope.sourceServerId);
-      if (!connection) {
-        // 明确报离线，不返回空配置集：面板必须区分「设备离线」和「设备确实没有配置」。
-        throw new Error(`Source Server is offline: ${scope.sourceServerId}`);
+      //
+      // 存在性由 AttachServicePort 入口先用 Directory 快照校验；这里再查一次 Manager 是
+      // TOCTOU 防线：判定后连接可能刚好断开，必须 fail-closed（带 source-server-offline code）。
+      const connection = requireSourceSettingsOnlineConnection({
+        sourceServerId: scope.sourceServerId,
+        onlineConnection: sourceServerConnectionManager?.getOnlineConnection(scope.sourceServerId),
+      });
+      let services: ServiceCollection;
+      try {
+        services = createSourceSettingsServiceCollection(connection.services, {
+          sourceServerId: scope.sourceServerId,
+        });
+      } catch (error) {
+        // 旧 Source 缺少配置通道：UI 需要区分「设备离线」与「设备版本不支持配置面」。
+        const message = error instanceof Error ? error.message : String(error);
+        if (message.includes(SOURCE_SETTINGS_UNAVAILABLE_ERROR_CODE)) {
+          throw new SourceSettingsAttachmentError(
+            SourceSettingsAttachmentErrorCodes.SourceServerSettingsUnavailable,
+            message,
+          );
+        }
+        throw error;
       }
       return {
-        services: createSourceSettingsServiceCollection(connection.services, {
-          sourceServerId: scope.sourceServerId,
-        }),
+        services,
         generation:
           sourceServerConnectionManager
             ?.listStates()
@@ -2335,6 +2360,43 @@ function logWindowHostTopology(reason: string): void {
   logger.info(
     `window Host topology, reason=${reason}, pid=${process.pid}, connections=${stats.connectionCount}, logicalSessions=${stats.logicalSessionCount}, attachments=${windowHostAttachmentRegistry.size()}`,
   );
+}
+
+/**
+ * Source 设置 attachment 的 Host 回执。
+ *
+ * main 只有收到 ok 回执才会把 MessagePort 交给 renderer；失败也必须回执，否则 renderer
+ * 只能等超时，无法区分「设备不存在 / 离线 / Source 版本不支持」。其他 scope 不走回执链。
+ */
+function postSourceSettingsAttachmentResult(params: {
+  requestId: string;
+  attachmentId: string;
+  result: { ok: true } | { ok: false; code: SourceSettingsAttachmentErrorCode; message: string };
+}): void {
+  parentPort?.postMessage({
+    type: HostResponseTypes.SourceSettingsAttachmentResult,
+    requestId: params.requestId,
+    attachmentId: params.attachmentId,
+    ...params.result,
+  });
+}
+
+/**
+ * 设备存在性判定：Directory 快照是唯一事实源（含从未连接过的已登记设备）。
+ * 快照读取失败时返回 true，把判定交给在线连接与 service collection，避免把「读不到目录」
+ * 伪装成「设备不存在」；真正的失败仍会以 offline / attach-rejected 回执。
+ */
+async function isSourceServerRegistered(sourceServerId: string): Promise<boolean> {
+  try {
+    const snapshot = await ensureSourceServerDirectory().snapshot();
+    return snapshot.servers.some((server) => server.sourceServerId === sourceServerId);
+  } catch (error) {
+    logger.warn(
+      `failed to read source server directory for source-settings attachment, sourceServerId=${sourceServerId}`,
+      error,
+    );
+    return true;
+  }
 }
 
 function disposeAttachedServicePorts(): void {
@@ -2879,6 +2941,28 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       return;
     }
     try {
+      if (msg.scope.kind === "source-settings") {
+        // 设备不存在与离线必须可读区分（Directory = 存在性权威，Manager = 在线权威）。
+        const availability = resolveSourceSettingsAttachmentAvailability({
+          sourceServerId: msg.scope.sourceServerId,
+          sourceServerExists: await isSourceServerRegistered(msg.scope.sourceServerId),
+          onlineConnection: sourceServerConnectionManager?.getOnlineConnection(
+            msg.scope.sourceServerId,
+          ),
+        });
+        if (!availability.available) {
+          rejectUnavailableAttachedServicePort(port, false);
+          postSourceSettingsAttachmentResult({
+            requestId: msg.requestId,
+            attachmentId: msg.attachmentId,
+            result: { ok: false, code: availability.code, message: availability.message },
+          });
+          logger.warn(
+            `source-settings attachment rejected, attachmentId=${msg.attachmentId}, code=${availability.code}`,
+          );
+          return;
+        }
+      }
       if (msg.scope.kind === "remote") {
         // Bind 与 Attach 共用 parentPort，但 WSL 上一代 workspace release 可能仍在途。
         // 持有已转移 port 等待 Host 内 generation barrier，避免新 attachment 踩过旧 runtime 清理。
@@ -2891,6 +2975,14 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         scope: msg.scope,
         port,
       });
+      if (msg.scope.kind === "source-settings") {
+        // 端口已经在 expose 时交给 ChannelServer；回执只表示「renderer 可以安全使用它」。
+        postSourceSettingsAttachmentResult({
+          requestId: msg.requestId,
+          attachmentId: msg.attachmentId,
+          result: { ok: true },
+        });
+      }
       logger.info(
         `attached scoped service port, attachmentId=${msg.attachmentId}, scope=${msg.scope.kind}, clientMode=${msg.clientMode}`,
       );
@@ -2899,6 +2991,14 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       // 跨 logical session 或旧 identity 的 port 若继续暴露，会把远端请求路由到错误 source。
       // scope 校验失败必须关闭已转移端口并明确记录，禁止回退 active local services。
       rejectUnavailableAttachedServicePort(port, false);
+      if (msg.scope.kind === "source-settings") {
+        const failure = toSourceSettingsAttachmentFailure(error);
+        postSourceSettingsAttachmentResult({
+          requestId: msg.requestId,
+          attachmentId: msg.attachmentId,
+          result: { ok: false, ...failure },
+        });
+      }
       logger.warn(`failed to attach scoped service port, attachmentId=${msg.attachmentId}`, error);
     }
     return;

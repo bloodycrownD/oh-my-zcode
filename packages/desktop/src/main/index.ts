@@ -1409,6 +1409,7 @@ app.whenReady().then(async () => {
       remoteSessionManager.cancelPendingRemoteWorkspaceSessionsForWindow,
     bindRemoteWorkspaceSessionContext: remoteSessionManager.bindRemoteWorkspaceSessionContext,
     confirmRendererAttachmentReady: remoteSessionManager.confirmRendererAttachmentReady,
+    windowHostProcessMap,
     isDockerDaemonAvailable,
     listAvailableWSLDistros,
     listAvailableDockerContainers,

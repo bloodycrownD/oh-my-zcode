@@ -37,6 +37,9 @@ export {
   unregisterRemoteWorkspaceSession,
   useRemoteWorkspaceSessionStore,
 } from "./store/remoteWorkspaceSessionStore.js";
+// Source 设置面 attachment 注册表：Desktop renderer 端口桥在窗口启动时登记，
+// 设置页按 sourceServerId 读取远端配置服务集（上游同形态）。
+export { registerSourceSettingsServices } from "./store/sourceSettingsServiceStore.js";
 export {
   REMOTE_WORKSPACE_DISCONNECTED_ERROR_CODE,
   createRemoteWorkspaceDisconnectedError,

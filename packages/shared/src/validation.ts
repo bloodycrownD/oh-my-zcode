@@ -263,6 +263,28 @@ export const hostDetachServicePortMessageSchema = z.object({
   attachmentId: nonEmptyStringSchema,
 });
 
+/**
+ * Renderer → main：按需为某个 Source 申请远端设置服务端口。
+ * main 校验后转成 `attach-service-port` 的 `source-settings` scope，并等待 Host 回执。
+ */
+export const sourceSettingsAttachmentRequestSchema = z
+  .object({
+    sourceServerId: nonEmptyStringSchema,
+  })
+  .strict();
+export type SourceSettingsAttachmentRequest = z.infer<typeof sourceSettingsAttachmentRequestSchema>;
+
+/** main → renderer：Source 设置面 MessagePort 的随附载荷（端口本身走 transfer）。 */
+export const sourceSettingsServicePortPayloadSchema = z
+  .object({
+    attachmentId: nonEmptyStringSchema,
+    sourceServerId: nonEmptyStringSchema,
+  })
+  .strict();
+export type SourceSettingsServicePortPayload = z.infer<
+  typeof sourceSettingsServicePortPayloadSchema
+>;
+
 export const hostDisposeMessageSchema = z.object({
   type: z.literal("dispose"),
 });
@@ -508,6 +530,24 @@ export const hostRemoteWorkspaceReconnectedResponseSchema = z
     descriptor: windowHostRemoteWorkspaceDescriptorSchema,
   })
   .strict();
+
+/**
+ * window Host → main：`source-settings` attachment 装配结果。
+ * main 只有收到 ok 回执才会把 MessagePort 交给 renderer；失败必须带可读 code。
+ */
+export const hostSourceSettingsAttachmentResultResponseSchema = z
+  .object({
+    type: z.literal("source-settings-attachment-result"),
+    requestId: nonEmptyStringSchema,
+    attachmentId: nonEmptyStringSchema,
+    ok: z.boolean(),
+    code: z.string().optional(),
+    message: z.string().optional(),
+  })
+  .strict();
+export type HostSourceSettingsAttachmentResultResponse = z.infer<
+  typeof hostSourceSettingsAttachmentResultResponseSchema
+>;
 
 export const hostLogResponseSchema = z.object({
   type: z.literal("log"),
@@ -887,6 +927,7 @@ export const hostResponseMessageSchema = z.discriminatedUnion("type", [
   hostRemoteWorkspaceConnectFailedResponseSchema,
   hostRemoteWorkspaceClosedResponseSchema,
   hostRemoteWorkspaceReconnectedResponseSchema,
+  hostSourceSettingsAttachmentResultResponseSchema,
   hostLogResponseSchema,
   hostAgentProcessSpawnedResponseSchema,
   hostAgentProcessReadyResponseSchema,

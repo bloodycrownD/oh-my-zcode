@@ -1,4 +1,9 @@
-import { buildLocalMediaPreviewUrl, type IPlatformService } from "@zcode/shared";
+import {
+  buildLocalMediaPreviewUrl,
+  SourceSettingsAttachmentError,
+  SourceSettingsAttachmentErrorCodes,
+  type IPlatformService,
+} from "@zcode/shared";
 
 import { desktopBrowserPlatformBridge } from "./desktopBrowserPlatformBridge.js";
 
@@ -23,6 +28,16 @@ export function createDesktopPlatform(options: {
       window.zcode.activateOrSetWorkspace?.(path) ?? Promise.resolve({ activated: false }),
     connectRemote: (remoteOptions, requestId, context) =>
       window.zcode.connectRemote(remoteOptions, requestId, context),
+    // 平台能力探测依赖该函数存在：旧 preload 缺席时返回的 Promise 必须 reject（不是 null），
+    // 让设置页停在「该 Source 不可用」空态而不是把本机配置伪装成远端事实。
+    requestSourceSettingsAttachment: (sourceServerId) =>
+      window.zcode.requestSourceSettingsAttachment?.(sourceServerId) ??
+      Promise.reject(
+        new SourceSettingsAttachmentError(
+          SourceSettingsAttachmentErrorCodes.Unsupported,
+          "Source settings attachment bridge unavailable",
+        ),
+      ),
     cancelPendingRemoteConnection: (requestId) =>
       window.zcode.cancelPendingRemoteConnection?.(requestId) ?? Promise.resolve(),
     bindRemoteWorkspaceSessionContext: (context) =>

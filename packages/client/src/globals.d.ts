@@ -58,6 +58,8 @@ declare global {
       ): Promise<{ success: boolean; error?: string; sessionId?: string }>;
       /** 取消当前窗口尚未建立完成的远程连接 */
       cancelPendingRemoteConnection?(requestId?: string): Promise<void>;
+      /** 按需为该 Source 申请远端设置服务端口（Desktop preload 实现） */
+      requestSourceSettingsAttachment?(sourceServerId: string): Promise<{ attachmentId: string }>;
       /** 绑定远程 logical session 的 canonical workspace context */
       bindRemoteWorkspaceSessionContext?(context: {
         remoteSessionId: string;

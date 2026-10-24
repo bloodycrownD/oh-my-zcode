@@ -46,6 +46,7 @@ import type {
   WindowControlsOverlayReadyPayload,
 } from "./platform.js";
 import type { BrowserViewportSize } from "./browser-use/command-metadata.js";
+import type { SourceSettingsAttachmentIpcResult } from "./source-settings-attachment.js";
 import type {
   CuaAccessibilitySettingsResult,
   OpenCuaPermissionOnboardingOptions,
@@ -177,6 +178,8 @@ export const PlatformChannels = {
   ActivateOrSetWorkspace: "zcode:activate-or-set-workspace",
   /** 建立 SSH 远程连接 */
   ConnectRemote: "zcode:connect-remote",
+  /** Renderer → Main：按需为该 Source 申请远端设置服务端口（source-settings scope） */
+  RequestSourceSettingsAttachment: "zcode:request-source-settings-attachment",
   /** 取消当前窗口正在进行中的远程连接 */
   CancelPendingRemoteConnection: "zcode:cancel-pending-remote-connection",
   /** Renderer → Main：绑定远程 logical session 的 canonical workspace context */
@@ -408,6 +411,8 @@ export const InternalChannels = {
   ServicePort: "zcode:service-port",
   /** main → renderer 转发窗口 Host 的 scoped MessagePort */
   ScopedServicePort: "zcode:scoped-service-port",
+  /** main → renderer 转发 Source 设置面（source-settings scope）的 MessagePort */
+  SourceSettingsServicePort: "zcode:source-settings-service-port",
   /** renderer → main：scoped MessagePort 已注册，可安全切换 attachment */
   ScopedServicePortReady: "zcode:scoped-service-port-ready",
   /** preload → renderer：主进程已确认系统通知展示，renderer 可播放提示音 */
@@ -492,6 +497,8 @@ export const HostResponseTypes = {
   RemoteWorkspaceClosed: "remote-workspace-closed",
   /** window Host → main：断连 workspace 经恢复状态机原子换代到新 sessionId */
   RemoteWorkspaceReconnected: "remote-workspace-reconnected",
+  /** window Host → main：source-settings attachment 装配结果（按 attachmentId/requestId 关联） */
+  SourceSettingsAttachmentResult: "source-settings-attachment-result",
   /** host 进程日志上报 */
   Log: "log",
   /** host 内拉起新的 agent 子进程 */
@@ -630,6 +637,10 @@ export interface PlatformChannelMap {
   [PlatformChannels.ConnectRemote]: {
     request: ConnectRemoteRequest;
     response: { success: boolean; error?: string; sessionId?: string };
+  };
+  [PlatformChannels.RequestSourceSettingsAttachment]: {
+    request: { sourceServerId: string };
+    response: SourceSettingsAttachmentIpcResult;
   };
   [PlatformChannels.CancelPendingRemoteConnection]: {
     request: CancelPendingRemoteConnectionRequest;

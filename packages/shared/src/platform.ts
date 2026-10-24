@@ -597,6 +597,15 @@ export interface IPlatformService {
   /** 取消当前窗口尚未建立完成的远程连接（可选：Web 平台可忽略） */
   cancelPendingRemoteConnection?(requestId?: string): Promise<void>;
 
+  /**
+   * 按需为指定 Source 申请远端设置服务端口（Desktop 专属）。
+   *
+   * 成功返回 attachmentId；失败抛 `SourceSettingsAttachmentError`，code 区分设备不存在 /
+   * 离线 / Source 版本缺通道等情形。UI 只有拿到端口才按 Source 读远端配置，绝不静默回退
+   * 本机服务；平台缺席（Web / 旧 preload）时保持可选能力探测。
+   */
+  requestSourceSettingsAttachment?(sourceServerId: string): Promise<{ attachmentId: string }>;
+
   /** 将 canonical workspace 身份绑定到已创建的远程 logical session。 */
   bindRemoteWorkspaceSessionContext?(
     context: BindRemoteWorkspaceSessionContextRequest,

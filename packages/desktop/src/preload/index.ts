@@ -61,7 +61,13 @@ import type {
   CreateTempTextAttachmentRequest,
   OpenCuaPermissionOnboardingOptions,
 } from "@zcode/shared";
-import { InternalChannels, PlatformChannels, formatZCodeRendererProcessName } from "@zcode/shared";
+import {
+  InternalChannels,
+  PlatformChannels,
+  formatZCodeRendererProcessName,
+  sourceSettingsServicePortPayloadSchema,
+  unwrapSourceSettingsAttachmentIpcResult,
+} from "@zcode/shared";
 
 const openWorkspacePathCallbacks = new Set<(path: string) => void>();
 const pendingOpenWorkspacePaths: string[] = [];
@@ -189,6 +195,18 @@ contextBridge.exposeInMainWorld("zcode", {
     ipcRenderer.invoke(PlatformChannels.CancelPendingRemoteConnection, {
       requestId,
     }),
+  /**
+   * 按需申请 Source 设置服务端口：main 校验设备登记/在线状态并等待 Host 回执，
+   * 失败以结构化 code 返回；这里统一解包成 throw，UI 才能区分「不存在 / 离线 / 不支持」。
+   */
+  requestSourceSettingsAttachment: async (
+    sourceServerId: string,
+  ): Promise<{ attachmentId: string }> => {
+    const result = await ipcRenderer.invoke(PlatformChannels.RequestSourceSettingsAttachment, {
+      sourceServerId,
+    });
+    return unwrapSourceSettingsAttachmentIpcResult(result);
+  },
   bindRemoteWorkspaceSessionContext: (context: {
     remoteSessionId: string;
     workspacePath: string;
@@ -650,6 +668,20 @@ ipcRenderer.on(
     }
   },
 );
+
+ipcRenderer.on(InternalChannels.SourceSettingsServicePort, (event, payload: unknown) => {
+  const [port] = event.ports;
+  // 载荷 schema 与 renderer bridge 共用：缺 sourceServerId/attachmentId 的端口不能进 renderer，
+  // 否则会注册成没有归属的 services。
+  const parsed = sourceSettingsServicePortPayloadSchema.safeParse(payload);
+  if (!port || !parsed.success) {
+    port?.close();
+    return;
+  }
+  window.postMessage({ type: InternalChannels.SourceSettingsServicePort, ...parsed.data }, "*", [
+    port,
+  ]);
+});
 
 window.addEventListener("message", (event) => {
   if (event.source !== window || typeof event.data !== "object" || event.data === null) {
