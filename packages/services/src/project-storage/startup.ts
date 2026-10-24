@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 const { DatabaseSync } = createRequire(import.meta.url)(
   "node:sqlite",
 ) as typeof import("node:sqlite");
+import type { ProjectMigrationContext } from "#src/project-storage/contract.js";
 import { TaskIndexRepo } from "#src/session/taskIndexRepo.js";
 import { AutomationRepo } from "#src/session/automationRepo.js";
 import {
@@ -29,13 +30,13 @@ const LOCK_WAIT_MS = 60 * 60_000;
 /**
  * 由 Host Worker 调用，SQL 和迁移后修复与旧 Repo 共用，只有获取写锁异步等待。
  *
- * omz 口径：上游形态在此追加 settings 入参并构造 OffPeakTaskRepo / TaskIndexRepo(settings,…)，
- * 分别依赖 omz 已退役的闲时运行链与未随本阶段移植的 TaskIndexRepo 换代构造器；omz 维持
- * 两参 Repo 形态，settings 注入随 P4/P5 项目迁移接线时一并恢复。
+ * v1.0.22 事故修复：Worker 必须携带旧 settings 完成项目迁移（0005 的 workspace 种子），
+ * 否则老库只能看到「账本已写、种子为空」——随后老会话一律 project.host-mismatch。
  */
 export async function prepareTasksIndexStorage(
   path: string,
   onProgress: (phase: TasksStoragePhase, migration?: DatabaseMigrationFacts) => void,
+  settings?: ProjectMigrationContext["settings"],
 ): Promise<void> {
   // 回调拿到的是当时事实，不共享后续执行会继续递增的内部对象。
   const report = (phase: TasksStoragePhase, migration?: DatabaseMigrationFacts) =>
@@ -107,7 +108,10 @@ export async function prepareTasksIndexStorage(
   }
   if (closeFailure) throw closeFailure;
   markTasksStorageMigrated(path);
-  const repos = [new TaskIndexRepo(path, LOCK_WAIT_MS), new AutomationRepo(path, LOCK_WAIT_MS)];
+  const repos = [
+    new TaskIndexRepo(path, LOCK_WAIT_MS, settings),
+    new AutomationRepo(path, LOCK_WAIT_MS),
+  ];
   let preparationFailure: unknown;
   let repoCloseFailure: unknown;
   try {

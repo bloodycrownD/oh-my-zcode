@@ -88,10 +88,17 @@ function resolveDirectories(
 ): ProjectDirectories {
   const row = readTask(db, task);
   // 旧远端影子行仍可能保留；行与项目一致不代表当前 Host 有权加载其目录。
-  if (row && row.host_id !== ownerHostId) throw new Error("project.host-mismatch");
-  const workspacePath = row ? String(row.root_path) : task.workspacePath;
+  // 但「无归属」不等于「归属别的 Host」：v1.0.22 及更早的库整列不存在（host_id 为
+  // undefined）或迁移前行为 NULL，这类行由本机收养（reconcileLegacy/admitTaskIdentity
+  // 负责落 host），不能在这里当成跨 Host 访问拒绝——否则老项目全部打不开。
+  if (row && row.host_id != null && row.host_id !== ownerHostId)
+    throw new Error("project.host-mismatch");
+  const workspacePath = row
+    ? String(row.root_path ?? row.workspace_path ?? task.workspacePath)
+    : task.workspacePath;
   const project = row?.project_id ? requireProject(db, String(row.project_id)) : null;
-  if (project && row?.host_id !== project.hostId) throw new Error("project.host-mismatch");
+  if (project && row?.host_id != null && row.host_id !== project.hostId)
+    throw new Error("project.host-mismatch");
   assertRemoteTaskDirectories(
     ownerHostId,
     project,

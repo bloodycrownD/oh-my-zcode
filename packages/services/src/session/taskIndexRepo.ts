@@ -6,7 +6,7 @@ import {
 import { mkdir } from "node:fs/promises";
 import { createHash, randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { dirname, join } from "node:path";
 import {
   isRemoteWorkspaceIdentity,
   ZCODE_AGENT_PROVIDER,
@@ -35,10 +35,13 @@ import type {
   ZCodeTaskGroupColor,
 } from "#src/session/zcodeTaskListTypes.js";
 import { createServiceLogger } from "#src/logger/serviceLogger.js";
-import { getTasksIndexDatabasePath } from "#src/paths.js";
+import { getTasksIndexDatabasePath, getZCodeDataRootDir } from "#src/paths.js";
 import { runTasksDatabaseMigrations } from "#src/session/tasksDatabase/migrations.js";
 import { projectStorage } from "#src/project-storage/index.js";
-import type { ProjectRepositoryContract } from "#src/project-storage/contract.js";
+import type {
+  ProjectMigrationContext,
+  ProjectRepositoryContract,
+} from "#src/project-storage/contract.js";
 
 const require = createRequire(import.meta.url);
 const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
@@ -480,6 +483,10 @@ export class TaskIndexRepo {
   constructor(
     private readonly startupDbPath?: string,
     private readonly startupBusyTimeoutMs = 5000,
+    // v1.0.22 事故修复：项目存储（hosts/projects/tasks.host_id）必须经生产启动链迁移，
+    // 否则老库永远停在「无 hosts 表 + tasks 无 host_id 列」，老会话一律 project.host-mismatch。
+    private readonly migrationSettings?: ProjectMigrationContext["settings"],
+    private readonly storageHostId?: string,
   ) {}
   private db: DatabaseSyncInstance | null = null;
   private dbPath: string | null = null;
@@ -530,6 +537,14 @@ export class TaskIndexRepo {
     // Worker 已完成该路径的原始准备，业务连接不再重复全表修复。
     if (isTasksStoragePrepared(path, this.db)) return;
     if (!isTasksStorageMigrated(path, this.db)) runTasksDatabaseMigrations(this.db);
+    // 项目/连接迁移（0005/0006/0007/0008）：账本只在首次应用，每次启动调用幂等；
+    // 缺 backup 目录会被 runner 直接拒绝，故显式给数据根下的 backup。
+    await projectStorage.migrate(this.getDatabase(), {
+      settings: this.migrationSettings,
+      hostId: this.storageHostId,
+      backupDirectories: [join(getZCodeDataRootDir(), "backup")],
+      warn: (message, details) => createServiceLogger("project-migration").warn(message, details),
+    });
     this.cleanupDeletedTaskGroupingReferences();
   }
 
