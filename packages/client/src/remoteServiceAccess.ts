@@ -38,6 +38,7 @@ import {
   ITaskGroupService,
   IRemoteProjectService,
   ISourceServerWorkspaceService,
+  ISourceServerManagementService,
   type IServiceAccessor,
 } from "@zcode/services";
 
@@ -95,6 +96,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
   // Source 端 workspace 身份解析通道（upstream-v316-fullsync P7 续批）：daemon serve 已换装
   // createServerHostServices 并注册；旧 Source（未升级 wire）无通道时消费方按 absent 降级。
   readonly sourceServerWorkspaceService: ISourceServerWorkspaceService;
+  // Source/Profile 管理面（backlog-sweep P9-1）：只有本机 Desktop Host 注册；远端 workspace
+  // 的 accessor 无该通道，调用方按 IServiceAccessor 的可选缺席语义判定 `managementEnabled`。
+  readonly sourceServerManagementService: ISourceServerManagementService;
 
   constructor(channelClient: IChannelClient) {
     this.fileService = ProxyChannel.toService<IFileService>(
@@ -215,6 +219,9 @@ export class RemoteServiceAccess implements IServiceAccessor {
     );
     this.sourceServerWorkspaceService = ProxyChannel.toService<ISourceServerWorkspaceService>(
       channelClient.getChannel(ISourceServerWorkspaceService.channelName),
+    );
+    this.sourceServerManagementService = ProxyChannel.toService<ISourceServerManagementService>(
+      channelClient.getChannel(ISourceServerManagementService.channelName),
     );
   }
 }

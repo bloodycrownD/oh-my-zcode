@@ -95,6 +95,8 @@ export const ServiceChannels = {
   WindowProjectChanges: "window-project-changes",
   /** Source 端 workspace 身份解析/迁移通道（identity 绑定回执） */
   SourceServerWorkspace: "source-server-workspace",
+  /** 本机 Desktop Host 的 Source/Profile 管理面（设置页设备卡，backlog-sweep P9） */
+  SourceServerManagement: "source-server-management",
   /** 文件系统监视服务 */
   FileWatcher: "file-watcher",
   /** OAuth 认证服务 */

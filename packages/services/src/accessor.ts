@@ -37,6 +37,7 @@ import type { IProjectService } from "./project/contract.js";
 import type { ITaskGroupService } from "./task-groups/contract.js";
 import type { IRemoteProjectService } from "./remote-projects/contract.js";
 import type { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
+import type { ISourceServerManagementService } from "./source-server-management/sourceServerManagement.js";
 
 /** UI 层消费的统一服务接口 */
 export interface IServiceAccessor {
@@ -76,6 +77,11 @@ export interface IServiceAccessor {
    * 消费方（identity 绑定回执）按缺席降级跳过绑定，旧链共存不受影响。
    */
   readonly sourceServerWorkspaceService?: ISourceServerWorkspaceService;
+  /**
+   * 本机 Desktop Host 的 Source/Profile 管理面（backlog-sweep P9-1）：daemon serve / Web /
+   * 测试 double 无此通道，设置页设备卡按缺席降级（不渲染设备管理段）。
+   */
+  readonly sourceServerManagementService?: ISourceServerManagementService;
   // CUA 是 opt-in 内测特性：local macOS host 提供，远端 等 host 没有。可选避免连锁必填。
   readonly cuaPermissionService?: ICuaPermissionService;
   readonly botsService: IBotsService;

@@ -92,6 +92,23 @@ export {
   type ControllerRemoteIdentityMigrationReport,
 } from "./session/controllerRemoteIdentityMigration.js";
 export type { UpdateConnectionProfileInput } from "./source-server-management/sourceServerManagement.js";
+// Source Server 管理面实现（backlog-sweep Step 7 / P9-1）：Directory/Manager 以结构化端口
+// 注入（desktop host 传具体实例），services 不反向 import desktop。
+export { createSourceServerManagementService } from "./source-server-management/sourceServerManagementService.js";
+export type {
+  CreateSourceServerManagementServiceOptions,
+  SourceServerManagementConnectionPort,
+  SourceServerManagementDirectoryPort,
+  SourceServerManagementDirectorySnapshot,
+  SourceServerManagementService,
+} from "./source-server-management/sourceServerManagementService.js";
+export {
+  SourceServerMigrationCounts,
+  sumMigrationCounts,
+  type SourceServerMigrationCountsOptions,
+  type SourceServerMigrationCountsReadResult,
+  type SourceServerMigrationCountState,
+} from "./source-server-management/sourceServerMigrationCounts.js";
 // R3 三期（P7 续批）：Source 端 workspace 身份解析通道——契约、服务实现与唯一 wire
 // 映射 seam（daemon serve 换装 createServerHostServices 后经 http 包 ChannelServer）。
 export { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";
