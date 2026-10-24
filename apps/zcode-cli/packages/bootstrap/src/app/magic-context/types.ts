@@ -1,0 +1,127 @@
+/**
+ * magic-context 装配的公共类型面（自 `../magic-context-turn-transform.ts` 逐字搬出，
+ * 纯搬迁、零语义改动）。
+ *
+ * 这里只放被 assembly / ports 两个模块共同引用的类型：门面文件
+ * `../magic-context-turn-transform.ts` 原样再导出它们，调用方路径不变。
+ * 本文件不持有任何运行时逻辑，也没有模块级副作用。
+ */
+
+import type { Logger } from "@zcode/core";
+import type { ConfigPort, SessionStorePort, TraceContext } from "@zcode/contracts";
+import type { SessionMagicContextUsage } from "@zcode/shared/zcode-protocol-v4";
+import type { CreateSidecarModel } from "../magic-context-historian.js";
+import type { MagicContextUsageRecorder } from "./usage.js";
+
+/** 包内 `createTransform` 的返回值形状（单测用桩实现替换它）。 */
+export type ZCodeMagicContextTransform = (
+  input: Record<string, never>,
+  output: { messages: unknown[] },
+) => Promise<void>;
+
+export interface MagicContextTurnTransformOptions {
+  /**
+   * **冷**求值后的 effective 开关（`features.magicContext && magicContext.enabled`，
+   * 见 spec 契约 8 与 `runtime-config.ts`）。false → 工厂直接返回 undefined：不开
+   * bridge、不 import 模块图、不开 DB。
+   *
+   * 运行中切换走返回端口上的 `isEnabled()`，不是这里。
+   */
+  enabled: boolean;
+  /**
+   * FORK（S23 / D-12）：本 App 的配置口。提供时 config bridge 订阅
+   * `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置**下一 turn 即生效**，
+   * 无需重启。
+   *
+   * 缺席时退回 S19b 的静态快照（只读 `configDomain`），保留给单测与不装配配置面的
+   * embedder；生产装配（`create-app.ts`）一定传入。
+   */
+  configPort?: ConfigPort;
+  /** `RuntimeConfig.magicContext` 参数域快照；仅在没有 `configPort` 时作为配置源。 */
+  configDomain?: unknown;
+  sessionId: string;
+  workingDirectory: string;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 1-2）：本进程是否「跑完一轮就退出」。
+   *
+   * 这是本文件两处 settle（`settleInFlightHistorian` 与端口钩子
+   * `settleScheduledPass`）**唯一**的判据来源。三个入口经
+   * `ZCodeAppOptions`（`app/types.ts`）把它显式透传进来：stdio 协议宿主与 TUI 是
+   * 长驻进程 → `false`；`print`（`-p`）一次性进程 → `true`。取进程生命周期而不是
+   * 「是不是桌面」，是因为 TUI 与 print 在 argv 上不可区分，只有入口自己知道。
+   *
+   * `true`（缺省）= 进程会退出，于是在这一轮交还控制权之前替 historian 等一个
+   * 有界窗口（本批改动之前的逐行行为）；`false` = 进程长驻，两处 settle 都不阻塞
+   * 前台——调度器契约自陈 fire-and-forget 自行 publish，优雅关闭时由
+   * `registerClose` 的 drain 收口兜底（MF-05）。
+   *
+   * 缺省 `true` 是刻意的保守方向：不声明形态时按「进程会退出」处理，即便那是长驻
+   * 进程，代价也只是一次多余的有界等待，而不是把在飞的折叠丢在半路。
+   */
+  processExitsAfterTurn?: boolean;
+  /**
+   * FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 **vision 判定源**。
+   *
+   * 为什么由宿主注入：包内 render-trigger 的 `modelKeyAcceptsImages` 上游读
+   * `models-dev-cache` 的 apiCache，而本 fork 那条链零生产者（refresh 零调用者）——
+   * 恒 false 会让整条移植的渲染路径成为死代码。判定改走**静态目录**
+   * `ModelInputFormatData.supportsImage`（packages/shared/src/model-config.ts:51-59，
+   * 与 contracts media-policy.ts:40 同一源），而「provider/model → properties」
+   * 的解析只有持有 provider Registry 的宿主做得到，包内零包依赖碰不到共享目录。
+   *
+   * 契约：入参是 canonical `provider/model` 键（包内已做 pi 前缀规范化），
+   * 返回 true 表示这个模型吃图。**未知即 false**（fail-closed，与上游「缺失
+   * cache 条目不出图」同向）；缺席（不传）时包内同样按 false 处理——即整个
+   * mural 渲染静默不触发，与 Step 15 之前的现场行为一致。
+   *
+   * 注入是进程级（包内 `setMuralVisionProbe`，与 `setRawMessageProvider` 同范式）：
+   * 模型目录与会话无关，多会话共享同一份 Registry 视图。
+   */
+  muralVisionProbe?: (canonicalModelKey: string) => boolean;
+  /** 读历史的第二数据源；缺席时 raw-message provider 只服务内存历史。 */
+  sessionStore?: SessionStorePort;
+  logger: Logger;
+  /**
+   * FORK（S24 / D-6）：`"provider/model"` → 一个可发请求的 `Model`。historian 的
+   * sidecar 请求经它发出，缺席时 executor **不装**、`historianRunnable` 保持 false
+   * （见 `createMagicContextHistorianHost`）。生产装配（`create-app.ts`）由
+   * provider Registry + `modelFactory` 提供。
+   */
+  createSidecarModel?: CreateSidecarModel;
+  /** 会话根 trace；sidecar 请求在它下面开子 span。 */
+  traceContext?: TraceContext;
+  /**
+   * FORK（MF-05）：把本装配的**关闭钩子**交给装配层。
+   *
+   * 之前 `drainHistorianSchedulerWithTimeout` / `historian.shutdown` /
+   * `bridge.dispose` 三件事没有任何生产调用方（config bridge 在
+   * `config-bridge.ts` 里订阅 `ConfigPort` 且永不退订），于是会话/进程结束时
+   * 在飞的 historian 不会被收口、订阅计数也不会归零。
+   *
+   * 装配层把它挂进 `session-facade.ts` 的 `close()` 链——**必须**在
+   * `closeSessionResources` 之前：historian 的在飞请求要写库，而 store / execution
+   * port 一旦先关，写库就落在已关闭的 store 上。
+   *
+   * 缺席（单测与不装 historian 的装配）= 不产生关闭钩子，行为与本 fork 之前逐行
+   * 相同。
+   */
+  registerClose?(close: () => Promise<void>): void;
+  /**
+   * FORK（S24）：provider usage 的记录口。上游 OpenCode 的 plugin 在
+   * `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里由宿主
+   * 从 `model_complete` 事件喂。**不接它等于永久 `percentage=0`**——scheduler 永远
+   * `defer`，drop 与 historian 都不会启动（实测见 E2E 报告 T-M2 的 FAIL 记录）。
+   * 缺席时退回 S19b 的空 Map，行为与那时逐行相同。
+   */
+  usageRecorder?: MagicContextUsageRecorder;
+  /**
+   * FORK（D-13）：预算摘要的出口。装配层（`create-app`）把它接到 v4 gateway 的
+   * `updateMagicContextUsage`，于是 `usage.magicContext` 出现在桌面 ChatContextUsage
+   * 面板上。
+   *
+   * **缺席 = 整条推送不存在**：CLI/TUI 前端没有 snapshot 投影层，不传它；没有它时
+   * 本文件只多两个 `if (!sink) return`，DB 读写一次都不多。传 `null` 表示「读不到」，
+   * 投影层据此删掉该键（面板整段收起），**不是**写一份全零。
+   */
+  onMagicContextUsage?: (usage: SessionMagicContextUsage | null) => void;
+}
