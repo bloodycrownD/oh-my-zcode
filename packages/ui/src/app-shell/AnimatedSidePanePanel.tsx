@@ -45,6 +45,12 @@ import { SubagentDirectorySidePane } from "@/app-shell/SubagentDirectorySidePane
 import { SelectionSideChatPane } from "@/app-shell/SelectionSideChatPane.js";
 import { BackgroundBashOutputSidePane } from "@/app-shell/BackgroundBashOutputSidePane.js";
 import { PlanDetailSidePane } from "@/app-shell/PlanDetailSidePane.js";
+import {
+  SIDE_PANE_FULL_VIEW_CONVERSATION_TAB_VALUE,
+  SidePaneFullViewConversationTab,
+  SidePaneFullViewToggleButton,
+  type SidePaneFullViewSurface,
+} from "@/side-pane-full-view/index.js";
 import { WorkflowRunSidePane } from "@/app-shell/WorkflowRunSidePane.js";
 import { WorkflowRunDirectorySidePane } from "@/app-shell/WorkflowRunDirectorySidePane.js";
 import { WorkflowActorSessionSidePane } from "@/app-shell/WorkflowActorSessionSidePane.js";
@@ -337,6 +343,9 @@ export function AnimatedSidePanePanel({
   showWindowControls,
   onCloseSidePane,
   toggleSidePaneShortcutLabel,
+  fullViewToggle,
+  fullView = null,
+  fullViewSlotRef,
 }: {
   services: IServiceAccessor;
   frameClassName?: string;
@@ -344,6 +353,18 @@ export function AnimatedSidePanePanel({
   showWindowControls?: boolean;
   onCloseSidePane?: () => void;
   toggleSidePaneShortcutLabel?: string;
+  /** 桌面端「进入 / 退出完整视图」按钮；缺省不渲染（Web、手机远控）。 */
+  fullViewToggle?: { active: boolean; onToggle: () => void; shortcutLabel?: string };
+  /** 完整视图生效时的 tab 栏状态（spec：docs/ui/side-pane-full-view.md）。 */
+  fullView?: {
+    surface: SidePaneFullViewSurface;
+    conversationTitle: string;
+    /** 侧栏收起时为左上角浮层按钮组留出的左侧留白（与 WorkspaceHeader 同一规则）。 */
+    leadingInsetClassName?: string | false;
+    onSelectSurface: (surface: SidePaneFullViewSurface) => void;
+  } | null;
+  /** 面板内容区（tab 栏下方），完整视图的对话宿主按它定位。 */
+  fullViewSlotRef?: (element: HTMLDivElement | null) => void;
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
   isVisible: boolean;
@@ -811,6 +832,13 @@ export function AnimatedSidePanePanel({
   const closeSidePaneButton =
     isVisible && onCloseSidePane ? (
       <div className="flex shrink-0 items-center gap-0.5 [app-region:no-drag]">
+        {fullViewToggle ? (
+          <SidePaneFullViewToggleButton
+            active={fullViewToggle.active}
+            onToggle={fullViewToggle.onToggle}
+            shortcutLabel={fullViewToggle.shortcutLabel}
+          />
+        ) : null}
         <WorkspaceSidePaneToggleButton
           isSidePaneOpen
           onToggleSidePane={onCloseSidePane}
@@ -925,8 +953,11 @@ export function AnimatedSidePanePanel({
         // 独立外框放在内容层：关闭仍保留 Browser Guest 和 tab 实例，不改变面板持久化边界。
         "h-full overflow-hidden bg-background",
         frameClassName,
+        // 完整视图：相对外层 PanelGroup 铺满整行，库管理的 panel 宽度保持不变。
+        // 外框只需 z-0 建立自己的层叠上下文，对话列内容都在 z-30 的宿主里。
+        fullView && "absolute inset-0 z-0",
       )}
-      style={lockedContentStyle}
+      style={fullView ? undefined : lockedContentStyle}
     >
       <ScopedErrorBoundary
         scope="workspace-side-pane"
@@ -934,28 +965,40 @@ export function AnimatedSidePanePanel({
         variant="panel"
         className="h-full"
       >
-        {hasRenderedSidePane && sidePaneState ? (
+        {hasRenderedSidePane && (sidePaneState || fullView) ? (
           <>
-            {visibleTabs.length === 0 ? openTabLauncher : null}
+            {/* 完整视图由 tab 栏的对话 tab 承接空态，普通视图才用整块 launcher。 */}
+            {visibleTabs.length === 0 && !fullView ? openTabLauncher : null}
             {/* sidePaneState 是 workspace 级 registry，fork/切换任务后可能只剩其他
                 任务的 session-scoped tab。此时 registry 非空但 visibleTabs 为空，渲染
                 value="" 的空 Tabs 会白屏。这里隐藏但保留 TabsContent 挂载，切回父任务时
-                辅助对话草稿和引用不会丢失。 */}
+                辅助对话草稿和引用不会丢失。完整视图下 tab 栏必须可见（对话 tab 是入口）。 */}
             <div
               className={cn(
                 "h-full min-h-0",
-                visibleTabs.length === 0 && !screenshotSurfaceRequest && "hidden",
+                visibleTabs.length === 0 && !screenshotSurfaceRequest && !fullView && "hidden",
               )}
             >
               <Tabs
-                value={visibleActiveTabId}
-                onValueChange={onActivateTab}
+                value={
+                  fullView?.surface === "conversation"
+                    ? SIDE_PANE_FULL_VIEW_CONVERSATION_TAB_VALUE
+                    : visibleActiveTabId
+                }
+                onValueChange={(value) => {
+                  if (fullView && value === SIDE_PANE_FULL_VIEW_CONVERSATION_TAB_VALUE) {
+                    fullView.onSelectSurface("conversation");
+                    return;
+                  }
+                  onActivateTab(value);
+                }}
                 className="relative h-full gap-0"
               >
                 <TabsList
                   style={captionControlsStyle}
                   className={cn(
                     "flex justify-start w-full rounded-none p-0 border-0 border-b border-border/50 bg-transparent shadow-none !h-12 overflow-hidden",
+                    fullView?.leadingInsetClassName,
                     // 独立面板将标签栏移至窗口顶部，需补充窗口拖拽区域；标签和按钮仍处理自身交互。
                     isDesktop &&
                       "[app-region:drag] [&_button]:[app-region:no-drag] [&_[data-side-pane-tab-id]]:[app-region:no-drag]",
@@ -966,6 +1009,14 @@ export function AnimatedSidePanePanel({
                     <div className="flex h-full shrink-0 items-center p-2">
                       {sidePaneTabOverview}
                     </div>
+                    {fullView ? (
+                      <div className="flex h-full shrink-0 items-center pr-1">
+                        <SidePaneFullViewConversationTab
+                          title={fullView.conversationTitle}
+                          isActive={fullView.surface === "conversation"}
+                        />
+                      </div>
+                    ) : null}
                     <DndContext
                       sensors={tabDragSensors}
                       collisionDetection={closestCenter}
@@ -1065,7 +1116,14 @@ export function AnimatedSidePanePanel({
                 */}
                 </TabsList>
 
-                <div className="relative min-h-0 flex-1 isolate">
+                <div
+                  ref={fullViewSlotRef}
+                  data-side-pane-content-slot=""
+                  className="relative min-h-0 flex-1 isolate"
+                >
+                  {fullView && visibleTabs.length === 0 ? (
+                    <div className="absolute inset-0 z-10">{openTabLauncher}</div>
+                  ) : null}
                   {tabs.map((tab) => {
                     if (
                       (tab.type === "browser" || tab.type === "browser-use") &&
