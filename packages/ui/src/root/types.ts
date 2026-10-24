@@ -1,7 +1,7 @@
 import type { IPlatformService, SourceServerManagementSnapshot } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import type { ReactNode } from "react";
-import type { CreateTaskRequest } from "@/app-shell/types.js";
+import type { CreateTaskRequest, RemoteConnectionOpenPreference } from "@/app-shell/types.js";
 
 export interface RootProps {
   services: IServiceAccessor;
@@ -51,8 +51,8 @@ export interface WorkspaceSettingsLayerProps {
   onCreateTask?: (request?: CreateTaskRequest) => void;
   onOpenWorkspace?: () => void;
   allowOpenWorkspace?: RootProps["allowOpenWorkspace"];
-  /** 设备管理「新建连接」：打开 Root 的全局远程连接向导。 */
-  onOpenRemoteConnection?: () => void;
+  /** 设备管理「新建连接」：打开 Root 的全局远程连接向导（支持 completion/returnTarget 往返）。 */
+  onOpenRemoteConnection?: (preference?: RemoteConnectionOpenPreference) => void | boolean;
   /** 设备管理「连接/重试/安装」：用已保存线路预填向导，成功时回传 management 快照。 */
   onConnectRemoteProfile?: (profileId: string) => Promise<SourceServerManagementSnapshot | void>;
   /** 设备管理「查看项目」：连接（或复用已打开 tab）后打开该设备上的项目路径。 */

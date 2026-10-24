@@ -17,6 +17,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { ScrollFadeViewport } from "@/components/ui/scroll-fade-viewport.js";
 import { TID_SIDEBAR } from "@zcode/shared/test-ids";
+import { remoteHostIdFromWorkspaceIdentity } from "@zcode/shared";
 import { cn } from "@/components/lib/utils.js";
 import { SidebarTooltipProvider } from "@/ControlHintTooltip.js";
 import type {
@@ -122,6 +123,13 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
   // P4.1：编辑/新建对话框 owner 自 toast 占位升级为真组件（上游 index.tsx 同款状态）。
   const [editor, setEditor] = useState<{ project: VirtualProject | null } | null>(null);
   const [creating, setCreating] = useState(false);
+  // 当前任务只影响远端「新建项目」的默认设备（上游 :94-101 同款）。
+  const hasActiveRemoteTask = useZCodeSessionStore((state) =>
+    Boolean(
+      props.workspaceIdentity &&
+      state.workspaces[props.workspaceIdentity.trim() || props.workspacePath]?.activeTaskId,
+    ),
+  );
   // grouped 视角的工具栏/吸顶组头 portal 目标（上游 groupedToolbar/groupedSticky 同职责）。
   const [groupedToolbar, setGroupedToolbar] = useState<HTMLDivElement | null>(null);
   const [groupedSticky, setGroupedSticky] = useState<HTMLDivElement | null>(null);
@@ -250,12 +258,14 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
                   onViewChange={setView}
                   actionsRef={setGroupedToolbar}
                 >
-                  {/* 拍板②：项目树内「新建项目」入口（项目 chip 菜单），omz 聊天空态菜单不替换。 */}
+                  {/* 拍板②：项目树内「新建项目」入口（项目 chip 菜单），omz 聊天空态菜单不替换。
+                      设备管理往返入口随 Shell 回调同源下发，不能只给侧栏挂载点。 */}
                   <ProjectComposerMenu
                     workspacePath={props.workspacePath}
                     workspaceIdentity={props.workspaceIdentity}
                     onCreateTask={props.onCreateTask}
                     onSelectConversationWorkspace={props.onCreateConversationTask}
+                    onOpenRemoteWorkspace={props.onOpenRemoteWorkspace}
                     triggerClassName="max-w-40 pl-2.5 pr-1.5"
                   />
                 </ProjectSidebarListHeader>
@@ -397,14 +407,26 @@ export const ProjectSidebar = memo(function ProjectSidebar(props: ProjectSidebar
               ) : null}
             </div>
           </div>
-          {/* P4.1：编辑/新建对话框挂侧栏根部（上游 index.tsx 同款）；omz 本机形态无远端设备面。 */}
+          {/* P4.1：编辑/新建对话框挂侧栏根部（上游 index.tsx 同款）。
+              设备管理往返（backlog-sweep 缺陷修复）：能力来自 Shell 透传的真实
+              onOpenRemoteWorkspace，两处入口（侧栏 + composer chip）都必须开启，
+              否则「添加远程设备…」入口退化成不可达的死分支。 */}
           {creating && service ? (
             <ProjectCreation
               workspacePath={props.workspacePath}
               workspaceIdentity={props.workspaceIdentity}
               onCreateTask={props.onCreateTask}
               projects={tree.projects}
+              directory={directory}
               service={service}
+              remoteService={remoteService}
+              allowDeviceManagement={Boolean(props.onOpenRemoteWorkspace)}
+              onOpenRemoteWorkspace={props.onOpenRemoteWorkspace}
+              defaultDeviceId={
+                hasActiveRemoteTask && props.workspaceIdentity
+                  ? (remoteHostIdFromWorkspaceIdentity(props.workspaceIdentity) ?? "local")
+                  : "local"
+              }
               onClose={() => setCreating(false)}
               onSaved={refresh}
             />

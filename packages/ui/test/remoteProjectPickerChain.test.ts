@@ -25,6 +25,8 @@ import {
 } from "../src/remote-connection-flow/contract.js";
 import { deriveRemoteProjectHostId } from "../src/root/useRemoteWorkspaceHistory.js";
 import { ensureSourceServerBoundaryAcknowledged } from "../src/lib/sourceServerBoundaryOnboarding.js";
+import { selectProjectDevices } from "../src/project-sidebar/ProjectCreation.js";
+import type { RemoteProjectDirectory, RemoteProjectHost } from "../src/project-sidebar/contract.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
 const uiSrc = path.join(root, "packages", "ui", "src");
@@ -312,18 +314,175 @@ test("RemoteProjectList：onLegacyCapability 能力回传（Step 6 落可见闸�
   assert.match(source, /capabilityCallback\.current\?\.\(Boolean\(tree\.legacySingleRoot\)\)/);
 });
 
-test("ProjectCreation：设备面走 directory.hosts 映射，onAddDevice disable（拍板 A）", () => {
+test("ProjectCreation：设备面按统一 identity 投影，空目录 + 无设备管理即纯本机（无下拉）", () => {
   const source = readUi("project-sidebar", "ProjectCreation.tsx");
+  // 设备行投影：host 身份经统一工具反解 Source 归属，不上手拼 authority。
+  assert.match(source, /function projectDevice\(host: RemoteProjectHost\): ProjectDevice \{/);
   assert.match(
     source,
-    /const devices: ProjectDevice\[\] \| undefined = directory\s*\? directory\.hosts\.map/,
+    /parseRemoteWorkspaceIdentity\(\s*buildRemoteHostWorkspaceIdentity\(host\.id, "\/"\),\s*\)\?\.sourceServerId;/,
+    "server 形态 host 必须反解出 sourceServerId",
   );
+  assert.match(source, /\.\.\.\(sourceServerId \? \{ sourceServerId \} : \{\}\),/);
   assert.match(source, /label: remoteHostLabel\(host\)/);
   assert.match(source, /status: host\.connectionStatus \?\? "offline"/);
-  assert.match(source, /onConnectDevice=\{remoteService \? connectDevice : undefined\}/);
+  // 空目录不得把纯本机形态变成设备下拉：长度判定 + 显式能力双门。
+  assert.match(
+    source,
+    /const hosts = directory\?\.hosts \?\? \[\];\s*if \(!directory \|\| \(hosts\.length === 0 && !allowDeviceManagement\)\) return undefined;/,
+    "空投影且不允许设备管理时必须返回 undefined（ProjectEditor 的 devices 闸门）",
+  );
+  assert.match(source, /const devices = selectProjectDevices\(directory, allowDeviceManagement\);/);
   assert.match(source, /onPrepareExisting=\{\s*remoteService/);
-  assert.doesNotMatch(source, /onAddDevice=\{/, "拍板 A：本轮不得接向导壳的设备新增入口");
-  assert.match(source, /拍板 A/, "disable 决定必须登记在实现处");
+  // 消费者：ProjectEditor 的渲染闸门就是 devices 真值，devices=undefined 即不渲染下拉。
+  const editor = readUi("project-sidebar", "ProjectEditor.tsx");
+  assert.match(editor, /\{devices \? \(/);
+  // 设备管理能力默认仍关闭；只有显式传 allowDeviceManagement 的挂载点接管向导。
+  assert.match(source, /allowDeviceManagement = false/, "默认值必须保持关闭");
+  assert.match(
+    source,
+    /const openDeviceWizard = allowDeviceManagement \? onOpenRemoteWorkspace : undefined;/,
+  );
+  assert.match(
+    source,
+    /onConnectDevice=\{remoteService \|\| openDeviceWizard \? connectDevice : undefined\}/,
+  );
+});
+
+test("ProjectCreation：向导回传必须仍是同一 Source，不一致明确失败（不再静默放行）", () => {
+  const source = readUi("project-sidebar", "ProjectCreation.tsx");
+  // 打开向导时把设备 Source 作为 preferredSourceServerId 下发。
+  assert.match(source, /preferredSourceServerId: device\.sourceServerId,/);
+  // 回传校验：不同 Source 直接 reject（由 ProjectEditor 错误行展示），不放行到原目录流程。
+  assert.match(
+    source,
+    /if \(\s*device\.sourceServerId !== undefined &&\s*result\.sourceServerId !== device\.sourceServerId\s*\) \{/,
+    "同 Source 校验必须真的比较两侧身份",
+  );
+  assert.match(source, /reject\(new Error\("project\.connection-unavailable"\)\);/);
+  assert.doesNotMatch(
+    source,
+    /device\.sourceServerId === undefined \|\|\s*result\.sourceServerId === device\.sourceServerId/,
+    "旧的恒真放行式校验必须已拆除",
+  );
+});
+
+test("selectProjectDevices：运行时投影（纯本机不下拉 / server host 带 Source / legacy 无 Source）", () => {
+  const host = (
+    id: string,
+    connectionStatus?: RemoteProjectHost["connectionStatus"],
+  ): RemoteProjectHost => ({
+    id,
+    membershipId: "m1",
+    kind: "ssh",
+    target: null,
+    position: 0,
+    ...(connectionStatus ? { connectionStatus } : {}),
+  });
+  const directory = (...hosts: RemoteProjectHost[]): RemoteProjectDirectory => ({
+    hosts,
+    entries: [],
+  });
+  assert.equal(selectProjectDevices(undefined, true), undefined, "无目录投影不启用设备面");
+  // 缺陷4：useProjectTree 初始投影 `{hosts:[],entries:[]}`，旧代码使 devices 从 undefined 变 []
+  // （truthy），纯本机形态也会渲染设备下拉。
+  assert.equal(
+    selectProjectDevices(directory(), false),
+    undefined,
+    "空目录 + 不允许设备管理 = 纯本机，必须不渲染下拉",
+  );
+  assert.deepEqual(
+    selectProjectDevices(directory(), true),
+    [],
+    "显式允许设备管理时保留「添加远程设备」入口",
+  );
+  // 缺陷2：server 形态 host 必须带 Source 身份，向导回传才能做同 Source 校验。
+  const [serverDevice] = selectProjectDevices(
+    directory(host("remote:server:dev-1", "online")),
+    false,
+  )!;
+  assert.equal(serverDevice?.sourceServerId, "dev-1");
+  assert.equal(serverDevice?.status, "online");
+  const [legacyDevice] = selectProjectDevices(directory(host("remote:ssh:build:22:dev")), false)!;
+  assert.equal(legacyDevice?.sourceServerId, undefined, "legacy ssh 设备没有 Source 归属");
+});
+
+test("设备管理往返：两处挂载点都真接向导壳（替换旧的「不得传」断言）", () => {
+  const sidebar = readUi("project-sidebar", "index.tsx");
+  const composer = readUi("project-sidebar", "ProjectComposerMenu.tsx");
+  const creation = readUi("project-sidebar", "ProjectCreation.tsx");
+  // 挂载点①侧栏：能力与回调同源，缺一个就退化不可达。
+  assert.match(
+    sidebar,
+    /<ProjectCreation[\s\S]*?allowDeviceManagement=\{Boolean\(props\.onOpenRemoteWorkspace\)\}[\s\S]*?onOpenRemoteWorkspace=\{props\.onOpenRemoteWorkspace\}/,
+    "侧栏挂载点必须同时下发能力与 Shell 回调",
+  );
+  // 挂载点②chip：能力经 ProjectComposerMenu 透传到同一个新建表单。
+  assert.match(
+    sidebar,
+    /<ProjectComposerMenu[\s\S]*?onOpenRemoteWorkspace=\{props\.onOpenRemoteWorkspace\}/,
+    "chip 入口必须拿到 Shell 下发的向导回调",
+  );
+  assert.match(
+    composer,
+    /allowDeviceManagement=\{Boolean\(onOpenRemoteWorkspace\)\}[\s\S]*?onOpenRemoteWorkspace=\{onOpenRemoteWorkspace\}/,
+    "composer 挂载点必须把能力与回调一起交给 ProjectCreation",
+  );
+  assert.match(
+    composer,
+    /onOpenRemoteWorkspace\?: ProjectSidebarProps\["onOpenRemoteWorkspace"\];/,
+  );
+  // 真接线：点「添加设备」/「连接」都能带着 completion + returnTarget 打开同一向导并回传。
+  assert.match(creation, /onAddDevice=\{\s*openDeviceWizard\s*\?/);
+  assert.match(creation, /completion: "device-management"/);
+  assert.match(creation, /kind: "connect-device"/);
+  assert.match(creation, /kind: "add-device"/);
+});
+
+// ---------- ④b 设备往返一次性消费 ----------
+
+test("Root：deviceAdditionReturn 一次性消费（成功/失败/取消后清空，「查看项目」不再被跳过）", () => {
+  const source = readUi("Root.tsx");
+  const start = source.indexOf("const finishDeviceAddition = useCallback(");
+  const end = source.indexOf("const resolveDeviceAdditionSourceServerId", start);
+  assert.ok(start > -1 && end > start, "finishDeviceAddition 必须存在");
+  const body = source.slice(start, end);
+  // 缺陷3：成功回传后旧实现不清引用，之后设备面板走向导成功时
+  // `if (deviceAdditionReturn.current)` 直接 return，pendingDeviceIntentRef 永不结算。
+  assert.match(
+    body,
+    /const release = \(\) => \{\s*if \(deviceAdditionReturn\.current === pending\) deviceAdditionReturn\.current = null;\s*\};/,
+    "释放点必须按 owner 身份比对，迟到结果不能清新入口",
+  );
+  assert.match(
+    body,
+    /finally \{\s*if \(!retryable\) release\(\);\s*\}/,
+    "成功/失败/取消三条终态必须都走到统一释放点",
+  );
+  assert.match(body, /let retryable = false;/, "只有可重试的读失败保留 owner");
+  assert.match(body, /retryable = true;/, "读失败分支必须标记为可重试");
+  assert.doesNotMatch(
+    body,
+    /result\.kind === "cancelled" && deviceAdditionReturn\.current === pending/,
+    "旧实现只清 cancelled，必须已拆除",
+  );
+  // 面板「连接/查看项目」的结算链仍在设备往返分支之后：owner 被清空后才轮到这里。
+  const connect = source.indexOf("const handleRemoteConnectionDialogConnect = useCallback(");
+  const connectEnd = source.indexOf("const remoteConnectionDialog =", connect);
+  assert.ok(connect > -1 && connectEnd > connect, "handleRemoteConnectionDialogConnect 必须存在");
+  const connectBody = source.slice(connect, connectEnd);
+  const deviceBranch = connectBody.indexOf("if (deviceAdditionReturn.current) {");
+  const intentBranch = connectBody.indexOf("const pending = pendingDeviceIntentRef.current;");
+  assert.ok(deviceBranch > -1, "设备往返分支必须存在");
+  assert.ok(
+    intentBranch > deviceBranch,
+    "面板意图分支必须仍在设备往返分支之后（残留 owner 会把它整段跳过）",
+  );
+  assert.match(
+    connectBody.slice(intentBranch),
+    /pending\.resolve\(snapshot\)/,
+    "面板 promise 必须在成功路径结算",
+  );
 });
 
 // ---------- ⑤ conversation 旧链 ----------

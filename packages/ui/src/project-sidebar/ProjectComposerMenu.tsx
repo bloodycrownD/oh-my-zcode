@@ -2,7 +2,9 @@
 // ①不替换 omz ChatEmptyWorkspacePreviewMenu；本组件作为项目树内「新建项目」入口挂载
 //   （ProjectSidebarListHeader 右端 chip：项目搜索/切换/脱离/新建）；
 // ②Remote* 整组剔除：ChatRemoteFolderSelection/RemoteIdentityHoverCard/remoteHostLabel/
-//   useRemoteConnectionEntryVisibility/onOpenRemoteWorkspace/addDevice 连接流（三期回补）；
+//   useRemoteConnectionEntryVisibility/addDevice 连接流（三期回补）；
+//   设备管理往返（backlog-sweep 缺陷修复）：onOpenRemoteWorkspace 由 ProjectSidebar
+//   从其 props 透传，本 chip 打开的新建表单与侧栏挂载点共用同一设备管理能力；
 // ③遥测面剔除：runUserAction/runUserActionAsync 直接调用操作（omz 无 userActionTelemetry）；
 // ④P4.2 起 store 有 draftProjectId/draftTaskGroupId：当前项目勾选态与分组继承已接。
 import type { ReactNode } from "react";
@@ -43,6 +45,7 @@ export function ProjectComposerMenu({
   allowConversationWorkspaceDetach = allowConversationWorkspaceSelection,
   onCreateTask,
   onSelectConversationWorkspace,
+  onOpenRemoteWorkspace,
   containerClassName,
   triggerClassName,
   triggerIndicator,
@@ -54,6 +57,8 @@ export function ProjectComposerMenu({
   allowConversationWorkspaceDetach?: boolean;
   onCreateTask: ProjectSidebarProps["onCreateTask"];
   onSelectConversationWorkspace: () => void | Promise<void>;
+  /** 设备管理往返入口（Shell → ProjectSidebar → 本 chip）；缺席即纯本机创建形态。 */
+  onOpenRemoteWorkspace?: ProjectSidebarProps["onOpenRemoteWorkspace"];
   /** 调用方局部调整 workspace chip 外层视觉，不改变普通会话默认样式。 */
   containerClassName?: string;
   /** 调用方局部调整 workspace trigger 视觉，不改变普通会话默认样式。 */
@@ -65,7 +70,8 @@ export function ProjectComposerMenu({
 }) {
   const { intl } = useZCodeIntl();
   const [workspaceSearchQuery, setWorkspaceSearchQuery] = useState("");
-  const { tree, projects, error, service, refresh } = useProjectDirectory();
+  const { tree, projects, error, directory, service, remoteService, refresh } =
+    useProjectDirectory();
   const workspaceKey = workspaceIdentity?.trim() || workspacePath;
   const hostId = workspaceIdentity ? remoteHostIdFromWorkspaceIdentity(workspaceIdentity) : null;
   // 草稿项目身份（upstream-v316-fullsync P4.2）：未提交草稿的项目选择是唯一勾选事实源。
@@ -285,7 +291,14 @@ export function ProjectComposerMenu({
           workspaceIdentity={workspaceIdentity}
           onCreateTask={createProjectTask}
           projects={tree.projects}
+          directory={directory}
           service={service}
+          remoteService={remoteService}
+          // 当前任务的 hostId 作为默认设备；无活动任务时落回本机（上游 :585 同款）。
+          defaultDeviceId={activeTaskId && hostId ? hostId : "local"}
+          // 与侧栏挂载点同能力：设备管理往返只在 Shell 真下发回调时开启。
+          allowDeviceManagement={Boolean(onOpenRemoteWorkspace)}
+          onOpenRemoteWorkspace={onOpenRemoteWorkspace}
           onClose={() => setCreating(false)}
           onSaved={refresh}
         />

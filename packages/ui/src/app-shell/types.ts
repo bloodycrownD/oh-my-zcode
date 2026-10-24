@@ -83,6 +83,44 @@ export interface CreateTaskOptions {
 
 export type CreateTaskRequest = ZCodeProvider | CreateTaskOptions;
 
+/** 设备添加/连接的往返结果：只带可见事实，不携带凭据或序列化引用。 */
+export type DeviceAdditionResult =
+  | { kind: "connected"; sourceServerId: string | undefined }
+  | { kind: "cancelled"; background?: boolean };
+
+/**
+ * 仅存在于当前 renderer 内存里的原 owner 引用（upstream-v316 设备管理往返契约）。
+ * 创建草稿/设备面板把 finish 交给 Root，由 Root 在向导完成或取消时回写结果。
+ */
+export interface DeviceAdditionReturnTarget {
+  /** 已有设备连接留在原项目页；只有新增设备往返设置。 */
+  kind: "connect-device" | "add-device";
+  isCurrent(): boolean;
+  /** 只投递连接层可见性；原 owner 决定自己的提交门禁。 */
+  onVisibilityChange?(visible: boolean): void;
+  /** 返回导航前由原 owner 校验异步成员资格；Root 随后重验原意图。 */
+  canFinish?(result: DeviceAdditionResult): Promise<boolean>;
+  finish(result: DeviceAdditionResult): void | Promise<void>;
+}
+
+/**
+ * 远程连接向导的入口意图（对齐上游 app-shell/types.ts）。
+ * `completion: "device-management"` 表示连接完成后只回传设备事实，不进入目录/项目副作用。
+ */
+export interface RemoteConnectionOpenPreference {
+  returnTarget?: DeviceAdditionReturnTarget;
+  completion?: "device-management";
+  /** 已有设备的精确 Profile；向导据此直达参数页并用于回传 Source 归属。 */
+  preferredProfileId?: string;
+  /** 已识别设备（创建草稿的设备下拉）的 Source id；连接成功后原样回传。 */
+  preferredSourceServerId?: string;
+  preferredTarget?: RemoteTarget;
+  preferredKind?: RemoteTarget["kind"];
+  preferredWslDistro?: string;
+  /** 设备管理「连接」入口：用已保存线路预填向导（不含 secret）。 */
+  initialTarget?: RemoteTarget;
+}
+
 export interface AppProps {
   services: IServiceAccessor;
   onConnectRemote: (options: RemoteTarget, requestId?: string) => Promise<string>;
@@ -102,7 +140,7 @@ export interface AppProps {
   onResolveConversationWorkspace?: () => Promise<string>;
   onOpenWorkspace: () => void;
   onOpenFolderFromWorkspaceMenu: () => void;
-  onOpenRemoteWorkspace?: () => void;
+  onOpenRemoteWorkspace?: (preference?: RemoteConnectionOpenPreference) => void | boolean;
   onCreateScratchWorkspace: (name: string) => Promise<string | null>;
   remoteConnectionInProgress?: boolean;
   onReturnToWorkspace?: () => void;

@@ -12,6 +12,11 @@ import {
 } from "@zcode/shared";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { Button } from "@/components/ui/button.js";
+import type {
+  DeviceAdditionResult,
+  DeviceAdditionReturnTarget,
+  RemoteConnectionOpenPreference,
+} from "@/app-shell/types.js";
 import { PlatformProvider } from "@/hooks/usePlatform.js";
 import { ServiceProvider } from "@/hooks/useServices.js";
 import { useDynamicWorkflowAvailabilityLoader } from "@/hooks/useDynamicWorkflowAvailability.js";
@@ -76,14 +81,31 @@ import { RootStartupLoading } from "@/root/RootStartupLoading.js";
 import { useSettings } from "@/hooks/useSettingService.js";
 import { useSystemLanguagePromptSync } from "@/hooks/useSystemLanguagePromptSync.js";
 import { CLOSE_ACTIVE_CONTEXT_REQUEST_EVENT } from "@/lib/closeActiveContext.js";
+import { setPendingSettingsSectionIntent } from "@/lib/settingsNavigation.js";
 import { AssistantCodeCommentFeatureProvider } from "@/AssistantCodeCommentFeatureProvider.js";
 
 const DEFAULT_LUCIDE_STROKE_WIDTH = 1.5;
-interface RemoteConnectionOpenPreference {
-  preferredKind?: RemoteTarget["kind"];
-  preferredWslDistro?: string;
-  /** 设备管理「连接」入口：用已保存线路预填向导（不含 secret）。 */
-  initialTarget?: RemoteTarget;
+
+/**
+ * 菜单项/按钮直接把回调挂在 onSelect/onClick 上时，DOM 事件会作为首参传入。
+ * 只接受带契约字段的 preference；事件等其它对象一律按“无意图”归零，避免把事件存进向导状态。
+ */
+const REMOTE_CONNECTION_PREFERENCE_KEYS = [
+  "returnTarget",
+  "completion",
+  "preferredProfileId",
+  "preferredSourceServerId",
+  "preferredTarget",
+  "preferredKind",
+  "preferredWslDistro",
+  "initialTarget",
+] as const satisfies ReadonlyArray<keyof RemoteConnectionOpenPreference>;
+
+function normalizeRemoteConnectionOpenPreference(
+  value: RemoteConnectionOpenPreference | undefined,
+): RemoteConnectionOpenPreference | null {
+  if (!value || typeof value !== "object") return null;
+  return REMOTE_CONNECTION_PREFERENCE_KEYS.some((key) => key in value) ? value : null;
 }
 
 /** 设备管理入口发起的向导只承担认证/安装，成功后把 management 快照交回面板的 run 通道。 */
@@ -446,10 +468,171 @@ function RootInner({
 
   useBotBroadcastEffects(services, tabStoreApi);
 
-  const handleOpenRemoteConnection = useCallback((preference?: RemoteConnectionOpenPreference) => {
-    setRemoteConnectionOpenPreference(preference ?? null);
-    setRemoteConnectionDialogOpen(true);
-  }, []);
+  /**
+   * 设备管理往返的原 owner（创建草稿/设备面板）。引用只活在本 renderer 内存里：
+   * `finish` 由 Root 在向导成功或取消时调用，owner 自己决定是否提交设备选择。
+   */
+  const deviceAdditionReturn = useRef<{
+    target: DeviceAdditionReturnTarget;
+    completion?: "checking" | "delivered";
+    tabId: string | null;
+    workspaceKey?: string;
+  } | null>(null);
+
+  /**
+   * 把向导结果投递给原 owner（对齐上游 Root.tsx:470-527）：
+   * - 投递前按原 tab 存续与同一 workspace 重新校验，迟到结果不能跨入口复活旧草稿；
+   * - `canFinish` 由 owner 校验异步成员资格，失败退化成后台 cancelled；
+   * - 一次性消费：成功/失败/取消都在退出前清掉引用（只有可重试的读失败保留 owner），
+   *   迟到成功与后续「连接/查看项目」都不会再复用同一返回目标。
+   */
+  const finishDeviceAddition = useCallback(
+    async (
+      result: DeviceAdditionResult,
+      background = false,
+      canDeliver: () => boolean = () => true,
+    ) => {
+      const pending = deviceAdditionReturn.current;
+      // 同步消费；异步资格校验仍保留同一 owner 标识，新入口替换后旧结果无权导航。
+      if (!pending) return false;
+      if (pending.completion && result.kind === "connected") return true;
+      // 一次性消费（backlog-sweep 缺陷修复）：本次调用认领 owner 后，成功/失败/取消都必须在
+      // 退出前释放引用。残留的已投递 owner 会让设备面板后续的「连接/查看项目」在
+      // handleRemoteConnectionDialogConnect 的 deviceAdditionReturn 分支被提前 return，
+      // pendingDeviceIntentRef 永不结算（面板 promise 悬空、「查看项目」不再打开）。
+      const release = () => {
+        if (deviceAdditionReturn.current === pending) deviceAdditionReturn.current = null;
+      };
+      pending.completion = "checking";
+      const isCurrent = () =>
+        deviceAdditionReturn.current === pending && pending.target.isCurrent();
+      const deliver = (value: DeviceAdditionResult, inBackground: boolean) => {
+        if (!isCurrent()) return;
+        const tabs = tabStoreApi.getState();
+        const tab = tabs.tabs.find((item) => item.id === pending.tabId);
+        const workspaceKey =
+          tab && isWorkspaceTab(tab)
+            ? tab.workspaceIdentity?.trim() || tab.workspacePath
+            : undefined;
+        if ((pending.tabId && !tab) || pending.workspaceKey !== workspaceKey) return;
+        if (pending.tabId && !inBackground) tabs.activateTab(pending.tabId);
+        logger.debug("[Root] return from device addition", {
+          kind: value.kind,
+          tabId: pending.tabId,
+        });
+        pending.completion = "delivered";
+        return pending.target.finish(value);
+      };
+      // 只有可重试的读失败保留 owner（连接 flow 会显示原因并允许重试/取消）；其余终态释放。
+      let retryable = false;
+      try {
+        if (result.kind === "connected" && pending.target.canFinish) {
+          const valid = await pending.target.canFinish(result);
+          if (!isCurrent()) return true;
+          if (!valid) {
+            await deliver({ kind: "cancelled", background: true }, true);
+            return true;
+          }
+        }
+        if (result.kind === "connected" && !canDeliver()) {
+          pending.completion = undefined;
+          return true;
+        }
+        await deliver(result, background);
+      } catch (error) {
+        if (!isCurrent()) return true;
+        // 读取失败不是取消。保留原 owner 和禁发约束，让连接 flow 显示原因并提供重试/取消。
+        pending.completion = undefined;
+        retryable = true;
+        throw error;
+      } finally {
+        if (!retryable) release();
+      }
+      return true;
+    },
+    [tabStoreApi],
+  );
+
+  /**
+   * 解析本次连接对应的 Source server id，供 owner 回写设备选择。
+   * 创建草稿点已有设备时入口会带 preferredSourceServerId，原样回传即可；
+   * 「添加设备」没有该字段，才回落到 management 快照，且只有唯一在线设备才回填，
+   * 避免把新增设备误选到另一台已在线设备。
+   */
+  const resolveDeviceAdditionSourceServerId = useCallback(
+    async (preference: RemoteConnectionOpenPreference | null): Promise<string | undefined> => {
+      const preferredSourceServerId = preference?.preferredSourceServerId?.trim();
+      if (preferredSourceServerId) return preferredSourceServerId;
+      const management = services.sourceServerManagementService;
+      if (!management) return undefined;
+      try {
+        const snapshot = await management.getSnapshot();
+        const profileId = preference?.preferredProfileId;
+        if (profileId) {
+          const onlineState = snapshot.states.find(
+            (item) =>
+              item.profileId === profileId && item.state === "online" && item.sourceServerId,
+          );
+          if (onlineState?.sourceServerId) return onlineState.sourceServerId;
+          const profile = snapshot.profiles.find((item) => item.profileId === profileId);
+          if (profile?.sourceServerId && profile.lifecycleState !== "retired")
+            return profile.sourceServerId;
+        }
+        const onlineSourceServerIds = [
+          ...new Set(
+            snapshot.states.flatMap((item) =>
+              item.state === "online" && item.sourceServerId ? [item.sourceServerId] : [],
+            ),
+          ),
+        ];
+        return onlineSourceServerIds.length === 1 ? onlineSourceServerIds[0] : undefined;
+      } catch (error) {
+        logger.warn("[Root] 解析设备连接结果失败", { error });
+        return undefined;
+      }
+    },
+    [services.sourceServerManagementService],
+  );
+
+  const handleOpenRemoteConnection = useCallback(
+    (rawPreference?: RemoteConnectionOpenPreference): void | boolean => {
+      const preference = normalizeRemoteConnectionOpenPreference(rawPreference);
+      // 连接流程进行中或原 owner 正在校验返回时，不接受新的往返意图；
+      // 调用方（创建草稿）据此把 accepted=false 当作“未接管”处理。
+      if (
+        preference?.returnTarget &&
+        (remoteConnectionInProgress ||
+          (deviceAdditionReturn.current && !deviceAdditionReturn.current.completion))
+      )
+        return false;
+      if (!remoteConnectionInProgress) {
+        // 新入口替换尚在资格校验的旧返回，先解除旧 owner 的门禁，再使其迟到结果失效。
+        deviceAdditionReturn.current?.target.onVisibilityChange?.(false);
+        const tabs = tabStoreApi.getState();
+        const tab = tabs.tabs.find((item) => item.id === tabs.activeTabId);
+        deviceAdditionReturn.current = preference?.returnTarget
+          ? {
+              target: preference.returnTarget,
+              tabId: tabs.activeTabId,
+              workspaceKey:
+                tab && isWorkspaceTab(tab)
+                  ? tab.workspaceIdentity?.trim() || tab.workspacePath
+                  : undefined,
+            }
+          : null;
+        // 新增设备往返设置页；已有设备的重连留在原项目/草稿页，不能被误当成新增设备。
+        if (preference?.returnTarget?.kind === "add-device") {
+          setPendingSettingsSectionIntent("remoteDevices");
+          tabStoreApi.getState().openSettingsTab();
+        }
+        setRemoteConnectionOpenPreference(preference ?? null);
+      }
+      deviceAdditionReturn.current?.target.onVisibilityChange?.(true);
+      setRemoteConnectionDialogOpen(true);
+      return true;
+    },
+    [remoteConnectionInProgress, tabStoreApi],
+  );
   /**
    * Picker 真链的 Root 侧装配（上游 Root.tsx:1284-1361 的等价形态）。
    * hostId 由 useRemoteWorkspaceHistory 用统一 identity 工具派生后随 intent 送达；
@@ -837,13 +1020,24 @@ function RootInner({
       if (!open) {
         // 用户没连就关掉向导时，面板按钮不能一直停在 busy；按当前快照收尾。
         settlePendingDeviceIntent();
+        // 设备管理往返：关闭即取消，解除原 owner（创建草稿）的等待；
+        // 已投递或正在做资格校验的结果不能重复回传。
+        const pendingDeviceAddition = deviceAdditionReturn.current;
+        if (pendingDeviceAddition && !pendingDeviceAddition.completion) {
+          void finishDeviceAddition({ kind: "cancelled" }).catch((error) =>
+            logger.warn("[Root] 设备添加取消回传失败", error),
+          );
+        }
+        if (pendingDeviceAddition?.completion !== "delivered") {
+          pendingDeviceAddition?.target.onVisibilityChange?.(false);
+        }
       }
       setRemoteConnectionDialogOpen(open);
       if (!open) {
         setRemoteConnectionOpenPreference(null);
       }
     },
-    [settlePendingDeviceIntent],
+    [finishDeviceAddition, settlePendingDeviceIntent],
   );
 
   // 项目流程关闭（取消或保存完成）统一释放向导 attachment：
@@ -1021,6 +1215,23 @@ function RootInner({
       context?: Parameters<IPlatformService["connectRemote"]>[2],
     ) => {
       const sessionId = await handleConnectRemote(target, requestId, context);
+      // 设备管理往返（completion:"device-management" + returnTarget）：只回传设备事实，
+      // 不进入目录/项目链路；owner 自己决定是否把该设备写回创建草稿的选择。
+      if (deviceAdditionReturn.current) {
+        const sourceServerId = await resolveDeviceAdditionSourceServerId(
+          remoteConnectionOpenPreference,
+        );
+        const delivered = await finishDeviceAddition({ kind: "connected", sourceServerId });
+        if (delivered) {
+          // 让 SSHDialog 先完成自己的成功态提交，再收起并换代；否则它随后的
+          // applyOpenState(true) 会把刚关掉的向导重新拉起，且下次打开会落回已连接的目录步。
+          window.setTimeout(() => {
+            handleRemoteConnectionDialogOpenChange(false);
+            setRemoteConnectionDialogEpoch((value) => value + 1);
+          }, 0);
+          return sessionId;
+        }
+      }
       const pending = pendingDeviceIntentRef.current;
       if (!pending) {
         return sessionId;
@@ -1068,7 +1279,10 @@ function RootInner({
       handleRemoteConnectionDialogOpenChange,
       handleSelectRemoteProject,
       releaseUncommittedRemoteSession,
+      remoteConnectionOpenPreference,
+      resolveDeviceAdditionSourceServerId,
       services.sourceServerManagementService,
+      finishDeviceAddition,
     ],
   );
 
@@ -1142,7 +1356,7 @@ function RootInner({
     allowOpenWorkspace,
     // 设备管理接线（backlog-sweep 设备面板）：新建连接 / 连接线路 / 打开项目
     // 都必须落到 Root 的同一份向导与 remote workspace 链，SettingsPage 不自建连接。
-    onOpenRemoteConnection: allowRemoteWorkspace ? () => handleOpenRemoteConnection() : undefined,
+    onOpenRemoteConnection: allowRemoteWorkspace ? handleOpenRemoteConnection : undefined,
     onConnectRemoteProfile: allowRemoteWorkspace ? handleConnectRemoteProfile : undefined,
     onOpenRemoteDeviceProject: allowRemoteWorkspace ? handleOpenRemoteDeviceProject : undefined,
   };

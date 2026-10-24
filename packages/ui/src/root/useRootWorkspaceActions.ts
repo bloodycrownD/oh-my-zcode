@@ -1,13 +1,8 @@
 /* eslint-disable max-lines -- Root workspace action hook 集中编排项目、远程和 conversation 入口；合并期保持动作边界完整，后续按领域拆分。 */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
-import {
-  type AppSettings,
-  type IPlatformService,
-  type RemoteTarget,
-  type ZCodeTaskClientMode,
-} from "@zcode/shared";
+import { type AppSettings, type IPlatformService, type ZCodeTaskClientMode } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
-import type { CreateTaskRequest } from "@/app-shell/types.js";
+import type { CreateTaskRequest, RemoteConnectionOpenPreference } from "@/app-shell/types.js";
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 
@@ -36,11 +31,6 @@ import {
   V4_DRAFT_SCOPE_ROOT,
 } from "@/v4/composer/composerDraftStore.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
-
-interface OpenRemoteConnectionPreference {
-  preferredKind?: RemoteTarget["kind"];
-  preferredWslDistro?: string;
-}
 
 /** 新任务落点：identity 缺省一律归一化为 null，供只读校验、focus/addTab 统一消费。 */
 interface NewTaskTargetResolution {
@@ -104,7 +94,7 @@ export function useRootWorkspaceActions({
   openDirectoryBrowser?: () => void;
   refreshProviderState: () => Promise<void>;
   updateAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
-  onOpenRemoteConnection?: (preference?: OpenRemoteConnectionPreference) => void;
+  onOpenRemoteConnection?: (preference?: RemoteConnectionOpenPreference) => void | boolean;
   /** 远端项目任务创建的唯一 admission：目录由 Host 侧 prepareSession 解析，这里只申请/绑定 attachment。 */
   openRemoteProjectWorkspace?: (target: {
     hostId: string;
