@@ -17,6 +17,8 @@ import { useTabPersistence } from "@/hooks/useTabPersistence.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SSHDialog } from "@/SSHDialog.js";
+import { RemoteProjectPicker } from "@/project-sidebar/RemoteProjectPicker.js";
+import type { RemoteProjectHost } from "@/project-sidebar/contract.js";
 import { SettingsPage } from "@/SettingsPage.js";
 import { setDefaultFileDisplayBasePath } from "@/lib/fileDisplay.js";
 import { countAllUnreadTasks } from "@/lib/unreadTaskCount.js";
@@ -37,6 +39,7 @@ import { resolveRootWorkspaceShellTarget } from "@/root/rootWorkspaceShellTarget
 import { OccupationOnboarding } from "@/onboarding/OccupationOnboarding.js";
 import { OnboardingDialog } from "@/onboarding/OnboardingDialog.js";
 import { useRemoteWorkspaceHistory } from "@/root/useRemoteWorkspaceHistory.js";
+import type { RemoteWorkspaceProjectIntent } from "@/root/useRemoteWorkspaceHistory.js";
 import { useRemoteWorkspaceTabLifecycle } from "@/root/useRemoteWorkspaceTabLifecycle.js";
 import { useRootProviderStateRefresh } from "@/root/useRootProviderStateRefresh.js";
 import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
@@ -162,6 +165,17 @@ function RootInner({
   const [remoteConnectionDialogOpen, setRemoteConnectionDialogOpen] = useState(false);
   const [remoteConnectionOpenPreference, setRemoteConnectionOpenPreference] =
     useState<RemoteConnectionOpenPreference | null>(null);
+  // Picker 真链（backlog-sweep Step 4）：选目录只进入项目创建，不建 tab。
+  // stale-intent 守卫：epoch 自增使迟到的 selection 装配与旧 onClose 失效。
+  const remoteProjectIntentEpoch = useRef(0);
+  const [remoteProjectSelection, setRemoteProjectSelection] = useState<{
+    host: RemoteProjectHost;
+    path: string;
+    sessionId: string;
+  } | null>(null);
+  // 向导内部自己持有 connectedSessionId；项目流程彻底关闭后必须换代重挂，
+  // 否则下次打开「远程工作区」会回到已被释放的目录步（shouldResetRemoteConnectionOnOpen 恒 false）。
+  const [remoteConnectionDialogEpoch, setRemoteConnectionDialogEpoch] = useState(0);
   const [directoryBrowserOpen, setDirectoryBrowserOpen] = useState(false);
   const [remoteConnectionInProgress, setRemoteConnectionInProgress] = useState(false);
   const [remoteConnectionRequestId, setRemoteConnectionRequestId] = useState<string | null>(null);
@@ -360,6 +374,25 @@ function RootInner({
     setRemoteConnectionOpenPreference(preference ?? null);
     setRemoteConnectionDialogOpen(true);
   }, []);
+  /**
+   * Picker 真链的 Root 侧装配（上游 Root.tsx:1284-1361 的等价形态）。
+   * hostId 由 useRemoteWorkspaceHistory 用统一 identity 工具派生后随 intent 送达；
+   * 这里只负责按成员校正目录事实并落 selection，不自行拼身份键。
+   */
+  const handleRemoteProjectIntent = useCallback(
+    async ({ sessionId, path, hostId }: RemoteWorkspaceProjectIntent) => {
+      const epoch = remoteProjectIntentEpoch.current;
+      const remoteService = services.remoteProjectService;
+      if (!remoteService) throw new Error("remote-project.service-unavailable");
+      const directory = await remoteService.readDirectory();
+      // 读取目录跨了异步边界：期间用户关闭/改选流程时，迟到结果不得再打开项目表单。
+      if (epoch !== remoteProjectIntentEpoch.current) throw new Error("project.creation-cancelled");
+      const host = directory.hosts.find((item) => item.id === hostId);
+      if (!host) throw new Error("remote-project.host-removed");
+      setRemoteProjectSelection({ host, path, sessionId });
+    },
+    [services.remoteProjectService],
+  );
   const handleOpenDirectoryBrowser = useCallback(() => {
     setDirectoryBrowserOpen(true);
   }, []);
@@ -433,6 +466,7 @@ function RootInner({
     activateTabByPath,
     addTab,
     onWorkspaceActivated: handleRemoteWorkspaceActivated,
+    onRemoteProjectIntent: handleRemoteProjectIntent,
   });
 
   useEffect(() => {
@@ -628,28 +662,60 @@ function RootInner({
   }, [isSettingsTabActive, workspaceShellPath]);
 
   const handleRemoteConnectionDialogOpenChange = useCallback((open: boolean) => {
+    // 关闭向导即作废尚未落地的项目意图：迟到 readDirectory 不能重新弹出已关闭的项目表单。
+    if (!open) remoteProjectIntentEpoch.current++;
     setRemoteConnectionDialogOpen(open);
     if (!open) {
       setRemoteConnectionOpenPreference(null);
     }
   }, []);
 
+  // 项目流程关闭（取消或保存完成）统一释放向导 attachment：
+  // epoch++ 让旧 intent 失效，同时换代重挂向导，避免下次打开落回已释放的目录步。
+  const handleRemoteProjectSelectionClose = useCallback(() => {
+    const sessionId = remoteProjectSelection?.sessionId;
+    setRemoteProjectSelection(null);
+    handleRemoteConnectionDialogOpenChange(false);
+    setRemoteConnectionDialogEpoch((value) => value + 1);
+    if (sessionId) {
+      void handleCancelRemoteProject(sessionId).catch((error) =>
+        logger.warn("[Root] 释放项目创建 attachment 失败", error),
+      );
+    }
+  }, [handleCancelRemoteProject, handleRemoteConnectionDialogOpenChange, remoteProjectSelection]);
+
   const remoteConnectionDialog = allowRemoteWorkspace ? (
-    <SSHDialog
-      onConnect={handleConnectRemote}
-      onSelectProject={handleSelectRemoteProject}
-      onCancelSession={handleCancelRemoteProject}
-      localWorkspacePath={localWorkspacePathForRemoteConnection}
-      isWindowsDesktop={isWindowsDesktop}
-      remoteWorkspaceSessions={remoteWorkspaceSessions}
-      open={remoteConnectionDialogOpen}
-      onOpenChange={handleRemoteConnectionDialogOpenChange}
-      onFlowActiveChange={setRemoteConnectionInProgress}
-      onFlowRequestIdChange={setRemoteConnectionRequestId}
-      preferredKind={remoteConnectionOpenPreference?.preferredKind}
-      preferredWslDistro={remoteConnectionOpenPreference?.preferredWslDistro}
-      hideTriggerWhenClosed
-    />
+    <>
+      {/* 项目创建面：向导选目录后接管（不建 tab），保存/取消都由这里释放 attachment。 */}
+      {remoteProjectSelection && services.projectService && services.remoteProjectService ? (
+        <RemoteProjectPicker
+          key={remoteProjectSelection.host.membershipId}
+          host={remoteProjectSelection.host}
+          initialRoots={[remoteProjectSelection.path]}
+          service={services.projectService}
+          remoteService={services.remoteProjectService}
+          onClose={handleRemoteProjectSelectionClose}
+          onSaved={async () => {}}
+        />
+      ) : null}
+      <SSHDialog
+        key={remoteConnectionDialogEpoch}
+        onConnect={handleConnectRemote}
+        onSelectProject={handleSelectRemoteProject}
+        workspacePurpose="project"
+        onCancelSession={handleCancelRemoteProject}
+        localWorkspacePath={localWorkspacePathForRemoteConnection}
+        isWindowsDesktop={isWindowsDesktop}
+        remoteWorkspaceSessions={remoteWorkspaceSessions}
+        open={remoteConnectionDialogOpen && !remoteProjectSelection}
+        onOpenChange={handleRemoteConnectionDialogOpenChange}
+        onFlowActiveChange={setRemoteConnectionInProgress}
+        onFlowRequestIdChange={setRemoteConnectionRequestId}
+        preferredKind={remoteConnectionOpenPreference?.preferredKind}
+        preferredWslDistro={remoteConnectionOpenPreference?.preferredWslDistro}
+        hideTriggerWhenClosed
+      />
+    </>
   ) : null;
   const directoryBrowserDialog = directoryBrowserOpen ? (
     <ScopedErrorBoundary

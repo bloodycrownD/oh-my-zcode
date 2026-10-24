@@ -1,6 +1,6 @@
-// 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批，拍板 B：Remote* 组件与同步链回填）。
-// omz：ProjectEditor 为 P4 本机形态（无 host/initialRoots/remoteService 设备面）——
-// 远端创建表单的设备选择随 P3 vproj-storage 批回补。
+// 照搬上游 v3.16.2 project-sidebar/RemoteProjectPicker.tsx（backlog-sweep Step 4 真链）。
+// 与上游差异：无。创建表单必须拿到 host（hostId 来源）与 initialRoots（进入创建态的信号）——
+// 不传时 RemoteProjectList 不会切创建态，ProjectEditor 保存也不带 hostId（服务端按 local 路由）。
 import type { ComponentProps } from "react";
 import { ProjectEditor } from "@/project-sidebar/ProjectEditor.js";
 import { RemoteProjectList } from "@/project-sidebar/RemoteProjectList.js";
@@ -14,6 +14,8 @@ export function RemoteProjectPicker(
       {...props}
       renderCreate={(projects, add, close) => (
         <ProjectEditor
+          host={props.host}
+          initialRoots={props.initialRoots}
           project={null}
           projects={projects}
           service={props.service}
