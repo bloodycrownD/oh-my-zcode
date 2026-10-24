@@ -1,7 +1,8 @@
-// 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批）并 omz 化：
-// ①management 服务缝（sourceServerManagementService）随 P9 设置页批（spec ⑦ 挂账）——
-//   在位前连接中不展示阶段进度条（connecting 段降级为不渲染），failed/offline 段完整可用；
-// ②classifyRemoteConnectionError 从 omz remoteConnectionPresentationErrors 导入。
+// 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批，backlog-sweep Step 9 消费缝切换）：
+// ①management 服务缝（sourceServerManagementService）已随 Step 7-8 在位——连接中阶段进度条
+//   恢复上游形态：profileId 由 registry 的设备投影给出，日志取自 Host 结构化操作日志 owner；
+// ②classifyRemoteConnectionError 从 omz remoteConnectionPresentation 导入；
+// ③resolveRemoteOperationProgress 仍取本地底座 remote-connection/remoteOperationProgress。
 import { useEffect, useState } from "react";
 import { Check, Copy, LoaderCircle } from "lucide-react";
 import { buildRemoteHostWorkspaceIdentity, parseRemoteWorkspaceIdentity } from "@zcode/shared";
@@ -10,6 +11,7 @@ import { cn } from "@/components/lib/utils.js";
 import { toast } from "@/components/ui/toast.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { logger } from "@/logger.js";
+import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useRemoteDevicePresentationInput } from "@/hooks/useSourceServerStatuses.js";
 import { useSourceServerOperationLogs } from "@/hooks/useSourceServerOperationLogs.js";
 import { classifyRemoteConnectionError } from "@/lib/remoteConnectionPresentationErrors.js";
@@ -49,16 +51,19 @@ export function RemoteConnectionProgressSection({
   error?: string;
 }) {
   const { intl } = useZCodeIntl();
-  // omz：sourceServerManagementService 缝随 P9 设置页批（spec ⑦ 挂账）。缝到位前
-  // connecting 进度段恒不渲染（管理域结构化日志投影缺席），failed/offline 诊断段完整
-  // 可用；接入时恢复上游条件并传入 management 服务（useSourceServerOperationLogs）。
-  const managementEnabled = false;
+  // management 服务缝已在位（Step 7-8）；缺席入口（Web/无本机 Host）由 hook 内部静默降级，
+  // 连接中只显示阶段名而不带日志进度。
+  const management = useBaseWorkspaceServices().sourceServerManagementService;
   const sourceServerId = sourceServerIdForHost(host);
   const device = useRemoteDevicePresentationInput(sourceServerId);
   // URL Server 直连没有 Source 管理域，也就没有阶段日志可投影，连接中只保留标题状态。
-  const connecting = managementEnabled && status === "connecting" && sourceServerId !== undefined;
+  const connecting = status === "connecting" && sourceServerId !== undefined;
+  const profileId = connecting ? device?.profileId : undefined;
   // Hooks 规则：无条件挂载；management 缺席时 hook 内部静默降级。
-  useSourceServerOperationLogs(undefined, []);
+  const { logsByProfileId } = useSourceServerOperationLogs(
+    management,
+    profileId ? [profileId] : [],
+  );
   const now = useNow(connecting);
   // 修复原因：布尔值会让新错误沿用“已复制”；记录被复制的原文，错误变化后自然失效。
   const [copiedError, setCopiedError] = useState<string>();
@@ -66,8 +71,9 @@ export function RemoteConnectionProgressSection({
     intl.formatMessage({ id }, values);
 
   if (connecting) {
-    // management 缝（P9）到位前本分支不可达；接入后改回 logsByProfileId[profileId] 投影。
-    const progress = resolveRemoteOperationProgress([]);
+    const progress = resolveRemoteOperationProgress(
+      profileId ? (logsByProfileId[profileId] ?? []) : [],
+    );
     const seconds =
       progress.startedAt === undefined
         ? undefined

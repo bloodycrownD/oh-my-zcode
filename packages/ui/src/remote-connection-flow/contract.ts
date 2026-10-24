@@ -25,3 +25,26 @@ export function normalizeRemoteConnectionWorkspacePurpose(
 ): RemoteConnectionWorkspacePurpose {
   return value === "project" ? "project" : "conversation";
 }
+
+/**
+ * 同一连接流程的只读 UI 投影（backlog-sweep Step 9 / P9-3 组件级例外，上游 contract.ts:118-133）：
+ * 不含凭据、不保存连接事实。本仓向导壳未搬（拍板 A），故 Provider 无生产挂载点——
+ * `useRemoteConnectionProgress()` 恒返回 null，`SourceServerManagementPanel` 的
+ * 「未完成连接」横幅因此不渲染；类型与最小 Provider/hook 保留，向导壳落地时直接复用。
+ */
+export interface RemoteConnectionProgress {
+  operationId: string;
+  view: import("@/RemoteConnectionWizardChrome.js").RemoteWizardStep;
+  cancelled: boolean;
+  target: import("@zcode/shared").RemoteTarget | null;
+  sourceServerId?: string;
+  profileId?: string;
+  name?: string;
+  logs: import("@/hooks/useRemoteConnectionLogs.js").RemoteConnectionLogEntry[];
+  error: string;
+  reason: string;
+  waiting: boolean;
+  ready: boolean;
+  onResume(): void;
+  onCancel(): void;
+}

@@ -4,14 +4,14 @@
 // 时可将本文件并回或转为 re-export。
 
 /** 连接向导与侧栏详情共用的用户阶段；原始 phase 的归并规则只在这里维护一份。 */
-const REMOTE_CONNECTION_PHASES = [
+export const REMOTE_CONNECTION_PHASES = [
   ["channel", "remote.phase.channel"],
   ["identify", "remote.phase.identify"],
   ["deploy", "remote.phase.deploy"],
   ["handshake", "remote.phase.handshake"],
 ] as const;
 
-function normalizeRemoteConnectionPhase(rawPhase: string): string | null {
+export function normalizeRemoteConnectionPhase(rawPhase: string): string | null {
   if (rawPhase === "probe") return "channel";
   if (rawPhase === "directory-record") return "identify";
   if (rawPhase === "publish-online") return "handshake";

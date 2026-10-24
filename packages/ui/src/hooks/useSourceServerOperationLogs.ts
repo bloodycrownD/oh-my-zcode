@@ -1,18 +1,16 @@
-// 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批）并 omz 化：
-// ISourceServerManagementService 频道面随 P9 设置页批（spec ⑦ 挂账）；此处收窄为结构
-// 端口（getRecentOperationLogs/onDidAppendOperationLog），management 缺席时静默降级，
-// 事件只触发重读，关闭页面后仍从同一个 Host owner 查询；不在 UI 累积历史。
+// 照搬上游 v3.16.2 hooks/useSourceServerOperationLogs.ts（backlog-sweep Step 9 / P9-3 消费缝）。
+// 历史沿革：P7 末批以「management 频道面随 P9」为由收窄为结构端口
+// （`getRecentOperationLogs({ profileId })`）；Step 7-8 落地后的真实契约是
+// `getRecentOperationLogs(profileId: string)`，故切回上游服务签名。management 缺席时静默降级；
+// 事件只触发重读，关闭页面后仍从同一个 Host owner 查询，不在 UI 累积历史。
 import { useEffect, useState } from "react";
 import { sourceServerOperationLogSchema, type SourceServerOperationLog } from "@zcode/shared";
+import type { ISourceServerManagementService } from "@zcode/services";
 import { logger } from "@/logger.js";
 
-export interface SourceServerOperationLogsPort {
-  getRecentOperationLogs?(profile: { profileId: string }): Promise<SourceServerOperationLog[]>;
-  onDidAppendOperationLog?(listener: () => void): { dispose(): void } | undefined;
-}
-
+/** 事件只触发重读，关闭页面后仍从同一个 Host owner 查询；不在 UI 累积历史。 */
 export function useSourceServerOperationLogs(
-  management: SourceServerOperationLogsPort | undefined,
+  management: ISourceServerManagementService | undefined,
   profileIds: readonly string[] = [],
 ) {
   const [logsByProfileId, setLogsByProfileId] = useState<
@@ -35,7 +33,7 @@ export function useSourceServerOperationLogs(
       try {
         const entries = await Promise.all(
           ids.map(async (id) => {
-            const logs = await management.getRecentOperationLogs!({ profileId: id });
+            const logs = await management.getRecentOperationLogs(id);
             return [id, logs.map((entry) => sourceServerOperationLogSchema.parse(entry))] as const;
           }),
         );

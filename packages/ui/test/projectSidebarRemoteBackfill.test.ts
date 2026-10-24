@@ -70,7 +70,13 @@ test("ProjectSidebarNode：connect 动作与 onRemoveEntry 接真", () => {
   assert.match(source, /remoteService!\.connectHost\(project\.hostId\)/);
   assert.match(source, /onReconnectRemoteWorkspace\(\s*buildRemoteHostWorkspaceIdentity\(/);
   assert.match(source, /await remoteService\.removeEntry\(entryId\);/);
-  assert.match(source, /P9 挂账：设备设置跳转/, "设备设置跳转挂账注释必须在位");
+  // backlog-sweep Step 10（p9-nav）已把「设备设置」挂账换成真动作：设置页 remoteDevices
+  // 分区 + Source 定位意图；Step 9 的面板/跳转消费面在同一批落地，故此处断言真实接线。
+  assert.match(
+    source,
+    /setPendingSettingsSectionIntent\("remoteDevices", \{ sourceServerId \}\)/,
+    "设备设置入口必须直达 remoteDevices 分区并带 Source 定位",
+  );
 });
 
 test("ProjectNodeContent：RemoteIdentityHoverCardSlot 拆除换真组件", () => {
@@ -149,14 +155,41 @@ test("host 注册链：Local Host services.register + client getter + accessor �
 // ---------- ④ 挂账面 ----------
 
 test("拍板 A/P9 挂账面注释在位（不静默裁剪）", () => {
+  // backlog-sweep Step 9：management 消费缝已切换为真实数据源（恒空 stub 退役），
+  // 这里改为断言「真实接线的形状」——registry 数据源 + 上游服务签名。
+  const statuses = read(root, "packages", "ui", "src", "hooks", "useSourceServerStatuses.ts");
   assert.match(
-    read(root, "packages", "ui", "src", "hooks", "useSourceServerStatuses.ts"),
-    /P9 设置页批/,
+    statuses,
+    /getSourceServerStatusRegistry\(management\)/,
+    "useSourceServerStatuses 必须接 management 数据源（registry）",
   );
   assert.match(
-    read(root, "packages", "ui", "src", "project-sidebar", "RemoteConnectionProgressSection.tsx"),
+    statuses,
+    /sourceServerManagementService/,
+    "management 服务来自 useBaseWorkspaceServices().sourceServerManagementService",
+  );
+  assert.doesNotMatch(
+    statuses,
+    /subscribeToNothing, getEmptyStatuses, getEmptyStatuses/,
+    "恒空 stub 不能继续作为返回面（management 在位时必须订阅 registry）",
+  );
+  const progressSection = read(
+    root,
+    "packages",
+    "ui",
+    "src",
+    "project-sidebar",
+    "RemoteConnectionProgressSection.tsx",
+  );
+  assert.doesNotMatch(
+    progressSection,
     /managementEnabled = false/,
-    "management 缝缺席时 connecting 进度段必须显式降级",
+    "management 缝已在位（Step 7-9），不能再保留恒假闸门",
+  );
+  assert.match(
+    progressSection,
+    /logsByProfileId\[profileId\]/,
+    "连接中阶段进度必须投影真实操作日志",
   );
   // backlog-sweep Step 4：Picker 挂账已清（真链落 Root），注释改为透传形状断言。
   assert.match(

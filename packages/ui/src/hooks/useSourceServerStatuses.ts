@@ -1,29 +1,46 @@
-// 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批）并 omz 化：
-// ISourceServerManagementService 频道面（快照订阅 registry）随 P9 设置页批接入（spec ⑦
-// 挂账）；本批消费缝先行——management 缺席时恒返回空投影，消费方（RemoteConnectionProgress
-// Section / OfflineRemoteProjectRows / useRemoteProjectConnectionPresentation）按 undefined
-// 降级为「无设备聚合态」，不产生 RPC 或轮询。registry 实体到位后仅此处切换数据源。
-import { useSyncExternalStore } from "react";
+// 照搬上游 v3.16.2 hooks/useSourceServerStatuses.ts（backlog-sweep Step 9 / P9-3 消费缝切换）。
+// 历史沿革：P7 末批以「management 频道面随 P9」为由先落恒空 stub；本批 management 服务
+// （Step 7-8）已在位，故切回上游真实数据源——`getSourceServerStatusRegistry(management)`
+// 订阅 Host 快照事件；management 缺席（Web 入口 / 无本机 Host）时仍退化为恒空投影，
+// 不产生 RPC 或轮询。
+import { useMemo, useSyncExternalStore } from "react";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
-import type { AggregatedSourceStatus } from "@/lib/remoteConnectionPresentation.js";
-import type { RemoteConnectionPresentationInput } from "@/lib/remoteConnectionPresentation.js";
+import { getSourceServerStatusRegistry } from "@/store/sourceServerStatusRegistry.js";
+import type {
+  AggregatedSourceStatus,
+  RemoteConnectionPresentationInput,
+} from "@/lib/remoteConnectionPresentation.js";
 
 const emptyStatuses: ReadonlyMap<string, AggregatedSourceStatus> = new Map();
 const subscribeToNothing = () => () => undefined;
 const getEmptyStatuses = () => emptyStatuses;
 
 export function useSourceServerStatuses() {
-  // omz：management 缝随 P9；在位前恒空投影。
-  useBaseWorkspaceServices();
-  return useSyncExternalStore(subscribeToNothing, getEmptyStatuses, getEmptyStatuses);
+  const management = useBaseWorkspaceServices().sourceServerManagementService;
+  const registry = useMemo(
+    () => (management ? getSourceServerStatusRegistry(management) : null),
+    [management],
+  );
+  return useSyncExternalStore(
+    registry?.subscribe ?? subscribeToNothing,
+    registry?.getSnapshot ?? getEmptyStatuses,
+    registry?.getSnapshot ?? getEmptyStatuses,
+  );
 }
 
 const emptyInputs: ReadonlyMap<string, RemoteConnectionPresentationInput> = new Map();
 const getEmptyInputs = () => emptyInputs;
 
 export function useRemoteDevicePresentationInput(sourceServerId?: string) {
-  // omz：management 缝随 P9；在位前恒 undefined（上游返回 inputs.get(sourceServerId)）。
-  useBaseWorkspaceServices();
-  const inputs = useSyncExternalStore(subscribeToNothing, getEmptyInputs, getEmptyInputs);
+  const management = useBaseWorkspaceServices().sourceServerManagementService;
+  const registry = useMemo(
+    () => (management ? getSourceServerStatusRegistry(management) : null),
+    [management],
+  );
+  const inputs = useSyncExternalStore(
+    registry?.subscribe ?? subscribeToNothing,
+    registry?.getInputs ?? getEmptyInputs,
+    registry?.getInputs ?? getEmptyInputs,
+  );
   return sourceServerId ? inputs.get(sourceServerId) : undefined;
 }

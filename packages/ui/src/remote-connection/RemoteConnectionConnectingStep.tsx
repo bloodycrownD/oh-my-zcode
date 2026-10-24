@@ -9,9 +9,59 @@ import {
   isRemoteConnectionLogScrolledToLatest,
   scrollRemoteConnectionLogsToLatestIfFollowing,
 } from "@/remote-connection/remoteConnectionLogScroll.js";
+import {
+  normalizeRemoteConnectionPhase,
+  REMOTE_CONNECTION_PHASES,
+} from "@/remote-connection/remoteOperationProgress.js";
+
+export type RemoteConnectionPhaseStatus = "pending" | "active" | "complete" | "failed";
+
+/**
+ * 照搬上游 v3.16.2 remote-connection/RemoteConnectionConnectingStep.tsx:75-111 的
+ * `resolveRemoteConnectionPhases`（backlog-sweep Step 9 / P9-3 例外的最小实现）。
+ * 阶段清单与原始 phase 归并复用 `remoteOperationProgress.ts` 的唯一维护点，本函数只负责
+ * 「渲染层日志流 → 四态阶段轨」的投影：日志 message 形如 `[source-server:<phase>] ...`。
+ * 消费方：`remote-connection-flow/ui/RemoteConnectionProgress.tsx` 的最小化连接进度条。
+ */
+export function resolveRemoteConnectionPhases(
+  logs: ReadonlyArray<Pick<RemoteConnectionLogEntry, "message" | "level">>,
+  options: { connectionReady?: boolean } = {},
+) {
+  let activeIndex = -1;
+  let failedIndex = -1;
+  for (const log of logs) {
+    const match = /^\[source-server:([^\]]+)\]/u.exec(log.message);
+    if (!match) continue;
+    const phaseIndex = REMOTE_CONNECTION_PHASES.findIndex(
+      ([key]) => key === normalizeRemoteConnectionPhase(match[1]!),
+    );
+    if (phaseIndex < 0) continue;
+    activeIndex = Math.max(activeIndex, phaseIndex);
+    if (log.level === "error") failedIndex = phaseIndex;
+  }
+  // 修复原因：成功连接后 publish-online 不是 Renderer 日志流的可靠终结事件，
+  // 仅按日志推断会出现顶部已连接但阶段轨永久停在握手中的状态。连接 session ready
+  // 是同一条连接流程的权威终态；没有错误阶段时用它完成最终阶段，不改变连接中的日志进度。
+  const connectionReady =
+    (options.connectionReady === true ||
+      logs.some((log) => log.message.startsWith("[source-server:publish-online]"))) &&
+    failedIndex < 0;
+  return REMOTE_CONNECTION_PHASES.map(([key, titleId], index) => ({
+    key,
+    titleId,
+    status: (failedIndex === index
+      ? "failed"
+      : connectionReady
+        ? "complete"
+        : index < activeIndex
+          ? "complete"
+          : index === activeIndex
+            ? "active"
+            : "pending") as RemoteConnectionPhaseStatus,
+  }));
+}
 
 export function RemoteConnectionConnectingStep({
-
   logs,
   errorMessage,
   loading,
