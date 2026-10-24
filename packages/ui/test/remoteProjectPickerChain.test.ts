@@ -369,3 +369,36 @@ test("边界确认：i18n 两侧成对（title/description/gotIt）", () => {
     }
   }
 });
+
+// ---------- ⑦ Step 6：legacySingleRoot 列表闸门 ----------
+
+test("RemoteProjectList：legacySingleRoot 落 state 并闸住创建入口（Step 6）", () => {
+  const source = readUi("project-sidebar", "RemoteProjectList.tsx");
+  // 状态落地：读树结果同时驱动列表与能力回传，闸门不能只看父级 props。
+  assert.match(source, /const \[legacySingleRoot, setLegacySingleRoot\] = useState\(false\);/);
+  assert.match(source, /setLegacySingleRoot\(Boolean\(tree\.legacySingleRoot\)\);/);
+  // 创建态门禁：单根退回设备不得进入 renderCreate（否则 ProjectEditor 保存才报错）。
+  assert.match(
+    source,
+    /if \(host && !embedded && creating && !loading && !legacySingleRoot && !error && renderCreate\)/,
+    "创建态必须排除 legacySingleRoot",
+  );
+  // 新建按钮禁用 + 升级提示文案（i18n 键两侧在册）。
+  assert.match(
+    source,
+    /disabled=\{loading \|\| saving \|\| Boolean\(error\) \|\| legacySingleRoot\}/,
+    "新建按钮必须按能力禁用",
+  );
+  assert.match(
+    source,
+    /\{legacySingleRoot \? \(\s*<p className="text-ui-sm text-foreground-subtle">\{msg\("legacyUpgradeRequired"\)\}<\/p>\s*\) : null\}/,
+    "单根退回设备必须给出升级文案",
+  );
+  for (const locale of ["zh-CN.ts", "en-US.ts"]) {
+    const localeSource = read(uiSrc, "i18n", "locales", locale);
+    assert.ok(
+      localeSource.includes('"project.legacyUpgradeRequired":'),
+      `${locale} 缺键 project.legacyUpgradeRequired`,
+    );
+  }
+});

@@ -1,6 +1,7 @@
 // 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批，拍板 B）并 omz 化：
 // legacySingleRoot 的可用性回传（onLegacyCapability）随 backlog-sweep Step 4 落地——
-// ProjectEditor 需要它决定单根退回设备的升级提示；列表自身的创建闸门与文案属 Step 6。
+// ProjectEditor 需要它决定单根退回设备的升级提示；Step 6 补列表自身的创建闸门与文案
+// （上游 :66/:80/:117/:192/:199-201）：单根退回设备既不能进创建态，也不能新建。
 import { formatProjectError } from "@/project-sidebar/view.js";
 import { useOptionalProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -67,6 +68,8 @@ export function RemoteProjectList({
   const [projects, setProjects] = useState<VirtualProject[]>([]);
   const [loading, setLoading] = useState(true);
   const [creating, setCreating] = useState(initialRoots !== undefined);
+  // 服务端仍是单根退回能力（legacy-single-root）时不能创建/编辑项目，只能挑已有入口。
+  const [legacySingleRoot, setLegacySingleRoot] = useState(false);
   const [saving, setSaving] = useState(false);
   const [retry, setRetry] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -78,9 +81,12 @@ export function RemoteProjectList({
     void service
       .readTree({ hostId, includeDeleted: true })
       .then((tree) => {
-        if (active) setProjects(tree.projects.filter((project) => project.hostId === hostId));
-        // 能力回传：单根退回设备不能新建项目组织入口（Step 6 落列表自身的可见闸门）。
-        capabilityCallback.current?.(Boolean(tree.legacySingleRoot));
+        if (active) {
+          setProjects(tree.projects.filter((project) => project.hostId === hostId));
+          setLegacySingleRoot(Boolean(tree.legacySingleRoot));
+          // 能力回传：单根退回设备不能新建项目组织入口，列表自身的可见闸门见下方按钮。
+          capabilityCallback.current?.(Boolean(tree.legacySingleRoot));
+        }
       })
       .catch((cause) => {
         if (active) setError(formatProjectError(cause, intl.formatMessage));
@@ -115,7 +121,7 @@ export function RemoteProjectList({
     await onSaved(current);
     if (current()) onClose();
   };
-  if (host && !embedded && creating && !loading && !error && renderCreate)
+  if (host && !embedded && creating && !loading && !legacySingleRoot && !error && renderCreate)
     return renderCreate(projects, add, () => setCreating(false));
   const content = (
     <>
@@ -190,13 +196,16 @@ export function RemoteProjectList({
       ) : null}
       {embedded ? null : (
         <Button
-          disabled={loading || saving || Boolean(error)}
+          disabled={loading || saving || Boolean(error) || legacySingleRoot}
           data-testid="remote-project-new"
           onClick={() => setCreating(true)}
         >
           {msg("new")}
         </Button>
       )}
+      {legacySingleRoot ? (
+        <p className="text-ui-sm text-foreground-subtle">{msg("legacyUpgradeRequired")}</p>
+      ) : null}
     </>
   );
   return embedded ? (
