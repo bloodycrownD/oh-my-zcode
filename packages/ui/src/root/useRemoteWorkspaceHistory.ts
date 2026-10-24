@@ -7,9 +7,15 @@ import type {
   IPlatformService,
   RemoteSessionClosedEvent,
   RemoteSessionReconnectedEvent,
+  RemoteTarget,
   RemoteWorkspaceSessionEntry,
 } from "@zcode/shared";
-import { buildSshRemoteHostKey, createUuid, stripRemoteTargetSecrets } from "@zcode/shared";
+import {
+  buildSshRemoteHostKey,
+  createUuid,
+  remoteHostIdFromWorkspaceIdentity,
+  stripRemoteTargetSecrets,
+} from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import {
   bindRemoteWorkspaceIdentity,
@@ -46,8 +52,29 @@ import {
 } from "@/root/reconnectRemoteWorkspaceHistoryEntry.js";
 import { useRemoteConnectionEntryVisibility } from "@/hooks/useRemoteConnectionEntryVisibility.js";
 import { markRemoteWorkspaceRunningTasksFailed } from "@/lib/remoteWorkspaceSessionRuntime.js";
+import type { RemoteConnectionWorkspacePurpose } from "@/remote-connection-flow/contract.js";
 
 export { reconnectRemoteWorkspaceHistoryEntry };
+
+/** Picker 真链（Step 4）的意图载荷：hostId 已由身份工具派生，Root 只做目录查找与 selection 装配。 */
+export interface RemoteWorkspaceProjectIntent {
+  sessionId: string;
+  path: string;
+  hostId: string;
+}
+
+/**
+ * 项目 Host 身份只经统一 identity 工具派生（buildRemoteWorkspaceIdentity →
+ * remoteHostIdFromWorkspaceIdentity），业务代码不得手写 authority。
+ * 上游用 buildServerRemoteWorkspaceIdentity 的 server 分支；omz 的 RemoteWorkspaceSession
+ * 不带 sourceServerId（server 直连传输不随本期，拍板②），故只用 target 形态。
+ */
+export function deriveRemoteProjectHostId(
+  workspacePath: string,
+  target: RemoteTarget,
+): string | null {
+  return remoteHostIdFromWorkspaceIdentity(buildRemoteWorkspaceIdentity(workspacePath, target));
+}
 
 async function bindRemoteWorkspaceContextAndGetSession(params: {
   platform: Pick<IPlatformService, "bindRemoteWorkspaceSessionContext">;
@@ -479,6 +506,8 @@ async function selectRemoteWorkspaceProjectFromDialog({
   onWorkspaceActivated,
   refreshPinnedTasks,
   refreshTimelineTasks,
+  workspacePurpose,
+  onRemoteProjectIntent,
 }: {
   canUseRemoteWorkspace: boolean;
   sessionId: string;
@@ -521,6 +550,9 @@ async function selectRemoteWorkspaceProjectFromDialog({
     workspacePath: string;
     workspaceIdentity?: string;
   }) => Promise<void>;
+  /** 未传或非 "project" 时走旧链（连上即开 tab）；"project" 在 bind 前转交 Root 的项目入口。 */
+  workspacePurpose?: RemoteConnectionWorkspacePurpose;
+  onRemoteProjectIntent?: (intent: RemoteWorkspaceProjectIntent) => void | Promise<void>;
 }): Promise<void> {
   if (!canUseRemoteWorkspace) {
     throw new Error("Remote workspace is disabled in this mode");
@@ -539,6 +571,24 @@ async function selectRemoteWorkspaceProjectFromDialog({
 
   const canonicalPath = await resolveRemoteWorkspaceCanonicalPath(sessionId, path);
   const workspaceIdentity = buildRemoteWorkspaceIdentity(canonicalPath, remoteTarget);
+
+  // Picker 真链（backlog-sweep Step 4）：purpose==="project" 时在 bind 之前 return。
+  // 这里不 addTab/activateTabByPath、不 bindRemoteWorkspaceSessionContext、不 commit 会话 mutation——
+  // 选目录只进入「项目创建」，保存与入口登记完成之前不打开会话（上游 Root.tsx:1360-1361 同语义）。
+  // 对外可见语义变化：Root 的「打开远程工作区」不再是「连上即开 tab」，登记在 CHANGELOG/QA。
+  if (workspacePurpose === "project") {
+    if (!onRemoteProjectIntent) {
+      // 没有 Root 的 selection 回调时 fail-closed：不能悄悄退回旧链把用户带进一个未登记入口的 tab。
+      throw new Error("project.connection-unavailable");
+    }
+    const hostId = deriveRemoteProjectHostId(canonicalPath, remoteTarget);
+    if (!hostId) {
+      throw new Error("project.connection-unavailable");
+    }
+    await onRemoteProjectIntent({ sessionId, path: canonicalPath, hostId });
+    return;
+  }
+
   const existingWorkspaceTab = getWorkspaceTabs().find(
     (tab): tab is import("@/store/tabStore.js").WorkspaceTabState =>
       isWorkspaceTab(tab) &&
@@ -629,6 +679,7 @@ export function useRemoteWorkspaceHistory({
   activateTabByPath,
   addTab,
   onWorkspaceActivated,
+  onRemoteProjectIntent,
 }: {
   intl: ReturnType<typeof import("@/i18n/IntlProvider.js").useZCodeIntl>["intl"];
   services: IServiceAccessor;
@@ -651,6 +702,8 @@ export function useRemoteWorkspaceHistory({
     },
   ) => void;
   onWorkspaceActivated?: (target: { workspacePath: string; workspaceIdentity: string }) => void;
+  /** Picker 真链的 Root 侧装配入口；缺席时 purpose==="project" 直接 fail-closed。 */
+  onRemoteProjectIntent?: (intent: RemoteWorkspaceProjectIntent) => void | Promise<void>;
 }) {
   const showRemoteConnectionEntry = useRemoteConnectionEntryVisibility();
   const canUseRemoteWorkspace = allowRemoteWorkspace && showRemoteConnectionEntry;
@@ -991,13 +1044,20 @@ export function useRemoteWorkspaceHistory({
   );
 
   const handleSelectRemoteProject = useCallback(
-    async (sessionId: string, path: string, localWorkspacePath?: string) => {
+    async (
+      sessionId: string,
+      path: string,
+      localWorkspacePath?: string,
+      workspacePurpose?: RemoteConnectionWorkspacePurpose,
+    ) => {
       try {
         await selectRemoteWorkspaceProjectFromDialog({
           canUseRemoteWorkspace,
           sessionId,
           path,
           localWorkspacePath,
+          workspacePurpose,
+          onRemoteProjectIntent,
           loadingMessage: intl.formatMessage({ id: "common.loading" }),
           getRemoteWorkspaceSession,
           connectionTarget: pendingConnectionTargetsBySessionIdRef.current.get(sessionId),
@@ -1028,6 +1088,7 @@ export function useRemoteWorkspaceHistory({
       handleCancelRemoteProject,
       intl,
       onWorkspaceActivated,
+      onRemoteProjectIntent,
       resolveRemoteWorkspaceCanonicalPath,
       canUseRemoteWorkspace,
     ],

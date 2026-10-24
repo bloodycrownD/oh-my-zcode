@@ -407,6 +407,8 @@ export function ChatEmptyWorkspacePreviewMenu({
         <SSHDialog
           onConnect={onConnectRemote}
           onSelectProject={onSelectRemoteProject}
+          // 空态入口保持「连上即开远程会话 tab」的旧链；项目创建面只属于 Root 的 Picker。
+          workspacePurpose="conversation"
           onCancelSession={onCancelRemoteProject}
           localWorkspacePath={localWorkspacePathForRemoteConnection}
           isWindowsDesktop={isWindowsDesktop}

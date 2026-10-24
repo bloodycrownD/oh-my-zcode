@@ -42,11 +42,21 @@ import {
 import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import type { VariantProps } from "class-variance-authority";
+import {
+  normalizeRemoteConnectionWorkspacePurpose,
+  type RemoteConnectionWorkspacePurpose,
+  type SelectRemoteProjectHandler,
+} from "@/remote-connection-flow/contract.js";
 
 interface RemoteConnectionDialogProps {
   onConnect: (options: RemoteTarget, requestId?: string) => Promise<string>;
-  onSelectProject: (sessionId: string, path: string, localWorkspacePath?: string) => Promise<void>;
+  onSelectProject: SelectRemoteProjectHandler;
   onCancelSession: (sessionId: string) => Promise<void>;
+  /**
+   * 选目录完成后的归属意图；由挂载点显式传值（Root="project" / ChatEmptyState="conversation"）。
+   * 未传按 "conversation" 兜底，保证旧入口「连上即开 tab」的行为不变。
+   */
+  workspacePurpose?: RemoteConnectionWorkspacePurpose;
   localWorkspacePath?: string;
   trigger?: ReactNode;
   triggerVariant?: VariantProps<typeof buttonVariants>["variant"];
@@ -67,6 +77,7 @@ export function RemoteConnectionDialog({
   onConnect,
   onSelectProject,
   onCancelSession,
+  workspacePurpose: workspacePurposeProp,
   localWorkspacePath,
   trigger,
   triggerVariant = "outline",
@@ -85,6 +96,7 @@ export function RemoteConnectionDialog({
   const { intl } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
   const cancelPendingRemoteConnection = useCancelPendingRemoteConnection();
+  const workspacePurpose = normalizeRemoteConnectionWorkspacePurpose(workspacePurposeProp);
   const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -369,7 +381,8 @@ export function RemoteConnectionDialog({
       setSelectingDirectory(true);
       resetFeedback();
       try {
-        await onSelectProject(connectedSessionId, path, localWorkspacePath);
+        // 四参透传：purpose 是 owner 分支的唯一信号（"project" 交 Root 的 Picker，"conversation" 保持旧链）。
+        await onSelectProject(connectedSessionId, path, localWorkspacePath, workspacePurpose);
         resetConnectionLogs();
         setCurrentStep("kind");
         setConnectedSessionId(null);
@@ -400,6 +413,7 @@ export function RemoteConnectionDialog({
       onSelectProject,
       resetDirectorySelectionState,
       updateConnectingRequestId,
+      workspacePurpose,
     ],
   );
 
