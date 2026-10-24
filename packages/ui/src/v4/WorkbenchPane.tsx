@@ -77,6 +77,8 @@ interface ChatPaneShellProps {
   onFocusRequest: (paneId: string) => void;
   /** 绝对定位 rect（布局层计算的 calc 表达式）。 */
   style: CSSProperties;
+  /** 完整视图浮窗 solo 模式下隐藏非焦点 pane（仍保持挂载）。 */
+  hidden?: boolean;
   dropSide?: PaneSplitSide | null;
   onDragOver?: (event: DragEvent<HTMLDivElement>) => void;
   onDragLeave?: (event: DragEvent<HTMLDivElement>) => void;
@@ -119,6 +121,7 @@ const ChatPaneShell = memo(function ChatPaneShell({
   showFocusIndicator,
   onFocusRequest,
   style,
+  hidden = false,
   dropSide,
   onDragOver,
   onDragLeave,
@@ -145,6 +148,7 @@ const ChatPaneShell = memo(function ChatPaneShell({
       style={style}
       className={cn(
         "absolute flex min-h-0 min-w-0 flex-col",
+        hidden && "hidden",
         showFocusIndicator && focused && "ring-1 ring-inset ring-[var(--color-brand)]",
       )}
     >
@@ -305,6 +309,8 @@ export interface WorkbenchShellBinding {
 interface WorkbenchLeafPaneProps {
   paneId: string;
   rect: RectExpr;
+  /** 完整视图浮窗只显示焦点 pane；其余 pane 隐藏但不卸载。 */
+  hidden?: boolean;
   focused: boolean;
   showFocusIndicator: boolean;
   canSplit: boolean;
@@ -340,6 +346,7 @@ function workspaceBadgeFor(scope: PaneWorkspaceScope): PaneWorkspaceBadge {
 export function WorkbenchLeafPane({
   paneId,
   rect,
+  hidden = false,
   focused,
   showFocusIndicator,
   canSplit,
@@ -529,6 +536,7 @@ export function WorkbenchLeafPane({
       showFocusIndicator={showFocusIndicator}
       onFocusRequest={onFocusRequest}
       style={style}
+      hidden={hidden}
       dropSide={dropSide}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}

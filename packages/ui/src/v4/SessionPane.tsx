@@ -100,6 +100,11 @@ import { WorkspaceHookPendingBanner } from "@/v4/WorkspaceHookPendingBanner.js";
 import { ConversationStatusPanel } from "@/v4/ConversationStatusPanel.js";
 import { SessionSubscriptionErrorPanel } from "@/v4/SessionSubscriptionErrorPanel.js";
 import { ConversationTimeline } from "@/v4/ConversationTimeline.js";
+import {
+  isFloatingPresentation as isFloatingPresentationOf,
+  useConversationPanePresentation,
+} from "@/side-pane-full-view/index.js";
+import type { ConversationLatestTurnSummary } from "@/v4/conversationTimelineLiveTail.js";
 import { ConversationBottomDockTransition } from "@/v4/ConversationBottomDockTransition.js";
 import { SessionPluginReferenceIconBoundary } from "@/v4/SessionPluginReferenceIconProvider.js";
 import {
@@ -744,6 +749,53 @@ export function SessionPane({
     snapshot?.pendingInteractions.find(
       (interaction) => interaction.payload.kind !== "workspaceHookReview",
     )?.interactionId ?? null;
+  const panePresentation = useConversationPanePresentation();
+  // 展示形态 → 浮动判断走 side-pane-full-view/model.ts 的同一条规则（双投影的第二跳）。
+  const isFloatingPresentation = isFloatingPresentationOf(panePresentation.presentation);
+  const isRunning = Boolean(snapshot?.control.canStop);
+  const { reportFloatingStatus } = panePresentation;
+  const floatingOwnerKey = sessionId ?? "__draft__";
+  // 浮窗形态下由时间线上报最后一个回合（同一个 render unit 的运行状态、时长与最终回答）；
+  // 记录带上 owner，切换会话后旧会话的摘要不会混进新会话。
+  const [floatingLatestTurn, setFloatingLatestTurn] = useState<{
+    ownerKey: string;
+    summary: ConversationLatestTurnSummary;
+  } | null>(null);
+  const handleFloatingLatestTurnSummaryChange = useCallback(
+    (summary: ConversationLatestTurnSummary) =>
+      setFloatingLatestTurn({ ownerKey: floatingOwnerKey, summary }),
+    [floatingOwnerKey],
+  );
+  const floatingLatestTurnSummary =
+    isFloatingPresentation && floatingLatestTurn?.ownerKey === floatingOwnerKey
+      ? floatingLatestTurn.summary
+      : null;
+  const floatingTurnKey = floatingLatestTurnSummary?.turnKey ?? null;
+  const floatingTurnRunning = floatingLatestTurnSummary?.running ?? false;
+  const floatingTurnAnswer = floatingLatestTurnSummary?.answer ?? null;
+  const hasFloatingLatestTurn = floatingLatestTurnSummary !== null;
+  useEffect(() => {
+    // 完整视图浮窗只展示焦点 pane 的状态；docked 时 reportFloatingStatus 为 noop。
+    if (!focused) return;
+    reportFloatingStatus({
+      running: isRunning,
+      blockingInteractionId,
+      ownerKey: floatingOwnerKey,
+      latestTurn: hasFloatingLatestTurn
+        ? { turnKey: floatingTurnKey, running: floatingTurnRunning, answer: floatingTurnAnswer }
+        : null,
+    });
+  }, [
+    blockingInteractionId,
+    floatingOwnerKey,
+    floatingTurnAnswer,
+    floatingTurnKey,
+    floatingTurnRunning,
+    focused,
+    hasFloatingLatestTurn,
+    isRunning,
+    reportFloatingStatus,
+  ]);
   const selectionSideChatKey = sessionId
     ? buildSelectionSideChatKey(workspaceKey, sessionId)
     : null;
@@ -3493,7 +3545,8 @@ export function SessionPane({
       submissionReady={composerSubmissionReady}
       updateComposerContent={updateComposerContent}
       createSubmissionFromComposer={createSubmissionFromComposer}
-      contextHeader={isDraft ? draftComposerHeader : undefined}
+      // 完整视图浮窗默认是一条输入框：草稿项目栏不进入浮窗，切到对话 tab 再选择项目。
+      contextHeader={isDraft && !isFloatingPresentation ? draftComposerHeader : undefined}
       centered={isDraft}
       blockingRequestId={blockingInteractionId}
       listenAddToChatEvents={focused}
@@ -3599,7 +3652,10 @@ export function SessionPane({
       ) : null}
       {composerNode}
       {/* 办公模式显示主动任务推荐；编程模式保留原有小型场景入口。 */}
-      {isDraft && (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
+      {/* 完整视图浮窗只露出输入框，草稿推荐提示不进入浮窗。 */}
+      {isDraft &&
+      !isFloatingPresentation &&
+      (!isOfficeMode || sharedSettings?.proactiveSuggestionsEnabled === true) ? (
         <ConversationDraftSuggestedPromptsContainer
           className={isOfficeMode ? "mt-4" : "mt-6"}
           proactive={isOfficeMode}
@@ -3797,7 +3853,19 @@ export function SessionPane({
                   </div>
                 ) : null
               }
-              centerEmptyStateWithDock={isDraft}
+              // 浮窗形态只露出底部输入区，空会话也必须贴底，不能居中。
+              centerEmptyStateWithDock={isDraft && !isFloatingPresentation}
+              floatingComposerDock={isFloatingPresentation}
+              onComposerDockHeightChange={
+                isFloatingPresentation && focused
+                  ? panePresentation.reportComposerDockHeight
+                  : undefined
+              }
+              onLatestTurnSummaryChange={
+                isFloatingPresentation && focused
+                  ? handleFloatingLatestTurnSummaryChange
+                  : undefined
+              }
               summaryPanelLayout={statusPanelLayout}
               conversationFindQuery={!isDraft && focused ? conversationFindQuery : ""}
               conversationFindActiveIndex={!isDraft && focused ? conversationFindActiveIndex : -1}
