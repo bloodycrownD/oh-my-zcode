@@ -38,6 +38,11 @@ import { buildSkillMentionMarkdown } from "@/mentions/mentionMarkdown.js";
 import { filterSkillsForProvider } from "@/lib/skillSourceFilter.js";
 import { invalidateDeferredDraftSessionForSkillChange } from "@/lib/zcodeDraftSkillInvalidation.js";
 import { PluginStoreAvatar } from "@/settings/PluginStoreAvatar.js";
+import {
+  buildSourceSettingsProjectionKey,
+  isSettingsProjectionCurrent,
+  type SettingsSourceCapabilityServices,
+} from "@/settings/settingsSourceWorkspace.js";
 import { SettingsResourceHeaderActions } from "@/settings/SettingsResourceHeaderActions.js";
 import {
   SettingsResourceGroupHeader,
@@ -155,6 +160,10 @@ interface SkillsSectionProps {
   onOpenPluginStore?: () => void;
   showMarketplaceBreadcrumb?: boolean;
   reportDetailBreadcrumb?: boolean;
+  /** Source user scope 的端口能力；存在时技能读写直接用端口服务，不再走 workspace 解析。 */
+  sourcePortServices?: SettingsSourceCapabilityServices;
+  /** Source user scope 的缓存权威键；本机/workspace scope 不传。 */
+  cacheAuthorityKey?: string;
 }
 
 export function SkillsSection({
@@ -164,12 +173,14 @@ export function SkillsSection({
   remoteTarget,
   scopeFilter,
   searchQuery,
+  sourcePortServices,
   onVisibleCountChange,
   onCreateTask,
   onDetailOpenChange,
   onOpenPluginStore,
   showMarketplaceBreadcrumb = false,
   reportDetailBreadcrumb = false,
+  cacheAuthorityKey,
 }: SkillsSectionProps) {
   const { intl, locale } = useZCodeIntl();
   const platform = usePlatform();
@@ -198,8 +209,19 @@ export function SkillsSection({
   );
   // PluginsSection 已把 Scope target 传入，但 Skills 仍从当前 ServiceProvider
   // 取服务，导致跨远程 host 误路由。技能读写和远端同步都改用同一 target 解析结果。
-  const { pluginManagementService, skillSyncService, skillsService } =
-    targetServiceResolution.services;
+  // Source user scope 有 attachment 端口时，端口就是权威读数面：优先用端口服务。
+  const resolvedPluginManagementService = targetServiceResolution.services.pluginManagementService;
+  const resolvedSkillSyncService = targetServiceResolution.services.skillSyncService;
+  const resolvedSkillsService = targetServiceResolution.services.skillsService;
+  const resolvedSettingsSyncService = targetServiceResolution.services.settingsSyncService;
+  const pluginManagementService =
+    sourcePortServices?.pluginManagementService ?? resolvedPluginManagementService;
+  const skillSyncService = sourcePortServices?.skillSyncService ?? resolvedSkillSyncService;
+  const skillsService = sourcePortServices?.skillsService ?? resolvedSkillsService;
+  const settingsSyncService =
+    sourcePortServices?.settingsSyncService ?? resolvedSettingsSyncService;
+  // 端口存在即数据面就绪；锚点等待连接只在没有端口时阻塞。
+  const dataRpcReady = targetServiceResolution.rpcReady || Boolean(sourcePortServices);
   const zcodeSessionService = useZCodeSessionService(
     activeWorkspacePath ?? undefined,
     undefined,
@@ -220,12 +242,22 @@ export function SkillsSection({
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [remoteSkillSyncOpen, setRemoteSkillSyncOpen] = useState(false);
   const latestRequestIdRef = useRef(0);
-  const activeSkillTargetKey = activeWorkspaceIdentity?.trim() || activeWorkspacePath || "";
-  const projectionMatchesTarget =
-    !activeWorkspacePath || loadedSkillTargetKey === activeSkillTargetKey;
+  const activeSkillTargetKey = buildSourceSettingsProjectionKey(
+    activeWorkspacePath,
+    activeWorkspaceIdentity,
+    cacheAuthorityKey,
+  );
+  // Bug 原因：active key 带 Source authority、request/loaded key 只带 identity||path 时，
+  // Source scope 的 loadedSkillTargetKey 永远不等于 activeSkillTargetKey，列表停在 loading。
+  // 三处 key（active / request / loaded）必须用同一口径。
+  const projectionMatchesTarget = isSettingsProjectionCurrent({
+    hasTarget: Boolean(activeWorkspacePath),
+    activeTargetKey: activeSkillTargetKey,
+    loadedTargetKey: loadedSkillTargetKey,
+  });
 
   useEffect(() => {
-    if (!activeWorkspacePath || !targetServiceResolution.rpcReady) return;
+    if (!activeWorkspacePath || !dataRpcReady) return;
     void initializePlugins({
       workspacePath: activeWorkspacePath,
       workspaceIdentity: activeWorkspaceIdentity,
@@ -238,12 +270,12 @@ export function SkillsSection({
     initializePlugins,
     pluginManagementService,
     scopeFilter,
-    targetServiceResolution.rpcReady,
+    dataRpcReady,
   ]);
 
   const workspaceLabel = getWorkspaceBasename(activeWorkspacePath);
   const connectedRemoteSyncTarget =
-    targetServiceResolution.rpcReady &&
+    dataRpcReady &&
     shouldShowRemoteSyncActions({
       remoteSessionId,
       remoteTarget,
@@ -296,7 +328,7 @@ export function SkillsSection({
 
   const loadSkills = useCallback(
     async (showBlockingLoading: boolean) => {
-      if (!targetServiceResolution.rpcReady) return;
+      if (!dataRpcReady) return;
       if (!activeWorkspacePath) {
         setSkills([]);
         setCapability(null);
@@ -306,7 +338,12 @@ export function SkillsSection({
         setLoadedSkillTargetKey("");
         return;
       }
-      const requestTargetKey = activeWorkspaceIdentity?.trim() || activeWorkspacePath;
+      // 与 activeSkillTargetKey 同口径（含 cacheAuthorityKey），否则 Source scope 恒 mismatch。
+      const requestTargetKey = buildSourceSettingsProjectionKey(
+        activeWorkspacePath,
+        activeWorkspaceIdentity,
+        cacheAuthorityKey,
+      );
       setLoading(showBlockingLoading);
       setError(null);
       const requestId = ++latestRequestIdRef.current;
@@ -333,11 +370,11 @@ export function SkillsSection({
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     },
-    [activeWorkspaceIdentity, activeWorkspacePath, skillsService, targetServiceResolution.rpcReady],
+    [activeWorkspaceIdentity, activeWorkspacePath, cacheAuthorityKey, skillsService, dataRpcReady],
   );
 
   useEffect(() => {
-    if (!targetServiceResolution.rpcReady) {
+    if (!dataRpcReady) {
       latestRequestIdRef.current += 1;
       setLoading(false);
       setError(null);
@@ -348,7 +385,7 @@ export function SkillsSection({
     // 首屏或切换 Scope target 时必须显示阻塞 loading；手动刷新仍走后台刷新，
     // 避免有当前 target 数据时整块闪烁。
     void loadSkills(true);
-  }, [activeWorkspacePath, loadSkills, targetServiceResolution.rpcReady]);
+  }, [activeWorkspacePath, loadSkills, dataRpcReady]);
 
   const refresh = useCallback(async () => {
     await loadSkills(false);
@@ -712,7 +749,7 @@ export function SkillsSection({
         </div>
       ) : null}
 
-      {targetServiceResolution.rpcReady && diagnostics.length > 0 ? (
+      {dataRpcReady && diagnostics.length > 0 ? (
         <div className="overflow-hidden rounded-lg border border-amber-500/40 bg-amber-500/10 text-ui-base text-foreground">
           <button
             type="button"
@@ -776,19 +813,19 @@ export function SkillsSection({
         </div>
       ) : null}
 
-      {targetServiceResolution.rpcReady && !capability?.userScopeAvailable ? (
+      {dataRpcReady && !capability?.userScopeAvailable ? (
         <div className="rounded-lg border border-border bg-card px-3 py-2 text-ui-base text-foreground-subtle">
           {intl.formatMessage({ id: "settings.skills.userScopeDesktopOnly" })}
         </div>
       ) : null}
 
-      {targetServiceResolution.rpcReady && error ? (
+      {dataRpcReady && error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base text-destructive">
           {error}
         </div>
       ) : null}
 
-      {!targetServiceResolution.rpcReady ? (
+      {!dataRpcReady ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.connecting" })} />
       ) : loading || !projectionMatchesTarget ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.loading" })} />
@@ -961,10 +998,10 @@ export function SkillsSection({
         </DialogContent>
       </Dialog>
       <SkillsImportDialog
-        open={importDialogOpen && targetServiceResolution.rpcReady}
+        open={importDialogOpen && dataRpcReady}
         workspacePath={activeWorkspacePath}
         workspaceIdentity={activeWorkspaceIdentity}
-        settingsSyncService={targetServiceResolution.services.settingsSyncService}
+        settingsSyncService={settingsSyncService}
         onOpenChange={setImportDialogOpen}
         onImported={async () => {
           await invalidateDeferredDraftSessionForSkillChange({
@@ -977,11 +1014,9 @@ export function SkillsSection({
         }}
       />
       <RemoteSyncDialogs
-        canSyncSkills={Boolean(
-          targetServiceResolution.rpcReady && connectedRemoteSyncTarget && activeWorkspacePath,
-        )}
+        canSyncSkills={Boolean(dataRpcReady && connectedRemoteSyncTarget && activeWorkspacePath)}
         canSyncMcp={false}
-        skillOpen={remoteSkillSyncOpen && targetServiceResolution.rpcReady}
+        skillOpen={remoteSkillSyncOpen && dataRpcReady}
         mcpOpen={false}
         onSkillOpenChange={setRemoteSkillSyncOpen}
         onMcpOpenChange={() => {}}

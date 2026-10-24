@@ -62,7 +62,9 @@ function getRootDir(source: SettingsDirectorySource, workspacePath?: string): st
   if (source === "zcode") {
     // 用户级数据目录在 S32 品牌改名后是 `~/.omz`（新起，不迁移旧 `~/.zcode`）；
     // 工作区级约定目录仍叫 `.zcode`，随仓库走，不受品牌改名影响。
-    return workspacePath ? join(baseDir, WORKSPACE_ZCODE_DIR) : join(baseDir, USER_ZCODE_DIR, "cli");
+    return workspacePath
+      ? join(baseDir, WORKSPACE_ZCODE_DIR)
+      : join(baseDir, USER_ZCODE_DIR, "cli");
   }
   return join(baseDir, source === "agents" ? ".agents" : ".claude");
 }
@@ -221,6 +223,7 @@ async function loadHooksImpl(
   params: {
     workspaceIdentity?: string;
     workspacePath: string;
+    scope?: "all" | "user";
   },
   logger: ServiceLogger,
 ): Promise<{
@@ -230,6 +233,23 @@ async function loadHooksImpl(
 }> {
   const workspacePath = resolve(params.workspacePath);
   const workspaceIdentity = params.workspaceIdentity?.trim() || workspacePath;
+  if (params.scope === "user") {
+    // Source Settings：调用方给的是远端 RPC 锚点（可能是某项目目录），
+    // 不能读该项目目录下的 .zcode/config.json，只读用户配置与用户级兼容来源。
+    const userSource = await readUserZCodeSource();
+    const runtimeRoot = resolveWorkspaceHookRuntimeRoot([userSource?.hooks]);
+    const hooks = [
+      ...fromUserZCodeSource({
+        source: userSource,
+        runtimeRoot,
+        workspacePath,
+        location: buildLocation("zcode"),
+      }),
+      ...(await loadLegacyHooksFromLocation("agents")),
+      ...(await loadLegacyHooksFromLocation("claude")),
+    ];
+    return { hooks, hooksEnabled: hooks.some((hook) => hook.enabled) };
+  }
   const [{ sources: projectSources }, userSource] = await Promise.all([
     readWorkspaceHookProjectSources({ workingDirectory: workspacePath }),
     readUserZCodeSource(),
@@ -294,6 +314,7 @@ async function saveHooksImpl(params: {
   workspaceIdentity?: string;
   workspacePath: string;
   hooks: Hook[];
+  scope?: "all" | "user";
 }): Promise<void> {
   const currentProjectConfigPath = resolve(params.workspacePath, ".zcode", "config.json");
   const userHooks = params.hooks.filter(
@@ -310,7 +331,11 @@ async function saveHooksImpl(params: {
         resolve(hook.configuredState.sourcePath) === currentProjectConfigPath),
   );
   await writeZCodeHooksConfig(undefined, userHooks);
-  await writeZCodeHooksConfig(params.workspacePath, projectHooks);
+  // Source Settings 的 user scope 里 workspacePath 只是 RPC 锚点，不是用户的项目；
+  // 写它会把 user 编辑误落到锚点目录的 .zcode/config.json。
+  if (params.scope !== "user") {
+    await writeZCodeHooksConfig(params.workspacePath, projectHooks);
+  }
 }
 
 export function createHooksService(

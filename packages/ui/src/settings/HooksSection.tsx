@@ -2,6 +2,7 @@
 import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { Plus } from "lucide-react";
 import type { Hook, HookConfig, ZCodeInstalledPluginSummary, ZCodePluginInfo } from "@zcode/shared";
+import type { IHooksService } from "@zcode/services";
 import { Button } from "@/components/ui/button.js";
 import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
@@ -35,10 +36,21 @@ import {
   shouldShowWorkspaceHookTrustNotice,
   WorkspaceHookTrustNotice,
 } from "@/settings/WorkspaceHookTrustNotice.js";
+import {
+  buildSettingsSourceAuthorityKey,
+  filterWorkspaceTabsForSettingsSource,
+  useSettingsSourceServiceRoute,
+} from "@/settings/settingsSourceWorkspace.js";
+import { SettingsSourceUnavailable } from "@/settings/SettingsSourceUnavailable.js";
 
 interface HooksSectionProps {
   workspacePath?: string | null;
   workspaceIdentity?: string;
+  /**
+   * 「按 Source 编辑」的入口：undefined = 本机设置页（保留旧行为）；string = 编辑该设备的
+   * 配置；null = 只允许本机项目。默认不传，因此现有调用方的 scope 不变。
+   */
+  settingsSourceServerId?: string | null;
 }
 
 function isEditableHook(hook: Hook): boolean {
@@ -137,7 +149,11 @@ function filterPluginHooksByScope(
   );
 }
 
-export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionProps) {
+export function HooksSection({
+  workspacePath,
+  workspaceIdentity,
+  settingsSourceServerId,
+}: HooksSectionProps) {
   const { intl, locale } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
   const hooksState = useHooksStore();
@@ -156,36 +172,103 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
   const tabs = useTabStore((state) => state.tabs);
   const workspaceTabs = useMemo(() => {
     const seen = new Set<string>();
-    return tabs
-      .filter(isWorkspaceTab)
-      .filter(isPluginScopeWorkspaceConnected)
-      .filter((tab) => {
-        const key = getPluginWorkspaceKey(tab);
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  }, [tabs]);
+    const connected = tabs.filter(isWorkspaceTab).filter(isPluginScopeWorkspaceConnected);
+    // undefined 保留「本机设置页看全部项目」的旧行为；显式 Source（含 null=本机 Source）
+    // 才把 scope 菜单收窄到该 Source，避免用户选中后仍能看到别的设备的项目。
+    const scoped =
+      settingsSourceServerId === undefined
+        ? connected
+        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId);
+    return scoped.filter((tab) => {
+      const key = getPluginWorkspaceKey(tab);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [settingsSourceServerId, tabs]);
   const [selectedScopeKey, setSelectedScopeKey] = useState("user");
   const deferredQuery = useDeferredValue(query);
   const selectedWorkspace = workspaceTabs.find(
     (tab) => getPluginWorkspaceKey(tab) === selectedScopeKey,
   );
   const activeScope: HookScope = selectedWorkspace ? "project" : "user";
-  const targetWorkspacePath = selectedWorkspace?.workspacePath ?? workspacePath;
-  const targetWorkspaceIdentity = selectedWorkspace?.workspaceIdentity ?? workspaceIdentity;
+  // Source scope 服务来源顺序：已登记 attachment 端口 → 该设备的 workspace 锚点 → 不可用。
+  // 端口存在时不需要设备打开 workspace（端口就是该设备 user scope 的权威读数面）；
+  // 选中项目 scope 时仍用项目自己的 workspace 服务，端口只覆盖 Source user scope。
+  const sourceScoped = settingsSourceServerId !== undefined;
+  const sourceRoute = useSettingsSourceServiceRoute({
+    settingsSourceServerId,
+    scopedTabs: workspaceTabs,
+    fallbackWorkspacePath: workspacePath,
+    fallbackWorkspaceIdentity: workspaceIdentity,
+  });
+  const sourceScopeAnchor = sourceRoute?.anchor;
+  const sourcePortCapabilities = !selectedWorkspace ? sourceRoute?.capabilities : undefined;
+  const sourceUnavailable = Boolean(
+    sourceScoped && !selectedWorkspace && sourceRoute?.kind === "unavailable",
+  );
+  // 选中项目 scope 时只认该 workspace 自己的远端身份；回退到锚点 tab 会把别的
+  // workspace 的 remoteSessionId 拼到当前路径上，RPC 会越界。
+  const sourceUserScopePath =
+    sourceScopeAnchor?.available && sourceScopeAnchor.workspacePath
+      ? sourceScopeAnchor.workspacePath
+      : sourceRoute?.userScopeRpcPath;
+  const targetWorkspacePath = selectedWorkspace
+    ? selectedWorkspace.workspacePath
+    : sourceScoped
+      ? sourceUserScopePath
+      : workspacePath;
+  const targetWorkspaceIdentity = selectedWorkspace
+    ? selectedWorkspace.workspaceIdentity
+    : sourceScoped
+      ? sourceScopeAnchor?.available
+        ? sourceScopeAnchor.workspaceIdentity
+        : undefined
+      : workspaceIdentity;
+  const targetRemoteSessionId = selectedWorkspace
+    ? selectedWorkspace.remoteSessionId
+    : sourceScopeAnchor?.tab?.remoteSessionId;
+  const targetRemoteTarget = selectedWorkspace
+    ? selectedWorkspace.remoteTarget
+    : sourceScopeAnchor?.tab?.remoteTarget;
   const targetWorkspaceKey = targetWorkspacePath
     ? getWorkspaceKey(targetWorkspacePath, targetWorkspaceIdentity)
     : null;
+  const cacheAuthorityKey =
+    sourceScoped && settingsSourceServerId && !selectedWorkspace
+      ? buildSettingsSourceAuthorityKey(settingsSourceServerId)
+      : undefined;
   const targetServiceResolution = useWorkspaceServicesResolution(
     targetWorkspacePath,
-    selectedWorkspace?.remoteSessionId,
+    targetRemoteSessionId,
     targetWorkspaceIdentity,
-    selectedWorkspace?.remoteTarget,
+    targetRemoteTarget,
   );
   // Scope 切到另一个远程 workspace 后，路径已切换但 hooks/plugin 服务仍来自
   // 当前激活 workspace。这里让服务 host 与 target 身份同源，等待连接时不发送越界 RPC。
-  const { hooksService, pluginManagementService } = targetServiceResolution.services;
+  const { hooksService: resolvedHooksService, pluginManagementService: resolvedPluginService } =
+    targetServiceResolution.services;
+  // 端口是 Source user scope 的权威读数面：存在时直接用它，不再“借”某个 workspace 的服务。
+  const targetHooksService = sourcePortCapabilities?.hooksService ?? resolvedHooksService;
+  const pluginManagementService =
+    sourcePortCapabilities?.pluginManagementService ?? resolvedPluginService;
+  // 端口存在即数据面就绪；锚点等待连接只在没有端口时阻塞。
+  const dataRpcReady = targetServiceResolution.rpcReady || Boolean(sourcePortCapabilities);
+  // Bug 原因：Source user scope 的锚点路径不是 project。强制 user-only 合同，
+  // 避免把 Source 的 workspace 锚点误当项目并覆盖其 .zcode/config.json。
+  const hooksService = useMemo<IHooksService>(() => {
+    if (!sourceScoped || activeScope !== "user") return targetHooksService;
+    return {
+      loadHooks: (params) => targetHooksService.loadHooks({ ...params, scope: "user" }),
+      saveHooks: (params) => targetHooksService.saveHooks({ ...params, scope: "user" }),
+      ...(targetHooksService.grantWorkspaceHookTrust
+        ? {
+            grantWorkspaceHookTrust:
+              targetHooksService.grantWorkspaceHookTrust.bind(targetHooksService),
+          }
+        : {}),
+    };
+  }, [activeScope, sourceScoped, targetHooksService]);
   const zcodeSessionService = useZCodeSessionService(
     targetWorkspacePath ?? undefined,
     undefined,
@@ -198,8 +281,9 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
   const { trustActionAvailable, trustingHookId, trustHook } = useWorkspaceHookInlineTrust({
     workspacePath: targetWorkspacePath,
     workspaceIdentity: targetWorkspaceIdentity,
-    hooksService: targetServiceResolution.rpcReady ? hooksService : undefined,
-    rpcReady: targetServiceResolution.rpcReady,
+    authorityKey: cacheAuthorityKey,
+    hooksService: dataRpcReady ? hooksService : undefined,
+    rpcReady: dataRpcReady,
   });
   const reviewBindings = useWorkspaceHookReviewStore((state) => state.bindings);
 
@@ -264,57 +348,70 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
   );
 
   useEffect(() => {
-    if (!targetServiceResolution.rpcReady) return;
+    if (sourceUnavailable || !dataRpcReady) return;
     void hooksState.initialize(
       targetWorkspacePath ?? undefined,
       targetWorkspaceIdentity,
       hooksService,
+      cacheAuthorityKey,
     );
   }, [
+    cacheAuthorityKey,
     hooksService,
     hooksState.initialize,
-    targetServiceResolution.rpcReady,
+    sourceUnavailable,
+    dataRpcReady,
     targetWorkspaceIdentity,
     targetWorkspacePath,
   ]);
 
   useEffect(() => {
-    if (!targetWorkspacePath || !targetServiceResolution.rpcReady) return;
+    if (sourceUnavailable || !targetWorkspacePath || !dataRpcReady) return;
     void initializePlugins({
       workspacePath: targetWorkspacePath,
       workspaceIdentity: targetWorkspaceIdentity,
+      configScope: sourceScoped && activeScope === "user" ? "user" : undefined,
       pluginService: pluginManagementService,
     });
   }, [
+    activeScope,
     initializePlugins,
     pluginManagementService,
-    targetServiceResolution.rpcReady,
+    sourceScoped,
+    sourceUnavailable,
+    dataRpcReady,
     targetWorkspaceIdentity,
     targetWorkspacePath,
   ]);
 
   const handleRefresh = useCallback(async () => {
-    if (!targetServiceResolution.rpcReady) return;
+    if (sourceUnavailable || !dataRpcReady) return;
     await Promise.all([
       hooksState.initialize(
         targetWorkspacePath ?? undefined,
         targetWorkspaceIdentity,
         hooksService,
+        cacheAuthorityKey,
       ),
       targetWorkspacePath
         ? initializePlugins({
             workspacePath: targetWorkspacePath,
             workspaceIdentity: targetWorkspaceIdentity,
+            configScope: sourceScoped && activeScope === "user" ? "user" : undefined,
             pluginService: pluginManagementService,
           })
         : Promise.resolve(),
     ]);
   }, [
+    activeScope,
+    cacheAuthorityKey,
     hooksService,
     hooksState.initialize,
     initializePlugins,
     pluginManagementService,
-    targetServiceResolution.rpcReady,
+    sourceScoped,
+    sourceUnavailable,
+    dataRpcReady,
     targetWorkspaceIdentity,
     targetWorkspacePath,
   ]);
@@ -433,7 +530,7 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
     [hooksService, hooksState.importHook, intl, invalidateDraft],
   );
 
-  if (viewMode === "form" && targetServiceResolution.rpcReady) {
+  if (viewMode === "form" && !sourceUnavailable && dataRpcReady) {
     return (
       <>
         <SettingsBreadcrumbReporter
@@ -475,7 +572,7 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
   const showWorkspaceHookTrustNotice = shouldShowWorkspaceHookTrustNotice({
     hooks: editableHooks,
     loadedWorkspaceKey: hooksState.loadedWorkspaceKey,
-    rpcReady: targetServiceResolution.rpcReady,
+    rpcReady: dataRpcReady,
     targetWorkspaceKey,
   });
   return (
@@ -511,13 +608,15 @@ export function HooksSection({ workspacePath, workspaceIdentity }: HooksSectionP
 
       {showWorkspaceHookTrustNotice ? <WorkspaceHookTrustNotice hooks={editableHooks} /> : null}
 
-      {targetServiceResolution.rpcReady && error ? (
+      {dataRpcReady && error ? (
         <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-ui-base text-destructive">
           {error}
         </div>
       ) : null}
 
-      {!targetServiceResolution.rpcReady ? (
+      {sourceUnavailable && settingsSourceServerId ? (
+        <SettingsSourceUnavailable sourceServerId={settingsSourceServerId} />
+      ) : !dataRpcReady ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.connecting" })} />
       ) : loading && totalCount === 0 ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.loading" })} />

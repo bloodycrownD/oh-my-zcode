@@ -39,7 +39,10 @@ import { logger } from "@/logger.js";
 import { settingsResourceRowInteraction } from "@/settings/settingsResourceRowInteraction.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
-import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import {
+  useBaseWorkspaceServices,
+  useWorkspaceServicesResolution,
+} from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import {
   buildRegistryModelSelectGroups,
@@ -77,6 +80,13 @@ import {
 import { PluginStoreAvatar } from "@/settings/PluginStoreAvatar.js";
 import type { StorePluginItem } from "@/settings/pluginStoreListing.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
+import {
+  buildSettingsSourceAuthorityKey,
+  buildSourceSettingsProjectionKey,
+  filterWorkspaceTabsForSettingsSource,
+  useSettingsSourceServiceRoute,
+} from "@/settings/settingsSourceWorkspace.js";
+import { SettingsSourceUnavailable } from "@/settings/SettingsSourceUnavailable.js";
 
 const AGENT_COLORS: AgentColor[] = [...SUBAGENT_COLORS];
 const COLOR_DOT_CLASS: Record<AgentColor, string> = SUBAGENT_COLOR_CLASS;
@@ -125,6 +135,11 @@ interface SubagentsSectionProps {
   onManageModels?: () => void;
   workspacePath?: string | null;
   workspaceIdentity?: string;
+  /**
+   * 「按 Source 编辑」的入口：undefined = 本机设置页（旧行为）；string = 编辑该设备；
+   * null = 只允许本机项目。默认不传，现有调用方不受影响。
+   */
+  settingsSourceServerId?: string | null;
 }
 
 function isEditableUserAgent(agent: AgentSummary): boolean {
@@ -1249,35 +1264,36 @@ function SubagentForm({
   );
 }
 
-export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
+export function SubagentsSection({
+  onManageModels,
+  workspacePath,
+  workspaceIdentity,
+  settingsSourceServerId,
+}: SubagentsSectionProps) {
   const { intl, locale } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
   const plugins = usePluginManagementStore((state) => state.plugins);
   const availablePlugins = usePluginManagementStore((state) => state.availablePlugins);
   const initializePlugins = usePluginManagementStore((state) => state.initialize);
   const localHostServices = useBaseWorkspaceServices();
-  const modelSelectionRead = useModelSelectionServiceView(localHostServices.modelSelectionService);
-  const modelSelectionView =
-    modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
-  // 非 Ready 生命周期均保留表单中的模型意图；error/unavailable 不能被误判成模型已失效。
-  const modelSelectionLoading = modelSelectionRead.state.status !== "ready";
   const tabs = useTabStore((state) => state.tabs);
   const workspaceTabs = useMemo(() => {
     const seen = new Set<string>();
-    return (
-      tabs
-        .filter(isWorkspaceTab)
-        .filter(isPluginScopeWorkspaceConnected)
-        // Subagent Settings 只管理 Local Environment；远程配置浏览/编辑是独立产品能力。
-        .filter((tab) => !tab.remoteTarget && !tab.remoteSessionId && !tab.workspaceIdentity)
-        .filter((tab) => {
-          const key = getPluginWorkspaceKey(tab);
-          if (seen.has(key)) return false;
-          seen.add(key);
-          return true;
-        })
-    );
-  }, [tabs]);
+    const connected = tabs.filter(isWorkspaceTab).filter(isPluginScopeWorkspaceConnected);
+    const scoped =
+      settingsSourceServerId === undefined
+        ? // Subagent Settings 默认只管理 Local Environment；远程配置浏览/编辑是独立产品能力。
+          connected.filter(
+            (tab) => !tab.remoteTarget && !tab.remoteSessionId && !tab.workspaceIdentity,
+          )
+        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId);
+    return scoped.filter((tab) => {
+      const key = getPluginWorkspaceKey(tab);
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }, [settingsSourceServerId, tabs]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [capability, setCapability] = useState<AgentsCapability | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1292,10 +1308,82 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
   const selectedWorkspace = workspaceTabs.find(
     (tab) => getPluginWorkspaceKey(tab) === selectedScopeKey,
   );
-  const targetWorkspacePath = selectedWorkspace?.workspacePath ?? "";
-  const targetWorkspaceIdentity = undefined;
-  const { pluginManagementService, subagentsService } = localHostServices;
+  // Source 服务来源顺序：已登记 attachment 端口 → 该设备的 workspace 锚点 → 不可用。
+  // 端口存在时设备不需要打开 workspace（端口就是该设备 user scope 的权威读数面）；
+  // 选中项目 scope 时仍用项目自己的 workspace 服务。
+  const sourceScoped = settingsSourceServerId !== undefined;
+  const sourceRoute = useSettingsSourceServiceRoute({
+    settingsSourceServerId,
+    scopedTabs: workspaceTabs,
+    fallbackWorkspacePath: workspacePath,
+    fallbackWorkspaceIdentity: workspaceIdentity,
+  });
+  const sourceScopeAnchor = sourceRoute?.anchor;
+  const sourcePortCapabilities = !selectedWorkspace ? sourceRoute?.capabilities : undefined;
+  const sourceUnavailable = Boolean(
+    sourceScoped && !selectedWorkspace && sourceRoute?.kind === "unavailable",
+  );
+  // 选中项目 scope 时只认该 workspace 自己的远端身份；回退到锚点 tab 会把别的
+  // workspace 的 remoteSessionId 拼到当前路径上，RPC 会越界。
+  const sourceUserScopePath =
+    sourceScopeAnchor?.available && sourceScopeAnchor.workspacePath
+      ? sourceScopeAnchor.workspacePath
+      : (sourceRoute?.userScopeRpcPath ?? "");
+  const targetWorkspacePath = settingsSourceServerId
+    ? selectedWorkspace
+      ? selectedWorkspace.workspacePath
+      : sourceUserScopePath
+    : (selectedWorkspace?.workspacePath ?? "");
+  const targetWorkspaceIdentity = settingsSourceServerId
+    ? selectedWorkspace
+      ? selectedWorkspace.workspaceIdentity
+      : sourceScopeAnchor?.available
+        ? sourceScopeAnchor.workspaceIdentity
+        : undefined
+    : undefined;
+  const targetRemoteSessionId = selectedWorkspace
+    ? selectedWorkspace.remoteSessionId
+    : sourceScopeAnchor?.tab?.remoteSessionId;
+  const targetRemoteTarget = selectedWorkspace
+    ? selectedWorkspace.remoteTarget
+    : sourceScopeAnchor?.tab?.remoteTarget;
+  const cacheAuthorityKey =
+    sourceScoped && settingsSourceServerId && !selectedWorkspace
+      ? buildSettingsSourceAuthorityKey(settingsSourceServerId)
+      : undefined;
+  const targetServiceResolution = useWorkspaceServicesResolution(
+    targetWorkspacePath,
+    targetRemoteSessionId,
+    targetWorkspaceIdentity,
+    targetRemoteTarget,
+  );
+  const sourceServices = settingsSourceServerId
+    ? targetServiceResolution.services
+    : localHostServices;
+  const resolvedPluginService = sourceServices.pluginManagementService;
+  const resolvedSubagentsService = sourceServices.subagentsService;
+  // 端口是 Source user scope 的权威读数面：subagents 与插件清单都直接读端口服务。
+  const pluginManagementService =
+    sourcePortCapabilities?.pluginManagementService ?? resolvedPluginService;
+  const subagentsService = sourcePortCapabilities?.subagentsService ?? resolvedSubagentsService;
+  // 端口存在即数据面就绪；锚点等待连接只在没有端口时阻塞。
+  const targetRpcReady = settingsSourceServerId
+    ? targetServiceResolution.rpcReady || Boolean(sourcePortCapabilities)
+    : true;
   const activeScope = selectedWorkspace ? "workspace" : "user";
+  // Provider/Model 事实属于目标 Environment：Source 模式读锚点自己的 model-selection，
+  // 本机模式保持原来的 Local Host 视图。Source 没有可用锚点时禁用读取，避免把本机
+  // Provider 视图伪装成远端事实。
+  const modelSelectionRead = useModelSelectionServiceView(
+    settingsSourceServerId
+      ? sourceServices.modelSelectionService
+      : localHostServices.modelSelectionService,
+    !sourceUnavailable,
+  );
+  const modelSelectionView =
+    modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
+  // 非 Ready 生命周期均保留表单中的模型意图；error/unavailable 不能被误判成模型已失效。
+  const modelSelectionLoading = modelSelectionRead.state.status !== "ready";
   const latestRequestIdRef = useRef(0);
   const pluginInventoryWorkspacePath = targetWorkspacePath || workspaceTabs[0]?.workspacePath;
   const chatModelSelectGroups = useMemo(() => {
@@ -1315,6 +1403,8 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
   const subagentModelSelectGroups = chatModelSelectGroups;
   const loadAgents = useCallback(
     async (showBlockingLoading: boolean) => {
+      // Source 模式没有可用锚点/远端连接时不得发起 RPC：发出去只会落到本机或断连代理。
+      if (sourceUnavailable || (settingsSourceServerId && !targetRpcReady)) return;
       setLoading(showBlockingLoading);
       setRefreshing(!showBlockingLoading);
       setError(null);
@@ -1343,15 +1433,45 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
         setError(loadError instanceof Error ? loadError.message : String(loadError));
       }
     },
-    [subagentsService, activeScope, targetWorkspaceIdentity, targetWorkspacePath],
+    [
+      activeScope,
+      settingsSourceServerId,
+      sourceUnavailable,
+      subagentsService,
+      targetRpcReady,
+      targetWorkspaceIdentity,
+      targetWorkspacePath,
+    ],
   );
 
   useEffect(() => {
     void loadAgents(true);
   }, [loadAgents]);
 
+  // 端口释放（设备掉线/删除）后来源可能回落成 unavailable：此时 loadAgents 直接返回，
+  // 必须显式结束 loading / refreshing，否则页面会停在「加载中」而没有任何请求在跑。
   useEffect(() => {
-    if (!pluginInventoryWorkspacePath) return;
+    if (!sourceUnavailable) return;
+    latestRequestIdRef.current += 1;
+    setLoading(false);
+    setRefreshing(false);
+    setError(null);
+  }, [sourceUnavailable]);
+
+  const activeAgentTargetKey = buildSourceSettingsProjectionKey(
+    targetWorkspacePath,
+    targetWorkspaceIdentity,
+    cacheAuthorityKey,
+  );
+  useEffect(() => {
+    // Source 切换后先丢掉上一台设备的投影；迟到的 loadAgents 结果由 requestId 守卫。
+    setAgents([]);
+    setCapability(null);
+  }, [activeAgentTargetKey]);
+
+  useEffect(() => {
+    if (sourceUnavailable || !pluginInventoryWorkspacePath) return;
+    if (settingsSourceServerId && !targetRpcReady) return;
     let active = true;
     // 冷启动 seed 晚于文件首读，旧用户页又跳过 inventory 初始化，导致插件直到重进才出现。
     // 复用已有初始化完成事件刷新只读资源，不阻塞用户列表、不轮询，也不把项目配置带入用户页。
@@ -1378,6 +1498,9 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
     loadAgents,
     pluginInventoryWorkspacePath,
     pluginManagementService,
+    settingsSourceServerId,
+    sourceUnavailable,
+    targetRpcReady,
     targetWorkspaceIdentity,
   ]);
 
@@ -1614,6 +1737,22 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
   }, [agents, editingAgent]);
   const isFormView = canManageUserAgents && (showForm || currentEditingAgent !== null);
 
+  if (sourceUnavailable && settingsSourceServerId) {
+    return (
+      <div className="space-y-6">
+        <div className="flex min-w-0 flex-wrap items-center gap-3">
+          <PluginScopeMenu
+            align="start"
+            selectedScopeKey={selectedScopeKey}
+            workspaceTabs={workspaceTabs}
+            onScopeKeyChange={setSelectedScopeKey}
+          />
+        </div>
+        <SettingsSourceUnavailable sourceServerId={settingsSourceServerId} />
+      </div>
+    );
+  }
+
   if (isFormView) {
     return (
       <div className="space-y-6">
@@ -1748,7 +1887,9 @@ export function SubagentsSection({ onManageModels }: SubagentsSectionProps) {
         </div>
       ) : null}
 
-      {loading ? (
+      {settingsSourceServerId && !targetRpcReady ? (
+        <PluginLoadingState label={intl.formatMessage({ id: "common.connecting" })} />
+      ) : loading ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.loading" })} />
       ) : hasSearchResultEmpty ? (
         <PluginSearchEmptyState label={intl.formatMessage({ id: "settings.subagents.empty" })} />

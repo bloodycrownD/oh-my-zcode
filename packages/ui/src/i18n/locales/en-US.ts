@@ -7322,6 +7322,8 @@ const enUS: Record<string, string> = {
   "settings.source.retiredProfilesWithCount": "Archived connections ({count})",
   "settings.source.retryMigration": "Retry merge",
   "settings.source.setDefault": "Set as default connection",
+  "settings.source.settingsUnavailable":
+    "Can't read settings from {sourceServerId}. Connect the device and open one of its projects, then try again.",
   "settings.source.showInSidebar": "Show in sidebar",
   "settings.source.startupAutoReconnect": "Reconnect automatically at startup",
   "settings.source.startupAutoReconnectDescription":

@@ -6847,6 +6847,8 @@ const zhCN: Record<string, string> = {
   "settings.source.retiredProfilesWithCount": "已归档连接（{count}）",
   "settings.source.retryMigration": "重试合并",
   "settings.source.setDefault": "设为默认连接",
+  "settings.source.settingsUnavailable":
+    "无法读取 {sourceServerId} 的设置。请先连接设备并打开它的任一项目，然后重试。",
   "settings.source.showInSidebar": "在侧边栏中显示",
   "settings.source.startupAutoReconnect": "启动时自动重连",
   "settings.source.startupAutoReconnectDescription":

@@ -13,6 +13,7 @@ import type {
   AppSettings,
   IntegratedTerminalShellOption,
   IntegratedTerminalShellSelection,
+  IPlatformService,
   Locale,
   SourceServerManagementSnapshot,
   ZCodeInteractionBehavior,
@@ -27,6 +28,13 @@ import {
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select.js";
 import { toast } from "@/components/ui/toast.js";
 import { DesktopWindowFrame } from "@/DesktopWindowFrame.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -99,6 +107,8 @@ import {
 import { AppearanceSectionContent } from "./settingsCodePreview.js";
 import type { SettingsSectionId } from "@/lib/settingsNavigation.js";
 import { requestPluginStoreOpen } from "@/lib/pluginStoreNavigation.js";
+import { logger } from "@/logger.js";
+import { ensureSourceSettingsServices } from "@/store/sourceSettingsServiceStore.js";
 // 遥测链路移除后设置动作直接执行；保留本包装以免改动全部调用点的对象字面量形状。
 // featureId / action / trigger / completed / failureStage 已无消费方，仅为兼容现有调用签名保留。
 function runSettingsActionAsync<T>(options: {
@@ -151,6 +161,83 @@ function SettingsSidebarButton({
     </ControlHintTooltip>
   );
 }
+
+/**
+ * 「按设备编辑设置」选择器的哨兵值：
+ * - all：保持本机设置页旧行为（不按设备收窄 workspace scope）；
+ * - local：只允许本机项目（等价 settingsSourceServerId === null）；
+ * - 其它值：Source Server id（等价 settingsSourceServerId === "<id>"）。
+ */
+const SETTINGS_SOURCE_ALL = "__all__";
+const SETTINGS_SOURCE_LOCAL = "__local__";
+
+type SourceSettingsAttachmentRequest = (
+  sourceServerId: string,
+) => Promise<{ attachmentId: string }>;
+
+/**
+ * 探测平台是否提供 Source 设置 attachment（上游 IPlatformService.requestSourceSettingsAttachment）。
+ *
+ * omz 落位差异：Desktop 端的 requestSourceSettingsAttachment IPC 与 renderer 端口桥尚未随本批
+ * 落位，因此运行时通常拿到 undefined。缺席时保持「该 Source 的已连接 workspace 当锚点」的既有
+ * 真实链路；平台补齐后本函数自动返回值，UI 无需再改。不要把它改写成绕过 IPlatformService 的直连。
+ */
+function resolveSourceSettingsAttachmentRequest(
+  platform: IPlatformService,
+): SourceSettingsAttachmentRequest | undefined {
+  const candidate = (platform as { requestSourceSettingsAttachment?: unknown })
+    .requestSourceSettingsAttachment;
+  return typeof candidate === "function"
+    ? (candidate as SourceSettingsAttachmentRequest).bind(platform)
+    : undefined;
+}
+
+function SettingsSourceSelect({
+  value,
+  sourceServers,
+  onValueChange,
+}: {
+  value: string;
+  sourceServers: readonly { sourceServerId: string; displayName: string }[];
+  onValueChange: (value: string) => void;
+}) {
+  const { intl } = useZCodeIntl();
+  return (
+    <Select value={value} onValueChange={onValueChange}>
+      <SelectTrigger
+        size="lg"
+        className="w-56 min-w-0 justify-between"
+        aria-label={intl.formatMessage({ id: "settings.source.devicesHeading" })}
+        data-settings-source-select="true"
+      >
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value={SETTINGS_SOURCE_ALL}>
+          {intl.formatMessage({ id: "settings.scope.default" })}
+        </SelectItem>
+        <SelectItem value={SETTINGS_SOURCE_LOCAL}>
+          {intl.formatMessage({ id: "project.local" })}
+        </SelectItem>
+        {sourceServers.map((server) => (
+          <SelectItem key={server.sourceServerId} value={server.sourceServerId}>
+            {server.displayName}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  );
+}
+
+/** 支持「按设备编辑」的分区：配置读写都按 Source scope 收窄。 */
+const SETTINGS_SOURCE_SCOPED_SECTIONS: ReadonlySet<SettingsSectionId> = new Set([
+  "plugin",
+  "mcp",
+  "skill",
+  "commands",
+  "subagents",
+  "hooks",
+]);
 
 export function SettingsPage({
   isDesktop,
@@ -323,6 +410,55 @@ export function SettingsPage({
   // 与面板各自订阅同一 management 实例，避免把快照再抬成跨层状态。
   const { snapshot: deviceManagementSnapshot } =
     useSourceServerManagementSnapshot(deviceManagement);
+  // 「按设备编辑设置」入口（本批缺陷修复）：Source 设置面的 scope 以前没有任何生产调用方，
+  // 四个 section 的 settingsSourceServerId 永远是 undefined。选择器直接投影 management
+  // 快照（设备列表的唯一事实源），不新建第二份设备状态。
+  const sourceServers = deviceManagementSnapshot?.servers ?? [];
+  const [settingsSourceSelection, setSettingsSourceSelection] = useState(SETTINGS_SOURCE_ALL);
+  const selectedSettingsSourceServerId =
+    settingsSourceSelection === SETTINGS_SOURCE_ALL
+      ? undefined
+      : settingsSourceSelection === SETTINGS_SOURCE_LOCAL
+        ? null
+        : settingsSourceSelection;
+  useEffect(() => {
+    if (
+      settingsSourceSelection === SETTINGS_SOURCE_ALL ||
+      settingsSourceSelection === SETTINGS_SOURCE_LOCAL
+    ) {
+      return;
+    }
+    // 设备被删除/换代后回落默认：按已不存在的 Source 过滤会把 scope 菜单清空，
+    // 看起来像「点击没反应」。
+    if (!sourceServers.some((server) => server.sourceServerId === settingsSourceSelection)) {
+      setSettingsSourceSelection(SETTINGS_SOURCE_ALL);
+    }
+  }, [settingsSourceSelection, sourceServers]);
+  // 选中 Source 时申请该设备「无 workspace」的配置 attachment（选中变化/挂载都走这里）。
+  // 平台未提供该 IPC 时保持「已连接 workspace 当锚点」的既有真实链路；失败只记 warn，
+  // 页面按 unavailable 空态显示，绝不静默回退本机服务。
+  const sourceAttachmentRequest = useMemo(
+    () => resolveSourceSettingsAttachmentRequest(platform),
+    [platform],
+  );
+  useEffect(() => {
+    if (!selectedSettingsSourceServerId || !sourceAttachmentRequest) return undefined;
+    let cancelled = false;
+    void ensureSourceSettingsServices(
+      selectedSettingsSourceServerId,
+      sourceAttachmentRequest,
+    ).catch((error: unknown) => {
+      if (cancelled) return;
+      logger.warn("[settings] 请求 Source 设置 attachment 失败，保持 workspace 锚点链路", error);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedSettingsSourceServerId, sourceAttachmentRequest]);
+  const showSettingsSourceSelect =
+    SETTINGS_SOURCE_SCOPED_SECTIONS.has(activeSection) &&
+    Boolean(deviceManagement) &&
+    sourceServers.length > 0;
   const handleShowDeviceInSidebar = useCallback(
     (sourceServerId: string) => {
       const target = workspaceTabs.find(
@@ -1233,6 +1369,15 @@ export function SettingsPage({
                               </span>
                             ) : null}
                           </div>
+                          {showSettingsSourceSelect ? (
+                            <div className="flex min-w-0 items-center gap-2">
+                              <SettingsSourceSelect
+                                value={settingsSourceSelection}
+                                sourceServers={sourceServers}
+                                onValueChange={setSettingsSourceSelection}
+                              />
+                            </div>
+                          ) : null}
                         </div>
                         {activeSection === "general" ? (
                           <GeneralSectionHeader localePreference={localePreference} />
@@ -1428,6 +1573,7 @@ export function SettingsPage({
                             initialScopeKey={pluginScopeKey}
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                             showMarketplaceBreadcrumb={pluginNavigationOrigin === "plugin-store"}
                             onCreateTask={onCreateTask}
                             onOpenPluginStore={(_returnScopeKey, intent) => {
@@ -1442,6 +1588,7 @@ export function SettingsPage({
                             mode="mcp"
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                             onCreateTask={onCreateTask}
                             onOpenPluginStore={(_returnScopeKey, intent) => {
                               // 添加市场与浏览插件都先离开设置层，再显示商店。
@@ -1455,6 +1602,7 @@ export function SettingsPage({
                             mode="skill"
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                             onCreateTask={onCreateTask}
                             onOpenPluginStore={(_returnScopeKey, intent) => {
                               // 添加市场与浏览插件都先离开设置层，再显示商店。
@@ -1476,6 +1624,7 @@ export function SettingsPage({
                             onManageModels={handleOpenModelProviderSettings}
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                           />
                         ) : activeSection === "automations" ? (
                           <AutomationsSection
@@ -1487,6 +1636,7 @@ export function SettingsPage({
                             mode="command"
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                             onCreateTask={onCreateTask}
                             onOpenPluginStore={(_returnScopeKey, intent) => {
                               // 添加市场与浏览插件都先离开设置层，再显示商店。
@@ -1498,6 +1648,7 @@ export function SettingsPage({
                           <HooksSection
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                           />
                         ) : activeSection === "workspaceFileSearch" ? (
                           <WorkspaceFileSearchSection
