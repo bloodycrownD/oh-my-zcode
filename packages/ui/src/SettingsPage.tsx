@@ -37,6 +37,8 @@ import {
   consumePendingSettingsPluginScopeKey,
   consumePendingSettingsPluginTab,
   consumePendingSettingsModelProviderTarget,
+  consumePendingSettingsSourceServerDetails,
+  consumePendingSettingsSourceServerId,
   resolveSettingsSection,
   shouldFallbackSettingsUsageTabToApp,
   writeLastSettingsSectionPreference,
@@ -44,6 +46,7 @@ import {
 } from "@/lib/settingsNavigation.js";
 
 import { ModelProviderSection } from "@/settings/ModelProviderSection.js";
+import { SourceServerManagementPanel } from "@/source-server-management/SourceServerManagementPanel.js";
 import { UsageStatsSection } from "@/settings/UsageStatsSection.js";
 import { SubagentsSection } from "@/settings/SubagentsSection.js";
 import { AutomationsSection } from "@/settings/AutomationsSection.js";
@@ -195,6 +198,14 @@ export function SettingsPage({
     consumePendingSettingsPluginScopeKey(),
   );
   const [settingsSectionNavigationVersion, setSettingsSectionNavigationVersion] = useState(0);
+  // 设备卡定位（backlog-sweep Step 9/10）：分区跳转带 Source 维度时直达该设备卡；
+  // 首次挂载从 sessionStorage 消费一次（已打开页面由同一导航事件直接接收）。
+  const [targetSourceServerId, setTargetSourceServerId] = useState<string | undefined>(() =>
+    consumePendingSettingsSourceServerId(),
+  );
+  const [targetSourceServerDetails, setTargetSourceServerDetails] = useState<boolean>(() =>
+    consumePendingSettingsSourceServerDetails(),
+  );
   useEffect(() => {
     // React Strict Mode 会双执行 state initializer；来源和 scopeKey 都在挂载完成后再清理，
     // Marketplace 只返回 User 已安装视图；Workspace 仍通过设置页自身的配置层切换进入。
@@ -353,6 +364,10 @@ export function SettingsPage({
         setActiveSettingsSection(section, activeSection);
         // 设置入口是一级路由边界。即使仍落在同一 section，也必须销毁旧的 New/Edit/Detail 子状态。
         setSettingsSectionNavigationVersion((version) => version + 1);
+        setTargetSourceServerId(section === "remoteDevices" ? detail?.sourceServerId : undefined);
+        setTargetSourceServerDetails(
+          section === "remoteDevices" && detail?.sourceServerDetails === true,
+        );
         if (section === "usage" && detail?.usageTab) {
           setUsageActiveTab(detail.usageTab);
         }
@@ -1013,6 +1028,9 @@ export function SettingsPage({
                               data-testid={testId(TID_SETTINGS_SECTION_NAV, id)}
                               onClick={() => {
                                 setPluginNavigationOrigin(undefined);
+                                // 手动切分区时清掉设备卡定位意图，避免下次进入仍吸附旧设备。
+                                setTargetSourceServerId(undefined);
+                                setTargetSourceServerDetails(false);
                                 setSettingsSectionNavigationVersion((version) => version + 1);
                                 setActiveSettingsSection(id);
                               }}
@@ -1243,6 +1261,35 @@ export function SettingsPage({
                         {/* 归档管理（upstream-v316-fullsync P4.1）：与任务自动归档设置同区段；
                             自带 ProjectDirectoryProvider，不依赖侧栏挂载。 */}
                         {activeSection === "general" ? <ArchiveManagement /> : null}
+                        {/* 远程设备管理（backlog-sweep Step 9 / P9-3）：桌面端专属分区。
+                            降级登记：连接/新建主操作依赖 Root 全局向导（拍板 A 未搬），
+                            故面板内连接族按钮 disabled；设备行、编辑连接、删除、日志、
+                            迁移报告、默认线路与开机重连开关全部真实可用。 */}
+                        {activeSection === "remoteDevices" ? (
+                          sharedSettings &&
+                          isDesktop &&
+                          localHostServices.sourceServerManagementService ? (
+                            <SourceServerManagementPanel
+                              key={`remote:${settingsSectionNavigationVersion}`}
+                              targetSourceServerId={targetSourceServerId}
+                              targetSourceServerDetails={targetSourceServerDetails}
+                              onTargetSourceServerFocused={() => {
+                                setTargetSourceServerId(undefined);
+                                setTargetSourceServerDetails(false);
+                              }}
+                              management={localHostServices.sourceServerManagementService}
+                              workspaceTabs={workspaceTabs}
+                              settings={sharedSettings}
+                              onUpdateSettings={updateSharedSettings}
+                            />
+                          ) : (
+                            <p className="text-ui-sm text-remote-foreground-muted">
+                              {intl.formatMessage({
+                                id: sharedSettings ? "settings.source.empty" : "common.loading",
+                              })}
+                            </p>
+                          )
+                        ) : null}
                         {activeSection === "appearance" ? (
                           <AppearanceSectionContent
                             codePreviewSettings={codePreviewSettings}

@@ -19,6 +19,7 @@ import {
   Keyboard,
   FileSearch,
   Layers,
+  HardDrive,
 } from "lucide-react";
 import { isSettingsSectionEnabled, type SettingsSectionId } from "@/lib/settingsNavigation.js";
 import type { Theme } from "@/useTheme.js";
@@ -140,6 +141,15 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
     titleId: "settings.browser.title",
     groupId: "basics",
   },
+  // 原型导航顺序：浏览器之后才是远程设备（照搬上游 settingsPageConfig.ts:133-140）；
+  // 远程设备管理依赖本机 Host 的 Source 管理服务，Web 入口不展示（见下方过滤）。
+  {
+    id: "remoteDevices",
+    icon: HardDrive,
+    titleId: "settings.remoteDevicesTitle",
+    contentTitleId: "settings.remoteDevicesTitle",
+    groupId: "basics",
+  },
   // 电脑控制紧跟「浏览器」：两者都是给 Agent 用的本机操控入口，
   // 放在基础设置里让用户在同一处理解「控制浏览器 / 控制整台电脑」的关系。
   {
@@ -172,8 +182,12 @@ const BASE_SETTINGS_SECTIONS: SettingsSectionDefinition[] = [
 
 // 兼容既有只读消费者：默认配置代表不带桌面平台能力的 Web 视图；
 // macOS/Windows/Linux 必须继续通过 createSettingsPageConfig 动态加入 Computer Use。
+// remoteDevices 同口径：设备管理只在本机桌面 Host 成立，Web 视图不展示。
 export const SETTINGS_SECTIONS = BASE_SETTINGS_SECTIONS.filter(
-  (section) => section.id !== "computerUse" && isSettingsSectionEnabled(section.id),
+  (section) =>
+    section.id !== "computerUse" &&
+    section.id !== "remoteDevices" &&
+    isSettingsSectionEnabled(section.id),
 );
 
 interface SettingsPageConfigOptions {
@@ -190,6 +204,8 @@ export function createSettingsPageConfig({
   const showComputerUse = isDesktop || isMacDesktop || isWindowsDesktop;
   const settingsSections = BASE_SETTINGS_SECTIONS.filter((section) => {
     if (section.id === "computerUse" && !showComputerUse) return false;
+    // 远程设备管理读本机 Host 的 Source 管理服务；非桌面入口无该服务，不展示分区。
+    if (section.id === "remoteDevices" && !showComputerUse) return false;
     return isSettingsSectionEnabled(section.id);
   });
   const settingsSectionGroups = BASE_SETTINGS_SECTION_GROUPS.map((group) => ({
