@@ -1,0 +1,98 @@
+# magic-context-system-prompt-guard 开发编排状态（code-dev-loop）
+# 过程产物，随波次更新；禁止写入记忆文件
+spec_path: docs/iterations/magic-context-system-prompt-guard/spec.md
+prd_path: null  # 需求为用户口述，已并入 spec「需求来源」
+branch: magic-context-system-prompt-guard
+base_sha: eeb881a0
+head_sha: 3c51dff1
+
+spec_summary: >
+  根治 sess_8a943109 类事故（agent ctx_reduce 盖章 1-5 把三条 system 段整段 drop）：
+  tags.message_role 列（migration v10000 fork 车道）+ 每 pass stamp 回填（存量也写）+
+  四层防线（queue hard error / apply reject+清队 / applyFlushedStatuses 自愈 + sentinel replay 跳过 /
+  strip+heuristic+caveman 豁免 system）+ 教育层（宿主 full 描述 + 包内 light 描述 + constants 同步 +
+  英文四 stamping 变体 + zh 孪生四变体）+ 读侧 getPersistedSchemaVersion 全量 MAX +
+  sibling-conflict 分支改 isMigrationApplied + 版本联动测试（smoke/boot-busy-retry/bootstrap G-2）。
+  16 测试用例 T-G1..T-G16；9 Step；16 变更点。
+
+files_touched_plan:
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/migrations.ts        # S1
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/storage-db.ts        # S1
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/storage-tags.ts      # S1
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/types.ts             # S1
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/storage-clone.ts     # S1（列清单）
+  - apps/zcode-cli/packages/magic-context/src/core/features/magic-context/memory/storage-memory.ts  # S1（注释）
+  - apps/zcode-cli/packages/magic-context/scripts/smoke-storage.mjs                           # S1（联动+T-G9/G15）
+  - apps/zcode-cli/packages/magic-context/scripts/test-boot-busy-retry.mjs                    # S1（联动）
+  - apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-memories-rpc.mjs             # S1（G-2 联动）
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/tag-messages.ts        # S2
+  - apps/zcode-cli/packages/magic-context/src/core/tools/ctx-reduce/tools.ts                  # S3
+  - apps/zcode-cli/packages/magic-context/src/core/tools/ctx-reduce/constants.ts              # S3
+  - apps/zcode-cli/packages/magic-context/src/core/tools/light-descriptions.ts                # S3
+  - apps/zcode-cli/packages/core/src/tool/handlers/ctx-context.ts                             # S3（宿主 full 描述）
+  - apps/zcode-cli/packages/core/scripts/test-ctx-tool-descriptions.mjs                      # S3（断言）
+  - apps/zcode-cli/packages/magic-context/scripts/test-ctx-tools.mjs                         # S3（T-G1/G2/G3）
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/apply-operations.ts    # S4+S5
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/execute-flush.ts       # S4
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/sentinel.ts            # S5
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/strip-content.ts       # S6
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/heuristic-cleanup.ts   # S6
+  - apps/zcode-cli/packages/magic-context/src/core/hooks/magic-context/caveman-cleanup.ts     # S6
+  - apps/zcode-cli/packages/magic-context/src/core/agents/magic-context-prompt.ts             # S7
+  - apps/zcode-cli/packages/bootstrap/src/app/magic-context-prompt-section-zh-cn.ts           # S7
+  - apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-section-zh.mjs              # S7（断言）
+  - apps/zcode-cli/packages/magic-context/scripts/test-transform.mjs                         # S8（集中：T-G4..G8/G10..G14/G16）
+
+contracts:
+  - stampTagMessageRole(db, sessionId, tagNumber, role): number  # 返回 changes；SQL 用 IS NOT（NULL 安全）
+  - TagEntry.messageRole?: string | null
+  - ctx_reduce 对含 system tag 的请求：整体 Error，文案列交集 tag 号
+  - migration v10000 = ensureColumn("tags","message_role","TEXT")（fork 车道）
+  - getPersistedSchemaVersion 改全量 MAX（去 <10000 过滤）；getCurrentVersion 不动
+
+evidence_packs: []  # 首个读区子代理顺手落盘
+
+blocking_steps: [s1, s2, s3, s45, s6, t8, s9]  # s7 non-blocking
+
+dag_version: 2
+wave_plan:
+  - [impl-s1]                                       # done
+  - [impl-s2, impl-s3, impl-s45, impl-s6, impl-s7]  # 进行中（文件互不冲突，并行）
+  - [impl-t8]                                       # Step 8：test-transform 集中用例（依赖 s2/s45/s6 源码）
+  - [verify-s9]                                     # Step 9：build + test:all + 补跑两脚本 + 版本断言 + oxfmt + typecheck
+  - [e2e-heal]                                      # 用户指派：真库 e2e（拷贝真实库验证迁移+读侧；构造受损数据验证防线三自愈）
+  - [cr-func-all]                                   # 波次功能小检（全范围，含 e2e 证据）
+
+node_status:
+  impl-s1:  { status: done, head_sha: ceb70d2f, executor: subagent, evidence: "smoke 54 checks 0 fail（含 T-G9/G9b/G15）；boot-busy-retry 7/7；回归 ctx-tools 20/20 transform 38/38；oxfmt 零新增；IS NOT 实测 4 象限" }
+  impl-s2:  { status: done, head_sha: 260fbc62, executor: subagent, evidence: "text/file 打标点 stamp 落地；build 绿；test-transform 38/38；oxfmt：src/core 在 ignorePatterns（移植件豁免，spec 口径）" }
+  impl-s45: { status: done, head_sha: 9b44329c, executor: subagent, evidence: "防线二 :361/:364 + 防线三 :515 + execute-flush getTagById 守卫 + sentinel role 扩展；build 绿；transform 38/38 + ctx-tools 20/20；commits e13851e3+9b44329c" }
+  impl-s6:  { status: done, head_sha: f94b4b3b, executor: subagent, evidence: "strip 两函数豁免 + heuristic routine 跳过 + caveman 三入口（列+target 双保险）；build 绿；transform 38/38 + ctx-tools 23/23（含 s3 的 T-G1/G2/G3）" }
+  impl-s7:  { status: done, head_sha: 96feddb7, executor: subagent, evidence: "EN 四变体 + zh 四变体禁令句 + zh 断言（含 no-reduce 反例）；test:mc-section-zh PASS；prompt-surface 26/26；oxfmt 绿；commits fd2b997f+96feddb7" }
+  impl-s3:  { status: done, head_sha: 093bbc33, executor: subagent, evidence: "防线一交集拒绝 + 描述三落点（宿主 full/light/constants）+ T-G1/G2/G3 + T-CTX-4；ctx-tools 23/23、descriptions 4/4、双包 typecheck 绿；commits e36fb074+093bbc33；登记：test-ctx-tools 既有 oxfmt 漂移未重排、core 测试需根 tsx 执行" }
+  e2e-heal: { status: done, head_sha: 715456d2, executor: subagent, evidence: "37/37 断言：E2E-0 真库迁移（110.6MB 拷贝、94→10000、33690 tags 无损、幂等）；E2E-1 受损自愈（system 修 active+role 回填+wire 原文逐字节、user 对照保持 dropped、二 pass 幂等）；E2E-2 防线一 Refusing 逐字+pending_ops 0" }
+  impl-t8:  { status: done, head_sha: 88dfc1e0, executor: subagent, evidence: "T-G4/5/6/7/8/10/11/12/13/14/16 落地，49/49 全绿；无疑似缺陷；oxfmt 合规" }
+  verify-s9: { status: done, head_sha: 93237be5, executor: subagent, evidence: "test:all 全绿（smoke 54/0、transform 49/0、ctx-tools 23/23、boot 7/7 等 12 脚本）；bootstrap G-2 19/19；descriptions 4/4（根 tsx）；版本断言 10000=10000；oxfmt 零新增（#57 对照法 symmetrical_differences=0）；根 typecheck 绿 + CLI 27/27 tasks；v4-perf PASS；CRLF=0；e2e 脚本 oxlint 回归已修（93237be5，0w/0e）" }
+  cr-func-all: { status: done, executor: subagent, readonly: true, evidence: "dev-ready: yes——变更点 16/16 有落点、T-G1..G16 全载体全绿、Steps 1-9 齐、抽查复核（防线一顺序/防线三优先级/教育句 4+4/e2e 三场景）通过、e2e 37/37 复跑" }
+  fix-cr:    { status: done, head_sha: 405ac6a7, executor: subagent, evidence: "cr-fix-spec 8 P2 闭合 + K-1/K-2 闭合（K-3 待入库）（commits 3110c085+405ac6a7）；smoke 56/56、transform 50/50、prompt-surface 27/27、mc-section-zh 含 EN 六例、e2e 37/37、oxfmt 0；EN_GUARD_TEXT 按源码实际字面量（有意偏差，正确）" }
+  review-diff-fix: { status: done, executor: subagent, readonly: true, evidence: "cr-func-ready: yes——8 P2+K 逐条闭合核验、实跑验收全绿、fix 自身无新问题、405ac6a7 纯排版字节级验证成立；非阻塞观察 4 条不改判" }
+  fix-oq:      { status: done, head_sha: 3c51dff1, executor: subagent, evidence: "open questions 拍板批次 4 条闭合（oqfix/1 文案 3 处 + oqfix/2 防线二/三日志 + oqfix/3 T-G12 档位断言 + oqfix/4 clone 契约）；smoke 56/56、transform 51/51、ctx-tools 23/23、tsc 绿；防线日志实测生效；commits 6841f996+3c51dff1" }
+  review-diff-oq: { status: done, executor: subagent, readonly: true, evidence: "fix-oq-ready: yes——4 条核验通过、无越界改动、复跑 ×2 全绿；O1 范围外同族文案残留登记 open question #12（语义风险低）" }
+
+open_must_fix: []
+spec_deviations: []
+
+# ---- code-review-loop 编排（用户指派 cr；spec-check-loop 循环纪律）----
+# 纪律：CR 阶段的收敛对象是 cr-fix-spec（docs/iterations/magic-context-system-prompt-guard/cr-fix-spec.md）。
+# 开发 spec.md 自 v4 起**冻结**——CR 发现一律落 cr-fix-spec，禁止 doc-fix 回写 spec.md；
+# spec.md 仅作 A 维对照依据（readonly）。循环：review(readonly 子代理) → 主代理落盘 cr-fix-spec
+# → review 校验覆盖与可执行性 → … → fix-spec-ready。
+cr:
+  fix_spec_path: docs/iterations/magic-context-system-prompt-guard/cr-fix-spec.md
+  status: done（fix-cr 3110c085+405ac6a7 → review-diff cr-func-ready；spec-check r4→doc-fix→r5 Go；fix-oq 6841f996+3c51dff1 → review-diff-oq fix-oq-ready）
+  review_round: 3（r1 三 scope 8 P2 → r2 review-full 4 文本修订 → r3 review-diff 闭合复审）
+  base_sha: eeb881a0
+  reviewed_head: 93237be5
+  fixed_head: 405ac6a7
+  must_fix: [schema/B-1, schema/G-1, guards/B-1, guards/A-1, guards/G-1, promptdoc/B-1, promptdoc/G-1, promptdoc/G-2]  # 8 P2 全闭合
+  spec_fix_plan: []

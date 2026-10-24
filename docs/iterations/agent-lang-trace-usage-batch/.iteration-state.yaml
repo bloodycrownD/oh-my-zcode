@@ -1,0 +1,50 @@
+# agent-lang-trace-usage-batch 开发编排状态（code-dev-loop）
+# 流程管线（用户拍板 2026-10-19）：dev → e2e → cr → spec-check → dev（修复）→ e2e → … → publish v1.0.17
+# 纪律：派遣一律同步等待（#87 教训），禁止 run_in_background 并发失序
+
+spec_path: docs/iterations/agent-lang-trace-usage-batch/spec.md
+branch: agent-lang-trace-usage-batch
+base_sha: 1b181fd4
+spec_head: ec5f2119
+dag_version: 1
+
+wave_plan:
+  - wave-0: [impl-s1, impl-s5, impl-s10]        # 并行：A1+A2 shared / B1+B2 head 链 / C1+C2 占用（文件互不冲突）
+  - wave-1: [impl-s2, impl-s6]                   # A3-A5 desktop / B3 Turns 纯函数（依赖 s5 类型）
+  - wave-2: [impl-s3, impl-s7]                   # A6 services / B4-B9+B11 回合 UI（含 s8 reasoning 并入；依赖 s6）
+  - wave-3: [impl-s4, impl-s9]                   # A7+A8 cli+bootstrap（依赖 s3）/ B10+B12 wire filter（依赖 s7）
+  - wave-4: [verify-all]                         # 全量门禁：pnpm typecheck + lint + 各 package 测试 + i18n parity
+  - wave-5: [cr-func-all]                        # 波次功能小检 → dev-ready
+
+node_status:
+  impl-s1:  { status: pending, spec: "A1+A2（runtimeEnv 常量+validation schema uiLocale）", files: "shared/runtimeEnv.ts, shared/validation.ts" }
+  impl-s5:  { status: pending, spec: "B1+B2（messagesHead 落盘+读取合并 croppedCount+toolCalls 映射+四纯函数导出；T-T1+T-T6 services 半边）", files: "adapters/runner-debug.ts, services/modelTrajectory.ts, services/session/zcodeTaskService.ts, adapters/scripts/test-runner-debug-head.mjs, services/test/modelTrajectoryHead.test.ts" }
+  impl-s10: { status: pending, spec: "C1+C2（ctx-status lastUsageContextLimit+文案澄清+ContextContent 说明行；T-U1/T-U2）", files: "magic-context/host/ctx-status.ts, bootstrap/ctx-commands/format-ctx-status.ts, ui/i18n/locales/*, ui/chat-input-toolbar/contextUsage.tsx, magic-context/scripts/test-ctx-status-diagnostics.mjs" }
+  impl-s2:  { status: pending, spec: "A3+A4+A5（HostInitMessage.uiLocale→currentApplicationLocale→createLocalServices 透传）", files: "desktop/main/*3 文件" }
+  impl-s6:  { status: pending, spec: "B3（Turns 纯函数：分组/fallback/预览/reasoning 投影/shouldUseConversationDelta+resolveTrajectoryInputMessages+computeDeltaMessages 迁入；T-T3/T-T4/T-T5/T-T8/T-T9）", files: "ui/ModelTrajectoryTurns.ts(新), ui/test/modelTrajectoryTurns.test.ts(新)" }
+  impl-s3:  { status: pending, spec: "A6（options+resolveSpawnEnv 注入+buildUiLocaleSpawnEnv 纯函数；T-L2）", files: "services/node.ts, services/test/(新)" }
+  impl-s7:  { status: pending, spec: "B4-B9+B11+B6-reasoning（回合外壳+虚拟化+搜索+展开 hook+i18n+useSettings 接线）", files: "ui/ModelTrajectoryTurnGroup.tsx(新), Timeline, Pane, Search, SearchHighlight, Expansion, ExpansionMenu, RoleStyles, ExpandableMessage, PaneParts(连带 re-export), i18n 两文件" }
+  impl-s4:  { status: pending, spec: "A7+A8（run.ts env 读取→entrypoint 闭包；T-L1/T-L3/T-L4）", files: "cli/run.ts, bootstrap/app/types.ts, bootstrap/zcode-protocol-entrypoint.ts, bootstrap/scripts/test-prompt-language-rpc.mjs, cli/test/runUiLocale.test.ts(新)" }
+  impl-s9:  { status: pending, spec: "B10+B12（WireFilter+回合内隐藏+计数+Pane 局部开关+测试登记）", files: "ui/ModelTrajectoryWireFilter.ts(新), ui/ModelTrajectoryPaneParts.tsx, ui/test/modelTrajectoryWireFilter.test.ts(新), 根 package.json+各 package test:*" }
+  verify-all: { status: pending }
+  cr-func-all: { status: pending }
+
+open_must_fix: []
+spec_deviations: []
+
+# ---- dev-ready 快照（2026-10-19，dag_version 1 收口）----
+dev_ready:
+  head_sha: 76e56701
+  commits: 20（ec5f2119 spec → 76e56701 typecheck 修复；git rev-list --count 1b181fd4..HEAD）
+  impl_nodes: s1/s5/s10/s2/s6/s3/s7/s4/s9 全 done
+  verify_all: gate-green（typecheck 13 工程 0 错 / lint 0 errors / v4-perf 411→415 / mc 149/149 / rpc 12/12 / desktop-full gate OK / i18n 5926 / arch 0）
+  cr_func_all: func-ready yes（0 P0/P1；P2-1/P2-3 已修 4deea34e，P2-2 误报，P2-4/P2-5 登记不阻塞）
+  known_decisions:
+    - shouldUseConversationDelta 显式白名单（unknown→full）＝迁移前语义逐字保留，T-T8 钉死
+    - s9 抽 ModelTrajectoryCallInput.tsx（max-lines）纯结构移动
+    - s7 回合内 per-turn 列对齐（subgrid 断链）设计内视觉差异，真机验收确认
+    - .oxlintrc.json 加 .tools/**（3ed75631，本地未跟踪工具目录）
+  pending_manual:
+    - Step4 真机：系统语言=默认+中文 → 新窗口新会话首轮系统提示词中文（A 端到端唯一验证路径）
+    - Step7/8 真机：回合 IA 观感 + reasoning 开关 + 占位隐藏 toggle + 搜索展开
+  next: e2e → cr → spec-check → 修复 → e2e → publish v1.0.17
