@@ -5,6 +5,7 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ButtonHTMLAttributes,
   type ReactNode,
@@ -109,6 +110,16 @@ import type { SettingsSectionId } from "@/lib/settingsNavigation.js";
 import { requestPluginStoreOpen } from "@/lib/pluginStoreNavigation.js";
 import { logger } from "@/logger.js";
 import { ensureSourceSettingsServices } from "@/store/sourceSettingsServiceStore.js";
+import { getSourceSettingsServices } from "@/store/sourceSettingsServiceStore.js";
+import { useSourceSettingsAttachmentId } from "@/store/sourceSettingsServiceStore.js";
+import { useSourceSettingsServices } from "@/store/sourceSettingsServiceStore.js";
+import { useSourceSettingsServicesVersion } from "@/store/sourceSettingsServiceStore.js";
+import { releaseSourceSettingsServices } from "@/store/sourceSettingsServiceStore.js";
+import {
+  isSettingsSourceOnline,
+  resolveSettingsSourceCapabilityServices,
+} from "@/settings/settingsSourceWorkspace.js";
+import type { IServiceAccessor } from "@zcode/services";
 // 遥测链路移除后设置动作直接执行；保留本包装以免改动全部调用点的对象字面量形状。
 // featureId / action / trigger / completed / failureStage 已无消费方，仅为兼容现有调用签名保留。
 function runSettingsActionAsync<T>(options: {
@@ -178,9 +189,16 @@ type SourceSettingsAttachmentRequest = (
 /**
  * 探测平台是否提供 Source 设置 attachment（上游 IPlatformService.requestSourceSettingsAttachment）。
  *
- * omz 落位差异：Desktop 端的 requestSourceSettingsAttachment IPC 与 renderer 端口桥尚未随本批
- * 落位，因此运行时通常拿到 undefined。缺席时保持「该 Source 的已连接 workspace 当锚点」的既有
- * 真实链路；平台补齐后本函数自动返回值，UI 无需再改。不要把它改写成绕过 IPlatformService 的直连。
+ * 当前链路（2026-10-24 已闭环，ab7dd19e 落地）：desktop preload 暴露
+ * requestSourceSettingsAttachment → main 的 sourceSettingsAttachmentBroker 校验设备登记/在线
+ * 状态并等 Host 回执 → Host 确认服务集可装配后，main 经
+ * `InternalChannels.SourceSettingsServicePort` 把 scoped MessagePort transfer 给 renderer →
+ * renderer 启动时注册的 sourceSettingsServicePortBridge 收到消息并调用
+ * registerSourceSettingsServices 登记端口；设置页只按 sourceServerId 读取已登记的服务。
+ *
+ * 本函数仍必须经 IPlatformService 探测而不是绕过平台层直连 renderer 全局对象：Web / 旧
+ * preload 没有该能力时返回 undefined，调用方保持「该 Source 的已连接 workspace 当锚点」的
+ * 既有真实链路。
  */
 function resolveSourceSettingsAttachmentRequest(
   platform: IPlatformService,
@@ -238,6 +256,376 @@ const SETTINGS_SOURCE_SCOPED_SECTIONS: ReadonlySet<SettingsSectionId> = new Set(
   "subagents",
   "hooks",
 ]);
+
+/**
+ * Source 设置 attachment 自动重试的追踪状态（纯数据，便于无 jsdom 的单测）。
+ *
+ * Bug 原因：旧 effect 只依赖 [selectedSettingsSourceServerId, sourceAttachmentRequest]，
+ * 设备掉线再上线时 management 快照变了但 effect 不重跑，端口再也申请不回来，用户只能
+ * 手动重选设备。修复依据：在线状态是 management 快照的事实，用快照变化驱动重试即可，
+ * 不需要轮询定时器。
+ *
+ * 幂等键 = `sourceServerId + cycle`（在线周期）。cycle 只在观察到「离线 → 在线」时 +1，
+ * 因此同一在线周期内最多自动申请一次；端口已登记时直接跳过，不干扰成功建立的端口。
+ * 例外（同一周期也允许再申请）：前一次申请失败（失败回调清空 attemptedCycle），或
+ * 已登记的端口在同一周期内被释放（`portRegistered` 由 true 变 false）。
+ *
+ * 失败退避：连续失败越多，下一次申请要等得越久；只按状态变化到达时的退避时长封顶 30s，
+ * 由调用方按 `retryAfterMs` / 失败次数注册一次性可取消定时器再跑决策（不是轮询），
+ * 否则「失败后快速掉线重连」会占掉新在线周期却永远不再申请。
+ *
+ * 有界性（2026-10-25 复核补齐）：`failedAttempts` 与 `portReleaseAttempts` 各有明确上限；
+ * 任一到达上限即进入 `exhausted` 放弃态（UI 显式提示 + 手动重试出口），不再安排定时器。
+ * 放弃态在「离线→在线」新周期、端口确认登记、切换设备时重置。
+ */
+export interface SourceSettingsAttachmentRetryTracker {
+  sourceServerId: string;
+  /** 上一次观察到的在线状态；null = management 快照尚未就绪（不据此拦截）。 */
+  online: boolean | null;
+  /** 当前在线周期序号：每观察到一次「离线 → 在线」+1。 */
+  cycle: number;
+  /** 最近一次申请所在的在线周期；null = 本设备尚未自动申请过（或前一次申请已失败）。 */
+  attemptedCycle: number | null;
+  /** 连续失败次数：端口确认登记（成功）时清零。 */
+  failedAttempts: number;
+  /** 最近一次申请的时间戳（毫秒）；0 = 从未申请。 */
+  lastAttemptAt: number;
+  /** 上一次观察时该 Source 的端口是否已登记；用于识别同一周期内的端口释放。 */
+  portRegistered: boolean;
+  /** 端口首次被观察到已登记的时间（毫秒）；0 = 从未登记。用于判断「稳定登记」。 */
+  portRegisteredAt: number;
+  /** 同一在线周期内连续「端口登记后随即失效」的次数；稳定登记后清零。 */
+  portReleaseAttempts: number;
+  /**
+   * 连续观察到「management 快照明确 offline 且端口仍存活」的次数。
+   *
+   * Bug 原因：旧实现只要快照投影短暂落后（profile→sourceServerId 绑定还没同步）就判定
+   * offline 并立刻释放端口，会把刚建立且仍可用的端口误杀，也会让首次申请被 offline 拦住。
+   * 修复依据：至少连续两次明确 offline，且释放前再用最新快照复核一次，才允许释放。
+   */
+  offlineObservations: number;
+  /**
+   * 自动申请已放弃：连续失败或端口抖动达到上限后不再自行重发。
+   *
+   * 放弃态必须在 UI 上显式提示；设备掉线重连（新在线周期）、端口成功登记、切换设备
+   * 或用户手动重试都会重置，避免「每 ≤30s 无限重发 IPC」和静默卡死两种极端。
+   */
+  exhausted: boolean;
+  /**
+   * 下次允许申请的时间戳（毫秒）。
+   *
+   * 端口释放后的最小间隔必须跨 effect 重跑仍然生效；只依赖 `lastAttemptAt` 的 elapsed
+   * 判断会被「无关快照变化触发的重跑」绕过，重新退化成立即重发。
+   */
+  retryNotBefore: number;
+}
+
+export const SOURCE_SETTINGS_ATTACHMENT_RETRY_BASE_DELAY_MS = 2_000;
+export const SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_DELAY_MS = 30_000;
+/**
+ * 连续自动重试上限：设备仍被选中、快照也不显示 offline（例如 management 认为 online
+ * 但 Host 一直拒绝 attachment）时，仅靠指数退避会每 ≤30s 无限重发 IPC。达到上限后
+ * 停止自动重试，等重选设备/端口成功登记等新事实再重新计数。
+ */
+export const SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_ATTEMPTS = 6;
+/**
+ * 端口登记后存活多久才算「稳定成功」：低于该时长的释放（包括端口桥心跳探测发现的
+ * 静默死端口）按连续抖动退避；超过则视为一次正常释放并重新计数。
+ *
+ * 必须严格大于端口桥判定静默死端口的最长耗时，否则每次静默死亡都会被当成稳定登记，
+ * `portReleaseAttempts` 每次清零，「连续 N 次抖动即放弃」的上限永远触发不到，退化成
+ * 无界重申请。按桥的探测节奏推算（15s 间隔、10s 超时、连续 3 次失败才判死）：登记后
+ * 最坏情况是首个探测成功、随即静默死亡，再经历 3 个探测周期，共 4×15s + 10s = 70s
+ * 才能观察到释放。取 90s 给定时器/渲染调度留 20s 余量；桥改节奏时下方守卫会失败提醒。
+ */
+export const SOURCE_SETTINGS_ATTACHMENT_STABLE_PORT_MS = 90_000;
+/**
+ * 端口释放后重新申请的最小间隔。
+ *
+ * Bug 原因：释放分支清零失败计数后按「释放次数 = 0」计算退避，第一次释放的退避为 0，
+ * 形成 release → emit → effect → request → register → close 的无延迟自激循环。
+ * 修复依据：释放驱动的重申请至少等一个基础退避，并由 `retryNotBefore` 跨 effect 重跑兜底。
+ */
+export const SOURCE_SETTINGS_ATTACHMENT_RELEASE_MIN_INTERVAL_MS =
+  SOURCE_SETTINGS_ATTACHMENT_RETRY_BASE_DELAY_MS;
+/**
+ * 第一次明确 offline 到「释放前复核」之间的间隔：给 management 快照追上 Host 状态的时间。
+ * 复核使用 `getSnapshot()` 重新读一次最新快照，不把陈旧投影当成释放依据。
+ */
+export const SOURCE_SETTINGS_ATTACHMENT_OFFLINE_CONFIRM_DELAY_MS = 2_000;
+
+/** 失败退避时长：2s 起，按连续失败次数指数增长，封顶 30s。 */
+export function resolveSourceSettingsAttachmentRetryDelayMs(failedAttempts: number): number {
+  if (failedAttempts <= 0) return 0;
+  return Math.min(
+    SOURCE_SETTINGS_ATTACHMENT_RETRY_BASE_DELAY_MS * 2 ** (Math.min(failedAttempts, 8) - 1),
+    SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_DELAY_MS,
+  );
+}
+
+/** 申请回执的端口登记结论。 */
+export type SourceSettingsAttachmentReceiptOutcome = "registered" | "unregistered" | "incomplete";
+
+/**
+ * 申请回执只代表 Host 接受并投递了 attachment，不等于 renderer 已登记端口。
+ *
+ * Bug 原因：旧成功回调直接把回执当成功清掉退避和定时器，端口消息丢失（或登记的是不完整
+ * 服务集）时 `attemptedCycle` 已占住本周期且没有后续触发，页面永远停在 unavailable。
+ * 修复依据：回执后必须校验注册表条目与六个分区依赖的服务集合，未登记按失败路径处理。
+ */
+export function resolveSourceSettingsAttachmentReceiptOutcome(
+  services: IServiceAccessor | undefined,
+): SourceSettingsAttachmentReceiptOutcome {
+  if (!services) return "unregistered";
+  return resolveSettingsSourceCapabilityServices(services) ? "registered" : "incomplete";
+}
+
+/**
+ * 记录一次申请失败（含「回执成功但端口未登记」）。
+ *
+ * 返回 `exhausted = true` 时调用方必须停止安排定时器，并把放弃态显示到 UI；否则按
+ * `retryAfterMs` 安排一次可取消的定时重试。
+ */
+export function recordSourceSettingsAttachmentFailure(params: {
+  tracker: SourceSettingsAttachmentRetryTracker;
+}): {
+  tracker: SourceSettingsAttachmentRetryTracker;
+  failedAttempts: number;
+  exhausted: boolean;
+  retryAfterMs: number;
+} {
+  const tracker = params.tracker;
+  tracker.failedAttempts += 1;
+  tracker.attemptedCycle = null;
+  tracker.retryNotBefore = 0;
+  if (tracker.failedAttempts >= SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_ATTEMPTS) {
+    tracker.exhausted = true;
+    return {
+      tracker,
+      failedAttempts: tracker.failedAttempts,
+      exhausted: true,
+      retryAfterMs: 0,
+    };
+  }
+  return {
+    tracker,
+    failedAttempts: tracker.failedAttempts,
+    exhausted: false,
+    retryAfterMs: resolveSourceSettingsAttachmentRetryDelayMs(tracker.failedAttempts),
+  };
+}
+
+export type SourceSettingsAttachmentOfflineReleaseAction = "keep" | "confirm" | "release";
+
+/**
+ * 决定「management 快照明确 offline 且端口仍存活」时是否释放端口。
+ *
+ * 规则：第一次明确 offline 只记录观察（confirm，调用方等一个确认间隔后再跑一次）；
+ * 第二次仍明确 offline 才返回 release（调用方还须用最新 `getSnapshot()` 复核）。
+ * 端口不在、快照未知或在线时一律 keep 并清零观察计数。
+ */
+export function decideSourceSettingsAttachmentOfflineRelease(params: {
+  previous: SourceSettingsAttachmentRetryTracker | undefined;
+  sourceServerId: string;
+  online: boolean | undefined;
+  portRegistered: boolean;
+}): {
+  action: SourceSettingsAttachmentOfflineReleaseAction;
+  tracker: SourceSettingsAttachmentRetryTracker;
+} {
+  const previous =
+    params.previous?.sourceServerId === params.sourceServerId ? params.previous : undefined;
+  const tracker: SourceSettingsAttachmentRetryTracker = previous ?? {
+    sourceServerId: params.sourceServerId,
+    online: null,
+    cycle: 0,
+    attemptedCycle: null,
+    failedAttempts: 0,
+    lastAttemptAt: 0,
+    portRegistered: false,
+    portRegisteredAt: 0,
+    portReleaseAttempts: 0,
+    offlineObservations: 0,
+    exhausted: false,
+    retryNotBefore: 0,
+  };
+  if (params.online !== false || !params.portRegistered) {
+    tracker.offlineObservations = 0;
+    return { action: "keep", tracker };
+  }
+  tracker.offlineObservations += 1;
+  if (tracker.offlineObservations < 2) {
+    return { action: "confirm", tracker };
+  }
+  tracker.offlineObservations = 0;
+  return { action: "release", tracker };
+}
+
+export type SourceSettingsAttachmentAttemptReason =
+  | "initial"
+  | "retry"
+  | "reconnect"
+  | "port-released"
+  | "port-registered"
+  | "offline"
+  | "same-cycle"
+  | "backoff"
+  /** 自动重试次数用尽：不再自行重发，等用户/状态事件重新触发。 */
+  | "exhausted";
+
+export interface SourceSettingsAttachmentAttemptDecision {
+  request: boolean;
+  reason: SourceSettingsAttachmentAttemptReason;
+  /** 退避剩余时长（毫秒）；仅 reason === "backoff" 时非零。 */
+  retryAfterMs: number;
+  /** 本次观察后的追踪状态，调用方负责写回。 */
+  tracker: SourceSettingsAttachmentRetryTracker;
+}
+
+/**
+ * 决定本次 effect 运行是否要申请 Source 设置 attachment。
+ *
+ * 触发条件（唯一口径）：
+ * 1. 首次选中/挂载（cycle 0，尚无申请记录）；
+ * 2. 观察到「离线 → 在线」进入新在线周期，且该周期还没申请过；
+ * 3. 前一次申请失败（调用方清空 attemptedCycle），退避到期后继续；
+ * 4. 已登记的端口在同一在线周期内被释放（Host detach / 端口失效）；连续「登记后
+ *    随即失效」的抖动按次数退避，达到上限后不再自动申请（exhausted）。
+ * 其它情况（端口已登记、已知离线、同一周期、退避未到）一律不申请。
+ */
+export function decideSourceSettingsAttachmentAttempt(params: {
+  previous: SourceSettingsAttachmentRetryTracker | undefined;
+  sourceServerId: string;
+  /** management 快照的在线投影；undefined = 快照未就绪，保持旧行为允许申请。 */
+  online: boolean | undefined;
+  /** 该 Source 的 attachment 端口是否已登记。 */
+  portRegistered: boolean;
+  now: number;
+}): SourceSettingsAttachmentAttemptDecision {
+  const online = params.online ?? null;
+  const previous =
+    params.previous?.sourceServerId === params.sourceServerId ? params.previous : undefined;
+  const reconnected = previous?.online === false && online === true;
+  // 快照从「未就绪」变成明确在线也是新的外部事实：启动阶段若已把重试次数用尽，
+  // 不能因为 previous.online 是 null 就一直卡在放弃态。
+  const firstObservedOnline = previous !== undefined && previous.online === null && online === true;
+  const cycle = previous ? previous.cycle + (reconnected ? 1 : 0) : 0;
+  const tracker: SourceSettingsAttachmentRetryTracker = {
+    sourceServerId: params.sourceServerId,
+    online,
+    cycle,
+    attemptedCycle: previous?.attemptedCycle ?? null,
+    failedAttempts: previous?.failedAttempts ?? 0,
+    lastAttemptAt: previous?.lastAttemptAt ?? 0,
+    portRegistered: previous?.portRegistered ?? false,
+    portRegisteredAt: previous?.portRegisteredAt ?? 0,
+    // 离线→在线是新的在线周期，端口抖动计数从零开始；否则连续抖动会跨周期累计。
+    portReleaseAttempts: reconnected ? 0 : (previous?.portReleaseAttempts ?? 0),
+    offlineObservations: online === false ? (previous?.offlineObservations ?? 0) : 0,
+    // 设备状态变化（离线→在线 / 快照就绪后首次在线）是新的外部事实：放弃态必须重置。
+    exhausted: reconnected || firstObservedOnline ? false : (previous?.exhausted ?? false),
+    retryNotBefore: previous?.retryNotBefore ?? 0,
+  };
+  // 首次选中/挂载即申请：不依赖 management 的 online 投影（快照可能落后或尚未就绪），
+  // 失败由退避与次数上限兜底。只有「已经申请过」的周期才按明确 offline 拦截。
+  const isFirstAttempt = !previous || previous.lastAttemptAt === 0;
+  const skip = (
+    reason: SourceSettingsAttachmentAttemptReason,
+    retryAfterMs = 0,
+  ): SourceSettingsAttachmentAttemptDecision => ({
+    request: false,
+    reason,
+    retryAfterMs,
+    tracker,
+  });
+  const requestIfDue = (
+    reason: SourceSettingsAttachmentAttemptReason,
+  ): SourceSettingsAttachmentAttemptDecision => {
+    // 放弃态优先级最高：即使退避时间已过也不再自行重发。
+    if (tracker.exhausted) return skip("exhausted");
+    // 端口释放后的最小间隔跨 effect 重跑生效（无关快照变化不能绕过它）。
+    if (tracker.retryNotBefore > params.now) {
+      return skip("backoff", tracker.retryNotBefore - params.now);
+    }
+    const backoffDelayMs = resolveSourceSettingsAttachmentRetryDelayMs(tracker.failedAttempts);
+    const elapsedMs = params.now - tracker.lastAttemptAt;
+    if (backoffDelayMs > 0 && elapsedMs < backoffDelayMs) {
+      return skip("backoff", backoffDelayMs - elapsedMs);
+    }
+    tracker.attemptedCycle = tracker.cycle;
+    tracker.lastAttemptAt = params.now;
+    tracker.retryNotBefore = 0;
+    return { request: true, reason, retryAfterMs: 0, tracker };
+  };
+
+  if (params.portRegistered) {
+    // 已成功登记的端口不改动；后续即使掉线重连也以端口事实为准。
+    // 端口登记 = 申请成功：清零失败计数并从放弃态恢复（迟到端口也能让自动链路自愈）。
+    if (!tracker.portRegistered) tracker.portRegisteredAt = params.now;
+    tracker.portRegistered = true;
+    tracker.attemptedCycle = tracker.cycle;
+    tracker.failedAttempts = 0;
+    tracker.offlineObservations = 0;
+    tracker.retryNotBefore = 0;
+    tracker.exhausted = false;
+    return skip("port-registered");
+  }
+  if (tracker.portRegistered) {
+    // 端口曾登记、现在不在了：Host 在同一在线周期里 detach（离线/删除/换代）也必须能
+    // 重新申请，不能停在 `attemptedCycle === cycle` 上。
+    const registeredForMs =
+      tracker.portRegisteredAt > 0
+        ? params.now - tracker.portRegisteredAt
+        : params.now - tracker.lastAttemptAt;
+    tracker.portRegistered = false;
+    tracker.portRegisteredAt = 0;
+    tracker.attemptedCycle = null;
+    if (params.online === false) return skip("offline");
+    // 端口稳定登记过说明上一次申请真的可用：这是正常释放，重新按首次释放计数。
+    if (registeredForMs >= SOURCE_SETTINGS_ATTACHMENT_STABLE_PORT_MS) {
+      tracker.portReleaseAttempts = 0;
+    }
+    // 次数兜底：抖动计数与累计失败计数任一到达上限都不再自动重发。
+    if (
+      tracker.portReleaseAttempts >= SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_ATTEMPTS ||
+      tracker.failedAttempts >= SOURCE_SETTINGS_ATTACHMENT_RETRY_MAX_ATTEMPTS
+    ) {
+      tracker.exhausted = true;
+      return skip("exhausted");
+    }
+    tracker.portReleaseAttempts += 1;
+    // Bug 原因：旧实现先清零失败计数再按「释放次数 = 0」算退避，第一次释放的退避为 0，
+    // 形成 release→emit→effect→request→register→close 的无延迟自激循环。
+    // 修复依据：释放驱动的重申请至少等待一个基础退避，并由 retryNotBefore 跨重跑兜底。
+    const releaseDelayMs = Math.max(
+      resolveSourceSettingsAttachmentRetryDelayMs(
+        Math.max(tracker.portReleaseAttempts, tracker.failedAttempts),
+      ),
+      SOURCE_SETTINGS_ATTACHMENT_RELEASE_MIN_INTERVAL_MS,
+    );
+    tracker.retryNotBefore = params.now + releaseDelayMs;
+    const elapsedMs = params.now - tracker.lastAttemptAt;
+    if (elapsedMs < releaseDelayMs) {
+      return skip("backoff", releaseDelayMs - elapsedMs);
+    }
+    tracker.attemptedCycle = tracker.cycle;
+    tracker.lastAttemptAt = params.now;
+    tracker.retryNotBefore = 0;
+    return { request: true, reason: "port-released", retryAfterMs: 0, tracker };
+  }
+  if (params.online === false && !isFirstAttempt) return skip("offline");
+  if (tracker.attemptedCycle === tracker.cycle) return skip("same-cycle");
+
+  // 新在线周期的首次成功申请记 reconnect（即使它被退避推迟到本周期内稍后重试）；
+  // 同周期内的失败重试记 retry，便于测试/日志区分「重连」与「退避重试」。
+  const reason: SourceSettingsAttachmentAttemptReason =
+    reconnected || tracker.cycle > 0
+      ? "reconnect"
+      : tracker.lastAttemptAt > 0
+        ? "retry"
+        : "initial";
+  return requestIfDue(reason);
+}
 
 export function SettingsPage({
   isDesktop,
@@ -411,8 +799,8 @@ export function SettingsPage({
   const { snapshot: deviceManagementSnapshot } =
     useSourceServerManagementSnapshot(deviceManagement);
   // 「按设备编辑设置」入口（本批缺陷修复）：Source 设置面的 scope 以前没有任何生产调用方，
-  // 四个 section 的 settingsSourceServerId 永远是 undefined。选择器直接投影 management
-  // 快照（设备列表的唯一事实源），不新建第二份设备状态。
+  // 按 Source 收窄的 section 的 settingsSourceServerId 永远是 undefined。选择器直接投影
+  // management 快照（设备列表的唯一事实源），不新建第二份设备状态。
   const sourceServers = deviceManagementSnapshot?.servers ?? [];
   const [settingsSourceSelection, setSettingsSourceSelection] = useState(SETTINGS_SOURCE_ALL);
   const selectedSettingsSourceServerId =
@@ -441,20 +829,283 @@ export function SettingsPage({
     () => resolveSourceSettingsAttachmentRequest(platform),
     [platform],
   );
+  const sourceAttachmentRetryTrackerRef = useRef<SourceSettingsAttachmentRetryTracker | null>(null);
+  // 退避/失败都必须有一个后续触发：effect 只随快照/端口变化运行，失败后若没有新事件，
+  // 同一设备永远不会再申请。这里用一次性定时器（非轮询）在到期后重跑同一决策；
+  // 延时由 resolveSourceSettingsAttachmentRetryDelayMs 封顶 30s，effect 清理（切设备、
+  // 端口登记、组件卸载）统一 clearTimeout。
+  const sourceAttachmentRetryTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [sourceAttachmentRetryTick, setSourceAttachmentRetryTick] = useState(0);
+  // 申请代际：并发/重复 effect 重跑可能共享同一个 ensure promise（注册表去重），
+  // 只允许最后一代申请的回执记成功/失败，避免一次请求被两个 handler 各记一次失败。
+  const sourceAttachmentAttemptTokenRef = useRef(0);
+  // 自动重试已放弃时显式记下设备 id：达到上限必须在 UI 上可见，不能静默停在 unavailable。
+  const [sourceAttachmentExhaustedFor, setSourceAttachmentExhaustedFor] = useState<string | null>(
+    null,
+  );
+  // 「释放前再确认」用最新 management 快照复核过的那一条陈旧快照：记住后不再对同一条
+  // 快照重复复核，避免「快照持续落后 → 每轮 effect 都发一次 getSnapshot」变成轮询。
+  const sourceAttachmentRevalidatedSnapshotRef = useRef<{
+    snapshot: SourceServerManagementSnapshot;
+    sourceServerId: string;
+  } | null>(null);
+  // 申请是异步的：卸载后才 reject 的请求不得再安排定时器（否则会在已卸载页面里 setState）。
+  const sourceAttachmentMountedRef = useRef(true);
   useEffect(() => {
-    if (!selectedSettingsSourceServerId || !sourceAttachmentRequest) return undefined;
-    let cancelled = false;
-    void ensureSourceSettingsServices(
-      selectedSettingsSourceServerId,
-      sourceAttachmentRequest,
-    ).catch((error: unknown) => {
-      if (cancelled) return;
-      logger.warn("[settings] 请求 Source 设置 attachment 失败，保持 workspace 锚点链路", error);
-    });
+    sourceAttachmentMountedRef.current = true;
     return () => {
-      cancelled = true;
+      sourceAttachmentMountedRef.current = false;
     };
-  }, [selectedSettingsSourceServerId, sourceAttachmentRequest]);
+  }, []);
+  const clearSourceAttachmentRetryTimer = useCallback(() => {
+    if (sourceAttachmentRetryTimerRef.current !== null) {
+      clearTimeout(sourceAttachmentRetryTimerRef.current);
+      sourceAttachmentRetryTimerRef.current = null;
+    }
+  }, []);
+  const scheduleSourceAttachmentRetry = useCallback(
+    (delayMs: number) => {
+      clearSourceAttachmentRetryTimer();
+      sourceAttachmentRetryTimerRef.current = setTimeout(() => {
+        sourceAttachmentRetryTimerRef.current = null;
+        setSourceAttachmentRetryTick((tick) => tick + 1);
+      }, delayMs);
+    },
+    [clearSourceAttachmentRetryTimer],
+  );
+  // 放弃态只从 tracker 这一份事实派生，避免再维护第二份「是否放弃」状态。
+  const syncSourceAttachmentExhausted = useCallback(
+    (tracker: SourceSettingsAttachmentRetryTracker | null) => {
+      const exhaustedFor = tracker?.exhausted ? tracker.sourceServerId : null;
+      setSourceAttachmentExhaustedFor((current) =>
+        current === exhaustedFor ? current : exhaustedFor,
+      );
+    },
+    [],
+  );
+  // 放弃态的手动出口：用户点「重试」视为新的申请意图，清零退避/抖动/放弃标记后立即重跑。
+  const handleRetrySourceAttachment = useCallback(() => {
+    const tracker = sourceAttachmentRetryTrackerRef.current;
+    if (tracker) {
+      tracker.failedAttempts = 0;
+      tracker.portReleaseAttempts = 0;
+      tracker.offlineObservations = 0;
+      tracker.exhausted = false;
+      tracker.attemptedCycle = null;
+      tracker.lastAttemptAt = 0;
+      tracker.retryNotBefore = 0;
+    }
+    setSourceAttachmentExhaustedFor(null);
+    setSourceAttachmentRetryTick((tick) => tick + 1);
+  }, []);
+  // 订阅附件端口注册表：端口登记/释放都要参与重试判定（尤其掉线时端口先释放、快照后更新），
+  // 不能只在快照事件里读一次，否则重连瞬间可能看到已失效的旧端口而漏掉重申请。
+  const sourceSettingsPortServices = useSourceSettingsServices(
+    selectedSettingsSourceServerId ?? undefined,
+  );
+  // 注册表版本保证「登记后同批失效」也能让 effect 重跑：settings 对象本身可能回到
+  // undefined（与上一次渲染相同），React 不会因此重算。
+  const sourceSettingsPortServicesVersion = useSourceSettingsServicesVersion();
+  // 与上面的 services 同一渲染快照读出的 attachment id：释放时带上它，慢到的旧信号只会
+  // 命中自己那一代，不会把 render 之后才登记的新一代附件一并 dispose。
+  const sourceSettingsPortAttachmentId = useSourceSettingsAttachmentId(
+    selectedSettingsSourceServerId ?? undefined,
+  );
+  useEffect(() => {
+    // 本轮重算接管后续触发权：上一轮安排的定时器必须先撤销（卸载时由本 effect 的
+    // cleanup 统一清理），避免切设备/端口已恢复后旧定时器再触发一次申请。
+    clearSourceAttachmentRetryTimer();
+    if (!selectedSettingsSourceServerId || !sourceAttachmentRequest) {
+      // 回到「全部/本机」或平台没有该能力：清空追踪，再次选中同一设备视为一次新的
+      // 手动申请，不被上一条在线周期的幂等键拦住。
+      sourceAttachmentRetryTrackerRef.current = null;
+      // 作废迟到的申请回执：切回「全部/本机」后不得再往已清空的追踪里记成功/失败。
+      sourceAttachmentAttemptTokenRef.current += 1;
+      setSourceAttachmentExhaustedFor(null);
+      return clearSourceAttachmentRetryTimer;
+    }
+    const sourceServerId = selectedSettingsSourceServerId;
+    const snapshot = deviceManagementSnapshot;
+    const revalidatedSnapshot = sourceAttachmentRevalidatedSnapshotRef.current;
+    const revalidatedOnline =
+      snapshot !== null &&
+      revalidatedSnapshot?.sourceServerId === sourceServerId &&
+      revalidatedSnapshot.snapshot === snapshot;
+    const online = snapshot
+      ? revalidatedOnline || isSettingsSourceOnline(snapshot, sourceServerId)
+      : undefined;
+    // 端口「条目存在」不等于「设置面可用」：服务集缺少六个分区依赖的必需通道时，
+    // 下面的 ensure 会被存活条目短路（只重试不重新申请）。先摘掉不完整条目并解除
+    // 本周期幂等键，让决策按「端口未登记」重新申请；同一 Source 的新端口仍可接替。
+    if (
+      sourceSettingsPortServices !== undefined &&
+      resolveSourceSettingsAttachmentReceiptOutcome(sourceSettingsPortServices) !== "registered"
+    ) {
+      releaseSourceSettingsServices(sourceServerId, sourceSettingsPortAttachmentId);
+      const staleTracker = sourceAttachmentRetryTrackerRef.current;
+      if (staleTracker?.sourceServerId === sourceServerId) staleTracker.attemptedCycle = null;
+    }
+    const portRegistered =
+      sourceSettingsPortServices !== undefined &&
+      resolveSourceSettingsAttachmentReceiptOutcome(sourceSettingsPortServices) === "registered";
+
+    // 1) 释放判定：只有连续两次明确 offline（且释放前最新快照复核仍 offline）才释放。
+    // Bug 原因：只按快照投影的单次 online=false 就释放，会把刚建立且仍可用的端口误杀；
+    // 首次申请也被 online 判定拦住。修复依据见 decideSourceSettingsAttachmentOfflineRelease。
+    const releaseDecision = decideSourceSettingsAttachmentOfflineRelease({
+      previous: sourceAttachmentRetryTrackerRef.current ?? undefined,
+      sourceServerId,
+      online,
+      portRegistered,
+    });
+    sourceAttachmentRetryTrackerRef.current = releaseDecision.tracker;
+    if (portRegistered) {
+      // 端口已登记 = 申请成功：即时退出放弃态，避免「端口可用但还挂着失败提示」。
+      releaseDecision.tracker.failedAttempts = 0;
+      releaseDecision.tracker.exhausted = false;
+    }
+    syncSourceAttachmentExhausted(releaseDecision.tracker);
+    if (releaseDecision.action === "confirm") {
+      // 第一次明确 offline：先保留端口，等一个确认间隔后再观察一次（快照可能短暂落后）。
+      scheduleSourceAttachmentRetry(SOURCE_SETTINGS_ATTACHMENT_OFFLINE_CONFIRM_DELAY_MS);
+      return clearSourceAttachmentRetryTimer;
+    }
+    if (releaseDecision.action === "release") {
+      const tracker = releaseDecision.tracker;
+      // 第二次观察仍 offline：释放前再向 management 读一次最新快照，避免用陈旧投影误杀端口。
+      let confirmSnapshot: Promise<SourceServerManagementSnapshot> | undefined;
+      if (deviceManagement) {
+        try {
+          confirmSnapshot = deviceManagement.getSnapshot();
+        } catch (error) {
+          logger.warn("[settings] 无法确认 Source 在线状态，保留现有设置端口", error);
+        }
+      }
+      if (!confirmSnapshot) {
+        tracker.offlineObservations = 0;
+        return clearSourceAttachmentRetryTimer;
+      }
+      void confirmSnapshot.then(
+        (latest) => {
+          if (!sourceAttachmentMountedRef.current) return;
+          // tracker 身份校验：切设备/重选会换 tracker，迟到的确认不得释放新设备的端口。
+          if (sourceAttachmentRetryTrackerRef.current !== tracker) return;
+          if (isSettingsSourceOnline(latest, sourceServerId)) {
+            // 快照短暂落后：保留仍可用的端口，并记住这条陈旧快照，避免重复复核。
+            tracker.offlineObservations = 0;
+            if (snapshot) {
+              sourceAttachmentRevalidatedSnapshotRef.current = { snapshot, sourceServerId };
+            }
+            return;
+          }
+          // 最新快照仍明确 offline：Host 侧 attachment 已不可用，显式释放旧条目。
+          releaseSourceSettingsServices(sourceServerId, sourceSettingsPortAttachmentId);
+        },
+        (error: unknown) => {
+          if (!sourceAttachmentMountedRef.current) return;
+          if (sourceAttachmentRetryTrackerRef.current !== tracker) return;
+          // 复核失败不构成「明确 offline」：保留端口，避免把仍可用的连接误判成离线。
+          tracker.offlineObservations = 0;
+          logger.warn("[settings] 确认 Source 离线状态失败，保留现有设置端口", error);
+        },
+      );
+      return clearSourceAttachmentRetryTimer;
+    }
+
+    // 2) 申请判定：首次选中即申请（不依赖 online），失败走退避与次数上限。
+    const decision = decideSourceSettingsAttachmentAttempt({
+      previous: releaseDecision.tracker,
+      sourceServerId,
+      online,
+      portRegistered,
+      now: Date.now(),
+    });
+    sourceAttachmentRetryTrackerRef.current = decision.tracker;
+    syncSourceAttachmentExhausted(decision.tracker);
+    if (!decision.request) {
+      if (decision.reason === "backoff" && decision.retryAfterMs > 0) {
+        scheduleSourceAttachmentRetry(decision.retryAfterMs);
+      }
+      return clearSourceAttachmentRetryTimer;
+    }
+
+    const applyFailure = (error: unknown): void => {
+      // 失败：解除同在线周期的幂等键（attemptedCycle = null），否则退避到期后仍会被
+      // same-cycle 拦住；随后按指数退避安排一次性定时重试。设备重新在线也会由快照变化
+      // 再跑决策，所以定时器只是「没有新事件」时的兜底；连续失败达到上限后停止，
+      // 并把放弃态交给 UI 显式提示（不静默）。
+      // 已切到别的设备时不再记这次失败，避免把上一台设备的回执算到当前设备头上。
+      if (!sourceAttachmentMountedRef.current) return;
+      const tracker = sourceAttachmentRetryTrackerRef.current;
+      if (tracker?.sourceServerId !== sourceServerId) return;
+      const outcome = recordSourceSettingsAttachmentFailure({ tracker });
+      if (outcome.exhausted) {
+        logger.warn("[settings] Source 设置 attachment 连续失败，停止自动重试", error);
+        clearSourceAttachmentRetryTimer();
+        syncSourceAttachmentExhausted(outcome.tracker);
+        return;
+      }
+      logger.warn("[settings] 请求 Source 设置 attachment 失败，退避后自动重试", error);
+      syncSourceAttachmentExhausted(outcome.tracker);
+      scheduleSourceAttachmentRetry(outcome.retryAfterMs);
+    };
+
+    const attemptToken = sourceAttachmentAttemptTokenRef.current + 1;
+    sourceAttachmentAttemptTokenRef.current = attemptToken;
+    void ensureSourceSettingsServices(selectedSettingsSourceServerId, sourceAttachmentRequest).then(
+      () => {
+        if (sourceAttachmentAttemptTokenRef.current !== attemptToken) return;
+        if (!sourceAttachmentMountedRef.current) return;
+        const tracker = sourceAttachmentRetryTrackerRef.current;
+        if (tracker?.sourceServerId !== sourceServerId) return;
+        // IPC 回执 ≠ 端口已登记：端口消息可能丢失，或登记了缺少必需通道的服务集。
+        // 旧实现直接清掉退避，此时 attemptedCycle 已占住本周期且没有定时器，页面会
+        // 永远停在 unavailable。未登记必须按失败路径继续退避重试。
+        const receipt = resolveSourceSettingsAttachmentReceiptOutcome(
+          getSourceSettingsServices(sourceServerId),
+        );
+        if (receipt !== "registered") {
+          if (receipt === "incomplete") {
+            // 已登记但服务集不完整：对设置面不可用，先摘掉条目，避免下次 ensure 被
+            // 「存活条目」短路成空转（只重试不重新申请）。
+            releaseSourceSettingsServices(sourceServerId, sourceSettingsPortAttachmentId);
+          }
+          logger.warn(
+            "[settings] Source 设置 attachment 回执后端口未登记，按失败退避重试",
+            receipt,
+          );
+          applyFailure(receipt);
+          return;
+        }
+        if (!tracker.portRegistered) tracker.portRegisteredAt = Date.now();
+        tracker.portRegistered = true;
+        tracker.failedAttempts = 0;
+        tracker.offlineObservations = 0;
+        tracker.retryNotBefore = 0;
+        // 不重置 portReleaseAttempts：端口刚登记又释放时仍要累计抖动次数，否则
+        // 「登记→释放」循环会不断清零计数，次数上限永远触发不了。
+        tracker.exhausted = false;
+        clearSourceAttachmentRetryTimer();
+        syncSourceAttachmentExhausted(tracker);
+      },
+      (error: unknown) => {
+        if (sourceAttachmentAttemptTokenRef.current !== attemptToken) return;
+        applyFailure(error);
+      },
+    );
+    return clearSourceAttachmentRetryTimer;
+  }, [
+    clearSourceAttachmentRetryTimer,
+    deviceManagement,
+    deviceManagementSnapshot,
+    scheduleSourceAttachmentRetry,
+    selectedSettingsSourceServerId,
+    sourceAttachmentRequest,
+    sourceAttachmentRetryTick,
+    sourceSettingsPortServices,
+    sourceSettingsPortServicesVersion,
+    syncSourceAttachmentExhausted,
+  ]);
   const showSettingsSourceSelect =
     SETTINGS_SOURCE_SCOPED_SECTIONS.has(activeSection) &&
     Boolean(deviceManagement) &&
@@ -1379,6 +2030,30 @@ export function SettingsPage({
                             </div>
                           ) : null}
                         </div>
+                        {showSettingsSourceSelect &&
+                        sourceAttachmentExhaustedFor !== null &&
+                        sourceAttachmentExhaustedFor === selectedSettingsSourceServerId ? (
+                          // 自动申请达到次数上限后必须让用户看见：继续静默退避会无限重发 IPC，
+                          // 直接隐藏又会让页面像「设备没有配置」。这里保留显式失败态，
+                          // 并给一个手动重试出口（重置退避/放弃标记后立即重跑决策）。
+                          <div
+                            data-testid="settings-source-attachment-exhausted"
+                            data-source-server-id={sourceAttachmentExhaustedFor}
+                            className="mt-2 flex flex-wrap items-center gap-2 rounded-lg border border-dashed border-border bg-surface px-3 py-2"
+                          >
+                            <span className="text-ui-sm text-foreground-subtle">
+                              {intl.formatMessage({ id: "settings.source.operationFailed" })}
+                            </span>
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              onClick={handleRetrySourceAttachment}
+                            >
+                              {intl.formatMessage({ id: "common.retry" })}
+                            </Button>
+                          </div>
+                        ) : null}
                         {activeSection === "general" ? (
                           <GeneralSectionHeader localePreference={localePreference} />
                         ) : null}
@@ -1615,6 +2290,7 @@ export function SettingsPage({
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
                             isDesktop={isDesktop}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                           />
                         ) : activeSection === "usage" ? (
                           /* FORK（D-4）：Coding Plan 额度页整删，只剩 App Usage（无 tab）。 */
@@ -1630,6 +2306,7 @@ export function SettingsPage({
                           <AutomationsSection
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                           />
                         ) : activeSection === "commands" ? (
                           <PluginsSection
@@ -1654,6 +2331,7 @@ export function SettingsPage({
                           <WorkspaceFileSearchSection
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                           />
                         ) : activeSection === "browser" ? (
                           <BrowserSettingsSection
@@ -1661,6 +2339,7 @@ export function SettingsPage({
                             isWindowsDesktop={isWindowsDesktop}
                             workspacePath={activeWorkspacePath}
                             workspaceIdentity={activeWorkspaceIdentity}
+                            settingsSourceServerId={selectedSettingsSourceServerId}
                             embeddedBrowserAllowInsecureCertificates={
                               embeddedBrowserAllowInsecureCertificates
                             }

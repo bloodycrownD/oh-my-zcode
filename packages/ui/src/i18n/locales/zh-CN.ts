@@ -2523,6 +2523,9 @@ const zhCN: Record<string, string> = {
   "settings.scope.user": "用户",
   "settings.scope.workspace": "工作区",
   "settings.scope.default": "默认",
+  "settings.scope.appLevel": "应用级设置",
+  "settings.scope.appLevelNotice":
+    "所选设备不影响此分区：操作始终落在本应用与当前工作区，而不是所选设备。",
   "settings.plugins.scope.inheritedUser": "继承 User 默认",
   "settings.plugins.scope.userDefault": "User 默认",
   "settings.plugins.scope.workspaceOverride": "本工作区覆盖",
@@ -3662,6 +3665,7 @@ const zhCN: Record<string, string> = {
   "settings.subagents.model.select": "选择模型",
   "settings.subagents.model.main": "主模型",
   "settings.subagents.model.lite": "轻量模型",
+  "settings.subagents.model.sourceLocalFallback": "该设备不提供模型目录，模型候选来自本机。",
   "settings.subagents.permissionMode.auto": "自动",
   "settings.subagents.permissionMode.plan": "计划模式",
   "settings.subagents.color.blue": "蓝色",
@@ -6799,6 +6803,7 @@ const zhCN: Record<string, string> = {
   "settings.source.deviceName": "设备名",
   "settings.source.deviceNameRequired": "设备名不能为空。",
   "settings.source.devicesHeading": "设备",
+  "settings.source.deviceSourceUnresolved": "设备已连接，但无法确认它对应的 Source，请稍后重试。",
   "settings.source.disconnectHint": "断开后，远端任务会继续运行。",
   "settings.source.editConnection": "编辑",
   "settings.source.editConnectionDescription":

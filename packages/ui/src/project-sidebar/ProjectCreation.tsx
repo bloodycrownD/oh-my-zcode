@@ -8,9 +8,13 @@
 //   契约类型见 app-shell/types.ts 的 RemoteConnectionOpenPreference（挂载点/Root 同批落地）；
 //   能力缺席（allowDeviceManagement=false 或回调未传）时保持 remoteService.connectHost 降级路径；
 // ③设备行带 Source 身份（backlog-sweep 缺陷修复）：server 形态 host（`remote:server:<id>`）
-//   由统一 identity 工具反解出 sourceServerId，向导据此带 preferredSourceServerId 直达设备，
-//   返回时必须仍是同一 Source；不一致明确失败，不能静默放行把另一台设备的目录写进草稿。
-//   legacy ssh/wsl/docker host 没有 Source 归属，保持「报告 connected 即回原流程」；
+//   由统一 identity 工具反解出 sourceServerId；向导返回时必须仍是同一 Source，不一致明确失败，
+//   不能静默放行把另一台设备的目录写进草稿。向导入口不再携带「选中设备的 Source」当期望值：
+//   Root 只按本次实际连上的 target 反解 Source（Root.tsx 的 resolveDeviceAdditionSourceServerId）。
+//   设备行的 sourceServerId 同时作为「能不能归属 Source」的能力标记随 returnTarget 透传
+//   （deviceSourceServerId）：有值 = server 形态设备，Root 反解失败时按可读失败收尾；
+//   undefined = legacy ssh/wsl/docker host，没有 Source 归属，保持「报告 connected 即回原流程」，
+//   Root 不得把成功连接降级成取消。
 // ④P4.2 起 store 有 draftProjectId：保存期间草稿失效守卫按上游 draftProjectId 对比，
 //   draftFocusVersion 仍作 omz 侧草稿重建的补充近似；
 // ⑤onCreateTask 按 omz CreateTaskOptions 口径（projectId/taskGroupId 增字段）；
@@ -170,9 +174,13 @@ export function ProjectCreation({
         setConnection(request);
         const accepted = openDeviceWizard({
           completion: "device-management",
-          preferredSourceServerId: device.sourceServerId,
           returnTarget: {
             kind: "connect-device",
+            // 能力标记而非期望值：有值 = server 形态设备（必须确认本次连上的仍是同一
+            // Source），undefined = legacy ssh/wsl/docker 设备（没有 Source 归属，
+            // 反解失败也按 connected 回原流程）。判定见 root/deviceAdditionSource.ts 的
+            // requiresResolvedDeviceAdditionSource。
+            deviceSourceServerId: device.sourceServerId,
             isCurrent: () => active.current && pendingConnection.current === request,
             finish: (result) => {
               if (!active.current || pendingConnection.current !== request) return;

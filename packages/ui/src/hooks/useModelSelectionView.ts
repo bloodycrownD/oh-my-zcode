@@ -171,6 +171,36 @@ export function useModelSelectionServiceView(
   return { state: visibleState, reload: useCallback(() => reload(), []) };
 }
 
+export interface SettingsSourceModelSelectionResolution {
+  service: IModelSelectionService | null;
+  /** true = Source 端口没有设备侧模型目录，已回落本机；调用方必须在 UI 上标注来源。 */
+  fromLocalFallback: boolean;
+}
+
+/**
+ * 设置页「按 Source 编辑」时的模型选择服务解析。
+ *
+ * 修复依据：`source-settings` 端口只装配 hooks/plugin-management/skills/subagents 等配置面
+ * （packages/services/src/source-server-management/sourceSettingsServiceCollection.ts:62-139），
+ * 刻意不注册 model-selection；`SettingsSourceCapabilityServices` 也不投影该服务。因此端口
+ * 路由下不存在「设备侧模型目录」，不能把未注册 channel 的 RPC proxy 当服务用（ChannelServer
+ * 会按 Unknown channel 超时），只能明确回落本机，并让调用方把来源标出来，避免用户把本机
+ * 模型当成设备事实。无端口时保持原有 workspace/锚点解析结果，本机设置页不受影响。
+ */
+export function resolveSettingsSourceModelSelectionService(params: {
+  /** Source user scope 且 attachment 端口已登记（端口路由）。 */
+  portUserScope: boolean;
+  /** 无端口时原有的 workspace 解析结果（锚点远端或本机）。 */
+  workspaceService?: IModelSelectionService | null;
+  /** 本机 Host 的模型选择服务。 */
+  localService?: IModelSelectionService | null;
+}): SettingsSourceModelSelectionResolution {
+  if (params.portUserScope) {
+    return { service: params.localService ?? null, fromLocalFallback: true };
+  }
+  return { service: params.workspaceService ?? null, fromLocalFallback: false };
+}
+
 /** 模型候选只来自明确 Workspace Target；等待远端时不读取 Local/Base Host。 */
 export function useModelSelectionView(
   workspacePath: string | null | undefined,

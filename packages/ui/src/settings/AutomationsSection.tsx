@@ -1,6 +1,6 @@
 /* eslint-disable max-lines -- 定时任务主视图集中维护列表、创建/编辑整页路由与启停/删除操作，集中更利于交互一致。 */
-import { useCallback, useEffect, useRef, useState, type ComponentType, type SVGProps } from "react";
-import { CircleCheck, RotateCcw, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useState, type ComponentType, type SVGProps } from "react";
+import { CircleCheck, Monitor, RotateCcw, TriangleAlert } from "lucide-react";
 import {
   AUTOMATION_CREATE_LIMIT,
   TID_AUTOMATION_ACTION_DELETE,
@@ -26,6 +26,7 @@ import { toast as showToast, type ToastOptions } from "@/components/ui/toast.js"
 import { cn } from "@/components/lib/utils.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { AutomationScheduledTemplateIcon } from "@/settings/AutomationScheduledTemplateIcon.js";
+import { isSpecificSettingsSource } from "@/settings/settingsSourceWorkspace.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { useServices } from "@/hooks/useServices.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
@@ -100,6 +101,13 @@ import { AutomationTemplateSkeletonGrid } from "@/settings/AutomationTemplateSke
 interface AutomationsSectionProps {
   workspacePath?: string | null;
   workspaceIdentity?: string;
+  /**
+   * 设置页顶部的设备（Source）选择，三态与设置页选择器一致：
+   * `undefined` = 未按设备收窄（选择器「全部」）、`null` = 本机、字符串 = 具体设备。
+   * 本分区不按它收窄读写落点，只用于决定应用级提示是否展示：
+   * 只有选中具体设备时才需要提示「改动不作用于所选设备」。
+   */
+  settingsSourceServerId?: string | null;
   /** 「Create via chat」:切到会话让 agent 用 CronCreate 创建;缺省则回退到手动创建整页。
    * target = 工作流所属项目；定时任务的「通过对话创建」不带 target，落到活动项目。 */
   onCreateViaChat?: (prompt: string, target?: SavedWorkflowProjectTarget) => void;
@@ -132,6 +140,37 @@ function toast(message: string, options?: ToastOptions): number {
     ...options,
     anchorId: AUTOMATIONS_TOAST_ANCHOR_ID,
   });
+}
+
+/**
+ * 应用级分区提示。
+ * 本分区不按 settingsSourceServerId 收窄读写落点，选中具体设备后进入本页时必须显式说明
+ * 改动不作用于该设备，避免静默错配；未选中具体设备（「全部」/「本机」）时不展示。
+ */
+function AppLevelSettingsNotice({
+  settingsSourceServerId,
+}: {
+  settingsSourceServerId?: string | null;
+}) {
+  const { intl } = useZCodeIntl();
+  if (!isSpecificSettingsSource(settingsSourceServerId)) {
+    return null;
+  }
+  return (
+    <div
+      role="note"
+      data-settings-app-level="true"
+      className="flex items-start gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-ui-base leading-6 text-foreground-subtle"
+    >
+      <Monitor className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-medium text-foreground">
+          {intl.formatMessage({ id: "settings.scope.appLevel" })}
+        </div>
+        <div>{intl.formatMessage({ id: "settings.scope.appLevelNotice" })}</div>
+      </div>
+    </div>
+  );
 }
 
 /** 创建表单的预填草稿(来自「More ideas」模板)。 */
@@ -392,6 +431,7 @@ function AutomationStatusFilterEmpty() {
 export function AutomationsSection({
   workspacePath,
   workspaceIdentity,
+  settingsSourceServerId,
   onCreateViaChat,
   openAutomationId,
   openAutomationTab,
@@ -904,6 +944,7 @@ export function AutomationsSection({
                 : "automations.description",
         })}
       </p>
+      <AppLevelSettingsNotice settingsSourceServerId={settingsSourceServerId} />
     </div>
   );
 

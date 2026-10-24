@@ -38,7 +38,10 @@ import { cn } from "@/components/lib/utils.js";
 import { logger } from "@/logger.js";
 import { settingsResourceRowInteraction } from "@/settings/settingsResourceRowInteraction.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
-import { useModelSelectionServiceView } from "@/hooks/useModelSelectionView.js";
+import {
+  resolveSettingsSourceModelSelectionService,
+  useModelSelectionServiceView,
+} from "@/hooks/useModelSelectionView.js";
 import {
   useBaseWorkspaceServices,
   useWorkspaceServicesResolution,
@@ -85,6 +88,7 @@ import {
   buildSourceSettingsProjectionKey,
   filterWorkspaceTabsForSettingsSource,
   useSettingsSourceServiceRoute,
+  useSettingsSourceWorkspaceHistory,
 } from "@/settings/settingsSourceWorkspace.js";
 import { SettingsSourceUnavailable } from "@/settings/SettingsSourceUnavailable.js";
 
@@ -382,6 +386,20 @@ function AgentBadge({ children, className }: { children: string; className?: str
     >
       {children}
     </span>
+  );
+}
+
+/**
+ * 模型候选来源标注。Source 端口不提供设备侧模型目录时，候选来自本机；
+ * 必须显式告诉用户，否则按设备编辑 subagent 时会把本机模型误当成设备事实。
+ */
+function ModelSelectionSourceNote({ fromLocalFallback }: { fromLocalFallback: boolean }) {
+  const { intl } = useZCodeIntl();
+  if (!fromLocalFallback) return null;
+  return (
+    <div className="rounded-lg border border-border bg-surface px-3 py-2 text-ui-base text-foreground-subtle">
+      {intl.formatMessage({ id: "settings.subagents.model.sourceLocalFallback" })}
+    </div>
   );
 }
 
@@ -795,6 +813,7 @@ function SubagentForm({
   modelSelectionView,
   modelSelectionLoading,
   modelSelectGroups,
+  modelSelectionFromLocalFallback,
   onManageModels,
   saving,
   onCancel,
@@ -808,6 +827,8 @@ function SubagentForm({
   modelSelectionView?: ModelSelectionView | null;
   modelSelectionLoading: boolean;
   modelSelectGroups: readonly ModelSelectGroup[];
+  /** 候选来自本机回落（Source 端口没有设备侧模型目录）时为 true，用于标注来源。 */
+  modelSelectionFromLocalFallback: boolean;
   onManageModels?: () => void;
   saving: boolean;
   onCancel: () => void;
@@ -1125,6 +1146,7 @@ function SubagentForm({
               onValueCommit={setThoughtLevel}
             />
           </div>
+          <ModelSelectionSourceNote fromLocalFallback={modelSelectionFromLocalFallback} />
           {modelError ? <p className="text-ui-base text-destructive">{modelError}</p> : null}
           {thoughtLevelInvalid ? (
             <p className="text-ui-base text-destructive">
@@ -1277,6 +1299,9 @@ export function SubagentsSection({
   const initializePlugins = usePluginManagementStore((state) => state.initialize);
   const localHostServices = useBaseWorkspaceServices();
   const tabs = useTabStore((state) => state.tabs);
+  // 旧 ssh/wsl/docker 线路的归属只来自 Source Directory 历史；scope 菜单与服务锚点
+  // 必须共用同一份 history，否则选中设备后已连接项目不会出现在下拉里。
+  const settingsSourceWorkspaceHistory = useSettingsSourceWorkspaceHistory(settingsSourceServerId);
   const workspaceTabs = useMemo(() => {
     const seen = new Set<string>();
     const connected = tabs.filter(isWorkspaceTab).filter(isPluginScopeWorkspaceConnected);
@@ -1286,14 +1311,16 @@ export function SubagentsSection({
           connected.filter(
             (tab) => !tab.remoteTarget && !tab.remoteSessionId && !tab.workspaceIdentity,
           )
-        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId);
+        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId, {
+            workspaceHistory: settingsSourceWorkspaceHistory,
+          });
     return scoped.filter((tab) => {
       const key = getPluginWorkspaceKey(tab);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-  }, [settingsSourceServerId, tabs]);
+  }, [settingsSourceServerId, settingsSourceWorkspaceHistory, tabs]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [capability, setCapability] = useState<AgentsCapability | null>(null);
   const [loading, setLoading] = useState(false);
@@ -1317,6 +1344,7 @@ export function SubagentsSection({
     scopedTabs: workspaceTabs,
     fallbackWorkspacePath: workspacePath,
     fallbackWorkspaceIdentity: workspaceIdentity,
+    workspaceHistory: settingsSourceWorkspaceHistory,
   });
   const sourceScopeAnchor = sourceRoute?.anchor;
   const sourcePortCapabilities = !selectedWorkspace ? sourceRoute?.capabilities : undefined;
@@ -1371,13 +1399,19 @@ export function SubagentsSection({
     ? targetServiceResolution.rpcReady || Boolean(sourcePortCapabilities)
     : true;
   const activeScope = selectedWorkspace ? "workspace" : "user";
-  // Provider/Model 事实属于目标 Environment：Source 模式读锚点自己的 model-selection，
-  // 本机模式保持原来的 Local Host 视图。Source 没有可用锚点时禁用读取，避免把本机
-  // Provider 视图伪装成远端事实。
+  // Provider/Model 事实属于目标 Environment。Source user scope 且端口已登记时，端口只装配
+  // hooks/plugin-management/skills/subagents 等配置面，不提供 model-selection——没有设备侧
+  // 模型目录可读；此时显式回落本机并在 UI 标注来源，不能静默把本机列表当成设备事实。
+  // 无端口时保持原有锚点/本机通道，本机设置页行为不变。
+  const portUserScope = Boolean(sourcePortCapabilities);
+  const modelSelectionResolution = resolveSettingsSourceModelSelectionService({
+    portUserScope,
+    workspaceService: sourceServices.modelSelectionService,
+    localService: localHostServices.modelSelectionService,
+  });
+  const modelSelectionFromLocalFallback = modelSelectionResolution.fromLocalFallback;
   const modelSelectionRead = useModelSelectionServiceView(
-    settingsSourceServerId
-      ? sourceServices.modelSelectionService
-      : localHostServices.modelSelectionService,
+    modelSelectionResolution.service,
     !sourceUnavailable,
   );
   const modelSelectionView =
@@ -1789,6 +1823,7 @@ export function SubagentsSection({
             modelSelectionView={modelSelectionView}
             modelSelectionLoading={modelSelectionLoading}
             modelSelectGroups={subagentModelSelectGroups}
+            modelSelectionFromLocalFallback={modelSelectionFromLocalFallback}
             onManageModels={onManageModels}
             saving={saving}
             onCancel={handleCancelForm}
@@ -1878,6 +1913,9 @@ export function SubagentsSection({
           </Button>
         </div>
       ) : null}
+
+      {/* 列表行也带模型覆盖选择器：来源标注必须与表单一致，不能只在编辑页提示。 */}
+      <ModelSelectionSourceNote fromLocalFallback={modelSelectionFromLocalFallback} />
 
       {capability && !capability.userScopeAvailable ? (
         <div className="rounded-lg border border-border bg-surface px-3 py-2 text-ui-base text-foreground-subtle">

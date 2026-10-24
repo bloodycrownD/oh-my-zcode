@@ -26,6 +26,7 @@ import {
 import { deriveRemoteProjectHostId } from "../src/root/useRemoteWorkspaceHistory.js";
 import { ensureSourceServerBoundaryAcknowledged } from "../src/lib/sourceServerBoundaryOnboarding.js";
 import { selectProjectDevices } from "../src/project-sidebar/ProjectCreation.js";
+import { requiresResolvedDeviceAdditionSource } from "../src/root/deviceAdditionSource.js";
 import type { RemoteProjectDirectory, RemoteProjectHost } from "../src/project-sidebar/contract.js";
 
 const root = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "..");
@@ -351,8 +352,13 @@ test("ProjectCreation：设备面按统一 identity 投影，空目录 + 无设�
 
 test("ProjectCreation：向导回传必须仍是同一 Source，不一致明确失败（不再静默放行）", () => {
   const source = readUi("project-sidebar", "ProjectCreation.tsx");
-  // 打开向导时把设备 Source 作为 preferredSourceServerId 下发。
-  assert.match(source, /preferredSourceServerId: device\.sourceServerId,/);
+  // 能力标记：设备行的 Source 归属随 returnTarget 透传，Root 据此区分 server 形态设备与
+  // legacy ssh/wsl/docker（后者没有 Source 归属，连接成功不得被降级成取消）。
+  assert.match(
+    source,
+    /kind: "connect-device",[\s\S]*?deviceSourceServerId: device\.sourceServerId,/,
+    "connect-device 必须透传设备行的 Source 归属作为能力标记",
+  );
   // 回传校验：不同 Source 直接 reject（由 ProjectEditor 错误行展示），不放行到原目录流程。
   assert.match(
     source,
@@ -365,6 +371,59 @@ test("ProjectCreation：向导回传必须仍是同一 Source，不一致明确�
     /device\.sourceServerId === undefined \|\|\s*result\.sourceServerId === device\.sourceServerId/,
     "旧的恒真放行式校验必须已拆除",
   );
+});
+
+test("requiresResolvedDeviceAdditionSource：按设备行 Source 归属分流（legacy 不要求反解）", () => {
+  const target = (
+    overrides: Partial<Parameters<typeof requiresResolvedDeviceAdditionSource>[0]>,
+  ) => ({
+    kind: "connect-device" as const,
+    isCurrent: () => true,
+    finish() {},
+    ...overrides,
+  });
+  // legacy ssh/wsl/docker 设备没有 Source 归属：反解失败仍回 connected 走原流程。
+  assert.equal(requiresResolvedDeviceAdditionSource(target({})), false);
+  // server 形态设备带 Source 归属：必须确认本次连上的仍是同一 Source。
+  assert.equal(
+    requiresResolvedDeviceAdditionSource(target({ deviceSourceServerId: "dev-1" })),
+    true,
+  );
+  // 「添加设备」没有设备行，owner 依赖回传的 Source 选中新设备。
+  assert.equal(requiresResolvedDeviceAdditionSource(target({ kind: "add-device" })), true);
+});
+
+test("Root：设备回执分流——只有需要 Source 归属时才降级取消并回收会话", () => {
+  const source = readUi("Root.tsx");
+  assert.match(
+    source,
+    /const requiresResolvedSource = requiresResolvedDeviceAdditionSource\(\s*pendingAddition\.target,?\s*\);/,
+    "分流必须走统一判定函数，不能按 returnTarget.kind 一刀切",
+  );
+  // legacy 设备（requiresResolvedSource=false）必须回 connected；cancelled 只属于需要归属的设备。
+  assert.match(
+    source,
+    /!sourceServerId && requiresResolvedSource\s*\?\s*\{ kind: "cancelled" \}\s*:\s*\{ kind: "connected", sourceServerId \}/,
+    "反解失败只在设备能归属 Source 时取消；legacy 连接成功必须保持 connected",
+  );
+  assert.match(
+    source,
+    /if \(!sourceServerId && requiresResolvedSource\) \{\s*\/\/ 归属未确认时不会再有 tab 使用这条 session/,
+    "只有取消回执才回收未提交会话；legacy 的会话必须保留给原流程",
+  );
+  // owner 的 finish 拒绝（例如向导改连到另一台 Source）时，连接没有落成 tab，
+  // 必须回收 session 再把错误交给连接 flow 重试。
+  assert.match(
+    source,
+    /catch \(error\) \{[\s\S]*?await releaseUncommittedRemoteSession\(sessionId\);[\s\S]*?throw error;/,
+    "finish 拒绝后必须回收未提交 session 并继续抛出，不能在会话存储里留下孤儿",
+  );
+  // 已死入口偏好不得再回潮：类型声明与偏好键归一化列表都清干净。
+  assert.doesNotMatch(readUi("app-shell", "types.ts"), /preferredSourceServerId/);
+  assert.doesNotMatch(source, /"preferredSourceServerId"/);
+  // 同批清理：向导已按本次实际 target 反解 Source，入口不再消费这两个提示字段。
+  assert.doesNotMatch(readUi("app-shell", "types.ts"), /preferredProfileId|preferredTarget/);
+  assert.doesNotMatch(source, /"preferredProfileId"|"preferredTarget"/);
 });
 
 test("selectProjectDevices：运行时投影（纯本机不下拉 / server host 带 Source / legacy 无 Source）", () => {

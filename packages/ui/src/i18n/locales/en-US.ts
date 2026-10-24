@@ -2702,6 +2702,9 @@ const enUS: Record<string, string> = {
   "settings.scope.user": "User",
   "settings.scope.workspace": "Workspace",
   "settings.scope.default": "Default",
+  "settings.scope.appLevel": "App-level setting",
+  "settings.scope.appLevelNotice":
+    "The selected device does not affect this section: actions always apply to this app and the active workspace, not the selected device.",
   "settings.plugins.scope.inheritedUser": "Inherits User default",
   "settings.plugins.scope.userDefault": "User default",
   "settings.plugins.scope.workspaceOverride": "Workspace override",
@@ -3926,6 +3929,8 @@ const enUS: Record<string, string> = {
   "settings.subagents.model.select": "Select model",
   "settings.subagents.model.main": "Main",
   "settings.subagents.model.lite": "Lite",
+  "settings.subagents.model.sourceLocalFallback":
+    "This device does not provide a model catalog; model options come from this app.",
   "settings.subagents.permissionMode.auto": "Auto",
   "settings.subagents.permissionMode.plan": "Plan",
   "settings.subagents.color.blue": "Blue",
@@ -7272,6 +7277,8 @@ const enUS: Record<string, string> = {
   "settings.source.deviceName": "Device name",
   "settings.source.deviceNameRequired": "Device name is required.",
   "settings.source.devicesHeading": "Devices",
+  "settings.source.deviceSourceUnresolved":
+    "The device is connected, but its Source could not be determined. Try again later.",
   "settings.source.disconnectHint": "Remote tasks will continue running after you disconnect.",
   "settings.source.editConnection": "Edit",
   "settings.source.editConnectionDescription":

@@ -1,6 +1,10 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useServices } from "@/hooks/useServices.js";
-import { setMcpStoreDirectoryService, useMcpStore } from "@/store/mcpStore.js";
+import {
+  claimMcpStoreDirectoryService,
+  releaseMcpStoreDirectoryService,
+  useMcpStore,
+} from "@/store/mcpStore.js";
 
 export function useEnsureWorkspaceMcpLoaded(
   workspaceAbsPath: string,
@@ -8,14 +12,19 @@ export function useEnsureWorkspaceMcpLoaded(
   rpcReady: boolean,
 ) {
   const services = useServices();
+  // App 壳层是 workspace 目录服务的常驻持有者。claim/release 与设置页端口面板共用
+  // 同一张登记表：本 hook 因 rpcReady / 服务变化重跑时只释放自己的令牌，不会清掉
+  // 端口面板仍在持有的登记（反之亦然）。
+  const directoryServiceOwnerRef = useRef<object>({});
 
   useEffect(() => {
     if (!rpcReady) {
       return;
     }
-    setMcpStoreDirectoryService(services.mcpSyncService);
+    const owner = directoryServiceOwnerRef.current;
+    claimMcpStoreDirectoryService(owner, services.mcpSyncService, "workspace");
     return () => {
-      setMcpStoreDirectoryService(null);
+      releaseMcpStoreDirectoryService(owner);
     };
   }, [rpcReady, services.mcpSyncService]);
 

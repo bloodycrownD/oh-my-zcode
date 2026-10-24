@@ -44,15 +44,117 @@ import { isRemoteWorkspaceDisconnectedError } from "@/lib/remoteWorkspaceService
 import { mergeMcpServerStatusSnapshots } from "@/store/mcpStoreStatusList.js";
 
 let mcpPlatformService: McpPlatformService | null = null;
-let mcpDirectoryService: McpDirectoryService | null = null;
+
+/**
+ * 目录服务持有者类别：Source 端口是设备 user scope 的权威读写面；App 级 workspace
+ * 登记只是常驻壳层的兜底。端口持有期间不能被 App 的重跑静默覆盖。
+ */
+export type McpStoreDirectoryServiceOwnerKind = "workspace" | "source-port";
+
+interface McpDirectoryServiceClaim {
+  kind: McpStoreDirectoryServiceOwnerKind;
+  sequence: number;
+  service: McpDirectoryService;
+}
+
+/**
+ * 目录服务槽位的所有权登记表。
+ *
+ * 过去是「一个模块级变量 + 谁卸载谁置 null」：设置页端口面板 cleanup 会连同 App 级
+ * useEnsureWorkspaceMcpLoaded 的登记一起抹掉，而那个 hook 依赖未变不会重跑，槽位此后
+ * 恒为 null，远端 workspace 的 MCP 写入就落到本机 platform.saveMcpToUserDirectory。
+ *
+ * 现在所有持有者（App 壳层、Source 端口面板）用稳定实例令牌 claim/release：
+ * - 同一 owner 重复 claim 视为续期（Map 覆盖），不会让计数虚增；
+ * - 任一方 release 只删除自己的登记，登记表大小即活跃持有者数量；
+ * - 只有登记表归零后槽位才真正为空。
+ */
+const mcpDirectoryServiceClaims = new Map<object, McpDirectoryServiceClaim>();
+let mcpDirectoryServiceClaimSequence = 0;
 
 export function setMcpStorePlatform(platform: McpPlatformService | null): void {
   mcpPlatformService = platform;
 }
 
-export function setMcpStoreDirectoryService(service: McpDirectoryService | null): void {
-  mcpDirectoryService = service;
+/** 登记一个目录服务持有者；`owner` 必须是调用方组件实例的稳定令牌（useRef）。 */
+export function claimMcpStoreDirectoryService(
+  owner: object,
+  service: McpDirectoryService,
+  kind: McpStoreDirectoryServiceOwnerKind = "workspace",
+): void {
+  mcpDirectoryServiceClaimSequence += 1;
+  mcpDirectoryServiceClaims.set(owner, {
+    kind,
+    sequence: mcpDirectoryServiceClaimSequence,
+    service,
+  });
 }
+
+/** 释放持有者登记；其他持有者仍有效时槽位保持不变，全部释放后才回落到 null。 */
+export function releaseMcpStoreDirectoryService(owner: object): void {
+  mcpDirectoryServiceClaims.delete(owner);
+}
+
+/**
+ * 当前生效的目录服务：Source 端口持有者优先（Source user scope 的权威读写面），
+ * 同类持有者取最近一次 claim；登记表为空（未加载 / 已全部释放）时返回 null，
+ * 调用方随即可回落到本机 platform 行为。
+ */
+export function getMcpStoreDirectoryService(): McpDirectoryService | null {
+  let effective: McpDirectoryServiceClaim | null = null;
+  for (const claim of mcpDirectoryServiceClaims.values()) {
+    if (
+      !effective ||
+      (claim.kind === "source-port" && effective.kind !== "source-port") ||
+      (claim.kind === effective.kind && claim.sequence > effective.sequence)
+    ) {
+      effective = claim;
+    }
+  }
+  return effective?.service ?? null;
+}
+
+/**
+ * 隔离读取目标：按 scopeKey（Source 设置账本键）给设备 user scope 建一份独立投影。
+ *
+ * `directoryService` 必须由调用方显式传入，不能回落到模块级 claim：设置页覆盖期间
+ * App 级常驻持有者仍在登记表里，回落会把设备读取混到当前 workspace 的读写面上。
+ */
+export interface McpIsolatedScopeTarget {
+  scopeKey: string;
+  directoryService: McpDirectoryService;
+  /**
+   * 该设备已打开 workspace 的锚点路径（没有锚点时省略）。
+   *
+   * user scope 面板本身不需要项目路径；但 mcp/list 的 connect 语义会用显式下发的
+   * `mcpServers` 替换运行态集合（见 CLI 的 `explicitMcpServersProvided` 分支）。
+   * 因此读取时带上真实锚点，把该 workspace 的项目级 MCP 一并投影进隔离快照，
+   * 状态刷新时才能像旧行为一样同时覆盖 user + 该 workspace 的配置。
+   */
+  workspacePath?: string;
+}
+
+/**
+ * 一个隔离 scope 的完整投影。与全局 `currentProjectPath` / `currentWorkspaceIdentity` /
+ * `nativeServers` / `servers` 完全无关：设备侧读取只落在这里，设置页关闭后不会改变
+ * App 级 store 对当前 workspace 的判断，也不会把设备 MCP 的 env/header 下发给本机 Agent。
+ */
+interface McpIsolatedServerSnapshot {
+  nativeServers: NativeMcpServerRecord[];
+  servers: ZCodeMcpServer[];
+  /** 读取时使用的设备 workspace 锚点；workspace scope 条目只在它匹配时下发。 */
+  workspacePath?: string;
+  /** 该 scope 内的启停覆盖（按 serverId）；同名服务器在不同设备之间互不影响。 */
+  enabledStates: Record<string, boolean>;
+  statusSnapshots: Record<string, ZCodeMcpServerStatusSnapshot>;
+}
+
+const MCP_ISOLATED_EMPTY_SNAPSHOT: McpIsolatedServerSnapshot = {
+  nativeServers: [],
+  servers: [],
+  enabledStates: {},
+  statusSnapshots: {},
+};
 
 interface UpdateServerStatusOptions {
   invalidateStatusListRequests?: boolean;
@@ -131,6 +233,48 @@ interface McpStoreState {
   deletePreloadedMcpServer: (source: McpSource, name: string) => void;
   setCurrentSessionId: (sessionId: string | null) => void;
   migrateLegacyCommonMcp: () => Promise<MigrateLegacyResult>;
+  /** 按 scopeKey 隔离的设备 user scope 投影；不参与全局 current* 的匹配。 */
+  isolatedServerSnapshots: Record<string, McpIsolatedServerSnapshot>;
+  loadIsolatedMcpServers: (target: McpIsolatedScopeTarget) => Promise<boolean>;
+  addIsolatedMcpServer: (
+    target: McpIsolatedScopeTarget,
+    source: McpSource,
+    name: string,
+    config: McpServerConfig,
+    projectPath?: string,
+  ) => Promise<void>;
+  updateIsolatedMcpServer: (
+    target: McpIsolatedScopeTarget,
+    source: McpSource,
+    name: string,
+    config: McpServerConfig,
+    projectPath?: string,
+  ) => Promise<void>;
+  deleteIsolatedMcpServer: (
+    target: McpIsolatedScopeTarget,
+    source: McpSource,
+    name: string,
+    projectPath?: string,
+  ) => Promise<void>;
+  toggleIsolatedServer: (
+    target: McpIsolatedScopeTarget,
+    id: string,
+    enabled: boolean,
+  ) => Promise<void>;
+  getIsolatedEnabledMcpServers: (scopeKey: string, provider: string) => ZCodeAgentMcpServer[];
+  beginIsolatedServerStatusListRefresh: (scopeKey: string, mode?: ZCodeMcpListMode) => number;
+  markIsolatedServerStatusListRefreshFailed: (
+    scopeKey: string,
+    error: string,
+    requestEpoch: number,
+    mode?: ZCodeMcpListMode,
+  ) => void;
+  mergeIsolatedServerStatusSnapshots: (
+    scopeKey: string,
+    statuses: Record<string, ZCodeMcpServerStatusSnapshot>,
+    requestEpoch: number,
+    mode?: "connect" | "status",
+  ) => void;
 }
 
 export const useMcpStore = create<McpStoreState>((set, get) => {
@@ -140,10 +284,31 @@ export const useMcpStore = create<McpStoreState>((set, get) => {
     connect: 0,
     status: 0,
   };
+  // 隔离 scope 的 epoch 与请求去重必须各自独立：全局 workspace 与设备 user scope
+  // 同时在刷新时，任何一方的 begin/invalidate 都不能作废另一方的在途结果。
+  const isolatedStatusListEpochs = new Map<string, Record<ZCodeMcpListMode, number>>();
+  const isolatedLoadPromises = new Map<string, Promise<boolean>>();
+  // 同一 scope 的锚点路径可能切换；晚返回的旧读取不能覆盖新锚点的快照。
+  const latestIsolatedLoadKey = new Map<string, string>();
 
   function invalidateStatusListRequests(): void {
     statusListEpochs.connect += 1;
     statusListEpochs.status += 1;
+  }
+
+  function getIsolatedStatusListEpochs(scopeKey: string): Record<ZCodeMcpListMode, number> {
+    let epochs = isolatedStatusListEpochs.get(scopeKey);
+    if (!epochs) {
+      epochs = { connect: 0, status: 0 };
+      isolatedStatusListEpochs.set(scopeKey, epochs);
+    }
+    return epochs;
+  }
+
+  function invalidateIsolatedStatusListRequests(scopeKey: string): void {
+    const epochs = getIsolatedStatusListEpochs(scopeKey);
+    epochs.connect += 1;
+    epochs.status += 1;
   }
 
   function resolveMcpDirectoryService(
@@ -156,7 +321,7 @@ export const useMcpStore = create<McpStoreState>((set, get) => {
       // 到用户级 ZCode Agent MCP 的迁移；目录服务只用于远端 workspace 覆盖路由。
       return null;
     }
-    return directoryService ?? mcpDirectoryService;
+    return directoryService ?? getMcpStoreDirectoryService();
   }
 
   function commitState(partial: {
@@ -214,6 +379,98 @@ export const useMcpStore = create<McpStoreState>((set, get) => {
     set(commitState({ nativeServers }));
   }
 
+  function rebuildIsolatedSnapshot(
+    state: McpStoreState,
+    nativeServers: NativeMcpServerRecord[],
+    enabledStates: Record<string, boolean>,
+    existingServers: ZCodeMcpServer[],
+    statusSnapshots: Record<string, ZCodeMcpServerStatusSnapshot>,
+    workspacePath?: string,
+  ): McpIsolatedServerSnapshot {
+    return {
+      nativeServers,
+      servers: buildServerList(
+        state.config,
+        nativeServers,
+        enabledStates,
+        state.deletedPreloadMcpServers,
+        existingServers,
+      ),
+      workspacePath,
+      enabledStates,
+      statusSnapshots,
+    };
+  }
+
+  function updateIsolatedNativeServer(
+    scopeKey: string,
+    source: CliMcpSource,
+    name: string,
+    config: McpServerConfig,
+    projectPath?: string,
+  ): void {
+    set((state) => {
+      const previous = state.isolatedServerSnapshots[scopeKey] ?? MCP_ISOLATED_EMPTY_SNAPSHOT;
+      const nativeServers = previous.nativeServers.slice();
+      const targetIndex = nativeServers.findIndex(
+        (server) =>
+          server.source === source && server.name === name && server.projectPath === projectPath,
+      );
+      if (targetIndex >= 0) {
+        const existing = nativeServers[targetIndex];
+        if (!existing) {
+          return {};
+        }
+        nativeServers[targetIndex] = { ...existing, config };
+      } else {
+        const scope: McpScope = projectPath ? "workspace" : "user";
+        nativeServers.push({
+          source,
+          scope,
+          name,
+          config,
+          enabled: true,
+          projectPath,
+        });
+      }
+      return {
+        isolatedServerSnapshots: {
+          ...state.isolatedServerSnapshots,
+          [scopeKey]: rebuildIsolatedSnapshot(
+            state,
+            nativeServers,
+            previous.enabledStates,
+            previous.servers,
+            previous.statusSnapshots,
+            previous.workspacePath,
+          ),
+        },
+      };
+    });
+  }
+
+  async function persistIsolatedChange(
+    target: McpIsolatedScopeTarget,
+    payload: {
+      action: "upsert" | "delete" | "set-enabled";
+      source: CliMcpSource;
+      name: string;
+      config?: McpServerConfig;
+      enabled?: boolean;
+      projectPath?: string;
+      location?: ZCodeMcpServer["location"];
+    },
+  ): Promise<void> {
+    await persistCliMcpToUserDirectory(mcpPlatformService, payload, target.directoryService).catch(
+      (error) => {
+        logger.warn(
+          `[mcpStore] persist isolated MCP failed scope=${target.scopeKey}`,
+          String(error),
+        );
+      },
+    );
+  }
+
   async function persistScopedChange(
     source: McpSource,
     payload: {
@@ -248,6 +505,7 @@ export const useMcpStore = create<McpStoreState>((set, get) => {
     deletedPreloadMcpServers: new Set(),
     isConfigLoaded: false,
     currentSessionId: null,
+    isolatedServerSnapshots: {},
 
     loadConfig: () => {
       const config = loadPersistedConfig();
@@ -724,6 +982,337 @@ export const useMcpStore = create<McpStoreState>((set, get) => {
         set(commitState({ nativeServers: servers }));
       }
       return migration;
+    },
+
+    loadIsolatedMcpServers: async (target) => {
+      if (typeof window === "undefined") {
+        return false;
+      }
+      if (!get().isConfigLoaded) {
+        get().loadConfig();
+      }
+      const { scopeKey, workspacePath } = target;
+      const loadKey = `${scopeKey}\0${workspacePath ?? ""}`;
+      const inFlight = isolatedLoadPromises.get(loadKey);
+      if (inFlight) {
+        return await inFlight;
+      }
+      latestIsolatedLoadKey.set(scopeKey, loadKey);
+      const promise = (async () => {
+        try {
+          // 没有真实 workspace 锚点时只读设备用户目录；有锚点时连同该 workspace 的
+          // 项目级 MCP 一起读取，供 mcp/list 的 replace 语义下发完整集合。
+          const nativeServers = await fetchNativeMcpServers(
+            mcpPlatformService,
+            workspacePath ? { workspacePath } : undefined,
+            target.directoryService,
+          );
+          if (latestIsolatedLoadKey.get(scopeKey) !== loadKey) {
+            // 同一 scope 已经切到新锚点；旧结果不能写进快照。
+            return false;
+          }
+          set((state) => {
+            const previous = state.isolatedServerSnapshots[scopeKey] ?? MCP_ISOLATED_EMPTY_SNAPSHOT;
+            return {
+              isolatedServerSnapshots: {
+                ...state.isolatedServerSnapshots,
+                [scopeKey]: rebuildIsolatedSnapshot(
+                  state,
+                  nativeServers,
+                  previous.enabledStates,
+                  previous.servers,
+                  previous.statusSnapshots,
+                  workspacePath,
+                ),
+              },
+            };
+          });
+          return true;
+        } catch (error) {
+          logger.warn(
+            `[mcpStore] load isolated MCP servers failed scope=${scopeKey}`,
+            String(error),
+          );
+          return false;
+        } finally {
+          isolatedLoadPromises.delete(loadKey);
+        }
+      })();
+      isolatedLoadPromises.set(loadKey, promise);
+      return await promise;
+    },
+
+    addIsolatedMcpServer: async (target, source, name, config, projectPath) => {
+      invalidateIsolatedStatusListRequests(target.scopeKey);
+      const targetSource: CliMcpSource = source === "mcp" ? "zcodeagentmcp" : source;
+      // 先落盘再更新投影，避免保存后立即触发的 mcp/list 读到旧配置。
+      await persistIsolatedChange(target, {
+        action: "upsert",
+        source: targetSource,
+        name,
+        config,
+        projectPath,
+      });
+      // user scope 与当前锚点 workspace 的条目都在隔离快照里；写入其它 workspace
+      // 的配置只落盘，避免把别的项目配置混进当前投影。
+      if (!projectPath || projectPath === target.workspacePath) {
+        updateIsolatedNativeServer(target.scopeKey, targetSource, name, config, projectPath);
+      }
+    },
+
+    updateIsolatedMcpServer: async (target, source, name, config, projectPath) => {
+      invalidateIsolatedStatusListRequests(target.scopeKey);
+      const targetSource: CliMcpSource = source === "mcp" ? "zcodeagentmcp" : source;
+      await persistIsolatedChange(target, {
+        action: "upsert",
+        source: targetSource,
+        name,
+        config,
+        projectPath,
+      });
+      if (!projectPath || projectPath === target.workspacePath) {
+        updateIsolatedNativeServer(target.scopeKey, targetSource, name, config, projectPath);
+      }
+    },
+
+    deleteIsolatedMcpServer: async (target, source, name, projectPath) => {
+      invalidateIsolatedStatusListRequests(target.scopeKey);
+      const targetSource: CliMcpSource = source === "mcp" ? "zcodeagentmcp" : source;
+      await persistIsolatedChange(target, {
+        action: "delete",
+        source: targetSource,
+        name,
+        projectPath,
+      });
+      if (projectPath && projectPath !== target.workspacePath) {
+        return;
+      }
+      set((state) => {
+        const previous = state.isolatedServerSnapshots[target.scopeKey];
+        if (!previous) {
+          return {};
+        }
+        const nativeServers = previous.nativeServers.filter(
+          (server) =>
+            !(
+              server.source === targetSource &&
+              server.name === name &&
+              server.projectPath === projectPath
+            ),
+        );
+        return {
+          isolatedServerSnapshots: {
+            ...state.isolatedServerSnapshots,
+            [target.scopeKey]: rebuildIsolatedSnapshot(
+              state,
+              nativeServers,
+              previous.enabledStates,
+              previous.servers,
+              previous.statusSnapshots,
+              previous.workspacePath,
+            ),
+          },
+        };
+      });
+    },
+
+    toggleIsolatedServer: async (target, id, enabled) => {
+      invalidateIsolatedStatusListRequests(target.scopeKey);
+      const snapshot = get().isolatedServerSnapshots[target.scopeKey];
+      const targetServer = snapshot?.servers.find((server) => server.id === id);
+      if (!targetServer) {
+        return;
+      }
+      if (targetServer.source !== "mcp") {
+        await persistIsolatedChange(target, {
+          action: "set-enabled",
+          source: targetServer.source,
+          name: targetServer.name,
+          enabled,
+          projectPath: targetServer.projectPath,
+          location: targetServer.location,
+        });
+      }
+      set((state) => {
+        const current = state.isolatedServerSnapshots[target.scopeKey];
+        if (!current) {
+          return {};
+        }
+        const enabledStates = { ...current.enabledStates, [id]: enabled };
+        return {
+          isolatedServerSnapshots: {
+            ...state.isolatedServerSnapshots,
+            [target.scopeKey]: {
+              ...current,
+              enabledStates,
+              servers: current.servers.map((server): ZCodeMcpServer => {
+                if (server.id !== id) {
+                  return server;
+                }
+                if (enabled) {
+                  return { ...server, enabled };
+                }
+                return {
+                  ...server,
+                  enabled,
+                  status: "unknown",
+                  authorization: undefined,
+                  error: undefined,
+                  failureKind: undefined,
+                  serverRequestId: undefined,
+                  toolCount: undefined,
+                };
+              }),
+            },
+          },
+        };
+      });
+    },
+
+    getIsolatedEnabledMcpServers: (scopeKey, _provider) => {
+      const snapshot = get().isolatedServerSnapshots[scopeKey];
+      if (!snapshot) {
+        return [];
+      }
+      const candidates = new Map<string, ZCodeMcpServer>();
+      for (const server of snapshot.servers) {
+        const isEnabled = snapshot.enabledStates[server.id] ?? server.enabled;
+        if (!isEnabled) continue;
+        if (server.source !== "zcodeagentmcp") continue;
+        // 隔离快照可能包含锚点 workspace 的项目级 MCP；只下发与本次读取锚点一致的
+        // workspace 条目，绝不把别的项目配置带给该设备的 Agent。
+        if (server.scope === "workspace" && server.projectPath !== snapshot.workspacePath) {
+          continue;
+        }
+        const existing = candidates.get(server.name);
+        if (!existing || getServerPriority(server) > getServerPriority(existing)) {
+          candidates.set(server.name, server);
+        }
+      }
+      const result: ZCodeAgentMcpServer[] = [];
+      for (const server of candidates.values()) {
+        const zcodeAgentServer = convertToZCodeAgentMcpServer(server.name, server.config);
+        if (zcodeAgentServer) result.push(zcodeAgentServer);
+      }
+      return result;
+    },
+
+    beginIsolatedServerStatusListRefresh: (scopeKey, mode = "connect") => {
+      const epochs = getIsolatedStatusListEpochs(scopeKey);
+      epochs[mode] += 1;
+      const requestEpoch = epochs[mode];
+      if (mode === "status") {
+        // 与全局语义一致：OAuth status-only 轮询只读 runtime snapshot，不改本地投影。
+        return requestEpoch;
+      }
+      set((state) => {
+        const snapshot = state.isolatedServerSnapshots[scopeKey];
+        if (!snapshot) {
+          return {};
+        }
+        return {
+          isolatedServerSnapshots: {
+            ...state.isolatedServerSnapshots,
+            [scopeKey]: {
+              ...snapshot,
+              servers: snapshot.servers.map((server): ZCodeMcpServer => {
+                const enabled = snapshot.enabledStates[server.id] ?? server.enabled;
+                if (
+                  server.source !== "zcodeagentmcp" ||
+                  !enabled ||
+                  (!server.changed && server.status !== "unknown")
+                ) {
+                  return server;
+                }
+                return {
+                  ...server,
+                  status: "connecting",
+                  authorization: undefined,
+                  error: undefined,
+                  failureKind: undefined,
+                  serverRequestId: undefined,
+                  toolCount: undefined,
+                };
+              }),
+            },
+          },
+        };
+      });
+      return requestEpoch;
+    },
+
+    markIsolatedServerStatusListRefreshFailed: (
+      scopeKey,
+      error,
+      requestEpoch,
+      mode = "connect",
+    ) => {
+      const epochs = getIsolatedStatusListEpochs(scopeKey);
+      if (requestEpoch !== epochs[mode] || mode === "status") {
+        // status-only 轮询是只读 best-effort；临时失败不能清空已有授权快照。
+        return;
+      }
+      set((state) => {
+        const snapshot = state.isolatedServerSnapshots[scopeKey];
+        if (!snapshot) {
+          return {};
+        }
+        return {
+          isolatedServerSnapshots: {
+            ...state.isolatedServerSnapshots,
+            [scopeKey]: {
+              ...snapshot,
+              statusSnapshots: {},
+              servers: snapshot.servers.map((server): ZCodeMcpServer => {
+                const enabled = snapshot.enabledStates[server.id] ?? server.enabled;
+                if (
+                  server.source !== "zcodeagentmcp" ||
+                  !enabled ||
+                  server.status !== "connecting"
+                ) {
+                  return server;
+                }
+                return {
+                  ...server,
+                  status: "error",
+                  authorization: undefined,
+                  error,
+                  failureKind: "status_unavailable",
+                  serverRequestId: undefined,
+                  toolCount: undefined,
+                };
+              }),
+            },
+          },
+        };
+      });
+    },
+
+    mergeIsolatedServerStatusSnapshots: (scopeKey, statuses, requestEpoch, mode = "connect") => {
+      const epochs = getIsolatedStatusListEpochs(scopeKey);
+      if (requestEpoch !== epochs[mode]) {
+        return;
+      }
+      set((state) => {
+        const snapshot = state.isolatedServerSnapshots[scopeKey];
+        if (!snapshot) {
+          return {};
+        }
+        const nextStatusSnapshots =
+          mode === "status" ? { ...snapshot.statusSnapshots, ...statuses } : statuses;
+        return {
+          isolatedServerSnapshots: {
+            ...state.isolatedServerSnapshots,
+            [scopeKey]: {
+              ...snapshot,
+              statusSnapshots: nextStatusSnapshots,
+              servers: mergeMcpServerStatusSnapshots(snapshot.servers, nextStatusSnapshots, {
+                markMissingConnectingAsError: mode !== "status",
+              }),
+            },
+          },
+        };
+      });
     },
   };
 });

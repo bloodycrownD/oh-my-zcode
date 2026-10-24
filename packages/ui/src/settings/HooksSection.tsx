@@ -40,6 +40,7 @@ import {
   buildSettingsSourceAuthorityKey,
   filterWorkspaceTabsForSettingsSource,
   useSettingsSourceServiceRoute,
+  useSettingsSourceWorkspaceHistory,
 } from "@/settings/settingsSourceWorkspace.js";
 import { SettingsSourceUnavailable } from "@/settings/SettingsSourceUnavailable.js";
 
@@ -170,6 +171,11 @@ export function HooksSection({
   const [editingHook, setEditingHook] = useState<Hook | null>(null);
   const [query, setQuery] = useState("");
   const tabs = useTabStore((state) => state.tabs);
+  // 旧 ssh/wsl/docker 线路只有经 Source Directory 历史映射才能归到选中设备；scope 菜单
+  // 与服务锚点必须用同一份 history，否则下拉看不到已连接项目、锚点却已可用。
+  // 同一份值也注入 useSettingsSourceServiceRoute：快照到达后 route 复用该值、不再自建
+  // management 快照订阅（hasExternalWorkspaceHistory），菜单与锚点只认一处事实。
+  const settingsSourceWorkspaceHistory = useSettingsSourceWorkspaceHistory(settingsSourceServerId);
   const workspaceTabs = useMemo(() => {
     const seen = new Set<string>();
     const connected = tabs.filter(isWorkspaceTab).filter(isPluginScopeWorkspaceConnected);
@@ -178,14 +184,16 @@ export function HooksSection({
     const scoped =
       settingsSourceServerId === undefined
         ? connected
-        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId);
+        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId, {
+            workspaceHistory: settingsSourceWorkspaceHistory,
+          });
     return scoped.filter((tab) => {
       const key = getPluginWorkspaceKey(tab);
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
     });
-  }, [settingsSourceServerId, tabs]);
+  }, [settingsSourceServerId, settingsSourceWorkspaceHistory, tabs]);
   const [selectedScopeKey, setSelectedScopeKey] = useState("user");
   const deferredQuery = useDeferredValue(query);
   const selectedWorkspace = workspaceTabs.find(
@@ -201,6 +209,7 @@ export function HooksSection({
     scopedTabs: workspaceTabs,
     fallbackWorkspacePath: workspacePath,
     fallbackWorkspaceIdentity: workspaceIdentity,
+    workspaceHistory: settingsSourceWorkspaceHistory,
   });
   const sourceScopeAnchor = sourceRoute?.anchor;
   const sourcePortCapabilities = !selectedWorkspace ? sourceRoute?.capabilities : undefined;

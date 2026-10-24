@@ -32,16 +32,32 @@ import {
   selectPluginsForScope,
 } from "@/settings/pluginCapabilityProjection.js";
 import type { WorkspaceTabState } from "@/store/tabStore.js";
+import type { SettingsSourceCapabilityServices } from "@/settings/settingsSourceWorkspace.js";
 import {
   resolveCommandScopeRecovery,
   resolveCommandStorageTarget,
   shouldRefreshCurrentCommandList,
 } from "@/settings/commandWorkspaceScope.js";
 
+/**
+ * Source user scope 的端口服务面。
+ *
+ * 字段直接取自 {@link SettingsSourceCapabilityServices}（source-settings 服务集的唯一
+ * 投影），避免这里再写一份字段名后与端口能力漂移。`authorityKey` 是 Source 设置账本键：
+ * 命令读取按 user scope 不带 workspacePath，账本键只用于 commandsStore /
+ * pluginManagementStore 的投影隔离，不会发给命令写入 RPC。
+ */
+export type CommandsSourcePortServices = Pick<
+  SettingsSourceCapabilityServices,
+  "commandsService" | "pluginManagementService" | "settingsSyncService"
+> & { authorityKey: string };
+
 interface CommandsSectionProps {
   workspacePath?: string | null;
   workspaceIdentity?: string;
   scopeFilter: "user" | "workspace";
+  /** Source user scope 的端口服务；存在时命令读写直接用端口实现，不再走 workspace 解析。 */
+  sourcePortServices?: CommandsSourcePortServices;
   parentScopeKey: string;
   workspaceTabs: WorkspaceTabState[];
   searchQuery: string;
@@ -54,6 +70,7 @@ export function CommandsSection({
   workspacePath,
   workspaceIdentity,
   scopeFilter,
+  sourcePortServices,
   parentScopeKey,
   workspaceTabs,
   searchQuery,
@@ -64,7 +81,12 @@ export function CommandsSection({
   const { intl, locale } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
 
-  const currentWorkspaceKey = workspaceIdentity?.trim() || workspacePath || "";
+  // 端口只覆盖 Source user scope：user scope 命令只读用户目录，不携带 workspacePath；
+  // 账本键仅用于 store 投影隔离，避免切设备时把 A 的命令行（含 filePath）投影给 B。
+  const portServices = scopeFilter === "user" ? sourcePortServices : undefined;
+  const serviceWorkspacePath = portServices ? undefined : (workspacePath ?? undefined);
+  const effectiveWorkspaceIdentity = portServices?.authorityKey ?? workspaceIdentity;
+  const currentWorkspaceKey = effectiveWorkspaceIdentity?.trim() || serviceWorkspacePath || "";
   const currentWorkspaceTab = workspaceTabs.find(
     (tab) => getPluginWorkspaceKey(tab) === currentWorkspaceKey,
   );
@@ -72,13 +94,20 @@ export function CommandsSection({
   // ServiceProvider，会把 B 的路径发往 A 的 remote host。两者统一走 target 解析结果，
   // 并在连接就绪前暂停 RPC，不回退到当前激活 workspace 的 service。
   const listServiceResolution = useWorkspaceServicesResolution(
-    currentWorkspaceTab?.workspacePath ?? workspacePath,
+    currentWorkspaceTab?.workspacePath ?? serviceWorkspacePath,
     currentWorkspaceTab?.remoteSessionId,
-    currentWorkspaceTab?.workspaceIdentity ?? workspaceIdentity,
+    currentWorkspaceTab?.workspaceIdentity ?? effectiveWorkspaceIdentity,
     currentWorkspaceTab?.remoteTarget,
   );
-  const { commandsService, pluginManagementService, settingsSyncService } =
-    listServiceResolution.services;
+  // 端口是 Source user scope 的权威读数面：存在时直接用端口服务，不再借 workspace 服务。
+  const commandsService =
+    portServices?.commandsService ?? listServiceResolution.services.commandsService;
+  const pluginManagementService =
+    portServices?.pluginManagementService ?? listServiceResolution.services.pluginManagementService;
+  const settingsSyncService =
+    portServices?.settingsSyncService ?? listServiceResolution.services.settingsSyncService;
+  // 端口存在即数据面就绪；锚点等待连接只在没有端口时阻塞。
+  const dataRpcReady = listServiceResolution.rpcReady || Boolean(portServices);
 
   const {
     commands,
@@ -91,10 +120,10 @@ export function CommandsSection({
     deleteCommand,
     toggleCommand,
   } = useCommands({
-    workspacePath: workspacePath ?? undefined,
-    workspaceIdentity,
+    workspacePath: serviceWorkspacePath,
+    workspaceIdentity: effectiveWorkspaceIdentity,
     commandsService,
-    enabled: listServiceResolution.rpcReady,
+    enabled: dataRpcReady,
   });
 
   const [showForm, setShowForm] = useState(false);
@@ -107,12 +136,18 @@ export function CommandsSection({
   );
   const formServiceTarget = formTargetWorkspace ?? currentWorkspaceTab;
   const formServiceResolution = useWorkspaceServicesResolution(
-    formServiceTarget?.workspacePath ?? workspacePath,
+    formServiceTarget?.workspacePath ?? serviceWorkspacePath,
     formServiceTarget?.remoteSessionId,
     formServiceTarget?.workspaceIdentity ?? workspaceIdentity,
     formServiceTarget?.remoteTarget,
   );
   const formServices = formServiceResolution.services;
+  // 端口 user scope 的写入同样走端口服务；表单切到具体 workspace 时端口由父级撤下，
+  // 仍回落到该 workspace 的服务解析结果。
+  const formCommandsService =
+    formScopeKey === "user" && portServices
+      ? portServices.commandsService
+      : formServices.commandsService;
 
   useEffect(() => {
     const recovery = resolveCommandScopeRecovery({
@@ -138,8 +173,11 @@ export function CommandsSection({
   const availablePlugins = usePluginManagementStore((state) => state.availablePlugins);
   const initializePlugins = usePluginManagementStore((state) => state.initialize);
 
+  // 端口 user scope 的插件清单同样来自设备端口；identity 保持端口契约的「不伪造
+  // workspace authority」口径（账面身份只用于本页命令 store 隔离）。
+  const pluginStoreTargetKey = workspaceIdentity?.trim() || workspacePath || "";
   useEffect(() => {
-    if (!workspacePath || !listServiceResolution.rpcReady) return;
+    if (!workspacePath || !dataRpcReady) return;
     void initializePlugins({
       workspacePath,
       workspaceIdentity,
@@ -147,8 +185,8 @@ export function CommandsSection({
       pluginService: pluginManagementService,
     });
   }, [
+    dataRpcReady,
     initializePlugins,
-    listServiceResolution.rpcReady,
     pluginManagementService,
     scopeFilter,
     workspaceIdentity,
@@ -169,7 +207,7 @@ export function CommandsSection({
           throw new Error("Selected Workspace is no longer available");
         }
         if (editingCommand) {
-          await formServices.commandsService.updateCommandFile({
+          await formCommandsService.updateCommandFile({
             agentSource: editingCommand.agentSource,
             commandId: editingCommand.id,
             config,
@@ -178,7 +216,7 @@ export function CommandsSection({
             workspacePath: targetWorkspacePath,
           });
         } else {
-          await formServices.commandsService.writeCommandFile({
+          await formCommandsService.writeCommandFile({
             config,
             agentSource: ZCODE_COMMAND_AGENT_SOURCE,
             storageLevel,
@@ -207,14 +245,7 @@ export function CommandsSection({
         setSaving(false);
       }
     },
-    [
-      currentWorkspaceKey,
-      editingCommand,
-      formServices.commandsService,
-      intl,
-      refresh,
-      workspaceTabs,
-    ],
+    [currentWorkspaceKey, editingCommand, formCommandsService, intl, refresh, workspaceTabs],
   );
 
   const handleDelete = useCallback(
@@ -307,7 +338,7 @@ export function CommandsSection({
   // 命令分组短暂取自别的 target 的插件投影。
   const pluginStoreMatchesTarget =
     (pluginStoreWorkspaceIdentity?.trim() || pluginStoreWorkspacePath || "") ===
-      currentWorkspaceKey && pluginConfigScope === scopeFilter;
+      pluginStoreTargetKey && pluginConfigScope === scopeFilter;
   const scopedPlugins = useMemo(
     () =>
       pluginStoreMatchesTarget ? selectPluginsForScope(plugins, installedPlugins, scopeFilter) : [],
@@ -437,7 +468,7 @@ export function CommandsSection({
         </div>
       ) : null}
 
-      {!listServiceResolution.rpcReady ? (
+      {!dataRpcReady ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.connecting" })} />
       ) : loading || !projectionMatchesTarget ? (
         <PluginLoadingState label={intl.formatMessage({ id: "common.loading" })} />
@@ -494,9 +525,10 @@ export function CommandsSection({
         </div>
       )}
       <CommandsImportDialog
-        open={importDialogOpen && listServiceResolution.rpcReady}
-        workspacePath={workspacePath}
-        workspaceIdentity={workspaceIdentity}
+        open={importDialogOpen && dataRpcReady}
+        // 端口 user scope 只导入该设备的 user 目录；Source 占位路径不是可写项目。
+        workspacePath={serviceWorkspacePath}
+        workspaceIdentity={portServices ? undefined : workspaceIdentity}
         settingsSyncService={settingsSyncService}
         onOpenChange={setImportDialogOpen}
         onImported={refresh}

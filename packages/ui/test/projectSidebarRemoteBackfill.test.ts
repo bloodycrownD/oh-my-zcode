@@ -2,7 +2,7 @@
  * T-RU10（upstream-v316-fullsync P7 末批）：Remote* 回填与占位拆除守卫。
  *
  * 形态：源码形状守卫 + 纯逻辑单测，npx tsx --tsconfig packages/ui/tsconfig.json --test 运行。
- * ①回填文件清单在位（7 组件 + useProjectRemoteSync + 依赖层）；
+ * ①回填文件清单在位（6 组件 + useProjectRemoteSync + 依赖层）；
  * ②消费链接线：index（sync/diagnostics/remoteHost/deviceLabel/dialog）、
  *   ProjectSidebarNode（connect/onRemoveEntry）、ProjectNodeContent（slot→真组件）、
  *   useProjectTaskNavigation（attachRemoteProjectWorkspace 真链）；
@@ -22,10 +22,9 @@ const read = (...parts: string[]) => readFileSync(path.join(...parts), "utf8");
 
 // ---------- ① 回填清单 ----------
 
-test("回填文件清单在位（Remote* 7 组件 + 同步链 + 依赖层）", () => {
+test("回填文件清单在位（Remote* 6 组件 + 同步链 + 依赖层）", () => {
   const files = [
     "packages/ui/src/project-sidebar/RemoteProjectList.tsx",
-    "packages/ui/src/project-sidebar/RemoteProjectMenu.tsx",
     "packages/ui/src/project-sidebar/RemoteProjectPicker.tsx",
     "packages/ui/src/project-sidebar/RemoteHostSection.tsx",
     "packages/ui/src/project-sidebar/RemoteIdentityHoverCard.tsx",

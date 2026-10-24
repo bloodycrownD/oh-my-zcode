@@ -61,7 +61,13 @@ import {
 } from "@/settings/SettingsResourceGroup.js";
 import { McpServersImportDialog } from "@/settings/ExternalAgentImportDialog.js";
 import { RemoteSyncDialogs, shouldShowRemoteSyncActions } from "@/settings/RemoteSyncActions.js";
-import { useMcpStore } from "@/store/mcpStore.js";
+import type { SettingsSourceCapabilityServices } from "@/settings/settingsSourceWorkspace.js";
+import {
+  claimMcpStoreDirectoryService,
+  releaseMcpStoreDirectoryService,
+  useMcpStore,
+  type McpIsolatedScopeTarget,
+} from "@/store/mcpStore.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useBaseWorkspaceServices, useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
@@ -533,6 +539,20 @@ function PluginMcpServerList({
   );
 }
 
+/**
+ * Source user scope 的端口服务面。
+ *
+ * 字段直接取自 {@link SettingsSourceCapabilityServices}（source-settings 服务集的唯一
+ * 投影），避免这里再写一份字段名后与端口能力漂移。`authorityKey` 是 Source 设置账本键，
+ * 只作为 mcpStore 的目录服务路由键（端口 user scope 没有项目 identity，而 store 只在
+ * identity 非空时才使用显式传入的目录服务）；它不是 workspace identity，也不会作为
+ * workspace 参数发给 MCP 读取/写入 RPC。
+ */
+export type McpSettingsSourcePortServices = Pick<
+  SettingsSourceCapabilityServices,
+  "mcpSyncService" | "pluginManagementService" | "settingsSyncService"
+> & { authorityKey: string };
+
 interface McpSettingsSectionProps {
   workspacePath?: string | null;
   workspaceIdentity?: string;
@@ -540,6 +560,8 @@ interface McpSettingsSectionProps {
   remoteTarget?: RemoteTarget;
   localWorkspacePath?: string;
   scopeFilter: "user" | "workspace";
+  /** Source user scope 的端口服务；存在时 MCP 读写直接用端口实现，不再走 workspace 解析。 */
+  sourcePortServices?: McpSettingsSourcePortServices;
   parentScopeKey: string;
   workspaceTabs: WorkspaceTabState[];
   searchQuery: string;
@@ -557,6 +579,7 @@ export function McpSettingsSection({
   remoteTarget,
   localWorkspacePath,
   scopeFilter,
+  sourcePortServices,
   parentScopeKey,
   workspaceTabs,
   searchQuery,
@@ -568,12 +591,33 @@ export function McpSettingsSection({
 }: McpSettingsSectionProps) {
   const { intl, locale } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
-  const services = useWorkspaceServices(
+  // 端口只覆盖 Source user scope；workspace scope 仍按该 workspace 的 target 解析服务。
+  const portServices = scopeFilter === "user" ? sourcePortServices : undefined;
+  const workspaceServices = useWorkspaceServices(
     workspacePath,
     remoteSessionId,
     workspaceIdentity,
     remoteTarget,
   );
+  // 端口是 Source user scope 的权威读数面：存在时直接用它，不再借某个 workspace 的服务。
+  const mcpSyncService = portServices?.mcpSyncService ?? workspaceServices.mcpSyncService;
+  const pluginManagementService =
+    portServices?.pluginManagementService ?? workspaceServices.pluginManagementService;
+  const settingsSyncService =
+    portServices?.settingsSyncService ?? workspaceServices.settingsSyncService;
+  // mcpStore 的增删改 / 启停持久化只认模块级目录服务（resolveMcpDirectoryService）。
+  // 端口 user scope 面板用实例令牌把端口服务登记为 Source 持有者：App 级
+  // useEnsureWorkspaceMcpLoaded 在设置页覆盖期间仍会随 rpcReady / 服务变化重跑，
+  // 双方共用同一张 claim/release 登记表，各自只释放自己的令牌，不存在「谁卸载谁
+  // 置 null」的覆盖窗口。端口服务本身变化时才换登记，避免每次 render 抖动。
+  const portDirectoryService = portServices?.mcpSyncService;
+  const portDirectoryServiceOwner = useRef<object>({});
+  useEffect(() => {
+    if (!portDirectoryService) return;
+    const owner = portDirectoryServiceOwner.current;
+    claimMcpStoreDirectoryService(owner, portDirectoryService, "source-port");
+    return () => releaseMcpStoreDirectoryService(owner);
+  }, [portDirectoryService]);
   const platform = usePlatform();
   const baseServices = useBaseWorkspaceServices();
   const { zcodeAgentService } = baseServices;
@@ -592,15 +636,72 @@ export function McpSettingsSection({
   const storeActiveWorkspacePath = useTabStore((s) => s.activeWorkspacePath);
   const storeActiveWorkspaceIdentity = useTabStore((s) => s.activeWorkspaceIdentity ?? undefined);
   const activeWorkspacePath = workspacePath ?? storeActiveWorkspacePath;
-  const activeWorkspaceIdentity = workspaceIdentity ?? storeActiveWorkspaceIdentity;
+  // 端口 user scope 没有项目 identity：mcpStore 只在 identity 非空时才使用显式传入的
+  // 目录服务（见 mcpStore.resolveMcpDirectoryService），因此这里用 Source 设置账本键
+  // 做路由键，让端口 mcpSyncService 成为唯一读取面。回落到 store 当前 workspace 的
+  // identity 会把别的设备/工作区的事实带进来，端口模式下必须排除。
+  const activeWorkspaceIdentity = portServices
+    ? workspaceIdentity?.trim() || portServices.authorityKey
+    : (workspaceIdentity ?? storeActiveWorkspaceIdentity);
   const activeWorkspaceKey = activeWorkspaceIdentity?.trim() || activeWorkspacePath || "";
+  // 端口 user scope 且没有真实 workspace 锚点：mcp/list 没有可连接的 workspace，
+  // 也不能把账本键当 workspace identity 发给 agent，状态刷新与运行态热刷新都要跳过。
+  const portUserScopeWithoutWorkspace = Boolean(portServices) && !workspaceIdentity?.trim();
+  // 设备 user scope 的读取/写入目标是按账本键隔离的独立投影。它不经过
+  // ensureLoadedForWorkspace / loadMcpFromUserDirectory：那两个入口会用传入的占位路径和
+  // 账本键改写全局 currentProjectPath / currentWorkspaceIdentity，并清空 App 级
+  // nativeServers / servers；设置浮层关闭后 App hook 依赖未变不会重跑，别的入口就会
+  // 继续看到设备侧 MCP 事实。
+  //
+  // 有真实 workspace 锚点时，隔离读取要连同该 workspace 的项目级 MCP 一起取：
+  // mcp/list 的 connect 会用显式下发的 mcpServers 替换运行态集合，只发 user scope
+  // 会误断开设备 workspace 里仍在运行的 MCP。
+  const isolatedWorkspacePath = workspaceIdentity?.trim() ? activeWorkspacePath : undefined;
+  const isolatedScopeTarget = useMemo<McpIsolatedScopeTarget | null>(
+    () =>
+      portServices
+        ? {
+            scopeKey: portServices.authorityKey,
+            directoryService: portServices.mcpSyncService,
+            workspacePath: isolatedWorkspacePath ?? undefined,
+          }
+        : null,
+    [portServices, isolatedWorkspacePath],
+  );
+  // 插件清单走端口 pluginManagementService 时沿用端口契约的 identity 口径（不伪造
+  // workspace authority，Source user scope 传 undefined）；投影键按服务实参推导，
+  // 避免用 mcpStore 的账本路由键去比对插件 store 的缓存。
+  const pluginServiceIdentity = portServices ? workspaceIdentity : activeWorkspaceIdentity;
+  const pluginTargetKey = pluginServiceIdentity?.trim() || activeWorkspacePath || "";
   const currentMcpStoreWorkspaceKey = currentWorkspaceIdentity?.trim() || currentProjectPath;
+  // 端口 user scope 从隔离快照取数；全局 workspace 匹配只用于非端口 scope。
+  // 隔离快照是否已加载本身就是端口视图的 ready 信号，不再拿全局 current* 去比对。
+  const isolatedSnapshot = useMcpStore((s) =>
+    isolatedScopeTarget ? s.isolatedServerSnapshots[isolatedScopeTarget.scopeKey] : undefined,
+  );
+  const isolatedSnapshotReady = Boolean(isolatedSnapshot);
   // active tab 会先于异步 MCP 目录加载切换；过渡帧不能把 A 的配置和
   // snapshot 投影到 B，更不能让后续 effect 把这些敏感配置发送给 B 的 Agent。
-  const mcpStoreMatchesActiveWorkspace =
-    Boolean(activeWorkspaceKey) && currentMcpStoreWorkspaceKey === activeWorkspaceKey;
-  const servers = mcpStoreMatchesActiveWorkspace ? storedServers : [];
-  const statusSnapshots = mcpStoreMatchesActiveWorkspace ? storedStatusSnapshots : {};
+  const mcpStoreMatchesActiveWorkspace = isolatedScopeTarget
+    ? isolatedSnapshotReady
+    : Boolean(activeWorkspaceKey) && currentMcpStoreWorkspaceKey === activeWorkspaceKey;
+  const servers = isolatedScopeTarget
+    ? (isolatedSnapshot?.servers ?? [])
+    : mcpStoreMatchesActiveWorkspace
+      ? storedServers
+      : [];
+  const statusSnapshots = isolatedScopeTarget
+    ? (isolatedSnapshot?.statusSnapshots ?? {})
+    : mcpStoreMatchesActiveWorkspace
+      ? storedStatusSnapshots
+      : {};
+  // 状态刷新队列的 store 侧对齐键：端口 scope 用隔离快照是否就绪 + 当前 scope key，
+  // 绝不与全局 currentProject* 比较。
+  const storeWorkspaceKey = isolatedScopeTarget
+    ? isolatedSnapshotReady
+      ? activeWorkspaceKey
+      : ""
+    : currentMcpStoreWorkspaceKey;
   const isConfigLoaded = useMcpStore((s) => s.isConfigLoaded);
   const ensureLoadedForWorkspace = useMcpStore((s) => s.ensureLoadedForWorkspace);
   const loadMcpFromUserDirectory = useMcpStore((s) => s.loadMcpFromUserDirectory);
@@ -612,6 +713,21 @@ export function McpSettingsSection({
   const beginServerStatusListRefresh = useMcpStore((s) => s.beginServerStatusListRefresh);
   const markServerStatusListRefreshFailed = useMcpStore((s) => s.markServerStatusListRefreshFailed);
   const mergeServerStatusSnapshots = useMcpStore((s) => s.mergeServerStatusSnapshots);
+  const loadIsolatedMcpServers = useMcpStore((s) => s.loadIsolatedMcpServers);
+  const addIsolatedMcpServer = useMcpStore((s) => s.addIsolatedMcpServer);
+  const updateIsolatedMcpServer = useMcpStore((s) => s.updateIsolatedMcpServer);
+  const deleteIsolatedMcpServer = useMcpStore((s) => s.deleteIsolatedMcpServer);
+  const toggleIsolatedServer = useMcpStore((s) => s.toggleIsolatedServer);
+  const getIsolatedEnabledMcpServers = useMcpStore((s) => s.getIsolatedEnabledMcpServers);
+  const beginIsolatedServerStatusListRefresh = useMcpStore(
+    (s) => s.beginIsolatedServerStatusListRefresh,
+  );
+  const markIsolatedServerStatusListRefreshFailed = useMcpStore(
+    (s) => s.markIsolatedServerStatusListRefreshFailed,
+  );
+  const mergeIsolatedServerStatusSnapshots = useMcpStore(
+    (s) => s.mergeIsolatedServerStatusSnapshots,
+  );
 
   const [showForm, setShowForm] = useState(false);
   const [formScopeKey, setFormScopeKey] = useState(parentScopeKey);
@@ -661,7 +777,7 @@ export function McpSettingsSection({
     configReadyWorkspaceKey: mcpConfigReadyWorkspaceKey,
     isConfigLoaded,
     serverStatusListKey,
-    storeWorkspaceKey: currentMcpStoreWorkspaceKey,
+    storeWorkspaceKey,
   });
   latestStatusListRefreshInputRef.current = {
     activeWorkspaceIdentity,
@@ -670,7 +786,7 @@ export function McpSettingsSection({
     configReadyWorkspaceKey: mcpConfigReadyWorkspaceKey,
     isConfigLoaded,
     serverStatusListKey,
-    storeWorkspaceKey: currentMcpStoreWorkspaceKey,
+    storeWorkspaceKey,
   };
   const autoStatusListRefreshKey = useMemo(() => {
     if (
@@ -718,6 +834,17 @@ export function McpSettingsSection({
       trigger?: McpStatusListRefreshTrigger;
     }) => {
       const trigger = options?.trigger ?? "auto";
+      // 端口 user scope 没有 workspace 锚点：mcp/list 需要真实 workspace 才能由 agent
+      // 连接服务器。账本键只是目录服务路由键，不能当 workspace identity 发出去。
+      if (portUserScopeWithoutWorkspace) {
+        if (trigger === "manual") {
+          logger.warn("[mcp] manual status refresh skipped", {
+            reason: "source-port-user-scope",
+            workspacePath: activeWorkspacePath,
+          });
+        }
+        return;
+      }
       const requestedWorkspaceKey = activeWorkspaceKey;
       const requestedInput = latestStatusListRefreshInputRef.current;
       // 队列 runner 和 in-flight response 都可能跨 workspace 生命周期；
@@ -753,7 +880,44 @@ export function McpSettingsSection({
       // skipReason 已经覆盖了这个分支，这里只为类型收窄。
       if (!requestedWorkspacePath) return;
       const requestedMcpServers =
-        options?.mcpServers ?? useMcpStore.getState().getEnabledMcpServersForZCode("zcode");
+        options?.mcpServers ??
+        (isolatedScopeTarget
+          ? getIsolatedEnabledMcpServers(isolatedScopeTarget.scopeKey, "zcode")
+          : useMcpStore.getState().getEnabledMcpServersForZCode("zcode"));
+      // 端口 user scope 的运行态也写回隔离快照：begin/merge/failed 三个回调必须成组
+      // 切换，否则 epoch 归属会和全局 workspace 的刷新互相作废。
+      const statusRefreshHandlers = isolatedScopeTarget
+        ? {
+            beginServerStatusListRefresh: (mode?: ZCodeMcpListMode) =>
+              beginIsolatedServerStatusListRefresh(isolatedScopeTarget.scopeKey, mode),
+            markServerStatusListRefreshFailed: (
+              error: string,
+              requestEpoch: number,
+              mode?: ZCodeMcpListMode,
+            ) =>
+              markIsolatedServerStatusListRefreshFailed(
+                isolatedScopeTarget.scopeKey,
+                error,
+                requestEpoch,
+                mode,
+              ),
+            mergeServerStatusSnapshots: (
+              statuses: Record<string, ZCodeMcpServerStatusSnapshot>,
+              requestEpoch: number,
+              mode?: ZCodeMcpListMode,
+            ) =>
+              mergeIsolatedServerStatusSnapshots(
+                isolatedScopeTarget.scopeKey,
+                statuses,
+                requestEpoch,
+                mode,
+              ),
+          }
+        : {
+            beginServerStatusListRefresh,
+            markServerStatusListRefreshFailed,
+            mergeServerStatusSnapshots,
+          };
       await statusListRefreshQueueRef.current?.request(async () => {
         if (!isRequestCurrent()) {
           return;
@@ -763,10 +927,11 @@ export function McpSettingsSection({
         }
 
         const outcome = await refreshMcpServerStatusList({
-          beginServerStatusListRefresh,
+          beginServerStatusListRefresh: statusRefreshHandlers.beginServerStatusListRefresh,
           getCurrentWorkspaceKey: getCurrentRefreshWorkspaceKey,
-          markServerStatusListRefreshFailed,
-          mergeServerStatusSnapshots,
+          markServerStatusListRefreshFailed:
+            statusRefreshHandlers.markServerStatusListRefreshFailed,
+          mergeServerStatusSnapshots: statusRefreshHandlers.mergeServerStatusSnapshots,
           // 设置页列表可能来自 `.agents/mcp.json` fallback；agent 侧 mcp/list 自己
           // createConfig 读不到这批 UI-resolved MCP，必须和真实 session 一样显式下发。
           mcpServers: requestedMcpServers,
@@ -774,7 +939,7 @@ export function McpSettingsSection({
           requestedWorkspaceKey,
           workspaceIdentity: requestedInput.activeWorkspaceIdentity,
           workspacePath: requestedWorkspacePath,
-          mcpSyncService: services.mcpSyncService,
+          mcpSyncService,
         }).catch((error) => {
           logger.warn("[mcp] list server statuses failed", {
             error: error instanceof Error ? error.message : String(error),
@@ -813,11 +978,18 @@ export function McpSettingsSection({
     },
     [
       activeWorkspaceKey,
+      activeWorkspacePath,
+      beginIsolatedServerStatusListRefresh,
       beginServerStatusListRefresh,
+      getIsolatedEnabledMcpServers,
       intl,
+      isolatedScopeTarget,
+      markIsolatedServerStatusListRefreshFailed,
       markServerStatusListRefreshFailed,
+      mergeIsolatedServerStatusSnapshots,
       mergeServerStatusSnapshots,
-      services.mcpSyncService,
+      mcpSyncService,
+      portUserScopeWithoutWorkspace,
     ],
   );
 
@@ -828,24 +1000,40 @@ export function McpSettingsSection({
     if (refreshingStatusList) return;
     setRefreshingStatusList(true);
     try {
-      await loadMcpFromUserDirectory(services.mcpSyncService, activeWorkspaceIdentity);
-      if (activeWorkspacePath && !mcpConfigReadyWorkspaceKey) {
-        const loaded = await ensureLoadedForWorkspace(
-          activeWorkspacePath,
-          services.mcpSyncService,
-          activeWorkspaceIdentity,
-        );
-        const state = useMcpStore.getState();
-        const loadedWorkspaceKey =
-          state.currentWorkspaceIdentity?.trim() || state.currentProjectPath;
-        if (loaded && loadedWorkspaceKey === activeWorkspaceKey) {
+      if (isolatedScopeTarget) {
+        // 端口 user scope 只刷新隔离快照：不调用 loadMcpFromUserDirectory /
+        // ensureLoadedForWorkspace，避免把设备占位路径和账本键写进全局 current*。
+        const loaded = await loadIsolatedMcpServers(isolatedScopeTarget);
+        if (loaded) {
           setMcpConfigReadyWorkspaceKey(activeWorkspaceKey);
           // ref 只在 render 时同步；这里补写一次，否则同一 tick 内紧接着的请求仍会
           // 因为 config-not-ready 被跳过，用户就得再点一次刷新。
           latestStatusListRefreshInputRef.current = {
             ...latestStatusListRefreshInputRef.current,
             configReadyWorkspaceKey: activeWorkspaceKey,
+            storeWorkspaceKey: activeWorkspaceKey,
           };
+        }
+      } else {
+        await loadMcpFromUserDirectory(mcpSyncService, activeWorkspaceIdentity);
+        if (activeWorkspacePath && !mcpConfigReadyWorkspaceKey) {
+          const loaded = await ensureLoadedForWorkspace(
+            activeWorkspacePath,
+            mcpSyncService,
+            activeWorkspaceIdentity,
+          );
+          const state = useMcpStore.getState();
+          const loadedWorkspaceKey =
+            state.currentWorkspaceIdentity?.trim() || state.currentProjectPath;
+          if (loaded && loadedWorkspaceKey === activeWorkspaceKey) {
+            setMcpConfigReadyWorkspaceKey(activeWorkspaceKey);
+            // ref 只在 render 时同步；这里补写一次，否则同一 tick 内紧接着的请求仍会
+            // 因为 config-not-ready 被跳过，用户就得再点一次刷新。
+            latestStatusListRefreshInputRef.current = {
+              ...latestStatusListRefreshInputRef.current,
+              configReadyWorkspaceKey: activeWorkspaceKey,
+            };
+          }
         }
       }
       await requestMcpServerStatusList({ trigger: "manual" });
@@ -857,11 +1045,13 @@ export function McpSettingsSection({
     activeWorkspaceKey,
     activeWorkspacePath,
     ensureLoadedForWorkspace,
+    isolatedScopeTarget,
+    loadIsolatedMcpServers,
     loadMcpFromUserDirectory,
     mcpConfigReadyWorkspaceKey,
     refreshingStatusList,
     requestMcpServerStatusList,
-    services.mcpSyncService,
+    mcpSyncService,
   ]);
 
   useEffect(() => {
@@ -869,7 +1059,7 @@ export function McpSettingsSection({
     setMcpOAuthAuthorizationFollowupRefresh(null);
     mcpStatusOnlyUnsupportedRef.current = false;
     setMcpStatusOnlyUnsupported(false);
-  }, [activeWorkspaceKey, services.mcpSyncService]);
+  }, [activeWorkspaceKey, mcpSyncService]);
 
   useEffect(() => {
     let cancelled = false;
@@ -878,13 +1068,17 @@ export function McpSettingsSection({
       return;
     }
 
-    void ensureLoadedForWorkspace(
-      activeWorkspacePath,
-      services.mcpSyncService,
-      activeWorkspaceIdentity,
-    )
+    const loadPromise = isolatedScopeTarget
+      ? // 端口 user scope 的读取入口：只按 scopeKey 写隔离快照，不碰全局 current*。
+        loadIsolatedMcpServers(isolatedScopeTarget)
+      : ensureLoadedForWorkspace(activeWorkspacePath, mcpSyncService, activeWorkspaceIdentity);
+    void loadPromise
       .then((loaded) => {
         if (cancelled || !loaded) {
+          return;
+        }
+        if (isolatedScopeTarget) {
+          setMcpConfigReadyWorkspaceKey(activeWorkspaceKey);
           return;
         }
         const state = useMcpStore.getState();
@@ -909,7 +1103,9 @@ export function McpSettingsSection({
     activeWorkspaceKey,
     activeWorkspacePath,
     ensureLoadedForWorkspace,
-    services.mcpSyncService,
+    isolatedScopeTarget,
+    loadIsolatedMcpServers,
+    mcpSyncService,
   ]);
 
   useEffect(() => {
@@ -917,17 +1113,17 @@ export function McpSettingsSection({
       return;
     }
     void initializePlugins({
-      pluginService: services.pluginManagementService,
-      workspaceIdentity: activeWorkspaceIdentity,
+      pluginService: pluginManagementService,
+      workspaceIdentity: pluginServiceIdentity,
       workspacePath: activeWorkspacePath,
       configScope: scopeFilter,
     });
   }, [
-    activeWorkspaceIdentity,
+    pluginServiceIdentity,
     activeWorkspacePath,
     initializePlugins,
     scopeFilter,
-    services.pluginManagementService,
+    pluginManagementService,
   ]);
 
   useEffect(() => {
@@ -1159,7 +1355,7 @@ export function McpSettingsSection({
     }
     const pluginStoreMatchesTarget =
       (pluginStoreWorkspaceIdentity?.trim() || pluginStoreWorkspacePath || "") ===
-        activeWorkspaceKey && pluginConfigScope === scopeFilter;
+        pluginTargetKey && pluginConfigScope === scopeFilter;
     if (!pluginStoreMatchesTarget) {
       return [];
     }
@@ -1169,11 +1365,11 @@ export function McpSettingsSection({
     return buildPluginMcpServerItems(scopedPlugins, query, statusSnapshots);
   }, [
     installedPlugins,
-    activeWorkspaceKey,
     isRemoteSyncContext,
     pluginConfigScope,
     pluginStoreWorkspaceIdentity,
     pluginStoreWorkspacePath,
+    pluginTargetKey,
     plugins,
     query,
     scopeFilter,
@@ -1188,9 +1384,12 @@ export function McpSettingsSection({
     () => groupPluginMcpServersByPlugin(pluginMcpServers),
     [pluginMcpServers],
   );
-  const mcpProjectionReady =
-    !activeWorkspacePath ||
-    (mcpStoreMatchesActiveWorkspace && mcpConfigReadyWorkspaceKey === activeWorkspaceKey);
+  // 隔离 scope 的 ready 只取决于自己的快照与加载标记；非端口 scope 继续要求全局
+  // store 已对齐当前 workspace，避免过渡帧把 A 的配置投到 B。
+  const mcpProjectionReady = isolatedScopeTarget
+    ? isolatedSnapshotReady && mcpConfigReadyWorkspaceKey === activeWorkspaceKey
+    : !activeWorkspacePath ||
+      (mcpStoreMatchesActiveWorkspace && mcpConfigReadyWorkspaceKey === activeWorkspaceKey);
   const hasEmptySearchResult = Boolean(query.trim()) && filteredMcpCount === 0;
   const installedServers = useMemo(
     () =>
@@ -1217,6 +1416,19 @@ export function McpSettingsSection({
     : "";
 
   async function handleToggle(id: string, enabled: boolean) {
+    if (isolatedScopeTarget) {
+      // 端口 user scope 的启停只落设备文件并更新隔离快照；toggleServer 会读取
+      // 全局 servers 且回写全局 enabledStates/status，不能用于设备投影。
+      await toggleIsolatedServer(isolatedScopeTarget, id, enabled);
+      if (!enabled || !activeWorkspacePath || portUserScopeWithoutWorkspace) {
+        // 设备 user scope 没有可连接的 workspace，状态保持 unknown；
+        // 不能把待定态当失败态。
+        return;
+      }
+      void requestMcpServerStatusList();
+      return;
+    }
+
     await toggleServer(id, enabled);
     void refreshRuntimeMcpTools();
 
@@ -1231,7 +1443,8 @@ export function McpSettingsSection({
 
     // renderer 侧浅检查无法真实启动 stdio MCP，曾把不存在的 command 误判为 connected。
     // 打开后只展示连接中，最终绿/红状态统一等待 agent 侧 mcp/list 真实 connect/listTools 回写。
-    if (!activeWorkspacePath) {
+    // 端口 user scope 没有可连接的 workspace，状态保持 unknown，不能把待定态当失败态。
+    if (!activeWorkspacePath || portUserScopeWithoutWorkspace) {
       updateServerStatus(id, "unknown", undefined, {
         invalidateStatusListRequests: false,
       });
@@ -1250,7 +1463,9 @@ export function McpSettingsSection({
    * 失败静默（旧 CLI method-not-found 已在 services 层吞掉，工具面保持旧集合）。
    */
   const refreshRuntimeMcpTools = useCallback(async () => {
-    if (!activeWorkspacePath) {
+    // source-settings 端口不注册 zcodeAgentService；端口 user scope 也没有真实 workspace
+    // 可热刷新。这里不能拿本机 agent + 账本键去刷新别的设备的运行态。
+    if (!activeWorkspacePath || portServices) {
       return;
     }
     try {
@@ -1262,17 +1477,19 @@ export function McpSettingsSection({
     } catch {
       // 静默：状态列表刷新链（mcp/list）会另行提示连接类错误。
     }
-  }, [activeWorkspacePath, activeWorkspaceIdentity, zcodeAgentService]);
+  }, [activeWorkspacePath, activeWorkspaceIdentity, portServices, zcodeAgentService]);
 
   async function handleSave(form: FormState, prev?: ZCodeMcpServer) {
     if (!activeWorkspacePath) {
       return;
     }
-    const loaded = await ensureLoadedForWorkspace(
-      activeWorkspacePath,
-      services.mcpSyncService,
-      activeWorkspaceIdentity,
-    );
+    const loaded = isolatedScopeTarget
+      ? isolatedSnapshotReady || (await loadIsolatedMcpServers(isolatedScopeTarget))
+      : await ensureLoadedForWorkspace(
+          activeWorkspacePath,
+          mcpSyncService,
+          activeWorkspaceIdentity,
+        );
     if (!loaded) {
       return;
     }
@@ -1284,7 +1501,27 @@ export function McpSettingsSection({
     // currentProjectPath；保存目标必须使用表单已解析并完成加载的 workspace props。
     const projectPath = formScopeKey === "user" ? undefined : activeWorkspacePath;
 
-    if (prev) {
+    if (isolatedScopeTarget) {
+      // 设备 user scope 保存只走显式端口目录服务并更新隔离快照；workspace scope
+      // 的条目落到该设备 workspace 文件，但不写入本设备的 user scope 投影。
+      if (prev) {
+        await updateIsolatedMcpServer(
+          isolatedScopeTarget,
+          DEFAULT_MCP_SOURCE,
+          prev.name,
+          config,
+          projectPath,
+        );
+      } else {
+        await addIsolatedMcpServer(
+          isolatedScopeTarget,
+          DEFAULT_MCP_SOURCE,
+          form.name,
+          config,
+          projectPath,
+        );
+      }
+    } else if (prev) {
       await updateScopedMcpServer(DEFAULT_MCP_SOURCE, prev.name, config, projectPath);
     } else {
       await addScopedMcpServer(DEFAULT_MCP_SOURCE, form.name, config, projectPath);
@@ -1312,7 +1549,16 @@ export function McpSettingsSection({
       return;
     }
 
-    await deleteScopedMcpServer(server.source, server.name, server.projectPath);
+    if (isolatedScopeTarget) {
+      await deleteIsolatedMcpServer(
+        isolatedScopeTarget,
+        server.source,
+        server.name,
+        server.projectPath,
+      );
+    } else {
+      await deleteScopedMcpServer(server.source, server.name, server.projectPath);
+    }
     void refreshRuntimeMcpTools();
     setEditingServer(null);
     setShowForm(false);
@@ -1582,12 +1828,22 @@ export function McpSettingsSection({
         // 对话框携带的是 mcpStore 的 currentProjectPath，只有它与当前 target
         // 一致时才和 services 的 host 同源；不一致的过渡帧不能让导入按 A 的 host 落盘 B 的路径。
         open={importDialogOpen && mcpStoreMatchesActiveWorkspace}
-        workspacePath={currentProjectPath}
-        workspaceIdentity={activeWorkspaceIdentity}
-        settingsSyncService={services.settingsSyncService}
+        // 端口 user scope 的 target 路径 / 账本键只用于路由设备端口；导入必须落该设备的
+        // user 目录，不能把 Source 占位路径当成可写的 project workspace。
+        workspacePath={portServices ? undefined : currentProjectPath}
+        workspaceIdentity={portServices ? undefined : activeWorkspaceIdentity}
+        settingsSyncService={settingsSyncService}
         onOpenChange={setImportDialogOpen}
         onImported={async () => {
-          await loadMcpFromUserDirectory(services.mcpSyncService, activeWorkspaceIdentity);
+          if (isolatedScopeTarget) {
+            // 设备 user scope 导入后只重读隔离快照；不能走会改写全局 current* 的读取入口。
+            const loaded = await loadIsolatedMcpServers(isolatedScopeTarget);
+            if (loaded) {
+              setMcpConfigReadyWorkspaceKey(activeWorkspaceKey);
+            }
+            return;
+          }
+          await loadMcpFromUserDirectory(mcpSyncService, activeWorkspaceIdentity);
           // cr-fix-spec mcp/B-5：导入与保存/删除/启停同语义——配置落盘后立即刷新
           // 已开会话的工具面（尽力而为，失败静默）。
           void refreshRuntimeMcpTools();
@@ -1601,18 +1857,26 @@ export function McpSettingsSection({
         onSkillOpenChange={() => {}}
         onMcpOpenChange={setRemoteMcpSyncOpen}
         localMcpSyncService={baseServices.mcpSyncService}
-        remoteMcpSyncService={services.mcpSyncService}
+        remoteMcpSyncService={mcpSyncService}
         remoteTarget={connectedRemoteSyncTarget}
         skillWorkspacePath=""
         mcpWorkspacePath={activeWorkspacePath ?? ""}
         mcpLocalWorkspacePath={localWorkspacePath}
         onSkillsSynced={() => {}}
         onMcpSynced={async () => {
-          const loaded = await loadMcpFromUserDirectory(
-            services.mcpSyncService,
-            activeWorkspaceIdentity,
-          );
+          const loaded = isolatedScopeTarget
+            ? await loadIsolatedMcpServers(isolatedScopeTarget)
+            : await loadMcpFromUserDirectory(mcpSyncService, activeWorkspaceIdentity);
           if (loaded) {
+            if (isolatedScopeTarget) {
+              setMcpConfigReadyWorkspaceKey(activeWorkspaceKey);
+              // 同步完成后同一 tick 内会立即发状态请求，ref 必须同步到最新 ready 键。
+              latestStatusListRefreshInputRef.current = {
+                ...latestStatusListRefreshInputRef.current,
+                configReadyWorkspaceKey: activeWorkspaceKey,
+                storeWorkspaceKey: activeWorkspaceKey,
+              };
+            }
             await requestMcpServerStatusList();
             // cr-fix-spec mcp/B-5：远端同步同导入——落盘后刷新已开会话工具面。
             void refreshRuntimeMcpTools();

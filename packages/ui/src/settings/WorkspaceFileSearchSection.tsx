@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { FolderOpen, RotateCcw, Save, Undo2 } from "lucide-react";
+import { FolderOpen, Monitor, RotateCcw, Save, Undo2 } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import { Textarea } from "@/components/ui/textarea.js";
 import { toast } from "@/components/ui/toast.js";
@@ -7,11 +7,19 @@ import { usePlatform } from "@/hooks/usePlatform.js";
 import { useWorkspaceServicesResolution } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SettingsGroupCard } from "@/settings/SettingsPageParts.js";
+import { isSpecificSettingsSource } from "@/settings/settingsSourceWorkspace.js";
 import { logger } from "@/logger.js";
 
 interface WorkspaceFileSearchSectionProps {
   workspacePath?: string | null;
   workspaceIdentity?: string;
+  /**
+   * 设置页顶部的设备（Source）选择，三态与设置页选择器一致：
+   * `undefined` = 未按设备收窄（选择器「全部」）、`null` = 本机、字符串 = 具体设备。
+   * 本分区不按它收窄读写落点，只用于决定应用级提示是否展示：
+   * 只有选中具体设备时才需要提示「改动不作用于所选设备」。
+   */
+  settingsSourceServerId?: string | null;
 }
 
 type IgnoreFileState = {
@@ -29,16 +37,23 @@ type IgnoreFileState = {
 export function WorkspaceFileSearchSection({
   workspacePath,
   workspaceIdentity,
+  settingsSourceServerId,
 }: WorkspaceFileSearchSectionProps) {
   // 无 workspace 时直接提示，不挂 workspace 服务解析 hook 链（同 SessionPluginReferenceIconBoundary
   // 的分层先例），避免无谓的 services/tabStore context 依赖。
   if (!workspacePath) {
-    return <NoWorkspaceFileSearchHint />;
+    return (
+      <div className="space-y-3">
+        <AppLevelSettingsNotice settingsSourceServerId={settingsSourceServerId} />
+        <NoWorkspaceFileSearchHint />
+      </div>
+    );
   }
   return (
     <ActiveWorkspaceFileSearchEditor
       workspacePath={workspacePath}
       workspaceIdentity={workspaceIdentity}
+      settingsSourceServerId={settingsSourceServerId}
     />
   );
 }
@@ -52,12 +67,45 @@ function NoWorkspaceFileSearchHint() {
   );
 }
 
+/**
+ * 应用级分区提示。
+ * 本分区不按 settingsSourceServerId 收窄读写落点：.zcodeignore 始终按当前工作区读写。
+ * 选中具体设备时说明改动不作用于该设备；未选中具体设备时不展示。
+ */
+function AppLevelSettingsNotice({
+  settingsSourceServerId,
+}: {
+  settingsSourceServerId?: string | null;
+}) {
+  const { intl } = useZCodeIntl();
+  if (!isSpecificSettingsSource(settingsSourceServerId)) {
+    return null;
+  }
+  return (
+    <div
+      role="note"
+      data-settings-app-level="true"
+      className="flex items-start gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-ui-base leading-6 text-foreground-subtle"
+    >
+      <Monitor className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-medium text-foreground">
+          {intl.formatMessage({ id: "settings.scope.appLevel" })}
+        </div>
+        <div>{intl.formatMessage({ id: "settings.scope.appLevelNotice" })}</div>
+      </div>
+    </div>
+  );
+}
+
 function ActiveWorkspaceFileSearchEditor({
   workspacePath,
   workspaceIdentity,
+  settingsSourceServerId,
 }: {
   workspacePath: string;
   workspaceIdentity?: string;
+  settingsSourceServerId?: string | null;
 }) {
   const { intl } = useZCodeIntl();
   const platform = usePlatform();
@@ -191,6 +239,7 @@ function ActiveWorkspaceFileSearchEditor({
     // 排版对齐设置页统一规范：导语 + SettingsGroupCard 卡片，
     // 文字统一 text-ui-base；textarea 因内容是规则文本保留等宽字体。
     <div className="space-y-3">
+      <AppLevelSettingsNotice settingsSourceServerId={settingsSourceServerId} />
       <div className="text-ui-base font-medium text-foreground-subtle">
         {intl.formatMessage({ id: "settings.workspaceFileSearch.description" })}
       </div>

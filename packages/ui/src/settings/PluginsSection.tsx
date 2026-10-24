@@ -100,6 +100,7 @@ import {
   buildSettingsSourceAuthorityKey,
   filterWorkspaceTabsForSettingsSource,
   useSettingsSourceServiceRoute,
+  useSettingsSourceWorkspaceHistory,
   type SettingsSourceCapabilityServices,
 } from "@/settings/settingsSourceWorkspace.js";
 import { SettingsSourceUnavailable } from "@/settings/SettingsSourceUnavailable.js";
@@ -985,13 +986,18 @@ export function PluginsSection({
   const storeActiveWorkspaceIdentity = useTabStore((state) => state.activeWorkspaceIdentity);
   const activeWorkspacePath = workspacePath ?? storeActiveWorkspacePath;
   const activeWorkspaceIdentity = workspaceIdentity ?? storeActiveWorkspaceIdentity ?? undefined;
+  // 旧 ssh/wsl/docker 线路只有经 Source Directory 历史映射才能归到选中设备；scope 菜单
+  // 与服务锚点必须用同一份 history，否则下拉看不到已连接项目、锚点却已可用。
+  const settingsSourceWorkspaceHistory = useSettingsSourceWorkspaceHistory(settingsSourceServerId);
   const workspaceTabs = useMemo(() => {
     const seen = new Set<string>();
     const connected = tabs.filter(isWorkspaceTab).filter(isPluginScopeWorkspaceConnected);
     const scoped =
       settingsSourceServerId === undefined
         ? connected
-        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId);
+        : filterWorkspaceTabsForSettingsSource(connected, settingsSourceServerId, {
+            workspaceHistory: settingsSourceWorkspaceHistory,
+          });
     const deduped = scoped.filter((tab) => {
       const key = workspaceKey(tab);
       if (seen.has(key)) return false;
@@ -1018,7 +1024,13 @@ export function PluginsSection({
       });
     }
     return deduped;
-  }, [activeWorkspaceIdentity, activeWorkspacePath, settingsSourceServerId, tabs]);
+  }, [
+    activeWorkspaceIdentity,
+    activeWorkspacePath,
+    settingsSourceServerId,
+    settingsSourceWorkspaceHistory,
+    tabs,
+  ]);
   // Source 服务来源顺序：已登记 attachment 端口 → 该设备的 workspace 锚点 → 不可用。
   // 端口存在时设备不需要打开 workspace（端口就是该设备 user scope 的权威读数面）。
   const sourceRoute = useSettingsSourceServiceRoute({
@@ -1026,20 +1038,34 @@ export function PluginsSection({
     scopedTabs: workspaceTabs,
     fallbackWorkspacePath: workspacePath,
     fallbackWorkspaceIdentity: workspaceIdentity,
+    workspaceHistory: settingsSourceWorkspaceHistory,
   });
-  // 端口只覆盖本组件自己消费的 plugin / skill 读取面；mcp / command 分区仍由各自
-  // section 解析 workspace 服务，没有真实锚点时必须继续 unavailable——否则会用本机
-  // 服务读写本机配置，却显示成远端设备的事实。
+  // 端口是四个分区（plugin / skill / mcp / command）user scope 的权威读数面。
+  // 服务字段统一来自 settingsSourceWorkspace 的 capabilities 投影（含 mcpSync /
+  // commands），不再从原始 accessor 另取一份，避免两套端口判定口径漂移。
   const sourcePortCapabilities =
-    (mode === "plugin" || mode === "skill") && settingsSourceServerId
-      ? sourceRoute?.capabilities
-      : undefined;
+    settingsSourceServerId && sourceRoute?.kind === "port" ? sourceRoute.capabilities : undefined;
+  const sourcePortPanelServices = useMemo(() => {
+    if (!settingsSourceServerId || !sourcePortCapabilities) return undefined;
+    return {
+      // mcpStore 只把 identity 当目录服务路由键，不发送给读取/写入 RPC；端口 user scope
+      // 没有项目归属，这里用 Source 设置账本键做设备内隔离，不构造 workspace identity。
+      authorityKey: buildSettingsSourceAuthorityKey(settingsSourceServerId),
+      mcpSyncService: sourcePortCapabilities.mcpSyncService,
+      commandsService: sourcePortCapabilities.commandsService,
+      pluginManagementService: sourcePortCapabilities.pluginManagementService,
+      settingsSyncService: sourcePortCapabilities.settingsSyncService,
+    };
+  }, [settingsSourceServerId, sourcePortCapabilities]);
+  // mcp / command 分区与 plugin / skill 共用同一份端口投影；capabilities 已保证
+  // mcpSync / commands 在位，因此端口就绪判定不再按 mode 分叉。
+  const sourcePortReady = Boolean(sourcePortCapabilities);
   const sourceAnchorTarget = useMemo<WorkspaceTabState | null>(() => {
     if (!settingsSourceServerId || !sourceRoute) return null;
     const anchor = sourceRoute.anchor;
     if (anchor.tab) return anchor.tab;
-    // 调用方注入的锚点（如 Source home）只有通过归属判定才可用：别的设备/本机的
-    // identity 会把 RPC 打到错误 host，宁可不可用也不落回本机服务。
+    // 注入的项目锚点只有通过归属判定才可用：别的设备/本机的 identity 会把 RPC
+    // 打到错误 host，宁可不可用也不落回本机服务。
     if (anchor.available && anchor.workspacePath && anchor.workspaceIdentity) {
       return {
         id: `__settings_source_anchor__:${anchor.workspaceIdentity}`,
@@ -1051,8 +1077,8 @@ export function PluginsSection({
     }
     // 端口已登记但设备没打开 workspace：端口本身即权威读数面。这里只借用它的
     // user-scope RPC 路径作为展示 / 缓存 target，不构造 workspaceIdentity，
-    // 也不把该 target 交给 workspace 服务解析（由 capabilityOverride 短路）。
-    if (sourcePortCapabilities && sourceRoute.kind === "port" && sourceRoute.userScopeRpcPath) {
+    // 也不把该 target 交给 workspace 服务解析（由端口服务短路）。
+    if (sourcePortReady && sourceRoute.kind === "port" && sourceRoute.userScopeRpcPath) {
       return {
         id: `__settings_source_user_scope__:${settingsSourceServerId}`,
         kind: "workspace",
@@ -1061,7 +1087,7 @@ export function PluginsSection({
       };
     }
     return null;
-  }, [settingsSourceServerId, sourcePortCapabilities, sourceRoute]);
+  }, [settingsSourceServerId, sourcePortReady, sourceRoute]);
   const sourceUnavailable = Boolean(settingsSourceServerId) && !sourceAnchorTarget;
   const sourceUserScopeTarget = sourceAnchorTarget;
   const preferredHost = useMemo(
@@ -1401,6 +1427,11 @@ export function PluginsSection({
                     remoteTarget={mcpTarget.remoteTarget}
                     localWorkspacePath={mcpTarget.localWorkspacePath}
                     scopeFilter={effectiveMcpScopeKey === "user" ? "user" : "workspace"}
+                    // user scope 选中的是设备时，端口就是该设备配置的权威读数面；
+                    // workspace scope / 本机 scope 继续按 target 解析 workspace 服务。
+                    sourcePortServices={
+                      effectiveMcpScopeKey === "user" ? sourcePortPanelServices : undefined
+                    }
                     parentScopeKey={selectedScopeKey}
                     workspaceTabs={workspaceTabs}
                     searchQuery={searchQueries.mcps}
@@ -1472,6 +1503,11 @@ export function PluginsSection({
                     workspacePath={commandTarget.workspacePath}
                     workspaceIdentity={commandTarget.workspaceIdentity}
                     scopeFilter={effectiveCommandScopeKey === "user" ? "user" : "workspace"}
+                    // 同 MCP：设备 user scope 由 attachment 端口直接提供读取面，
+                    // 不借设备上某个 workspace 或激活 workspace 的服务。
+                    sourcePortServices={
+                      effectiveCommandScopeKey === "user" ? sourcePortPanelServices : undefined
+                    }
                     parentScopeKey={selectedScopeKey}
                     workspaceTabs={workspaceTabs}
                     searchQuery={searchQueries.commands}

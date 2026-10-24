@@ -5,6 +5,7 @@ import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
   DesktopCommandIds,
   appRuntimePreferencesChangedBroadcastPayloadSchema,
+  stripRemoteTargetSecrets,
   type ConnectionProfile,
   type IPlatformService,
   type RemoteTarget,
@@ -12,6 +13,7 @@ import {
 } from "@zcode/shared";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { Button } from "@/components/ui/button.js";
+import { toast } from "@/components/ui/toast.js";
 import type {
   DeviceAdditionResult,
   DeviceAdditionReturnTarget,
@@ -57,6 +59,10 @@ import { useRootProviderSettingsSnapshot } from "@/root/useRootProviderSettingsS
 import { useDesktopNativeThemeSync } from "@/root/useDesktopNativeThemeSync.js";
 import { useRootPlatformEffects } from "@/root/useRootPlatformEffects.js";
 import { useRootWorkspaceActions } from "@/root/useRootWorkspaceActions.js";
+import {
+  requiresResolvedDeviceAdditionSource,
+  resolveConnectedSourceServerId,
+} from "@/root/deviceAdditionSource.js";
 import { useSourceServerUpdateNotifications } from "@/root/sourceServerUpdateNotifications.js";
 import { useBotBroadcastEffects } from "@/root/useBotBroadcastEffects.js";
 import {
@@ -93,9 +99,6 @@ const DEFAULT_LUCIDE_STROKE_WIDTH = 1.5;
 const REMOTE_CONNECTION_PREFERENCE_KEYS = [
   "returnTarget",
   "completion",
-  "preferredProfileId",
-  "preferredSourceServerId",
-  "preferredTarget",
   "preferredKind",
   "preferredWslDistro",
   "initialTarget",
@@ -554,38 +557,22 @@ function RootInner({
   );
 
   /**
-   * 解析本次连接对应的 Source server id，供 owner 回写设备选择。
-   * 创建草稿点已有设备时入口会带 preferredSourceServerId，原样回传即可；
-   * 「添加设备」没有该字段，才回落到 management 快照，且只有唯一在线设备才回填，
-   * 避免把新增设备误选到另一台已在线设备。
+   * 反解本次向导实际连上的 Source server id，供 owner 回写设备选择。
+   *
+   * 缺陷根因：入口偏好里的「打开向导时选中的设备」只代表打开时点的那一行，用户可以在
+   * 向导里把目标改成另一台机器；直接回显会把创建草稿和后续「查看项目」带到错的 Source。
+   * 因此只按本次 `connectRemote` 的真实 target 去 management 快照里找对应 Profile /
+   * online 状态 / preferredProfileId 归属，收敛不到唯一 id 就返回 undefined，由调用点按
+   * 设备类型决定是「可读失败」还是「legacy 设备照常 connected」（见
+   * requiresResolvedDeviceAdditionSource）。
    */
   const resolveDeviceAdditionSourceServerId = useCallback(
-    async (preference: RemoteConnectionOpenPreference | null): Promise<string | undefined> => {
-      const preferredSourceServerId = preference?.preferredSourceServerId?.trim();
-      if (preferredSourceServerId) return preferredSourceServerId;
+    async (connectedTarget: RemoteTarget): Promise<string | undefined> => {
       const management = services.sourceServerManagementService;
       if (!management) return undefined;
       try {
         const snapshot = await management.getSnapshot();
-        const profileId = preference?.preferredProfileId;
-        if (profileId) {
-          const onlineState = snapshot.states.find(
-            (item) =>
-              item.profileId === profileId && item.state === "online" && item.sourceServerId,
-          );
-          if (onlineState?.sourceServerId) return onlineState.sourceServerId;
-          const profile = snapshot.profiles.find((item) => item.profileId === profileId);
-          if (profile?.sourceServerId && profile.lifecycleState !== "retired")
-            return profile.sourceServerId;
-        }
-        const onlineSourceServerIds = [
-          ...new Set(
-            snapshot.states.flatMap((item) =>
-              item.state === "online" && item.sourceServerId ? [item.sourceServerId] : [],
-            ),
-          ),
-        ];
-        return onlineSourceServerIds.length === 1 ? onlineSourceServerIds[0] : undefined;
+        return resolveConnectedSourceServerId(snapshot, connectedTarget);
       } catch (error) {
         logger.warn("[Root] 解析设备连接结果失败", { error });
         return undefined;
@@ -1218,11 +1205,48 @@ function RootInner({
       // 设备管理往返（completion:"device-management" + returnTarget）：只回传设备事实，
       // 不进入目录/项目链路；owner 自己决定是否把该设备写回创建草稿的选择。
       if (deviceAdditionReturn.current) {
-        const sourceServerId = await resolveDeviceAdditionSourceServerId(
-          remoteConnectionOpenPreference,
-        );
-        const delivered = await finishDeviceAddition({ kind: "connected", sourceServerId });
+        // 回执按设备类型分流（判定依据见 requiresResolvedDeviceAdditionSource）：
+        // 「添加设备」和 server 形态设备必须确认本次连上的 Source；legacy ssh/wsl/docker
+        // 设备没有 Source 归属，约定「报告 connected 即回原流程」（ProjectCreation 只在
+        // device.sourceServerId 存在时才校验身份），不能把成功连接降级成取消并释放会话。
+        // 回执形态在 await 前确定；await 期间 owner 被取消/替换时，由 finishDeviceAddition
+        // 按当前 ref 的 isCurrent 守卫丢弃迟到结果。
+        const pendingAddition = deviceAdditionReturn.current;
+        const requiresResolvedSource = requiresResolvedDeviceAdditionSource(pendingAddition.target);
+        // 按本次实际连接目标反解归属（用户可能在向导里改选了另一台设备）。
+        const sourceServerId = await resolveDeviceAdditionSourceServerId(target);
+        if (!sourceServerId && requiresResolvedSource) {
+          // 连接成功但归属无法唯一确认：不能把 undefined 当成功静默回传给 owner——
+          // 「添加设备」会静默什么都不做，server 形态设备则无法确认回写的仍是同一 Source。
+          // 这里给可读提示并按取消收尾，宁可不回写也不能回写一个猜的 Source。
+          logger.warn("[Root] 设备连接成功但无法唯一确认 Source 归属", {
+            target: stripRemoteTargetSecrets(target),
+            expectedSourceServerId: pendingAddition.target.deviceSourceServerId,
+          });
+          toast(intl.formatMessage({ id: "settings.source.deviceSourceUnresolved" }), {
+            variant: "warning",
+            dedupeKey: "root.device-addition-source-unresolved",
+          });
+        }
+        let delivered: boolean;
+        try {
+          delivered = await finishDeviceAddition(
+            !sourceServerId && requiresResolvedSource
+              ? { kind: "cancelled" }
+              : { kind: "connected", sourceServerId },
+          );
+        } catch (error) {
+          // 原 owner 可能在 finish 里拒绝（例如向导改连到另一台 Source 后身份校验失败）。
+          // finish 拒绝说明本次连接没有提交成 tab；必须回收未提交 session，再把错误交给
+          // 连接 flow 显示原因并允许重试，不能把 session 留在会话存储里无人引用。
+          await releaseUncommittedRemoteSession(sessionId);
+          throw error;
+        }
         if (delivered) {
+          if (!sourceServerId && requiresResolvedSource) {
+            // 归属未确认时不会再有 tab 使用这条 session，按未提交回收，避免残留逻辑会话。
+            await releaseUncommittedRemoteSession(sessionId);
+          }
           // 让 SSHDialog 先完成自己的成功态提交，再收起并换代；否则它随后的
           // applyOpenState(true) 会把刚关掉的向导重新拉起，且下次打开会落回已连接的目录步。
           window.setTimeout(() => {
@@ -1275,14 +1299,14 @@ function RootInner({
       return sessionId;
     },
     [
+      finishDeviceAddition,
       handleConnectRemote,
       handleRemoteConnectionDialogOpenChange,
       handleSelectRemoteProject,
+      intl,
       releaseUncommittedRemoteSession,
-      remoteConnectionOpenPreference,
       resolveDeviceAdditionSourceServerId,
       services.sourceServerManagementService,
-      finishDeviceAddition,
     ],
   );
 

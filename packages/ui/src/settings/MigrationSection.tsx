@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { Loader2, RefreshCcw, TriangleAlert } from "lucide-react";
+import { Loader2, Monitor, RefreshCcw, TriangleAlert } from "lucide-react";
 import { Button } from "@/components/ui/button.js";
 import {
   Card,
@@ -21,18 +21,57 @@ import {
 import { useClaudeSessionMigration } from "@/hooks/useClaudeSessionMigration.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { MigrationCandidatesCard } from "@/settings/MigrationCandidatesCard.js";
+import { isSpecificSettingsSource } from "@/settings/settingsSourceWorkspace.js";
 
 const RANGE_OPTIONS = ["7d", "30d", "90d", "all"] as const;
 const WORKSPACE_FILTER_OPTIONS = ["all", "current"] as const;
+
+/**
+ * 应用级分区提示。
+ * 本分区不按 settingsSourceServerId 收窄读写落点：扫描/导入的是本机 Claude 历史记录。
+ * 选中具体设备时说明改动不作用于该设备；未选中具体设备时不展示。
+ */
+function AppLevelSettingsNotice({
+  settingsSourceServerId,
+}: {
+  settingsSourceServerId?: string | null;
+}) {
+  const { intl } = useZCodeIntl();
+  if (!isSpecificSettingsSource(settingsSourceServerId)) {
+    return null;
+  }
+  return (
+    <div
+      role="note"
+      data-settings-app-level="true"
+      className="flex items-start gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-ui-base leading-6 text-foreground-subtle"
+    >
+      <Monitor className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-medium text-foreground">
+          {intl.formatMessage({ id: "settings.scope.appLevel" })}
+        </div>
+        <div>{intl.formatMessage({ id: "settings.scope.appLevelNotice" })}</div>
+      </div>
+    </div>
+  );
+}
 
 export function MigrationSection({
   workspacePath,
   workspaceIdentity,
   isDesktop,
+  settingsSourceServerId,
 }: {
   workspacePath: string | null;
   workspaceIdentity?: string;
   isDesktop?: boolean;
+  /**
+   * 设置页顶部的设备（Source）选择，三态与设置页选择器一致：
+   * `undefined` = 未按设备收窄（选择器「全部」）、`null` = 本机、字符串 = 具体设备。
+   * 本分区不按它收窄读写落点，只用于决定应用级提示是否展示。
+   */
+  settingsSourceServerId?: string | null;
 }) {
   const { intl, locale } = useZCodeIntl();
   const {
@@ -80,6 +119,7 @@ export function MigrationSection({
 
   return (
     <div className="space-y-6">
+      <AppLevelSettingsNotice settingsSourceServerId={settingsSourceServerId} />
       <Card className="border border-border bg-card py-0 shadow-none">
         <CardHeader className="border-b border-border">
           <CardAction>

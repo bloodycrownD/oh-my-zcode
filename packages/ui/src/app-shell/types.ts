@@ -95,6 +95,16 @@ export type DeviceAdditionResult =
 export interface DeviceAdditionReturnTarget {
   /** 已有设备连接留在原项目页；只有新增设备往返设置。 */
   kind: "connect-device" | "add-device";
+  /**
+   * 原 owner 设备行自带的 Source 归属（`ProjectDevice.sourceServerId` 原样透传），
+   * 只用于判定「这台设备能不能归属 Source」，值本身只进日志：
+   * - 有值 = server 形态设备（host 身份 `remote:server:<id>` 经统一 identity 反解而来），
+   *   本次连接必须能反解回同一个 Source，否则按可读失败收尾；
+   * - undefined = legacy ssh/wsl/docker 设备：这类设备没有 Source 归属能力，沿用既有
+   *   约定「报告 connected 即回原流程」，反解不到 Source 也不能降级成取消。
+   * 「新增设备」没有设备行，不设此字段，由 Root 按流程类型要求 Source。
+   */
+  deviceSourceServerId?: string;
   isCurrent(): boolean;
   /** 只投递连接层可见性；原 owner 决定自己的提交门禁。 */
   onVisibilityChange?(visible: boolean): void;
@@ -110,11 +120,6 @@ export interface DeviceAdditionReturnTarget {
 export interface RemoteConnectionOpenPreference {
   returnTarget?: DeviceAdditionReturnTarget;
   completion?: "device-management";
-  /** 已有设备的精确 Profile；向导据此直达参数页并用于回传 Source 归属。 */
-  preferredProfileId?: string;
-  /** 已识别设备（创建草稿的设备下拉）的 Source id；连接成功后原样回传。 */
-  preferredSourceServerId?: string;
-  preferredTarget?: RemoteTarget;
   preferredKind?: RemoteTarget["kind"];
   preferredWslDistro?: string;
   /** 设备管理「连接」入口：用已保存线路预填向导（不含 secret）。 */

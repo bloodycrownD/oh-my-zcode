@@ -1,6 +1,6 @@
 /* oxlint-disable eslint(max-lines) -- Browser Plugin、Chrome 数据导入与清理共享同一平台状态机，拆分会扩大 pending/失败回收边界。 */
 import { useCallback, useEffect, useState, type ReactNode } from "react";
-import { LoaderCircle } from "lucide-react";
+import { LoaderCircle, Monitor } from "lucide-react";
 import type { ChromeBrowserDataImportResult } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
 import {
@@ -22,6 +22,7 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { invalidateDeferredDraftSessionForSkillChange } from "@/lib/zcodeDraftSkillInvalidation.js";
 import { logger } from "@/logger.js";
 import { SettingsGroupCard, SettingsRow } from "@/settings/SettingsPageParts.js";
+import { isSpecificSettingsSource } from "@/settings/settingsSourceWorkspace.js";
 import { usePluginManagementStore } from "@/store/pluginManagementStore.js";
 import { useSkillStore } from "@/store/skillStore.js";
 import { formatImportSummary } from "./browserImportSummary.js";
@@ -33,6 +34,13 @@ interface BrowserSettingsSectionProps {
   isWindowsDesktop?: boolean;
   workspacePath?: string | null;
   workspaceIdentity?: string;
+  /**
+   * 设置页顶部的设备（Source）选择，三态与设置页选择器一致：
+   * `undefined` = 未按设备收窄（选择器「全部」）、`null` = 本机、字符串 = 具体设备。
+   * 本分区不按它收窄读写落点，只用于决定应用级提示是否展示：
+   * 只有选中具体设备时才需要提示「改动不作用于所选设备」。
+   */
+  settingsSourceServerId?: string | null;
   embeddedBrowserAllowInsecureCertificates?: boolean;
   onEmbeddedBrowserAllowInsecureCertificatesChange?: (enabled: boolean) => Promise<void>;
 }
@@ -70,11 +78,43 @@ function BrowserOperationButton({
   );
 }
 
+/**
+ * 应用级分区提示。
+ * 本分区不按 settingsSourceServerId 收窄读写落点：浏览器插件开关、数据导入/清理与证书策略
+ * 都作用于当前应用（本机）。选中具体设备时说明改动不作用于该设备；未选中具体设备时不展示。
+ */
+function AppLevelSettingsNotice({
+  settingsSourceServerId,
+}: {
+  settingsSourceServerId?: string | null;
+}) {
+  const { intl } = useZCodeIntl();
+  if (!isSpecificSettingsSource(settingsSourceServerId)) {
+    return null;
+  }
+  return (
+    <div
+      role="note"
+      data-settings-app-level="true"
+      className="flex items-start gap-2 rounded-lg border border-border bg-surface px-4 py-3 text-ui-base leading-6 text-foreground-subtle"
+    >
+      <Monitor className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+      <div className="min-w-0">
+        <div className="font-medium text-foreground">
+          {intl.formatMessage({ id: "settings.scope.appLevel" })}
+        </div>
+        <div>{intl.formatMessage({ id: "settings.scope.appLevelNotice" })}</div>
+      </div>
+    </div>
+  );
+}
+
 export function BrowserSettingsSection({
   isDesktop,
   isWindowsDesktop = false,
   workspacePath,
   workspaceIdentity,
+  settingsSourceServerId,
   embeddedBrowserAllowInsecureCertificates = false,
   onEmbeddedBrowserAllowInsecureCertificatesChange = async () => {},
 }: BrowserSettingsSectionProps) {
@@ -215,6 +255,7 @@ export function BrowserSettingsSection({
 
   return (
     <div className="space-y-5">
+      <AppLevelSettingsNotice settingsSourceServerId={settingsSourceServerId} />
       <section className="space-y-3">
         <SettingsGroupCard>
           <SettingsRow

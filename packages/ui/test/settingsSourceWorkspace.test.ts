@@ -3,8 +3,9 @@
  * 移植上游 ui/test/settingsSourceWorkspace.test.ts（vitest → node:test）。
  *
  * 本批（source-settings 收口）追加：
- * ①归属判定矩阵；②锚点解析（含「别的设备不能当锚点」回归）；③投影键口径与 loading 结束；
- * ④SettingsPage / 三个 section 的源码形状守卫（生产入口必须真的把 id 传下去）。
+ * ①归属判定矩阵（含旧 ssh 线路经 Directory legacy alias 映射）；②锚点解析（含「别的设备
+ * 不能当锚点」回归）；③投影键口径与 loading 结束；④SettingsPage / 三个 section 的源码形状
+ * 守卫（生产入口必须真的把 id 传下去）；⑤旧线路映射必须来自本机 Source 管理面并进入锚点链。
  *
  * 运行：npx tsx --tsconfig packages/ui/tsconfig.json --test packages/ui/test/settingsSourceWorkspace.test.ts
  */
@@ -25,8 +26,6 @@ import {
   resolveSettingsSourceScopeAnchor,
   resolveSettingsSourceServerSelection,
   resolveSettingsSourceServiceRoute,
-  resolveSettingsUserScopeTarget,
-  resolveSourceSettingsHomeDir,
   resolveSourceSettingsValue,
   workspaceBelongsToSettingsSource,
 } from "../src/settings/settingsSourceWorkspace.js";
@@ -51,13 +50,15 @@ function tab(id: string, workspaceIdentity?: string): WorkspaceTabState {
   } as WorkspaceTabState;
 }
 
-/** 只填四个分区真正消费的能力面；其余字段本批用例不触达。 */
+/** 填满 source-settings 服务集的必需通道；其余字段本批用例不触达。 */
 function createPortServices(tag: string): IServiceAccessor {
   return {
     hooksService: { tag },
     pluginManagementService: { tag },
     skillsService: { tag },
     subagentsService: { tag },
+    mcpSyncService: { tag },
+    commandsService: { tag },
     skillSyncService: { tag },
     settingsSyncService: { tag },
   } as unknown as IServiceAccessor;
@@ -112,19 +113,226 @@ test("T-SS2 不把 Source A 的项目作用域发给 Source B 的服务", () => 
 });
 
 test("T-SS2 归属判定唯一口径：server identity 认设备，其余 identity 归本机/不归任何设备", () => {
-  const owned = { workspaceIdentity: "remote:server:source-a:/work/a" };
-  const sibling = { workspaceIdentity: "remote:server:source-b:/work/b" };
-  const legacySsh = { workspaceIdentity: "remote:ssh:host:22:user:/work/legacy" };
-  const local = { workspaceIdentity: undefined };
+  const owned = { workspaceIdentity: "remote:server:source-a:/work/a", workspacePath: "/work/a" };
+  const sibling = { workspaceIdentity: "remote:server:source-b:/work/b", workspacePath: "/work/b" };
+  const legacySsh = {
+    workspaceIdentity: "remote:ssh:host:22:user:/work/legacy",
+    workspacePath: "/work/legacy",
+  };
+  const local = { workspaceIdentity: undefined, workspacePath: "/work/local" };
 
   assert.equal(workspaceBelongsToSettingsSource(owned, "source-a"), true);
   assert.equal(workspaceBelongsToSettingsSource(owned, "source-b"), false);
   assert.equal(workspaceBelongsToSettingsSource(owned, null), false, "远端项目不属于本机");
   assert.equal(workspaceBelongsToSettingsSource(sibling, "source-a"), false);
-  assert.equal(workspaceBelongsToSettingsSource(legacySsh, "source-a"), false, "ssh 旧链不归设备");
-  assert.equal(workspaceBelongsToSettingsSource(legacySsh, null), false, "ssh 旧链不是本机");
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacySsh, "source-a"),
+    false,
+    "ssh 旧链没有历史映射时不归设备",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacySsh, null),
+    false,
+    "ssh 旧链不是本机（历史映射也不能把它变成本机）",
+  );
   assert.equal(workspaceBelongsToSettingsSource(local, null), true, "无 identity 的项目归本机");
   assert.equal(workspaceBelongsToSettingsSource(local, "source-a"), false);
+});
+
+test("T-SS2 旧 ssh 线路：Directory legacy alias 唯一命中时归属该 Source", () => {
+  const legacyIdentity = "remote:ssh:host:22:user:/work/legacy";
+  const legacy = { workspaceIdentity: legacyIdentity, workspacePath: "/work/legacy" };
+  const history = [
+    {
+      workspacePath: "/work/legacy",
+      legacyWorkspaceIdentity: legacyIdentity,
+      profileId: "profile-a",
+      sourceServerId: "source-a",
+      lastOpenedAt: 1,
+    },
+  ];
+
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a", { workspaceHistory: history }),
+    true,
+    "旧 ssh identity 命中映射 → 归属于该 Source",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-b", { workspaceHistory: history }),
+    false,
+    "映射到 source-a 的线路不能被 source-b 借用",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, null, { workspaceHistory: history }),
+    false,
+    "旧 ssh 线路永远不是本机 scope",
+  );
+});
+
+test("T-SS2 旧 ssh 线路：映射缺失 / 不精确 / 多义命中都按不归属处理", () => {
+  const legacyIdentity = "remote:ssh:host:22:user:/work/legacy";
+  const legacy = { workspaceIdentity: legacyIdentity, workspacePath: "/work/legacy" };
+  const entry = (
+    overrides: Partial<{
+      workspacePath: string;
+      legacyWorkspaceIdentity: string;
+      sourceServerId: string;
+      lastOpenedAt: number;
+    }>,
+  ) => ({
+    workspacePath: "/work/legacy",
+    legacyWorkspaceIdentity: legacyIdentity,
+    profileId: "profile-a",
+    sourceServerId: "source-a",
+    lastOpenedAt: 1,
+    ...overrides,
+  });
+
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a"),
+    false,
+    "没有 workspaceHistory 不得归属",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a", { workspaceHistory: [] }),
+    false,
+    "空历史 = 映射缺失",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a", {
+      workspaceHistory: [entry({ workspacePath: "/work/other" })],
+    }),
+    false,
+    "路径不一致不得命中（禁止按 hostname/账号猜测）",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a", {
+      workspaceHistory: [
+        entry({ legacyWorkspaceIdentity: "remote:ssh:other:22:user:/work/legacy" }),
+      ],
+    }),
+    false,
+    "identity 不是该条目的 legacy alias 不得命中",
+  );
+  const ambiguous = [
+    entry({ sourceServerId: "source-a" }),
+    entry({ sourceServerId: "source-b", lastOpenedAt: 2 }),
+  ];
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-a", { workspaceHistory: ambiguous }),
+    false,
+    "两台设备声明同一 alias 时保持待识别，不猜归属",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(legacy, "source-b", { workspaceHistory: ambiguous }),
+    false,
+  );
+});
+
+test("T-SS2 remote:server 形态行为不变：identity 权威优先于任何历史映射", () => {
+  const owned = { workspaceIdentity: "remote:server:source-a:/work/a", workspacePath: "/work/a" };
+  // 历史条目把同一路径的 legacy alias 记成 server identity 且指向 source-b；
+  // server identity 必须先解析、不得被历史映射覆盖。
+  const misleadingHistory = [
+    {
+      workspacePath: "/work/a",
+      legacyWorkspaceIdentity: "remote:server:source-a:/work/a",
+      profileId: "profile-a",
+      sourceServerId: "source-b",
+      lastOpenedAt: 1,
+    },
+  ];
+
+  assert.equal(
+    workspaceBelongsToSettingsSource(owned, "source-a", { workspaceHistory: misleadingHistory }),
+    true,
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(owned, "source-b", { workspaceHistory: misleadingHistory }),
+    false,
+    "server identity 说 source-a 时历史不能改写归属",
+  );
+  assert.equal(
+    workspaceBelongsToSettingsSource(owned, null, { workspaceHistory: misleadingHistory }),
+    false,
+  );
+});
+
+test("T-SS2 作用域过滤：旧 ssh tab 有映射才进所选 Source 的列表", () => {
+  const legacyIdentity = "remote:ssh:h:22:u:/work/legacy";
+  const tabs = [
+    tab("local"),
+    tab("a", "remote:server:source-a:/work/a"),
+    tab("legacy", legacyIdentity),
+  ];
+  // tab() 把 workspacePath 固定成 /work/<id>；历史条目必须与它精确对齐。
+  const history = [
+    {
+      workspacePath: "/work/legacy",
+      legacyWorkspaceIdentity: legacyIdentity,
+      profileId: "profile-a",
+      sourceServerId: "source-a",
+      lastOpenedAt: 1,
+    },
+  ];
+
+  assert.deepEqual(
+    filterWorkspaceTabsForSettingsSource(tabs, "source-a", { workspaceHistory: history }).map(
+      (item) => item.id,
+    ),
+    ["a", "legacy"],
+    "旧 ssh 线路命中映射后进入该 Source 作用域",
+  );
+  assert.deepEqual(
+    filterWorkspaceTabsForSettingsSource(tabs, "source-a").map((item) => item.id),
+    ["a"],
+    "没有映射时行为不变（旧 ssh tab 不归任何 Source）",
+  );
+  assert.deepEqual(
+    filterWorkspaceTabsForSettingsSource(tabs, null, { workspaceHistory: history }).map(
+      (item) => item.id,
+    ),
+    ["local"],
+    "历史映射不能把远端线路算成本机",
+  );
+});
+
+test("T-SS2 锚点解析：旧 ssh 项目经 Directory 映射后可作为所选 Source 的锚点", () => {
+  const legacyIdentity = "remote:ssh:h:22:u:/work/legacy";
+  const history = [
+    {
+      workspacePath: "/work/legacy",
+      legacyWorkspaceIdentity: legacyIdentity,
+      profileId: "profile-a",
+      sourceServerId: "source-a",
+      lastOpenedAt: 1,
+    },
+  ];
+  const params = {
+    scopedTabs: [] as const,
+    fallbackWorkspacePath: "/work/legacy",
+    fallbackWorkspaceIdentity: legacyIdentity,
+  };
+
+  const accepted = resolveSettingsSourceScopeAnchor({
+    sourceServerId: "source-a",
+    ...params,
+    workspaceHistory: history,
+  });
+  assert.equal(accepted.available, true, "映射命中后旧 ssh 项目不能再被判 unavailable");
+  assert.equal(accepted.workspacePath, "/work/legacy");
+  assert.equal(accepted.workspaceIdentity, legacyIdentity);
+
+  const noMapping = resolveSettingsSourceScopeAnchor({ sourceServerId: "source-a", ...params });
+  assert.equal(noMapping.available, false, "映射缺失仍按不归属处理");
+  assert.equal(noMapping.workspacePath, undefined, "不可用时不得泄漏外来路径");
+
+  const foreign = resolveSettingsSourceScopeAnchor({
+    sourceServerId: "source-b",
+    ...params,
+    workspaceHistory: history,
+  });
+  assert.equal(foreign.available, false, "映射到 source-a 的项目不能当 source-b 的锚点");
 });
 
 test("T-SS2 锚点解析：别的设备的 workspace 不能当所选 Source 的锚点", () => {
@@ -180,67 +388,14 @@ test("T-SS2 锚点解析：本机 scope 无锚点也合法，注入的远端项�
   assert.equal(localPathOnly.workspacePath, "/work/local", "无 identity 的本机项目可以当锚点");
 });
 
-test("T-SS2 锚点解析：无 tab 的远端 Source 用 home 构造归属 identity", () => {
-  const anchor = resolveSettingsSourceScopeAnchor({
-    sourceServerId: "source-a",
-    scopedTabs: [],
-    sourceHomeDir: "/root",
-  });
-  assert.equal(anchor.available, true);
-  assert.equal(anchor.workspacePath, "/root");
-  assert.equal(anchor.workspaceIdentity, "remote:server:source-a:/root");
-  assert.equal(workspaceBelongsToSettingsSource(anchor, "source-a"), true);
-
-  const missingHome = resolveSettingsSourceScopeAnchor({
+test("T-SS2 锚点解析：无 tab 的远端 Source 显式 unavailable（不得回落本机）", () => {
+  const noAnchor = resolveSettingsSourceScopeAnchor({
     sourceServerId: "source-a",
     scopedTabs: [],
   });
-  assert.equal(missingHome.available, false, "拿不到 home 时必须显式不可用");
-});
-
-test("T-SS2 Source user scope 不绑定项目 identity，但必须由 Source 构造归属 identity", () => {
-  assert.deepEqual(
-    resolveSettingsUserScopeTarget({
-      sourceServerId: "source-b",
-      sourceHomeDir: "/root",
-      projectWorkspacePath: "/work/b",
-      projectWorkspaceIdentity: "remote:server:source-b:/work/b",
-    }),
-    {
-      workspacePath: "/root",
-      workspaceIdentity: "remote:server:source-b:/root",
-      authorityKey: "source-settings:source-b",
-      unavailable: false,
-    },
-  );
-
-  // 没有 home 时不能给「无 identity 的远端路径」，必须显式 unavailable。
-  assert.deepEqual(resolveSettingsUserScopeTarget({ sourceServerId: "source-b" }), {
-    authorityKey: "source-settings:source-b",
-    unavailable: true,
-  });
-});
-
-test("T-SS2 拿不到 Source 时降级为本机项目 scope", () => {
-  assert.deepEqual(
-    resolveSettingsUserScopeTarget({
-      sourceServerId: null,
-      projectWorkspacePath: "/work/local",
-      projectWorkspaceIdentity: "local:work",
-    }),
-    {
-      workspacePath: "/work/local",
-      workspaceIdentity: "local:work",
-      unavailable: false,
-    },
-  );
-});
-
-test("T-SS2 不暴露上一台 Source 的 home", () => {
-  const home = { sourceServerId: "source-a", homedir: "/home/alice" };
-  assert.equal(resolveSourceSettingsHomeDir(home, "source-a"), "/home/alice");
-  assert.equal(resolveSourceSettingsHomeDir(home, "source-b"), undefined);
-  assert.equal(resolveSourceSettingsHomeDir(null, "source-a"), undefined);
+  assert.equal(noAnchor.available, false, "没有可证明归属的锚点时必须显式不可用");
+  assert.equal(noAnchor.workspacePath, undefined);
+  assert.equal(noAnchor.workspaceIdentity, undefined);
 });
 
 test("T-SS2 不暴露上一台 Source 的设置代际", () => {
@@ -343,6 +498,9 @@ test("T-SS2 端口优先：四个分区解析到已登记端口服务而不是�
   assert.equal(route.capabilities?.pluginManagementService, port.pluginManagementService);
   assert.equal(route.capabilities?.skillsService, port.skillsService);
   assert.equal(route.capabilities?.subagentsService, port.subagentsService);
+  // MCP / 命令面板与四个基础分区共用同一份投影，不能再各自读原始 accessor。
+  assert.equal(route.capabilities?.mcpSyncService, port.mcpSyncService);
+  assert.equal(route.capabilities?.commandsService, port.commandsService);
   assert.equal(route.userScopeRpcPath, "/work/a", "有锚点时复用锚点路径作为 user scope RPC 路径");
 });
 
@@ -523,6 +681,23 @@ test("T-SS2 生产入口：三个 section 的服务来源走统一「端口→�
       /!workspaceIdentity\?\.trim\(\)/,
       `${file.at(-1)} 不得再用「identity 非空」当归属证明`,
     );
+    // scope 菜单与服务锚点必须共用同一份 Directory 历史：只订阅不喂给过滤，会出现
+    // 「下拉看不到该设备已连接项目、锚点却已可用」的第二套口径。
+    assert.match(
+      source,
+      /useSettingsSourceWorkspaceHistory\(/,
+      `${file.at(-1)} 必须订阅 Source Directory 历史以识别旧 ssh/wsl/docker 线路`,
+    );
+    assert.match(
+      source,
+      /filterWorkspaceTabsForSettingsSource\([\s\S]*?workspaceHistory: settingsSourceWorkspaceHistory/,
+      `${file.at(-1)} 的 scope 菜单过滤必须喂入同一份 workspaceHistory`,
+    );
+    assert.match(
+      source,
+      /useSettingsSourceServiceRoute\(\{[\s\S]*?workspaceHistory: settingsSourceWorkspaceHistory/,
+      `${file.at(-1)} 的服务锚点解析必须使用与 scope 菜单相同的 workspaceHistory`,
+    );
   }
 });
 
@@ -544,4 +719,45 @@ test("T-SS2 生产入口：SkillsSection 三处 key 同口径且用共享 loadin
     "loaded key 只保存 request key",
   );
   assert.match(skills, /isSettingsProjectionCurrent\(\{/, "loading 结束条件必须复用共享判定");
+});
+
+test("T-SS2 生产入口：旧线路映射复用 sourceIdentity 且真的接到本机 Source 管理面", () => {
+  const source = read("packages", "ui", "src", "settings", "settingsSourceWorkspace.ts");
+
+  assert.match(
+    source,
+    /import \{ getWorkspaceSourceServerId \} from "@\/conversation-workspace-target\/sourceIdentity\.js";/,
+    "必须复用现有 ssh→Source 映射函数，不新造映射表",
+  );
+  assert.match(
+    source,
+    /getWorkspaceSourceServerId\(tab, \{ workspaceHistory: options\.workspaceHistory \}\)/,
+    "归属判定必须把 Directory 历史喂给映射函数（否则旧 ssh identity 恒不归属）",
+  );
+  assert.match(
+    source,
+    /useBaseWorkspaceServices\(\)/,
+    "历史必须取自本机 base Host（激活 workspace 可能是远端 Host）",
+  );
+  assert.match(
+    source,
+    /useSourceServerManagementSnapshot\(\s*baseServices\.sourceServerManagementService,\s*\{ enabled: needsWorkspaceHistory \},?\s*\)/,
+    "必须订阅 Source 管理面快照作为 workspaceHistory 的生产来源",
+  );
+  assert.match(
+    source,
+    /managementSnapshot\?\.workspaceHistory/,
+    "workspaceHistory 必须来自 management 快照，不得写死空数组",
+  );
+  assert.match(
+    source,
+    /resolveSettingsSourceScopeAnchor\(\{[\s\S]*?workspaceHistory,\s*\}\)/,
+    "锚点解析必须收到 history（参数不能恒 undefined）",
+  );
+  // 旧线路 authority（host/port/username）不参与归属判断，禁止在业务层自行拆解。
+  assert.doesNotMatch(
+    source,
+    /identity\.split\(":"\)|remote:ssh[\s\S]{0,40}\.split/,
+    "不得在设置归属判定里手写 identity authority 解析",
+  );
 });
