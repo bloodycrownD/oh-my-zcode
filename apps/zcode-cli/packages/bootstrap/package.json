@@ -56,6 +56,7 @@
     "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs",
     "test:held-queue-routing": "tsx --test scripts/test-held-queue-routing.mjs",
     "test:mc-entry-identity-guard": "node --test scripts/test-mc-entry-identity-guard.mjs",
+    "test:mc-zero-load": "node --test scripts/test-magic-context-zero-load.mjs",
     "test:concurrent-turn-terminal-guard": "node --test scripts/test-concurrent-turn-terminal-guard.mjs"
   },
   "dependencies": {

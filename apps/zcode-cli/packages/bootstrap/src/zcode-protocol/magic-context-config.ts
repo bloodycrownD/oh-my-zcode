@@ -1,6 +1,10 @@
 import { ConfigKey } from "@zcode/contracts";
-import { getDefaultConfigPath, loadFileConfig, updateMagicContextInFileConfig } from "@zcode/adapters/config";
-import { MagicContextConfigSchema } from "@zcode/magic-context";
+import {
+  getDefaultConfigPath,
+  loadFileConfig,
+  updateMagicContextInFileConfig,
+} from "@zcode/adapters/config";
+import { MagicContextConfigSchema } from "@zcode/magic-context/host/config/schema";
 import {
   zcodeWorkspaceReadMagicContextConfigParamsSchema,
   zcodeWorkspaceReadMagicContextConfigResultSchema,
@@ -180,7 +184,9 @@ export async function updateMagicContextConfig(
   });
 }
 
-function formatIssues(error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> }): string {
+function formatIssues(error: {
+  issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>;
+}): string {
   return error.issues
     .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`)
     .join("; ");

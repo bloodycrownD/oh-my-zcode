@@ -3,15 +3,18 @@
  *
  * ============================================================================
  * 这里是 bootstrap 侧 magic-context 的运行时装配入口，而且只在
- * `features.magicContext` 打开时才 import（`createZCodeApp` 用动态 import 调本文件
- * 的工厂）。`@zcode/magic-context` 的静态 import 面全仓共 7 处：
- * adapters/src/config/schema.ts（配置 schema，走窄子路径
- * `@zcode/magic-context/host/config/schema`）、bootstrap/src/app 下的本文件与
- * magic-context-{historian,usage-summary,prompt-section-zh-cn}.ts、
- * bootstrap/src/zcode-protocol 下的 magic-context-{config,memories}.ts；
- * core 的 ctx_* 工具与 bootstrap 的 /ctx-* 命令走动态 import。
- * 关掉 flag 时本文件与它拉起的整棵运行时装配图不加载；原因见
- * `core/src/runtime/helpers/magic-context-turn-transform.ts` 的文件头。
+ * `features.magicContext` 打开时才 import（`create-app` 经
+ * `app/magic-context/adapter.ts` 动态 import 本文件）。`@zcode/magic-context`
+ * 的**运行时**静态 import 面全仓共 6 处，全部落在这棵「门后」子图里：
+ * `app/magic-context/{assembly,ports,prompt-surface,usage}.ts` 与
+ * `app/magic-context-{historian,usage-summary}.ts`（另有
+ * `app/magic-context/{projection,types}.ts` 与
+ * `app/magic-context-prompt-section-zh-cn.ts` 只是 `import type`，编译后擦除）。
+ * 配置面走窄子路径 `@zcode/magic-context/host/config/schema`（adapters 与
+ * `zcode-protocol/magic-context-{config,memories}.ts`）；`zcode-protocol` 下的
+ * 实现值一律 handler 内部动态 import。关掉 flag 时本文件与它拉起的整棵运行时
+ * 装配图都不加载；长期守卫见 `scripts/test-magic-context-zero-load.mjs`。
+ * 原因见 `core/src/runtime/helpers/magic-context-turn-transform.ts` 的文件头。
  * ============================================================================
  *
  * 本文件负责三件事：
