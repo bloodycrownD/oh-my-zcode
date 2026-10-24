@@ -247,3 +247,28 @@ CR `code-review-loop` 判决 `fix-spec-ready` 后由 code-dev-loop 执行，26 �
 2. 上游 footer banner 槽留空（SidebarBottomActivity 剔除后无内容注入）。
 3. nav 与 ProjectSections 新建入口并存（上游形态保持）。
 4. 队列行胶囊预览纳入本轮（Step 22，探索报告标可选）。
+
+## 执行记录（code-dev-loop，2026-10-24 收口）
+
+本迭代 27 个 Step 全部落地，分支 `backlog-sweep`，基线 `f29e5cca`（CR 轮收口点）。
+
+| Wave | Step | 交付 | 提交 |
+|---|---|---|---|
+| W1 | 1-2 / 12-13 / 17-18 / 20-25 | 服务层、U5/U6/U11/U12、胶囊、服务商交互（含 CR 轮 26 条 must-fix） | 见 cr_fix_dag.node_status |
+| W2 | 3 / 5 | 侧栏骨架（nav→task-list→scroll→footer）+ `WorkspaceSidebar` 收为 alias + 双视角（classic/projects）整机制删除 + 死文件簇删除 + i18n 两键清除 | 474b8b9e / 3b52c5e3 / e72c7192 |
+| W3 | 4 / 6 | 远端项目 Picker 真链（四参契约 + purpose=project 在 bind 前 return + Root selection/stale-intent + Picker→Editor host/initialRoots + 边界确认）+ legacySingleRoot 闸门 | 52f4780e / b729d07b / 7d384af3 / f947a8c0 |
+| W4 | 15 | U8 `localUsageEvidence` 三证据源（品牌 `~/.omz`）+ node.ts 接线（`includeDeleted: true`） | 29bc1e72 / 950d47c9 |
+| W5 | 7 / 8 / 11 | P9-1 management 服务（17 方法 + 3 事件）+ host 注册 + connectHost 切上游版 + source-settings scope/detach 守卫 + server 侧 web 面远程路由删除 | e21b50b5 / 2f382668 / 9581b5f0 / 52f7eb65 |
+| W6 | 9 / 10 | P9-3 设备管理面板族（1740L 面板 + 迁移报告 + 更新活动 + hooks）+ 4 条消费缝真接 + 编辑连接弹窗 + P9-4 settingsNavigation/侧栏设备 action/更新提示控制器 + i18n 94 键 | 5f9098b4 / 40e32417 / 8965296d / 43155d7b / 411da10f / ccf96689 / fae4c0f9 / e1dc0f74 / 99de9538 |
+| W7 | 19 | U10 side-pane 全屏（新模块 10 文件 + 双投影 + 快捷键 + 浮窗宿主 + 14 test id + 1 i18n 键） | a5deb00d / 8f6008eb / e9730fa7 / d4cfdf2e |
+| W8 | 16 / 14 | U9 server 静态路由穿越加固（盘符/UNC/绝对路径一律 404）+ 新建 server 测试工程；U7 各项复核在位（由 W6 面板批同批落地） | 8bcb2607 / 69a3e60c |
+| W9 | 26 / 27 | 孤儿清扫 44 文件 + knip 终态基线 + 全门禁 + CHANGELOG/QA 附录 | a7d7c70c |
+
+**关键裁定执行情况**：
+
+- Step 5「删双视角」按用户裁定（上游无此机制 → 不做 fork 自创）执行，`sidebar-view-mode` 持久化键与两枚切换钮全清。
+- Step 11「deployServer 退役」按 R5 只做 web 面（`/api/connect-remote`、`/ws/remote/:id` 与 web 消费点），host 闸门 `ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1` 与旧分支保留为回滚阀。
+- Step 4「远端建任务」按拍板 A 收窄：`start()` 带非 local `hostId` 时拒绝并 toast，远端建任务路由留下一轮。
+- Step 9「例外真实范围」严格按 R4：面板不搬向导壳，`onAddDevice` 不传、connect/retry/install 显式 disabled。
+
+**新增/变更的 deviation 清单**：见 `.iteration-state.yaml` 的 `spec_deviations` D25-D46 与 `open_observations` 末 8 条；真机验收清单见 `qa-appendix.md`。

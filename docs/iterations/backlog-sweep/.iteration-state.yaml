@@ -1,6 +1,6 @@
 dag_version: 1
 review_round: 5
-status: code-dev-loop 启动（spec-check-loop 5 轮收口；分支 backlog-sweep）
+status: dev-ready（Step 1-27 全闭合；分支 backlog-sweep；真机 QA 待验收，见 qa-appendix.md）
 prd_path: null # 用户口述需求，无 prd.md；需求来源见 spec「需求来源」节
 spec_path: docs/iterations/backlog-sweep/spec.md
 open_must_fix: []
@@ -68,12 +68,26 @@ dev_dag:
     verify-pill2: { status: passed, executor: "subagent+main", note: "fix 三项全闭；判 fail 因 test:v4-perf 批启动器（非 fix 引入），主代理 b15e0278 修正并复跑 29/29" }
     cr-func-a: { status: passed, executor: readonly-subagent, verdict: "func-ready yes；D1-D12 偏差待登记" }
     cr-func-b: { status: passed, executor: readonly-subagent, verdict: "func-ready no→P1 src-only 图片不可达，主代理 b5b3afab 收口并补可达用例" }
-    impl-sidebar: { status: pending, spec_steps: "3-6" }
-    impl-u8: { status: pending, spec_steps: "15" }
-    impl-p9: { status: pending, spec_steps: "7-11" }
-    impl-u9u7: { status: pending, spec_steps: "16,14" }
-    impl-u10: { status: pending, spec_steps: "19" }
-    gates: { status: pending, spec_steps: "26-27" }
+    impl-sidebar: { status: done, spec_steps: "3-6", executor: subagent, commits: "474b8b9e,3b52c5e3,e72c7192,f947a8c0" }
+    impl-picker: { status: done, spec_steps: "4", executor: subagent, commits: "52f4780e,b729d07b,7d384af3" }
+    impl-u8: { status: done, spec_steps: "15", executor: subagent, commits: "29bc1e72,950d47c9" }
+    impl-p9: { status: done, spec_steps: "7-11", executor: subagent, commits: "e21b50b5,2f382668,9581b5f0,52f7eb65,5f9098b4,40e32417,8965296d,43155d7b,411da10f,ccf96689,fae4c0f9,e1dc0f74,99de9538" }
+    impl-u9u7: { status: done, spec_steps: "16,14", executor: subagent, commits: "8bcb2607,69a3e60c", note: "Step 14（U7）的 isInvalidPort/collectRemoteFormFieldErrors/preserveDraftOnOpen/savedSshConfigAlias/focusField 族由 impl-p9 面板批同批落地（EditConnectionProfileDialog + RemoteConnectionFields），复核在位" }
+    impl-u10: { status: done, spec_steps: "19", executor: subagent, commits: "a5deb00d,8f6008eb,e9730fa7,d4cfdf2e" }
+    impl-orphan-sweep: { status: done, executor: main, commits: "a7d7c70c", note: "经典侧栏 alias 后 44 个孤儿文件删除 + knip 终态基线（51 项逐项裁决：删 0 豁免 51）" }
+    gates: { status: done, spec_steps: "26-27", executor: main, commits: "a7d7c70c", note: "typecheck 0 / desktop-full 54 基线 / lint 149w0e / oxfmt 触碰面 0 / knip 基线 / i18n 6410×2 / test:v4-perf 52 批全绿 / cli-backport 绿" }
+  gates:
+    date: "2026-10-24"
+    head: "69a3e60c"
+    typecheck_root: "0 error（含新增 packages/server/tsconfig.test.json 工程）"
+    typecheck_desktop_full: "54 error kinds（基线 366，removed 312，零新增）"
+    lint: "149 warnings / 0 errors = 基线，触碰面零新增"
+    oxfmt: "f29e5cca..HEAD 全量 108 文件 --check exit 0"
+    knip: "docs/iterations/backlog-sweep/cache/gate-knip.json：与本迭代基线 diff 51 项，删 44 文件、豁免 51（NEW_SYMBOL_UNWIRED 30 / BASELINE_FILE_ORPHAN 17 / BARREL_REEXPORT 3 / BASELINE_DRIFT 1）"
+    i18n: "zh/en 各 6410 键对称，--verify 幂等（值冲突仲裁 92/91、品牌残留 0）"
+    test_v4_perf: "52 批 / 845 pass / 0 fail（基线 712 → 本轮 +133）"
+    cli_backport: "6+5+4+2 全绿"
+    bundle: "production build exit 0；verify:bundle-imports PASS（50 文件）；desktop-launch-smoke PASS（现有 profile 与全新空 profile 双 PASS）"
   e2e_evidence:
     date: "2026-10-23"
     head: "2cf16af6"
@@ -92,10 +106,10 @@ dev_dag:
     fix_spec_path: docs/iterations/backlog-sweep/cr-fix-spec.md
     wave_plan: [[review-scope-svc, review-scope-composer, review-scope-desktop, review-scope-provider], [review-full]]
     node_status: { review-scope-svc: done, review-scope-composer: done, review-scope-desktop: done, review-scope-provider: done, review-full: done }
-    must_fix_open: 26
+    must_fix_open: 0
     severity: { p0: 0, p1: 2, p2: 24 }
     spec_fix_plan: []
-    status: fix-spec-ready（r4 review-full: yes；待用户确认后执行）
+    status: closed（26 条 must-fix 全落地：2 P1 + 24 P2；见 cr_fix_dag 与 cr-fix-spec 执行记录）
   cr_fix_dag:
     spec_path: docs/iterations/backlog-sweep/cr-fix-spec.md
     base_sha: 41f66023
@@ -134,7 +148,7 @@ dev_dag:
     review_round: 3
     open_must_fix: []
     doc_fix_plan: []
-    status: Go（r3 复审通过；待用户确认 execute-ready → 执行 fix-spec）
+    status: closed（r3 复审 Go；cr-fix-spec 26 条已执行完毕，见 cr_fix_dag）
   spec_deviations:
     - "D1 六值导出落 services/src/node.ts 而非 index.ts（root barrel 是 renderer 面，value 导入会把 node:crypto 链拉进浏览器包）— 接受"
     - "D2 TaskIndexRepo 调用点 11 处/9 文件，非 spec 的 8 处；3/4 参签名全部兼容 — 接受"
@@ -160,6 +174,28 @@ dev_dag:
     - "D22 CR 轮：editorDefinitions.ts(272L) 为 G-1 抽出的 electron-free 平台登记表（新文件，spec 未列；不拆则三平台无法在 node 测试注入）（cr-fix-spec S28）"
     - "D23 CR 轮：composerSubmitMachine 的 succeed 只在单测消费，组件侧该减法恒 0，已删该死判定并对齐注释；claim/fail 仍真实接线（cr-fix-spec S29）"
     - "D24 CR 轮：K4 不可行——modelProviderNameDialog/CardActions 留在 setup-ui-component-test 批（@/lib 别名在 tsx --test 下解析失败）"
+    - "D25 Step 3：ProjectSidebarProps 新增 workspaceReadOnlyReason（omz 扩展）——spec 要求 tooltip 复用骨架新建入口，但原 prop 面无该字段，不补则 tooltip 成死代码"
+    - "D26 Step 3：onOpenFileManager 未上提到壳层——omz 无 side-pane 文件管理器 tab（上游 handleOpenFileManager 无对应物），改为骨架内承接 WorkspaceFileTree 滑层，行为等价"
+    - "D27 Step 5：删除清单外多删 2 个零消费者文件（lib/restrictVerticalDragWithinContainer.ts、lib/workspaceRuntimeRelease.ts）"
+    - "D28 Step 5+26：经典侧栏 alias 后 44 个孤儿文件就地删除（workspace-grouped-tasks 全簇 20 + Workspace*TasksSection 4 + hooks 5 + lib 13 + v4 2；task-row-action-button.tsx 保留，新骨架 project-sidebar/grouped/* 仍在用）；knip 51 项逐项裁决、删 0 豁免 51"
+    - "D29 Step 4：hostId 派生落 hook（deriveRemoteProjectHostId）而非 Root.tsx——owner 是 hook 且它持有 target；上游 server 分支不移植（omz RemoteWorkspaceSession 无 sourceServerId）"
+    - "D30 Step 4：边界确认降级为普通确认框——omz ConfirmDialogRequest 无上游 intent/presentation:'source-server-boundary'/requiredAcknowledgement"
+    - "D31 Step 4：Picker 关闭时一并关闭整个向导 + 对话框换代 key——omz SSHDialog 内部 connectedSessionId 不重置，不重挂会回到已释放的目录步"
+    - "D32 Step 4：ProjectCreation 的 directory/remoteService 设为可选、onAddDevice 完全不传（拍板 A：向导壳族不搬）"
+    - "D33 Step 7：上游 sourceServerManagementService.ts / sourceServerMigrationCounts.ts 在参考树缺失，按契约 + host 调用点 + UI 消费语义自研（400L/124L）；落 services 后改为结构化端口注入（SourceServerManagementDirectoryPort/ConnectionPort），services 不反向 import desktop"
+    - "D34 Step 7：omz 全仓无 sourceServerReleaseResolver → updateSource 走到 'release is unavailable' 拒绝（不伪造成功）；source-settings scope 显式抛 not wired 且不回退 local services"
+    - "D35 Step 7：onDirectorySnapshot 未移植（omz 无消费方）；connectHost/readConnectionStates 的 kind:'server' 分支不移植（r5 P0-1 裁定）"
+    - "D36 Step 9：DesktopCommandIds.CheckForUpdates 在 omz 不存在（无桌面自更新链路）→ update-desktop 降级 toast + 新键 settings.source.controllerUpdateUnavailable；toast 变体 source-server-update → omz update"
+    - "D37 Step 9：面板 connect/retry/install 在 onConnectProfile 缺席时显式 disabled（拍板 A 不搬向导壳，不静默死点）；onCreateConnection/onOpenProject/onDisconnectSource/onShowInSidebar 等待 Root 面挂账"
+    - "D38 Step 9：buildRemoteTarget 未统一到 collectRemoteFormFieldErrors（两处校验规则暂并存）；useSourceServerOperationLogs 端口形态回退到上游签名（P7 shim 与真契约不兼容）"
+    - "D39 Step 9/10：i18n 共落 83（面板）+11（导航/通知）键，zh/en 各 6410 键对称；Step 10 期间由服务端统一合并（cache/step10-i18n-keys.json 留档）"
+    - "D40 Step 10：RemoteTarget 无 {kind:'server'} → getEligibleNotificationKey 删该守卫（TS2367 死比较）；SettingsSectionIntentEventDetail 仍未导出（omz 现状）"
+    - "D41 Step 10：上游 onFlowTargetChange（Root 挂 SSHDialog）在 omz 不存在 → 以 remoteProjectSelection?.host.target 投影喂 handleConnectionTargetChange；SSHDialog 打开期（连接尚未产 selection）无法抑制更新提示，已知缺口"
+    - "D42 Step 19：逐 hunk 台账——采用 15 组（模块/记忆/测试 id/快捷键/live tail/时间线 8 段/SessionPane 5 段/壳层 9 段等）；改写 5 处（resolveSidePaneFullViewHostMode、leadingInsetClassName 用 omz WorkspaceHeader 口径、supportsSidePaneFullView=Boolean(isDesktop)、空 tab launcher 只在 fullView 注入、FULL_WORKBENCH_RECT 就地声明）；放弃 4 组（contract.example/test/module.ts 无 vitest-in-src、composer layout:'inline'+workingDurationMs 文件面外、useComposerToolbarFit probe 早退属 C1 面、V4WorkspaceChatArea canSplit/拖放属上游其它演进）"
+    - "D43 Step 19：ConversationHost.tsx 609L 上游不可拆 → 加 max-lines 豁免头；T-UF5 另覆盖回答气泡基线状态机、fullView owner 隔离、i18n 12 键对称"
+    - "D44 Step 11：formatZodError 一并删（仅被已删路由使用）；http.ts 的 ./remote/index.js 整行删除（模块导出面本身未动，createRemoteBackend 仍被 source-server/transportAdapter 与 host 使用）"
+    - "D45 Step 16：isInsideDirectory 增可注入 pathApi（默认真 node:path）并导出 isPathDriveQualified/isInsideDirectory，使 win32 跨盘语义在任何平台可断言；未加 realpath 规范化（与上游一致），加固后 /D:/...、盘符、UNC 三类输入由 200/fallback 变 404"
+    - "D46 历史卫生：7d384af3 提交信息误标为 commit-2 文案（并行代理 amend 事故，内容完整）；不改写历史，以本条登记"
   open_observations:
     - "P2 host/index.ts:1574/1641/1654 在 reusedConnectionTarget 命中时沿用入参 profile（上游同形态）— P9 收口"
     - "P2 membership_id 在 0008 会重新 randomUUID（Picker key 换代一次，启动期无在途请求）"
@@ -167,3 +203,10 @@ dev_dag:
     - "P2 Provider 重命名侧静默吞错（InlineEditableProviderCard.tsx:531 .catch(() => undefined)）— CR 裁定只登记不修，待后续批"
     - "P2 冲突库的 legacy 侧重复入口行被硬删（与既有 bindHost 同形；仅可能丢 cached_roots_json/legacy_workspace_json 缓存值）— T-QA1 观测"
     - "P2 services 无 tsconfig.test.json，T-RP3/T-RP4 仅运行期兜底 — Step 26 评估"
+    - "P2 RootWorkspaceContent 内 3 行过渡 prop 声明（停止下传 reconnecting* 两 prop）待清理"
+    - "P2 knip 30 项 NEW_SYMBOL_UNWIRED：P9/浮窗进度/更新偏好等预埋面（RemoteConnectionProgressProvider、usePublishRemoteConnectionProgress、RemoteConnectionKindTile、createSourceServerUpdatePreferences、useDeferredSourceServerUpdates 等）待后续接线批消费"
+    - "P2 source-settings 远端配置服务集未搬（resolveScope 显式 not wired，不回退 local）"
+    - "P2 sourceServerReleaseResolver 未注入 → 设备更新按钮走到 'release is unavailable'（UI 有可读错误文案，不静默）"
+    - "P2 SSHDialog 打开期无 flow-target 出口 → 连接尚未产 selection 时无法抑制 Source 更新提示"
+    - "P2 ConversationComposer 浮窗单行输入（layout=\"inline\" + workingDurationMs）未接，收起态由输入区高度裁剪承接"
+    - "P2 风险 R-A（空 settings 抢烧 0005/0008 迁移账本）、R-B（未读角标双源）、R-C（host 上限裸错误码）仍未决，随 CHANGELOG 已知限制发布"
