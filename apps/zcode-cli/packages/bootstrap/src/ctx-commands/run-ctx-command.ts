@@ -120,10 +120,11 @@ export interface CtxCommandHost {
    * magic-context 的 effective 开关（契约 8：`features.magicContext &&
    * magicContext.enabled`）。
    *
-   * **唯一可信来源是宿主暴露的那一次求值**（CLI 侧 `app.isMagicContextEnabled?.()`、
-   * v4 侧 `record.app.isMagicContextEnabled?.()`，都由 `create-app` 用
-   * `runtimeConfig.magicContext.enabled === true` 填，与 `createMagicContextTurnTransform`
-   * 的装配门同一个值）。本模块既不读 `features` 也不重算：两份算法只要有一处漂移，
+   * **唯一可信来源是 `resolveMagicContextEffectiveEnabled`
+   * （`app/magic-context/gate.ts`）的求值结果**。CLI 侧 `app.isMagicContextEnabled?.()`、
+   * v4 侧 `record.app.isMagicContextEnabled?.()` 都由适配器
+   * `createMagicContextAdapter` 用同一个口径函数填，与 `createMagicContextTurnTransform`
+   * 的装配门同一个值。本模块既不读 `features` 也不重算：两份算法只要有一处漂移，
    * 命令面与 turn-loop 就会分叉。
    *
    * 可选而非必需（能力缺席按「关」处理，见 `runCtxCommand`）。

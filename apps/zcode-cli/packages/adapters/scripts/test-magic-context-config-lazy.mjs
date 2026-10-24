@@ -18,9 +18,10 @@
  * 长期守卫：只 import 本包编译产物 `dist/config/schema.js`，断言 MC 侧只出现
  * schema 自身与它的两个纯函数依赖。
  *
- * 覆盖范围说明：本脚本只测 **adapters 配置链**。bootstrap 的
- * `zcode-protocol/magic-context-config.ts` 仍静态 import barrel（RPC handler 的
- * 另一条链），不在此脚本的装载面内。
+ * 覆盖范围说明：本脚本只测 **adapters 配置链**。bootstrap 侧的另一条链
+ * （`zcode-protocol/magic-context-config.ts` 与 `magic-context-memories.ts`）已在
+ * commit 32f205b7 一并收敛（前者走同一窄子路径，后者实现值改 handler 内动态 import），
+ * 进程级装载清单由 `bootstrap/scripts/test-magic-context-zero-load.mjs` 守卫。
  *
  * 运行：`node --test scripts/test-magic-context-config-lazy.mjs`
  * （先 `pnpm --filter @zcode/magic-context build`、`pnpm --filter @zcode/adapters build`。）
