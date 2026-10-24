@@ -1,0 +1,399 @@
+{
+ "meta": {
+  "node": "backlog-sweep Step 26 knip 终态基线",
+  "iteration": "backlog-sweep",
+  "baseline": "f29e5cca（CR 轮收口，即本迭代 P0/P1/P2 完成点）",
+  "head": "99de9538",
+  "collectedAt": "2026-10-24",
+  "command": "pnpm exec knip --reporter json（全仓一次采集；与 upstream-v316-fullsync/cache/gate-knip.json 逐项 diff）",
+  "repoTotals": {
+   "files": 110,
+   "dependencies": 55,
+   "devDependencies": 29,
+   "optionalPeerDependencies": 0,
+   "unlisted": 8,
+   "unresolved": 0,
+   "binaries": 0,
+   "catalog": 0,
+   "exports": 526,
+   "nsExports": 0,
+   "types": 300,
+   "nsTypes": 0,
+   "enumMembers": 0,
+   "namespaceMembers": 0,
+   "duplicates": 38
+  },
+  "diff": {
+   "added": 51,
+   "byVerdict": {
+    "BASELINE_DRIFT": 1,
+    "NEW_SYMBOL_UNWIRED": 30,
+    "BASELINE_FILE_ORPHAN": 17,
+    "BARREL_REEXPORT": 3
+   },
+   "removed": 43,
+   "deleted": 44,
+   "deletedNote": "删除 44 个经典侧栏 alias 后的孤儿文件（workspace-grouped-tasks 全簇 20 + Workspace*TasksSection 4 + hooks 5 + lib 13 + v4 2）；task-row-action-button.tsx 保留（新骨架 project-sidebar/grouped/* 仍在用）。"
+  },
+  "verdict": "零新增死代码入账：44 个真孤儿就地删除；51 项新增条目全部归属「新模块预埋面 / barrel 重导出 / 经典侧栏遗留公共导出 / 基线漂移」，逐项登记豁免，无一项需要在本轮删除。"
+ },
+ "issues": [
+  {
+   "kind": "dependencies",
+   "file": "package.json",
+   "name": "border-beam",
+   "verdict": "BASELINE_DRIFT",
+   "reason": "border-beam 在 1ff8cad9 基线采集后已存在于根 package.json（本轮 git diff 未增删依赖），非本迭代引入；上游 v3.16 照搬面保留，待产品决定是否使用。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/side-pane-full-view/model.ts",
+   "name": "FLOATING_ANCHORS",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/side-pane-full-view/model.ts",
+   "name": "FLOATING_MARGIN_PX",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/side-pane-full-view/model.ts",
+   "name": "FLOATING_WIDTH_PX",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/side-pane-full-view/model.ts",
+   "name": "FLOATING_EXPANDED_MAX_HEIGHT_PX",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/side-pane-full-view/model.ts",
+   "name": "FloatingSize",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/store/zcodeSessionStoreSelectors.ts",
+   "name": "getTaskUnreadIndicator",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/sourceServerUpdatePreferences.ts",
+   "name": "useDeferredSourceServerUpdates",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/remoteConnectionWizard.ts",
+   "name": "isInvalidPort",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/services/src/remote-projects/index.ts",
+   "name": "IRemoteProjectService",
+   "verdict": "BARREL_REEXPORT",
+   "reason": "上游同形 barrel：三个符号为对外服务面（IRemoteProjectService 等），消费方经 deep path 导入，barrel 重导出保留。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/services/src/remote-projects/index.ts",
+   "name": "projectWorkspaceSettings",
+   "verdict": "BARREL_REEXPORT",
+   "reason": "上游同形 barrel：三个符号为对外服务面（IRemoteProjectService 等），消费方经 deep path 导入，barrel 重导出保留。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/services/src/remote-projects/index.ts",
+   "name": "readRemoteProjectDirectory",
+   "verdict": "BARREL_REEXPORT",
+   "reason": "上游同形 barrel：三个符号为对外服务面（IRemoteProjectService 等），消费方经 deep path 导入，barrel 重导出保留。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/side-pane-full-view/index.ts",
+   "name": "SIDE_PANE_FULL_VIEW_ENTER_STATE",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/taskListMembershipSets.ts",
+   "name": "fetchTaskListMembershipSets",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/taskListMembershipSets.ts",
+   "name": "fetchTaskListMembershipSetsForEndpointsCached",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/taskQueryCache.ts",
+   "name": "buildTaskListCacheDescriptor",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/taskQueryCache.ts",
+   "name": "buildTaskListCacheKeyFromDescriptor",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/taskListMembershipVersion.ts",
+   "name": "bumpTaskListMembershipVersionForWorkspaceEvent",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/taskListMembershipVersion.ts",
+   "name": "useTaskListMembershipVersion",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/services/src/remote-projects/workspace-settings.ts",
+   "name": "projectWorkspaceSettings",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/source-server-management/SourceServerManagementPanel.tsx",
+   "name": "getProjectCount",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/taskListMetaSync.ts",
+   "name": "removeTaskFromTaskCaches",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/workspaceServiceResolver.ts",
+   "name": "isRemoteWorkspaceTarget",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/workspaceServiceResolver.ts",
+   "name": "buildWorkspaceServiceLookup",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/remote-connection-flow/ui/RemoteConnectionProgress.tsx",
+   "name": "RemoteConnectionProgressProvider",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/remote-connection-flow/ui/RemoteConnectionProgress.tsx",
+   "name": "usePublishRemoteConnectionProgress",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/source-server-management/sourceServerUpdatePreferences.ts",
+   "name": "createSourceServerUpdatePreferences",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/remote-connection/RemoteConnectionTags.tsx",
+   "name": "REMOTE_KIND_PRESENTATION",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/remote-connection/RemoteConnectionTags.tsx",
+   "name": "RemoteConnectionKindTile",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增模块的预埋面（P9/远端面板/浮窗进度/偏好控制器等）：契约完整但接线按拍板 A 或后续批挂账，删除会破坏契约一致性。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/remote-connection/RemoteConnectionTags.tsx",
+   "name": "RemoteConnectionDisplayStatus",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/useWorkspaceSessionsIndexItems.ts",
+   "name": "buildWorkspaceSessionsIndexSourceKey",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/workbenchPointerDragDrop.ts",
+   "name": "cancelWorkbenchPointerDrag",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/workbenchPointerDragDrop.ts",
+   "name": "finishWorkbenchPointerDrag",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/v4/workbenchPointerDragDrop.ts",
+   "name": "updateWorkbenchPointerDrag",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "exports",
+   "file": "packages/ui/src/lib/workflowRunLine.ts",
+   "name": "countLiveWorkflowRuns",
+   "verdict": "BASELINE_FILE_ORPHAN",
+   "reason": "经典侧栏时代遗留的公共导出（文件仍被新骨架消费，导出面已无调用方）；删除属清理面，登记待后续批统一收敛，避免本轮大范围改公共面。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/remote-connection/RemoteConnectionConnectingStep.tsx",
+   "name": "RemoteConnectionPhaseStatus",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/store/sourceServerStatusRegistry.ts",
+   "name": "SourceServerStatusRegistry",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/desktop/src/main/fileApplications.ts",
+   "name": "EditorDefLike",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/ToolCallBlocks/inlineImageResult.ts",
+   "name": "InlineImageResult",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/composerSubmitMachine.ts",
+   "name": "ComposerSubmitContextKind",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/composerSubmitMachine.ts",
+   "name": "ComposerSubmitPhase",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/composerSubmitMachine.ts",
+   "name": "ComposerSubmitMachineState",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/composerSubmitMachine.ts",
+   "name": "ComposerSubmitMachineAction",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/composerSubmitMachine.ts",
+   "name": "ComposerSubmitAvailability",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/scopedDraftContentUpdate.ts",
+   "name": "ScopedDraftContentUpdateParams",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/composer/scopedDraftContentUpdate.ts",
+   "name": "ScopedDraftContentUpdateResult",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/settings/model-provider-section/createProviderNameDialog.ts",
+   "name": "CreateProviderBannerKind",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/settings/model-provider-section/createProviderNameDialog.ts",
+   "name": "CreateProviderBanner",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/lib/sourceServerBoundaryOnboarding.ts",
+   "name": "EnsureSourceServerBoundaryAcknowledgedOptions",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/root/sourceServerUpdateNotifications.ts",
+   "name": "SourceServerUpdateNotificationController",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  },
+  {
+   "kind": "types",
+   "file": "packages/ui/src/v4/conversationTimelineLiveTail.ts",
+   "name": "ConversationTimelineLiveTailSplit",
+   "verdict": "NEW_SYMBOL_UNWIRED",
+   "reason": "本迭代新增的模块内类型：被同模块签名使用、外部仅测试/形状断言引用，knip 按「导出无人 import」计；保留以便下游接线，不删。"
+  }
+ ]
+}
