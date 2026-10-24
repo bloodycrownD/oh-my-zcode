@@ -1505,15 +1505,14 @@ function ConversationComposerImpl({
         submittedPromptContexts.conversationSelections.forEach(
           removeMergedConversationSelectionReference,
         );
-        // composer/G-1 succeed：只移除冻结面。冻结面全部移除后载体应为空；
-        // 等待期用户新加的 chip 属于下一条消息，revision 变化时整条不清。
-        const succeededSubmitState = composerSubmitMachine.reduce(submittedSubmitState, {
-          type: "succeed",
-        });
-        if (
-          contentRevisionRef.current === cleanupRevision &&
-          countComposerPromptContexts(succeededSubmitState.liveContexts) === 0
-        ) {
+        // composer/G-1 succeed：成功即清掉「本次提交的载体」。
+        // 这里不再对 frozen 做 subtract 判定——载体侧冻结面与 live 侧都在上面逐项移除，
+        // 在 ACK 时刻再算一次「live 减 frozen」恒为 0（组件拿不到 ACK 时刻的 live 值），
+        // 那条判定没有任何保护力。真正起保护作用的是 revision 快照：等待期用户动过草稿
+        // （含新增 chip）时 revision 变了，整条载体不清，新 chip 属 live hook、从不写进载体。
+        // reducer 的 subtract/union 语义（等待期新增不被 succeed 清、fail 保留全部）由
+        // composerSubmitMachine 的 T-PR2-8/9 单测锁死。
+        if (contentRevisionRef.current === cleanupRevision) {
           updateComposerContent({ promptContexts: undefined });
         }
         // 发送成功：清本次提交捕获的 scope 草稿；prompt history 已在真实发送前同步写盘，

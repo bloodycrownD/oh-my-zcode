@@ -1120,10 +1120,10 @@ export class SourceServerConnectionManager {
         }
       }
       if (this.options.directory) {
-        // Directory admission（P7 续批）：握手落盘（设备名/lastOnline/workspaceHistory 与
-        // Profile→Source 绑定持久化）。recordHandshake 只落 Profile→Source 绑定；成员（hosts
-        // 表）由注入的 admitConnection 在 :866-900 登记、:1160 提交，membershipIntent
-        // （add/retain）在那里生效。
+        // Directory admission（P7 续批）：握手落盘只写 settings 侧——Profile→Source 绑定、
+        // sourceServers 设备记录（设备名/lastOnline）与 workspaceHistory，见
+        // sourceServerDirectory.ts:421-487；它不碰 hosts 成员表。成员（hosts 表）由注入的
+        // admitConnection 在 :860-885 登记、:1160 提交，membershipIntent（add/retain）在那里生效。
         options.onDiagnosticPhase?.("directory-record");
         const handshakeResult = await this.options.directory.recordHandshake(
           profile.profileId,
