@@ -290,6 +290,11 @@ import { createSystemService } from "./system/systemService.js";
 import { createTerminalService } from "./terminal/terminalService.js";
 import { createSettingServiceWithMigrations } from "./setting/settingService.js";
 import { createOnboardingRecordService } from "./onboarding/onboardingRecordService.js";
+import {
+  createHasExistingLocalTask,
+  hasAnyAgentSessionRow,
+  resolveAgentSessionDbPath,
+} from "./onboarding/localUsageEvidence.js";
 import { createObservableSettingService } from "./setting/observableSettingService.js";
 import { createCredentialService } from "./credential/credentialService.js";
 import { createBroadcastService } from "./broadcast/broadcastService.js";
@@ -1337,9 +1342,37 @@ export function createLocalServices(options: {
   // （daemon/remote workspace 为远端 Host），缺省 undefined 即本机 local（对照上游 :1375）。
   const taskIndexRepo = new TaskIndexRepo(undefined, options?.projectStorageHostId);
   // onboarding 完成记录：登录面整删后不再有 userId，恒为 null（匿名）。
+  const onboardingEvidenceLogger = createServiceLogger("onboardingRecordService");
   const onboardingRecordService = createOnboardingRecordService({
     loadUserId: async () => null,
-    hasExistingLocalTask: async () => (await taskIndexRepo.listTaskMetas({})).length > 0,
+    // 老用户使用证据不能只查 tasks-index：索引是 session 同步器的衍生投影，同步器在
+    // agent/provider 就绪后才回填，而判定在登录完成、主界面挂载时执行，早于回填——
+    // 2026-10 线上误弹：索引重建后登录瞬间判定看到空索引，老用户被当成新用户弹出引导
+    // （取证：判定时刻全部历史任务行还在 WAL 未落库）。会话库与旧版快照目录是磁盘级
+    // 持久事实，与同步时序无关；includeDeleted 让清空过任务列表的存量用户也不失去
+    // 资格。会话证据必须查 {home}/.omz/cli/db/db.sqlite 的 session 表（评审 CR-01：
+    // cli/sessions 是工作流输出目录，且文件存在性不代表有会话）。
+    hasExistingLocalTask: createHasExistingLocalTask({
+      listIndexTasks: () => taskIndexRepo.listTaskMetas({ includeDeleted: true }),
+      // 解析结果 null（相对路径等无法镜像的配置）→ 跳过会话证据源，继续旧版快照检查；
+      // 不得猜默认路径，否则自定义会话库的存量用户被漏判。跳过/命中各留一条 debug
+      // （评审 SG-02）：判定每登录一次至多一条，线上复核"走了哪个证据源"有据可依；
+      // 不记录完整路径，避免 home 路径进日志。
+      hasAgentSessionRow: async () => {
+        const sessionDbPath = await resolveAgentSessionDbPath();
+        if (sessionDbPath === null) {
+          onboardingEvidenceLogger.debug(
+            undefined,
+            "onboarding 会话证据源跳过：会话库路径不可镜像（相对路径配置）",
+          );
+          return false;
+        }
+        const hasRow = await hasAnyAgentSessionRow(sessionDbPath);
+        onboardingEvidenceLogger.debug(undefined, "onboarding 会话证据源已查询", { hasRow });
+        return hasRow;
+      },
+      resolveLegacyTaskSessionsDir: () => join(resolveAppConfigDir(), "sessions"),
+    }),
   });
   const providerConfigLog = createServiceLogger("provider-config");
   // FORK（D-6）：Built-in 目录冻结为打包内置的 zcode-builtin.json，不再远端下发，
