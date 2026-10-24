@@ -7,7 +7,10 @@ import {
   type SessionStorePort,
   type ToolResultDisplayPayload,
 } from "@zcode/contracts";
-import { getConversationMessageProjectionPolicy } from "@zcode/shared";
+import {
+  getConversationMessageProjectionPolicy,
+  stripMagicContextTagNotation,
+} from "@zcode/shared";
 
 export type SessionTranscriptPart =
   | {
@@ -82,12 +85,16 @@ export function projectSessionTranscript(
     const transcriptParts = assistantReplayPartsFromParts(parts);
     const hasStructuredParts = transcriptParts.some((part) => part.type !== "text");
     const visibleParts = hasStructuredParts ? transcriptParts : [];
-    const text = transcriptParts
-      .filter(
-        (part): part is Extract<SessionTranscriptPart, { type: "text" }> => part.type === "text",
-      )
-      .map((part) => part.text)
-      .join("\n\n");
+    // CLI transcript 是用户可见投影：历史库 assistant 正文里模型自写的 §N§
+    // 在读取时剥掉（不回刷历史库）。
+    const text = stripMagicContextTagNotation(
+      transcriptParts
+        .filter(
+          (part): part is Extract<SessionTranscriptPart, { type: "text" }> => part.type === "text",
+        )
+        .map((part) => part.text)
+        .join("\n\n"),
+    );
     if (text.trim().length === 0 && visibleParts.length === 0) {
       continue;
     }

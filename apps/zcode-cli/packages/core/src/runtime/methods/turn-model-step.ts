@@ -10,6 +10,7 @@ import {
   TurnMachineImpl,
 } from "../deps.js";
 import type { MessageId, ModelNetworkStatusEvent, ModelToolContract } from "../deps.js";
+import { stripMagicContextTagNotation } from "@zcode/shared";
 import {
   createRuntimeAssistantEntry,
   type RuntimeMessageEntry,
@@ -499,7 +500,10 @@ export async function runModelBackedTurnStep(
         sessionID: this.sessionId,
         messageID: assistantMessageId,
         type: "text",
-        text: state.modelResponse,
+        // 落库前剥掉模型自写的 §N§ 可见前缀：MC 的提示词要求回复以 §N§ 开头，
+        // 但那是上下文打标，不属于助手正文。只作用于持久化的这一份——
+        // state.modelResponse / text_delta 实时下发保持原文（实时层由 UI 读取时剥）。
+        text: stripMagicContextTagNotation(state.modelResponse),
         time: {
           start: modelStartedAt,
           end: Date.now(),
