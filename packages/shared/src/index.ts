@@ -87,6 +87,8 @@ export * from "./zcode-network-debug-status.js";
 export * from "./zcode-session-visible-content.js";
 export * from "./conversation-message-projection-policy.js";
 export * from "./conversation-preview-artifacts.js";
+// Magic Context §N§ 标签剥离：落库（core）与消费端（ui/bootstrap）共用同一语义。
+export * from "./text/magic-context-tag.js";
 export * from "./zcode-session-task-status.js";
 export * from "./zcode-session-content-profile.js";
 export * from "./zcode-tool-projection-memory.js";
