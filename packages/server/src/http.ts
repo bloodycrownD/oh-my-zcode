@@ -1,7 +1,7 @@
 /* eslint-disable max-lines -- HTTP、WebSocket 与静态资源路由集中注册，保持同一鉴权顺序。 */
 import { randomUUID } from "node:crypto";
 import { readFile, stat } from "node:fs/promises";
-import { basename, extname, relative, resolve, sep } from "node:path";
+import { basename, extname, isAbsolute, relative, resolve, sep } from "node:path";
 import { hostname } from "node:os";
 import { Hono, type Context } from "hono";
 import { serve } from "@hono/node-server";
@@ -229,9 +229,36 @@ function isStaticFallbackAllowed(pathname: string): boolean {
   return !isTokenProtectedPath(pathname);
 }
 
-function isInsideDirectory(root: string, candidate: string): boolean {
-  const diff = relative(root, candidate);
-  return diff === "" || (!diff.startsWith("..") && !diff.includes(`..${sep}`));
+// 盘符路径（"Z:/x"、"Z:\x"、"Z:x"）在 Windows 的 path.resolve 下会被当作绝对路径或
+// 盘符相对路径解析到另一块盘（含 subst 虚拟盘与映射的网络盘），静态服务器一旦接受就会
+// 越盘取文件，因此前置拒绝；pathApi 可注入，便于在任何平台上验证 win32 语义。
+const DRIVE_QUALIFIED_PATH_PATTERN = /^[a-zA-Z]:/;
+
+export function isPathDriveQualified(pathname: string): boolean {
+  return DRIVE_QUALIFIED_PATH_PATTERN.test(pathname);
+}
+
+interface PathContainmentApi {
+  relative(from: string, to: string): string;
+  isAbsolute(target: string): boolean;
+  readonly sep: string;
+}
+
+const defaultPathContainmentApi: PathContainmentApi = { relative, isAbsolute, sep };
+
+export function isInsideDirectory(
+  root: string,
+  candidate: string,
+  pathApi: PathContainmentApi = defaultPathContainmentApi,
+): boolean {
+  const diff = pathApi.relative(root, candidate);
+  // Windows 跨盘时 path.relative 返回的是目标绝对路径（例如 "Z:\marker.txt"），它不以
+  // ".." 开头，仅靠 ".." 判定会把它误判为「在静态根内」导致越盘读取；relative 结果为
+  // 绝对路径一律视为越界，posix 语义不受影响。
+  if (pathApi.isAbsolute(diff)) {
+    return false;
+  }
+  return diff === "" || (!diff.startsWith("..") && !diff.includes(`..${pathApi.sep}`));
 }
 
 async function resolveStaticFile(
@@ -242,6 +269,12 @@ async function resolveStaticFile(
   const root = resolve(staticRoot);
   const normalizedPathname = pathname === "/" ? "/index.html" : pathname;
   const relativePath = decodeURIComponent(normalizedPathname).replace(/^\/+/, "");
+  // 盘符路径（含 %3A 解码后的形式）与绝对路径（Windows 根路径 "\x"、UNC "\\host\share"）
+  // 必须在 resolve 之前拒绝：它们会绕过静态根，且跨盘时"根内"前缀校验失效。这类请求
+  // 直接 404，也不进入 SPA fallback，避免把越界尝试渲染成 200。
+  if (isPathDriveQualified(relativePath) || isAbsolute(relativePath)) {
+    return null;
+  }
   let candidate = resolve(root, relativePath);
   if (!isInsideDirectory(root, candidate)) {
     return null;
