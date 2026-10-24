@@ -18,7 +18,7 @@
 | 4 | 取消/关闭向导 | 不残留半截 selection；再次打开是干净的首步（换代 key 生效） |
 | 5 | 首次连 `source-server` 类目标 | 出现边界确认（omz 形态：普通确认框），**取消不落盘** |
 
-> 已知语义切换（发布说明必须写）：此前「打开远程工作区」是直接进入工作区；现在改为进入远端项目创建。远端**建任务**的 host 路由属于下一轮（本轮 `start()` 带 `hostId` 非 `local` 时会给「暂不支持在远端主机创建任务」的 toast），这是有意收窄，不是坏点。
+> 已知语义切换（发布说明必须写）：此前「打开远程工作区」是直接进入工作区；现在改为进入远端项目创建。远端**建任务**路由已实现：`start()` 带非 local `hostId` 时由所属 Host 经 `projectService.prepareSession` 解析目录与 `workspaceIdentity`，再打开该远端 workspace。当前真实拒绝条件只有两类——①非本机 `hostId` 没带项目归属 → `project.remote-project-required`；②`web-remote-replayable`（手机远控）下不允许远端建任务导航 → `project.remote-host-create-unavailable`。Host 侧目录准备失败（设备离线/拿不到稳定 identity）同样落到 `project.remote-host-create-unavailable` 的可读文案，不会静默落到本机草稿。
 
 ## 2. T-QA2 设备管理（对应 Step 7-10）
 
@@ -31,7 +31,7 @@
 | 5 | 侧栏远端项目节点的「设备设置」入口 | 跳到设置-远程设备并**定位到该设备** |
 | 6 | 有可用更新时 | 顶部提示「有可用更新」；点「立即更新」→ 进度/结果 toast；点「详情」→ 更新活动面板 |
 
-> 已知缺口（不是 bug，是本轮拍板/依赖缺口）：①设备卡主操作里 **connect/retry/install 在未接向导壳时是 disabled**（拍板 A：向导壳族不搬）；②「更新」依赖 release resolver，本仓未注入 → 点更新会得到 `release is unavailable` 的错误文案（面板顶部 alert + 详情按钮），**不会静默失败**；③`source-settings` scope 未接线（UI 当前不发起该 scope，不可达）。
+> 已接线的三项（不再是缺口）：①设备卡主操作 **connect/retry/install 已接 Host 管理链**——`SettingsPage.tsx:1356` 的 `onConnectProfile` ← `Root.tsx:895-922` 的 `handleConnectRemoteProfile`（`management.connectProfile` 一步完成连接/安装/重试，仅在抛 `credentials-required` 时才回落到预填向导），`Root.tsx:1146`/`:1225` 两条下发路径均在位；②「更新」的 **release resolver 已注入**（`host/index.ts:1324,1344` → `sourceServerReleaseResolver.ts:415` 的 `createSourceServerReleaseResolver`），底层失败仍收敛为「无法确定更新」的可读文案，不伪造版本；③`source-settings` scope **只剩 renderer 发起方未接**——host 侧 `resolveScope` 已按 Source 在线连接装配远端配置服务集（`host/index.ts:2299-2318`，离线显式报错不回退本机设置），但 UI 当前没有任何地方发起该 scope，故面板仍不可达。
 
 ## 3. T-QA3 胶囊（composer 选区/队列 chip）撤回与重发
 
@@ -77,7 +77,21 @@
 | 1 | 用**现有 v1.0.22 profile** 升级启动 | 会话/项目历史仍在；侧栏直接是新骨架 |
 | 2 | 升级后**第一个动作就是打开 web/服务端入口** | 观察是否出现「迁移已记账但 seed 为空」导致老项目不回填（R-A）。若命中，记录日志里的 0005/0008 迁移行与 `entries` 表行数 |
 
-## 8. 记录
+## 8. T-QA6 U5/U6/U11/U12 观感 + 托盘红点（**需真机**）
+
+> 这四组自动化侧只有形状/纯逻辑守卫（T-UF1 的动画类与失败态分支、T-UF6 的选择器、T-UF4 的 sum→max、T-UF5 的快捷键注册），观感、GUI 拉起与平台行为必须真机看。
+
+| # | 步骤 | 期望 |
+| --- | --- | --- |
+| 1 | U5：展开/收起 dialog、collapsible 区块 | 有淡入/淡出动画（`data-[state=open]:[&>div]:animate-in` 形态），无「按组名分组」的残留样式 |
+| 2 | U5：看快捷键提示（如全屏 `Ctrl/Cmd+Shift+F`） | 走 `ControlShortcutBadge` 统一徽章，键帽与其它快捷键一致 |
+| 3 | U6：工具调用里给一个**本地不存在的图片路径** | 失败态是可读提示（`previewFailed`），不出现空白框/永久骨架 |
+| 4 | U6：切到另一张图或另一个文件后再切回 | 失败态被清掉并重试，不残留上一张的判断 |
+| 5 | U11：在文件树/预览里对一个 PDF 或图片选「用其它应用打开」 | 弹出的是**文件应用**列表（不是 IDE 列表）；选中后系统真的拉起；IDE 的「上次选择」不被文件应用污染 |
+| 6 | U12：多会话/多窗口同时来未读 | 任务栏/Tray 是**单个圆点且不随数量翻倍**（sum→max），描述文案走 locale |
+| 7 | U12（Windows）：关窗到托盘后有未读 | 托盘图标叠加红点；读完后红点消失；macOS/Linux 无红点属预期（omz 托盘本就 Windows-only） |
+
+## 9. 记录
 
 | 用例 | 结果（pass/fail/阻塞） | 环境 | 备注/截图 |
 | --- | --- | --- | --- |
@@ -86,5 +100,6 @@
 | T-QA3 |  |  |  |
 | T-QA4 |  |  |  |
 | T-QA5 |  |  |  |
+| T-QA6 |  |  |  |
 | 侧栏骨架 |  |  |  |
 | 升级路径 |  |  |  |

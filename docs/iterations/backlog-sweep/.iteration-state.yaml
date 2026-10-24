@@ -75,17 +75,18 @@ dev_dag:
     impl-u9u7: { status: done, spec_steps: "16,14", executor: subagent, commits: "8bcb2607,69a3e60c", note: "Step 14（U7）的 isInvalidPort/collectRemoteFormFieldErrors/preserveDraftOnOpen/savedSshConfigAlias/focusField 族由 impl-p9 面板批同批落地（EditConnectionProfileDialog + RemoteConnectionFields），复核在位" }
     impl-u10: { status: done, spec_steps: "19", executor: subagent, commits: "a5deb00d,8f6008eb,e9730fa7,d4cfdf2e" }
     impl-orphan-sweep: { status: done, executor: main, commits: "a7d7c70c", note: "经典侧栏 alias 后 44 个孤儿文件删除 + knip 终态基线（51 项逐项裁决：删 0 豁免 51）" }
-    gates: { status: done, spec_steps: "26-27", executor: main, commits: "a7d7c70c", note: "typecheck 0 / desktop-full 54 基线 / lint 149w0e / oxfmt 触碰面 0 / knip 基线 / i18n 6410×2 / test:v4-perf 52 批全绿 / cli-backport 绿" }
+    gates: { status: done, spec_steps: "26-27", executor: main, commits: "a7d7c70c", note: "typecheck 0 / desktop-full 54 基线 / lint 149w0e / oxfmt 触碰面 0 / knip 基线 / i18n 6424×2 / test:v4-perf 55 批 864 pass 全绿 / cli-backport 绿" }
   gates:
     date: "2026-10-24"
-    head: "69a3e60c"
+    head: "32ca0644"
+    post_head_commits: "69a3e60c 之后三批：c1896184 老库迁移热修（老项目 project.host-mismatch + T-MIG1）/ 47f6d0b0 设备卡连接族接线 + 后台连接进度真接通（Provider 挂 Root、SSHDialog 发布进度、向导阶段轨）/ 32ca0644 source-settings 远端读取（host resolveScope）+ release resolver 注入 + 远端建任务路由 + barrel 收口"
     typecheck_root: "0 error（含新增 packages/server/tsconfig.test.json 工程）"
     typecheck_desktop_full: "54 error kinds（基线 366，removed 312，零新增）"
     lint: "149 warnings / 0 errors = 基线，触碰面零新增"
     oxfmt: "f29e5cca..HEAD 全量 108 文件 --check exit 0"
-    knip: "docs/iterations/backlog-sweep/cache/gate-knip.json：与本迭代基线 diff 51 项，删 44 文件、豁免 51（NEW_SYMBOL_UNWIRED 30 / BASELINE_FILE_ORPHAN 17 / BARREL_REEXPORT 3 / BASELINE_DRIFT 1）"
-    i18n: "zh/en 各 6410 键对称，--verify 幂等（值冲突仲裁 92/91、品牌残留 0）"
-    test_v4_perf: "52 批 / 845 pass / 0 fail（基线 712 → 本轮 +133）"
+    knip: "docs/iterations/backlog-sweep/cache/gate-knip.json：与本迭代基线 diff 51 项，删 44 文件、豁免 51（NEW_SYMBOL_UNWIRED 30 / BASELINE_FILE_ORPHAN 17 / BARREL_REEXPORT 3 / BASELINE_DRIFT 1）；**基线采集于 a7d7c70c，已过时**（见 open_observations 待办）"
+    i18n: "zh/en 各 6424 键对称，--verify 幂等（值冲突仲裁 92/91、品牌残留 0、死桶 0）"
+    test_v4_perf: "55 批 / 864 pass / 0 fail（基线 712 → 本轮 +152；采集于 32ca0644，输出 TEMP/bs-v4perf.log）"
     cli_backport: "6+5+4+2 全绿"
     bundle: "production build exit 0；verify:bundle-imports PASS（50 文件）；desktop-launch-smoke PASS（现有 profile 与全新空 profile 双 PASS）"
   e2e_evidence:
@@ -98,7 +99,7 @@ dev_dag:
       - "test:v4-perf 全量聚合：712 pass / 0 fail（49 批，含新增 T-RP1-6/T-PR1-3/T-PV1-2/T-UF1/4/6）"
       - "root typecheck：exit 0（含 shared/ui test 工程与 desktop host 工程）"
       - "ui test 工程 tsc -b packages/ui/tsconfig.test.json：OK"
-    manual_gate: "T-QA3（胶囊撤回观感）、T-QA5（服务商三交互）、T-QA6（文件应用拉起/角标/托盘）仍需真机手测"
+    manual_gate: "T-QA3（胶囊撤回观感）、T-QA5（服务商三交互）、T-QA6（U5/U6/U11/U12 观感 + 文件应用拉起 + Windows 托盘红点）仍需真机手测，条目见 qa-appendix.md §8"
   cr_loop:
     mode: scope
     dag_version: 5
@@ -188,7 +189,7 @@ dev_dag:
     - "D36 Step 9：DesktopCommandIds.CheckForUpdates 在 omz 不存在（无桌面自更新链路）→ update-desktop 降级 toast + 新键 settings.source.controllerUpdateUnavailable；toast 变体 source-server-update → omz update"
     - "D37 Step 9：面板 connect/retry/install 在 onConnectProfile 缺席时显式 disabled（拍板 A 不搬向导壳，不静默死点）；onCreateConnection/onOpenProject/onDisconnectSource/onShowInSidebar 等待 Root 面挂账"
     - "D38 Step 9：buildRemoteTarget 未统一到 collectRemoteFormFieldErrors（两处校验规则暂并存）；useSourceServerOperationLogs 端口形态回退到上游签名（P7 shim 与真契约不兼容）"
-    - "D39 Step 9/10：i18n 共落 83（面板）+11（导航/通知）键，zh/en 各 6410 键对称；Step 10 期间由服务端统一合并（cache/step10-i18n-keys.json 留档）"
+    - "D39 Step 9/10：i18n 共落 83（面板）+11（导航/通知）键，zh/en 各 6410 键对称（当批口径；终态 6424 键）；Step 10 期间由服务端统一合并（cache/step10-i18n-keys.json 留档）"
     - "D40 Step 10：RemoteTarget 无 {kind:'server'} → getEligibleNotificationKey 删该守卫（TS2367 死比较）；SettingsSectionIntentEventDetail 仍未导出（omz 现状）"
     - "D41 Step 10：上游 onFlowTargetChange（Root 挂 SSHDialog）在 omz 不存在 → 以 remoteProjectSelection?.host.target 投影喂 handleConnectionTargetChange；SSHDialog 打开期（连接尚未产 selection）无法抑制更新提示，已知缺口"
     - "D42 Step 19：逐 hunk 台账——采用 15 组（模块/记忆/测试 id/快捷键/live tail/时间线 8 段/SessionPane 5 段/壳层 9 段等）；改写 5 处（resolveSidePaneFullViewHostMode、leadingInsetClassName 用 omz WorkspaceHeader 口径、supportsSidePaneFullView=Boolean(isDesktop)、空 tab launcher 只在 fullView 注入、FULL_WORKBENCH_RECT 就地声明）；放弃 4 组（contract.example/test/module.ts 无 vitest-in-src、composer layout:'inline'+workingDurationMs 文件面外、useComposerToolbarFit probe 早退属 C1 面、V4WorkspaceChatArea canSplit/拖放属上游其它演进）"
@@ -204,9 +205,13 @@ dev_dag:
     - "P2 冲突库的 legacy 侧重复入口行被硬删（与既有 bindHost 同形；仅可能丢 cached_roots_json/legacy_workspace_json 缓存值）— T-QA1 观测"
     - "P2 services 无 tsconfig.test.json，T-RP3/T-RP4 仅运行期兜底 — Step 26 评估"
     - "P2 RootWorkspaceContent 内 3 行过渡 prop 声明（停止下传 reconnecting* 两 prop）待清理"
-    - "P2 knip 30 项 NEW_SYMBOL_UNWIRED：P9/浮窗进度/更新偏好等预埋面（RemoteConnectionProgressProvider、usePublishRemoteConnectionProgress、RemoteConnectionKindTile、createSourceServerUpdatePreferences、useDeferredSourceServerUpdates 等）待后续接线批消费"
-    - "P2 source-settings 远端配置服务集未搬（resolveScope 显式 not wired，不回退 local）"
-    - "P2 sourceServerReleaseResolver 未注入 → 设备更新按钮走到 'release is unavailable'（UI 有可读错误文案，不静默）"
+    - "P2 knip 30 项 NEW_SYMBOL_UNWIRED（基线采集于 a7d7c70c，未重采）：其中约 9 项已在 47f6d0b0 / 32ca0644 被真实消费（RemoteConnectionProgressProvider 挂 Root、usePublishRemoteConnectionProgress 由 SSHDialog 发布、RemoteConnectionKindTile / REMOTE_KIND_PRESENTATION 进设备卡、useDeferredSourceServerUpdates / createSourceServerUpdatePreferences 进面板与通知控制器等），其余仍是 P9/浮窗进度预埋面；待重采基线后再判断净增"
+    - "P2 source-settings：host 侧已接（desktop/src/host/index.ts:2299-2318 按在线 Source 连接装配 createSourceSettingsServiceCollection，离线显式报错不回退 local），只剩 renderer 发起方未接——packages/ui 全仓无 source-settings scope 构造点，面板不可达"
+    - "P2 sourceServerReleaseResolver 已注入（desktop/src/host/index.ts:1324,1344 → services/src/source-server-management/sourceServerReleaseResolver.ts:415），设备更新按钮走真实制品解析；解析失败仍收敛为「无法确定更新」的可读文案，不伪造版本"
     - "P2 SSHDialog 打开期无 flow-target 出口 → 连接尚未产 selection 时无法抑制 Source 更新提示"
     - "P2 ConversationComposer 浮窗单行输入（layout=\"inline\" + workingDurationMs）未接，收起态由输入区高度裁剪承接"
-    - "P2 风险 R-A（空 settings 抢烧 0005/0008 迁移账本）、R-B（未读角标双源）、R-C（host 上限裸错误码）仍未决，随 CHANGELOG 已知限制发布"
+    - "P2 风险 R-A（空 settings 抢烧 0005/0008 迁移账本，发版说明仍需「先启桌面端」）与 R-B（未读角标双源）仍未决，随 CHANGELOG 已知限制发布；R-C 已修——project-sidebar/view.ts:274 的 formatProjectError 把 remote-project.host-limit 映射到 project.hostLimit（zh/en 键在位）"
+    - "部分实现①ProjectCreation 设备选择面：组件已备 directory/remoteService/defaultDeviceId 可选 props（project-sidebar/ProjectCreation.tsx:31-52），但两处挂载点都没传（project-sidebar/index.tsx:402-410、project-sidebar/ProjectComposerMenu.tsx:283-291），故侧栏新建/编辑对话框恒为本机形态，远端设备选择面未启用"
+    - "部分实现②ToolSearch native×MC 降级（MC 红线）：native 形态依赖 tool_reference 原样到达服务端，MC 正投影会把 role:tool 块数组文本化为空串，引用块必失（upstream-v316-fullsync/toolsearch-seam-proof.md:97-107）；政策=local 为主形态、native 仅 Claude 系可选，默认 off，不因 MC 加隐藏 gate"
+    - "部分实现③source-settings renderer 发起方：host 侧 resolveScope 与远端配置服务集已在位（desktop/src/host/index.ts:2299-2318），renderer 侧零构造点（packages/ui 全仓无 source-settings scope），设备面板尚读不到远端配置"
+    - "部分实现④knip 基线重采：cache/gate-knip.json 采集于 a7d7c70c（meta 记 head b7509aa4），已过时——sourceServerUpdatePreferences.ts 已迁到 source-server-management/（lib/ 只剩薄 re-export）而基线仍记旧路径，RemoteConnectionProgressProvider / usePublishRemoteConnectionProgress 等已真实消费仍记 NEW_SYMBOL_UNWIRED；Step 26 需重采基线"

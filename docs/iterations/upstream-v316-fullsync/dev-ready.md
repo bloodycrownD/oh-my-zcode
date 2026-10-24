@@ -50,8 +50,8 @@ closed：i18n 四项/落地序修正/行数漂移/YAML 修复等；open（4 项 
 
 **真机 QA**：T-CP3（合并入口三态）/T-VU2（项目树/归档/分组/编辑/新建）/T-RM3（SSH 端到端）/T-RM4（WSL-Docker 断连恢复/换代/升级）/T-QA-bugAB（编辑历史+中断队列复测）/T-RU5（远端矩阵并入 RM3/RM4）。
 
-**P3 挂账**：entries 表+resolveHost 路由+legacySingleRoot+RemoteProjectPicker 挂载+ProjectCreation 设备选择面。
-**P9/发布轮挂账**：management 服务+registry+设置设备卡+设备设置跳转；deployServer 退役拍板；remote-viewing 状态回填（relay v2 面缓行）。
+**P3 挂账**：四项（entries 表 + resolveHost 路由，`services/src/remote-projects` Step 1/2；legacySingleRoot 闸门，`RemoteProjectList` Step 6；RemoteProjectPicker 挂载，`Root.tsx:1079` Step 4）已全部完成。**仅剩** ProjectCreation 设备选择面：组件已备 `directory`/`remoteService`/`defaultDeviceId` 可选 props（`project-sidebar/ProjectCreation.tsx:31-52`），但两处挂载点都没传（`project-sidebar/index.tsx:402-410`、`ProjectComposerMenu.tsx:283-291`），侧栏新建/编辑对话框恒为本机形态。
+**P9/发布轮挂账**：management 服务 + registry + 设置设备卡 + 设备设置跳转均已完成（设备卡 connect/retry/install 走 Host 管理链，release resolver 已注入；source-settings host 侧已接、仅 renderer 发起方未接）。**仅剩** deployServer 退役待发布轮拍板；remote-viewing 状态回填仍随 relay v2 缓行（fork 无该 face，`useProjectUnreadSignals.ts` 恒 false）。
 **已知限制**：native ToolSearch×MC 文本化丢失（local 为主形态）；跨重启公告状态重置（重开全量公告一次）。
 
 ## 6. 提交链

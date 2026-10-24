@@ -12,7 +12,7 @@ oh-my-zcode 是 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）的 for
 
 | 路径                       | 内容                                        | 本 fork 当前基线                          |
 | -------------------------- | ------------------------------------------- | ----------------------------------------- |
-| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.16.2 @ `3c5b2276`（fullsync 后；产品面全量纳入，缓行/排除面见 `docs/iterations/upstream-v316-fullsync/spec.md` 排除清单。**补同步**：`docs/iterations/backlog-sweep/spec.md` 把 fullsync 缓行的 P3 侧栏骨架 / P9 设备管理面板族 / U5-U12 用户故事 / side-pane 全屏（U10）补齐，剩余差异只剩拍板项——向导壳族不搬、远端建任务路由、source-settings scope） |
+| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.16.2 @ `3c5b2276`（fullsync 后；产品面全量纳入，缓行/排除面见 `docs/iterations/upstream-v316-fullsync/spec.md` 排除清单。**补同步**：`docs/iterations/backlog-sweep/spec.md` 把 fullsync 缓行的 P3 侧栏骨架 / P9 设备管理面板族 / U5-U12 用户故事 / side-pane 全屏（U10）补齐，剩余差异只剩——向导壳族按拍板 A 不搬；source-settings 的 renderer 发起方未接（host 侧 scope 读取与远端配置服务集已实现，`packages/desktop/src/host/index.ts:2299-2318`）。**远端建任务路由已落地**（`packages/ui/src/root/useRootWorkspaceActions.ts:191-208,238-267`：非 local `hostId` 经 `projectService.prepareSession` 由所属 Host 解析目录与 identity 后再开 workspace，拒绝条件只剩「无项目归属」与「web-remote-replayable 下不可导航」） |
 | `.reference/magic-context` | 上游 `@cortexkit/opencode-magic-context`    | 0.44.4                                    |
 | `.reference/pi`            | 上游 Pi harness（magic-context 的宿主之一） | 随 magic-context 版本走                   |
 

@@ -2,7 +2,7 @@
 
 ### 新增
 
-- **侧栏骨架照 zcode v3.16.2 重写**：`ProjectSidebarNavigation`（顶部导航区）+ `WorkspaceSidebarFooter`（底部 banner 槽）+ 结构顺序改为「导航 → 任务列表 → 滚动区 → footer」，`WorkspaceSidebar` 收为上游 alias 形态；顶部「新建」在项目/分组上下文点击时自动继承归属（`draftTaskGroupId`）；带 `hostId` 的新建请求在非本机主机上显式拒绝并提示（远端建任务路由留下一轮）。**经典 tab 列表整段退役**（项目树取代），随之下线 44 个孤儿文件（`workspace-grouped-tasks/` 全簇、`Workspace*TasksSection`、related hooks/libs）。
+- **侧栏骨架照 zcode v3.16.2 重写**：`ProjectSidebarNavigation`（顶部导航区）+ `WorkspaceSidebarFooter`（底部 banner 槽）+ 结构顺序改为「导航 → 任务列表 → 滚动区 → footer」，`WorkspaceSidebar` 收为上游 alias 形态；顶部「新建」在项目/分组上下文点击时自动继承归属（`draftTaskGroupId`）；带非本机 `hostId` 的新建请求已接通**远端建任务路由**——由所属 Host 经 `projectService.prepareSession` 解析目录与 `workspaceIdentity` 后再打开该远端 workspace，只有「请求没带项目归属」才显式拒绝并提示。**经典 tab 列表整段退役**（项目树取代），随之下线 44 个孤儿文件（`workspace-grouped-tasks/` 全簇、`Workspace*TasksSection`、related hooks/libs）。
 - **远端项目 Picker 真链**（v3.16 P3 语义切换）：`onSelectProject` 升级为四参契约并带 `workspacePurpose`——`"project"` 在 bind 之前返回、交给 Root 的 selection 装配（不再 addTab/激活/bind），`"conversation"` 保持旧链零变化；Root 挂 `RemoteProjectPicker` + selection/stale-intent（epoch）守卫；Picker→ProjectEditor 透传 `host`/`initialRoots`；新增首次连接边界确认（退回普通确认框形态）；`RemoteProjectList` 补 `legacySingleRoot` 创建闸门与升级文案。**行为变更**：侧栏「打开远程工作区」进入远端**项目创建**，不再直接切工作区。
 - **设备管理（P9 远程设备）**：新增 source-server management 服务（17 方法 + 2 必选事件 + 可选操作日志事件）与 host 注册，`connectHost`/`readConnectionStates` 切上游 management 版；设置页新增「远程设备」分区与完整设备管理面板族（设备卡/线路/迁移报告/更新活动/编辑连接弹窗，含字段级校验与焦点定位）；侧栏远端项目节点的「设备设置」直达并定位；Source 更新提示控制器（可用/必须更新/进行中/完成/失败五态）。
 - **side-pane 全屏**（U10）：新增 `side-pane-full-view` 模块（双投影 `isFloatingPresentation`/`fullViewSlot`、浮窗几何、对话宿主），右侧 pane 可全屏，对话区转浮窗/solo 形态；`Ctrl/Cmd+Shift+F` 快捷键与设置页可改键；全屏状态按 pane owner 记忆；轨迹 tab 在无可见 tab 时仍保持可见（omz 特有面零回归）。
@@ -24,16 +24,16 @@
 
 - typecheck 0 错（新增 `packages/server/tsconfig.test.json` 工程入队）；desktop-full 54 error kinds（基线 366，零新增）；lint 149 warnings / 0 errors（零新增）；oxfmt 触碰面 108 文件全 clean。
 - knip 终态基线落盘 `docs/iterations/backlog-sweep/cache/gate-knip.json`：与本迭代基线逐项 diff 51 项，**删 44 个真孤儿文件**，其余 51 项按「预埋面/barrel/经典遗留公共导出/基线漂移」逐项登记豁免。
-- i18n zh/en 各 6410 键对称，`test:i18n-merge --verify` 幂等通过；`test:v4-perf` 52 批 / 845 pass / 0 fail；`test:cli-backport` 全绿。
+- i18n zh/en 各 6424 键对称，`test:i18n-merge --verify` 幂等通过（值冲突仲裁 zh 92 / en 91、品牌残留 0、死桶 0）；`test:v4-perf` 55 批 / 864 pass / 0 fail（采集于 `32ca0644`，输出见 `TEMP/bs-v4perf.log`）；`test:cli-backport` 全绿。
 - 打包链：production build exit 0、`verify:bundle-imports` PASS（50 文件）、`desktop-launch-smoke` PASS（现有 profile 与**全新空 profile**双 PASS）。
 
 ### 已知限制（发版说明需要保留）
 
 - **首次升级路径提醒**：若升级后先启动 web/server 入口再启桌面端，可能出现「迁移已记账但 seed 为空」导致旧项目不回填（R-A）。升级后请**先启动桌面端**一次。
-- 设备卡主操作中 connect/retry/install 在未接向导壳时为 disabled（拍板：不搬向导壳）；「更新」依赖的 release resolver 本仓未注入，点击会得到可读的失败提示而非静默失败。
-- 远端**建任务**（在远端主机上开新任务）本轮不支持，侧栏会显式拒绝并提示；远端项目下的会话查看/续跑可用。
-- 未读角标存在双源（任务栏/托盘与侧栏门控语义不一致，R-B）；接入第 21 台远端设备时错误文案为裸错误码（R-C）——两项均待后续批。
-- 真机验收清单见 `docs/iterations/backlog-sweep/qa-appendix.md`（T-QA1/2/3/4/5 + 侧栏骨架 + 升级路径）。
+- 设备卡主操作 connect/retry/install 已接 Host 管理链（`connectProfile` 一步完成连接/安装/重试，仅在缺交互凭据时回落预填向导）；「更新」的 release resolver 已注入，「无法确定更新」只会在真的解析不到制品时出现。
+- 远端**建任务**已支持（所属 Host 准备目录后直接开远端 workspace）；仅手机远控（`web-remote-replayable`）下不提供该导航，未带项目归属的请求会被显式拒绝并提示。
+- 未读角标存在双源（任务栏/托盘与侧栏门控语义不一致，R-B）待后续批；R-C（接入第 21 台远端设备时的裸错误码）已修，现在提示 `project.hostLimit` 的可读上限文案。
+- 真机验收清单见 `docs/iterations/backlog-sweep/qa-appendix.md`（T-QA1/2/3/4/5/6 + 侧栏骨架 + 升级路径）。
 
 ## [1.0.22](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.21...v1.0.22) (2026-10-23)
 
