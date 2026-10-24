@@ -45,13 +45,17 @@ test("T-VU1: ProjectSidebar 经 ProjectDirectoryProvider 共享目录 owner", ()
   );
 });
 
-test("T-VU1: 壳层并存入口——经典侧栏与项目树视角二选一渲染且可切换", () => {
+test("T-VU1: 壳层单视角——项目树是唯一侧栏形态（双视角已删，backlog-sweep Step 5）", () => {
   const shell = readFileSync(path.join(srcRoot, "app-shell", "WorkspaceShellLayout.tsx"), "utf8");
-  assert.match(shell, /sidebarViewMode === "projects"/, "项目树视角分支必须在场");
   assert.match(shell, /<ProjectDirectoryProvider/, "项目树子树必须挂目录 owner");
-  assert.match(shell, /<WorkspaceSidebar/, "omz 经典侧栏必须保留（并存拍板）");
-  assert.match(shell, /sidebar-view-mode-toggle/, "视角切换入口必须在场");
-  assert.match(shell, /zcode:workspace-shell:sidebar-view-mode/, "视角偏好必须持久化");
+  assert.match(shell, /<WorkspaceSidebar/, "侧栏经 WorkspaceSidebar alias 渲染（上游形态）");
+  assert.doesNotMatch(shell, /sidebarViewMode/, "经典/项目树双视角开关必须已删除");
+  assert.doesNotMatch(shell, /sidebar-view-mode-toggle/, "视角切换入口必须已删除");
+  assert.doesNotMatch(
+    shell,
+    /zcode:workspace-shell:sidebar-view-mode/,
+    "视角偏好持久化键必须已删除",
+  );
 });
 
 test("T-VU1: services 公开出口暴露 IProjectService 契约且 accessor 为可选字段", () => {
