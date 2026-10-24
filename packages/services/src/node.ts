@@ -102,6 +102,9 @@ export type {
   SourceServerManagementDirectorySnapshot,
   SourceServerManagementService,
 } from "./source-server-management/sourceServerManagementService.js";
+// Source settings attachment 的远端配置服务集（backlog-sweep Step 8）：host 用在线
+// Source 的 accessor 装配，services 侧不反向依赖 desktop。
+export { createSourceSettingsServiceCollection } from "./source-server-management/sourceSettingsServiceCollection.js";
 export {
   SourceServerMigrationCounts,
   sumMigrationCounts,
@@ -109,6 +112,13 @@ export {
   type SourceServerMigrationCountsReadResult,
   type SourceServerMigrationCountState,
 } from "./source-server-management/sourceServerMigrationCounts.js";
+// Source Server 更新制品 resolver（backlog-sweep）：release descriptor/archive 解析与缓存。
+// node-only（crypto/fs/stream），只能经本出口给 desktop host 注入，禁止进 renderer barrel。
+export {
+  createSourceServerReleaseResolver,
+  SourceServerReleaseUnavailableError,
+  type SourceServerReleaseResolver,
+} from "./source-server-management/sourceServerReleaseResolver.js";
 // R3 三期（P7 续批）：Source 端 workspace 身份解析通道——契约、服务实现与唯一 wire
 // 映射 seam（daemon serve 换装 createServerHostServices 后经 http 包 ChannelServer）。
 export { ISourceServerWorkspaceService } from "./source-server-workspace/sourceServerWorkspace.js";

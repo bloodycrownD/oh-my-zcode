@@ -493,6 +493,15 @@ test("T-RP4: resolveServerProjectService 两分支（virtual 转发 / legacy 只
       () => legacy.readProjects({ hostId: "remote:ssh:devbox:22:omz" }),
       /project\.cross-host-move/,
     );
+    // 合成项目 ID 只存在于控制端投影；prepareSession 不能把它当成远端持库项目，
+    // 否则新任务首发会在远端 reserveCreatedTask 被 project.not-found 拒绝。
+    const prepared = await legacy.prepareSession({ projectId: projects[0]!.id });
+    assert.equal(prepared.workspacePath, "/srv/app");
+    assert.equal(prepared.projectId, null);
+    await assert.rejects(
+      () => legacy.prepareSession({ projectId: "missing-project" }),
+      /project\.not-found/,
+    );
     // 目录读取走远端文件服务，路径按远端平台规则归一，不触碰本机文件系统。
     const directory = await legacy.readDirectory({ path: "/srv/./app" });
     assert.equal(directory.path, "/srv/app");

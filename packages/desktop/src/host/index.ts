@@ -49,6 +49,8 @@ import {
   createLocalServices,
   createRemoteProjectConnectionAdmission,
   createSourceServerManagementService,
+  createSourceServerReleaseResolver,
+  createSourceSettingsServiceCollection,
   disposeServiceResources,
   disposeServiceResourcesAndWait,
   AutomationRepo,
@@ -58,6 +60,7 @@ import {
   remoteProjectHostIdForProfile,
   type HostApiNetworkTransport,
   type SourceServerManagementService,
+  type SourceServerReleaseResolver,
 } from "@zcode/services/node";
 import { createHostResourceUsageResponder } from "./hostResourceUsage.js";
 import {
@@ -1284,6 +1287,23 @@ function requireRemoteProjectService(): IRemoteProjectService {
   return activeServices.get(IRemoteProjectService);
 }
 
+/**
+ * 窗口级远程资源目录：InitLocal 给初始值（设置页直接更新时也必须有 CDN/缓存配置），
+ * ConnectRemoteWorkspace 收到同一份配置时刷新（配置随窗口生命周期稳定，刷新只防漂移）。
+ */
+let windowRemoteAssetDirs: RemoteAssetDirs = {};
+let sourceServerReleaseResolver: SourceServerReleaseResolver | null = null;
+
+function ensureSourceServerReleaseResolver(): SourceServerReleaseResolver {
+  sourceServerReleaseResolver ??= createSourceServerReleaseResolver({
+    resolveAssetDirs: () => windowRemoteAssetDirs,
+    // 设置页代理是 Host 内唯一允许的出口；每次调用取当前 transport，服务集合换代后不悬空。
+    fetch: (...args) => requireActiveHostApiNetworkTransport().fetch(...args),
+    logWarn: (message, error) => logger.warn(message, error),
+  });
+  return sourceServerReleaseResolver;
+}
+
 let sourceServerConnectionManager: SourceServerConnectionManager | null = null;
 function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
   if (sourceServerConnectionManager) return sourceServerConnectionManager;
@@ -1291,6 +1311,8 @@ function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
   // Directory 窄接口注入（recordHandshake 握手落盘 + identityChanged 判定）；
   // admitConnection 交给 remote-projects 服务（连接管理器只管 admission/commit 时序）；
   // onProjectChange 只转发变更事实，迟到的 Source 广播由 Manager 按 ownership 过滤。
+  // resolveRelease 是 updateSource/启动安装的共同制品入口：不注入就只会得到
+  // "release is unavailable" 的伪失败（backlog-sweep 已知缺口）。
   sourceServerConnectionManager = new SourceServerConnectionManager({
     logWarn: (message, error) => logger.warn(message, error),
     directory: {
@@ -1299,6 +1321,7 @@ function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
     admitConnection: (input) =>
       createRemoteProjectConnectionAdmission(requireRemoteProjectService())(input),
     onProjectChange: notifyProjectChange,
+    resolveRelease: ensureSourceServerReleaseResolver(),
   });
   return sourceServerConnectionManager;
 }
@@ -1316,6 +1339,9 @@ function ensureSourceServerManagementService(): SourceServerManagementService {
   sourceServerManagementService = createSourceServerManagementService({
     directory: ensureSourceServerDirectory(),
     manager,
+    // 上游同形：management 在 updateSource 单次调用时把 resolver 交给 Manager；两边共用
+    // 同一实例，避免设置页与连接/重连路径对同一 Source 解析出不同制品。
+    resolveRelease: ensureSourceServerReleaseResolver(),
     logWarn: (message, error) => logger.warn(message, error),
     // 删除设备是唯一不可逆操作：先摘本机 host 行与 source-settings attachment，
     // 失败即中止（Directory 删除尚未发生），不产生半删状态。
@@ -1521,6 +1547,8 @@ async function connectManagedSourceServerHandle(params: {
   notifyClose: (event: WindowRemoteConnectionCloseEvent) => void;
 }): Promise<WindowRemoteConnectionHandle<ServiceCollection, HostRemoteConnectionCapabilities>> {
   if (!activeServices) throw new Error("Local Host services are not initialized.");
+  // 更新/安装共用本次连接的远程资源目录；Resolver 在真正解析时读取最新值。
+  windowRemoteAssetDirs = params.remoteAssets;
   const manager = ensureSourceServerConnectionManager();
   const directory = ensureSourceServerDirectory();
   let lastNotifiedRecoveryAttempt = 0;
@@ -2269,11 +2297,24 @@ const windowHostAttachmentRegistry = createWindowHostAttachmentRegistry<
       return { services: activeServices, generation: 1 };
     }
     if (scope.kind === "source-settings") {
-      // omz 偏差（backlog-sweep Step 8）：上游在此换装 createSourceSettingsServiceCollection
-      // （远端 skills/MCP/plugins/hooks/settings-sync 的裁剪服务集）。omz 尚无该服务集
-      // （P9 只到设备管理面板，远端配置面未接线），显式拒绝以暴露真实缺口，不回退到
-      // 本机 local services——那会把本机配置当成远端配置读写。
-      throw new Error(`Source settings attachments are not wired yet: ${scope.sourceServerId}`);
+      // 只认 Manager 持有的在线 Source 连接：它的 services 是远端 RPC accessor，读到的就是
+      // 远端配置。这里刻意不回退到 windowRemoteConnectionRegistry 的 workspace 服务集——
+      // 后者按 workspace 语义把 setting/credential/settings-sync 换成本机权威，拿它冒充
+      // 远端配置会让设备面板读写本机设置。
+      const connection = sourceServerConnectionManager?.getOnlineConnection(scope.sourceServerId);
+      if (!connection) {
+        // 明确报离线，不返回空配置集：面板必须区分「设备离线」和「设备确实没有配置」。
+        throw new Error(`Source Server is offline: ${scope.sourceServerId}`);
+      }
+      return {
+        services: createSourceSettingsServiceCollection(connection.services, {
+          sourceServerId: scope.sourceServerId,
+        }),
+        generation:
+          sourceServerConnectionManager
+            ?.listStates()
+            .find((state) => state.sourceServerId === scope.sourceServerId)?.updatedAt ?? 1,
+      };
     }
     const session = windowRemoteConnectionRegistry.getSession(scope.remoteSessionId);
     if (!session) {
@@ -2702,6 +2743,7 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     logger.info(
       `connecting window-scoped remote source, requestId=${msg.requestId}, target=${formatRemoteTargetForLog(msg.target)}`,
     );
+    windowRemoteAssetDirs = msg.remoteAssets;
     void remoteConnectionProgressContext
       .run(msg.requestId, () =>
         windowRemoteConnectionRegistry.connect({
@@ -2879,6 +2921,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       logger.error("init-local message missing MessagePort");
       return;
     }
+    // 设置页可以在本窗口从未发起 ConnectRemoteWorkspace 时直接更新已登记设备；
+    // 因此远程资源目录必须随窗口初始化下发，不能只依赖连接消息（上游 InitLocal 同形）。
+    windowRemoteAssetDirs = msg.remoteAssets ?? windowRemoteAssetDirs;
     if (databaseStartup) {
       port.close();
       databaseStartup.coordinator.publish();

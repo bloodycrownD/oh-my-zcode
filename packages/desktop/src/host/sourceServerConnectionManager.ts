@@ -23,6 +23,7 @@ import {
   stripRemoteTargetSecrets,
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
+import { SourceServerReleaseUnavailableError } from "@zcode/services/node";
 import {
   createSourceServerTransportAdapter,
   type ServerReleaseAsset,
@@ -605,7 +606,11 @@ export class SourceServerConnectionManager {
       const release =
         options.release ?? (releaseResolver ? await releaseResolver(probe, options.target) : null);
       context.signal?.throwIfAborted();
-      if (!release) throw new Error("Source Server update release is unavailable");
+      if (!release)
+        // 没有解析器时同样按「未知」失败：面板可翻译成可读文案，且绝不伪造版本。
+        throw new SourceServerReleaseUnavailableError(
+          "Source Server update release is unknown because no release resolver is available",
+        );
       await adapter.installOrUpdate(options.target, release, context, {
         force: options.force === true,
       });

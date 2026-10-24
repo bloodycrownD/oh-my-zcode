@@ -31,6 +31,7 @@ import type {
   ISourceServerManagementService,
   UpdateConnectionProfileInput,
 } from "./sourceServerManagement.js";
+import type { SourceServerReleaseResolver } from "./sourceServerReleaseResolver.js";
 
 /** Directory 快照形态与 desktop SourceServerDirectory.snapshot() 完全一致（结构化相容）。 */
 export interface SourceServerManagementDirectorySnapshot {
@@ -73,6 +74,8 @@ export interface SourceServerManagementConnectionPort {
     profile: Pick<ConnectionProfile, "profileId" | "transport" | "sourceServerId">;
     target: Exclude<RemoteTarget, { kind: "server" }>;
     force?: boolean;
+    /** 上游同形：management 拥有 release 解析策略，Manager 只消费单次解析结果。 */
+    resolveRelease?: SourceServerReleaseResolver;
   }): Promise<unknown>;
   disconnect(sourceServerId: string): void;
   removeProfile(profileId: string): void;
@@ -91,6 +94,8 @@ export interface SourceServerManagementConnectionPort {
 export interface CreateSourceServerManagementServiceOptions {
   directory: SourceServerManagementDirectoryPort;
   manager: SourceServerManagementConnectionPort;
+  /** 更新制品解析器（desktop host 注入；缺失时 Manager 只能按不可用拒绝）。 */
+  resolveRelease?: SourceServerReleaseResolver;
   /**
    * 删除设备前的回调（backlog-sweep Step 8）：先撤 hosts 行与 source-settings attachment，
    * 再落 Directory 删除。抛错即中止删除——删除是不可逆操作，不能出现「远端设备已消失、
@@ -290,6 +295,7 @@ class SourceServerManagementServiceImpl implements SourceServerManagementService
       profile: toConnectProfile(profile),
       target,
       force: input.force === true,
+      ...(this.options.resolveRelease ? { resolveRelease: this.options.resolveRelease } : {}),
     });
     return await this.getSnapshot();
   }
