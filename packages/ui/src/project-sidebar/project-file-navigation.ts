@@ -1,0 +1,47 @@
+// 照搬上游 v3.16.2 project-sidebar/project-file-navigation.ts 并 omz 化：
+// 删 webRemoteControlWorkspaceSwitcher 分支（relay v2 手机远控面，omz 无该 prop）。
+import {
+  buildRemoteHostWorkspaceIdentity,
+  type IRemoteProjectService,
+  type ProjectSidebarProps,
+  type SidebarFileTreeTarget,
+  type VirtualProject,
+} from "@/project-sidebar/contract.js";
+import { attachRemoteProjectWorkspace } from "@/project-sidebar/remote-navigation.js";
+
+/** 文件读取目标只取用户选中的 root；不能用同路径的当前 tab 猜远端身份。 */
+export async function resolveProjectFileTarget(input: {
+  project: VirtualProject;
+  rootPath: string;
+  isRemote: boolean;
+  props: ProjectSidebarProps;
+  remoteService?: IRemoteProjectService;
+  findSession(identity: string): { sessionId: string } | undefined;
+}): Promise<SidebarFileTreeTarget | null> {
+  const { project, rootPath, props } = input;
+  if (!project.roots.some((root) => root.rootPath === rootPath))
+    throw new Error("project.root-not-found");
+  const identity = input.isRemote
+    ? buildRemoteHostWorkspaceIdentity(project.hostId, rootPath)
+    : undefined;
+  let sessionId = identity ? input.findSession(identity)?.sessionId : undefined;
+  if (identity && !sessionId) {
+    if (!input.remoteService) throw new Error("project.connection-unavailable");
+    sessionId = await attachRemoteProjectWorkspace({
+      hostId: project.hostId,
+      workspacePath: rootPath,
+      workspaceIdentity: identity,
+      remoteService: input.remoteService,
+      findSession: input.findSession,
+      connect: props.onConnectRemote,
+      bind: (id, path) => props.onSelectRemoteProject(id, path, undefined, identity),
+      cancel: props.onCancelRemoteProject,
+    });
+  }
+  return {
+    workspacePath: rootPath,
+    workspaceName: project.name,
+    ...(identity ? { workspaceIdentity: identity } : {}),
+    ...(sessionId ? { workspaceRemoteSessionId: sessionId } : {}),
+  };
+}

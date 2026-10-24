@@ -17,6 +17,7 @@ import {
   DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu.js";
+import type { ReactNode } from "react";
 import { PencilRuler, Globe, Maximize, Palette, Settings, ZoomIn, ZoomOut } from "lucide-react";
 import { usePlatform } from "@/hooks/usePlatform.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -38,6 +39,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   // relay v1 清理（phase-relay-v1-cleanup）：workspacePath/workspaceIdentity 此前只喂给已删的
   // 手机远控触发器；props 形状保留（调用方仍传），组件内不再消费。
   isDesktop = false,
+  banner,
   className,
 }: {
   theme: Theme;
@@ -51,6 +53,11 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   workspaceRemoteSessionId?: string;
   activeTaskId?: string | null;
   isDesktop?: boolean;
+  /**
+   * 底部活动槽（上游 footer :235 同职责）：omz 侧栏骨架留槽不注入内容
+   * （SidebarBottomActivity 属商业化面剔除，backlog-sweep 拍板遗留②）。
+   */
+  banner?: ReactNode;
   className?: string;
 }) {
   const { intl } = useZCodeIntl();
@@ -107,6 +114,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   return (
     // footer 被 Settings 复用，页面专属边距由调用方传入，避免修改共享默认样式。
     <footer className={cn("flex shrink-0 flex-col gap-2.5 px-4 pt-2 pb-4", className)}>
+      {banner}
       <div className="flex min-w-0 gap-2">
         <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
           <DropdownMenuTrigger asChild>

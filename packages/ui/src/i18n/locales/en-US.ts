@@ -191,6 +191,7 @@ const enUS: Record<string, string> = {
   "common.generating": "Generating...",
   "common.connecting": "Connecting...",
   "common.cancel": "Cancel",
+  "common.gotIt": "Got it",
   "common.retry": "Retry",
   "common.close": "Close",
   "chat.plan.removeMarker": "Remove Plan from the next submission",
@@ -1492,6 +1493,9 @@ const enUS: Record<string, string> = {
   "common.next": "Next",
   "remote.trigger": "Remote connection",
   "remote.wizard": "Remote connect",
+  "remote.sourceServerBoundaryTitle": "Local offline, tasks keep running",
+  "remote.sourceServerBoundaryDescription":
+    "Remote tasks keep running, even when you close ZCode or put your computer to sleep.",
   "remoteConnection.feedback": "Feedback",
   "remote.step.kind": "Choose method",
   "remote.step.settings": "Fill settings",
@@ -6823,6 +6827,8 @@ const enUS: Record<string, string> = {
   "project.remoteDescription": "Choose folders on a connected computer",
   "project.localDescription": "Edit, run, and test files on your computer",
   "project.remote": "Remote",
+  "project.remote-host-create-unsupported":
+    "Remote devices cannot create tasks yet. Switch to a local project first.",
   "project.local": "Local",
   "project.type": "Project type",
   "project.create": "Create project",

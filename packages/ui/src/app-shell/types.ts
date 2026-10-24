@@ -62,6 +62,11 @@ export interface CreateTaskOptions {
   projectId?: string | null;
   /** 分组归属意图；P4.2 起随入口→startDraft→SessionPane admit 链真实落分组。 */
   taskGroupId?: string | null;
+  /**
+   * 任务归属设备（upstream-v316-fullsync P4 backlog Step 3）：本机 owner 缺省 `local` 可省；
+   * 远端建任务路由未落地前，非 local 在 Root 动作边界被拒绝并提示。
+   */
+  hostId?: string;
   /** 异步预填只能提交到解析 Skill 时的同一新任务目标。 */
   expectedWorkspaceKey?: string;
   provider?: ZCodeProvider;

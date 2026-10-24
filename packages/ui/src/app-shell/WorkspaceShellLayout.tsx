@@ -1634,6 +1634,7 @@ export const WorkspaceShellLayout = memo(function WorkspaceShellLayoutComponent(
                           automationsActive={workspaceMainView === "automations"}
                           onOpenPluginStore={handleOpenPluginStore}
                           pluginStoreActive={workspaceMainView === "plugin-store"}
+                          workspaceReadOnlyReason={workspaceReadOnlyReason}
                         />
                       </div>
                     </ProjectDirectoryProvider>

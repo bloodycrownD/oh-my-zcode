@@ -128,4 +128,9 @@ export interface ProjectSidebarProps {
   automationsActive?: boolean;
   pluginStoreActive?: boolean;
   onFileTreeOpenChange?: (open: boolean) => void;
+  /**
+   * 只读 workspace 的禁用原因（omz 扩展，backlog-sweep Step 3/5）：经典侧栏退役后
+   * 由骨架导航的 WorkspaceNewTaskTooltip 承接，创建动作本身仍由 Shell 的只读闸门拦截。
+   */
+  workspaceReadOnlyReason?: string;
 }

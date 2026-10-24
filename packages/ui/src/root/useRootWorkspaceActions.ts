@@ -8,6 +8,7 @@ import {
 } from "@zcode/shared";
 import type { IServiceAccessor } from "@zcode/services";
 import type { CreateTaskRequest } from "@/app-shell/types.js";
+import { toast } from "@/components/ui/toast.js";
 import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 
 import { isRendererReloadNavigation } from "@/lib/rendererNavigation.js";
@@ -211,6 +212,16 @@ export function useRootWorkspaceActions({
           newTaskTarget.workspaceIdentity ?? undefined,
         )
       ) {
+        return;
+      }
+
+      // 设备归属闸门（backlog-sweep Step 3，对照上游 node 侧远端建任务路由）：
+      // 项目树/分组入口会带 hostId；本机 owner（local 或缺省）行为不变，
+      // 非 local 的远端建任务路由本轮未落地——拒绝并 toast，不能静默落到本机草稿。
+      const requestedHostId = typeof request === "string" ? undefined : request?.hostId;
+      if (requestedHostId && requestedHostId !== "local") {
+        logger.warn(`[Root] ${source} rejected: remote host create unsupported`, requestedHostId);
+        toast(intl.formatMessage({ id: "project.remote-host-create-unsupported" }));
         return;
       }
 
