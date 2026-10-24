@@ -57,8 +57,11 @@ export function isProviderNameExistsError(message: string | null | undefined): b
 /**
  * 创建失败横幅的分类结果。
  *
+ * 优先级固定 `duplicate > empty > create`：重名先报（它就是用户要改的那件事），
+ * 其次是空名必填，最后才是服务层回传的失败串。
+ *
  * `duplicate`：名称与已有供应商重名（前端校验或服务层并发兜底）；
- * `empty`：名称为空/纯空白，必填提示优先于任何服务端错误；
+ * `empty`：名称为空/纯空白（排在重名之后、服务端错误之前）；
  * `create`：仅在前端名称校验通过且服务层确实报错时成立；
  * `null`：无横幅。
  */

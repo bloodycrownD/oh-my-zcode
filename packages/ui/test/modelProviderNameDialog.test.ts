@@ -381,3 +381,23 @@ test("弹窗创建在途禁止关闭：onOpenChange 守卫 creating", () => {
   // 横幅重试按钮只由分类结果驱动（kind === create 才给重试）。
   assert.match(dialogSource, /\{banner\.showRetry \? \(/);
 });
+
+test("creating 由真实在途状态驱动：Section 必须把 state 传到弹窗并置位/复位", () => {
+  // 弹窗侧的 `disabled={creating}` / `!creating` 守卫只有在 Section 真把在途状态传进来
+  // 才有意义；把它改成常量（undefined/true）时上面两条断言仍绿，所以这里单独守接线。
+  assert.match(
+    sectionSource,
+    /creating=\{creatingProvider\}/,
+    "Section 必须把 creatingProvider 透传给创建弹窗",
+  );
+  assert.match(
+    sectionSource,
+    /const \[creatingProvider, setCreatingProvider\] = useState\(false\)/,
+    "在途状态必须是受控 state",
+  );
+  assert.match(sectionSource, /setCreatingProvider\(true\)/, "创建开始必须置位在途状态");
+  const start = sectionSource.indexOf("const handleCreateProvider = useCallback(");
+  const end = sectionSource.indexOf("[createPersonalProvider", start);
+  const body = sectionSource.slice(start, end);
+  assert.match(body, /finally \{[\s\S]*setCreatingProvider\(false\);/, "finally 必须复位在途状态");
+});

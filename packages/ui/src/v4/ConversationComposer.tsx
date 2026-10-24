@@ -155,6 +155,7 @@ import { useOpenPptxElementReference } from "@/v4/composer/useOpenPptxElementRef
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import { useConversationSelectionReferences } from "@/v4/composer/useConversationSelectionReferences.js";
 import {
+  conversationSelectionContentKey,
   conversationSelectionContextKey,
   type ConversationSelectionDisplayReference,
 } from "@/lib/conversationSelectionReference.js";
@@ -824,6 +825,7 @@ function ConversationComposerImpl({
         restoredPromptContexts.conversationSelections,
         conversationSelectionReferences,
         conversationSelectionContextKey,
+        conversationSelectionContentKey,
       ),
     [conversationSelectionReferences, restoredPromptContexts.conversationSelections],
   );
@@ -1508,9 +1510,10 @@ function ConversationComposerImpl({
         // composer/G-1 succeed：成功即清掉「本次提交的载体」。
         // 这里不再对 frozen 做 subtract 判定——载体侧冻结面与 live 侧都在上面逐项移除，
         // 在 ACK 时刻再算一次「live 减 frozen」恒为 0（组件拿不到 ACK 时刻的 live 值），
-        // 那条判定没有任何保护力。真正起保护作用的是 revision 快照：等待期用户动过草稿
-        // （含新增 chip）时 revision 变了，整条载体不清，新 chip 属 live hook、从不写进载体。
-        // reducer 的 subtract/union 语义（等待期新增不被 succeed 清、fail 保留全部）由
+        // 那条判定没有任何保护力。真正的保护是两条事实：(a) 冻结面已在上方按 key 逐项移除；
+        // (b) live chip 只存在于 hook，从不写进载体。revision 快照只覆盖「等待期改了正文」——
+        // 正文改过时整条载体不清，避免把用户新输入冲掉。
+        // 等待期新增 chip 不被 succeed 清、fail 时 frozen ∪ live 全保留，由
         // composerSubmitMachine 的 T-PR2-8/9 单测锁死。
         if (contentRevisionRef.current === cleanupRevision) {
           updateComposerContent({ promptContexts: undefined });

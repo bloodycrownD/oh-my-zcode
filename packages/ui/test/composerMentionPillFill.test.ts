@@ -31,6 +31,7 @@ import {
 } from "../src/v4/composer/composerSubmitMachine.js";
 import { applyScopedDraftContentUpdate } from "../src/v4/composer/scopedDraftContentUpdate.js";
 import {
+  conversationSelectionContentKey,
   conversationSelectionContextKey,
   parsePromptConversationSelections,
 } from "../src/lib/conversationSelectionReference.js";
@@ -706,6 +707,49 @@ test("composer/B-5: 无 id 会话选区可单条删除，key 归一去重与删�
     mergeContextList([restoredA], [restoredA2], conversationSelectionContextKey).length,
     1,
     "同 key 的 live/restored 只能出一条 chip",
+  );
+
+  // ②' 真实形态：恢复项没有 id、live 项一定有 id —— 身份键必然不等，
+  // 只有内容键能把「撤回后再选同一段」收敛成一条。
+  const liveSameSelection = {
+    id: "sel-live-1",
+    contentType: "assistant" as const,
+    sourceSessionId: "s1",
+    sourceRowId: 7,
+    path: "src/a.ts",
+    text: "片段 A",
+  };
+  assert.notEqual(
+    conversationSelectionContextKey(restoredA),
+    conversationSelectionContextKey(liveSameSelection),
+    "身份键在恢复项与 live 项之间必然不等（恢复项无 id）",
+  );
+  assert.equal(
+    conversationSelectionContentKey(restoredA),
+    conversationSelectionContentKey(liveSameSelection),
+    "内容键必须跨来源对齐同一段选区",
+  );
+  const crossSourceMerged = mergeContextList(
+    [restoredA, restoredB],
+    [liveSameSelection],
+    conversationSelectionContextKey,
+    conversationSelectionContentKey,
+  );
+  assert.equal(crossSourceMerged.length, 2, "同一选区只留 live 一条，另一条恢复项保留");
+  assert.equal(
+    (crossSourceMerged[1] as { id?: string }).id,
+    "sel-live-1",
+    "留下的必须是 live 项（id 可回溯到消息行）",
+  );
+  assert.deepEqual(
+    crossSourceMerged.map(conversationSelectionContextKey),
+    [conversationSelectionContextKey(restoredB), "sel-live-1"],
+    "去重后 key 集合 = 未冲突的恢复项 + live 项（restored 在前、live 在后的固定顺序）",
+  );
+  // 只给身份键（不传内容键）时保持旧行为——守住「内容键是显式选择」这条契约
+  assert.equal(
+    mergeContextList([restoredA], [liveSameSelection], conversationSelectionContextKey).length,
+    2,
   );
 
   // ③ 删除按 key 精确移除，其他条目不受影响

@@ -50,16 +50,27 @@ export function countComposerPromptContexts(contexts: {
  *
  * 参数顺序固定为 **restored 在前、live 在后**：同 key 时 live 覆盖 restored——live 是用户
  * 刚加/正在操作的最新事实，restored 只是撤回快照。倒序会让恢复态反向覆盖用户输入。
+ *
+ * `contentKeyOf` 为**跨来源内容指纹**（可选）：身份键只有 live 侧才稳定（恢复项丢了 id），
+ * 只按身份键判重时「撤回后再选同一段」会同时出恢复项与 live 项两枚 chip。给了内容键，
+ * 恢复项只要与任一 live 项内容相同就不再出现。
  */
 export function mergeContextList<T>(
   restored: readonly T[],
   live: readonly T[],
   keyOf: (item: T) => string,
+  contentKeyOf?: (item: T) => string,
 ): readonly T[] {
   if (restored.length === 0) return live;
   if (live.length === 0) return restored;
   const liveKeys = new Set(live.map(keyOf));
-  return [...restored.filter((item) => !liveKeys.has(keyOf(item))), ...live];
+  const liveContentKeys = contentKeyOf ? new Set(live.map(contentKeyOf)) : null;
+  const isDuplicate = (item: T): boolean => {
+    if (liveKeys.has(keyOf(item))) return true;
+    if (!liveContentKeys || !contentKeyOf) return false;
+    return liveContentKeys.has(contentKeyOf(item));
+  };
+  return [...restored.filter((item) => !isDuplicate(item)), ...live];
 }
 
 /**

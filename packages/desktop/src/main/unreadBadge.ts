@@ -73,7 +73,8 @@ const BADGE_PADDING = 3;
 
 // ---- 数字徽章渲染器：生产零调用，仅上游测试兼容，接线待产品确认 ----
 //
-// `renderTaskbarBadgePixels`（含下面的点阵字体与字形常量）目前没有任何生产调用方：
+// `renderTaskbarBadgePixels`（以及它专用的 BADGE_FONT 与上方的 GLYPH_* / BADGE_PADDING
+// 常量；BADGE_CIRCLE_COLOR / BADGE_TEXT_COLOR 与圆点渲染器共用）目前没有任何生产调用方：
 // Windows 任务栏与托盘最终都用纯红圆点（`renderTaskbarStatusDotPixels` /
 // `renderAntialiasedStatusDotPixels`），因为 16px 显示尺寸下数字不可读（见 TRAY/overlay 注释）。
 // 上一迭代已裁决「生产零调用不迁」（docs/iterations/upstream-v3.16-sync/spec.md），

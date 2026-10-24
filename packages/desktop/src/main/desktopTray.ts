@@ -23,7 +23,8 @@ let trayLogger: { warn: (...args: unknown[]) => void } | null = null;
 const TRAY_LOGICAL_SIZE = 16;
 
 let trayBaseImage: NativeImage | null = null;
-// 单槽缓存：红点图形与 label 无关（数量只进无障碍/Tooltip 文案），
+// 单槽缓存：红点图形与 label（未读数）无关——托盘 tooltip 恒为静态品牌名，未读数在这里
+// 只当「是否非零」的布尔闸，不进任何文案（无障碍描述在任务栏 overlay 侧生成）。
 // 之前按 label 存 10 张视觉等价的 nativeImage，纯属重复渲染。
 let trayBadgeImage: NativeImage | null = null;
 

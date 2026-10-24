@@ -537,11 +537,12 @@ export class TaskIndexRepo {
     // Worker 已完成该路径的原始准备，业务连接不再重复全表修复。
     if (isTasksStoragePrepared(path, this.db)) return;
     if (!isTasksStorageMigrated(path, this.db)) runTasksDatabaseMigrations(this.db);
-    // 项目/连接迁移的生产接线（Step 1-③，对照上游 :396-402）：业务连接每次启动都跑
-    // 版本化迁移，0005/0008 的 apply 只在账本缺席时执行，因此这里幂等。desktop 由
-    // tasksStorageWorker 带 settings 完成 0005/0008；Host 主线程已被 hostDatabaseStartup
-    // 标记 prepared（hostDatabaseStartup.ts:58、prepared.ts:16-18 同进程 Set），故上面的
-    // 早退必命中——新增迁移接点必须落在 worker 侧或显式绕过该早退。
+    // 项目/连接迁移的生产接线（Step 1-③，对照上游 :396-402）：凡是走到这里的业务连接
+    // （Worker 与未经 prepared 标记的入口）每次启动都跑版本化迁移，0005/0008 的 apply
+    // 只在账本缺席时执行，因此这里幂等。desktop 由 tasksStorageWorker 带 settings 完成
+    // 0005/0008；Host 主线程已被 hostDatabaseStartup 标记 prepared（hostDatabaseStartup.ts:58、
+    // prepared.ts:16-18 同进程 Set），故上面的早退必命中——新增迁移接点必须落在 worker 侧
+    // 或显式绕过该早退。
     await projectStorage.migrate(this.getDatabase(), {
       settings: this.migrationSettings,
       hostId: this.storageHostId,

@@ -275,12 +275,16 @@ test("T-RP5: 已应用 0005 的存量库再启动，hosts 非空且 projects/ent
           "SELECT host_id FROM remote_project_entries",
         );
         assert.equal(entries[0]?.host_id, stableId, "entries 必须显式重写到稳定 id");
-        const projects = query<{ host_id: string }>(
+        const projects = query<{ host_id: string; deleted: number }>(
           db,
-          "SELECT host_id FROM projects WHERE project_id=?",
+          "SELECT host_id,deleted FROM projects WHERE project_id=?",
           "legacy-project",
         );
         assert.equal(projects[0]?.host_id, stableId, "projects 必须显式重写到稳定 id");
+        // 无同名冲突时去重 SQL 必须命中 0 行：软删只针对「稳定侧已有同名未删项目」这一形状。
+        // 若去重子查询漏掉 `host_id=stable` 限定，会把全部 legacy 项目洗成 deleted=1，
+        // 而只断言 host_id 的用例仍然全绿 —— 所以这条必须单独守着。
+        assert.equal(projects[0]?.deleted, 0, "无同名冲突的 legacy 项目不得被去重逻辑软删");
         assert.equal(
           query(db, "SELECT 1 FROM schema_migration WHERE id=?", "0008_connection_hosts").length,
           1,

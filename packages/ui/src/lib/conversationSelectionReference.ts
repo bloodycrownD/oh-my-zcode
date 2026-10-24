@@ -37,16 +37,29 @@ export type ConversationSelectionDisplayReference =
   | ConversationSelectionReference;
 
 /**
- * 会话选区 chip 的稳定身份键。
+ * 会话选区 chip 的**身份键**：单条删除与 live 侧自身去重用它。
  *
- * `parsePromptConversationSelections` 对现代 `# userselect:` 块产出 `{ path?, text }`，**没有 id**；
- * 而 live 选区一定有 id。去重（mergeContextList）与单条删除都必须走本函数，
- * 不能给恢复项塞合成 id —— 否则 live 与 restored 永不相等，同一选区会渲染成两枚 chip。
+ * live 选区一定有 id，恢复项（`parsePromptConversationSelections` 从 `# userselect:` 块解出的
+ * `{ path?, text }`）没有 id，所以这里 id 优先、无 id 退回内容键。身份键**不能**用来判
+ * 「live 与 restored 是不是同一个选区」——两侧必然不同（`id` vs `path\0text`），
+ * 那件事由 `conversationSelectionContentKey` 负责。
  */
 export function conversationSelectionContextKey(
   reference: ConversationSelectionDisplayReference,
 ): string {
   if ("id" in reference && reference.id) return reference.id;
+  return conversationSelectionContentKey(reference);
+}
+
+/**
+ * 会话选区 chip 的**内容键**：跨来源判重用（撤回恢复项 vs live 新选区）。
+ *
+ * 恢复项丢了 id，唯一能对齐两侧的是「路径 + 正文」这对原文事实。代价是同一路径下逐字相同的
+ * 两段选区会被视为同一条——这正好是去重想要的结果（重复挂同一段引用没有意义）。
+ */
+export function conversationSelectionContentKey(
+  reference: ConversationSelectionDisplayReference,
+): string {
   return `${reference.path ?? ""}\u0000${reference.text}`;
 }
 
