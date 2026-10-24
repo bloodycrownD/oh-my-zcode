@@ -1,6 +1,6 @@
 // 照搬上游 v3.16.2（upstream-v316-fullsync P7 末批，拍板 B）并 omz 化：
-// legacySingleRoot 升级面（tree.legacySingleRoot/onLegacyCapability）随 P3 vproj-storage
-// 批回补（omz ProjectTree 无该字段），本批剔除；其余流程与上游同构。
+// legacySingleRoot 的可用性回传（onLegacyCapability）随 backlog-sweep Step 4 落地——
+// ProjectEditor 需要它决定单根退回设备的升级提示；列表自身的创建闸门与文案属 Step 6。
 import { formatProjectError } from "@/project-sidebar/view.js";
 import { useOptionalProjectDirectory } from "@/project-sidebar/ProjectDirectoryProvider.js";
 import { useEffect, useRef, useState, type ReactNode } from "react";
@@ -27,12 +27,14 @@ export function RemoteProjectList({
   device,
   embedded = false,
   onBeforeAdd,
+  onLegacyCapability,
   renderCreate,
 }: {
   host?: RemoteProjectHost;
   device?: ProjectDevice;
   embedded?: boolean;
   onBeforeAdd?(isCurrent: () => boolean): Promise<RemoteProjectHost>;
+  onLegacyCapability?(legacy: boolean): void;
   renderCreate?(
     projects: VirtualProject[],
     add: (project: VirtualProject) => Promise<void>,
@@ -49,6 +51,9 @@ export function RemoteProjectList({
   const scopeRef = useRef(scope);
   scopeRef.current = scope;
   const current = () => active.current && scopeRef.current === scope;
+  // 回调以 ref 转发：父级每次渲染重建闭包不能触发重新读取目录，也不能漏掉最新回调。
+  const capabilityCallback = useRef(onLegacyCapability);
+  capabilityCallback.current = onLegacyCapability;
   const sidebar = useOptionalProjectDirectory();
   const active = useRef(true);
   useEffect(() => {
@@ -74,6 +79,8 @@ export function RemoteProjectList({
       .readTree({ hostId, includeDeleted: true })
       .then((tree) => {
         if (active) setProjects(tree.projects.filter((project) => project.hostId === hostId));
+        // 能力回传：单根退回设备不能新建项目组织入口（Step 6 落列表自身的可见闸门）。
+        capabilityCallback.current?.(Boolean(tree.legacySingleRoot));
       })
       .catch((cause) => {
         if (active) setError(formatProjectError(cause, intl.formatMessage));

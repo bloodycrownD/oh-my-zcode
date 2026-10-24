@@ -1,6 +1,7 @@
 /* eslint-disable max-lines -- 远程连接向导的多个步骤暂集中在同一文件，避免拆分时扩大 SSH/Docker/WSL 回归面。 */
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import type {
+  AppSettings,
   DockerContainerInfo,
   RemoteAssetInstallMode,
   RemoteTarget,
@@ -30,12 +31,72 @@ import type { SSHAuthMethod } from "@/hooks/useRemoteConnectionForm.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { useOptionalBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { useOptionalPlatform } from "@/hooks/usePlatform.js";
+import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
+import { useConfirmDialogStore } from "@/store/confirmDialogStore.js";
+import { ensureSourceServerBoundaryAcknowledged } from "@/lib/sourceServerBoundaryOnboarding.js";
+import { logger } from "@/logger.js";
 import {
   RemoteSyncDialogs,
   RemoteSyncDropdownButton,
   shouldShowRemoteSyncActions,
 } from "@/settings/RemoteSyncActions.js";
 export { RemoteConnectionConnectingStep } from "@/remote-connection/RemoteConnectionConnectingStep.js";
+
+/**
+ * 照搬上游 v3.16.2 RemoteConnectionDialogContent.tsx:58-105（backlog-sweep Step 4 依赖）。
+ * 远程设备/目录入口的首次能力边界介绍：只有用户显式确认才写版本号。
+ * omz 降级：ConfirmDialogRequest 尚无 `intent`/`presentation: "source-server-boundary"`/
+ * `requiredAcknowledgement` 三个字段（上游 confirm 扩展面），这里退化为普通确认框——
+ * 语义不变（确认=已读，取消/并发冲突/卸载都不落盘），只是少了专用视觉与强制勾选。
+ * 旧字段包含展示即已读，扩到 3 会破坏回滚；只在有效确认后写新介绍标记。
+ */
+export function useRemoteBoundaryAcknowledgement() {
+  const settingService = useOptionalBaseWorkspaceServices()?.settingService;
+  const syncAppSettings = useOptionalPlatform()?.syncAppSettings;
+  const confirm = useConfirmDialog();
+  const { intl } = useZCodeIntl();
+  return useCallback(
+    async (isCurrent: () => boolean, onBlocked?: () => void): Promise<boolean> => {
+      if (!settingService) return isCurrent();
+      try {
+        const settings = await settingService.get();
+        if (!isCurrent()) return false;
+        if (settings.remoteBoundaryIntroAcknowledgedVersion === 1) return true;
+        // 全局确认框拒绝并发请求；完成动作由调用方保留，不能把占用误当用户取消。
+        if (useConfirmDialogStore.getState().pendingRequest) {
+          onBlocked?.();
+          return false;
+        }
+        return await ensureSourceServerBoundaryAcknowledged({
+          currentVersion: settings.remoteBoundaryIntroAcknowledgedVersion,
+          targetVersion: 1,
+          isCurrent,
+          requestAcknowledgement: () =>
+            confirm({
+              title: intl.formatMessage({ id: "remote.sourceServerBoundaryTitle" }),
+              description: intl.formatMessage({ id: "remote.sourceServerBoundaryDescription" }),
+              confirmLabel: intl.formatMessage({ id: "common.gotIt" }),
+              showKeyboardHints: false,
+            }),
+          persistVersion: async (version) => {
+            const patch = {
+              remoteBoundaryIntroAcknowledgedVersion: version,
+            } satisfies Partial<AppSettings>;
+            await settingService.update(patch);
+            syncAppSettings?.(patch);
+          },
+        });
+      } catch (cause) {
+        // 说明的读取/保存失败不能伪装成远程连接失败；保持未读，下一次主动使用重试。
+        logger.warn("[RemoteBoundaryAcknowledgement] 读取或保存远程介绍状态失败", cause);
+        return isCurrent();
+      }
+    },
+    [settingService, syncAppSettings, confirm, intl],
+  );
+}
 
 function getKindIcon(kind: RemoteTarget["kind"]) {
   switch (kind) {

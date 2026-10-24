@@ -374,6 +374,11 @@ export interface AppSettings {
   remoteStartupAutoReconnectEnabled?: boolean;
   /** Source Server Directory 的设置面迁移水位（一次性 profile/identity 重排标记）。 */
   sourceServerDirectoryMigrationVersion?: 1;
+  /**
+   * 远程能力边界初次介绍已读水位（backlog-sweep Step 4，上游 AppSettings:402 同形）。
+   * 只有用户显式确认才写 1；缺失/其它值都按未读处理，扩到 3 会破坏回滚。
+   */
+  remoteBoundaryIntroAcknowledgedVersion?: 1;
   /** 上次关闭时激活的 tab 索引 */
   lastActiveTabIndex?: number;
   /** 每个 workspace 的最后活跃 taskId，下次打开自动恢复 */

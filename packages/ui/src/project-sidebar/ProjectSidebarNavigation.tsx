@@ -1,5 +1,5 @@
 // 照搬上游 v3.16.2 project-sidebar/ProjectSidebarNavigation.tsx 并 omz 化：
-// ①删 deviceNavigation/isWebRemoteControl 分支（relay v2 手机远控设备头，omz 无该面）；
+// ①删手机远控设备头与远控视口分支（relay v2 面，omz 不带）；
 // ②omz 独有面迁移（backlog-sweep Step 5 独有面归宿④）：经典侧栏的 WorkspaceNewTaskTooltip
 //   随 alias 退役迁入本骨架新建入口，只读 workspace 仍给出禁用原因提示；
 // ③顶层新建走裸调用 onCreateTask()（不显式传 null），分组/项目归属继承由 ProjectSidebar 承担。

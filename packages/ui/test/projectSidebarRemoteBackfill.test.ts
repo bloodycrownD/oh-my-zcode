@@ -158,9 +158,11 @@ test("拍板 A/P9 挂账面注释在位（不静默裁剪）", () => {
     /managementEnabled = false/,
     "management 缝缺席时 connecting 进度段必须显式降级",
   );
+  // backlog-sweep Step 4：Picker 挂账已清（真链落 Root），注释改为透传形状断言。
   assert.match(
     read(root, "packages", "ui", "src", "project-sidebar", "RemoteProjectPicker.tsx"),
-    /P3 vproj-storage/,
+    /initialRoots=\{props\.initialRoots\}/,
+    "创建表单必须拿到 initialRoots（否则不进创建态）",
   );
   assert.match(
     read(root, "packages", "ui", "src", "project-sidebar", "useProjectRemoteSync.tsx"),

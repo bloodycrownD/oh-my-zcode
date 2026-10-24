@@ -448,6 +448,8 @@ const appSettingsObjectSchema = z.object({
   proactiveSuggestionsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().default(false),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).default([]),
+  // 远程能力边界介绍已读水位（backlog-sweep Step 4）：只有显式确认才写 1，缺失=未读。
+  remoteBoundaryIntroAcknowledgedVersion: z.literal(1).optional(),
   lastActiveTabIndex: z.number().int().nonnegative().default(0),
   lastActiveTaskByWorkspace: z.record(z.string(), z.string()).optional(),
   dataBaseDir: z.string().trim().min(1).optional(),
@@ -530,6 +532,7 @@ export const appSettingsPatchSchema = z.object({
   proactiveSuggestionsEnabled: z.boolean().optional(),
   memoryEnabled: z.boolean().optional(),
   lastWorkspaceSession: z.array(appWorkspaceSessionEntrySchema).optional(),
+  remoteBoundaryIntroAcknowledgedVersion: z.literal(1).optional(),
   lastActiveTabIndex: z.number().int().nonnegative().optional(),
   lastActiveTaskByWorkspace: z.record(z.string(), z.string()).optional(),
   dataBaseDir: z.string().trim().min(1).optional(),
