@@ -1,0 +1,60 @@
+{
+  "$comment": "backlog-sweep Step 10 / P9-4（设置导航 remoteDevices + 侧栏设备 action + 更新提示控制器）所需的 i18n 键。本步代理不改 locale 文件（i18n 由 Step 9 代理独占），值全部取自上游 v3.16.2 packages/ui/src/i18n/locales/{zh-CN,en-US}.ts 原文（zh:2548-2560/en:2735-2748、remote.runningTasksUnavailable zh:285/en:314）。品牌口径：omz 用户可见产品名仍为 ZCode，故 controllerUpdateAvailableToast 里的 ZCode Desktop 原样保留。既有键 common.close / remote.action.details 两侧已在册，未列入。",
+  "keys": [
+    {
+      "key": "remote.runningTasksUnavailable",
+      "zh": "设备未提供任务清单；强制更新会中断正在运行的任务。",
+      "en": "The device did not provide a task list. Forcing the update will interrupt running tasks."
+    },
+    {
+      "key": "settings.source.updateNow",
+      "zh": "立即更新",
+      "en": "Update now"
+    },
+    {
+      "key": "settings.source.forceUpdate",
+      "zh": "强制更新",
+      "en": "Force update"
+    },
+    {
+      "key": "settings.source.forceUpdateTitle",
+      "zh": "强制更新此设备？",
+      "en": "Force-update this device?"
+    },
+    {
+      "key": "settings.source.forceUpdateDescription",
+      "zh": "强制更新会中断此设备上仍在运行的任务。请确认这些任务可以停止。",
+      "en": "A forced update stops tasks that are still running on this device. Confirm that those tasks may be interrupted."
+    },
+    {
+      "key": "sourceServer.updateAvailableToast",
+      "zh": "{source} 有可用更新\n设备 {current} → {available}。",
+      "en": "{source} has an update\nDevice {current} → {available}."
+    },
+    {
+      "key": "sourceServer.updateRequiredToast",
+      "zh": "{source} 必须更新后才能连接\n当前 {current}，需要 {available}。",
+      "en": "{source} must be updated before it can connect\nCurrent {current}; required {available}."
+    },
+    {
+      "key": "sourceServer.updateStartedToast",
+      "zh": "正在更新 {source}…",
+      "en": "Updating {source}…"
+    },
+    {
+      "key": "sourceServer.updateCompletedToast",
+      "zh": "{source} 已更新并重新连接。",
+      "en": "{source} was updated and reconnected."
+    },
+    {
+      "key": "sourceServer.updateFailedToast",
+      "zh": "{source} 更新失败，请在远程设备中查看日志并重试。",
+      "en": "{source} could not be updated. Review the log under Remote devices and try again."
+    },
+    {
+      "key": "sourceServer.controllerUpdateAvailableToast",
+      "zh": "{source} 需要更新 ZCode\nDesktop {current} → {available}，请更新 ZCode 后重新连接。",
+      "en": "ZCode has an update for {source}\nDesktop {current} → {available}; update ZCode to match this Source."
+    }
+  ]
+}
