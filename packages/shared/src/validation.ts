@@ -184,9 +184,19 @@ export type WindowHostRemoteWorkspaceDescriptor = z.infer<
 
 export const windowHostAttachmentScopeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("local") }).strict(),
+  // Source 设置面（backlog-sweep Step 8）：Desktop 专属作用域，按源设备隔离——
+  // 删除设备/非 online 时整组 attachment 被 detach（host 删前回调）。
+  z
+    .object({
+      kind: z.literal("source-settings"),
+      sourceServerId: nonEmptyStringSchema,
+    })
+    .strict(),
   z
     .object({
       kind: z.literal("remote"),
+      // 远端 workspace 的所属设备（identity 隔离用；旧调用方不带时按路径语义兼容）。
+      sourceServerId: nonEmptyStringSchema.optional(),
       remoteSessionId: nonEmptyStringSchema,
       workspacePath: nonEmptyStringSchema,
       workspaceIdentity: nonEmptyStringSchema,

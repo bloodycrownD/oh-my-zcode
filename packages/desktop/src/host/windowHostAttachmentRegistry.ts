@@ -1,5 +1,14 @@
-import type { WindowHostAttachmentScope } from "@zcode/shared";
+import type { SourceServerConnectionState, WindowHostAttachmentScope } from "@zcode/shared";
 import type { ZCodeAgentV4ClientMode } from "@zcode/services";
+
+/**
+ * Source settings attachment 只在本机 Desktop Host 上、且 Source 当前 online 时可用
+ * （照搬上游 sourceSettingsServiceCollection.ts:26-29）：
+ * 只有 online generation 可继续服务设置，updating 也可能已经 dispose 旧连接。
+ */
+export function shouldDetachSourceSettingsAttachment(state: SourceServerConnectionState): boolean {
+  return state !== "online";
+}
 
 interface WindowHostAttachmentPort {
   once(event: "close", listener: () => void): unknown;
@@ -61,6 +70,11 @@ export function createWindowHostAttachmentRegistry<
     scope: WindowHostAttachmentScope;
     port: TPort;
   }): void {
+    // 手机（replayable）链路不得复用 Desktop 专属的 source-settings 作用域（上游同守卫）：
+    // 该 scope 暴露的是本机 Source 的远端配置面，没有可 replay 的 session 语义。
+    if (params.clientMode === "web-remote-replayable" && params.scope.kind === "source-settings") {
+      throw new Error("Source settings attachments are Desktop-only");
+    }
     // scope 必须先由 Host registry 验证；验证失败时不能影响同 attachmentId 的现有端口。
     const resolved = options.resolveScope(params.scope);
     const exposedParams: WindowHostExposeAttachmentParams<TServices, TPort, TCapabilities> = {
@@ -128,10 +142,24 @@ export function createWindowHostAttachmentRegistry<
     }
   }
 
+  function detachSourceSettingsAttachments(sourceServerId: string): void {
+    for (const [attachmentId, tracked] of attachments) {
+      if (
+        tracked.params.scope.kind !== "source-settings" ||
+        tracked.params.scope.sourceServerId !== sourceServerId
+      ) {
+        continue;
+      }
+      attachments.delete(attachmentId);
+      disposeTracked(tracked);
+    }
+  }
+
   return {
     attach,
     detach,
     detachRemoteSessionAttachments,
+    detachSourceSettingsAttachments,
     detachStaleRemoteSessionAttachments,
     size: () => attachments.size,
     list: () =>

@@ -34,6 +34,7 @@ import {
   IProjectService,
   IRemoteProjectService,
   ISettingService,
+  ISourceServerManagementService,
   IWindowControllerService,
   IZCodeAgentService,
   IZCodeTaskService,
@@ -47,6 +48,7 @@ import {
   bindRemoteProjectIdentities,
   createLocalServices,
   createRemoteProjectConnectionAdmission,
+  createSourceServerManagementService,
   disposeServiceResources,
   disposeServiceResourcesAndWait,
   AutomationRepo,
@@ -55,6 +57,7 @@ import {
   createSettingServiceWithMigrations,
   remoteProjectHostIdForProfile,
   type HostApiNetworkTransport,
+  type SourceServerManagementService,
 } from "@zcode/services/node";
 import { createHostResourceUsageResponder } from "./hostResourceUsage.js";
 import {
@@ -133,7 +136,10 @@ import {
   createRemotePromptAttachmentTaskService,
   materializeRemotePromptAttachments,
 } from "./remotePromptAttachments.js";
-import { createWindowHostAttachmentRegistry } from "./windowHostAttachmentRegistry.js";
+import {
+  createWindowHostAttachmentRegistry,
+  shouldDetachSourceSettingsAttachment,
+} from "./windowHostAttachmentRegistry.js";
 import {
   createWindowRemoteConnectionRegistry,
   WindowRemoteConnectionUnavailableError,
@@ -1297,15 +1303,53 @@ function ensureSourceServerConnectionManager(): SourceServerConnectionManager {
   return sourceServerConnectionManager;
 }
 
+/** 管理服务单例（上游 host/index.ts:4028-4056）：注册到 Local Host 服务集合，通道自动暴露。 */
+let sourceServerManagementService: SourceServerManagementService | null = null;
+/** Manager 状态订阅：非 online 状态必须撤掉 source-settings attachment（上游 :4048-4054）。 */
+let sourceSettingsStateSubscription: { dispose(): void } | null = null;
+
+function ensureSourceServerManagementService(): SourceServerManagementService {
+  if (sourceServerManagementService) return sourceServerManagementService;
+  if (!activeServices) throw new Error("Local Host services are not initialized.");
+  const services = activeServices;
+  const manager = ensureSourceServerConnectionManager();
+  sourceServerManagementService = createSourceServerManagementService({
+    directory: ensureSourceServerDirectory(),
+    manager,
+    logWarn: (message, error) => logger.warn(message, error),
+    // 删除设备是唯一不可逆操作：先摘本机 host 行与 source-settings attachment，
+    // 失败即中止（Directory 删除尚未发生），不产生半删状态。
+    onBeforeSourceServerRemoved: async (sourceServerId) => {
+      const hostId = remoteHostIdFromWorkspaceIdentity(
+        buildServerRemoteWorkspaceIdentity({ serverId: sourceServerId, workspacePath: "/" }),
+      );
+      if (!hostId) throw new Error("remote-project.invalid-host-identity");
+      await services.get(IRemoteProjectService).removeHost(hostId);
+      windowHostAttachmentRegistry.detachSourceSettingsAttachments(sourceServerId);
+    },
+  });
+  services.register(ISourceServerManagementService, sourceServerManagementService);
+  sourceSettingsStateSubscription = manager.onDidChangeState((state) => {
+    notifyProjectChange();
+    if (state.sourceServerId && shouldDetachSourceSettingsAttachment(state.state)) {
+      windowHostAttachmentRegistry.detachSourceSettingsAttachments(state.sourceServerId);
+    }
+  });
+  return sourceServerManagementService;
+}
+
 /**
- * 远端项目 Host 重连（Step 2 directory 版；P9 切上游 management 版时整体替换）：
- * 只重连已登记成员——Profile 由 Directory 持有，凭据经 resolveSilentConnectionTarget
- * 复用启动重连链路，Manager 以 retain 意图复用/恢复物理连接，返回稳定 host 身份。
+ * 远端项目 Host 重连（backlog-sweep Step 7 起为上游 management 版）：只重连已登记成员。
+ *
+ * 与 Step 2 的 directory 版差别：Profile 选择、凭据解析与健康判定统一走
+ * `ISourceServerManagementService`（设置页设备卡与项目入口共用同一份快照与错误语义），
+ * 因此这里不再直接读 Directory/Manager。`kind:"server"` 分支不移植（omz `RemoteTarget`
+ * 无 server variant，URL Server 仍走 LEGACY deployServer 旧链）。
  */
 async function connectRemoteProjectHost(host: RemoteProjectHost): Promise<string> {
-  if (!host.target) throw new Error("remote-project.connector-unavailable");
-  const directory = ensureSourceServerDirectory();
-  const snapshot = await directory.snapshot();
+  if (!sourceServerManagementService) throw new Error("remote-project.connector-unavailable");
+  const management = sourceServerManagementService;
+  const snapshot = await management.getSnapshot();
   const profiles = snapshot.profiles.filter(
     (profile) =>
       profile.lifecycleState !== "retired" && remoteProjectHostIdForProfile(profile) === host.id,
@@ -1313,22 +1357,16 @@ async function connectRemoteProjectHost(host: RemoteProjectHost): Promise<string
   const preferred = new Set(snapshot.servers.map((server) => server.preferredProfileId));
   const profile = profiles.find((item) => preferred.has(item.profileId)) ?? profiles[0];
   if (!profile) throw new Error("remote-project.profile-not-found");
-  const target = await directory.resolveSilentConnectionTarget(profile.profileId);
-  if (!target) throw new Error("remote-project.connector-unavailable");
-  const connected = await ensureSourceServerConnectionManager().connect({
-    profile: {
-      profileId: profile.profileId,
-      ...(profile.sourceServerId ? { sourceServerId: profile.sourceServerId } : {}),
-      transport: profile.transport,
-    },
-    target,
-    // retain：connectHost 只重连已登记成员，不新增成员（上游同语义）。
-    membershipIntent: "retain",
-  });
-  return remoteProjectHostIdForProfile({
-    ...profile,
-    sourceServerId: connected.sourceServerId,
-  });
+  const connected = await management.connectProfile(profile.profileId, { retainedOnly: true });
+  const resolved = connected.profiles.find((item) => item.profileId === profile.profileId);
+  if (
+    !resolved ||
+    !connected.states.some(
+      (state) => state.profileId === resolved.profileId && state.state === "online",
+    )
+  )
+    throw new Error("project.host-offline");
+  return remoteProjectHostIdForProfile(resolved);
 }
 
 /** 目录投影的连接态（Manager 事件唯一来源；恢复后不再显示旧持久错误）。 */
@@ -1348,10 +1386,12 @@ async function readRemoteProjectConnectionStates(): Promise<
       "connectionStatus" | "lastConnectionError" | "lastConnectionStatus" | "upgradeTarget"
     >
   >();
-  const manager = ensureSourceServerConnectionManager();
-  const snapshot = await ensureSourceServerDirectory().snapshot();
+  // omz 偏差：上游先投影 windowRemoteConnectionRegistry 里的 `kind:"server"` 直连；
+  // omz 无 server variant（URL Server 走 LEGACY 链），该段在本地恒为空集，故不移植。
+  if (!sourceServerDirectoryInstance || !sourceServerConnectionManager) return result;
+  const snapshot = await sourceServerDirectoryInstance.snapshot();
   const inFlight: readonly string[] = ["bootstrapping", "retrying", "updating"];
-  for (const state of manager.listStates()) {
+  for (const state of sourceServerConnectionManager.listStates()) {
     const profile = snapshot.profiles.find((item) => item.profileId === state.profileId);
     if (!profile) continue;
     const id = remoteProjectHostIdForProfile(profile);
@@ -2228,6 +2268,13 @@ const windowHostAttachmentRegistry = createWindowHostAttachmentRegistry<
       }
       return { services: activeServices, generation: 1 };
     }
+    if (scope.kind === "source-settings") {
+      // omz 偏差（backlog-sweep Step 8）：上游在此换装 createSourceSettingsServiceCollection
+      // （远端 skills/MCP/plugins/hooks/settings-sync 的裁剪服务集）。omz 尚无该服务集
+      // （P9 只到设备管理面板，远端配置面未接线），显式拒绝以暴露真实缺口，不回退到
+      // 本机 local services——那会把本机配置当成远端配置读写。
+      throw new Error(`Source settings attachments are not wired yet: ${scope.sourceServerId}`);
+    }
     const session = windowRemoteConnectionRegistry.getSession(scope.remoteSessionId);
     if (!session) {
       throw new Error(`未找到远程 logical session，remoteSessionId=${scope.remoteSessionId}`);
@@ -2295,6 +2342,18 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
           timeoutMs: 6_000,
         },
         {
+          name: "source-server-management-dispose",
+          // 管理服务只持事件订阅与统计缓存；必须先于 Manager 释放，避免 teardown 期间
+          // Directory/Manager 事件继续推送到已关闭的通道。
+          run: async () => {
+            sourceSettingsStateSubscription?.dispose();
+            sourceSettingsStateSubscription = null;
+            sourceServerManagementService?.dispose();
+            sourceServerManagementService = null;
+          },
+          timeoutMs: 2_000,
+        },
+        {
           name: "source-server-manager-dispose",
           run: async () => {
             sourceServerConnectionManager?.dispose();
@@ -2349,6 +2408,10 @@ function disposeHostResourcesBestEffort(reason: string): void {
   }
   cronAutomationRepo.close();
   void windowRemoteConnectionRegistry.dispose();
+  sourceSettingsStateSubscription?.dispose();
+  sourceSettingsStateSubscription = null;
+  sourceServerManagementService?.dispose();
+  sourceServerManagementService = null;
   sourceServerConnectionManager?.dispose();
   sourceServerConnectionManager = null;
 
@@ -2924,6 +2987,11 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         // 远端项目入口持久化（backlog-sweep Step 1-2）：唯一写入者=SQLite
         // createRemoteProjectService（由 createLocalServices 注册）；P7 末批的
         // directory 投影服务与注册已按数据所有者裁定删除，不再二次注册。
+        //
+        // Source 管理服务（backlog-sweep Step 7 / P9-1）：在服务集合就绪后立即创建并注册
+        // （上游 host/index.ts:4028-4056 同序）——connectHost 与设置页设备卡共用同一实例，
+        // 因此不能等到第一次设置页打开才惰性创建。
+        ensureSourceServerManagementService();
         const zcodeTaskService = services.getOptional(IZCodeTaskService);
         if (zcodeTaskService) {
           const reportingZCodeTaskService = createReportingRemoteZCodeTaskService(
