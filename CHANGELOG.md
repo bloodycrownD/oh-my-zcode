@@ -19,6 +19,8 @@
 ### 修复
 
 - **本地使用痕迹判定漏掉已删任务**：不再只看未删除任务，`includeDeleted: true` + 会话库/快照目录三证据源共同判定，避免老用户升级后被当作「首次使用」重新走引导。
+- **native × MC 引用保留（MC 正投影侧）已修**：MC 正投影不再把含 `tool_reference` 的 `role:"tool"` 块数组文本化——引用块按原顺序/内容保留，纯文本与媒体块数组逐字节不变；结构化结果同时计入「已完成工具结果」，避免调用/结果被拆成两个 composite key（tool arc pairing 事故模式）。两处改动带 `FORK` 注释，**升级 magic-context 需 rebase 该处**。回归见 `apps/zcode-cli/packages/magic-context/scripts/test-tool-reference-projection.mjs`（T-TR1/T-TR2，已挂入该包 `test:all`）。
+- **native × MC 引用保留（bootstrap 反投影侧）端到端闭合**：反投影此前只认字符串输出，MC 正投影保留的块数组一律落成 `content:""`——引用块丢失、混合 Text+引用时文本也一起丢，且 `isUnchanged` 恒判「已改动」导致每 pass 重建。现 `apps/zcode-cli/packages/bootstrap/src/app/magic-context/projection.ts` 新增 `toolOutputContentOf`(:176-193)：纯文本块按 `"\n\n"` 还原为文本、含非文本记录块（`tool_reference` 等）的数组按原序浅拷贝结构化保留、畸形项显式丢弃；`toolOutputOf`(:199-204) 字符串路径零行为变化，`isUnchanged`(:242) / `rebuildEntry`(:304) 由此保住**文本与引用两端**（`status:"error"` 仍映射 `isError`）。回归 `apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-tool-reference-roundtrip.mjs`（T-RT1..T-RT7：string 往返/纯文本/纯引用/混合/isUnchanged/畸形未知块策略/错误状态），已登记 bootstrap `test:tool-reference-roundtrip` 与根 `test:v4-perf`。
 
 ### 门禁与基线
 
@@ -34,6 +36,7 @@
 - 远端**建任务**已支持（所属 Host 准备目录后直接开远端 workspace）；仅手机远控（`web-remote-replayable`）下不提供该导航，未带项目归属的请求会被显式拒绝并提示。
 - 未读角标存在双源（任务栏/托盘与侧栏门控语义不一致，R-B）待后续批；R-C（接入第 21 台远端设备时的裸错误码）已修，现在提示 `project.hostLimit` 的可读上限文案。
 - 真机验收清单见 `docs/iterations/backlog-sweep/qa-appendix.md`（T-QA1/2/3/4/5/6 + 侧栏骨架 + 升级路径）。
+- **native ToolSearch × MC 端到端已闭合**：bootstrap 反投影不再把块数组输出重建为空串——`apps/zcode-cli/packages/bootstrap/src/app/magic-context/projection.ts` 的 `toolOutputContentOf`(:176-193) 把纯文本块按 `"\n\n"` 还原为文本、含 `tool_reference` 的块数组按原序结构化保留（不文本化、不丢），`toolOutputOf`(:199-204) 字符串路径逐字节不变，`isUnchanged`(:242) 与 `rebuildEntry`(:304) 因此**端到端保住文本与引用**。剩余限制只有「native 仅 anthropic-messages 协议可用、local 仍是 omz 主形态」；升级 magic-context 需 rebase 正投影 FORK（`magic-context/src/host/types.ts` 的 `toolResultToPart`）与反投影 FORK（`app/magic-context/projection.ts:176-204`），详见 `docs/iterations/upstream-v316-fullsync/toolsearch-seam-proof.md` §3.3。
 
 ## [1.0.22](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.21...v1.0.22) (2026-10-23)
 
@@ -71,7 +74,7 @@
 
 ### 已知限制与挂账（真机 QA 待验收）
 
-- native ToolSearch×MC：native 引用块会被 MC 文本化丢失（MC 包红线禁改），local 为 omz 主形态。
+- native ToolSearch×MC：native 引用块经 MC pass 仍会丢失（MC 正投影已修正，端到端待 bootstrap 反投影补齐；升级 magic-context 需 rebase 该处），local 为 omz 主形态。
 - 真机挂账：T-CP3 合并入口/T-VU2 项目树/T-RM3 SSH 端到端/T-RM4 WSL-Docker 断连恢复/换代矩阵/T-QA-bugAB 复测。
 - P3/P9 挂账：entries 表+resolveHost 路由+RemoteProjectPicker 挂载；management 服务+registry+设置设备卡；deployServer 旧链退役拍板留发布轮；向导壳族按「UI 保 omz」政策关闭。
 - U5-U12 仍在 `upstream-v3.16-backport` 分支待续。

@@ -286,7 +286,18 @@ export function partHasCompletedResult(part: unknown): boolean {
     if (!isRecord(part)) return false;
     if (part.type === "tool") {
         if (!isRecord(part.state)) return false;
-        return typeof part.state.output === "string" || part.state.status === "error";
+        // FORK（toolsearch / native tool references，偏离上游）：本 fork 的 host
+        // 正投影在结果块含 `tool_reference` 时把 `state.output` 保留为块数组
+        // （见 host/types.ts `toolResultToPart`），不再是上游假设的纯字符串。
+        // 它仍然是**闭合的完成结果**：只看字符串会把这类 part 误判成 invocation，
+        // 导致 assistant 调用侧与 user 结果侧落进两个 composite key（参见
+        // docs/specs/magic-context-tool-arc-pairing.md 记录的孤儿 invocation 事故）。
+        // 升级 magic-context 时 rebase：上游若引入结构化 output，按其类型收口。
+        return (
+            typeof part.state.output === "string" ||
+            Array.isArray(part.state.output) ||
+            part.state.status === "error"
+        );
     }
     return part.type === "tool_result";
 }

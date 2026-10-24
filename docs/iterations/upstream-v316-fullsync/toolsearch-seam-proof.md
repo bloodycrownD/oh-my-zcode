@@ -60,6 +60,8 @@ content 经 `contentText` **文本化**：只有 `text` 块的文字被保留拼
 `tool_reference` 块（`{type:"tool_reference", toolName}`，无 text/content 字段）
 **直接丢弃**。反投影（bootstrap `rebuildEntry`）把 tool 结果重建为
 `content: string`。
+（2026-10-24 勘误：MC 正投影已改为保留含 `tool_reference` 的块数组，见 §3.3；
+本段保留为当时的推演依据，落地序不回退。）
 
 推演：若按 spec 预定序「MC transform → 暴露决策 → 投影」：
 
@@ -94,17 +96,41 @@ content 经 `contentText` **文本化**：只有 `text` 块的文字被保留拼
 | e | 双投影同源（Step 19b 不变量） | 两投影都吃 MC 输出数组；改动不触碰 :131/:141 的关系 |
 | f | 公告可见性与 omz reminder 族一致 | 公告在 MC 之前提交（同 plan_mode_exit/runtime_mode/output_style）：MC 可见、可按既有 tag/drop 语义处置；delta 扫描读 canonical（含上轮公告），公告 source 登记 per-request 组、不落盘 |
 
-### 3.3 native 模式 × MC：已知降级面（登记，不阻塞）
+### 3.3 native 模式 × MC：引用保留（正投影与反投影已闭合）
 
-native 模式依赖 tool_reference 块原样到达 Anthropic 服务端展开。MC 正投影对
-role:"tool" 块数组一律文本化（§3.1），native 引用块在 MC pass 后必失——这是 MC 包
-内部语义（红线禁改）。处置：
+native 模式依赖 tool_reference 块原样到达 Anthropic 服务端展开。原推演结论是 MC 正投影
+对 role:"tool" 块数组一律文本化（§3.1），native 引用块在 MC pass 后必失。2026-10-24
+同时修正 MC 正投影与 bootstrap 反投影后，该结论两端都不再成立，**端到端已闭合**：
 
-- omz 化政策：local 模式为 omz 主推形态（任意 provider 可用）；native 仅
+- **已修（MC 包）**：`apps/zcode-cli/packages/magic-context/src/host/types.ts` 的
+  `toolResultToPart` 在块数组含 `{type:"tool_reference"}` 时把 `state.output` 设为逐块
+  浅拷贝的原数组（顺序/内容不变），纯文本与媒体块数组仍走 `contentText`；
+  `core/hooks/magic-context/tool-drop-target.ts` 的 `partHasCompletedResult` 把数组输出
+  也算作闭合结果，避免结构化结果被误判为调用中间态、拆成两个 composite key。两处改动
+  均带 `FORK` 注释。
+- **已补（bootstrap 反投影，2026-10-24）**：`apps/zcode-cli/packages/bootstrap/src/app/
+  magic-context/projection.ts`（拆分后旧文件 `app/magic-context-turn-transform.ts` 只剩 160 行
+  工厂门面，旧指针 `:724-727`/`:760-766`/`:821-834` 全部失效）。`toolOutputContentOf`(:176-193) 是新增的块数组策略：纯文本块按正投影
+  `contentText` 的同一规则以 `"\n\n"` 还原为字符串，出现任何非文本记录块（`tool_reference` /
+  image / 未来块）则整段按原序浅拷贝**结构化保留**（不文本化、不丢），畸形项（非对象、
+  `type:"text"` 但 text 非字符串）显式丢弃并在注释里写明理由；`toolOutputOf`(:199-204) 字符串
+  与 `state.error` 路径逐字节不变、数组走上述策略；`isUnchanged` 的工具分支(:242) 因此能在
+  内容一致时判未改动（原 entry 逐引用复用、cache 前缀不抖），`rebuildEntry`(:304) 重建时写回的
+  是文本或块数组而不再是 `content:""`；`status === "error"` 仍映射 `isError`。**端到端保住
+  文本与引用**。
+- **回归**：
+  1. `apps/zcode-cli/packages/magic-context/scripts/test-tool-reference-projection.mjs`
+     （T-TR1 引用块存活、T-TR2 纯文本仍文本化，2/2），登记为该包
+     `test:tool-reference-projection` 并挂入 `test:all`；
+  2. `apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-tool-reference-roundtrip.mjs`
+     （T-RT1..T-RT7：string 往返 / 纯文本块还原 / 纯引用块保留 / 混合两者都在 / isUnchanged
+     判定 / 畸形与未知 type 块的显式策略 / error 状态保 isError，7/7），登记为 bootstrap
+     `test:tool-reference-roundtrip` 并追加到根 `test:v4-perf` 末尾。该脚本直接以 Node 原生
+     类型剥离加载 `projection.ts` 源码（不读 `dist/`），避免忘 build 时测旧产物。
+- **升级 magic-context 需 rebase**：上述 FORK 改动偏离上游 v3.16.2，升级 MC 包时必须重放
+  并复跑上述脚本，不能直接以新版本覆盖。
+- omz 化政策不变：local 模式为 omz 主推形态（任意 provider 可用）；native 仅
   anthropic-messages 协议可用（`resolveToolSearchCapability.protocolSupported`）。
-- MC 开启 + native 并用时，引用块丢失 = 服务端不展开已发现工具定义，模型需重新
-  select 拉取——功能可用性存续（ToolSearch/DeferredToolCall 控制入口仍在），登记为
-  已知降级面，与上游「native 全支持」的偏差记录于 CHANGELOG/UPSTREAM-SYNC。
 - `resolveToolSearchMode` 的 native 校验、auto 降级逻辑照搬上游（capability 缺失时
   native 报错 / auto 回退 local/off），不因 MC 添加隐藏 gate——MC 是会话内可关的
   独立功能面，交叠行为显式登记优于隐式互斥。

@@ -151,8 +151,55 @@ function sameContent(left: ModelMessageContent, right: ModelMessageContent): boo
   });
 }
 
-function toolOutputOf(part: ToolPart): string {
-  if (typeof part.state?.output === "string") return part.state.output;
+/**
+ * FORK（toolsearch / native tool references，2026-10-24）：`role:"tool"` 的结构化结果
+ * 反投影——把「文本」与「引用块」两端都保住。
+ *
+ * 背景：MC 正投影（`packages/magic-context/src/host/types.ts` 的 `toolResultToPart`）
+ * 在结果块数组含 `{type:"tool_reference"}` 时把 `state.output` **保留为块数组**；
+ * 本函数原先只认字符串，数组一律落成 `""`——ToolSearch 的 native 引用块经一次 MC
+ * pass 即丢，`isUnchanged` 因内容不等恒判「已改动」，`rebuildEntry` 再把结果写回空串；
+ * 混合 Text + 引用时**连原本能到模型的文本也一起丢**。
+ *
+ * 策略（与正投影互逆，逐形状显式可判）：
+ *   1. 纯文本块数组（`type:"text"` + 字符串 text）→ 按正投影 `contentText` 的同一规则
+ *      以 `"\n\n"` 拼接还原成字符串：正投影对这类输入本来就是文本化，往返后逐字节相同，
+ *      字符串原 entry 因此能通过 `isUnchanged` 复用（cache 前缀不抖动）；
+ *   2. 出现任何非文本记录块（`tool_reference` / image / 未来新增块）→ 整段按原序浅拷贝
+ *      返回，**不文本化**：引用块没有 text/content 字段，文本化即等于删除；
+ *   3. 畸形项显式丢弃：非对象项、以及 `type:"text"` 但 `text` 非字符串的块——它们不可能
+ *      成为合法的 `ModelMessageContentBlock`，透传给 provider projection 只会抛错。
+ *      全部被丢弃时返回空串（与「没有 content」在 wire 上等价，同 `normalizeContent`）。
+ *
+ * 字符串输出（含 `state.error`）走第一句原样返回：既有 `role:"tool"` 条目零行为变化。
+ */
+function toolOutputContentOf(output: readonly unknown[]): ModelMessageContent {
+  const blocks: ModelMessageContentBlock[] = [];
+  const texts: string[] = [];
+  let structured = false;
+  for (const block of output) {
+    if (!isRecord(block)) continue;
+    if (block.type === "text") {
+      if (typeof block.text !== "string") continue;
+      texts.push(block.text);
+      blocks.push({ type: "text", text: block.text });
+      continue;
+    }
+    structured = true;
+    // 与 `contentBlocksOf` 的未知块口径一致：浅拷贝即回到原值（正投影也是 `{...block}`）。
+    blocks.push({ ...block } as unknown as ModelMessageContentBlock);
+  }
+  return structured ? blocks : texts.join("\n\n");
+}
+
+/**
+ * `role:"tool"` 的结果内容。字符串路径逐字节不变；块数组交给
+ * {@link toolOutputContentOf} 做「文本还原 / 结构保留」二选一。
+ */
+function toolOutputOf(part: ToolPart): ModelMessageContent {
+  const output = part.state?.output;
+  if (typeof output === "string") return output;
+  if (Array.isArray(output)) return toolOutputContentOf(output);
   return typeof part.state?.error === "string" ? part.state.error : "";
 }
 

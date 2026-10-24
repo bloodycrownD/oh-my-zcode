@@ -262,7 +262,30 @@ export interface ToolLikePart {
   state: {
     status: "pending" | "running" | "completed" | "error";
     input?: unknown;
-    output?: string;
+    /**
+     * FORK（toolsearch / native tool references，偏离上游）：上游 magic-context
+     * 把 `state.output` 当作纯字符串（OpenCode 的 tool part 就是这么序列化的），
+     * 本 fork 的 `role:"tool"` 条目却可能是**块数组**。历史上这里经 `contentText`
+     * 一律文本化，于是 `{type:"tool_reference", toolName}` 块（没有 text/content
+     * 字段）被压成空串——native ToolSearch 的引用在 MC pass 后必失
+     * （docs/iterations/upstream-v316-fullsync/toolsearch-seam-proof.md §3.3）。
+     *
+     * 因此：块数组里**存在 tool_reference** 时，`output` 保留原块数组（浅拷贝，
+     * 顺序不变），不再文本化；其余任何输入仍走 `contentText`，字符串输出逐字节
+     * 不变。这与 adapters 侧的同款保护对齐
+     * （`packages/adapters/src/model/transform.ts:174-192`：只要块数组含
+     * tool_reference 就跳过文本化）。
+     *
+     * 包内按 `typeof output === "string"` 判断「结果可打标/可 drop」的地方会自然
+     * 跳过这类 part（引用既不该被 §N§ 打标，也不该被压成 `[dropped §N§]`）；
+     * 需要字符串的下游（read-session-formatting / tail-hygiene / ctx-expand /
+     * final-wire-token-estimate）已有 non-string 兜底（JSON.stringify 或忽略）。
+     *
+     * 升级 magic-context 时**必须 rebase 本改动**：上游若把 tool part 的 output
+     * 改成别的承载形状，这里的联合类型与 `toolResultToPart` 的结构保留逻辑要一起
+     * 迁移，否则 native 引用会被上游的文本化语义重新吃掉。
+     */
+    output?: string | readonly ZCodeModelMessageContentBlock[];
     error?: string;
     title?: string;
     metadata?: Record<string, unknown>;
@@ -319,11 +342,36 @@ function toolCallsToParts(toolCalls: readonly ZCodeModelToolCall[] | undefined):
   });
 }
 
-/** Tool result part for a `role: "tool"` entry (OpenCode's tool-result shape). */
+/**
+ * `true` for a block that is a native tool-search reference
+ * (`{ type: "tool_reference", toolName }`, see `contracts/src/tools/tool-search.ts`).
+ *
+ * FORK（toolsearch）：块数组里只要出现这种块，就**不能**把整个结果文本化——
+ * 它没有 text/content 字段，`contentText` 会把它静默压没，native 模式下
+ * Anthropic 服务端因此无法展开已发现的工具定义。
+ */
+function isToolReferenceBlock(block: unknown): boolean {
+  return isRecord(block) && block.type === "tool_reference";
+}
+
+/**
+ * Tool result part for a `role: "tool"` entry (OpenCode's tool-result shape).
+ *
+ * FORK（toolsearch / native tool references）：块数组含 `tool_reference` 时，
+ * `state.output` 保留块数组（逐块浅拷贝，顺序与内容不变），不再走 `contentText`。
+ * 其余输入（字符串、纯文本块数组、媒体块数组、不含 tool_reference 的错误结果）
+ * 行为与改动前逐字节相同；没有 ToolSearch 时永远不会出现 `tool_reference`，
+ * 因此 mode off 零差异。与 adapters `transform.ts:174-192` 的保护同构。
+ * 升级 magic-context 时 rebase。
+ */
 function toolResultToPart(message: ZCodeModelInputMessage): ToolLikePart | null {
   if (typeof message.toolCallId !== "string" || message.toolCallId.length === 0) return null;
-  const output =
-    typeof message.content === "string" ? message.content : contentText(message.content);
+  const output: string | readonly ZCodeModelMessageContentBlock[] =
+    typeof message.content === "string"
+      ? message.content
+      : message.content.some(isToolReferenceBlock)
+        ? message.content.map((block) => ({ ...block }))
+        : contentText(message.content);
   const part: ToolLikePart = {
     type: "tool",
     callID: message.toolCallId,
@@ -331,7 +379,9 @@ function toolResultToPart(message: ZCodeModelInputMessage): ToolLikePart | null 
     state: {
       status: message.isError === true ? "error" : "completed",
       output,
-      ...(message.isError === true ? { error: output } : {}),
+      // 结构化输出（引用块）没有可复制的错误文本；error 仍只承载字符串结果，
+      // 与改动前的类型和 wire 语义一致。状态本身已由 `status: "error"` 表达。
+      ...(message.isError === true && typeof output === "string" ? { error: output } : {}),
     },
   };
   return part;
