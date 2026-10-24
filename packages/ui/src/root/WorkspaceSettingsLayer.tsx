@@ -15,6 +15,9 @@ export function WorkspaceSettingsLayer({
   onCreateTask,
   onOpenWorkspace,
   allowOpenWorkspace,
+  onOpenRemoteConnection,
+  onConnectRemoteProfile,
+  onOpenRemoteDeviceProject,
 }: WorkspaceSettingsLayerProps) {
   useEffect(() => {
     logger.info("[Root] settings layer mounted");
@@ -37,6 +40,9 @@ export function WorkspaceSettingsLayer({
             onCreateTask={onCreateTask}
             onOpenWorkspace={onOpenWorkspace}
             allowOpenWorkspace={allowOpenWorkspace}
+            onOpenRemoteConnection={onOpenRemoteConnection}
+            onConnectRemoteProfile={onConnectRemoteProfile}
+            onOpenRemoteDeviceProject={onOpenRemoteDeviceProject}
           />
         </ServiceProvider>
       ) : (
@@ -50,6 +56,9 @@ export function WorkspaceSettingsLayer({
           onCreateTask={onCreateTask}
           onOpenWorkspace={onOpenWorkspace}
           allowOpenWorkspace={allowOpenWorkspace}
+          onOpenRemoteConnection={onOpenRemoteConnection}
+          onConnectRemoteProfile={onConnectRemoteProfile}
+          onOpenRemoteDeviceProject={onOpenRemoteDeviceProject}
         />
       )}
     </div>

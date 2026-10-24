@@ -1,13 +1,17 @@
 // 照搬上游 v3.16.2 remote-connection-flow/ui/RemoteConnectionProgress.tsx（134L，backlog-sweep
 // Step 9 / P9-3 组件级例外，拍板 A 的例外真实范围之一）。
-// 组件形态照搬；本仓向导壳未搬（拍板 A），故 Provider 无生产挂载点——面板侧的
-// `useRemoteConnectionProgress()` 恒为 null，「未完成连接」横幅不渲染。这是登记过的降级，
-// 不是死代码：向导壳落地时只需在 Root 挂 Provider + 发布点。
+// 接线（knip-wire-progress）：发布侧由 `useRemoteConnectionProgressPublisher` 承接（向导壳
+// 收起到后台时发布真实 state），Provider 需挂在 RootInner 以同时覆盖向导与设备面板；
+// 面板侧在 sourceServerId/profileId 缺省时按 target 回填 scope，横幅才能落到正确设备卡。
 import type { RemoteConnectionProgress } from "@/remote-connection-flow/contract.js";
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { AlertTriangleIcon, LoaderIcon } from "lucide-react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
-import { resolveRemoteConnectionPhases } from "@/remote-connection/RemoteConnectionConnectingStep.js";
+import {
+  getRemoteConnectionActivePhase,
+  getRemoteConnectionPhasePercent,
+  resolveRemoteConnectionPhases,
+} from "@/remote-connection-flow/ui/remoteConnectionPhases.js";
 import { formatRemoteLinkRailTarget } from "@/remote-connection/RemoteLinkRail.js";
 import { cn } from "@/components/lib/utils.js";
 
@@ -51,11 +55,8 @@ export function RemoteConnectionMinimizedProgress({
 }: RemoteConnectionProgress) {
   const { intl } = useZCodeIntl();
   const phases = resolveRemoteConnectionPhases(logs);
-  const active =
-    phases.find((phase) => phase.status === "active" || phase.status === "failed") ?? phases[0]!;
-  const percent = Math.round(
-    (phases.filter((phase) => phase.status === "complete").length / phases.length) * 100,
-  );
+  const active = getRemoteConnectionActivePhase(phases);
+  const percent = getRemoteConnectionPhasePercent(phases);
   const device = name ?? (target ? formatRemoteLinkRailTarget(target) : "");
   const progressing = view === "connecting" && !cancelled && !ready;
   const title = intl.formatMessage(

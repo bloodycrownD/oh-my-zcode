@@ -47,6 +47,7 @@ import {
   type RemoteConnectionWorkspacePurpose,
   type SelectRemoteProjectHandler,
 } from "@/remote-connection-flow/contract.js";
+import { useRemoteConnectionProgressPublisher } from "@/remote-connection-flow/ui/useRemoteConnectionProgressPublisher.js";
 
 interface RemoteConnectionDialogProps {
   onConnect: (options: RemoteTarget, requestId?: string) => Promise<string>;
@@ -71,6 +72,11 @@ interface RemoteConnectionDialogProps {
   onFlowRequestIdChange?: (requestId: string | null) => void;
   preferredKind?: RemoteTarget["kind"];
   preferredWslDistro?: string;
+  /**
+   * 设备管理「连接」入口用已保存线路预填表单；向导仍完整展示参数页，
+   * 用户确认/补凭据后才发起连接（见 useRemoteConnectionForm.initialTarget）。
+   */
+  initialTarget?: RemoteTarget;
 }
 
 export function RemoteConnectionDialog({
@@ -92,6 +98,7 @@ export function RemoteConnectionDialog({
   onFlowRequestIdChange,
   preferredKind,
   preferredWslDistro,
+  initialTarget,
 }: RemoteConnectionDialogProps) {
   const { intl } = useZCodeIntl();
   const confirmDialog = useConfirmDialog();
@@ -154,6 +161,7 @@ export function RemoteConnectionDialog({
     isWindowsDesktop,
     preferredKind,
     preferredWslDistro,
+    initialTarget,
   });
   const directoryBrowserServices = useRemoteWorkspaceSessionStore((state) =>
     connectedSessionId ? (state.sessionsById[connectedSessionId]?.services ?? null) : null,
@@ -168,6 +176,24 @@ export function RemoteConnectionDialog({
     [connectedSessionId, currentStep, loading],
   );
   const flowActive = isRemoteConnectionFlowActive(flowSnapshot);
+
+  // 预填来自已保存线路时直接落在参数页：连接方式已经确定，再让用户选一次 kind 是重复操作。
+  // 每个「打开」周期只应用一次，用户主动返回 kind 页时不能被这里反复推回去。
+  const appliedInitialTargetOpenRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      appliedInitialTargetOpenRef.current = false;
+      return;
+    }
+    if (!initialTarget || appliedInitialTargetOpenRef.current) {
+      return;
+    }
+    appliedInitialTargetOpenRef.current = true;
+    // 恢复中的后台连接（connecting/已连上待选目录）有自己的步骤，不能被预填强拉回参数页。
+    if (!isRemoteConnectionFlowActive(flowSnapshot)) {
+      setCurrentStep("settings");
+    }
+  }, [flowSnapshot, initialTarget, open]);
 
   useEffect(() => {
     onFlowActiveChange?.(flowActive);
@@ -274,6 +300,25 @@ export function RemoteConnectionDialog({
     }
     closeDialog();
   }, [closeDialog, confirmRemoteFlowDiscard]);
+
+  /*
+   * 收起到后台时把真实连接状态发布给 Root 层的 Provider，设置-设备面板据此渲染后台进度条。
+   * 只有「连接中 + 弹窗已收起」才发布：展开的向导本身就是进度界面，再发布一个横幅会重复。
+   */
+  useRemoteConnectionProgressPublisher({
+    minimized: flowActive && !open && currentStep === "connecting",
+    operationId: connectingRequestId ?? "pending",
+    view: currentStep,
+    target: pendingRemoteTarget,
+    requestId: connectingRequestId,
+    error,
+    reason: "",
+    ready: false,
+    onResume: () => applyOpenState(true),
+    onCancel: () => {
+      void handleCloseRequest();
+    },
+  });
 
   const startRemoteConnection = async (target: RemoteTarget) => {
     const nextTarget = withDefaultRemoteResourcePackages(target);
@@ -570,6 +615,7 @@ export function RemoteConnectionDialog({
                   <RemoteConnectionConnectingStep
                     kind={kind}
                     logs={connectionLogs}
+                    requestId={connectingRequestId}
                     errorMessage={error}
                     loading={loading}
                     onBack={() => {

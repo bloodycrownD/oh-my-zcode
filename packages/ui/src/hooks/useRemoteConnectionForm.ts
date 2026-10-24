@@ -35,6 +35,7 @@ export function useRemoteConnectionForm({
   isWindowsDesktop,
   preferredKind,
   preferredWslDistro,
+  initialTarget,
   savedSshConfigAlias,
   preserveDraftOnOpen = false,
 }: {
@@ -42,6 +43,11 @@ export function useRemoteConnectionForm({
   isWindowsDesktop: boolean;
   preferredKind?: RemoteKind;
   preferredWslDistro?: string;
+  /**
+   * 设备管理「连接」入口带已保存线路打开向导：只回填非 secret 字段，
+   * 凭据仍由用户本次输入，避免把历史 secret 带进新连接草稿。
+   */
+  initialTarget?: RemoteTarget;
   /** 编辑已有连接时，保留历史别名，允许用户显式清除（backlog-sweep Step 9）。 */
   savedSshConfigAlias?: string;
   /** 编辑弹窗复用同一表单状态：打开时不重置草稿（backlog-sweep Step 9）。 */
@@ -123,6 +129,38 @@ export function useRemoteConnectionForm({
       setWslDistro(preferredWslDistro);
     }
   }, [availableKinds, open, preferredKind, preferredWslDistro, preserveDraftOnOpen]);
+
+  // 必须排在上面的打开重置之后：预填字段要覆盖 preferredKind/上次草稿，而不是被它们覆盖。
+  // initialTarget 引用由调用方在打开期间保持稳定，否则快照刷新会重复覆盖用户刚输入的凭据。
+  useEffect(() => {
+    if (!open || preserveDraftOnOpen || !initialTarget) {
+      return;
+    }
+    if (!availableKinds.includes(initialTarget.kind)) {
+      return;
+    }
+
+    setKind(initialTarget.kind);
+    if (initialTarget.kind === "ssh") {
+      setHostState(initialTarget.host);
+      setPortState(initialTarget.port != null ? String(initialTarget.port) : "22");
+      setUsernameState(initialTarget.username);
+      setSshAuthMethod(initialTarget.privateKeyPath ? "privateKey" : "password");
+      // secret 一律清空：预填只负责省去重复选择线路，认证必须由本次会话重新提供。
+      setPassword("");
+      setPrivateKeyPathState(initialTarget.privateKeyPath ?? "");
+      setPrivateKeyPassphrase("");
+      setAssetInstallMode(initialTarget.assetInstallMode ?? DEFAULT_REMOTE_ASSET_INSTALL_MODE);
+      setSelectedSshConfigAlias(initialTarget.sshConfigAlias?.trim() || null);
+      return;
+    }
+    if (initialTarget.kind === "wsl") {
+      setWslDistro(initialTarget.distro ?? "");
+      setWslUser(initialTarget.user ?? "");
+      return;
+    }
+    setManualDockerContainer(initialTarget.container);
+  }, [availableKinds, initialTarget, open, preserveDraftOnOpen]);
 
   const refreshDockerContainers = useCallback(
     ({ clearContainersOnError = true }: { clearContainersOnError?: boolean } = {}) => {

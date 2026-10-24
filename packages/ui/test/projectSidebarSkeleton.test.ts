@@ -128,7 +128,7 @@ test("T-SB1: 顶层新建裸调用 + 三参 start + grouped 分组继承", () =>
   assert.match(index, /\.\.\.\(hostId \? \{ hostId \} : \{\}\)/, "hostId 只在有值时透传");
 });
 
-test("T-SB1: hostId 消费闸门——DTO/透传/拒绝提示三段在位", () => {
+test("T-SB1: hostId 消费链——DTO/透传/远端项目路由三段在位", () => {
   assert.match(
     readUi("app-shell", "types.ts"),
     /hostId\?: string;/,
@@ -140,15 +140,52 @@ test("T-SB1: hostId 消费闸门——DTO/透传/拒绝提示三段在位", () =
     "项目行对象展开必须天然透传 hostId",
   );
   const actions = readUi("root", "useRootWorkspaceActions.ts");
-  assert.match(actions, /requestedHostId !== "local"/, "非 local hostId 必须在动作边界拒绝");
-  assert.match(actions, /project\.remote-host-create-unsupported/, "拒绝必须带专属提示键");
+  assert.match(actions, /requestedHostId !== "local"/, "非 local hostId 必须走独立路由分支");
+  assert.match(actions, /prepareSession\(\{/, "远端建任务必须先由所属 Host 解析目录");
+  assert.match(
+    actions,
+    /openRemoteProjectWorkspace\(\{/,
+    "远端目录必须经 workspace admission 打开",
+  );
+  assert.doesNotMatch(
+    actions,
+    /project\.remote-host-create-unsupported/,
+    "远端建任务不能再一律拒绝",
+  );
   for (const locale of ["zh-CN", "en-US"]) {
-    assert.match(
-      readUi("i18n", "locales", `${locale}.ts`),
-      /"project\.remote-host-create-unsupported":/,
-      `${locale} 必须登记拒绝提示文案`,
-    );
+    const source = readUi("i18n", "locales", `${locale}.ts`);
+    for (const key of [
+      "project.remote-project-required",
+      "project.remote-host-create-unavailable",
+    ]) {
+      assert.ok(source.includes(`"${key}":`), `${locale} 必须登记 ${key} 文案`);
+    }
   }
+});
+
+test("T-SB1: 远端建任务复用 Host 已准备的 workspace identity（不按 transport target 重算）", () => {
+  const history = readUi("root", "useRemoteWorkspaceHistory.ts");
+  assert.match(
+    history,
+    /const canonicalPath = preparedWorkspaceIdentity\s*\? path\s*:/,
+    "已准备目录不能再次 realpath",
+  );
+  assert.match(
+    history,
+    /preparedWorkspaceIdentity \?\? buildRemoteWorkspaceIdentity/,
+    "stable identity 不得被 ssh/wsl/docker 形态覆盖",
+  );
+  const root = readUi("Root.tsx");
+  assert.match(
+    root,
+    /handleSelectPreparedRemoteProject\(sessionId, workspacePath, workspaceIdentity, isCurrent\)/,
+    "admission 必须把 Host identity 交给 prepared binder",
+  );
+  assert.match(
+    root,
+    /handleSelectRemoteProject=\{handleSelectRemoteProjectFromSidebar\}/,
+    "侧栏 identity 调用面与向导 purpose 调用面必须分派",
+  );
 });
 
 test("T-SB1: 独有面归宿——拖拽层在骨架内可断言，文件树滑层由骨架承接", () => {

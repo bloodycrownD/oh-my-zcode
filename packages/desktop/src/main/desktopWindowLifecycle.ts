@@ -6,6 +6,7 @@ import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { HostMessageTypes, InternalChannels, PlatformChannels, type Locale } from "@zcode/shared";
 import { createBrowserWindow } from "./desktopWindowChrome.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
+import type { RemoteAssetDirs } from "./desktopRuntimeEnv.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
 import { supportsNativeWindowsRoundedCorners } from "./desktopWindowChromeState.js";
@@ -58,6 +59,8 @@ export function createWindow(options: {
   initialDesktopZoomLevel?: number;
   initialWindowSize?: DesktopWindowSize;
   currentApplicationLocale?: () => Locale;
+  /** 窗口级远程资源目录；随 InitLocal 下发，设置页直接更新已登记设备时不必先发起连接。 */
+  remoteAssets?: RemoteAssetDirs;
   persistWindowSize?: (state: DesktopWindowSize) => Promise<void>;
   /** Main 模块初始化期已开始的异步环境采集；通常在 renderer dom-ready 前完成。 */
   runtimeProcessEnvPatchPromise?: Promise<Record<string, string>>;
@@ -186,6 +189,7 @@ export function createWindow(options: {
         ...(options.currentApplicationLocale
           ? { uiLocale: options.currentApplicationLocale() }
           : {}),
+        ...(options.remoteAssets ? { remoteAssets: options.remoteAssets } : {}),
         workspacePath: primaryWarmupTarget?.workspacePath,
         workspaceIdentity: primaryWarmupTarget?.workspaceIdentity,
         ...(options.agentWarmupTargets && options.agentWarmupTargets.length > 0

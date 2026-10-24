@@ -1,7 +1,8 @@
 // 照搬上游 v3.16.2 settings/SourceServerManagementPanel.tsx（1740L，backlog-sweep Step 9 / P9-3）。
 // omz 适配（逐条 deviation，缺一不可）：
-// ①面板不搬向导壳（拍板 A）：连接/安装主操作依赖 `onConnectProfile`/`onCreateConnection` prop，
-//   本批 SettingsPage 未接 Root 全局弹窗 → 这些按钮渲染为 disabled（不是死点），登记 T-QA2；
+// ①向导壳由 Root 提供：连接/安装主操作依赖 `onConnectProfile`/`onCreateConnection` prop，
+//   桌面 SettingsPage 已接 Root 全局弹窗；没有该 prop 的入口（如 Web 面）按钮保持 disabled；
+//   连接成功后 `onConnectProfile` 返回 management 快照，由面板 `run` 统一 applySnapshot。
 // ②`DesktopCommandIds.CheckForUpdates` 在 omz 不存在（本仓无桌面自更新链路）→
 //   `update-desktop` 分支降级为 toast 提示 `settings.source.controllerUpdateUnavailable`；
 // ③toast 变体 `source-server-update` → omz 等价 `update`；
@@ -31,8 +32,6 @@ import {
   Pencil,
   Plus,
   Server,
-  Box,
-  TerminalSquare,
   Copy,
   Trash2,
 } from "lucide-react";
@@ -56,6 +55,7 @@ import { useConfirmDialog } from "@/hooks/useConfirmDialog.js";
 import { useSourceServerManagementSnapshot } from "@/source-server-management/useSourceServerManagementSnapshot.js";
 import { useSourceServerOperationLogs } from "@/hooks/useSourceServerOperationLogs.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
+import { resolveRemoteConnectionProgressScope } from "@/source-server-management/sourceServerManagementPresentation.js";
 import { SourceServerMigrationReportPanel } from "@/source-server-management/SourceServerMigrationReportPanel.js";
 import {
   SourceServerLogList,
@@ -87,6 +87,7 @@ import {
 import { EditConnectionProfileDialog } from "@/remote-connection/EditConnectionProfileDialog.js";
 import {
   formatConnectionProfileTarget,
+  REMOTE_KIND_PRESENTATION,
   RemoteConnectionKindTag,
   RemoteConnectionStatusTag,
 } from "@/remote-connection/RemoteConnectionTags.js";
@@ -94,7 +95,7 @@ import type { WorkspaceTabState } from "@/store/tabStore.js";
 import { getWorkspaceSourceServerId } from "@/conversation-workspace-target/sourceIdentity.js";
 import { buildRemoteWorkspaceProjection } from "@/remote/remoteWorkspaceProjection.js";
 
-/** 需要走到 `onConnectProfile` 的主操作；拍板 A 下向导壳缺席时这些按钮禁用而不是静默无响应。 */
+/** 需要走到 `onConnectProfile` 的主操作；入口未提供向导时这些按钮显式禁用而不是静默无响应。 */
 const CONNECT_FAMILY_ACTIONS: ReadonlySet<string> = new Set(["connect", "retry", "install"]);
 
 function formatTimestamp(timestamp: number, locale: string): string {
@@ -176,9 +177,11 @@ export function SourceServerManagementPanel({
   targetSourceServerDetails?: boolean;
   onTargetSourceServerFocused?: () => void;
   onCreateConnection?: () => void;
-  /** 用户点击连接时交给 Root 的全局弹窗，以 preferredProfileId 直达第 4 步。 */
-  onConnectProfile?: (profileId: string) => Promise<void> | void;
-  /** 用户断开设备时交给 Root 的统一 RemoteWorkspaceController。 */
+  /** 用户点击连接时交给 Root 的全局弹窗：用已保存线路预填；resolve 的 management 快照由 run 回写。 */
+  onConnectProfile?: (
+    profileId: string,
+  ) => Promise<SourceServerManagementSnapshot | void> | SourceServerManagementSnapshot | void;
+  /** 用户断开设备时交给本机 Host 的 management 断开链（SettingsPage 直接接服务方法）。 */
   onDisconnectSource?: (sourceServerId: string) => Promise<void>;
   /** 「在侧边栏中显示」菜单项：返回工作区主界面（侧边栏设备分组所在处）。 */
   onShowInSidebar?: (sourceServerId: string) => void;
@@ -222,9 +225,6 @@ export function SourceServerManagementPanel({
   const [busyOperations, setBusyOperations] = useState<ReadonlyMap<string, readonly string[]>>(
     new Map(),
   );
-  const busyScopes = new Set([...busyOperations.values()].flat());
-  if (background?.sourceServerId) busyScopes.add(`source:${background.sourceServerId}`);
-  else if (background?.profileId) busyScopes.add(`profile:${background.profileId}`);
   const hasBusyScope = useCallback(
     (scope: string) => [...operationsRef.current.values()].some((scopes) => scopes.includes(scope)),
     [],
@@ -255,6 +255,15 @@ export function SourceServerManagementPanel({
   } = useSourceServerManagementSnapshot(management, {
     onError: (cause) => setError(getSourceServerManagementErrorMessage(cause, intl.formatMessage)),
   });
+  // 发布侧可能只带 target（新连接尚未落 Profile id）；按快照回填后，
+  // 后台连接才能定位到对应设备卡/连接行，并让该设备的操作按钮在连接期间保持禁用。
+  const backgroundScope = useMemo(
+    () => resolveRemoteConnectionProgressScope(background, snapshot),
+    [background, snapshot],
+  );
+  const busyScopes = new Set([...busyOperations.values()].flat());
+  if (backgroundScope.sourceServerId) busyScopes.add(`source:${backgroundScope.sourceServerId}`);
+  else if (backgroundScope.profileId) busyScopes.add(`profile:${backgroundScope.profileId}`);
   const focusedTargetRef = useRef<string | undefined>(undefined);
   const deviceCardsRef = useRef(new Map<string, HTMLElement>());
   useEffect(() => {
@@ -586,9 +595,8 @@ export function SourceServerManagementPanel({
       default:
         void run(
           `connect:${profile.profileId}`,
-          async () => {
-            await onConnectProfile?.(profile.profileId);
-          },
+          // 返回值是连接后的 management 快照；交给 run 统一 applySnapshot，不再另开回写通道。
+          async () => onConnectProfile?.(profile.profileId),
           [profileOperationScope(profile)],
         );
     }
@@ -743,8 +751,8 @@ export function SourceServerManagementPanel({
         ) : null}
       </div>
       {background &&
-      !servers.some((server) => server.sourceServerId === background.sourceServerId) &&
-      !unboundProfiles.some((profile) => profile.profileId === background.profileId) ? (
+      !servers.some((server) => server.sourceServerId === backgroundScope.sourceServerId) &&
+      !unboundProfiles.some((profile) => profile.profileId === backgroundScope.profileId) ? (
         <section
           data-unfinished-background-connection
           className="rounded-xl border border-card-border bg-card pt-3"
@@ -792,12 +800,10 @@ export function SourceServerManagementPanel({
             (profile) => stateByProfile.get(profile.profileId)?.state === "online",
           );
           const displayedProfile = currentProfile ?? preferredProfile;
-          const ConnectionIcon =
-            displayedProfile?.transport === "docker"
-              ? Box
-              : displayedProfile?.transport === "wsl"
-                ? TerminalSquare
-                : Server;
+          // 类型图标与标签共用同一份类型展示契约，避免设备卡再维护一套 kind → icon 映射。
+          const ConnectionIcon = displayedProfile
+            ? REMOTE_KIND_PRESENTATION[displayedProfile.transport].Icon
+            : Server;
           // 同一项目可能有多条历史（不同连接），保留最近一次，并按最近打开倒序展示。
           const latestProjectByKey = new Map<string, SourceServerWorkspaceHistoryEntry>();
           for (const project of device?.knownProjects ?? []) {
@@ -914,7 +920,7 @@ export function SourceServerManagementPanel({
               }}
               className="overflow-hidden rounded-xl border border-card-border bg-card focus-visible:outline-2 focus-visible:outline-ring"
             >
-              {background?.sourceServerId === server.sourceServerId ? (
+              {background && backgroundScope.sourceServerId === server.sourceServerId ? (
                 <RemoteConnectionMinimizedProgress {...background} />
               ) : null}
               <div className="flex min-w-0 flex-wrap items-center gap-3 px-4 py-4">
@@ -1151,9 +1157,7 @@ export function SourceServerManagementPanel({
                       onClick={() =>
                         void run(
                           `connect:${preferredProfile.profileId}`,
-                          async () => {
-                            await onConnectProfile?.(preferredProfile.profileId);
-                          },
+                          async () => onConnectProfile?.(preferredProfile.profileId),
                           [profileOperationScope(preferredProfile)],
                         )
                       }
@@ -1518,8 +1522,8 @@ export function SourceServerManagementPanel({
           <details
             open={
               background &&
-              !background.sourceServerId &&
-              unboundProfiles.some((profile) => profile.profileId === background.profileId)
+              !backgroundScope.sourceServerId &&
+              unboundProfiles.some((profile) => profile.profileId === backgroundScope.profileId)
                 ? true
                 : undefined
             }
@@ -1538,8 +1542,8 @@ export function SourceServerManagementPanel({
                 <div key={profile.profileId}>
                   {renderProfile(profile)}
                   {background &&
-                  !background.sourceServerId &&
-                  background.profileId === profile.profileId ? (
+                  !backgroundScope.sourceServerId &&
+                  backgroundScope.profileId === profile.profileId ? (
                     <RemoteConnectionMinimizedProgress {...background} />
                   ) : null}
                   {(logsByProfileId[profile.profileId]?.length ?? 0) > 0 ? (

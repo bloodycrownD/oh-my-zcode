@@ -1,7 +1,6 @@
 // 照搬上游 v3.16.2 lib/sourceServerUpdateAction.ts（53L，backlog-sweep Step 9 / P9-3）。
-// omz 缺口登记：management.updateSource 走 Host 时 resolveRelease 尚未注入（Step 7-8 已知
-// 缺口），因此本动作在真实 Host 上会落到 "release is unavailable" 错误面——面板把它按
-// 普通错误码展示，不做伪造成功。
+// 更新制品解析由 Host 注入的 sourceServerReleaseResolver 承担：上游不可达时抛
+// source-server-release-unavailable（面板映射为「无法确定更新」），不会伪造成功。
 import { SOURCE_SERVER_UPDATE_RUNNING_TASKS_ERROR_CODE } from "@zcode/shared";
 import type { SourceServerManagementSnapshot, SourceServerUpdateTarget } from "@zcode/shared";
 import type { ISourceServerManagementService } from "@zcode/services";

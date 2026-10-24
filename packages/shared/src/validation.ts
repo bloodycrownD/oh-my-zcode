@@ -160,6 +160,11 @@ export const hostInitLocalMessageSchema = z.object({
    * strip 未知键，漏加字段会被宿主侧静默丢弃（本协议唯一的 init-local 入口）。
    */
   uiLocale: nonEmptyStringSchema.optional(),
+  /**
+   * 窗口级远程资源目录（CDN/缓存/mock-cdn）。设置页「更新」不经过 ConnectRemoteWorkspace，
+   * 必须在初始化时拿到与 Main 相同的配置，否则 release resolver 只能报未知。
+   */
+  remoteAssets: remoteAssetDirsSchema.optional(),
   agentWarmupTargets: z.array(hostAgentWarmupTargetSchema).max(3).optional(),
   agentSpawnFallbackCwd: nonEmptyStringSchema.optional(),
   zcodeBuiltinProviderConfigFilePath: nonEmptyStringSchema,

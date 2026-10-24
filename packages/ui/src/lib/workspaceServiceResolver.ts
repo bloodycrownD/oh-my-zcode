@@ -1,5 +1,4 @@
 import type { IServiceAccessor } from "@zcode/services";
-import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 
 interface WorkspaceServiceTarget {
   workspacePath: string;
@@ -42,7 +41,7 @@ export function resolveWorkspaceRemoteSessionId<TServices>(
   );
 }
 
-export function isRemoteWorkspaceTarget(
+function isRemoteWorkspaceTarget(
   target: WorkspaceServiceTarget,
   resolvedRemoteSessionId?: string,
 ): boolean {
@@ -75,23 +74,4 @@ export function resolveWorkspaceServices(
     services: baseServices,
     isRemoteWorkspace,
   };
-}
-
-export function buildWorkspaceServiceLookup(
-  workspaceTabs: WorkspaceServiceTarget[],
-  baseServices: IServiceAccessor,
-  state: WorkspaceServiceResolverState,
-): Map<string, ResolvedWorkspaceServices> {
-  const lookup = new Map<string, ResolvedWorkspaceServices>();
-
-  for (const tab of workspaceTabs) {
-    const resolved = resolveWorkspaceServices(tab, baseServices, state);
-    if (!resolved) {
-      continue;
-    }
-
-    lookup.set(buildTaskWorkspaceKey(tab.workspacePath, tab.workspaceIdentity), resolved);
-  }
-
-  return lookup;
 }

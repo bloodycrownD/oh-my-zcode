@@ -6,7 +6,7 @@ import { logger } from "@/logger.js";
 import { WorkspaceSettingsLayer } from "@/root/WorkspaceSettingsLayer.js";
 import type { AppProps } from "@/app-shell/types.js";
 import type { RemoteConnectionLogEntry } from "@/hooks/useRemoteConnectionLogs.js";
-import type { RootProps } from "@/root/types.js";
+import type { RootProps, WorkspaceSettingsLayerProps } from "@/root/types.js";
 import type { IServiceAccessor } from "@zcode/services";
 
 const StableWorkspaceApp = memo(App);
@@ -28,6 +28,9 @@ interface RootWorkspaceContentProps {
   handleOpenWorkspace: AppProps["onOpenWorkspace"];
   handleOpenFolderFromWorkspaceMenu: AppProps["onOpenFolderFromWorkspaceMenu"];
   handleOpenRemoteWorkspace?: AppProps["onOpenRemoteWorkspace"];
+  /** 设备管理接线：SettingsPage 的设备面板回调必须来自 Root，不能自建连接链。 */
+  handleConnectRemoteProfile?: WorkspaceSettingsLayerProps["onConnectRemoteProfile"];
+  handleOpenRemoteDeviceProject?: WorkspaceSettingsLayerProps["onOpenRemoteDeviceProject"];
   handleCreateScratchWorkspace: AppProps["onCreateScratchWorkspace"];
   remoteConnectionInProgress?: AppProps["remoteConnectionInProgress"];
   remoteWorkspaceSessions: NonNullable<AppProps["remoteWorkspaceSessions"]>;
@@ -67,6 +70,8 @@ export function RootWorkspaceContent({
   handleOpenWorkspace,
   handleOpenFolderFromWorkspaceMenu,
   handleOpenRemoteWorkspace,
+  handleConnectRemoteProfile,
+  handleOpenRemoteDeviceProject,
   handleCreateScratchWorkspace,
   remoteConnectionInProgress,
   remoteWorkspaceSessions,
@@ -174,6 +179,9 @@ export function RootWorkspaceContent({
             onCreateTask={handleCreateTask}
             onOpenWorkspace={handleOpenWorkspace}
             allowOpenWorkspace={allowOpenWorkspace}
+            onOpenRemoteConnection={handleOpenRemoteWorkspace}
+            onConnectRemoteProfile={handleConnectRemoteProfile}
+            onOpenRemoteDeviceProject={handleOpenRemoteDeviceProject}
           />
         </ScopedErrorBoundary>
       ) : null}

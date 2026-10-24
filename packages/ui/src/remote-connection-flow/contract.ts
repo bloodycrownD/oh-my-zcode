@@ -28,9 +28,11 @@ export function normalizeRemoteConnectionWorkspacePurpose(
 
 /**
  * 同一连接流程的只读 UI 投影（backlog-sweep Step 9 / P9-3 组件级例外，上游 contract.ts:118-133）：
- * 不含凭据、不保存连接事实。本仓向导壳未搬（拍板 A），故 Provider 无生产挂载点——
- * `useRemoteConnectionProgress()` 恒返回 null，`SourceServerManagementPanel` 的
- * 「未完成连接」横幅因此不渲染；类型与最小 Provider/hook 保留，向导壳落地时直接复用。
+ * 不含凭据、不保存连接事实（`target` 发布前必须脱敏）。
+ * 接线（knip-wire-progress）：向导壳收起后台时经
+ * `useRemoteConnectionProgressPublisher` 发布真实 state，`RemoteConnectionProgressProvider`
+ * 挂在 RootInner 以同时覆盖向导与设备面板；`sourceServerId`/`profileId` 缺省时，
+ * `SourceServerManagementPanel` 按 `target` 从快照回填 scope。
  */
 export interface RemoteConnectionProgress {
   operationId: string;

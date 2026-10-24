@@ -415,7 +415,7 @@ test("T-VU4: UI 提交链全链形状守卫（transport/SessionPane/入口/回�
   assert.match(clientContext, /taskGroupId\?: string \| null/);
   const actions = read(uiSrc, "root", "useRootWorkspaceActions.ts");
   // 入口忽略面清零：projectId/taskGroupId 不再被入口丢弃。
-  assert.match(actions, /projectId: createProjectId/);
+  assert.match(actions, /projectId: targetProjectId/);
   assert.match(actions, /taskGroupId: createTaskGroupId/);
   const grouped = read(uiSrc, "project-sidebar", "TaskGroupedView.tsx");
   assert.match(grouped, /draftTaskGroupId/);

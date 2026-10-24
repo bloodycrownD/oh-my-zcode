@@ -5,7 +5,10 @@ import {
   APP_RUNTIME_PREFERENCES_CHANGED_BROADCAST_CHANNEL,
   DesktopCommandIds,
   appRuntimePreferencesChangedBroadcastPayloadSchema,
+  type ConnectionProfile,
+  type IPlatformService,
   type RemoteTarget,
+  type SourceServerManagementSnapshot,
 } from "@zcode/shared";
 import { TooltipProvider } from "@/components/ui/tooltip.js";
 import { Button } from "@/components/ui/button.js";
@@ -17,6 +20,7 @@ import { useTabPersistence } from "@/hooks/useTabPersistence.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SSHDialog } from "@/SSHDialog.js";
+import { RemoteConnectionProgressProvider } from "@/remote-connection-flow/ui/RemoteConnectionProgress.js";
 import { RemoteProjectPicker } from "@/project-sidebar/RemoteProjectPicker.js";
 import type { RemoteProjectHost } from "@/project-sidebar/contract.js";
 import { SettingsPage } from "@/SettingsPage.js";
@@ -31,7 +35,8 @@ import { StoreProvider, useZCodeStore } from "@/store/StoreProvider.js";
 import { setMcpStorePlatform } from "@/store/mcpStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { TabStoreProvider, useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
-import { isSettingsTab, isWorkspaceTab } from "@/store/tabStore.js";
+import { isSettingsTab, isWorkspaceTab, type WorkspaceTabState } from "@/store/tabStore.js";
+import { getWorkspaceSourceServerId } from "@/conversation-workspace-target/sourceIdentity.js";
 import { logger } from "@/logger.js";
 import { RootShell } from "@/root/RootShell.js";
 import { RootWorkspaceContent } from "@/root/RootWorkspaceContent.js";
@@ -49,7 +54,11 @@ import { useRootPlatformEffects } from "@/root/useRootPlatformEffects.js";
 import { useRootWorkspaceActions } from "@/root/useRootWorkspaceActions.js";
 import { useSourceServerUpdateNotifications } from "@/root/sourceServerUpdateNotifications.js";
 import { useBotBroadcastEffects } from "@/root/useBotBroadcastEffects.js";
-import { registerBaseWorkspaceServices } from "@/store/remoteWorkspaceSessionStore.js";
+import {
+  registerBaseWorkspaceServices,
+  useRemoteWorkspaceSessionStore,
+} from "@/store/remoteWorkspaceSessionStore.js";
+import { attachRemoteProjectWorkspace } from "@/project-sidebar/remote-navigation.js";
 import type { RootProps } from "@/root/types.js";
 import { DiffsWorkerPoolProvider } from "@/root/DiffsWorkerPoolProvider.js";
 
@@ -73,6 +82,52 @@ const DEFAULT_LUCIDE_STROKE_WIDTH = 1.5;
 interface RemoteConnectionOpenPreference {
   preferredKind?: RemoteTarget["kind"];
   preferredWslDistro?: string;
+  /** 设备管理「连接」入口：用已保存线路预填向导（不含 secret）。 */
+  initialTarget?: RemoteTarget;
+}
+
+/** 设备管理入口发起的向导只承担认证/安装，成功后把 management 快照交回面板的 run 通道。 */
+interface PendingDeviceIntent {
+  project?: { path: string; localWorkspacePath?: string };
+  resolve: (snapshot?: SourceServerManagementSnapshot) => void;
+  reject: (cause: unknown) => void;
+}
+
+/**
+ * 已保存 Profile 的 target 只做表单预填：剔除 credential ref，
+ * 凭据必须由用户在本次向导里重新提供，不能把历史 secret 引用带进新草稿。
+ */
+function toWizardTarget(target: ConnectionProfile["target"]): RemoteTarget {
+  switch (target.kind) {
+    case "ssh":
+      return {
+        kind: "ssh",
+        host: target.host,
+        ...(target.port != null ? { port: target.port } : {}),
+        username: target.username,
+        ...(target.sshConfigAlias ? { sshConfigAlias: target.sshConfigAlias } : {}),
+        ...(target.privateKeyPath ? { privateKeyPath: target.privateKeyPath } : {}),
+        ...(target.assetInstallMode ? { assetInstallMode: target.assetInstallMode } : {}),
+      };
+    case "wsl":
+      return {
+        kind: "wsl",
+        ...(target.distro ? { distro: target.distro } : {}),
+        ...(target.user ? { user: target.user } : {}),
+      };
+    case "docker":
+      return { kind: "docker", container: target.container };
+  }
+}
+
+/** Directory 缺可静默使用的凭据时抛出的公开错误码（sourceServerDirectory.resolveProfileTarget）。 */
+function isInteractiveCredentialsRequired(cause: unknown): boolean {
+  return Boolean(
+    cause &&
+    typeof cause === "object" &&
+    "code" in cause &&
+    (cause as { code?: unknown }).code === "credentials-required",
+  );
 }
 
 /**
@@ -102,7 +157,13 @@ export function Root(props: RootProps) {
                   <AssistantCodeCommentFeatureProvider
                     enabled={props.assistantCodeCommentCardsEnabled}
                   >
-                    <RootInner {...props} />
+                    {/*
+                     * 后台连接进度必须跨「向导」与「设置-设备面板」共享：RootInner 同时渲染
+                     * SSHDialog（发布方）和 SettingsPage（消费方），Provider 只能挂在它们的公共祖先。
+                     */}
+                    <RemoteConnectionProgressProvider>
+                      <RootInner {...props} />
+                    </RemoteConnectionProgressProvider>
                   </AssistantCodeCommentFeatureProvider>
                 </DiffsWorkerPoolProvider>
               </TabStoreProvider>
@@ -172,6 +233,8 @@ function RootInner({
   const [remoteConnectionDialogOpen, setRemoteConnectionDialogOpen] = useState(false);
   const [remoteConnectionOpenPreference, setRemoteConnectionOpenPreference] =
     useState<RemoteConnectionOpenPreference | null>(null);
+  // 设备管理面板发起的向导请求；连接成功后用它把 management 快照交回面板的 run 通道。
+  const pendingDeviceIntentRef = useRef<PendingDeviceIntent | null>(null);
   // Picker 真链（backlog-sweep Step 4）：选目录只进入项目创建，不建 tab。
   // stale-intent 守卫：epoch 自增使迟到的 selection 装配与旧 onClose 失效。
   const remoteProjectIntentEpoch = useRef(0);
@@ -409,6 +472,41 @@ function RootInner({
   const handleOpenDirectoryBrowser = useCallback(() => {
     setDirectoryBrowserOpen(true);
   }, []);
+  /**
+   * 远端项目建任务的 workspace admission（对照上游 Root.tsx:783-817）：目录与身份已由
+   * Host 侧 prepareSession 解析，这里只复用既有连接申请 logical attachment 并打开 tab。
+   * 连接/绑定失败直接抛错，由 Root 动作边界 toast，不降级到本机 workspace。
+   */
+  async function openPreparedRemoteProjectWorkspace(target: {
+    hostId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+    expectedMembershipId?: string;
+    projectId: string | null;
+  }): Promise<void> {
+    const workspaceIdentity = target.workspaceIdentity?.trim();
+    if (!workspaceIdentity) throw new Error("project.workspace-identity-required");
+    const remoteService = services.remoteProjectService;
+    if (!remoteService) throw new Error("remote-project.service-unavailable");
+    await attachRemoteProjectWorkspace({
+      hostId: target.hostId,
+      workspacePath: target.workspacePath,
+      workspaceIdentity,
+      ...(target.expectedMembershipId ? { expectedMembershipId: target.expectedMembershipId } : {}),
+      projectId: target.projectId,
+      ...(services.projectService ? { projectService: services.projectService } : {}),
+      remoteService,
+      findSession: (identity) => {
+        const state = useRemoteWorkspaceSessionStore.getState();
+        const sessionId = state.sessionIdByWorkspaceIdentity[identity];
+        return sessionId ? state.sessionsById[sessionId] : undefined;
+      },
+      connect: handleConnectRemote,
+      bind: (sessionId, workspacePath, isCurrent) =>
+        handleSelectPreparedRemoteProject(sessionId, workspacePath, workspaceIdentity, isCurrent),
+      cancel: handleCancelRemoteProject,
+    });
+  }
   const {
     setWorkspaceActionError,
     startDraftInWorkspace,
@@ -438,6 +536,7 @@ function RootInner({
     refreshProviderState,
     updateAppSettings,
     onOpenRemoteConnection: allowRemoteWorkspace ? handleOpenRemoteConnection : undefined,
+    openRemoteProjectWorkspace: openPreparedRemoteProjectWorkspace,
   });
   const handleRemoteWorkspaceActivated = useCallback(
     ({
@@ -461,6 +560,7 @@ function RootInner({
     restorePersistedSession,
     handleCancelRemoteProject,
     handleSelectRemoteProject,
+    handleSelectPreparedRemoteProject,
     handleConnectRemote,
     handleReconnectRemoteWorkspace,
     handleRemoteWorkspaceTabsClosed,
@@ -481,6 +581,43 @@ function RootInner({
     onWorkspaceActivated: handleRemoteWorkspaceActivated,
     onRemoteProjectIntent: handleRemoteProjectIntent,
   });
+
+  /**
+   * app-shell 侧栏既有调用面把 Host 已准备的 identity 透传到第四参（ProjectSidebarProps
+   * `preparedWorkspaceIdentity`），向导壳则传 purpose。这里按值分派：purpose 保持连接流程，
+   * identity 走已准备目录的 bind，避免 remote:server:* 被按 transport target 重算成 remote:ssh:*。
+   */
+  const handleSelectRemoteProjectFromSidebar = useCallback(
+    (
+      sessionId: string,
+      path: string,
+      localWorkspacePath?: string,
+      preparedWorkspaceIdentityOrPurpose?: string,
+      isCurrent?: () => boolean | Promise<boolean>,
+    ) => {
+      if (
+        preparedWorkspaceIdentityOrPurpose === "project" ||
+        preparedWorkspaceIdentityOrPurpose === "conversation"
+      ) {
+        return handleSelectRemoteProject(
+          sessionId,
+          path,
+          localWorkspacePath,
+          preparedWorkspaceIdentityOrPurpose,
+        );
+      }
+      if (preparedWorkspaceIdentityOrPurpose) {
+        return handleSelectPreparedRemoteProject(
+          sessionId,
+          path,
+          preparedWorkspaceIdentityOrPurpose,
+          isCurrent,
+        );
+      }
+      return handleSelectRemoteProject(sessionId, path, localWorkspacePath);
+    },
+    [handleSelectPreparedRemoteProject, handleSelectRemoteProject],
+  );
 
   useEffect(() => {
     // fileDisplay 默认不传 basePath 时需要落到“当前激活 workspace”。
@@ -674,14 +811,40 @@ function RootInner({
     );
   }, [isSettingsTabActive, workspaceShellPath]);
 
-  const handleRemoteConnectionDialogOpenChange = useCallback((open: boolean) => {
-    // 关闭向导即作废尚未落地的项目意图：迟到 readDirectory 不能重新弹出已关闭的项目表单。
-    if (!open) remoteProjectIntentEpoch.current++;
-    setRemoteConnectionDialogOpen(open);
-    if (!open) {
-      setRemoteConnectionOpenPreference(null);
-    }
+  const settlePendingDeviceIntent = useCallback((snapshot?: SourceServerManagementSnapshot) => {
+    const pending = pendingDeviceIntentRef.current;
+    pendingDeviceIntentRef.current = null;
+    pending?.resolve(snapshot);
   }, []);
+
+  /** 连接已建立但项目没落地时的回收：已经提交成 tab 的 session 不能拆。 */
+  const releaseUncommittedRemoteSession = useCallback(
+    async (sessionId: string) => {
+      const committed = tabStoreApi
+        .getState()
+        .tabs.some((tab) => isWorkspaceTab(tab) && tab.remoteSessionId === sessionId);
+      if (!committed) {
+        await handleCancelRemoteProject(sessionId).catch(() => undefined);
+      }
+    },
+    [handleCancelRemoteProject, tabStoreApi],
+  );
+
+  const handleRemoteConnectionDialogOpenChange = useCallback(
+    (open: boolean) => {
+      // 关闭向导即作废尚未落地的项目意图：迟到 readDirectory 不能重新弹出已关闭的项目表单。
+      if (!open) remoteProjectIntentEpoch.current++;
+      if (!open) {
+        // 用户没连就关掉向导时，面板按钮不能一直停在 busy；按当前快照收尾。
+        settlePendingDeviceIntent();
+      }
+      setRemoteConnectionDialogOpen(open);
+      if (!open) {
+        setRemoteConnectionOpenPreference(null);
+      }
+    },
+    [settlePendingDeviceIntent],
+  );
 
   // 项目流程关闭（取消或保存完成）统一释放向导 attachment：
   // epoch++ 让旧 intent 失效，同时换代重挂向导，避免下次打开落回已释放的目录步。
@@ -696,6 +859,218 @@ function RootInner({
       );
     }
   }, [handleCancelRemoteProject, handleRemoteConnectionDialogOpenChange, remoteProjectSelection]);
+
+  /**
+   * 用已保存线路打开向导，并把后续结果交给面板的 run 通道。
+   * 同一时刻只保留一个面板发起的向导；重复点击不同线路时先收尾上一个 promise。
+   */
+  const openDeviceWizard = useCallback(
+    (
+      profile: ConnectionProfile,
+      project?: { path: string; localWorkspacePath?: string },
+    ): Promise<SourceServerManagementSnapshot | void> => {
+      settlePendingDeviceIntent();
+      const completion = new Promise<SourceServerManagementSnapshot | void>((resolve, reject) => {
+        pendingDeviceIntentRef.current = {
+          ...(project ? { project } : {}),
+          resolve,
+          reject,
+        };
+      });
+      setRemoteConnectionOpenPreference({
+        initialTarget: toWizardTarget(profile.target),
+        preferredKind: profile.transport,
+      });
+      setRemoteConnectionDialogOpen(true);
+      return completion;
+    },
+    [settlePendingDeviceIntent],
+  );
+
+  /**
+   * 设备管理面板的「连接 / 重试 / 安装」入口：优先走 Host 管理链（已保存凭据/在线复用
+   * 时一步完成安装与重试，面板状态机直接投影进度）；只有需要交互凭据时才用预填向导接管。
+   * 拿不到 manager 或 profile 时 reject，不能静默返回让按钮假装成功。
+   */
+  const handleConnectRemoteProfile = useCallback(
+    async (profileId: string) => {
+      const management = services.sourceServerManagementService;
+      if (!management) {
+        throw Object.assign(new Error("Source server management service is unavailable"), {
+          code: "management-unavailable",
+        });
+      }
+      const snapshot = await management.getSnapshot();
+      const profile = snapshot.profiles.find(
+        (candidate) => candidate.profileId === profileId && candidate.lifecycleState !== "retired",
+      );
+      if (!profile) {
+        throw Object.assign(new Error(`Unknown Connection Profile: ${profileId}`), {
+          code: "profile-not-found",
+        });
+      }
+      try {
+        return await management.connectProfile(profileId);
+      } catch (error) {
+        // Directory.resolveProfileTarget 在没有可静默使用的凭据时抛 credentials-required；
+        // 这时才把连接交给向导，让用户补密码/口令。
+        if (!isInteractiveCredentialsRequired(error)) throw error;
+        return await openDeviceWizard(profile);
+      }
+    },
+    [openDeviceWizard, services.sourceServerManagementService],
+  );
+
+  /**
+   * 设备管理面板的「查看项目」入口：已打开的 tab 直接激活；设备在线时复用物理连接直接开 tab；
+   * 离线（可能需要交互凭据）时用该设备线路预填向导，连接成功后打开用户点击的项目路径。
+   */
+  const handleOpenRemoteDeviceProject = useCallback(
+    async (sourceServerId: string, path: string, profileId?: string) => {
+      const management = services.sourceServerManagementService;
+      if (!management) {
+        throw Object.assign(new Error("Source server management service is unavailable"), {
+          code: "management-unavailable",
+        });
+      }
+      const snapshot = await management.getSnapshot();
+      const existingTab = tabStoreApi.getState().tabs.find(
+        (tab): tab is WorkspaceTabState =>
+          isWorkspaceTab(tab) &&
+          Boolean(tab.remoteSessionId) &&
+          tab.workspacePath === path &&
+          getWorkspaceSourceServerId(tab, {
+            workspaceHistory: snapshot.workspaceHistory,
+          }) === sourceServerId,
+      );
+      if (existingTab) {
+        activateTabByPath(existingTab.workspacePath, {
+          workspaceIdentity: existingTab.workspaceIdentity,
+        });
+        return;
+      }
+
+      const server = snapshot.servers.find(
+        (candidate) => candidate.sourceServerId === sourceServerId,
+      );
+      const deviceProfiles = snapshot.profiles.filter(
+        (candidate) =>
+          candidate.sourceServerId === sourceServerId && candidate.lifecycleState !== "retired",
+      );
+      const profile =
+        (profileId
+          ? deviceProfiles.find((candidate) => candidate.profileId === profileId)
+          : undefined) ??
+        deviceProfiles.find((candidate) => candidate.profileId === server?.preferredProfileId) ??
+        deviceProfiles[0];
+      if (!profile) {
+        throw Object.assign(
+          new Error(`No active connection profile for source server: ${sourceServerId}`),
+          { code: "profile-not-found" },
+        );
+      }
+
+      // 设备已在线时直接复用 Host 物理连接创建 session：密码等凭据由 Manager 的在线连接保留，
+      // 再走向导会因表单没有 secret 而要求用户重复输入。
+      const deviceOnline = snapshot.states.some(
+        (state) => state.sourceServerId === sourceServerId && state.state === "online",
+      );
+      if (deviceOnline) {
+        const sessionId = await handleConnectRemote(toWizardTarget(profile.target));
+        try {
+          await handleSelectRemoteProject(
+            sessionId,
+            path,
+            localWorkspacePathForRemoteConnection,
+            "conversation",
+          );
+        } catch (error) {
+          await releaseUncommittedRemoteSession(sessionId);
+          throw error;
+        }
+        return;
+      }
+
+      await openDeviceWizard(profile, {
+        path,
+        ...(localWorkspacePathForRemoteConnection
+          ? { localWorkspacePath: localWorkspacePathForRemoteConnection }
+          : {}),
+      });
+    },
+    [
+      activateTabByPath,
+      handleConnectRemote,
+      handleSelectRemoteProject,
+      localWorkspacePathForRemoteConnection,
+      openDeviceWizard,
+      releaseUncommittedRemoteSession,
+      services.sourceServerManagementService,
+      tabStoreApi,
+    ],
+  );
+
+  /**
+   * 向导统一连接入口：普通连接成功后把 management 快照交回面板；设备管理发起的
+   * 「查看项目」则先收起向导，再按已连接的 session 直接打开目标路径。
+   */
+  const handleRemoteConnectionDialogConnect = useCallback(
+    async (
+      target: Parameters<IPlatformService["connectRemote"]>[0],
+      requestId?: string,
+      context?: Parameters<IPlatformService["connectRemote"]>[2],
+    ) => {
+      const sessionId = await handleConnectRemote(target, requestId, context);
+      const pending = pendingDeviceIntentRef.current;
+      if (!pending) {
+        return sessionId;
+      }
+      // 先摘掉 ref，后续收起向导触发的 onOpenChange 不能把本次结果再 settle 一次。
+      pendingDeviceIntentRef.current = null;
+      const project = pending.project;
+      if (!project) {
+        void services.sourceServerManagementService?.getSnapshot().then(
+          (snapshot) => pending.resolve(snapshot),
+          () => pending.resolve(undefined),
+        );
+        return sessionId;
+      }
+
+      void (async () => {
+        try {
+          // 让 SSHDialog 先完成自己的成功态提交，再收起并换代；否则它随后的
+          // applyOpenState(true) 会把刚关掉的向导重新拉起。
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 0);
+          });
+          handleRemoteConnectionDialogOpenChange(false);
+          setRemoteConnectionDialogEpoch((value) => value + 1);
+          await handleSelectRemoteProject(
+            sessionId,
+            project.path,
+            project.localWorkspacePath,
+            "conversation",
+          );
+          const snapshot = await services.sourceServerManagementService?.getSnapshot();
+          pending.resolve(snapshot);
+        } catch (error) {
+          logger.warn("[Root] 设备管理打开项目失败", { error });
+          // 只有尚未提交成 tab 的 session 才回收；已经建出的 tab 不能因后续刷新失败被拆掉。
+          await releaseUncommittedRemoteSession(sessionId);
+          // 连接成功但打开项目失败必须回到面板错误态，不能吞掉。
+          pending.reject(error);
+        }
+      })();
+      return sessionId;
+    },
+    [
+      handleConnectRemote,
+      handleRemoteConnectionDialogOpenChange,
+      handleSelectRemoteProject,
+      releaseUncommittedRemoteSession,
+      services.sourceServerManagementService,
+    ],
+  );
 
   const remoteConnectionDialog = allowRemoteWorkspace ? (
     <>
@@ -713,7 +1088,7 @@ function RootInner({
       ) : null}
       <SSHDialog
         key={remoteConnectionDialogEpoch}
-        onConnect={handleConnectRemote}
+        onConnect={handleRemoteConnectionDialogConnect}
         onSelectProject={handleSelectRemoteProject}
         workspacePurpose="project"
         onCancelSession={handleCancelRemoteProject}
@@ -726,6 +1101,7 @@ function RootInner({
         onFlowRequestIdChange={setRemoteConnectionRequestId}
         preferredKind={remoteConnectionOpenPreference?.preferredKind}
         preferredWslDistro={remoteConnectionOpenPreference?.preferredWslDistro}
+        initialTarget={remoteConnectionOpenPreference?.initialTarget}
         hideTriggerWhenClosed
       />
     </>
@@ -764,6 +1140,11 @@ function RootInner({
     onCreateTask: handleCreateTask,
     onOpenWorkspace: handleOpenWorkspace,
     allowOpenWorkspace,
+    // 设备管理接线（backlog-sweep 设备面板）：新建连接 / 连接线路 / 打开项目
+    // 都必须落到 Root 的同一份向导与 remote workspace 链，SettingsPage 不自建连接。
+    onOpenRemoteConnection: allowRemoteWorkspace ? () => handleOpenRemoteConnection() : undefined,
+    onConnectRemoteProfile: allowRemoteWorkspace ? handleConnectRemoteProfile : undefined,
+    onOpenRemoteDeviceProject: allowRemoteWorkspace ? handleOpenRemoteDeviceProject : undefined,
   };
 
   if (isStartupRenderBlocked) {
@@ -830,7 +1211,7 @@ function RootInner({
             activeWorkspacePath={activeWorkspacePath}
             isSettingsTabActive={isSettingsTabActive}
             handleConnectRemote={handleConnectRemote}
-            handleSelectRemoteProject={handleSelectRemoteProject}
+            handleSelectRemoteProject={handleSelectRemoteProjectFromSidebar}
             handleCancelRemoteProject={handleCancelRemoteProject}
             handleReconnectRemoteWorkspace={handleReconnectRemoteWorkspace}
             handleCreateTask={handleCreateTask}
@@ -840,6 +1221,12 @@ function RootInner({
             handleOpenFolderFromWorkspaceMenu={handleOpenFolderFromWorkspaceMenu}
             handleOpenRemoteWorkspace={
               allowRemoteWorkspace ? handleOpenRemoteConnection : undefined
+            }
+            handleConnectRemoteProfile={
+              allowRemoteWorkspace ? handleConnectRemoteProfile : undefined
+            }
+            handleOpenRemoteDeviceProject={
+              allowRemoteWorkspace ? handleOpenRemoteDeviceProject : undefined
             }
             handleCreateScratchWorkspace={handleCreateScratchWorkspace}
             remoteConnectionInProgress={remoteConnectionInProgress}

@@ -1,54 +1,6 @@
-// 照搬上游 v3.16.2 lib/sourceServerUpdateAction.ts（backlog-sweep Step 10 / P9-4 依赖）：
-// 更新动作与「强制更新」说明的唯一实现；提示 toast 与设备卡共用，避免两处 guard 分叉。
-import { SOURCE_SERVER_UPDATE_RUNNING_TASKS_ERROR_CODE } from "@zcode/shared";
-import type { SourceServerManagementSnapshot, SourceServerUpdateTarget } from "@zcode/shared";
-import type { ISourceServerManagementService } from "@zcode/services";
-
-function getErrorCode(error: unknown): string | undefined {
-  if (!error || typeof error !== "object" || !("code" in error)) return undefined;
-  return typeof error.code === "string" ? error.code : undefined;
-}
-
-export async function runSourceServerUpdate(options: {
-  management: ISourceServerManagementService;
-  profileId: string;
-  expectedTarget?: SourceServerUpdateTarget;
-  confirmForce: () => Promise<boolean>;
-}): Promise<SourceServerManagementSnapshot | null> {
-  try {
-    return await options.management.updateSource({
-      profileId: options.profileId,
-      ...(options.expectedTarget ? { expectedTarget: options.expectedTarget } : {}),
-      force: false,
-    });
-  } catch (error) {
-    if (getErrorCode(error) !== SOURCE_SERVER_UPDATE_RUNNING_TASKS_ERROR_CODE) {
-      throw error;
-    }
-    // Bug 原因：版本 required 过去直接等价为 force update，会绕过运行中 Task guard。
-    // 先受 guard 拒绝，再由用户明确确认中断，才能发送 force=true。
-    if (!(await options.confirmForce())) return null;
-    return await options.management.updateSource({
-      profileId: options.profileId,
-      ...(options.expectedTarget ? { expectedTarget: options.expectedTarget } : {}),
-      force: true,
-    });
-  }
-}
-
-/** guard 拒绝后读取 Host 的活动投影；旧远端不支持时明确告知清单不可用。 */
-export async function getSourceServerForceUpdateDescription(
-  management: ISourceServerManagementService,
-  profileId: string,
-  formatMessage: (id: string) => string,
-): Promise<string> {
-  const snapshot = await management.getSnapshot();
-  const tasks = snapshot.states.find((state) => state.profileId === profileId)?.runningTasks;
-  return (
-    formatMessage("settings.source.forceUpdateDescription") +
-    "\n\n" +
-    (tasks?.length
-      ? tasks.map((task) => `${task.sessionId} — ${task.workspacePath}`).join("\n")
-      : formatMessage("remote.runningTasksUnavailable"))
-  );
-}
+// 上游 v3.16.2 的 lib/ 路径锚点：更新动作的唯一实现由 source-server-management/ 承载（P9-3 面板先落地）。
+// 提示 toast 与设备卡必须共用同一份 guard 逻辑，本文件只重导出，避免两份实现的 force 分支漂移。
+export {
+  getSourceServerForceUpdateDescription,
+  runSourceServerUpdate,
+} from "@/source-server-management/sourceServerUpdateAction.js";

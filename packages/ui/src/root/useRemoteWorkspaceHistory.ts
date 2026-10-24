@@ -489,6 +489,7 @@ async function selectRemoteWorkspaceProjectFromDialog({
   canUseRemoteWorkspace,
   sessionId,
   path,
+  preparedWorkspaceIdentity,
   localWorkspacePath,
   loadingMessage,
   getRemoteWorkspaceSession,
@@ -508,10 +509,13 @@ async function selectRemoteWorkspaceProjectFromDialog({
   refreshTimelineTasks,
   workspacePurpose,
   onRemoteProjectIntent,
+  isCurrent,
 }: {
   canUseRemoteWorkspace: boolean;
   sessionId: string;
   path: string;
+  /** Host 已登记的稳定身份；准备过的项目目录不能再按 transport target 重算。 */
+  preparedWorkspaceIdentity?: string;
   localWorkspacePath?: string;
   loadingMessage: string;
   getRemoteWorkspaceSession: (sessionId: string) => RemoteWorkspaceSession | null;
@@ -553,10 +557,15 @@ async function selectRemoteWorkspaceProjectFromDialog({
   /** 未传或非 "project" 时走旧链（连上即开 tab）；"project" 在 bind 前转交 Root 的项目入口。 */
   workspacePurpose?: RemoteConnectionWorkspacePurpose;
   onRemoteProjectIntent?: (intent: RemoteWorkspaceProjectIntent) => void | Promise<void>;
+  isCurrent?: () => boolean | Promise<boolean>;
 }): Promise<void> {
   if (!canUseRemoteWorkspace) {
     throw new Error("Remote workspace is disabled in this mode");
   }
+  const assertCurrent = async () => {
+    if ((await isCurrent?.()) === false) throw new Error("project.navigation-cancelled");
+  };
+  await assertCurrent();
 
   const remoteSession = getRemoteWorkspaceSession(sessionId);
   if (!remoteSession) {
@@ -569,8 +578,14 @@ async function selectRemoteWorkspaceProjectFromDialog({
     throw new Error(`远程 workspace session 缺少连接目标: ${sessionId}`);
   }
 
-  const canonicalPath = await resolveRemoteWorkspaceCanonicalPath(sessionId, path);
-  const workspaceIdentity = buildRemoteWorkspaceIdentity(canonicalPath, remoteTarget);
+  // 已准备目录（远端建任务）已经把 Host 的 cwd 与 stable identity 一起交过来。
+  // 再走 realpath 或按 transport target 重算身份会把 remote:server:* 拆成 remote:ssh:*，
+  // 导致项目树/侧栏订阅与刚打开的 tab 落在两个 scope。
+  const canonicalPath = preparedWorkspaceIdentity
+    ? path
+    : await resolveRemoteWorkspaceCanonicalPath(sessionId, path);
+  const workspaceIdentity =
+    preparedWorkspaceIdentity ?? buildRemoteWorkspaceIdentity(canonicalPath, remoteTarget);
 
   // Picker 真链（backlog-sweep Step 4）：purpose==="project" 时在 bind 之前 return。
   // 这里不 addTab/activateTabByPath、不 bindRemoteWorkspaceSessionContext、不 commit 会话 mutation——
@@ -617,6 +632,7 @@ async function selectRemoteWorkspaceProjectFromDialog({
   // context 绑定回 main，再提交 connected 状态与 tab。df2db1df7a 把 provider 同步移到 main/host 时
   // 顺带删掉了这次 bind，导致新建连接后选的目录在手机端必然被 REMOTE_WORKSPACE_IDENTITY_MISMATCH 拒绝。
   // bind 失败时 fail-closed：回收 session 并把错误抛回连接弹窗，不留下 descriptor 与 tab 不一致的 session。
+  await assertCurrent();
   try {
     await bindRemoteWorkspaceSessionContext({
       sessionId,
@@ -1094,6 +1110,55 @@ export function useRemoteWorkspaceHistory({
     ],
   );
 
+  const handleSelectPreparedRemoteProject = useCallback(
+    async (
+      sessionId: string,
+      path: string,
+      preparedWorkspaceIdentity: string,
+      isCurrent?: () => boolean | Promise<boolean>,
+    ) => {
+      try {
+        await selectRemoteWorkspaceProjectFromDialog({
+          canUseRemoteWorkspace,
+          sessionId,
+          path,
+          preparedWorkspaceIdentity,
+          isCurrent,
+          loadingMessage: intl.formatMessage({ id: "common.loading" }),
+          getRemoteWorkspaceSession,
+          connectionTarget: pendingConnectionTargetsBySessionIdRef.current.get(sessionId),
+          getWorkspaceTabs: () => tabStoreApi.getState().tabs,
+          resolveRemoteWorkspaceCanonicalPath,
+          activateTabByPath,
+          handleCancelRemoteProject,
+          bindRemoteWorkspaceSessionContext,
+          commitRemoteWorkspaceSessionMutation,
+          getRemoteSessions: () => remoteWorkspaceSessionsRef.current,
+          bindRemoteWorkspacePath,
+          bindRemoteWorkspaceIdentity,
+          addTab,
+          onWorkspaceActivated,
+          refreshPinnedTasks: refreshRemotePinnedTasksForSession,
+          refreshTimelineTasks: refreshRemoteTimelineTasksForSession,
+        });
+      } finally {
+        pendingConnectionTargetsBySessionIdRef.current.delete(sessionId);
+      }
+    },
+    [
+      activateTabByPath,
+      addTab,
+      bindRemoteWorkspaceSessionContext,
+      tabStoreApi,
+      commitRemoteWorkspaceSessionMutation,
+      handleCancelRemoteProject,
+      intl,
+      onWorkspaceActivated,
+      resolveRemoteWorkspaceCanonicalPath,
+      canUseRemoteWorkspace,
+    ],
+  );
+
   const handleConnectRemote = useCallback(
     async (
       options: Parameters<IPlatformService["connectRemote"]>[0],
@@ -1495,6 +1560,7 @@ export function useRemoteWorkspaceHistory({
     restorePersistedSession,
     handleCancelRemoteProject,
     handleSelectRemoteProject,
+    handleSelectPreparedRemoteProject,
     handleConnectRemote,
     handleReconnectRemoteWorkspace,
     handleOpenRemoteWorkspaceFromHistory,

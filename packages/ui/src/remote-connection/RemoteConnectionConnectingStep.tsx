@@ -9,60 +9,19 @@ import {
   isRemoteConnectionLogScrolledToLatest,
   scrollRemoteConnectionLogsToLatestIfFollowing,
 } from "@/remote-connection/remoteConnectionLogScroll.js";
-import {
-  normalizeRemoteConnectionPhase,
-  REMOTE_CONNECTION_PHASES,
-} from "@/remote-connection/remoteOperationProgress.js";
+import { RemoteConnectionPhaseRail } from "@/remote-connection-flow/ui/RemoteConnectionPhaseRail.js";
+import { useRemoteConnectionPhaseLogs } from "@/remote-connection-flow/ui/useRemoteConnectionPhaseLogs.js";
 
-export type RemoteConnectionPhaseStatus = "pending" | "active" | "complete" | "failed";
-
-/**
- * 照搬上游 v3.16.2 remote-connection/RemoteConnectionConnectingStep.tsx:75-111 的
- * `resolveRemoteConnectionPhases`（backlog-sweep Step 9 / P9-3 例外的最小实现）。
- * 阶段清单与原始 phase 归并复用 `remoteOperationProgress.ts` 的唯一维护点，本函数只负责
- * 「渲染层日志流 → 四态阶段轨」的投影：日志 message 形如 `[source-server:<phase>] ...`。
- * 消费方：`remote-connection-flow/ui/RemoteConnectionProgress.tsx` 的最小化连接进度条。
- */
-export function resolveRemoteConnectionPhases(
-  logs: ReadonlyArray<Pick<RemoteConnectionLogEntry, "message" | "level">>,
-  options: { connectionReady?: boolean } = {},
-) {
-  let activeIndex = -1;
-  let failedIndex = -1;
-  for (const log of logs) {
-    const match = /^\[source-server:([^\]]+)\]/u.exec(log.message);
-    if (!match) continue;
-    const phaseIndex = REMOTE_CONNECTION_PHASES.findIndex(
-      ([key]) => key === normalizeRemoteConnectionPhase(match[1]!),
-    );
-    if (phaseIndex < 0) continue;
-    activeIndex = Math.max(activeIndex, phaseIndex);
-    if (log.level === "error") failedIndex = phaseIndex;
-  }
-  // 修复原因：成功连接后 publish-online 不是 Renderer 日志流的可靠终结事件，
-  // 仅按日志推断会出现顶部已连接但阶段轨永久停在握手中的状态。连接 session ready
-  // 是同一条连接流程的权威终态；没有错误阶段时用它完成最终阶段，不改变连接中的日志进度。
-  const connectionReady =
-    (options.connectionReady === true ||
-      logs.some((log) => log.message.startsWith("[source-server:publish-online]"))) &&
-    failedIndex < 0;
-  return REMOTE_CONNECTION_PHASES.map(([key, titleId], index) => ({
-    key,
-    titleId,
-    status: (failedIndex === index
-      ? "failed"
-      : connectionReady
-        ? "complete"
-        : index < activeIndex
-          ? "complete"
-          : index === activeIndex
-            ? "active"
-            : "pending") as RemoteConnectionPhaseStatus,
-  }));
-}
+// 阶段投影已收敛到 flow 层唯一维护点（knip-wire-progress）：向导阶段轨与后台最小化进度条共用，
+// 这里保留 re-export 以兼容既有消费方（sourceServerPanelShape.test.ts 从本文件导入）。
+export {
+  resolveRemoteConnectionPhases,
+  type RemoteConnectionPhaseStatus,
+} from "@/remote-connection-flow/ui/remoteConnectionPhases.js";
 
 export function RemoteConnectionConnectingStep({
   logs,
+  requestId,
   errorMessage,
   loading,
   onBack,
@@ -70,12 +29,15 @@ export function RemoteConnectionConnectingStep({
 }: {
   kind: RemoteTarget["kind"];
   logs: RemoteConnectionLogEntry[];
+  /** 本次连接尝试的 requestId；阶段轨据此从 runtime 原始事件取 phase 标记。 */
+  requestId?: string | null;
   errorMessage: string;
   loading: boolean;
   onBack: () => void;
   onRetry: () => void;
 }) {
   const { intl } = useZCodeIntl();
+  const { phaseLogs } = useRemoteConnectionPhaseLogs(requestId);
   const logContainerRef = useRef<HTMLDivElement | null>(null);
   const shouldFollowLatestLogRef = useRef(true);
   const latestLogId = logs.at(-1)?.id;
@@ -108,6 +70,8 @@ export function RemoteConnectionConnectingStep({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-6 h-full">
       <div className="flex flex-col flex-1 min-h-0 space-y-4">
+        {/* 阶段轨读 runtime 原始事件（保留 phase 标记），日志面板读展示用规范化日志；同一事件流。 */}
+        <RemoteConnectionPhaseRail logs={phaseLogs} />
         <div className="min-h-0 flex-1 flex flex-col rounded-xl bg-background border border-border">
           <div className="flex items-center justify-between border-b border-border px-4 py-3">
             <p className="text-ui-base font-medium text-foreground">

@@ -1,76 +1,15 @@
-// 照搬上游 v3.16.2 lib/sourceServerUpdatePreferences.ts（backlog-sweep Step 10 / P9-4 依赖）：
-// 「已提示」持久去重与「稍后」运行期偏好。上游把两者放同一 owner，面板挂载/卸载不清「稍后」。
-import { useSyncExternalStore } from "react";
+// 上游 v3.16.2 的 lib/ 路径锚点：偏好唯一 owner 由 source-server-management/ 承载（P9-3 面板先落地）。
+// Step 10 曾在本路径再建一份同形 singleton，导致设置面板的「稍后」写不进通知控制器读取的 store；
+// 这里只重导出同一实例与键函数，两个消费面共享「已提示」与「稍后」状态。
+// useDeferredSourceServerUpdates 不再从这里导出：面板已从 owner 模块直接消费，重复导出只会再制造一条分叉入口。
+import {
+  createSourceServerUpdatePreferences,
+  sourceServerUpdateKey,
+  sourceServerUpdatePreferences,
+} from "@/source-server-management/sourceServerUpdatePreferences.js";
 
-interface StorageLike {
-  getItem(key: string): string | null;
-  setItem(key: string, value: string): void;
-}
-const STORAGE_KEY = "zcode-source-update-notifications-v1";
-
-function browserStorage(): StorageLike | null {
-  try {
-    return typeof window === "undefined" ? null : window.localStorage;
-  } catch {
-    return null;
-  }
-}
-
-export function sourceServerUpdateKey(sourceServerId: string, version: string): string {
-  return JSON.stringify([sourceServerId, version]);
-}
-
-/** 持久去重只控制主动提示，不隐藏仍可操作的设备更新状态。 */
-export function createSourceServerUpdatePreferences(
-  storage: StorageLike | null = browserStorage(),
-) {
-  const seen = new Set<string>();
-  let deferred = new Set<string>();
-  const listeners = new Set<() => void>();
-  const read = () => {
-    try {
-      const keys: unknown = JSON.parse(storage?.getItem(STORAGE_KEY) ?? "[]");
-      if (Array.isArray(keys)) for (const key of keys) if (typeof key === "string") seen.add(key);
-    } catch {
-      // 偏好损坏或存储不可访问时，本次运行仍保留内存去重。
-    }
-  };
-  read();
-  return {
-    hasSeen(key: string) {
-      read();
-      return seen.has(key);
-    },
-    markSeen(key: string) {
-      read();
-      seen.add(key);
-      try {
-        storage?.setItem(STORAGE_KEY, JSON.stringify([...seen]));
-      } catch {
-        /* 存储失败不阻断更新操作。 */
-      }
-    },
-    getDeferred: () => deferred,
-    isDeferred: (key: string) => deferred.has(key),
-    defer(key: string) {
-      deferred = new Set(deferred).add(key);
-      for (const listener of listeners) listener();
-    },
-    subscribe(listener: () => void) {
-      listeners.add(listener);
-      return () => {
-        listeners.delete(listener);
-      };
-    },
-  };
-}
-
-// UI 偏好唯一 owner；面板挂载/卸载不会清除“稍后”，新运行只恢复持久去重。
-export const sourceServerUpdatePreferences = createSourceServerUpdatePreferences();
-export function useDeferredSourceServerUpdates(): ReadonlySet<string> {
-  return useSyncExternalStore(
-    sourceServerUpdatePreferences.subscribe,
-    sourceServerUpdatePreferences.getDeferred,
-    sourceServerUpdatePreferences.getDeferred,
-  );
-}
+export {
+  createSourceServerUpdatePreferences,
+  sourceServerUpdateKey,
+  sourceServerUpdatePreferences,
+};

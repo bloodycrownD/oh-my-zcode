@@ -271,5 +271,6 @@ export function formatProjectError(
   if (code === "remote-project.host-removed") return formatMessage({ id: "project.hostRemoved" });
   if (code === "project.connection-unavailable")
     return formatMessage({ id: "project.connectionUnavailable" });
+  if (code === "remote-project.host-limit") return formatMessage({ id: "project.hostLimit" });
   return String(cause);
 }

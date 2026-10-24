@@ -1711,6 +1711,12 @@ const enUS: Record<string, string> = {
     "The device cannot be removed because connection cleanup failed. Nothing was deleted.",
   "settings.source.error.source-server-remove-persist-failed":
     "The device is disconnected, but local records could not be fully deleted. Try again later.",
+  "settings.source.error.source-server-release-unavailable":
+    "Could not determine the available Source Server update (release metadata is unreachable). No update was started.",
+  "settings.source.error.profile-not-found":
+    "That saved connection no longer exists. Refresh the device list and try again.",
+  "settings.source.error.management-unavailable":
+    "Device management is unavailable in this window. Reopen Settings and try again.",
   "wsl.description":
     "Connect to the default distro, or choose a specific distro installed on this device.",
   "wsl.distro": "Distribution",
@@ -6807,6 +6813,8 @@ const enUS: Record<string, string> = {
   "project.connectAndBrowse": "Connect and choose folder",
   "project.hostRemoved": "This device was removed from the project list. Select a device again.",
   "project.connectionUnavailable": "This device is unavailable. Reconnect it in settings.",
+  "project.hostLimit":
+    "You've reached the remote device limit. Remove an existing device before adding another.",
   "project.addRemoteDevice": "Add remote device…",
   "project.deviceStatus.online": "Online",
   "project.deviceStatus.offline": "Offline",
@@ -6826,8 +6834,10 @@ const enUS: Record<string, string> = {
   "project.remoteDescription": "Choose folders on a connected computer",
   "project.localDescription": "Edit, run, and test files on your computer",
   "project.remote": "Remote",
-  "project.remote-host-create-unsupported":
-    "Remote devices cannot create tasks yet. Switch to a local project first.",
+  "project.remote-project-required":
+    "Choose a remote project before creating a task on a remote device.",
+  "project.remote-host-create-unavailable":
+    "Could not create a task on the remote device. Check that the device is connected and the project still exists.",
   "project.local": "Local",
   "project.type": "Project type",
   "project.create": "Create project",
@@ -7230,6 +7240,15 @@ const enUS: Record<string, string> = {
   "remote.minimized.directory": "Choose a directory on {device}",
   "remote.minimized.kind": "Continue choosing a device",
   "remote.minimized.settings": "Continue setting up the connection",
+  "remote.minimized.resume": "Click to resume the connection wizard",
+  "remote.minimized.connecting": "Connecting to {device}…",
+  "remote.minimized.failed": "Connection to {device} failed",
+  "remote.minimized.waiting": "Waiting for confirmation or information",
+  "remote.background.ready": "Connection complete",
+  "remote.background.continue": "Continue",
+  "remote.background.review": "View or resolve",
+  "remote.background.cancel": "Cancel connection",
+  "remote.connectionCancelled": "Cancelled",
   "remote.runningTasksUnavailable":
     "The device did not provide a task list. Forcing the update will interrupt running tasks.",
   "settings.remoteDevicesDescription":

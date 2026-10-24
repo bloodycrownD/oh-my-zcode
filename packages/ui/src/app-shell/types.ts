@@ -65,7 +65,7 @@ export interface CreateTaskOptions {
   taskGroupId?: string | null;
   /**
    * 任务归属设备（upstream-v316-fullsync P4 backlog Step 3）：本机 owner 缺省 `local` 可省；
-   * 远端建任务路由未落地前，非 local 在 Root 动作边界被拒绝并提示。
+   * 非 local 时 Root 把创建路由到该 Host 的项目目录（必须带 projectId），失败显式拒绝。
    */
   hostId?: string;
   /** 异步预填只能提交到解析 Skill 时的同一新任务目标。 */

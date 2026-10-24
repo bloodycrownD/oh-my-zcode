@@ -43,6 +43,7 @@ import {
   buildHostProcessEnv,
   hostModulePath,
   resolveBundledGlmBinaryPath,
+  type RemoteAssetDirs,
 } from "./desktopRuntimeEnv.js";
 import { buildHostE2ECoverageEnv } from "./e2eCoverage.js";
 
@@ -75,6 +76,8 @@ export interface HostInitMessage {
    * 缺席时回落现有 env/Intl 探测（旧载荷兼容）。
    */
   uiLocale?: string;
+  /** Main 解析后的窗口级远程资源目录；Host 的设置页更新/连接安装共用这一份配置。 */
+  remoteAssets?: RemoteAssetDirs;
   /** Main 解析后的 ZCode Built-in Provider Config 路径；Host/Services 不感知 Electron 安装布局。 */
   zcodeBuiltinProviderConfigFilePath: string;
   /** 上一路径无效（如显式 env 覆盖指向旧版本缓存）时的随包回落路径。 */

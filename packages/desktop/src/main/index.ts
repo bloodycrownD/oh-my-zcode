@@ -984,6 +984,8 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
       }),
     windowHostProcessMap,
     onHostProcessReady: (windowKey) => cuaPipFocusRouter.refreshWindow(windowKey),
+    // 与远端连接使用同一份解析结果：设置页更新已登记设备不依赖本窗口先发起连接。
+    remoteAssets: resolveRemoteAssetDirs({ locale: currentApplicationLocale }, hostProcessLocalEnv),
     spawnHostProcess: (win, label, initMessage) =>
       spawnHostProcess(
         win,

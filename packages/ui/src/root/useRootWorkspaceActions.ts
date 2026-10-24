@@ -1,5 +1,5 @@
 /* eslint-disable max-lines -- Root workspace action hook 集中编排项目、远程和 conversation 入口；合并期保持动作边界完整，后续按领域拆分。 */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import {
   type AppSettings,
   type IPlatformService,
@@ -88,6 +88,7 @@ export function useRootWorkspaceActions({
   openDirectoryBrowser,
 
   onOpenRemoteConnection,
+  openRemoteProjectWorkspace,
   workbenchGroupClientMode = "desktop-continuous",
 }: {
   intl: ReturnType<typeof import("@/i18n/IntlProvider.js").useZCodeIntl>["intl"];
@@ -104,8 +105,21 @@ export function useRootWorkspaceActions({
   refreshProviderState: () => Promise<void>;
   updateAppSettings: (patch: Partial<AppSettings>) => Promise<void>;
   onOpenRemoteConnection?: (preference?: OpenRemoteConnectionPreference) => void;
+  /** 远端项目任务创建的唯一 admission：目录由 Host 侧 prepareSession 解析，这里只申请/绑定 attachment。 */
+  openRemoteProjectWorkspace?: (target: {
+    hostId: string;
+    workspacePath: string;
+    workspaceIdentity?: string;
+    expectedMembershipId?: string;
+    projectId: string | null;
+  }) => Promise<void>;
   workbenchGroupClientMode?: ZCodeTaskClientMode;
 }) {
+  // Root 的远端装配依赖本 hook 返回的动作；点击执行时才读取最新实现，避免整个新建入口每轮失稳。
+  const remoteProjectOpener = useRef(openRemoteProjectWorkspace);
+  useLayoutEffect(() => {
+    remoteProjectOpener.current = openRemoteProjectWorkspace;
+  });
   const [workspaceActionError, setWorkspaceActionError] = useState<string | null>(null);
   const requestConfirmation = useConfirmDialog();
   const {
@@ -160,7 +174,8 @@ export function useRootWorkspaceActions({
   );
 
   const startNewTaskFromActiveWorkspace = useCallback(
-    (source: string, request?: CreateTaskRequest) => {
+    async (source: string, request?: CreateTaskRequest) => {
+      const openRemoteProjectWorkspace = remoteProjectOpener.current;
       const state = tabStoreApi.getState();
       const {
         activeWorkspacePath: currentActiveWorkspacePath,
@@ -172,6 +187,25 @@ export function useRootWorkspaceActions({
         workbenchGroupClientMode === "desktop-continuous" && workbenchGroupState.activeGroupId
           ? (workbenchGroupState.groups[workbenchGroupState.activeGroupId] ?? null)
           : null;
+      const createProjectId = typeof request === "string" ? undefined : request?.projectId;
+      const requestedHostId = typeof request === "string" ? undefined : request?.hostId;
+      // 设备归属：本机 owner（local 或缺省）保持原路径；非 local 必须带明确项目，
+      // 目录与身份由该 Host 解析，不能静默落到本机草稿。
+      const targetHostId =
+        requestedHostId && requestedHostId !== "local" ? requestedHostId : undefined;
+      if (targetHostId && !createProjectId) {
+        logger.warn(`[Root] ${source} rejected: remote project required`, targetHostId);
+        toast(intl.formatMessage({ id: "project.remote-project-required" }));
+        return;
+      }
+      if (targetHostId && workbenchGroupClientMode === "web-remote-replayable") {
+        logger.warn(
+          `[Root] ${source} rejected: remote project navigation unavailable`,
+          targetHostId,
+        );
+        toast(intl.formatMessage({ id: "project.remote-host-create-unavailable" }));
+        return;
+      }
       // 跨项目发起已保存工作流时，新任务必须落在工作流归属项目，而非活动项目
       // request 显式带 targetWorkspace 时采用它，
       // 否则惰性回退到 workbench 焦点解析，无 target 时行为与旧版逐字节一致。
@@ -197,48 +231,82 @@ export function useRootWorkspaceActions({
       ) {
         return;
       }
-      if (!newTaskTarget) {
-        logger.error(`[Root] ${source} failed: no active workspace`);
+
+      let targetWorkspacePath: string | null = null;
+      let targetWorkspaceIdentity: string | undefined;
+      let targetProjectId: string | null | undefined = createProjectId;
+      if (targetHostId) {
+        // 远端目录必须由所属 Host 准备：本机 Host 的 projectService 经现有连接路由到
+        // 目标 Host，返回附件已登记的稳定 workspaceIdentity；离线/缺项目都显式拒绝。
+        try {
+          const projectService = services.projectService;
+          if (!projectService) throw new Error("project.service-unavailable");
+          const remoteProjectId = createProjectId;
+          if (!remoteProjectId) throw new Error("project.remote-project-required");
+          const prepared = await projectService.prepareSession({
+            hostId: targetHostId,
+            projectId: remoteProjectId,
+          });
+          const workspaceIdentity = prepared.workspaceIdentity?.trim();
+          if (!workspaceIdentity) throw new Error("project.workspace-identity-required");
+          if (!openRemoteProjectWorkspace) throw new Error("project.remote-navigation-unavailable");
+          await openRemoteProjectWorkspace({
+            hostId: targetHostId,
+            workspacePath: prepared.workspacePath,
+            workspaceIdentity,
+            projectId: prepared.projectId,
+          });
+          targetWorkspacePath = prepared.workspacePath;
+          targetWorkspaceIdentity = workspaceIdentity;
+          targetProjectId = prepared.projectId;
+        } catch (error) {
+          logger.error(`[Root] ${source} failed to route remote task creation`, error);
+          setWorkspaceActionError(error instanceof Error ? error.message : String(error));
+          toast(intl.formatMessage({ id: "project.remote-host-create-unavailable" }));
+          return;
+        }
+      } else {
+        if (!newTaskTarget) {
+          logger.error(`[Root] ${source} failed: no active workspace`);
+          setWorkspaceActionError(intl.formatMessage({ id: "workspace.noActiveForNewTask" }));
+          return;
+        }
+
+        // 仅禁用按钮无法覆盖桌面菜单和快捷键；启动期失效 workspace
+        // 必须在动作边界再次校验，避免历史只读页被隐式切回可发送草稿态。
+        if (
+          isWorkspaceReadOnly(
+            state,
+            newTaskTarget.workspacePath,
+            newTaskTarget.workspaceIdentity ?? undefined,
+          )
+        ) {
+          return;
+        }
+
+        if (
+          !focusWorkspace(
+            newTaskTarget.workspacePath,
+            newTaskTarget.workspaceIdentity
+              ? { workspaceIdentity: newTaskTarget.workspaceIdentity }
+              : undefined,
+          )
+        ) {
+          addTab(
+            newTaskTarget.workspacePath,
+            newTaskTarget.workspaceIdentity
+              ? { workspaceIdentity: newTaskTarget.workspaceIdentity }
+              : undefined,
+          );
+        }
+        targetWorkspacePath = newTaskTarget.workspacePath;
+        targetWorkspaceIdentity = newTaskTarget.workspaceIdentity ?? undefined;
+      }
+
+      if (!targetWorkspacePath) {
+        logger.error(`[Root] ${source} failed: no task target`);
         setWorkspaceActionError(intl.formatMessage({ id: "workspace.noActiveForNewTask" }));
         return;
-      }
-
-      // 仅禁用按钮无法覆盖桌面菜单和快捷键；启动期失效 workspace
-      // 必须在动作边界再次校验，避免历史只读页被隐式切回可发送草稿态。
-      if (
-        isWorkspaceReadOnly(
-          state,
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity ?? undefined,
-        )
-      ) {
-        return;
-      }
-
-      // 设备归属闸门（backlog-sweep Step 3，对照上游 node 侧远端建任务路由）：
-      // 项目树/分组入口会带 hostId；本机 owner（local 或缺省）行为不变，
-      // 非 local 的远端建任务路由本轮未落地——拒绝并 toast，不能静默落到本机草稿。
-      const requestedHostId = typeof request === "string" ? undefined : request?.hostId;
-      if (requestedHostId && requestedHostId !== "local") {
-        logger.warn(`[Root] ${source} rejected: remote host create unsupported`, requestedHostId);
-        toast(intl.formatMessage({ id: "project.remote-host-create-unsupported" }));
-        return;
-      }
-
-      if (
-        !focusWorkspace(
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity
-            ? { workspaceIdentity: newTaskTarget.workspaceIdentity }
-            : undefined,
-        )
-      ) {
-        addTab(
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity
-            ? { workspaceIdentity: newTaskTarget.workspaceIdentity }
-            : undefined,
-        );
       }
 
       setWorkspaceActionError(null);
@@ -247,7 +315,6 @@ export function useRootWorkspaceActions({
         typeof request === "string" ? undefined : request?.groupedDraftPlacement;
       // 虚拟项目/分组归属意图（upstream-v316-fullsync P4.2）：项目树与分组入口携带的
       // 创建目标不再被入口忽略；首发时由 SessionPane 捕获并落 Host 归属。
-      const createProjectId = typeof request === "string" ? undefined : request?.projectId;
       const createTaskGroupId = typeof request === "string" ? undefined : request?.taskGroupId;
       const rawInitialPrompt = typeof request === "string" ? undefined : request?.initialPrompt;
       // Skill mention 后的尾空格决定光标落在 chip 之后；直接 trim 后再保存
@@ -255,24 +322,19 @@ export function useRootWorkspaceActions({
       const initialPrompt = rawInitialPrompt?.trim() ? rawInitialPrompt : undefined;
       const initialPromptMention =
         typeof request === "string" ? undefined : request?.initialPromptMention;
-      logger.info(`[Root] ${source}:`, newTaskTarget.workspacePath, provider ?? "default-provider");
+      logger.info(`[Root] ${source}:`, targetWorkspacePath, provider ?? "default-provider");
       // Cmd/Ctrl+N 是创建新的单 panel 草稿，不是在当前 workbench
       // group / paneLayout 中继续拆一个 draft；目标 workspace 取 focused pane。
       useWorkbenchGroupStore.getState().deactivateActiveGroup();
       usePaneLayoutStore.getState().resetToPrimaryPane();
       useZCodeSessionStore
         .getState()
-        .startDraft(
-          newTaskTarget.workspacePath,
-          provider,
-          newTaskTarget.workspaceIdentity ?? undefined,
-          {
-            groupedDraftPlacement,
-            ...(createProjectId !== undefined ? { projectId: createProjectId } : {}),
-            ...(createTaskGroupId !== undefined ? { taskGroupId: createTaskGroupId } : {}),
-            createSource: typeof request === "string" ? undefined : request?.createSource,
-          },
-        );
+        .startDraft(targetWorkspacePath, provider, targetWorkspaceIdentity, {
+          groupedDraftPlacement,
+          ...(targetProjectId !== undefined ? { projectId: targetProjectId } : {}),
+          ...(createTaskGroupId !== undefined ? { taskGroupId: createTaskGroupId } : {}),
+          createSource: typeof request === "string" ? undefined : request?.createSource,
+        });
       if (initialPrompt) {
         // insert request 被首个 composer 消费后会清空；如果随后因 pane/config
         // 切换 remount，新 composer 会从空的 __draft__ 恢复并覆盖预填。先写草稿事实源，
@@ -283,21 +345,21 @@ export function useRootWorkspaceActions({
         // 让 TaskGroupedView 在查看会话时也能渲染分组内草稿行。
         const composerClientNamespace = composerClientNamespaceValue;
         const draftProjectId =
-          createProjectId !== undefined
-            ? createProjectId
+          targetProjectId !== undefined
+            ? targetProjectId
             : (readComposerWorkspaceScope(
-                newTaskTarget.workspacePath,
-                newTaskTarget.workspaceIdentity ?? undefined,
+                targetWorkspacePath,
+                targetWorkspaceIdentity,
                 composerClientNamespace,
               )?.projectId ?? null);
         const draftScope = resolveComposerScope(
           draftProjectId,
-          newTaskTarget.workspaceIdentity ?? undefined,
+          targetWorkspaceIdentity,
           composerClientNamespace,
         );
         const savedRootDraft = readV4ComposerDraft(
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity ?? undefined,
+          targetWorkspacePath,
+          targetWorkspaceIdentity,
           V4_DRAFT_SCOPE_ROOT,
           draftScope,
         );
@@ -305,14 +367,10 @@ export function useRootWorkspaceActions({
           createTaskGroupId !== undefined
             ? createTaskGroupId
             : (savedRootDraft?.taskGroupId ?? null);
-        rememberComposerWorkspaceScope(
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity ?? undefined,
-          draftScope,
-        );
+        rememberComposerWorkspaceScope(targetWorkspacePath, targetWorkspaceIdentity, draftScope);
         persistV4ComposerDraft(
-          newTaskTarget.workspacePath,
-          newTaskTarget.workspaceIdentity ?? undefined,
+          targetWorkspacePath,
+          targetWorkspaceIdentity,
           V4_DRAFT_SCOPE_ROOT,
           {
             text: initialPrompt,
@@ -325,14 +383,21 @@ export function useRootWorkspaceActions({
         useZCodeSessionStore
           .getState()
           .requestComposerTextInsert(
-            newTaskTarget.workspacePath,
+            targetWorkspacePath,
             initialPrompt,
-            newTaskTarget.workspaceIdentity ?? undefined,
+            targetWorkspaceIdentity,
             initialPromptMention,
           );
       }
     },
-    [addTab, intl, tabStoreApi, workbenchGroupClientMode, composerClientNamespaceValue],
+    [
+      addTab,
+      intl,
+      services.projectService,
+      tabStoreApi,
+      workbenchGroupClientMode,
+      composerClientNamespaceValue,
+    ],
   );
 
   const handleSelectProject = useCallback(
@@ -519,7 +584,7 @@ export function useRootWorkspaceActions({
 
   const handleCreateTask = useCallback(
     (request?: CreateTaskRequest) => {
-      startNewTaskFromActiveWorkspace("sidebar new task", request);
+      return startNewTaskFromActiveWorkspace("sidebar new task", request);
     },
     [startNewTaskFromActiveWorkspace],
   );

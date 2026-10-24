@@ -15,6 +15,7 @@ import {
   runSourceServerUpdate,
 } from "@/lib/sourceServerUpdateAction.js";
 import {
+  createSourceServerUpdatePreferences,
   sourceServerUpdatePreferences,
   sourceServerUpdateKey,
 } from "@/lib/sourceServerUpdatePreferences.js";
@@ -28,8 +29,11 @@ import { logger } from "@/logger.js";
  */
 const SOURCE_SERVER_UPDATE_TOAST_VARIANT: NonNullable<ToastOptions["variant"]> = "update";
 
+/** 注入偏好的契约直接取自 store 工厂：设置面板与控制器必须共用同一 owner，避免另写结构类型后漂移。 */
+type SourceServerUpdatePreferences = ReturnType<typeof createSourceServerUpdatePreferences>;
+
 interface NotificationControllerOptions {
-  preferences?: Pick<typeof sourceServerUpdatePreferences, "hasSeen" | "markSeen">;
+  preferences?: Pick<SourceServerUpdatePreferences, "hasSeen" | "markSeen">;
   management: ISourceServerManagementService;
   formatMessage: (id: string, values?: Record<string, string | number>) => string;
   showToast: (message: string, options?: ToastOptions) => unknown;

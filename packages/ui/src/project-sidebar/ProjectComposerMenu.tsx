@@ -225,9 +225,11 @@ export function ProjectComposerMenu({
                         projectId: project.id,
                         hostId: project.hostId,
                       });
-                      // 同侧栏项目新建入口：由 Root/Host 解析主要目录。
+                      // 同侧栏项目新建入口：由 Root/Host 解析主要目录；远端项目必须带 hostId，
+                      // 否则会按本机项目解析并把草稿落回本机。
                       createProjectTask({
                         projectId: project.id,
+                        ...(project.hostId !== "local" ? { hostId: project.hostId } : {}),
                       });
                     }}
                   >

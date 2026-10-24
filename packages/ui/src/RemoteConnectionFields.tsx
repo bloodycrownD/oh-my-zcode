@@ -37,6 +37,7 @@ import { cn } from "@/components/lib/utils.js";
 import { Button } from "@/components/ui/button.js";
 import { Input } from "@/components/ui/input.js";
 import { RemoteConnectionHistoryInput } from "@/remote-connection/RemoteConnectionHistoryInput.js";
+import { RemoteConnectionKindTile } from "@/remote-connection/RemoteConnectionTags.js";
 import { buildSshConnectionHistorySuggestions } from "@/remote-connection/sshHistorySuggestions.js";
 import {
   Command,
@@ -337,6 +338,7 @@ export function RemoteConnectionFields({
                             setSshAliasPopoverOpen(false);
                           }}
                         >
+                          <RemoteConnectionKindTile kind="ssh" />
                           <span className="flex min-w-0 flex-1 flex-col text-left">
                             <span className="truncate">{aliasOption.alias}</span>
                             <span className="truncate text-ui-base text-foreground-subtle">
@@ -740,6 +742,7 @@ export function RemoteConnectionFields({
                               setDockerContainerPopoverOpen(false);
                             }}
                           >
+                            <RemoteConnectionKindTile kind="docker" />
                             <span className="min-w-0 flex-1 truncate">{container.name}</span>
                             <CheckIcon
                               className={cn(

@@ -60,12 +60,6 @@ function entryKeyOf(scope: WorkspaceSessionsIndexScope): string {
   });
 }
 
-export function buildWorkspaceSessionsIndexSourceKey(
-  scope: Pick<WorkspaceSessionsIndexScope, "workspacePath" | "workspaceIdentity" | "endpointKey">,
-): string {
-  return entryKeyOf(scope);
-}
-
 function toRegistryScope(scope: WorkspaceSessionsIndexScope): SessionsIndexScope {
   return {
     workspaceKey: workspaceKeyOf(scope),

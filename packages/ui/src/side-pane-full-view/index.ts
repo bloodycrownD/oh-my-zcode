@@ -18,5 +18,4 @@ export { useConversationPanePresentation } from "@/side-pane-full-view/conversat
 export {
   isFloatingPresentation,
   resolveSidePaneFullViewHostMode,
-  SIDE_PANE_FULL_VIEW_ENTER_STATE,
 } from "@/side-pane-full-view/model.js";

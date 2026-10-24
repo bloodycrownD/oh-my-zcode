@@ -14,7 +14,7 @@ export const SIDE_PANE_FULL_VIEW_ENTER_STATE: SidePaneFullViewState = {
   floating: "collapsed",
 };
 
-export const FLOATING_ANCHORS: readonly FloatingAnchor[] = [
+const FLOATING_ANCHORS: readonly FloatingAnchor[] = [
   "top-left",
   "top-right",
   "left-center",
@@ -25,9 +25,9 @@ export const FLOATING_ANCHORS: readonly FloatingAnchor[] = [
 ];
 
 export const DEFAULT_FLOATING_ANCHOR: FloatingAnchor = "bottom-right";
-export const FLOATING_MARGIN_PX = 16;
-export const FLOATING_WIDTH_PX = 560;
-export const FLOATING_EXPANDED_MAX_HEIGHT_PX = 640;
+const FLOATING_MARGIN_PX = 16;
+const FLOATING_WIDTH_PX = 560;
+const FLOATING_EXPANDED_MAX_HEIGHT_PX = 640;
 export const FLOATING_MINIMIZED_SIZE_PX = 48;
 /** 指针移动不足该距离时，⠿ 与圆形按钮按点击处理。 */
 export const FLOATING_DRAG_CLICK_THRESHOLD_PX = 4;
@@ -63,7 +63,7 @@ export interface FloatingRect {
   readonly height: number;
 }
 
-export interface FloatingSize {
+interface FloatingSize {
   readonly width: number;
   readonly height: number;
 }

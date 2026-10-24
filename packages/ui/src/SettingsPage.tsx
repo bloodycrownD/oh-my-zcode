@@ -14,12 +14,16 @@ import type {
   IntegratedTerminalShellOption,
   IntegratedTerminalShellSelection,
   Locale,
+  SourceServerManagementSnapshot,
   ZCodeInteractionBehavior,
 } from "@zcode/shared";
 import {
   TID_SETTINGS_BACK_BUTTON,
   TID_SETTINGS_PAGE,
   TID_SETTINGS_SECTION_NAV,
+  buildRemoteHostWorkspaceIdentity,
+  buildServerRemoteWorkspaceIdentity,
+  remoteHostIdFromWorkspaceIdentity,
   testId,
 } from "@zcode/shared";
 import { Button } from "@/components/ui/button.js";
@@ -40,6 +44,7 @@ import {
   consumePendingSettingsSourceServerDetails,
   consumePendingSettingsSourceServerId,
   resolveSettingsSection,
+  setPendingSettingsSectionIntent,
   shouldFallbackSettingsUsageTabToApp,
   writeLastSettingsSectionPreference,
   type SettingsModelProviderTarget,
@@ -47,6 +52,8 @@ import {
 
 import { ModelProviderSection } from "@/settings/ModelProviderSection.js";
 import { SourceServerManagementPanel } from "@/source-server-management/SourceServerManagementPanel.js";
+import { useSourceServerManagementSnapshot } from "@/source-server-management/useSourceServerManagementSnapshot.js";
+import { getWorkspaceSourceServerId } from "@/conversation-workspace-target/sourceIdentity.js";
 import { UsageStatsSection } from "@/settings/UsageStatsSection.js";
 import { SubagentsSection } from "@/settings/SubagentsSection.js";
 import { AutomationsSection } from "@/settings/AutomationsSection.js";
@@ -155,6 +162,9 @@ export function SettingsPage({
   onCreateTask,
 
   allowOpenWorkspace: _allowOpenWorkspace = true,
+  onOpenRemoteConnection,
+  onConnectRemoteProfile,
+  onOpenRemoteDeviceProject,
 }: {
   isDesktop?: boolean;
   isWindowsDesktop?: boolean;
@@ -165,6 +175,16 @@ export function SettingsPage({
   onCreateTask?: (request?: CreateTaskRequest) => void;
   onOpenWorkspace?: () => void;
   allowOpenWorkspace?: boolean;
+  /** 设备管理「新建连接」：打开 Root 的全局远程连接向导。 */
+  onOpenRemoteConnection?: () => void;
+  /** 设备管理「连接/重试/安装」：Root 用已保存线路预填向导，成功时回传 management 快照。 */
+  onConnectRemoteProfile?: (profileId: string) => Promise<SourceServerManagementSnapshot | void>;
+  /** 设备管理「查看项目」：Root 连接（或复用已打开 tab）后打开设备上的项目路径。 */
+  onOpenRemoteDeviceProject?: (
+    sourceServerId: string,
+    path: string,
+    profileId?: string,
+  ) => Promise<void>;
 }) {
   const { intl, localePreference, setLocalePreference } = useZCodeIntl();
   const { settingsSectionGroups, settingsSections } = useMemo(
@@ -255,6 +275,8 @@ export function SettingsPage({
   const activeWorkspacePath = useTabStore((state) => state.activeWorkspacePath);
   const tabs = useTabStore((state) => state.tabs);
   const workspaceTabs = useMemo(() => tabs.filter(isWorkspaceTab), [tabs]);
+  const activateTab = useTabStore((state) => state.activateTab);
+  const openSettingsTab = useTabStore((state) => state.openSettingsTab);
   // Settings 打开后 activeTab 会变成 settings，本地反查 activeTab 读 identity 会稳定丢失。
   // 这里改为读取 tabStore 维护的“最近激活 workspace identity”，让插件管理继续命中正确远端。
   const activeWorkspaceIdentity = useTabStore(
@@ -296,6 +318,55 @@ export function SettingsPage({
   const services = useServices();
   const localHostServices = useBaseWorkspaceServices();
   const { settings: sharedSettings, update: updateSharedSettings } = useSettings();
+  const deviceManagement = localHostServices.sourceServerManagementService;
+  // 「在侧边栏中显示」需要把 tab 归属回 Source Server（legacy alias 依赖 Directory 历史）；
+  // 与面板各自订阅同一 management 实例，避免把快照再抬成跨层状态。
+  const { snapshot: deviceManagementSnapshot } =
+    useSourceServerManagementSnapshot(deviceManagement);
+  const handleShowDeviceInSidebar = useCallback(
+    (sourceServerId: string) => {
+      const target = workspaceTabs.find(
+        (tab) =>
+          getWorkspaceSourceServerId(tab, {
+            workspaceHistory: deviceManagementSnapshot?.workspaceHistory,
+          }) === sourceServerId,
+      );
+      // 面板只在存在对应 tab 时渲染该菜单项；这里的迟到点击直接忽略，不新开连接。
+      if (!target) return;
+      onBack?.();
+      activateTab(target.id);
+      requestAnimationFrame(() => {
+        // 侧栏项目行的身份是 Host 侧 `remote:server:<id>:<path>`，与 tab 的
+        // legacy/ssh identity 不同源，必须用同一构造函数比对而不是字符串猜测。
+        const hostId = remoteHostIdFromWorkspaceIdentity(
+          buildServerRemoteWorkspaceIdentity({ serverId: sourceServerId, workspacePath: "/" }),
+        );
+        const identity = hostId
+          ? buildRemoteHostWorkspaceIdentity(hostId, target.workspacePath)
+          : undefined;
+        const row = identity
+          ? Array.from(
+              document.querySelectorAll<HTMLElement>("[data-project-workspace-identity]"),
+            ).find((element) => element.dataset.projectWorkspaceIdentity === identity)
+          : undefined;
+        row?.scrollIntoView({ block: "center" });
+        row?.querySelector<HTMLElement>("button")?.focus({ preventScroll: true });
+      });
+    },
+    [activateTab, deviceManagementSnapshot?.workspaceHistory, onBack, workspaceTabs],
+  );
+  const handleShowDeviceUpdateDetails = useCallback(
+    (sourceServerId: string) => {
+      // 更新 toast 可能来自已卸载的面板：写一次性导航意图再拉起设置页，
+      // 已挂载页面由同一事件直接定位设备卡详情。
+      setPendingSettingsSectionIntent("remoteDevices", {
+        sourceServerId,
+        sourceServerDetails: true,
+      });
+      openSettingsTab();
+    },
+    [openSettingsTab],
+  );
   const nativeSearchEnhancementsEnabled = sharedSettings?.nativeSearchEnhancementsEnabled !== false;
   const toolSearchMode = sharedSettings?.toolSearchMode ?? "off";
   const askUserQuestionAutoResolutionEnabled =
@@ -1281,6 +1352,20 @@ export function SettingsPage({
                               workspaceTabs={workspaceTabs}
                               settings={sharedSettings}
                               onUpdateSettings={updateSharedSettings}
+                              onCreateConnection={onOpenRemoteConnection}
+                              onConnectProfile={onConnectRemoteProfile}
+                              onDisconnectSource={
+                                deviceManagement
+                                  ? async (sourceServerId) => {
+                                      // Host 负责断开物理连接并广播 state 事件；
+                                      // 面板 run 随后按新快照回写本页状态。
+                                      await deviceManagement.disconnectSource(sourceServerId);
+                                    }
+                                  : undefined
+                              }
+                              onOpenProject={onOpenRemoteDeviceProject}
+                              onShowInSidebar={handleShowDeviceInSidebar}
+                              onShowUpdateDetails={handleShowDeviceUpdateDetails}
                             />
                           ) : (
                             <p className="text-ui-sm text-remote-foreground-muted">

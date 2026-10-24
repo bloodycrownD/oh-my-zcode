@@ -138,9 +138,12 @@ export function createLegacySingleRootProjectService(
         };
       const project = (await catalog()).projects.find((item) => item.id === params.projectId);
       if (!project) throw new Error("project.not-found");
+      // 合成项目 ID 只存在于控制端的只读投影，远端持库 Host 没有对应 project 行；
+      // 把它带回创建请求会让远端 reserveCreatedTask 以 project.not-found 拒绝。
+      // 旧 Server 的单 root 归属由 cwd 与只读投影匹配，不依赖创建参数里的 projectId。
       return {
         workspacePath: project.roots[0]!.rootPath,
-        projectId: project.id,
+        projectId: null,
         additionalDirectories: [],
       };
     },
