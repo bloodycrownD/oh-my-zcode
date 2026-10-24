@@ -21,6 +21,7 @@ export type ShortcutCommandId =
   | "switchTheme"
   | "toggleTerminal"
   | "toggleSidePane"
+  | "toggleSidePaneFullView"
   | "previousConversation"
   | "nextConversation"
   | "navigateBack"
@@ -71,6 +72,12 @@ export const SHORTCUT_COMMANDS: readonly ShortcutCommandEntry[] = [
   { id: "switchTheme", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+l"] },
   { id: "toggleTerminal", channel: "window", defaultBindings: ["CmdOrCtrl+j"] },
   { id: "toggleSidePane", channel: "window", defaultBindings: ["CmdOrCtrl+Alt+b"] },
+  // Side Pane 完整视图（桌面端专属；Web 无处理器，设置页按 isDesktop 过滤展示）。
+  {
+    id: "toggleSidePaneFullView",
+    channel: "window",
+    defaultBindings: ["CmdOrCtrl+Shift+f"],
+  },
   { id: "previousConversation", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+["] },
   { id: "nextConversation", channel: "window", defaultBindings: ["CmdOrCtrl+Shift+]"] },
   { id: "navigateBack", channel: "window", defaultBindings: ["CmdOrCtrl+["] },

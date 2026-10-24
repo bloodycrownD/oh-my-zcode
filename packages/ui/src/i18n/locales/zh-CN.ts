@@ -1876,6 +1876,7 @@ const zhCN: Record<string, string> = {
   "settings.shortcuts.command.toggleSidebar": "切换左侧栏",
   "settings.shortcuts.command.switchTheme": "切换深色/浅色主题",
   "settings.shortcuts.command.toggleSidePane": "切换右侧面板",
+  "settings.shortcuts.command.toggleSidePaneFullView": "进入或退出完整视图",
   "settings.shortcuts.command.toggleTerminal": "切换终端",
   "settings.shortcuts.command.previousConversation": "上一个任务",
   "settings.shortcuts.command.nextConversation": "下一个任务",
