@@ -5,7 +5,7 @@ import {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   MagicContextConfigSchema,
   type MagicContextConfig,
-} from "@zcode/magic-context";
+} from "@zcode/magic-context/host/config/schema";
 
 const stringRecordSchema = z.record(z.string(), z.string());
 const unknownRecordSchema = z.record(z.string(), z.unknown());
@@ -69,6 +69,17 @@ const toolSearchSchema = z
  * 是**完整域**（内部 `.default()` 已补齐），因此 `config-merger` 的
  * `Object.assign` 整域覆盖语义成立——高层来源不会因为只写一个字段而丢掉低层的
  * 其余字段。
+ *
+ * FORK（mc-adapter-decoupling）：本文件在进程启动的**无条件**装载链上（bootstrap
+ * 的 `createConfig` / `loadFileConfig` 经 `@zcode/adapters/config` 静态引入），
+ * 因此这里改走包的**窄子路径** `@zcode/magic-context/host/config/schema`，而不是
+ * barrel `@zcode/magic-context`。barrel 的 `src/index.ts` 静态 re-export 了
+ * `storage-db` / `host/*` / `core/hooks/*` 等实现模块——经 barrel 引入时，即使
+ * `features.magicContext=false`（bootstrap 侧确实不 `import()` 工厂），进程也会
+ * 先把整棵 MC 实现图连同 `node:sqlite` 拉起来。窄子路径只传递 schema 自身与两个
+ * 纯函数依赖（`host/config/language`、`core/shared/prompt-surface`），且与 barrel
+ * 导出的是**同一个模块实例**（ESM 按 URL 缓存），对象/schema 身份不变。
+ * 回归守卫：`scripts/test-magic-context-config-lazy.mjs`。
  */
 const magicContextDomainSchema = MagicContextConfigSchema.optional();
 
@@ -348,6 +359,8 @@ export type ZCodeConfigFile = z.infer<typeof ZCodeConfigFileSchema>;
 // 另立一份声明。`adapters/config` 是 config.json 装载与 `ConfigPort` 读写的唯一入口，
 // 它的调用方（bootstrap 装配层、RPC handler）从这个名字取到的是与包内运行时
 // **同一个对象**——运行时 `instanceof` / schema 身份比较都成立。
+// FORK（mc-adapter-decoupling）：上面的 import 走窄子路径，与 barrel re-export
+// 的是同一个 dist 模块，故引用同一性不因绕开 barrel 而改变。
 export { DEFAULT_MAGIC_CONTEXT_CONFIG, MagicContextConfigSchema, type MagicContextConfig };
 
 type SkillCommandOverrideMap = Record<string, { enable?: boolean }>;

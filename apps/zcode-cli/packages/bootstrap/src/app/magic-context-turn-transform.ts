@@ -2,11 +2,16 @@
  * Step 19b — bootstrap 侧的 magic-context 装配。
  *
  * ============================================================================
- * 这里是全仓唯一 import `@zcode/magic-context` 运行时值的地方，而且只在
+ * 这里是 bootstrap 侧 magic-context 的运行时装配入口，而且只在
  * `features.magicContext` 打开时才 import（`createZCodeApp` 用动态 import 调本文件
- * 的工厂）。原因见 `core/src/runtime/helpers/magic-context-turn-transform.ts` 的
- * 文件头：用户显式把 flag 关掉时，CLI 启动不应该把整棵 magic-context 模块图
- * 拉进内存。
+ * 的工厂）。`@zcode/magic-context` 的静态 import 面全仓共 7 处：
+ * adapters/src/config/schema.ts（配置 schema，走窄子路径
+ * `@zcode/magic-context/host/config/schema`）、bootstrap/src/app 下的本文件与
+ * magic-context-{historian,usage-summary,prompt-section-zh-cn}.ts、
+ * bootstrap/src/zcode-protocol 下的 magic-context-{config,memories}.ts；
+ * core 的 ctx_* 工具与 bootstrap 的 /ctx-* 命令走动态 import。
+ * 关掉 flag 时本文件与它拉起的整棵运行时装配图不加载；原因见
+ * `core/src/runtime/helpers/magic-context-turn-transform.ts` 的文件头。
  * ============================================================================
  *
  * 本文件负责三件事：
