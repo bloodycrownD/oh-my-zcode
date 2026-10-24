@@ -48,7 +48,7 @@ export interface ServerRemoteDuplexConnectionOptions {
 // 上游 v3.16.2 同文件的 WS 形态 connectServerRemote（直连 URL 握手：token 鉴权 fetch
 // server-info/host capability + 裸 WebSocket upgrade + commitMembership）唯一消费方是
 // target.kind === "server" 的直连分支（上游 host/index:1938）；omz 的 RemoteTarget 联合
-// 不含 server kind，该直连面由既有 deployServer 旧链承载（共存政策，退役见 spec Step 19）。
+// 不含 server kind，该直连面由既有 deployServer 旧链承载（共存政策，退役见 spec Step 11）。
 // daemon 链的 connectServer 默认实现恒为 connectServerRemoteOverDuplex，WS 形态无消费方。
 
 function appendEndpointPath(basePath: string, endpointPath: string): string {

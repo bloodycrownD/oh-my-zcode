@@ -120,8 +120,8 @@ packages/ui/src/project-sidebar/useProjectFileTree.ts      # Q2 顺手补：100L
 - Step 14 — phase-u-backports — blocking: yes — qa: auto — U7：`remoteConnectionWizard.ts` `isInvalidPort`/`collectRemoteFormFieldErrors`/`findSourceServerUpgradeProfileId` 已随 Step 9/10 落地（本步不重复）；RemoteConnectionFields.tsx 只挑 autoFocusHost/focusCredentials hunk（`fieldErrors`/`focusField` 已随 Step 9 落地；上游重写版不整搬）；`useRemoteConnectionForm.ts` 上游 hunk 为 :240-261 的 loaded&&!error 守卫（spec 旧行号 211-221 已漂移；`preserveDraftOnOpen`/`savedSshConfigAlias`（上游 :46-56）已随 Step 9 落地）
 - Step 15 — phase-u-backports — blocking: yes — qa: auto — U8：localUsageEvidence.ts(164L,`~/.omz`)+**消费方接线（P1-8）**：`node.ts` 导入（**上游 :42 导入，本仓对应 import 区**）并切 `createHasExistingLocalTask({listIndexTasks: () => taskIndexRepo.listTaskMetas({includeDeleted:true}), hasAgentSessionRow, resolveLegacyTaskSessionsDir})`（对照上游 :1387-1388；omz 现为 `node.ts:1314-1316` 的 `listTaskMetas({}).length>0` 内联判断，替换后模块为真实消费）
 - Step 16 — phase-u-backports — blocking: yes — qa: auto — U9：http.ts:246-249 +isAbsolute 判定+isPathDriveQualified+盘符前置 404；新建 packages/server/test/+tsconfig.test.json+根 typecheck 工程表+test:v4-perf 登记
-- Step 17 — phase-u-backports — blocking: yes — qa: auto — U11：fileApplications.ts(321L) 整件+`editors.ts`/`openInEditor.ts`/platform 链接线（上游无 `openWithFileApplication.ts` 独立件，探索报告该名有误，以 fileApplications 321L 为准）+OpenSplitButton path+PreviewPane 序号守卫；纯逻辑选择器用例 T-UF6（平台差异按 omz 三平台口径，GUI 拉起真机归 T-QA6 观测）
-- Step 18 — phase-u-backports — blocking: yes — qa: auto — U12：unreadBadge.ts sum→max+overlay（36→~330L）+desktopWindowLifecycle 多窗口+desktopTray 红点+chromeState 常量导出；T-UF4 锁 sum→max 语义
+- Step 17 — phase-u-backports — blocking: yes — qa: auto — U11：fileApplications.ts(321L) 整件+`editors.ts`/`openInEditor.ts`/platform 链接线（上游无 `openWithFileApplication.ts` 独立件，探索报告该名有误，以 fileApplications 321L 为准）+OpenSplitButton path+PreviewPane 序号守卫；纯逻辑选择器用例 T-UF6（平台差异按 omz 三平台口径，GUI 拉起真机归 T-QA6 观测）；**CR 轮实现细节（终态）**：①平台登记表 `getEditorDefsForPlatform(platform)` 抽到**新文件** `packages/desktop/src/main/editorDefinitions.ts`（不 import electron，否则 node 测试无法注入三平台），`editors.ts` 只剩薄包装 `getEditorDefsForCurrentPlatform()`；②`partitionEditorDefs(defs)`（按 `"fileExtensions" in def` 分段）落 `fileApplications.ts`，`getBaseInstalledEditors` 复用；③文件应用条目带 `fileApplication: true`（`platform.ts` 的 `EditorInfo` 可选字段），`OpenSplitButton` 只对非文件应用持久化「上次选择的编辑器」（`lib/editorPreference.ts:shouldPersistEditorSelection`），否则 PDF 的 preview 会污染工作区头/预览头的 IDE 显示；④`GetInstalledEditors` 平台契约放宽为 request `string | undefined`（S23）；⑤`getEditorDefsForCurrentPlatform()` 语义扩大为 `[...IDE, ...getFileApplicationDefs()]`，**文件应用只经 filePath 附加**、基座过滤在函数外（S26）；**测试登记**：`packages/desktop/test/fileApplicationsSelector.test.ts`（T-UF6）+ `editorSelectionPersist.test.ts` + `inlineImageResult.test.ts`（desktop/B-2）均在 test:v4-perf 白名单
+- Step 18 — phase-u-backports — blocking: yes — qa: auto — U12：unreadBadge.ts sum→max+overlay（36→~330L）+desktopWindowLifecycle 多窗口+desktopTray 红点+chromeState 常量导出；T-UF4 锁 sum→max 语义；**CR 轮终局裁定（S8 / desktop/C-1，2026-10-23）**：数字徽章渲染器 `renderTaskbarBadgePixels` **生产零调用，仅上游测试兼容，接线待产品确认**——段首注释已写明，删除会连带删掉已通过的像素用例；生产面一律走纯红圆点（`renderTaskbarStatusDotPixels` / `renderAntialiasedStatusDotPixels`），若产品决定恢复数字角标，接线点是 `createWindowsTaskbarOverlayApplier` 的 `createBadgeImage`（当前只喂红点）；**同批其它终态**：任务栏角标描述走 locale（`taskbar.unreadTasks` 键 zh/en 对称，`formatDesktopMenuMessage(locale, id, values)` 由两个调用点各自传 locale，`description` 为**必填**入参）+徽章图缓存收敛**单槽**（同 label 只建一次、换 label 复用同一实例，原先按 label 存 10 张等价图）；托盘红点仅 Windows（S21）
 - Step 19 — phase-u-backports — blocking: yes — qa: auto — U10 side-pane 全屏压轴：side-pane-full-view 13 文件+8 大文件逐 hunk 融合（SessionPane/WorkspaceShellLayout/ConversationTimeline/V4WorkspaceChatArea/WorkbenchPane/AnimatedSidePanePanel/App/types）+useComposerToolbarFit 叠加在 P1 已落分支之上+conversationTimelineLiveTail+47+shortcutCommands+1+test-ids+14+i18n +1 键（toggleSidePaneFullView）
 - Step 20 — phase-pill-restore — blocking: yes — qa: auto — `mentionMarkdown.ts` 富反解析：产出 {category,label,value,markdown(=fullMatch 原文),data}；目的地白名单 plugin:///#sess_/./..// /盘符；inline 裸 token 不转（用户拍板）；代码块 fence 跳过策略
 - Step 21 — phase-pill-restore — blocking: yes — qa: auto — `LexicalChatInput` 富装填 API（**`setTextWithPluginMentions` 保留为富 API 的薄包装，`ConversationComposer.tsx:271` 调用面不动——P2-7**；对齐 replaceEditorText 段落切分+selectEnd）；替换 **5 个** setText 点：ChatPromptEditor.tsx:207（编辑历史）、ConversationComposer.tsx:330（队列撤回）、:222（草稿 editorState 回退）、:273（外部预填）、:1176（发送失败回滚正文——纳入，正文恢复同样需保胶囊）
@@ -171,6 +171,56 @@ packages/ui/src/project-sidebar/useProjectFileTree.ts      # Q2 顺手补：100L
 - T-QA5 — blocking: no — qa: manual_user — 服务商真机：三交互+重名提示+删除确认+窄栏折叠
 - T-QA6 — blocking: no — qa: manual_user — U5/U6/U12 观感：嵌套淡出/图片失败态/角标不翻倍+tray 红点
 
+### 用例宿主（K1 要求：T-* → 宿主文件 → 登记批次）
+
+| 用例 | 宿主文件 | 批次 |
+|---|---|---|
+| T-RP1/T-RP2/T-RP5/T-RP7 | `packages/services/test/remoteProjectsMigration.test.ts` | `node --import tsx --test` |
+| T-RP3/T-RP4/T-RP6 | `packages/services/test/remoteProjectsService.test.ts`（跨包 import `desktop/src/host/*`，S16 定案：拆纯函数不补 services test 工程） | 同上 |
+| T-SB1/T-SB2/T-SB3/T-SB4 | `packages/ui/test/projectSidebarP42.test.ts`、六个侧栏 tripwire 套件、`remoteProjectPickerChain.test.ts` | `tsx --test`（ui tsconfig） |
+| T-SM1/T-MG2 | `packages/services/test/sourceServerManagement.test.ts` 等 | `node --import tsx --test` |
+| T-MG3/T-MG4 | `packages/ui/test/sourceServerPanelShape.test.ts` 等 | `tsx --test` |
+| T-UF1 | `packages/ui/test/u5u6SurvivorsShape.test.ts`（`isInvalidPort` 断言在 Step 14 宿主，S22） | `tsx --test` |
+| T-UF2 | `packages/ui/test/localUsageEvidence.test.ts` | `tsx --test` |
+| T-UF3 | `packages/server/test/pathTraversal.test.ts`（新工程） | 根 typecheck 工程表 + `test:v4-perf` |
+| T-UF4 | `packages/desktop/test/unreadBadgeMaxSemantics.test.ts` | `node --import tsx --test` |
+| T-UF5 | `packages/ui/test/sidePaneFullView.test.ts` | `tsx --test` |
+| T-UF6 | `packages/desktop/test/fileApplicationsSelector.test.ts`（CR 轮新增 `editorSelectionPersist.test.ts`、`inlineImageResult.test.ts` 同批） | `node --import tsx --test` |
+| T-PR1/T-PR2/T-PR3 | `packages/ui/test/composerMentionPillParse.test.ts`、`composerMentionPillFill.test.ts`、`composerHeldQueueGuard.test.ts` | `node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test` |
+| T-PV1/T-PV2 | `packages/ui/test/modelProviderNameDialog.test.ts`、`modelProviderCardActions.test.ts`（S10：名称归一化纯逻辑宿主在 PV1 文件） | 同上（tsx 段不可用：`@/lib` 别名在 `tsx --test` 下解析失败，K4 因此不迁批次） |
+| T-GT1 | Step 26 聚合门禁（无独立宿主） | — |
+
+### CR 轮回写（S1-S29 终态，2026-10-23 收口）
+
+CR `code-review-loop` 判决 `fix-spec-ready` 后由 code-dev-loop 执行，26 条 must-fix（2 P1 + 24 P2）全部落地并经 verify（4 路 pass）+ cr-func（4 路 `func-ready: yes`）。deviations 终态：
+
+- **S1**（草稿 schema 新增 `promptContexts` 载体、`readDraft` 放宽为「正文或载体至少一样」、`promoteComposerDraft` 显式剥离）：accepted。旧客户端读纯上下文草稿会丢弃载体，随 Step 21 已在 CHANGELOG 待登记。
+- **S2 + S25**（`setTextWithPluginMentions` 由 plugin 专用变富装填别名；草稿恢复入口 `restorePersistedComposerDraftIntoInput` 同切富 API）：accepted，Step 21 的装填点计为 **5 个 setText + 1 个草稿恢复入口**。
+- **S3**（`updateComposerContent` 终态为「值 or 函数」双形态，跨 scope 写回由 `applyScopedDraftContentUpdate` 丢弃）：accepted，「签名收窄」措辞作废。
+- **S4**（T-PR2 源码字面量次数断言降级为 `>= 1` + 负向断言）：fixed。
+- **S5**（services 六值导出落 `node.ts` 而非 `index.ts`）：accepted。
+- **S6**（0008 幂等仅行级成立、`membership_id` 每次重跑换 UUID）：accepted，本 spec R6 不称「完全幂等」。
+- **S7**（`migrateConnectionHostsOnUpgrade` 不动 `tasks.host_id`）：accepted，收敛范围=projects/entries；**CR 轮补**：新增去重只软删「稳定侧已有同名未删项目」的 legacy 项目（保留行与任务可读），entries 侧硬删 legacy 重复行后改绑。
+- **S8**（数字徽章段生产零调用）：fixed（取注释保留），Step 18 已写。
+- **S9**（`sharedImageSrc`/`image.src` 无生产者，预埋兼容）：accepted，注释口径已与事实对齐。
+- **S10-S14**：accepted/fixed（见 cr-fix-spec 表）。
+- **S15**（`TaskIndexRepo` 调用点 11 处/9 文件）：accepted，spec 计数以 11 处为准。
+- **S16**（services 无 test 工程，desktop 测试跨包 import）：定案拆纯函数。
+- **S17**（0008 用 `ensureHost(INSERT OR IGNORE)+UPDATE`）：accepted，「幂等 upsert」。
+- **S18**（队列行复用气泡渲染器 + `previewText` prop）：fixed。
+- **S19**（host 上限裸错误码）：accepted，见 R-C。
+- **S20**（Step 13 额外改 `nodeReplToolDisplay.ts`）：accepted。
+- **S21**（托盘红点仅 Windows）：accepted。
+- **S22**（`isInvalidPort` 断言归 Step 14 宿主）：accepted。
+- **S23**（`GetInstalledEditors` 契约放宽）：accepted，Step 17 已写。
+- **S24**（`unreadBadge` 公共面改名/转导出）：accepted，与 knip 基线联动登记。
+- **S26**（`getEditorDefsForCurrentPlatform()` 语义扩大）：accepted，Step 17 已写。
+- **S27（CR 轮新增）**：会话选区 chip 的**跨来源去重**必须用内容键——恢复项（`parsePromptConversationSelections` 产出）没有 id，live 项一定有 id，只按身份键判重时「撤回后再选同一段」会同时出两枚 chip。终态：`conversationSelectionContextKey`（id 优先，身份/删除用）+ `conversationSelectionContentKey`（`path\0text`，跨来源判重用），`mergeContextList` 增加可选 `contentKeyOf`，仅会话选区传内容键（其余三类 id 两侧都稳定）。
+- **S28（CR 轮新增）**：`editorDefinitions.ts`（272L）为 G-1 抽出的 electron-free 平台登记表，fix-spec 只写「拆成 `getEditorDefsForPlatform`」，新文件为「可注入三平台断言」的必要依赖，Step 17 已登记。
+- **S29（CR 轮新增）**：`composerSubmitMachine` 的 `claim` 在组件里有真实消费（冻结提交面），`succeed` 只做「live 减 frozen」——组件侧该减法恒为 0（拿不到 ACK 时刻的 live），故组件**不再用 succeed 做分支**，成功清载体只由 revision 快照 + 逐项移除保护；reducer 的 subtract/union 语义仍由 T-PR2-8/9 单测锁死。
+
+**K 节执行状态**：K1（本 spec 回写 + R-A/R-B/R-C 入风险表 + 用例宿主表）= 已闭合；K2（CHANGELOG 逐条语句）= **待 Step 27 落笔**（R-C 已知问题句无条件写、R-A 发版说明只在 open Q1 取③时写）；K3（`host/index.ts:1701` 注释「spec Step 19」改 Step 11）= 已闭合；K4（`modelProviderNameDialog`/`modelProviderCardActions` 迁回 `tsx --test` 批）= **不可行**（`@/lib` 别名在 `tsx --test` 下解析失败，见 provider 实测），保持现批，登记为本仓测试基建限制；K5（调试残渣）= 已清（含根目录 `+m.length+`、`+x[2])`）。
+
 ## 风险与回滚方案
 
 | 风险 | 缓解 | 回滚 |
@@ -185,6 +235,9 @@ packages/ui/src/project-sidebar/useProjectFileTree.ts      # Q2 顺手补：100L
 | R8 provider 交互与上游同构文件成为同步热点 | 登记为 fork 差异点（交互载体非业务逻辑） | — |
 | R9 i18n 键重复插入破坏 --verify | 键级插入脚本幂等；P9 153 键先 diff 上游再插 | — |
 | R10 队列/编辑双链改动碰 v1.0.21 bug A/B 修复面 | T-PR2/T-PR3 tripwire + routing 套件复跑；Step 21 落地即红 composerHeldQueueGuard:42-54 → Step 22 blocking 联动 | 分步 revert |
+| R-A 空 settings 抢烧迁移账本 | 升级后**先**启动 web/server 入口（`packages/server/src/entry-http.ts:17` / `stdioServices.ts:38`），再启桌面端：0005 以空 settings 应用并记账 → desktop Worker 跳过 → 旧项目/连接入口**永久不迁移** | 三种解法（①非桌面入口自带 settings ②0005 seed 在「账本在但 seed 空」时补跑 ③接受并写发版说明）待拍板，本轮取默认①+风险登记；发版说明只在取③时写（见 CHANGELOG 条件句） | 不改迁移语义，可独立补丁 |
+| R-B 未读角标双源 | 关闭通知后未读数变化：`root/useRootPlatformEffects.ts:270-274`（无门控）与 `project-sidebar/ProjectDirectoryProvider.tsx:72-74`（带 `notificationEnabled` 门控）并存，U12 后角标在任务栏/托盘可见，与门控语义矛盾 | 单一 owner 待产品裁定；本轮只在 spec 登记，不进 CHANGELOG | — |
+| R-C host 上限裸错误码 | 接入第 21 台远端设备：`remote-projects/index.ts:41-50` 抛 `remote-project.host-limit`，全仓无 i18n 映射，UI 以原文串展示 | 后续批补 i18n 键；CHANGELOG 已知问题逐字登记 | — |
 
 回滚总案：每 phase 独立 commit 链（预计 30-40 commits），单 phase 可 revert；发版按用户指令走 omz-publish，含打包启动冒烟门禁（smoke:desktop+verify:bundle-imports 为 v1.0.21 后常驻）。
 

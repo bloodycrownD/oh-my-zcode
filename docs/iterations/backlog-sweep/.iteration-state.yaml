@@ -107,12 +107,26 @@ dev_dag:
       - [cr-func-composer, cr-func-desktop, cr-func-provider, cr-func-svc]
       - [gates-and-spec-writeback]
     node_status:
-      impl-composer: { status: pending, scope: "9 条：B-1,B-2,B-3,B-4,B-5,B-6,C-1,G-1,A-1" }
-      impl-desktop: { status: pending, scope: "7 条：B-1,B-2,B-3,C-1,F-1,G-1,H-1" }
-      impl-provider: { status: pending, scope: "5 条：B-1,B-2,B-3,A-1,G-1" }
-      impl-svc: { status: pending, scope: "5 条：B-1,C-1,F-1,F-2,G-1" }
-      register-tests: { status: pending, executor: main }
-      gates-and-spec-writeback: { status: pending, executor: main, note: "K节回写 spec + 风险表 + 门禁" }
+      impl-composer: { status: done, scope: "9 条：B-1,B-2,B-3,B-4,B-5,B-6,C-1,G-1,A-1", commits: "c5e20bcd,156e0ac1,93568113,9e84851d,fbb95320,a49ba4fe,23e583c7,6f93b1b1" }
+      impl-desktop: { status: done, scope: "7 条：B-1,B-2,B-3,C-1,F-1,G-1,H-1", commits: "5fb16992,3c923a9f,6e371dbd,22021db5,65cbcb67" }
+      impl-provider: { status: done, scope: "5 条：B-1,B-2,B-3,A-1,G-1", commits: "af91ee4a,5f6ca731,2fd266dc" }
+      impl-svc: { status: done, scope: "5 条：B-1,C-1,F-1,F-2,G-1", commits: "93db869f,707d4d25,1e232046" }
+      register-tests: { status: done, executor: main, commits: "845cf893", note: "editorSelectionPersist/inlineImageResult 登记进 test:v4-perf" }
+      verify-composer: { status: done, verdict: pass }
+      verify-desktop: { status: done, verdict: pass }
+      verify-provider: { status: done, verdict: pass }
+      verify-svc: { status: done, verdict: pass }
+      cr-func-composer: { status: done, verdict: "func-ready: yes" }
+      cr-func-desktop: { status: done, verdict: "func-ready: yes" }
+      cr-func-provider: { status: done, verdict: "func-ready: yes" }
+      cr-func-svc: { status: done, verdict: "func-ready: yes" }
+      gates-and-spec-writeback: { status: done, executor: main, commits: "87c99fba,14731c7c", note: "K1/K3/K5 闭合；K2 待 Step 27；K4 不可行已登记" }
+    gates:
+      typecheck_root: pass
+      typecheck_desktop: "169=基线，零新增"
+      lint: "149w/0e=基线"
+      oxfmt: "触碰面 51 文件 clean"
+      test_v4_perf: "47 批 / 743 pass / 0 fail（基线 712 + 本轮新增 31）"
     open_must_fix: []
   spec_check_loop:
     target: docs/iterations/backlog-sweep/cr-fix-spec.md
@@ -142,11 +156,14 @@ dev_dag:
     - "D18 Step 13 额外改 lib/nodeReplToolDisplay.ts 透传 src（必要依赖）；其 visit 门 P1 已由 b5b3afab 收口"
     - "D19 U12 托盘红点仅 Windows（omz 托盘本就 Windows-only）— fork 平台范围"
     - "D20 T-UF1 的 isInvalidPort 断言归 U7/Step 14 节点（跨节点覆盖边界）"
+    - "D21 CR 轮：会话选区跨来源去重改用内容键（conversationSelectionContentKey），身份键仍用于删除——恢复项无 id，只按身份键会出两枚 chip（cr-fix-spec S27）"
+    - "D22 CR 轮：editorDefinitions.ts(272L) 为 G-1 抽出的 electron-free 平台登记表（新文件，spec 未列；不拆则三平台无法在 node 测试注入）（cr-fix-spec S28）"
+    - "D23 CR 轮：composerSubmitMachine 的 succeed 只在单测消费，组件侧该减法恒 0，已删该死判定并对齐注释；claim/fail 仍真实接线（cr-fix-spec S29）"
+    - "D24 CR 轮：K4 不可行——modelProviderNameDialog/CardActions 留在 setup-ui-component-test 批（@/lib 别名在 tsx --test 下解析失败）"
   open_observations:
     - "P2 host/index.ts:1574/1641/1654 在 reusedConnectionTarget 命中时沿用入参 profile（上游同形态）— P9 收口"
-    - "P2 0008 迁移同名项目唯一索引风险（projects UNIQUE(host_id,name) WHERE deleted=0）— T-QA1 覆盖或补迁移用例"
     - "P2 membership_id 在 0008 会重新 randomUUID（Picker key 换代一次，启动期无在途请求）"
     - "P2 reconnectOnStartup 全仓零调用（pre-existing），开机自动重连不走 admission"
-    - "P2 Provider 重名文案硬编码中文 + 创建失败横幅不随输入清除 — 待 P9 或后续批"
-    - "P2 hasDraftToSubmit 不含 restored 载体（纯上下文撤回项在空正文时发送键不亮）"
+    - "P2 Provider 重命名侧静默吞错（InlineEditableProviderCard.tsx:531 .catch(() => undefined)）— CR 裁定只登记不修，待后续批"
+    - "P2 冲突库的 legacy 侧重复入口行被硬删（与既有 bindHost 同形；仅可能丢 cached_roots_json/legacy_workspace_json 缓存值）— T-QA1 观测"
     - "P2 services 无 tsconfig.test.json，T-RP3/T-RP4 仅运行期兜底 — Step 26 评估"

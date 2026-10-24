@@ -279,7 +279,7 @@
 
 ## Spec deviations
 
-> 状态汇总（**终态，无 open**）：S1-S7 / S9-S12 / S14-S18 / S20-S26 = `accepted`（按行内处置回写 spec 或注释口径）；S8 = `fixed`（终局取 (b) 注释保留，与 desktop/C-1 同源）；S13 = `fixed`（弹窗内 role=alert 为最终形态）；S19 = `accepted`（风险已登记 R-C，`remote-project.host-limit` 的 i18n 键留后续批）。
+> 状态汇总（**终态，无 open**）：S1-S7 / S9-S12 / S14-S18 / S20-S26 = `accepted`（按行内处置回写 spec 或注释口径）；S8 = `fixed`（终局取 (b) 注释保留，与 desktop/C-1 同源）；S13 = `fixed`（弹窗内 role=alert 为最终形态）；S19 = `accepted`（风险已登记 R-C，`remote-project.host-limit` 的 i18n 键留后续批）；**S27-S29 = 执行期新增并已闭合**（见文末「执行记录」）。
 > 已登记 deviation 均不阻塞本 fix-spec 执行；「待用户确认」的只有 open questions 里的产品向问题（Q1/Q2/Q3）。
 
 | # | 内容 | 证据 | 建议处置 |
@@ -362,3 +362,36 @@
 3. `host/index.ts:1701` 注释仍引「spec Step 19」（本轮 Step 19 = U10，deployServer 退役属 Step 11）→ 顺手改正（上一轮遗留）
 4. `test:v4-perf` 分组一致性：纯 node 测试（modelProviderNameDialog/CardActions）挂在带 `setup-ui-component-test.mjs` 的 UI 批末组，语义上更接近 `tsx --test` 批
 5. 调试残留已清（`+m.length+`/`Close'))hits.push(p)` 等工程垃圾已删）；`.reference/`、`.tools/` 属工具目录，保持 untracked
+
+---
+
+## 执行记录（code-dev-loop，2026-10-23）
+
+**判决 → 执行 → 复验**：本 fix-spec 经 spec-check-loop 三轮（r3 Go）后由 code-dev-loop 执行。DAG：`impl-composer / impl-desktop / impl-provider / impl-svc` 四路并行 → `register-tests`（主代理）→ `verify-{composer,desktop,provider,svc}` 四路独立复验 → `cr-func-{…}` 四路 readonly 功能小检 → `gates-and-spec-writeback`（主代理）。
+
+- **26 条 must-fix 全部落地**（2 P1 + 24 P2），24 个提交：`c5e20bcd 156e0ac1 93568113 9e84851d fbb95320 a49ba4fe 23e583c7 6f93b1b1 5fb16992 3c923a9f 6e371dbd 22021db5 65cbcb67 af91ee4a 5f6ca731 2fd266dc 93db869f 707d4d25 1e232046 845cf893 87c99fba 14731c7c`
+- **verify 四路全 pass**；**cr-func 四路 `func-ready: yes`**，开放 must-fix = 0
+- **门禁**：root typecheck 0 错；desktop typecheck 169 = 基线零新增；lint 149w/0e（=基线，全在 `.reference/` 与既有文件）；oxfmt 触碰面 51 文件 clean；`test:v4-perf` 47 批 / **743 pass / 0 fail**（基线 712 + 本轮新增 31）
+
+### 执行期新增 deviations（已闭合，同步进 spec）
+
+| # | 内容 | 处置 |
+|---|---|---|
+| S27 | 会话选区 chip 跨来源去重必须用**内容键**：恢复项（`parsePromptConversationSelections` 产出）没有 id，live 项一定有 id，只按身份键判重时「撤回后再选同一段」会同时出两枚 chip | `conversationSelectionContextKey`（id 优先，身份/删除用）+ 新增 `conversationSelectionContentKey`（`path\0text`，跨来源判重用）；`mergeContextList` 增可选 `contentKeyOf`，仅会话选区传内容键；用例补真实形态（live 带 id、restored 无 id）与「只给身份键时保持旧行为」双向断言 |
+| S28 | `editorDefinitions.ts`（272L）为 G-1 抽出的 electron-free 平台登记表（新文件，spec 未列） | 不拆则 `getEditorDefsForPlatform(platform)` 无法在 node 测试注入三平台；Step 17 已登记 |
+| S29 | `composerSubmitMachine` 的 `succeed` 组件侧恒为「live 减 frozen（=冻结面克隆）」= 0，是无保护力的死判定 | 删除该判定、注释改为真实保护（逐项移除 + live chip 从不写进载体 + revision 只覆盖正文），reducer subtract/union 语义仍由 T-PR2-8/9 锁死；claim/fail 仍真实接线 |
+
+### cr-func 复检项收口（P2 全清）
+
+- B-5 验收②「同选区只 1 条」原用例用两条**无 id**项代餐，对命名场景恒绿 → 已由 S27 根修 + 真实形态用例替换
+- `ConversationComposer` succeed 注释宣称「revision 保护 chip 新增」（revision 只在改正文时自增）→ 注释改真实口径
+- `desktopTray` 单槽缓存注释称「数量进无障碍/Tooltip 文案」（托盘侧只当布尔闸）→ 已改
+- `unreadBadge` 段首注释称「下面的字形常量」（实际在上方且配色与圆点渲染器共用）→ 已改
+- `createProviderNameDialog` 注释称「必填优先于任何服务端错误」（实际 `duplicate > empty > create`）→ 已改
+- `taskIndexRepo` 注释「每次启动都跑版本化迁移」→ 限定为「走到这里的业务连接（prepared 早退除外）」
+- svc 去重子查询缺 `host_id=stable` 限定也能全绿 → 非冲突用例补 `deleted=0` 断言
+- provider G-1 缺 `creating={creatingProvider}`/`setCreatingProvider` 接线断言 → 补用例
+
+### K 节状态
+
+K1（spec 回写 + R-A/R-B/R-C 入风险表 + 用例宿主表）= **已闭合**；K2（CHANGELOG 逐条语句）= **待 Step 27 落笔**（R-C 已知问题句无条件写；R-A 发版说明只在 open Q1 取③时写，Q1 仍未拍板）；K3（`host/index.ts:1701`/`:1464`、`serverRemoteConnection.ts:51` 的「spec Step 19」→ Step 11）= 已闭合；K4（两个 provider 测试迁回 `tsx --test` 批）= **不可行**（`@/lib` 别名在 `tsx --test` 下解析失败），保持现批并登记；K5（调试残渣）= 已清。

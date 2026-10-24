@@ -1461,7 +1461,7 @@ function ensureSourceServerDirectory(): SourceServerDirectory {
  * ConnectRemoteWorkspace 主链切换）；Profile 由 Directory.ensureProfile 建/复用，
  * 握手经 Directory.recordHandshake 落盘（membershipIntent 随 options 透传）。
  * Coexistence 政策：deployServer 旧链（setupRemoteConnection）保留共存零删除，
- * 退役拍板留 P9/发布轮（spec Step 19）。
+ * 退役拍板留 P9/发布轮（spec Step 11：本轮只删 server 侧 web 面路由，host 面保留为回滚阀）。
  *
  * Manager 三事件接线（照上游形态）：
  * - onDidChangeState → 投影为 recoverable close 事件（恢复进度 1/3..3/3 与预算终态）
@@ -1698,7 +1698,7 @@ async function createWindowRemoteConnectionHandle(params: {
   // 全量走 daemon 分支（SourceServerConnectionManager 恢复 owner + Directory Profile/握手
   // 落盘 + identity 绑定回执）。deployServer 旧链（下方 setupRemoteConnection 函数体）
   // 保留共存零删除：ZCODE_REMOTE_DEPLOY_SERVER_LEGACY=1 环境开关可回退（回滚预案），
-  // 退役清单归 P9/发布轮（spec Step 19）。
+  // 退役清单归 P9/发布轮（spec Step 11：本轮 host 面全留=回滚阀）。
   if (process.env.ZCODE_REMOTE_DEPLOY_SERVER_LEGACY !== "1") {
     return await connectManagedSourceServerHandle({
       target: params.target,
