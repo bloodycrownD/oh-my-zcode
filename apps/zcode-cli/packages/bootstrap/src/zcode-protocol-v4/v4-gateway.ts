@@ -1455,8 +1455,15 @@ export class ConversationV4Gateway {
     rawParams: unknown,
   ): Promise<V4SubscribeDispatchResult<ConversationTopicFrame>> {
     // viewReadyMs 的起点：CLI 侧「打开会话」这件事从这里开始（与 openPhases 同轴）。
-    // 终点取 ACK 组装完成处，因此它覆盖 restore + hydration + initial frame encode，
-    // 是 phase-0 基线里唯一能与「≤1s」直接对比的总量。
+    // 终点取 ACK 组装完成处，因此它覆盖 restore + hydration + initial frame encode。
+    //
+    // ⚠ 口径（cr-func 2026-10-25 矫正）：这是 **CLI 进程内**的视图就绪段，**不含**
+    // host 准备（openTiming.hostPrepareMs）、CLI spawn（openTiming.cliBootstrapMs）、
+    // RPC 往返、首帧传输与 renderer 的 apply/paint。冷开时它系统性偏短，**不能**拿它
+    // 判「用户体验 ≤1s」——验收基准是 renderer 侧的 uiViewReadyMs
+    // （conversationProjectionStore / conversationOpenObservability）。
+    // 各段还嵌套：viewReadyMs ⊇ initialFrameEncodeMs，viewReadyMs ⊃ mergeMs + rehydrateMs，
+    // 阶段 0 还 ⊃ runtime 激活本体。只可读，不可相加。
     const viewReadyStartedAt = performance.now();
     const params = v4ConversationSubscribeParamsSchema.parse(rawParams);
     const sessionId = parseConversationTopic(params.topic);
@@ -1722,15 +1729,29 @@ export class ConversationV4Gateway {
    * 为什么独立成 query 而不是 ACK 字段：view-only 下 runtime 激活发生在 view-ready
    * ACK **之后**，ACK 帧里不可能有该值（IS8；openPhases 明确不含 runtimeReadyMs）。
    *
-   * 只读语义：**不触发激活**，只回已发生的事实。激活的生产点在冷订阅（今天）与
-   * ACK 后的后台预激活 + send 类命令（phase-view-runtime-split），查询不参与其中。
-   * `runtimeReadyMs: null` = 本进程没观测到一次激活（≠ 0）。
+   * 只读语义：**不触发激活**，只回已发生的事实。`runtimeReadyMs` 的生产点是
+   * `ensureColdReadyPublisher`（量的是 `coldResume.ensureResumed` 本体），而它被所有
+   * 冷会话的读入口复用——订阅、rowsRange、turnDirectory、plans 等都会走到，不是
+   * 「只有冷订阅」；phase-view-runtime-split 之后改由 ACK 后后台预激活写入，读数口径不变。
+   *
+   * `runtimeReadyMs` 的口径钉死为 **「激活本体耗时」**（`ensureResumed` 的耗时），
+   * 不是「从 ACK 起算」：阶段 0 的激活在 ACK **之前**，按 ACK 起算会算出负数；
+   * 阶段 8 拆开后激活在 ACK **之后**，按 ACK 起算又会把等待时间算进去。只有「激活本体」
+   * 能跨阶段比较。`runtimeReadyMs: null` = 本进程没观测到一次激活（≠ 0）。
+   *
+   * `runtimeReady` 布尔的口径是 **「该会话的 runtime record 是否 live」**
+   * （`hasLiveConversation` 直判 record），**不是**「runtime 已就绪」：
+   * 视图可读 ≠ runtime 就绪，今天二者恰好同源而已。
+   * ⚠ Step 8 必须改成读 `runtimeReadyFlights` 的 settle 结果——拆出 view-only 之后，
+   * 只建了 view publisher、runtime 尚未激活的会话会让 record 仍然 live，本字段会误报 true。
    */
   async runtimeReady(rawParams: unknown): Promise<V4ConversationRuntimeReadyResult> {
     const params = v4ConversationRuntimeReadyParamsSchema.parse(rawParams);
     return v4ConversationRuntimeReadyResultSchema.parse({
       sessionId: params.sessionId,
       runtimeReadyMs: this.runtimeActivationMs.get(params.sessionId) ?? null,
+      // 语义 = 「会话 runtime record 是否 live」（见上：Step 8 要换成 runtimeReadyFlights
+      // 的 settle 结果，否则 view-only 会话会误报 true）。
       runtimeReady: this.hasLiveConversation(params.sessionId),
     });
   }
@@ -3007,6 +3028,11 @@ export class ConversationV4Gateway {
   /**
    * 冷恢复 READY 只在明确需要 activation 的入口创建；hydratePublisher 保持 projection-only。
    * 注册 promise 早于 activation，避免 record 提前入册后并发 command/query 越过恢复水位。
+   *
+   * 调用方**不止冷订阅**：`rowsRange`、`turnDirectory`、`plans` 以及其余冷会话读入口都走
+   * 同一条 `readyFlights → hasLiveConversation → ensureColdReadyPublisher` 三段式。
+   * 因此本函数也是 `runtimeReadyMs` 的生产点，而且「一次冷开」可以由任一读入口触发——
+   * 「激活的唯一生产点是冷订阅」这个说法不成立（cr-func 2026-10-25 矫正）。
    */
   private ensureColdReadyPublisher(
     sessionId: string,
@@ -3017,9 +3043,13 @@ export class ConversationV4Gateway {
     if (existingFlight) return existingFlight;
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
-      // runtime 激活耗时（conversation/runtimeReady 的唯一生产点）。今天激活与建投影
-      // 串行，故这里只量 ensureResumed；phase-view-runtime-split 把它移进后台预激活时
-      // 换的是写入位置，不是读数口径。
+      // runtime 激活耗时（conversation/runtimeReady 的唯一写入点）。
+      //
+      // 口径钉死为「激活本体耗时」= ensureResumed 的耗时，不是「从 ACK 起算」：
+      // 阶段 0 激活发生在 ACK 之前（按 ACK 起算会是负数），阶段 8 拆开后又发生在 ACK
+      // 之后（按 ACK 起算会掺入等待）。只有本体耗时能跨阶段比较。
+      // 今天激活与建投影串行，故这里只量 ensureResumed；phase-view-runtime-split 把它
+      // 移进后台预激活时，换的是写入位置（以及是否跨 ACK），不是读数口径。
       const activationStartedAt = performance.now();
       const persistedMessages = await this.coldResume.ensureResumed(
         sessionId,

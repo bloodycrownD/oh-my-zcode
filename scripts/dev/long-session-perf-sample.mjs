@@ -78,10 +78,14 @@ const USAGE = [
   "",
   "会话打开分段（session-open-latency）：",
   "",
+  "  验收基准是 renderer 侧总量 `renderer.uiViewReadyMs`（connect 入口 → snapshot 应用完成），",
+  "  要看首绘再叠加 `renderer.paintAfterApplyMs`。`openPhases.viewReadyMs` 只是 CLI 进程内",
+  "  一段（不含 host 准备 / CLI spawn / RPC 往返 / 渲染），且各段嵌套不可相加。",
+  "",
   "  本脚本同时采集 conversation subscribe ACK 的顶层键 `openPhases`",
   "  （viewReadyMs / mergeMs / rehydrateMs；manifestMs、materializeMs 要到 row manifest",
   "  与分页物化落地后才有值）与 `runtimeReady` query（runtimeReadyMs 不在 ACK 里：",
-  "  view-only 的激活发生在 ACK 之后）。两者来自页面窗口面",
+  "  view-only 的激活发生在 ACK 之后，口径为激活本体耗时）。两者来自页面窗口面",
   "  `window.__zcodeV4ConversationOpensE2E`，缺省取最近一次 ACK 命中的会话。",
   "  该面未挂载（旧 renderer）时只告警，不判失败。",
   "",
@@ -331,6 +335,12 @@ const PROBE_DUMP_EXPR = `(() => {
 //   - `runtimeReadyMs` 不在 ACK 里（view-only 的激活发生在 ACK 之后），只能事后走
 //     `v4/conversation/runtimeReady` query，窗口面会转给最近一次 ACK 命中的会话。
 // 该面是新增的：旧 renderer 未挂载时只告警，不判失败。
+//
+// 口径（cr-func 2026-10-25 矫正）：**验收基准是 renderer 侧总量 `uiViewReadyMs`**
+// （= connect 入口 → snapshot 应用完成；要覆盖首绘再叠加 `paintAfterApplyMs`）。
+// `openPhases.viewReadyMs` 只是 **CLI 进程内**的视图就绪段，不含 host 准备 / CLI spawn /
+// RPC 往返 / 首帧传输 / renderer apply+paint，冷开下系统性偏短；各段还嵌套不可相加
+// （viewReadyMs ⊇ initialFrameEncodeMs，viewReadyMs ⊃ mergeMs + rehydrateMs）。
 const OPEN_PROBE_CHECK_EXPR = `(() => {
   const probe = window.__zcodeV4ConversationOpensE2E;
   if (!probe) return JSON.stringify({ mounted: false });
@@ -590,13 +600,20 @@ function logOpenProbe(label, sample) {
     return;
   }
   const phases = latest.openPhases ? JSON.stringify(latest.openPhases) : "{}";
+  // 验收基准是 renderer 侧总量 uiViewReadyMs；openPhases.viewReadyMs 只是 CLI 进程内一段
+  // （不含 host 准备 / CLI spawn / RPC 往返 / 渲染），两者不可互换、也不可相减。
+  const rendererReady = latest.renderer
+    ? `uiViewReadyMs=${latest.renderer.uiViewReadyMs ?? "null"} paintAfterApplyMs=${
+        latest.renderer.paintAfterApplyMs ?? "null"
+      }`
+    : "uiViewReadyMs=unavailable";
   const runtime = sample.runtimeReady
     ? `runtimeReadyMs=${sample.runtimeReady.runtimeReadyMs ?? "null"} runtimeReady=${
         sample.runtimeReady.runtimeReady
       }`
     : `runtimeReady=unavailable${sample.runtimeReadyError ? `（${sample.runtimeReadyError}）` : ""}`;
   console.log(
-    `${TAG} ${label}: topic=${latest.topic} openPhases=${phases} ${runtime}` +
+    `${TAG} ${label}: topic=${latest.topic} ${rendererReady} openPhases=${phases} ${runtime}` +
       `（ACK 样本 ${sample.acks?.length ?? 0} 条）`,
   );
 }
@@ -789,13 +806,13 @@ async function main() {
         [
           `${TAG} 警告: 会话打开观测面 window.__zcodeV4ConversationOpensE2E 未挂载。`,
           "openPhases / runtimeReady 将是 null（本次报告仍会写出其余分段）。",
-          "该面由 packages/ui/src/v4/conversationOpenObservability.ts 提供，需 dev renderer 重启后生效。",
+          "该面由 packages/ui/src/v4/conversationOpenObservability.ts 提供，" +
+            "需 dev renderer 重启后生效。",
         ].join("\n"),
       );
     } else {
-      console.log(
-        `${TAG} 会话打开观测面已挂载，方法: ${(openProbeInfo.methods ?? []).join(", ")}`,
-      );
+      const mountedMethods = (openProbeInfo.methods ?? []).join(", ");
+      console.log(`${TAG} 会话打开观测面已挂载，方法: ${mountedMethods}`);
     }
     openProbeBeforeSampling = await readOpenProbe(cdp);
     logOpenProbe("采样前 openPhases", openProbeBeforeSampling);
@@ -844,8 +861,10 @@ async function main() {
       type: target.type ?? null,
     },
     segments,
-    // 会话打开分段（session-open-latency）：ACK 顶层 `openPhases`（viewReadyMs /
-    // mergeMs / rehydrateMs）+ `runtimeReady` query（ACK 里没有该值）。
+    // 会话打开分段（session-open-latency）：
+    //   - `renderer.uiViewReadyMs` / `renderer.paintAfterApplyMs` = **验收基准**（总量口径）；
+    //   - `openPhases`（ACK 顶层）= 分解项，其中 viewReadyMs 只是 CLI 进程内一段；
+    //   - `runtimeReady` query（ACK 里没有该值，口径为激活本体耗时）。
     // 采样前后各取一次：打开会话发生在采样之前，采样期间也可能发生重订阅/热切换。
     openProbe: {
       beforeSampling: openProbeBeforeSampling ?? null,

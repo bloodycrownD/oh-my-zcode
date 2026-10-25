@@ -23,6 +23,11 @@ import {
 import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
 import type { ConversationTransport } from "@/v4/transport.js";
+import {
+  isConversationOpenProbeDevEnabled,
+  recordConversationOpenRendererTiming,
+  unregisterConversationRuntimeReadyReader,
+} from "@/v4/conversationOpenObservability.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
 
 /**
@@ -158,6 +163,21 @@ export interface SessionOpenRendererTiming {
   initialFrameTransportMs?: number;
   rendererSnapshotApplyMs?: number;
   snapshotAppliedAt?: number;
+  /**
+   * **总量口径**：connect 入口 → snapshot 应用完成（renderer 单调时钟）。
+   *
+   * 它是「用户看到历史」那一刻的唯一 renderer 侧总量，也是验收基准：ACK 侧
+   * `openPhases.viewReadyMs` 只是 CLI 进程内一段，**不含** host 准备 / CLI spawn /
+   * RPC 往返 / 首帧传输 / 渲染，冷开下系统性偏短，不能拿它判 ≤1s。
+   * 各段嵌套不可相加（`viewReadyMs ⊇ initialFrameEncodeMs`，
+   * `viewReadyMs ⊃ mergeMs + rehydrateMs`）。
+   */
+  uiViewReadyMs?: number;
+  /**
+   * snapshot 应用完成 → 两个 `requestAnimationFrame` 后的首绘回调（近似首帧 paint）。
+   * 与 {@link uiViewReadyMs} 相加才是「到首绘」的体感总量；非浏览器环境缺席。
+   */
+  paintAfterApplyMs?: number;
 }
 
 /**
@@ -367,6 +387,11 @@ export class ConversationProjectionStore {
   private runtimeRecycleRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private runtimeRecycleRetryAttempt = 0;
   private sessionOpenRendererTiming: SessionOpenRendererTiming = {};
+  /**
+   * 本次 connect 的起点（单调时钟）。`uiViewReadyMs = snapshotAppliedAt - 本值`，
+   * 必须跨 connect 持久到首帧应用：applyFrame 与 connect 不在同一个栈里。
+   */
+  private sessionOpenConnectStartedAt: number | null = null;
   private initialSubscribeAckAt: number | null = null;
   private planQueryInFlight = false;
   private planQueryPending = false;
@@ -453,6 +478,37 @@ export class ConversationProjectionStore {
     return { ...this.sessionOpenRendererTiming };
   }
 
+  /** 把 renderer 侧分段回填到 dev 观测面（`__zcodeV4ConversationOpensE2E` 的 ACK 样本）。 */
+  private reportOpenRendererTiming(): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    recordConversationOpenRendererTiming(this.topic, this.sessionOpenRendererTiming);
+  }
+
+  /**
+   * 首绘采样：从 snapshot 应用完成起，等两个 rAF 再记一次耗时（近似首帧 paint）。
+   *
+   * 只量「应用到首绘」这一段，不重复量总量：`uiViewReadyMs + paintAfterApplyMs` 才是
+   * 「到首绘」的体感总量。非浏览器环境没有 rAF，缺席即可（缺席 ≠ 0）。
+   */
+  private scheduleOpenPaintSample(snapshotAppliedAt: number): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    if (typeof requestAnimationFrame !== "function") return;
+    // 两帧窗口内若发生重订阅（generation 变），这次首绘属于上一代，不能记到新的
+    // sessionOpenRendererTiming 上——分段会与新的 connect 起点错配。
+    const generation = this.generation;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (this.closed || this.generation !== generation) return;
+        this.sessionOpenRendererTiming = {
+          ...this.sessionOpenRendererTiming,
+          paintAfterApplyMs: roundedDuration(snapshotAppliedAt, monotonicNow()),
+        };
+        this.setState({ rendererTiming: this.sessionOpenRendererTiming });
+        this.reportOpenRendererTiming();
+      });
+    });
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -493,6 +549,8 @@ export class ConversationProjectionStore {
       status: "started",
       topic: this.topic,
     });
+    // uiViewReadyMs 的起点：跨代重订阅会覆盖成最新一代的起点，与下面的分段同源。
+    this.sessionOpenConnectStartedAt = connectStartedAt;
     this.sessionOpenRendererTiming = {
       rendererPrepareMs: roundedDuration(connectStartedAt, subscribeStartedAt),
     };
@@ -799,6 +857,7 @@ export class ConversationProjectionStore {
       this.observeModelTransition(next, context.online && hadAppliedBase);
       if (context.subscribeMode !== null && context.frameReceivedAt !== undefined) {
         const snapshotAppliedAt = monotonicNow();
+        const connectStartedAt = this.sessionOpenConnectStartedAt;
         this.sessionOpenRendererTiming = {
           ...this.sessionOpenRendererTiming,
           ...(this.initialSubscribeAckAt === null
@@ -810,9 +869,17 @@ export class ConversationProjectionStore {
                 ),
               }),
           rendererSnapshotApplyMs: roundedDuration(context.frameReceivedAt, snapshotAppliedAt),
+          // 总量口径：起点早于 CLI spawn、终点在首帧应用完成之后，因此它是本迭代唯一
+          // 能与「冷开 ≤1s」直接比较的 renderer 侧数值。ACK 的 openPhases.viewReadyMs
+          // 只是它内部的一段（见 SessionOpenRendererTiming 的注释）。
+          ...(connectStartedAt === null
+            ? {}
+            : { uiViewReadyMs: roundedDuration(connectStartedAt, snapshotAppliedAt) }),
           snapshotAppliedAt,
         };
         this.setState({ rendererTiming: this.sessionOpenRendererTiming });
+        this.reportOpenRendererTiming();
+        this.scheduleOpenPaintSample(snapshotAppliedAt);
       }
       if (context.recovery) this.markRecoveryFrameSeen();
       return;
@@ -1706,6 +1773,9 @@ export class ConversationProjectionStore {
     this.offAssemblyFault();
     this.offRuntimeRestart?.();
     this.offRuntimeLifecycle?.();
+    // 会话关闭即摘掉 runtimeReady reader：它持有 transport/agentService，不摘就是泄漏；
+    // 且 probe.runtimeReady() 之后再读到它会打出可拉起 CLI 的 RPC。
+    unregisterConversationRuntimeReadyReader(this.topic);
     this.clearRuntimeRecycleRetry();
     this.turnDirectoryDebouncer?.cancel();
     this.turnDirectoryDebouncer = null;

@@ -74,6 +74,8 @@ export interface ConversationTransport {
    * v4/conversation/runtimeReady：runtime 激活耗时（毫秒）观测。
    *
    * 该值**不在** subscribe ACK 里：view-only 的激活发生在 ACK 之后。查询不触发激活。
+   * 口径：`runtimeReadyMs` = **激活本体耗时**（不是从 ACK 起算）；`runtimeReady` 布尔 =
+   * **会话 runtime record 是否 live**（不是「runtime 已就绪」，Step 8 会改）。
    */
   runtimeReady(params: V4ConversationRuntimeReadyParams): Promise<V4ConversationRuntimeReadyResult>;
   /** v4/conversation/workflowRunEvents：workflow run 的事件日志分页（cursor = journal sequence）。 */

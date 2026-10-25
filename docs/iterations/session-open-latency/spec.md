@@ -55,7 +55,7 @@ dependency:
 | 是否做 view-only 首屏 | **做** | 冷开 7.6s 里 `session.resume_completed` 占 2.7s，只做投影窗口化拿不回这一段 |
 | 运行时历史何时全量 | **首次发送前**，且 `historyMode` 取 `"none"` 而非 `"tail"` | `messageHistory.init()`（`message-history.ts:163-164`）会把 `entries` 清空，tail 水化的产物必然被抹掉，做 tail 是纯浪费 |
 | 协议兼容 | `sessionActionAvailability` / `commandAck.reasonCode` 的扩张是 additive；**`openTiming` 不是** | `conversationOpenTimingSchema` 是 `.strict()`（`transport.ts:149`），加键会让旧客户端整帧解析失败 → 新分段放 ack **顶层**新键，不动 `openTiming` |
-| **runtime 何时被激活**（首轮漏掉，会死锁） | **ACK 后后台预激活 + send 类命令 await**：view-ready ACK 后立刻 fire-and-forget 启动 runtime 激活；`sendText` 类命令 `await runtimeReadyFlights`（自动触发一次激活），其它命令在 runtime 未就绪时回 `runtimeNotReady`。**composer 不禁用**（可输入，只在发送前显示「正在加载运行环境…」） | 若 composer 禁用 + 所有命令都拒，就没有任何路径能升到 runtime-ready，会话永久停在 view-only；这也是 `runtimeReadyMs` 的唯一生产者 |
+| **runtime 何时被激活**（首轮漏掉，会死锁） | **ACK 后后台预激活 + send 类命令 await**：view-ready ACK 后立刻 fire-and-forget 启动 runtime 激活；`sendText` 类命令 `await runtimeReadyFlights`（自动触发一次激活），其它命令在 runtime 未就绪时回 `runtimeNotReady`。**composer 不禁用**（可输入，只在发送前显示「正在加载运行环境…」） | 若 composer 禁用 + 所有命令都拒，就没有任何路径能升到 runtime-ready，会话永久停在 view-only。**注意 `runtimeReadyMs` 的写入点不在订阅专有路径上**：今天它写在 `ensureColdReadyPublisher` 里，而该函数被订阅、`rowsRange`、`turnDirectory`、`plans` 等**所有冷会话读入口**复用，「激活的唯一生产点是冷订阅」不成立 |
 | manifest 粒度 | **turn 级行清单 + 一次 O(turns) 窄读供 preview** | 目录项要求 `queryPreview`/`assistantPreview`/`previewKind`（`publisher.ts:588-599`、`transport.ts:560-568`）且一个 turn 可以有多条 steer query 各成一项，纯 `{row_count, query_row_id}` 表达不了；preview 只需按 id 点查该 turn 的 query 与末条 assistant 消息文本前缀，不读全量 parts |
 | `totalCount` 在 delta 侧怎么维护 | **`row.removed` 增加 `totalCount`/`firstRowId`**（`delta.ts:100` 非 strict，additive），权威值随裁断一起下发 | `apply.ts:92-93` 的 `removed` 数的是**客户端窗口内**被删行；窗口只有 60 行时 rewind 到 rowId 3000 只能减 60，manifest 却是 20000 → 客户端 totalCount 与权威值立刻分叉 |
 
@@ -119,9 +119,13 @@ dependency:
 ### phase-0-baseline
 
 - 在同基线（HEAD 含 v1.0.27 补丁）实测三路径（冷开 5k 消息会话 / 冷开小会话 / 热切换 / 深翻页到底），落 `docs/iterations/session-open-latency/baseline.json`。
+- **验收基准（2026-10-25 cr-func 矫正，以后以此为准）**：「冷开 ≤1s」判的是 **renderer 侧 `uiViewReadyMs`**（= `connect 入口 → snapshot 应用完成`，renderer 单调时钟）；要覆盖到首绘再加 `paintAfterApplyMs`（2×`requestAnimationFrame`，`uiViewReadyMs + paintAfterApplyMs` 才是体感总量）。两者由 `conversationProjectionStore` 回填进 `__zcodeV4ConversationOpensE2E` 的 ACK 样本。
+  - **`openPhases` 降级为分解项**：`viewReadyMs` 是 **CLI 进程内**的视图就绪段（起点 `subscribeReserved`、终点 ACK 组装），**不含** `openTiming.cliBootstrapMs`（冷开新 spawn CLI）、`hostPrepareMs`、`cliRequestMs`、ACK 后的首帧传输、`rendererSnapshotApplyMs` 与 React commit + paint，冷开下系统性偏短，**不得**再用它判 ≤1s。
+- **口径三条硬约束**（写进 schema / 脚本 / 验收三处）：①`viewReadyMs` = CLI 内部视图就绪段，不含上述任一段；②各段**嵌套不可相加**（`viewReadyMs ⊇ initialFrameEncodeMs`，`viewReadyMs ⊃ mergeMs + rehydrateMs`，阶段 0 里它**还** ⊇ runtime 激活本体）；③`manifestMs` / `materializeMs` 本阶段恒缺席，热切换下 `mergeMs` / `rehydrateMs` 也会缺席——**缺席 ≠ 0**，禁止补 0 求「各段之和」。
+- **`runtimeReadyMs` 口径钉死为「激活本体耗时」**（`coldResume.ensureResumed` 的耗时），**不是**「从 ACK 起算」：阶段 0 激活在 ACK **之前**（按 ACK 起算会是负数），阶段 8 拆开后激活在 ACK **之后**（按 ACK 起算会掺入等待）。只有本体耗时能跨阶段比较。
 - **分段观测通道（IS8）**：不动 `openTiming`（`.strict()`）。新增 ack 顶层键 `openPhases: { viewReadyMs, manifestMs, materializeMs, mergeMs, rehydrateMs }`——**不含 `runtimeReadyMs`**（view-only 的激活发生在 ACK 之后，ACK 帧里不可能有该值；它由 `conversation/runtimeReady` query 提供）；`mergeMs`/`rehydrateMs` 的产生点在 `performHydration`（`:2989-3185`）内部，由 gateway 侧变量回传，锚点不是 `:1443-1445`。
 - **runtimeReady 的观测通道（二选一已定：走 query）**：view-only 下 runtime 激活发生在 ACK 之后，故新增 `conversation/runtimeReady` query 回传该值，Step 14 从它读。已知代价：该 query 要穿 5 层管道——`transport.ts:335` V4_METHODS → `server.ts:507` case → gateway → `zcodeAgent.ts:880` → `zcodeAgentService.ts:4719` → `zcodeAgentConnectionScope.ts:736` → `agentConversationTransport.ts:337`；这 7 处都要改，列进 Step 1。（**不再并列「写 `session.resume_completed` 日志字段」方案**——两套通道并存会出现双源不一致。）
-- 采集脚本：`scripts/dev/long-session-perf-sample.mjs` 目前只消费 `window.__zcodePerfProbe`（`:291-308,685-693`），需新增 `--out docs/iterations/session-open-latency/baseline.json` 与 ack 顶层键的采集。
+- 采集脚本：`scripts/dev/long-session-perf-sample.mjs` 原本只消费 `window.__zcodePerfProbe`（`:291-308,685-693`）；`--out` **是既有参数，直接复用**（不要新增第二个输出选项），需补的是 ack 顶层键、`runtimeReady` query 与 renderer 侧 `uiViewReadyMs`/`paintAfterApplyMs` 的采集，示例：`--out docs/iterations/session-open-latency/baseline.json`。
 
 ### phase-row-manifest（IS2 + IS5）
 
@@ -171,7 +175,7 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 
 **激活触发点（首轮整篇缺失，不补就是死锁）**：
 
-- view-ready ACK 发出后**立刻后台预激活** runtime（fire-and-forget，`runtimeReadyFlights` 记录在途 flight），这样多数情况下用户看到历史时 runtime 已在就绪路上，`runtimeReadyMs` 也就有了生产者。
+- view-ready ACK 发出后**立刻后台预激活** runtime（fire-and-forget，`runtimeReadyFlights` 记录在途 flight），这样多数情况下用户看到历史时 runtime 已在就绪路上。`runtimeReadyMs` 的**写入点**是激活本体（今天在 `ensureColdReadyPublisher` 里量 `ensureResumed`），拆分后只换写入位置，读数口径仍是「激活本体耗时」。
 - **`sendText` 类命令是激活触发器**：`handleCommand` 对 send 类命令 `await runtimeReadyFlights`（若尚未启动则当场启动），其余命令在 runtime 未就绪时回 `{status:"rejected", reasonCode:"runtimeNotReady"}`。**例外：`sessionId` 为空的新建会话（`createSession`，`v4-gateway.ts:2493-2499`）不受此门限制**，否则会把新建会话一起拒掉。
 - **composer 不禁用**：只在发送前显示「正在加载运行环境…」；禁用会直接掐掉唯一的激活入口。
 - `queryCommands` **不属于** runtime-ready 门槛：`v4-gateway.ts:2580-2590` 只 await 已存在的 flight、不会创建，也不会因 view-only 失败。
@@ -246,7 +250,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 | # | 不变式 | 文件 | 改动 |
 |---|---|---|---|
 | 1 | IS8 | ack 顶层 + `transport.ts` | 新增 `openPhases` 顶层键（**不动 `.strict()` 的 `openTiming`**） |
-| 2 | IS8 | `scripts/dev/long-session-perf-sample.mjs` | 支持 `--out` 与 ack 顶层键采集 |
+| 2 | IS8 | `scripts/dev/long-session-perf-sample.mjs` | **复用既有 `--out`**（不新增输出选项）；补 ack 顶层键、`runtimeReady` query 与 renderer 侧 `uiViewReadyMs`/`paintAfterApplyMs` 采集 |
 | 3 | IS2/IS5 | `adapters/.../repositories/turn-manifest.ts` + 新迁移 | **两张表**读写（`session_turn_manifest` + `session_turn_query_manifest`，后者**只登记 `origin === "realUser"`**），按 `branch_generation` 键控；空分支 `totalCount=0` / `firstRowId=null` |
 | 4 | IS5 | `bootstrap/.../session-row-manifest.ts`（新） | `totalCount`/`firstRowId`/`realUserQueryTotal`/`turnDirectory`/rowId base 唯一来源；空分支 `totalCount=0` / `firstRowId=null` |
 | 4b | IS5 | `packages/shared/.../delta.ts` | `row.removed` 增加 `totalCount`/`firstRowId`（additive，非 strict） |
@@ -286,7 +290,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 - Step 11 — phase-view-runtime-split — blocking: yes — qa: auto：`rowsRange` 冷路径不复触发冷开；升级路径改 `hydratedSessions.delete()` 先删。
 - Step 12 — phase-lazy-history — blocking: yes — qa: auto：`historyMode`；eager context init 移到 turn；发送闸门在 init **之后**；逐个核对 `resume.ts` 里以全量 messages 为输入的剩余步骤（`turnNumber`/`latestAssistant*`/`mainTurnCacheHitAggregate`/`discardPersistedPendingSteerInputs`/`syncPersistedSessionTitleForResume`）。
 - Step 13 — phase-gates — blocking: yes — qa: auto：`test-cold-open-window.mjs` 覆盖 IS1 逐值一致、IS2 两种事故防护、IS6 翻页不漏、IS7 历史完整。
-- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3，`openPhases` 读 ACK 侧各段，**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时），对照 `baseline.json` 判 ≤1s / ≤800ms；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。
+- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3，**验收基准读 renderer 侧 `uiViewReadyMs`（要做首绘再叠加 `paintAfterApplyMs`）**；`openPhases` 只作分解项（`viewReadyMs` 是 CLI 进程内段，不含 host/CLI spawn/RPC/渲染，且各段嵌套不可相加）；**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时；口径是激活本体耗时，不是从 ACK 起算），对照 `baseline.json` 判 ≤1s / ≤800ms；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。
 
 ## 测试策略
 
@@ -322,9 +326,9 @@ apps/zcode-cli/packages/bootstrap/scripts/
 5. **`rowId` 语义变更是全仓最贵的改动**：**两份同构实现**都要改——不可变 `apply.ts:91-110` 与可变 `applyConversationDeltaMutable`（`:171-189`，同文件）。两件事必须同时做到：①**废除全局 `nextRowId++`**（否则 rewind 后 live 有空洞、cold 紧凑，两条路径永远对不齐，T-SL7/T-SL11 必红）；②`totalCount` 在 delta 侧仍无解（`removed` 数的是窗口内被删行），因此 `row.removed` 必须携带权威 `totalCount`/`firstRowId`。空 active 分支 `totalCount=0` / `firstRowId=null`，对齐 `apply.test.ts:514-527` 的既有契约。
 6. **`openTiming` 的 `.strict()`**：新分段只能放 ack 顶层；若坚持放 `openTiming`，旧客户端整帧解析失败。IS8 已定。
 7. **改动面横跨 adapters/contracts/core/bootstrap/shared/ui**：`rowId` 与 manifest 的改动必须按 Step 顺序，且 Step 4 之前不得合并任何依赖 manifest 的 UI 改动。
-8. **性能验收在 dev build**（`perfProbe` dev-only），生产侧只看 `openPhases`。验收口径必须写明数据来源。
+8. **性能验收在 dev build**（`perfProbe` 与 `__zcodeV4ConversationOpensE2E` 的 renderer 出口都是 dev-only）。验收基准是 renderer 侧 `uiViewReadyMs`（+ `paintAfterApplyMs`）；生产侧只有 CLI 内部分解项（`openPhases`），**不得**拿它判总时长。验收口径必须写明数据来源。
 9. **窗口化不会自动消掉的剩余全量读**：每个 subagent child 各全量读一次（`server-operations.ts:1715-1717`）、`buildColdFileChangeSummaries` 8 并发逐 messageId 读 artifact（`cold-file-change-summaries.ts:231-262`）、`restoreWorkspaceCheckpointEntries`/`FileRewindEntries` 各读一遍 eventStore。这些单列，不计入本 spec 收益。
-10. **`openPhases.snapshotRowCount` 语义会漂移**：`v4-gateway.ts:1481` 今天取的是**投影全量行数**，窗口化后会变成「物化窗口行数」。phase-0 基线对照必须注明这一点，否则会被误读成「优化无效」。
+10. **`openTiming.snapshotRowCount` 语义会漂移**（该字段在 `openTiming` 里，**不在** `openPhases`）：`v4-gateway.ts:1481` 今天取的是**投影全量行数**，窗口化后会变成「物化窗口行数」。phase-0 基线对照必须注明这一点，否则会被误读成「优化无效」。
 11. **既有测试会碎，须列入回归范围**：`test-turn-directory.mjs:83-90` 用白盒直接改 `rows.totalCount/firstRowId` 并靠全量行喂 `getTurnDirectory`，manifest 成为权威后必须重写该夹具。
 12. **本 spec 推翻了前次的 B3 排除**：`docs/apm/memory/20261025-session-open-latency-b1.md:24` 明确记过「B3（首帧不等全量）被排除」。本次依据是后来的「都修吧，根治」兜底授权（`:33`），属**推翻前次决策**，不是「已获授权」——按三态纪律如实登记。
 

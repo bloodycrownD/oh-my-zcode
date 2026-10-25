@@ -160,12 +160,21 @@ export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema
  * 消费者拿到的永远是自己认识的那个子集；老客户端剥未知键而不是整帧失败。
  *
  * 五段只覆盖 **ACK 帧内**可得的耗时：
- *   - `viewReadyMs`：subscribe 入口 → ACK 组装完成（视图可读的总时长）；
+ *   - `viewReadyMs`：subscribe 入口 → ACK 组装完成。**口径 = CLI 进程内的视图就绪段**：
+ *     不含 host 准备（`openTiming.hostPrepareMs`）、CLI spawn（`cliBootstrapMs`）、RPC
+ *     往返、首帧传输（renderer `initialFrameTransportMs`）与 renderer 的 apply/paint。
+ *     冷开时它系统性偏短，**不能**当用户体感，也**不能**用来判「≤1s」——验收基准是
+ *     renderer 侧的 `uiViewReadyMs`（`conversationOpenObservability`）；
  *   - `mergeMs`：`loadPersistedEvents`（持久事件合并/transcript 合成）；
  *   - `rehydrateMs`：`publisher.rehydrate`（投影重建）；
  *   - `manifestMs` / `materializeMs`：row manifest 读取与分页物化的耗时。产生点在
  *     phase-row-manifest / phase-paged-materialization，本阶段尚无生产者，读取方必须
- *     按 undefined 处理。
+ *     按 undefined 处理（**缺席 ≠ 0**）。
+ *
+ * **各段嵌套，不可相加**：`viewReadyMs ⊇ initialFrameEncodeMs`；
+ * `viewReadyMs ⊃ mergeMs + rehydrateMs`；阶段 0 里 `viewReadyMs` 还包含 runtime 激活本体
+ * （阶段 8 拆开后激活移到 ACK 之后，那时它才落在 `viewReadyMs` 之外）。
+ * 缺席项按 `undefined` 处理，禁止补 0 后求「各段之和」。
  *
  * **不含 `runtimeReadyMs`**：view-only 下 runtime 激活发生在 view-ready ACK **之后**，
  * ACK 帧里不可能有该值。它走 `v4/conversation/runtimeReady` query
@@ -632,10 +641,20 @@ export type V4ConversationTurnDirectoryResult = z.infer<
 // 因此 runtimeReadyMs 只能事后 query；Step 14 的性能验收也从这里读。
 //
 // 语义边界（Step 1 只有观测，不产生激活）：
-//   - 本 query **不触发激活**。今天 activation 的唯一生产点是冷订阅的 cold resume；
+//   - 本 query **不触发激活**。`runtimeReadyMs` 的写入点是 `ensureColdReadyPublisher`
+//     （量 `coldResume.ensureResumed` 本体），而该函数被**所有冷会话读入口**复用
+//     （订阅、rowsRange、turnDirectory、plans…），不是「只有冷订阅」。
 //     phase-view-runtime-split 之后改由「ACK 后后台预激活 + send 类命令 await」驱动，
 //     查询侧读数口径不变。
+//   - `runtimeReadyMs` 的口径是 **「激活本体耗时」**，不是「从 ACK 起算」：阶段 0 的
+//     激活在 ACK **之前**（按 ACK 起算得负数），阶段 8 拆开后激活在 ACK **之后**
+//     （按 ACK 起算会把等待算进去）。只有本体耗时能跨阶段比较。
 //   - `runtimeReadyMs: null` 只表示「本进程没观测到一次激活」，不是「激活耗时 0」。
+//
+// `runtimeReady` 布尔的口径是 **「该会话的 runtime record 是否 live」**，
+// **不是**「runtime 是否已就绪」：它直接读 `hasLiveConversation`。Step 8 必须改成读
+// `runtimeReadyFlights` 的 settle 结果，否则 view-only（只建了 view publisher、runtime
+// 尚未激活）的会话会误报 true。
 export const v4ConversationRuntimeReadyParamsSchema = z
   .object({
     sessionId: z.string().min(1),
@@ -651,7 +670,10 @@ export const v4ConversationRuntimeReadyResultSchema = z.object({
   sessionId: z.string().min(1),
   /** 本进程最近一次观测到的 runtime 激活耗时（毫秒）；未观测到为 null（≠ 0）。 */
   runtimeReadyMs: z.number().int().nonnegative().nullable(),
-  /** 读取时刻该会话的 runtime 是否已就绪。视图可读 ≠ runtime 就绪。 */
+  /**
+   * 会话 runtime **record 是否 live**（不是「runtime 是否已就绪」）。视图可读 ≠ runtime
+   * 就绪；Step 8 拆出 view-only 后本字段改读 `runtimeReadyFlights` 的 settle 结果。
+   */
   runtimeReady: z.boolean(),
 });
 export type V4ConversationRuntimeReadyResult = z.infer<

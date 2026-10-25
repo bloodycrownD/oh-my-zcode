@@ -220,9 +220,10 @@ export function createAgentConversationTransport(
           ...(result.ack.openTiming ? { openTiming: result.ack.openTiming } : {}),
         });
         // runtimeReadyMs 不在 ACK 里（激活发生在 ACK 之后），采样脚本要事后 query：
-        // 注册本 transport 上的读取闭包（走与未来消费者完全相同的传输方法），
-        // sessionId 缺省指向最近一次 ACK。
-        registerConversationRuntimeReadyReader(sessionId, () =>
+        // 注册本 transport 上的读取闭包（走与未来消费者完全相同的传输方法）。键是 topic
+        // ——会话关闭时 store 手上只有 topic，摘 reader 需要同一把键。闭包持有本 transport
+        // 与 agentService，因此只保留最新一份，并在 store.close() 时 unregister。
+        registerConversationRuntimeReadyReader(params.topic, () =>
           transport.runtimeReady({ sessionId }),
         );
         logger.lifecycle.info("v4 conversation subscription acknowledged", {
