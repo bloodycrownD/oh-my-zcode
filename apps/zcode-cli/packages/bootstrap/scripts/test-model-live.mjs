@@ -370,8 +370,8 @@ function createPromotionHarness({ queueItem, modelState, autoDrainPromotion = fa
     logger: { info: () => {}, warn: () => {} },
     getQueueItem: (sessionId, queueItemId) =>
       sessionId === SESSION_ID && queueItemId === queueItem.queueItemId ? queueItem : null,
-    // I1：执行文本来自 session_input 账本。夹具让账本与投影同值（本文件只钉模型选择）；
-    // 账本与投影不一致的权威断言在 test-input-authority.mjs 的 L 组。
+    // I1：执行文本 + 附件来自 session_input 账本。夹具让账本与投影同值（本文件只钉模型
+    // 选择）；账本与投影不一致的权威断言在 test-input-authority.mjs 的 L 组。
     getSessionInputForExecution: async (sessionId, queueItemId) =>
       sessionId === SESSION_ID && queueItemId === queueItem.queueItemId
         ? {
@@ -380,6 +380,7 @@ function createPromotionHarness({ queueItem, modelState, autoDrainPromotion = fa
             id: queueItemId,
             sessionID: sessionId,
             text: queueItem.text,
+            attachments: queueItem.attachments ?? [],
           }
         : { state: "missing", id: queueItemId, sessionID: sessionId },
     getInputRoutingMode: () => null,

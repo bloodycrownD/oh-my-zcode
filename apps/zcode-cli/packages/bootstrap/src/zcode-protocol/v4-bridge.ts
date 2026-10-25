@@ -297,6 +297,22 @@ function isConversationInputAdmissionCommand(type: CommandEnvelope["type"]): boo
   );
 }
 
+/**
+ * 账本权威硬失败（`fault.command.inputNotPending` / `fault.command.inconsistentAuthority`）：
+ * 同一队列项重试永远不会成功——账本行已终态、已不存在或 payload 损坏。
+ *
+ * 与「租约忙」那类瞬时失败的区别：瞬时失败由 `scheduleAutoDrainRetry` 自愈；
+ * 这一类必须停下来告诉用户唯一出口（删除该项后重发），否则该会话的 auto-drain
+ * 会永久停在这一项上（cr-func F2）。
+ */
+function isLedgerAuthorityFault(error: unknown): boolean {
+  const reasonCode = (error as { reasonCode?: unknown } | null)?.reasonCode;
+  return (
+    reasonCode === "fault.command.inputNotPending" ||
+    reasonCode === "fault.command.inconsistentAuthority"
+  );
+}
+
 function buildForkInitialInput(
   envelope: CommandEnvelope,
   childSessionId: string,
@@ -553,10 +569,18 @@ export function createConversationV4Gateway(
       }
       // 自动提升失败不能继续越过该 FIFO barrier；重新暂停并保留原项，交用户重试。
       await record.app.setQueueAutoDrain(false);
+      // 账本权威硬失败（终态/缺行/损坏）是**不可自愈**的：同一项重试永远不会成功，
+      // 队列会一直停在这里。运营出口 = 用户删除该项后重发（删除会把账本行 settle 成
+      // cancelled），所以告警里必须写出这条动作，而不是只报"auto-drain failed"。
+      // spec edit-resend-stale-text 风险节「运营出口」（cr-func F2）。
       context.logger?.warn("v4 auto-drain failed and queue was paused", {
         error: error instanceof Error ? error.message : String(error),
         queueItemId: head.queueItemId,
+        recoverable: !isLedgerAuthorityFault(error),
         sessionId: record.app.sessionId,
+        ...(isLedgerAuthorityFault(error)
+          ? { userAction: "delete the queue item and resend; re-enable auto-drain afterwards" }
+          : {}),
       });
     }
   };

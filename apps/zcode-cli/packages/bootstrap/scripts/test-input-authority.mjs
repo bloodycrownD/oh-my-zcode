@@ -44,11 +44,17 @@
  * I5. `modelSelectionPinned:` 的自算只许在 input-intent.ts；其余同上。
  * I6. retry 分支不得把 payload 整体断言成 edit 形状（`as { newText: string }`）——
  *     旧写法让「retry 偷读 newText」在类型上合法，是兜底搬家的温床。
- * I7. queue.ts 的执行内容（提升轮 content / intent.text）**只能来自 session_input 账本**；
- *     投影项的 `queueItem.text` 仅剩 spec 4b 例外表的三处（goal objective/goal intent.text/
- *     displayText），其余站点即红。
- * L. I1 执行权威（sendQueuedNow 直驱真实 handler）：账本文本 ≠ 投影文本时执行账本文本；
- *    账本终态/缺失/宿主能力缺席一律硬失败，且不起轮、不留 reservation。
+ * I7. queue.ts 的执行内容（提升轮 content / intent.text / 附件）**只能来自 session_input
+ *     账本**；投影项的 `queueItem.text` 仅剩 spec 4b 例外表的三处（goal objective/
+ *     goal intent.text/displayText），其余站点即红。
+ * I8. queue.ts 里仍是投影项提供的执行输入只许 spec 4b 登记的一处（toolDisallowlist）：
+ *     `queueItem.attachments` 已收口账本（cr-func F1），再出现即红。
+ * I9. 硬失败的可操作文案必须能到达用户：`SessionPane` 的 sendQueuedNow 拒绝分支必须
+ *     toast `ack.message`（只记日志 = 用户看不到唯一出口，cr-func F2）。
+ * L. I1 执行权威（sendQueuedNow 直驱真实 handler）：账本文本/附件 ≠ 投影时执行账本；
+ *    账本终态/缺失/损坏/宿主能力缺席一律硬失败，且不起轮、不留 reservation、
+ *    不移除队列项；损坏态与「合法空文本」必须区分（L4/L5，cr-func F4）；硬失败文案
+ *    必须带可操作出口（F2）。
  * J. 执行侧重建 intent 的 pin 形状：`resolveCanonicalInput` 保持三态（缺键=无 pin
  *    事实），`inputIntentMetadataFromCanonical` 在 wire 上落实为 boolean。
  * K. retry 的 canonical 解析不得读 `payload.newText`（payload 只有 target）。
@@ -58,7 +64,7 @@
  */
 
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -903,7 +909,7 @@ const QUEUE_TEXT_ALLOWLIST = [
     note: "goal objective 解析（spec 4b 例外，合法）",
   },
   {
-    code: "inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text),",
+    code: "objective ?? queueItem.text,",
     file: "zcode-protocol-v4/commands/handlers/queue.ts",
     note: "goal 分支的 intent.text（spec 4b 例外表，合法）",
   },
@@ -911,6 +917,22 @@ const QUEUE_TEXT_ALLOWLIST = [
     code: "displayText: queueItem.text,",
     file: "zcode-protocol-v4/commands/handlers/queue.ts",
     note: "展示文案（spec 4b 例外，合法）",
+  },
+];
+
+/**
+ * queue.ts 里**仍是投影项提供**的执行输入（cr-func F1）。
+ *
+ * `attachments` 已经收口到账本（本轮的 F1 必修），所以下面先断言它彻底消失；
+ * 剩下 `toolDisallowlist` 一处是登记在案的唯一例外：账本 payload 不写它，
+ * admission 写入本轮冻结，要收口只能改读 `TurnSteerQueued` 的事件账本。
+ * 这里按「未登记即红」守住它，不许再长出第二个。
+ */
+const QUEUE_PROJECTION_EXECUTION_ALLOWLIST = [
+  {
+    code: "toolDisallowlist: queueItem.toolDisallowlist,",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "spec 4b 例外（第 4 处）：工具禁用在事件账本里，未进 session_input",
   },
 ];
 
@@ -922,7 +944,7 @@ test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表�
     "提升轮执行文本必须来自 session_input 账本，不得再读投影项（RC1 根因）",
   );
   assert.equal(
-    code.includes("inputIntentMetadataFromQueueItem(queueItem, queueItem.text)"),
+    code.includes("inputIntentMetadataFromQueueItem(queueItem, queueItem.text"),
     false,
     "落库 intent.text 必须由账本传入（变更点 21）",
   );
@@ -930,8 +952,19 @@ test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表�
   assertPattern(code, /content: executionText,/u, "提升轮 content 必须取账本权威文本");
   assertPattern(
     code,
-    /inputIntentMetadataFromQueueItem\(queueItem, executionText\)/u,
-    "普通分支 intent.text 必须取账本权威文本",
+    /inputIntentMetadataFromQueueItem\(queueItem, executionText, authority\.attachments\)/u,
+    "普通分支 intent.text 与 attachmentRefs 都必须取账本",
+  );
+  // F1：附件不再是投影给出的执行输入。
+  assert.equal(
+    code.includes("queueItem.attachments"),
+    false,
+    "附件必须来自账本（F1）：queueItem.attachments 不得出现在 queue.ts",
+  );
+  assertPattern(
+    code,
+    /mapAttachmentRefsToTurnAttachments\(\s*record\.app,\s*authority\.attachments,?\s*\)/u,
+    "执行附件必须映射账本 attachments",
   );
   const matches = collectCodeLineMatches(
     (code) => code.includes("queueItem.text"),
@@ -947,6 +980,65 @@ test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表�
     label: "queue.ts 的 queueItem.text",
     matches,
   });
+});
+
+test("I8 queue.ts 的投影执行输入只剩 spec 4b 登记的一处（toolDisallowlist）", () => {
+  const matches = collectCodeLineMatches(
+    (code) => code.includes("queueItem.toolDisallowlist") || code.includes("queueItem.attachments"),
+    queueHandlerPath,
+  );
+  assert.equal(
+    matches.length,
+    1,
+    "投影项提供的执行输入只允许 toolDisallowlist 一处；attachments 必须已收口账本（F1）",
+  );
+  assertSourceAllowlist({
+    allowlist: QUEUE_PROJECTION_EXECUTION_ALLOWLIST,
+    label: "queue.ts 的投影执行输入",
+    matches,
+  });
+});
+
+/**
+ * I9（F2 的另一半）：服务端把「删除该队列项后重发」写进 ACK message，客户端必须把它
+ * 露出来——`SessionPane` 的 `sendQueuedNow` 拒绝分支过去只 `logger.warn`，等于文案
+ * 只存在于日志（用户唯一能做的动作永远看不见）。
+ *
+ * 为什么这条守卫放在 bootstrap 的脚本里：这个出口是**成对**的（服务端文案 + 客户端
+ * 呈现），而 `packages/ui` 没有 jsdom，只能做源码形状断言；把它挂在同一条 F2 用例
+ * 旁边，任何一侧被回退都会在这里红。
+ */
+const uiSessionPanePath = join(
+  here,
+  "..",
+  "..",
+  "..",
+  "..",
+  "..",
+  "packages",
+  "ui",
+  "src",
+  "v4",
+  "SessionPane.tsx",
+);
+
+test("I9 (F2) sendQueuedNow 被拒必须把 ACK message toast 出来（不许只记日志）", () => {
+  assert.equal(existsSync(uiSessionPanePath), true, `UI 源码路径失效：${uiSessionPanePath}`);
+  const source = stripCommentsKeepLines(readFileSync(uiSessionPanePath, "utf8"));
+  const start = source.indexOf('dispatchCommand("sendQueuedNow"');
+  assert.ok(start >= 0, "SessionPane 必须仍有 sendQueuedNow 的派发点");
+  const block = source.slice(start, start + 1600);
+  assertPattern(block, /ack\.status !== "accepted" && ack\.status !== "noop"/u, "拒绝分支判据");
+  assertPattern(
+    block,
+    /toast\(ack\.message/u,
+    "拒绝分支必须 toast ack.message（硬失败文案的唯一可见出口）",
+  );
+  assertPattern(
+    block,
+    /\[dispatchCommand, focusTimelineToLatest, intl, sessionId\]/u,
+    "intl 必须进依赖",
+  );
 });
 
 // ── J / K: 执行侧重建 intent 的形状与 retry payload 访问 ─────────────────────
@@ -1007,15 +1099,36 @@ const EXEC_SESSION_ID = "ses_exec_authority";
 const PROJECTION_TEXT = "投影里的旧文本（不得被执行）";
 /** 账本里的执行文本：唯一合法的执行内容。 */
 const LEDGER_TEXT = "账本里的执行文本";
+/**
+ * 附件同一条口径（cr-func F1）：投影说这项带的是 PROJ_ATTACH，账本说带的是
+ * LEDGER_ATTACH——执行时必须发账本那份，连 `intent.attachmentRefs` 也必须是账本值
+ * （它是编辑重发继承附件的唯一来源）。
+ */
+const PROJ_ATTACH = {
+  ref: "C:\\tmp\\projection-stale.txt",
+  fileName: "projection-stale.txt",
+  mime: "text/plain",
+  bytes: 21,
+};
+const LEDGER_ATTACH = {
+  ref: "C:\\tmp\\ledger-authoritative.txt",
+  fileName: "ledger-authoritative.txt",
+  mime: "text/plain",
+  bytes: 17,
+};
 
-function executionQueueItem({ kind = "sendText", text = PROJECTION_TEXT } = {}) {
+function executionQueueItem({
+  kind = "sendText",
+  text = PROJECTION_TEXT,
+  attachments = [PROJ_ATTACH],
+} = {}) {
   return {
     sourceCommandId: "cmd-exec-original",
     queueItemId: "queue-exec-1",
     clientId: "ui",
     kind,
     text,
-    attachments: [],
+    attachments,
     delivery: { requested: "queue", admitted: "queue" },
     order: { admissionSeq: 7, queuePosition: 0 },
     steer: { state: "notRequested" },
@@ -1113,15 +1226,16 @@ function executionHarness({ authority, withCapability = true, queueItem = execut
   return { calls, captured, envelope, host };
 }
 
-const pendingAuthority = (text) => ({
+const pendingAuthority = (text, attachments = [LEDGER_ATTACH]) => ({
   state: "pending",
   status: "admitted",
   id: "queue-exec-1",
   sessionID: EXEC_SESSION_ID,
   text,
+  attachments,
 });
 
-test("L1 (T-IA1) 账本文本 ≠ 投影文本：提升轮 content 与 intent.text 都取账本", async () => {
+test("L1 (T-IA1) 账本文本/附件 ≠ 投影：提升轮 content、intent.text 与附件都取账本", async () => {
   const harness = executionHarness({ authority: pendingAuthority(LEDGER_TEXT) });
   await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
   assert.equal(harness.calls.sendInput, 1, "账本 pending 必须正常起轮");
@@ -1132,6 +1246,22 @@ test("L1 (T-IA1) 账本文本 ≠ 投影文本：提升轮 content 与 intent.te
     "落库 intent.text 必须等于账本文本（否则冷恢复把旧文本带回 edit target）",
   );
   assert.notEqual(harness.captured.input.text, PROJECTION_TEXT, "投影文本被执行 = RC1 复活");
+  // F1：附件也只能来自账本——投影项的 attachments 不得成为执行输入。
+  assert.equal(
+    harness.captured.input.attachments?.[0]?.path,
+    LEDGER_ATTACH.ref,
+    "执行附件必须来自账本（投影 attachment 被发出去 = F1 的半个不变量复活）",
+  );
+  assert.equal(
+    harness.captured.options.intent.attachmentRefs?.[0]?.ref,
+    LEDGER_ATTACH.ref,
+    "落库 intent.attachmentRefs 必须来自账本（否则编辑重发继承到旧附件）",
+  );
+  assert.notEqual(
+    harness.captured.options.intent.attachmentRefs?.[0]?.ref,
+    PROJ_ATTACH.ref,
+    "投影附件被写进 intent = 附件口径没收口",
+  );
   // 普通提升成功后必须恢复 autoDrain（held-queue tripwire 的行为面）。
   assert.equal(harness.calls.autoDrainResumed, true);
 });
@@ -1178,6 +1308,12 @@ test("L2 (T-IA2) 账本终态 → 硬失败、不起轮、不留 reservation", a
           `${status} 必须按 inputNotPending 硬失败`,
         );
         assert.match(error.message, new RegExp(status, "u"), "错误信息必须带账本终态，便于对账");
+        // F2：ACK 的 message 会被 UI 直接 toast（SessionPane），必须含可操作出口。
+        assert.match(
+          error.message,
+          /删除该队列项/u,
+          `${status}：硬失败文案必须告诉用户唯一出口（删除该队列项后重发）`,
+        );
         return true;
       },
       `账本 status=${status} 时不得回落投影文本起轮`,
@@ -1222,4 +1358,77 @@ test("L3 (T-IA2) 账本缺行 / 宿主无执行权威能力 → 硬失败 incons
   assert.equal(noCapability.calls.sendInput, 0, "宿主无能力时不得回落到投影文本");
   assert.equal(noCapability.calls.ledgerReads, 0);
   assert.equal(noCapability.calls.warnings.length, 1, "能力缺席也必须留痕（不许静默）");
+});
+
+/**
+ * L4（cr-func F4）：账本 payload 损坏 ≠ 合法空文本。
+ *
+ * 这是本轮最危险的一条：账本成为唯一权威之后，adapters 若把「JSON 解析失败」兜底成
+ * `{ text: "" }`，执行侧就会拿空文本起轮、再把队列项移除——用户内容静默丢失且不触发
+ * 任何 fault。所以损坏必须落在 `corrupt` 态并硬失败，且**不允许**出现空文本起轮。
+ *
+ * 账本解析的那一半（真实 SQLite 行 + 非法 JSON）在
+ * `packages/adapters/scripts/test-session-input-ledger-authority.mjs`；本用例守 handler 侧：
+ * 收到 corrupt 不得起轮 / 不得留 reservation / 不得移除队列项 / 必须留对账 warn 与可操作文案。
+ */
+test("L4 (T-IA2) 账本 payload 损坏 → 硬失败、不起轮、不移除队列项、不兜底空串", async () => {
+  const corruptCases = [
+    "payload_unparsable",
+    "payload_not_object",
+    "text_not_string",
+    "attachments_unreadable",
+  ];
+  for (const reason of corruptCases) {
+    const harness = executionHarness({
+      authority: { state: "corrupt", reason, id: "queue-exec-1", sessionID: EXEC_SESSION_ID },
+    });
+    await assert.rejects(
+      () => queueHandlers.sendQueuedNow(harness.host, harness.envelope),
+      (error) => {
+        assert.equal(
+          error.reasonCode,
+          "fault.command.inconsistentAuthority",
+          `${reason}：损坏是"权威不可读"，与缺行同一 fault code`,
+        );
+        assert.equal(error.name, "V4QueueInputLedgerCorruptError", `${reason}：必须是独立损坏错误`);
+        assert.match(error.message, new RegExp(reason, "u"), `${reason}：message 必须带损坏原因`);
+        assert.match(
+          error.message,
+          /删除该队列项/u,
+          `${reason}：损坏同样不可自愈，文案必须给出口（F2）`,
+        );
+        assert.doesNotMatch(
+          error.message,
+          /text: ""|empty text/u,
+          `${reason}：不得把损坏说成空文本`,
+        );
+        return true;
+      },
+      `${reason}：损坏的账本行不得被当成空文本执行`,
+    );
+    assert.equal(harness.calls.sendInput, 0, `${reason}：不得起轮（空文本起轮 = 静默丢内容）`);
+    assert.equal(harness.calls.reserve, 0, `${reason}：不得留 reservation`);
+    assert.equal(harness.calls.remove, 0, `${reason}：不得移除队列项`);
+    assert.equal(harness.calls.warnings.length, 1, `${reason}：损坏必须留对账 warn`);
+    assert.equal(harness.calls.warnings[0].fields.ledgerState, "corrupt");
+    assert.equal(harness.calls.warnings[0].fields.corruptReason, reason);
+  }
+});
+
+/**
+ * L5（F4 的「合法空文本」对照面）：`text: ""` + 只有附件是合法输入，必须正常起轮。
+ *
+ * 没有这一条，L4 可以用「所有空文本一律硬失败」作弊通过——那会把 attachment-only
+ * 的 query 全部打死。两者的区别是「读不出」vs「读出来了，内容是空的」。
+ */
+test("L5 账本合法空文本 + 只有附件 → 正常起轮（与损坏态区分）", async () => {
+  const harness = executionHarness({ authority: pendingAuthority("") });
+  await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
+  assert.equal(harness.calls.sendInput, 1, "合法空文本（只有附件）必须正常起轮");
+  assert.equal(harness.captured.input.text, "");
+  assert.equal(
+    harness.captured.input.attachments?.[0]?.path,
+    LEDGER_ATTACH.ref,
+    "空文本轮的附件同样只能来自账本",
+  );
 });

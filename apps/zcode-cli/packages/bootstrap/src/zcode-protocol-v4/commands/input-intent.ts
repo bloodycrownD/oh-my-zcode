@@ -381,10 +381,15 @@ function assembleResolvedCanonicalInput(seed: {
  * 提升轮的模型活值覆盖（出队模型规则：提升一律用会话活值）不在本函数内
  * 施加：它由 handlers/queue.ts 的 `applyPromotedModelSelection` 在本函数返回值上收口
  * （那里持有 runtime），本函数保持纯转换；pin 判据与写回门的语义以下方注释为准。
+ *
+ * `attachmentRefs` 是**必填**参数，且调用方必须传账本值（I1 的「文本 + 附件」口径，
+ * cr-func F1）。刻意不给默认值/不必读 `item.attachments`：一旦允许缺省，落库的
+ * `intent.attachmentRefs` 就会在没人注意时退回投影，而它是编辑重发继承附件的唯一来源。
  */
 export function inputIntentMetadataFromQueueItem(
   item: QueueItem,
   canonicalText: string,
+  attachmentRefs: readonly AttachmentRef[],
 ): TurnInputIntentMetadata {
   // 注意：modelSelectionPinned 是 admission 期进程内标志，QueueItem 不持久化它，
   // 本函数刻意不置 pin——queue 提升按非显式处理、不写回会话选择（有意语义，勿当漏字段补）。
@@ -405,7 +410,7 @@ export function inputIntentMetadataFromQueueItem(
     ...(item.delivery.fallbackReasonCode
       ? { fallbackReasonCode: item.delivery.fallbackReasonCode }
       : {}),
-    attachmentRefs: item.attachments,
+    attachmentRefs: [...attachmentRefs],
     ...(item.sharedContextRefs ? { sharedContextRefs: [...item.sharedContextRefs] } : {}),
     // 提升只改变调度状态；重试／编辑原始输入的来源关联不能在此丢失。
     ...(item.provenance ? { provenance: { ...item.provenance } } : {}),

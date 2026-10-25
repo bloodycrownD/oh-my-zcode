@@ -1,6 +1,7 @@
 // Session Store Port：为会话输入、消息和投影提供稳定的存储边界。
 // ============================================================
 
+import type { AttachmentRef } from "@zcode/shared/zcode-protocol-v4";
 import type {
   MessageId,
   PartId,
@@ -794,15 +795,20 @@ export type SessionInputDelivery = "startNow" | "guide" | "queue";
 export type SessionInputStatus = "admitted" | "promoted" | "cancelled" | "discarded" | "failed";
 
 /**
- * 执行权威读法的互斥四态（I1：执行侧输入文本只能来自 session_input 账本）。
+ * 执行权威读法的互斥五态（I1：执行侧输入文本与附件只能来自 session_input 账本）。
  *
- * - `pending`：未起跑（status=admitted）。`text` 是本轮**唯一**合法的执行文本。
+ * - `pending`：未起跑（status=admitted）。`text` / `attachments` 是本轮**唯一**合法的
+ *   执行输入。
  * - `started`：已起跑（promoted，与 user message 同事务落过 transcript）。
  * - `voided`：已作废（cancelled / discarded / failed）。
  * - `missing`：账本无此行——投影与账本不一致。
+ * - `corrupt`：账本有这一行且仍是 admitted，但 payload 不可判定（非法 JSON / 非对象 /
+ *   text 不是字符串 / 附件事实缺失）。**不是**「合法空文本」——空文本是合法输入
+ *   （只有附件的 query），损坏是「读不出用户写了什么」。执行侧必须硬失败：
+ *   兜底成 `text: ""` 等于拿空内容起轮再把队列项移除，用户内容静默丢失。
  *
- * 终态与缺失**刻意不携带 text**：让「终态还去取文本」在类型上写不出来。执行侧拿到
- * 非 pending 必须硬失败，禁止回落投影项文本（spec edit-resend-stale-text I1）。
+ * 终态、缺失与损坏**刻意不携带 text**：让「终态还去取文本」在类型上写不出来。执行侧
+ * 拿到非 pending 必须硬失败，禁止回落投影项文本（spec edit-resend-stale-text I1）。
  */
 export type SessionInputExecutionAuthority =
   | {
@@ -812,6 +818,27 @@ export type SessionInputExecutionAuthority =
       sessionID: SessionId;
       /** 账本 payload.text：执行侧唯一权威文本。 */
       text: string;
+      /**
+       * 账本 payload.conversationInputIntent.attachments：执行侧唯一权威附件。
+       *
+       * 为什么附件也在账本：admission（`v4-bridge.ts` 写 `saveSessionInput`）已把
+       * attachments 写进账本，`TurnSteerQueued` 的幂等 upsert 通过
+       * `buildPersistedConversationInputIntent`（`attachments: intent.attachmentRefs`）
+       * 原样保留——即「文本 + 附件」是同一权威面上的两个字段，零新增写入。
+       * 空数组 = 账本明确说「无附件」，与「字段读不出」区分开（后者是 `corrupt`）。
+       */
+      attachments: readonly AttachmentRef[];
+    }
+  | {
+      state: "corrupt";
+      /** 不可判定原因：只看 payload 本身能否读成合法执行输入。 */
+      reason:
+        | "payload_unparsable"
+        | "payload_not_object"
+        | "text_not_string"
+        | "attachments_unreadable";
+      id: string;
+      sessionID: SessionId;
     }
   | {
       state: "started";
@@ -1142,6 +1169,13 @@ export interface SessionStorePort {
   /**
    * promotion（原子性硬要求）：账本置 promoted + user message/parts
    * 持久化在同一事务——杜绝「queue 已消费但 transcript 无 user message」的孤儿窗口。
+   *
+   * **只接受 status=admitted 的行**：UPDATE 带 `status='admitted'` 前置，条件不满足
+   * （行已被 settle 成 cancelled/discarded/failed，或行不存在）即抛错并回滚整个事务，
+   * 不留半截 user message。原因：执行侧读权威（`getSessionInputForExecution`）与
+   * promotion 之间存在窗口（读在 reserve 之前），期间该行可能被取消；无前置条件的
+   * UPDATE 会把已取消的输入改写成 promoted 并落进 transcript，等于让一条被撤销的
+   * 输入在历史里复活（spec edit-resend-stale-text F5）。
    */
   promoteSessionInput?(input: {
     id: string;
@@ -1172,11 +1206,12 @@ export interface SessionStorePort {
   /** global createSession.firstInput 查重：由 queue_<sourceCommandId> 找回真实 session。 */
   getSessionInputById?(id: string): Promise<SessionInputRecord | null>;
   /**
-   * 执行权威读法（I1）：按 id + session 读 session_input，返回互斥四态 + 权威文本。
+   * 执行权威读法（I1）：按 id + session 读 session_input，返回互斥五态 + 权威文本/附件。
    *
    * 与 `getSessionInputById` 的分工：后者是 global 查重（createSession 跨 session 找回），
-   * 不带 session 约束也不区分终态；本方法是执行侧「这条输入还能不能跑、跑什么文本」的
-   * 唯一读入口——跨会话同 id 不得执行，终态/缺失必须由调用方硬失败（不得回落投影）。
+   * 不带 session 约束也不区分终态；本方法是执行侧「这条输入还能不能跑、跑什么内容」的
+   * 唯一读入口——跨会话同 id 不得执行，终态/缺失/损坏必须由调用方硬失败（不得回落投影，
+   * 不得把损坏 payload 兜底成空文本）。
    */
   getSessionInputForExecution?(input: {
     id: string;

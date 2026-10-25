@@ -79,18 +79,88 @@ export async function saveSessionInput(
   );
 }
 
-function decodePayload(raw: string): { text: string; [key: string]: unknown } {
+type SessionInputPayload = { text: string; [key: string]: unknown };
+
+/**
+ * 账本 payload 的严格解析结果。
+ *
+ * 为什么必须区分「解析失败」与「合法空文本」：`text: ""` 是合法输入（只有附件的
+ * query），而「JSON 读不出来」意味着**不知道用户写了什么**。过去两者都返回
+ * `{ text: "" }`，执行侧把账本当唯一权威之后，损坏行会让空文本起轮并移除队列项
+ * ——用户内容静默丢失且不触发任何 fault（cr-func F4）。
+ */
+type SessionInputPayloadParse =
+  | { readonly ok: true; readonly payload: Record<string, unknown> }
+  | { readonly ok: false; readonly reason: "payload_unparsable" | "payload_not_object" };
+
+function parsePayload(raw: string): SessionInputPayloadParse {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw) as unknown;
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? ({ text: "", ...(parsed as Record<string, unknown>) } as {
-          text: string;
-          [key: string]: unknown;
-        })
-      : { text: "" };
+    parsed = JSON.parse(raw);
   } catch {
-    return { text: "" };
+    return { ok: false, reason: "payload_unparsable" };
   }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { ok: false, reason: "payload_not_object" };
+  }
+  return { ok: true, payload: parsed as Record<string, unknown> };
+}
+
+/**
+ * 宽松解码：**只给展示 / hydration 面用**（`decodeSessionInputRow` 的
+ * list/get、`updateSessionInputs` 的读-改-写）。
+ *
+ * 这些消费者拿不到权威判定权：命令事实查询、恢复清扫、队列编辑读回都只需要
+ * 「能展示的近似文本」，这里坏行退化成空串不会让任何东西被执行。执行侧**不得**
+ * 调用本函数——唯一入口是 `readSessionInputForExecution`，它把解析失败上报成
+ * `corrupt` 让 handler 硬失败（见该函数注释）。
+ */
+function decodePayload(raw: string): SessionInputPayload {
+  const parsed = parsePayload(raw);
+  if (!parsed.ok) return { text: "" };
+  return {
+    ...parsed.payload,
+    text: typeof parsed.payload.text === "string" ? parsed.payload.text : "",
+  };
+}
+
+/** 附件事实的类型只从契约派生：契约改了这里自动跟着改，不维护第二份镜像。 */
+type LedgerAttachments = Extract<
+  SessionInputExecutionAuthority,
+  { state: "pending" }
+>["attachments"];
+
+function isAttachmentRef(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    typeof candidate.ref === "string" &&
+    typeof candidate.fileName === "string" &&
+    typeof candidate.mime === "string" &&
+    typeof candidate.bytes === "number"
+  );
+}
+
+/**
+ * 账本里的附件事实：`payload.conversationInputIntent.attachments`。
+ *
+ * 为什么是这一处而不是 `payload.attachments`：`TurnSteerQueued` 的账本 upsert 会用
+ * `buildPersistedConversationInputIntent` 重写整个 payload，只带上
+ * `text / intent / conversationInputIntent` 三个键——admission 时写的顶层
+ * `payload.attachments` 会被丢掉，而 `conversationInputIntent.attachments`
+ * （= `intent.attachmentRefs ?? []`）在两个写入点都存在。所以这一处才是账本里
+ * 唯一"两个写者都覆盖"的附件事实。
+ *
+ * 返回 `undefined` = 读不出附件事实（不是「没有附件」）。调用方必须按损坏处理：
+ * 把「读不出」当成 `[]` 会静默丢掉用户附件，与 F4 的空串兜底同一类事故。
+ */
+function readLedgerAttachments(payload: Record<string, unknown>): LedgerAttachments | undefined {
+  const intent = payload.conversationInputIntent;
+  if (!intent || typeof intent !== "object" || Array.isArray(intent)) return undefined;
+  const attachments = (intent as Record<string, unknown>).attachments;
+  if (!Array.isArray(attachments)) return undefined;
+  // 逐项严格校验：过滤掉坏项等于静默丢附件，同样是内容丢失。
+  return attachments.every(isAttachmentRef) ? (attachments as LedgerAttachments) : undefined;
 }
 
 interface SessionInputPatch {
@@ -272,8 +342,13 @@ export async function promoteSessionInput(
         }
       }
     }
-    db.prepare(
-      `
+    // F5：只看得到 admitted 的行。执行侧读权威（readSessionInputForExecution）发生在
+    // reserve 之前，到 here 之间该行可能已被 settle（cancelled/discarded/failed）；
+    // 无前置条件的 UPDATE 会把撤销过的输入改写回 promoted 并留在 transcript 里。
+    // changes !== 1 → 抛错让 catch 回滚整笔事务（user message/parts 一并撤销）。
+    const promoted = db
+      .prepare(
+        `
         update session_input
         set status = 'promoted',
             promoted_message_id = ?,
@@ -283,9 +358,15 @@ export async function promoteSessionInput(
               where session_id = ?
             ),
             time_updated = ?
-        where id = ? and session_id = ?
+        where id = ? and session_id = ? and status = 'admitted'
         `,
-    ).run(String(input.message.id), input.sessionID, now, input.id, input.sessionID);
+      )
+      .run(String(input.message.id), input.sessionID, now, input.id, input.sessionID);
+    if (promoted.changes !== 1) {
+      throw new Error(
+        `session_input ${input.id} is not promotable: expected status=admitted (row missing or already settled)`,
+      );
+    }
     db.exec("commit");
   } catch (error) {
     db.exec("rollback");
@@ -369,12 +450,17 @@ export async function getSessionInputById(
 }
 
 /**
- * 执行权威读法（I1）：把一行 session_input 读成互斥四态。
+ * 执行权威读法（I1）：把一行 session_input 读成互斥五态。
  *
  * 为什么不复用 `getSessionInputById`：那是 global 查重（createSession 跨 session 找回
  * session），不带 session 约束、也不区分「终态」。执行侧需要两件它在类型上给不出的事：
  * ① 按 session 约束（跨会话同 id 不允许被当成执行权威）；② 终态标记，且终态**不返回
  * text**——让「账本已终结但照旧拿文本起轮」在类型上写不出来。
+ *
+ * 与展示面 `decodePayload` 的分界（cr-func F4）：本函数**不用**宽松解码。admitted 行的
+ * payload 解析失败 / 不是对象 / text 不是字符串 / 附件事实读不出，一律返回
+ * `state:"corrupt"`，让 handler 硬失败。绝不返回 `{ text: "" }`——空文本是合法输入
+ * （只有附件的 query），把损坏兜底成空串等于拿空内容起轮并移除队列项（静默丢内容）。
  *
  * spec `docs/iterations/bugfix-batch-20261025/bugs/edit-resend-stale-text` 变更点 1。
  * `status` 由 DB check 约束限定为五值，这里按白名单判定，未知值一律按 `failed` 上报
@@ -402,13 +488,35 @@ export async function readSessionInputForExecution(
     | undefined;
   if (!row) return { state: "missing", id: input.id, sessionID: input.sessionID };
   if (row.status === "admitted") {
+    const parsed = parsePayload(row.payload);
+    if (!parsed.ok) {
+      return { state: "corrupt", reason: parsed.reason, id: input.id, sessionID: input.sessionID };
+    }
+    if (typeof parsed.payload.text !== "string") {
+      return {
+        state: "corrupt",
+        reason: "text_not_string",
+        id: input.id,
+        sessionID: input.sessionID,
+      };
+    }
+    const attachments = readLedgerAttachments(parsed.payload);
+    if (attachments === undefined) {
+      return {
+        state: "corrupt",
+        reason: "attachments_unreadable",
+        id: input.id,
+        sessionID: input.sessionID,
+      };
+    }
     return {
       state: "pending",
       status: "admitted",
       id: input.id,
       sessionID: input.sessionID,
-      // 只取账本自己的文本；这里没有、也不许有任何投影回落（I1）。
-      text: decodePayload(row.payload).text,
+      // 只取账本自己的文本/附件；这里没有、也不许有任何投影回落（I1）。
+      text: parsed.payload.text,
+      attachments,
     };
   }
   if (row.status === "promoted") {

@@ -112,6 +112,7 @@ function makeHost({ queueItem, appResult = true }) {
       id: queueItemId,
       sessionID: sessionId,
       text: queueItem?.text ?? "",
+      attachments: queueItem?.attachments ?? [],
     }),
   };
 }
@@ -257,6 +258,9 @@ test("B6: 空闲态 guide → 转交 sendQueuedNow，执行文本取账本（I1�
       id: queueItemId,
       sessionID: sessionId,
       text: ledgerText,
+      // 账本附件事实（I1 的附件口径）：夹具里与投影同值，附件权威性由
+      // test-input-authority 的 L1 断言。
+      attachments: projected.attachments ?? [],
     }),
     getInputRoutingMode: () => null,
     ensureModelReady: async () => undefined,

@@ -320,7 +320,7 @@ function createPromotionHarness({ queueItem, modelState, sessionId }) {
     logger: { info: () => {}, warn: () => {} },
     getQueueItem: (sid, queueItemId) =>
       sid === sessionId && queueItemId === queueItem.queueItemId ? queueItem : null,
-    // I1：执行文本来自 session_input 账本（本夹具让账本与投影同值，只钉模型选择语义）。
+    // I1：执行文本 + 附件来自 session_input 账本（本夹具让账本与投影同值，只钉模型选择语义）。
     getSessionInputForExecution: async (sid, queueItemId) =>
       sid === sessionId && queueItemId === queueItem.queueItemId
         ? {
@@ -329,6 +329,7 @@ function createPromotionHarness({ queueItem, modelState, sessionId }) {
             id: queueItemId,
             sessionID: sid,
             text: queueItem.text,
+            attachments: queueItem.attachments ?? [],
           }
         : { state: "missing", id: queueItemId, sessionID: sid },
     getInputRoutingMode: () => null,

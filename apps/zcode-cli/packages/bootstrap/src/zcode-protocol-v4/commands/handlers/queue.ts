@@ -4,6 +4,7 @@
 // pendingInputId（同一 id 空间，无需翻译）。queue 变更的事件由 core runtime 自发，
 // 经 gateway ingest 推进 v4 投影——本组不需要 legacy 广播钩子。
 import type {
+  AttachmentRef,
   CommandEnvelope,
   CommandPayloadMap,
   CommandResult,
@@ -34,6 +35,18 @@ class V4QueueItemTextUnavailableError extends Error {
 }
 
 /**
+ * 硬失败的运营出口（spec 风险节「运营出口」）。
+ *
+ * 账本侧的这条输入已不可执行（终态 / 缺行 / 损坏），投影里残留的队列项是幽灵：
+ * 自动放行在 `v4-bridge` 的 auto-drain catch 里已被暂停，手动「立即发送」对同一 id
+ * 永远 rejected，用户不删掉它就再也发不出去。唯一可做的动作是删除该项后重发——
+ * ACK 的 `message` 会被 UI 直接 toast（`SessionPane` 的 sendQueuedNow 拒绝分支），
+ * 所以文案必须写清动作，不能只说账本状态（cr-func F2）。
+ */
+const LEDGER_DEAD_ITEM_RECOVERY =
+  "该队列项已没有可执行的账本输入，无法发送；请删除该队列项后重新发送（删除后若队列仍暂停，重新打开自动放行）";
+
+/**
  * 执行权威不是「未起跑」：账本已是 promoted（已起跑）/ cancelled / discarded / failed。
  *
  * I1（spec edit-resend-stale-text）：执行文本只能来自 `session_input` 账本，账本项终态时
@@ -43,7 +56,9 @@ class V4QueueInputNotPendingError extends Error {
   readonly reasonCode = "fault.command.inputNotPending";
   constructor(queueItemId: string, status: string, statusReason?: string) {
     super(
-      `v4 sendQueuedNow input is not pending: ${queueItemId} (ledger status ${status}${statusReason ? `: ${statusReason}` : ""})`,
+      `v4 sendQueuedNow input is not pending: ${queueItemId} (ledger status ${status}${
+        statusReason ? `: ${statusReason}` : ""
+      })；${LEDGER_DEAD_ITEM_RECOVERY}`,
     );
     this.name = "V4QueueInputNotPendingError";
   }
@@ -56,8 +71,30 @@ class V4QueueInputNotPendingError extends Error {
 class V4QueueInputAuthorityMissingError extends Error {
   readonly reasonCode = "fault.command.inconsistentAuthority";
   constructor(queueItemId: string, detail: string) {
-    super(`v4 sendQueuedNow execution authority missing: ${queueItemId} (${detail})`);
+    super(
+      `v4 sendQueuedNow execution authority missing: ${queueItemId} (${detail})；${LEDGER_DEAD_ITEM_RECOVERY}`,
+    );
     this.name = "V4QueueInputAuthorityMissingError";
+  }
+}
+
+/**
+ * 账本行还在、状态还是 admitted，但 payload 读不出可信内容（非法 JSON / 非对象 /
+ * text 不是字符串 / 附件事实缺失）。
+ *
+ * 这一态是 cr-func F4 的根修：过去 adapters 把解析失败兜底成 `{ text: "" }`，执行侧
+ * 于是拿空文本起轮并移除队列项——用户内容静默丢失。现在损坏与「合法空文本」分开：
+ * 空文本走正常执行，损坏走本错误（reasonCode 与「账本缺行」同为
+ * `fault.command.inconsistentAuthority`：对客户端而言都是"这条输入不可执行"，
+ * 差异在 message 与对账日志里）。
+ */
+class V4QueueInputLedgerCorruptError extends Error {
+  readonly reasonCode = "fault.command.inconsistentAuthority";
+  constructor(queueItemId: string, reason: string) {
+    super(
+      `v4 sendQueuedNow execution authority is corrupt: ${queueItemId} (ledger payload ${reason})；${LEDGER_DEAD_ITEM_RECOVERY}`,
+    );
+    this.name = "V4QueueInputLedgerCorruptError";
   }
 }
 
@@ -298,22 +335,33 @@ function applyPromotedModelSelection(
 }
 
 /**
- * I1 的唯一执行文本来源：按 id 读 `session_input` 账本。
+ * I1 的唯一执行输入来源：按 id 读 `session_input` 账本，取 **文本 + 附件**。
  *
- * 接受条件只有一个：账本 `status=admitted`（未起跑）。其余三态全部硬失败：
+ * 为什么附件也读账本：admission 已把 attachments 写进账本
+ * （`v4-bridge.ts` 的 `saveSessionInput`，`payload.attachments` +
+ * `payload.conversationInputIntent.attachments`），`TurnSteerQueued` 的幂等 upsert
+ * 经 `buildPersistedConversationInputIntent` 保留 `conversationInputIntent.attachments`，
+ * 所以读账本不需要任何新增写入。投影项的 `queueItem.attachments` 从此不再是执行输入
+ * （cr-func F1：只数 `queueItem.text` 的 I7 只是半个不变量）。
+ *
+ * 接受条件只有一个：账本 `status=admitted`（未起跑）。其余四态全部硬失败：
  * - `started`（promoted，已起跑）/ `voided`（cancelled / discarded / failed）→
  *   `fault.command.inputNotPending`；
- * - `missing`（账本无此行）或宿主未提供该能力 → `fault.command.inconsistentAuthority`。
+ * - `missing`（账本无此行）→ `fault.command.inconsistentAuthority`；
+ * - `corrupt`（payload 读不出可信内容）→ 同为 `fault.command.inconsistentAuthority`，
+ *   但独立错误类型与文案——绝不能兜底成空文本起轮（F4）。
+ * 宿主未提供该能力同样按 `missing` 硬失败。
  *
  * 硬失败必须可观测：先做一次对账上报（warn 日志带 session/item/终态与原因，不落文本内容），
- * 再抛出带 reasonCode 的领域错误——gateway 会把它原样上行成 ACK 的 reasonCode。
- * **不读、也不回落到投影项的 `queueItem.text`**。
+ * 再抛出带 reasonCode 与「删除该队列项后重发」出口的领域错误——gateway 会把它原样上行成
+ * ACK 的 reasonCode/message。
+ * **不读、也不回落到投影项的 `queueItem.text` / `queueItem.attachments`**。
  */
-async function resolveExecutionText(
+async function resolveExecutionAuthority(
   host: V4CommandCoreHost,
   record: V4SessionRecordView,
   queueItemId: string,
-): Promise<string> {
+): Promise<{ attachments: readonly AttachmentRef[]; text: string }> {
   const sessionId = record.app.sessionId;
   const read = host.getSessionInputForExecution;
   if (!read) {
@@ -324,7 +372,9 @@ async function resolveExecutionText(
     throw new V4QueueInputAuthorityMissingError(queueItemId, "host capability absent");
   }
   const authority = await read(sessionId, queueItemId);
-  if (authority.state === "pending") return authority.text;
+  if (authority.state === "pending") {
+    return { attachments: authority.attachments, text: authority.text };
+  }
   host.logger?.warn?.("v4 sendQueuedNow rejected: ledger authority is not pending", {
     ledgerState: authority.state,
     ...(authority.state === "voided"
@@ -341,9 +391,13 @@ async function resolveExecutionText(
             : {}),
         }
       : {}),
+    ...(authority.state === "corrupt" ? { corruptReason: authority.reason } : {}),
     queueItemId,
     sessionId,
   });
+  if (authority.state === "corrupt") {
+    throw new V4QueueInputLedgerCorruptError(queueItemId, authority.reason);
+  }
   if (authority.state === "missing") {
     throw new V4QueueInputAuthorityMissingError(queueItemId, "ledger row missing");
   }
@@ -382,9 +436,10 @@ async function sendQueuedNow(
     if (queueItem === null) {
       throw new V4QueueItemTextUnavailableError(payload.queueItemId);
     }
-    // I1（RC1 根修）：执行文本从 session_input 账本读，投影项只用于校验存在性。
-    // 放在 reserve/lease 之前：终态或缺失时不留下任何 side effect，原项原位保留。
-    const executionText = await resolveExecutionText(host, record, queueItem.queueItemId);
+    // I1（RC1 根修）：执行文本与附件都从 session_input 账本读，投影项只用于校验存在性。
+    // 放在 reserve/lease 之前：终态/缺失/损坏时不留下任何 side effect，原项原位保留。
+    const authority = await resolveExecutionAuthority(host, record, queueItem.queueItemId);
+    const executionText = authority.text;
     const acquirePromotionLease = (mode: "after-current" | "idle-only"): void => {
       const leaseResult = record.app.runtime.acquireForegroundPromotionLease({
         leaseId: foregroundPromotionLeaseId,
@@ -410,7 +465,7 @@ async function sendQueuedNow(
     if (queueItem.kind === "sendGoalCommand" && !objective) {
       throw new V4GoalRejectedError("emptyObjective", "Usage: /goal <objective>");
     }
-    const attachments = await mapAttachmentRefsToTurnAttachments(record.app, queueItem.attachments);
+    const attachments = await mapAttachmentRefsToTurnAttachments(record.app, authority.attachments);
     if (!autoDrainPromotion) acquirePromotionLease("after-current");
     let preempted = false;
     if (!autoDrainPromotion) {
@@ -425,13 +480,20 @@ async function sendQueuedNow(
     ) {
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
-    // spec 4b 例外表：goal 分支的 objective 解析与 displayText 仍读投影项（本 spec 不动）；
-    // 例外之外**执行内容**只来自账本 `executionText`——见下方普通分支的两处。
+    // spec 4b 例外表：goal 分支的 objective 解析、intent.text 与 displayText 仍读投影项
+    // （本 spec 不动）。例外之外**执行内容**只来自账本 `authority`——见下方普通分支。
+    //
+    // F3：本分支**只消费账本的状态**（`resolveExecutionAuthority` 已保证 admitted），
+    // 正文按 4b 例外仍取投影。不要以为 `/goal` 的 objective 也走了账本：它没有。
     if (queueItem.kind === "sendGoalCommand") {
       const intent = applyPromotedModelSelection(
         record.app.runtime,
         queueItem,
-        inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text),
+        inputIntentMetadataFromQueueItem(
+          queueItem,
+          objective ?? queueItem.text,
+          authority.attachments,
+        ),
       );
       const goalContinuationWillStart = !(
         intent.planEnabled ??
@@ -449,10 +511,11 @@ async function sendQueuedNow(
     } else {
       // 变更点 21：落库/执行的 `intent.text` 与 `content` 必须是账本文本，
       // 否则冷恢复会把它带回 edit target（transcript-hydration），旧文本再次可执行。
+      // 附件同理：`intent.attachmentRefs` 取账本（F1），否则编辑重发会从投影继承旧附件。
       const intent = applyPromotedModelSelection(
         record.app.runtime,
         queueItem,
-        inputIntentMetadataFromQueueItem(queueItem, executionText),
+        inputIntentMetadataFromQueueItem(queueItem, executionText, authority.attachments),
       );
       const started = await startPromptTurn(host, record, {
         content: executionText,
@@ -461,6 +524,11 @@ async function sendQueuedNow(
         ...(preempted && !attachments?.length ? { inputPresentation: "user_steer" as const } : {}),
         intent,
         requireIdle: true,
+        // spec 4b 例外（本 spec 登记的第 4 处）：`toolDisallowlist` 仍是投影项提供的
+        // 执行输入——账本 payload 不写它（admission 写入本轮冻结），它的 durable 事实
+        // 在 `TurnSteerQueued.toolDisallowlist` 事件里（`product-projection.ts` 由此构造
+        // 队列项）。要收口只能改读事件账本，属另一条变更；登记为已知限制而不是假称
+        // 「执行侧已全部收口账本」。
         toolDisallowlist: queueItem.toolDisallowlist,
         ...(attachments ? { attachments } : {}),
       });

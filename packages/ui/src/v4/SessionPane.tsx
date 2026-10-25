@@ -2652,11 +2652,19 @@ export function SessionPane({
         (ack) => {
           if (ack.status !== "accepted" && ack.status !== "noop") {
             logger.warn(`[v4-pane] sendQueuedNow 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+            // 执行权威硬失败（账本终态/缺行/损坏）时，该项会一直卡在队列里且自动放行
+            // 已暂停——只记日志等于用户永远看不到唯一可行的出口。ACK 的 message 里带着
+            // 「删除该队列项后重新发送」的动作说明，必须让用户看见（cr-func F2）。
+            toast(ack.message ?? intl.formatMessage({ id: "chat.ctx.rejected" }), {
+              dismissible: true,
+              position: "bottom-center",
+              variant: "warning",
+            });
           }
         },
       );
     },
-    [dispatchCommand, focusTimelineToLatest, sessionId],
+    [dispatchCommand, focusTimelineToLatest, intl, sessionId],
   );
 
   const handleReorderQueueItem = useCallback(

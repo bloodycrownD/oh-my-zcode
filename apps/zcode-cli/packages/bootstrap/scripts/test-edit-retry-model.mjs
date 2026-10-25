@@ -745,7 +745,9 @@ test("F2: inputIntentMetadataFromQueueItem 不置 pin（queue 提升喂回不写
     dispatch: { state: "queued" },
     admittedAt: 1_700_000_000_000,
   };
-  const intent = inputIntentMetadataFromQueueItem(queueItem, "f2 text");
+  // 第三个参数是账本附件事实（I1「文本 + 附件」口径，cr-func F1）：从这个 item 提升时
+  // 附件只能来自账本；这里传 item 自己的空数组表示账本也记录了「无附件」。
+  const intent = inputIntentMetadataFromQueueItem(queueItem, "f2 text", queueItem.attachments);
   assert.ok(
     !("modelSelectionPinned" in intent),
     "queue 提升 intent 不得携带 modelSelectionPinned 键（QueueItem 不持久化 pin）",
