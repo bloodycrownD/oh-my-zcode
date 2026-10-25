@@ -33,9 +33,10 @@
  *      幸存轮的排队项一条都不许动。
  * T-RW2 真实可达链（本 bug 的核心断言）：暂停队列 + 编辑重发 → 点「继续」时旧项不得被提升，
  *      新文本的路由必须是 startNow（改前：enqueue + 提升起旧文本）。
- * T-RW3 投影收口：`TurnSteerDiscarded` 对任意 reason 都移除队列项（既有行为，禁止加 reason
- *      过滤——promoted 依赖同一语义）。autoDrain 门与投影的双侧复位属 Step 5，本文件此刻
- *      只钉「作废即移除」。
+ * T-RW3 投影收口 + autoDrain 双侧复位：`TurnSteerDiscarded` 对任意 reason 都移除队列项
+ *      （既有行为，禁止加 reason 过滤——promoted 依赖同一语义）；作废后**投影队列为空**时
+ *      runtime 门（queueAutoDrain）与 v4 投影（queue.autoDrain）必须同时复位，只复位一侧
+ *      即失败；队列非空（幸存 held 项）时必须两边都保持 held。
  * T-RW5 不自伤：排除自持 id 后，**没有任何 settle 调用**指向它、账本仍为 admitted（不能只
  *      断言终态 promoted：误 settle 后 promote 会因 status='admitted' 前置而硬失败，两种
  *      事故的终态都是「没有 promoted」），且它随后仍能正常提升起轮。
@@ -70,9 +71,8 @@ const { appendEvent, createEvent, notifyEventSinks } = await import(
 const { rebuildProjection } = await import(
   pathToFileURL(join(coreSrc, "runtime", "methods", "message-persistence.ts")).href
 );
-const { discardRewoundPendingSteerInputs } = await import(
-  pathToFileURL(join(coreSrc, "runtime", "methods", "steering.ts")).href
-);
+const { completeExternalQueueDrain, discardRewoundPendingSteerInputs, setQueueAutoDrain } =
+  await import(pathToFileURL(join(coreSrc, "runtime", "methods", "steering.ts")).href);
 const { ProductProjection } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "product-projection.ts")).href
 );
@@ -231,15 +231,21 @@ function createRuntime({ ledger }) {
       warn: (message, fields) => warnings.push({ fields, message }),
     },
     pendingInputReservations: new Map(),
+    // runtime 的 autoDrain 门与授权位镜像：真实构造器默认 true / false（agent-runtime.ts:230）。
+    // 复位断言必须读这两个字段（真实 setQueueAutoDrain 写它们），不能用投影值代替。
+    queueAutoDrain: true,
+    queueExternalDrainActive: false,
     rebuildProjection,
     runtimeTaskRegistry: { all: () => ({}) },
     sessionId: SESSION_ID,
     sessionStore: ledger.port,
     warnings,
     appendEvent,
+    completeExternalQueueDrain,
     createEvent,
     discardRewoundPendingSteerInputs,
     notifyEventSinks,
+    setQueueAutoDrain,
   };
   return runtime;
 }
@@ -305,8 +311,19 @@ function queueState(context) {
   return {
     autoDrain: snapshot.queue.autoDrain,
     items: snapshot.queue.items,
+    pauseReason: snapshot.queue.pauseReason,
     queueLength: snapshot.queue.items.length,
   };
+}
+
+/**
+ * 生产链路 `record.app.setQueueAutoDrain(x)` → core `setQueueAutoDrain`（input-facade.ts:355）：
+ * 一次调用同时翻 runtime 门（queueAutoDrain / queueExternalDrainActive）并追加
+ * QueueAutoDrainChanged 事件（v4 投影由此收口）。**不能用 emitFact 直喂投影**——那样只改
+ * 一侧，恰好会让本步要防的「只复位一侧」缺陷在测试里看不出来。
+ */
+async function setAutoDrain(context, autoDrain) {
+  await context.runtime.setQueueAutoDrain({ autoDrain, traceContext: TRACE_CONTEXT });
 }
 
 /**
@@ -317,7 +334,7 @@ function queueState(context) {
  * `queueHandlers.sendQueuedNow`，执行文本用真实账本读法。
  */
 async function resumeAutoDrain(context) {
-  await emitFact(context, SessionEventType.QueueAutoDrainChanged, { autoDrain: true });
+  await setAutoDrain(context, true);
   const { items, autoDrain } = queueState(context);
   const head = items[0] ?? null;
   const promoted =
@@ -564,8 +581,8 @@ test("T-RW1 预 settle 失败时事件汇兜底：rewound 必须落 discarded，
 test("T-RW2 暂停队列 + 编辑重发：点「继续」时旧项从未被提升，新文本路由为 startNow", async () => {
   const context = createContext();
   await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
-  // 终止 → 队列暂停（stop 显式 setQueueAutoDrain(false)；同一事件也是 v4-bridge 的权威写入）。
-  await emitFact(context, SessionEventType.QueueAutoDrainChanged, { autoDrain: false });
+  // 终止 → 队列暂停（stop 显式 setQueueAutoDrain(false)；同一调用同时翻 runtime 门和投影）。
+  await setAutoDrain(context, false);
   // 本次编辑重发自身的 admission 行（新文本）。生产时序：空闲编辑重发时 admission 发生在
   // rewind 之后（startCanonicalIntent），此刻投影里还没有它的队列项——只有账本行。
   context.ledger.seed({ id: SELF_ID, text: NEW_TEXT });
@@ -623,7 +640,7 @@ test("T-RW2 暂停队列 + 编辑重发：点「继续」时旧项从未被提�
 test("T-RW2 反向：未作废时同一条链会把 OLD_TEXT 起轮（证明用例真的在测那条链）", async () => {
   const context = createContext();
   await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
-  await emitFact(context, SessionEventType.QueueAutoDrainChanged, { autoDrain: false });
+  await setAutoDrain(context, false);
 
   const resumed = await resumeAutoDrain(context);
   assert.equal(resumed.promoted, true, "对照组：没有级联时旧项一定会被提升");
@@ -631,7 +648,7 @@ test("T-RW2 反向：未作废时同一条链会把 OLD_TEXT 起轮（证明用�
   assert.equal(resumed.captured.input.text, OLD_TEXT, "对照组起跑的正是旧文本");
 });
 
-// ── T-RW3 投影收口（既有行为，禁止加 reason 过滤） ──────────────────────────
+// ── T-RW3 投影收口 + autoDrain 双侧复位（Step 5） ───────────────────────────
 
 test("T-RW3 TurnSteerDiscarded 对任意 reason 都移除队列项（promoted 依赖同一语义）", async () => {
   for (const reason of ["rewound", "promoted", "user_removed", "turn_cancelled"]) {
@@ -648,6 +665,122 @@ test("T-RW3 TurnSteerDiscarded 对任意 reason 都移除队列项（promoted �
       `reason=${reason} 时投影必须移除该项（onTurnSteerDiscarded 不许按 reason 过滤）`,
     );
   }
+});
+
+test("T-RW3 作废清空队列后：runtime 门与 v4 投影同时复位 autoDrain（只复位一侧即失败）", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
+  // 「终止」留下的暂停态：runtime 门与投影由同一次权威写入同时翻到 false。
+  await setAutoDrain(context, false);
+  assert.equal(context.runtime.queueAutoDrain, false);
+  assert.equal(context.runtime.queueExternalDrainActive, false);
+  assert.equal(queueState(context).autoDrain, false);
+  assert.equal(queueState(context).pauseReason, "manual");
+
+  const discarded = await context.runtime.discardRewoundPendingSteerInputs({
+    removedTurnIds: [TURN_REMOVED],
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.deepEqual(discarded, [OLD_ID]);
+
+  // 投影侧：项被移除（既有行为）+ 授权位复位（v4 投影消费 QueueAutoDrainChanged）。
+  assert.deepEqual(queueState(context).items, []);
+  assert.equal(
+    queueState(context).autoDrain,
+    true,
+    "投影侧必须复位：autoDrain=false 会被 v4 投影派生为 held，下一次入队就再也不会自动放行",
+  );
+  assert.equal(queueState(context).pauseReason, undefined, "复位后不得残留 pauseReason");
+  // 门侧：runtime 的授权位与 external drain 标记。
+  assert.equal(context.runtime.queueAutoDrain, true, "runtime 门必须复位");
+  assert.equal(
+    context.runtime.queueExternalDrainActive,
+    false,
+    "队列已空 = 没有待外层 FIFO 提升的项；标记停在 true 会抑制下一轮的行内 guide 消费",
+  );
+
+  // 复位事件必须排在作废事件之后：UI 先看到项消失，再看到恢复；且只发一次。
+  const relevant = (await context.runtime.eventStore.getEvents(SESSION_ID))
+    .filter(
+      (event) =>
+        event.type === SessionEventType.QueueAutoDrainChanged ||
+        event.type === SessionEventType.TurnSteerDiscarded,
+    )
+    .map((event) =>
+      event.type === SessionEventType.TurnSteerDiscarded
+        ? "discarded"
+        : `autoDrain:${event.payload.autoDrain}`,
+    );
+  assert.deepEqual(relevant, ["autoDrain:false", "discarded", "autoDrain:true"]);
+
+  // 复位不得把任何东西「顺带提升」：队列空 + 门开，auto-drain 无事可做。
+  const resumed = await resumeAutoDrain(context);
+  assert.equal(resumed.promoted, false);
+  assert.equal(resumed.calls?.sendInput ?? 0, 0);
+});
+
+test("T-RW3 队列非空（幸存 held 项）时必须保持 held：复位会让它在 start 前抢跑", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
+  await seedQueuedInput(context, { id: KEPT_ID, targetTurnId: TURN_KEPT, text: KEPT_TEXT });
+  await setAutoDrain(context, false);
+
+  await context.runtime.discardRewoundPendingSteerInputs({
+    removedTurnIds: [TURN_REMOVED],
+    traceContext: TRACE_CONTEXT,
+  });
+
+  // 本次删掉了 1 条，但队列里还有 survivor —— 用「删了几条」推算会在这里误开门。
+  assert.deepEqual(
+    queueState(context).items.map((item) => item.queueItemId),
+    [KEPT_ID],
+  );
+  assert.equal(queueState(context).autoDrain, false, "投影侧必须保持 held");
+  assert.equal(context.runtime.queueAutoDrain, false, "runtime 门必须保持关闭");
+  assert.equal(context.runtime.queueExternalDrainActive, false);
+
+  const autoDrainEvents = (await context.runtime.eventStore.getEvents(SESSION_ID)).filter(
+    (event) => event.type === SessionEventType.QueueAutoDrainChanged,
+  );
+  assert.deepEqual(
+    autoDrainEvents.map((event) => event.payload.autoDrain),
+    [false],
+    "队列非空时不得追加复位事件",
+  );
+
+  // 保持关闭的真实后果：survivor 不会被 auto-drain 提升；反证若误复位就会被提升起轮
+  // （rewind 返回后 afterLegacyStateMutation → autoDrainV4QueueIfReady 早于 startCanonicalIntent）。
+  const head = queueState(context).items[0];
+  const gate = (autoDrain) =>
+    shouldAutoDrainV4QueueHead({
+      autoDrain,
+      dispatchState: head.dispatch.state,
+      sessionBusy: false,
+      targetStatus: null,
+    });
+  assert.equal(gate(queueState(context).autoDrain), false, "幸存项不得被提升");
+  assert.equal(gate(true), true, "反证：无条件复位时同一闸门会放行幸存项 = 本 bug 复发");
+});
+
+test("T-RW3 无可作废项时不碰暂停位（队列本来就空 ≠ 本次作废清了队列）", async () => {
+  const context = createContext();
+  await setAutoDrain(context, false);
+
+  const discarded = await context.runtime.discardRewoundPendingSteerInputs({
+    removedTurnIds: [TURN_REMOVED],
+    traceContext: TRACE_CONTEXT,
+  });
+
+  assert.deepEqual(discarded, []);
+  assert.equal(queueState(context).autoDrain, false, "本次没作废任何项，不该改动暂停语义");
+  assert.equal(context.runtime.queueAutoDrain, false);
+  assert.equal(
+    (await context.runtime.eventStore.getEvents(SESSION_ID)).filter(
+      (event) => event.type === SessionEventType.QueueAutoDrainChanged,
+    ).length,
+    1,
+    "不得追加复位事件",
+  );
 });
 
 // ── T-RW5 不自伤（观测中间态） ──────────────────────────────────────────────

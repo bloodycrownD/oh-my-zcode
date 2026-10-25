@@ -1697,5 +1697,35 @@ export async function discardRewoundPendingSteerInputs(
     });
   }
 
+  // Step 5（spec 变更点 11 / T-RW3）：作废后**重新投影**判空，空了才复位 drain 门。
+  //
+  // 为什么必须重投影、而不是用「本命令删了几条」推算：candidates 只覆盖本次命中判据的项，
+  // 队列里可能还有别的轮的 held 项存活（作废后仍然非空），也可能在这两步之间有并发入队。
+  // 只要还剩一项就不能开门——rewind 返回后 afterLegacyStateMutation →
+  // autoDrainV4QueueIfReady 会抢在 startCanonicalIntent 之前把幸存项提升起轮，
+  // 那正是本 bug 的原症状：旧输入在新分支上跑。
+  //
+  // 复位只能走权威路径 setQueueAutoDrain：它同时翻 runtime 门（queueAutoDrain /
+  // queueExternalDrainActive）并追加 QueueAutoDrainChanged 事件，v4 投影据此把
+  // queue.autoDrain 收口。直写投影会留下「runtime 门已复位、投影仍 held」的单侧状态。
+  // 紧随其后的 completeExternalQueueDrain 是因为此刻投影队列已空：没有待外层 FIFO
+  // 提升的项，标记若停在 true 会抑制下一轮的行内 guide 消费（TUI /rewind 没有
+  // afterLegacyStateMutation 配对来清它）。
+  //
+  // 只有「本次确实作废过项」才会走到这里（candidates 为空在上方 early return）：
+  // 队列本来就空的 rewind 不碰用户的暂停位，避免把无关的暂停语义一起改掉。
+  const remaining = await this.rebuildProjection();
+  if (remaining.pendingSteerInputs.length === 0) {
+    await this.setQueueAutoDrain({ autoDrain: true, traceContext: options.traceContext });
+    this.completeExternalQueueDrain();
+    this.logger?.debug("Rewind discarded the whole queue; auto drain resumed", {
+      ...traceContextToLogContext(options.traceContext),
+      discardedCount: discarded.length,
+      event: "rewind.queue_auto_drain.resumed",
+      module: "core.runtime",
+      status: "completed",
+    });
+  }
+
   return discarded;
 }
