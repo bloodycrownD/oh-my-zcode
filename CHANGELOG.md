@@ -1,3 +1,19 @@
+## [1.0.27](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.20...v1.0.27) (2026-10-25)
+
+回滚到 v1.0.20 基线后，把「与上游同步无关、v1.0.20 本身就存在」的四条缺陷单独迁回。不含任何 v1.0.21+ 的新架构（虚拟项目 / 远程开发 / 设备管理 / 按设备设置均不涉及）。
+
+### 修复
+
+- **Magic Context 自标注 §N§ 不再上屏**：MC 要求模型每条回复以 `§N§ ` 打头，上游在持久化边界剥离，本仓移植时只搬了打标没搬剥离（`stripPersistedAssistantText` 零调用点）。现在落库前剥离（含中断落库路径 `cancelled-stream-persistence`），并在气泡正文、复制、会话列表预览、会话内搜索、CLI transcript 五处消费端剥离——历史里已带标记的消息也不再显示。用户消息与工具参数不剥离。
+- **中断暂停队列后输入不再被吞**：暂停态下输入新消息会被「clear/keep」确认框分支吃掉（该分支历史上被误删了一行 `return;`，确认状态立刻被同函数尾部覆盖，输入被清空且没发出去）。现在补回 `return;`，并把 held 路由从 `choice` 改为 `enqueue`——暂停只停自动派发，追加的输入照常入队（用户拍板语义）；「立即发送」手动提升一条后自动恢复派发，暂停横幅随之消失。
+- **崩溃遗留的「运行中」不再永久显示**：进程被强杀时任务索引最后写入停在 `status=running`，而 sessions-index 同步器刻意不回放历史终态，于是老会话永远显示运行中、点停止也停不下来（本地库实测 82 条任务里 15 条）。现在启动时做一次全量对账、打开项目时再按 workspace 对一次，把「已终态」的 running 收敛为 completed；同一事实的 `task_status` 列与 `meta_json.status` 两处一起写（读路径优先 meta_json，只改列不生效）。对账失败只记 warn，绝不阻断应用启动。
+- **死链 MCP 不再拖住冷启动**：MCP 连接池没有聚合上限，单 server 要等到 `timeoutMs`（默认 30s）——不可达 endpoint 与首次 `npx` 拉包把 MCP startup 拖到 9.4s。现在单 server 连接最多等 4 秒，超时记为 failed（工具不注册），后台连接继续、日后连上自动恢复；`Promise.all` 不会整批失败。
+
+### 已知限制
+
+- MCP 连接上限未覆盖「设置页刷新」的 revalidate 重连分支，该路径仍可能被单个慢 server 拖到 30s。
+- 启动对账会刷新被收敛任务的 `updated_at`，它们会出现在列表顶部。
+
 ## [1.0.20](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.19...v1.0.20) (2026-10-23)
 
 ### 修复
