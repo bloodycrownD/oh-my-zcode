@@ -1430,6 +1430,53 @@ export function createConversationV4Gateway(
           });
         });
     },
+    // ── turn 行清单（row manifest）持久化 ─────────────
+    // 投影只交出「这一轮定稿了多少行」；落库在这里，且必须 detached——manifest 是
+    // 冷开快路径，它的失败只能降级为全量物化，绝不能影响 ingest 与帧发送。
+    recordTurnManifest: (sessionId, entry) => {
+      const turnManifest = context.deps.sessionStore?.turnManifest;
+      if (!turnManifest) return;
+      void turnManifest
+        .upsertTurnManifest({ sessionID: sessionId as SessionId, ...entry })
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 turn manifest write failed", {
+            error: error instanceof Error ? error.message : String(error),
+            event: "zcode_protocol.v4.turn_manifest_write_failed",
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            turnId: entry.turn.turnId,
+          });
+        });
+    },
+    rewriteTurnManifestBranch: (sessionId, input) => {
+      const turnManifest = context.deps.sessionStore?.turnManifest;
+      if (!turnManifest) return;
+      void turnManifest
+        .rewriteTurnManifestBranch({ sessionID: sessionId as SessionId, ...input })
+        .then((result) => {
+          if (result.applied) return;
+          // 源代次不完整（老会话 / 从未写过这个代次）→ 目标代次保持缺失。读端据此
+          // 降级全量物化并重建，**不能**把缺行当成「空分支」。
+          log?.debug("v4 turn manifest branch rewrite skipped", {
+            branchGeneration: input.branchGeneration,
+            event: "zcode_protocol.v4.turn_manifest_rewind_incomplete",
+            missingTurnCount: result.missingTurnIds.length,
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            sourceGeneration: input.sourceGeneration,
+          });
+        })
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 turn manifest branch rewrite failed", {
+            branchGeneration: input.branchGeneration,
+            error: error instanceof Error ? error.message : String(error),
+            event: "zcode_protocol.v4.turn_manifest_rewind_failed",
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            sourceGeneration: input.sourceGeneration,
+          });
+        });
+    },
     // Gateway 的单一 READY promise 负责并发与水位；binder 只恢复 runtime。
     resumePersistedSession: async (
       sessionId,
@@ -1874,6 +1921,9 @@ export function createConversationV4Gateway(
         // gateway 旧字段名仍叫 synthesized；这里表示投影已由 durable
         // transcript 重物化，需替换 ingest 抢先建的 cold publisher。
         synthesized: merged.usedDurableTranscript,
+        // turn 行清单按代次键控。synthesized transcript 不含 RewindTriggered，
+        // 事件重放推不出代次，只能取持久 revert 的真值。
+        branchGeneration: source.branchGeneration,
         subagentsSeed: {
           revision: subagents.revision,
           childSessionIds: subagents.childSessionIds,

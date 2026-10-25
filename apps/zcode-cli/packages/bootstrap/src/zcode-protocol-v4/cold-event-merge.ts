@@ -19,6 +19,11 @@ interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
   messages: MessageWithParts[];
+  /**
+   * 持久化的分支代次（`SessionRevert.branchGeneration`）。turn 行清单按它键控；
+   * 读不到 store 时只能是 0——此时 manifest 也会走缺失降级，不能当成权威代次。
+   */
+  branchGeneration: number;
   /** shared_context 正文仍是 provider-only；这里只下发脱敏的 handover metadata。 */
   sharedContextImport?: ConversationSnapshot["sharedContextImport"];
   /** 只有成功读取 session_target 后才存在；显式 null 也是持久 authority。 */
@@ -63,6 +68,7 @@ export async function loadPersistedConversationMaterialization(input: {
     // 无 sessionStore 时旧 bridge 人工填 target:null，把“没有读取”误当成
     // “持久层明确清空”，进而压掉唯一的内存 TargetChanged 并强制 synthesized。
     return {
+      branchGeneration: 0,
       goalVerificationEntries: [],
       memoryEvents: [...input.memoryEvents],
       messages: [],
@@ -112,6 +118,7 @@ export async function loadPersistedConversationMaterialization(input: {
         : { title: session.title.trim() }
       : undefined;
   return {
+    branchGeneration: session?.revert?.branchGeneration ?? 0,
     goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
     memoryEvents: [...input.memoryEvents],
     messages,

@@ -52,6 +52,7 @@ import type {
   TaskUsageQueryResult,
   TodoItem,
   ToolUsageRecord,
+  TurnManifestStorePort,
   TurnUsageRecord,
   UpsertScriptWorkflowDefinitionInput,
   UpdateScriptWorkflowActivityInput,
@@ -100,6 +101,7 @@ import * as sessionEntryRepository from "./repositories/session-entries.js";
 import * as sessionInputRepository from "./repositories/session-inputs.js";
 import * as sessionRepository from "./repositories/sessions.js";
 import * as todoRepository from "./repositories/todos.js";
+import * as turnManifestRepository from "./repositories/turn-manifest.js";
 import * as usageRepository from "./repositories/usage.js";
 
 function forkChildSessionId(entry: SessionEntryInfo): SessionId | null {
@@ -213,6 +215,7 @@ export class SqliteSessionStore
   private readonly dbPath: string;
   private readonly forkCommitFaultAt?: ForkCommitFaultStage;
   private dwfJournalStore?: JournalStorePort;
+  private turnManifestStore?: TurnManifestStorePort;
 
   constructor(options: SqliteSessionStoreOptions = {}, startupToken?: symbol) {
     this.dbPath = options.dbPath ?? getDefaultSessionDbPath();
@@ -636,6 +639,22 @@ export class SqliteSessionStore
     type?: SessionEntryType | string;
   }): Promise<SessionEntryInfo[]> {
     return sessionEntryRepository.sessionEntries(this.db, input);
+  }
+
+  /** turn 行清单读写面：同一连接上的三条窄方法，按需构造一次。 */
+  get turnManifest(): TurnManifestStorePort {
+    this.turnManifestStore ??= {
+      upsertTurnManifest: (input) => {
+        this.throwBeforeWrite();
+        return turnManifestRepository.upsertTurnManifest(this.db, input);
+      },
+      rewriteTurnManifestBranch: (input) => {
+        this.throwBeforeWrite();
+        return turnManifestRepository.rewriteTurnManifestBranch(this.db, input);
+      },
+      readTurnManifest: (input) => turnManifestRepository.readTurnManifest(this.db, input),
+    };
+    return this.turnManifestStore;
   }
 
   // ── session_input 账本──

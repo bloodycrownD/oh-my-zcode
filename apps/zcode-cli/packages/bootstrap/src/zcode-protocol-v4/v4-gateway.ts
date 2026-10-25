@@ -24,6 +24,7 @@ import type {
   SessionEvent,
   TargetChangedPayload,
   TurnId,
+  TurnManifestBranchRewriteInput,
   FileSystemErrorCode,
 } from "@zcode/contracts";
 import type {
@@ -145,6 +146,7 @@ import type {
   SessionSubagentsSeed,
   SessionUsageSeed,
 } from "./product-projection.js";
+import type { TurnManifestEntry } from "./turn-manifest-entry.js";
 import type { ConversationRowTargetAction } from "./product-projection.js";
 import { SessionsIndexFanoutThrottle } from "./sessions-index-fanout-throttle.js";
 import { SessionsIndexPublisher } from "./sessions-index-publisher.js";
@@ -179,6 +181,11 @@ function rowTargetActionForCommand(
 interface PersistedEventsLoadResult {
   events: SessionEvent[];
   synthesized: boolean;
+  /**
+   * 冷恢复时持久化的分支代次（`SessionRevert.branchGeneration`）。事件重放推不出来：
+   * synthesized transcript 不含 RewindTriggered，缺这个种子 manifest 会键控到代次 0。
+   */
+  branchGeneration?: number;
   /** durable transcript 重放后、live buffer 补回前注入的 store-verified child manifest。 */
   subagentsSeed?: SessionSubagentsSeed;
   /** shared_context 不生成可见 row；只把脱敏 handover metadata 下发。 */
@@ -329,6 +336,20 @@ export interface V4GatewayHost {
   invalidatePersistentCommandFacts?(sessionId: string): void;
   /** canonical goal complete 已进入 projection；宿主副作用必须 detached，禁止阻塞 ingest。 */
   onTargetCompleted?(sessionId: string, event: SessionEvent): void;
+  /**
+   * turn 终态的行清单写入（`onTurnComplete` / `onTurnError` 两处）。实现必须持久、幂等，
+   * 且不得阻塞 ingest——投影侧只负责把 entry 交出来。缺席（旧宿主/测试桩）时只跳过
+   * manifest，投影与协议行为不变。
+   */
+  recordTurnManifest?(sessionId: string, entry: TurnManifestEntry): void | Promise<void>;
+  /**
+   * rewind 的分支重写：把 `keptTurnIds` 描述的保留前缀搬到 `branchGeneration` 代次。
+   * 缺席时该代次的 manifest 保持缺失，读端降级为全量物化并重建。
+   */
+  rewriteTurnManifestBranch?(
+    sessionId: string,
+    input: Omit<TurnManifestBranchRewriteInput, "sessionID">,
+  ): void | Promise<void>;
   /** 完整 chunk transaction commit 后一次性写 session artifact。 */
   putSessionAttachment?(
     sessionId: string,
@@ -987,6 +1008,12 @@ export class ConversationV4Gateway {
 
   private ingestNormalizedEvent(sessionId: string, event: SessionEvent): void {
     const publisher = this.ensurePublisher(sessionId);
+    // rewind 的 manifest 重写必须知道**截断前**的代次与 turn 顺序：投影内部一旦截断，
+    // 旧代次就只剩「还在的新行」，拿不到该复制什么。
+    const manifestBranchBefore =
+      event.type === SessionEventType.RewindTriggered
+        ? publisher.getTurnManifestBranchState()
+        : null;
     const promotedQueueRemoval =
       event.type === SessionEventType.TurnSteerDiscarded &&
       (event.payload as { reason?: string }).reason === "promoted";
@@ -1027,6 +1054,10 @@ export class ConversationV4Gateway {
       return;
     }
     this.resolveProjectionEventCommit(sessionId, String(event.id));
+    this.recordTurnManifestForEvent(sessionId, event, publisher);
+    if (manifestBranchBefore !== null) {
+      this.rewriteTurnManifestBranchForRewind(sessionId, publisher, manifestBranchBefore);
+    }
     if (
       event.type === SessionEventType.TargetChanged &&
       (event.payload as TargetChangedPayload).target?.status === "complete"
@@ -1090,6 +1121,73 @@ export class ConversationV4Gateway {
     }
     // sessions-index fan-out（防御式：任何异常都不能打断 conversation 主路径）。
     this.fanOutToIndex(sessionId, event);
+  }
+
+  /**
+   * turn 终态的行清单写入（`onTurnComplete` 与 `onTurnError` 两个终态点都到这里，
+   * 因为投影对两者都走同一份「行已定稿」状态）。
+   *
+   * 挂在**投影已成功吃下事件之后**：manifest 记的是投影物化出来的行数，投影没吃下的
+   * 事件写进去就是凭空捏造一条全序事实。写入是 detached 的（不阻塞 ingest），
+   * 失败只打点——manifest 缺失的后果是下次冷开降级全量物化，不是数据错误。
+   */
+  private recordTurnManifestForEvent(
+    sessionId: string,
+    event: SessionEvent,
+    publisher: ConversationTopicPublisher,
+  ): void {
+    if (event.type !== SessionEventType.TurnComplete && event.type !== SessionEventType.TurnError) {
+      return;
+    }
+    const record = this.host.recordTurnManifest;
+    if (!record) return;
+    const entry = publisher.getTurnManifestEntry(event);
+    if (!entry) return;
+    try {
+      void Promise.resolve(record(sessionId, entry)).catch((error: unknown) => {
+        this.host.onError?.("v4.turnManifest.record", error, {
+          phase: "record",
+          sessionId,
+          turnId: entry.turn.turnId,
+        });
+      });
+    } catch (error) {
+      this.host.onError?.("v4.turnManifest.record", error, { phase: "record", sessionId });
+    }
+  }
+
+  /**
+   * rewind 的分支重写：把保留前缀搬到新代次（同代次则原地过滤）。
+   *
+   * 只在「代次变了」或「turn 集合变了」时写：workspace `file_summary_rewind` 只改
+   * header 的 fileChanges 状态、不截行，不该触发一次 O(turns) 的 manifest 重写。
+   */
+  private rewriteTurnManifestBranchForRewind(
+    sessionId: string,
+    publisher: ConversationTopicPublisher,
+    before: { branchGeneration: number; turnIds: string[] },
+  ): void {
+    const rewrite = this.host.rewriteTurnManifestBranch;
+    if (!rewrite) return;
+    const after = publisher.getTurnManifestBranchState();
+    const changed =
+      after.branchGeneration !== before.branchGeneration ||
+      after.turnIds.length !== before.turnIds.length ||
+      after.turnIds.some((turnId, index) => turnId !== before.turnIds[index]);
+    if (!changed) return;
+    try {
+      void Promise.resolve(
+        rewrite(sessionId, {
+          branchGeneration: after.branchGeneration,
+          sourceGeneration: before.branchGeneration,
+          keptTurnIds: after.turnIds,
+        }),
+      ).catch((error: unknown) => {
+        this.host.onError?.("v4.turnManifest.rewind", error, { phase: "rewind", sessionId });
+      });
+    } catch (error) {
+      this.host.onError?.("v4.turnManifest.rewind", error, { phase: "rewind", sessionId });
+    }
   }
 
   /**
@@ -3169,6 +3267,9 @@ export class ConversationV4Gateway {
       // 创建时种子可能落空（record 尚未入册），首次订阅补一次（幂等、事件优先）。
       this.hydrationBuffers.delete(sessionId);
       this.seedPublisherConfig(sessionId, latestPublisher);
+      if (loaded.branchGeneration !== undefined) {
+        latestPublisher.seedBranchGeneration(loaded.branchGeneration);
+      }
       if (loaded.sharedContextImport) {
         latestPublisher.seedSharedContextImport(loaded.sharedContextImport);
       }
@@ -3209,6 +3310,11 @@ export class ConversationV4Gateway {
     });
     // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
     phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));
+    // 代次种子放在 rehydrate 之后：rehydrate 会换掉 projection，而 synthesized transcript
+    // 里没有 RewindTriggered，事件重放推不出代次（会停在 0，manifest 键控到错的代次上）。
+    if (loaded.branchGeneration !== undefined) {
+      publisher.seedBranchGeneration(loaded.branchGeneration);
+    }
     if (loaded.sharedContextImport) {
       publisher.seedSharedContextImport(loaded.sharedContextImport);
     }
@@ -3260,6 +3366,13 @@ export class ConversationV4Gateway {
     });
     for (const rawEvent of replayEvents) {
       for (const normalized of this.normalizeRuntimeEventSequence(sessionId, rawEvent)) {
+        // 补回的 buffer 事件绕过了 ingestNormalizedEvent（直接进 publisher），因此
+        // manifest 的两个写入点必须在这里各补一次，否则 hydration 窗口内结束的 turn
+        // 与发生于该窗口的 rewind 都不会落到 manifest 上。
+        const manifestBranchBefore =
+          normalized.type === SessionEventType.RewindTriggered
+            ? publisher.getTurnManifestBranchState()
+            : null;
         try {
           publisher.ingest(normalized);
           this.resolveProjectionEventCommit(sessionId, String(normalized.id));
@@ -3278,6 +3391,11 @@ export class ConversationV4Gateway {
             phase: "replayBufferedEvents",
             sessionId,
           });
+          continue;
+        }
+        this.recordTurnManifestForEvent(sessionId, normalized, publisher);
+        if (manifestBranchBefore !== null) {
+          this.rewriteTurnManifestBranchForRewind(sessionId, publisher, manifestBranchBefore);
         }
       }
     }

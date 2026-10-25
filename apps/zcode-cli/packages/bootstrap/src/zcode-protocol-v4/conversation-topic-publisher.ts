@@ -32,11 +32,8 @@ import type {
   V4ConversationTurnDirectoryResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
-  DEFAULT_MAX_PREVIEW_CHARS,
-  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
   DELIVERY_PROFILES,
   PROTOCOL_V4_LIMITS,
-  buildPreviewText,
   clampWorkflowRunsForLegacy,
   coalesceConversationDeltas,
   filterConversationDeltasForProfile,
@@ -47,6 +44,11 @@ import {
   encodeConversationDeltasForLegacy,
   workflowRunDeltaGrowthUpperBound,
 } from "./conversation-workflow-run-deltas.js";
+import {
+  turnDirectoryAssistantPreviewKind,
+  turnDirectoryPreview,
+  type TurnManifestEntry,
+} from "./turn-manifest-entry.js";
 import {
   ProductProjection,
   type StableForkCandidateResolution,
@@ -68,13 +70,6 @@ const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
   "error",
   "cancelled",
 ]);
-
-/**
- * turn 目录里「没有正文可摘」时的 fallback。i18n 文案不下发（客户端按
- * `assistantPreviewKind` 填 `chat.turnNavigator.*`），所以这里只能是空串——
- * 服务端一旦下发占位文案，客户端就再也无法本地化。
- */
-const TURN_DIRECTORY_EMPTY_PREVIEW = "";
 
 /**
  * cold replay 会高频测量临时 delta；TextEncoder 会为每次测量再分配完整 Uint8Array。
@@ -344,6 +339,25 @@ export class ConversationTopicPublisher {
   }
 
   /**
+   * 分支代次种子（cold hydration）：与 `SessionRevert.branchGeneration` 同源。
+   * 只靠事件重放推导会漏——synthesized transcript 不含 RewindTriggered，
+   * 于是代次停在 0、manifest 键控到错的代次上。
+   */
+  seedBranchGeneration(generation: number): void {
+    this.projection.seedBranchGeneration(generation);
+  }
+
+  /** turn 终态行清单（活投影口径）；该事件已无可物化行时返回 null。 */
+  getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
+    return this.projection.getTurnManifestEntry(event);
+  }
+
+  /** 当前分支代次 + active turn 顺序：rewind 复制 manifest 前缀的唯一坐标。 */
+  getTurnManifestBranchState(): { branchGeneration: number; turnIds: string[] } {
+    return this.projection.getTurnManifestBranchState();
+  }
+
+  /**
    * 下发用快照：rows 只带尾部窗口（snapshotTailWindowRows），
    * totalCount/firstRowId 保留全序口径——客户端以 `window[0].rowId === firstRowId`
    * 判定已到顶，更早历史经 rows/range 游标拉取。投影内部快照保持全量
@@ -572,15 +586,8 @@ export class ConversationTopicPublisher {
       }
     }
 
-    const preview = (texts: readonly string[]): string =>
-      buildPreviewText({
-        texts,
-        // 摘要口径与 renderer rail 严格同源（@zcode/shared/previewText 的 220 字符 / 2 段）。
-        fallback: TURN_DIRECTORY_EMPTY_PREVIEW,
-        maxPreviewChars: DEFAULT_MAX_PREVIEW_CHARS,
-        maxPreviewParagraphs: DEFAULT_MAX_PREVIEW_PARAGRAPHS,
-      });
-
+    // 摘要口径与 manifest 共用同一份派生（turn-manifest-entry.ts）：manifest 快路径与
+    // 全量物化出的目录必须逐字节一致，两条路径各写一份 preview 就不可能对齐。
     const allEntries = queries
       .toSorted((left, right) => left.rowId - right.rowId)
       .map((row): TurnDirectoryEntry => {
@@ -589,14 +596,15 @@ export class ConversationTopicPublisher {
         return {
           turnId: row.turnId,
           queryRowId: row.rowId,
-          queryPreview: preview([row.text]),
+          queryPreview: turnDirectoryPreview([row.text]),
           // 文案不下发：非 text 态的 assistantPreview 恒为空串，客户端按枚举填 i18n。
-          assistantPreview: hasAssistantText ? preview(turn?.assistantTexts ?? []) : "",
-          assistantPreviewKind: hasAssistantText
-            ? "text"
-            : turn?.headerState === "running"
-              ? "running"
-              : "empty",
+          assistantPreview: hasAssistantText
+            ? turnDirectoryPreview(turn?.assistantTexts ?? [])
+            : "",
+          assistantPreviewKind: turnDirectoryAssistantPreviewKind(
+            hasAssistantText,
+            turn?.headerState,
+          ),
         };
       });
 

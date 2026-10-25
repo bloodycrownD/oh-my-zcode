@@ -180,6 +180,22 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 - **`durableTurnByMessageId` 的数据源**：manifest 的 `message_ids_json` 给出 `messageId → turnId`，替代 `cold-event-merge.ts:506-544` 的全量扫描。**`durableTurnByRuntimeAnchor`（`:552-573`）需要 `message.info.anchor.turnId` 的 runtime 锚，manifest 没有这一列**——该场景改用索引查询 `select json_extract(data,'$.anchor.turnId') from message where session_id=?`（O(turns) 级，不解析正文），不再二选一。
 - **`selectActiveConversationBranch` 输入放宽**：改为「id 序 + 可选正文映射」，全量与索引两条路径共用同一函数（不写第二份规则）。
 
+#### Step 2 落地说明（实现后回填，Step 3+ 直接按此接）
+
+| 事项 | 落地形态 | Step 3+ 必须遵守 |
+|---|---|---|
+| 表与迁移 | `adapters/.../migrations/0023-session-turn-manifest.ts`（`0023_session_turn_manifest`），两张表 + 3 个索引；**不加 session FK**（detached live child 有 turn 但无 session 行，`pragma foreign_keys=on` 会把合法写入挡掉） | 消息索引（Step 3）与 `session-row-manifest.ts`（Step 4）只读这两张表，不得另建缓存表 |
+| 写入口 | `contracts` 的 `TurnManifestStorePort`（`session-store.port.ts`，`SessionStorePort.turnManifest?` 可选）；仓储 `repositories/turn-manifest.ts` | 读端经同一个可选端口；缺席 = 降级全量物化，**不得**当成空分支 |
+| 写入路径拆分 | `ProductProjection.getTurnManifestEntry(event)` 只**派生**（纯 reducer，无 store），gateway 在 `ingestNormalizedEvent` 与 hydration 的 buffer 补回环里各自 `recordTurnManifest`（detached）。两个终态点（`turn_complete` / `turn_error`）在投影内是同一份「行已定稿」状态，故用事件类型闸门而不是两个调用点 | 不得在投影内直连 store；新增写入点必须同时补这两条 ingest 路径，否则 hydration 窗口内结束的 turn 会缺席 |
+| 只登记 realUser | query 行由 `buildTurnManifestEntry`（`turn-manifest-entry.ts`）从同 turn 行派生，`origin !== "realUser"` 只计 `row_count` 不成条 | 目录只读 query 表，不得再扫投影行 |
+| preview 口径 | `turnDirectoryPreview` / `turnDirectoryAssistantPreviewKind` 是该口径的**唯一实现**，`getTurnDirectory` 与 manifest 共用（原先 publisher 内的私有实现已外移） | 改 220 字 / 2 段预算只改这一处，否则 T-SL7 必红 |
+| query 级 `row_count` | 定义为**分段行数**：从该 query 行（含）到下一个 realUser query 行（不含）或 turn 末尾；turnHeader 不属于任何分段 | 翻页按 `query_row_id + row_count` 定位时按此定义 |
+| `projection_schema_version` | 常量在 `bootstrap/.../turn-manifest-entry.ts`（`TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 1`），仓储只当不透明整数存 | 投影规则一变必须 +1；读端拿 `schemaMismatch` 即整表重建 |
+| 代次 | `ProductProjection.branchGeneration` 常驻字段（事件 rewind 时 `max` 进位、`clone/adopt` 一并搬运、`seedBranchGeneration` 只升不降，种子来自 `loadPersistedEvents` 的 `branchGeneration`） | 任何新增的投影 clone/adopt 路径必须搬这个字段（漏搬 = rewind 的 +1 静默丢失） |
+| rewind 重写 | `rewriteTurnManifestBranch({ branchGeneration, sourceGeneration, keptTurnIds })`：按给定顺序重排 ordinal、`row_count` 不重算、成功后清掉更早代次；源代次缺任一保留 turn → `applied:false`（目标代次保持缺失） | 读端把 `applied:false` 与 `missing` 同等对待（降级全量物化 + 重建） |
+| 空分支 | 完全 rewind 掉的分支在存储里没有行 → 读作 `missing`，由降级路径全量物化（成本本来就是一次空读）；`totalCount=0 / firstRowId=null` 由 `deriveTurnManifestTotals` 统一保证（manifest 快路径与重建路径共用） | 不得为「空分支」另加标记行，也不得把 totalCount 改估算 |
+| 账目修正 | `readTurnManifest({ observedRowCounts })` 就地改不一致的 `row_count` 并回 `manifestAdjusted` + `adjustedTurnIds`；幂等（第二次不再修正）；后续 turn 的 base 因累加自动平移 | `manifestAdjusted` 的打点落在 Step 4 的读取调用处（Step 2 无读路径） |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。

@@ -89,3 +89,33 @@ export interface InputHistoryRow {
   kind: string;
   time_created: number;
 }
+
+export interface TurnManifestRow {
+  session_id: string;
+  branch_generation: number;
+  ordinal: number;
+  turn_id: string;
+  first_message_id: string | null;
+  last_message_id: string | null;
+  message_ids_json: string;
+  row_count: number;
+  row_count_source: "live" | "cold";
+  projection_schema_version: number;
+  time_created: number;
+  time_updated: number;
+}
+
+export interface TurnQueryManifestRow {
+  session_id: string;
+  branch_generation: number;
+  turn_id: string;
+  query_ordinal_in_turn: number;
+  query_message_id: string | null;
+  query_row_id: number;
+  row_count: number;
+  query_preview: string;
+  assistant_preview: string;
+  assistant_preview_kind: "text" | "running" | "empty";
+  time_created: number;
+  time_updated: number;
+}

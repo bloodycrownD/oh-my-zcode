@@ -1026,6 +1026,127 @@ export interface LocalSettingStorePort {
   }): CollaborationMode | Promise<CollaborationMode>;
 }
 
+// ── turn 行清单（row manifest）：全序计数的持久权威 ─────────────────────────
+//
+// 两张表分工（session_turn_manifest / session_turn_query_manifest）：
+//   turn 级  —— 出 totalCount、firstRowId 与每个 turn 的 rowId base（base =
+//               1 + Σ 前序 active turn 的 rowCount，**不落库**：落库就会成为与投影
+//               规则并存的第二个事实源）；
+//   query 级 —— 出 turnDirectory（只登记 origin === "realUser" 的 query）。
+//
+// 键控坐标是 (sessionID, branchGeneration)：branchGeneration 与
+// `SessionRevert.branchGeneration` 同源，每次 destructive conversation rewind 单调 +1。
+// 空 active 分支在存储里没有任何行，因此与「manifest 缺失」同义；读端按降级处理，
+// 降级后仍需满足 totalCount=0 / firstRowId=null（见 TurnManifestSnapshot）。
+
+/** `rowCount` 的产生路径：live = 活投影终态；cold = 冷物化回写。 */
+export type TurnManifestRowCountSource = "live" | "cold";
+
+export interface TurnManifestTurnRecord {
+  turnId: string;
+  /** active 分支内的 turn 位置（0 起）。决定 rowId base 的累加顺序。 */
+  ordinal: number;
+  /** 该 turn 全部可投影 messageId（按行序、去重）。 */
+  messageIds: string[];
+  firstMessageId: MessageId | null;
+  lastMessageId: MessageId | null;
+  /** 该 turn 在投影里的行数（含 turnHeader 与同 turn 的 steer 行）。 */
+  rowCount: number;
+  rowCountSource: TurnManifestRowCountSource;
+  /** 投影规则版本；不匹配即整表重建，避免 rowId 整体漂移。 */
+  projectionSchemaVersion: number;
+}
+
+export interface TurnManifestQueryRecord {
+  turnId: string;
+  /** 同一 turn 内 realUser query 的序号（0 起）。steer query 各自成条。 */
+  queryOrdinalInTurn: number;
+  /** 该 query 行的 transcript messageId；旧事件可能没有。 */
+  queryMessageId: MessageId | null;
+  queryRowId: number;
+  /**
+   * 该 query 分段的行数：从 query 行自身（含）到下一个 realUser query 行（不含）
+   * 或 turn 末尾为止。turn 起始的 turnHeader 不属于任何分段。
+   */
+  rowCount: number;
+  queryPreview: string;
+  assistantPreview: string;
+  assistantPreviewKind: "text" | "running" | "empty";
+}
+
+export interface TurnManifestWrite {
+  sessionID: SessionId;
+  branchGeneration: number;
+  turn: TurnManifestTurnRecord;
+  /** 该 turn 的全部 realUser query 行（整批替换，不做增量合并）。 */
+  queries: TurnManifestQueryRecord[];
+}
+
+export interface TurnManifestSnapshot {
+  branchGeneration: number;
+  /** 按 ordinal 升序。 */
+  turns: TurnManifestTurnRecord[];
+  /** 按 (turnId 的 turn 顺序, queryOrdinalInTurn) 升序。 */
+  queries: TurnManifestQueryRecord[];
+  /** Σ turn.rowCount；空 active 分支为 0。 */
+  totalCount: number;
+  /** 空 active 分支为 null；否则恒为 1（rowId base 从 1 起）。 */
+  firstRowId: number | null;
+  realUserQueryTotal: number;
+  /** 本次读取是否做过账目修正（就地改 row_count，不重读正文）。 */
+  manifestAdjusted: boolean;
+  adjustedTurnIds: string[];
+}
+
+export type TurnManifestReadResult =
+  | { status: "missing" }
+  | { status: "schemaMismatch"; expectedVersion: number; foundVersions: number[] }
+  | { status: "ok"; snapshot: TurnManifestSnapshot };
+
+export interface TurnManifestReadInput {
+  sessionID: SessionId;
+  branchGeneration: number;
+  expectedProjectionSchemaVersion: number;
+  /**
+   * 已物化窗口内 turn → 实际行数。给出时做一次 O(turns) 账目修正：
+   * 只改不一致的 row_count（后续 turn 的 base 因累加而自动平移），不重读正文。
+   */
+  observedRowCounts?: ReadonlyMap<string, number>;
+}
+
+export interface TurnManifestBranchRewriteInput {
+  sessionID: SessionId;
+  /** 目标代次（rewind 后 = 事件给出的新代次）。 */
+  branchGeneration: number;
+  /** 复制来源代次；等于目标代次表示原地过滤同一代次。 */
+  sourceGeneration: number;
+  /** 保留的 turn，按 active 分支行序；ordinal 依此重建。 */
+  keptTurnIds: readonly string[];
+}
+
+/**
+ * rewind 分支重写结果。`applied: false` 表示源 manifest 不完整（老会话、gen 不匹配、
+ * 该代次从未写过）——目标代次保持缺失，读端据此降级为全量物化并重建，**不得**把
+ * 「缺行」当成「空分支」。
+ */
+export type TurnManifestBranchRewriteResult =
+  | { applied: true; keptTurnCount: number }
+  | { applied: false; reason: "sourceIncomplete"; missingTurnIds: string[] };
+
+/**
+ * manifest 读写面。实现约束：
+ * - 写入是整 turn 替换（turn 行 upsert + 该 turn 的 query 行整批替换），幂等；
+ * - branchGeneration 变化时只复制保留的 turn，不重算 row_count；
+ * - 读取不得读 message/part 正文。
+ */
+export interface TurnManifestStorePort {
+  upsertTurnManifest(input: TurnManifestWrite): Promise<void>;
+  rewriteTurnManifestBranch(
+    input: TurnManifestBranchRewriteInput,
+  ): Promise<TurnManifestBranchRewriteResult>;
+  readTurnManifest(input: TurnManifestReadInput): Promise<TurnManifestReadResult>;
+}
+
 export interface SessionStorePort {
   createSession(input: CreateSessionInput): Promise<SessionInfo>;
   /** legacy 兼容原语；V4 stable/compact-edit fork 禁止调用，统一走 commitForkBundle。 */
@@ -1071,6 +1192,11 @@ export interface SessionStorePort {
     sessionID: SessionId;
     type?: SessionEntryType | string;
   }): Promise<SessionEntryInfo[]>;
+  /**
+   * turn 行清单读写面（可选：旧宿主/内存 store 不实现）。缺席时投影侧只跳过 manifest
+   * 写入，读取方必须降级为全量物化——不得把「没实现」当成「空分支」。
+   */
+  turnManifest?: TurnManifestStorePort;
   // ── session_input 账本（可选方法，旧宿主可不实现）──
   /** admission：输入已被接受（排队/待注入），durable 记账。幂等（同 id 重入更新 payload）。 */
   saveSessionInput?(input: {

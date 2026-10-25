@@ -15,6 +15,7 @@ import type {
   AssistantFeedbackUpdatedPayload,
   DynamicWorkflowRunProgressPayload,
   HookRunLifecyclePayload,
+  MessageId,
   ModelCompletePayload,
   ModelNetworkStatusPayload,
   ModelSelectedPayload,
@@ -146,6 +147,7 @@ import {
   SESSION_ALLOW_PERMISSION_OPTION_KIND,
 } from "../permission-options.js";
 import { shouldHideInvalidToolCallFromProduct } from "../tool-call-product-visibility.js";
+import { buildTurnManifestEntry, type TurnManifestEntry } from "./turn-manifest-entry.js";
 
 type HookInvocationRowContent = Omit<
   HookInvocationRow,
@@ -435,6 +437,13 @@ export class ProductProjection {
   private rowIndexById = new Map<number, number>();
   private hydrationAccumulator: MutableConversationSnapshotAccumulator | null = null;
   private nextRowId = 1;
+  /**
+   * 当前 active 分支代次（与 `SessionRevert.branchGeneration` 同源）。
+   * manifest 按它键控：每次 destructive conversation rewind +1，rewind 时把保留前缀复制到
+   * 新代次。这里保存是必需的——`onRewindTriggered` 过去只读事件载荷、从不留状态，
+   * 于是写 manifest 时没有键可用。
+   */
+  private branchGeneration = 0;
   private streamingTextRowId: number | null = null;
   private streamingReasoningRowId: number | null = null;
   // output-token Continue 是同一 product turn 内的请求级恢复，不应泄漏成新的正文行。
@@ -781,6 +790,69 @@ export class ProductProjection {
   }
 
   /**
+   * 分支代次种子（cold hydration）：与 `SessionRevert.branchGeneration` 同源，事件重放
+   * 推导不出来（synthesized transcript 不含 RewindTriggered）。取 max 保持幂等：
+   * 事件重放已推出的更大代次不会被种子回退。
+   */
+  seedBranchGeneration(generation: number): void {
+    if (!Number.isInteger(generation) || generation < 0) return;
+    this.branchGeneration = Math.max(this.branchGeneration, generation);
+  }
+
+  /**
+   * turn 终态的行清单（活投影口径）。
+   *
+   * 只读当前投影行，**不**回读 store：row_count 是投影的副产物，先落 manifest 再回读会
+   * 把「投影还没物化完」写成「这一轮就这么点行」。行已被 rewind 截掉（迟到终态）→ null。
+   */
+  getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
+    // 只有终态才有「定稿的行数」：非终态即使能算出来，也是缺收尾行（tool 收口、header
+    // 终态）的中间快照，写进去会让冷开读到未收口的全序，随后又被真正的终态覆盖。
+    if (event.type !== SessionEventType.TurnComplete && event.type !== SessionEventType.TurnError) {
+      return null;
+    }
+    const turnId = this.turnIdOf(event);
+    const rows = this.snapshot.rows.window;
+    const seenTurnIds = new Set<string>();
+    let ordinal = -1;
+    let index = 0;
+    for (; index < rows.length; index += 1) {
+      if (rows[index]!.turnId === turnId) {
+        ordinal = seenTurnIds.size;
+        break;
+      }
+      seenTurnIds.add(rows[index]!.turnId);
+    }
+    if (ordinal < 0) return null;
+    const turnRows: ConversationRow[] = [];
+    for (; index < rows.length; index += 1) {
+      const row = rows[index]!;
+      if (row.turnId !== turnId) break;
+      turnRows.push(row);
+    }
+    return buildTurnManifestEntry({
+      turnId,
+      ordinal,
+      rows: turnRows,
+      messageIdForRow: (rowId) => this.messageIdByRowId.get(rowId) as MessageId | undefined,
+      rowCountSource: "live",
+      branchGeneration: this.branchGeneration,
+    });
+  }
+
+  /** 当前分支代次 + active turn 顺序（行序）；rewind 复制 manifest 前缀的坐标。 */
+  getTurnManifestBranchState(): { branchGeneration: number; turnIds: string[] } {
+    const turnIds: string[] = [];
+    const seen = new Set<string>();
+    for (const row of this.snapshot.rows.window) {
+      if (seen.has(row.turnId)) continue;
+      seen.add(row.turnId);
+      turnIds.push(row.turnId);
+    }
+    return { branchGeneration: this.branchGeneration, turnIds };
+  }
+
+  /**
    * rowId → 权威 messageId。桥接层执行 forkAssistant/editUserQuery 时把命令载荷的
    * 内部 rowId 翻译成 core 需要的 messageId。未知 rowId（非 assistant/user 行、
    * 或迟到）返回 null，桥接层据此回 rejected。
@@ -1123,6 +1195,9 @@ export class ProductProjection {
     clone.rowIndexById = new Map(this.rowIndexById);
     clone.hydrationAccumulator = null;
     clone.nextRowId = this.nextRowId;
+    // 分支代次同样要随 clone/adopt 走：ingest 的原子提交路径在候选实例上归约，
+    // 漏拷这一项会让 rewind 的 +1 在 adopt 后静默丢失（manifest 键控到旧代次）。
+    clone.branchGeneration = this.branchGeneration;
     clone.streamingTextRowId = this.streamingTextRowId;
     clone.streamingReasoningRowId = this.streamingReasoningRowId;
     clone.outputContinuationTextRowId = this.outputContinuationTextRowId;
@@ -1183,6 +1258,7 @@ export class ProductProjection {
     this.rowIndexById = candidate.rowIndexById;
     this.hydrationAccumulator = null;
     this.nextRowId = candidate.nextRowId;
+    this.branchGeneration = candidate.branchGeneration;
     this.streamingTextRowId = candidate.streamingTextRowId;
     this.streamingReasoningRowId = candidate.streamingReasoningRowId;
     this.outputContinuationTextRowId = candidate.outputContinuationTextRowId;
@@ -1857,6 +1933,13 @@ export class ProductProjection {
         this.rewoundHookInvocationIds.add(hookInvocationId);
         this.hookRowIdByInvocationId.delete(hookInvocationId);
       }
+    }
+    // 代次推进与行截断是**同一次提交**：manifest 按代次键控，只截行不换代次会让新 turn
+    // 在旧代次里复用被截 turn 的 ordinal（同一 ordinal 两个 turn），只换代次不截行会让
+    // manifest 把已截掉的 turn 复制进新代次。两者必须同时发生，且旧语义（仅
+    // createdMessageId、无代次）保持代次不变、由 manifest 原地过滤。
+    if (payload.branchGeneration !== undefined && Number.isInteger(payload.branchGeneration)) {
+      this.branchGeneration = Math.max(this.branchGeneration, payload.branchGeneration);
     }
     return [{ op: "row.removed", fromRowId }];
   }
