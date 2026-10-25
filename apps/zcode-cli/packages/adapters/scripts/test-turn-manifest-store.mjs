@@ -16,6 +16,10 @@
  *       后续 turn 的 base 因累加自动平移；重复修正必须幂等（第二次 adjusted=false）。
  *   D. **空分支**：totalCount=0 / firstRowId=null，不是 firstRowId=1。
  *   E. **版本**：projection_schema_version 不一致必须能被读出来（整表重建的前提）。
+ *   F. **清单缺项**（Step 3）：ordinal 空洞 / 有 turn 未登记 / manifest 指向索引里不存在的
+ *      消息 → 一律 `inconsistent` 走整表重建。这三种都**不能**用账目修正糊过去：修正只改
+ *      「已登记 turn 的行数」，补不了缺的 turn 或错的分支——糊过去的结果是 totalCount
+ *      偏小 / rowId base 整体前移（静默错位，不是报错）。
  *
  * 运行方式：`node --import tsx --test scripts/test-turn-manifest-store.mjs`
  * （走 tsx 因为被测代码是 `src/` 的 TypeScript；仓储本身只依赖 node:sqlite 与本地模块。）
@@ -437,5 +441,107 @@ test("E5: 同一 ordinal 被新 turn 占用时，旧分支残留被逐出（不�
     result.snapshot.queries.map((item) => item.queryRowId),
     [2, 40, 21],
   );
+  db.close();
+});
+
+// ── F: 清单缺项 → 整表重建（Step 3 的「未登记 turn」检测）────────────────────
+
+test("F1: ordinal 出现空洞 → inconsistent/ordinalGap，且不做账目修正", async () => {
+  const db = emptyDb();
+  await seedThreeTurns(db);
+  // 中间轮次的登记行没写进去（detached 写入丢失）。t3 的 ordinal 仍是 2 → 0,2 空洞。
+  db.prepare("delete from session_turn_manifest where session_id = ? and turn_id = ?").run(
+    SESSION,
+    "t2",
+  );
+  const result = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    // 账目修正不能把「缺一整轮」糊过去：先判缺项，再谈行数偏差。
+    observedRowCounts: new Map([["t1", 99]]),
+  });
+  assert.equal(result.status, "inconsistent");
+  assert.equal(result.reason, "ordinalGap");
+  assert.deepEqual(result.turnIds, []);
+  assert.deepEqual(result.missingMessageIds, []);
+  const untouched = db
+    .prepare("select row_count from session_turn_manifest where session_id = ? and turn_id = ?")
+    .get(SESSION, "t1");
+  assert.equal(untouched.row_count, 3, "判缺项时不得顺手改 row_count");
+  db.close();
+});
+
+test("F2: 观察到的 turn 里有 manifest 未登记的 → inconsistent/unregisteredTurns", async () => {
+  const db = emptyDb();
+  await seedThreeTurns(db);
+
+  const complete = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    observedTurnIds: ["t1", "t2", "t3"],
+  });
+  assert.equal(complete.status, "ok", "子集观察不得误判");
+
+  const missing = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    observedTurnIds: ["t1", "t2", "t3", "t4", "t4", "t9"],
+  });
+  assert.equal(missing.status, "inconsistent");
+  assert.equal(missing.reason, "unregisteredTurns");
+  // 去重且保序：重复观察不能把同一个 turn 报两遍。
+  assert.deepEqual(missing.turnIds, ["t4", "t9"]);
+  db.close();
+});
+
+test("F3: manifest 的 messageId 不在消息索引里 → inconsistent/messageIndexMismatch", async () => {
+  const db = emptyDb();
+  await seedThreeTurns(db);
+
+  const complete = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    observedMessageIds: ["t1-m1", "t1-m2", "t2-m1", "t2-m2", "t3-m1", "t3-m2", "unrelated"],
+  });
+  assert.equal(complete.status, "ok", "索引多出无关行不算失配");
+
+  const missing = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    observedMessageIds: ["t1-m1", "t1-m2", "t2-m1", "t2-m2", "t3-m1"],
+  });
+  assert.equal(missing.status, "inconsistent");
+  assert.equal(missing.reason, "messageIndexMismatch");
+  assert.deepEqual(missing.missingMessageIds, ["t3-m2"]);
+  db.close();
+});
+
+test("F4: messageIndexMismatch 的诊断列表截断到 20 条（不把日志打爆）", async () => {
+  const db = emptyDb();
+  const messageIds = Array.from({ length: 40 }, (_value, index) => `bulk-m${index}`);
+  await upsertTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    turn: turn("t1", 0, 40, {
+      messageIds,
+      firstMessageId: messageIds[0],
+      lastMessageId: messageIds[39],
+    }),
+    queries: [],
+  });
+  const result = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+    observedMessageIds: [],
+  });
+  assert.equal(result.status, "inconsistent");
+  assert.equal(result.reason, "messageIndexMismatch");
+  assert.equal(result.missingMessageIds.length, 20);
   db.close();
 });

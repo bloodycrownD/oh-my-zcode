@@ -196,6 +196,20 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | 空分支 | 完全 rewind 掉的分支在存储里没有行 → 读作 `missing`，由降级路径全量物化（成本本来就是一次空读）；`totalCount=0 / firstRowId=null` 由 `deriveTurnManifestTotals` 统一保证（manifest 快路径与重建路径共用） | 不得为「空分支」另加标记行，也不得把 totalCount 改估算 |
 | 账目修正 | `readTurnManifest({ observedRowCounts })` 就地改不一致的 `row_count` 并回 `manifestAdjusted` + `adjustedTurnIds`；幂等（第二次不再修正）；后续 turn 的 base 因累加自动平移 | `manifestAdjusted` 的打点落在 Step 4 的读取调用处（Step 2 无读路径） |
 
+#### Step 3 落地说明（实现后回填，Step 4+ 直接按此接）
+
+| 事项 | 落地形态 | Step 4+ 必须遵守 |
+|---|---|---|
+| 索引读面 | `adapters/.../repositories/messages.ts` 的 `listSessionMessageIndex({ sessionID })`；端口 `SessionStorePort.listSessionMessageIndex?`（**可选**，缺席 = 降级全量 `messages()`，不得当空会话） | 只吃这一个入口，不另写 SQL；读端不得回退成 `messages()` 除非端口缺席 |
+| 读哪些列 | 只 `select id, sequence, time_created, rowid as storage_row_id`（窄行类型 `MessageIndexRow` **没有 data 列**，类型上就退不回正文读）；条目形状 `{ id, sequence, timeCreated, storageRowId }`，`storageRowId` **不是**投影 rowId。实测（`:memory:`，5000 消息 / 20000 part × 1200B）：索引读 **6.8ms** vs `messages()` 全量 **131.7ms**（≈19×），是 Step 5 读放大比的分母基线（不是 phase-0 基线） | 不得 `select *` / 读 `data`（role 在 data JSON 里）；门禁 `test-session-message-index.mjs` A4/A5 是形状守卫 |
+| 排序 | 逐字复刻 `messages()` 的 `order by sequence is null, sequence, time_created, rowid`（`sequence is null` 的 0/1 让 NULL 行排在**非空之后**；`time_created`/`rowid` 两个 tiebreaker 不能省）。形状守卫直接比对两段 SQL 的 ORDER BY 子串 | 改序只能同时改两处，否则 A4 红 |
+| part 侧 | 本步**不做**：part 权威序（`order by message_id, sequence is null, sequence, time_created, id`）随 Step 5 的两段查询一次落在 `readActiveBranchTail` | Step 5 必须复刻该序，且与 message 段同一事务窗口 |
+| 裁断规则 | 唯一实现 `selectActiveConversationBranchIds(orderedMessageIds, options)`（contracts/rewind）；`selectActiveConversationBranch(items, options)` 只做「id 序 → 条目」映射，新增可选 `getMessageId` 访问器（索引条目没有 `info`）。既有 6 个调用点零改动（默认访问器读 `{ info: { id } }`） | **不得**再写第二份分支判断；任何路径（resume / cold / fork / 索引）都规约到 id 核心 |
+| 双路等价 | `adapters/scripts/test-session-message-index.mjs`（`test:session-message-index`）覆盖 T-SL1 + T-SL2 的 Step 3 部分：排序复刻（NULL/撞号/同时间/rewind 空洞/跨会话隔离）+ 10 组双路等价（target 在/不在、cut 在/不在、kept 混入不存在的 id、kept+created、只喂窗口） | 新增裁断分支必须补一组双路用例 |
+| 未登记 turn 检测 | `readTurnManifest` 新增两个**可选**观察输入：`observedMessageIds`（`listSessionMessageIndex` 的 id）与 `observedTurnIds`（调用方的权威 turn：投影或 durable 事件）。返回新状态 `{ status: "inconsistent", reason }`，reason ∈ `ordinalGap` / `unregisteredTurns` / `messageIndexMismatch` → **整表重建**，且**先于**账目修正 | 读端（Step 4）必须把索引 id 传进 `observedMessageIds`；`observedTurnIds` 是抓「尾部丢轮」的唯一手段——**消息索引没有 turn 维度**，索引只能查「manifest 指向已不存在的消息」 |
+| 缺项 vs 修正 | `ordinalGap` 由 manifest 自身判出（写入口的 ordinal 恒连续，空洞 = detached 写入丢失）；`unregisteredTurns` 需要外部 turn 观察；`messageIndexMismatch` 只诊断前 20 条 messageId | `inconsistent` 与 `missing`/`schemaMismatch` 同等对待：降级全量物化 + 重建 manifest（`manifestFallback` 打点带 reason） |
+| 性能遗留 | `ProductProjection.getTurnManifestEntry` 的终态派生仍是「从 rows 头扫到本 turn」（O(rows)/次，累计 O(turns×rows)）。实测 5k 行 / 500 轮：整会话累计 20ms、单次平均 40µs（最后一轮最坏 77µs，含 Set 分配），且只在**终态事件**上发生（非终态在入口早退） | 优化**推给 Step 4**：rowId base 的累加本来就需要「turn 序 + 每轮行数」这份状态，届时用一份 `turnIds` 序 + `firstRowIndex` 索引同时服务 base 与 ordinal，并**必须**同步进 `cloneProjection`/`adoptProjection`（漏搬 = base/ordinal 静默漂移）；本步不新增第二份状态 |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。

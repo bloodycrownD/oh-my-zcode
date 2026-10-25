@@ -45,6 +45,17 @@ export interface PartRow {
   data: string;
 }
 
+/**
+ * `listSessionMessageIndex` 的窄行：只有排序键与 rowid，**没有 `data`**。
+ * 存在这一层是为了让「索引读」在类型上就无法退化成正文读（role 在 data JSON 里）。
+ */
+export interface MessageIndexRow {
+  id: string;
+  sequence: number | null;
+  time_created: number;
+  storage_row_id: number;
+}
+
 export interface SessionEntryRow {
   id: string;
   session_id: string;

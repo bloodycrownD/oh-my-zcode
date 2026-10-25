@@ -43,6 +43,7 @@ import type {
   SessionInputDelivery,
   SessionInputRecord,
   SessionInputStatus,
+  SessionMessageIndexEntry,
   SessionTaskLinkRecord,
   SessionRevert,
   SessionStorePort,
@@ -627,6 +628,12 @@ export class SqliteSessionStore
 
   async messages(input: { sessionID: SessionId }): Promise<MessageWithParts[]> {
     return messageRepository.messages(this.db, input);
+  }
+
+  async listSessionMessageIndex(input: {
+    sessionID: SessionId;
+  }): Promise<SessionMessageIndexEntry[]> {
+    return messageRepository.listSessionMessageIndex(this.db, input);
   }
 
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {

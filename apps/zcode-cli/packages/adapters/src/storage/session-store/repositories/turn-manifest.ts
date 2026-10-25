@@ -278,6 +278,11 @@ export async function rewriteTurnManifestBranch(
  * - 该代次没有行 → `missing`（与「空 active 分支」同义：读端降级全量物化，空分支的
  *   全量物化本来就是一次空读）；
  * - `projection_schema_version` 不一致 → `schemaMismatch`（必须整表重建，否则 rowId 整体漂移）；
+ * - 清单本身缺项/指向不存在的消息 → `inconsistent`（整表重建，**不做**账目修正）：
+ *   - `ordinalGap`：登记行 ordinal 出现空洞 = 中间某轮从未登记；
+ *   - `unregisteredTurns`：调用方给出的权威 turn 里有未登记的（尾部丢失只能靠它抓——
+ *     消息索引没有 turn 维度）；
+ *   - `messageIndexMismatch`：manifest 的 messageId 不在消息索引里（消息被删/换库）。
  * - `observedRowCounts` 给出时做账目修正：只改不一致的 `row_count` 并置 `manifestAdjusted`，
  *   后续 turn 的 base 因累加而自动平移，不重读正文。
  */
@@ -306,6 +311,49 @@ export async function readTurnManifest(
         expectedVersion: input.expectedProjectionSchemaVersion,
         foundVersions,
       };
+    }
+
+    // 清单缺项优先于账目修正：修正只处理「已登记 turn 的行数偏差」，补不了缺的 turn。
+    // ordinal 是写入口按投影给的连续序号（rewind 重写时按 keptTurnIds 重排），
+    // 出现空洞只可能是 detached 写入丢失 —— 那正是「有 turn 从未登记」。
+    const ordinalGap = rows.some((row, index) => row.ordinal !== index);
+    if (ordinalGap) {
+      db.exec("commit");
+      return { status: "inconsistent", reason: "ordinalGap", turnIds: [], missingMessageIds: [] };
+    }
+    if (input.observedTurnIds && input.observedTurnIds.length > 0) {
+      const registered = new Set(rows.map((row) => row.turn_id));
+      const unregistered = [...new Set(input.observedTurnIds)].filter(
+        (turnId) => !registered.has(turnId),
+      );
+      if (unregistered.length > 0) {
+        db.exec("commit");
+        return {
+          status: "inconsistent",
+          reason: "unregisteredTurns",
+          turnIds: unregistered,
+          missingMessageIds: [],
+        };
+      }
+    }
+    if (input.observedMessageIds) {
+      const indexed = new Set<string>(input.observedMessageIds);
+      const missing: string[] = [];
+      for (const row of rows) {
+        for (const messageId of decodeMessageIds(row.message_ids_json)) {
+          if (!indexed.has(messageId)) missing.push(messageId);
+        }
+      }
+      if (missing.length > 0) {
+        db.exec("commit");
+        return {
+          status: "inconsistent",
+          reason: "messageIndexMismatch",
+          turnIds: [],
+          // 只留前 20 条：这是诊断信息，不是清单（拉全量会把日志打爆）。
+          missingMessageIds: [...new Set(missing)].slice(0, 20),
+        };
+      }
     }
 
     const adjustedTurnIds: string[] = [];

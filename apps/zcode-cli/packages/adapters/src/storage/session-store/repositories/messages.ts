@@ -6,11 +6,12 @@ import type {
   MessageWithParts,
   PartId,
   SessionId,
+  SessionMessageIndexEntry,
   SessionStorePort,
 } from "@zcode/contracts";
 import { decodeMessageRow, decodePartRow, partCreatedAt } from "../codecs.js";
 import { encodeJson } from "../json.js";
-import type { MessageRow, PartRow } from "../rows.js";
+import type { MessageIndexRow, MessageRow, PartRow } from "../rows.js";
 import { touchSession } from "./sessions.js";
 
 // 只补回旧版快照字段，不合并整个 JSON：递归 merge 会让已清空的 metadata/options 残留。
@@ -216,6 +217,38 @@ export async function removePart(
     input.messageID,
     input.sessionID,
   );
+}
+
+/**
+ * 全序消息索引（IS2 的「id 必须全序」读面）：只读排序键，**不读 `data`**。
+ *
+ * 排序必须与 `messages()` 逐字一致（`order by sequence is null, sequence, time_created, rowid`）：
+ * - `sequence is null` 的结果集是 0/1，**null 行排在非空之后**（0015 backfill 的注释也是这个口径）；
+ * - `time_created` 与 `rowid` 是同级 tiebreaker，不能省——sequence 相同的行（旧库/导入）
+ *   否则顺序不稳定，索引序与全量序就会出现「同序但不同列」的静默漂移。
+ *
+ * 不读 `data` 是设计约束（message 表没有 role 列，role 在 data JSON 里）：一旦这里
+ * `select *` 或读 data，冷开就退回全量正文读，Step 5/7 的窗口化收益归零。
+ */
+export async function listSessionMessageIndex(
+  db: DatabaseSync,
+  input: { sessionID: SessionId },
+): Promise<SessionMessageIndexEntry[]> {
+  const rows = db
+    .prepare(
+      `
+      select id, sequence, time_created, rowid as storage_row_id from message
+      where session_id = ?
+      order by sequence is null, sequence, time_created, rowid
+      `,
+    )
+    .all(input.sessionID) as unknown as MessageIndexRow[];
+  return rows.map((row) => ({
+    id: row.id as MessageId,
+    sequence: row.sequence,
+    timeCreated: row.time_created,
+    storageRowId: row.storage_row_id,
+  }));
 }
 
 export async function messages(

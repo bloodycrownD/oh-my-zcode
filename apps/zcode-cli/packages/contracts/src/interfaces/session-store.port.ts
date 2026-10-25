@@ -1026,6 +1026,23 @@ export interface LocalSettingStorePort {
   }): CollaborationMode | Promise<CollaborationMode>;
 }
 
+// ── 全序消息索引：id 序的唯一窄读面 ────────────────────────────────────────
+//
+// 只读排序键（id / sequence / time_created / rowid），**不读 `data`**：role 在
+// `data` JSON 里，索引不需要它，读它等于回退成全量正文读。排序必须与 `messages()`
+// 逐字一致（`order by sequence is null, sequence, time_created, rowid`）——这是 IS2
+// 的权威序，两条路径不同序会让裁断在索引路径上复活已回滚分支。
+
+/** 消息索引的一行：排序键 + SQLite rowid，不含 role/正文。 */
+export interface SessionMessageIndexEntry {
+  id: MessageId;
+  /** `message.sequence` 原值；null = 迁移前的旧行，排序时排在非空之后。 */
+  sequence: number | null;
+  timeCreated: number;
+  /** SQLite rowid，同序行的最终 tiebreaker。**不是**投影 rowId。 */
+  storageRowId: number;
+}
+
 // ── turn 行清单（row manifest）：全序计数的持久权威 ─────────────────────────
 //
 // 两张表分工（session_turn_manifest / session_turn_query_manifest）：
@@ -1101,6 +1118,24 @@ export interface TurnManifestSnapshot {
 export type TurnManifestReadResult =
   | { status: "missing" }
   | { status: "schemaMismatch"; expectedVersion: number; foundVersions: number[] }
+  /**
+   * manifest 与观察到的会话不一致 → **整表重建**（不做账目修正：修正只处理「已登记
+   * turn 的行数偏差」，这三种是「清单本身缺项/指向不存在的消息」）。
+   *
+   * - `ordinalGap`：已登记 turn 的 ordinal 出现空洞 = 中间某轮从未登记（detached 写入
+   *   丢失）。这是「存在 manifest 未登记的 turn」在 **manifest 内部**可判的一半。
+   * - `unregisteredTurns`：调用方给出的权威 turn（投影/durable 事件）里有未登记的轮次。
+   *   消息索引没有 turn 维度，尾部丢失只能靠这个观察抓。
+   * - `messageIndexMismatch`：manifest 登记的 messageId 不在消息索引里（消息被删/换库）。
+   */
+  | {
+      status: "inconsistent";
+      reason: "ordinalGap" | "unregisteredTurns" | "messageIndexMismatch";
+      /** unregisteredTurns 时给出观察到的、manifest 未登记的 turn。 */
+      turnIds: string[];
+      /** messageIndexMismatch 时给出索引里找不到的 messageId（截断到前 20 条）。 */
+      missingMessageIds: string[];
+    }
   | { status: "ok"; snapshot: TurnManifestSnapshot };
 
 export interface TurnManifestReadInput {
@@ -1112,6 +1147,18 @@ export interface TurnManifestReadInput {
    * 只改不一致的 row_count（后续 turn 的 base 因累加而自动平移），不重读正文。
    */
   observedRowCounts?: ReadonlyMap<string, number>;
+  /**
+   * 消息索引（`listSessionMessageIndex`）的 id 观察。给出时校验 manifest 的 messageId
+   * 覆盖：引用了索引里不存在的消息 → `inconsistent/messageIndexMismatch`（整表重建）。
+   * 仓储只读 manifest 表本身，索引由调用方读一次传进来（仓储不得回读 message 正文）。
+   */
+  observedMessageIds?: readonly MessageId[];
+  /**
+   * 权威 turn 观察（调用方从投影或 durable 事件得到——**消息索引本身没有 turn 维度**，
+   * 抓不到尾部丢失的轮次）。给出且存在 manifest 未登记的 turn →
+   * `inconsistent/unregisteredTurns`（整表重建；就地补写需要 row_count，等价于物化）。
+   */
+  observedTurnIds?: readonly string[];
 }
 
 export interface TurnManifestBranchRewriteInput {
@@ -1187,6 +1234,11 @@ export interface SessionStorePort {
     messageID: MessageId;
   }): Promise<MessageWithParts | null>;
   messages(input: { sessionID: SessionId }): Promise<MessageWithParts[]>;
+  /**
+   * 全序消息索引：与 `messages()` **同一权威排序**，但不读 `data`、不解码 parts。
+   * 缺席（旧宿主/内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
+   */
+  listSessionMessageIndex?(input: { sessionID: SessionId }): Promise<SessionMessageIndexEntry[]>;
   saveSessionEntry?(input: SessionEntryInfo): Promise<void>;
   sessionEntries?(input: {
     sessionID: SessionId;
