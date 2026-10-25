@@ -87,9 +87,35 @@ export interface ConversationOpenAckSample {
 
 export type ConversationRuntimeReadyReader = () => Promise<V4ConversationRuntimeReadyResult>;
 
+/**
+ * `paintAfterApplyMs` 采样**被丢弃**的原因（缺席原因，不是数值）。
+ *
+ * 两种丢弃都是设计内的早退（`conversationProjectionStore.scheduleOpenPaintSample`），但过去是
+ * **静默**的：`renderer.paintAfterApplyMs` 在快路径 regime 上无声缺席，报告里只剩
+ * `uiViewReadyMs`，`uiViewReadyMs + paintAfterApplyMs` 这条「到首绘」口径永远凑不齐，
+ * 也无法区分「rAF 还没跑」与「样本已作废」。
+ */
+export type ConversationOpenPaintMissingReason = "closed" | "generation_changed";
+
+/** 一条被丢弃的首绘采样记录（按 topic 只留最近一条）。 */
+export interface ConversationOpenPaintMissingSample {
+  reason: ConversationOpenPaintMissingReason;
+  /** 丢弃发生时刻（epoch ms，用于判断它属于哪一次打开）。 */
+  at: number;
+}
+
 /** window 上的调试面；`acks` 只存摘要，容量固定。 */
 export interface ConversationOpenProbe {
   acks: ConversationOpenAckSample[];
+  /**
+   * topic → 最近一次**被丢弃**的首绘采样原因。
+   *
+   * 与 `acks[].renderer.paintAfterApplyMs` 并列、而不是塞进 `renderer`：被丢弃的是「上一代 /
+   * 已关闭」那一次打开的首绘，写进当前 ACK 样本的 `renderer` 会与它自己的
+   * `paintAfterApplyMs` 互相打架（一个说测到了、一个说缺席）。新 ACK 覆盖该 topic 时清空，
+   * `reset()` 也清空。
+   */
+  paintMissing: Record<string, ConversationOpenPaintMissingSample>;
   reset(): void;
   /**
    * 读指定（缺省 = 最近一次 ACK 命中的）会话的 runtime 激活耗时；没有 reader 时返回 null。
@@ -143,8 +169,10 @@ function ensureProbe(): ConversationOpenProbe | null {
   if (existing) return existing;
   const probe: ConversationOpenProbe = {
     acks: [],
+    paintMissing: {},
     reset() {
       probe.acks.length = 0;
+      for (const topic of Object.keys(probe.paintMissing)) delete probe.paintMissing[topic];
     },
   };
   // 读取出口只在 dev 挂载：它会把 RPC 打到 agentService，进而可能拉起 CLI 进程。
@@ -174,7 +202,30 @@ export function recordConversationOpenAck(sample: ConversationOpenAckSample): vo
   if (probe.acks.length > MAX_ACK_SAMPLES) {
     probe.acks.splice(0, probe.acks.length - MAX_ACK_SAMPLES);
   }
+  // 新一代 ACK 代表一次新的打开：上一次打开留下的「首绘被丢弃」标记不再描述它。
+  // 不清的话，采样脚本会把上一代的缺席原因当成本次样本的结论。
+  delete probe.paintMissing[sample.topic];
   lastAckTopic = sample.topic;
+}
+
+/**
+ * 记录一次**被丢弃**的首绘采样（`scheduleOpenPaintSample` 的早退分支调用）。
+ *
+ * 缺席原因必须能和「还没到」区分开：脚本读到 `paintMissing.reason` 才知道
+ * `uiViewReadyMs + paintAfterApplyMs` 为什么凑不齐，而不是把它当成「rAF 尚未触发」继续等。
+ * 同样打 warn——静默丢弃正是 phase-0 里 5/9 次无声缺席的来源。
+ */
+export function recordConversationOpenPaintMissing(
+  topic: string,
+  reason: ConversationOpenPaintMissingReason,
+): void {
+  const probe = ensureProbe();
+  if (!probe) return;
+  probe.paintMissing[topic] = { reason, at: Date.now() };
+  logger.warn(
+    `[v4-open-probe] ${topic} 的首绘采样被丢弃（paint_missing=${reason}），` +
+      "该次打开的 paintAfterApplyMs 不会出现（缺席 ≠ 0）",
+  );
 }
 
 /**

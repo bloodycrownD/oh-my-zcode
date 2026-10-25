@@ -25,6 +25,7 @@ import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversation
 import type { ConversationTransport } from "@/v4/transport.js";
 import {
   isConversationOpenProbeDevEnabled,
+  recordConversationOpenPaintMissing,
   recordConversationOpenRendererTiming,
   unregisterConversationRuntimeReadyReader,
   type ConversationOpenRendererTiming,
@@ -487,7 +488,13 @@ export class ConversationProjectionStore {
     const generation = this.generation;
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (this.closed || this.generation !== generation) return;
+        if (this.closed || this.generation !== generation) {
+          // 丢弃是设计内早退，但**不能静默**：phase-0 基线里 5/9 次 paintAfterApplyMs
+          // 无声缺席（「重开 3 次全缺」正是走这里），报告无法区分「rAF 还没跑」与
+          // 「样本已作废」。写一条缺席原因进观测面（reason 二选一），由采样脚本原样带出。
+          this.reportOpenPaintMissing(this.closed ? "closed" : "generation_changed");
+          return;
+        }
         this.sessionOpenRendererTiming = {
           ...this.sessionOpenRendererTiming,
           paintAfterApplyMs: roundedDuration(snapshotAppliedAt, monotonicNow()),
@@ -496,6 +503,12 @@ export class ConversationProjectionStore {
         this.reportOpenRendererTiming();
       });
     });
+  }
+
+  /** 首绘采样缺席（丢弃）打点；`paintAfterApplyMs` 的缺席原因必须可被判读。 */
+  private reportOpenPaintMissing(reason: "closed" | "generation_changed"): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    recordConversationOpenPaintMissing(this.topic, reason);
   }
 
   subscribe(listener: () => void): () => void {

@@ -177,7 +177,15 @@ export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema
  * `openTiming` 侧同理：**`hostPrepareMs ⊇ cliBootstrapMs + providerRegistrySyncMs +
  * taskMetaReadMs`**——它量的是「subscribe 入口 → CLI 请求发起」，这三段（spawn、provider
  * registry 同步、task meta 读）全发生在该区间内（`zcodeAgentService.ts:4407-4477`），
- * 把它们与 `hostPrepareMs` 相加即重复计数；`cliBootstrapMs` 在复用进程时缺席（缺席 ≠ 0）。
+ * 把它们与 `hostPrepareMs` 相加即重复计数。
+ *
+ * **`cliBootstrapMs` 的语义与缺席条件**：它是「**本次 subscribe 触发或等待进程 spawn 的等待
+ * 耗时**」，只在 `cliProcessState === "spawned"` 时有值；`reused` 时缺席（缺席 ≠ 0）。
+ * `spawned` 的判定按 acquire 前后的**进程事实差**（spawn 时刻 / runtime 代次 / 在途启动），
+ * **不是**「该 workspace 有没有 client 对象」——侧栏任务列表会预建 client，用后者判会让冷开
+ * 恒记 reused、spawn 成本埋进 `hostPrepareMs`（phase-0 baseline findings.coldCliBootstrapMissing）。
+ * 因此冷开主判据用 `uiViewReadyMs − hostPrepareMs`（必然覆盖 spawn），
+ * `uiViewReadyMs − cliBootstrapMs` 作并列分解项。
  * 缺席项按 `undefined` 处理，禁止补 0 后求「各段之和」。
  *
  * **不含 `runtimeReadyMs`**：view-only 下 runtime 激活发生在 view-ready ACK **之后**，
@@ -237,10 +245,10 @@ export const conversationTopicFrameSchema = createTopicFrameSchema(
   conversationSnapshotSchema,
   conversationDeltaSchema,
 ).superRefine((frame, context) => {
-    if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
-      context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
-    }
-  });
+  if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
+    context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+  }
+});
 export type ConversationTopicFrame = z.infer<typeof conversationTopicFrameSchema>;
 export const conversationTopicWireFrameSchema = createTopicWireFrameSchema(
   conversationTopicFrameSchema,
@@ -589,7 +597,13 @@ export const v4ConversationTurnDirectoryParamsSchema = z.object({
   // 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。
   beforeQueryRowId: z.number().int().nonnegative().optional(),
   // 缺省 = 服务端取 PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries。
-  limit: z.number().int().nonnegative().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
+  limit: z
+    .number()
+    .int()
+    .nonnegative()
+    .min(1)
+    .max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries)
+    .optional(),
 });
 export type V4ConversationTurnDirectoryParams = z.infer<
   typeof v4ConversationTurnDirectoryParamsSchema
