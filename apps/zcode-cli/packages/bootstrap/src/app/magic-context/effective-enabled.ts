@@ -5,8 +5,8 @@
  * `runtime-config.ts` 的冷求值，以及 `zcode-protocol/magic-context-memories.ts`
  * 的配置读取。后者只读了 `magicContext.enabled` 域、漏了 `features.magicContext`
  * 这个 kill switch，于是总开关关闭时设置页仍能打开记忆库（与 `create-app` 的
- * 装配门不同频）。收成纯函数后：无包依赖、无副作用、无全局状态，装配层与协议
- * handler 共用同一份真值表。
+ * 装配门不同频）。收成纯函数后：无运行期包依赖（只有一条 `import type`，编译后擦除）、
+ * 无副作用、无全局状态，装配层与协议 handler 共用同一份真值表。
  *
  * 防腐层意义：这是「宿主语义」而不是「magic-context 包语义」——它不 import 任何
  * `@zcode/magic-context` 符号，升级上游或整体摘除包时都不需要跟着改。后续
@@ -21,6 +21,8 @@
  * 要么调用 `projectMagicContextEffectiveEnabled()` 读它算出的冷值——不得再各写一遍比较。
  * `bootstrap/scripts/test-magic-context-gate.mjs` 的「同源守卫」在全仓范围强制这一点。
  */
+import type { AgentRuntimeConfig } from "@zcode/core";
+
 export interface MagicContextEffectiveEnabledInput {
   /** `features.magicContext`，调用方已解析缺省（config lane 默认 true）。 */
   featureFlag: boolean;
@@ -51,9 +53,17 @@ export function resolveMagicContextEffectiveEnabled(
  * 这里**不重新求值**三轴：`RuntimeConfig.magicContext.enabled` 是冷求值的**输出**，
  * 再喂回 `resolveMagicContextEffectiveEnabled` 会得到同一结果却掩盖「谁是输入」。
  * 缺省方向与原三处逐位一致：缺席按关（冷值缺席只可能出现在未投影该字段的轻量形态）。
+ *
+ * 入参必须用具名类型 `AgentRuntimeConfig`（即 `resolveAppRuntimeConfig(...).runtimeConfig`
+ * 的类型）：**唯一允许传的就是 `resolveAppRuntimeConfig` 的返回值**。之前写成结构化鸭子
+ * 类型（`{ magicContext?: { enabled?: boolean } }`）时，raw config 域的
+ * `configResult.config` 同样可赋值——那个域里也有 `magicContext.enabled`，但**没有**经过
+ * features 门，误传会静默绕过 kill switch。类型层挡住「顺手传 config」之后，运行期还有
+ * `test-magic-context-gate.mjs` 的同源守卫：全仓生产代码里本函数只允许出现在
+ * `create-app.ts`，且实参必须是 `runtimeConfig`。
  */
 export function projectMagicContextEffectiveEnabled(
-  runtimeConfig: { readonly magicContext?: { readonly enabled?: boolean } | undefined } | undefined,
+  runtimeConfig: AgentRuntimeConfig | undefined,
 ): boolean {
   return runtimeConfig?.magicContext?.enabled === true;
 }

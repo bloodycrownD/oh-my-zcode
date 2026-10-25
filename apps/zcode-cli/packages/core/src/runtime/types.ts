@@ -188,11 +188,24 @@ export interface AgentRuntimeConfig {
   nativeSearchEnhancementsEnabled?: boolean;
   memory?: MemoryRuntimeConfig;
   /**
-   * Step 19b：magic-context（`features.magicContext`，S19a 落地的门控）运行时开关。
-   * 值来自 `RuntimeConfig.features.magicContext`——bootstrap 的
-   * `resolveAppRuntimeConfig` 把它投影到这里。`undefined`/`false` 都表示关闭：
-   * 用户显式关掉时是零成本退路（T-M8 语义），装配层连 transform 实例都不创建。
-   * Step 23 接 ConfigPort 热更新后，运行中改配置必须立刻生效。
+   * magic-context 的**冷值**开关（装配期求值后冻结）。
+   *
+   * 值不是 `features.magicContext` 本身，而是 bootstrap 唯一口径
+   * `resolveMagicContextEffectiveEnabled()` 的三轴求值结果
+   * （`features.magicContext` kill switch × `magicContext.enabled` 域值 × 运行期 override），
+   * 由 `resolveAppRuntimeConfig` 投影到 `runtimeConfig.magicContext.enabled`。
+   * 也就是说这里**已经是 effective 布尔**：core 侧不得再叠加 features 判断。
+   *
+   * 三个消费点的 `undefined` 缺省方向**不一致**，各自在调用处用
+   * `isMagicContextEffectiveByConfig(enabled, { whenUnset })` 显式声明：
+   *   - `helpers/runtime-tools.ts`（ctx 工具注册门）与
+   *     `helpers/magic-context-prompt-section.ts`（段注入门）按**关**——只有装配期真的
+   *     算出 true 才启用；
+   *   - `helpers/magic-context-turn-transform.ts` 的兜底否决按**开**——那一层以端口活值
+   *     `isEnabled()` 为准，config 只做否决。
+   *
+   * `false` 是零成本退路（T-M8 语义）：装配层连 transform 实例都不创建。
+   * 运行中改配置走热值（bridge 快照 `isEnabled()`），不读这个字段。
    */
   magicContext?: {
     enabled?: boolean;

@@ -70,7 +70,7 @@ dependency:
 | G1 | `gate.ts:32-36` | 唯一口径（新，未提交） |
 | G2 | `runtime-config.ts:213-226` | 调 G1（冷值） |
 | G3 | `zcode-protocol/magic-context-memories.ts:128-150` | 调 G1 |
-| G4 | `create-app.ts:827 / :884 / :1281` | `runtimeConfig.magicContext?.enabled === true` **同一求值写三遍** |
+| G4 | `create-app.ts`（分析时在 `:827 / :884 / :1281`，行号会漂；落地后按符号定位） | `runtimeConfig.magicContext?.enabled === true` **同一求值写三遍** |
 | G5 | `magic-context-turn-transform.ts:1611-1612` | `isEnabled()` 读 bridge 快照（热值） |
 | G6 | `core/src/runtime/helpers/runtime-tools.ts:126` | `config.magicContext?.enabled === true` |
 | G7 | `core/src/runtime/helpers/magic-context-prompt-section.ts:84` | `!== true` → 回落原生记忆段 |
@@ -93,7 +93,7 @@ G6/G7/G8 在 core 侧、按设计不 import 包（`import type` only），它们
 |---|---|
 | **IM1** | 开关为 false ⇒ **M0 白名单之外**的 MC 模块零加载。M0 = `magic-context/dist/host/config/{schema,language}.js` + `dist/core/shared/prompt-surface-key.js` **及其 zod4 依赖闭包**（`magic-context/package.json:38` 是 zod `4.6.5`，不是 zod3；`sea-tui-assets.mjs:135` 注释亦记 zod4 抢根位）。`language.js` 必在闭包内，因为 `schema.ts:52` 值导入它、`:341` 的 `.refine(isValidLanguageCode)` 在模块顶层求值；`prompt-surface.js` 必须**被替换**为 `prompt-surface-key.js`（改 `schema.ts:51`），否则闭包多出 `prompt-surface.js` 与 `harness-provider-map.js` 两个文件。判定口径：「**M0 之外**的行为模块（`src/core/**`、`src/host/**` 中除 M0 三者外的文件）计数为 0」，不是「全部模块为 0」 |
 | **IM2** | **摘除脚本执行后**，宿主 typecheck / lint / `createApp()` 启动 / 非 MC 测试全通过。此路径下宿主代码被删匹配项，**不依赖任何运行期「包缺失探测」**；运行期只保留 `absent(import_failed)`（动态 import 失败这一真实可达场景）。**不存在 `package_missing` 这个 reason** |
-| **IM3** | 生效判定只有一个实现，冷/热两值都由它算出 |
+| **IM3** | 三轴生效判定只有**一个实现**（`bootstrap/src/app/magic-context/effective-enabled.ts` 的 `resolveMagicContextEffectiveEnabled`；core 侧只有同义的布尔投影 `isMagicContextEffectiveByConfig`）。**冷值**由它算出并冻结进 `RuntimeConfig`；**热值**（bridge 快照 `isEnabled()`，G5）只投影同一域值，feature 门由装配门**结构性**携带——开关为 false 就根本没有端口，热路径不重算三轴 |
 | **IM4** | core 侧对 MC 的依赖只有三端口 + 静态导入面永不出现运行期值 import；**例外（须单列预算，不得混算）**：`core/src/tool/handlers/ctx-{context,memory,search}.ts` 在**调用期** `await import("@zcode/magic-context")`（`:56`/`:63`/`:77`），这是 ctx 工具自身的实现依赖，随 4 个工具一起被摘除。**MC 包内的行为（含 compartment 失效）只能由 host 侧调用**，core 不得反向依赖 |
 | **IM5** | 注入身份只存活在「字节未改且 role 匹配」的条目上（C2 的根不变量） |
 | **IM6** | `prefixTrimStatus === "refused"` 时**不注入 M1 中的 `<new-compartments>` 块**（M1 其余内容照旧，它承载 memory 增量 / new memories / user profile）；`boundary-precedes-window` 保持现状（该态下 M1 可能是窗口外历史的唯一载体，抑制反而丢信息） |
@@ -113,7 +113,7 @@ G6/G7/G8 在 core 侧、按设计不 import 包（`import type` only），它们
 
 把 G4/G5/G6/G7/G8/G9 全部收敛到一个通道：
 
-- **bootstrap 侧**：导出唯一 `resolveMagicContextEffectiveEnabled()`；`create-app.ts` 三处同一求值（:827/:884/:1281）改为调用一次并复用结果；`isMagicContextEnabled()` 契约只转发。
+- **bootstrap 侧**：导出唯一 `resolveMagicContextEffectiveEnabled()`；`create-app.ts` 里三处同一求值（装配门 / 工厂 `enabled:` 入参 / `isMagicContextEnabled()` 契约，按符号定位、不写死行号）改为调用一次 `projectMagicContextEffectiveEnabled(runtimeConfig)` 并复用结果；`isMagicContextEnabled()` 契约只转发。
 - **core 侧**：`runtime-tools.ts:126`、`magic-context-prompt-section.ts:84`、`magic-context-turn-transform.ts:232-234` 三处改调 core 内部纯函数。**注意三者今天的缺省方向不一致**：`:126` 用 `=== true`（undefined→关）、`:84` 用 `!== true`（undefined→关）、`:234` 用 `=== false`（undefined→开，且以端口在场为前提）。因此**不合并成单函数**：core 侧保留各自的缺省语义，只把「真值来源」统一为同一个 `isMagicContextEffectiveByConfig(enabled)` 投影；`magic-context-turn-transform.ts:232-234` 的「端口在场 + `isEnabled()` 优先、config 只做否决」结构原样保留。bootstrap 三轴表与 core 布尔投影表在同一测试文件里逐行对齐（见 T-MC1）。
 - **冷/热分工保留**：冷值进 `RuntimeConfig`（G2）；热值走 bridge 快照（G5）。core 的 `:233` 以 `isEnabled()` 为准、`:234` 再兜底 `config` 的顺序不动。
 
@@ -246,7 +246,7 @@ C1 的确切条件（四条同时成立）：① 缓存对 `cached_m0/m1_bytes` 
 
 - 接线未挂的测试：`test-magic-context-lifecycle.mjs`、`test-magic-context-ui-config.mjs`、`test-magic-context-ui-model-picker.mjs` 当前不在任何 script/CI 里。
 - **29 个 MC 相关脚本没有 CI 执行点**（`.github/workflows/` 只有 `release-desktop.yml` 构建用到 MC）。
-- `test-magic-context-gate.mjs:61-82` 的源码形状守卫是字符串包含判定，注释里提到函数名也会通过 → 升级为 AST 级（或至少剥离注释后判定）。
+- `test-magic-context-gate.mjs` 早期的源码形状守卫是字符串包含判定，注释里提到函数名也会通过 → 升级为**剥注释 + 逐行正则**判定（**定案：不做 AST**，与全仓源码形状守卫同口径；覆盖边界见 Step 16）。
 
 ## 最终项目结构
 
@@ -277,7 +277,7 @@ apps/zcode-cli/packages/cli/scripts/unplug-magic-context.mjs  新增
 apps/zcode-cli/packages/bootstrap/scripts/
   test-magic-context-zero-load.mjs                       新增
   test-magic-context-coupling-budget.mjs                 新增
-  test-magic-context-gate.mjs                            改（AST 级守卫 + 入库）
+  test-magic-context-gate.mjs                            改（剥注释 + 正则守卫 + 入库；覆盖边界见 Step 16）
   test-mc-entry-identity-guard.mjs                       新增
 UPSTREAM-SYNC.md                                         改（口径修正 + FORK 语法 + rebase 点登记）
 ```
@@ -288,24 +288,25 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 |---|---|---|---|
 | 1 | — | `bootstrap/package.json` + `scripts/test-magic-context-gate.mjs` | 基线入库（现为 untracked，干净 checkout 必挂） |
 | 2 | IM3 | `app/magic-context/gate.ts` → `effective-enabled.ts` | 更名去两义；导出 `resolveMagicContextEffectiveEnabled` |
-| 3 | IM3 | `create-app.ts:827/884/1281` | 三处同一求值收敛为一次调用 |
-| 4 | IM3 | `core/.../{runtime-tools,magic-context-prompt-section,magic-context-turn-transform}.ts` | 真值来源统一为同一投影函数，但**各自保留原有 undefined 语义**（三者方向不一致，见 T-MC1），不合并成单函数 |
-| 5 | — | `app/magic-context-turn-transform.ts`（2240 行） | 拆为门面 + 八文件，守五条零行为不变量；原文件保留为全导出面 shim |
-| 6 | IM1 | `magic-context/package.json` | 新增 `./host/config/schema` 窄子路径 |
-| 7 | IM1 | `core/shared/prompt-surface-key.ts`（新）+ `prompt-surface.ts` | 抽零依赖叶子，压窄 schema 子路径闭包 |
-| 8 | IM1 | `adapters/src/config/schema.ts:4-8` | 改走窄子路径 |
-| 9 | IM1 | `zcode-protocol/magic-context-config.ts:3`、`magic-context-memories.ts:80-92` | 去顶层值 import，handler 内惰性 |
-| 10 | IM1 | `magic-context-memories.ts:166-169` | 自开库改为复用注入 handle |
-| 11 | IM5 | `app/magic-context/projection.ts` | 加 `originalPairsWithMessage` + `sanitizeRebuiltMetadata`（取 `ff8b4522`） |
-| 12 | IM6 | `core/hooks/magic-context/inject-compartments.ts:2089-2095`（**读侧 WHERE，根修**）、`:2939-2945`（`<new-compartments>` 块构建点）、`:3865-3891`（缓存回放路径） | ①`readM0Compartments` 加 `rebase_status`/水位 WHERE（**否则 host 侧「标记」不生效，整修是空的**）；②refused 时只抑制 `<new-compartments>` 块，不抑制整条 M1；③缓存回放路径必须同样过滤，否则 `prepareCachedM0M1Replay` 会原样重放带块文本。FORK 登记 |
-| 13 | IM6 | `magic-context/src/host/compartment-invalidation.ts`（新）+ `fork-edit-retry.ts:106` + `create-app.ts`（挂可选端口） | rewind 后**按 revert 水位过滤 DB 层 compartment 记录**（M0 的 `readM0Compartments` 才不会再吐出旧摘要）+ 清 `session_meta` 缓存与 injection cache；**不改 core 的 `rewind-message.ts`** |
-| 14 | IM2 | `create-app.ts:836` | 动态 import 失败降级为 `absent(import_failed)` 并记录，不 throw（**不引入 `package_missing`**，见 phase-unplug） |
-| 15 | IM2 | `cli/scripts/unplug-magic-context.mjs`（新） | 一键摘除 + `--archive-db` |
-| 16 | IM7 | `UPSTREAM-SYNC.md:119`、FORK 语法 | 口径修正 + 机读化 |
-| 17 | IM7 | `bootstrap/scripts/test-magic-context-coupling-budget.mjs`（新） | 散点数量上限门禁 |
-| 18 | IM1 | `bootstrap/scripts/test-magic-context-zero-load.mjs`（新） | 关闭态「M0 白名单之外零模块」断言 |
-| 19 | IM5 | `bootstrap/scripts/test-mc-entry-identity-guard.mjs`（新） | 身份不变量回归 |
-| 20 | — | `bootstrap/package.json`、CI 配置 | 接线 3 个未挂测试 + 补 CI 执行点 |
+| 3 | IM3 | `app/magic-context/effective-enabled.ts` | 新增冷值投影 `projectMagicContextEffectiveEnabled()`：只读 `RuntimeConfig.magicContext.enabled` 这一位**已算出**的冷值，不重算三轴；入参用具名类型（唯一允许 `resolveAppRuntimeConfig` 的返回值），同源守卫钉「生产代码只允许 `create-app.ts` 一处、实参必须是 `runtimeConfig`」 |
+| 4 | IM3 | `create-app.ts`（按符号定位，不写死行号：`projectMagicContextEffectiveEnabled(runtimeConfig)` 那一处） | 三处同一求值收敛为一次调用并复用同一个布尔：装配门 `if (magicContextEffectiveEnabled)`、工厂 `enabled:` 入参、`isMagicContextEnabled` 契约 |
+| 5 | IM3 | `core/.../{runtime-tools,magic-context-prompt-section,magic-context-turn-transform}.ts` | 真值来源统一为同一投影函数，但**各自保留原有 undefined 语义**（三者方向不一致，见 T-MC1），不合并成单函数 |
+| 6 | — | `app/magic-context-turn-transform.ts`（2240 行） | 拆为门面 + 八文件，守五条零行为不变量；原文件保留为全导出面 shim |
+| 7 | IM1 | `magic-context/package.json` | 新增 `./host/config/schema` 窄子路径 |
+| 8 | IM1 | `core/shared/prompt-surface-key.ts`（新）+ `prompt-surface.ts` | 抽零依赖叶子，压窄 schema 子路径闭包 |
+| 9 | IM1 | `adapters/src/config/schema.ts:4-8` | 改走窄子路径 |
+| 10 | IM1 | `zcode-protocol/magic-context-config.ts:3`、`magic-context-memories.ts:80-92` | 去顶层值 import，handler 内惰性 |
+| 11 | IM1 | `magic-context-memories.ts:166-169` | 自开库改为复用注入 handle |
+| 12 | IM5 | `app/magic-context/projection.ts` | 加 `originalPairsWithMessage` + `sanitizeRebuiltMetadata`（取 `ff8b4522`） |
+| 13 | IM6 | `core/hooks/magic-context/inject-compartments.ts:2089-2095`（**读侧 WHERE，根修**）、`:2939-2945`（`<new-compartments>` 块构建点）、`:3865-3891`（缓存回放路径） | ①`readM0Compartments` 加 `rebase_status`/水位 WHERE（**否则 host 侧「标记」不生效，整修是空的**）；②refused 时只抑制 `<new-compartments>` 块，不抑制整条 M1；③缓存回放路径必须同样过滤，否则 `prepareCachedM0M1Replay` 会原样重放带块文本。FORK 登记 |
+| 14 | IM6 | `magic-context/src/host/compartment-invalidation.ts`（新）+ `fork-edit-retry.ts:106` + `create-app.ts`（挂可选端口） | rewind 后**按 revert 水位过滤 DB 层 compartment 记录**（M0 的 `readM0Compartments` 才不会再吐出旧摘要）+ 清 `session_meta` 缓存与 injection cache；**不改 core 的 `rewind-message.ts`** |
+| 15 | IM2 | `create-app.ts:836` | 动态 import 失败降级为 `absent(import_failed)` 并记录，不 throw（**不引入 `package_missing`**，见 phase-unplug） |
+| 16 | IM2 | `cli/scripts/unplug-magic-context.mjs`（新） | 一键摘除 + `--archive-db` |
+| 17 | IM7 | `UPSTREAM-SYNC.md:119`、FORK 语法 | 口径修正 + 机读化 |
+| 18 | IM7 | `bootstrap/scripts/test-magic-context-coupling-budget.mjs`（新） | 散点数量上限门禁 |
+| 19 | IM1 | `bootstrap/scripts/test-magic-context-zero-load.mjs`（新） | 关闭态「M0 白名单之外零模块」断言 |
+| 20 | IM5 | `bootstrap/scripts/test-mc-entry-identity-guard.mjs`（新） | 身份不变量回归 |
+| 21 | — | `bootstrap/package.json`、CI 配置 | 接线 3 个未挂测试 + 补 CI 执行点 |
 
 ## 详细实现步骤
 
@@ -324,7 +325,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 - Step 13 — phase-unplug — blocking: yes — qa: auto：`unplug-magic-context.mjs`（dry-run + `--apply` + `--archive-db`），在临时 checkout 上端到端跑通。
 - Step 14 — phase-upgrade-surface — blocking: yes — qa: auto：`UPSTREAM-SYNC.md` 口径修正 + FORK 语法 + rebase 点登记。
 - Step 15 — phase-upgrade-surface — blocking: yes — qa: auto：`test-magic-context-coupling-budget.mjs` 落地，上限取本 spec 落地后的实测值。
-- Step 16 — phase-gates — blocking: yes — qa: auto：接线 3 个未挂测试；**新建 `.github/workflows/mc-tests.yml`** 承载 29 个 MC 脚本；`test-magic-context-gate.mjs` 守卫升级为剥离注释后判定。
+- Step 16 — phase-gates — blocking: yes — qa: auto：接线 3 个未挂测试；**新建 `.github/workflows/mc-tests.yml`** 承载 29 个 MC 脚本；`test-magic-context-gate.mjs` 守卫升级为**剥注释 + 逐行正则**判定（不是 AST，与全仓的源码形状守卫同口径）。覆盖边界写死：正则只认字面形态（比较 / 取反 / 真值化），不识别类型层面的别名与间接调用（`const f = () => cfg.magicContext.enabled; f()`），这类写法靠评审兜住；守卫入口另有一道扫描面断言（三个扫描根存在 + 扫描文件数下限 + 已知锚点在列），杜绝脚本被移动后的「零扫描通过」假绿。
 - Step 17 — phase-gates — blocking: no — qa: manual_user：真机验证（关闭态启动快、设置页可开、`/ctx-status` 有明确不可用提示、rewind 后模型不再看到旧摘要）。
 
 ## 测试策略
