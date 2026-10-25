@@ -111,6 +111,17 @@ async function submitConversationRewind(
   if (result.strategy !== RewindStrategy.ActiveChain) {
     throw new Error(`conversation rewind unavailable for ${anchorMessageId}: ${result.strategy}`);
   }
+  // FORK（spec phase-compartment-rewind / C1）：rewind 之后让 magic-context 里被裁
+  // 轮次的 compartment 摘要失效——旧摘要活在 M0 的 `<session-history>`，只要库还在
+  // 就会照旧注入，模型因此看得见用户已经撤回的对话。
+  //
+  // 只挂**可选**调用：flag 关 / DB 开不出来时通道不存在，跳过即可（不塞空实现，
+  // 见 `ZCodeApp.invalidateMagicContextCompartments` 的契约）。调用点放在 rewind
+  // 成功之后、重发新文本之前——那一轮 transform 才会读到清理后的状态。
+  await record.app.invalidateMagicContextCompartments?.({
+    anchorMessageId: result.targetMessageId,
+    keptMessageCount: result.keptMessageCount,
+  });
   await host.afterLegacyStateMutation?.(record, "session_rewound");
 }
 

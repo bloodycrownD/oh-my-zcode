@@ -83,6 +83,16 @@ cd .reference/magic-context && git fetch --tags && git checkout <target>
 
 口径备注：第 5 节 `EXEMPT-2b` 行记的「5 静态 + 2 动态」是 Step 5 之前的实测值，Step 14（phase-upgrade-surface）统一修正；Z3 落地后协议侧两处已不再静态加载包，相对该行是**减少**，不是新增加载点。
 
+**phase-compartment-rewind（C1）/ phase-identity-guard（Step 8）新增偏离点**（同表编号延续）：
+
+| # | 位置 | 偏离内容 | 升级 MC 时的 rebase 动作 |
+| - | ---- | -------- | ------------------------ |
+| Z4 | `magic-context/src/core/features/magic-context/rewind-invalidation.ts`（**新文件**）+ `src/index.ts` 的 `invalidateCompartmentsForRewind` 导出 | 上游没有 rewind 概念。fork 复用 `compartments.rebase_status = 'unresolved'` 承载「rewind 水位之后」语义（上游该值只由已删的 store-generation rebase walk 写、本 fork 从不写），并新增一个 host 可调的失效函数：标记 `end_message >= 水位` 的行 + `clearCachedM0M1` + `clearInjectionCache` 三件事同批 | 逐字重放上游后**新增文件不受影响**（不在上游目录内）；只需确认 `rebase_status` 列仍在（`storage-db.ts` 的 `ensureColumn`）且上游没有把 `unresolved` 重新解释成别的语义。若上游恢复了 rebase walk 并开始写 `unresolved`，必须改用**独立列/独立表**，不得两种语义共用一列 |
+| Z5 | `magic-context/src/core/hooks/magic-context/inject-compartments.ts`：`readM0Compartments` / `readNewCompartments` / 重建路径的 `getCompartments`、`prepareCachedM0M1Replay`、`renderM0` | ①M0/M1 读侧把 `rebase_status='unresolved'` 的行排除（上游只有 `getLastCompartmentEndMessage(Id)` 做这件事）；②`prepareCachedM0M1Replay` 在「缓存基线边界已作废 / 基线之后有作废行」时拒绝重放并清掉缓存对（否则热路径绕过 ①）；③`renderM0` 新增 `<session-history-invalidated>` 块（尾部 continuous 失效段时投递，模型据此知道旧摘要被 rewind 作废）。三者合成「rewind 后模型不再看见被裁摘要」 | 逐字重放 `inject-compartments.ts` 后按块重新贴回：`readM0Compartments` 的尾部失效分流、`readNewCompartments` 的 WHERE、`getCompartments` 调用点的 filter、`prepareCachedM0M1Replay` 的失效判定、`renderM0` 的 `invalidatedHistory` 参数与块。**`<session-history-invalidated>` 是本 fork 的新 wire 块**：上游若新增同名/近义块要合并而不是并存；`test-rewind-compartments.mjs` 的 T-RW2 写死了块名与文案里的 `summary segment(s)` / `sequences a-b` |
+| Z6 | `magic-context/src/core/hooks/magic-context/inject-compartments.ts`：`stripNewCompartmentsBlock` / `stripNewCompartmentsFromHead` + `injectM0M1` 的两条 unshift 路径 | 上游 `prefixTrimStatus === "refused"` 时只记日志、整窗照发；fork 额外把 m[1] 的 `<new-compartments>` 块剔掉（**只掐块**，memory 增量 / new memories / user profile 与注入本身都不动）。`boundary-precedes-window` 态不动 | 逐字重放后重新贴回两处 `if (prefixTrimStatus === "refused")` 分支与两个 helper。**不得扩大成「refused 整条 M1 不注入」**（会连带丢记忆增量，T-RW4 会红） |
+| Z7 | `bootstrap/src/app/magic-context/projection.ts`：`originalPairsWithMessage` + `sanitizeRebuiltMetadata` | 取自本仓 `ff8b4522`（幽灵消息事故根修）的两道身份守卫：role 不符断配对（`tool ↔ user` 折叠例外）、重建条目永久剥离 `inputPresentation`、`source` 保留。上游 magic-context 没有这一层（是宿主反投影） | 该文件是 fork 宿主侧文件，与上游 `src/core/**` 无交集；若被上游同步覆盖或重构，从 `ff8b4522` 取回两函数与 `projectMagicContextEntries` / `rebuildEntry` 的两处调用点。守卫语义见 `bootstrap/scripts/test-mc-entry-identity-guard.mjs` 的 4 条用例 |
+| Z8 | `bootstrap/src/app/magic-context/storage.ts` 的 `invalidateMagicContextCompartmentsForRewind`、`assembly.ts` 的 `registerCompartmentInvalidator`、`create-app.ts` 的 `invalidateMagicContextCompartments` 端口、`zcode-protocol-v4/.../fork-edit-retry.ts` 的一行调用 | 上游无此层（宿主适配）。水位换算在宿主（`anchorMessageId` 在 `sessionStore.messages()` 的 1-based 位置，与包内 `toStoredRows` 同一编号规则），标记与缓存清理在包内；端口**可选**：MC 未装配时键不存在，调用方跳过 | 纯宿主侧偏离，与上游无交集。升级时保证包仍导出 `invalidateCompartmentsForRewind`（Z4）；若 `ConversationRewindResult` 新增 `revert` 字段（另一条工作线的候选改动），水位来源可改用它，但**本 fork 当前刻意不改 `rewind-message.ts`**（core 只能 `import type`，IM4） |
+
 
 ### 各 phase 的不可回退点（硬约束）
 

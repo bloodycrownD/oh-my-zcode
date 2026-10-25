@@ -40,7 +40,10 @@ import {
   createMagicContextPromptSectionResolver,
   createMagicContextToolDescriptionResolver,
 } from "./ports.js";
-import type { MagicContextTurnTransformOptions } from "./types.js";
+import type {
+  MagicContextCompartmentInvalidator,
+  MagicContextTurnTransformOptions,
+} from "./types.js";
 import { createMagicContextUsageRecorder, type MagicContextUsageRecorder } from "./usage.js";
 
 /**
@@ -78,6 +81,15 @@ export interface MagicContextPlugin {
   toolDescription: ReturnType<typeof createMagicContextToolDescriptionResolver>;
   usageRecorder: MagicContextUsageRecorder;
   close: () => Promise<void>;
+  /**
+   * FORK（spec phase-compartment-rewind / C1）：rewind 之后让旧 compartment 失效。
+   *
+   * `undefined` = 本装配没有可用库（flag 关 / DB 开不出来）——那时 `create-app`
+   * 不把 `invalidateMagicContextCompartments` 挂到 app 上，调用方按可选方法处理。
+   * 与 `close` 一样是 **getter**：工厂在构造期回填，晚于返回也能补上，不会被对象
+   * 字面量求值钉死成 undefined。
+   */
+  invalidateCompartments: MagicContextCompartmentInvalidator | undefined;
 }
 
 /** 没装成（关闭 / 库开不出来）时的关闭钩子：工厂没注册就不该有收口动作。 */
@@ -111,11 +123,19 @@ export async function createMagicContextPlugin(
   // ② 工厂返回的 `close` 由 registerClose 回填；调用方自带的 registerClose 照旧转发
   // （Step 4 之前 create-app 就是靠它拿 close 的，不能因为插件接管而断链）。
   let registeredClose: (() => Promise<void>) | undefined;
+  // FORK（spec phase-compartment-rewind / C1）：与 close 同一套回填手法——工厂在
+  // DB 开出来之后立刻回填，本文件只捕获、不自己拼一个（水位换算要用工厂持有的
+  // db + sessionStore，插件层没有这两样）。
+  let registeredInvalidateCompartments: MagicContextCompartmentInvalidator | undefined;
   const turnTransform = await createMagicContextTurnTransform({
     ...transformOptions,
     registerClose: (close) => {
       registeredClose = close;
       transformOptions.registerClose?.(close);
+    },
+    registerCompartmentInvalidator: (invalidate) => {
+      registeredInvalidateCompartments = invalidate;
+      transformOptions.registerCompartmentInvalidator?.(invalidate);
     },
     // 插件自己的 recorder 放在最后：即使调用方用 JS 绕过类型塞了同名键，也不生效。
     usageRecorder,
@@ -152,6 +172,11 @@ export async function createMagicContextPlugin(
     // `test-magic-context-plugin.mjs` 的「同一函数对象」断言在 getter 下仍成立。
     get close() {
       return registeredClose ?? noopClose;
+    },
+    // FORK（spec phase-compartment-rewind / C1）：同一个 getter 纪律——工厂没走到
+    // DB 成功（flag 关 / db_null）时保持 undefined，装配层据此**不挂** app 端口。
+    get invalidateCompartments() {
+      return registeredInvalidateCompartments;
     },
   };
 }

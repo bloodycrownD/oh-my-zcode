@@ -360,6 +360,23 @@ export interface ZCodeApp {
    */
   reloadWorkspaceHookTrust(): Promise<void>;
   close?(): Promise<void>;
+  /**
+   * FORK（spec phase-compartment-rewind / C1）：rewind 之后让 magic-context 里被裁
+   * 轮次的 compartment 摘要失效（DB 按水位标记 + 清持久/进程内缓存）。
+   *
+   * **可选 = 能力之门**：flag 关、MC 包缺失或 DB 开不出来时本键不存在，调用方
+   * （v4 `fork-edit-retry.ts`）按可选方法跳过——绝不在这里塞一个空实现，那会让
+   * 「有没有真的失效」在两处各有说法。
+   *
+   * 语义：内部已把失败收成 warn（rewind 已提交，不因收尾失败把命令判失败）；读侧
+   * （`inject-compartments.ts`）另有 water-level 过滤 + refused 掐块两道独立闸。
+   */
+  invalidateMagicContextCompartments?(input: {
+    /** 被裁掉的第一条消息（`ConversationRewindResult.targetMessageId`）。 */
+    anchorMessageId: string;
+    /** rewind 结果里的保留条数：持久序换算不出来时的兜底水位。 */
+    keptMessageCount: number;
+  }): Promise<void>;
   getMode(): CollaborationMode;
   getModel(): string;
   /** current-only 协议快照精确读取当前 Registry 模型，避免枚举整个目录。 */

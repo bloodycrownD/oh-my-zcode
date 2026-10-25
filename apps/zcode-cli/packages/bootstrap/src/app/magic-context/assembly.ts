@@ -39,6 +39,7 @@ import { HISTORIAN_SETTLE_TIMEOUT_MS } from "./settle.js";
 import {
   BOOT_OPEN_BUSY_TIMEOUT_MS,
   describeStorageUnavailability,
+  invalidateMagicContextCompartmentsForRewind,
   openMagicContextStorageWithBusyRetry,
 } from "./storage.js";
 import type { MagicContextTurnTransformOptions } from "./types.js";
@@ -270,6 +271,26 @@ export async function createMagicContextTurnTransform(
     // D-13 ①：这一 pass 刚改过 compartments / dropped / 缓存块。
     publishUsageSummary();
   };
+  // FORK（spec phase-compartment-rewind / C1）：把「rewind 之后让旧 compartment
+  // 失效」交给装配层。与 `registerClose` 同一范式（构造期回填），时序要求只有一条：
+  // DB 已开（水位标记与缓存列都在它上面）。闭包捕获的是**本工厂持有的同一个**
+  // `db` 句柄（进程级 openDatabase 单例），不另开连接、不做每轮重建。
+  //
+  // 为什么这个动作不放在 core 的 `rewind-message.ts`：core 只能 `import type`（IM4），
+  // 而 rewind 级联本身属另一条工作线；host 的 `fork-edit-retry.ts` 是 v4 编辑重发/
+  // 重试的唯一 rewind 调点，一行可选调用即可覆盖 C1 收窄后的范围。
+  options.registerCompartmentInvalidator?.(async (input) => {
+    await invalidateMagicContextCompartmentsForRewind(
+      {
+        db,
+        sessionId: options.sessionId,
+        ...(options.sessionStore === undefined ? {} : { sessionStore: options.sessionStore }),
+        logger: options.logger,
+      },
+      input,
+    );
+  });
+
   // FORK（MF-05）：会话/进程关闭时按 **drain → shutdown → dispose** 的顺序收口。
   //
   //   ① drain（有界）：在飞的那次后台 pass 先跑完，让它的 publish 与 drain 预留真正

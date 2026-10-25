@@ -19,6 +19,24 @@ export type ZCodeMagicContextTransform = (
   output: { messages: unknown[] },
 ) => Promise<void>;
 
+/**
+ * FORK（spec phase-compartment-rewind / C1）：rewind 事实，交给 compartment 失效
+ * 回调的**唯一**入参形状。
+ *
+ * `anchorMessageId` = 被裁掉的第一条消息（`ConversationRewindResult.targetMessageId`）；
+ * `keptMessageCount` = rewind 结果里的保留条数，仅作「持久序换算出不来」时的兜底
+ * 水位（见 `storage.ts` 的 `invalidateMagicContextCompartmentsForRewind`）。
+ */
+export interface MagicContextCompartmentRewindInput {
+  anchorMessageId: string;
+  keptMessageCount: number;
+}
+
+/** rewind → compartment 失效回调。`undefined` 返回值不存在：内部已把错误收成 warn。 */
+export type MagicContextCompartmentInvalidator = (
+  input: MagicContextCompartmentRewindInput,
+) => Promise<void>;
+
 export interface MagicContextTurnTransformOptions {
   /**
    * **冷**求值后的 effective 开关（`features.magicContext && magicContext.enabled`，
@@ -106,6 +124,24 @@ export interface MagicContextTurnTransformOptions {
    * 相同。
    */
   registerClose?(close: () => Promise<void>): void;
+  /**
+   * FORK（spec phase-compartment-rewind / C1）：把「rewind 之后让 compartment 失效」
+   * 的回调交给装配层（与 `registerClose` 同范式，构造期回填，不在返回值上加字段）。
+   *
+   * 回调入参是 **rewind 事实**（锚点 messageId + 被保留的消息条数），不是包内坐标：
+   * 「messageId → 持久序序号」的换算要用 `sessionStore.messages()` 的顺序，那是
+   * 宿主持有的东西（包内 `toStoredRows` 也是同一条顺序）；包只消费序号。
+   *
+   * 时序：工厂在 DB 开出来之后立刻回填（早于任何 turn），所以端口在场即「能失效」；
+   * 关闭态 / db_null 时不存在这个回调，`record.app.invalidateMagicContextCompartments`
+   * 也就不会被挂上——调用方按可选方法处理。
+   *
+   * 为什么不在 core 侧让 `rewind-message.ts` 调包：core 只能 `import type`（IM4），
+   * 且 rewind 级联属另一条工作线；host 的 `fork-edit-retry.ts` 是 v4 编辑重发/重试
+   * 的唯一 rewind 调点，一行可选调用即可覆盖 C1 的范围（TUI `/rewind` 不在本 spec
+   * 范围，见 phase-compartment-rewind 的收窄裁定）。
+   */
+  registerCompartmentInvalidator?(invalidate: MagicContextCompartmentInvalidator): void;
   /**
    * FORK（S24）：provider usage 的记录口。上游 OpenCode 的 plugin 在
    * `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里由宿主

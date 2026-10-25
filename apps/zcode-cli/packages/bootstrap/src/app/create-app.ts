@@ -1205,6 +1205,13 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       sessionId,
       traceId: traceContext.traceId,
       runtime,
+      // FORK（spec phase-compartment-rewind / C1）：rewind → compartment 失效的
+      // 可选端口。插件在场（DB 真的开出来了）才挂；缺席即「本 App 没有可失效的
+      // magic-context 库」，调用方按可选方法跳过。闭包由插件在构造期回填，不在这里
+      // 另造实现（水位换算归包 + 工厂持有的 db/sessionStore）。
+      ...(magicContextPlugin?.invalidateCompartments === undefined
+        ? {}
+        : { invalidateMagicContextCompartments: magicContextPlugin.invalidateCompartments }),
       respondWorkspaceHookReview: (input) =>
         workspaceHookRuntimeSecurity?.respond(
           {

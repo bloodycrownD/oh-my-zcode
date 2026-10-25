@@ -9,9 +9,11 @@
  */
 
 import type { Logger } from "@zcode/core";
+import type { SessionStorePort } from "@zcode/contracts";
 import {
   getMigrationOnOpenRefusal,
   getSchemaFenceRejection,
+  invalidateCompartmentsForRewind,
   isTransientStorageOpenError,
   projectStoredMessage,
   type ContextDatabase,
@@ -83,6 +85,89 @@ export function pageFromRows(
 /** `projectStoredMessage` 产出的 `MessageLike` 补上 ordinal 即成 `RawMessage`。 */
 export function withOrdinal(row: StoredRow): RawMessage {
   return { ...row.raw, ordinal: row.ordinal } as RawMessage;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// rewind → compartment 失效（spec phase-compartment-rewind / C1）
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * FORK（spec phase-compartment-rewind / C1）：rewind 之后让旧 compartment 失效。
+ *
+ * 水位换算：`anchorOrdinal` = 被裁掉的第一条消息在**持久序**里的 1-based 序号，
+ * 与 compartments 的 `start_message` / `end_message` 同一坐标系（两者都由
+ * `toStoredRows` 从 `sessionStore.messages()` 编号，见本文件上半段）。revert 只写
+ * `session.revert`、不删行，所以锚点行仍在库里，按 id 定位是可靠的。
+ *
+ * 为什么由宿主给水位、包做其余全部：标记列、`session_meta` 缓存列、进程内注入
+ * 缓存三者必须同批清理，且形状全归包所有（见包内 `rewind-invalidation.ts` 文件头）。
+ * 宿主只知道自己那份持久序。
+ *
+ * 失败方向：**不抛**。rewind 已经提交（transcript 已截断），此时让命令失败等于
+ * 「历史回退了但客户端看到报错」，比留下一次可观测的 warn 更糟。所以这里把异常
+ * 收成 `magic_context.compartments_invalidation_failed` 的 warn——读侧
+ * （`inject-compartments.ts` 的 water-level 过滤 + refused 掐块）仍是独立的一道闸，
+ * 宿主侧失败不会让旧摘要静默复现成「正常路径」。
+ */
+export async function invalidateMagicContextCompartmentsForRewind(
+  deps: {
+    db: ContextDatabase;
+    sessionId: string;
+    sessionStore?: SessionStorePort;
+    logger: Logger;
+  },
+  input: { anchorMessageId: string; keptMessageCount: number },
+): Promise<void> {
+  let anchorOrdinal = 0;
+  let ordinalSource: "session_store" | "kept_count_fallback" = "session_store";
+  if (deps.sessionStore) {
+    try {
+      const persisted = await deps.sessionStore.messages({
+        sessionID: deps.sessionId as never,
+      });
+      const index = persisted.findIndex((message) => message.info?.id === input.anchorMessageId);
+      if (index >= 0) anchorOrdinal = index + 1;
+    } catch (error) {
+      deps.logger.warn("Magic context rewind invalidation could not read the session store", {
+        module: "bootstrap",
+        event: "magic_context.compartments_invalidation_store_read_failed",
+        sessionId: deps.sessionId,
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  if (anchorOrdinal <= 0) {
+    // 兜底：rewind 结果自带「保留了多少条」。这个数与 `sessionStore.messages()`
+    // 的编号在正常情况下逐条对齐；只要有一处不对齐（例如 store 里含被过滤的
+    // 合成行），水位会偏小/偏大。方向可接受：偏小 ⇒ 多标几行（丢掉一段本可保留
+    // 的摘要），偏大 ⇒ 少标几行（读侧仍有 refused 掐块兜底）。source 记在日志里，
+    // 真出现时能一眼看出走了兜底。
+    anchorOrdinal = input.keptMessageCount + 1;
+    ordinalSource = "kept_count_fallback";
+  }
+  try {
+    const result = invalidateCompartmentsForRewind(deps.db, deps.sessionId, anchorOrdinal);
+    deps.logger.info("Magic context compartments invalidated after rewind", {
+      module: "bootstrap",
+      event: "magic_context.compartments_invalidated",
+      sessionId: deps.sessionId,
+      anchorMessageId: input.anchorMessageId,
+      anchorOrdinal: result.anchorOrdinal,
+      markedUnresolved: result.markedUnresolved,
+      alreadyInvalidated: result.alreadyInvalidated,
+      ordinalSource,
+      ...(result.skipped === undefined ? {} : { skipped: result.skipped }),
+    });
+  } catch (error) {
+    deps.logger.warn("Magic context compartment invalidation failed after rewind", {
+      module: "bootstrap",
+      event: "magic_context.compartments_invalidation_failed",
+      sessionId: deps.sessionId,
+      anchorMessageId: input.anchorMessageId,
+      anchorOrdinal,
+      detail: error instanceof Error ? error.message : String(error),
+    });
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

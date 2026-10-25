@@ -39,6 +39,10 @@ import {
     getProjectState,
     MEMORY_VISIBILITY_MUTATION_CATEGORY,
     persistCachedM0,
+    // FORK（spec phase-compartment-rewind / C1）：`prepareCachedM0M1Replay` 发现
+    // 缓存对早于一次 rewind 失效时必须清掉它（而不是只 return undefined），否则
+    // 下一次 defer pass 又会拿到同一份失效字节。
+    clearCachedM0M1,
 } from "../../features/magic-context/storage.js";
 import { readProjectDocsCanonical } from "../../features/magic-context/project-docs-hash.js";
 import {
@@ -493,7 +497,12 @@ export function prepareCompartmentInjection(
     // rows anyway once the host prunes them). Only its start/end coordinates
     // are stale, and range recovery refuses those by rebase_status, so the
     // agent gets the compartment text and a clear refusal instead of a gap.
-    const compartments = getCompartments(db, sessionId);
+    // FORK（spec phase-compartment-rewind / C1）：这条重建路径同样要滤掉 rewind 水位
+    // 之后的行——`getCompartments` 是包的公共读面（historian 计数等也用），不在它
+    // 内部改 WHERE，只在注入侧按 rebaseStatus 过滤，避免影响非注入消费者。
+    const compartments = getCompartments(db, sessionId).filter(
+        (compartment) => compartment.rebaseStatus !== "unresolved",
+    );
     // v2 faithful facts: session_facts is retired as a render source. Facts are
     // promoted to project memory and render via <project-memory>. We no longer
     // read or render session_facts here (matching the runner's removed write
@@ -1146,6 +1155,45 @@ const MAX_FORCED_MEMORIES_PER_DELTA = 10;
 const M0_EMPTY_BODY = "<session-history></session-history>";
 const M1_EMPTY_PLACEHOLDER =
     "<session-history-since>(no new content since last materialization)</session-history-since>";
+
+/**
+ * FORK（spec phase-compartment-rewind / C1，`injectM0M1` 的 refused 兜底）：从 m[1]
+ * 文本里剔掉 `<new-compartments>` 块。
+ *
+ * 为什么只掐块、不掐整条 m[1]：m[1] 还承载 memory 增量 / new memories / user
+ * profile——整条丢掉等于把记忆更新一起吞掉。为什么必须在 refused 时掐：rewind 让
+ * `preparedTrimBoundaryId` 落在窗口之外（`classifyAbsentBoundary` → `"refused"`），
+ * 此时窗口里的行**没有**被裁掉，而 `<new-compartments>` 里的段正是「上次基线之后
+ * 的摘要」——照发等于把刚被裁/刚失效的内容从另一个入口重新灌回模型。
+ *
+ * 边界态不动：`boundary-precedes-window` 时 m[1] 整条照旧（该态下 m[1] 可能是窗口
+ * 外历史的唯一载体）。
+ */
+const NEW_COMPARTMENTS_BLOCK_PATTERN = /<new-compartments>[\s\S]*?<\/new-compartments>\n?/;
+
+export function stripNewCompartmentsBlock(m1Text: string): string {
+    if (!m1Text.includes("<new-compartments>")) return m1Text;
+    const stripped = m1Text.replace(NEW_COMPARTMENTS_BLOCK_PATTERN, "").trim();
+    return stripped.length === 0 ? M1_EMPTY_PLACEHOLDER : stripped;
+}
+
+/**
+ * 把已构建的 m[0]/m[1] 头里的 m[1] 文本换成剔块后的版本，返回新文本（未变则 null）。
+ *
+ * 头形状由 {@link prependM0M1Messages} 固定：`[m0, m1]`，m[1] 只有一个 text part。
+ * 就地改而不是重建整个头：m[0] 侧可能带 mural 的 `file` part，重建要复制 mural
+ * 决策，容易与调用方分叉。就地改还有一个好处——若这个头来自进程内注入缓存，
+ * 剔块结果会随缓存一起被后续 defer pass 复用，不会下一轮又冒出来。
+ */
+function stripNewCompartmentsFromHead(head: MessageLike[]): string | null {
+    const m1Message = head.at(-1);
+    const part = m1Message?.parts[0] as { type?: unknown; text?: unknown } | undefined;
+    if (part === undefined || part.type !== "text" || typeof part.text !== "string") return null;
+    const stripped = stripNewCompartmentsBlock(part.text);
+    if (stripped === part.text) return null;
+    part.text = stripped;
+    return stripped;
+}
 
 type ProjectDocsRender = { renderedBlock: string; canonicalHash: string };
 const EMPTY_PROJECT_DOCS: ProjectDocsRender = { renderedBlock: "", canonicalHash: "" };
@@ -2082,7 +2130,36 @@ export function trimUserMemoriesToBudget(
     return selected;
 }
 
-function readM0Compartments(db: Database, sessionId: string): M0Compartment[] {
+/**
+ * FORK（spec phase-compartment-rewind / C1）：rewind 水位之后的 compartment 不参与
+ * 注入。
+ *
+ * 过去这里按 session **全量**读（WHERE 只有 `session_id`），于是 v4 编辑重发/重试
+ * 之后，被裁轮次的旧摘要仍渲染进 M0 的 `<session-history>`——模型看得见用户已经
+ * 撤回的内容。host 侧 `invalidateCompartmentsForRewind`（`rewind-invalidation.ts`）
+ * 把 `end_message >= 水位` 的行标成 `rebase_status='unresolved'`，本函数按行分流：
+ *
+ *   - `compartments` 只含仍然有效的行（`ok`），这才进 `<session-history>`；
+ *   - `invalidatedTail` 是**尾部连续**的失效段（sequence 最大的一串 unresolved 行）。
+ *     它在 M0 里投一条 `<session-history-invalidated>` 说明，让模型知道「上面这段
+ *     历史是被 rewind 作废的旧摘要，不是漏给」，而不是悄悄少给内容。
+ *
+ * 尾部判定是自限的：historian 在 rewind 之后新写出的 compartment（sequence 更大、
+ * `ok`）一出现，尾部就不再连续，说明块随之消失——它只覆盖「基线比有效历史长」
+ * 的那段窗口，不会永久挂在 prompt 里。
+ */
+interface InvalidatedHistorySummary {
+    count: number;
+    firstSequence: number;
+    lastSequence: number;
+}
+
+interface M0CompartmentRead {
+    compartments: M0Compartment[];
+    invalidatedTail: InvalidatedHistorySummary | null;
+}
+
+function readM0Compartments(db: Database, sessionId: string): M0CompartmentRead {
     const rows = cachedStatement(
         m0CompartmentStatements,
         db,
@@ -2094,7 +2171,31 @@ function readM0Compartments(db: Database, sessionId: string): M0Compartment[] {
           ORDER BY sequence ASC`,
     ).all(sessionId) as Array<Record<string, unknown>>;
 
-    return rows.map(rowToM0Compartment);
+    const compartments: M0Compartment[] = [];
+    let invalidatedTail: InvalidatedHistorySummary | null = null;
+    for (const row of rows) {
+        const compartment = rowToM0Compartment(row);
+        if (compartment.rebaseStatus !== "unresolved") {
+            compartments.push(compartment);
+            // 后面还有有效行 ⇒ 失效段不在尾部，说明块不再需要。
+            invalidatedTail = null;
+            continue;
+        }
+        invalidatedTail =
+            invalidatedTail === null
+                ? {
+                      count: 1,
+                      firstSequence: compartment.sequence,
+                      lastSequence: compartment.sequence,
+                  }
+                : {
+                      count: invalidatedTail.count + 1,
+                      firstSequence: invalidatedTail.firstSequence,
+                      lastSequence: compartment.sequence,
+                  };
+    }
+
+    return { compartments, invalidatedTail };
 }
 
 function nullableString(value: unknown): string | null {
@@ -2192,7 +2293,7 @@ function readNewCompartments(
                 end_message_id, title, content, p1, p2, p3, p4, episode_type,
                 created_at, importance, legacy, rebase_status
            FROM compartments
-          WHERE session_id = ? AND sequence > ?
+          WHERE session_id = ? AND sequence > ? AND rebase_status != 'unresolved'
           ORDER BY sequence ASC`,
     ).all(sessionId, afterSequence) as Array<Record<string, unknown>>;
     return rows.map(rowToM0Compartment);
@@ -2315,6 +2416,12 @@ export function renderM0(args: {
     compartments: M0Compartment[];
     memories: Memory[];
     facts: SessionFact[];
+    /**
+     * FORK（spec phase-compartment-rewind / C1）：尾部失效段说明。由
+     * `readM0Compartments` 给出；caller 不传即不投（例如 compaction-off 的零
+     * compartment 路径）。
+     */
+    invalidatedHistory?: InvalidatedHistorySummary | null;
     mural?: { enabled: boolean; supportsVision: boolean; dataUrl?: string };
     memoryRenderOptions?: MemoryRenderOptions;
     historyBudgetTokens?: number;
@@ -2349,6 +2456,25 @@ export function renderM0(args: {
             ? `<session-history>\n${sessionHistory}\n</session-history>`
             : M0_EMPTY_BODY,
     );
+
+    // FORK（spec phase-compartment-rewind / C1）：尾部失效段说明。
+    //
+    // 为什么必须显式说，而不是静默少给：`<session-history>` 少了被 rewind 作废的
+    // 那几段之后，模型看到的历史比它上一轮见过的短——没有说明时它会当成「历史本
+    // 来就到这里」甚至去编造缺口内容。这一段只是**陈述事实**（作废了几段、序号
+    // 区间、上面那段有效历史到哪结束），不含任何被裁内容本身。
+    //
+    // 只在失效段位于尾部时出现（见 `readM0Compartments` 的 self-limiting 判定），
+    // 因此不会永久挂在 prompt 里；文本只含 count/sequence，确定性、可被 cache 复用。
+    const invalidatedHistory = args.invalidatedHistory;
+    if (invalidatedHistory !== null && invalidatedHistory !== undefined) {
+        const first = invalidatedHistory.firstSequence;
+        const last = invalidatedHistory.lastSequence;
+        const range = first === last ? `sequence ${first}` : `sequences ${first}-${last}`;
+        sections.push(
+            `<session-history-invalidated>\nThe user rewound the conversation. ${invalidatedHistory.count} summary segment(s) (${range}) covering the rewound turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat the rewound turns as removed from history and do not infer their content.\n</session-history-invalidated>`,
+        );
+    }
 
     const memoriesBlock = renderMemoryBlockV2(
         args.memories,
@@ -2439,6 +2565,8 @@ export function materializeM0(options: M0M1RenderOptions): MaterializeM0Result {
     const projectDirectory = options.projectDirectory ?? projectPath ?? "";
     let snapshotMarkers: M0SnapshotMarkers;
     let compartments: M0Compartment[] = [];
+    /** FORK（C1）：尾部失效段说明（见 readM0Compartments）。 */
+    let invalidatedHistory: InvalidatedHistorySummary | null = null;
     let facts: SessionFact[] = [];
     let memories: Memory[] = [];
     let userMemories: UserMemory[] = [];
@@ -2487,9 +2615,17 @@ export function materializeM0(options: M0M1RenderOptions): MaterializeM0Result {
         // rows exist but never render into <session-history>. The snapshot
         // markers still read the real maxCompartmentSeq so the staleness
         // check stays accurate; only the render input is emptied.
-        compartments = options.compactionOff
-            ? []
-            : readM0Compartments(options.db, options.sessionId);
+        //
+        // FORK（spec phase-compartment-rewind / C1）：M0 只吃 `readM0Compartments`
+        // 过滤后的有效行；尾部失效段另开 <session-history-invalidated> 说明。
+        if (options.compactionOff) {
+            compartments = [];
+            invalidatedHistory = null;
+        } else {
+            const read = readM0Compartments(options.db, options.sessionId);
+            compartments = read.compartments;
+            invalidatedHistory = read.invalidatedTail;
+        }
         // v2 faithful facts: session_facts is retired as a render source (facts
         // promote to project memory, rendered below via `memories`). Keep `facts`
         // empty so renderSessionHistoryWithDecay never emits a <session_facts>
@@ -2569,6 +2705,7 @@ export function materializeM0(options: M0M1RenderOptions): MaterializeM0Result {
         userProfileBudgetTokens: options.userProfileBudgetTokens,
         decayPressureMultiplier,
         mural,
+        invalidatedHistory,
     });
 
     let attempts = 0;
@@ -2589,6 +2726,7 @@ export function materializeM0(options: M0M1RenderOptions): MaterializeM0Result {
             userProfileBudgetTokens: options.userProfileBudgetTokens,
             decayPressureMultiplier,
             mural,
+            invalidatedHistory,
         });
         attempts += 1;
     }
@@ -3390,14 +3528,23 @@ function renderFreshM0NonPersisted(options: M0M1RenderOptions): {
     // filtering, deterministic across passes — matches Pi fallback).
     snapshotMarkers.materializedAt = options.state.cachedM0MaterializedAt ?? 0;
     // Compaction-off renders through the zero-compartment path here too.
-    const compartments = options.compactionOff
-        ? []
-        : withCompartmentDates(
-              options.db,
-              options.sessionId,
-              readM0Compartments(options.db, options.sessionId),
-              options.temporalAwareness,
-          );
+    // FORK（spec phase-compartment-rewind / C1）：与 materializeM0 同源——M0 只吃
+    // 有效行，尾部失效段另开说明块（两处回退路径必须一致，否则「持久化失败时
+    // 退回旧摘要」）。
+    let invalidatedHistory: InvalidatedHistorySummary | null = null;
+    let compartments: M0Compartment[];
+    if (options.compactionOff) {
+        compartments = [];
+    } else {
+        const read = readM0Compartments(options.db, options.sessionId);
+        compartments = withCompartmentDates(
+            options.db,
+            options.sessionId,
+            read.compartments,
+            options.temporalAwareness,
+        );
+        invalidatedHistory = read.invalidatedTail;
+    }
     // Use the SAME frozen cutoff for the baseline memory read as m[1] does, so a
     // memory crossing expires_at between two fallback passes can't shift the m[0]
     // baseline bytes either (live Date.now() default would reintroduce drift).
@@ -3473,6 +3620,7 @@ function renderFreshM0NonPersisted(options: M0M1RenderOptions): {
             userProfileBudgetTokens: options.userProfileBudgetTokens,
             decayPressureMultiplier,
             mural,
+            invalidatedHistory,
         });
         attempts += 1;
     }
@@ -3861,6 +4009,53 @@ function trimToPreparedPrefix(
     return status;
 }
 
+/**
+ * FORK（spec phase-compartment-rewind / C1）：这份持久 m[0]/m[1] 对是否早于一次
+ * compartment 失效（rewind 水位标记）？
+ *
+ * 两条判据，缺一不可：
+ *   1. **M0 侧**：缓存基线边界（`cached_m0_last_baseline_end_message_id`）指向
+ *      compartment 现在已是 `unresolved` ⇒ rewind 把基线自己作废了，缓存的
+ *      `<session-history>` 里就有被裁摘要。
+ *   2. **M1 侧**：存在 `sequence > 缓存基线 maxCompartmentSeq` 的 unresolved 行
+ *      ⇒ 缓存 `<new-compartments>` 覆盖的那段增量被作废了。
+ *
+ * 自愈：host 侧 invalidation 已经清过一次；这里只在「缓存对仍活着但已失效」时
+ * 兜底（端口缺席 / 别的宿主形态 / 跨进程写的标记）。清掉之后下一次 materialize
+ * 用过滤后的行重建，新基线边界必然是有效行、而 maxCompartmentSeq 是表内 raw max
+ * （`getMaxCompartmentSeq` 不带 rebase 过滤），于是判据 1/2 都不再命中，回放恢复。
+ *
+ * 一条 SELECT 判完两条（都走 idx_compartments_session）：
+ */
+function cachedPairPredatesCompartmentInvalidation(
+    db: Database,
+    sessionId: string,
+    row: CachedM0M1Row,
+): boolean {
+    const boundaryId = row.cached_m0_last_baseline_end_message_id;
+    if (!boundaryId) return false;
+    const verdict = db
+        .prepare(
+            `SELECT
+               (SELECT rebase_status
+                  FROM compartments
+                 WHERE session_id = ? AND end_message_id = ?
+                 ORDER BY sequence DESC LIMIT 1) AS boundary_status,
+               (SELECT 1
+                  FROM compartments
+                 WHERE session_id = ?
+                   AND rebase_status = 'unresolved'
+                   AND sequence > ?
+                 LIMIT 1) AS newer_unresolved`,
+        )
+        .get(sessionId, boundaryId, sessionId, row.cached_m0_max_compartment_seq ?? -1) as
+        | { boundary_status: string | null; newer_unresolved: number | null }
+        | null
+        | undefined;
+    if (!verdict) return false;
+    return verdict.boundary_status === "unresolved" || verdict.newer_unresolved !== null;
+}
+
 /** Capture a complete persisted pair and its boundary before a fallible preflight. */
 export function prepareCachedM0M1Replay(
     db: Database,
@@ -3868,6 +4063,18 @@ export function prepareCachedM0M1Replay(
 ): InjectM0M1Result | undefined {
     const row = readCachedM0M1Row(db, sessionId);
     if (!row?.cached_m0_bytes || !row.cached_m1_bytes) return undefined;
+    // FORK（spec phase-compartment-rewind / C1）：缓存回放路径同样过滤。不清的话
+    // 「过滤只发生在重建路径」会被热路径整体绕过——defer pass 原样重放 rewind 前
+    // 渲染好的字节（M0 含旧摘要，M1 含它们的 <new-compartments>）。
+    if (cachedPairPredatesCompartmentInvalidation(db, sessionId, row)) {
+        clearCachedM0M1(db, sessionId);
+        clearInjectionCache(sessionId);
+        sessionLog(
+            sessionId,
+            "compartment injection: persisted m[0]/m[1] predates a rewind invalidation; dropped the cached pair so the next materialization rebuilds from filtered compartments",
+        );
+        return undefined;
+    }
     const m0Bytes = toBuffer(row.cached_m0_bytes);
     const m1Text = toBuffer(row.cached_m1_bytes).toString("utf8");
     const mural = row.cached_m0_mural_data_url
@@ -3905,12 +4112,23 @@ export function injectM0M1(options: M0M1RenderOptions): InjectM0M1Result {
     if (prepared?.preparedMessages) {
         const head = prepared.preparedMessages;
         let prefixTrimStatus: PrefixTrimStatus = "not-attempted";
+        let m1Text = prepared.m1Text;
         if (options.messages) {
             prefixTrimStatus = trimToPreparedPrefix(options, prepared);
+            // FORK（spec phase-compartment-rewind / C1）：refused = 边界不在窗口内、
+            // 本轮没有任何行被真正裁掉，"记 refused 但整窗照发"本身是既有语义（窗口
+            // 内容完整）；但 `<new-compartments>` 是「基线之后的摘要」，refused 时
+            // 它描述的那段历史既没被裁掉、也可能刚被 rewind 作废——照发就是从另一个
+            // 入口把失效摘要灌回模型。只掐块，m[1] 其余内容（memory 增量/新记忆/
+            // user profile）照旧，见 `stripNewCompartmentsBlock`。
+            if (prefixTrimStatus === "refused") {
+                m1Text = stripNewCompartmentsFromHead(head) ?? m1Text;
+            }
             options.messages.unshift(...structuredClone(head));
         }
         return {
             ...prepared,
+            m1Text,
             prependedMessageCount: options.messages ? head.length : 0,
             prefixTrimStatus,
         };
@@ -4191,6 +4409,12 @@ export function injectM0M1(options: M0M1RenderOptions): InjectM0M1Result {
             materializationContentionRetryExhausted: contentionExhausted,
             preparedTrimBoundaryId,
         });
+        // FORK（spec phase-compartment-rewind / C1）：与 prepared 路径同一处语义——
+        // refused 时只从已构建的头里剔掉 `<new-compartments>` 块，m[1] 其余内容与
+        // 注入本身都不动（同见 `stripNewCompartmentsBlock` 的说明）。
+        if (prefixTrimStatus === "refused") {
+            m1Text = stripNewCompartmentsFromHead(preparedMessages) ?? m1Text;
+        }
         options.messages.unshift(...structuredClone(preparedMessages));
     } else prependedMessageCount = 0;
 
