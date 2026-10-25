@@ -16,6 +16,9 @@ import {
   markTasksStorageMigrated,
   markTasksStoragePrepared,
 } from "#src/session/tasksDatabase/prepared.js";
+import { createServiceLogger } from "#src/logger/serviceLogger.js";
+
+const logger = createServiceLogger("tasks-storage-startup");
 
 type TasksStoragePhase =
   | "checking"
@@ -100,6 +103,20 @@ export async function prepareTasksIndexStorage(
   try {
     // 这些是原本就在初始化时执行的修复，不创建新的迁移或改变已有事务边界。
     for (const repo of repos) await repo.ensureReady();
+    for (const repo of repos) {
+      if (!(repo instanceof TaskIndexRepo)) continue;
+      // 崩溃/强杀会留下 task_status=running 的假「运行中」会话；本进程刚启动不可能有本地轮
+      // 在跑，所以这里做一次性全量收敛。对账失败只告警、绝不向上抛：它属于附加修复，
+      // 一旦阻断存储准备会让整个应用起不来（存储本身已就绪）。
+      try {
+        const reconciled = await repo.markAllRunningTasksCompleted();
+        if (reconciled > 0) {
+          logger.info(undefined, `启动对账收敛崩溃遗留 running → completed count=${reconciled}`);
+        }
+      } catch (error) {
+        logger.warn(undefined, "启动期 running 任务对账失败，已跳过（不阻断存储准备）", error);
+      }
+    }
   } catch (error) {
     preparationFailure = error;
     throw error;

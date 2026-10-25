@@ -1467,6 +1467,121 @@ export class TaskIndexRepo {
     });
   }
 
+  /**
+   * 启动对账：把持久化里仍标 `running`、但权威 sessions-index 已给出终态的任务收敛到
+   * `completed`。
+   *
+   * 根因（v1.0.26）：进程崩溃/强杀时最后一次写入停在 status=running；而 index 同步器
+   * 刻意「不回放历史终态」（zcodeTaskIndexSyncer.processSummary 的 becameTerminal 需要
+   * 本轮基线先见到非终态），于是这些任务永远停在 running——侧栏与状态区一直显示
+   * 「运行中」，但实际没有任何轮在跑。这里只做单向收敛：running → completed。
+   *
+   * 判据只认「同一 workspace 的权威 summary 已终态」。上游 v1.0.26 还接受「task 已不在
+   * summary 集合里」作为收敛依据，本仓刻意去掉：v1.0.20 的 sessions-index 首帧快照是否
+   * 一定包含 subagent 派生会话没有代码保证，按「已消失」收敛可能误伤正在跑的任务。
+   * 历史脏数据交给启动期全量对账（`markAllRunningTasksCompleted`）兜住。
+   */
+  async reconcileStaleRunningTasks(params: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+    terminalTaskIds: readonly string[];
+  }): Promise<number> {
+    await this.ensureReady();
+    const workspaceKeyValue = workspaceKey(params);
+    const terminal = [...new Set(params.terminalTaskIds)];
+    if (terminal.length === 0) return 0;
+    const terminalClause = `task_id IN (${terminal.map(() => "?").join(",")})`;
+    const rows = this.getDatabase()
+      .prepare(
+        `SELECT task_id AS taskId FROM tasks
+         WHERE workspace_key=? AND (${terminalClause})`,
+      )
+      .all(workspaceKeyValue, ...terminal) as Array<{ taskId: string }>;
+    return this.completeRunningRows(
+      workspaceKeyValue,
+      rows.map((row) => row.taskId),
+    );
+  }
+
+  /**
+   * 进程启动对账：把上一进程崩溃/强杀留下的 `running` 一次性收敛为 `completed`。
+   *
+   * 与 `reconcileStaleRunningTasks` 的区别：后者需要权威 summary 证明终态，只能覆盖
+   * 「本次已订阅 index」的 workspace；本进程刚启动时不可能有任何本地轮在跑，因此可以
+   * 全局收敛。另一实例若确实在跑某个任务，它下一次事件写入会把状态重新置回 running，
+   * 所以这里只做启动期的一次性纠偏，不会污染活跃会话。
+   */
+  async markAllRunningTasksCompleted(): Promise<number> {
+    await this.ensureReady();
+    // 不能只按 task_status 列筛：历史修复只改了列、没改 meta_json，而 rowToMeta 优先读
+    // meta_json，界面仍旧显示运行中。这里两处一起看，把「列或 meta_json 任一为 running」
+    // 的行都纳入（V1.0.26 已发生过一次列修复不生效的事故）。
+    const rows = this.getDatabase()
+      .prepare(
+        "SELECT workspace_key AS workspaceKey, task_id AS taskId, task_status AS status, meta_json AS metaJson FROM tasks",
+      )
+      .all() as Array<{
+      workspaceKey: string;
+      taskId: string;
+      status: string | null;
+      metaJson: string;
+    }>;
+    let changed = 0;
+    for (const row of rows) {
+      const columnRunning = row.status === "running";
+      let metaRunning = false;
+      try {
+        metaRunning = (JSON.parse(row.metaJson) as { status?: unknown }).status === "running";
+      } catch {
+        metaRunning = false;
+      }
+      if (!columnRunning && !metaRunning) continue;
+      changed += await this.completeRunningRows(row.workspaceKey, [row.taskId]);
+    }
+    return changed;
+  }
+
+  /**
+   * running → completed 的唯一写入口。
+   *
+   * `rowToMeta` 优先采用 meta_json 里的 status，只改 `task_status` 列会出现
+   * 「库里已是 completed、界面仍显示运行中」的分裂，因此两处必须同时改写。
+   */
+  private async completeRunningRows(
+    workspaceKeyValue: string,
+    taskIds: readonly string[],
+  ): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const now = Date.now();
+    const database = this.getDatabase();
+    const select = database.prepare(
+      "SELECT meta_json AS metaJson, task_status AS status FROM tasks WHERE workspace_key=? AND task_id=?",
+    );
+    const update = database.prepare(
+      "UPDATE tasks SET task_status='completed', updated_at=?, meta_json=? WHERE workspace_key=? AND task_id=?",
+    );
+    let changed = 0;
+    for (const taskId of taskIds) {
+      const row = select.get(workspaceKeyValue, taskId) as
+        | { metaJson: string; status: string | null }
+        | undefined;
+      if (!row) continue;
+      let nextMetaJson = row.metaJson;
+      let metaRunning = false;
+      try {
+        const parsed = JSON.parse(row.metaJson) as Record<string, unknown>;
+        metaRunning = parsed.status === "running";
+        nextMetaJson = JSON.stringify({ ...parsed, status: "completed", updatedAt: now });
+      } catch {
+        // meta_json 损坏时保留原文，只收敛列，读路径本就会回退到列值。
+      }
+      if (row.status !== "running" && !metaRunning) continue;
+      const result = update.run(now, nextMetaJson, workspaceKeyValue, taskId);
+      changed += Number(result.changes ?? 0);
+    }
+    return changed;
+  }
+
   async updateTaskState(params: {
     workspacePath: string;
     workspaceIdentity?: string;

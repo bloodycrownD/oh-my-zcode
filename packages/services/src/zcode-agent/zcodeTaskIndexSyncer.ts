@@ -738,6 +738,36 @@ export function createZCodeTaskIndexSyncer(
         firstError,
       );
     }
+    // 崩溃遗留的 running 对账（v1.0.26）：processSummary 刻意不回放历史终态，因此进程被
+    // 杀时停在 running 的任务不会自愈。这里用同一批权威 summary 做一次单向收敛：已经是
+    // 终态的 running 任务 → completed。刻意不把「已不在 summary 集合里」当作收敛依据——
+    // 首帧快照是否包含 subagent 派生会话在本版本没有代码保证，按「已消失」收敛有误伤
+    // 正在跑的任务的风险；历史脏数据由启动期全量对账兜住。
+    const terminalTaskIds = candidates
+      .filter((summary) => isTerminalPhase(summary.phase))
+      .map((summary) => summary.sessionId);
+    try {
+      const reconciled = await taskIndexRepo.reconcileStaleRunningTasks({
+        terminalTaskIds,
+        workspacePath: state.target.workspacePath,
+        ...(state.target.workspaceIdentity
+          ? { workspaceIdentity: state.target.workspaceIdentity }
+          : {}),
+      });
+      if (reconciled > 0) {
+        logger.info(
+          undefined,
+          `task index 收敛崩溃遗留 running → completed workspace=${resolveWorkspaceKey(state.target)} count=${reconciled}`,
+        );
+      }
+    } catch (error) {
+      // 对账只是附加修复：失败不能影响首帧基线补齐与后续事件处理，只留一条告警。
+      logger.warn(
+        undefined,
+        `task index running 对账失败 workspace=${resolveWorkspaceKey(state.target)}`,
+        error,
+      );
+    }
   }
 
   function deliveryKindOf(event: unknown): TopicDeliveryKind {

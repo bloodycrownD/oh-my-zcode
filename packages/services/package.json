@@ -17,7 +17,8 @@
     "lint:fix": "oxlint --fix",
     "test:storage-exec-output-clean": "tsx --test test/storageExecOutputClean.test.ts",
     "test:model-trajectory-head": "tsx --test test/modelTrajectoryHead.test.ts",
-    "test:ui-locale-spawn-env": "tsx --test test/buildUiLocaleSpawnEnv.test.ts"
+    "test:ui-locale-spawn-env": "tsx --test test/buildUiLocaleSpawnEnv.test.ts",
+    "test:task-running-reconcile": "tsx --test test/taskRunningReconcile.test.ts"
   },
   "dependencies": {
     "@larksuiteoapi/node-sdk": "1.64.0",
