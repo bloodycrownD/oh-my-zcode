@@ -740,6 +740,35 @@ export function createZCodeTaskIndexSyncer(
         firstError,
       );
     }
+    // 崩溃遗留的 running 对账（v1.0.26）：processSummary 刻意不回放历史终态，因此
+    // 进程被杀时停在 running 的任务不会自愈。这里用同一批权威 summary 做一次单向收敛：
+    // 已经是终态、或已不在 summary 集合里的 running 任务 → completed。
+    const terminalTaskIds = candidates
+      .filter((summary) => isTerminalPhase(summary.phase))
+      .map((summary) => summary.sessionId);
+    const knownTaskIds = candidates.map((summary) => summary.sessionId);
+    try {
+      const reconciled = await taskIndexRepo.reconcileStaleRunningTasks({
+        terminalTaskIds,
+        knownTaskIds,
+        workspacePath: state.target.workspacePath,
+        ...(state.target.workspaceIdentity
+          ? { workspaceIdentity: state.target.workspaceIdentity }
+          : {}),
+      });
+      if (reconciled > 0) {
+        logger.info(
+          undefined,
+          `task index 收敛崩溃遗留 running → completed workspace=${resolveWorkspaceKey(state.target)} count=${reconciled}`,
+        );
+      }
+    } catch (error) {
+      logger.warn(
+        undefined,
+        `task index running 对账失败 workspace=${resolveWorkspaceKey(state.target)}`,
+        error,
+      );
+    }
   }
 
   function deliveryKindOf(event: unknown): TopicDeliveryKind {

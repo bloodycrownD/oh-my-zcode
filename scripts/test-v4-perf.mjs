@@ -44,6 +44,7 @@ const COMMANDS = [
   "node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/composerHeldQueueGuard.test.ts",
   "node --import tsx --test packages/shared/test/sqliteMigrationsRunner.test.ts",
   "node --import tsx --test packages/services/test/tasksMigrationsUpgrade.test.ts",
+    "node --import tsx --test packages/services/test/taskRunningReconcile.test.ts",
   "node --import tsx --test packages/services/test/projectStorageRepository.test.ts",
   "node --import tsx --test packages/services/test/taskMembershipQuery.test.ts",
   "node --import tsx --test packages/shared/test/sourceServerContracts.test.ts",

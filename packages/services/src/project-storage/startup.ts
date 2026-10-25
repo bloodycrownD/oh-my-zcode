@@ -121,7 +121,12 @@ export async function prepareTasksIndexStorage(
   let repoCloseFailure: unknown;
   try {
     // 这些是原本就在初始化时执行的修复，不创建新的迁移或改变已有事务边界。
-    for (const repo of repos) await repo.ensureReady();
+    for (const repo of repos) {
+      await repo.ensureReady();
+      // 启动期一次性纠偏：上一进程崩溃遗留的 running 全部收敛成 completed，
+      // 否则侧栏/状态区会永远显示「运行中」（v1.0.26 修复，见 TaskIndexRepo 注释）。
+      if (repo instanceof TaskIndexRepo) await repo.markAllRunningTasksCompleted();
+    }
   } catch (error) {
     preparationFailure = error;
     throw error;

@@ -1,3 +1,10 @@
+## [1.0.26](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.25...v1.0.26) (2026-10-25)
+
+### 修复
+
+- **老会话不再假显示「运行中」**：任务索引里崩溃遗留的 `task_status=running` 现在会在启动时被对账收敛成 `completed`。此前进程被强杀时最后一次写入停在 running，而 sessions-index 同步器刻意不回放历史终态，于是这些任务永远显示运行中、实际没有任何轮在跑（本地库实测 15 条）。修复同时改写 `task_status` 列与 `meta_json.status`——读路径优先 meta_json，只改列不生效。
+- 新增回归 `T-RUN1`：只收敛「已终态/已消失」的 running，仍在跑的任务不被误伤；启动期全量纠偏幂等。
+
 ## [1.0.25](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.24...v1.0.25) (2026-10-25)
 
 ### 修复
