@@ -22,10 +22,15 @@ import type {
   ConversationOpenTiming,
   V4ConversationRuntimeReadyResult,
 } from "@zcode/shared/zcode-protocol-v4";
+import { logger } from "@/logger.js";
 
 /**
  * renderer 侧首屏就绪的原始量。全部取 `performance.now()` 单调时钟，**同源可相减**，
- * 但各段嵌套、不可相加（见 `SessionOpenRendererTiming` 的字段注释）。
+ * 但各段嵌套、不可相加（见字段注释）。
+ *
+ * **唯一一份定义**：`conversationProjectionStore` 的 `SessionOpenRendererTiming` 是它的
+ * 别名（`import type`），不得再复制第二份 shape——两份定义一旦分叉，回填的字段与采样
+ * 脚本读的字段就会悄悄对不上。
  */
 export interface ConversationOpenRendererTiming {
   /** connect 入口 → subscribe 发起（renderer 侧准备段）。 */
@@ -42,6 +47,10 @@ export interface ConversationOpenRendererTiming {
    * 这是唯一能与「冷开 ≤1s」直接比较的 renderer 侧总量：起点早于 CLI spawn，终点晚于
    * 首帧应用。`openPhases.viewReadyMs` 只是它内部的一段（CLI 进程内视图就绪），
    * 因此两者不可互换、也不可相减。
+   *
+   * 两个读法陷阱：①起点是 `SessionDataLayer.acquire`，acquire 在 `useEffect` 里执行，
+   * **比用户点击晚一个 React commit**，不能当完整点击延迟；②runtime recycle 有界重试
+   * 重入 `connect()` 时不传起始时间戳，起点被重置——带 recycle 的冷开会显得很快。
    */
   uiViewReadyMs?: number;
   /**
@@ -91,6 +100,7 @@ export interface ConversationOpenProbe {
   runtimeReady?(sessionId?: string): Promise<V4ConversationRuntimeReadyResult | null>;
 }
 
+/** 同时记住的 **topic** 数上限（每个 topic 只留最近一条 ACK，见 `recordConversationOpenAck`）。 */
 const MAX_ACK_SAMPLES = 20;
 
 type ConversationOpenProbeWindow = Window & {
@@ -155,6 +165,11 @@ function ensureProbe(): ConversationOpenProbe | null {
 export function recordConversationOpenAck(sample: ConversationOpenAckSample): void {
   const probe = ensureProbe();
   if (!probe) return;
+  // **按 topic 保留最近一条**（cr-func N3）：renderer 分段是事后按 topic 回填的，全局
+  // FIFO 会被侧 pane / 子代理的 ACK 把目标会话样本挤出缓冲，回填随即静默丢数。
+  // 覆盖旧样本而不是追加，也符合「一次打开只关心该 topic 最近一次 subscribe」。
+  const previousIndex = probe.acks.findIndex((existing) => existing.topic === sample.topic);
+  if (previousIndex >= 0) probe.acks.splice(previousIndex, 1);
   probe.acks.push(sample);
   if (probe.acks.length > MAX_ACK_SAMPLES) {
     probe.acks.splice(0, probe.acks.length - MAX_ACK_SAMPLES);
@@ -166,8 +181,9 @@ export function recordConversationOpenAck(sample: ConversationOpenAckSample): vo
  * 回填 renderer 侧分段到该 topic 最近一次 ACK 样本。
  *
  * 为什么事后回填而不是在 ACK 里带：`uiViewReadyMs` 的终点（snapshot 应用完成）与
- * `paintAfterApplyMs` 的终点（首绘回调）都在 ACK 之后。找不到样本时静默丢弃——那时窗口面
- * 未挂载或 ACK 已被挤出环形缓冲，没有可对齐的打开事件。
+ * `paintAfterApplyMs` 的终点（首绘回调）都在 ACK 之后。找不到样本时**必须留信号**
+ * （warn）而不能静默丢弃：那时窗口面未挂载、或该 topic 的 ACK 已被缓冲挤出，验收指标
+ * `uiViewReadyMs` 会凭空消失，采样报告里只剩 `uiViewReadyMs=unavailable`。
  */
 export function recordConversationOpenRendererTiming(
   topic: string,
@@ -181,6 +197,10 @@ export function recordConversationOpenRendererTiming(
     sample.renderer = { ...timing };
     return;
   }
+  logger.warn(
+    `[v4-open-probe] ${topic} 没有可回填的 ACK 样本，renderer 分段丢弃` +
+      `（字段=${Object.keys(timing).join(",") || "空"}）`,
+  );
 }
 
 /**

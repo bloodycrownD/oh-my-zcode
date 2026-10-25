@@ -27,6 +27,7 @@ import {
   isConversationOpenProbeDevEnabled,
   recordConversationOpenRendererTiming,
   unregisterConversationRuntimeReadyReader,
+  type ConversationOpenRendererTiming,
 } from "@/v4/conversationOpenObservability.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
 
@@ -158,27 +159,15 @@ export interface ConversationStoreState {
   lastMutation?: ConversationProjectionLastMutation;
 }
 
-export interface SessionOpenRendererTiming {
-  rendererPrepareMs?: number;
-  initialFrameTransportMs?: number;
-  rendererSnapshotApplyMs?: number;
-  snapshotAppliedAt?: number;
-  /**
-   * **总量口径**：connect 入口 → snapshot 应用完成（renderer 单调时钟）。
-   *
-   * 它是「用户看到历史」那一刻的唯一 renderer 侧总量，也是验收基准：ACK 侧
-   * `openPhases.viewReadyMs` 只是 CLI 进程内一段，**不含** host 准备 / CLI spawn /
-   * RPC 往返 / 首帧传输 / 渲染，冷开下系统性偏短，不能拿它判 ≤1s。
-   * 各段嵌套不可相加（`viewReadyMs ⊇ initialFrameEncodeMs`，
-   * `viewReadyMs ⊃ mergeMs + rehydrateMs`）。
-   */
-  uiViewReadyMs?: number;
-  /**
-   * snapshot 应用完成 → 两个 `requestAnimationFrame` 后的首绘回调（近似首帧 paint）。
-   * 与 {@link uiViewReadyMs} 相加才是「到首绘」的体感总量；非浏览器环境缺席。
-   */
-  paintAfterApplyMs?: number;
-}
+/**
+ * renderer 首帧 timing 的类型别名。
+ *
+ * shape 的**唯一定义**在 `v4/conversationOpenObservability.ts` 的
+ * `ConversationOpenRendererTiming`（采样面的 ACK 样本也用它），这里只做别名导出：
+ * 两份定义分叉会让「回填的字段」与「采样脚本读的字段」悄悄对不上（cr-func N7）。
+ * store → observability 是既有单向依赖，类型放那边不成环。
+ */
+export type SessionOpenRendererTiming = ConversationOpenRendererTiming;
 
 /**
  * turnNavigator 目录缓存态（只读 query 结果 + 裁决水位，非 conversation 协议事实）。
@@ -550,6 +539,10 @@ export class ConversationProjectionStore {
       topic: this.topic,
     });
     // uiViewReadyMs 的起点：跨代重订阅会覆盖成最新一代的起点，与下面的分段同源。
+    // **口径陷阱**：首帧溢出重试（下面的 `initialOverflowRetry` 分支）与 runtime recycle
+    // 的有界重试（`scheduleRuntimeRecycleReconnect` → `connect()`）都不传
+    // `rendererPrepareStartedAt`，起点被重置成该次重试的时刻。**一次带 recycle 的冷开
+    // 在 baseline 里会显得很快**，判读前必须确认是否发生过重试。
     this.sessionOpenConnectStartedAt = connectStartedAt;
     this.sessionOpenRendererTiming = {
       rendererPrepareMs: roundedDuration(connectStartedAt, subscribeStartedAt),
@@ -871,7 +864,7 @@ export class ConversationProjectionStore {
           rendererSnapshotApplyMs: roundedDuration(context.frameReceivedAt, snapshotAppliedAt),
           // 总量口径：起点早于 CLI spawn、终点在首帧应用完成之后，因此它是本迭代唯一
           // 能与「冷开 ≤1s」直接比较的 renderer 侧数值。ACK 的 openPhases.viewReadyMs
-          // 只是它内部的一段（见 SessionOpenRendererTiming 的注释）。
+          // 只是它内部的一段（见 ConversationOpenRendererTiming 的注释）。
           ...(connectStartedAt === null
             ? {}
             : { uiViewReadyMs: roundedDuration(connectStartedAt, snapshotAppliedAt) }),

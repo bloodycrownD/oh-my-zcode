@@ -8,7 +8,7 @@ dependency:
 
 ## 设计目标
 
-把冷开与中途切换压到 **1s / 800ms 级**，且不靠「看起来快了」。
+把冷开与中途切换压到 **1s / 800ms 级**，且不靠「看起来快了」。冷开的 1s 是**视图侧**（不含 CLI spawn，spawn 单列观察项），判据见下方 phase-0-baseline 的三档表。
 
 现有链路的瓶颈不是传输（尾窗 60 行 + 游标分页早已就绪），而是三件事被绑死：
 
@@ -119,13 +119,26 @@ dependency:
 ### phase-0-baseline
 
 - 在同基线（HEAD 含 v1.0.27 补丁）实测三路径（冷开 5k 消息会话 / 冷开小会话 / 热切换 / 深翻页到底），落 `docs/iterations/session-open-latency/baseline.json`。
-- **验收基准（2026-10-25 cr-func 矫正，以后以此为准）**：「冷开 ≤1s」判的是 **renderer 侧 `uiViewReadyMs`**（= `connect 入口 → snapshot 应用完成`，renderer 单调时钟）；要覆盖到首绘再加 `paintAfterApplyMs`（2×`requestAnimationFrame`，`uiViewReadyMs + paintAfterApplyMs` 才是体感总量）。两者由 `conversationProjectionStore` 回填进 `__zcodeV4ConversationOpensE2E` 的 ACK 样本。
+- **验收基准（2026-10-25 cr-func 两轮矫正：按场景分三档，以后以此为准）**：验收量是 **renderer 侧 `uiViewReadyMs`**（= `connect 入口 → snapshot 应用完成`，renderer 单调时钟）；要覆盖到首绘再加 `paintAfterApplyMs`（2×`requestAnimationFrame`，`uiViewReadyMs + paintAfterApplyMs` 才是体感总量）。两者由 `conversationProjectionStore` 回填进 `__zcodeV4ConversationOpensE2E` 的 ACK 样本。
+
+  | 场景 | 判据 | 依据 |
+  |---|---|---|
+  | **冷开**（CLI 未起） | `uiViewReadyMs - openTiming.cliBootstrapMs ≤ 1s`（视图侧，spawn 单列）；总量（含 spawn）作观察项 `≤2.5~3s` | `cliBootstrapMs` 必然落在 connect→ACK 之间（`zcodeAgentService.ts:4407-4414`，冷订阅先 `getReadOnlyClient` 再 `client.request`），spawn 不是视图侧能优化的成本；基线里「点任务→CLI 起好」约 +1.4s 是 v1.0.26 旧树数值，phase-0 必须在**本基线**重测 |
+  | **热开**（CLI 已起、会话冷） | `uiViewReadyMs ≤ 800ms` | 同会话 CLI 热时重开实测 0.4–0.7s，800ms 留余量；此时 `cliBootstrapMs` 缺席（`cliProcessState === "reused"`），无需相减 |
+  | **切回**（已打开 / keep-warm） | **不发生 subscribe，`uiViewReadyMs` 没有生产者** → 不适用于该指标；单列「内存态切回」观察项（`SessionDataLayer.acquire` → 首绘 paint，参考 ≤150ms），或在 baseline 里显式标注豁免 | 该量只在 subscribe 路径上产生样本；keep-warm 命中时 `acquire` 直接复用 store（`sessionDataLayer.ts:76-82`），没有 ACK |
+
+  **把单一「冷开 ≤1s」挂在 `uiViewReadyMs` 上是自设的不可能门槛**：该量含 CLI spawn，而冷启 spawn 一项就超过 1s，按定义不可达；冷开必须减掉 `cliBootstrapMs` 才是视图侧口径。
   - **`openPhases` 降级为分解项**：`viewReadyMs` 是 **CLI 进程内**的视图就绪段（起点 `subscribeReserved`、终点 ACK 组装），**不含** `openTiming.cliBootstrapMs`（冷开新 spawn CLI）、`hostPrepareMs`、`cliRequestMs`、ACK 后的首帧传输、`rendererSnapshotApplyMs` 与 React commit + paint，冷开下系统性偏短，**不得**再用它判 ≤1s。
-- **口径三条硬约束**（写进 schema / 脚本 / 验收三处）：①`viewReadyMs` = CLI 内部视图就绪段，不含上述任一段；②各段**嵌套不可相加**（`viewReadyMs ⊇ initialFrameEncodeMs`，`viewReadyMs ⊃ mergeMs + rehydrateMs`，阶段 0 里它**还** ⊇ runtime 激活本体）；③`manifestMs` / `materializeMs` 本阶段恒缺席，热切换下 `mergeMs` / `rehydrateMs` 也会缺席——**缺席 ≠ 0**，禁止补 0 求「各段之和」。
+- **口径硬约束**（写进 schema / 脚本 / 验收三处）：①`viewReadyMs` = CLI 内部视图就绪段，不含上述任一段；②各段**嵌套不可相加**（`viewReadyMs ⊇ initialFrameEncodeMs`，`viewReadyMs ⊃ mergeMs + rehydrateMs`，阶段 0 里它**还** ⊇ runtime 激活本体；`openTiming.hostPrepareMs ⊇ cliBootstrapMs + providerRegistrySyncMs + taskMetaReadMs`，见 `zcodeAgentService.ts:4407-4477`——`hostPrepareMs` 量的是 `subscribe 入口 → cliRequest 发起`，这三段全在它内部，相加即重复计数）；③`manifestMs` / `materializeMs` 本阶段恒缺席，热切换下 `mergeMs` / `rehydrateMs` 也会缺席——**缺席 ≠ 0**，禁止补 0 求「各段之和」。
+- **两个必须写进 baseline 的口径陷阱**（否则数字会被误读）：
+  - `uiViewReadyMs` 的起点是 `SessionDataLayer.acquire`，而 acquire 在 `useEffect` 里（`sessionDataLayer.ts:70-89` → `SessionPane.tsx:1811-1816`），**比用户点击晚一个 React commit**——它天然不含「点击 → 提交」那一段，不能当完整点击延迟。
+  - 重试代际**只记最后一次**：`conversationProjectionStore.ts:625,688` 的重入不传 `rendererPrepareStartedAt`，起点被重置为最后一次 connect 的时刻。**一次带 runtime recycle 的冷开在 baseline 里会显得很快**，采样时必须能从报告里看出是否发生过重试。
 - **`runtimeReadyMs` 口径钉死为「激活本体耗时」**（`coldResume.ensureResumed` 的耗时），**不是**「从 ACK 起算」：阶段 0 激活在 ACK **之前**（按 ACK 起算会是负数），阶段 8 拆开后激活在 ACK **之后**（按 ACK 起算会掺入等待）。只有本体耗时能跨阶段比较。
 - **分段观测通道（IS8）**：不动 `openTiming`（`.strict()`）。新增 ack 顶层键 `openPhases: { viewReadyMs, manifestMs, materializeMs, mergeMs, rehydrateMs }`——**不含 `runtimeReadyMs`**（view-only 的激活发生在 ACK 之后，ACK 帧里不可能有该值；它由 `conversation/runtimeReady` query 提供）；`mergeMs`/`rehydrateMs` 的产生点在 `performHydration`（`:2989-3185`）内部，由 gateway 侧变量回传，锚点不是 `:1443-1445`。
 - **runtimeReady 的观测通道（二选一已定：走 query）**：view-only 下 runtime 激活发生在 ACK 之后，故新增 `conversation/runtimeReady` query 回传该值，Step 14 从它读。已知代价：该 query 要穿 5 层管道——`transport.ts:335` V4_METHODS → `server.ts:507` case → gateway → `zcodeAgent.ts:880` → `zcodeAgentService.ts:4719` → `zcodeAgentConnectionScope.ts:736` → `agentConversationTransport.ts:337`；这 7 处都要改，列进 Step 1。（**不再并列「写 `session.resume_completed` 日志字段」方案**——两套通道并存会出现双源不一致。）
 - 采集脚本：`scripts/dev/long-session-perf-sample.mjs` 原本只消费 `window.__zcodePerfProbe`（`:291-308,685-693`）；`--out` **是既有参数，直接复用**（不要新增第二个输出选项），需补的是 ack 顶层键、`runtimeReady` query 与 renderer 侧 `uiViewReadyMs`/`paintAfterApplyMs` 的采集，示例：`--out docs/iterations/session-open-latency/baseline.json`。
+  - **按目标会话取样本（cr-func N2）**：ACK 样本必须按目标 topic 取（topic = `conversation/<sessionId>`），不得取环形缓冲最后一条（那可能是侧 pane / 子代理 topic）。目标来源：`--session <id>` 显式指定优先，缺省取采样时间线所属 pane 的 `data-session-id`（`SessionPane.tsx:3541`）。
+  - **缺验收指标必须非零退出（cr-func N2）**：目标样本的 `renderer.uiViewReadyMs` 缺席、观测面未挂载、或没有目标 ACK 时，报告照写并置 `openProbe.acceptance.verdict = "missing"`，退出码 **8**（= 采到但缺验收指标），与跑挂（`4` launch / `5` target / `6` perfProbe / `7` CDP）和用法错误（`2`）区分；`3` 已被「dev server 不可达」占用，不复用。脚本只判「有没有采到」；三档阈值判定仍以本节表格为准。
 
 ### phase-row-manifest（IS2 + IS5）
 
@@ -290,7 +303,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 - Step 11 — phase-view-runtime-split — blocking: yes — qa: auto：`rowsRange` 冷路径不复触发冷开；升级路径改 `hydratedSessions.delete()` 先删。
 - Step 12 — phase-lazy-history — blocking: yes — qa: auto：`historyMode`；eager context init 移到 turn；发送闸门在 init **之后**；逐个核对 `resume.ts` 里以全量 messages 为输入的剩余步骤（`turnNumber`/`latestAssistant*`/`mainTurnCacheHitAggregate`/`discardPersistedPendingSteerInputs`/`syncPersistedSessionTitleForResume`）。
 - Step 13 — phase-gates — blocking: yes — qa: auto：`test-cold-open-window.mjs` 覆盖 IS1 逐值一致、IS2 两种事故防护、IS6 翻页不漏、IS7 历史完整。
-- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3，**验收基准读 renderer 侧 `uiViewReadyMs`（要做首绘再叠加 `paintAfterApplyMs`）**；`openPhases` 只作分解项（`viewReadyMs` 是 CLI 进程内段，不含 host/CLI spawn/RPC/渲染，且各段嵌套不可相加）；**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时；口径是激活本体耗时，不是从 ACK 起算），对照 `baseline.json` 判 ≤1s / ≤800ms；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。
+- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3，**验收基准读 renderer 侧 `uiViewReadyMs`**（要做首绘再叠加 `paintAfterApplyMs`），**按 phase-0 的三档表判**：冷开 `uiViewReadyMs - openTiming.cliBootstrapMs ≤ 1s`（总量作观察项）、热开 `uiViewReadyMs ≤ 800ms`、切回不适用该指标（单列内存态切回观察项）；`openPhases` 只作分解项（`viewReadyMs` 是 CLI 进程内段，不含 host/CLI spawn/RPC/渲染，且各段嵌套不可相加）；**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时；口径是激活本体耗时，不是从 ACK 起算），对照 `baseline.json` 判；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。
 
 ## 测试策略
 

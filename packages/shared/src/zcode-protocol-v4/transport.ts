@@ -174,6 +174,10 @@ export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema
  * **各段嵌套，不可相加**：`viewReadyMs ⊇ initialFrameEncodeMs`；
  * `viewReadyMs ⊃ mergeMs + rehydrateMs`；阶段 0 里 `viewReadyMs` 还包含 runtime 激活本体
  * （阶段 8 拆开后激活移到 ACK 之后，那时它才落在 `viewReadyMs` 之外）。
+ * `openTiming` 侧同理：**`hostPrepareMs ⊇ cliBootstrapMs + providerRegistrySyncMs +
+ * taskMetaReadMs`**——它量的是「subscribe 入口 → CLI 请求发起」，这三段（spawn、provider
+ * registry 同步、task meta 读）全发生在该区间内（`zcodeAgentService.ts:4407-4477`），
+ * 把它们与 `hostPrepareMs` 相加即重复计数；`cliBootstrapMs` 在复用进程时缺席（缺席 ≠ 0）。
  * 缺席项按 `undefined` 处理，禁止补 0 后求「各段之和」。
  *
  * **不含 `runtimeReadyMs`**：view-only 下 runtime 激活发生在 view-ready ACK **之后**，
