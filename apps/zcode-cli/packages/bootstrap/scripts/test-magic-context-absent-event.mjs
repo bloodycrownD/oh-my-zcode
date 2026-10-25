@@ -23,8 +23,10 @@
  *
  * 本脚本四组断言：
  *   E1 create-app 装配路径（子进程，enabled!==true）：
- *      a. `module.register` resolve hook 断言 magic-context-turn-transform
- *         模块**零加载**（flag 关时连 import 请求都不该发生）；
+ *      a. `module.register` resolve hook 断言 magic-context-turn-transform 门面
+ *         **与它拆分后的 `app/magic-context/` 整个目录**零加载（flag 关时连 import
+ *         请求都不该发生；只盯门面精确路径会漏掉「绕过门面直接静态 import 拆分
+ *         文件」的盲区，见 FACTORY_MODULE_MARKERS 的注释）；
  *      b. hook 活性自检（哨兵模块必经 resolve，证明 hook 真的在链路上）；
  *      c. 可控 dataDir（MAGIC_CONTEXT_DB_DIR → 临时目录）断言无 db 文件；
  *      d. 子进程回传日志断言捕获 `disabled` 事件（leaf emit 的形状）。
@@ -364,8 +366,39 @@ const SENTINEL_SOURCE = `export const SENTINEL = true;\n`;
  * 工厂模块的判据：解析落点（file URL）里的这一段路径。core 的 turn-loop helper
  * 是 `runtime/helpers/magic-context-turn-transform.js`，不含 `app/` 段，因此不会被
  * 误判为工厂。
+ *
+ * ＝＝ 为什么是「两条 marker」而不是一条 ＝＝
+ * phase-facade（Step 3）把单体拆成门面 + `app/magic-context/` 目录下的 8 个文件。
+ * 只认门面文件的精确路径会留一个盲区：**任何一处绕开门面直接静态 import
+ * `./magic-context/*.js`，都会把 MC 包拉进关闭态，而本守卫照样绿**。目录前缀那条
+ * 覆盖新增的全部拆分文件；门面那条保留——11 个脚本与旧 dist 路径仍以它为准，
+ * 且它是「门面自己被解析」的直接证据。
+ *
+ * ＝＝ 为什么还要一条 allow ＝＝
+ * `app/magic-context/` 目录里**有一个文件在关闭态本来就该被加载**：
+ * `effective-enabled.ts` 是零 MC 依赖的门控层（spec IM3 / phase-effective-single），
+ * `create-app.ts` 在装配门之前静态 import 它算冷值——它若被算成「工厂加载」，这条
+ * 守卫会永远红（实测：目录前缀命中它的两条解析记录）。白名单只放这一个文件；
+ * 「它自己不许 import MC」由 `test-magic-context-gate.mjs` 的源码形状守卫负责，
+ * 不在这里重复。
+ *
+ * 阳性对照不用改：控制段 `import()` 门面时必然解析门面 + 它 re-export 的整个目录，
+ * 两条 marker 都会真实命中，等于自带正例。
  */
-const FACTORY_MODULE_MARKER = "bootstrap/dist/app/magic-context-turn-transform.js";
+const FACTORY_MODULE_MARKERS = [
+  "bootstrap/dist/app/magic-context-turn-transform.js",
+  "bootstrap/dist/app/magic-context/",
+];
+
+/** 目录内唯一允许在关闭态解析的文件（零依赖门控层，见上）。 */
+const FACTORY_MODULE_ALLOWED_MARKERS = ["bootstrap/dist/app/magic-context/effective-enabled.js"];
+
+/** 一条解析记录是否算「工厂加载」。 */
+function isFactoryResolution(resolution) {
+  const url = String(resolution.url);
+  if (FACTORY_MODULE_ALLOWED_MARKERS.some((marker) => url.includes(marker))) return false;
+  return FACTORY_MODULE_MARKERS.some((marker) => url.includes(marker));
+}
 
 /** 跑一次 create-app 装配子进程；返回回传报告 + resolve hook 观测日志。 */
 async function runCreateAppDriver() {
@@ -433,7 +466,7 @@ async function runCreateAppDriver() {
   }
 }
 
-test("E1: create-app enabled!==true 装配路径——事件可达且工厂模块零加载", async () => {
+test("E1: create-app enabled!==true 装配路径——事件可达且工厂门面与拆分目录零加载", async () => {
   const { controlResolutions, exit, report, stderr, windowResolutions } =
     await runCreateAppDriver();
   assert.equal(exit, 0, `driver 应正常退出；stderr:\n${stderr}`);
@@ -449,21 +482,21 @@ test("E1: create-app enabled!==true 装配路径——事件可达且工厂模�
     `resolve hook 应观察到多次解析（create-app 的依赖图），实际 ${windowResolutions.length} 条`,
   );
   // mc/A-1 主断言：disabled 装配路径下**工厂模块**（bootstrap 侧
-  // magic-context-turn-transform）零加载。core 的 turn-loop helper
-  // （runtime/helpers/magic-context-turn-transform）是同基名的另一个模块、恒被加载，
-  // 不在此断言范围内——所以判据看解析落点而不是 specifier 字符串。
-  const factoryResolutions = windowResolutions.filter((resolution) =>
-    String(resolution.url).includes(FACTORY_MODULE_MARKER),
-  );
+  // magic-context-turn-transform 门面）与它拆分后的整个 `app/magic-context/` 目录
+  // 零加载。core 的 turn-loop helper（runtime/helpers/magic-context-turn-transform）
+  // 是同基名的另一个模块、恒被加载，不在此断言范围内——所以判据看解析落点而不是
+  // specifier 字符串。
+  const factoryResolutions = windowResolutions.filter(isFactoryResolution);
   assert.deepEqual(
     factoryResolutions,
     [],
-    "enabled!==true 时不允许解析/加载 bootstrap 的 magic-context-turn-transform 工厂模块",
+    "enabled!==true 时不允许解析/加载 bootstrap 的 magic-context 工厂门面与其拆分目录" +
+      "（effective-enabled.js 是零依赖门控层，已白名单放行）",
   );
   // 阳性对照：同一根 hook、同一个落点判据，在子进程主动 import 工厂时必须抓到——
   // 否则「零加载」可能只是因为判据写错（永远匹配不上）。
   assert.ok(
-    controlResolutions.some((resolution) => String(resolution.url).includes(FACTORY_MODULE_MARKER)),
+    controlResolutions.some(isFactoryResolution),
     "阳性对照：hook 必须能抓到一次真实的工厂模块解析（否则零加载断言无效）",
   );
   // 可控 dataDir：factory 没跑 ⇒ 没有库文件。

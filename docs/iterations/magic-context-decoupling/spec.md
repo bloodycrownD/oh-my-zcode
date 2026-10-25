@@ -99,6 +99,16 @@ G6/G7/G8 在 core 侧、按设计不 import 包（`import type` only），它们
 | **IM6** | `prefixTrimStatus === "refused"` 时**不注入 M1 中的 `<new-compartments>` 块**（M1 其余内容照旧，它承载 memory 增量 / new memories / user profile）；`boundary-precedes-window` 保持现状（该态下 M1 可能是窗口外历史的唯一载体，抑制反而丢信息） |
 | **IM7** | 宿主侧 MC 耦合散点数量有门禁，只减不增。**口径写死**：正则 `^@zcode/magic-context(/|$)` 匹配**所有**导入行——值导入、`import type`、`await import`、`typeof import`、以及**窄子路径**（`/host/config/schema` 等，本 spec 自己会新增 3 处，必须计入）；按包分列 + 上限。文件数不计（`phase-facade` 会新增 8 个文件）。core 的 ctx handler 调用期 `await import` 单列预算（见 IM4 例外） |
 
+### 模块数口径（三段，互不混算）
+
+三处计数服务于三个不同问题。此前 spec 把它们混成一句「MC 模块计数为 0 / M0 外为 0 / 散点上限」，而 `phase-facade` 之后 bootstrap 侧 1 → 8 个文件、静态 MC 导入语句 1 → 6 条，混着写会让 Step 4 / Step 7 / Step 15 的数值断言退化成记账。以下三条各管一件事，**不得互相顶替**：
+
+1. **关闭态（唯一可判定的「零加载」口径）**：子进程 + `module.register` resolve hook 下，`@zcode/magic-context` 包内 **M0 白名单之外**的解析数 = 0，**且** `dist/app/magic-context/**` 与 `dist/app/magic-context-turn-transform.js` 的解析数 = 0。第二条是拆分带来的新面：只盯包内，则「绕过门面直接静态 import 拆分文件」会把整棵 MC 图拉进关闭态而守卫照绿。`app/magic-context/effective-enabled.js` 是零 MC 依赖的门控层，关闭态**本来就该被解析**，计数时白名单放行。
+2. **启用态**：MC 包闭包文件数 + init 毫秒 + RSS 三项同机前后对比（留容差）；bootstrap 侧拆分文件数**只记录不断言**——拆成几个文件是组织决定，不是行为契约。
+3. **耦合预算**：数「跨动态边界的静态运行时值导入点」= `app/magic-context/**` **之外**、静态 import `@zcode/magic-context`（barrel `.`）的文件数，目标恒为 0（唯一入口是 `create-app.ts` 对 `./magic-context/index.js` 的 `await import`）。`app/magic-context/**` 目录内部的文件数**不计入**。判 flag 必需的窄子路径（`/host/config/schema`）、`import type`、`typeof import` 与调用期 `await import` 都是**零运行时值**的形态，不进本条口径——它们归 IM7。
+
+> 口径 3 与 IM7 不是同一个数，别互相换算：IM7 按正则数「所有导入行」，问的是「跟随上游升级要看多少个接触点」，有非零上限；口径 3 只数「关闭态会不会被一条静态边拉进 MC」，目标恒为 0。
+
 ## 总体方案
 
 ### phase-0-baseline（先清基线）
@@ -165,7 +175,7 @@ createMagicContextPlugin(options: Omit<MagicContextTurnTransformOptions, "usageR
 - `magic-context-historian.ts`、`magic-context-usage-summary.ts` 迁入 `magic-context/` 目录（它们目前是单体的静态依赖 `:187`/`:189`），并各留 shim。
 - 装配门（`:826-844`）保持动态 import 形态。
 
-**`magic-context-turn-transform.ts` 不删除，保留为 re-export shim**（只被动态 import，不破 IM1）。原因：11 个脚本硬编码该 dist 路径（`test-magic-context-turn-transform.mjs:89`、`test-settle-background.mjs:107`、`test-mural-media-blocks.mjs:99`、`test-prompt-surface-toolset-hash.mjs:95`、`test-magic-context-lifecycle.mjs:68`、`test-magic-context-config-rpc.mjs:66`、`test-magic-context-section-zh.mjs:270`、`magic-context/scripts/test-boot-busy-retry.mjs:97`、`test-e2e-live-all.mjs:152`、`diag-first-send-latency.mjs:52`），且 `test-magic-context-absent-event.mjs:368` 的 `FACTORY_MODULE_MARKER` 需要它存在（该文件中 `:95-101` 有 existsSync 预检，缺文件会先 throw，不会假绿——但 shim 保留后，marker 必须**改指真正的装配入口 `dist/app/magic-context/index.js`**，否则守卫只盯 shim，不覆盖生产入口）。
+**`magic-context-turn-transform.ts` 不删除，保留为 re-export shim**（只被动态 import，不破 IM1）。原因：11 个脚本硬编码该 dist 路径（`test-magic-context-turn-transform.mjs:89`、`test-settle-background.mjs:107`、`test-mural-media-blocks.mjs:99`、`test-prompt-surface-toolset-hash.mjs:95`、`test-magic-context-lifecycle.mjs:68`、`test-magic-context-config-rpc.mjs:66`、`test-magic-context-section-zh.mjs:270`、`magic-context/scripts/test-boot-busy-retry.mjs:97`、`test-e2e-live-all.mjs:152`、`diag-first-send-latency.mjs:52`），且 `test-magic-context-absent-event.mjs` 的工厂判据需要它存在（该文件中 `:95-101` 有 existsSync 预检，缺文件会先 throw，不会假绿）。**判据必须是两条 marker**：门面精确路径 `…/dist/app/magic-context-turn-transform.js` + 目录前缀 `…/dist/app/magic-context/`（拆分后新增的 8 个文件都归它管；只盯门面会让「绕过门面直接静态 import 拆分文件」漏网——实测在 dist 里塞一条 `import "./magic-context/usage.js"` 会被目录前缀抓到）。目录内的 `effective-enabled.js` 是零依赖门控层、关闭态本来就加载，须白名单放行（实测它会被前缀命中两条记录）。Step 4 之后的生产入口 `dist/app/magic-context/index.js` 已在目录前缀覆盖范围内，不必单列。
 
 ### phase-zero-load（IM1）
 
@@ -185,7 +195,7 @@ createMagicContextPlugin(options: Omit<MagicContextTurnTransformOptions, "usageR
 - `magic-context-memories.ts:166-169` 的自开库改为**向宿主取已装好的 handle**。注意：`openDatabase` 本来就是按 path 缓存的进程级单例（`storage-db.ts:2695-2719`），所以这里拿到的其实是**同一个** handle，不是第二个连接——真正的问题是「一条只读 RPC 会在 flag/装配缺席时创建并迁移 DB」。需要**新增**一个端口（当前全仓不存在 `getMagicContextStorage()`）：由装配层提供 `getInstalledMagicContextStorage(): { db } | null`，flag off / 包缺失 / 未初始化时返回 `null`，handler 在 `null` 时回 `unavailable` 信封而不开库。
 - **观测面不可破**：`unavailableListResult`（`:172-186`）的信封语义必须保持——「包缺失」「开关关闭」「库不可用」三种情况都回同一 `supported:true` 信封，绝不出现 `-32603`（否则设置页崩）。
 
-**W3 验收**：新增 `test-magic-context-zero-load.mjs`，在子进程里 `createApp()` 后断言 MC 模块计数为 0（关闭态），并对 M0 白名单外的 `@zcode/magic-context` import 抛错。
+**W3 验收**：新增 `test-magic-context-zero-load.mjs`。关闭态口径按「模块数口径」①（见上）：子进程 + `module.register` resolve hook 下，`@zcode/magic-context` 包内 **M0 白名单之外**的解析数 = 0，**且** `dist/app/magic-context/**` 与 `dist/app/magic-context-turn-transform.js` 的解析数 = 0（后者是 phase-facade 拆分带来的新面，只盯包内会让「绕过门面直接静态 import 拆分文件」漏网）；M0 内 ≤ 实测上限。**不写「MC 模块计数为 0」**——那不是可成立的口径（M0 本身必须加载）。
 
 ### phase-identity-guard（IM5，C2）
 
@@ -240,7 +250,7 @@ C1 的确切条件（四条同时成立）：① 缓存对 `cached_m0/m1_bytes` 
 
 - `UPSTREAM-SYNC.md:119` 的过期口径（「5 静态 + 2 动态 = 7 处」）改为实测值：**6 静态值 + 1 静态 type-only + 4 动态 + 11 处 `typeof import` 类型位**。
 - FORK 标记机读化：统一语法 `FORK(<scope>): <reason>`；现测大写 `FORK` 口径为 core 120 处 / 68 文件、host 41 处 / 5 文件（research 的 294/75 是忽略大小写口径，含散文里的 "fork"，不可复现）。
-- 新增 `test-magic-context-coupling-budget.mjs`：散点数量上限写死（按本 spec 落地后的实测值），超限即失败。
+- 新增 `test-magic-context-coupling-budget.mjs`：IM7 散点数量上限写死（按本 spec 落地后的实测值，正则口径含窄子路径与 type-only），超限即失败。**口径③（跨动态边界的静态运行时值导入）目标恒为 0，是另一条独立断言**，不并进这个上限。
 
 ### phase-gates
 
@@ -260,7 +270,7 @@ apps/zcode-cli/packages/magic-context/
 apps/zcode-cli/packages/bootstrap/src/app/
   magic-context/effective-enabled.ts                     新增（更名自 gate.ts）
   magic-context/{index,types,usage,projection,storage,ports,assembly,settle}.ts  新增（拆分）
-  magic-context-turn-transform.ts                        改为纯 re-export shim，**保留完整旧导出面**（`export *` 自各新模块，不只门面）：脚本需要的 8 个导出（`createMagicContextTurnTransform`、`createZCodeMagicContextTurnTransformPort`、`createMagicContextUsageRecorder`、`createMagicContextPromptSectionResolver`、`describeStorageUnavailability`、`openMagicContextStorageWithBusyRetry`、`pushMagicContextUsageSummary` 等）一个都不能少，`test-magic-context-absent-event.mjs:106` 直接从该路径 import `describeStorageUnavailability`
+  magic-context-turn-transform.ts                        改为纯 re-export shim，**逐条具名 re-export（禁止 `export *`）**：拆分把 10 个内部符号提升为 export 以便跨文件引用，`export *` 会让它们从旧 dist 路径外溢——projection 2（`projectMagicContextEntries` / `createZCodeScheduler`）、settle 3（`HISTORIAN_SETTLE_TIMEOUT_MS` / `settleInFlightHistorian` / `settleInFlightHistorianInBackground`）、storage 5（`StoredRow` / `toStoredRows` / `pageFromRows` / `withOrdinal` / `BOOT_OPEN_BUSY_TIMEOUT_MS`）。**旧导出面 15 个一个不少**（8 个导出函数 + 2 个常量 + 5 个类型），用 `.d.ts` 的 `Equal<>` 对拍 + `keyof` 双向 `Exclude` 断言逐字验证（`d1f2283a` 已执行：before 15 / after 15；负向对照改一个常量后立即失败），常驻守卫见 `bootstrap/scripts/test-magic-context-plugin.mjs` 的 C1/C2/C3；`test-magic-context-absent-event.mjs:106` 直接从该路径 import `describeStorageUnavailability`
   magic-context-historian.ts / magic-context-usage-summary.ts  迁入该目录，**同时各自留一个 re-export shim**（`test-magic-context-historian.mjs:67-69`、`test-magic-context-usage-projection.mjs:70-72` 硬编码了这两个 dist 路径）
   magic-context-absent-event.ts                          改（reason 只保留 `disabled|import_failed|db_null:*`，**不加 `package_missing`**）
   create-app.ts                                          改（门面消费 + 包缺失降级 + 判定复用）
@@ -278,6 +288,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
   test-magic-context-zero-load.mjs                       新增
   test-magic-context-coupling-budget.mjs                 新增
   test-magic-context-gate.mjs                            改（剥注释 + 正则守卫 + 入库；覆盖边界见 Step 16）
+  test-magic-context-plugin.mjs                          新增（门面两层导出面对拍：index 只有 createMagicContextPlugin 一个值 + 旧门面 15 个符号逐字不变 + 10 个内部符号不外溢）
   test-mc-entry-identity-guard.mjs                       新增
 UPSTREAM-SYNC.md                                         改（口径修正 + FORK 语法 + rebase 点登记）
 ```
@@ -291,7 +302,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 | 3 | IM3 | `app/magic-context/effective-enabled.ts` | 新增冷值投影 `projectMagicContextEffectiveEnabled()`：只读 `RuntimeConfig.magicContext.enabled` 这一位**已算出**的冷值，不重算三轴；入参用具名类型（唯一允许 `resolveAppRuntimeConfig` 的返回值），同源守卫钉「生产代码只允许 `create-app.ts` 一处、实参必须是 `runtimeConfig`」 |
 | 4 | IM3 | `create-app.ts`（按符号定位，不写死行号：`projectMagicContextEffectiveEnabled(runtimeConfig)` 那一处） | 三处同一求值收敛为一次调用并复用同一个布尔：装配门 `if (magicContextEffectiveEnabled)`、工厂 `enabled:` 入参、`isMagicContextEnabled` 契约 |
 | 5 | IM3 | `core/.../{runtime-tools,magic-context-prompt-section,magic-context-turn-transform}.ts` | 真值来源统一为同一投影函数，但**各自保留原有 undefined 语义**（三者方向不一致，见 T-MC1），不合并成单函数 |
-| 6 | — | `app/magic-context-turn-transform.ts`（2240 行） | 拆为门面 + 八文件，守五条零行为不变量；原文件保留为全导出面 shim |
+| 6 | — | `app/magic-context-turn-transform.ts`（2240 行 → 门面 + 8 文件 + `index.ts`） | 拆为 `app/magic-context/{types,usage,projection,storage,settle,ports,assembly}.ts` + `index.ts`（`createMagicContextPlugin` 唯一出口），守五条零行为不变量；原文件保留为**逐条具名 re-export** 的 shim（15 个旧导出逐字不变，**禁止 `export *`**，见「最终项目结构」） |
 | 7 | IM1 | `magic-context/package.json` | 新增 `./host/config/schema` 窄子路径 |
 | 8 | IM1 | `core/shared/prompt-surface-key.ts`（新）+ `prompt-surface.ts` | 抽零依赖叶子，压窄 schema 子路径闭包 |
 | 9 | IM1 | `adapters/src/config/schema.ts:4-8` | 改走窄子路径 |
@@ -304,7 +315,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 | 16 | IM2 | `cli/scripts/unplug-magic-context.mjs`（新） | 一键摘除 + `--archive-db` |
 | 17 | IM7 | `UPSTREAM-SYNC.md:119`、FORK 语法 | 口径修正 + 机读化 |
 | 18 | IM7 | `bootstrap/scripts/test-magic-context-coupling-budget.mjs`（新） | 散点数量上限门禁 |
-| 19 | IM1 | `bootstrap/scripts/test-magic-context-zero-load.mjs`（新） | 关闭态「M0 白名单之外零模块」断言 |
+| 19 | IM1 | `bootstrap/scripts/test-magic-context-zero-load.mjs`（新） | 关闭态「M0 白名单之外零模块 + `app/magic-context/**` 零解析」断言（口径①） |
 | 20 | IM5 | `bootstrap/scripts/test-mc-entry-identity-guard.mjs`（新） | 身份不变量回归 |
 | 21 | — | `bootstrap/package.json`、CI 配置 | 接线 3 个未挂测试 + 补 CI 执行点 |
 
@@ -313,10 +324,10 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 - Step 1 — phase-0-baseline — blocking: yes — qa: auto：`git add` 现有 wave-1 三改一新增，`test:magic-context-gate` 入库并可跑；`gate.ts` 更名 `effective-enabled.ts`，同步 `runtime-config.ts`、`magic-context-memories.ts`、测试文件引用。
 - Step 2 — phase-effective-single — blocking: yes — qa: auto：bootstrap 三处同一求值收敛；core 三处统一真值来源但**保留各自 undefined 语义**；补两张真值表测试（bootstrap 三轴 / core 布尔投影）。
 - Step 3 — phase-facade — blocking: yes — qa: auto：先落 `types.ts` + `usage.ts` + `storage.ts` + `projection.ts`（纯函数与既有测试对齐），再落 `ports.ts` + `assembly.ts` + `settle.ts` + `index.ts`；**本步结束必须零行为**（现有 MC 测试族全绿）。
-- Step 4 — phase-facade — blocking: yes — qa: auto：`create-app.ts` 改消费门面；`magic-context-turn-transform.ts` 改为**完整旧导出面**的 re-export shim（**不删**，8 个导出一个不少）；`test-magic-context-absent-event.mjs:368` 的 `FACTORY_MODULE_MARKER` **改指新入口 `dist/app/magic-context/index.js`**（否则守卫只盯 shim，生产入口不再受保护）；实测模块数与内存不退化。
+- Step 4 — phase-facade — blocking: yes — qa: auto：`create-app.ts` 改消费门面 `app/magic-context/index.ts` 的 `createMagicContextPlugin`（usage recorder 由插件构造并返回，调用方不再注入；`resolveFallbackContextWindow` 必填）；`magic-context-turn-transform.ts` 改为**逐条具名 re-export** 的 shim（**不删**，15 个旧导出——10 值 + 5 类型——一个不少，**禁止 `export *`**）；`test-magic-context-absent-event.mjs` 的 `FACTORY_MODULE_MARKERS` **补指新入口 `dist/app/magic-context/`**（否则守卫只盯 shim，生产入口与拆分文件都不受保护）；实测模块数与内存不退化（口径②，文件数只记录不断言）。
 - Step 5 — phase-zero-load — blocking: yes — qa: auto：包内新增窄子路径 + 抽零依赖叶子（**目标闭包 = 3 个文件：schema + language + prompt-surface-key，外加 zod 4.6.5 闭包**）；**`schema.ts:51` 必须改指 `prompt-surface-key.js`**，否则闭包仍是 4 个文件；`adapters/src/config/schema.ts` 改导入（顺序必须先改包、后改宿主）。
 - Step 6 — phase-zero-load — blocking: yes — qa: auto：两个 handler 惰性化 + memories 复用注入 handle；保持 `supported:true` 信封三态一致。
-- Step 7 — phase-zero-load — blocking: yes — qa: auto：`test-magic-context-zero-load.mjs` 落地，断言**M0 白名单之外**模块计数为 0（`module.register` resolve hook 记录），M0 内 ≤ 实测上限并写死。
+- Step 7 — phase-zero-load — blocking: yes — qa: auto：`test-magic-context-zero-load.mjs` 落地，按**口径①（关闭态）**断言：`module.register` resolve hook 下 `@zcode/magic-context` 包内 M0 白名单外解析数 = 0，**且** `dist/app/magic-context/**` 与 `dist/app/magic-context-turn-transform.js` 解析数 = 0（`app/magic-context/effective-enabled.js` 白名单放行）；M0 内 ≤ 实测上限并写死。**不写「模块计数为 0」**。
 - Step 8 — phase-identity-guard — blocking: yes — qa: auto：从 `ff8b4522` 取回双守卫，落到拆分后的 `projection.ts`。
 - Step 9 — phase-identity-guard — blocking: yes — qa: auto：`test-mc-entry-identity-guard.mjs` 落地（下标漂移 + role 不符用例）。
 - Step 10 — phase-compartment-rewind — blocking: yes — qa: auto：`compartment-invalidation.ts`（**DB 层按 revert 水位过滤**，不止清缓存）+ `record.app.invalidateMagicContextCompartments?` 可选端口 + `create-app.ts` 挂载 + `fork-edit-retry.ts:106` 调用。（**不改 core 的 `rewind-message.ts`**；静态 const import 会新增第 7 处静态值导入并破坏 IM1。）
@@ -324,7 +335,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 - Step 12 — phase-unplug — blocking: yes — qa: auto：`create-app.ts:836` 的 `absent(import_failed)` 降级路径。（**不再验证「人工移走 node_modules 仍能启动」**——`adapters/src/config/schema.ts:4-8` 会先在配置装载阶段抛 `ERR_MODULE_NOT_FOUND`，该场景由 Step 13 的摘除脚本承载。）
 - Step 13 — phase-unplug — blocking: yes — qa: auto：`unplug-magic-context.mjs`（dry-run + `--apply` + `--archive-db`），在临时 checkout 上端到端跑通。
 - Step 14 — phase-upgrade-surface — blocking: yes — qa: auto：`UPSTREAM-SYNC.md` 口径修正 + FORK 语法 + rebase 点登记。
-- Step 15 — phase-upgrade-surface — blocking: yes — qa: auto：`test-magic-context-coupling-budget.mjs` 落地，上限取本 spec 落地后的实测值。
+- Step 15 — phase-upgrade-surface — blocking: yes — qa: auto：`test-magic-context-coupling-budget.mjs` 落地，按 **IM7 的散点口径**（正则统计所有导入行，含窄子路径）写死上限，上限取本 spec 落地后的实测值；**不要与口径③（跨动态边界的静态运行时值导入 = 0）混算**。
 - Step 16 — phase-gates — blocking: yes — qa: auto：接线 3 个未挂测试；**新建 `.github/workflows/mc-tests.yml`** 承载 29 个 MC 脚本；`test-magic-context-gate.mjs` 守卫升级为**剥注释 + 逐行正则**判定（不是 AST，与全仓的源码形状守卫同口径）。覆盖边界写死：正则只认字面形态（比较 / 取反 / 真值化），不识别类型层面的别名与间接调用（`const f = () => cfg.magicContext.enabled; f()`），这类写法靠评审兜住；守卫入口另有一道扫描面断言（三个扫描根存在 + 扫描文件数下限 + 已知锚点在列），杜绝脚本被移动后的「零扫描通过」假绿。
 - Step 17 — phase-gates — blocking: no — qa: manual_user：真机验证（关闭态启动快、设置页可开、`/ctx-status` 有明确不可用提示、rewind 后模型不再看到旧摘要）。
 
@@ -343,7 +354,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 - T-MC9 — blocking: yes — **IM6 覆盖分两条**：①**M0 无旧摘要**（host 侧根修 + 读侧 WHERE）：**在 v4 编辑重发/重试路径**上 rewind 后，下个 turn 的 provider 请求里 `<session-history>`（M0）不含被裁轮次的摘要文本（**范围按 phase-compartment-rewind 的定案收窄**——TUI `/rewind` 没有 host 失效调用，不在此断言）；②**窗口内原文不被替代/重复**（core 侧兜底）。
 - T-MC10 — blocking: yes — **IM2 摘除**：临时 checkout 执行 `--apply` 后依次通过 **`pnpm typecheck`** + **`pnpm exec turbo --cwd apps/zcode-cli run typecheck --force`** + **`pnpm exec turbo --cwd apps/zcode-cli run lint`** + 非 MC 测试，`createApp()` 可启动。前两条缺一不可：根 `typecheck` 只跑 `packages/*`，根 `oxlint` 的 ignorePatterns 含 `apps/zcode-cli`。
 - T-MC11 — blocking: yes — **IM2 数据归档**：`--archive-db` 后原路径不再有 db 文件，备份目录含 `-wal`/`-shm`。
-- T-MC12 — blocking: yes — **IM7 预算**：散点数量超上限即失败（上限为本 spec 落地后的实测值）。
+- T-MC12 — blocking: yes — **IM7 预算**：散点数量超上限即失败（上限为本 spec 落地后的实测值，按 IM7 正则口径；与口径③恒为 0 的「跨动态边界静态运行时值导入」分开断言）。
 - T-MC13 — blocking: yes — **零行为拆分**：facade 拆分前后 MC 既有测试脚本结果逐条一致。**脚本清单按实测 29 个固定**（`magic-context/scripts/` 13 + `bootstrap/scripts/test-magic-context*.mjs` 12 + core/adapters 命名脚本 4），不写「约 30」。**CI 落地对象必须新建**：`.github/workflows/` 现只有 `release-desktop.yml`（bundle/attach，**无 test job**），需新增 `mc-tests.yml` 承载这批脚本，否则 Step 16 无处可挂。
 - T-MC14 — blocking: yes — **时序不变量**：`registerClose` 为 `drain → shutdown → dispose` 且早于 `closeSessionResources`；`settlesInForeground` 只求值一次。
 
@@ -360,6 +371,12 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 5. **阶段间依赖顺序**：Step 5 必须先包后宿主，Step 10 依赖 Step 3 的 `storage.ts`/`settle.ts` 已就位。
 6. **不可逆数据面**：摘除脚本务必 dry-run 优先、`--archive-db` 幂等；`fail_closed_blocking` 的清理不能漏，否则配置语义静默丢失。
 7. **测试预算**：新增 4 个脚本 + 接线 3 个 + CI 接入 29 个，运行时间会上升；`test-magic-context-zero-load.mjs` 需子进程拉起，单次约数秒，放 CI 而非本地 pre-commit。
+
+### Step 3（`d1f2283a`）实测暴露的风险（cr-func 登记，下一波 CR 据此对账）
+
+8. **`ports.ts` 531 行塞了三件事**：三个 resolver + turn-transform 端口工厂 + 失败分级（B 组三档）。想按职责再拆一个 `failure.ts`，但 spec 的目录清单固定为 9 个文件（`index`/`types`/`usage`/`projection`/`storage`/`settle`/`ports`/`assembly`/`effective-enabled`），所以本轮**不拆**。它的实际风险是「端口工厂与失败分级共享 `handleTransformFailure` 的私有 helper，将来改一档会连带改到端口」——改这个文件前先读它的文件头五条不变量说明。若将来要拆：`handleTransformFailure` / `passthrough` / `tryReplayLkg`（ports.ts:434/:485/:493）与端口工厂之间只共享 `settle` 与 `projection` 两处导入，切面是干净的，但**必须先改 spec 的目录清单**。
+9. **启用态模块数 1 → 8**（8 个职责文件；若把新入口 `index.ts` 也算上，目录内共 9 个模块，旧门面只做 re-export）：`create-app.ts` 的动态 import 面从一个文件变成一个目录入口，模块解析与编译成本落在「装配门打开之后」而不是关闭态；关闭态不受影响（口径① 断言 `app/magic-context/**` 解析数 = 0）。**口径已按「模块数口径」②/③ 处理**：启用态只做同机前后对比（文件数只记录不断言），不设数值断言，避免拆分本身把门禁变成记账。
+10. **worktree 环境前置**（真跑门禁时踩到，非代码缺陷）：`test-boot-busy-retry.mjs` 需要 `node_modules/.cache` 目录存在；`test:magic-context-usage`（`test-magic-context-usage-projection.mjs`）需要先 `tsc -b packages/ui` 才有它 import 的 ui 编译产物；`test-magic-context-absent-event.mjs` 与 `test-magic-context-plugin.mjs` 都需要 `pnpm --filter @zcode/bootstrap build` 的 dist。新 worktree 上这些都不是「测试挂了」，先补前置再判红。
 
 ### 回滚
 

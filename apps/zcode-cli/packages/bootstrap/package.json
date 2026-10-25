@@ -27,6 +27,7 @@
     "test:mural-media-blocks": "node --test scripts/test-mural-media-blocks.mjs",
     "test:e2e-live-all": "node --test scripts/test-e2e-live-all.mjs",
     "test:magic-context-absent-event": "node --test scripts/test-magic-context-absent-event.mjs",
+    "test:magic-context-plugin": "node --test scripts/test-magic-context-plugin.mjs",
     "test:magic-context-historian": "node --test scripts/test-magic-context-historian.mjs",
     "test:magic-context-config-rpc": "node scripts/test-magic-context-config-rpc.mjs",
     "test:magic-context-memories-rpc": "node scripts/test-magic-context-memories-rpc.mjs",

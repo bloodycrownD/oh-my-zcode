@@ -1,0 +1,142 @@
+/**
+ * magic-context 装配的**唯一出口**（spec phase-facade / Step 3，spec `:126`）。
+ *
+ * ============================================================================
+ * 为什么要有这一层，以及它与同目录外那个门面的分工
+ * ============================================================================
+ *
+ * 本目录外还留着 `../magic-context-turn-transform.ts`——那是**历史兼容面**：
+ * 11 个脚本硬编码它的 dist 路径，`test-magic-context-absent-event.mjs` 的
+ * `FACTORY_MODULE_MARKERS` 也指向它。它逐条 re-export 15 个符号（10 个值 + 5 个类型），
+ * 一个都不能少、一个都不能多，见该文件头。
+ *
+ * 本文件是**未来唯一入口**：`create-app.ts`（Step 4）只从这里拿插件。两层不重复实现
+ * ——旧门面 re-export 实现文件，本文件只做「把实现文件装配成一个插件」。
+ *
+ * ── 三条纪律 ────────────────────────────────────────────────────────────────
+ *
+ * ① **本文件只允许被动态 import**。它静态引入 `@zcode/magic-context`（经
+ *    `./assembly.js` / `./ports.js` / `./usage.js`），任何静态边都会让关闭态把整棵
+ *    MC 模块图拉进启动路径（IM1）。装配门在 `create-app.ts`，生效口径的静态半边在
+ *    `./effective-enabled.ts`（那一层零 MC 依赖，所以它可以被静态 import）。
+ *    **不要把 `effective-enabled.ts` 从这里 re-export**——那会把「判 flag」的静态
+ *    消费者拖进 MC 模块图。
+ *
+ * ② **开关判定不在这里重复**。`!options.enabled` 的第一句在
+ *    `createMagicContextTurnTransform`（assembly.ts），它同时负责发射
+ *    `magic_context.transform_absent(reason=disabled)`。本文件若自己先 return，
+ *    那条生产可达的 disabled 事件就没了（mc/A-1 的整条修复），所以这里**必须**
+ *    无条件调用工厂、由工厂做门。
+ *
+ * ③ **usage recorder 归插件所有**。它由本文件构造并返回，调用方不再注入
+ *    （入参类型 `Omit<…, "usageRecorder">`）。构造顺序是硬要求：recorder 必须先于
+ *    transform，因为工厂会拿它 `prime(db)` 回上一轮落库的读数（`assembly.ts:166`），
+ *    而 CLI 是「一进程一轮」——prime 缺席等于每轮从 0% 开始，scheduler 恒 defer。
+ */
+
+import type { MagicContextTurnTransform } from "@zcode/core";
+import { createMagicContextTurnTransform } from "./assembly.js";
+import {
+  createMagicContextPromptSectionResolver,
+  createMagicContextToolDescriptionResolver,
+} from "./ports.js";
+import type { MagicContextTurnTransformOptions } from "./types.js";
+import { createMagicContextUsageRecorder, type MagicContextUsageRecorder } from "./usage.js";
+
+/**
+ * 插件入参 = 工厂入参 **减去 `usageRecorder`** + 窗口兜底解析。
+ *
+ * 减掉 `usageRecorder`：它是插件的**自有状态**，不是调用方的能力。调用方仍按老办法
+ * 从事件扇出喂 `record()`，但那已经通过返回的 `usageRecorder` 完成，不再需要把对象
+ * 递进来（旧 `MagicContextTurnTransformOptions` 类型保持不动：工厂仍接受它，11 个
+ * 脚本与既有单测的直构路径逐字不变）。
+ *
+ * 加 `resolveFallbackContextWindow`：上下文窗口三源的第二层（env / e2e / R-2 之外
+ * 的「会话生效模型的 registry 查询」）。它此前是 `createMagicContextUsageRecorder`
+ * 的第三参、由 `create-app.ts` 传闭包；漏进契约就会让这一层静默消失、退回 128k 默认，
+ * 改变 scheduler 决策——违反「零行为」，所以它是**必填**。
+ */
+export type MagicContextPluginOptions = Omit<MagicContextTurnTransformOptions, "usageRecorder"> & {
+  resolveFallbackContextWindow: () => number | undefined;
+};
+
+/**
+ * 装配结果。字段与 spec `:145-154` 的返回形状逐条对应。
+ *
+ * `turnTransform` 在 `disabled` / `db_null`（且 `fail_closed_blocking=false`）时是
+ * `undefined`——core 的 turn-loop 插入点按「端口在场」判定是否插桩，所以这里不能
+ * 用一个惰性 stub 代替（那会让关闭态仍产生 `transform_absent` 之外的行为）。
+ *
+ * `close` 与 `registerClose` 是**同一个函数对象**：工厂在构造期把关闭钩子回调给
+ * `registerClose`，本文件同时捕获它并原样返回，不另造包装（包装会让「两者顺序
+ * drain → shutdown → dispose」出现两份真相）。
+ */
+export interface MagicContextPlugin {
+  turnTransform: MagicContextTurnTransform | undefined;
+  promptSection: ReturnType<typeof createMagicContextPromptSectionResolver>;
+  toolDescription: ReturnType<typeof createMagicContextToolDescriptionResolver>;
+  usageRecorder: MagicContextUsageRecorder;
+  close: () => Promise<void>;
+}
+
+/** 没装成（关闭 / 库开不出来）时的关闭钩子：工厂没注册就不该有收口动作。 */
+const noopClose = async (): Promise<void> => {};
+
+/**
+ * 把 MC 装配成一个插件：`turnTransform` / `promptSection` / `toolDescription` /
+ * `usageRecorder` / `close` 一次给全。
+ *
+ * 零行为要点：这里做的三件事与 `create-app.ts` 现有手工装配**逐行等价**——
+ *   1. 先 `createMagicContextUsageRecorder(sessionId, logger, {resolveFallbackContextWindow})`
+ *      （create-app 的 `:851-880`）；
+ *   2. 再 `createMagicContextTurnTransform({...options, usageRecorder, registerClose})`
+ *      （`:885-960`），其中 `enabled` / `configPort` / `configDomain` / 进程形态 /
+ *      mural probe / sidecar 工厂全部原样透传；
+ *   3. 最后两个 resolver 用同一份 `configPort` / `configDomain` / `logger` 构造
+ *      （`:1025-1042`）。
+ * 没有新增缓存、没有改变构造顺序、没有吞掉任何返回值。
+ */
+export async function createMagicContextPlugin(
+  options: MagicContextPluginOptions,
+): Promise<MagicContextPlugin> {
+  // 拆出 `resolveFallbackContextWindow`：它是 recorder 的入参，不是工厂的字段。
+  const { resolveFallbackContextWindow, ...transformOptions } = options;
+
+  // ① recorder 先于 transform（`prime` 在工厂内、DB 开出来之后立刻发生）。
+  const usageRecorder = createMagicContextUsageRecorder(options.sessionId, options.logger, {
+    resolveFallbackContextWindow,
+  });
+
+  // ② 工厂返回的 `close` 由 registerClose 回填；调用方自带的 registerClose 照旧转发
+  // （Step 4 之前 create-app 就是靠它拿 close 的，不能因为插件接管而断链）。
+  let registeredClose: (() => Promise<void>) | undefined;
+  const turnTransform = await createMagicContextTurnTransform({
+    ...transformOptions,
+    registerClose: (close) => {
+      registeredClose = close;
+      transformOptions.registerClose?.(close);
+    },
+    // 插件自己的 recorder 放在最后：即使调用方用 JS 绕过类型塞了同名键，也不生效。
+    usageRecorder,
+  });
+
+  // ③ 两个 prompt-surface 注入口：配置源与 create-app 现在传的完全一致。
+  const promptSection = createMagicContextPromptSectionResolver({
+    configPort: options.configPort,
+    configDomain: options.configDomain,
+    logger: options.logger,
+  });
+  const toolDescription = createMagicContextToolDescriptionResolver({
+    configPort: options.configPort,
+    configDomain: options.configDomain,
+    logger: options.logger,
+  });
+
+  return {
+    turnTransform,
+    promptSection,
+    toolDescription,
+    usageRecorder,
+    close: registeredClose ?? noopClose,
+  };
+}
