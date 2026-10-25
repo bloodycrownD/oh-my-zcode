@@ -360,6 +360,14 @@ export class ConversationTopicPublisher {
     this.projection.seedBranchGeneration(generation);
   }
 
+  /**
+   * 冷窗口的 rowId 起点播种（IS1）：值取 `selectColdTailWindow(...).rowIdBase`。
+   * 只允许在任何行物化之前调用，见 `ProductProjection.seedRowIdOrigin`。
+   */
+  seedRowIdOrigin(origin: number): void {
+    this.projection.seedRowIdOrigin(origin);
+  }
+
   /** turn 终态行清单（活投影口径）；该事件已无可物化行时返回 null。 */
   getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
     return this.projection.getTurnManifestEntry(event);

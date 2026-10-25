@@ -1,4 +1,5 @@
 import type {
+  MessageId,
   SessionId,
   SessionMessageIndexEntry,
   SessionStorePort,
@@ -148,6 +149,78 @@ export function selectManifestTurnDirectory(
 /** turnId → rowId base（未知 turn = null；调用方据此判「这一轮不在 manifest 里」）。 */
 export function manifestRowIdBase(facts: SessionRowManifestFacts, turnId: string): number | null {
   return facts.rowIdBaseByTurnId.get(turnId) ?? null;
+}
+
+/**
+ * 冷开首屏的尾窗（phase-paged-materialization / IS6）：从 active 分支尾部对齐到**整 turn**。
+ *
+ * 双约束取 min（`PROTOCOL_V4_LIMITS.coldWindowTurns` / `coldWindowMaxRows`）：
+ * - 只限 turn 数时，一个几百 toolCall 的超大 turn 会让「窗口化」失效（行数是硬上界）；
+ * - 只限行数时，窗口边界会落在 turn 中间，toolCall ↔ result 跨窗、合成器身份也跟着漂。
+ *
+ * **至少取一轮**：单个 turn 自己就超过行上限时仍然返回它。返回空窗等于首屏空白，而
+ * 「行数硬上界」在这里只是内存/时延的预算，不是正确性约束——正确性靠 turn 对齐。
+ *
+ * 返回值是 Step 6/7 唯一的窗口身份来源：
+ * - `ordinal` → 合成器的 `initialTurnNumber`（RC4：窗口从 0 编号会让 turnId 整体漂移）；
+ * - `rowIdBase` → 投影的 `rowIdOrigin`（否则窗口内 rowId 与全量物化整体平移）；
+ * - `limitBefore` → `readActiveBranchTail` 的窗口游标（窗口首条 messageId，含）。
+ */
+export interface ColdTailWindow {
+  /** 窗口首轮在 manifest 里的 ordinal（= 该轮之前有多少轮）。 */
+  ordinal: number;
+  /** 窗口首轮的 turnId（诊断用；身份由 ordinal 表达）。 */
+  turnId: string;
+  /** 窗口首轮的 rowId base（`deriveTurnRowIdBase` 口径）= 冷窗口的 `rowIdOrigin`。 */
+  rowIdBase: number;
+  /** 窗口覆盖的 turn 数（≤ maxTurns；单轮超行上限时为 1）。 */
+  turnCount: number;
+  /** 窗口覆盖的 manifest 行数（Σ rowCount，与 `totalCount` 同口径）。 */
+  rowCount: number;
+  /** 窗口首条 messageId（`readActiveBranchTail` 的 `limitBefore`）；整窗无消息时为 null。 */
+  limitBefore: MessageId | null;
+  /** 窗口内按行序排列的 messageId（= active 分支的后缀）。 */
+  messageIds: MessageId[];
+}
+
+export function selectColdTailWindow(
+  snapshot: Pick<TurnManifestSnapshot, "turns"> & { firstRowId?: number | null },
+  limits: { maxTurns?: number; maxRows?: number } = {},
+): ColdTailWindow | null {
+  const turns = snapshot.turns;
+  if (turns.length === 0) return null;
+  // 上限非法值（0 / 负数）按「至少一轮」处理：窗口化是性能优化，不能让它产出空窗。
+  const maxTurns = Math.max(1, limits.maxTurns ?? PROTOCOL_V4_LIMITS.coldWindowTurns);
+  const maxRows = Math.max(0, limits.maxRows ?? PROTOCOL_V4_LIMITS.coldWindowMaxRows);
+
+  let start = turns.length - 1;
+  let turnCount = 1;
+  let rowCount = Math.max(0, turns[start]!.rowCount);
+  while (start > 0) {
+    if (turnCount + 1 > maxTurns) break;
+    const nextRowCount = Math.max(0, turns[start - 1]!.rowCount);
+    // 行数是硬上界：再加一轮就会超预算就停（正好等于预算时才允许加入）。
+    if (rowCount + nextRowCount > maxRows) break;
+    start -= 1;
+    turnCount += 1;
+    rowCount += nextRowCount;
+  }
+
+  const first = turns[start]!;
+  const priorRowCounts = turns.slice(0, start).map((turn) => turn.rowCount);
+  // 窗口内 messageId 按行序拼（重复 id 由 `readActiveBranchTail` 按首现去重）。
+  const messageIds = turns
+    .slice(start)
+    .flatMap((turn) => turn.messageIds) as unknown as MessageId[];
+  return {
+    ordinal: first.ordinal,
+    turnId: first.turnId,
+    rowIdBase: deriveTurnRowIdBase(priorRowCounts, snapshot.firstRowId ?? 1),
+    turnCount,
+    rowCount,
+    limitBefore: messageIds[0] ?? null,
+    messageIds,
+  };
 }
 
 /**

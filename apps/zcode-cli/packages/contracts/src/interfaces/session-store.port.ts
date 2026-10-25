@@ -1239,6 +1239,21 @@ export interface SessionStorePort {
    * 缺席（旧宿主/内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
    */
   listSessionMessageIndex?(input: { sessionID: SessionId }): Promise<SessionMessageIndexEntry[]>;
+  /**
+   * 分支感知的尾窗正文读（IS2 / IS6 的读面）。
+   *
+   * `activeMessageIds` 是调用方用消息索引 + `selectActiveConversationBranchIds` 算出的
+   * **全序** active 分支 id 序；实现只按这份序取窗口内的 message + part 正文，不做裁断、
+   * 不按时间取尾 N 条（那会在 revert 会话上复活旧分支或清空历史）。
+   * `limitBefore` 是窗口首条 id（含），由 manifest 的窗口首轮给出；缺席或找不到 = 读整条分支。
+   *
+   * 缺席（旧宿主 / 内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
+   */
+  readActiveBranchTail?(input: {
+    sessionID: SessionId;
+    activeMessageIds: readonly MessageId[];
+    limitBefore?: MessageId | null;
+  }): Promise<MessageWithParts[]>;
   saveSessionEntry?(input: SessionEntryInfo): Promise<void>;
   sessionEntries?(input: {
     sessionID: SessionId;

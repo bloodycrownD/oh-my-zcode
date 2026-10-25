@@ -104,6 +104,7 @@
     "test:mcp-connect-deadline": "node --import tsx --test scripts/test-mcp-connect-deadline.mjs",
     "test:turn-manifest-store": "node --import tsx --test scripts/test-turn-manifest-store.mjs",
     "test:session-message-index": "node --import tsx --test scripts/test-session-message-index.mjs",
+    "test:active-branch-tail": "node --import tsx --test scripts/test-active-branch-tail.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"

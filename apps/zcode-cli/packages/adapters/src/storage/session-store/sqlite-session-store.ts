@@ -636,6 +636,14 @@ export class SqliteSessionStore
     return messageRepository.listSessionMessageIndex(this.db, input);
   }
 
+  async readActiveBranchTail(input: {
+    sessionID: SessionId;
+    activeMessageIds: readonly MessageId[];
+    limitBefore?: MessageId | null;
+  }): Promise<MessageWithParts[]> {
+    return messageRepository.readActiveBranchTail(this.db, input);
+  }
+
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {
     this.throwBeforeWrite();
     return sessionEntryRepository.saveSessionEntry(this.db, input);

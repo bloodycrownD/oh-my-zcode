@@ -228,6 +228,21 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | schema 版本 | `TURN_MANIFEST_PROJECTION_SCHEMA_VERSION` 升到 **2**（rowId 口径变化 → v1 清单里的 `query_row_id` 是带空洞的旧编号，必须整表重建） | 投影规则再变必须继续 +1 |
 | 观测 | `openPhases.manifestMs` 由 `performHydration` 写入（读路径耗时；宿主未实现 `readRowManifest` 时**缺席**，缺席 ≠ 0）；`gateway.getRowManifestOutcome(sessionId)` 给测试/诊断读 `{action, reason, detail}` | 不得把这个分段塞进 `openTiming`（`.strict()`，IS8） |
 
+#### Step 5 落地说明（实现后回填，Step 6+ 直接按此接）
+
+| 事项 | 落地形态 | Step 6+ 必须遵守 |
+|---|---|---|
+| 尾窗读入口 | `adapters/.../repositories/messages.ts` 的 `readActiveBranchTail({ sessionID, activeMessageIds, limitBefore })`；端口 `SessionStorePort.readActiveBranchTail?`（可选，缺席 = 降级全量 `messages()`，不得当空会话） | 只吃这一个入口；`activeMessageIds` 必须是**全序** active 序（`listSessionMessageIndex` + `selectActiveConversationBranchIds` 的产物），传窗口进去就是 T-SL3/T-SL4 的事故形态 |
+| 窗口语义 | `limitBefore` = 窗口**首条** id（含），值来自 manifest；游标不在 active 序里（清单与索引不同步）→ 读整条分支（多读，绝不少读）；重复 id 按首现去重（kept 与 cut 后缀会重叠） | 窗口起点只能来自 `selectColdTailWindow(...).limitBefore`，不得自己按 `time_created` 取 N 条 |
+| 两段查询 | message 段 `where session_id = ? and id in (...)`、**不带 order by**（顺序由 active 序下标决定，裁断可给出与 DB 序不同的 kept 序）；part 段只对第 1 段真读到的 id 查，`order by message_id, sequence is null, sequence, time_created, id` 逐字复刻 `messages()`；每段按 500 个 id 分块（SQLite 变量上限 999 的一倍余量） | 改 part 序必须与 `messages()` 同时改；`test-active-branch-tail` B2 是形状守卫（含「part 段不得出现 `or`」——只有行集合不变、时延退化的那类回退靠它抓） |
+| 读放大（本步唯一可测收益） | 5k 消息 / 20k part × 1200B（`:memory:`，与 Step 3 A 组同形状）：索引 6.6~11.2ms、全量 `messages()` 199~210ms、尾窗（80 条 / 320 part）3.2~7.5ms → **26~66×** | 这是「冷开正文读」的收益上限；端到端时延收益要等 Step 6/7 接线，**不得**把它写成冷开时延，也不得与 phase-0 基线混用 |
+| 双约束常量 | `PROTOCOL_V4_LIMITS.coldWindowTurns = 8` + `coldWindowMaxRows = 400`（与既有 `snapshotTailWindowRows` / `rowsRangeMaxLimit` 同级） | 窗口选择统一走 `selectColdTailWindow`，调用方不得另写一份 |
+| 窗口选择（纯函数） | `session-row-manifest.ts` 的 `selectColdTailWindow(snapshot, limits?)`：从尾部按**整 turn** 累加，turn 数 ≤ 8、行数 ≤ 400；**至少返回一轮**（单轮自己就超行上限时仍返回它——返回空窗等于首屏空白，行预算是时延约束不是正确性约束）。返回 `{ ordinal, turnId, rowIdBase, turnCount, rowCount, limitBefore, messageIds }` | `ordinal` → Step 6 的 `initialTurnNumber`；`rowIdBase` → `seedRowIdOrigin`；`limitBefore`/`messageIds` → 尾窗读的游标与 identity |
+| rowIdOrigin 播种 | `ProductProjection.seedRowIdOrigin(origin)` + `ConversationTopicPublisher` 透传；**只允许在没有任何行时**调用（播种后再改 origin 会让同一逻辑位置算出两个 id，故直接抛错而非静默忽略）。全量物化不调用，默认恒 1 | Step 6/7 在建投影后、首次 ingest 前调用，值取 `rowIdBase`；任何新增的投影 clone/adopt 路径都要搬 `rowIdOrigin`（已在 Step 4 的搬运清单里） |
+| 本步**未接线**的三项 | ①`rowIdOrigin` 的生产值 ②降级回写的 `ordinalBase > 0` ③读路径 `fullyMaterialized: false`。三者都只在**窗口真的喂进投影之后**才有意义：窗口化同时改变 turnId 起点（Step 6 的 `initialTurnNumber`）、ordinal 起点（manifest 已有的 turn 数）与 turn 集合（窗口内）；在此之前把 `fullyMaterialized` 改成 false 只会白丢 Step 4 的反向集合校验 | Step 6 接线时：`rebuildRowManifestFromProjection` 的 `keptTurnIds` **必须传整条分支**（manifest 的 turn 序），不能用窗口投影的 `activeTurnIds`——否则剪枝会把没物化的头部真实轮次删掉 |
+| T-SL3 / T-SL4 | `test-active-branch-tail` D1/D2：同一份裁断选项下，全序 → 正确分支（非空），窗口 → 原样返回窗口（复活旧分支）/ `kept` 为空（清空历史）；尾窗读只吃全序裁断的结果 | Step 13 的端到端版本（真 store + gateway）仍要覆盖；本步钉住的是「**窗口不得进入裁断**」 |
+| 迟到行偏差（Step 4 遗留 new_risk） | manifest 的 `Σ row_count` 只数**连续块**：锚在历史轮的迟到行（goal verification 等）物理追加在尾部、不改该轮 `row_count`（E2），因此 Σ 比投影实际行数少 N。目前无消费者（`rowIdBaseByTurnId` 只在 facts/测试里），本步未接线；但 `rowIdOrigin = rowIdBase` 一旦接上就会让窗口内 rowId **整体前移 N**（全量物化用紧凑游标、计数里含迟到行） | 修法必须在**写侧**（投影），不在读侧：或把迟到行计入物理末块的 `row_count`（Σ 恢复为 rows.length，但该轮行数语义变宽），或给迟到行单独的可计数身份。Step 6 接线窗口**之前**必须先定这一条；在那之前窗口化只对无迟到行的会话成立 |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。

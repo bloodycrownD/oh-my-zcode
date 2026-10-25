@@ -830,6 +830,28 @@ export class ProductProjection {
   }
 
   /**
+   * 冷窗口的 rowId 起点播种（IS1 的窗口化入口）。
+   *
+   * 全量投影的首行 id 恒为 1（默认值不动）；窗口化物化只把 active 分支的尾部若干轮喂进
+   * 投影，这时首行 id 是 manifest 给的窗口首轮 base（`selectColdTailWindow(...).rowIdBase`）。
+   * 不播种就会让窗口内每一行的 rowId 比全量物化小一个 base，翻页锚点与会话头部同时跳。
+   *
+   * **只允许在还没有任何行时调用**：播种之后再改 origin 会让已经发出的 rowId 与 `nextRowId`
+   * 分叉（同一逻辑位置算出两个 id），那正是 IS1 禁止的漂移，所以这里直接抛错而不是静默忽略
+   * ——忽略会让「窗口化没生效」变成一条只在翻页时显形的错位。
+   */
+  seedRowIdOrigin(origin: number): void {
+    if (!Number.isInteger(origin) || origin < 1) {
+      throw new RangeError(`rowIdOrigin must be a positive integer, got ${String(origin)}`);
+    }
+    if (this.snapshot.rows.window.length > 0) {
+      throw new Error("rowIdOrigin must be seeded before any row is materialized");
+    }
+    this.rowIdOrigin = origin;
+    this.nextRowId = origin;
+  }
+
+  /**
    * turn 终态的行清单（活投影口径）。
    *
    * 只读当前投影行，**不**回读 store：row_count 是投影的副产物，先落 manifest 再回读会

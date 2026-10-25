@@ -38,8 +38,13 @@ const {
   createSessionRowManifestReader,
   deriveSessionRowManifestFacts,
   deriveTurnRowIdBase,
+  selectColdTailWindow,
   selectManifestTurnDirectory,
 } = await import(new URL("../src/zcode-protocol-v4/session-row-manifest.ts", import.meta.url).href);
+const { PROTOCOL_V4_LIMITS } = await import("@zcode/shared/zcode-protocol-v4");
+const { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } = await import(
+  new URL("../src/zcode-protocol-v4/turn-manifest-entry.ts", import.meta.url).href
+);
 const { ConversationTopicPublisher } = await import(
   new URL("../src/zcode-protocol-v4/conversation-topic-publisher.ts", import.meta.url).href
 );
@@ -670,11 +675,130 @@ test("F2: manifest 事实在场时首帧 totalCount 取清单值（窗口只剩�
   );
 });
 
-// ── G: gateway 接线（读路径挂在 hydration 收口）──────────────────────────
+// ── H: 冷窗口选择（Step 5：整 turn 对齐 + 双约束）─────────────────────────
 
-const { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } = await import(
-  new URL("../src/zcode-protocol-v4/turn-manifest-entry.ts", import.meta.url).href
-);
+function windowTurn(turnId, ordinal, rowCount, messageIds) {
+  return {
+    turnId,
+    ordinal,
+    rowCount,
+    messageIds,
+    firstMessageId: messageIds[0] ?? null,
+    lastMessageId: messageIds[messageIds.length - 1] ?? null,
+    rowCountSource: "live",
+    projectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+  };
+}
+
+function windowSnapshot(rowCounts, { perTurnMessages = 2 } = {}) {
+  const turns = rowCounts.map((rowCount, ordinal) => {
+    const messageIds = Array.from(
+      { length: perTurnMessages },
+      (_unused, index) => `t${ordinal + 1}-m${index + 1}`,
+    );
+    return windowTurn(`turn-${ordinal + 1}`, ordinal, rowCount, messageIds);
+  });
+  return { turns, firstRowId: turns.length > 0 ? 1 : null };
+}
+
+test("H1: 分支不超过上限 → 窗口就是整条分支，rowIdBase = 1、limitBefore = 首条消息", () => {
+  const snapshot = windowSnapshot([2, 3, 4]);
+  const window = selectColdTailWindow(snapshot);
+  assert.deepEqual(
+    {
+      ordinal: window.ordinal,
+      turnId: window.turnId,
+      rowIdBase: window.rowIdBase,
+      turnCount: window.turnCount,
+      rowCount: window.rowCount,
+      limitBefore: window.limitBefore,
+    },
+    { ordinal: 0, turnId: "turn-1", rowIdBase: 1, turnCount: 3, rowCount: 9, limitBefore: "t1-m1" },
+  );
+  assert.deepEqual(window.messageIds, snapshot.turns.flatMap((turn) => turn.messageIds));
+});
+
+test("H2: turn 数上限生效 → 窗口是后缀，ordinal/rowIdBase 按前序轮数平移", () => {
+  // 12 轮 × 2 行：coldWindowTurns=8 → 取最后 8 轮（16 行），前 4 轮不进窗口。
+  const snapshot = windowSnapshot(new Array(12).fill(2));
+  const window = selectColdTailWindow(snapshot);
+  assert.equal(window.turnCount, 8);
+  assert.equal(window.ordinal, 4);
+  assert.equal(window.rowIdBase, 1 + 8, "base = 1 + Σ 前序 4 轮 × 2 行");
+  assert.equal(window.rowCount, 16);
+  assert.equal(window.limitBefore, "t5-m1");
+  assert.deepEqual(window.messageIds, snapshot.turns.slice(4).flatMap((turn) => turn.messageIds));
+  // 窗口必须是**后缀**：ordinal + turnCount === 总轮数（否则尾部被裁掉了）。
+  assert.equal(window.ordinal + window.turnCount, snapshot.turns.length);
+});
+
+test("H3: 行数上限是硬上界（正好等于预算时仍可加入下一轮）", () => {
+  // 6 轮 × 100 行：maxRows=400 → 只能取 4 轮；200 行/轮时正好 2 轮。
+  const hundred = selectColdTailWindow(windowSnapshot(new Array(6).fill(100)));
+  assert.equal(hundred.turnCount, 4);
+  assert.equal(hundred.rowCount, 400);
+  assert.equal(hundred.ordinal, 2);
+
+  const twoHundreds = selectColdTailWindow(windowSnapshot(new Array(6).fill(200)));
+  assert.equal(twoHundreds.turnCount, 2, "400 行正好等于预算，不得少取一轮");
+  assert.equal(twoHundreds.rowCount, 400);
+});
+
+test("H4: 单轮超行上限 → 仍取一轮（窗口化不得产出空窗）", () => {
+  const window = selectColdTailWindow(windowSnapshot([2, 1000]));
+  assert.equal(window.turnCount, 1);
+  assert.equal(window.turnId, "turn-2");
+  assert.equal(window.ordinal, 1);
+  assert.equal(window.rowIdBase, 3, "前序只有第一轮的 2 行");
+  assert.equal(window.rowCount, 1000);
+  assert.equal(window.limitBefore, "t2-m1");
+});
+
+test("H5: 空分支 → null（窗口化不接管空历史，由 totalCount=0 契约表达）", () => {
+  assert.equal(selectColdTailWindow({ turns: [], firstRowId: null }), null);
+});
+
+test("H6: 显式 limits 覆盖常量（Step 7 的按页物化复用同一函数）", () => {
+  const snapshot = windowSnapshot(new Array(5).fill(3));
+  const window = selectColdTailWindow(snapshot, { maxTurns: 2, maxRows: 1000 });
+  assert.equal(window.turnCount, 2);
+  assert.equal(window.ordinal, 3);
+  assert.equal(window.rowIdBase, 1 + 9);
+  assert.equal(window.rowCount, 6);
+});
+
+test("H7: rowIdOrigin 播种 → 窗口内每行从 manifest base 起编号，且只允许无行时播种", () => {
+  const projection = new ProductProjection(SESSION_ID, EPOCH);
+  projection.seedRowIdOrigin(101);
+  for (const event of twoTurnEvents()) projection.applyEvent(event);
+  const rows = projection.getSnapshot().rows.window;
+  assert.equal(rows[0].rowId, 101, "窗口首行 id 必须是 manifest 给的窗口首轮 base");
+  assert.deepEqual(
+    rows.map((row) => row.rowId),
+    rows.map((_row, index) => 101 + index),
+  );
+  assert.equal(
+    projection.getTurnManifestRowIdBase("msg-user-1"),
+    101,
+    "窗口首轮的 base 就是 origin",
+  );
+  assert.equal(
+    projection.getTurnManifestRowIdBase("msg-user-2"),
+    101 + rows.filter((row) => row.turnId === "msg-user-1").length,
+  );
+  // 已物化之后再改 origin 会让同一逻辑位置算出两个 id —— 必须拒绝而不是静默忽略。
+  assert.throws(() => projection.seedRowIdOrigin(1));
+  assert.throws(() => projection.seedRowIdOrigin(0));
+});
+
+test("H8: publisher 透传 rowIdOrigin（冷窗口的播种入口）", () => {
+  const instance = publisher();
+  instance.seedRowIdOrigin(51);
+  ingestAll(instance, twoTurnEvents());
+  assert.equal(instance.getSnapshot().rows.window[0].rowId, 51);
+});
+
+// ── G: gateway 接线（读路径挂在 hydration 收口）──────────────────────────
 
 function stubGatewayHost({ readRowManifest, events = twoTurnEvents() } = {}) {
   const captures = { records: [], rewinds: [], errors: [], debug: [] };
