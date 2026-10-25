@@ -11,6 +11,7 @@ import {
   createMessageId,
   createQueryId,
   createSessionEvent,
+  deriveQueueAutoDrain,
   traceContextToLogContext,
 } from "../deps.js";
 import type {
@@ -22,6 +23,7 @@ import type {
   PendingTurnInput,
   QueryId,
   SessionEvent,
+  SessionInputExecutionAuthority,
   TraceContext,
   TurnSteerInput,
   TurnSteerRejectReason,
@@ -1022,6 +1024,93 @@ export async function reorderPendingInput(
 }
 
 /**
+ * held 项物化前的执行权威读取（spec edit-resend-stale-text / I1；cr-func P1-1）。
+ *
+ * 物化把文本注入 `activeTurn.pendingInputs`，drain 时它直接成为 runtime user entry
+ * 与 `persistUserPrompt` 的正文——也就是「投影文本变成模型内容」。所以正文只取
+ * `session_input` 账本（`getSessionInputForExecution`，与 sendQueuedNow 同一执行权威），
+ * 投影的 `held.input` 退回纯展示。
+ *
+ * 返回 `undefined` = 本次不物化（**不是**「输入为空字符串」）：
+ * - 账本能力缺席（老宿主/夹具）：无法判定，宁可不物化也不拿投影起轮；
+ * - 账本非 `pending`（终态/缺失/损坏）：该项本来就不能执行，物化只会把死项种进内存，
+ *   且 drain 时会以投影文本起一轮本不该发生的执行；
+ * - 账本附件非空而投影看不出附件：物化不携带完整 attachment 载荷，会静默丢附件
+ *   （既有行为，保持跳过，由 autoDrain 独立成轮兜底）。
+ *
+ * 读账本抛错同样不物化：拿不准文本来源时，唯一安全动作是保持队列投影原样。
+ */
+async function resolveHeldGuideInput(
+  this: AgentRuntimeInternal,
+  held: PendingSteerInputInfo,
+): Promise<string | undefined> {
+  const store = this.sessionStore;
+  if (!store?.getSessionInputForExecution) {
+    this.logger?.warn("Guide materialization skipped: ledger authority capability absent", {
+      event: "turn.steer.delivery_toggle.materialize_skipped",
+      module: "core.runtime",
+      pendingInputId: held.pendingInputId,
+      reason: "ledger_capability_absent",
+      status: "failed",
+    });
+    return undefined;
+  }
+  let authority: SessionInputExecutionAuthority;
+  try {
+    authority = await store.getSessionInputForExecution({
+      id: held.pendingInputId,
+      sessionID: this.sessionId,
+    });
+  } catch (error) {
+    this.logger?.warn("Guide materialization skipped: ledger authority read failed", {
+      errorMessage: error instanceof Error ? error.message : String(error),
+      event: "turn.steer.delivery_toggle.materialize_skipped",
+      module: "core.runtime",
+      pendingInputId: held.pendingInputId,
+      reason: "ledger_read_failed",
+      status: "failed",
+    });
+    return undefined;
+  }
+  if (authority.state !== "pending") {
+    this.logger?.warn("Guide materialization skipped: ledger authority is not pending", {
+      ...(authority.state === "corrupt" ? { corruptReason: authority.reason } : {}),
+      event: "turn.steer.delivery_toggle.materialize_skipped",
+      ledgerState: authority.state,
+      module: "core.runtime",
+      pendingInputId: held.pendingInputId,
+      status: "failed",
+    });
+    return undefined;
+  }
+  if (authority.attachments.length > 0) {
+    // 投影说「无附件」但账本说有：物化会丢掉账本附件（与既有 attachmentRefs 跳过一致）。
+    this.logger?.debug("Guide materialization skipped (ledger attachments)", {
+      event: "turn.steer.delivery_toggle.materialize_skipped",
+      ledgerAttachmentCount: authority.attachments.length,
+      module: "core.runtime",
+      pendingInputId: held.pendingInputId,
+      reason: "ledger_attachments",
+      status: "completed",
+    });
+    return undefined;
+  }
+  if (authority.text !== held.input) {
+    // 账本与投影文本漂移：执行必须用账本（I1），但投影漂移要留痕，否则下次排查只看
+    // 到「用户看到的和跑的不一样」却没有任何记录。不落文本内容。
+    this.logger?.debug("Guide materialization text differs from projection (ledger wins)", {
+      event: "turn.steer.delivery_toggle.materialize_text_differs",
+      ledgerBytes: measureUtf8Bytes(authority.text),
+      module: "core.runtime",
+      pendingInputId: held.pendingInputId,
+      projectionBytes: measureUtf8Bytes(held.input),
+      status: "completed",
+    });
+  }
+  return authority.text;
+}
+
+/**
  * （v4 setQueueItemDelivery）：用户拍板 toggle——把排队项投递车道在 queue ↔ guide
  * 间切换。guide = 引导至下一轮工具调用后运行（内联当前轮，与「立即」sendQueuedNow
  * 抢占当前轮语义区分）；queue = 回到普通排队、消费时独立成轮。
@@ -1066,22 +1155,29 @@ export async function setPendingInputDelivery(
       // 不物化（与 sendQueuedNow 抢占互斥）。带附件的项暂不物化（投影不含完整
       // attachment 载荷，物化会丢附件；保持投影切换、由 autoDrain 独立成轮兜底）。
       if ((held.intent?.attachmentRefs?.length ?? 0) === 0) {
-        activeTurn.pendingInputs.push({
-          id: held.pendingInputId,
-          input: held.input,
-          queuedAt: held.queuedAt,
-          traceId: held.traceId,
-          commandKind: held.commandKind,
-          source: held.source,
-          inputPresentation: held.inputPresentation,
-          delivery: "guide",
-          intent: held.intent
-            ? { ...held.intent, admittedDelivery: "guide", fallbackReasonCode: undefined }
-            : undefined,
-          toolDisallowlist: held.toolDisallowlist,
-          turnId: held.targetTurnId,
-          materialized: true,
-        });
+        // I1（spec edit-resend-stale-text；cr-func P1-1）：物化项 drain 时正文直接
+        // 成为 runtime user entry + `persistUserPrompt`，即「文本变成模型内容」。
+        // 所以正文只能取 session_input 账本——投影的 `held.input` 是展示模型，
+        // 拿它起轮与 RC1 同形。
+        const materializedInput = await resolveHeldGuideInput.call(this, held);
+        if (materializedInput !== undefined) {
+          activeTurn.pendingInputs.push({
+            id: held.pendingInputId,
+            input: materializedInput,
+            queuedAt: held.queuedAt,
+            traceId: held.traceId,
+            commandKind: held.commandKind,
+            source: held.source,
+            inputPresentation: held.inputPresentation,
+            delivery: "guide",
+            intent: held.intent
+              ? { ...held.intent, admittedDelivery: "guide", fallbackReasonCode: undefined }
+              : undefined,
+            toolDisallowlist: held.toolDisallowlist,
+            turnId: held.targetTurnId,
+            materialized: true,
+          });
+        }
       } else {
         this.logger?.debug("Guide toggle skipped materialization (attachments)", {
           event: "turn.steer.delivery_toggle.materialize_skipped",
@@ -1791,10 +1887,19 @@ export async function discardRewoundPendingSteerInputs(
   //
   // 只有「本次确实作废过项」才会走到这里（candidates 为空在上方 early return）：
   // 队列本来就空的 rewind 不碰用户的暂停位，避免把无关的暂停语义一起改掉。
+  // 作废后的暂停位由唯一派生规则决定（cr-func P2）：队列为空 → 放行；非空 → 保持现值。
+  // 判据来自重投影，不是「本次删了几条」推算——并发入队/别的轮的 held 项都算数。
+  // 只在目标位与现值不同时才写：过去无条件 `setQueueAutoDrain(true)` 会给每次「已放行
+  // 状态的 rewind」都追加一条同值事件（投影/审计里两次无关的「恢复」）。
   const remaining = await this.rebuildProjection();
-  if (remaining.pendingSteerInputs.length === 0) {
-    await this.setQueueAutoDrain({ autoDrain: true, traceContext: options.traceContext });
-    this.completeExternalQueueDrain();
+  const currentAutoDrain = this.queueAutoDrain;
+  const targetAutoDrain = deriveQueueAutoDrain({
+    current: currentAutoDrain,
+    queueLength: remaining.pendingSteerInputs.length,
+  });
+  if (targetAutoDrain !== currentAutoDrain) {
+    await this.setQueueAutoDrain({ autoDrain: targetAutoDrain, traceContext: options.traceContext });
+    if (targetAutoDrain) this.completeExternalQueueDrain();
     this.logger?.debug("Rewind discarded the whole queue; auto drain resumed", {
       ...traceContextToLogContext(options.traceContext),
       discardedCount: discarded.length,

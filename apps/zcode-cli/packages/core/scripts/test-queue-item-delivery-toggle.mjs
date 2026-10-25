@@ -60,7 +60,7 @@ function pendingInput(id, { delivery = "queue", withIntent = true } = {}) {
   };
 }
 
-function makeRuntime({ pendingInputs, reservations = [] } = {}) {
+function makeRuntime({ pendingInputs, reservations = [], ledger } = {}) {
   const activeTurn = pendingInputs
     ? { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs }
     : undefined;
@@ -72,6 +72,22 @@ function makeRuntime({ pendingInputs, reservations = [] } = {}) {
     permissionFullAccessPending: false,
     queueExternalDrainActive: false,
     events,
+    // 执行权威（I1）：物化正文只认账本，投影 held.input 只用于展示。
+    // `ledger === undefined` → 宿主没有该能力（老夹具形态）。
+    ...(ledger === undefined
+      ? {}
+      : {
+          sessionStore: {
+            getSessionInputForExecution: async ({ id, sessionID }) => ({
+              state: "pending",
+              status: "admitted",
+              id,
+              sessionID,
+              text: ledger.text,
+              attachments: ledger.attachments ?? [],
+            }),
+          },
+        }),
     appendEvent: async (event) => {
       events.push(event);
       return event;
@@ -277,14 +293,22 @@ function makeHeldProjection(overrides = {}) {
   };
 }
 
-test("held 物化：queue 车道项切 guide 进内存 pendingInputs，注入门可见", async () => {
-  const runtime = makeRuntime({ pendingInputs: [] });
+test("held 物化：正文取账本（I1），投影文本只用于展示", async () => {
+  const runtime = makeRuntime({
+    pendingInputs: [],
+    ledger: { text: "账本里的引导内容（与投影不同）" },
+  });
   runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
   runtime.rebuildProjection = async () => makeHeldProjection();
   assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
   assert.equal(runtime.activeTurn.pendingInputs.length, 1, "必须物化进内存");
   const materialized = runtime.activeTurn.pendingInputs[0];
-  assert.equal(materialized.input, "引导排队的命令内容");
+  // 变异探测：把 resolveHeldGuideInput 的返回值改回 held.input，本断言即红。
+  assert.equal(
+    materialized.input,
+    "账本里的引导内容（与投影不同）",
+    "物化正文必须来自 session_input 账本，不得用投影 held.input",
+  );
   assert.equal(materialized.delivery, "guide");
   assert.equal(materialized.materialized, true);
   assert.equal(materialized.intent.admittedDelivery, "guide");
@@ -296,8 +320,61 @@ test("held 物化：queue 车道项切 guide 进内存 pendingInputs，注入门
   );
 });
 
-test("held 反物化：物化项切回 queue 整体移出内存，权威回 queue 车道投影", async () => {
+test("held 物化：宿主无账本能力时不物化（不得拿投影起轮）", async () => {
+  // 老宿主/夹具形态：无法判定权威文本 → 保持投影切换，不把投影文本变成模型内容。
   const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "无账本能力时不得物化");
+  assert.equal(runtime.events.length, 1, "投影事件照发（UI 仍显示切换）");
+  assert.equal(
+    hasInlineGuidePendingInput.call(runtime, runtime.activeTurn),
+    false,
+    "未物化项不得进入注入消费门",
+  );
+});
+
+test("held 物化：账本非 pending（终态/损坏）不物化", async () => {
+  // 账本说不该执行时，物化只会把死项种进内存并在 drain 时用投影文本起一轮。
+  const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  runtime.sessionStore = {
+    getSessionInputForExecution: async ({ id, sessionID }) => ({
+      state: "voided",
+      status: "cancelled",
+      id,
+      sessionID,
+    }),
+  };
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "账本非 pending 时不得物化");
+  assert.equal(runtime.events.length, 1, "投影事件照发");
+});
+
+test("held 物化：账本附件非空而投影无附件时不物化（不静默丢附件）", async () => {
+  const runtime = makeRuntime({ pendingInputs: [] });
+  runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
+  runtime.rebuildProjection = async () => makeHeldProjection();
+  runtime.sessionStore = {
+    getSessionInputForExecution: async ({ id, sessionID }) => ({
+      state: "pending",
+      status: "admitted",
+      id,
+      sessionID,
+      text: "账本正文",
+      attachments: [{ ref: "att-9", fileName: "b.png", mime: "image/png", bytes: 2 }],
+    }),
+  };
+  assert.equal(await setDelivery(runtime, "qi-held-1", "guide"), true);
+  assert.equal(runtime.activeTurn.pendingInputs.length, 0, "账本附件项不得物化");
+  assert.equal(runtime.events.length, 1, "投影事件照发");
+});
+
+test("held 反物化：物化项切回 queue 整体移出内存，权威回 queue 车道投影", async () => {
+  // 物化需要账本权威（I1）；这里只要一次成功的物化，正文值不参与本用例断言。
+  const runtime = makeRuntime({ pendingInputs: [], ledger: { text: "引导排队的命令内容" } });
   runtime.activeTurn = { turnId: TURN_ID, traceContext: TRACE_CONTEXT, pendingInputs: [] };
   runtime.rebuildProjection = async () => makeHeldProjection();
   await setDelivery(runtime, "qi-held-1", "guide");
