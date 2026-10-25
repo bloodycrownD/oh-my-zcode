@@ -98,6 +98,38 @@ await import(
 const { queueHandlers } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "queue.ts")).href
 );
+const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
+  pathToFileURL(
+    join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-edit-retry.ts"),
+  ).href
+);
+const { applyWorkspaceFileRewind } = await import(
+  pathToFileURL(join(coreSrc, "runtime", "methods", "file-rewind.ts")).href
+);
+// 真实 FileSystemPort 错误类型：file-rewind 只把 `isFileSystemPortError + not_found`
+// 当成「文件不存在」，普通 Error 会被判成读取失败（计划阶段直接 unsafe）。
+const { createFileSystemError } = await import(
+  pathToFileURL(join(contractsSrc, "interfaces", "file-system.port.ts")).href
+);
+// UI 侧「失败后把 newText 放回 composer」的唯一判据（packages/ui 无 jsdom，纯函数在这里断言）。
+const { resolveEditFailureComposerDraft } = await import(
+  pathToFileURL(
+    join(
+      here,
+      "..",
+      "..",
+      "..",
+      "..",
+      "..",
+      "packages",
+      "ui",
+      "src",
+      "v4",
+      "editFailureComposerRestore.ts",
+    ),
+  ).href
+);
+const { commandAckSchema } = await import("@zcode/shared/zcode-protocol-v4");
 
 const { SessionEventType, createSessionEvent } = contractsEvents;
 
@@ -1051,3 +1083,456 @@ test("T-RW4 结算必须排在 held 判据之前（唯一的顺序约束），�
   // guide 项在 fallback 之前也已在投影中（变异 M2 实测：把它挪到 fallback 之前，
   // 结算结果与账本状态逐条不变）。这里不写一条无法证伪的顺序断言。
 });
+
+// ── T-RT 公共夹具（I4 事务，Step 7-9）───────────────────────────────────────
+
+const REWIND_WORKSPACE_ROOT = join(here, "__file_rewind_fixture__");
+const REWIND_TARGET_MESSAGE_ID = "msg-rt-target";
+const REWIND_CHECKPOINT_ID = "ckpt-rt-1";
+const EDIT_NEW_TEXT = "失败后必须能原样重发的新文本";
+
+/**
+ * 真实 `applyWorkspaceFileRewind` + 内存文件系统（Step 7 / T-RT2）。
+ *
+ * 只桩掉三个端口（artifactStore / fileSystemPort / eventStore），写文件、journal、
+ * 补偿与「apply / commit 阶段判定」全部走真实实现——T-RT2 断言的正是这三者的先后关系，
+ * 用假 runtime 复刻等于把被测逻辑删掉。
+ *
+ * `files`: { "src/a.ts": { before, after } }，current 初始 = after（= checkpoint 记下的
+ * 「改完后」内容，即 rewind 前的工作区状态）。
+ */
+function createFileRewindRuntime({ files, writeFailureAt } = {}) {
+  const calls = { commits: 0, reads: 0, removes: [], writes: [] };
+  const contents = new Map(
+    Object.entries(files ?? {}).map(([relative, state]) => [
+      join(REWIND_WORKSPACE_ROOT, relative),
+      { ...state, current: state.current ?? state.after },
+    ]),
+  );
+  const runtime = {
+    appendEvent,
+    artifactStore: {
+      readToolResultArtifact: async () => ({
+        content: JSON.stringify({
+          files: Object.entries(files ?? {}).map(([relative, state]) => ({
+            afterContent: state.after,
+            beforeContent: state.before,
+            existedBefore: state.before !== null,
+            path: relative,
+            structuredPatch: [],
+          })),
+          createdAt: "2026-10-25T00:00:00.000Z",
+          kind: "workspace_file_before_change",
+          toolCallId: "tc-rt-1",
+          toolName: "Edit",
+          version: 1,
+        }),
+      }),
+    },
+    createEvent,
+    eventSinks: [],
+    eventStore: {
+      getEvents: async () => [
+        createSessionEvent(
+          SessionEventType.CheckpointCreated,
+          SESSION_ID,
+          {
+            checkpointId: REWIND_CHECKPOINT_ID,
+            fileCount: Object.keys(files ?? {}).length,
+            messageId: REWIND_TARGET_MESSAGE_ID,
+            scope: "workspace",
+            snapshotRef: `artifact://${REWIND_CHECKPOINT_ID}`,
+          },
+          { traceId: TRACE_CONTEXT.traceId },
+        ),
+      ],
+    },
+    fileSystemPort: {
+      readTextFile: async ({ path }) => {
+        calls.reads += 1;
+        const state = contents.get(path);
+        if (!state || state.current === null) {
+          throw createFileSystemError({ code: "not_found", message: `missing ${path}`, path });
+        }
+        return { content: state.current };
+      },
+      removeFile: async ({ path }) => {
+        calls.removes.push(path);
+        contents.get(path).current = null;
+      },
+      writeTextFile: async ({ content, path }) => {
+        calls.writes.push({ content, path });
+        if (calls.writes.length === writeFailureAt) throw new Error("simulated write failure");
+        contents.get(path).current = content;
+      },
+    },
+    logger: { debug: () => undefined, info: () => undefined, warn: () => undefined },
+    notifyEventSinks,
+    rootTraceContext: TRACE_CONTEXT,
+    sessionId: SESSION_ID,
+    workspaceRoot: REWIND_WORKSPACE_ROOT,
+  };
+  return {
+    calls,
+    currentOf: (relative) => contents.get(join(REWIND_WORKSPACE_ROOT, relative)).current,
+    runtime,
+  };
+}
+
+function applyFileRewind(harness, commitAfterApply) {
+  return applyWorkspaceFileRewind.call(harness.runtime, {
+    ...(commitAfterApply ? { commitAfterApply } : {}),
+    targetMessageIds: [REWIND_TARGET_MESSAGE_ID],
+    traceContext: TRACE_CONTEXT,
+  });
+}
+
+/**
+ * `editUserQuery` 的事务宿主（T-RT1/3/4/5）：真实 handler + 可控 runtime。
+ *
+ * `state.startMode` 可在用例中间切换，用来验证「失败后同一份 newText 能立刻重发」。
+ * `state.revert` 是 `setRevert` 的替身：rewind 成功才写目标 messageId，恢复会话
+ * （spec 已否决的 restoreRevert）只会把它写回 null/旧值。
+ */
+function createEditTransactionHarness({ commitFailure = false, startMode = "started" } = {}) {
+  const calls = {
+    cancels: [],
+    fileApplies: 0,
+    previews: 0,
+    rewinds: [],
+    sendInputs: [],
+    stateMutations: [],
+  };
+  const state = { revert: null, startMode };
+  const emptyPreview = {
+    canApply: true,
+    ignoredFiles: [],
+    safeFiles: [{ action: "restore", operationCount: 1, path: "src/a.ts", toolNames: ["Edit"] }],
+    unsafeFiles: [],
+  };
+  const runtime = {
+    applyWorkspaceFileRewind: async ({ commitAfterApply }) => {
+      calls.fileApplies += 1;
+      if (commitFailure) {
+        // 真实 core 在 commit 阶段失败时返回 failurePhase:"commit"（文件已回退、不补偿）。
+        return {
+          applied: false,
+          commitError: "simulated commit failure",
+          failurePhase: "commit",
+          preview: emptyPreview,
+          response: "files rewound, commit failed",
+        };
+      }
+      await commitAfterApply();
+      return { applied: true, preview: emptyPreview, response: "applied" };
+    },
+    getActiveForegroundExecutionId: () => undefined,
+    getSessionModelSelection: () => undefined,
+    previewWorkspaceFileRewind: async () => {
+      calls.previews += 1;
+      return emptyPreview;
+    },
+    rewindConversationToMessage: async (params) => {
+      calls.rewinds.push(params);
+      state.revert = params.targetMessageId;
+      return { strategy: "active_chain" };
+    },
+  };
+  const record = {
+    app: {
+      getModel: () => "openai/gpt-5",
+      getMode: () => "build",
+      readTarget: async () => null,
+      runtime,
+      sendInput: async (input) => {
+        calls.sendInputs.push(input);
+        if (state.startMode === "throws") {
+          throw Object.assign(new Error("model target unavailable"), {
+            reasonCode: "fault.command.modelUnavailable",
+          });
+        }
+        // 复刻 Core admission 的 busy 门：abort 若留下 active turn / foreground 执行权，
+        // 新提交会被退回队列而不是起轮（T-RT3 的判据）。
+        if (
+          record.activeAbortController ||
+          runtime.getActiveForegroundExecutionId() !== undefined
+        ) {
+          return {
+            delivery: "queue",
+            kind: "queued",
+            pendingInputId: "pending-rt-busy",
+            queueLength: 1,
+          };
+        }
+        if (state.startMode === "queued") {
+          return {
+            delivery: "queue",
+            kind: "queued",
+            pendingInputId: "pending-rt-queued",
+            queueLength: 1,
+          };
+        }
+        return { completion: Promise.resolve(), kind: "started_turn", turnId: "turn-rt-new" };
+      },
+      sessionId: SESSION_ID,
+      updateTargetStatus: async () => null,
+    },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    afterLegacyStateMutation: async (_record, reason) => {
+      calls.stateMutations.push(reason);
+    },
+    cancelInputCommand: async (sessionId, queueItemId, reason) => {
+      calls.cancels.push({ queueItemId, reason, sessionId });
+    },
+    getInputRoutingMode: () => null,
+    getMessageIdsForTurnRow: () => [REWIND_TARGET_MESSAGE_ID],
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { info: () => undefined, warn: () => undefined },
+    resolveRowActionTarget: () => ({
+      editTarget: {
+        entityId: "ent-rt",
+        intent: {
+          admittedDelivery: "startNow",
+          clientId: "ui",
+          kind: "sendText",
+          queueItemId: "queue-original",
+          requestedDelivery: "startNow",
+          sourceCommandId: "cmd-original",
+          text: "被编辑的旧文本",
+        },
+        productTurnId: "turn-1",
+        transcriptMessageId: REWIND_TARGET_MESSAGE_ID,
+      },
+      messageId: REWIND_TARGET_MESSAGE_ID,
+      ok: true,
+      row: {
+        entityId: "ent-rt",
+        kind: "userInput",
+        productTurnId: "turn-1",
+        rowId: 4,
+        turnId: "turn-1",
+        visibility: "visible",
+      },
+    }),
+  };
+  const makeEnvelope = (workspaceMode = "preserve") => ({
+    baseLogEpoch: "epoch-rt",
+    baseRevision: 0,
+    clientId: "ui",
+    commandId: "cmd-rt-edit",
+    issuedAt: Date.now(),
+    payload: {
+      newText: EDIT_NEW_TEXT,
+      target: { entityId: "ent-rt", rowId: 4 },
+      workspaceMode,
+    },
+    sessionId: SESSION_ID,
+    type: "editUserQuery",
+  });
+  return { calls, host, makeEnvelope, record, state };
+}
+
+// ── T-RT2 apply / commit 阶段分离（Step 7）──────────────────────────────────
+
+test("T-RT2① apply 阶段失败：commitAfterApply 根本不被调用（shutdown 前不落 setRevert）", async () => {
+  // 文件被外部改过 → 计划阶段判 unsafe，写文件之前就返回 blocked。
+  const unsafe = createFileRewindRuntime({
+    files: { "src/a.ts": { after: "after", before: "before", current: "externally modified" } },
+  });
+  const unsafeResult = await applyFileRewind(unsafe, async () => {
+    unsafe.calls.commits += 1;
+  });
+  assert.equal(unsafeResult.applied, false);
+  assert.equal(unsafeResult.preview.canApply, false);
+  assert.equal(unsafeResult.failurePhase, "apply");
+  assert.equal(unsafe.calls.commits, 0, "apply 未成功就绝不能进入 commit（= setRevert 不落）");
+  assert.equal(unsafe.currentOf("src/a.ts"), "externally modified", "计划阶段失败不得改工作区");
+
+  // 写文件阶段失败：journal 逆序补偿，文件回到 rewind 前内容，commit 同样不得开始。
+  const writeFailure = createFileRewindRuntime({
+    files: {
+      "src/a.ts": { after: "a-after", before: "a-before" },
+      "src/b.ts": { after: "b-after", before: "b-before" },
+    },
+    writeFailureAt: 2,
+  });
+  const writeResult = await applyFileRewind(writeFailure, async () => {
+    writeFailure.calls.commits += 1;
+  });
+  assert.equal(writeResult.applied, false);
+  assert.equal(writeResult.failurePhase, "apply");
+  assert.equal(writeFailure.calls.commits, 0, "写失败必须停在 apply 阶段");
+  assert.equal(writeFailure.currentOf("src/a.ts"), "a-after", "已写文件必须被补偿");
+  assert.equal(writeFailure.currentOf("src/b.ts"), "b-after", "未写文件保持原样");
+  assert.equal(
+    writeFailure.calls.writes.length,
+    4,
+    "两次 apply 写（第二次失败）+ journal 逆序补偿两次（journal 在写之前入账，含失败那次）",
+  );
+});
+
+test("T-RT2② commit 阶段失败：文件不得被补偿回未截断，且必须标出 failurePhase=commit", async () => {
+  const harness = createFileRewindRuntime({
+    files: { "src/a.ts": { after: "after-content", before: "before-content" } },
+  });
+  let sawRewoundFiles = false;
+  const result = await applyFileRewind(harness, async () => {
+    harness.calls.commits += 1;
+    // commit 回调执行时文件必须已经是 before 内容：这是「文件回退先于会话截断」的证据。
+    sawRewoundFiles = harness.currentOf("src/a.ts") === "before-content";
+    throw new Error("simulated commit failure");
+  });
+
+  assert.equal(harness.calls.commits, 1, "commit 必须真的被调用过（否则测的不是这条路）");
+  assert.equal(sawRewoundFiles, true, "commit 开始时文件必须已回退");
+  assert.equal(result.applied, false);
+  assert.equal(result.failurePhase, "commit");
+  assert.equal(result.commitError, "simulated commit failure");
+  assert.equal(
+    harness.currentOf("src/a.ts"),
+    "before-content",
+    "commit 失败后补偿文件 = 「会话已截断 + 文件未截断」，重启也不自愈；必须保持已回退",
+  );
+  assert.equal(
+    harness.calls.writes.length,
+    1,
+    "commit 阶段失败不得再写文件（补偿写会让上面那条断言变成另一种事故）",
+  );
+});
+
+test("T-RT2② commit 失败在 handler 侧必须上行成可见 fault，不得伪装成 blocked", async () => {
+  const harness = createEditTransactionHarness({ commitFailure: true });
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope("rewind")),
+    (error) => {
+      assert.ok(error instanceof V4EditCommittedFailureError, "必须是 I4 的可见失败类型");
+      assert.equal(error.draftText, EDIT_NEW_TEXT, "newText 必须随失败一起回传");
+      assert.match(error.message, /工作区文件已回退/);
+      assert.match(error.message, /重新发送/);
+      return true;
+    },
+  );
+  const cancels = harness.calls.cancels;
+  assert.equal(cancels.length, 1, "本次命令自持的账本行必须被结算");
+  assert.equal(cancels[0].queueItemId, "queue_cmd-rt-edit", "结算的是本次 admission 行");
+});
+
+// ── T-RT1 / T-RT3 / T-RT4 / T-RT5 abort 语义（Step 8-9）──────────────────────
+
+test("T-RT1 start 失败：截断保持已提交、不回滚，客户端收到带「历史已回退」语义的 fault", async () => {
+  const harness = createEditTransactionHarness({ startMode: "throws" });
+  let failure;
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope("preserve")),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+
+  assert.ok(failure instanceof V4EditCommittedFailureError, "必须转成可见的 I4 失败");
+  assert.equal(failure.draftText, EDIT_NEW_TEXT);
+  assert.equal(
+    failure.reasonCode,
+    "fault.command.modelUnavailable",
+    "原始领域错误码必须保留（客户端要能按 guard/fault 分流）",
+  );
+  assert.match(failure.message, /历史已回退到目标轮/);
+  assert.match(failure.message, /可直接重新发送/);
+
+  // 会话侧：revert 保持已截断，没有任何「恢复会话」的写回（第二次 rewind 就是回滚信号）。
+  assert.equal(harness.state.revert, REWIND_TARGET_MESSAGE_ID, "不得回滚截断");
+  assert.equal(harness.calls.rewinds.length, 1, "失败后不得再提交一次反向 rewind");
+  // 账本侧：本次命令自持行被结算，不留 admitted limbo。
+  assert.equal(harness.calls.cancels.length, 1);
+  assert.equal(harness.calls.cancels[0].queueItemId, "queue_cmd-rt-edit");
+  assert.equal(harness.calls.cancels[0].reason, "fault.command.modelUnavailable");
+  // start 确实被尝试过（失败点必须在 start，不能是更早的校验）。
+  assert.equal(harness.calls.sendInputs.length, 1);
+  assert.equal(harness.calls.sendInputs[0].text, EDIT_NEW_TEXT);
+});
+
+test("T-RT3 失败后拿到的草稿可以直接发送成功（不靠行内编辑态存活、不留 active 锁）", async () => {
+  const harness = createEditTransactionHarness({ startMode: "throws" });
+  let failure;
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope()),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+
+  // 用户拿到草稿后直接发送（真实入口是 composer：新 commandId、普通 sendText）。
+  // 这里只验证 abort 之后这条提交能被准入——残留 active turn / 锁会让它变成 queued。
+  harness.state.startMode = "started";
+  const resent = await harness.record.app.sendInput({ text: failure.draftText });
+  assert.equal(failure.draftText, EDIT_NEW_TEXT, "草稿内容必须就是 newText");
+  assert.equal(resent.kind, "started_turn", "abort 之后新提交必须能起轮（不得留 active turn/锁）");
+  assert.equal(harness.calls.sendInputs.at(-1).text, EDIT_NEW_TEXT, "起轮的必须仍是编辑后的文本");
+  assert.equal(
+    harness.record.activeAbortController,
+    undefined,
+    "abort 不得留下 bootstrap controller",
+  );
+  assert.equal(
+    harness.state.revert,
+    REWIND_TARGET_MESSAGE_ID,
+    "截断保持（用户看到的历史与工作区一致）",
+  );
+});
+
+test("T-RT4 失败结果把 newText 写进 composer 草稿；成功（含 queued）绝不覆盖用户输入", () => {
+  const harness = createEditTransactionHarness();
+  const failedAck = {
+    commandId: "cmd-rt-edit",
+    draftText: EDIT_NEW_TEXT,
+    message: "历史已回退到目标轮…",
+    reasonCode: "fault.command.executionFailed",
+    revisionAtDecision: 0,
+    status: "failed",
+  };
+  assert.deepEqual(
+    resolveEditFailureComposerDraft(failedAck),
+    { inputKind: "sendText", text: EDIT_NEW_TEXT },
+    "T-RT3 的唯一实现路径：失败时 newText 必须能落回 composer 草稿",
+  );
+  assert.equal(
+    resolveEditFailureComposerDraft({ ...failedAck, status: "accepted" }),
+    null,
+    "成功（含 queued）不得用草稿覆盖用户当前输入",
+  );
+  assert.equal(
+    resolveEditFailureComposerDraft({ ...failedAck, draftText: undefined }),
+    null,
+    "没有 draftText 的失败（校验期拒绝、目标行还在）不得凭空多出一份草稿",
+  );
+  // 契约必须能承载该字段（ACK additive）。
+  const parsed = commandAckSchema.parse({ ...failedAck, commandId: "cmd-rt-edit" });
+  assert.equal(parsed.draftText, EDIT_NEW_TEXT);
+  // 链路最后一环：gateway 只从显式携带 draftText 的领域错误透传，不做推断。
+  const gatewaySource = stripComments(
+    readFileSync(join(bootstrapSrc, "zcode-protocol-v4/v4-gateway.ts"), "utf8"),
+  );
+  assert.match(gatewaySource, /draftText\s*=\s*[\s\S]{0,200}?\.draftText/);
+  assert.match(gatewaySource, /\.\.\.\(draftText \? \{ draftText \} : \{\}\)/);
+});
+
+test("T-RT5 newText 被 queued 不算失败：不触发 abort、不结算账本行", async () => {
+  const harness = createEditTransactionHarness({ startMode: "queued" });
+  const result = await forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope());
+
+  assert.equal(result?.disposition, "rewind", "排队是成功投递（I5 负责可见性），不是失败");
+  assert.equal(harness.calls.sendInputs.length, 1);
+  assert.equal(harness.calls.sendInputs[0].text, EDIT_NEW_TEXT);
+  assert.deepEqual(
+    harness.calls.cancels,
+    [],
+    "queued 走 abort 会把它刚排进队列的输入结算掉 = 静默丢输入",
+  );
+  assert.equal(harness.state.revert, REWIND_TARGET_MESSAGE_ID, "截断按用户意图保留");
+});
+

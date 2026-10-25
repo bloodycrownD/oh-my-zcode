@@ -2550,6 +2550,12 @@ export class ConversationV4Gateway {
         typeof (error as { reasonCode?: unknown } | null)?.reasonCode === "string"
           ? String((error as { reasonCode: string }).reasonCode)
           : null;
+      // I4：截断已提交后 start 失败必须让客户端拿回 newText（目标行已随 rewind 卸载，
+      // composer 草稿是唯一出路）。只有显式携带 draftText 的领域错误才透传，不推断。
+      const draftText =
+        typeof (error as { draftText?: unknown } | null)?.draftText === "string"
+          ? String((error as { draftText: string }).draftText)
+          : undefined;
       const final = {
         status: "failed" as const,
         reasonCode:
@@ -2557,6 +2563,7 @@ export class ConversationV4Gateway {
             ? "fault.command.notImplemented"
             : (domainReasonCode ?? "fault.command.executionFailed"),
         message: error instanceof Error ? error.message : String(error),
+        ...(draftText ? { draftText } : {}),
       };
       await cancelDurableInput(final.reasonCode);
       releaseDurableInput(final);

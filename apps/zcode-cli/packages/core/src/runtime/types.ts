@@ -634,6 +634,16 @@ export interface WorkspaceFileRewindApplyResult {
   applied: boolean;
   preview: WorkspaceFileRewindPreview;
   response: string;
+  /**
+   * `applied === false` 时的失败阶段（spec edit-resend-stale-text / I4）：
+   * - `"apply"`：文件回写阶段失败，journal 已按逆序补偿，工作区回到命令执行前；
+   * - `"commit"`：文件已**全部**回写，但 `commitAfterApply` 抛错。此时文件回退不可逆，
+   *   `session.revert` 可能已经落下，调用方不得补偿文件（会得到「会话已截断 + 文件未截断」，
+   *   重启也不自愈——cold-event-merge 只收敛会话分支），必须按「已提交后失败」上报。
+   */
+  failurePhase?: "apply" | "commit";
+  /** `failurePhase === "commit"` 时的原始错误描述（诊断与 fault 文案用）。 */
+  commitError?: string;
 }
 
 export interface ConversationRewindResult {

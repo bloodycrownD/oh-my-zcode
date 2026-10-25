@@ -450,6 +450,14 @@ export const commandAckSchema = z.object({
   // rejected/stale/noop/failed 必带；= guard id 或 fault code（命名空间）。
   reasonCode: z.string().optional(),
   message: z.string().optional(),
+  /**
+   * 失败时仍要交付给客户端的待重发文本（spec edit-resend-stale-text / I4）。
+   *
+   * 只有 `editUserQuery` 的「截断已提交后 start 失败」会带：目标行已随 rewind 从投影
+   * 移除、行内编辑态不可能存活，唯一能保住 newText 的路径是客户端把它写回 composer 草稿。
+   * 可选字段，旧客户端忽略即可（additive）。
+   */
+  draftText: z.string().optional(),
   revisionAtDecision: z.number(),
   // duplicate 回放缓存结果；accepted 亦可即时带（fork）。
   result: commandResultSchema.optional(),

@@ -49,6 +49,7 @@ import type { MessageFileLinkTarget } from "@/components/ai-elements/message.js"
 import { useServices } from "@/hooks/useServices.js";
 import { useDynamicWorkflowAvailability } from "@/hooks/useDynamicWorkflowAvailability.js";
 import { resolveWorkflowResumeHandler } from "@/v4/workflowResumeGate.js";
+import { resolveEditFailureComposerDraft } from "@/v4/editFailureComposerRestore.js";
 import {
   workflowSessionModelOf,
   type WorkflowRunSettingsChange,
@@ -2492,12 +2493,27 @@ export function SessionPane({
           position: "bottom-center",
           variant: "warning",
         });
+        // I4（spec edit-resend-stale-text，T-RT3/T-RT4）：截断已提交后 start 失败时，
+        // 目标行已随 rewind 从投影移除，行内编辑态不可能存活——newText 唯一的出路是
+        // composer 草稿。CLI 只在「截断已落地」的失败上带 draftText，这里不做推断。
+        // composer 侧有 hasDraftContent 门，不会覆盖用户已输入的草稿。
+        const editDraft = resolveEditFailureComposerDraft(ack);
+        if (editDraft) {
+          setComposerRestoreRequest({
+            requestId: nextComposerRestoreRequestIdRef.current++,
+            sessionId,
+            workspaceKey,
+            inputKind: editDraft.inputKind,
+            text: editDraft.text,
+            attachments: [],
+          });
+        }
         return false;
       }
       // fork ACK 只做旧协议解码兼容；新 edit 永不导航 child。blocked 由行内冲突弹窗处理。
       return ack;
     },
-    [createSubmissionFromComposer, dispatchCommand, sessionId],
+    [createSubmissionFromComposer, dispatchCommand, intl, sessionId, workspaceKey],
   );
 
   const dispatchRetryTurn = useCallback(

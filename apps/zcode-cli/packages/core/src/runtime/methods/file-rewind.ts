@@ -104,8 +104,7 @@ export async function applyWorkspaceFileRewind(
     commitAfterApply?: () => Promise<void>;
   } = {},
 ): Promise<WorkspaceFileRewindApplyResult> {
-  const traceContext =
-    options.traceContext ?? getCurrentTraceContext() ?? this.rootTraceContext;
+  const traceContext = options.traceContext ?? getCurrentTraceContext() ?? this.rootTraceContext;
   const plan = await buildWorkspaceFileRewindPlan.call(this, {
     ...options,
     traceContext,
@@ -113,6 +112,7 @@ export async function applyWorkspaceFileRewind(
   if (!plan.canApply) {
     return {
       applied: false,
+      failurePhase: "apply",
       preview: toPreview(plan),
       response: "File rewind was not applied because at least one file is unsafe.",
     };
@@ -121,6 +121,7 @@ export async function applyWorkspaceFileRewind(
   if (!this.fileSystemPort) {
     return {
       applied: false,
+      failurePhase: "apply",
       preview: toPreview({
         ...plan,
         canApply: false,
@@ -141,6 +142,13 @@ export async function applyWorkspaceFileRewind(
 
   const restoredFiles: Array<{ action: "delete" | "restore"; path: string }> = [];
   const journal: FileRewindJournalEntry[] = [];
+  // 阶段边界（spec edit-resend-stale-text / I4、变更点 13）：apply 与 commit 必须分开。
+  // - apply 阶段（写文件）失败 → journal 可以补偿，工作区回到命令执行前；
+  // - commit 阶段（文件已全部写成功后的 commitAfterApply，典型是会话截断）一旦开始，
+  //   **绝不补偿文件**。文件回退不可逆，而 commit 里 setRevert 之后的
+  //   rebuildConversationDerivedState / appendEvent 可能已经抛错——补偿会造出
+  //   「会话已截断 + 文件未截断」，重启也不自愈（cold-event-merge 只收敛会话分支）。
+  let commitStarted = false;
   try {
     for (const operation of plan.operations) {
       throwIfTurnAborted(options.abortSignal);
@@ -179,8 +187,31 @@ export async function applyWorkspaceFileRewind(
       );
       restoredFiles.push({ action: "restore", path: operation.path });
     }
+    // 文件已全部回写成功：从这一行起进入 commit 阶段，后面任何失败都不得补偿文件。
+    commitStarted = true;
     await options.commitAfterApply?.();
   } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (commitStarted) {
+      // 文件已经回退且不可逆；commit 回调可能已经落下了会话截断。补偿文件会让
+      // 会话与工作区永久不一致，所以这里只如实上报 commit 失败、保留文件回退结果，
+      // 由调用方转成对客户端可见的 fault（T-RT1 的「失败可见」语义）。
+      this.logger?.warn("Workspace file rewind commit failed after files were applied", {
+        ...traceContextToLogContext(traceContext),
+        errorMessage: message,
+        event: "rewind.file_summary.commit_failed",
+        module: "core.runtime",
+        operationCount: plan.operations.length,
+        status: "failed",
+      });
+      return {
+        applied: false,
+        commitError: message,
+        failurePhase: "commit",
+        preview: toPreview(plan),
+        response: `Workspace files were rewound but the rewind commit failed: ${message}`,
+      };
+    }
     // 多文件 rewind 过去在第 N 次写失败时会留下半回滚 workspace。
     // journal 按写入逆序恢复命令执行前内容；补偿失败升级为不可恢复错误。
     try {
@@ -191,9 +222,9 @@ export async function applyWorkspaceFileRewind(
         "Workspace file rewind failed and compensation was incomplete",
       );
     }
-    const message = error instanceof Error ? error.message : String(error);
     return {
       applied: false,
+      failurePhase: "apply",
       preview: {
         ...toPreview(plan),
         canApply: false,
@@ -285,8 +316,7 @@ async function buildWorkspaceFileRewindPlan(
     traceContext?: TraceContext;
   },
 ): Promise<WorkspaceFileRewindPlan> {
-  const traceContext =
-    options.traceContext ?? getCurrentTraceContext() ?? this.rootTraceContext;
+  const traceContext = options.traceContext ?? getCurrentTraceContext() ?? this.rootTraceContext;
   if (!this.artifactStore || !this.fileSystemPort) {
     return {
       canApply: false,
@@ -509,10 +539,7 @@ function resolveTargetCheckpoints(
       .map((event) => event.payload)
       .filter((payload): payload is CheckpointCreatedPayload => {
         const checkpoint = payload as Partial<CheckpointCreatedPayload>;
-        return (
-          checkpoint.scope === RewindScope.Workspace ||
-          checkpoint.scope === RewindScope.Both
-        );
+        return checkpoint.scope === RewindScope.Workspace || checkpoint.scope === RewindScope.Both;
       });
   }
 

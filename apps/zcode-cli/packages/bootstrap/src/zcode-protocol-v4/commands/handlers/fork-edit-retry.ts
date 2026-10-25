@@ -90,6 +90,41 @@ class V4RetryTargetNotLatestError extends Error {
 }
 
 /**
+ * 截断（以及 `workspaceMode:"rewind"` 的文件回退）**已经落地**之后的失败（spec I4）。
+ *
+ * 语义定稿，三件事缺一不可：
+ * 1. **不写回 `session.revert`**：文件回退发生在 commit 之前且不可逆，把会话恢复成
+ *    「未截断」会让会话与工作区永久不一致，重启也不自愈（`cold-event-merge` 只收敛
+ *    会话分支，不收敛工作区）。`restoreRevert` 原语已被否决，不要重新引入。
+ * 2. **作废本次 `session_input`**：abort 只结算本次命令自持的账本行（`queue_<commandId>`），
+ *    不留 `admitted` limbo；edit 路径不持 queue reservation（reservation 只在
+ *    `sendQueuedNow` 的 promote 主线），无需释放。
+ * 3. **失败必须可见且 newText 不丢**：目标行已随 rewind 从投影移除，行组件与行内编辑态
+ *    一并卸载，唯一可行路径是把 `draftText` 回传客户端写进 composer 草稿。
+ */
+export class V4EditCommittedFailureError extends Error {
+  readonly draftText: string;
+  readonly reasonCode: string;
+
+  constructor(options: { draftText: string; message: string; reasonCode: string }) {
+    super(options.message);
+    this.name = "V4EditCommittedFailureError";
+    this.draftText = options.draftText;
+    this.reasonCode = options.reasonCode;
+  }
+}
+
+/** 保留原始领域错误码（guard.* / fault.*），否则归一为 executionFailed。 */
+function failureReasonCodeOf(error: unknown): string {
+  const code = (error as { reasonCode?: unknown } | null)?.reasonCode;
+  return typeof code === "string" && code.length > 0 ? code : "fault.command.executionFailed";
+}
+
+function failureMessageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
+/**
  * edit/retry 在 rewind 时必须排除的 session_input id：本次命令自持的那一行。
  * 形态与 admission 写账/命令收件箱同源（`queue_<commandId>`，见 command-inbox.ts），
  * 走 `commandAdmissionOf` 而不是手写拼串——admission 显式覆盖 id 时这里必须跟着变，
@@ -184,77 +219,134 @@ async function editUserQuery(
       goalPausedMutationReason: "edit_user_query_goal_paused",
     });
   }
+  // ── I4 事务（spec 变更点 13/14/15）────────────────────────────────────────
+  // 三段边界：validate（上面已完成）→ rewind（文件回退 + 会话截断同进同退）→ start。
+  // rewind 一旦提交就不可逆：文件回退不可补偿、会话截断不回写，失败只能「可见 + 可重发」。
   let conversationRewindCommitted = false;
-  if ((payload.workspaceMode ?? "preserve") === "rewind") {
-    const turnMessageIds = resolution.messageIds ??
-      host.getMessageIdsForTurnRow?.(record.app.sessionId, resolution.row.rowId) ?? [
-        editTarget.transcriptMessageId,
-      ];
-    const fileOptions = {
-      targetMessageIds: turnMessageIds as MessageId[],
-      targetTurnId: resolution.row.turnId as TurnId,
-      traceContext: record.traceContext,
-    };
-    const preview = await record.app.runtime.previewWorkspaceFileRewind(fileOptions);
-    // shell/ignored 变更无法证明完整回滚。组合模式 fail closed，并把最新 preview 原样返回 UI。
-    if (!preview.canApply || preview.ignoredFiles.length > 0 || preview.safeFiles.length === 0) {
-      const reasonCode =
-        preview.unsafeFiles.length > 0
-          ? "guard.workspaceRewindUnsafeFiles"
-          : preview.ignoredFiles.length > 0
-            ? "guard.workspaceRewindIgnoredFiles"
-            : preview.safeFiles.length === 0
-              ? "guard.workspaceRewindUnavailable"
-              : "guard.workspaceRewindApplyConflict";
-      await host.cancelInputCommand?.(
-        record.app.sessionId,
-        commandAdmissionOf(envelope).queueItemId,
-        reasonCode,
-      );
-      return {
-        type: "editUserQuery",
-        disposition: "blocked",
-        sessionId: record.app.sessionId,
-        reasonCode,
-        preview,
-      };
-    }
-    const applied = await record.app.runtime.applyWorkspaceFileRewind({
-      ...fileOptions,
-      commitAfterApply: async () => {
-        await submitConversationRewind(
-          host,
-          record,
+  let workspaceFilesRewound = false;
+  try {
+    if ((payload.workspaceMode ?? "preserve") === "rewind") {
+      const turnMessageIds = resolution.messageIds ??
+        host.getMessageIdsForTurnRow?.(record.app.sessionId, resolution.row.rowId) ?? [
           editTarget.transcriptMessageId,
-          rewindExclusionIds(envelope),
-        );
-        conversationRewindCommitted = true;
-      },
-    });
-    if (!applied.applied) {
-      await host.cancelInputCommand?.(
-        record.app.sessionId,
-        commandAdmissionOf(envelope).queueItemId,
-        "guard.workspaceRewindApplyConflict",
-      );
-      return {
-        type: "editUserQuery",
-        disposition: "blocked",
-        sessionId: record.app.sessionId,
-        reasonCode: "guard.workspaceRewindApplyConflict",
-        preview: applied.preview,
+        ];
+      const fileOptions = {
+        targetMessageIds: turnMessageIds as MessageId[],
+        targetTurnId: resolution.row.turnId as TurnId,
+        traceContext: record.traceContext,
       };
+      const preview = await record.app.runtime.previewWorkspaceFileRewind(fileOptions);
+      // shell/ignored 变更无法证明完整回滚。组合模式 fail closed，并把最新 preview 原样返回 UI。
+      if (!preview.canApply || preview.ignoredFiles.length > 0 || preview.safeFiles.length === 0) {
+        const reasonCode =
+          preview.unsafeFiles.length > 0
+            ? "guard.workspaceRewindUnsafeFiles"
+            : preview.ignoredFiles.length > 0
+              ? "guard.workspaceRewindIgnoredFiles"
+              : preview.safeFiles.length === 0
+                ? "guard.workspaceRewindUnavailable"
+                : "guard.workspaceRewindApplyConflict";
+        await host.cancelInputCommand?.(
+          record.app.sessionId,
+          commandAdmissionOf(envelope).queueItemId,
+          reasonCode,
+        );
+        return {
+          type: "editUserQuery",
+          disposition: "blocked",
+          sessionId: record.app.sessionId,
+          reasonCode,
+          preview,
+        };
+      }
+      const applied = await record.app.runtime.applyWorkspaceFileRewind({
+        ...fileOptions,
+        commitAfterApply: async () => {
+          await submitConversationRewind(
+            host,
+            record,
+            editTarget.transcriptMessageId,
+            rewindExclusionIds(envelope),
+          );
+          conversationRewindCommitted = true;
+        },
+      });
+      if (!applied.applied) {
+        if (applied.failurePhase === "commit") {
+          // 文件已全部回退（不可逆），commit 回调抛错——`setRevert` 之后还有
+          // rebuildConversationDerivedState / appendEvent 可能失败，所以会话截断状态
+          // 不可断言、更不可回写。按「已提交后失败」上报，不返回 blocked：
+          // blocked 的语义是「什么都没发生」，这里文件已经动了。
+          throw new V4EditCommittedFailureError({
+            draftText: canonical.text,
+            message:
+              "工作区文件已回退，会话历史可能已回退到目标轮；编辑后的文本已放回输入框，" +
+              `可直接重新发送。原因：${applied.commitError ?? "unknown"}`,
+            reasonCode: "fault.command.executionFailed",
+          });
+        }
+        await host.cancelInputCommand?.(
+          record.app.sessionId,
+          commandAdmissionOf(envelope).queueItemId,
+          "guard.workspaceRewindApplyConflict",
+        );
+        return {
+          type: "editUserQuery",
+          disposition: "blocked",
+          sessionId: record.app.sessionId,
+          reasonCode: "guard.workspaceRewindApplyConflict",
+          preview: applied.preview,
+        };
+      }
+      workspaceFilesRewound = true;
+      conversationRewindCommitted = true;
     }
+    if (!conversationRewindCommitted) {
+      await submitConversationRewind(
+        host,
+        record,
+        editTarget.transcriptMessageId,
+        rewindExclusionIds(envelope),
+      );
+      conversationRewindCommitted = true;
+    }
+    await startCanonicalIntent(host, record, envelope, canonical, attachments);
+  } catch (error) {
+    // abort 的唯一实现：结算本次命令自持的账本行。结算失败不能覆盖原始失败
+    // （gateway 的 cancelCommandInput 还会兜一次），所以只告警。
+    const settleAbortedInput = async (reasonCode: string): Promise<void> => {
+      try {
+        await host.cancelInputCommand?.(
+          record.app.sessionId,
+          commandAdmissionOf(envelope).queueItemId,
+          reasonCode,
+        );
+      } catch (cancelError) {
+        host.logger?.warn?.("v4 editUserQuery failed to settle aborted session_input", {
+          commandId: envelope.commandId,
+          error: failureMessageOf(cancelError),
+          sessionId: record.app.sessionId,
+        });
+      }
+    };
+    if (error instanceof V4EditCommittedFailureError) {
+      await settleAbortedInput(error.reasonCode);
+      throw error;
+    }
+    // 校验/预览阶段的失败什么都没提交：原样上行，由调用方按既有语义处理。
+    if (!conversationRewindCommitted && !workspaceFilesRewound) throw error;
+    // 截断已落地：不写回 revert（restoreRevert 已否决），只结算本次账本行 + 回可读 fault。
+    // 提交后的冲刷失败（queued）不会走到这里——T-RT5：queued 不是失败。
+    const reasonCode = failureReasonCodeOf(error);
+    await settleAbortedInput(reasonCode);
+    throw new V4EditCommittedFailureError({
+      draftText: canonical.text,
+      message:
+        "历史已回退到目标轮；编辑后的文本已放回输入框，可直接重新发送。" +
+        `原因：${failureMessageOf(error)}`,
+      reasonCode,
+    });
   }
-  if (!conversationRewindCommitted) {
-    await submitConversationRewind(
-      host,
-      record,
-      editTarget.transcriptMessageId,
-      rewindExclusionIds(envelope),
-    );
-  }
-  await startCanonicalIntent(host, record, envelope, canonical, attachments);
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
   // 无法与 retry 稳定区分。命令副作用完成后由 Agent server 写低频 info 审计索引。
   host.logger?.info?.("v4 editUserQuery completed", {
