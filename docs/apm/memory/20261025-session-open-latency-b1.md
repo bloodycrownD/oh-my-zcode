@@ -1,8 +1,8 @@
 ---
-date: 2026-10-25 13:20
-title: 会话打开慢的定性：传输已分页、计算是全量，待做 B1 装载窗口化
-keywords: 会话打开慢, 冷启动, 分页, 投影全量, B1, 切换会话延迟
-abstract: 实测把一次冷开 7.6s 拆到毫秒：慢不在传输（尾巴 60 行 + rows/range 游标已就绪），而在「为显示 60 行先算全部 2593 条」；方案定为 B1 装载窗口化（resume 只读尾部窗口、更早按需回填），覆盖冷开与中途切换。
+date: 2026-10-25 21:50
+title: 会话打开慢的根治：显示窗口/全序索引/运行时历史三件事解绑（spec 已落盘）
+keywords: 会话打开慢, 冷启动, 分页, 投影全量, B1, 切换会话延迟, 全序索引, view-only, historyMode, selectActiveConversationBranch, 幽灵runtime
+abstract: 实测冷开慢不在传输（尾 60 行 + rows/range 游标已就绪），而在「为显示 60 行先算全部 2593 条」且冷订阅把「看」与「跑」绑死。根治 spec 定为把显示窗口、全序索引（只读 id 列）、运行时历史（发送时才全量）三件事解绑；revert 裁断必须全序（尾窗近似会复活已回滚分支或清空历史），totalCount 不许估算，rowId 不要求跨进程稳定。
 ---
 
 user:
@@ -28,3 +28,15 @@ user:
 
 assistant:
 不能直接套：那组毫秒数是在 v1.0.26 树上量的，现在基线是 v1.0.20（回滚后），hydrate/投影那批新架构改动不在树里。建议顺序：先在同一条基线上实测 v1.0.27 的冷开与切换耗时（只读不改码），再出一份 B1 技术方案（含验收指标 ≤1s / ≤800ms 与回滚阀）给用户审，点头后才动核心。
+
+user:
+都修吧，根治。如果需要决定的地方，通通按照根治的思路做决定。
+
+assistant:
+spec 已落盘 `docs/iterations/session-open-latency/spec.md`（六阶段 / 七条不变式 IS1~IS7）。根治思路不是「给投影加 limit」，而是把三件事解绑：**显示窗口**（尾 60 行正文）、**全序索引**（只要 id/role/time，不要正文）、**运行时历史**（发送时才需要）。
+
+关键裁定（原本留给用户的三个问题，按根治原则自行定）：①`session.revert` 裁断**必须全序**——只喂尾窗时 `selectActiveConversationBranch`（contracts/src/rewind/index.ts:165-204）会因 targetIndex<0 **复活已回滚分支**、因 cutIndex<0 **整段清空历史**，而全序 id 索引很便宜，没有近似的理由；②`totalCount` **不许改成估算**，但改由索引给精确值（UI 同时用它估滚动条与判 totalCount>rows.length，估算会让两者矛盾）；③`rowId` **不要求跨进程稳定**（不落 checkpoint 表），但 `firstRowId`/`totalCount` 必须有独立于投影自增的权威来源。
+
+顺序是硬的：order-index 先行（IS2/IS5 的唯一合法来源）→ tail-window → view/runtime 拆分 → 懒历史。两处勘误也写进 spec：`readSessionContextUsage` 并**不**重复读 messages（`persistedMessages ?? ...` 已复用）；「hydratePublisher 是 projection-only」不成立——`loadPersistedEvents` 无 record 时直接返回空事件，仓内根本没有「看不跑」的分支。
+
+最高风险：`hasLiveConversation` 变三态（live/viewOnly/absent）后任何残留二态判定都会重演 `v4-gateway.ts:1951-1957` 记录的幽灵 runtime 事故（二次 resume → 重复 SessionResumed → 双写账本 → transcript 定格），所以三态化必须收成单函数 + 源码守卫。
