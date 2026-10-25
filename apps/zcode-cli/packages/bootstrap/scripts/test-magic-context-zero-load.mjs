@@ -25,6 +25,24 @@
  * 开关判定），M0 必然加载。判据只能是「M0 之外为零」。
  *
  * ============================================================================
+ * 窗口的**两个根**（ZL-1：根扎错地方 = 假绿）
+ * ============================================================================
+ *
+ * 关闭态窗口在同一子进程里解析**两个生产入口**，缺一不可：
+ *
+ *   `dist/app/create-app.js`          —— 装配面（工厂 / 插件 / 端口接线）
+ *   `dist/zcode-protocol/server.js`   —— **协议入口**：`magic-context-memories.ts` 与
+ *                                        `magic-context-config.ts` 的静态导入方
+ *
+ * 只 root create-app 时，「handler 顶层把 barrel 静态导入加回来」这一**本门禁自身
+ * 要防的回归**发生在 `server.js` 的依赖图里，而门禁根本没 import 它 —— 全绿也
+ * 什么都没证明。`server.js` 在关闭态是零 MC 包内解析（实测 0），成本约 300 条解析
+ * / 0.3s 量级，必须常驻窗口。
+ *
+ * **根是死的会退化**：窗口里必须真的出现 `server.js` 的解析记录（第 2 组断言的活性
+ * 半条），否则「server 根下零加载」退化成「没 import 过 server」。
+ *
+ * ============================================================================
  * M0 白名单（**显式**，不含「大概这些」）
  * ============================================================================
  *
@@ -55,6 +73,22 @@
  *    变红 → 改回）在 Step 5/7 的交付记录里，不写进测试本体（测试不该改源码）。
  *
  * ============================================================================
+ * zod 版本判据：以 **MC 自己的 manifest 解析**为准（ZL-2）
+ * ============================================================================
+ *
+ * 关闭态窗口里实测有 **19 个 zod 根**：1×4.6.5（根 `node_modules/zod`）+ 18×
+ * 3.25.76（`@zcode/contracts` 一份 + `@jimp/*` 十六份 + `zod-to-json-schema` 一份）。
+ * 旧写法取「窗口里第一条 `/node_modules/zod/` 解析」——它绿只是因为
+ * `adapters/config/schema.ts` 的 `import { z } from "zod"` 恰好排在窄子路径导入之前。
+ * 那是**语句顺序的偶然**：MC 的 zod 换成 3.x 而根位仍是 4.6.5 时，旧断言照样绿，
+ * 正是它声称要防的「zod3 静默失真」。
+ *
+ * 现在的判据：`createRequire(<mc>/package.json).resolve("zod/package.json")` ——
+ * 「MC 实际用哪个 zod」在 Node 解析语义下只有这一个正确答案。窗口扫描降级为
+ * **辅助信息**（打印出来供排查）+ 一条不依赖顺序的活性断言（窗口里必须出现 MC
+ * 解析出的那一份 zod，否则版本钉住的是一份没人用的副本）。
+ *
+ * ============================================================================
  * 隔离与前置
  * ============================================================================
  *
@@ -68,22 +102,42 @@
 
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
 const NODE = process.execPath;
 
-const BOOTSTRAP_DIST_APP = join(REPO_ROOT, "apps/zcode-cli/packages/bootstrap/dist/app/");
+const BOOTSTRAP_DIST = join(REPO_ROOT, "apps/zcode-cli/packages/bootstrap/dist/");
+const BOOTSTRAP_DIST_APP = join(BOOTSTRAP_DIST, "app/");
 const CREATE_APP_DIST = join(BOOTSTRAP_DIST_APP, "create-app.js");
+/** 协议入口：`magic-context-memories.ts` / `magic-context-config.ts` 的静态导入方。 */
+const PROTOCOL_SERVER_DIST = join(BOOTSTRAP_DIST, "zcode-protocol/server.js");
 const FACTORY_SHIM_DIST = join(BOOTSTRAP_DIST_APP, "magic-context-turn-transform.js");
 const EFFECTIVE_ENABLED_DIST = join(BOOTSTRAP_DIST_APP, "magic-context", "effective-enabled.js");
-const MC_DIST_INDEX = join(REPO_ROOT, "apps/zcode-cli/packages/magic-context/dist/index.js");
+const MC_PACKAGE_ROOT = join(REPO_ROOT, "apps/zcode-cli/packages/magic-context");
+const MC_PACKAGE_JSON = join(MC_PACKAGE_ROOT, "package.json");
+const MC_DIST_INDEX = join(MC_PACKAGE_ROOT, "dist/index.js");
 
-for (const dist of [CREATE_APP_DIST, FACTORY_SHIM_DIST, EFFECTIVE_ENABLED_DIST, MC_DIST_INDEX]) {
+for (const dist of [
+  CREATE_APP_DIST,
+  PROTOCOL_SERVER_DIST,
+  FACTORY_SHIM_DIST,
+  EFFECTIVE_ENABLED_DIST,
+  MC_DIST_INDEX,
+]) {
   if (!existsSync(dist)) {
     throw new Error(
       `missing ${dist} — run \`pnpm --filter @zcode/bootstrap build\` / ` +
@@ -104,7 +158,13 @@ const M0_PACKAGE_FILES = [
   "core/shared/prompt-surface-key.js",
 ];
 
-/** M0 的 zod 闭包：版本写死，防止「某天 zod 变成 3 或换了包」时口径静默失真。 */
+/**
+ * M0 的 zod 闭包版本：与 `magic-context/package.json` 的 pin 逐字一致
+ * （`"zod": "4.6.5"`）。换版本等于换口径，需同步 spec IM1。
+ *
+ * 判据不看「窗口里的第一条 zod」（那有 19 个根，第一条由 import 顺序决定），
+ * 而看 MC manifest 的解析结果——见 {@link resolveMcZod}。
+ */
 const M0_ZOD_VERSION = "4.6.5";
 
 /** 包内解析落点的两形态（pnpm 符号链接可能给出 realpath 或 node_modules 路径）。 */
@@ -145,8 +205,59 @@ function zodRootFromUrl(url) {
 }
 
 /**
- * 驱动源码。窗口（control 标记之前）= `import create-app` + 真实 `createZCodeApp`
- * + `close()`；control 之后 = 一次 barrel import 作判据量程证明。
+ * MC 自己实际用的 zod —— **唯一的正确判据**（ZL-2）。
+ *
+ * `createRequire(<mc>/package.json).resolve("zod/package.json")` 走的就是 MC 的
+ * 模块上下文会走的那条 node 解析：从 `<mc>/` 起逐级找 `node_modules/zod`。
+ * 只读 `package.json` 的 `dependencies.zod` 字符串不够（那是声明，不是解析结果：
+ * pnpm 的 layout / 嵌套副本 / 覆盖都可能让实际解析落在别处）。
+ *
+ * 返回 realpath 归一后的 `packageRoot`（不带尾斜杠），与窗口扫描的 zod 根可直接比较。
+ */
+function resolveMcZod() {
+  const requireFromMc = createRequire(MC_PACKAGE_JSON);
+  const manifestPath = realpathSync(requireFromMc.resolve("zod/package.json"));
+  const packageRoot = realpathSync(dirname(manifestPath));
+  return {
+    manifestPath,
+    packageRoot,
+    version: JSON.parse(readFileSync(manifestPath, "utf8")).version,
+  };
+}
+
+/**
+ * 窗口里出现过的 zod 根 → 解析条数（**辅助信息**，不是判据）。
+ *
+ * 它回答的是「窗口到底碰了几份 zod」，正好把旧写法依赖的「序」暴露成一个可读数字。
+ */
+function zodRootsInWindow(window) {
+  const counts = new Map();
+  for (const entry of window) {
+    const root = zodRootFromUrl(String(entry.url));
+    if (root === undefined) continue;
+    counts.set(root, (counts.get(root) ?? 0) + 1);
+  }
+  return counts;
+}
+
+/** zod 包根的归一化 key：realpath + 正斜杠 + 去尾斜杠（窗口 URL 与 require 解析形态不同）。 */
+function normalizeZodRoot(root) {
+  const slashed = root.replaceAll("\\", "/").replace(/\/+$/, "");
+  try {
+    return realpathSync(root).replaceAll("\\", "/").replace(/\/+$/, "");
+  } catch {
+    return slashed;
+  }
+}
+
+/**
+ * 驱动源码。窗口（control 标记之前）= 协议入口 `zcode-protocol/server.js` +
+ * `import create-app` + 真实 `createZCodeApp` + `close()`；control 之后 = 一次
+ * barrel import 作判据量程证明。
+ *
+ * 两个根都在窗口里（ZL-1）：`server.js` 是两个 MC handler 的静态导入方，
+ * 「handler 顶层把 barrel 加回来」只会出现在它的依赖图里。import 顺序取
+ * 「协议入口 → 装配」——与 CLI 进程的加载顺序同向（协议入口是常驻面，app 是按会话建）。
  *
  * 子进程里只**观测**，不断言：断言全在父进程做，失败信息才带得上 node:test 的上下文。
  */
@@ -184,6 +295,15 @@ registerHooks({
 
 // 活性自检：哨兵是本进程注册 hook 之后的第一个真实文件解析。
 await import(process.env.ZCODE_TEST_SENTINEL);
+
+// ── 根 ①：生产协议入口（两个 MC handler 的静态导入方）────────────────────────
+// 失败不中断驱动：错误进报告，父进程先断言它，仍能拿到窗口诊断。
+let serverError;
+try {
+  await import(process.env.ZCODE_TEST_PROTOCOL_SERVER);
+} catch (error) {
+  serverError = error instanceof Error ? error.message : String(error);
+}
 
 const entries = [];
 const logger = {
@@ -253,7 +373,7 @@ try {
 // resolve hook 的写日志跑在 hooks 线程：收尾前让出一轮。
 await new Promise((resolve) => setTimeout(resolve, 50));
 process.stdout.write(
-  "DRIVER-REPORT " + JSON.stringify({ appError, closeError }) + "\\n",
+  "DRIVER-REPORT " + JSON.stringify({ appError, closeError, serverError }) + "\\n",
 );
 
 // ── 控制段：判据量程证明（不属于装配窗口） ────────────────────────────────────
@@ -289,6 +409,7 @@ async function runDisabledDriver() {
         ZCODE_TEST_HOOK_LOG: hookLog,
         ZCODE_TEST_SENTINEL: pathToFileURL(sentinel).href,
         ZCODE_TEST_CREATE_APP: pathToFileURL(CREATE_APP_DIST).href,
+        ZCODE_TEST_PROTOCOL_SERVER: pathToFileURL(PROTOCOL_SERVER_DIST).href,
         ZCODE_TEST_MC_ENTRY: pathToFileURL(MC_DIST_INDEX).href,
         // 隔离：所有写路径改指 tempRoot，绝不碰真实 ~/.omz。
         ZCODE_STORAGE_DIR: storageDir,
@@ -333,6 +454,12 @@ async function runDisabledDriver() {
 test("IM1: 关闭态 @zcode/magic-context 包内 M0 之外零解析 + 宿主装配面零解析", async () => {
   const { control, exit, report, stderr, window } = await runDisabledDriver();
   assert.equal(exit, 0, `驱动进程应正常退出；stderr:\n${stderr}`);
+  // 两个根都必须真的加载成功（根坏了，窗口就少一整片生产入口）。
+  assert.equal(
+    report.serverError,
+    undefined,
+    `协议入口 zcode-protocol/server.js 不该加载失败：${report.serverError}`,
+  );
   assert.equal(report.appError, undefined, `createZCodeApp 不该失败：${report.appError}`);
   assert.equal(report.closeError, undefined, `app.close 不该失败：${report.closeError}`);
 
@@ -341,8 +468,20 @@ test("IM1: 关闭态 @zcode/magic-context 包内 M0 之外零解析 + 宿主装�
     window.some((entry) => String(entry.url).includes("sentinel.mjs")),
     "哨兵模块必须被 resolve hook 观察到（hook 活在链路上）",
   );
+  // 根 ① 活性（ZL-1）：server.js 本身必须出现在窗口里。缺了它，「协议入口路径零加载」
+  // 就退化成「根本没 import 过协议入口」——这正是修掉的那条假绿。
+  const serverEntryUrl = pathToFileURL(PROTOCOL_SERVER_DIST).href;
+  assert.ok(
+    window.some((entry) => String(entry.url) === serverEntryUrl),
+    "活性：窗口内必须出现协议入口 zcode-protocol/server.js 的解析记录（ZL-1 的根是死的）",
+  );
   // 窗口非空：配置装载 + 装配的依赖图远不止几条。
   assert.ok(window.length > 100, `装配窗口应观察到大量解析，实际 ${window.length} 条`);
+  // 诊断：窗口规模（两个根合计），失败时能把「少了哪个根」和「涨了多少」对上。
+  console.log(
+    `[IM1] 装配窗口 ${window.length} 条解析（create-app + zcode-protocol/server.js），` +
+      `MC 包内 ${new Set(window.map((entry) => mcPackageFile(String(entry.url))).filter(Boolean)).size} 个文件`,
+  );
 
   // ── 2. 口径① 第一条：包内 M0 之外零解析 ────────────────────────────────────
   const windowMcFiles = new Set();
@@ -372,18 +511,33 @@ test("IM1: 关闭态 @zcode/magic-context 包内 M0 之外零解析 + 宿主装�
     );
   }
 
-  // ── 4. zod 闭包版本写死 4.6.5（不是 zod3）──────────────────────────────────
-  const zodUrl = window
-    .map((entry) => String(entry.url))
-    .find((url) => zodRootFromUrl(url) !== undefined);
-  assert.ok(zodUrl, "M0 闭包里必须出现 zod 解析（`host/config/schema.js` 值导入它）");
-  const zodRoot = zodRootFromUrl(zodUrl);
-  const zodVersion = JSON.parse(readFileSync(`${zodRoot}package.json`, "utf8")).version;
+  // ── 4. zod：以 MC 自己 manifest 的解析结果为准（ZL-2）───────────────────────
+  //
+  // 旧写法取窗口里「第一条」zod 解析——窗口实测有 19 个 zod 根，第一条只由 import
+  // 语句顺序决定，与「MC 用的是哪份 zod」无关。现在主判据是 MC 的模块解析结果。
+  const mcZod = resolveMcZod();
   assert.equal(
-    zodVersion,
+    mcZod.version,
     M0_ZOD_VERSION,
-    `M0 的 zod 闭包版本必须是 ${M0_ZOD_VERSION}（magic-context/package.json 的 pin）；` +
-      "换版本等于换口径，需同步 spec IM1",
+    `MC 自己解析到的 zod 版本必须是 ${M0_ZOD_VERSION}（magic-context/package.json 的 pin）；` +
+      `实际解析到 ${mcZod.manifestPath} = ${mcZod.version}。换版本等于换口径，需同步 spec IM1`,
+  );
+
+  // 辅助信息（**不是**判据）：窗口到底碰了几份 zod、各自几条解析。旧写法的「序」
+  // 在这里就是一个一眼可见的偶然量。
+  const windowZodRoots = zodRootsInWindow(window);
+  console.log(
+    `[IM1] 窗口 zod 根 ${windowZodRoots.size} 个：` +
+      [...windowZodRoots].map(([root, count]) => `${root}×${count}`).join(" | ") +
+      ` ｜ 判据来源 ${mcZod.manifestPath}`,
+  );
+  // 不依赖顺序的活性：MC 用的那一份 zod 必须真的在窗口里被解析过。否则版本断言
+  // 描述的可能是一份没人加载的副本（pnpm layout / 嵌套副本下这并非不可能）。
+  const mcZodRootKey = normalizeZodRoot(mcZod.packageRoot);
+  assert.ok(
+    [...windowZodRoots.keys()].some((root) => normalizeZodRoot(root) === mcZodRootKey),
+    `活性：窗口里必须出现 MC 自己那份 zod（${mcZod.packageRoot}）的解析——` +
+      "否则「M0 的 zod 是 4.6.5」描述的不是实际加载的那份",
   );
 
   // ── 5. 口径① 第二条：宿主侧装配面零解析（effective-enabled 白名单放行）─────

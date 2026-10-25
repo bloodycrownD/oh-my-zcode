@@ -63,7 +63,9 @@
  *   superseded）只在工具面用于选文案，wire 上 message 已是可直显文本（ownership
  *   的 message 在组合函数里就是不透明的「was not found」，防泄漏纪律）。
  * - 组合函数可能抛 `ModuleMemoryAuthorityError`（module authority 托管的项目）：
- *   捕获转可读的 ProtocolRequestError（fail-visible，不是降级）。
+ *   捕获转可读的 ProtocolRequestError（fail-visible，不是降级）。判据用 `code` /
+ *   `name` 字段（见 {@link isModuleMemoryAuthorityError}）——该错误来自动态 import 的
+ *   另一个模块实例，两份包副本时 `instanceof` 会静默失效（ZL-6）。
  * - 开库抛错（如 `SQLITE_BUSY` / `database is locked`）在 archive 侧**原文透传**：
  *   services 的可重试转译靠 message 匹配（Step 5 的 isSqliteBusyError），这里重新
  *   包一层会把可重试信号吃掉；null（确定性打不开）给可读的 -32010。list 侧：开库段
@@ -117,6 +119,10 @@ import {
  * `unavailable` 信封（`supported:true`），绝不抛 `-32603`；archive 侧的结果信封没有
  * `available` 位，只能抛可读 `-32010`（与开库失败同一处置，见文件头）。
  *
+ * 「业务符号取不到」这一态生产上不可构造（包在 manifest 里），所以经
+ * `MagicContextMemoriesDependencies.loadRuntime` 留了单测注入缝（ZL-4）——否则它只是
+ * 一页没有测试的代码，回归时会静默变成 `-32603`。
+ *
  * 登记处：`UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
  */
 type MagicContextModule = typeof import("@zcode/magic-context");
@@ -133,9 +139,47 @@ async function loadMagicContextRuntime(): Promise<MagicContextModule> {
   return await import("@zcode/magic-context");
 }
 
-/** 供单测注入的窄缝；生产路径固定为用户级 `~/.omz/cli/config.json`。 */
+/**
+ * 取业务符号模块：注入缝优先（单测专用），否则走真 barrel 动态 import。
+ *
+ * 「怎么加载」可换，「失败怎么办」不可换：异常原样外抛，由调用方按各自信封语义处理。
+ */
+async function resolveMagicContextRuntime(
+  dependencies: MagicContextMemoriesDependencies,
+): Promise<MagicContextModule> {
+  return await (dependencies.loadRuntime ?? loadMagicContextRuntime)();
+}
+
+/**
+ * `ModuleMemoryAuthorityError` 的跨副本判据（ZL-6）。
+ *
+ * 生产路径上这个错误来自**动态 import 的另一个模块实例**：同一个进程里若存在两份
+ * `@zcode/magic-context` 副本（pnpm 嵌套解析、打包/直构混用），`instanceof` 会静默
+ * 失效（两份类的原型链不同），authority 拒绝就会被当普通错误原文透传，用户看到的是
+ * 一句内部报错。该类自带 `code` 与 `name` 两个稳定标记（storage-memory.ts:624-633），
+ * 用它们判据与副本无关；`instanceof` 仍留作第一判据（本地副本时零成本、且能挡住
+ * 恰好同名的无关错误）。
+ */
+function isModuleMemoryAuthorityError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "ModuleMemoryAuthorityError") return true;
+  if (error === null || typeof error !== "object") return false;
+  const { code, name } = error as { code?: unknown; name?: unknown };
+  return code === "MEMORY_MODULE_AUTHORITY" || name === "ModuleMemoryAuthorityError";
+}
+
+/** 供单测注入的窄缝；生产路径固定为用户级 `~/.omz/cli/config.json` 与真 barrel。 */
 export interface MagicContextMemoriesDependencies {
   configPath?: string;
+  /**
+   * 业务符号加载器（ZL-4）：默认（不传）走 {@link loadMagicContextRuntime}。
+   *
+   * 唯一目的是让「包在、但业务符号加载失败」这一态**可测**（spec T-MC5 第三态）：
+   * 生产路径上 `import("@zcode/magic-context")` 抛错是不可构造的（包已在
+   * package.json 里），所以这条分支此前只有代码、没有测试。注入缝只换「怎么加载」，
+   * **不换失败语义**——抛错仍由两个 handler 各自收敛（list → unavailable 信封，
+   * archive → 可读 -32010），与 schema 加载失败同一处置。
+   */
+  loadRuntime?: () => Promise<MagicContextModule>;
 }
 
 /** 打不开/关着时列表信封的零值计数（字段集与 `getMemoryCountsByStatus` 的 wire 投影一致）。 */
@@ -291,7 +335,7 @@ export async function listMagicContextMemories(
   // ①-b 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
   let magicContext: MagicContextModule;
   try {
-    magicContext = await loadMagicContextRuntime();
+    magicContext = await resolveMagicContextRuntime(dependencies);
   } catch (error) {
     context.logger?.warn("magicContext memories list: package unavailable", {
       module: "bootstrap.zcode_protocol",
@@ -423,7 +467,7 @@ export async function archiveMagicContextMemories(
   // ①-b 业务符号（barrel）惰性加载。
   let magicContext: MagicContextModule;
   try {
-    magicContext = await loadMagicContextRuntime();
+    magicContext = await resolveMagicContextRuntime(dependencies);
   } catch (error) {
     throw new ProtocolRequestError(
       -32010,
@@ -489,10 +533,14 @@ export async function archiveMagicContextMemories(
       })),
     });
   } catch (error) {
-    if (error instanceof magicContext.ModuleMemoryAuthorityError) {
+    if (isModuleMemoryAuthorityError(error)) {
+      const authorityCode =
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "MEMORY_MODULE_AUTHORITY";
       throw new ProtocolRequestError(
         -32010,
-        `Memory archives for this project are managed by the memory module (${error.code}); refusing the TypeScript-side archive.`,
+        `Memory archives for this project are managed by the memory module (${authorityCode}); refusing the TypeScript-side archive.`,
       );
     }
     throw error;

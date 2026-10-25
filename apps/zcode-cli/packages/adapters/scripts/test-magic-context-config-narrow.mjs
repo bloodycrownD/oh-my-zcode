@@ -40,6 +40,7 @@ const ADAPTERS_SCHEMA = join(ADAPTERS_ROOT, "src/config/schema.ts");
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
 const MC_ROOT = join(REPO_ROOT, "apps/zcode-cli/packages/magic-context");
 const MC_SCHEMA_SRC = join(MC_ROOT, "src/host/config/schema.ts");
+const MC_LANGUAGE_SRC = join(MC_ROOT, "src/host/config/language.ts");
 const MC_KEY_LEAF_SRC = join(MC_ROOT, "src/core/shared/prompt-surface-key.ts");
 const MC_PACKAGE_JSON = join(MC_ROOT, "package.json");
 
@@ -52,21 +53,42 @@ function stripComments(source) {
   return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/[^\n]*/g, "$1");
 }
 
-/** 收集源码里所有指向 MC 包的**字面量**说明符（值导入 / type-only / 动态 import / require）。 */
-function magicContextSpecifiers(source) {
+/**
+ * 字面量说明符的**所有**形态（ZL-3）。守卫只允许在这张表上做「加一条」，不允许
+ * 在断言侧列举「我想到的写法」——旧守卫正是后者：只认 `import {` / `import(`，
+ * 于是 `import x from "pkg"`、`import * as x from "pkg"`、`export … from "pkg"`
+ * 三种形态全部漏检，而它们与被覆盖的形态没有任何语义差别。
+ *
+ *   `from "x"`      → import / import type / export … from / export * as ns from
+ *   `import("x")`   → 动态 import（含 await）
+ *   `require("x")`  → CommonJS / TS 的 import x = require("x")
+ *   `import "x"`    → 副作用导入
+ *
+ * 覆盖边界照旧：只认字面量。`const P = "@zcode/" + "magic-context"` 这类拼接靠评审兜住。
+ */
+const SPECIFIER_PATTERNS = [
+  /\bfrom\s*["']([^"']+)["']/g,
+  /\b(?:import|require)\s*\(\s*["'`]([^"'`]+)["'`]/g,
+  /\bimport\s*["']([^"']+)["']/g,
+];
+
+/** 收集源码里所有字面量说明符（保序、不去重——重复导入本身就该被看见）。 */
+function importSpecifiers(source) {
   const specifiers = [];
-  for (const pattern of [
-    /\bfrom\s*["']([^"']+)["']/g,
-    /\b(?:import|require)\s*\(\s*["'`]([^"'`]+)["'`]/g,
-    /\bimport\s*["']([^"']+)["']/g,
-  ]) {
+  for (const pattern of SPECIFIER_PATTERNS) {
     for (const match of source.matchAll(pattern)) {
-      if (match[1] === "@zcode/magic-context" || match[1].startsWith("@zcode/magic-context/")) {
-        specifiers.push(match[1]);
-      }
+      specifiers.push(match[1]);
     }
   }
   return specifiers;
+}
+
+/** 收集源码里所有指向 MC 包的**字面量**说明符（值导入 / type-only / 动态 import / require）。 */
+function magicContextSpecifiers(source) {
+  return importSpecifiers(source).filter(
+    (specifier) =>
+      specifier === "@zcode/magic-context" || specifier.startsWith("@zcode/magic-context/"),
+  );
 }
 
 const NARROW_SCHEMA = "@zcode/magic-context/host/config/schema";
@@ -140,13 +162,46 @@ test("MC schema 的 prompt_surface key 校验必须取自零依赖叶子（闭�
   // 叶子本身必须真的是零 import——否则「闭包塌到 3」只是把依赖挪了个位置。
   const leafSource = stripComments(readFileSync(MC_KEY_LEAF_SRC, "utf8"));
   assert.deepEqual(
-    magicContextSpecifiers(leafSource),
+    importSpecifiers(leafSource),
     [],
-    "prompt-surface-key.ts 不得 import MC 包内任何模块",
-  );
-  assert.ok(
-    !/\b(?:import|require)\s*[({]/.test(leafSource),
     "prompt-surface-key.ts 必须是零 import 叶子（spec `:45`：把 isValidPromptSurfaceModelKey " +
-      "抽成零依赖叶子，否则窄子路径闭包降不到 2→3 个文件）",
+      "抽成零依赖叶子，否则窄子路径闭包降不到 2→3 个文件）。" +
+      "旧守卫用 `/\\b(?:import|require)\\s*[({]/` 只认 `import {` / `import(`，" +
+      "`import x from` / `import * as x` / `export … from` 全部漏检——收集器覆盖全部形态",
+  );
+});
+
+// ══ ZL-3：M0 三文件的**外部 npm 依赖**守卫（包内文件计数看不见这一面）═════════
+//
+// `bootstrap/scripts/test-magic-context-zero-load.mjs` 只数「MC 包内文件」，对 M0 的
+// 外部依赖完全没有约束：往 `language.ts` 加一行
+// `import heavy from "some-heavy-npm-pkg"` 今天全绿，而它会在**每次启动**（早于任何
+// 开关判定）被加载。所以 M0 的外部面必须由静态形状守卫钉住：
+//
+//   `host/config/language.ts`  —— 零 import（纯 Intl.DisplayNames，零依赖叶子）
+//   `host/config/schema.ts`    —— 外部说明符**恰好** `["zod"]`
+//   `core/shared/prompt-surface-key.ts` —— 零 import（上一条用例已断言）
+//
+// 判据用收集器（importSpecifiers），不是「列举我想到的写法」。
+
+test("M0 language.ts 必须零 import（ZL-3：外部 npm 依赖无守卫）", () => {
+  const source = stripComments(readFileSync(MC_LANGUAGE_SRC, "utf8"));
+  assert.deepEqual(
+    importSpecifiers(source),
+    [],
+    "host/config/language.ts 是 M0 三文件之一（关闭态每次启动必经），必须保持零 import。" +
+      "任何外部 npm 包都会随配置装载一起加载，而零加载门禁只数包内文件，看不到这一层",
+  );
+});
+
+test('M0 schema.ts 的非相对说明符必须恰好是 ["zod"]（ZL-3）', () => {
+  const source = stripComments(readFileSync(MC_SCHEMA_SRC, "utf8"));
+  const nonRelative = importSpecifiers(source).filter((specifier) => !specifier.startsWith("."));
+  assert.deepEqual(
+    nonRelative,
+    ["zod"],
+    "host/config/schema.ts 的外部依赖必须恰好是 zod（M0 闭包 = 3 文件 + zod 4.6.5）。" +
+      "新增任何外部包都会进入每次启动的配置装载路径；它也不在零加载门禁的「包内文件」计数里，" +
+      "所以必须在这里拦下",
   );
 });
