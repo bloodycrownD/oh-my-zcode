@@ -650,7 +650,7 @@ export function createConversationV4Gateway(
         queueItemId: admission.queueItemId,
         clientId: envelope.clientId || "cli",
         kind,
-        text: input.text ?? "",
+        text: input.text,
         attachments: attachmentRefs,
         ...(input.intent.sharedContextRefs
           ? { sharedContextRefs: input.intent.sharedContextRefs }

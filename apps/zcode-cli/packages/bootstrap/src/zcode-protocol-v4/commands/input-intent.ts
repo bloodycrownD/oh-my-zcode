@@ -128,9 +128,26 @@ export interface CanonicalInputRecord {
   admittedDelivery?: TurnInputIntentMetadata["admittedDelivery"];
   fallbackReasonCode?: string;
   modelSelection?: ModelSelection;
+  /**
+   * 继承源自带的 pin 事实。只在调用方没有提供任何模型选择事实
+   * （`selection.explicit` / `selection.live` 都缺省）时才会被采用；
+   * 一旦调用方给了事实，pin 由 `resolveCanonicalInput` 按规则重新判定。
+   */
+  modelSelectionPinned?: boolean;
   mode?: SubmissionMode;
   planEnabled?: boolean;
   provenance?: TurnInputIntentMetadata["provenance"];
+}
+
+/**
+ * 调用方提供的模型选择**事实**（不是判断）：
+ * - `explicit`：本次 command 的 payload 显式携带的选择；
+ * - `live`：运行态会话当前活值。
+ * 优先级与 pin 规则只在 `resolveCanonicalInput` 内实现，调用方不得自行 `??` 串联。
+ */
+export interface CanonicalInputSelectionFacts {
+  explicit?: ModelSelection;
+  live?: ModelSelection;
 }
 
 /** 继承自 canonical 的投递事实；缺省键 = 本次未继承，由调用方决定（admission 自行推导）。 */
@@ -161,11 +178,29 @@ export interface ResolvedCanonicalInput {
  * `record` 是 edit/retry 的 canonical 继承源，其它命令传 null / undefined；
  * 返回 null 表示这条 command 不产生用户输入。`payload` 必须传 `envelope.payload` 本体：
  * 投递事实只有一个来源，参数分开只是为了让 admission 与执行两侧能用同一份入参调用。
+ *
+ * ## modelSelection / modelSelectionPinned 也只在这里决定
+ *
+ * 规则（唯一实现）：
+ * ```
+ * modelSelection       = selection?.explicit ?? selection?.live ?? record?.modelSelection
+ * modelSelectionPinned = selection?.explicit !== undefined ? true : record?.modelSelectionPinned
+ * ```
+ * 调用方只提供事实——`explicit` 来自 payload、`live` 来自 `runtime.getSessionModelSelection()`、
+ * 什么都不传就表示「本次没有模型选择事实」（admission 当前就是这样，落库字段与今天逐字一致）。
+ * 传 `selection` 的一方不得再在外面写 `explicit ?? live ?? snapshot` 或自己算 pin。
+ *
+ * 为什么 pin 的判断权必须收到这里：`modelSelectionPinned` 是 runtime「写回 + 持久化 +
+ * emitModelSelected」三连的唯一开关，这条写回门是 2026-10-09 修过的同类缺陷
+ * （bugfix-batch-20261009 变更点 1d：继承快照曾被静默写回，把用户刚切换的模型还原并落库）。
+ * 只要在某条路径上 pin 被漏置/误置，编辑重发就会重演「模型没切到最新」。**任何在函数外
+ * 再判一次 pin 的代码都是那次缺陷的回归**——包括为了「顺手兜底」而复制上面的优先级链。
  */
 export function resolveCanonicalInput(
   record: CanonicalInputRecord | null | undefined,
   payload: unknown,
   envelope: CommandEnvelope,
+  selection?: CanonicalInputSelectionFacts,
 ): ResolvedCanonicalInput | null {
   if (envelope.type === "createSession") {
     const firstInput = (payload as { firstInput?: { text: string; attachments?: AttachmentRef[] } })
@@ -175,6 +210,7 @@ export function resolveCanonicalInput(
       kind: "sendText",
       text: firstInput.text,
       attachments: firstInput.attachments ?? [],
+      selection,
     });
   }
   if (envelope.type === "createSelectionSideSession") {
@@ -184,6 +220,7 @@ export function resolveCanonicalInput(
       kind: "sendText",
       text: firstInput.text,
       attachments: [],
+      selection,
     });
   }
   if (envelope.type === "sendText" || envelope.type === "sendGoalCommand") {
@@ -197,21 +234,26 @@ export function resolveCanonicalInput(
       text: sendPayload.text,
       attachments: sendPayload.attachments ?? [],
       ...(sendPayload.context_refs ? { sharedContextRefs: sendPayload.context_refs } : {}),
+      selection,
     });
   }
   if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") return null;
   if (!record) return null;
-  const editPayload = payload as { newText?: string; attachments?: AttachmentRef[] };
+  // `newText` 在 `commandPayloadSchemas.editUserQuery` 里是必填，且 envelope 已在
+  // `parseCommandEnvelope` 按该 schema 校验过——这里按 schema 形状断言，不设兜底：
+  // 过去 `newText ?? record.text` 会把「编辑后仍重发旧文本」重新引回来（见 T-IA4 守卫）。
+  const editPayload = payload as { newText: string; attachments?: AttachmentRef[] };
   return assembleResolvedCanonicalInput({
     kind: record.kind,
     // edit 重发新文本；retry 重发原轮 canonical 文本（截断后已拿不到可见文本）。
-    text: envelope.type === "editUserQuery" ? (editPayload.newText ?? record.text) : record.text,
+    text: envelope.type === "editUserQuery" ? editPayload.newText : record.text,
     // payload 显式给 attachments（含 []）优先；缺省才继承原轮。
     attachments:
       envelope.type === "editUserQuery" && editPayload.attachments
         ? editPayload.attachments
         : inheritedAttachmentRefs(record.attachments),
     record,
+    selection,
   });
 }
 
@@ -235,20 +277,26 @@ function inheritedAttachmentRefs(
   );
 }
 
-/** 把各分支解析出的字段装配成唯一结果；text/intent/delivery 的相对关系只在这里决定。 */
+/** 把各分支解析出的字段装配成唯一结果；text/intent/delivery/modelSelection 的相对关系只在这里决定。 */
 function assembleResolvedCanonicalInput(seed: {
   kind: "sendText" | "sendGoalCommand";
   text: string;
   attachments: readonly AttachmentRef[];
   record?: CanonicalInputRecord;
   sharedContextRefs?: TurnInputIntentMetadata["sharedContextRefs"];
+  selection?: CanonicalInputSelectionFacts;
 }): ResolvedCanonicalInput {
-  const { record } = seed;
+  const { record, selection } = seed;
   const delivery: CanonicalInputDelivery = {
     ...(record?.requestedDelivery ? { requested: record.requestedDelivery } : {}),
     ...(record?.admittedDelivery ? { admitted: record.admittedDelivery } : {}),
     ...(record?.fallbackReasonCode ? { fallbackReasonCode: record.fallbackReasonCode } : {}),
   };
+  // 模型选择：显式 payload > 会话活值 > 继承快照；pin 只认「最后确实来自显式 payload」
+  // （规则定义见 `resolveCanonicalInput` 文档，不允许在别处再判一次）。
+  const modelSelection = selection?.explicit ?? selection?.live ?? record?.modelSelection;
+  const modelSelectionPinned =
+    selection?.explicit !== undefined ? true : record?.modelSelectionPinned;
   // 原始输入来源：provenance 优先，其次原轮的 sourceCommandId——
   // edit/retry 换了 commandId，但归因必须仍指向真正产生这条输入的原始命令。
   const originalSourceCommandId = record?.provenance?.sourceCommandId ?? record?.sourceCommandId;
@@ -268,7 +316,8 @@ function assembleResolvedCanonicalInput(seed: {
     ...(delivery.requested ? { requestedDelivery: delivery.requested } : {}),
     ...(delivery.admitted ? { admittedDelivery: delivery.admitted } : {}),
     ...(delivery.fallbackReasonCode ? { fallbackReasonCode: delivery.fallbackReasonCode } : {}),
-    ...(record?.modelSelection ? { modelSelection: record.modelSelection } : {}),
+    ...(modelSelection ? { modelSelection } : {}),
+    ...(modelSelectionPinned !== undefined ? { modelSelectionPinned } : {}),
     ...(record?.mode ? { mode: record.mode } : {}),
     ...(record?.planEnabled !== undefined ? { planEnabled: record.planEnabled } : {}),
     attachmentRefs: seed.attachments,
