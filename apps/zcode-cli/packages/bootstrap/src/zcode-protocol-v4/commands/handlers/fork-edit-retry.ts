@@ -11,6 +11,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   RewindStrategy,
+  isConversationRewindCommittedError,
   traceContextToLogContext,
   type MessageId,
   type TurnId,
@@ -92,6 +93,9 @@ class V4RetryTargetNotLatestError extends Error {
 /**
  * 截断（以及 `workspaceMode:"rewind"` 的文件回退）**已经落地**之后的失败（spec I4）。
  *
+ * edit 与 retry 共用（cr-func P1-5：retry 过去没有这条出口）：两条车道都是
+ * `rewind → start`，提交点之后失败只能「可见 + 可重发」。
+ *
  * 语义定稿，三件事缺一不可：
  * 1. **不写回 `session.revert`**：文件回退发生在 commit 之前且不可逆，把会话恢复成
  *    「未截断」会让会话与工作区永久不一致，重启也不自愈（`cold-event-merge` 只收敛
@@ -99,7 +103,7 @@ class V4RetryTargetNotLatestError extends Error {
  * 2. **作废本次 `session_input`**：abort 只结算本次命令自持的账本行（`queue_<commandId>`），
  *    不留 `admitted` limbo；edit 路径不持 queue reservation（reservation 只在
  *    `sendQueuedNow` 的 promote 主线），无需释放。
- * 3. **失败必须可见且 newText 不丢**：目标行已随 rewind 从投影移除，行组件与行内编辑态
+ * 3. **失败必须可见且文本不丢**：目标行已随 rewind 从投影移除，行组件与行内编辑态
  *    一并卸载，唯一可行路径是把 `draftText` 回传客户端写进 composer 草稿。
  */
 export class V4EditCommittedFailureError extends Error {
@@ -150,21 +154,63 @@ async function submitConversationRewind(
   record: V4SessionRecordView,
   anchorMessageId: string,
   excludeSessionInputIds: readonly string[],
+  onCommitted: () => void,
 ): Promise<void> {
-  const result = await record.app.runtime.rewindConversationToMessage({
-    // I2 排除集（spec 变更点 20）：本次 edit/retry 自身的 admission 行也在同一账本里。
-    // 编辑时旧轮仍在跑，它的 TurnSteerQueued 可能把 targetTurnId 记成被截断的那个 turn；
-    // 不排除就会把自己的执行权威 settle 掉，紧随其后的 start 读权威即硬失败（I1）。
-    // 制度上不能从 TraceContext 反推 commandId（不含该字段），只能在此显式传入。
-    excludeSessionInputIds: [...excludeSessionInputIds],
-    events: [],
-    targetMessageId: anchorMessageId as MessageId,
-    traceContext: record.traceContext,
-  });
+  let result: Awaited<ReturnType<typeof record.app.runtime.rewindConversationToMessage>>;
+  try {
+    result = await record.app.runtime.rewindConversationToMessage({
+      // I2 排除集（spec 变更点 20）：本次 edit/retry 自身的 admission 行也在同一账本里。
+      // 编辑时旧轮仍在跑，它的 TurnSteerQueued 可能把 targetTurnId 记成被截断的那个 turn；
+      // 不排除就会把自己的执行权威 settle 掉，紧随其后的 start 读权威即硬失败（I1）。
+      // 制度上不能从 TraceContext 反推 commandId（不含该字段），只能在此显式传入。
+      excludeSessionInputIds: [...excludeSessionInputIds],
+      events: [],
+      targetMessageId: anchorMessageId as MessageId,
+      traceContext: record.traceContext,
+    });
+  } catch (error) {
+    // I4（cr-func P1-2）：`setRevert` 在 rewind 原语内部，成功后还有级联作废、派生状态
+    // 重建与 RewindTriggered 三步可能抛错。原语把那段失败包成
+    // `ConversationRewindCommittedError`（committed: true），这里据此把**事实**交给调用方：
+    // 截断已落盘 ≠ 什么都没提交。局部布尔只在整段调用成功后才会翻转，用它判会把这个
+    // 窗口误报成校验期失败（无 draftText、无「历史已回退」文案）。
+    if (isConversationRewindCommittedError(error)) onCommitted();
+    throw error;
+  }
   if (result.strategy !== RewindStrategy.ActiveChain) {
     throw new Error(`conversation rewind unavailable for ${anchorMessageId}: ${result.strategy}`);
   }
+  // 成功返回即截断已提交；放在 afterLegacyStateMutation 之前——那次广播失败同样
+  // 不能让「历史已回退」退化成「什么都没发生」。
+  onCommitted();
   await host.afterLegacyStateMutation?.(record, "session_rewound");
+}
+
+/**
+ * abort 的唯一实现：结算本次命令自持的账本行（`queue_<commandId>`）。
+ * 结算失败不能覆盖原始失败（gateway 的 cancelCommandInput 还会兜一次），所以只告警。
+ * edit 与 retry 共用——两条车道都必须在失败时把 limbo 行收口。
+ */
+async function settleAbortedCommandInput(
+  host: V4CommandCoreHost,
+  record: V4SessionRecordView,
+  envelope: CommandEnvelope,
+  reasonCode: string,
+  logEvent: string,
+): Promise<void> {
+  try {
+    await host.cancelInputCommand?.(
+      record.app.sessionId,
+      commandAdmissionOf(envelope).queueItemId,
+      reasonCode,
+    );
+  } catch (cancelError) {
+    host.logger?.warn?.(`v4 ${logEvent} failed to settle aborted session_input`, {
+      commandId: envelope.commandId,
+      error: failureMessageOf(cancelError),
+      sessionId: record.app.sessionId,
+    });
+  }
 }
 
 /**
@@ -224,6 +270,10 @@ async function editUserQuery(
   // rewind 一旦提交就不可逆：文件回退不可补偿、会话截断不回写，失败只能「可见 + 可重发」。
   let conversationRewindCommitted = false;
   let workspaceFilesRewound = false;
+  // I4：提交事实只由 rewind 原语/成功返回给出，不由「try 走到哪一行」推断。
+  const markConversationRewindCommitted = (): void => {
+    conversationRewindCommitted = true;
+  };
   // I5：start 的投递事实必须在 try 外声明——成功路径要把它带回 ACK，失败路径不读它。
   let startOutcome: CanonicalStartOutcome | null = null;
   try {
@@ -269,6 +319,7 @@ async function editUserQuery(
             record,
             editTarget.transcriptMessageId,
             rewindExclusionIds(envelope),
+            markConversationRewindCommitted,
           );
           conversationRewindCommitted = true;
         },
@@ -309,28 +360,14 @@ async function editUserQuery(
         record,
         editTarget.transcriptMessageId,
         rewindExclusionIds(envelope),
+        markConversationRewindCommitted,
       );
       conversationRewindCommitted = true;
     }
     startOutcome = await startCanonicalIntent(host, record, envelope, canonical, attachments);
   } catch (error) {
-    // abort 的唯一实现：结算本次命令自持的账本行。结算失败不能覆盖原始失败
-    // （gateway 的 cancelCommandInput 还会兜一次），所以只告警。
-    const settleAbortedInput = async (reasonCode: string): Promise<void> => {
-      try {
-        await host.cancelInputCommand?.(
-          record.app.sessionId,
-          commandAdmissionOf(envelope).queueItemId,
-          reasonCode,
-        );
-      } catch (cancelError) {
-        host.logger?.warn?.("v4 editUserQuery failed to settle aborted session_input", {
-          commandId: envelope.commandId,
-          error: failureMessageOf(cancelError),
-          sessionId: record.app.sessionId,
-        });
-      }
-    };
+    const settleAbortedInput = (reasonCode: string): Promise<void> =>
+      settleAbortedCommandInput(host, record, envelope, reasonCode, "editUserQuery");
     if (error instanceof V4EditCommittedFailureError) {
       await settleAbortedInput(error.reasonCode);
       throw error;
@@ -394,6 +431,12 @@ async function editUserQuery(
  * retryTurn：assistant target → messageId → rewind 截断 + 重发
  * canonical user intent。intent 在 projection resolver 阶段、rewind **之前**完成解析，
  * 截断后不再回读可见文本或 transcript parent 猜测原输入。
+ *
+ * I4/I5（cr-func P1-5）：retry 与 edit 是同一条 `rewind → start` 事务，出口必须同形——
+ * 截断已提交后失败要带 `draftText`（原消息回 composer 可直接重发）、投递态要上进 ACK。
+ * 过去这里三步都缺：rewind 之后 start 失败被原样 rethrow（历史已截断、用户却只看到
+ * 一个普通错误），`queued` 与 `startNow` 在 ACK 上完全一样（静默成功），契约里也没有
+ * `retryTurn` 结果分支。三条一起补，否则 retry 只是换了车道的旧 bug。
  */
 async function retryTurn(
   host: V4CommandCoreHost,
@@ -418,10 +461,56 @@ async function retryTurn(
   if (!canonical) {
     throw new Error(`retryTurn canonical input unavailable: ${envelope.commandId}`);
   }
+  // 附件映射在 rewind 前完成：引用失效要在截断历史之前暴露。
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, canonical.attachments);
-  await submitConversationRewind(host, record, resolution.messageId, rewindExclusionIds(envelope));
-  await startCanonicalIntent(host, record, envelope, canonical, attachments);
-  return undefined;
+  let conversationRewindCommitted = false;
+  const markConversationRewindCommitted = (): void => {
+    conversationRewindCommitted = true;
+  };
+  let startOutcome: CanonicalStartOutcome | null = null;
+  try {
+    await submitConversationRewind(
+      host,
+      record,
+      resolution.messageId,
+      rewindExclusionIds(envelope),
+      markConversationRewindCommitted,
+    );
+    startOutcome = await startCanonicalIntent(host, record, envelope, canonical, attachments);
+  } catch (error) {
+    const settleAbortedInput = (reasonCode: string): Promise<void> =>
+      settleAbortedCommandInput(host, record, envelope, reasonCode, "retryTurn");
+    if (error instanceof V4EditCommittedFailureError) {
+      await settleAbortedInput(error.reasonCode);
+      throw error;
+    }
+    // 什么都没提交（解析/映射/rewind 前置失败）：目标行仍在，retry 仍可点，原样上行。
+    if (!conversationRewindCommitted) throw error;
+    // 截断已落地：不回写 revert（文件回退不可逆），只结算账本行 + 回可读 fault + 草稿。
+    const reasonCode = failureReasonCodeOf(error);
+    await settleAbortedInput(reasonCode);
+    throw new V4EditCommittedFailureError({
+      draftText: canonical.text,
+      message:
+        "历史已回退到目标轮；原消息已放回输入框，可直接重新发送。" +
+        `原因：${failureMessageOf(error)}`,
+      reasonCode,
+    });
+  }
+  return {
+    type: "retryTurn",
+    sessionId: record.app.sessionId,
+    // I5：投递三值同 edit（`queue`/`guide` = 这一轮没有立刻起跑，客户端据此改口）。
+    // goal 分支没有 admission 回执（startOutcome = null），缺省即「无投递事实」。
+    ...(startOutcome
+      ? {
+          delivery: startOutcome.delivery,
+          ...(startOutcome.delivery === "startNow"
+            ? {}
+            : { queueItemId: commandAdmissionOf(envelope).queueItemId }),
+        }
+      : {}),
+  };
 }
 
 /**

@@ -400,6 +400,20 @@ export const commandResultSchema = z.discriminatedUnion("type", [
     response: z.string(),
   }),
   z.object({
+    /**
+     * retryTurn 结果（spec edit-resend-stale-text / I4+I5，cr-func P1-5）。
+     *
+     * retry 与 edit 是同一条 `rewind → start` 事务，所以 ACK 必须给出同一组事实：
+     * `delivery` 说这一轮到底起跑了没有（缺省 = 无投递事实，见 `CanonicalStartOutcome`），
+     * `queueItemId` 让 UI 能点到「已排队的那一项」。截断已提交后的失败走
+     * `commandAck.draftText`（与 editUserQuery 同一出口），不在 result 里表达。
+     */
+    type: z.literal("retryTurn"),
+    sessionId: z.string().min(1),
+    delivery: z.enum(["startNow", "queue", "guide"]).optional(),
+    queueItemId: z.string().min(1).optional(),
+  }),
+  z.object({
     type: z.literal("editUserQuery"),
     // fork 仅保留旧 ACK 解码兼容；新 editUserQuery 不再生成 child session。
     disposition: z.enum(["rewind", "fork", "blocked"]),

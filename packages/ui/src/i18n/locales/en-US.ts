@@ -4923,6 +4923,11 @@ const enUS: Record<string, string> = {
   // Edit resend accepted but queued (delivery=queue): the turn has not started yet.
   "chat.edit.queued":
     "Edited message is queued and will be sent automatically after the current reply finishes (not sent yet).",
+  // Retry shares the same rewind→start transaction: rejection and queuing must be visible.
+  "chat.retry.rejected":
+    "Retry was rejected; session state may still be restoring. Retry again or send a new message.",
+  "chat.retry.queued":
+    "Retried message is queued and will be sent automatically after the current reply finishes (not sent yet).",
   "chat.ctx.sessionRequired":
     "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",

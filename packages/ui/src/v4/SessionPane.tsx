@@ -50,7 +50,7 @@ import { useServices } from "@/hooks/useServices.js";
 import { useDynamicWorkflowAvailability } from "@/hooks/useDynamicWorkflowAvailability.js";
 import { resolveWorkflowResumeHandler } from "@/v4/workflowResumeGate.js";
 import { resolveEditFailureComposerDraft } from "@/v4/editFailureComposerRestore.js";
-import { resolveEditDelivery } from "@/v4/editDeliveryOutcome.js";
+import { resolveEditDelivery, resolveRetryDelivery } from "@/v4/editDeliveryOutcome.js";
 import {
   workflowSessionModelOf,
   type WorkflowRunSettingsChange,
@@ -2548,10 +2548,39 @@ export function SessionPane({
 
   const handleRetry = useCallback(
     (target: ConversationRowTarget) => {
+      // 草稿恢复需要 sessionId/workspaceKey（与 handleEdit 同一前置）；缺投影直接不派发。
+      if (!sessionId) return;
       void dispatchRetryTurn(target)
         .then((ack) => {
-          if (ack.status !== "accepted") {
+          if (ack.status !== "accepted" && ack.status !== "duplicate") {
             logger.warn(`[v4-pane] retry 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
+            // cr-func P1-5：retry 与 edit 是同一条 rewind→start 事务，失败出口必须同形。
+            toast(ack.message ?? intl.formatMessage({ id: "chat.retry.rejected" }), {
+              dismissible: true,
+              position: "bottom-center",
+              variant: "warning",
+            });
+            // 截断已提交后失败会带 draftText（原消息）；行已随 rewind 移除，只能回 composer。
+            const retryDraft = resolveEditFailureComposerDraft(ack);
+            if (retryDraft) {
+              setComposerRestoreRequest({
+                requestId: nextComposerRestoreRequestIdRef.current++,
+                sessionId,
+                workspaceKey,
+                inputKind: retryDraft.inputKind,
+                text: retryDraft.text,
+                attachments: [],
+              });
+            }
+            return;
+          }
+          // I5：queue/guide 表示这一轮没有立刻起跑，retry 不再表现为静默成功。
+          if (resolveRetryDelivery(ack) === "queue") {
+            toast(intl.formatMessage({ id: "chat.retry.queued" }), {
+              dismissible: true,
+              position: "bottom-center",
+              variant: "info",
+            });
           }
         })
         .catch((error: unknown) => {
@@ -2560,7 +2589,7 @@ export function SessionPane({
           });
         });
     },
-    [dispatchRetryTurn],
+    [dispatchRetryTurn, intl, sessionId, workspaceKey],
   );
 
   const handleAssistantFeedback = useCallback(

@@ -161,6 +161,61 @@ export interface ActiveConversationBranchOptions {
   rewindTargetMessageId?: MessageId;
 }
 
+// ============================================================
+// Committed-failure contract（I4 事务边界）
+// ============================================================
+
+/** 类型化错误的稳定标识：跨包判定不用 `instanceof`（多份 module 实例会失效）。 */
+export const CONVERSATION_REWIND_COMMITTED = "conversation_rewind_committed" as const;
+
+/**
+ * 截断**已经落盘**之后的失败（`setRevert` 之后，`discardRewoundPendingSteerInputs` /
+ * `rebuildConversationDerivedState` / `RewindTriggered` 任一抛错）。
+ *
+ * 为什么必须是类型化事实、而不是让调用方用一个局部布尔：`setRevert` 在 rewind
+ * 原语内部（`rewind-message.ts` 的 `applyConversationRewindPlan`），调用方只能把
+ * 布尔语句放在整次调用**之后**——中途抛错时布尔仍是 false，于是「历史已截断」被
+ * 当成「什么都没发生」原样 rethrow（没有 draftText、没有「历史已回退」文案）。
+ * 抛错路径本身就是提交事实的唯一证据，所以由原语在 catch 里把它变成这个错误。
+ *
+ * `committed` 是给调用方读的事实字段；`rewindId` / `targetMessageId` 供对账与日志，
+ * `cause` 保留原始失败（诊断用，不得据此回写 revert——文件回退已不可逆）。
+ */
+export class ConversationRewindCommittedError extends Error {
+  readonly code = CONVERSATION_REWIND_COMMITTED;
+  readonly committed = true;
+  readonly rewindId: string;
+  readonly targetMessageId?: MessageId;
+
+  constructor(options: {
+    cause: unknown;
+    message?: string;
+    rewindId: string;
+    targetMessageId?: MessageId;
+  }) {
+    super(
+      options.message ??
+        `conversation rewind committed but a post-commit step failed: ${
+          options.cause instanceof Error ? options.cause.message : String(options.cause)
+        }`,
+    );
+    this.name = "ConversationRewindCommittedError";
+    this.rewindId = options.rewindId;
+    if (options.targetMessageId !== undefined) {
+      this.targetMessageId = options.targetMessageId;
+    }
+    this.cause = options.cause;
+  }
+}
+
+export function isConversationRewindCommittedError(
+  error: unknown,
+): error is ConversationRewindCommittedError {
+  return (
+    error instanceof Error && (error as { code?: unknown }).code === CONVERSATION_REWIND_COMMITTED
+  );
+}
+
 /** runtime resume、cold projection 与 stable fork 共用的 conversation active-branch 裁剪。 */
 export function selectActiveConversationBranch<T extends { info: { id: MessageId } }>(
   messages: readonly T[],

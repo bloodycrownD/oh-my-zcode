@@ -19,14 +19,34 @@ export type EditCommandOutcome = CommandAck | boolean | void | null | undefined;
  * 两个方向都不许推断：缺字段推断成 `startNow` 正是 I5 要消灭的「假成功」；
  * 推断成 `queue` 则会让新客户端对每个旧 CLI 的编辑都弹一条排队提示。
  */
+/** edit/retry 共用的投递三值判定：只认显式值，缺省一律 null（未知）。 */
+function explicitDelivery(delivery: unknown): EditDelivery | null {
+  return delivery === "startNow" || delivery === "queue" || delivery === "guide" ? delivery : null;
+}
+
 export function resolveEditDelivery(outcome: EditCommandOutcome): EditDelivery | null {
   if (typeof outcome !== "object" || outcome === null) return null;
   const ack = outcome;
   if (ack.status !== "accepted" && ack.status !== "duplicate") return null;
   const result = ack.result;
   if (!result || result.type !== "editUserQuery") return null;
-  const delivery = result.delivery;
-  return delivery === "startNow" || delivery === "queue" || delivery === "guide" ? delivery : null;
+  return explicitDelivery(result.delivery);
+}
+
+/**
+ * 从 `retryTurn` 的 ACK 读投递态（cr-func P1-5）。
+ *
+ * retry 与 edit 是同一条 `rewind → start` 事务，`queue` 同样是「没起跑」——
+ * 过去 retryTurn 不返回任何结果，客户端只能把 queued 当成功。判定规则与
+ * `resolveEditDelivery` 逐字相同，只是结果分支不同。
+ */
+export function resolveRetryDelivery(outcome: EditCommandOutcome): EditDelivery | null {
+  if (typeof outcome !== "object" || outcome === null) return null;
+  const ack = outcome;
+  if (ack.status !== "accepted" && ack.status !== "duplicate") return null;
+  const result = ack.result;
+  if (!result || result.type !== "retryTurn") return null;
+  return explicitDelivery(result.delivery);
 }
 
 /**

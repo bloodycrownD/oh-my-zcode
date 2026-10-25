@@ -1,5 +1,6 @@
 /* eslint-disable max-lines -- rewind message primitive 与 cascade 封装共享 conversation/workspace 语义，避免拆分时误改原 /rewind 行为。 */
 import {
+  ConversationRewindCommittedError,
   RewindScope,
   RewindStrategy,
   SessionEventType,
@@ -583,42 +584,67 @@ async function applyConversationRewindPlan(
   this.branchGeneration = branchGeneration;
   this.runtimeTaskRegistry.setActiveBranchGeneration?.(branchGeneration);
 
-  // I2（spec 变更点 7/19/20）：截断一旦落账，被截断区间上的未起跑输入就必须同批作废。
-  // 位置写死在这里——setRevert 之后（低一级：截断已是事实）、RewindTriggered 之前
-  // （让 UI 先看到 queue 项消失再看到历史截断，不留「旧项在空历史里排队」的中间态）。
-  // 判别依据是事件投影的 pendingSteerInputs（不是 activeTurn.pendingInputs：edit 路径
-  // 抢占后 activeTurn 已不存在，普通排队项也从不入内存）。
-  await this.discardRewoundPendingSteerInputs({
-    ...(options.excludeSessionInputIds?.length
-      ? { excludeSessionInputIds: options.excludeSessionInputIds }
-      : {}),
-    removedTurnIds,
-    traceContext: options.traceContext,
-  });
+  // I4 事务边界（spec 变更点 9/10；cr-func P1-2）：`setRevert` 是本原语的提交点，
+  // 之后的级联作废 / 派生状态重建 / RewindTriggered 都可能抛错。一旦越过提交点，
+  // 「历史已截断」就是既定事实——必须抛类型化错误（`committed: true`），不能让它
+  // 以普通异常上行成「什么都没提交」：调用方会因此不写 draftText、不报「历史已回退」。
+  try {
+    // I2（spec 变更点 7/19/20）：截断一旦落账，被截断区间上的未起跑输入就必须同批作废。
+    // 位置写死在这里——setRevert 之后（低一级：截断已是事实）、RewindTriggered 之前
+    // （让 UI 先看到 queue 项消失再看到历史截断，不留「旧项在空历史里排队」的中间态）。
+    // 判别依据是事件投影的 pendingSteerInputs（不是 activeTurn.pendingInputs：edit 路径
+    // 抢占后 activeTurn 已不存在，普通排队项也从不入内存）。
+    await this.discardRewoundPendingSteerInputs({
+      ...(options.excludeSessionInputIds?.length
+        ? { excludeSessionInputIds: options.excludeSessionInputIds }
+        : {}),
+      removedTurnIds,
+      traceContext: options.traceContext,
+    });
 
-  await rebuildConversationDerivedState.call(this, {
-    branchCutAfterMessageId,
-    keptMessageIds: keptMessages.map((message) => message.info.id as MessageId),
-    persistedMessages,
-    targetMessageId: options.targetMessageId,
-    traceContext: options.traceContext,
-  });
-
-  const event = this.createEvent(
-    SessionEventType.RewindTriggered,
-    {
-      rewindId,
-      scope: RewindScope.Conversation,
-      strategy: evaluation.strategy,
-      targetMessageId: options.targetMessageId,
+    await rebuildConversationDerivedState.call(this, {
       branchCutAfterMessageId,
-      branchGeneration,
-      reason: evaluation.reason,
-    },
-    options.traceContext,
-  );
-  await this.appendEvent(event, options.traceContext);
-  options.events.push(event);
+      keptMessageIds: keptMessages.map((message) => message.info.id as MessageId),
+      persistedMessages,
+      targetMessageId: options.targetMessageId,
+      traceContext: options.traceContext,
+    });
+
+    const event = this.createEvent(
+      SessionEventType.RewindTriggered,
+      {
+        rewindId,
+        scope: RewindScope.Conversation,
+        strategy: evaluation.strategy,
+        targetMessageId: options.targetMessageId,
+        branchCutAfterMessageId,
+        branchGeneration,
+        reason: evaluation.reason,
+      },
+      options.traceContext,
+    );
+    await this.appendEvent(event, options.traceContext);
+    options.events.push(event);
+  } catch (error) {
+    this.logger?.error(
+      "Conversation rewind failed after commit",
+      error instanceof Error ? error : new Error(String(error)),
+      {
+        ...traceContextToLogContext(options.traceContext),
+        branchGeneration,
+        event: "rewind.conversation.post_commit_failed",
+        module: "core.runtime",
+        rewindId,
+        status: "failed",
+        targetMessageId: options.targetMessageId,
+      },
+    );
+    throw new ConversationRewindCommittedError({
+      cause: error,
+      rewindId,
+      targetMessageId: options.targetMessageId,
+    });
+  }
 
   this.logger?.info("Conversation rewind applied", {
     ...traceContextToLogContext(options.traceContext),
