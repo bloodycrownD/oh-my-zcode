@@ -40,10 +40,15 @@ import {
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
 import {
   createSessionRowManifestReader,
+  readColdRowPageMaterialization,
   readColdTailWindowMaterialization,
 } from "../zcode-protocol-v4/session-row-manifest.js";
 import { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } from "../zcode-protocol-v4/turn-manifest-entry.js";
-import { hydrationTurnModelKeyOfMessage } from "../zcode-protocol-v4/transcript-hydration.js";
+import {
+  goalVerificationEntriesFromSessionEntries,
+  hydrationModelKeyOfSelection,
+  hydrationTurnModelSelectionOfMessage,
+} from "../zcode-protocol-v4/transcript-hydration.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
   ConversationRowTargetResolution,
@@ -190,23 +195,27 @@ async function readConversationFileChanges(
 }
 
 /**
- * 窗口物化的模型基线（`initialModelKey`）：读**窗口前一轮的首条消息**取选型 key。
+ * 窗口 / 页物化的模型基线：读**窗口（页）前一轮的首条消息**取选型。
  *
  * 只读一条（`messageWithParts`），不碰窗口正文。读不到 / 没有选型快照 → null：这时窗口
  * 首轮会多发一次 hydration-trace 的 ModelSelected，但它不声明种子权威、也不标记
  * `configModelTouchedByEvent`，最终配置值与全量物化相同（只是多一条冗余事件）。
+ *
+ * 返回值同时喂两处：合成器的 `initialModelKey`（去重）与投影的 `seedTurnModelBaseline`
+ * （`modelChange` marker 的上一轮基准）。后者漏了会让「模型恰好在窗口首轮切换」时少一行。
  */
-async function readHydrationTurnModelKey(
+async function readHydrationTurnModelSelection(
   store: NonNullable<ZCodeProtocolAgentServerContext["deps"]["sessionStore"]>,
   sessionId: string,
   messageId: MessageId,
-): Promise<string | null> {
+): Promise<{ modelSelection: ModelSelection } | null> {
   try {
     const message = await store.messageWithParts({
       sessionID: sessionId as SessionId,
       messageID: messageId,
     });
-    return message ? hydrationTurnModelKeyOfMessage(message) : null;
+    const modelSelection = message ? hydrationTurnModelSelectionOfMessage(message) : null;
+    return modelSelection ? { modelSelection } : null;
   } catch {
     // 基线只是「少发一条冗余事件」的优化，读失败不得影响冷开。
     return null;
@@ -1518,6 +1527,103 @@ export function createConversationV4Gateway(
     readRowManifest: (sessionId, input) => rowManifestReader.read(sessionId as SessionId, input),
     invalidateRowManifestIndex: (sessionId) =>
       rowManifestReader.invalidateMessageIndex(sessionId as SessionId),
+    // ── 按需物化一页（IS6，Step 7）─────────────
+    // 计划（缺哪几个整轮）由 gateway 用 manifest 的 facts 选出；本层只做「读页内正文 →
+    // 用与冷开同一套合成器产事件」。`rowIdOrigin` 不在这里播种——宿主不持有投影。
+    //
+    // 与冷窗口的一处**刻意不对称**：这里不重建 `fileChanges` 摘要。它的数据源是内存
+    // eventStore 里的 CheckpointCreated（`buildColdFileChangeSummaries`），而真正冷的会话
+    // 事件表本来就是空的（冷开那一次也拿不到）；同进程暖物化时窗口路径会带上它，于是
+    // 只在「同进程 + workspace checkpoint」这一组合下页内会少一个文件摘要卡片。
+    // 记账为已知代价：它不影响行数、rowId 与任何全序量，翻页不会因此错位。
+    materializeRowPage: async (sessionId, plan) => {
+      const store = context.deps.sessionStore;
+      if (!store) return null;
+      const page = await readColdRowPageMaterialization({
+        sessionID: sessionId as SessionId,
+        store,
+        reader: rowManifestReader,
+        plan,
+      });
+      if (page.kind !== "page") {
+        log?.debug("v4 row page read unavailable", {
+          event: "zcode_protocol.v4.row_page_unavailable",
+          module: "bootstrap.zcode_protocol",
+          reason: page.reason,
+          ...(page.detail === undefined ? {} : { detail: page.detail }),
+          sessionId,
+          ordinal: plan.ordinal,
+          beforeRowId: plan.rowIdBase + plan.rowCount,
+        });
+        return null;
+      }
+      // session_entry 里的 goal verification 会落成行，且合成器对「anchor 找不到」的
+      // entry 会落到时间线末尾（等于给这一页凭空加行）。只发锚在**页内**轮次的事实。
+      const pageMessageIds = new Set(plan.messageIds.map((messageId) => String(messageId)));
+      const entries = store.sessionEntries
+        ? await store.sessionEntries({ sessionID: sessionId as SessionId }).catch((error) => {
+            log?.warn("v4 row page session entries read failed", {
+              error: error instanceof Error ? error.message : String(error),
+              event: "zcode_protocol.v4.row_page_session_entries_failed",
+              module: "bootstrap.zcode_protocol",
+              sessionId,
+            });
+            return [];
+          })
+        : [];
+      const goalVerificationEntries = goalVerificationEntriesFromSessionEntries(entries).filter(
+        (entry) => {
+          const anchor = entry.payload.anchorAssistantMessageId;
+          return !anchor || pageMessageIds.has(String(anchor));
+        },
+      );
+      // 页首轮的模型基线 = 页前一轮首条消息的选型（与冷窗口同一取法）。
+      const baseline = plan.precedingTurnFirstMessageId
+        ? await readHydrationTurnModelSelection(store, sessionId, plan.precedingTurnFirstMessageId)
+        : null;
+      const initialModelKey = baseline
+        ? hydrationModelKeyOfSelection(baseline.modelSelection)
+        : null;
+      const merged = mergeColdConversationEvents({
+        // 页只吃持久正文：临时的 queue/permission/background 状态不属于历史行，
+        // 且它们物理上都在尾部（页在窗口以上），带进来只会给页添不该有的行。
+        memoryEvents: [],
+        messages: page.messages,
+        sessionId,
+        goalVerificationEntries,
+        synthesis: {
+          initialTurnNumber: plan.ordinal,
+          ...(initialModelKey === null ? {} : { initialModelKey }),
+          ...(page.baseTimestampMs === undefined ? {} : { baseTimestampMs: page.baseTimestampMs }),
+        },
+      });
+      log?.debug("v4 row page materialized", {
+        event: "zcode_protocol.v4.row_page_materialized",
+        module: "bootstrap.zcode_protocol",
+        initialModelKey: initialModelKey !== null,
+        messageCount: page.messages.length,
+        ordinal: plan.ordinal,
+        rowCount: plan.rowCount,
+        rowIdBase: plan.rowIdBase,
+        sessionId,
+        turnCount: plan.turnCount,
+      });
+      return {
+        events: merged.events,
+        messageCount: page.messages.length,
+        initialModelKeyResolved: initialModelKey !== null,
+        // 投影的上一轮模型基线：缺了会让「模型恰好在页首轮切换」时少一行 marker。
+        ...(baseline === null
+          ? {}
+          : {
+              modelBaseline: {
+                provider: baseline.modelSelection.providerId,
+                model: baseline.modelSelection.modelId,
+                thought: baseline.modelSelection.options?.reasoningLevel ?? "",
+              },
+            }),
+      };
+    },
     // Gateway 的单一 READY promise 负责并发与水位；binder 只恢复 runtime。
     resumePersistedSession: async (
       sessionId,
@@ -1955,14 +2061,17 @@ export function createConversationV4Gateway(
           })
         : source.goalVerificationEntries;
       // 窗口起点之前的模型基线：取窗口前一轮的首条消息（一次单行读，不碰正文窗口）。
-      const initialModelKey =
+      const modelBaseline =
         windowPlan?.precedingTurnFirstMessageId && store
-          ? await readHydrationTurnModelKey(
+          ? await readHydrationTurnModelSelection(
               store,
               sessionId,
               windowPlan.precedingTurnFirstMessageId,
             )
           : null;
+      const initialModelKey = modelBaseline
+        ? hydrationModelKeyOfSelection(modelBaseline.modelSelection)
+        : null;
       // live ModelComplete.fileChanges 只存在于内存事件；cold merge 以持久
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
       // workspace checkpoint + artifact 才是跨进程持久事实，这里按 user messageId
@@ -2064,6 +2173,18 @@ export function createConversationV4Gateway(
         // Step 6：窗口坐标（rowIdBase / ordinal / 整条分支 turn 序 / facts）。
         // gateway 用它播种 `rowIdOrigin`、决定 `fullyMaterialized:false` 与回写 ordinalBase。
         ...(windowPlan ? { coldWindow: windowPlan } : {}),
+        // 窗口的上一轮模型基线（Step 7 补）：与 `initialModelKey` 同一份选型，但消费者是
+        // 投影（`modelChange` marker 的上一轮基准），不是合成器。缺了它，「模型恰好在窗口
+        // 首轮切换」时 marker 行会消失、其后 rowId 整体前移。
+        ...(modelBaseline === null
+          ? {}
+          : {
+              synthesisModelBaseline: {
+                provider: modelBaseline.modelSelection.providerId,
+                model: modelBaseline.modelSelection.modelId,
+                thought: modelBaseline.modelSelection.options?.reasoningLevel ?? "",
+              },
+            }),
       };
     },
     onError: (scope, error, errorContext) =>

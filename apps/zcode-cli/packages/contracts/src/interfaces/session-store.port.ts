@@ -1246,6 +1246,9 @@ export interface SessionStorePort {
    * **全序** active 分支 id 序；实现只按这份序取窗口内的 message + part 正文，不做裁断、
    * 不按时间取尾 N 条（那会在 revert 会话上复活旧分支或清空历史）。
    * `limitBefore` 是窗口首条 id（含），由 manifest 的窗口首轮给出；缺席或找不到 = 读整条分支。
+   * `limitAfter` 是窗口**之后**一条 id（不含），由 manifest 的「页末轮之后第一个有消息的轮」
+   * 给出；缺席或找不到 = 读到分支末尾。两个游标一起把一次翻页的正文读限制在页内的整轮里
+   * （Step 7 按需物化；不传 `limitAfter` 时行为与 Step 5 逐字相同）。
    *
    * 缺席（旧宿主 / 内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
    */
@@ -1253,6 +1256,7 @@ export interface SessionStorePort {
     sessionID: SessionId;
     activeMessageIds: readonly MessageId[];
     limitBefore?: MessageId | null;
+    limitAfter?: MessageId | null;
   }): Promise<MessageWithParts[]>;
   saveSessionEntry?(input: SessionEntryInfo): Promise<void>;
   sessionEntries?(input: {

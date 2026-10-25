@@ -117,7 +117,13 @@ function seedBranchFixture(db) {
     insertMessage(db, { id, sequence, timeCreated: 100 + index, role }),
   );
   for (const id of ["m1", "m2", "m3", "m4", "m5", "m6"]) {
-    insertPart(db, { id: `${id}-p1`, messageID: id, sequence: 0, timeCreated: 200, text: `${id}a` });
+    insertPart(db, {
+      id: `${id}-p1`,
+      messageID: id,
+      sequence: 0,
+      timeCreated: 200,
+      text: `${id}a`,
+    });
   }
   return db;
 }
@@ -173,7 +179,10 @@ test("A3: 顺序由 activeMessageIds 决定，不按 DB 序重排（rewind 的 k
 
 test("A4: 空 active 序 → 空结果（不发 SQL，也不当成全量）", async () => {
   const db = seedBranchFixture(migratedDb());
-  assert.deepEqual(await readActiveBranchTail(db, { sessionID: SESSION, activeMessageIds: [] }), []);
+  assert.deepEqual(
+    await readActiveBranchTail(db, { sessionID: SESSION, activeMessageIds: [] }),
+    [],
+  );
   db.close();
 });
 
@@ -311,6 +320,42 @@ test("C4: 非 active（被裁掉）的消息不返回——分支归属只由 ac
     ["m1", "m2"],
     "旧分支 m3..m6 仍在 append-only store 里，但不得出现在尾窗读里",
   );
+  db.close();
+});
+
+test("C5: limitAfter 是**不含**的上界（Step 7 按页物化：翻第 N 页不读它以下的后缀）", async () => {
+  const db = seedBranchFixture(migratedDb());
+  const activeIds = ["m1", "m2", "m3", "m4", "m5", "m6"];
+  const page = await readActiveBranchTail(db, {
+    sessionID: SESSION,
+    activeMessageIds: activeIds,
+    limitBefore: "m2",
+    limitAfter: "m4",
+  });
+  assert.deepEqual(
+    page.map((message) => message.info.id),
+    ["m2", "m3"],
+    "两端都是整轮边界；上界那条**不**读",
+  );
+  // 上界找不到 = 读到分支末尾（多读，绝不少读），与 limitBefore 同一条纪律。
+  const fallback = await readActiveBranchTail(db, {
+    sessionID: SESSION,
+    activeMessageIds: activeIds,
+    limitBefore: "m2",
+    limitAfter: "m-gone",
+  });
+  assert.deepEqual(
+    fallback.map((message) => message.info.id),
+    ["m2", "m3", "m4", "m5", "m6"],
+  );
+  // 两个游标重合 = 空页（调用方的页计划自相矛盾，不得静默读掉整条分支）。
+  const empty = await readActiveBranchTail(db, {
+    sessionID: SESSION,
+    activeMessageIds: activeIds,
+    limitBefore: "m3",
+    limitAfter: "m3",
+  });
+  assert.deepEqual(empty, []);
   db.close();
 });
 

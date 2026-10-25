@@ -19,6 +19,7 @@ import {
 import type {
   CommandEnvelope,
   ConversationDelta,
+  ConversationRow,
   ConversationRowTarget,
   ConversationSnapshot,
   ConversationTopicFrame,
@@ -61,6 +62,7 @@ import {
   type SessionConfigSeed,
   type SessionSubagentsSeed,
   type SessionUsageSeed,
+  type TurnModelBaselineSeed,
 } from "./product-projection.js";
 import type { TopicFrameReservation } from "./topic-frame-reservation.js";
 import {
@@ -368,6 +370,15 @@ export class ConversationTopicPublisher {
     this.projection.seedRowIdOrigin(origin);
   }
 
+  /**
+   * 窗口 / 翻页物化的上一轮模型基线（IS1）：值取窗口（页）前一轮首条消息的选型。
+   * 不播种会让「模型切换恰好在窗口/页首轮」时那一行 `modelChange` marker 消失，
+   * 其后所有行的 rowId 整体前移（与全量物化分叉）。
+   */
+  seedTurnModelBaseline(baseline: TurnModelBaselineSeed): void {
+    this.projection.seedTurnModelBaseline(baseline);
+  }
+
   /** turn 终态行清单（活投影口径）；该事件已无可物化行时返回 null。 */
   getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
     return this.projection.getTurnManifestEntry(event);
@@ -558,26 +569,44 @@ export class ConversationTopicPublisher {
     params: { beforeRowId?: number; limit: number },
     deliveryProfile: DeliveryProfileName = "replayable",
   ): V4ConversationRowsRangeResult {
+    return this.encodeRowsRangePage(
+      this.projection.getSnapshot().rows.window,
+      params,
+      deliveryProfile,
+    );
+  }
+
+  /**
+   * 把**任意一批行**编码成一页 rows/range（IS6 的编码半边）。
+   *
+   * gateway 的按需物化（Step 7）会拿临时投影物化出来的页调用它，于是「页」与「投影窗口」
+   * 共用同一份**可见性过滤 + 游标裁剪 + `hasMore` 口径**——两份实现迟早会让「窗口内翻页」
+   * 与「窗口外翻页」给出不同的 hasMore，而客户端是拿它当循环终止条件的。
+   *
+   * `hasMore` 按**权威首行**判定（manifest 在场时用它，否则用投影的首行），不是
+   * 「eligible.length > rows.length」：按需物化后 eligible 只含本页，后者会恒 false，
+   * 而客户端硬依赖它（`conversationProjectionStore` 的 `if (!result.hasMore) break;`）。
+   * 也不能写死 `> 1`：live rewind 之后 firstRowId 仍是 1，但 manifest 的口径是权威值。
+   */
+  encodeRowsRangePage(
+    rows: readonly ConversationRow[],
+    params: { beforeRowId?: number; limit: number },
+    deliveryProfile: DeliveryProfileName = "replayable",
+  ): V4ConversationRowsRangeResult {
     const snapshot = this.projection.getSnapshot();
     const limit = Math.max(1, Math.min(params.limit, PROTOCOL_V4_LIMITS.rowsRangeMaxLimit));
-    const visibleRows = filterConversationRowsForProfile(
-      snapshot.rows.window,
-      DELIVERY_PROFILES[deliveryProfile],
-    );
+    const visibleRows = filterConversationRowsForProfile(rows, DELIVERY_PROFILES[deliveryProfile]);
     const eligible =
       params.beforeRowId === undefined
         ? visibleRows
         : visibleRows.filter((row) => row.rowId < (params.beforeRowId as number));
-    const rows = eligible.slice(-limit);
-    // `hasMore` 按**权威首行**判定（manifest 在场时用它，否则用投影的首行），不是
-    // 「eligible.length > rows.length」：按需物化后 eligible 只含本页，后者会恒 false，
-    // 而客户端硬依赖它（`conversationProjectionStore` 的 `if (!result.hasMore) break;`）。
+    const pageRows = eligible.slice(-limit);
     const firstRowId = this.rowManifestFacts
       ? this.rowManifestFacts.firstRowId
       : (snapshot.rows.firstRowId ?? visibleRows[0]?.rowId ?? null);
-    const pageFirstRowId = rows[0]?.rowId;
+    const pageFirstRowId = pageRows[0]?.rowId;
     return {
-      rows,
+      rows: pageRows,
       atSeq: snapshot.seq,
       atRevision: snapshot.revision,
       atLogEpoch: this.logEpoch,
@@ -875,6 +904,14 @@ export class ConversationTopicPublisher {
        * 两个（批量化失败会重建一个 strict 候选），所以两处都要播。
        */
       rowIdOrigin?: number;
+      /**
+       * 冷窗口的**上一轮模型基线**（IS1，Step 6/7）：窗口前一轮首条消息的选型。
+       *
+       * 与 `rowIdOrigin` 同一个播种时机、同一个理由（候选实例在重放前播种）。它的作用不是
+       * 展示：`modelChange` marker 靠「上一轮模型 vs 本轮 config」判定，窗口首轮恰好是切换
+       * 轮时缺了基线就会**少一行**，其后所有行 rowId 前移。
+       */
+      modelBaseline?: TurnModelBaselineSeed;
     } = {},
   ): void {
     // 重物化会换掉整份投影行，旧的 manifest 基线随之失效（调用方 hydration 结束时会重新
@@ -892,6 +929,9 @@ export class ConversationTopicPublisher {
     if (options.rowIdOrigin !== undefined) {
       candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
     }
+    if (options.modelBaseline !== undefined) {
+      candidate.projection.seedTurnModelBaseline(options.modelBaseline);
+    }
     const usedBatchHydration = candidate.tryBatchHydration(events);
     if (!usedBatchHydration) {
       // 保守上界超限不代表权威 projection 一定超限；重新从空候选走原逐事件原子
@@ -904,6 +944,9 @@ export class ConversationTopicPublisher {
       });
       if (options.rowIdOrigin !== undefined) {
         candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
+      }
+      if (options.modelBaseline !== undefined) {
+        candidate.projection.seedTurnModelBaseline(options.modelBaseline);
       }
       for (const event of events) {
         try {

@@ -433,6 +433,17 @@ type TurnModelBaseline =
   | { kind: "sourceLess" }
   | { kind: "known"; provider: string; model: string; thought: string };
 
+/**
+ * 窗口 / 翻页物化的**上一轮模型基线**（`seedTurnModelBaseline` 的入参）。
+ *
+ * thought 只随基线记录，不参与「模型身份是否变化」的判定（与 `lastTurnModel` 同规）。
+ */
+export interface TurnModelBaselineSeed {
+  provider: string;
+  model: string;
+  thought: string;
+}
+
 export class ProductProjection {
   private snapshot: ConversationSnapshot;
   // reducer 内部的 rowId 查找必须与 rows.window 同步；冷恢复过去每次 find 都扫描全表，
@@ -865,6 +876,33 @@ export class ProductProjection {
     }
     this.rowIdOrigin = origin;
     this.nextRowId = origin;
+  }
+
+  /**
+   * 窗口 / 翻页物化的**上一轮模型基线**播种（IS1）。
+   *
+   * `modelChange` marker 是「本轮 TurnStarted 时，config 的 provider/model 与**上一轮**不同」
+   * 才落的一行（见 onTurnStarted 的 marker 分支）。窗口化与按页物化只喂尾部若干轮，投影里
+   * 根本没有上一轮，`lastTurnModel` 停在 `silentInitial` —— 于是「模型恰好在窗口/页首轮
+   * 切换」时那一行 marker 会**凭空消失**：`row_count` 与全量物化差 1，其后每一行的 rowId
+   * 都整体前移。全量物化不会有这个问题，所以显式播种是唯一不产生分叉的修法。
+   *
+   * 基线值来自窗口/页**前一轮首条消息**的选型快照（`hydrationTurnModelSelectionOfMessage`），
+   * 与合成器建立 `initialModelKey` 的取法同源。
+   *
+   * 只允许在还没有任何轮时调用：播种之后再改基线会让「已经发出去的 marker 行」与后续
+   * 判定分叉，所以直接抛错而不是静默忽略。
+   */
+  seedTurnModelBaseline(baseline: TurnModelBaselineSeed): void {
+    if (this.activeTurnIds.length > 0) {
+      throw new Error("turn model baseline must be seeded before any turn is materialized");
+    }
+    this.lastTurnModel = {
+      kind: "known",
+      provider: baseline.provider,
+      model: baseline.model,
+      thought: baseline.thought,
+    };
   }
 
   /**

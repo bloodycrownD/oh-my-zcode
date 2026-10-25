@@ -145,14 +145,19 @@ import type {
   SessionConfigSeed,
   SessionSubagentsSeed,
   SessionUsageSeed,
+  TurnModelBaselineSeed,
 } from "./product-projection.js";
+import { ProductProjection } from "./product-projection.js";
 import {
   TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
   type TurnManifestEntry,
 } from "./turn-manifest-entry.js";
 import {
   decideRowManifestAction,
+  selectColdRowPage,
+  type ColdRowPagePlan,
   type ColdTailWindowPlan,
+  type SessionRowManifestFacts,
   type SessionRowManifestReadOutcome,
   type SessionRowManifestReadRequest,
 } from "./session-row-manifest.js";
@@ -210,6 +215,16 @@ interface PersistedEventsLoadResult {
    * 取**整条分支**（`branchTurnIds`）。缺席 = 全量物化（旧行为）。
    */
   coldWindow?: ColdTailWindowPlan;
+  /**
+   * 窗口的**上一轮模型基线**（Step 7 补漏）：窗口前一轮首条消息的选型。
+   *
+   * 它与 `coldWindow` 是一对：`rowIdOrigin` 决定行号起点，它决定「窗首那一轮要不要落
+   * `modelChange` marker」。只喂窗口时投影没有上一轮（`lastTurnModel` 停在 silentInitial），
+   * 而 marker 是靠「上一轮模型 vs 本轮 config」判定的——模型恰好在窗首切换时那一行会消失，
+   * 于是 `row_count` 少 1、其后每一行的 rowId 整体前移（与全量物化分叉）。
+   * 全量物化路径不传（它自己有完整的轮次）。
+   */
+  synthesisModelBaseline?: TurnModelBaselineSeed;
 }
 
 type V4GatewayErrorContext = Record<string, unknown>;
@@ -382,6 +397,22 @@ export interface V4GatewayHost {
    * 这是不会漏的粗粒度失效点。
    */
   invalidateRowManifestIndex?(sessionId: string): void;
+  /**
+   * 按需物化一页（Step 7 / IS6 的**执行缝**）。
+   *
+   * 计划由 gateway 用 manifest 的 facts 选出（`selectColdRowPage`），宿主只做三件事：
+   * 按 `limitBefore`/`limitAfter` 读**页内整轮**正文 → 用与冷开同一套合成器产出事件 →
+   * 交回事件。gateway 再拿临时投影物化这一页（`rowIdOrigin = plan.rowIdBase`）并交
+   * publisher 编码。
+   *
+   * 为什么计划在 gateway、正文在宿主：`publisher.getRowsRange` 是**同步**方法且没有
+   * store（构造只有 sessionId/logEpoch/options），异步 + IO 只能落在网关这一层；而
+   * 「缺哪几个 turn」是 manifest 事实，不该让宿主另写一份选择规则。
+   *
+   * 返回 null = 这一页不物化（端口缺席 / 游标与索引不同步 / 页内无消息），调用方退回
+   * 「投影现算的那一页 + `hasMore:false`」——宁可上拉到底，不可交出与全量物化不一致的行。
+   */
+  materializeRowPage?(sessionId: string, plan: ColdRowPagePlan): Promise<ColdRowPageEvents | null>;
   /** 完整 chunk transaction commit 后一次性写 session artifact。 */
   putSessionAttachment?(
     sessionId: string,
@@ -593,6 +624,14 @@ interface HydrationPhases {
    */
   manifestMs?: number;
   /**
+   * 本次冷开的清单是否被**账目修正**过（就地改 `row_count`，不重读正文）。
+   *
+   * 只在「清单可用」时才有值（true/false）；降级重建与没读清单都缺席——缺席不能当成
+   * false，那会把「这次没走清单」说成「清单本来就没偏差」。它是 Step 14 判读
+   * 「live 与 cold 的行数分布还在不在分叉」的唯一直接证据。
+   */
+  manifestAdjusted?: boolean;
+  /**
    * 本次 hydration 收口时刻（performance.now()）。ACK 组装时用它判断「这几段是不是
    * 刚落在这条 subscribe 的等待窗口内」——热切换/已 hydrate 的会话不会把上一次的耗时
    * 冒充成本次的分段。
@@ -633,6 +672,52 @@ interface ColdWindowOutcomeSummary {
   applied: boolean;
   /** 窗口化路径上的清单二次判定降级（永不重建；沿用物化前的事实）。 */
   fallbackReason?: string;
+  at: number;
+}
+
+/**
+ * 宿主交回的「一页事件」（Step 7 执行缝的另一半）。
+ *
+ * 只有事件：`rowIdOrigin` 由 gateway 从 `plan.rowIdBase` 播种（一份事实只有一个来源），
+ * 宿主不持有投影。
+ */
+interface ColdRowPageEvents {
+  events: SessionEvent[];
+  /** 页内正文消息条数（诊断：与 plan 的轮数/行数一起判「读少了」）。 */
+  messageCount: number;
+  /** 合成器的模型基线是否取到；false = 页首轮会多发一条 ModelSync 事件（见下）。 */
+  initialModelKeyResolved: boolean;
+  /**
+   * 页的**上一轮模型基线**（页前一轮首条消息的选型）。
+   *
+   * 临时投影必须用它播种 `seedTurnModelBaseline`：否则页首轮恰好是模型切换轮时，
+   * `modelChange` marker 行不会生成，页内行数比 manifest 少 1、rowId 整体前移。
+   */
+  modelBaseline?: TurnModelBaselineSeed;
+}
+
+/**
+ * 最近一次按需物化一页的落点（Step 7 的可观测面）。
+ *
+ * 与 `ColdWindowOutcomeSummary` 同一读法：`applied:false` 必须带 `reason`，否则「翻页没
+ * 物化」与「翻页本来就没有更早行」在现象上完全一样。
+ */
+interface RowPageOutcomeSummary {
+  applied: boolean;
+  /** applied:false 的原因（选不出页 / 宿主拒绝 / 一致性守卫拦下）。 */
+  reason?: string;
+  beforeRowId: number;
+  limit: number;
+  /** 实际参与规划的轮数/行数（applied 时有值）。 */
+  turnCount?: number;
+  rowCount?: number;
+  /** 规划的首轮 ordinal 与 base（排查 rowId 平移用）。 */
+  ordinal?: number;
+  rowIdBase?: number;
+  /** 本次物化最终写进这一页的行数（0 = 守卫拦下）。 */
+  pageRows?: number;
+  /** 宿主读正文 + 合成的耗时（毫秒）。`openPhases.materializeMs` 刻意不填它，见注释。 */
+  materializeMs?: number;
   at: number;
 }
 
@@ -757,6 +842,11 @@ export class ConversationV4Gateway {
   private readonly rowManifestOutcomes = new Map<string, RowManifestOutcomeSummary>();
   /** 冷开尾窗的落点（Step 6）：一次冷开一条，`applied` 与降级原因一起进诊断。 */
   private readonly coldWindowOutcomes = new Map<string, ColdWindowOutcomeSummary>();
+  /**
+   * 最近一次按需物化一页的落点（Step 7）。只留最后一条：翻页是逐页串行的，
+   * 明细进 debug 日志，这里只给测试/诊断读「上一页到底物化了没有、因为什么没物化」。
+   */
+  private readonly rowPageOutcomes = new Map<string, RowPageOutcomeSummary>();
   /**
    * 本进程内观测到的 runtime 激活耗时（毫秒）。
    *
@@ -1317,6 +1407,9 @@ export class ConversationV4Gateway {
           reason: "manifest",
           at: Date.now(),
         });
+        // 「清单可用」的两种结局都要可见：修正过 = true，没修正 = false。
+        // 降级重建 / 没读清单时这个键缺席（缺席 ≠ 没偏差）。
+        phases.manifestAdjusted = outcome.manifestAdjusted;
         if (outcome.manifestAdjusted) {
           // 账目修正：冷物化出的行数与 live 写入的 row_count 不同，只改计数不重读正文。
           // 必须打点，否则「清单被悄悄改过」会被读成「manifest 从来没生效」。
@@ -1898,16 +1991,24 @@ export class ConversationV4Gateway {
             Math.round(performance.now() - initialFrameEncodeStartedAt),
           ),
           sessionRuntimeState: isLiveConversation ? "warm" : "cold",
+          // ⚠ 口径（risk 10，Step 7 钉死）：这是**本次物化的投影行数**，不是会话总行数。
+          // 全量物化时它 = totalCount；窗口化冷开时它 = 窗口行数（≤ coldWindowMaxRows）。
+          // 会话总行数只看 `rows.totalCount`（manifest 权威）。把它当总行数读会把
+          // 「窗口化生效」误读成「会话变短了 / 优化无效」。
           snapshotRowCount: publisher.getSnapshot().rows.window.length,
         },
         // ACK 侧分段（IS8）：openTiming 是 .strict()，分段只能放这个新顶层键。
-        // manifestMs / materializeMs 的产生点分别在 phase-row-manifest 与
-        // phase-paged-materialization，本阶段不填——缺席就是「还没这一测点」。
+        // `materializeMs` 仍缺席且**不该有**：按需物化发生在 rowsRange 上（那里没有 ACK
+        // 帧），它的成本经 `getRowPageOutcome(sessionId).materializeMs` 与 debug 行暴露；
+        // 硬塞进 ACK 只会得到一个永远是 undefined 的键（口径禁令见 transport.ts）。
         openPhases: {
           version: 1,
           viewReadyMs: Math.max(0, Math.round(performance.now() - viewReadyStartedAt)),
           ...(freshHydrationPhases?.manifestMs !== undefined
             ? { manifestMs: freshHydrationPhases.manifestMs }
+            : {}),
+          ...(freshHydrationPhases?.manifestAdjusted !== undefined
+            ? { manifestAdjusted: freshHydrationPhases.manifestAdjusted }
             : {}),
           ...(freshHydrationPhases?.mergeMs !== undefined
             ? { mergeMs: freshHydrationPhases.mergeMs }
@@ -2040,6 +2141,16 @@ export class ConversationV4Gateway {
    * v4/conversation/rowsRange：按 beforeRowId 游标向上取一窗
    * 历史行。只读 query，不建订阅；数据源 = 该会话投影全量行——冷会话（重启后直开
    * 历史）复用与 subscribe 相同的冷恢复 + hydration 管线先把投影建起来。
+   *
+   * Step 7（IS6）：窗口化冷开之后投影只含尾部若干轮，窗口以上的行**不存在**。此时这一页
+   * 走 `materializeRowPage`（gateway 按 manifest 定位缺哪几个整轮 → 宿主异步读正文 + 合成
+   * → 临时投影物化 → 交 publisher 编码），结果不驻留投影（只进本次返回页）。
+   *
+   * 三条「不物化」的边界必须分清，否则「没生效」会被读成「翻页坏了」：
+   *   - 本页整段落在已物化窗口内 → 投影现算（窗口内翻页永不触发第二次冷开）；
+   *   - manifest 事实已作废（有 live 事件）→ 退回投影现算，`hasMore` 随之退化为
+   *     「更早方向在投影里还有没有」，见 new_risk（窗口化 + live 之后翻页暂不可用）；
+   *   - 选不出页 / 宿主拒绝 / 一致性守卫拦下 → 退回投影现算并打点 `getRowPageOutcome`。
    */
   async rowsRange(rawParams: unknown): Promise<V4ConversationRowsRangeResult> {
     const params = v4ConversationRowsRangeParamsSchema.parse(rawParams);
@@ -2049,14 +2160,207 @@ export class ConversationV4Gateway {
       : !this.hasLiveConversation(params.sessionId)
         ? await this.ensureColdReadyPublisher(params.sessionId)
         : await this.hydratePublisher(params.sessionId);
+    const profile: "continuous" | "replayable" =
+      // clientMode 决定行可见性过滤档位：桌面 continuous（默认）/ 断线恢复 replayable。
+      params.clientMode === "desktop-continuous" ? "continuous" : "replayable";
+    // 先判「这一页缺不缺」，再决定要不要付物化的钱：窗口内翻页只走投影现算。
+    // manifest 事实只取一次，判定与规划共用（两处各取一次会让「判定时还在、规划时没了」
+    // 变成一条不可达分支）。
+    const facts = publisher.getRowManifestFacts();
+    // manifest 事实缺席 = 没有可用清单（live 会话 / 老会话降级）：不去猜轮边界。
+    // 这一句是**唯一**的清单闸：`materializeRowsPage` 拿到的一定是非空事实，不再重复判。
+    if (facts !== null && this.rowPageNeeded(facts, publisher, params.beforeRowId, params.limit)) {
+      const page = await this.materializeRowsPage({
+        sessionId: params.sessionId,
+        publisher,
+        facts,
+        beforeRowId: params.beforeRowId as number,
+        limit: params.limit,
+        profile,
+      });
+      if (page !== null) return page;
+    }
     return publisher.getRowsRange(
       {
         ...(params.beforeRowId !== undefined ? { beforeRowId: params.beforeRowId } : {}),
         limit: params.limit,
       },
-      // clientMode 决定行可见性过滤档位：桌面 continuous（默认）/ 断线恢复 replayable。
-      params.clientMode === "desktop-continuous" ? "continuous" : "replayable",
+      profile,
     );
+  }
+
+  /**
+   * 这一页是否需要按需物化（IS6 的判定半边）。
+   *
+   * 判据是「请求区间的最低行是否落在**已物化窗口**之下」——不是 `hasMore`：窗口内翻页时
+   * `hasMore` 本来就是 true（更早方向确实还有行），拿它当触发条件会让投影内的每一页都去
+   * 物化一次。反过来，请求区间跨在窗口边界上时整页交给物化（临时投影覆盖页内整轮，因此
+   * 它自己就是完整的），不做两份来源的拼接。
+   */
+  private rowPageNeeded(
+    facts: SessionRowManifestFacts,
+    publisher: ConversationTopicPublisher,
+    beforeRowId: number | undefined,
+    limit: number,
+  ): boolean {
+    if (beforeRowId === undefined) return false;
+    if (!this.host.materializeRowPage) return false;
+    const windowRows = publisher.getSnapshot().rows.window;
+    const projectedFirstRowId = windowRows[0]?.rowId;
+    if (projectedFirstRowId === undefined) return false;
+    // 投影首行就是权威首行 = 全量物化（没有缺页）。窗口化时首行是窗口首轮 base > 首行。
+    if (projectedFirstRowId <= (facts.firstRowId ?? 1)) return false;
+    const clampedLimit = Math.max(1, Math.min(limit, PROTOCOL_V4_LIMITS.rowsRangeMaxLimit));
+    // 请求区间 = [beforeRowId - limit, beforeRowId)。区间下界在窗口之下 → 缺行。
+    return beforeRowId - clampedLimit < projectedFirstRowId;
+  }
+
+  /**
+   * 按需物化一页（Step 7 的执行缝）。
+   *
+   * 三个必须成立的守卫，任一不成立就**放弃这一页**（返回 null，调用方退回投影现算）：
+   *   1. 临时投影的 turn 数 === plan.turnCount（合成器的轮边界与 manifest 对齐；
+   *      不对齐说明页首轮那条消息不构成一轮的起点，行身份会整体错位）；
+   *   2. 临时投影的行数 === plan.rowCount（**每页一次的账目校验**：manifest 的
+   *      `row_count` 必须与冷物化逐值一致，不一致宁可少一页也不交出平移过的 rowId）；
+   *   3. 页内行必须完整落在 `[rowIdBase, rowIdBase + rowCount)`（同一件事的另一面，
+   *      但乱序/空洞会在这里先暴露）。
+   */
+  private async materializeRowsPage(input: {
+    sessionId: string;
+    publisher: ConversationTopicPublisher;
+    /** 判定时取到的 manifest 事实（= 规划的唯一输入，不再回读）。 */
+    facts: SessionRowManifestFacts;
+    beforeRowId: number;
+    limit: number;
+    profile: "continuous" | "replayable";
+  }): Promise<V4ConversationRowsRangeResult | null> {
+    const materialize = this.host.materializeRowPage;
+    if (!materialize) return null;
+    const selection = selectColdRowPage(input.facts, {
+      beforeRowId: input.beforeRowId,
+      limit: input.limit,
+    });
+    if (selection.kind !== "page") {
+      // `noOlderRows` 是「上面本来就没有行」，不是失败：不打成 fallback。
+      if (selection.reason !== "noOlderRows") {
+        this.rowPageOutcomes.set(input.sessionId, {
+          applied: false,
+          reason: selection.reason,
+          beforeRowId: input.beforeRowId,
+          limit: input.limit,
+          at: Date.now(),
+        });
+        this.host.onDebug?.(
+          `v4 row page unavailable session=${input.sessionId} reason=${selection.reason} ` +
+            `beforeRowId=${input.beforeRowId}`,
+        );
+      }
+      return null;
+    }
+    const plan = selection.plan;
+    const startedAt = performance.now();
+    let page: ColdRowPageEvents | null;
+    try {
+      page = await materialize.call(this.host, input.sessionId, plan);
+    } catch (error) {
+      // 翻页是只读且可重发的 query：宿主抛错不能让整条读挂掉，只放弃这一页。
+      this.host.onError?.("v4.rowPage.materialize", error, {
+        phase: "materialize",
+        sessionId: input.sessionId,
+        ordinal: plan.ordinal,
+      });
+      page = null;
+    }
+    const materializeMs = Math.max(0, Math.round(performance.now() - startedAt));
+    if (page === null) {
+      this.rowPageOutcomes.set(input.sessionId, {
+        applied: false,
+        reason: "hostUnavailable",
+        beforeRowId: input.beforeRowId,
+        limit: input.limit,
+        ordinal: plan.ordinal,
+        rowIdBase: plan.rowIdBase,
+        materializeMs,
+        at: Date.now(),
+      });
+      this.host.onDebug?.(
+        `v4 row page host declined session=${input.sessionId} ordinal=${plan.ordinal} ` +
+          `limitBefore=${String(plan.limitBefore)}`,
+      );
+      return null;
+    }
+
+    // 临时投影：rowIdOrigin 与上一轮模型基线都必须在中行之前播种（`seedRowIdOrigin` /
+    // `seedTurnModelBaseline` 在已有行时抛错，这是刻意的失败模式），随后一次性重放这一页。
+    const projection = new ProductProjection(input.sessionId, `row-page/${Date.now()}`);
+    projection.seedRowIdOrigin(plan.rowIdBase);
+    if (page.modelBaseline !== undefined) {
+      projection.seedTurnModelBaseline(page.modelBaseline);
+    }
+    for (const event of page.events) projection.applyEvent(event);
+    const snapshot = projection.getSnapshot();
+    const producedTurnIds = projection.getTurnManifestBranchState().turnIds;
+    const pageRows = snapshot.rows.window;
+    const expectedLastRowId = plan.rowIdBase + plan.rowCount - 1;
+    const rowsInsidePage =
+      pageRows.length === plan.rowCount &&
+      pageRows[0]?.rowId === plan.rowIdBase &&
+      pageRows[pageRows.length - 1]?.rowId === expectedLastRowId;
+    if (producedTurnIds.length !== plan.turnCount || !rowsInsidePage) {
+      // 对齐失败：不交出这一页。打点必须带两侧数字，否则「合成器与 manifest 谁错」
+      // 无从判断（这正是窗口化最难复现的一类分歧）。
+      this.rowPageOutcomes.set(input.sessionId, {
+        applied: false,
+        reason: "alignmentMismatch",
+        beforeRowId: input.beforeRowId,
+        limit: input.limit,
+        ordinal: plan.ordinal,
+        rowIdBase: plan.rowIdBase,
+        turnCount: plan.turnCount,
+        rowCount: plan.rowCount,
+        pageRows: pageRows.length,
+        materializeMs,
+        at: Date.now(),
+      });
+      this.host.onError?.("v4.rowPage.alignment", new Error("row page alignment mismatch"), {
+        phase: "viewport",
+        sessionId: input.sessionId,
+        ordinal: plan.ordinal,
+        expectedTurns: plan.turnCount,
+        producedTurns: producedTurnIds.length,
+        expectedRows: plan.rowCount,
+        producedRows: pageRows.length,
+        firstRowId: pageRows[0]?.rowId ?? null,
+        expectedFirstRowId: plan.rowIdBase,
+      });
+      return null;
+    }
+    const result = input.publisher.encodeRowsRangePage(
+      pageRows,
+      { beforeRowId: input.beforeRowId, limit: input.limit },
+      input.profile,
+    );
+    this.rowPageOutcomes.set(input.sessionId, {
+      applied: true,
+      beforeRowId: input.beforeRowId,
+      limit: input.limit,
+      ordinal: plan.ordinal,
+      rowIdBase: plan.rowIdBase,
+      turnCount: plan.turnCount,
+      rowCount: plan.rowCount,
+      pageRows: result.rows.length,
+      materializeMs,
+      at: Date.now(),
+    });
+    this.host.onDebug?.(
+      `v4 row page applied session=${input.sessionId} ordinal=${plan.ordinal} ` +
+        `rowIdBase=${plan.rowIdBase} turns=${plan.turnCount} rows=${plan.rowCount} ` +
+        `pageRows=${result.rows.length} messages=${page.messageCount} ` +
+        `initialModelKey=${String(page.initialModelKeyResolved)} ` +
+        `materializeMs=${materializeMs} hasMore=${String(result.hasMore)}`,
+    );
+    return result;
   }
 
   /**
@@ -3327,6 +3631,7 @@ export class ConversationV4Gateway {
     this.lastHydrationPhases.clear();
     this.rowManifestOutcomes.clear();
     this.coldWindowOutcomes.clear();
+    this.rowPageOutcomes.clear();
     this.runtimeActivationMs.clear();
     this.hydrationInFlight.clear();
     this.readyFlights.clear();
@@ -3375,6 +3680,11 @@ export class ConversationV4Gateway {
   /** 测试探针 / 诊断：某会话最近一次冷开的尾窗落点（缺席 = 从没窗口化过）。 */
   getColdWindowOutcome(sessionId: string): ColdWindowOutcomeSummary | null {
     return this.coldWindowOutcomes.get(sessionId) ?? null;
+  }
+
+  /** 测试探针 / 诊断：某会话最近一次按需物化一页的落点（缺席 = 从没翻过页）。 */
+  getRowPageOutcome(sessionId: string): RowPageOutcomeSummary | null {
+    return this.rowPageOutcomes.get(sessionId) ?? null;
   }
 
   private ensurePublisher(sessionId: string): ConversationTopicPublisher {
@@ -3611,6 +3921,11 @@ export class ConversationV4Gateway {
       // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
       // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
       ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
+      // 窗口的上一轮模型基线：与 rowIdOrigin 同一个播种时机，漏了会让窗首那一轮的
+      // `modelChange` marker 消失（窗内 rowId 整体前移 1）。
+      ...(loaded.synthesisModelBaseline === undefined
+        ? {}
+        : { modelBaseline: loaded.synthesisModelBaseline }),
     });
     // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
     phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));

@@ -103,7 +103,7 @@ dependency:
 
 | ID | 不变式 |
 |---|---|
-| **IS1** | **投影身份确定性（live 与 cold 同一规则）**：`turnId`、`rowId`、`row.createdAt`、`ModelSelected` 序列在任意物化顺序 / 任意窗口起点 / **任意路径（live 或 cold）** 下必须逐值一致。**前提是废除全局 `nextRowId++`**：rowId base 在每个 turn **起始时**由 manifest 给出（= 前序 active turn 的 `row_count` 累加），live 与 cold 走同一函数。这样 rewind 后新 turn 复用被截 turn 的 base，**不再产生空洞**（现状 `:5141` 的 `nextRowId++` 永不回退正是空洞来源）。`createdAtSeq` 由 `event.sequenceNumber` 派生（`:5150`），窗口化后全局序号不同，**不参与比较** |
+| **IS1** | **投影身份确定性（live 与 cold 同一规则）**：`turnId`、`rowId`、`row.createdAt`、`ModelSelected` 序列在任意物化顺序 / 任意窗口起点 / **任意路径（live 或 cold）** 下必须逐值一致。**前提是废除全局 `nextRowId++`**：rowId base 在每个 turn **起始时**由 manifest 给出（= 前序 active turn 的 `row_count` 累加），live 与 cold 走同一函数。这样 rewind 后新 turn 复用被截 turn 的 base，**不再产生空洞**（现状 `:5141` 的 `nextRowId++` 永不回退正是空洞来源）。`createdAtSeq` 由 `event.sequenceNumber` 派生（`:5150`），窗口化后全局序号不同，**不参与比较**。**成立条件见下方「IS1 的强制条件」（Step 7 收紧）** |
 | **IS2** | 分支裁断、文件摘要、用量统计永远基于**全序**信息（正文可窗口，id 必须全序）；窗口 = **active 分支的后缀**，不是原始序后缀 |
 | **IS3** | 命令只能在 **runtime-ready** 之后执行；view-ready 只放行读与翻页，但 **send 类命令是激活触发器**（见决策表） |
 | **IS4** | `hasLiveConversation` 三态（live / viewOnly / absent），且 `v4-gateway.ts` 内**不得残留 `sessionExists` 直判**：`:705,1099,2002,2039,2065,2111,2164,2208,2828,2996,3307` 11 处须逐个归位。**实现方式**：保留同步的 `conversationState`（只判 live / notLive，它本身必须调 `host.sessionExists`），viewOnly vs absent 由视图水化结果落一个 gateway 侧 `viewReadySessions` 集合承担（absent 只能由一次异步 store 读得知，同步函数判不出来） |
@@ -111,6 +111,29 @@ dependency:
 | **IS6** | `rows/range` 必须能在**未物化**的页上工作（按需物化），且不重复触发冷开 |
 | **IS7** | 运行时历史未全量水化前禁止发 turn；闸门必须在 `ensureContextInitialized` **之后** |
 | **IS8** | `openTiming` 不改（`.strict()`）；新分段放 ack 顶层新键 |
+
+### IS1 的强制条件（Step 7 收紧，必须与表格一起读）
+
+「任意物化顺序 / 任意窗口起点 / 任意路径逐值一致」在窗口化之后**不能无条件成立**。Step 6 给了两处
+反例、Step 7 又查出一处，因此 IS1 的准确表述是下面三条条件同时成立时才全量成立：
+
+1. **`rowId` 稳定只在「manifest 可用」时恒真**。manifest 不可用（missing / schemaMismatch /
+   inconsistent / readFailed / 老会话）→ 降级全量物化，`rowIdOrigin` 回到 1，**窗口期已下发给客户端的
+   rowId 会整体平移一次**。兜底只有三条：①不写坏数据（全量物化永远是对的）；②打点可见
+   （`manifestFallback` + `getRowManifestOutcome`）；③客户端的 `logEpoch` 陈旧读丢弃只能挡住跨进程，
+   挡不住同进程重排——所以这条**是已知的一次性跳变**，不是「不会发生」。客户端侧唯一的缓解是
+   `loadOlder` 的在途游标校验（`current.rows.window[0].rowId !== beforeRowId` → 结果作废），
+   它会把跳变变成「这一页白拉」而不是「锚点错位」。
+2. **live 与 cold 的逐行 `rowId` 一致只在「无迟到行」时成立**。Step 6 的按 `turnId` 归户让
+   `Σ row_count === rows.length` 且两侧**计数**一致，但迟到行（锚在历史轮的 goal verification 等）
+   在 live 里物理追加在**尾部**、在 cold 里落在**锚定轮内**：该轮之后每一行的 rowId 两条路径必然分叉，
+   append-only 无回填手段。因此翻页读**只认 manifest 的 base（cold 口径）**，不得复用 live 已发出的
+   rowId；含迟到行的会话上 IS1 退化为「计数一致 + 逐页自洽」，**不承诺 live 期与冷开期的逐行 rowId 相等**。
+3. **`createdAtSeq` 不参与任何比较**（全局序号在窗口化后不同），`row.createdAt` 只由
+   `baseTimestampMs`（整条分支首条消息）派生。
+4. **窗口 / 页必须同时播种「rowId 起点」与「上一轮模型基线」**（Step 7 补）。`modelChange` marker
+   是 TurnStarted 时按「上一轮模型 vs 本轮 config」落的一行，只喂尾部轮时投影没有上一轮 → 切换轮少一行、
+   其后 rowId 整体前移。两个播种点是同一个时机（候选投影建好、首次 ingest 之前）。
 
 ## 总体方案
 
@@ -261,6 +284,23 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | T-SL5 / T-SL6（本步钉住的部分） | `test-session-row-manifest` J1/J2/J3：窗口合成 vs 全量合成的 `turnId` / `turnNumber` / `createdAt` / `ModelSelected` 序列逐值相等；窗口投影 + `rowIdOrigin` 播种后每行 `rowId` / `kind` / `createdAt` 与全量投影尾部逐值相等；窗首 assistant 不多一轮 | Step 13 的端到端版本（真 store + gateway + 翻页）仍要覆盖 |
 | 已知代价 | ①窗口化后客户端翻页到窗口前沿会拿到空页且 `hasMore:false`（`getRowsRange` 的 `pageFirstRowId === undefined`），Step 7 的按需物化才补齐；②manifest 变得不可用时回到全量物化，全量投影的 rowId 从 1 重排，窗口期的 rowId 会整体平移（客户端翻页锚点跳变）；③`openTiming.snapshotRowCount` 从「投影全量行数」变成「物化窗口行数」（风险 10 已登记） | Step 7 必须先解决 ①，Step 14 判读时要注明 ③ |
 
+#### Step 7 落地说明（实现后回填，Step 8+ 直接按此接）
+
+| 事项 | 落地形态 | Step 8+ 必须遵守 |
+|---|---|---|
+| 执行缝落在哪（IS6） | `v4-gateway.rowsRange`：`rowPageNeeded`（判「请求区间最低行是否落在**已物化窗口**之下」）→ `host.materializeRowPage(sessionId, plan)`（宿主只读正文 + 合成，返回事件）→ gateway 建**临时** `ProductProjection` 物化 → `publisher.encodeRowsRangePage(rows, params, profile)`。publisher 只有一个 `hasMore` 实现（`getRowsRange` 也走它） | 不得把页物化搬回 publisher（同步方法、无 store）；不得出现第二份 `hasMore` 口径 |
+| 页定位（gateway 侧按 manifest） | `session-row-manifest.ts` 的 `selectColdRowPage(facts, { beforeRowId, limit })`：`facts.turns` 给逐轮 ordinal/rowCount/首条消息；页按**整轮**扩边（`toolCall ↔ result` 不跨页）；`rowIdBase` 只取 `facts.rowIdBaseByTurnId`；`limitBefore`/`limitAfter` 由轮的首条消息给 | 页必须是整轮；`rowIdBase` 不得另算；`facts.turns` 是布局，**不复制 messageIds 全表** |
+| 页正文读 | `readActiveBranchTail` 新增**可选** `limitAfter`（不含的上界）：翻第 N 页只读页内整轮，成本与「页在会话里的位置」无关。两端游标都找不到时退回「多读」而不是「少读」 | 上界只能来自 manifest；`limitBefore` 不在 active 序 → 整页不物化（`limitBeforeMissed`） |
+| 每页一次的账目校验 | 临时投影必须满足：`turnIds.length === plan.turnCount`、`rows.length === plan.rowCount`、首末 rowId `=== [rowIdBase, rowIdBase+rowCount-1]`。任一不符 → **放弃这一页**（退回投影现算 + `getRowPageOutcome().reason = "alignmentMismatch"`），绝不交出平移过的 rowId | 不得为「翻得动」放宽守卫；要修的是写侧的 `row_count`，不是读侧的容忍 |
+| 模型基线（本步查出的 IS1 洞） | `modelChange` marker 靠「上一轮模型 vs 本轮 config」判定；只喂尾部轮时投影没有上一轮 → 切换轮少一行、其后 rowId 整体前移。修法 = `ProductProjection.seedTurnModelBaseline`：冷窗口走 `rehydrate(events, { modelBaseline })`，页走临时投影播种；基线值 = 窗口（页）**前一轮首条消息**的选型（`hydrationTurnModelSelectionOfMessage`） | 任何新的重物化入口必须把 `rowIdOrigin` **与**模型基线**一起**传；候选投影可能有两个，两处都要播 |
+| 按需物化的结果不驻留 | 页只进本次返回页，publisher 投影不变（前插要重写 `apply.ts` 的追加假设与 `rowIndexById`）。每次翻页重合成是既定代价 | 不得为省它引入「前插存储」；`loadOlder`/`loadAllOlder` 靠游标推进，不需要服务端驻留 |
+| `hasMore` | 按 manifest 的 `firstRowId` 判（`pageFirstRowId > firstRowId`），不写死 `> 1`（live rewind 后首行可能不是 1） | 客户端 `if (!result.hasMore) break` 是硬依赖，翻页到顶必须为 false |
+| 降级与打点 | 宿主返回 null（端口缺席 / `limitBeforeMissed` / `emptyPage`）→ 退回投影现算；`noOlderRows`（上面本来就没行）**不算降级、不打点**。落点 `getRowPageOutcome(sessionId)` | 新增降级原因必须进该落点的 `reason`，否则「没生效」与「翻页坏了」无法区分 |
+| `openPhases` 口径（本步定稿） | ①`manifestAdjusted` **进** `openPhases`（三态：`true` 修正过 / `false` 无偏差 / **缺席** = 没走清单）；②`materializeMs` **仍缺席且不该有**——按需物化发生在 `rows/range` 上（没有 ACK 帧），成本走 `getRowPageOutcome().materializeMs`；③`openTiming.snapshotRowCount` 口径钉死为「**本次物化的投影行数**」（全量物化 = totalCount；窗口化 = 窗口行数），会话总行数只看 `rows.totalCount` | 缺席 ≠ false / 0；不得把 rowsRange 的耗时塞进 ACK |
+| 窗口化 + live 之后 | 第一条 live ingest 作废 manifest 事实（Step 4 既定），页物化随之关闭 → 窗口以上翻页再退回 `hasMore:false`（与 Step 6 的已知代价同形，不写坏数据） | 见 new_risk：放开必须先解决「live 之后清单还是不是权威」 |
+| 窗口化二次读降级（无自愈） | 二次判定降级时只沿用物化前事实 + `fallbackReason`，**下次冷开重判**。没有自愈路径，理由：能从窗口投影补的只有尾部轮次，头部轮次的行数补不出来；真要修只能「下次冷开强制全量 + 整表重建」 | 若将来做自愈，入口只能是「标记 suspect → 下一次冷开退全量」，不得从窗口投影回写 |
+| T-SL9 本地版（本步钉住） | `test-session-row-manifest` L1-L4 + M1-M8：页定位逐值、有界读、逐页与全量物化逐值相等、到顶 `hasMore:false`、窗口内翻页不碰宿主、全量物化永不物化、翻页不触发第二次冷开（`loadPersistedEvents` / `resumePersistedSession` 各一次）、对齐守卫（轮数 / 行数）、窗首切换轮的模型基线、live 之后清单作废的降级 | Step 13 的端到端版本（真 store + gateway + 翻页）仍要覆盖 |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。
@@ -351,8 +391,8 @@ apps/zcode-cli/packages/bootstrap/scripts/
 
 | # | 不变式 | 文件 | 改动 |
 |---|---|---|---|
-| 1 | IS8 | ack 顶层 + `transport.ts` | 新增 `openPhases` 顶层键（**不动 `.strict()` 的 `openTiming`**） |
-| 2 | IS8 | `scripts/dev/long-session-perf-sample.mjs` | **复用既有 `--out`**（不新增输出选项）；补 ack 顶层键、`runtimeReady` query 与 renderer 侧 `uiViewReadyMs`/`paintAfterApplyMs` 采集；C3 追加：`--path` 四路径自驱动、每次采前 `reset()`、target 判据去产品名、可见性三步 + `contaminated` 标记、`paint_missing` 原因、主判/并列两套判据 |
+| 1 | IS8 | ack 顶层 + `transport.ts` | 新增 `openPhases` 顶层键（**不动 `.strict()` 的 `openTiming`**）；Step 7 追加 `manifestAdjusted`（三态，缺席 = 没走清单），`materializeMs` 保持无生产者 |
+| 2 | IS8 | `scripts/dev/long-session-perf-sample.mjs` | **复用既有 `--out`**（不新增输出选项）；补 ack 顶层键（含 Step 7 的 `manifestAdjusted` 三态）、`runtimeReady` query 与 renderer 侧 `uiViewReadyMs`/`paintAfterApplyMs` 采集；C3 追加：`--path` 四路径自驱动、每次采前 `reset()`、target 判据去产品名、可见性三步 + `contaminated` 标记、`paint_missing` 原因、主判/并列两套判据 |
 | 3 | IS2/IS5 | `adapters/.../repositories/turn-manifest.ts` + 新迁移 | **两张表**读写（`session_turn_manifest` + `session_turn_query_manifest`，后者**只登记 `origin === "realUser"`**），按 `branch_generation` 键控；空分支 `totalCount=0` / `firstRowId=null` |
 | 4 | IS5 | `bootstrap/.../session-row-manifest.ts`（新） | `totalCount`/`firstRowId`/`realUserQueryTotal`/`turnDirectory`/rowId base 唯一来源；空分支 `totalCount=0` / `firstRowId=null` |
 | 4b | IS5 | `packages/shared/.../delta.ts` | `row.removed` 增加 `totalCount`/`firstRowId`（additive，非 strict） |
@@ -370,7 +410,9 @@ apps/zcode-cli/packages/bootstrap/scripts/
 | 14 | IS4 | `v4-gateway.ts:3306-3308` + 11 处 `sessionExists` | `conversationState` 只判 live/notLive（自身保留 `host.sessionExists`），新增 `viewReadySessions` 承担 viewOnly vs absent；11 处直判逐个归位 |
 | 15 | IS3 | `server-operations.ts:1490-1498` | `materializeSessionShell` / `activateRuntime` 拆分；首屏 model 空态 |
 | 16 | IS3 | `v4-bridge.ts:1738-1871` | store-only 变体（**不调 `resolveConversationBackingRecord`**） |
-| 17 | IS6 | `v4-gateway.ts:1608-1624`（gateway 侧异步物化）+ `publisher.ts:476-498`（只改 `hasMore` 口径） | 按需物化在 gateway 完成（publisher 的 `getRowsRange` 是同步方法、无 store）；冷路径不复触发完整冷开 |
+| 17 | IS6 | `v4-gateway.ts` 的 `rowsRange`（`rowPageNeeded` + `materializeRowsPage` + 临时投影）+ `session-row-manifest.ts` 的 `selectColdRowPage`/`readColdRowPageMaterialization` + `publisher.ts` 的 `encodeRowsRangePage`（`hasMore` 的**唯一**实现，`getRowsRange` 也走它）+ `V4GatewayHost.materializeRowPage`（bridge 实现） | 按需物化在 gateway 完成（publisher 的 `getRowsRange` 是同步方法、无 store）；页不驻留；冷路径不复触发完整冷开 |
+| 17b | IS6 | `contracts/.../session-store.port.ts` + `adapters/.../repositories/messages.ts` | `readActiveBranchTail` 新增**可选** `limitAfter`（不含的上界）：翻第 N 页只读页内整轮，成本与页的位置无关；两端游标找不到都退回「多读」 |
+| 17c | IS1 | `product-projection.ts`（`seedTurnModelBaseline`）、`conversation-topic-publisher.ts`（`rehydrate({ modelBaseline })`）、`transcript-hydration.ts`（`hydrationTurnModelSelectionOfMessage`/`hydrationModelKeyOfSelection`） | 窗口/页必须同时播种 rowId 起点与上一轮模型基线，否则窗首（页首）恰好是模型切换轮时少一行 marker、其后 rowId 整体前移 |
 | 18 | IS3/IS8 | `snapshot.ts:149-166` + `getWireSnapshotForProfile` | additive `sessionRuntime`（schema 上 `.default("live")`，**在网关边界注入**，不污染 `computeAvailability` 的纯函数性）；`canStop:false` 表示 view-only（**不新增 stop 维度**） |
 | 19 | IS3 | `SessionPane.tsx:220,457,3395,3464`、`ConversationComposer.tsx:342-374` | 新增 `viewOnly`（只禁 edit/fork/retry/rewind）；**composer 保持可用**（唯一激活入口）+ 新增外部 placeholder 入参 |
 | 20 | IS3 | `v4-gateway.ts:2962` | 升级前 `hydratedSessions.delete()`（`forceRebuild` 现被早退挡住） |
@@ -430,9 +472,12 @@ apps/zcode-cli/packages/bootstrap/scripts/
 7. **改动面横跨 adapters/contracts/core/bootstrap/shared/ui**：`rowId` 与 manifest 的改动必须按 Step 顺序，且 Step 4 之前不得合并任何依赖 manifest 的 UI 改动。
 8. **性能验收在 dev build**（`perfProbe` 与 `__zcodeV4ConversationOpensE2E` 的 renderer 出口都是 dev-only）。验收基准是 renderer 侧 `uiViewReadyMs`（+ `paintAfterApplyMs`）；生产侧只有 CLI 内部分解项（`openPhases`），**不得**拿它判总时长。验收口径必须写明数据来源。
 9. **窗口化不会自动消掉的剩余全量读**：每个 subagent child 各全量读一次（`server-operations.ts:1715-1717`）、`buildColdFileChangeSummaries` 8 并发逐 messageId 读 artifact（`cold-file-change-summaries.ts:231-262`）、`restoreWorkspaceCheckpointEntries`/`FileRewindEntries` 各读一遍 eventStore。这些单列，不计入本 spec 收益。
-10. **`openTiming.snapshotRowCount` 语义会漂移**（该字段在 `openTiming` 里，**不在** `openPhases`）：`v4-gateway.ts:1481` 今天取的是**投影全量行数**，窗口化后会变成「物化窗口行数」。phase-0 基线对照必须注明这一点，否则会被误读成「优化无效」。
+10. **`openTiming.snapshotRowCount` 语义会漂移**（该字段在 `openTiming` 里，**不在** `openPhases`）：`v4-gateway.ts:1481` 今天取的是**投影全量行数**，窗口化后会变成「物化窗口行数」。**Step 7 已把它钉死为「本次物化的投影行数」**（全量物化 = `totalCount`，窗口化 = 窗口行数；会话总行数只看 `rows.totalCount`），并在写入点写了口径注释。phase-0 基线对照必须注明这一点，否则会被误读成「优化无效」——**同一份 133ms 的 `viewReadyMs` 在窗口化前后对应的 `snapshotRowCount` 不是同一个量**。
 11. **既有测试会碎，须列入回归范围**：`test-turn-directory.mjs:83-90` 用白盒直接改 `rows.totalCount/firstRowId` 并靠全量行喂 `getTurnDirectory`，manifest 成为权威后必须重写该夹具。
 12. **本 spec 推翻了前次的 B3 排除**：`docs/apm/memory/20261025-session-open-latency-b1.md:24` 明确记过「B3（首帧不等全量）被排除」。本次依据是后来的「都修吧，根治」兜底授权（`:33`），属**推翻前次决策**，不是「已获授权」——按三态纪律如实登记。
+13. **窗口/页的 `modelChange` marker 靠播种才能与全量一致**（Step 7 查出并修）：`seedTurnModelBaseline` 漏在任何一个重物化入口上，都会让「模型恰好在窗首/页首切换」的那一轮少一行、其后 rowId 整体前移；它是**静默**的（不报错，只是翻页错位）。回归锚点：`test-session-row-manifest` M1（页首切换轮）与 M6（窗首切换轮）。
+14. **窗口化二次读降级没有自愈路径**（Step 6 遗留，Step 7 确认）：只沿用物化前事实 + `fallbackReason`，下一次冷开重判。可接受的理由是「不写坏数据 + 现象可见 + 修法成本高于收益」——从窗口投影补不出头部轮次，只能「下次冷开强制全量 + 整表重建」，那等于把一次冷开降级成两次。长期「能用但不一致」的会话每次冷开都走这条路，Step 14 判读时要看 `getColdWindowOutcome().fallbackReason` 的出现频率。
+15. **窗口化冷开 + 第一条 live ingest 之后，窗口以上的翻页再次不可用**（Step 7 登记的 new_risk）：manifest 事实在 live ingest 上作废（Step 4 既定，否则 `totalCount` 会漏算正在跑的那一轮），页物化因此关闭，`rows/range` 退回「投影里没有就没有」。现象是 `hasMore:false`、不报错、不写坏数据。放开的前提是先定「live 之后清单还是不是权威」（当前轮不在清单里，但头部轮次仍在），那是独立的口径问题，不在本 spec 范围。行为锚点：`test-session-row-manifest` M8。
 
 ### 回滚
 

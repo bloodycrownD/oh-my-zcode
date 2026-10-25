@@ -1121,6 +1121,13 @@ function evaluateOpenAcceptance(sample, target) {
     cliBootstrapMs,
     cliProcessState: ack.openTiming?.cliProcessState ?? null,
     hostPrepareMs,
+    // 清单账目修正（Step 7）：true = 本次冷开就地改过 row_count（live 与 cold 的行数分布
+    // 还在分叉）；false = 清单可用且无偏差；**null = 没走清单**（降级 / 宿主无读端口）。
+    // 三态不是为了好看：把它折成布尔会把「没读清单」说成「清单没偏差」。
+    manifestAdjusted:
+      typeof ack.openPhases?.manifestAdjusted === "boolean"
+        ? ack.openPhases.manifestAdjusted
+        : null,
     primaryCriterion: "uiViewReadyMs - hostPrepareMs",
     hostSideViewMs:
       hostPrepareMs === undefined ? undefined : Math.max(0, uiViewReadyMs - hostPrepareMs),
@@ -1167,7 +1174,8 @@ function logOpenProbe(label, sample, acceptance) {
       }`
     : `runtimeReady=unavailable${sample.runtimeReadyError ? `（${sample.runtimeReadyError}）` : ""}`;
   console.log(
-    `${TAG} ${label}: topic=${ack.topic} ${rendererReady} ${spawn} openPhases=${phases} ${runtime}` +
+    `${TAG} ${label}: topic=${ack.topic} ${rendererReady} ${spawn}` +
+      `/manifestAdjusted=${acceptance?.manifestAdjusted ?? "absent"} openPhases=${phases} ${runtime}` +
       `（ACK 样本 ${sample.acks?.length ?? 0} 条，verdict=${acceptance?.verdict ?? "?"}）`,
   );
 }

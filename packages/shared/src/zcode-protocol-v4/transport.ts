@@ -168,8 +168,11 @@ export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema
  *   - `mergeMs`：`loadPersistedEvents`（持久事件合并/transcript 合成）；
  *   - `rehydrateMs`：`publisher.rehydrate`（投影重建）；
  *   - `manifestMs` / `materializeMs`：row manifest 读取与分页物化的耗时。产生点在
- *     phase-row-manifest / phase-paged-materialization，本阶段尚无生产者，读取方必须
- *     按 undefined 处理（**缺席 ≠ 0**）。
+ *     phase-row-manifest / phase-paged-materialization。`manifestMs` 已有生产者；
+ *     **`materializeMs` 刻意仍无生产者**——按需物化发生在 `rows/range` 上（那里没有 ACK
+ *     帧），其成本走 CLI 侧 `getRowPageOutcome(...).materializeMs`，塞进 ACK 只会得到一个
+ *     永远 undefined 的键。读取方必须按 undefined 处理（**缺席 ≠ 0**）。
+ *   - `manifestAdjusted`：本次冷开的清单有没有被账目修正过（三态，见字段注释）。
  *
  * **各段嵌套，不可相加**：`viewReadyMs ⊇ initialFrameEncodeMs`；
  * `viewReadyMs ⊃ mergeMs + rehydrateMs`；阶段 0 里 `viewReadyMs` 还包含 runtime 激活本体
@@ -199,6 +202,14 @@ export const conversationOpenPhasesSchema = z.object({
   materializeMs: openTimingMsSchema,
   mergeMs: openTimingMsSchema,
   rehydrateMs: openTimingMsSchema,
+  /**
+   * 本次冷开的 turn 行清单是否被**账目修正**过（就地改 `row_count`，不重读正文）。
+   *
+   * 三态而不是布尔：`true` = 清单与物化出的行数有偏差且已就地修正；`false` = 清单可用
+   * 且无偏差；**缺席** = 这次没走清单（降级重建 / 宿主没实现读端口）。把缺席当 `false`
+   * 会把「没读清单」说成「清单没偏差」，那正是「优化没生效」最容易被误读的一格。
+   */
+  manifestAdjusted: z.boolean().optional(),
 });
 export type ConversationOpenPhases = z.infer<typeof conversationOpenPhasesSchema>;
 

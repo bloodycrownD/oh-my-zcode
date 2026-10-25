@@ -69,6 +69,21 @@ export interface SessionRowManifestFacts {
   turnIdByMessageId: Map<string, string>;
   /** active 分支的 turn 数（= manifest 行数）。 */
   turnCount: number;
+  /**
+   * 逐轮布局（按 ordinal 升序）：Step 7 的翻页定位用它把 `beforeRowId` 翻成「页内哪几个
+   * 整轮」，再取正文游标。**不驻留 messageIds 数组**——那等于把整条分支的消息 id 复制
+   * 一份进 publisher；页内的 messageId 由 `turnIdByMessageId` 反查（见 `selectColdRowPage`）。
+   */
+  turns: SessionRowManifestTurnLayout[];
+}
+
+/** facts 里的逐轮布局（manifest 快照的最小投影，不含消息全表）。 */
+export interface SessionRowManifestTurnLayout {
+  ordinal: number;
+  turnId: string;
+  rowCount: number;
+  /** 该轮首条 messageId；该轮没有可投影消息时为 null（不能当正文读游标）。 */
+  firstMessageId: MessageId | null;
 }
 
 /**
@@ -106,6 +121,12 @@ export function deriveSessionRowManifestFacts(
     rowIdBaseByTurnId,
     turnIdByMessageId,
     turnCount: snapshot.turns.length,
+    turns: snapshot.turns.map((turn) => ({
+      ordinal: turn.ordinal,
+      turnId: turn.turnId,
+      rowCount: turn.rowCount,
+      firstMessageId: turn.firstMessageId,
+    })),
   };
 }
 
@@ -664,4 +685,247 @@ async function readWindowBody(
   const readTail = store.readActiveBranchTail;
   if (!readTail) return null;
   return readTail({ sessionID: input.sessionID, activeMessageIds, limitBefore });
+}
+
+// ── 按需物化的一页（Step 7 / IS6）──────────────────────────────────────────
+
+/**
+ * 翻页选不出一页的原因。**都能打点、都不产生错数据**：选不出就退回「投影现算的那一页」，
+ * 客户端看到的是「更早方向没有了」（`hasMore:false`），与 Step 6 的已知代价一致。
+ */
+export type ColdRowPageUnavailableReason =
+  /** 空 active 分支：没有页可物化（`totalCount=0 / firstRowId=null` 已表达）。 */
+  | "emptyBranch"
+  /** `beforeRowId` 不高于权威首行 = 上面本来就没有行（不是失败）。 */
+  | "noOlderRows"
+  /** 页首轮没有可投影消息（没有正文游标，读不出它的行）。 */
+  | "noMessageCursor"
+  /** facts 里查不到页首轮的 base（清单自身不一致，读端不该到这）。 */
+  | "noRowIdBase";
+
+/**
+ * 一页的 manifest 坐标（**不含正文**）。三个消费者各取一段：
+ * - gateway：`rowIdBase` → 临时投影的 `rowIdOrigin`，`turnCount`/`rowCount` → 一致性守卫；
+ * - 宿主读正文：`limitBefore` / `limitAfter`；
+ * - 合成器：`ordinal` → `initialTurnNumber`，`precedingTurnFirstMessageId` → `initialModelKey`。
+ */
+export interface ColdRowPagePlan {
+  /** 页首轮的 manifest ordinal（= 合成器的 `initialTurnNumber`）。 */
+  ordinal: number;
+  /** 页首轮的 rowId base（= 临时投影的 `rowIdOrigin`）。 */
+  rowIdBase: number;
+  /** 页覆盖的 turn 数（一致性守卫的期望值）。 */
+  turnCount: number;
+  /** 页覆盖的 manifest 行数（Σ rowCount，与 `totalCount` 同口径）。 */
+  rowCount: number;
+  firstTurnId: string;
+  lastTurnId: string;
+  /** 页内 turn 序（升序）；宿主用它把 goal verification 归户到页内的轮。 */
+  turnIds: string[];
+  /** 页内 messageId（manifest 口径；goal verification 的 anchor 过滤）。 */
+  messageIds: MessageId[];
+  /** 正文读下界（含）= 页首轮首条 messageId。 */
+  limitBefore: MessageId;
+  /** 正文读上界（不含）= 页末轮之后第一个有消息的轮的首条 messageId；null = 读到分支末尾。 */
+  limitAfter: MessageId | null;
+  /** 页前一轮的首条 messageId（`initialModelKey`）；页即分支头时为 null。 */
+  precedingTurnFirstMessageId: MessageId | null;
+}
+
+export type ColdRowPageSelection =
+  | { kind: "page"; plan: ColdRowPagePlan }
+  | { kind: "unavailable"; reason: ColdRowPageUnavailableReason };
+
+/**
+ * `beforeRowId` → 一页整轮（Step 7 / IS6 的定位半边）。
+ *
+ * 三条规则，缺一条就会与全量物化错位：
+ *   1. **按整轮对齐**：页的上下界都扩到 turn 边界，`toolCall ↔ result` 不跨页，合成器的
+ *      轮边界也不会与 manifest 的轮边界打架（`preface` 保持默认）。
+ *   2. **rowId base 只从 `rowIdBaseByTurnId` 取**：那是 `deriveTurnRowIdBase` 的唯一落点，
+ *      这里再求和一次就是第二份实现（IS1 的同一函数要求）。
+ *   3. **页外不读**：`limitAfter` 取「页末轮之后第一个有消息的轮」，于是翻第 N 页的成本
+ *      与「页在会话里的位置」无关（否则每页都会把后缀重读重合成一遍）。
+ *
+ * `limitBefore` 取不到（页首轮没有可投影消息）时**不猜**：直接判不可用。少一页可以用
+ * `hasMore:false` 表达，猜一个游标会让页内 rowId 整体平移。
+ */
+export function selectColdRowPage(
+  facts: Pick<
+    SessionRowManifestFacts,
+    "turns" | "firstRowId" | "rowIdBaseByTurnId" | "turnIdByMessageId"
+  >,
+  params: { beforeRowId: number; limit: number },
+): ColdRowPageSelection {
+  const firstRowId = facts.firstRowId;
+  if (firstRowId === null || facts.turns.length === 0) {
+    return { kind: "unavailable", reason: "emptyBranch" };
+  }
+  if (params.beforeRowId <= firstRowId) {
+    return { kind: "unavailable", reason: "noOlderRows" };
+  }
+  const limit = Math.max(1, params.limit);
+  // 页的偏移区间 [wantStart, rowsBefore) 相对权威首行；两端都不含尾部的追逐。
+  const rowsBefore = params.beforeRowId - firstRowId;
+  const wantStart = Math.max(0, rowsBefore - limit);
+  let offset = 0;
+  let firstIndex = -1;
+  let lastIndex = -1;
+  for (let index = 0; index < facts.turns.length; index += 1) {
+    const rowCount = Math.max(0, facts.turns[index]!.rowCount);
+    if (firstIndex < 0 && offset + rowCount > wantStart) firstIndex = index;
+    if (offset < rowsBefore) lastIndex = index;
+    offset += rowCount;
+  }
+  if (firstIndex < 0 || lastIndex < firstIndex) {
+    return { kind: "unavailable", reason: "noOlderRows" };
+  }
+  const first = facts.turns[firstIndex]!;
+  const last = facts.turns[lastIndex]!;
+  const limitBefore = first.firstMessageId;
+  if (limitBefore === null) return { kind: "unavailable", reason: "noMessageCursor" };
+  const rowIdBase = facts.rowIdBaseByTurnId.get(first.turnId);
+  if (rowIdBase === undefined) return { kind: "unavailable", reason: "noRowIdBase" };
+
+  // 页末轮之后第一个有消息的轮 = 正文读的**上界**（不含）。找不到（页末轮之后全是空轮）
+  // 就是「读到分支末尾」——此时后缀本来也没有消息可读。
+  let limitAfter: MessageId | null = null;
+  for (let index = lastIndex + 1; index < facts.turns.length; index += 1) {
+    const candidate = facts.turns[index]!.firstMessageId;
+    if (candidate !== null) {
+      limitAfter = candidate;
+      break;
+    }
+  }
+  // 页前一轮的模型基线：向前找最近的有消息的轮（空轮给不出选型）。
+  let precedingTurnFirstMessageId: MessageId | null = null;
+  for (let index = firstIndex - 1; index >= 0; index -= 1) {
+    const candidate = facts.turns[index]!.firstMessageId;
+    if (candidate !== null) {
+      precedingTurnFirstMessageId = candidate;
+      break;
+    }
+  }
+
+  const selected = facts.turns.slice(firstIndex, lastIndex + 1);
+  const turnIds = selected.map((turn) => turn.turnId);
+  const selectedTurnIds = new Set(turnIds);
+  // 页内 messageId 由 `turnIdByMessageId` 反查（保持快照里的原序，去重交给下游）。
+  const messageIds: MessageId[] = [];
+  for (const [messageId, turnId] of facts.turnIdByMessageId) {
+    if (selectedTurnIds.has(turnId)) messageIds.push(messageId as MessageId);
+  }
+  const rowCount = selected.reduce((sum, turn) => sum + Math.max(0, turn.rowCount), 0);
+  return {
+    kind: "page",
+    plan: {
+      ordinal: first.ordinal,
+      rowIdBase,
+      turnCount: selected.length,
+      rowCount,
+      firstTurnId: first.turnId,
+      lastTurnId: last.turnId,
+      turnIds,
+      messageIds,
+      limitBefore,
+      limitAfter,
+      precedingTurnFirstMessageId,
+    },
+  };
+}
+
+/** 一页正文读的降级原因（宿主侧；每一种都只导致「这一页不物化」）。 */
+export type ColdRowPageReadFallbackReason =
+  | "portAbsent"
+  | "noIndexPort"
+  | "noTailPort"
+  | "sessionReadFailed"
+  | "indexReadFailed"
+  | "limitBeforeMissed"
+  | "emptyPage";
+
+export type ColdRowPageReadResult =
+  | {
+      kind: "page";
+      plan: ColdRowPagePlan;
+      /** 页内整轮的正文（message + part，别的轮一条都不读）。 */
+      messages: MessageWithParts[];
+      /** `baseTimestampMs` 的唯一来源：**整条**分支首条消息的 timeCreated。 */
+      baseTimestampMs?: number;
+    }
+  | { kind: "unavailable"; reason: ColdRowPageReadFallbackReason; detail?: string };
+
+/**
+ * 按页读正文（Step 7）：`plan` 由 gateway 用 manifest 的 facts 选出，本函数只负责
+ * 「全序 active 序 + 两端游标的正文读」。
+ *
+ * 为什么裁断在**这里**再算一遍而不是复用 hydration 的结果：裁断吃的是全序 id 序
+ * （IS2），而翻页可能发生在冷开很久之后（进程内没有保存 active 序）；索引按会话缓存，
+ * 这里付的是缓存命中，不是第二次 O(messages) 读。
+ *
+ * 页内消息必须真的落在 active 序里（`limitBeforeMissed`）：清单与索引不同步时宁可
+ * 这一页不物化，也不能把已回滚分支的正文当成历史交给客户端。
+ */
+export async function readColdRowPageMaterialization(input: {
+  sessionID: SessionId;
+  store: SessionStorePort | undefined;
+  reader: SessionRowManifestReader;
+  plan: ColdRowPagePlan;
+}): Promise<ColdRowPageReadResult> {
+  const store = input.store;
+  if (!store) return { kind: "unavailable", reason: "portAbsent" };
+  if (!store.listSessionMessageIndex) return { kind: "unavailable", reason: "noIndexPort" };
+  if (!store.readActiveBranchTail) return { kind: "unavailable", reason: "noTailPort" };
+
+  let rewind: ActiveConversationBranchRewind;
+  try {
+    const session = await store.getSession(input.sessionID);
+    rewind = {
+      branchCutAfterMessageId: session?.revert?.branchCutAfterMessageID,
+      rewindCreatedMessageId: session?.revert?.createdMessageID,
+      rewindKeptMessageIds: session?.revert?.keptMessageIDs,
+      rewindTargetMessageId: session?.revert?.targetMessageID,
+    };
+  } catch (error) {
+    return {
+      kind: "unavailable",
+      reason: "sessionReadFailed",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  const indexEntries = await input.reader.readMessageIndex(input.sessionID);
+  if (indexEntries === null) return { kind: "unavailable", reason: "indexReadFailed" };
+  const orderedMessageIds = indexEntries.map((entry) => String(entry.id));
+  const activeMessageIds = selectActiveConversationBranchIds(
+    orderedMessageIds,
+    rewind,
+  ) as MessageId[];
+  if (!activeMessageIds.includes(input.plan.limitBefore)) {
+    return {
+      kind: "unavailable",
+      reason: "limitBeforeMissed",
+      detail: String(input.plan.limitBefore),
+    };
+  }
+
+  const messages = await store.readActiveBranchTail({
+    sessionID: input.sessionID,
+    activeMessageIds,
+    limitBefore: input.plan.limitBefore,
+    ...(input.plan.limitAfter === null ? {} : { limitAfter: input.plan.limitAfter }),
+  });
+  if (messages.length === 0) return { kind: "unavailable", reason: "emptyPage" };
+
+  // 时间基准取**整条分支**首条消息（不是页首条）：合成器用它推导 createdAt，
+  // 取页首条会让同一行在冷窗口与翻页里算出两个时间（IS1 破）。
+  const baseTimestampMs = indexEntries.find(
+    (entry) => String(entry.id) === activeMessageIds[0],
+  )?.timeCreated;
+  return {
+    kind: "page",
+    plan: input.plan,
+    messages,
+    ...(baseTimestampMs === undefined ? {} : { baseTimestampMs }),
+  };
 }

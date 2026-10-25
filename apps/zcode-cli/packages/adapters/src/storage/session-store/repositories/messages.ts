@@ -286,6 +286,16 @@ export interface ReadActiveBranchTailInput {
    * 宁可多付一次全量正文读，也不能因为一个找不到的游标让首屏空白。
    */
   limitBefore?: MessageId | null;
+  /**
+   * 窗口上界（**不含**）：该 id 及其之后的消息不读。缺省 = 读到分支末尾。
+   *
+   * Step 7 的按需物化靠它把一次翻页的正文读限制在页内的整轮里：`limitBefore` 是页首轮
+   * 首条消息、`limitAfter` 是页末轮之后第一个有消息的轮的首条消息（都由 manifest 给）。
+   * 不传时行为与 Step 5 的尾窗读逐字相同（读到分支末尾）。
+   *
+   * 游标不在 `activeMessageIds` 里 = 清单与索引不同步：退化为读到分支末尾（多读，绝不少读）。
+   */
+  limitAfter?: MessageId | null;
 }
 
 /**
@@ -304,6 +314,8 @@ export interface ReadActiveBranchTailInput {
  *      （`sequence is null` 的 0/1 让 NULL 行排在非空之后，两个 tiebreaker 不能省）。
  *
  * 只读这一窗口的正文：更早消息的 `data` 与 part 一条都不读，这是冷开读放大比的来源。
+ * Step 7 的按需物化额外传 `limitAfter`，把窗口收在页内的整轮里（两端都由 manifest 给），
+ * 于是「翻一页」的正文读与合成成本只与页大小相关，不随页在会话里的位置增长。
  */
 export async function readActiveBranchTail(
   db: DatabaseSync,
@@ -311,13 +323,20 @@ export async function readActiveBranchTail(
 ): Promise<MessageWithParts[]> {
   // 窗口下界：`limitBefore` 是窗口**首条** id（含）。找不到游标 → 读整条分支。
   const startIndex = input.limitBefore ? input.activeMessageIds.indexOf(input.limitBefore) : 0;
-  const windowIds = startIndex > 0 ? input.activeMessageIds.slice(startIndex) : input.activeMessageIds;
+  const windowIds =
+    startIndex > 0 ? input.activeMessageIds.slice(startIndex) : input.activeMessageIds;
+
+  // 窗口上界（Step 7）：`limitAfter` 是窗口之后一条 id（不含）。找不到游标 → 读到分支末尾。
+  // 上界落在窗口首位（= 两个游标重合）时给出空窗：那是调用方的页计划自相矛盾，
+  // 宁可少读让上层看见「页内没有消息」，也不要静默读掉整条分支。
+  const endIndex = input.limitAfter ? windowIds.indexOf(input.limitAfter) : -1;
+  const boundedIds = endIndex >= 0 ? windowIds.slice(0, endIndex) : windowIds;
 
   // 同一 id 可能出现两次（rewind 的 kept + cut 后缀可以重叠）：按首现去重但保留给定顺序，
   // 与 `messages()` 的「一行一条」对齐。
   const orderedIds: MessageId[] = [];
   const seen = new Set<string>();
-  for (const messageId of windowIds) {
+  for (const messageId of boundedIds) {
     if (seen.has(messageId)) continue;
     seen.add(messageId);
     orderedIds.push(messageId);

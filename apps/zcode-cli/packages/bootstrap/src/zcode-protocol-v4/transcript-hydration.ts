@@ -953,17 +953,36 @@ function hydratedModelKey(modelSelection: ModelSelection): string {
 }
 
 /**
- * 窗口化物化的 `initialModelKey`：一条历史消息对应的选型 key（窗口首轮之前的模型基线）。
+ * 窗口 / 按页物化的 `initialModelKey`：一条历史消息对应的选型（窗口首轮之前的模型基线）。
  *
  * 取法必须与合成器建立基线的取法一致：real-user 轮取 user message 的 `modelSelection`
  * 快照，assistant 开头（preface / 维护轮）取 assistant 自己的 provider/model/reasoningLevel。
  * 取不到 → null：窗口首轮会多发一次 ModelSelected（hydration trace 不声明种子权威、也不
  * 标记 `configModelTouchedByEvent`，最终配置值与全量物化相同），只是多一条冗余事件。
+ *
+ * 除了给合成器当 `initialModelKey`，同一份选型还要作为投影的**上一轮模型基线**播种
+ * （`ProductProjection.seedTurnModelBaseline`）：`modelChange` marker 靠「上一轮模型与本轮
+ * config 是否不同」判定，缺了基线会让切换轮少一行、其后 rowId 整体前移。
  */
+export function hydrationTurnModelSelectionOfMessage(
+  message: MessageWithParts,
+): ModelSelection | null {
+  return turnModelSelectionOfUserMessage(message) ?? assistantModelSelectionOf(message) ?? null;
+}
+
 export function hydrationTurnModelKeyOfMessage(message: MessageWithParts): string | null {
-  const selection =
-    turnModelSelectionOfUserMessage(message) ?? assistantModelSelectionOf(message) ?? null;
+  const selection = hydrationTurnModelSelectionOfMessage(message);
   return selection ? hydratedModelKey(selection) : null;
+}
+
+/**
+ * 选型 → 合成器的 `initialModelKey` 口径（`provider\0model\0thought`）。
+ *
+ * 独立导出是为了让「按页物化」不必先拼一条假消息：它已经从 plan 拿到了上一轮的 messageId
+ * 与选型，只需要同一份 key 口径（各写一份 `\0` 拼接迟早分叉）。
+ */
+export function hydrationModelKeyOfSelection(selection: ModelSelection): string {
+  return hydratedModelKey(selection);
 }
 
 function turnModelSelectionOfUserMessage(message: MessageWithParts): ModelSelection | null {

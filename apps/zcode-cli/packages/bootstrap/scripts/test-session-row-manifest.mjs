@@ -29,6 +29,13 @@
  *      任一没接上这里就会红。
  *   K. **gateway 的窗口落点**：`rowIdOrigin` 在 rehydrate 内播种、`fullyMaterialized:false`、
  *      窗口化路径永不重建/剪枝（keptTurnIds 只认整条分支）。
+ *   L. **按页物化的定位（Step 7 / IS6）**：`beforeRowId` → 页内**整轮**，
+ *      `rowIdBase`/`limitBefore`/`limitAfter` 全部来自 manifest；页首轮没有正文游标时
+ *      不猜（宁可这一页不物化）。
+ *   M. **gateway 的按需物化接线**：每页与全量物化逐值相等、窗口内翻页不碰宿主、
+ *      翻页不触发第二次冷开、页内轮数/行数与 manifest 不符时放弃这一页（对齐守卫）。
+ *      另含「模型切换恰好在窗首那一轮」：窗口/页都必须播种上一轮模型基线，
+ *      否则 `modelChange` marker 少一行、其后 rowId 整体前移。
  *
  * 运行：`npx tsx --test scripts/test-session-row-manifest.mjs`（与 test-turn-directory
  * 同理，必须走 tsx：publisher 的依赖链摸到 `@zcode/model-option-map` 的 src 出口）。
@@ -45,7 +52,9 @@ const {
   createSessionRowManifestReader,
   deriveSessionRowManifestFacts,
   deriveTurnRowIdBase,
+  readColdRowPageMaterialization,
   readColdTailWindowMaterialization,
+  selectColdRowPage,
   selectColdTailWindow,
   selectManifestTurnDirectory,
 } = await import(new URL("../src/zcode-protocol-v4/session-row-manifest.ts", import.meta.url).href);
@@ -53,9 +62,11 @@ const { PROTOCOL_V4_LIMITS } = await import("@zcode/shared/zcode-protocol-v4");
 const { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } = await import(
   new URL("../src/zcode-protocol-v4/turn-manifest-entry.ts", import.meta.url).href
 );
-const { synthesizeEventsFromMessages } = await import(
-  new URL("../src/zcode-protocol-v4/transcript-hydration.ts", import.meta.url).href
-);
+const {
+  synthesizeEventsFromMessages,
+  hydrationTurnModelKeyOfMessage,
+  hydrationTurnModelSelectionOfMessage,
+} = await import(new URL("../src/zcode-protocol-v4/transcript-hydration.ts", import.meta.url).href);
 const { ConversationTopicPublisher } = await import(
   new URL("../src/zcode-protocol-v4/conversation-topic-publisher.ts", import.meta.url).href
 );
@@ -177,9 +188,17 @@ function manifestSnapshotOf(instance, { branchGeneration = 0 } = {}) {
   onRead,
   tailMessages,
   loadedMessages,
+  session = null,
 } = {}) {
-  const calls = { manifestReads: [], indexReads: 0, tailReads: [], fullReads: [] };
+  const calls = { manifestReads: [], indexReads: 0, tailReads: [], fullReads: [], sessionReads: 0 };
   const store = {
+    // 按页物化的裁断事实（rewind）来自 session 行；这里只返回一份最小形状。
+    getSession: async () => {
+      calls.sessionReads += 1;
+      return session;
+    },
+    messageWithParts: async ({ messageID }) =>
+      (loadedMessages ?? []).find((message) => message.info.id === messageID) ?? null,
     listSessionMessageIndex: async ({ sessionID }) => {
       calls.indexReads += 1;
       return indexEntries.map((id, index) => ({
@@ -961,6 +980,11 @@ test("G1: ok 时注入事实 → turnDirectory / 快照全序量来自 manifest�
       clientMode: "desktop-continuous",
     });
     assert.equal(dispatch.ack.openPhases.manifestMs >= 0, true, "manifestMs 是 ACK 顶层分段");
+    assert.equal(
+      dispatch.ack.openPhases.manifestAdjusted,
+      false,
+      "清单可用且没修正过 = false（缺席才表示「没走清单」，两者不能混）",
+    );
     assert.equal(gateway.getRowManifestOutcome(SESSION_ID).action, "use-manifest");
 
     const directory = await gateway.turnDirectory({ sessionId: SESSION_ID });
@@ -1044,6 +1068,11 @@ test("G3: 宿主没实现 readRowManifest → 完全不读（manifestMs 缺席�
       clientMode: "desktop-continuous",
     });
     assert.equal("manifestMs" in dispatch.ack.openPhases, false, "缺席 ≠ 0");
+    assert.equal(
+      "manifestAdjusted" in dispatch.ack.openPhases,
+      false,
+      "没走清单 → 这个键也必须缺席（缺席 ≠ false）",
+    );
     assert.equal(gateway.getRowManifestOutcome(SESSION_ID), null);
     assert.equal(captures.records.length, 0);
   } finally {
@@ -1602,6 +1631,618 @@ test("K3: 全量物化（无 coldWindow）仍声明 fullyMaterialized:true 并�
     assert.equal(captures.rewinds.length, 1);
     assert.deepEqual(captures.rewinds[0].input.keptTurnIds, ["msg-user-1", "msg-user-2"]);
     assert.equal(gateway.getColdWindowOutcome(SESSION_ID), null, "全量物化没有窗口落点");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+// ── L: 按需物化的**定位**（Step 7 / IS6：beforeRowId → 页内整轮）───────────
+
+/** 只造「轮 → 行数 + 首条消息」的事实（页定位只吃这些）。 */
+function pageFacts(rowCounts, { perTurnMessages = 2, firstRowId = 1 } = {}) {
+  const turns = rowCounts.map((rowCount, ordinal) => {
+    const messageIds = Array.from(
+      { length: perTurnMessages },
+      (_unused, index) => `t${ordinal + 1}-m${index + 1}`,
+    );
+    return windowTurn(`turn-${ordinal + 1}`, ordinal, rowCount, messageIds);
+  });
+  const totalCount = turns.reduce((sum, turn) => sum + Math.max(0, turn.rowCount), 0);
+  return deriveSessionRowManifestFacts({
+    branchGeneration: 0,
+    turns,
+    queries: [],
+    totalCount,
+    firstRowId: totalCount > 0 ? firstRowId : null,
+    realUserQueryTotal: 0,
+    manifestAdjusted: false,
+    adjustedTurnIds: [],
+  });
+}
+
+test("L1: each page = 整轮对齐，rowIdBase/limitBefore/limitAfter 全部来自 manifest", () => {
+  // 10 轮 × 3 行 = 30 行；翻 [16,22) 这一页 → 轮 6-7（各 3 行）。
+  const facts = pageFacts(new Array(10).fill(3));
+  const selection = selectColdRowPage(facts, { beforeRowId: 22, limit: 6 });
+  assert.equal(selection.kind, "page");
+  assert.equal(selection.plan.ordinal, 5, "页首轮 ordinal = 合成器的 initialTurnNumber");
+  assert.equal(selection.plan.rowIdBase, 16, "页首轮 base = 1 + Σ 前序 5 轮 × 3 行");
+  assert.equal(selection.plan.turnCount, 2);
+  assert.equal(selection.plan.rowCount, 6);
+  assert.equal(selection.plan.limitBefore, "t6-m1", "正文读下界 = 页首轮首条消息");
+  assert.equal(
+    selection.plan.limitAfter,
+    "t8-m1",
+    "上界 = 页末轮之后第一个有消息的轮（页外一条都不读）",
+  );
+  assert.equal(selection.plan.precedingTurnFirstMessageId, "t5-m1", "模型基线取页前一轮的首条消息");
+  assert.deepEqual(selection.plan.turnIds, ["turn-6", "turn-7"]);
+  assert.deepEqual(selection.plan.messageIds, ["t6-m1", "t6-m2", "t7-m1", "t7-m2"]);
+});
+
+test("L2: 顶部边界：页首即权威首行 → rowIdBase=1、hasOlder 由 firstRowId 判定", () => {
+  const facts = pageFacts([3, 3, 3]);
+  const top = selectColdRowPage(facts, { beforeRowId: 4, limit: 6 });
+  assert.equal(top.kind, "page");
+  assert.equal(top.plan.rowIdBase, 1);
+  assert.equal(top.plan.turnCount, 1, "上界夹住整轮：只取第 1 轮");
+  assert.equal(top.plan.limitAfter, "t2-m1");
+  assert.equal(top.plan.precedingTurnFirstMessageId, null, "页即分支头 → 没有模型基线");
+  // beforeRowId 不高于权威首行 = 上面本来就没有行（不是失败）。
+  assert.deepEqual(selectColdRowPage(facts, { beforeRowId: 1, limit: 6 }), {
+    kind: "unavailable",
+    reason: "noOlderRows",
+  });
+  // 空分支：totalCount=0 / firstRowId=null 由 facts 表达。
+  assert.deepEqual(selectColdRowPage(pageFacts([]), { beforeRowId: 5, limit: 6 }), {
+    kind: "unavailable",
+    reason: "emptyBranch",
+  });
+});
+
+test("L3: 零行轮不贡献行数，但占一位 turn（一致性守卫的期望值含它）", () => {
+  const facts = pageFacts([2, 0, 2, 2]);
+  const selection = selectColdRowPage(facts, { beforeRowId: 7, limit: 2 });
+  assert.equal(selection.kind, "page");
+  assert.equal(selection.plan.firstTurnId, "turn-4");
+  assert.equal(selection.plan.rowIdBase, 5, "base 只累加行数：1 + 2 + 0 + 2");
+  assert.equal(selection.plan.turnCount, 1);
+  assert.equal(selection.plan.rowCount, 2);
+  assert.equal(selection.plan.limitAfter, null, "页末轮之后没有更有消息的轮");
+  // 页首轮没有可投影消息 → 不猜游标（猜了页内 rowId 会整体平移）。
+  const headless = deriveSessionRowManifestFacts({
+    branchGeneration: 0,
+    turns: [{ ...windowTurn("turn-1", 0, 3, []), firstMessageId: null }],
+    queries: [],
+    totalCount: 3,
+    firstRowId: 1,
+    realUserQueryTotal: 0,
+    manifestAdjusted: false,
+    adjustedTurnIds: [],
+  });
+  assert.deepEqual(selectColdRowPage(headless, { beforeRowId: 4, limit: 3 }), {
+    kind: "unavailable",
+    reason: "noMessageCursor",
+  });
+});
+
+test("L4: 页正文只读页内整轮（两端游标都落到 store），baseTimestampMs 取分支首条", async () => {
+  const snapshot = snapshotOfTurns(10, { rowCount: 3 });
+  const ids = manifestMessageIds(snapshot);
+  const facts = deriveSessionRowManifestFacts(snapshot);
+  const selection = selectColdRowPage(facts, { beforeRowId: 22, limit: 6 });
+  assert.equal(selection.kind, "page");
+  const { store, calls } = fakeStore({
+    readResult: { status: "ok", snapshot },
+    indexEntries: ids,
+    tailMessages: ["msg-6-user", "msg-6-assistant", "msg-7-user", "msg-7-assistant"].map((id) => ({
+      info: { id },
+      parts: [],
+    })),
+  });
+  const result = await readColdRowPageMaterialization({
+    sessionID: SESSION_ID,
+    store,
+    reader: readerFor(store),
+    plan: selection.plan,
+  });
+  assert.equal(result.kind, "page");
+  assert.equal(calls.tailReads.length, 1);
+  const tailRead = calls.tailReads[0];
+  assert.equal(tailRead.limitBefore, "msg-6-user");
+  assert.equal(tailRead.limitAfter, "msg-8-user", "上界必须交给 store（页外一条都不读）");
+  assert.equal(calls.fullReads.length, 0, "页物化不得回退到全量 messages()");
+  assert.equal(calls.sessionReads, 1, "裁断事实（rewind）来自 session 行");
+  assert.equal(
+    result.baseTimestampMs,
+    1_700_000_000_000,
+    "时间基准取**整条分支**首条消息，不是页首条",
+  );
+  // 清单与索引不同步（页首条不在 active 序里）→ 这一页不物化，绝不读别的轮。
+  const truncated = fakeStore({
+    readResult: { status: "ok", snapshot },
+    indexEntries: ids.slice(0, 4),
+    tailMessages: [],
+  });
+  const missed = await readColdRowPageMaterialization({
+    sessionID: SESSION_ID,
+    store: truncated.store,
+    reader: readerFor(truncated.store),
+    plan: selection.plan,
+  });
+  assert.equal(missed.kind, "unavailable");
+  assert.equal(missed.reason, "limitBeforeMissed");
+  assert.equal(truncated.calls.tailReads.length, 0, "游标不同步时不得按窗口读正文");
+});
+
+// ── M: gateway 的按需物化接线（Step 7 / IS6 的执行缝）────────────────────
+
+/** 全量投影的 manifest 快照（与 live 写入同形）。 */
+function manifestSnapshotFromBranch(instance, { branchGeneration = 0 } = {}) {
+  const entries = instance.getTurnManifestEntriesForBranch({ rowCountSource: "live" });
+  const turns = entries.map((entry, ordinal) => ({ ...entry.turn, ordinal }));
+  const queries = entries.flatMap((entry) => entry.queries);
+  const totalCount = turns.reduce((sum, turn) => sum + turn.rowCount, 0);
+  return {
+    branchGeneration,
+    turns,
+    queries,
+    totalCount,
+    firstRowId: totalCount > 0 ? 1 : null,
+    realUserQueryTotal: queries.length,
+    manifestAdjusted: false,
+    adjustedTurnIds: [],
+  };
+}
+
+function identityOfRow(row) {
+  return { rowId: row.rowId, turnId: row.turnId, kind: row.kind, createdAt: row.createdAt };
+}
+
+/**
+ * 冷窗口 + 按需物化的 gateway 夹具（真合成器，不用手写事件）。
+ *
+ * 宿主的三件事都与生产同构：`loadPersistedEvents` 给**尾窗**事件 + 坐标、
+ * `readRowManifest` 给全量清单事实、`materializeRowPage` 用与冷开同一套合成器把 plan
+ * 指定的整轮重合成一遍。于是「页」与「全量」的比较是逐值的，不是形状比较。
+ */
+function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManifestSnapshot } = {}) {
+  const messages = transcript(turnCount, { modelChangeAtTurn: 6 });
+  const baseTimestampMs = messages[0].info.time.created;
+  const full = projectEvents(
+    synthesizeEventsFromMessages(messages, { sessionId: SESSION_ID, baseTimestampMs }),
+  );
+  const fullRows = full.getSnapshot().rows.window;
+  const written = manifestSnapshotFromBranch(full);
+  const snapshot = onManifestSnapshot ? onManifestSnapshot(written) : written;
+  const facts = deriveSessionRowManifestFacts(snapshot);
+  const windowStartTurn = turnCount - windowTurns + 1;
+  const windowMessages = messages.slice((windowStartTurn - 1) * 2);
+  // 窗口 base 只从**清单事实**取（与 `selectColdRowPage` 同一个来源）：篡改清单的用例里
+  // 窗口与页必须一起平移，否则夹具自己就不自洽。
+  const windowBase = facts.rowIdBaseByTurnId.get(`m-${windowStartTurn}-u`);
+  const precedingTurnFirstMessageId = `m-${windowStartTurn - 1}-u`;
+  const precedingMessage =
+    windowStartTurn > 1
+      ? messages.find((message) => message.info.id === precedingTurnFirstMessageId)
+      : undefined;
+  const precedingSelection = precedingMessage
+    ? hydrationTurnModelSelectionOfMessage(precedingMessage)
+    : null;
+  const windowEvents = synthesizeEventsFromMessages(windowMessages, {
+    sessionId: SESSION_ID,
+    baseTimestampMs,
+    initialTurnNumber: windowStartTurn - 1,
+    ...(precedingSelection ? { initialModelKey: modelKeyOf(precedingSelection) } : {}),
+  });
+  const coldWindow = {
+    ordinal: windowStartTurn - 1,
+    rowIdBase: windowBase,
+    turnCount: windowTurns,
+    rowCount: facts.turns.slice(windowStartTurn - 1).reduce((sum, turn) => sum + turn.rowCount, 0),
+    limitBefore: `m-${windowStartTurn}-u`,
+    branchTurnIds: facts.turns.map((turn) => turn.turnId),
+    activeMessageIds: messages.map((message) => message.info.id),
+    windowMessageIds: windowMessages.map((message) => message.info.id),
+    facts,
+    manifestAdjusted: false,
+    messageIndexChecked: true,
+    precedingTurnFirstMessageId,
+    baseTimestampMs,
+  };
+
+  const calls = { resume: 0, load: 0, pages: [] };
+  let activated = false;
+  const { host, captures } = stubGatewayHost({
+    readRowManifest: async () => ({
+      kind: "manifest",
+      facts,
+      snapshot,
+      manifestAdjusted: false,
+      adjustedTurnIds: [],
+      messageIndexChecked: true,
+    }),
+  });
+  // 生产里 resume 会真的把 record 激活，`sessionExists` 随之变 true；夹具必须同构，
+  // 否则第二次读入口会再走一遍冷开（那是夹具假象，不是 IS6 的失效）。
+  host.sessionExists = () => activated;
+  host.resumePersistedSession = async () => {
+    calls.resume += 1;
+    activated = true;
+    return { status: "resumed" };
+  };
+  host.loadPersistedEvents = async () => {
+    calls.load += 1;
+    return {
+      events: windowEvents,
+      synthesized: true,
+      sourceEventSeq: 999,
+      branchGeneration: 0,
+      coldWindow,
+      // 与 bridge 同构：窗口的上一轮模型基线（模型恰好在窗首切换时决定 marker 行）。
+      ...(precedingSelection
+        ? {
+            synthesisModelBaseline: {
+              provider: precedingSelection.providerId,
+              model: precedingSelection.modelId,
+              thought: precedingSelection.options?.reasoningLevel ?? "",
+            },
+          }
+        : {}),
+    };
+  };
+  host.materializeRowPage = async (sessionId, plan) => {
+    calls.pages.push(plan);
+    if (onPlan) {
+      const overridden = await onPlan(plan, { messages, baseTimestampMs });
+      if (overridden !== undefined) return overridden;
+    }
+    // 与 bridge 同构：按 plan 的**两端游标**取页内整轮（等价于 readActiveBranchTail），
+    // 再用同一套合成器 + 同一套上下文。刻意不用 `plan.messageIds`：那会让游标（含
+    // limitAfter）在夹具里失去承重作用。
+    const startIndex = messages.findIndex((message) => message.info.id === plan.limitBefore);
+    const endIndex = plan.limitAfter
+      ? messages.findIndex((message) => message.info.id === plan.limitAfter)
+      : -1;
+    const selected =
+      startIndex < 0 ? messages : messages.slice(startIndex, endIndex >= 0 ? endIndex : undefined);
+    const preceding = plan.precedingTurnFirstMessageId
+      ? messages.find((message) => message.info.id === plan.precedingTurnFirstMessageId)
+      : null;
+    const baseline = preceding ? hydrationTurnModelSelectionOfMessage(preceding) : null;
+    const events = synthesizeEventsFromMessages(selected, {
+      sessionId: SESSION_ID,
+      baseTimestampMs,
+      initialTurnNumber: plan.ordinal,
+      ...(baseline
+        ? {
+            initialModelKey: hydrationTurnModelKeyOfMessage(preceding),
+          }
+        : {}),
+    });
+    return {
+      events,
+      messageCount: selected.length,
+      initialModelKeyResolved: baseline !== null,
+      // 与 bridge 同构：投影的上一轮模型基线（缺了会在页首切换轮少一行 marker）。
+      ...(baseline
+        ? {
+            modelBaseline: {
+              provider: baseline.providerId,
+              model: baseline.modelId,
+              thought: baseline.options?.reasoningLevel ?? "",
+            },
+          }
+        : {}),
+    };
+  };
+  return { host, captures, calls, full, fullRows, facts, messages, windowBase };
+}
+
+test("M1: 冷窗后逐页翻到顶 —— 每页与全量物化逐值相等，且只冷开一次（T-SL9 / IS6）", async () => {
+  const { host, calls, fullRows, windowBase } = pagedGatewayFixture();
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const collected = [];
+    let beforeRowId = windowBase;
+    let hasMore = true;
+    for (let page = 0; page < 20 && hasMore; page += 1) {
+      const result = await gateway.rowsRange({
+        sessionId: SESSION_ID,
+        beforeRowId,
+        limit: 6,
+        clientMode: "desktop-continuous",
+      });
+      assert.ok(result.rows.length > 0, "窗口以上还有行时不得返回空页");
+      assert.deepEqual(
+        result.rows.map(identityOfRow),
+        fullRows
+          .filter((row) => row.rowId >= beforeRowId - 6 && row.rowId < beforeRowId)
+          .slice(-6)
+          .map(identityOfRow),
+        "每一页都必须与全量物化的同区间逐值相等（IS1 / T-SL9）",
+      );
+      collected.push(...result.rows);
+      beforeRowId = result.rows[0].rowId;
+      hasMore = result.hasMore;
+    }
+    assert.equal(hasMore, false, "到权威首行必须停：hasMore 由 manifest 的 firstRowId 判定");
+    assert.equal(beforeRowId, 1, "最后一个游标就是权威首行");
+    assert.deepEqual(
+      collected.toSorted((left, right) => left.rowId - right.rowId).map(identityOfRow),
+      fullRows.filter((row) => row.rowId < windowBase).map(identityOfRow),
+      "翻到顶后的行集合必须与全量物化的窗口以上部分逐值相等",
+    );
+    assert.equal(calls.pages.length, 4, "每页一次物化（21 行 / 6 行 = 4 页）");
+    assert.equal(calls.load, 1, "翻页不得触发第二次冷开（loadPersistedEvents 只跑一次）");
+    assert.equal(calls.resume, 1, "翻页不得再激活 runtime");
+    const outcome = gateway.getRowPageOutcome(SESSION_ID);
+    assert.equal(outcome.applied, true);
+    assert.equal(outcome.pageRows, 4, "顶部那一页只有 4 行（不再凑满 limit）");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M2: 窗口内翻页不碰宿主（投影现算），hasMore 仍按权威首行", async () => {
+  const { host, calls, windowBase } = pagedGatewayFixture();
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const result = await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: windowBase + 6,
+      limit: 2,
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(calls.pages.length, 0, "请求区间落在已物化窗口内 → 不得按需物化");
+    assert.deepEqual(
+      result.rows.map((row) => row.rowId),
+      [windowBase + 4, windowBase + 5],
+    );
+    assert.equal(result.hasMore, true, "页首行 > 权威首行 → 更早方向仍有行");
+    assert.equal(gateway.getRowPageOutcome(SESSION_ID), null, "没走物化就不该留下落点");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M3: 宿主缺席 → 退回投影现算，不抛错也不谎报 hasMore", async () => {
+  const { host, windowBase } = pagedGatewayFixture();
+  delete host.materializeRowPage;
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const result = await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: windowBase,
+      limit: 6,
+      clientMode: "desktop-continuous",
+    });
+    assert.deepEqual(result.rows, [], "窗口以上的行投影里不存在");
+    assert.equal(result.hasMore, false, "没有页可给时宁可上拉到底，也不能报「还有」");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M4: 轮数与 manifest 不符（行数相同）→ 放弃这一页并打点", async () => {
+  // 3 轮 × 2 行 = 6 行、rowId 连续：行数与 plan 相同，**只有轮数**对不上（2 vs 3）。
+  const bareTurn = ({ turnNumber, userMessageId, seq }) => [
+    sessionEvent("turn_started", seq, {
+      turnNumber,
+      input: `p${turnNumber}`,
+      messageId: userMessageId,
+    }),
+    sessionEvent(
+      "turn_complete",
+      seq + 1,
+      { response: "", tokenCount: 0, toolCallCount: 0, duration: 10, resultType: "success" },
+      `turn-${turnNumber}`,
+    ),
+  ];
+  const { host, windowBase } = pagedGatewayFixture({
+    onPlan: async () => ({
+      events: [
+        ...bareTurn({ turnNumber: 6, userMessageId: "m-6-u", seq: 1 }),
+        ...bareTurn({ turnNumber: 7, userMessageId: "m-7-u", seq: 3 }),
+        ...bareTurn({ turnNumber: 8, userMessageId: "m-8-u", seq: 5 }),
+      ],
+      messageCount: 3,
+      initialModelKeyResolved: true,
+    }),
+  });
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    // 页 = 轮 7-8（各 3 行）：rowIdBase 20、6 行、2 轮。宿主交出 3 轮/6 行。
+    const expectedPage = await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: windowBase + 3,
+      limit: 6,
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(expectedPage.rows.length > 0, true, "守卫拦下时退回投影现算（窗口内仍有行）");
+    const outcome = gateway.getRowPageOutcome(SESSION_ID);
+    assert.equal(outcome.applied, false);
+    assert.equal(outcome.reason, "alignmentMismatch");
+    assert.equal(outcome.rowIdBase, 20);
+    assert.equal(outcome.turnCount, 2, "plan 期望 2 轮");
+    assert.equal(outcome.rowCount, 6, "plan 期望 6 行");
+    assert.equal(outcome.pageRows, 6, "合成出来也是 6 行 → 只有轮数守卫能拦下");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M6: 模型切换恰好落在窗首那一轮 → 窗口必须播种上一轮基线（否则少一行 marker、rowId 前移）", async () => {
+  // 切换到第 6 轮；窗口从第 6 轮起（5 轮）→ 窗首那一轮正是切换轮。
+  const { host, captures, windowBase, fullRows } = pagedGatewayFixture({ windowTurns: 5 });
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    const dispatch = await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const windowRows = dispatch.initialFrame?.payload?.snapshot?.rows?.window ?? [];
+    const identity = (row) => ({
+      rowId: row.rowId,
+      turnId: row.turnId,
+      kind: row.kind,
+      createdAt: row.createdAt,
+    });
+    assert.deepEqual(
+      windowRows.map(identity),
+      fullRows
+        .filter((row) => row.rowId >= windowBase)
+        .map(identity)
+        .slice(-windowRows.length),
+      "窗口内每一行（含窗首那一轮的 modelChange marker）必须与全量物化逐值相等",
+    );
+    assert.equal(
+      windowRows[0].rowId,
+      windowBase,
+      "窗首行必须是 marker（marker 落在 turnHeader 之前），不是 turnHeader",
+    );
+    assert.equal(captures.errors.length, 0, "对齐失败必须留错误；这里不允许发生");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M7: 全量物化（投影首行 == 权威首行）→ 永不按需物化（没有缺页）", async () => {
+  // 不注入 coldWindow：全量物化，投影首行 = 1，`beforeRowId - limit` 落在首行之前也不用物化。
+  const reference = publisher();
+  ingestAll(reference, twoTurnEvents());
+  const snapshot = manifestSnapshotOf(reference);
+  const { host } = stubGatewayHost({
+    readRowManifest: async () => ({
+      kind: "manifest",
+      facts: deriveSessionRowManifestFacts(snapshot),
+      snapshot,
+      manifestAdjusted: false,
+      adjustedTurnIds: [],
+      messageIndexChecked: true,
+    }),
+  });
+  const pages = [];
+  host.materializeRowPage = async (sessionId, plan) => {
+    pages.push(plan);
+    return null;
+  };
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const result = await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: 3,
+      limit: 6,
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(pages.length, 0, "全量物化没有缺页：一次都不该找宿主物化");
+    assert.deepEqual(
+      result.rows.map((row) => row.rowId),
+      [1, 2],
+      "全量投影直接给出更早的行",
+    );
+    assert.equal(result.hasMore, false, "首行就是权威首行 → 到顶");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M8: 窗口化之后来了一条 live 事件 → 清单作废，翻页退回投影现算（不猜轮、不抛错）", async () => {
+  // 这是 risk 11 的行为锚点：manifest 在 live ingest 上作废（Step 4 既定），页物化随之
+  // 关闭。现象必须是「上拉到底」，不是「抛错」，也不是「拿旧清单硬翻」。
+  const { host, calls, windowBase } = pagedGatewayFixture();
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    gateway.ingest(
+      SESSION_ID,
+      // raw seq 必须紧接 hydration 的 `sourceEventSeq`（999）：gateway 只连续 drain。
+      sessionEvent("turn_started", 1000, {
+        turnNumber: 11,
+        input: "新的一轮",
+        messageId: "m-11-u",
+      }),
+    );
+    const result = await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: windowBase,
+      limit: 6,
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(calls.pages.length, 0, "facts 已作废 → 不得再找宿主物化");
+    assert.deepEqual(result.rows, [], "投影里没有的行就是没有");
+    assert.equal(result.hasMore, false, "不谎报「还有更早」");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("M5: manifest 行数与冷物化不符 → 每页一次的账目校验拦下（不交出平移过的 rowId）", async () => {
+  // 清单把**页内那两轮**各多算 1 行（窗口之前的轮次不变）：页 plan 会要 8 行，
+  // 而同一批消息冷物化只出 6 行 —— 这正是「live 与 cold 行数分叉」在页上的形态。
+  const { host, windowBase } = pagedGatewayFixture({
+    onManifestSnapshot: (snapshot) => ({
+      ...snapshot,
+      turns: snapshot.turns.map((turn) =>
+        turn.turnId === "m-6-u" || turn.turnId === "m-7-u"
+          ? { ...turn, rowCount: turn.rowCount + 1 }
+          : turn,
+      ),
+    }),
+  });
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    await gateway.rowsRange({
+      sessionId: SESSION_ID,
+      beforeRowId: windowBase,
+      limit: 6,
+      clientMode: "desktop-continuous",
+    });
+    const outcome = gateway.getRowPageOutcome(SESSION_ID);
+    assert.equal(outcome.applied, false, "账目不一致的页不得下发");
+    assert.equal(outcome.reason, "alignmentMismatch");
+    assert.equal(outcome.turnCount, 2, "轮数对得上");
+    assert.equal(outcome.rowCount, 9, "manifest 说页内两轮共 9 行（4+5 被各加 1）");
+    assert.equal(
+      outcome.pageRows,
+      7,
+      "同一批消息冷物化只有 7 行（4+3）→ 守卫拦下，不交出平移过的 rowId",
+    );
   } finally {
     gateway.dispose();
   }

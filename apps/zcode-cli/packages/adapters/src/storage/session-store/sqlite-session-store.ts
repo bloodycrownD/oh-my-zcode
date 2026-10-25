@@ -640,6 +640,7 @@ export class SqliteSessionStore
     sessionID: SessionId;
     activeMessageIds: readonly MessageId[];
     limitBefore?: MessageId | null;
+    limitAfter?: MessageId | null;
   }): Promise<MessageWithParts[]> {
     return messageRepository.readActiveBranchTail(this.db, input);
   }
