@@ -1479,6 +1479,47 @@ async function drainPendingInputUnlocked(
   };
 }
 
+/**
+ * 取消路径的 pending 输入结算（spec edit-resend-stale-text Step 6 / 变更点 9）。
+ *
+ * ============================================================================
+ * 判定：只结算「队列承载不了」的项，存活项一条都不许动
+ * ============================================================================
+ *
+ * 调用点在 `turn.ts` 的 TurnCancelled 分支、`fallbackPendingGuidesToQueue` **之后**。
+ * 此刻 `activeTurn.pendingInputs` 里混着两类项，不能一刀切——原实现 `splice(0)` 全清，
+ * 等于把「停止这一轮」做成「清空用户所有排队内容」：
+ *
+ * ① **队列承载得了的项**（仍在事件投影 `pendingSteerInputs` 里）：取消路径先已把未消费的
+ *    guide 原地改投普通 queue（`fallbackPendingGuidesToQueue`，投影落成
+ *    `steer.state=fellBack` + delivery=queue），它们是**用户还想发的项**。这类项的账本
+ *    **必须保持 `admitted`**：I1 的 `getSessionInputForExecution` 只接受 admitted，提前置
+ *    终态会让用户点「继续」时的提升硬失败（`fault.command.inputNotPending`），比「admitted
+ *    残留」严重得多。既有回归红线 `test-queue-item-delivery-command.mjs` C3 钉的正是这条
+ *    投影形态（stop 后 guide 必须在队列里 fellBack，而不是消失）。
+ *
+ * ② **队列承载不了的项（孤儿）**：内存里有、事件投影里没有。唯一真实产生窗口是
+ *    `admitTurnSteer` 先 push 内存（`steering.ts:154`）再 `appendEvent`（`:180`）——事件
+ *    落账失败时这条输入既不在队列投影里、也就没有消费方（提升只由投影驱动），永远不可能
+ *    起轮。它留在内存还有一处真实危害：`turn.ts` 取消分支的 held 判据读的是
+ *    `activeTurn.pendingInputs.length`（不是投影），孤儿会把「队列其实为空」判成
+ *    「队列非空 → setQueueAutoDrain(false)」，留下「paused 且 0 项」的 durable 位。
+ *    这类项才是本方法要结算的对象：摘内存 + 一条 `TurnSteerDiscarded(reason)`，
+ *    由 `events.ts` 的集中记账落成 `cancelled`（rewound/session_resumed 才落 discarded）。
+ *
+ * 判据来源：**是否在队列里由事件投影裁决**，内存只用来定位「本次要摘哪些」——两条事实
+ * 不能互相替换（级联作废看投影，内存结算看内存，各自只在自己的场景里有意义）。
+ * 注意判据是**投影成员资格**、不是 delivery：guide 项在 fallback 之前也已在
+ * `pendingSteerInputs` 里，所以与 fallback 的先后不改变判据结果（实测：把它挪到
+ * fallback 之前，结算集合与账本状态逐条不变）。真正的顺序约束只有一条——必须排在
+ * `turn.ts` 的 held 判据之前，因为那条判据读的是内存长度。
+ *
+ * **不得用 `clearAllPendingInputs`**：它按投影清扫全部 held 项，会连存活队列项一起清掉。
+ * **投影读失败时零结算**：读不出 ≠ 队列为空。把读失败当「一条都不在队列里」会把用户还在
+ * 排队的输入全部误杀——这是本方法最危险的误杀路径，故 fail-safe 到「什么都不做」。
+ *
+ * 返回被结算的 id（诊断与测试断言用；生产调用方可以忽略）。
+ */
 export async function discardPendingInput(
   this: AgentRuntimeInternal,
   options: {
@@ -1487,11 +1528,39 @@ export async function discardPendingInput(
     reason: "turn_cancelled" | "turn_failed" | "session_resumed";
     traceContext: TraceContext;
   },
-): Promise<void> {
-  if (this.activeTurn !== options.activeTurn) return;
-  const pendingInputs = options.activeTurn.pendingInputs.splice(0);
-  if (pendingInputs.length === 0) return;
-  const pendingInputIds = pendingInputs.map((pendingInput) => pendingInput.id);
+): Promise<string[]> {
+  if (this.activeTurn !== options.activeTurn) return [];
+  if (options.activeTurn.pendingInputs.length === 0) return [];
+  let carried: Set<string>;
+  try {
+    const projection = await this.rebuildProjection();
+    carried = new Set(projection.pendingSteerInputs.map((item) => item.pendingInputId));
+  } catch (error) {
+    this.logger?.warn("Pending input settlement skipped: projection unavailable", {
+      ...traceContextToLogContext(options.traceContext),
+      errorMessage: error instanceof Error ? error.message : String(error),
+      event: "turn.steer.settle_skipped",
+      module: "core.runtime",
+      pendingInputCount: options.activeTurn.pendingInputs.length,
+      reason: options.reason,
+      status: "failed",
+    });
+    return [];
+  }
+  const orphans = options.activeTurn.pendingInputs.filter((item) => !carried.has(item.id));
+  if (orphans.length === 0) return [];
+  const orphanIds = new Set(orphans.map((item) => item.id));
+  // 原位摘除，保持 `pendingInputs` 数组引用不变（其他路径持有同一引用）。
+  options.activeTurn.pendingInputs.splice(
+    0,
+    options.activeTurn.pendingInputs.length,
+    ...options.activeTurn.pendingInputs.filter((item) => !orphanIds.has(item.id)),
+  );
+  const pendingInputIds = orphans.map((item) => item.id);
+  for (const pendingInputId of pendingInputIds) {
+    // 孤儿不可能被提升，残留 reservation 只会挡住同 id 的重入判定。
+    this.pendingInputReservations.delete(pendingInputId);
+  }
 
   const event = createSessionEvent(
     SessionEventType.TurnSteerDiscarded,
@@ -1508,16 +1577,17 @@ export async function discardPendingInput(
   );
   await this.appendEvent(event, options.traceContext);
   options.events?.push(event);
-  this.logger?.debug("Turn steer discarded", {
+  this.logger?.debug("Orphaned turn steer input settled on turn end", {
     ...traceContextToLogContext(options.traceContext),
-    discardedCount: pendingInputs.length,
-    event: "turn.steer.discarded",
+    discardedCount: pendingInputIds.length,
+    event: "turn.steer.settled",
     module: "core.runtime",
     pendingInputIds,
     reason: options.reason,
     status: "completed",
     targetTurnId: options.activeTurn.turnId,
   });
+  return pendingInputIds;
 }
 
 export async function discardPersistedPendingSteerInputs(

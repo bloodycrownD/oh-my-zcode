@@ -37,6 +37,9 @@
  *      （既有行为，禁止加 reason 过滤——promoted 依赖同一语义）；作废后**投影队列为空**时
  *      runtime 门（queueAutoDrain）与 v4 投影（queue.autoDrain）必须同时复位，只复位一侧
  *      即失败；队列非空（幸存 held 项）时必须两边都保持 held。
+ * T-RW4 stop 结算（Step 6）：只结算「队列承载不了」的孤儿 pending 输入；改投 queue 的 guide
+ *      与 held 队列项的账本必须保持 admitted（零 settle）——stop 是「停这一轮」，不是
+ *      「清空排队内容」。判据顺序（fallback → 结算 → held 判据）另有源码形状守卫。
  * T-RW5 不自伤：排除自持 id 后，**没有任何 settle 调用**指向它、账本仍为 admitted（不能只
  *      断言终态 promoted：误 settle 后 promote 会因 status='admitted' 前置而硬失败，两种
  *      事故的终态都是「没有 promoted」），且它随后仍能正常提升起轮。
@@ -71,8 +74,13 @@ const { appendEvent, createEvent, notifyEventSinks } = await import(
 const { rebuildProjection } = await import(
   pathToFileURL(join(coreSrc, "runtime", "methods", "message-persistence.ts")).href
 );
-const { completeExternalQueueDrain, discardRewoundPendingSteerInputs, setQueueAutoDrain } =
-  await import(pathToFileURL(join(coreSrc, "runtime", "methods", "steering.ts")).href);
+const {
+  completeExternalQueueDrain,
+  discardPendingInput,
+  discardRewoundPendingSteerInputs,
+  fallbackPendingGuidesToQueue,
+  setQueueAutoDrain,
+} = await import(pathToFileURL(join(coreSrc, "runtime", "methods", "steering.ts")).href);
 const { ProductProjection } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "product-projection.ts")).href
 );
@@ -243,7 +251,9 @@ function createRuntime({ ledger }) {
     appendEvent,
     completeExternalQueueDrain,
     createEvent,
+    discardPendingInput,
     discardRewoundPendingSteerInputs,
+    fallbackPendingGuidesToQueue,
     notifyEventSinks,
     setQueueAutoDrain,
   };
@@ -266,9 +276,9 @@ async function emitFact({ product, runtime }, type, payload, options = {}) {
 }
 
 /** 入队事实：[admission 落账] + TurnSteerQueued（生产同序：先账本后事件）。 */
-async function seedQueuedInput(context, { id, targetTurnId, text }) {
+async function seedQueuedInput(context, { delivery = "queue", id, targetTurnId, text }) {
   await context.runtime.sessionStore.saveSessionInput({
-    delivery: "queue",
+    delivery,
     id,
     kind: "sendText",
     payload: {
@@ -278,15 +288,15 @@ async function seedQueuedInput(context, { id, targetTurnId, text }) {
     sessionID: SESSION_ID,
   });
   await emitFact(context, SessionEventType.TurnSteerQueued, {
-    delivery: "queue",
+    delivery,
     input: text,
     inputPreview: text,
     inputSize: text.length,
     intent: {
-      admittedDelivery: "queue",
+      admittedDelivery: delivery,
       kind: "sendText",
       queueItemId: id,
-      requestedDelivery: "queue",
+      requestedDelivery: delivery,
       sourceCommandId: id.replace(/^queue_/, ""),
       text,
     },
@@ -820,4 +830,224 @@ test("T-RW5 排除集生效：自持 id 没有任何 settle 调用、账本仍 a
   await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
   assert.equal(harness.calls.sendInput, 1);
   assert.equal(harness.captured.input.text, NEW_TEXT);
+});
+
+// ── T-RW4 stop 结算（只结算队列承载不了的孤儿，Step 6） ──────────────────────
+
+const GUIDE_ID = "queue_cmd-guide";
+const GUIDE_TEXT = "本轮未消费的引导输入（stop 后应改投普通队列并保留）";
+const ORPHAN_ID = "pending_turn-edited-1_orphan";
+const ORPHAN_TEXT = "事件落账失败的内存孤儿（队列里根本不存在）";
+
+/** 内存态 pendingInput 的形状（对齐 steering.ts admitTurnSteer 的构造）。 */
+function pendingInputOf({ delivery, id, text }) {
+  return {
+    delivery,
+    id,
+    input: text,
+    intent: { admittedDelivery: delivery, kind: "sendText", queueItemId: id, text },
+    queuedAt: new Date(),
+    traceId: TRACE_CONTEXT.traceId,
+    turnId: TURN_REMOVED,
+  };
+}
+
+function activeTurnWith(pendingInputs) {
+  return {
+    kind: "foreground",
+    pendingInputs,
+    steerable: false,
+    traceContext: { ...TRACE_CONTEXT },
+    turnId: TURN_REMOVED,
+  };
+}
+
+/**
+ * stop 的真实时序（`turn.ts:720-751`）：`pauseActiveTargetForCancellation` →
+ * `fallbackPendingGuidesToQueue`（guide 原地改投 queue）→ **Step 6 结算** → held 判据。
+ * 夹具逐段照抄，不简化：跳过 fallback 就测不到「存活项不许被结算」这条。
+ */
+async function settleOnCancel(context, activeTurn) {
+  const events = [];
+  context.runtime.activeTurn = activeTurn;
+  const fallbackChanged = await context.runtime.fallbackPendingGuidesToQueue({
+    activeTurn,
+    events,
+    reasonCode: "guide.turnInterrupted",
+    traceContext: TRACE_CONTEXT,
+  });
+  const settled = await context.runtime.discardPendingInput({
+    activeTurn,
+    events,
+    reason: "turn_cancelled",
+    traceContext: TRACE_CONTEXT,
+  });
+  return { events, fallbackChanged, settled };
+}
+
+test("T-RW4 stop 只结算孤儿：改投 queue 的 guide 与 held 项账本必须保持 admitted", async () => {
+  const context = createContext();
+  // ① 本轮未消费的 guide：账本 + 事件投影 + 内存 pendingInputs 三处都有。
+  await seedQueuedInput(context, {
+    delivery: "guide",
+    id: GUIDE_ID,
+    targetTurnId: TURN_REMOVED,
+    text: GUIDE_TEXT,
+  });
+  // ② 内存孤儿：真实产生窗口是「push 内存成功、appendEvent 失败」——投影与账本都没有队列行。
+  context.ledger.seed({ id: ORPHAN_ID, text: ORPHAN_TEXT });
+  // ③ held 队列项：只在投影/账本里，从来不入内存。
+  await seedQueuedInput(context, { id: KEPT_ID, targetTurnId: TURN_KEPT, text: KEPT_TEXT });
+
+  const activeTurn = activeTurnWith([
+    pendingInputOf({ delivery: "guide", id: GUIDE_ID, text: GUIDE_TEXT }),
+    pendingInputOf({ delivery: "queue", id: ORPHAN_ID, text: ORPHAN_TEXT }),
+  ]);
+
+  const { fallbackChanged, settled } = await settleOnCancel(context, activeTurn);
+
+  assert.equal(fallbackChanged, 1, "guide 必须先被改投普通 queue（保留语义）");
+  assert.deepEqual(settled, [ORPHAN_ID], "只有队列承载不了的孤儿该被结算");
+
+  // ① 存活 guide：账本仍 admitted、零 settle —— 提前置终态会让「继续」的提升被 I1 硬失败。
+  assert.equal(
+    context.ledger.calls.settles.filter((call) => call.id === GUIDE_ID).length,
+    0,
+    "对存活项的 settle 就是误杀（账本 admitted 是队列项可执行的唯一前提）",
+  );
+  assert.equal(context.ledger.rows.get(GUIDE_ID).status, "admitted");
+  assert.equal(
+    (await context.ledger.port.getSessionInputForExecution({ id: GUIDE_ID, sessionID: SESSION_ID }))
+      .state,
+    "pending",
+    "存活项必须仍可被执行侧读成 pending",
+  );
+  // 投影侧：guide 改投 queue 后仍在队列里（既有回归红线 test-queue-item-delivery-command C3）。
+  const guideRow = queueState(context).items.find((item) => item.queueItemId === GUIDE_ID);
+  assert.ok(guideRow, "改投 queue 的 guide 不得从队列消失");
+  assert.equal(guideRow.delivery.admitted, "queue");
+  assert.equal(guideRow.steer.state, "fellBack");
+  assert.equal(guideRow.steer.reasonCode, "guide.turnInterrupted");
+
+  // ② 孤儿：账本 cancelled(turn_cancelled)，内存摘除，投影本来就没有它。
+  assert.equal(context.ledger.rows.get(ORPHAN_ID).status, "cancelled");
+  assert.equal(context.ledger.rows.get(ORPHAN_ID).statusReason, "turn_cancelled");
+  assert.deepEqual(
+    activeTurn.pendingInputs.map((item) => item.id),
+    [GUIDE_ID],
+    "孤儿必须摘出内存：它留在内存会污染 held 判据（该判据读内存长度）",
+  );
+  assert.equal(
+    queueState(context).items.some((item) => item.queueItemId === ORPHAN_ID),
+    false,
+  );
+
+  // ③ held 队列项全程不受影响（它不在内存里，结算碰不到它）。
+  assert.equal(context.ledger.rows.get(KEPT_ID).status, "admitted");
+  assert.equal(context.ledger.calls.settles.filter((call) => call.id === KEPT_ID).length, 0);
+  assert.ok(queueState(context).items.some((item) => item.queueItemId === KEPT_ID));
+
+  // 事件留痕：只有一条 discard，reason=turn_cancelled，且只点名孤儿。
+  const discards = (await context.runtime.eventStore.getEvents(SESSION_ID)).filter(
+    (event) => event.type === SessionEventType.TurnSteerDiscarded,
+  );
+  assert.equal(discards.length, 1);
+  assert.deepEqual(discards[0].payload.pendingInputIds, [ORPHAN_ID]);
+  assert.equal(discards[0].payload.reason, "turn_cancelled");
+  assert.equal(discards[0].payload.targetTurnId, TURN_REMOVED);
+});
+
+test("T-RW4 没有孤儿时零结算：stop 不得清空用户排队内容", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, {
+    delivery: "guide",
+    id: GUIDE_ID,
+    targetTurnId: TURN_REMOVED,
+    text: GUIDE_TEXT,
+  });
+  const activeTurn = activeTurnWith([
+    pendingInputOf({ delivery: "guide", id: GUIDE_ID, text: GUIDE_TEXT }),
+  ]);
+
+  const { settled } = await settleOnCancel(context, activeTurn);
+
+  assert.deepEqual(settled, [], "内存里全是队列承载得了的项 → 一条都不结算");
+  assert.equal(context.ledger.calls.settles.length, 0, "stop 之后账本不得出现任何终态写入");
+  assert.equal(context.ledger.rows.get(GUIDE_ID).status, "admitted");
+  assert.equal(
+    (await context.runtime.eventStore.getEvents(SESSION_ID)).filter(
+      (event) => event.type === SessionEventType.TurnSteerDiscarded,
+    ).length,
+    0,
+    "没有孤儿就不该有 discard 事件（有事件 = 项从队列消失 = 误杀）",
+  );
+});
+
+test("T-RW4 投影读失败时零结算（读失败 ≠ 队列为空）", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, {
+    delivery: "guide",
+    id: GUIDE_ID,
+    targetTurnId: TURN_REMOVED,
+    text: GUIDE_TEXT,
+  });
+  const activeTurn = activeTurnWith([
+    pendingInputOf({ delivery: "guide", id: GUIDE_ID, text: GUIDE_TEXT }),
+    pendingInputOf({ delivery: "queue", id: ORPHAN_ID, text: ORPHAN_TEXT }),
+  ]);
+  context.runtime.activeTurn = activeTurn;
+  // 判据不可信时最危险的走法是把「读不出」当成「一条都不在队列里」→ 全量误杀。
+  context.runtime.rebuildProjection = async () => {
+    throw new Error("projection unavailable");
+  };
+
+  const settled = await context.runtime.discardPendingInput({
+    activeTurn,
+    reason: "turn_cancelled",
+    traceContext: TRACE_CONTEXT,
+  });
+
+  assert.deepEqual(settled, []);
+  assert.equal(activeTurn.pendingInputs.length, 2, "内存一条都不许动");
+  assert.equal(context.ledger.calls.settles.length, 0, "读失败必须 fail-safe 到零结算");
+  assert.ok(
+    context.runtime.warnings.some((entry) => entry.fields?.event === "turn.steer.settle_skipped"),
+    "跳过必须可观测",
+  );
+});
+
+test("T-RW4 引用守卫：activeTurn 已被替换时零结算", async () => {
+  const context = createContext();
+  const staleTurn = activeTurnWith([
+    pendingInputOf({ delivery: "queue", id: ORPHAN_ID, text: ORPHAN_TEXT }),
+  ]);
+  context.runtime.activeTurn = activeTurnWith([]);
+
+  const settled = await context.runtime.discardPendingInput({
+    activeTurn: staleTurn,
+    reason: "turn_cancelled",
+    traceContext: TRACE_CONTEXT,
+  });
+
+  assert.deepEqual(settled, []);
+  assert.equal(staleTurn.pendingInputs.length, 1, "过期句柄不得改内存");
+  assert.equal(context.ledger.calls.settles.length, 0);
+});
+
+test("T-RW4 结算必须排在 held 判据之前（唯一的顺序约束），且确实被接线", () => {
+  const source = stripComments(readCoreSource("runtime/methods/turn.ts"));
+  const cancelStart = source.indexOf("if (coreError.type === CoreErrorType.TurnCancelled) {");
+  const settleIndex = source.indexOf("await this.discardPendingInput({");
+  const heldIndex = source.indexOf("activeTurn.pendingInputs.length > 0");
+  assert.ok(cancelStart > 0, "取消分支必须仍然存在");
+  assert.ok(settleIndex > 0, "Step 6 的结算必须被接线（不允许「能力在但零调用方」）");
+  assert.ok(settleIndex > cancelStart, "结算必须挂在取消路径里，不得挪到普通失败分支");
+  assert.ok(heldIndex > 0, "held 判据必须仍然存在");
+  assert.ok(
+    settleIndex < heldIndex,
+    "结算必须在 held 判据之前：held 判据读内存长度，孤儿留在内存会把「队列为空」判成 held（paused + 0 项）",
+  );
+  // 与 fallback 的先后**不是**语义约束：判据是「是否仍在事件投影 pendingSteerInputs 里」，
+  // guide 项在 fallback 之前也已在投影中（变异 M2 实测：把它挪到 fallback 之前，
+  // 结算结果与账本状态逐条不变）。这里不写一条无法证伪的顺序断言。
 });

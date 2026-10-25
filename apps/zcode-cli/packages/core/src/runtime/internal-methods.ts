@@ -183,12 +183,17 @@ export interface AgentRuntimeCoreMethods {
     runtimeEntries: readonly RuntimeMessageEntry[];
   }>;
   sealBackgroundTaskNotifications(input: SealBackgroundTaskNotificationsInput): void;
+  /**
+   * 取消路径结算 `activeTurn.pendingInputs`：只结算事件投影里已不存在的孤儿项
+   * （队列承载不了的没账本消费方），存活队列项一条不动——它们的账本必须保持
+   * `admitted`，否则用户点「继续」时提升会被 I1 硬失败。返回被结算的 id。
+   */
   discardPendingInput(options: {
     activeTurn: ActiveTurnSteeringState;
     events?: SessionEvent[];
     reason: "turn_cancelled" | "turn_failed" | "session_resumed";
     traceContext: TraceContext;
-  }): Promise<void>;
+  }): Promise<string[]>;
   removePendingInputById(options: {
     pendingInputId: string;
     reason: "user_removed" | "promoted";

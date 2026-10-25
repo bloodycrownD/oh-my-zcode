@@ -726,6 +726,32 @@ export async function executeTurnCommand(
               reasonCode: "guide.turnInterrupted",
               traceContext: turnTraceContext,
             });
+            // Step 6（spec edit-resend-stale-text）：结算本轮内存里「队列承载不了」的
+            // 孤儿 pending 输入。两条约束，改之前先读完：
+            // ① 必须在下方 :769 的 held 判据之前——该判据读的是内存
+            //    `activeTurn.pendingInputs.length`（不是投影），孤儿若留在内存会把
+            //    「队列其实为空」判成 held，留下「paused 且 0 项」的 durable 位。
+            //    这是唯一有行为后果的顺序约束；与 fallback 的先后不改变判据结果
+            //    （判据是「是否仍在事件投影 pendingSteerInputs 里」，guide 项在
+            //    fallback 之前也已经在投影里），保持在后只是让读序成「先保留、再结算」。
+            // ② 结算失败不得阻断收口——吞掉异常只记 warn，否则 TurnComplete 缺失会让
+            //    会话停在 running（比一条孤儿账本行严重得多）。
+            try {
+              await this.discardPendingInput({
+                activeTurn,
+                events,
+                reason: "turn_cancelled",
+                traceContext: turnTraceContext,
+              });
+            } catch (error) {
+              this.logger?.warn("Failed to settle pending inputs on turn cancellation", {
+                ...traceContextToLogContext(turnTraceContext),
+                errorMessage: error instanceof Error ? error.message : String(error),
+                event: "turn.steer.settle_failed",
+                module: "core.runtime",
+                status: "failed",
+              });
+            }
           }
         }
         // 普通 TurnError 只结束当前 turn，不撤销已经 accepted 的 future input。
