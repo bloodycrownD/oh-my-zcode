@@ -27,6 +27,7 @@ import {
   TID_V4_FORK,
   TID_V4_ROW,
   TID_V4_ROW_ATTACHMENTS,
+  stripMagicContextTagNotation,
   testId,
 } from "@zcode/shared";
 import type {
@@ -1478,7 +1479,9 @@ export const ConversationAssistantTextActions = memo(function ConversationAssist
   return (
     <MessageActions className={cn(className)}>
       <CopyRowAction
-        text={text}
+        // 复制入口是 assistant 文本专用（ConversationTurnGroup 传入整轮合并文本），
+        // 在这里统一剥掉 §N§ 自标注；用户消息行的复制不走本组件。
+        text={stripMagicContextTagNotation(text)}
         rowId={rowId}
         label={copyLabel}
         tooltip={resolveTooltip(copyLabel)}
@@ -1579,9 +1582,13 @@ const AssistantTextRowView = memo(function AssistantTextRowView({
   const projectsCodeComments = codeCommentCardsEnabled && codeCommentProjectionEnabled === true;
   const visibleText = useMemo(
     () =>
-      projectsCodeComments
-        ? projectAssistantCodeComments(row.text, { streaming }).visibleText
-        : row.text,
+      // 历史库里已有 9,522 条 assistant 正文以模型自写的 §N§ 开头（不回刷历史库），
+      // 展示前统一剥掉；projectAssistantCodeComments 只负责代码注释投影，剥离在外层。
+      stripMagicContextTagNotation(
+        projectsCodeComments
+          ? projectAssistantCodeComments(row.text, { streaming }).visibleText
+          : row.text,
+      ),
     [projectsCodeComments, row.text, streaming],
   );
   const visiblePreviewCards = previewCards && previewCards.length > 0 ? previewCards : null;
@@ -1644,7 +1651,8 @@ const AssistantTextRowView = memo(function AssistantTextRowView({
         <ConversationAssistantTextActions
           rowId={row.rowId}
           entityId={row.entityId}
-          text={copyText ?? row.text}
+          // 复制内容同样剥掉模型自写的 §N§ 前缀（copyText 是整轮合并文本）。
+          text={stripMagicContextTagNotation(copyText ?? row.text)}
           createdAt={row.createdAt}
           feedback={readAssistantFeedback(row)}
           sessionId={context.sessionId}

@@ -1,4 +1,5 @@
 import type { AssistantTextRow, UserInputRow } from "@zcode/shared/zcode-protocol-v4";
+import { stripMagicContextTagNotation } from "@zcode/shared";
 import type { ChatSearchResultHighlightRequest } from "@/v4/legacyChatViewTypes.js";
 import type { ConversationTurnRenderUnit } from "@/v4/conversationTurnRenderUnits.js";
 import { projectAssistantCodeComments } from "@/lib/assistantCodeComment.js";
@@ -58,11 +59,15 @@ function addTargetsForUnit(
   for (const row of unit.assistantTextRows) {
     targets.push({
       ...createTarget(unitIndex, row),
-      text: projectUnitCodeComments
-        ? projectAssistantCodeComments(row.text, {
-            streaming: row.state === "streaming",
-          }).visibleText
-        : row.text,
+      // 与 ConversationRowView 的 visibleText 同源剥离：查找高亮的偏移量必须落在
+      // 实际渲染文本上，否则历史 §N§ 前缀会让命中位置整体偏移。
+      text: stripMagicContextTagNotation(
+        projectUnitCodeComments
+          ? projectAssistantCodeComments(row.text, {
+              streaming: row.state === "streaming",
+            }).visibleText
+          : row.text,
+      ),
     });
   }
 }

@@ -1,4 +1,5 @@
 import { createPartId } from "../deps.js";
+import { stripMagicContextTagNotation } from "@zcode/shared";
 import type { MessageId, TraceContext } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import type { RuntimeModelStreamSnapshot } from "../types.js";
@@ -43,7 +44,9 @@ export async function persistCancelledStreamSnapshot(
       sessionID: runtime.sessionId,
       messageID: options.assistantMessageId,
       type: "text",
-      text: options.snapshot.text,
+      // 中断落库路径与成功路径同一边界：用户 stop 时 flush 的这段已到达文本同样可能带
+      // 模型自写的 §N§ 前缀，不剥就会绕过成功路径的落库剥离直接写进库。
+      text: stripMagicContextTagNotation(options.snapshot.text),
       time: {
         start: options.assistantCreatedAt,
         end: completedAt,

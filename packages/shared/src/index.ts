@@ -87,6 +87,8 @@ export * from "./zcode-network-debug-status.js";
 export * from "./zcode-session-visible-content.js";
 export * from "./conversation-message-projection-policy.js";
 export * from "./conversation-preview-artifacts.js";
+// MC `§N§` 自标注的剥离工具：落库边界（core/bootstrap）与消费端（UI/预览）共用。
+export * from "./text/magic-context-tag.js";
 export * from "./zcode-session-task-status.js";
 export * from "./zcode-session-content-profile.js";
 export * from "./zcode-tool-projection-memory.js";

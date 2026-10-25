@@ -9,6 +9,7 @@ import {
   type SessionsIndexDelta,
   type SessionsIndexSnapshot,
 } from "@zcode/shared/zcode-protocol-v4";
+import { stripMagicContextTagNotation } from "@zcode/shared";
 
 /** 派生一条 summary 需要的、快照之外的会话级元信息（来自 session-store record / 事件时刻）。 */
 export interface SessionSummaryDeriveExtra {
@@ -36,7 +37,9 @@ function deriveSessionSummary(
       row.kind === "assistantText" &&
       row.text.trim().length > 0
     ) {
-      lastAssistantPreview = row.text.slice(0, MAX_PREVIEW_CHARS);
+      // 历史库的 assistant 正文可能以模型自写的 §N§ 开头；预览是用户可见文本，
+      // 先剥再截断，否则 120 字符预算会被标签前缀占用。
+      lastAssistantPreview = stripMagicContextTagNotation(row.text).slice(0, MAX_PREVIEW_CHARS);
     }
     if (lastAssistantPreview) break;
   }
