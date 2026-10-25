@@ -26,8 +26,12 @@ import type {
 /**
  * 投影规则版本：turnId / rowId base / row 形状任一变化都必须 +1。
  * 版本不匹配即整表重建——旧 manifest 会让 rowId 整体漂移，症状是翻页错位而不是报错。
+ *
+ * v2（Step 4）：废除跨 turn 的全局 `nextRowId++`，rowId base 改为「前序 active turn 的
+ * row_count 累加」（rewind 后复用被截轮的 base、不再产生空洞）。v1 清单里的
+ * `query_row_id` 是按带空洞的旧口径写的，继续用会让目录游标指向错误位置——必须整表重建。
  */
-export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 1;
+export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 2;
 
 /** 没有正文可摘时的 fallback：客户端按 `assistantPreviewKind` 填 i18n，服务端不下发文案。 */
 export const TURN_DIRECTORY_EMPTY_PREVIEW = "";

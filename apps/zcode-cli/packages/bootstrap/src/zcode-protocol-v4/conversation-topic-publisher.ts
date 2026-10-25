@@ -11,7 +11,11 @@
 // - 重订阅 = 替换：同 connectionId 重复 subscribe 即作废旧订阅并清其
 //   flush buffer，旧 subscriptionId 不再产帧，客户端按 subId 丢弃旧代际帧。
 import { Buffer } from "node:buffer";
-import { SessionEventType, type SessionEvent } from "@zcode/contracts";
+import {
+  SessionEventType,
+  type SessionEvent,
+  type TurnManifestRowCountSource,
+} from "@zcode/contracts";
 import type {
   CommandEnvelope,
   ConversationDelta,
@@ -59,6 +63,10 @@ import {
   type SessionUsageSeed,
 } from "./product-projection.js";
 import type { TopicFrameReservation } from "./topic-frame-reservation.js";
+import {
+  selectManifestTurnDirectory,
+  type SessionRowManifestFacts,
+} from "./session-row-manifest.js";
 
 interface LogEntry {
   seq: number;
@@ -276,6 +284,11 @@ export class ConversationTopicPublisher {
   private nextLogicalFrameSerial = 1;
   /** 当前 snapshot logical frame 的保守上界；流式追加只累计增量，逼近上限才精确序列化。 */
   private wireSnapshotBytesUpperBound: number;
+  /**
+   * 冷开读到的 manifest 事实（IS5 的权威源）。null = 没有可用清单，全序量回退到投影现算。
+   * 只在冷 hydration 后有值，第一条 live 事件即作废（见 `seedRowManifestFacts`）。
+   */
+  private rowManifestFacts: SessionRowManifestFacts | null = null;
 
   constructor(
     private readonly sessionId: string,
@@ -352,9 +365,52 @@ export class ConversationTopicPublisher {
     return this.projection.getTurnManifestEntry(event);
   }
 
+  /** 整条 active 分支的行清单（冷物化回写 / 整表重建；ordinalBase 见投影注释）。 */
+  getTurnManifestEntriesForBranch(input: {
+    rowCountSource: TurnManifestRowCountSource;
+    ordinalBase?: number;
+  }): TurnManifestEntry[] {
+    return this.projection.getTurnManifestEntriesForBranch(input);
+  }
+
+  /** turnId → 连续块行数（账目修正的 `observedRowCounts`）。 */
+  getTurnRowCounts(): Map<string, number> {
+    return this.projection.getTurnRowCounts();
+  }
+
+  /** turnId → rowId base（IS1 的 live 口径；未知 turn = null）。 */
+  getTurnManifestRowIdBase(turnId: string): number | null {
+    return this.projection.getTurnManifestRowIdBase(turnId);
+  }
+
   /** 当前分支代次 + active turn 顺序：rewind 复制 manifest 前缀的唯一坐标。 */
   getTurnManifestBranchState(): { branchGeneration: number; turnIds: string[] } {
     return this.projection.getTurnManifestBranchState();
+  }
+
+  /**
+   * 注入 manifest 事实（冷开读路径的产物）。
+   *
+   * 注入后 `totalCount` / `firstRowId` / `turnDirectory` / `realUserQueryTotal` 改由 manifest
+   * 提供（IS5：禁止由 `rows.window` 现算）。生命周期钉死为「冷快照基线」：
+   * **第一条 live 事件 ingest 即作废**（`ingest` 里清空），因为 manifest 只在 turn 终态写，
+   * 正在跑的这一轮的行不在里面，继续拿它当权威会让 totalCount 少算当前轮。
+   */
+  seedRowManifestFacts(facts: SessionRowManifestFacts): void {
+    this.rowManifestFacts = facts;
+    this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
+  }
+
+  /** 丢弃 manifest 基线（回到投影现算）。 */
+  clearRowManifestFacts(): void {
+    if (this.rowManifestFacts === null) return;
+    this.rowManifestFacts = null;
+    this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
+  }
+
+  /** 测试 / Step 7 探针：当前生效的 manifest 事实（未注入 = null）。 */
+  getRowManifestFacts(): SessionRowManifestFacts | null {
+    return this.rowManifestFacts;
   }
 
   /**
@@ -372,13 +428,16 @@ export class ConversationTopicPublisher {
     snapshot = this.projection.getSnapshot(),
   ): ConversationSnapshot {
     const visibleRows = filterConversationRowsForProfile(snapshot.rows.window, profile);
+    // IS5：manifest 在场面时 totalCount / firstRowId 只来自它（禁止由 rows.window 现算）。
+    // 缺席（live 会话 / 老会话降级）才回退到窗口现算，两者在「全量物化 + 清单完整」时逐值相等。
+    const facts = this.rowManifestFacts;
     const visibleSnapshot: ConversationSnapshot = {
       ...snapshot,
       rows: {
         ...snapshot.rows,
         window: visibleRows,
-        totalCount: visibleRows.length,
-        firstRowId: visibleRows[0]?.rowId ?? null,
+        totalCount: facts ? facts.totalCount : visibleRows.length,
+        firstRowId: facts ? facts.firstRowId : (visibleRows[0]?.rowId ?? null),
       },
     };
     const limit = PROTOCOL_V4_LIMITS.snapshotTailWindowRows;
@@ -502,12 +561,19 @@ export class ConversationTopicPublisher {
         ? visibleRows
         : visibleRows.filter((row) => row.rowId < (params.beforeRowId as number));
     const rows = eligible.slice(-limit);
+    // `hasMore` 按**权威首行**判定（manifest 在场时用它，否则用投影的首行），不是
+    // 「eligible.length > rows.length」：按需物化后 eligible 只含本页，后者会恒 false，
+    // 而客户端硬依赖它（`conversationProjectionStore` 的 `if (!result.hasMore) break;`）。
+    const firstRowId = this.rowManifestFacts
+      ? this.rowManifestFacts.firstRowId
+      : (snapshot.rows.firstRowId ?? visibleRows[0]?.rowId ?? null);
+    const pageFirstRowId = rows[0]?.rowId;
     return {
       rows,
       atSeq: snapshot.seq,
       atRevision: snapshot.revision,
       atLogEpoch: this.logEpoch,
-      hasMore: eligible.length > rows.length,
+      hasMore: pageFirstRowId !== undefined && (firstRowId === null || pageFirstRowId > firstRowId),
     };
   }
 
@@ -554,6 +620,21 @@ export class ConversationTopicPublisher {
     deliveryProfile: DeliveryProfileName = "replayable",
   ): V4ConversationTurnDirectoryResult {
     const snapshot = this.projection.getSnapshot();
+    // IS5：manifest 在场时目录与 `realUserQueryTotal` 直接读 query 表（含三个 preview，
+    // 无需窄读正文）。契约（升序 / 严格更小游标 / hasMore 含义）由
+    // `selectManifestTurnDirectory` 与下面的全量扫描各自实现同一套规则，T-SL7 逐值比对。
+    const facts = this.rowManifestFacts;
+    if (facts) {
+      const page = selectManifestTurnDirectory(facts, params);
+      return {
+        entries: page.entries,
+        realUserQueryTotal: page.realUserQueryTotal,
+        atSeq: snapshot.seq,
+        atRevision: snapshot.revision,
+        atLogEpoch: this.logEpoch,
+        hasMore: page.hasMore,
+      };
+    }
     const limit = Math.max(
       1,
       Math.min(
@@ -678,6 +759,9 @@ export class ConversationTopicPublisher {
 
   /** 应用权威事件：投影推进 + 日志记账 + 扇出到各订阅者 flush buffer。 */
   ingest(event: SessionEvent): void {
+    // 冷快照的 manifest 基线在第一条 live 事件上作废：清单只在 turn 终态写，正在跑的
+    // 这一轮不在里面，继续拿它当权威会让 totalCount / 目录少算当前轮。
+    this.clearRowManifestFacts();
     const projectionLimit =
       event.type === SessionEventType.TurnComplete || event.type === SessionEventType.TurnError
         ? PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxBytes
@@ -774,6 +858,9 @@ export class ConversationTopicPublisher {
     events: readonly SessionEvent[],
     options: { onPayloadTooLarge?: (error: ProjectionPayloadTooLargeError) => void } = {},
   ): void {
+    // 重物化会换掉整份投影行，旧的 manifest 基线随之失效（调用方 hydration 结束时会重新
+    // 读一次清单再注入；不重新注入就回退到投影现算，绝不会拿旧基线冒充新事实）。
+    this.clearRowManifestFacts();
     // 重放不能先清空当前 projection/log/subscription delivery，再逐条 replay：
     // 任一普通 reducer 异常都会把 topic 留在半重放状态。候选 publisher 不承接订阅，
     // 完整 replay（含 logical size 校验）成功后才一次 adopt 权威数据面。

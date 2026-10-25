@@ -210,6 +210,24 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | 缺项 vs 修正 | `ordinalGap` 由 manifest 自身判出（写入口的 ordinal 恒连续，空洞 = detached 写入丢失）；`unregisteredTurns` 需要外部 turn 观察；`messageIndexMismatch` 只诊断前 20 条 messageId | `inconsistent` 与 `missing`/`schemaMismatch` 同等对待：降级全量物化 + 重建 manifest（`manifestFallback` 打点带 reason） |
 | 性能遗留 | `ProductProjection.getTurnManifestEntry` 的终态派生仍是「从 rows 头扫到本 turn」（O(rows)/次，累计 O(turns×rows)）。实测 5k 行 / 500 轮：整会话累计 20ms、单次平均 40µs（最后一轮最坏 77µs，含 Set 分配），且只在**终态事件**上发生（非终态在入口早退） | 优化**推给 Step 4**：rowId base 的累加本来就需要「turn 序 + 每轮行数」这份状态，届时用一份 `turnIds` 序 + `firstRowIndex` 索引同时服务 base 与 ordinal，并**必须**同步进 `cloneProjection`/`adoptProjection`（漏搬 = base/ordinal 静默漂移）；本步不新增第二份状态 |
 
+#### Step 4 落地说明（实现后回填，Step 5+ 直接按此接）
+
+| 事项 | 落地形态 | Step 5+ 必须遵守 |
+|---|---|---|
+| 读路径模块 | `bootstrap/.../session-row-manifest.ts`：`deriveSessionRowManifestFacts(snapshot)` 把 manifest 快照翻成 `{ totalCount, firstRowId, realUserQueryTotal, entries, rowIdBaseByTurnId, turnIdByMessageId, turnCount }`；`selectManifestTurnDirectory(facts, params)` 实现目录三条硬定义；`createSessionRowManifestReader({ store })` 收敛 store 读与降级判定 | 只吃这一个模块，不另算全序量；计数**不重算**（仓储的 `deriveTurnManifestTotals` 是唯一实现，读端只透传） |
+| 读端调用方 | `v4-gateway.hydrateRowManifest`（`performHydration` 收口处、`hydratedSessions.add` 之前）。传 `observedTurnIds` = 投影 active turn 序、`observedRowCounts` = 投影连续块行数、`fullyMaterialized: true`；`ok` → `publisher.seedRowManifestFacts(facts)`，`fallback` → 回写整代 cold manifest | Step 5 的窗口化物化把 `fullyMaterialized` 改成 `false`（否则「manifest 比窗口长」会被判成不一致）；届时 `observedTurnIds` 只能是窗口内 turn，抓不到尾部丢轮 |
+| 降级判定 | 唯一入口 `decideRowManifestAction(outcome)`：`manifest` → use-manifest；`missing` / `schemaMismatch` / `inconsistent` / `portAbsent` / `readFailed` → **同一个动作** `materialize-and-rebuild`。`readFailed` 也归进去是刻意的：重建幂等，而「读不到就当空分支」会让全序归零 | 不得按原因各写一条分支；新增降级原因必须并进同一动作 |
+| 回写重建 | `rebuildRowManifestFromProjection`：全量物化的每一轮以 `rowCountSource: "cold"` 逐条 upsert，再 `rewriteTurnManifestBranch({sourceGeneration === branchGeneration, keptTurnIds})` **剪掉**投影里不存在的尾部 ordinal（不剪会「清单比投影长」→ 反复降级死循环）。`missing` 不剪（没有尾部），`readFailed` 不剪（store 状态未知，剪枝是删除） | 窗口化时 `ordinalBase` 必须从 manifest 已有的 turn 数起，且 `keptTurnIds` 必须是**整条分支**（否则剪枝删掉没物化的头部轮次）。store 侧逐出行为由 `test-turn-manifest-store` E5/E6 锁住 |
+| rowId base | 唯一公式 `deriveTurnRowIdBase(priorRowCounts, originBase = 1)`（同时被 live 投影与读端使用）。live 侧 `ProductProjection.turnRowIdBase(turnId)` 按「前序 active turn 的连续块行数」求值并缓存，`getTurnManifestRowIdBase` 暴露；`rowIdOrigin` 是全量投影的首行 id（恒 1），Step 5 用 manifest 给冷窗口首轮播种 | 冷窗口必须 seed `rowIdOrigin = manifest base(窗口首轮)`，否则窗口内 rowId 与全量物化整体平移 |
+| 废除全局自增 | `nextRowId` 仍是游标，但**截断（row.removed）后回退到 `rowIdOrigin + 剩余行数`**：被截 turn 的 id 被新 turn 复用，id 集合恒为 `origin..origin+rows-1` 的连续前缀，「rewind 后空洞」消失。分配只用游标——`deriveTurnRowIdBase` 与之在 turn 起始处逐值相等（A3 用例校验，`Math.max(base, cursor)` 这类守卫在该不变量下恒为 no-op，故不留） | 不得再引入第二份 rowId 事实；任何改变行结构的路径都必须走 `syncTurnRowIndexAfterDeltas` |
+| turn 行序索引 | 投影新增常驻状态 `activeTurnIds`（首现序）+ `turnFirstRowIndexById`（首行下标）+ `turnRowIdBaseById`（turn 起始 base 缓存），三者**全部**同步进 `cloneProjection`/`adoptProjection`；`row.removed` 走 `rebuildTurnRowIndex`（重建 + 游标回退） | 任何新增投影 clone/adopt 路径漏搬 = base/ordinal 静默漂移；Step 3 的 O(rows) 扫描已消除（`getTurnManifestEntry` 改为 O(turns)+O(本轮行数)） |
+| publisher 权威化 | `seedRowManifestFacts(facts)` 后 `totalCount`/`firstRowId`（首帧）、`turnDirectory`/`realUserQueryTotal`、`getRowsRange.hasMore` 全部改由 manifest 提供；**第一条 live ingest 即作废基线**（`ingest` 里 `clearRowManifestFacts`），`rehydrate` 同样作废 | 窗口化落地后 publisher 仍是「冷快照基线」语义：一旦有 live 事件就把权威交回投影，不得让旧清单冒充新事实 |
+| 消息索引缓存 | `session-conversation-index.ts` 的 `createSessionMessageIndexCache`（会话 × 一份 promise，最多 16 会话 LRU，失败不留毒）。失效点：**任何 live ingest**（`ingestNormalizedEvent` 无条件调 `host.invalidateRowManifestIndex`，覆盖「新消息落库 / rewind 截断」且不会漏事件类型） | 翻页读必须复用这份缓存（一次冷开只付一次 O(messages)）；不得按事件类型白名单失效 |
+| 索引观察 | 两趟读：第一趟只带 turn 观察（便宜），通过后才读索引并把 `observedMessageIds` 传进第二趟。索引端口缺席 → `messageIndexChecked: false`（「没查」可见，不当成通过）；空索引是**有效观察**（消息全没了 = mismatch） | 不得为了省一次读而把两趟合并成「先读索引」——老会话第一次冷开没有清单，那 6.8ms 是白付的 |
+| 读端一致性校验 | 契约侧的 `unregisteredTurns` 只判「观察到但没登记」；反方向（登记了但投影没有）只在 `fullyMaterialized: true` 时判（`unobservedTurnIds`），因为窗口化下「manifest 比窗口长」是合法状态 | 窗口化路径必须显式传 `fullyMaterialized: false` |
+| schema 版本 | `TURN_MANIFEST_PROJECTION_SCHEMA_VERSION` 升到 **2**（rowId 口径变化 → v1 清单里的 `query_row_id` 是带空洞的旧编号，必须整表重建） | 投影规则再变必须继续 +1 |
+| 观测 | `openPhases.manifestMs` 由 `performHydration` 写入（读路径耗时；宿主未实现 `readRowManifest` 时**缺席**，缺席 ≠ 0）；`gateway.getRowManifestOutcome(sessionId)` 给测试/诊断读 `{action, reason, detail}` | 不得把这个分段塞进 `openTiming`（`.strict()`，IS8） |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。

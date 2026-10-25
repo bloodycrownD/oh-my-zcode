@@ -39,6 +39,7 @@ import type {
   TurnCompletePayload,
   TurnErrorPayload,
   TurnInputIntentMetadata,
+  TurnManifestRowCountSource,
   TurnSteerDispatchChangedPayload,
   TurnSteerDiscardedPayload,
   TurnSteerDeliveryChangedPayload,
@@ -148,6 +149,8 @@ import {
 } from "../permission-options.js";
 import { shouldHideInvalidToolCallFromProduct } from "../tool-call-product-visibility.js";
 import { buildTurnManifestEntry, type TurnManifestEntry } from "./turn-manifest-entry.js";
+// IS1：rowId base 与 manifest 读端**同一个函数**（session-row-manifest.ts 是它的唯一实现）。
+import { deriveTurnRowIdBase } from "./session-row-manifest.js";
 
 type HookInvocationRowContent = Omit<
   HookInvocationRow,
@@ -436,7 +439,34 @@ export class ProductProjection {
   // tool/turn 终态越多退化越明显。普通归约增量维护，rewind 才重建。
   private rowIndexById = new Map<number, number>();
   private hydrationAccumulator: MutableConversationSnapshotAccumulator | null = null;
+  /**
+   * rowId 的唯一分配状态（IS1）。
+   *
+   * 旧实现是一个**跨 turn 永不回退**的 `nextRowId++`：rewind 截掉的行不会归还 id，于是
+   * live 投影留下空洞，而 cold 物化从来只见过截断后的历史（紧凑），两条路径的 rowId
+   * 永远对不齐——`hasOlderRows`（`window[0].rowId > firstRowId`）也随之失真。
+   *
+   * 现在 base 由 `deriveTurnRowIdBase(前序 active turn 的 row_count, origin)` 给出（与
+   * manifest 读端同一函数），行内序号 = 本 turn 已有行数；`rowIdOrigin` 是全量投影的
+   * 首行 id（恒 1；Step 5/7 的冷窗口把它设成 manifest 给的窗口 base）。
+   * 截断（rewind / row.removed）后游标回到 `origin + rows.length`，被截的 id 被复用，
+   * **不再产生空洞**。
+   */
+  private rowIdOrigin = 1;
   private nextRowId = 1;
+  /**
+   * active 分支的 turn 行序（首现序）与每个 turn 首行在 `rows.window` 的下标。
+   *
+   * 这份状态同时服务三件事，所以只存一份：
+   *   - turn 的 ordinal（manifest 的 `ordinal`，`getTurnManifestEntry` 原本 O(rows) 扫描）；
+   *   - 该 turn 的连续行块（manifest 的 `row_count` 与 query 分段）；
+   *   - rowId base 的「前序 active turn 行数」（按块长求和）。
+   * 新增**任何**投影 clone/adopt 路径都必须搬运它们，漏搬 = base/ordinal 静默漂移。
+   */
+  private activeTurnIds: string[] = [];
+  private turnFirstRowIndexById = new Map<string, number>();
+  /** turn 起始时求出的 rowId base（IS1：求值一次，此后不再漂移）。 */
+  private turnRowIdBaseById = new Map<string, number>();
   /**
    * 当前 active 分支代次（与 `SessionRevert.branchGeneration` 同源）。
    * manifest 按它键控：每次 destructive conversation rewind +1，rewind 时把保留前缀复制到
@@ -804,6 +834,10 @@ export class ProductProjection {
    *
    * 只读当前投影行，**不**回读 store：row_count 是投影的副产物，先落 manifest 再回读会
    * 把「投影还没物化完」写成「这一轮就这么点行」。行已被 rewind 截掉（迟到终态）→ null。
+   *
+   * ordinal 与行块都取自行序索引（O(turns) + O(本轮行数)）。旧实现每次从 rows 头扫到本
+   * 轮，整会话累计 O(turns × rows)——Step 3 实测 20ms/500 轮，且终态事件本来不需要
+   * 看一眼别人的行。
    */
   getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
     // 只有终态才有「定稿的行数」：非终态即使能算出来，也是缺收尾行（tool 收口、header
@@ -811,45 +845,76 @@ export class ProductProjection {
     if (event.type !== SessionEventType.TurnComplete && event.type !== SessionEventType.TurnError) {
       return null;
     }
-    const turnId = this.turnIdOf(event);
-    const rows = this.snapshot.rows.window;
-    const seenTurnIds = new Set<string>();
-    let ordinal = -1;
-    let index = 0;
-    for (; index < rows.length; index += 1) {
-      if (rows[index]!.turnId === turnId) {
-        ordinal = seenTurnIds.size;
-        break;
-      }
-      seenTurnIds.add(rows[index]!.turnId);
+    return this.buildTurnManifestEntryFor(this.turnIdOf(event), "live", 0);
+  }
+
+  /**
+   * 整条 active 分支的行清单（冷路径全量物化后的回写 / 整表重建用）。
+   *
+   * `ordinalBase` 是回写时 ordinals 的起点，**必须**由调用方按 manifest 已有的 turn 数给出：
+   * 仓储的 `insertTurnRow` 会把「同一 ordinal 上的另一个 turn」当成被 rewind 截掉的残留
+   * 逐出，窗口化物化若从 0 起编号就会把头部真实轮次全部顶掉。
+   */
+  getTurnManifestEntriesForBranch(input: {
+    rowCountSource: TurnManifestRowCountSource;
+    ordinalBase?: number;
+  }): TurnManifestEntry[] {
+    const ordinalBase = Math.max(0, input.ordinalBase ?? 0);
+    const entries: TurnManifestEntry[] = [];
+    for (const turnId of this.activeTurnIds) {
+      const entry = this.buildTurnManifestEntryFor(turnId, input.rowCountSource, ordinalBase);
+      if (entry) entries.push(entry);
     }
+    return entries;
+  }
+
+  /** 每个 active turn 的连续块行数（账目修正的 `observedRowCounts` 输入）。 */
+  getTurnRowCounts(): Map<string, number> {
+    const counts = new Map<string, number>();
+    for (const [ordinal, turnId] of this.activeTurnIds.entries()) {
+      counts.set(turnId, this.turnBlockRowCount(ordinal));
+    }
+    return counts;
+  }
+
+  /** turnId → rowId base（IS1 的 live 口径；未知 turn = null）。 */
+  getTurnManifestRowIdBase(turnId: string): number | null {
+    if (!this.turnFirstRowIndexById.has(turnId)) return null;
+    return this.turnRowIdBase(turnId);
+  }
+
+  private buildTurnManifestEntryFor(
+    turnId: string,
+    rowCountSource: TurnManifestRowCountSource,
+    ordinalOffset: number,
+  ): TurnManifestEntry | null {
+    const ordinal = this.activeTurnIds.indexOf(turnId);
     if (ordinal < 0) return null;
+    const firstIndex = this.turnFirstRowIndexById.get(turnId);
+    if (firstIndex === undefined) return null;
+    // 只取**连续块**：迟到行落在后面的位置时，它们不属于这一轮的定稿行数（旧实现同样
+    // 在遇到第一个别的 turn 时停止），否则 row_count 会把别人的行算进来。
+    const rows = this.snapshot.rows.window;
     const turnRows: ConversationRow[] = [];
-    for (; index < rows.length; index += 1) {
+    for (let index = firstIndex; index < rows.length; index += 1) {
       const row = rows[index]!;
       if (row.turnId !== turnId) break;
       turnRows.push(row);
     }
+    if (turnRows.length === 0) return null;
     return buildTurnManifestEntry({
       turnId,
-      ordinal,
+      ordinal: ordinalOffset + ordinal,
       rows: turnRows,
       messageIdForRow: (rowId) => this.messageIdByRowId.get(rowId) as MessageId | undefined,
-      rowCountSource: "live",
+      rowCountSource,
       branchGeneration: this.branchGeneration,
     });
   }
 
   /** 当前分支代次 + active turn 顺序（行序）；rewind 复制 manifest 前缀的坐标。 */
   getTurnManifestBranchState(): { branchGeneration: number; turnIds: string[] } {
-    const turnIds: string[] = [];
-    const seen = new Set<string>();
-    for (const row of this.snapshot.rows.window) {
-      if (seen.has(row.turnId)) continue;
-      seen.add(row.turnId);
-      turnIds.push(row.turnId);
-    }
-    return { branchGeneration: this.branchGeneration, turnIds };
+    return { branchGeneration: this.branchGeneration, turnIds: [...this.activeTurnIds] };
   }
 
   /**
@@ -1151,8 +1216,12 @@ export class ProductProjection {
       : reducedWithSubagents;
     const finalDeltas = this.attachRevision(clearSettledOutputPreviews(deltas));
     if (this.hydrationAccumulator) {
+      const previousRowsLength = this.snapshot.rows.window.length;
       applyConversationDeltasMutable(this.hydrationAccumulator, finalDeltas);
       this.snapshot.seq = event.sequenceNumber;
+      // 批量路径的 rowIndexById 由 accumulator 原地维护；turn 行序与 rowId 游标仍要记账，
+      // 否则冷恢复整段下来 base 全是 1（manifest 与翻页锚点当场漂移）。
+      this.syncTurnRowIndexAfterDeltas(previousRowsLength, finalDeltas);
     } else {
       const previousRowsLength = this.snapshot.rows.window.length;
       this.snapshot = {
@@ -1194,7 +1263,14 @@ export class ProductProjection {
     clone.snapshot = this.snapshot;
     clone.rowIndexById = new Map(this.rowIndexById);
     clone.hydrationAccumulator = null;
+    clone.rowIdOrigin = this.rowIdOrigin;
     clone.nextRowId = this.nextRowId;
+    // turn 行序/块起点同样必须随 clone/adopt 走：它们是 rowId base 与 manifest ordinal 的
+    // 唯一来源，漏搬会让候选实例从「零个 turn」开始算 base，adopt 后 offset 直接漂移
+    // （与 branchGeneration 漏搬同类的静默错误）。
+    clone.activeTurnIds = [...this.activeTurnIds];
+    clone.turnFirstRowIndexById = new Map(this.turnFirstRowIndexById);
+    clone.turnRowIdBaseById = new Map(this.turnRowIdBaseById);
     // 分支代次同样要随 clone/adopt 走：ingest 的原子提交路径在候选实例上归约，
     // 漏拷这一项会让 rewind 的 +1 在 adopt 后静默丢失（manifest 键控到旧代次）。
     clone.branchGeneration = this.branchGeneration;
@@ -1257,7 +1333,11 @@ export class ProductProjection {
     this.snapshot = candidate.snapshot;
     this.rowIndexById = candidate.rowIndexById;
     this.hydrationAccumulator = null;
+    this.rowIdOrigin = candidate.rowIdOrigin;
     this.nextRowId = candidate.nextRowId;
+    this.activeTurnIds = candidate.activeTurnIds;
+    this.turnFirstRowIndexById = candidate.turnFirstRowIndexById;
+    this.turnRowIdBaseById = candidate.turnRowIdBaseById;
     this.branchGeneration = candidate.branchGeneration;
     this.streamingTextRowId = candidate.streamingTextRowId;
     this.streamingReasoningRowId = candidate.streamingReasoningRowId;
@@ -5220,8 +5300,51 @@ export class ProductProjection {
     };
   }
 
+  /**
+   * 一个 turn 的 rowId base（IS1，唯一实现 `deriveTurnRowIdBase`）：
+   * `origin + Σ 本 turn 之前各 active turn 的连续块行数`。
+   *
+   * 求值点是 **turn 起始**（第一次给该 turn 分配行时），结果按 turn 缓存——同一轮中途
+   * 再多一行不得重算 base，否则前面已发出的 rowId 会被「推断」成另一个值；而每行都重算
+   * O(turns) 的求和会把冷恢复退化成 O(turns × rows)。
+   */
+  private turnRowIdBase(turnId: string): number {
+    const cached = this.turnRowIdBaseById.get(turnId);
+    if (cached !== undefined) return cached;
+    const found = this.activeTurnIds.indexOf(turnId);
+    // 不在行序里 = 新 turn：它的前序就是当前全部 active turn。
+    const ordinal = found < 0 ? this.activeTurnIds.length : found;
+    const priorRowCounts: number[] = [];
+    for (let index = 0; index < ordinal; index += 1) {
+      priorRowCounts.push(this.turnBlockRowCount(index));
+    }
+    const base = deriveTurnRowIdBase(priorRowCounts, this.rowIdOrigin);
+    this.turnRowIdBaseById.set(turnId, base);
+    return base;
+  }
+
+  /** 第 `ordinal` 个 active turn 的**连续块**行数（与 manifest row_count 同口径）。 */
+  private turnBlockRowCount(ordinal: number): number {
+    const turnId = this.activeTurnIds[ordinal];
+    if (turnId === undefined) return 0;
+    const start = this.turnFirstRowIndexById.get(turnId);
+    if (start === undefined) return 0;
+    const rows = this.snapshot.rows.window;
+    let end = start;
+    while (end < rows.length && rows[end]!.turnId === turnId) end += 1;
+    return end - start;
+  }
+
   private rowBase(event: SessionEvent, turnId: string, entityId = String(event.id)) {
-    const rowId = this.nextRowId++;
+    // 分配**只用**紧凑游标：`nextRowId === rowIdOrigin + window.length` 恒成立（行只追加、
+    // 截断后回退），而 turn 起始处游标恰好等于 `deriveTurnRowIdBase(前序 row_count, origin)`
+    // ——manifest 口径就是它的前缀和声明，两条路径逐值一致由 A3 用例锁住。
+    // 因此「跨 turn 永不回退的全局自增」已经不存在：rewind 后游标回到 compact 位置，
+    // 被截 turn 的 id 被新 turn 复用，不再产生空洞（E1 用例锁住）。
+    // base 本身按同一份行结构派生（`getTurnManifestRowIdBase`），是 Step 5 用 manifest 给
+    // 冷窗口首轮播种时唯一的换算依据。
+    const rowId = this.nextRowId;
+    this.nextRowId = rowId + 1;
     this.entityIdByRowId.set(rowId, entityId);
     return {
       rowId,
@@ -5257,6 +5380,7 @@ export class ProductProjection {
       this.rowIndexById = new Map(
         this.snapshot.rows.window.map((row, index) => [row.rowId, index]),
       );
+      this.syncTurnRowIndexAfterDeltas(previousRowsLength, deltas);
       return;
     }
     let nextIndex = previousRowsLength;
@@ -5265,6 +5389,50 @@ export class ProductProjection {
       this.rowIndexById.set(delta.row.rowId, nextIndex);
       nextIndex += 1;
     }
+    this.syncTurnRowIndexAfterDeltas(previousRowsLength, deltas);
+  }
+
+  /**
+   * 行结构变化的唯一记账点（append 登记首行下标；截断重建整份索引）。
+   *
+   * `rowId` 游标与 turn 行序是**同一份状态**：IS1 的 base 由「前序 turn 的块行数」推出，
+   * 所以截断后游标必须回到 `origin + 剩余行数`——这正是「rewind 复用被截轮的 base、
+   * 不再产生空洞」的实现，也是 manifest 能成为权威的数学前提。
+   *
+   * 只碰 turn 索引与 rowId 游标，**不碰** `rowIndexById`：hydrate 的批量路径里后者由
+   * `MutableConversationSnapshotAccumulator` 原地维护，这里重建会换掉它持有的那个 Map。
+   */
+  private syncTurnRowIndexAfterDeltas(
+    previousRowsLength: number,
+    deltas: readonly ConversationDelta[],
+  ): void {
+    if (deltas.some((delta) => delta.op === "row.removed")) {
+      this.rebuildTurnRowIndex();
+      return;
+    }
+    let index = previousRowsLength;
+    for (const delta of deltas) {
+      if (delta.op !== "row.appended") continue;
+      this.noteAppendedRowTurn(delta.row.turnId, index);
+      index += 1;
+    }
+  }
+
+  private noteAppendedRowTurn(turnId: string, index: number): void {
+    if (this.turnFirstRowIndexById.has(turnId)) return;
+    this.turnFirstRowIndexById.set(turnId, index);
+    this.activeTurnIds.push(turnId);
+  }
+
+  private rebuildTurnRowIndex(): void {
+    this.activeTurnIds = [];
+    this.turnFirstRowIndexById = new Map();
+    // base / 分配计数都按行结构求值，截断后可能落在别的块上——整份丢掉让它们下次按新结构重算。
+    this.turnRowIdBaseById = new Map();
+    this.snapshot.rows.window.forEach((row, index) => {
+      this.noteAppendedRowTurn(row.turnId, index);
+    });
+    this.nextRowId = this.rowIdOrigin + this.snapshot.rows.window.length;
   }
 
   private findToolRow(toolCallId: string): ToolCallRow | undefined {

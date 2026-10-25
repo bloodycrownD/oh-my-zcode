@@ -416,8 +416,7 @@ test("E4: 重写到零保留 turn（rewind 到首条）后该代次读作 missin
   db.close();
 });
 
-test("E5: 同一 ordinal 被新 turn 占用时，旧分支残留被逐出（不撞主键）", async () => {
-  const db = emptyDb();
+test("E5: 同一 ordinal 被新 turn 占用时，旧分支残留被逐出（不撞主键）", async () => {  const db = emptyDb();
   await seedThreeTurns(db);
   // 模拟旧语义 rewind 后新 turn 复用 ordinal 1（manifest 还没来得及重写）。
   await upsertTurnManifest(db, {
@@ -444,8 +443,45 @@ test("E5: 同一 ordinal 被新 turn 占用时，旧分支残留被逐出（不�
   db.close();
 });
 
-// ── F: 清单缺项 → 整表重建（Step 3 的「未登记 turn」检测）────────────────────
+test("E6: 回写 ordinal 从 manifest 的 turn 数起（窗口化物化不得逐出头部真实轮次）", async () => {
+  const db = emptyDb();
+  await seedThreeTurns(db);
+  // 冷窗口只物化了尾部两轮：调用方必须从 ordinal 3 起写（Step 4 的 ordinalBase），
+  // 否则仓储的「同 ordinal 逐出」会把 t1/t3 当成被 rewind 的残留删掉。
+  await upsertTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    turn: turn("t4", 3, 2, { rowCountSource: "cold" }),
+    queries: [query("t4", 0, 30, 2)],
+  });
+  await upsertTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    turn: turn("t5", 4, 7, { rowCountSource: "cold" }),
+    queries: [query("t5", 0, 32, 7)],
+  });
+  const result = await readTurnManifest(db, {
+    sessionID: SESSION,
+    branchGeneration: 0,
+    expectedProjectionSchemaVersion: VERSION,
+  });
+  assert.equal(result.status, "ok");
+  assert.deepEqual(
+    result.snapshot.turns.map((item) => item.turnId),
+    ["t1", "t2", "t3", "t4", "t5"],
+    "头部真实轮次必须原样保留",
+  );
+  assert.deepEqual(
+    result.snapshot.turns.map((item) => item.rowCountSource),
+    ["live", "live", "live", "cold", "cold"],
+  );
+  // 全序计数随累加平移：base(t4) = 1 + 3 + 5 + 4。
+  assert.equal(result.snapshot.totalCount, 3 + 5 + 4 + 2 + 7);
+  assert.equal(result.snapshot.firstRowId, 1);
+  db.close();
+});
 
+// ── F: 清单缺项 → 整表重建（Step 3 的「未登记 turn」检测）────────────────────
 test("F1: ordinal 出现空洞 → inconsistent/ordinalGap，且不做账目修正", async () => {
   const db = emptyDb();
   await seedThreeTurns(db);

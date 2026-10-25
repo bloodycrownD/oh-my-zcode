@@ -146,7 +146,15 @@ import type {
   SessionSubagentsSeed,
   SessionUsageSeed,
 } from "./product-projection.js";
-import type { TurnManifestEntry } from "./turn-manifest-entry.js";
+import {
+  TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+  type TurnManifestEntry,
+} from "./turn-manifest-entry.js";
+import {
+  decideRowManifestAction,
+  type SessionRowManifestReadOutcome,
+  type SessionRowManifestReadRequest,
+} from "./session-row-manifest.js";
 import type { ConversationRowTargetAction } from "./product-projection.js";
 import { SessionsIndexFanoutThrottle } from "./sessions-index-fanout-throttle.js";
 import { SessionsIndexPublisher } from "./sessions-index-publisher.js";
@@ -350,6 +358,22 @@ export interface V4GatewayHost {
     sessionId: string,
     input: Omit<TurnManifestBranchRewriteInput, "sessionID">,
   ): void | Promise<void>;
+  /**
+   * turn 行清单读取（IS5 的唯一读路径实现，宿主负责接 store）。
+   *
+   * 缺席（旧宿主 / 测试桩）时 gateway 完全不读清单：`openPhases.manifestMs` 缺席
+   * （缺席≠0），全序量回退到投影现算——不得把「没实现」当成「空分支」。
+   */
+  readRowManifest?(
+    sessionId: string,
+    input: SessionRowManifestReadRequest,
+  ): Promise<SessionRowManifestReadOutcome>;
+  /**
+   * 失效该会话的全序消息索引缓存（`listSessionMessageIndex` 是 O(messages) 读）。
+   * gateway 在**任何** live ingest 上调一次：新消息落库 / rewind 截断都走同一条事件流，
+   * 这是不会漏的粗粒度失效点。
+   */
+  invalidateRowManifestIndex?(sessionId: string): void;
   /** 完整 chunk transaction commit 后一次性写 session artifact。 */
   putSessionAttachment?(
     sessionId: string,
@@ -545,21 +569,41 @@ interface V4SubscribeDispatchResult<TFrame> {
 }
 
 /**
- * 一次 hydration 内两段的耗时（毫秒），供 ACK 的 `openPhases` 回填。
+ * 一次 hydration 内三段的耗时（毫秒），供 ACK 的 `openPhases` 回填。
  *
  * 产生点只有 `performHydration`：`mergeMs` = `loadPersistedEvents`（持久事件合并 /
- * transcript 合成），`rehydrateMs` = `publisher.rehydrate`（投影重建）。
- * 早退分支（保留健康 live publisher）没有 rehydrate，故两者都可缺席。
+ * transcript 合成），`rehydrateMs` = `publisher.rehydrate`（投影重建），`manifestMs` =
+ * row manifest 读路径（step 4 起）。早退分支（保留健康 live publisher）三者都可缺席。
  */
 interface HydrationPhases {
   mergeMs?: number;
   rehydrateMs?: number;
+  /**
+   * row manifest 读路径耗时（IS5 的读端：manifest 两张表 + 消息索引观察）。
+   * 产生点只有 `performHydration`，且只在宿主实现 `readRowManifest` 时有值——
+   * 旧宿主/测试桩下缺席（**缺席 ≠ 0**）。
+   */
+  manifestMs?: number;
   /**
    * 本次 hydration 收口时刻（performance.now()）。ACK 组装时用它判断「这几段是不是
    * 刚落在这条 subscribe 的等待窗口内」——热切换/已 hydrate 的会话不会把上一次的耗时
    * 冒充成本次的分段。
    */
   finishedAtMs?: number;
+}
+
+/**
+ * manifest 读路径的结论摘要（`manifestFallback` 打点 + 测试探针）。
+ *
+ * `action` 是唯一判定（`decideRowManifestAction`）：`materialize-and-rebuild` =
+ * 本次冷开走全量物化并回写整代 manifest。三种降级原因共用它，不各写一条分支。
+ */
+interface RowManifestOutcomeSummary {
+  action: "use-manifest" | "materialize-and-rebuild";
+  /** use-manifest 时为 "manifest"；否则是降级原因。 */
+  reason: string;
+  detail?: Extract<SessionRowManifestReadOutcome, { kind: "fallback" }>["detail"];
+  at: number;
 }
 
 function encodeReservedTopicFrame(
@@ -673,6 +717,14 @@ export class ConversationV4Gateway {
    * 只做观测，不参与任何判定。
    */
   private readonly lastHydrationPhases = new Map<string, HydrationPhases>();
+  /**
+   * 最近一次 manifest 读路径的结论（观测 + 测试探针）。
+   *
+   * 这里是 `manifestFallback` 打点的唯一落点：`missing` / `schemaMismatch` /
+   * `inconsistent` 三种状态**同样**记成 `fallback`（spec Step 3 交给 Step 4 钉住的约束），
+   * 区分只体现在 `reason` / `detail` 上，动作完全一致（全量物化 + 重建 manifest）。
+   */
+  private readonly rowManifestOutcomes = new Map<string, RowManifestOutcomeSummary>();
   /**
    * 本进程内观测到的 runtime 激活耗时（毫秒）。
    *
@@ -1008,6 +1060,10 @@ export class ConversationV4Gateway {
 
   private ingestNormalizedEvent(sessionId: string, event: SessionEvent): void {
     const publisher = this.ensurePublisher(sessionId);
+    // 全序消息索引是 O(messages) 读且按会话缓存（Step 5/7 的翻页要反复用同一份 id 序）。
+    // 任何 live 事件都可能是「新消息落库 / rewind 截断」的载体：这里无条件失效一次，
+    // 粗粒度但**不会漏**——按事件类型白名单的失效点迟早会漏掉一个新事件类型。
+    this.host.invalidateRowManifestIndex?.(sessionId);
     // rewind 的 manifest 重写必须知道**截断前**的代次与 turn 顺序：投影内部一旦截断，
     // 旧代次就只剩「还在的新行」，拿不到该复制什么。
     const manifestBranchBefore =
@@ -1188,6 +1244,144 @@ export class ConversationV4Gateway {
     } catch (error) {
       this.host.onError?.("v4.turnManifest.rewind", error, { phase: "rewind", sessionId });
     }
+  }
+
+  /**
+   * 冷开读路径（IS5）：读 manifest → 判定可用性 → 注入 publisher 或回写重建。
+   *
+   * 顺序钉死为「全量物化之后」：`observedRowCounts` 与 `observedTurnIds` 都来自投影行，
+   * 读之前物化就不存在「账目修正」与「未登记 turn」这两个观察。
+   *
+   * 三条降级（missing / schemaMismatch / inconsistent）走 `decideRowManifestAction` 的同一
+   * 分支：全量物化已经是既成事实（本阶段冷开就是全量），差别只在**回写重建 manifest**。
+   * 这是 `manifestFallback` 的唯一打点处；Step 5 的窗口化物化会在这里改成
+   * `fullyMaterialized: false` 并接按需物化。
+   */
+  private async hydrateRowManifest(
+    sessionId: string,
+    publisher: ConversationTopicPublisher,
+    phases: HydrationPhases,
+  ): Promise<void> {
+    const read = this.host.readRowManifest;
+    if (!read) return;
+    const startedAt = performance.now();
+    const branch = publisher.getTurnManifestBranchState();
+    try {
+      const outcome = await read(sessionId, {
+        branchGeneration: branch.branchGeneration,
+        expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+        observedTurnIds: branch.turnIds,
+        observedRowCounts: publisher.getTurnRowCounts(),
+        fullyMaterialized: true,
+      });
+      const action = decideRowManifestAction(outcome);
+      if (outcome.kind === "manifest") {
+        publisher.seedRowManifestFacts(outcome.facts);
+        this.rowManifestOutcomes.set(sessionId, {
+          action,
+          reason: "manifest",
+          at: Date.now(),
+        });
+        if (outcome.manifestAdjusted) {
+          // 账目修正：冷物化出的行数与 live 写入的 row_count 不同，只改计数不重读正文。
+          // 必须打点，否则「清单被悄悄改过」会被读成「manifest 从来没生效」。
+          this.host.onDebug?.(
+            `v4 row manifest adjusted session=${sessionId} turns=${outcome.adjustedTurnIds.length}`,
+          );
+        }
+        if (!outcome.messageIndexChecked) {
+          this.host.onDebug?.(`v4 row manifest message index unavailable session=${sessionId}`);
+        }
+        return;
+      }
+      this.rowManifestOutcomes.set(sessionId, {
+        action,
+        reason: outcome.reason,
+        ...(outcome.detail === undefined ? {} : { detail: outcome.detail }),
+        at: Date.now(),
+      });
+      this.host.onDebug?.(
+        `v4 row manifest fallback session=${sessionId} reason=${outcome.reason} ` +
+          `turns=${branch.turnIds.length}`,
+      );
+      // missing = 该代次本来就没有行，没有可剪的尾部；schemaMismatch / inconsistent 的残留
+      // 行必须剪掉，否则读端会一直看到「清单比投影长」而反复降级。
+      this.rebuildRowManifestFromProjection(sessionId, publisher, {
+        prune: outcome.reason !== "missing",
+      });
+    } catch (error) {
+      // 读路径自身已把 store 异常收敛成 fallback/readFailed；到这里只剩宿主实现抛错。
+      // 不吞：记一笔并按「没有清单」处理，冷开不能因为清单读失败整体失败。
+      this.rowManifestOutcomes.set(sessionId, {
+        action: "materialize-and-rebuild",
+        reason: "readFailed",
+        at: Date.now(),
+      });
+      this.host.onError?.("v4.rowManifest.read", error, { phase: "read", sessionId });
+      // 读失败时 store 状态未知，不做剪枝（剪枝是一次删除，宁可少做）。
+      this.rebuildRowManifestFromProjection(sessionId, publisher);
+    } finally {
+      phases.manifestMs = Math.max(0, Math.round(performance.now() - startedAt));
+    }
+  }
+
+  /**
+   * 降级后的整代回写：把全量物化出的每一轮写成 `row_count_source = 'cold'`，再剪掉投影里
+   * 已不存在的尾部 ordinal。
+   *
+   * 为什么要剪：`upsertTurnManifest` 只保证「本 turn 覆盖写」，manifest 里比投影更长的
+   * 尾部（rewind 未被记录 / schema 旧残留）不会被它删掉，读端下一轮仍会看到
+   * `unobservedTurnIds` → 再降级 → 死循环。剪枝走 `rewriteTurnManifestBranch` 的同代次
+   * 原地过滤（`sourceGeneration === branchGeneration`），它正是「按给定 keptTurnIds 重排
+   * ordinal 并删掉其余」的唯一实现。
+   *
+   * `ordinalBase` 是这条路径唯一的危险参数：仓储的 `insertTurnRow` 会把「同一 ordinal 上的
+   * 另一个 turn」当成被 rewind 截掉的残留逐出。全量物化从 0 起；**窗口化物化必须从
+   * manifest 已有的 turn 数起**（Step 5），并且届时的 `keptTurnIds` 必须是整条分支，
+   * 否则剪枝会把没物化的头部真实轮次删掉。
+   *
+   * 写入链是 detached 的：失败只打点——清单缺失的后果是下次冷开再降级一次，不是数据错误。
+   */
+  private rebuildRowManifestFromProjection(
+    sessionId: string,
+    publisher: ConversationTopicPublisher,
+    options: { ordinalBase?: number; prune?: boolean } = {},
+  ): void {
+    const record = this.host.recordTurnManifest;
+    if (!record) return;
+    const branch = publisher.getTurnManifestBranchState();
+    const entries = publisher.getTurnManifestEntriesForBranch({
+      rowCountSource: "cold",
+      ...(options.ordinalBase === undefined ? {} : { ordinalBase: options.ordinalBase }),
+    });
+    if (entries.length === 0) return;
+    const writes = entries.map((entry) =>
+      Promise.resolve()
+        .then(() => record(sessionId, entry))
+        .catch((error: unknown) => {
+          this.host.onError?.("v4.turnManifest.record", error, {
+            phase: "rebuild",
+            sessionId,
+            turnId: entry.turn.turnId,
+          });
+        }),
+    );
+    const rewrite = this.host.rewriteTurnManifestBranch;
+    if (options.prune !== true || !rewrite) {
+      void Promise.all(writes);
+      return;
+    }
+    void Promise.all(writes).then(() =>
+      Promise.resolve(
+        rewrite(sessionId, {
+          branchGeneration: branch.branchGeneration,
+          sourceGeneration: branch.branchGeneration,
+          keptTurnIds: branch.turnIds,
+        }),
+      ).catch((error: unknown) => {
+        this.host.onError?.("v4.turnManifest.rewind", error, { phase: "rebuild-prune", sessionId });
+      }),
+    );
   }
 
   /**
@@ -1642,6 +1836,9 @@ export class ConversationV4Gateway {
         openPhases: {
           version: 1,
           viewReadyMs: Math.max(0, Math.round(performance.now() - viewReadyStartedAt)),
+          ...(freshHydrationPhases?.manifestMs !== undefined
+            ? { manifestMs: freshHydrationPhases.manifestMs }
+            : {}),
           ...(freshHydrationPhases?.mergeMs !== undefined
             ? { mergeMs: freshHydrationPhases.mergeMs }
             : {}),
@@ -3058,6 +3255,7 @@ export class ConversationV4Gateway {
     for (const buffer of this.hydrationBuffers.values()) buffer.cancelled = true;
     this.hydrationBuffers.clear();
     this.lastHydrationPhases.clear();
+    this.rowManifestOutcomes.clear();
     this.runtimeActivationMs.clear();
     this.hydrationInFlight.clear();
     this.readyFlights.clear();
@@ -3091,6 +3289,16 @@ export class ConversationV4Gateway {
     const reservation = publisher.reserveFlush(state.subscriptionId);
     if (!reservation || !reservation.commit()) return null;
     return reservation.frame;
+  }
+
+  /**
+   * 测试探针 / 诊断：某会话最近一次 manifest 读路径的结论。
+   *
+   * 生产可观测面是 `v4 row manifest fallback ...` 的 debug 行与 `rowManifestOutcomes`；
+   * 这个 getter 让「降级打点」在测试里可断言（不必解析日志）。
+   */
+  getRowManifestOutcome(sessionId: string): RowManifestOutcomeSummary | null {
+    return this.rowManifestOutcomes.get(sessionId) ?? null;
   }
 
   private ensurePublisher(sessionId: string): ConversationTopicPublisher {
@@ -3411,6 +3619,10 @@ export class ConversationV4Gateway {
     if (loaded.usageSeed === undefined) {
       await this.seedPublisherUsage(sessionId, publisher, persistedMessages);
     }
+    // IS5 读路径：全量物化已经完成，此时才能拿投影的 turn 序与行数去核对 manifest。
+    // 放在 seeds 之后、`hydratedSessions.add` 之前：ACK 的 snapshot 编码必须已经能看到
+    // 注入的 manifest 事实（否则首帧的 totalCount 会先按投影现算一次，再被下一帧改掉）。
+    await this.hydrateRowManifest(sessionId, publisher, phases);
     for (const [routeKey, state] of this.flushStates) {
       if (state.sessionId !== sessionId) continue;
       if (!publisher.hasSubscription(state.subscriptionId, state.connectionId)) continue;

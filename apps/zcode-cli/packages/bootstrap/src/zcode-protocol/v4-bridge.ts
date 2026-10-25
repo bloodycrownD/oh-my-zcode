@@ -38,6 +38,7 @@ import {
   mergeColdConversationEvents,
 } from "../zcode-protocol-v4/cold-event-merge.js";
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
+import { createSessionRowManifestReader } from "../zcode-protocol-v4/session-row-manifest.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
   ConversationRowTargetResolution,
@@ -1411,6 +1412,11 @@ export function createConversationV4Gateway(
       return [];
     }
   };
+  // manifest 读端：一个网关实例一份（消息索引缓存按会话键控，跨读复用；
+  // store 用 getter，deps 可能在构造后才注入）。
+  const rowManifestReader = createSessionRowManifestReader({
+    store: () => context.deps.sessionStore,
+  });
   return new ConversationV4Gateway({
     cliVersion: context.deps.version,
     sessionExists: (sessionId) => context.sessions.has(sessionId),
@@ -1477,6 +1483,12 @@ export function createConversationV4Gateway(
           });
         });
     },
+    // ── turn 行清单（row manifest）读路径（IS5，Step 4）─────────────
+    // 与写入同一份端口；读端逻辑（判定 / 账目修正 / 消息索引观察）住在
+    // `session-row-manifest.ts`，本层只负责把 store 交出去。
+    readRowManifest: (sessionId, input) => rowManifestReader.read(sessionId as SessionId, input),
+    invalidateRowManifestIndex: (sessionId) =>
+      rowManifestReader.invalidateMessageIndex(sessionId as SessionId),
     // Gateway 的单一 READY promise 负责并发与水位；binder 只恢复 runtime。
     resumePersistedSession: async (
       sessionId,
