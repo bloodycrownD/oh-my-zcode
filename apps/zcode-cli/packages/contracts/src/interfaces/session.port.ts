@@ -359,6 +359,17 @@ export type TurnSteerResult =
       pendingInputId: string;
       queueLength: number;
       turnId: TurnId;
+      /**
+       * 这条输入**实际**落在哪条投递车道（spec edit-resend-stale-text / I5）。
+       *
+       * - `guide`：内联进当前轮，模型已经看到这条输入；
+       * - `queue`：留在队列等下一轮。
+       *
+       * 必须由 Core 在 admission 现场给出，不能让调用方按 `queueDelivery` 参数或
+       * 附件情况复算：`prompt-admission.ts` 会在附件存在或 turn 不可 steer 时把
+       * `guide` 回退成 `queue`，那套回退规则只有这一处。
+       */
+      delivery: TurnSteerDeliveryMode;
     }
   | {
       activeTurnId?: TurnId;

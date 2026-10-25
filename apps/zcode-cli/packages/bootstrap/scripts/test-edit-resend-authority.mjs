@@ -43,6 +43,10 @@
  * T-RW5 不自伤：排除自持 id 后，**没有任何 settle 调用**指向它、账本仍为 admitted（不能只
  *      断言终态 promoted：误 settle 后 promote 会因 status='admitted' 前置而硬失败，两种
  *      事故的终态都是「没有 promoted」），且它随后仍能正常提升起轮。
+ * T-DA1 投递态上抛（Step 10）：ACK 必带 `delivery` 三值；`startNow` / `queue` / `guide`
+ *      逐个断言，queueItemId 与 admission 权威 id 同源；契约三值 + 可选字段可解码。
+ * T-DA2 旧结果兼容 + UI 分流（Step 11）：缺省 `delivery` 读成「无投递事实」（不反推
+ *      startNow 也不反推 queue）；UI 只在 queue 时提示排队、且 queued 不收敛编辑态。
  *
  * 运行：`pnpm --dir apps/zcode-cli/packages/bootstrap run test:edit-resend-authority`
  */
@@ -58,6 +62,8 @@ const bootstrapSrc = join(here, "..", "src");
 const cliPackages = join(here, "..", "..");
 const coreSrc = join(cliPackages, "core", "src");
 const contractsSrc = join(cliPackages, "contracts", "src");
+/** UI 的 v4 目录：I5 的「UI 不得在 queued 时表现为成功」只有源码形状 + 纯函数两层可断言。 */
+const uiV4Src = join(here, "..", "..", "..", "..", "..", "packages", "ui", "src", "v4");
 
 const contractsEvents = await import(
   pathToFileURL(join(contractsSrc, "events", "session.events.ts")).href
@@ -76,10 +82,13 @@ const { rebuildProjection } = await import(
 );
 const {
   completeExternalQueueDrain,
+  createPendingInputId,
   discardPendingInput,
   discardRewoundPendingSteerInputs,
+  enqueueDeferredInput,
   fallbackPendingGuidesToQueue,
   setQueueAutoDrain,
+  steerTurn,
 } = await import(pathToFileURL(join(coreSrc, "runtime", "methods", "steering.ts")).href);
 const { ProductProjection } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "product-projection.ts")).href
@@ -129,7 +138,11 @@ const { resolveEditFailureComposerDraft } = await import(
     ),
   ).href
 );
-const { commandAckSchema } = await import("@zcode/shared/zcode-protocol-v4");
+const { commandAckSchema, commandResultSchema } = await import("@zcode/shared/zcode-protocol-v4");
+// I5 的 UI 判据（纯函数；packages/ui 无 jsdom，与 editFailureComposerRestore 同一层）。
+const { resolveEditDelivery, shouldCollapseEditState } = await import(
+  pathToFileURL(join(uiV4Src, "editDeliveryOutcome.ts")).href
+);
 
 const { SessionEventType, createSessionEvent } = contractsEvents;
 
@@ -283,11 +296,14 @@ function createRuntime({ ledger }) {
     appendEvent,
     completeExternalQueueDrain,
     createEvent,
+    createPendingInputId,
     discardPendingInput,
     discardRewoundPendingSteerInputs,
+    enqueueDeferredInput,
     fallbackPendingGuidesToQueue,
     notifyEventSinks,
     setQueueAutoDrain,
+    steerTurn,
   };
   return runtime;
 }
@@ -1194,7 +1210,11 @@ function applyFileRewind(harness, commitAfterApply) {
  * `state.revert` 是 `setRevert` 的替身：rewind 成功才写目标 messageId，恢复会话
  * （spec 已否决的 restoreRevert）只会把它写回 null/旧值。
  */
-function createEditTransactionHarness({ commitFailure = false, startMode = "started" } = {}) {
+function createEditTransactionHarness({
+  commitFailure = false,
+  queuedDelivery = "queue",
+  startMode = "started",
+} = {}) {
   const calls = {
     cancels: [],
     fileApplies: 0,
@@ -1265,8 +1285,10 @@ function createEditTransactionHarness({ commitFailure = false, startMode = "star
           };
         }
         if (state.startMode === "queued") {
+          // `delivery` 是 Core admission 的现场事实（TurnSteerResult）：guide = 内联进
+          // 当前轮，queue = 等下一轮。prompt-turn 只转述，不参与判定。
           return {
-            delivery: "queue",
+            delivery: queuedDelivery,
             kind: "queued",
             pendingInputId: "pending-rt-queued",
             queueLength: 1,
@@ -1526,6 +1548,7 @@ test("T-RT5 newText 被 queued 不算失败：不触发 abort、不结算账本�
   const result = await forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope());
 
   assert.equal(result?.disposition, "rewind", "排队是成功投递（I5 负责可见性），不是失败");
+  assert.equal(result?.delivery, "queue", "ACK 必须如实带上投递态（I5），不能只有 success");
   assert.equal(harness.calls.sendInputs.length, 1);
   assert.equal(harness.calls.sendInputs[0].text, EDIT_NEW_TEXT);
   assert.deepEqual(
@@ -1534,6 +1557,198 @@ test("T-RT5 newText 被 queued 不算失败：不触发 abort、不结算账本�
     "queued 走 abort 会把它刚排进队列的输入结算掉 = 静默丢输入",
   );
   assert.equal(harness.state.revert, REWIND_TARGET_MESSAGE_ID, "截断按用户意图保留");
+});
+
+// ── T-DA1 / T-DA2 投递态上抛与 UI 分流（Step 10-11 / I5）──────────────────────
+
+test("T-DA1 queued 时 ACK 必须带 delivery 三值 + queueItemId（queued 不得表现为成功）", async () => {
+  // ① 真起跑：startNow，且没有队列项可指。
+  const started = createEditTransactionHarness({ startMode: "started" });
+  const startedResult = await forkEditRetryHandlers.editUserQuery(
+    started.host,
+    started.makeEnvelope(),
+  );
+  assert.equal(startedResult?.disposition, "rewind");
+  assert.equal(
+    startedResult?.delivery,
+    "startNow",
+    "started_turn 的投递态必须是 startNow（不能一律写 queue 让 UI 每次都提示排队）",
+  );
+  assert.equal(startedResult?.queueItemId, undefined, "startNow 没有队列项，不许编一个 id");
+
+  // ② 排队：ACK 如实说 queue，并指向投影里那条队列项（删除/撤回要点得中）。
+  const queued = createEditTransactionHarness({ startMode: "queued" });
+  const queuedResult = await forkEditRetryHandlers.editUserQuery(
+    queued.host,
+    queued.makeEnvelope(),
+  );
+  assert.equal(queuedResult?.disposition, "rewind", "排队仍是成功投递，不是失败（T-RT5）");
+  assert.equal(
+    queuedResult?.delivery,
+    "queue",
+    "这就是 I5 的核心：queued 过去只有 success，客户端无法区分「已起跑」与「排队」",
+  );
+  assert.equal(
+    queuedResult?.queueItemId,
+    "queue_cmd-rt-edit",
+    "队列项 id 必须与 admission 权威 id 同源（= 投影 intent.queueItemId）",
+  );
+  assert.deepEqual(queued.calls.cancels, [], "排队不得触发 abort");
+
+  // ③ guide：内联进当前轮，与 queue 必须可区分——三值不是两值。
+  const guided = createEditTransactionHarness({ startMode: "queued", queuedDelivery: "guide" });
+  const guidedResult = await forkEditRetryHandlers.editUserQuery(
+    guided.host,
+    guided.makeEnvelope(),
+  );
+  assert.equal(
+    guidedResult?.delivery,
+    "guide",
+    "Core 说 guide 就必须报 guide：若在 ACK 层把 queued 一律写成 queue，客户端会把「模型已看到」误报成「排队中」",
+  );
+  assert.equal(guidedResult?.queueItemId, "queue_cmd-rt-edit", "guide 也是队列/待输入项，给 id");
+
+  // ④ 契约层：三值都能过 result schema，且 queueItemId 可携带。
+  for (const delivery of ["startNow", "queue", "guide"]) {
+    const parsed = commandResultSchema.parse({
+      delivery,
+      disposition: "rewind",
+      sessionId: SESSION_ID,
+      type: "editUserQuery",
+      ...(delivery === "startNow" ? {} : { queueItemId: "queue_cmd-rt-edit" }),
+    });
+    assert.equal(parsed.delivery, delivery);
+  }
+  // ACK 层同样能承载这些字段（客户端从 ack.result 读）。
+  const ack = commandAckSchema.parse({
+    commandId: "cmd-rt-edit",
+    result: {
+      delivery: "queue",
+      disposition: "rewind",
+      queueItemId: "queue_cmd-rt-edit",
+      sessionId: SESSION_ID,
+      type: "editUserQuery",
+    },
+    revisionAtDecision: 0,
+    status: "accepted",
+  });
+  assert.equal(ack.result?.delivery, "queue");
+});
+
+test("T-DA1 来源：Core admission 回执自己带 delivery（steer 与 deferred 两条车道，不留给调用方复算）", async () => {
+  const context = createContext();
+  const runtime = context.runtime;
+
+  // 无活跃轮 → deferred 入队车道。
+  const deferred = await enqueueDeferredInput.call(runtime, {
+    input: DEFERRED_TEXT,
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.equal(deferred.kind, "queued");
+  assert.equal(deferred.delivery, "queue", "缺省落到 queue 车道（与事件里的 delivery 同一个值）");
+  const guideDeferred = await enqueueDeferredInput.call(runtime, {
+    delivery: "guide",
+    input: DEFERRED_TEXT,
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.equal(guideDeferred.delivery, "guide", "guide 请求必须原样回执，不能被 ACK 层抹成 queue");
+
+  // 有活跃轮 → steer 车道：request.delivery 缺省仍然是 queue。
+  runtime.activeTurn = {
+    kind: "user",
+    pendingInputs: [],
+    steerable: true,
+    traceContext: TRACE_CONTEXT,
+    turnId: TURN_KEPT,
+  };
+  const steered = await steerTurn.call(runtime, {
+    input: DEFERRED_TEXT,
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.equal(steered.kind, "queued");
+  assert.equal(steered.delivery, "queue", "steer 车道的缺省投递是 queue（不是 guide）");
+  const guideSteered = await steerTurn.call(runtime, {
+    delivery: "guide",
+    input: DEFERRED_TEXT,
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.equal(guideSteered.delivery, "guide");
+});
+
+test("T-DA2 旧 CLI 不回 delivery：UI 按未知处理（不弹排队提示、沿用旧收敛）", () => {
+  const legacyAck = {
+    commandId: "cmd-rt-edit",
+    result: { disposition: "rewind", sessionId: SESSION_ID, type: "editUserQuery" },
+    revisionAtDecision: 0,
+    status: "accepted",
+  };
+  // 契约：缺省 delivery 仍能解码（旧 CLI → 新客户端）。
+  assert.equal(commandAckSchema.parse(legacyAck).result?.delivery, undefined);
+  assert.equal(
+    resolveEditDelivery(legacyAck),
+    null,
+    "缺字段只能读成「无投递事实」，不许反推 startNow（假成功）也不许反推 queue（对旧 CLI 每次都弹提示）",
+  );
+  assert.equal(shouldCollapseEditState(legacyAck), true, "无投递事实沿用旧行为：收敛编辑态");
+  // 枚举外的值同样只能读成「未知」：这是「只认显式三值」的边界，不是 `?? null` 的透传。
+  assert.equal(
+    resolveEditDelivery({
+      ...legacyAck,
+      result: { ...legacyAck.result, delivery: "later" },
+    }),
+    null,
+    "未知投递值不得当成事实带进 UI 分流（宽容解码会让新字段悄悄改变行为）",
+  );
+  // 旧宿主可能根本没有 ACK（void / true）：同样不许抛、不许改变收敛行为。
+  assert.equal(resolveEditDelivery(undefined), null);
+  assert.equal(shouldCollapseEditState(undefined), true);
+  assert.equal(shouldCollapseEditState(true), true);
+
+  // 失败没有被拒结果：即便带 delivery 也没有投递事实。
+  const rejectedWithDelivery = {
+    ...legacyAck,
+    result: {
+      delivery: "queue",
+      disposition: "rewind",
+      sessionId: SESSION_ID,
+      type: "editUserQuery",
+    },
+    status: "rejected",
+  };
+  assert.equal(
+    resolveEditDelivery(rejectedWithDelivery),
+    null,
+    "只有 accepted/duplicate 才谈投递态",
+  );
+
+  // UI 分流的唯一判据：queue 不收敛，其余（含未知）收敛。
+  const withDelivery = (delivery) => ({
+    ...legacyAck,
+    result: { ...legacyAck.result, ...(delivery ? { delivery } : {}) },
+  });
+  assert.equal(shouldCollapseEditState(withDelivery("queue")), false, "queued 必须留着编辑态");
+  assert.equal(shouldCollapseEditState(withDelivery("guide")), true, "guide 已内联进当前轮 = 成功");
+  assert.equal(shouldCollapseEditState(withDelivery("startNow")), true);
+});
+
+test("T-DA2 UI 接线：SessionPane 只对 queue 提示、ConversationRowView 用同一判据决定是否收敛", () => {
+  const paneSource = stripComments(readFileSync(join(uiV4Src, "SessionPane.tsx"), "utf8"));
+  assert.match(
+    paneSource,
+    /if \(resolveEditDelivery\(ack\) === "queue"\) \{\s*\n\s*toast\(intl\.formatMessage\(\{ id: "chat\.edit\.queued" \}\)/,
+    "queued 必须给用户一条「已排队、未立即发送」的提示（否则只有日志里看得见）",
+  );
+  const rowSource = stripComments(readFileSync(join(uiV4Src, "ConversationRowView.tsx"), "utf8"));
+  assert.match(
+    rowSource,
+    /if \(shouldCollapseEditState\(result\)\) setEditing\(false\);/,
+    "收敛编辑态必须过 I5 判据，不得再无条件 setEditing(false)",
+  );
+  assert.doesNotMatch(
+    rowSource,
+    /if \(result !== false\) \{\s*\n\s*setEditing\(false\);/,
+    "旧的无条件收敛形态必须消失（它正是「queued 表现为成功」的现场）",
+  );
 });
 
 // ── T-RW6 删空队列复位 autoDrain（Step 5/6 同一条铁律的残留）─────────────────

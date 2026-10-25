@@ -50,6 +50,7 @@ import { useServices } from "@/hooks/useServices.js";
 import { useDynamicWorkflowAvailability } from "@/hooks/useDynamicWorkflowAvailability.js";
 import { resolveWorkflowResumeHandler } from "@/v4/workflowResumeGate.js";
 import { resolveEditFailureComposerDraft } from "@/v4/editFailureComposerRestore.js";
+import { resolveEditDelivery } from "@/v4/editDeliveryOutcome.js";
 import {
   workflowSessionModelOf,
   type WorkflowRunSettingsChange,
@@ -2511,6 +2512,17 @@ export function SessionPane({
         return false;
       }
       // fork ACK 只做旧协议解码兼容；新 edit 永不导航 child。blocked 由行内冲突弹窗处理。
+      // I5（spec edit-resend-stale-text）：`queued` 是「命令成功、但这一轮没起跑」。
+      // 过去它和 startNow 一样只有 success，用户看到编辑器消失就以为消息已发出，
+      // 实际输入排在队列里等下一轮。这里必须改口（行内编辑态由 ConversationRowView
+      // 保持不收敛，两处合起来才是完整语义）。
+      if (resolveEditDelivery(ack) === "queue") {
+        toast(intl.formatMessage({ id: "chat.edit.queued" }), {
+          dismissible: true,
+          position: "bottom-center",
+          variant: "info",
+        });
+      }
       return ack;
     },
     [createSubmissionFromComposer, dispatchCommand, intl, sessionId, workspaceKey],

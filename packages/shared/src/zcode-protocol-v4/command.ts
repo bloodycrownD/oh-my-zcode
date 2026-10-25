@@ -406,6 +406,20 @@ export const commandResultSchema = z.discriminatedUnion("type", [
     sessionId: z.string().min(1),
     reasonCode: z.string().min(1).optional(),
     preview: v4ConversationFileRewindPreviewResultSchema.optional(),
+    /**
+     * 这次编辑重发实际落在哪条投递车道（spec edit-resend-stale-text / I5，与
+     * `inputAccepted` / `inputDisposition` 的 `delivery` 同源同值）。
+     *
+     * 为什么必须进 ACK：`queued` 在过去是**静默成功**——CLI 返回 success，客户端据此
+     * 关闭行内编辑态，用户以为已经发送，实际输入还排在队列里等下一轮（I5 的失效形态）。
+     * `startNow` 之外的两种都表示「这一轮没有立刻起跑」，UI 必须据此改口。
+     *
+     * schema 层可选：旧 CLI 不回这个字段，旧客户端也不认识它（additive，不做版本协商）。
+     * 缺省的含义是「本次结果没有投递事实」，客户端只能按未知处理，不得反推成 startNow。
+     */
+    delivery: z.enum(["startNow", "queue", "guide"]).optional(),
+    /** `delivery` 非 `startNow` 时才可能有：本次输入在队列/待输入里的 id。 */
+    queueItemId: z.string().min(1).optional(),
   }),
   z.object({
     // startSavedWorkflow accepted ACK：

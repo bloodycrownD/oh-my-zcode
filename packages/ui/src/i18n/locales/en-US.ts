@@ -4920,6 +4920,9 @@ const enUS: Record<string, string> = {
   // 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。
   "chat.edit.rejected":
     "Edit resend was rejected; session state may still be restoring. Retry or send a new message.",
+  // Edit resend accepted but queued (delivery=queue): the turn has not started yet.
+  "chat.edit.queued":
+    "Edited message is queued and will be sent automatically after the current reply finishes (not sent yet).",
   "chat.ctx.sessionRequired":
     "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",

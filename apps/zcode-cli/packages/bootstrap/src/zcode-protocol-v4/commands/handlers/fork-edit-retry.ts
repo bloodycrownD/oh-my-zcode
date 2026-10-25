@@ -224,6 +224,8 @@ async function editUserQuery(
   // rewind 一旦提交就不可逆：文件回退不可补偿、会话截断不回写，失败只能「可见 + 可重发」。
   let conversationRewindCommitted = false;
   let workspaceFilesRewound = false;
+  // I5：start 的投递事实必须在 try 外声明——成功路径要把它带回 ACK，失败路径不读它。
+  let startOutcome: CanonicalStartOutcome | null = null;
   try {
     if ((payload.workspaceMode ?? "preserve") === "rewind") {
       const turnMessageIds = resolution.messageIds ??
@@ -310,7 +312,7 @@ async function editUserQuery(
       );
       conversationRewindCommitted = true;
     }
-    await startCanonicalIntent(host, record, envelope, canonical, attachments);
+    startOutcome = await startCanonicalIntent(host, record, envelope, canonical, attachments);
   } catch (error) {
     // abort 的唯一实现：结算本次命令自持的账本行。结算失败不能覆盖原始失败
     // （gateway 的 cancelCommandInput 还会兜一次），所以只告警。
@@ -354,6 +356,8 @@ async function editUserQuery(
     attachmentCount: attachmentRefs?.length ?? 0,
     clientId: envelope.clientId,
     commandId: envelope.commandId,
+    // I5：「命令成功」不再等于「已起跑」；审计面必须能直接看到排队事实。
+    delivery: startOutcome?.delivery ?? "unknown",
     event: EDIT_USER_QUERY_COMPLETED_EVENT,
     intentKind: editTarget.intent.kind,
     module: CONVERSATION_COMMAND_LOG_MODULE,
@@ -367,6 +371,22 @@ async function editUserQuery(
     type: "editUserQuery",
     disposition: "rewind",
     sessionId: record.app.sessionId,
+    // I5（spec edit-resend-stale-text 变更点 16/17）：把投递态带进 ACK。
+    // `queue` / `guide` 都表示这一轮**没有立刻起跑**，客户端据此改口而不是当成成功；
+    // goal 分支（startOutcome = null）没有 admission 回执，缺省即「无投递事实」。
+    //
+    // `queueItemId` 走 admission 的权威 id（与 `rewindExclusionIds` 同源），不用 Core 的
+    // pendingInputId：投影队列项的 id 恒为 `intent.queueItemId`（`product-projection.ts`
+    // 的 `payload.intent?.queueItemId ?? payload.pendingInputId`），而 intent.queueItemId
+    // 就是 `commandAdmissionOf(envelope).queueItemId`。用它，UI 的删除/撤回才点得中。
+    ...(startOutcome
+      ? {
+          delivery: startOutcome.delivery,
+          ...(startOutcome.delivery === "startNow"
+            ? {}
+            : { queueItemId: commandAdmissionOf(envelope).queueItemId }),
+        }
+      : {}),
   };
 }
 
@@ -461,6 +481,18 @@ async function forkAssistant(
 }
 
 /**
+ * 起轮之后的投递事实（spec edit-resend-stale-text / I5）。
+ *
+ * `null` 只出现在 goal 分支：`applyGoalCommand` 的续跑是 fire-and-forget
+ * （`continueGoalAfterChange` 后台跑 `continueActiveTarget`），没有 admission 回执，
+ * 也就没有「这一轮是否已起跑」的事实可报。**不猜成 `startNow`**——plan 模式或已有
+ * active turn 时它根本不会起跑；ACK 缺省 `delivery` 的语义就是「本次没有投递事实」。
+ */
+interface CanonicalStartOutcome {
+  delivery: "startNow" | "queue" | "guide";
+}
+
+/**
  * 执行侧起轮：只消费 `resolveCanonicalInput` 的返回值，不再自己算文本或模型。
  *
  * 语义史（全部收敛到 `commands/input-intent.ts` 的注释里，本文件不再重复实现）：
@@ -471,6 +503,8 @@ async function forkAssistant(
  * - 出队模型（2026-10-11 裁定 + Bug D 修正）：显式 payload > 会话活值 > 原轮快照，
  *   pin 只认显式 payload，且一律不写回会话态（v1.0.4 写回红线）。规则实现只在
  *   `resolveCanonicalInput`；本文件只提供 `explicit` / `live` 两个事实（守卫 I3）。
+ * - I5（2026-10-25）：`startPromptTurn` 的返回值**必须读**。它过去在这里被直接丢弃，
+ *   于是 `queued`（= 没起跑）与 `started_turn` 在调用方看来一模一样，ACK 恒为成功。
  */
 async function startCanonicalIntent(
   host: V4CommandCoreHost,
@@ -478,7 +512,7 @@ async function startCanonicalIntent(
   envelope: CommandEnvelope,
   canonical: ResolvedCanonicalInput,
   attachments: Awaited<ReturnType<typeof mapAttachmentRefsToTurnAttachments>>,
-): Promise<void> {
+): Promise<CanonicalStartOutcome | null> {
   const intent = inputIntentMetadataFromCanonical(envelope, canonical.intent);
   if (canonical.intent.kind === "sendGoalCommand") {
     await applyGoalCommand(host, record, {
@@ -486,14 +520,15 @@ async function startCanonicalIntent(
       objective: canonical.text,
       intent,
     });
-    return;
+    return null;
   }
-  await startPromptTurn(host, record, {
+  const started = await startPromptTurn(host, record, {
     content: canonical.text,
     inputId: envelope.commandId,
     intent,
     ...(attachments ? { attachments } : {}),
   });
+  return { delivery: started.delivery };
 }
 
 export const forkEditRetryHandlers = {

@@ -37,6 +37,18 @@ interface PromptTurnStartResult {
   /** Core 真实完成 promise，仅供生命周期清理使用，不属于 ACK 边界。 */
   completion?: Promise<unknown>;
   admission: SendInputResult;
+  /**
+   * 本次 admission 的实际投递车道（spec edit-resend-stale-text / I5）。
+   *
+   * 过去 `queued` 分支只写一条 info 日志就返回，调用方拿到的是「和成功一样」的返回值，
+   * 于是 edit 的 ACK 永远是 success、UI 按成功收敛编辑态——而输入其实还排在队列里。
+   * 这里把投递态作为**返回值的一部分**上抛，调用方必须消费它（不允许再靠日志猜）。
+   *
+   * 来源只有 Core admission 回执：`started_turn` ⇒ `startNow`；`queued` ⇒ Core 给出的
+   * `delivery`（`guide` = 已内联进当前轮，`queue` = 等下一轮）。Bootstrap 不复算
+   * 「guide 会不会因附件回退成 queue」——那套回退规则在 `prompt-admission.ts` 里唯一存在。
+   */
+  delivery: "startNow" | "queue" | "guide";
   /** 兼容旧调用方；初始 ACK 不再依赖 messageId。 */
   messageId?: string;
 }
@@ -124,21 +136,13 @@ export async function startPromptTurn(
       },
     );
   } catch (error) {
-    clearPromptRecordState(
-      record,
-      previousAutomationId,
-      previousBotDeliveryTarget,
-    );
+    clearPromptRecordState(record, previousAutomationId, previousBotDeliveryTarget);
     await host.afterLegacyStateMutation?.(record, "prompt_failed");
     throw error;
   }
 
   if (admission.kind === "rejected") {
-    clearPromptRecordState(
-      record,
-      previousAutomationId,
-      previousBotDeliveryTarget,
-    );
+    clearPromptRecordState(record, previousAutomationId, previousBotDeliveryTarget);
     throw new V4PromptRejectedError(
       "activePrompt",
       `Core prompt admission rejected: ${admission.reason}`,
@@ -149,18 +153,22 @@ export async function startPromptTurn(
     // Bug C 定位日志（2026-10-15）：用户报「重启后编辑重发 UI 已改但 agent 未收到」，
     // rejected 已有 toast 可见性，唯此分支静默返回。记录归因输入，复现时一锤定音。
     host.logger?.info?.("v4 prompt admission queued (turn not started)", {
+      delivery: admission.delivery,
       inputId: params.inputId,
       pendingInputId: admission.pendingInputId,
       queueLength: admission.queueLength,
       turnId: admission.turnId,
       sessionId: record.app.sessionId,
     });
-    clearPromptRecordState(
-      record,
-      previousAutomationId,
-      previousBotDeliveryTarget,
-    );
-    return { admission, turnStarted: Promise.resolve() };
+    clearPromptRecordState(record, previousAutomationId, previousBotDeliveryTarget);
+    // I5：`queued` 不是失败（T-RT5），但也**不是**「已起跑」。把 Core 的投递车道
+    // 原样上抛，让 ACK 能如实告诉客户端「排队了 / 已内联进当前轮」，而不是让它按
+    // 「没有抛错」推断成成功。
+    return {
+      admission,
+      delivery: admission.delivery,
+      turnStarted: Promise.resolve(),
+    };
   }
 
   const completion = runWithSessionResidencyFinalization(record, async () => {
@@ -175,11 +183,7 @@ export async function startPromptTurn(
         sessionId: record.app.sessionId,
       });
     } finally {
-      clearPromptRecordState(
-        record,
-        previousAutomationId,
-        previousBotDeliveryTarget,
-      );
+      clearPromptRecordState(record, previousAutomationId, previousBotDeliveryTarget);
       await host.afterLegacyStateMutation?.(record, mutationReason);
     }
   });
@@ -190,7 +194,7 @@ export async function startPromptTurn(
     sessionId: record.app.sessionId,
     textLength: params.content.length,
   });
-  return { admission, completion, turnStarted: Promise.resolve() };
+  return { admission, delivery: "startNow", completion, turnStarted: Promise.resolve() };
 }
 
 function clearPromptRecordState(
@@ -239,4 +243,3 @@ export function turnBackgroundAttributionOf(params: {
 
 const AUTOMATION_INPUT_ID_PREFIX = "automation-";
 const AUTOMATION_MUTATION_TOOL_NAMES = ["CronCreate", "CronUpdate", "CronDelete"] as const;
-

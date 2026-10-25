@@ -1,5 +1,6 @@
 /* oxlint-disable eslint(max-lines) -- v4 逐行 row 渲染分发集中收口（每种 row 一个 memo 叶子 + timelineMarker 分隔线），拆分会打散行类型对照。 */
 import { useIsOfficeMode } from "@/hooks/useInterfaceMode.js";
+import { shouldCollapseEditState } from "@/v4/editDeliveryOutcome.js";
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightLeftIcon,
@@ -1109,8 +1110,12 @@ const UserInputRowView = memo(function UserInputRowView({
           return;
         }
         if (result !== false) {
-          setEditing(false);
           setConflictOpen(false);
+          // I5（spec edit-resend-stale-text）：`queued` 表示这一轮**还没起跑**。
+          // 无条件 `setEditing(false)` 会让编辑器消失 = 表现得像已经发出去，
+          // 而输入实际排在队列里等下一轮（用户看到的就是「编辑没生效」）。
+          // 投递态由 CLI 的 editUserQuery ACK 显式给出；缺字段（旧 CLI）沿用旧行为收敛。
+          if (shouldCollapseEditState(result)) setEditing(false);
         }
       } finally {
         setSubmitting(false);

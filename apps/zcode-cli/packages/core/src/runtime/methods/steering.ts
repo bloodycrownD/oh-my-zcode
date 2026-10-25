@@ -199,6 +199,10 @@ export async function steerTurn(
 
   return {
     kind: "queued",
+    // I5：admission 的 ACK 必须能区分 guide（已内联进当前轮）与 queue（等下一轮）。
+    // steerTurn 的 `delivery` 缺省即 queue 车道（与下方 `admissionIntent(..., "queue")`
+    // 同一判据），所以这里补默认值而不是另造规则。
+    delivery: delivery ?? "queue",
     pendingInputId: pendingInput.id,
     queueLength,
     turnId: activeTurn.turnId,
@@ -294,6 +298,9 @@ export async function enqueueDeferredInput(
 
   return {
     kind: "queued",
+    // I5：与写入 `TurnSteerQueued.delivery` / `intent.admittedDelivery` 的值严格同源
+    // （上面 5 行用的就是同一个 `delivery`），ACK 与事件投影不会各说一套。
+    delivery,
     pendingInputId,
     queueLength,
     turnId: targetTurnId,
