@@ -340,6 +340,31 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 - Step 16 — phase-gates — blocking: yes — qa: auto：接线 3 个未挂测试；**新建 `.github/workflows/mc-tests.yml`** 承载 29 个 MC 脚本；`test-magic-context-gate.mjs` 守卫升级为**剥注释 + 逐行正则**判定（不是 AST，与全仓的源码形状守卫同口径）。覆盖边界写死：正则只认字面形态（比较 / 取反 / 真值化），不识别类型层面的别名与间接调用（`const f = () => cfg.magicContext.enabled; f()`），这类写法靠评审兜住；守卫入口另有一道扫描面断言（三个扫描根存在 + 扫描文件数下限 + 已知锚点在列），杜绝脚本被移动后的「零扫描通过」假绿。
 - Step 17 — phase-gates — blocking: no — qa: manual_user：真机验证（关闭态启动快、设置页可开、`/ctx-status` 有明确不可用提示、rewind 后模型不再看到旧摘要）。
 
+## Step 13 落地记录（impl-b6，2026-10-25，提交见 `feat(mc): 一键摘除脚本 + 摘除后端到端验证`）
+
+**交付物**：`apps/zcode-cli/packages/cli/scripts/unplug-magic-context.mjs`（约 2.3K 行，规则表内联）。
+
+**形态**：规则驱动，不是补丁回放。四种规则（`sub` 逐字子串 / `del` 整行锚点区间 / `cut` 块前块后锚点 / `json` 结构化）**每条都做匹配数校验**——锚点不唯一、子串命中 0 次或多次即中止；引擎跑在虚拟文件树上，`dry-run` 与 `--apply` 走同一条代码路径。flag：`--apply`（默认 dry-run）、`--archive-db`、`--verify`（9 条摘除后断言，含 dist import）、`--audit`（grep 清单对账）、`--restore`（`git checkout --` 还原全部 touched 路径）。
+
+**实测规模**：整件删除 55 个路径（包本体 + 6 个 bootstrap 宿主模块 + ctx 命令面 + core 三个 ctx 工具实现 + 5 个 UI 件 + 全部 MC 行为测试）+ 改写 48 个共享文件（146 条规则）+ 清理 30 个陈留 dist 路径。
+
+**与 spec 原文的三处偏离（已核对，均为更有依据的选择）**：
+
+| # | spec 原写法 | 实际做法 | 依据 |
+|---|---|---|---|
+| D1 | 删掉 core 的 `magic-context-{turn-transform,prompt-section,effective-enabled}.ts` 与 `context/sections/magic-context.ts` | **保留**这四个文件（`ctx-*` 工具实现与注册仍删） | IM4 明确 core 只保留三端口；这四个文件零包依赖，bootstrap 不装端口时 turn-loop / builder 只做一次判空（`isEnabled()`/`resolver` 缺席即直通）。删它们要改 builder/turn-loop/agent-runtime 的落位点，扩大爆炸半径且毁掉 re-plug 接口 |
+| D2 | 删 UI + services 的整个 D-13 链 | 删 UI 渲染（`contextUsage.tsx` 的 MC 段、`magicContextUsageRows.ts`）与 AppOptions 的 `onMagicContextUsage` 入口；**保留** v4 快照的 `usage.magicContext` 字段及其投影/转发层（`product-projection` / `conversation-topic-publisher` / `v4-gateway` / `snapshot.ts`） | 摘除后该字段**没有任何生产者**（恒缺席），UI 整段不渲染；删字段会改 v4 快照的序列化形状。登记在脚本 `KEEP_LIST` 的「additive 协议字段」组 |
+| D3 | 删 `EXTERNAL` 的 wire 修复 | **保留** `adapters/src/model/anthropic-stream-compat.ts` 的 `<session-history>` 双消息信封修复 | 判据是信封形状而非包；历史库里的 transcript 仍可能带这种形状（与 §N§ 剥离同理） |
+
+**11 个硬编码 `dist/app/magic-context-turn-transform.js` 的脚本**：它们全部是 MC 行为测试（`test-{magic-context-turn-transform,settle-background,mural-media-blocks,prompt-surface-toolset-hash,magic-context-lifecycle,magic-context-config-rpc,magic-context-section-zh,absent-event,zero-load}` + `diag-first-send-latency` + MC 包自己的 `test-boot-busy-retry`）→ **随 MC 一起整件删除**，同时 `--apply` 清理陈留 dist。`test-magic-context-absent-event.mjs` 的零加载守卫**不会假绿**：脚本被删 → 没有守卫；`--verify` 第 9 条另行断言 `dist/app/magic-context*` 与包目录都不存在，`--audit` 再兜一层「零运行期导入」。
+
+**端到端验证（真跑，非声明）**：`--apply` → 根 `pnpm typecheck` 绿 + `turbo run typecheck --force` 25/25 绿 + `turbo run build --force` 通过 + `--verify` 9/9 PASS（dist import ×2 / tools 38 无 ctx_* / slash help 19 无 ctx-* / App 可见命令 goal,workflow,init / v4 命令面 16 导出无 ctx 符号 / UI 两个分区均消失 / 无运行期导入 / 33 个 dist/包路径均不存在）+ `--audit` 35 个残留文件全部登记 + `--apply` 第二次幂等 + `--restore` 还原 103 个路径后树干净；`--archive-db` 在假 HOME 上验证（`magic-context.db{, -wal, -shm}` → `~/.omz/backup-<ts>/`，原路径清空）。
+
+**lint 基线（重要，不当作本波回归）**：本树 `turbo run lint` 在摘除前**已经红**（cli 2 / contracts 5 / adapters 24 / bootstrap 18 / magic-context 17，全部 `max-lines` 与存量 `no-unused-vars`；`oxfmt --check` 的基线是 241 个文件未格式化）。摘除后同包错误数**逐包相等**且少了 MC 包那条，即脚本没有新增 lint/格式问题。
+
+**未落地（后续步骤）**：Step 12（`create-app.ts` 的 `absent(import_failed)` 降级）、Step 14（`UPSTREAM-SYNC.md` 口径）、Step 15（耦合预算门禁）、Step 16（CI 接线 + 3 个未挂测试）、Step 17（真机）。本波只做 Step 13；Step 12 的降级路径在摘除场景里不可达（摘除脚本把 import 点整段删掉），但它是「包在、动态 import 失败」的唯一真实分支，仍应补。
+
+
 ## 测试策略
 
 ### 测试用例
