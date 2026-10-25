@@ -793,6 +793,46 @@ export type SessionInputDelivery = "startNow" | "guide" | "queue";
 
 export type SessionInputStatus = "admitted" | "promoted" | "cancelled" | "discarded" | "failed";
 
+/**
+ * 执行权威读法的互斥四态（I1：执行侧输入文本只能来自 session_input 账本）。
+ *
+ * - `pending`：未起跑（status=admitted）。`text` 是本轮**唯一**合法的执行文本。
+ * - `started`：已起跑（promoted，与 user message 同事务落过 transcript）。
+ * - `voided`：已作废（cancelled / discarded / failed）。
+ * - `missing`：账本无此行——投影与账本不一致。
+ *
+ * 终态与缺失**刻意不携带 text**：让「终态还去取文本」在类型上写不出来。执行侧拿到
+ * 非 pending 必须硬失败，禁止回落投影项文本（spec edit-resend-stale-text I1）。
+ */
+export type SessionInputExecutionAuthority =
+  | {
+      state: "pending";
+      status: "admitted";
+      id: string;
+      sessionID: SessionId;
+      /** 账本 payload.text：执行侧唯一权威文本。 */
+      text: string;
+    }
+  | {
+      state: "started";
+      status: "promoted";
+      id: string;
+      sessionID: SessionId;
+      promotedMessageID?: MessageId;
+    }
+  | {
+      state: "voided";
+      status: "cancelled" | "discarded" | "failed";
+      id: string;
+      sessionID: SessionId;
+      statusReason?: string;
+    }
+  | {
+      state: "missing";
+      id: string;
+      sessionID: SessionId;
+    };
+
 export interface SessionInputRecord {
   id: string;
   sessionID: SessionId;
@@ -1131,6 +1171,17 @@ export interface SessionStorePort {
   }): Promise<SessionInputRecord[]>;
   /** global createSession.firstInput 查重：由 queue_<sourceCommandId> 找回真实 session。 */
   getSessionInputById?(id: string): Promise<SessionInputRecord | null>;
+  /**
+   * 执行权威读法（I1）：按 id + session 读 session_input，返回互斥四态 + 权威文本。
+   *
+   * 与 `getSessionInputById` 的分工：后者是 global 查重（createSession 跨 session 找回），
+   * 不带 session 约束也不区分终态；本方法是执行侧「这条输入还能不能跑、跑什么文本」的
+   * 唯一读入口——跨会话同 id 不得执行，终态/缺失必须由调用方硬失败（不得回落投影）。
+   */
+  getSessionInputForExecution?(input: {
+    id: string;
+    sessionID: SessionId;
+  }): Promise<SessionInputExecutionAuthority>;
   readTodos(input: { sessionID: SessionId }): Promise<TodoItem[]>;
   updateTodos(input: { sessionID: SessionId; todos: TodoItem[] }): Promise<void>;
   readTarget(input: { sessionID: SessionId }): Promise<SessionGoal | null>;

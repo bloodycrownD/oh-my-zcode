@@ -41,6 +41,7 @@ import type {
   SessionId,
   SessionInfo,
   SessionInputDelivery,
+  SessionInputExecutionAuthority,
   SessionInputRecord,
   SessionInputStatus,
   SessionTaskLinkRecord,
@@ -703,6 +704,13 @@ export class SqliteSessionStore
 
   async getSessionInputById(id: string): Promise<SessionInputRecord | null> {
     return sessionInputRepository.getSessionInputById(this.db, id);
+  }
+
+  async getSessionInputForExecution(input: {
+    id: string;
+    sessionID: SessionId;
+  }): Promise<SessionInputExecutionAuthority> {
+    return sessionInputRepository.readSessionInputForExecution(this.db, input);
   }
 
   async readTodos(input: { sessionID: SessionId }): Promise<TodoItem[]> {

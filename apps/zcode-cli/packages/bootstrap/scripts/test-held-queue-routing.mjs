@@ -78,6 +78,14 @@ test("tripwire：sendQueuedNow 手动提升成功后恢复 autoDrain（立即发
     /if \(!autoDrainPromotion\) \{\s*\n\s*await record\.app\.setQueueAutoDrain\(true\)/,
   );
   assert.match(source, /queue_auto_drain_resumed/);
+  // `setQueueAutoDrain` 是 ZCodeApp 上 required 的成员（app/types.ts），
+  // session-flow.ts / v4-bridge.ts 也都是非可选调用。可选调用（`?.`）会让能力缺席时
+  // 静默吞掉恢复动作——这条曾经让本 tripwire 长期红，不许再以改写调用形态的方式回来。
+  assert.doesNotMatch(
+    source,
+    /setQueueAutoDrain\?\.\(/,
+    "恢复语义不得用可选调用（能力缺席必须暴露，不是跳过）",
+  );
 });
 
 test("防御面：choice 裁决（applyHeldQueueDisposition）保留为兜底", () => {

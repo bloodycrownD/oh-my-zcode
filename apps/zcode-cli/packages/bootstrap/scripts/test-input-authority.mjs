@@ -44,8 +44,11 @@
  * I5. `modelSelectionPinned:` 的自算只许在 input-intent.ts；其余同上。
  * I6. retry 分支不得把 payload 整体断言成 edit 形状（`as { newText: string }`）——
  *     旧写法让「retry 偷读 newText」在类型上合法，是兜底搬家的温床。
- * I7. queue.ts 的执行文本（提升轮 content / intent.text）仍读投影项，属 RC1 的
- *     执行侧另一半；Step 3 收口，本步只把现状钉进 allowlist，新增用法即红。
+ * I7. queue.ts 的执行内容（提升轮 content / intent.text）**只能来自 session_input 账本**；
+ *     投影项的 `queueItem.text` 仅剩 spec 4b 例外表的三处（goal objective/goal intent.text/
+ *     displayText），其余站点即红。
+ * L. I1 执行权威（sendQueuedNow 直驱真实 handler）：账本文本 ≠ 投影文本时执行账本文本；
+ *    账本终态/缺失/宿主能力缺席一律硬失败，且不起轮、不留 reservation。
  * J. 执行侧重建 intent 的 pin 形状：`resolveCanonicalInput` 保持三态（缺键=无 pin
  *    事实），`inputIntentMetadataFromCanonical` 在 wire 上落实为 boolean。
  * K. retry 的 canonical 解析不得读 `payload.newText`（payload 只有 target）。
@@ -505,14 +508,21 @@ test("G4 explicit 与 live 同时存在 → explicit 胜出且 pin=true（优先
   assert.equal(resolved.intent.modelSelectionPinned, true);
 });
 
-test("G5 无显式事实时继承 record.modelSelectionPinned（pin 事实不因传 live 被抹掉）", () => {
+test("G5 继承源携带 modelSelectionPinned 也不得 pin（继承分支已删：pin 只有 explicit 一种来源）", () => {
+  // 投影 `ConversationEditTarget.intent` 今天不含该字段（product-projection.ts 白名单构造）。
+  // 这里刻意带一位进去，钉住「即使将来有人把它加进投影白名单，编辑重发也不会凭空 pin」——
+  // 旧实现的后半支 `: record.modelSelectionPinned` 正是把这条红线重新接通的入口。
   const record = { ...RECORD, modelSelectionPinned: true };
   const payload = { target: { rowId: 4, entityId: "ent-4" }, newText: EDITED_TEXT };
   const resolved = resolveCanonicalInput(record, payload, envelopeOf("editUserQuery", payload), {
     live: LIVE_SELECTION,
   });
   assert.deepEqual(resolved.intent.modelSelection, LIVE_SELECTION);
-  assert.equal(resolved.intent.modelSelectionPinned, true);
+  assertAbsent(
+    resolved.intent,
+    "modelSelectionPinned",
+    "继承源不得提供 pin 事实（pin 只认本次 explicit）",
+  );
 });
 
 test("G6 非 edit 分支同样接受选择事实（sendText 显式选择 → intent 携带且 pin）", () => {
@@ -879,10 +889,12 @@ test("I6 retry 分支不得把 payload 断言成 edit 形状（旧写法给 retr
 });
 
 /**
- * queue.ts 里 `queueItem.text` 的合法用法与「待 Step 3 收口」用法
- * （spec 变更点 2 / 21 与 4b 的守卫例外表）。执行文本（`content:` 与提升 intent 的
- * `text`）仍读投影项是 RC1 的另一半；Step 3 改为读 `session_input` 账本后，必须同步
- * 删掉这两条 allowlist，本守卫会以「条目已过期」逼出那次 bookkeeping。
+ * queue.ts 里 `queueItem.text` 剩下的合法用法（spec 4b 的守卫例外表：
+ * goal objective 解析 / goal 分支 intent.text / displayText）。
+ *
+ * Step 3 已把**执行内容**（普通分支的 `content:` 与 `intent.text`）改为读
+ * `session_input` 账本，那两条「待收口」条目已按过期即红的设计删掉——
+ * 再出现新的 `queueItem.text` 作执行内容，本守卫会以「未登记站点」打红。
  */
 const QUEUE_TEXT_ALLOWLIST = [
   {
@@ -900,24 +912,36 @@ const QUEUE_TEXT_ALLOWLIST = [
     file: "zcode-protocol-v4/commands/handlers/queue.ts",
     note: "展示文案（spec 4b 例外，合法）",
   },
-  {
-    code: "inputIntentMetadataFromQueueItem(queueItem, queueItem.text),",
-    file: "zcode-protocol-v4/commands/handlers/queue.ts",
-    note: "待 Step 3：落库 intent.text 改由账本传入（变更点 21）",
-  },
-  {
-    code: "content: queueItem.text,",
-    file: "zcode-protocol-v4/commands/handlers/queue.ts",
-    note: "待 Step 3：提升轮执行文本改读 session_input 账本（变更点 2）",
-  },
 ];
 
-test("I7 queue.ts 的执行文本仍读投影项（RC1 另一半）：现状入 allowlist，Step 3 收口", () => {
+test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表的三处", () => {
+  const code = stripComments(readFileSync(queueHandlerPath, "utf8"));
+  assert.equal(
+    code.includes("content: queueItem.text"),
+    false,
+    "提升轮执行文本必须来自 session_input 账本，不得再读投影项（RC1 根因）",
+  );
+  assert.equal(
+    code.includes("inputIntentMetadataFromQueueItem(queueItem, queueItem.text)"),
+    false,
+    "落库 intent.text 必须由账本传入（变更点 21）",
+  );
+  // 正向：执行内容确实取账本变量，而不是某个改名后的投影读法。
+  assertPattern(code, /content: executionText,/u, "提升轮 content 必须取账本权威文本");
+  assertPattern(
+    code,
+    /inputIntentMetadataFromQueueItem\(queueItem, executionText\)/u,
+    "普通分支 intent.text 必须取账本权威文本",
+  );
   const matches = collectCodeLineMatches(
     (code) => code.includes("queueItem.text"),
     queueHandlerPath,
   );
-  assert.ok(matches.length >= 5, "queue.ts 里 queueItem.text 的站点数量异常，先确认扫描没失效");
+  assert.equal(
+    matches.length,
+    3,
+    "queue.ts 的 queueItem.text 只允许 spec 4b 例外表的三处；站点数量异常先确认扫描没失效",
+  );
   assertSourceAllowlist({
     allowlist: QUEUE_TEXT_ALLOWLIST,
     label: "queue.ts 的 queueItem.text",
@@ -967,4 +991,235 @@ test("K1 retryTurn 的 canonical 解析不得读取 payload.newText（payload �
   assert.ok(resolved, "retryTurn 带 record 必须产生输入");
   assert.equal(resolved.text, RECORD_TEXT);
   assert.equal(reads, 0, "retry 读 payload.newText = edit 形状越界（改前靠三元短路偶然安全）");
+});
+
+// ── L: I1 执行权威——sendQueuedNow 只认 session_input 账本 ────────────────────
+//
+// 本组直驱**真实** queue handler（不是源码形状断言）。改前全红：`sendQueuedNow`
+// 用投影项 `queueItem.text` 起轮，账本写了什么根本不影响执行结果。
+
+const { queueHandlers } = await import(
+  pathToFileURL(join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "queue.ts")).href
+);
+
+const EXEC_SESSION_ID = "ses_exec_authority";
+/** 投影里的旧文本：任何执行用例都不允许把它发出去。 */
+const PROJECTION_TEXT = "投影里的旧文本（不得被执行）";
+/** 账本里的执行文本：唯一合法的执行内容。 */
+const LEDGER_TEXT = "账本里的执行文本";
+
+function executionQueueItem({ kind = "sendText", text = PROJECTION_TEXT } = {}) {
+  return {
+    sourceCommandId: "cmd-exec-original",
+    queueItemId: "queue-exec-1",
+    clientId: "ui",
+    kind,
+    text,
+    attachments: [],
+    delivery: { requested: "queue", admitted: "queue" },
+    order: { admissionSeq: 7, queuePosition: 0 },
+    steer: { state: "notRequested" },
+    dispatch: { state: "queued" },
+    admittedAt: 1_700_000_000_000,
+  };
+}
+
+/**
+ * 提升 harness：`authority` 是账本读法的返回值；`withCapability=false` 模拟旧宿主
+ * 没有执行权威能力（必须硬失败，不能回落到投影项）。
+ */
+function executionHarness({ authority, withCapability = true, queueItem = executionQueueItem() }) {
+  const calls = {
+    ledgerReads: 0,
+    release: 0,
+    remove: 0,
+    reserve: 0,
+    sendInput: 0,
+    warnings: [],
+  };
+  const captured = {};
+  const record = {
+    app: {
+      sessionId: EXEC_SESSION_ID,
+      getMode: () => "build",
+      readTarget: async () => null,
+      runtime: {
+        // 会话无活值：applyPromotedModelSelection 不动 modelSelection（模型不在本组断言范围）。
+        getSessionModelSelection: () => undefined,
+        getPlanEnabled: () => false,
+        getActiveTurnInfo: () => undefined,
+        getActiveForegroundExecutionId: () => undefined,
+        acquireForegroundPromotionLease: () => ({ kind: "acquired" }),
+        releaseForegroundPromotionLease: () => undefined,
+      },
+      reserveQueueItem: async () => {
+        calls.reserve += 1;
+        return true;
+      },
+      markQueueItemPromoting: async () => true,
+      removeQueueItem: async () => {
+        calls.remove += 1;
+        return true;
+      },
+      releaseQueueItemReservation: async () => {
+        calls.release += 1;
+        return true;
+      },
+      setQueueAutoDrain: async () => {
+        calls.autoDrainResumed = true;
+      },
+      sendInput: async (input, options) => {
+        calls.sendInput += 1;
+        captured.input = input;
+        captured.options = options;
+        return { kind: "started_turn", turnId: "turn-exec", completion: Promise.resolve() };
+      },
+    },
+    traceContext: { traceId: "trace-exec", sessionId: EXEC_SESSION_ID },
+    persistence: "immediate",
+  };
+  const host = {
+    getRecord: (sessionId) => (sessionId === EXEC_SESSION_ID ? record : undefined),
+    logger: {
+      info: () => undefined,
+      warn: (message, fields) => calls.warnings.push({ message, fields }),
+    },
+    getQueueItem: (sessionId, queueItemId) =>
+      sessionId === EXEC_SESSION_ID && queueItemId === queueItem.queueItemId ? queueItem : null,
+    getInputRoutingMode: () => null,
+    ensureModelReady: async () => undefined,
+    afterLegacyStateMutation: async () => undefined,
+    ...(withCapability
+      ? {
+          getSessionInputForExecution: async (sessionId, queueItemId) => {
+            calls.ledgerReads += 1;
+            assert.equal(sessionId, EXEC_SESSION_ID, "账本读法必须按 session 约束");
+            assert.equal(queueItemId, queueItem.queueItemId, "账本读法必须按 queue item id");
+            return authority;
+          },
+        }
+      : {}),
+  };
+  const envelope = {
+    commandId: "cmd-exec-promote",
+    clientId: "ui",
+    sessionId: EXEC_SESSION_ID,
+    type: "sendQueuedNow",
+    payload: { queueItemId: queueItem.queueItemId },
+    issuedAt: new Date(1_700_000_000_000),
+    baseRevision: 3,
+    baseLogEpoch: "epoch-exec-authority",
+  };
+  return { calls, captured, envelope, host };
+}
+
+const pendingAuthority = (text) => ({
+  state: "pending",
+  status: "admitted",
+  id: "queue-exec-1",
+  sessionID: EXEC_SESSION_ID,
+  text,
+});
+
+test("L1 (T-IA1) 账本文本 ≠ 投影文本：提升轮 content 与 intent.text 都取账本", async () => {
+  const harness = executionHarness({ authority: pendingAuthority(LEDGER_TEXT) });
+  await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
+  assert.equal(harness.calls.sendInput, 1, "账本 pending 必须正常起轮");
+  assert.equal(harness.captured.input.text, LEDGER_TEXT, "执行内容只能来自账本");
+  assert.equal(
+    harness.captured.options.intent.text,
+    LEDGER_TEXT,
+    "落库 intent.text 必须等于账本文本（否则冷恢复把旧文本带回 edit target）",
+  );
+  assert.notEqual(harness.captured.input.text, PROJECTION_TEXT, "投影文本被执行 = RC1 复活");
+  // 普通提升成功后必须恢复 autoDrain（held-queue tripwire 的行为面）。
+  assert.equal(harness.calls.autoDrainResumed, true);
+});
+
+test("L2 (T-IA2) 账本终态 → 硬失败、不起轮、不留 reservation", async () => {
+  const terminalCases = [
+    {
+      authority: { state: "started", status: "promoted", id: "q", sessionID: EXEC_SESSION_ID },
+      status: "promoted",
+    },
+    {
+      authority: {
+        state: "voided",
+        status: "cancelled",
+        id: "q",
+        sessionID: EXEC_SESSION_ID,
+        statusReason: "user_removed",
+      },
+      status: "cancelled",
+    },
+    {
+      authority: {
+        state: "voided",
+        status: "discarded",
+        id: "q",
+        sessionID: EXEC_SESSION_ID,
+        statusReason: "session_resumed",
+      },
+      status: "discarded",
+    },
+    {
+      authority: { state: "voided", status: "failed", id: "q", sessionID: EXEC_SESSION_ID },
+      status: "failed",
+    },
+  ];
+  for (const { authority, status } of terminalCases) {
+    const harness = executionHarness({ authority });
+    await assert.rejects(
+      () => queueHandlers.sendQueuedNow(harness.host, harness.envelope),
+      (error) => {
+        assert.equal(
+          error.reasonCode,
+          "fault.command.inputNotPending",
+          `${status} 必须按 inputNotPending 硬失败`,
+        );
+        assert.match(error.message, new RegExp(status, "u"), "错误信息必须带账本终态，便于对账");
+        return true;
+      },
+      `账本 status=${status} 时不得回落投影文本起轮`,
+    );
+    assert.equal(harness.calls.sendInput, 0, `${status}：不得起轮`);
+    assert.equal(
+      harness.calls.reserve,
+      0,
+      `${status}：不得留 reservation（硬失败发生在 reserve 之前）`,
+    );
+    assert.equal(harness.calls.remove, 0, `${status}：不得移除队列项`);
+    assert.equal(harness.calls.warnings.length, 1, `${status}：硬失败必须留对账 warn`);
+    assert.equal(harness.calls.warnings[0].fields.ledgerStatus, status);
+  }
+});
+
+test("L3 (T-IA2) 账本缺行 / 宿主无执行权威能力 → 硬失败 inconsistentAuthority", async () => {
+  const missing = executionHarness({
+    authority: { state: "missing", id: "queue-exec-1", sessionID: EXEC_SESSION_ID },
+  });
+  await assert.rejects(
+    () => queueHandlers.sendQueuedNow(missing.host, missing.envelope),
+    (error) => {
+      assert.equal(error.reasonCode, "fault.command.inconsistentAuthority");
+      return true;
+    },
+  );
+  assert.equal(missing.calls.sendInput, 0, "账本缺行不得起轮（不许回落投影）");
+
+  // 能力缺席（旧宿主/夹具未升级）同样是「权威不可读」，不是「按投影跑」。
+  const noCapability = executionHarness({
+    authority: null,
+    withCapability: false,
+  });
+  await assert.rejects(
+    () => queueHandlers.sendQueuedNow(noCapability.host, noCapability.envelope),
+    (error) => {
+      assert.equal(error.reasonCode, "fault.command.inconsistentAuthority");
+      return true;
+    },
+  );
+  assert.equal(noCapability.calls.sendInput, 0, "宿主无能力时不得回落到投影文本");
+  assert.equal(noCapability.calls.ledgerReads, 0);
+  assert.equal(noCapability.calls.warnings.length, 1, "能力缺席也必须留痕（不许静默）");
 });

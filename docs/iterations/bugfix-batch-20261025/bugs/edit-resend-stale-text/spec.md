@@ -142,7 +142,7 @@ MC 稳定复现时总在场（`features.magicContext` 默认 true，`apps/zcode-
    - `status !== "admitted"` → 抛 `fault.command.inputNotPending`，不回落。**`held` 不是 `session_input` 状态**——`SessionInputStatus` 只有 `admitted|promoted|cancelled|discarded|failed`（`contracts/src/interfaces/session-store.port.ts:794`），`held` 是队列级路由态（`queue.autoDrain=false`）；放行 held 队列项时其账本行本就落在 `admitted`。
    - 账本行缺失 → 抛 `fault.command.inconsistentAuthority`。
 4. 断言守护：新增源码形状守卫，禁止 `queue.ts` 内出现 `queueItem.text` 作为执行内容。
-4b. **I1 的作用范围必须写明**（否则与现状对不上）：I1 只覆盖「queue 提升链的执行文本」。以下**三处**今天仍读投影、**本 spec 不动**，列为已知限制：`retryTurn` 的重发文本（`fork-edit-retry.ts:279`）、`editUserQuery` 的 attachments 缺省（`:137`）、`queue.ts:344` 的 goal `objective ?? queueItem.text`。**`queue.ts:363` 不在例外表里——它在本次范围内**（`inputIntentMetadataFromQueueItem` 的 `text` 改为由账本传入，见变更点 21），因为不修它落库的 `intent.text` 仍可能来自投影，冷恢复会把它带回 edit target（`transcript-hydration.ts:1668,1690`）。T-IA4 的守卫例外表 = 上述三处 + `:318-324`（goal objective 解析）+ `:352`（displayText）；T-IA1 追加断言「落库 `intent.text` == 账本文本」。
+4b. **I1 的作用范围必须写明**（否则与现状对不上）：I1 只覆盖「queue 提升链的执行文本」。以下**三处**今天仍读投影、**本 spec 不动**，列为已知限制：`retryTurn` 的重发文本（解析在 `commands/input-intent.ts:287-297` 的 `retryTurn` 分支，调用点 `handlers/fork-edit-retry.ts:277`；Step 2 收敛后旧锚点 `fork-edit-retry.ts:279` 已漂移）、`editUserQuery` 的 attachments 缺省（`commands/input-intent.ts:271-285`，调用点 `handlers/fork-edit-retry.ts:144`；旧锚点 `:137` 已漂移）、`queue.ts` 的 goal `objective ?? queueItem.text`。**`queue.ts` 普通分支的 `content:` / `intent.text` 不在例外表里——它在本次范围内**（`inputIntentMetadataFromQueueItem` 的 `text` 改为由账本传入，见变更点 21），因为不修它落库的 `intent.text` 仍可能来自投影，冷恢复会把它带回 edit target（`transcript-hydration.ts:1668,1690`）。T-IA4 的守卫例外表 = 上述三处（goal objective 解析 + goal 分支 intent.text + displayText）；T-IA1 追加断言「落库 `intent.text` == 账本文本」。
 
 ### phase-rewind-cascade（I2）
 

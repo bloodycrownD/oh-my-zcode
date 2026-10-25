@@ -137,11 +137,16 @@ export interface CanonicalInputRecord {
   fallbackReasonCode?: string;
   modelSelection?: ModelSelection;
   /**
-   * 继承源自带的 pin 事实。只在调用方没有提供任何模型选择事实
-   * （`selection.explicit` / `selection.live` 都缺省）时才会被采用；
-   * 一旦调用方给了事实，pin 由 `resolveCanonicalInput` 按规则重新判定。
+   * 继承源**刻意不参与** pin 判定（`?: never` = 携带即类型错误）。
+   *
+   * edit/retry 只有两种模型事实：本次显式的 `selection.explicit` 与会话活值
+   * `selection.live`。投影构造方不得携带 `modelSelectionPinned`——`ConversationEditTarget`
+   * 的 `intent`（`product-projection.ts` 白名单构造）今天本就没有该字段；一旦有人把它
+   * 加进投影白名单，旧的 `record.modelSelectionPinned` 继承分支就会让「无 explicit 的
+   * 编辑重发」变成 `pin=true`，触发 `turn-model.ts` 的 setSessionModelSelection +
+   * persist + emitModelSelected 三连写回（v1.0.4 红线）。
    */
-  modelSelectionPinned?: boolean;
+  modelSelectionPinned?: never;
   mode?: SubmissionMode;
   planEnabled?: boolean;
   provenance?: TurnInputIntentMetadata["provenance"];
@@ -198,12 +203,16 @@ export interface ResolvedCanonicalInput {
  * 规则（这条路径的唯一实现）：
  * ```
  * modelSelection       = selection?.explicit ?? selection?.live ?? record?.modelSelection
- * modelSelectionPinned = selection?.explicit !== undefined ? true : record?.modelSelectionPinned
+ * modelSelectionPinned = selection?.explicit !== undefined ? true : (缺键，不 pin)
  * ```
  * 调用方只提供事实——`explicit` 来自 payload、`live` 来自 `runtime.getSessionModelSelection()`、
  * 什么都不传就表示「本次没有模型选择事实」（admission 当前就是这样，落库字段与今天逐字一致）。
  * 传 `selection` 的一方不得再在外面写 `explicit ?? live ?? snapshot` 或自己算 pin。
  * 守卫：`scripts/test-input-authority.mjs` 的 I3（执行侧零重复规则）/ I4 / I5。
+ *
+ * pin **没有继承分支**：继承源（`record`）不携带 pin 事实，`record.modelSelectionPinned`
+ * 的类型是 `never`。若把它接回判据，「无 explicit 的编辑重发」会继承 `pin=true` 并触发
+ * 写回三连（v1.0.4 红线）；投影构造方也不得把它加进白名单。
  *
  * 为什么 pin 的判断权必须收到这里：`modelSelectionPinned` 是 runtime「写回 + 持久化 +
  * emitModelSelected」三连的唯一开关，这条写回门是 2026-10-09 修过的同类缺陷
@@ -328,9 +337,14 @@ function assembleResolvedCanonicalInput(seed: {
   };
   // 模型选择：显式 payload > 会话活值 > 继承快照；pin 只认「最后确实来自显式 payload」
   // （规则定义见 `resolveCanonicalInput` 文档，不允许在别处再判一次）。
+  //
+  // pin 没有继承分支：`record.modelSelectionPinned` 的类型是 `never`，继承源不携带 pin
+  // 事实。edit/retry 的模型事实只有 explicit / live 两种——过去的
+  // `explicit !== undefined ? true : record.modelSelectionPinned` 后半支今天不可达
+  // （投影 `ConversationEditTarget.intent` 无该字段），但一旦有人把它加进投影白名单，
+  // 编辑重发就会在无 explicit 时 pin=true，触发 turn-model.ts 的写回三连（v1.0.4 红线）。
   const modelSelection = selection?.explicit ?? selection?.live ?? record?.modelSelection;
-  const modelSelectionPinned =
-    selection?.explicit !== undefined ? true : record?.modelSelectionPinned;
+  const modelSelectionPinned = selection?.explicit !== undefined ? true : undefined;
   // 原始输入来源：provenance 优先，其次原轮的 sourceCommandId——
   // edit/retry 换了 commandId，但归因必须仍指向真正产生这条输入的原始命令。
   const originalSourceCommandId = record?.provenance?.sourceCommandId ?? record?.sourceCommandId;

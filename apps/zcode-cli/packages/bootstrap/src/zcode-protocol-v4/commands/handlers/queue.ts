@@ -33,6 +33,34 @@ class V4QueueItemTextUnavailableError extends Error {
   }
 }
 
+/**
+ * 执行权威不是「未起跑」：账本已是 promoted（已起跑）/ cancelled / discarded / failed。
+ *
+ * I1（spec edit-resend-stale-text）：执行文本只能来自 `session_input` 账本，账本项终态时
+ * **必须硬失败**——回落投影值等于让展示模型当执行权威，正是本条 bug 的根因。
+ */
+class V4QueueInputNotPendingError extends Error {
+  readonly reasonCode = "fault.command.inputNotPending";
+  constructor(queueItemId: string, status: string, statusReason?: string) {
+    super(
+      `v4 sendQueuedNow input is not pending: ${queueItemId} (ledger status ${status}${statusReason ? `: ${statusReason}` : ""})`,
+    );
+    this.name = "V4QueueInputNotPendingError";
+  }
+}
+
+/**
+ * 账本没有这一行（或宿主没有执行权威能力）：投影说项还在、账本说没这条输入。
+ * 同样硬失败——执行侧拿不到权威文本时不许退化成投影文本。
+ */
+class V4QueueInputAuthorityMissingError extends Error {
+  readonly reasonCode = "fault.command.inconsistentAuthority";
+  constructor(queueItemId: string, detail: string) {
+    super(`v4 sendQueuedNow execution authority missing: ${queueItemId} (${detail})`);
+    this.name = "V4QueueInputAuthorityMissingError";
+  }
+}
+
 class V4QueueItemReservedError extends Error {
   readonly reasonCode = "guard.queueItemReserved";
   constructor(queueItemId: string) {
@@ -270,6 +298,63 @@ function applyPromotedModelSelection(
 }
 
 /**
+ * I1 的唯一执行文本来源：按 id 读 `session_input` 账本。
+ *
+ * 接受条件只有一个：账本 `status=admitted`（未起跑）。其余三态全部硬失败：
+ * - `started`（promoted，已起跑）/ `voided`（cancelled / discarded / failed）→
+ *   `fault.command.inputNotPending`；
+ * - `missing`（账本无此行）或宿主未提供该能力 → `fault.command.inconsistentAuthority`。
+ *
+ * 硬失败必须可观测：先做一次对账上报（warn 日志带 session/item/终态与原因，不落文本内容），
+ * 再抛出带 reasonCode 的领域错误——gateway 会把它原样上行成 ACK 的 reasonCode。
+ * **不读、也不回落到投影项的 `queueItem.text`**。
+ */
+async function resolveExecutionText(
+  host: V4CommandCoreHost,
+  record: V4SessionRecordView,
+  queueItemId: string,
+): Promise<string> {
+  const sessionId = record.app.sessionId;
+  const read = host.getSessionInputForExecution;
+  if (!read) {
+    host.logger?.warn?.("v4 sendQueuedNow execution authority capability absent", {
+      queueItemId,
+      sessionId,
+    });
+    throw new V4QueueInputAuthorityMissingError(queueItemId, "host capability absent");
+  }
+  const authority = await read(sessionId, queueItemId);
+  if (authority.state === "pending") return authority.text;
+  host.logger?.warn?.("v4 sendQueuedNow rejected: ledger authority is not pending", {
+    ledgerState: authority.state,
+    ...(authority.state === "voided"
+      ? {
+          ledgerStatus: authority.status,
+          ...(authority.statusReason ? { statusReason: authority.statusReason } : {}),
+        }
+      : {}),
+    ...(authority.state === "started"
+      ? {
+          ledgerStatus: authority.status,
+          ...(authority.promotedMessageID
+            ? { promotedMessageID: authority.promotedMessageID }
+            : {}),
+        }
+      : {}),
+    queueItemId,
+    sessionId,
+  });
+  if (authority.state === "missing") {
+    throw new V4QueueInputAuthorityMissingError(queueItemId, "ledger row missing");
+  }
+  throw new V4QueueInputNotPendingError(
+    queueItemId,
+    authority.status,
+    authority.state === "voided" ? authority.statusReason : undefined,
+  );
+}
+
+/**
  * sendQueuedNow：reserve → Core promotion lease → stop barrier → start/promote → remove。
  * - 必须读取完整 QueueItem；text-only fallback 会丢 sourceCommandId/附件/client/order，禁止使用。
  * - stop 复用 session-flow 的语义：goal-pause barrier（否则 verifier 未收 abort 时
@@ -297,6 +382,9 @@ async function sendQueuedNow(
     if (queueItem === null) {
       throw new V4QueueItemTextUnavailableError(payload.queueItemId);
     }
+    // I1（RC1 根修）：执行文本从 session_input 账本读，投影项只用于校验存在性。
+    // 放在 reserve/lease 之前：终态或缺失时不留下任何 side effect，原项原位保留。
+    const executionText = await resolveExecutionText(host, record, queueItem.queueItemId);
     const acquirePromotionLease = (mode: "after-current" | "idle-only"): void => {
       const leaseResult = record.app.runtime.acquireForegroundPromotionLease({
         leaseId: foregroundPromotionLeaseId,
@@ -337,14 +425,8 @@ async function sendQueuedNow(
     ) {
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
-    // 待收口（spec edit-resend-stale-text Step 3 / 变更点 2、21）：下面两个分支的
-    // **执行内容**仍取自投影项 `queueItem.text`——这是 RC1「执行侧从投影读输入」的
-    // 另一半（T-IA4 的 queue 侧断言）。Step 3 改为读 `session_input` 账本
-    // （`status !== "admitted"` 硬失败，账本行缺失 → inconsistentAuthority），届时
-    // goal 分支的 `objective ?? queueItem.text` 与普通分支的 `queueItem.text`
-    // （intent.text 与 `content:` 两处）一并改掉。本步不动行为，只把现状钉进
-    // scripts/test-input-authority.mjs 的 I7 allowlist：新增任何 `queueItem.text`
-    // 作执行内容即红，收口时必须同步删除 allowlist 条目。
+    // spec 4b 例外表：goal 分支的 objective 解析与 displayText 仍读投影项（本 spec 不动）；
+    // 例外之外**执行内容**只来自账本 `executionText`——见下方普通分支的两处。
     if (queueItem.kind === "sendGoalCommand") {
       const intent = applyPromotedModelSelection(
         record.app.runtime,
@@ -365,13 +447,15 @@ async function sendQueuedNow(
       });
       leaseReleaseOwnedByBackground = goalContinuationWillStart;
     } else {
+      // 变更点 21：落库/执行的 `intent.text` 与 `content` 必须是账本文本，
+      // 否则冷恢复会把它带回 edit target（transcript-hydration），旧文本再次可执行。
       const intent = applyPromotedModelSelection(
         record.app.runtime,
         queueItem,
-        inputIntentMetadataFromQueueItem(queueItem, queueItem.text),
+        inputIntentMetadataFromQueueItem(queueItem, executionText),
       );
       const started = await startPromptTurn(host, record, {
-        content: queueItem.text,
+        content: executionText,
         inputId: queueItem.sourceCommandId,
         // 手动提升若实际抢占旧执行，同样是 human steer；自动 drain 不产生此标记。
         ...(preempted && !attachments?.length ? { inputPresentation: "user_steer" as const } : {}),
@@ -395,10 +479,13 @@ async function sendQueuedNow(
     if (!removed) throw new V4QueuePromotionCommitError(payload.queueItemId);
     // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
     // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
+    //
+    // `setQueueAutoDrain` 是 ZCodeApp 上 required 的成员（app/types.ts），
+    // session-flow / v4-bridge 也都是非可选调用；这里曾写成可选调用（`?.`）只为绕开
+    // 旧夹具缺失能力，结果 tripwire 长期红：能力真的缺席时恢复动作会被静默吞掉。
+    // 夹具已补桩（model-live / e2e-live-all / queue-item-delivery），恢复语义必须硬调用。
     if (!autoDrainPromotion) {
-      // 测试夹具与旧宿主可能没有 setQueueAutoDrain（v1.0.20 的 model-live 夹具即如此），
-      // 与 afterLegacyStateMutation 同样用可选调用：能力缺失时跳过恢复，不打断提升。
-      await record.app.setQueueAutoDrain?.(true);
+      await record.app.setQueueAutoDrain(true);
       await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
     }
     return undefined;

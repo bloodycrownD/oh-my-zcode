@@ -8,6 +8,7 @@
 // - 环境能力（模型就绪 / legacy 广播 / shell 解析）是注入钩子：旧协议 binder 在过渡期
 //   提供实现，与旧协议同生命周期——每个钩子都标注过渡归宿，新增钩子必须标注。
 import type {
+  SessionInputExecutionAuthority,
   SessionTaskType,
   StableForkGoalBoundaryMetadata,
   TraceContext,
@@ -83,6 +84,15 @@ export interface V4CommandCoreHost {
   // ── v4 原生能力（非过渡钩子）────────────────────────────────
   /** queue 项完整权威 intent；sendQueuedNow 禁止退化成 text-only 重发。 */
   getQueueItem?(sessionId: string, queueItemId: string): V4QueueItemCommand | null;
+  /**
+   * 执行权威（I1）：session_input 账本的按 id 读法，返回互斥四态 + 权威文本。
+   * 执行侧（sendQueuedNow）的输入文本只能来自这里；投影项只用于存在性与调度元数据。
+   * 能力缺席 = 执行权威不可读，handler 必须硬失败（不得回落投影文本）。
+   */
+  getSessionInputForExecution?(
+    sessionId: string,
+    queueItemId: string,
+  ): Promise<SessionInputExecutionAuthority>;
   /** typed maintenance 命令去重；判据来自同一 projection queue，不维护旁路集合。 */
   hasQueueItemKind?(sessionId: string, kind: QueueItem["kind"]): boolean;
   /** guide eligibility：只阻止已有 ordinary queue；已有 guide 仍允许继续按 FIFO admission。 */

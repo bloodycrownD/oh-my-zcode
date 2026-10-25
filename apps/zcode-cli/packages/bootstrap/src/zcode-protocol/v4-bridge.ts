@@ -591,6 +591,17 @@ export function createConversationV4Gateway(
     // 返回值回填），这里惰性取用避免构造期自引用。
     getQueueItem: (sessionId, queueItemId) =>
       context.v4Gateway?.getQueueItem(sessionId, queueItemId) ?? null,
+    // 执行权威（I1）：按 id + session 直读 session_input 账本。
+    // 存储/能力缺席时如实回「缺失」——handler 会硬失败（fault.command.inconsistentAuthority），
+    // 绝不回落到投影项文本（那是本条 bug 的执行侧根因）。
+    getSessionInputForExecution: async (sessionId, queueItemId) => {
+      const store = context.deps.sessionStore;
+      const sessionID = sessionId as SessionId;
+      if (!store?.getSessionInputForExecution) {
+        return { state: "missing", id: queueItemId, sessionID };
+      }
+      return store.getSessionInputForExecution({ id: queueItemId, sessionID });
+    },
     hasQueueItemKind: (sessionId, kind) =>
       context.v4Gateway?.hasQueueItemKind(sessionId, kind) ?? false,
     hasQueuedDelivery: (sessionId, delivery) =>

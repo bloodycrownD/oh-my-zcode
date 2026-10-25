@@ -352,6 +352,10 @@ function createPromotionHarness({ queueItem, modelState, autoDrainPromotion = fa
       markQueueItemPromoting: async () => true,
       removeQueueItem: async () => true,
       releaseQueueItemReservation: async () => true,
+      // 「立即发送」=恢复语义：手动提升成功后 handler 硬调用它（非可选）。
+      setQueueAutoDrain: async () => {
+        captured.autoDrainResumed = true;
+      },
       sendInput: async (input, options) => {
         captured.sendInput = input;
         captured.sendInputOptions = options;
@@ -366,6 +370,18 @@ function createPromotionHarness({ queueItem, modelState, autoDrainPromotion = fa
     logger: { info: () => {}, warn: () => {} },
     getQueueItem: (sessionId, queueItemId) =>
       sessionId === SESSION_ID && queueItemId === queueItem.queueItemId ? queueItem : null,
+    // I1：执行文本来自 session_input 账本。夹具让账本与投影同值（本文件只钉模型选择）；
+    // 账本与投影不一致的权威断言在 test-input-authority.mjs 的 L 组。
+    getSessionInputForExecution: async (sessionId, queueItemId) =>
+      sessionId === SESSION_ID && queueItemId === queueItem.queueItemId
+        ? {
+            state: "pending",
+            status: "admitted",
+            id: queueItemId,
+            sessionID: sessionId,
+            text: queueItem.text,
+          }
+        : { state: "missing", id: queueItemId, sessionID: sessionId },
     getInputRoutingMode: () => null,
     ensureModelReady: async () => undefined,
     afterLegacyStateMutation: async () => undefined,

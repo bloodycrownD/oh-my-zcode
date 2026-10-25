@@ -43,10 +43,13 @@ const EPOCH = "epoch-dlv";
 // ── A. 协议面 ──────────────────────────────────────────────────────────────
 
 test("A1: setQueueItemDelivery payload 只接受 queue|guide", () => {
-  assert.deepEqual(commandPayloadSchemas.setQueueItemDelivery.parse({ queueItemId: "qi", delivery: "guide" }), {
-    queueItemId: "qi",
-    delivery: "guide",
-  });
+  assert.deepEqual(
+    commandPayloadSchemas.setQueueItemDelivery.parse({ queueItemId: "qi", delivery: "guide" }),
+    {
+      queueItemId: "qi",
+      delivery: "guide",
+    },
+  );
   assert.deepEqual(
     commandPayloadSchemas.setQueueItemDelivery.parse({ queueItemId: "qi", delivery: "queue" }),
     { queueItemId: "qi", delivery: "queue" },
@@ -88,6 +91,11 @@ function makeHost({ queueItem, appResult = true }) {
         ? {
             app: {
               sessionId,
+              // B1/B5 钉的是「toggle 驱动 core 改写」这条门；空闲态的 guide 会转交
+              // sendQueuedNow（queue.ts 的空闲回落），与本组语义不同。夹具此前缺
+              // runtime 直接 TypeError（B1/B5 长期红），补一个「有前台执行」的活值让
+              // 用例落在它自称的路径上——断言本身未放宽。
+              runtime: { getActiveForegroundExecutionId: () => "exec-dlv-1" },
               setQueueItemDelivery: async (pendingInputId, delivery) => {
                 calls.push({ kind: "app.setQueueItemDelivery", pendingInputId, delivery });
                 return appResult;
@@ -97,6 +105,14 @@ function makeHost({ queueItem, appResult = true }) {
           }
         : undefined,
     getQueueItem: () => queueItem,
+    // 执行权威（I1）：只有空闲回落会走到 sendQueuedNow，见 B6。
+    getSessionInputForExecution: async (sessionId, queueItemId) => ({
+      state: "pending",
+      status: "admitted",
+      id: queueItemId,
+      sessionID: sessionId,
+      text: queueItem?.text ?? "",
+    }),
   };
 }
 
@@ -129,8 +145,7 @@ function queueItem({ dispatchState = "queued", admitted = "queue" } = {}) {
   };
 }
 
-const runHandler = (host, envelope) =>
-  queueHandlers.setQueueItemDelivery(host, envelope);
+const runHandler = (host, envelope) => queueHandlers.setQueueItemDelivery(host, envelope);
 
 test("B1: queued 态 queue→guide 驱动 core 改写", async () => {
   const host = makeHost({ queueItem: queueItem() });
@@ -198,6 +213,61 @@ test("B5: core 未命中（并发 drain 竞态）时 warn + 显式 rejected（P0
   );
 });
 
+test("B6: 空闲态 guide → 转交 sendQueuedNow，执行文本取账本（I1）", async () => {
+  // 空闲（无前台执行、无外层 abort）时切 guide 会永久滞留，handler 把该项转交
+  // sendQueuedNow。这条入口同样受 I1 约束：投影项文本是旧值，账本才是执行权威。
+  const projected = queueItem();
+  const ledgerText = "账本里的新文本";
+  const captured = {};
+  const record = {
+    app: {
+      sessionId: SESSION_ID,
+      getMode: () => "build",
+      readTarget: async () => null,
+      runtime: {
+        getActiveForegroundExecutionId: () => undefined,
+        getSessionModelSelection: () => undefined,
+        getPlanEnabled: () => false,
+        getActiveTurnInfo: () => undefined,
+        acquireForegroundPromotionLease: () => ({ kind: "acquired" }),
+        releaseForegroundPromotionLease: () => undefined,
+      },
+      reserveQueueItem: async () => true,
+      markQueueItemPromoting: async () => true,
+      removeQueueItem: async () => true,
+      releaseQueueItemReservation: async () => true,
+      setQueueAutoDrain: async () => {
+        captured.autoDrainResumed = true;
+      },
+      sendInput: async (input) => {
+        captured.input = input;
+        return { kind: "started_turn", turnId: "turn-dlv", completion: Promise.resolve() };
+      },
+    },
+    traceContext: { traceId: "trace-dlv", turnId: "turn-1" },
+    persistence: "immediate",
+  };
+  const host = {
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { warn: () => undefined },
+    getQueueItem: () => projected,
+    getSessionInputForExecution: async (sessionId, queueItemId) => ({
+      state: "pending",
+      status: "admitted",
+      id: queueItemId,
+      sessionID: sessionId,
+      text: ledgerText,
+    }),
+    getInputRoutingMode: () => null,
+    ensureModelReady: async () => undefined,
+    afterLegacyStateMutation: async () => undefined,
+  };
+  assert.equal(await runHandler(host, makeEnvelope("guide")), undefined);
+  assert.equal(captured.input?.text, ledgerText, "空闲回落起轮必须用账本文本，而不是投影项");
+  assert.notEqual(captured.input?.text, projected.text, "投影文本被执行 = RC1 复活");
+  assert.equal(captured.autoDrainResumed, true, "手动提升成功后必须恢复 autoDrain");
+});
+
 // ── C. 投影面 ──────────────────────────────────────────────────────────────
 
 let eventSeq = 0;
@@ -260,7 +330,9 @@ function deliveryChangedEvent({ admittedDelivery, requestedDelivery, fallbackRea
 }
 
 function queueItemOf(projection) {
-  const item = projection.getSnapshot().queue.items.find((row) => row.queueItemId === QUEUE_ITEM_ID);
+  const item = projection
+    .getSnapshot()
+    .queue.items.find((row) => row.queueItemId === QUEUE_ITEM_ID);
   assert.ok(item, "queue 行必须存在");
   return item;
 }

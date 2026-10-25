@@ -304,6 +304,8 @@ function createPromotionHarness({ queueItem, modelState, sessionId }) {
       markQueueItemPromoting: async () => true,
       removeQueueItem: async () => true,
       releaseQueueItemReservation: async () => true,
+      // 手动提升成功后的恢复语义：handler 硬调用（非可选）。
+      setQueueAutoDrain: async () => undefined,
       sendInput: async (input, options) => {
         captured.sendInput = input;
         captured.sendInputOptions = options;
@@ -318,6 +320,17 @@ function createPromotionHarness({ queueItem, modelState, sessionId }) {
     logger: { info: () => {}, warn: () => {} },
     getQueueItem: (sid, queueItemId) =>
       sid === sessionId && queueItemId === queueItem.queueItemId ? queueItem : null,
+    // I1：执行文本来自 session_input 账本（本夹具让账本与投影同值，只钉模型选择语义）。
+    getSessionInputForExecution: async (sid, queueItemId) =>
+      sid === sessionId && queueItemId === queueItem.queueItemId
+        ? {
+            state: "pending",
+            status: "admitted",
+            id: queueItemId,
+            sessionID: sid,
+            text: queueItem.text,
+          }
+        : { state: "missing", id: queueItemId, sessionID: sid },
     getInputRoutingMode: () => null,
     ensureModelReady: async () => undefined,
     afterLegacyStateMutation: async () => undefined,
