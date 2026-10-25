@@ -15,6 +15,50 @@ import type { McpTelemetryTracker } from "./telemetry.js";
 
 const DEFAULT_IDLE_GRACE_MS = 30_000;
 
+/**
+ * 冷启动不等死链：单个 MCP server 的连接最多占用这么久。
+ *
+ * 根因（会话打开慢）：`connectConfiguredServers` 用 `Promise.all` 等全部 server 连上，
+ * 而不可达的 http/sse server 要走完整 TCP/HTTP 超时（实测每台 5-6s），`npx` 形态的
+ * stdio server 首次还要拉包（实测 9.4s）——整条 startup 因此被拖到 9s 以上，而 CLI 的
+ * 首个会话快照要等 runtime 就绪，用户看到的就是「点开会话卡住」。
+ *
+ * 语义：到点按 `failed` 记账（工具不注册，可由设置页 mcp/list 手动重连），
+ * 后台连接不取消——它若稍后连上，后续 status 会自然翻成 connected。
+ */
+const MCP_CONNECT_DEADLINE_MS = 4_000;
+
+function withConnectDeadline(
+  serverName: string,
+  config: McpServerConfig,
+  connecting: Promise<McpServerStatus>,
+  logger?: Logger,
+): Promise<McpServerStatus> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<McpServerStatus>((resolve) => {
+    timer = setTimeout(() => {
+      logger?.warn("MCP server connect exceeded deadline", {
+        error: `connect timed out after ${MCP_CONNECT_DEADLINE_MS}ms`,
+        event: "mcp.server.connect_timeout",
+        mcpServerName: serverName,
+        module: "adapters.mcp.pool",
+        transport: config.type,
+      });
+      resolve({
+        error: `MCP connect timed out after ${MCP_CONNECT_DEADLINE_MS}ms`,
+        status: "failed",
+        toolCount: 0,
+        transport: config.type,
+        updatedAt: new Date().toISOString(),
+      });
+    }, MCP_CONNECT_DEADLINE_MS);
+    timer.unref?.();
+  });
+  return Promise.race([connecting, deadline]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 interface CreateMcpAdapterForPoolInput {
   connectionContext: McpConnectionContext;
   config: McpServerConfig;
@@ -242,7 +286,13 @@ export function createMcpConnectionPool(options: McpConnectionPoolOptions): McpC
         entry = {
           adapter,
           connectionContext,
-          connecting: adapter.connectServer(serverName, config, connectOptions),
+          // 有界连接：不可达 server 不拖住整条 MCP startup（见 MCP_CONNECT_DEADLINE_MS）。
+          connecting: withConnectDeadline(
+            serverName,
+            config,
+            adapter.connectServer(serverName, config, connectOptions),
+            logger,
+          ),
           key,
           refs: new Set([leaseId]),
           serverName,

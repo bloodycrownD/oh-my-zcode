@@ -101,6 +101,7 @@
     "test:tool-result-cache-control": "node --test scripts/test-tool-result-cache-control.mjs",
     "test:magic-context-boundaries": "node --test scripts/test-magic-context-boundaries.mjs",
     "test:runner-debug-head": "node --test scripts/test-runner-debug-head.mjs",
+    "test:mcp-connect-deadline": "node --import tsx --test scripts/test-mcp-connect-deadline.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "oxlint src",
     "lint:fix": "oxlint --write src"
