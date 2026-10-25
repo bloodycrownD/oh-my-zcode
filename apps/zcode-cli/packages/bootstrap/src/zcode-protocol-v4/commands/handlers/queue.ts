@@ -388,7 +388,9 @@ async function sendQueuedNow(
     // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
     // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
     if (!autoDrainPromotion) {
-      await record.app.setQueueAutoDrain(true);
+      // 测试夹具与旧宿主可能没有 setQueueAutoDrain（v1.0.20 的 model-live 夹具即如此），
+      // 与 afterLegacyStateMutation 同样用可选调用：能力缺失时跳过恢复，不打断提升。
+      await record.app.setQueueAutoDrain?.(true);
       await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
     }
     return undefined;
