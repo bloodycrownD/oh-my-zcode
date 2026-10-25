@@ -76,6 +76,18 @@ const USAGE = [
   "  node scripts/dev/long-session-perf-sample.mjs --skip-launch --duration-ms 60000 \\",
   "    --scroll-selector '[data-testid=\"conversation-timeline\"]'",
   "",
+  "会话打开分段（session-open-latency）：",
+  "",
+  "  本脚本同时采集 conversation subscribe ACK 的顶层键 `openPhases`",
+  "  （viewReadyMs / mergeMs / rehydrateMs；manifestMs、materializeMs 要到 row manifest",
+  "  与分页物化落地后才有值）与 `runtimeReady` query（runtimeReadyMs 不在 ACK 里：",
+  "  view-only 的激活发生在 ACK 之后）。两者来自页面窗口面",
+  "  `window.__zcodeV4ConversationOpensE2E`，缺省取最近一次 ACK 命中的会话。",
+  "  该面未挂载（旧 renderer）时只告警，不判失败。",
+  "",
+  "  例：node scripts/dev/long-session-perf-sample.mjs --skip-launch \\",
+  "        --out docs/iterations/session-open-latency/baseline.json",
+  "",
 ].join("\n");
 
 /** 带退出码的错误：抛出后在顶层统一回收子进程 / CDP 连接再退出。 */
@@ -310,6 +322,48 @@ const PROBE_DUMP_EXPR = `(() => {
   return typeof dumped === "string" ? dumped : JSON.stringify(dumped);
 })()`;
 
+// ---- 会话打开分段（ACK 顶层键 openPhases + runtimeReady query）----------------
+//
+// 数据源是 UI 侧窗口面 `__zcodeV4ConversationOpensE2E`
+// （packages/ui/src/v4/conversationOpenObservability.ts）。为什么不能在别处取：
+//   - `openPhases` / `openTiming` 只在 conversation subscribe **ACK 帧**里，不进
+//     snapshot / delta，页面外拿不到；
+//   - `runtimeReadyMs` 不在 ACK 里（view-only 的激活发生在 ACK 之后），只能事后走
+//     `v4/conversation/runtimeReady` query，窗口面会转给最近一次 ACK 命中的会话。
+// 该面是新增的：旧 renderer 未挂载时只告警，不判失败。
+const OPEN_PROBE_CHECK_EXPR = `(() => {
+  const probe = window.__zcodeV4ConversationOpensE2E;
+  if (!probe) return JSON.stringify({ mounted: false });
+  return JSON.stringify({
+    mounted: true,
+    ackCount: Array.isArray(probe.acks) ? probe.acks.length : 0,
+    methods: Object.keys(probe).filter((k) => typeof probe[k] === "function"),
+  });
+})()`;
+
+const OPEN_PROBE_SAMPLE_EXPR = `(async () => {
+  const probe = window.__zcodeV4ConversationOpensE2E;
+  if (!probe) return JSON.stringify({ mounted: false });
+  const acks = Array.isArray(probe.acks) ? probe.acks : [];
+  let runtimeReady = null;
+  let runtimeReadyError = null;
+  if (typeof probe.runtimeReady === "function") {
+    try {
+      runtimeReady = await probe.runtimeReady();
+    } catch (error) {
+      runtimeReadyError = error && error.message ? String(error.message) : String(error);
+    }
+  }
+  return JSON.stringify({
+    mounted: true,
+    capturedAt: new Date().toISOString(),
+    acks,
+    latestAck: acks.length > 0 ? acks[acks.length - 1] : null,
+    runtimeReady,
+    runtimeReadyError,
+  });
+})()`;
+
 const RENDERER_ENV_EXPR = `(() => {
   const timeline = document.querySelector(${JSON.stringify(TIMELINE_SELECTOR)});
   const num = (value) => {
@@ -514,6 +568,39 @@ function safeParse(raw) {
   }
 }
 
+/** 取当前页面上的会话打开分段（ACK 摘要 + runtimeReady query）；窗口面缺席时不判失败。 */
+async function readOpenProbe(cdp) {
+  try {
+    return safeParse(await cdp.evaluate(OPEN_PROBE_SAMPLE_EXPR));
+  } catch (error) {
+    return { mounted: false, error: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+function logOpenProbe(label, sample) {
+  if (!sample || sample.mounted !== true) {
+    console.error(
+      `${TAG} ${label}: 会话打开观测面未挂载（旧 renderer 或非 dev 构建），openPhases 采集跳过`,
+    );
+    return;
+  }
+  const latest = sample.latestAck;
+  if (!latest) {
+    console.log(`${TAG} ${label}: 尚无 subscribe ACK 样本（先打开一个会话再采样）`);
+    return;
+  }
+  const phases = latest.openPhases ? JSON.stringify(latest.openPhases) : "{}";
+  const runtime = sample.runtimeReady
+    ? `runtimeReadyMs=${sample.runtimeReady.runtimeReadyMs ?? "null"} runtimeReady=${
+        sample.runtimeReady.runtimeReady
+      }`
+    : `runtimeReady=unavailable${sample.runtimeReadyError ? `（${sample.runtimeReadyError}）` : ""}`;
+  console.log(
+    `${TAG} ${label}: topic=${latest.topic} openPhases=${phases} ${runtime}` +
+      `（ACK 样本 ${sample.acks?.length ?? 0} 条）`,
+  );
+}
+
 async function sampleSegment(cdp, name, { durationMs, drive }) {
   await cdp.evaluate(PROBE_RESET_EXPR);
   let driverInfo = null;
@@ -674,6 +761,8 @@ async function main() {
   const cdp = new CdpSession(target.webSocketDebuggerUrl);
   activeCdp = cdp;
   let segments;
+  let openProbeBeforeSampling;
+  let openProbeAfterSampling;
   try {
     await cdp.connect();
 
@@ -692,6 +781,25 @@ async function main() {
     }
     console.log(`${TAG} perfProbe 已挂载，方法: ${(probeInfo.methods ?? []).join(", ")}`);
 
+    // 会话打开分段：先取一次（窗口加载/打开会话发生在采样之前），采样结束后再取一次
+    // （期间可能发生重订阅/热切换）。窗口面缺席只告警，不改变退出码。
+    const openProbeInfo = safeParse(await cdp.evaluate(OPEN_PROBE_CHECK_EXPR));
+    if (openProbeInfo.mounted !== true) {
+      console.error(
+        [
+          `${TAG} 警告: 会话打开观测面 window.__zcodeV4ConversationOpensE2E 未挂载。`,
+          "openPhases / runtimeReady 将是 null（本次报告仍会写出其余分段）。",
+          "该面由 packages/ui/src/v4/conversationOpenObservability.ts 提供，需 dev renderer 重启后生效。",
+        ].join("\n"),
+      );
+    } else {
+      console.log(
+        `${TAG} 会话打开观测面已挂载，方法: ${(openProbeInfo.methods ?? []).join(", ")}`,
+      );
+    }
+    openProbeBeforeSampling = await readOpenProbe(cdp);
+    logOpenProbe("采样前 openPhases", openProbeBeforeSampling);
+
     const scrollStart = SCROLL_DRIVER_EXPR(
       options.scrollSelector ? JSON.stringify(options.scrollSelector) : "null",
       SCROLL_INTERVAL_MS,
@@ -705,6 +813,8 @@ async function main() {
         drive: { start: scrollStart },
       }),
     ];
+    openProbeAfterSampling = await readOpenProbe(cdp);
+    logOpenProbe("采样后 openPhases", openProbeAfterSampling);
   } finally {
     cdp.close();
   }
@@ -734,6 +844,13 @@ async function main() {
       type: target.type ?? null,
     },
     segments,
+    // 会话打开分段（session-open-latency）：ACK 顶层 `openPhases`（viewReadyMs /
+    // mergeMs / rehydrateMs）+ `runtimeReady` query（ACK 里没有该值）。
+    // 采样前后各取一次：打开会话发生在采样之前，采样期间也可能发生重订阅/热切换。
+    openProbe: {
+      beforeSampling: openProbeBeforeSampling ?? null,
+      afterSampling: openProbeAfterSampling ?? null,
+    },
   };
 
   const outPath = options.out

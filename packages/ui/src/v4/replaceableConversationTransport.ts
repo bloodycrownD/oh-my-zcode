@@ -145,6 +145,13 @@ export class ReplaceableConversationTransport implements ConversationTransport {
     return this.current.plans(params);
   }
 
+  // 同一类漏接的预防（见下方 workflowRunEvents 的教训）：接口新增成员时这里必须同步转发。
+  runtimeReady(
+    params: Parameters<ConversationTransport["runtimeReady"]>[0],
+  ): ReturnType<ConversationTransport["runtimeReady"]> {
+    return this.current.runtimeReady(params);
+  }
+
   // workflowRunEvents 是后来（workflow run 事件日志的 RPC）加进 ConversationTransport
   // 的成员，加的时候只落到了具体传输实现上，这个稳定身份漏掉了转发。而 pane 持的正是本对象，
   // 于是走 service proxy 的 pane 上 `transport.workflowRunEvents` 是 undefined——run 详情页

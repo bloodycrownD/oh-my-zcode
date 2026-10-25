@@ -106,6 +106,7 @@ import type {
   V4ConversationWorkflowRunsResult,
   V4ConversationRowsRangeResult,
   V4ConversationTurnDirectoryResult,
+  V4ConversationRuntimeReadyResult,
   V4ConversationResyncResult,
   V4ConversationSubscribeResult,
   V4SessionsIndexSubscribeResult,
@@ -448,6 +449,14 @@ export interface ZCodeAgentConversationTurnDirectoryParams extends ZCodeAgentSes
 
 /** 当前有效分支里的终态 ExitPlanMode 目录。 */
 export type ZCodeAgentConversationPlansParams = ZCodeAgentSessionTarget;
+
+/**
+ * runtime 激活耗时观测（conversation/runtimeReady）。
+ *
+ * 该值不可能出现在 subscribe ACK 里：view-only 下激活发生在 view-ready ACK 之后。
+ * 查询只读、无状态、超时重发安全，且不触发激活。
+ */
+export type ZCodeAgentConversationRuntimeReadyParams = ZCodeAgentSessionTarget;
 
 /** workflow run 的事件日志分页（详情页审计面）；cursor = journal sequence。 */
 export interface ZCodeAgentConversationWorkflowRunEventsParams extends ZCodeAgentSessionTarget {
@@ -887,6 +896,13 @@ export interface IZCodeAgentService {
   conversationPlansV4(
     params: ZCodeAgentConversationPlansParams,
   ): Promise<V4ConversationPlansResult>;
+  /**
+   * runtime 激活耗时观测（毫秒）。**不触发激活**：ACK 侧的 openPhases 不可能有该值，
+   * 故单独成 query，性能验收与 T-SL16 都从这里读。
+   */
+  conversationRuntimeReadyV4(
+    params: ZCodeAgentConversationRuntimeReadyParams,
+  ): Promise<V4ConversationRuntimeReadyResult>;
   /** workflow run 事件日志分页；与 plans 同族（只读、无状态、超时重发安全）。 */
   conversationWorkflowRunEventsV4(
     params: ZCodeAgentConversationWorkflowRunEventsParams,

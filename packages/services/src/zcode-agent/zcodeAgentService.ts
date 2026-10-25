@@ -202,6 +202,7 @@ import type {
   ZCodeAgentConversationRowsRangeParams,
   ZCodeAgentConversationTurnDirectoryParams,
   ZCodeAgentConversationPlansParams,
+  ZCodeAgentConversationRuntimeReadyParams,
   ZCodeAgentConversationWorkflowRunEventsParams,
   ZCodeAgentConversationWorkflowRunArtifactDataParams,
   ZCodeAgentConversationWorkflowRunArtifactReadParams,
@@ -253,6 +254,7 @@ import {
   v4ConversationRowsRangeResultSchema,
   v4ConversationTurnDirectoryResultSchema,
   v4ConversationPlansResultSchema,
+  v4ConversationRuntimeReadyResultSchema,
   v4ConversationWorkflowRunEventsResultSchema,
   v4ConversationWorkflowRunArtifactDataResultSchema,
   v4ConversationWorkflowRunArtifactReadResultSchema,
@@ -4760,6 +4762,17 @@ export function createZCodeAgentService(
         V4_METHODS.conversationPlans,
         { sessionId: params.sessionId },
         v4ConversationPlansResultSchema,
+      );
+    },
+
+    // runtime 激活耗时观测：同族的只读 query，沿现有 workspace attachment 透传；
+    // 不注入 clientMode（与 clientMode 无关），也不触发激活（激活在 CLI 侧由订阅/发送驱动）。
+    async conversationRuntimeReadyV4(params: ZCodeAgentConversationRuntimeReadyParams) {
+      const client = await getReadOnlyClient(params);
+      return client.request(
+        V4_METHODS.conversationRuntimeReady,
+        { sessionId: params.sessionId },
+        v4ConversationRuntimeReadyResultSchema,
       );
     },
 

@@ -149,8 +149,41 @@ export const conversationOpenTimingSchema = z
   .strict();
 export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema>;
 
+/**
+ * 会话打开的**分段** timing（ACK 顶层新键，IS8）。
+ *
+ * 为什么不放进 `openTiming`：那个 schema 是 `.strict()`，新增键会让旧客户端整帧解析
+ * 失败。本键是独立的新顶层键，旧客户端的 `subscribeAckSchema` 不 strict，会把它剥掉
+ * 而不是报错——这正是「additive」在本协议里的形态。
+ *
+ * **刻意不 .strict()**：本键是观测面，后续 phase 会往里加段（manifest / 窗口物化）。
+ * 消费者拿到的永远是自己认识的那个子集；老客户端剥未知键而不是整帧失败。
+ *
+ * 五段只覆盖 **ACK 帧内**可得的耗时：
+ *   - `viewReadyMs`：subscribe 入口 → ACK 组装完成（视图可读的总时长）；
+ *   - `mergeMs`：`loadPersistedEvents`（持久事件合并/transcript 合成）；
+ *   - `rehydrateMs`：`publisher.rehydrate`（投影重建）；
+ *   - `manifestMs` / `materializeMs`：row manifest 读取与分页物化的耗时。产生点在
+ *     phase-row-manifest / phase-paged-materialization，本阶段尚无生产者，读取方必须
+ *     按 undefined 处理。
+ *
+ * **不含 `runtimeReadyMs`**：view-only 下 runtime 激活发生在 view-ready ACK **之后**，
+ * ACK 帧里不可能有该值。它走 `v4/conversation/runtimeReady` query
+ * （见 `v4ConversationRuntimeReadyResultSchema`）。
+ */
+export const conversationOpenPhasesSchema = z.object({
+  version: z.literal(1),
+  viewReadyMs: openTimingMsSchema,
+  manifestMs: openTimingMsSchema,
+  materializeMs: openTimingMsSchema,
+  mergeMs: openTimingMsSchema,
+  rehydrateMs: openTimingMsSchema,
+});
+export type ConversationOpenPhases = z.infer<typeof conversationOpenPhasesSchema>;
+
 const conversationSubscribeAckSchema = subscribeAckSchema.extend({
   openTiming: conversationOpenTimingSchema.optional(),
+  openPhases: conversationOpenPhasesSchema.optional(),
 });
 export type ConversationSubscribeAck = z.infer<typeof conversationSubscribeAckSchema>;
 
@@ -339,6 +372,10 @@ export const V4_METHODS = {
   conversationTurnDirectory: "v4/conversation/turnDirectory",
   // 当前有效分支的终态 ExitPlanMode 目录；只读、无状态、超时重发安全。
   conversationPlans: "v4/conversation/plans",
+  // runtime 激活耗时（毫秒）观测：view-only 的激活发生在 subscribe ACK **之后**，
+  // ACK 帧（openPhases）里不可能有该值，故必须独立成 query。只读、无状态、超时重发安全，
+  // 且**不触发激活**（触发点是 ACK 后的后台预激活与 send 类命令）。
+  conversationRuntimeReady: "v4/conversation/runtimeReady",
   conversationFileChanges: "v4/conversation/fileChanges",
   backgroundBashOutput: "v4/conversation/backgroundBashOutput",
   conversationFileRewindPreview: "v4/conversation/fileRewindPreview",
@@ -584,6 +621,41 @@ export const v4ConversationTurnDirectoryResultSchema = z.object({
 });
 export type V4ConversationTurnDirectoryResult = z.infer<
   typeof v4ConversationTurnDirectoryResultSchema
+>;
+
+// ── runtime 就绪观测（conversation/runtimeReady）──
+// 与 rowsRange / turnDirectory 同族的只读 query：无状态、超时重发安全。
+//
+// **为什么必须有这条独立 query**：会话打开的分段 timing 放 ACK 顶层（openPhases），但
+// view-only 下 runtime 的激活发生在 view-ready ACK **之后**——ACK 帧里不可能有激活耗时。
+// 若把该值塞进 openTiming/openPhases，唯一的结果是「永远是 undefined，却被当成 0」。
+// 因此 runtimeReadyMs 只能事后 query；Step 14 的性能验收也从这里读。
+//
+// 语义边界（Step 1 只有观测，不产生激活）：
+//   - 本 query **不触发激活**。今天 activation 的唯一生产点是冷订阅的 cold resume；
+//     phase-view-runtime-split 之后改由「ACK 后后台预激活 + send 类命令 await」驱动，
+//     查询侧读数口径不变。
+//   - `runtimeReadyMs: null` 只表示「本进程没观测到一次激活」，不是「激活耗时 0」。
+export const v4ConversationRuntimeReadyParamsSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+export type V4ConversationRuntimeReadyParams = z.infer<
+  typeof v4ConversationRuntimeReadyParamsSchema
+>;
+
+// 有意不 .strict()：同族 query 的取舍——未来加观测字段（如激活阶段细分）时，
+// 老客户端剥键而不是解析失败。
+export const v4ConversationRuntimeReadyResultSchema = z.object({
+  sessionId: z.string().min(1),
+  /** 本进程最近一次观测到的 runtime 激活耗时（毫秒）；未观测到为 null（≠ 0）。 */
+  runtimeReadyMs: z.number().int().nonnegative().nullable(),
+  /** 读取时刻该会话的 runtime 是否已就绪。视图可读 ≠ runtime 就绪。 */
+  runtimeReady: z.boolean(),
+});
+export type V4ConversationRuntimeReadyResult = z.infer<
+  typeof v4ConversationRuntimeReadyResultSchema
 >;
 
 // ── conversation plans directory ──

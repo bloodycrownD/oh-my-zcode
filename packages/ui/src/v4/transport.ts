@@ -22,6 +22,8 @@ import type {
   V4ConversationRowsRangeResult,
   V4ConversationTurnDirectoryParams,
   V4ConversationTurnDirectoryResult,
+  V4ConversationRuntimeReadyParams,
+  V4ConversationRuntimeReadyResult,
   V4ConversationWorkflowRunArtifactDataParams,
   V4ConversationWorkflowRunArtifactDataResult,
   V4ConversationWorkflowRunArtifactReadParams,
@@ -68,6 +70,12 @@ export interface ConversationTransport {
   ): Promise<V4ConversationTurnDirectoryResult>;
   /** v4/conversation/plans：当前有效分支里的全部终态计划。 */
   plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult>;
+  /**
+   * v4/conversation/runtimeReady：runtime 激活耗时（毫秒）观测。
+   *
+   * 该值**不在** subscribe ACK 里：view-only 的激活发生在 ACK 之后。查询不触发激活。
+   */
+  runtimeReady(params: V4ConversationRuntimeReadyParams): Promise<V4ConversationRuntimeReadyResult>;
   /** v4/conversation/workflowRunEvents：workflow run 的事件日志分页（cursor = journal sequence）。 */
   workflowRunEvents(
     params: V4ConversationWorkflowRunEventsParams,

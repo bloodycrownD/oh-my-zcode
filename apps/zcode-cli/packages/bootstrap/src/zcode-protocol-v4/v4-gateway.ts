@@ -73,6 +73,8 @@ import type {
   ConversationTelemetryFact,
   CuaPermissionObservation,
   ConversationOpenTiming,
+  ConversationOpenPhases,
+  V4ConversationRuntimeReadyResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
   DELIVERY_PROFILES,
@@ -122,6 +124,8 @@ import {
   v4ConversationRowsRangeParamsSchema,
   v4ConversationTurnDirectoryParamsSchema,
   v4ConversationTurnDirectoryResultSchema,
+  v4ConversationRuntimeReadyParamsSchema,
+  v4ConversationRuntimeReadyResultSchema,
   v4ConversationResyncParamsSchema,
   v4ConversationSubscribeParamsSchema,
   v4ConversationUnsubscribeParamsSchema,
@@ -510,10 +514,31 @@ class ProjectionEventCommitWaitError extends Error {
  * 消费，公共 JSON-RPC result schema 始终严格为 `{ ack }`。
  */
 interface V4SubscribeDispatchResult<TFrame> {
-  ack: SubscribeAck & { openTiming?: ConversationOpenTiming };
+  ack: SubscribeAck & {
+    openTiming?: ConversationOpenTiming;
+    openPhases?: ConversationOpenPhases;
+  };
   initialFrame: TFrame | null;
   initialWires: RoutedTopicWireFrame[];
   commit(): boolean;
+}
+
+/**
+ * 一次 hydration 内两段的耗时（毫秒），供 ACK 的 `openPhases` 回填。
+ *
+ * 产生点只有 `performHydration`：`mergeMs` = `loadPersistedEvents`（持久事件合并 /
+ * transcript 合成），`rehydrateMs` = `publisher.rehydrate`（投影重建）。
+ * 早退分支（保留健康 live publisher）没有 rehydrate，故两者都可缺席。
+ */
+interface HydrationPhases {
+  mergeMs?: number;
+  rehydrateMs?: number;
+  /**
+   * 本次 hydration 收口时刻（performance.now()）。ACK 组装时用它判断「这几段是不是
+   * 刚落在这条 subscribe 的等待窗口内」——热切换/已 hydrate 的会话不会把上一次的耗时
+   * 冒充成本次的分段。
+   */
+  finishedAtMs?: number;
 }
 
 function encodeReservedTopicFrame(
@@ -622,6 +647,20 @@ export class ConversationV4Gateway {
   private readonly readyFlights = new Map<string, Promise<ConversationTopicPublisher>>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
+  /**
+   * 最近一次 hydration 的分段耗时（见 `openPhases`）。ACK 组装时读取；
+   * 只做观测，不参与任何判定。
+   */
+  private readonly lastHydrationPhases = new Map<string, HydrationPhases>();
+  /**
+   * 本进程内观测到的 runtime 激活耗时（毫秒）。
+   *
+   * 生产点今天只有冷订阅的 `coldResume.ensureResumed`（phases 拆开之前，激活与建投影是
+   * 串行的一段）；phase-view-runtime-split 拆出 `runtimeReadyFlights` 后改由 ACK 后的后台
+   * 预激活写入，`conversation/runtimeReady` 的读数口径不变。
+   * 只做观测：不参与任何判定，缺席 = 本进程没观测到激活。
+   */
+  private readonly runtimeActivationMs = new Map<string, number>();
   /** transcript 合成序列与 runtime raw 序列之间的 per-session 单调映射。 */
   private readonly rawSequenceStates = new Map<string, RawSequenceState>();
   /** connection-independent；command admission 与 transport subscription 生命周期解耦。 */
@@ -1415,6 +1454,10 @@ export class ConversationV4Gateway {
   async subscribeReserved(
     rawParams: unknown,
   ): Promise<V4SubscribeDispatchResult<ConversationTopicFrame>> {
+    // viewReadyMs 的起点：CLI 侧「打开会话」这件事从这里开始（与 openPhases 同轴）。
+    // 终点取 ACK 组装完成处，因此它覆盖 restore + hydration + initial frame encode，
+    // 是 phase-0 基线里唯一能与「≤1s」直接对比的总量。
+    const viewReadyStartedAt = performance.now();
     const params = v4ConversationSubscribeParamsSchema.parse(rawParams);
     const sessionId = parseConversationTopic(params.topic);
     if (sessionId === null) {
@@ -1468,6 +1511,14 @@ export class ConversationV4Gateway {
         const state = this.flushStates.get(routeKey);
         if (state) this.scheduleFlush(routeKey, state, publisher);
       });
+      const hydrationPhases = this.lastHydrationPhases.get(sessionId);
+      // 只回填「落在这条 subscribe 等待窗口内」的 hydration 分段：restoreStartedAt 之后的
+      // hydration 才是本次订阅真正等掉的那一段（热切换不跑 hydration，不能冒领旧值）。
+      const freshHydrationPhases =
+        hydrationPhases?.finishedAtMs !== undefined &&
+        hydrationPhases.finishedAtMs >= restoreStartedAt
+          ? hydrationPhases
+          : undefined;
       dispatch.ack = {
         ...dispatch.ack,
         openTiming: {
@@ -1479,6 +1530,19 @@ export class ConversationV4Gateway {
           ),
           sessionRuntimeState: isLiveConversation ? "warm" : "cold",
           snapshotRowCount: publisher.getSnapshot().rows.window.length,
+        },
+        // ACK 侧分段（IS8）：openTiming 是 .strict()，分段只能放这个新顶层键。
+        // manifestMs / materializeMs 的产生点分别在 phase-row-manifest 与
+        // phase-paged-materialization，本阶段不填——缺席就是「还没这一测点」。
+        openPhases: {
+          version: 1,
+          viewReadyMs: Math.max(0, Math.round(performance.now() - viewReadyStartedAt)),
+          ...(freshHydrationPhases?.mergeMs !== undefined
+            ? { mergeMs: freshHydrationPhases.mergeMs }
+            : {}),
+          ...(freshHydrationPhases?.rehydrateMs !== undefined
+            ? { rehydrateMs: freshHydrationPhases.rehydrateMs }
+            : {}),
         },
       };
     } catch (error) {
@@ -1650,6 +1714,25 @@ export class ConversationV4Gateway {
         params.clientMode === "desktop-continuous" ? "continuous" : "replayable",
       ),
     );
+  }
+
+  /**
+   * v4/conversation/runtimeReady：runtime 激活耗时的观测 query。
+   *
+   * 为什么独立成 query 而不是 ACK 字段：view-only 下 runtime 激活发生在 view-ready
+   * ACK **之后**，ACK 帧里不可能有该值（IS8；openPhases 明确不含 runtimeReadyMs）。
+   *
+   * 只读语义：**不触发激活**，只回已发生的事实。激活的生产点在冷订阅（今天）与
+   * ACK 后的后台预激活 + send 类命令（phase-view-runtime-split），查询不参与其中。
+   * `runtimeReadyMs: null` = 本进程没观测到一次激活（≠ 0）。
+   */
+  async runtimeReady(rawParams: unknown): Promise<V4ConversationRuntimeReadyResult> {
+    const params = v4ConversationRuntimeReadyParamsSchema.parse(rawParams);
+    return v4ConversationRuntimeReadyResultSchema.parse({
+      sessionId: params.sessionId,
+      runtimeReadyMs: this.runtimeActivationMs.get(params.sessionId) ?? null,
+      runtimeReady: this.hasLiveConversation(params.sessionId),
+    });
   }
 
   /** 完整有效 projection 的终态计划目录；冷会话复用订阅 hydration。 */
@@ -2855,6 +2938,8 @@ export class ConversationV4Gateway {
     this.hydratedSessions.clear();
     for (const buffer of this.hydrationBuffers.values()) buffer.cancelled = true;
     this.hydrationBuffers.clear();
+    this.lastHydrationPhases.clear();
+    this.runtimeActivationMs.clear();
     this.hydrationInFlight.clear();
     this.readyFlights.clear();
     this.rawSequenceStates.clear();
@@ -2932,10 +3017,18 @@ export class ConversationV4Gateway {
     if (existingFlight) return existingFlight;
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
+      // runtime 激活耗时（conversation/runtimeReady 的唯一生产点）。今天激活与建投影
+      // 串行，故这里只量 ensureResumed；phase-view-runtime-split 把它移进后台预激活时
+      // 换的是写入位置，不是读数口径。
+      const activationStartedAt = performance.now();
       const persistedMessages = await this.coldResume.ensureResumed(
         sessionId,
         resumeThoughtLevel,
         workspace,
+      );
+      this.runtimeActivationMs.set(
+        sessionId,
+        Math.max(0, Math.round(performance.now() - activationStartedAt)),
       );
       return this.hydratePublisher(sessionId, persistedMessages);
     });
@@ -2995,11 +3088,15 @@ export class ConversationV4Gateway {
     const existingAtStart = this.publishers.get(sessionId);
     const liveSessionAtStart = this.host.sessionExists(sessionId);
     const hydrationStartedAt = performance.now();
+    // openPhases 的 merge / rehydrate 分段：本函数是唯一产生点（早退分支只有 merge 段）。
+    const phases: HydrationPhases = {};
+    this.lastHydrationPhases.set(sessionId, phases);
     this.host.onDebug?.(
       `v4 hydrate started session=${sessionId} liveSessionAtStart=${String(liveSessionAtStart)} ` +
         `existingPublisherAtStart=${String(existingAtStart !== undefined)} ` +
         `persistedMessages=${String(persistedMessages?.length ?? 0)}`,
     );
+    const mergeStartedAt = performance.now();
     const loaded: PersistedEventsLoadResult = this.host.loadPersistedEvents
       ? await this.host.loadPersistedEvents(sessionId, persistedMessages).catch((error) => {
           this.host.onError?.("v4.hydrate", error, {
@@ -3013,6 +3110,8 @@ export class ConversationV4Gateway {
           return { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
         })
       : { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
+    // 持久事件合并 / transcript 合成 → openPhases.mergeMs。
+    phases.mergeMs = Math.max(0, Math.round(performance.now() - mergeStartedAt));
 
     this.host.onDebug?.(
       `v4 hydrate loaded session=${sessionId} events=${loaded.events.length} ` +
@@ -3051,6 +3150,8 @@ export class ConversationV4Gateway {
       );
       this.hydratedSessions.add(sessionId);
       this.publishCurrentSummaryToIndex(sessionId);
+      // 早退分支没有 rehydrate：只落 merge 段与收口时刻，读端按缺席处理 rehydrateMs。
+      phases.finishedAtMs = performance.now();
       return latestPublisher;
     }
 
@@ -3065,6 +3166,7 @@ export class ConversationV4Gateway {
         `conversation projection rehydrated while waiting for event commit: ${sessionId}`,
       ),
     );
+    const rehydrateStartedAt = performance.now();
     publisher.rehydrate(loaded.events, {
       // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
       // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
@@ -3075,6 +3177,8 @@ export class ConversationV4Gateway {
           sessionId,
         }),
     });
+    // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
+    phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));
     if (loaded.sharedContextImport) {
       publisher.seedSharedContextImport(loaded.sharedContextImport);
     }
@@ -3181,6 +3285,7 @@ export class ConversationV4Gateway {
     }
     this.hydratedSessions.add(sessionId);
     this.publishCurrentSummaryToIndex(sessionId);
+    phases.finishedAtMs = performance.now();
     return publisher;
   }
 

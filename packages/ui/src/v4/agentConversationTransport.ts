@@ -28,6 +28,8 @@ import {
   type V4ConversationPlansResult,
   type V4ConversationRowsRangeParams,
   type V4ConversationRowsRangeResult,
+  type V4ConversationRuntimeReadyParams,
+  type V4ConversationRuntimeReadyResult,
   type V4ConversationTurnDirectoryParams,
   type V4ConversationTurnDirectoryResult,
   type V4ConversationSubscribeResult,
@@ -38,6 +40,10 @@ import { ensureAgentV4ConnectionHandshake } from "@/v4/agentV4ConnectionHandshak
 import { createWorkflowRunTransportMethods } from "@/v4/agentConversationTransportWorkflowRuns.js";
 import { createAckActivationBarrier } from "@/v4/ackActivationBarrier.js";
 import { createTopicWireDecoder } from "@/v4/topicWireDecoder.js";
+import {
+  recordConversationOpenAck,
+  registerConversationRuntimeReadyReader,
+} from "@/v4/conversationOpenObservability.js";
 import { logger } from "@/logger.js";
 import {
   uploadAttachmentTransaction,
@@ -63,6 +69,7 @@ type ConversationV4AgentService = Pick<
   | "conversationRowsRangeV4"
   | "conversationTurnDirectoryV4"
   | "conversationPlansV4"
+  | "conversationRuntimeReadyV4"
   | "conversationWorkflowRunEventsV4"
   | "conversationWorkflowRunsV4"
   | "conversationWorkflowRunArtifactsV4"
@@ -143,7 +150,7 @@ export function createAgentConversationTransport(
     }
     return bytes;
   };
-  return {
+  const transport: ConversationTransport = {
     async subscribe(params: SubscribeParams): Promise<V4ConversationSubscribeResult> {
       const sessionId = parseConversationTopic(params.topic);
       if (!sessionId) {
@@ -202,6 +209,22 @@ export function createAgentConversationTransport(
           throw error;
         }
         topicBySubscriptionId.set(result.ack.subscriptionId, params.topic);
+        // 采样面：ACK 是 openPhases/openTiming 的唯一载体（不进 snapshot/delta），
+        // 这里落一份摘要，供 scripts/dev/long-session-perf-sample.mjs 经 CDP 取数。
+        recordConversationOpenAck({
+          topic: params.topic,
+          sessionId,
+          mode: result.ack.mode,
+          at: Date.now(),
+          ...(result.ack.openPhases ? { openPhases: result.ack.openPhases } : {}),
+          ...(result.ack.openTiming ? { openTiming: result.ack.openTiming } : {}),
+        });
+        // runtimeReadyMs 不在 ACK 里（激活发生在 ACK 之后），采样脚本要事后 query：
+        // 注册本 transport 上的读取闭包（走与未来消费者完全相同的传输方法），
+        // sessionId 缺省指向最近一次 ACK。
+        registerConversationRuntimeReadyReader(sessionId, () =>
+          transport.runtimeReady({ sessionId }),
+        );
         logger.lifecycle.info("v4 conversation subscription acknowledged", {
           ...lifecycleContext,
           durationMs: Date.now() - startedAt,
@@ -357,6 +380,17 @@ export function createAgentConversationTransport(
     async plans(params: V4ConversationPlansParams): Promise<V4ConversationPlansResult> {
       await ensureHandshake();
       return agentService.conversationPlansV4({
+        ...workspace,
+        sessionId: params.sessionId,
+      });
+    },
+    // runtime 激活耗时观测（只读、不触发激活）。ACK 侧的 openPhases 不含该值：
+    // view-only 的激活发生在 ACK 之后。
+    async runtimeReady(
+      params: V4ConversationRuntimeReadyParams,
+    ): Promise<V4ConversationRuntimeReadyResult> {
+      await ensureHandshake();
+      return agentService.conversationRuntimeReadyV4({
         ...workspace,
         sessionId: params.sessionId,
       });
@@ -582,4 +616,5 @@ export function createAgentConversationTransport(
         }
       : {}),
   };
+  return transport;
 }
