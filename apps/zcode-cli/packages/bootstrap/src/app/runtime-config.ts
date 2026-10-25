@@ -16,6 +16,7 @@ import { omitMcpServers, resolveTrustedOfficialCuaServerNames } from "../mcp-con
 import { resolveDefaultEmbeddedSearchBackend } from "./embedded-search-backend.js";
 import { resolvePromptLanguage } from "./app-config-options.js";
 import { getProjectMemoryRoot } from "./paths.js";
+import { resolveMagicContextEffectiveEnabled } from "./magic-context/gate.js";
 import type { ZCodeAppOptions } from "./types.js";
 import { resolveConfiguredDefaultModelSelectionOf } from "./types.js";
 import {
@@ -210,13 +211,17 @@ export function resolveAppRuntimeConfig(input: {
     // `runtime/helpers/magic-context-turn-transform.ts` 与 bootstrap
     // `magic-context-turn-transform.ts`。
     magicContext: {
-      enabled:
-        (options.runtimeConfig?.magicContext?.enabled ??
-          configResult.config.features.magicContext) &&
+      // 唯一口径见 `app/magic-context/gate.ts`（契约 8）；这里只做冷求值。
+      enabled: resolveMagicContextEffectiveEnabled({
+        featureFlag: configResult.config.features.magicContext,
+        ...(options.runtimeConfig?.magicContext?.enabled === undefined
+          ? {}
+          : { overrideEnabled: options.runtimeConfig.magicContext.enabled }),
         // 配置契约层把参数域收敛成不透明对象（`create-app.ts` 侧同样靠断言读它），
         // 这里只需要 `enabled` 那一位。
-        (configResult.config as { magicContext?: { enabled?: boolean } }).magicContext?.enabled !==
-          false,
+        domainEnabled: (configResult.config as { magicContext?: { enabled?: boolean } }).magicContext
+          ?.enabled,
+      }),
     },
   };
   return {

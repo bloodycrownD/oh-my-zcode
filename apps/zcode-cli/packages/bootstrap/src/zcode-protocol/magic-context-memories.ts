@@ -99,6 +99,7 @@ import {
   type ZCodeWorkspaceListMagicContextMemoriesParams,
   type ZCodeWorkspaceListMagicContextMemoriesResult,
 } from "@zcode/shared";
+import { resolveMagicContextEffectiveEnabled } from "../app/magic-context/gate.js";
 import {
   parseParams,
   ProtocolRequestError,
@@ -133,10 +134,19 @@ function isMagicContextDisabled(
     if (!configPort) continue;
     // ConfigPort 的 MagicContext 域恒有值（注册时把 schema 的 .default() 解析结果
     // 钉进去了），safeParse 是纵深防御而非正常路径。
-    return readMagicContextEnabled(configPort.get(ConfigKey.MagicContext)) === false;
+    return !resolveMagicContextEffectiveEnabled({
+      // feature kill switch 与装配层同源（契约 8）；端口值缺席按缺省 true。
+      featureFlag: configPort.get(ConfigKey.FeatureMagicContext) !== false,
+      domainEnabled: readMagicContextEnabled(configPort.get(ConfigKey.MagicContext)),
+    });
   }
   const loaded = loadFileConfig(configPath);
-  return readMagicContextEnabled(loaded.config.magicContext) === false;
+  return !resolveMagicContextEffectiveEnabled({
+    // 文件里没写 features 段时按缺省 true（config lane 的默认值），不能把
+    // 「没配」读成「关了」。
+    featureFlag: loaded.config.features?.magicContext !== false,
+    domainEnabled: readMagicContextEnabled(loaded.config.magicContext),
+  });
 }
 
 function readMagicContextEnabled(raw: unknown): boolean {

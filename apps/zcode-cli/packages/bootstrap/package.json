@@ -32,6 +32,7 @@
     "test:magic-context-memories-rpc": "node scripts/test-magic-context-memories-rpc.mjs",
     "test:magic-context-usage": "node --test scripts/test-magic-context-usage-projection.mjs",
     "test:magic-context-tag-strip": "tsx --test scripts/test-magic-context-tag-strip.mjs",
+    "test:magic-context-gate": "tsx --test scripts/test-magic-context-gate.mjs",
     "test:held-queue-routing": "tsx --test scripts/test-held-queue-routing.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
