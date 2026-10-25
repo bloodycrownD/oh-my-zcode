@@ -352,6 +352,10 @@ function createPromotionHarness({ queueItem, modelState, autoDrainPromotion = fa
       markQueueItemPromoting: async () => true,
       removeQueueItem: async () => true,
       releaseQueueItemReservation: async () => true,
+      // 「立即发送」=恢复语义：手动提升成功后 handler 硬调用它（非可选）。
+      setQueueAutoDrain: async () => {
+        captured.autoDrainResumed = true;
+      },
       sendInput: async (input, options) => {
         captured.sendInput = input;
         captured.sendInputOptions = options;

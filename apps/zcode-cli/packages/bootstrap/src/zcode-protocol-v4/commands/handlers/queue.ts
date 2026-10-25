@@ -387,10 +387,13 @@ async function sendQueuedNow(
     if (!removed) throw new V4QueuePromotionCommitError(payload.queueItemId);
     // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
     // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
+    // 恢复语义必须是硬调用：`setQueueAutoDrain` 是 ZCodeApp 上 **required** 的成员
+    // （app/types.ts:785），session-flow.ts / v4-bridge.ts 也都是非可选调用。db41442f
+    // 曾把它改成可选调用（`?.`）只为绕开旧夹具缺能力，结果是能力真缺席时恢复动作被
+    // 静默吞掉、tripwire 长期红（test-held-queue-routing 源码形状断言）。夹具侧
+    // （test-model-live / test-e2e-live-all 的 promotion harness）已补桩，不再需要兜底。
     if (!autoDrainPromotion) {
-      // 测试夹具与旧宿主可能没有 setQueueAutoDrain（v1.0.20 的 model-live 夹具即如此），
-      // 与 afterLegacyStateMutation 同样用可选调用：能力缺失时跳过恢复，不打断提升。
-      await record.app.setQueueAutoDrain?.(true);
+      await record.app.setQueueAutoDrain(true);
       await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
     }
     return undefined;
