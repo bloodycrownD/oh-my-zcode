@@ -182,6 +182,23 @@ async function deleteQueueItem(
     // queue 撤回编辑因此可能把已消费的旧投影再次恢复到 composer。
     throw new V4CommandNoopError("queue.itemMissing");
   }
+  // 删空队列必须复位 autoDrain（与 Step 5 rewind 级联同一条铁律）：否则留下
+  // 「paused + 0 项」的 durable 位——0 项时下一次发送确实仍 startNow（enqueue 分支要求
+  // queueLength>0），但**下一轮结束后新入队的项**会被判成 held，用户没按暂停却不再自动放行。
+  //
+  // 三个约束缺一即错：
+  // 1. 只在**删除后投影队列为空**时复位（不是「删了几条」推算）——还剩 ≥1 项时复位会让
+  //    存活项被 auto-drain 抢跑；
+  // 2. 走权威路径 `app.setQueueAutoDrain(true)`（runtime 门 + QueueAutoDrainChanged 事件），
+  //    不得直写投影；
+  // 3. `getQueueLength` 缺席时读不到「空」，按非空处理（fail-safe：宁可保持 held，
+  //    也不能在还有项时无条件放行）。
+  const remaining = host.getQueueLength?.(record.app.sessionId);
+  if (remaining === 0) {
+    await record.app.setQueueAutoDrain(true);
+    // 不能只翻授权位：idle 暂停队列没有 active turn 可替它启动队首（同 setAutoDrain handler）。
+    await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
+  }
   return undefined;
 }
 

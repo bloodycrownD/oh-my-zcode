@@ -1536,3 +1536,93 @@ test("T-RT5 newText 被 queued 不算失败：不触发 abort、不结算账本�
   assert.equal(harness.state.revert, REWIND_TARGET_MESSAGE_ID, "截断按用户意图保留");
 });
 
+// ── T-RW6 删空队列复位 autoDrain（Step 5/6 同一条铁律的残留）─────────────────
+
+function createDeleteQueueItemHarness({
+  queueLengthAfterDelete = 0,
+  removeResult = true,
+  withQueueLength = true,
+} = {}) {
+  const calls = { autoDrain: [], mutations: [], removed: [] };
+  const record = {
+    app: {
+      removeQueueItem: async (queueItemId) => {
+        calls.removed.push(queueItemId);
+        return removeResult;
+      },
+      sessionId: SESSION_ID,
+      setQueueAutoDrain: async (autoDrain) => {
+        calls.autoDrain.push(autoDrain);
+      },
+    },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    afterLegacyStateMutation: async (_record, reason) => {
+      calls.mutations.push(reason);
+    },
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { warn: () => undefined },
+    ...(withQueueLength ? { getQueueLength: () => queueLengthAfterDelete } : {}),
+  };
+  const envelope = {
+    clientId: "ui",
+    commandId: "cmd-del-rt",
+    issuedAt: Date.now(),
+    payload: { queueItemId: "queue_cmd-old" },
+    sessionId: SESSION_ID,
+    type: "deleteQueueItem",
+  };
+  return { calls, envelope, host };
+}
+
+test("T-RW6 删空队列必须复位 autoDrain（否则下一轮结束后的新入队项永远 held）", async () => {
+  const harness = createDeleteQueueItemHarness({ queueLengthAfterDelete: 0 });
+  await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
+
+  assert.deepEqual(harness.calls.removed, ["queue_cmd-old"]);
+  assert.deepEqual(harness.calls.autoDrain, [true], "只在删空时取权威路径 setQueueAutoDrain(true)");
+  assert.deepEqual(
+    harness.calls.mutations,
+    ["queue_auto_drain_resumed"],
+    "必须走 afterLegacyStateMutation：idle 暂停队列没有 active turn 替它启动队首",
+  );
+
+  // 残留位的真实后果：下一轮结束后（completed + queue>0）新入队项被 auto-drain 永久 held。
+  const gate = (autoDrain) =>
+    shouldAutoDrainV4QueueHead({
+      autoDrain,
+      dispatchState: "queued",
+      sessionBusy: false,
+      targetStatus: null,
+    });
+  assert.equal(gate(false), false, "autoDrain=false 的残留位会让新项永远不被放行（用户没按暂停）");
+  assert.equal(gate(true), true, "复位后同一闸门放行 = 修复语义");
+});
+
+test("T-RW6 删到还剩 ≥1 项时不许复位（存活项会被 auto-drain 抢跑）", async () => {
+  const harness = createDeleteQueueItemHarness({ queueLengthAfterDelete: 1 });
+  await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
+
+  assert.deepEqual(harness.calls.autoDrain, [], "队列非空时复位 = 让存活项抢跑");
+  assert.deepEqual(harness.calls.mutations, [], "没有复位就没有 resumed 广播");
+});
+
+test("T-RW6 读不到队列长度时按非空处理（fail-safe：宁可不复位）", async () => {
+  const noCounter = createDeleteQueueItemHarness({ withQueueLength: false });
+  await queueHandlers.deleteQueueItem(noCounter.host, noCounter.envelope);
+  assert.deepEqual(noCounter.calls.autoDrain, [], "无法证明「空」时不得无条件放行");
+
+  // 反证：未命中的删除是 noop，同样不得复位（否则并发 drain 会把暂停位提前清掉）。
+  const miss = createDeleteQueueItemHarness({ removeResult: false });
+  await assert.rejects(
+    () => queueHandlers.deleteQueueItem(miss.host, miss.envelope),
+    (error) => {
+      assert.equal(error.reasonCode, "queue.itemMissing");
+      return true;
+    },
+  );
+  assert.deepEqual(miss.calls.autoDrain, []);
+  assert.deepEqual(miss.calls.mutations, []);
+});
