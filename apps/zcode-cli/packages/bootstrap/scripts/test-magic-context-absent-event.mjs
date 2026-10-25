@@ -94,7 +94,13 @@ registerHooks({
 const DIST_APP = fileURLToPath(new URL("../dist/app/", import.meta.url));
 const CREATE_APP_DIST_URL = pathToFileURL(join(DIST_APP, "create-app.js")).href;
 const FACTORY_DIST_URL = pathToFileURL(join(DIST_APP, "magic-context-turn-transform.js")).href;
-for (const dist of [CREATE_APP_DIST_URL, FACTORY_DIST_URL]) {
+/**
+ * Step 4 的生产入口：`create-app.ts` 的 `await import("./magic-context/index.js")`
+ * 目标，也是 `FACTORY_MODULE_MARKERS` 第三条。阳性对照必须真 import 它一次，否则
+ * 那条 marker 永远不会被命中——等于判据里留了一个没人验证的死条目。
+ */
+const ENTRY_DIST_URL = pathToFileURL(join(DIST_APP, "magic-context", "index.js")).href;
+for (const dist of [CREATE_APP_DIST_URL, FACTORY_DIST_URL, ENTRY_DIST_URL]) {
   if (!existsSync(fileURLToPath(dist))) {
     throw new Error(
       `missing ${fileURLToPath(dist)} — run \`pnpm --filter @zcode/bootstrap build\` first`,
@@ -353,10 +359,13 @@ process.stdout.write("DRIVER-REPORT " + JSON.stringify(report) + "\\n");
 
 // ── 阳性对照（在报告之后） ──────────────────────────────────────────────────
 // 「零加载」断言的可信度取决于「hook + 落点判据确实能抓到工厂加载」。这里在报告
-// 之后主动 import 一次工厂模块：hook 观测日志里 control 标记之后的工厂解析必须
-// 出现（父进程据此反向验证判据），而 control 标记之前保持零条。
+// 之后主动 import 两次：先旧门面（shim），再 Step 4 的生产入口
+// app/magic-context/index.js（create-app 唯一消费的模块）。hook 观测日志里
+// control 标记之后的工厂解析必须出现（父进程据此反向验证判据），而 control 标记
+// 之前保持零条。
 appendFileSync(HOOK_LOG, JSON.stringify({ control: true }) + "\\n");
 await import(${JSON.stringify(FACTORY_DIST_URL)});
+await import(${JSON.stringify(ENTRY_DIST_URL)});
 await new Promise((resolve) => setTimeout(resolve, 50));
 `;
 
@@ -367,27 +376,49 @@ const SENTINEL_SOURCE = `export const SENTINEL = true;\n`;
  * 是 `runtime/helpers/magic-context-turn-transform.js`，不含 `app/` 段，因此不会被
  * 误判为工厂。
  *
- * ＝＝ 为什么是「两条 marker」而不是一条 ＝＝
+ * ＝＝ 为什么是「三条 marker」而不是一条 ＝＝
  * phase-facade（Step 3）把单体拆成门面 + `app/magic-context/` 目录下的 8 个文件。
  * 只认门面文件的精确路径会留一个盲区：**任何一处绕开门面直接静态 import
  * `./magic-context/*.js`，都会把 MC 包拉进关闭态，而本守卫照样绿**。目录前缀那条
  * 覆盖新增的全部拆分文件；门面那条保留——11 个脚本与旧 dist 路径仍以它为准，
- * 且它是「门面自己被解析」的直接证据。
+ * 且它是「门面自己被解析」的直接证据；第三条是 Step 4 的生产入口
+ * `app/magic-context/index.js`（`create-app.ts` 现在只 import 它）。
  *
  * ＝＝ 为什么还要一条 allow ＝＝
  * `app/magic-context/` 目录里**有一个文件在关闭态本来就该被加载**：
  * `effective-enabled.ts` 是零 MC 依赖的门控层（spec IM3 / phase-effective-single），
  * `create-app.ts` 在装配门之前静态 import 它算冷值——它若被算成「工厂加载」，这条
  * 守卫会永远红（实测：目录前缀命中它的两条解析记录）。白名单只放这一个文件；
- * 「它自己不许 import MC」由 `test-magic-context-gate.mjs` 的源码形状守卫负责，
- * 不在这里重复。
+ * 「它自己不许 import MC」由 `test-magic-context-gate.mjs` 的源码形状守卫负责
+ * （N1，Step 4 补：读 `src/app/magic-context/effective-enabled.ts`、剥注释后断言
+ * 没有 `from "@zcode/magic-context"`），不在这里重复。
  *
- * 阳性对照不用改：控制段 `import()` 门面时必然解析门面 + 它 re-export 的整个目录，
- * 两条 marker 都会真实命中，等于自带正例。
+ * ＝＝ 覆盖边界（N2，别把这条守卫读成「关态零加载」全覆盖）＝＝
+ * 本守卫判的是**宿主侧的 MC 装配模块**有没有被解析（bootstrap 的 shim / 拆分目录 /
+ * 生产入口）。**`@zcode/magic-context` 包本身**的解析不在 E1 范围——那是口径①
+ * （spec `:106` / `:198`，Step 7 的 `test-magic-context-zero-load.mjs`：M0 白名单
+ * 之外包内解析数 = 0）。两层不能互相顶替：本守卫绿不代表包内零加载，反之亦然。
+ *
+ * 阳性对照：控制段 `import()` 门面时必然解析门面 + 它 re-export 的整个目录，前两条
+ * marker 都会真实命中，等于自带正例。Step 4 起控制段**再 import 一次生产入口**
+ * `app/magic-context/index.js`——它是 `create-app.ts` 唯一消费的模块。控制段两次
+ * import 都必须被外层断言看见（否则第三条 marker 只是个从没验证过的死条目）。
  */
 const FACTORY_MODULE_MARKERS = [
   "bootstrap/dist/app/magic-context-turn-transform.js",
   "bootstrap/dist/app/magic-context/",
+  // Step 4：生产入口（`create-app.ts` 的 `await import("./magic-context/index.js")`）。
+  // 它已被上面的目录前缀覆盖，单列只为把「生产入口」这条语义写死在判据里——
+  // 前缀被误删/误改时，这一条仍能命中。
+  "bootstrap/dist/app/magic-context/index.js",
+  // 装配面的两个**目录外**单文件（Step 3 时仍留在 `src/app/` 下，spec 最终结构里会
+  // 迁进目录并各留 shim）。它们同样是「静态值导入 MC」的模块，今天只被门面目录内
+  // 静态引用（`assembly.ts:34-35`）——但只要有人从 `create-app.ts` 静态引一次，
+  // 关闭态就会把 MC 包拉进来，而上面的门面/目录前缀两条 marker 都抓不到。补进来
+  // 之后「宿主侧 MC 装配模块」这条面就完整了，控制段的入口 import 会解析它们
+  // （见下方逐 marker 的阳性对照断言），不会退化成死条目。
+  "bootstrap/dist/app/magic-context-historian.js",
+  "bootstrap/dist/app/magic-context-usage-summary.js",
 ];
 
 /** 目录内唯一允许在关闭态解析的文件（零依赖门控层，见上）。 */
@@ -499,6 +530,16 @@ test("E1: create-app enabled!==true 装配路径——事件可达且工厂门�
     controlResolutions.some(isFactoryResolution),
     "阳性对照：hook 必须能抓到一次真实的工厂模块解析（否则零加载断言无效）",
   );
+  // 阳性对照的第二半（Step 4）：**每一条** marker 都必须在控制窗口里被真实解析命中。
+  // 目录前缀已经覆盖了 index.js，单列的那些 marker 若从未命中过就是死条目——判据里
+  // 留死条目的后果是「以为在守、其实没守」。控制段的两次 import（旧门面 + 生产入口）
+  // 覆盖全部五条：门面 → marker 1；re-export 链 → marker 2/4/5；入口 → marker 3。
+  for (const marker of FACTORY_MODULE_MARKERS) {
+    assert.ok(
+      controlResolutions.some((resolution) => String(resolution.url).includes(marker)),
+      `阳性对照：marker "${marker}" 必须被控制段的一次真实解析命中（否则它是死条目）`,
+    );
+  }
   // 可控 dataDir：factory 没跑 ⇒ 没有库文件。
   assert.equal(report.dbFileExists, false, "disabled 装配不允许创建 magic-context.db");
   // 事件可达：disabled 由 create-app 侧经 leaf 发射（生产唯一发射点）。

@@ -517,3 +517,40 @@ test("同源守卫：gate.ts 已更名，旧路径不再被引用", () => {
   }
   assert.deepEqual(offenders, [], `旧路径 magic-context/gate 仍被引用：${offenders.join(", ")}`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// N1：门控层零 MC 依赖
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * `test-magic-context-absent-event.mjs` 的 `FACTORY_MODULE_ALLOWED_MARKERS` 放行了
+ * `dist/app/magic-context/effective-enabled.js`（它在关闭态本来就该被解析），并在
+ * 注释里声明「它自己不许 import MC 由本文件负责」——**这条不变量此前没有任何守卫**，
+ * 等于放行条件裸奔：只要有人往门控层加一行 `import "@zcode/magic-context"`，关闭态
+ * 就会把整棵 MC 图拉进启动路径（IM1），而 absent-event 那条守卫仍全绿（白名单直接
+ * 跳过它）。这里把那句补偿声明变成可执行的断言。
+ *
+ * 判定同样是「剥注释 + 正则」（不做 AST，与全仓源码形状守卫同口径）：
+ *   ① 静态值导入 / type-only 导入 / 窄子路径导入：`from "@zcode/magic-context…"`；
+ *   ② 动态形态：`import("@zcode/magic-context…")` / `require("@zcode/magic-context…")`
+ *      ——它们同样会在运行期解析包（调用期也算，门控层是同步求值的，没有「以后再
+ *      import」的合法场景）。
+ * 覆盖边界：正则不认类型别名与间接调用（`const p = "@zcode/" + "magic-context"`），
+ * 这类写法靠评审兜住，与 spec `:339` 的守卫覆盖面一致。
+ */
+test("零依赖门控层：effective-enabled.ts 不 import @zcode/magic-context（N1）", () => {
+  const source = readSource("app/magic-context/effective-enabled.ts");
+  // `from "@zcode/magic-context…"`（值导入 / type-only / 窄子路径 / re-export），
+  // 外加**副作用导入** `import "@zcode/magic-context"`——它没有 `from`，只匹配
+  // `from` 会被这一种写法整个绕过。
+  assert.ok(
+    !/(?:from\s*|import\s*)["']@zcode\/magic-context/.test(source),
+    "effective-enabled.ts 出现指向 `@zcode/magic-context…` 的导入：它是关闭态唯一被放行的" +
+      "门控层（IM1 / spec :106），任何指向包的导入都会把 MC 模块图拉进关闭态，而 " +
+      "test-magic-context-absent-event.mjs 的白名单不会报红",
+  );
+  assert.ok(
+    !/\b(?:import|require)\s*\(\s*["']@zcode\/magic-context/.test(source),
+    "effective-enabled.ts 出现指向 @zcode/magic-context 的动态 import()/require()：同上",
+  );
+});

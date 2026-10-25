@@ -828,11 +828,26 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // `isMagicContextEnabled` 命令契约三处此前各写一遍同一个比较。三处读的是同一份
     // 冷值（`runtime-config.ts` 用唯一口径 `resolveMagicContextEffectiveEnabled` 算出的
     // `runtimeConfig.magicContext.enabled`），所以只投影一次、三处复用同一个布尔。
+    // Step 4（spec phase-facade）：装配面收成**单点**——一次动态 import + 一次
+    // `createMagicContextPlugin` 调用换回全部产物（turnTransform / promptSection /
+    // toolDescription / usageRecorder / close）。关态门的语义一字未变：这个 `if`
+    // 是唯一入口，`enabled !== true` 时零 import、零 DB 创建，只发 absent 事件。
     const magicContextEffectiveEnabled = projectMagicContextEffectiveEnabled(runtimeConfig);
-    let magicContextAssembly: typeof import("./magic-context-turn-transform.js") | undefined;
+    // FORK（MF-05）：magic-context 的关闭钩子由装配工厂**注册**回来，而不是这里
+    // 拿它的内部对象——后者会把 drain/shutdown/dispose 的顺序知识泄到装配层。
+    // 缺席 = 没装 magic-context（flag 关或 DB 开不出来），此时不注入 session facade。
+    //
+    // 注意仍走 `registerClose` 回填、**不读**插件返回的 `close`：插件在「工厂没注册
+    // 关闭钩子」时（db_null 且 fail_closed_blocking=false）返回 noop，而本装配要保留
+    // 「没有真实钩子就一个键都不注入」的原语义——`session-facade` 的关闭链不许多一次
+    // 空调用。两者在真实钩子在场时是同一个函数对象（`index.ts` 的
+    // `registeredClose ?? noopClose`），所以这里只取「是否注册过」这一位。
+    let closeMagicContext: (() => Promise<void>) | undefined;
+    let magicContextPlugin: import("./magic-context/index.js").MagicContextPlugin | undefined;
     if (magicContextEffectiveEnabled) {
+      let pluginModule: typeof import("./magic-context/index.js");
       try {
-        magicContextAssembly = await import("./magic-context-turn-transform.js");
+        pluginModule = await import("./magic-context/index.js");
       } catch (error) {
         emitMagicContextTransformAbsent(
           logger,
@@ -841,17 +856,84 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
         );
         throw error;
       }
-    } else {
-      emitMagicContextTransformAbsent(
+      // usage recorder 由插件**自己构造并返回**（入参里不再有 `usageRecorder`）：
+      // 它必须先于 transform（`prime(db)` 在工厂内、DB 开出来之后立刻发生），这条
+      // 顺序现在由插件内部保证，装配层不再持有构造权。
+      magicContextPlugin = await pluginModule.createMagicContextPlugin({
+        // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
+        // 是 `features.magicContext && magicContext.enabled`，这一位与上面装配门读
+        // 的是同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。
+        enabled: magicContextEffectiveEnabled,
+        registerClose: (close) => {
+          closeMagicContext = close;
+        },
+        // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
+        // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
+        // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
+        // 的静态源，生产路径恒有 `configPort`。
+        configPort: configResult.configPort,
+        configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
+        sessionId,
+        workingDirectory,
+        // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：进程形态透传。
+        // 三个入口（protocol / TUI / print）各自知道自己是不是长驻，bootstrap 不
+        // 做 argv 嗅探——TUI 与 `-p` 在 argv 上不可区分。缺省 true = 保守，保持
+        // print 与所有未声明形态的现有前台 settle 行为。
+        processExitsAfterTurn: options.processExitsAfterTurn ?? true,
+        sessionStore,
         logger,
-        "disabled",
-        "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
-      );
-    }
-    const magicContextUsageRecorder = magicContextAssembly?.createMagicContextUsageRecorder(
-      sessionId,
-      logger,
-      {
+        // FORK（D-13）：把预算摘要交给协议宿主的投影层。缺席（CLI/TUI）时本条
+        // 推送不存在，magic-context 其余行为逐行不变。
+        ...(options.onMagicContextUsage === undefined
+          ? {}
+          : { onMagicContextUsage: options.onMagicContextUsage }),
+        // FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 vision 判定源。
+        // 包内 render-trigger 上游读 models-dev apiCache（本 fork 零生产者、恒
+        // false），判定改走**静态目录** `ModelInputFormatData.supportsImage`
+        // （packages/shared/src/model-config.ts:51-59，与 contracts
+        // media-policy.ts:40 同一源）；「provider/model → properties」的解析只有
+        // 这里持有的 provider Registry 做得到。未知模型/catalog 缺字段一律
+        // false（fail-closed，与上游「缺失 cache 条目不出图」同向）。冒号 tag
+        // 后缀（modelID:tag）与上游 `modelSupportsVision` 的 fallback 同款：
+        // 先整键、再去 tag 试一次。
+        muralVisionProbe: (modelKey: string) => {
+          const separator = modelKey.indexOf("/");
+          if (separator <= 0) return false;
+          const providerId = modelKey.slice(0, separator);
+          const modelId = modelKey.slice(separator + 1);
+          const accepts = (id: string): boolean => {
+            const model = options.providerRegistry.getModel(providerId, id);
+            return model?.config?.properties?.inputFormat?.supportsImage === true;
+          };
+          if (accepts(modelId)) return true;
+          const colon = modelId.lastIndexOf(":");
+          return colon > 0 ? accepts(modelId.slice(0, colon)) : false;
+        },
+        // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
+        // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
+        // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类
+        // 辅助调用」准备的（它给未带 reasoning 档位的选择补上最低档），所以
+        // 旁路请求与主会话选模型走的是**同一条**校验，而不是这里再抄一份解析。
+        createSidecarModel: (modelId: string) => {
+          const resolved = resolveRegistryOwnedSelection(
+            options.providerRegistry,
+            modelId,
+            undefined,
+            { allowMissingReasoning: true },
+          );
+          if (!resolved) return undefined;
+          return modelFactory({
+            selection: completeAuxiliaryRegistryModelSelection(
+              options.providerRegistry,
+              resolved.selection,
+            ),
+          });
+        },
+        traceContext,
+        // 上下文窗口三源的第二层（env / e2e / R-2 之外的 registry 查询）。它是
+        // recorder 的入参、不是工厂字段，插件把它转交给 recorder；**必填**，漏掉会
+        // 让这一层静默消失、退回 128k 默认，改变 scheduler 决策。
+        //
         // e2e/R-2 二层兜底：模型自带 `properties.contextWindow` 缺席（用户实证：
         // 未设置历史/默认模型时 catalog 无窗口）时，解析**会话生效模型**的 registry
         // 窗口。会话生效模型 = 显式选择（runtime 持有，含 restore 的持久选择）??
@@ -876,89 +958,18 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
             return undefined;
           }
         },
-      },
-    );
-    // FORK（MF-05）：magic-context 的关闭钩子由装配工厂**注册**回来，而不是这里
-    // 拿它的内部对象——后者会把 drain/shutdown/dispose 的顺序知识泄到装配层。
-    // 缺席 = 没装 magic-context（flag 关或 DB 开不出来），此时不注入 session facade。
-    let closeMagicContext: (() => Promise<void>) | undefined;
-    const magicContextTurnTransform = magicContextAssembly
-      ? await magicContextAssembly.createMagicContextTurnTransform({
-          // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
-          // 是 `features.magicContext && magicContext.enabled`，这一位与下面装配门读
-          // 的是同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。
-          enabled: magicContextEffectiveEnabled,
-          registerClose: (close) => {
-            closeMagicContext = close;
-          },
-          // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
-          // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
-          // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
-          // 的静态源，生产路径恒有 `configPort`。
-          configPort: configResult.configPort,
-          configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
-          sessionId,
-          workingDirectory,
-          // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：进程形态透传。
-          // 三个入口（protocol / TUI / print）各自知道自己是不是长驻，bootstrap 不
-          // 做 argv 嗅探——TUI 与 `-p` 在 argv 上不可区分。缺省 true = 保守，保持
-          // print 与所有未声明形态的现有前台 settle 行为。
-          processExitsAfterTurn: options.processExitsAfterTurn ?? true,
-          sessionStore,
-          logger,
-          // FORK（D-13）：把预算摘要交给协议宿主的投影层。缺席（CLI/TUI）时本条
-          // 推送不存在，magic-context 其余行为逐行不变。
-          ...(options.onMagicContextUsage === undefined
-            ? {}
-            : { onMagicContextUsage: options.onMagicContextUsage }),
-          // FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 vision 判定源。
-          // 包内 render-trigger 上游读 models-dev apiCache（本 fork 零生产者、恒
-          // false），判定改走**静态目录** `ModelInputFormatData.supportsImage`
-          // （packages/shared/src/model-config.ts:51-59，与 contracts
-          // media-policy.ts:40 同一源）；「provider/model → properties」的解析只有
-          // 这里持有的 provider Registry 做得到。未知模型/catalog 缺字段一律
-          // false（fail-closed，与上游「缺失 cache 条目不出图」同向）。冒号 tag
-          // 后缀（modelID:tag）与上游 `modelSupportsVision` 的 fallback 同款：
-          // 先整键、再去 tag 试一次。
-          muralVisionProbe: (modelKey: string) => {
-            const separator = modelKey.indexOf("/");
-            if (separator <= 0) return false;
-            const providerId = modelKey.slice(0, separator);
-            const modelId = modelKey.slice(separator + 1);
-            const accepts = (id: string): boolean => {
-              const model = options.providerRegistry.getModel(providerId, id);
-              return model?.config?.properties?.inputFormat?.supportsImage === true;
-            };
-            if (accepts(modelId)) return true;
-            const colon = modelId.lastIndexOf(":");
-            return colon > 0 ? accepts(modelId.slice(0, colon)) : false;
-          },
-          // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的
-          // `Model`，而「这个模型此刻造不造得出来」这件事只有 provider Registry
-          // 知道。`completeAuxiliaryRegistryModelSelection` 正是为「连通性这类
-          // 辅助调用」准备的（它给未带 reasoning 档位的选择补上最低档），所以
-          // 旁路请求与主会话选模型走的是**同一条**校验，而不是这里再抄一份解析。
-          createSidecarModel: (modelId: string) => {
-            const resolved = resolveRegistryOwnedSelection(
-              options.providerRegistry,
-              modelId,
-              undefined,
-              { allowMissingReasoning: true },
-            );
-            if (!resolved) return undefined;
-            return modelFactory({
-              selection: completeAuxiliaryRegistryModelSelection(
-                options.providerRegistry,
-                resolved.selection,
-              ),
-            });
-          },
-          traceContext,
-          ...(magicContextUsageRecorder === undefined
-            ? {}
-            : { usageRecorder: magicContextUsageRecorder }),
-        })
-      : undefined;
+      });
+    } else {
+      emitMagicContextTransformAbsent(
+        logger,
+        "disabled",
+        "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
+      );
+    }
+    // 插件产物的三个消费面：事件扇出（recorder）、turn-loop 端口（transform）、
+    // prompt-surface 两个注入口（见 `new AgentRuntime` 的入参）。
+    const magicContextUsageRecorder = magicContextPlugin?.usageRecorder;
+    const magicContextTurnTransform = magicContextPlugin?.turnTransform;
     runtime = new AgentRuntime(sessionId, runtimeConfig, {
       // 主代理的模型请求过治理器的 observer：立即放行，但让治理器看见它的 429 / 成功。
       modelRequestAdmission: workflowConcurrencyGovernor.observer(),
@@ -1014,31 +1025,23 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // 端口在场即注册门：缺席（默认）时 turn-loop 的插入点是纯判空。
       ...(magicContextTurnTransform === undefined ? {} : { magicContextTurnTransform }),
       // FORK（bugfix-batch-20261011 / Step 13，D1）：`## Magic Context` agent 提示词段
-      // 的装配端口。与 turn transform 同一个门（`magicContextAssembly` 在场即
-      // `features.magicContext` 开着），同一个模块唯一的 import 点——core 的 context
-      // builder 是同步的且不许静态 import 包，所以 11 参装配只能由这里做。
+      // 的装配端口。与 turn transform 同一个门（插件在场即 `features.magicContext`
+      // 开着），同一个动态 import 唯一的消费点——core 的 context builder 是同步的且
+      // 不许静态 import 包，所以 11 参装配只能由这里做。
       // 缺席时 context builder 回落原生 `# Memory` 段（互斥裁定，
       // 见 core `context/sections/magic-context.ts`）。
-      ...(magicContextAssembly === undefined
+      //
+      // Step 4：两个 resolver 由插件用**同一份** `configPort` / `configDomain` /
+      // `logger` 构造并返回（此前是这里各调一次同名工厂，参数逐字相同）。
+      // FORK（bugfix-batch-20261011 / Step 14）：`magicContextToolDescription` 是
+      // preset 分档描述求值器——设置页的 `prompt_surface.default` / `models` 经它
+      // 第一次真正影响模型看得见的工具描述（light 档换紧凑文案）；在那之前这两个
+      // 字段写下去没有任何运行期消费者。
+      ...(magicContextPlugin === undefined
         ? {}
         : {
-            magicContextPromptSection: magicContextAssembly.createMagicContextPromptSectionResolver(
-              {
-                configPort: configResult.configPort,
-                configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
-                logger,
-              },
-            ),
-            // FORK（bugfix-batch-20261011 / Step 14）：同一个门注入 preset 分档描述
-            // 求值器。设置页的 `prompt_surface.default` / `models` 经它第一次真正影响
-            // 模型看得见的工具描述（light 档换紧凑文案）；在那之前这两个字段写下去
-            // 没有任何运行期消费者。
-            magicContextToolDescription:
-              magicContextAssembly.createMagicContextToolDescriptionResolver({
-                configPort: configResult.configPort,
-                configDomain: (configResult.config as { magicContext?: unknown }).magicContext,
-                logger,
-              }),
+            magicContextPromptSection: magicContextPlugin.promptSection,
+            magicContextToolDescription: magicContextPlugin.toolDescription,
           }),
       // FORK（bugfix-batch-20261011 / Step 6）：子智能体模型 override 的
       // per-spawn 活读源（见上方创建处注释）。deps 经 createDefaultSubagentPort
