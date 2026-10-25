@@ -69,3 +69,5 @@ packages/desktop/.e2e-artifacts/
 packages/desktop/.e2e-cache/
 packages/desktop/.e2e-network-capture/
 .zcode-runtime/
+# 本地 e2e 临时产物（隔离 profile / 截图 / 日志）
+.zcode/e2e/
