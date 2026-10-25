@@ -151,11 +151,29 @@ function isAttachmentRef(value: unknown): boolean {
  * （= `intent.attachmentRefs ?? []`）在两个写入点都存在。所以这一处才是账本里
  * 唯一"两个写者都覆盖"的附件事实。
  *
- * 返回 `undefined` = 读不出附件事实（不是「没有附件」）。调用方必须按损坏处理：
- * 把「读不出」当成 `[]` 会静默丢掉用户附件，与 F4 的空串兜底同一类事故。
+ * 返回 `undefined` = 读不出附件事实（真损坏）。调用方必须按损坏处理：
+ * 把「字段在、但读不出」当成 `[]` 会静默丢掉用户附件，与 F4 的空串兜底同一类事故。
+ *
+ * **唯一的例外是「intent 事实整体缺失」的 legacy 形状**（cr-func P1-3）：
+ * `TurnSteerQueued` 在没有 intent 时只写 `{ text }`（`events.ts`），而 intent 至今
+ * 仍可能缺失（legacy `session/send` 只在 `params.modelSelection` 存在时才建 intent）。
+ * 这类行的账本与投影**都没有**附件事实（投影的 `QueueItem.attachments` 也只从
+ * `intent.attachmentRefs` 来，见 `product-projection.ts`），所以 `[]` 不是猜测而是
+ * 唯一可读的答案；把它判成损坏会让这一项永久不可提升、auto-drain 停在这一项上，
+ * 用户只能删项重发（P1-3 的失效形态）。
+ *
+ * 判据写死为「`intent` 与 `conversationInputIntent` **同时**缺失」：
+ * - 两者都在（新写者）→ 正常读 `conversationInputIntent.attachments`；
+ * - 只有 `conversationInputIntent` 缺失但 `intent` 在 → 事实在、读不出 = 损坏；
+ * - `conversationInputIntent` 在但 `attachments` 不是数组 / 有坏项 → 损坏。
+ * 这个区分是**可判定的**（已知历史形状 vs 字段损坏），不是「读失败就宽松」。
  */
 function readLedgerAttachments(payload: Record<string, unknown>): LedgerAttachments | undefined {
   const intent = payload.conversationInputIntent;
+  if (intent === undefined && payload.intent === undefined) {
+    // legacy 形状：`{ text }`（无 intent 事实）。账本没有、也无从记录附件。
+    return [];
+  }
   if (!intent || typeof intent !== "object" || Array.isArray(intent)) return undefined;
   const attachments = (intent as Record<string, unknown>).attachments;
   if (!Array.isArray(attachments)) return undefined;

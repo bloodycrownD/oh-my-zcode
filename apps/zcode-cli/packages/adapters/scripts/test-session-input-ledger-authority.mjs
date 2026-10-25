@@ -18,13 +18,20 @@
  * `fault.command.inconsistentAuthority` 硬失败。`text: ""` 仍然是**合法**输入
  * （attachment-only query），必须照常 pending——两者绝不能再混在一起。
  *
+ * **唯一例外（fix-a10 / cr-func P1-3）**：`intent` 与 `conversationInputIntent`
+ * **同时**缺失的 legacy 形状（`{ text }`，今天仍会产出）读成 pending + `attachments: []`。
+ * 这不是放宽「损坏 ≠ 空」：账本与投影都从未记录过附件时，`[]` 是唯一可读答案；
+ * 把它判成损坏会让该项永久不可提升。判据是「intent 事实整体缺失」vs「字段在但读不出」，
+ * 后者仍然 corrupt（用例 5b）。
+ *
  * 本脚本用**真实 SQLite 库**（临时目录）验证适配器侧：
  * 1) 非法 JSON → corrupt（而不是 `text: ""`）；
  * 2) 合法空文本 → pending；
  * 3) 附件事实只认 `conversationInputIntent.attachments`（两个账本写者都覆盖的位置），
  *    顶层 `payload.attachments` 会被 `TurnSteerQueued` 的重写丢掉，不得读它；
  * 4) F5：`promoteSessionInput` 只接受 status=admitted 的行，已 settle 的行 promote
- *    必须抛错并回滚（不留半截 user message）。
+ *    必须抛错并回滚（不留半截 user message）；
+ * 5) legacy 无 intent 行可执行（P1-3），而「字段在但读不出」仍 corrupt。
  *
  * handler 侧的对应断言在 `bootstrap/scripts/test-input-authority.mjs` 的 L4/L5。
  *
@@ -209,20 +216,41 @@ test("4 text 不是字符串 → corrupt（不许把 null/数字当文本起轮�
   assert.equal(authority.reason, "text_not_string");
 });
 
-test("5 附件事实读不出 → corrupt（不许当成「没有附件」）", async () => {
-  // 5a：没有 conversationInputIntent（旧写者/被外部改写）
+test("5a legacy「intent 事实整体缺失」→ 可执行，附件为空（P1-3：不得造永久死项）", async () => {
+  // 生产形状：`TurnSteerQueued` 在 intent 缺失时只写 `{ text }`（events.ts）。
+  // 这种行以前被判 `corrupt/attachments_unreadable` → 永久不可提升、auto-drain 停住。
+  // 账本与投影都没有附件事实（投影 attachments 也只从 intent.attachmentRefs 来），
+  // 所以读成 `[]` 是唯一的答案，不是猜测。
   insertInput({
-    id: "input-no-intent",
-    behavior: { payload: JSON.stringify({ text: "只有文本" }) },
+    id: "input-legacy-no-intent",
+    behavior: { payload: JSON.stringify({ text: "legacy 文本" }) },
   });
-  const noIntent = await store.getSessionInputForExecution({
-    id: "input-no-intent",
+  const legacy = await store.getSessionInputForExecution({
+    id: "input-legacy-no-intent",
     sessionID: SESSION_ID,
   });
-  assert.equal(noIntent.state, "corrupt");
-  assert.equal(noIntent.reason, "attachments_unreadable");
+  assert.equal(legacy.state, "pending", "legacy 形状必须可执行，不得造永久死项");
+  assert.equal(legacy.text, "legacy 文本");
+  assert.deepEqual(legacy.attachments, [], "账本没有附件事实时按无附件读");
+});
 
-  // 5b：数组里混了坏项 → 整体不可信（过滤坏项 = 静默丢附件）
+test("5b intent 事实在、附件字段读不出 → 仍是 corrupt（真损坏不许兜成空）", async () => {
+  // 反向守卫：只要行里存在 intent 事实（新写者），`conversationInputIntent` 缺失就是
+  // 「字段在、读不出」——这一态必须继续硬失败，否则「读不出 ≠ 没有附件」的规则被放宽。
+  insertInput({
+    id: "input-intent-without-projection",
+    behavior: {
+      payload: JSON.stringify({ text: "文本", intent: { kind: "sendText", queueItemId: "qi" } }),
+    },
+  });
+  const damaged = await store.getSessionInputForExecution({
+    id: "input-intent-without-projection",
+    sessionID: SESSION_ID,
+  });
+  assert.equal(damaged.state, "corrupt");
+  assert.equal(damaged.reason, "attachments_unreadable");
+
+  // 数组里混了坏项 → 整体不可信（过滤坏项 = 静默丢附件）
   insertInput({
     id: "input-bad-attachment",
     behavior: {
