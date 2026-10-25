@@ -2,8 +2,10 @@
 /**
  * 五条不变式的回归网（spec `docs/iterations/bugfix-batch-20261025/bugs/edit-resend-stale-text`）。
  *
- * 本文件当前覆盖 **I2（分支截断级联作废）** —— Step 4 的验收面。其余不变式的用例由后续
- * 步骤（Step 5 投影复位 / Step 7-9 事务 / Step 10-11 投递态）在本文件继续追加，不要另立脚本。
+ * Step 13 收口后本文件对 **I1..I5 各至少一例**：I1 执行权威取账本（正向 + 终态反向）、
+ * I2 判据集合/不自伤/幽灵项、I3 单一解析入口（admission ↔ 执行逐字一致）、I4 事务
+ * （apply/commit 分离 + abort 不写回 + draftText）、I5 投递态三值。Step 14 把它连同其余
+ * 三个脚本挂进根 `test:v4-perf`——它是防止第五次回归的唯一门禁，不要拆成多个脚本。
  *
  * ============================================================================
  * 本步第一件事：RC2 的真实可达链（spec「根因/RC2」要求先证伪再动手）
@@ -27,16 +29,26 @@
  * 用例分区
  * ============================================================================
  *
+ * T-IA1 执行权威取账本（I1 / Step 3 收口，Step 13 补例）：提升轮的 content、落库
+ *      `intent.text` 与附件都取 `session_input`，投影项文本/附件被改成旧值也不得被执行；
+ *      账本终态 → 硬失败、不起轮（反向不得发生）。
+ * T-IA3 单一解析入口（I3 / Step 2 收口，Step 13 补例）：同一条 edit 命令，admission 侧
+ *      `resolveCanonicalInput` 的产出与执行侧真正交给 `sendInput` 的 text/附件逐字一致。
  * T-RW0 源码形状：级联必须挂在 setRevert 之后 / RewindTriggered 之前；不得读
  *      `activeTurn.pendingInputs`；edit/retry 必须把自持 id 传给 rewind。
  * T-RW1 判据三条：`admitted` ∧ 排除自持 id ∧ (targetTurnId ∈ removedTurnIds ∨ 'deferred')；
  *      幸存轮的排队项一条都不许动。
- * T-RW2 真实可达链（本 bug 的核心断言）：暂停队列 + 编辑重发 → 点「继续」时旧项不得被提升，
- *      新文本的路由必须是 startNow（改前：enqueue + 提升起旧文本）。
+ * T-RW2 不终止直接编辑重发（本 bug 的核心断言）：用户没点停止、队列也没被暂停，
+ *      rewind 返回时 `autoDrain` 仍是 true —— `afterLegacyStateMutation` →
+ *      `autoDrainV4QueueIfReady` 会把**属于被截断那一轮**的旧队首提升起轮（早于
+ *      `startCanonicalIntent`），新文本的 admission 随即撞上活跃轮被退回 queue。
+ *      断言：钩子一项都不得提升 + 新文本路由为 startNow（改前：提升 OLD_TEXT）。
+ *      **不要用 stop 路径复证本用例**：那条路的旧项是 held 的，改前就不会起跑（假绿）。
  * T-RW3 投影收口 + autoDrain 双侧复位：`TurnSteerDiscarded` 对任意 reason 都移除队列项
  *      （既有行为，禁止加 reason 过滤——promoted 依赖同一语义）；作废后**投影队列为空**时
  *      runtime 门（queueAutoDrain）与 v4 投影（queue.autoDrain）必须同时复位，只复位一侧
- *      即失败；队列非空（幸存 held 项）时必须两边都保持 held。
+ *      即失败；队列非空（幸存 held 项）时必须两边都保持 held；已作废项在用户点「继续」
+ *      后同样不得被提升（恢复门只放行存活项）。
  * T-RW4 stop 结算（Step 6）：只结算「队列承载不了」的孤儿 pending 输入；改投 queue 的 guide
  *      与 held 队列项的账本必须保持 admitted（零 settle）——stop 是「停这一轮」，不是
  *      「清空排队内容」。判据顺序（fallback → 结算 → held 判据）另有源码形状守卫。
@@ -111,6 +123,10 @@ const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
   pathToFileURL(
     join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-edit-retry.ts"),
   ).href
+);
+// I3 的唯一解析入口：admission 侧（无选择事实）与执行侧（带事实）必须产出同一份结果。
+const { resolveCanonicalInput } = await import(
+  pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "input-intent.ts")).href
 );
 const { applyWorkspaceFileRewind } = await import(
   pathToFileURL(join(coreSrc, "runtime", "methods", "file-rewind.ts")).href
@@ -323,30 +339,55 @@ async function emitFact({ product, runtime }, type, payload, options = {}) {
   return stored;
 }
 
-/** 入队事实：[admission 落账] + TurnSteerQueued（生产同序：先账本后事件）。 */
-async function seedQueuedInput(context, { delivery = "queue", id, targetTurnId, text }) {
+/**
+ * 入队事实：[admission 落账] + TurnSteerQueued（生产同序：先账本后事件）。
+ *
+ * `ledgerText` / `ledgerAttachments` 与 `projectionText` / `projectionAttachments` 刻意分开：
+ * I1 要证明「投影被改成旧值也不得被执行」，两条事实必须在夹具里真的不是同一份。
+ * 缺省时它们相等（其余用例不关心 I1 的这条差异）。
+ */
+async function seedQueuedInput(
+  context,
+  {
+    delivery = "queue",
+    id,
+    // `text` 必须排在两个派生缺省值之前：解构默认值按出现顺序求值，靠后会 TDZ。
+    text,
+    targetTurnId,
+    ledgerAttachments = [],
+    ledgerText = text,
+    projectionAttachments = [],
+    projectionText = text,
+  },
+) {
   await context.runtime.sessionStore.saveSessionInput({
     delivery,
     id,
     kind: "sendText",
     payload: {
-      conversationInputIntent: { attachments: [], kind: "sendText", queueItemId: id, text },
-      text,
+      conversationInputIntent: {
+        attachments: ledgerAttachments,
+        kind: "sendText",
+        queueItemId: id,
+        text: ledgerText,
+      },
+      text: ledgerText,
     },
     sessionID: SESSION_ID,
   });
   await emitFact(context, SessionEventType.TurnSteerQueued, {
     delivery,
-    input: text,
-    inputPreview: text,
-    inputSize: text.length,
+    input: projectionText,
+    inputPreview: projectionText,
+    inputSize: projectionText.length,
     intent: {
       admittedDelivery: delivery,
+      attachmentRefs: projectionAttachments,
       kind: "sendText",
       queueItemId: id,
       requestedDelivery: delivery,
       sourceCommandId: id.replace(/^queue_/, ""),
-      text,
+      text: projectionText,
     },
     pendingInputId: id,
     queueLength: 1,
@@ -385,14 +426,13 @@ async function setAutoDrain(context, autoDrain) {
 }
 
 /**
- * 「用户点继续 / setAutoDrain(true)」的真实链路：`queue.ts` 的 setAutoDrain handler 只做
- * `app.setQueueAutoDrain(true)` + `afterLegacyStateMutation("queue_auto_drain_resumed")`，
- * 后者在 v4-bridge 里就是 `QueueAutoDrainChanged` 落投影 + `autoDrainV4QueueIfReady`。
- * 这里逐段照抄，不是简化：gate 用真实 `shouldAutoDrainV4QueueHead`，提升用真实
- * `queueHandlers.sendQueuedNow`，执行文本用真实账本读法。
+ * rewind 返回后的权威钩子：`afterLegacyStateMutation` → `autoDrainV4QueueIfReady`
+ * （`v4-bridge.ts:505-586`）。这里逐段照抄它真正的判据（`shouldAutoDrainV4QueueHead`
+ * 用投影里的 `head.autoDrain` + dispatch 状态 + 会话是否空闲），提升走真实 handler。
+ *
+ * 它**不依赖**任何「用户点继续」的动作：`autoDrain` 本来就是 true 时只差这一次调用。
  */
-async function resumeAutoDrain(context) {
-  await setAutoDrain(context, true);
+async function runAutoDrainHook(context) {
   const { items, autoDrain } = queueState(context);
   const head = items[0] ?? null;
   const promoted =
@@ -408,6 +448,18 @@ async function resumeAutoDrain(context) {
   const harness = promotionHarness(context, head);
   await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
   return { head, promoted: true, ...harness };
+}
+
+/**
+ * 「用户点继续 / setAutoDrain(true)」的真实链路：`queue.ts` 的 setAutoDrain handler 只做
+ * `app.setQueueAutoDrain(true)` + `afterLegacyStateMutation("queue_auto_drain_resumed")`，
+ * 后者在 v4-bridge 里就是 `QueueAutoDrainChanged` 落投影 + `autoDrainV4QueueIfReady`。
+ * 这里逐段照抄，不是简化：gate 用真实 `shouldAutoDrainV4QueueHead`，提升用真实
+ * `queueHandlers.sendQueuedNow`，执行文本用真实账本读法。
+ */
+async function resumeAutoDrain(context) {
+  await setAutoDrain(context, true);
+  return runAutoDrainHook(context);
 }
 
 /** `sendQueuedNow` 的可控宿主（真实 handler；账本读法接上下文里的真账本）。 */
@@ -598,6 +650,77 @@ test("T-RW1 removedTurnIds 为空 → 零作废零事件（无截断就没有级
   assert.equal(context.ledger.calls.settles.length, 0);
 });
 
+/**
+ * 判据的可判定集合化（Step 12）：三条条件各有唯一事实来源，成员判定必须能逐条取反。
+ *
+ * 集合 = `session_input` 里同时满足 ①`status=admitted`、②`id ∉ excludeSessionInputIds`、
+ * ③`targetTurnId ∈ removedTurnIds ∨ 'deferred'` 的行。
+ * - ②③ 在 core 侧判定 → 本用例的真值表（任何一条被放宽/收紧，只有对应的行进出集合）；
+ * - ① 是**写侧单点判据**（`settleSessionInput` 的 `where status='admitted'`），由
+ *   adapters 的 `test-session-input-ledger-authority` 用例 9 守护——core 拿到的投影项
+ *   不携带账本状态，这里只断言「已终态的行不得被回写」这一侧。
+ *
+ * 12 行 = 2(账本 admitted|promoted) × 2(是否自持) × 3(targetTurnId: removed|kept|deferred)。
+ */
+test("T-RW1 判据是可判定集合：逐条取反只有对应的行进出集合", async () => {
+  const context = createContext();
+  const targetOf = { deferred: "deferred", kept: TURN_KEPT, removed: TURN_REMOVED };
+  const rows = [];
+  for (const admitted of [true, false]) {
+    for (const excluded of [true, false]) {
+      for (const target of ["removed", "kept", "deferred"]) {
+        const id = `queue_cmd-${admitted ? "adm" : "prm"}-${excluded ? "self" : "other"}-${target}`;
+        rows.push({ admitted, excluded, id, member: !excluded && target !== "kept" });
+        await seedQueuedInput(context, { id, targetTurnId: targetOf[target], text: `${id} 文本` });
+        if (!admitted) context.ledger.rows.get(id).status = "promoted";
+      }
+    }
+  }
+  const excludedIds = rows.filter((row) => row.excluded).map((row) => row.id);
+
+  const discarded = await context.runtime.discardRewoundPendingSteerInputs({
+    excludeSessionInputIds: excludedIds,
+    removedTurnIds: [TURN_REMOVED],
+    traceContext: TRACE_CONTEXT,
+  });
+
+  assert.deepEqual(
+    [...discarded].sort(),
+    rows
+      .filter((row) => row.member)
+      .map((row) => row.id)
+      .sort(),
+    "集合成员 = ②∧③：排除自持 id 后只剩被截断轮次与 deferred，幸存轮一条都不许动",
+  );
+
+  for (const row of rows) {
+    const expectedStatus = row.admitted ? (row.member ? "discarded" : "admitted") : "promoted";
+    assert.equal(
+      context.ledger.rows.get(row.id).status,
+      expectedStatus,
+      `${row.id}: 账本 ${row.admitted ? "admitted" : "promoted"} 行在 member=${row.member} 时状态必须是 ${expectedStatus}`,
+    );
+    const settles = context.ledger.calls.settles.filter((call) => call.id === row.id);
+    assert.equal(
+      settles.length > 0,
+      row.member,
+      `${row.id}: member=${row.member} 时才允许出现 settle 调用（非成员不得被顺带收口）`,
+    );
+    for (const settle of settles) assert.equal(settle.reason, "rewound");
+  }
+
+  // 投影侧同理：剩下的必须正好是非成员。
+  assert.deepEqual(
+    queueState(context)
+      .items.map((item) => item.queueItemId)
+      .sort(),
+    rows
+      .filter((row) => !row.member)
+      .map((row) => row.id)
+      .sort(),
+  );
+});
+
 test("T-RW1 账本已终态的行不会被级联写回（promoted 不许回退，settle 幂等）", async () => {
   const context = createContext();
   await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
@@ -634,39 +757,33 @@ test("T-RW1 预 settle 失败时事件汇兜底：rewound 必须落 discarded，
   assert.deepEqual(queueState(context).items, []);
 });
 
-// ── T-RW2 本 bug 的核心断言（真实可达链） ───────────────────────────────────
+// ── T-RW2 本 bug 的核心断言（不终止直接编辑重发） ────────────────────────────
 
-test("T-RW2 暂停队列 + 编辑重发：点「继续」时旧项从未被提升，新文本路由为 startNow", async () => {
+test("T-RW2 不终止直接编辑重发：autoDrain 仍为 true 时 rewind 钩子也不得提升旧队首", async () => {
   const context = createContext();
   await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
-  // 终止 → 队列暂停（stop 显式 setQueueAutoDrain(false)；同一调用同时翻 runtime 门和投影）。
-  await setAutoDrain(context, false);
-  // 本次编辑重发自身的 admission 行（新文本）。生产时序：空闲编辑重发时 admission 发生在
-  // rewind 之后（startCanonicalIntent），此刻投影里还没有它的队列项——只有账本行。
+  // 用户没有点停止、也没有暂停队列 —— 因此 rewind 返回时**没有任何 held 兜底**：
+  // `afterLegacyStateMutation("session_rewound")` → `autoDrainV4QueueIfReady` 会看到
+  // autoDrain=true + dispatchState=queued + 会话空闲，直接把队首提升起轮。
+  // 旧项一旦活过截断，抢跑就发生在这里，而且早于下面 startCanonicalIntent 的 admission。
   context.ledger.seed({ id: SELF_ID, text: NEW_TEXT });
 
-  const before = queueState(context);
-  assert.deepEqual(
-    before.items.map((item) => item.queueItemId),
-    [OLD_ID],
-    "改前/截断前：属于被截断那一轮的旧项还在队列里",
-  );
-
-  // rewind 截断（真实级联；报告里附的「改前红」就是把这一行删掉/退化成空实现）。
+  // rewind 截断（真实级联）。「改前红」= 把这一行退化成空实现：
+  // 旧项留在队列里，紧随其后的 rewind 钩子就会把它提升起轮（起跑内容是 OLD_TEXT）。
   await context.runtime.discardRewoundPendingSteerInputs({
     excludeSessionInputIds: [SELF_ID],
     removedTurnIds: [TURN_REMOVED, TURN_REMOVED_CHILD],
     traceContext: TRACE_CONTEXT,
   });
 
-  // 用户点「继续」。
-  const resumed = await resumeAutoDrain(context);
+  // rewind 返回后的权威钩子（不是「点继续」：这条链不需要用户额外动作）。
+  const hook = await runAutoDrainHook(context);
   assert.equal(
-    resumed.calls?.sendInput ?? 0,
+    hook.calls?.sendInput ?? 0,
     0,
     "旧项被提升起轮 = I2 违反（改前红：这里会是 1，且内容是 OLD_TEXT）",
   );
-  assert.equal(resumed.promoted, false, "作废后队首不存在，auto-drain 无事可做");
+  assert.equal(hook.promoted, false, "作废后队首不存在，auto-drain 无事可做");
 
   // 旧文本即使被别的路径拿到投影项，也再也取不到执行权威（I1 + I2 双保险）。
   const oldAuthority = await context.ledger.port.getSessionInputForExecution({
@@ -695,15 +812,16 @@ test("T-RW2 暂停队列 + 编辑重发：点「继续」时旧项从未被提�
   );
 });
 
-test("T-RW2 反向：未作废时同一条链会把 OLD_TEXT 起轮（证明用例真的在测那条链）", async () => {
+test("T-RW2 反向：同一条 rewind 钩子在未作废时会立刻把 OLD_TEXT 起轮（证明用例真的在测那条链）", async () => {
   const context = createContext();
   await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
-  await setAutoDrain(context, false);
 
-  const resumed = await resumeAutoDrain(context);
-  assert.equal(resumed.promoted, true, "对照组：没有级联时旧项一定会被提升");
-  assert.equal(resumed.calls.sendInput, 1);
-  assert.equal(resumed.captured.input.text, OLD_TEXT, "对照组起跑的正是旧文本");
+  // 对照组：不跑级联（= 改前行为）。同一个 helper、同一个闸门、同一个托管，唯一差别是
+  // 旧项还在队列里——它必须被提升，且起跑内容必须是 OLD_TEXT。
+  const hook = await runAutoDrainHook(context);
+  assert.equal(hook.promoted, true, "对照组：没有级联时旧项一定会被提升");
+  assert.equal(hook.calls.sendInput, 1);
+  assert.equal(hook.captured.input.text, OLD_TEXT, "对照组起跑的正是旧文本");
 });
 
 // ── T-RW3 投影收口 + autoDrain 双侧复位（Step 5） ───────────────────────────
@@ -839,6 +957,40 @@ test("T-RW3 无可作废项时不碰暂停位（队列本来就空 ≠ 本次作
     1,
     "不得追加复位事件",
   );
+});
+
+/**
+ * 「先终止再编辑」的 held 项滞留路径（T-RW2 的旧入口，Step 12 移到 T-RW3）。
+ *
+ * 这条链上旧项本来就被 stop 冻结在队列里：**改前它也不会自己起跑**，所以它不能承载
+ * T-RW2 的「改前红」。留在这里的价值是另一件事——用户后续点「继续」时，恢复动作只能
+ * 放行**存活**项；已作废的旧项必须在那一刻也拿不到执行权（否则重置暂停位的每一步都是
+ * 一次复发机会）。T-RW2 现在用 `autoDrain=true` 的不终止入口承载核心断言。
+ */
+test("T-RW3 暂停队列 + 编辑重发后点「继续」：已作废的旧项不得被恢复动作提升", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, { id: OLD_ID, targetTurnId: TURN_REMOVED, text: OLD_TEXT });
+  // 终止 → 队列暂停（stop 显式 setQueueAutoDrain(false)；同一调用同时翻 runtime 门和投影）。
+  await setAutoDrain(context, false);
+  // 本次编辑重发自身的 admission 行（新文本）。生产时序：空闲编辑重发时 admission 发生在
+  // rewind 之后（startCanonicalIntent），此刻投影里还没有它的队列项——只有账本行。
+  context.ledger.seed({ id: SELF_ID, text: NEW_TEXT });
+
+  // rewind 截断（真实级联）。
+  await context.runtime.discardRewoundPendingSteerInputs({
+    excludeSessionInputIds: [SELF_ID],
+    removedTurnIds: [TURN_REMOVED, TURN_REMOVED_CHILD],
+    traceContext: TRACE_CONTEXT,
+  });
+
+  // 用户点「继续」。
+  const resumed = await resumeAutoDrain(context);
+  assert.equal(
+    resumed.calls?.sendInput ?? 0,
+    0,
+    "旧项被提升起轮 = I2 违反（改前红：这里会是 1，且内容是 OLD_TEXT）",
+  );
+  assert.equal(resumed.promoted, false, "作废后队首不存在，auto-drain 无事可做");
 });
 
 // ── T-RW5 不自伤（观测中间态） ──────────────────────────────────────────────
@@ -1221,6 +1373,9 @@ function createEditTransactionHarness({
     previews: 0,
     rewinds: [],
     sendInputs: [],
+    // I3：执行侧真正交给 Core 的 intent/delivery 事实（`sendInput(input, options)`），
+    // 与 admission 侧的 `resolveCanonicalInput` 产出逐字对比。
+    sendOptions: [],
     stateMutations: [],
   };
   const state = { revert: null, startMode };
@@ -1264,8 +1419,9 @@ function createEditTransactionHarness({
       getMode: () => "build",
       readTarget: async () => null,
       runtime,
-      sendInput: async (input) => {
+      sendInput: async (input, options) => {
         calls.sendInputs.push(input);
+        calls.sendOptions.push(options);
         if (state.startMode === "throws") {
           throw Object.assign(new Error("model target unavailable"), {
             reasonCode: "fault.command.modelUnavailable",
@@ -1302,6 +1458,16 @@ function createEditTransactionHarness({
     persistence: "immediate",
     traceContext: TRACE_CONTEXT,
   };
+  // 被编辑轮的 canonical 事实（I3：admission 侧要用同一份继承源再解析一次）。
+  const editTargetIntent = {
+    admittedDelivery: "startNow",
+    clientId: "ui",
+    kind: "sendText",
+    queueItemId: "queue-original",
+    requestedDelivery: "startNow",
+    sourceCommandId: "cmd-original",
+    text: "被编辑的旧文本",
+  };
   const host = {
     afterLegacyStateMutation: async (_record, reason) => {
       calls.stateMutations.push(reason);
@@ -1316,15 +1482,7 @@ function createEditTransactionHarness({
     resolveRowActionTarget: () => ({
       editTarget: {
         entityId: "ent-rt",
-        intent: {
-          admittedDelivery: "startNow",
-          clientId: "ui",
-          kind: "sendText",
-          queueItemId: "queue-original",
-          requestedDelivery: "startNow",
-          sourceCommandId: "cmd-original",
-          text: "被编辑的旧文本",
-        },
+        intent: editTargetIntent,
         productTurnId: "turn-1",
         transcriptMessageId: REWIND_TARGET_MESSAGE_ID,
       },
@@ -1354,7 +1512,7 @@ function createEditTransactionHarness({
     sessionId: SESSION_ID,
     type: "editUserQuery",
   });
-  return { calls, host, makeEnvelope, record, state };
+  return { calls, editTargetIntent, host, makeEnvelope, record, state };
 }
 
 // ── T-RT2 apply / commit 阶段分离（Step 7）──────────────────────────────────
@@ -1840,4 +1998,128 @@ test("T-RW6 读不到队列长度时按非空处理（fail-safe：宁可不复�
   );
   assert.deepEqual(miss.calls.autoDrain, []);
   assert.deepEqual(miss.calls.mutations, []);
+});
+
+// ── I1 执行权威取账本（Step 3 收口 / Step 13 补例） ──────────────────────────
+
+/** 投影里的旧值：任何执行用例都不允许把它发出去。 */
+const STALE_PROJECTION_TEXT = "投影里的旧文本（不得被执行）";
+/** 账本里的执行文本：唯一合法的执行内容。 */
+const LEDGER_AUTHORITY_TEXT = "账本里的执行文本（唯一权威）";
+const STALE_PROJECTION_ATTACH = {
+  bytes: 21,
+  fileName: "projection-stale.txt",
+  mime: "text/plain",
+  ref: "C:\\tmp\\projection-stale.txt",
+};
+const LEDGER_AUTHORITY_ATTACH = {
+  bytes: 17,
+  fileName: "ledger-authoritative.txt",
+  mime: "text/plain",
+  ref: "C:\\tmp\\ledger-authoritative.txt",
+};
+
+test("T-IA1 提升轮的执行文本与附件只来自账本：投影项被改成旧值时也不得被执行", async () => {
+  const context = createContext();
+  await seedQueuedInput(context, {
+    id: OLD_ID,
+    ledgerAttachments: [LEDGER_AUTHORITY_ATTACH],
+    ledgerText: LEDGER_AUTHORITY_TEXT,
+    projectionAttachments: [STALE_PROJECTION_ATTACH],
+    projectionText: STALE_PROJECTION_TEXT,
+    targetTurnId: TURN_KEPT,
+    text: LEDGER_AUTHORITY_TEXT,
+  });
+  // 先确认夹具真的分叉了：投影项上躺着旧文本 + 旧附件（否则本用例测的是同一个值）。
+  const head = queueState(context).items[0];
+  assert.equal(head.text, STALE_PROJECTION_TEXT);
+  assert.equal(head.attachments?.[0]?.ref, STALE_PROJECTION_ATTACH.ref);
+
+  const harness = promotionHarness(context, head);
+  await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
+
+  assert.equal(harness.calls.sendInput, 1, "账本 pending 必须正常起轮");
+  assert.equal(harness.captured.input.text, LEDGER_AUTHORITY_TEXT, "执行内容只能来自账本");
+  assert.equal(
+    harness.captured.options.intent.text,
+    LEDGER_AUTHORITY_TEXT,
+    "落库 intent.text 必须等于账本文本（否则冷恢复把它带回 edit target，旧文本再次可执行）",
+  );
+  assert.equal(
+    harness.captured.input.attachments?.[0]?.path,
+    LEDGER_AUTHORITY_ATTACH.ref,
+    "执行附件必须来自账本（投影附件被发出去 = F1 的半个不变量复活）",
+  );
+  assert.equal(
+    harness.captured.options.intent.attachmentRefs?.[0]?.ref,
+    LEDGER_AUTHORITY_ATTACH.ref,
+    "落库 intent.attachmentRefs 必须来自账本（它是编辑重发继承附件的唯一来源）",
+  );
+
+  // 反向不得发生：账本进入终态后，同一项不得再被执行——哪怕投影项还好端端躺在队列里。
+  context.ledger.rows.get(OLD_ID).status = "discarded";
+  context.ledger.rows.get(OLD_ID).statusReason = "rewound";
+  const staleHead = queueState(context).items[0];
+  assert.ok(staleHead, "反向前提：投影项仍在（I1 的硬失败不依赖投影是否已移除）");
+  const second = promotionHarness(context, staleHead);
+  await assert.rejects(
+    () => queueHandlers.sendQueuedNow(second.host, second.envelope),
+    (error) => {
+      assert.equal(error.reasonCode, "fault.command.inputNotPending");
+      return true;
+    },
+    "账本终态必须硬失败，不得回落投影文本起轮",
+  );
+  assert.equal(second.calls.sendInput, 0, "终态账本行不得起轮");
+});
+
+// ── I3 单一解析入口（Step 2 收口 / Step 13 补例） ────────────────────────────
+
+test("T-IA3 同一条 edit 命令：admission 解析与执行侧实际提交逐字一致", async () => {
+  const harness = createEditTransactionHarness();
+  const attachment = {
+    bytes: 12,
+    fileName: "edit-attach.txt",
+    mime: "text/plain",
+    ref: "C:\\tmp\\edit-attach.txt",
+  };
+  const baseEnvelope = harness.makeEnvelope();
+  const envelope = {
+    ...baseEnvelope,
+    payload: { ...baseEnvelope.payload, attachments: [attachment] },
+  };
+
+  // admission 侧（v4-bridge.resolveInputCommandForAdmission 的等价调用）：只有继承源，
+  // 没有模型选择事实——文本/附件/投递都必须已经由同一个函数定稿。
+  const admissionSide = resolveCanonicalInput(harness.editTargetIntent, envelope.payload, envelope);
+  assert.ok(admissionSide, "edit 命令必然解析出 canonical input");
+  assert.equal(
+    admissionSide.text,
+    EDIT_NEW_TEXT,
+    "edit 的权威文本是本次 payload 的 newText，不是被编辑轮的旧文本",
+  );
+
+  await forkEditRetryHandlers.editUserQuery(harness.host, envelope);
+
+  const sentInput = harness.calls.sendInputs[0];
+  const sentOptions = harness.calls.sendOptions[0];
+  assert.equal(sentInput.text, admissionSide.text, "执行侧文本必须与 admission 解析逐字相同");
+  assert.notEqual(sentInput.text, harness.editTargetIntent.text, "被编辑轮的旧文本不得被执行");
+  assert.equal(sentOptions.intent.text, admissionSide.intent.text, "intent.text 同源同值");
+  assert.deepEqual(
+    sentOptions.intent.attachmentRefs,
+    [...admissionSide.attachments],
+    "执行侧附件必须是同一份 canonical 事实（不是投影/原轮的）",
+  );
+  assert.deepEqual(
+    [sentInput.attachments?.[0]?.path],
+    [attachment.ref],
+    "附件真的随本轮提交（不是只在 intent 里留个引用）",
+  );
+  // 投递事实同源：schema 三值枚举里属于「立刻起跑」的那一个。
+  assert.equal(
+    sentOptions.intent.requestedDelivery,
+    admissionSide.delivery.requested ?? "startNow",
+  );
+  assert.equal(sentOptions.intent.admittedDelivery, admissionSide.delivery.admitted ?? "startNow");
 });

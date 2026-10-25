@@ -46,7 +46,7 @@ import test from "node:test";
 // fork-edit-retry ⇄ input-intent ⇄ executor ⇄ handlers/index 之间存在循环依赖；
 // 与 test-edit-retry-model.mjs 相同：先以 executor 为入口初始化，再取 handler 导出。
 await import(new URL("../src/zcode-protocol-v4/commands/executor.ts", import.meta.url).href);
-const { forkEditRetryHandlers } = await import(
+const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
   new URL("../src/zcode-protocol-v4/commands/handlers/fork-edit-retry.ts", import.meta.url).href
 );
 const { hasActiveTurn } = await import(
@@ -79,19 +79,25 @@ const SNAPSHOT_SELECTION = Object.freeze({
  *     （v4 sendText 起的 turn / 后台通知 turn 的真实形态）；
  *   - "legacy"：Bootstrap controller 与 Core execution 同时在位（旧发送端）；
  *   - "idle"：无活跃 turn。
+ *
+ * `rewindOutcome`（Step 13 / spec 变更点 22）：把 rewind 桩扩成**成功/失败两态**——
+ *   - "active_chain"（缺省）：成功，rewind 落下；
+ *   - "unavailable"：返回非 active_chain 策略（真实 core 在目标不可达时这样回）；
+ *   - "throws"：调用直接抛错。
+ * 失败两态都发生在**截断落账之前**，因此必须原样上行，不得伪装成 I4 的「已提交失败」。
  */
-function createEditHarness({ activeTurnKind }) {
+function createEditHarness({ activeTurnKind, rewindOutcome = "active_chain" }) {
   const calls = {
     admittedLogs: [],
     bootstrapController: undefined,
+    cancels: [],
     rewinds: [],
     sendInputs: [],
     stopForegroundResults: [],
     stopForegroundOptions: [],
   };
   const state = {
-    activeForegroundExecutionId:
-      activeTurnKind === "idle" ? undefined : `exec-${activeTurnKind}-1`,
+    activeForegroundExecutionId: activeTurnKind === "idle" ? undefined : `exec-${activeTurnKind}-1`,
   };
   const runtime = {
     getActiveForegroundExecutionId: () => state.activeForegroundExecutionId,
@@ -109,9 +115,7 @@ function createEditHarness({ activeTurnKind }) {
       // legacy 后台 turn 的 abortSignal 与 runtime command 相连，abort 传播到
       // background turn 的 finally 后释放 Bootstrap 外层锁
       // （server-operations.ts:2329-2334）。
-      calls.bootstrapController?.abort(
-        new Error("v4 editUserQuery preempts active turn"),
-      );
+      calls.bootstrapController?.abort(new Error("v4 editUserQuery preempts active turn"));
       record.activeAbortController = undefined;
       const result = { foregroundExecutionId, kind: "stopped" };
       calls.stopForegroundResults.push(result);
@@ -120,7 +124,8 @@ function createEditHarness({ activeTurnKind }) {
     getSessionModelSelection: () => SNAPSHOT_SELECTION,
     rewindConversationToMessage: async (params) => {
       calls.rewinds.push(params);
-      return { strategy: "active_chain" };
+      if (rewindOutcome === "throws") throw new Error("simulated conversation rewind failure");
+      return { strategy: rewindOutcome };
     },
     releaseForegroundPromotionLease: () => undefined,
   };
@@ -161,6 +166,9 @@ function createEditHarness({ activeTurnKind }) {
     calls.bootstrapController = controller;
   }
   const host = {
+    cancelInputCommand: async (sessionId, queueItemId, reason) => {
+      calls.cancels.push({ queueItemId, reason, sessionId });
+    },
     getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
     getInputRoutingMode: () => null,
     logger: {
@@ -257,11 +265,7 @@ test("E1: model-only 活跃 turn（Core 持 foreground、Bootstrap 无 controlle
     "started_turn",
     "旧 turn 未抢占时新文本会被 Core busy admission 退回 queue（delivery=queue）",
   );
-  assert.equal(
-    calls.sendInputs[0].busyAtAdmission,
-    undefined,
-    "admission 时旧 turn 必须已被抢占",
-  );
+  assert.equal(calls.sendInputs[0].busyAtAdmission, undefined, "admission 时旧 turn 必须已被抢占");
   assert.equal(calls.admittedLogs.length, 1, "抢占生效时 v4 prompt admitted 必须出现");
 
   // rewind 与提交内容照旧：截断被编辑轮、重发编辑后的新文本。
@@ -303,16 +307,8 @@ test("E3: 空闲会话 → 不进入抢占路径，admission 正常启动", asyn
     [],
     "空闲会话不得发起抢占（hasActiveTurn 为假时整条 preempt 路径都不该进）",
   );
-  assert.deepEqual(
-    calls.stopForegroundResults,
-    [],
-    "空闲会话不得请求停止 Core 前台执行",
-  );
-  assert.equal(
-    calls.bootstrapController,
-    undefined,
-    "空闲会话不得 abort 任何 controller",
-  );
+  assert.deepEqual(calls.stopForegroundResults, [], "空闲会话不得请求停止 Core 前台执行");
+  assert.equal(calls.bootstrapController, undefined, "空闲会话不得 abort 任何 controller");
   assert.equal(calls.sendInputs.length, 1);
   assert.equal(calls.sendInputs[0].admissionKind, "started_turn");
   assert.equal(calls.admittedLogs.length, 1);
@@ -328,4 +324,42 @@ test("E4: 抢占判据与 waitForSessionIdle 对齐（Core foreground 单独成�
   assert.equal(hasActiveTurn(modelOnly.record), true, "model-only turn 必须判为活跃");
   assert.equal(hasActiveTurn(legacy.record), true, "Bootstrap controller turn 必须判为活跃");
   assert.equal(hasActiveTurn(idle.record), false, "两处 authority 都没有时必须判空闲");
+});
+
+test("E5: rewind 失败（截断未落账）→ 原样上行，不得伪装成「历史已回退」的已提交失败", async () => {
+  // 两个失败形态都是真实的：目标不可达时 core 回非 active_chain 策略（handler 主动抛），
+  // 存储/端口异常时调用本身抛错。二者都发生在 setRevert 之前，语义相同。
+  for (const rewindOutcome of ["unavailable", "throws"]) {
+    const { calls, envelope, host } = createEditHarness({
+      activeTurnKind: "idle",
+      rewindOutcome,
+    });
+    let failure;
+    await assert.rejects(
+      () => forkEditRetryHandlers.editUserQuery(host, envelope),
+      (error) => {
+        failure = error;
+        return true;
+      },
+    );
+
+    assert.equal(
+      failure instanceof V4EditCommittedFailureError,
+      false,
+      `${rewindOutcome}: 截断没有落账，报「历史已回退到目标轮」就是撒谎`,
+    );
+    assert.equal(failure?.draftText, undefined, `${rewindOutcome}: 未提交的失败不该产生草稿`);
+    assert.equal(calls.sendInputs.length, 0, `${rewindOutcome}: rewind 失败不得起轮`);
+    assert.equal(
+      calls.admittedLogs.length,
+      0,
+      `${rewindOutcome}: 没有 admission 就没有 admitted 日志`,
+    );
+    assert.equal(calls.rewinds.length, 1, `${rewindOutcome}: rewind 确实被尝试过（失败点在这里）`);
+    assert.deepEqual(
+      calls.cancels,
+      [],
+      `${rewindOutcome}: 什么都没提交就不进 abort 分支（admission 账本行由 gateway 兜底结算）`,
+    );
+  }
 });

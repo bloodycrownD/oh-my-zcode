@@ -355,3 +355,47 @@ test("8 F5 promote 只接受 admitted：已 settle 的行 promote 必须抛错�
   );
   assert.equal(messageCount("msg-orphan"), 0, "缺行的 promote 不得留下孤儿 user message");
 });
+
+test("9 I2 判据的写侧单点（① admitted）：settle 不得改写已终态行", async () => {
+  // rewind 级联的候选来自**事件投影**（`pendingSteerInputs`），那条投影不携带账本状态，
+  // 所以判据三条里的 ①`status=admitted` 只能由这条 WHERE 子句保证（spec 变更点 7/19）。
+  // 一旦条件被去掉：`promoted`（已起跑）会被记成 `discarded`，诊断面看到的是
+  // 「这条输入是回退作废的」，而真实事故形态是「它已经在跑了」——两种状态混为一谈。
+  const statusOf = (id) =>
+    raw.prepare("select status from session_input where id = ?").get(id).status;
+  const reasonOf = (id) =>
+    raw.prepare("select status_reason from session_input where id = ?").get(id).status_reason;
+
+  // 正向：admitted 行照常收口（两个方向都要，否则「一律不改」也能绿）。
+  insertInput({ id: "input-settle-admitted", behavior: { payload: payloadOf() } });
+  await store.settleSessionInput({
+    id: "input-settle-admitted",
+    reason: "rewound",
+    sessionID: SESSION_ID,
+    status: "discarded",
+  });
+  assert.equal(statusOf("input-settle-admitted"), "discarded");
+  assert.equal(reasonOf("input-settle-admitted"), "rewound");
+
+  // 反向：已 promoted 的行不得被回退成 discarded（迟到的级联/事件汇都不许改写终态）。
+  insertInput({ id: "input-settle-promoted", status: "promoted" });
+  await store.settleSessionInput({
+    id: "input-settle-promoted",
+    reason: "rewound",
+    sessionID: SESSION_ID,
+    status: "discarded",
+  });
+  assert.equal(statusOf("input-settle-promoted"), "promoted", "已起跑的输入不得被记成作废");
+  assert.equal(reasonOf("input-settle-promoted"), null, "终态行连 reason 都不许被补写");
+
+  // 反向：更早的用户取消同样是终态，不能被级联覆盖成 rewound。
+  insertInput({ id: "input-settle-cancelled", status: "cancelled", statusReason: "user_removed" });
+  await store.settleSessionInput({
+    id: "input-settle-cancelled",
+    reason: "rewound",
+    sessionID: SESSION_ID,
+    status: "discarded",
+  });
+  assert.equal(statusOf("input-settle-cancelled"), "cancelled");
+  assert.equal(reasonOf("input-settle-cancelled"), "user_removed");
+});
