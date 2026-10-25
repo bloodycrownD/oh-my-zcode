@@ -97,7 +97,19 @@ export interface V4CommandCoreHost {
   hasQueueItemKind?(sessionId: string, kind: QueueItem["kind"]): boolean;
   /** guide eligibility：只阻止已有 ordinary queue；已有 guide 仍允许继续按 FIFO admission。 */
   hasQueuedDelivery?(sessionId: string, delivery: "guide" | "queue"): boolean;
-  getQueueLength?(sessionId: string): number;
+  /**
+   * 队列长度；`undefined` = 读不到（v4 gateway 缺席/投影未就绪）。
+   *
+   * 过去 v4-bridge 在 gateway 缺席时回落 `0`，与「读不到按非空处理」的 fail-safe 正好相反：
+   * 删项路径会据此判定「队列已空」并无条件复位 autoDrain（cr-func P2-1）。回落 0 是
+   * 一个**事实伪造**，这里改成如实回 `undefined`，由调用方决定 fail-safe。
+   */
+  getQueueLength?(sessionId: string): number | undefined;
+  /**
+   * 队列暂停位（v4 投影 `queue.autoDrain`）。`deriveQueueAutoDrain` 的「当前位」输入；
+   * `undefined` = 读不到（gateway 缺席/无投影）——派生规则据此保持现值，不得猜 true/false。
+   */
+  getQueueAutoDrain?(sessionId: string): boolean | undefined;
   /** timeline/child 这类无 user message 的成功副作用持久化查重事实。 */
   recordPersistentCommandFact?(
     sessionId: string,

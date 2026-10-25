@@ -44,9 +44,9 @@
  * I5. `modelSelectionPinned:` 的自算只许在 input-intent.ts；其余同上。
  * I6. retry 分支不得把 payload 整体断言成 edit 形状（`as { newText: string }`）——
  *     旧写法让「retry 偷读 newText」在类型上合法，是兜底搬家的温床。
- * I7. queue.ts 的执行内容（提升轮 content / intent.text / 附件）**只能来自 session_input
- *     账本**；投影项的 `queueItem.text` 仅剩 spec 4b 例外表的三处（goal objective/
- *     goal intent.text/displayText），其余站点即红。
+ * I7. queue.ts 的执行内容（提升轮 content / intent.text / 附件，含 goal 分支的
+ *     objective 解析与 intent.text）**只能来自 session_input 账本**；投影项的
+ *     `queueItem.text` 仅剩 displayText 一处，其余站点即红。
  * I8. queue.ts 里仍是投影项提供的执行输入只许 spec 4b 登记的一处（toolDisallowlist）：
  *     `queueItem.attachments` 已收口账本（cr-func F1），再出现即红。
  * I9. 硬失败的可操作文案必须能到达用户：`SessionPane` 的 sendQueuedNow 拒绝分支必须
@@ -895,28 +895,17 @@ test("I6 retry 分支不得把 payload 断言成 edit 形状（旧写法给 retr
 });
 
 /**
- * queue.ts 里 `queueItem.text` 剩下的合法用法（spec 4b 的守卫例外表：
- * goal objective 解析 / goal 分支 intent.text / displayText）。
+ * queue.ts 里 `queueItem.text` 剩下的合法用法（spec 4b 的守卫例外表）。
  *
- * Step 3 已把**执行内容**（普通分支的 `content:` 与 `intent.text`）改为读
- * `session_input` 账本，那两条「待收口」条目已按过期即红的设计删掉——
- * 再出现新的 `queueItem.text` 作执行内容，本守卫会以「未登记站点」打红。
+ * cr-func P1-4 之后只剩 **displayText 一处**：goal 分支的 objective 解析与落库
+ * `intent.text` 也已改为读 `session_input` 账本。那两条「待收口」条目按过期即红的
+ * 设计删掉——再出现新的 `queueItem.text` 作执行内容，本守卫会以「未登记站点」打红。
  */
 const QUEUE_TEXT_ALLOWLIST = [
   {
-    code: "? parseGoalObjectiveFromCommandText(queueItem.text)",
-    file: "zcode-protocol-v4/commands/handlers/queue.ts",
-    note: "goal objective 解析（spec 4b 例外，合法）",
-  },
-  {
-    code: "objective ?? queueItem.text,",
-    file: "zcode-protocol-v4/commands/handlers/queue.ts",
-    note: "goal 分支的 intent.text（spec 4b 例外表，合法）",
-  },
-  {
     code: "displayText: queueItem.text,",
     file: "zcode-protocol-v4/commands/handlers/queue.ts",
-    note: "展示文案（spec 4b 例外，合法）",
+    note: "展示文案（spec 4b 例外，合法：纯展示，不参与执行/落库）",
   },
 ];
 
@@ -936,7 +925,7 @@ const QUEUE_PROJECTION_EXECUTION_ALLOWLIST = [
   },
 ];
 
-test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表的三处", () => {
+test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表的 displayText", () => {
   const code = stripComments(readFileSync(queueHandlerPath, "utf8"));
   assert.equal(
     code.includes("content: queueItem.text"),
@@ -972,8 +961,8 @@ test("I7 queue.ts 的执行内容不得读投影项：只剩 spec 4b 例外表�
   );
   assert.equal(
     matches.length,
-    3,
-    "queue.ts 的 queueItem.text 只允许 spec 4b 例外表的三处；站点数量异常先确认扫描没失效",
+    1,
+    "queue.ts 的 queueItem.text 只允许 spec 4b 例外表的 displayText 一处；站点数量异常先确认扫描没失效",
   );
   assertSourceAllowlist({
     allowlist: QUEUE_TEXT_ALLOWLIST,

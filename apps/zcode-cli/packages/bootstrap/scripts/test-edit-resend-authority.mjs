@@ -80,6 +80,11 @@ const uiV4Src = join(here, "..", "..", "..", "..", "..", "packages", "ui", "src"
 const contractsEvents = await import(
   pathToFileURL(join(contractsSrc, "events", "session.events.ts")).href
 );
+// 暂停位的唯一派生规则（cr-func P2）。纯函数，直接取 contracts 源码断言真值表，
+// 不需要经过 queue handler 才能证明判据正确。
+const { deriveQueueAutoDrain } = await import(
+  pathToFileURL(join(contractsSrc, "interfaces", "session.port.ts")).href
+);
 const { EventReducer } = await import(
   pathToFileURL(join(contractsSrc, "events", "event-reducer.ts")).href
 );
@@ -131,6 +136,14 @@ const { resolveCanonicalInput } = await import(
 const { applyWorkspaceFileRewind } = await import(
   pathToFileURL(join(coreSrc, "runtime", "methods", "file-rewind.ts")).href
 );
+// I4 事务边界的真实原语（P1-2）：只有真 `rewindConversationToMessage` 能证明
+// 「setRevert 之后失败」会抛带 committed:true 的类型化错误。
+const { rewindConversationToMessage } = await import(
+  pathToFileURL(join(coreSrc, "runtime", "methods", "rewind-message.ts")).href
+);
+const { ConversationRewindCommittedError, isConversationRewindCommittedError } = await import(
+  pathToFileURL(join(contractsSrc, "rewind", "index.ts")).href
+);
 // 真实 FileSystemPort 错误类型：file-rewind 只把 `isFileSystemPortError + not_found`
 // 当成「文件不存在」，普通 Error 会被判成读取失败（计划阶段直接 unsafe）。
 const { createFileSystemError } = await import(
@@ -155,8 +168,14 @@ const { resolveEditFailureComposerDraft } = await import(
   ).href
 );
 const { commandAckSchema, commandResultSchema } = await import("@zcode/shared/zcode-protocol-v4");
+// 真实 sqlite 适配器（P1-3 端到端）：legacy「无 intent」行的读法只有真 store 能证明。
+const { SqliteSessionStore } = await import(
+  pathToFileURL(
+    join(cliPackages, "adapters", "src", "storage", "session-store", "sqlite-session-store.ts"),
+  ).href
+);
 // I5 的 UI 判据（纯函数；packages/ui 无 jsdom，与 editFailureComposerRestore 同一层）。
-const { resolveEditDelivery, shouldCollapseEditState } = await import(
+const { resolveEditDelivery, resolveRetryDelivery, shouldCollapseEditState } = await import(
   pathToFileURL(join(uiV4Src, "editDeliveryOutcome.ts")).href
 );
 
@@ -354,6 +373,7 @@ async function seedQueuedInput(
     // `text` 必须排在两个派生缺省值之前：解构默认值按出现顺序求值，靠后会 TDZ。
     text,
     targetTurnId,
+    kind = "sendText",
     ledgerAttachments = [],
     ledgerText = text,
     projectionAttachments = [],
@@ -363,11 +383,11 @@ async function seedQueuedInput(
   await context.runtime.sessionStore.saveSessionInput({
     delivery,
     id,
-    kind: "sendText",
+    kind,
     payload: {
       conversationInputIntent: {
         attachments: ledgerAttachments,
-        kind: "sendText",
+        kind,
         queueItemId: id,
         text: ledgerText,
       },
@@ -383,7 +403,7 @@ async function seedQueuedInput(
     intent: {
       admittedDelivery: delivery,
       attachmentRefs: projectionAttachments,
-      kind: "sendText",
+      kind,
       queueItemId: id,
       requestedDelivery: delivery,
       sourceCommandId: id.replace(/^queue_/, ""),
@@ -462,8 +482,8 @@ async function resumeAutoDrain(context) {
   return runAutoDrainHook(context);
 }
 
-/** `sendQueuedNow` 的可控宿主（真实 handler；账本读法接上下文里的真账本）。 */
-function promotionHarness(context, queueItem) {
+/** `sendQueuedNow` 的可控宿主（真实 handler；账本读法接上下文里的真账本或真 store）。 */
+function promotionHarness(context, queueItem, options = {}) {
   const calls = { remove: 0, reserve: 0, sendInput: 0, warnings: [] };
   const captured = {};
   const record = {
@@ -494,6 +514,15 @@ function promotionHarness(context, queueItem) {
         captured.options = options;
         return { completion: Promise.resolve(), kind: "started_turn", turnId: "turn-new" };
       },
+      // goal 分支（P1-4）：objective / intent / displayText 都落在 setTarget 上。
+      setTarget: async (params) => {
+        captured.goalTarget = params;
+        return undefined;
+      },
+      continueActiveTarget: async (options) => {
+        captured.goalContinuation = options;
+        return undefined;
+      },
       sessionId: SESSION_ID,
       setQueueAutoDrain: async () => undefined,
     },
@@ -508,7 +537,9 @@ function promotionHarness(context, queueItem) {
       sessionId === SESSION_ID && queueItemId === queueItem.queueItemId ? queueItem : null,
     getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
     getSessionInputForExecution: (sessionId, queueItemId) =>
-      context.ledger.port.getSessionInputForExecution({ id: queueItemId, sessionID: sessionId }),
+      options.authority
+        ? options.authority({ id: queueItemId, sessionID: sessionId })
+        : context.ledger.port.getSessionInputForExecution({ id: queueItemId, sessionID: sessionId }),
     logger: {
       info: () => undefined,
       warn: (message, fields) => calls.warnings.push({ fields, message }),
@@ -1366,6 +1397,9 @@ function createEditTransactionHarness({
   commitFailure = false,
   queuedDelivery = "queue",
   startMode = "started",
+  // P1-2：模拟「setRevert 之后失败」——真实 core 会抛带 committed:true 的类型化错误
+  // （`ConversationRewindCommittedError`），handler 必须据此判定「截断已提交」。
+  rewindCommittedFailure = false,
 } = {}) {
   const calls = {
     cancels: [],
@@ -1409,6 +1443,16 @@ function createEditTransactionHarness({
     },
     rewindConversationToMessage: async (params) => {
       calls.rewinds.push(params);
+      if (rewindCommittedFailure) {
+        // 真实原语在 setRevert 落盘后失败时的形状：截断已是事实（revert 已写），
+        // 错误带 committed:true。原样上抛由 handler 转成可见失败。
+        state.revert = params.targetMessageId;
+        throw new ConversationRewindCommittedError({
+          cause: new Error("rebuild failed after commit"),
+          rewindId: "rewind-rt-committed",
+          targetMessageId: params.targetMessageId,
+        });
+      }
       state.revert = params.targetMessageId;
       return { strategy: "active_chain" };
     },
@@ -1600,8 +1644,120 @@ test("T-RT2② commit 失败在 handler 侧必须上行成可见 fault，不得�
   assert.equal(cancels[0].queueItemId, "queue_cmd-rt-edit", "结算的是本次 admission 行");
 });
 
-// ── T-RT1 / T-RT3 / T-RT4 / T-RT5 abort 语义（Step 8-9）──────────────────────
+test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 core，不是 stub）", async () => {
+  // 直接用真实 `rewindConversationToMessage`：提交点（setRevert）之后的三步
+  // ——级联作废 / 派生状态重建 / RewindTriggered——任一抛错都必须变成类型化事实。
+  // 否则 handler 的局部布尔（只在整段成功后翻转）会把这个窗口原样 rethrow 成
+  // 「什么都没提交」：历史已截断、无 draftText、无「历史已回退」文案。
+  const makeRuntime = ({ failAppend }) => {
+    const userMessage = {
+      info: { id: "msg-user-rt1", role: "user", sessionID: SESSION_ID, time: { created: 1 } },
+      parts: [
+        {
+          id: "part-rt1",
+          messageID: "msg-user-rt1",
+          sessionID: SESSION_ID,
+          text: "原始输入",
+          time: { end: 2, start: 1 },
+          type: "text",
+        },
+      ],
+    };
+    const calls = { reverts: [], events: [] };
+    const runtime = {
+      artifactStore: undefined,
+      branchGeneration: 0,
+      createEvent: (type, payload, trace) =>
+        createSessionEvent(type, SESSION_ID, payload, { traceId: trace.traceId }),
+      // 故意在 RewindTriggered 上抛错 = 「setRevert 之后失败」的最小真实窗口
+      // （`discardRewoundPendingSteerInputs` 无候选会早退，`rebuildConversationDerivedState`
+      //  用最小桩跑通；第三个 append 点是唯一必到的提交后写）。
+      discardRewoundPendingSteerInputs,
+      appendEvent: async (event) => {
+        calls.events.push(event.type);
+        if (failAppend && event.type === "rewind_triggered") {
+          throw new Error("simulated append failure after commit");
+        }
+        return event;
+      },
+      injectTargetStateIntoMessageHistory: () => undefined,
+      logger: { debug: () => undefined, error: () => undefined, info: () => undefined, warn: () => undefined },
+      messageHistory: {
+        addAttachment: () => undefined,
+        addEntries: () => undefined,
+        borrowReadOnlyRuntimeEntries: () => [],
+        replaceMessages: () => undefined,
+        reset: () => undefined,
+        setCacheMiss: () => undefined,
+      },
+      readFileState: new Map(),
+      readSessionTargetForContext: async () => null,
+      rebuildProjection: async () => ({ pendingSteerInputs: [] }),
+      runtimeTaskRegistry: { all: () => ({}), setActiveBranchGeneration: () => undefined },
+      sessionId: SESSION_ID,
+      sessionStore: {
+        getSession: async () => ({ revert: undefined }),
+        messages: async () => [userMessage],
+        setRevert: async (input) => {
+          calls.reverts.push(input.revert);
+        },
+      },
+      workspaceRoot: "D:/tmp/ws",
+      workingDirectory: "D:/tmp/ws",
+    };
+    return { calls, runtime };
+  };
 
+  // 正向对照：不注入失败时同一条路径正常返回（证明下面不是「反正都抛」）。
+  const ok = makeRuntime({ failAppend: false });
+  const applied = await rewindConversationToMessage.call(ok.runtime, {
+    events: [],
+    targetMessageId: "msg-user-rt1",
+    traceContext: TRACE_CONTEXT,
+  });
+  assert.equal(applied.keptMessageCount, 0);
+  assert.equal(ok.calls.reverts.length, 1, "正向对照：setRevert 已落盘");
+
+  const failing = makeRuntime({ failAppend: true });
+  let failure;
+  await assert.rejects(
+    () =>
+      rewindConversationToMessage.call(failing.runtime, {
+        events: [],
+        targetMessageId: "msg-user-rt1",
+        traceContext: TRACE_CONTEXT,
+      }),
+    (error) => {
+      failure = error;
+      return true;
+    },
+  );
+  // 变异探测：去掉 rewind-message.ts 里的 try/catch（或把类型化错误换回原错），本条即红。
+  assert.equal(isConversationRewindCommittedError(failure), true, "必须是带 committed 事实的类型化错误");
+  assert.equal(failure.committed, true);
+  assert.equal(failing.calls.reverts.length, 1, "提交点是 setRevert —— 它确实已经发生");
+});
+
+test("T-RT2③ handler 用事实而不是布尔判「已提交」：类型化错误 → draftText + 历史已回退", async () => {
+  const harness = createEditTransactionHarness({ rewindCommittedFailure: true });
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(harness.host, harness.makeEnvelope("preserve")),
+    (error) => {
+      assert.ok(
+        error instanceof V4EditCommittedFailureError,
+        "setRevert 之后失败不得原样上行成「什么都没提交」",
+      );
+      assert.equal(error.draftText, EDIT_NEW_TEXT, "newText 必须回 composer（目标行已随截断消失）");
+      assert.match(error.message, /历史已回退到目标轮/);
+      return true;
+    },
+  );
+  // 失败按提交后语义收口：账本行被结算，且没有尝试 start（截断后不该继续起轮）。
+  assert.equal(harness.calls.cancels.length, 1);
+  assert.equal(harness.calls.sendInputs.length, 0);
+});
+
+// ── T-RT1 / T-RT3 / T-RT4 / T-RT5 abort 语义（Step 8-9）──────────────────────
 test("T-RT1 start 失败：截断保持已提交、不回滚，客户端收到带「历史已回退」语义的 fault", async () => {
   const harness = createEditTransactionHarness({ startMode: "throws" });
   let failure;
@@ -1909,13 +2065,179 @@ test("T-DA2 UI 接线：SessionPane 只对 queue 提示、ConversationRowView �
   );
 });
 
+// ── P1-5：retryTurn 与 edit 同一条 rewind→start 事务（delivery / draft / 提交后失败）──
+
+/** retry 的最小宿主：target 解析、rewind 两态、start 三态（started/queued/throws）。 */
+function createRetryHarness({
+  rewindCommittedFailure = false,
+  rewindOutcome = "active_chain",
+  startMode = "started",
+} = {}) {
+  const calls = { cancels: [], rewinds: [], sendInputs: [], sendOptions: [] };
+  const state = { revert: null };
+  const editTarget = {
+    attachments: undefined,
+    intent: {
+      admittedDelivery: "startNow",
+      clientId: "ui",
+      kind: "sendText",
+      queueItemId: "queue-original-retry",
+      requestedDelivery: "startNow",
+      sourceCommandId: "cmd-original-retry",
+      text: "原始待重试的消息",
+    },
+    transcriptMessageId: "msg-original-retry",
+  };
+  const runtime = {
+    getActiveForegroundExecutionId: () => undefined,
+    getSessionModelSelection: () => undefined,
+    rewindConversationToMessage: async (params) => {
+      calls.rewinds.push(params);
+      if (rewindCommittedFailure) {
+        state.revert = params.targetMessageId;
+        throw new ConversationRewindCommittedError({
+          cause: new Error("post-commit step failed"),
+          rewindId: "rewind-retry-committed",
+          targetMessageId: params.targetMessageId,
+        });
+      }
+      if (rewindOutcome !== "active_chain") return { strategy: rewindOutcome };
+      state.revert = params.targetMessageId;
+      return { strategy: "active_chain" };
+    },
+  };
+  const record = {
+    app: {
+      getMode: () => "build",
+      getModel: () => "openai/gpt-5",
+      readTarget: async () => null,
+      runtime,
+      sendInput: async (input, options) => {
+        calls.sendInputs.push(input);
+        calls.sendOptions.push(options);
+        if (startMode === "throws") {
+          throw Object.assign(new Error("model target unavailable"), {
+            reasonCode: "fault.command.modelUnavailable",
+          });
+        }
+        if (startMode === "queued") {
+          return { delivery: "queue", kind: "queued", pendingInputId: "p-retry", queueLength: 1 };
+        }
+        return { completion: Promise.resolve(), kind: "started_turn", turnId: "turn-retry" };
+      },
+      sessionId: SESSION_ID,
+    },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    afterLegacyStateMutation: async () => undefined,
+    cancelInputCommand: async (sessionId, queueItemId, reason) => {
+      calls.cancels.push({ queueItemId, reason, sessionId });
+    },
+    ensureModelReady: async () => undefined,
+    getInputRoutingMode: () => null,
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { info: () => undefined, warn: () => undefined },
+    resolveRowActionTarget: () => ({
+      editTarget,
+      messageId: "msg-original-retry",
+      ok: true,
+      row: { entityId: "ent-original", rowId: 7, turnId: "turn-original" },
+    }),
+  };
+  const envelope = {
+    baseRevision: 0,
+    clientId: "ui",
+    commandId: "cmd-retry-rt",
+    issuedAt: Date.now(),
+    payload: { target: { entityId: "ent-original", rowId: 7 } },
+    sessionId: SESSION_ID,
+    type: "retryTurn",
+  };
+  return { calls, envelope, host, state };
+}
+
+test("T-RT6 retryTurn 起跑成功：ACK 带 delivery 三值（契约新增 retryTurn 结果分支）", async () => {
+  const harness = createRetryHarness({ startMode: "started" });
+  const result = await forkEditRetryHandlers.retryTurn(harness.host, harness.envelope);
+  assert.equal(result?.type, "retryTurn");
+  assert.equal(result?.sessionId, SESSION_ID);
+  assert.equal(result?.delivery, "startNow");
+  // 契约：结果必须能过 schema（否则客户端解码失败，投递态等于没上抛）。
+  const parsed = commandResultSchema.parse({ ...result, sessionId: SESSION_ID });
+  assert.equal(parsed.delivery, "startNow");
+  // 重发的是原轮 canonical 文本，不是任何 payload 字段。
+  assert.equal(harness.calls.sendInputs[0].text, "原始待重试的消息");
+});
+
+test("T-RT6 retryTurn queued：ACK 明确说没起跑 + queueItemId 点得中", async () => {
+  const harness = createRetryHarness({ startMode: "queued" });
+  const result = await forkEditRetryHandlers.retryTurn(harness.host, harness.envelope);
+  assert.equal(result?.delivery, "queue", "queued 不得再是静默成功");
+  assert.equal(result?.queueItemId, "queue_cmd-retry-rt", "与 admission 权威 id 同源");
+
+  const ack = commandAckSchema.parse({
+    commandId: harness.envelope.commandId,
+    result,
+    revisionAtDecision: 0,
+    status: "accepted",
+  });
+  assert.equal(resolveRetryDelivery(ack), "queue", "UI 判据能读到 retry 的投递态");
+});
+
+test("T-RT6 retryTurn 截断已提交后失败：draftText 带回原消息 + 「历史已回退」", async () => {
+  const harness = createRetryHarness({ startMode: "throws" });
+  await assert.rejects(
+    () => forkEditRetryHandlers.retryTurn(harness.host, harness.envelope),
+    (error) => {
+      assert.ok(error instanceof V4EditCommittedFailureError, "retry 必须有与 edit 同形的失败出口");
+      assert.equal(error.draftText, "原始待重试的消息", "原消息必须回 composer（目标行已随截断消失）");
+      assert.match(error.message, /历史已回退到目标轮/);
+      return true;
+    },
+  );
+  assert.equal(harness.calls.cancels.length, 1, "本次命令自持的账本行必须结算");
+  assert.equal(harness.state.revert, "msg-original-retry", "截断保持（不回滚 revert）");
+});
+
+test("T-RT6 retryTurn 原语报「已提交」：同样走 draftText 出口（不靠局部布尔）", async () => {
+  const harness = createRetryHarness({ rewindCommittedFailure: true });
+  await assert.rejects(
+    () => forkEditRetryHandlers.retryTurn(harness.host, harness.envelope),
+    (error) => {
+      assert.ok(error instanceof V4EditCommittedFailureError);
+      assert.equal(error.draftText, "原始待重试的消息");
+      assert.match(error.message, /历史已回退到目标轮/);
+      return true;
+    },
+  );
+  assert.equal(harness.calls.sendInputs.length, 0, "rewind 失败不得继续起轮");
+});
+
+test("T-RT6 retryTurn rewind 前失败（未提交）：原样上行，不产生草稿", async () => {
+  const harness = createRetryHarness({ rewindOutcome: "unavailable" });
+  await assert.rejects(
+    () => forkEditRetryHandlers.retryTurn(harness.host, harness.envelope),
+    (error) => {
+      assert.equal(error instanceof V4EditCommittedFailureError, false, "未提交的失败不是 I4 的已提交失败");
+      assert.equal(error.draftText, undefined);
+      assert.equal(harness.state.revert, null, "什么都没提交");
+      return true;
+    },
+  );
+  assert.equal(harness.calls.cancels.length, 0, "未提交时没有账本行需要按已提交语义结算");
+});
+
 // ── T-RW6 删空队列复位 autoDrain（Step 5/6 同一条铁律的残留）─────────────────
 
 function createDeleteQueueItemHarness({
   queueLengthAfterDelete = 0,
   removeResult = true,
   withQueueLength = true,
-} = {}) {
+  // 删除前/后的暂停位（投影事实）。缺省 false = 用户正处于暂停（这是「删空复位」唯一有意义的场景）。
+  autoDrainBefore,
+}) {
   const calls = { autoDrain: [], mutations: [], removed: [] };
   const record = {
     app: {
@@ -1938,6 +2260,7 @@ function createDeleteQueueItemHarness({
     getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
     logger: { warn: () => undefined },
     ...(withQueueLength ? { getQueueLength: () => queueLengthAfterDelete } : {}),
+    ...(withQueueLength ? { getQueueAutoDrain: () => autoDrainBefore ?? false } : {}),
   };
   const envelope = {
     clientId: "ui",
@@ -2002,7 +2325,125 @@ test("T-RW6 读不到队列长度时按非空处理（fail-safe：宁可不复�
 
 // ── I1 执行权威取账本（Step 3 收口 / Step 13 补例） ──────────────────────────
 
-/** 投影里的旧值：任何执行用例都不允许把它发出去。 */
+// ── P2：暂停位的唯一派生规则 ─────────────────────────────────────────────────
+
+/** 空/非空/显式请求/读不到 四类输入的真值表；这是四处补丁收敛成的唯一规则。 */
+test("T-RW7 deriveQueueAutoDrain：暂停 = 队列非空 && 显式请求，空队列一律归一化为放行", () => {
+  const derive = deriveQueueAutoDrain;
+  // 空队列：无论现值/显式请求，都归一化为放行（消灭「paused + 0 项」残留位）。
+  assert.equal(derive({ current: false, queueLength: 0 }), true, "删空/抽干后必须复位");
+  assert.equal(derive({ current: false, queueLength: 0, requested: false }), true);
+  assert.equal(derive({ current: true, queueLength: 0 }), true);
+  // 非空：显式请求优先（用户暂停/继续都算数）。
+  assert.equal(derive({ current: true, queueLength: 2, requested: false }), false, "用户暂停");
+  assert.equal(derive({ current: false, queueLength: 2, requested: true }), true, "用户继续");
+  // 非空 + 无请求（结构事件）：保持现值，不越权改用户的暂停位。
+  assert.equal(derive({ current: false, queueLength: 2 }), false);
+  assert.equal(derive({ current: true, queueLength: 2 }), true);
+  // 读不到长度：只认显式请求；没有请求就保持现值（无法证明「空」，不许放行）。
+  assert.equal(derive({ current: false, queueLength: undefined }), false, "读不到 ≠ 空");
+  assert.equal(derive({ current: true, queueLength: undefined }), true);
+  assert.equal(derive({ current: false, queueLength: undefined, requested: true }), true);
+});
+
+test("T-RW7 删空复位是幂等的：已放行的会话不重复写同值事件", async () => {
+  const harness = createDeleteQueueItemHarness({
+    autoDrainBefore: true,
+    queueLengthAfterDelete: 0,
+  });
+  await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
+  assert.deepEqual(harness.calls.autoDrain, [], "现值已是放行 → 不得再写一条同值 QueueAutoDrainChanged");
+  assert.deepEqual(harness.calls.mutations, [], "没有翻转就没有 resumed 广播");
+});
+
+/** setAutoDrain handler 的最小宿主（暂停位/长度都是可控事实）。 */
+function createSetAutoDrainHarness({ autoDrainBefore, queueLength }) {
+  const calls = { autoDrain: [], mutations: [], warnings: [] };
+  const record = {
+    app: {
+      sessionId: SESSION_ID,
+      setQueueAutoDrain: async (autoDrain) => {
+        calls.autoDrain.push(autoDrain);
+      },
+    },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    afterLegacyStateMutation: async (_record, reason) => {
+      calls.mutations.push(reason);
+    },
+    getQueueAutoDrain: () => autoDrainBefore,
+    getQueueLength: () => queueLength,
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { warn: (message) => calls.warnings.push(message) },
+  };
+  const envelope = (autoDrain) => ({
+    clientId: "ui",
+    commandId: `cmd-auto-${String(autoDrain)}`,
+    issuedAt: Date.now(),
+    payload: { autoDrain },
+    sessionId: SESSION_ID,
+    type: "setAutoDrain",
+  });
+  return { calls, envelope, host };
+}
+
+test("T-RW7 setAutoDrain 也走同一派生规则：空队列的「暂停」不落库，非空才生效", async () => {
+  const empty = createSetAutoDrainHarness({ autoDrainBefore: true, queueLength: 0 });
+  await queueHandlers.setAutoDrain(empty.host, empty.envelope(false));
+  assert.deepEqual(empty.calls.autoDrain, [], "空队列 pause 无承载对象 → 归一化后与现值相同，不写");
+
+  const busy = createSetAutoDrainHarness({ autoDrainBefore: true, queueLength: 2 });
+  await queueHandlers.setAutoDrain(busy.host, busy.envelope(false));
+  assert.deepEqual(busy.calls.autoDrain, [false], "非空队列的显式暂停必须落库");
+  assert.deepEqual(busy.calls.mutations, []);
+
+  const resume = createSetAutoDrainHarness({ autoDrainBefore: false, queueLength: 2 });
+  await queueHandlers.setAutoDrain(resume.host, resume.envelope(true));
+  assert.deepEqual(resume.calls.autoDrain, [true]);
+  assert.deepEqual(
+    resume.calls.mutations,
+    ["queue_auto_drain_resumed"],
+    "放行必须触发 resumed 广播（idle 暂停队列没有 active turn 替它启动队首）",
+  );
+});
+
+test("T-RW7 bridge 读不到队列长度时不得回落 0（P2-1：回落 0 与「按非空处理」相反）", () => {
+  const bridgeSource = stripComments(
+    readFileSync(join(bootstrapSrc, "zcode-protocol", "v4-bridge.ts"), "utf8"),
+  );
+  // 变异探测：把 `getQueueLength` 的 gateway 回落改回 `?? 0`，本条即红。
+  assert.doesNotMatch(
+    bridgeSource,
+    /getQueueLength:\s*\(sessionId\)\s*=>[^\n]*\?\?\s*0/u,
+    "gateway 缺席时不许把「读不到」伪造成 0：删项会据此无条件复位 autoDrain",
+  );
+  assert.match(
+    bridgeSource,
+    /getQueueLength:\s*\(sessionId\)\s*=>\s*context\.v4Gateway\?\.getQueueLength\(sessionId\)/u,
+    "长度必须如实回 undefined，由 handler 的 fail-safe 决定",
+  );
+  // 成对的暂停位读法同样是「读不到就如实回 undefined」。
+  assert.match(
+    bridgeSource,
+    /getQueueAutoDrain:\s*\(sessionId\)\s*=>\s*context\.v4Gateway\?\.getQueueAutoDrain\(sessionId\)/u,
+  );
+});
+
+test("T-RW7 当前位读不到时：结构事件不动暂停位，显式请求照常落地", async () => {  // 结构事件（delete）没有「当前位」事实：不写，也不假称已复位。
+  const harness = createDeleteQueueItemHarness({ queueLengthAfterDelete: 0 });
+  harness.host.getQueueAutoDrain = undefined;
+  await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
+  assert.deepEqual(harness.calls.autoDrain, [], "没有当前位事实 → 不写（fail-safe）");
+
+  // 显式请求不依赖旧值（用户意图本身是完整事实）。
+  const explicit = createSetAutoDrainHarness({ autoDrainBefore: undefined, queueLength: 2 });
+  await queueHandlers.setAutoDrain(explicit.host, explicit.envelope(false));
+  assert.deepEqual(explicit.calls.autoDrain, [false], "显式暂停不需要当前位也能落库");
+});
+
+/** 投影里旧值：任何执行用例都不允许把它发出去。 */
 const STALE_PROJECTION_TEXT = "投影里的旧文本（不得被执行）";
 /** 账本里的执行文本：唯一合法的执行内容。 */
 const LEDGER_AUTHORITY_TEXT = "账本里的执行文本（唯一权威）";
@@ -2071,6 +2512,100 @@ test("T-IA1 提升轮的执行文本与附件只来自账本：投影项被改�
     "账本终态必须硬失败，不得回落投影文本起轮",
   );
   assert.equal(second.calls.sendInput, 0, "终态账本行不得起轮");
+});
+
+// ── I1 补充：goal 车道（cr-func P1-4）与 legacy 无 intent（P1-3） ──────────────
+
+test("T-IA5 goal 分支的 objective 与落库 intent.text 取账本，displayText 仍取投影", async () => {
+  const context = createContext();
+  const LEDGER_GOAL_TEXT = "/goal 账本里的目标";
+  const PROJECTION_GOAL_TEXT = "/goal 投影里的旧目标";
+  await seedQueuedInput(context, {
+    id: OLD_ID,
+    kind: "sendGoalCommand",
+    ledgerText: LEDGER_GOAL_TEXT,
+    projectionText: PROJECTION_GOAL_TEXT,
+    targetTurnId: TURN_KEPT,
+    text: LEDGER_GOAL_TEXT,
+  });
+  const head = queueState(context).items[0];
+  assert.equal(head.kind, "sendGoalCommand", "夹具前提：队列项是 goal 车道");
+  assert.equal(head.text, PROJECTION_GOAL_TEXT, "夹具前提：投影文本与账本真的不同");
+
+  const harness = promotionHarness(context, head);
+  await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
+
+  // 变异探测：把 objective 解析改回 queueItem.text，本条即红。
+  assert.equal(
+    harness.captured.goalTarget?.objective,
+    "账本里的目标",
+    "goal 的 objective 必须解析自账本（与普通分支同一条 I1 论证：不修 text 冷恢复会带回旧值）",
+  );
+  assert.equal(
+    harness.captured.goalTarget?.intent?.text,
+    "账本里的目标",
+    "落库 intent.text 必须等于账本解析出的 canonical objective",
+  );
+  assert.equal(
+    harness.captured.goalTarget?.displayText,
+    PROJECTION_GOAL_TEXT,
+    "displayText 是纯展示，仍是用户看到的投影原文（不得被账本改写）",
+  );
+  assert.equal(harness.calls.sendInput, 0, "goal 分支不走普通起轮");
+});
+
+test("T-IA6 legacy「无 intent」账本行（真 sqlite）：仍可提升，不再造永久死项", async (t) => {
+  // 生产形状：`TurnSteerQueued` 在 intent 缺失时只写 `{ text }`（events.ts），而 intent
+  // 今天仍可能缺失（legacy session/send 只在带 modelSelection 时建 intent）。这条行过去
+  // 被读成 corrupt/attachments_unreadable → 永久不可提升、auto-drain 停在这一项。
+  // 这里用**真 store**（不是 stub）验证读法与 handler 的联合行为。
+  const store = new SqliteSessionStore({ dbPath: ":memory:" });
+  t.after(() => store.close());
+  await store.createSession({
+    id: SESSION_ID,
+    projectID: "proj-legacy-e2e",
+    slug: "legacy-e2e",
+    directory: "D:/tmp/legacy-e2e",
+    title: "legacy e2e",
+    version: "1.0.20",
+  });
+  const LEGACY_ID = "queue_legacy_no_intent";
+  const LEGACY_TEXT = "legacy 排队的原文本";
+  await store.saveSessionInput({
+    id: LEGACY_ID,
+    sessionID: SESSION_ID,
+    kind: "sendText",
+    delivery: "queue",
+    payload: { text: LEGACY_TEXT },
+  });
+
+  const authority = await store.getSessionInputForExecution({
+    id: LEGACY_ID,
+    sessionID: SESSION_ID,
+  });
+  assert.equal(authority.state, "pending", "legacy 形状必须可执行（mutation：读侧改回一律 corrupt 即红）");
+  assert.deepEqual(authority.attachments, [], "账本从未记录附件 → 唯一可读答案是无附件");
+
+  // 投影同事实：TurnSteerQueued 不带 intent → 队列项 attachments 也是 []。
+  const context = createContext();
+  await emitFact(context, SessionEventType.TurnSteerQueued, {
+    input: LEGACY_TEXT,
+    inputPreview: LEGACY_TEXT,
+    inputSize: LEGACY_TEXT.length,
+    pendingInputId: LEGACY_ID,
+    queueLength: 1,
+    targetTurnId: TURN_KEPT,
+  });
+  const head = queueState(context).items[0];
+  assert.equal(head.attachments?.length ?? 0, 0, "投影与账本一致：都没有附件事实");
+
+  const harness = promotionHarness(context, head, {
+    authority: (input) => store.getSessionInputForExecution(input),
+  });
+  await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
+  assert.equal(harness.calls.sendInput, 1, "legacy 行必须能提升（而不是硬失败留下死项）");
+  assert.equal(harness.captured.input.text, LEGACY_TEXT, "执行文本仍只来自账本");
+  assert.equal(harness.captured.options.intent.text, LEGACY_TEXT);
 });
 
 // ── I3 单一解析入口（Step 2 收口 / Step 13 补例） ────────────────────────────

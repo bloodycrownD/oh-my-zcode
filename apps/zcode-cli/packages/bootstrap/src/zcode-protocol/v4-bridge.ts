@@ -630,7 +630,10 @@ export function createConversationV4Gateway(
       context.v4Gateway?.hasQueueItemKind(sessionId, kind) ?? false,
     hasQueuedDelivery: (sessionId, delivery) =>
       context.v4Gateway?.hasQueuedDelivery(sessionId, delivery) ?? false,
-    getQueueLength: (sessionId) => context.v4Gateway?.getQueueLength(sessionId) ?? 0,
+    // 队列长度/暂停位都是投影事实；gateway 缺席时如实回「读不到」——回落 0/false
+    // 会让「删项后按空队列复位」在没有任何投影时凭空成立（cr-func P2）。
+    getQueueLength: (sessionId) => context.v4Gateway?.getQueueLength(sessionId),
+    getQueueAutoDrain: (sessionId) => context.v4Gateway?.getQueueAutoDrain(sessionId),
     waitForProjectionEventCommit: (sessionId, eventId, options) => {
       const gateway = context.v4Gateway;
       if (!gateway) {

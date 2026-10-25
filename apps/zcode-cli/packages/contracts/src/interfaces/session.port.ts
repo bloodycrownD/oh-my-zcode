@@ -275,6 +275,58 @@ export type TurnSteerSource = "plan_approval_feedback" | "workflow_refine_feedba
  */
 export type TurnSteerDeliveryMode = "guide" | "queue";
 
+/**
+ * 队列暂停位（`queueAutoDrain`）的**唯一派生规则**（spec edit-resend-stale-text；cr-func P2）。
+ *
+ * ============================================================================
+ * 规则
+ * ============================================================================
+ *
+ * 「暂停」只有一个含义：**队列里还有项，且用户/系统要求它们不要自动放行**。
+ * 所以暂停位不是一个可以随处独立写的 flag，而是两个事实的函数：
+ *
+ *   ① 队列是否为空（由事件投影裁决，不是「本次删了几条」推算）；
+ *   ② 是否有显式请求（用户点暂停/继续、stop 拦下后续项、auto-drain 失败停住、
+ *      手动「立即发送」=恢复）。
+ *
+ * 于是：`暂停 = (队列非空) && (显式请求 ?? 当前位)`。0 项时任何暂停都承载不了，
+ * 归一化为「放行」——这正是过去反复出现的「paused + 0 项」durable 残留：
+ * 它在下一次入队时把「用户没按暂停」的项判成 held，用户只能手动点继续。
+ *
+ * 读不到队列长度（宿主能力缺席/投影未就绪）→ 保持当前位：无法证明「空」时不得放行，
+ * 否则会在还有项时把存活项一起交给 auto-drain 抢跑。
+ *
+ * ============================================================================
+ * 为什么必须收敛成这一个函数（放在 contracts 而不是某一层内部）
+ * ============================================================================
+ *
+ * 这条规则以前被四处各自补：rewind 级联（core）、`deleteQueueItem`、
+ * `sendQueuedNow`、`setAutoDrain`（bootstrap）。每新增一条「把队列抽干」的路径就漏一处
+ * （delete 那处就是漏出来的），而每处的判据写法又略有差别（有的看本次删了几条、
+ * 有的看投影、有的无条件复位）。规则跨这两层使用，所以放在两边都依赖的 contracts，
+ * 而不是任一侧内部——否则必然出现第二份镜像。
+ */
+export function deriveQueueAutoDrain(input: {
+  /**
+   * 当前暂停位（core 的 runtime 门 / v4 投影的 `queue.autoDrain`，两者由
+   * `QueueAutoDrainChanged` 事件保持同一事实）。
+   */
+  current: boolean;
+  /**
+   * 队列长度；`undefined` = 读不到（能力缺席/投影未就绪），按「无法证明为空」处理。
+   * `0` = 明确为空（唯一会强制放行的取值）。
+   */
+  queueLength: number | undefined;
+  /** 显式请求；缺省 = 只做「空队列归一化」，不改变现值。 */
+  requested?: boolean;
+}): boolean {
+  // 空队列：暂停没有承载对象。这一步优先于显式请求——「paused + 0 项」本身就是要消灭的
+  // 残留位，用户此刻点暂停也无法让它有意义（下一轮结束后的新项仍会被判 held）。
+  if (input.queueLength === 0) return true;
+  if (input.requested !== undefined) return input.requested;
+  return input.current;
+}
+
 /** 协议无关的输入 intent metadata；bootstrap v4 在事件边界组装为 ConversationInputIntent。 */
 export interface TurnInputIntentMetadata {
   planEnabled?: boolean;

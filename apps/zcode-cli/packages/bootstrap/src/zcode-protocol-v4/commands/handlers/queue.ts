@@ -11,6 +11,7 @@ import type {
   QueueItem,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { TurnInputIntentMetadata } from "@zcode/contracts";
+import { deriveQueueAutoDrain } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
 import { inputIntentMetadataFromQueueItem } from "../input-intent.js";
 import { startPromptTurn } from "../prompt-turn.js";
@@ -185,21 +186,50 @@ async function deleteQueueItem(
   // 删空队列必须复位 autoDrain（与 Step 5 rewind 级联同一条铁律）：否则留下
   // 「paused + 0 项」的 durable 位——0 项时下一次发送确实仍 startNow（enqueue 分支要求
   // queueLength>0），但**下一轮结束后新入队的项**会被判成 held，用户没按暂停却不再自动放行。
-  //
-  // 三个约束缺一即错：
-  // 1. 只在**删除后投影队列为空**时复位（不是「删了几条」推算）——还剩 ≥1 项时复位会让
-  //    存活项被 auto-drain 抢跑；
-  // 2. 走权威路径 `app.setQueueAutoDrain(true)`（runtime 门 + QueueAutoDrainChanged 事件），
-  //    不得直写投影；
-  // 3. `getQueueLength` 缺席时读不到「空」，按非空处理（fail-safe：宁可保持 held，
-  //    也不能在还有项时无条件放行）。
-  const remaining = host.getQueueLength?.(record.app.sessionId);
-  if (remaining === 0) {
-    await record.app.setQueueAutoDrain(true);
-    // 不能只翻授权位：idle 暂停队列没有 active turn 可替它启动队首（同 setAutoDrain handler）。
-    await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
-  }
+  // 判据/写入口都是唯一派生的（cr-func P2）：本处只提供「删除后队列长度」这个事实，
+  // 是否复位、要不要发 resumed 广播由 `syncQueueAutoDrain` 一处决定。
+  await syncQueueAutoDrain(host, record, { reason: "queue_item_deleted" });
   return undefined;
+}
+
+/**
+ * 暂停位的唯一写入口（cr-func P2）：把「当前位 / 队列长度 / 显式请求」三个事实交给
+ * `deriveQueueAutoDrain`，只在目标位与现值不同时走权威路径 `app.setQueueAutoDrain`。
+ *
+ * 为什么写入口也收成一个：过去 `deleteQueueItem` / `setAutoDrain` / rewind 级联 /
+ * `sendQueuedNow` 各自判断「要不要复位」，判据略有差别（有的削 0、有的无条件、有的看
+ * 本次删了几条），每新增一条抽干队列的路径就漏一处。现在四处都只提供事实。
+ *
+ * fail-safe：
+ * - 长度读不到 → 保持现值（无法证明「空」，放行会让存活项抢跑）；
+ * - 当前位读不到、又只有结构事件（无显式请求）→ 不动：没有事实就不写；
+ * - 当前位读不到、但有显式请求（用户点了暂停/继续）→ 按请求写（显式意图不需要旧值）。
+ */
+async function syncQueueAutoDrain(
+  host: V4CommandCoreHost,
+  record: V4SessionRecordView,
+  options: { reason: string; requested?: boolean },
+): Promise<void> {
+  const sessionId = record.app.sessionId;
+  const queueLength = host.getQueueLength?.(sessionId);
+  const current = host.getQueueAutoDrain?.(sessionId);
+  if (current === undefined && options.requested === undefined) {
+    host.logger?.warn?.("v4 queue auto-drain left untouched: current bit unreadable", {
+      queueLength,
+      reason: options.reason,
+      sessionId,
+    });
+    return;
+  }
+  const target = deriveQueueAutoDrain({
+    current: current ?? true,
+    queueLength,
+    ...(options.requested !== undefined ? { requested: options.requested } : {}),
+  });
+  if (current === target) return;
+  await record.app.setQueueAutoDrain(target);
+  // 不能只翻授权位：idle 暂停队列没有 active turn 可替它启动队首（同 setAutoDrain handler）。
+  if (target) await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
 }
 
 async function editQueueItem(
@@ -243,12 +273,12 @@ async function setAutoDrain(
 ): Promise<CommandResult | undefined> {
   const payload = envelope.payload as CommandPayloadMap["setAutoDrain"];
   const record = requireRecord(host, envelope.sessionId);
-  await record.app.setQueueAutoDrain(payload.autoDrain);
-  if (payload.autoDrain) {
-    // 不能只翻授权位：idle 暂停队列没有 active turn 可替它启动队首。复用 CLI
-    // 权威 ready hook，busy 时只武装，idle 时立即按 sendQueuedNow 原子路径提升。
-    await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");
-  }
+  // 显式请求（用户点暂停/继续）走同一个派生函数：队列为空时「暂停」没有承载对象，
+  // 归一化为放行（不留下无法承载的 paused 位）；非空时按请求写入。
+  await syncQueueAutoDrain(host, record, {
+    reason: "user_set_auto_drain",
+    requested: payload.autoDrain,
+  });
   return undefined;
 }
 
@@ -475,9 +505,13 @@ async function sendQueuedNow(
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
     queueItemReserved = true;
+    // I1（cr-func P1-4）：goal 分支的 objective 与落库 `intent.text` 也从账本解析——
+    // 「不修 intent.text 会让冷恢复把旧文本带回 edit target」这条论证对 goal 一字不差；
+    // `/goal` 只是把 text 解析成 objective，解析源不能是投影。
+    // `displayText` 保持投影（纯展示：UI 要显示的正是用户当初那一行原文）。
     const objective =
       queueItem.kind === "sendGoalCommand"
-        ? parseGoalObjectiveFromCommandText(queueItem.text)
+        ? parseGoalObjectiveFromCommandText(authority.text)
         : undefined;
     if (queueItem.kind === "sendGoalCommand" && !objective) {
       throw new V4GoalRejectedError("emptyObjective", "Usage: /goal <objective>");
@@ -497,18 +531,15 @@ async function sendQueuedNow(
     ) {
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
-    // spec 4b 例外表：goal 分支的 objective 解析、intent.text 与 displayText 仍读投影项
-    // （本 spec 不动）。例外之外**执行内容**只来自账本 `authority`——见下方普通分支。
-    //
-    // F3：本分支**只消费账本的状态**（`resolveExecutionAuthority` 已保证 admitted），
-    // 正文按 4b 例外仍取投影。不要以为 `/goal` 的 objective 也走了账本：它没有。
+    // spec 4b 例外表（cr-func P1-4 后只剩一项）：goal 分支的 `displayText` 仍读投影
+    // （纯展示）。执行内容与落库 intent 一律取账本 `authority`——见下方两个分支。
     if (queueItem.kind === "sendGoalCommand") {
       const intent = applyPromotedModelSelection(
         record.app.runtime,
         queueItem,
         inputIntentMetadataFromQueueItem(
           queueItem,
-          objective ?? queueItem.text,
+          objective ?? authority.text,
           authority.attachments,
         ),
       );
@@ -565,10 +596,14 @@ async function sendQueuedNow(
     // omz 拍板（2026-10-23，bug B）：手动「立即发送」=恢复语义——本条提升后自动放行剩余
     // 队列（与「继续」按钮一致）。自动 drain 提升本身就在 autoDrain=true 下进行，无需重复。
     //
+    // 这是暂停位唯一派生规则（`deriveQueueAutoDrain`）的**显式 `requested: true` 分支**：
+    // 「立即发送」是用户的显式意图，结果恒为 true（队列空/非空都一样），所以这里不经过
+    // `syncQueueAutoDrain` 也不影响语义。保留字面调用是有意的——`test:held-queue-routing`
+    // 的 tripwire 钉住「手动提升成功后必须硬调用 setQueueAutoDrain(true)」（曾经被改成
+    // `?.(true)` 静默吞掉），不可为此改写调用形态。
+    //
     // `setQueueAutoDrain` 是 ZCodeApp 上 required 的成员（app/types.ts），
-    // session-flow / v4-bridge 也都是非可选调用；这里曾写成可选调用（`?.`）只为绕开
-    // 旧夹具缺失能力，结果 tripwire 长期红：能力真的缺席时恢复动作会被静默吞掉。
-    // 夹具已补桩（model-live / e2e-live-all / queue-item-delivery），恢复语义必须硬调用。
+    // session-flow / v4-bridge 也都是非可选调用。
     if (!autoDrainPromotion) {
       await record.app.setQueueAutoDrain(true);
       await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");

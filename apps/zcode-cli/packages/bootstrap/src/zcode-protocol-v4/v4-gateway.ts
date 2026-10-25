@@ -2625,6 +2625,14 @@ export class ConversationV4Gateway {
     return this.publishers.get(sessionId)?.getSnapshot().queue.items.length ?? 0;
   }
 
+  /**
+   * 队列暂停位（投影事实）。派生规则需要「当前位」这一输入：`deriveQueueAutoDrain`
+   * 只在目标位 ≠ 现值时才写，避免每次结构事件都追加一条同值 `QueueAutoDrainChanged`。
+   */
+  getQueueAutoDrain(sessionId: string): boolean {
+    return this.publishers.get(sessionId)?.getSnapshot().queue.autoDrain ?? true;
+  }
+
   /** Resident 回收保护：publisher queue 与 CommandInbox pinned facts 任一存在都不可关闭。 */
   hasResidencyBlockingCommands(sessionId: string): boolean {
     return this.getQueueLength(sessionId) > 0 || this.inbox.hasPinnedSessionState(sessionId);
