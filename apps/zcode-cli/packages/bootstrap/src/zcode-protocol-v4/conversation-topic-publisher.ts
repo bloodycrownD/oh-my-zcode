@@ -864,7 +864,18 @@ export class ConversationTopicPublisher {
    */
   rehydrate(
     events: readonly SessionEvent[],
-    options: { onPayloadTooLarge?: (error: ProjectionPayloadTooLargeError) => void } = {},
+    options: {
+      onPayloadTooLarge?: (error: ProjectionPayloadTooLargeError) => void;
+      /**
+       * 冷窗口的 rowId 起点（IS1，Step 6）：值取 `selectColdTailWindow(...).rowIdBase`。
+       *
+       * **必须走这里而不是 rehydrate 之后再 `seedRowIdOrigin`**：重放会把整份 projection
+       * 换成候选实例，播种只有在「建投影之后、首次 ingest 之前」才合法
+       * （`ProductProjection.seedRowIdOrigin` 在有行之后调用会直接抛错）。候选实例可能是
+       * 两个（批量化失败会重建一个 strict 候选），所以两处都要播。
+       */
+      rowIdOrigin?: number;
+    } = {},
   ): void {
     // 重物化会换掉整份投影行，旧的 manifest 基线随之失效（调用方 hydration 结束时会重新
     // 读一次清单再注入；不重新注入就回退到投影现算，绝不会拿旧基线冒充新事实）。
@@ -878,6 +889,9 @@ export class ConversationTopicPublisher {
       subscriberBufferMaxOps: this.subscriberBufferMaxOps,
       subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
     });
+    if (options.rowIdOrigin !== undefined) {
+      candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
+    }
     const usedBatchHydration = candidate.tryBatchHydration(events);
     if (!usedBatchHydration) {
       // 保守上界超限不代表权威 projection 一定超限；重新从空候选走原逐事件原子
@@ -888,6 +902,9 @@ export class ConversationTopicPublisher {
         subscriberBufferMaxOps: this.subscriberBufferMaxOps,
         subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
       });
+      if (options.rowIdOrigin !== undefined) {
+        candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
+      }
       for (const event of events) {
         try {
           candidate.ingest(event);

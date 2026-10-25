@@ -152,6 +152,7 @@ import {
 } from "./turn-manifest-entry.js";
 import {
   decideRowManifestAction,
+  type ColdTailWindowPlan,
   type SessionRowManifestReadOutcome,
   type SessionRowManifestReadRequest,
 } from "./session-row-manifest.js";
@@ -202,6 +203,13 @@ interface PersistedEventsLoadResult {
   sourceEventSeq?: number;
   /** 与本次历史事件使用同一容量的种子；null 表示已查询但没有历史水位。 */
   usageSeed?: SessionUsageSeed | null;
+  /**
+   * 本次冷开实际物化的**尾窗坐标**（Step 6 / IS2 / IS6）。给出时：
+   * `events` 只覆盖窗口内的整轮（`turnId` 起点由 `ordinal` 决定），投影必须用
+   * `rowIdBase` 播种 `rowIdOrigin`，manifest 回写必须从 `ordinal` 起编号且 `keptTurnIds`
+   * 取**整条分支**（`branchTurnIds`）。缺席 = 全量物化（旧行为）。
+   */
+  coldWindow?: ColdTailWindowPlan;
 }
 
 type V4GatewayErrorContext = Record<string, unknown>;
@@ -606,6 +614,28 @@ interface RowManifestOutcomeSummary {
   at: number;
 }
 
+/**
+ * 冷开尾窗的落点（Step 6 的可观测面）。
+ *
+ * 没有它，「窗口化没生效」与「清单与索引不同步」在现象上完全一样（都退化成全量）。
+ * 宿主侧 `coldWindowFallback.reason` 与这里的 `applied` 一起构成三段式读法：
+ *   - 宿主给了窗口 + applied:true → 窗口真的物化了；
+ *   - 宿主没给窗口（见 `zcode_protocol.v4.cold_window_fallback` 的 reason）→ 没生效，
+ *     其中 `limitBeforeMissed` 就是**清单与索引不同步**（清单指向的窗口首条消息不在 active 序）；
+ *   - 宿主给了窗口但读清单二次判定降级（`fallbackReason`）→ 本次冷开沿用物化前的事实。
+ */
+interface ColdWindowOutcomeSummary {
+  ordinal: number;
+  rowIdBase: number;
+  rowCount: number;
+  turnCount: number;
+  limitBefore: string | null;
+  applied: boolean;
+  /** 窗口化路径上的清单二次判定降级（永不重建；沿用物化前的事实）。 */
+  fallbackReason?: string;
+  at: number;
+}
+
 function encodeReservedTopicFrame(
   reservation: TopicFrameReservation<RoutedTopicFrame>,
 ): RoutedTopicWireFrame[] {
@@ -725,6 +755,8 @@ export class ConversationV4Gateway {
    * 区分只体现在 `reason` / `detail` 上，动作完全一致（全量物化 + 重建 manifest）。
    */
   private readonly rowManifestOutcomes = new Map<string, RowManifestOutcomeSummary>();
+  /** 冷开尾窗的落点（Step 6）：一次冷开一条，`applied` 与降级原因一起进诊断。 */
+  private readonly coldWindowOutcomes = new Map<string, ColdWindowOutcomeSummary>();
   /**
    * 本进程内观测到的 runtime 激活耗时（毫秒）。
    *
@@ -1261,6 +1293,7 @@ export class ConversationV4Gateway {
     sessionId: string,
     publisher: ConversationTopicPublisher,
     phases: HydrationPhases,
+    coldWindow?: ColdTailWindowPlan,
   ): Promise<void> {
     const read = this.host.readRowManifest;
     if (!read) return;
@@ -1272,7 +1305,9 @@ export class ConversationV4Gateway {
         expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
         observedTurnIds: branch.turnIds,
         observedRowCounts: publisher.getTurnRowCounts(),
-        fullyMaterialized: true,
+        // 窗口化物化：投影只覆盖 active 分支的后缀，**反向** turn 集合校验必须关掉
+        // （「manifest 比窗口长」是合法状态），否则每一页都会被判成 inconsistent。
+        fullyMaterialized: coldWindow === undefined,
       });
       const action = decideRowManifestAction(outcome);
       if (outcome.kind === "manifest") {
@@ -1304,6 +1339,27 @@ export class ConversationV4Gateway {
         `v4 row manifest fallback session=${sessionId} reason=${outcome.reason} ` +
           `turns=${branch.turnIds.length}`,
       );
+      if (coldWindow !== undefined) {
+        // **窗口化路径永不重建**：投影只有尾部若干轮，拿它回写会把头部真实轮次的行数写成
+        // 0（ordinalBase + 剪枝只能「保留已知的」，不能「补出没物化的」）。
+        // 清单在物化前已通过 `decideRowManifestAction` 判为可用，这里的不一致只可能来自
+        // 两读之间发生的 live 写入 / 冷热 turn 身份分歧——本次冷开沿用物化前读到的事实
+        // （它们才是与这批 events 同一时刻的快照），下一次冷开会重新判定。
+        publisher.seedRowManifestFacts(coldWindow.facts);
+        const previous = this.coldWindowOutcomes.get(sessionId);
+        if (previous) {
+          this.coldWindowOutcomes.set(sessionId, {
+            ...previous,
+            fallbackReason: outcome.reason,
+            at: Date.now(),
+          });
+        }
+        this.host.onDebug?.(
+          `v4 row manifest windowed fallback session=${sessionId} reason=${outcome.reason} ` +
+            `ordinal=${coldWindow.ordinal}`,
+        );
+        return;
+      }
       // missing = 该代次本来就没有行，没有可剪的尾部；schemaMismatch / inconsistent 的残留
       // 行必须剪掉，否则读端会一直看到「清单比投影长」而反复降级。
       this.rebuildRowManifestFromProjection(sessionId, publisher, {
@@ -1318,6 +1374,10 @@ export class ConversationV4Gateway {
         at: Date.now(),
       });
       this.host.onError?.("v4.rowManifest.read", error, { phase: "read", sessionId });
+      if (coldWindow !== undefined) {
+        publisher.seedRowManifestFacts(coldWindow.facts);
+        return;
+      }
       // 读失败时 store 状态未知，不做剪枝（剪枝是一次删除，宁可少做）。
       this.rebuildRowManifestFromProjection(sessionId, publisher);
     } finally {
@@ -1337,15 +1397,25 @@ export class ConversationV4Gateway {
    *
    * `ordinalBase` 是这条路径唯一的危险参数：仓储的 `insertTurnRow` 会把「同一 ordinal 上的
    * 另一个 turn」当成被 rewind 截掉的残留逐出。全量物化从 0 起；**窗口化物化必须从
-   * manifest 已有的 turn 数起**（Step 5），并且届时的 `keptTurnIds` 必须是整条分支，
+   * manifest 已有的 turn 数起**（Step 6 的 `coldWindow.ordinal`），并且届时的
+   * `keptTurnIds` 必须是**整条分支**（`coldWindow.branchTurnIds`，manifest 的 turn 序），
    * 否则剪枝会把没物化的头部真实轮次删掉。
+   *
+   * 现状是窗口化路径**不重建**（投影只有尾部，回写会把头部轮次的行数写成 0），所以这两条
+   * 参数只在「将来放开窗口化重建」时才用得上：`keptTurnIds` 缺省取投影的整条分支序，
+   * 那只在全量物化时才是「整条」。
    *
    * 写入链是 detached 的：失败只打点——清单缺失的后果是下次冷开再降级一次，不是数据错误。
    */
   private rebuildRowManifestFromProjection(
     sessionId: string,
     publisher: ConversationTopicPublisher,
-    options: { ordinalBase?: number; prune?: boolean } = {},
+    options: {
+      ordinalBase?: number;
+      prune?: boolean;
+      /** 剪枝保留的 turn 序：全量物化 = 投影 active 序；窗口化必须传 manifest 整条分支。 */
+      keptTurnIds?: readonly string[];
+    } = {},
   ): void {
     const record = this.host.recordTurnManifest;
     if (!record) return;
@@ -1376,7 +1446,7 @@ export class ConversationV4Gateway {
         rewrite(sessionId, {
           branchGeneration: branch.branchGeneration,
           sourceGeneration: branch.branchGeneration,
-          keptTurnIds: branch.turnIds,
+          keptTurnIds: options.keptTurnIds ?? branch.turnIds,
         }),
       ).catch((error: unknown) => {
         this.host.onError?.("v4.turnManifest.rewind", error, { phase: "rebuild-prune", sessionId });
@@ -3256,6 +3326,7 @@ export class ConversationV4Gateway {
     this.hydrationBuffers.clear();
     this.lastHydrationPhases.clear();
     this.rowManifestOutcomes.clear();
+    this.coldWindowOutcomes.clear();
     this.runtimeActivationMs.clear();
     this.hydrationInFlight.clear();
     this.readyFlights.clear();
@@ -3299,6 +3370,11 @@ export class ConversationV4Gateway {
    */
   getRowManifestOutcome(sessionId: string): RowManifestOutcomeSummary | null {
     return this.rowManifestOutcomes.get(sessionId) ?? null;
+  }
+
+  /** 测试探针 / 诊断：某会话最近一次冷开的尾窗落点（缺席 = 从没窗口化过）。 */
+  getColdWindowOutcome(sessionId: string): ColdWindowOutcomeSummary | null {
+    return this.coldWindowOutcomes.get(sessionId) ?? null;
   }
 
   private ensurePublisher(sessionId: string): ConversationTopicPublisher {
@@ -3448,6 +3524,10 @@ export class ConversationV4Gateway {
       : { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
     // 持久事件合并 / transcript 合成 → openPhases.mergeMs。
     phases.mergeMs = Math.max(0, Math.round(performance.now() - mergeStartedAt));
+    // 尾窗坐标（Step 6）：宿主声明「本次 events 只覆盖窗口内的整轮」时才存在。
+    // 全量物化时缺席，后面三步（rowIdOrigin / fullyMaterialized / ordinalBase）全部沿用旧语义。
+    // 落点等「确实重物化了」再记（下面的早退分支会保留既有 live publisher，窗口并未生效）。
+    const coldWindow = loaded.coldWindow;
 
     this.host.onDebug?.(
       `v4 hydrate loaded session=${sessionId} events=${loaded.events.length} ` +
@@ -3506,6 +3586,18 @@ export class ConversationV4Gateway {
       ),
     );
     const rehydrateStartedAt = performance.now();
+    if (coldWindow !== undefined) {
+      // 到这里才是真的用窗口重物化了（早退分支保留 live publisher，不消费 events）。
+      this.coldWindowOutcomes.set(sessionId, {
+        ordinal: coldWindow.ordinal,
+        rowIdBase: coldWindow.rowIdBase,
+        rowCount: coldWindow.rowCount,
+        turnCount: coldWindow.turnCount,
+        limitBefore: coldWindow.limitBefore === null ? null : String(coldWindow.limitBefore),
+        applied: true,
+        at: Date.now(),
+      });
+    }
     publisher.rehydrate(loaded.events, {
       // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
       // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
@@ -3515,6 +3607,10 @@ export class ConversationV4Gateway {
           phase: "publisher.rehydrate",
           sessionId,
         }),
+      // 冷窗口的 rowId 起点（IS1）：全量物化恒为 1（不出现在这里）。
+      // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
+      // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
+      ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
     });
     // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
     phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));
@@ -3622,7 +3718,9 @@ export class ConversationV4Gateway {
     // IS5 读路径：全量物化已经完成，此时才能拿投影的 turn 序与行数去核对 manifest。
     // 放在 seeds 之后、`hydratedSessions.add` 之前：ACK 的 snapshot 编码必须已经能看到
     // 注入的 manifest 事实（否则首帧的 totalCount 会先按投影现算一次，再被下一帧改掉）。
-    await this.hydrateRowManifest(sessionId, publisher, phases);
+    // loadPersistedEvents 的产出里可能带**尾窗坐标**（Step 6）：此时投影只物化了窗口，
+    // 声明 `fullyMaterialized:false`，且回写必须从窗口 ordinal 起编号、按整条分支剪枝。
+    await this.hydrateRowManifest(sessionId, publisher, phases, loaded.coldWindow);
     for (const [routeKey, state] of this.flushStates) {
       if (state.sessionId !== sessionId) continue;
       if (!publisher.hasSubscription(state.subscriptionId, state.connectionId)) continue;

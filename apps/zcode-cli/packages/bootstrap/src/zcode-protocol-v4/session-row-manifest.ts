@@ -1,5 +1,7 @@
 import type {
+  ActiveConversationBranchRewind,
   MessageId,
+  MessageWithParts,
   SessionId,
   SessionMessageIndexEntry,
   SessionStorePort,
@@ -9,6 +11,7 @@ import type {
   TurnManifestSnapshot,
   TurnManifestTurnRecord,
 } from "@zcode/contracts";
+import { selectActiveConversationBranchIds } from "@zcode/contracts";
 import { PROTOCOL_V4_LIMITS, type TurnDirectoryEntry } from "@zcode/shared/zcode-protocol-v4";
 import {
   createSessionMessageIndexCache,
@@ -239,6 +242,12 @@ export type SessionRowManifestReadOutcome =
   | {
       kind: "manifest";
       facts: SessionRowManifestFacts;
+      /**
+       * 原始快照（账目修正后的）。`facts` 是给客户端/投影用的四个量与 base，**窗口选择**
+       * 还要 per-turn 的 `rowCount` / `messageIds`（`selectColdTailWindow` 的输入），
+       * 所以两份都带出来——重新读一遍 store 是第二次实现，迟早与 facts 分叉。
+       */
+      snapshot: TurnManifestSnapshot;
       /** 本次读做过账目修正（就地改 row_count，不重读正文）。 */
       manifestAdjusted: boolean;
       adjustedTurnIds: string[];
@@ -299,6 +308,13 @@ export interface SessionRowManifestReader {
     sessionID: SessionId,
     request: SessionRowManifestReadRequest,
   ): Promise<SessionRowManifestReadOutcome>;
+  /**
+   * 该会话的全序消息索引（与 `read` 共用同一份缓存）。
+   *
+   * 冷窗口的裁断与尾窗读都要全序 id 序，而 `read` 内部已经把索引读过一遍——这里必须
+   * 复用那份缓存，否则一次冷开会把 O(messages) 的索引读付两次。`null` = 端口缺席。
+   */
+  readMessageIndex(sessionID: SessionId): Promise<readonly SessionMessageIndexEntry[] | null>;
   /** 失效该会话的消息索引缓存（live ingest / rewind）。 */
   invalidateMessageIndex(sessionID: SessionId): void;
   dispose(): void;
@@ -349,6 +365,7 @@ export function createSessionRowManifestReader(input: {
       return {
         kind: "manifest",
         facts: deriveSessionRowManifestFacts(second.snapshot),
+        snapshot: second.snapshot,
         manifestAdjusted: second.snapshot.manifestAdjusted,
         adjustedTurnIds: second.snapshot.adjustedTurnIds,
         messageIndexChecked: indexEntries !== null,
@@ -379,6 +396,11 @@ export function createSessionRowManifestReader(input: {
 
   return {
     read,
+    readMessageIndex(sessionID) {
+      const store = input.store();
+      if (!store?.listSessionMessageIndex) return Promise.resolve(null);
+      return readIndexForCheck(store, sessionID);
+    },
     invalidateMessageIndex(sessionID) {
       indexCache.invalidate(sessionID);
     },
@@ -452,4 +474,194 @@ function toFallback(
     }
   }
   return null;
+}
+
+// ── 冷开尾窗的**唯一**物化计划（Step 6 接线）────────────────────────────────
+
+/**
+ * 尾窗物化降级到全量的原因。**每一种都必须打点**（gateway / bridge 各有一条日志）：
+ * 静默退全量在现象上等于「窗口化没生效」，与「清单与索引不同步」完全无法区分。
+ */
+export type ColdTailWindowFallbackReason =
+  | RowManifestFallbackReason
+  | "emptyBranch"
+  | "noIndexPort"
+  | "indexReadFailed"
+  | "noTailPort"
+  | "noWindowCursor"
+  | "limitBeforeMissed"
+  | "emptyTail"
+  | "sharedContextImport";
+
+/**
+ * 窗口坐标（**不含正文**）：冷开后面几步要用的身份一次给全，避免各自再读一遍清单。
+ * gateway 只吃这一份：`rowIdBase` → `seedRowIdOrigin`、`ordinal` → `initialTurnNumber` 与
+ * 降级回写的 `ordinalBase`、`branchTurnIds` → 剪枝的 `keptTurnIds`。
+ */
+export interface ColdTailWindowPlan {
+  ordinal: number;
+  rowIdBase: number;
+  turnCount: number;
+  rowCount: number;
+  limitBefore: MessageId | null;
+  /**
+   * **整条** active 分支的 turn 序（不是窗口）。降级回写的 `keptTurnIds` 必须用它：
+   * 窗口投影的 `activeTurnIds` 只含窗口内 turn，拿它剪枝会把没物化的头部真实轮次删掉。
+   */
+  branchTurnIds: string[];
+  /** 全序 active message id：`buildColdFileChangeSummaries` 仍要按整条分支过滤。 */
+  activeMessageIds: MessageId[];
+  /**
+   * 窗口内的 messageId（清单口径）。用于过滤**锚在窗口外**的 goal verification 事实：
+   * 合成器对「anchor 找不到」的 entry 会落到时间线末尾，那会给窗口凭空加行。
+   */
+  windowMessageIds: MessageId[];
+  /** manifest 快照的四个量与 base → publisher facts 的唯一来源。 */
+  facts: SessionRowManifestFacts;
+  manifestAdjusted: boolean;
+  messageIndexChecked: boolean;
+  /**
+   * 合成器的非零起点上下文（RC4）：`baseTimestampMs` 取**整条分支**首条消息时间；
+   * 窗口前一轮的首条 messageId 用于 `initialModelKey`（窗口即整条分支时缺席）。
+   */
+  precedingTurnFirstMessageId: MessageId | null;
+  baseTimestampMs?: number;
+}
+
+/** 窗口物化的完整产出 = 坐标 + 窗口正文（正文只含窗口内的 message + part）。 */
+export interface ColdTailWindowMaterialization extends ColdTailWindowPlan {
+  messages: MessageWithParts[];
+}
+
+export type ColdTailWindowReadResult =
+  | ({ kind: "window" } & ColdTailWindowMaterialization)
+  | { kind: "full"; reason: ColdTailWindowFallbackReason; detail?: string };
+
+/**
+ * 冷开尾窗的读计划（Step 6 / IS2 / IS6）——**冷开正文读只经这一个入口**。
+ *
+ * 顺序是有意的：
+ *   1. 先读 manifest（两趟 + 索引交叉验证，全部走 `reader`，索引缓存跨步复用）；
+ *   2. `decideRowManifestAction` 不是 `use-manifest` → 直接全量物化（清单不可信时
+ *      `selectColdTailWindow` 的 `ordinal` 会给出错的 `initialTurnNumber`）；
+ *   3. 只信 `use-manifest` 之后才选窗口，然后按**全序** active id 序读窗口正文。
+ *
+ * 任何一步不成立都返回 `kind:"full"` 并带上原因——**宁可慢，不可少读**：窗口是一份
+ * 视图，缺口会表现为「首屏少了几轮」，而全量物化永远是对的。
+ *
+ * `limitBefore` 找不到（清单与索引不同步）必须单独成一个原因：那时实际读到的是整条
+ * 分支，若仍按窗口播种 `rowIdOrigin` / `initialTurnNumber`，rowId 会整体平移。
+ */
+export async function readColdTailWindowMaterialization(input: {
+  sessionID: SessionId;
+  store: SessionStorePort | undefined;
+  reader: SessionRowManifestReader;
+  branchGeneration: number;
+  expectedProjectionSchemaVersion: number;
+  /** `session.revert` 的四个裁断字段（与全量路径同一份规则，见 `selectActiveConversationBranchIds`）。 */
+  rewind?: ActiveConversationBranchRewind;
+  /**
+   * runtime resume 已经拿到的全量正文（`persistedMessages`）。给出时**不读 store**，
+   * 只在内存里按下界切片：同一份窗口、零 IO（resume 已经把正文读进内存，再读一次 DB
+   * 是纯浪费；而窗口本身仍然省掉整条分支的合成与投影）。
+   */
+  loadedMessages?: readonly MessageWithParts[];
+}): Promise<ColdTailWindowReadResult> {
+  const store = input.store;
+  if (!store) return { kind: "full", reason: "portAbsent" };
+  if (!store.listSessionMessageIndex) return { kind: "full", reason: "noIndexPort" };
+  // 内存正文路径不需要尾窗读端口；只有真要读 DB 时才要求它。
+  if (!store.readActiveBranchTail && !input.loadedMessages) {
+    return { kind: "full", reason: "noTailPort" };
+  }
+
+  const outcome = await input.reader.read(input.sessionID, {
+    branchGeneration: input.branchGeneration,
+    expectedProjectionSchemaVersion: input.expectedProjectionSchemaVersion,
+  });
+  if (decideRowManifestAction(outcome) !== "use-manifest" || outcome.kind !== "manifest") {
+    return {
+      kind: "full",
+      reason: outcome.kind === "fallback" ? outcome.reason : "readFailed",
+      ...(outcome.kind === "fallback" && outcome.detail?.message !== undefined
+        ? { detail: outcome.detail.message }
+        : {}),
+    };
+  }
+
+  const window = selectColdTailWindow(outcome.snapshot);
+  // 空 active 分支：全量物化本来就是一次空读（`totalCount=0 / firstRowId=null` 由 facts 表达）。
+  if (!window) return { kind: "full", reason: "emptyBranch" };
+
+  const indexEntries = await input.reader.readMessageIndex(input.sessionID);
+  if (indexEntries === null) return { kind: "full", reason: "indexReadFailed" };
+  const orderedMessageIds = indexEntries.map((entry) => String(entry.id));
+  // 裁断只吃 id 序（IS2）：窗口绝不能进这里，否则 rewind 的 target/cut 落在窗口外时
+  // 会原样返回窗口（复活旧分支）或整段清空。
+  const activeMessageIds = selectActiveConversationBranchIds(
+    orderedMessageIds,
+    input.rewind ?? {},
+  ) as MessageId[];
+
+  const limitBefore = window.limitBefore;
+  if (limitBefore === null) return { kind: "full", reason: "noWindowCursor" };
+  if (!activeMessageIds.includes(limitBefore)) {
+    // 清单指向的窗口首条消息不在 active 序里 = 清单与索引不同步。此时读全文是对的，
+    // 但**必须**让调用方看见——否则这一项会永远静默地退化成全量。
+    return { kind: "full", reason: "limitBeforeMissed", detail: String(limitBefore) };
+  }
+
+  const messages = await readWindowBody(input, store, activeMessageIds, limitBefore);
+  if (messages === null)
+    return { kind: "full", reason: "limitBeforeMissed", detail: String(limitBefore) };
+  if (messages.length === 0) return { kind: "full", reason: "emptyTail" };
+
+  const precedingTurn = window.ordinal > 0 ? outcome.snapshot.turns[window.ordinal - 1] : undefined;
+  const baseTimestampMs = indexEntries.find(
+    (entry) => String(entry.id) === activeMessageIds[0],
+  )?.timeCreated;
+
+  return {
+    kind: "window",
+    ordinal: window.ordinal,
+    rowIdBase: window.rowIdBase,
+    turnCount: window.turnCount,
+    rowCount: window.rowCount,
+    limitBefore,
+    branchTurnIds: outcome.snapshot.turns.map((turn) => turn.turnId),
+    activeMessageIds,
+    windowMessageIds: [...window.messageIds],
+    facts: outcome.facts,
+    manifestAdjusted: outcome.manifestAdjusted,
+    messageIndexChecked: outcome.messageIndexChecked,
+    precedingTurnFirstMessageId: (precedingTurn?.messageIds[0] ?? null) as MessageId | null,
+    ...(baseTimestampMs === undefined ? {} : { baseTimestampMs }),
+    messages,
+  };
+}
+
+/**
+ * 窗口正文：内存里有（resume 的 `persistedMessages`）就按游标切片，否则走
+ * `readActiveBranchTail`（**冷开唯一的正文读入口**，`messages()` 全量读不再参与）。
+ *
+ * 返回 null = 内存正文里找不到游标（与 DB 路径的 `limitBeforeMissed` 同义：不同步，退全量）。
+ */
+async function readWindowBody(
+  input: {
+    sessionID: SessionId;
+    loadedMessages?: readonly MessageWithParts[];
+  },
+  store: SessionStorePort,
+  activeMessageIds: readonly MessageId[],
+  limitBefore: MessageId,
+): Promise<MessageWithParts[] | null> {
+  const loaded = input.loadedMessages;
+  if (loaded) {
+    const start = loaded.findIndex((message) => String(message.info.id) === String(limitBefore));
+    return start < 0 ? null : loaded.slice(start);
+  }
+  // 端口缺席已在入口判过（`noTailPort`），这里的断言只是让类型收窄。
+  const readTail = store.readActiveBranchTail;
+  if (!readTail) return null;
+  return readTail({ sessionID: input.sessionID, activeMessageIds, limitBefore });
 }

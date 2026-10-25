@@ -468,6 +468,22 @@ export class ProductProjection {
   /** turn 起始时求出的 rowId base（IS1：求值一次，此后不再漂移）。 */
   private turnRowIdBaseById = new Map<string, number>();
   /**
+   * 每个 turn **在整份行窗口里的行数**（= manifest 的 `row_count`，含迟到行）。
+   *
+   * 旧实现按「连续块」计数：锚在历史轮的迟到行（goal verification 等）物理追加在尾部、
+   * 不属于任何连续块，于是 `Σ row_count < 行数`。manifest 的 `totalCount` 与 rowId base
+   * 都由这份累加得出，少了 N 行会让冷窗口的 `rowIdOrigin` 整体前移 N（全量物化用紧凑
+   * 游标），窗口内 rowId 与全量物化对不齐——IS1 直接破。
+   *
+   * 修法取「迟到行按 `turnId` 归户」：把该轮散落在窗口各处的行都算进它自己的 `row_count`，
+   * 于是 `Σ row_count == rows.length` 恒成立，且**与 cold 口径一致**（cold 合成器把
+   * goal verification 放在它锚定的那一轮里，本来就是一个整块）。反过来若把迟到行记进
+   * 「物理末块」，live 与 cold 的行数分布就永久不同，账目修正会每次冷开都跑一遍。
+   *
+   * 必须随 clone/adopt 搬运（漏搬 = 行数与 base 静默漂移）。
+   */
+  private turnRowCountById = new Map<string, number>();
+  /**
    * 当前 active 分支代次（与 `SessionRevert.branchGeneration` 同源）。
    * manifest 按它键控：每次 destructive conversation rewind +1，rewind 时把保留前缀复制到
    * 新代次。这里保存是必需的——`onRewindTriggered` 过去只读事件载荷、从不留状态，
@@ -890,11 +906,11 @@ export class ProductProjection {
     return entries;
   }
 
-  /** 每个 active turn 的连续块行数（账目修正的 `observedRowCounts` 输入）。 */
+  /** 每个 active turn 的行数（账目修正的 `observedRowCounts` 输入；口径同 `row_count`）。 */
   getTurnRowCounts(): Map<string, number> {
     const counts = new Map<string, number>();
-    for (const [ordinal, turnId] of this.activeTurnIds.entries()) {
-      counts.set(turnId, this.turnBlockRowCount(ordinal));
+    for (const turnId of this.activeTurnIds) {
+      counts.set(turnId, this.turnRowCount(turnId));
     }
     return counts;
   }
@@ -914,14 +930,23 @@ export class ProductProjection {
     if (ordinal < 0) return null;
     const firstIndex = this.turnFirstRowIndexById.get(turnId);
     if (firstIndex === undefined) return null;
-    // 只取**连续块**：迟到行落在后面的位置时，它们不属于这一轮的定稿行数（旧实现同样
-    // 在遇到第一个别的 turn 时停止），否则 row_count 会把别人的行算进来。
+    // 行集合 = 本 turn 的**全部**行：先取连续块（绝大多数情况只有这一块），再补该轮散落
+    // 在窗口后段的迟到行（goal verification 等锚在历史轮的迟到行物理落在尾部）。
+    // 只数连续块会让 `Σ row_count < rows.length`，冷窗口的 rowIdOrigin 因此整体前移。
     const rows = this.snapshot.rows.window;
     const turnRows: ConversationRow[] = [];
     for (let index = firstIndex; index < rows.length; index += 1) {
       const row = rows[index]!;
       if (row.turnId !== turnId) break;
       turnRows.push(row);
+    }
+    if (turnRows.length < this.turnRowCount(turnId)) {
+      // 有迟到行：只有这种轮才付一次 O(rows) 扫描（正常轮的行数等于块长，直接跳过）。
+      for (let index = firstIndex + turnRows.length; index < rows.length; index += 1) {
+        const row = rows[index]!;
+        if (row.turnId !== turnId) continue;
+        turnRows.push(row);
+      }
     }
     if (turnRows.length === 0) return null;
     return buildTurnManifestEntry({
@@ -1293,6 +1318,9 @@ export class ProductProjection {
     clone.activeTurnIds = [...this.activeTurnIds];
     clone.turnFirstRowIndexById = new Map(this.turnFirstRowIndexById);
     clone.turnRowIdBaseById = new Map(this.turnRowIdBaseById);
+    // 每轮行数（含迟到行归户）同样是 clone/adopt 的搬运项：漏搬会让候选实例从「零行」
+    // 重算 base 与 manifest row_count，adopt 后整条分支的计数静默归零。
+    clone.turnRowCountById = new Map(this.turnRowCountById);
     // 分支代次同样要随 clone/adopt 走：ingest 的原子提交路径在候选实例上归约，
     // 漏拷这一项会让 rewind 的 +1 在 adopt 后静默丢失（manifest 键控到旧代次）。
     clone.branchGeneration = this.branchGeneration;
@@ -1360,6 +1388,7 @@ export class ProductProjection {
     this.activeTurnIds = candidate.activeTurnIds;
     this.turnFirstRowIndexById = candidate.turnFirstRowIndexById;
     this.turnRowIdBaseById = candidate.turnRowIdBaseById;
+    this.turnRowCountById = candidate.turnRowCountById;
     this.branchGeneration = candidate.branchGeneration;
     this.streamingTextRowId = candidate.streamingTextRowId;
     this.streamingReasoningRowId = candidate.streamingReasoningRowId;
@@ -5324,11 +5353,16 @@ export class ProductProjection {
 
   /**
    * 一个 turn 的 rowId base（IS1，唯一实现 `deriveTurnRowIdBase`）：
-   * `origin + Σ 本 turn 之前各 active turn 的连续块行数`。
+   * `origin + Σ 本 turn 之前各 active turn 的行数`（行数 = manifest `row_count` 口径，
+   * 迟到行按 `turnId` 归户，见 `turnRowCount`）。
    *
    * 求值点是 **turn 起始**（第一次给该 turn 分配行时），结果按 turn 缓存——同一轮中途
    * 再多一行不得重算 base，否则前面已发出的 rowId 会被「推断」成另一个值；而每行都重算
    * O(turns) 的求和会把冷恢复退化成 O(turns × rows)。
+   *
+   * 新 turn 的 base 恒等于紧凑游标（`Σ 全部 active turn 的行数 == rows.length`），所以
+   * 分配与 base 同源；已在跑的轮若之后收到迟到行，它的缓存 base 仍是「当时被分配到的
+   * 真实位置」——那份行 id 已经发给客户端，不能再改（append-only 的固有限制，见 E2）。
    */
   private turnRowIdBase(turnId: string): number {
     const cached = this.turnRowIdBaseById.get(turnId);
@@ -5338,32 +5372,31 @@ export class ProductProjection {
     const ordinal = found < 0 ? this.activeTurnIds.length : found;
     const priorRowCounts: number[] = [];
     for (let index = 0; index < ordinal; index += 1) {
-      priorRowCounts.push(this.turnBlockRowCount(index));
+      priorRowCounts.push(this.turnRowCount(this.activeTurnIds[index]!));
     }
     const base = deriveTurnRowIdBase(priorRowCounts, this.rowIdOrigin);
     this.turnRowIdBaseById.set(turnId, base);
     return base;
   }
 
-  /** 第 `ordinal` 个 active turn 的**连续块**行数（与 manifest row_count 同口径）。 */
-  private turnBlockRowCount(ordinal: number): number {
-    const turnId = this.activeTurnIds[ordinal];
-    if (turnId === undefined) return 0;
-    const start = this.turnFirstRowIndexById.get(turnId);
-    if (start === undefined) return 0;
-    const rows = this.snapshot.rows.window;
-    let end = start;
-    while (end < rows.length && rows[end]!.turnId === turnId) end += 1;
-    return end - start;
+  /**
+   * 该 turn 在整份行窗口里的行数（manifest `row_count` 的唯一口径）。
+   *
+   * 迟到行按 `turnId` 归户，因此 `Σ turnRowCount(activeTurnIds) === rows.length` 恒成立
+   * ——正是「manifest 的 totalCount 与紧凑 rowId 游标同源」的前提（见 `rowBase`）。
+   */
+  private turnRowCount(turnId: string): number {
+    return this.turnRowCountById.get(turnId) ?? 0;
   }
 
   private rowBase(event: SessionEvent, turnId: string, entityId = String(event.id)) {
     // 分配**只用**紧凑游标：`nextRowId === rowIdOrigin + window.length` 恒成立（行只追加、
     // 截断后回退），而 turn 起始处游标恰好等于 `deriveTurnRowIdBase(前序 row_count, origin)`
-    // ——manifest 口径就是它的前缀和声明，两条路径逐值一致由 A3 用例锁住。
+    // ——manifest 口径就是它的前缀和声明（迟到行归户后 `Σ row_count === window.length`，
+    // 所以「新 turn 的 base == 游标」仍然逐值成立），由 A3/E2 用例锁住。
     // 因此「跨 turn 永不回退的全局自增」已经不存在：rewind 后游标回到 compact 位置，
     // 被截 turn 的 id 被新 turn 复用，不再产生空洞（E1 用例锁住）。
-    // base 本身按同一份行结构派生（`getTurnManifestRowIdBase`），是 Step 5 用 manifest 给
+    // base 本身按同一份行结构派生（`getTurnManifestRowIdBase`），是 Step 6 用 manifest 给
     // 冷窗口首轮播种时唯一的换算依据。
     const rowId = this.nextRowId;
     this.nextRowId = rowId + 1;
@@ -5441,6 +5474,7 @@ export class ProductProjection {
   }
 
   private noteAppendedRowTurn(turnId: string, index: number): void {
+    this.turnRowCountById.set(turnId, this.turnRowCount(turnId) + 1);
     if (this.turnFirstRowIndexById.has(turnId)) return;
     this.turnFirstRowIndexById.set(turnId, index);
     this.activeTurnIds.push(turnId);
@@ -5451,6 +5485,7 @@ export class ProductProjection {
     this.turnFirstRowIndexById = new Map();
     // base / 分配计数都按行结构求值，截断后可能落在别的块上——整份丢掉让它们下次按新结构重算。
     this.turnRowIdBaseById = new Map();
+    this.turnRowCountById = new Map();
     this.snapshot.rows.window.forEach((row, index) => {
       this.noteAppendedRowTurn(row.turnId, index);
     });

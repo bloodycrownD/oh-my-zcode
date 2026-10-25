@@ -30,8 +30,14 @@ import type {
  * v2（Step 4）：废除跨 turn 的全局 `nextRowId++`，rowId base 改为「前序 active turn 的
  * row_count 累加」（rewind 后复用被截轮的 base、不再产生空洞）。v1 清单里的
  * `query_row_id` 是按带空洞的旧口径写的，继续用会让目录游标指向错误位置——必须整表重建。
+ *
+ * v3（Step 6）：`row_count` 改为「该轮在整份行窗口里的行数」，迟到行（锚在历史轮的 goal
+ * verification 等，物理落在尾部）按 `turnId` 归户计入。v2 清单只数连续块，`Σ row_count`
+ * 比投影实际行数少 N，冷窗口按这份累加做 rowIdOrigin 会让窗口内 rowId 整体前移 N——只能
+ * 整表重建，不能用账目修正补（修正只改已登记 turn 的计数，而 v2 的偏差恰恰是「迟到的
+ * 那几行没有任何 turn 认领」）。
  */
-export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 2;
+export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 3;
 
 /** 没有正文可摘时的 fallback：客户端按 `assistantPreviewKind` 填 i18n，服务端不下发文案。 */
 export const TURN_DIRECTORY_EMPTY_PREVIEW = "";

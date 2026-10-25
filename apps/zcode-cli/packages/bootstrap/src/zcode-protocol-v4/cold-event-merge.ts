@@ -1,6 +1,7 @@
 import {
   SessionEventType,
   selectActiveConversationBranch,
+  type ActiveConversationBranchRewind,
   type MessageWithParts,
   type SessionEntryInfo,
   type SessionEvent,
@@ -12,8 +13,14 @@ import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import {
   goalVerificationEntriesFromSessionEntries,
   synthesizeEventsFromMessages,
+  type ColdSynthesisContext,
   type HydratedGoalVerificationEntry,
 } from "./transcript-hydration.js";
+import type {
+  ColdTailWindowFallbackReason,
+  ColdTailWindowPlan,
+  ColdTailWindowReadResult,
+} from "./session-row-manifest.js";
 
 interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
@@ -28,6 +35,29 @@ interface ConversationMaterializationSource {
   sharedContextImport?: ConversationSnapshot["sharedContextImport"];
   /** 只有成功读取 session_target 后才存在；显式 null 也是持久 authority。 */
   target?: SessionGoal | null;
+  /**
+   * 本次冷开实际用的尾窗坐标（Step 6；缺席 = 全量物化）。
+   * `messages` 已是窗口正文，这里的身份供 `rowIdOrigin` / `initialTurnNumber` / 回写用。
+   */
+  coldWindow?: ColdTailWindowPlan;
+  /**
+   * 没有用窗口的原因。**必须打点**：静默退全量在现象上就是「窗口化没生效」，
+   * 与「清单与索引不同步」无法区分。
+   */
+  coldWindowFallback?: { reason: ColdTailWindowFallbackReason; detail?: string };
+}
+
+/**
+ * 窗口计划的输入：已经读到的持久事实（session / session_entry）。
+ * 计划函数由调用方注入，`cold-event-merge` 不依赖 manifest 读路径。
+ */
+interface ColdWindowPlanFacts {
+  session: Awaited<ReturnType<PersistedConversationMaterializationStore["getSession"]>>;
+  entries: readonly SessionEntryInfo[];
+  branchGeneration: number;
+  /** runtime resume 已读进内存的全量正文（可能缺席）。 */
+  persistedMessages?: readonly MessageWithParts[];
+  rewind: ActiveConversationBranchRewind;
 }
 
 interface PersistedConversationMaterializationStore {
@@ -63,6 +93,11 @@ export async function loadPersistedConversationMaterialization(input: {
   persistedMessages?: MessageWithParts[];
   sessionId: string;
   store?: PersistedConversationMaterializationStore;
+  /**
+   * 冷开尾窗计划（Step 6）。给出时**只读窗口正文**（内存里有就切片，否则走
+   * `readActiveBranchTail`），全量 `messages()` 不再参与；返回 `kind:"full"` 时沿用旧路径。
+   */
+  planColdWindow?: (facts: ColdWindowPlanFacts) => Promise<ColdTailWindowReadResult>;
 }): Promise<ConversationMaterializationSource> {
   if (!input.store) {
     // 无 sessionStore 时旧 bridge 人工填 target:null，把“没有读取”误当成
@@ -75,18 +110,35 @@ export async function loadPersistedConversationMaterialization(input: {
     };
   }
   const sessionID = input.sessionId as import("@zcode/contracts").SessionId;
-  const [session, allMessages, target, entries] = await Promise.all([
+  const [session, target, entries] = await Promise.all([
     input.store.getSession(sessionID),
-    input.persistedMessages ?? input.store.messages({ sessionID }),
     input.store.readTarget({ sessionID }),
     input.store.sessionEntries ? input.store.sessionEntries({ sessionID }) : Promise.resolve([]),
   ]);
-  const messages = selectActiveConversationBranch(allMessages, {
+  const rewind: ActiveConversationBranchRewind = {
     branchCutAfterMessageId: session?.revert?.branchCutAfterMessageID,
     rewindCreatedMessageId: session?.revert?.createdMessageID,
     rewindKeptMessageIds: session?.revert?.keptMessageIDs,
     rewindTargetMessageId: session?.revert?.targetMessageID,
-  });
+  };
+  const plan = input.planColdWindow
+    ? await input.planColdWindow({
+        session,
+        entries,
+        branchGeneration: session?.revert?.branchGeneration ?? 0,
+        ...(input.persistedMessages === undefined
+          ? {}
+          : { persistedMessages: input.persistedMessages }),
+        rewind,
+      })
+    : null;
+  const windowed = plan?.kind === "window" ? plan : null;
+  const messages = windowed
+    ? windowed.messages
+    : selectActiveConversationBranch(
+        input.persistedMessages ?? (await input.store.messages({ sessionID })),
+        rewind,
+      );
   const sharedContextMessage = messages.find(
     (message) =>
       message.info.role === "user" &&
@@ -117,6 +169,13 @@ export async function loadPersistedConversationMaterialization(input: {
           }
         : { title: session.title.trim() }
       : undefined;
+  // 窗口坐标（不含正文）：正文已经放进 `messages`，这里只交出身份，避免同一份大数组
+  // 在结果里出现两次。
+  let coldWindow: ColdTailWindowPlan | undefined;
+  if (windowed) {
+    const { messages: _windowMessages, kind: _kind, ...coordinates } = windowed;
+    coldWindow = coordinates;
+  }
   return {
     branchGeneration: session?.revert?.branchGeneration ?? 0,
     goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
@@ -124,6 +183,15 @@ export async function loadPersistedConversationMaterialization(input: {
     messages,
     ...(sharedContextImport ? { sharedContextImport } : {}),
     target,
+    ...(coldWindow ? { coldWindow } : {}),
+    ...(plan?.kind === "full"
+      ? {
+          coldWindowFallback: {
+            reason: plan.reason,
+            ...(plan.detail === undefined ? {} : { detail: plan.detail }),
+          },
+        }
+      : {}),
   };
 }
 
@@ -153,6 +221,11 @@ interface MergeInput {
   messages: readonly MessageWithParts[];
   sessionId: string;
   target?: SessionGoal | null;
+  /**
+   * 窗口化物化的非零起点上下文（RC4）：`initialTurnNumber` / `initialModelKey` / `preface` /
+   * `baseTimestampMs`。全量物化时不传，合成结果与旧路径逐字相同。
+   */
+  synthesis?: ColdSynthesisContext;
 }
 
 const MEMORY_ONLY_EVENT_TYPES = new Set<string>([
@@ -723,6 +796,7 @@ export function mergeColdConversationEvents(input: MergeInput): ColdEventMergeRe
     contextWindow: input.contextWindow,
     fileChangeSummariesByMessageId: input.fileChangeSummariesByMessageId,
     goalVerificationEntries: durableGoalEntries,
+    ...(input.synthesis ?? {}),
   });
   const durableEvents = input.target
     ? [

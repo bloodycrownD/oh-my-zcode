@@ -38,7 +38,12 @@ import {
   mergeColdConversationEvents,
 } from "../zcode-protocol-v4/cold-event-merge.js";
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
-import { createSessionRowManifestReader } from "../zcode-protocol-v4/session-row-manifest.js";
+import {
+  createSessionRowManifestReader,
+  readColdTailWindowMaterialization,
+} from "../zcode-protocol-v4/session-row-manifest.js";
+import { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } from "../zcode-protocol-v4/turn-manifest-entry.js";
+import { hydrationTurnModelKeyOfMessage } from "../zcode-protocol-v4/transcript-hydration.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
   ConversationRowTargetResolution,
@@ -182,6 +187,30 @@ async function readConversationFileChanges(
       (await record.app.readToolResultArtifact(snapshotRef)).content,
     ...(targetTurnId ? { targetTurnId } : {}),
   });
+}
+
+/**
+ * 窗口物化的模型基线（`initialModelKey`）：读**窗口前一轮的首条消息**取选型 key。
+ *
+ * 只读一条（`messageWithParts`），不碰窗口正文。读不到 / 没有选型快照 → null：这时窗口
+ * 首轮会多发一次 hydration-trace 的 ModelSelected，但它不声明种子权威、也不标记
+ * `configModelTouchedByEvent`，最终配置值与全量物化相同（只是多一条冗余事件）。
+ */
+async function readHydrationTurnModelKey(
+  store: NonNullable<ZCodeProtocolAgentServerContext["deps"]["sessionStore"]>,
+  sessionId: string,
+  messageId: MessageId,
+): Promise<string | null> {
+  try {
+    const message = await store.messageWithParts({
+      sessionID: sessionId as SessionId,
+      messageID: messageId,
+    });
+    return message ? hydrationTurnModelKeyOfMessage(message) : null;
+  } catch {
+    // 基线只是「少发一条冗余事件」的优化，读失败不得影响冷开。
+    return null;
+  }
 }
 
 /**
@@ -1864,14 +1893,87 @@ export function createConversationV4Gateway(
               },
             }
           : {}),
+        // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空 / 有
+        // shared_context 导入时一律退回全量，原因随 `coldWindowFallback` 带出并打点。
+        ...(store
+          ? {
+              planColdWindow: async (facts) => {
+                // shared_context 导入的展示元数据依赖「在 active 分支里 find 那条 user
+                // message」，窗口会把它静默丢掉。Step 9 改由 manifest/索引给 id 之后再放开。
+                if (facts.entries.some((entry) => entry.type === "v4/shared_context_import")) {
+                  return { kind: "full" as const, reason: "sharedContextImport" as const };
+                }
+                return readColdTailWindowMaterialization({
+                  sessionID: sessionId as SessionId,
+                  store,
+                  reader: rowManifestReader,
+                  branchGeneration: facts.branchGeneration,
+                  expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+                  rewind: facts.rewind,
+                  ...(facts.persistedMessages === undefined
+                    ? {}
+                    : { loadedMessages: facts.persistedMessages }),
+                });
+              },
+            }
+          : {}),
       });
+      if (source.coldWindowFallback) {
+        // 静默退全量在现象上就是「窗口化没生效」，与「清单与索引不同步」无法区分——
+        // 两种情形都在这里留痕（reason=limitBeforeMissed 就是清单与索引不同步）。
+        log?.debug("v4 cold window fallback", {
+          event: "zcode_protocol.v4.cold_window_fallback",
+          module: "bootstrap.zcode_protocol",
+          reason: source.coldWindowFallback.reason,
+          ...(source.coldWindowFallback.detail === undefined
+            ? {}
+            : { detail: source.coldWindowFallback.detail }),
+          sessionId,
+        });
+      }
+      const windowPlan = source.coldWindow;
+      if (windowPlan) {
+        log?.debug("v4 cold window applied", {
+          event: "zcode_protocol.v4.cold_window_applied",
+          limitBefore: windowPlan.limitBefore,
+          messageCount: source.messages.length,
+          module: "bootstrap.zcode_protocol",
+          ordinal: windowPlan.ordinal,
+          rowCount: windowPlan.rowCount,
+          rowIdBase: windowPlan.rowIdBase,
+          sessionId,
+          turnCount: windowPlan.turnCount,
+        });
+      }
+      // 锚在窗口外的 goal verification 不能在窗口里发射（合成器找不到 anchor 就落到
+      // 时间线末尾，等于给窗口凭空加行）；它属于未物化的那一轮，由翻页按需物化。
+      const windowedMessageIds = windowPlan ? new Set(windowPlan.windowMessageIds) : null;
+      const goalVerificationEntries = windowedMessageIds
+        ? source.goalVerificationEntries.filter((entry) => {
+            const anchor = entry.payload.anchorAssistantMessageId;
+            return !anchor || windowedMessageIds.has(anchor as MessageId);
+          })
+        : source.goalVerificationEntries;
+      // 窗口起点之前的模型基线：取窗口前一轮的首条消息（一次单行读，不碰正文窗口）。
+      const initialModelKey =
+        windowPlan?.precedingTurnFirstMessageId && store
+          ? await readHydrationTurnModelKey(
+              store,
+              sessionId,
+              windowPlan.precedingTurnFirstMessageId,
+            )
+          : null;
       // live ModelComplete.fileChanges 只存在于内存事件；cold merge 以持久
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
       // workspace checkpoint + artifact 才是跨进程持久事实，这里按 user messageId
       // 重建摘要，再交给 transcript hydration 合成同构 ModelComplete。
       const fileChangeSummariesByMessageId = await buildColdFileChangeSummaries({
         events: source.memoryEvents,
-        messageIds: source.messages.map((message) => String(message.info.id)),
+        // 窗口化只裁正文，不裁索引：文件摘要必须按**整条** active 分支的 messageId
+        // 过滤（`windowPlan.activeMessageIds`），否则窗口外那一轮的文件摘要会丢。
+        messageIds: windowPlan
+          ? windowPlan.activeMessageIds.map((messageId) => String(messageId))
+          : source.messages.map((message) => String(message.info.id)),
         readArtifact: async (snapshotRef) =>
           (await record.app.readToolResultArtifact(snapshotRef)).content,
         onArtifactError: (messageId, error) =>
@@ -1896,9 +1998,25 @@ export function createConversationV4Gateway(
         memoryEvents: source.memoryEvents,
         messages: source.messages,
         sessionId,
-        goalVerificationEntries: source.goalVerificationEntries,
+        goalVerificationEntries,
         ...(Object.prototype.hasOwnProperty.call(source, "target")
           ? { target: source.target }
+          : {}),
+        // 窗口化物化的非零起点上下文（RC4）：编号 / 模型基线 / 时间基准。
+        // **不传 `preface:false`**：窗口按 manifest 的整轮对齐，窗首的 assistant 消息若属于
+        // 某个 turn，那一轮在全量物化里同样会开出来（manifest 的 turn 边界就是合成器的边界）；
+        // 抑制它反而会丢掉一整轮并把后续 `hydrate-turn-N` 整体前移。
+        // 全量物化时整段不传，合成结果与旧路径逐字相同。
+        ...(windowPlan
+          ? {
+              synthesis: {
+                initialTurnNumber: windowPlan.ordinal,
+                ...(initialModelKey === null ? {} : { initialModelKey }),
+                ...(windowPlan.baseTimestampMs === undefined
+                  ? {}
+                  : { baseTimestampMs: windowPlan.baseTimestampMs }),
+              },
+            }
           : {}),
       });
       for (const diagnostic of merged.diagnostics) {
@@ -1943,6 +2061,9 @@ export function createConversationV4Gateway(
         },
         ...(source.sharedContextImport ? { sharedContextImport: source.sharedContextImport } : {}),
         sourceEventSeq,
+        // Step 6：窗口坐标（rowIdBase / ordinal / 整条分支 turn 序 / facts）。
+        // gateway 用它播种 `rowIdOrigin`、决定 `fullyMaterialized:false` 与回写 ordinalBase。
+        ...(windowPlan ? { coldWindow: windowPlan } : {}),
       };
     },
     onError: (scope, error, errorContext) =>
