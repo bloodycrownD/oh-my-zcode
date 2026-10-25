@@ -144,7 +144,15 @@ MC 稳定复现时总在场（`features.magicContext` 默认 true，`apps/zcode-
    - **附件位置写死**：`payload.conversationInputIntent.attachments`。不读 `payload.attachments`——`TurnSteerQueued` 的账本 upsert（`core/src/runtime/methods/events.ts:334`）会用 `buildPersistedConversationInputIntent` 重写整个 payload，只带 `text/intent/conversationInputIntent`，admission 写在顶层的那一份会被丢掉；而 `conversationInputIntent.attachments`（= `intent.attachmentRefs ?? []`）在两个写者都会写。读它不需要任何新增写入。
    - **损坏 ≠ 空文本**（cr-func F4）：`admitted` 行的 payload 解析失败 / 不是对象 / `text` 不是字符串 / 附件事实读不出，一律返回 `state:"corrupt"`（**不携带 text**）→ 抛 `fault.command.inconsistentAuthority`（独立错误类型与文案）。`text: ""` 仍是合法输入（attachment-only query），必须照常 pending：把损坏兜底成空串等于拿空内容起轮再移除队列项，用户内容静默丢失且无 fault。
 4. 断言守护：新增源码形状守卫，禁止 `queue.ts` 内出现 `queueItem.text` 作为执行内容；**同时**禁止 `queueItem.attachments`（I1 的附件口径），并登记唯一残留的投影执行输入 `queueItem.toolDisallowlist`（见 4b）。
-4b. **I1 的作用范围必须写明**（否则与现状对不上）：I1 覆盖「queue 提升链的执行文本 + 附件」。以下**四处**今天仍读投影、**本 spec 不动**，列为已知限制：`retryTurn` 的重发文本（解析在 `commands/input-intent.ts:287-297` 的 `retryTurn` 分支，调用点 `handlers/fork-edit-retry.ts:277`；Step 2 收敛后旧锚点 `fork-edit-retry.ts:279` 已漂移）、`editUserQuery` 的 attachments 缺省（`commands/input-intent.ts:271-285`，调用点 `handlers/fork-edit-retry.ts:144`；旧锚点 `:137` 已漂移）、`queue.ts` 的 goal `objective ?? queueItem.text`、以及 **`queue.ts` 的 `toolDisallowlist: queueItem.toolDisallowlist`**（cr-func F1 登记）。`toolDisallowlist` 无法随文本一起收口：它的 durable 事实在 `TurnSteerQueued.toolDisallowlist` 事件里（`product-projection.ts:3436` 由此构造队列项），`session_input` 账本不写它，而 admission 侧账本写入本轮冻结；要收口只能改读事件账本，属另一条变更。**`queue.ts` 普通分支的 `content:` / `intent.text` / `attachmentRefs` 不在例外表里——它在本次范围内**（`inputIntentMetadataFromQueueItem` 的 `text` 与 `attachmentRefs` 改为由账本传入，见变更点 21），因为不修它落库的 `intent.text` / `intent.attachmentRefs` 仍可能来自投影，冷恢复会把它带回 edit target（`transcript-hydration.ts:1668,1690`）与编辑重发继承。T-IA4 的守卫例外表 = 上述四处（goal objective 解析 + goal 分支 intent.text + displayText + toolDisallowlist）；T-IA1 追加断言「落库 `intent.text` == 账本文本、`intent.attachmentRefs` == 账本附件」。
+4b. **I1 的作用范围必须写明**（否则与现状对不上）：I1 覆盖「queue 提升链的执行文本 + 附件 + guide 物化正文」。**fix-a10 后**例外表只剩两处，且都不读 `queueItem.text` 作执行内容：
+   - `queue.ts` 的 goal 分支 `displayText: queueItem.text`（**纯展示**：UI 要显示的正是用户当初那一行原文；objective 解析与落库 `intent.text` 已在 fix-a10 改为账本，见 §phase-input-authority 的 4c）；
+   - `queue.ts` 的 `toolDisallowlist: queueItem.toolDisallowlist`（cr-func F1 登记）：它的 durable 事实在 `TurnSteerQueued.toolDisallowlist` 事件里（`product-projection.ts:3436` 由此构造队列项），`session_input` 账本不写它，admission 侧账本写入本轮冻结；要收口只能改读事件账本，属另一条变更。
+
+   **历史例外（fix-a10 已收口，勿再当例外）**：`retryTurn` 的重发文本与 `editUserQuery` 的 attachments 缺省走的是「被编辑轮的 canonical 事实」，不是队列投影，且 fix-a10 已让 retry 也进入 I4/I5 出口（见 4c）；goal 的 `objective` 解析与 `intent.text` 曾登记为例外，理由（不修 `intent.text` 冷恢复会带回旧文本）对 goal 一字不差，已于 fix-a10 收口。T-IA4 的守卫例外表 = 上述两处；T-IA1 追加断言「落库 `intent.text` == 账本文本、`intent.attachmentRefs` == 账本附件」。
+
+4c. **fix-a10（cr-func 五条 P1 + 两条 P2）在 I1 上补的两个洞**：
+   - **guide 物化（P1-1）**：`setPendingInputDelivery` 的 held 回落把 `pendingSteerInputs` 里的投影文本物化进 `activeTurn.pendingInputs`，drain 时直接成为 runtime user entry + `persistUserPrompt` 正文——即「投影文本变成模型内容」，与 RC1 同形，原 4b 没覆盖。现改为物化前经 `getSessionInputForExecution` 取**账本文本**；账本非 `pending` / 附件非空 / 能力缺席 / 读失败一律**不物化**（记 warn，仍发投影同步事件），绝不回落到 `held.input`。账本与投影文本漂移时以账本执行并留 debug 痕迹（不落文本内容）。
+   - **legacy 无 intent 行（P1-3）**：`TurnSteerQueued` 在 intent 缺失时只写 `{ text }`（`events.ts`），而 intent 今天仍可能缺失（legacy `session/send` 只在 `params.modelSelection` 存在时才建 intent），这类行原被判 `corrupt/attachments_unreadable` → 永久不可提升。现读侧把「`intent` 与 `conversationInputIntent` **同时**缺失」判为已知 legacy 形状（附件 = `[]`：账本与投影（`QueueItem.attachments` 只来自 `intent.attachmentRefs`）都从未记录附件，`[]` 是唯一可读答案）；「字段在但读不出」仍是 `corrupt`。见风险节第 1 条的修正。
 
 ### phase-rewind-cascade（I2）
 
@@ -166,11 +174,34 @@ MC 稳定复现时总在场（`features.magicContext` 默认 true，`apps/zcode-
 10. **start 失败不回滚截断**：`editUserQuery` 的 `abort` 只做三件事——作废本次新建的 `session_input`、释放 reservation、把失败以可读 fault 回给客户端（附「历史已回退到目标轮，可直接重新发送」的语义）。**不写回 `session.revert`**。理由见上。
 11. **失败后 newText 不丢（唯一可行路径是草稿）**：`abort` 之后目标行已随 rewind 从投影移除（`rewind-message.ts:523` 的 `keptMessages` 不含 target；`product-projection.ts:1839-1861` 从 turnHeader 起整段 `row.removed`），行组件与本地编辑态一并卸载——所以**不能**指望「同一目标行仍可编辑」。交付方式：`abort` 的失败结果携带 `draftText`，UI 收到后写入 composer 草稿（`ConversationRowView` 不做任何编辑态保留）。这条必须同时出现在契约、handler 与 UI 三处，否则 T-RT3 无实现路径。
 
+11b. **提交事实必须是类型化错误，不是调用方的局部布尔（fix-a10 / cr-func P1-2）**：`setRevert` 在 `applyConversationRewindPlan` **内部**，之后还有级联作废（`discardRewoundPendingSteerInputs`）、`rebuildConversationDerivedState`、`RewindTriggered` 三次 `await`，每一处都可能抛错。handler 原来的 `conversationRewindCommitted` 布尔只在整段调用**成功返回后**翻转，中途抛错时仍是 false → 走「什么都没提交」分支原样 rethrow：**历史已截断、无 draftText、无「历史已回退」文案**。修法：
+   - `rewind-message.ts` 把提交点之后的三步包进 try/catch，失败抛 `ConversationRewindCommittedError`（contracts `rewind/index.ts`，带 `committed: true` + `rewindId` / `targetMessageId` / 原始 `cause`；跨包判定用 `code` 常量而不是 `instanceof`）。
+   - `submitConversationRewind`（edit/retry 共用）在 catch 里识别该错误并调用 `onCommitted()`，把**事实**交给调用方；成功返回时同样调用（放在 `afterLegacyStateMutation` 之前——广播失败也不能让「历史已回退」退化）。
+   - edit 与 retry 都用事实判「已提交」，转成带 `draftText` 的 `V4EditCommittedFailureError`。
+   - 用例：T-RT2③（真 core 原语 + 注入 `RewindTriggered` append 失败）与 handler 侧同款；另加 retry 版（T-RT6）。
+
 ### phase-delivery-ack（I5）
 
 12. `packages/shared/.../command.ts:402-409` 的 `editUserQuery` 结果增加 `delivery: "startNow" | "queue" | "guide"`（**三值，与既有 `delivery` 字段同源**，`command.ts:430,439`）与可选 `queueItemId`（`delivery` 由 handler 必填，schema 层可选以便旧客户端忽略）。
 13. `prompt-turn.ts:148-164` 的 `queued` 分支上抛投递态；`fork-edit-retry.ts:216-228` 透传。
 14. UI：`SessionPane.tsx:2453-2501` 在 `delivery === "queue"` 时明示「已排队、未立即发送」，`ConversationRowView.tsx:1100-1114` 仅非 queued 才收敛编辑态。
+14b. **retryTurn 复用 edit 的三件套（fix-a10 / cr-func P1-5）**：retry 也是 `rewind → start`，过去它 `return undefined`、契约里没有 `retryTurn` 结果分支，于是 queued 仍是静默成功、截断后 start 失败既无 draft 也无「历史已回退」文案。现在：
+   - 契约 `commandResultSchema` 增加 `{ type: "retryTurn", sessionId, delivery?, queueItemId? }`；
+   - handler 用与 edit 同一个 try/catch/`draftText`/`committed` 判据，返回值带 `delivery`（`queue`/`guide` 时附 `queueItemId`）；
+   - UI `SessionPane.handleRetry` 对 rejected toast `ack.message` 并把 `ack.draftText` 写回 composer，对 `delivery === "queue"` 提示已排队（判据 `resolveRetryDelivery`，与 edit 的 `resolveEditDelivery` 逐字同规则）。
+
+### phase-queue-pause-derivation（fix-a10 P2，暂停位的唯一派生规则）
+
+**规则**：`暂停 = (队列非空) && (显式请求 ?? 当前位)`，实现为唯一纯函数 `deriveQueueAutoDrain`（`contracts/src/interfaces/session.port.ts`，core 与 bootstrap 都 import 它）：
+
+- `queueLength === 0` → 恒为 `true`（放行）：0 项时任何暂停都无法承载，留着就是「paused + 0 项」durable 残留——下一轮结束后的新入队项会被判 held，用户没按暂停却要手动点继续；
+- 非空 + 显式请求 → 请求值（用户点暂停/继续、stop 拦后续、auto-drain 失败停住、「立即发送」=恢复）；
+- 非空 + 无请求（结构事件）→ 保持现值（不得越权改用户的暂停位）；
+- `queueLength === undefined`（读不到）→ 按「无法证明为空」处理：没有请求就保持现值，不得放行。
+
+**收敛点**：core `discardRewoundPendingSteerInputs`（重投影后）、bootstrap `deleteQueueItem`、`setAutoDrain` 三处都只提供事实（现值/长度/显式请求）并经 `syncQueueAutoDrain` 写；`sendQueuedNow` 是同一规则的显式 `requested: true` 分支（结果恒为 true），保留字面 `await record.app.setQueueAutoDrain(true)` 以维持 `test:held-queue-routing` 的 tripwire（该正则不可改）。写入口只在**目标位 ≠ 现值**时落库，不再给每次结构事件追加同值 `QueueAutoDrainChanged`。
+
+**读不到 ≠ 空（P2-1）**：`v4-bridge` 的 `getQueueLength` 过去在 gateway 缺席时回落 `0`，与「读不到按非空处理」正好相反（删项会据此无条件复位 autoDrain）。现回落 `undefined`；`getQueueAutoDrain` 同为可选能力，缺席时结构事件一律不动、显式请求照常落地（`syncQueueAutoDrain` 的 fail-safe）。
 
 ### phase-editor-seed（**取消**）
 
@@ -294,6 +325,12 @@ package.json                                           改（门禁挂载）
 - T-DA1 — blocking: yes — **I5**：`sendInput` 桩返回 `{kind:"queued"}` 时，`editUserQuery` 结果含 `delivery:"queue"`；UI 不把编辑态当成功收敛。
 - T-DA2 — blocking: yes — **I5 兼容**：缺省 `delivery` 的旧结果不导致 UI 异常。
 - T-ES1 — blocking: no — **已删除**（RC6 证否，原 I6 不成立，见根因节）。
+- T-IA8（fix-a10 / P1-4）— blocking: yes — **goal 车道也走账本**：投影文本与账本文本不同时，`objective` 与落库 `intent.text` 取账本解析结果，`displayText` 保持投影原文（纯展示）。变异：把 objective 解析改回 `queueItem.text` 即红。
+- T-IA9（fix-a10 / P1-3）— blocking: yes — **legacy 无 intent 行可执行**：真 sqlite 写入 `{ text }`（生产 legacy 形状）→ `getSessionInputForExecution` 返回 `pending` + `attachments: []`，`sendQueuedNow` 正常起轮（死项消失）；反向：`intent` 在而附件字段读不出仍是 `corrupt`（adapters 5b）。变异：读侧改回「一律 corrupt」即红。
+- T-RT6（fix-a10 / P1-5）— blocking: yes — **retry 三件套**：起跑成功 ACK 带 `delivery:"startNow"`；queued 带 `delivery:"queue"` + `queueItemId`；截断已提交后失败（含原语报 committed）带 `draftText` + 「历史已回退」；rewind 前失败原样上行且不产生草稿。
+- T-RT7（fix-a10 / P1-2）— blocking: yes — **提交事实是类型化错误**：真 core 原语在 `RewindTriggered` append 失败时抛 `committed:true` 的 `ConversationRewindCommittedError`，且 `setRevert` 已落盘；handler 据此走 `draftText` 出口，而非「什么都没提交」。
+- T-RW7（fix-a10 / P2）— blocking: yes — **暂停位派生规则**：`deriveQueueAutoDrain` 真值表（空队列恒放行 / 非空显式优先 / 只读请求时保持 / 读不到不猜）；`deleteQueueItem` 与 `setAutoDrain` 都经同一写入口、只在目标位 ≠ 现值时落库；当前位读不到时结构事件不动、显式请求照常落地。
+- T-RW8（fix-a10 / P1-1）— blocking: yes — **guide 物化取账本**（core 直证）：held 项切 guide 时 `materialized.input` == 账本文本（≠ 投影文本）；账本非 pending / 附件非空 / 能力缺席时不物化、投影事件照发。变异：物化改回 `held.input` 即红。
 
 夹具约束：T-IA*/T-RW*/T-RT*/T-DA* 落在 `bootstrap/scripts/`，用真实 handler + 可控宿主。**四个既有夹具的桩必须同步升级**（Step 3 交付项）：`scripts/test-model-live.mjs:367`、`scripts/test-e2e-live-all.mjs:319`、`scripts/test-queue-item-delivery-command.mjs:99` 都要加 `getQueueItem` 之外的账本能力；`test-held-queue-routing.mjs` 对 `queue.ts` 的源码形状断言需随实现同步。其中 `test-model-live` 已在根 `test:v4-perf` 内，不同步升级会当次打红。**T-IA5/T-IA7 另需一层真实存储夹具**：`adapters/scripts/test-session-input-ledger-authority.mjs`（临时目录里的真实 SQLite，直接改写 payload 制造损坏；handler 侧的桩无法证明「适配器不把解析失败兜底成空串」）。
 
@@ -302,7 +339,9 @@ package.json                                           改（门禁挂载）
 ### 风险
 
 1. **I1 改变执行侧权威来源**：`sendQueuedNow` 从投影读改为账本读，若账本与投影在历史数据上已不一致，会出现「以前能跑、现在硬失败」。**终态定为当次硬失败**（不做「先只打日志观察一轮」的过渡——那与 I1「禁止回落投影值」直接矛盾）：硬失败前做一次对账上报，把不一致写入诊断日志；若历史库确实缺字段，按 Step 3 决策降级为「先补账本再切权威」，但**不允许长期停在回落态**。**账本可读但内容损坏时不得降级**：损坏必须走 `corrupt` 硬失败（F4），绝不回落投影或兜底空文本——只有「字段缺失/历史遗留」才有讨论降级的余地，「读不出来」没有任何安全回落。
-   **已知的「以前能跑、现在硬失败」名单**（都是有意的，出口统一是删项重发）：① 账本行终态或缺失；② 账本 payload 损坏；③ **行里没有附件事实**（`conversationInputIntent.attachments` 缺失）——这只可能来自 intent 事实之前写入的行（旧 runtime 的 `TurnSteerQueued` 没有 intent，`events.ts:342` 的 `...(conversationInputIntent ? … : {})` 会写出一份只有 text 的 payload）。第③类为什么不退化成 `[]`：账本没记录附件时，「用户有没有带附件」不可判定，判成「没有」可能把用户在投影里看着还在的附件静默丢掉——与 F4 的空串兜底同类。宁可让用户看到「删除该项后重发」。
+   **已知的「以前能跑、现在硬失败」名单**（都是有意的，出口统一是删项重发）：① 账本行终态或缺失；② 账本 payload 损坏；③ **行里没有附件事实但另有 intent 事实**（`intent` 在、`conversationInputIntent.attachments` 缺失或读不出）。
+   **③ 的原措辞已作废（fix-a10 / cr-func P1-3）**：原文写「这只可能来自 intent 事实之前写入的行」，这句话**不成立**——`TurnSteerQueued` 在 intent 缺失时只写 `{ text }`（`events.ts` 的 `...(conversationInputIntent ? … : {})`），而 intent 今天仍会缺失（legacy `session/send` 只在 `params.modelSelection` 存在时才建 intent，`server-operations.ts`）。所以「无 intent 的只有 text 的 payload」是**今天仍在生产**的形状，不是历史遗留。该形状现在的读法是 `pending` + `attachments: []`（不是 corrupt）：账本与投影都从未记录过附件（`QueueItem.attachments` 只来自 `intent.attachmentRefs`），`[]` 是唯一可读答案；把它判损坏会让该项永久不可提升、auto-drain 停在这一项，用户只能删项重发——那正是本轮要消灭的死项。
+   仍然保持「读不出 ≠ 没有附件」的是**有 intent 事实时**：`intent` 在而 `conversationInputIntent` / `attachments` 读不出，一律 `corrupt`（判据可判定：已知历史形状 vs 字段损坏），绝不兜底成 `[]`。
 2. **I2 语义变化（已拍板）**：截断时把被截断区间的未起跑输入作废，意味着「终止后留在队列里的那条」在编辑重发时会消失。用户已授权「按根治思路做决定」，故**不再回问**；但与 `held-queue-input-dropped` 的拍板不冲突（那条讲追加输入照常入队，这条讲被截断区间的输入），实现时两条 spec 不得互斥。
 3. **I4 不再引入「反向写 revert」能力**：首轮设计的 `restoreRevert` 已撤销（文件回滚不可逆会让会话与工作区不一致）。风险转为「start 失败后用户必须重发」——由 T-RT3/T-RT4 的草稿保留兜住。**另有一处真实窗口**：`file-rewind.ts:182` 的 `commitAfterApply` 在 try 内调用，catch（`:183-193`）会补偿文件并返回 `applied:false`；而 `setRevert`（`rewind-message.ts:559`）之后还有 `rebuildConversationDerivedState`（`:576`）与 `appendEvent`（`:597`）可能抛错——此时「会话已截断 + 文件被补偿回未截断」仍是不一致。对策：`file-rewind` 必须区分 **apply 阶段**与 **commit 阶段**，commit 一旦开始就不得再补偿文件（T-RT2 增加该用例）。
 4. **协议加字段**：`delivery` 为可选字段，旧客户端忽略即可。**需新增的是 result schema 断言**（`test-edit-retry-model.mjs:118-130` 的 A1 组测 payload schema，不受影响）。既有 `delivery` 取值是 `startNow|queue|guide`（`command.ts:430,439`，`session-flow.ts:297-308` 已在用），编辑重发会继承被编辑轮的 `requestedDelivery`（`fork-edit-retry.ts:382`）→ `prompt-turn.ts:107-109` 可落到 `guide`，因此新字段必须用三值枚举，不能只写两值。
