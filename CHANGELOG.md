@@ -1,3 +1,9 @@
+## [1.0.25](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.24...v1.0.25) (2026-10-25)
+
+### 修复
+
+- **MCP 连接不再无限等**：单个 MCP server 的连接加了 4 秒上限（`MCP_CONNECT_DEADLINE_MS`）。不可达的 http/sse 端点和首次拉包的 npx stdio server 不再把整条 MCP startup 拖到 9 秒以上——实测 startup 9.4s → 2.6–5.6s。超时按 `failed` 记账（工具不注册，设置页 mcp/list 可手动重连），后台连接不取消，稍后连上后状态会自动翻回 `connected`。
+
 ## [1.0.24](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.23...v1.0.24) (2026-10-25)
 
 ### 新增

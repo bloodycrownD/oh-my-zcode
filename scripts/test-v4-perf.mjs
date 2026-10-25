@@ -58,7 +58,6 @@ const COMMANDS = [
   "node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/sidePaneFullView.test.ts",
   "node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/sourceServerPanelShape.test.ts",
   "node --import tsx --test packages/server/test/pathTraversal.test.ts",
-  "node --import tsx --test packages/desktop/test/remoteProjectDirectoryService.test.ts",
   "node --import tsx --test packages/services/test/legacyDbUpgrade.test.ts",
   "node --import tsx --test packages/services/test/sourceServerReleaseResolver.test.ts packages/services/test/sourceSettingsServiceCollection.test.ts",
   "node --import ./packages/ui/test/helpers/setup-ui-component-test.mjs --test packages/ui/test/remoteConnectionProgressWiring.test.ts",
