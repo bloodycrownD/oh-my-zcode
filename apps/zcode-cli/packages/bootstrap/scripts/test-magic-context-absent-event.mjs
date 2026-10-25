@@ -21,7 +21,7 @@
  *      `emitMagicContextTransformAbsent(logger, "disabled", ...)`；
  *   ③ import_failed 与工厂内 db_null/disabled 分支全部改调 leaf。
  *
- * 本脚本四组断言：
+ * 本脚本五组断言：
  *   E1 create-app 装配路径（子进程，enabled!==true）：
  *      a. `module.register` resolve hook 断言 magic-context-turn-transform 门面
  *         **与它拆分后的 `app/magic-context/` 整个目录**零加载（flag 关时连 import
@@ -30,6 +30,9 @@
  *      b. hook 活性自检（哨兵模块必经 resolve，证明 hook 真的在链路上）；
  *      c. 可控 dataDir（MAGIC_CONTEXT_DB_DIR → 临时目录）断言无 db 文件；
  *      d. 子进程回传日志断言捕获 `disabled` 事件（leaf emit 的形状）。
+ *   E1b create-app 装配路径（子进程，enabled===true 且插件入口解析被强制抛错）：
+ *      **Step 12 的 `import_failed` 降级**——事件照发、create-app 不失败、不建库、
+ *      失败后不再加载任何其它宿主装配模块。
  *   E2 leaf emit helper 进程内直测：事件名/reason/detail/module 四字段形状，
  *      以及 reason 取值域与真实发射值逐字一致。
  *   E3 工厂 db_null 细分守卫（mc/C-1）：表驱动直测导出的
@@ -237,7 +240,21 @@ test("E3: describeStorageUnavailability 表驱动细分（mc/C-1 守卫）", () 
  * hook 形态说明：inline `registerHooks({ resolve(...) })`（与父进程同一手法）。
  * 单独 hooks 模块（`register("路径")`）在本机 Node 22.22 上实测不触发，故不用。
  */
-const DRIVER_SOURCE = `import { registerHooks } from "node:module";
+/**
+ * 子进程驱动源码。两个模式：
+ *
+ *   - `enabled: false`（E1，disabled 路径）
+ *   - `enabled: true, forceImportFailure: true`（E1b，Step 12 的 import_failed 降级路径）
+ *
+ * `forceImportFailure` 的注入方式是在 resolve hook 里**对插件入口的落点抛错**——
+ * 也就是让 `create-app.ts` 那一条真实的 `await import("./magic-context/index.js")`
+ * 失败。不桩被测代码、不改包布局（spec 已否决「人工移走 node_modules」：配置装载阶段
+ * 会先抛 ERR_MODULE_NOT_FOUND，走不到这条分支）。
+ */
+const driverSource = ({
+  enabled,
+  forceImportFailure,
+}) => `import { registerHooks } from "node:module";
 import { appendFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -245,6 +262,8 @@ import { pathToFileURL } from "node:url";
 const HOOK_LOG = process.env.ZCODE_TEST_HOOK_LOG;
 const SENTINEL_SPECIFIER = "./sentinel.mjs";
 const REPO_ROOT = ${JSON.stringify(REPO_ROOT)};
+const FORCE_IMPORT_FAILURE = ${JSON.stringify(forceImportFailure)};
+const PLUGIN_ENTRY_URL = ${JSON.stringify(ENTRY_DIST_URL)};
 const TS_SOURCE_PACKAGES = new Set(["@zcode/shared", "@zcode/model-option-map", "@zcode/provider"]);
 
 registerHooks({
@@ -253,6 +272,11 @@ registerHooks({
     // 观测：specifier + 最终落点（core 的 turn-loop helper 与本文件同基名但不同模块，
     // 判「工厂模块零加载」必须看解析落点，不能只看 specifier 字符串）。
     appendFileSync(HOOK_LOG, JSON.stringify({ specifier, url: resolved.url }) + "\\n");
+    // Step 12：把失败钉在真实的动态 import 点上（插件入口）。抛在 resolve 里 =
+    // 该 import() 以这个错误 reject，正是 create-app 的 catch 分支要处理的形态。
+    if (FORCE_IMPORT_FAILURE && resolved.url === PLUGIN_ENTRY_URL) {
+      throw new Error("forced magic-context import failure");
+    }
     // TS-source 包重定向（与父进程同一手法）：@zcode/shared 等包入口发布的是原始
     // TypeScript，裸 node 加载不了，改指到同布局的编译产物。只改解析，不桩被测代码。
     const segments = specifier.split("/");
@@ -325,14 +349,14 @@ try {
     providerRegistry,
     skipUserConfig: true,
     version: "0.0.0-absent-event-test",
-    sessionId: "ses_absent_event_disabled",
+    sessionId: ${JSON.stringify(enabled ? "ses_absent_event_import_failed" : "ses_absent_event_disabled")},
     workingDirectory: process.env.ZCODE_TEST_WORKSPACE,
     env: process.env,
     loggerFactory,
     // 关掉 MCP：本用例与 MCP 无关，省掉 adapter 的 import 与端口。
     runtimeConfig: {
       mcp: { enabled: false },
-      magicContext: { enabled: false },
+      magicContext: { enabled: ${JSON.stringify(enabled)} },
     },
   });
   try {
@@ -363,10 +387,15 @@ process.stdout.write("DRIVER-REPORT " + JSON.stringify(report) + "\\n");
 // app/magic-context/index.js（create-app 唯一消费的模块）。hook 观测日志里
 // control 标记之后的工厂解析必须出现（父进程据此反向验证判据），而 control 标记
 // 之前保持零条。
-appendFileSync(HOOK_LOG, JSON.stringify({ control: true }) + "\\n");
-await import(${JSON.stringify(FACTORY_DIST_URL)});
-await import(${JSON.stringify(ENTRY_DIST_URL)});
-await new Promise((resolve) => setTimeout(resolve, 50));
+//
+// import_failed 模式下整段跳过：入口的解析被刻意抛错，这里的 import 必然 reject，
+// 而这与「判据是否有效」无关（该模式的正例是 E1b 里的 window 断言）。
+if (!FORCE_IMPORT_FAILURE) {
+  appendFileSync(HOOK_LOG, JSON.stringify({ control: true }) + "\\n");
+  await import(${JSON.stringify(FACTORY_DIST_URL)});
+  await import(${JSON.stringify(ENTRY_DIST_URL)});
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
 `;
 
 const SENTINEL_SOURCE = `export const SENTINEL = true;\n`;
@@ -398,6 +427,22 @@ const SENTINEL_SOURCE = `export const SENTINEL = true;\n`;
  * 生产入口）。**`@zcode/magic-context` 包本身**的解析不在 E1 范围——那是口径①
  * （spec `:106` / `:198`，Step 7 的 `test-magic-context-zero-load.mjs`：M0 白名单
  * 之外包内解析数 = 0）。两层不能互相顶替：本守卫绿不代表包内零加载，反之亦然。
+ *
+ * ＝＝ 根只有 create-app：为什么**不**补 `zcode-protocol/server.js` 根（Step 16 判定）＝＝
+ * `test-magic-context-zero-load.mjs` 在 `a1427747` 补了第二个根（协议入口），因为两个
+ * MC handler 的静态导入方是 `server.js`——「handler 顶层把 barrel 加回来」这条回归发生在
+ * create-app 的依赖图之外。本脚本**不需要**同样的补救，理由是可判定的：
+ *
+ *   本脚本的判据是「哪些**宿主装配模块**被解析」，而 `magic-context-historian.ts` /
+ *   `-usage-summary.ts` / `app/magic-context/**` 每一个都在模块顶层静态 import
+ *   `@zcode/magic-context`。因此「协议入口的图里静态引进其中任何一个」必然在关闭态
+ *   解析到 MC 包内文件，**zero-load 的 §2（M0 之外包内解析数 = 0）会先红**——它用的是
+ *   更强（包内文件计数）且已经是双根的判据。在这里补一个 server 根等于把同一条语义用
+ *   更弱的口径再断言一遍，代价是多一个子进程根（约 300 条解析 / 0.3s）。
+ *
+ * 反过来说：**zero-load 的 §2 是包内计数的必要条件，不是本脚本的替代品**——它看不见
+ * 「宿主装配模块被解析但包内文件没解析」这种形态（今天不存在，因为那意味着该模块是空的），
+ * 这正是本脚本继续独立存在的原因。
  *
  * 阳性对照：控制段 `import()` 门面时必然解析门面 + 它 re-export 的整个目录，前两条
  * marker 都会真实命中，等于自带正例。Step 4 起控制段**再 import 一次生产入口**
@@ -432,7 +477,7 @@ function isFactoryResolution(resolution) {
 }
 
 /** 跑一次 create-app 装配子进程；返回回传报告 + resolve hook 观测日志。 */
-async function runCreateAppDriver() {
+async function runCreateAppDriver({ enabled = false, forceImportFailure = false } = {}) {
   const tempRoot = mkdtempSync(join(tmpdir(), "omz-absent-event-"));
   const dbDir = join(tempRoot, "mc-db");
   const storageDir = join(tempRoot, "storage");
@@ -443,7 +488,7 @@ async function runCreateAppDriver() {
     mkdirSync(dir, { recursive: true });
   }
   writeFileSync(hookLog, "");
-  writeFileSync(join(tempRoot, "driver.mjs"), DRIVER_SOURCE);
+  writeFileSync(join(tempRoot, "driver.mjs"), driverSource({ enabled, forceImportFailure }));
   writeFileSync(join(tempRoot, "sentinel.mjs"), SENTINEL_SOURCE);
 
   try {
@@ -552,4 +597,60 @@ test("E1: create-app enabled!==true 装配路径——事件可达且工厂门�
   assert.equal(report.warnEvents[0].reason, "disabled");
   assert.equal(report.warnEvents[0].module, "bootstrap");
   assert.match(report.warnEvents[0].detail, /magicContext.enabled is false/);
+});
+
+/**
+ * E1b（Step 12 / phase-unplug / IM2）：**`import_failed` 降级**。
+ *
+ * 被钉住的语义：装配门开着、包也在，但这**一次**动态 import 失败时，create-app 必须
+ * 发 `transform_absent(import_failed)` 后继续启动（`appError === undefined`），而不是
+ * rethrow。原实现 `catch → emit → throw error` 等于「包在、只是这次没加载起来 = App
+ * 起不来」，与本轮「包缺失不再致命」的口径相反。
+ *
+ * 注入方式是 resolve hook 对**插件入口落点**抛错（`driverSource({ forceImportFailure })`）：
+ * 让 `create-app.ts` 那条真实的 `await import("./magic-context/index.js")` reject。
+ * 变异证明：把 `catch` 里的降级改回 `throw error`，本条红在 `appError` 上。
+ */
+test("E1b: 动态 import 失败降级为 absent(import_failed)，create-app 照常启动", async () => {
+  const { exit, report, stderr, windowResolutions } = await runCreateAppDriver({
+    enabled: true,
+    forceImportFailure: true,
+  });
+  assert.equal(exit, 0, `driver 应正常退出；stderr:\n${stderr}`);
+  // 主断言：降级，不抛出。退化回 rethrow 时 appError 会带上 "forced magic-context
+  // import failure"，这一条直接红。
+  assert.equal(
+    report.appError,
+    undefined,
+    "动态 import 失败不得让 createZCodeApp 失败（Step 12 降级）：" + `实际 ${report.appError}`,
+  );
+  assert.equal(report.closeError, undefined, `app.close 不该失败：${report.closeError}`);
+  // 事件：恰好一条、reason=import_failed、detail 带底层原因（可观测性不因降级而丢）。
+  assert.equal(
+    report.warnEvents.length,
+    1,
+    `import_failed 时必须恰好发一条 transform_absent，实际 ${report.warnEvents.length} 条`,
+  );
+  assert.equal(report.warnEvents[0].event, MAGIC_CONTEXT_TRANSFORM_ABSENT_EVENT);
+  assert.equal(report.warnEvents[0].reason, "import_failed");
+  assert.equal(report.warnEvents[0].module, "bootstrap");
+  assert.match(report.warnEvents[0].detail, /forced magic-context import failure/);
+  // 工厂没跑 ⇒ 没有库文件（与 db_null/disabled 同一可观测后果）。
+  assert.equal(report.dbFileExists, false, "import_failed 不得创建 magic-context.db");
+
+  // 活性＋范围：失败必须发生在**插件入口那一次解析**上（否则这条用例可能只是
+  // 「import 被别的地方拦掉了」），且失败之后装配面不得继续加载任何其它 MC 宿主模块
+  // （import 失败 = 这条边断了，后面的 assembly/historian/usage-summary 一个都不该来）。
+  assert.ok(
+    windowResolutions.some((resolution) => String(resolution.url) === ENTRY_DIST_URL),
+    "活性：窗口里必须出现插件入口解析的尝试记录（失败点就是被守卫的那条动态 import）",
+  );
+  const leaked = windowResolutions
+    .filter(isFactoryResolution)
+    .filter((resolution) => String(resolution.url) !== ENTRY_DIST_URL);
+  assert.deepEqual(
+    leaked.map((resolution) => resolution.url),
+    [],
+    "import 失败后不得再解析任何其它 MC 宿主装配模块——失败即缺席，下游一个都不该加载",
+  );
 });

@@ -196,7 +196,8 @@ export async function invalidateMagicContextCompartmentsForRewind(
  *   - `import_failed`  ：装配层（create-app.ts）动态 import 本模块失败（5b）
  *
  * 语义边界（fail-closed 契约不受影响，事件只是可观测性）：
- *   - import_failed：发事件后**照旧 throw**（保留 fail-closed 性状）；
+ *   - import_failed：发事件后**降级**，不再 throw（Step 12 / IM2：与 db_null 同性质，
+ *     rethrow 等于「包在、只是这次没加载起来 = App 起不来」）；
  *   - disabled / db_null：发事件后照旧 return undefined 降级；db_null 且
  *     `fail_closed_blocking=true` 时同样**先发事件、再 throw**。
  */

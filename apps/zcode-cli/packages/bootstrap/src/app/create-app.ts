@@ -813,12 +813,20 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     //
     // 它与 transform 工厂**同一个动态 import**：flag off 时这段代码根本不求值，
     // 于是 recorder 的模块也不会被加载（flag off 的成本纪律对新增的缝一视同仁）。
-    // ⑤-5b：动态 import 失败当前是**冒泡 throw**（fail-closed 性状），修复只补
-    // 可观测性——发 `magic_context.transform_absent`（reason=import_failed）后
-    // **照旧 rethrow**，不捕获成降级。事件名/reason 词表与工厂侧同源，统一走
-    // `magic-context-absent-event.ts` 这个零依赖 leaf（工厂本模块不能静态 import
-    // ——否则 flag 关时也会把整个 magic-context 模块图拖进启动路径；leaf 没有
-    // 这个成本）。
+    // ⑤-5b / Step 12（spec phase-unplug / IM2）：动态 import 失败**降级**为
+    // `absent(import_failed)`，不再 rethrow。原实现发完事件 `throw error`，等于
+    // 「包在、但 dist 缺失 / exports 写坏 / 解析链被打断 = 整个 App 起不来」——
+    // 而这条路径的全部后果只是「没有 magic-context」，与 db_null 那一档同性质，
+    // 不该比它更致命。降级形态：事件发出 → `pluginModule` 缺席 → 下面的工厂调用
+    // 连同实参一起短路 → 三个消费面（recorder / turnTransform / prompt 两注入）
+    // 全部按「没装」处理，其余启动流程一字不改。
+    //
+    // 摘除场景（Step 13 的一键摘除脚本）**走不到这里**：它把本段 import 整段删掉。
+    // 所以这条分支覆盖的正是「包仍在、只是这次没加载起来」，例如 SEA / bundle 里
+    // MC 是 external 而 staging 漏了资产。失败原因留在 detail 里，下次启动重新尝试。
+    // 事件名/reason 词表与工厂侧同源，统一走 `magic-context-absent-event.ts` 这个
+    // 零依赖 leaf（工厂本模块不能静态 import ——否则 flag 关时也会把整个
+    // magic-context 模块图拖进启动路径；leaf 没有这个成本）。
     //
     // ⑤-5a：**disabled 也要发事件**。flag 关时工厂永不执行，`transform_absent`
     // (reason=disabled) 若只由工厂发就一次都不会出现——「压缩停机」在 disabled
@@ -845,7 +853,8 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     let closeMagicContext: (() => Promise<void>) | undefined;
     let magicContextPlugin: import("./magic-context/index.js").MagicContextPlugin | undefined;
     if (magicContextEffectiveEnabled) {
-      let pluginModule: typeof import("./magic-context/index.js");
+      // Step 12：import 失败只降级、不抛出——`pluginModule` 缺席即「这次没装上」。
+      let pluginModule: typeof import("./magic-context/index.js") | undefined;
       try {
         pluginModule = await import("./magic-context/index.js");
       } catch (error) {
@@ -854,12 +863,15 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           "import_failed",
           error instanceof Error ? error.message : String(error),
         );
-        throw error;
       }
       // usage recorder 由插件**自己构造并返回**（入参里不再有 `usageRecorder`）：
       // 它必须先于 transform（`prime(db)` 在工厂内、DB 开出来之后立刻发生），这条
       // 顺序现在由插件内部保证，装配层不再持有构造权。
-      magicContextPlugin = await pluginModule.createMagicContextPlugin({
+      //
+      // `?.` 是 Step 12 的降级点，不是风格偏好：`pluginModule` 缺席（import_failed）
+      // 时整个工厂调用**连同下面一百多行实参一起短路**，装配层因此不需要第二个
+      // 「缺席分支」——它与「flag 关」在下游本来就是同一条路径（产物都是 undefined）。
+      magicContextPlugin = await pluginModule?.createMagicContextPlugin({
         // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
         // 是 `features.magicContext && magicContext.enabled`，这一位与上面装配门读
         // 的是同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。

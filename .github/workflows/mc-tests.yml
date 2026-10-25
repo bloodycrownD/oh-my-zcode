@@ -1,0 +1,144 @@
+# magic-context 测试族 CI（spec `magic-context-decoupling` T-MC13 / Step 16）
+#
+# 为什么必须新建一个 workflow：本仓库 `.github/workflows/` 之前只有
+# `release-desktop.yml`，它只在 tag 上跑、只做打包与发布，**没有任何 test job**。
+# Step 16 要「接线 3 个未挂测试 + 29 个 MC 脚本」，那里无处可挂，于是单开这一个。
+#
+# 触发面刻意**不做 path 过滤**：MC 的接触点横跨 `core` / `bootstrap` / `adapters` /
+# `cli` / `magic-context` 五个包与若干根脚本，任何一条 paths 白名单都容易漏掉
+# 一类改动（漏掉的表现是「门禁没跑」而不是「门禁变红」，比失败更危险）。
+#
+# 有的脚本必须 `node --test`、有的必须带 `tsx --test`、有的直接 `node`——命令形态写在
+# 各包 `package.json` 的 script 里，本文件**只点名字**，不复制命令形态。新增 MC 脚本时
+# 先加 script 再往下面的清单里加一行，两处不要各写一套。
+#
+# 实测口径（2026-10-25，本分支）：本清单 = 39 项（MC 包 14 + bootstrap 18 +
+# core 3 + adapters 4，其中 `test:edit-retry` 是 rewind 端口（Z8）的宿主调用方，
+# 与 MC 同批回归）。spec 里写的「29 个」成稿早于本迭代新增的
+# `test:magic-context-coupling-budget` / `test:rewind-compartments` /
+# `test:mc-entry-identity-guard` / `test:mc-compartment-rewind-host` 四个脚本，
+# 按实际清单执行，不按旧数字裁剪。
+#
+# 未纳入的 MC 脚本（`test-magic-context-lifecycle.mjs` / `-ui-config.mjs` /
+# `-ui-model-picker.mjs`）：它们在包 `package.json` 里**没有 script**，属于历史遗留的
+# 「裸脚本」，前置条件（UI 编译产物 / 直构夹具）尚未登记清楚。要纳入必须先补 script
+# 并写清前置，不要在这里硬写 node 路径绕过包的口径。
+
+name: Magic Context Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mc-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  mc-tests:
+    name: magic-context suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      # pnpm 版本取根 package.json 的 packageManager 字段
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # 被测代码一律从 dist 加载（与本地门禁同一手法），所以必须先产出编译产物：
+      # 根 `typecheck` 是 `tsc -b`，覆盖 `packages/*`；`@zcode/bootstrap` /
+      # `@zcode/adapters` 的 build 经 turbo 的 `^build` 连带产出 magic-context /
+      # core / contracts / i18n 的 dist。bootstrap 自己的 `typecheck` 是
+      # `tsc --noEmit`，**不产出 dist**，不能拿它顶替这一步。
+      - name: Build workspace type outputs
+        run: |
+          pnpm typecheck
+          pnpm exec turbo --cwd apps/zcode-cli run build --force \
+            --filter=@zcode/bootstrap --filter=@zcode/adapters
+
+      - name: Run magic-context suites
+        shell: bash
+        run: |
+          set -euo pipefail
+          run() {
+            echo "::group::$1 → $2"
+            pnpm --filter "$1" run "$2"
+            echo "::endgroup::"
+          }
+
+          # ── MC 包（14）────────────────────────────────────────────────────
+          MC=@zcode/magic-context
+          run $MC smoke
+          run $MC test
+          run $MC test:host
+          run $MC test:ctx-status-diagnostics
+          run $MC test:transform
+          run $MC test:historian
+          run $MC test:ctx-tools
+          run $MC test:ctx-search-memory
+          run $MC test:prompt-surface
+          run $MC test:memory-promotion
+          run $MC test:mural-render
+          run $MC test:tool-name-closure
+          run $MC test:boot-busy-retry
+          # Step 11：rewind 后 M0 摘要按水位过滤（T-RW1..RW7）
+          run $MC test:rewind-compartments
+
+          # ── bootstrap 宿主装配（18）───────────────────────────────────────
+          BS=@zcode/bootstrap
+          run $BS test:magic-context
+          run $BS test:mc-section-zh
+          run $BS test:settle-background
+          run $BS test:mural-media-blocks
+          run $BS test:prompt-surface-toolset-hash
+          # Step 12：import_failed 降级（E1b）
+          run $BS test:magic-context-absent-event
+          run $BS test:magic-context-plugin
+          # Step 9：投影身份守卫（T-MC6/7）
+          run $BS test:mc-entry-identity-guard
+          # Step 10：宿主侧 compartment 失效（Z8）
+          run $BS test:mc-compartment-rewind-host
+          run $BS test:magic-context-historian
+          run $BS test:magic-context-config-rpc
+          run $BS test:magic-context-memories-rpc
+          run $BS test:magic-context-usage
+          run $BS test:magic-context-tag-strip
+          # Step 16：门控层源码形状守卫（N1 / 同源守卫）
+          run $BS test:magic-context-gate
+          # Step 7：关闭态零加载（口径①）
+          run $BS test:magic-context-zero-load
+          # Step 15：耦合预算（IM7）
+          run $BS test:magic-context-coupling-budget
+          # rewind 端口（Z8）的宿主调用方：v4 编辑重发/重试路径
+          run $BS test:edit-retry
+
+          # ── core（3）─────────────────────────────────────────────────────
+          CORE=@zcode/core
+          run $CORE test:magic-context-section
+          run $CORE test:magic-context-section-ctx-note
+          run $CORE test:prompt-language-context
+
+          # ── adapters（4）─────────────────────────────────────────────────
+          AD=@zcode/adapters
+          run $AD test:magic-context-domain
+          run $AD test:magic-context-boundaries
+          # Step 5：配置装载面只走窄子路径（W1）
+          run $AD test:magic-context-config-narrow
+          # 没有 package script 的裸脚本：直接点路径（不要为它在包里再开一个入口）
+          echo "::group::adapters → scripts/test-feature-flag.mjs"
+          node apps/zcode-cli/packages/adapters/scripts/test-feature-flag.mjs
+          echo "::endgroup::"

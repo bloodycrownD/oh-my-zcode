@@ -37,6 +37,7 @@
     "test:magic-context-tag-strip": "tsx --test scripts/test-magic-context-tag-strip.mjs",
     "test:magic-context-gate": "tsx --test scripts/test-magic-context-gate.mjs",
     "test:magic-context-zero-load": "node --test scripts/test-magic-context-zero-load.mjs",
+    "test:magic-context-coupling-budget": "node --test scripts/test-magic-context-coupling-budget.mjs",
     "test:held-queue-routing": "tsx --test scripts/test-held-queue-routing.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
