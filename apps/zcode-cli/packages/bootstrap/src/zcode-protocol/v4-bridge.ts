@@ -19,14 +19,16 @@ import { createExternalTurnFaultError } from "@zcode/core";
 import {
   V4_NOTIFICATIONS,
   conversationInputIntentSchema,
-  type AttachmentRef,
   type CommandEnvelope,
-  type ConversationInputIntent,
   type V4ConversationFileChangesResult,
   type V4ConversationFileRewindPreviewResult,
   type SessionSummary,
 } from "@zcode/shared/zcode-protocol-v4";
 import { V4CommandExecutor } from "../zcode-protocol-v4/commands/executor.js";
+import {
+  resolveCanonicalInput,
+  type ResolvedCanonicalInput,
+} from "../zcode-protocol-v4/commands/input-intent.js";
 import { V4QueuePromotionLeaseUnavailableError } from "../zcode-protocol-v4/commands/handlers/queue.js";
 import { V4CapabilityUnsupportedError } from "../zcode-protocol-v4/commands/handlers/interaction-background.js";
 import {
@@ -259,137 +261,31 @@ async function previewConversationFileRewind(
   });
 }
 
-interface InputCommandForAdmission {
-  kind: ConversationInputIntent["kind"];
-  text: string;
-  attachments: readonly AttachmentRef[];
-  sharedContextRefs?: ConversationInputIntent["sharedContextRefs"];
-  requestedDelivery?: ConversationInputIntent["delivery"]["requested"];
-  admittedDelivery?: ConversationInputIntent["delivery"]["admitted"];
-  fallbackReasonCode?: string;
-  provenance?: ConversationInputIntent["provenance"];
-}
-
 type ResolveAdmissionRowTarget = (
   sessionId: string,
   target: { rowId: number; entityId: string },
   action: "editUserQuery" | "retryTurn",
 ) => ConversationRowTargetResolution | null;
 
-function admissionAttachmentRefs(
-  attachments: NonNullable<
-    Extract<ConversationRowTargetResolution, { ok: true }>["editTarget"]
-  >["intent"]["attachments"],
-): AttachmentRef[] {
-  return (
-    attachments?.flatMap((attachment) =>
-      attachment.ref
-        ? [
-            {
-              // 重试／编辑必须保留与原 row 相同的附件来源：逐字段枚举会丢掉
-              // sourceKind，text/plain 附件在再 admission 后失去预览授权依据。
-              ...attachment,
-              ref: attachment.ref,
-            },
-          ]
-        : [],
-    ) ?? []
-  );
-}
-
 /**
- * admission 只持久化真正会产生输入的命令。edit/retry 不能从 payload 猜 intent；
- * 必须复用 projection 的 canonical target，并把旧来源折叠进 provenance。
+ * admission 侧的 I3 接线：先把 row target 翻译成 canonical 继承源（需要 v4 投影），
+ * 再把 text / intent / attachments / delivery 的解析整体交给 `resolveCanonicalInput`。
+ * edit/retry 不能从 payload 猜 intent；其余命令的 payload 分支都住在共享函数里，
+ * 本文件不再保留第二套继承规则。
  */
 function resolveInputCommandForAdmission(
   envelope: CommandEnvelope,
-  admissionSessionId: string,
   resolveRowTarget: ResolveAdmissionRowTarget,
-): InputCommandForAdmission | null {
-  if (envelope.type === "createSession") {
-    const firstInput = (
-      envelope.payload as {
-        firstInput?: { text: string; attachments?: AttachmentRef[] };
-      }
-    ).firstInput;
-    return firstInput
-      ? {
-          kind: "sendText",
-          text: firstInput.text,
-          attachments: firstInput.attachments ?? [],
-        }
-      : null;
+): ResolvedCanonicalInput | null {
+  if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") {
+    return resolveCanonicalInput(null, envelope.payload, envelope);
   }
-  if (envelope.type === "createSelectionSideSession") {
-    const firstInput = (
-      envelope.payload as {
-        firstInput?: { text: string };
-      }
-    ).firstInput;
-    return firstInput
-      ? {
-          kind: "sendText",
-          text: firstInput.text,
-          attachments: [],
-        }
-      : null;
-  }
-  if (envelope.type === "sendText" || envelope.type === "sendGoalCommand") {
-    const payload = envelope.payload as {
-      text: string;
-      attachments?: AttachmentRef[];
-      context_refs?: ConversationInputIntent["sharedContextRefs"];
-    };
-    return {
-      kind: envelope.type,
-      text: payload.text,
-      attachments: payload.attachments ?? [],
-      ...(payload.context_refs ? { sharedContextRefs: payload.context_refs } : {}),
-    };
-  }
-  if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") return null;
   if (!envelope.sessionId) return null;
-  const payload = envelope.payload as {
-    target: { rowId: number; entityId: string };
-    newText?: string;
-    attachments?: AttachmentRef[];
-  };
+  const payload = envelope.payload as { target: { rowId: number; entityId: string } };
   const resolution = resolveRowTarget(envelope.sessionId, payload.target, envelope.type);
   if (!resolution?.ok || !resolution.editTarget) return null;
-  const canonical = resolution.editTarget;
-
   // 会先提交 append-only branch cut，不再为 edit 创建 hidden child。
-  const originalSourceCommandId =
-    canonical.intent.provenance?.sourceCommandId ?? canonical.intent.sourceCommandId;
-  return {
-    kind: canonical.intent.kind,
-    text:
-      envelope.type === "editUserQuery"
-        ? (payload.newText ?? canonical.intent.text)
-        : canonical.intent.text,
-    attachments:
-      envelope.type === "editUserQuery" && payload.attachments
-        ? payload.attachments
-        : admissionAttachmentRefs(canonical.intent.attachments),
-    ...(canonical.intent.requestedDelivery
-      ? { requestedDelivery: canonical.intent.requestedDelivery }
-      : {}),
-    ...(canonical.intent.admittedDelivery
-      ? { admittedDelivery: canonical.intent.admittedDelivery }
-      : {}),
-    ...(canonical.intent.fallbackReasonCode
-      ? { fallbackReasonCode: canonical.intent.fallbackReasonCode }
-      : {}),
-    ...(originalSourceCommandId
-      ? {
-          provenance: canonical.intent.provenance ?? {
-            sourceCommandId: originalSourceCommandId,
-            ...(canonical.intent.queueItemId ? { queueItemId: canonical.intent.queueItemId } : {}),
-            ...(canonical.intent.clientId ? { clientId: canonical.intent.clientId } : {}),
-          },
-        }
-      : {}),
-  };
+  return resolveCanonicalInput(resolution.editTarget.intent, envelope.payload, envelope);
 }
 
 function isConversationInputAdmissionCommand(type: CommandEnvelope["type"]): boolean {
@@ -405,18 +301,18 @@ function buildForkInitialInput(
   envelope: CommandEnvelope,
   childSessionId: string,
   admission: { admissionSeq: number; admittedAt: number; queueItemId: string },
-  input: InputCommandForAdmission,
+  input: ResolvedCanonicalInput,
 ): ForkCommitBundle["initialInput"] {
-  const requested = input.requestedDelivery ?? "startNow";
-  const fallbackReasonCode = input.fallbackReasonCode;
+  const requested = input.delivery.requested ?? "startNow";
+  const fallbackReasonCode = input.delivery.fallbackReasonCode;
   const admitted =
-    input.admittedDelivery ??
+    input.delivery.admitted ??
     (fallbackReasonCode ? "queue" : requested === "auto" ? "startNow" : requested);
   const intent = conversationInputIntentSchema.parse({
     sourceCommandId: envelope.commandId,
     queueItemId: admission.queueItemId,
     clientId: envelope.clientId || "cli",
-    kind: input.kind,
+    kind: input.intent.kind,
     text: input.text,
     attachments: input.attachments,
     delivery: {
@@ -430,7 +326,7 @@ function buildForkInitialInput(
       : { state: "notRequested" },
     dispatch: { state: "admitted" },
     admittedAt: admission.admittedAt,
-    ...(input.provenance ? { provenance: input.provenance } : {}),
+    ...(input.intent.provenance ? { provenance: input.intent.provenance } : {}),
   });
   return {
     id: admission.queueItemId,
@@ -711,12 +607,11 @@ export function createConversationV4Gateway(
       if (!context.deps.sessionStore?.saveSessionInput) return null;
       const input = resolveInputCommandForAdmission(
         envelope,
-        sessionId,
         (sourceSessionId, target, action) =>
           context.v4Gateway?.resolveRowActionTarget(sourceSessionId, target, action) ?? null,
       );
       if (!input) return null;
-      const kind = input.kind;
+      const kind = input.intent.kind;
       const record = context.sessions.get(sessionId);
       if (record?.persistence === "deferred") {
         // session_input 有 session 外键；draft 要到 startPromptTurn 后台阶段才持久化，
@@ -731,7 +626,7 @@ export function createConversationV4Gateway(
       // 这是执行前账本的“预计投递边界”；TurnSteerQueued 会用实际 delivery/回退原因
       // 幂等更新同一记录。startNow 不能伪装成 queue，否则重启 discarded 的诊断事实失真。
       const requestedDelivery =
-        input.requestedDelivery ??
+        input.delivery.requested ??
         (routingMode === "enqueue"
           ? "queue"
           : routingMode === "guide" && kind === "sendText"
@@ -739,12 +634,12 @@ export function createConversationV4Gateway(
             : "startNow");
       const attachmentRefs = input.attachments;
       const fallbackReasonCode =
-        input.fallbackReasonCode ??
+        input.delivery.fallbackReasonCode ??
         (requestedDelivery === "guide" && attachmentRefs.length > 0
           ? "guide.attachmentsUnsupported"
           : undefined);
       const admittedDelivery =
-        input.admittedDelivery ??
+        input.delivery.admitted ??
         (fallbackReasonCode
           ? "queue"
           : requestedDelivery === "auto"
@@ -757,7 +652,9 @@ export function createConversationV4Gateway(
         kind,
         text: input.text ?? "",
         attachments: attachmentRefs,
-        ...(input.sharedContextRefs ? { sharedContextRefs: input.sharedContextRefs } : {}),
+        ...(input.intent.sharedContextRefs
+          ? { sharedContextRefs: input.intent.sharedContextRefs }
+          : {}),
         delivery: {
           requested: requestedDelivery,
           admitted: admittedDelivery,
@@ -771,7 +668,7 @@ export function createConversationV4Gateway(
             : { state: "notRequested" },
         dispatch: { state: "admitted" },
         admittedAt: admission.admittedAt,
-        ...(input.provenance ? { provenance: input.provenance } : {}),
+        ...(input.intent.provenance ? { provenance: input.intent.provenance } : {}),
       });
       await context.deps.sessionStore.saveSessionInput({
         id: admission.queueItemId,
@@ -1230,7 +1127,6 @@ export function createConversationV4Gateway(
       const forkedSessionId = String(createSessionId());
       const input = resolveInputCommandForAdmission(
         envelope,
-        forkedSessionId,
         (sourceSessionId, target, action) =>
           context.v4Gateway?.resolveRowActionTarget(sourceSessionId, target, action) ?? null,
       );

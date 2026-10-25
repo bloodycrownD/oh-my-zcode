@@ -2,6 +2,7 @@ import type { TurnInputIntentMetadata } from "@zcode/contracts";
 import type { ModelSelection } from "@zcode/shared";
 import type { AttachmentRef, CommandEnvelope, QueueItem } from "@zcode/shared/zcode-protocol-v4";
 import type { SubmissionMode } from "@zcode/shared/zcode-protocol-v4";
+import type { CanonicalTurnAttachment } from "../event-normalizer.js";
 import { commandAdmissionOf } from "./executor.js";
 
 interface CanonicalCommandIntent {
@@ -108,6 +109,173 @@ export function inputIntentMetadataFromCanonical(
         }
       : {}),
   };
+}
+
+/**
+ * edit/retry 的 canonical 继承源：投影 `ConversationEditTarget["intent"]` 的结构子集。
+ * 只登记 `resolveCanonicalInput` 真正会读的字段——新增继承字段必须先在投影事实里存在，
+ * 并只在本文件登记，调用方不得另起一套。
+ */
+export interface CanonicalInputRecord {
+  kind: "sendText" | "sendGoalCommand";
+  text: string;
+  sourceCommandId?: string;
+  clientId?: string;
+  /** 原轮附件（投影形状：`ref` 可能缺省）；无 ref 表示没有已提交内容，不可重发。 */
+  attachments?: readonly CanonicalTurnAttachment[];
+  queueItemId?: string;
+  requestedDelivery?: TurnInputIntentMetadata["requestedDelivery"];
+  admittedDelivery?: TurnInputIntentMetadata["admittedDelivery"];
+  fallbackReasonCode?: string;
+  modelSelection?: ModelSelection;
+  mode?: SubmissionMode;
+  planEnabled?: boolean;
+  provenance?: TurnInputIntentMetadata["provenance"];
+}
+
+/** 继承自 canonical 的投递事实；缺省键 = 本次未继承，由调用方决定（admission 自行推导）。 */
+export interface CanonicalInputDelivery {
+  requested?: TurnInputIntentMetadata["requestedDelivery"];
+  admitted?: TurnInputIntentMetadata["admittedDelivery"];
+  fallbackReasonCode?: string;
+}
+
+export interface ResolvedCanonicalInput {
+  /** 本次真正要发送的权威文本（I3：text 只有一个来源）。 */
+  text: string;
+  /** 交给 `inputIntentMetadataFromCanonical` 的继承源；其 `text` 恒等于上方 `text`。 */
+  intent: CanonicalCommandIntent;
+  /** payload 显式优先、否则继承原轮的附件引用。 */
+  attachments: readonly AttachmentRef[];
+  /** 继承的投递事实。 */
+  delivery: CanonicalInputDelivery;
+}
+
+/**
+ * I3 的唯一解析入口：一条 command 的 text / intent / attachments / delivery 只在这里产生。
+ *
+ * 为什么必须唯一：admission（`v4-bridge` 写 `session_input` 账本）与执行
+ * （`fork-edit-retry` 起轮）过去各自实现同一套 text/attachments/delivery/provenance 继承
+ * 规则，当前结果一致纯属人工对齐、无断言守护——`intent.text` 类缺陷反复回归的结构性原因。
+ *
+ * `record` 是 edit/retry 的 canonical 继承源，其它命令传 null / undefined；
+ * 返回 null 表示这条 command 不产生用户输入。`payload` 必须传 `envelope.payload` 本体：
+ * 投递事实只有一个来源，参数分开只是为了让 admission 与执行两侧能用同一份入参调用。
+ */
+export function resolveCanonicalInput(
+  record: CanonicalInputRecord | null | undefined,
+  payload: unknown,
+  envelope: CommandEnvelope,
+): ResolvedCanonicalInput | null {
+  if (envelope.type === "createSession") {
+    const firstInput = (payload as { firstInput?: { text: string; attachments?: AttachmentRef[] } })
+      .firstInput;
+    if (!firstInput) return null;
+    return assembleResolvedCanonicalInput({
+      kind: "sendText",
+      text: firstInput.text,
+      attachments: firstInput.attachments ?? [],
+    });
+  }
+  if (envelope.type === "createSelectionSideSession") {
+    const firstInput = (payload as { firstInput?: { text: string } }).firstInput;
+    if (!firstInput) return null;
+    return assembleResolvedCanonicalInput({
+      kind: "sendText",
+      text: firstInput.text,
+      attachments: [],
+    });
+  }
+  if (envelope.type === "sendText" || envelope.type === "sendGoalCommand") {
+    const sendPayload = payload as {
+      text: string;
+      attachments?: AttachmentRef[];
+      context_refs?: TurnInputIntentMetadata["sharedContextRefs"];
+    };
+    return assembleResolvedCanonicalInput({
+      kind: envelope.type,
+      text: sendPayload.text,
+      attachments: sendPayload.attachments ?? [],
+      ...(sendPayload.context_refs ? { sharedContextRefs: sendPayload.context_refs } : {}),
+    });
+  }
+  if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") return null;
+  if (!record) return null;
+  const editPayload = payload as { newText?: string; attachments?: AttachmentRef[] };
+  return assembleResolvedCanonicalInput({
+    kind: record.kind,
+    // edit 重发新文本；retry 重发原轮 canonical 文本（截断后已拿不到可见文本）。
+    text: envelope.type === "editUserQuery" ? (editPayload.newText ?? record.text) : record.text,
+    // payload 显式给 attachments（含 []）优先；缺省才继承原轮。
+    attachments:
+      envelope.type === "editUserQuery" && editPayload.attachments
+        ? editPayload.attachments
+        : inheritedAttachmentRefs(record.attachments),
+    record,
+  });
+}
+
+/** 投影附件 → 可重发引用：无 ref 的附件没有已提交内容，不能重发。 */
+function inheritedAttachmentRefs(
+  attachments: readonly CanonicalTurnAttachment[] | undefined,
+): AttachmentRef[] {
+  return (
+    attachments?.flatMap((attachment) =>
+      attachment.ref
+        ? [
+            {
+              // 重试／编辑必须保留与原 row 相同的附件来源：逐字段枚举会丢掉
+              // sourceKind，text/plain 附件在再 admission 后失去预览授权依据。
+              ...attachment,
+              ref: attachment.ref,
+            },
+          ]
+        : [],
+    ) ?? []
+  );
+}
+
+/** 把各分支解析出的字段装配成唯一结果；text/intent/delivery 的相对关系只在这里决定。 */
+function assembleResolvedCanonicalInput(seed: {
+  kind: "sendText" | "sendGoalCommand";
+  text: string;
+  attachments: readonly AttachmentRef[];
+  record?: CanonicalInputRecord;
+  sharedContextRefs?: TurnInputIntentMetadata["sharedContextRefs"];
+}): ResolvedCanonicalInput {
+  const { record } = seed;
+  const delivery: CanonicalInputDelivery = {
+    ...(record?.requestedDelivery ? { requested: record.requestedDelivery } : {}),
+    ...(record?.admittedDelivery ? { admitted: record.admittedDelivery } : {}),
+    ...(record?.fallbackReasonCode ? { fallbackReasonCode: record.fallbackReasonCode } : {}),
+  };
+  // 原始输入来源：provenance 优先，其次原轮的 sourceCommandId——
+  // edit/retry 换了 commandId，但归因必须仍指向真正产生这条输入的原始命令。
+  const originalSourceCommandId = record?.provenance?.sourceCommandId ?? record?.sourceCommandId;
+  const provenance = originalSourceCommandId
+    ? (record?.provenance ?? {
+        sourceCommandId: originalSourceCommandId,
+        ...(record?.queueItemId ? { queueItemId: record.queueItemId } : {}),
+        ...(record?.clientId ? { clientId: record.clientId } : {}),
+      })
+    : undefined;
+  const intent: CanonicalCommandIntent = {
+    kind: seed.kind,
+    text: seed.text,
+    ...(record?.sourceCommandId ? { sourceCommandId: record.sourceCommandId } : {}),
+    ...(record?.clientId ? { clientId: record.clientId } : {}),
+    ...(record?.queueItemId ? { queueItemId: record.queueItemId } : {}),
+    ...(delivery.requested ? { requestedDelivery: delivery.requested } : {}),
+    ...(delivery.admitted ? { admittedDelivery: delivery.admitted } : {}),
+    ...(delivery.fallbackReasonCode ? { fallbackReasonCode: delivery.fallbackReasonCode } : {}),
+    ...(record?.modelSelection ? { modelSelection: record.modelSelection } : {}),
+    ...(record?.mode ? { mode: record.mode } : {}),
+    ...(record?.planEnabled !== undefined ? { planEnabled: record.planEnabled } : {}),
+    attachmentRefs: seed.attachments,
+    ...(seed.sharedContextRefs ? { sharedContextRefs: [...seed.sharedContextRefs] } : {}),
+    ...(provenance ? { provenance } : {}),
+  };
+  return { text: seed.text, intent, attachments: seed.attachments, delivery };
 }
 
 /**
