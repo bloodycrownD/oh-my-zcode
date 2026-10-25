@@ -38,13 +38,24 @@
  * H. 等价性（T-IA3 的仓内替身）：admission 侧（无选择事实）与执行侧（带选择事实）
  *    对同一 payload 产出完全相同的 text / attachments / delivery / 非模型 intent。
  * I. T-IA4 源码形状守卫：兜底不许搬家复活。
+ * I3. 执行侧（fork-edit-retry）不得再有本地模型优先级链 / 自算 pin——只传事实。
+ * I4. 模型优先级链（`??` + 会话活值）只许在 input-intent.ts；其余站点全部在
+ *     allowlist 里并注明「待收口」（cr-func N2：不许一轮全清，但也不许再长新的）。
+ * I5. `modelSelectionPinned:` 的自算只许在 input-intent.ts；其余同上。
+ * I6. retry 分支不得把 payload 整体断言成 edit 形状（`as { newText: string }`）——
+ *     旧写法让「retry 偷读 newText」在类型上合法，是兜底搬家的温床。
+ * I7. queue.ts 的执行文本（提升轮 content / intent.text）仍读投影项，属 RC1 的
+ *     执行侧另一半；Step 3 收口，本步只把现状钉进 allowlist，新增用法即红。
+ * J. 执行侧重建 intent 的 pin 形状：`resolveCanonicalInput` 保持三态（缺键=无 pin
+ *    事实），`inputIntentMetadataFromCanonical` 在 wire 上落实为 boolean。
+ * K. retry 的 canonical 解析不得读 `payload.newText`（payload 只有 target）。
  *
  * 运行方式：`pnpm --dir apps/zcode-cli/packages/bootstrap run test:input-authority`
  * （= `tsx --test scripts/test-input-authority.mjs`；tsx 直接吃 src，免去先 build）。
  */
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { test } from "node:test";
 import { dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -53,12 +64,23 @@ const here = dirname(fileURLToPath(import.meta.url));
 const srcRoot = join(here, "..", "src");
 const inputIntentPath = join(srcRoot, "zcode-protocol-v4", "commands", "input-intent.ts");
 const bridgePath = join(srcRoot, "zcode-protocol", "v4-bridge.ts");
+const forkEditRetryPath = join(
+  srcRoot,
+  "zcode-protocol-v4",
+  "commands",
+  "handlers",
+  "fork-edit-retry.ts",
+);
+const queueHandlerPath = join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "queue.ts");
+const INPUT_INTENT_REL_PATH = "zcode-protocol-v4/commands/input-intent.ts";
 
 // fork-edit-retry ⇄ input-intent ⇄ executor ⇄ handlers/index 之间存在循环依赖；
 // 与 test-edit-retry-model 同源：先以 executor 为入口初始化（commandAdmissionOf 是
 // 函数声明、提升后可用），再取 input-intent 的导出才不会在重导出上命中 TDZ。
 await import(pathToFileURL(join(srcRoot, "zcode-protocol-v4", "commands", "executor.ts")).href);
-const { resolveCanonicalInput } = await import(pathToFileURL(inputIntentPath).href);
+const { inputIntentMetadataFromCanonical, resolveCanonicalInput } = await import(
+  pathToFileURL(inputIntentPath).href
+);
 
 process.on("exit", (code) => {
   console.log("");
@@ -594,11 +616,10 @@ test("I1 T-IA4：input-intent.ts 的 edit 分支不得复活 `newText ?? record.
     "edit 分支不得回退 record.text（= 编辑后重发旧文本）",
   );
   // 正向：edit 用 newText、retry 用 record.text，两分支都只认一个来源。
-  assertPattern(
-    code,
-    /envelope\.type === "editUserQuery"\s*\?\s*editPayload\.newText\s*:\s*record\.text/u,
-    "edit/retry 的 text 必须直接取各自唯一来源（M3 形状）",
-  );
+  // Step 2 形状变更（cr-func N5）：`retryTurn` 的 payload 只有 target，旧实现用一句
+  // `payload as { newText: string }` 给 retry 也伪造了 newText 字段。现在按
+  // `envelope.type` 拆两个分支，各自断言自己的 payload 形状（见 I6）。
+  assertBranchTextShape(code);
 });
 
 test("I2 T-IA4：v4-bridge.ts 不得再出现 `?? canonical.intent.text`（旧锚点仍须为绿）", () => {
@@ -612,4 +633,338 @@ test("I2 T-IA4：v4-bridge.ts 不得再出现 `?? canonical.intent.text`（旧�
   // 同一条 admission 路径上不许再留 `text: input.text ?? ""`：ResolvedCanonicalInput.text
   // 是必填 string，兜底只会把契约破坏藏起来（本波只钉账本写入这一处，见 new_risks）。
   assertNoPattern(code, /\btext:\s*input\.text\s*\?\?/u, "账本 text 不得再套 ?? 兜底");
+});
+
+// ── I3..I7: 模型选择权威 / 执行侧去重 / queue 执行文本的源码形状守卫 ──────────
+//
+// 本组守卫钉的是 Step 2（执行侧改调唯一入口）的形状。它们**改前是红的**：
+// `fork-edit-retry.ts` 里那句 `explicitModelSelection ?? liveSelection ??
+// editTarget.intent.modelSelection` 与 `modelSelectionPinned: explicitModelSelection
+// !== undefined` 就是被删掉的重复规则；`input-intent.ts` 里那句
+// `payload as { newText: string }` 就是给 retry 伪造的类型。
+
+/** 递归列出 src 下所有 .ts：守卫覆盖整棵执行侧代码树，而不是点名的几个文件。 */
+function listSourceFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return listSourceFiles(path);
+    return entry.name.endsWith(".ts") ? [path] : [];
+  });
+}
+
+function relativeSourcePath(filePath) {
+  return filePath.slice(srcRoot.length + 1).replace(/\\/gu, "/");
+}
+
+/**
+ * 行号保持的注释剥离：块注释替换成等量换行、行注释整段删除。
+ * allowlist 按「相对路径 + 该行代码」核对，行号漂移不会让条目静默失效。
+ */
+function stripCommentsKeepLines(source) {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//gu, (match) => match.replace(/[^\n]/gu, ""))
+    .replace(/(^|[^:])\/\/.*$/gmu, "$1");
+}
+
+function codeLinesOf(filePath) {
+  return stripCommentsKeepLines(readFileSync(filePath, "utf8")).split(/\r?\n/u);
+}
+
+/** 逐行收集真实代码里命中 predicate 的非空行；`only` 可把扫描限定到单个文件。 */
+function collectCodeLineMatches(predicate, only) {
+  const matches = [];
+  const files = only ? [only] : listSourceFiles(srcRoot);
+  for (const filePath of files) {
+    const file = relativeSourcePath(filePath);
+    codeLinesOf(filePath).forEach((line, index) => {
+      const code = line.trim();
+      if (!code) return;
+      if (predicate(code)) matches.push({ code, file, line: index + 1 });
+    });
+  }
+  return matches;
+}
+
+/**
+ * allowlist 双向核对：
+ * - 未登记的新站点 → 红（先按 spec 收口，或在条目里登记并注明排到哪一步）；
+ * - 登记但已不存在的条目 → 红（站点已收口/改写，必须删条目，否则守卫变成装饰）。
+ * `ownerFile` 是唯一规则的所有者，免检。
+ */
+function assertSourceAllowlist({ allowlist, label, matches, ownerFile }) {
+  const rest = matches.filter((match) => match.file !== ownerFile);
+  const allowed = new Set(allowlist.map((entry) => `${entry.file}::${entry.code}`));
+  const found = new Set(rest.map((match) => `${match.file}::${match.code}`));
+  const unexpected = [...found].filter((key) => !allowed.has(key));
+  assert.deepEqual(
+    unexpected,
+    [],
+    `${label}：出现未登记的站点——先按 spec 收口，或在 allowlist 里登记并注明排到哪一步`,
+  );
+  const stale = [...allowed].filter((key) => !found.has(key));
+  assert.deepEqual(
+    stale,
+    [],
+    `${label}：allowlist 条目已过期（该站点已收口/改写），请删除或更新条目`,
+  );
+}
+
+/** edit / retry 两个分支各自的文本来源（Step 2 的形状）。 */
+function assertBranchTextShape(code) {
+  for (const [type, sourcePattern, message] of [
+    ["editUserQuery", /text:\s*editPayload\.newText/u, "edit 的 text 只能取 payload.newText"],
+    ["retryTurn", /text:\s*record\.text/u, "retry 的 text 只能取 record.text"],
+  ]) {
+    const start = code.indexOf(`if (envelope.type === "${type}")`);
+    assert.ok(start >= 0, `${type} 必须是独立分支（按 envelope.type 拆开，各自断言 payload 形状）`);
+    const end = code.indexOf("\n  }", start);
+    assert.ok(end > start, `${type} 分支必须是独立块`);
+    assert.match(code.slice(start, end), sourcePattern, message);
+  }
+}
+
+test("I3 执行侧（fork-edit-retry）不得再有本地模型优先级链 / 自算 pin：只许传事实", () => {
+  const code = stripComments(readFileSync(forkEditRetryPath, "utf8"));
+  assertNoPattern(
+    code,
+    /\?\?\s*liveSelection/u,
+    "执行侧不得再拼 `explicit ?? live ?? snapshot`（规则只在 input-intent.ts）",
+  );
+  assertNoPattern(
+    code,
+    /\?\?[^\n;]*getSessionModelSelection/u,
+    "执行侧不得再用 `?? getSessionModelSelection()` 兜底模型",
+  );
+  assertNoPattern(
+    code,
+    /modelSelectionPinned\s*:/u,
+    "pin 判据只许在 input-intent.ts；执行侧只提供 explicit / live 事实",
+  );
+  // 正向：两侧事实必须交给唯一入口（cr-func N1 的验收形态）。
+  assertPattern(
+    code,
+    /explicit:\s*payload\.modelSelection/u,
+    "edit 必须把 payload 的显式选择当事实传入",
+  );
+  assertPattern(
+    code,
+    /live:\s*record\.app\.runtime\.getSessionModelSelection\(\)/u,
+    "必须把会话活值当事实传入",
+  );
+});
+
+/**
+ * cr-func N2 的「待收口」清单：模型选择优先级链（`??` + 会话活值）全仓只剩
+ * `input-intent.ts` 一处实现。以下站点今天仍各自串联，**不在 Step 2 范围**
+ * （Step 2 只收口 edit/retry 的 canonical 输入解析路径）。收口时删条目，不许扩表。
+ */
+const MODEL_LIVE_CHAIN_ALLOWLIST = [
+  {
+    code: "getRuntime().getSessionModelSelection() ?? readConfiguredDefaultModelSelection();",
+    file: "app/create-app.ts",
+    note: "app 装配期的默认模型解析，不产生输入 intent（待收口）",
+  },
+  {
+    code: "activeSession?.app.runtime.getSessionModelSelection() ??",
+    file: "zcode-protocol/automation-port.ts",
+    note: "自动化派发取当前会话模型，不产生输入 intent（待收口）",
+  },
+  {
+    code: "options.modelSelection ?? record.app.runtime.getSessionModelSelection(),",
+    file: "zcode-protocol/v4-bridge.ts",
+    note: "createSelectionSideSession 的 fork 模型解析，不属 edit/retry 输入权威（待收口）",
+  },
+  {
+    code: "record.app.runtime.getSessionModelSelection() ?? record.restoredModelSelection;",
+    file: "zcode-protocol/v4-bridge.ts",
+    note: "投影种子 getSessionConfigSeed 的模型展示值（待收口）",
+  },
+  {
+    code: "const selection = record.app.runtime.getSessionModelSelection() ?? record.restoredModelSelection;",
+    file: "zcode-protocol/workspace-model-runtime.ts",
+    note: "工作区模型展示面（待收口）",
+  },
+];
+
+test("I4 模型优先级链（?? + 会话活值）只许在 input-intent.ts：其余站点在 allowlist（待收口）", () => {
+  const ownerCode = stripComments(readFileSync(inputIntentPath, "utf8"));
+  // 唯一实现必须仍在这里：缺了它，下面的「其余站点为空」就是假绿。
+  assertPattern(
+    ownerCode,
+    /selection\?\.explicit \?\? selection\?\.live \?\? record\?\.modelSelection/u,
+    "explicit > live > 继承快照 的唯一实现必须留在 input-intent.ts",
+  );
+  const matches = collectCodeLineMatches(
+    (code) =>
+      code.includes("??") &&
+      /getSessionModelSelection\(|liveSelection|currentSelection|runtimeSelection/u.test(code),
+  );
+  assertSourceAllowlist({
+    allowlist: MODEL_LIVE_CHAIN_ALLOWLIST,
+    label: "模型优先级链",
+    matches,
+    ownerFile: INPUT_INTENT_REL_PATH,
+  });
+});
+
+/**
+ * `modelSelectionPinned:` 的自算站点（cr-func N2 点名的五处）。它们走的是另一个
+ * builder（`inputIntentMetadata`），不在 edit/retry canonical 路径上。
+ */
+const MODEL_PIN_ALLOWLIST = [
+  {
+    code: "modelSelectionPinned: payload.modelSelection !== undefined,",
+    file: "zcode-protocol-v4/commands/handlers/goal.ts",
+    note: "sendGoalCommand 走 inputIntentMetadata（待收口）",
+  },
+  {
+    code: "modelSelectionPinned: false,",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "queue 提升语义（活值一律不 pin），不在 canonical 路径（待收口）",
+  },
+  {
+    code: "modelSelectionPinned: payload.modelSelection !== undefined,",
+    file: "zcode-protocol-v4/commands/handlers/session-flow.ts",
+    note: "sendText 走 inputIntentMetadata（待收口）",
+  },
+  {
+    code: "modelSelectionPinned: payload.firstInput.modelSelection !== undefined,",
+    file: "zcode-protocol-v4/commands/handlers/session-mgmt.ts",
+    note: "createSession 走 inputIntentMetadata（待收口）",
+  },
+  {
+    code: "modelSelectionPinned: true,",
+    file: "zcode-protocol/server-operations.ts",
+    note: "legacy session/send 分支（进入条件即显式 modelSelection）（待收口）",
+  },
+];
+
+test("I5 `modelSelectionPinned:` 的自算只许在 input-intent.ts：其余站点在 allowlist（待收口）", () => {
+  const ownerCode = stripComments(readFileSync(inputIntentPath, "utf8"));
+  assertPattern(ownerCode, /modelSelectionPinned/u, "pin 键必须仍由 input-intent.ts 产出");
+  const matches = collectCodeLineMatches((code) => /modelSelectionPinned\s*:/u.test(code));
+  assertSourceAllowlist({
+    allowlist: MODEL_PIN_ALLOWLIST,
+    label: "自算 modelSelectionPinned",
+    matches,
+    ownerFile: INPUT_INTENT_REL_PATH,
+  });
+});
+
+test("I6 retry 分支不得把 payload 断言成 edit 形状（旧写法给 retry 伪造了 newText）", () => {
+  const code = stripComments(readFileSync(inputIntentPath, "utf8"));
+  const start = code.indexOf('if (envelope.type === "retryTurn")');
+  assert.ok(start >= 0, "retryTurn 必须是独立分支（cr-func N5）");
+  const end = code.indexOf("\n  }", start);
+  assert.ok(end > start, "retryTurn 分支必须是独立块");
+  const retryBranch = code.slice(start, end);
+  // retry 的 schema 只有 target：读到 newText 就说明 edit 的 payload 断言又越界了。
+  assertNoPattern(retryBranch, /newText|editPayload/u, "retry 分支不得读 edit 的 payload 字段");
+  // edit 分支**保留**自己的 schema 形状断言（不设兜底），但只在分支内：分支外那一句
+  // `payload as { newText: string }` 就是给 retry 伪造类型的来源。
+  const editStart = code.indexOf('if (envelope.type === "editUserQuery")');
+  assert.ok(editStart >= 0, "editUserQuery 必须是独立分支");
+  const editEnd = code.indexOf("\n  }", editStart);
+  assert.ok(editEnd > editStart, "editUserQuery 分支必须是独立块");
+  const editBranch = code.slice(editStart, editEnd);
+  const castsInBranch = (editBranch.match(/payload as \{ newText: string/gu) ?? []).length;
+  const castsInFile = (code.match(/payload as \{ newText: string/gu) ?? []).length;
+  assert.equal(
+    castsInFile,
+    castsInBranch,
+    "payload 的 edit 形状断言必须收在 editUserQuery 分支内（分支外 = 又给 retry 伪造 newText）",
+  );
+  assert.equal(castsInBranch, 1, "edit 分支必须保留自己的 payload 形状断言，且不设兜底");
+  assertBranchTextShape(code);
+});
+
+/**
+ * queue.ts 里 `queueItem.text` 的合法用法与「待 Step 3 收口」用法
+ * （spec 变更点 2 / 21 与 4b 的守卫例外表）。执行文本（`content:` 与提升 intent 的
+ * `text`）仍读投影项是 RC1 的另一半；Step 3 改为读 `session_input` 账本后，必须同步
+ * 删掉这两条 allowlist，本守卫会以「条目已过期」逼出那次 bookkeeping。
+ */
+const QUEUE_TEXT_ALLOWLIST = [
+  {
+    code: "? parseGoalObjectiveFromCommandText(queueItem.text)",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "goal objective 解析（spec 4b 例外，合法）",
+  },
+  {
+    code: "inputIntentMetadataFromQueueItem(queueItem, objective ?? queueItem.text),",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "goal 分支的 intent.text（spec 4b 例外表，合法）",
+  },
+  {
+    code: "displayText: queueItem.text,",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "展示文案（spec 4b 例外，合法）",
+  },
+  {
+    code: "inputIntentMetadataFromQueueItem(queueItem, queueItem.text),",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "待 Step 3：落库 intent.text 改由账本传入（变更点 21）",
+  },
+  {
+    code: "content: queueItem.text,",
+    file: "zcode-protocol-v4/commands/handlers/queue.ts",
+    note: "待 Step 3：提升轮执行文本改读 session_input 账本（变更点 2）",
+  },
+];
+
+test("I7 queue.ts 的执行文本仍读投影项（RC1 另一半）：现状入 allowlist，Step 3 收口", () => {
+  const matches = collectCodeLineMatches(
+    (code) => code.includes("queueItem.text"),
+    queueHandlerPath,
+  );
+  assert.ok(matches.length >= 5, "queue.ts 里 queueItem.text 的站点数量异常，先确认扫描没失效");
+  assertSourceAllowlist({
+    allowlist: QUEUE_TEXT_ALLOWLIST,
+    label: "queue.ts 的 queueItem.text",
+    matches,
+  });
+});
+
+// ── J / K: 执行侧重建 intent 的形状与 retry payload 访问 ─────────────────────
+
+test("J1 执行侧重建 intent 的 pin 恒为 boolean：仅活值时 false（不是缺键），显式时 true", () => {
+  const payload = { target: { rowId: 4, entityId: "ent-4" }, newText: EDITED_TEXT };
+  const envelope = envelopeOf("editUserQuery", payload);
+  const liveOnly = resolveCanonicalInput(RECORD, payload, envelope, { live: LIVE_SELECTION });
+  assert.ok(liveOnly);
+  // 唯一入口保持三态：缺键 = 本次没有 pin 事实（admission 依赖它与收敛前逐字一致）。
+  assertAbsent(liveOnly.intent, "modelSelectionPinned");
+  const rebuilt = inputIntentMetadataFromCanonical(envelope, liveOnly.intent);
+  assert.equal(
+    rebuilt.modelSelectionPinned,
+    false,
+    "执行侧重建的 intent 必须明确表态 false，而不是缺键（test-edit-retry-model B2/B3/B5 的契约）",
+  );
+  assert.deepEqual(rebuilt.modelSelection, LIVE_SELECTION);
+  assert.equal(rebuilt.text, EDITED_TEXT);
+
+  const explicit = resolveCanonicalInput(RECORD, payload, envelope, {
+    explicit: EXPLICIT_SELECTION,
+    live: LIVE_SELECTION,
+  });
+  assert.ok(explicit);
+  const pinned = inputIntentMetadataFromCanonical(envelope, explicit.intent);
+  assert.equal(pinned.modelSelectionPinned, true, "显式事实 → pin（runtime 写回门的唯一开关）");
+  assert.deepEqual(pinned.modelSelection, EXPLICIT_SELECTION);
+});
+
+test("K1 retryTurn 的 canonical 解析不得读取 payload.newText（payload 只有 target）", () => {
+  let reads = 0;
+  const payload = Object.defineProperty({ target: { rowId: 4, entityId: "ent-4" } }, "newText", {
+    configurable: true,
+    enumerable: true,
+    get() {
+      reads += 1;
+      return STRAY_NEW_TEXT;
+    },
+  });
+  const resolved = resolveCanonicalInput(RECORD, payload, envelopeOf("retryTurn", payload));
+  assert.ok(resolved, "retryTurn 带 record 必须产生输入");
+  assert.equal(resolved.text, RECORD_TEXT);
+  assert.equal(reads, 0, "retry 读 payload.newText = edit 形状越界（改前靠三元短路偶然安全）");
 });

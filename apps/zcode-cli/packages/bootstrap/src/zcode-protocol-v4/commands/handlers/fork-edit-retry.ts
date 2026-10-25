@@ -13,11 +13,14 @@ import {
   RewindStrategy,
   traceContextToLogContext,
   type MessageId,
-  type ModelSelection,
   type TurnId,
 } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
-import { inputIntentMetadataFromCanonical } from "../input-intent.js";
+import {
+  inputIntentMetadataFromCanonical,
+  resolveCanonicalInput,
+  type ResolvedCanonicalInput,
+} from "../input-intent.js";
 import { startPromptTurn } from "../prompt-turn.js";
 import { commandAdmissionOf } from "../executor.js";
 import { requireRecord } from "../record-access.js";
@@ -29,7 +32,6 @@ import {
   V4InputAdmissionRejectedError,
 } from "./session-flow.js";
 import { applyGoalCommand } from "./goal.js";
-import type { ConversationEditTarget } from "../../product-projection.js";
 
 const CONVERSATION_COMMAND_LOG_MODULE = "bootstrap.zcode_protocol_v4.commands";
 const EDIT_USER_QUERY_COMPLETED_EVENT = "conversation.command.edit_user_query.completed";
@@ -134,10 +136,23 @@ async function editUserQuery(
     throw new V4EditTargetNotLatestError(payload.target.rowId);
   }
   const editTarget = resolution.editTarget;
-  const attachmentRefs = payload.attachments ?? stableAttachmentRefs(editTarget);
+  // I3（spec 变更点 4/5）：text / intent / attachments / 投递事实 / 模型优先级全部交给
+  // 唯一解析入口，这里只提供**事实**——payload 的显式 modelSelection + 会话当前活值。
+  // 过去本文件自己拼 `explicit ?? live ?? snapshot` 与 `modelSelectionPinned:`，
+  // 与 admission 侧是两套规则（无断言守护）。解析必须在 rewind 之前完成：截断后
+  // 投影里再取不到原轮的 canonical 事实（retry 同理）。
+  const canonical = resolveCanonicalInput(editTarget.intent, envelope.payload, envelope, {
+    explicit: payload.modelSelection,
+    live: record.app.runtime.getSessionModelSelection(),
+  });
+  if (!canonical) {
+    // editUserQuery + 已解析的 editTarget 必然产生输入；缺了说明调用链被改坏。
+    throw new Error(`editUserQuery canonical input unavailable: ${envelope.commandId}`);
+  }
+  const attachmentRefs = canonical.attachments;
   // attachments 缺省与 [] 语义不同；必须基于 effective refs 校验，
   // 才能同时允许 attachment-only edit，并在正文和附件都被清空时于 rewind 前拒绝。
-  if (!hasPromptInput(payload.newText, attachmentRefs)) {
+  if (!hasPromptInput(canonical.text, attachmentRefs)) {
     throw new V4InputAdmissionRejectedError("proto.invalidPayload", "input must not be empty");
   }
   // 附件映射在 rewind 前完成：引用失效要在截断历史之前暴露，避免半程失败。
@@ -213,19 +228,7 @@ async function editUserQuery(
   if (!conversationRewindCommitted) {
     await submitConversationRewind(host, record, editTarget.transcriptMessageId);
   }
-  await startCanonicalIntent(
-    host,
-    record,
-    envelope,
-    editTarget,
-    payload.newText,
-    attachmentRefs,
-    attachments,
-    // 编辑重发带当前 composer 的 modelSelection（用户可能在编辑前刚切模型）。
-    // 出队模型规则（2026-10-11 裁定）下它仅在会话无活值时兜底；正常路径
-    // 会话活值已由 UI 即时下发的 switchModelConfig 与 composer 同步。
-    payload.modelSelection,
-  );
+  await startCanonicalIntent(host, record, envelope, canonical, attachments);
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
   // 无法与 retry 稳定区分。命令副作用完成后由 Agent server 写低频 info 审计索引。
   host.logger?.info?.("v4 editUserQuery completed", {
@@ -268,18 +271,18 @@ async function retryTurn(
   if (!resolution?.ok || !resolution.messageId || !resolution.editTarget) {
     throw new V4RetryTargetNotLatestError(payload.target.rowId);
   }
-  const attachmentRefs = stableAttachmentRefs(resolution.editTarget);
-  const attachments = await mapAttachmentRefsToTurnAttachments(record.app, attachmentRefs);
+  const editTarget = resolution.editTarget;
+  // retry 的 payload 只有 target：没有显式选择事实，模型按「会话活值 > 原轮快照」；
+  // 文本固定原轮 canonical（截断后拿不到可见文本）。与 edit 共用同一解析入口。
+  const canonical = resolveCanonicalInput(editTarget.intent, envelope.payload, envelope, {
+    live: record.app.runtime.getSessionModelSelection(),
+  });
+  if (!canonical) {
+    throw new Error(`retryTurn canonical input unavailable: ${envelope.commandId}`);
+  }
+  const attachments = await mapAttachmentRefsToTurnAttachments(record.app, canonical.attachments);
   await submitConversationRewind(host, record, resolution.messageId);
-  await startCanonicalIntent(
-    host,
-    record,
-    envelope,
-    resolution.editTarget,
-    resolution.editTarget.intent.text,
-    attachmentRefs,
-    attachments,
-  );
+  await startCanonicalIntent(host, record, envelope, canonical, attachments);
   return undefined;
 }
 
@@ -339,68 +342,36 @@ async function forkAssistant(
   return result;
 }
 
-function stableAttachmentRefs(editTarget: ConversationEditTarget) {
-  return editTarget.intent.attachments?.flatMap((attachment) =>
-    attachment.ref ? [{ ...attachment, ref: attachment.ref }] : [],
-  );
-}
-
+/**
+ * 执行侧起轮：只消费 `resolveCanonicalInput` 的返回值，不再自己算文本或模型。
+ *
+ * 语义史（全部收敛到 `commands/input-intent.ts` 的注释里，本文件不再重复实现）：
+ * - Bug C（2026-10-15）：`intent.text` 必须等于本次真正发送的文本。持久化事实取
+ *   `intent.text ?? text`，intent 若保留被编辑轮旧文本，落库/重启重建就是旧文本——
+ *   用户症状「编辑后 agent 仍用编辑前的 msg」。在线路径模型用 content（新文本）所以
+ *   平时正常，重启后才暴露。本函数的 `intent` 与 `content` 都取自同一个 `canonical.text`。
+ * - 出队模型（2026-10-11 裁定 + Bug D 修正）：显式 payload > 会话活值 > 原轮快照，
+ *   pin 只认显式 payload，且一律不写回会话态（v1.0.4 写回红线）。规则实现只在
+ *   `resolveCanonicalInput`；本文件只提供 `explicit` / `live` 两个事实（守卫 I3）。
+ */
 async function startCanonicalIntent(
   host: V4CommandCoreHost,
   record: V4SessionRecordView,
   envelope: CommandEnvelope,
-  editTarget: ConversationEditTarget,
-  text: string,
-  attachmentRefs: ReturnType<typeof stableAttachmentRefs>,
+  canonical: ResolvedCanonicalInput,
   attachments: Awaited<ReturnType<typeof mapAttachmentRefsToTurnAttachments>>,
-  explicitModelSelection?: ModelSelection,
 ): Promise<void> {
-  // 用户裁定 2026-10-11（出队模型）：编辑重发与 queue 提升同语义——
-  // 一律用会话当前活值；显式 payload 仅在会话无活值时兜底，被编辑轮旧快照最后兜底。
-  // 仍不写回会话态（v1.0.4 写回红线不变）；pin 仅当最终选择确实来自显式 payload。
-  // 修正 2026-10-15（Bug D）：显式 payload 提到活值之前——它是 composer 编辑提交
-  // 时的当前模型（用户刚换的新模型），活值在 switchModelConfig 竞态/失败时可能
-  // 仍停旧模型，旧模型失效会让编辑重发直接报错。活值仍优先于旧快照，出队语义
-  // （活值 > 快照）保留在后两段；pin 只认显式 payload。
-  const liveSelection = record.app.runtime.getSessionModelSelection();
-  const resolvedSelection =
-    explicitModelSelection ?? liveSelection ?? editTarget.intent.modelSelection;
-  const intent = inputIntentMetadataFromCanonical(
-    envelope,
-    {
-      kind: editTarget.intent.kind,
-      // Bug C 实锤修复（2026-10-15）：intent.text 必须用编辑后的新文本。持久化
-      // 事实（buildPersistedConversationInputIntent）取 `intent.text ?? text`，
-      // intent 元数据若保留被编辑轮的旧文本，落库/重启重建的 msg 就是旧文本
-      // ——用户症状「编辑后 agent 仍用编辑前的 msg」。在线路径模型用 sendInput
-      // 的 content（新文本）所以平时正常，重启后 messageHistory 从持久化 fact
-      // 重建才暴露。kind/queueItemId 等仍继承原轮（归因不变），仅 text 归一。
-      text,
-      sourceCommandId: editTarget.intent.sourceCommandId,
-      clientId: editTarget.intent.clientId,
-      queueItemId: editTarget.intent.queueItemId,
-      requestedDelivery: editTarget.intent.requestedDelivery,
-      admittedDelivery: editTarget.intent.admittedDelivery,
-      fallbackReasonCode: editTarget.intent.fallbackReasonCode,
-      modelSelection: resolvedSelection,
-      modelSelectionPinned: explicitModelSelection !== undefined,
-      mode: editTarget.intent.mode,
-      planEnabled: editTarget.intent.planEnabled,
-      attachmentRefs,
-      provenance: editTarget.intent.provenance,
-    },
-    text,
-  );
-  if (editTarget.intent.kind === "sendGoalCommand") {
+  const intent = inputIntentMetadataFromCanonical(envelope, canonical.intent);
+  if (canonical.intent.kind === "sendGoalCommand") {
     await applyGoalCommand(host, record, {
       inputId: envelope.commandId,
-      objective: text,
+      objective: canonical.text,
       intent,
     });
     return;
   }
   await startPromptTurn(host, record, {
-    content: text,
+    content: canonical.text,
     inputId: envelope.commandId,
     intent,
     ...(attachments ? { attachments } : {}),

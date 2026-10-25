@@ -71,11 +71,16 @@ export function inputIntentMetadata(
   };
 }
 
-/** edit/retry 以新 commandId 重建，但保留原 canonical kind/delivery/cause。 */
+/**
+ * edit/retry 以新 commandId 重建，但保留原 canonical kind/delivery/cause。
+ *
+ * 不接收第二个 text 参数：I3 要求 `intent.text` 只能来自 `resolveCanonicalInput`
+ * 的返回值（过去这里允许调用方另传一份 text，等于给「intent 用旧文本、content 用新文本」
+ * 留了一道后门——Bug C 的形态）。
+ */
 export function inputIntentMetadataFromCanonical(
   envelope: CommandEnvelope,
   canonical: CanonicalCommandIntent,
-  text = canonical.text,
 ): TurnInputIntentMetadata {
   const admission = commandAdmissionOf(envelope);
   const originalSourceCommandId =
@@ -85,11 +90,14 @@ export function inputIntentMetadataFromCanonical(
     queueItemId: admission.queueItemId,
     clientId: envelope.clientId || canonical.clientId || "cli",
     kind: canonical.kind,
-    text,
+    text: canonical.text,
     ...(canonical.modelSelection ? { modelSelection: canonical.modelSelection } : {}),
-    ...(canonical.modelSelectionPinned !== undefined
-      ? { modelSelectionPinned: canonical.modelSelectionPinned }
-      : {}),
+    // 执行侧重建的 intent 在 wire 上恒带 boolean pin（今天就是这个形状：
+    // test-edit-retry-model 的 B2/B3/B5 断言 `false` 而非缺键）。`resolveCanonicalInput`
+    // 的返回值保持三态——缺键 = 本次没有 pin 事实，admission 依赖它与收敛前逐字一致；
+    // 这里只把缺键落实成 `false`，**不是**另立一套 pin 判据（判据仍只有
+    // `assembleResolvedCanonicalInput` 那一处）。
+    modelSelectionPinned: canonical.modelSelectionPinned ?? false,
     ...(canonical.mode ? { mode: canonical.mode } : {}),
     ...(canonical.planEnabled !== undefined ? { planEnabled: canonical.planEnabled } : {}),
     admissionSeq: admission.admissionSeq,
@@ -179,9 +187,15 @@ export interface ResolvedCanonicalInput {
  * 返回 null 表示这条 command 不产生用户输入。`payload` 必须传 `envelope.payload` 本体：
  * 投递事实只有一个来源，参数分开只是为了让 admission 与执行两侧能用同一份入参调用。
  *
- * ## modelSelection / modelSelectionPinned 也只在这里决定
+ * ## modelSelection / modelSelectionPinned：edit/retry canonical 输入路径只在这里决定
  *
- * 规则（唯一实现）：
+ * 本条约束的作用范围是 **edit/retry 的 canonical 输入解析路径**——`resolveCanonicalInput`
+ * 的 editUserQuery / retryTurn 两个分支，以及唯一调用方 `handlers/fork-edit-retry.ts`。
+ * 这条路径过去自己实现了一遍 `explicit ?? live ?? snapshot` 与
+ * `modelSelectionPinned: explicit !== undefined`，是「换模型后编辑重发跑旧模型 / 旧快照
+ * 被静默写回」的直接成因。
+ *
+ * 规则（这条路径的唯一实现）：
  * ```
  * modelSelection       = selection?.explicit ?? selection?.live ?? record?.modelSelection
  * modelSelectionPinned = selection?.explicit !== undefined ? true : record?.modelSelectionPinned
@@ -189,12 +203,20 @@ export interface ResolvedCanonicalInput {
  * 调用方只提供事实——`explicit` 来自 payload、`live` 来自 `runtime.getSessionModelSelection()`、
  * 什么都不传就表示「本次没有模型选择事实」（admission 当前就是这样，落库字段与今天逐字一致）。
  * 传 `selection` 的一方不得再在外面写 `explicit ?? live ?? snapshot` 或自己算 pin。
+ * 守卫：`scripts/test-input-authority.mjs` 的 I3（执行侧零重复规则）/ I4 / I5。
  *
  * 为什么 pin 的判断权必须收到这里：`modelSelectionPinned` 是 runtime「写回 + 持久化 +
  * emitModelSelected」三连的唯一开关，这条写回门是 2026-10-09 修过的同类缺陷
  * （bugfix-batch-20261009 变更点 1d：继承快照曾被静默写回，把用户刚切换的模型还原并落库）。
- * 只要在某条路径上 pin 被漏置/误置，编辑重发就会重演「模型没切到最新」。**任何在函数外
- * 再判一次 pin 的代码都是那次缺陷的回归**——包括为了「顺手兜底」而复制上面的优先级链。
+ * 在**这条路径**上漏置/误置 pin，编辑重发就会重演「模型没切到最新」——包括为了「顺手兜底」
+ * 而复制上面的优先级链。
+ *
+ * 尚未收口的站点（守卫里带 allowlist，一步一个，不许扩表）：走另一个 builder
+ * `inputIntentMetadata` 的 sendText / sendGoalCommand / createSession / legacy session/send
+ * （`session-flow.ts:203`、`goal.ts:75`、`session-mgmt.ts:96`、`server-operations.ts:1985`），
+ * queue 提升（`queue.ts:268` 的 `applyPromotedModelSelection`），以及模型装配/展示面
+ * （`v4-bridge.ts:1022,1385`、`workspace-model-runtime.ts:146`、`create-app.ts:862`、
+ * `automation-port.ts:102`）。收口一个删一条 allowlist 条目。
  */
 export function resolveCanonicalInput(
   record: CanonicalInputRecord | null | undefined,
@@ -237,24 +259,36 @@ export function resolveCanonicalInput(
       selection,
     });
   }
-  if (envelope.type !== "editUserQuery" && envelope.type !== "retryTurn") return null;
-  if (!record) return null;
-  // `newText` 在 `commandPayloadSchemas.editUserQuery` 里是必填，且 envelope 已在
-  // `parseCommandEnvelope` 按该 schema 校验过——这里按 schema 形状断言，不设兜底：
-  // 过去 `newText ?? record.text` 会把「编辑后仍重发旧文本」重新引回来（见 T-IA4 守卫）。
-  const editPayload = payload as { newText: string; attachments?: AttachmentRef[] };
-  return assembleResolvedCanonicalInput({
-    kind: record.kind,
-    // edit 重发新文本；retry 重发原轮 canonical 文本（截断后已拿不到可见文本）。
-    text: envelope.type === "editUserQuery" ? editPayload.newText : record.text,
-    // payload 显式给 attachments（含 []）优先；缺省才继承原轮。
-    attachments:
-      envelope.type === "editUserQuery" && editPayload.attachments
-        ? editPayload.attachments
-        : inheritedAttachmentRefs(record.attachments),
-    record,
-    selection,
-  });
+  if (envelope.type === "editUserQuery") {
+    if (!record) return null;
+    // `newText` 在 `commandPayloadSchemas.editUserQuery` 里是必填，且 envelope 已在
+    // `parseCommandEnvelope` 按该 schema 校验过——按 schema 形状断言，不设兜底：
+    // 过去 `newText ?? record.text` 会把「编辑后仍重发旧文本」重新引回来（见 T-IA4 守卫）。
+    // 断言只作用于 edit 分支：retry 的 payload 只有 `target`（见下方分支）。
+    const editPayload = payload as { newText: string; attachments?: AttachmentRef[] };
+    return assembleResolvedCanonicalInput({
+      kind: record.kind,
+      text: editPayload.newText,
+      // payload 显式给 attachments（含 []）优先；缺省才继承原轮。
+      attachments: editPayload.attachments ?? inheritedAttachmentRefs(record.attachments),
+      record,
+      selection,
+    });
+  }
+  if (envelope.type === "retryTurn") {
+    if (!record) return null;
+    // retry 重发原轮 canonical 文本（截断后已拿不到可见文本）。payload 只有 `target`，
+    // 所以这里**不**按 edit 的形状断言 payload——给 retry 伪造 `newText` 字段会让
+    // 「retry 偷读新文本」在类型上合法，正是 `newText ?? record.text` 兜底的温床（守卫 I6）。
+    return assembleResolvedCanonicalInput({
+      kind: record.kind,
+      text: record.text,
+      attachments: inheritedAttachmentRefs(record.attachments),
+      record,
+      selection,
+    });
+  }
+  return null;
 }
 
 /** 投影附件 → 可重发引用：无 ref 的附件没有已提交内容，不能重发。 */

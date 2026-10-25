@@ -337,6 +337,14 @@ async function sendQueuedNow(
     ) {
       throw new V4QueueItemReservedError(payload.queueItemId);
     }
+    // 待收口（spec edit-resend-stale-text Step 3 / 变更点 2、21）：下面两个分支的
+    // **执行内容**仍取自投影项 `queueItem.text`——这是 RC1「执行侧从投影读输入」的
+    // 另一半（T-IA4 的 queue 侧断言）。Step 3 改为读 `session_input` 账本
+    // （`status !== "admitted"` 硬失败，账本行缺失 → inconsistentAuthority），届时
+    // goal 分支的 `objective ?? queueItem.text` 与普通分支的 `queueItem.text`
+    // （intent.text 与 `content:` 两处）一并改掉。本步不动行为，只把现状钉进
+    // scripts/test-input-authority.mjs 的 I7 allowlist：新增任何 `queueItem.text`
+    // 作执行内容即红，收口时必须同步删除 allowlist 条目。
     if (queueItem.kind === "sendGoalCommand") {
       const intent = applyPromotedModelSelection(
         record.app.runtime,
