@@ -100,6 +100,7 @@
     "test:network-status-crash": "node --test scripts/test-network-status-crash.mjs",
     "test:tool-result-cache-control": "node --test scripts/test-tool-result-cache-control.mjs",
     "test:magic-context-boundaries": "node --test scripts/test-magic-context-boundaries.mjs",
+    "test:magic-context-config-narrow": "node --test scripts/test-magic-context-config-narrow.mjs",
     "test:runner-debug-head": "node --test scripts/test-runner-debug-head.mjs",
     "test:mcp-connect-deadline": "node --import tsx --test scripts/test-mcp-connect-deadline.mjs",
     "typecheck": "tsc --noEmit",

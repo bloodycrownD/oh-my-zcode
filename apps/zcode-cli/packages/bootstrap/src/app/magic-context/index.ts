@@ -69,7 +69,8 @@ export type MagicContextPluginOptions = Omit<MagicContextTurnTransformOptions, "
  *
  * `close` 与 `registerClose` 是**同一个函数对象**：工厂在构造期把关闭钩子回调给
  * `registerClose`，本文件同时捕获它并原样返回，不另造包装（包装会让「两者顺序
- * drain → shutdown → dispose」出现两份真相）。
+ * drain → shutdown → dispose」出现两份真相）。`close` 实现为 **getter**（永远读
+ * 当前值），见下方 return 处的说明。
  */
 export interface MagicContextPlugin {
   turnTransform: MagicContextTurnTransform | undefined;
@@ -137,6 +138,20 @@ export async function createMagicContextPlugin(
     promptSection,
     toolDescription,
     usageRecorder,
-    close: registeredClose ?? noopClose,
+    // Step 5 P3-2：**getter，不是值快照**。
+    //
+    // 旧写法 `close: registeredClose ?? noopClose` 在对象字面量求值时就把值钉死了，
+    // 它成立的前提是「工厂一定在 resolve（本函数 await 返回）之前同步调用过
+    // registerClose」——该前提今天成立（`createMagicContextTurnTransform` 是 async，
+    // 在内部同步段回填），但**没有任何守卫**：一旦工厂把 registerClose 挪到某个
+    // 后台任务或延迟一拍，旧写法会静默退化成 noopClose，表现为「关闭钩子从不执行、
+    // 也没有报错」（drain → shutdown → dispose 整条收口消失）。
+    //
+    // getter 永远读当前值：注册早于/晚于返回都拿得到真实 close，晚注册时还能补上。
+    // 代价是每次读属性都重新求值一次 `??`（可忽略），且属性不再可写/可枚举快照——
+    // `test-magic-context-plugin.mjs` 的「同一函数对象」断言在 getter 下仍成立。
+    get close() {
+      return registeredClose ?? noopClose;
+    },
   };
 }

@@ -71,6 +71,19 @@ cd .reference/magic-context && git fetch --tags && git checkout <target>
 3. 若上游改了 host↔core 的结构契约，同步 `src/host/typecheck-seams.ts`。
 4. 更新 `apps/zcode-cli/packages/magic-context/LICENSE.magic-context` 里的 `upstream version` / `snapshot used`。
 
+### magic-context 插件化偏离点（rebase 登记）
+
+下面是 `magic-context-decoupling` 迭代引入、**上游没有**的偏离点。逐字重放上游后必须按「rebase 动作」一列重新贴回；每条在源码处都有 `FORK（magic-context-decoupling…）` 注释块写明同样内容。
+
+| # | 位置 | 偏离内容 | 升级 MC 时的 rebase 动作 |
+| - | ---- | -------- | ------------------------ |
+| Z1 | `magic-context/package.json`（`exports`） | 新增 `"./host/config/schema"` 子路径（`types` / `import` / `require` 三条件同构，与 `.` 一致）。上游只有 `.` 一个入口 | 上游若调整 `exports` 或重命名 `host/config/schema.ts`，同步该子路径，并同时改宿主三处消费者：`adapters/src/config/schema.ts`、`zcode-protocol/magic-context-config.ts`、`magic-context-memories.ts`。**子路径只允许导出 schema 常量与类型，不得导出行为符号**（否则关闭态加载面失控，spec 风险 3） |
+| Z2 | `magic-context/src/core/shared/prompt-surface-key.ts`（新）+ `prompt-surface.ts` + `host/config/schema.ts` 的 import 行 | 上游 `isValidPromptSurfaceModelKey` 内联在 `prompt-surface.ts`（真身 `:56`），而该文件顶部依赖 `harness-provider-map.js`。fork 把函数**逐字**抽成零 import 叶子，`prompt-surface.ts` 改为从叶子 re-export，`host/config/schema.ts` 改指叶子 → schema 子路径闭包 4 文件塌到 3 | 逐字重放 `prompt-surface.ts` 后**重新抽叶子**，并把 `host/config/schema.ts` 的 import 从 `prompt-surface.js` 改回 `prompt-surface-key.js`。函数规则变更只改叶子。**若闭包涨到 4 个文件，`bootstrap/scripts/test-magic-context-zero-load.mjs` 会直接变红**（M0 白名单写死 3 个文件） |
+| Z3 | `bootstrap/src/zcode-protocol/magic-context-config.ts`、`magic-context-memories.ts` | 上游无此层（是 ZCode 适配层）。fork 把两处**顶层 barrel 值导入**改为 handler 内惰性 `await import`：判 flag 只用窄子路径的 schema，业务符号（存储 / 管理视图 / 组合函数）才走 barrel | 纯宿主侧偏离，与上游无交集。升级时只需保证 Z1 的子路径仍在；若上游把 `host/config/schema.ts` 拆成多文件，惰性导入点要跟着改（`isMagicContextDisabled` 两个值都从该子路径取） |
+
+口径备注：第 5 节 `EXEMPT-2b` 行记的「5 静态 + 2 动态」是 Step 5 之前的实测值，Step 14（phase-upgrade-surface）统一修正；Z3 落地后协议侧两处已不再静态加载包，相对该行是**减少**，不是新增加载点。
+
+
 ### 各 phase 的不可回退点（硬约束）
 
 这些是 fork 内部发明或收紧的语义，**任何同步/重构都不得回退**：

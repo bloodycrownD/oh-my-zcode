@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js",
       "require": "./dist/index.js"
+    },
+    "./host/config/schema": {
+      "types": "./dist/host/config/schema.d.ts",
+      "import": "./dist/host/config/schema.js",
+      "require": "./dist/host/config/schema.js"
     }
   },
   "scripts": {

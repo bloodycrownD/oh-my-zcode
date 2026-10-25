@@ -77,19 +77,8 @@
 
 import { ConfigKey } from "@zcode/contracts";
 import { getDefaultConfigPath, loadFileConfig } from "@zcode/adapters/config";
-import {
-  DEFAULT_MAGIC_CONTEXT_CONFIG,
-  MagicContextConfigSchema,
-  ModuleMemoryAuthorityError,
-  archiveProjectMemories,
-  getMagicContextDatabasePath,
-  getProjectMemoryCountsForAdmin,
-  initializeMagicContextHost,
-  listProjectMemoriesForAdmin,
-  openDatabase,
-  resolveProjectIdentityForSession,
-  type Memory,
-} from "@zcode/magic-context";
+// 只有**类型**留在顶层：`Memory` 是 `import type`，编译后被完全擦除，不产生解析边。
+import type { Memory } from "@zcode/magic-context";
 import {
   zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema,
   zcodeWorkspaceArchiveMagicContextMemoriesResultSchema,
@@ -105,6 +94,44 @@ import {
   ProtocolRequestError,
   type ZCodeProtocolAgentServerContext,
 } from "./server-types.js";
+
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 6）：本模块**不再**在顶层
+ * 从包 barrel 静态值导入 10 个符号（`DEFAULT_MAGIC_CONTEXT_CONFIG` /
+ * `MagicContextConfigSchema` / `ModuleMemoryAuthorityError` / `archiveProjectMemories` /
+ * `getMagicContextDatabasePath` / `getProjectMemoryCountsForAdmin` /
+ * `initializeMagicContextHost` / `listProjectMemoriesForAdmin` / `openDatabase` /
+ * `resolveProjectIdentityForSession`）。
+ *
+ * 原因：本文件经 `server.ts` 静态常驻，顶层 barrel 值导入会让**进程一启动**就解析整棵
+ * MC 图（实测 231 个包内文件），`features.magicContext` 还没被读到就已经付过这份钱
+ * （spec W2 / IM1）。
+ *
+ * 两种导入必须**分列**（混着写会白改）：
+ *   - **判 flag 只需 schema** → 窄子路径 `@zcode/magic-context/host/config/schema`
+ *     （闭包实测 3 文件 + zod，即 M0）。effective 门只用它的 `safeParse`。
+ *   - **业务符号**（存储 / 管理视图 / 组合函数 / authority 错误类）→ 开门之后才
+ *     `await import("@zcode/magic-context")`。业务符号只在确实要读库时才需要。
+ *
+ * 信封语义不可破（spec T-MC5）：list 侧把「schema 取不到」「业务符号取不到」都收敛成
+ * `unavailable` 信封（`supported:true`），绝不抛 `-32603`；archive 侧的结果信封没有
+ * `available` 位，只能抛可读 `-32010`（与开库失败同一处置，见文件头）。
+ *
+ * 登记处：`UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
+ */
+type MagicContextModule = typeof import("@zcode/magic-context");
+
+/** 判 flag 只用 schema：窄子路径，闭包 3 文件 + zod。 */
+async function loadMagicContextConfigSchema(): Promise<
+  typeof import("@zcode/magic-context/host/config/schema")
+> {
+  return await import("@zcode/magic-context/host/config/schema");
+}
+
+/** 业务符号：barrel，只在 effective 门放行之后加载。 */
+async function loadMagicContextRuntime(): Promise<MagicContextModule> {
+  return await import("@zcode/magic-context");
+}
 
 /** 供单测注入的窄缝；生产路径固定为用户级 `~/.omz/cli/config.json`。 */
 export interface MagicContextMemoriesDependencies {
@@ -124,11 +151,22 @@ const ZERO_MEMORY_COUNTS = {
  * effective `magicContext.enabled` 的读取：ConfigPort 优先、文件兜底（config lane
  * 先例，见文件头）。坏域按 schema 缺省（`enabled` 默认 true），不把「文件暂时坏」
  * 伪造成「功能被关」。
+ *
+ * 惰性化（Step 6）：schema 走窄子路径动态 import。**取不到时向外抛**——调用方
+ * （两个 handler）各自把它映射成自己的失败形态：list → `unavailable` 信封，
+ * archive → 可读 -32010。这里不吞错，否则「包被摘除」会被误读成「功能被关」。
  */
-function isMagicContextDisabled(
+async function isMagicContextDisabled(
   context: ZCodeProtocolAgentServerContext,
   configPath: string,
-): boolean {
+): Promise<boolean> {
+  const { MagicContextConfigSchema, DEFAULT_MAGIC_CONTEXT_CONFIG } =
+    await loadMagicContextConfigSchema();
+  const readEnabled = (raw: unknown): boolean => {
+    const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
+    return parsed.success ? parsed.data.enabled : DEFAULT_MAGIC_CONTEXT_CONFIG.enabled;
+  };
+
   for (const record of context.sessions.values()) {
     const configPort = record.app?.getConfigPort?.();
     if (!configPort) continue;
@@ -137,7 +175,7 @@ function isMagicContextDisabled(
     return !resolveMagicContextEffectiveEnabled({
       // feature kill switch 与装配层同源（契约 8）；端口值缺席按缺省 true。
       featureFlag: configPort.get(ConfigKey.FeatureMagicContext) !== false,
-      domainEnabled: readMagicContextEnabled(configPort.get(ConfigKey.MagicContext)),
+      domainEnabled: readEnabled(configPort.get(ConfigKey.MagicContext)),
     });
   }
   const loaded = loadFileConfig(configPath);
@@ -145,13 +183,8 @@ function isMagicContextDisabled(
     // 文件里没写 features 段时按缺省 true（config lane 的默认值），不能把
     // 「没配」读成「关了」。
     featureFlag: loaded.config.features?.magicContext !== false,
-    domainEnabled: readMagicContextEnabled(loaded.config.magicContext),
+    domainEnabled: readEnabled(loaded.config.magicContext),
   });
-}
-
-function readMagicContextEnabled(raw: unknown): boolean {
-  const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
-  return parsed.success ? parsed.data.enabled : DEFAULT_MAGIC_CONTEXT_CONFIG.enabled;
 }
 
 /**
@@ -163,9 +196,11 @@ function readMagicContextEnabled(raw: unknown): boolean {
  * throw = busy/瞬时类失败（openDatabase 以 `{ cause }` 保留底层错误，message
  * 逐字可用）。
  */
-function initializeAndOpenDatabase(): ReturnType<typeof openDatabase> {
-  initializeMagicContextHost();
-  return openDatabase(getMagicContextDatabasePath());
+function initializeAndOpenDatabase(
+  magicContext: MagicContextModule,
+): ReturnType<MagicContextModule["openDatabase"]> {
+  magicContext.initializeMagicContextHost();
+  return magicContext.openDatabase(magicContext.getMagicContextDatabasePath());
 }
 
 /** 非正常可用态的列表信封（不改 DB、不落盘）。 */
@@ -234,15 +269,45 @@ export async function listMagicContextMemories(
   const configPath = dependencies.configPath ?? getDefaultConfigPath();
 
   // ① effective 门：关着时连 openDatabase 都不发生（「关掉不建库」纪律）。
-  if (isMagicContextDisabled(context, configPath)) {
+  // 惰性取 schema 失败（包缺失 / 子路径被改坏）也收敛成 unavailable 信封：
+  // list 的结果信封承载得了「打不开」，绝不把这类失败冒泡成 -32603（T-MC5）。
+  let disabled: boolean;
+  try {
+    disabled = await isMagicContextDisabled(context, configPath);
+  } catch (error) {
+    context.logger?.warn("magicContext memories list: config schema unavailable", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    return unavailableListResult(params.workspace, "unavailable");
+  }
+  if (disabled) {
     return unavailableListResult(params.workspace, "disabled");
+  }
+
+  // ①-b 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
+  let magicContext: MagicContextModule;
+  try {
+    magicContext = await loadMagicContextRuntime();
+  } catch (error) {
+    context.logger?.warn("magicContext memories list: package unavailable", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    return unavailableListResult(params.workspace, "unavailable");
   }
 
   // ② 开库。抛（busy/瞬时）与 null（fence/pending）都收敛成 unavailable——列表
   // 有信封承载「打不开」，不需要把瞬时故障冒泡成 RPC 错误。
-  let db: ReturnType<typeof openDatabase>;
+  let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = initializeAndOpenDatabase();
+    db = initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories list: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -265,21 +330,24 @@ export async function listMagicContextMemories(
   }
 
   // ③ 项目身份：与写入/检索同一空间（git: 身份或缺省 dir: 身份），不做第二份推导。
-  const projectIdentity = resolveProjectIdentityForSession(params.workspace.workspacePath);
+  const projectIdentity = magicContext.resolveProjectIdentityForSession(
+    params.workspace.workspacePath,
+  );
   if (!projectIdentity) {
     context.logger?.warn("magicContext memories list: project identity unresolved", {
       module: "bootstrap.zcode_protocol",
       event: "zcode_protocol.magic_context.memories_unavailable",
       reason: "unavailable",
-      detail: "resolveProjectIdentityForSession returned undefined (home project / git identity paused)",
+      detail:
+        "resolveProjectIdentityForSession returned undefined (home project / git identity paused)",
       workspaceKey: params.workspace.workspaceKey,
     });
     return unavailableListResult(params.workspace, "unavailable");
   }
 
   // ④ 管理视图列表 + 汇总计数（两函数各自口径；面板以列表为准）。
-  const memories = listProjectMemoriesForAdmin(db, projectIdentity);
-  const counts = getProjectMemoryCountsForAdmin(db, projectIdentity);
+  const memories = magicContext.listProjectMemoriesForAdmin(db, projectIdentity);
+  const counts = magicContext.getProjectMemoryCountsForAdmin(db, projectIdentity);
 
   // ⑤ category 过滤（CLI 侧，string 全等；未知分类 → 空列表而不是报错，词表
   // 增删只影响过滤，不影响整表读取）。
@@ -334,18 +402,40 @@ export async function archiveMagicContextMemories(
 
   // ① effective 门：关着时反射式拒绝，不开库（信封无 available 位，静默零值
   // outcomes 会被 UI 读成「什么都没发生」）。
-  if (isMagicContextDisabled(context, configPath)) {
+  // 惰性取 schema / 业务符号失败同样只能抛可读错误：本方法的信封没有 available 位，
+  // 回空 outcomes 等于把「包不在」伪装成「没有可废弃的记忆」（T-MC5 的 archive 侧）。
+  let disabled: boolean;
+  try {
+    disabled = await isMagicContextDisabled(context, configPath);
+  } catch (error) {
+    throw new ProtocolRequestError(
+      -32010,
+      `Magic Context configuration is unavailable (${error instanceof Error ? error.message : String(error)}); memories cannot be archived.`,
+    );
+  }
+  if (disabled) {
     throw new ProtocolRequestError(
       -32010,
       "Magic Context is disabled (magicContext.enabled=false); enable it in Settings before archiving memories.",
     );
   }
 
+  // ①-b 业务符号（barrel）惰性加载。
+  let magicContext: MagicContextModule;
+  try {
+    magicContext = await loadMagicContextRuntime();
+  } catch (error) {
+    throw new ProtocolRequestError(
+      -32010,
+      `Magic Context is not installed in this build (${error instanceof Error ? error.message : String(error)}); memories cannot be archived.`,
+    );
+  }
+
   // ② 开库。throw 原文透传（services 的 BUSY 可重试转译按 message 匹配）；
   // null 是确定性打不开，给可读错误。
-  let db: ReturnType<typeof openDatabase>;
+  let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = initializeAndOpenDatabase();
+    db = initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories archive: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -363,7 +453,9 @@ export async function archiveMagicContextMemories(
   }
 
   // ③ 项目身份：解析不出时 fail-visible（回空 outcomes 会误导「废弃成功/不存在」）。
-  const projectIdentity = resolveProjectIdentityForSession(params.workspace.workspacePath);
+  const projectIdentity = magicContext.resolveProjectIdentityForSession(
+    params.workspace.workspacePath,
+  );
   if (!projectIdentity) {
     throw new ProtocolRequestError(
       -32010,
@@ -373,7 +465,12 @@ export async function archiveMagicContextMemories(
 
   // ④ 组合函数（单事务成对写）；authority 拒绝转可读消息，其余错误原文透传。
   try {
-    const outcomes = archiveProjectMemories(db, projectIdentity, params.memoryIds, params.reason);
+    const outcomes = magicContext.archiveProjectMemories(
+      db,
+      projectIdentity,
+      params.memoryIds,
+      params.reason,
+    );
     context.logger?.info("magicContext memories archived", {
       module: "bootstrap.zcode_protocol",
       event: "zcode_protocol.magic_context.memories_archived",
@@ -392,7 +489,7 @@ export async function archiveMagicContextMemories(
       })),
     });
   } catch (error) {
-    if (error instanceof ModuleMemoryAuthorityError) {
+    if (error instanceof magicContext.ModuleMemoryAuthorityError) {
       throw new ProtocolRequestError(
         -32010,
         `Memory archives for this project are managed by the memory module (${error.code}); refusing the TypeScript-side archive.`,

@@ -544,13 +544,17 @@ test("零依赖门控层：effective-enabled.ts 不 import @zcode/magic-context�
   // 外加**副作用导入** `import "@zcode/magic-context"`——它没有 `from`，只匹配
   // `from` 会被这一种写法整个绕过。
   assert.ok(
-    !/(?:from\s*|import\s*)["']@zcode\/magic-context/.test(source),
+    // N1（Step 5 修）：字符类必须同时收**反引号模板**（["'`]）。修之前只认双引号与单引号，
+    // 用模板字面量作参数的 import(反引号 @zcode/magic-context 反引号) 实测全绿——而它在
+    // 运行期与字符串参数完全等价，同样把整棵 MC 图拉进关闭态。
+    !/(?:from\s*|import\s*)["'`]@zcode\/magic-context/.test(source),
     "effective-enabled.ts 出现指向 `@zcode/magic-context…` 的导入：它是关闭态唯一被放行的" +
       "门控层（IM1 / spec :106），任何指向包的导入都会把 MC 模块图拉进关闭态，而 " +
       "test-magic-context-absent-event.mjs 的白名单不会报红",
   );
   assert.ok(
-    !/\b(?:import|require)\s*\(\s*["']@zcode\/magic-context/.test(source),
+    // N1 同上：动态形态也要收反引号。
+    !/\b(?:import|require)\s*\(\s*["'`]@zcode\/magic-context/.test(source),
     "effective-enabled.ts 出现指向 @zcode/magic-context 的动态 import()/require()：同上",
   );
 });

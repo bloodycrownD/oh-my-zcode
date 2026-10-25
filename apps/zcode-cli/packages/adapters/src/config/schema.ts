@@ -1,11 +1,28 @@
 /* eslint-disable max-lines -- zcode-cli 配置 schema 需要集中维护文件解析和 provider 继承，拆散会让配置语义更难对齐。 */
 import { z } from "zod";
 import type { RuntimeConfigPatch } from "@zcode/contracts";
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 5）：走**窄子路径**，
+ * 不再从包 barrel（`@zcode/magic-context`）取值导入。
+ *
+ * 为什么这一行是「关闭态零加载」的关键：本模块由 `./index.js` 静态引入，而配置装载是
+ * 每次启动的必经路径——`:65` 的 `MagicContextConfigSchema.optional()` 在**模块顶层
+ * 求值**，早于 `features.magicContext` 存在。barrel 会把 `src/core/**` 与 `src/host/**`
+ * 的整棵图（实测 231 个文件）拉进内存在，任何开关都拦不住。
+ *
+ * 窄子路径 `./host/config/schema` 的闭包实测 3 个文件（`schema.js` + `language.js` +
+ * `core/shared/prompt-surface-key.js`）+ zod 4.6.5 闭包，即 spec IM1 的 M0 白名单。
+ * 顶层求值**保留**：字段级校验是 D-12 的既定决定（见下方 `magicContextDomainSchema`
+ * 的说明），代价是 M0 必然加载。
+ *
+ * rebase 点：本行是宿主侧偏离，与 MC 上游无关；若包内 `host/config/schema.ts` 的
+ * 导出面变化，需同步本文件的消费点。登记处：`UPSTREAM-SYNC.md` 第 3 节。
+ */
 import {
   DEFAULT_MAGIC_CONTEXT_CONFIG,
   MagicContextConfigSchema,
   type MagicContextConfig,
-} from "@zcode/magic-context";
+} from "@zcode/magic-context/host/config/schema";
 
 const stringRecordSchema = z.record(z.string(), z.string());
 const unknownRecordSchema = z.record(z.string(), z.unknown());

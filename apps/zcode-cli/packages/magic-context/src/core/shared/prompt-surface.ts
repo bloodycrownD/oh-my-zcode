@@ -21,6 +21,21 @@
 
 import { modelRefLookupOrder } from "./harness-provider-map.js";
 
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 5）：`isValidPromptSurfaceModelKey`
+ * 的真身已抽到零依赖叶子 `./prompt-surface-key.js`，本文件**改为从它 re-export**。
+ *
+ * 原因：本文件顶部的 `harness-provider-map` 依赖让「只想做 prompt_surface key 校验」的
+ * 宿主配置 schema 连带解析两个无关文件；宿主 `adapters/src/config/schema.ts` 在模块顶层
+ * 求值该 schema（配置装载必经路径），闭包大小直接决定关闭态加载量（spec IM1 / 口径①）。
+ * 叶子抽出后 `host/config/schema` 子路径闭包 = schema + language + prompt-surface-key。
+ *
+ * rebase 点：上游若改动该函数，改 `prompt-surface-key.ts`；若上游改了本文件的
+ * `harness-provider-map` 依赖，需重新评估能否合并回去（条件见叶子文件头）。
+ * 登记处：仓库根 `UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
+ */
+export { isValidPromptSurfaceModelKey } from "./prompt-surface-key.js";
+
 /** The built-in prompt-surface variants. */
 export type PromptSurfacePreset = "full" | "light";
 
@@ -51,34 +66,6 @@ export function promptSurfaceConfigIdentity(config: PromptSurfaceConfig | undefi
 }
 
 export type PromptSurfaceResolutionSource = "exact" | "bare" | "wildcard" | "default";
-
-/** Validate bare model, provider/model, and provider/* routing keys. */
-export function isValidPromptSurfaceModelKey(key: string): boolean {
-    if (key.length === 0 || key.trim() !== key) return false;
-
-    const slash = key.indexOf("/");
-    if (slash < 0) return !key.includes("*");
-    if (slash === 0 || slash === key.length - 1) return false;
-
-    const provider = key.slice(0, slash);
-    const modelID = key.slice(slash + 1);
-    if (
-        provider.trim() !== provider ||
-        modelID.trim() !== modelID ||
-        provider.includes("*") ||
-        (modelID.includes("*") && modelID !== "*")
-    ) {
-        return false;
-    }
-    if (modelID === "*") return true;
-
-    return (
-        modelID.length > 0 &&
-        !modelID.startsWith("/") &&
-        !modelID.endsWith("/") &&
-        !modelID.includes("//")
-    );
-}
 
 export type ModelKeyLookupSource = Exclude<PromptSurfaceResolutionSource, "default">;
 

@@ -48,7 +48,20 @@
 
 import { z } from "zod";
 
-import { isValidPromptSurfaceModelKey } from "../../core/shared/prompt-surface.js";
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 5）：从**零依赖叶子**
+ * `core/shared/prompt-surface-key.js` 取 prompt_surface key 校验，而不是从
+ * `core/shared/prompt-surface.js`。
+ *
+ * 原因：本文件是 `@zcode/magic-context/host/config/schema` 窄子路径的载荷，宿主
+ * `adapters/src/config/schema.ts` 在模块顶层求值 `MagicContextConfigSchema`（配置装载
+ * 必经路径）。`prompt-surface.js` 会连带拉 `harness-provider-map.js`，闭包就会从
+ * 3 个文件涨到 4 个，多解析一个与校验无关的文件（spec IM1 / 口径①）。
+ *
+ * rebase 点：逐字重放上游本文件后，上游第 51 行是 `from "../../core/shared/prompt-surface.js"`，
+ * 需重新改回叶子路径。登记处：仓库根 `UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
+ */
+import { isValidPromptSurfaceModelKey } from "../../core/shared/prompt-surface-key.js";
 import { isValidLanguageCode } from "./language.js";
 
 /** Source: `DEFAULT_EXECUTE_THRESHOLD_PERCENTAGE`. */
