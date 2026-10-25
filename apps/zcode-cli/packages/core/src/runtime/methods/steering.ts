@@ -54,6 +54,13 @@ function hasSteerInput(request: Pick<TurnSteerInput, "attachments" | "input">): 
   return request.input.trim().length > 0 || Boolean(request.attachments?.length);
 }
 
+/**
+ * 无活跃轮入队时的 targetTurnId 兜底值（`enqueueDeferredInput`）。
+ * 它是一个合法但**不可归属到任何 turn** 的占位值：分支截断时无法证明它属于幸存轮次，
+ * 按 I2 一律作废（spec 变更点 19 的 ③ 后半条）。
+ */
+const DEFERRED_TARGET_TURN_ID = "deferred";
+
 export async function steerTurn(
   this: AgentRuntimeInternal,
   input: string | TurnSteerInput,
@@ -227,7 +234,7 @@ export async function enqueueDeferredInput(
     this.activeTurn?.turnId ??
     this.latestAssistantTurnId ??
     traceContext.turnId ??
-    ("deferred" as TurnId);
+    (DEFERRED_TARGET_TURN_ID as TurnId);
   const queryId = request.queryId ?? (request.inputId as QueryId | undefined) ?? createQueryId();
   const commandKind = request.commandKind;
   const source: TurnSteerSource | undefined = request.source;
@@ -1123,7 +1130,9 @@ export async function setPendingInputDelivery(
       {
         pendingInputId: options.pendingInputId,
         requestedDelivery:
-          pendingInput.intent?.requestedDelivery ?? pendingInput.intent?.admittedDelivery ?? "queue",
+          pendingInput.intent?.requestedDelivery ??
+          pendingInput.intent?.admittedDelivery ??
+          "queue",
         admittedDelivery: "queue",
         targetTurnId: activeTurn.turnId,
         ...(pendingInput.intent
@@ -1583,4 +1592,110 @@ export async function discardPersistedPendingSteerInputs(
   }
 
   return pendingInputs.length;
+}
+
+/**
+ * I2：分支截断级联作废「被截断区间内的未起跑输入」。
+ *
+ * spec `docs/iterations/bugfix-batch-20261025/bugs/edit-resend-stale-text` 变更点 7/19/20。
+ * 在 `setRevert` 成功之后、`RewindTriggered` 之前调用：那一轮的待发输入不该在新分支上复活。
+ *
+ * 判据（三条同时成立）：
+ *  ① 账本行仍是 `admitted` —— 由 `settleSessionInput` 的 `where status='admitted'` 保证
+ *     （写侧单点判据，避免「先读后写」在 reserve/promote 之间产生 TOCTOU 窗口）；
+ *  ② `id ∉ excludeSessionInputIds` —— 调用方本次重发自持的行（`queue_<commandId>`）；
+ *  ③ `targetTurnId ∈ removedTurnIds`，或 `targetTurnId === "deferred"`。
+ *
+ * **不用 `activeTurn.pendingInputs`**：edit/retry 在 rewind 之前已经抢占并等到 idle，
+ * 此刻 `activeTurn` 不存在；而且普通排队项按设计从不入内存（`enqueueDeferredInput`
+ * 只发事件），只有 guide 物化项才进 `pendingInputs`——拿内存对象会一条都取不到，
+ * 从而在「看起来修了」的表象下让旧输入继续存活（本 bug 第五次复发的最短路径）。
+ *
+ * **必须排除本次重发自身的行**：它也在同一 session_input 账本里，且编辑时旧轮仍在跑，
+ * 它的 `TurnSteerQueued` 完全可能把 `targetTurnId` 记成被截断的那个 turn。不排除就会
+ * 把自己的执行权威 settle 掉，start 阶段读权威即硬失败（I1）。`TraceContext` 不含
+ * commandId，所以排除集合只能由 bootstrap 侧显式传入（spec 5b）。
+ */
+export async function discardRewoundPendingSteerInputs(
+  this: AgentRuntimeInternal,
+  options: {
+    excludeSessionInputIds?: readonly string[];
+    removedTurnIds: readonly string[];
+    traceContext: TraceContext;
+  },
+): Promise<string[]> {
+  const removedTurns = new Set(options.removedTurnIds.map(String));
+  if (removedTurns.size === 0) return [];
+  const excluded = new Set(options.excludeSessionInputIds ?? []);
+  // ③ 的事实来源只能是事件投影：TurnSteerQueued.targetTurnId 经 rebuildProjection 投影成
+  // pendingSteerInputs[].targetTurnId（steering.ts 的 discardPersistedPendingSteerInputs 同源）。
+  const projection = await this.rebuildProjection();
+  const candidates = projection.pendingSteerInputs.filter((item) => {
+    if (excluded.has(item.pendingInputId)) return false;
+    const targetTurnId = String(item.targetTurnId);
+    return targetTurnId === DEFERRED_TARGET_TURN_ID || removedTurns.has(targetTurnId);
+  });
+  if (candidates.length === 0) return [];
+
+  // 先写持久终态再发事件：与 settleRemovedSessionInput 同一取舍——只摘投影会留下
+  // admitted 的 durable 行（重启清扫会把它记成 session_resumed，与真实原因不符）。
+  // settle 失败不阻断事件汇：事件汇里会对同一 id 再 settle 一次，而此处截断已经落下，
+  // 抛错只会制造「历史已截断、命令失败」的半程状态（I4 的出口在 Step 8/9 统一定稿）。
+  for (const item of candidates) {
+    try {
+      await this.sessionStore?.settleSessionInput?.({
+        id: item.pendingInputId,
+        sessionID: this.sessionId,
+        reason: "rewound",
+        status: "discarded",
+      });
+    } catch (error) {
+      this.logger?.warn("Failed to settle rewound session input", {
+        ...traceContextToLogContext(options.traceContext),
+        errorMessage: error instanceof Error ? error.message : String(error),
+        event: "session_input.rewound_settle_failed",
+        module: "core.runtime",
+        pendingInputId: item.pendingInputId,
+        status: "failed",
+      });
+    }
+  }
+
+  const byTurn = new Map<TurnId, PendingSteerInputInfo[]>();
+  for (const item of candidates) {
+    const group = byTurn.get(item.targetTurnId) ?? [];
+    group.push(item);
+    byTurn.set(item.targetTurnId, group);
+  }
+  const discarded: string[] = [];
+  for (const [targetTurnId, group] of byTurn) {
+    const pendingInputIds = group.map((item) => item.pendingInputId);
+    const event = createSessionEvent(
+      SessionEventType.TurnSteerDiscarded,
+      this.sessionId,
+      {
+        pendingInputIds,
+        reason: "rewound",
+        targetTurnId,
+      },
+      {
+        traceId: options.traceContext.traceId,
+        turnId: targetTurnId,
+      },
+    );
+    await this.appendEvent(event, options.traceContext);
+    discarded.push(...pendingInputIds);
+    this.logger?.debug("Turn steer discarded", {
+      ...traceContextToLogContext(options.traceContext),
+      discardedCount: group.length,
+      event: "turn.steer.discarded",
+      module: "core.runtime",
+      pendingInputIds,
+      reason: "rewound",
+      status: "completed",
+      targetTurnId,
+    });
+  }
+
+  return discarded;
 }

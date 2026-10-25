@@ -398,6 +398,12 @@ export async function rewindConversationToMessage(
   this: AgentRuntimeInternal,
   options: {
     abortSignal?: AbortSignal;
+    /**
+     * 本次重发（edit/retry）自持的 session_input id，级联作废时必须排除：
+     * 它的 TurnSteerQueued 可能把 targetTurnId 记成被截断的那个 turn，作废自己会让
+     * 紧随其后的 start 读到终态账本而硬失败（I1）。spec 变更点 20。
+     */
+    excludeSessionInputIds?: readonly string[];
     events: SessionEvent[];
     scope?: RewindScope;
     targetMessageId: MessageId;
@@ -424,6 +430,9 @@ export async function rewindConversationToMessage(
   return applyConversationRewindPlan.call(this, {
     abortSignal: options.abortSignal,
     events: options.events,
+    ...(options.excludeSessionInputIds?.length
+      ? { excludeSessionInputIds: options.excludeSessionInputIds }
+      : {}),
     plan,
     targetMessageId: options.targetMessageId,
     traceContext: options.traceContext,
@@ -536,6 +545,7 @@ async function applyConversationRewindPlan(
   this: AgentRuntimeInternal,
   options: {
     abortSignal?: AbortSignal;
+    excludeSessionInputIds?: readonly string[];
     events: SessionEvent[];
     plan: Extract<ConversationRewindPlan, { kind: "available" }>;
     targetMessageId: MessageId;
@@ -572,6 +582,19 @@ async function applyConversationRewindPlan(
   });
   this.branchGeneration = branchGeneration;
   this.runtimeTaskRegistry.setActiveBranchGeneration?.(branchGeneration);
+
+  // I2（spec 变更点 7/19/20）：截断一旦落账，被截断区间上的未起跑输入就必须同批作废。
+  // 位置写死在这里——setRevert 之后（低一级：截断已是事实）、RewindTriggered 之前
+  // （让 UI 先看到 queue 项消失再看到历史截断，不留「旧项在空历史里排队」的中间态）。
+  // 判别依据是事件投影的 pendingSteerInputs（不是 activeTurn.pendingInputs：edit 路径
+  // 抢占后 activeTurn 已不存在，普通排队项也从不入内存）。
+  await this.discardRewoundPendingSteerInputs({
+    ...(options.excludeSessionInputIds?.length
+      ? { excludeSessionInputIds: options.excludeSessionInputIds }
+      : {}),
+    removedTurnIds,
+    traceContext: options.traceContext,
+  });
 
   await rebuildConversationDerivedState.call(this, {
     branchCutAfterMessageId,

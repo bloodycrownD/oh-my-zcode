@@ -113,6 +113,8 @@ export interface AgentRuntimeTurnMethods {
   }): Promise<ConversationRewindResult | WorkspaceRewindResult>;
   rewindConversationToMessage(options: {
     abortSignal?: AbortSignal;
+    /** 本次重发自持的 session_input id；级联作废必须排除（spec 变更点 20）。 */
+    excludeSessionInputIds?: readonly string[];
     events: SessionEvent[];
     targetMessageId: MessageId;
     traceContext: TraceContext;

@@ -39,6 +39,7 @@
     "test:edit-retry": "tsx --test scripts/test-edit-retry.mjs",
     "test:edit-retry-model": "tsx --test scripts/test-edit-retry-model.mjs",
     "test:input-authority": "tsx --test scripts/test-input-authority.mjs",
+    "test:edit-resend-authority": "tsx --test scripts/test-edit-resend-authority.mjs",
     "test:default-model-live": "tsx --test scripts/test-default-model-live.mjs",
     "test:model-live": "node --test scripts/test-model-live.mjs",
     "test:prompt-surface-toolset-hash": "node --test scripts/test-prompt-surface-toolset-hash.mjs",

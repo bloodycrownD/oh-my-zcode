@@ -90,6 +90,16 @@ class V4RetryTargetNotLatestError extends Error {
 }
 
 /**
+ * edit/retry 在 rewind 时必须排除的 session_input id：本次命令自持的那一行。
+ * 形态与 admission 写账/命令收件箱同源（`queue_<commandId>`，见 command-inbox.ts），
+ * 走 `commandAdmissionOf` 而不是手写拼串——admission 显式覆盖 id 时这里必须跟着变，
+ * 否则级联会去作废一个不存在的 id，而真正的自身行被当成旧输入丢掉（T-RW5 的事故形态）。
+ */
+function rewindExclusionIds(envelope: CommandEnvelope): readonly string[] {
+  return [commandAdmissionOf(envelope).queueItemId];
+}
+
+/**
  * rewind 截断（直驱 core）：edit/retry 不再伪造 `/rewind` slash turn，而是
  * 直接提交 same-session active branch cut。workspaceMode=rewind 会在文件写入全部
  * 成功后，于同一 commit gate 调用这个 primitive。
@@ -104,8 +114,14 @@ async function submitConversationRewind(
   host: V4CommandCoreHost,
   record: V4SessionRecordView,
   anchorMessageId: string,
+  excludeSessionInputIds: readonly string[],
 ): Promise<void> {
   const result = await record.app.runtime.rewindConversationToMessage({
+    // I2 排除集（spec 变更点 20）：本次 edit/retry 自身的 admission 行也在同一账本里。
+    // 编辑时旧轮仍在跑，它的 TurnSteerQueued 可能把 targetTurnId 记成被截断的那个 turn；
+    // 不排除就会把自己的执行权威 settle 掉，紧随其后的 start 读权威即硬失败（I1）。
+    // 制度上不能从 TraceContext 反推 commandId（不含该字段），只能在此显式传入。
+    excludeSessionInputIds: [...excludeSessionInputIds],
     events: [],
     targetMessageId: anchorMessageId as MessageId,
     traceContext: record.traceContext,
@@ -206,7 +222,12 @@ async function editUserQuery(
     const applied = await record.app.runtime.applyWorkspaceFileRewind({
       ...fileOptions,
       commitAfterApply: async () => {
-        await submitConversationRewind(host, record, editTarget.transcriptMessageId);
+        await submitConversationRewind(
+          host,
+          record,
+          editTarget.transcriptMessageId,
+          rewindExclusionIds(envelope),
+        );
         conversationRewindCommitted = true;
       },
     });
@@ -226,7 +247,12 @@ async function editUserQuery(
     }
   }
   if (!conversationRewindCommitted) {
-    await submitConversationRewind(host, record, editTarget.transcriptMessageId);
+    await submitConversationRewind(
+      host,
+      record,
+      editTarget.transcriptMessageId,
+      rewindExclusionIds(envelope),
+    );
   }
   await startCanonicalIntent(host, record, envelope, canonical, attachments);
   // 生产 renderer 不落日志，过去只能从通用 rewind + send 猜测发生过编辑，
@@ -281,7 +307,7 @@ async function retryTurn(
     throw new Error(`retryTurn canonical input unavailable: ${envelope.commandId}`);
   }
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, canonical.attachments);
-  await submitConversationRewind(host, record, resolution.messageId);
+  await submitConversationRewind(host, record, resolution.messageId, rewindExclusionIds(envelope));
   await startCanonicalIntent(host, record, envelope, canonical, attachments);
   return undefined;
 }

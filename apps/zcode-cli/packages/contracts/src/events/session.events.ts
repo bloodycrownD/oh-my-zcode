@@ -536,7 +536,15 @@ export interface TurnSteerDiscardedPayload {
   // user_removed（v4 queue 单项删除）：用户显式从 queue 移除某项，区别于 turn 生命周期丢弃。
   // promoted：sendQueuedNow 已取得执行权，只从 queue 投影摘除；session_input 必须继续
   // 保持 admitted，直到 user message 原子 promotion（或重启后 discarded）。
-  reason: "turn_cancelled" | "turn_failed" | "session_resumed" | "user_removed" | "promoted";
+  // rewound（I2）：分支截断（rewind/edit/retry）级联作废被截断轮次上的未起跑输入；
+  // 账本落 discarded 而不是 cancelled——它不是用户取消，而是「这一轮已不存在」。
+  reason:
+    | "turn_cancelled"
+    | "turn_failed"
+    | "session_resumed"
+    | "user_removed"
+    | "promoted"
+    | "rewound";
 }
 
 export interface SessionInputPromotedPayload {

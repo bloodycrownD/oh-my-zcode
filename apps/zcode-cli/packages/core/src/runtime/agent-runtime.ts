@@ -657,6 +657,11 @@ export interface AgentRuntime {
    */
   rewindConversationToMessage(options: {
     abortSignal?: AbortSignal;
+    /**
+     * 本次重发（edit/retry）自持的 session_input id（`queue_<commandId>`）：
+     * 级联作废被截断区间的未起跑输入时必须排除自己，否则 start 会读到终态账本。
+     */
+    excludeSessionInputIds?: readonly string[];
     events: SessionEvent[];
     targetMessageId: MessageId;
     traceContext: TraceContext;

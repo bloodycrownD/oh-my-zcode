@@ -244,6 +244,16 @@ export interface AgentRuntimeCoreMethods {
     traceContext: TraceContext;
   }): Promise<void>;
   discardPersistedPendingSteerInputs(traceContext: TraceContext): Promise<number>;
+  /**
+   * I2：分支截断（rewind/edit/retry）级联作废被截断区间内的未起跑输入。
+   * 判据 = 账本 admitted ∧ id ∉ excludeSessionInputIds ∧ (targetTurnId ∈ removedTurnIds ∨ 'deferred')；
+   * targetTurnId 取自事件投影 pendingSteerInputs，不用 activeTurn.pendingInputs。
+   */
+  discardRewoundPendingSteerInputs(options: {
+    excludeSessionInputIds?: readonly string[];
+    removedTurnIds: readonly string[];
+    traceContext: TraceContext;
+  }): Promise<string[]>;
   /** held 项按 id 丢弃（held 回落）：active turn 结束后经投影定位补 TurnSteerDiscarded。 */
   discardHeldPendingInputById(
     pendingInputId: string,

@@ -63,6 +63,7 @@ import {
   completeExternalQueueDrain,
   discardHeldPendingInputById,
   discardPendingInput,
+  discardRewoundPendingSteerInputs,
   editPendingInputById,
   emitModeChanged,
   emitModelSelected,
@@ -268,6 +269,7 @@ export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void 
   proto.emitModelSelected = emitModelSelected;
   proto.emitModeChanged = emitModeChanged;
   proto.discardPersistedPendingSteerInputs = discardPersistedPendingSteerInputs;
+  proto.discardRewoundPendingSteerInputs = discardRewoundPendingSteerInputs;
   proto.discardHeldPendingInputById = discardHeldPendingInputById;
   proto.clearAllPendingInputs = clearAllPendingInputs;
   proto.createDefaultSubagentPort = createDefaultSubagentPort;

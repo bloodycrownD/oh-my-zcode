@@ -395,8 +395,13 @@ async function persistDurableSessionEvent(
     // 保持 admitted，随后由 persistUserPrompt 原子置 promoted；若进程先退出，恢复清扫
     // 会把它明确置 discarded/session_resumed。
     if (payload.reason === "promoted") return;
-    // session_resumed=重启不保留队列（裁决，留痕不静默）；其余用户动作归 cancelled。
-    const status = payload.reason === "session_resumed" ? "discarded" : "cancelled";
+    // session_resumed=重启不保留队列（裁决，留痕不静默）；rewound=分支截断级联作废
+    // （spec edit-resend-stale-text I2）——两者都不是「用户取消这一项」，落 discarded
+    // 才能与 cancelled（用户动作）区分开，诊断/对账时才看得清「这条输入为什么没了」。
+    const status =
+      payload.reason === "session_resumed" || payload.reason === "rewound"
+        ? "discarded"
+        : "cancelled";
     for (const pendingInputId of payload.pendingInputIds) {
       try {
         await this.sessionStore.settleSessionInput?.({
