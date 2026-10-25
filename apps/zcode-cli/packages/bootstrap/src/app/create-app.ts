@@ -86,6 +86,7 @@ import { getWorkflowConcurrencyGovernor } from "./workflow-concurrency-governor.
 import { createDynamicWorkflowSnippetService } from "./dynamic-workflow-snippet-service.js";
 import { createModelCatalogPort } from "./model-catalog-port.js";
 import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
+import { projectMagicContextEffectiveEnabled } from "./magic-context/effective-enabled.js";
 import { createDynamicWorkflowRunProgressSink } from "./dynamic-workflow-run-progress-sink.js";
 import { createScriptWorkflowAgentRuntime } from "./script-workflow-child-runtime.js";
 import { workflowActorModelPolicy } from "./workflow-actor-model.js";
@@ -823,8 +824,13 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
     // (reason=disabled) 若只由工厂发就一次都不会出现——「压缩停机」在 disabled
     // 形态下依旧静默（mc/A-1 收口）。这是生产侧 disabled 的唯一发射点；工厂内
     // 的 disabled 分支只保留给直构/测试。
+    // IM3（spec phase-effective-single / W3 G4）：装配门、工厂 `enabled` 入参、
+    // `isMagicContextEnabled` 命令契约三处此前各写一遍同一个比较。三处读的是同一份
+    // 冷值（`runtime-config.ts` 用唯一口径 `resolveMagicContextEffectiveEnabled` 算出的
+    // `runtimeConfig.magicContext.enabled`），所以只投影一次、三处复用同一个布尔。
+    const magicContextEffectiveEnabled = projectMagicContextEffectiveEnabled(runtimeConfig);
     let magicContextAssembly: typeof import("./magic-context-turn-transform.js") | undefined;
-    if (runtimeConfig.magicContext?.enabled === true) {
+    if (magicContextEffectiveEnabled) {
       try {
         magicContextAssembly = await import("./magic-context-turn-transform.js");
       } catch (error) {
@@ -881,7 +887,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
           // 是 `features.magicContext && magicContext.enabled`，这一位与下面装配门读
           // 的是同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。
-          enabled: runtimeConfig.magicContext?.enabled === true,
+          enabled: magicContextEffectiveEnabled,
           registerClose: (close) => {
             closeMagicContext = close;
           },
@@ -1278,7 +1284,7 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       // FORK（MF-06）：命令面读同一个 effective 开关，与 turn-loop 的门**同源同值**
       // ——都来自 `runtimeConfig.magicContext.enabled` 那一次求值（MF-01 算出来的
       // 那个）。`/ctx-*` 消费它来决定要不要开库，不再自行读 `features`。
-      isMagicContextEnabled: () => runtimeConfig.magicContext?.enabled === true,
+      isMagicContextEnabled: () => magicContextEffectiveEnabled,
       readToolResultArtifact: (uri) =>
         artifactStore.readToolResultArtifact({ uri, trace: traceContext }),
       // wire/staging 全程是 decoded chunk；只有完整 checksum commit 后才在

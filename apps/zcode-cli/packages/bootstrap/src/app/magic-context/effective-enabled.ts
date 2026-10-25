@@ -15,6 +15,11 @@
  * 缺省语义与包内 schema 对齐：`enabled: z.boolean().default(true)`，所以
  * `domainEnabled` 缺席按开处理，只有显式 `false` 才关；`featureFlag` 由调用方
  * 解析完缺省后传入（resolved config 必为 boolean）。
+ *
+ * IM3（spec phase-effective-single）：本文件是**唯一**实现。三轴求值只允许在这里
+ * 写一次；消费方要么调用 `resolveMagicContextEffectiveEnabled()`（有自己的原始输入），
+ * 要么调用 `projectMagicContextEffectiveEnabled()` 读它算出的冷值——不得再各写一遍比较。
+ * `bootstrap/scripts/test-magic-context-gate.mjs` 的「同源守卫」在全仓范围强制这一点。
  */
 export interface MagicContextEffectiveEnabledInput {
   /** `features.magicContext`，调用方已解析缺省（config lane 默认 true）。 */
@@ -33,4 +38,22 @@ export function resolveMagicContextEffectiveEnabled(
   input: MagicContextEffectiveEnabledInput,
 ): boolean {
   return (input.overrideEnabled ?? input.featureFlag) && input.domainEnabled !== false;
+}
+
+/**
+ * 冷值投影：读 `RuntimeConfig` 里那一位**已由 {@link resolveMagicContextEffectiveEnabled}
+ * 算出并冻结**的 `magicContext.enabled`。
+ *
+ * 为什么需要它：`create-app.ts` 曾在装配门 / 工厂入参 / `isMagicContextEnabled` 契约
+ * 三处各写一遍同一个比较（spec W3 的 G4）。三处读的是同一个字段、同一个值，重算一次
+ * 没有任何意义，只留下「三份可能漂移的判定」。收成一次调用后装配层只剩一个布尔。
+ *
+ * 这里**不重新求值**三轴：`RuntimeConfig.magicContext.enabled` 是冷求值的**输出**，
+ * 再喂回 `resolveMagicContextEffectiveEnabled` 会得到同一结果却掩盖「谁是输入」。
+ * 缺省方向与原三处逐位一致：缺席按关（冷值缺席只可能出现在未投影该字段的轻量形态）。
+ */
+export function projectMagicContextEffectiveEnabled(
+  runtimeConfig: { readonly magicContext?: { readonly enabled?: boolean } | undefined } | undefined,
+): boolean {
+  return runtimeConfig?.magicContext?.enabled === true;
 }

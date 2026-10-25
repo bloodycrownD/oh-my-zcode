@@ -99,7 +99,7 @@ import {
   type ZCodeWorkspaceListMagicContextMemoriesParams,
   type ZCodeWorkspaceListMagicContextMemoriesResult,
 } from "@zcode/shared";
-import { resolveMagicContextEffectiveEnabled } from "../app/magic-context/gate.js";
+import { resolveMagicContextEffectiveEnabled } from "../app/magic-context/effective-enabled.js";
 import {
   parseParams,
   ProtocolRequestError,
