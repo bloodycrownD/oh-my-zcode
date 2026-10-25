@@ -308,7 +308,7 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 | 8 | IM1 | `core/shared/prompt-surface-key.ts`（新）+ `prompt-surface.ts` | 抽零依赖叶子，压窄 schema 子路径闭包 |
 | 9 | IM1 | `adapters/src/config/schema.ts:4-8` | 改走窄子路径 |
 | 10 | IM1 | `zcode-protocol/magic-context-config.ts:3`、`magic-context-memories.ts:80-92` | 去顶层值 import，handler 内惰性 |
-| 11 | IM1 | `magic-context-memories.ts:166-169` | 自开库改为复用注入 handle |
+| 11 | IM1 | `magic-context-memories.ts:166-169` | 自开库改为复用注入 handle（**fix-b8 已实现**：装配层 `registerStorage` → 插件 `storage` → `app.getMagicContextStorage?()` 三态端口，见下方 fix-b8 记录） |
 | 12 | IM5 | `app/magic-context/projection.ts` | 加 `originalPairsWithMessage` + `sanitizeRebuiltMetadata`（取 `ff8b4522`） |
 | 13 | IM6 | `core/hooks/magic-context/inject-compartments.ts:2089-2095`（**读侧 WHERE，根修**）、`:2939-2945`（`<new-compartments>` 块构建点）、`:3865-3891`（缓存回放路径） | ①`readM0Compartments` 加 `rebase_status`/水位 WHERE（**否则 host 侧「标记」不生效，整修是空的**）；②refused 时只抑制 `<new-compartments>` 块，不抑制整条 M1；③缓存回放路径必须同样过滤，否则 `prepareCachedM0M1Replay` 会原样重放带块文本。FORK 登记 |
 | 14 | IM6 | `magic-context/src/host/compartment-invalidation.ts`（新）+ `fork-edit-retry.ts:106` + `create-app.ts`（挂可选端口） | rewind 后**按 revert 水位过滤 DB 层 compartment 记录**（M0 的 `readM0Compartments` 才不会再吐出旧摘要）+ 清 `session_meta` 缓存与 injection cache；**不改 core 的 `rewind-message.ts`** |
@@ -374,9 +374,83 @@ UPSTREAM-SYNC.md                                         改（口径修正 + FO
 
 **Step 16 判定：`test-magic-context-absent-event.mjs` 的 server 根缺口——不补。** zero-load 在 `a1427747` 补 `server.js` 根是因为两个 MC handler 的**静态**导入方在那里；本脚本的 marker（`app/magic-context/**`、门面、`magic-context-historian.js`、`-usage-summary.js`）每一个都在模块顶层静态 import MC barrel，所以「协议图静态引进其中任何一个」必然让 zero-load 的 §2（M0 之外包内解析数 = 0，已是双根、判据更强）先红；在 absent-event 里补 server 根等于用更弱的口径重述同一条语义，只多一个子进程根（约 300 条解析 / 0.3s）。判定与理由已写进脚本内 `FACTORY_MODULE_MARKERS` 的「根只有 create-app」注释块，避免下一轮复审重复提问。
 
+**Step 16 补记（fix-b8，cr-func 的 P1-1）**：本步新建的 `.github/workflows/mc-tests.yml` **必须同批进摘除清单**——它的 39 条全是 `pnpm --filter <包> run <MC script>`，包与 script 摘除后每一条都 404，workflow 会永久红。已加入 `DEDICATED_PATHS`（整份删除，不改写成空壳）。
+**通则**：凡「本步新增的 CI / 测试 / 门禁」都必须同批进 `DEDICATED_PATHS`，否则摘除后它们从「门禁」变成「永久红」。本波顺带补上了 Step 15 新增的 `test-magic-context-coupling-budget.mjs`（此前不在清单里）。
+
 **Step 14（phase-upgrade-surface）**：`UPSTREAM-SYNC.md` 第 3 节新增 **Z9**（Step 12 的 import_failed 降级 + E1b 变异证据）与 **Z10**（IM7 耦合预算门禁的对外语义与升级处置），编号 Z1→Z10 连续，并在第二张表标题写明「当前最大编号 Z10，下次从 Z11 起」。口径回填三处：①第 5 节 `EXEMPT-2b` 行按实测重算为 **15 处运行期加载点（9 静态 require + 6 文件/7 行动态 import）**，逐文件列出并说明相对旧「5 静态 + 2 动态」的 +4/+4 来源（facade 拆分 1→6、core ctx handler 1→3、协议两处静态转惰性、cli 侧改经 `bootstrap/ctx-commands` 后不再直接加载包），明确「不得把 facade 的 6 个静态点合并回单体压数字」；②第 3 节口径备注改为说明 EXEMPT-2b 与 IM7 是**两个不同的数**、不得互相换算；③第 4 节「测试族」行改指 `mc-tests.yml`（39 项）与本地等价跑法。`docs/.iteration-state.yaml` 的 `exempt` 条目同步为同一数字（该文件与表有「保持一致」的约定）。
 
 
+
+## cr-func 修复波（fix-b8，2026-10-25）
+
+cr-func 判 `func_ready: no`（无 P0，3 条 P1 + 4 条 P2）。三条判据本身都成立，缺的是**「一键摘除」交付物的清单完整性**——全部落在脚本 / 文档层。
+
+### P1-1 摘除后 workflow 整份存活 → CI 永久红
+
+`.github/workflows/mc-tests.yml` 进 `DEDICATED_PATHS`（整份删除）。同时补上 Step 15 新增却漏登记的 `test-magic-context-coupling-budget.mjs`。
+dry-run：整件删除 **55 → 57**。**变异证明**：把该条目删掉 → `--audit` 红在 `.github/workflows/mc-tests.yml`（旧口径 `git grep -il magiccontext` 看不见它——文件里只有 kebab 写法）。
+
+### P1-2 5 个 package script 指向已删测试文件
+
+旧判据是名字正则 `/scripts\/(test-)?(magic-context|mc-|ctx-)/`，于是 `test:settle-background` / `test:mural-media-blocks` / `test:e2e-live-all` / `test:prompt-surface-toolset-hash` / `test:prompt-surface-tiering` 这 5 个**名字里没有 MC 前缀、却硬编码了被删测试文件**的 script 留在 package.json 里，失败从「文件 404」转移到「script 404」。
+
+改法（结构化推导）：`scriptPathCandidates(command, packageDir)` 把命令里的路径 token 按**所在包目录**解析成仓库相对路径，命中 `DEDICATED_PATHS`（含祖先目录）即删该 script。`test:v4-perf` 的按段收窄**必须排在这条规则之前**（否则整条长命令会因为含一个被删的 ui 测试路径而整体消失）。
+dry-run 现在会打印**被删 script 台账**（28 条，逐条给依据 path/name）。**变异证明**：把结构化判据短路 → 删除数 28 → 23、5 个名字从台账消失，且 `--audit` 新增的「悬空 script」检查红出这 5 条（`<package.json>: <script> → <path>`）；还原后 sha256 逐字节一致。
+
+### P1-3 spec 变更点 #11 未实现且未登记 → **实现端口**
+
+选了「实现」而不是「登记偏离」，理由是根治：装配层缺席时不该创建/迁移库。
+
+端口形状（四跳，全部可选 / 不透明）：
+
+```
+assembly.ts  db 成功之后  →  options.registerStorage?.({ db })
+index.ts     registerStorage 捕获 → MagicContextPlugin.storage（getter）
+create-app   getMagicContextStorage: () => magicContextPlugin?.storage ?? null   ← **无条件挂**
+app/types.ts getMagicContextStorage?(): { readonly db: unknown } | null
+handler      readInstalledStorage() → installed | unavailable | absent
+```
+
+- `installed` = 用装配层句柄（不再 openDatabase）；
+- `unavailable` = 有 App 暴露端口但回 `null`（装配抛错 / db_null / import_failed）→ list 回 `unavailable` 信封、archive 抛 `-32010`，**都在 barrel 加载之前**，所以连业务符号都不加载、更不会建库；
+- `absent` = 没有任何 session 暴露该端口（直构 / 单测夹具）→ 保留旧的自开库兜底（22 例既有直构用例依赖它）。
+- `db` 刻意是 `unknown`（不写 `typeof import("@zcode/magic-context")`）：宿主**保留**的 `app/types.ts` 摘除后仍要过 typecheck，且写实类型会往 IM7 预算多记一处散点。唯一 cast 在 handler 里，是本设计的边界转换。
+- 摘除清单新增两条 `sub` 规则（`app/types.ts` 的字段块、`create-app.ts` 的挂载行），dry-run 复现通过。
+
+新增两条用例（`test-magic-context-memories-rpc.mjs` D4）：端口回 `null` 时 list → `available:false/unavailable`、archive → `-32010`，且**库文件不存在**、`loadRuntime` 零调用。**变异证明**：把 `readInstalledStorage` 短路成恒 `absent` → 24 例里恰好新加的两例红（`22 pass / 2 fail`），其中 archive 一例的实际错误文案退化成「not installed in this build」（= 走了 barrel 自开库老路）；还原后 24/24。
+
+### P2-1 audit 口径只认 camelCase（P1-1 / P1-2 没被自检抓到的根因）
+
+- 口径：`RESIDUE_RE = /magic[-_]?context|ctx-/i`（覆盖 kebab / camel / `magic_context` / `/ctx-*`）。旧口径 `git grep -il magiccontext` 只抹平大小写、抹不平连字符，于是 kebab-only 与 `ctx-`-only 完全不在对账范围。
+- 对账改走**虚拟树**：先跑一遍规则（只写 `fileCache`），再扫「摘除后的内容」。这样 `--audit` 不再必须真的 apply 过才能跑，与脚本「dry-run 优先」的纪律一致；扫描面与旧 `git grep` 的路径参数一致（`apps` / `packages` / `scripts` / `knip.json` / `.github`，跳过 `node_modules`/`dist`/`.reference` 等）。
+- 新增「悬空 script」检查（见 P1-2）。
+- **首跑就捞出 16 个未登记残留**（旧口径全部看不见）——其中 2 类是真缺陷，已修：
+  - `apps/zcode-cli/packages/i18n/src/locales/{en-US,zh-CN}.ts` 的 CLI 帮助表仍逐行宣传 `/ctx-status`…`/ctx-recomp` 四条已删命令 → 两份 locale 各加一条 `del` 规则；
+  - `packages/shared/src/test-ids.ts` 的 `settings-mcm-*`（13 个）与 `TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT` 死导出（消费方 UI 件已被整件删除）→ 两条 `del` 规则。
+  其余 14 条是注释 / 注册表键 / 格式器 ignore glob / 摘除工具自身，进 `KEEP_LIST` 并逐条写理由（含 `core/src/runtime/helpers/index.ts` 的接缝 barrel 再导出）。
+- 对账结果：**60 个残留文件全部登记**；`0` 个悬空 script。**变异证明**：口径收窄回 `/magiccontext/i` → 残留集合 60 → **36**（旧口径漏掉 24 个文件）；把 P1-1 的条目拿掉 → 红在 workflow。
+
+### P2-3 `<session-history-invalidated>` 未进 records 标记清单
+
+7 处清单（`TEMPORAL_AWARENESS_OVERRIDE_GUIDANCE` / `BASE_INTRO` / `BASE_INTRO_NO_REDUCE` / `BASE_INTRO_LIGHT` / `BASE_INTRO_NO_REDUCE_LIGHT` / `SUBAGENT_REDUCE_INTRO` / `SUBAGENT_REDUCE_INTRO_LIGHT`）逐个补 `<session-history-invalidated>`；块正文补一句 `Tool effects and files on disk are unaffected — only these history entries were invalidated.`（防止模型误以为工具副作用/磁盘改动也被撤销）。
+新断言：`test-prompt-surface.mjs` 一次渲染 **8 个变体**逐个断言（含 `primaryOverride` + temporal 那一份），漏一处即红；`test-rewind-compartments.mjs` 的 T-RW2 补断言块正文那句话。**变异证明**：删掉一个变体的标签 + 删掉正文那句话 → prompt-surface `27 pass / 1 fail`（#23）、rewind `6 pass / 1 fail`（T-RW2）；还原后 28/28 与 7/7。偏离已登记为 `UPSTREAM-SYNC.md` 的 **Z12**（`src/core/**` 逐字区的 rebase 点）。
+
+### P2-4 `/ctx-status` 的 `compartmentCount` 含 unresolved 行
+
+`getCompartments` 是全量读，注入面却排除 `rebase_status='unresolved'`（Z5）→ rewind 后 `count:5` 与「模型实际看到 3 段」不一致。快照拆 `compartmentCount`（仍会注入的段数）+ `invalidatedCompartmentCount`，文本快照对应 `count:` / `invalidated:` 两行（恒打印，形状不随状态变化）。
+新用例：3 段有效 + 2 段 unresolved → `count 3 / invalidated 2`。**变异证明**：把 `compartmentCount` 改回 `compartments.length` → 该用例红（其余 3 例绿）；还原后 4/4。登记 **Z13**。
+
+### P2-6 耦合预算可被「合回单体」规避
+
+预算按导入行计数，把 6 个职责文件合回一个会让 `bootstrap/src` 从 25 掉到约 20——**合回单体反而更绿**。新增形状守卫：`app/magic-context/` 的 `.ts` 文件集合必须逐字等于 spec「最终项目结构」的 9 个（`assembly` / `effective-enabled` / `index` / `ports` / `projection` / `settle` / `storage` / `types` / `usage`）。用**精确集合**而不是「≥ 6」下限：下限挡不住「9 合 8」，精确集合对任意两两合并都红；确需拆/并时先改 spec 的目录清单。
+**变异证明**：把 `usage.ts` 改名成 `usageMerged.ts`（等价于「合并后少一个名字」）→ 该用例红、其余 3 例绿（预算数字仍是 52/25，正是「假性变绿」的现实版）；改回后 4/4。
+
+### 门禁与数字（真跑）
+
+- 标准套件全绿：zero-load 1/1、absent-event 5/5、gate 27/27、plugin 10/10、magic-context 23/23、mc-section-zh、config-rpc 10/10、memories-rpc **24/24**（+2）、coupling-budget **4/4**（+1）、edit-retry 6/6、entry-identity-guard 4/4、compartment-rewind-host 3/3、adapters config-narrow 6/6 / boundaries 10/10 / domain 22/22、MC rewind 7/7、prompt-surface **28/28**（+1）、ctx-status **4/4**（+1）。
+- `turbo run typecheck --force`（4 包）= **12/12，0 cached**；`architecture:check --changed` = OK / 0 new。
+- 摘除脚本 dry-run：整件删除 **57**、改写 **51** 文件 / **152** 条规则、删除 **28** 个 script、陈留 dist 30；`--audit`：60 个残留全部登记 + 0 悬空 script。
+- lint：根 `pnpm lint` = **0 errors / 74 warnings**（apps 不在根 oxlint 扫描面内，`ignorePatterns` 含 `apps/zcode-cli`）；`turbo run lint --force`（bootstrap / cli / magic-context / adapters 四包报违规，core 零违规）= **66 warnings / 84 errors**，逐条都是存量 `max-lines`（每个超限文件 1 条）与 `no-unused-vars`。逐文件核对第 400 行边界：本轮改动的 9 个 `.ts` 源文件**没有一个跨过门槛**（`create-app` 1275→1276、`app/types` 611→612、`inject-compartments` 3393→3393 本来就超；其余 6 个 33–356 行，远低于 400）→ **新增 0**。基线数字口径备注：本记录实测的是「5 包 turbo lint」范围，与手交时的「66 errors」不是同一口径（后者未注明范围），本波的判据只用「逐文件是否跨限」这条。
 
 ## 测试策略
 

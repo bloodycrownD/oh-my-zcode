@@ -273,6 +273,46 @@ test("IM7：宿主侧 MC 耦合散点逐格不超预算（只减不增）", () =
   );
 });
 
+/**
+ * P2-6：形状守卫——装配目录必须保持**拆分**。
+ *
+ * 预算按「导入行」计数，于是有一个反向激励：把 `app/magic-context/{ports,usage,
+ * projection,settle,storage,assembly}.ts` 合回一个文件，`bootstrap/src` 就从 25 掉到
+ * 约 20（每个被合并的文件少 1–3 条 `@zcode/magic-context` 导入），预算是「只减不增」
+ * ——**合回单体反而更绿**。而 absent-event 的目录前缀 marker 与 plugin 的导出面对拍
+ * 都不看文件数，三道门禁同时放过这个规避。
+ *
+ * 这条断言把「拆分」本身钉成形状：spec「最终项目结构」列出的 9 个文件必须逐个在场。
+ * 用**精确集合**而不是「≥ 6 个」的下限——下限挡不住「9 合 2」（还剩 2 个，仍 < 6 会红，
+ * 但「9 合 8」不红）；精确集合对任意两两合并都红，代价是将来要合法拆/并时**必须先改
+ * spec 的目录清单再改这里**（spec 风险 8 的既定纪律）。
+ */
+const MC_FACADE_DIR = join(REPO_ROOT, "apps/zcode-cli/packages/bootstrap/src/app/magic-context");
+const MC_FACADE_FILES = [
+  "assembly.ts",
+  "effective-enabled.ts",
+  "index.ts",
+  "ports.ts",
+  "projection.ts",
+  "settle.ts",
+  "storage.ts",
+  "types.ts",
+  "usage.ts",
+];
+
+test("形状：装配目录保持 spec 的 9 文件拆分（否则合并即让预算假性变绿）", () => {
+  const present = readdirSync(MC_FACADE_DIR)
+    .filter((name) => name.endsWith(".ts"))
+    .sort();
+  assert.deepEqual(
+    present,
+    [...MC_FACADE_FILES].sort(),
+    "`bootstrap/src/app/magic-context/` 的文件集合与 spec「最终项目结构」不一致：" +
+      "把职责文件合回单体会减少 MC 导入行、让 IM7 预算假性变绿。" +
+      "确需拆分/合并时，先改 spec 的目录清单，再同步本清单与 BUCKET_LIMITS。",
+  );
+});
+
 test("IM4 单列：core 的 ctx 工具调用期 await import 恰好 3 处（与 IM7 分开计）", () => {
   const runtimeImports = SCAN.hits.filter(
     (hit) => hit.bucket === "core/src" && hit.specifier === MC_SPECIFIER,

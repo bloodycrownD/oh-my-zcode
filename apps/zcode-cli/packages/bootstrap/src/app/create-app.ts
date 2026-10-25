@@ -1224,6 +1224,12 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       ...(magicContextPlugin?.invalidateCompartments === undefined
         ? {}
         : { invalidateMagicContextCompartments: magicContextPlugin.invalidateCompartments }),
+      // FORK（spec phase-zero-load / W2 / 变更点 #11）：库句柄端口。**无条件挂**（哪怕
+      // 插件缺席 / 装配抛错）：handler 靠「端口在场且返回 null」区分「本 App 参与了
+      // 装配但没装成」与「直构夹具形态」，后者才允许自开库兜底。若这里随插件一起
+      // 缺席，一条只读 RPC 就会在装配失败时把库创建并迁移出来——那正是本端口要根治
+      // 的缺陷。`??` 不写在此处：`storage` 是 getter，取值时才求（构造期回填）。
+      getMagicContextStorage: () => magicContextPlugin?.storage ?? null,
       respondWorkspaceHookReview: (input) =>
         workspaceHookRuntimeSecurity?.respond(
           {

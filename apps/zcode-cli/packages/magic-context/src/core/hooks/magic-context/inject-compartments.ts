@@ -2472,7 +2472,7 @@ export function renderM0(args: {
         const last = invalidatedHistory.lastSequence;
         const range = first === last ? `sequence ${first}` : `sequences ${first}-${last}`;
         sections.push(
-            `<session-history-invalidated>\nThe user rewound the conversation. ${invalidatedHistory.count} summary segment(s) (${range}) covering the rewound turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat the rewound turns as removed from history and do not infer their content.\n</session-history-invalidated>`,
+            `<session-history-invalidated>\nThe user rewound the conversation. ${invalidatedHistory.count} summary segment(s) (${range}) covering the rewound turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat the rewound turns as removed from history and do not infer their content. Tool effects and files on disk are unaffected — only these history entries were invalidated.\n</session-history-invalidated>`,
         );
     }
 

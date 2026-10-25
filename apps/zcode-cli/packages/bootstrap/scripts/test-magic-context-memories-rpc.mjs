@@ -134,6 +134,8 @@ const DIRS = {
   authorityCopy: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-authority-copy-")),
   foreign: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-foreign-")),
   fence: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-fence-")),
+  // D4（存储端口）：专供「装配层没有可用库」两例的项目目录。
+  portNull: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-port-null-")),
 };
 
 magicContext.initializeMagicContextHost();
@@ -1146,6 +1148,75 @@ test("降级：业务符号加载失败——archive 抛可读 -32010（T-MC5 �
       },
     );
     assert.equal(existsSync(drillDbPath), false, "加载失败发生在开库之前，不得建库");
+  });
+});
+
+// ══ D4. 存储端口（spec phase-zero-load / W2 / 变更点 #11）：装配没装成 → 不自开库 ══
+
+/**
+ * 一个「参与了装配、但没有可用库」的 App，等价于生产上的 db_null / 装配抛错 /
+ * import_failed：端口在场，`getMagicContextStorage()` 回 `null`。
+ */
+function sessionRecordWithStorage(getStorage) {
+  return { app: { getMagicContextStorage: getStorage } };
+}
+
+test("端口：getMagicContextStorage()=null → list 回 unavailable，且不建库、不加载 barrel", async () => {
+  const dbPath = join(TEMP_ROOT, "port-null-list.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(sessionRecordWithStorage(() => null)),
+      { workspace: workspaceRef(DIRS.portNull) },
+      {
+        configPath: ENABLED_CONFIG,
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          throw new Error("the port already answered unavailable; the barrel must not load");
+        },
+      },
+    );
+    assert.equal(result.supported, true, "信封承载「没装成」，绝不冒泡成 -32603");
+    assert.equal(result.available, false);
+    assert.equal(result.reason, "unavailable");
+    assert.deepEqual(result.entries, []);
+    assert.deepEqual(result.counts, ZERO_COUNTS);
+    assert.equal(result.truncated, false);
+    assert.equal(runtimeLoaded, 0, "端口已给 unavailable，连业务符号都不该加载");
+    assert.equal(
+      existsSync(dbPath),
+      false,
+      "**不得创建库文件**：旧行为会在这里 openDatabase（创建 + 迁移）——那正是端口要根治的缺陷",
+    );
+  });
+});
+
+test("端口：getMagicContextStorage()=null → archive 抛可读 -32010，且不建库", async () => {
+  const dbPath = join(TEMP_ROOT, "port-null-archive.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    await assert.rejects(
+      () =>
+        archiveMagicContextMemories(
+          contextWith(sessionRecordWithStorage(() => null)),
+          { workspace: workspaceRef(DIRS.portNull), memoryIds: [1] },
+          {
+            configPath: ENABLED_CONFIG,
+            loadRuntime: async () => {
+              runtimeLoaded += 1;
+              throw new Error("the port already answered unavailable; the barrel must not load");
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /storage is not installed/i);
+        return true;
+      },
+    );
+    assert.equal(runtimeLoaded, 0);
+    assert.equal(existsSync(dbPath), false, "写路径同样不得在装配缺席时把库造出来");
   });
 });
 

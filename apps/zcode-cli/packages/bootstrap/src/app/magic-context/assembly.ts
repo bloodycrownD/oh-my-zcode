@@ -137,6 +137,17 @@ export async function createMagicContextTurnTransform(
     return undefined;
   }
 
+  // FORK（spec phase-zero-load / W2 / 变更点 #11）：把**已经开好的**库句柄交给装配层。
+  //
+  // 为什么必须有这一行：`magic-context-memories.ts` 的两条 RPC（list / archive）此前
+  // 在 handler 里自己 `openDatabase(getMagicContextDatabasePath())`——句柄是按路径缓存
+  // 的同一个对象，但**第一次**调用会创建并迁移库。于是「开关开着、装配却没成」的
+  // 会话被一条只读 RPC 造出一个库来。端口让 handler 只消费这里交付的句柄，装配没成
+  // （本工厂在上面 db_null / import_failed 分支返回）就不存在句柄，RPC 回 unavailable。
+  //
+  // 位置：`db` 成功之后、`deps` / transform / 端口构造之前（任何 turn 之前）。
+  options.registerStorage?.({ db });
+
   // deps 必须是**同一个活对象**：包内 transform 每个 pass 都重新读
   // `deps.cacheTtlConfig` / `deps.executeThresholdPercentage` 等字段，所以这里把
   // 配置字段挂在一个稳定引用上，热生效时原地改写即可；重建 deps 反而会让已经

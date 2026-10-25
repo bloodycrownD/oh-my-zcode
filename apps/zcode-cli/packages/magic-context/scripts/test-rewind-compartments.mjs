@@ -301,6 +301,11 @@ test("T-RW2 rewind 后 M0 不再注入被裁段，且投 <session-history-invali
   );
   assert.ok(afterText.includes("2 summary segment(s)"), "说明块必须给出作废段数");
   assert.ok(afterText.includes("sequences 1-2"), "说明块必须给出序号区间");
+  // P2-3 复审补充：模型看到「历史被作废」时容易连带以为工具副作用/磁盘改动也被撤销。
+  assert.ok(
+    afterText.includes("Tool effects and files on disk are unaffected"),
+    "说明块必须明确「工具副作用与磁盘文件不受影响」",
+  );
 });
 
 // ── T-RW3：M1 增量块同样过滤 unresolved ─────────────────────────────────

@@ -70,10 +70,7 @@ test("lastUsageContextLimit carries the persisted limit of the last usage readin
   assert.equal(snapshot.lastInputTokens, 54_000);
 
   const lines = formatMagicContextStatusSnapshot(snapshot).split("\n");
-  assert.ok(
-    lines.includes("  last usage context limit: 200000"),
-    "文本快照必须带上那次读数的分母",
-  );
+  assert.ok(lines.includes("  last usage context limit: 200000"), "文本快照必须带上那次读数的分母");
   // 分子与分母成对出现，读者才判得出「27% 是相对哪个窗口」。
   assert.ok(lines.includes("  last context usage: 27%"));
 });
@@ -102,6 +99,43 @@ test("an explicit 0 write (reset / legacy backfill) is also treated as unobserve
   assert.equal(snapshot.lastUsageContextLimit, null);
   // 其余读数仍在该行上，字段之间互不牵连。
   assert.equal(snapshot.contextPercentage, 27);
+});
+
+test("rewind 作废的 compartment 不计入 count，另列 invalidated", async () => {
+  // P2-4：`getCompartments` 是**全量**读（含 rebase_status='unresolved' 的行），而
+  // 注入面（readM0Compartments）会过滤掉它们。快照若直接 `compartments.length`，
+  // rewind 后 `/ctx-status` 会报「count: 5」，而模型实际只看到 3 段。
+  const sessionId = "sess_status_invalidated";
+  const { appendCompartments } = await import(
+    dist("core/features/magic-context/compartment-storage.js")
+  );
+  appendCompartments(
+    db,
+    sessionId,
+    [0, 1, 2, 3, 4].map((sequence) => ({
+      sequence,
+      startMessage: sequence + 1,
+      endMessage: sequence + 1,
+      startMessageId: `m-${sequence}`,
+      endMessageId: `m-${sequence}`,
+      title: `segment-${sequence}`,
+      content: `SUMMARY-${sequence}`,
+      p1: `SUMMARY-${sequence}`,
+    })),
+  );
+  // 后两段 = rewind 之后被标成 unresolved 的行（rewind-invalidation 的写形态）。
+  db.prepare(
+    "UPDATE compartments SET rebase_status = 'unresolved' WHERE session_id = ? AND sequence >= 3",
+  ).run(sessionId);
+
+  const snapshot = await readMagicContextStatusSnapshot({ db, sessionId });
+  assert.ok(snapshot);
+  assert.equal(snapshot.compartmentCount, 3, "只数仍会注入的段（作废行不参与）");
+  assert.equal(snapshot.invalidatedCompartmentCount, 2, "作废段单独计数");
+
+  const lines = formatMagicContextStatusSnapshot(snapshot).split("\n");
+  assert.ok(lines.includes("  count: 3"), "count 必须与注入面一致");
+  assert.ok(lines.includes("  invalidated: 2"), "作废段数必须在快照里可见");
 });
 
 test.after(() => {

@@ -67,8 +67,21 @@ export interface MagicContextStatusSnapshot {
    * 真实的 limit。
    */
   lastUsageContextLimit: number | null;
-  /** 已压缩的 compartment 条数。 */
+  /**
+   * 已压缩且**仍然有效**的 compartment 条数（`rebase_status != 'unresolved'`）。
+   *
+   * 口径与注入面一致：rewind 之后被标成 `unresolved` 的行不会进 `<session-history>`，
+   * 所以它们不计入本数——否则 `/ctx-status` 会报「5 段」而模型实际只看到 3 段。
+   * 失效行另见 {@link invalidatedCompartmentCount}。
+   */
   compartmentCount: number;
+  /**
+   * rewind 后作废（`rebase_status = 'unresolved'`）的 compartment 条数。
+   *
+   * 与 `compartmentCount` 拆开的原因：两者语义不同（「注入了几段」vs「作废了几段」），
+   * 合成一个数会让读者无法判断差额是压缩还是 rewind 造成的。
+   */
+  invalidatedCompartmentCount: number;
   /** 最后一条 compartment 覆盖到的 message ordinal；-1 = 还没有任何 compartment。 */
   lastCompartmentEndMessage: number;
   /** pending_ops 队列深度；null = 读不到（诊断读，永不抛）。 */
@@ -107,9 +120,15 @@ export async function readMagicContextStatusSnapshot(
   const meta = getOrCreateSessionMeta(db, sessionId);
   const compartments = getCompartments(db, sessionId);
   const lastCompartmentEndMessage = getLastCompartmentEndMessage(db, sessionId);
+  // rewind 作废的行仍在库里（DELETE 会丢摘要，见 inject-compartments 的 self-limiting
+  // 判定），只是读侧不再渲染。计数必须跟着读侧口径走。
+  const invalidatedCompartmentCount = compartments.filter(
+    (compartment) => compartment.rebaseStatus === "unresolved",
+  ).length;
 
   return {
-    compartmentCount: compartments.length,
+    compartmentCount: compartments.length - invalidatedCompartmentCount,
+    invalidatedCompartmentCount,
     contextPercentage: meta.lastContextPercentage,
     lastCompartmentEndMessage,
     lastInputTokens: meta.lastInputTokens,
@@ -152,6 +171,9 @@ export function formatMagicContextStatusSnapshot(
     "",
     "Compartments",
     `  count: ${snapshot.compartmentCount}`,
+    // 与 count 成对出现：读者要判断「5 段」与「模型看到 3 段」的差额，必须看到这一行
+    // （rewind 作废 / 仍在库但不注入）。恒打印（含 0），这样输出形状不随状态变化。
+    `  invalidated: ${snapshot.invalidatedCompartmentCount}`,
     `  last compacted message: ${snapshot.lastCompartmentEndMessage}`,
     "",
     "Tags",

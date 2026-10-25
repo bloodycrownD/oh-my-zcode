@@ -126,6 +126,8 @@ import {
  * 登记处：`UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
  */
 type MagicContextModule = typeof import("@zcode/magic-context");
+/** `openDatabase` 的非空半边（端口里的 `db` 是不透明的 `unknown`，这里窄回来）。 */
+type MagicContextDatabase = NonNullable<ReturnType<MagicContextModule["openDatabase"]>>;
 
 /** 判 flag 只用 schema：窄子路径，闭包 3 文件 + zod。 */
 async function loadMagicContextConfigSchema(): Promise<
@@ -247,6 +249,39 @@ function initializeAndOpenDatabase(
   return magicContext.openDatabase(magicContext.getMagicContextDatabasePath());
 }
 
+/**
+ * 装配层交付的库句柄（spec phase-zero-load / W2 / 变更点 #11）。
+ *
+ * 三态与语义：
+ *   · `installed`   → 用装配层**已经开好**的句柄，不再 openDatabase；
+ *   · `unavailable` → 有 App 暴露了端口但返回 `null`（flag 关在更早的门就 return 了，
+ *     走到这里只会是「装配抛错 / db_null / import 失败」）→ 调用方回 unavailable，
+ *     **绝不自开库**（旧行为会让一条只读 RPC 创建并迁移 DB）；
+ *   · `absent`      → 没有任何 session 暴露该端口 = 直构 / 单测夹具形态（生产路径恒有
+ *     App），保留旧的自开库兜底。
+ */
+type InstalledStorage =
+  | { state: "absent" }
+  | { state: "unavailable" }
+  | { state: "installed"; db: MagicContextDatabase };
+
+/**
+ * 逐 session 找第一个暴露存储端口的 App（与 `isMagicContextDisabled` 找 ConfigPort
+ * 同一迭代纪律：`openDatabase` 是按路径缓存的进程级单例，取哪个 App 的句柄都是同一个）。
+ */
+function readInstalledStorage(context: ZCodeProtocolAgentServerContext): InstalledStorage {
+  for (const record of context.sessions.values()) {
+    const getStorage = record.app?.getMagicContextStorage;
+    if (typeof getStorage !== "function") continue;
+    const handle = getStorage();
+    if (handle === null) return { state: "unavailable" };
+    // 端口形状是不透明的 `{ db: unknown }`（宿主保留文件不能 `import type` 被删的包）；
+    // 包在场时这里窄回真实签名——这是刻意的边界转换，见 types.ts 的同名说明。
+    return { state: "installed", db: handle.db as MagicContextDatabase };
+  }
+  return { state: "absent" };
+}
+
 /** 非正常可用态的列表信封（不改 DB、不落盘）。 */
 function unavailableListResult(
   workspace: ZCodeWorkspaceListMagicContextMemoriesParams["workspace"],
@@ -332,7 +367,22 @@ export async function listMagicContextMemories(
     return unavailableListResult(params.workspace, "disabled");
   }
 
-  // ①-b 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
+  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）。**必须排在 barrel 加载之前**：端口
+  // 在场且为 null 时连业务符号都不需要（直接回 unavailable 信封），也就不会有任何
+  // openDatabase → 不会创建/迁移库。
+  const installed = readInstalledStorage(context);
+  if (installed.state === "unavailable") {
+    context.logger?.warn("magicContext memories list: storage not installed", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: "app.getMagicContextStorage() returned null (assembly absent / db_null)",
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    return unavailableListResult(params.workspace, "unavailable");
+  }
+
+  // ①-c 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
   let magicContext: MagicContextModule;
   try {
     magicContext = await resolveMagicContextRuntime(dependencies);
@@ -349,9 +399,12 @@ export async function listMagicContextMemories(
 
   // ② 开库。抛（busy/瞬时）与 null（fence/pending）都收敛成 unavailable——列表
   // 有信封承载「打不开」，不需要把瞬时故障冒泡成 RPC 错误。
+  //
+  // 生产路径用装配层交付的句柄（同一个进程级单例，不开第二条连接、**不会创建库**）；
+  // 只有直构/夹具形态（`installed.state === "absent"`）才落到旧的自开库兜底。
   let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = initializeAndOpenDatabase(magicContext);
+    db = installed.state === "installed" ? installed.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories list: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -464,6 +517,16 @@ export async function archiveMagicContextMemories(
     );
   }
 
+  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）：端口在场且为 null → 可读错误，
+  // **不自开库**（归档是写路径，在装配缺席时更没有理由替它把库造出来）。
+  const installed = readInstalledStorage(context);
+  if (installed.state === "unavailable") {
+    throw new ProtocolRequestError(
+      -32010,
+      "Magic Context storage is not installed in this app (assembly absent or the database failed to open); memories cannot be archived.",
+    );
+  }
+
   // ①-b 业务符号（barrel）惰性加载。
   let magicContext: MagicContextModule;
   try {
@@ -476,10 +539,10 @@ export async function archiveMagicContextMemories(
   }
 
   // ② 开库。throw 原文透传（services 的 BUSY 可重试转译按 message 匹配）；
-  // null 是确定性打不开，给可读错误。
+  // null 是确定性打不开，给可读错误。生产路径走装配层句柄（不创建库）。
   let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = initializeAndOpenDatabase(magicContext);
+    db = installed.state === "installed" ? installed.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories archive: storage open failed", {
       module: "bootstrap.zcode_protocol",

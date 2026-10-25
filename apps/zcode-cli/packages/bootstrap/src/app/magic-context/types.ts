@@ -37,6 +37,20 @@ export type MagicContextCompartmentInvalidator = (
   input: MagicContextCompartmentRewindInput,
 ) => Promise<void>;
 
+/**
+ * FORK（spec phase-zero-load / W2 / 变更点 #11）：装配层交出的**已装好**的库句柄。
+ *
+ * `db` 故意是 `unknown`，**不写成 `ReturnType<typeof import("@zcode/magic-context").openDatabase>`**：
+ *   - 这个端口要穿过宿主**保留**的 `app/types.ts`（摘除后仍要过 typecheck，不能
+ *     `import type` 一个被删的包），所以两边的形状必须是不透明的结构型；
+ *   - 写成 `typeof import(...)` 会往 IM7 耦合预算里多记一处散点，而这一处对「升级
+ *     时要看多少处」没有贡献（它只是一个透传字段）。
+ *
+ * 唯一的消费者（`magic-context-memories.ts`）在包在场时把 `db` 窄回真实类型，那一处
+ * cast 是本设计**刻意**的边界转换，不是漏网的类型洞。
+ */
+export type MagicContextStorageHandle = { readonly db: unknown };
+
 export interface MagicContextTurnTransformOptions {
   /**
    * **冷**求值后的 effective 开关（`features.magicContext && magicContext.enabled`，
@@ -142,6 +156,20 @@ export interface MagicContextTurnTransformOptions {
    * 范围，见 phase-compartment-rewind 的收窄裁定）。
    */
   registerCompartmentInvalidator?(invalidate: MagicContextCompartmentInvalidator): void;
+  /**
+   * FORK（spec phase-zero-load / W2 / 变更点 #11）：库开出来之后把句柄回填给装配层。
+   *
+   * 与 `registerClose` / `registerCompartmentInvalidator` 同一范式（构造期回填，不在
+   * 返回值上加字段）：直构路径（11 个脚本 + 单测）不需要知道它，缺席即零行为。
+   *
+   * **它解决的缺陷**：`magic-context-memories.ts` 的两条 RPC（list / archive）此前自己
+   * `openDatabase(getMagicContextDatabasePath())`。`openDatabase` 按路径缓存、不开第二条
+   * 连接，但它会**创建并迁移**库——于是一条只读 RPC 在「装配缺席 / db_null」时把库造了
+   * 出来。端口让 handler 只消费「装配层已经装好的」句柄，装配没成就不开库。
+   *
+   * 时序：在 `db` 成功之后、`deps`/transform 构造之前回填（早于任何 turn）。
+   */
+  registerStorage?(storage: MagicContextStorageHandle): void;
   /**
    * FORK（S24）：provider usage 的记录口。上游 OpenCode 的 plugin 在
    * `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里由宿主

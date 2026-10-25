@@ -42,6 +42,7 @@ import {
 } from "./ports.js";
 import type {
   MagicContextCompartmentInvalidator,
+  MagicContextStorageHandle,
   MagicContextTurnTransformOptions,
 } from "./types.js";
 import { createMagicContextUsageRecorder, type MagicContextUsageRecorder } from "./usage.js";
@@ -90,6 +91,18 @@ export interface MagicContextPlugin {
    * 字面量求值钉死成 undefined。
    */
   invalidateCompartments: MagicContextCompartmentInvalidator | undefined;
+  /**
+   * FORK（spec phase-zero-load / W2 / 变更点 #11）：本装配**已经开好**的 magic-context
+   * 库句柄。`undefined` = 没装成（flag 关 / db_null / import 失败）。
+   *
+   * 装配层（`create-app`）把它投影成 `record.app.getMagicContextStorage()`：协议 handler
+   * 据此决定「用这个句柄」还是「回 unavailable」，**不再自己开库**（旧行为会让一条
+   * 只读 RPC 在装配缺席时创建并迁移 DB）。
+   *
+   * 与 `close` / `invalidateCompartments` 同样是 **getter**（工厂构造期回填，晚于返回
+   * 也能补上）。
+   */
+  storage: MagicContextStorageHandle | undefined;
 }
 
 /** 没装成（关闭 / 库开不出来）时的关闭钩子：工厂没注册就不该有收口动作。 */
@@ -127,6 +140,10 @@ export async function createMagicContextPlugin(
   // DB 开出来之后立刻回填，本文件只捕获、不自己拼一个（水位换算要用工厂持有的
   // db + sessionStore，插件层没有这两样）。
   let registeredInvalidateCompartments: MagicContextCompartmentInvalidator | undefined;
+  // FORK（spec phase-zero-load / W2 / 变更点 #11）：与 close 同一套回填手法。工厂在
+  // `db` 开出来之后立刻交出句柄；本文件只捕获，不自己 openDatabase（那会多一条
+  // 开库路径，也让「装配成没成」出现第二个判据）。
+  let registeredStorage: MagicContextStorageHandle | undefined;
   const turnTransform = await createMagicContextTurnTransform({
     ...transformOptions,
     registerClose: (close) => {
@@ -136,6 +153,10 @@ export async function createMagicContextPlugin(
     registerCompartmentInvalidator: (invalidate) => {
       registeredInvalidateCompartments = invalidate;
       transformOptions.registerCompartmentInvalidator?.(invalidate);
+    },
+    registerStorage: (storage) => {
+      registeredStorage = storage;
+      transformOptions.registerStorage?.(storage);
     },
     // 插件自己的 recorder 放在最后：即使调用方用 JS 绕过类型塞了同名键，也不生效。
     usageRecorder,
@@ -177,6 +198,12 @@ export async function createMagicContextPlugin(
     // DB 成功（flag 关 / db_null）时保持 undefined，装配层据此**不挂** app 端口。
     get invalidateCompartments() {
       return registeredInvalidateCompartments;
+    },
+    // FORK（spec phase-zero-load / W2 / 变更点 #11）：同一个 getter 纪律。undefined =
+    // 没装成，装配层据此让 `getMagicContextStorage()` 回 null（handler → unavailable，
+    // 不自开库）。
+    get storage() {
+      return registeredStorage;
     },
   };
 }

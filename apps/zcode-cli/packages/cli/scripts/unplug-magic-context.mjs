@@ -56,15 +56,24 @@
  *   8. 源码里不再有 `@zcode/magic-context` 的**运行期导入**（注释不算）；
  *   9. MC 包目录与陈留 dist 全部消失。
  *
- * 另外 `--audit` 把 `git grep` 出来的 MC 残留逐文件对账：要么是被本脚本删掉/
- * 改写的文件，要么必须落在 `KEEP_LIST`（带保留理由）里；出现任何未登记残留即
- * 失败——这是「升级跟随」口径的机读守卫。
+ * 另外 `--audit` 把**摘除后仍带 MC 痕迹**的文件（kebab / camel / `ctx-` 三种写法）逐文件
+ * 对账：要么是被本脚本删掉/改写的文件，要么必须落在 `KEEP_LIST`（带保留理由）里；出现
+ * 任何未登记残留即失败。它同时校验「没有 package script 指向已删文件」——这是
+ * 「升级跟随」口径的机读守卫，跑在虚拟树上，所以 dry-run 阶段就能对账。
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../..");
@@ -129,6 +138,9 @@ const DEDICATED_PATHS = [
   "apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-ui-model-picker.mjs",
   "apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-usage-projection.mjs",
   "apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-zero-load.mjs",
+  // Step 15 新增：IM7 耦合预算门禁。它统计的就是「宿主指向 MC 的导入行」，
+  // 摘除后每一项都为 0/路径不存在，留着必红——**新加门禁必须同批进摘除清单**。
+  "apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-coupling-budget.mjs",
   "apps/zcode-cli/packages/bootstrap/scripts/test-mc-compartment-rewind-host.mjs",
   "apps/zcode-cli/packages/bootstrap/scripts/test-mc-entry-identity-guard.mjs",
   "apps/zcode-cli/packages/bootstrap/scripts/test-e2e-live-all.mjs",
@@ -145,6 +157,11 @@ const DEDICATED_PATHS = [
   "apps/zcode-cli/packages/cli/scripts/test-ctx-commands.mjs",
   "packages/ui/test/magicContextPromptSurfaceOverrides.test.ts",
   "packages/services/test/magicContextMemoriesDegradation.test.ts",
+
+  // CI：整份 workflow 39 条全是 `pnpm --filter <包> run <MC script>`。摘除后包不在、
+  // script 已删 → 每一条都 404，workflow 永久红。**它必须整份删除**，不能改写成
+  // 「跳过 MC」——本 workflow 的存在理由就是这 39 条，改写成空壳只会留下一个假绿。
+  ".github/workflows/mc-tests.yml",
 ];
 
 /**
@@ -211,6 +228,9 @@ const KEEP_LIST = [
       "apps/zcode-cli/packages/core/src/runtime/helpers/magic-context-turn-transform.ts",
       "apps/zcode-cli/packages/core/src/runtime/helpers/magic-context-prompt-section.ts",
       "apps/zcode-cli/packages/core/src/runtime/helpers/magic-context-effective-enabled.ts",
+      // 接缝的 barrel 再导出（`export * from "./magic-context-turn-transform.js"`）：
+      // 它是三端口对外的唯一名字来源，删掉这一行等于把已保留的接缝从公开面摘掉。
+      "apps/zcode-cli/packages/core/src/runtime/helpers/index.ts",
       "apps/zcode-cli/packages/core/src/runtime/methods/subagent.ts",
       "apps/zcode-cli/packages/core/src/runtime/methods/context.ts",
       "apps/zcode-cli/packages/core/src/runtime/methods/turn-loop.ts",
@@ -290,6 +310,43 @@ const KEEP_LIST = [
     reason:
       "构建/CI 注释与文档：解释「为什么它曾是 esbuild external / 打包种子」，摘除后不再是可执行配置。",
   },
+  {
+    // P2-1：旧 audit 口径（`git grep -il magiccontext`）看不见 kebab 写法，于是
+    // 下面这些「只以 `magic-context` 出现」的文件从来没被对账过。逐条看过：全是
+    // **注释 / 文档串 / onboarding 文案**，没有一处 import 包、注册命令或产生运行时值。
+    paths: [
+      "apps/zcode-cli/packages/bootstrap/src/zcode-protocol/prompt-language.ts",
+      "apps/zcode-cli/packages/bootstrap/src/zcode-protocol-entrypoint.ts",
+      "apps/zcode-cli/packages/cli/src/prompt-command.ts",
+      "apps/zcode-cli/packages/cli/src/tui-prompt-handler.ts",
+      "apps/zcode-cli/packages/core/src/agent/message-history.ts",
+      "apps/zcode-cli/packages/core/scripts/test-promotion-lease.mjs",
+      "packages/ui/src/ModelTrajectoryWireFilter.ts",
+      "packages/shared/src/onboardingRecord.ts",
+      "packages/services/test/onboardingMemoryWriteStop.test.ts",
+    ],
+    reason:
+      "只出现在注释 / 文案里（解释某个判据与 MC 同源，或记录迭代名）：摘除后没有可执行语义。删注释只会让每次上游重放多一处手工改动，故保留。",
+  },
+  {
+    // P2-1：同样是旧口径的盲区，但这两条不是注释——
+    //   · `system-reminder/source.ts`：提醒源**注册表键** `magic_context`。MC 不在时
+    //     没有生产者，键恒不触发；删键会重排 descriptor 表并留下一批 i18n 孤儿键。
+    //   · `.oxfmtrc.json`：格式器的 ignore glob。目录摘除后命中 0 个文件。
+    paths: [
+      "apps/zcode-cli/packages/core/src/system-reminder/source.ts",
+      "apps/zcode-cli/.oxfmtrc.json",
+    ],
+    reason:
+      "注册表键与格式器 ignore glob：都是「MC 不在时命中 0 次」的数据项，零包依赖、零行为；删掉只会扩大摘除面并让重放时多两处冲突。",
+  },
+  {
+    // 摘除工具自己：规则表与清单里必然满是 MC 字面量。摘除后它必须仍在场
+    // （`--restore` 回滚、将来重新引入、以及 `--audit` 的机读守卫都靠它）。
+    paths: ["apps/zcode-cli/packages/cli/scripts/unplug-magic-context.mjs"],
+    reason:
+      "本脚本就是摘除工具本身，字面量是它的数据而不是耦合。摘除后仍需在场以支持 `--restore` 与 `--audit` 对账。",
+  },
 ];
 
 // ============================================================
@@ -368,6 +425,49 @@ const PACKAGE_JSON_FILES = [
   "apps/zcode-cli/packages/cli/package.json",
   "apps/zcode-cli/packages/core/package.json",
 ];
+
+/**
+ * 「哪些 package script 指向已删路径」——**结构化推导**，不是名字枚举。
+ *
+ * 旧口径拿名字正则匹配命令（`scripts/(test-)?(magic-context|mc-|ctx-)`），于是
+ * `test:settle-background` / `test:mural-media-blocks` / `test:e2e-live-all` /
+ * `test:prompt-surface-toolset-hash` / `test:prompt-surface-tiering` 这 5 个
+ * **名字里没有 MC 前缀、却硬编码了被删测试文件**的 script 全部留在 package.json 里：
+ * 摘除删掉了 `.mjs`，script 还在 → 失败从「文件 404」转移到「script 404」，而
+ * `--verify`（dist 层）与旧 `--audit`（残留 grep）都看不见这一类。
+ *
+ * 判据改成「命令里出现的仓库内路径命中 DEDICATED_PATHS」：路径是唯一事实。以后新增
+ * 一个 MC 测试文件，只要进了清单，引用它的 script 自动被删，不需要再枚举一遍脚本名。
+ */
+const SCRIPT_PATH_TOKEN = /\.(?:mjs|cjs|js|json|ts|tsx)$/;
+
+/** 命令 token → 仓库内路径候选（按包目录解析相对路径，同时保留根相对形态）。 */
+function scriptPathCandidates(command, packageDir) {
+  const candidates = [];
+  for (const raw of command.split(/\s+/)) {
+    const token = raw
+      .replace(/^['"]|['"]$/g, "")
+      .replace(/\\/g, "/")
+      .replace(/^\.\//, "");
+    if (token === "" || token.startsWith("-") || !SCRIPT_PATH_TOKEN.test(token)) continue;
+    // `apps/` / `packages/` 开头的是**仓库根**相对路径；其余（`scripts/x.mjs`、`./x`）
+    // 一律按**所在包**的目录解析——包脚本里的 `scripts/` 不是仓库根的 `scripts/`。
+    if (/^(?:apps|packages)\//.test(token)) candidates.push(token);
+    if (packageDir !== "") candidates.push(`${packageDir}/${token}`);
+    else if (token.startsWith("scripts/")) candidates.push(token);
+  }
+  return candidates;
+}
+
+/** 路径（或其任一祖先目录）是否在整件删除清单里。 */
+function isDedicatedPath(candidate) {
+  return DEDICATED_PATHS.some(
+    (relative) => candidate === relative || candidate.startsWith(`${relative}/`),
+  );
+}
+
+/** dry-run / --apply 用的「被删 script」台账（printPlan 与 audit 共用同一份推导）。 */
+const DELETED_SCRIPTS = [];
 
 const RULES = [
   // ── contracts: ConfigKey / ConfigValue / RuntimeConfig / defaults ──────────
@@ -1113,6 +1213,18 @@ const RULES = [
     kind: "sub",
     file: BOOTSTRAP_CREATE_APP,
     find:
+      "      // FORK（spec phase-zero-load / W2 / 变更点 #11）：库句柄端口。**无条件挂**（哪怕\n" +
+      "      // 插件缺席 / 装配抛错）：handler 靠「端口在场且返回 null」区分「本 App 参与了\n" +
+      "      // 装配但没装成」与「直构夹具形态」，后者才允许自开库兜底。若这里随插件一起\n" +
+      "      // 缺席，一条只读 RPC 就会在装配失败时把库创建并迁移出来——那正是本端口要根治\n" +
+      "      // 的缺陷。`??` 不写在此处：`storage` 是 getter，取值时才求（构造期回填）。\n" +
+      "      getMagicContextStorage: () => magicContextPlugin?.storage ?? null,\n",
+    replace: ``,
+  },
+  {
+    kind: "sub",
+    file: BOOTSTRAP_CREATE_APP,
+    find:
       "      // FORK（S23 / D-12）：`workspace/updateMagicContextConfig` 把参数域写进内存\n" +
       "      // 侧的唯一入口必须是**本 App 正在用的** ConfigPort——magic-context 的 config\n" +
       "      // bridge 订阅的就是它（见 magic-context-turn-transform.ts）。\n",
@@ -1180,6 +1292,32 @@ const RULES = [
       "    /** rewind 结果里的保留条数：持久序换算不出来时的兜底水位。 */\n" +
       "    keptMessageCount: number;\n" +
       "  }): Promise<void>;\n",
+    replace: ``,
+  },
+  {
+    kind: "sub",
+    file: BOOTSTRAP_APP_TYPES,
+    find:
+      "  /**\n" +
+      "   * FORK（spec phase-zero-load / W2 / 变更点 #11）：本 App **已经装好**的 magic-context\n" +
+      "   * 库句柄。\n" +
+      "   *\n" +
+      "   * **为什么需要端口**：`magic-context-memories.ts` 的 list / archive 两条 RPC 此前\n" +
+      "   * 在 handler 里自己 `openDatabase(getMagicContextDatabasePath())`。按路径缓存的句柄\n" +
+      "   * 确实是同一个，但**第一次**调用会创建并迁移库——于是一条只读 RPC 在「装配缺席 /\n" +
+      "   * `db_null`」时把库造了出来。\n" +
+      "   *\n" +
+      "   * 三态（handler 的判据）：\n" +
+      "   *   · 返回 `{ db }` → 用这个句柄，不再 open；\n" +
+      "   *   · 返回 `null`   → 本 App 参与了装配**但没装成** → handler 回 `unavailable` 信封，\n" +
+      "   *     **绝不自开库**；\n" +
+      "   *   · 方法本身缺席 → 直构 / 单测夹具形态（没有 App 装配面）→ handler 保留旧的\n" +
+      "   *     自开库兜底（`test-magic-context-memories-rpc` 的 22 例直构夹具依赖它）。\n" +
+      "   *\n" +
+      "   * `db` 故意是 `unknown`：本文件摘除后仍要过 typecheck，不能 `import type` 一个会被\n" +
+      "   * 删掉的包。唯一消费者在包在场时把它窄回真实类型（见 `magic-context-memories.ts`）。\n" +
+      "   */\n" +
+      "  getMagicContextStorage?(): { readonly db: unknown } | null;\n",
     replace: ``,
   },
   {
@@ -2116,6 +2254,43 @@ const RULES = [
     replace: ``,
   },
 
+  // ── CLI 帮助文本里的 ctx-* 命令（P2-1：旧 audit 口径看不见 kebab / `ctx-` 写法）──
+  //
+  // 命令面（`ctx-commands` / slash-command-surface）摘除后，这两份帮助表仍然逐行
+  // 宣传 `/ctx-status` 等四条已被删掉的命令——用户照着敲只会得到 unknown command。
+  // 两份 locale 必须同批删（`uiLocaleContract` 之外，CLI 侧也成对维护）。
+  {
+    kind: "del",
+    file: "apps/zcode-cli/packages/i18n/src/locales/en-US.ts",
+    start: "  /ctx-status           Show the Magic Context status snapshot for this session",
+    end: "  /ctx-recomp [range]   Trigger one compartment recomputation pass (simplified)",
+  },
+  {
+    kind: "del",
+    file: "apps/zcode-cli/packages/i18n/src/locales/zh-CN.ts",
+    start: "  /ctx-status           查看当前 session 的 Magic Context 状态快照",
+    end: "  /ctx-recomp [range]   触发一次分舱重算（简化版）",
+  },
+
+  // ── 共享 test-id 常量：消费它们的 UI 件已被整件删除，留着即死导出 ──────────
+  //
+  // 两条都只被 `MemoryManagementSection.tsx` / `contextUsage.tsx` 引用（两文件已在
+  // DEDICATED_PATHS 里）。旧 audit 抓不到它们是因为常量名与值都是 kebab 写法
+  // （`settings-mcm-*` / `chat-context-usage-magic-context`）——P2-1 扩口径后由本案兜住。
+  {
+    kind: "del",
+    file: "packages/shared/src/test-ids.ts",
+    start: "// FORK（magic-context-memory-management / Step 8）：「记忆」分区改挂 magic-context",
+    end: `export const TID_SETTINGS_MCM_ENTRY_EXPAND = "settings-mcm-entry-expand";`,
+  },
+  {
+    kind: "del",
+    file: "packages/shared/src/test-ids.ts",
+    start:
+      "/** context 面板内的 magic-context 预算段（D-13；字段缺席时该段不渲染，e2e 据此断言） */",
+    end: `export const TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT = "chat-context-usage-magic-context";`,
+  },
+
   // package.json / knip.json：依赖、脚本、导出与忽略项
   ...PACKAGE_JSON_FILES.map((file) => ({
     kind: "json",
@@ -2125,14 +2300,9 @@ const RULES = [
       if (json.devDependencies) delete json.devDependencies["@zcode/magic-context"];
       if (json.exports) delete json.exports["./ctx-commands"];
       if (json.scripts) {
-        for (const [name, command] of Object.entries(json.scripts)) {
-          if (
-            typeof command === "string" &&
-            /scripts\/(test-)?(magic-context|mc-|ctx-)/.test(command)
-          ) {
-            delete json.scripts[name];
-          }
-        }
+        // ① `test:v4-perf` 先按段收窄：它是一条把几十个用例串起来的长命令，整条删掉
+        //    会连带删掉与 MC 无关的 40+ 用例，所以只剔 MC 段（含被删的 ui 测试路径）。
+        //    **必须排在 ② 之前**：否则 ② 会因为这条命令里还带着被删路径而整条删掉它。
         const perf = json.scripts["test:v4-perf"];
         if (typeof perf === "string") {
           json.scripts["test:v4-perf"] = perf
@@ -2144,6 +2314,19 @@ const RULES = [
                 ),
             )
             .join(" && ");
+        }
+        // ② 逐条判死：**结构化优先**（命令里出现某个已删路径就删），名字正则退为兜底
+        //    （命令引用了已删文件却没带扩展名、或走 `run <script>` 间接点名时，名字
+        //    正则仍能抓住）。`packageDir` 让包内相对路径（`scripts/x.mjs`）可与清单
+        //    里的仓库相对路径对账。
+        const packageDir = dirname(file) === "." ? "" : dirname(file);
+        for (const [name, command] of Object.entries(json.scripts)) {
+          if (name === "test:v4-perf" || typeof command !== "string") continue;
+          const byPath = scriptPathCandidates(command, packageDir).some(isDedicatedPath);
+          const byName = /scripts\/(test-)?(magic-context|mc-|ctx-)/.test(command);
+          if (!byPath && !byName) continue;
+          delete json.scripts[name];
+          DELETED_SCRIPTS.push({ file, name, reason: byPath ? "path" : "name" });
         }
       }
       if (json.workspaces && json.workspaces["apps/zcode-cli/packages/magic-context"]) {
@@ -2302,6 +2485,7 @@ function expandDedicatedPaths() {
 function runRules() {
   const perFile = new Map();
   let skipped = 0;
+  DELETED_SCRIPTS.length = 0;
   for (const rule of RULES) {
     const outcome = applyEdit(rule);
     if (outcome === "skipped") {
@@ -2320,6 +2504,12 @@ function printPlan(deleted, perFile) {
   console.log(`\n改写共享文件（${perFile.size}）：`);
   for (const [file, count] of [...perFile.entries()].sort()) {
     console.log(`  ~ ${file} (${count} 条规则)`);
+  }
+  // 被删的 package script 必须逐个列出来：它们的判据是「命令里引用了已删路径」，
+  // 不列名字的话，dry-run 只能看到 package.json 被改写过，看不出删的是哪几条。
+  console.log(`\n删除 package script（${DELETED_SCRIPTS.length}）：`);
+  for (const entry of [...DELETED_SCRIPTS].sort((a, b) => a.name.localeCompare(b.name))) {
+    console.log(`  - ${entry.file}: ${entry.name}（依据 ${entry.reason}）`);
   }
   console.log(
     `\n陈留 dist 清理（存在即删）：${STALE_DIST_PATHS.filter((p) => existsSync(abs(p))).length} 个路径`,
@@ -2533,51 +2723,162 @@ function verify() {
 }
 
 // ── 清单对账 ───────────────────────────────────────────────────────────────
-function audit() {
-  const listGrep = (pattern) => {
-    try {
-      return execFileSync(
-        "git",
-        ["grep", "-il", pattern, "--", "apps", "packages", "scripts", "knip.json", ".github"],
-        {
-          cwd: REPO_ROOT,
-          encoding: "utf8",
-          maxBuffer: 32 * 1024 * 1024,
-        },
-      )
-        .trim()
-        .split(/\r?\n/)
-        .filter(Boolean);
-    } catch {
-      return [];
-    }
-  };
+/**
+ * 残留口径（P2-1）：三种写法都算。
+ *
+ *   `magic-context`（kebab）—— 包名 / 路径 / 事件名 / CI 文件
+ *   `magicContext`  （camel）—— 字段名、变量名
+ *   `ctx-`                  —— `/ctx-status` 这类连字符命令与文件名
+ *
+ * 旧口径是 `git grep -il magiccontext`：`-i` 只抹平大小写，抹不平**连字符**。
+ * 于是 kebab-only（`magic-context`）与 `ctx-`-only 的残留文件**完全不在对账范围内**
+ * ——「未登记即失败」这条守卫漏掉了一整类形态（P1-1 的 workflow、P1-2 的 script
+ * 都栽在这个盲区里）。
+ */
+const RESIDUE_RE = /magic[-_]?context|ctx-/i;
 
-  const importUsers = listGrep("@zcode/magic-context").filter((file) =>
-    MC_IMPORT_RE.test(readFileSync(abs(file), "utf8")),
-  );
-  const residue = listGrep("magiccontext");
+/** 对账扫描面：与旧 `git grep` 的路径参数一致（不扩大到 docs / 仓库根文档）。 */
+const AUDIT_ROOTS = ["apps", "packages", "scripts", ".github"];
+const AUDIT_FILES = ["knip.json"];
+const AUDIT_EXTENSIONS = new Set([
+  ".ts",
+  ".tsx",
+  ".mts",
+  ".cts",
+  ".js",
+  ".mjs",
+  ".cjs",
+  ".jsx",
+  ".json",
+  ".yml",
+  ".yaml",
+  ".md",
+]);
+const AUDIT_SKIP_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".git",
+  ".turbo",
+  ".next",
+  ".reference",
+  ".zcode",
+  "out",
+]);
+
+function* walkAuditFiles(dir) {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    if (entry.isDirectory()) {
+      if (AUDIT_SKIP_DIRS.has(entry.name)) continue;
+      yield* walkAuditFiles(join(dir, entry.name));
+      continue;
+    }
+    if (!entry.isFile()) continue;
+    const dot = entry.name.lastIndexOf(".");
+    if (dot < 0 || !AUDIT_EXTENSIONS.has(entry.name.slice(dot))) continue;
+    yield join(dir, entry.name);
+  }
+}
+
+/**
+ * 对账走**虚拟树**：`runRules()` 先把每条规则的改写结果放进 `fileCache`，这里读到的
+ * 就是「摘除后的内容」，整件删除路径直接跳过。
+ *
+ * 为什么不用 `git grep`：它只能看磁盘。于是 `--audit` 必须**真的 apply 过**才有意义，
+ * 而摘除脚本的第一纪律是 dry-run 优先。虚拟树让同一条对账在 dry-run 上就能跑，
+ * 判据（未登记即失败）一字不变。
+ */
+function collectAuditPaths() {
+  const paths = [];
+  for (const root of AUDIT_ROOTS) {
+    for (const absolute of walkAuditFiles(abs(root))) {
+      paths.push(relative(REPO_ROOT, absolute).split("\\").join("/"));
+    }
+  }
+  for (const file of AUDIT_FILES) {
+    if (existsSync(abs(file))) paths.push(file);
+  }
+  return paths;
+}
+
+function collectResidue() {
+  const residue = [];
+  for (const file of collectAuditPaths()) {
+    if (isDedicatedPath(file)) continue;
+    const content = readVirtual(file);
+    if (content === null) continue;
+    if (RESIDUE_RE.test(content)) residue.push(file);
+  }
+  return residue;
+}
+
+/**
+ * 悬空 script：命令里出现的路径既已被删、又不可能存在 → 这条 script 摘除后必然 404。
+ *
+ * 这是 P1-2 的机读守卫。它不认 script 名（旧口径只认 `magic-context|mc-|ctx-` 前缀），
+ * 只认「命令里那个文件在不在」——所以 `test:settle-background` 这类名字里没有 MC 字样、
+ * 却硬编码了 MC 测试文件的 script 一样会被抓。
+ */
+function collectDanglingScripts() {
+  const dangling = [];
+  for (const file of PACKAGE_JSON_FILES) {
+    const raw = readVirtual(file);
+    if (raw === null) continue;
+    const packageDir = dirname(file) === "." ? "" : dirname(file);
+    for (const [name, command] of Object.entries(JSON.parse(raw).scripts ?? {})) {
+      if (typeof command !== "string") continue;
+      for (const candidate of scriptPathCandidates(command, packageDir)) {
+        // 只对「根本不存在」的路径报警：`dist/` 之类尚未构建的产物不在扫描面内，
+        // 判据刻意收在「DEDICATED_PATHS 命中 或 文件真的不存在」两条上。
+        if (isDedicatedPath(candidate) || !existsSync(abs(candidate))) {
+          dangling.push(`${file}: ${name} → ${candidate}`);
+          break;
+        }
+      }
+    }
+  }
+  return dangling;
+}
+
+function audit() {
+  // 先跑一遍规则（只写虚拟树），让对账看到的是**摘除后**的内容。
+  runRules();
+
+  const residue = collectResidue();
   const unaccounted = residue.filter((file) => {
-    if (DEDICATED_PATHS.some((relative) => file === relative || file.startsWith(`${relative}/`)))
-      return false;
+    if (isDedicatedPath(file)) return false;
     return !KEEP_LIST.some((entry) => entry.paths.includes(file));
   });
+  const dangling = collectDanglingScripts();
 
   let failed = false;
-  if (importUsers.length > 0) {
-    failed = true;
-    console.error(`✗ 仍有 ${importUsers.length} 个文件 import @zcode/magic-context：`);
-    for (const file of importUsers) console.error(`    ${file}`);
-  } else {
-    console.log("✓ 没有任何运行期导入 @zcode/magic-context");
-  }
-
   if (unaccounted.length > 0) {
     failed = true;
     console.error(`✗ 有 ${unaccounted.length} 个未登记残留（既不在删除清单，也不在 KEEP_LIST）：`);
     for (const file of unaccounted) console.error(`    ${file}`);
   } else {
     console.log(`✓ ${residue.length} 个残留文件全部登记在 KEEP_LIST（或属于已删清单）`);
+  }
+
+  if (dangling.length > 0) {
+    failed = true;
+    console.error(`✗ 有 ${dangling.length} 个 package script 指向已删/不存在的文件：`);
+    for (const entry of dangling) console.error(`    ${entry}`);
+  } else {
+    console.log("✓ 没有 package script 指向已删/不存在的文件");
+  }
+
+  if (failed) {
+    console.error(
+      "\n对账失败：要么把残留登记进 KEEP_LIST（写清理由），要么让对应的 RULES / DEDICATED_PATHS 处理它。",
+    );
   }
   return failed ? 1 : 0;
 }

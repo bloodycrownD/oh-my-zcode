@@ -702,6 +702,26 @@ export interface ZCodeApp {
    * 可选而非必需：与 `getConfigPort` 同理，测试与轻量 embedder 可以不实现。
    */
   isMagicContextEnabled?(): boolean;
+  /**
+   * FORK（spec phase-zero-load / W2 / 变更点 #11）：本 App **已经装好**的 magic-context
+   * 库句柄。
+   *
+   * **为什么需要端口**：`magic-context-memories.ts` 的 list / archive 两条 RPC 此前
+   * 在 handler 里自己 `openDatabase(getMagicContextDatabasePath())`。按路径缓存的句柄
+   * 确实是同一个，但**第一次**调用会创建并迁移库——于是一条只读 RPC 在「装配缺席 /
+   * `db_null`」时把库造了出来。
+   *
+   * 三态（handler 的判据）：
+   *   · 返回 `{ db }` → 用这个句柄，不再 open；
+   *   · 返回 `null`   → 本 App 参与了装配**但没装成** → handler 回 `unavailable` 信封，
+   *     **绝不自开库**；
+   *   · 方法本身缺席 → 直构 / 单测夹具形态（没有 App 装配面）→ handler 保留旧的
+   *     自开库兜底（`test-magic-context-memories-rpc` 的 22 例直构夹具依赖它）。
+   *
+   * `db` 故意是 `unknown`：本文件摘除后仍要过 typecheck，不能 `import type` 一个会被
+   * 删掉的包。唯一消费者在包在场时把它窄回真实类型（见 `magic-context-memories.ts`）。
+   */
+  getMagicContextStorage?(): { readonly db: unknown } | null;
   setModel(
     modelId: string | ModelSelection,
     options?: {
