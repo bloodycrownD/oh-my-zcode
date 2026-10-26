@@ -14,20 +14,10 @@ import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost } from "../types.js";
 // 日志 module 名单点定义：与 edit/retry 同属一个 v4 命令模块，两处字面量会漂移。
 import { CONVERSATION_COMMAND_LOG_MODULE } from "./fork-edit-retry.js";
+// 行目标过期的裁决与 edit/retry 同一处：`proto.*` 必须原样上行（见 `assertRowTargetFresh`）。
+import { assertRowTargetFresh } from "./fork-edit-retry-guards.js";
 
 const FORK_ASSISTANT_COMPLETED_EVENT = "conversation.command.fork_assistant.completed";
-
-/** fork 目标不是所属轮最后一段 assistantText → 明确拒绝。 */
-export class V4ForkTargetNotLatestSegmentError extends Error {
-  readonly reasonCode = "fault.command.executionFailed";
-
-  constructor(targetRowId: number) {
-    super(
-      `forkAssistant targetRowId ${targetRowId} 不是所属轮的最后一段 assistant（fork 只挂轮尾段）`,
-    );
-    this.name = "V4ForkTargetNotLatestSegmentError";
-  }
-}
 
 class V4ForkTargetGuardError extends Error {
   constructor(
@@ -50,6 +40,8 @@ async function forkAssistant(
     payload.target,
     "forkAssistant",
   );
+  // 过期目标必须先抛：折成 guard.* 客户端就不会刷新（用户点重试永远落在旧行上）。
+  assertRowTargetFresh(targetResolution, "forkAssistant", payload.target.rowId);
   if (!targetResolution?.ok) {
     throw new V4ForkTargetGuardError("guard.forkTargetNotStable", payload.target.rowId);
   }

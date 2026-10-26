@@ -43,7 +43,11 @@ import {
   V4InputAdmissionRejectedError,
 } from "./session-flow.js";
 import { applyGoalCommand } from "./goal.js";
-import { V4EditTargetNotLatestError, V4RetryTargetNotLatestError } from "./fork-edit-retry-guards.js";
+import {
+  assertRowTargetFresh,
+  V4EditTargetNotLatestError,
+  V4RetryTargetNotLatestError,
+} from "./fork-edit-retry-guards.js";
 
 /** 与 forkAssistant 共用同一个 v4 命令模块名（`fork-assistant.ts` 从这里取）。 */
 export const CONVERSATION_COMMAND_LOG_MODULE = "bootstrap.zcode_protocol_v4.commands";
@@ -188,6 +192,8 @@ async function editUserQuery(
     payload.target,
     "editUserQuery",
   );
+  // 过期目标必须先抛 proto.*：折成 guard.latestQueryEditOnly 客户端就不会刷新。
+  assertRowTargetFresh(resolution, "editUserQuery", payload.target.rowId);
   if (!resolution?.ok || !resolution.editTarget) {
     throw new V4EditTargetNotLatestError(payload.target.rowId);
   }
@@ -408,6 +414,8 @@ async function retryTurn(
     payload.target,
     "retryTurn",
   );
+  // 过期目标必须先抛 proto.*：折成 guard.latestAssistantRetryOnly 客户端就不会刷新。
+  assertRowTargetFresh(resolution, "retryTurn", payload.target.rowId);
   if (!resolution?.ok || !resolution.messageId || !resolution.editTarget) {
     throw new V4RetryTargetNotLatestError(payload.target.rowId);
   }

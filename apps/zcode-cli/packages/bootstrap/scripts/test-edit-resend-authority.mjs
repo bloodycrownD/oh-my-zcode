@@ -141,6 +141,12 @@ const { forkAssistantHandlers } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-assistant.ts"))
     .href
 );
+// 行目标过期的唯一裁决点（fork/edit/retry 共用）：用例要按**类**断言，而不是只比字符串。
+const { V4RowTargetStaleError } = await import(
+  pathToFileURL(
+    join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-edit-retry-guards.ts"),
+  ).href
+);
 // P2-3：stop 的「拦下后续项」判定必须与 deriveQueueAutoDrain 同口径（读不到 ≠ 空）。
 const { sessionFlowHandlers } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "session-flow.ts"))
@@ -1673,6 +1679,9 @@ function applyFileRewind(harness, commitAfterApply) {
 function createEditTransactionHarness({
   commitFailure = false,
   queuedDelivery = "queue",
+  // 行目标解析器的失败形态注入口：`undefined` = 走正常的 ok 解析；传
+  // `{ok:false,status:"stale",reasonCode:"proto.staleTarget"}` 等即可覆盖拒绝分支。
+  rowGate,
   startMode = "started",
   // P1-2：模拟「setRevert 之后失败」——真实 core 会抛带 committed:true 的类型化错误
   // （`ConversationRewindCommittedError`），handler 必须据此判定「截断已提交」。
@@ -1800,24 +1809,25 @@ function createEditTransactionHarness({
     getMessageIdsForTurnRow: () => [REWIND_TARGET_MESSAGE_ID],
     getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
     logger: { info: () => undefined, warn: () => undefined },
-    resolveRowActionTarget: () => ({
-      editTarget: {
-        entityId: "ent-rt",
-        intent: editTargetIntent,
-        productTurnId: "turn-1",
-        transcriptMessageId: REWIND_TARGET_MESSAGE_ID,
+    resolveRowActionTarget: () =>
+      rowGate ?? {
+        editTarget: {
+          entityId: "ent-rt",
+          intent: editTargetIntent,
+          productTurnId: "turn-1",
+          transcriptMessageId: REWIND_TARGET_MESSAGE_ID,
+        },
+        messageId: REWIND_TARGET_MESSAGE_ID,
+        ok: true,
+        row: {
+          entityId: "ent-rt",
+          kind: "userInput",
+          productTurnId: "turn-1",
+          rowId: 4,
+          turnId: "turn-1",
+          visibility: "visible",
+        },
       },
-      messageId: REWIND_TARGET_MESSAGE_ID,
-      ok: true,
-      row: {
-        entityId: "ent-rt",
-        kind: "userInput",
-        productTurnId: "turn-1",
-        rowId: 4,
-        turnId: "turn-1",
-        visibility: "visible",
-      },
-    }),
   };
   const makeEnvelope = (workspaceMode = "preserve") => ({
     baseLogEpoch: "epoch-rt",
@@ -2575,6 +2585,8 @@ test("T-RW9（cr-func P2-3）stop：队列长度读不到时按非空处理，�
 function createRetryHarness({
   rewindCommittedFailure = false,
   rewindOutcome = "active_chain",
+  // 行目标解析器的失败形态注入口（同 createEditTransactionHarness）。
+  rowGate,
   startMode = "started",
 } = {}) {
   const calls = { cancels: [], rewinds: [], sendInputs: [], sendOptions: [] };
@@ -2643,12 +2655,13 @@ function createRetryHarness({
     getInputRoutingMode: () => null,
     getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
     logger: { info: () => undefined, warn: () => undefined },
-    resolveRowActionTarget: () => ({
-      editTarget,
-      messageId: "msg-original-retry",
-      ok: true,
-      row: { entityId: "ent-original", rowId: 7, turnId: "turn-original" },
-    }),
+    resolveRowActionTarget: () =>
+      rowGate ?? {
+        editTarget,
+        messageId: "msg-original-retry",
+        ok: true,
+        row: { entityId: "ent-original", rowId: 7, turnId: "turn-original" },
+      },
   };
   const envelope = {
     baseRevision: 0,
@@ -2807,9 +2820,8 @@ test("F1 非轮尾段：stable-target 拒绝必须上行成 guard.forkTargetNotS
       // 变异：删掉 `if (!resolution.ok) throw ...` → 本次调用不再抛错（stub 会照常 fork），
       // 下面整条用例（含 calls.forks === 0）即红。
       assert.equal(error.reasonCode, "guard.forkTargetNotStable", "原因码必须原样上行（客户端按它分流）");
-      // 只钉「是本模块的 fork 目标拒绝」，不钉具体子类：`V4ForkTargetNotLatestSegmentError`
-      // 今天未被使用（见 new_risks），将来接上它不该让本用例红，但 TypeError 之类的
-      // 「能力缺失」必须红。
+      // 只钉「是本模块的 fork 目标拒绝」，不钉具体子类：将来换实现子类不该让本用例红，
+      // 但 TypeError 之类的「能力缺失」必须红。
       assert.match(error.name, /^V4ForkTarget/, "必须是 fork 目标拒绝，不是 TypeError/能力缺失");
       assert.match(error.message, /targetRowId 12/, "失败信息必须点明是哪一行");
       return true;
@@ -2827,9 +2839,10 @@ test("F1 行动作门：投影不可 fork 的行在稳定目标解析之前就�
   await assert.rejects(
     () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
     (error) => {
-      // 这里不断言具体码：handler 把行门的 reasonCode 归一到 guard.forkTargetNotStable
-      // （见 new_risks）。要守的是「任何拒绝都不得继续去 fork」。
-      assert.match(error.reasonCode, /^guard\./);
+      // rejected = 行在、动作不可用：走本命令自己的 guard 码，不得借道 proto.*
+      // （proto.* 是「过期」专用，混用会让客户端白刷一轮）。stale/rejected 的分界在
+      // `assertRowTargetFresh`，stale 分支由 P-CODE 用例钉住。
+      assert.equal(error.reasonCode, "guard.forkTargetNotStable");
       assert.match(error.name, /^V4ForkTarget/);
       return true;
     },
@@ -3325,4 +3338,106 @@ test("T-IA3 同一条 edit 命令：admission 解析与执行侧实际提交逐�
     admissionSide.delivery.requested ?? "startNow",
   );
   assert.equal(sentOptions.intent.admittedDelivery, admissionSide.delivery.admitted ?? "startNow");
+});
+
+// ── P-CODE：行目标过期必须原样上行 `proto.*`（不折成 `guard.*`）──────────────
+//
+// 两个前缀是两种动作：`proto.*` = 权威已推进，客户端要先刷新再重试；
+// `guard.*` = 策略拒绝，重试无用（UI 判据 `packages/ui/src/v4/staleAuthorityRecovery.ts`，
+// 只认 `proto.staleLogEpoch` / `proto.staleRevision` / `proto.staleTarget`）。
+// 折叠的效果是用户点重试永远落在已消失的行上，所以这三条命令各钉一条。
+
+test("P-CODE forkAssistant 行目标过期：原样上行 proto.staleTarget，且绝不 fork/不解析稳定目标", async () => {
+  const harness = createForkAssistantHarness({
+    rowGate: { ok: false, reasonCode: "proto.staleTarget", status: "stale" },
+  });
+  await assert.rejects(
+    () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
+    (error) => {
+      // 变异：删掉 `assertRowTargetFresh` 调用 → 落进下面的 guard 分支，本断言即红。
+      assert.ok(
+        error instanceof V4RowTargetStaleError,
+        `过期目标必须是过期目标错误，实际 ${error?.name}`,
+      );
+      assert.equal(error.reasonCode, "proto.staleTarget", "proto.* 必须原样上行，不得归一成 guard.*");
+      assert.match(error.message, /targetRowId 12/, "失败信息必须点明是哪一行");
+      return true;
+    },
+  );
+  assert.equal(harness.calls.stableTargets.length, 0, "过期目标在稳定目标解析之前就拒绝");
+  assert.equal(harness.calls.forks.length, 0, "过期目标绝不 fork");
+  assert.deepEqual(harness.calls.logs, [], "被拒绝的请求不得写「已 fork」审计");
+});
+
+test("P-CODE 无解析面（宿主给不出 resolution）：与 admission 同判 proto.staleTarget", async () => {
+  // v4-gateway.ts 的 admission 把「拿不到 resolution」判成 stale/proto.staleTarget；
+  // handler 侧对同一输入必须同判，否则两条入口对同一次请求给出两种原因码。
+  const harness = createForkAssistantHarness({ rowGate: null });
+  await assert.rejects(
+    () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
+    (error) => {
+      assert.ok(error instanceof V4RowTargetStaleError, `实际 ${error?.name}`);
+      assert.equal(error.reasonCode, "proto.staleTarget");
+      return true;
+    },
+  );
+  assert.equal(harness.calls.forks.length, 0);
+});
+
+test("P-CODE editUserQuery / retryTurn 行目标过期：proto 原样上行，且不 rewind、不回退工作区、不起跑", async () => {
+  const edit = createEditTransactionHarness({
+    rowGate: { ok: false, reasonCode: "proto.staleTarget", status: "stale" },
+  });
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(edit.host, edit.makeEnvelope()),
+    (error) => {
+      // 变异：删掉 edit 侧的 `assertRowTargetFresh` 调用 → 抛 V4EditTargetNotLatestError
+      // （guard.latestQueryEditOnly），本断言即红。
+      assert.ok(error instanceof V4RowTargetStaleError, `edit 实际 ${error?.name}`);
+      assert.equal(error.reasonCode, "proto.staleTarget");
+      return true;
+    },
+  );
+  assert.equal(edit.calls.rewinds.length, 0, "过期目标不得截断历史");
+  assert.equal(edit.calls.fileApplies, 0, "过期目标不得回退工作区");
+  assert.equal(edit.calls.sendInputs.length, 0, "过期目标不得起跑新轮");
+
+  const retry = createRetryHarness({
+    rowGate: { ok: false, reasonCode: "proto.staleTarget", status: "stale" },
+  });
+  await assert.rejects(
+    () => forkEditRetryHandlers.retryTurn(retry.host, retry.envelope),
+    (error) => {
+      // 变异：删掉 retry 侧的 `assertRowTargetFresh` 调用 → V4RetryTargetNotLatestError。
+      assert.ok(error instanceof V4RowTargetStaleError, `retry 实际 ${error?.name}`);
+      assert.equal(error.reasonCode, "proto.staleTarget");
+      return true;
+    },
+  );
+  assert.equal(retry.calls.rewinds.length, 0, "过期目标不得截断历史");
+  assert.equal(retry.calls.sendInputs.length, 0, "过期目标不得起跑新轮");
+});
+
+test("P-CODE 反向：解析器判 rejected（行在、动作不可用）仍走各命令自己的 guard 码", async () => {
+  // 变异：把 `assertRowTargetFresh` 里 `status !== "stale"` 的早退删掉 → 这里全变 proto.*。
+  const rejected = { ok: false, reasonCode: "guard.actionUnavailable", status: "rejected" };
+  const edit = createEditTransactionHarness({ rowGate: rejected });
+  await assert.rejects(
+    () => forkEditRetryHandlers.editUserQuery(edit.host, edit.makeEnvelope()),
+    (error) => {
+      assert.equal(error.reasonCode, "guard.latestQueryEditOnly");
+      return true;
+    },
+  );
+  assert.equal(edit.calls.rewinds.length, 0);
+
+  const retry = createRetryHarness({ rowGate: rejected });
+  await assert.rejects(
+    () => forkEditRetryHandlers.retryTurn(retry.host, retry.envelope),
+    (error) => {
+      assert.equal(error.reasonCode, "guard.latestAssistantRetryOnly");
+      return true;
+    },
+  );
+  assert.equal(retry.calls.rewinds.length, 0);
 });
