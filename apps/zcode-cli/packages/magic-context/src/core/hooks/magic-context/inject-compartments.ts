@@ -2484,8 +2484,19 @@ export function renderM0(args: {
         const first = invalidatedHistory.firstSequence;
         const last = invalidatedHistory.lastSequence;
         const range = first === last ? `sequence ${first}` : `sequences ${first}-${last}`;
+        // FORK（cr-func 第 3 轮 P2-4）：**空历史变体**。`compartments.length === 0` 时
+        // 上面渲染的是 `<session-history></session-history>`（M0_EMPTY_BODY），里面
+        // 没有任何有效段，原句「The <session-history> above ends at the last still-valid
+        // summary」就是假话。该态可达：rewind 到第一个 compartment 之前（或其 end_message
+        // 之前）会让**全部**段变 unresolved，`readM0Compartments` 于是回
+        // `compartments: []` + `invalidatedTail: {…}`。只换这半句，其余（中性截断陈述 +
+        // 工作区免责）保持不变——那两句在两种态下都为真。
+        const survivorClause =
+            args.compartments.length === 0
+                ? "No still-valid summary remains above (every earlier summary was invalidated)"
+                : "The <session-history> above ends at the last still-valid summary";
         sections.push(
-            `<session-history-invalidated>\nConversation history was truncated at this point: ${invalidatedHistory.count} summary segment(s) (${range}) covering the removed turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat those turns as removed from history and do not infer their content. This notice says nothing about workspace files: earlier edits may or may not still be on disk, so re-read a file before relying on an earlier change.\n</session-history-invalidated>`,
+            `<session-history-invalidated>\nConversation history was truncated at this point: ${invalidatedHistory.count} summary segment(s) (${range}) covering the removed turns were invalidated and are not shown. ${survivorClause}; treat those turns as removed from history and do not infer their content. This notice says nothing about workspace files: earlier edits may or may not still be on disk, so re-read a file before relying on an earlier change.\n</session-history-invalidated>`,
         );
     }
 

@@ -377,6 +377,14 @@ test("D2: createMagicContextPlugin(enabled:true) 端到端——transform 在场
     assert.equal(plugin.turnTransform.isEnabled?.(), true, "端口活值开关在默认配置下应为 true");
     // drain → shutdown → dispose 全链：close 必须能正常返回。
     await plugin.close();
+    // FORK（cr-func 第 3 轮 P2-5）：close 之后句柄必须**从数据上**消失，不能只靠
+    // 「transport 串行 + 先摘登记后 await」这条调度前提兜住。invalidateCompartments
+    // 不在本断言范围内（它服务于 rewind 路径，关闭后不会再有 rewind）。
+    assert.equal(
+      plugin.storage,
+      undefined,
+      "close 之后 plugin.storage 必须是 undefined——否则 handler 会拿到已销毁的 db（今天只是被调度顺序兜住）",
+    );
   } finally {
     if (previousDbDir === undefined) delete process.env.MAGIC_CONTEXT_DB_DIR;
     else process.env.MAGIC_CONTEXT_DB_DIR = previousDbDir;

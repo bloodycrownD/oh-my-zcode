@@ -2249,7 +2249,16 @@ export const zcodeWorkspaceListMagicContextMemoriesResultSchema = z
     supported: z.boolean().default(true),
     /** magicContext 关闭 / 库打不开 → false（零值条目，不建库不落盘）。 */
     available: z.boolean(),
-    /** available=false 的原因："disabled" | "unavailable"；旧 CLI 降级时 services 另用 "unsupported"（UI 以 supported:false 为主判据）。供 UI 占位文案。 */
+    /**
+     * available=false 的原因，**三个取值**：
+     *   - `"disabled"`：magicContext 被关；
+     *   - `"unavailable"`：装配没装成 / 库打不开 / 身份解析不出（重试有意义）；
+     *   - `"no-app-port"`：本工作区没有活动会话，记忆库未装配（**生产可达**：两条
+     *     RPC 是 workspace 级，冷启动或会话全关时就是这个态）。重试不会自己变好，
+     *     面板据此给「先打开或恢复一个会话」的引导（cr-func 第 3 轮 P1-1）。
+     * 旧 CLI 降级时 services 另用 `"unsupported"`（UI 以 supported:false 为主判据）。
+     * 字段是自由字符串而非枚举：新增取值不破坏旧端解析，旧 UI 落到 else 分支。
+     */
     reason: z.string().optional(),
     entries: z.array(zcodeMagicContextMemoryEntrySchema),
     /**

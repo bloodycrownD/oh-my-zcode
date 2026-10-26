@@ -11,8 +11,8 @@
  *   2. 删掉宿主侧所有 MC 专属模块（bootstrap 装配门面 / 协议 handler / ctx 命令 /
  *      core 的 ctx 工具与段实现 / UI 的设置分区与用量面板）；
  *   3. 把仍然存活但与 MC 共享的文件里的 MC 段落、导入、类型、注册项逐条删掉
- *      （146 条规则，见下方 `RULES`；每条都用「唯一锚点或唯一子串」定位，
- *      匹配数不符即中止，不做模糊替换）；
+ *      （158 条规则 = sub 121 / del 12 / cut 24 / json 1，见下方 `RULES`；每条都用
+ *      「唯一锚点或唯一子串」定位，匹配数不符即中止，不做模糊替换）；
  *   4. 清理 `package.json` 的依赖/脚本/导出、knip 忽略项、构建 external 与
  *      打包种子（`sea-tui-assets` 在没有 MC 包时会直接 throw）；
  *   5. 清理**陈留 dist**：tsc 不会删除已消失源码的产物，`dist/app/magic-context*`
@@ -60,6 +60,11 @@
  * 对账：要么是被本脚本删掉/改写的文件，要么必须落在 `KEEP_LIST`（带保留理由）里；出现
  * 任何未登记残留即失败。它同时校验「没有 package script 指向已删文件」——这是
  * 「升级跟随」口径的机读守卫，跑在虚拟树上，所以 dry-run 阶段就能对账。
+ *
+ * `--audit` 的三档退出码（cr-func 第 3 轮 P1-2）：`0` = 全绿；`1` = 下限 / 未登记残留 /
+ * 悬空 script（**内容**层面的红）；`3` = 规则表锚点失配（**脚本自身**的维护信号，
+ * 「非 MC 功能故障」，改 RULES 不改 MC）。分码是为了让 CI 红能被正确分诊——这三类都
+ * 挂在 MC 的 job 里，混成 exit 1 会被读成「MC 坏了」。
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
@@ -2615,7 +2620,7 @@ if (hasFlag("--help") || hasFlag("-h")) {
       "  --apply        真摘除（幂等：已摘除时退出码 0）",
       "  --archive-db   把 magic-context.db{,-wal,-shm} 移到 ~/.omz/backup-<ts>/",
       "  --verify       摘除后自检 9 条（dist import / 工具 / 命令 / UI / 残留）",
-      "  --audit        grep 清单对账：未登记的 MC 残留即失败",
+      "  --audit        grep 清单对账：未登记的 MC 残留即失败（exit 1；规则表锚点失配 exit 3）",
       "  --restore      git checkout 还原本脚本改过/删过的全部路径",
     ].join("\n"),
   );
@@ -3213,7 +3218,27 @@ function auditSelfCheckFailures() {
 
 function audit() {
   // 先跑一遍规则（只写虚拟树），让对账看到的是**摘除后**的内容。
-  runRules();
+  //
+  // FORK（cr-func 第 3 轮 P1-2）：`runRules()` 在规则表锚点失配时会 **throw**
+  // （`findLine` 命中数 ≠ 1 / `sub` 子串命中数不符 / `json` 规则零改动，见
+  // `applyEdit`），而本函数原先没有任何捕获。它挂在 CI 的
+  // `Run magic-context suites` step 里（job 名 `magic-context suite`，见
+  // `.github/workflows/mc-tests.yml`），于是「源文件漂移把某条锚点改坏」会以
+  // 「未捕获异常 + 堆栈 + exit 1」的样子混进 MC 测试的红里——人第一眼必然读成
+  // **MC 功能坏了**，而真相是脚本自己的维护信号。所以：
+  //   · 单独 exit **3**（下限 / 未登记残留 / 悬空 script 三类仍是 1，按码可分诊）；
+  //   · 文案开头就写明「非 MC 功能故障」并给出下一步（同步 RULES 锚点）。
+  try {
+    runRules();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`✗ 摘除脚本规则表失配（非 MC 功能故障）：${message}；请同步更新 RULES 锚点。`);
+    console.error(
+      "  含义：某条规则的定位串在源文件里不再唯一 / 子串命中数或 JSON 变更数变了 —— " +
+        "改的是本脚本的 RULES，不是 magic-context。exit 3 = 规则表失配（本脚本约定）。",
+    );
+    return 3;
+  }
 
   const selfCheck = auditSelfCheckFailures();
   if (selfCheck.length > 0) {
@@ -3234,9 +3259,22 @@ function audit() {
   const belowFloor = residue.length < MIN_RESIDUE_FILES;
   if (belowFloor) {
     failed = true;
+    // 两种完全不同的成因会落到同一条断言上（cr-func 第 3 轮 P1-2）：
+    //   ① 扫描面变窄（根 / 扩展名 / 虚拟树 / grep 口径被改小）→ 修判据；
+    //   ② **合法地删掉了 MC 文件**（例如上游把某个 host 文件合并掉）→ 扫描面没坏，
+    //      是基准变了，此时要**同步下调 `MIN_RESIDUE_FILES`** 并在注释里说明为什么。
+    // 旧文案只说 ①，于是踩到 ② 的人（CI 红在 59 → 55 的那 4 个余量上）被明确告知了
+    // 一个错误的原因，只能靠翻源码猜。两种成因必须并列。
     console.error(
-      `✗ 残留文件只有 ${residue.length} 个，低于下限 ${MIN_RESIDUE_FILES}——扫描面已经变窄` +
-        "（根/扩展名/虚拟树/grep 口径之一被改小），「全部登记」于是退化成「什么都没扫到」。",
+      `✗ 残留文件只有 ${residue.length} 个，低于下限 ${MIN_RESIDUE_FILES}。两种成因，按证据二选一：`,
+    );
+    console.error(
+      "  ① 扫描面变窄（AUDIT_ROOTS / 扩展名表 / 虚拟树读取 / RESIDUE_RE 口径之一被改小）" +
+        "→ 修判据；否则「全部登记」已经退化成「什么都没扫到」；",
+    );
+    console.error(
+      "  ② 合法地删了 MC 文件（文件真的不存在了，不是漏扫）→ 扫描面没坏、基准变了：" +
+        `**同步下调 MIN_RESIDUE_FILES**（当前 ${MIN_RESIDUE_FILES}）并在该常量的注释里写清为什么。`,
     );
   }
   if (unaccounted.length > 0) {

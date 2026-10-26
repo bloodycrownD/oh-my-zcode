@@ -330,17 +330,47 @@ function classifyStorageGate(
     : { state: "blocked", reason: "no-app-port" };
 }
 
-/** blocked 的可读说明（list 落 warn、archive 拼协议错误都用这一份措辞）。 */
+/** blocked 的**内部**可读说明（只进日志，不进用户可见串）。 */
 function describeBlockedStorage(reason: "storage-not-installed" | "no-app-port"): string {
   return reason === "storage-not-installed"
     ? "no app exposes a magic-context storage handle (assembly absent / db_null / import failed)"
     : "no app exposes getMagicContextStorage (workspace-level RPC with zero live sessions: cold start or all sessions closed)";
 }
 
-/** 非正常可用态的列表信封（不改 DB、不落盘）。 */
+/**
+ * FORK（magic-context-decoupling / cr-func 第 3 轮 P1-1 + P2-6）：**用户可见**的
+ * blocked 说明，与 {@link describeBlockedStorage} 分列。
+ *
+ * 为什么要分两份而不复用上一份：上一份的两个受众要求相反——日志要实现名
+ * （`getMagicContextStorage` / `workspace-level RPC`）才能定位，用户要**下一步动作**
+ * 而不是内部机制。旧实现把日志措辞直接拼进 `-32010` 的 message，而这条 message 会
+ * 原样进面板 toast：于是用户读到「no app exposes getMagicContextStorage
+ * (workspace-level RPC with zero live sessions: cold start or all sessions closed)」
+ * ——嵌套括号、内部实现名、且不可操作。
+ *
+ * 两态的动作确实不同，所以返回的是**完整的用户句子**（不是从句）：
+ *   · `no-app-port`（零活动会话）→ 用户能自己解决：先在本工作区开会话；
+ *   · `storage-not-installed`（装配没装成）→ 开会话没用，只能重试 / 重启。
+ */
+function describeBlockedStorageForUser(reason: "storage-not-installed" | "no-app-port"): string {
+  return reason === "storage-not-installed"
+    ? "the local memory store is unavailable because the CLI could not attach its storage layer; retry in a moment or restart the CLI"
+    : "project memories live with a session and this workspace has none open; open or resume a session in this workspace first, then try again";
+}
+
+/**
+ * 非正常可用态的列表信封（不改 DB、不落盘）。
+ *
+ * FORK（cr-func 第 3 轮 P1-1）：reason 新增第三个取值 `no-app-port`。此前
+ * `absent`（零活动会话，生产可达：workspace 级 RPC + `closeSession` 会 delete 记录）
+ * 与「装配没装成」共用 `unavailable`，面板只能二选一——于是它对冷启动用户写
+ * 「本机记忆库暂不可用，请稍后重试」，**而这一态下稍后重试永远不会成功**（除非这期间
+ * 开了会话）。wire 字段本身是 `z.string().optional()`，加值不破 schema：
+ * 旧 UI 落到 else 分支（显示 disabled 文案），desktop 与 CLI 同包发布，窗口极短。
+ */
 function unavailableListResult(
   workspace: ZCodeWorkspaceListMagicContextMemoriesParams["workspace"],
-  reason: "disabled" | "unavailable",
+  reason: "disabled" | "unavailable" | "no-app-port",
 ): ZCodeWorkspaceListMagicContextMemoriesResult {
   return zcodeWorkspaceListMagicContextMemoriesResultSchema.parse({
     workspace,
@@ -436,7 +466,12 @@ export async function listMagicContextMemories(
       detail: describeBlockedStorage(gate.reason),
       workspaceKey: params.workspace.workspaceKey,
     });
-    return unavailableListResult(params.workspace, "unavailable");
+    // FORK（cr-func 第 3 轮 P1-1）：`absent` 单独过线，面板才能给出**可执行**的下一步
+    // （开会话）而不是「稍后重试」这句在该态下永远不成立的承诺。
+    return unavailableListResult(
+      params.workspace,
+      gate.reason === "no-app-port" ? "no-app-port" : "unavailable",
+    );
   }
 
   // ①-c 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
@@ -579,9 +614,18 @@ export async function archiveMagicContextMemories(
   // 拦在这里（cr-func P1-2）：生产可达，不是夹具形态。
   const gate = classifyStorageGate(readInstalledStorage(context), dependencies);
   if (gate.state === "blocked") {
+    // FORK（cr-func 第 3 轮 P2-6）：-32010 的 message 会**原样进面板 toast**，
+    // 所以用户面用 `describeBlockedStorageForUser`（动作 + 无实现名）；实现级诊断
+    // （getMagicContextStorage / workspace-level RPC）只落日志，不随错误串外泄。
+    context.logger?.warn("magicContext memories archive: storage not installed", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_archive_failed",
+      detail: describeBlockedStorage(gate.reason),
+      workspaceKey: params.workspace.workspaceKey,
+    });
     throw new ProtocolRequestError(
       -32010,
-      `Magic Context storage is not installed in this app (${describeBlockedStorage(gate.reason)}); memories cannot be archived.`,
+      `Memories cannot be archived right now: ${describeBlockedStorageForUser(gate.reason)}.`,
     );
   }
 

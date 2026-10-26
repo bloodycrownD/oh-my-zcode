@@ -2103,6 +2103,8 @@ const zhCN: Record<string, string> = {
   "settings.memory.management.unavailable.disabled":
     "跨会话项目记忆未启用，可在「上下文管理」分区开启后重试。",
   "settings.memory.management.unavailable.unavailable": "本机记忆库暂不可用，请稍后重试。",
+  "settings.memory.management.unavailable.noAppPort":
+    "跨会话项目记忆随会话装配：本工作区当前没有打开的会话。请先在本工作区打开或恢复一个会话，再点「重试」。",
   "settings.memory.management.counts.total": "全部 {count}",
   "settings.memory.management.counts.active": "活跃 {count}",
   "settings.memory.management.counts.permanent": "长期 {count}",

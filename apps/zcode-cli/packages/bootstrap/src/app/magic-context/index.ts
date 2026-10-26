@@ -147,8 +147,30 @@ export async function createMagicContextPlugin(
   const turnTransform = await createMagicContextTurnTransform({
     ...transformOptions,
     registerClose: (close) => {
-      registeredClose = close;
-      transformOptions.registerClose?.(close);
+      // FORK（cr-func 第 3 轮 P2-5）：close 完成后**清空库句柄**。
+      //
+      // 缺陷：`registeredStorage` 此前在 close 之后仍然指着已销毁的 db。今天没出事
+      // 只是**调度**兜住的——`transport` 的请求串行 + 关闭路径先摘登记再 `await
+      // close()`，所以「关闭之后还有 RPC 读这个句柄」这条时间线被排除了。这种安全性
+      // 挂在两处调用顺序上，任何一处改动（并发 RPC、close 与 shutdown 交叉、宿主换
+      // 传输层）都会静默退化成「拿已关闭的 db 干活」。
+      //
+      // 改成数据驱动：`storage` getter 读的就是 `registeredStorage`，close 一结束它
+      // 立刻是 undefined → 装配层的 `getMagicContextStorage()` 回 null → handler 走
+      // `unavailable` / 不自开库，不再需要「调度上不会发生」这个前提。
+      //
+      // 包装不改变语义边界：`plugin.close` 与 `registerClose` 回填的**仍是同一个函数
+      // 对象**（本 getter 与本回调读同一个 `registeredClose`，见下方 getter 注释与
+      // `test-magic-context-plugin.mjs` 的同一性断言）；包装只多做一件收尾的事，且
+      // 用 `finally` 保证「close 抛错也清空」（否则最需要清空的那条路径恰好不清）。
+      registeredClose = async () => {
+        try {
+          await close();
+        } finally {
+          registeredStorage = undefined;
+        }
+      };
+      transformOptions.registerClose?.(registeredClose);
     },
     registerCompartmentInvalidator: (invalidate) => {
       registeredInvalidateCompartments = invalidate;

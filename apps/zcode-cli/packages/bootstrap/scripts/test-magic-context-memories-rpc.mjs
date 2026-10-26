@@ -34,6 +34,13 @@
  *       list → unavailable 信封且不建库；archive → 可读 -32010（带底层原因）。
  *     - 跨包副本的 authority 错误（ZL-6）：`instanceof` 失效时仍转可读 -32010。
  *
+ *   T-R3b —— 存储端口三态与 blocked 文案（cr-func 第 2 轮 P1-2 / 第 3 轮 P1-1+P2-6）：
+ *     - 端口回 `null`（装配没装成）→ list `reason:"unavailable"`、archive -32010
+ *       （建议重试/重启，**不**建议开会话）；
+ *     - `absent`（零 session，生产可达）→ list `reason:"no-app-port"`（与上一条分开，
+ *       面板才能给出可执行引导）、archive -32010 建议「先在本工作区开会话」；
+ *     - 两条 -32010 文案都不得带实现名（`getMagicContextStorage` / `workspace-level RPC`）。
+ *
  *   T-R4 —— dispatch 源守卫（G-1，四处手工对齐坐标 ③）：
  *     - server.ts 剥注释后必须各有且仅有一处 list/archive 的 `case`，且紧跟
  *       对应 handler 的 `return await …(this.context, request.params);` 字面量
@@ -1221,7 +1228,12 @@ test("端口：getMagicContextStorage()=null → archive 抛可读 -32010，且�
       (error) => {
         assert.equal(error.name, "ProtocolRequestError");
         assert.equal(error.code, -32010);
-        assert.match(error.message, /storage is not installed/i);
+        assert.match(error.message, /cannot be archived right now/i);
+        // 两条 blocked 文案必须**互不串台**（cr-func 第 3 轮 P2-6）：端口回 null 是
+        // 装配没装成 → 建议重试/重启；说「开会话」在这里是假建议（开了也没用）。
+        assert.match(error.message, /retry in a moment or restart the CLI/i);
+        assert.doesNotMatch(error.message, /open or resume a session in this workspace first/i);
+        assert.doesNotMatch(error.message, /getMagicContextStorage|workspace-level RPC/i);
         return true;
       },
     );
@@ -1237,7 +1249,7 @@ test("端口：getMagicContextStorage()=null → archive 抛可读 -32010，且�
 // 于是「冷启动 CLI」或「会话全关后在设置里打开记忆面板」就是 `absent` 态——旧实现
 // 在这一态保留自开库兜底，等于生产上一条只读 RPC 会创建并迁移数据库。
 
-test("absent（零 session，workspace 级 RPC）→ list 回 unavailable 且不建库、不加载 barrel", async () => {
+test("absent（零 session，workspace 级 RPC）→ list 回 no-app-port 且不建库、不加载 barrel", async () => {
   const dbPath = join(TEMP_ROOT, "absent-prod-list.db");
   let runtimeLoaded = 0;
   await withDatabasePath(dbPath, async () => {
@@ -1255,7 +1267,11 @@ test("absent（零 session，workspace 级 RPC）→ list 回 unavailable 且不
     );
     assert.equal(result.supported, true);
     assert.equal(result.available, false);
-    assert.equal(result.reason, "unavailable", "absent 不是「可用」，必须回 unavailable");
+    assert.equal(
+      result.reason,
+      "no-app-port",
+      "absent 必须单独过线（cr-func 第 3 轮 P1-1）：与「装配没装成」共用 unavailable 时，面板只能写「稍后重试」——而这一态下重试永远不会成功",
+    );
     assert.deepEqual(result.entries, []);
     assert.deepEqual(result.counts, ZERO_COUNTS);
     assert.equal(runtimeLoaded, 0, "absent 门排在 barrel 之前，业务符号一律不加载");
@@ -1288,11 +1304,19 @@ test("absent（零 session）→ archive 抛可读 -32010 且不建库（写路�
       (error) => {
         assert.equal(error.name, "ProtocolRequestError");
         assert.equal(error.code, -32010);
-        assert.match(error.message, /storage is not installed/i);
+        assert.match(error.message, /cannot be archived right now/i);
         assert.match(
           error.message,
-          /no app exposes getMagicContextStorage/i,
-          "原因必须与「端口回 null」区分开（absent vs 装成但 db_null）",
+          /open or resume a session in this workspace first/i,
+          "absent 的错误必须给出可执行动作（cr-func 第 3 轮 P2-6）：开会话是这一态唯一的解法",
+        );
+        // 用户可见串不得带实现名（旧文案是「no app exposes getMagicContextStorage
+        // (workspace-level RPC with zero live sessions: …)」——嵌套括号、内部机制、不可操作）。
+        assert.doesNotMatch(error.message, /getMagicContextStorage|workspace-level RPC/i);
+        assert.doesNotMatch(
+          error.message,
+          /retry in a moment or restart the CLI/i,
+          "「稍后重试 / 重启」是装配没装成那一条的建议；absent 照抄就是假建议",
         );
         return true;
       },

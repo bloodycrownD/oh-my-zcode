@@ -21,7 +21,7 @@
  *      `emitMagicContextTransformAbsent(logger, "disabled", ...)`；
  *   ③ import_failed 与工厂内 db_null/disabled 分支全部改调 leaf。
  *
- * 本脚本五组断言：
+ * 本脚本六组断言：
  *   E1 create-app 装配路径（子进程，enabled!==true）：
  *      a. `module.register` resolve hook 断言 magic-context-turn-transform 门面
  *         **与它拆分后的 `app/magic-context/` 整个目录**零加载（flag 关时连 import
@@ -38,6 +38,11 @@
  *   E3 工厂 db_null 细分守卫（mc/C-1）：表驱动直测导出的
  *      `describeStorageUnavailability`——refusal 无 blockers 时**不**误判
  *      migration_guard（与包内 storage-unavailable-reason.ts:24 同口径）。
+ *   E4 installed 态装配（cr-func 第 2 轮 P1-3）：真 `createZCodeApp` + `enabled:true`
+ *      断言 `app.getMagicContextStorage()` 回 `{ db }`（四跳的前三跳贯通）。
+ *      编号说明（cr-func 第 3 轮 P2-3）：本条初稿在 docstring 里自称 E3、标题却写成
+ *      「E2:」，与既有 E2a/E2b（leaf 直测）和 E3（db_null 细分）**双重撞号**。现统一
+ *      为 **E4**；文件内编号固定为 E1 / E1b / E2a / E2b / E3 / E4，新增一律往后排。
  *
  * 隔离（硬规矩）：子进程所有写路径都经 env 显式改指临时目录——
  * `ZCODE_STORAGE_DIR`（storage/session db）、`MAGIC_CONTEXT_DB_DIR` +
@@ -693,8 +698,8 @@ test("E1b: 动态 import 失败降级为 absent(import_failed)，create-app 照�
 });
 
 /**
- * E3（cr-func 第 2 轮 P1-3）：**installed 态的装配**——真 `createZCodeApp` 必须把
- * 装配层的库句柄透传到 `app.getMagicContextStorage()`。
+ * E4（cr-func 第 2 轮 P1-3 / 第 3 轮 P2-3 统一编号）：**installed 态的装配**——真
+ * `createZCodeApp` 必须把装配层的库句柄透传到 `app.getMagicContextStorage()`。
  *
  * 被钉住的是四跳中的前三跳：
  *   assembly.ts  `options.registerStorage?.({ db })`  →  index.ts  `registeredStorage`
@@ -708,7 +713,7 @@ test("E1b: 动态 import 失败降级为 absent(import_failed)，create-app 照�
  * 与 E1/E1b 的差别：这里 `enabled: true` 且**不**破坏 import，所以装配真跑一遍、
  * 库文件真被创建——`dbFileExists` 就是「句柄来自真实装配」的旁证（不是手搓对象）。
  */
-test("E2: enabled 装配把库句柄透传到 app.getMagicContextStorage()（四跳前三跳贯通）", async () => {
+test("E4: enabled 装配把库句柄透传到 app.getMagicContextStorage()（四跳前三跳贯通）", async () => {
   const { exit, report, stderr } = await runCreateAppDriver({ enabled: true });
   assert.equal(exit, 0, `driver 应正常退出；stderr:\n${stderr}`);
   assert.equal(report.appError, undefined, `enabled 装配不该失败：${report.appError}`);

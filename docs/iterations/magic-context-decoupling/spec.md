@@ -413,11 +413,11 @@ handler      readInstalledStorage() → installed | unavailable | absent
 
 - `installed` = 用装配层句柄（不再 openDatabase）；
 - `unavailable` = 有 App 暴露端口但没有任何一个给出句柄（装配抛错 / db_null / import_failed）→ list 回 `unavailable` 信封、archive 抛 `-32010`，**都在 barrel 加载之前**，所以连业务符号都不加载、更不会建库；
-- `absent` = 没有任何 session 暴露该端口。**cr-func 第 2 轮 P1-2 修正：它不是「直构夹具形态」，而是生产可达**——两条 RPC 是 workspace 级（handler 不接 `sessionId`），`context.sessions` 构造时为空（`server.ts:256`）、`closeSession` 会 `delete`（`server-operations.ts:2581`），所以「冷启动 CLI」与「会话全关后打开设置里的记忆面板」都落到这一态；初稿在此保留自开库兜底，等于一条只读 RPC 在生产上创建并迁移 DB（正是端口要根治的缺陷）。现在 `absent` 与 `unavailable` 同一处置：**不许自开库**。直构夹具只剩显式注入 `dependencies.allowDirectOpen: true` 一条通路，判据是显式标记而不是「端口方法在不在」。
+- `absent` = 没有任何 session 暴露该端口。**cr-func 第 2 轮 P1-2 修正：它不是「直构夹具形态」，而是生产可达**——两条 RPC 是 workspace 级（handler 不接 `sessionId`），`context.sessions` 构造时为空（`server.ts:256`）、`closeSession` 会 `delete`（`server-operations.ts:2581`），所以「冷启动 CLI」与「会话全关后打开设置里的记忆面板」都落到这一态；初稿在此保留自开库兜底，等于一条只读 RPC 在生产上创建并迁移 DB（正是端口要根治的缺陷）。现在 `absent` 与 `unavailable` 同一处置：**不许自开库**；但 wire 上**分开**——`absent` 的 list 信封带 `reason:"no-app-port"`（fix-b10 P1-1：面板要能给出「先开会话」的动作，`unavailable` 的「稍后重试」在这一态是假建议）。直构夹具只剩显式注入 `dependencies.allowDirectOpen: true` 一条通路，判据是显式标记而不是「端口方法在不在」。
 - `db` 刻意是 `unknown`（不写 `typeof import("@zcode/magic-context")`）：宿主**保留**的 `app/types.ts` 摘除后仍要过 typecheck，且写实类型会往 IM7 预算多记一处散点。唯一 cast 在 handler 里，是本设计的边界转换。
 - 摘除清单新增两条 `sub` 规则（`app/types.ts` 的字段块、`create-app.ts` 的挂载行），dry-run 复现通过。
 
-用例（`test-magic-context-memories-rpc.mjs` D4）：端口回 `null` 时 list → `available:false/unavailable`、archive → `-32010`，且**库文件不存在**、`loadRuntime` 零调用；`absent`（零 session）无 `allowDirectOpen` 时同样两条（新增，P1-2）；端口给出真句柄时 list **直接用该句柄**且不建目标库（新增，装成态）；多个 App 里第一个回 `null`、第二个有句柄 → 取第二个（新增，P2-7）。
+用例（`test-magic-context-memories-rpc.mjs` D4）：端口回 `null` 时 list → `available:false/unavailable`、archive → `-32010`，且**库文件不存在**、`loadRuntime` 零调用；`absent`（零 session）无 `allowDirectOpen` 时同样两条（新增，P1-2），其中 list 的 reason 是 **`no-app-port`**、archive 的 message 给「先开会话」且不带实现名（fix-b10 P1-1/P2-6）；端口给出真句柄时 list **直接用该句柄**且不建目标库（新增，装成态）；多个 App 里第一个回 `null`、第二个有句柄 → 取第二个（新增，P2-7）。
 **变异证明**：把 `absent` 改回自开库 → 新增的 absent 两例红在「库文件被创建」；把 `readInstalledStorage` 改回「第一个暴露端口的 App 说了算」→ 多 App 一例红；还原后全绿。
 
 ### P2-1 audit 口径只认 camelCase（P1-1 / P1-2 没被自检抓到的根因）
@@ -453,7 +453,7 @@ handler      readInstalledStorage() → installed | unavailable | absent
 
 - **P1-1 块正文在骗模型**：`<session-history-invalidated>` 原先写「Tool effects and files on disk are unaffected」——`editUserQuery` 在 `workspaceMode === "rewind"` 时先 `applyWorkspaceFileRewind`（`fork-edit-retry.ts:168-223`），**磁盘文件真的被回滚**；同一段说明还服务 `retryTurn`，旧句「The user rewound the conversation」把「点重试」说成用户主动 rewind。改为**统一中性表述**（不按分支措辞）：只说历史在此截断 + 明确「本说明不描述工作区文件状态，依赖旧改动前先重读文件」。理由：本包读到的事实只有 `rebase_status`（拿不到 `workspaceMode`），分支版本要么落库加迁移、要么在渲染处猜。T-RW2 正向断言新两句、反向断言旧两句不得出现。**变异证明**：换回旧两句 → rewind `6 pass / 1 fail`（T-RW2）；还原后 7/7。
 - **P1-2 `absent` 生产可达**：两条 RPC 是 workspace 级、`context.sessions` 构造时为空、`closeSession` 会 delete ⇒ 冷启动 / 会话全关时打开记忆面板就是 `absent`，旧实现保留自开库兜底 = 原始缺陷仍在主路径。现在 `absent` 与 `unavailable` 同一处置（`unavailable` + reason `no-app-port` / `storage-not-installed`），直构夹具只剩显式 `dependencies.allowDirectOpen: true`。分类口径同步改在 `app/types.ts`、`create-app.ts` 的行内注释、spec 变更点 #11 与 Z11（**不是**「直构夹具形态」）。新增 4 例：absent list / absent archive（都不建库、不加载 barrel）、`absent + allowDirectOpen`（口子只剩这一条）、installed 真句柄被消费。**变异证明**：把 `absent` 分支改回 `direct-open` → 恰好新增的 absent 两例红（`27 pass / 2 fail`）；还原后 29/29。
-- **P1-3 `installed` 零门禁**：四跳此前没有任何一跳被断言。补三处：plugin D2 断言 `plugin.storage`（第②跳）、absent-event 新增 **E3**（真 `createZCodeApp` + `enabled:true` 断言 `exposed/present/hasDb` 全 true、`dbFileExists` true —— 第①③跳）、E1/E1b 断言 `exposed:true / present:false`（端口**无条件挂**）、memories-rpc 的 installed 用例断言第④跳。**变异证明**：①删 `index.ts` 的 `registeredStorage = storage` → plugin D2 红 + E3 红（`9 pass / 1 fail` 与 `5 pass / 1 fail`）；②把 create-app 的挂载收进 conditional spread → E1/E1b 红（`4 pass / 2 fail`，E3 仍绿——证明两条断言各自有对象）。
+- **P1-3 `installed` 零门禁**：四跳此前没有任何一跳被断言。补三处：plugin D2 断言 `plugin.storage`（第②跳）、absent-event 新增 **E4**（真 `createZCodeApp` + `enabled:true` 断言 `exposed/present/hasDb` 全 true、`dbFileExists` true —— 第①③跳）、E1/E1b 断言 `exposed:true / present:false`（端口**无条件挂**）、memories-rpc 的 installed 用例断言第④跳。**变异证明**：①删 `index.ts` 的 `registeredStorage = storage` → plugin D2 红 + E4 红（`9 pass / 1 fail` 与 `5 pass / 1 fail`）；②把 create-app 的挂载收进 conditional spread → E1/E1b 红（`4 pass / 2 fail`，E4 仍绿——证明两条断言各自有对象）。编号曾是 E3（与 db_null 细分那条撞号），fix-b10 的 P2-3 统一为 **E4**（文件内固定序：E1 / E1b / E2a / E2b / E3 / E4）。
 - **P2-1 `/ctx-status` 只改了一半**：`formatCtxStatus`（用户真正看到的 CLI 文本）补 `invalidated` 行（恒打印，形状不随状态变化）；`snapshot.ts:218` 的 `compartmentCount` 注释改为「仍有效的段数，不是 `getCompartments()` 的行数」。**变异证明**：删掉该行 → cli ctx-commands 的 `formatCtxStatus prints invalidated…` 红（`13 pass / 1 fail`）。
 - **P2-2 KEEP_LIST 三处理由不实**：①i18n 两份 locale 不再整份保留（`uiLocaleContract` 只测 host `init-local` 的 `uiLocale` 字段，两份 locale 是 `Record<string,string>`、无类型级对等约束——真删不会红），改用 11 条 `cut` 规则删掉 MC 独占键组（`settings.memory` + `settings.context.*`、`settings.memory.management.*`（保留 `legacySwitchRetired`：`SettingsPage.tsx` 的迁移 effect 仍在用）、`chat.contextUsage.magicContext.*`、`chat.ctx.*`），逐组核对过消费者都在整件删除或规则删除范围内；②`product-projection` / `v4-gateway` / `conversation-topic-publisher` 的理由从「其余命中都是注释」改为「无生产者但仍在场的写入面（零行为）」——`applyMagicContextUsage()` 等确是活代码；③`system-reminder/source.ts` 删掉「删键会重排 descriptor 表」这条不成立的论据（Record 顺序无语义），只留「删它要同改 4 处」。
 - **P2-3 耦合预算建议与实现相反**：失败文案改为「搬进 `app/magic-context/**` 不会让数字下降（该目录计入 `bootstrap/src`），要降只能真减导入行」，并给出 spec 路径；9 文件形状守卫的失败消息也补 `docs/iterations/magic-context-decoupling/spec.md`。
@@ -475,6 +475,76 @@ handler      readInstalledStorage() → installed | unavailable | absent
 - `turbo run typecheck --force`（bootstrap/adapters/core/magic-context）= **12/12，0 cached**；`architecture:check --changed` = OK / 0 new。
 - 摘除脚本 dry-run 复现：整件删除 **57**、改写 **53** 文件 / **163** 条规则（+11 条 locale 键组 cut）、删除 **28** 个 script（逐条与上一轮一致）、**收窄 1**（`test:v4-perf`，剔 5 段）、陈留 dist 30；`--audit`：**59** 个残留全部登记（下限 55）+ 0 悬空 script（含间接点名）。`--apply` 端到端本轮刻意不重跑（硬约束），规则可复现性由 dry-run + audit + 判据自检共同钉住。
 - 变异探测逐条见上文；除 `create-app.ts`（变异期间同步修了注释、基线 sha 因此变更）外，所有被变异文件均按 sha256 逐字节还原。
+
+## cr-func 第 3 轮（fix-b10，2026-10-25）
+
+cr-func 判 `func_ready: yes`（这一支可以合）。本波只做「合并前建议的两件」+ 四条低成本 P2，另四条 P2 记账不阻塞合并。
+
+### P1-1 冷启动记忆面板的**假建议** + 没有重试入口 → 选 (A) 让 `absent` 单独过线
+
+现象：`classifyStorageGate` 把 `absent` 归 `blocked(reason="no-app-port")`，但 list 信封只有 `disabled|unavailable` 两值 → 面板 `MemoryManagementSection.tsx` 对 `absent` 渲染 `settings.memory.management.unavailable.unavailable`：「本机记忆库暂不可用，请稍后重试。」冷启动 `absent` 下这句的承诺**永远不成立**（除非这期间开了会话），且该分支没有重试按钮（`Button` 只在 `loadError` 分支），用户只能离开设置页再进来触发 remount。
+
+**选 (A)（加第三个 reason + 可操作文案 + 重试按钮）而不是 (B)（只把文案改中性）的四条理由**：
+
+1. 两态的**下一步动作本来就不同**：`no-app-port` = 开会话；`storage-not-installed` = 重试/重启。任何中性文案对两者都不可执行——(B) 只是把一句假话换成一句废话。
+2. 这个分类**已经存在**（`classifyStorageGate` 的 `gate.reason`），(B) 等于继续把它丢在 warn 日志里，产品面永远拿不到。
+3. wire 上交得起：`reason` 是 `z.string().optional()`（不是枚举），加值不破 strict 判据，也不需要新 schema 分支。
+4. (B) 不解决「没有重试入口」——而 remount 才能重拉正是复审点名的可操作性缺陷。
+
+落地五处（每处的「为什么」写在代码注释里）：
+
+- **handler**（`magic-context-memories.ts`）：`unavailableListResult` 的 reason 域加 `no-app-port`；blocked 分支 `gate.reason === "no-app-port" ? "no-app-port" : "unavailable"`（装配没装成仍是 `unavailable`）。
+- **shared**（`packages/shared/src/zcode-protocol/index.ts`）：`reason` 注释改成三值 + 写明「自由字符串、旧端落 else、加值不破解析」。
+- **UI**（`MemoryManagementSection.tsx`）：`unavailableMessageId` 三态映射，判据是**白名单 `disabled`**——未知取值落中性 `unavailable` 而不是「被关掉了」（后者对未知原因是另一句假话）；占位态加「重试」按钮（复用 `TID_SETTINGS_MCM_REFRESH` + `load(0)`），补齐此前只有 `loadError` 分支才有的入口。
+- **i18n**（`zh-CN.ts` / `en-US.ts`）：新增 `settings.memory.management.unavailable.noAppPort`，文案给动作（先在本工作区打开或恢复一个会话，再点重试）。
+- **契约测试**（`test-magic-context-memories-rpc.mjs`）：absent list 断言 `reason === "no-app-port"`；端口回 `null` 那条仍断言 `unavailable`——两态互斥由两条既有用例分别钉住（不是同一条用例里二选一）。
+
+**变异证明**：把 handler 的映射改回恒 `"unavailable"` → memories-rpc `28 pass / 1 fail`（absent list）；把用户面文案换回日志面 `describeBlockedStorage` → `27 pass / 2 fail`（端口回 null + absent 两条 archive 用例的「建议串台」断言）；两处均按 sha256 逐字节还原。i18n 新键由 `scripts/check-i18n-parity.mjs` 守住（只加一侧 → exit 1，实测；恢复后 5937 键对等）。
+
+### 已知缺口：`absent` 的面板引导**只做到文案 + 重试**（按「未实现」登记）
+
+**还不是「用户被领到会话入口」**：占位态没有直达「打开 / 恢复会话」的动作（不深链会话列表、不代开会话），用户仍要自己找到会话入口、再回设置页点重试。按三态口径登记为**未实现**（能力不在），**不是「拍板不做」**——补它需要在 UI 侧引入会话启动动作或深链，属新交互，须先与产品对齐入口位置（设置页内代开 or 跨页深链），本波不动。
+
+### P1-2 `--audit` 的两个「非 MC 故障」出口分诊
+
+1. **下限失败消息给错原因**（`MIN_RESIDUE_FILES` 断言）：旧文案只说「扫描面已经变窄」。但踩到它的第二种人是**合法删了 MC 文件**（CI 红在 59 → 55 的那 4 个余量上）——他们需要的是「同步下调 `MIN_RESIDUE_FILES`」，只有读过 `:3139-3147` 注释的人知道。现改为**两种成因并列**（① 扫描面变窄 → 修判据；② 合法删除 → 同步下调下限并写清为什么），实测复制脚本抬高下限到 200 时两条都打印，exit 仍是 1。
+2. **规则表锚点失配无分诊**：`audit()` 原先第一句就是 `runRules()` 且无 try/catch，`applyEdit` 在锚点命中数 ≠ 1 / 子串命中数不符 / JSON 零改动时 throw，而它挂在 CI 的 `Run magic-context suites` step 里（job 名 `magic-context suite`）→ 未捕获异常 + 堆栈 + exit 1，**人第一眼必然读成 MC 功能坏了**。现在 `runRules()` 包 try/catch，输出「✗ 摘除脚本规则表失配（非 MC 功能故障）：`<file>`: `<message>`；请同步更新 RULES 锚点」并 **`return 3`**；下限 / 未登记残留 / 悬空 script 三类保持 1（按码可分诊）。
+   **实测**（同目录副本注入一条不存在的锚点，真文件不动）：`EXIT=3`，stderr 首行即上面那句 + 第二行「改的是本脚本的 RULES，不是 magic-context」。
+
+### P2 四条（低成本，已落地）
+
+- **P2-3 `absent-event` 的 E 编号四处不一致**：新用例 docstring 自称 `E3`、`test()` 标题写 `E2:`，而文件里已有真正的 `E3`（db_null 细分）与 `E2a/E2b`（leaf 直测）→ 统一为 **E4**（文件内固定序 E1 / E1b / E2a / E2b / E3 / E4，新增往后排）。同步改：脚本头「五组断言 → 六组」并补 E4 条目、本条 spec 记录、`UPSTREAM-SYNC.md` Z11（原写 E2）。
+- **P2-4 `renderM0` 全失效态措辞**：`compartments` 为空 + `invalidatedHistory` 非空（可达：rewind 到第一个 compartment 之前，全部段被作废）时，正文仍说 `The <session-history> above ends at the last still-valid summary`，而上方 `<session-history></session-history>` 里**没有任何有效段**。现按 `args.compartments.length === 0` 换半句为 `No still-valid summary remains above (every earlier summary was invalidated)`；其余两句（中性截断陈述 + 工作区免责）不动。新增 **T-RW2b** 正反两向断言。**变异证明**：把判据改成恒 `false` → T-RW2b 红（`7 pass / 1 fail`），还原后 **8/8**。
+- **P2-5 `registeredStorage` 在 close 后不清空**：今天靠 `transport` 串行 + 关闭路径「先摘登记后 await close」兜住——安全性挂在两处调用顺序上。现在 `index.ts` 的 `registerClose` 包一层：close 结束（`finally`，抛错也清）后置 `registeredStorage = undefined`，`storage` getter 与 `getMagicContextStorage()` 随之回 `null` → handler 走 `unavailable`，兜底从「靠调度」变「靠数据」。同一性断言仍成立（`plugin.close` 与 `registerClose` 回填的是**同一个**函数对象）。**变异证明**：去掉那行清空 → plugin D2 那条新断言红（`9 pass / 1 fail`），其余 9 条仍绿——证明既有断言（含同一性）覆盖不到这个点。
+- **P2-6 archive 的 `-32010` 文案**：旧串是 `Magic Context storage is not installed in this app (no app exposes getMagicContextStorage (workspace-level RPC with zero live sessions: cold start or all sessions closed))`——嵌套括号 + 内部实现名 + 不可操作。现拆两份：`describeBlockedStorage`（实现级诊断）**只落日志**（archive 侧补一条 warn，诊断力不下降）；`describeBlockedStorageForUser`（完整用户句子）进 message——`no-app-port` 给「先在本工作区打开或恢复一个会话」，`storage-not-installed` 给「稍后重试 / 重启 CLI」。前缀同时换掉 `Magic Context storage is not installed in this app`（在 `no-app-port` 下它本身也是假话：库装没装和有没有会话是两件事）→ `Memories cannot be archived right now:`，两态共用且都为真。**变异证明**：见 P1-1 第 2 条（同一处变异让两条用例里的「建议串台 + 实现名」断言红）。
+
+### 已记账、本波**不做**的四条 P2（不阻塞合并）
+
+| 项 | 现状 / 为什么留到现在 |
+| --- | --- |
+| 跨水位段的措辞粒度 | 某段可能跨越水位（`start_message < 水位 ≤ end_message`），按「尾部连续 unresolved」整段剔除会把该段里**水位之前**的保留轮次摘要也一起剔掉；说明块只说「作废了几段」。改正需要按消息粒度切段（新存储形态），量级属下一个迭代；当前方向的偏差是「少给一点有效历史 + 明说截断」，不会让模型看见用户撤掉的内容。 |
+| `re-read a file before relying on an earlier change` 每轮重复 | 失效说明块随 M0 每轮重投到下一次压缩为止（historian 写出更大的 `ok` 段后尾部不再连续、块自动消失）。成本有界（一句话），换来的是「不承诺磁盘状态」这条硬约束；若将来要省 token，应在 M0 缓存 marker 里带「已提示」位，属缓存格式变更。 |
+| `hasDb` 只判 `typeof === "object"` | absent-event E4 的 `hasDb` 没有「句柄里的 db === 装配层那个 db」的**同一性**断言，理论上一个空对象 `{}` 也能过。补它要把装配层 db 也回传给子进程比对（跨进程无法比对引用，只能比对可观察行为如 `PRAGMA` 结果）；当前 `dbFileExists` 是旁证。 |
+| `auditSelfCheckFailures` 是内联函数 | 它自己坏了没有第二处守卫（判据的自检由自己执行）。补第二处守卫需要外部快照（例如提交一份解析器期望输出），属门禁架构改动。 |
+
+**口径**：以上四条都是「**未实现 / 未补**」，不是「拍板不做」；四条都不影响合并判据（不改产品行为、不产生假绿的关键路径）。
+
+### fix-b10 门禁与数字（真跑，2026-10-25）
+
+- 套件（19 套全绿，真跑）：zero-load 1/1、absent-event 6/6、gate 27/27、plugin 10/10、bootstrap magic-context 23/23、mc-section-zh PASS（16-case）、config-rpc 10/10、memories-rpc **29/29**、coupling-budget 4/4、MC prompt-surface 28/28、ctx-status 4/4、MC rewind **8/8**（+T-RW2b）、entry-identity-guard 4/4、compartment-rewind-host 3/3、cli ctx-commands 14/14、edit-retry 6/6、adapters config-narrow 6/6 / boundaries 10/10 / domain 22/22。
+- `turbo run typecheck --force`（bootstrap / adapters / core / magic-context）= **12/12，0 cached**；根 `pnpm typecheck`（tsc -b 12 工程，含 `packages/ui` 与两个 test 工程）0 error。
+- 摘除脚本 `--dry-run`：整件删除 **57**、改写 **53** 文件、删除 **28** 个 script、收窄 **1**（`test:v4-perf`）、陈留 dist **30**，exit 0——改动（新增 i18n 键、handler/spec 文案）没有破任何锚点。
+- `--audit`：**59** 个残留全部登记（下限 55）+ 0 悬空 script，exit 0；规则表失配探针 exit **3**（见 P1-2）。
+- `scripts/check-i18n-parity.mjs`：zh-CN 与 en-US 各 **5937** 键对等；删掉 zh 侧新键的探针 → exit 1（只列 en 侧那一行）。
+- lint：7 个被改的 app 文件逐个与 HEAD 同诊断（`max-lines` 4 处是既有，其余 0）→ **新增 0**；`MemoryManagementSection.tsx` 的 `oxfmt --check` 红是**基线既有**（HEAD 版本同样红，且 oxfmt 想改的 5 处全在本波未触碰的行）。
+- `architecture:check --changed`：OK / violations 0 / new 0。
+- 变异探测（全部按 sha256 逐字节还原）：①handler 的 reason 映射改回恒 `unavailable` → memories-rpc `28/1`；②用户面文案换回日志面 → `27/2`（两条 archive 建议串台）；③renderM0 空态判据改回恒 false → rewind `7/1`（T-RW2b）；④去掉 close 后清空句柄 → plugin `9/1`；⑤删 zh 新键 → i18n parity exit 1；⑥规则表注入假锚点（同目录副本）→ audit exit **3** + 分诊文案；⑦下限抬到 200（同目录副本）→ exit 1 且两种成因并列打印。
+
+### 测试覆盖边界（本波新增的判断点是否都有红断言）
+
+- handler 的 reason 映射、blocked 文案分列、renderM0 空态半句、close 后清空句柄：都有**变异下会红**的断言（见上文逐条）。
+- **UI 的 `unavailableMessageId` 映射没有组件级断言**：`packages/ui` 没有组件渲染测试（`test/*.test.ts` 全是纯逻辑），`MemoryManagementSection` 也不在 `tsconfig.test.json` 的接线范围内。本波**不加**一条不会红的断言（按「变异下不红就删」的纪律），它的可测半边（wire 值 `no-app-port`）已由 memories-rpc 覆盖；i18n 键的存在性由 `check-i18n-parity.mjs` 覆盖。**已知风险**：把 UI 映射改回旧三元不会有测试报错，只有 typecheck/lint。
+- E 编号统一与文档同步属命名/文档改动，无行为断言（不需要）。
 
 ## 测试策略
 

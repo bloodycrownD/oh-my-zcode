@@ -10,6 +10,9 @@
  *   T-RW2 — **M0 过滤 + 说明块**：第二次 `materializeM0` 的 `<session-history>` 不含
  *           被作废段的正文，且投出 `<session-history-invalidated>`（count + 序号区间）。
  *           反向：未失效时该块不出现（不能永久挂在 prompt 里）。
+ *   T-RW2b — **全部段被作废**（有效段为空，可达：rewind 到第一个 compartment 之前）：
+ *           说明块换成「No still-valid summary remains above」半句，不得再声称
+ *           「上面的 <session-history> 还有最后一个有效摘要」（那是假话，P2-4）。
  *   T-RW3 — **M1 增量同样过滤**：`renderM1` 的 `<new-compartments>` 不引用 unresolved 行。
  *   T-RW4 — **refused 时只掐块**：`prefixTrimStatus === "refused"` ⇒ m[1] 的
  *           `<new-compartments>` 被剔掉（注入头里也没有），而 `<new-memories>` 等
@@ -322,6 +325,45 @@ test("T-RW2 rewind 后 M0 不再注入被裁段，且投 <session-history-invali
     afterText.includes("The user rewound the conversation"),
     false,
     "不得把「点重试」说成用户主动 rewind（retryTurn 与 editUserQuery 共用同一段说明）",
+  );
+});
+
+// ── T-RW2b：全部段都被作废时，说明块不得声称「上面还有效」 ───────────────
+test("T-RW2b 全部 compartment 作废（有效段为空）→ 说明块换成空历史措辞", () => {
+  const sessionId = "ses_t_rw2b";
+  seedCompartments(sessionId, [
+    {
+      sequence: 0,
+      startMessage: 1,
+      endMessage: 1,
+      startMessageId: "m-1",
+      endMessageId: "m-1",
+      content: "ONLY-SUMMARY",
+    },
+  ]);
+
+  // 锚点 = 第 1 条消息 ⇒ 唯一的段（end_message 1 >= 1）同样被作废。这正是
+  // 「rewind 到第一个 compartment 之前」的形态：compartments 空 + invalidatedTail 非空。
+  invalidateCompartmentsForRewind(db, sessionId, 1);
+
+  const afterText = materializeM0(renderOptions(sessionId)).m0Bytes.toString("utf8");
+  assert.ok(
+    afterText.includes("<session-history></session-history>"),
+    "前置：没有有效段时 <session-history> 必须是空壳（M0_EMPTY_BODY）",
+  );
+  assert.ok(!afterText.includes("ONLY-SUMMARY"), "被作废段的正文不得进 M0");
+  assert.ok(afterText.includes("<session-history-invalidated>"), "说明块照旧要投");
+  assert.ok(afterText.includes("1 summary segment(s)"), "说明块给出作废段数");
+  // cr-func 第 3 轮 P2-4：空历史下旧句「The <session-history> above ends at the last
+  // still-valid summary」是**假话**——上面那个 <session-history> 里一段都没有。
+  assert.ok(
+    afterText.includes("No still-valid summary remains above"),
+    "有效段为空时必须换半句（不能指着一个空 <session-history> 说「上面还有最后一个有效摘要」）",
+  );
+  assert.equal(
+    afterText.includes("ends at the last still-valid summary"),
+    false,
+    "空历史下不得保留「ends at the last still-valid summary」",
   );
 });
 
