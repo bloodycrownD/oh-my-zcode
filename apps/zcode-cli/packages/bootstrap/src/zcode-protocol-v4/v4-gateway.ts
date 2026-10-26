@@ -1017,6 +1017,17 @@ export class ConversationV4Gateway {
    * 让 `forceRebuild` 生效；这一份是「还欠一次升级」的事实，升级完成即删。
    */
   private readonly degradedFirstScreen = new Set<string>();
+  /**
+   * 进行中的**激活后全量升级**（Step 11）。
+   *
+   * 只给读入口让路用：升级会先删 `hydratedSessions`（`forceRebuild` 的硬前置），删完之后
+   * 到升级收口之前，这份投影既「可读」又「不在防双算水位里」。没有这条事实，读/翻页会在
+   * 这个窗口里把它当成「还没水化」→ 重新走冷路径（重新物化外壳 = 一次冷开）并起一份自己
+   * 的水化，把在飞的升级吞掉（`hydratePublisher` 对 in-flight 是「加入」而非「排队」）。
+   *
+   * **不用**它做别的判定：升级的成功/失败结论仍只看 `hydratedSessions` 与投影本身。
+   */
+  private readonly projectionUpgrades = new Map<string, Promise<ConversationTopicPublisher>>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
   /**
@@ -2353,6 +2364,9 @@ export class ConversationV4Gateway {
    * → 临时投影物化 → 交 publisher 编码），结果不驻留投影（只进本次返回页）。
    *
    * 三条「不物化」的边界必须分清，否则「没生效」会被读成「翻页坏了」：
+   *   - **视图已就绪**（`readableViewPublisher`：投影在、`viewReadySessions` 在册）→ 直接读
+   *     这份投影，连冷路径都不进：不重新物化外壳、不起第二次冷开（Step 11）。升级在飞的
+   *     窗口也走这条（那时 `hydratedSessions` 已被删，但投影仍可读）；
    *   - 本页整段落在已物化窗口内 → 投影现算（窗口内翻页永不触发第二次冷开）；
    *   - manifest 事实已作废（有 live 事件**改动了行集合**）→ 退回投影现算，`hasMore` 随之
    *     退化为「更早方向在投影里还有没有」，见 new_risk（窗口化 + live 追加行之后翻页暂
@@ -3802,6 +3816,8 @@ export class ConversationV4Gateway {
     this.viewReadySessions.delete(sessionId);
     // 会话被关掉后「欠一次升级」不再是事实：下一次冷开会按当时的 record 形态重新判定。
     this.degradedFirstScreen.delete(sessionId);
+    // 在飞的升级同理：它换出来的投影属于这条会话，会话关了就不再是「可读的视图」。
+    this.projectionUpgrades.delete(sessionId);
     // 激活结论同样不能留下：会话被关掉之后「runtime 就绪」不再是事实，下一次冷开必须
     // 重新判（否则重建出的 view-only shell 会继承上一条 record 的就绪结论）。
     this.runtimeReadySessions.delete(sessionId);
@@ -3867,6 +3883,7 @@ export class ConversationV4Gateway {
     this.viewReadySessions.clear();
     this.runtimeReadySessions.clear();
     this.degradedFirstScreen.clear();
+    this.projectionUpgrades.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -3978,6 +3995,10 @@ export class ConversationV4Gateway {
    * 调用方**不止冷订阅**：`rowsRange`、`turnDirectory`、`plans`、`fileChanges`、附件读面
    * 都经 `resolveViewPublisher` 走到这里。Step 9 之前本函数也是 `runtimeReadyMs` 的生产链
    * （内部等激活）；现在激活本体归 `ensureRuntimeReady`，读路径不再产生那份耗时。
+   *
+   * Step 11：视图**已经**可读时本函数直接早退（`readableViewPublisher`），不再物化外壳。
+   * 这条早退同时覆盖「读入口先水化、随后冷订阅再进来」的顺序——否则那次订阅会把外壳
+   * 再物化一遍（= 一次冷开），而它的投影其实已经建好了。
    */
   private ensureViewReadyPublisher(
     sessionId: string,
@@ -3986,6 +4007,12 @@ export class ConversationV4Gateway {
   ): Promise<ConversationTopicPublisher> {
     const existingFlight = this.viewReadyFlights.get(sessionId);
     if (existingFlight) return existingFlight;
+    // Step 11：视图已可读 → 直接返回这份投影，**不再**物化外壳。这里也会被 subscribe 走到
+    // （冷会话订阅的入口就是本函数），所以修在这里才能覆盖「读入口先水化、随后订阅」这条
+    // 真实顺序：以前那次订阅会把外壳再物化一遍（`materializeSessionShell` 在生产宿主里对
+    // 已在册的 record 早退，但外壳物化本身在 record 被回收时就是一次完整冷开）。
+    const readable = this.readableViewPublisher(sessionId);
+    if (readable !== undefined) return Promise.resolve(readable);
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
       // Step 9：视图只等外壳。**不要**在这里再调 `ensureRuntimeReady`——那会让首屏重新
@@ -4097,15 +4124,41 @@ export class ConversationV4Gateway {
    *
    * fire-and-forget：失败只记账（下一次冷开会按当时的 record 形态重新判定），
    * 绝不把失败回传给已经成功的激活调用方。
+   *
+   * Step 11：升级在飞期间必须让读入口看得见（`projectionUpgrades`）——它删掉了
+   * `hydratedSessions`，否则翻页会重新走冷路径并把升级吞掉。登记是**同步**的（调用后立刻
+   * set），因此不存在「升级已经开始、读入口还以为没有」的窗口。
+   *
+   * 耗时只进 debug：升级是激活之后的一次全量正文读，不在 `openPhases` 里（`materializeMs`
+   * 仍缺席，Step 7 的口径不变），这里是它唯一的读数（Step 14 要量化就看这条行）。
    */
   private scheduleProjectionUpgrade(sessionId: string): void {
     if (this.disposed) return;
     if (!this.degradedFirstScreen.has(sessionId)) return;
     // 先消费事实：升级只做一次，失败不自动重试（重试条件应该是「下一次冷开」而不是轮询）。
     this.degradedFirstScreen.delete(sessionId);
-    void this.upgradeProjectionToFull(sessionId).catch((error) => {
-      this.host.onError?.("v4.runtime.upgradeProjection", error, { sessionId });
-    });
+    const startedAt = performance.now();
+    const upgrade = this.upgradeProjectionToFull(sessionId);
+    this.projectionUpgrades.set(sessionId, upgrade);
+    void upgrade
+      .then(
+        () => {
+          this.host.onDebug?.(
+            `v4 projection upgrade applied session=${sessionId} upgradeMs=${Math.max(
+              0,
+              Math.round(performance.now() - startedAt),
+            )}`,
+          );
+        },
+        (error: unknown) => {
+          this.host.onError?.("v4.runtime.upgradeProjection", error, { sessionId });
+        },
+      )
+      .finally(() => {
+        if (this.projectionUpgrades.get(sessionId) === upgrade) {
+          this.projectionUpgrades.delete(sessionId);
+        }
+      });
   }
 
   /**
@@ -4165,10 +4218,41 @@ export class ConversationV4Gateway {
   private async resolveViewPublisher(sessionId: string): Promise<ConversationTopicPublisher> {
     const existingFlight = this.viewReadyFlights.get(sessionId);
     if (existingFlight) return existingFlight;
+    // Step 11：视图已可读就不再走冷路径。这才是「翻页/重订不触发第二次冷开」的接缝——
+    // 放在这里而不是各读方法里，是因为读入口很多（见 `ensureViewReadyPublisher` 的调用方）。
+    const readable = this.readableViewPublisher(sessionId);
+    if (readable !== undefined) return readable;
     if (this.conversationState(sessionId) === "notLive") {
       return this.ensureViewReadyPublisher(sessionId);
     }
     return this.hydratePublisher(sessionId);
+  }
+
+  /**
+   * 「视图已可读」时直接给出投影，否则 undefined（调用方退回冷路径）。**唯一**判定点。
+   *
+   * 三个条件缺一不可：
+   *   ①有一次成功的视图水化（`viewReadySessions`，IS4 的 viewOnly 半边）；
+   *   ②投影还在（`publishers`）；
+   *   ③防双算水位在册，**或**正有一次激活后的全量升级在飞。
+   *
+   * ③的前半是常规态。后半（升级在飞）不能省：升级为了 `forceRebuild` 会先删
+   * `hydratedSessions`，删完到收口之间若把它当成「还没水化」，每一次翻页都会重新走冷路径
+   * ——先物化一次外壳（**这就是一次冷开**），再起一份自己的水化并「加入」在飞的升级，升级
+   * 于是变成 no-op（同一份窗口再物化一遍）。升级只是把同一份投影换成全量，读旧的即可。
+   *
+   * 但③也**不能**退化成「只要 `viewReadySessions`」：升级失败时 `hydratedSessions` 不会
+   * 重新登记，那时读入口必须退回冷路径重读一次（自愈）——否则一次失败的 rehydrate 会把
+   * 半成品投影钉到会话关闭为止。
+   */
+  private readableViewPublisher(sessionId: string): ConversationTopicPublisher | undefined {
+    if (!this.viewReadySessions.has(sessionId)) return undefined;
+    const publisher = this.publishers.get(sessionId);
+    if (publisher === undefined) return undefined;
+    if (this.hydratedSessions.has(sessionId) || this.projectionUpgrades.has(sessionId)) {
+      return publisher;
+    }
+    return undefined;
   }
 
   /**

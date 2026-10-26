@@ -28,6 +28,9 @@
  *      激活归 ACK 后的预激活与 send 类命令；外壳存在 ≠ runtime 就绪（D4/D5 + G1-G3）。
  *   H. **窗口化冷开的 shared_context 兼容**（Step 9）：那条 model-only 上下文消息几乎总在
  *      窗口之外，靠「窗口正文 find」会静默丢掉分享导入元数据；改为按 id 单条确认（H1/H2）。
+ *   M. **读入口不复触发冷开**（Step 11）：视图已就绪后翻页/重订不得再物化外壳（那就是
+ *      第二次冷开）；升级删了 `hydratedSessions` 的那段窗口里，读入口要继续读旧投影而不是
+ *      起第二份水化把升级吞掉（M1-M3）。
  *
  * 运行：`npx tsx --test scripts/test-view-runtime-split.mjs`（必须走 tsx：gateway 的依赖
  * 链摸到 `@zcode/model-option-map` 的 src 出口）。
@@ -56,7 +59,7 @@ process.on("exit", (code) => {
   console.log("");
   console.log(
     code === 0
-      ? "TEST PASS — Step 8/9/10 view/runtime split (IS3 + IS4 + IS8)"
+      ? "TEST PASS — Step 8/9/10/11 view/runtime split (IS3 + IS4 + IS8)"
       : `TEST FAIL — Step 8/9 view/runtime split (exit code ${code})`,
   );
 });
@@ -1536,4 +1539,201 @@ test("L3: 未知态显示成空态——不把「runtime 才知道」的字段�
       draftConfigControlSource.includes("draft.planEnabled === undefined"),
     "激活后只对「从未表达过」的草稿补一次",
   );
+});
+
+// ── M: 读入口不复触发冷开（Step 11）─────────────────────────────────────────
+//
+// Step 11 的两件事：①`rowsRange`（以及同族的读/翻页入口）在**视图已就绪**之后不得再走
+// 冷路径——那条路会重新物化外壳（`materializeSessionShell`），在 record 被回收时就是一次
+// 完整冷开；②升级会先删 `hydratedSessions`，读入口在那个窗口里必须继续读旧投影，而不是
+// 起第二份水化把升级吞掉。
+//
+// 本组用 `calls.shell` / `calls.load` 两个宿主侧计数当判据：它们是被观测行为，
+// 不是源码形状（后者只能证明「写了」，证明不了「读入口真的不再走那条路」）。
+
+/** view-only 首屏 + 全量升级的 loadPersistedEvents 桩（K2 同形，多记一个 options）。 */
+function degradedLoadStub({ onFull } = {}) {
+  const options = [];
+  return {
+    options,
+    load: async (_sessionId, _messages, loadOptions) => {
+      options.push(loadOptions ?? {});
+      if (loadOptions?.fullMaterialization === true) {
+        if (onFull) await onFull();
+        return { events: [], synthesized: true, sourceEventSeq: 0, branchGeneration: 0 };
+      }
+      // 首屏：view-only 口径（store-only，没有 record 事实）→ 记「欠一次升级」。
+      return {
+        events: [],
+        synthesized: true,
+        sourceEventSeq: 0,
+        branchGeneration: 0,
+        viewOnlyHydration: true,
+      };
+    },
+  };
+}
+
+function pagingParams() {
+  return {
+    sessionId: SESSION_ID,
+    beforeRowId: 1,
+    limit: 2,
+    clientMode: "desktop-continuous",
+  };
+}
+
+test("M1: 视图已就绪后翻页/重订不再物化外壳（读入口不触发第二次冷开）", async () => {
+  const { host, calls, holdResume } = gatewayFixture({ shellPort: true });
+  const stub = degradedLoadStub();
+  host.loadPersistedEvents = async (sessionId, messages, options) => {
+    calls.load += 1;
+    return await stub.load(sessionId, messages, options);
+  };
+  const gateway = new ConversationV4Gateway(host);
+  const releaseResume = holdResume();
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-m1a",
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(calls.shell, 1, "首屏必须物化一次外壳");
+    assert.equal(calls.load, 1, "首屏一次 hydration");
+
+    // ① view-only 窗口（resume 悬在半空）：连续翻页。以前每一页都会重走冷路径 → 外壳 2/3/4。
+    for (let page = 0; page < 3; page += 1) {
+      const result = await gateway.rowsRange(pagingParams());
+      assert.ok(Array.isArray(result.rows), "翻页必须正常返回（不是 404）");
+    }
+    assert.equal(calls.shell, 1, "view-only 期翻页不得重复物化外壳（= 不得触发第二次冷开）");
+    assert.equal(calls.load, 1, "view-only 期翻页不得起第二份 hydration");
+
+    // ② 重订：冷会话订阅同样走视图水位，已就绪时必须是纯早退。
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-m1b",
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(calls.shell, 1, "视图已就绪后重订不得再物化外壳");
+    assert.equal(calls.load, 1, "视图已就绪后重订不得再读一次正文");
+
+    // ③ 激活后升级（fire-and-forget）：升级本身是一次全量读，只此一次。
+    releaseResume();
+    await waitFor(() => calls.load >= 2, "激活成功后必须发生一次全量升级");
+    assert.equal(stub.options[1].fullMaterialization, true, "升级必须是全量口径");
+    assert.equal(calls.shell, 1, "升级不碰外壳");
+
+    // ④ 升级之后（hydratedSessions 已重新登记）：翻页仍不得触发冷路径。
+    for (let page = 0; page < 2; page += 1) {
+      await gateway.rowsRange(pagingParams());
+    }
+    assert.equal(calls.shell, 1, "升级后的翻页不得物化外壳");
+    assert.equal(calls.load, 2, "升级后的翻页不得再读正文（读旧投影即可）");
+  } finally {
+    releaseResume();
+    gateway.dispose();
+  }
+});
+
+test("M2: 升级在飞时翻页不等全量读、也不起第二份水化（读入口让路）", async () => {
+  const { host, calls } = gatewayFixture({ shellPort: true });
+  let releaseFull;
+  let fullStarted = false;
+  const debugLines = [];
+  const stub = degradedLoadStub({
+    onFull: async () => {
+      fullStarted = true;
+      await new Promise((resolve) => {
+        releaseFull = resolve;
+      });
+    },
+  });
+  host.loadPersistedEvents = async (sessionId, messages, options) => {
+    calls.load += 1;
+    return await stub.load(sessionId, messages, options);
+  };
+  host.onDebug = (message) => debugLines.push(message);
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-m2a",
+      clientMode: "desktop-continuous",
+    });
+    await waitFor(() => fullStarted, "激活成功后必须启动全量升级");
+    assert.equal(calls.load, 2, "夹具：首屏 + 升级各一次");
+
+    // 升级已经把 hydratedSessions 删掉了；此时翻页若被当成「还没水化」，就会重新物化外壳
+    // 并起一份自己的水化（加入在飞的升级 → 升级变 no-op），现象是翻页卡到全量读结束。
+    const settled = await Promise.race([
+      gateway.rowsRange(pagingParams()).then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("blocked"), 300)),
+    ]);
+    assert.equal(settled, "resolved", "升级在飞时翻页不得等全量读");
+    assert.equal(calls.shell, 1, "升级在飞时翻页不得物化外壳");
+    assert.equal(calls.load, 2, "升级在飞时翻页不得起第二份 hydration");
+
+    releaseFull();
+    await waitFor(
+      () => debugLines.some((line) => line.includes("v4 projection upgrade applied")),
+      "升级必须留下一条 debug 读数",
+    );
+    assert.ok(
+      debugLines.some((line) => /v4 projection upgrade applied .*upgradeMs=\d+/.test(line)),
+      "升级的成本只能从这条 debug 行读（openPhases 里没有它，materializeMs 仍缺席）",
+    );
+    assert.equal(calls.load, 2, "升级只读一次全量正文");
+  } finally {
+    releaseFull?.();
+    gateway.dispose();
+  }
+});
+
+test("M3: 撤销防双算水位之后读入口必须退回冷路径重读（早退不得把缺段的投影钉住）", async () => {
+  // 「视图可读」不等于「投影是完整的」：assistant 守恒那条修复会单独撤销
+  // `hydratedSessions`（投影拒收过正文流 → 下次必须从持久事实重读补齐）。读入口的早退
+  // 若只认 `viewReadySessions`，就会把这份缺段的投影一直供下去（现象：回复整段消失，
+  // 直到用户手动刷新/会话关闭）。升级失败后同形。
+  const { host, calls } = gatewayFixture();
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-m3a",
+      clientMode: "desktop-continuous",
+    });
+    assert.equal(calls.load, 1, "首屏一次 hydration");
+
+    // 没有 TurnStarted 的正文增量 = 投影建立晚于流开始 → 被拒收并记 dropped 计数。
+    gateway.ingest(
+      SESSION_ID,
+      sessionEvent(
+        "model_streaming",
+        1,
+        {
+          kind: "text_delta",
+          assistantMessageId: "msg-m3-assistant",
+          partId: "part-m3",
+          delta: "迟到的正文",
+          done: false,
+        },
+        "turn-m3",
+      ),
+    );
+    await waitFor(
+      () => calls.errors.some((entry) => entry.scope === "v4.assistantConservation"),
+      "拒收正文流必须撤销 hydrated 水位（现有保护，本用例的前提）",
+    );
+
+    // 水位被撤销之后，读入口必须重新走冷路径读一次正文。
+    await gateway.rowsRange(pagingParams());
+    assert.equal(
+      calls.load,
+      2,
+      "hydrated 水位不在册时必须重读（早退只认「投影在」就会把缺段投影钉住）",
+    );
+  } finally {
+    gateway.dispose();
+  }
 });
