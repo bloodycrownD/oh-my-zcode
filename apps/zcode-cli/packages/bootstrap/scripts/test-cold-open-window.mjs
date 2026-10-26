@@ -505,10 +505,34 @@ function newCounters() {
     events: [],
     live: false,
     runtimeActive: false,
+    /** 每次 `loadPersistedEvents` 的水位账目：读到的事件水位 + 实际交出去的那个。 */
+    watermarks: [],
+    /** 流式回复的人为延迟：让「在飞」窗口确定存在（默认 0 = 旧行为）。 */
+    streamDelayMs: 0,
     /** 可控的「激活悬在半空」——用来证明 view-only 期确实没就绪。 */
     resumeGate: null,
+    /** 可控的「升级的持久读取已完成、rehydrate 还没发生」窗口（risk 16 的对照组）。 */
+    upgradeReadGate: null,
     /** 让下一次激活失败一次（验证失败不驻留）。 */
     failNextResume: false,
+  };
+}
+
+/** 手动放行的门（与 `holdResume` 同族，只是不绑在激活上）。 */
+function deferredGate() {
+  let release;
+  let markReached;
+  let released = false;
+  return {
+    promise: new Promise((resolve) => (release = resolve)),
+    /** 门被等到的信号：调用方可以据此知道「门之前的工作已经做完」。 */
+    reached: new Promise((resolve) => (markReached = resolve)),
+    markReached: () => markReached(),
+    release: () => {
+      if (released) return;
+      released = true;
+      release();
+    },
   };
 }
 
@@ -814,7 +838,7 @@ const MODEL_PROPERTIES = {
 };
 
 /** 记录 provider 实际收到的请求的 stub model（这是 T-SL13 的观测点本体）。 */
-function recordingModel(requestLog) {
+function recordingModel(requestLog, streamDelayMs = 0) {
   const model = {
     providerId: "provider-a",
     modelId: "model-a",
@@ -831,6 +855,11 @@ function recordingModel(requestLog) {
     },
     async *streamText(request) {
       requestLog.push({ kind: "stream", request });
+      // 只给「并发窗口」用例加延迟：默认模型是同步 yield，一轮可能在升级读持久事实
+      // 之前就结束——那样测到的不是「在飞」，并发用例会退化成顺序用例。
+      if (streamDelayMs > 0) {
+        await new Promise((resolve) => setTimeout(resolve, streamDelayMs));
+      }
       yield { type: "text_end", id: "part-stub" };
       yield { type: "finish", finishReason: "stop", usage: {} };
     },
@@ -865,7 +894,7 @@ function realRuntimeWorld({ root, store, requestLog, counters, logger }) {
             appVersion: "0.0.0-test",
             eventStore: options.eventStore,
             sessionStore: store,
-            modelFactory: () => recordingModel(requestLog),
+            modelFactory: () => recordingModel(requestLog, counters.streamDelayMs ?? 0),
             logger,
             traceContext: { traceId: `trace-${options.sessionId}` },
           },
@@ -954,20 +983,45 @@ function realRuntimeHost({ context, gatewayRef, counters }) {
       counters.load += 1;
       counters.loadOptions.push(loadOptions ?? {});
       const record = context.sessions.get(sessionId);
-      const [liveEvents] = record
-        ? await Promise.all([record.eventStore.getEvents(sessionId)])
-        : [[]];
-      return await readColdMaterializationWithMemoryEvents({
+      // 与 `v4-bridge.ts:2014-2019` 逐值同参：**必须**交出真水位（`sourceEventSeq`，见
+      // `v4-bridge.ts:2238`）。它是 gateway 重放 live 尾部的锚点：交 0 会让升级重放后的
+      // 每一个 raw 事件都卡在「等 seq=1」的 gap 里（`test-session-row-manifest.mjs:932`
+      // 对这条契约有记账），并发在飞的那一轮于是被静默抹掉。
+      const [liveEvents, sourceEventSeq] = record
+        ? await Promise.all([
+            record.eventStore.getEvents(sessionId),
+            record.eventStore.getLatestSequenceNumber(sessionId),
+          ])
+        : [[], 0];
+      const watermark = {
+        fullMaterialization: loadOptions?.fullMaterialization === true,
+        sourceEventSeq,
+        events: liveEvents.length,
+        returnedSourceEventSeq: undefined,
+      };
+      counters.watermarks.push(watermark);
+      const materialized = await readColdMaterializationWithMemoryEvents({
         store: context.deps.sessionStore,
         reader: gatewayRef.reader,
         sessionId,
         persistedMessages,
         loadOptions,
         memoryEvents: liveEvents,
+        sourceEventSeq,
         // view-only 首屏：record 还是外壳（runtime 没起）→ usage / fileChanges 一起缺席。
         viewOnlyShell: record?.runtimeViewOnlyShell === true,
         record,
       });
+      // 交出去的必须是**读到的**那个水位：读到了却返回 0 与「没有水位」在 gateway 眼里
+      // 是同一件事（尾部重放会卡在 raw gap 里）。
+      watermark.returnedSourceEventSeq = materialized.sourceEventSeq;
+      // 并发窗口的门：持久事实（上面那次读取）已经定型，但 rehydrate 还没发生。
+      // 门挡在读取**之后**，所以升级的输入仍是「轮次开始那一刻」的持久状态。
+      if (loadOptions?.fullMaterialization === true && counters.upgradeReadGate) {
+        counters.upgradeReadGate.markReached();
+        await counters.upgradeReadGate.promise;
+      }
+      return materialized;
     },
     readRowManifest: (sessionId, input) => gatewayRef.reader.read(sessionId, input),
     invalidateRowManifestIndex: (sessionId) => gatewayRef.reader.invalidateMessageIndex(sessionId),
@@ -1041,6 +1095,7 @@ async function readColdMaterializationWithMemoryEvents({
   persistedMessages,
   loadOptions,
   memoryEvents,
+  sourceEventSeq = 0,
   viewOnlyShell,
   record,
 }) {
@@ -1124,7 +1179,8 @@ async function readColdMaterializationWithMemoryEvents({
   return {
     events: merged.events,
     synthesized: merged.usedDurableTranscript,
-    sourceEventSeq: 0,
+    // 真水位（不是 0）：gateway 只能沿 `sourceEventSeq+1` 连续 drain，见上面的 loader。
+    sourceEventSeq,
     branchGeneration: source.branchGeneration,
     ...(windowPlan ? { coldWindow: windowPlan } : {}),
     ...(modelBaseline === null
@@ -1615,17 +1671,23 @@ test("D1 (遗留①): 真冷首屏拿不到 fileChanges 摘要，页物化也不
   }
 });
 
-test("D2 (遗留②): 升级与首轮 send 并发——观测流式行是否回退（risk 16）", async (t) => {
+test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「不做升级、继续 live」逐 rowId 相等", async (t) => {
   const root = tempRoot("d2");
   const counters = newCounters();
   counters.runtimes = [];
   counters.runtimeResumes = 0;
+  // 「在飞」必须确定存在：默认模型同步 yield，一轮可能在升级的持久读取之前就收口，
+  // 那样这条用例测的是顺序而不是并发。只给流式回复加延迟，不改任何被测语义。
+  counters.streamDelayMs = 60;
+  const upgradeGate = deferredGate();
+  counters.upgradeReadGate = upgradeGate;
   const requestLog = [];
   const { logger } = recordingLogger();
   const world = await realRuntimeCase({ root, counters, requestLog, logger });
   const { gateway, context } = world;
   const unsubscribers = [];
   t.after(async () => {
+    upgradeGate.release();
     for (const unsubscribe of unsubscribers) unsubscribe();
     gateway.dispose();
     await closeQuietly(world);
@@ -1633,8 +1695,8 @@ test("D2 (遗留②): 升级与首轮 send 并发——观测流式行是否回�
   });
 
   // 客户端视角的行观测：**出站帧序列**（`emitWireFrame` 的完整快照 + 行增量）。
-  // 用帧而不是「再订阅一次」：resync 快照正是升级改写投影后客户端实际收到的形态，
-  // 回退（行数/rowId 上界倒退）只会在帧序列里可见。
+  // resync 快照正是升级改写投影后客户端实际收到的形态，回退（rowId 上界倒退）
+  // 只会在帧序列里可见。
   const first = await subscribeSnapshot(gateway, "conn-d2a");
   const beforeRows = first.rows.window;
   const record = context.sessions.get(SESSION_ID);
@@ -1649,11 +1711,79 @@ test("D2 (遗留②): 升级与首轮 send 并发——观测流式行是否回�
     issuedAt: 1_700_000_000_000,
   });
   await waitFor(
-    () => counters.debugs.some((line) => line.includes("v4 projection upgrade applied")),
-    "本轮必须发生一次升级（否则没有并发）",
+    () => counters.loadOptions.some((options) => options.fullMaterialization === true),
+    "激活成功后必须排一次全量升级",
+  );
+  // 门之前的活（持久事实读取 + 契约字段回填）必须已经做完，否则下面读到的水位只是
+  // 一本还没记完的账。
+  await waitForPromise(upgradeGate.reached, "升级的持久读取必须到达门");
+
+  // ── 对照组 =「不做升级、继续 live」──
+  // 读入口在升级在飞时返回既有投影（`readableViewPublisher` 的第三个条件），所以这份
+  // 行集合就是「没有升级这回事」时投影会有的内容：首屏历史 + 本轮 live 的行。
+  const control = await gateway.rowsRange({
+    sessionId: SESSION_ID,
+    limit: 200,
+    clientMode: "desktop-continuous",
+  });
+  const controlRows = control.rows;
+  assert.ok(
+    controlRows.length > beforeRows.length,
+    "对照组必须包含本轮 live 的新行（否则并发窗口没建立，下面的比较是空的）",
+  );
+  // 对照态必须还是**降级**投影（首行与首屏同一个窗口边界）：首行变早 = 升级已经落定，
+  // 那时读到的对照组就是升级后的自己，这条用例会退化成「升级 vs 升级」。
+  assert.equal(
+    controlRows[0].rowId,
+    beforeRows[0].rowId,
+    "对照组必须在升级落定之前读（首行仍是首屏窗口边界）",
   );
 
-  // 判据：rowId 上界只能单调不减。任何一帧快照的上界低于此前已下发的上界 = 流式行回退。
+  // 宿主契约（risk 16 的机制本体）：升级那次持久读取必须交出真水位
+  // （`v4-bridge.ts:2014-2019/2238`）。交 0 会让尾部重放的每个事件都卡在「等 seq=1」
+  // 的 raw gap 里（`test-session-row-manifest.mjs:932` 对这条契约有记账），并发在飞的
+  // 那一轮于是被静默抹掉。
+  const upgradeLoad = counters.watermarks.find((entry) => entry.fullMaterialization);
+  assert.ok(upgradeLoad, "升级必须走一次 loadPersistedEvents");
+  assert.equal(
+    upgradeLoad.returnedSourceEventSeq,
+    upgradeLoad.sourceEventSeq,
+    "持久读取必须把读到的事件水位原样交出去（换掉/清零 = 尾部重放会卡在 raw gap）",
+  );
+  assert.ok(
+    upgradeLoad.sourceEventSeq > 0,
+    `升级的持久读取必须报出真水位，实际 ${upgradeLoad.sourceEventSeq}（0 = 宿主契约违约，尾部会卡在 raw gap）`,
+  );
+
+  upgradeGate.release();
+  await waitFor(
+    () => counters.debugs.some((line) => line.includes("v4 projection upgrade applied")),
+    "升级必须落定（否则比的是两份 live 投影）",
+  );
+
+  // ① 判据本体：升级后**不得改动、不得抹掉**对照组里的任何一行（逐 rowId 身份相等）。
+  //    首屏是窗口化的，所以对照组只含末几轮 + live 尾部；升级允许把窗口之外更早的历史
+  //    补进来（这正是升级的目的），但共享区间的每一行必须逐值不变——「并发在飞的一轮
+  //    被静默抹掉」就会在这里现形。
+  const after = await subscribeSnapshot(gateway, "conn-d2b");
+  const afterRows = after.rows.window;
+  const controlFirst = controlRows[0].rowId;
+  assert.deepEqual(
+    afterRows.filter((row) => row.rowId >= controlFirst).map(identityOfRow),
+    controlRows.map(identityOfRow),
+    "升级后共享区间的行集合必须与「不做升级、继续 live」逐 rowId 相等（不得抹掉在飞的一轮）",
+  );
+  assert.ok(
+    afterRows.some((row) => row.rowId < controlFirst),
+    "升级必须真的补上窗口之外的历史（否则它只是一次窗口重物化，上面的比较是空的）",
+  );
+  assert.equal(
+    after.rows.totalCount,
+    afterRows.length,
+    "升级之后 totalCount 必须与窗口行数一致（不能多算一份、也不能少一轮）",
+  );
+
+  // ② 客户端已经收到的行不得在后续帧里消失：rowId 上界只能单调不减。
   const startingMax = Math.max(...beforeRows.map((row) => row.rowId));
   let observedMax = startingMax;
   let rollback = null;
@@ -1686,17 +1816,17 @@ test("D2 (遗留②): 升级与首轮 send 并发——观测流式行是否回�
       `finalMaxRowId=${observedMax} rollback=${rollback === null ? "none" : JSON.stringify(rollback)}\n`,
   );
   assert.ok(frameCount > 0, "夹具：必须真的下发过出站帧（否则这条观测是空的）");
+  assert.equal(
+    rollback,
+    null,
+    `出站快照的 rowId 上界不得回退（客户端已经收到过 ${startingMax} 之上的流式行）`,
+  );
 
-  // 并发之后的两条硬事实：
-  //   ① **数据面没写坏**：本轮的消息已经落进真 store（投影的陈旧不等于持久层丢数据）；
-  //   ② 投影自洽：行号连续、totalCount 与窗口长度一致。
-  // 注意：升级会把投影**整份替换**成「升级那一刻的持久事实」，因此并发期已在飞的行
-  // 可能不在最终快照里——这是 spec risk 16 描述的现象，本用例把它记成观测输出
-  // （`[risk16]` 行）而不是断言某个方向，避免把「已修」和「未修」任一侧写死。
+  // ③ 数据面没写坏：本轮的消息已经落进真 store（投影的陈旧不等于持久层丢数据）。
   const persisted = await world.store.messages({ sessionID: SESSION_ID });
   assert.ok(
     persisted.length >= TOTAL_TURNS * 2 + 2,
-    `本轮的用户消息与 assistant 消息必须已落库（数据面不受投影回退影响），实际 ${persisted.length} 条`,
+    `本轮的用户消息与 assistant 消息必须已落库（数据面不受投影影响），实际 ${persisted.length} 条`,
   );
   assert.ok(
     persisted.some(
@@ -1706,27 +1836,7 @@ test("D2 (遗留②): 升级与首轮 send 并发——观测流式行是否回�
     ),
     "本轮的用户输入必须能在真 store 里按原文找到",
   );
-  const after = await subscribeSnapshot(gateway, "conn-d2b");
-  const afterIds = after.rows.window.map((row) => row.rowId);
-  for (const row of beforeRows) {
-    assert.ok(afterIds.includes(row.rowId), `rowId ${row.rowId} 在并发之后消失`);
-  }
-  assert.equal(
-    after.rows.totalCount,
-    after.rows.window.length,
-    "升级之后投影必须自洽（totalCount 与窗口长度一致）",
-  );
-  assert.deepEqual(
-    afterIds,
-    afterIds.map((_rowId, index) => index + 1),
-    "行号必须连续（回退不得在投影里留下空洞）",
-  );
   assert.equal(counters.resume, 1, "并发路径同样只能激活一次");
-  // 观测面的结论必须显式留在输出里：回退是否发生是 Step 14 前需要裁定的输入。
-  assert.ok(
-    rollback === null || rollback.maxRowId < rollback.observedMax,
-    "回退观测项的形状必须自洽（回退点 = 把升级改成首个 turn 结束后再排）",
-  );
 });
 
 async function waitFor(predicate, message, timeoutMs = 5_000) {
@@ -1735,5 +1845,20 @@ async function waitFor(predicate, message, timeoutMs = 5_000) {
     if (predicate()) return;
     if (Date.now() - startedAt > timeoutMs) throw new Error(`timeout: ${message}`);
     await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+}
+
+/** 有界等待一个 promise：环境异常时给可读的失败而不是静默挂死（门专用）。 */
+async function waitForPromise(promise, message, timeoutMs = 5_000) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_resolve, reject) => {
+        timer = setTimeout(() => reject(new Error(`timeout: ${message}`)), timeoutMs);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
   }
 }
