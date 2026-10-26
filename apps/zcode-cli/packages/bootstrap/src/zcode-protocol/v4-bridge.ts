@@ -89,9 +89,19 @@ import type {
   SessionId,
   StableForkGoalBoundaryMetadata,
   TraceId,
+  TurnFileChangeSummary,
   TurnId,
   WorkspaceId,
 } from "@zcode/contracts";
+
+/**
+ * 正在做文件变更摘要后台补齐的会话集合（单飞）。
+ *
+ * 补齐是纯优化，它读的 artifact 与下一次冷开的读路径共用同一份 I/O：真机实测两轮补齐
+ * 重叠时，一次冷开的 `mergeMs` 从 200 量级弹到 2023ms。因此同一会话只允许一个补齐在跑，
+ * 撞上就跳过——下一轮打开再补，不会丢数据。
+ */
+const fileChangeBackfillInFlight = new Set<string>();
 import { HYDRATION_TRACE_ID } from "../zcode-protocol-v4/projection-state.js";
 import { resolveWorkspaceRefFromId } from "./mapper.js";
 import { buildLiveWorkspaceConfigStateV4 } from "./v4-workspace-config.js";
@@ -2147,37 +2157,132 @@ export function createConversationV4Gateway(
       // 重建摘要，再交给 transcript hydration 合成同构 ModelComplete。
       // record 缺席（store-only 骨架）时没有 artifact reader：摘要为空是**预期降级**，
       // 不是「这一轮没有改文件」——所以只在有 record 时才尝试。
-      const fileChangeSummariesByMessageId = record
-        ? await buildColdFileChangeSummaries({
+      // **先读持久缓存，不在首屏按消息现算**（真机取证）：每个 checkpoint 一次 artifact
+      // 读 + 整快照反序列化（约 7ms/条）。真机 312 条物化消息 → 1918ms，占 mergeMs 95%。
+      // 摘要是不可变派生事实，算一次落库，之后每次冷开只做一次按 session 的批量读。
+      let fileChangeSummariesByMessageId: Map<string, TurnFileChangeSummary> | undefined;
+      if (record) {
+        const fileChangeSummaryMessageIds = source.messages.map((message) =>
+          String(message.info.id),
+        );
+        const fileChangeSummaryStore = store?.fileChangeSummaries;
+        const cachedFileChangeSummaries = fileChangeSummaryStore
+          ? await fileChangeSummaryStore.readFileChangeSummaries({
+              sessionId: sessionId as SessionId,
+              messageIds: fileChangeSummaryMessageIds,
+            })
+          : undefined;
+        fileChangeSummariesByMessageId = new Map();
+        // 缓存里的 `null` 是「算过、这一轮本来就没有变更」的负缓存：必须参与「已覆盖」
+        // 判定，否则这些 messageId（多数轮次）每次冷开都会被当成未命中重算一遍。
+        const coveredFileChangeMessageIds = new Set<string>();
+        for (const [messageId, summary] of cachedFileChangeSummaries ?? []) {
+          coveredFileChangeMessageIds.add(messageId);
+          if (summary) {
+            fileChangeSummariesByMessageId.set(messageId, summary as TurnFileChangeSummary);
+          }
+        }
+        // artifact 读失败时那一轮没有摘要并不代表「没有变更」：本批出现过错误就只写正结果，
+        // 否则一次瞬时失败会把该轮永久钉成「无变更」。
+        let fileChangeArtifactErrorCount = 0;
+        const buildFileChangeSummaries = (messageIds: readonly string[]) =>
+          buildColdFileChangeSummaries({
             events: source.memoryEvents,
-            // 只给**本次真的会被合成**的那些消息算摘要（Step 15）。
-            //
-            // 旧实现按整条 active 分支（窗口计划里的全序 messageId 列表，实测 2978 条 /
-            // 61 个带 workspace checkpoint 的 user message）过滤，于是窗口化首屏为窗口外的
-            // 轮次读了 685 个 artifact（29.5MB），而摘要的**唯一消费者**是
-            // transcript-hydration 合成 ModelComplete 时的
-            // `fileChangeSummariesByMessageId.get(userMessageId)`
-            // ——它只会查 `source.messages` 里的消息。窗口外的轮次本次不合成任何行，
-            // 那 685 次读没有任何出口（翻页也不读摘要，见 `materializeRowPage` 的已知代价）。
-            // 全量物化时 `source.messages` 就是整条 active 分支，与旧口径逐值一致。
-            messageIds: source.messages.map((message) => String(message.info.id)),
-            // fix-c19：view-only 首屏没有 resume，`CheckpointCreated` 事件还没被
-            // `restoreWorkspaceCheckpointEntries` 回放进 eventStore——旧实现靠「激活后整份
-            // 重读」把它们补回来（代价是整条分支灌进 live 投影）。现在直接从同一读里已经
-            // 拿到的 session_entry 取（按窗口 messageId 过滤仍在摘要构造器内），首屏就有摘要。
+            messageIds,
             persistedCheckpoints: source.persistedWorkspaceCheckpoints,
             readArtifact: async (snapshotRef) =>
               (await record.app.readToolResultArtifact(snapshotRef)).content,
-            onArtifactError: (messageId, error) =>
+            onArtifactError: (messageId, error) => {
+              fileChangeArtifactErrorCount += 1;
               context.logger?.warn("v4 cold file change artifact read failed", {
                 error: error instanceof Error ? error.message : String(error),
                 event: "zcode_protocol.v4.hydrate_file_changes_failed",
                 messageId,
                 module: "bootstrap.zcode_protocol",
                 sessionId,
-              }),
-          })
-        : undefined;
+              });
+            },
+          });
+        const persistFileChangeSummaries = async (
+          messageIds: readonly string[],
+          built: ReadonlyMap<string, TurnFileChangeSummary>,
+          allowNegative: boolean,
+        ) => {
+          if (!fileChangeSummaryStore) return;
+          const computedAt = Date.now();
+          const records: { computedAt: number; messageId: string; summary: unknown }[] = [];
+          for (const messageId of messageIds) {
+            const summary = built.get(messageId);
+            if (summary) {
+              records.push({ computedAt, messageId, summary });
+              continue;
+            }
+            if (allowNegative) records.push({ computedAt, messageId, summary: null });
+          }
+          if (records.length === 0) return;
+          await fileChangeSummaryStore.upsertFileChangeSummaries({
+            sessionId: sessionId as SessionId,
+            records,
+          });
+        };
+        const missingFileChangeMessageIds = fileChangeSummaryMessageIds.filter(
+          (messageId) => !coveredFileChangeMessageIds.has(messageId),
+        );
+        if (missingFileChangeMessageIds.length > 0) {
+          // 无缓存端口（旧宿主 / 内存 store）时退回全量现算：不能因为「没缓存」就让
+          // 所有轮次的角标静默消失。
+          const inlineLimit = fileChangeSummaryStore
+            ? 16
+            : missingFileChangeMessageIds.length;
+          const inlineIds =
+            inlineLimit >= missingFileChangeMessageIds.length
+              ? missingFileChangeMessageIds
+              : missingFileChangeMessageIds.slice(-inlineLimit);
+          const deferredIds =
+            inlineLimit >= missingFileChangeMessageIds.length
+              ? []
+              : missingFileChangeMessageIds.slice(
+                  0,
+                  missingFileChangeMessageIds.length - inlineLimit,
+                );
+          const errorsBeforeInline = fileChangeArtifactErrorCount;
+          const inlineSummaries = await buildFileChangeSummaries(inlineIds);
+          for (const [messageId, summary] of inlineSummaries) {
+            fileChangeSummariesByMessageId.set(messageId, summary);
+          }
+          await persistFileChangeSummaries(
+            inlineIds,
+            inlineSummaries,
+            fileChangeArtifactErrorCount === errorsBeforeInline,
+          );
+          if (deferredIds.length > 0 && !fileChangeBackfillInFlight.has(sessionId)) {
+            // 后台补齐：不 await；**单飞**——补齐是纯优化，绝不允许与下一次冷开抢同一批
+            // artifact I/O（真机实测重叠时把一次冷开的 mergeMs 从 200 量级顶到 2023ms）。
+            fileChangeBackfillInFlight.add(sessionId);
+            void (async () => {
+              try {
+                const errorsBeforeDeferred = fileChangeArtifactErrorCount;
+                const deferredSummaries = await buildFileChangeSummaries(deferredIds);
+                await persistFileChangeSummaries(
+                  deferredIds,
+                  deferredSummaries,
+                  fileChangeArtifactErrorCount === errorsBeforeDeferred,
+                );
+              } catch (error) {
+                context.logger?.warn("v4 cold file change summary backfill failed", {
+                  error: error instanceof Error ? error.message : String(error),
+                  event: "zcode_protocol.v4.hydrate_file_changes_backfill_failed",
+                  messageIdCount: deferredIds.length,
+                  module: "bootstrap.zcode_protocol",
+                  sessionId,
+                });
+              } finally {
+                fileChangeBackfillInFlight.delete(sessionId);
+              }
+            })();
+          }
+        }
+      }
       markPhase("fileChangeSummariesMs");
       // 冷恢复 transcript 不保存模型能力，旧 hydration 自行填 20 万；
       // provider registry 已在 resume 前同步完成，应按恢复/退避后的当前模型精确取值。
@@ -2246,7 +2351,9 @@ export function createConversationV4Gateway(
         persistedMessages,
       );
       markPhase("subagentsMs");
-      log?.debug("v4 cold load breakdown", {
+      // 诊断期临时提到 info：dev 启动链给的是 ZCODE_ENV=production，debug 全被级别过滤掉，
+      // mergeMs 只能看总数、拆不开。定位完成后改回 debug。
+      log?.info("v4 cold load breakdown", {
         event: "zcode_protocol.v4.cold_load_breakdown",
         module: "bootstrap.zcode_protocol",
         phase: "loadPersistedEvents",

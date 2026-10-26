@@ -1054,6 +1054,8 @@ export interface FileChangeSummaryStorePort {
     input: FileChangeSummaryReadInput,
   ): Promise<ReadonlyMap<string, unknown>>;
   upsertFileChangeSummaries(input: FileChangeSummaryWriteInput): Promise<void>;
+}
+
 // ── 全序消息索引：id 序的唯一窄读面 ────────────────────────────────────────
 //
 // 只读排序键（id / sequence / time_created / rowid），**不读 `data`**：role 在
