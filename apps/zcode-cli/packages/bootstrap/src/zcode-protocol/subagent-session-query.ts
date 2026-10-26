@@ -6,8 +6,10 @@ import {
   type BackgroundTaskInfo,
   type MessageWithParts,
   type SessionEvent,
+  type SessionId,
   type SessionInfo,
   type SessionProjection,
+  type SessionStorePort,
   type ToolPart,
   STREAM_RECOVERY_DISCARDED_ERROR_NAME,
 } from "@zcode/contracts";
@@ -379,6 +381,37 @@ function startedAt(
   if (background?.startedAt) return background.startedAt.getTime();
   if (candidate.startedAt !== undefined) return candidate.startedAt;
   return "time" in candidate.part.state ? candidate.part.state.time.start : undefined;
+}
+
+/**
+ * 子会话「终态输出」的**窄读**：只取最后一条 assistant 消息（`lastChildOutcome` 的唯一输入）。
+ *
+ * 为什么不是 `store.messages({sessionID: child})`：一个长会话的下级 Agent 数量与每个 child
+ * 的轮次都会增长（实测 152 个 child / 15.8k 消息 / 89k part），全量读 = 152 次
+ * message+part 全表扫（实测 2.3~3.6s），而 `lastChildOutcome` 只消费
+ * `assistantMessages.at(-1)` 一条。冷开首屏为这份「用不上的尾部」付了整个会话的正文读。
+ *
+ * 读法：消息索引与 `messages()` 同一权威序 → 从尾部向前找第一条 role=assistant 的消息 →
+ * `messageWithParts` 单条读回。`lastChildOutcome([message])` 与
+ * `lastChildOutcome(全部消息)` 逐值相同（它只取最后一条 assistant）。索引/单条读端口缺席
+ * （旧宿主、内存 store）时退回全量 `messages()`：窄读是优化，不是语义前提。
+ */
+export async function readChildOutcomeMessages(
+  store: Pick<SessionStorePort, "messages" | "messageWithParts" | "listSessionMessageIndex">,
+  sessionID: SessionId,
+): Promise<MessageWithParts[]> {
+  if (!store.listSessionMessageIndex || !store.messageWithParts) {
+    return await store.messages({ sessionID });
+  }
+  const index = await store.listSessionMessageIndex({ sessionID });
+  // 从尾部向前扫：终态输出几乎总在最后一条，退到 file/step 尾巴的概率很低。
+  for (let position = index.length - 1; position >= 0; position -= 1) {
+    const messageId = index[position]?.id;
+    if (messageId === undefined) continue;
+    const message = await store.messageWithParts({ sessionID, messageID: messageId });
+    if (message?.info.role === "assistant") return [message];
+  }
+  return [];
 }
 
 export function projectSessionSubagents(

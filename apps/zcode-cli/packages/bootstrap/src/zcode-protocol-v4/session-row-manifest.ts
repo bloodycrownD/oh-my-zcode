@@ -532,7 +532,15 @@ export interface ColdTailWindowPlan {
    * 窗口投影的 `activeTurnIds` 只含窗口内 turn，拿它剪枝会把没物化的头部真实轮次删掉。
    */
   branchTurnIds: string[];
-  /** 全序 active message id：`buildColdFileChangeSummaries` 仍要按整条分支过滤。 */
+  /**
+   * 全序 active message id。
+   *
+   * 消费者只有两处，都必须按**整条分支**：①`shared_context_import` 的 model-only 首条消息
+   * 确认（`cold-event-merge`，取 `[0]`）；②窗口游标存在性判定。
+   * **不**再喂 `buildColdFileChangeSummaries`（Step 15）：文件摘要只服务本轮的合成器，
+   * 按 `source.messages`（本次真的物化的消息）过滤即可，按整条分支过滤会为窗口外的轮次
+   * 白读 artifact。
+   */
   activeMessageIds: MessageId[];
   /**
    * 窗口内的 messageId（清单口径）。用于过滤**锚在窗口外**的 goal verification 事实：

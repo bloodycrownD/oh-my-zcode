@@ -1147,12 +1147,12 @@ async function readColdMaterializationWithMemoryEvents({
     : null;
   // fileChanges 摘要：与 bridge 同一条门——只有「有 record（有 artifact reader）」才重建。
   // 真冷（record 缺席）时它是空的，这是**预期降级**（首屏降级清单第 ⑤ 项）。
+  // 过滤集合同样与 bridge 一致（Step 15）：只给本次真的会合成的 `source.messages` 算摘要，
+  // 不再按整条 active 分支过滤（那会为窗口外的轮次白读 artifact）。
   const fileChangeSummaries = record
     ? await buildFileChangeSummaries({
         events: source.memoryEvents,
-        messageIds: windowPlan
-          ? windowPlan.activeMessageIds.map((messageId) => String(messageId))
-          : source.messages.map((message) => String(message.info.id)),
+        messageIds: source.messages.map((message) => String(message.info.id)),
       })
     : undefined;
   const merged = mergeColdConversationEvents({
@@ -1862,3 +1862,247 @@ async function waitForPromise(promise, message, timeoutMs = 5_000) {
     clearTimeout(timer);
   }
 }
+
+// ── S: 子会话终态窄读（Step 15：冷开 mergeMs 的最大单项）─────────────────────
+//
+// 真机实测（3012 message 的会话）：`listSessionSubagents` 为 152 个 child 各读一次全量
+// message+part（15.8k 消息 / 89k part）＝ 2.3~3.6s，占 mergeMs 的 60%+；而
+// `lastChildOutcome` 的全部输入只是**最后一条 assistant 消息**。窄读必须与全量读给出
+// 逐值相同的 running/ended（否则省下来的是错误）。
+
+const CHILD_SESSION_ID = "ses_cold_open_window_child";
+const CHILD_TRAILING_SESSION_ID = "ses_cold_open_window_child_trailing";
+
+function assistantInfo(messageID, created, completed) {
+  return {
+    id: messageID,
+    sessionID: CHILD_SESSION_ID,
+    role: "assistant",
+    time: { created, completed },
+    agent: "zcode-agent",
+    modelId: "model-a",
+    providerId: "provider-a",
+    mode: "build",
+  };
+}
+
+async function seedSubagentChild(store, root) {
+  await store.createSession({
+    id: CHILD_SESSION_ID,
+    projectID: PROJECT_ID,
+    parentID: SESSION_ID,
+    taskType: "subagent_child",
+    slug: "cold-open-window-child",
+    directory: root,
+    title: "子会话",
+    version: "0.0.0",
+    time: { created: 1_700_000_001_000, updated: 1_700_000_002_000 },
+  });
+  // 一轮带工具调用的 assistant（没有终态文本 → 不能当作 outcome）。
+  await store.saveMessage(assistantInfo("c-a1", 1_700_000_001_100, 1_700_000_001_400));
+  await store.savePart({
+    id: "c-a1-tool",
+    sessionID: CHILD_SESSION_ID,
+    messageID: "c-a1",
+    type: "tool",
+    callID: "call-child-1",
+    tool: "Read",
+    state: {
+      status: "completed",
+      input: { filePath: "src/app.ts" },
+      output: "ok",
+      title: "Read",
+      metadata: {},
+      time: { start: 1_700_000_001_150, end: 1_700_000_001_390 },
+    },
+  });
+  // 终态 assistant：窄读必须命中这一条（它有文本、没有 tool part）。
+  await store.saveMessage(assistantInfo("c-a2", 1_700_000_001_500, 1_700_000_001_900));
+  await store.savePart({
+    id: "c-a2-text",
+    sessionID: CHILD_SESSION_ID,
+    messageID: "c-a2",
+    type: "text",
+    text: "完成：改了 3 个文件",
+  });
+
+  // 第二个 child：最后一条是 user 消息（子会话在等下一轮），outcome 仍应是上一条 assistant。
+  await store.createSession({
+    id: CHILD_TRAILING_SESSION_ID,
+    projectID: PROJECT_ID,
+    parentID: SESSION_ID,
+    taskType: "subagent_child",
+    slug: "cold-open-window-child-trailing",
+    directory: root,
+    title: "子会话（尾部 user）",
+    version: "0.0.0",
+    time: { created: 1_700_000_003_000, updated: 1_700_000_004_000 },
+  });
+  await store.saveMessage({
+    id: "c2-a1",
+    sessionID: CHILD_TRAILING_SESSION_ID,
+    role: "assistant",
+    time: { created: 1_700_000_003_100, completed: 1_700_000_003_500 },
+    agent: "zcode-agent",
+    modelId: "model-a",
+    providerId: "provider-a",
+    mode: "build",
+  });
+  await store.savePart({
+    id: "c2-a1-text",
+    sessionID: CHILD_TRAILING_SESSION_ID,
+    messageID: "c2-a1",
+    type: "text",
+    text: "已完成",
+  });
+  await store.saveMessage({
+    id: "c2-u-2",
+    sessionID: CHILD_TRAILING_SESSION_ID,
+    role: "user",
+    time: { created: 1_700_000_003_900 },
+    agent: "zcode-agent",
+    modelId: "model-a",
+    providerId: "provider-a",
+  });
+  await store.savePart({
+    id: "c2-u-2-text",
+    sessionID: CHILD_TRAILING_SESSION_ID,
+    messageID: "c2-u-2",
+    type: "text",
+    text: "继续",
+  });
+}
+
+/** 父会话里两条 Agent 调用（候选取自 tool part，与生产同一套 collectCandidates）。 */
+function parentAgentMessages() {
+  const call = (turn, childSessionId) => ({
+    info: {
+      id: `m-${turn}-a`,
+      sessionID: SESSION_ID,
+      role: "assistant",
+      time: {
+        created: 1_700_000_000_000 + turn * 1_000,
+        completed: 1_700_000_000_400 + turn * 1_000,
+      },
+      agent: "zcode-agent",
+      modelId: "model-a",
+      providerId: "provider-a",
+      mode: "build",
+    },
+    parts: [
+      {
+        id: `prt-${turn}-agent`,
+        sessionID: SESSION_ID,
+        messageID: `m-${turn}-a`,
+        type: "tool",
+        callID: `call-agent-${turn}`,
+        tool: "Agent",
+        state: {
+          status: "completed",
+          input: { description: `子任务 ${turn}`, prompt: "做点事", run_in_background: false },
+          output: JSON.stringify({
+            childSessionId,
+            description: `子任务 ${turn}`,
+            agentType: "general",
+            status: "completed",
+          }),
+          title: "Agent",
+          metadata: {},
+          time: { start: 1_700_000_000_100, end: 1_700_000_000_300 },
+        },
+      },
+    ],
+  });
+  return [call(1, CHILD_SESSION_ID), call(2, CHILD_TRAILING_SESSION_ID)];
+}
+
+test("S1: 子会话终态窄读与全量读逐值一致，且不再读 child 的全量 messages()", async (t) => {
+  const { readChildOutcomeMessages, projectSessionSubagents } = await import(
+    new URL("../src/zcode-protocol/subagent-session-query.ts", import.meta.url).href
+  );
+  const root = mkdtempSync(join(tmpdir(), "zcode-cold-open-window-s1-"));
+  const store = createSqliteSessionStore({ dbPath: join(root, "sessions.db") });
+  t.after(async () => {
+    await store.close?.();
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  await store.createSession({
+    id: SESSION_ID,
+    projectID: PROJECT_ID,
+    slug: "cold-open-window-s1",
+    directory: root,
+    title: "父会话",
+    version: "0.0.0",
+    time: { created: 1_700_000_000_000, updated: 1_700_000_009_000 },
+  });
+  await seedSubagentChild(store, root);
+  const parentMessages = parentAgentMessages();
+
+  const childFullReads = [];
+  const countedStore = {
+    messages: async (input) => {
+      childFullReads.push(String(input.sessionID));
+      return await store.messages(input);
+    },
+    messageWithParts: (input) => store.messageWithParts(input),
+    listSessionMessageIndex: (input) => store.listSessionMessageIndex(input),
+  };
+
+  // ① 窄读命中「最后一条 assistant」，且没有为 child 走全量读。
+  const narrowChild = await readChildOutcomeMessages(countedStore, CHILD_SESSION_ID);
+  assert.equal(
+    childFullReads.filter((id) => id === CHILD_SESSION_ID).length,
+    0,
+    "窄读不得退化成全量",
+  );
+  assert.deepEqual(
+    narrowChild.map((message) => String(message.info.id)),
+    ["c-a2"],
+    "窄读必须只取最后一条 assistant（带 tool part 的 c-a1 不是终态输出）",
+  );
+  const narrowTrailingChild = await readChildOutcomeMessages(
+    countedStore,
+    CHILD_TRAILING_SESSION_ID,
+  );
+  assert.deepEqual(
+    narrowTrailingChild.map((message) => String(message.info.id)),
+    ["c2-a1"],
+    "尾部是 user 消息时仍要回溯到最后一条 assistant（与全量读的 filter().at(-1) 同义）",
+  );
+
+  // ② 与全量读逐值一致：running / ended 不许因为窄读而漂。
+  const parentSession = await store.getSession(SESSION_ID);
+  const childSessions = new Map([
+    [CHILD_SESSION_ID, await store.getSession(CHILD_SESSION_ID)],
+    [CHILD_TRAILING_SESSION_ID, await store.getSession(CHILD_TRAILING_SESSION_ID)],
+  ]);
+  const buildProjection = (childMessagesById) =>
+    projectSessionSubagents({
+      revision: 7,
+      parentSession,
+      messages: parentMessages,
+      childSessionsById: childSessions,
+      childMessagesById,
+      childProjectionsById: new Map(),
+    });
+  const fullProjection = buildProjection(
+    new Map([
+      [CHILD_SESSION_ID, await store.messages({ sessionID: CHILD_SESSION_ID })],
+      [CHILD_TRAILING_SESSION_ID, await store.messages({ sessionID: CHILD_TRAILING_SESSION_ID })],
+    ]),
+  );
+  const narrowProjection = buildProjection(
+    new Map([
+      [CHILD_SESSION_ID, narrowChild],
+      [CHILD_TRAILING_SESSION_ID, narrowTrailingChild],
+    ]),
+  );
+  assert.deepEqual(narrowProjection, fullProjection, "窄读的 running/ended 必须与全量读逐值一致");
+  assert.equal(narrowProjection.ended.length, 2, "夹具：两个子会话都已终态");
+  assert.equal(
+    narrowProjection.ended.find((item) => item.childSessionId === CHILD_SESSION_ID)?.summary,
+    "完成：改了 3 个文件",
+    "summary 来自最后一条 assistant 的正文（窄读不能把这份正文丢掉）",
+  );
+});

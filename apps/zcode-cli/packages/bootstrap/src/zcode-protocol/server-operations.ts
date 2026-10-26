@@ -120,6 +120,7 @@ import {
   collectSubagentChildSessionIds,
   paginateEndedSubagents,
   projectSessionSubagents,
+  readChildOutcomeMessages,
 } from "./subagent-session-query.js";
 import { runSessionModelConfigMutation } from "../zcode-protocol-v4/model-config-mutation.js";
 import type { SessionConfigSeed } from "../zcode-protocol-v4/product-projection.js";
@@ -1884,9 +1885,10 @@ export async function listSessionSubagents(
     childSessionIds.map(async (childSessionId) => {
       const childSession = await store.getSession(childSessionId as SessionId);
       if (!childSession || childSession.taskType !== "subagent_child") return null;
-      const childMessages = await store.messages({
-        sessionID: childSession.id,
-      });
+      // 窄读（Step 15）：只取最后一条 assistant 消息，`lastChildOutcome` 的全部输入就是它。
+      // 旧实现对每个 child 读全量 message+part（长会话 152 个 child ⇒ 2.3~3.6s），而这份
+      // 正文除了最后一条 assistant 之外没有任何消费者——冷开 mergeMs 的最大单项。
+      const childMessages = await readChildOutcomeMessages(store, childSession.id);
       const liveChild = context.sessions.get(childSessionId);
       const childProjection = liveChild
         ? await liveChild.app.runtime.getProjection().catch(() => undefined)

@@ -1975,6 +1975,14 @@ export function createConversationV4Gateway(
     // 是已完成正文权威，session_entry 只补 legacy goal，内存事件只补
     // 未持久 in-flight 和 queue/permission/control 等 ephemeral 状态。
     loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {
+      // 冷开 mergeMs 的分项读数（Step 15）：mergeMs 是整个宿主调用的墙钟，过去只知总数
+      // 不知构成，导致「全量事件重放很贵」这类推断无法证伪。只走 debug，不进 openPhases。
+      const loadMarks: Record<string, number> = {};
+      let markStartedAt = performance.now();
+      const markPhase = (name: string) => {
+        loadMarks[name] = Math.round(performance.now() - markStartedAt);
+        markStartedAt = performance.now();
+      };
       // dwf workflow actor / subagent 这类 detached live child 没有自己的
       // bootstrap record（事件经 ingestDetachedLiveSession 走父 record 的 sink 路由）。
       // context.sessions.get 取不到 record 时不能直接返回 synthesized:false——
@@ -1990,6 +1998,7 @@ export function createConversationV4Gateway(
       // 事件按 child sessionId 归档），因此 sourceEventSeq 仍是 child 的真实水位。
       // 代价：contextWindow 分母会按父 record 的当前模型解析而不是 actor 模型，纯展示层偏差。
       const record = await resolveConversationBackingRecord(context, sessionId);
+      markPhase("backingRecordMs");
       if (!record) {
         // Step 9：record 缺席**不再**是「读不到历史」的闸门——它只意味着没有内存侧 live
         // 事件、没有 artifact reader（view-only 骨架层 / 旧宿主）。返回空事件会把
@@ -2017,6 +2026,7 @@ export function createConversationV4Gateway(
             record.eventStore.getLatestSequenceNumber(sessionId as SessionId),
           ])
         : [[], 0];
+      markPhase("memoryEventsMs");
       // workflow run 的冷回放：journal 回放出的进度
       // 事件前置到内存事件之前——cold merge 已把该类型归为 memory-only 权威（保序进 supplements），
       // 投影经同一个 reducer 归约，`workflowRuns` 因此在重启前后一致。
@@ -2024,6 +2034,7 @@ export function createConversationV4Gateway(
         ? await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents)
         : [];
       const events = replayed.length === 0 ? liveEvents : [...replayed, ...liveEvents];
+      markPhase("workflowReplayMs");
       const store = context.deps.sessionStore;
       const source = await loadPersistedConversationMaterialization({
         memoryEvents: events,
@@ -2080,6 +2091,7 @@ export function createConversationV4Gateway(
             }
           : {}),
       });
+      markPhase("materializationMs");
       if (source.coldWindowFallback) {
         // 静默退全量在现象上就是「窗口化没生效」，与「清单与索引不同步」无法区分——
         // 两种情形都在这里留痕（reason=limitBeforeMissed 就是清单与索引不同步）。
@@ -2128,6 +2140,7 @@ export function createConversationV4Gateway(
       const initialModelKey = modelBaseline
         ? hydrationModelKeyOfSelection(modelBaseline.modelSelection)
         : null;
+      markPhase("modelBaselineMs");
       // live ModelComplete.fileChanges 只存在于内存事件；cold merge 以持久
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
       // workspace checkpoint + artifact 才是跨进程持久事实，这里按 user messageId
@@ -2137,11 +2150,17 @@ export function createConversationV4Gateway(
       const fileChangeSummariesByMessageId = record
         ? await buildColdFileChangeSummaries({
             events: source.memoryEvents,
-            // 窗口化只裁正文，不裁索引：文件摘要必须按**整条** active 分支的 messageId
-            // 过滤（`windowPlan.activeMessageIds`），否则窗口外那一轮的文件摘要会丢。
-            messageIds: windowPlan
-              ? windowPlan.activeMessageIds.map((messageId) => String(messageId))
-              : source.messages.map((message) => String(message.info.id)),
+            // 只给**本次真的会被合成**的那些消息算摘要（Step 15）。
+            //
+            // 旧实现按整条 active 分支（窗口计划里的全序 messageId 列表，实测 2978 条 /
+            // 61 个带 workspace checkpoint 的 user message）过滤，于是窗口化首屏为窗口外的
+            // 轮次读了 685 个 artifact（29.5MB），而摘要的**唯一消费者**是
+            // transcript-hydration 合成 ModelComplete 时的
+            // `fileChangeSummariesByMessageId.get(userMessageId)`
+            // ——它只会查 `source.messages` 里的消息。窗口外的轮次本次不合成任何行，
+            // 那 685 次读没有任何出口（翻页也不读摘要，见 `materializeRowPage` 的已知代价）。
+            // 全量物化时 `source.messages` 就是整条 active 分支，与旧口径逐值一致。
+            messageIds: source.messages.map((message) => String(message.info.id)),
             readArtifact: async (snapshotRef) =>
               (await record.app.readToolResultArtifact(snapshotRef)).content,
             onArtifactError: (messageId, error) =>
@@ -2154,6 +2173,7 @@ export function createConversationV4Gateway(
               }),
           })
         : undefined;
+      markPhase("fileChangeSummariesMs");
       // 冷恢复 transcript 不保存模型能力，旧 hydration 自行填 20 万；
       // provider registry 已在 resume 前同步完成，应按恢复/退避后的当前模型精确取值。
       // view-only shell 的「当前模型」还是默认值：用它算分母比「暂时没有」更误导
@@ -2167,6 +2187,7 @@ export function createConversationV4Gateway(
               contextWindow,
             )
           : null;
+      markPhase("usageSeedMs");
       const merged = mergeColdConversationEvents({
         contextWindow,
         fileChangeSummariesByMessageId,
@@ -2219,6 +2240,20 @@ export function createConversationV4Gateway(
         { sessionId, endedLimit: 1 },
         persistedMessages,
       );
+      markPhase("subagentsMs");
+      log?.debug("v4 cold load breakdown", {
+        event: "zcode_protocol.v4.cold_load_breakdown",
+        module: "bootstrap.zcode_protocol",
+        phase: "loadPersistedEvents",
+        sessionId,
+        fullMaterialization: loadOptions?.fullMaterialization === true,
+        memoryEvents: events.length,
+        mergedEvents: merged.events.length,
+        windowed: windowPlan !== undefined,
+        materializedMessages: source.messages.length,
+        ...(windowPlan ? { activeMessageIds: windowPlan.activeMessageIds.length } : {}),
+        ...loadMarks,
+      });
       return {
         events: merged.events,
         // 与合成事件共用本次查询结果；不在后续回填阶段重新读取另一份容量。

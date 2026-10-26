@@ -1599,6 +1599,36 @@ test("K7: 激活未就绪时首屏收口只登记不排（deferred），激活�
   }
 });
 
+test("K8: 文件摘要只按本次物化的消息过滤——不得再按整条 active 分支白读 artifact", () => {
+  // Step 14 实测：窗口化首屏按整条 active 分支（2978 条 / 61 个带 checkpoint 的 user message）
+  // 过滤，于是为窗口外的轮次读了 685 个 artifact（29.5MB）；而这些摘要的唯一消费者是
+  // transcript-hydration 合成 ModelComplete 时的按 messageId 查表，窗口外的轮次本次不合成任何行。
+  const summariesAt = bridgeSource.indexOf("const fileChangeSummariesByMessageId = record");
+  assert.ok(summariesAt > 0, "bridge 的摘要构造块必须存在");
+  const summariesBody = bridgeSource.slice(
+    summariesAt,
+    bridgeSource.indexOf('markPhase("fileChangeSummariesMs")', summariesAt),
+  );
+  assert.ok(
+    summariesBody.includes("messageIds: source.messages.map((message) => String(message.info.id))"),
+    "摘要的 messageIds 必须是本次真的会被合成的 source.messages",
+  );
+  assert.ok(
+    !summariesBody.includes("windowPlan.activeMessageIds"),
+    "不得退回整条 active 分支过滤（那 685 次读没有任何出口）",
+  );
+  // 上游注释里点明「窗口外那一轮的文件摘要会丢」的旧理由已经失效：窗口外的轮次本次
+  // 根本不合成行。翻页也不读摘要（materializeRowPage 的已知代价），这一点另有锚点（D1）。
+  const plannerSource = readFileSync(
+    new URL("../src/zcode-protocol-v4/session-row-manifest.ts", import.meta.url),
+    "utf8",
+  );
+  assert.ok(
+    !plannerSource.includes("buildColdFileChangeSummaries 仍要按整条分支过滤"),
+    "窗口计划的注释不得再声称摘要要按整条分支过滤（那是被推翻的口径）",
+  );
+});
+
 // ── L: UI 侧（Step 10）──────────────────────────────────────────────────────
 //
 // UI 没有单测基建（packages/ui 只有 lint），因此这里锁「语义形状」而不是快照：
