@@ -323,9 +323,13 @@ test("B2: 需要 record 的普通命令一律 require-runtime（不误升级成�
 function gatewayFixture({ resumeRegistersRecord = true } = {}) {
   const calls = { resume: 0, executed: [], errors: [] };
   let live = false;
+  // Step 9 起「record 在册」与「runtime 在跑」是两个事实：view-only shell 只建 record。
+  // 默认让二者同步（旧口径），需要暴露缝的用例用 setRuntimeActive 单独拧。
+  let runtimeActive = null;
   let resumeBehaviour = () => "resumed";
   const host = {
     sessionExists: () => live,
+    isSessionRuntimeActive: () => (runtimeActive === null ? live : runtimeActive),
     emitWireFrame: () => {},
     executeCommand: async (envelope) => {
       calls.executed.push(envelope.type);
@@ -336,6 +340,7 @@ function gatewayFixture({ resumeRegistersRecord = true } = {}) {
       const outcome = resumeBehaviour();
       if (outcome === "throw") throw new Error("resume boom");
       if (resumeRegistersRecord) live = true;
+      runtimeActive = true;
       return { status: "resumed", persistedMessages: [] };
     },
     loadPersistedEvents: async () => ({
@@ -354,6 +359,9 @@ function gatewayFixture({ resumeRegistersRecord = true } = {}) {
     calls,
     setLive: (value) => {
       live = value;
+    },
+    setRuntimeActive: (value) => {
+      runtimeActive = value;
     },
     setResumeBehaviour: (next) => {
       resumeBehaviour = next;
@@ -550,8 +558,57 @@ test("D3: record 之外的两条事实——一次成功激活让 runtimeReady �
   }
 });
 
-// ── E/F: 源码守卫（IS4 唯一判定点 + IS3 激活触发点位置）─────────────────────
+test("D4: record 在册但 runtime 没跑（view-only shell）不得判成就绪——Step 9 的 blocking 前置", async () => {
+  // 这是 Step 8 注释里那条「必须在接 shell 之前修掉」的缝：`isRuntimeReady` 过去以
+  // 「record 在册 ⇒ live ⇒ 就绪」短路。接上 shell 之后 record 一定在册，而 runtime 没起，
+  // 如果还短路就会：①conversation/runtimeReady 说谎；②send 类命令不去激活，直接撞上
+  // 一个没有 runtime 的 record（幽灵 runtime 的入口）。
+  const { host, calls, setLive, setRuntimeActive } = gatewayFixture();
+  setLive(true); // record 已在册（shell 物化的结果）
+  setRuntimeActive(false); // 但 app 没有 resume
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    const ready = await gateway.runtimeReady({ sessionId: SESSION_ID });
+    assert.equal(ready.runtimeReady, false, "record 在册 ≠ runtime 就绪");
+    assert.equal(ready.runtimeReadyMs, null, "没激活过就没有本体耗时（缺席 ≠ 0）");
 
+    const rejected = await gateway.handleCommand(commandEnvelope("stop", {}));
+    assert.equal(rejected.status, "rejected");
+    assert.equal(rejected.reasonCode, "runtimeNotReady", "view-only 先拒，让客户端重试");
+    assert.equal(calls.resume, 0, "非 send 类不得顺手激活");
+
+    // send 类命令是唯一激活入口：它必须把 shell 升到 runtime-ready。
+    const ack = await gateway.handleCommand(commandEnvelope("sendText", { text: "继续" }));
+    assert.equal(ack.status, "accepted", "send 类必须当场激活而不是被门拒");
+    assert.equal(calls.resume, 1);
+    const after = await gateway.runtimeReady({ sessionId: SESSION_ID });
+    assert.equal(after.runtimeReady, true, "激活成功后结论必须落到集合上");
+    assert.equal(typeof after.runtimeReadyMs, "number");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("D5: disposeSession 清掉激活结论——重建出的 shell 不能继承上一条 record 的就绪事实", async () => {
+  const { host, calls, setLive, setRuntimeActive } = gatewayFixture();
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.handleCommand(commandEnvelope("sendText", { text: "跑一轮" }));
+    assert.equal(calls.resume, 1);
+    assert.equal((await gateway.runtimeReady({ sessionId: SESSION_ID })).runtimeReady, true);
+
+    // 会话被关掉 → 再以 view-only shell 的形态回来（record 在册、runtime 没起）。
+    gateway.disposeSession(SESSION_ID);
+    setLive(true);
+    setRuntimeActive(false);
+    const ready = await gateway.runtimeReady({ sessionId: SESSION_ID });
+    assert.equal(ready.runtimeReady, false, "结论必须随会话销毁一起清，否则 shell 冒充就绪");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+// ── E/F: 源码守卫（IS4 唯一判定点 + IS3 激活触发点位置）─────────────────────
 const gatewaySource = readFileSync(
   new URL("../src/zcode-protocol-v4/v4-gateway.ts", import.meta.url),
   "utf8",
@@ -573,15 +630,54 @@ test("E1: host.sessionExists 只有 hasHostRecord 一个调用点（IS4/T-SL12�
     "private conversationState(",
     "private conversationViewState(",
     "private isRuntimeReady(",
+    "private hostRuntimeActive(",
     "viewReadySessions = new Set",
     "runtimeReadyFlights = new Map",
     "viewReadyFlights = new Map",
+    // Step 9：激活结论集合。它是 `isRuntimeReady` 的唯一数据源，缺了这条守卫
+    // 「record 在册 ⇒ 就绪」的短路会悄悄回来（D4 只在行为上抓）。
+    "runtimeReadySessions = new Set",
+    "isSessionRuntimeActive?(",
   ]) {
     assert.ok(gatewaySource.includes(needle), `缺少 ${needle}`);
   }
   assert.ok(
     !/this\.readyFlights\b/.test(gatewaySource),
     "旧的单表 readyFlights 不得残留（双水位必须真的拆开）",
+  );
+
+  // `isRuntimeReady` 的函数体不得直接读 record：结论只来自激活集合 + 宿主活性回填。
+  const readyAt = gatewaySource.indexOf("private isRuntimeReady(");
+  const nextMemberAt = gatewaySource.indexOf("private markViewReady(");
+  assert.ok(readyAt > 0 && nextMemberAt > readyAt, "isRuntimeReady 必须是一段可检视的函数体");
+  const readyBody = gatewaySource.slice(readyAt, nextMemberAt);
+  assert.ok(
+    readyBody.includes("runtimeReadySessions.has"),
+    "isRuntimeReady 必须读激活结论集合",
+  );
+  assert.ok(
+    !readyBody.includes("hasHostRecord("),
+    "isRuntimeReady 不得以「record 在册」短路（Step 9 的 blocking 前置）",
+  );
+});
+
+test("E2: 宿主活性探针是「runtime 在跑」的唯一原始判定点（record 只回答在不在册）", () => {
+  // 两个问题分开问：`hasHostRecord` → record；`hostRuntimeActive` → runtime。
+  const hostRecordAt = gatewaySource.indexOf("private hasHostRecord(");
+  const runtimeActiveAt = gatewaySource.indexOf("private hostRuntimeActive(");
+  assert.ok(hostRecordAt > 0 && runtimeActiveAt > hostRecordAt);
+  const runtimeActiveBody = gatewaySource.slice(
+    runtimeActiveAt,
+    gatewaySource.indexOf("private conversationState(", runtimeActiveAt),
+  );
+  assert.ok(
+    runtimeActiveBody.includes("this.host.isSessionRuntimeActive"),
+    "活性探针必须读宿主能力，不得退化成 record 判断",
+  );
+  assert.equal(
+    gatewaySource.split("this.host.isSessionRuntimeActive").length - 1,
+    1,
+    "探针调用点只此一处（散落直判会得到两个不同的「live」）",
   );
 });
 

@@ -110,6 +110,15 @@ export interface ZCodeProtocolSessionRecord {
   restoreWarning?: { message: string; type: string };
   /** 冷恢复候选只供初始投影；新的选模事件立即清除，不能替代 Runtime 执行绑定。 */
   restoredModelSelection?: ModelSelection;
+  /**
+   * **view-only shell**：record 已物化（store 读 session + 首屏种子 + `createRecord`）但
+   * runtime **没有** resume。
+   *
+   * Step 9 起 `sessions` 在册不再等于「runtime 跑起来了」：唯一区分点就是这里，读它的地方
+   * 是宿主探针 `V4GatewayHost.isSessionRuntimeActive`。`activateRuntime` 成功后必须清掉
+   * （否则 ghost：runtime 已跑却被判成 view-only，send 类命令会被门拒）。
+   */
+  runtimeViewOnlyShell?: boolean;
 }
 
 export interface ZCodeProtocolClientRequestOptions {

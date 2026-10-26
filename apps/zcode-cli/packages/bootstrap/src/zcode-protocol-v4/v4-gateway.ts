@@ -256,6 +256,18 @@ export interface V4GatewayHost {
   /** 会话是否在宿主注册表中活跃（inbox 的 sessionNotFound 裁决依据）。 */
   sessionExists(sessionId: string): boolean;
   /**
+   * 该会话的 **runtime 是否正在跑**（IS4 / Step 9）。
+   *
+   * 这是与 {@link sessionExists} **不同**的问题：`materializeSessionShell` 会
+   * `createRecord` 但不 resume，于是 record 在册而 runtime 没起来。「会话算不算 live」与
+   * 「runtime 是否就绪」都必须读这里——读 record 会让 view-only 会话误报就绪，send 类命令
+   * 随即撞上一个没起 runtime 的 record（幽灵 runtime 的入口）。
+   *
+   * 未实现（旧宿主 / 测试桩）→ gateway 退回「record 在册」：那些宿主没有 view-only shell
+   * 路径，两种口径等价。
+   */
+  isSessionRuntimeActive?(sessionId: string): boolean;
+  /**
    * V4 冷恢复钩子。gateway 用同一个 READY promise 包住 runtime activation 与 projection
    * hydration；宿主只负责恢复 record。
    */
@@ -939,6 +951,18 @@ export class ConversationV4Gateway {
    * 个错误，重试语义由调用方决定）。
    */
   private readonly runtimeReadyFlights = new Map<string, RuntimeReadyFlight>();
+  /**
+   * 「runtime 已就绪」的**激活结论**集合（IS3 / Step 9）。
+   *
+   * 写入点只有两个：①本进程一次成功的 `coldResume.ensureResumed`（激活本体）；
+   * ②宿主报告 runtime 正在跑（热会话 / 新建会话 / 别处 resume 过的会话）时回填。
+   * 读取点只有 `isRuntimeReady`。
+   *
+   * **不得**用「record 在册」代替它（Step 9 的退化形态）：`materializeSessionShell` 也建
+   * record，那个短路会让 view-only 会话误报 `runtimeReady:true`——`conversation/runtimeReady`
+   * 说谎只是症状，真正的代价是 send 类命令不再去激活、直接撞上一个没起 runtime 的 record。
+   */
+  private readonly runtimeReadySessions = new Set<string>();
   /**
    * 视图已就绪的会话（IS4 的 viewOnly 半边）。
    *
@@ -3729,6 +3753,9 @@ export class ConversationV4Gateway {
     this.viewReadyFlights.delete(sessionId);
     this.runtimeReadyFlights.delete(sessionId);
     this.viewReadySessions.delete(sessionId);
+    // 激活结论同样不能留下：会话被关掉之后「runtime 就绪」不再是事实，下一次冷开必须
+    // 重新判（否则重建出的 view-only shell 会继承上一条 record 的就绪结论）。
+    this.runtimeReadySessions.delete(sessionId);
     this.rawSequenceStates.delete(sessionId);
     if (options.clearCommandInbox) this.inbox.clearSession(sessionId);
     this.telemetryNormalizer.clearSession(sessionId);
@@ -3789,6 +3816,7 @@ export class ConversationV4Gateway {
     this.viewReadyFlights.clear();
     this.runtimeReadyFlights.clear();
     this.viewReadySessions.clear();
+    this.runtimeReadySessions.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -3938,6 +3966,8 @@ export class ConversationV4Gateway {
     // 已经是 live runtime 的会话（热切换 / detached live child）：不重复 resume。
     // `runtimeActivationMs` 保持缺席（缺席 ≠ 0：本进程没观测到一次激活）。
     if (this.conversationState(sessionId) === "live") {
+      // 这也是一条激活结论：runtime 早在别处起来了，本进程不需要再激活一次。
+      this.runtimeReadySessions.add(sessionId);
       return Promise.resolve(undefined);
     }
     const activationStartedAt = performance.now();
@@ -3951,6 +3981,7 @@ export class ConversationV4Gateway {
           workspace,
         );
         flight.activated = true;
+        this.runtimeReadySessions.add(sessionId);
         this.runtimeActivationMs.set(
           sessionId,
           Math.max(0, Math.round(performance.now() - activationStartedAt)),
@@ -4450,16 +4481,37 @@ export class ConversationV4Gateway {
   }
 
   /**
+   * 宿主侧的**「runtime 正在跑」**事实（IS4 / Step 9 的唯一原始活性判定点）。
+   *
+   * 与 `hasHostRecord` 是两个问题：Step 9 的 view-only shell 也 `createRecord`，record 在册
+   * 而 runtime 没起来。**旧宿主 / 测试桩**没有 `isSessionRuntimeActive` 探针时退回
+   * `hasHostRecord`——那些宿主没有 shell 路径，两种口径等价（这是刻意的兼容降级，不是漏判）。
+   */
+  private hostRuntimeActive(sessionId: string): boolean {
+    const probe = this.host.isSessionRuntimeActive;
+    if (!probe) return this.hasHostRecord(sessionId);
+    try {
+      return probe.call(this.host, sessionId) === true;
+    } catch (error) {
+      // 探针坏了不得让门禁按「已就绪」放行（安全方向是未就绪）。
+      this.host.onError?.("v4.runtime.activeProbe", error, { sessionId });
+      return false;
+    }
+  }
+
+  /**
    * 会话的 **live / notLive** 二态（IS4 的同步半边）。
    *
    * 运行中 subagent 没有独立 bootstrap record，但 raw child 事件会先建 publisher——
-   * `detachedLiveSessions` 与「record 在册」同属 live，退化成 notLive 会把一条正在跑的 child
-   * 再 cold resume 成第二个 runtime。
+   * `detachedLiveSessions` 与「runtime 正在跑」同属 live，退化成 notLive 会把一条正在跑的
+   * child 再 cold resume 成第二个 runtime。
+   *
+   * **不读 record**（Step 9 起）：view-only shell 有 record 但没有 runtime，把它判成 live 会让
+   * 预激活与激活入口一起早退（首屏永不自动激活）。
    */
   private conversationState(sessionId: string): "live" | "notLive" {
-    return this.hasHostRecord(sessionId) || this.detachedLiveSessions.has(sessionId)
-      ? "live"
-      : "notLive";
+    if (this.detachedLiveSessions.has(sessionId)) return "live";
+    return this.hostRuntimeActive(sessionId) ? "live" : "notLive";
   }
 
   /**
@@ -4478,18 +4530,22 @@ export class ConversationV4Gateway {
   /**
    * runtime 是否**已就绪**（≠ record 是否在册）。
    *
-   * 两个来源都要看：live 判定（热会话 / 新建会话 / detached child 从来不会有 flight）+
-   * 本进程内一次成功激活的结论。
+   * 只读**激活结论**集合：①本进程一次成功的激活（`ensureRuntimeReady`）；
+   * ②宿主报告 runtime 正在跑时的回填（热会话 / 新建会话 / 别处 resume 过）。
    *
-   * ⚠ 本步「record 在册 ⇒ runtime 就绪」还成立，因为阶段 8 **没有**只建视图不激活的路径
-   * （`ensureViewReadyPublisher` 内部就等激活）。Step 9 的 `materializeSessionShell` 会
-   * `createRecord` 但不 resume，届时必须把这个 live 短路换成「激活结论」集合——否则
-   * view-only 会话会误报 true，正是幽灵 runtime 的入口。（已登记在 spec Step 8 落地说明，
-   * 是 Step 9 的 blocking 前置。）
+   * ⚠ **不得**退回「record 在册 ⇒ 就绪」的短路（Step 8 的临时口径）：Step 9 的
+   * `materializeSessionShell` 会 `createRecord` 但不 resume，那条短路会让 view-only 会话
+   * 误报 true，正是幽灵 runtime 的入口。回归锚点：D3（record 不在册仍能判出 ready）+ D4
+   * （record 在册但 runtime 没跑必须判 false）。
    */
   private isRuntimeReady(sessionId: string): boolean {
-    if (this.runtimeReadyFlights.get(sessionId)?.activated === true) return true;
-    return this.conversationState(sessionId) === "live";
+    if (this.runtimeReadySessions.has(sessionId)) return true;
+    // 回填：live runtime 本身就是「已就绪」的结论，写进集合供后续读取（也避免每次再问宿主）。
+    if (this.conversationState(sessionId) === "live") {
+      this.runtimeReadySessions.add(sessionId);
+      return true;
+    }
+    return false;
   }
 
   /** 视图水化的成功收口：`hydratedSessions`（防双算）与 `viewReadySessions`（IS4）同点登记。 */

@@ -1458,6 +1458,13 @@ export function createConversationV4Gateway(
   return new ConversationV4Gateway({
     cliVersion: context.deps.version,
     sessionExists: (sessionId) => context.sessions.has(sessionId),
+    // IS4 / Step 9：record 在册 ≠ runtime 在跑。view-only shell 由
+    // `materializeSessionShell` 建 record 但不 resume，只有这里能分辨——
+    // gateway 的 live 判定与 `runtimeReady` 都读它（读 record 会让 view-only 误报就绪）。
+    isSessionRuntimeActive: (sessionId) => {
+      const record = context.sessions.get(sessionId);
+      return record !== undefined && record.runtimeViewOnlyShell !== true;
+    },
     onDebug: (message) => log?.debug(message),
     onTargetCompleted: (sessionId) => {
       const record = context.sessions.get(sessionId);
