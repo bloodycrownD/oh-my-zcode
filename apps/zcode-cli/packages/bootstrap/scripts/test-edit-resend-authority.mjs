@@ -138,8 +138,9 @@ const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
 );
 // forkAssistant（F1）：与 edit/retry 分文件、不参与 rewind→start 事务，handler 级零覆盖。
 const { forkAssistantHandlers } = await import(
-  pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-assistant.ts"))
-    .href
+  pathToFileURL(
+    join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-assistant.ts"),
+  ).href
 );
 // 行目标过期的唯一裁决点（fork/edit/retry 共用）：用例要按**类**断言，而不是只比字符串。
 const { V4RowTargetStaleError } = await import(
@@ -335,6 +336,8 @@ function createLedger() {
 /** 真实 runtime 形状的可控宿主：投影走真实 EventReducer，落账走真实 appendEvent。 */
 function createRuntime({ ledger }) {
   const warnings = [];
+  const errors = [];
+  const deferredHistoryCleared = [];
   const runtime = {
     branchGeneration: 0,
     eventReducer: new EventReducer(),
@@ -342,6 +345,7 @@ function createRuntime({ ledger }) {
     eventStore: new InMemorySessionEventStore({ retention: "unbounded" }),
     logger: {
       debug: () => undefined,
+      error: (message, fields) => errors.push({ fields, message }),
       info: () => undefined,
       warn: (message, fields) => warnings.push({ fields, message }),
     },
@@ -355,6 +359,12 @@ function createRuntime({ ledger }) {
     sessionId: SESSION_ID,
     sessionStore: ledger.port,
     warnings,
+    errors,
+    deferredHistoryCleared,
+    // spec C（懒历史）在 rewind 提交后必须丢掉「已 defer 水化」的标记：否则下一次发送
+    // 会以为历史还在、拿到被截断前的旧历史。真实 runtime 上这是
+    // `core/src/runtime/methods/history-hydration.ts` 的成员，这里是同一份契约的桩。
+    clearDeferredHistoryHydration: () => deferredHistoryCleared.push(true),
     appendEvent,
     completeExternalQueueDrain,
     createEvent,
@@ -566,7 +576,10 @@ function promotionHarness(context, queueItem, options = {}) {
     getSessionInputForExecution: (sessionId, queueItemId) =>
       options.authority
         ? options.authority({ id: queueItemId, sessionID: sessionId })
-        : context.ledger.port.getSessionInputForExecution({ id: queueItemId, sessionID: sessionId }),
+        : context.ledger.port.getSessionInputForExecution({
+            id: queueItemId,
+            sessionID: sessionId,
+          }),
     logger: {
       info: () => undefined,
       warn: (message, fields) => calls.warnings.push({ fields, message }),
@@ -1276,10 +1289,18 @@ test("F2 排除集的值：edit 重发只排除自持那一行，被截断轮的
     [],
     "对自身 id 的任何 settle 都算自伤",
   );
-  assert.equal(context.ledger.rows.get(F2_SELF_ID).status, "admitted", "start 之前必须仍是 admitted");
+  assert.equal(
+    context.ledger.rows.get(F2_SELF_ID).status,
+    "admitted",
+    "start 之前必须仍是 admitted",
+  );
   // ⑤ 后果不是推测：紧随其后的 start 能读到执行权威（I1），且发的是新文本。
   //    先钉「跑的是真原语」：它的提交点 setRevert 必须真的落过一次。
-  assert.equal(calls.reverts.length, 1, "真原语的提交点（setRevert）确实执行过——不是 stub 演出来的");
+  assert.equal(
+    calls.reverts.length,
+    1,
+    "真原语的提交点（setRevert）确实执行过——不是 stub 演出来的",
+  );
   const authority = await context.ledger.port.getSessionInputForExecution({
     id: F2_SELF_ID,
     sessionID: SESSION_ID,
@@ -1341,7 +1362,11 @@ test("F2 多 id 形态：一条 command 结构上只有一行 session_input（�
   const rows = await store.listSessionInputs({ sessionID: SESSION_ID });
   assert.equal(rows.length, 1, "同 commandId 的重复写入是 upsert —— 一条 command 只有一行");
   assert.equal(rows[0].id, rowId);
-  assert.equal(rows[0].delivery, "queue", "后写的投递事实覆盖前一条（整 payload 覆盖，不是 merge）");
+  assert.equal(
+    rows[0].delivery,
+    "queue",
+    "后写的投递事实覆盖前一条（整 payload 覆盖，不是 merge）",
+  );
   // 排除集若真有多 id 需求，唯一可能来源是「一行 command 派生多行账本」；上面证明不存在，
   // 所以 F2 主用例的 `deepEqual([自持 id])` 就是完整断言，不需要为多 id 再编一份夹具。
 });
@@ -1950,10 +1975,15 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
         },
       ],
     };
-    const calls = { reverts: [], events: [] };
+    const calls = { reverts: [], events: [], deferredHistoryCleared: 0 };
     const runtime = {
       artifactStore: undefined,
       branchGeneration: 0,
+      // spec C（懒历史）：rewind 提交后必须丢掉「已 defer 水化」的标记。真实成员在
+      // `core/src/runtime/methods/history-hydration.ts`；这里计数以便断言它真的被调到。
+      clearDeferredHistoryHydration: () => {
+        calls.deferredHistoryCleared += 1;
+      },
       createEvent: (type, payload, trace) =>
         createSessionEvent(type, SESSION_ID, payload, { traceId: trace.traceId }),
       // 故意在 RewindTriggered 上抛错 = 「setRevert 之后失败」的最小真实窗口
@@ -1968,7 +1998,12 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
         return event;
       },
       injectTargetStateIntoMessageHistory: () => undefined,
-      logger: { debug: () => undefined, error: () => undefined, info: () => undefined, warn: () => undefined },
+      logger: {
+        debug: () => undefined,
+        error: () => undefined,
+        info: () => undefined,
+        warn: () => undefined,
+      },
       messageHistory: {
         addAttachment: () => undefined,
         addEntries: () => undefined,
@@ -2013,6 +2048,14 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
   });
   assert.equal(applied.keptMessageCount, 0);
   assert.equal(ok.calls.reverts.length, 1, "正向对照：setRevert 已落盘");
+  // spec C（懒历史）的交叉不变式：截断已落盘之后，「已 defer 水化」标记必须被丢掉。
+  // 否则下一次发送会认为历史仍在内存里、拿到的是截断前的旧历史——症状与「编辑后发旧消息」
+  // 一模一样，但根因在懒历史侧。变异探测：删掉 rewind-message.ts 里那一行即红。
+  assert.equal(
+    ok.calls.deferredHistoryCleared,
+    1,
+    "rewind 提交后必须清掉 lazy-history 的 defer 标记（否则下次发送读回截断前历史）",
+  );
 
   const failing = makeRuntime({ failAppend: true });
   let failure;
@@ -2029,7 +2072,11 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
     },
   );
   // 变异探测：去掉 rewind-message.ts 里的 try/catch（或把类型化错误换回原错），本条即红。
-  assert.equal(isConversationRewindCommittedError(failure), true, "必须是带 committed 事实的类型化错误");
+  assert.equal(
+    isConversationRewindCommittedError(failure),
+    true,
+    "必须是带 committed 事实的类型化错误",
+  );
   assert.equal(failure.committed, true);
   assert.equal(failing.calls.reverts.length, 1, "提交点是 setRevert —— 它确实已经发生");
 
@@ -2524,7 +2571,11 @@ test("T-DA4（cr-func P2-5）edit 与 retry 的投递态判据逐条同答", () 
   assert.equal(resolveRetryDelivery(ackFor("retryTurn", { status: "duplicate" })), "queue");
   // ③ result.type 段：两条入口不得互读对方的结果。
   assert.equal(resolveEditDelivery(ackFor("retryTurn")), null, "edit 不得读 retryTurn 结果");
-  assert.equal(resolveRetryDelivery(ackFor("editUserQuery")), null, "retry 不得读 editUserQuery 结果");
+  assert.equal(
+    resolveRetryDelivery(ackFor("editUserQuery")),
+    null,
+    "retry 不得读 editUserQuery 结果",
+  );
   assert.equal(
     resolveRetryDelivery(ackFor("retryTurn", { withResult: false })),
     null,
@@ -2709,7 +2760,11 @@ test("T-RT6 retryTurn 截断已提交后失败：draftText 带回原消息 + 「
     () => forkEditRetryHandlers.retryTurn(harness.host, harness.envelope),
     (error) => {
       assert.ok(error instanceof V4EditCommittedFailureError, "retry 必须有与 edit 同形的失败出口");
-      assert.equal(error.draftText, "原始待重试的消息", "原消息必须回 composer（目标行已随截断消失）");
+      assert.equal(
+        error.draftText,
+        "原始待重试的消息",
+        "原消息必须回 composer（目标行已随截断消失）",
+      );
       assert.match(error.message, /历史已回退到目标轮/);
       return true;
     },
@@ -2737,7 +2792,11 @@ test("T-RT6 retryTurn rewind 前失败（未提交）：原样上行，不产生
   await assert.rejects(
     () => forkEditRetryHandlers.retryTurn(harness.host, harness.envelope),
     (error) => {
-      assert.equal(error instanceof V4EditCommittedFailureError, false, "未提交的失败不是 I4 的已提交失败");
+      assert.equal(
+        error instanceof V4EditCommittedFailureError,
+        false,
+        "未提交的失败不是 I4 的已提交失败",
+      );
       assert.equal(error.draftText, undefined);
       assert.equal(harness.state.revert, null, "什么都没提交");
       return true;
@@ -2819,7 +2878,11 @@ test("F1 非轮尾段：stable-target 拒绝必须上行成 guard.forkTargetNotS
     (error) => {
       // 变异：删掉 `if (!resolution.ok) throw ...` → 本次调用不再抛错（stub 会照常 fork），
       // 下面整条用例（含 calls.forks === 0）即红。
-      assert.equal(error.reasonCode, "guard.forkTargetNotStable", "原因码必须原样上行（客户端按它分流）");
+      assert.equal(
+        error.reasonCode,
+        "guard.forkTargetNotStable",
+        "原因码必须原样上行（客户端按它分流）",
+      );
       // 只钉「是本模块的 fork 目标拒绝」，不钉具体子类：将来换实现子类不该让本用例红，
       // 但 TypeError 之类的「能力缺失」必须红。
       assert.match(error.name, /^V4ForkTarget/, "必须是 fork 目标拒绝，不是 TypeError/能力缺失");
@@ -3016,7 +3079,11 @@ test("T-RW7 删空复位是幂等的：已放行的会话不重复写同值事�
     queueLengthAfterDelete: 0,
   });
   await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
-  assert.deepEqual(harness.calls.autoDrain, [], "现值已是放行 → 不得再写一条同值 QueueAutoDrainChanged");
+  assert.deepEqual(
+    harness.calls.autoDrain,
+    [],
+    "现值已是放行 → 不得再写一条同值 QueueAutoDrainChanged",
+  );
   assert.deepEqual(harness.calls.mutations, [], "没有翻转就没有 resumed 广播");
 });
 
@@ -3104,15 +3171,25 @@ test("T-RW7 bridge 读不到队列长度时不得回落 0（P2-1：回落 0 与�
     gatewaySource.match(/getQueueLength\([^)]*\): number \| undefined \{([\s\S]*?)\n  \}/u)?.[1] ??
     "";
   const autoDrainBody =
-    gatewaySource.match(/getQueueAutoDrain\([^)]*\): boolean \| undefined \{([\s\S]*?)\n  \}/u)?.[1] ??
-    "";
-  assert.notEqual(lengthBody, "", "getQueueLength 必须声明 number | undefined（读不到 = undefined）");
+    gatewaySource.match(
+      /getQueueAutoDrain\([^)]*\): boolean \| undefined \{([\s\S]*?)\n  \}/u,
+    )?.[1] ?? "";
+  assert.notEqual(
+    lengthBody,
+    "",
+    "getQueueLength 必须声明 number | undefined（读不到 = undefined）",
+  );
   assert.notEqual(autoDrainBody, "", "getQueueAutoDrain 必须声明 boolean | undefined");
   assert.doesNotMatch(lengthBody, /\?\?\s*0/u, "gateway 不许把 publisher 缺席伪造成空队列");
-  assert.doesNotMatch(autoDrainBody, /\?\?\s*true/u, "gateway 不许把 publisher 缺席伪造成「已放行」");
+  assert.doesNotMatch(
+    autoDrainBody,
+    /\?\?\s*true/u,
+    "gateway 不许把 publisher 缺席伪造成「已放行」",
+  );
 });
 
-test("T-RW7 当前位读不到时：结构事件不动暂停位，显式请求照常落地", async () => {  // 结构事件（delete）没有「当前位」事实：不写，也不假称已复位。
+test("T-RW7 当前位读不到时：结构事件不动暂停位，显式请求照常落地", async () => {
+  // 结构事件（delete）没有「当前位」事实：不写，也不假称已复位。
   const harness = createDeleteQueueItemHarness({ queueLengthAfterDelete: 0 });
   harness.host.getQueueAutoDrain = undefined;
   await queueHandlers.deleteQueueItem(harness.host, harness.envelope);
@@ -3264,7 +3341,11 @@ test("T-IA6 legacy「无 intent」账本行（真 sqlite）：仍可提升，不
     id: LEGACY_ID,
     sessionID: SESSION_ID,
   });
-  assert.equal(authority.state, "pending", "legacy 形状必须可执行（mutation：读侧改回一律 corrupt 即红）");
+  assert.equal(
+    authority.state,
+    "pending",
+    "legacy 形状必须可执行（mutation：读侧改回一律 corrupt 即红）",
+  );
   assert.deepEqual(authority.attachments, [], "账本从未记录附件 → 唯一可读答案是无附件");
 
   // 投影同事实：TurnSteerQueued 不带 intent → 队列项 attachments 也是 []。
@@ -3359,7 +3440,11 @@ test("P-CODE forkAssistant 行目标过期：原样上行 proto.staleTarget，�
         error instanceof V4RowTargetStaleError,
         `过期目标必须是过期目标错误，实际 ${error?.name}`,
       );
-      assert.equal(error.reasonCode, "proto.staleTarget", "proto.* 必须原样上行，不得归一成 guard.*");
+      assert.equal(
+        error.reasonCode,
+        "proto.staleTarget",
+        "proto.* 必须原样上行，不得归一成 guard.*",
+      );
       assert.match(error.message, /targetRowId 12/, "失败信息必须点明是哪一行");
       return true;
     },
