@@ -20,6 +20,34 @@ type ZCodeProtocolMessageHandler = (
 ) => Promise<ZCodeProtocolOutgoingMessage | undefined>;
 
 const PROTOCOL_EOF_DRAIN_MS = 100;
+/**
+ * 串行队列等待超过这个数就升到 `warn`：真机冷开的正常值是个位数毫秒，一旦越过它
+ * 就说明「请求到了、CLI 还在忙上一个」——冷开账单里那 800~1150ms 的可检索信号。
+ */
+const PROTOCOL_SLOW_QUEUE_WAIT_MS = 200;
+
+/**
+ * 请求的**三段**耗时打点（fix-c19）：这段曾经是冷开账单里的盲区。
+ *
+ * 真机读数显示 `uiViewReadyMs − openPhases.viewReadyMs` 有 800~1150ms 落在 CLI handler
+ * 开始之前，但没人知道它落在「renderer → host → stdio」、「stdio 到达 → handler 出队」
+ * 还是「handler 内部」——本类三者都拿得到：
+ *
+ *   - `receivedAt`：这一行**读进来**的墙钟（`onData` 的 dispatchLine）；
+ *   - `dispatchedAt`：这一行**真正进入 handler** 的墙钟（串行队列 `processing` 之后）；
+ *   - `queueWaitMs`：两者之差 —— 就是「请求到了、但 CLI 还在忙上一个请求」的那一段；
+ *   - `handlerMs`：handler 本体（含帧编码 + outbox take）；
+ *   - `respondedAt`：response 交给 stdout 的墙钟。
+ *
+ * 全部是 epoch 毫秒，因此可以和 renderer 侧的 `click.dispatchedAt` / ACK 到达时刻直接相减
+ * （同一台机器、同一个时钟），把 `click → ACK` 完整拆开。只走 debug、只在请求上打，
+ * 不进协议、不进 `openPhases`（IS8 的键集合不变）。
+ */
+interface ProtocolRequestTiming {
+  receivedAt: number;
+  dispatchedAt: number;
+  respondedAt: number;
+}
 
 interface ZCodeProtocolNdjsonConnectionOptions {
   signal?: AbortSignal;
@@ -155,6 +183,8 @@ export class ZCodeProtocolNdjsonConnection {
 
   private dispatchLine(line: string): void {
     if (this.terminal) return;
+    // 打点起点：这一行读进来的时刻（与 renderer 侧 click 同一时钟）。
+    const receivedAt = Date.now();
     const message = this.decodeLine(line);
     if (!message) {
       return;
@@ -163,7 +193,7 @@ export class ZCodeProtocolNdjsonConnection {
       // Agent 发出反向 request 前已同步登记 pending response。
       // 若 response 等待“最后一个排队请求开始”，后续普通请求会把等待点推到当前长请求之后，
       // 形成「当前请求等 response、response 等后续请求」的死锁。
-      void this.handleMessage(message).catch((error: unknown) => {
+      void this.handleMessage(message, receivedAt).catch((error: unknown) => {
         this.fail(error instanceof Error ? error : new Error(String(error)));
       });
       return;
@@ -172,7 +202,7 @@ export class ZCodeProtocolNdjsonConnection {
       // 停止/取消控制必须等它前面的普通请求真正进入 handler、建立 abort
       // controller，再越过该请求的异步执行；只延后一轮微任务会让控制请求提前成为空操作。
       void this.lastQueuedMessageStarted
-        .then(() => this.handleMessage(message))
+        .then(() => this.handleMessage(message, receivedAt))
         .catch((error: unknown) => {
           this.fail(error instanceof Error ? error : new Error(String(error)));
         });
@@ -185,7 +215,7 @@ export class ZCodeProtocolNdjsonConnection {
     this.lastQueuedMessageStarted = started;
     this.processing = this.processing
       .then(async () => {
-        const handling = this.handleMessage(message);
+        const handling = this.handleMessage(message, receivedAt);
         markStarted();
         await handling;
       })
@@ -232,8 +262,9 @@ export class ZCodeProtocolNdjsonConnection {
     );
   }
 
-  private async handleMessage(message: ZCodeProtocolMessage): Promise<void> {
+  private async handleMessage(message: ZCodeProtocolMessage, receivedAt: number): Promise<void> {
     if (this.terminal) return;
+    const dispatchedAt = Date.now();
     const response = await this.options.handleMessage(message);
     if (response) {
       // 确定性时序：先一次性 take 当前 request 的 outbox，再连续写 response
@@ -257,6 +288,40 @@ export class ZCodeProtocolNdjsonConnection {
       // Writable.write() 未同步抛错作为“进入本 connection-owned queue”的 admission；
       // 后续异步 EPIPE 会终结整个 connection epoch，旧 subscription 不会在新管道复用。
       if (!this.terminal) postResponseBatch.commit();
+    }
+    this.logRequestTiming(message, { dispatchedAt, receivedAt, respondedAt: Date.now() });
+  }
+
+  /**
+   * 每个**请求**一行三段耗时（见 `ProtocolRequestTiming`）。
+   *
+   * 只在请求上打（response / notification 不打），且只在 debug 级：这是开发机与真机
+   * 采样的诊断面，不进协议、不进 `openPhases`。`receivedAt` / `dispatchedAt` / `respondedAt`
+   * 是 epoch 毫秒，可与 renderer 侧的 click / ACK 时刻直接相减——冷开账单里那段
+   * 「handler 之前的 800~1150ms」只有靠这三段才分得开。
+   */
+  private logRequestTiming(
+    message: ZCodeProtocolMessage,
+    timing: Omit<ProtocolRequestTiming, never>,
+  ): void {
+    if (!("method" in message)) return;
+    const queueWaitMs = Math.max(0, timing.dispatchedAt - timing.receivedAt);
+    const handlerMs = Math.max(0, timing.respondedAt - timing.dispatchedAt);
+    const fields = {
+      event: "zcode_protocol.request.timing",
+      module: "bootstrap.zcode_protocol",
+      method: message.method,
+      requestId: String((message as { id?: unknown }).id ?? ""),
+      receivedAt: timing.receivedAt,
+      dispatchedAt: timing.dispatchedAt,
+      respondedAt: timing.respondedAt,
+      queueWaitMs,
+      handlerMs,
+    };
+    this.options.logger?.debug("ZCode Protocol request timing", fields);
+    // 冷开采样只需要一眼就能 grep 到的文本行（与 `v4 cold load breakdown` 同一习惯）。
+    if (queueWaitMs >= PROTOCOL_SLOW_QUEUE_WAIT_MS) {
+      this.options.logger?.warn("ZCode Protocol request waited in queue", fields);
     }
   }
 

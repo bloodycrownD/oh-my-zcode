@@ -9,6 +9,7 @@ import type {
   SessionId,
   SessionMessageIndexEntry,
   SessionStorePort,
+  SessionToolPartEntry,
 } from "@zcode/contracts";
 import { decodeMessageRow, decodePartRow, partCreatedAt } from "../codecs.js";
 import { encodeJson } from "../json.js";
@@ -428,6 +429,67 @@ export async function readActiveBranchTail(
   return messageRows.map((row) => ({
     info: decodeMessageRow(row),
     parts: partsByMessage.get(row.id) ?? [],
+  }));
+}
+
+/**
+ * **按 tool 名**取整条 active 分支的工具调用 part（fix-c19 的窄读）。
+ *
+ * 为什么不是 `messages()`：子会话候选（`Agent` / `Task` / `subagent` 三类 tool part）过去
+ * 由父会话**全量正文读**支撑（长会话 3012 message / 29MB，实测 ~490ms，占窗口化首屏
+ * mergeMs 的 87%），而它只消费这三类 part。
+ *
+ * 读法：`part` 表按 `session_id` 走索引，SQL 侧用 `json_extract(data, '$.tool')` 过滤——
+ * 只把命中的行交给 JS 解码（`data` 是整条 part 的 JSON，未命中的行一个字节都不解）。
+ * 顺序复刻 `messages()` 的 part 序（`message_id, sequence is null, sequence, time_created,
+ * id`）；给了 `activeMessageIds` 时改按**那份序**输出（分支序是调用方的权威序，DB 序不能替
+ * 它决定归属）。
+ *
+ * 不在这里做分支裁断：裁断只有 `selectActiveConversationBranchIds` 一份实现。
+ */
+export async function readActiveBranchToolParts(
+  db: DatabaseSync,
+  input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  },
+): Promise<SessionToolPartEntry[]> {
+  const toolNames = input.toolNames.filter((name) => name.length > 0);
+  if (toolNames.length === 0) return [];
+  const placeholders = placeholdersFor(toolNames.length);
+  const rows = db
+    .prepare(
+      `
+      select id, message_id, session_id, data, sequence, time_created
+      from part
+      where session_id = ?
+        and json_extract(data, '$.type') = 'tool'
+        and json_extract(data, '$.tool') in (${placeholders})
+      order by message_id, sequence is null, sequence, time_created, id
+      `,
+    )
+    .all(input.sessionID, ...toolNames) as unknown as PartRow[];
+
+  const active = input.activeMessageIds;
+  if (active === undefined) {
+    return rows.map((row) => ({
+      messageId: row.message_id as MessageId,
+      part: decodePartRow(row) as SessionToolPartEntry["part"],
+    }));
+  }
+  const positionById = new Map<string, number>();
+  active.forEach((messageId, index) => {
+    if (!positionById.has(messageId)) positionById.set(messageId, index);
+  });
+  // 不在 active 分支里的 part（revert 掉的那一支）直接丢；分支序由 positionById 决定。
+  const kept = rows.filter((row) => positionById.has(row.message_id));
+  kept.sort(
+    (left, right) => positionById.get(left.message_id)! - positionById.get(right.message_id)!,
+  );
+  return kept.map((row) => ({
+    messageId: row.message_id as MessageId,
+    part: decodePartRow(row) as SessionToolPartEntry["part"],
   }));
 }
 

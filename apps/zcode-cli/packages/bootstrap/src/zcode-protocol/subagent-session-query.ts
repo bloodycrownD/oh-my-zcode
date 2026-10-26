@@ -3,7 +3,9 @@ import {
   createSessionId,
   SessionEventType,
   selectActiveConversationBranch,
+  selectActiveConversationBranchIds,
   type BackgroundTaskInfo,
+  type MessageId,
   type MessageWithParts,
   type SessionEvent,
   type SessionId,
@@ -58,6 +60,11 @@ interface ProjectSessionSubagentsInput {
   childProjectionsById: ReadonlyMap<string, SessionProjection>;
   parentProjection?: SessionProjection;
   parentEvents?: readonly SessionEvent[];
+  /**
+   * 已经算好的候选（fix-c19 的窄读路径）。给出时**不再**从 `messages` 重算：窄读拿不到
+   * 正文，`messages` 会是空数组，重算会得到「没有子会话」。
+   */
+  candidates?: readonly SubagentCandidate[];
 }
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -214,21 +221,122 @@ function candidateFromToolPart(
   };
 }
 
+function candidatesFromToolParts(
+  parts: Iterable<ToolPart>,
+  relations: ReadonlyMap<string, SubagentEventRelation>,
+): SubagentCandidate[] {
+  const candidates = new Map<string, SubagentCandidate>();
+  for (const part of parts) {
+    const candidate = candidateFromToolPart(part, relations.get(part.callID));
+    if (candidate) candidates.set(candidate.childSessionId, candidate);
+  }
+  return [...candidates.values()];
+}
+
 function collectCandidates(
   session: SessionInfo,
   messages: readonly MessageWithParts[],
   parentEvents?: readonly SessionEvent[],
 ): SubagentCandidate[] {
-  const candidates = new Map<string, SubagentCandidate>();
   const relations = subagentEventRelations(parentEvents);
+  const parts: ToolPart[] = [];
   for (const message of activeBranchMessages(session, messages)) {
     for (const part of message.parts) {
       if (part.type !== "tool") continue;
-      const candidate = candidateFromToolPart(part, relations.get(part.callID));
-      if (candidate) candidates.set(candidate.childSessionId, candidate);
+      parts.push(part);
     }
   }
-  return [...candidates.values()];
+  return candidatesFromToolParts(parts, relations);
+}
+
+/**
+ * 子会话候选的**窄读**（fix-c19）：不读父会话全文，只读「Agent 类 tool part」。
+ *
+ * 旧实现 `collectCandidates(parentSession, await store.messages(...))` 为拿这几个候选读了
+ * 整条 active 分支（长会话 3012 message / 29MB 正文，实测 ~490ms，占窗口化首屏 mergeMs
+ * 的 87%）。候选的**全部输入**就是 `Agent` / `Task` / `subagent` 三类 tool part 的
+ * `state`（input / output / metadata）——正文一个字都不需要。
+ *
+ * 两段读：
+ *   ① `listSessionMessageIndex`（只读排序键，O(n) 但每行只有几列）+ 与全量路径**同一个**
+ *      裁断实现（`selectActiveConversationBranchIds`）得到 active id 序；
+ *   ② `readActiveBranchToolParts`（SQL 侧按 tool 名过滤，只解码命中的 part）。
+ *
+ * 端口缺席（旧宿主 / 内存 store）返回 `null`，调用方退回全量 `messages()`：窄读是优化，
+ * 不是语义前提（与 `readChildOutcomeMessages` 同一纪律）。
+ */
+export async function readSubagentCandidatesNarrow(
+  store: Pick<SessionStorePort, "readActiveBranchToolParts" | "listSessionMessageIndex">,
+  session: SessionInfo,
+  parentEvents?: readonly SessionEvent[],
+): Promise<SubagentCandidate[] | null> {
+  if (!store.readActiveBranchToolParts || !store.listSessionMessageIndex) return null;
+  const index = await store.listSessionMessageIndex({ sessionID: session.id });
+  const activeMessageIds = selectActiveConversationBranchIds(
+    index.map((entry) => String(entry.id)),
+    {
+      branchCutAfterMessageId: session.revert?.branchCutAfterMessageID,
+      rewindCreatedMessageId: session.revert?.createdMessageID,
+      rewindKeptMessageIds: session.revert?.keptMessageIDs,
+      rewindTargetMessageId: session.revert?.targetMessageID,
+    },
+  );
+  const entries = await store.readActiveBranchToolParts({
+    sessionID: session.id,
+    toolNames: [...SUBAGENT_TOOL_NAMES],
+    activeMessageIds: activeMessageIds as MessageId[],
+  });
+  return candidatesFromToolParts(
+    entries.map((entry) => entry.part),
+    subagentEventRelations(parentEvents),
+  );
+}
+
+/**
+ * 子会话候选的**唯一决策点**：先复用 resume 给的内存正文，再试窄读，最后才退全量。
+ *
+ * 抽出来是为了让「走哪条路」可被单测钉住（`listSessionSubagents` 的接线只是调用它）：
+ *   - `persisted`：resume 已经把正文读进内存（live 会话 / 有 historyMode:"full" 的旧宿主）；
+ *   - `narrow`：消息索引 + 按 tool 名的 part 读（view-only 首屏的主路径，省一次全文读）；
+ *   - `full`：端口缺席，退回 `messages()`（窄读是优化，不是语义前提）。
+ *
+ * `messages` 只在 `persisted` / `full` 下非空；窄读路径给空数组——调用方必须把
+ * `candidates` 一起交给 `projectSessionSubagents`，否则它会按空正文重算出「没有子会话」。
+ */
+export async function resolveSubagentCandidates(
+  store: Pick<
+    SessionStorePort,
+    "messages" | "readActiveBranchToolParts" | "listSessionMessageIndex"
+  >,
+  session: SessionInfo,
+  options: {
+    persistedMessages?: readonly MessageWithParts[];
+    parentEvents?: readonly SessionEvent[];
+  } = {},
+): Promise<{
+  candidates: readonly SubagentCandidate[];
+  messages: readonly MessageWithParts[];
+  source: "persisted" | "narrow" | "full";
+}> {
+  if (options.persistedMessages) {
+    return {
+      candidates: collectCandidates(session, options.persistedMessages, options.parentEvents),
+      messages: options.persistedMessages,
+      source: "persisted",
+    };
+  }
+  const narrow = await readSubagentCandidatesNarrow(store, session, options.parentEvents).catch(
+    () => null,
+  );
+  if (narrow !== null) {
+    return { candidates: narrow, messages: [], source: "narrow" };
+  }
+  const messages = await store.messages({ sessionID: session.id });
+  return {
+    candidates: collectCandidates(session, messages, options.parentEvents),
+    messages,
+    source: "full",
+  };
 }
 
 export function collectSubagentChildSessionIds(
@@ -239,6 +347,20 @@ export function collectSubagentChildSessionIds(
   return collectCandidates(session, messages, parentEvents).map(
     (candidate) => candidate.childSessionId,
   );
+}
+
+/**
+ * 候选本体（`childSessionId` 之外还带 title/agentId/part 等投影要用的字段）。
+ *
+ * 导出它是为了让窄读与全量读汇到**同一份**候选判定：`listSessionSubagents` 先算一次，
+ * 再交给 `projectSessionSubagents({ candidates })`，避免它按空 `messages` 重算出「没有子会话」。
+ */
+export function collectSubagentCandidates(
+  session: SessionInfo,
+  messages: readonly MessageWithParts[],
+  parentEvents?: readonly SessionEvent[],
+): SubagentCandidate[] {
+  return collectCandidates(session, messages, parentEvents);
 }
 
 function lastChildOutcome(messages: readonly MessageWithParts[] | undefined): {
@@ -419,11 +541,9 @@ export function projectSessionSubagents(
 ): SessionSubagentProjection {
   const running: ZCodeSessionRunningSubagent[] = [];
   const ended: ZCodeSessionEndedSubagent[] = [];
-  for (const candidate of collectCandidates(
-    input.parentSession,
-    input.messages,
-    input.parentEvents,
-  )) {
+  const candidates =
+    input.candidates ?? collectCandidates(input.parentSession, input.messages, input.parentEvents);
+  for (const candidate of candidates) {
     const childSession = input.childSessionsById.get(candidate.childSessionId);
     if (!childSession || childSession.taskType !== "subagent_child") continue;
     const childProjection = input.childProjectionsById.get(candidate.childSessionId);

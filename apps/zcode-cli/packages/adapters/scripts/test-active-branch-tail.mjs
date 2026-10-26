@@ -33,9 +33,10 @@ import { DatabaseSync } from "node:sqlite";
 const { SQLITE_MIGRATIONS } = await import(
   new URL("../src/storage/session-store/migrations.ts", import.meta.url).href
 );
-const { listSessionMessageIndex, messages, readActiveBranchTail } = await import(
-  new URL("../src/storage/session-store/repositories/messages.ts", import.meta.url).href
-);
+const { listSessionMessageIndex, messages, readActiveBranchTail, readActiveBranchToolParts } =
+  await import(
+    new URL("../src/storage/session-store/repositories/messages.ts", import.meta.url).href
+  );
 const { selectActiveConversationBranchIds } = await import(
   new URL("../../contracts/src/rewind/index.ts", import.meta.url).href
 );
@@ -476,5 +477,86 @@ test("E1: 5k 消息会话的读放大比（全量 messages() vs 尾窗 readActiv
       `ratio=${(fullMs / Math.max(windowMs, 0.001)).toFixed(1)}x`,
   );
   assert.ok(windowMs < fullMs, "只读 1.6% 正文不可能比全量读慢（环境异常时先怀疑夹具）");
+
+  // ③ 按 tool 名的窄读（fix-c19：子会话候选不再读父会话全文）——同一条「读放大」主线：
+  //    只解命中的 part，且分支序/内容与全量读过滤结果逐值一致。
+  const toolDb = seedBranchFixture(migratedDb());
+  insertToolPart(toolDb, { id: "t-a1", messageID: "m1", tool: "Task" });
+  insertToolPart(toolDb, { id: "t-a2", messageID: "m2", tool: "Agent" });
+  insertToolPart(toolDb, { id: "t-b1", messageID: "m4", tool: "Bash" });
+  insertToolPart(toolDb, { id: "t-a3", messageID: "m6", tool: "subagent" });
+
+  const toolFull = await messages(toolDb, { sessionID: SESSION });
+  const toolActiveIds = toolFull.map((message) => message.info.id);
+  const narrow = await readActiveBranchToolParts(toolDb, {
+    sessionID: SESSION,
+    toolNames: ["Agent", "Task", "subagent"],
+    activeMessageIds: toolActiveIds,
+  });
+  assert.deepEqual(
+    narrow.map((entry) => entry.part.callID),
+    ["call-t-a1", "call-t-a2", "call-t-a3"],
+    "只读 Agent 类 tool part（Bash 必须被 SQL 过滤掉），顺序 = active 分支序",
+  );
+  // 与「全量读 + 手工过滤」逐值一致（同一份 part 判定，不允许两套）。
+  const fullFiltered = toolFull.flatMap((message) =>
+    message.parts
+      .filter((part) => part.type === "tool" && ["Agent", "Task", "subagent"].includes(part.tool))
+      .map((part) => ({ messageId: message.info.id, part })),
+  );
+  assert.deepEqual(narrow, fullFiltered, "窄读结果必须与全量读过滤结果逐值相等");
+
+  // 分支裁断仍然只有一份实现：被裁掉的消息上的 Agent part 不进结果。
+  const cut = await readActiveBranchToolParts(toolDb, {
+    sessionID: SESSION,
+    toolNames: ["Agent", "Task", "subagent"],
+    activeMessageIds: ["m1", "m2"],
+  });
+  assert.deepEqual(
+    cut.map((entry) => entry.part.callID),
+    ["call-t-a1", "call-t-a2"],
+    "activeMessageIds 之外的消息（含它的 part）一条都不许出来",
+  );
+
+  // 空 tool 名单 = 不读（不能退化成整会话扫描）。
+  assert.deepEqual(
+    await readActiveBranchToolParts(toolDb, {
+      sessionID: SESSION,
+      toolNames: [],
+      activeMessageIds: toolActiveIds,
+    }),
+    [],
+    "空 tool 名单必须直接返回空（不发 SQL）",
+  );
+  toolDb.close();
   db.close();
 });
+
+// ── F: 按 tool 名的窄读的夹具（fix-c19）────────────────────────────────────
+
+/** 工具调用 part（`readActiveBranchToolParts` 的判据是 `$.type='tool'` + `$.tool`）。 */
+function insertToolPart(db, { id, messageID, tool, sequence = 0, timeCreated = 300 }) {
+  db.prepare(
+    `insert into part (id, message_id, session_id, time_created, time_updated, data, sequence)
+     values (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    messageID,
+    SESSION,
+    timeCreated,
+    timeCreated,
+    JSON.stringify({
+      type: "tool",
+      callID: `call-${id}`,
+      tool,
+      state: {
+        status: "completed",
+        input: { description: id },
+        output: `{\\"childSessionId\\":\\"child-${id}\\"}`,
+        time: { start: timeCreated, end: timeCreated },
+      },
+    }),
+    sequence,
+  );
+  return id;
+}

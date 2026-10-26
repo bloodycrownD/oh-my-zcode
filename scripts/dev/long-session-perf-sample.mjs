@@ -1586,6 +1586,11 @@ async function measureOpen(cdp, options, run) {
     typeof ackWait.state?.ackAt === "number" && typeof click.dispatchedAt === "number"
       ? Math.max(0, ackWait.state.ackAt - click.dispatchedAt)
       : null;
+  // fix-c19：把这两个 epoch 时刻落到 run 上，才能与 CLI 侧
+  // `zcode_protocol.request.timing`（receivedAt / dispatchedAt / respondedAt）直接相减，
+  // 把「click → ACK」拆成 host→CLI 送达 / CLI 串行队列 / handler 三段。纯诊断字段。
+  run.clickAt = typeof click.dispatchedAt === "number" ? click.dispatchedAt : null;
+  run.ackAt = typeof ackWait.state?.ackAt === "number" ? ackWait.state.ackAt : null;
   if (!ackWait.done) {
     return {
       ...run,
@@ -1797,6 +1802,10 @@ function logOpenPathRun(run) {
     `并列(uiViewReady-cliBootstrap)=${a.viewSideMs ?? "n/a"}`,
     `paint=${a.paintAfterApplyMs ?? "absent"}${a.paintMissingReason ? `(paint_missing=${a.paintMissingReason})` : ""}`,
     `clickToAck=${run.clickToAckMs ?? "n/a"}`,
+    // fix-c19：与 CLI 日志 `zcode_protocol.request.timing` 对齐用的 epoch 时刻
+    // （收到 ACK 后可从日志里 grep 同一 method 的 receivedAt / dispatchedAt / respondedAt）。
+    `clickAt=${run.clickAt ?? "n/a"}`,
+    `ackAt=${run.ackAt ?? "n/a"}`,
     `visibility=${run.visibility?.contaminated ? "contaminated" : "ok"}`,
   ];
   if (run.switchback) {

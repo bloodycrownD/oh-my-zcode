@@ -59,7 +59,8 @@
     "test:dwf-read-narrowing": "tsx --test scripts/test-dwf-read-narrowing.mjs",
     "test:dwf-journal-contract": "tsx --test scripts/test-dwf-journal-contract.mjs",
     "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs",
-    "test:hydrate-load-failure": "tsx --test scripts/test-hydrate-load-failure.mjs"
+    "test:hydrate-load-failure": "tsx --test scripts/test-hydrate-load-failure.mjs",
+    "test:request-timing": "tsx --test scripts/test-request-timing.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",

@@ -117,10 +117,10 @@ import { mapComputerUseOperationEvent } from "./computer-use-operation-event.js"
 import { protocolMcpServersToRuntimeMcpConfig } from "./protocol-mcp-config.js";
 import { projectIdFromDirectory } from "../app/paths.js";
 import {
-  collectSubagentChildSessionIds,
   paginateEndedSubagents,
   projectSessionSubagents,
   readChildOutcomeMessages,
+  resolveSubagentCandidates,
 } from "./subagent-session-query.js";
 import { runSessionModelConfigMutation } from "../zcode-protocol-v4/model-config-mutation.js";
 import type { SessionConfigSeed } from "../zcode-protocol-v4/product-projection.js";
@@ -1876,11 +1876,28 @@ export async function listSessionSubagents(
       `Session not found: ${params.sessionId}`,
     );
   }
-  const messages = persistedMessages ?? (await store.messages({ sessionID: parentSession.id }));
+  // 候选来源（fix-c19）：resume 已经把正文读进内存就复用（零成本）；否则先试**窄读**
+  // （消息索引 + 按 tool 名的 part 读，只解 Agent 类 part）；端口缺席才退回全量
+  // `messages()`——旧实现无条件走那条，长会话实测 ~490ms（占窗口化首屏 mergeMs 的 87%）。
+  // 三条路的判定集中在 `resolveSubagentCandidates`（单测锚点 `test:cold-open-window` S1）。
   const parentEvents = liveParent
     ? await liveParent.eventStore.getEvents(parentSession.id).catch(() => [])
     : [];
-  const childSessionIds = collectSubagentChildSessionIds(parentSession, messages, parentEvents);
+  const resolved = await resolveSubagentCandidates(store, parentSession, {
+    ...(persistedMessages === undefined ? {} : { persistedMessages }),
+    ...(parentEvents.length > 0 ? { parentEvents } : {}),
+  });
+  const messages = resolved.messages;
+  const candidates = resolved.candidates;
+  context.logger?.debug("ZCode Protocol subagent candidates resolved", {
+    event: "zcode_protocol.session.subagent_candidates",
+    module: "bootstrap.zcode_protocol",
+    sessionId: params.sessionId,
+    source: resolved.source,
+    candidates: candidates.length,
+    parentMessages: messages.length,
+  });
+  const childSessionIds = candidates.map((candidate) => candidate.childSessionId);
   const childEntries = await Promise.all(
     childSessionIds.map(async (childSessionId) => {
       const childSession = await store.getSession(childSessionId as SessionId);
@@ -1906,6 +1923,7 @@ export async function listSessionSubagents(
     revision: liveParent?.stateRevision ?? parentSession.time.updated,
     parentSession,
     messages,
+    candidates,
     childSessionsById: new Map(
       persistedChildren.map((entry) => [entry.childSessionId, entry.childSession]),
     ),

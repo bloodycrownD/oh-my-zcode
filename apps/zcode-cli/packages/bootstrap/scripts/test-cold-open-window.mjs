@@ -2118,4 +2118,113 @@ test("S1: 子会话终态窄读与全量读逐值一致，且不再读 child 的
     "完成：改了 3 个文件",
     "summary 来自最后一条 assistant 的正文（窄读不能把这份正文丢掉）",
   );
+
+  // ③ 父会话侧同样是窄读（fix-c19）：候选来自「按 tool 名的 part」，与全量 messages() 逐值
+  // 一致，且**不再为父会话读一次全文**（长会话实测 478ms → 137ms）。
+  const { readSubagentCandidatesNarrow, collectSubagentCandidates, resolveSubagentCandidates } =
+    await import(new URL("../src/zcode-protocol/subagent-session-query.ts", import.meta.url).href);
+  for (const message of parentMessages) {
+    await store.saveMessage(message.info);
+    for (const part of message.parts) {
+      // 持久化要求 part 自带 `time`（`partCreatedAt` 读它）；内存夹具里只有 `state.time`。
+      await store.savePart({
+        time: { created: 1_700_000_000_100, updated: 1_700_000_000_100 },
+        ...part,
+      });
+    }
+  }
+  // 一条**干扰项**：同一 session 里的非 Agent tool part 不得被读出来（SQL 侧按 tool 名过滤）。
+  await store.saveMessage({
+    id: "m-3-a",
+    sessionID: SESSION_ID,
+    role: "assistant",
+    time: { created: 1_700_000_005_000, completed: 1_700_000_005_400 },
+    agent: "zcode-agent",
+    modelId: "model-a",
+    providerId: "provider-a",
+    mode: "build",
+  });
+  await store.savePart({
+    id: "prt-3-bash",
+    sessionID: SESSION_ID,
+    messageID: "m-3-a",
+    type: "tool",
+    callID: "call-bash-3",
+    tool: "Bash",
+    time: { created: 1_700_000_005_100, updated: 1_700_000_005_100 },
+    state: {
+      status: "completed",
+      input: { command: "ls" },
+      output: "a.ts",
+      time: { start: 1_700_000_005_100, end: 1_700_000_005_200 },
+    },
+  });
+
+  const parentReads = [];
+  const parentStore = {
+    messages: async (input) => {
+      parentReads.push(String(input.sessionID));
+      return await store.messages(input);
+    },
+    listSessionMessageIndex: (input) => store.listSessionMessageIndex(input),
+    readActiveBranchToolParts: (input) => store.readActiveBranchToolParts(input),
+  };
+  const freshParentSession = await store.getSession(SESSION_ID);
+  const narrowCandidates = await readSubagentCandidatesNarrow(parentStore, freshParentSession);
+  assert.equal(
+    parentReads.length,
+    0,
+    "窄读不得为父会话走一次全量 messages()（那正是它要消灭的 ~490ms）",
+  );
+  const fullCandidates = collectSubagentCandidates(
+    freshParentSession,
+    await store.messages({ sessionID: SESSION_ID }),
+  );
+  assert.deepEqual(
+    narrowCandidates.map((candidate) => candidate.childSessionId),
+    fullCandidates.map((candidate) => candidate.childSessionId),
+    "候选的 id 序必须与全量读一致（分支序 = 索引裁断序）",
+  );
+  assert.deepEqual(
+    narrowCandidates.map((candidate) => candidate.part.callID),
+    ["call-agent-1", "call-agent-2"],
+    "只读 Agent 类 tool part（Bash 不得被读出来）",
+  );
+
+  // ④ 端口缺席 → null（调用方退回全量 messages()，窄读不是语义前提）。
+  const portless = await readSubagentCandidatesNarrow(
+    { listSessionMessageIndex: (input) => store.listSessionMessageIndex(input) },
+    freshParentSession,
+  );
+  assert.equal(portless, null, "端口缺席必须显式返回 null（不能让调用方以为「没有子会话」）");
+
+  // ⑤ 三条路的**唯一决策点**（`listSessionSubagents` 只调用它）：persisted > narrow > full。
+  const persistedRoute = await resolveSubagentCandidates(parentStore, freshParentSession, {
+    persistedMessages: await store.messages({ sessionID: SESSION_ID }),
+  });
+  assert.equal(persistedRoute.source, "persisted", "resume 已读进内存时必须零成本复用");
+  const readsAfterPersisted = parentReads.length;
+  const narrowRoute = await resolveSubagentCandidates(parentStore, freshParentSession);
+  assert.equal(narrowRoute.source, "narrow", "端口齐全时必须走窄读");
+  assert.equal(narrowRoute.messages.length, 0, "窄读路径不得携带父会话正文（否则等于没省）");
+  assert.equal(parentReads.length, readsAfterPersisted, "窄读路径不得再调用一次 messages()");
+  assert.deepEqual(
+    narrowRoute.candidates.map((candidate) => candidate.childSessionId),
+    fullCandidates.map((candidate) => candidate.childSessionId),
+    "窄读路由的候选必须与全量路由逐值一致",
+  );
+  const fullRoute = await resolveSubagentCandidates(
+    {
+      messages: (input) => store.messages(input),
+      listSessionMessageIndex: (input) => store.listSessionMessageIndex(input),
+    },
+    freshParentSession,
+  );
+  assert.equal(fullRoute.source, "full", "端口缺席必须退回全量（而不是给出空候选）");
+  assert.equal(fullRoute.messages.length > 0, true, "全量路由必须真的读了父会话正文");
+  assert.deepEqual(
+    fullRoute.candidates.map((candidate) => candidate.childSessionId),
+    fullCandidates.map((candidate) => candidate.childSessionId),
+    "三条路的候选必须同一份判定",
+  );
 });

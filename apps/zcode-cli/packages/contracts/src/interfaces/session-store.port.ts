@@ -1044,6 +1044,17 @@ export interface SessionMessageIndexEntry {
 }
 
 /**
+ * `readActiveBranchToolParts` 的一条结果：工具调用 part + 它挂在哪条消息上。
+ *
+ * 带上 `messageId` 是为了让调用方按**自己的** id 序（active 分支序）排序/过滤；
+ * 实现侧的顺序只保证「与 `messages()` 同一 part 序」，不保证分支语义。
+ */
+export interface SessionToolPartEntry {
+  messageId: MessageId;
+  part: ToolPart;
+}
+
+/**
  * 「最后一条带 mode 的 assistant」的窄读结果（首屏 model/mode 种子，IS3 / Step 9）。
  *
  * view-only shell 用 `createRecord(resume:false)` 物化 record：runtime 取**默认模型**，
@@ -1284,6 +1295,24 @@ export interface SessionStorePort {
     limitBefore?: MessageId | null;
     limitAfter?: MessageId | null;
   }): Promise<MessageWithParts[]>;
+  /**
+   * **按 tool 名**取整条 active 分支的工具调用 part（fix-c19 的窄读）。
+   *
+   * 唯一消费者是子会话候选（`listSessionSubagents` → `collectSubagents`）：它只看
+   * `Agent` / `Task` / `subagent` 三类 tool part，而旧实现为此读一次父会话全文
+   * （长会话 3012 message / 29MB，实测 ~490ms）。
+   *
+   * `toolNames` 在 SQL 侧过滤（`json_extract(data, '$.tool')`），不把无关 part 读出来；
+   * `activeMessageIds` 给出时只在**这份序**里取（顺序即返回值顺序），缺席则整会话取。
+   * 实现**不做**分支裁断——裁断仍是 `selectActiveConversationBranchIds` 那一份唯一实现。
+   *
+   * 缺席（旧宿主 / 内存 store）= 调用方降级为全量 `messages()`（窄读是优化，不是语义前提）。
+   */
+  readActiveBranchToolParts?(input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  }): Promise<SessionToolPartEntry[]>;
   saveSessionEntry?(input: SessionEntryInfo): Promise<void>;
   sessionEntries?(input: {
     sessionID: SessionId;

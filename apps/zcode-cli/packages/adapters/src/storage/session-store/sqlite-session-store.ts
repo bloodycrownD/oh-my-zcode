@@ -44,6 +44,7 @@ import type {
   SessionInputRecord,
   SessionInputStatus,
   SessionMessageIndexEntry,
+  SessionToolPartEntry,
   PersistedAssistantSelection,
   SessionTaskLinkRecord,
   SessionRevert,
@@ -651,6 +652,15 @@ export class SqliteSessionStore
     limitAfter?: MessageId | null;
   }): Promise<MessageWithParts[]> {
     return messageRepository.readActiveBranchTail(this.db, input);
+  }
+
+  /** 子会话候选的窄读（fix-c19）：只解码指定 tool 名的 part。 */
+  async readActiveBranchToolParts(input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  }): Promise<SessionToolPartEntry[]> {
+    return messageRepository.readActiveBranchToolParts(this.db, input);
   }
 
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {
