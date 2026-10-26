@@ -75,6 +75,7 @@ import type {
   CuaPermissionObservation,
   ConversationOpenTiming,
   ConversationOpenPhases,
+  SessionRuntimeAvailability,
   V4ConversationRuntimeReadyResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
@@ -193,6 +194,17 @@ function rowTargetActionForCommand(
   }
 }
 
+/**
+ * `loadPersistedEvents` 的读口径（Step 10 的升级路径）。
+ *
+ * `fullMaterialization:true` = 调用方要**全量投影**（激活后把首屏的降级投影升级掉）：
+ * 宿主必须跳过尾窗规划（`planColdWindow`），也不得再按 view-only 口径留空 runtime 事实。
+ * 缺席与旧调用完全一致（首屏按窗口化 / view-only 读）。
+ */
+interface LoadPersistedEventsOptions {
+  fullMaterialization?: boolean;
+}
+
 interface PersistedEventsLoadResult {
   events: SessionEvent[];
   synthesized: boolean;
@@ -226,6 +238,15 @@ interface PersistedEventsLoadResult {
    * 全量物化路径不传（它自己有完整的轮次）。
    */
   synthesisModelBaseline?: TurnModelBaselineSeed;
+  /**
+   * 本次首屏是按 **view-only 口径**读的（Step 9 的 store-only：record 还是 shell，或压根没有
+   * record）。此时 usage / fileChanges 摘要 / `thoughtLevels` 等 runtime 事实刻意缺席，
+   * 激活后必须整份重新 hydration 才能补齐（Step 10 的升级路径）。
+   *
+   * 与 `coldWindow` 是两个独立的降级维度：窗口化只裁正文，view-only 连容量口径都留空；
+   * 任一为真都要求升级。
+   */
+  viewOnlyHydration?: boolean;
 }
 
 type V4GatewayErrorContext = Record<string, unknown>;
@@ -549,6 +570,7 @@ export interface V4GatewayHost {
   loadPersistedEvents?(
     sessionId: string,
     persistedMessages?: MessageWithParts[],
+    options?: LoadPersistedEventsOptions,
   ): Promise<PersistedEventsLoadResult>;
   /** 仅用于低频生命周期和恢复裁决；高频 event/stream trace 禁止走生产日志。 */
   onDebug?(message: string): void;
@@ -986,6 +1008,15 @@ export class ConversationV4Gateway {
    * 只由 hydration 成功收口写入，cleanup / dispose 清除。
    */
   private readonly viewReadySessions = new Set<string>();
+  /**
+   * 首屏投影是**降级**的会话（Step 10）：窗口化（`coldWindow`）或 view-only 口径
+   * （`viewOnlyHydration`）读出来的投影。
+   *
+   * 只在 `performHydration` 里按本次 load 的事实写入，激活成功后消费一次（升级成全量）。
+   * 与 `hydratedSessions` 分开的理由：那个是「防双算」的水位，升级时需要主动删掉它才能
+   * 让 `forceRebuild` 生效；这一份是「还欠一次升级」的事实，升级完成即删。
+   */
+  private readonly degradedFirstScreen = new Set<string>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
   /**
@@ -3769,6 +3800,8 @@ export class ConversationV4Gateway {
     this.viewReadyFlights.delete(sessionId);
     this.runtimeReadyFlights.delete(sessionId);
     this.viewReadySessions.delete(sessionId);
+    // 会话被关掉后「欠一次升级」不再是事实：下一次冷开会按当时的 record 形态重新判定。
+    this.degradedFirstScreen.delete(sessionId);
     // 激活结论同样不能留下：会话被关掉之后「runtime 就绪」不再是事实，下一次冷开必须
     // 重新判（否则重建出的 view-only shell 会继承上一条 record 的就绪结论）。
     this.runtimeReadySessions.delete(sessionId);
@@ -3833,6 +3866,7 @@ export class ConversationV4Gateway {
     this.runtimeReadyFlights.clear();
     this.viewReadySessions.clear();
     this.runtimeReadySessions.clear();
+    this.degradedFirstScreen.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -3890,12 +3924,27 @@ export class ConversationV4Gateway {
     if (!publisher) {
       publisher = new ConversationTopicPublisher(sessionId, this.createLogEpoch(sessionId), {
         now: this.now,
+        // IS3/IS8：runtime 态在**帧编码边界**注入（投影保持事件派生的确定性）。
+        // provider 每帧读一次，所以激活完成后的下一帧起就自动变回 live，不需要二次接线。
+        sessionRuntime: () => this.sessionRuntimeAvailability(sessionId),
       });
       this.publishers.set(sessionId, publisher);
       // config 种子：创建即注入 runtime 真值（不产 delta / 不 bump revision）。
       this.seedPublisherConfig(sessionId, publisher);
     }
     return publisher;
+  }
+
+  /**
+   * 会话对外的 runtime 态（IS3/IS8 的唯一口径）。
+   *
+   * `viewOnly` 只在「视图已就绪、runtime 未就绪」时成立——这正是 Step 9 拆开后的常态。
+   * 其余（视图还没水化、或 runtime 已就绪）一律 `live`：schema 的默认值就是 live，
+   * 在「还不知道」时下发 view-only 会让客户端把一条正常会话的编辑入口全锁掉。
+   */
+  private sessionRuntimeAvailability(sessionId: string): SessionRuntimeAvailability {
+    if (this.isRuntimeReady(sessionId)) return "live";
+    return this.viewReadySessions.has(sessionId) ? "viewOnly" : "live";
   }
 
   /**
@@ -4019,6 +4068,11 @@ export class ConversationV4Gateway {
           sessionId,
           Math.max(0, Math.round(performance.now() - activationStartedAt)),
         );
+        // Step 10：激活成功 → 首屏的降级投影（尾窗 / view-only 口径）升级成全量。
+        // **必须在激活本体之后**（激活前没有 record，全量读也拿不到 usage/fileChanges），
+        // 且 fire-and-forget（激活的读数是「本体耗时」，不能被这次重读污染；send 类命令
+        // 也不该为它多等一份全量正文）。
+        this.scheduleProjectionUpgrade(sessionId);
         return persistedMessages;
       } catch (error) {
         // 失败不驻留：并发加入者手里仍有同一个 promise（看到同一个错误），但表里清掉，
@@ -4031,6 +4085,46 @@ export class ConversationV4Gateway {
     })();
     this.runtimeReadyFlights.set(sessionId, flight);
     return flight.promise;
+  }
+
+  /**
+   * 激活后把**降级的首屏投影**升级成全量投影（Step 10）。
+   *
+   * 触发条件只有一条：`performHydration` 记过「本次首屏是窗口化或 view-only 口径」。
+   * 它必须走激活本体的同一批入口（`ensureRuntimeReady → coldResume.ensureResumed →
+   * activateRuntime`），**不得**在这里再 `createRecord` / `app.resume`：那是双 resume
+   * 的来源（幽灵 runtime 前科），而本函数只做投影侧的重新水化。
+   *
+   * fire-and-forget：失败只记账（下一次冷开会按当时的 record 形态重新判定），
+   * 绝不把失败回传给已经成功的激活调用方。
+   */
+  private scheduleProjectionUpgrade(sessionId: string): void {
+    if (this.disposed) return;
+    if (!this.degradedFirstScreen.has(sessionId)) return;
+    // 先消费事实：升级只做一次，失败不自动重试（重试条件应该是「下一次冷开」而不是轮询）。
+    this.degradedFirstScreen.delete(sessionId);
+    void this.upgradeProjectionToFull(sessionId).catch((error) => {
+      this.host.onError?.("v4.runtime.upgradeProjection", error, { sessionId });
+    });
+  }
+
+  /**
+   * 升级的执行体：等首屏 hydration 收口 → 删防双算水位 → 强制整份重建（全量读）。
+   *
+   * `hydratedSessions.delete` 是**必须**的：`hydratePublisher` 的早退判定
+   * （`existing && hydratedSessions.has(...)`）在 `forceRebuild` 之前，不删就等于 no-op
+   * ——这正是 spec 点名的坑。全量读靠 `fullMaterialization` 让宿主跳过尾窗规划：
+   * 否则「升级」只是把同一份窗口投影再物化一遍。
+   */
+  private async upgradeProjectionToFull(sessionId: string): Promise<ConversationTopicPublisher> {
+    // hydratePublisher 对 in-flight 是「加入」而不是「排队重建」，直接调用会把升级吞掉。
+    const inFlight = this.hydrationInFlight.get(sessionId);
+    if (inFlight) await inFlight.catch(() => undefined);
+    if (this.disposed) {
+      throw new Error(`v4 projection upgrade cancelled for session ${sessionId}`);
+    }
+    this.hydratedSessions.delete(sessionId);
+    return await this.hydratePublisher(sessionId, undefined, true, { fullMaterialization: true });
   }
 
   /**
@@ -4096,6 +4190,7 @@ export class ConversationV4Gateway {
     sessionId: string,
     persistedMessages?: MessageWithParts[],
     forceRebuild = false,
+    loadOptions: LoadPersistedEventsOptions = {},
   ): Promise<ConversationTopicPublisher> {
     const existing = this.publishers.get(sessionId);
     // 已 hydrate 过的 live publisher：直接复用（避免重复重建 / 双计）。
@@ -4114,6 +4209,7 @@ export class ConversationV4Gateway {
       buffer,
       persistedMessages,
       forceRebuild,
+      loadOptions,
     ).finally(() => {
       if (this.hydrationBuffers.get(sessionId) === buffer) {
         this.hydrationBuffers.delete(sessionId);
@@ -4131,6 +4227,7 @@ export class ConversationV4Gateway {
     buffer: HydrationBuffer,
     persistedMessages?: MessageWithParts[],
     forceRebuild = false,
+    loadOptions: LoadPersistedEventsOptions = {},
   ): Promise<ConversationTopicPublisher> {
     const existingAtStart = this.publishers.get(sessionId);
     // 诊断字段 `liveSessionAtStart` 沿用 live 语义（IS4）：detached child 也算 live。
@@ -4146,17 +4243,19 @@ export class ConversationV4Gateway {
     );
     const mergeStartedAt = performance.now();
     const loaded: PersistedEventsLoadResult = this.host.loadPersistedEvents
-      ? await this.host.loadPersistedEvents(sessionId, persistedMessages).catch((error) => {
-          this.host.onError?.("v4.hydrate", error, {
-            durationMs: Math.max(0, Math.round(performance.now() - hydrationStartedAt)),
-            existingPublisherAtStart: existingAtStart !== undefined,
-            liveSessionAtStart,
-            phase: "loadPersistedEvents",
-            persistedMessages: persistedMessages?.length ?? 0,
-            sessionId,
-          });
-          return { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
-        })
+      ? await this.host
+          .loadPersistedEvents(sessionId, persistedMessages, loadOptions)
+          .catch((error) => {
+            this.host.onError?.("v4.hydrate", error, {
+              durationMs: Math.max(0, Math.round(performance.now() - hydrationStartedAt)),
+              existingPublisherAtStart: existingAtStart !== undefined,
+              liveSessionAtStart,
+              phase: "loadPersistedEvents",
+              persistedMessages: persistedMessages?.length ?? 0,
+              sessionId,
+            });
+            return { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
+          })
       : { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
     // 持久事件合并 / transcript 合成 → openPhases.mergeMs。
     phases.mergeMs = Math.max(0, Math.round(performance.now() - mergeStartedAt));
@@ -4213,6 +4312,12 @@ export class ConversationV4Gateway {
     // 只记住 await 之前的 existing 引用是不够的：load 等待期间 raw event
     // 会继续推进这个 publisher，synthesized 返回后却把它整体删除，queue/stream 随之
     // 消失。重建以 sourceEventSeq 为 raw snapshot 边界，并把等待窗口内事件补回。
+    // Step 10：到这里才是**本次投影真的被重物化**了（上面的早退分支保留既有 live publisher，
+    // 窗口/降级口径并未生效）。首屏降级（窗口化或 view-only）→ 记一笔「欠一次全量升级」；
+    // 这是激活后升级的唯一判据，用「有没有 record」判会在 send 路径上永久漏升级。
+    if (coldWindow !== undefined || loaded.viewOnlyHydration === true) {
+      this.degradedFirstScreen.add(sessionId);
+    }
     const publisher = latestPublisher ?? existingAtStart ?? this.ensurePublisher(sessionId);
     this.rejectProjectionEventWaiters(
       sessionId,

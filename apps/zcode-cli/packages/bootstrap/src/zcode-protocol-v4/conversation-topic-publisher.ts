@@ -27,6 +27,8 @@ import type {
   DeliveryProfileName,
   QueueItem,
   SessionMagicContextUsage,
+  SessionRuntimeAvailability,
+  StatePatch,
   SubscribeAck,
   TopicFrameDeliveryKind,
   ToolCallRow,
@@ -164,6 +166,16 @@ interface ConversationTopicPublisherOptions {
   subscriberBufferMaxOps?: number;
   /** 每订阅者 logical deltas payload 的 UTF-8 byte 上限。 */
   subscriberBufferMaxBytes?: number;
+  /**
+   * 会话的 runtime 态（IS3/IS8 的注入缝）：网关在**构造 publisher 时**传入，
+   * 帧编码时写进 `availability.sessionRuntime` 并在 view-only 时压平控制面。
+   *
+   * 为什么必须是 provider 而不是快照字段：帧在 publisher 内编码后经
+   * `emitReservedTopicFrame → emitWireFrame` 出站，网关拿不到可改的 snapshot 对象；
+   * 而 runtime 起没起是宿主的运行时事实，投影（纯事件派生）不知道也不该知道。
+   * 缺席 = `live`（旧宿主的语义，与 schema 的 `.default("live")` 一致）。
+   */
+  sessionRuntime?: () => SessionRuntimeAvailability;
 }
 
 interface ConversationSubscriberBufferLimits {
@@ -292,6 +304,12 @@ export class ConversationTopicPublisher {
    * `seedRowManifestFacts` 与 `rowSetSignature`）。
    */
   private rowManifestFacts: SessionRowManifestFacts | null = null;
+  /**
+   * runtime 态 provider（IS3/IS8）：网关构造时注入，帧编码时读取。
+   * 只允许在**出站编码**（快照 / state patch）读它：读进投影会让同一批事件产出两份不同的
+   * 投影，破坏「事件 → 投影」的确定性。
+   */
+  private readonly sessionRuntimeProvider?: () => SessionRuntimeAvailability;
 
   constructor(
     private readonly sessionId: string,
@@ -300,6 +318,7 @@ export class ConversationTopicPublisher {
   ) {
     this.topic = `conversation/${sessionId}`;
     this.projection = new ProductProjection(sessionId, logEpoch);
+    this.sessionRuntimeProvider = options.sessionRuntime;
     this.now = options.now ?? Date.now;
     this.retention = options.retention ?? PROTOCOL_V4_LIMITS.eventRetentionPerSession;
     this.subscriberBufferMaxOps = nonNegativeHardBound(
@@ -483,7 +502,7 @@ export class ConversationTopicPublisher {
     // IS5：manifest 在场面时 totalCount / firstRowId 只来自它（禁止由 rows.window 现算）。
     // 缺席（live 会话 / 老会话降级）才回退到窗口现算，两者在「全量物化 + 清单完整」时逐值相等。
     const facts = this.rowManifestFacts;
-    const visibleSnapshot: ConversationSnapshot = {
+    const visibleSnapshot: ConversationSnapshot = this.applyRuntimeBoundary({
       ...snapshot,
       rows: {
         ...snapshot.rows,
@@ -491,13 +510,71 @@ export class ConversationTopicPublisher {
         totalCount: facts ? facts.totalCount : visibleRows.length,
         firstRowId: facts ? facts.firstRowId : (visibleRows[0]?.rowId ?? null),
       },
-    };
+    });
     const limit = PROTOCOL_V4_LIMITS.snapshotTailWindowRows;
     if (visibleRows.length <= limit) return visibleSnapshot;
     return {
       ...visibleSnapshot,
       rows: { ...visibleSnapshot.rows, window: visibleRows.slice(-limit) },
     };
+  }
+
+  /** IS3/IS8：当前会话的 runtime 态（缺席 provider = live，与 schema 默认一致）。 */
+  private currentSessionRuntime(): SessionRuntimeAvailability {
+    return this.sessionRuntimeProvider?.() ?? "live";
+  }
+
+  /**
+   * 出站快照的 runtime 边界改写（IS8 的注入缝）。
+   *
+   * view-only 时做两件事，都是「别让客户端以为 runtime 在跑」：
+   * ①`availability.sessionRuntime = "viewOnly"`（客户端据此只禁 edit/fork/retry/rewind，
+   *   composer 保持可用——它是唯一的激活入口）；
+   * ②控制面压平成「不能停」：`canStop:false` / `stopState:"idle"`。view-only 没有 runtime，
+   *   历史尾部可能停在半个 running 轮（进程退出前的 TurnStarted），照抄会让 Stop 按钮
+   *   指向一个不存在的目标。`phase` 等其余字段不动——它们是历史事实。
+   */
+  private applyRuntimeBoundary(snapshot: ConversationSnapshot): ConversationSnapshot {
+    const runtime = this.currentSessionRuntime();
+    const availability =
+      snapshot.availability.sessionRuntime === runtime
+        ? snapshot.availability
+        : { ...snapshot.availability, sessionRuntime: runtime };
+    if (runtime === "live") {
+      return availability === snapshot.availability ? snapshot : { ...snapshot, availability };
+    }
+    return {
+      ...snapshot,
+      availability,
+      control: { ...snapshot.control, canStop: false, stopState: "idle" },
+    };
+  }
+
+  /**
+   * 出站 delta 的 runtime 边界改写（与 {@link applyRuntimeBoundary} 同一把尺）。
+   *
+   * 只改 `state.updated` 里的两个键：`availability` 补 `sessionRuntime`，`control` 压平
+   * 「能停」。不做按事件类型的白名单——补丁里带哪个键就改哪个键，其余键原样透传。
+   */
+  private applyRuntimeBoundaryToDeltas(
+    deltas: readonly ConversationDelta[],
+  ): readonly ConversationDelta[] {
+    const runtime = this.currentSessionRuntime();
+    if (runtime === "live") return deltas;
+    return deltas.map((delta) => {
+      if (delta.op !== "state.updated") return delta;
+      const patch: StatePatch = delta.patch;
+      const nextPatch: StatePatch = {
+        ...patch,
+        ...(patch.availability
+          ? { availability: { ...patch.availability, sessionRuntime: runtime } }
+          : {}),
+        ...(patch.control
+          ? { control: { ...patch.control, canStop: false, stopState: "idle" as const } }
+          : {}),
+      };
+      return { ...delta, patch: nextPatch };
+    });
   }
 
   /**
@@ -523,7 +600,9 @@ export class ConversationTopicPublisher {
     deltas: readonly ConversationDelta[],
     subscription: Subscription,
   ): readonly ConversationDelta[] {
-    const filtered = filterConversationDeltasForProfile(deltas, subscription.profile);
+    const filtered = this.applyRuntimeBoundaryToDeltas(
+      filterConversationDeltasForProfile(deltas, subscription.profile),
+    );
     if (subscription.workflowRunDeltas) return filtered;
     return encodeConversationDeltasForLegacy(filtered, this.projection.getSnapshot().workflowRuns);
   }
@@ -967,6 +1046,7 @@ export class ConversationTopicPublisher {
       retention: this.retention,
       subscriberBufferMaxOps: this.subscriberBufferMaxOps,
       subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
+      sessionRuntime: this.sessionRuntimeProvider,
     });
     if (options.rowIdOrigin !== undefined) {
       candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
@@ -983,6 +1063,7 @@ export class ConversationTopicPublisher {
         retention: this.retention,
         subscriberBufferMaxOps: this.subscriberBufferMaxOps,
         subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
+        sessionRuntime: this.sessionRuntimeProvider,
       });
       if (options.rowIdOrigin !== undefined) {
         candidate.projection.seedRowIdOrigin(options.rowIdOrigin);

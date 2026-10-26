@@ -1968,7 +1968,7 @@ export function createConversationV4Gateway(
     // 冷订阅不再在 eventStore / transcript 之间 XOR。message/part
     // 是已完成正文权威，session_entry 只补 legacy goal，内存事件只补
     // 未持久 in-flight 和 queue/permission/control 等 ephemeral 状态。
-    loadPersistedEvents: async (sessionId, persistedMessages) => {
+    loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {
       // dwf workflow actor / subagent 这类 detached live child 没有自己的
       // bootstrap record（事件经 ingestDetachedLiveSession 走父 record 的 sink 路由）。
       // context.sessions.get 取不到 record 时不能直接返回 synthesized:false——
@@ -2052,7 +2052,9 @@ export function createConversationV4Gateway(
           : {}),
         // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空时退回
         // 全量，原因随 `coldWindowFallback` 带出并打点。
-        ...(store
+        // Step 10：激活后的升级（`fullMaterialization`）**不传** `planColdWindow`——
+        // 升级的意义就是把窗口投影换成全量，再规划一次尾窗只会把同一份窗口重物化一遍。
+        ...(store && loadOptions?.fullMaterialization !== true
           ? {
               planColdWindow: async (facts) => {
                 // Step 9：shared_context 导入不再退全量——那条 model-only 上下文消息由
@@ -2231,6 +2233,11 @@ export function createConversationV4Gateway(
         // Step 6：窗口坐标（rowIdBase / ordinal / 整条分支 turn 序 / facts）。
         // gateway 用它播种 `rowIdOrigin`、决定 `fullyMaterialized:false` 与回写 ordinalBase。
         ...(windowPlan ? { coldWindow: windowPlan } : {}),
+        // Step 10：本次首屏是按 **view-only 口径**读的（record 还是 shell、或压根没有 record）——
+        // usage / fileChanges / thoughtLevels 等只有 runtime 才有的事实一起缺席。gateway 据此
+        // 判定「激活后必须升级成全量投影」，不能用「有没有 record」代替：record 在册而
+        // runtime 没起才是本步的常态。
+        ...(viewOnlyShell || record === undefined ? { viewOnlyHydration: true as const } : {}),
         // 窗口的上一轮模型基线（Step 7 补）：与 `initialModelKey` 同一份选型，但消费者是
         // 投影（`modelChange` marker 的上一轮基准），不是合成器。缺了它，「模型恰好在窗口
         // 首轮切换」时 marker 行会消失、其后 rowId 整体前移。

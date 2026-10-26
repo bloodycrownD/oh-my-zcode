@@ -115,6 +115,10 @@ export function computeAvailability(context: AvailabilityContext): SessionAction
   const { phase, goalStatus } = context;
   const running = phase === "running" || phase === "prewarming";
   return {
+    // 投影不知道 runtime 起没起（那是宿主的运行时事实，不是事件派生的事实）。这里恒为
+    // `live`，view-only 由网关在 publisher 的帧编码边界按会话状态覆盖（IS8 的注入缝）。
+    // 若把 runtime 状态塞进 context，就会让「同一批事件 → 同一份投影」这条不变量失效。
+    sessionRuntime: "live",
     fork: phase === "draft" ? denied("forkTargetNotStable") : ALLOWED,
     switchModelConfig: ALLOWED,
     setFollowupMode: ALLOWED,
