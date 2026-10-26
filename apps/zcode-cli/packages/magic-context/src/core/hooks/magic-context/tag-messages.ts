@@ -1,5 +1,9 @@
 import type { ContextDatabase } from "../../features/magic-context/storage.js";
-import { getSourceContents, saveSourceContent } from "../../features/magic-context/storage.js";
+import {
+    getSourceContents,
+    replaceSourceContent,
+    saveSourceContent,
+} from "../../features/magic-context/storage.js";
 import {
     adoptNullOwnerToolTag,
     getCandidateToolOwners,
@@ -909,16 +913,21 @@ export function tagMessages(
                 // is the only way to keep message content stable across passes
                 // when assignTag's recovery rebound a different tag number
                 // than what the resolver expected.
+                // FORK（edit-resend-stale-text / v1.0.30）：tag 身份是位置
+                // （host 投影的 `mc<ordinal>`），rewind / 编辑重发会让同一位置换成另一条
+                // 消息；无条件用持久 source 覆盖会把新正文换回被编辑掉的旧正文（用户症状：
+                // 编辑后模型仍读到历史消息）。入站文本来自宿主 messageHistory，是权威原文，
+                // 一旦与持久 source 不一致，只能说明该 tag 已指向另一条消息——以入站为准，
+                // 并用 upsert 纠正 source；一致时仍恢复持久 source（保留 tag 号重绑时的
+                // 字节稳定性）。
+                const sourceContent = stripTagPrefix(textPart.text);
                 const persistedSource = sourceContents.get(tagId);
-                if (persistedSource !== undefined) {
+                if (persistedSource !== undefined && persistedSource === sourceContent) {
                     textPart.text = persistedSource;
-                } else {
-                    const sourceContent = stripTagPrefix(textPart.text);
-                    if (sourceContent.trim().length > 0) {
-                        const _tSaveText = performance.now();
-                        saveSourceContent(db, sessionId, tagId, sourceContent);
-                        accSaveSource += performance.now() - _tSaveText;
-                    }
+                } else if (sourceContent.trim().length > 0) {
+                    const _tSaveText = performance.now();
+                    replaceSourceContent(db, sessionId, tagId, sourceContent);
+                    accSaveSource += performance.now() - _tSaveText;
                 }
                 messageTagNumbers.set(
                     message,

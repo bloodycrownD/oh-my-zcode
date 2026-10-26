@@ -945,6 +945,53 @@ test("b4 a host that does not declare its process model keeps upstream's reset",
   }
 });
 
+// --- b5: edit-resend 后同位置消息被替换，旧 source 不得覆盖新正文 ---
+//
+// v1.0.29 真机根因：MC 的 tag 身份是位置（host 投影的 `mc<ordinal>`），
+// `source_contents[tagId]` 保存打 tag 前的原文。编辑重发（rewind）会让同一位置
+// 换成另一条消息；旧实现无条件用持久 source 覆盖，模型因此始终读到被编辑掉的
+// 那条（用户症状：编辑后发出去的还是历史消息）。
+
+const tagMessagesB5 = await load("hooks/magic-context/tag-messages.js");
+const B5_SESSION = "ses_edit_resend_same_position";
+// 宿主投影给消息的 id：位置身份，rewind 前后不变——正是 bug 的触发条件。
+const B5_MESSAGE_ID = "mc1";
+
+function b5Message(text) {
+  return [
+    {
+      info: { id: B5_MESSAGE_ID, role: "user", sessionID: B5_SESSION, time: { created: 1000 } },
+      parts: [{ type: "text", text }],
+    },
+  ];
+}
+
+test("b5 edit-resend refreshes source_content instead of replaying the stale text", () => {
+  const tagger = taggerModule.createTagger();
+  const first = b5Message("123");
+  tagMessagesB5.tagMessages(B5_SESSION, first, tagger, b4Db);
+  const firstText = first[0].parts[0].text;
+  if (!/^§\d+§ 123$/u.test(firstText)) {
+    throw new Error(`unexpected first-pass wire text: ${firstText}`);
+  }
+
+  // 同一位置（同 mc id）被编辑重发换成新正文；旧实现会回放 "123"。
+  const edited = b5Message("789");
+  tagMessagesB5.tagMessages(B5_SESSION, edited, tagger, b4Db);
+  const editedText = edited[0].parts[0].text;
+  if (!/^§\d+§ 789$/u.test(editedText)) {
+    throw new Error(`stale source content replayed: ${editedText}`);
+  }
+
+  // 对照：内容没变时仍复用同一 tag 与同一正文（修复不得破坏跨 pass 稳定性）。
+  const stable = b5Message("789");
+  tagMessagesB5.tagMessages(B5_SESSION, stable, tagger, b4Db);
+  const stableText = stable[0].parts[0].text;
+  if (stableText !== editedText) {
+    throw new Error(`stable content changed across passes: ${stableText} !== ${editedText}`);
+  }
+});
+
 // --- g: system prompt guard（magic-context-system-prompt-guard，Step 8 收口） ---
 //
 // spec §六 的 T-G4–T-G16（T-G1/G2/G3 在 test-ctx-tools.mjs，T-G9/T-G15 在

@@ -311,3 +311,24 @@ package.json                                           改（门禁挂载）
 - 回归网（Step 13-14）**不建议回滚**，它是防止第五次回归的唯一保障。
 
 无 DB schema 迁移；`discarded` 新增 reason 为枚举值扩张；**不新增任何 revert 写回能力**（`restoreRevert` 已撤销）。
+
+## 根因修订（2026-10-27，v1.0.29 真机复现）
+
+**本 spec 的五条不变式仍成立，但都不是真机症状的根因。** v1.0.28 按本 spec 全量修复后，用户真机仍复现「编辑后发出去的还是历史消息」；v1.0.29 回滚 A 后复现路径不变。按「先打日志再改代码」重查，得到如下证据链（会话 `sess_cf3ea2f8`，三次编辑 `123→789`、`321→987`、`987→369`）：
+
+| 层 | 观测 |
+| --- | --- |
+| UI 行内编辑提交 | `nextText` 为新文本（指纹一致） |
+| CLI admission / handler / rewind / start | 收到的 newText 与新起轮文本均为新文本 |
+| 落库 `message`/`part` | 新 user 消息正文为新文本 |
+| **发给 provider 的最后一条 user** | **仍是被编辑掉的旧文本**（Magic Context 的 `§N§` 前缀证明是 MC transform 重写了历史） |
+
+根因在 `magic-context/src/core/hooks/magic-context/tag-messages.ts`：
+
+1. MC 的 tag 身份是**位置**——host 投影给每条 runtime entry 的 id 是 `mc<ordinal>`（`src/host/types.ts:363`），`contentId = mc<ordinal>:p<partIndex>`；
+2. 每个 pass 把「打 tag 前的原文」写进 `source_contents[tagId]`，并在后续 pass **无条件用该持久原文覆盖入站文本**（旧 `tag-messages.ts:912`）；
+3. rewind / 编辑重发让同一位置换成另一条消息，`mc<ordinal>` 不变 → 精确命中旧 tag → 新正文被旧 `source_contents` 覆盖成被编辑掉的那条。
+
+**修复**：`tag-messages.ts` 的 source 恢复改为「一致才恢复、不一致以入站为准并 upsert 纠正」。入站文本来自宿主 `messageHistory`（权威原文），与持久 source 不一致时只能说明该 tag 已指向另一条消息；`replaceSourceContent` 纠正后才不会在下一 pass 再次回放。回归：`magic-context/scripts/test-transform.mjs` 的 b5（同一 `mc1` 位置先 `123` 后 `789`，断言 wire 文本为 `§N§ 789`；再加一条「内容不变时跨 pass 字节稳定」对照）。
+
+**未覆盖（明确登记）**：tool output 的 tag 身份同样按位置，但该路径没有 source 回放，暂未观察到症状；assistant 文本走同一修复。若后续出现「tool 输出被旧内容覆盖」，按同一判据扩展。
