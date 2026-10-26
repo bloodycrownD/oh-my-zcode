@@ -135,6 +135,7 @@ import { AttachmentUploadRegistry } from "./attachment-upload-registry.js";
 import {
   ColdSessionResumeCoordinator,
   type ColdSessionResumeOutcome,
+  type ColdSessionShellOutcome,
 } from "./cold-session-resume.js";
 import { CommandInbox } from "./command-inbox.js";
 import {
@@ -276,6 +277,21 @@ export interface V4GatewayHost {
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
   ): Promise<ColdSessionResumeOutcome>;
+  /**
+   * **只物化 view-only 外壳**（IS3 / Step 9 的视图水位入口）：store 读 session + 首屏
+   * model/mode 种子 + `createRecord(resume:false)`，**不** resume。
+   *
+   * 有它时 `ensureViewReadyPublisher` 只等这一条，首屏不再串进 runtime 激活；
+   * 缺席（旧宿主 / 测试桩）→ 退回 Step 8 的「先激活再建投影」，行为不变。
+   *
+   * `notFound` 与 `resumePersistedSession` 同义（store 里也没有这条会话），错误分型由
+   * `ColdSessionResumeCoordinator` 统一。
+   */
+  materializeSessionShell?(
+    sessionId: string,
+    resumeThoughtLevel?: string,
+    workspace?: ZCodeWorkspaceRef,
+  ): Promise<ColdSessionShellOutcome>;
   /**
    * 下行物理帧出口（宿主负责投递：stdio notification / MessagePort / ws）。
    *
@@ -935,10 +951,9 @@ export class ConversationV4Gateway {
    * **视图水位**（读与翻页只等这一层）：冷会话「把投影建起来」的单飞。
    *
    * IS3 把「看」与「跑」拆成两条水位，这里是「看」的那条：`rowsRange` / `turnDirectory` /
-   * `plans` / 附件预览等只读入口归它；它们绝不等待 runtime 激活（今天 `ensureViewReadyPublisher`
-   * 内部仍会等一次激活，因为投影正文只能由 resume 给出——Step 9 的 store-only
-   * `loadPersistedEvents` 才会把这一层真正解耦）。语义仍是「本次冷恢复收口」，不能拿它当
-   * 「runtime 已就绪」（那是 `runtimeReadyFlights`）。
+   * `plans` / 附件预览等只读入口归它；它们绝不等待 runtime 激活。Step 9 起它只物化
+   * view-only 外壳（store-only 读正文），激活本体归 `runtimeReadyFlights`。
+   * 语义仍是「本次冷恢复收口」，不能拿它当「runtime 已就绪」。
    */
   private readonly viewReadyFlights = new Map<string, Promise<ConversationTopicPublisher>>();
   /**
@@ -2084,8 +2099,8 @@ export class ConversationV4Gateway {
     //   建了个只含 fork 事件的 cold publisher）→ 用 transcript 合成**重建**。
     // - 有 publisher 且事件日志完整（流式 live）→ 保留，重放会双计且打断流。
     //
-    // 订阅是**视图**入口，只等视图水位（IS3）。阶段 8 里视图水位内部仍要等一次激活
-    // （投影正文的来源），Step 9 之后它就不等了，激活由下面的 ACK 后预激活接管。
+    // 订阅是**视图**入口，只等视图水位（IS3）。Step 9 起视图水位只物化外壳（不 resume），
+    // 激活由下面的 ACK 后预激活接管——「首屏返回时 runtime 还没起来」是预期状态。
     //
     // 已在飞的视图水位必须被加入（即使此刻 record 已经变成 live）：那条 flight 的
     // hydration 会带上 resume 给的 `persistedMessages`，另起一次会丢掉它并可能建出
@@ -2551,8 +2566,9 @@ export class ConversationV4Gateway {
    * ACK **之后**，ACK 帧里不可能有该值（IS8；openPhases 明确不含 runtimeReadyMs）。
    *
    * 只读语义：**不触发激活**，只回已发生的事实。`runtimeReadyMs` 的生产点是
-   * `ensureRuntimeReady`（量的是 `coldResume.ensureResumed` 本体）；三个触发方是视图水位
-   * （阶段 8 的临时依赖）、ACK 后的后台预激活与 send 类命令，读数口径不随写入点变化。
+   * `ensureRuntimeReady`（量的是 `coldResume.ensureResumed` 本体）；触发方是 ACK 后的
+   * 后台预激活、send 类命令，以及没有 shell 端口的旧宿主上视图水位的降级分支；
+   * 读数口径不随写入点变化（Step 9 起视图水位本身不再产生这个值）。
    *
    * `runtimeReadyMs` 的口径钉死为 **「激活本体耗时」**（`ensureResumed` 的耗时），
    * 不是「从 ACK 起算」：阶段 0 的激活在 ACK **之前**，按 ACK 起算会算出负数；
@@ -3902,16 +3918,17 @@ export class ConversationV4Gateway {
   /**
    * 冷会话「视图就绪」的唯一入口：**视图水位**（`viewReadyFlights`）的单飞。
    *
-   * 三件事按顺序发生：等 runtime 激活（今天投影正文只能由 resume 给出，Step 9 换成
-   * store-only 读取后就只剩「建投影」）→ hydration → 登记 `viewReadySessions`/`hydratedSessions`。
+   * 两件事按顺序发生：**物化 view-only 外壳**（store 读 session + 首屏种子，
+   * `createRecord(resume:false)`；Step 8 及以前这里是「等一次 runtime 激活」）→ hydration。
+   * 视图水化成功后登记 `viewReadySessions`/`hydratedSessions`。
    *
    * 读与翻页**只**等这一层（IS3 的 view 半边）；它们不该因为「runtime 还没激活」而被拒，
-   * 也不该反过来替命令触发激活。
+   * 也不该反过来替命令触发激活。**激活只能来自** ACK 之后的后台预激活
+   * （`prewarmRuntimeAfterViewAck`）与 send 类命令——那两处都在本函数之外。
    *
    * 调用方**不止冷订阅**：`rowsRange`、`turnDirectory`、`plans`、`fileChanges`、附件读面
-   * 都经 `resolveViewPublisher` 走到这里。因此本函数也是 `runtimeReadyMs` 的生产链，
-   * 「一次冷开」可以由任一读入口触发——「激活的唯一生产点是冷订阅」这个说法不成立
-   * （cr-func 2026-10-25 矫正；Step 8 起激活本体归 `ensureRuntimeReady`，读数口径不变）。
+   * 都经 `resolveViewPublisher` 走到这里。Step 9 之前本函数也是 `runtimeReadyMs` 的生产链
+   * （内部等激活）；现在激活本体归 `ensureRuntimeReady`，读路径不再产生那份耗时。
    */
   private ensureViewReadyPublisher(
     sessionId: string,
@@ -3922,14 +3939,10 @@ export class ConversationV4Gateway {
     if (existingFlight) return existingFlight;
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
-      // 阶段 8 里视图仍要等一次激活（投影正文的来源）；Step 9 之后这里改成 store-only，
-      // 而激活改由 ACK 之后的后台预激活 + send 类命令触发。
-      const persistedMessages = await this.ensureRuntimeReady(
-        sessionId,
-        resumeThoughtLevel,
-        workspace,
-      );
-      return this.hydratePublisher(sessionId, persistedMessages);
+      // Step 9：视图只等外壳。**不要**在这里再调 `ensureRuntimeReady`——那会让首屏重新
+      // 串上激活（MCP/技能/MEMORY.md 的装载），正是本步要拆掉的东西。
+      const resumedMessages = await this.ensureViewShell(sessionId, resumeThoughtLevel, workspace);
+      return this.hydratePublisher(sessionId, resumedMessages);
     });
     this.viewReadyFlights.set(sessionId, operation);
     // 成功和失败都由同一清理函数释放；不创建会重复传播 rejection 的派生 promise。
@@ -3943,14 +3956,34 @@ export class ConversationV4Gateway {
   }
 
   /**
+   * 视图水位的「物化外壳」一步（IS3 / Step 9）。
+   *
+   * 有 `host.materializeSessionShell` → 只建 view-only 外壳，返回 undefined（正文由
+   * store-only hydration 自己读，不再依赖 resume 的返回值）。
+   * 没有 → 退回 Step 8 的「先激活再建投影」，并把 resume 读到的正文带回去（行为不变）。
+   */
+  private async ensureViewShell(
+    sessionId: string,
+    resumeThoughtLevel?: string,
+    workspace?: ZCodeWorkspaceRef,
+  ): Promise<MessageWithParts[] | undefined> {
+    if (!this.host.materializeSessionShell) {
+      return await this.ensureRuntimeReady(sessionId, resumeThoughtLevel, workspace);
+    }
+    await this.coldResume.ensureShellMaterialized(sessionId, resumeThoughtLevel, workspace);
+    return undefined;
+  }
+
+  /**
    * **runtime 水位**（`runtimeReadyFlights`）的唯一入口：runtime 激活的单飞。
    *
    * 口径钉死为**激活本体耗时** = `coldResume.ensureResumed` 的耗时，不是「从 ACK 起算」：
    * 阶段 0 激活在 ACK 之前（按 ACK 起算会是负数），阶段 8 拆开之后激活在 ACK 之后
    * （按 ACK 起算会把等待算进去）。只有本体耗时能跨阶段比较，所以写入点挪到哪里都只写这一段。
    *
-   * 三个调用方：①`ensureViewReadyPublisher`（阶段 8 的临时依赖）②ACK 之后的后台预激活
-   * ③send 类命令（唯一允许「当场启动」的触发器）。**不在这里判 workspace/thoughtLevel**：
+   * 三个调用方：①`ensureViewShell` 的降级分支（旧宿主没有 `materializeSessionShell`
+   * 时的 Phase-8 行为；生产宿主不会走到）②ACK 之后的后台预激活 ③send 类命令（唯一允许
+   * 「当场启动」的触发器）。**不在这里判 workspace/thoughtLevel**：
    * 首个调用方给什么就用什么，后续加入者复用同一份 flight（与 `coldResume` 的单飞一致）。
    *
    * 结论语义：成功 → 条目驻留并置 `activated`（`conversation/runtimeReady` 读它）；
@@ -4008,9 +4041,10 @@ export class ConversationV4Gateway {
    * 失败只经 `onError` 记账（结论同时记在 `runtimeReadyFlights` 上，供
    * `conversation/runtimeReady` 读）。
    *
-   * 阶段 8 里它通常是 no-op：视图水位内部仍要等一次激活（投影正文的来源），这条 flight
-   * 早已落定。它存在的理由是 Step 9——store-only 视图不再等激活，届时这里是首屏唯一的
-   * 自动激活来源；现在就接线，Step 9 只需把视图水位的激活依赖摘掉。
+   * 阶段 9 起它是**首屏唯一的自动激活来源**：视图水位只物化外壳（不 resume），因此这条
+   * fire-and-forget 是「用户看到历史之后 runtime 才开始起来」的唯一接线点。它必须留在
+   * `subscribeReserved` 里、帧编码之后（源码守卫 F1 锁位置）——挪进视图水位就会把激活
+   * 耗时重新算进 `viewReadyMs`，删掉则首屏永不自动激活（死锁）。
    */
   private prewarmRuntimeAfterViewAck(
     sessionId: string,
@@ -4031,7 +4065,8 @@ export class ConversationV4Gateway {
    *
    * 取代过去在每个只读方法里各抄一遍的 `readyFlights → hasLiveConversation →
    * ensureColdReadyPublisher / hydratePublisher` 三段式：读的语义只有一种——「给我一个
-   * 可读的投影」。live 会话直接 hydration；冷会话走视图水位（它内部才会牵扯激活）。
+   * 可读的投影」。live 会话直接 hydration；冷会话走视图水位（**只物化外壳 + 建投影，
+   * 不牵扯激活**；Step 9）。
    */
   private async resolveViewPublisher(sessionId: string): Promise<ConversationTopicPublisher> {
     const existingFlight = this.viewReadyFlights.get(sessionId);

@@ -105,6 +105,7 @@ import {
   createSessionRecordForV4,
   ensureSessionModelAvailableForNextTurn,
   listSessionSubagents,
+  materializeSessionShell,
   registerForkedSession,
   readSessionContextUsage,
 } from "./server-operations.js";
@@ -1631,6 +1632,27 @@ export function createConversationV4Gateway(
             }),
       };
     },
+    // Gateway 的视图水位只建外壳（Step 9）：store 读 session + 首屏种子 + createRecord
+    // 但不 resume。首屏因此不再等 MCP/技能/MEMORY.md 的装载；runtime 由 ACK 之后的后台
+    // 预激活（或 send 类命令）经下面的 `resumePersistedSession` 起来。
+    materializeSessionShell: async (sessionId, resumeThoughtLevel, workspace) => {
+      const persisted = await context.deps.sessionStore?.getSession(sessionId as SessionId);
+      if (!persisted) {
+        context.logger?.warn("ZCode Protocol v4 session shell has no persisted session", {
+          activeSessionCount: context.sessions.size,
+          event: "zcode_protocol.v4.shell_persisted_missing",
+          module: "bootstrap.zcode_protocol",
+          sessionId,
+        });
+        return { status: "notFound" };
+      }
+      await materializeSessionShell(context, {
+        sessionId,
+        ...(workspace ? { workspace } : {}),
+        ...(resumeThoughtLevel ? { thoughtLevel: resumeThoughtLevel } : {}),
+      });
+      return { status: "materialized" };
+    },
     // Gateway 的单一 READY promise 负责并发与水位；binder 只恢复 runtime。
     resumePersistedSession: async (
       sessionId,
@@ -1686,6 +1708,12 @@ export function createConversationV4Gateway(
     getSessionConfigSeed: (sessionId) => {
       const record = context.sessions.get(sessionId);
       if (!record) return null;
+      // view-only shell（Step 9）：runtime 没 resume，`getSessionModelSelection()` 给的是
+      // **默认模型**，读它等于把默认模型当成历史选型显示。首屏只认持久事实（外壳物化时
+      // 用一条窄查询算好放在 record 上），取不到就是空态——激活后由 runtime 真值补齐。
+      if (record.runtimeViewOnlyShell === true) {
+        return record.viewOnlyConfigSeed ?? null;
+      }
       const selection =
         record.app.runtime.getSessionModelSelection() ?? record.restoredModelSelection;
       return {
@@ -1713,6 +1741,10 @@ export function createConversationV4Gateway(
     getSessionUsageSeed: async (sessionId, persistedMessages) => {
       const record = context.sessions.get(sessionId);
       if (!record) return null;
+      // view-only 首屏没有 usage 是**预期**（spec 的首屏降级清单第 ② 项）：容量口径要读
+      // runtime 的当前模型，而它此刻是默认值；用默认模型算出的分母比「暂时没有」更误导。
+      // 激活后 hydration 会再种一次（publisher.seedUsage 的既有覆盖语义）。
+      if (record.runtimeViewOnlyShell === true) return null;
       const contextUsage = await readSessionContextUsage(context, sessionId, persistedMessages);
       // usage seed 会在 hydration 后再次覆盖首帧分母；必须与合成事件
       // 使用同一份当前模型 registry 真值，不能把旧 runtime projection 的窗口写回来。
@@ -1953,31 +1985,38 @@ export function createConversationV4Gateway(
       // 代价：contextWindow 分母会按父 record 的当前模型解析而不是 actor 模型，纯展示层偏差。
       const record = await resolveConversationBackingRecord(context, sessionId);
       if (!record) {
-        // 诊断：hydrate 预期在 runtime 已由 cold-resume 激活后执行；连父 record 兜底
-        // 都落空时，返回空事件会把真实的生命周期竞态伪装成“历史为空”，必须留下明确现场。
-        context.logger?.warn("ZCode Protocol v4 hydrate has no active runtime", {
+        // Step 9：record 缺席**不再**是「读不到历史」的闸门——它只意味着没有内存侧 live
+        // 事件、没有 artifact reader（view-only 骨架层 / 旧宿主）。返回空事件会把
+        // durable transcript 整段丢掉（首屏空历史），所以继续走 store-only 合并。
+        context.logger?.debug("ZCode Protocol v4 hydrate store-only (no backing record)", {
           activeSessionCount: context.sessions.size,
-          event: "zcode_protocol.v4.hydrate_runtime_missing",
+          event: "zcode_protocol.v4.hydrate_store_only",
           module: "bootstrap.zcode_protocol",
           phase: "loadPersistedEvents",
           sessionId,
         });
-        return { events: [], synthesized: false, sourceEventSeq: 0 };
       }
+      // view-only shell 的内存 event store 是空的（没有 runtime 往里写），artifact reader
+      // 与容量口径也都还停在默认模型上：这两项对首屏是**预期缺席**（spec 的首屏降级清单）。
+      const viewOnlyShell = record?.runtimeViewOnlyShell === true;
       // message/part 与 session_entry 的异步读取期间 live sink 仍可收到新事件。
       // gateway 必须知道 memory eventStore 取快照时的 raw cursor，才能只补 await 窗口内
       // 的尾部，并把 transcript 合成的 1..N 序列稳定映射回后续 runtime raw seq。
       // 内存 event store 会淘汰已完成 turn 的瞬态事件，max(events.seq) 会小于真实
       // 游标，让已淘汰的 delta 被当成 await 窗口尾部重放。两次调用之间没有 await，拿到的是
       // 同一时刻的一致快照。
-      const [liveEvents, sourceEventSeq] = await Promise.all([
-        record.eventStore.getEvents(sessionId as SessionId),
-        record.eventStore.getLatestSequenceNumber(sessionId as SessionId),
-      ]);
+      const [liveEvents, sourceEventSeq] = record
+        ? await Promise.all([
+            record.eventStore.getEvents(sessionId as SessionId),
+            record.eventStore.getLatestSequenceNumber(sessionId as SessionId),
+          ])
+        : [[], 0];
       // workflow run 的冷回放：journal 回放出的进度
       // 事件前置到内存事件之前——cold merge 已把该类型归为 memory-only 权威（保序进 supplements），
       // 投影经同一个 reducer 归约，`workflowRuns` 因此在重启前后一致。
-      const replayed = await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents);
+      const replayed = record
+        ? await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents)
+        : [];
       const events = replayed.length === 0 ? liveEvents : [...replayed, ...liveEvents];
       const store = context.deps.sessionStore;
       const source = await loadPersistedConversationMaterialization({
@@ -1990,6 +2029,11 @@ export function createConversationV4Gateway(
                 getSession: (id) => store.getSession(id),
                 messages: (input) => store.messages(input),
                 readTarget: (input) => store.readTarget(input),
+                // Step 9：窗口化时按 id 单条确认 shared_context 的 model-only 上下文消息
+                // （它几乎总在窗口之外，靠窗口正文 find 会静默丢掉分享导入元数据）。
+                ...(store.messageWithParts
+                  ? { messageWithParts: (input) => store.messageWithParts!(input) }
+                  : {}),
                 ...(store.sessionEntries
                   ? {
                       sessionEntries: (input) =>
@@ -2006,16 +2050,13 @@ export function createConversationV4Gateway(
               },
             }
           : {}),
-        // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空 / 有
-        // shared_context 导入时一律退回全量，原因随 `coldWindowFallback` 带出并打点。
+        // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空时退回
+        // 全量，原因随 `coldWindowFallback` 带出并打点。
         ...(store
           ? {
               planColdWindow: async (facts) => {
-                // shared_context 导入的展示元数据依赖「在 active 分支里 find 那条 user
-                // message」，窗口会把它静默丢掉。Step 9 改由 manifest/索引给 id 之后再放开。
-                if (facts.entries.some((entry) => entry.type === "v4/shared_context_import")) {
-                  return { kind: "full" as const, reason: "sharedContextImport" as const };
-                }
+                // Step 9：shared_context 导入不再退全量——那条 model-only 上下文消息由
+                // `cold-event-merge` 按 id 单条确认（不在窗口正文里也读得到）。
                 return readColdTailWindowMaterialization({
                   sessionID: sessionId as SessionId,
                   store,
@@ -2083,31 +2124,41 @@ export function createConversationV4Gateway(
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
       // workspace checkpoint + artifact 才是跨进程持久事实，这里按 user messageId
       // 重建摘要，再交给 transcript hydration 合成同构 ModelComplete。
-      const fileChangeSummariesByMessageId = await buildColdFileChangeSummaries({
-        events: source.memoryEvents,
-        // 窗口化只裁正文，不裁索引：文件摘要必须按**整条** active 分支的 messageId
-        // 过滤（`windowPlan.activeMessageIds`），否则窗口外那一轮的文件摘要会丢。
-        messageIds: windowPlan
-          ? windowPlan.activeMessageIds.map((messageId) => String(messageId))
-          : source.messages.map((message) => String(message.info.id)),
-        readArtifact: async (snapshotRef) =>
-          (await record.app.readToolResultArtifact(snapshotRef)).content,
-        onArtifactError: (messageId, error) =>
-          context.logger?.warn("v4 cold file change artifact read failed", {
-            error: error instanceof Error ? error.message : String(error),
-            event: "zcode_protocol.v4.hydrate_file_changes_failed",
-            messageId,
-            module: "bootstrap.zcode_protocol",
-            sessionId,
-          }),
-      });
+      // record 缺席（store-only 骨架）时没有 artifact reader：摘要为空是**预期降级**，
+      // 不是「这一轮没有改文件」——所以只在有 record 时才尝试。
+      const fileChangeSummariesByMessageId = record
+        ? await buildColdFileChangeSummaries({
+            events: source.memoryEvents,
+            // 窗口化只裁正文，不裁索引：文件摘要必须按**整条** active 分支的 messageId
+            // 过滤（`windowPlan.activeMessageIds`），否则窗口外那一轮的文件摘要会丢。
+            messageIds: windowPlan
+              ? windowPlan.activeMessageIds.map((messageId) => String(messageId))
+              : source.messages.map((message) => String(message.info.id)),
+            readArtifact: async (snapshotRef) =>
+              (await record.app.readToolResultArtifact(snapshotRef)).content,
+            onArtifactError: (messageId, error) =>
+              context.logger?.warn("v4 cold file change artifact read failed", {
+                error: error instanceof Error ? error.message : String(error),
+                event: "zcode_protocol.v4.hydrate_file_changes_failed",
+                messageId,
+                module: "bootstrap.zcode_protocol",
+                sessionId,
+              }),
+          })
+        : undefined;
       // 冷恢复 transcript 不保存模型能力，旧 hydration 自行填 20 万；
       // provider registry 已在 resume 前同步完成，应按恢复/退避后的当前模型精确取值。
-      const contextWindow = resolveSessionModelContextWindow(context, record);
-      const usageSeed = sessionUsageSeedFromRuntimeContextUsage(
-        await readSessionContextUsage(context, sessionId, source.messages),
-        contextWindow,
-      );
+      // view-only shell 的「当前模型」还是默认值：用它算分母比「暂时没有」更误导
+      // （spec 首屏降级 ②），所以这里连 capacity 一起留空，激活后重新 hydration 补齐。
+      const contextWindow =
+        record && !viewOnlyShell ? resolveSessionModelContextWindow(context, record) : undefined;
+      const usageSeed =
+        record && !viewOnlyShell
+          ? sessionUsageSeedFromRuntimeContextUsage(
+              await readSessionContextUsage(context, sessionId, source.messages),
+              contextWindow,
+            )
+          : null;
       const merged = mergeColdConversationEvents({
         contextWindow,
         fileChangeSummariesByMessageId,

@@ -1043,6 +1043,20 @@ export interface SessionMessageIndexEntry {
   storageRowId: number;
 }
 
+/**
+ * 「最后一条带 mode 的 assistant」的窄读结果（首屏 model/mode 种子，IS3 / Step 9）。
+ *
+ * view-only shell 用 `createRecord(resume:false)` 物化 record：runtime 取**默认模型**，
+ * 于是首屏若读 record 就会把默认模型当成历史选型显示出来。首屏种子只能来自持久事实，
+ * 而 mode 只落在 assistant 消息上（没有 session_entry 承载它）。
+ */
+export interface PersistedAssistantSelection {
+  /** 持久化的协作模式原值；调用方必须再过一次 mode 词表校验（旧记录可能有非法值）。 */
+  mode?: string;
+  /** 同一条消息的选型；缺 provider/model 时不伪造（首屏显示空态）。 */
+  modelSelection?: ModelSelection;
+}
+
 // ── turn 行清单（row manifest）：全序计数的持久权威 ─────────────────────────
 //
 // 两张表分工（session_turn_manifest / session_turn_query_manifest）：
@@ -1239,6 +1253,18 @@ export interface SessionStorePort {
    * 缺席（旧宿主/内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
    */
   listSessionMessageIndex?(input: { sessionID: SessionId }): Promise<SessionMessageIndexEntry[]>;
+  /**
+   * 首屏 model/mode 的窄读：**最后一条带 mode 的 assistant**（IS3 / Step 9）。
+   *
+   * 只读一行的 `data`（不解码 parts、不扫全表）。用途是 view-only shell 的首屏种子：
+   * `createRecord(resume:false)` 让 runtime 落到默认模型，`getSessionConfigSeed` 若读 record
+   * 就会把**默认模型**当成历史选型显示出来。
+   *
+   * 缺席（旧宿主 / 内存 store）→ 首屏显示空态，激活后再补齐（spec 的首屏降级清单第 ④ 项）。
+   */
+  readLatestAssistantSelection?(input: {
+    sessionID: SessionId;
+  }): Promise<PersistedAssistantSelection | null>;
   /**
    * 分支感知的尾窗正文读（IS2 / IS6 的读面）。
    *

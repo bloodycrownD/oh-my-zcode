@@ -44,6 +44,7 @@ import type {
   SessionInputRecord,
   SessionInputStatus,
   SessionMessageIndexEntry,
+  PersistedAssistantSelection,
   SessionTaskLinkRecord,
   SessionRevert,
   SessionStorePort,
@@ -634,6 +635,13 @@ export class SqliteSessionStore
     sessionID: SessionId;
   }): Promise<SessionMessageIndexEntry[]> {
     return messageRepository.listSessionMessageIndex(this.db, input);
+  }
+
+  /** 首屏 model/mode 窄读（Step 9）：一行、不读 parts。 */
+  async readLatestAssistantSelection(input: {
+    sessionID: SessionId;
+  }): Promise<PersistedAssistantSelection | null> {
+    return messageRepository.readLatestAssistantSelection(this.db, input);
   }
 
   async readActiveBranchTail(input: {

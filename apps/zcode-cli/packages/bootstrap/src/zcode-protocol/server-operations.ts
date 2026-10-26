@@ -23,6 +23,7 @@ import {
   type ExecutionShellSelection,
   type MessageWithParts,
   type ModelSelection,
+  type PersistedAssistantSelection,
   type MessageId,
   type ModelId,
   type ModelProviderId,
@@ -117,6 +118,7 @@ import {
   projectSessionSubagents,
 } from "./subagent-session-query.js";
 import { runSessionModelConfigMutation } from "../zcode-protocol-v4/model-config-mutation.js";
+import type { SessionConfigSeed } from "../zcode-protocol-v4/product-projection.js";
 import { runWithSessionResidencyFinalization } from "./session-residency.js";
 
 const PLAN_MODE_GOAL_CONTINUATION_SKIPPED_MESSAGE = "Plan mode 下已记录 goal，但不会自动继续。";
@@ -1400,32 +1402,63 @@ interface ActivatedSessionForResume {
 }
 
 /**
- * 只恢复 session runtime 生命周期，不物化任何协议表示。
+ * view-only 外壳的物化结果（`materializeSessionShell`）。
  *
- * V4 冷订阅过去复用 resumeSession，虽然返回值会被直接丢弃，仍会为大历史
- * 构建一份完整 legacy snapshot。runtime 激活和 legacy 表示是两个职责；这里保留
- * snapshot 之前的原有顺序与副作用，让 V4 随后用自己的 durable projection 水合。
+ * `created: false` 只表示「record 已经存在」——它可能是 live runtime、也可能是另一个
+ * view-only shell。要不要 resume 由 `record.runtimeViewOnlyShell` 决定，不由这里决定。
  */
-export async function activateSessionForResume(
+export interface MaterializedSessionShell {
+  record: ZCodeProtocolSessionRecord;
+  knownSession?: SessionInfo;
+  created: boolean;
+}
+
+/**
+ * **只物化外壳**：store 读 session + 首屏 model/mode 种子 → `createRecord(resume:false)` →
+ * `sessions.set`。**不** resume。
+ *
+ * 分界点按 spec 落在「`sessions.set` 与 `app.resume` 之间」。拆开的收益是首屏不必等
+ * runtime 激活（MCP / 技能 / MEMORY.md 的装载都在激活里）；代价是这期间的 record 处于
+ * **view-only** 态，必须由 `runtimeViewOnlyShell` 标出来——`sessions` 在册不再等于
+ * 「runtime 跑起来了」。
+ *
+ * 首屏种子（model/mode）只来自持久事实：`createRecord(resume:false)` 会让 runtime 落到
+ * **默认模型**，读 record 会把默认模型当成历史选型显示出来。
+ *
+ * **per-session 单飞**：Step 9 起同一条冷会话有两条入口会走到这里（视图水位只建外壳、
+ * 激活建外壳 + resume），它们在 gateway 是两条独立水位。不在这里再串一次的话，并发时
+ * 会建出**两个 app**，`sessions.set` 后写覆盖先写——被覆盖的那个已经 resume 的 runtime
+ * 就此孤儿化（双写事件账、transcript 定格，与幽灵 runtime 同一类事故）。
+ */
+export async function materializeSessionShell(
   context: ZCodeProtocolAgentServerContext,
   params: ZCodeSessionResumeParams,
-  options: { reusePersistedMessages?: boolean } = {},
-): Promise<ActivatedSessionForResume> {
-  const resumeStartedAt = Date.now();
+): Promise<MaterializedSessionShell> {
+  const flights = (context.sessionShellFlights ??= new Map());
+  const inFlight = flights.get(params.sessionId);
+  if (inFlight) return await inFlight;
+  const flight = materializeSessionShellOnce(context, params);
+  flights.set(params.sessionId, flight);
+  try {
+    return await flight;
+  } finally {
+    // 成功/失败都释放：失败之后必须允许重试（与 `coldResume` 的 settle 即释放一致）。
+    if (flights.get(params.sessionId) === flight) flights.delete(params.sessionId);
+  }
+}
+
+async function materializeSessionShellOnce(
+  context: ZCodeProtocolAgentServerContext,
+  params: ZCodeSessionResumeParams,
+): Promise<MaterializedSessionShell> {
+  const shellStartedAt = Date.now();
   const activeBeforeWait = context.sessions.has(params.sessionId);
-  context.logger?.debug("ZCode Protocol session resume started", {
-    activeBeforeWait,
-    event: "zcode_protocol.session.resume_started",
-    hasSessionStore: Boolean(context.deps.sessionStore),
-    module: "bootstrap.zcode_protocol",
-    sessionId: params.sessionId,
-  });
   // 再激活闸门：该 session 正在容量去激活（app.close 收尾未完成）时先等待，
   // 防止新旧 app 对同一 session 资源交错读写。无 in-flight 时立即返回。
   await context.sessionResidentPool?.waitForDeactivation(params.sessionId);
   const existing = context.sessions.get(params.sessionId);
   if (existing) {
-    return { record: existing };
+    return { record: existing, created: false };
   }
   let session = await getPersistedSession(context, params.sessionId);
   if (!session) {
@@ -1434,7 +1467,7 @@ export async function activateSessionForResume(
     context.logger?.warn("ZCode Protocol session resume found no persisted record", {
       activeBeforeWait,
       activeSessionCount: context.sessions.size,
-      durationMs: Math.max(0, Date.now() - resumeStartedAt),
+      durationMs: Math.max(0, Date.now() - shellStartedAt),
       event: "zcode_protocol.session.resume_persisted_missing",
       hasSessionStore: Boolean(context.deps.sessionStore),
       module: "bootstrap.zcode_protocol",
@@ -1455,8 +1488,10 @@ export async function activateSessionForResume(
       workspaceIdentity: session.workspaceID,
       workspacePath: session.path ?? session.directory,
     });
-  let persistedMessages = await readPersistedSessionMessages(context, params.sessionId);
-  const mode = derivePersistedSessionMode(persistedMessages);
+  // 首屏 model/mode：一条窄读（最后一条带 mode 的 assistant），不读全量正文。
+  // 取不到就走空态——绝不能退回 record 的默认模型（那正是 spec 查明的坑）。
+  const persistedSelection = await readPersistedAssistantSelection(context, params.sessionId);
+  const mode = derivePersistedSessionMode(persistedSelection);
   // shell 设置变更只对新 session 生效；冷恢复必须使用创建时落库的
   // Bash shell 快照。runtime.resumeFromStore 会读取快照；这里只负责不把
   // resume 请求里携带的当前 settings 重新注入老 session。
@@ -1477,7 +1512,9 @@ export async function activateSessionForResume(
       workspace,
     },
     params.sessionId as SessionId,
-    true,
+    // **不 resume**：这正是本步的分界点。runtime 由 `activateRuntime` 在 ACK 之后
+    // （后台预激活）或 send 类命令里起来。
+    false,
     { kind: "host" },
     session.traceID ? { traceId: session.traceID } : undefined,
   );
@@ -1486,33 +1523,145 @@ export async function activateSessionForResume(
   // 表现为原会话消失、冒出"新任务刚刚"）。恢复路径回填 store 的真实时间。
   if (session.time?.created) record.createdAt = session.time.created;
   if (session.time?.updated) record.updatedAt = session.time.updated;
+  // 首屏选型（只读意图，不是执行绑定）：容量口径与首屏种子都要它，激活后被 resume 结果覆盖。
+  if (persistedSelection?.modelSelection) {
+    record.restoredModelSelection = persistedSelection.modelSelection;
+  }
+  // view-only 首屏种子：`getSessionConfigSeed` 只在 `runtimeViewOnlyShell` 为真时读它。
+  // 之所以必须单独存一份：`createRecord(resume:false)` 之后 `runtime.getSessionModelSelection()`
+  // 返回的是**默认模型**，直接读 record 会把默认模型当成历史选型显示出来。
+  record.viewOnlyConfigSeed = buildViewOnlyConfigSeed(persistedSelection, mode);
+  // **唯一**的 view-only 标记：`V4GatewayHost.isSessionRuntimeActive` 读它区分
+  // 「record 在册」与「runtime 在跑」。漏标 = 首屏不自动激活（预激活会以为已 live）。
+  record.runtimeViewOnlyShell = true;
   context.assertServing?.();
   context.sessions.set(params.sessionId, record);
+  context.logger?.debug("ZCode Protocol session shell materialized", {
+    activeSessionCount: context.sessions.size,
+    durationMs: Math.max(0, Date.now() - shellStartedAt),
+    event: "zcode_protocol.session.shell_materialized",
+    hasPersistedModel: Boolean(persistedSelection?.modelSelection),
+    mode: mode ?? null,
+    module: "bootstrap.zcode_protocol",
+    sessionId: params.sessionId,
+    traceId: record.traceContext.traceId,
+  });
+  return { record, knownSession: session, created: true };
+}
+
+/**
+ * 同一份 record 的激活单飞（Step 9，WeakMap：不延长 record 生命周期）。
+ *
+ * 只在「record 已物化、runtime 还没起来」的窗口里有用；成功后标记清除，后续调用直接早退。
+ */
+const runtimeActivationFlights = new WeakMap<
+  ZCodeProtocolSessionRecord,
+  Promise<ActivatedSessionForResume>
+>();
+
+/**
+ * **激活本体**：`app.resume`（+ `activatePausedTargetAfterResume`）+ 清 view-only 标记。
+ *
+ * 只对 view-only shell 真正做事：live runtime（热会话 / 别的路径刚激活过）直接返回，
+ * **绝不**二次 resume——那会向同一份事件日志追写第二条 `SessionResumed`、重放 resume
+ * hooks、双写账本（`v4-gateway.ts` 里记录的幽灵 runtime 事故）。
+ *
+ * 失败时 `runtimeViewOnlyShell` 保留（下一次触发可重试）；成功才清。
+ */
+export async function activateRuntime(
+  context: ZCodeProtocolAgentServerContext,
+  shell: MaterializedSessionShell,
+  options: { reusePersistedMessages?: boolean; resumeStartedAt?: number } = {},
+): Promise<ActivatedSessionForResume> {
+  const { record } = shell;
+  if (record.runtimeViewOnlyShell !== true) {
+    // 已经是 live runtime：不重复 resume，也不写 runtimeActivationMs（本进程没观测到激活）。
+    return {
+      record,
+      ...(shell.knownSession ? { knownSession: shell.knownSession } : {}),
+    };
+  }
+  // per-record 单飞（Step 9）：拆开之后「外壳已在、还没 resume」的窗口从「一次同步间隙」
+  // 变成了整个激活时长，两个入口（V4 预激活 / send 命令，或 legacy session/resume）
+  // 拿着同一条 record 进来就会 resume 两次——第二条 SessionResumed、resume hooks 重放、
+  // 事件账双写。按 record 身份（WeakMap，不延长生命周期）合并成一次。
+  const inFlight = runtimeActivationFlights.get(record);
+  if (inFlight) return await inFlight;
+  const flight = activateRuntimeOnce(context, shell, options);
+  runtimeActivationFlights.set(record, flight);
+  try {
+    return await flight;
+  } finally {
+    if (runtimeActivationFlights.get(record) === flight) runtimeActivationFlights.delete(record);
+  }
+}
+
+async function activateRuntimeOnce(
+  context: ZCodeProtocolAgentServerContext,
+  shell: MaterializedSessionShell,
+  options: { reusePersistedMessages?: boolean; resumeStartedAt?: number },
+): Promise<ActivatedSessionForResume> {
+  const { record } = shell;
+  const resumeStartedAt = options.resumeStartedAt ?? Date.now();
+  // 全量正文只在激活时读一次：view-only 首屏不付这份成本（窗口化冷开更是只读尾窗）。
+  let persistedMessages = options.reusePersistedMessages
+    ? await readPersistedSessionMessages(context, record.app.sessionId)
+    : undefined;
   const resumeResult = await runSessionModelConfigMutation(record.app, async () => {
-    const result = options.reusePersistedMessages
+    const result = persistedMessages
       ? await record.app.resume({ persistedMessages })
       : await record.app.resume();
     // 仅用于首次投影种子，包含有效模型+空档位；它不是第二份可执行 Runtime 选择。
     record.restoredModelSelection = result.modelSelection;
     return result;
   });
-  if (options.reusePersistedMessages && resumeResult.persistedMessagesReloadRequired) {
-    persistedMessages = await readPersistedSessionMessages(context, params.sessionId);
+  if (persistedMessages && resumeResult.persistedMessagesReloadRequired) {
+    persistedMessages = await readPersistedSessionMessages(context, record.app.sessionId);
   }
+  // 激活成功才清标记（失败保留 → 下一次订阅/发送可以重试激活）。
+  record.runtimeViewOnlyShell = undefined;
   context.logger?.info("ZCode Protocol session resume completed", {
     activeSessionCount: context.sessions.size,
     durationMs: Math.max(0, Date.now() - resumeStartedAt),
     event: "zcode_protocol.session.resume_completed",
     module: "bootstrap.zcode_protocol",
-    persistedMessageCount: persistedMessages.length,
-    sessionId: params.sessionId,
+    persistedMessageCount: persistedMessages?.length ?? 0,
+    sessionId: record.app.sessionId,
     traceId: record.traceContext.traceId,
   });
   return {
-    knownSession: session,
+    knownSession: shell.knownSession,
     record,
-    ...(options.reusePersistedMessages ? { persistedMessages } : {}),
+    ...(persistedMessages ? { persistedMessages } : {}),
   };
+}
+
+/**
+ * 只恢复 session runtime 生命周期，不物化任何协议表示。
+ *
+ * V4 冷订阅过去复用 resumeSession，虽然返回值会被直接丢弃，仍会为大历史
+ * 构建一份完整 legacy snapshot。runtime 激活和 legacy 表示是两个职责；这里保留
+ * snapshot 之前的原有顺序与副作用。
+ *
+ * Step 9 起拆成两步：`materializeSessionShell`（外壳，可单独用于首屏）+
+ * `activateRuntime`（激活本体）。本函数是「两步一起做」的兼容入口，既有调用方
+ * （legacy `session/resume`、V4 的 `resumePersistedSession`）行为不变。
+ */
+export async function activateSessionForResume(
+  context: ZCodeProtocolAgentServerContext,
+  params: ZCodeSessionResumeParams,
+  options: { reusePersistedMessages?: boolean } = {},
+): Promise<ActivatedSessionForResume> {
+  const resumeStartedAt = Date.now();
+  context.logger?.debug("ZCode Protocol session resume started", {
+    activeBeforeWait: context.sessions.has(params.sessionId),
+    event: "zcode_protocol.session.resume_started",
+    hasSessionStore: Boolean(context.deps.sessionStore),
+    module: "bootstrap.zcode_protocol",
+    sessionId: params.sessionId,
+  });
+  const shell = await materializeSessionShell(context, params);
+  return await activateRuntime(context, shell, { ...options, resumeStartedAt });
 }
 
 export async function resumeSession(context: ZCodeProtocolAgentServerContext, rawParams: unknown) {
@@ -3287,14 +3436,70 @@ async function readPersistedSessionMessages(
   }) ?? []);
 }
 
-function derivePersistedSessionMode(
-  messages: readonly MessageWithParts[],
-): ZCodeSessionCreateParams["mode"] | undefined {
-  for (let index = messages.length - 1; index >= 0; index -= 1) {
-    const info = messages[index]?.info;
-    if (info?.role === "assistant" && isZCodeSessionMode(info.mode)) return info.mode;
+/**
+ * 首屏 model/mode 的唯一来源：**最后一条带 mode 的 assistant**（窄读，不读全量正文）。
+ *
+ * 过去是 `derivePersistedSessionMode(messages)` 在整份持久正文里倒扫——view-only 外壳不能
+ * 为了一个 mode 字段读 5k 条消息（那正好是 Step 5/7 要消掉的成本）。查询语义必须与倒扫
+ * 等价：同一权威序的**最后一条**、且 `mode` 必须过词表（旧记录的非法值当没有）。
+ *
+ * 读失败/宿主没有这个能力时返回 null → 首屏显示空态，激活后由 runtime 真值补齐。
+ */
+async function readPersistedAssistantSelection(
+  context: ZCodeProtocolAgentServerContext,
+  sessionId: string,
+): Promise<PersistedAssistantSelection | null> {
+  const store = context.deps.sessionStore;
+  if (!store?.readLatestAssistantSelection) return null;
+  try {
+    return await store.readLatestAssistantSelection({ sessionID: sessionId as SessionId });
+  } catch (error) {
+    // 首屏种子读失败不能拖垮首屏：空态是明确的降级，激活后会补齐。
+    context.logger?.warn("ZCode Protocol session shell selection read failed", {
+      error: error instanceof Error ? error.message : String(error),
+      event: "zcode_protocol.session.shell_selection_failed",
+      module: "bootstrap.zcode_protocol",
+      sessionId,
+    });
+    return null;
   }
-  return undefined;
+}
+
+function derivePersistedSessionMode(
+  selection: PersistedAssistantSelection | null,
+): ZCodeSessionCreateParams["mode"] | undefined {
+  const mode = selection?.mode;
+  return isZCodeSessionMode(mode) ? mode : undefined;
+}
+
+/**
+ * view-only 首屏的 config 种子：**只放持久事实**。
+ *
+ * 故意不给 `thoughtLevels` / `planEnabled` / `permissionGrant`：它们只能从 runtime 读，
+ * 而 view-only 的 runtime 还没起来（spec 的首屏降级清单第 ④ 项）。给默认值会让 UI
+ * 把「不知道」显示成「就是默认」，激活后再改一次反而更乱。取不到模型时整个种子为空对象
+ * ——空态是明确的降级，不是伪造。
+ */
+function buildViewOnlyConfigSeed(
+  selection: PersistedAssistantSelection | null,
+  mode: ZCodeSessionCreateParams["mode"] | undefined,
+): SessionConfigSeed {
+  const modelSelection = selection?.modelSelection;
+  return {
+    ...(modelSelection
+      ? {
+          modelSelection: {
+            providerId: modelSelection.providerId,
+            modelId: modelSelection.modelId,
+            ...(modelSelection.options ? { options: { ...modelSelection.options } } : {}),
+          },
+          provider: modelSelection.providerId,
+          model: modelSelection.modelId,
+          thought: modelSelection.options?.reasoningLevel ?? "",
+        }
+      : {}),
+    ...(mode ? { mode } : {}),
+  };
 }
 
 function isZCodeSessionMode(

@@ -22,8 +22,12 @@
  *      其余语义（live / viewOnly / absent / runtime 就绪）各走自己的函数——散落直判会把
  *      「record 在册」当成「runtime 跑起来了」（幽灵 runtime 前科）。
  *   F. **ACK 后后台预激活**（IS3 的激活触发点）：调用点必须在帧编码之后、且只此一处。
- *      阶段 8 里视图水位内部仍等激活，所以它今天是 no-op 的冗余路径——但它必须存在，
- *      Step 9 的 store-only 视图靠它接管自动激活（源码守卫锁住位置）。
+ *      **Step 9 起它是首屏唯一的自动激活来源**——视图水位只物化外壳（不 resume），
+ *      摘掉预激活就是「首屏永不自动激活」的死锁，而 D3 覆盖不到（F1/F2 锁形状与接缝）。
+ *   G. **外壳 / 激活拆分**（Step 9）：视图水位只建 view-only 外壳（createRecord 不 resume），
+ *      激活归 ACK 后的预激活与 send 类命令；外壳存在 ≠ runtime 就绪（D4/D5 + G1-G3）。
+ *   H. **窗口化冷开的 shared_context 兼容**（Step 9）：那条 model-only 上下文消息几乎总在
+ *      窗口之外，靠「窗口正文 find」会静默丢掉分享导入元数据；改为按 id 单条确认（H1/H2）。
  *
  * 运行：`npx tsx --test scripts/test-view-runtime-split.mjs`（必须走 tsx：gateway 的依赖
  * 链摸到 `@zcode/model-option-map` 的 src 出口）。
@@ -39,14 +43,20 @@ const { ConversationV4Gateway, commandRuntimeGate } = await import(
 const { ConversationTopicPublisher } = await import(
   new URL("../src/zcode-protocol-v4/conversation-topic-publisher.ts", import.meta.url).href
 );
+const { loadPersistedConversationMaterialization } = await import(
+  new URL("../src/zcode-protocol-v4/cold-event-merge.ts", import.meta.url).href
+);
+const { activateRuntime } = await import(
+  new URL("../src/zcode-protocol/server-operations.ts", import.meta.url).href
+);
 const { commandTypeSchema } = await import("@zcode/shared/zcode-protocol-v4");
 
 process.on("exit", (code) => {
   console.log("");
   console.log(
     code === 0
-      ? "TEST PASS — Step 8 view/runtime split (IS3 + IS4)"
-      : `TEST FAIL — Step 8 view/runtime split (exit code ${code})`,
+      ? "TEST PASS — Step 8/9 view/runtime split (IS3 + IS4)"
+      : `TEST FAIL — Step 8/9 view/runtime split (exit code ${code})`,
   );
 });
 
@@ -320,25 +330,45 @@ test("B2: 需要 record 的普通命令一律 require-runtime（不误升级成�
 
 // ── C/D: 命令闸门与 runtime 水位（gateway 级）───────────────────────────────
 
-function gatewayFixture({ resumeRegistersRecord = true } = {}) {
-  const calls = { resume: 0, executed: [], errors: [] };
+function gatewayFixture({
+  resumeRegistersRecord = true,
+  shellPort = false,
+  runtimeProbe = true,
+} = {}) {
+  const calls = { resume: 0, shell: 0, executed: [], errors: [] };
   let live = false;
   // Step 9 起「record 在册」与「runtime 在跑」是两个事实：view-only shell 只建 record。
   // 默认让二者同步（旧口径），需要暴露缝的用例用 setRuntimeActive 单独拧。
   let runtimeActive = null;
   let resumeBehaviour = () => "resumed";
+  // 可控的「resume 悬在半空」——用来证明视图水位/ACK 没有等激活（等了的实现会挂在这里）。
+  let resumeGate = null;
   const host = {
     sessionExists: () => live,
-    isSessionRuntimeActive: () => (runtimeActive === null ? live : runtimeActive),
+    ...(runtimeProbe
+      ? { isSessionRuntimeActive: () => (runtimeActive === null ? live : runtimeActive) }
+      : {}),
     emitWireFrame: () => {},
     executeCommand: async (envelope) => {
       calls.executed.push(envelope.type);
       return undefined;
     },
+    ...(shellPort
+      ? {
+          // 生产宿主的形态：只建外壳（record 在册、runtime 没起），不 resume。
+          materializeSessionShell: async () => {
+            calls.shell += 1;
+            live = true;
+            runtimeActive = false;
+            return { status: "materialized" };
+          },
+        }
+      : {}),
     resumePersistedSession: async () => {
       calls.resume += 1;
       const outcome = resumeBehaviour();
       if (outcome === "throw") throw new Error("resume boom");
+      if (resumeGate) await resumeGate.promise;
       if (resumeRegistersRecord) live = true;
       runtimeActive = true;
       return { status: "resumed", persistedMessages: [] };
@@ -365,6 +395,16 @@ function gatewayFixture({ resumeRegistersRecord = true } = {}) {
     },
     setResumeBehaviour: (next) => {
       resumeBehaviour = next;
+    },
+    /** 让下一次 resume 停在半空，返回放行函数。 */
+    holdResume: () => {
+      let release;
+      resumeGate = { promise: new Promise((resolve) => (release = resolve)) };
+      return () => {
+        // 已经在 await 的那个 promise 持有自己的引用，所以必须先放行再清门。
+        resumeGate = null;
+        release();
+      };
     },
   };
 }
@@ -504,7 +544,9 @@ test("D1: 激活失败不驻留——下一次发送能重新激活，且 runtim
   }
 });
 
-test("D2: 首次订阅只激活一次；runtimeReady 查询在激活前为 false/null", async () => {
+test("D2: 旧宿主（无 shell 端口）首次订阅仍只激活一次；runtimeReady 在激活前为 false/null", async () => {
+  // 没有 `materializeSessionShell` 的宿主（测试桩 / 旧宿主）退回 Step 8 的「先激活再建投影」：
+  // 这条降级分支必须保持逐字不变，否则窗口化之外的宿主会一起断掉。
   const { host, calls } = gatewayFixture();
   const gateway = new ConversationV4Gateway(host);
   try {
@@ -517,10 +559,91 @@ test("D2: 首次订阅只激活一次；runtimeReady 查询在激活前为 false
       connectionId: "conn-1",
       clientMode: "desktop-continuous",
     });
-    assert.equal(calls.resume, 1, "订阅期间的视图水化只激活一次");
-    // 让 ACK 后的后台预激活（microtask）跑完：它必须复用同一条水位，不得二次 resume。
+    assert.equal(calls.resume, 1, "降级分支的视图水化仍要等一次激活");
     await new Promise((resolve) => setTimeout(resolve, 0));
     assert.equal(calls.resume, 1, "ACK 后预激活不得重复 resume");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("G1: 视图水位只物化外壳（不 resume），激活由 ACK 后的预激活接管（Step 9 的核心拆分）", async () => {
+  const { host, calls, holdResume } = gatewayFixture({ shellPort: true });
+  const gateway = new ConversationV4Gateway(host);
+  const releaseResume = holdResume();
+  try {
+    // 关键断言的手法是让 resume **悬在半空**：视图水位若还在等激活，subscribe 就会挂住。
+    const subscribing = gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    const settled = await Promise.race([
+      subscribing.then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 250)),
+    ]);
+    assert.equal(settled, "resolved", "视图水位不得等激活：等了的实现会在这里超时");
+    await subscribing;
+    assert.equal(calls.shell, 1, "视图水位必须物化外壳");
+    assert.equal(
+      (await gateway.runtimeReady({ sessionId: SESSION_ID })).runtimeReady,
+      false,
+      "ACK 已发出而 resume 还没落定 → 首屏不算 runtime 就绪",
+    );
+
+    releaseResume();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.resume, 1, "ACK 之后必须自动激活（否则首屏永不就绪 = 死锁）");
+    const ready = await gateway.runtimeReady({ sessionId: SESSION_ID });
+    assert.equal(ready.runtimeReady, true);
+    assert.equal(typeof ready.runtimeReadyMs, "number");
+  } finally {
+    releaseResume();
+    gateway.dispose();
+  }
+});
+
+test("G2: 外壳已就绪后再订阅不重复激活（shell → 激活是单向升级）", async () => {
+  const { host, calls } = gatewayFixture({ shellPort: true });
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-1",
+      clientMode: "desktop-continuous",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.resume, 1);
+
+    // 第二次订阅（新连接）：外壳已在、runtime 已在跑 → 两条水位都不该再动。
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-2",
+      clientMode: "desktop-continuous",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(calls.resume, 1, "live 会话不得二次 resume（幽灵 runtime 前科）");
+    assert.equal(calls.shell, 1, "外壳只物化一次");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("G3: 外壳物化失败（notFound）沿用 subscribe 的会话不可用分型，不激活", async () => {
+  const { host, calls } = gatewayFixture({ shellPort: true });
+  host.materializeSessionShell = async () => ({ status: "notFound" });
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await assert.rejects(
+      gateway.subscribe({
+        topic: `conversation/${SESSION_ID}`,
+        connectionId: "conn-1",
+        clientMode: "desktop-continuous",
+      }),
+      /sessionNotFound|not persisted|fault\.subscribe/,
+      "store 里也没有这条会话 → notFound（不是静默空历史）",
+    );
+    assert.equal(calls.resume, 0, "外壳都物化不出来时不得硬激活");
   } finally {
     gateway.dispose();
   }
@@ -530,8 +653,12 @@ test("D3: record 之外的两条事实——一次成功激活让 runtimeReady �
   // Step 9 的 view-only shell 会「createRecord 但不 resume」，所以这两个判断都不能只看 record：
   //   - runtimeReady 要能读激活结论（否则 shell 一出现就误报「已就绪」）；
   //   - 「会话是否存在」要包含「视图已水化」（否则 shell 上的命令全被 sessionNotFound 拒掉）。
-  // 本夹具刻意让 resume 成功但不登记 record，把这两条缝单独暴露出来。
-  const { host, calls } = gatewayFixture({ resumeRegistersRecord: false });
+  // 本夹具刻意让 resume 成功但**不登记 record**、也**不给活性探针**：这样「就绪」只能来自
+  // 激活结论集合本身（旧宿主 + 无 record 的最坏组合，D3 就是这条缝的锚点）。
+  const { host, calls } = gatewayFixture({
+    resumeRegistersRecord: false,
+    runtimeProbe: false,
+  });
   const gateway = new ConversationV4Gateway(host);
   try {
     await gateway.subscribe({
@@ -608,6 +735,278 @@ test("D5: disposeSession 清掉激活结论——重建出的 shell 不能继承
   }
 });
 
+// ── H: 窗口化冷开的 shared_context 兼容（Step 9）───────────────────────────
+
+const SHARED_CONTEXT_MESSAGE = {
+  info: {
+    id: "m-shared-context",
+    sessionID: SESSION_ID,
+    role: "user",
+    time: { created: 1 },
+    agent: "zcode-agent",
+    source: "shared_context",
+    visibility: "model-only",
+    semantics: {
+      origin: "import",
+      kind: "shared_context",
+      source: "conversation_share",
+      uiVisibility: "hidden",
+      providerVisibility: "visible",
+      transcriptVisibility: "visible",
+    },
+  },
+  parts: [],
+};
+
+const TAIL_MESSAGE = {
+  info: {
+    id: "m-tail-user",
+    sessionID: SESSION_ID,
+    role: "user",
+    time: { created: 2 },
+    agent: "a",
+  },
+  parts: [],
+};
+
+function sharedContextStore({ withSingleRead = true, readCalls = [] } = {}) {
+  return {
+    getSession: async () => ({ title: "分享的会话", revert: {} }),
+    messages: async () => [SHARED_CONTEXT_MESSAGE, TAIL_MESSAGE],
+    readTarget: async () => null,
+    sessionEntries: async () => [
+      {
+        id: "entry-shared-context",
+        sessionID: SESSION_ID,
+        type: "v4/shared_context_import",
+        time: { created: 1, updated: 1 },
+        data: { contextId: "ctx-1", shareUrl: "https://share.example/x", status: "pending" },
+      },
+    ],
+    ...(withSingleRead
+      ? {
+          messageWithParts: async ({ messageID }) => {
+            readCalls.push(String(messageID));
+            return messageID === SHARED_CONTEXT_MESSAGE.info.id ? SHARED_CONTEXT_MESSAGE : null;
+          },
+        }
+      : {}),
+  };
+}
+
+/** 只喂尾部一轮的窗口计划（Steps 6/7 的形状：正文不含那条 model-only 上下文消息）。 */
+function tailWindowPlan(messages) {
+  return {
+    kind: "window",
+    messages,
+    ordinal: 1,
+    rowIdBase: 10,
+    turnCount: 1,
+    rowCount: 2,
+    limitBefore: TAIL_MESSAGE.info.id,
+    branchTurnIds: ["turn-1"],
+    activeMessageIds: [SHARED_CONTEXT_MESSAGE.info.id, TAIL_MESSAGE.info.id],
+    windowMessageIds: [TAIL_MESSAGE.info.id],
+    facts: { totalCount: 2, firstRowId: 10 },
+    manifestAdjusted: false,
+    messageIndexChecked: true,
+    precedingTurnFirstMessageId: null,
+  };
+}
+
+test("H1: 窗口正文里没有分享导入的上下文消息时，按 id 单条读补回元数据（不静默消失）", async () => {
+  const readCalls = [];
+  const result = await loadPersistedConversationMaterialization({
+    memoryEvents: [],
+    sessionId: SESSION_ID,
+    store: sharedContextStore({ readCalls }),
+    planColdWindow: async () => tailWindowPlan([TAIL_MESSAGE]),
+  });
+  assert.deepEqual(readCalls, [SHARED_CONTEXT_MESSAGE.info.id], "只读分支首条一次（O(1)）");
+  assert.ok(result.sharedContextImport, "窗口化不得丢掉分享导入的展示元数据");
+  assert.equal(result.sharedContextImport.contextId, "ctx-1");
+  assert.equal(result.sharedContextImport.status, "pending");
+  assert.equal(result.messages.length, 1, "正文仍然只有窗口那一轮");
+});
+
+test("H2: 那条消息本来就在窗口正文里时不发生额外单条读（正常会话不付这份成本）", async () => {
+  const readCalls = [];
+  const result = await loadPersistedConversationMaterialization({
+    memoryEvents: [],
+    sessionId: SESSION_ID,
+    store: sharedContextStore({ readCalls }),
+    planColdWindow: async () => tailWindowPlan([SHARED_CONTEXT_MESSAGE, TAIL_MESSAGE]),
+  });
+  assert.deepEqual(readCalls, [], "窗口内能找到就不该再读一次");
+  assert.equal(result.sharedContextImport?.contextId, "ctx-1");
+  assert.equal(result.messages.length, 2);
+});
+
+// ── I: 外壳 / 激活拆分与首屏降级（Step 9 的接线守卫）────────────────────────
+//
+// 这三个点都是「删掉一行就静默退化」的接缝：首屏显示默认模型、usage 用默认分母、
+// record 缺席时退回空历史。行为用例需要完整的 bootstrap context（Step 13 的端到端），
+// 这里只锁「那一行在不在、在不在正确的位置」。
+
+const serverOperationsSource = readFileSync(
+  new URL("../src/zcode-protocol/server-operations.ts", import.meta.url),
+  "utf8",
+);
+const bridgeSource = readFileSync(
+  new URL("../src/zcode-protocol/v4-bridge.ts", import.meta.url),
+  "utf8",
+);
+
+test("I1: shell 只建 record 不 resume，activateRuntime 才 resume 并清 view-only 标记", () => {
+  const shellAt = serverOperationsSource.indexOf("export async function materializeSessionShell(");
+  const activateAt = serverOperationsSource.indexOf("export async function activateRuntime(");
+  assert.ok(shellAt > 0 && activateAt > shellAt, "两个函数必须拆开且顺序稳定");
+  const shellBody = serverOperationsSource.slice(shellAt, activateAt);
+  assert.ok(
+    !shellBody.includes("record.app.resume("),
+    "外壳不得 resume（Step 9 的整个收益就在这条分界线上）",
+  );
+  assert.ok(
+    shellBody.includes("record.runtimeViewOnlyShell = true;"),
+    "外壳必须打 view-only 标记：漏了预激活会以为已 live（首屏永不自动激活）",
+  );
+  assert.ok(
+    shellBody.includes("context.sessionShellFlights ??= new Map()") &&
+      shellBody.includes("if (inFlight) return await inFlight;"),
+    "外壳物化必须 per-session 单飞：视图水位与激活会并发进入同一会话（双 createRecord）",
+  );
+  // `materializeSessionRecord` 的第 4 个实参就是 resume。翻成 true 的后果是「外壳已经 resume，
+  // 标记却还写着 view-only」→ 预激活再 resume 一次（双写账本），所以按位置钉住它。
+  const resumeArg = shellBody.match(/\/\/ \*\*不 resume\*\*[\s\S]*?\n\s*(true|false),/);
+  assert.equal(
+    resumeArg?.[1],
+    "false",
+    "materializeSessionShell 必须以 resume:false 建 record（Step 9 的分界点就在这个实参上）",
+  );
+  assert.ok(
+    shellBody.includes("readPersistedAssistantSelection("),
+    "首屏 model/mode 只能来自窄查询（读 messages 等于把窗口化收益还回去）",
+  );
+
+  const activateBody = serverOperationsSource.slice(
+    activateAt,
+    serverOperationsSource.indexOf("export async function activateSessionForResume("),
+  );
+  assert.ok(
+    activateBody.includes("if (record.runtimeViewOnlyShell !== true)"),
+    "已 live 的会话不得二次 resume（幽灵 runtime 前科）",
+  );
+  assert.ok(
+    activateBody.includes("record.app.resume("),
+    "激活本体的唯一 resume 点在 activateRuntime",
+  );
+  assert.ok(
+    activateBody.includes("record.runtimeViewOnlyShell = undefined;"),
+    "激活成功后必须清标记，否则 runtime 已跑却被判成 view-only（命令会被门拒）",
+  );
+});
+
+test("I2: 三处首屏降级都以 runtimeViewOnlyShell 为判据（漏一处就显示默认模型的假真值）", () => {
+  const configSeedAt = bridgeSource.indexOf("getSessionConfigSeed: (sessionId) => {");
+  const usageSeedAt = bridgeSource.indexOf(
+    "getSessionUsageSeed: async (sessionId, persistedMessages) => {",
+  );
+  assert.ok(configSeedAt > 0 && usageSeedAt > configSeedAt, "两个种子钩子必须都存在");
+  const configSeedBody = bridgeSource.slice(configSeedAt, usageSeedAt);
+  assert.ok(
+    configSeedBody.includes("record.runtimeViewOnlyShell === true") &&
+      configSeedBody.includes("record.viewOnlyConfigSeed"),
+    "view-only 首屏种子必须优先于 record 的默认模型",
+  );
+  assert.ok(
+    configSeedBody.indexOf("record.viewOnlyConfigSeed") <
+      configSeedBody.indexOf("record.app.runtime.getSessionModelSelection()"),
+    "顺序不能反：先判 view-only，再去读 runtime 选择",
+  );
+  const usageSeedBody = bridgeSource.slice(
+    usageSeedAt,
+    bridgeSource.indexOf("// ── sessions-index hooks", usageSeedAt),
+  );
+  assert.ok(
+    usageSeedBody.includes("record.runtimeViewOnlyShell === true") &&
+      usageSeedBody.includes("return null"),
+    "view-only 首屏不给 usage 种子（用默认模型算分母比「暂时没有」更误导）",
+  );
+
+  // loadPersistedEvents：record 缺席不再是闸门（旧实现直接 return 空事件 → 首屏空历史）。
+  const loadAt = bridgeSource.indexOf(
+    "loadPersistedEvents: async (sessionId, persistedMessages) => {",
+  );
+  assert.ok(loadAt > 0);
+  const loadBody = bridgeSource.slice(
+    loadAt,
+    bridgeSource.indexOf("if (source.coldWindowFallback)", loadAt),
+  );
+  assert.ok(
+    !loadBody.includes("zcode_protocol.v4.hydrate_runtime_missing"),
+    "record 缺席不得提前返回空事件（store-only 变体必须照常产出 durable transcript）",
+  );
+  assert.ok(
+    loadBody.includes("resolveConversationBackingRecord") &&
+      loadBody.includes("zcode_protocol.v4.hydrate_store_only") &&
+      loadBody.includes("const [liveEvents, sourceEventSeq] = record"),
+    "record 只能降级为「没有内存事件」，不能降级为「没有历史」",
+  );
+});
+
+test("I3: activateRuntime 只对 view-only shell resume 一次，成功后清标记（live 会话不二次 resume）", async () => {
+  // 幽灵 runtime 的直接防护：`activateRuntime` 不是「无条件 resume」，而是「只把 shell 升级」。
+  const resumes = [];
+  const record = {
+    app: {
+      sessionId: "ses-activate",
+      resume: async () => {
+        resumes.push(1);
+        return { modelSelection: null };
+      },
+    },
+    runtimeViewOnlyShell: true,
+    traceContext: { traceId: "trace-activate" },
+  };
+  const context = {
+    sessions: new Map([["ses-activate", record]]),
+    deps: {},
+  };
+  const shell = { record, created: true };
+
+  await activateRuntime(context, shell, {});
+  assert.equal(resumes.length, 1, "view-only shell 必须激活");
+  assert.equal(
+    record.runtimeViewOnlyShell,
+    undefined,
+    "成功后必须清标记（否则命令会被门永久拒掉）",
+  );
+
+  await activateRuntime(context, shell, {});
+  assert.equal(resumes.length, 1, "live runtime 不得二次 resume（会双写账本、transcript 定格）");
+});
+
+test("I4: 同一条 record 的并发激活合并成一次（拆开后「外壳在、没 resume」的窗口是整个激活时长）", async () => {
+  const resumes = [];
+  const record = {
+    app: {
+      sessionId: "ses-activate-race",
+      resume: async () => {
+        resumes.push(1);
+        return { modelSelection: null };
+      },
+    },
+    runtimeViewOnlyShell: true,
+    traceContext: { traceId: "trace-race" },
+  };
+  const context = { sessions: new Map([["ses-activate-race", record]]), deps: {} };
+  const shell = { record, created: true };
+  // 两个入口（V4 预激活 / send 命令，或 legacy session/resume）同时拿到同一条记录。
+  await Promise.all([activateRuntime(context, shell, {}), activateRuntime(context, shell, {})]);
+  assert.equal(resumes.length, 1, "并发激活必须共享同一次 resume");
+  assert.equal(record.runtimeViewOnlyShell, undefined);
+});
+
 // ── E/F: 源码守卫（IS4 唯一判定点 + IS3 激活触发点位置）─────────────────────
 const gatewaySource = readFileSync(
   new URL("../src/zcode-protocol-v4/v4-gateway.ts", import.meta.url),
@@ -651,10 +1050,7 @@ test("E1: host.sessionExists 只有 hasHostRecord 一个调用点（IS4/T-SL12�
   const nextMemberAt = gatewaySource.indexOf("private markViewReady(");
   assert.ok(readyAt > 0 && nextMemberAt > readyAt, "isRuntimeReady 必须是一段可检视的函数体");
   const readyBody = gatewaySource.slice(readyAt, nextMemberAt);
-  assert.ok(
-    readyBody.includes("runtimeReadySessions.has"),
-    "isRuntimeReady 必须读激活结论集合",
-  );
+  assert.ok(readyBody.includes("runtimeReadySessions.has"), "isRuntimeReady 必须读激活结论集合");
   assert.ok(
     !readyBody.includes("hasHostRecord("),
     "isRuntimeReady 不得以「record 在册」短路（Step 9 的 blocking 前置）",
@@ -695,5 +1091,29 @@ test("F1: 后台预激活的调用点在帧编码之后（IS3 激活触发点）
   assert.ok(
     callAt > encodeAt && callAt > flushSetAt,
     "预激活必须在帧编码（subscribeReserved）之后，否则激活耗时会串进 viewReadyMs",
+  );
+});
+
+test("F2: 视图水位的接缝只有 ensureViewShell，且它不再等激活（降级分支必须显式写出来）", () => {
+  const viewAt = gatewaySource.indexOf("private ensureViewReadyPublisher(");
+  const shellAt = gatewaySource.indexOf("private async ensureViewShell(");
+  assert.ok(viewAt > 0 && shellAt > viewAt, "两个函数必须都存在且顺序稳定");
+  const viewBody = gatewaySource.slice(viewAt, shellAt);
+  assert.ok(viewBody.includes("await this.ensureViewShell("), "视图水位只等外壳");
+  assert.ok(
+    !viewBody.includes("this.ensureRuntimeReady(") && !viewBody.includes("this.coldResume."),
+    "视图水位不得自己接激活（Step 9 拆掉的就是这条依赖）",
+  );
+  // 降级分支（旧宿主没有 shell 端口）必须留在 ensureViewShell 里并**显式**可见：
+  // 它读 `host.materializeSessionShell` 的有无，而不是把激活偷偷塞回读路径。
+  const shellBody = gatewaySource.slice(
+    shellAt,
+    gatewaySource.indexOf("private ensureRuntimeReady(", shellAt),
+  );
+  assert.ok(
+    shellBody.includes("this.host.materializeSessionShell") &&
+      shellBody.includes("ensureShellMaterialized(") &&
+      shellBody.includes("this.ensureRuntimeReady("),
+    "ensureViewShell 必须是「有端口 → 只物化外壳 / 没端口 → 退回激活」两条显式分支",
   );
 });

@@ -72,6 +72,15 @@ interface PersistedConversationMaterializationStore {
     };
   } | null>;
   messages(input: { sessionID: import("@zcode/contracts").SessionId }): Promise<MessageWithParts[]>;
+  /**
+   * 单条消息读（Step 9 的 shared_context 窗口兼容）。窗口化时那条 model-only 上下文消息
+   * 通常在窗口之外，不能靠「在窗口正文里 find」；按 id 读一次是 O(1)。
+   * 缺席（旧宿主 / 内存 store）→ 只在窗口正文里找，等价于 Step 6 的行为。
+   */
+  messageWithParts?(input: {
+    sessionID: import("@zcode/contracts").SessionId;
+    messageID: import("@zcode/contracts").MessageId;
+  }): Promise<MessageWithParts | null>;
   readTarget(input: {
     sessionID: import("@zcode/contracts").SessionId;
   }): Promise<SessionGoal | null>;
@@ -79,6 +88,23 @@ interface PersistedConversationMaterializationStore {
     sessionID: import("@zcode/contracts").SessionId;
     type?: string;
   }): Promise<SessionEntryInfo[]>;
+}
+
+/**
+ * shared context 导入的「model-only 上下文消息」判定（唯一判据，窗口内外共用）。
+ *
+ * `commitSharedContextImportBundle` 把它与 session 一起原子落库，且它是 active 分支的
+ * **第一条**消息——这是窗口化路径能按 id 单条确认它的前提。
+ */
+function isSharedContextImportMessage(
+  message: MessageWithParts | null | undefined,
+): message is MessageWithParts {
+  return (
+    message?.info.role === "user" &&
+    message.info.source === "shared_context" &&
+    message.info.semantics?.origin === "import" &&
+    message.info.semantics?.kind === "shared_context"
+  );
 }
 
 /**
@@ -139,14 +165,21 @@ export async function loadPersistedConversationMaterialization(input: {
         input.persistedMessages ?? (await input.store.messages({ sessionID })),
         rewind,
       );
-  const sharedContextMessage = messages.find(
-    (message) =>
-      message.info.role === "user" &&
-      message.info.source === "shared_context" &&
-      message.info.semantics?.origin === "import" &&
-      message.info.semantics?.kind === "shared_context",
-  );
   const sharedContextEntry = entries.find((entry) => entry.type === "v4/shared_context_import");
+  // 窗口化（Step 9）：这条 model-only 上下文消息几乎总在窗口之外，`messages.find` 找不到
+  // 会静默丢掉分享导入的展示元数据。它由 `commitSharedContextImportBundle` 与 session
+  // 原子落库、且是 active 分支的第一条消息——按 id 单条读一次即可确认（O(1)，不读正文窗口）。
+  let sharedContextMessage = messages.find((message) => isSharedContextImportMessage(message));
+  if (!sharedContextMessage && windowed && sharedContextEntry && input.store.messageWithParts) {
+    const contextMessageId = windowed.activeMessageIds[0];
+    if (contextMessageId !== undefined) {
+      const candidate = await input.store.messageWithParts({
+        sessionID,
+        messageID: contextMessageId,
+      });
+      if (isSharedContextImportMessage(candidate)) sharedContextMessage = candidate;
+    }
+  }
   const sharedContextData =
     sharedContextEntry?.data && typeof sharedContextEntry.data === "object"
       ? (sharedContextEntry.data as Record<string, unknown>)

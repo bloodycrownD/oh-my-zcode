@@ -30,7 +30,9 @@ import {
 } from "@zcode/shared";
 import type { ZCodeApp, ZCodeAppOptions } from "../app/types.js";
 import type { V4InteractionRegistry } from "../zcode-protocol-v4/interaction-registry.js";
+import type { SessionConfigSeed } from "../zcode-protocol-v4/product-projection.js";
 import type { ConversationV4Gateway } from "../zcode-protocol-v4/v4-gateway.js";
+import type { MaterializedSessionShell } from "./server-operations.js";
 import type { SessionResidentPool, SessionResidentPoolOptions } from "./session-resident-pool.js";
 
 export interface ParamsSchema<T> {
@@ -119,6 +121,13 @@ export interface ZCodeProtocolSessionRecord {
    * （否则 ghost：runtime 已跑却被判成 view-only，send 类命令会被门拒）。
    */
   runtimeViewOnlyShell?: boolean;
+  /**
+   * view-only 首屏的 config 种子（Step 9）：只从持久事实派生（尾部 assistant 的
+   * model/mode）。`runtimeViewOnlyShell` 为真时 `getSessionConfigSeed` 读它而不是读 record
+   * ——record 此刻给的是**默认模型**（`createRecord(resume:false)` 的后果）。
+   * 激活成功后标记清除，本字段随即失效（不再被读）。
+   */
+  viewOnlyConfigSeed?: SessionConfigSeed;
 }
 
 export interface ZCodeProtocolClientRequestOptions {
@@ -153,6 +162,14 @@ export interface ZCodeProtocolAgentServerContext {
   // 协议请求则持有 operation lease，禁止异步 handler 与容量回收交错。
   sessionResidentPool?: SessionResidentPool;
   sessions: Map<string, ZCodeProtocolSessionRecord>;
+  /**
+   * 外壳物化的 per-session 单飞（Step 9，懒创建）。
+   *
+   * 同一条冷会话有两条入口会建 record：视图水位（只建外壳）与激活（外壳 + resume）。
+   * 两者在 gateway 是独立水位，因此唯一的写 `sessions` 的层必须自己串一次，否则并发时
+   * `createRecord` 会跑两遍——后写覆盖先写，被覆盖的那个 resumed runtime 就此孤儿化。
+   */
+  sessionShellFlights?: Map<string, Promise<MaterializedSessionShell>>;
   notify(notification: ZCodeProtocolNotification): void;
   requestClient<T>(
     method: ZCodeProtocolMethod,

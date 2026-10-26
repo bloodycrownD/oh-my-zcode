@@ -511,8 +511,10 @@ export type ColdTailWindowFallbackReason =
   | "noTailPort"
   | "noWindowCursor"
   | "limitBeforeMissed"
-  | "emptyTail"
-  | "sharedContextImport";
+  | "emptyTail";
+// `sharedContextImport` 曾是「窗口会静默丢掉分享导入元数据」的降级原因；Step 9 改成按 id
+// 单条确认那条 model-only 上下文消息（`cold-event-merge` 的 isSharedContextImportMessage），
+// 该降级已删除——分享导入的会话现在也走窗口化。
 
 /**
  * 窗口坐标（**不含正文**）：冷开后面几步要用的身份一次给全，避免各自再读一遍清单。

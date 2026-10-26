@@ -34,7 +34,7 @@ import { DatabaseSync } from "node:sqlite";
 const { SQLITE_MIGRATIONS } = await import(
   new URL("../src/storage/session-store/migrations.ts", import.meta.url).href
 );
-const { listSessionMessageIndex, messages } = await import(
+const { listSessionMessageIndex, messages, readLatestAssistantSelection } = await import(
   new URL("../src/storage/session-store/repositories/messages.ts", import.meta.url).href
 );
 const { readTurnManifest, upsertTurnManifest } = await import(
@@ -83,7 +83,10 @@ function seedSession(db, sessionID) {
  * 而 `saveMessage` 恒写非空 sequence。写进来的 `data` 仍是合法消息 JSON，
  * `messages()` 的完整读路径能正常解码（本测试要拿它当权威序基准）。
  */
-function insertMessage(db, { id, sequence, timeCreated, role = "user", sessionID = SESSION }) {
+function insertMessage(
+  db,
+  { id, sequence, timeCreated, role = "user", sessionID = SESSION, extra = {} },
+) {
   db.prepare(
     `insert into message (id, session_id, time_created, time_updated, data, sequence)
      values (?, ?, ?, ?, ?, ?)`,
@@ -92,7 +95,7 @@ function insertMessage(db, { id, sequence, timeCreated, role = "user", sessionID
     sessionID,
     timeCreated,
     timeCreated,
-    JSON.stringify({ role, time: { created: timeCreated } }),
+    JSON.stringify({ role, time: { created: timeCreated }, ...extra }),
     sequence,
   );
   return id;
@@ -413,5 +416,100 @@ test("C2: manifest 指向索引里不存在的消息 → messageIndexMismatch（
   assert.equal(result.status, "inconsistent");
   assert.equal(result.reason, "messageIndexMismatch");
   assert.deepEqual(result.missingMessageIds, ["m-deleted"]);
+  db.close();
+});
+
+// ── D: 首屏 model/mode 窄读（Step 9）────────────────────────────────────────
+//
+// 失效面：view-only shell 用 `createRecord(resume:false)` 物化，runtime 停在默认模型，
+// 首屏种子只能来自持久事实。查询有三个容易写错的地方：
+//   ① 取「最后一条 assistant」而不是「最后一条消息」（会话尾部常常是 user/queue 行）；
+//   ② 排序必须复刻权威序的**反序**（`sequence is null desc, sequence desc, ...`），
+//      少一个 tiebreaker 就会在撞号/同时间时挑到隔壁那条；
+//   ③ 没有 mode 的旧 assistant 必须跳过，不能当成「没有历史选型」。
+
+/** 三条 assistant：a1 有 mode+模型、a2 没有 mode（旧记录）、a3 有 mode 但排在 a1 之前。 */
+async function seedSelectionFixture(db) {
+  insertMessage(db, {
+    id: "u1",
+    sequence: 0,
+    timeCreated: 100,
+    extra: { mode: "build" },
+  });
+  insertMessage(db, {
+    id: "a1",
+    sequence: 1,
+    timeCreated: 110,
+    role: "assistant",
+    extra: {
+      mode: "plan",
+      modelId: "claude-x",
+      providerId: "anthropic",
+      reasoningLevel: "high",
+      parentID: "u1",
+    },
+  });
+  insertMessage(db, {
+    id: "a2",
+    sequence: 2,
+    timeCreated: 120,
+    role: "assistant",
+    extra: { modelId: "ignored", providerId: "ignored", parentID: "u1" },
+  });
+  // 排在 a1 之前（sequence 更小）的 assistant：不能被当成「最后一条」。
+  insertMessage(db, {
+    id: "a0",
+    sequence: -1,
+    timeCreated: 90,
+    role: "assistant",
+    extra: { mode: "yolo", modelId: "old", providerId: "old" },
+  });
+  return db;
+}
+
+test("D1: 取最后一条**带 mode** 的 assistant（跳过无 mode 的旧记录与尾部 user 行）", async () => {
+  const db = await seedSelectionFixture(migratedDb());
+  const selection = await readLatestAssistantSelection(db, { sessionID: SESSION });
+  assert.ok(selection, "必须找到一条");
+  assert.equal(selection.mode, "plan", "a2 没有 mode → 继续往前找（不是「没有历史选型」）");
+  assert.deepEqual(selection.modelSelection, {
+    providerId: "anthropic",
+    modelId: "claude-x",
+    options: { reasoningLevel: "high" },
+  });
+  db.close();
+});
+
+test("D2: 无模式的历史 assistant 不参与（没有可用 mode 时返回的 mode 仍是空）", async () => {
+  const db = migratedDb();
+  insertMessage(db, { id: "u1", sequence: 0, timeCreated: 100 });
+  insertMessage(db, {
+    id: "a1",
+    sequence: 1,
+    timeCreated: 110,
+    role: "assistant",
+    extra: { modelId: "claude-x", providerId: "anthropic", parentID: "u1" },
+  });
+  assert.equal(
+    await readLatestAssistantSelection(db, { sessionID: SESSION }),
+    null,
+    "一条带 mode 的 assistant 都没有 → null（首屏空态），不得伪造默认值",
+  );
+  db.close();
+});
+
+test("D3: 别的会话的 assistant 不会串进来（缺 where session_id 的最直接症状）", async () => {
+  const db = await seedSelectionFixture(migratedDb());
+  insertMessage(db, {
+    id: "x9",
+    sequence: 99,
+    timeCreated: 999,
+    role: "assistant",
+    sessionID: OTHER_SESSION,
+    extra: { mode: "yolo", modelId: "other", providerId: "other" },
+  });
+  const selection = await readLatestAssistantSelection(db, { sessionID: SESSION });
+  assert.equal(selection.mode, "plan");
+  assert.equal(selection.modelSelection.modelId, "claude-x");
   db.close();
 });

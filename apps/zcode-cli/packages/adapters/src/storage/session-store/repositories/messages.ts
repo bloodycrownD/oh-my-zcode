@@ -5,6 +5,7 @@ import type {
   MessagePart,
   MessageWithParts,
   PartId,
+  PersistedAssistantSelection,
   SessionId,
   SessionMessageIndexEntry,
   SessionStorePort,
@@ -252,11 +253,56 @@ export async function listSessionMessageIndex(
 }
 
 /**
+ * 首屏 model/mode 的窄读：**最后一条带 mode 的 assistant**（IS3 / Step 9）。
+ *
+ * mode 只落在 assistant 消息的 `data` 上（session_entry 没有承载它的类型），所以首屏种子
+ * 绕不开消息表；但这里只读**一行**、只解 1 条 message 的 JSON，不读 parts、不扫全表——
+ * 与 `messages()` 全量读的差别是 O(1) 对 O(n)。
+ *
+ * 排序键复刻 `messages()` 的权威序（`sequence is null, sequence, time_created, rowid`）的
+ * 反序：取的就是同一序列的最后一条。`mode is not null` 进 SQL 而不是取最后一条再判，
+ * 因为「最后一条 assistant 恰好是旧格式、没有 mode」时应当继续往前找（`derivePersistedSessionMode`
+ * 的倒扫语义）。
+ */
+export async function readLatestAssistantSelection(
+  db: DatabaseSync,
+  input: { sessionID: SessionId },
+): Promise<PersistedAssistantSelection | null> {
+  const row = db
+    .prepare(
+      `
+      select * from message
+      where session_id = ?
+        and json_extract(data, '$.role') = 'assistant'
+        and json_extract(data, '$.mode') is not null
+      order by sequence is null desc, sequence desc, time_created desc, rowid desc
+      limit 1
+      `,
+    )
+    .get(input.sessionID) as unknown as MessageRow | undefined;
+  if (!row) return null;
+  const info = decodeMessageRow(row);
+  if (info.role !== "assistant") return null;
+  const { modelId, providerId, reasoningLevel } = info;
+  return {
+    mode: info.mode,
+    ...(modelId && providerId
+      ? {
+          modelSelection: {
+            providerId: String(providerId),
+            modelId: String(modelId),
+            ...(reasoningLevel ? { options: { reasoningLevel } } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
  * 单条 SQL 的 `in (...)` 参数上限。SQLite 默认变量上限 999，500 留一倍余量：
  * 冷窗口（≤400 行对应的消息）一条语句就够，整条分支最多分几条。
  */
 const MESSAGE_READ_CHUNK_SIZE = 500;
-
 function placeholdersFor(count: number): string {
   return new Array(count).fill("?").join(", ");
 }
