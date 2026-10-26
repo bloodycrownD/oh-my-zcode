@@ -59,6 +59,13 @@
  *      逐个断言，queueItemId 与 admission 权威 id 同源；契约三值 + 可选字段可解码。
  * T-DA2 旧结果兼容 + UI 分流（Step 11）：缺省 `delivery` 读成「无投递事实」（不反推
  *      startNow 也不反推 queue）；UI 只在 queue 时提示排队、且 queued 不收敛编辑态。
+ * F2 `rewindExclusionIds` 的**值**（test 节点补，2026-10-25）：T-RW0 只钉形状、不读返回
+ *      值——变异「改成 `return []`」时三套相关用例全绿。这里用真 handler + 真 rewind
+ *      原语 + 真级联 + 真账本断言排除集恰好等于自持那一行、被截断轮排队项照样作废、
+ *      自持行零 settle；另用真 sqlite 钉「一条 command 结构上只有一行 session_input」。
+ * F1 forkAssistant handler 级（本波前为零覆盖）：非轮尾段的 stable-target 拒绝必须上行
+ *      成 `guard.*` 且绝不 fork；行门先于稳定目标解析；正常路径逐字段核对 fork 参数与
+ *      完成审计；fork 失败不得写「已 fork」。
  *
  * 运行：`pnpm --dir apps/zcode-cli/packages/bootstrap run test:edit-resend-authority`
  */
@@ -128,6 +135,11 @@ const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
   pathToFileURL(
     join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-edit-retry.ts"),
   ).href
+);
+// forkAssistant（F1）：与 edit/retry 分文件、不参与 rewind→start 事务，handler 级零覆盖。
+const { forkAssistantHandlers } = await import(
+  pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-assistant.ts"))
+    .href
 );
 // P2-3：stop 的「拦下后续项」判定必须与 deriveQueueAutoDrain 同口径（读不到 ≠ 空）。
 const { sessionFlowHandlers } = await import(
@@ -1070,6 +1082,262 @@ test("T-RW5 排除集生效：自持 id 没有任何 settle 调用、账本仍 a
   await queueHandlers.sendQueuedNow(harness.host, harness.envelope);
   assert.equal(harness.calls.sendInput, 1);
   assert.equal(harness.captured.input.text, NEW_TEXT);
+});
+
+// ── F2：`rewindExclusionIds` 的**运行时值**（值级，不是形状级）───────────────
+//
+// T-RW0 只钉「每处 rewind 都传 `rewindExclusionIds(envelope)`」这个**形状**，从不读返回值。
+// 变异实测（2026-10-25 本波）：把该函数改成 `return []`，`test:edit-resend-authority` 56 /
+// `test:edit-retry` 5 / `test:edit-retry-model` 18 **全绿**——而「编辑重发的那一条被自己
+// 作废」正是本 bug 的原始形态（spec I2 / 变更点 20）。下面用真 handler + 真 rewind 原语 +
+// 真级联 + 真账本把排除集的**值**固定住：
+//   · 少了自持 id → 自持行被级联 settle，紧随其后的 start 读权威即硬失败；
+//   · 多了别人的 id → 属于被截断轮的旧输入活下来，在新分支上复活。
+
+const F2_SELF_ID = "queue_cmd-f2-edit";
+const F2_QUEUED_A_ID = "queue_cmd-f2-queued-a";
+const F2_QUEUED_B_ID = "queue_cmd-f2-queued-b";
+const F2_TARGET_MESSAGE_ID = "msg-f2-edit-target";
+const F2_OLD_TEXT = "被编辑轮的旧文本（f2）";
+const F2_NEW_TEXT = "编辑后的新文本（f2）";
+
+/**
+ * edit 事务宿主，但 `rewindConversationToMessage` 是**真 core 原语**（不是 stub）。
+ *
+ * 排除集只有走完 `fork-edit-retry → rewind-message.applyConversationRewindPlan →
+ * discardRewoundPendingSteerInputs → settleSessionInput` 才证明得了「这条重发不会把自己
+ * 作废」——用 stub 复刻级联等于把被测逻辑删掉（T-RT2③ 用同一套最小 runtime 面）。
+ */
+function createRewindExclusionHarness() {
+  const context = createContext();
+  const calls = { cancels: [], reverts: [], rewinds: [], sendInputs: [], stateMutations: [] };
+  const userMessage = {
+    info: {
+      anchor: { turnId: TURN_REMOVED },
+      id: F2_TARGET_MESSAGE_ID,
+      role: "user",
+      sessionID: SESSION_ID,
+      time: { created: 1 },
+    },
+    parts: [
+      {
+        id: "part-f2-target",
+        messageID: F2_TARGET_MESSAGE_ID,
+        sessionID: SESSION_ID,
+        text: F2_OLD_TEXT,
+        time: { end: 2, start: 1 },
+        type: "text",
+      },
+    ],
+  };
+  // 账本 port + 真原语额外需要的会话面（getSession / messages / setRevert）。
+  // 账本仍是 `context.ledger`（断言直接读它的 calls/rows）。
+  const sessionStore = {
+    ...context.ledger.port,
+    getSession: async () => ({ revert: undefined }),
+    messages: async () => [userMessage],
+    setRevert: async (input) => {
+      calls.reverts.push(input.revert);
+    },
+  };
+  Object.assign(context.runtime, {
+    artifactStore: undefined,
+    getActiveForegroundExecutionId: () => undefined,
+    getSessionModelSelection: () => undefined,
+    injectTargetStateIntoMessageHistory: () => undefined,
+    messageHistory: {
+      addAttachment: () => undefined,
+      addEntries: () => undefined,
+      borrowReadOnlyRuntimeEntries: () => [],
+      replaceMessages: () => undefined,
+      reset: () => undefined,
+      setCacheMiss: () => undefined,
+    },
+    readFileState: new Map(),
+    readSessionTargetForContext: async () => null,
+    runtimeTaskRegistry: { all: () => ({}), setActiveBranchGeneration: () => undefined },
+    sessionStore,
+    workingDirectory: "D:/tmp/f2-ws",
+    workspaceRoot: "D:/tmp/f2-ws",
+  });
+  // 先捕获入参、再调真原语：这样「传给原语的值」与「级联实际作废了谁」是同一份事实，
+  // 不会出现「断言读 stub 的入参、真实行为在别处」的假绿。
+  context.runtime.rewindConversationToMessage = async (params) => {
+    calls.rewinds.push(params);
+    return rewindConversationToMessage.call(context.runtime, params);
+  };
+  const record = {
+    app: {
+      getModel: () => "openai/gpt-5",
+      getMode: () => "build",
+      readTarget: async () => null,
+      runtime: context.runtime,
+      sendInput: async (input, options) => {
+        calls.sendInputs.push({ input, options });
+        return { completion: Promise.resolve(), kind: "started_turn", turnId: "turn-f2-new" };
+      },
+      sessionId: SESSION_ID,
+    },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    afterLegacyStateMutation: async (_record, reason) => {
+      calls.stateMutations.push(reason);
+    },
+    cancelInputCommand: async (sessionId, queueItemId, reason) => {
+      calls.cancels.push({ queueItemId, reason, sessionId });
+    },
+    getInputRoutingMode: () => null,
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: { info: () => undefined, warn: () => undefined },
+    resolveRowActionTarget: () => ({
+      editTarget: {
+        entityId: "ent-f2",
+        intent: {
+          admittedDelivery: "startNow",
+          clientId: "ui",
+          kind: "sendText",
+          queueItemId: "queue-f2-original",
+          requestedDelivery: "startNow",
+          sourceCommandId: "cmd-f2-original",
+          text: F2_OLD_TEXT,
+        },
+        transcriptMessageId: F2_TARGET_MESSAGE_ID,
+      },
+      messageId: F2_TARGET_MESSAGE_ID,
+      ok: true,
+      row: { entityId: "ent-f2", kind: "userInput", rowId: 11, turnId: TURN_REMOVED },
+    }),
+  };
+  const envelope = {
+    baseRevision: 0,
+    clientId: "ui",
+    // 自持 id 由 commandId 派生（`queue_<commandId>`，与 admission 同源）。
+    commandId: "cmd-f2-edit",
+    issuedAt: Date.now(),
+    payload: { newText: F2_NEW_TEXT, target: { entityId: "ent-f2", rowId: 11 } },
+    sessionId: SESSION_ID,
+    type: "editUserQuery",
+  };
+  return { calls, context, envelope, host };
+}
+
+test("F2 排除集的值：edit 重发只排除自持那一行，被截断轮的两条排队输入照样作废", async () => {
+  const { calls, context, envelope, host } = createRewindExclusionHarness();
+  // 最危险形态（T-RW5 同款）：自持行的 TurnSteerQueued 也把 targetTurnId 记在
+  // 被截断的那个 turn 上——没有排除集保护，它一定会被级联 settle。
+  await seedQueuedInput(context, { id: F2_SELF_ID, targetTurnId: TURN_REMOVED, text: F2_NEW_TEXT });
+  await seedQueuedInput(context, {
+    id: F2_QUEUED_A_ID,
+    targetTurnId: TURN_REMOVED,
+    text: "被截断轮排队的输入 A",
+  });
+  await seedQueuedInput(context, {
+    id: F2_QUEUED_B_ID,
+    targetTurnId: TURN_REMOVED,
+    text: "被截断轮排队的输入 B",
+  });
+
+  const result = await forkEditRetryHandlers.editUserQuery(host, envelope);
+
+  assert.equal(calls.rewinds.length, 1, "preserve 模式只走一次 rewind");
+  // ① 值级断言：原语收到的排除集**恰好**是自持那一行。
+  //    变异 M-F2a（改成 `return []`）与 M-F2b（映射改成 `pending_<commandId>`）都红在这里。
+  assert.deepEqual(
+    calls.rewinds[0].excludeSessionInputIds,
+    [F2_SELF_ID],
+    "排除集必须恰好等于 {自持 id}：少一个 = 自己作废自己（原 bug），多一个 = 该作废的旧输入活下来",
+  );
+  // ② 反向逐条写出（不只依赖上面的 deepEqual）：队列里那两条一条都不许进排除集。
+  for (const id of [F2_QUEUED_A_ID, F2_QUEUED_B_ID]) {
+    assert.equal(
+      calls.rewinds[0].excludeSessionInputIds.includes(id),
+      false,
+      `${id} 不是自持行，排除它等于让它在新分支上复活`,
+    );
+  }
+  // ③ 级联真的作用在账本上：两条排队行 discarded(rewound)。
+  //    变异 M-F2c（把队列项也塞进排除集）红在这里。
+  for (const id of [F2_QUEUED_A_ID, F2_QUEUED_B_ID]) {
+    assert.equal(context.ledger.rows.get(id).status, "discarded", `${id} 必须被级联作废`);
+    assert.equal(context.ledger.rows.get(id).statusReason, "rewound");
+  }
+  // ④ 不自伤：自持行零 settle 调用、账本仍 admitted。
+  //    误 settle 在终态上看不出来（T-RW5 的论证），所以两条都要断言。
+  assert.deepEqual(
+    context.ledger.calls.settles.filter((call) => call.id === F2_SELF_ID),
+    [],
+    "对自身 id 的任何 settle 都算自伤",
+  );
+  assert.equal(context.ledger.rows.get(F2_SELF_ID).status, "admitted", "start 之前必须仍是 admitted");
+  // ⑤ 后果不是推测：紧随其后的 start 能读到执行权威（I1），且发的是新文本。
+  //    先钉「跑的是真原语」：它的提交点 setRevert 必须真的落过一次。
+  assert.equal(calls.reverts.length, 1, "真原语的提交点（setRevert）确实执行过——不是 stub 演出来的");
+  const authority = await context.ledger.port.getSessionInputForExecution({
+    id: F2_SELF_ID,
+    sessionID: SESSION_ID,
+  });
+  assert.equal(authority.state, "pending", "自伤时这里会是 voided → start 硬失败");
+  assert.equal(calls.sendInputs.length, 1);
+  assert.equal(calls.sendInputs[0].input.text, F2_NEW_TEXT);
+  // ⑥ 投影侧收口：队列只剩自持项；命令成功、不是 committed 失败。
+  assert.deepEqual(
+    queueState(context).items.map((item) => item.queueItemId),
+    [F2_SELF_ID],
+    "被作废项必须同时从 v4 投影队列移除（否则 UI 上还留着幽灵项）",
+  );
+  assert.equal(result?.disposition, "rewind");
+  assert.equal(result?.delivery, "startNow");
+  // 只有第一条是 rewind 的 legacy 广播；之后是 start 起轮后的生命周期回调（异步，可能
+  // 已在本用例断言前落地）。断「截断先于起轮广播」而不是断整串。
+  assert.deepEqual(calls.stateMutations.slice(0, 1), ["session_rewound"]);
+  assert.deepEqual(calls.cancels, [], "成功路径不得结算任何账本行");
+});
+
+test("F2 多 id 形态：一条 command 结构上只有一行 session_input（真 sqlite 钉 upsert）", async (t) => {
+  // 结论：**不存在**「一条 command 产生多个 session_input 行」的形态，因此排除集恒为
+  // 单元素是结构约束，不是当前实现巧合。四条依据：
+  //   ① `queueItemId = queue_<commandId>` 是 commandId 的纯函数（command-inbox.ts:75/182）；
+  //   ② 唯一 admission 写账点用同一个 id（v4-bridge.ts:711-712）；
+  //   ③ 同 commandId 的第二次提交在 CommandInbox 就被 pin/查表吸收成重放 ACK
+  //      （command-inbox.ts:134-153、176-203），根本不会二次 admission；
+  //   ④ core 侧 pendingInputId 取 `intent.queueItemId`（steering.ts:251-254），同一 intent
+  //      只有一个 queueItemId，级联判据里也只可能有一个 id 对应这条 command。
+  // ②③ 的落库后果用**真 store** 钉成事实（不靠读源码）：同 id 再写是 upsert，不会多出一行。
+  const store = new SqliteSessionStore({ dbPath: ":memory:" });
+  t.after(() => store.close());
+  await store.createSession({
+    directory: "D:/tmp/f2-multi",
+    id: SESSION_ID,
+    projectID: "proj-f2-multi",
+    slug: "f2-multi",
+    title: "f2 multi",
+    version: "1.0.20",
+  });
+  const COMMAND_ID = "cmd-f2-multi";
+  const rowId = `queue_${COMMAND_ID}`;
+  await store.saveSessionInput({
+    delivery: "startNow",
+    id: rowId,
+    kind: "sendText",
+    payload: { text: "第一次写（admission）" },
+    sessionID: SESSION_ID,
+  });
+  // 第二次写：TurnSteerQueued 侧对同一 id 的幂等更新（生产真实形态）。
+  await store.saveSessionInput({
+    delivery: "queue",
+    id: rowId,
+    kind: "sendText",
+    payload: { text: "第二次写（队列回执）" },
+    sessionID: SESSION_ID,
+  });
+  const rows = await store.listSessionInputs({ sessionID: SESSION_ID });
+  assert.equal(rows.length, 1, "同 commandId 的重复写入是 upsert —— 一条 command 只有一行");
+  assert.equal(rows[0].id, rowId);
+  assert.equal(rows[0].delivery, "queue", "后写的投递事实覆盖前一条（整 payload 覆盖，不是 merge）");
+  // 排除集若真有多 id 需求，唯一可能来源是「一行 command 派生多行账本」；上面证明不存在，
+  // 所以 F2 主用例的 `deepEqual([自持 id])` 就是完整断言，不需要为多 id 再编一份夹具。
 });
 
 // ── T-RW4 stop 结算（只结算队列承载不了的孤儿，Step 6） ──────────────────────
@@ -2463,6 +2731,153 @@ test("T-RT6 retryTurn rewind 前失败（未提交）：原样上行，不产生
     },
   );
   assert.equal(harness.calls.cancels.length, 0, "未提交时没有账本行需要按已提交语义结算");
+});
+
+// ── F1：forkAssistant 的 handler 级覆盖（本波前为零）────────────────────────
+//
+// `grep` 全仓没有任何脚本调用 `forkAssistant`；变异「去掉 stable-target 拒绝」时
+// `test:edit-resend` 56 / `test:edit-retry` 5 **全绿**——拒绝路径完全没有断言。
+// 生产里「目标不是所属轮最后一段 assistant」由投影闸门给出：
+// `resolveStableForkCandidate` 在 `isLatestAssistantSegmentRow(rowId) === false` 时返回
+// `{ok:false, reasonCode:"guard.forkTargetNotStable"}`（product-projection.ts:946-961），
+// handler 必须据此拒绝，不能带着 `target: undefined` 继续去 fork。
+
+const FORK_BOUNDARY_MESSAGE_ID = "msg-fork-boundary";
+const FORK_STABLE_TARGET = {
+  boundaryMessageId: FORK_BOUNDARY_MESSAGE_ID,
+  orderedMessageIds: ["msg-fork-user", FORK_BOUNDARY_MESSAGE_ID],
+  productTurnId: "turn-fork",
+  transcriptTurnId: "turn-fork-runtime",
+};
+const FORK_GOAL_BOUNDARY = { kind: "none" };
+
+/**
+ * forkAssistant 的最小宿主：行门 / 稳定目标 / fork 三层的返回值都可切换，
+ * 用来分别证明「哪一层拒绝」与「拒绝发生在副作用之前」。
+ */
+function createForkAssistantHarness({ rowGate = "ok", stableTarget = "ok" } = {}) {
+  const calls = { forks: [], logs: [], rowGates: [], stableTargets: [] };
+  const record = {
+    app: { sessionId: SESSION_ID },
+    persistence: "immediate",
+    traceContext: TRACE_CONTEXT,
+  };
+  const host = {
+    forkStableConversation: async (sessionId, options) => {
+      calls.forks.push({ options, sessionId });
+      return { forkedSessionId: "ses_fork_child" };
+    },
+    getRecord: (sessionId) => (sessionId === SESSION_ID ? record : undefined),
+    logger: {
+      info: (message, fields) => calls.logs.push({ fields, message }),
+      warn: () => undefined,
+    },
+    resolveRowActionTarget: (sessionId, target, action) => {
+      calls.rowGates.push({ action, rowId: target.rowId, sessionId });
+      return rowGate === "ok"
+        ? { action, messageId: FORK_BOUNDARY_MESSAGE_ID, ok: true, row: { rowId: target.rowId } }
+        : rowGate;
+    },
+    resolveStableForkTarget: async (sessionId, rowId) => {
+      calls.stableTargets.push({ rowId, sessionId });
+      return stableTarget === "ok"
+        ? { goalBoundary: FORK_GOAL_BOUNDARY, ok: true, target: FORK_STABLE_TARGET }
+        : stableTarget;
+    },
+  };
+  const envelope = {
+    baseRevision: 7,
+    clientId: "ui",
+    commandId: "cmd-fork-1",
+    issuedAt: Date.now(),
+    payload: { target: { entityId: "ent-fork", rowId: 12 } },
+    sessionId: SESSION_ID,
+    type: "forkAssistant",
+  };
+  return { calls, envelope, host };
+}
+
+test("F1 非轮尾段：stable-target 拒绝必须上行成 guard.forkTargetNotStable，且绝不 fork", async () => {
+  const harness = createForkAssistantHarness({
+    stableTarget: { ok: false, reasonCode: "guard.forkTargetNotStable" },
+  });
+  await assert.rejects(
+    () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
+    (error) => {
+      // 变异：删掉 `if (!resolution.ok) throw ...` → 本次调用不再抛错（stub 会照常 fork），
+      // 下面整条用例（含 calls.forks === 0）即红。
+      assert.equal(error.reasonCode, "guard.forkTargetNotStable", "原因码必须原样上行（客户端按它分流）");
+      // 只钉「是本模块的 fork 目标拒绝」，不钉具体子类：`V4ForkTargetNotLatestSegmentError`
+      // 今天未被使用（见 new_risks），将来接上它不该让本用例红，但 TypeError 之类的
+      // 「能力缺失」必须红。
+      assert.match(error.name, /^V4ForkTarget/, "必须是 fork 目标拒绝，不是 TypeError/能力缺失");
+      assert.match(error.message, /targetRowId 12/, "失败信息必须点明是哪一行");
+      return true;
+    },
+  );
+  assert.equal(harness.calls.stableTargets.length, 1, "稳定目标确实被解析过（拒绝发生在解析之后）");
+  assert.equal(harness.calls.forks.length, 0, "拒绝必须发生在 fork 之前");
+  assert.deepEqual(harness.calls.logs, [], "被拒绝的请求不得写「已 fork」审计");
+});
+
+test("F1 行动作门：投影不可 fork 的行在稳定目标解析之前就被拒绝（fail closed）", async () => {
+  const harness = createForkAssistantHarness({
+    rowGate: { ok: false, reasonCode: "guard.actionUnavailable", status: "rejected" },
+  });
+  await assert.rejects(
+    () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
+    (error) => {
+      // 这里不断言具体码：handler 把行门的 reasonCode 归一到 guard.forkTargetNotStable
+      // （见 new_risks）。要守的是「任何拒绝都不得继续去 fork」。
+      assert.match(error.reasonCode, /^guard\./);
+      assert.match(error.name, /^V4ForkTarget/);
+      return true;
+    },
+  );
+  assert.equal(harness.calls.rowGates.length, 1);
+  assert.equal(harness.calls.rowGates[0].action, "forkAssistant", "行门必须按 forkAssistant 解析");
+  assert.equal(harness.calls.stableTargets.length, 0, "行门先于稳定目标解析（更便宜的判据在前）");
+  assert.equal(harness.calls.forks.length, 0);
+});
+
+test("F1 正常路径：fork 成功，目标边界/来源命令/修订号逐字段交给宿主", async () => {
+  const harness = createForkAssistantHarness();
+  const result = await forkAssistantHandlers.forkAssistant(harness.host, harness.envelope);
+
+  assert.deepEqual(result, { sessionId: "ses_fork_child", type: "forkAssistant" });
+  assert.equal(harness.calls.forks.length, 1);
+  const fork = harness.calls.forks[0];
+  assert.equal(fork.sessionId, SESSION_ID, "fork 的是父会话");
+  // 逐字段：少传/多传一个都会红（宿主契约，改了要同步测试）。
+  assert.deepEqual(fork.options, {
+    goalBoundary: FORK_GOAL_BOUNDARY,
+    revisionAtDecision: 7,
+    sourceCommandId: "cmd-fork-1",
+    target: FORK_STABLE_TARGET,
+  });
+  assert.equal(harness.calls.logs.length, 1);
+  assert.equal(
+    harness.calls.logs[0].fields.event,
+    "conversation.command.fork_assistant.completed",
+    "完成事实必须可检索（生产默认 JSONL）",
+  );
+  assert.equal(harness.calls.logs[0].fields.childSessionId, "ses_fork_child");
+  assert.equal(harness.calls.logs[0].fields.parentSessionId, SESSION_ID);
+  assert.equal(harness.calls.logs[0].fields.targetBoundaryMessageId, FORK_BOUNDARY_MESSAGE_ID);
+  assert.equal(harness.calls.logs[0].fields.targetRowId, 12);
+});
+
+test("F1 fork 失败不写完成审计：「已 fork」记录不得早于 child 创建", async () => {
+  const harness = createForkAssistantHarness();
+  harness.host.forkStableConversation = async () => {
+    throw new Error("fork bundle commit failed");
+  };
+  await assert.rejects(
+    () => forkAssistantHandlers.forkAssistant(harness.host, harness.envelope),
+    /fork bundle commit failed/,
+  );
+  // 变异：把 info 挪到 fork 调用之前 → 本条红（失败请求会被记成成功）。
+  assert.deepEqual(harness.calls.logs, []);
 });
 
 // ── T-RW6 删空队列复位 autoDrain（Step 5/6 同一条铁律的残留）─────────────────
