@@ -36,6 +36,7 @@
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
     "test:turn-manifest-entry": "tsx --test scripts/test-turn-manifest-entry.mjs",
     "test:session-row-manifest": "tsx --test scripts/test-session-row-manifest.mjs",
+    "test:view-runtime-split": "tsx --test scripts/test-view-runtime-split.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
     "test:queue-item-delivery-command": "tsx --test scripts/test-queue-item-delivery-command.mjs",
     "test:edit-retry": "tsx --test scripts/test-edit-retry.mjs",

@@ -288,7 +288,8 @@ export class ConversationTopicPublisher {
   private wireSnapshotBytesUpperBound: number;
   /**
    * 冷开读到的 manifest 事实（IS5 的权威源）。null = 没有可用清单，全序量回退到投影现算。
-   * 只在冷 hydration 后有值，第一条 live 事件即作废（见 `seedRowManifestFacts`）。
+   * 只在冷 hydration 后有值，第一条**改动了行集合**的 live 事件即作废（见
+   * `seedRowManifestFacts` 与 `rowSetSignature`）。
    */
   private rowManifestFacts: SessionRowManifestFacts | null = null;
 
@@ -412,8 +413,12 @@ export class ConversationTopicPublisher {
    *
    * 注入后 `totalCount` / `firstRowId` / `turnDirectory` / `realUserQueryTotal` 改由 manifest
    * 提供（IS5：禁止由 `rows.window` 现算）。生命周期钉死为「冷快照基线」：
-   * **第一条 live 事件 ingest 即作废**（`ingest` 里清空），因为 manifest 只在 turn 终态写，
-   * 正在跑的这一轮的行不在里面，继续拿它当权威会让 totalCount 少算当前轮。
+   * **第一条改动了行集合的 live 事件 ingest 即作废**（`ingest` 里按 `rowSetSignature` 判定），
+   * 因为 manifest 只在 turn 终态写，正在跑的这一轮的行不在里面，继续拿它当权威会让
+   * totalCount 少算当前轮。反之，**不增删行**的 live 事件（`SessionResumed`、标题、协作模式、
+   * 交互应答）不作废：Step 8 起激活发生在 ACK 之后，按「任何 ingest 即作废」会让窗口化翻页
+   * 在激活那一刻就失效（行一行没变），生产里等于按需物化不存在。注意 `ModelSelected` **不在**
+   * 这个名单里：模型切换会在轮内长出一行 `modelChange` marker（Step 7 的模型基线就是为它存在的）。
    */
   seedRowManifestFacts(facts: SessionRowManifestFacts): void {
     this.rowManifestFacts = facts;
@@ -427,9 +432,37 @@ export class ConversationTopicPublisher {
     this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
   }
 
-  /** 测试 / Step 7 探针：当前生效的 manifest 事实（未注入 = null）。 */
+  /** 测试 / Step 8 探针：当前生效的 manifest 事实（未注入 = null）。 */
   getRowManifestFacts(): SessionRowManifestFacts | null {
     return this.rowManifestFacts;
+  }
+
+  /**
+   * 测试 / Step 8 探针：投影行集合的 O(1) 签名。
+   *
+   * 生产代码只在 `ingest` 里前后各取一次；暴露它是因为「同长度但换过行」这一类形态没有
+   * 稳定的真实事件构造方式，而签名本身是 manifest 权威性的判断依据，必须能单独钉住
+   * （否则删掉首行/末行两段也不会有测试红）。
+   */
+  getRowSetSignature(): string {
+    return this.rowSetSignature();
+  }
+
+  /**
+   * 投影行集合的 O(1) 签名（行数 + 首行 + 末行 rowId）。
+   *
+   * 用途只有一个：判断一次 ingest 是否**增删/换过行**，从而决定要不要作废 manifest 基线
+   * （Step 8 的口径：「第一条 live ingest 即作废」收紧为「第一条改动了行集合的 live ingest
+   * 即作废」）。取三段的理由：行数抓追加与截断，首行抓 rewind 后的整体平移，末行抓
+   * 「同长度但换了分支」这类行数看不出来的替换。行内容的原地更新（反馈、状态位）与只改
+   * 会话元数据的事件（标题、模式、交互应答）不改变这三个值——它们本来就不影响清单里的计数。
+   * `ModelSelected` **不能**当成「不增删行」：模型切换会在轮内长出一行 marker。
+   */
+  private rowSetSignature(): string {
+    const rows = this.projection.getSnapshot().rows.window;
+    const first = rows.length === 0 ? "-" : rows[0].rowId;
+    const last = rows.length === 0 ? "-" : rows[rows.length - 1].rowId;
+    return `${rows.length}:${first}:${last}`;
   }
 
   /**
@@ -796,9 +829,13 @@ export class ConversationTopicPublisher {
 
   /** 应用权威事件：投影推进 + 日志记账 + 扇出到各订阅者 flush buffer。 */
   ingest(event: SessionEvent): void {
-    // 冷快照的 manifest 基线在第一条 live 事件上作废：清单只在 turn 终态写，正在跑的
-    // 这一轮不在里面，继续拿它当权威会让 totalCount / 目录少算当前轮。
-    this.clearRowManifestFacts();
+    // 冷快照的 manifest 基线在**投影行集合发生变化**时作废（Step 8 定稿，见下方
+    // `rowSetSignature`）：清单只在 turn 终态写，正在跑的这轮不在里面，继续拿它当权威
+    // 会让 totalCount / 目录少算当前轮——那条理由成立的前提是「确实有行不在清单里」。
+    // 反过来，激活期的 `SessionResumed`、标题 / 模式变化、交互应答这类**不增删行**的事件
+    // 不该让基线失效：阶段 8 之后激活发生在 ACK 之后，按「任何 ingest 即作废」会让窗口化
+    // 翻页在激活那一刻就死掉（行一行没变），生产里等于功能不存在。
+    const rowSetBefore = this.rowSetSignature();
     const projectionLimit =
       event.type === SessionEventType.TurnComplete || event.type === SessionEventType.TurnError
         ? PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxBytes
@@ -832,6 +869,11 @@ export class ConversationTopicPublisher {
       });
       if (deltas === null) throw new ProjectionPayloadTooLargeError(candidateBytes);
       this.wireSnapshotBytesUpperBound = nextUpperBound;
+    }
+    // 行集合变了才作废基线（见本函数开头）：行数 / 首行 / 末行三个 O(1) 事实就足以判定
+    // 「有没有行不在清单里」，不引入按事件类型的白名单（漏列一种事件就会拿旧清单冒充新事实）。
+    if (this.rowManifestFacts !== null && this.rowSetSignature() !== rowSetBefore) {
+      this.clearRowManifestFacts();
     }
     this.log.push({ seq: event.sequenceNumber, deltas });
     while (this.log.length > this.retention) {

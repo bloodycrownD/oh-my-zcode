@@ -297,9 +297,24 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | `hasMore` | 按 manifest 的 `firstRowId` 判（`pageFirstRowId > firstRowId`），不写死 `> 1`（live rewind 后首行可能不是 1） | 客户端 `if (!result.hasMore) break` 是硬依赖，翻页到顶必须为 false |
 | 降级与打点 | 宿主返回 null（端口缺席 / `limitBeforeMissed` / `emptyPage`）→ 退回投影现算；`noOlderRows`（上面本来就没行）**不算降级、不打点**。落点 `getRowPageOutcome(sessionId)` | 新增降级原因必须进该落点的 `reason`，否则「没生效」与「翻页坏了」无法区分 |
 | `openPhases` 口径（本步定稿） | ①`manifestAdjusted` **进** `openPhases`（三态：`true` 修正过 / `false` 无偏差 / **缺席** = 没走清单）；②`materializeMs` **仍缺席且不该有**——按需物化发生在 `rows/range` 上（没有 ACK 帧），成本走 `getRowPageOutcome().materializeMs`；③`openTiming.snapshotRowCount` 口径钉死为「**本次物化的投影行数**」（全量物化 = totalCount；窗口化 = 窗口行数），会话总行数只看 `rows.totalCount` | 缺席 ≠ false / 0；不得把 rowsRange 的耗时塞进 ACK |
-| 窗口化 + live 之后 | 第一条 live ingest 作废 manifest 事实（Step 4 既定），页物化随之关闭 → 窗口以上翻页再退回 `hasMore:false`（与 Step 6 的已知代价同形，不写坏数据） | 见 new_risk：放开必须先解决「live 之后清单还是不是权威」 |
+| 窗口化 + live 之后 | 第一条**改动了行集合**的 live ingest 作废 manifest 事实（Step 4 既定；Step 8 把口径从「任何 ingest」收紧到「行集合变化」，见下方 Step 8 落地说明），页物化随之关闭 → 窗口以上翻页再退回 `hasMore:false`（与 Step 6 的已知代价同形，不写坏数据） | 清单在「行集合没变」期间仍是权威；一旦投影多出清单外的行即作废。但这不等于「live 期清单继续可用于翻页」——本轮之外的历史轮次虽仍在清单里，页物化的正文读仍以「投影与清单同源」为前提，本 spec 不放开 |
 | 窗口化二次读降级（无自愈） | 二次判定降级时只沿用物化前事实 + `fallbackReason`，**下次冷开重判**。没有自愈路径，理由：能从窗口投影补的只有尾部轮次，头部轮次的行数补不出来；真要修只能「下次冷开强制全量 + 整表重建」 | 若将来做自愈，入口只能是「标记 suspect → 下一次冷开退全量」，不得从窗口投影回写 |
 | T-SL9 本地版（本步钉住） | `test-session-row-manifest` L1-L4 + M1-M8：页定位逐值、有界读、逐页与全量物化逐值相等、到顶 `hasMore:false`、窗口内翻页不碰宿主、全量物化永不物化、翻页不触发第二次冷开（`loadPersistedEvents` / `resumePersistedSession` 各一次）、对齐守卫（轮数 / 行数）、窗首切换轮的模型基线、live 之后清单作废的降级 | Step 13 的端到端版本（真 store + gateway + 翻页）仍要覆盖 |
+
+#### Step 8 落地说明（实现后回填，Step 9+ 直接按此接）
+
+| 事项 | 落地形态 | Step 9+ 必须遵守 |
+|---|---|---|
+| 双水位表 | `viewReadyFlights`（读/翻页/附件读面：`resolveViewPublisher` 是取 publisher 的唯一入口）与 `runtimeReadyFlights`（激活本体：`ensureRuntimeReady` 是唯一入口）。归位实测：本树只有 **12 处** `readyFlights` 引用（spec 的 18 处是在别的树点数的），逐处归位后 `this.readyFlights` 零残留（源码守卫 E1 钉住） | 不得在读入口重新引入「顺手激活」：读只等视图水位，激活只能来自 ACK 后预激活与 send 类命令 |
+| 命令对 runtime 的依赖分档 | `commandRuntimeGate(type)` 纯函数 + 三张显式名单：`trigger-activation`（sendText / sendGoalCommand / resumeGoal / editUserQuery / retryTurn / sendQueuedNow / forkAssistant / createSelectionSideSession / startSavedWorkflow / resumeWorkflowRun）、`record-free`（resolveInteraction / snoozeInteractionAutoResolution / discardSharedContext）、其余 `require-runtime`。协议共 38 个命令，全覆盖由 B1 钉住 | 新增命令必须显式归位：默认落 `require-runtime` 只是安全方向，忘登记会让「点了就跑」的命令在 view-only 会话点不动（B1 会红） |
+| 命令闸门的三态动作 | `handleCommand`：触发器 → `await ensureRuntimeReady`（当场启动或加入）；`require-runtime` → 只等已在飞的水位，仍未就绪回 ACK `rejected + reasonCode:"runtimeNotReady"`（可重试，不进 inbox 幂等表）；`record-free` 原样放行。`sessionId === null`（createSession）不受门限 | `runtimeNotReady` 必须保持「可重试」语义；不得改成 `failed`（那是「命令坏了」）或放行（handler 只会抛 sessionNotFound） |
+| 激活触发点 | ACK 后的后台预激活 `prewarmRuntimeAfterViewAck`：调用点在 `subscribeReserved` 的帧编码（`publisher.subscribeReserved`）之后、返回帧之前，fire-and-forget、失败只经 `onError` 记账。阶段 8 里它是冗余路径（视图水位内部仍等一次激活），Step 9 才成为首屏唯一的自动激活来源（源码守卫 F1 锁位置） | 把视图水位的激活依赖摘掉时**不要**顺带删掉预激活；它的位置（帧编码之后）决定激活耗时不会串进 `viewReadyMs` / `initialFrameEncodeMs` |
+| 命令结果查询 | `queryCommands` 只加入已在飞的水位（视图 + runtime），不创建、不拒；水位失败也不影响查询（结论在 inbox 幂等表里） | 不得把 `queryCommands` 并入 runtime-ready 门槛 |
+| 激活失败不驻留 | `runtimeReadyFlights` 成功才驻留（`activated: true`），失败即删条目 → 下一次订阅/发送可重新激活（D1）；`runtimeReadyMs` 只在成功时写（缺席 ≠ 0） | 若将来引入「失败态」展示，不能把条目留在水位表里冒充可加入的 flight |
+| IS4 三态 + 唯一原始判定点 | `hasHostRecord` 是**唯一**直接调 `host.sessionExists` 的地方；`conversationState`（live/notLive，含 detached live child）、`viewReadySessions`+`conversationViewState`（viewOnly/absent）、`isRuntimeReady`（live 或一次成功激活）各管一个语义。`CommandInbox.getRevision` 走三态（`absent` 才回 null） | 源码守卫 E1 断言 `this.host.sessionExists` 只出现一次：任何「只想问 record 在不在」的新调用必须走 `hasHostRecord` 并注明理由 |
+| **live 之后清单还是不是权威（本步定稿）** | 作废条件从「第一条 live ingest」收紧为「**第一条改动了投影行集合**的 live ingest」：`rowSetSignature` = 行数 + 首行 rowId + 末行 rowId，`ingest` 前后各取一次。理由：激活期的 `SessionResumed` / 标题 / 模式 / 交互应答不增删行，按旧口径会让窗口化翻页在激活那一刻失效（行一行没变），生产里等于按需物化不存在。行数抓追加/截断，首行抓 rewind 后的整体平移，末行抓「同长度但换了分支」 | 不得改成按事件类型白名单（漏列一种就会拿旧清单冒充新事实）；也不得退回无条件作废。新事件的「是否增删行」不在登记表里判定，由签名兜住 |
+| Step 9 的 blocking 前置 | `isRuntimeReady` 现在以「record 在册 ⇒ live ⇒ 就绪」为短路，这只在「没有 view-only 路径」时成立。Step 9 的 `materializeSessionShell` 会 `createRecord` 但不 resume，届时必须把这条短路换成「激活结论」集合，否则 view-only 会话误报 `runtimeReady:true`（幽灵 runtime 的入口）。回归锚点：D3（record 不在册仍能判出 ready）+ E1 | Step 9 必须先改 `isRuntimeReady` 再接线 shell，且 D3 不得削弱 |
+| 本步钉住的测试 | 新增 `test:view-runtime-split`（16 例）：A1-A3 清单权威口径（不增删行不作废 / 增删行必作废 / 签名的三段）、B1-B2 分档全表、C1-C6 闸门动作、D1-D3 失败不驻留 + record 之外的两条事实、E1/F1 源码守卫。T-SL10/T-SL16 的端到端版本（真 runtime 起轮）仍需 Step 13 覆盖 | 变异探测 13 项全部按预期打红，禁止削弱 |
 
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
@@ -428,7 +443,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 - Step 5 — phase-paged-materialization — blocking: yes — qa: auto：`readActiveBranchTail`（分支感知 + 两段查询）；`coldWindowTurns` 常量；对 5k 消息会话测读放大比。
 - Step 6 — phase-paged-materialization — blocking: yes — qa: auto：合成器注入非零起点上下文（复用 `baseTimestampMs`）；断言窗口化 vs 全量 `turnId`/`createdAt`/`ModelSelected` 逐值相等。
 - Step 7 — phase-paged-materialization — blocking: yes — qa: auto：按需物化的执行缝落在 **gateway 侧**（`rowsRange` 入口按 manifest 定位缺失 turn → 异步读正文 → 临时投影合成页 → 交 publisher 编码）；publisher 侧只把 `hasMore` 改成按 manifest 的 `firstRowId` 判定；断言与全量物化逐值相等。
-- Step 8 — phase-view-runtime-split — blocking: yes — qa: auto：双水位表 + 18 处归位；**激活触发点**（ACK 后后台预激活 + send 类命令 await `runtimeReadyFlights`，composer 不禁用）；`conversationState`（live/notLive）+ `viewReadySessions`（viewOnly/absent）+ 11 处 `sessionExists` 归位。
+- Step 8 — phase-view-runtime-split — blocking: yes — qa: auto：双水位表 + 逐处归位（本树实测 12 处 `readyFlights`，归位后零残留）；**激活触发点**（ACK 后后台预激活 + send 类命令 await `runtimeReadyFlights`，composer 不禁用）；`conversationState`（live/notLive）+ `viewReadySessions`（viewOnly/absent）+ `host.sessionExists` 直判收敛到 `hasHostRecord` 单点（本树实测 5 处直判）；命令分档 `commandRuntimeGate`；**live 之后清单权威口径定稿**（行集合变化才作废）。本地用例 `test:view-runtime-split`（16 例）；T-SL10/T-SL16 端到端仍留给 Step 13。
 - Step 9 — phase-view-runtime-split — blocking: yes — qa: auto：`materializeSessionShell`/`activateRuntime` 拆分；`derivePersistedSessionMode` 专用查询；store-only `loadPersistedEvents`（绕开 record 闸门）。
 - Step 10 — phase-view-runtime-split — blocking: yes — qa: auto：协议 additive（`sessionRuntime` + `runtimeNotReady`）；UI `viewOnly` + **composer 保持可用（不得传 `disabled`）**+ `canStop:false`。
 - Step 11 — phase-view-runtime-split — blocking: yes — qa: auto：`rowsRange` 冷路径不复触发冷开；升级路径改 `hydratedSessions.delete()` 先删。
@@ -477,7 +492,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 12. **本 spec 推翻了前次的 B3 排除**：`docs/apm/memory/20261025-session-open-latency-b1.md:24` 明确记过「B3（首帧不等全量）被排除」。本次依据是后来的「都修吧，根治」兜底授权（`:33`），属**推翻前次决策**，不是「已获授权」——按三态纪律如实登记。
 13. **窗口/页的 `modelChange` marker 靠播种才能与全量一致**（Step 7 查出并修）：`seedTurnModelBaseline` 漏在任何一个重物化入口上，都会让「模型恰好在窗首/页首切换」的那一轮少一行、其后 rowId 整体前移；它是**静默**的（不报错，只是翻页错位）。回归锚点：`test-session-row-manifest` M1（页首切换轮）与 M6（窗首切换轮）。
 14. **窗口化二次读降级没有自愈路径**（Step 6 遗留，Step 7 确认）：只沿用物化前事实 + `fallbackReason`，下一次冷开重判。可接受的理由是「不写坏数据 + 现象可见 + 修法成本高于收益」——从窗口投影补不出头部轮次，只能「下次冷开强制全量 + 整表重建」，那等于把一次冷开降级成两次。长期「能用但不一致」的会话每次冷开都走这条路，Step 14 判读时要看 `getColdWindowOutcome().fallbackReason` 的出现频率。
-15. **窗口化冷开 + 第一条 live ingest 之后，窗口以上的翻页再次不可用**（Step 7 登记的 new_risk）：manifest 事实在 live ingest 上作废（Step 4 既定，否则 `totalCount` 会漏算正在跑的那一轮），页物化因此关闭，`rows/range` 退回「投影里没有就没有」。现象是 `hasMore:false`、不报错、不写坏数据。放开的前提是先定「live 之后清单还是不是权威」（当前轮不在清单里，但头部轮次仍在），那是独立的口径问题，不在本 spec 范围。行为锚点：`test-session-row-manifest` M8。
+15. **窗口化冷开 + 第一条改动了行集合的 live ingest 之后，窗口以上的翻页再次不可用**（Step 7 登记的 new_risk，Step 8 定口径）：manifest 事实在「投影行集合发生变化」时作废（否则 `totalCount` 会漏算正在跑的那一轮），页物化因此关闭，`rows/range` 退回「投影里没有就没有」。现象是 `hasMore:false`、不报错、不写坏数据。**Step 8 已定的部分**：激活 / 标题 / 模式 / 交互应答这类不增删行的事件不再作废基线（`rowSetSignature`），所以「打开会话就把翻页打死」的形态不再存在；**仍未定/未做**的是「live 期间继续用清单翻页」——本轮之外的历史轮次虽仍在清单里，页物化的正文读仍以「投影与清单同源」为前提，放开它需要「清单 + 未入清单尾部轮次」的合并口径，不在本 spec 范围。行为锚点：`test-session-row-manifest` M8（增删行仍作废）+ `test-view-runtime-split` A1/A2（两类事件的分界）。
 
 ### 回滚
 

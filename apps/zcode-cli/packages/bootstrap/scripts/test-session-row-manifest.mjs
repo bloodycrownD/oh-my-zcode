@@ -724,7 +724,7 @@ test("E4: 回写 ordinal 从 base 起（窗口化物化不得逐出头部真实�
 
 // ── F: publisher 用 manifest 事实（IS5）────────────────────────────────────
 
-test("F1: 注入事实后 totalCount/firstRowId/turnDirectory 只来自 manifest，首条 live 事件即作废", () => {
+test("F1: 注入事实后 totalCount/firstRowId/turnDirectory 只来自 manifest，改动了行集合的 live 事件即作废", () => {
   const instance = publisher();
   ingestAll(instance, twoTurnEvents());
   const snapshot = manifestSnapshotOf(instance);
@@ -746,7 +746,9 @@ test("F1: 注入事实后 totalCount/firstRowId/turnDirectory 只来自 manifest
   assert.deepEqual(instance.getTurnDirectory({}), instance.getTurnDirectory({}));
   assert.equal(instance.getRowManifestFacts(), facts);
 
-  // 第一条 live 事件：清单基线作废（正在跑的这轮不在 manifest 里）。
+  // 第一轮新的 live 事件：它新增了行 → 清单基线作废（正在跑的这轮不在 manifest 里）。
+  // Step 8 把口径收紧为「**改动了行集合**的 live 事件才作废」：`SessionResumed` / 标题这类
+  // 不增删行的激活期事件不再作废（回归锚点见 `test-view-runtime-split` A1/A2）。
   instance.ingest(
     sessionEvent("turn_started", 40, { turnNumber: 3, input: "新问题", messageId: "msg-user-3" }),
   );
@@ -2173,9 +2175,10 @@ test("M7: 全量物化（投影首行 == 权威首行）→ 永不按需物化�
   }
 });
 
-test("M8: 窗口化之后来了一条 live 事件 → 清单作废，翻页退回投影现算（不猜轮、不抛错）", async () => {
-  // 这是 risk 11 的行为锚点：manifest 在 live ingest 上作废（Step 4 既定），页物化随之
-  // 关闭。现象必须是「上拉到底」，不是「抛错」，也不是「拿旧清单硬翻」。
+test("M8: 窗口化之后来了一条加了行的 live 事件 → 清单作废，翻页退回投影现算（不猜轮、不抛错）", async () => {
+  // 这是 risk 11 的行为锚点：manifest 在「改动了行集合」的 live ingest 上作废（Step 4 既定，
+  // Step 8 收紧口径），页物化随之关闭。现象必须是「上拉到底」，不是「抛错」，也不是
+  // 「拿旧清单硬翻」。本轮 TurnStarted 会新增行，因此它仍属作废那一类。
   const { host, calls, windowBase } = pagedGatewayFixture();
   const gateway = new ConversationV4Gateway(host);
   try {

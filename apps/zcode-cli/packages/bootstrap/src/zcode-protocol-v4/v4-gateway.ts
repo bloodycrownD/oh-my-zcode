@@ -571,10 +571,106 @@ interface ProjectionEventCommitWaiter {
   reject(error: Error): void;
 }
 
+/**
+ * runtime 水位的一条记录。
+ *
+ * `promise` 是宿主 resume（= 激活本体）的单飞结果；`activated` 是**成功结论**。
+ * 结论必须留在表里（不像视图水位那样 settle 即删）：`conversation/runtimeReady` 的布尔
+ * 只能读结论——`host.sessionExists` 在 Step 9 的 view-only shell 上也为真，它证明不了
+ * runtime 跑起来了。**失败不驻留**（条目删除，下一次触发可重试），与
+ * `ColdSessionResumeCoordinator` 的 settle 即释放保持一致；否则一次瞬时 resume 失败会把
+ * 该会话永久钉在「激活过一次，失败」上。
+ */
+interface RuntimeReadyFlight {
+  promise: Promise<MessageWithParts[] | undefined>;
+  /** true = 本进程内这次激活已成功；false = 仍在飞。 */
+  activated: boolean;
+}
+
+/**
+ * 命令对 runtime 的依赖分三档（IS3 / Step 8）。
+ *
+ * - `trigger-activation`：**唯一的激活触发器**。用户此刻就要「跑」，因此允许当场启动
+ *   runtime 激活并等它（`sendText` 类）。若这些命令也只拒不发，view-only 会话没有任何
+ *   路径能升到 runtime-ready（死锁），所以它们是门的一部分而不是门的受害者。
+ * - `require-runtime`：handler 会 `requireRecord`（或经 `host.getRecord` 判 record）。
+ *   runtime 未就绪时回 ACK `status:"rejected" + reasonCode:"runtimeNotReady"`——**可重试**，
+ *   不能伪装成 `failed`（那是「命令真的坏了」），也不能放行（handler 只会抛 sessionNotFound）。
+ * - `record-free`：幂等收口，明示不依赖 record（晚到的交互应答、全局建会话、store 级丢弃）。
+ *   今天它们在没有 record 时也能成功，闸门不得拒掉它们。
+ */
+type CommandRuntimeGate = "trigger-activation" | "require-runtime" | "record-free";
+
+/**
+ * send 类命令：starts/branches a turn（或立即拉起一个 run），因此是激活触发器。
+ *
+ * 清单是**显式**的：新增一个「点了就跑」的命令必须在这里登记，否则它在 view-only 会话上
+ * 会被 require-runtime 档拒成 `runtimeNotReady`（安全方向，但用户点不动）。
+ */
+const ACTIVATION_TRIGGER_COMMANDS: ReadonlySet<CommandEnvelope["type"]> = new Set<
+  CommandEnvelope["type"]
+>([
+  "sendText",
+  "sendGoalCommand",
+  "resumeGoal",
+  "editUserQuery",
+  "retryTurn",
+  "sendQueuedNow",
+  "forkAssistant",
+  "createSelectionSideSession",
+  "startSavedWorkflow",
+  "resumeWorkflowRun",
+]);
+
+/**
+ * 明示不依赖 record 的命令（handler 侧刻意不做 `requireRecord`，见
+ * `handlers/interaction-background.ts` 与 `handlers/session-mgmt.ts` 的注释）：
+ * 晚到应答可能发生在会话已收口/删除之后，必须保持幂等成功；`discardSharedContext`
+ * 走的是 store 级能力。
+ */
+const RECORD_FREE_COMMANDS: ReadonlySet<CommandEnvelope["type"]> = new Set<CommandEnvelope["type"]>(
+  ["resolveInteraction", "snoozeInteractionAutoResolution", "discardSharedContext"],
+);
+
+/**
+ * 命令 → runtime 依赖档（IS3 的唯一分类实现）。
+ *
+ * 只做纯映射，不读任何状态：闸门的判定（能不能放行）在 `handleCommand` 里，测试可以直接
+ * 对这张表逐个命令断言——「新增命令忘了归位」会在这里红，而不是在生产里表现成一条
+ * 莫名其妙的 sessionNotFound。
+ */
+export function commandRuntimeGate(type: CommandEnvelope["type"]): CommandRuntimeGate {
+  if (ACTIVATION_TRIGGER_COMMANDS.has(type)) return "trigger-activation";
+  if (RECORD_FREE_COMMANDS.has(type)) return "record-free";
+  return "require-runtime";
+}
+
 const PROJECTION_EVENT_COMMIT_TIMEOUT_MS = 25_000;
 const MAX_TELEMETRY_EVENT_IDS = 2_000;
 /** detached subagent child 终态后无订阅者时，publisher 由低频 tick 释放前的保留时长。 */
 const DETACHED_CHILD_PUBLISHER_GRACE_MS = 120_000;
+/**
+ * 「runtime 未就绪」的 ACK 原因码（`CommandAck.reasonCode` 是自由字符串，无需改协议）。
+ *
+ * 语义 = **可重试**：命令没有被执行、也没有进 inbox 幂等表；客户端在
+ * `conversation/runtimeReady` 报 ready 之后用同一个 commandId 重发是安全的。
+ */
+const RUNTIME_NOT_READY_REASON = "runtimeNotReady";
+
+/**
+ * 命令闸门的一次判定结果。
+ *
+ * `gated` 只说明「要等水位」，不预判能不能放行——require-runtime 档要等完才知道，
+ * 判定与等待分开才不会被写成两条口径。
+ */
+type CommandGateDecision =
+  | { kind: "pass" }
+  | {
+      kind: "gated";
+      sessionId: string;
+      mode: "trigger-activation" | "await-runtime";
+      commandId: string;
+    };
 
 class ProjectionEventCommitWaitError extends Error {
   constructor(
@@ -823,8 +919,34 @@ export class ConversationV4Gateway {
   private readonly hydratedSessions = new Set<string>();
   /** 首次 hydration 按 session 单飞；并发 pane 共享同一份重建结果。 */
   private readonly hydrationInFlight = new Map<string, Promise<ConversationTopicPublisher>>();
-  /** cold activation 到 hydration 的 READY 水位；只阻塞本次恢复期间的 command/query。 */
-  private readonly readyFlights = new Map<string, Promise<ConversationTopicPublisher>>();
+  /**
+   * **视图水位**（读与翻页只等这一层）：冷会话「把投影建起来」的单飞。
+   *
+   * IS3 把「看」与「跑」拆成两条水位，这里是「看」的那条：`rowsRange` / `turnDirectory` /
+   * `plans` / 附件预览等只读入口归它；它们绝不等待 runtime 激活（今天 `ensureViewReadyPublisher`
+   * 内部仍会等一次激活，因为投影正文只能由 resume 给出——Step 9 的 store-only
+   * `loadPersistedEvents` 才会把这一层真正解耦）。语义仍是「本次冷恢复收口」，不能拿它当
+   * 「runtime 已就绪」（那是 `runtimeReadyFlights`）。
+   */
+  private readonly viewReadyFlights = new Map<string, Promise<ConversationTopicPublisher>>();
+  /**
+   * **runtime 水位**（send 类命令与所有 `requireRecord` 路径只等这一层）：runtime 激活的单飞。
+   *
+   * 与 `coldResume` 内部单飞是**同一件事的两个视角**：那边只负责「别恢复两次」，这边还要
+   * 记住 settle 结论——`conversation/runtimeReady` 的布尔必须读结论而不能读 record
+   * （record 只证明「宿主注册表里有它」，Step 9 的 view-only shell 也会创建 record）。
+   * 因此条目**settle 后不删**，只在 cleanup / dispose 清理；reject 也留着（并发加入者看到同一
+   * 个错误，重试语义由调用方决定）。
+   */
+  private readonly runtimeReadyFlights = new Map<string, RuntimeReadyFlight>();
+  /**
+   * 视图已就绪的会话（IS4 的 viewOnly 半边）。
+   *
+   * `live` / `notLive` 用同步的 `conversationState` 判；`viewOnly` 与 `absent` 的差别只在
+   * 「有没有一次成功的视图水化」，而那只可能是一次异步 store 读的产物，同步函数判不出来。
+   * 只由 hydration 成功收口写入，cleanup / dispose 清除。
+   */
+  private readonly viewReadySessions = new Set<string>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
   /**
@@ -936,7 +1058,9 @@ export class ConversationV4Gateway {
     this.coldResume = new ColdSessionResumeCoordinator(host);
     this.inbox = new CommandInbox({
       getRevision: (sessionId) => {
-        if (!this.host.sessionExists(sessionId)) return null;
+        // 问的是「这条会话算不算存在」而不是「runtime 活没活」（IS4）：view-only 会话有投影
+        // 但没激活 runtime，按 live 判会把它当不存在，admission 直接回 sessionNotFound。
+        if (this.conversationViewState(sessionId) === "absent") return null;
         // 已知会话但尚无事件 → 投影未建，revision 视为 0（draft 起点）。
         return this.publishers.get(sessionId)?.getSnapshot().revision ?? 0;
       },
@@ -1590,7 +1714,8 @@ export class ConversationV4Gateway {
     let released = 0;
     for (const [childId, terminalAt] of [...this.detachedTerminalAt]) {
       if (nowMs - terminalAt < graceMs) continue;
-      if (this.host.sessionExists(childId)) continue;
+      // 只问「child 自己有没有 record」（有 record 的会话由常规生命周期管），不是 live 判定。
+      if (this.hasHostRecord(childId)) continue;
       if (this.publishers.get(childId)?.hasSubscribers()) continue;
       this.releaseDetachedChild(childId);
       released += 1;
@@ -1925,7 +2050,7 @@ export class ConversationV4Gateway {
     if (sessionId === null) {
       throw new Error(`Unsupported topic: ${params.topic}`);
     }
-    const isLiveConversation = this.hasLiveConversation(sessionId);
+    const isLiveConversation = this.conversationState(sessionId) === "live";
     this.host.onDebug?.(
       `subscribe conversation session=${sessionId} coldResume=${String(!isLiveConversation)}`,
     );
@@ -1934,17 +2059,24 @@ export class ConversationV4Gateway {
     // - 有 publisher 但事件日志覆盖不了 transcript（fork child：resume 的 ingest 抢先
     //   建了个只含 fork 事件的 cold publisher）→ 用 transcript 合成**重建**。
     // - 有 publisher 且事件日志完整（流式 live）→ 保留，重放会双计且打断流。
+    //
+    // 订阅是**视图**入口，只等视图水位（IS3）。阶段 8 里视图水位内部仍要等一次激活
+    // （投影正文的来源），Step 9 之后它就不等了，激活由下面的 ACK 后预激活接管。
+    //
+    // 已在飞的视图水位必须被加入（即使此刻 record 已经变成 live）：那条 flight 的
+    // hydration 会带上 resume 给的 `persistedMessages`，另起一次会丢掉它并可能建出
+    // 「只含事件日志、缺 transcript」的投影。
     const restoreStartedAt = performance.now();
-    const existingReady = this.readyFlights.get(sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !isLiveConversation
-        ? await this.ensureColdReadyPublisher(
+    const viewFlight = this.viewReadyFlights.get(sessionId);
+    const publisher = viewFlight
+      ? await viewFlight
+      : isLiveConversation
+        ? await this.hydratePublisher(sessionId)
+        : await this.ensureViewReadyPublisher(
             sessionId,
             params.resumeThoughtLevel,
             params.workspace,
-          )
-        : await this.hydratePublisher(sessionId);
+          );
     const cliSessionRestoreMs = !isLiveConversation
       ? Math.max(0, Math.round(performance.now() - restoreStartedAt))
       : undefined;
@@ -2042,6 +2174,10 @@ export class ConversationV4Gateway {
       flushWindowMs: DELIVERY_PROFILES[profileName].flushWindowMs,
       timer: null,
     });
+    // ACK 已组装、帧已编码 —— 激活从这里开始后台跑（IS3 的触发点，见
+    // `prewarmRuntimeAfterViewAck`）。必须放在帧编码之后：否则激活的 await 会串进
+    // viewReadyMs / initialFrameEncodeMs，把「看」的耗时算到「跑」头上。
+    this.prewarmRuntimeAfterViewAck(sessionId, params.resumeThoughtLevel, params.workspace);
     return dispatch;
   }
 
@@ -2148,18 +2284,15 @@ export class ConversationV4Gateway {
    *
    * 三条「不物化」的边界必须分清，否则「没生效」会被读成「翻页坏了」：
    *   - 本页整段落在已物化窗口内 → 投影现算（窗口内翻页永不触发第二次冷开）；
-   *   - manifest 事实已作废（有 live 事件）→ 退回投影现算，`hasMore` 随之退化为
-   *     「更早方向在投影里还有没有」，见 new_risk（窗口化 + live 之后翻页暂不可用）；
+   *   - manifest 事实已作废（有 live 事件**改动了行集合**）→ 退回投影现算，`hasMore` 随之
+   *     退化为「更早方向在投影里还有没有」，见 new_risk（窗口化 + live 追加行之后翻页暂
+   *     不可用）；`SessionResumed` / 标题 / 模式 / 交互应答这类不增删行的事件**不作废**基线
+   *     （Step 8 定稿；`ModelSelected` 不在此列——模型切换会在轮内长出一行 marker）；
    *   - 选不出页 / 宿主拒绝 / 一致性守卫拦下 → 退回投影现算并打点 `getRowPageOutcome`。
    */
   async rowsRange(rawParams: unknown): Promise<V4ConversationRowsRangeResult> {
     const params = v4ConversationRowsRangeParamsSchema.parse(rawParams);
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const profile: "continuous" | "replayable" =
       // clientMode 决定行可见性过滤档位：桌面 continuous（默认）/ 断线恢复 replayable。
       params.clientMode === "desktop-continuous" ? "continuous" : "replayable";
@@ -2366,18 +2499,13 @@ export class ConversationV4Gateway {
   /**
    * v4/conversation/turnDirectory：turnNavigator 的窄投影目录（用户可见 query 粒度）。
    *
-   * 与 rowsRange 同族同形：只读 query、不建订阅、三段式取 publisher（readyFlights →
-   * hasLiveConversation → ensureColdReadyPublisher / hydratePublisher），因此冷会话
-   * （重启后直开历史）无需改动 transcript-hydration 即可自动可用。
+   * 与 rowsRange 同族同形：只读 query、不建订阅、经视图水位取 publisher
+   * （`resolveViewPublisher`），因此冷会话（重启后直开历史）无需改动
+   * transcript-hydration 即可自动可用。
    */
   async turnDirectory(rawParams: unknown): Promise<V4ConversationTurnDirectoryResult> {
     const params = v4ConversationTurnDirectoryParamsSchema.parse(rawParams);
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     return v4ConversationTurnDirectoryResultSchema.parse(
       publisher.getTurnDirectory(
         {
@@ -2399,41 +2527,31 @@ export class ConversationV4Gateway {
    * ACK **之后**，ACK 帧里不可能有该值（IS8；openPhases 明确不含 runtimeReadyMs）。
    *
    * 只读语义：**不触发激活**，只回已发生的事实。`runtimeReadyMs` 的生产点是
-   * `ensureColdReadyPublisher`（量的是 `coldResume.ensureResumed` 本体），而它被所有
-   * 冷会话的读入口复用——订阅、rowsRange、turnDirectory、plans 等都会走到，不是
-   * 「只有冷订阅」；phase-view-runtime-split 之后改由 ACK 后后台预激活写入，读数口径不变。
+   * `ensureRuntimeReady`（量的是 `coldResume.ensureResumed` 本体）；三个触发方是视图水位
+   * （阶段 8 的临时依赖）、ACK 后的后台预激活与 send 类命令，读数口径不随写入点变化。
    *
    * `runtimeReadyMs` 的口径钉死为 **「激活本体耗时」**（`ensureResumed` 的耗时），
    * 不是「从 ACK 起算」：阶段 0 的激活在 ACK **之前**，按 ACK 起算会算出负数；
    * 阶段 8 拆开后激活在 ACK **之后**，按 ACK 起算又会把等待时间算进去。只有「激活本体」
    * 能跨阶段比较。`runtimeReadyMs: null` = 本进程没观测到一次激活（≠ 0）。
    *
-   * `runtimeReady` 布尔的口径是 **「该会话的 runtime record 是否 live」**
-   * （`hasLiveConversation` 直判 record），**不是**「runtime 已就绪」：
-   * 视图可读 ≠ runtime 就绪，今天二者恰好同源而已。
-   * ⚠ Step 8 必须改成读 `runtimeReadyFlights` 的 settle 结果——拆出 view-only 之后，
-   * 只建了 view publisher、runtime 尚未激活的会话会让 record 仍然 live，本字段会误报 true。
+   * `runtimeReady` 布尔的口径是 **「runtime 是否已就绪」**（`isRuntimeReady`：live 判定
+   * 或一次成功激活的结论），**不是**「record 是否在册」——Step 9 起 view-only shell 也会
+   * `createRecord`，按 record 判会把「只建了视图、没跑 runtime」误报成就绪。
    */
   async runtimeReady(rawParams: unknown): Promise<V4ConversationRuntimeReadyResult> {
     const params = v4ConversationRuntimeReadyParamsSchema.parse(rawParams);
     return v4ConversationRuntimeReadyResultSchema.parse({
       sessionId: params.sessionId,
       runtimeReadyMs: this.runtimeActivationMs.get(params.sessionId) ?? null,
-      // 语义 = 「会话 runtime record 是否 live」（见上：Step 8 要换成 runtimeReadyFlights
-      // 的 settle 结果，否则 view-only 会话会误报 true）。
-      runtimeReady: this.hasLiveConversation(params.sessionId),
+      runtimeReady: this.isRuntimeReady(params.sessionId),
     });
   }
 
   /** 完整有效 projection 的终态计划目录；冷会话复用订阅 hydration。 */
   async plans(rawParams: unknown): Promise<V4ConversationPlansResult> {
     const params = v4ConversationPlansParamsSchema.parse(rawParams);
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     return publisher.getPlans();
   }
 
@@ -2721,16 +2839,16 @@ export class ConversationV4Gateway {
    * 不需要投影（同一判断见这两个 query 刻意不带 atSeq/atLogEpoch）。习语与 attachmentBegin
    * 逐字相同；`ensureResumed` 自带按会话单飞，与并发订阅共享同一次 activation。
    *
-   * 活性判定必须与 subscribe 同一条
-   * `hasLiveConversation`，不能只看 `sessionExists`。dwf actor transcript 是 detached live
-   * 会话——真 runtime 活在 run service 里、宿主刻意没有 record；嵌套 SessionPane 的发现
-   * 查询带着 actor id 打到这里，旧判定就对一条**正在运行**的会话物化出第二个（幽灵）
-   * runtime：它向同一份事件日志追加 SessionResumed、丢弃 pending steer、重放 resume hooks，
-   * 双写把序列账搞乱，transcript 从此定格（症状是直播冻结在「已工作 xx 秒」）。
+   * 活性判定必须走 `conversationState`（IS4），不能只看 `sessionExists`。dwf actor transcript
+   * 是 detached live 会话——真 runtime 活在 run service 里、宿主刻意没有 record；嵌套
+   * SessionPane 的发现查询带着 actor id 打到这里，旧判定就对一条**正在运行**的会话物化出
+   * 第二个（幽灵）runtime：它向同一份事件日志追加 SessionResumed、丢弃 pending steer、重放
+   * resume hooks，双写把序列账搞乱，transcript 从此定格（症状是直播冻结在「已工作 xx 秒」）。
    */
   private async ensureHostRecordForJournalRead(sessionId: string): Promise<void> {
-    if (this.hasLiveConversation(sessionId)) return;
-    await this.coldResume.ensureResumed(sessionId);
+    // 只等 runtime 水位（journal 读要宿主 record）。走 `ensureRuntimeReady` 而不是直接
+    // `coldResume`：与订阅/命令共享同一条激活单飞，并留下 settle 结论供 runtimeReady query 读。
+    await this.ensureRuntimeReady(sessionId);
   }
 
   async fileChanges(rawParams: unknown): Promise<V4ConversationFileChangesResult> {
@@ -2738,12 +2856,7 @@ export class ConversationV4Gateway {
     if (!this.host.getConversationFileChanges) {
       throw new Error("fault.fileChanges.unsupported");
     }
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.hasLiveConversation(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const resolution = this.resolveQueryRowTarget(publisher, params, "fileChanges");
     const messageIds = resolution.messageIds ?? [];
     const targetTurnId = toRuntimeTurnId(resolution.row.turnId);
@@ -2769,12 +2882,7 @@ export class ConversationV4Gateway {
     if (!this.host.previewConversationFileRewind) {
       throw new Error("fault.fileRewindPreview.unsupported");
     }
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.host.sessionExists(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const resolution = this.resolveQueryRowTarget(publisher, params, "fileRewindPreview");
     const messageIds = resolution.messageIds ?? [];
     const targetTurnId = toRuntimeTurnId(resolution.row.turnId);
@@ -2809,9 +2917,9 @@ export class ConversationV4Gateway {
     if (!this.host.putSessionAttachment) {
       throw new Error("fault.attachment.putUnsupported");
     }
-    if (!this.host.sessionExists(params.sessionId)) {
-      await this.coldResume.ensureResumed(params.sessionId);
-    }
+    // 上传要写进 runtime（`app.writePromptAttachment`），所以是 **runtime 水位**：
+    // 不能靠视图水位（view-only 会话有投影但没有 record，写会 404）。
+    await this.ensureRuntimeReady(params.sessionId);
     return this.attachmentUploads.begin(params);
   }
 
@@ -2832,12 +2940,9 @@ export class ConversationV4Gateway {
     if (!this.host.readSessionAttachment) {
       throw new Error("fault.attachment.readUnsupported");
     }
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.host.sessionExists(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    // 附件归属由投影里的权威 user row 证明 → 视图水位足够（read 需要 record，
+    // 但那一步在 host 侧失败即可，读入口不为它顺手激活 runtime）。
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const resolution = this.resolveReadableMediaAttachment(
       publisher,
       params.sessionId,
@@ -2878,12 +2983,9 @@ export class ConversationV4Gateway {
     if (!this.host.readSessionAttachment) {
       throw new ZCodeAttachmentFaultError(ZCODE_ATTACHMENT_FAULT_CODES.readUnsupported);
     }
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.host.sessionExists(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    // 三个附件分享读面都只读投影（行归属 + messageId），因此走视图水位：view-only
+    // 会话也能预览已发送附件；宿主侧的 record 缺失由 host 自己失败，不在这里藏一次激活。
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const row = publisher
       .getSnapshot()
       .rows.window.find(
@@ -2931,12 +3033,7 @@ export class ConversationV4Gateway {
     if (!this.host.statSessionAttachment) {
       throw new ZCodeAttachmentFaultError(ZCODE_ATTACHMENT_FAULT_CODES.statUnsupported);
     }
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.host.sessionExists(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const row = publisher
       .getSnapshot()
       .rows.window.find(
@@ -2975,12 +3072,7 @@ export class ConversationV4Gateway {
 
   async attachmentPreviewSource(rawParams: unknown): Promise<V4AttachmentPreviewSourceResult> {
     const params = v4AttachmentPreviewSourceParamsSchema.parse(rawParams);
-    const existingReady = this.readyFlights.get(params.sessionId);
-    const publisher = existingReady
-      ? await existingReady
-      : !this.host.sessionExists(params.sessionId)
-        ? await this.ensureColdReadyPublisher(params.sessionId)
-        : await this.hydratePublisher(params.sessionId);
+    const publisher = await this.resolveViewPublisher(params.sessionId);
     const resolution = this.resolveReadableMediaAttachment(
       publisher,
       params.sessionId,
@@ -3191,6 +3283,28 @@ export class ConversationV4Gateway {
   }
 
   /**
+   * 命令闸门的判定（不等待、不创建水位）。
+   *
+   * 只解析信封并查 `commandRuntimeGate` 的分类；解析失败 → `pass`（让 inbox 按它自己的
+   * 错误口径拒绝，闸门不抢那条错误）。`sessionId === null` 的 `createSession` 永远 `pass`：
+   * 它创建的就是 runtime 本身，把它也拒掉就等于「没有会话能出生」。
+   */
+  private commandGateDecision(rawParams: unknown): CommandGateDecision {
+    const parsed = parseCommandEnvelope(rawParams);
+    if (!parsed.ok) return { kind: "pass" };
+    const { sessionId, type, commandId } = parsed.envelope;
+    if (sessionId === null) return { kind: "pass" };
+    const gate = commandRuntimeGate(type);
+    if (gate === "record-free") return { kind: "pass" };
+    return {
+      kind: "gated",
+      sessionId,
+      mode: gate === "trigger-activation" ? "trigger-activation" : "await-runtime",
+      commandId,
+    };
+  }
+
+  /**
    * v4/command：inbox 六态裁决；accepted 时执行副作用并把终态随响应返回。
    *
    * 这里曾经"立即回初始 ACK、后台 settle"，
@@ -3201,12 +3315,38 @@ export class ConversationV4Gateway {
    * settle 仍然固化结果供 duplicate 重放。
    */
   async handleCommand(rawParams: unknown): Promise<CommandAck> {
-    // READY 只存在于冷恢复窗口；正常命令直接进入 inbox，避免重复解析信封。
-    if (this.readyFlights.size > 0) {
-      const parsed = parseCommandEnvelope(rawParams);
-      const sessionId = parsed.ok ? parsed.envelope.sessionId : null;
-      const ready = sessionId === null ? undefined : this.readyFlights.get(sessionId);
-      if (ready) await ready;
+    // 命令闸门（IS3 / Step 8）：命令只能在 **runtime-ready** 之后执行。
+    //
+    // 分类见 `commandRuntimeGate`；这里只负责「等 / 触发 / 拒」三种动作：
+    //   - 触发器（send 类）：当场启动或加入 runtime 水位，然后等它——这是 view-only
+    //     会话唯一的升级路径，缺了它 composer 就是死锁；
+    //   - require-runtime：不创建水位。已在飞的视图/runtime 水位都等（保持「冷开期间的
+    //     命令先等恢复收口」这条既有语义），等完仍未就绪 → 可重试的 `runtimeNotReady`；
+    //   - record-free：原样放行（晚到交互应答、全局建会话、store 级丢弃）。
+    // sessionId 为 null（createSession）不受此门限制。
+    const gate = this.commandGateDecision(rawParams);
+    if (gate.kind === "gated") {
+      if (gate.mode === "trigger-activation") {
+        await this.ensureRuntimeReady(gate.sessionId);
+        // 视图水位仍在飞时也要等：命令读的是投影（admission 的 revision / row target），
+        // 提前放行只会在 hydration 窗口里拿到 staleRevision。
+        await this.awaitExistingViewFlight(gate.sessionId);
+      } else {
+        // 只等已在飞的水位，不创建。激活失败不能让「未就绪」变成命令异常：
+        // 结论已在 flight 上，下面的 `isRuntimeReady` 会给出可重试的 runtimeNotReady。
+        await this.awaitExistingViewFlight(gate.sessionId).catch(() => undefined);
+        const runtimeFlight = this.runtimeReadyFlights.get(gate.sessionId);
+        if (runtimeFlight) await runtimeFlight.promise.catch(() => undefined);
+        if (!this.isRuntimeReady(gate.sessionId)) {
+          return {
+            commandId: gate.commandId,
+            status: "rejected",
+            reasonCode: RUNTIME_NOT_READY_REASON,
+            message: "session runtime is not ready yet; retry after runtime activation settles",
+            revisionAtDecision: this.publishers.get(gate.sessionId)?.getSnapshot().revision ?? 0,
+          };
+        }
+      }
     }
 
     const outcome = await this.inbox.handle(rawParams);
@@ -3352,10 +3492,15 @@ export class ConversationV4Gateway {
   /** v4/commands/query：同 key 与 handleCommand 共用 CommandInbox gate。 */
   async queryCommands(rawParams: unknown): Promise<CommandsQueryResult> {
     const params = commandsQueryParamsSchema.parse(rawParams);
+    // 命令结果查询只**加入已在飞的水位**（视图 + runtime），绝不创建：它既不是激活
+    // 触发器，也不属于 runtime-ready 门槛（view-only 会话上它必须照常可用）。
+    // 水位失败也不影响查询：它只做排序约束，真实结论在 inbox 的幂等表里。
     await Promise.all(
-      params.commands.map((key) => {
-        const ready = key.sessionId === null ? undefined : this.readyFlights.get(key.sessionId);
-        return ready;
+      params.commands.map(async (key) => {
+        if (key.sessionId === null) return;
+        await this.awaitExistingViewFlight(key.sessionId).catch(() => undefined);
+        const flight = this.runtimeReadyFlights.get(key.sessionId);
+        if (flight) await flight.promise.catch(() => undefined);
       }),
     );
     return commandsQueryResultSchema.parse({
@@ -3578,7 +3723,12 @@ export class ConversationV4Gateway {
     if (hydrationBuffer) hydrationBuffer.cancelled = true;
     this.hydrationBuffers.delete(sessionId);
     this.hydrationInFlight.delete(sessionId);
-    this.readyFlights.delete(sessionId);
+    // 两条水位 + 三态里的 viewOnly 半边一起清：会话被关掉之后「视图还在」不再是事实，
+    // runtime 的 settle 结论也不能留下来（下一次冷开必须重新判，且 runtimeReadyMs 的口径是
+    // 「本进程内这次激活」而不是「历史上激活过」）。
+    this.viewReadyFlights.delete(sessionId);
+    this.runtimeReadyFlights.delete(sessionId);
+    this.viewReadySessions.delete(sessionId);
     this.rawSequenceStates.delete(sessionId);
     if (options.clearCommandInbox) this.inbox.clearSession(sessionId);
     this.telemetryNormalizer.clearSession(sessionId);
@@ -3598,7 +3748,8 @@ export class ConversationV4Gateway {
       this.detachedChildrenByParent.delete(sessionId);
       for (const childId of children) {
         this.detachedChildParent.delete(childId);
-        if (this.host.sessionExists(childId)) continue;
+        // 同 prune：只判 record 归属，不判 live（child 本身就在 detachedLiveSessions 里）。
+        if (this.hasHostRecord(childId)) continue;
         this.releaseDetachedChild(childId);
       }
     }
@@ -3634,7 +3785,10 @@ export class ConversationV4Gateway {
     this.rowPageOutcomes.clear();
     this.runtimeActivationMs.clear();
     this.hydrationInFlight.clear();
-    this.readyFlights.clear();
+    // 两条水位与三态半边同步清空（IS3 / IS4）：dispose 之后不应留下任何「曾就绪」的事实。
+    this.viewReadyFlights.clear();
+    this.runtimeReadyFlights.clear();
+    this.viewReadySessions.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -3718,49 +3872,154 @@ export class ConversationV4Gateway {
   }
 
   /**
-   * 冷恢复 READY 只在明确需要 activation 的入口创建；hydratePublisher 保持 projection-only。
-   * 注册 promise 早于 activation，避免 record 提前入册后并发 command/query 越过恢复水位。
+   * 冷会话「视图就绪」的唯一入口：**视图水位**（`viewReadyFlights`）的单飞。
    *
-   * 调用方**不止冷订阅**：`rowsRange`、`turnDirectory`、`plans` 以及其余冷会话读入口都走
-   * 同一条 `readyFlights → hasLiveConversation → ensureColdReadyPublisher` 三段式。
-   * 因此本函数也是 `runtimeReadyMs` 的生产点，而且「一次冷开」可以由任一读入口触发——
-   * 「激活的唯一生产点是冷订阅」这个说法不成立（cr-func 2026-10-25 矫正）。
+   * 三件事按顺序发生：等 runtime 激活（今天投影正文只能由 resume 给出，Step 9 换成
+   * store-only 读取后就只剩「建投影」）→ hydration → 登记 `viewReadySessions`/`hydratedSessions`。
+   *
+   * 读与翻页**只**等这一层（IS3 的 view 半边）；它们不该因为「runtime 还没激活」而被拒，
+   * 也不该反过来替命令触发激活。
+   *
+   * 调用方**不止冷订阅**：`rowsRange`、`turnDirectory`、`plans`、`fileChanges`、附件读面
+   * 都经 `resolveViewPublisher` 走到这里。因此本函数也是 `runtimeReadyMs` 的生产链，
+   * 「一次冷开」可以由任一读入口触发——「激活的唯一生产点是冷订阅」这个说法不成立
+   * （cr-func 2026-10-25 矫正；Step 8 起激活本体归 `ensureRuntimeReady`，读数口径不变）。
    */
-  private ensureColdReadyPublisher(
+  private ensureViewReadyPublisher(
     sessionId: string,
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
   ): Promise<ConversationTopicPublisher> {
-    const existingFlight = this.readyFlights.get(sessionId);
+    const existingFlight = this.viewReadyFlights.get(sessionId);
     if (existingFlight) return existingFlight;
     // 先登记同一个 READY，再开始所有耗时工作。
     const operation = Promise.resolve().then(async () => {
-      // runtime 激活耗时（conversation/runtimeReady 的唯一写入点）。
-      //
-      // 口径钉死为「激活本体耗时」= ensureResumed 的耗时，不是「从 ACK 起算」：
-      // 阶段 0 激活发生在 ACK 之前（按 ACK 起算会是负数），阶段 8 拆开后又发生在 ACK
-      // 之后（按 ACK 起算会掺入等待）。只有本体耗时能跨阶段比较。
-      // 今天激活与建投影串行，故这里只量 ensureResumed；phase-view-runtime-split 把它
-      // 移进后台预激活时，换的是写入位置（以及是否跨 ACK），不是读数口径。
-      const activationStartedAt = performance.now();
-      const persistedMessages = await this.coldResume.ensureResumed(
+      // 阶段 8 里视图仍要等一次激活（投影正文的来源）；Step 9 之后这里改成 store-only，
+      // 而激活改由 ACK 之后的后台预激活 + send 类命令触发。
+      const persistedMessages = await this.ensureRuntimeReady(
         sessionId,
         resumeThoughtLevel,
         workspace,
       );
-      this.runtimeActivationMs.set(
-        sessionId,
-        Math.max(0, Math.round(performance.now() - activationStartedAt)),
-      );
       return this.hydratePublisher(sessionId, persistedMessages);
     });
-    this.readyFlights.set(sessionId, operation);
+    this.viewReadyFlights.set(sessionId, operation);
     // 成功和失败都由同一清理函数释放；不创建会重复传播 rejection 的派生 promise。
     const clear = () => {
-      if (this.readyFlights.get(sessionId) === operation) this.readyFlights.delete(sessionId);
+      if (this.viewReadyFlights.get(sessionId) === operation) {
+        this.viewReadyFlights.delete(sessionId);
+      }
     };
     void operation.then(clear, clear);
     return operation;
+  }
+
+  /**
+   * **runtime 水位**（`runtimeReadyFlights`）的唯一入口：runtime 激活的单飞。
+   *
+   * 口径钉死为**激活本体耗时** = `coldResume.ensureResumed` 的耗时，不是「从 ACK 起算」：
+   * 阶段 0 激活在 ACK 之前（按 ACK 起算会是负数），阶段 8 拆开之后激活在 ACK 之后
+   * （按 ACK 起算会把等待算进去）。只有本体耗时能跨阶段比较，所以写入点挪到哪里都只写这一段。
+   *
+   * 三个调用方：①`ensureViewReadyPublisher`（阶段 8 的临时依赖）②ACK 之后的后台预激活
+   * ③send 类命令（唯一允许「当场启动」的触发器）。**不在这里判 workspace/thoughtLevel**：
+   * 首个调用方给什么就用什么，后续加入者复用同一份 flight（与 `coldResume` 的单飞一致）。
+   *
+   * 结论语义：成功 → 条目驻留并置 `activated`（`conversation/runtimeReady` 读它）；
+   * 失败 → 条目删除（下一次触发可重试，与 `coldResume` 自己的 settle 即释放一致）。
+   */
+  private ensureRuntimeReady(
+    sessionId: string,
+    resumeThoughtLevel?: string,
+    workspace?: ZCodeWorkspaceRef,
+  ): Promise<MessageWithParts[] | undefined> {
+    const existing = this.runtimeReadyFlights.get(sessionId);
+    if (existing) return existing.promise;
+    // 已经是 live runtime 的会话（热切换 / detached live child）：不重复 resume。
+    // `runtimeActivationMs` 保持缺席（缺席 ≠ 0：本进程没观测到一次激活）。
+    if (this.conversationState(sessionId) === "live") {
+      return Promise.resolve(undefined);
+    }
+    const activationStartedAt = performance.now();
+    // promise 在 flight 上回填（结论要靠 flight 的同一性做「只删自己」判定）。
+    const flight: RuntimeReadyFlight = { activated: false, promise: Promise.resolve(undefined) };
+    flight.promise = (async () => {
+      try {
+        const persistedMessages = await this.coldResume.ensureResumed(
+          sessionId,
+          resumeThoughtLevel,
+          workspace,
+        );
+        flight.activated = true;
+        this.runtimeActivationMs.set(
+          sessionId,
+          Math.max(0, Math.round(performance.now() - activationStartedAt)),
+        );
+        return persistedMessages;
+      } catch (error) {
+        // 失败不驻留：并发加入者手里仍有同一个 promise（看到同一个错误），但表里清掉，
+        // 下一次订阅/发送可以重新尝试激活。
+        if (this.runtimeReadyFlights.get(sessionId) === flight) {
+          this.runtimeReadyFlights.delete(sessionId);
+        }
+        throw error;
+      }
+    })();
+    this.runtimeReadyFlights.set(sessionId, flight);
+    return flight.promise;
+  }
+
+  /**
+   * 视图 ACK 之后的后台 runtime 预激活（**IS3 的激活触发点**，spec 明文要求）。
+   *
+   * 调用点在 `subscribeReserved` 返回帧之前、帧编码之后：它 fire-and-forget，绝不 await，
+   * 因此不落在本次 RPC 的关键路径上——多数情况下用户看到历史时 runtime 已在就绪路上。
+   * 失败只经 `onError` 记账（结论同时记在 `runtimeReadyFlights` 上，供
+   * `conversation/runtimeReady` 读）。
+   *
+   * 阶段 8 里它通常是 no-op：视图水位内部仍要等一次激活（投影正文的来源），这条 flight
+   * 早已落定。它存在的理由是 Step 9——store-only 视图不再等激活，届时这里是首屏唯一的
+   * 自动激活来源；现在就接线，Step 9 只需把视图水位的激活依赖摘掉。
+   */
+  private prewarmRuntimeAfterViewAck(
+    sessionId: string,
+    resumeThoughtLevel?: string,
+    workspace?: ZCodeWorkspaceRef,
+  ): void {
+    if (this.disposed) return;
+    // 已在飞 / 已成功 / 已失败（条目已删）都以水位表为准，不在这里重判。
+    if (this.runtimeReadyFlights.has(sessionId)) return;
+    if (this.conversationState(sessionId) === "live") return;
+    void this.ensureRuntimeReady(sessionId, resumeThoughtLevel, workspace).catch((error) => {
+      this.host.onError?.("v4.runtime.prewarm", error, { sessionId });
+    });
+  }
+
+  /**
+   * 读 / 翻页取 publisher 的唯一入口（IS3 的 view 半边）。
+   *
+   * 取代过去在每个只读方法里各抄一遍的 `readyFlights → hasLiveConversation →
+   * ensureColdReadyPublisher / hydratePublisher` 三段式：读的语义只有一种——「给我一个
+   * 可读的投影」。live 会话直接 hydration；冷会话走视图水位（它内部才会牵扯激活）。
+   */
+  private async resolveViewPublisher(sessionId: string): Promise<ConversationTopicPublisher> {
+    const existingFlight = this.viewReadyFlights.get(sessionId);
+    if (existingFlight) return existingFlight;
+    if (this.conversationState(sessionId) === "notLive") {
+      return this.ensureViewReadyPublisher(sessionId);
+    }
+    return this.hydratePublisher(sessionId);
+  }
+
+  /**
+   * 读入口的「等已在飞的视图水化」版本：不创建 flight、不触发冷开。
+   *
+   * 只给「本来就是 live 会话的附加只读能力」用（dwf journal 读取等）；冷会话若也要读，
+   * 应当显式走 `resolveViewPublisher` 而不是在这里顺手激活。
+   */
+  private async awaitExistingViewFlight(sessionId: string): Promise<void> {
+    const flight = this.viewReadyFlights.get(sessionId);
+    if (flight) await flight;
   }
 
   /**
@@ -3808,7 +4067,8 @@ export class ConversationV4Gateway {
     forceRebuild = false,
   ): Promise<ConversationTopicPublisher> {
     const existingAtStart = this.publishers.get(sessionId);
-    const liveSessionAtStart = this.host.sessionExists(sessionId);
+    // 诊断字段 `liveSessionAtStart` 沿用 live 语义（IS4）：detached child 也算 live。
+    const liveSessionAtStart = this.conversationState(sessionId) === "live";
     const hydrationStartedAt = performance.now();
     // openPhases 的 merge / rehydrate 分段：本函数是唯一产生点（早退分支只有 merge 段）。
     const phases: HydrationPhases = {};
@@ -3877,7 +4137,7 @@ export class ConversationV4Gateway {
         persistedMessages,
         loaded.usageSeed,
       );
-      this.hydratedSessions.add(sessionId);
+      this.markViewReady(sessionId);
       this.publishCurrentSummaryToIndex(sessionId);
       // 早退分支没有 rehydrate：只落 merge 段与收口时刻，读端按缺席处理 rehydrateMs。
       phases.finishedAtMs = performance.now();
@@ -4056,7 +4316,7 @@ export class ConversationV4Gateway {
         this.scheduleFlush(routeKey, state, publisher);
       }
     }
-    this.hydratedSessions.add(sessionId);
+    this.markViewReady(sessionId);
     this.publishCurrentSummaryToIndex(sessionId);
     phases.finishedAtMs = performance.now();
     return publisher;
@@ -4177,12 +4437,65 @@ export class ConversationV4Gateway {
   }
 
   /**
-   * 运行中 subagent 没有独立 bootstrap record，但 raw child events 会先建立 publisher。
-   * publisher 已存在就代表 conversation live 可订阅，不能再把同一 child cold resume 成
-   * 第二个 runtime；真正的历史 session 仍由 host record / persisted resume 负责。
+   * 宿主注册表里有没有这条会话的 record（**只回答这一件事**）。
+   *
+   * IS4 的唯一原始调用点：`host.sessionExists` 对 live 与 view-only 都可能是 true，
+   * 散落直判会让「还算不算存在 / 是不是 live」这两个问题在不同入口得到不同答案
+   * （幽灵 runtime 前科见 `ensureHostRecordForJournalRead` 的注释）。需要语义判定的
+   * 调用方改用 `conversationState` / `conversationViewState` / `isRuntimeReady`；
+   * 确实只想问「record 在不在」的（detached child 释放、诊断日志）走这里并注明理由。
    */
-  private hasLiveConversation(sessionId: string): boolean {
-    return this.host.sessionExists(sessionId) || this.detachedLiveSessions.has(sessionId);
+  private hasHostRecord(sessionId: string): boolean {
+    return this.host.sessionExists(sessionId);
+  }
+
+  /**
+   * 会话的 **live / notLive** 二态（IS4 的同步半边）。
+   *
+   * 运行中 subagent 没有独立 bootstrap record，但 raw child 事件会先建 publisher——
+   * `detachedLiveSessions` 与「record 在册」同属 live，退化成 notLive 会把一条正在跑的 child
+   * 再 cold resume 成第二个 runtime。
+   */
+  private conversationState(sessionId: string): "live" | "notLive" {
+    return this.hasHostRecord(sessionId) || this.detachedLiveSessions.has(sessionId)
+      ? "live"
+      : "notLive";
+  }
+
+  /**
+   * 三态视图（IS4）：live / viewOnly / absent。
+   *
+   * `viewOnly` = 视图（投影）已经能读，但 runtime 没激活；`absent` = 连视图都没有
+   * （宿主注册表没有、也没有一次成功的视图水化）。只有 `absent` 才能当成
+   * 「这个会话不存在」——把它和 viewOnly 混为一谈会让读与翻页直接 404。
+   */
+  private conversationViewState(sessionId: string): "live" | "viewOnly" | "absent" {
+    if (this.conversationState(sessionId) === "live") return "live";
+    if (this.viewReadySessions.has(sessionId)) return "viewOnly";
+    return "absent";
+  }
+
+  /**
+   * runtime 是否**已就绪**（≠ record 是否在册）。
+   *
+   * 两个来源都要看：live 判定（热会话 / 新建会话 / detached child 从来不会有 flight）+
+   * 本进程内一次成功激活的结论。
+   *
+   * ⚠ 本步「record 在册 ⇒ runtime 就绪」还成立，因为阶段 8 **没有**只建视图不激活的路径
+   * （`ensureViewReadyPublisher` 内部就等激活）。Step 9 的 `materializeSessionShell` 会
+   * `createRecord` 但不 resume，届时必须把这个 live 短路换成「激活结论」集合——否则
+   * view-only 会话会误报 true，正是幽灵 runtime 的入口。（已登记在 spec Step 8 落地说明，
+   * 是 Step 9 的 blocking 前置。）
+   */
+  private isRuntimeReady(sessionId: string): boolean {
+    if (this.runtimeReadyFlights.get(sessionId)?.activated === true) return true;
+    return this.conversationState(sessionId) === "live";
+  }
+
+  /** 视图水化的成功收口：`hydratedSessions`（防双算）与 `viewReadySessions`（IS4）同点登记。 */
+  private markViewReady(sessionId: string): void {
+    this.hydratedSessions.add(sessionId);
+    this.viewReadySessions.add(sessionId);
   }
 
   private async seedPublisherUsage(
