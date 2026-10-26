@@ -173,7 +173,6 @@ function hasGeneratedMarker(relativePath) {
   );
 }
 
-
 /**
  * 分列键：`<宿主包>/<面>`。面只有两种——`src`（生产代码）与 `scripts`（测试/脚本）。
  * 判法按路径段而不是正则猜：`…/packages/<pkg>/src/…` 或 `…/packages/<pkg>/scripts/…`；

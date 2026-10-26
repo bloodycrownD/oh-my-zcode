@@ -23,8 +23,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { commandAckSchema, commandPayloadSchemas, parseCommandEnvelope, COMMANDS_REQUIRING_BASE_REVISION } =
-  await import("@zcode/shared/zcode-protocol-v4");
+const {
+  commandAckSchema,
+  commandPayloadSchemas,
+  parseCommandEnvelope,
+  COMMANDS_REQUIRING_BASE_REVISION,
+} = await import("@zcode/shared/zcode-protocol-v4");
 const { SessionEventType } = await import("@zcode/contracts");
 // 先载 executor 打通模块图（v4-gateway ↔ handlers/index ↔ queue 存在环，
 // 直接 import queue.ts 会撞 TDZ；同 test-edit-retry-model 范式）。
@@ -194,7 +198,10 @@ test("B7: core 上报 fail-closed 时 ACK 带 degradedReason（不再静默成�
   // 变异探测：handler 恢复 `return undefined`（丢弃 outcome），本断言即红——那正是
   // 「已切引导但未内联」对客户端完全不可见的形态。
   assert.equal(result.inlined, false);
-  assert.equal(commandAckSchema.parse(makeAck(result)).result?.degradedReason, "ledger_capability_absent");
+  assert.equal(
+    commandAckSchema.parse(makeAck(result)).result?.degradedReason,
+    "ledger_capability_absent",
+  );
 });
 
 test("B2: reserved / promoting 拒绝（guard.queueItemDeliveryLocked）", async () => {
