@@ -11,10 +11,15 @@
 // - 重订阅 = 替换：同 connectionId 重复 subscribe 即作废旧订阅并清其
 //   flush buffer，旧 subscriptionId 不再产帧，客户端按 subId 丢弃旧代际帧。
 import { Buffer } from "node:buffer";
-import { SessionEventType, type SessionEvent } from "@zcode/contracts";
+import {
+  SessionEventType,
+  type SessionEvent,
+  type TurnManifestRowCountSource,
+} from "@zcode/contracts";
 import type {
   CommandEnvelope,
   ConversationDelta,
+  ConversationRow,
   ConversationRowTarget,
   ConversationSnapshot,
   ConversationTopicFrame,
@@ -22,6 +27,8 @@ import type {
   DeliveryProfileName,
   QueueItem,
   SessionMagicContextUsage,
+  SessionRuntimeAvailability,
+  StatePatch,
   SubscribeAck,
   TopicFrameDeliveryKind,
   ToolCallRow,
@@ -32,11 +39,8 @@ import type {
   V4ConversationTurnDirectoryResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import {
-  DEFAULT_MAX_PREVIEW_CHARS,
-  DEFAULT_MAX_PREVIEW_PARAGRAPHS,
   DELIVERY_PROFILES,
   PROTOCOL_V4_LIMITS,
-  buildPreviewText,
   clampWorkflowRunsForLegacy,
   coalesceConversationDeltas,
   filterConversationDeltasForProfile,
@@ -48,6 +52,11 @@ import {
   workflowRunDeltaGrowthUpperBound,
 } from "./conversation-workflow-run-deltas.js";
 import {
+  turnDirectoryAssistantPreviewKind,
+  turnDirectoryPreview,
+  type TurnManifestEntry,
+} from "./turn-manifest-entry.js";
+import {
   ProductProjection,
   type StableForkCandidateResolution,
   type ConversationRowTargetAction,
@@ -55,8 +64,13 @@ import {
   type SessionConfigSeed,
   type SessionSubagentsSeed,
   type SessionUsageSeed,
+  type TurnModelBaselineSeed,
 } from "./product-projection.js";
 import type { TopicFrameReservation } from "./topic-frame-reservation.js";
+import {
+  selectManifestTurnDirectory,
+  type SessionRowManifestFacts,
+} from "./session-row-manifest.js";
 
 interface LogEntry {
   seq: number;
@@ -68,13 +82,6 @@ const TERMINAL_PLAN_STATUSES: ReadonlySet<ToolCallRow["status"]> = new Set([
   "error",
   "cancelled",
 ]);
-
-/**
- * turn 目录里「没有正文可摘」时的 fallback。i18n 文案不下发（客户端按
- * `assistantPreviewKind` 填 `chat.turnNavigator.*`），所以这里只能是空串——
- * 服务端一旦下发占位文案，客户端就再也无法本地化。
- */
-const TURN_DIRECTORY_EMPTY_PREVIEW = "";
 
 /**
  * cold replay 会高频测量临时 delta；TextEncoder 会为每次测量再分配完整 Uint8Array。
@@ -159,6 +166,16 @@ interface ConversationTopicPublisherOptions {
   subscriberBufferMaxOps?: number;
   /** 每订阅者 logical deltas payload 的 UTF-8 byte 上限。 */
   subscriberBufferMaxBytes?: number;
+  /**
+   * 会话的 runtime 态（IS3/IS8 的注入缝）：网关在**构造 publisher 时**传入，
+   * 帧编码时写进 `availability.sessionRuntime` 并在 view-only 时压平控制面。
+   *
+   * 为什么必须是 provider 而不是快照字段：帧在 publisher 内编码后经
+   * `emitReservedTopicFrame → emitWireFrame` 出站，网关拿不到可改的 snapshot 对象；
+   * 而 runtime 起没起是宿主的运行时事实，投影（纯事件派生）不知道也不该知道。
+   * 缺席 = `live`（旧宿主的语义，与 schema 的 `.default("live")` 一致）。
+   */
+  sessionRuntime?: () => SessionRuntimeAvailability;
 }
 
 interface ConversationSubscriberBufferLimits {
@@ -281,6 +298,18 @@ export class ConversationTopicPublisher {
   private nextLogicalFrameSerial = 1;
   /** 当前 snapshot logical frame 的保守上界；流式追加只累计增量，逼近上限才精确序列化。 */
   private wireSnapshotBytesUpperBound: number;
+  /**
+   * 冷开读到的 manifest 事实（IS5 的权威源）。null = 没有可用清单，全序量回退到投影现算。
+   * 只在冷 hydration 后有值，第一条**改动了行集合**的 live 事件即作废（见
+   * `seedRowManifestFacts` 与 `rowSetSignature`）。
+   */
+  private rowManifestFacts: SessionRowManifestFacts | null = null;
+  /**
+   * runtime 态 provider（IS3/IS8）：网关构造时注入，帧编码时读取。
+   * 只允许在**出站编码**（快照 / state patch）读它：读进投影会让同一批事件产出两份不同的
+   * 投影，破坏「事件 → 投影」的确定性。
+   */
+  private readonly sessionRuntimeProvider?: () => SessionRuntimeAvailability;
 
   constructor(
     private readonly sessionId: string,
@@ -289,6 +318,7 @@ export class ConversationTopicPublisher {
   ) {
     this.topic = `conversation/${sessionId}`;
     this.projection = new ProductProjection(sessionId, logEpoch);
+    this.sessionRuntimeProvider = options.sessionRuntime;
     this.now = options.now ?? Date.now;
     this.retention = options.retention ?? PROTOCOL_V4_LIMITS.eventRetentionPerSession;
     this.subscriberBufferMaxOps = nonNegativeHardBound(
@@ -344,6 +374,140 @@ export class ConversationTopicPublisher {
   }
 
   /**
+   * 让所有现有订阅在下一次 flush 收到一份**新快照**（不换投影、不重放事件）。
+   *
+   * 唯一消费者是激活后的派生量补种（`seedConfig` / `seedUsage` 直改初值、不产 delta）：
+   * 不驱动这一下，客户端要等到下一个事件才看见 usage / thoughtLevels 补齐。
+   *
+   * 与 `rehydrate` 的 resync 区别：那里整份投影被换掉（rollback 也就不存在），这里只换了
+   * 快照内容，`currentSeq` / retained log 不变，因此**不动** `sentSeq` 之外的任何东西。
+   * 语义上等值于「订阅者从当前水位重新拿一次 snapshot」（`resyncRequired` 就是这条路径）。
+   */
+  requireSnapshotResync(): void {
+    for (const subscription of this.subscriptions.values()) {
+      subscription.buffer = [];
+      subscription.bufferBytes = 0;
+      subscription.resyncRequired = true;
+      // sentSeq=0 与 rehydrate 一致：帧区间 (0, currentSeq] 才是完整快照，
+      // 保留旧 sentSeq 会让 `frame.fromSeq` 指向一个客户端从未见过的水位。
+      subscription.sentSeq = 0;
+      // 在途 reservation 的帧内容已是旧快照，不能再 commit（同上：身份不再匹配）。
+      subscription.inFlight = null;
+    }
+  }
+
+  /**
+   * 分支代次种子（cold hydration）：与 `SessionRevert.branchGeneration` 同源。
+   * 只靠事件重放推导会漏——synthesized transcript 不含 RewindTriggered，
+   * 于是代次停在 0、manifest 键控到错的代次上。
+   */
+  seedBranchGeneration(generation: number): void {
+    this.projection.seedBranchGeneration(generation);
+  }
+
+  /**
+   * 冷窗口的 rowId 起点播种（IS1）：值取 `selectColdTailWindow(...).rowIdBase`。
+   * 只允许在任何行物化之前调用，见 `ProductProjection.seedRowIdOrigin`。
+   */
+  seedRowIdOrigin(origin: number): void {
+    this.projection.seedRowIdOrigin(origin);
+  }
+
+  /**
+   * 窗口 / 翻页物化的上一轮模型基线（IS1）：值取窗口（页）前一轮首条消息的选型。
+   * 不播种会让「模型切换恰好在窗口/页首轮」时那一行 `modelChange` marker 消失，
+   * 其后所有行的 rowId 整体前移（与全量物化分叉）。
+   */
+  seedTurnModelBaseline(baseline: TurnModelBaselineSeed): void {
+    this.projection.seedTurnModelBaseline(baseline);
+  }
+
+  /** turn 终态行清单（活投影口径）；该事件已无可物化行时返回 null。 */
+  getTurnManifestEntry(event: SessionEvent): TurnManifestEntry | null {
+    return this.projection.getTurnManifestEntry(event);
+  }
+
+  /** 整条 active 分支的行清单（冷物化回写 / 整表重建；ordinalBase 见投影注释）。 */
+  getTurnManifestEntriesForBranch(input: {
+    rowCountSource: TurnManifestRowCountSource;
+    ordinalBase?: number;
+  }): TurnManifestEntry[] {
+    return this.projection.getTurnManifestEntriesForBranch(input);
+  }
+
+  /** turnId → 连续块行数（账目修正的 `observedRowCounts`）。 */
+  getTurnRowCounts(): Map<string, number> {
+    return this.projection.getTurnRowCounts();
+  }
+
+  /** turnId → rowId base（IS1 的 live 口径；未知 turn = null）。 */
+  getTurnManifestRowIdBase(turnId: string): number | null {
+    return this.projection.getTurnManifestRowIdBase(turnId);
+  }
+
+  /** 当前分支代次 + active turn 顺序：rewind 复制 manifest 前缀的唯一坐标。 */
+  getTurnManifestBranchState(): { branchGeneration: number; turnIds: string[] } {
+    return this.projection.getTurnManifestBranchState();
+  }
+
+  /**
+   * 注入 manifest 事实（冷开读路径的产物）。
+   *
+   * 注入后 `totalCount` / `firstRowId` / `turnDirectory` / `realUserQueryTotal` 改由 manifest
+   * 提供（IS5：禁止由 `rows.window` 现算）。生命周期钉死为「冷快照基线」：
+   * **第一条改动了行集合的 live 事件 ingest 即作废**（`ingest` 里按 `rowSetSignature` 判定），
+   * 因为 manifest 只在 turn 终态写，正在跑的这一轮的行不在里面，继续拿它当权威会让
+   * totalCount 少算当前轮。反之，**不增删行**的 live 事件（`SessionResumed`、标题、协作模式、
+   * 交互应答）不作废：Step 8 起激活发生在 ACK 之后，按「任何 ingest 即作废」会让窗口化翻页
+   * 在激活那一刻就失效（行一行没变），生产里等于按需物化不存在。注意 `ModelSelected` **不在**
+   * 这个名单里：模型切换会在轮内长出一行 `modelChange` marker（Step 7 的模型基线就是为它存在的）。
+   */
+  seedRowManifestFacts(facts: SessionRowManifestFacts): void {
+    this.rowManifestFacts = facts;
+    this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
+  }
+
+  /** 丢弃 manifest 基线（回到投影现算）。 */
+  clearRowManifestFacts(): void {
+    if (this.rowManifestFacts === null) return;
+    this.rowManifestFacts = null;
+    this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
+  }
+
+  /** 测试 / Step 8 探针：当前生效的 manifest 事实（未注入 = null）。 */
+  getRowManifestFacts(): SessionRowManifestFacts | null {
+    return this.rowManifestFacts;
+  }
+
+  /**
+   * 测试 / Step 8 探针：投影行集合的 O(1) 签名。
+   *
+   * 生产代码只在 `ingest` 里前后各取一次；暴露它是因为「同长度但换过行」这一类形态没有
+   * 稳定的真实事件构造方式，而签名本身是 manifest 权威性的判断依据，必须能单独钉住
+   * （否则删掉首行/末行两段也不会有测试红）。
+   */
+  getRowSetSignature(): string {
+    return this.rowSetSignature();
+  }
+
+  /**
+   * 投影行集合的 O(1) 签名（行数 + 首行 + 末行 rowId）。
+   *
+   * 用途只有一个：判断一次 ingest 是否**增删/换过行**，从而决定要不要作废 manifest 基线
+   * （Step 8 的口径：「第一条 live ingest 即作废」收紧为「第一条改动了行集合的 live ingest
+   * 即作废」）。取三段的理由：行数抓追加与截断，首行抓 rewind 后的整体平移，末行抓
+   * 「同长度但换了分支」这类行数看不出来的替换。行内容的原地更新（反馈、状态位）与只改
+   * 会话元数据的事件（标题、模式、交互应答）不改变这三个值——它们本来就不影响清单里的计数。
+   * `ModelSelected` **不能**当成「不增删行」：模型切换会在轮内长出一行 marker。
+   */
+  private rowSetSignature(): string {
+    const rows = this.projection.getSnapshot().rows.window;
+    const first = rows.length === 0 ? "-" : rows[0].rowId;
+    const last = rows.length === 0 ? "-" : rows[rows.length - 1].rowId;
+    return `${rows.length}:${first}:${last}`;
+  }
+
+  /**
    * 下发用快照：rows 只带尾部窗口（snapshotTailWindowRows），
    * totalCount/firstRowId 保留全序口径——客户端以 `window[0].rowId === firstRowId`
    * 判定已到顶，更早历史经 rows/range 游标拉取。投影内部快照保持全量
@@ -358,21 +522,82 @@ export class ConversationTopicPublisher {
     snapshot = this.projection.getSnapshot(),
   ): ConversationSnapshot {
     const visibleRows = filterConversationRowsForProfile(snapshot.rows.window, profile);
-    const visibleSnapshot: ConversationSnapshot = {
+    // IS5：manifest 在场面时 totalCount / firstRowId 只来自它（禁止由 rows.window 现算）。
+    // 缺席（live 会话 / 老会话降级）才回退到窗口现算，两者在「全量物化 + 清单完整」时逐值相等。
+    const facts = this.rowManifestFacts;
+    const visibleSnapshot: ConversationSnapshot = this.applyRuntimeBoundary({
       ...snapshot,
       rows: {
         ...snapshot.rows,
         window: visibleRows,
-        totalCount: visibleRows.length,
-        firstRowId: visibleRows[0]?.rowId ?? null,
+        totalCount: facts ? facts.totalCount : visibleRows.length,
+        firstRowId: facts ? facts.firstRowId : (visibleRows[0]?.rowId ?? null),
       },
-    };
+    });
     const limit = PROTOCOL_V4_LIMITS.snapshotTailWindowRows;
     if (visibleRows.length <= limit) return visibleSnapshot;
     return {
       ...visibleSnapshot,
       rows: { ...visibleSnapshot.rows, window: visibleRows.slice(-limit) },
     };
+  }
+
+  /** IS3/IS8：当前会话的 runtime 态（缺席 provider = live，与 schema 默认一致）。 */
+  private currentSessionRuntime(): SessionRuntimeAvailability {
+    return this.sessionRuntimeProvider?.() ?? "live";
+  }
+
+  /**
+   * 出站快照的 runtime 边界改写（IS8 的注入缝）。
+   *
+   * view-only 时做两件事，都是「别让客户端以为 runtime 在跑」：
+   * ①`availability.sessionRuntime = "viewOnly"`（客户端据此只禁 edit/fork/retry/rewind，
+   *   composer 保持可用——它是唯一的激活入口）；
+   * ②控制面压平成「不能停」：`canStop:false` / `stopState:"idle"`。view-only 没有 runtime，
+   *   历史尾部可能停在半个 running 轮（进程退出前的 TurnStarted），照抄会让 Stop 按钮
+   *   指向一个不存在的目标。`phase` 等其余字段不动——它们是历史事实。
+   */
+  private applyRuntimeBoundary(snapshot: ConversationSnapshot): ConversationSnapshot {
+    const runtime = this.currentSessionRuntime();
+    const availability =
+      snapshot.availability.sessionRuntime === runtime
+        ? snapshot.availability
+        : { ...snapshot.availability, sessionRuntime: runtime };
+    if (runtime === "live") {
+      return availability === snapshot.availability ? snapshot : { ...snapshot, availability };
+    }
+    return {
+      ...snapshot,
+      availability,
+      control: { ...snapshot.control, canStop: false, stopState: "idle" },
+    };
+  }
+
+  /**
+   * 出站 delta 的 runtime 边界改写（与 {@link applyRuntimeBoundary} 同一把尺）。
+   *
+   * 只改 `state.updated` 里的两个键：`availability` 补 `sessionRuntime`，`control` 压平
+   * 「能停」。不做按事件类型的白名单——补丁里带哪个键就改哪个键，其余键原样透传。
+   */
+  private applyRuntimeBoundaryToDeltas(
+    deltas: readonly ConversationDelta[],
+  ): readonly ConversationDelta[] {
+    const runtime = this.currentSessionRuntime();
+    if (runtime === "live") return deltas;
+    return deltas.map((delta) => {
+      if (delta.op !== "state.updated") return delta;
+      const patch: StatePatch = delta.patch;
+      const nextPatch: StatePatch = {
+        ...patch,
+        ...(patch.availability
+          ? { availability: { ...patch.availability, sessionRuntime: runtime } }
+          : {}),
+        ...(patch.control
+          ? { control: { ...patch.control, canStop: false, stopState: "idle" as const } }
+          : {}),
+      };
+      return { ...delta, patch: nextPatch };
+    });
   }
 
   /**
@@ -398,7 +623,9 @@ export class ConversationTopicPublisher {
     deltas: readonly ConversationDelta[],
     subscription: Subscription,
   ): readonly ConversationDelta[] {
-    const filtered = filterConversationDeltasForProfile(deltas, subscription.profile);
+    const filtered = this.applyRuntimeBoundaryToDeltas(
+      filterConversationDeltasForProfile(deltas, subscription.profile),
+    );
     if (subscription.workflowRunDeltas) return filtered;
     return encodeConversationDeltasForLegacy(filtered, this.projection.getSnapshot().workflowRuns);
   }
@@ -477,23 +704,48 @@ export class ConversationTopicPublisher {
     params: { beforeRowId?: number; limit: number },
     deliveryProfile: DeliveryProfileName = "replayable",
   ): V4ConversationRowsRangeResult {
+    return this.encodeRowsRangePage(
+      this.projection.getSnapshot().rows.window,
+      params,
+      deliveryProfile,
+    );
+  }
+
+  /**
+   * 把**任意一批行**编码成一页 rows/range（IS6 的编码半边）。
+   *
+   * gateway 的按需物化（Step 7）会拿临时投影物化出来的页调用它，于是「页」与「投影窗口」
+   * 共用同一份**可见性过滤 + 游标裁剪 + `hasMore` 口径**——两份实现迟早会让「窗口内翻页」
+   * 与「窗口外翻页」给出不同的 hasMore，而客户端是拿它当循环终止条件的。
+   *
+   * `hasMore` 按**权威首行**判定（manifest 在场时用它，否则用投影的首行），不是
+   * 「eligible.length > rows.length」：按需物化后 eligible 只含本页，后者会恒 false，
+   * 而客户端硬依赖它（`conversationProjectionStore` 的 `if (!result.hasMore) break;`）。
+   * 也不能写死 `> 1`：live rewind 之后 firstRowId 仍是 1，但 manifest 的口径是权威值。
+   */
+  encodeRowsRangePage(
+    rows: readonly ConversationRow[],
+    params: { beforeRowId?: number; limit: number },
+    deliveryProfile: DeliveryProfileName = "replayable",
+  ): V4ConversationRowsRangeResult {
     const snapshot = this.projection.getSnapshot();
     const limit = Math.max(1, Math.min(params.limit, PROTOCOL_V4_LIMITS.rowsRangeMaxLimit));
-    const visibleRows = filterConversationRowsForProfile(
-      snapshot.rows.window,
-      DELIVERY_PROFILES[deliveryProfile],
-    );
+    const visibleRows = filterConversationRowsForProfile(rows, DELIVERY_PROFILES[deliveryProfile]);
     const eligible =
       params.beforeRowId === undefined
         ? visibleRows
         : visibleRows.filter((row) => row.rowId < (params.beforeRowId as number));
-    const rows = eligible.slice(-limit);
+    const pageRows = eligible.slice(-limit);
+    const firstRowId = this.rowManifestFacts
+      ? this.rowManifestFacts.firstRowId
+      : (snapshot.rows.firstRowId ?? visibleRows[0]?.rowId ?? null);
+    const pageFirstRowId = pageRows[0]?.rowId;
     return {
-      rows,
+      rows: pageRows,
       atSeq: snapshot.seq,
       atRevision: snapshot.revision,
       atLogEpoch: this.logEpoch,
-      hasMore: eligible.length > rows.length,
+      hasMore: pageFirstRowId !== undefined && (firstRowId === null || pageFirstRowId > firstRowId),
     };
   }
 
@@ -540,6 +792,21 @@ export class ConversationTopicPublisher {
     deliveryProfile: DeliveryProfileName = "replayable",
   ): V4ConversationTurnDirectoryResult {
     const snapshot = this.projection.getSnapshot();
+    // IS5：manifest 在场时目录与 `realUserQueryTotal` 直接读 query 表（含三个 preview，
+    // 无需窄读正文）。契约（升序 / 严格更小游标 / hasMore 含义）由
+    // `selectManifestTurnDirectory` 与下面的全量扫描各自实现同一套规则，T-SL7 逐值比对。
+    const facts = this.rowManifestFacts;
+    if (facts) {
+      const page = selectManifestTurnDirectory(facts, params);
+      return {
+        entries: page.entries,
+        realUserQueryTotal: page.realUserQueryTotal,
+        atSeq: snapshot.seq,
+        atRevision: snapshot.revision,
+        atLogEpoch: this.logEpoch,
+        hasMore: page.hasMore,
+      };
+    }
     const limit = Math.max(
       1,
       Math.min(
@@ -572,15 +839,8 @@ export class ConversationTopicPublisher {
       }
     }
 
-    const preview = (texts: readonly string[]): string =>
-      buildPreviewText({
-        texts,
-        // 摘要口径与 renderer rail 严格同源（@zcode/shared/previewText 的 220 字符 / 2 段）。
-        fallback: TURN_DIRECTORY_EMPTY_PREVIEW,
-        maxPreviewChars: DEFAULT_MAX_PREVIEW_CHARS,
-        maxPreviewParagraphs: DEFAULT_MAX_PREVIEW_PARAGRAPHS,
-      });
-
+    // 摘要口径与 manifest 共用同一份派生（turn-manifest-entry.ts）：manifest 快路径与
+    // 全量物化出的目录必须逐字节一致，两条路径各写一份 preview 就不可能对齐。
     const allEntries = queries
       .toSorted((left, right) => left.rowId - right.rowId)
       .map((row): TurnDirectoryEntry => {
@@ -589,14 +849,15 @@ export class ConversationTopicPublisher {
         return {
           turnId: row.turnId,
           queryRowId: row.rowId,
-          queryPreview: preview([row.text]),
+          queryPreview: turnDirectoryPreview([row.text]),
           // 文案不下发：非 text 态的 assistantPreview 恒为空串，客户端按枚举填 i18n。
-          assistantPreview: hasAssistantText ? preview(turn?.assistantTexts ?? []) : "",
-          assistantPreviewKind: hasAssistantText
-            ? "text"
-            : turn?.headerState === "running"
-              ? "running"
-              : "empty",
+          assistantPreview: hasAssistantText
+            ? turnDirectoryPreview(turn?.assistantTexts ?? [])
+            : "",
+          assistantPreviewKind: turnDirectoryAssistantPreviewKind(
+            hasAssistantText,
+            turn?.headerState,
+          ),
         };
       });
 
@@ -670,6 +931,13 @@ export class ConversationTopicPublisher {
 
   /** 应用权威事件：投影推进 + 日志记账 + 扇出到各订阅者 flush buffer。 */
   ingest(event: SessionEvent): void {
+    // 冷快照的 manifest 基线在**投影行集合发生变化**时作废（Step 8 定稿，见下方
+    // `rowSetSignature`）：清单只在 turn 终态写，正在跑的这轮不在里面，继续拿它当权威
+    // 会让 totalCount / 目录少算当前轮——那条理由成立的前提是「确实有行不在清单里」。
+    // 反过来，激活期的 `SessionResumed`、标题 / 模式变化、交互应答这类**不增删行**的事件
+    // 不该让基线失效：阶段 8 之后激活发生在 ACK 之后，按「任何 ingest 即作废」会让窗口化
+    // 翻页在激活那一刻就死掉（行一行没变），生产里等于功能不存在。
+    const rowSetBefore = this.rowSetSignature();
     const projectionLimit =
       event.type === SessionEventType.TurnComplete || event.type === SessionEventType.TurnError
         ? PROTOCOL_V4_LIMITS.logicalFrameAssemblyMaxBytes
@@ -703,6 +971,11 @@ export class ConversationTopicPublisher {
       });
       if (deltas === null) throw new ProjectionPayloadTooLargeError(candidateBytes);
       this.wireSnapshotBytesUpperBound = nextUpperBound;
+    }
+    // 行集合变了才作废基线（见本函数开头）：行数 / 首行 / 末行三个 O(1) 事实就足以判定
+    // 「有没有行不在清单里」，不引入按事件类型的白名单（漏列一种事件就会拿旧清单冒充新事实）。
+    if (this.rowManifestFacts !== null && this.rowSetSignature() !== rowSetBefore) {
+      this.clearRowManifestFacts();
     }
     this.log.push({ seq: event.sequenceNumber, deltas });
     while (this.log.length > this.retention) {
@@ -764,8 +1037,30 @@ export class ConversationTopicPublisher {
    */
   rehydrate(
     events: readonly SessionEvent[],
-    options: { onPayloadTooLarge?: (error: ProjectionPayloadTooLargeError) => void } = {},
+    options: {
+      onPayloadTooLarge?: (error: ProjectionPayloadTooLargeError) => void;
+      /**
+       * 冷窗口的 rowId 起点（IS1，Step 6）：值取 `selectColdTailWindow(...).rowIdBase`。
+       *
+       * **必须走这里而不是 rehydrate 之后再 `seedRowIdOrigin`**：重放会把整份 projection
+       * 换成候选实例，播种只有在「建投影之后、首次 ingest 之前」才合法
+       * （`ProductProjection.seedRowIdOrigin` 在有行之后调用会直接抛错）。候选实例可能是
+       * 两个（批量化失败会重建一个 strict 候选），所以两处都要播。
+       */
+      rowIdOrigin?: number;
+      /**
+       * 冷窗口的**上一轮模型基线**（IS1，Step 6/7）：窗口前一轮首条消息的选型。
+       *
+       * 与 `rowIdOrigin` 同一个播种时机、同一个理由（候选实例在重放前播种）。它的作用不是
+       * 展示：`modelChange` marker 靠「上一轮模型 vs 本轮 config」判定，窗口首轮恰好是切换
+       * 轮时缺了基线就会**少一行**，其后所有行 rowId 前移。
+       */
+      modelBaseline?: TurnModelBaselineSeed;
+    } = {},
   ): void {
+    // 重物化会换掉整份投影行，旧的 manifest 基线随之失效（调用方 hydration 结束时会重新
+    // 读一次清单再注入；不重新注入就回退到投影现算，绝不会拿旧基线冒充新事实）。
+    this.clearRowManifestFacts();
     // 重放不能先清空当前 projection/log/subscription delivery，再逐条 replay：
     // 任一普通 reducer 异常都会把 topic 留在半重放状态。候选 publisher 不承接订阅，
     // 完整 replay（含 logical size 校验）成功后才一次 adopt 权威数据面。
@@ -774,7 +1069,14 @@ export class ConversationTopicPublisher {
       retention: this.retention,
       subscriberBufferMaxOps: this.subscriberBufferMaxOps,
       subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
+      sessionRuntime: this.sessionRuntimeProvider,
     });
+    if (options.rowIdOrigin !== undefined) {
+      candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
+    }
+    if (options.modelBaseline !== undefined) {
+      candidate.projection.seedTurnModelBaseline(options.modelBaseline);
+    }
     const usedBatchHydration = candidate.tryBatchHydration(events);
     if (!usedBatchHydration) {
       // 保守上界超限不代表权威 projection 一定超限；重新从空候选走原逐事件原子
@@ -784,7 +1086,14 @@ export class ConversationTopicPublisher {
         retention: this.retention,
         subscriberBufferMaxOps: this.subscriberBufferMaxOps,
         subscriberBufferMaxBytes: this.subscriberBufferMaxBytes,
+        sessionRuntime: this.sessionRuntimeProvider,
       });
+      if (options.rowIdOrigin !== undefined) {
+        candidate.projection.seedRowIdOrigin(options.rowIdOrigin);
+      }
+      if (options.modelBaseline !== undefined) {
+        candidate.projection.seedTurnModelBaseline(options.modelBaseline);
+      }
       for (const event of events) {
         try {
           candidate.ingest(event);

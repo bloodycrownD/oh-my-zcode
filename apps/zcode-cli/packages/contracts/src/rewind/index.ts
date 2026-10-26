@@ -154,7 +154,8 @@ export interface EvaluateRewindTargetInput<T extends { id: string }> {
   targetMessageId: MessageId | string;
 }
 
-export interface ActiveConversationBranchOptions {
+/** 裁断只需要 rewind 选项；正文与 role 一律不参与（IS2：「id 必须全序，正文可窗口」）。 */
+export interface ActiveConversationBranchRewind {
   branchCutAfterMessageId?: MessageId;
   rewindCreatedMessageId?: MessageId;
   rewindKeptMessageIds?: readonly MessageId[];
@@ -216,46 +217,87 @@ export function isConversationRewindCommittedError(
   );
 }
 
-/** runtime resume、cold projection 与 stable fork 共用的 conversation active-branch 裁剪。 */
-export function selectActiveConversationBranch<T extends { info: { id: MessageId } }>(
-  messages: readonly T[],
-  options: ActiveConversationBranchOptions = {},
-): T[] {
-  if (!options.rewindTargetMessageId) return [...messages];
-  const messagesById = new Map(messages.map((message) => [message.info.id, message]));
-  const targetIndex = messages.findIndex(
-    (message) => message.info.id === options.rewindTargetMessageId,
-  );
+export interface ActiveConversationBranchOptions<
+  T = unknown,
+> extends ActiveConversationBranchRewind {
+  /**
+   * 条目 → messageId 访问器。缺省读全量消息的 `{ info: { id } }`；索引条目
+   * （`SessionMessageIndexEntry`）没有 `info`，走索引路径时必须显式给出。
+   */
+  getMessageId?: (item: T) => MessageId;
+}
+
+/**
+ * conversation active-branch 裁剪的**唯一实现**：只吃 id 序。
+ *
+ * 全量消息路径（`selectActiveConversationBranch`）与索引路径
+ * （`listSessionMessageIndex` 给出的 id 序）都规约到这一份规则，避免两套裁断在
+ * `target`/`cut` 落点或 `keptMessageIDs` 缺失时给出不同分支——那样的分歧不是崩溃，
+ * 而是**静默复活已回滚分支**或**整段清空历史**（spec IS2 / T-SL2）。
+ *
+ * 输入必须是由调用方保证的**全序** id 序列（窗口序会因 `targetIndex < 0` 复活旧分支）。
+ */
+export function selectActiveConversationBranchIds(
+  orderedMessageIds: readonly string[],
+  options: ActiveConversationBranchRewind = {},
+): string[] {
+  if (!options.rewindTargetMessageId) return [...orderedMessageIds];
+  const indexById = new Map<string, number>();
+  orderedMessageIds.forEach((messageId, index) => {
+    if (!indexById.has(messageId)) indexById.set(messageId, index);
+  });
+  const targetIndex = indexById.get(options.rewindTargetMessageId) ?? -1;
   const kept = options.rewindKeptMessageIds
-    ? options.rewindKeptMessageIds
-        .map((messageId) => messagesById.get(messageId))
-        .filter((message): message is T => message !== undefined)
+    ? options.rewindKeptMessageIds.filter((messageId) => indexById.has(messageId))
     : targetIndex >= 0
-      ? messages.slice(0, targetIndex)
-      : [...messages];
+      ? orderedMessageIds.slice(0, targetIndex)
+      : [...orderedMessageIds];
 
   if (options.branchCutAfterMessageId) {
-    const cutIndex = messages.findIndex(
-      (message) => message.info.id === options.branchCutAfterMessageId,
-    );
+    const cutIndex = indexById.get(options.branchCutAfterMessageId) ?? -1;
     // rewind 不再写 model-visible reminder。cut 游标直接指向提交前 transcript
     // 尾部，之后追加的任意 canonical message 自动属于新分支；旧分支仍留在 append-only store。
-    return cutIndex >= 0 ? [...kept, ...messages.slice(cutIndex + 1)] : kept;
+    return cutIndex >= 0 ? [...kept, ...orderedMessageIds.slice(cutIndex + 1)] : kept;
   }
 
   if (options.rewindKeptMessageIds) {
     if (!options.rewindCreatedMessageId) return kept;
-    const createdIndex = messages.findIndex(
-      (message) => message.info.id === options.rewindCreatedMessageId,
-    );
-    return createdIndex >= 0 ? [...kept, ...messages.slice(createdIndex)] : kept;
+    const createdIndex = indexById.get(options.rewindCreatedMessageId) ?? -1;
+    return createdIndex >= 0 ? [...kept, ...orderedMessageIds.slice(createdIndex)] : kept;
   }
-  if (targetIndex < 0) return [...messages];
+  if (targetIndex < 0) return [...orderedMessageIds];
   if (!options.rewindCreatedMessageId) return kept;
-  const createdIndex = messages.findIndex(
-    (message) => message.info.id === options.rewindCreatedMessageId,
+  const createdIndex = indexById.get(options.rewindCreatedMessageId) ?? -1;
+  return createdIndex >= 0 ? [...kept, ...orderedMessageIds.slice(createdIndex)] : kept;
+}
+
+/**
+ * runtime resume、cold projection 与 stable fork 共用的 conversation active-branch 裁剪。
+ *
+ * 输入放宽：条目不再必须是全量 `MessageWithParts`——只要给 `getMessageId`，索引条目
+ * （只有 id 与排序键）也能裁断。裁断逻辑本身在 `selectActiveConversationBranchIds`，
+ * 本函数只做「id 序 → 条目」的映射，**不得**再写第二份分支判断。
+ */
+export function selectActiveConversationBranch<T>(
+  items: readonly T[],
+  options: ActiveConversationBranchOptions<T> = {},
+): T[] {
+  if (!options.rewindTargetMessageId) return [...items];
+  const getId = options.getMessageId ?? defaultMessageIdOf<T>;
+  const indexById = new Map<string, number>();
+  const orderedMessageIds: string[] = [];
+  items.forEach((item, index) => {
+    const messageId = getId(item);
+    orderedMessageIds.push(messageId);
+    if (!indexById.has(messageId)) indexById.set(messageId, index);
+  });
+  return selectActiveConversationBranchIds(orderedMessageIds, options).map(
+    (messageId) => items[indexById.get(messageId)!]!,
   );
-  return createdIndex >= 0 ? [...kept, ...messages.slice(createdIndex)] : kept;
+}
+
+function defaultMessageIdOf<T>(item: T): MessageId {
+  return (item as { info: { id: MessageId } }).info.id;
 }
 
 export function parseCheckpointCreatedPayload(input: unknown): CheckpointCreatedPayload {

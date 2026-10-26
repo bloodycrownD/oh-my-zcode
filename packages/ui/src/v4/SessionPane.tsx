@@ -220,6 +220,18 @@ export interface SessionPaneProps {
   rootSessionId?: string;
   /** subagent 右侧详情等观察视图：不显示 composer/input，也不发送行内编辑类命令。 */
   readOnly?: boolean;
+  /**
+   * view-only 首屏（IS3 / Step 10）：runtime 还没激活，投影只有持久历史。
+   *
+   * 缺省（undefined）= 跟随协议快照的 `availability.sessionRuntime`：网关在帧编码边界按
+   * 会话实际状态注入，激活完成后下一帧就自动变回 `live`，不需要宿主二次接线。
+   * 显式传值只留给「还没有投影、但宿主已知只能看」的入口。
+   *
+   * **不得**用 `readOnly` 代替它：`readOnly` 连 composer 一起删掉，而 composer 恰恰是
+   * view-only 会话升到 runtime-ready 的唯一入口（禁用 = 死锁）。这里只禁
+   * edit / fork / retry / rewind 与文件回滚。
+   */
+  viewOnly?: boolean;
   /** 观察视图的显式例外：允许文件摘要恢复 workspace，但不开放会话编辑能力。 */
   allowWorkspaceFileRewind?: boolean;
   /** 框选副屏：保留普通 composer/tools，但隐藏并禁止 edit/retry/fork/goal。 */
@@ -457,6 +469,7 @@ export function SessionPane({
   sessionId,
   rootSessionId,
   readOnly = false,
+  viewOnly,
   allowWorkspaceFileRewind = false,
   selectionSideChat = false,
   activeSelectionSideChatSessionId = null,
@@ -530,6 +543,14 @@ export function SessionPane({
   const [lease, setLease] = useState<SessionLease | null>(null);
   const state = useConversationProjection(lease);
   const snapshot = state.snapshot;
+  // view-only 生效值：显式 prop 优先，否则读协议字段（网关在帧编码边界注入，激活后自动翻回）。
+  // 快照缺席（connecting）按 live 处理：那时 composer 本来就被 `connecting` 门挡着。
+  const viewOnlyActive =
+    viewOnly ?? (snapshot?.availability.sessionRuntime ?? "live") === "viewOnly";
+  /** view-only 的 composer 文案：只换 placeholder，不禁用输入（唯一激活入口）。 */
+  const viewOnlyComposerPlaceholder = viewOnlyActive
+    ? intl.formatMessage({ id: "chat.placeholder.runtimeLoading" })
+    : undefined;
   // 草稿态：还没有 sessionId，既没有权威 phase 也没有正式会话的行。
   const isDraft = sessionId === null;
   /**
@@ -797,6 +818,9 @@ export function SessionPane({
     provider,
     sessionId,
     sessionConfig: snapshot?.sessionId === sessionId ? snapshot.config : null,
+    // IS3 / Step 10：view-only 首屏的种子不完整，草稿侧据此保持「不知道」的空态，
+    // 激活后的全量种子再补齐一次（planEnabled）。
+    sessionRuntime: snapshot?.availability.sessionRuntime ?? "live",
     agentStartupAllowed: draftAgentStartupAllowed,
     modelSelectionService,
   });
@@ -1539,7 +1563,9 @@ export function SessionPane({
     snapshot?.control.activeWorks ?? [],
   );
   // 子智能体详情的会话内容仍只读；文件撤销恢复的是 workspace，必须作为独立能力判断。
-  const workspaceFileRewindEnabled = !readOnly || allowWorkspaceFileRewind;
+  // view-only 一并关掉文件回滚：`applyFileRewind` 是写操作且要先 stop barrier，激活前必然被
+  // runtime 闸门拒掉；露着入口只会让用户点出一个可重试的 runtimeNotReady。
+  const workspaceFileRewindEnabled = (!readOnly || allowWorkspaceFileRewind) && !viewOnlyActive;
   // cancelBackgroundWork：启动卡 / 后台任务卡的「取消」入口。定义在 rowContext memo 之前，
   // 供其绑定（onOpenWorkflowRun 同样在 memo 前定义）；只读模式下不下发（与 4213 处一致）。
   const handleCancelBackgroundWork = useCallback(
@@ -3252,12 +3278,17 @@ export function SessionPane({
   const errored = sessionId !== null && state.status === "error";
   // retry 的产品裁决属于行级权威投影。这里仅提供命令能力，入口是否展示
   // 完全读取 row.actions.canRetry，禁止再用 pane phase 形成第二套 guard。
-  const retryActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  const retryActionsEnabled =
+    !readOnly && !viewOnlyActive && !selectionSideChat && Boolean(sessionId);
   // fork 可用性完全由 row.actions.canFork（CLI stable resolver 投影）裁决；pane 只提供命令回调。
-  const forkActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  // view-only 额外禁掉：激活前 fork/edit/retry 都是「先起 runtime 再改写历史」的命令，
+  // 只留 composer 这一条激活入口（send 类），其余入口等激活后第一帧再放出来。
+  const forkActionsEnabled =
+    !readOnly && !viewOnlyActive && !selectionSideChat && Boolean(sessionId);
   // editUserQuery 已由 command 层防御 latest real user query，并在 running
   // 提交时先 stop barrier 再 rewind/rerun；UI 不应再用 completed gate 把入口整轮隐藏。
-  const editActionsEnabled = !readOnly && !selectionSideChat && Boolean(sessionId);
+  const editActionsEnabled =
+    !readOnly && !viewOnlyActive && !selectionSideChat && Boolean(sessionId);
   const initialDraftConfigForDiagnostics = isDraft ? resolveInitialDraftConfig() : undefined;
   // CLI V4 projection 是 running/count/manifest 的唯一权威；renderer 不再在 spawn
   // 事件后另发查询拼接第二份状态，避免并发 child 的 in-flight refresh 丢更新。
@@ -3498,6 +3529,8 @@ export function SessionPane({
       contextHeader={isDraft ? draftComposerHeader : undefined}
       centered={isDraft}
       blockingRequestId={blockingInteractionId}
+      // view-only 只换文案：composer 保持可用，它是这套会话唯一的激活入口。
+      placeholderOverride={viewOnlyComposerPlaceholder}
       listenAddToChatEvents={focused}
       externalTextInsertRequest={focused && sessionId === null ? composerTextInsertRequest : null}
       onExternalTextInsertApplied={handleExternalTextInsertApplied}

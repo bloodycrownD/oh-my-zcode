@@ -20,6 +20,7 @@ export type {
   PermissionDecisionResult,
   ResumeSessionOptions,
   ResumeSessionResult,
+  SessionHistoryMode,
   StopActiveForegroundExecutionOptions,
   StopActiveForegroundExecutionResult,
   TurnResult,

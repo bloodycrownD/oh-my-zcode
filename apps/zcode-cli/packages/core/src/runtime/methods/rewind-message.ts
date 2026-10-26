@@ -738,6 +738,9 @@ async function rebuildConversationDerivedState(
     messages: options.persistedMessages,
     ...branchOptions,
   });
+  // 这一次已经是完整水化（reset + hydrate），懒历史的待办必须同时作废——否则首次发轮
+  // 的闸门会在新分支上再追加一遍历史（同一批消息出现两份）。
+  this.clearDeferredHistoryHydration();
   await hydrateReadFileStateFromSession({
     messages: options.persistedMessages,
     readFileState: this.readFileState,

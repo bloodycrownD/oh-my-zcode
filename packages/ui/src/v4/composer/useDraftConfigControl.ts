@@ -14,7 +14,10 @@ import type {
   ZCodeProvider,
   ZCodeSlashCommand,
 } from "@zcode/shared";
-import type { SessionConfigState } from "@zcode/shared/zcode-protocol-v4";
+import type {
+  SessionConfigState,
+  SessionRuntimeAvailability,
+} from "@zcode/shared/zcode-protocol-v4";
 import type { IModelSelectionService } from "@zcode/services";
 import { completeNewModelSelection } from "@zcode/provider";
 import {
@@ -107,6 +110,12 @@ export function useDraftConfigControl(params: {
   sessionId: string | null;
   /** 仅匹配当前 Session 的首份投影可用作初始化；null 表示还没恢复完成。 */
   sessionConfig?: Partial<SessionConfigState> | null;
+  /**
+   * 会话的 runtime 态（IS3 / Step 10）。`viewOnly` 的首屏种子刻意不含 planEnabled /
+   * thoughtLevels / permissionGrant —— 这里据此把「不知道」保持成空态，等激活后的
+   * 全量种子再补一次，而不是先写一个默认值。
+   */
+  sessionRuntime?: SessionRuntimeAvailability;
   /** provider registry 已通过 renderer readiness 门禁后才允许拉起 Agent。 */
   agentStartupAllowed?: boolean;
   modelSelectionService: IModelSelectionService | null;
@@ -117,6 +126,7 @@ export function useDraftConfigControl(params: {
     provider,
     sessionId,
     sessionConfig,
+    sessionRuntime = "live",
     agentStartupAllowed = true,
     modelSelectionService,
   } = params;
@@ -162,9 +172,25 @@ export function useDraftConfigControl(params: {
         : {
             ...draft,
             mode: mode.success && mode.data !== "plan" ? mode.data : "build",
-            planEnabled: resolveExecutionState(sessionConfig ?? {}).planEnabled,
+            // IS3 / Step 10：view-only 首屏的 config 种子**刻意不含** planEnabled（只有 runtime
+            // 知道它）。缺席时不能写成 false——那会把「不知道」固化成一次显式选择，激活后
+            // 也再没有机会纠正。已知事实只有 mode：`plan === planEnabled`，其余留 undefined。
+            ...(typeof sessionConfig?.planEnabled === "boolean"
+              ? { planEnabled: resolveExecutionState(sessionConfig ?? {}).planEnabled }
+              : mode.success && mode.data === "plan"
+                ? { planEnabled: true }
+                : {}),
             modelSelection: sessionConfig?.modelSelection,
           };
+  }
+  // 激活后补齐一次（IS3）：view-only 期不知道的 planEnabled 由全量种子给出。
+  // 只在草稿从未表达过该选择（undefined）时补，绝不覆盖用户显式切换。
+  if (
+    sessionRuntime === "live" &&
+    draft.planEnabled === undefined &&
+    typeof sessionConfig?.planEnabled === "boolean"
+  ) {
+    draft = { ...draft, planEnabled: sessionConfig.planEnabled };
   }
   if (sessionConfig) {
     draft = applyComposerPlanTransition(draft, sessionConfig.planTransition);

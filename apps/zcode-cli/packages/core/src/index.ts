@@ -153,6 +153,7 @@ export type {
   PromptAdmissionReceipt,
   ResumeSessionOptions,
   ResumeSessionResult,
+  SessionHistoryMode,
   StartSavedWorkflowRunResult,
   AmendWorkflowRunSettingsInput,
   AmendWorkflowRunSettingsResult,

@@ -40,6 +40,17 @@ import {
   mergeColdConversationEvents,
 } from "../zcode-protocol-v4/cold-event-merge.js";
 import { lookupGlobalCreateSessionCommand } from "../zcode-protocol-v4/create-session-command-fact.js";
+import {
+  createSessionRowManifestReader,
+  readColdRowPageMaterialization,
+  readColdTailWindowMaterialization,
+} from "../zcode-protocol-v4/session-row-manifest.js";
+import { TURN_MANIFEST_PROJECTION_SCHEMA_VERSION } from "../zcode-protocol-v4/turn-manifest-entry.js";
+import {
+  goalVerificationEntriesFromSessionEntries,
+  hydrationModelKeyOfSelection,
+  hydrationTurnModelSelectionOfMessage,
+} from "../zcode-protocol-v4/transcript-hydration.js";
 import type { V4CommandCoreHost } from "../zcode-protocol-v4/commands/types.js";
 import type {
   ConversationRowTargetResolution,
@@ -96,6 +107,7 @@ import {
   createSessionRecordForV4,
   ensureSessionModelAvailableForNextTurn,
   listSessionSubagents,
+  materializeSessionShell,
   registerForkedSession,
   readSessionContextUsage,
 } from "./server-operations.js";
@@ -183,6 +195,34 @@ async function readConversationFileChanges(
       (await record.app.readToolResultArtifact(snapshotRef)).content,
     ...(targetTurnId ? { targetTurnId } : {}),
   });
+}
+
+/**
+ * 窗口 / 页物化的模型基线：读**窗口（页）前一轮的首条消息**取选型。
+ *
+ * 只读一条（`messageWithParts`），不碰窗口正文。读不到 / 没有选型快照 → null：这时窗口
+ * 首轮会多发一次 hydration-trace 的 ModelSelected，但它不声明种子权威、也不标记
+ * `configModelTouchedByEvent`，最终配置值与全量物化相同（只是多一条冗余事件）。
+ *
+ * 返回值同时喂两处：合成器的 `initialModelKey`（去重）与投影的 `seedTurnModelBaseline`
+ * （`modelChange` marker 的上一轮基准）。后者漏了会让「模型恰好在窗口首轮切换」时少一行。
+ */
+async function readHydrationTurnModelSelection(
+  store: NonNullable<ZCodeProtocolAgentServerContext["deps"]["sessionStore"]>,
+  sessionId: string,
+  messageId: MessageId,
+): Promise<{ modelSelection: ModelSelection } | null> {
+  try {
+    const message = await store.messageWithParts({
+      sessionID: sessionId as SessionId,
+      messageID: messageId,
+    });
+    const modelSelection = message ? hydrationTurnModelSelectionOfMessage(message) : null;
+    return modelSelection ? { modelSelection } : null;
+  } catch {
+    // 基线只是「少发一条冗余事件」的优化，读失败不得影响冷开。
+    return null;
+  }
 }
 
 /**
@@ -1345,9 +1385,21 @@ export function createConversationV4Gateway(
       return [];
     }
   };
+  // manifest 读端：一个网关实例一份（消息索引缓存按会话键控，跨读复用；
+  // store 用 getter，deps 可能在构造后才注入）。
+  const rowManifestReader = createSessionRowManifestReader({
+    store: () => context.deps.sessionStore,
+  });
   return new ConversationV4Gateway({
     cliVersion: context.deps.version,
     sessionExists: (sessionId) => context.sessions.has(sessionId),
+    // IS4 / Step 9：record 在册 ≠ runtime 在跑。view-only shell 由
+    // `materializeSessionShell` 建 record 但不 resume，只有这里能分辨——
+    // gateway 的 live 判定与 `runtimeReady` 都读它（读 record 会让 view-only 误报就绪）。
+    isSessionRuntimeActive: (sessionId) => {
+      const record = context.sessions.get(sessionId);
+      return record !== undefined && record.runtimeViewOnlyShell !== true;
+    },
     onDebug: (message) => log?.debug(message),
     onTargetCompleted: (sessionId) => {
       const record = context.sessions.get(sessionId);
@@ -1363,6 +1415,177 @@ export function createConversationV4Gateway(
             sessionId,
           });
         });
+    },
+    // ── turn 行清单（row manifest）持久化 ─────────────
+    // 投影只交出「这一轮定稿了多少行」；落库在这里，且必须 detached——manifest 是
+    // 冷开快路径，它的失败只能降级为全量物化，绝不能影响 ingest 与帧发送。
+    recordTurnManifest: (sessionId, entry) => {
+      const turnManifest = context.deps.sessionStore?.turnManifest;
+      if (!turnManifest) return;
+      void turnManifest
+        .upsertTurnManifest({ sessionID: sessionId as SessionId, ...entry })
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 turn manifest write failed", {
+            error: error instanceof Error ? error.message : String(error),
+            event: "zcode_protocol.v4.turn_manifest_write_failed",
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            turnId: entry.turn.turnId,
+          });
+        });
+    },
+    rewriteTurnManifestBranch: (sessionId, input) => {
+      const turnManifest = context.deps.sessionStore?.turnManifest;
+      if (!turnManifest) return;
+      void turnManifest
+        .rewriteTurnManifestBranch({ sessionID: sessionId as SessionId, ...input })
+        .then((result) => {
+          if (result.applied) return;
+          // 源代次不完整（老会话 / 从未写过这个代次）→ 目标代次保持缺失。读端据此
+          // 降级全量物化并重建，**不能**把缺行当成「空分支」。
+          log?.debug("v4 turn manifest branch rewrite skipped", {
+            branchGeneration: input.branchGeneration,
+            event: "zcode_protocol.v4.turn_manifest_rewind_incomplete",
+            missingTurnCount: result.missingTurnIds.length,
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            sourceGeneration: input.sourceGeneration,
+          });
+        })
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 turn manifest branch rewrite failed", {
+            branchGeneration: input.branchGeneration,
+            error: error instanceof Error ? error.message : String(error),
+            event: "zcode_protocol.v4.turn_manifest_rewind_failed",
+            module: "bootstrap.zcode_protocol",
+            sessionId,
+            sourceGeneration: input.sourceGeneration,
+          });
+        });
+    },
+    // ── turn 行清单（row manifest）读路径（IS5，Step 4）─────────────
+    // 与写入同一份端口；读端逻辑（判定 / 账目修正 / 消息索引观察）住在
+    // `session-row-manifest.ts`，本层只负责把 store 交出去。
+    readRowManifest: (sessionId, input) => rowManifestReader.read(sessionId as SessionId, input),
+    invalidateRowManifestIndex: (sessionId) =>
+      rowManifestReader.invalidateMessageIndex(sessionId as SessionId),
+    // ── 按需物化一页（IS6，Step 7）─────────────
+    // 计划（缺哪几个整轮）由 gateway 用 manifest 的 facts 选出；本层只做「读页内正文 →
+    // 用与冷开同一套合成器产事件」。`rowIdOrigin` 不在这里播种——宿主不持有投影。
+    //
+    // 与冷窗口的一处**刻意不对称**：这里不重建 `fileChanges` 摘要。它的数据源是内存
+    // eventStore 里的 CheckpointCreated（`buildColdFileChangeSummaries`），而真正冷的会话
+    // 事件表本来就是空的（冷开那一次也拿不到）；同进程暖物化时窗口路径会带上它，于是
+    // 只在「同进程 + workspace checkpoint」这一组合下页内会少一个文件摘要卡片。
+    // 记账为已知代价：它不影响行数、rowId 与任何全序量，翻页不会因此错位。
+    materializeRowPage: async (sessionId, plan) => {
+      const store = context.deps.sessionStore;
+      if (!store) return null;
+      const page = await readColdRowPageMaterialization({
+        sessionID: sessionId as SessionId,
+        store,
+        reader: rowManifestReader,
+        plan,
+      });
+      if (page.kind !== "page") {
+        log?.debug("v4 row page read unavailable", {
+          event: "zcode_protocol.v4.row_page_unavailable",
+          module: "bootstrap.zcode_protocol",
+          reason: page.reason,
+          ...(page.detail === undefined ? {} : { detail: page.detail }),
+          sessionId,
+          ordinal: plan.ordinal,
+          beforeRowId: plan.rowIdBase + plan.rowCount,
+        });
+        return null;
+      }
+      // session_entry 里的 goal verification 会落成行，且合成器对「anchor 找不到」的
+      // entry 会落到时间线末尾（等于给这一页凭空加行）。只发锚在**页内**轮次的事实。
+      const pageMessageIds = new Set(plan.messageIds.map((messageId) => String(messageId)));
+      const entries = store.sessionEntries
+        ? await store.sessionEntries({ sessionID: sessionId as SessionId }).catch((error) => {
+            log?.warn("v4 row page session entries read failed", {
+              error: error instanceof Error ? error.message : String(error),
+              event: "zcode_protocol.v4.row_page_session_entries_failed",
+              module: "bootstrap.zcode_protocol",
+              sessionId,
+            });
+            return [];
+          })
+        : [];
+      const goalVerificationEntries = goalVerificationEntriesFromSessionEntries(entries).filter(
+        (entry) => {
+          const anchor = entry.payload.anchorAssistantMessageId;
+          return !anchor || pageMessageIds.has(String(anchor));
+        },
+      );
+      // 页首轮的模型基线 = 页前一轮首条消息的选型（与冷窗口同一取法）。
+      const baseline = plan.precedingTurnFirstMessageId
+        ? await readHydrationTurnModelSelection(store, sessionId, plan.precedingTurnFirstMessageId)
+        : null;
+      const initialModelKey = baseline
+        ? hydrationModelKeyOfSelection(baseline.modelSelection)
+        : null;
+      const merged = mergeColdConversationEvents({
+        // 页只吃持久正文：临时的 queue/permission/background 状态不属于历史行，
+        // 且它们物理上都在尾部（页在窗口以上），带进来只会给页添不该有的行。
+        memoryEvents: [],
+        messages: page.messages,
+        sessionId,
+        goalVerificationEntries,
+        synthesis: {
+          initialTurnNumber: plan.ordinal,
+          ...(initialModelKey === null ? {} : { initialModelKey }),
+          ...(page.baseTimestampMs === undefined ? {} : { baseTimestampMs: page.baseTimestampMs }),
+        },
+      });
+      log?.debug("v4 row page materialized", {
+        event: "zcode_protocol.v4.row_page_materialized",
+        module: "bootstrap.zcode_protocol",
+        initialModelKey: initialModelKey !== null,
+        messageCount: page.messages.length,
+        ordinal: plan.ordinal,
+        rowCount: plan.rowCount,
+        rowIdBase: plan.rowIdBase,
+        sessionId,
+        turnCount: plan.turnCount,
+      });
+      return {
+        events: merged.events,
+        messageCount: page.messages.length,
+        initialModelKeyResolved: initialModelKey !== null,
+        // 投影的上一轮模型基线：缺了会让「模型恰好在页首轮切换」时少一行 marker。
+        ...(baseline === null
+          ? {}
+          : {
+              modelBaseline: {
+                provider: baseline.modelSelection.providerId,
+                model: baseline.modelSelection.modelId,
+                thought: baseline.modelSelection.options?.reasoningLevel ?? "",
+              },
+            }),
+      };
+    },
+    // Gateway 的视图水位只建外壳（Step 9）：store 读 session + 首屏种子 + createRecord
+    // 但不 resume。首屏因此不再等 MCP/技能/MEMORY.md 的装载；runtime 由 ACK 之后的后台
+    // 预激活（或 send 类命令）经下面的 `resumePersistedSession` 起来。
+    materializeSessionShell: async (sessionId, resumeThoughtLevel, workspace) => {
+      const persisted = await context.deps.sessionStore?.getSession(sessionId as SessionId);
+      if (!persisted) {
+        context.logger?.warn("ZCode Protocol v4 session shell has no persisted session", {
+          activeSessionCount: context.sessions.size,
+          event: "zcode_protocol.v4.shell_persisted_missing",
+          module: "bootstrap.zcode_protocol",
+          sessionId,
+        });
+        return { status: "notFound" };
+      }
+      await materializeSessionShell(context, {
+        sessionId,
+        ...(workspace ? { workspace } : {}),
+        ...(resumeThoughtLevel ? { thoughtLevel: resumeThoughtLevel } : {}),
+      });
+      return { status: "materialized" };
     },
     // Gateway 的单一 READY promise 负责并发与水位；binder 只恢复 runtime。
     resumePersistedSession: async (
@@ -1389,7 +1612,13 @@ export function createConversationV4Gateway(
           ...(workspace ? { workspace } : {}),
           ...(resumeThoughtLevel ? { thoughtLevel: resumeThoughtLevel } : {}),
         },
-        { reusePersistedMessages: true },
+        {
+          reusePersistedMessages: true,
+          // Step 12（IS7）：v4 的激活只服务「看」与后续命令，provider 历史由首次发轮前的
+          // core 闸门补。这里必须传 `"none"`——否则激活又要付 O(active × parts) 的水化，
+          // 那正是 lazy history 要摘掉的那一段。正文仍读一次（readFileState 与投影都要它）。
+          historyMode: "none",
+        },
       );
       return {
         status: "resumed",
@@ -1419,6 +1648,12 @@ export function createConversationV4Gateway(
     getSessionConfigSeed: (sessionId) => {
       const record = context.sessions.get(sessionId);
       if (!record) return null;
+      // view-only shell（Step 9）：runtime 没 resume，`getSessionModelSelection()` 给的是
+      // **默认模型**，读它等于把默认模型当成历史选型显示。首屏只认持久事实（外壳物化时
+      // 用一条窄查询算好放在 record 上），取不到就是空态——激活后由 runtime 真值补齐。
+      if (record.runtimeViewOnlyShell === true) {
+        return record.viewOnlyConfigSeed ?? null;
+      }
       const selection =
         record.app.runtime.getSessionModelSelection() ?? record.restoredModelSelection;
       return {
@@ -1446,6 +1681,10 @@ export function createConversationV4Gateway(
     getSessionUsageSeed: async (sessionId, persistedMessages) => {
       const record = context.sessions.get(sessionId);
       if (!record) return null;
+      // view-only 首屏没有 usage 是**预期**（spec 的首屏降级清单第 ② 项）：容量口径要读
+      // runtime 的当前模型，而它此刻是默认值；用默认模型算出的分母比「暂时没有」更误导。
+      // 激活后 hydration 会再种一次（publisher.seedUsage 的既有覆盖语义）。
+      if (record.runtimeViewOnlyShell === true) return null;
       const contextUsage = await readSessionContextUsage(context, sessionId, persistedMessages);
       // usage seed 会在 hydration 后再次覆盖首帧分母；必须与合成事件
       // 使用同一份当前模型 registry 真值，不能把旧 runtime projection 的窗口写回来。
@@ -1670,6 +1909,14 @@ export function createConversationV4Gateway(
     // 是已完成正文权威，session_entry 只补 legacy goal，内存事件只补
     // 未持久 in-flight 和 queue/permission/control 等 ephemeral 状态。
     loadPersistedEvents: async (sessionId, persistedMessages) => {
+      // 冷开 mergeMs 的分项读数（Step 15）：mergeMs 是整个宿主调用的墙钟，过去只知总数
+      // 不知构成，导致「全量事件重放很贵」这类推断无法证伪。只走 debug，不进 openPhases。
+      const loadMarks: Record<string, number> = {};
+      let markStartedAt = performance.now();
+      const markPhase = (name: string) => {
+        loadMarks[name] = Math.round(performance.now() - markStartedAt);
+        markStartedAt = performance.now();
+      };
       // dwf workflow actor / subagent 这类 detached live child 没有自己的
       // bootstrap record（事件经 ingestDetachedLiveSession 走父 record 的 sink 路由）。
       // context.sessions.get 取不到 record 时不能直接返回 synthesized:false——
@@ -1685,33 +1932,43 @@ export function createConversationV4Gateway(
       // 事件按 child sessionId 归档），因此 sourceEventSeq 仍是 child 的真实水位。
       // 代价：contextWindow 分母会按父 record 的当前模型解析而不是 actor 模型，纯展示层偏差。
       const record = await resolveConversationBackingRecord(context, sessionId);
+      markPhase("backingRecordMs");
       if (!record) {
-        // 诊断：hydrate 预期在 runtime 已由 cold-resume 激活后执行；连父 record 兜底
-        // 都落空时，返回空事件会把真实的生命周期竞态伪装成“历史为空”，必须留下明确现场。
-        context.logger?.warn("ZCode Protocol v4 hydrate has no active runtime", {
+        // Step 9：record 缺席**不再**是「读不到历史」的闸门——它只意味着没有内存侧 live
+        // 事件、没有 artifact reader（view-only 骨架层 / 旧宿主）。返回空事件会把
+        // durable transcript 整段丢掉（首屏空历史），所以继续走 store-only 合并。
+        context.logger?.debug("ZCode Protocol v4 hydrate store-only (no backing record)", {
           activeSessionCount: context.sessions.size,
-          event: "zcode_protocol.v4.hydrate_runtime_missing",
+          event: "zcode_protocol.v4.hydrate_store_only",
           module: "bootstrap.zcode_protocol",
           phase: "loadPersistedEvents",
           sessionId,
         });
-        return { events: [], synthesized: false, sourceEventSeq: 0 };
       }
+      // view-only shell 的内存 event store 是空的（没有 runtime 往里写），artifact reader
+      // 与容量口径也都还停在默认模型上：这两项对首屏是**预期缺席**（spec 的首屏降级清单）。
+      const viewOnlyShell = record?.runtimeViewOnlyShell === true;
       // message/part 与 session_entry 的异步读取期间 live sink 仍可收到新事件。
       // gateway 必须知道 memory eventStore 取快照时的 raw cursor，才能只补 await 窗口内
       // 的尾部，并把 transcript 合成的 1..N 序列稳定映射回后续 runtime raw seq。
       // 内存 event store 会淘汰已完成 turn 的瞬态事件，max(events.seq) 会小于真实
       // 游标，让已淘汰的 delta 被当成 await 窗口尾部重放。两次调用之间没有 await，拿到的是
       // 同一时刻的一致快照。
-      const [liveEvents, sourceEventSeq] = await Promise.all([
-        record.eventStore.getEvents(sessionId as SessionId),
-        record.eventStore.getLatestSequenceNumber(sessionId as SessionId),
-      ]);
+      const [liveEvents, sourceEventSeq] = record
+        ? await Promise.all([
+            record.eventStore.getEvents(sessionId as SessionId),
+            record.eventStore.getLatestSequenceNumber(sessionId as SessionId),
+          ])
+        : [[], 0];
+      markPhase("memoryEventsMs");
       // workflow run 的冷回放：journal 回放出的进度
       // 事件前置到内存事件之前——cold merge 已把该类型归为 memory-only 权威（保序进 supplements），
       // 投影经同一个 reducer 归约，`workflowRuns` 因此在重启前后一致。
-      const replayed = await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents);
+      const replayed = record
+        ? await replayDynamicWorkflowRunEvents(context, sessionId, record, liveEvents)
+        : [];
       const events = replayed.length === 0 ? liveEvents : [...replayed, ...liveEvents];
+      markPhase("workflowReplayMs");
       const store = context.deps.sessionStore;
       const source = await loadPersistedConversationMaterialization({
         memoryEvents: events,
@@ -1723,6 +1980,11 @@ export function createConversationV4Gateway(
                 getSession: (id) => store.getSession(id),
                 messages: (input) => store.messages(input),
                 readTarget: (input) => store.readTarget(input),
+                // Step 9：窗口化时按 id 单条确认 shared_context 的 model-only 上下文消息
+                // （它几乎总在窗口之外，靠窗口正文 find 会静默丢掉分享导入元数据）。
+                ...(store.messageWithParts
+                  ? { messageWithParts: (input) => store.messageWithParts!(input) }
+                  : {}),
                 ...(store.sessionEntries
                   ? {
                       sessionEntries: (input) =>
@@ -1739,41 +2001,157 @@ export function createConversationV4Gateway(
               },
             }
           : {}),
+        // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空时退回
+        // 全量，原因随 `coldWindowFallback` 带出并打点。
+        // fix-c19：**每次**读都规划尾窗（不再有「激活后升级成全量」那条读模式）。窗口化
+        // 首屏就是终态：行数由 manifest 给，窗口以上的页按需物化。
+        ...(store
+          ? {
+              planColdWindow: async (facts) => {
+                // Step 9：shared_context 导入不再退全量——那条 model-only 上下文消息由
+                // `cold-event-merge` 按 id 单条确认（不在窗口正文里也读得到）。
+                return readColdTailWindowMaterialization({
+                  sessionID: sessionId as SessionId,
+                  store,
+                  reader: rowManifestReader,
+                  branchGeneration: facts.branchGeneration,
+                  expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+                  rewind: facts.rewind,
+                  ...(facts.persistedMessages === undefined
+                    ? {}
+                    : { loadedMessages: facts.persistedMessages }),
+                });
+              },
+            }
+          : {}),
       });
+      markPhase("materializationMs");
+      if (source.coldWindowFallback) {
+        // 静默退全量在现象上就是「窗口化没生效」，与「清单与索引不同步」无法区分——
+        // 两种情形都在这里留痕（reason=limitBeforeMissed 就是清单与索引不同步）。
+        log?.debug("v4 cold window fallback", {
+          event: "zcode_protocol.v4.cold_window_fallback",
+          module: "bootstrap.zcode_protocol",
+          reason: source.coldWindowFallback.reason,
+          ...(source.coldWindowFallback.detail === undefined
+            ? {}
+            : { detail: source.coldWindowFallback.detail }),
+          sessionId,
+        });
+      }
+      const windowPlan = source.coldWindow;
+      if (windowPlan) {
+        log?.debug("v4 cold window applied", {
+          event: "zcode_protocol.v4.cold_window_applied",
+          limitBefore: windowPlan.limitBefore,
+          messageCount: source.messages.length,
+          module: "bootstrap.zcode_protocol",
+          ordinal: windowPlan.ordinal,
+          rowCount: windowPlan.rowCount,
+          rowIdBase: windowPlan.rowIdBase,
+          sessionId,
+          turnCount: windowPlan.turnCount,
+        });
+      }
+      // 锚在窗口外的 goal verification 不能在窗口里发射（合成器找不到 anchor 就落到
+      // 时间线末尾，等于给窗口凭空加行）；它属于未物化的那一轮，由翻页按需物化。
+      const windowedMessageIds = windowPlan ? new Set(windowPlan.windowMessageIds) : null;
+      const goalVerificationEntries = windowedMessageIds
+        ? source.goalVerificationEntries.filter((entry) => {
+            const anchor = entry.payload.anchorAssistantMessageId;
+            return !anchor || windowedMessageIds.has(anchor as MessageId);
+          })
+        : source.goalVerificationEntries;
+      // 窗口起点之前的模型基线：取窗口前一轮的首条消息（一次单行读，不碰正文窗口）。
+      const modelBaseline =
+        windowPlan?.precedingTurnFirstMessageId && store
+          ? await readHydrationTurnModelSelection(
+              store,
+              sessionId,
+              windowPlan.precedingTurnFirstMessageId,
+            )
+          : null;
+      const initialModelKey = modelBaseline
+        ? hydrationModelKeyOfSelection(modelBaseline.modelSelection)
+        : null;
+      markPhase("modelBaselineMs");
       // live ModelComplete.fileChanges 只存在于内存事件；cold merge 以持久
       // transcript 为正文权威时会压掉该事件，而 transcript 本身没有文件摘要字段。
       // workspace checkpoint + artifact 才是跨进程持久事实，这里按 user messageId
       // 重建摘要，再交给 transcript hydration 合成同构 ModelComplete。
-      const fileChangeSummariesByMessageId = await buildColdFileChangeSummaries({
-        events: source.memoryEvents,
-        messageIds: source.messages.map((message) => String(message.info.id)),
-        readArtifact: async (snapshotRef) =>
-          (await record.app.readToolResultArtifact(snapshotRef)).content,
-        onArtifactError: (messageId, error) =>
-          context.logger?.warn("v4 cold file change artifact read failed", {
-            error: error instanceof Error ? error.message : String(error),
-            event: "zcode_protocol.v4.hydrate_file_changes_failed",
-            messageId,
-            module: "bootstrap.zcode_protocol",
-            sessionId,
-          }),
-      });
+      // record 缺席（store-only 骨架）时没有 artifact reader：摘要为空是**预期降级**，
+      // 不是「这一轮没有改文件」——所以只在有 record 时才尝试。
+      const fileChangeSummariesByMessageId = record
+        ? await buildColdFileChangeSummaries({
+            events: source.memoryEvents,
+            // 只给**本次真的会被合成**的那些消息算摘要（Step 15）。
+            //
+            // 旧实现按整条 active 分支（窗口计划里的全序 messageId 列表，实测 2978 条 /
+            // 61 个带 workspace checkpoint 的 user message）过滤，于是窗口化首屏为窗口外的
+            // 轮次读了 685 个 artifact（29.5MB），而摘要的**唯一消费者**是
+            // transcript-hydration 合成 ModelComplete 时的
+            // `fileChangeSummariesByMessageId.get(userMessageId)`
+            // ——它只会查 `source.messages` 里的消息。窗口外的轮次本次不合成任何行，
+            // 那 685 次读没有任何出口（翻页也不读摘要，见 `materializeRowPage` 的已知代价）。
+            // 全量物化时 `source.messages` 就是整条 active 分支，与旧口径逐值一致。
+            messageIds: source.messages.map((message) => String(message.info.id)),
+            // fix-c19：view-only 首屏没有 resume，`CheckpointCreated` 事件还没被
+            // `restoreWorkspaceCheckpointEntries` 回放进 eventStore——旧实现靠「激活后整份
+            // 重读」把它们补回来（代价是整条分支灌进 live 投影）。现在直接从同一读里已经
+            // 拿到的 session_entry 取（按窗口 messageId 过滤仍在摘要构造器内），首屏就有摘要。
+            persistedCheckpoints: source.persistedWorkspaceCheckpoints,
+            readArtifact: async (snapshotRef) =>
+              (await record.app.readToolResultArtifact(snapshotRef)).content,
+            onArtifactError: (messageId, error) =>
+              context.logger?.warn("v4 cold file change artifact read failed", {
+                error: error instanceof Error ? error.message : String(error),
+                event: "zcode_protocol.v4.hydrate_file_changes_failed",
+                messageId,
+                module: "bootstrap.zcode_protocol",
+                sessionId,
+              }),
+          })
+        : undefined;
+      markPhase("fileChangeSummariesMs");
       // 冷恢复 transcript 不保存模型能力，旧 hydration 自行填 20 万；
       // provider registry 已在 resume 前同步完成，应按恢复/退避后的当前模型精确取值。
-      const contextWindow = resolveSessionModelContextWindow(context, record);
-      const usageSeed = sessionUsageSeedFromRuntimeContextUsage(
-        await readSessionContextUsage(context, sessionId, source.messages),
-        contextWindow,
-      );
+      // view-only shell 的「当前模型」还是默认值：用它算分母比「暂时没有」更误导
+      // （spec 首屏降级 ②），所以这里连 capacity 一起留空，激活后重新 hydration 补齐。
+      const contextWindow =
+        record && !viewOnlyShell ? resolveSessionModelContextWindow(context, record) : undefined;
+      const usageSeed =
+        record && !viewOnlyShell
+          ? sessionUsageSeedFromRuntimeContextUsage(
+              await readSessionContextUsage(context, sessionId, source.messages),
+              contextWindow,
+            )
+          : null;
+      markPhase("usageSeedMs");
       const merged = mergeColdConversationEvents({
         contextWindow,
         fileChangeSummariesByMessageId,
         memoryEvents: source.memoryEvents,
         messages: source.messages,
         sessionId,
-        goalVerificationEntries: source.goalVerificationEntries,
+        goalVerificationEntries,
         ...(Object.prototype.hasOwnProperty.call(source, "target")
           ? { target: source.target }
+          : {}),
+        // 窗口化物化的非零起点上下文（RC4）：编号 / 模型基线 / 时间基准。
+        // **不传 `preface:false`**：窗口按 manifest 的整轮对齐，窗首的 assistant 消息若属于
+        // 某个 turn，那一轮在全量物化里同样会开出来（manifest 的 turn 边界就是合成器的边界）；
+        // 抑制它反而会丢掉一整轮并把后续 `hydrate-turn-N` 整体前移。
+        // 全量物化时整段不传，合成结果与旧路径逐字相同。
+        ...(windowPlan
+          ? {
+              synthesis: {
+                initialTurnNumber: windowPlan.ordinal,
+                ...(initialModelKey === null ? {} : { initialModelKey }),
+                ...(windowPlan.baseTimestampMs === undefined
+                  ? {}
+                  : { baseTimestampMs: windowPlan.baseTimestampMs }),
+              },
+            }
           : {}),
       });
       for (const diagnostic of merged.diagnostics) {
@@ -1801,6 +2179,19 @@ export function createConversationV4Gateway(
         { sessionId, endedLimit: 1 },
         persistedMessages,
       );
+      markPhase("subagentsMs");
+      log?.debug("v4 cold load breakdown", {
+        event: "zcode_protocol.v4.cold_load_breakdown",
+        module: "bootstrap.zcode_protocol",
+        phase: "loadPersistedEvents",
+        sessionId,
+        memoryEvents: events.length,
+        mergedEvents: merged.events.length,
+        windowed: windowPlan !== undefined,
+        materializedMessages: source.messages.length,
+        ...(windowPlan ? { activeMessageIds: windowPlan.activeMessageIds.length } : {}),
+        ...loadMarks,
+      });
       return {
         events: merged.events,
         // 与合成事件共用本次查询结果；不在后续回填阶段重新读取另一份容量。
@@ -1808,6 +2199,9 @@ export function createConversationV4Gateway(
         // gateway 旧字段名仍叫 synthesized；这里表示投影已由 durable
         // transcript 重物化，需替换 ingest 抢先建的 cold publisher。
         synthesized: merged.usedDurableTranscript,
+        // turn 行清单按代次键控。synthesized transcript 不含 RewindTriggered，
+        // 事件重放推不出代次，只能取持久 revert 的真值。
+        branchGeneration: source.branchGeneration,
         subagentsSeed: {
           revision: subagents.revision,
           childSessionIds: subagents.childSessionIds,
@@ -1815,6 +2209,26 @@ export function createConversationV4Gateway(
         },
         ...(source.sharedContextImport ? { sharedContextImport: source.sharedContextImport } : {}),
         sourceEventSeq,
+        // Step 6：窗口坐标（rowIdBase / ordinal / 整条分支 turn 序 / facts）。
+        // gateway 用它播种 `rowIdOrigin`、决定 `fullyMaterialized:false` 与回写 ordinalBase。
+        ...(windowPlan ? { coldWindow: windowPlan } : {}),
+        // Step 10：本次首屏是按 **view-only 口径**读的（record 还是 shell、或压根没有 record）——
+        // usage / fileChanges / thoughtLevels 等只有 runtime 才有的事实一起缺席。gateway 据此
+        // 判定「激活后必须升级成全量投影」，不能用「有没有 record」代替：record 在册而
+        // runtime 没起才是本步的常态。
+        ...(viewOnlyShell || record === undefined ? { viewOnlyHydration: true as const } : {}),
+        // 窗口的上一轮模型基线（Step 7 补）：与 `initialModelKey` 同一份选型，但消费者是
+        // 投影（`modelChange` marker 的上一轮基准），不是合成器。缺了它，「模型恰好在窗口
+        // 首轮切换」时 marker 行会消失、其后 rowId 整体前移。
+        ...(modelBaseline === null
+          ? {}
+          : {
+              synthesisModelBaseline: {
+                provider: modelBaseline.modelSelection.providerId,
+                model: modelBaseline.modelSelection.modelId,
+                thought: modelBaseline.modelSelection.options?.reasoningLevel ?? "",
+              },
+            }),
       };
     },
     onError: (scope, error, errorContext) =>

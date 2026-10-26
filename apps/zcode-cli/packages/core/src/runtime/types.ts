@@ -278,6 +278,38 @@ export interface AgentRuntimeConfig {
   skillMetadataBudget?: number;
 }
 
+/**
+ * 历史水化模式（IS7，spec Step 12）。
+ *
+ * - `"full"`（默认）：resume 内一次性把 active 分支水化进 `messageHistory`（既有行为）。
+ * - `"none"`：**不在 resume 里水化**。view-only 激活只保留 readFileState 与不依赖正文遍历的
+ *   标量（`turnNumber` / `latestAssistant*` / `mainTurnCacheHitAggregate`），完整 provider
+ *   历史交给首次发送前的闸门 `hydrateDeferredMessageHistory`。
+ *
+ * 之所以没有 `"tail"`：`messageHistory.init()` 会清空 entries，尾部水化的产物必然被抹掉。
+ */
+export type SessionHistoryMode = "full" | "none";
+
+/**
+ * `historyMode:"none"` 时被推迟的全量水化输入。
+ *
+ * 登记点是 resume 收尾（`deferHistoryHydration`），消费点是首次发轮闸门
+ * （`hydrateDeferredMessageHistory`）。rewind 字段必须是 resume 时刻的同一份快照——
+ * 闸门重算一次裁断会让「resume 看到的 active 分支」与「模型看到的历史」分叉。
+ */
+export interface DeferredHistoryHydration {
+  branchCutAfterMessageId?: MessageId;
+  rewindCreatedMessageId?: MessageId;
+  rewindKeptMessageIds?: readonly MessageId[];
+  rewindTargetMessageId?: MessageId;
+  /**
+   * resume 期已经写进 `messageHistory` 的条目（shell 环境提醒 / 目标状态 / SessionStart
+   * hook 上下文）。`messageHistory.init()` 会清空 entries，闸门必须在 init + hydrate 之后
+   * 按原顺序补回，否则 `"none"` 与 `"full"` 的 provider 历史会分叉（T-SL13）。
+   */
+  resumeEntries: RuntimeMessageEntry[];
+}
+
 export interface ResumeSessionOptions {
   /** 中止 cold-resume admission wait；不会伪造 Workspace Hook review decision。 */
   abortSignal?: AbortSignal;
@@ -289,6 +321,8 @@ export interface ResumeSessionOptions {
    * 必须高于历史 session mode；交互式 resume 未指定时保持 undefined，让历史 mode 生效。
    */
   modeOverride?: CollaborationMode;
+  /** 历史水化模式；缺省 `"full"`（行为不变）。view-only 激活传 `"none"`。 */
+  historyMode?: SessionHistoryMode;
 }
 
 export interface MainTurnCacheHitAggregate {

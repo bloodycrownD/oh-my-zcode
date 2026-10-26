@@ -23,6 +23,13 @@ import {
 import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
 import type { ConversationTransport } from "@/v4/transport.js";
+import {
+  isConversationOpenProbeDevEnabled,
+  recordConversationOpenPaintMissing,
+  recordConversationOpenRendererTiming,
+  unregisterConversationRuntimeReadyReader,
+  type ConversationOpenRendererTiming,
+} from "@/v4/conversationOpenObservability.js";
 import { uiMemoryDiagnosticsRegistry } from "@/lib/memoryDiagnostics.js";
 
 /**
@@ -153,12 +160,15 @@ export interface ConversationStoreState {
   lastMutation?: ConversationProjectionLastMutation;
 }
 
-export interface SessionOpenRendererTiming {
-  rendererPrepareMs?: number;
-  initialFrameTransportMs?: number;
-  rendererSnapshotApplyMs?: number;
-  snapshotAppliedAt?: number;
-}
+/**
+ * renderer 首帧 timing 的类型别名。
+ *
+ * shape 的**唯一定义**在 `v4/conversationOpenObservability.ts` 的
+ * `ConversationOpenRendererTiming`（采样面的 ACK 样本也用它），这里只做别名导出：
+ * 两份定义分叉会让「回填的字段」与「采样脚本读的字段」悄悄对不上（cr-func N7）。
+ * store → observability 是既有单向依赖，类型放那边不成环。
+ */
+export type SessionOpenRendererTiming = ConversationOpenRendererTiming;
 
 /**
  * turnNavigator 目录缓存态（只读 query 结果 + 裁决水位，非 conversation 协议事实）。
@@ -367,6 +377,11 @@ export class ConversationProjectionStore {
   private runtimeRecycleRetryTimer: ReturnType<typeof setTimeout> | null = null;
   private runtimeRecycleRetryAttempt = 0;
   private sessionOpenRendererTiming: SessionOpenRendererTiming = {};
+  /**
+   * 本次 connect 的起点（单调时钟）。`uiViewReadyMs = snapshotAppliedAt - 本值`，
+   * 必须跨 connect 持久到首帧应用：applyFrame 与 connect 不在同一个栈里。
+   */
+  private sessionOpenConnectStartedAt: number | null = null;
   private initialSubscribeAckAt: number | null = null;
   private planQueryInFlight = false;
   private planQueryPending = false;
@@ -453,6 +468,49 @@ export class ConversationProjectionStore {
     return { ...this.sessionOpenRendererTiming };
   }
 
+  /** 把 renderer 侧分段回填到 dev 观测面（`__zcodeV4ConversationOpensE2E` 的 ACK 样本）。 */
+  private reportOpenRendererTiming(): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    recordConversationOpenRendererTiming(this.topic, this.sessionOpenRendererTiming);
+  }
+
+  /**
+   * 首绘采样：从 snapshot 应用完成起，等两个 rAF 再记一次耗时（近似首帧 paint）。
+   *
+   * 只量「应用到首绘」这一段，不重复量总量：`uiViewReadyMs + paintAfterApplyMs` 才是
+   * 「到首绘」的体感总量。非浏览器环境没有 rAF，缺席即可（缺席 ≠ 0）。
+   */
+  private scheduleOpenPaintSample(snapshotAppliedAt: number): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    if (typeof requestAnimationFrame !== "function") return;
+    // 两帧窗口内若发生重订阅（generation 变），这次首绘属于上一代，不能记到新的
+    // sessionOpenRendererTiming 上——分段会与新的 connect 起点错配。
+    const generation = this.generation;
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (this.closed || this.generation !== generation) {
+          // 丢弃是设计内早退，但**不能静默**：phase-0 基线里 5/9 次 paintAfterApplyMs
+          // 无声缺席（「重开 3 次全缺」正是走这里），报告无法区分「rAF 还没跑」与
+          // 「样本已作废」。写一条缺席原因进观测面（reason 二选一），由采样脚本原样带出。
+          this.reportOpenPaintMissing(this.closed ? "closed" : "generation_changed");
+          return;
+        }
+        this.sessionOpenRendererTiming = {
+          ...this.sessionOpenRendererTiming,
+          paintAfterApplyMs: roundedDuration(snapshotAppliedAt, monotonicNow()),
+        };
+        this.setState({ rendererTiming: this.sessionOpenRendererTiming });
+        this.reportOpenRendererTiming();
+      });
+    });
+  }
+
+  /** 首绘采样缺席（丢弃）打点；`paintAfterApplyMs` 的缺席原因必须可被判读。 */
+  private reportOpenPaintMissing(reason: "closed" | "generation_changed"): void {
+    if (!isConversationOpenProbeDevEnabled()) return;
+    recordConversationOpenPaintMissing(this.topic, reason);
+  }
+
   subscribe(listener: () => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -493,6 +551,12 @@ export class ConversationProjectionStore {
       status: "started",
       topic: this.topic,
     });
+    // uiViewReadyMs 的起点：跨代重订阅会覆盖成最新一代的起点，与下面的分段同源。
+    // **口径陷阱**：首帧溢出重试（下面的 `initialOverflowRetry` 分支）与 runtime recycle
+    // 的有界重试（`scheduleRuntimeRecycleReconnect` → `connect()`）都不传
+    // `rendererPrepareStartedAt`，起点被重置成该次重试的时刻。**一次带 recycle 的冷开
+    // 在 baseline 里会显得很快**，判读前必须确认是否发生过重试。
+    this.sessionOpenConnectStartedAt = connectStartedAt;
     this.sessionOpenRendererTiming = {
       rendererPrepareMs: roundedDuration(connectStartedAt, subscribeStartedAt),
     };
@@ -799,6 +863,7 @@ export class ConversationProjectionStore {
       this.observeModelTransition(next, context.online && hadAppliedBase);
       if (context.subscribeMode !== null && context.frameReceivedAt !== undefined) {
         const snapshotAppliedAt = monotonicNow();
+        const connectStartedAt = this.sessionOpenConnectStartedAt;
         this.sessionOpenRendererTiming = {
           ...this.sessionOpenRendererTiming,
           ...(this.initialSubscribeAckAt === null
@@ -810,9 +875,17 @@ export class ConversationProjectionStore {
                 ),
               }),
           rendererSnapshotApplyMs: roundedDuration(context.frameReceivedAt, snapshotAppliedAt),
+          // 总量口径：起点早于 CLI spawn、终点在首帧应用完成之后，因此它是本迭代唯一
+          // 能与「冷开 ≤1s」直接比较的 renderer 侧数值。ACK 的 openPhases.viewReadyMs
+          // 只是它内部的一段（见 ConversationOpenRendererTiming 的注释）。
+          ...(connectStartedAt === null
+            ? {}
+            : { uiViewReadyMs: roundedDuration(connectStartedAt, snapshotAppliedAt) }),
           snapshotAppliedAt,
         };
         this.setState({ rendererTiming: this.sessionOpenRendererTiming });
+        this.reportOpenRendererTiming();
+        this.scheduleOpenPaintSample(snapshotAppliedAt);
       }
       if (context.recovery) this.markRecoveryFrameSeen();
       return;
@@ -1706,6 +1779,9 @@ export class ConversationProjectionStore {
     this.offAssemblyFault();
     this.offRuntimeRestart?.();
     this.offRuntimeLifecycle?.();
+    // 会话关闭即摘掉 runtimeReady reader：它持有 transport/agentService，不摘就是泄漏；
+    // 且 probe.runtimeReady() 之后再读到它会打出可拉起 CLI 的 RPC。
+    unregisterConversationRuntimeReadyReader(this.topic);
     this.clearRuntimeRecycleRetry();
     this.turnDirectoryDebouncer?.cancel();
     this.turnDirectoryDebouncer = null;

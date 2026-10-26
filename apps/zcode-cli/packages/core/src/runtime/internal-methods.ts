@@ -281,6 +281,17 @@ export interface AgentRuntimeCoreMethods {
   subscribeEvents(sink: SessionEventSink): () => void;
   getContextBuilder(): ContextBuilder;
   ensureContextInitialized(traceContext: TraceContext, model?: Model): Promise<void>;
+  /** IS7 闸门：`historyMode:"none"` 的全量历史在首次发轮前补齐（无待办时纯早退）。 */
+  hydrateDeferredMessageHistory(traceContext: TraceContext): Promise<void>;
+  /** resume 收尾登记推迟的全量水化，并快照当时已写进 history 的条目。 */
+  deferHistoryHydration(rewind: {
+    branchCutAfterMessageId?: MessageId;
+    rewindCreatedMessageId?: MessageId;
+    rewindKeptMessageIds?: readonly MessageId[];
+    rewindTargetMessageId?: MessageId;
+  }): void;
+  /** 任何一次完整水化（闸门 / rewind 重建）都要清掉待办，避免历史被追加两份。 */
+  clearDeferredHistoryHydration(): void;
   getSkillCatalog(traceContext: TraceContext): Promise<SkillLoadOutcome>;
   createContextBuilderFromSnapshot(
     snapshot: ContextSourceSnapshot,

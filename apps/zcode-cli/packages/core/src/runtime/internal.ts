@@ -43,6 +43,7 @@ import type {
   AgentRuntimeConfig,
   AgentRuntimeDeps,
   BackgroundTaskNotificationSealReason,
+  DeferredHistoryHydration,
   PendingModelChangeTimeline,
   MainTurnCacheHitAggregate,
   RuntimeTurnFileChangeMap,
@@ -89,6 +90,11 @@ export interface AgentRuntimeInternal
   cachedTools: ModelToolContract[] | null;
   contextBuilder: ContextBuilder | null;
   contextInitialized: boolean;
+  /**
+   * 懒历史（`historyMode:"none"`）待补的全量水化。有值 = provider 历史还没水化，
+   * 任何把它交给模型的入口必须先过闸门（IS7）。见 `methods/history-hydration.ts`。
+   */
+  deferredHistoryHydration?: DeferredHistoryHydration;
   contextSourceSnapshot?: ContextSourceSnapshot;
   latestContextBuildResult?: ContextBuildResult;
   memoryRoot?: string;

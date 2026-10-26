@@ -149,8 +149,73 @@ export const conversationOpenTimingSchema = z
   .strict();
 export type ConversationOpenTiming = z.infer<typeof conversationOpenTimingSchema>;
 
+/**
+ * 会话打开的**分段** timing（ACK 顶层新键，IS8）。
+ *
+ * 为什么不放进 `openTiming`：那个 schema 是 `.strict()`，新增键会让旧客户端整帧解析
+ * 失败。本键是独立的新顶层键，旧客户端的 `subscribeAckSchema` 不 strict，会把它剥掉
+ * 而不是报错——这正是「additive」在本协议里的形态。
+ *
+ * **刻意不 .strict()**：本键是观测面，后续 phase 会往里加段（manifest / 窗口物化）。
+ * 消费者拿到的永远是自己认识的那个子集；老客户端剥未知键而不是整帧失败。
+ *
+ * 五段只覆盖 **ACK 帧内**可得的耗时：
+ *   - `viewReadyMs`：subscribe 入口 → ACK 组装完成。**口径 = CLI 进程内的视图就绪段**：
+ *     不含 host 准备（`openTiming.hostPrepareMs`）、CLI spawn（`cliBootstrapMs`）、RPC
+ *     往返、首帧传输（renderer `initialFrameTransportMs`）与 renderer 的 apply/paint。
+ *     冷开时它系统性偏短，**不能**当用户体感，也**不能**用来判「≤1s」——验收基准是
+ *     renderer 侧的 `uiViewReadyMs`（`conversationOpenObservability`）；
+ *   - `mergeMs`：`loadPersistedEvents`（持久事件合并/transcript 合成）；
+ *   - `rehydrateMs`：`publisher.rehydrate`（投影重建）；
+ *   - `manifestMs` / `materializeMs`：row manifest 读取与分页物化的耗时。产生点在
+ *     phase-row-manifest / phase-paged-materialization。`manifestMs` 已有生产者；
+ *     **`materializeMs` 刻意仍无生产者**——按需物化发生在 `rows/range` 上（那里没有 ACK
+ *     帧），其成本走 CLI 侧 `getRowPageOutcome(...).materializeMs`，塞进 ACK 只会得到一个
+ *     永远 undefined 的键。读取方必须按 undefined 处理（**缺席 ≠ 0**）。
+ *   - `manifestAdjusted`：本次冷开的清单有没有被账目修正过（三态，见字段注释）。
+ *
+ * **各段嵌套，不可相加**：`viewReadyMs ⊇ initialFrameEncodeMs`；
+ * `viewReadyMs ⊃ mergeMs + rehydrateMs`；阶段 0 里 `viewReadyMs` 还包含 runtime 激活本体
+ * （阶段 8 拆开后激活移到 ACK 之后，那时它才落在 `viewReadyMs` 之外）。
+ * `openTiming` 侧同理：**`hostPrepareMs ⊇ cliBootstrapMs + providerRegistrySyncMs +
+ * taskMetaReadMs`**——它量的是「subscribe 入口 → CLI 请求发起」，这三段（spawn、provider
+ * registry 同步、task meta 读）全发生在该区间内（`zcodeAgentService.ts:4407-4477`），
+ * 把它们与 `hostPrepareMs` 相加即重复计数。
+ *
+ * **`cliBootstrapMs` 的语义与缺席条件**：它是「**本次 subscribe 触发或等待进程 spawn 的等待
+ * 耗时**」，只在 `cliProcessState === "spawned"` 时有值；`reused` 时缺席（缺席 ≠ 0）。
+ * `spawned` 的判定按 acquire 前后的**进程事实差**（spawn 时刻 / runtime 代次 / 在途启动），
+ * **不是**「该 workspace 有没有 client 对象」——侧栏任务列表会预建 client，用后者判会让冷开
+ * 恒记 reused、spawn 成本埋进 `hostPrepareMs`（phase-0 baseline findings.coldCliBootstrapMissing）。
+ * 因此冷开主判据用 `uiViewReadyMs − hostPrepareMs`（必然覆盖 spawn），
+ * `uiViewReadyMs − cliBootstrapMs` 作并列分解项。
+ * 缺席项按 `undefined` 处理，禁止补 0 后求「各段之和」。
+ *
+ * **不含 `runtimeReadyMs`**：view-only 下 runtime 激活发生在 view-ready ACK **之后**，
+ * ACK 帧里不可能有该值。它走 `v4/conversation/runtimeReady` query
+ * （见 `v4ConversationRuntimeReadyResultSchema`）。
+ */
+export const conversationOpenPhasesSchema = z.object({
+  version: z.literal(1),
+  viewReadyMs: openTimingMsSchema,
+  manifestMs: openTimingMsSchema,
+  materializeMs: openTimingMsSchema,
+  mergeMs: openTimingMsSchema,
+  rehydrateMs: openTimingMsSchema,
+  /**
+   * 本次冷开的 turn 行清单是否被**账目修正**过（就地改 `row_count`，不重读正文）。
+   *
+   * 三态而不是布尔：`true` = 清单与物化出的行数有偏差且已就地修正；`false` = 清单可用
+   * 且无偏差；**缺席** = 这次没走清单（降级重建 / 宿主没实现读端口）。把缺席当 `false`
+   * 会把「没读清单」说成「清单没偏差」，那正是「优化没生效」最容易被误读的一格。
+   */
+  manifestAdjusted: z.boolean().optional(),
+});
+export type ConversationOpenPhases = z.infer<typeof conversationOpenPhasesSchema>;
+
 const conversationSubscribeAckSchema = subscribeAckSchema.extend({
   openTiming: conversationOpenTimingSchema.optional(),
+  openPhases: conversationOpenPhasesSchema.optional(),
 });
 export type ConversationSubscribeAck = z.infer<typeof conversationSubscribeAckSchema>;
 
@@ -191,10 +256,10 @@ export const conversationTopicFrameSchema = createTopicFrameSchema(
   conversationSnapshotSchema,
   conversationDeltaSchema,
 ).superRefine((frame, context) => {
-    if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
-      context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
-    }
-  });
+  if (!frame.topic.startsWith("conversation/") || frame.topic.length === "conversation/".length) {
+    context.addIssue({ code: "custom", message: "invalid conversation topic", path: ["topic"] });
+  }
+});
 export type ConversationTopicFrame = z.infer<typeof conversationTopicFrameSchema>;
 export const conversationTopicWireFrameSchema = createTopicWireFrameSchema(
   conversationTopicFrameSchema,
@@ -339,6 +404,10 @@ export const V4_METHODS = {
   conversationTurnDirectory: "v4/conversation/turnDirectory",
   // 当前有效分支的终态 ExitPlanMode 目录；只读、无状态、超时重发安全。
   conversationPlans: "v4/conversation/plans",
+  // runtime 激活耗时（毫秒）观测：view-only 的激活发生在 subscribe ACK **之后**，
+  // ACK 帧（openPhases）里不可能有该值，故必须独立成 query。只读、无状态、超时重发安全，
+  // 且**不触发激活**（触发点是 ACK 后的后台预激活与 send 类命令）。
+  conversationRuntimeReady: "v4/conversation/runtimeReady",
   conversationFileChanges: "v4/conversation/fileChanges",
   backgroundBashOutput: "v4/conversation/backgroundBashOutput",
   conversationFileRewindPreview: "v4/conversation/fileRewindPreview",
@@ -539,7 +608,13 @@ export const v4ConversationTurnDirectoryParamsSchema = z.object({
   // 取 queryRowId < beforeQueryRowId 的更早条目；缺省 = 从当前尾部向前。
   beforeQueryRowId: z.number().int().nonnegative().optional(),
   // 缺省 = 服务端取 PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries。
-  limit: z.number().int().nonnegative().min(1).max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries).optional(),
+  limit: z
+    .number()
+    .int()
+    .nonnegative()
+    .min(1)
+    .max(PROTOCOL_V4_LIMITS.turnDirectoryMaxEntries)
+    .optional(),
 });
 export type V4ConversationTurnDirectoryParams = z.infer<
   typeof v4ConversationTurnDirectoryParamsSchema
@@ -584,6 +659,54 @@ export const v4ConversationTurnDirectoryResultSchema = z.object({
 });
 export type V4ConversationTurnDirectoryResult = z.infer<
   typeof v4ConversationTurnDirectoryResultSchema
+>;
+
+// ── runtime 就绪观测（conversation/runtimeReady）──
+// 与 rowsRange / turnDirectory 同族的只读 query：无状态、超时重发安全。
+//
+// **为什么必须有这条独立 query**：会话打开的分段 timing 放 ACK 顶层（openPhases），但
+// view-only 下 runtime 的激活发生在 view-ready ACK **之后**——ACK 帧里不可能有激活耗时。
+// 若把该值塞进 openTiming/openPhases，唯一的结果是「永远是 undefined，却被当成 0」。
+// 因此 runtimeReadyMs 只能事后 query；Step 14 的性能验收也从这里读。
+//
+// 语义边界（Step 1 只有观测，不产生激活）：
+//   - 本 query **不触发激活**。`runtimeReadyMs` 的写入点是 `ensureColdReadyPublisher`
+//     （量 `coldResume.ensureResumed` 本体），而该函数被**所有冷会话读入口**复用
+//     （订阅、rowsRange、turnDirectory、plans…），不是「只有冷订阅」。
+//     phase-view-runtime-split 之后改由「ACK 后后台预激活 + send 类命令 await」驱动，
+//     查询侧读数口径不变。
+//   - `runtimeReadyMs` 的口径是 **「激活本体耗时」**，不是「从 ACK 起算」：阶段 0 的
+//     激活在 ACK **之前**（按 ACK 起算得负数），阶段 8 拆开后激活在 ACK **之后**
+//     （按 ACK 起算会把等待算进去）。只有本体耗时能跨阶段比较。
+//   - `runtimeReadyMs: null` 只表示「本进程没观测到一次激活」，不是「激活耗时 0」。
+//
+// `runtimeReady` 布尔的口径是 **「该会话的 runtime record 是否 live」**，
+// **不是**「runtime 是否已就绪」：它直接读 `hasLiveConversation`。Step 8 必须改成读
+// `runtimeReadyFlights` 的 settle 结果，否则 view-only（只建了 view publisher、runtime
+// 尚未激活）的会话会误报 true。
+export const v4ConversationRuntimeReadyParamsSchema = z
+  .object({
+    sessionId: z.string().min(1),
+  })
+  .strict();
+export type V4ConversationRuntimeReadyParams = z.infer<
+  typeof v4ConversationRuntimeReadyParamsSchema
+>;
+
+// 有意不 .strict()：同族 query 的取舍——未来加观测字段（如激活阶段细分）时，
+// 老客户端剥键而不是解析失败。
+export const v4ConversationRuntimeReadyResultSchema = z.object({
+  sessionId: z.string().min(1),
+  /** 本进程最近一次观测到的 runtime 激活耗时（毫秒）；未观测到为 null（≠ 0）。 */
+  runtimeReadyMs: z.number().int().nonnegative().nullable(),
+  /**
+   * 会话 runtime **record 是否 live**（不是「runtime 是否已就绪」）。视图可读 ≠ runtime
+   * 就绪；Step 8 拆出 view-only 后本字段改读 `runtimeReadyFlights` 的 settle 结果。
+   */
+  runtimeReady: z.boolean(),
+});
+export type V4ConversationRuntimeReadyResult = z.infer<
+  typeof v4ConversationRuntimeReadyResultSchema
 >;
 
 // ── conversation plans directory ──

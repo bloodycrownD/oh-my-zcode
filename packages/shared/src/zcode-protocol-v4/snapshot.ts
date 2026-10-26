@@ -146,7 +146,27 @@ export const actionAvailabilitySchema = z.discriminatedUnion("allowed", [
 ]);
 export type ActionAvailability = z.infer<typeof actionAvailabilitySchema>;
 
+/**
+ * 会话的 runtime 态（IS3/IS8，additive）。
+ *
+ * `viewOnly` = 投影（历史）已经能读，但 runtime 还没激活：此时命令闸门只放行
+ * send 类（唯一激活入口）与 record-free，其余回可重试的 `runtimeNotReady`；
+ * 控制面按「不能停」下发（`canStop:false` / `stopState:"idle"`）。
+ *
+ * `.default("live")` 是版本偏斜防御：旧快照/旧发送端没有这个键，缺键必须等于加入它
+ * 之前的行为（恒 live），否则新客户端会把一条正常会话判成 view-only。
+ */
+export const sessionRuntimeAvailabilitySchema = z.enum(["live", "viewOnly"]);
+export type SessionRuntimeAvailability = z.infer<typeof sessionRuntimeAvailabilitySchema>;
+
 export const sessionActionAvailabilitySchema = z.object({
+  /**
+   * 见 {@link sessionRuntimeAvailabilitySchema}。
+   *
+   * **不是** `computeAvailability` 的产物：投影不知道 runtime 起没起，那里恒为 `live`；
+   * 真值由网关在 publisher 的**帧编码边界**注入（快照与 state patch 同一条缝）。
+   */
+  sessionRuntime: sessionRuntimeAvailabilitySchema.default("live"),
   fork: actionAvailabilitySchema,
   switchModelConfig: actionAvailabilitySchema,
   setFollowupMode: actionAvailabilitySchema,

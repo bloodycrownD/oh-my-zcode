@@ -45,6 +45,17 @@ export interface PartRow {
   data: string;
 }
 
+/**
+ * `listSessionMessageIndex` 的窄行：只有排序键与 rowid，**没有 `data`**。
+ * 存在这一层是为了让「索引读」在类型上就无法退化成正文读（role 在 data JSON 里）。
+ */
+export interface MessageIndexRow {
+  id: string;
+  sequence: number | null;
+  time_created: number;
+  storage_row_id: number;
+}
+
 export interface SessionEntryRow {
   id: string;
   session_id: string;
@@ -88,4 +99,34 @@ export interface InputHistoryRow {
   attachments: string | null;
   kind: string;
   time_created: number;
+}
+
+export interface TurnManifestRow {
+  session_id: string;
+  branch_generation: number;
+  ordinal: number;
+  turn_id: string;
+  first_message_id: string | null;
+  last_message_id: string | null;
+  message_ids_json: string;
+  row_count: number;
+  row_count_source: "live" | "cold";
+  projection_schema_version: number;
+  time_created: number;
+  time_updated: number;
+}
+
+export interface TurnQueryManifestRow {
+  session_id: string;
+  branch_generation: number;
+  turn_id: string;
+  query_ordinal_in_turn: number;
+  query_message_id: string | null;
+  query_row_id: number;
+  row_count: number;
+  query_preview: string;
+  assistant_preview: string;
+  assistant_preview_kind: "text" | "running" | "empty";
+  time_created: number;
+  time_updated: number;
 }

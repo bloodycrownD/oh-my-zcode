@@ -509,6 +509,9 @@ export class ZCodeProtocolAgentServer {
       // turn 目录窄投影：与 rowsRange 同族的只读 query，独立 case 便于按方法分派。
       case V4_METHODS.conversationTurnDirectory:
         return await this.requireV4Gateway().turnDirectory(request.params);
+      // runtime 激活耗时观测：ACK 帧之后才有值，故不能放 openPhases，只能事后 query。
+      case V4_METHODS.conversationRuntimeReady:
+        return await this.requireV4Gateway().runtimeReady(request.params);
       case V4_METHODS.conversationPlans:
         return await this.requireV4Gateway().plans(request.params);
       case V4_METHODS.backgroundBashOutput:

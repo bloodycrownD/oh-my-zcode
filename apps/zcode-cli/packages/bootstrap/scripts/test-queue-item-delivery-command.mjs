@@ -93,8 +93,9 @@ function makeHost({ queueItem, appResult = { changed: true, inlined: true } }) {
               sessionId,
               // B1/B5 钉的是「toggle 驱动 core 改写」这条门；空闲态的 guide 会转交
               // sendQueuedNow（queue.ts 的空闲回落），与本组语义不同。夹具此前缺
-              // runtime 直接 TypeError（B1/B5 长期红），补一个「有前台执行」的活值让
-              // 用例落在它自称的路径上——断言本身未放宽。
+              // runtime 直接 TypeError（cc41a25e 加空闲回落门时未同步本夹具 →
+              // B1/B5 长期红），补一个「有前台执行」的活值让用例落在它自称的路径上
+              // ——断言本身未放宽。
               runtime: { getActiveForegroundExecutionId: () => "exec-dlv-1" },
               setQueueItemDelivery: async (pendingInputId, delivery) => {
                 calls.push({ kind: "app.setQueueItemDelivery", pendingInputId, delivery });

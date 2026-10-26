@@ -1,0 +1,867 @@
+{
+  "schema": "zcode-session-open-after/v4",
+  "generatedAt": "2026-10-26T12:05:00.000Z",
+  "phase": "Step 17 — fix-c20（CLI 串行请求队列 → 命令级读写锁）真机重测（after4）",
+  "spec": "docs/iterations/session-open-latency/spec.md",
+  "supersedes": "docs/iterations/session-open-latency/after3.json（Step 16 证据，原样保留，不修改）；baseline.json / after.json / after2.json 同样原样保留",
+  "head": {
+    "sha": "92f240d2",
+    "also": [
+      "a1f07360（Step 16 收口：父会话窄读 + 请求三段打点）",
+      "92f240d2 = 本步产品代码（读写锁 + 分类表 + 12 例并发用例）；24f5ab07 = 分类门禁的用例补强（钉住两条 legacy 写面）；随后一个文档提交 = spec Step 17 / 风险 27-29 / after4.json"
+    ],
+    "branch": "feat/session-open-latency"
+  },
+  "baseline": {
+    "file": "docs/iterations/session-open-latency/baseline.json",
+    "phase": "phase-0-baseline（c 树 8a1352d3，同一台机器，长会话 3012 message / 5255 行）",
+    "notMeasuredAgain": "本文件不重跑 phase-0 基线；与 after.json / after2.json / after3.json 用同一套夹具、同一采样脚本、同一口径"
+  },
+  "measure_setup": {
+    "fixture": "与 after.json / after2.json / after3.json 完全同一份沙盒（%TEMP%\\c-session-open-step14）：真实库副本，长会话 3012 message / 5255 行，tasks-index 裁剪到 3 条会话，workspace 改写。**未改动夹具**。沙盒依然没有 .omz/cli/artifacts 目录 ⇒ fileChange 摘要在夹具里以 ENOENT 失败（本步该段反而变慢，见 mergeMs 构成）。",
+    "build": "本分支 HEAD 重编 CLI bundle（node scripts/build-desktop-agent-cli.mjs，bundle 自检通过）；packages/desktop/out/* 复用 Step 14 的构建（本步未改 main/host/renderer 代码）；vite dev (5174)。",
+    "sampler": "scripts/dev/long-session-perf-sample.mjs（未改）；驱动沿用 Step 14/15/16 的 run-matrix 形态（kill 整树 → --open-workspace 冷启 → --path warm 采一轮）。CLI 日志在开测前轮转为 zcode-2026-10-26.after3.jsonl，因此请求分段只统计本步样本。",
+    "rounds": {
+      "coldApp": 6,
+      "coldAppWarmupDiscarded": 0,
+      "reopen": 3,
+      "switchback": 3,
+      "warmNotHolding": 0,
+      "note": "冷启 6 轮（连续两批各 3 轮，代码相同）；reopen / switchback 各 3 轮（after3 是 6 轮，本步按 gate 要求跑三路径 ×3）。"
+    },
+    "sandbox": "HOME/USERPROFILE/APPDATA/LOCALAPPDATA/ZCODE_DATA_BASE_DIR 全部指向沙盒；真实 ~/.omz 只读。"
+  },
+  "environment": {
+    "os": "Windows 10.0.26200 x64",
+    "node": "v22.22.0（mise.toml 要求 24.14.0，只报 engine 警告）",
+    "load_note": "本步测量与门禁测试并发（同一台机器）。"
+  },
+  "targets": {
+    "longSession": {
+      "id": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "messages": 3012,
+      "observedTotalRows": 5255,
+      "window": {
+        "ordinal": 151,
+        "turnCount": 8,
+        "messageCount": 115,
+        "rowCount": 160,
+        "rowIdBase": 5096
+      },
+      "subagentChildren": 152
+    },
+    "parkSession": {
+      "id": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "messages": 1217,
+      "observedTotalRows": 2347
+    }
+  },
+  "runs": {
+    "coldApp": [
+      {
+        "label": "cold-app-1",
+        "uiViewReadyMs": 1315,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 1196,
+        "mergeMs": 482,
+        "rehydrateMs": 45,
+        "manifestMs": 6,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1226,
+        "cliSessionRestoreMs": 1189,
+        "runtimeReadyMs": 1298,
+        "paintAfterApplyMs": 390,
+        "cliSegments": {
+          "clickToArrivalMs": 134,
+          "queueWaitMs": 1,
+          "handlerMs": 1201,
+          "workflowRunsHandlerMs": 1687
+        }
+      },
+      {
+        "label": "cold-app-2",
+        "uiViewReadyMs": 1362,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 1247,
+        "mergeMs": 419,
+        "rehydrateMs": 45,
+        "manifestMs": 5,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1274,
+        "cliSessionRestoreMs": 1240,
+        "runtimeReadyMs": 1342,
+        "paintAfterApplyMs": 370,
+        "cliSegments": {
+          "clickToArrivalMs": 147,
+          "queueWaitMs": 0,
+          "handlerMs": 1251,
+          "workflowRunsHandlerMs": 1741
+        }
+      },
+      {
+        "label": "cold-app-3",
+        "uiViewReadyMs": 1344,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 1222,
+        "mergeMs": 569,
+        "rehydrateMs": 45,
+        "manifestMs": 6,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1255,
+        "cliSessionRestoreMs": 1215,
+        "runtimeReadyMs": 1319,
+        "paintAfterApplyMs": 382,
+        "cliSegments": {
+          "clickToArrivalMs": 139,
+          "queueWaitMs": 0,
+          "handlerMs": 1225,
+          "workflowRunsHandlerMs": 1715
+        }
+      },
+      {
+        "label": "cold-app-4",
+        "uiViewReadyMs": 1151,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 1036,
+        "mergeMs": 435,
+        "rehydrateMs": 45,
+        "manifestMs": 6,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1063,
+        "cliSessionRestoreMs": 1029,
+        "runtimeReadyMs": 1138,
+        "paintAfterApplyMs": 458,
+        "cliSegments": {
+          "clickToArrivalMs": 134,
+          "queueWaitMs": 0,
+          "handlerMs": 1042,
+          "workflowRunsHandlerMs": 1649
+        }
+      },
+      {
+        "label": "cold-app-5",
+        "uiViewReadyMs": 1193,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 1086,
+        "mergeMs": 450,
+        "rehydrateMs": 43,
+        "manifestMs": 6,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1108,
+        "cliSessionRestoreMs": 1080,
+        "runtimeReadyMs": 1181,
+        "paintAfterApplyMs": 484,
+        "cliSegments": {
+          "clickToArrivalMs": 122,
+          "queueWaitMs": 0,
+          "handlerMs": 1090,
+          "workflowRunsHandlerMs": 1766
+        }
+      },
+      {
+        "label": "cold-app-6",
+        "uiViewReadyMs": 1260,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 1128,
+        "mergeMs": 470,
+        "rehydrateMs": 62,
+        "manifestMs": 13,
+        "manifestAdjusted": false,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "cold",
+        "cliRequestMs": 1155,
+        "cliSessionRestoreMs": 1119,
+        "runtimeReadyMs": 1262,
+        "paintAfterApplyMs": 424,
+        "cliSegments": {
+          "clickToArrivalMs": 133,
+          "queueWaitMs": 0,
+          "handlerMs": 1136,
+          "workflowRunsHandlerMs": 1732
+        }
+      }
+    ],
+    "reopen": [
+      {
+        "label": "reopen-1",
+        "uiViewReadyMs": 150,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 8,
+        "snapshotRowCount": 160
+      },
+      {
+        "label": "reopen-2",
+        "uiViewReadyMs": 136,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 7,
+        "snapshotRowCount": 160
+      },
+      {
+        "label": "reopen-3",
+        "uiViewReadyMs": 129,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 8,
+        "snapshotRowCount": 160
+      }
+    ],
+    "switchback": [
+      { "label": "switchback-1", "switchMs": 310, "noNewAck": true },
+      { "label": "switchback-2", "switchMs": 561, "noNewAck": true },
+      { "label": "switchback-3", "switchMs": 527, "noNewAck": true }
+    ],
+    "warmNotHolding": {
+      "measured": false,
+      "reason": "run#1 仍落在 keep-warm 窗口内：渲染层复用已有 topic 订阅、不产生新 ACK（CLI 日志里那一次点击没有 subscribe 行，只有一条 click+389ms 到达的 workflowRuns），采样器按 ack-timeout 判失败。与风险 26 同一现象，**本步仍未采到有效样本**。"
+    }
+  },
+  "aggregates": {
+    "coldApp": {
+      "uiViewReadyMs": [1315, 1362, 1344, 1151, 1193, 1260],
+      "uiViewReadyMsMedian": 1288,
+      "uiViewReadyMsRange": [1151, 1362],
+      "hostPrepareMs": [3, 3, 2, 2, 2, 2],
+      "hostSideViewMs": [1312, 1359, 1342, 1149, 1191, 1258],
+      "hostSideViewMsMedian": 1286,
+      "viewReadyMs": [1196, 1247, 1222, 1036, 1086, 1128],
+      "viewReadyMsMedian": 1162,
+      "mergeMs": [482, 419, 569, 435, 450, 470],
+      "mergeMsMedian": 460,
+      "rehydrateMs": [45, 45, 45, 45, 43, 62],
+      "rehydrateMsMedian": 45,
+      "manifestMs": [6, 5, 6, 6, 6, 13],
+      "manifestMsMedian": 6,
+      "cliRequestMs": [1226, 1274, 1255, 1063, 1108, 1155],
+      "cliRequestMsMedian": 1190,
+      "runtimeReadyMs": [1298, 1342, 1319, 1138, 1181, 1262],
+      "runtimeReadyMsMedian": 1280,
+      "paintAfterApplyMs": [390, 370, 382, 458, 484, 424],
+      "snapshotRowCount": [160, 160, 160, 160, 160, 160],
+      "sessionRuntimeState": ["cold", "cold", "cold", "cold", "cold", "cold"],
+      "manifestAdjusted": [false, false, false, false, false, false],
+      "afterStep14": { "uiViewReadyMsMedian": 3718 },
+      "afterStep15": { "uiViewReadyMsMedian": 1784 },
+      "afterStep16": { "uiViewReadyMsMedian": 1439, "hostSideViewMsMedian": 1436 },
+      "delta": "Step 16 → Step 17：−10%（1436 → 1286）；Step 14 → Step 17：−65%。主判仍为 fail（门槛 1000，差 286ms）",
+      "definition": "app 冷启 + CLI 预启动 + 该会话在点击前**未**激活（本步 6/6 都是点击后才激活）⇒ 量的是「view-only 首屏 + 与激活并发」。与 after/after2/after3 的 coldApp 完全同义。"
+    },
+    "reopen": {
+      "uiViewReadyMs": [150, 136, 129],
+      "uiViewReadyMsMedian": 136,
+      "afterStep14": 138,
+      "afterStep15": 145,
+      "afterStep16": 140,
+      "verdict": "持平（136 vs 140，噪声内；viewReadyMs 7~8ms 说明 CLI 侧只发帧不重建）"
+    },
+    "switchback": {
+      "switchMs": [310, 561, 527],
+      "switchMsMedian": 527,
+      "afterStep14": { "switchMsMedian": 450 },
+      "afterStep16": { "switchMsMedian": 426, "range": [320, 611] },
+      "noNewAck": "3/3",
+      "delta": "与 after3 同一噪声带（after3 的 6 个样本是 320~611，本步 3 个样本 310~561）；投影仍是尾窗（`snapshotRowCount` 160、`totalCount` 5255），本步不碰投影。"
+    }
+  },
+  "rw_lock": {
+    "impl": "`bootstrap/src/zcode-protocol/request-concurrency-gate.ts` 的 `RequestConcurrencyGate` 替换 `transport.ts` 里原来的 `processing` 串行链。三条语义：①只读共享（队首连续只读一次性放行）；②变更独占（等 `activeReaders === 0` 才进，且在它出队前任何新只读都不得进入）；③严格 FIFO（队列按到达顺序排）。合起来是「写优先的公平读写锁」：`[R1,R2,W,R3]` 的执行是 `R1‖R2 → W → R3`，不是 `R1‖R2‖R3 → W`。槽位释放在 resolve / reject / 同步 throw 三条路的 finally 语义里（抛错不毒化）。旁路（session/stop、workspace/cancelGenerateText）在 transport 里先命中旁路名单、**不过锁**，仍等「前一条排队请求开始跑」之后越过它。",
+    "classification_table": "`bootstrap/src/zcode-protocol/command-concurrency.ts` 的 `COMMAND_CONCURRENCY`：`Record<V4Method | ZCodeProtocolMethod, \"readonly\"|\"mutating\">`，键是 **wire 方法名**，109 条（= 两张协议方法表的并集，34 readonly + 75 mutating）。",
+    "missing_entry_gate": "三层：①穷尽类型——表是 `satisfies Record<V4Method | ZCodeProtocolMethod, CommandConcurrency>`，漏登记一条**编译即红**（变异 M6 实测 tsc exit 1）；②`test:command-concurrency` K5 按 `server.ts` 的 `dispatchRequest` **逐 case 复核**（93 个 case；出现裸字符串 case、或解析出的表达式数 ≠ 原始 case 行数都红——后者保证扫描器不会空跑）；③K6 双向核对表与协议表（多一条拼错的键也红，否则漏登记会看起来是绿的）。",
+    "conservative_side": "`commandConcurrencyOf(method)` 对**未知**方法名一律返回 `mutating`（协议表之外的字符串只有两种来源：本 server 不解释的通知、将来新增却没登记的命令）。表内也刻意把「其实是读、但不在冷开路径上且未逐行证明无写」的一大票命令归 mutating：插件面（list/overview/describe/validate/参考目录）、workflows/* 文件面、provider/testModelConnectivity、mcp/list、automation/*、process/childProcesses、以及全部 interaction/*（反向方法，本 server 从不接收）。",
+    "deliberate_exclusions": [
+      {
+        "command": "session/read",
+        "why": "handler 写 `record.deliveryKind`（server-operations.ts 的 readSession 首几行），是客户端可决定的服务端状态 → 保守侧归 mutating。"
+      },
+      {
+        "command": "session/subscribe",
+        "why": "写 `record.deliveryKind` + `record.legacyStreamSubscribed`，且是 legacy 事件流注册 → 归 mutating（不在冷开路径上，不影响收益）。"
+      }
+    ],
+    "duplicate_id_guard": "同一 requestId 在飞时强制独占（`concurrencyFor` 读 `inFlightRequestIds`）。理由：`postResponseOutbox` 与响应路由都按 requestId 键控，两条同 id 的请求并发会互相 delete/set（初始帧静默丢失）；串行链顺带掩盖了这个客户端违约，换成并发后必须显式挡住。",
+    "bypass": "`shouldBypassProcessingQueue` 不变（session/stop + workspace/cancelGenerateText），K6 断言该名单**不得扩大**（变异 M8 即红）。",
+    "instrumentation": "`zcode_protocol.request.timing` 新增 `dispatchClass`（readonly / mutating / bypass）：任何一次 queueWait 现在都能归因到「被一条变更独占」或「同 requestId 在飞」。不进协议、不进 openPhases（IS8 键集合不变）。",
+    "readonly_commands": [
+      {
+        "command": "v4/conversation/subscribe",
+        "why": "视图入口。注册按 (connectionId, topic, subscriptionId) 键控、水化按会话单飞（viewReadyFlights / hydrationInFlight），不写会话或持久化事实；「host 与手机 web 同时订阅同一会话」本来就要求它并发正确。"
+      },
+      {
+        "command": "v4/conversation/resync",
+        "why": "同一订阅的恢复（re-register + 重发 initial frame），与 subscribe 同键控、无持久化写。"
+      },
+      {
+        "command": "v4/conversation/rowsRange",
+        "why": "按 manifest 定位 + 临时投影合成页，页不驻留。"
+      },
+      { "command": "v4/conversation/turnDirectory", "why": "从投影行现算派生目录，不缓存不写回。" },
+      {
+        "command": "v4/conversation/runtimeReady",
+        "why": "只读激活结论集合（runtimeReadySessions / runtimeActivationMs）。"
+      },
+      { "command": "v4/conversation/plans", "why": "只读当前分支终态 ExitPlanMode 目录。" },
+      {
+        "command": "v4/conversation/fileChanges",
+        "why": "按 messageIds 读 checkpoint 摘要；写 checkpoint 的是 turn，不是这条查询。"
+      },
+      {
+        "command": "v4/conversation/fileRewindPreview",
+        "why": "只算 diff 预览；真正执行回滚走 v4/command 的 rewind（mutating）。"
+      },
+      {
+        "command": "v4/conversation/usage",
+        "why": "usage store 的聚合读（model_usage / turn_usage）。"
+      },
+      {
+        "command": "v4/usage/stats",
+        "why": "与上一条同一 handler（getUsageStats），仅换取名空间。"
+      },
+      {
+        "command": "v4/conversation/backgroundBashOutput",
+        "why": "读已有任务的有界输出游标，不启动/停止任务。"
+      },
+      { "command": "v4/conversation/workflowRunEvents", "why": "dwf journal 的只读分页。" },
+      {
+        "command": "v4/conversation/workflowRuns",
+        "why": "dwf journal 的只读枚举。⚠ 它首次调用会触发一次 runtime 激活（ensureHostRecordForJournalRead → ensureRuntimeReady），那是既有语义、也是「读触发激活」这个副作用的来源（见 activation_triggered_by_read），不是这条查询写入了什么。"
+      },
+      {
+        "command": "v4/conversation/workflowRunArtifacts",
+        "why": "产物清单只读（不 select 无界的 result_json）。"
+      },
+      {
+        "command": "v4/conversation/workflowRunArtifactData",
+        "why": "产物条目分页只读（cursor = journal sequence）。"
+      },
+      {
+        "command": "v4/conversation/workflowRunArtifactRead",
+        "why": "产物字节 ≤512KiB 分块读，授权在宿主端口。"
+      },
+      {
+        "command": "v4/conversation/workflowRunWorkspace",
+        "why": "工作区 transcript 的轻行清单（不带正文）。"
+      },
+      { "command": "v4/conversation/workflowRunNodeResult", "why": "单个节点的有界正文读。" },
+      { "command": "v4/attachment/read", "why": "已发送附件按 row/index 授权分块读，不落盘。" },
+      {
+        "command": "v4/conversation/attachmentRead",
+        "why": "Share 读 userInput 附件，同上按 row/index 授权。"
+      },
+      { "command": "v4/conversation/attachmentStat", "why": "只做授权 + stat，不读内容。" },
+      {
+        "command": "v4/attachment/previewSource",
+        "why": "返回经同一 row/index 授权的本地播放源，不改附件状态。"
+      },
+      {
+        "command": "v4/commands/query",
+        "why": "只等**已在飞**的水位（不创建）并读 inbox 幂等表；既不是激活触发器，也不入队输入。"
+      },
+      { "command": "session/list", "why": "读 session store + 已驻留 record 的元信息。" },
+      {
+        "command": "session/subagents",
+        "why": "读持久化候选 + 已驻留投影（Step 15/16 的窄读路径）。"
+      },
+      { "command": "session/messages", "why": "读活动分支消息页。" },
+      { "command": "session/events", "why": "读协议事件页。" },
+      { "command": "session/debug", "why": "读进程内观测快照（observations WeakMap），无副作用。" },
+      { "command": "session/usage", "why": "usage store 聚合读。" },
+      { "command": "usage/stats", "why": "与 session/usage 同一 handler。" },
+      {
+        "command": "workspace/readPresentation",
+        "why": "读 slash 命令目录（进程缓存装配），无写。"
+      },
+      { "command": "workspace/readPromptLanguage", "why": "读配置域。" },
+      {
+        "command": "workspace/readMagicContextConfig",
+        "why": "读 effective 配置域（update 的配对读）。"
+      },
+      {
+        "command": "workspace/listMagicContextMemories",
+        "why": "读记忆条目 + 计数（archive 才是写）。"
+      }
+    ],
+    "mutating_commands": [
+      "v4/connection/flow",
+      "v4/conversation/unsubscribe",
+      "v4/attachment/begin",
+      "v4/attachment/chunk",
+      "v4/attachment/commit",
+      "v4/attachment/abort",
+      "v4/command",
+      "v4/controller/subscribe",
+      "v4/controller/resync",
+      "v4/controller/unsubscribe",
+      "session/create",
+      "session/resume",
+      "session/read",
+      "session/subscribe",
+      "session/send",
+      "session/stop",
+      "session/cancelBackgroundTask",
+      "session/fork",
+      "session/goal",
+      "session/setModel",
+      "session/setThoughtLevel",
+      "session/setMode",
+      "session/close",
+      "session/requestRuntimePreferences",
+      "workspace/hooks/trustGrant",
+      "workspace/updateInteractionPreferences",
+      "workspace/updateMagicContextConfig",
+      "workspace/archiveMagicContextMemories",
+      "workspace/updatePromptLanguage",
+      "workspace/updateModelIoPreferences",
+      "workspace/updateDynamicWorkflowPolicy",
+      "workspace/generateText",
+      "workspace/cancelGenerateText",
+      "runtime/capabilities",
+      "computer-use/operation-event",
+      "provider/testModelConnectivity",
+      "mcp/list",
+      "mcp/refreshSessions",
+      "plugins/list",
+      "plugins/referenceCatalog",
+      "plugins/referenceCatalogWithCategory",
+      "plugins/resolveSuggestedReference",
+      "skills/referenceCatalog",
+      "plugins/setEnabled",
+      "plugins/overview",
+      "plugins/marketplace/add",
+      "plugins/marketplace/remove",
+      "plugins/marketplace/update",
+      "plugins/install",
+      "plugins/cancelOperation",
+      "plugins/uninstall",
+      "plugins/update",
+      "plugins/restoreBuiltin",
+      "plugins/configure",
+      "plugins/resetConfig",
+      "plugins/validate",
+      "plugins/describe",
+      "workflows/list",
+      "workflows/get",
+      "workflows/updateMeta",
+      "workflows/delete",
+      "workflows/runs",
+      "workflows/move",
+      "automation/create",
+      "automation/update",
+      "automation/checkTaskBinding",
+      "automation/list",
+      "automation/delete",
+      "process/childProcesses",
+      "interaction/requestPermission",
+      "interaction/requestUserInput",
+      "interaction/requestProviderRuntimeHeaders",
+      "interaction/requestOfficialMcpAuthHeaders",
+      "interaction/browserList",
+      "interaction/browserExecute"
+    ]
+  },
+  "concurrency_tests": [
+    {
+      "covers": "①两条只读确实并发（不是假并发）",
+      "how": "G1 闸门级 + I1 真实 transport：第一条只读 handler 用 deferred 卡住，断言第二条**在第一条还卡着时**已进 handler（order = [workflowRuns, subscribe]，且 inspect().activeReaders === 2）。串行实现下这里只会有一条。",
+      "mutation": "M1（只读不再共享）→ G1/G2/G3/I1 红"
+    },
+    {
+      "covers": "②变更独占（两个方向）",
+      "how": "G2：两条只读在飞 → 变更不得进；只放开一条仍不得进（必须全部排空）；全部放开才进。反向：变更在飞时新只读不得进，变更结束后才放行。I2 在真实 transport 上复现同一序列（rowsRange → v4/command → turnDirectory）。",
+      "mutation": "M2（变更不等排空）→ G2/G3/G4/I2/I4 红；M3（变更不挡新请求）→ G2/G3/I5 红"
+    },
+    {
+      "covers": "③变更之间保序 + 变更之后到达的只读不许插队",
+      "how": "G3：W1 卡住 → 排 W2、再排 R；断言进入顺序严格 W1→W2→R（R 不得越过已排队的 W2），反向对照 R1‖R2→W 也断言。",
+      "mutation": "M2 / M3 均使 G3 红"
+    },
+    {
+      "covers": "④只读抛错不毒化锁",
+      "how": "G4：异步 reject 与同步 throw 两条路之后 `inspect().activeReaders === 0`；且失败后仍排在队里的只读先跑、其后的变更照常进入（order = [R-blocked, W-after-error]）。",
+      "mutation": "M4（reject 不释放）→ G4 红；M12（同步 throw 不释放）→ G4 红"
+    },
+    {
+      "covers": "⑤分类漏登记即红",
+      "how": "K5 解析 `dispatchRequest` 的 93 个 case 并逐条查表；K6 双向穷尽（协议表 ↔ 分类表）+ 未知方法默认 mutating + 旁路名单不得扩大 + 「只读白名单里不得出现写面命令」的正则反查。",
+      "mutation": "M6（删 conversationPlans 分类）→ K5/K6 红 **且 tsc exit 1**；M9（裸字符串 case）→ K5 红；M7（未知默认翻成 readonly）→ K6/I5 红；M8（旁路名单扩大）→ K6 红；M13（attachment/begin 挪进只读）→ K6 红；M14（legacy session/read 挪进只读）→ K6 红"
+    },
+    {
+      "covers": "接线：分类表真的被调度器采用",
+      "how": "I1（只读并发）+ I2（独占）+ I4（同 id 降级，dispatchClass 由 readonly 变 mutating）+ I5（未知方法按变更串行）+ I3（stop 旁路越过在飞变更）。",
+      "mutation": "M10（只读塞进变更类）→ I1/I4 红；M5（去掉同 id 降级）→ I4 红"
+    },
+    {
+      "covers": "EOF 半关闭的排空等待",
+      "how": "G5：`waitForIdle` 在还有请求在飞时不得 resolve，排空后才 resolve；空闸门立即完成。",
+      "mutation": "M11（pump 的 finally 不唤醒 idle）→ G5 红"
+    }
+  ],
+  "mutation_probes": [
+    {
+      "id": "M1",
+      "what": "只读之间不再共享（已有在读时新只读必须等）",
+      "red": ["G1", "G2", "G3", "I1"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M2",
+      "what": "变更不等只读排空",
+      "red": ["G2", "G3", "G4", "I2", "I4"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M3",
+      "what": "变更在飞时不挡住新请求",
+      "red": ["G2", "G3", "I5"],
+      "restored": "字节级"
+    },
+    { "id": "M4", "what": "reject 时不释放槽位", "red": ["G4"], "restored": "字节级" },
+    { "id": "M5", "what": "同 requestId 在飞时不降级成独占", "red": ["I4"], "restored": "字节级" },
+    {
+      "id": "M6",
+      "what": "删掉 conversationPlans 的分类（模拟漏登记）",
+      "red": ["K5", "K6"],
+      "typecheck": "tsc --noEmit exit 1（穷尽类型兜住）",
+      "restored": "字节级"
+    },
+    {
+      "id": "M7",
+      "what": "未知方法名默认翻成 readonly",
+      "red": ["K6", "I5"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M8",
+      "what": "旁路名单扩大一条（workspace/generateText 也旁路）",
+      "red": ["K6"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M9",
+      "what": "dispatchRequest 里出现裸字符串 case",
+      "red": ["K5"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M10",
+      "what": "只读请求被塞进变更类（分类表不再被调度器采用）",
+      "red": ["I1", "I4"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M11",
+      "what": "pump 的 finally 不唤醒 waitForIdle",
+      "red": ["G5", "K5", "K6", "I1", "I2", "I3", "I4", "I5"],
+      "restored": "字节级"
+    },
+    { "id": "M12", "what": "任务同步抛错时不释放槽位", "red": ["G4"], "restored": "字节级" },
+    {
+      "id": "M13",
+      "what": "把附件事务的 v4/attachment/begin 挪进只读（名字正则必须抓到）",
+      "red": ["K6"],
+      "restored": "字节级"
+    },
+    {
+      "id": "M14",
+      "what": "把 legacy session/read 挪进只读（写 record.deliveryKind 的刻意排除）",
+      "red": ["K6"],
+      "restored": "字节级"
+    },
+    {
+      "note": "14 个变异全部实测变红，且每个都用 sha256 校验过字节级还原（`git status` 只剩预期文件）。**没有留下任何“变异下不红”的断言**：唯一的例外说明——第一版 M1 是「队首只读放一条就 return」，它没有变红，因为 `run()` 每次入队都会 pump，语义上并没有退化（循环只是优化）。该变异被替换成 M1（已有在读时新只读必须等）后立刻变红，说明不是断言太弱，而是第一个变异不是语义变更。",
+      "executed": "2026-10-26，`c20-mutations.cjs`，逐条 spawn `npx tsx --test scripts/test-command-concurrency.mjs`（+ M6 额外跑 `tsc --noEmit`）"
+    }
+  ],
+  "cli_pre_gap": {
+    "source": "`zcode_protocol.request.timing`（transport.ts，每次请求一行 debug；本步新增字段 `dispatchClass`）。字段 receivedAt / dispatchedAt / respondedAt 是 epoch 毫秒，可与 renderer 的 clickAt / ackAt 直接相减。",
+    "segments": {
+      "click_to_cli_arrival": {
+        "samples": [134, 147, 139, 134, 122, 133],
+        "median": 134,
+        "before": 131
+      },
+      "cli_queue_wait": { "samples": [1, 0, 0, 0, 0, 0], "median": 0, "before": 918, "max": 14 },
+      "cli_handler": {
+        "samples": [1201, 1251, 1225, 1042, 1090, 1136],
+        "median": 1169,
+        "before": 449
+      },
+      "workflowRuns_handler": {
+        "samples": [1687, 1741, 1715, 1649, 1766, 1732],
+        "median": 1724,
+        "before": "1012~1287"
+      }
+    },
+    "queue_wait_attribution": "全部 40 条 subscribe 的 queueWait 是 0~14ms（中位 2），dispatchClass=readonly。仍会等的是变更类：`v4/command` 的 queueWait 中位 1671（max 1757）——它们在 reopen/switchback 阶段排在在飞只读后面，是独占契约的要求，与改造前同档（after3 中位 1204，样本相位不同）。",
+    "closure": "`openTiming.cliRequestMs` 中位 1190 ≈ queue 0 + handler 1169 + 传输 ~21；`openPhases.viewReadyMs` 中位 1162 ≈ handler 1169 − 帧编码 6；三段相加 ≈ uiViewReadyMs 1288（+click→arrival 134）。账目闭合。",
+    "root_cause_correction": "Step 16 的结论「不是 resume 竞争，而是串行队列被兄弟查询占住」只对了一半：队列确实被兄弟查询占住（本步把它清零了），但那兄弟查询的 handler 本体就是**一次完整的 runtime 激活**——不是「workflowRuns 的冷缓存首次读」。详见 activation_triggered_by_read。",
+    "compressed": "918 → 0（−100%）。但主判只从 1436 降到 1286：省下来的排队被 handler 里的争用吃掉了（449 → 1169）。"
+  },
+  "activation_triggered_by_read": {
+    "chain": "v4/conversation/workflowRuns → ensureHostRecordForJournalRead（v4-gateway.ts:2932）→ ensureRuntimeReady → coldResume.ensureResumed → app.resume（app 启动 + 7 个 MCP 连接 + 会话 resume）",
+    "log_sequence": [
+      "06.921 cold resume flight created session=sess_57cf107c…",
+      "06.948 subscribe conversation session=sess_57cf107c… coldResume=true",
+      "06.949 cold shell flight created session=sess_57cf107c…",
+      "06.950~07.005 bootstrap.app.startup.{config,plugins,runtime_config,storage,mcp}.completed + 7 × mcp.server.connect.started + bootstrap.app.startup.completed",
+      "07.052 zcode_protocol.session.shell_materialized（materializeSessionShell 的最后一句，紧接着 return）",
+      "07.482 cold shell flight cleared（同一 flight 的 .finally()，理论上只隔一个微任务 —— 实测晚 430ms）",
+      "07.483 v4 hydrate started",
+      "07.919 v4 hydrate loaded … durationMs=436",
+      "07.989 subscribe ACK（handlerMs=1042）",
+      "08.057 session.resumed"
+    ],
+    "evidence": {
+      "event_loop_blocked_430ms": "`shell_materialized`（07.052）与同一 flight 的 `cold shell flight cleared`（07.482）相隔 430ms，其间整个进程零日志输出 ⇒ 激活里有一段长同步工作占满事件循环，并发的 subscribe 水化无法推进。",
+      "hydration_itself_unchanged": "subscribe 自己的水化窗口 `v4 hydrate loaded durationMs=436` 与 Step 16 同档（mergeMs 里 `subagentsMs` 238~297 也同档）。",
+      "merge_regression_component": "mergeMs 347 → 460 的 +113 全部来自 `fileChangeSummariesMs`（4~7 → 119~160）：3 次 artifact 读（沙盒里是 ENOENT）与 resume 的 I/O 撞在同一段。"
+    },
+    "side_effect_positive": "`openTiming.sessionRuntimeState` 从 Step 14 起的 `warm 6/6` 变成 **`cold 6/6`**，`runtimeReadyMs`（1280）与 `viewReadyMs`（1162）现在是两段独立耗时 —— subscribe 只等视图水位，激活在 ACK 之后完成。于是 view-only 补种路径第一次在本机冷开里真的跑起来：`v4 runtime facts seed deferred reason=runtimeNotReady trigger=firstScreenSettled` → `applied`（seedMs 404~599），6/6 全部 applied。改造前的 `warm` 是「串行队列让 workflowRuns 先激活了会话」的副产品。",
+    "not_fixed_why": "journal 读需要宿主 record（`record.app.listDynamicWorkflowRuns` 挂在这条记录上），把它降到视图水位（shell app 也能提供 dwf 端口）是语义变更：`ensureHostRecordForJournalRead` 的注释记录了「用 conversationState 判活、否则会造出幽灵 runtime」的前科（风险 2）。见风险 29 的两个下一步入口。"
+  },
+  "memory": {
+    "projection_rows": {
+      "cli_snapshotRowCount": [160, 160, 160, 160, 160, 160],
+      "renderer_data_total_row_count": 5255,
+      "note": "timeline 的 `data-total-row-count` 读的是 **manifest 的 totalCount**（5255），不是投影行数；投影规模看 `snapshotRowCount` 与渲染层 domRows（77~79）。本步不碰投影。"
+    },
+    "heap": {
+      "cdp_Runtime_getHeapUsage_usedSize_MB": {
+        "after_coldOpen": [119.1, 116.7, 119.0, 121.8, 122.0, 121.5],
+        "after_switchback": 165.6,
+        "after2_reference": "≈398MB（投影 5255 行的旧口径）",
+        "comparison_discipline": "after3 已澄清口径；本步与 after3 的 104.4（冷开）/ 134.8（切回）同族，冷开 +15MB、切回 +31MB，属 GC 时机噪声（三路径 ×3 未做多轮内存采样）。"
+      }
+    }
+  },
+  "acceptance": [
+    {
+      "scenario": "冷开（CLI 未起）主判：uiViewReadyMs − hostPrepareMs ≤ 1000ms",
+      "baseline": "中位 6097ms",
+      "after": "中位 3715ms（Step 14）",
+      "after2": "中位 1781ms（Step 15）",
+      "after3": "中位 1436ms（Step 16）",
+      "now": "中位 **1286ms**（6 个样本 1149~1359）",
+      "verdict": "fail",
+      "delta": "Step 16 → Step 17 −10%；仍是门槛的 1.29 倍。剩余构成：click→arrival 134 + handler 1169（其中 ~430 是激活的同步段占满事件循环、~436 是水化本体、其余是 shell/编码/传输）。",
+      "evidence": "aggregates.coldApp / cli_pre_gap / activation_triggered_by_read"
+    },
+    {
+      "scenario": "冷开并列分解项：uiViewReadyMs − cliBootstrapMs",
+      "baseline": "不可计算",
+      "now": "仍不可计算（cliBootstrapMs 缺席，cliProcessState=reused 6/6）",
+      "verdict": "not-computable"
+    },
+    {
+      "scenario": "冷开总量观察项（含 spawn）≤ 2.5~3s",
+      "baseline": "中位 7695ms（含 spawn 1578~1776）",
+      "now": "仍不可直接测（spawn 在点击之前）。代理 = uiViewReadyMs + runtimeReadyMs ≈ 2568ms（中位）",
+      "verdict": "unknown",
+      "caveat": "代理口径与 Step 14/15/16 相同，不得与 7695 相减。"
+    },
+    {
+      "scenario": "热开（CLI 已起、会话冷，runtime **不持有**）：uiViewReadyMs ≤ 800ms",
+      "regime": "not-holding",
+      "baseline": "9724",
+      "now": "**not-measured**（keep-warm 复用导致无新 ACK，风险 26 未解）",
+      "verdict": "not-measured"
+    },
+    {
+      "scenario": "热开（runtime **持有**）",
+      "regime": "holding",
+      "baseline": "133~187",
+      "now": "**136**（129~150，3 次）；`openPhases.viewReadyMs` 7~8ms、`cliRequestMs` 11~15ms（CLI 侧只发帧）",
+      "verdict": "pass"
+    },
+    {
+      "scenario": "重开同会话（非首次、runtime 持有）",
+      "baseline": "225 / 154（持有）；4128（卸下）",
+      "after2": "145（130~172，6 次）",
+      "after3": "140（122~178，6 次）",
+      "now": "136（129~150，3 次）",
+      "verdict": "pass",
+      "delta": "与 Step 16 持平"
+    },
+    {
+      "scenario": "切回（keep-warm，无新 ACK）",
+      "baseline": "无新 ACK 3/3；981/1112/1203",
+      "after": "无新 ACK 3/3；409/551/450",
+      "after3": "无新 ACK 6/6；320~611（中位 426）",
+      "now": "无新 ACK 3/3；310/561/527（中位 527）",
+      "verdict": "exempt-but-stable",
+      "delta": "同一噪声带（after3 的样本区间就覆盖 320~611）；投影规模未变（尾窗 160 行）"
+    }
+  ],
+  "invariants": {
+    "IS1": {
+      "claim": "投影身份确定性",
+      "status": "met",
+      "evidence": "snapshotRowCount 6/6 = 160，manifestAdjusted 6/6 false；本步不动 rowId 路径"
+    },
+    "IS2": {
+      "claim": "分支裁断/摘要基于全序；窗口 = active 后缀",
+      "status": "met",
+      "evidence": "本步不动裁断与摘要；`test:cold-open-window` 10 / `test:session-message-index` 21 / `test:active-branch-tail` 15 全绿"
+    },
+    "IS3": {
+      "claim": "命令只在 runtime-ready 后执行；view-ready 只放行读",
+      "status": "met-strengthened",
+      "evidence": "本步让 subscribe **不再**排在激活后面：`sessionRuntimeState` cold 6/6、`runtimeReadyMs`(1280) 与 `viewReadyMs`(1162) 分开计时、view-only 补种 6/6 `applied`。这正是 IS3 的原意（改造前的 warm 是串行队列的副产品）。命令侧不变：`test:view-runtime-split` 46 / `test:held-queue-routing` 6 / `test:queue-item-delivery-command` 10 全绿"
+    },
+    "IS4": {
+      "claim": "hasLiveConversation 三态",
+      "status": "met",
+      "evidence": "本步不改该路径；`test:view-runtime-split` 的 IS4 用例仍绿"
+    },
+    "IS5": {
+      "claim": "totalCount/firstRowId/turnDirectory 只来自 manifest",
+      "status": "met",
+      "evidence": "snapshot 160 行 + totalCount 5255 逐次复现；manifestMs 5~13ms"
+    },
+    "IS6": {
+      "claim": "rows/range 在未物化页上工作",
+      "status": "met",
+      "evidence": "`test:session-row-manifest` 60 绿；本步 rowsRange handler 24~71ms，未触发冷开"
+    },
+    "IS7": {
+      "claim": "未水化前禁止发 turn",
+      "status": "untouched",
+      "evidence": "本步未发真实 turn；`test:lazy-history` 8 绿"
+    },
+    "IS8": {
+      "claim": "openTiming 键集合不变、新分段放 ACK 顶层",
+      "status": "met",
+      "evidence": "`pnpm test:session-open-observability` 14；openPhases 仍只有 viewReadyMs/manifestMs/mergeMs/rehydrateMs/manifestAdjusted；`dispatchClass` 只走 CLI debug 日志（不进协议）"
+    }
+  },
+  "findings": [
+    {
+      "id": "queueWaitIsZero",
+      "title": "可避免的排队已清零：arrival→dispatch 918 → 0~1ms",
+      "evidence": "40 条 subscribe 的 queueWait 全部 0~14（中位 2），dispatchClass=readonly；before 是中位 918（754~1074）。",
+      "consequence": "「只读之间没有次序语义」这条判断被实测支持：把队列拆成读写锁后，subscribe 的入口延迟从 918ms 降到个位数毫秒。"
+    },
+    {
+      "id": "theOccupierWasAnActivation",
+      "title": "占住队列的那 1s 不是「workflowRuns 的冷缓存查询」，而是它触发的整条 runtime 激活",
+      "evidence": "`cold resume flight created` → `bootstrap.app.startup.*`（含 7 个 MCP 连接）→ `session.resumed`，handler 1649~1766ms；Step 16 把这段读成「首次读慢」。",
+      "consequence": "只压队列拿不到收益：工作本身是真的。要过 1s 必须让读不触发激活，或让激活不阻塞事件循环（风险 29）。"
+    },
+    {
+      "id": "activationBlocksEventLoop",
+      "title": "激活里有 ~430ms 同步阻塞事件循环，这是并发收益被吃掉的直接原因",
+      "evidence": "`shell_materialized`（07.052）与同一 flight 的 `.finally()` 的 `cold shell flight cleared`（07.482）相隔 430ms，其间进程零日志；同一 window 里 subscribe 的 handler 从 449 涨到 1169。",
+      "consequence": "任何「让 subscribe 与激活并发」的方案都只能拿到「不再串行排队」的收益，拿不到「两者真并行」的收益，除非先拆掉这段同步工作。"
+    },
+    {
+      "id": "sysRuntimeStateNowColdIsCorrect",
+      "title": "`sessionRuntimeState` 从 warm 变 cold 是本步的正面副作用，不是回归",
+      "evidence": "6/6 cold；`runtimeReadyMs`(1280) 不再被算进 `viewReadyMs`(1162)；view-only 补种 6/6 applied（404~599ms）。",
+      "consequence": "IS3 的「view-ready 只放行读」第一次在冷开路径上真的成立。判读纪律（风险 17）不变：这两个读数不许互相校验。"
+    },
+    {
+      "id": "mutatingStillSerial",
+      "title": "变更侧的次序保证没有被打折",
+      "evidence": "G3/I2/I4/I5 四条用例 + 12 个变异；`v4/command` 的 queueWait 中位 1671（它在等在飞只读排空，正是独占契约）。",
+      "consequence": "`test:held-queue-routing` 6 / `test:queue-item-delivery-command` 10 与本步的 I3 一起证明输入通道的权威来源没被改坏。"
+    }
+  ],
+  "risks": [
+    {
+      "id": "cli-serial-queue-blocks-subscribe",
+      "status": "已修（Step 17）",
+      "text": "串行队列已换成命令级读写锁，arrival→dispatch 918 → 0~1ms。行为锚点：`test:command-concurrency` G1-G5/K5/K6/I1-I5。"
+    },
+    {
+      "id": "concurrency-classification-table",
+      "status": "新登记（Step 17）",
+      "text": "只读并发的正确性依赖分类表保持穷尽：漏一条只读只是慢，漏一条变更就是次序错乱。三层防护（穷尽类型 / K5 逐 case / K6 双向核对）+ 未知方法名一律 mutating + 旁路名单不得扩大 + 同 requestId 强制独占。"
+    },
+    {
+      "id": "read-triggers-runtime-activation",
+      "status": "新登记（Step 17，未修）",
+      "text": "`workflowRuns` 等 journal 读会 await ensureRuntimeReady，于是「只想看 workflow 卡片」触发 app 启动 + 7 个 MCP 连接 + resume（1649~1766ms），其中 ~430ms 同步阻塞事件循环，把并发的 subscribe 一起拖慢。两个下一步入口：①journal 读只等视图水位（要证明 shell app 的 run 枚举与 live 逐值一致，含 resumable 谓词）；②把激活里的同步段拆成可让出 loop 的分片。"
+    },
+    {
+      "id": "warm-sample-blocked-by-keep-warm",
+      "status": "仍开（Step 15 登记的驱动口径）",
+      "text": "不持有 regime 的采样仍被 keep-warm 挡住（run#1 无新 ACK → ack-timeout；本步同样是 1 次尝试失败）。要量它必须先让采样器显式等 keep-warm 过期或改判据为「无新 ACK 即复用」。"
+    }
+  ],
+  "gates": [
+    { "cmd": "pnpm typecheck", "exit": 0, "summary": "tsc -b（根工作区 14 个工程）" },
+    {
+      "cmd": "turbo run typecheck --force --filter=@zcode/adapters --filter=@zcode/bootstrap",
+      "exit": 0,
+      "cached": "0 cached / 10 total",
+      "summary": "10 successful"
+    },
+    { "cmd": "test:cold-open-window", "exit": 0, "summary": "10 pass / 0 fail" },
+    { "cmd": "test:view-runtime-split", "exit": 0, "summary": "46 pass / 0 fail" },
+    { "cmd": "test:session-row-manifest", "exit": 0, "summary": "60 pass / 0 fail" },
+    { "cmd": "test:turn-manifest-entry", "exit": 0, "summary": "12 pass / 0 fail" },
+    { "cmd": "test:turn-directory", "exit": 0, "summary": "15 pass / 0 fail" },
+    { "cmd": "test:publisher-buffer-clamp", "exit": 0, "summary": "5 pass / 0 fail" },
+    { "cmd": "test:held-queue-routing", "exit": 0, "summary": "6 pass / 0 fail" },
+    { "cmd": "test:queue-item-delivery-command", "exit": 0, "summary": "10 pass / 0 fail" },
+    { "cmd": "test:hydrate-load-failure", "exit": 0, "summary": "4 pass / 0 fail" },
+    { "cmd": "test:request-timing", "exit": 0, "summary": "3 pass / 0 fail" },
+    { "cmd": "test:command-concurrency（本步新增）", "exit": 0, "summary": "12 pass / 0 fail" },
+    { "cmd": "adapters test:turn-manifest-store", "exit": 0, "summary": "18 pass / 0 fail" },
+    { "cmd": "adapters test:session-message-index", "exit": 0, "summary": "21 pass / 0 fail" },
+    { "cmd": "adapters test:active-branch-tail", "exit": 0, "summary": "15 pass / 0 fail" },
+    { "cmd": "core test:lazy-history", "exit": 0, "summary": "8 pass / 0 fail" },
+    { "cmd": "pnpm test:session-open-observability", "exit": 0, "summary": "14 pass / 0 fail" },
+    { "cmd": "bootstrap test:late-tool-input-guard", "exit": 0, "summary": "4 pass / 0 fail" },
+    {
+      "cmd": "oxfmt --check（0.47.0，改动文件）",
+      "exit": 0,
+      "summary": "5 files clean（transport.ts / command-concurrency.ts / request-concurrency-gate.ts / test-command-concurrency.mjs / bootstrap/package.json）"
+    },
+    {
+      "cmd": "pnpm lint",
+      "exit": 0,
+      "summary": "0 errors / 74 warnings（警告全部在 packages/ui 等既有文件）"
+    },
+    {
+      "cmd": "oxlint src（bootstrap 包级，非门禁要求）",
+      "exit": 1,
+      "summary": "25 warnings / 20 errors，**全部落在本步未触碰的文件**（max-lines / import 顺序等既有告警）；本步三个文件零 finding"
+    },
+    {
+      "cmd": "pnpm architecture:check --changed",
+      "exit": 0,
+      "summary": "OK / violations 0 / new 0"
+    },
+    {
+      "cmd": "test:edit-resend-authority / test:input-authority / test:session-input-ledger-authority",
+      "exit": null,
+      "summary": "**本分支不存在这三个 gate**（见 not_done）"
+    }
+  ],
+  "not_done": [
+    {
+      "item": "test:edit-resend-authority / test:input-authority / test:session-input-ledger-authority",
+      "why": "这三个 gate **不在 feat/session-open-latency 上**：`git ls-tree -r feat/session-open-latency` 里没有 `bootstrap/scripts/test-edit-resend-authority.mjs`、`bootstrap/scripts/test-input-authority.mjs`、`adapters/scripts/test-session-input-ledger-authority.mjs`（它们在 `main` 上，属 spec A/B 的合并产物）。本 worktree 不允许触碰其他 worktree，也没有 merge main。",
+      "instead": "跑了本分支上钉同一件事的 gate：`test:held-queue-routing` 6、`test:queue-item-delivery-command` 10、`test:late-tool-input-guard` 4、`test:view-runtime-split` 46（IS3 命令闸门）、本步新增的 I3（stop 旁路）——全绿。",
+      "next": "合并 main 后必须补跑这三个 gate（读写锁改的是命令执行层，它们钉的是输入的权威来源）。"
+    },
+    {
+      "item": "热开「不持有」regime ≤800ms",
+      "why": "keep-warm 复用 ⇒ 无新 ACK（风险 26），本步 1 次尝试同样失败。",
+      "next": "先改采样器判据（无新 ACK 即复用）或显式等 keep-warm 过期。"
+    },
+    {
+      "item": "读触发 runtime 激活（风险 29）的根治",
+      "why": "需要把 journal 读降到视图水位，属语义变更。",
+      "next": "见 risk.read-triggers-runtime-activation 的两个入口。"
+    }
+  ]
+}

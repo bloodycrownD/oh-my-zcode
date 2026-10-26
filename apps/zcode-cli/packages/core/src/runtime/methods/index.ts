@@ -88,6 +88,11 @@ import { startMcpStartup } from "./mcp.js";
 import { discoverSkillsForContext } from "./context.js";
 import { createConfigOnlyContextSnapshot } from "./context.js";
 import { initializeMessageHistoryFromContext } from "./context.js";
+import {
+  clearDeferredHistoryHydration,
+  deferHistoryHydration,
+  hydrateDeferredMessageHistory,
+} from "./history-hydration.js";
 import { extractToolCallsFromResult } from "./context.js";
 import { shouldStreamModelText } from "./context.js";
 import { runModelTextRequest } from "./model.js";
@@ -274,6 +279,9 @@ export function installAgentRuntimeMethods(ctor: AgentRuntimeConstructor): void 
   proto.clearAllPendingInputs = clearAllPendingInputs;
   proto.createDefaultSubagentPort = createDefaultSubagentPort;
   proto.ensureContextInitialized = ensureContextInitialized;
+  proto.hydrateDeferredMessageHistory = hydrateDeferredMessageHistory;
+  proto.deferHistoryHydration = deferHistoryHydration;
+  proto.clearDeferredHistoryHydration = clearDeferredHistoryHydration;
   proto.getSkillCatalog = getSkillCatalog;
   proto.createContextBuilderFromSnapshot = createContextBuilderFromSnapshot;
   proto.loadProjectMemoryRoot = loadProjectMemoryRoot;

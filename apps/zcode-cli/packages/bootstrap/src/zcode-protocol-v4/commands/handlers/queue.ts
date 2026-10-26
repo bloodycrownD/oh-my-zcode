@@ -479,8 +479,11 @@ async function sendQueuedNow(
     // 的 tripwire 钉住「手动提升成功后必须硬调用 setQueueAutoDrain(true)」（曾经被改成
     // `?.(true)` 静默吞掉），不可为此改写调用形态。
     //
-    // `setQueueAutoDrain` 是 ZCodeApp 上 required 的成员（app/types.ts），
-    // session-flow / v4-bridge 也都是非可选调用。
+    // `setQueueAutoDrain` 是 ZCodeApp 上 required 的成员（app/types.ts:785），
+    // session-flow / v4-bridge 也都是非可选调用。db41442f 曾把它改成可选调用（`?.`）
+    // 只为绕开旧夹具缺能力，结果是能力真缺席时恢复动作被静默吞掉、tripwire 长期红。
+    // 夹具侧（test-model-live / test-e2e-live-all 的 promotion harness）已补桩，
+    // 不再需要兜底。
     if (!autoDrainPromotion) {
       await record.app.setQueueAutoDrain(true);
       await host.afterLegacyStateMutation?.(record, "queue_auto_drain_resumed");

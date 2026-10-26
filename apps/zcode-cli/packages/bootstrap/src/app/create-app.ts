@@ -558,6 +558,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           modeOverride: options.runtimeConfig?.mode,
           persistedMessages: resumeOptions?.persistedMessages,
           traceContext: resumeTraceContext,
+          // Step 12（IS7）：v4 view-only 激活延迟 provider 历史水化；
+          // 缺省（legacy resume / prepareResume）保持 "full"。
+          ...(resumeOptions?.historyMode ? { historyMode: resumeOptions.historyMode } : {}),
         });
         await runtime.activatePausedTargetAfterResume(resumeTraceContext);
         resumePrepared = true;
