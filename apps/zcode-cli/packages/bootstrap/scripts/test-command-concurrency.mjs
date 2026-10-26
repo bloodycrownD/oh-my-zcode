@@ -359,6 +359,20 @@ test("K6: 分类表本身穷尽协议方法表，未知方法名一律按变更�
     ),
   );
   assert.deepEqual(suspicious, [], "只读白名单里出现了写面命令");
+  // 两条 legacy 写面**刻意**留在变更侧：形状像读（末段是 read / subscribe），但
+  // `readSession` 写 `record.deliveryKind`、`subscribeSession` 还写 `legacyStreamSubscribed`
+  // ——都是客户端可决定的服务端状态。上面那条名字正则抓不到它们，所以在这里单独钉死：
+  // 被顺手挪进只读时这条立刻红。
+  for (const legacyWrite of [
+    zcodeProtocolMethods.sessionRead,
+    zcodeProtocolMethods.sessionSubscribe,
+  ]) {
+    assert.equal(
+      commandConcurrencyOf(legacyWrite),
+      "mutating",
+      `${legacyWrite} 会写 record 上的客户端可决定状态，不得归只读（理由见 command-concurrency.ts 的行注释）`,
+    );
+  }
   // 冷开路径上的三个决定性命令必须在只读侧（否则 918ms 那一段白改）。
   for (const critical of [
     V4_METHODS.conversationSubscribe,
