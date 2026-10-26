@@ -684,9 +684,18 @@ async function readWindowBody(
     return start < 0 ? null : loaded.slice(start);
   }
   // 端口缺席已在入口判过（`noTailPort`），这里的断言只是让类型收窄。
-  const readTail = store.readActiveBranchTail;
-  if (!readTail) return null;
-  return readTail({ sessionID: input.sessionID, activeMessageIds, limitBefore });
+  if (!store.readActiveBranchTail) return null;
+  // Bug 原因（Step 13 端到端查出的）：这里曾经把方法**摘下来**再调
+  // （`const readTail = store.readActiveBranchTail; readTail(...)`），而生产的
+  // `SqliteSessionStore` 是类实例、方法体读 `this.db`——摘下来之后 `this` 是 undefined，
+  // 真 sqlite 冷开在窗口正文读这一步必抛 `Cannot read properties of undefined (reading 'db')`。
+  // 之前没暴露是因为 Step 6/7 的用例都用对象字面量夹具（`readActiveBranchTail` 是闭包）。
+  // 修复依据：与同文件 `readColdRowPageMaterialization:914` 的调用形态保持一致（保留 `this`）。
+  return await store.readActiveBranchTail({
+    sessionID: input.sessionID,
+    activeMessageIds,
+    limitBefore,
+  });
 }
 
 // ── 按需物化的一页（Step 7 / IS6）──────────────────────────────────────────
