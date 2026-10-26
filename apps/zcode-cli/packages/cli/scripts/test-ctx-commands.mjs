@@ -233,6 +233,65 @@ test("formatCtxStatus prints an em-dash-style unknown and one line when nothing 
   assert.equal(unavailable.split("\n").length, 1);
 });
 
+/**
+ * cr-func 第 2 轮 P2-1：`invalidated` 行必须进**用户真正看到的**那段 CLI 文本。
+ *
+ * 此前只有包侧 `formatMagicContextStatusSnapshot` 打印它（全仓只有测试在用），
+ * `formatCtxStatus` 的 COMPARTMENTS 段仍只有 `count` —— rewind 之后 `/ctx-status`
+ * 报「count 3」而库里 5 行，差额（压缩 vs rewind）无从判断。这里用独立 session id，
+ * 避免污染上面的 SESSION 夹具（后续 /ctx-recomp 用例还在数它的 compartment）。
+ */
+test("formatCtxStatus prints invalidated (rewound) compartments as its own aligned row", async () => {
+  const sessionId = "sess_ctx_status_invalidated";
+  appendCompartments(db, sessionId, [
+    {
+      content: "still valid block",
+      endMessage: 10,
+      endMessageId: "msg_end_a",
+      sequence: 1,
+      startMessage: 1,
+      startMessageId: "msg_start_a",
+      title: "valid",
+    },
+    {
+      content: "rewound block",
+      endMessage: 20,
+      endMessageId: "msg_end_b",
+      sequence: 2,
+      startMessage: 11,
+      startMessageId: "msg_start_b",
+      title: "rewound",
+    },
+  ]);
+  db.prepare(
+    "UPDATE compartments SET rebase_status = 'unresolved' WHERE session_id = ? AND sequence = 2",
+  ).run(sessionId);
+
+  const snapshot = await readMagicContextStatusSnapshot({ db, sessionId });
+  assert.ok(snapshot);
+  assert.equal(snapshot.compartmentCount, 1, "前置：count 只数仍会注入的段");
+  assert.equal(snapshot.invalidatedCompartmentCount, 1, "前置：作废段单独计数");
+
+  const lines = formatCtxStatus(snapshot).split("\n");
+  assert.ok(
+    lines.some((line) => /^ {2}count +1$/.test(line)),
+    "count 必须是仍会注入的段数（1），不是库里的行数（2）",
+  );
+  assert.ok(
+    lines.some((line) => /^ {2}invalidated +1$/.test(line)),
+    "用户看到的文本里必须有 invalidated 行（此前只有包侧渲染有）",
+  );
+
+  // 形状恒定：没有任何作废段的会话同样打印这一行（0），不随状态增删行。
+  const clean = await readMagicContextStatusSnapshot({ db, sessionId: "sess_never_seen" });
+  assert.ok(clean);
+  const cleanLines = formatCtxStatus(clean).split("\n");
+  assert.ok(
+    cleanLines.some((line) => /^ {2}invalidated +0$/.test(line)),
+    "invalidated 行必须恒在（0 也打印），否则文本形状随状态变化",
+  );
+});
+
 // ── /ctx-recomp 简化语义 ─────────────────────────────────────────────────────
 
 test("/ctx-recomp reports the pre-rebuild state while the runner is unwired", async () => {

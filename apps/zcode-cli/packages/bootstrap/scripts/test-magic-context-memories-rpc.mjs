@@ -136,6 +136,8 @@ const DIRS = {
   fence: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-fence-")),
   // D4（存储端口）：专供「装配层没有可用库」两例的项目目录。
   portNull: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-port-null-")),
+  // D5/D6（端口：absent 生产态 / installed 真句柄）共用的项目目录。
+  portInstalled: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-port-installed-")),
 };
 
 magicContext.initializeMagicContextHost();
@@ -193,11 +195,19 @@ function identityOf(dir) {
   return identity;
 }
 
+/**
+ * 直构夹具的显式注入（cr-func 第 2 轮 P1-2）：本文件的行为用例用**空 sessions** 的
+ * context 直调 handler，那在生产上是 `absent` 态（workspace 级 RPC + 零 session），
+ * 而 `absent` 现在一律不自开库。夹具要自己开库必须显式声明，不许靠「端口方法不在」
+ * 推断——那条推断正是生产可达缺陷的入口。
+ */
+const DIRECT_OPEN = { allowDirectOpen: true };
+
 function listRpc(dir, params = {}, options = {}) {
   return listMagicContextMemories(
     options.context ?? contextWith(),
     { workspace: workspaceRef(dir), ...params },
-    { configPath: options.configPath ?? ENABLED_CONFIG },
+    { ...DIRECT_OPEN, configPath: options.configPath ?? ENABLED_CONFIG },
   );
 }
 
@@ -209,7 +219,7 @@ function archiveRpc(dir, memoryIds, options = {}) {
       memoryIds,
       ...(options.reason === undefined ? {} : { reason: options.reason }),
     },
-    { configPath: options.configPath ?? ENABLED_CONFIG },
+    { ...DIRECT_OPEN, configPath: options.configPath ?? ENABLED_CONFIG },
   );
 }
 
@@ -870,7 +880,7 @@ test("T-R2 / ZL-6：跨包副本的 authority 错误仍转可读 -32010（instan
       archiveMagicContextMemories(
         contextWith(),
         { workspace: workspaceRef(DIRS.authorityCopy), memoryIds: [row.id] },
-        { configPath: ENABLED_CONFIG, loadRuntime: async () => crossCopyModule },
+        { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: async () => crossCopyModule },
       ),
     (error) => {
       assert.equal(error.name, "ProtocolRequestError");
@@ -1107,7 +1117,7 @@ test("降级：业务符号加载失败——list 收敛 unavailable 信封（T-
     const result = await listMagicContextMemories(
       contextWith(),
       { workspace: workspaceRef(DIRS.list) },
-      { configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
+      { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
     );
     assert.equal(result.supported, true, "supported 说的是「CLI 有这个能力」，与加载失败无关");
     assert.equal(result.available, false);
@@ -1132,7 +1142,7 @@ test("降级：业务符号加载失败——archive 抛可读 -32010（T-MC5 �
         archiveMagicContextMemories(
           contextWith(),
           { workspace: workspaceRef(DIRS.archive), memoryIds: [1] },
-          { configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
+          { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
         ),
       (error) => {
         assert.equal(error.name, "ProtocolRequestError");
@@ -1217,6 +1227,161 @@ test("端口：getMagicContextStorage()=null → archive 抛可读 -32010，且�
     );
     assert.equal(runtimeLoaded, 0);
     assert.equal(existsSync(dbPath), false, "写路径同样不得在装配缺席时把库造出来");
+  });
+});
+
+// ══ D5. absent 的生产可达性（cr-func 第 2 轮 P1-2）════════════════════════════
+//
+// `context.sessions` 构造时为空（server.ts:256）、closeSession 会 delete
+// （server-operations.ts:2581），而这两条 RPC 是 **workspace 级**、不接 sessionId。
+// 于是「冷启动 CLI」或「会话全关后在设置里打开记忆面板」就是 `absent` 态——旧实现
+// 在这一态保留自开库兜底，等于生产上一条只读 RPC 会创建并迁移数据库。
+
+test("absent（零 session，workspace 级 RPC）→ list 回 unavailable 且不建库、不加载 barrel", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-prod-list.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      // 空 sessions = 生产上「冷启动 / 会话全关」的形态。
+      contextWith(),
+      { workspace: workspaceRef(DIRS.portNull) },
+      {
+        configPath: ENABLED_CONFIG,
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          throw new Error("absent must be rejected before the barrel loads");
+        },
+      },
+    );
+    assert.equal(result.supported, true);
+    assert.equal(result.available, false);
+    assert.equal(result.reason, "unavailable", "absent 不是「可用」，必须回 unavailable");
+    assert.deepEqual(result.entries, []);
+    assert.deepEqual(result.counts, ZERO_COUNTS);
+    assert.equal(runtimeLoaded, 0, "absent 门排在 barrel 之前，业务符号一律不加载");
+    assert.equal(
+      existsSync(dbPath),
+      false,
+      "**不得创建库文件**：这是 P1-2 的原始缺陷（冷启动打开记忆面板 = 建库 + 迁移）",
+    );
+    assert.equal(existsSync(`${dbPath}-wal`), false);
+  });
+});
+
+test("absent（零 session）→ archive 抛可读 -32010 且不建库（写路径更不自开库）", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-prod-archive.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    await assert.rejects(
+      () =>
+        archiveMagicContextMemories(
+          contextWith(),
+          { workspace: workspaceRef(DIRS.portNull), memoryIds: [1] },
+          {
+            configPath: ENABLED_CONFIG,
+            loadRuntime: async () => {
+              runtimeLoaded += 1;
+              throw new Error("absent must be rejected before the barrel loads");
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /storage is not installed/i);
+        assert.match(
+          error.message,
+          /no app exposes getMagicContextStorage/i,
+          "原因必须与「端口回 null」区分开（absent vs 装成但 db_null）",
+        );
+        return true;
+      },
+    );
+    assert.equal(runtimeLoaded, 0);
+    assert.equal(existsSync(dbPath), false, "absent 的写路径不得把库造出来");
+  });
+});
+
+test("absent + 显式 allowDirectOpen → 才走直构夹具的自开库（口子只剩这一条）", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-direct-open.db");
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      { ...DIRECT_OPEN, configPath: ENABLED_CONFIG },
+    );
+    assert.equal(result.available, true, "显式标记是直构夹具唯一的自开库通路");
+    assert.equal(existsSync(dbPath), true, "显式标记下确实由 handler 自己把库开出来");
+  });
+});
+
+// ══ D6. installed 态：装配层句柄被真正消费（cr-func 第 2 轮 P1-3 / P2-7）══════
+
+test("installed：端口给出的句柄被直接使用——不自开库、不读目标路径", async () => {
+  const identity = identityOf(DIRS.portInstalled);
+  const row = insertRow(
+    identity,
+    "ARCHITECTURE",
+    "port fixture: served from the assembly handle, not from openDatabase().",
+  );
+  const probePath = join(TEMP_ROOT, "installed-should-not-open.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(probePath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(sessionRecordWithStorage(() => ({ db: seedDb }))),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      {
+        configPath: ENABLED_CONFIG,
+        // 业务符号仍需加载（列表投影在包内），但**开库**必须用端口句柄。
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          return magicContext;
+        },
+      },
+    );
+    assert.equal(result.available, true);
+    assert.equal(runtimeLoaded, 1);
+    assert.deepEqual(
+      result.entries.map((entry) => entry.id),
+      [row.id],
+      "读到的必须是端口句柄那个库里的行（证明 installed 分支被走到）",
+    );
+    assert.equal(
+      existsSync(probePath),
+      false,
+      "installed 态不得再 openDatabase：目标路径连文件都不该出现",
+    );
+  });
+});
+
+test("installed：多个 App 里第一个回 null、第二个有句柄 → 用第二个（任一有句柄即用）", async () => {
+  const identity = identityOf(DIRS.portInstalled);
+  const row = insertRow(
+    identity,
+    "NAMING",
+    "multi-app fixture: the second app's handle must be the one that serves this row.",
+  );
+  const probePath = join(TEMP_ROOT, "multi-app-should-not-open.db");
+  await withDatabasePath(probePath, async () => {
+    const result = await listMagicContextMemories(
+      // 顺序是刻意的：第一个持有端口但回 null（临时 workspace app），第二个才有句柄。
+      contextWith(
+        sessionRecordWithStorage(() => null),
+        sessionRecordWithStorage(() => ({ db: seedDb })),
+      ),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      { configPath: ENABLED_CONFIG, loadRuntime: async () => magicContext },
+    );
+    assert.equal(
+      result.available,
+      true,
+      "第一个端口回 null 不得让整体判 unavailable——另一个 App 真有句柄（P2-7）",
+    );
+    assert.ok(
+      result.entries.some((entry) => entry.id === row.id),
+      "必须用第二个 App 的句柄读到那一行（证明不是「第一个说了算」）",
+    );
+    assert.equal(existsSync(probePath), false);
   });
 });
 

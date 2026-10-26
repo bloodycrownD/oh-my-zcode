@@ -352,6 +352,14 @@ test("D2: createMagicContextPlugin(enabled:true) 端到端——transform 在场
 
     assert.ok(plugin.turnTransform, "开库成功后 turnTransform 必须在场（不是 undefined）");
     assert.equal(typeof plugin.turnTransform.isEnabled, "function");
+    // FORK（cr-func 第 2 轮 P1-3）：**第②跳**——工厂交出的库句柄必须被插件捕获。
+    // 这是四跳（assembly → index → create-app → handler）里唯一此前完全没有断言的一跳：
+    // 删掉 `registerStorage: (storage) => { registeredStorage = storage; … }` 这行转发，
+    // 生产上所有记忆 RPC 会静默变 unavailable，而 D2 旧断言（turnTransform / close /
+    // recorder）与 memories-rpc 的直构夹具全都仍然绿。
+    assert.ok(plugin.storage, "启用态装配必须交出库句柄（缺了 → 全部记忆 RPC 变 unavailable）");
+    assert.equal(typeof plugin.storage.db, "object", "句柄必须带真实 db 对象");
+    assert.notEqual(plugin.storage.db, null);
     assert.equal(
       plugin.close,
       registeredClose,

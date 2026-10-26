@@ -412,12 +412,13 @@ handler      readInstalledStorage() → installed | unavailable | absent
 ```
 
 - `installed` = 用装配层句柄（不再 openDatabase）；
-- `unavailable` = 有 App 暴露端口但回 `null`（装配抛错 / db_null / import_failed）→ list 回 `unavailable` 信封、archive 抛 `-32010`，**都在 barrel 加载之前**，所以连业务符号都不加载、更不会建库；
-- `absent` = 没有任何 session 暴露该端口（直构 / 单测夹具）→ 保留旧的自开库兜底（22 例既有直构用例依赖它）。
+- `unavailable` = 有 App 暴露端口但没有任何一个给出句柄（装配抛错 / db_null / import_failed）→ list 回 `unavailable` 信封、archive 抛 `-32010`，**都在 barrel 加载之前**，所以连业务符号都不加载、更不会建库；
+- `absent` = 没有任何 session 暴露该端口。**cr-func 第 2 轮 P1-2 修正：它不是「直构夹具形态」，而是生产可达**——两条 RPC 是 workspace 级（handler 不接 `sessionId`），`context.sessions` 构造时为空（`server.ts:256`）、`closeSession` 会 `delete`（`server-operations.ts:2581`），所以「冷启动 CLI」与「会话全关后打开设置里的记忆面板」都落到这一态；初稿在此保留自开库兜底，等于一条只读 RPC 在生产上创建并迁移 DB（正是端口要根治的缺陷）。现在 `absent` 与 `unavailable` 同一处置：**不许自开库**。直构夹具只剩显式注入 `dependencies.allowDirectOpen: true` 一条通路，判据是显式标记而不是「端口方法在不在」。
 - `db` 刻意是 `unknown`（不写 `typeof import("@zcode/magic-context")`）：宿主**保留**的 `app/types.ts` 摘除后仍要过 typecheck，且写实类型会往 IM7 预算多记一处散点。唯一 cast 在 handler 里，是本设计的边界转换。
 - 摘除清单新增两条 `sub` 规则（`app/types.ts` 的字段块、`create-app.ts` 的挂载行），dry-run 复现通过。
 
-新增两条用例（`test-magic-context-memories-rpc.mjs` D4）：端口回 `null` 时 list → `available:false/unavailable`、archive → `-32010`，且**库文件不存在**、`loadRuntime` 零调用。**变异证明**：把 `readInstalledStorage` 短路成恒 `absent` → 24 例里恰好新加的两例红（`22 pass / 2 fail`），其中 archive 一例的实际错误文案退化成「not installed in this build」（= 走了 barrel 自开库老路）；还原后 24/24。
+用例（`test-magic-context-memories-rpc.mjs` D4）：端口回 `null` 时 list → `available:false/unavailable`、archive → `-32010`，且**库文件不存在**、`loadRuntime` 零调用；`absent`（零 session）无 `allowDirectOpen` 时同样两条（新增，P1-2）；端口给出真句柄时 list **直接用该句柄**且不建目标库（新增，装成态）；多个 App 里第一个回 `null`、第二个有句柄 → 取第二个（新增，P2-7）。
+**变异证明**：把 `absent` 改回自开库 → 新增的 absent 两例红在「库文件被创建」；把 `readInstalledStorage` 改回「第一个暴露端口的 App 说了算」→ 多 App 一例红；还原后全绿。
 
 ### P2-1 audit 口径只认 camelCase（P1-1 / P1-2 没被自检抓到的根因）
 
@@ -432,8 +433,9 @@ handler      readInstalledStorage() → installed | unavailable | absent
 
 ### P2-3 `<session-history-invalidated>` 未进 records 标记清单
 
-7 处清单（`TEMPORAL_AWARENESS_OVERRIDE_GUIDANCE` / `BASE_INTRO` / `BASE_INTRO_NO_REDUCE` / `BASE_INTRO_LIGHT` / `BASE_INTRO_NO_REDUCE_LIGHT` / `SUBAGENT_REDUCE_INTRO` / `SUBAGENT_REDUCE_INTRO_LIGHT`）逐个补 `<session-history-invalidated>`；块正文补一句 `Tool effects and files on disk are unaffected — only these history entries were invalidated.`（防止模型误以为工具副作用/磁盘改动也被撤销）。
-新断言：`test-prompt-surface.mjs` 一次渲染 **8 个变体**逐个断言（含 `primaryOverride` + temporal 那一份），漏一处即红；`test-rewind-compartments.mjs` 的 T-RW2 补断言块正文那句话。**变异证明**：删掉一个变体的标签 + 删掉正文那句话 → prompt-surface `27 pass / 1 fail`（#23）、rewind `6 pass / 1 fail`（T-RW2）；还原后 28/28 与 7/7。偏离已登记为 `UPSTREAM-SYNC.md` 的 **Z12**（`src/core/**` 逐字区的 rebase 点）。
+7 处清单（`TEMPORAL_AWARENESS_OVERRIDE_GUIDANCE` / `BASE_INTRO` / `BASE_INTRO_NO_REDUCE` / `BASE_INTRO_LIGHT` / `BASE_INTRO_NO_REDUCE_LIGHT` / `SUBAGENT_REDUCE_INTRO` / `SUBAGENT_REDUCE_INTRO_LIGHT`）逐个补 `<session-history-invalidated>`；块正文中性陈述「历史在此被截断」并明确「本说明不描述工作区文件状态」（`Conversation history was truncated at this point: … This notice says nothing about workspace files: earlier edits may or may not still be on disk, so re-read a file before relying on an earlier change.`）。
+**cr-func 第 2 轮 P1-1 修正**：初稿写的是 `Tool effects and files on disk are unaffected` —— 那是可证伪的假话。`editUserQuery` 在 `payload.workspaceMode === "rewind"` 时先走 `applyWorkspaceFileRewind`（`fork-edit-retry.ts:168-223`，`workspaceMode` 是 UI 可达选项），**磁盘文件真的被回滚**，块正文却告诉模型「不受影响」；同一段说明也出现在 `retryTurn` 路径上，旧句「The user rewound the conversation」把「点重试」说成用户主动 rewind。两条路径事实相反、而本包读到的只有 `rebase_status`（拿不到 `workspaceMode`），所以选**统一中性表述 + 显式免责**，而不是按分支措辞（分支版本要么把 `workspaceMode` 落库并加迁移，要么在渲染处猜）。
+新断言：`test-prompt-surface.mjs` 一次渲染 **8 个变体**逐个断言（含 `primaryOverride` + temporal 那一份），漏一处即红；`test-rewind-compartments.mjs` 的 T-RW2 断言块正文含 `Conversation history was truncated at this point` 与 `This notice says nothing about workspace files`，并**反向断言**旧两句（`files on disk are unaffected` / `The user rewound the conversation`）不得出现。**变异证明**：把正文换回 `Tool effects and files on disk are unaffected` → T-RW2 红在反向断言（`6 pass / 1 fail`），还原后 7/7。偏离已登记为 `UPSTREAM-SYNC.md` 的 **Z12**（`src/core/**` 逐字区的 rebase 点）。
 
 ### P2-4 `/ctx-status` 的 `compartmentCount` 含 unresolved 行
 
@@ -445,12 +447,34 @@ handler      readInstalledStorage() → installed | unavailable | absent
 预算按导入行计数，把 6 个职责文件合回一个会让 `bootstrap/src` 从 25 掉到约 20——**合回单体反而更绿**。新增形状守卫：`app/magic-context/` 的 `.ts` 文件集合必须逐字等于 spec「最终项目结构」的 9 个（`assembly` / `effective-enabled` / `index` / `ports` / `projection` / `settle` / `storage` / `types` / `usage`）。用**精确集合**而不是「≥ 6」下限：下限挡不住「9 合 8」，精确集合对任意两两合并都红；确需拆/并时先改 spec 的目录清单。
 **变异证明**：把 `usage.ts` 改名成 `usageMerged.ts`（等价于「合并后少一个名字」）→ 该用例红、其余 3 例绿（预算数字仍是 52/25，正是「假性变绿」的现实版）；改回后 4/4。
 
+### cr-func 第 2 轮（fix-b9，2026-10-25）
+
+三条 P1 与七条 P2 的落地记录（逐条给改法、判据与变异证据）：
+
+- **P1-1 块正文在骗模型**：`<session-history-invalidated>` 原先写「Tool effects and files on disk are unaffected」——`editUserQuery` 在 `workspaceMode === "rewind"` 时先 `applyWorkspaceFileRewind`（`fork-edit-retry.ts:168-223`），**磁盘文件真的被回滚**；同一段说明还服务 `retryTurn`，旧句「The user rewound the conversation」把「点重试」说成用户主动 rewind。改为**统一中性表述**（不按分支措辞）：只说历史在此截断 + 明确「本说明不描述工作区文件状态，依赖旧改动前先重读文件」。理由：本包读到的事实只有 `rebase_status`（拿不到 `workspaceMode`），分支版本要么落库加迁移、要么在渲染处猜。T-RW2 正向断言新两句、反向断言旧两句不得出现。**变异证明**：换回旧两句 → rewind `6 pass / 1 fail`（T-RW2）；还原后 7/7。
+- **P1-2 `absent` 生产可达**：两条 RPC 是 workspace 级、`context.sessions` 构造时为空、`closeSession` 会 delete ⇒ 冷启动 / 会话全关时打开记忆面板就是 `absent`，旧实现保留自开库兜底 = 原始缺陷仍在主路径。现在 `absent` 与 `unavailable` 同一处置（`unavailable` + reason `no-app-port` / `storage-not-installed`），直构夹具只剩显式 `dependencies.allowDirectOpen: true`。分类口径同步改在 `app/types.ts`、`create-app.ts` 的行内注释、spec 变更点 #11 与 Z11（**不是**「直构夹具形态」）。新增 4 例：absent list / absent archive（都不建库、不加载 barrel）、`absent + allowDirectOpen`（口子只剩这一条）、installed 真句柄被消费。**变异证明**：把 `absent` 分支改回 `direct-open` → 恰好新增的 absent 两例红（`27 pass / 2 fail`）；还原后 29/29。
+- **P1-3 `installed` 零门禁**：四跳此前没有任何一跳被断言。补三处：plugin D2 断言 `plugin.storage`（第②跳）、absent-event 新增 **E3**（真 `createZCodeApp` + `enabled:true` 断言 `exposed/present/hasDb` 全 true、`dbFileExists` true —— 第①③跳）、E1/E1b 断言 `exposed:true / present:false`（端口**无条件挂**）、memories-rpc 的 installed 用例断言第④跳。**变异证明**：①删 `index.ts` 的 `registeredStorage = storage` → plugin D2 红 + E3 红（`9 pass / 1 fail` 与 `5 pass / 1 fail`）；②把 create-app 的挂载收进 conditional spread → E1/E1b 红（`4 pass / 2 fail`，E3 仍绿——证明两条断言各自有对象）。
+- **P2-1 `/ctx-status` 只改了一半**：`formatCtxStatus`（用户真正看到的 CLI 文本）补 `invalidated` 行（恒打印，形状不随状态变化）；`snapshot.ts:218` 的 `compartmentCount` 注释改为「仍有效的段数，不是 `getCompartments()` 的行数」。**变异证明**：删掉该行 → cli ctx-commands 的 `formatCtxStatus prints invalidated…` 红（`13 pass / 1 fail`）。
+- **P2-2 KEEP_LIST 三处理由不实**：①i18n 两份 locale 不再整份保留（`uiLocaleContract` 只测 host `init-local` 的 `uiLocale` 字段，两份 locale 是 `Record<string,string>`、无类型级对等约束——真删不会红），改用 11 条 `cut` 规则删掉 MC 独占键组（`settings.memory` + `settings.context.*`、`settings.memory.management.*`（保留 `legacySwitchRetired`：`SettingsPage.tsx` 的迁移 effect 仍在用）、`chat.contextUsage.magicContext.*`、`chat.ctx.*`），逐组核对过消费者都在整件删除或规则删除范围内；②`product-projection` / `v4-gateway` / `conversation-topic-publisher` 的理由从「其余命中都是注释」改为「无生产者但仍在场的写入面（零行为）」——`applyMagicContextUsage()` 等确是活代码；③`system-reminder/source.ts` 删掉「删键会重排 descriptor 表」这条不成立的论据（Record 顺序无语义），只留「删它要同改 4 处」。
+- **P2-3 耦合预算建议与实现相反**：失败文案改为「搬进 `app/magic-context/**` 不会让数字下降（该目录计入 `bootstrap/src`），要降只能真减导入行」，并给出 spec 路径；9 文件形状守卫的失败消息也补 `docs/iterations/magic-context-decoupling/spec.md`。
+- **P2-4 `--audit` 三处盲区**：①间接点名——新增 `parseRunReference`（`pnpm [-C|--dir <dir>] run <name>`，`--filter` 判不出包则返回 null 不猜）+ `isDeadScript` 递归分诊，目标 script 会被删时引用段一并删/收窄，悬空检查同样解析 script 名；②假候选——`pathCandidatesOfToken` 对 `apps/`/`packages/` token 只按仓库根解析，不再二次拼 `<pkg>/apps/…`；③`test:v4-perf` 的硬编码正则与 `if (name === "test:v4-perf") continue` 特例删除，改由同一条 `planScriptCommand` 按段分诊（剔掉的 5 段与旧正则完全一致：`magicContextPromptSurfaceOverrides` / `ctx-tool-descriptions` / `magic-context-boundaries` / `mc-section-zh` / `prompt-surface-toolset-hash`）。另加**判据自检**（`auditSelfCheckFailures`，先例同 plugin 的 A0）：解析器退化会让对账零命中通过，所以 8 条正例任一不成立即整份失败。**变异证明**：①`parseRunReference` 恒 null → 自检两条红；②`isDeadScript` 恒 false + 注入一条 `pnpm … run <已删 script>` 的探针 → 悬空检查红（含 `test:v4-perf` 的 4 条，说明删除判据坏了也有第二道网）；③把假候选加回去 + 嵌套包里的 `node apps/…` 探针 → 先红在自检，停用自检后悬空检查红在那个荒诞路径；三条均逐字节还原（sha256 比对）。
+- **P2-5 `--audit` 没有自动化入口**：`@zcode/cli` 新增 `test:mc-unplug-audit`（`node scripts/unplug-magic-context.mjs --audit`），并接进 `mc-tests.yml`（清单 39→40 项）。cli 的 `package.json` 因此成为残留，登记进 KEEP_LIST（字面量是文件名，不是耦合）。
+- **P2-6 残留只有绝对量**：新增 `MIN_RESIDUE_FILES = 55` 下限（实测 59）。只设下限不设等式：新增 MC 文件让残留变多属正常，扫描面变窄会让它掉到 0 而「全部登记」照样绿。**变异证明**：把 `packages` 从 `AUDIT_ROOTS` 拿掉 → 残留 47 < 55 → 红。
+- **P2-7 只认第一个暴露端口的 App**：`readInstalledStorage` 改为「**任一** App 给出句柄即用」，全部回 null 才 `unavailable`。**变异证明**：改回「第一个回 null 即整体 unavailable」→ multi-app 用例红（`28 pass / 1 fail`）；还原后 29/29。
+
 ### 门禁与数字（真跑）
 
 - 标准套件全绿：zero-load 1/1、absent-event 5/5、gate 27/27、plugin 10/10、magic-context 23/23、mc-section-zh、config-rpc 10/10、memories-rpc **24/24**（+2）、coupling-budget **4/4**（+1）、edit-retry 6/6、entry-identity-guard 4/4、compartment-rewind-host 3/3、adapters config-narrow 6/6 / boundaries 10/10 / domain 22/22、MC rewind 7/7、prompt-surface **28/28**（+1）、ctx-status **4/4**（+1）。
 - `turbo run typecheck --force`（4 包）= **12/12，0 cached**；`architecture:check --changed` = OK / 0 new。
 - 摘除脚本 dry-run：整件删除 **57**、改写 **51** 文件 / **152** 条规则、删除 **28** 个 script、陈留 dist 30；`--audit`：60 个残留全部登记 + 0 悬空 script。
 - lint：根 `pnpm lint` = **0 errors / 74 warnings**（apps 不在根 oxlint 扫描面内，`ignorePatterns` 含 `apps/zcode-cli`）；`turbo run lint --force`（bootstrap / cli / magic-context / adapters 四包报违规，core 零违规）= **66 warnings / 84 errors**，逐条都是存量 `max-lines`（每个超限文件 1 条）与 `no-unused-vars`。逐文件核对第 400 行边界：本轮改动的 9 个 `.ts` 源文件**没有一个跨过门槛**（`create-app` 1275→1276、`app/types` 611→612、`inject-compartments` 3393→3393 本来就超；其余 6 个 33–356 行，远低于 400）→ **新增 0**。基线数字口径备注：本记录实测的是「5 包 turbo lint」范围，与手交时的「66 errors」不是同一口径（后者未注明范围），本波的判据只用「逐文件是否跨限」这条。
+
+**fix-b9 复跑数字（2026-10-25，cr-func 第 2 轮）**：
+
+- 套件：absent-event **6/6**（+E3）、memories-rpc **29/29**（+5）、plugin **10/10**（D2 加 `plugin.storage` 断言）、MC rewind **7/7**、prompt-surface **28/28**、ctx-status **4/4**、cli ctx-commands **14/14**（+1）、gate 27/27、magic-context 23/23、zero-load 1/1、coupling-budget 4/4、edit-retry 6/6、entry-identity-guard 4/4、compartment-rewind-host 3/3、config-rpc 10/10、adapters config-narrow 6/6 / boundaries 10/10 / domain 22/22、usage 14/14、tag-strip 10/10、mc-section-zh PASS。
+- `turbo run typecheck --force`（bootstrap/adapters/core/magic-context）= **12/12，0 cached**；`architecture:check --changed` = OK / 0 new。
+- 摘除脚本 dry-run 复现：整件删除 **57**、改写 **53** 文件 / **163** 条规则（+11 条 locale 键组 cut）、删除 **28** 个 script（逐条与上一轮一致）、**收窄 1**（`test:v4-perf`，剔 5 段）、陈留 dist 30；`--audit`：**59** 个残留全部登记（下限 55）+ 0 悬空 script（含间接点名）。`--apply` 端到端本轮刻意不重跑（硬约束），规则可复现性由 dry-run + audit + 判据自检共同钉住。
+- 变异探测逐条见上文；除 `create-app.ts`（变异期间同步修了注释、基线 sha 因此变更）外，所有被变异文件均按 sha256 逐字节还原。
 
 ## 测试策略
 

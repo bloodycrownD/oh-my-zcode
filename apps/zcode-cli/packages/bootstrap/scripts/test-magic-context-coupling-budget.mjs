@@ -268,8 +268,12 @@ test("IM7：宿主侧 MC 耦合散点逐格不超预算（只减不增）", () =
     "以下分列的 MC 耦合散点超出预算（IM7：只减不增）：\n" +
       overBudget.join("\n") +
       "\n" +
-      "正当增加只有一种：上游新增真的需要宿主多接一处 → 同批更新 UPSTREAM-SYNC.md 的" +
-      "偏离点登记与本文件上限；否则请把散点收进 `app/magic-context/**`（该目录不计入）",
+      "正当增加只有一种：上游新增真的需要宿主多接一处 → 同批更新 UPSTREAM-SYNC.md 第 3 节" +
+      "的偏离点登记与本文件的上限。\n" +
+      "**注意：把散点搬进 `app/magic-context/**` 不会让这个数字下降**——该目录属于" +
+      "`bootstrap/src` 这一格，它的导入行照样计数（上限 25 的注释就写着「装配目录 6 文件」）。" +
+      "要降只能真的减少导入行（合并同一模块的多条导入、去掉不必要的类型导入），" +
+      "或按 spec 变更口径先在 `docs/iterations/magic-context-decoupling/spec.md` 里改预算。",
   );
 });
 
@@ -309,7 +313,8 @@ test("形状：装配目录保持 spec 的 9 文件拆分（否则合并即让�
     [...MC_FACADE_FILES].sort(),
     "`bootstrap/src/app/magic-context/` 的文件集合与 spec「最终项目结构」不一致：" +
       "把职责文件合回单体会减少 MC 导入行、让 IM7 预算假性变绿。" +
-      "确需拆分/合并时，先改 spec 的目录清单，再同步本清单与 BUCKET_LIMITS。",
+      "确需拆分/合并时，先改 spec 的目录清单（docs/iterations/magic-context-decoupling/spec.md" +
+      " 的「最终项目结构」一节），再同步本清单与 BUCKET_LIMITS。",
   );
 });
 

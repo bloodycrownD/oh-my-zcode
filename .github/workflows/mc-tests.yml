@@ -12,9 +12,10 @@
 # 各包 `package.json` 的 script 里，本文件**只点名字**，不复制命令形态。新增 MC 脚本时
 # 先加 script 再往下面的清单里加一行，两处不要各写一套。
 #
-# 实测口径（2026-10-25，本分支）：本清单 = 39 项（MC 包 14 + bootstrap 18 +
-# core 3 + adapters 4，其中 `test:edit-retry` 是 rewind 端口（Z8）的宿主调用方，
-# 与 MC 同批回归）。spec 里写的「29 个」成稿早于本迭代新增的
+# 实测口径（2026-10-25，本分支）：本清单 = 40 项（MC 包 14 + bootstrap 18 +
+# core 3 + adapters 4 + 摘除脚本对账 1，其中 `test:edit-retry` 是 rewind 端口（Z8）的宿主调用方，
+# 与 MC 同批回归；`test:mc-unplug-audit` 是 cr-func 第 2 轮补的 `--audit` 自动化入口）。
+# spec 里写的「29 个」成稿早于本迭代新增的
 # `test:magic-context-coupling-budget` / `test:rewind-compartments` /
 # `test:mc-entry-identity-guard` / `test:mc-compartment-rewind-host` 四个脚本，
 # 按实际清单执行，不按旧数字裁剪。
@@ -142,3 +143,9 @@ jobs:
           echo "::group::adapters → scripts/test-feature-flag.mjs"
           node apps/zcode-cli/packages/adapters/scripts/test-feature-flag.mjs
           echo "::endgroup::"
+
+          # ── 摘除脚本对账（cr-func 第 2 轮 P2-5）────────────────────────────
+          # `--audit` 此前**没有任何自动化入口**（git grep 零命中），所有 fail-loud
+          # 都靠人手动跑：残留未登记、script 悬空、扫描面变窄这三类都只能靠自觉。
+          # 它不需要构建产物（虚拟树），所以排在 suite 之外、最后跑。
+          run @zcode/cli test:mc-unplug-audit

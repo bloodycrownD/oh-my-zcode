@@ -2466,13 +2466,26 @@ export function renderM0(args: {
     //
     // 只在失效段位于尾部时出现（见 `readM0Compartments` 的 self-limiting 判定），
     // 因此不会永久挂在 prompt 里；文本只含 count/sequence，确定性、可被 cache 复用。
+    //
+    // FORK（magic-context-decoupling / cr-func 第 2 轮 P1-1）：正文**不得承诺磁盘状态**。
+    // 换掉的两句话都是可证伪的：
+    //   · 旧「The user rewound the conversation」——retry 路径（`retryTurn`）与
+    //     editUserQuery 共用 `submitConversationRewind`，点「重试」不是用户主动 rewind；
+    //   · 旧「Tool effects and files on disk are unaffected」——`editUserQuery` 在
+    //     `payload.workspaceMode === "rewind"` 时先走 `applyWorkspaceFileRewind`
+    //     （fork-edit-retry.ts:168-223），**磁盘文件真的被回滚**，这句话会让模型以为
+    //     自己上一轮的文件改动还在。
+    // 两条路事实相反、而本包读到的事实只有 rebase_status（不知道 workspaceMode 是哪个），
+    // 所以选「中性 + 显式免责」而不是按分支措辞：分支版本要么需要把 workspaceMode 落库
+    // 并加迁移，要么就是在这里猜。中性表述在两种路径上都为真，且给出可执行动作
+    // （先读文件再依赖旧改动）——不承诺、不误导。
     const invalidatedHistory = args.invalidatedHistory;
     if (invalidatedHistory !== null && invalidatedHistory !== undefined) {
         const first = invalidatedHistory.firstSequence;
         const last = invalidatedHistory.lastSequence;
         const range = first === last ? `sequence ${first}` : `sequences ${first}-${last}`;
         sections.push(
-            `<session-history-invalidated>\nThe user rewound the conversation. ${invalidatedHistory.count} summary segment(s) (${range}) covering the rewound turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat the rewound turns as removed from history and do not infer their content. Tool effects and files on disk are unaffected — only these history entries were invalidated.\n</session-history-invalidated>`,
+            `<session-history-invalidated>\nConversation history was truncated at this point: ${invalidatedHistory.count} summary segment(s) (${range}) covering the removed turns were invalidated and are not shown. The <session-history> above ends at the last still-valid summary; treat those turns as removed from history and do not infer their content. This notice says nothing about workspace files: earlier edits may or may not still be on disk, so re-read a file before relying on an earlier change.\n</session-history-invalidated>`,
         );
     }
 

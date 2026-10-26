@@ -711,12 +711,16 @@ export interface ZCodeApp {
    * 确实是同一个，但**第一次**调用会创建并迁移库——于是一条只读 RPC 在「装配缺席 /
    * `db_null`」时把库造了出来。
    *
-   * 三态（handler 的判据）：
+   * 三态（handler 的判据，cr-func 第 2 轮 P1-2 修正分类）：
    *   · 返回 `{ db }` → 用这个句柄，不再 open；
    *   · 返回 `null`   → 本 App 参与了装配**但没装成** → handler 回 `unavailable` 信封，
    *     **绝不自开库**；
-   *   · 方法本身缺席 → 直构 / 单测夹具形态（没有 App 装配面）→ handler 保留旧的
-   *     自开库兜底（`test-magic-context-memories-rpc` 的 22 例直构夹具依赖它）。
+   *   · 方法本身缺席 → 没有任何 App 暴露端口。它**不是**「直构夹具形态」而是**生产可达**：
+   *     两条记忆 RPC 是 workspace 级、不接 `sessionId`，`context.sessions` 构造时为空
+   *     （`server.ts:256`）、`closeSession` 会 delete（`server-operations.ts:2581`），
+   *     于是「冷启动 CLI」或「会话全关后在设置里打开记忆面板」就是这一态 → 同样回
+   *     `unavailable`，**同样不许自开库**（旧行为会在这里创建并迁移数据库）。
+   *     直构夹具的自开库只剩显式通路 `MagicContextMemoriesDependencies.allowDirectOpen`。
    *
    * `db` 故意是 `unknown`：本文件摘除后仍要过 typecheck，不能 `import type` 一个会被
    * 删掉的包。唯一消费者在包在场时把它窄回真实类型（见 `magic-context-memories.ts`）。

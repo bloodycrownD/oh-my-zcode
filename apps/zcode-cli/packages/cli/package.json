@@ -13,6 +13,7 @@
   "main": "./dist/zcode.cjs",
   "scripts": {
     "test:ctx-commands": "node --import tsx scripts/test-ctx-commands.mjs",
+    "test:mc-unplug-audit": "node scripts/unplug-magic-context.mjs --audit",
     "test:provider-runtime-env": "node --import tsx --test test/provider-runtime-env.test.ts",
     "test:run-ui-locale": "node --import tsx --test test/runUiLocale.test.ts",
     "build": "node scripts/build.mjs",

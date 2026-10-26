@@ -344,6 +344,13 @@ const providerRegistry = {
 
 let appError;
 let closeError;
+// FORK（cr-func 第 2 轮 P1-3）：装配层存储端口的**四跳贯通探针**（在真 App 上读）。
+//   ① assembly.ts 的 registerStorage?.({db}) → ② index.ts 的 getter → ③ create-app 的
+//   getMagicContextStorage 挂载 → ④ 协议 handler 的 readInstalledStorage。本探针覆盖
+//   ①②③，④ 由 test-magic-context-memories-rpc.mjs 的 installed 用例钉住。
+// 任何一跳断裂（删转发、把挂载收进 conditional spread、getter 退回值快照）都会让这里
+// 从 present:true 变成 false——而其余门禁仍然全绿，所以必须在真 App 上断言。
+let magicContextStorage = { exposed: false, present: false, hasDb: false };
 try {
   const app = await createZCodeApp({
     providerRegistry,
@@ -359,6 +366,19 @@ try {
       magicContext: { enabled: ${JSON.stringify(enabled)} },
     },
   });
+  const getStorage = app.getMagicContextStorage;
+  if (typeof getStorage === "function") {
+    const handle = getStorage();
+    magicContextStorage = {
+      exposed: true,
+      present: handle !== null && handle !== undefined,
+      hasDb:
+        handle !== null &&
+        handle !== undefined &&
+        typeof handle.db === "object" &&
+        handle.db !== null,
+    };
+  }
   try {
     await app.close();
   } catch (error) {
@@ -375,6 +395,7 @@ const report = {
   appError,
   closeError,
   dbFileExists: existsSync(join(process.env.MAGIC_CONTEXT_DB_DIR, "magic-context.db")),
+  magicContextStorage,
   warnEvents: entries
     .filter((entry) => entry.context?.event === "magic_context.transform_absent")
     .map((entry) => entry.context),
@@ -597,6 +618,18 @@ test("E1: create-app enabled!==true 装配路径——事件可达且工厂门�
   assert.equal(report.warnEvents[0].reason, "disabled");
   assert.equal(report.warnEvents[0].module, "bootstrap");
   assert.match(report.warnEvents[0].detail, /magicContext.enabled is false/);
+  // P1-3 第③跳：端口**无条件挂**（disabled 下也要在场，只是没有句柄）。
+  // 把 create-app 那行收进 conditional spread 就会让 exposed 变 false。
+  assert.equal(
+    report.magicContextStorage.exposed,
+    true,
+    "create-app 必须无条件暴露 getMagicContextStorage：缺了它，协议 handler 判不出",
+  );
+  assert.equal(
+    report.magicContextStorage.present,
+    false,
+    "disabled 装配没有句柄，端口必须回 null（handler 据此回 unavailable，不自开库）",
+  );
 });
 
 /**
@@ -637,6 +670,10 @@ test("E1b: 动态 import 失败降级为 absent(import_failed)，create-app 照�
   assert.match(report.warnEvents[0].detail, /forced magic-context import failure/);
   // 工厂没跑 ⇒ 没有库文件（与 db_null/disabled 同一可观测后果）。
   assert.equal(report.dbFileExists, false, "import_failed 不得创建 magic-context.db");
+  // P1-3：import 失败同样只让**句柄**缺席，端口本身仍在场（否则 handler 会把「这条边
+  // 断了」误判成「老宿主、可以自开库」）。
+  assert.equal(report.magicContextStorage.exposed, true);
+  assert.equal(report.magicContextStorage.present, false);
 
   // 活性＋范围：失败必须发生在**插件入口那一次解析**上（否则这条用例可能只是
   // 「import 被别的地方拦掉了」），且失败之后装配面不得继续加载任何其它 MC 宿主模块
@@ -652,5 +689,53 @@ test("E1b: 动态 import 失败降级为 absent(import_failed)，create-app 照�
     leaked.map((resolution) => resolution.url),
     [],
     "import 失败后不得再解析任何其它 MC 宿主装配模块——失败即缺席，下游一个都不该加载",
+  );
+});
+
+/**
+ * E3（cr-func 第 2 轮 P1-3）：**installed 态的装配**——真 `createZCodeApp` 必须把
+ * 装配层的库句柄透传到 `app.getMagicContextStorage()`。
+ *
+ * 被钉住的是四跳中的前三跳：
+ *   assembly.ts  `options.registerStorage?.({ db })`  →  index.ts  `registeredStorage`
+ *   →  index.ts  `get storage() { return registeredStorage }`  →  create-app.ts:1232
+ *   `getMagicContextStorage: () => magicContextPlugin?.storage ?? null`
+ * 任何一跳断裂（删掉转发、把挂载收进 conditional spread、getter 退回对象字面量快照），
+ * 生产上**所有记忆 RPC 静默变 unavailable**，而既有门禁全绿：plugin 的 D2 只断言
+ * turnTransform / close / recorder，memories-rpc 全是直构夹具，zero-load/absent-event
+ * 只看关闭态。第④跳（handler 消费句柄）见 memories-rpc 的 installed 用例。
+ *
+ * 与 E1/E1b 的差别：这里 `enabled: true` 且**不**破坏 import，所以装配真跑一遍、
+ * 库文件真被创建——`dbFileExists` 就是「句柄来自真实装配」的旁证（不是手搓对象）。
+ */
+test("E2: enabled 装配把库句柄透传到 app.getMagicContextStorage()（四跳前三跳贯通）", async () => {
+  const { exit, report, stderr } = await runCreateAppDriver({ enabled: true });
+  assert.equal(exit, 0, `driver 应正常退出；stderr:\n${stderr}`);
+  assert.equal(report.appError, undefined, `enabled 装配不该失败：${report.appError}`);
+  assert.equal(report.closeError, undefined, `app.close 不该失败：${report.closeError}`);
+  assert.equal(
+    report.magicContextStorage.exposed,
+    true,
+    "create-app 必须挂上 getMagicContextStorage（第③跳）",
+  );
+  assert.equal(
+    report.magicContextStorage.present,
+    true,
+    "装配成功时端口必须回句柄——回 null 就是 index.ts 的 registerStorage 转发断了（第①②跳）",
+  );
+  assert.equal(
+    report.magicContextStorage.hasDb,
+    true,
+    "句柄必须带真实 db（不是 {} 或可调用但空的占位）",
+  );
+  assert.equal(
+    report.dbFileExists,
+    true,
+    "旁证：enabled 路径真的把库开出来了——句柄不是手搓对象，而是装配产物",
+  );
+  assert.deepEqual(
+    report.warnEvents,
+    [],
+    "enabled 且 import 正常时不该出现 transform_absent",
   );
 });

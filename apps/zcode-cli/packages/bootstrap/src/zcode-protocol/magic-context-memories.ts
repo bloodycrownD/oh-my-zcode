@@ -182,6 +182,22 @@ export interface MagicContextMemoriesDependencies {
    * archive → 可读 -32010），与 schema 加载失败同一处置。
    */
   loadRuntime?: () => Promise<MagicContextModule>;
+  /**
+   * FORK（magic-context-decoupling / cr-func 第 2 轮 P1-2）：**直构夹具**才允许自己
+   * 开库的显式标记，默认 `false`。
+   *
+   * 为什么必须有这个标记：`absent`（没有任何 session 暴露存储端口）在过去被当成
+   * 「直构/单测夹具形态」，于是保留自开库兜底。但它在**生产上可达**——两条记忆 RPC 是
+   * **workspace 级**（handler 不接 `sessionId`），`context.sessions` 构造时为空
+   * （`server.ts:256`）、`closeSession` 会 `delete`（`server-operations.ts:2581`），
+   * 于是「冷启动 CLI」或「用户把会话全关掉后打开设置里的记忆面板」都会走到 `absent`
+   * → 自开库 → **创建并迁移数据库**。那正是端口要根治的缺陷。
+   *
+   * 判据必须是**显式注入**而不是「端口方法在不在」：方法缺席只说明这个 App 没暴露
+   * 端口（可以是老宿主、也可以是还没装配），推不出「现在可以替它把库造出来」。
+   * `test-magic-context-memories-rpc.mjs` 的直构用例显式传 `allowDirectOpen: true`。
+   */
+  allowDirectOpen?: boolean;
 }
 
 /** 打不开/关着时列表信封的零值计数（字段集与 `getMemoryCountsByStatus` 的 wire 投影一致）。 */
@@ -234,9 +250,10 @@ async function isMagicContextDisabled(
 }
 
 /**
- * 装载数据库句柄。`initializeMagicContextHost()` 必须在任何 DB 写之前（幂等；
- * 生产路径 create-app 装配层已调过，这里是直构/测试形态的第二保险，与 /ctx-*
- * 命令面的 ensureHostIdentity 同一理由）。
+ * 装载数据库句柄。`initializeMagicContextHost()` 必须在任何 DB 写之前（幂等）。
+ *
+ * **只有直构夹具会走到这里**（`dependencies.allowDirectOpen === true`，见该字段注释）：
+ * 生产装配路径一律用装配层交付的句柄，`absent` 也不再自开库。
  *
  * 返回 null = 确定性打不开（schema fence / 迁移未完成 / pending 竞争）；
  * throw = busy/瞬时类失败（openDatabase 以 `{ cause }` 保留底层错误，message
@@ -252,13 +269,16 @@ function initializeAndOpenDatabase(
 /**
  * 装配层交付的库句柄（spec phase-zero-load / W2 / 变更点 #11）。
  *
- * 三态与语义：
+ * 三态与语义（cr-func 第 2 轮 P1-2 修正：`absent` 的生产可达性）：
  *   · `installed`   → 用装配层**已经开好**的句柄，不再 openDatabase；
- *   · `unavailable` → 有 App 暴露了端口但返回 `null`（flag 关在更早的门就 return 了，
- *     走到这里只会是「装配抛错 / db_null / import 失败」）→ 调用方回 unavailable，
- *     **绝不自开库**（旧行为会让一条只读 RPC 创建并迁移 DB）；
- *   · `absent`      → 没有任何 session 暴露该端口 = 直构 / 单测夹具形态（生产路径恒有
- *     App），保留旧的自开库兜底。
+ *   · `unavailable` → 有 App 暴露了端口，但没有任何一个给出句柄（装配抛错 / db_null /
+ *     import 失败，或多个 App 都回 `null`）→ 调用方回 unavailable / `-32010`，
+ *     **绝不自开库**；
+ *   · `absent`      → 没有任何 session 暴露该端口。它**不是**「夹具形态」而是生产可达：
+ *     两条 RPC 是 workspace 级、不接 `sessionId`，`context.sessions` 构造时为空、
+ *     `closeSession` 会 delete——冷启动 CLI 或会话全关时打开记忆面板就是这一态。
+ *     因此同样**不许自开库**，调用方按 unavailable 处理。直构夹具改走显式
+ *     `dependencies.allowDirectOpen`。
  */
 type InstalledStorage =
   | { state: "absent" }
@@ -266,20 +286,55 @@ type InstalledStorage =
   | { state: "installed"; db: MagicContextDatabase };
 
 /**
- * 逐 session 找第一个暴露存储端口的 App（与 `isMagicContextDisabled` 找 ConfigPort
- * 同一迭代纪律：`openDatabase` 是按路径缓存的进程级单例，取哪个 App 的句柄都是同一个）。
+ * 逐 session 找**第一个给出句柄**的 App。
+ *
+ * 不能「第一个暴露端口的 App 决定全局」：`ProtocolRuntimeResources` 可能同时持有临时
+ * workspace app 与已登记 app，第一个回 `null` 就整体判 unavailable 会让另一个真有句柄的
+ * App 白等（cr-func 第 2 轮 P2-7）。判据因此是「任一 app 有句柄即用」，一个都没有才
+ * 区分 `absent`（没人暴露端口）与 `unavailable`（暴露了但全回 null）。
  */
 function readInstalledStorage(context: ZCodeProtocolAgentServerContext): InstalledStorage {
+  let sawPort = false;
   for (const record of context.sessions.values()) {
     const getStorage = record.app?.getMagicContextStorage;
     if (typeof getStorage !== "function") continue;
+    sawPort = true;
     const handle = getStorage();
-    if (handle === null) return { state: "unavailable" };
+    if (handle === null || handle === undefined) continue;
     // 端口形状是不透明的 `{ db: unknown }`（宿主保留文件不能 `import type` 被删的包）；
     // 包在场时这里窄回真实签名——这是刻意的边界转换，见 types.ts 的同名说明。
     return { state: "installed", db: handle.db as MagicContextDatabase };
   }
-  return { state: "absent" };
+  return sawPort ? { state: "unavailable" } : { state: "absent" };
+}
+
+/**
+ * 端口门：`absent` 只有显式 `allowDirectOpen` 才放行到自开库，其余一律 blocked。
+ *
+ * 返回 `{ db }` 表示「装配层已交付句柄，直接用」；`{ directOpen: true }` 表示
+ * 「直构夹具显式要求自开库」；否则 blocked，并给出可落日志的原因。
+ */
+function classifyStorageGate(
+  installed: InstalledStorage,
+  dependencies: MagicContextMemoriesDependencies,
+):
+  | { state: "installed"; db: MagicContextDatabase }
+  | { state: "direct-open" }
+  | { state: "blocked"; reason: "storage-not-installed" | "no-app-port" } {
+  if (installed.state === "installed") return { state: "installed", db: installed.db };
+  if (installed.state === "unavailable") {
+    return { state: "blocked", reason: "storage-not-installed" };
+  }
+  return dependencies.allowDirectOpen === true
+    ? { state: "direct-open" }
+    : { state: "blocked", reason: "no-app-port" };
+}
+
+/** blocked 的可读说明（list 落 warn、archive 拼协议错误都用这一份措辞）。 */
+function describeBlockedStorage(reason: "storage-not-installed" | "no-app-port"): string {
+  return reason === "storage-not-installed"
+    ? "no app exposes a magic-context storage handle (assembly absent / db_null / import failed)"
+    : "no app exposes getMagicContextStorage (workspace-level RPC with zero live sessions: cold start or all sessions closed)";
 }
 
 /** 非正常可用态的列表信封（不改 DB、不落盘）。 */
@@ -368,15 +423,17 @@ export async function listMagicContextMemories(
   }
 
   // ①-b 装配层的库句柄（spec W2 / 变更点 #11）。**必须排在 barrel 加载之前**：端口
-  // 在场且为 null 时连业务符号都不需要（直接回 unavailable 信封），也就不会有任何
-  // openDatabase → 不会创建/迁移库。
-  const installed = readInstalledStorage(context);
-  if (installed.state === "unavailable") {
+  // 缺席或全回 null 时连业务符号都不需要（直接回 unavailable 信封），也就不会有任何
+  // openDatabase → 不会创建/迁移库。`absent` 同样拦在这里（cr-func P1-2）：它是生产
+  // 可达的（workspace 级 RPC + 零 session），只有显式 `allowDirectOpen` 的直构夹具才
+  // 放行到自开库。
+  const gate = classifyStorageGate(readInstalledStorage(context), dependencies);
+  if (gate.state === "blocked") {
     context.logger?.warn("magicContext memories list: storage not installed", {
       module: "bootstrap.zcode_protocol",
       event: "zcode_protocol.magic_context.memories_unavailable",
       reason: "unavailable",
-      detail: "app.getMagicContextStorage() returned null (assembly absent / db_null)",
+      detail: describeBlockedStorage(gate.reason),
       workspaceKey: params.workspace.workspaceKey,
     });
     return unavailableListResult(params.workspace, "unavailable");
@@ -401,10 +458,10 @@ export async function listMagicContextMemories(
   // 有信封承载「打不开」，不需要把瞬时故障冒泡成 RPC 错误。
   //
   // 生产路径用装配层交付的句柄（同一个进程级单例，不开第二条连接、**不会创建库**）；
-  // 只有直构/夹具形态（`installed.state === "absent"`）才落到旧的自开库兜底。
+  // 只有显式 `allowDirectOpen` 的直构夹具才落到自开库（`gate.state === "direct-open"`）。
   let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = installed.state === "installed" ? installed.db : initializeAndOpenDatabase(magicContext);
+    db = gate.state === "installed" ? gate.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories list: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -517,13 +574,14 @@ export async function archiveMagicContextMemories(
     );
   }
 
-  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）：端口在场且为 null → 可读错误，
-  // **不自开库**（归档是写路径，在装配缺席时更没有理由替它把库造出来）。
-  const installed = readInstalledStorage(context);
-  if (installed.state === "unavailable") {
+  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）：端口缺席或全回 null → 可读错误，
+  // **不自开库**（归档是写路径，在装配缺席时更没有理由替它把库造出来）。`absent` 同样
+  // 拦在这里（cr-func P1-2）：生产可达，不是夹具形态。
+  const gate = classifyStorageGate(readInstalledStorage(context), dependencies);
+  if (gate.state === "blocked") {
     throw new ProtocolRequestError(
       -32010,
-      "Magic Context storage is not installed in this app (assembly absent or the database failed to open); memories cannot be archived.",
+      `Magic Context storage is not installed in this app (${describeBlockedStorage(gate.reason)}); memories cannot be archived.`,
     );
   }
 
@@ -542,7 +600,7 @@ export async function archiveMagicContextMemories(
   // null 是确定性打不开，给可读错误。生产路径走装配层句柄（不创建库）。
   let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = installed.state === "installed" ? installed.db : initializeAndOpenDatabase(magicContext);
+    db = gate.state === "installed" ? gate.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories archive: storage open failed", {
       module: "bootstrap.zcode_protocol",
