@@ -374,6 +374,29 @@ export class ConversationTopicPublisher {
   }
 
   /**
+   * 让所有现有订阅在下一次 flush 收到一份**新快照**（不换投影、不重放事件）。
+   *
+   * 唯一消费者是激活后的派生量补种（`seedConfig` / `seedUsage` 直改初值、不产 delta）：
+   * 不驱动这一下，客户端要等到下一个事件才看见 usage / thoughtLevels 补齐。
+   *
+   * 与 `rehydrate` 的 resync 区别：那里整份投影被换掉（rollback 也就不存在），这里只换了
+   * 快照内容，`currentSeq` / retained log 不变，因此**不动** `sentSeq` 之外的任何东西。
+   * 语义上等值于「订阅者从当前水位重新拿一次 snapshot」（`resyncRequired` 就是这条路径）。
+   */
+  requireSnapshotResync(): void {
+    for (const subscription of this.subscriptions.values()) {
+      subscription.buffer = [];
+      subscription.bufferBytes = 0;
+      subscription.resyncRequired = true;
+      // sentSeq=0 与 rehydrate 一致：帧区间 (0, currentSeq] 才是完整快照，
+      // 保留旧 sentSeq 会让 `frame.fromSeq` 指向一个客户端从未见过的水位。
+      subscription.sentSeq = 0;
+      // 在途 reservation 的帧内容已是旧快照，不能再 commit（同上：身份不再匹配）。
+      subscription.inFlight = null;
+    }
+  }
+
+  /**
    * 分支代次种子（cold hydration）：与 `SessionRevert.branchGeneration` 同源。
    * 只靠事件重放推导会漏——synthesized transcript 不含 RewindTriggered，
    * 于是代次停在 0、manifest 键控到错的代次上。

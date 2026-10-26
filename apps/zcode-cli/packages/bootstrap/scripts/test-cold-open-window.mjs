@@ -289,15 +289,16 @@ function coldOpenHost({ store, reader, counters }) {
     emitWireFrame: (wire) => counters.wires.push(wire),
     onError: (scope, error) => counters.errors.push({ scope, error }),
     onDebug: (message) => counters.debugs.push(String(message)),
-    loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {
+    loadPersistedEvents: async (sessionId, persistedMessages) => {
       counters.load += 1;
-      counters.loadOptions.push(loadOptions ?? {});
       return await readColdMaterialization({
         store,
         reader,
         sessionId,
         persistedMessages,
-        loadOptions,
+        // 与 `v4-bridge.ts:2281` 同一条判据：runtime 没在跑（外壳 / 压根没有 record）⇒
+        // 本次是按 view-only 口径读的，usage / config 种子缺席，激活后要补一次。
+        viewOnlyHydration: counters.runtimeActive !== true,
       });
     },
     readRowManifest: (sessionId, input) => reader.read(sessionId, input),
@@ -390,7 +391,7 @@ async function readColdMaterialization({
   reader,
   sessionId,
   persistedMessages,
-  loadOptions,
+  viewOnlyHydration,
 }) {
   const source = await loadPersistedConversationMaterialization({
     memoryEvents: [],
@@ -403,22 +404,18 @@ async function readColdMaterialization({
       messageWithParts: (input) => store.messageWithParts(input),
       sessionEntries: (input) => store.sessionEntries(input),
     },
-    ...(loadOptions?.fullMaterialization === true
-      ? {}
-      : {
-          planColdWindow: async (facts) =>
-            await readColdTailWindowMaterialization({
-              sessionID: sessionId,
-              store,
-              reader,
-              branchGeneration: facts.branchGeneration,
-              expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
-              rewind: facts.rewind,
-              ...(facts.persistedMessages === undefined
-                ? {}
-                : { loadedMessages: facts.persistedMessages }),
-            }),
-        }),
+    planColdWindow: async (facts) =>
+      await readColdTailWindowMaterialization({
+        sessionID: sessionId,
+        store,
+        reader,
+        branchGeneration: facts.branchGeneration,
+        expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+        rewind: facts.rewind,
+        ...(facts.persistedMessages === undefined
+          ? {}
+          : { loadedMessages: facts.persistedMessages }),
+      }),
   });
   const windowPlan = source.coldWindow;
   const windowedMessageIds = windowPlan ? new Set(windowPlan.windowMessageIds) : null;
@@ -463,6 +460,7 @@ async function readColdMaterialization({
     sourceEventSeq: 0,
     branchGeneration: source.branchGeneration,
     ...(windowPlan ? { coldWindow: windowPlan } : {}),
+    ...(viewOnlyHydration ? { viewOnlyHydration: true } : {}),
     ...(modelBaseline === null
       ? {}
       : {
@@ -472,7 +470,6 @@ async function readColdMaterialization({
             thought: modelBaseline.modelSelection.options?.reasoningLevel ?? "",
           },
         }),
-    ...(loadOptions?.viewOnlyHydration === true ? { viewOnlyHydration: true } : {}),
   };
 }
 
@@ -493,7 +490,6 @@ async function readHydrationTurnModelSelection(store, sessionId, messageId) {
 function newCounters() {
   return {
     load: 0,
-    loadOptions: [],
     shell: 0,
     resume: 0,
     page: 0,
@@ -511,8 +507,8 @@ function newCounters() {
     streamDelayMs: 0,
     /** 可控的「激活悬在半空」——用来证明 view-only 期确实没就绪。 */
     resumeGate: null,
-    /** 可控的「升级的持久读取已完成、rehydrate 还没发生」窗口（risk 16 的对照组）。 */
-    upgradeReadGate: null,
+    /** 可控的「补种的 usage 端口悬在半空」窗口（risk 16 的对照组）。 */
+    runtimeFactsGate: null,
     /** 让下一次激活失败一次（验证失败不驻留）。 */
     failNextResume: false,
   };
@@ -749,7 +745,7 @@ test("B1 (IS6): 连续翻页到顶——行集合与全量一致、hasMore 按 m
   const root = tempRoot("b1");
   const world = await coldWorld({ root });
   // 把激活**钉在半空**：翻页发生在 view-only 期，任何「读入口重新冷开」都会立刻可见
-  // （若让它自然激活，激活后的全量升级会多一次 `fullMaterialization` 读，混进判据里）。
+  // （若让它自然激活，激活后的派生量补种虽不读正文，但会多一条 resync 快照，混进判据里）。
   const releaseResume = holdResume(world.counters);
   t.after(async () => {
     releaseResume();
@@ -792,27 +788,23 @@ test("B1 (IS6): 连续翻页到顶——行集合与全量一致、hasMore 按 m
     );
     // ③ 全程只冷开一次：外壳一次、正文读一次、按需物化若干次。
     assert.equal(world.counters.shell, 1, "翻页不得再次物化外壳（= 不得触发第二次冷开）");
-    assert.equal(
-      world.counters.load,
-      1,
-      `翻页不得重读整份正文：options=${JSON.stringify(world.counters.loadOptions)}`,
-    );
+    assert.equal(world.counters.load, 1, `翻页不得重读整份正文：load=${world.counters.load}`);
     assert.equal(world.counters.resume, 1, "首屏的预激活已经发起过（夹具前提）");
     assert.ok(world.counters.page > 0, "夹具：翻页必须真的走到按需物化");
     assert.equal(world.counters.errors.length, 0, "翻页不得产生宿主错误");
 
-    // ④ 放行激活：升级是唯一一次全量读，且不碰外壳。
+    // ④ 放行激活：派生量补种是**窄读**，一次正文读都不多，也不碰外壳。
     releaseResume();
     await waitFor(
-      () => world.counters.loadOptions.some((options) => options.fullMaterialization === true),
-      "激活成功后必须发生一次全量升级",
+      () => world.counters.debugs.some((line) => line.includes("v4 runtime facts seed")),
+      "激活成功后必须补一次 runtime 派生量",
     );
-    assert.equal(world.counters.shell, 1, "升级不碰外壳");
-    assert.equal(
-      world.counters.loadOptions.filter((options) => options.fullMaterialization !== true).length,
-      1,
-      "升级之外的正文读仍然只有一次（升级是全量口径，不计入冷开）",
+    await waitFor(
+      () => world.counters.debugs.some((line) => line.includes("v4 runtime facts seed applied")),
+      "补种必须落定（不是只排队）",
     );
+    assert.equal(world.counters.shell, 1, "补种不碰外壳");
+    assert.equal(world.counters.load, 1, `补种不得再读正文：load=${world.counters.load}`);
   } finally {
     gateway.dispose();
   }
@@ -979,12 +971,11 @@ function realRuntimeHost({ context, gatewayRef, counters }) {
       });
       return { status: "resumed", persistedMessages: activated.persistedMessages ?? [] };
     },
-    loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {
+    loadPersistedEvents: async (sessionId, persistedMessages) => {
       counters.load += 1;
-      counters.loadOptions.push(loadOptions ?? {});
       const record = context.sessions.get(sessionId);
       // 与 `v4-bridge.ts:2014-2019` 逐值同参：**必须**交出真水位（`sourceEventSeq`，见
-      // `v4-bridge.ts:2238`）。它是 gateway 重放 live 尾部的锚点：交 0 会让升级重放后的
+      // `v4-bridge.ts:2238`）。它是 gateway 重放 live 尾部的锚点：交 0 会让尾部重放的
       // 每一个 raw 事件都卡在「等 seq=1」的 gap 里（`test-session-row-manifest.mjs:932`
       // 对这条契约有记账），并发在飞的那一轮于是被静默抹掉。
       const [liveEvents, sourceEventSeq] = record
@@ -994,7 +985,6 @@ function realRuntimeHost({ context, gatewayRef, counters }) {
           ])
         : [[], 0];
       const watermark = {
-        fullMaterialization: loadOptions?.fullMaterialization === true,
         sourceEventSeq,
         events: liveEvents.length,
         returnedSourceEventSeq: undefined,
@@ -1005,22 +995,16 @@ function realRuntimeHost({ context, gatewayRef, counters }) {
         reader: gatewayRef.reader,
         sessionId,
         persistedMessages,
-        loadOptions,
         memoryEvents: liveEvents,
         sourceEventSeq,
-        // view-only 首屏：record 还是外壳（runtime 没起）→ usage / fileChanges 一起缺席。
+        // view-only 首屏：record 还是外壳（runtime 没起）→ usage 缺席（fileChanges 不受影响：
+        // 它的输入是 session_entry 里的 checkpoint，不是 runtime 事实）。
         viewOnlyShell: record?.runtimeViewOnlyShell === true,
         record,
       });
       // 交出去的必须是**读到的**那个水位：读到了却返回 0 与「没有水位」在 gateway 眼里
       // 是同一件事（尾部重放会卡在 raw gap 里）。
       watermark.returnedSourceEventSeq = materialized.sourceEventSeq;
-      // 并发窗口的门：持久事实（上面那次读取）已经定型，但 rehydrate 还没发生。
-      // 门挡在读取**之后**，所以升级的输入仍是「轮次开始那一刻」的持久状态。
-      if (loadOptions?.fullMaterialization === true && counters.upgradeReadGate) {
-        counters.upgradeReadGate.markReached();
-        await counters.upgradeReadGate.promise;
-      }
       return materialized;
     },
     readRowManifest: (sessionId, input) => gatewayRef.reader.read(sessionId, input),
@@ -1064,6 +1048,11 @@ function realRuntimeHost({ context, gatewayRef, counters }) {
     getSessionUsageSeed: async () => {
       const record = context.sessions.get(SESSION_ID);
       if (!record || record.runtimeViewOnlyShell === true) return null;
+      // risk 16 的并发门：只挡**补种**那次（激活之后的）读取，水化期的 view-only 读照旧。
+      if (counters.runtimeFactsGate) {
+        counters.runtimeFactsGate.markReached();
+        await counters.runtimeFactsGate.promise;
+      }
       // 生产从 runtime 的 context usage 派生（view-only 期刻意不给）。形状与
       // `sessionUsageSeedFromRuntimeContextUsage` 一致：`{contextWindow:{usedTokens,maxTokens}}`。
       return {
@@ -1093,7 +1082,6 @@ async function readColdMaterializationWithMemoryEvents({
   reader,
   sessionId,
   persistedMessages,
-  loadOptions,
   memoryEvents,
   sourceEventSeq = 0,
   viewOnlyShell,
@@ -1110,22 +1098,18 @@ async function readColdMaterializationWithMemoryEvents({
       messageWithParts: (input) => store.messageWithParts(input),
       sessionEntries: (input) => store.sessionEntries(input),
     },
-    ...(loadOptions?.fullMaterialization === true
-      ? {}
-      : {
-          planColdWindow: async (facts) =>
-            await readColdTailWindowMaterialization({
-              sessionID: sessionId,
-              store,
-              reader,
-              branchGeneration: facts.branchGeneration,
-              expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
-              rewind: facts.rewind,
-              ...(facts.persistedMessages === undefined
-                ? {}
-                : { loadedMessages: facts.persistedMessages }),
-            }),
-        }),
+    planColdWindow: async (facts) =>
+      await readColdTailWindowMaterialization({
+        sessionID: sessionId,
+        store,
+        reader,
+        branchGeneration: facts.branchGeneration,
+        expectedProjectionSchemaVersion: TURN_MANIFEST_PROJECTION_SCHEMA_VERSION,
+        rewind: facts.rewind,
+        ...(facts.persistedMessages === undefined
+          ? {}
+          : { loadedMessages: facts.persistedMessages }),
+      }),
   });
   const windowPlan = source.coldWindow;
   const windowedMessageIds = windowPlan ? new Set(windowPlan.windowMessageIds) : null;
@@ -1152,6 +1136,9 @@ async function readColdMaterializationWithMemoryEvents({
   const fileChangeSummaries = record
     ? await buildFileChangeSummaries({
         events: source.memoryEvents,
+        // fix-c19：与 bridge 同一条窄读——view-only 首屏没有 resume，checkpoint 事实只能从
+        // session_entry 直接取（同一读里已经拿到）。
+        persistedCheckpoints: source.persistedWorkspaceCheckpoints,
         messageIds: source.messages.map((message) => String(message.info.id)),
       })
     : undefined;
@@ -1196,16 +1183,17 @@ async function readColdMaterializationWithMemoryEvents({
   };
 }
 
-/** 与 `v4-bridge.ts:2137` 的 `buildColdFileChangeSummaries` 同一入口（夹具只提供 artifact 内容）。 */
-async function buildFileChangeSummaries({ events, messageIds }) {
+/** 与 `v4-bridge.ts` 的 `buildColdFileChangeSummaries` 同一入口（夹具只提供 artifact 内容）。 */
+async function buildFileChangeSummaries({ events, persistedCheckpoints, messageIds }) {
   const { buildColdFileChangeSummaries } = await import(
     new URL("../src/zcode-protocol-v4/cold-file-change-summaries.ts", import.meta.url).href
   );
   const durableMessageIds = new Set(messageIds);
   const checkpoints = events.filter((event) => event.type === SessionEventType.CheckpointCreated);
-  if (checkpoints.length === 0) return new Map();
+  if (checkpoints.length === 0 && (persistedCheckpoints ?? []).length === 0) return new Map();
   return await buildColdFileChangeSummaries({
     events,
+    persistedCheckpoints,
     messageIds: [...durableMessageIds],
     readArtifact: async (snapshotRef) => WORKSPACE_ARTIFACTS[snapshotRef] ?? "{}",
   });
@@ -1360,7 +1348,7 @@ test("C1 (T-SL10): view-only 非 send 拒（runtimeNotReady）；send 是唯一�
   assert.equal(after.availability.sessionRuntime, "live");
 });
 
-test("C2 (T-SL11): 激活不产生第二条 SessionResumed；升级后 rowId 与 view-only 期逐值相等", async (t) => {
+test("C2 (T-SL11): 激活不产生第二条 SessionResumed；补种后 rowId 与 view-only 期逐值相等、投影仍是尾窗", async (t) => {
   const root = tempRoot("c2");
   const counters = newCounters();
   counters.runtimes = [];
@@ -1410,20 +1398,17 @@ test("C2 (T-SL11): 激活不产生第二条 SessionResumed；升级后 rowId 与
   const ack = await sending;
   assert.equal(ack.status, "accepted");
 
-  // 升级是 fire-and-forget：等到 host 收到 fullMaterialization 那次调用。
+  // 补种是 fire-and-forget：等它落定（它不读正文，等的是那两个宿主端口的窄读）。
   await waitFor(
-    () => counters.loadOptions.some((options) => options.fullMaterialization === true),
-    "激活成功后必须排一次全量升级",
+    () => counters.debugs.some((line) => line.includes("v4 runtime facts seed applied")),
+    "激活成功后必须补一次 runtime 派生量",
   );
-  await waitFor(
-    () => counters.debugs.some((line) => line.includes("v4 projection upgrade applied")),
-    "升级必须落定（否则下面比的是两份窗口投影）",
-  );
+  assert.equal(counters.load, 1, "补种不得再读一次持久事件（窗口化首屏就是终态）");
 
   assert.equal(
     resumedEvents.length,
     1,
-    "激活 + 升级 + 首轮 send 全程只能有一条 SessionResumed（幽灵 runtime 前哨）",
+    "激活 + 补种 + 首轮 send 全程只能有一条 SessionResumed（幽灵 runtime 前哨）",
   );
   assert.equal(counters.runtimeResumes, 1, "第二次 resume 会追写第二条 SessionResumed");
   assert.equal(resumedEvents[0].payload.messageCount, 0, "lazy resume：messageCount=0 是预期");
@@ -1434,20 +1419,25 @@ test("C2 (T-SL11): 激活不产生第二条 SessionResumed；升级后 rowId 与
     "事件仍要带 workspace 事实（不是把 payload 整体压空）",
   );
 
-  // 升级后的全量投影：view-only 期下发过的每一行都必须**原样**在场（rowId 逐值）。
+  // 补种只改派生量：view-only 期下发过的每一行都必须**原样**在场（rowId 逐值），
+  // 而且投影必须仍是尾窗——「激活后换成全量」正是风险 24（398MB / 5 倍切回）。
   const after = await subscribeSnapshot(gateway, "conn-c2b");
   const afterById = new Map(after.rows.window.map((row) => [row.rowId, row]));
   for (const row of viewOnlyRows) {
-    const upgraded = afterById.get(row.rowId);
-    assert.ok(upgraded, `rowId ${row.rowId} 在升级后消失（翻页锚点会跳）`);
+    const seeded = afterById.get(row.rowId);
+    assert.ok(seeded, `rowId ${row.rowId} 在补种后消失（翻页锚点会跳）`);
     assert.deepEqual(
-      identityOfRow(upgraded),
+      identityOfRow(seeded),
       identityOfRow(row),
-      `rowId ${row.rowId} 的身份在升级前后必须逐值相等（T-SL11）`,
+      `rowId ${row.rowId} 的身份在补种前后必须逐值相等（T-SL11）`,
     );
   }
-  // 升级必须真的补了更早的行（否则上面的比较是「窗口 vs 窗口」）。
-  assert.ok(after.rows.totalCount > viewOnlyRows.length, "升级后的投影必须包含窗口之外的历史");
+  assert.equal(
+    after.rows.window[0]?.rowId,
+    viewOnlyRows[0]?.rowId,
+    "补种不得把窗口往上扩（整条分支灌进来 = 风险 24）",
+  );
+  assert.ok(after.rows.totalCount >= viewOnlyRows.length, "全序量仍由 manifest 给（尾窗 ≠ 全量）");
 });
 
 test("C3 (T-SL13): 真 store 上的首次发送，provider 收到的历史与 historyMode:'full' 逐字节相等", async (t) => {
@@ -1542,7 +1532,7 @@ test("C3 (T-SL13): 真 store 上的首次发送，provider 收到的历史与 hi
   assert.equal(lazy.turn.response, "stub answer");
 });
 
-test("C4 (T-SL14): view-only 首屏无 usage / 无 fileChanges；激活后两者补齐", async (t) => {
+test("C4 (T-SL14): fileChanges 首屏就有（session_entry 窄读）；usage 仍待激活后窄读补齐", async (t) => {
   const root = tempRoot("c4");
   const counters = newCounters();
   counters.runtimes = [];
@@ -1563,53 +1553,96 @@ test("C4 (T-SL14): view-only 首屏无 usage / 无 fileChanges；激活后两者
   const record = context.sessions.get(SESSION_ID);
   unsubscribers.push(forwardRuntimeEvents(record.app.runtime, gateway));
 
-  // 首屏降级：usage / fileChanges 都缺席，而且是**明确缺席**（不是伪造默认值）。
+  // fix-c19：fileChanges 不再依赖「激活后整份重读」。它的输入（工作区 checkpoint）在
+  // session_entry 里本来就有一份，view-only 首屏直接从那里窄读，因此**首屏就有摘要**。
   const firstHeaders = first.rows.window.filter((row) => row.kind === "turnHeader");
   assert.ok(firstHeaders.length > 0, "夹具：首屏必须有 turnHeader 行");
-  assert.ok(
-    firstHeaders.every((row) => row.fileChanges === undefined),
-    "view-only 首屏不得有 fileChanges 摘要（那需要 runtime 的 artifact reader）",
+  const firstWithSummary = firstHeaders.filter((row) => row.fileChanges !== undefined);
+  assert.equal(
+    firstWithSummary.length,
+    1,
+    "view-only 首屏必须有 fileChanges 摘要（checkpoint 从 session_entry 窄读，不等 resume）",
   );
+  assert.equal(firstWithSummary[0].fileChanges.files, 1);
+  assert.equal(firstWithSummary[0].fileChanges.additions, 1);
+  assert.equal(
+    firstWithSummary[0].turnId,
+    "m-6-u",
+    "摘要必须挂在**第 6 轮**的 turnHeader 上（checkpoint 的 targetMessageId 决定归属）",
+  );
+  // usage 是**真**的 runtime 事实（当前模型的容量口径），首屏读不到就留空。
   assert.equal(
     first.usage.contextWindow,
     null,
     "view-only 首屏不得给 contextWindow（默认分母比「暂时没有」更误导）",
   );
 
-  await gateway.handleCommand({
-    commandId: "cmd-c4-send",
-    clientId: "client-test",
-    sessionId: SESSION_ID,
-    type: "sendText",
-    payload: { text: "继续说" },
-    issuedAt: 1_700_000_000_000,
-  });
+  // ACK 之后的后台预激活会起 runtime；补种在那之后一次窄读完成（不需要用户发消息）。
   await waitFor(
-    () => counters.debugs.some((line) => line.includes("v4 projection upgrade applied")),
-    "激活后必须完成全量升级（补齐只发生在升级里）",
+    () => counters.debugs.some((line) => line.includes("v4 runtime facts seed applied")),
+    "激活后必须补一次 runtime 派生量（窄读，不重读正文）",
   );
+  assert.equal(counters.load, 1, "补种不得再读一次持久事件（窗口化首屏就是终态）");
 
   const after = await subscribeSnapshot(gateway, "conn-c4b");
-  const headersWithSummary = after.rows.window.filter(
-    (row) => row.kind === "turnHeader" && row.fileChanges !== undefined,
-  );
-  assert.ok(
-    headersWithSummary.length > 0,
-    "激活后 fileChanges 摘要必须补齐（session_entry 的 checkpoint 在 resume 时被恢复成事件）",
-  );
-  assert.equal(headersWithSummary[0].fileChanges.files, 1);
-  assert.equal(headersWithSummary[0].fileChanges.additions, 1);
+  const afterHeaders = after.rows.window.filter((row) => row.kind === "turnHeader");
   assert.equal(
-    headersWithSummary[0].turnId,
-    "m-6-u",
-    "摘要必须挂在**第 6 轮**的 turnHeader 上（checkpoint 的 targetMessageId 决定归属）",
+    afterHeaders.filter((row) => row.fileChanges !== undefined).length,
+    1,
+    "激活后摘要仍在（补种不换投影，行集合与首屏一致）",
+  );
+  assert.equal(
+    after.usage.contextWindow?.usedTokens,
+    1_234,
+    "激活后 usage 必须补齐（runtime 知道分母，值来自宿主的窄读端口）",
   );
   assert.equal(
     typeof after.usage.contextWindow?.maxTokens,
     "number",
-    "激活后 usage 必须补齐（runtime 知道分母）",
+    "补齐的 usage 必须带分母（maxTokens）",
   );
-  assert.ok((after.usage.contextWindow.usedTokens ?? 0) > 0, "usage 必须有实际用量");
+
+  // 去重（fix-c19）：resume 之后**同一份** checkpoint 同时出现在内存事件与 session_entry 里
+  // （`restoreWorkspaceCheckpointEntries` 回放的就是这份 entry）。摘要构造器必须按
+  // checkpointId 去重，否则同一份改动会被计两遍（files/additions 翻倍）。
+  const { buildColdFileChangeSummaries } = await import(
+    new URL("../src/zcode-protocol-v4/cold-file-change-summaries.ts", import.meta.url).href
+  );
+  const checkpointEntry = (
+    await world.store.sessionEntries({
+      sessionID: SESSION_ID,
+      type: "runtime/workspace_checkpoint",
+    })
+  ).find((entry) => entry.id === "entry-checkpoint-6");
+  assert.ok(checkpointEntry, "夹具：session_entry 里必须有第 6 轮的 checkpoint");
+  const restoredEvent = {
+    id: "evt-checkpoint-6",
+    sessionId: SESSION_ID,
+    type: "checkpoint_created",
+    timestamp: new Date(1_700_000_006_000),
+    traceId: "trace-ckpt-6",
+    sequenceNumber: 900,
+    payload: checkpointEntry.data.payload,
+  };
+  const deduped = await buildColdFileChangeSummaries({
+    events: [restoredEvent],
+    persistedCheckpoints: [{ checkpoint: checkpointEntry.data.payload, turnId: "turn-6" }],
+    messageIds: ["m-6-u"],
+    readArtifact: async (snapshotRef) => WORKSPACE_ARTIFACTS[snapshotRef] ?? "{}",
+  });
+  assert.equal(
+    deduped.get("m-6-u")?.files,
+    1,
+    "同一 checkpoint 的事件与 entry 必须去重（重复计入 = 摘要翻倍）",
+  );
+  assert.equal(deduped.get("m-6-u")?.additions, 1, "去重后 additions 不得翻倍");
+  // writeCount 是**唯一**对重复敏感的字段：聚合按 path 归并，files/additions 会被同一份
+  // 最终内容抹平，只有写入次数会如实记成 2 次。所以判据必须落在它上面。
+  assert.equal(
+    deduped.get("m-6-u")?.items?.[0]?.writeCount,
+    1,
+    "同一 checkpoint 只算一次写入（writeCount=2 就是没去重）",
+  );
 });
 
 // ── D: 两条遗留（fileChanges 首屏可用性 + 升级/首轮 send 并发）────────────────
@@ -1671,23 +1704,23 @@ test("D1 (遗留①): 真冷首屏拿不到 fileChanges 摘要，页物化也不
   }
 });
 
-test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「不做升级、继续 live」逐 rowId 相等", async (t) => {
+test("D2 (risk 16): 派生量补种与首轮 send 并发——补种只发一份 resync 快照，行集合与「不补种、继续 live」逐 rowId 相等", async (t) => {
   const root = tempRoot("d2");
   const counters = newCounters();
   counters.runtimes = [];
   counters.runtimeResumes = 0;
-  // 「在飞」必须确定存在：默认模型同步 yield，一轮可能在升级的持久读取之前就收口，
+  // 「在飞」必须确定存在：默认模型同步 yield，一轮可能补种之前就收口，
   // 那样这条用例测的是顺序而不是并发。只给流式回复加延迟，不改任何被测语义。
   counters.streamDelayMs = 60;
-  const upgradeGate = deferredGate();
-  counters.upgradeReadGate = upgradeGate;
+  const factsGate = deferredGate();
+  counters.runtimeFactsGate = factsGate;
   const requestLog = [];
   const { logger } = recordingLogger();
   const world = await realRuntimeCase({ root, counters, requestLog, logger });
   const { gateway, context } = world;
   const unsubscribers = [];
   t.after(async () => {
-    upgradeGate.release();
+    factsGate.release();
     for (const unsubscribe of unsubscribers) unsubscribe();
     gateway.dispose();
     await closeQuietly(world);
@@ -1695,10 +1728,10 @@ test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「
   });
 
   // 客户端视角的行观测：**出站帧序列**（`emitWireFrame` 的完整快照 + 行增量）。
-  // resync 快照正是升级改写投影后客户端实际收到的形态，回退（rowId 上界倒退）
-  // 只会在帧序列里可见。
+  // 补种的 resync 快照是客户端实际收到的形态，回退（rowId 上界倒退）只在帧序列里可见。
   const first = await subscribeSnapshot(gateway, "conn-d2a");
   const beforeRows = first.rows.window;
+  const totalCountBefore = first.rows.totalCount;
   const record = context.sessions.get(SESSION_ID);
   unsubscribers.push(forwardRuntimeEvents(record.app.runtime, gateway));
 
@@ -1710,17 +1743,12 @@ test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「
     payload: { text: "继续说" },
     issuedAt: 1_700_000_000_000,
   });
-  await waitFor(
-    () => counters.loadOptions.some((options) => options.fullMaterialization === true),
-    "激活成功后必须排一次全量升级",
-  );
-  // 门之前的活（持久事实读取 + 契约字段回填）必须已经做完，否则下面读到的水位只是
-  // 一本还没记完的账。
-  await waitForPromise(upgradeGate.reached, "升级的持久读取必须到达门");
+  // 门挡在补种的 usage 端口上：此时激活已完成、本轮 live 事件正在进投影。
+  await waitForPromise(factsGate.reached, "补种必须到达宿主的 usage 端口");
 
-  // ── 对照组 =「不做升级、继续 live」──
-  // 读入口在升级在飞时返回既有投影（`readableViewPublisher` 的第三个条件），所以这份
-  // 行集合就是「没有升级这回事」时投影会有的内容：首屏历史 + 本轮 live 的行。
+  // ── 对照组 =「不补种、继续 live」──
+  // 补种不换投影（不删防双算水位、不 rehydrate），所以这份行集合就是「没有补种这回事」时
+  // 投影会有的内容：首屏历史 + 本轮 live 的行。
   const control = await gateway.rowsRange({
     sessionId: SESSION_ID,
     limit: 200,
@@ -1731,57 +1759,35 @@ test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「
     controlRows.length > beforeRows.length,
     "对照组必须包含本轮 live 的新行（否则并发窗口没建立，下面的比较是空的）",
   );
-  // 对照态必须还是**降级**投影（首行与首屏同一个窗口边界）：首行变早 = 升级已经落定，
-  // 那时读到的对照组就是升级后的自己，这条用例会退化成「升级 vs 升级」。
   assert.equal(
     controlRows[0].rowId,
     beforeRows[0].rowId,
-    "对照组必须在升级落定之前读（首行仍是首屏窗口边界）",
+    "补种不得改投影起点（首行必须还是首屏窗口边界）",
   );
 
-  // 宿主契约（risk 16 的机制本体）：升级那次持久读取必须交出真水位
-  // （`v4-bridge.ts:2014-2019/2238`）。交 0 会让尾部重放的每个事件都卡在「等 seq=1」
-  // 的 raw gap 里（`test-session-row-manifest.mjs:932` 对这条契约有记账），并发在飞的
-  // 那一轮于是被静默抹掉。
-  const upgradeLoad = counters.watermarks.find((entry) => entry.fullMaterialization);
-  assert.ok(upgradeLoad, "升级必须走一次 loadPersistedEvents");
-  assert.equal(
-    upgradeLoad.returnedSourceEventSeq,
-    upgradeLoad.sourceEventSeq,
-    "持久读取必须把读到的事件水位原样交出去（换掉/清零 = 尾部重放会卡在 raw gap）",
-  );
-  assert.ok(
-    upgradeLoad.sourceEventSeq > 0,
-    `升级的持久读取必须报出真水位，实际 ${upgradeLoad.sourceEventSeq}（0 = 宿主契约违约，尾部会卡在 raw gap）`,
-  );
-
-  upgradeGate.release();
+  factsGate.release();
   await waitFor(
-    () => counters.debugs.some((line) => line.includes("v4 projection upgrade applied")),
-    "升级必须落定（否则比的是两份 live 投影）",
+    () => counters.debugs.some((line) => line.includes("v4 runtime facts seed applied")),
+    "补种必须落定（否则比的是两份 live 投影）",
   );
 
-  // ① 判据本体：升级后**不得改动、不得抹掉**对照组里的任何一行（逐 rowId 身份相等）。
-  //    首屏是窗口化的，所以对照组只含末几轮 + live 尾部；升级允许把窗口之外更早的历史
-  //    补进来（这正是升级的目的），但共享区间的每一行必须逐值不变——「并发在飞的一轮
-  //    被静默抹掉」就会在这里现形。
+  // ① 判据本体：补种后**不得改动、不得抹掉**对照组里的任何一行（逐 rowId 身份相等）。
   const after = await subscribeSnapshot(gateway, "conn-d2b");
   const afterRows = after.rows.window;
   const controlFirst = controlRows[0].rowId;
   assert.deepEqual(
     afterRows.filter((row) => row.rowId >= controlFirst).map(identityOfRow),
     controlRows.map(identityOfRow),
-    "升级后共享区间的行集合必须与「不做升级、继续 live」逐 rowId 相等（不得抹掉在飞的一轮）",
-  );
-  assert.ok(
-    afterRows.some((row) => row.rowId < controlFirst),
-    "升级必须真的补上窗口之外的历史（否则它只是一次窗口重物化，上面的比较是空的）",
+    "补种后共享区间的行集合必须与「不补种、继续 live」逐 rowId 相等（不得抹掉在飞的一轮）",
   );
   assert.equal(
-    after.rows.totalCount,
-    afterRows.length,
-    "升级之后 totalCount 必须与窗口行数一致（不能多算一份、也不能少一轮）",
+    after.rows.window.length,
+    controlRows.length,
+    "补种不得增删行（整条分支灌进来 = 风险 24）",
   );
+  // 全序量不作为判据：本轮 live ingest 已经增删过行集合，manifest 基线按 IS5 作废
+  // （risk 15 的既有口径），`totalCount` 会退回投影现算。这里要证明的是「补种没动行」，
+  // 上面两条窗口区间 / 行集合相等的断言才是判据。
 
   // ② 客户端已经收到的行不得在后续帧里消失：rowId 上界只能单调不减。
   const startingMax = Math.max(...beforeRows.map((row) => row.rowId));
@@ -1812,7 +1818,7 @@ test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「
     }
   }
   process.stdout.write(
-    `\n[risk16] upgrade/send concurrency: frames=${frameCount} ` +
+    `\n[risk16] runtime-facts-seed/send concurrency: frames=${frameCount} ` +
       `finalMaxRowId=${observedMax} rollback=${rollback === null ? "none" : JSON.stringify(rollback)}\n`,
   );
   assert.ok(frameCount > 0, "夹具：必须真的下发过出站帧（否则这条观测是空的）");
@@ -1820,6 +1826,13 @@ test("D2 (risk 16): 升级与首轮 send 并发——升级后的行集合与「
     rollback,
     null,
     `出站快照的 rowId 上界不得回退（客户端已经收到过 ${startingMax} 之上的流式行）`,
+  );
+  // 代价有界：补种不读正文（一次都不多）。
+  assert.equal(counters.load, 1, "补种不得读正文");
+  assert.equal(
+    counters.watermarks.every((entry) => entry.sourceEventSeq === entry.returnedSourceEventSeq),
+    true,
+    "唯一那次持久读取必须把水位原样交出（换掉/清零 = 尾部重放会卡在 raw gap）",
   );
 
   // ③ 数据面没写坏：本轮的消息已经落进真 store（投影的陈旧不等于持久层丢数据）。

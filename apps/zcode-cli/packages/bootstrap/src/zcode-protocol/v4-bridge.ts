@@ -1974,7 +1974,7 @@ export function createConversationV4Gateway(
     // 冷订阅不再在 eventStore / transcript 之间 XOR。message/part
     // 是已完成正文权威，session_entry 只补 legacy goal，内存事件只补
     // 未持久 in-flight 和 queue/permission/control 等 ephemeral 状态。
-    loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {
+    loadPersistedEvents: async (sessionId, persistedMessages) => {
       // 冷开 mergeMs 的分项读数（Step 15）：mergeMs 是整个宿主调用的墙钟，过去只知总数
       // 不知构成，导致「全量事件重放很贵」这类推断无法证伪。只走 debug，不进 openPhases。
       const loadMarks: Record<string, number> = {};
@@ -2069,9 +2069,9 @@ export function createConversationV4Gateway(
           : {}),
         // Step 6（IS2/IS6）：冷开正文读走尾窗。清单不可信 / 索引不同步 / 分支为空时退回
         // 全量，原因随 `coldWindowFallback` 带出并打点。
-        // Step 10：激活后的升级（`fullMaterialization`）**不传** `planColdWindow`——
-        // 升级的意义就是把窗口投影换成全量，再规划一次尾窗只会把同一份窗口重物化一遍。
-        ...(store && loadOptions?.fullMaterialization !== true
+        // fix-c19：**每次**读都规划尾窗（不再有「激活后升级成全量」那条读模式）。窗口化
+        // 首屏就是终态：行数由 manifest 给，窗口以上的页按需物化。
+        ...(store
           ? {
               planColdWindow: async (facts) => {
                 // Step 9：shared_context 导入不再退全量——那条 model-only 上下文消息由
@@ -2161,6 +2161,11 @@ export function createConversationV4Gateway(
             // 那 685 次读没有任何出口（翻页也不读摘要，见 `materializeRowPage` 的已知代价）。
             // 全量物化时 `source.messages` 就是整条 active 分支，与旧口径逐值一致。
             messageIds: source.messages.map((message) => String(message.info.id)),
+            // fix-c19：view-only 首屏没有 resume，`CheckpointCreated` 事件还没被
+            // `restoreWorkspaceCheckpointEntries` 回放进 eventStore——旧实现靠「激活后整份
+            // 重读」把它们补回来（代价是整条分支灌进 live 投影）。现在直接从同一读里已经
+            // 拿到的 session_entry 取（按窗口 messageId 过滤仍在摘要构造器内），首屏就有摘要。
+            persistedCheckpoints: source.persistedWorkspaceCheckpoints,
             readArtifact: async (snapshotRef) =>
               (await record.app.readToolResultArtifact(snapshotRef)).content,
             onArtifactError: (messageId, error) =>
@@ -2246,7 +2251,6 @@ export function createConversationV4Gateway(
         module: "bootstrap.zcode_protocol",
         phase: "loadPersistedEvents",
         sessionId,
-        fullMaterialization: loadOptions?.fullMaterialization === true,
         memoryEvents: events.length,
         mergedEvents: merged.events.length,
         windowed: windowPlan !== undefined,

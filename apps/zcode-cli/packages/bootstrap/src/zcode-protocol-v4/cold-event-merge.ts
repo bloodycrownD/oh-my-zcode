@@ -16,6 +16,11 @@ import {
   type ColdSynthesisContext,
   type HydratedGoalVerificationEntry,
 } from "./transcript-hydration.js";
+import {
+  SESSION_ENTRY_WORKSPACE_CHECKPOINT,
+  parseCheckpointCreatedPayload,
+} from "@zcode/contracts";
+import type { PersistedWorkspaceCheckpoint } from "./cold-file-change-summaries.js";
 import type {
   ColdTailWindowFallbackReason,
   ColdTailWindowPlan,
@@ -26,6 +31,15 @@ interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
   messages: MessageWithParts[];
+  /**
+   * session_entry 里持久化的**工作区 checkpoint**（fix-c19）。
+   *
+   * `CheckpointCreated` 事件只在 resume 时由 `restoreWorkspaceCheckpointEntries` 回放进
+   * eventStore，而 view-only 首屏没有 resume——所以首屏要的 fileChanges 摘要不能等事件，
+   * 直接从这一份（同一读里已经拿到的 `session_entry`）派生。内存事件里已有的按
+   * checkpointId 去重（resume 过之后两者同源，重复会让同一份改动加两遍）。
+   */
+  persistedWorkspaceCheckpoints: PersistedWorkspaceCheckpoint[];
   /**
    * 持久化的分支代次（`SessionRevert.branchGeneration`）。turn 行清单按它键控；
    * 读不到 store 时只能是 0——此时 manifest 也会走缺失降级，不能当成权威代次。
@@ -133,6 +147,7 @@ export async function loadPersistedConversationMaterialization(input: {
       goalVerificationEntries: [],
       memoryEvents: [...input.memoryEvents],
       messages: [],
+      persistedWorkspaceCheckpoints: [],
     };
   }
   const sessionID = input.sessionId as import("@zcode/contracts").SessionId;
@@ -214,6 +229,10 @@ export async function loadPersistedConversationMaterialization(input: {
     goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
     memoryEvents: [...input.memoryEvents],
     messages,
+    persistedWorkspaceCheckpoints: workspaceCheckpointsFromSessionEntries(
+      entries,
+      input.memoryEvents,
+    ),
     ...(sharedContextImport ? { sharedContextImport } : {}),
     target,
     ...(coldWindow ? { coldWindow } : {}),
@@ -226,6 +245,52 @@ export async function loadPersistedConversationMaterialization(input: {
         }
       : {}),
   };
+}
+
+/**
+ * session_entry → 工作区 checkpoint（fix-c19 的窄读：不再等 resume 把同一个 payload 回放
+ * 成事件）。
+ *
+ * 信封形状与 core 的写侧（`workspace-checkpoint-persistence.ts` 的
+ * `persistWorkspaceCheckpoint`）逐字对应：`{ eventId, sequenceNumber, traceId, turnId?,
+ * payload }`。这里只做**读侧**校验，坏条目跳过——一条坏 checkpoint 不能把首屏拖垮。
+ *
+ * 内存事件里已有的 checkpointId 直接丢弃：resume 之后事件与 entry 同源，合并两份会让
+ * 同一份改动计两遍。注意顺序：内存事件才是权威（它可以比 entry 更新）。
+ */
+function workspaceCheckpointsFromSessionEntries(
+  entries: readonly SessionEntryInfo[],
+  memoryEvents: readonly SessionEvent[],
+): PersistedWorkspaceCheckpoint[] {
+  const knownIds = new Set<string>();
+  for (const event of memoryEvents) {
+    if (event.type !== SessionEventType.CheckpointCreated) continue;
+    try {
+      knownIds.add(parseCheckpointCreatedPayload(event.payload).checkpointId);
+    } catch {
+      // 坏事件不参与去重（它本来也进不了摘要）。
+    }
+  }
+  const checkpoints: PersistedWorkspaceCheckpoint[] = [];
+  for (const entry of entries) {
+    if (entry.type !== SESSION_ENTRY_WORKSPACE_CHECKPOINT) continue;
+    const envelope = entry.data;
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) continue;
+    const record = envelope as Record<string, unknown>;
+    if (!("payload" in record)) continue;
+    try {
+      const checkpoint = parseCheckpointCreatedPayload(record.payload);
+      if (knownIds.has(checkpoint.checkpointId)) continue;
+      knownIds.add(checkpoint.checkpointId);
+      checkpoints.push({
+        checkpoint,
+        turnId: typeof record.turnId === "string" ? record.turnId : null,
+      });
+    } catch {
+      // 旧格式 / 坏 payload：跳过（与 core 的 restore 同一口径）。
+    }
+  }
+  return checkpoints;
 }
 
 interface ColdEventMergeDiagnostic {

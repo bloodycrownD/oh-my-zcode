@@ -1853,7 +1853,7 @@ function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManife
     baseTimestampMs,
   };
 
-  const calls = { resume: 0, load: 0, fullLoads: 0, pages: [] };
+  const calls = { resume: 0, load: 0, pages: [] };
   let activated = false;
   const { host, captures } = stubGatewayHost({
     readRowManifest: async () => ({
@@ -1873,12 +1873,8 @@ function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManife
     activated = true;
     return { status: "resumed" };
   };
-  host.loadPersistedEvents = async (_sessionId, _messages, loadOptions) => {
+  host.loadPersistedEvents = async () => {
     calls.load += 1;
-    // Step 15 起「激活先完成」的顺序也会在首屏收口后排一次全量升级（本夹具的
-    // loadPersistedEvents 对升级返回同一份窗口事件，因此投影不会变成全量）。
-    // 升级不是冷开：断言必须能把「翻页触发的读」和「一次升级读」分开。
-    if (loadOptions?.fullMaterialization === true) calls.fullLoads += 1;
     return {
       events: windowEvents,
       synthesized: true,
@@ -1946,7 +1942,7 @@ function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManife
 }
 
 test("M1: 冷窗后逐页翻到顶 —— 每页与全量物化逐值相等，且只冷开一次（T-SL9 / IS6）", async () => {
-  const { host, calls, fullRows, windowBase } = pagedGatewayFixture();
+  const { host, captures, calls, fullRows, windowBase } = pagedGatewayFixture();
   const gateway = new ConversationV4Gateway(host);
   try {
     await gateway.subscribe({
@@ -1986,11 +1982,18 @@ test("M1: 冷窗后逐页翻到顶 —— 每页与全量物化逐值相等，�
     );
     assert.equal(calls.pages.length, 4, "每页一次物化（21 行 / 6 行 = 4 页）");
     assert.equal(
-      calls.load - calls.fullLoads,
+      calls.load,
       1,
-      "翻页不得触发第二次冷开（只有首屏那一次非升级读）",
+      "翻页不得触发第二次冷开（fix-c19 之后也不存在「激活后全量升级」那次读）",
     );
     assert.equal(calls.resume, 1, "翻页不得再激活 runtime");
+    // fix-c19：**窗口化本身不是降级**。这个夹具的首屏是窗口化的、但 record 是 live
+    // （runtime 事实齐全），所以激活后不欠任何补种——把「窗口化」也当欠账正是风险 24。
+    assert.equal(
+      captures.debug.some((line) => line.includes("v4 runtime facts seed applied")),
+      false,
+      "窗口化（非 view-only）首屏不得触发派生量补种",
+    );
     const outcome = gateway.getRowPageOutcome(SESSION_ID);
     assert.equal(outcome.applied, true);
     assert.equal(outcome.pageRows, 4, "顶部那一页只有 4 行（不再凑满 limit）");

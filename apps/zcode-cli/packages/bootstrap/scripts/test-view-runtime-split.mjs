@@ -29,8 +29,8 @@
  *   H. **窗口化冷开的 shared_context 兼容**（Step 9）：那条 model-only 上下文消息几乎总在
  *      窗口之外，靠「窗口正文 find」会静默丢掉分享导入元数据；改为按 id 单条确认（H1/H2）。
  *   M. **读入口不复触发冷开**（Step 11）：视图已就绪后翻页/重订不得再物化外壳（那就是
- *      第二次冷开）；升级删了 `hydratedSessions` 的那段窗口里，读入口要继续读旧投影而不是
- *      起第二份水化把升级吞掉（M1-M3）。
+ *      第二次冷开）；激活后的派生量补种**不删**水位（fix-c19：它不换投影），所以读入口
+ *      在任何时刻都读同一份投影（M1-M3）。
  *
  * 运行：`npx tsx --test scripts/test-view-runtime-split.mjs`（必须走 tsx：gateway 的依赖
  * 链摸到 `@zcode/model-option-map` 的 src 出口）。
@@ -339,7 +339,7 @@ function gatewayFixture({
   shellPort = false,
   runtimeProbe = true,
 } = {}) {
-  const calls = { resume: 0, shell: 0, executed: [], errors: [], load: 0 };
+  const calls = { resume: 0, shell: 0, executed: [], errors: [], load: 0, usageSeeds: 0 };
   let live = false;
   // Step 9 起「record 在册」与「runtime 在跑」是两个事实：view-only shell 只建 record。
   // 默认让二者同步（旧口径），需要暴露缝的用例用 setRuntimeActive 单独拧。
@@ -366,6 +366,14 @@ function gatewayFixture({
             runtimeActive = false;
             return { status: "materialized" };
           },
+          // 与 v4-bridge 同构：view-only shell 期读不到 runtime 的容量口径 → null；
+          // 激活之后才给出真值（fix-c19 的补种就是问这一次）。
+          // 计数只记「拿到真值」的那些次：水化期的那次（view-only）本来就返回 null。
+          getSessionUsageSeed: async () => {
+            if (runtimeActive !== true) return null;
+            calls.usageSeeds += 1;
+            return { contextWindow: { usedTokens: 1234, maxTokens: 200_000 } };
+          },
         }
       : {}),
     resumePersistedSession: async () => {
@@ -384,6 +392,9 @@ function gatewayFixture({
         synthesized: true,
         sourceEventSeq: 0,
         branchGeneration: 0,
+        // 与生产 bridge 同构：有 record 就一定会给 usageSeed（这里是 null = 查过但没有水位），
+        // 因此水化期不会再走 `getSessionUsageSeed` 兜底。
+        usageSeed: null,
       };
     },
     onError: (scope, error) => {
@@ -942,7 +953,7 @@ test("I2: 三处首屏降级都以 runtimeViewOnlyShell 为判据（漏一处就
 
   // loadPersistedEvents：record 缺席不再是闸门（旧实现直接 return 空事件 → 首屏空历史）。
   const loadAt = bridgeSource.indexOf(
-    "loadPersistedEvents: async (sessionId, persistedMessages, loadOptions) => {",
+    "loadPersistedEvents: async (sessionId, persistedMessages) => {",
   );
   assert.ok(loadAt > 0);
   const loadBody = bridgeSource.slice(
@@ -1240,7 +1251,7 @@ test("J3: 没有 provider / 旧快照缺键时一律按 live（schema 默认是�
   );
 });
 
-// ── K: 激活后的全量升级（Step 10 的主力）────────────────────────────────────
+// ── K: 激活后的派生量补种（Step 10 的主力，fix-c19 换成窄读）────────────────
 
 async function waitFor(predicate, message, timeoutMs = 3_000) {
   const startedAt = Date.now();
@@ -1283,26 +1294,22 @@ test("K1: 会话首帧按真实 runtime 态下发——外壳期 viewOnly，激�
   }
 });
 
-test("K2: 激活成功后把降级的首屏投影升级成全量（一次全量读、不二次 resume）", async () => {
+test("K2: view-only 首屏激活后只补派生量——不重读正文、不换投影（fix-c19 取代全量升级）", async () => {
   const { host, calls } = gatewayFixture({ shellPort: true });
-  const fullEvents = [
-    ...completedTurn({ turnNumber: 1, seq: 1 }),
-    ...completedTurn({ turnNumber: 2, seq: 5 }),
-  ];
-  const loadOptions = [];
-  host.loadPersistedEvents = async (sessionId, persistedMessages, options) => {
-    loadOptions.push(options ?? {});
-    if (loadOptions.length === 1) {
-      // 首屏：view-only 口径（record 还是 shell，正文与 runtime 事实都刻意缺席）。
-      return {
-        events: [],
-        synthesized: true,
-        sourceEventSeq: 0,
-        branchGeneration: 0,
-        viewOnlyHydration: true,
-      };
-    }
-    return { events: fullEvents, synthesized: true, sourceEventSeq: 0, branchGeneration: 0 };
+  const debugLines = [];
+  const wires = [];
+  host.onDebug = (message) => debugLines.push(String(message));
+  host.emitWireFrame = (wire) => wires.push(wire);
+  host.loadPersistedEvents = async () => {
+    calls.load += 1;
+    // 首屏：view-only 口径（record 还是 shell，正文与 runtime 事实都刻意缺席）。
+    return {
+      events: [],
+      synthesized: true,
+      sourceEventSeq: 0,
+      branchGeneration: 0,
+      viewOnlyHydration: true,
+    };
   };
   const gateway = new ConversationV4Gateway(host);
   try {
@@ -1314,71 +1321,112 @@ test("K2: 激活成功后把降级的首屏投影升级成全量（一次全量�
     assert.equal(
       first.initialFrame.payload.snapshot.rows.totalCount,
       0,
-      "夹具：首屏是降级投影（没有正文）",
+      "夹具：首屏是 view-only 投影（没有正文）",
+    );
+    assert.equal(
+      first.initialFrame.payload.snapshot.usage?.contextWindow ?? null,
+      null,
+      "view-only 首屏没有 usage 是预期（不拿默认模型编一个分母）",
     );
 
-    // ACK 之后的后台预激活负责激活 → 激活成功即排升级（fire-and-forget）。
-    await waitFor(() => loadOptions.length >= 2, "激活后的全量升级必须真的发生");
-    assert.equal(
-      loadOptions[1].fullMaterialization,
-      true,
-      "升级必须要求全量读：再规划一次尾窗只是把同一份窗口重物化一遍",
+    // ACK 之后的后台预激活负责激活 → 激活成功即补种派生量（fire-and-forget）。
+    await waitFor(
+      () => debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      "激活后必须补一次 runtime 派生量",
     );
-    assert.equal(calls.resume, 1, "升级不得二次 resume（幽灵 runtime 的唯一入口）");
+    assert.equal(calls.resume, 1, "补种不得二次 resume（幽灵 runtime 的唯一入口）");
+    // 这就是 fix-c19 的核心：**一次正文读都没有多**。旧实现在这里会多一次全量读
+    // （5255 行灌进 live 投影 → 398MB / 5 倍切回）。
+    assert.equal(calls.load, 1, "激活后不得再读一次持久事件（窗口化首屏就是终态）");
+    assert.ok(calls.usageSeeds >= 1, "补种必须真的问过宿主的 usage 端口（窄读）");
+
+    // 客户端视角：补种不产 delta，必须靠一次快照重发才看得见。
+    await waitFor(
+      () => wires.some((wire) => wire?.frame?.payload?.kind === "snapshot"),
+      "补种后必须给现有订阅重发一份快照（否则要等下一个事件才看见 usage）",
+    );
+    const resynced = wires
+      .map((wire) => wire?.frame?.payload)
+      .filter((payload) => payload?.kind === "snapshot")
+      .at(-1);
+    assert.equal(
+      resynced?.snapshot?.usage?.contextWindow?.usedTokens,
+      1234,
+      "重发的快照必须带上激活后的 usage 真值",
+    );
 
     const after = await gateway.subscribe({
       topic: `conversation/${SESSION_ID}`,
       connectionId: "conn-k2b",
       clientMode: "desktop-continuous",
     });
-    const snapshot = after.initialFrame.payload.snapshot;
-    assert.ok(snapshot.rows.totalCount > 0, "升级后投影必须包含正文");
-    assert.equal(
-      snapshot.rows.totalCount,
-      snapshot.rows.window.length,
-      "小会话的全量投影：totalCount 与窗口长度一致（没有窗口化残留）",
+    assert.equal(calls.load, 1, "重订仍是纯早退（不重读）");
+    assert.ok(
+      (after.initialFrame.payload.snapshot.rows.totalCount ?? 0) === 0,
+      "投影行集合仍只有本次物化的那些（空夹具 = 0），没有被「升级」灌成全量",
     );
     assert.equal(
-      calls.errors.filter((entry) => entry.scope.includes("upgrade")).length,
+      calls.errors.filter((entry) => entry.scope.includes("runtimeFactsSeed")).length,
       0,
-      "升级失败会经 onError 记账",
+      "补种失败会经 onError 记账",
     );
   } finally {
     gateway.dispose();
   }
 });
 
-test("K3: 升级路径必须「先删 hydratedSessions 再 forceRebuild」，且不得自己 resume", () => {
-  const upgradeAt = gatewaySource.indexOf("private async upgradeProjectionToFull(");
-  const prewarmAt = gatewaySource.indexOf("private prewarmRuntimeAfterViewAck(");
-  assert.ok(upgradeAt > 0 && prewarmAt > upgradeAt, "升级执行体必须存在且可检视");
-  const body = gatewaySource.slice(upgradeAt, prewarmAt);
-  const deleteAt = body.indexOf("this.hydratedSessions.delete(sessionId)");
-  const rebuildAt = body.indexOf("this.hydratePublisher(sessionId, undefined, true");
-  assert.ok(deleteAt > 0, "必须先删防双算水位");
-  assert.ok(
-    rebuildAt > deleteAt,
-    "顺序不能反：hydratePublisher 的早退判定在 forceRebuild 之前，不先删就是 no-op",
+test("K3: 补种路径只读宿主端口——不删水位、不重读、不重建投影（源码形状守卫）", () => {
+  // ① 全量升级的实体必须连根消失（留着就是 398MB 与 5 倍切回的入口）。
+  for (const gone of [
+    "upgradeProjectionToFull",
+    "scheduleProjectionUpgrade",
+    "fullMaterialization",
+    "degradedFirstScreen",
+    "projectionUpgrades",
+  ]) {
+    assert.equal(
+      gatewaySource.includes(gone),
+      false,
+      `${gone} 必须删干净（风险 24 的根因是「激活后把整条分支灌进 live 投影」）`,
+    );
+  }
+  // ② 补种执行体里不得出现任何「读正文 / 重建投影 / 撤销水位」。
+  const seedAt = gatewaySource.indexOf("private async seedRuntimeFacts(");
+  assert.ok(seedAt > 0, "补种执行体必须存在且可检视");
+  const seedBody = gatewaySource.slice(
+    seedAt,
+    gatewaySource.indexOf("private prewarmRuntimeAfterViewAck(", seedAt),
   );
-  assert.ok(body.includes("fullMaterialization: true"), "升级必须带上全量读口径");
   assert.ok(
-    !body.includes("app.resume(") && !body.includes("createRecord("),
-    "升级不得直接 resume/createRecord：必须走激活本体的同一条入口（双 resume = 幽灵 runtime）",
+    seedBody.includes("this.seedPublisherConfig("),
+    "config 种子（thoughtLevels / permissionGrant）必须补",
   );
+  assert.ok(seedBody.includes("await this.seedPublisherUsage("), "usage 种子必须补");
+  assert.ok(seedBody.includes("requireSnapshotResync()"), "不产 delta 的补种必须显式要求快照重发");
+  for (const forbidden of [
+    "hydratePublisher",
+    "hydratedSessions",
+    "rehydrate(",
+    "loadPersistedEvents",
+    "app.resume(",
+    "createRecord(",
+  ]) {
+    assert.equal(
+      seedBody.includes(forbidden),
+      false,
+      `补种不得出现 ${forbidden}：它只补派生量，不碰行集合、不删防双算水位`,
+    );
+  }
 
-  // 触发点：两个，且都不能省（Step 15 修的顺序依赖）。
+  // ③ 触发点仍是两个（激活成功 + 首屏收口），且都不能省。
   const readyAt = gatewaySource.indexOf("private ensureRuntimeReady(");
-  const readyBody = gatewaySource.slice(readyAt, upgradeAt);
+  const readyBody = gatewaySource.slice(readyAt, seedAt);
   const scheduleAt = readyBody.indexOf(
-    'this.scheduleProjectionUpgrade(sessionId, "runtimeActivated")',
+    'this.scheduleRuntimeFactsSeed(sessionId, "runtimeActivated")',
   );
   const activatedAt = readyBody.indexOf("flight.activated = true");
-  assert.ok(scheduleAt > 0, "激活成功必须排升级");
-  assert.ok(
-    scheduleAt > activatedAt,
-    "升级只能排在激活本体成功之后（激活前没有 record，全量读也补不齐）",
-  );
-  // 第二个触发点：首屏 hydrate 收口。只在「本次记了降级事实」时才调。
+  assert.ok(scheduleAt > 0, "激活成功必须排补种");
+  assert.ok(scheduleAt > activatedAt, "补种只能排在激活本体成功之后（激活前那两个端口读不到东西）");
   const sillAt = gatewaySource.indexOf("private async performHydration(");
   assert.ok(sillAt > 0);
   const hydrationBody = gatewaySource.slice(
@@ -1386,30 +1434,24 @@ test("K3: 升级路径必须「先删 hydratedSessions 再 forceRebuild」，且
     gatewaySource.indexOf("private keepProjectionAfterLoadFailure(", sillAt),
   );
   const settledAt = hydrationBody.indexOf(
-    'this.scheduleProjectionUpgrade(sessionId, "firstScreenSettled")',
+    'this.scheduleRuntimeFactsSeed(sessionId, "firstScreenSettled")',
   );
-  assert.ok(settledAt > 0, "首屏收口必须再排一次：激活先完成的顺序里只有这里能补上升级");
+  assert.ok(settledAt > 0, "首屏收口必须再排一次：激活先完成的顺序里只有这里能补上");
   assert.ok(
-    hydrationBody.slice(0, settledAt).includes("if (this.degradedFirstScreen.has(sessionId))"),
-    "收口触发点必须由「本次真的记了降级事实」把门（否则每次 hydrate 都多一条早退日志）",
+    hydrationBody.slice(0, settledAt).includes("if (this.runtimeFactsPending.has(sessionId))"),
+    "收口触发点必须由「本次真的记了欠补种事实」把门（否则每次 hydrate 都多一条早退日志）",
   );
-  // 幂等边界：先看「在飞 / 无降级 / 激活未就绪」三个早退，再消费 flag 起升级。
-  assert.ok(
-    gatewaySource.includes("if (this.projectionUpgrades.has(sessionId)) {") &&
-      gatewaySource.includes("if (!this.degradedFirstScreen.has(sessionId)) {") &&
-      gatewaySource.includes("if (!this.isRuntimeReady(sessionId)) {"),
-    "三个早退分支缺一不可：在飞（不许重复排）/ 无降级（不欠升级）/ 激活未就绪（等激活来排）",
-  );
+  // 幂等边界：先看「不欠 / 激活未就绪」两个早退，再消费 flag 起补种。
   const scheduleBody = gatewaySource.slice(
-    gatewaySource.indexOf("private scheduleProjectionUpgrade("),
-    gatewaySource.indexOf("private async upgradeProjectionToFull("),
+    gatewaySource.indexOf("private scheduleRuntimeFactsSeed("),
+    seedAt,
   );
   assert.ok(
-    scheduleBody.indexOf("this.degradedFirstScreen.delete(sessionId)") >
+    scheduleBody.indexOf("this.runtimeFactsPending.delete(sessionId)") >
       scheduleBody.indexOf("if (!this.isRuntimeReady(sessionId)) {"),
-    "flag 必须在「激活已就绪」之后才消费——提前删掉就没有人会再排这次升级",
+    "flag 必须在「激活已就绪」之后才消费——提前删掉就没有人会再补这次种子",
   );
-  for (const reason of ["reason=inFlight", "reason=notDegraded", "reason=runtimeNotReady"]) {
+  for (const reason of ["reason=notPending", "reason=runtimeNotReady"]) {
     assert.ok(
       scheduleBody.includes(reason),
       `早退必须留可检索的信号：${reason}（Step 14 的教训是它完全静默）`,
@@ -1417,8 +1459,10 @@ test("K3: 升级路径必须「先删 hydratedSessions 再 forceRebuild」，且
   }
 });
 
-test("K4: 首屏本来就是全量时不做无谓的重读（降级事实是唯一判据）", async () => {
+test("K4: 非 view-only 首屏不补种（runtime 事实本来就齐，不做无谓的二次种子）", async () => {
   const { host, calls } = gatewayFixture({ shellPort: true });
+  const debugLines = [];
+  host.onDebug = (message) => debugLines.push(String(message));
   const gateway = new ConversationV4Gateway(host);
   try {
     await gateway.subscribe({
@@ -1427,15 +1471,21 @@ test("K4: 首屏本来就是全量时不做无谓的重读（降级事实是唯�
       clientMode: "desktop-continuous",
     });
     await gateway.handleCommand(commandEnvelope("sendText", { text: "继续" }));
-    // 给 fire-and-forget 的升级留出足够时间（有的话一定会被观察到）。
+    // 给 fire-and-forget 的补种留出足够时间（有的话一定会被观察到）。
     await new Promise((resolve) => setTimeout(resolve, 40));
-    assert.equal(calls.load, 1, "没有窗口化 / view-only 口径就不该多读一次全量正文");
+    assert.equal(calls.load, 1, "首屏之外的读一次都不该发生");
+    assert.equal(calls.usageSeeds, 0, "首屏不是 view-only 口径 ⇒ 不欠补种，连端口都不该问");
+    assert.equal(
+      debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      false,
+      "不欠补种时不得声称 applied",
+    );
   } finally {
     gateway.dispose();
   }
 });
 
-test("K5: 升级不靠 rowSetSignature 作废清单——rehydrate 显式清事实，随后按全量重建", () => {
+test("K5: 重物化显式清清单事实；宿主读永远规划尾窗（全量读模式已不存在）", () => {
   const rehydrateAt = publisherSource.indexOf("  rehydrate(");
   assert.ok(rehydrateAt > 0, "publisher.rehydrate 必须存在");
   const rehydrateBody = publisherSource.slice(
@@ -1444,48 +1494,48 @@ test("K5: 升级不靠 rowSetSignature 作废清单——rehydrate 显式清事�
   );
   assert.ok(
     rehydrateBody.includes("this.clearRowManifestFacts()"),
-    "重物化会换掉整份投影行，必须显式丢弃旧清单（升级本身不走 ingest，签名判不到) ",
+    "重物化会换掉整份投影行，必须显式丢弃旧清单（rehydrate 不走 ingest，签名判不到）",
   );
-  // performHydration：rehydrate 之后才重建 manifest 事实，且升级时 coldWindow 缺席（全量口径）。
+  // performHydration：rehydrate 之后才重建 manifest 事实。顺序反了就是拿旧事实当新权威。
   const rehydrateCallAt = gatewaySource.indexOf("publisher.rehydrate(loaded.events, {");
   const hydrateManifestAt = gatewaySource.indexOf("await this.hydrateRowManifest(");
   assert.ok(
     rehydrateCallAt > 0 && hydrateManifestAt > rehydrateCallAt,
     "清单事实必须在 rehydrate 之后重新注入（顺序反了就是拿旧事实当新权威）",
   );
-  // 宿主侧：升级读必须跳过尾窗规划，否则「升级」只是把同一份窗口再物化一遍。
-  const skipWindowAt = bridgeSource.indexOf("loadOptions?.fullMaterialization !== true");
-  const planWindowAt = bridgeSource.indexOf("planColdWindow: async");
+  // 宿主侧：任何一次读都规划尾窗——不再有「跳过窗口规划的全量读」这种模式。
+  assert.equal(
+    bridgeSource.includes("fullMaterialization"),
+    false,
+    "bridge 不得再认读模式开关（那样才有「把整条分支读回来」的入口）",
+  );
   assert.ok(
-    skipWindowAt > 0 && planWindowAt > skipWindowAt,
-    "planColdWindow 必须被 fullMaterialization 门控",
+    bridgeSource.includes("...(store") && bridgeSource.includes("planColdWindow: async"),
+    "planColdWindow 必须无条件提供",
   );
 });
 
-// ── K6/K7: 升级的顺序独立性与幂等（Step 15 修的 bug）────────────────────────
+// ── K6/K7: 补种触发点的顺序独立性与幂等（Step 15 的 bug，fix-c19 逐字保留）──────
 //
 // 实测（Step 14 真机）：app 冷启的打开顺序是「**先激活、后窗口化首屏收口**」——
 // journal 读入口 `ensureHostRecordForJournalRead` 在点击前就 await 了 `ensureRuntimeReady`，
-// 于是 `scheduleProjectionUpgrade` 在激活分支读 `degradedFirstScreen` 时集合还是空的，
-// 早退之后没有任何重试入口，6 次打开一条升级都没有（CLI 重起那条顺序相反，3/3 都有）。
+// 于是排队函数在激活分支读 `runtimeFactsPending` 时集合还是空的，早退之后没有任何重试
+// 入口，6 次打开一次补齐都没有（CLI 重起那条顺序相反，3/3 都有）。
 // 判据必须是「谁先跑完」之外的**集合事实**，所以两个触发点都要排。
 
 /** 首屏 hydrate 可悬停的桩：`hold` 那一轮不会自己返回，直到放行。 */
 function gatedDegradedLoadStub() {
-  const options = [];
+  const loads = [];
   let releaseFirst = () => {};
   const firstGate = new Promise((resolve) => {
     releaseFirst = resolve;
   });
   let firstDone = false;
   return {
-    options,
+    loads,
     release: () => releaseFirst(),
-    load: async (_sessionId, _messages, loadOptions) => {
-      options.push(loadOptions ?? {});
-      if (loadOptions?.fullMaterialization === true) {
-        return { events: [], synthesized: true, sourceEventSeq: 0, branchGeneration: 0 };
-      }
+    load: async () => {
+      loads.push(1);
       if (!firstDone) {
         firstDone = true;
         await firstGate;
@@ -1495,20 +1545,21 @@ function gatedDegradedLoadStub() {
         synthesized: true,
         sourceEventSeq: 0,
         branchGeneration: 0,
+        usageSeed: null,
         viewOnlyHydration: true,
       };
     },
   };
 }
 
-test("K6: 激活先完成、窗口化首屏后收口——升级仍然必须发生（旧实现在这里永久缺席）", async () => {
+test("K6: 激活先完成、view-only 首屏后收口——补种仍然必须发生（旧实现在这里永久缺席）", async () => {
   const { host, calls } = gatewayFixture({ shellPort: true });
   const stub = gatedDegradedLoadStub();
   const debugLines = [];
   host.onDebug = (message) => debugLines.push(String(message));
-  host.loadPersistedEvents = async (sessionId, messages, options) => {
+  host.loadPersistedEvents = async () => {
     calls.load += 1;
-    return await stub.load(sessionId, messages, options);
+    return await stub.load();
   };
   const gateway = new ConversationV4Gateway(host);
   try {
@@ -1523,12 +1574,12 @@ test("K6: 激活先完成、窗口化首屏后收口——升级仍然必须发�
     await waitFor(() => calls.resume >= 1, "激活必须先发生（K6 的前提）");
     await new Promise((resolve) => setTimeout(resolve, 20));
     assert.equal(
-      stub.options.filter((option) => option.fullMaterialization === true).length,
+      calls.usageSeeds,
       0,
-      "激活完成时首屏还没收口 ⇒ 此刻不该有任何升级（降级事实尚未写入）",
+      "激活完成时首屏还没收口 ⇒ 此刻不该补种（欠补种的事实尚未写入）",
     );
     assert.ok(
-      debugLines.some((line) => line.includes("reason=notDegraded trigger=runtimeActivated")),
+      debugLines.some((line) => line.includes("reason=notPending trigger=runtimeActivated")),
       "激活分支的早退必须留可检索的信号（旧实现是完全静默）",
     );
 
@@ -1536,14 +1587,11 @@ test("K6: 激活先完成、窗口化首屏后收口——升级仍然必须发�
     await subscribePromise;
     await sendPromise;
     await waitFor(
-      () => stub.options.filter((option) => option.fullMaterialization === true).length === 1,
-      "首屏收口后必须由 second trigger 把升级排上",
+      () => debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      "首屏收口后必须由 second trigger 把补种排上并跑完",
     );
-    await waitFor(
-      () => debugLines.some((line) => line.includes("v4 projection upgrade applied")),
-      "升级必须真的跑完（不只是排队）",
-    );
-    assert.equal(calls.resume, 1, "升级不得二次 resume");
+    assert.equal(calls.resume, 1, "补种不得二次 resume");
+    assert.equal(calls.load, 1, "补种不得再读一次持久事件");
   } finally {
     gateway.dispose();
   }
@@ -1554,9 +1602,9 @@ test("K7: 激活未就绪时首屏收口只登记不排（deferred），激活�
   const stub = degradedLoadStub();
   const debugLines = [];
   host.onDebug = (message) => debugLines.push(String(message));
-  host.loadPersistedEvents = async (sessionId, messages, options) => {
+  host.loadPersistedEvents = async () => {
     calls.load += 1;
-    return await stub.load(sessionId, messages, options);
+    return await stub.load();
   };
   const gateway = new ConversationV4Gateway(host);
   try {
@@ -1569,31 +1617,28 @@ test("K7: 激活未就绪时首屏收口只登记不排（deferred），激活�
     assert.ok(
       debugLines.some(
         (line) =>
-          line.includes("v4 projection upgrade deferred") &&
+          line.includes("v4 runtime facts seed deferred") &&
           line.includes("reason=runtimeNotReady") &&
           line.includes("trigger=firstScreenSettled"),
       ),
-      "激活未就绪时必须留下 deferred 信号（这曾经是整条升级消失的时刻）",
+      "激活未就绪时必须留下 deferred 信号（这曾经是整条补齐消失的时刻）",
     );
-    assert.equal(
-      stub.options.filter((option) => option.fullMaterialization === true).length,
-      0,
-      "激活未就绪时不得起全量读（读不到 usage/fileChanges，只会换来一份更差的投影）",
-    );
+    assert.equal(calls.usageSeeds, 0, "激活未就绪时不得补种（端口只会给出空值，等于什么也没补）");
 
-    const fullLoads = () =>
-      stub.options.filter((option) => option.fullMaterialization === true).length;
     await gateway.handleCommand(commandEnvelope("sendText", { text: "继续" }));
-    await waitFor(() => fullLoads() === 1, "激活成功后必须补排这次升级");
-    // 再发一次：激活已就绪、flag 已消费、升级已完成 ⇒ 不再排第二次。
+    await waitFor(
+      () => debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      "激活成功后必须补排这次补种",
+    );
+    // 再发一次：激活已就绪、flag 已消费、补种已完成 ⇒ 不再排第二次。
     await gateway.handleCommand(commandEnvelope("sendText", { text: "再来" }));
     await new Promise((resolve) => setTimeout(resolve, 40));
-    assert.equal(fullLoads(), 1, "升级只做一次（flag 消费 + 在飞登记两道幂等，不许重复排）");
     assert.equal(
-      debugLines.filter((line) => line.includes("v4 projection upgrade applied")).length,
+      debugLines.filter((line) => line.includes("v4 runtime facts seed applied")).length,
       1,
-      "applied 只允许出现一次",
+      "补种只做一次（flag 消费即幂等），applied 只允许出现一次",
     );
+    assert.equal(calls.load, 1, "补种从不读正文");
   } finally {
     gateway.dispose();
   }
@@ -1751,29 +1796,25 @@ test("L3: 未知态显示成空态——不把「runtime 才知道」的字段�
 //
 // Step 11 的两件事：①`rowsRange`（以及同族的读/翻页入口）在**视图已就绪**之后不得再走
 // 冷路径——那条路会重新物化外壳（`materializeSessionShell`），在 record 被回收时就是一次
-// 完整冷开；②升级会先删 `hydratedSessions`，读入口在那个窗口里必须继续读旧投影，而不是
-// 起第二份水化把升级吞掉。
+// 完整冷开；②补种不换投影、不删防双算水位，读入口在任何时刻都读同一份投影。
 //
 // 本组用 `calls.shell` / `calls.load` 两个宿主侧计数当判据：它们是被观测行为，
 // 不是源码形状（后者只能证明「写了」，证明不了「读入口真的不再走那条路」）。
 
-/** view-only 首屏 + 全量升级的 loadPersistedEvents 桩（K2 同形，多记一个 options）。 */
-function degradedLoadStub({ onFull } = {}) {
-  const options = [];
+/** view-only 首屏的 loadPersistedEvents 桩（正文与 runtime 事实都刻意缺席）。 */
+function degradedLoadStub() {
+  const loads = [];
   return {
-    options,
-    load: async (_sessionId, _messages, loadOptions) => {
-      options.push(loadOptions ?? {});
-      if (loadOptions?.fullMaterialization === true) {
-        if (onFull) await onFull();
-        return { events: [], synthesized: true, sourceEventSeq: 0, branchGeneration: 0 };
-      }
-      // 首屏：view-only 口径（store-only，没有 record 事实）→ 记「欠一次升级」。
+    loads,
+    load: async () => {
+      loads.push(1);
+      // 首屏：view-only 口径（store-only，没有 record 事实）→ 记「欠一次派生量补种」。
       return {
         events: [],
         synthesized: true,
         sourceEventSeq: 0,
         branchGeneration: 0,
+        usageSeed: null,
         viewOnlyHydration: true,
       };
     },
@@ -1792,9 +1833,11 @@ function pagingParams() {
 test("M1: 视图已就绪后翻页/重订不再物化外壳（读入口不触发第二次冷开）", async () => {
   const { host, calls, holdResume } = gatewayFixture({ shellPort: true });
   const stub = degradedLoadStub();
-  host.loadPersistedEvents = async (sessionId, messages, options) => {
+  const debugLines = [];
+  host.onDebug = (message) => debugLines.push(String(message));
+  host.loadPersistedEvents = async () => {
     calls.load += 1;
-    return await stub.load(sessionId, messages, options);
+    return await stub.load();
   };
   const gateway = new ConversationV4Gateway(host);
   const releaseResume = holdResume();
@@ -1824,42 +1867,48 @@ test("M1: 视图已就绪后翻页/重订不再物化外壳（读入口不触发
     assert.equal(calls.shell, 1, "视图已就绪后重订不得再物化外壳");
     assert.equal(calls.load, 1, "视图已就绪后重订不得再读一次正文");
 
-    // ③ 激活后升级（fire-and-forget）：升级本身是一次全量读，只此一次。
+    // ③ 激活后补派生量（fire-and-forget）：只读宿主端口，**一次正文读都不多**。
     releaseResume();
-    await waitFor(() => calls.load >= 2, "激活成功后必须发生一次全量升级");
-    assert.equal(stub.options[1].fullMaterialization, true, "升级必须是全量口径");
-    assert.equal(calls.shell, 1, "升级不碰外壳");
+    await waitFor(
+      () => debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      "激活成功后必须补一次 runtime 派生量",
+    );
+    assert.equal(calls.shell, 1, "补种不碰外壳");
+    assert.equal(calls.load, 1, "补种不得再读一次持久事件（窗口化首屏就是终态）");
 
-    // ④ 升级之后（hydratedSessions 已重新登记）：翻页仍不得触发冷路径。
+    // ④ 补种之后：翻页仍不得触发冷路径。
     for (let page = 0; page < 2; page += 1) {
       await gateway.rowsRange(pagingParams());
     }
-    assert.equal(calls.shell, 1, "升级后的翻页不得物化外壳");
-    assert.equal(calls.load, 2, "升级后的翻页不得再读正文（读旧投影即可）");
+    assert.equal(calls.shell, 1, "补种后的翻页不得物化外壳");
+    assert.equal(calls.load, 1, "补种后的翻页不得再读正文（读旧投影即可）");
   } finally {
     releaseResume();
     gateway.dispose();
   }
 });
 
-test("M2: 升级在飞时翻页不等全量读、也不起第二份水化（读入口让路）", async () => {
+test("M2: 补种在飞时翻页不等它、也不起第二份水化（读入口始终看得见投影）", async () => {
   const { host, calls } = gatewayFixture({ shellPort: true });
-  let releaseFull;
-  let fullStarted = false;
   const debugLines = [];
-  const stub = degradedLoadStub({
-    onFull: async () => {
-      fullStarted = true;
-      await new Promise((resolve) => {
-        releaseFull = resolve;
-      });
-    },
+  // 把补种的宿主端口悬住：证明「补种在飞」不等于「投影不可读」。
+  let releaseSeed = () => {};
+  const seedGate = new Promise((resolve) => {
+    releaseSeed = resolve;
   });
-  host.loadPersistedEvents = async (sessionId, messages, options) => {
-    calls.load += 1;
-    return await stub.load(sessionId, messages, options);
+  let seedStarted = false;
+  const baseSeed = host.getSessionUsageSeed;
+  host.getSessionUsageSeed = async (...args) => {
+    seedStarted = true;
+    await seedGate;
+    return await baseSeed(...args);
   };
-  host.onDebug = (message) => debugLines.push(message);
+  const stub = degradedLoadStub();
+  host.loadPersistedEvents = async () => {
+    calls.load += 1;
+    return await stub.load();
+  };
+  host.onDebug = (message) => debugLines.push(String(message));
   const gateway = new ConversationV4Gateway(host);
   try {
     await gateway.subscribe({
@@ -1867,31 +1916,31 @@ test("M2: 升级在飞时翻页不等全量读、也不起第二份水化（读�
       connectionId: "conn-m2a",
       clientMode: "desktop-continuous",
     });
-    await waitFor(() => fullStarted, "激活成功后必须启动全量升级");
-    assert.equal(calls.load, 2, "夹具：首屏 + 升级各一次");
+    await waitFor(() => seedStarted, "激活成功后必须启动派生量补种");
+    assert.equal(calls.load, 1, "夹具：只有首屏那一次读");
 
-    // 升级已经把 hydratedSessions 删掉了；此时翻页若被当成「还没水化」，就会重新物化外壳
-    // 并起一份自己的水化（加入在飞的升级 → 升级变 no-op），现象是翻页卡到全量读结束。
+    // 旧实现在这段里已经删掉了 `hydratedSessions`；读入口若被当成「还没水化」，就会重新
+    // 物化外壳并起一份自己的水化。补种不删水位，所以翻页必须当场返回旧投影。
     const settled = await Promise.race([
       gateway.rowsRange(pagingParams()).then(() => "resolved"),
       new Promise((resolve) => setTimeout(() => resolve("blocked"), 300)),
     ]);
-    assert.equal(settled, "resolved", "升级在飞时翻页不得等全量读");
-    assert.equal(calls.shell, 1, "升级在飞时翻页不得物化外壳");
-    assert.equal(calls.load, 2, "升级在飞时翻页不得起第二份 hydration");
+    assert.equal(settled, "resolved", "补种在飞时翻页不得等它");
+    assert.equal(calls.shell, 1, "补种在飞时翻页不得物化外壳");
+    assert.equal(calls.load, 1, "补种在飞时翻页不得起第二份 hydration");
 
-    releaseFull();
+    releaseSeed();
     await waitFor(
-      () => debugLines.some((line) => line.includes("v4 projection upgrade applied")),
-      "升级必须留下一条 debug 读数",
+      () => debugLines.some((line) => line.includes("v4 runtime facts seed applied")),
+      "补种必须留下一条 debug 读数",
     );
     assert.ok(
-      debugLines.some((line) => /v4 projection upgrade applied .*upgradeMs=\d+/.test(line)),
-      "升级的成本只能从这条 debug 行读（openPhases 里没有它，materializeMs 仍缺席）",
+      debugLines.some((line) => /v4 runtime facts seed applied .*seedMs=\d+/.test(line)),
+      "补种的成本只能从这条 debug 行读（openPhases 里没有它，materializeMs 仍缺席）",
     );
-    assert.equal(calls.load, 2, "升级只读一次全量正文");
+    assert.equal(calls.load, 1, "补种全程不读正文");
   } finally {
-    releaseFull?.();
+    releaseSeed?.();
     gateway.dispose();
   }
 });
@@ -1900,7 +1949,7 @@ test("M3: 撤销防双算水位之后读入口必须退回冷路径重读（早�
   // 「视图可读」不等于「投影是完整的」：assistant 守恒那条修复会单独撤销
   // `hydratedSessions`（投影拒收过正文流 → 下次必须从持久事实重读补齐）。读入口的早退
   // 若只认 `viewReadySessions`，就会把这份缺段的投影一直供下去（现象：回复整段消失，
-  // 直到用户手动刷新/会话关闭）。升级失败后同形。
+  // 直到用户手动刷新/会话关闭）。水化失败后同形。
   const { host, calls } = gatewayFixture();
   const gateway = new ConversationV4Gateway(host);
   try {

@@ -194,17 +194,6 @@ function rowTargetActionForCommand(
   }
 }
 
-/**
- * `loadPersistedEvents` 的读口径（Step 10 的升级路径）。
- *
- * `fullMaterialization:true` = 调用方要**全量投影**（激活后把首屏的降级投影升级掉）：
- * 宿主必须跳过尾窗规划（`planColdWindow`），也不得再按 view-only 口径留空 runtime 事实。
- * 缺席与旧调用完全一致（首屏按窗口化 / view-only 读）。
- */
-interface LoadPersistedEventsOptions {
-  fullMaterialization?: boolean;
-}
-
 interface PersistedEventsLoadResult {
   events: SessionEvent[];
   synthesized: boolean;
@@ -239,12 +228,13 @@ interface PersistedEventsLoadResult {
    */
   synthesisModelBaseline?: TurnModelBaselineSeed;
   /**
-   * 本次首屏是按 **view-only 口径**读的（Step 9 的 store-only：record 还是 shell，或压根没有
-   * record）。此时 usage / fileChanges 摘要 / `thoughtLevels` 等 runtime 事实刻意缺席，
-   * 激活后必须整份重新 hydration 才能补齐（Step 10 的升级路径）。
+   * 本次首屏是按 **view-only 口径**读的（Step 9 的 store-only：record 还是 shell，或压根
+   * 没有 record）。此时 usage / fileChanges 摘要 / `thoughtLevels` 等 runtime 事实刻意缺席
+   * ——它们只能从 runtime 读，读不到时留空比拿默认模型编一个更误导的值好。
    *
-   * 与 `coldWindow` 是两个独立的降级维度：窗口化只裁正文，view-only 连容量口径都留空；
-   * 任一为真都要求升级。
+   * 激活后从宿主端口**窄读**补齐（fix-c19：不再重读正文——行集合由 manifest 给，窗口化
+   * 首屏就是终态）。**只有**它为真才算「欠一次派生量补种」；窗口化本身不算（窗口只裁正文，
+   * runtime 事实齐全，把整条分支灌进 live 投影正是风险 24）。
    */
   viewOnlyHydration?: boolean;
 }
@@ -580,11 +570,14 @@ export interface V4GatewayHost {
    * transcript 反向合成的——此时即便已有 cold publisher（fork resume 的 ingest 抢先
    * 建的）也要**重建**，否则历史不进投影。`synthesized=false`（完整事件日志）则保留
    * 已有 live publisher（流式不能被重建打断）。未实现（旧宿主）冷订阅退化为空投影。
+   *
+   * 读口径**没有**开关（fix-c19 删掉了「跳过窗口规划」那条读模式）：每次读都按「尾窗
+   * 规划 + 本次 record 形态」决定正文范围与 runtime 事实。全量投影不再存在，宿主不必再
+   * 支持「把整条分支读回来」。
    */
   loadPersistedEvents?(
     sessionId: string,
     persistedMessages?: MessageWithParts[],
-    options?: LoadPersistedEventsOptions,
   ): Promise<PersistedEventsLoadResult>;
   /** 仅用于低频生命周期和恢复裁决；高频 event/stream trace 禁止走生产日志。 */
   onDebug?(message: string): void;
@@ -1023,25 +1016,17 @@ export class ConversationV4Gateway {
    */
   private readonly viewReadySessions = new Set<string>();
   /**
-   * 首屏投影是**降级**的会话（Step 10）：窗口化（`coldWindow`）或 view-only 口径
-   * （`viewOnlyHydration`）读出来的投影。
+   * 「首屏欠一次 **runtime 派生量**补种」的会话（fix-c19）。
    *
-   * 只在 `performHydration` 里按本次 load 的事实写入，激活成功后消费一次（升级成全量）。
-   * 与 `hydratedSessions` 分开的理由：那个是「防双算」的水位，升级时需要主动删掉它才能
-   * 让 `forceRebuild` 生效；这一份是「还欠一次升级」的事实，升级完成即删。
+   * 判据只有 `viewOnlyHydration === true`（record 还是 shell / 压根没有 record）：这时
+   * usage 与 config 种子（`thoughtLevels` / `planEnabled` / `permissionGrant`）**刻意缺席**
+   * ——它们只能从 runtime 读，而 runtime 还没起。激活成功后从宿主端口窄读一次补种即可。
+   *
+   * **不再升级成全量投影**：行集合由 manifest 给，窗口以上的页由 `rows/range` 按需物化
+   * （1.7~6.7ms/页），把 5k 行灌进 live 投影只买到 398MB 堆和 5 倍切回成本（风险 24）。
+   * 窗口化首屏就是终态。
    */
-  private readonly degradedFirstScreen = new Set<string>();
-  /**
-   * 进行中的**激活后全量升级**（Step 11）。
-   *
-   * 只给读入口让路用：升级会先删 `hydratedSessions`（`forceRebuild` 的硬前置），删完之后
-   * 到升级收口之前，这份投影既「可读」又「不在防双算水位里」。没有这条事实，读/翻页会在
-   * 这个窗口里把它当成「还没水化」→ 重新走冷路径（重新物化外壳 = 一次冷开）并起一份自己
-   * 的水化，把在飞的升级吞掉（`hydratePublisher` 对 in-flight 是「加入」而非「排队」）。
-   *
-   * **不用**它做别的判定：升级的成功/失败结论仍只看 `hydratedSessions` 与投影本身。
-   */
-  private readonly projectionUpgrades = new Map<string, Promise<ConversationTopicPublisher>>();
+  private readonly runtimeFactsPending = new Set<string>();
   /** load await 窗口内的 raw accepted events；重建后按 cursor/eventId 补回。 */
   private readonly hydrationBuffers = new Map<string, HydrationBuffer>();
   /**
@@ -3828,10 +3813,8 @@ export class ConversationV4Gateway {
     this.viewReadyFlights.delete(sessionId);
     this.runtimeReadyFlights.delete(sessionId);
     this.viewReadySessions.delete(sessionId);
-    // 会话被关掉后「欠一次升级」不再是事实：下一次冷开会按当时的 record 形态重新判定。
-    this.degradedFirstScreen.delete(sessionId);
-    // 在飞的升级同理：它换出来的投影属于这条会话，会话关了就不再是「可读的视图」。
-    this.projectionUpgrades.delete(sessionId);
+    // 会话被关掉后「欠一次派生量补种」不再是事实：下一次冷开会按当时的 record 形态重新判定。
+    this.runtimeFactsPending.delete(sessionId);
     // 激活结论同样不能留下：会话被关掉之后「runtime 就绪」不再是事实，下一次冷开必须
     // 重新判（否则重建出的 view-only shell 会继承上一条 record 的就绪结论）。
     this.runtimeReadySessions.delete(sessionId);
@@ -3896,8 +3879,7 @@ export class ConversationV4Gateway {
     this.runtimeReadyFlights.clear();
     this.viewReadySessions.clear();
     this.runtimeReadySessions.clear();
-    this.degradedFirstScreen.clear();
-    this.projectionUpgrades.clear();
+    this.runtimeFactsPending.clear();
     this.rawSequenceStates.clear();
     this.telemetryEventIds.clear();
     this.detachedLiveSessions.clear();
@@ -4109,11 +4091,11 @@ export class ConversationV4Gateway {
           sessionId,
           Math.max(0, Math.round(performance.now() - activationStartedAt)),
         );
-        // Step 10：激活成功 → 首屏的降级投影（尾窗 / view-only 口径）升级成全量。
-        // **必须在激活本体之后**（激活前没有 record，全量读也拿不到 usage/fileChanges），
-        // 且 fire-and-forget（激活的读数是「本体耗时」，不能被这次重读污染；send 类命令
-        // 也不该为它多等一份全量正文）。
-        this.scheduleProjectionUpgrade(sessionId, "runtimeActivated");
+        // fix-c19：激活成功 → 补齐只有 runtime 才知道的派生量（usage / config 种子）。
+        // **必须在激活本体之后**（激活前那两个宿主端口只会给出空值），且 fire-and-forget
+        // （激活的读数是「本体耗时」，不能被这次补种污染；send 类命令也不该为它多等）。
+        // 行集合不动：窗口化首屏就是终态，翻页由 `rows/range` 按需物化。
+        this.scheduleRuntimeFactsSeed(sessionId, "runtimeActivated");
         return persistedMessages;
       } catch (error) {
         // 失败不驻留：并发加入者手里仍有同一个 promise（看到同一个错误），但表里清掉，
@@ -4129,117 +4111,85 @@ export class ConversationV4Gateway {
   }
 
   /**
-   * 激活后把**降级的首屏投影**升级成全量投影（Step 10）。
+   * 激活后补齐**只有 runtime 才知道的派生量**（fix-c19，取代 Step 10 的「升级成全量投影」）。
    *
-   * 触发条件只有一条：`performHydration` 记过「本次首屏是窗口化或 view-only 口径」。
-   * 它必须走激活本体的同一批入口（`ensureRuntimeReady → coldResume.ensureResumed →
-   * activateRuntime`），**不得**在这里再 `createRecord` / `app.resume`：那是双 resume
-   * 的来源（幽灵 runtime 前科），而本函数只做投影侧的重新水化。
+   * 补的是什么：`usage`（上下文占用 / 分母）与 config 种子（`thoughtLevels` /
+   * `planEnabled` / `permissionGrant`）。它们在 view-only 首屏**刻意缺席**（读不到就留空，
+   * 不拿默认模型编一个更误导的值），而宿主那两个端口在激活后就能直接给出真值。
    *
-   * **两个触发点，互不依赖先后**（Step 15 修的 bug）：激活成功分支与
-   * `performHydration` 收口各调一次。旧实现只在激活分支调一次，于是两条顺序里只有
-   * 「先窗口化 hydrate 收口、后激活」会升级；「激活先完成」（app 冷启的最常见路径：
-   * journal 读入口在点击前就 `await ensureRuntimeReady`）时读到的
-   * `degradedFirstScreen` 还是空的，早退之后**没有任何重试入口**，投影永久停在降级窗口
-   * ——不报错、`totalCount` 还由 manifest 给，所以没人会发现。
+   * 补的**不是**行：投影的行集合由 manifest 给（IS5），窗口以上的页由 `rows/range` 按需
+   * 物化。旧实现（Step 10 的「升级成全量投影」）用一次 `forceRebuild` 的整份重读把整条
+   * 分支（实测 5255 行）灌进 live 投影，代价是 398MB 堆与 450 → 2327ms 的切回（风险 24）；
+   * 而它换来的能力按需路径本来就有。那条路径已删除，这里只剩两个宿主端口的窄读。
    *
-   * 两个幂等边界：
-   *   ① 「欠一次升级」是**集合事实**（`degradedFirstScreen`），谁先到谁消费（`delete`
-   *      之后即不再排）；后到的调用看到 flag 已消费 → 只留一条 debug 行，不重复排；
-   *   ② 升级在飞期间 `projectionUpgrades` 有登记，再次调用直接早退（同一会话同时只允许
-   *      一份升级，否则两次 `forceRebuild` 会互相吞掉）。
+   * **两个触发点，互不依赖先后**（沿用 Step 15 的结论）：激活成功分支与
+   * `performHydration` 收口各调一次。app 冷启最常见顺序是「激活先完成」（journal 读入口在
+   * 点击前就 `await ensureRuntimeReady`），那时 `runtimeFactsPending` 还没写；只挂激活分支
+   * 就会永久缺席。
    *
-   * 激活未完成时**不排**、也不消费 flag（升级必须读得到 runtime 侧的 usage/fileChanges，
-   * 激活前读只会得到空全量投影，等于把降级投影换成一份更差的）；等激活分支来排。
+   * 幂等边界：flag 谁先到谁消费（`delete` 之后不再排）；激活未就绪时不消费（等激活来排）。
+   * 补种是**幂等**的（`seedConfig` 跳过事件触碰过的字段，`seedUsage` 覆盖同值），因此
+   * 不需要「在飞」登记——一次订阅生命周期内最多一份，且不碰任何行。
    *
-   * fire-and-forget：失败只记账（下一次冷开会按当时的 record 形态重新判定），
-   * 绝不把失败回传给已经成功的激活调用方。
+   * fire-and-forget：失败只记账，绝不回传给已经成功的激活调用方。
    *
-   * Step 11：升级在飞期间必须让读入口看得见（`projectionUpgrades`）——它删掉了
-   * `hydratedSessions`，否则翻页会重新走冷路径并把升级吞掉。登记是**同步**的（调用后立刻
-   * set），因此不存在「升级已经开始、读入口还以为没有」的窗口。
-   *
-   * 耗时只进 debug：升级是激活之后的一次全量正文读，不在 `openPhases` 里（`materializeMs`
-   * 仍缺席，Step 7 的口径不变），这里是它唯一的读数（Step 14 要量化就看这条行）。
-   * 每一次早退也各留一条 debug（`reason=notDegraded|runtimeNotReady|inFlight`）：
-   * 升级静默缺席过一次，不能再让「没升级」和「不需要升级」只有一个现象。
+   * 耗时只进 debug（不进 `openPhases` / `openTiming`：ACK 在激活之前，那两个口径装不下
+   * 激活之后的成本）。
    */
-  private scheduleProjectionUpgrade(
+  private scheduleRuntimeFactsSeed(
     sessionId: string,
     reason: "runtimeActivated" | "firstScreenSettled",
   ): void {
     if (this.disposed) return;
-    if (this.projectionUpgrades.has(sessionId)) {
+    if (!this.runtimeFactsPending.has(sessionId)) {
+      // 本次首屏不是 view-only 口径（正文与 runtime 事实都齐）：不欠补种。
       this.host.onDebug?.(
-        `v4 projection upgrade skipped session=${sessionId} reason=inFlight trigger=${reason}`,
-      );
-      return;
-    }
-    if (!this.degradedFirstScreen.has(sessionId)) {
-      // 本次首屏不是降级投影（全量物化 / live publisher 早退）：不欠升级。
-      this.host.onDebug?.(
-        `v4 projection upgrade skipped session=${sessionId} reason=notDegraded trigger=${reason}`,
+        `v4 runtime facts seed skipped session=${sessionId} reason=notPending trigger=${reason}`,
       );
       return;
     }
     if (!this.isRuntimeReady(sessionId)) {
       // flag 保留：激活分支（`trigger=runtimeActivated`）会再来一次。
       this.host.onDebug?.(
-        `v4 projection upgrade deferred session=${sessionId} reason=runtimeNotReady trigger=${reason}`,
+        `v4 runtime facts seed deferred session=${sessionId} reason=runtimeNotReady trigger=${reason}`,
       );
       return;
     }
-    // 先消费事实：升级只做一次，失败不自动重试（重试条件应该是「下一次冷开」而不是轮询）。
-    this.degradedFirstScreen.delete(sessionId);
+    // 先消费事实：一次订阅生命周期内补种一次即可（激活后 runtime 真值不会自己变回去）。
+    this.runtimeFactsPending.delete(sessionId);
     const startedAt = performance.now();
-    const upgrade = this.upgradeProjectionToFull(sessionId);
-    this.projectionUpgrades.set(sessionId, upgrade);
-    void upgrade
-      .then(
-        () => {
-          const upgradeMs = Math.max(0, Math.round(performance.now() - startedAt));
-          if (!this.hydratedSessions.has(sessionId)) {
-            // 持久读取失败（`keepProjectionAfterLoadFailure` 刻意不登记水位）：投影被**保留**、
-            // 不是被升级。这条行不能说 "applied"——Step 14 的量化只读它，谎报一次「很快的升级」
-            // 会把一次读故障读成一次性能改善。
-            this.host.onDebug?.(
-              `v4 projection upgrade skipped session=${sessionId} reason=loadFailed ` +
-                `upgradeMs=${upgradeMs}`,
-            );
-            return;
-          }
-          this.host.onDebug?.(
-            `v4 projection upgrade applied session=${sessionId} upgradeMs=${upgradeMs}`,
-          );
-        },
-        (error: unknown) => {
-          this.host.onError?.("v4.runtime.upgradeProjection", error, { sessionId });
-        },
-      )
-      .finally(() => {
-        if (this.projectionUpgrades.get(sessionId) === upgrade) {
-          this.projectionUpgrades.delete(sessionId);
-        }
-      });
+    void this.seedRuntimeFacts(sessionId).then(
+      () => {
+        const seedMs = Math.max(0, Math.round(performance.now() - startedAt));
+        this.host.onDebug?.(`v4 runtime facts seed applied session=${sessionId} seedMs=${seedMs}`);
+      },
+      (error: unknown) => {
+        // 下一次冷开会按当时的 record 形态重新判定（不轮询重试）。
+        this.host.onDebug?.(`v4 runtime facts seed skipped session=${sessionId} reason=seedFailed`);
+        this.host.onError?.("v4.runtime.runtimeFactsSeed", error, { sessionId });
+      },
+    );
   }
 
   /**
-   * 升级的执行体：等首屏 hydration 收口 → 删防双算水位 → 强制整份重建（全量读）。
+   * 派生量补种的执行体：**只读宿主端口，不读 store、不重建投影**。
    *
-   * `hydratedSessions.delete` 是**必须**的：`hydratePublisher` 的早退判定
-   * （`existing && hydratedSessions.has(...)`）在 `forceRebuild` 之前，不删就等于 no-op
-   * ——这正是 spec 点名的坑。全量读靠 `fullMaterialization` 让宿主跳过尾窗规划：
-   * 否则「升级」只是把同一份窗口投影再物化一遍。
+   * - `seedPublisherConfig`：同步读 `getSessionConfigSeed`（runtime 真值；view-only shell
+   *   那条分支返回外壳物化时的持久窄查询结果，激活后自然换成真值）；
+   * - `seedPublisherUsage`：`getSessionUsageSeed` 在 shell 期返回 null、激活后给出真值。
+   *
+   * 两者都只改投影初值、不产生 delta，所以补偿后必须让现有订阅 resync 一次
+   * （`requireSnapshotResync` + 驱动 flush），否则用户要等到下一个事件才看见。
    */
-  private async upgradeProjectionToFull(sessionId: string): Promise<ConversationTopicPublisher> {
-    // hydratePublisher 对 in-flight 是「加入」而不是「排队重建」，直接调用会把升级吞掉。
-    const inFlight = this.hydrationInFlight.get(sessionId);
-    if (inFlight) await inFlight.catch(() => undefined);
-    if (this.disposed) {
-      throw new Error(`v4 projection upgrade cancelled for session ${sessionId}`);
-    }
-    this.hydratedSessions.delete(sessionId);
-    return await this.hydratePublisher(sessionId, undefined, true, { fullMaterialization: true });
+  private async seedRuntimeFacts(sessionId: string): Promise<void> {
+    const publisher = this.publishers.get(sessionId);
+    // 窗口化首屏的投影可能已经被 dispose（会话关闭）——那就没什么可补的。
+    if (publisher === undefined) return;
+    this.seedPublisherConfig(sessionId, publisher);
+    await this.seedPublisherUsage(sessionId, publisher);
+    if (this.disposed || this.publishers.get(sessionId) !== publisher) return;
+    publisher.requireSnapshotResync();
+    this.resyncSessionSubscribers(sessionId, publisher, "runtimeFactsResync");
   }
 
   /**
@@ -4293,27 +4243,23 @@ export class ConversationV4Gateway {
   /**
    * 「视图已可读」时直接给出投影，否则 undefined（调用方退回冷路径）。**唯一**判定点。
    *
-   * 三个条件缺一不可：
+   * 两个条件缺一不可：
    *   ①有一次成功的视图水化（`viewReadySessions`，IS4 的 viewOnly 半边）；
-   *   ②投影还在（`publishers`）；
-   *   ③防双算水位在册，**或**正有一次激活后的全量升级在飞。
+   *   ②投影还在（`publishers`）且防双算水位在册（`hydratedSessions`）。
    *
-   * ③的前半是常规态。后半（升级在飞）不能省：升级为了 `forceRebuild` 会先删
-   * `hydratedSessions`，删完到收口之间若把它当成「还没水化」，每一次翻页都会重新走冷路径
-   * ——先物化一次外壳（**这就是一次冷开**），再起一份自己的水化并「加入」在飞的升级，升级
-   * 于是变成 no-op（同一份窗口再物化一遍）。升级只是把同一份投影换成全量，读旧的即可。
+   * fix-c19 之后③只剩前半。旧实现的「升级在飞」那半条是为「升级会先删
+   * `hydratedSessions`」让路的；全量升级已删，投影在订阅生命周期内**不会**被换掉，
+   * 因而这里也不存在「可读但不在水位里」的窗口。
    *
-   * 但③也**不能**退化成「只要 `viewReadySessions`」：升级失败时 `hydratedSessions` 不会
-   * 重新登记，那时读入口必须退回冷路径重读一次（自愈）——否则一次失败的 rehydrate 会把
+   * 但②的后半**不能**退化成「只要 `viewReadySessions`」：水化失败时 `hydratedSessions`
+   * 不会登记，那时读入口必须退回冷路径重读一次（自愈）——否则一次失败的 rehydrate 会把
    * 半成品投影钉到会话关闭为止。
    */
   private readableViewPublisher(sessionId: string): ConversationTopicPublisher | undefined {
     if (!this.viewReadySessions.has(sessionId)) return undefined;
     const publisher = this.publishers.get(sessionId);
     if (publisher === undefined) return undefined;
-    if (this.hydratedSessions.has(sessionId) || this.projectionUpgrades.has(sessionId)) {
-      return publisher;
-    }
+    if (this.hydratedSessions.has(sessionId)) return publisher;
     return undefined;
   }
 
@@ -4336,7 +4282,6 @@ export class ConversationV4Gateway {
     sessionId: string,
     persistedMessages?: MessageWithParts[],
     forceRebuild = false,
-    loadOptions: LoadPersistedEventsOptions = {},
   ): Promise<ConversationTopicPublisher> {
     const existing = this.publishers.get(sessionId);
     // 已 hydrate 过的 live publisher：直接复用（避免重复重建 / 双计）。
@@ -4355,7 +4300,6 @@ export class ConversationV4Gateway {
       buffer,
       persistedMessages,
       forceRebuild,
-      loadOptions,
     ).finally(() => {
       if (this.hydrationBuffers.get(sessionId) === buffer) {
         this.hydrationBuffers.delete(sessionId);
@@ -4373,7 +4317,6 @@ export class ConversationV4Gateway {
     buffer: HydrationBuffer,
     persistedMessages?: MessageWithParts[],
     forceRebuild = false,
-    loadOptions: LoadPersistedEventsOptions = {},
   ): Promise<ConversationTopicPublisher> {
     const existingAtStart = this.publishers.get(sessionId);
     // 诊断字段 `liveSessionAtStart` 沿用 live 语义（IS4）：detached child 也算 live。
@@ -4395,7 +4338,7 @@ export class ConversationV4Gateway {
     let loadFailed: unknown = null;
     const loaded: PersistedEventsLoadResult = this.host.loadPersistedEvents
       ? await this.host
-          .loadPersistedEvents(sessionId, persistedMessages, loadOptions)
+          .loadPersistedEvents(sessionId, persistedMessages)
           .catch((error: unknown) => {
             loadFailed = error;
             return NO_PERSISTED_EVENTS;
@@ -4421,12 +4364,12 @@ export class ConversationV4Gateway {
     if (loadFailed !== null) {
       // 一次失败的持久读取没有提供任何「事实变少了」的证据，所以这里**不 swap**：
       // 保留上一次成功水化（或 live 事件喂出来）的投影，并原样保留 raw 游标。
-      // 升级（`forceRebuild` + `fullMaterialization`）是这条分支的主要来源。
+      // 生产里的主要来源是「live publisher 已存在、首次 subscribe 才水化」与
+      // 授权提交失败重放（`waitForPermissionGrantCommit`）。
       return this.keepProjectionAfterLoadFailure(sessionId, loadFailed, {
         durationMs: Math.max(0, Math.round(performance.now() - hydrationStartedAt)),
         existingPublisherAtStart: existingAtStart !== undefined,
         forceRebuild,
-        fullMaterialization: loadOptions.fullMaterialization === true,
         liveSessionAtStart,
         persistedMessages: persistedMessages?.length ?? 0,
         phases,
@@ -4471,11 +4414,12 @@ export class ConversationV4Gateway {
     // 只记住 await 之前的 existing 引用是不够的：load 等待期间 raw event
     // 会继续推进这个 publisher，synthesized 返回后却把它整体删除，queue/stream 随之
     // 消失。重建以 sourceEventSeq 为 raw snapshot 边界，并把等待窗口内事件补回。
-    // Step 10：到这里才是**本次投影真的被重物化**了（上面的早退分支保留既有 live publisher，
-    // 窗口/降级口径并未生效）。首屏降级（窗口化或 view-only）→ 记一笔「欠一次全量升级」；
-    // 这是激活后升级的唯一判据，用「有没有 record」判会在 send 路径上永久漏升级。
-    if (coldWindow !== undefined || loaded.viewOnlyHydration === true) {
-      this.degradedFirstScreen.add(sessionId);
+    // fix-c19：到这里才是本次投影真的被物化了。首屏按 **view-only 口径**读（record 还是
+    // shell / 没有 record）⇒ runtime-only 的派生量（usage / config 种子）缺席，记一笔
+    // 「激活后补一次」。**窗口化本身不再记**：窗口只裁正文，行集合与全量一致（IS1/IS2），
+    // 而 manifest 是行数的权威——把整条分支灌进 live 投影正是风险 24（398MB / 5 倍切回）。
+    if (loaded.viewOnlyHydration === true) {
+      this.runtimeFactsPending.add(sessionId);
     }
     const publisher = latestPublisher ?? existingAtStart ?? this.ensurePublisher(sessionId);
     this.rejectProjectionEventWaiters(
@@ -4498,42 +4442,29 @@ export class ConversationV4Gateway {
         at: Date.now(),
       });
     }
-    // Step 15：升级（同一条 active 分支的窗口投影 → 全量投影）不能让读入口在
-    // `rehydrate` 到 `hydrateRowManifest` 之间看到「没有清单」——那段里 `rowsRange` 的
-    // 缺页判定会读到 `facts === null`，于是窗口以上的区间不再走按需物化、直接返回空页
-    // （实测：升级一旦在首屏收口后立刻启动，M1/M4/M5 的翻页全部退化成空页）。
-    // 清单事实是**分支级**的（totalCount / firstRowId / rowId base / turnDirectory），
-    // 升级不换分支、不换代次，所以旧事实在这段过渡里仍然成立；等 `hydrateRowManifest`
-    // 算完新事实再覆盖。只在升级路径带（`forceRebuild` + `fullMaterialization`），
-    // 其它 rehydrate（新代次 / 新会话）必须继续按「旧基线一律失效」清掉。
-    const isUpgrade = forceRebuild === true && loadOptions.fullMaterialization === true;
-    const carriedManifestFacts = isUpgrade ? publisher.getRowManifestFacts() : null;
-    try {
-      publisher.rehydrate(loaded.events, {
-        // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
-        // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
-        // 后续持久 TurnError/TurnComplete，使冷快照停在最后一个可恢复边界。
-        onPayloadTooLarge: (error) =>
-          this.host.onError?.("v4.hydrate.payloadTooLarge", error, {
-            phase: "publisher.rehydrate",
-            sessionId,
-          }),
-        // 冷窗口的 rowId 起点（IS1）：全量物化恒为 1（不出现在这里）。
-        // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
-        // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
-        ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
-        // 窗口的上一轮模型基线：与 rowIdOrigin 同一个播种时机，漏了会让窗首那一轮的
-        // `modelChange` marker 消失（窗内 rowId 整体前移 1）。
-        ...(loaded.synthesisModelBaseline === undefined
-          ? {}
-          : { modelBaseline: loaded.synthesisModelBaseline }),
-      });
-    } finally {
-      // 抛出时投影没被换掉（候选在 adopt 之前失败）：旧事实必须跟着旧投影一起留下。
-      if (carriedManifestFacts !== null) {
-        publisher.seedRowManifestFacts(carriedManifestFacts);
-      }
-    }
+    // fix-c19：升级（同一条分支的窗口投影 → 全量投影）已经不存在，这里**不再**为它把旧
+    // 清单事实带过 `rehydrate → hydrateRowManifest` 的过渡（风险 25 的修法随之退场）。
+    // 唯一还会 rehydrate 的路径（`keepProjectionAfterLoadFailure` 之后的授权重放）本来就
+    // 可能换分支代次，继续按「旧基线一律失效」清掉才是安全的一侧。
+    publisher.rehydrate(loaded.events, {
+      // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
+      // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
+      // 后续持久 TurnError/TurnComplete，使冷快照停在最后一个可恢复边界。
+      onPayloadTooLarge: (error) =>
+        this.host.onError?.("v4.hydrate.payloadTooLarge", error, {
+          phase: "publisher.rehydrate",
+          sessionId,
+        }),
+      // 冷窗口的 rowId 起点（IS1）：全量物化恒为 1（不出现在这里）。
+      // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
+      // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
+      ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
+      // 窗口的上一轮模型基线：与 rowIdOrigin 同一个播种时机，漏了会让窗首那一轮的
+      // `modelChange` marker 消失（窗内 rowId 整体前移 1）。
+      ...(loaded.synthesisModelBaseline === undefined
+        ? {}
+        : { modelBaseline: loaded.synthesisModelBaseline }),
+    });
     // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
     phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));
     // 代次种子放在 rehydrate 之后：rehydrate 会换掉 projection，而 synthesized transcript
@@ -4643,36 +4574,17 @@ export class ConversationV4Gateway {
     // loadPersistedEvents 的产出里可能带**尾窗坐标**（Step 6）：此时投影只物化了窗口，
     // 声明 `fullyMaterialized:false`，且回写必须从窗口 ordinal 起编号、按整条分支剪枝。
     await this.hydrateRowManifest(sessionId, publisher, phases, loaded.coldWindow);
-    for (const [routeKey, state] of this.flushStates) {
-      if (state.sessionId !== sessionId) continue;
-      if (!publisher.hasSubscription(state.subscriptionId, state.connectionId)) continue;
-      if (state.timer) {
-        clearTimeout(state.timer);
-        state.timer = null;
-      }
-      if (this.pausedConnections.has(state.connectionId)) continue;
-      const reservation = publisher.reserveFlush(state.subscriptionId);
-      if (!reservation) continue;
-      try {
-        this.emitReservation(reservation);
-      } catch (error) {
-        this.host.onError?.("v4.hydrate.subscriptionResync", error, {
-          phase: "subscriptionResync",
-          sessionId,
-        });
-        this.scheduleFlush(routeKey, state, publisher);
-      }
-    }
+    this.resyncSessionSubscribers(sessionId, publisher);
     this.markViewReady(sessionId);
     this.publishCurrentSummaryToIndex(sessionId);
     phases.finishedAtMs = performance.now();
-    // Step 15：窗口化 / view-only 首屏**收口**是升级的第二个触发点。
+    // fix-c19：view-only 首屏**收口**是派生量补种的第二个触发点。
     //
-    // 只在本次真的记了降级事实时才调（`notDegraded` 那条 debug 由激活分支承担，避免每次
-    // hydrate 都刷一行）。激活已完成的顺序（app 冷启：journal 读入口在点击前就激活）在这里
-    // 就能排上升级；激活尚未完成的顺序由激活分支排。fire-and-forget，不进首帧关键路径。
-    if (this.degradedFirstScreen.has(sessionId)) {
-      this.scheduleProjectionUpgrade(sessionId, "firstScreenSettled");
+    // 只在本次真的记了「欠补种」事实时才调（`notPending` 那条 debug 由激活分支承担，避免
+    // 每次 hydrate 都刷一行）。激活已完成的顺序（app 冷启：journal 读入口在点击前就激活）
+    // 在这里就能补上；激活尚未完成的顺序由激活分支补。fire-and-forget，不进首帧关键路径。
+    if (this.runtimeFactsPending.has(sessionId)) {
+      this.scheduleRuntimeFactsSeed(sessionId, "firstScreenSettled");
     }
     return publisher;
   }
@@ -4682,16 +4594,14 @@ export class ConversationV4Gateway {
    *
    * 两条不变量（一次读失败绝不允许破坏它们）：
    *   ① 用户可见的投影行数**不得变少**——读失败不是「历史没了」的证据。过去它带着
-   *      `events: []` 流进 `rehydrate`，现象是用户眼前的历史整段消失；升级路径更糟：
-   *      升级前的降级投影本来是可用（只是不全）的，被换成空投影是纯损失。
+   *      `events: []` 流进 `rehydrate`，现象是用户眼前的历史整段消失。
    *   ② live 事件**不得停止前进**——过去同一次回落把 `sourceEventSeq` 交成 0，游标回到
    *      起点而 live raw 序号已在几百上千，随后每个事件都卡在 `sourceEventSeq + 1` 的 gap 上，
    *      投影永远停在空/残状态直到用户重开。
    *
    * 自愈不在本函数里：调用方照常**不**重新登记 `hydratedSessions`，读入口
-   * `readableViewPublisher` 的第三个条件因此不成立，下一次读/翻页会退回冷路径再读一次
-   * （与「早退不得把缺段的投影钉住」同一条自愈路径）。升级本身仍按 Step 10 的口径只做一次，
-   * 不在这里轮询重试。
+   * `readableViewPublisher` 的第二个条件因此不成立，下一次读/翻页会退回冷路径再读一次
+   * （与「早退不得把缺段的投影钉住」同一条自愈路径）。不在这里轮询重试。
    *
    * 真冷（本来就没有投影）没有「旧投影」可以保留：空投影是唯一诚实的结果（用户眼前本来
    * 就没有历史）。那时也没有 raw 游标可归零，两者一致。
@@ -4703,7 +4613,6 @@ export class ConversationV4Gateway {
       durationMs: number;
       existingPublisherAtStart: boolean;
       forceRebuild: boolean;
-      fullMaterialization: boolean;
       liveSessionAtStart: boolean;
       persistedMessages: number;
       phases: HydrationPhases;
@@ -4718,7 +4627,6 @@ export class ConversationV4Gateway {
       durationMs: context.durationMs,
       existingPublisherAtStart: context.existingPublisherAtStart,
       forceRebuild: context.forceRebuild,
-      fullMaterialization: context.fullMaterialization,
       // 关键结论：true = 保住了旧投影；false = 本来就没有可保的（真冷）。
       // 两者必须能在日志里分开，否则「空会话读失败」会被误读成「历史被清空」。
       keptProjection: kept !== undefined,
@@ -4951,6 +4859,39 @@ export class ConversationV4Gateway {
       if (seed) publisher.seedUsage(seed);
     } catch (error) {
       this.host.onError?.("v4.usageSeed", error);
+    }
+  }
+
+  /**
+   * 把该会话现有订阅的待发帧立刻驱动一次（hydration 收口与派生量补种共用）。
+   *
+   * 两处都需要它，但理由不同：hydration 收口是「投影换了，订阅必须 resync」；补种是
+   * 「投影只改了 usage/config 这两个初值、不产 delta」，若不主动驱动，客户端要等到下一个
+   * 事件才看见（`seedUsage` / `seedConfig` 不产 delta 是刻意的，它们不能伪造行变化）。
+   *
+   * 失败只记账并重新排 flush：一次 emit 失败不该让订阅永久停在旧快照上。
+   */
+  private resyncSessionSubscribers(
+    sessionId: string,
+    publisher: ConversationTopicPublisher,
+    phase: "subscriptionResync" | "runtimeFactsResync" = "subscriptionResync",
+  ): void {
+    for (const [routeKey, state] of this.flushStates) {
+      if (state.sessionId !== sessionId) continue;
+      if (!publisher.hasSubscription(state.subscriptionId, state.connectionId)) continue;
+      if (state.timer) {
+        clearTimeout(state.timer);
+        state.timer = null;
+      }
+      if (this.pausedConnections.has(state.connectionId)) continue;
+      const reservation = publisher.reserveFlush(state.subscriptionId);
+      if (!reservation) continue;
+      try {
+        this.emitReservation(reservation);
+      } catch (error) {
+        this.host.onError?.("v4.hydrate.subscriptionResync", error, { phase, sessionId });
+        this.scheduleFlush(routeKey, state, publisher);
+      }
     }
   }
 

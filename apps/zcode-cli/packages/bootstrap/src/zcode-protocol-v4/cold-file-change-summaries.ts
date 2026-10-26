@@ -29,6 +29,22 @@ interface WorkspaceCheckpointWithTurn {
 
 type ReadArtifact = (snapshotRef: string) => Promise<string>;
 
+/**
+ * 一条**从 session_entry 读出来的**工作区 checkpoint（不含事件外壳）。
+ *
+ * 为什么需要它（fix-c19）：`buildColdFileChangeSummaries` 的输入一直是内存
+ * `CheckpointCreated` 事件，而这些事件只在 resume 时由
+ * `restoreWorkspaceCheckpointEntries` 从 session_entry 回放进 eventStore。view-only
+ * 首屏**没有 resume**，于是同一份事实在事件流里不存在——旧实现靠「激活后整份重读」
+ * 补回来。现在改成直接从 session_entry 读（这一步的读已经在
+ * `loadPersistedConversationMaterialization` 里发生），首屏就有摘要，不再需要任何
+ * 激活后的重读。
+ */
+export interface PersistedWorkspaceCheckpoint {
+  checkpoint: ReturnType<typeof parseCheckpointCreatedPayload>;
+  turnId: string | null;
+}
+
 function isSplitProductTurnId(turnId: string | null | undefined): boolean {
   return Boolean(turnId?.includes("~"));
 }
@@ -37,6 +53,18 @@ function isWorkspaceCheckpoint(
   checkpoint: ReturnType<typeof parseCheckpointCreatedPayload>,
 ): boolean {
   return checkpoint.scope === RewindScope.Workspace || checkpoint.scope === RewindScope.Both;
+}
+
+/**
+ * checkpointId 的安全读取：坏 payload 只能让**这一条**去重失败，不能让整份摘要抛错
+ * （与 `workspaceCheckpoints` 的宽容口径一致，那边也逐条 try 语义）。
+ */
+function safeCheckpointId(payload: unknown): string | null {
+  try {
+    return parseCheckpointCreatedPayload(payload).checkpointId;
+  } catch {
+    return null;
+  }
 }
 
 function workspaceCheckpoints(events: readonly SessionEvent[]): WorkspaceCheckpointWithTurn[] {
@@ -214,13 +242,31 @@ export async function readConversationFileChangesFromEvents(input: {
 
 export async function buildColdFileChangeSummaries(input: {
   events: readonly SessionEvent[];
+  /**
+   * 从 session_entry 读出的工作区 checkpoint（与 `events` 里的 CheckpointCreated 同源）。
+   * 两者按 checkpointId 去重（重复会让同一份改动被加两遍）。
+   */
+  persistedCheckpoints?: readonly PersistedWorkspaceCheckpoint[];
   messageIds: readonly string[];
   onArtifactError?: (messageId: string, error: unknown) => void;
   readArtifact: ReadArtifact;
 }): Promise<ReadonlyMap<string, TurnFileChangeSummary>> {
   const durableMessageIds = new Set(input.messageIds);
   const checkpointsByMessageId = new Map<string, WorkspaceCheckpointWithTurn[]>();
-  for (const entry of workspaceCheckpoints(input.events)) {
+  // 事件里的 checkpoint 是权威（resume 之后两者同源）：按 id 去重，先收事件再补持久侧。
+  const eventCheckpointIds = new Set(
+    input.events
+      .filter((event) => event.type === SessionEventType.CheckpointCreated)
+      .map((event) => safeCheckpointId(event.payload)),
+  );
+  const mergedCheckpoints = [
+    ...workspaceCheckpoints(input.events),
+    ...(input.persistedCheckpoints ?? []).filter(
+      ({ checkpoint }) =>
+        isWorkspaceCheckpoint(checkpoint) && !eventCheckpointIds.has(checkpoint.checkpointId),
+    ),
+  ];
+  for (const entry of mergedCheckpoints) {
     const messageId = String(entry.checkpoint.targetMessageId ?? entry.checkpoint.messageId);
     if (!durableMessageIds.has(messageId)) continue;
     const entries = checkpointsByMessageId.get(messageId) ?? [];
