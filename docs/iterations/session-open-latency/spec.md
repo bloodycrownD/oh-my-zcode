@@ -523,6 +523,60 @@ Step 15 之后只剩两件事：①升级兑现后 keep-warm 投影变成全量�
 
 **其余判读**：`sessionRuntimeState` 6/6 仍是 `warm`（点击前激活），因此本机冷开**没有**一次进入 view-only 补种路径（打点都是 `skipped reason=notPending trigger=runtimeActivated`）——该路径只在「CLI 重起后打开」出现，由 `test:view-runtime-split` K2/K6/K7 与 `test:cold-open-window` C2/C4/D2 覆盖。`timeline` 的 `data-total-row-count` 读的是 manifest 的 `totalCount`（5255），**不是**投影行数；投影规模只能看 `openTiming.snapshotRowCount`。
 
+#### Step 17 落地说明（fix-c20，`92f240d2`，2026-10-26 真机重测，数字全在 `after4.json`）
+
+Step 16 把冷开账单拆到三段之后，剩下唯一大头是 CLI 的**串行请求队列**（`arrival→dispatch` 中位 918ms）。本步把它换成**命令级读写锁**：只读并发、变更独占、严格 FIFO。夹具 / 采样器 / 口径与 Step 14~16 完全一致（`after.json` / `after2.json` / `after3.json` 原样保留，本步另写 `after4.json`）。
+
+| 场景                 | 判据                                 | Step 16（after3）            | Step 17（after4）                | 结论                                  |
+| -------------------- | ------------------------------------ | ---------------------------- | -------------------------------- | ------------------------------------- |
+| 冷开主判             | `uiViewReadyMs − hostPrepareMs ≤ 1s` | 1436                         | **1286**（6 样本 1149~1359）     | **仍未达标**（−10%，门槛的 1.29 倍）  |
+| 冷开分解             | `arrival→dispatch`（排队）           | 918（754~1074）              | **0~1**（全部样本 max 14）       | **目标达成**（可避免的排队已清零）    |
+| 冷开分解             | `handler`                            | 449（364~812）               | **1169**（1042~1251）            | **反向变长 2.6×**（见下，非回归）     |
+| 冷开分解             | `click→arrival`                      | 131                          | 134（122~147）                   | 持平                                  |
+| 冷开分解             | `workflowRuns` 首次 handler          | 1012~1287                    | **1724**（1649~1766）            | +34%（与 subscribe 争同一个事件循环） |
+| 冷开分解             | `openPhases.viewReadyMs` / `mergeMs` | 443 / 347                    | **1162 / 460**                   | viewReady ⊃ 排队；merge +113（争用）  |
+| 冷开分解             | `rehydrateMs` / `manifestMs`         | 47 / 6                       | 45 / 6                           | 持平                                  |
+| 冷开                 | `openTiming.sessionRuntimeState`     | warm 6/6                     | **cold 6/6**                     | 见下（这是 IS3 想要的顺序）           |
+| 投影规模             | `snapshotRowCount` / 渲染层行        | 160 / `totalCount` 5255      | 160 6/6 / 5255                   | 未动（本步不碰投影）                  |
+| 重开（runtime 持有） | 按热开 800ms 观察                    | 140                          | **136**（129~150）               | 持平                                  |
+| 切回（keep-warm）    | 豁免指标，断言无新 ACK               | 426（320~611，6/6 无新 ACK） | **527**（310~561，3/3 无新 ACK） | 同一噪声带（n=3），未新增成本         |
+
+**为什么队列消失后主判只降了 10%**：Step 16 的因果判断只对了一半。`arrival→dispatch` 确实被兄弟查询占住（本步证明它可以清零），但占住它的那段工作——`v4/conversation/workflowRuns` 的首次 handler——**不是「workflowRuns 的冷缓存查询」，而是它触发的整条 runtime 激活**：
+
+```
+v4/conversation/workflowRuns
+  → ensureHostRecordForJournalRead        （v4-gateway.ts:2932）
+  → ensureRuntimeReady                    （唯一激活入口）
+  → coldResume.ensureResumed → app.resume  （app 启动 + 7 个 MCP 连接 + 会话 resume）
+```
+
+日志逐段可证（一次冷开的完整序列）：`cold resume flight created`（06.921）→ `bootstrap.app.startup.config/plugins/runtime_config/storage/mcp.completed` + 7 × `mcp.server.connect.started`（06.952~07.004）→ `session.resumed`（08.057）。handler 1649~1766ms 全部是这段。
+
+这段工作既不能取消也不能“并行掉”——它抢的是**同一个事件循环**：
+
+- **证据一（同步阻塞的事件循环）**：`materializeSessionShell` 的最后一句就是 `shell_materialized` 日志（`server-operations.ts:1544`，紧接着 `return`），而同一个 flight 的 `.finally()` 里的 `cold shell flight cleared`（`cold-session-resume.ts:138`，理论上只隔一个微任务）实测晚了 **430ms**。这 430ms 里整个进程写不出一行日志 ⇒ 激活里有一段长同步工作占满了 loop。
+- **证据二（水化本体没变慢）**：subscribe 的 handler 从 449 涨到 1042~1251，而它自己的水化窗口 `v4 hydrate loaded … durationMs=436` 与 Step 16 同档；`mergeMs` 里唯一变慢的是 `fileChangeSummariesMs`（4~7 → 119~160，artifact 读与 resume 的 I/O 撞在同一段），其余分段（`subagentsMs` 238~297）与 Step 16 同档。
+
+因此本步的实际收益是**把「可避免的排队」清零**（918 → 0~1），代价是**把「不可避免的争用」从队列里挪到 handler 里显形**（449 → 1169）。冷开账目仍然闭合：1288 ≈ `click→arrival` 134 + `handler` 1169（其中 ~430 事件循环被占 + ~436 水化 + ~300 其余）+ 传输/渲染余量。**要过 1s 必须动激活，不是动队列**（见风险 29）。
+
+**一个附带的行为变化（正面）**：`openTiming.sessionRuntimeState` 从 Step 14 起的 `warm 6/6` 变成 **`cold 6/6`**，`runtimeReadyMs`（1280，中位）与 `viewReadyMs`（1162）现在**不再同一次等待**——激活在 ACK 之后才完成，冷开的 view-only 补种路径（`v4 runtime facts seed deferred reason=runtimeNotReady trigger=firstScreenSettled` → `applied`，`seedMs` 404~599）**第一次在本机冷开里真的跑起来**，6/6 全部 `applied`。改造前那个 `warm` 是「串行队列让 workflowRuns 先把会话激活了」的副产品，不是 IS3 想要的顺序；现在 subscribe 只等视图水位，与 IS3 一致（`test:view-runtime-split` K2/K6/K7 覆盖同一语义）。
+
+**读写锁的形态**（`request-concurrency-gate.ts` + `command-concurrency.ts`）：
+
+- **只读并发**：队首连续的只读一次性全部放行（只读之间没有次序语义）。
+- **变更独占**：变更必须等在飞只读排空（`activeReaders === 0`），并且在它出队之前**任何新只读都不得进入**。
+- **严格 FIFO**：队列按到达顺序排 ⇒ 变更与变更、变更与其后到达的只读之间的次序语义与改造前的串行链**逐条相同**（写优先的公平读写锁；`[R1,R2,W,R3]` 的执行是 `R1‖R2 → W → R3`，不是 `R1‖R2‖R3 → W`）。
+- **旁路不变**：`session/stop` 与 `workspace/cancelGenerateText` 在 transport 里先命中旁路名单、**不过锁**，仍然等「前一条排队请求开始跑」之后越过它（否则「停止」要等正在飞的变更跑完才发得出去）。
+- **分类表**：`COMMAND_CONCURRENCY: Record<V4Method | ZCodeProtocolMethod, "readonly"|"mutating">`（109 条，wire 方法名键控）。三条纪律——①**显式登记**（不按前缀猜）；②**拿不准一律 `mutating`**（`commandConcurrencyOf` 对未知方法名返回 `mutating`）；③漏登记即红。
+- **漏登记的三层防护**：①穷尽类型 —— 表是 `satisfies Record<两个协议方法表的并集, …>`，漏一条**编译即红**（变异实测 `tsc` exit 1）；②`test:command-concurrency` 的 K5 按 `server.ts` 的 `dispatchRequest` **逐 case 复核**（93 个 case；出现裸字符串 case 或解析数不等于 case 数都红，防空跑）；③K6 双向核对分类表与协议方法表（多一条拼错的键也红，否则漏登记会看起来是绿的）。
+- **与分类无关的一条安全闸**：**同一 requestId 在飞时强制独占**。`postResponseOutbox` 与响应路由都按 requestId 键控，两条同 id 的请求并发会互相 `delete`/`set`（初始帧静默丢失）；串行链顺带掩盖了这个客户端违约，换成并发之后必须显式挡住。
+- **打点**：`zcode_protocol.request.timing` 新增 `dispatchClass`（`readonly` / `mutating` / `bypass`）——任何一次 queueWait 现在都能归因到「被一条变更独占」或「同 requestId 在飞」。
+
+**归入 `readonly` 的 34 条**（逐条理由见 `command-concurrency.ts` 的行注释与 after4 的 `rw_lock.readonly_commands`）：v4 会话通道的 22 条读面（subscribe / resync / rowsRange / turnDirectory / runtimeReady / plans / fileChanges / fileRewindPreview / usage / usage stats / backgroundBashOutput / workflowRun{Events,Runs,Artifacts,ArtifactData,ArtifactRead,Workspace,NodeResult} / attachment read 四条 / commandsQuery）、legacy `session/{list,subagents,messages,events,debug,usage}` + `usage/stats`、`workspace/{readPresentation,readPromptLanguage,readMagicContextConfig,listMagicContextMemories}`。
+其中 `subscribe` / `resync` 形状上是**注册**，必须单独交代：注册按 `(connectionId, topic, subscriptionId)` 键控、水化按会话单飞（`viewReadyFlights` / `hydrationInFlight`），而「同一会话被 host 与手机 web 同时订阅」本来就要求这两条并发正确 ⇒ 它们与别的只读没有次序依赖。反过来，legacy `session/read` 与 `session/subscribe` **刻意不算只读**：两者都写 `record.deliveryKind`（`server-operations.ts` 的 `readSession` / `subscribeSession` 首几行）。
+
+**变异探测**（14 个，全部实测变红且字节级还原）：只读不共享 / 变更不等排空 / 变更不挡新请求 / 抛错不释放槽位（异步与同步两条路）/ 同 id 不降级 / 漏登记一条 / 未知方法默认翻转成只读 / 旁路名单扩大 / 裸字符串 case / 只读被塞进变更类 / 排空不唤醒 `waitForIdle` / `attachment/begin` 挪进只读（名字正则抓到）/ legacy `session/read` 挪进只读（刻意排除项抓到）。锚点：`test:command-concurrency`（12 例：G1-G5 闸门单测 + K5/K6 分类门禁 + I1-I5 真实 transport 接线）。
+
 ## 最终项目结构
 
 ```
@@ -547,6 +601,9 @@ apps/zcode-cli/packages/bootstrap/src/zcode-protocol-v4/
 apps/zcode-cli/packages/bootstrap/src/zcode-protocol/
   v4-bridge.ts                                             改（store-only loadPersistedEvents，不含 record 闸门）
   server-operations.ts                                     改（materialize / activate 拆分）
+  transport.ts                                             改（Step 17：串行 `processing` 链 → 命令级读写锁；`request.timing` 加 `dispatchClass`）
+  command-concurrency.ts                                   新增（Step 17：命令并发分类表，wire 方法名键控、穷尽类型）
+  request-concurrency-gate.ts                              新增（Step 17：只读共享 / 变更独占 / 严格 FIFO 的闸门）
 packages/shared/src/zcode-protocol-v4/
   snapshot.ts                                              改（additive: sessionRuntime）
   delta.ts                                                 改（row.removed 带 totalCount/firstRowId）
@@ -593,6 +650,8 @@ apps/zcode-cli/packages/bootstrap/scripts/
 | 20  | IS3     | `v4-gateway.ts:2962`                                                                                                                                                                                                                                                                                                    | 升级前 `hydratedSessions.delete()`（`forceRebuild` 现被早退挡住）                                                                                                                                                                                                                                                               |
 | 21  | IS7     | `core/src/runtime/types.ts:268-279`、`resume.ts:147-156`、`turn.ts:194-205`                                                                                                                                                                                                                                             | `historyMode:"none"`；eager context init 移到 turn；闸门在 init 之后                                                                                                                                                                                                                                                            |
 | 22  | IS1     | `bootstrap/scripts/test-cold-open-window.mjs`（新）                                                                                                                                                                                                                                                                     | 身份一致性 + 翻页 + 视图降级回归                                                                                                                                                                                                                                                                                                |
+| 23  | IS3     | `bootstrap/src/zcode-protocol/transport.ts` + `request-concurrency-gate.ts`（新）+ `command-concurrency.ts`（新）                                                                                                                                                                                                       | 串行 `processing` 链 → **命令级读写锁**：只读并发 / 变更独占 / 严格 FIFO；旁路（stop、cancelGenerateText）不过锁；同一 requestId 在飞强制独占；`request.timing` 加 `dispatchClass`。分类表穷尽两个协议方法表（漏登记编译即红），未知方法名一律 `mutating`                                                                       |
+| 24  | IS3     | `bootstrap/scripts/test-command-concurrency.mjs`（新）+ `package.json` 的 `test:command-concurrency`                                                                                                                                                                                                                    | G1-G5（闸门语义：并发 / 独占 / 保序 / 抛错不毒化 / 排空）+ K5/K6（分类表门禁：逐 case 复核 + 双向穷尽 + 旁路名单）+ I1-I5（真实 transport 接线 + 同 id 降级 + 未知方法保守）                                                                                                                                                    |
 
 ## 详细实现步骤
 
@@ -631,6 +690,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 - T-SL13 — blocking: yes — **IS7 历史完整**：`historyMode:"none"` 下首次发送后，provider 收到的历史与 `"full"` 逐字节相等；且 tail 水化产物不会被 `messageHistory.init()` 清空（本设计下不存在 tail 水化）。
 - T-SL14 — blocking: yes — **IS3 首屏降级**：view-only 首屏无 usage 为**预期**，激活后由宿主端口窄读补齐；~~无 fileChanges 摘要为预期~~（**Step 16 加强**：fileChanges 的输入是 `session_entry` 里的工作区 checkpoint，首屏从同一读里窄读即得，不再等激活后重读）。
 - T-SL15 — blocking: no — qa: manual_user：真机性能验收（Step 14）。
+- T-SL17 — blocking: yes — **IS3 命令并发契约**（Step 17）：`test:command-concurrency`。①两条只读**确实重叠**（闸门级 G1 + 真实 transport I1：第二条在第一条还卡着时已进 handler，不是假并发）；②**变更独占**（G2/I2：只读在飞时变更等全部排空；变更在飞时新只读不得进入）；③**变更之间保序 + 变更之后到达的只读不许插队**（G3：`[R1,R2,W,R3]` 的实际执行必须是 `R1‖R2 → W → R3`）；④**只读抛错不毒化锁**（G4：异步 reject 与同步 throw 两条路都放回槽位，之后的变更照样进）；⑤**分类漏登记即红**（K5 按 `dispatchRequest` 逐 case 复核 93 个 case；K6 双向穷尽 + 未知方法默认 `mutating` + 旁路名单不得扩大）。另含 I3（stop 旁路仍越过在飞变更）、I4（同 requestId 在飞降级成独占）、I5（未知方法按变更串行）。
 
 夹具：T-SL1-8 为纯函数 / 可控 store 单测；T-SL10/11 需要 gateway 级夹具（`V4GatewayHost` 30+ optional 成员），**若夹具成本超预算，降级为 publisher + 抽出纯函数闸门的用例**，并在 Step 13 前确认；T-SL12 为源码守卫（剥离注释后判定）。
 
@@ -664,7 +724,9 @@ apps/zcode-cli/packages/bootstrap/scripts/
 24. **升级兑现后 keep-warm 投影变成全量，切回成本翻五倍**（Step 15 实测登记，**Step 16 已修**）：风险 22 修好后「激活后补齐全量」在冷启路径上真的发生了（10/10），于是该会话的 live 投影从尾窗 160 行变成整条分支 5255 行（渲染层 memory sample：`projection.rows=4747` / `heapUsed≈398MB`）。切回（keep-warm，无新 ACK）实测 **1846~2367ms（中位 2327）**，Step 14 的 450ms 是「升级从未发生」的读数 ⇒ **+417%**。**Step 16 的修法不是延后升级，而是删除升级**：manifest 是行数权威（IS5）、`rows/range` 能按需物化任意页（1.7~6.7ms/页），全量投影换不到任何能力。删掉后实测：投影恒 160 行（`snapshotRowCount` 6/6）、renderer 堆 398 → 152MB（`performance.memory` 同口径）、切回 **426ms**（320~611，6/6 无新 ACK）、冷开 1784 → 1436。行为锚点：`test:view-runtime-split` K2/K3/K4/K6/K7/M1/M2、`test:session-row-manifest` M1（窗口化 ≠ 降级）、`test:cold-open-window` C2/D2。
 25. **升级过渡期的清单事实缺口曾让翻页退化成空页**（Step 15 查出并修，**Step 16 随升级删除而退场**）：`publisher.rehydrate` 会先清 manifest 事实，在 `hydrateRowManifest` 算完之前 `rowsRange` 读到 `facts === null` —— 缺页判定因此关闭，窗口以上的区间**直接返回空页**（`hasMore:false`，不报错）。Step 15 的修法是升级路径把旧事实带过过渡；Step 16 之后**投影在订阅生命周期内不再被换掉**，这段过渡不存在了，携带逻辑一并删除（`isUpgrade` 判据消失）。M1/M4/M5 现在靠「不存在过渡」保持绿；`readableViewPublisher` 的第三个条件也退化为只看 `hydratedSessions`。
 26. **`warm-not-holding` 的 run#1 现在会被 keep-warm 挡住**（Step 15 登记的驱动口径，**仍未解**）：不持有 regime 的首次打开若落在 keep-warm 窗口内，渲染层复用已有 topic 订阅、**不产生 subscribe/ACK**，采样器按 `ack-timeout` 判失败（CLI 日志可证：那一次点击没有 subscribe 行）。这与 switchback 同类（spec 已豁免它的 uiViewReadyMs）。要量「不持有」必须先显式等 keep-warm 过期，或把判据改成「无新 ACK 即复用」。数据：`after2.json` / `after3.json` 的 `runs.warmNotHolding`（Step 16 两次尝试同样失败）。
-27. **CLI 串行请求队列会把冷开的 subscribe 挡在兄弟查询后面**（Step 16 测出）：`transport.ts` 的 `processing` 链把所有非旁路请求串行化，而一次打开会并发发出 `subscribe` / `workflowRuns` / `fileChanges` / `plans` / `rowsRange`。实测（`zcode_protocol.request.timing`）：`click→CLI arrival` 只有 131ms（中位），但 `arrival→dispatch` 等 **918ms**（754~1074），占用者是同一刻到达的 `v4/conversation/workflowRuns`（首次读 1012~1287ms，中位只有 2ms ⇒ 慢的是冷缓存那几次）；handler 本体 449ms。这一段就是冷开 1436ms 里的最大单项，去掉它 ≈518ms。**未修**：只读命令并行化会改动「命令串行 + stop/cancel 旁路」两条既有约定，需要先裁定并发读是否安全（publisher 订阅注册 / manifest 缓存 / residency acquire 都是共享状态），不在本步兜底范围内。打点已留在代码里可 grep：debug `zcode_protocol.request.timing`（每次请求）、warn `ZCode Protocol request waited in queue`（队列 ≥200ms）。数据：`after3.json` 的 `cli_pre_gap`。
+27. **CLI 串行请求队列会把冷开的 subscribe 挡在兄弟查询后面**（Step 16 测出，**Step 17 已修**）：`transport.ts` 的 `processing` 链把所有非旁路请求串行化，而一次打开会并发发出 `subscribe` / `workflowRuns` / `fileChanges` / `plans` / `rowsRange`。实测（`zcode_protocol.request.timing`）：`click→CLI arrival` 只有 131ms（中位），但 `arrival→dispatch` 等 **918ms**（754~1074），占用者是同一刻到达的 `v4/conversation/workflowRuns`；handler 本体 449ms。**Step 17 的修法**是把串行链换成命令级读写锁（只读并发 / 变更独占 / 严格 FIFO，旁路不过锁），实测 `arrival→dispatch` **918 → 0~1ms**。但主判只降 10%（1436 → 1286）：占用队列的那段工作其实是 workflowRuns **触发的一次完整 runtime 激活**，它抢的是同一个事件循环，并行不掉——真正的因果链与下一步见风险 29。数据：`after3.json` 的 `cli_pre_gap`、`after4.json` 的 `cli_pre_gap`。
+28. **命令并发分类现在是一张必须保持穷尽的事实表**（Step 17 登记）：只读并发的正确性依赖「每一条已注册命令都有分类、且变更侧一条不漏」——**漏一条只读只是慢，漏一条变更就是次序错乱**（两条互斥命令并发）。三层防护：①分类表是 `Record<V4Method | ZCodeProtocolMethod, "readonly"|"mutating">`，漏登记**编译即红**；②`test:command-concurrency` 的 K5 按 `server.ts` 的 `dispatchRequest` 逐 case 复核（93 个 case；裸字符串 case 或解析数 ≠ case 数都红，防空跑）；③K6 双向核对表与协议方法表（多一条拼错的键也红）。另两条同族约束：**未知方法名一律 `mutating`**（`commandConcurrencyOf` 的兜底，变异翻成 `readonly` 即红），**旁路名单不许扩大**（K6 断言仍只有 `session/stop` 与 `workspace/cancelGenerateText` 两条）。行为锚点：`test:command-concurrency` G1-G5 / K5 / K6 / I1-I5（12 例，12 个变异全部实测变红）。
+29. **冷开剩下的 1.29 倍门槛是「一次只读查询触发了整条 runtime 激活」，不是查询本身慢**（Step 17 测出，**未修**）：`v4/conversation/workflowRuns`（以及 `workflowRunEvents` / `workflowRunArtifacts` / `workflowRunWorkspace` 等同一个 `ensureHostRecordForJournalRead` 的所有者）会 `await ensureRuntimeReady`，于是**一个只想看 workflow 卡片的读，触发了 app 启动 + 7 个 MCP 连接 + 会话 resume**（实测 handler 1649~1766ms）。这件事在 Step 16 被读成「workflowRuns 的冷缓存查询 1012~1287ms」，现在有日志逐段反驳：`cold resume flight created` → `bootstrap.app.startup.*` → `session.resumed`。而这段激活里有 **~430ms 同步阻塞事件循环**（`shell_materialized` 与同一 flight `.finally()` 的 `cold shell flight cleared` 相隔 430ms、其间进程零日志），把并发执行的 subscribe 水化一起拖慢（handler 449 → 1169，`fileChangeSummariesMs` 4~7 → 119~160）。**为什么不在本步修**：journal 读需要宿主 record（`record.app.listDynamicWorkflowRuns` 挂在这条记录上），把它降到**视图水位**（shell app 也能提供 dwf 端口）是语义变更：`ensureHostRecordForJournalRead` 的注释记录了「用 `conversationState` 判活、否则会造出幽灵 runtime」的前科（风险 2）。下一步两个入口：①让 journal 读只等视图水位（要证明 shell app 上的 run 枚举与 live 逐值一致，含 `resumable` 谓词）；②把激活里的同步段拆成可让出 loop 的分片（收益 ~430ms，且对首发送也有利）。数据：`after4.json` 的 `cli_pre_gap` / `activation_triggered_by_read`。
 
 ### 回滚
 
