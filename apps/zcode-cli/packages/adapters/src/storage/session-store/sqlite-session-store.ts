@@ -30,6 +30,7 @@ import type {
   PermissionRuleset,
   ProjectId,
   SessionEntryInfo,
+  FileChangeSummaryStorePort,
   SessionEntryType,
   ScriptWorkflowActivityRecord,
   ScriptWorkflowDefinitionRecord,
@@ -97,6 +98,7 @@ import * as messageRepository from "./repositories/messages.js";
 import * as scriptWorkflowActivityRepository from "./repositories/script-workflow-activities.js";
 import * as scriptWorkflowRunRepository from "./repositories/script-workflow-runs.js";
 import * as sessionEntryRepository from "./repositories/session-entries.js";
+import * as fileChangeSummariesRepository from "./repositories/file-change-summaries.js";
 import * as sessionInputRepository from "./repositories/session-inputs.js";
 import * as sessionRepository from "./repositories/sessions.js";
 import * as todoRepository from "./repositories/todos.js";
@@ -213,6 +215,23 @@ export class SqliteSessionStore
   private readonly dbPath: string;
   private readonly forkCommitFaultAt?: ForkCommitFaultStage;
   private dwfJournalStore?: JournalStorePort;
+  private fileChangeSummaryStore?: FileChangeSummaryStorePort;
+
+  /**
+   * 冷开文件变更摘要缓存：读是纯查询（只读连接可用），写前照例走 `throwBeforeWrite`。
+   * 两个实现都包成 Promise——端口是异步形状，调用方不需要知道底层是同步 sqlite。
+   */
+  get fileChangeSummaries(): FileChangeSummaryStorePort {
+    this.fileChangeSummaryStore ??= {
+      readFileChangeSummaries: async (input) =>
+        fileChangeSummariesRepository.readFileChangeSummaries(this.db, input),
+      upsertFileChangeSummaries: async (input) => {
+        this.throwBeforeWrite();
+        fileChangeSummariesRepository.upsertFileChangeSummaries(this.db, input);
+      },
+    };
+    return this.fileChangeSummaryStore;
+  }
 
   constructor(options: SqliteSessionStoreOptions = {}, startupToken?: symbol) {
     this.dbPath = options.dbPath ?? getDefaultSessionDbPath();

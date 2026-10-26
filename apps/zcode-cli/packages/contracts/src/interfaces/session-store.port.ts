@@ -1026,8 +1026,48 @@ export interface LocalSettingStorePort {
   }): CollaborationMode | Promise<CollaborationMode>;
 }
 
+/**
+ * 冷开文件变更摘要的持久缓存。
+ *
+ * `summary` 对仓储是不透明 JSON（形状由 bootstrap 侧的 `TurnFileChangeSummary` 决定，
+ * adapters 不反向依赖 bootstrap）。`summaryVersion` 参与主键：摘要口径一变就换版本号，
+ * 旧行自然读不到、由后台重新填，不需要写迁移脚本去改历史行。
+ */
+export interface FileChangeSummaryRecord {
+  messageId: string;
+  summary: unknown;
+  computedAt: number;
+}
+
+export interface FileChangeSummaryReadInput {
+  sessionId: SessionId;
+  messageIds: readonly string[];
+}
+
+export interface FileChangeSummaryWriteInput {
+  sessionId: SessionId;
+  records: readonly FileChangeSummaryRecord[];
+}
+
+export interface FileChangeSummaryStorePort {
+  readFileChangeSummaries(
+    input: FileChangeSummaryReadInput,
+  ): Promise<ReadonlyMap<string, unknown>>;
+  upsertFileChangeSummaries(input: FileChangeSummaryWriteInput): Promise<void>;
+}
+
 export interface SessionStorePort {
   createSession(input: CreateSessionInput): Promise<SessionInfo>;
+  /**
+   * 冷开「文件变更摘要」的持久缓存（可选：旧宿主/内存 store 不实现）。
+   *
+   * 为什么需要：摘要由 workspace checkpoint 的 **artifact** 派生（每个 checkpoint 一次
+   * artifact 读 + 整快照反序列化，真机约 7ms/条）。放在冷开必经路径上按消息全量现算，
+   * 重会话首屏会线性增长到 2 秒级（真机 291 条物化消息 / 2088ms）。摘要一旦算出就不再变
+   * （checkpoint 不可改），是可持久化的派生事实：算一次落库，之后每次冷开只做一次
+   * 按 session 的批量读。缺席时调用方必须退回现算（不得把「没实现」当成「没有变更」）。
+   */
+  fileChangeSummaries?: FileChangeSummaryStorePort;
   /** legacy 兼容原语；V4 stable/compact-edit fork 禁止调用，统一走 commitForkBundle。 */
   createForkedSessionWithMetadata?(
     input: CreateSessionInput,
