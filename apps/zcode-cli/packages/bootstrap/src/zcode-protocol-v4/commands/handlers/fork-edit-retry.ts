@@ -1,9 +1,19 @@
-// fork/edit/retry 命令组：forkAssistant / editUserQuery / retryTurn。
-// 共同点：都以 {rowId, entityId} 定位历史实体，经 host 的 v4 投影翻译面换成 transcript messageId
-// （翻译是 v4 原生决策，翻译不到直接 reject，绝不静默兜底 latestCheckpoint——会错点）。
+// edit/retry 两条车道：都以 {rowId, entityId} 定位历史实体，经 host 的 v4 投影翻译面换成
+// transcript messageId（翻译是 v4 原生决策，翻译不到直接 reject，绝不静默兜底
+// latestCheckpoint——会错点）。
 // - editUserQuery = 换文本的 retryTurn：rewind 截断该 turn → 原生 prompt turn 重发新文本。
 // - retryTurn = rewind 截断 + 重发原 user prompt（原文必须在 rewind 前解析，截断后拿不到）。
-// - forkAssistant = stable resolver + conversation-only copy；running parent 与 workspace 不动。
+//
+// 本文件是**一次 `rewind → start` 事务的唯一读法**：提交事实（`conversationRewindCommitted` /
+// `workspaceFilesRewound`）只在 `submitConversationRewind` 的 committed 错误与成功返回处翻转，
+// 提交后的失败出口（`V4EditCommittedFailureError` 带 draftText、不写回 revert）与截断前的
+// 原样上行分支都写在 `editUserQuery` / `retryTurn` 的同一个 try 里。三条 `submitConversationRewind`
+// 调用（edit 的 workspaceMode=rewind / preserve 两条路径 + retry）**必须留在本文件**：
+// `test-edit-resend-authority` 的 T-RW0 按源码形状钉住「每处都传 `rewindExclusionIds(envelope)`」，
+// 搬走调用点等于让该守卫对着空文件断言。
+//
+// 已单列（与本事务无关）：forkAssistant → `fork-assistant.ts`（不截断、不重发）；
+// 行目标拒绝词汇 → `fork-edit-retry-guards.ts`。
 import type {
   CommandEnvelope,
   CommandPayloadMap,
@@ -33,62 +43,11 @@ import {
   V4InputAdmissionRejectedError,
 } from "./session-flow.js";
 import { applyGoalCommand } from "./goal.js";
+import { V4EditTargetNotLatestError, V4RetryTargetNotLatestError } from "./fork-edit-retry-guards.js";
 
-const CONVERSATION_COMMAND_LOG_MODULE = "bootstrap.zcode_protocol_v4.commands";
+/** 与 forkAssistant 共用同一个 v4 命令模块名（`fork-assistant.ts` 从这里取）。 */
+export const CONVERSATION_COMMAND_LOG_MODULE = "bootstrap.zcode_protocol_v4.commands";
 const EDIT_USER_QUERY_COMPLETED_EVENT = "conversation.command.edit_user_query.completed";
-const FORK_ASSISTANT_COMPLETED_EVENT = "conversation.command.fork_assistant.completed";
-
-/** row target → messageId 翻译失败（非 assistant 行 / 迟到实体 / 会话无投影）。 */
-export class V4RowTranslationError extends Error {
-  readonly reasonCode = "fault.command.executionFailed";
-
-  constructor(command: string, targetRowId: number) {
-    super(`${command} targetRowId ${targetRowId} 无法解析到 transcript messageId`);
-    this.name = "V4RowTranslationError";
-  }
-}
-
-/** fork 目标不是所属轮最后一段 assistantText → 明确拒绝。 */
-export class V4ForkTargetNotLatestSegmentError extends Error {
-  readonly reasonCode = "fault.command.executionFailed";
-
-  constructor(targetRowId: number) {
-    super(
-      `forkAssistant targetRowId ${targetRowId} 不是所属轮的最后一段 assistant（fork 只挂轮尾段）`,
-    );
-    this.name = "V4ForkTargetNotLatestSegmentError";
-  }
-}
-
-class V4ForkTargetGuardError extends Error {
-  constructor(
-    readonly reasonCode: string,
-    targetRowId: number,
-  ) {
-    super(`forkAssistant targetRowId ${targetRowId} 被稳定目标解析器拒绝: ${reasonCode}`);
-    this.name = "V4ForkTargetGuardError";
-  }
-}
-
-/** latestQueryEditOnly：旧 row / 非 realUser row / 无投影均直接拒绝，不 stop 当前 turn。 */
-class V4EditTargetNotLatestError extends Error {
-  readonly reasonCode = "guard.latestQueryEditOnly";
-
-  constructor(targetRowId: number) {
-    super(`editUserQuery targetRowId ${targetRowId} 不是最后一轮 real user query`);
-    this.name = "V4EditTargetNotLatestError";
-  }
-}
-
-/** latestAssistantRetryOnly：历史 assistant 回复 retry 会回退 active branch，必须拒绝。 */
-class V4RetryTargetNotLatestError extends Error {
-  readonly reasonCode = "guard.latestAssistantRetryOnly";
-
-  constructor(targetRowId: number) {
-    super(`retryTurn targetRowId ${targetRowId} 不是最后一轮 assistant 回复`);
-    this.name = "V4RetryTargetNotLatestError";
-  }
-}
 
 /**
  * 截断（以及 `workspaceMode:"rewind"` 的文件回退）**已经落地**之后的失败（spec I4）。
@@ -514,62 +473,6 @@ async function retryTurn(
 }
 
 /**
- * forkAssistant：唯一 stable resolver 固定 logical-turn/message boundary，再走
- * conversation-only fork。此路径不读取 activeAbortController、不 stop parent，也不进入
- * legacy forkSession（后者含 ensureNoActiveTurn + workspace rewind）。
- */
-async function forkAssistant(
-  host: V4CommandCoreHost,
-  envelope: CommandEnvelope,
-): Promise<CommandResult | undefined> {
-  const payload = envelope.payload as CommandPayloadMap["forkAssistant"];
-  const record = requireRecord(host, envelope.sessionId);
-  const targetResolution = host.resolveRowActionTarget?.(
-    record.app.sessionId,
-    payload.target,
-    "forkAssistant",
-  );
-  if (!targetResolution?.ok) {
-    throw new V4ForkTargetGuardError("guard.forkTargetNotStable", payload.target.rowId);
-  }
-  if (!host.resolveStableForkTarget) {
-    throw new Error("v4 forkAssistant requires host.resolveStableForkTarget capability");
-  }
-  const resolution = await host.resolveStableForkTarget(record.app.sessionId, payload.target.rowId);
-  if (!resolution.ok) {
-    throw new V4ForkTargetGuardError(resolution.reasonCode, payload.target.rowId);
-  }
-  if (!host.forkStableConversation) {
-    throw new Error("v4 forkAssistant requires host.forkStableConversation capability");
-  }
-  const { forkedSessionId } = await host.forkStableConversation(record.app.sessionId, {
-    target: resolution.target,
-    goalBoundary: resolution.goalBoundary,
-    sourceCommandId: envelope.commandId,
-    revisionAtDecision: envelope.baseRevision ?? 0,
-  });
-  // fork 完成事实过去只在 session event/debug 中，生产默认 JSONL 无法直接检索。
-  // child 已创建并完成宿主注册后再写 info，避免把被拒绝或失败的请求误记为成功。
-  host.logger?.info?.("v4 forkAssistant completed", {
-    ...traceContextToLogContext(record.traceContext),
-    childSessionId: forkedSessionId,
-    clientId: envelope.clientId,
-    commandId: envelope.commandId,
-    event: FORK_ASSISTANT_COMPLETED_EVENT,
-    module: CONVERSATION_COMMAND_LOG_MODULE,
-    parentSessionId: record.app.sessionId,
-    revisionAtDecision: envelope.baseRevision ?? 0,
-    sessionId: record.app.sessionId,
-    status: "completed",
-    targetBoundaryMessageId: resolution.target.boundaryMessageId,
-    targetEntityId: payload.target.entityId,
-    targetRowId: payload.target.rowId,
-  });
-  const result = { type: "forkAssistant" as const, sessionId: forkedSessionId };
-  return result;
-}
-
-/**
  * 起轮之后的投递事实（spec edit-resend-stale-text / I5）。
  *
  * `null` 只出现在 goal 分支：`applyGoalCommand` 的续跑是 fire-and-forget
@@ -621,7 +524,6 @@ async function startCanonicalIntent(
 }
 
 export const forkEditRetryHandlers = {
-  forkAssistant,
   editUserQuery,
   retryTurn,
 };

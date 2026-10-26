@@ -5,7 +5,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost } from "../types.js";
-import { V4RowTranslationError } from "./fork-edit-retry.js";
+import { V4RowTranslationError } from "./fork-edit-retry-guards.js";
 
 async function setAssistantFeedback(
   host: V4CommandCoreHost,

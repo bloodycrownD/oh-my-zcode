@@ -1,7 +1,9 @@
 // 原生 handler 注册表（每组加一行 spread）。
 // 组文件命名 = 命令分组：session-flow / queue / session-mgmt /
-// goal / ctx / model-config / interaction-background / fork-edit-retry。
+// goal / ctx / model-config / interaction-background / fork-edit-retry（edit+retry）/
+// fork-assistant（不参与 rewind→start 事务，单独成组）。
 import { forkEditRetryHandlers } from "./fork-edit-retry.js";
+import { forkAssistantHandlers } from "./fork-assistant.js";
 import { fileRewindHandlers } from "./file-rewind.js";
 import { goalHandlers } from "./goal.js";
 import { ctxHandlers } from "./ctx.js";
@@ -23,6 +25,7 @@ export const NATIVE_HANDLERS = {
   ...modelConfigHandlers,
   ...interactionBackgroundHandlers,
   ...forkEditRetryHandlers,
+  ...forkAssistantHandlers,
   ...fileRewindHandlers,
   ...assistantFeedbackHandlers,
 } as const;

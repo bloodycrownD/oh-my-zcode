@@ -6,7 +6,7 @@ import type {
 import type { MessageId, TurnId } from "@zcode/contracts";
 import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost } from "../types.js";
-import { V4RowTranslationError } from "./fork-edit-retry.js";
+import { V4RowTranslationError } from "./fork-edit-retry-guards.js";
 
 async function applyFileRewind(
   host: V4CommandCoreHost,
