@@ -95,6 +95,10 @@ function createEditHarness({ activeTurnKind, rewindOutcome = "active_chain" }) {
     sendInputs: [],
     stopForegroundResults: [],
     stopForegroundOptions: [],
+    // FORK（spec phase-compartment-rewind / C1）：rewind → MC compartment 失效端口的
+    // 调用事实与顺序（rewind → invalidate → 重发）。
+    invalidations: [],
+    order: [],
   };
   const state = {
     activeForegroundExecutionId: activeTurnKind === "idle" ? undefined : `exec-${activeTurnKind}-1`,
@@ -124,8 +128,16 @@ function createEditHarness({ activeTurnKind, rewindOutcome = "active_chain" }) {
     getSessionModelSelection: () => SNAPSHOT_SELECTION,
     rewindConversationToMessage: async (params) => {
       calls.rewinds.push(params);
+      calls.order.push("rewind");
       if (rewindOutcome === "throws") throw new Error("simulated conversation rewind failure");
-      return { strategy: rewindOutcome };
+      // FORK（C1）：真实结果带 targetMessageId / keptMessageCount，失效端口按这两个
+      // 事实换算水位（见 create-app 的 invalidateMagicContextCompartments 契约）。
+      // A 侧另需要 strategy 可变（"unavailable" 用例走非 active_chain 分支）。
+      return {
+        strategy: rewindOutcome,
+        targetMessageId: "msg-4",
+        keptMessageCount: 3,
+      };
     },
     releaseForegroundPromotionLease: () => undefined,
   };
@@ -134,9 +146,17 @@ function createEditHarness({ activeTurnKind, rewindOutcome = "active_chain" }) {
       sessionId: SESSION_ID,
       getModel: () => "openai/gpt-5",
       runtime,
+      // FORK（spec phase-compartment-rewind / C1）：可选端口的宿主侧实现（测试替身）。
+      // 真实装配里只有 MC 库真的开出来时这个键才存在，所以下面还有一条「端口缺席」
+      // 用例（删掉本键后命令必须照常完成）。
+      invalidateMagicContextCompartments: async (input) => {
+        calls.invalidations.push(input);
+        calls.order.push("invalidate");
+      },
       readTarget: async () => null,
       updateTargetStatus: async () => null,
       sendInput: async (input, options) => {
+        calls.order.push("send");
         // 复刻 Core admission 的 busy 门（prompt-admission.ts:34-83）：
         // 仍有活跃 foreground execution 时，start_turn 且非 guide 的请求会被
         // enqueueDeferredInput(delivery:"queue") 退回队列，而不是启动新 turn。
@@ -362,4 +382,36 @@ test("E5: rewind 失败（截断未落账）→ 原样上行，不得伪装成�
       `${rewindOutcome}: 什么都没提交就不进 abort 分支（admission 账本行由 gateway 兜底结算）`,
     );
   }
+});
+
+// ── FORK（spec phase-compartment-rewind / C1）：rewind → compartment 失效端口 ──
+
+test("E7: rewind 成功后调用 compartment 失效端口，顺序 rewind → invalidate → 重发", async () => {
+  const { calls, envelope, host } = createEditHarness({ activeTurnKind: "model-only" });
+  const result = await forkEditRetryHandlers.editUserQuery(host, envelope);
+  await settleIdlePoll();
+
+  assert.deepEqual(
+    calls.invalidations,
+    [{ anchorMessageId: "msg-4", keptMessageCount: 3 }],
+    "失效端口必须收到 rewind 结果里的水位事实（锚点 messageId + 保留条数）",
+  );
+  assert.deepEqual(
+    calls.order,
+    ["rewind", "invalidate", "send"],
+    "顺序必须是 rewind → 失效 → 重发（失效晚于重发 ⇒ 那一轮仍会读到旧摘要）",
+  );
+  assert.equal(result?.disposition, "rewind");
+});
+
+test("E8: 端口缺席（MC 未装配）⇒ 命令照常完成，不伪造调用、不抛错", async () => {
+  const harness = createEditHarness({ activeTurnKind: "idle" });
+  delete harness.record.app.invalidateMagicContextCompartments;
+  const result = await forkEditRetryHandlers.editUserQuery(harness.host, harness.envelope);
+  await settleIdlePoll();
+
+  assert.deepEqual(harness.calls.invalidations, [], "端口缺席不得伪造一次失效调用");
+  assert.deepEqual(harness.calls.order, ["rewind", "send"], "其余链路不受影响");
+  assert.equal(harness.calls.rewinds.length, 1);
+  assert.equal(result?.disposition, "rewind");
 });

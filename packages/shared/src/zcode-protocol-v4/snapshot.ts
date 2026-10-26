@@ -215,7 +215,10 @@ export type SessionMagicContextCache = z.infer<typeof sessionMagicContextCacheSc
  *   - `usedTokens` / `usedPercent`  上一次 pass 的真实占用（`last_input_tokens` /
  *                      `last_context_percentage`）。与 `contextWindow` 是**两把尺子**：
  *                      那把量 provider 窗口，这把量 magic-context 自己的预算。
- *   - `compartmentCount` 已压缩的 compartment 条数（`getCompartments()`）。
+ *   - `compartmentCount` 已压缩且**仍然有效**的 compartment 条数（口径与注入面一致：
+ *                      rewind 后 `rebase_status='unresolved'` 的行不进 `<session-history>`，
+ *                      因此**不计入**；它不是 `getCompartments()` 的行数——那个数是压缩
+ *                      总量，rewind 作废段仍留在库里）。
  *   - `droppedTagCount` / `droppedTagTokens`  `tags.status='dropped'` 桶的行数与 token。
  *   - `cache`          本轮 m[0]/m[1] 注入块是否命中上下文缓存；`null` = 读不到该行。
  *

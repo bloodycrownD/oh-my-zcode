@@ -361,6 +361,23 @@ export interface ZCodeApp {
    */
   reloadWorkspaceHookTrust(): Promise<void>;
   close?(): Promise<void>;
+  /**
+   * FORK（spec phase-compartment-rewind / C1）：rewind 之后让 magic-context 里被裁
+   * 轮次的 compartment 摘要失效（DB 按水位标记 + 清持久/进程内缓存）。
+   *
+   * **可选 = 能力之门**：flag 关、MC 包缺失或 DB 开不出来时本键不存在，调用方
+   * （v4 `fork-edit-retry.ts`）按可选方法跳过——绝不在这里塞一个空实现，那会让
+   * 「有没有真的失效」在两处各有说法。
+   *
+   * 语义：内部已把失败收成 warn（rewind 已提交，不因收尾失败把命令判失败）；读侧
+   * （`inject-compartments.ts`）另有 water-level 过滤 + refused 掐块两道独立闸。
+   */
+  invalidateMagicContextCompartments?(input: {
+    /** 被裁掉的第一条消息（`ConversationRewindResult.targetMessageId`）。 */
+    anchorMessageId: string;
+    /** rewind 结果里的保留条数：持久序换算不出来时的兜底水位。 */
+    keptMessageCount: number;
+  }): Promise<void>;
   getMode(): CollaborationMode;
   getModel(): string;
   /** current-only 协议快照精确读取当前 Registry 模型，避免枚举整个目录。 */
@@ -686,6 +703,30 @@ export interface ZCodeApp {
    * 可选而非必需：与 `getConfigPort` 同理，测试与轻量 embedder 可以不实现。
    */
   isMagicContextEnabled?(): boolean;
+  /**
+   * FORK（spec phase-zero-load / W2 / 变更点 #11）：本 App **已经装好**的 magic-context
+   * 库句柄。
+   *
+   * **为什么需要端口**：`magic-context-memories.ts` 的 list / archive 两条 RPC 此前
+   * 在 handler 里自己 `openDatabase(getMagicContextDatabasePath())`。按路径缓存的句柄
+   * 确实是同一个，但**第一次**调用会创建并迁移库——于是一条只读 RPC 在「装配缺席 /
+   * `db_null`」时把库造了出来。
+   *
+   * 三态（handler 的判据，cr-func 第 2 轮 P1-2 修正分类）：
+   *   · 返回 `{ db }` → 用这个句柄，不再 open；
+   *   · 返回 `null`   → 本 App 参与了装配**但没装成** → handler 回 `unavailable` 信封，
+   *     **绝不自开库**；
+   *   · 方法本身缺席 → 没有任何 App 暴露端口。它**不是**「直构夹具形态」而是**生产可达**：
+   *     两条记忆 RPC 是 workspace 级、不接 `sessionId`，`context.sessions` 构造时为空
+   *     （`server.ts:256`）、`closeSession` 会 delete（`server-operations.ts:2581`），
+   *     于是「冷启动 CLI」或「会话全关后在设置里打开记忆面板」就是这一态 → 同样回
+   *     `unavailable`，**同样不许自开库**（旧行为会在这里创建并迁移数据库）。
+   *     直构夹具的自开库只剩显式通路 `MagicContextMemoriesDependencies.allowDirectOpen`。
+   *
+   * `db` 故意是 `unknown`：本文件摘除后仍要过 typecheck，不能 `import type` 一个会被
+   * 删掉的包。唯一消费者在包在场时把它窄回真实类型（见 `magic-context-memories.ts`）。
+   */
+  getMagicContextStorage?(): { readonly db: unknown } | null;
   setModel(
     modelId: string | ModelSelection,
     options?: {

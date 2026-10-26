@@ -37,7 +37,13 @@ export function formatCtxStatus(
       ["last usage context limit", formatNumber(snapshot.lastUsageContextLimit)],
     ]),
     section("COMPARTMENTS", [
+      // cr-func 第 2 轮 P2-1：`count` 是「仍会被注入的段数」，rewind 作废的
+      // `rebase_status='unresolved'` 行不计入；它们原来**只**在包侧
+      // `formatMagicContextStatusSnapshot` 里有 `invalidated:` 一行，而用户实际看到的
+      // 这段 CLI 文本没有——于是 rewind 之后 `/ctx-status` 报「count 3」而库里其实是 5 行，
+      // 差额（压缩 vs rewind）无从判断。两行恒打印，形状不随状态变化。
       ["count", formatNumber(snapshot.compartmentCount)],
+      ["invalidated", formatNumber(snapshot.invalidatedCompartmentCount)],
       ["last compacted message", formatNumber(snapshot.lastCompartmentEndMessage)],
       ["pending operations", formatNumber(snapshot.pendingOps)],
     ]),

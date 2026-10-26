@@ -30,6 +30,16 @@
  *       archive → -32010 可读错误（fail-visible，无 outcomes 无 mutation 行）；
  *     - openDatabase 回 null（schema fence）×2：list → unavailable 信封；
  *       archive → 可读 -32010（与开库 **throw** 的原文透传是两种可观察行为）。
+ *     - 业务符号（barrel）加载失败 ×2（ZL-4 注入缝 `loadRuntime`，T-MC5 第三态）：
+ *       list → unavailable 信封且不建库；archive → 可读 -32010（带底层原因）。
+ *     - 跨包副本的 authority 错误（ZL-6）：`instanceof` 失效时仍转可读 -32010。
+ *
+ *   T-R3b —— 存储端口三态与 blocked 文案（cr-func 第 2 轮 P1-2 / 第 3 轮 P1-1+P2-6）：
+ *     - 端口回 `null`（装配没装成）→ list `reason:"unavailable"`、archive -32010
+ *       （建议重试/重启，**不**建议开会话）；
+ *     - `absent`（零 session，生产可达）→ list `reason:"no-app-port"`（与上一条分开，
+ *       面板才能给出可执行引导）、archive -32010 建议「先在本工作区开会话」；
+ *     - 两条 -32010 文案都不得带实现名（`getMagicContextStorage` / `workspace-level RPC`）。
  *
  *   T-R4 —— dispatch 源守卫（G-1，四处手工对齐坐标 ③）：
  *     - server.ts 剥注释后必须各有且仅有一处 list/archive 的 `case`，且紧跟
@@ -128,8 +138,13 @@ const DIRS = {
   archive: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-archive-")),
   mix: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-mix-")),
   authority: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-authority-")),
+  authorityCopy: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-authority-copy-")),
   foreign: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-foreign-")),
   fence: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-fence-")),
+  // D4（存储端口）：专供「装配层没有可用库」两例的项目目录。
+  portNull: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-port-null-")),
+  // D5/D6（端口：absent 生产态 / installed 真句柄）共用的项目目录。
+  portInstalled: mkdtempSync(join(tmpdir(), "zcode-mc-rpc-port-installed-")),
 };
 
 magicContext.initializeMagicContextHost();
@@ -187,11 +202,19 @@ function identityOf(dir) {
   return identity;
 }
 
+/**
+ * 直构夹具的显式注入（cr-func 第 2 轮 P1-2）：本文件的行为用例用**空 sessions** 的
+ * context 直调 handler，那在生产上是 `absent` 态（workspace 级 RPC + 零 session），
+ * 而 `absent` 现在一律不自开库。夹具要自己开库必须显式声明，不许靠「端口方法不在」
+ * 推断——那条推断正是生产可达缺陷的入口。
+ */
+const DIRECT_OPEN = { allowDirectOpen: true };
+
 function listRpc(dir, params = {}, options = {}) {
   return listMagicContextMemories(
     options.context ?? contextWith(),
     { workspace: workspaceRef(dir), ...params },
-    { configPath: options.configPath ?? ENABLED_CONFIG },
+    { ...DIRECT_OPEN, configPath: options.configPath ?? ENABLED_CONFIG },
   );
 }
 
@@ -203,8 +226,19 @@ function archiveRpc(dir, memoryIds, options = {}) {
       memoryIds,
       ...(options.reason === undefined ? {} : { reason: options.reason }),
     },
-    { configPath: options.configPath ?? ENABLED_CONFIG },
+    { ...DIRECT_OPEN, configPath: options.configPath ?? ENABLED_CONFIG },
   );
+}
+
+/**
+ * 一个**必然失败**的业务符号加载器（ZL-4 注入缝）：模拟「包在 manifest 里、但
+ * barrel 加载不出来」。生产路径上这是不可构造的，所以经 `dependencies.loadRuntime`
+ * 注入；它只换「怎么加载」，不换失败语义。
+ */
+function failingRuntime(message = "simulated: magic-context barrel unavailable") {
+  return async () => {
+    throw new Error(message);
+  };
 }
 
 /** 临时把 DB 路径换成新文件（effective 门用例要证明「连文件都不产生」）。 */
@@ -284,8 +318,12 @@ test("T-R1（schema）：list 参数信封——limit 1..200（缺省 200）、o
   assert.equal(parsed.category, undefined);
 
   assert.equal(
-    schema.safeParse({ workspace: SCHEMA_WORKSPACE, category: "ARCHITECTURE", limit: 200, offset: 0 })
-      .success,
+    schema.safeParse({
+      workspace: SCHEMA_WORKSPACE,
+      category: "ARCHITECTURE",
+      limit: 200,
+      offset: 0,
+    }).success,
     true,
   );
   for (const [label, bad] of [
@@ -306,10 +344,14 @@ test("T-R1（schema）：archive 参数信封——memoryIds 1..100、reason ≤
   const schema = zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema;
   const ids100 = Array.from({ length: 100 }, (_, index) => index + 1);
 
-  assert.equal(schema.safeParse({ workspace: SCHEMA_WORKSPACE, memoryIds: [1, 2, 3] }).success, true);
+  assert.equal(
+    schema.safeParse({ workspace: SCHEMA_WORKSPACE, memoryIds: [1, 2, 3] }).success,
+    true,
+  );
   assert.equal(schema.safeParse({ workspace: SCHEMA_WORKSPACE, memoryIds: ids100 }).success, true);
   assert.equal(
-    schema.safeParse({ workspace: SCHEMA_WORKSPACE, memoryIds: [1], reason: "x".repeat(4096) }).success,
+    schema.safeParse({ workspace: SCHEMA_WORKSPACE, memoryIds: [1], reason: "x".repeat(4096) })
+      .success,
     true,
     "reason 上限 4096（与工具面 CtxMemoryInputSchema.reason 同值）",
   );
@@ -320,7 +362,10 @@ test("T-R1（schema）：archive 参数信封——memoryIds 1..100、reason ≤
     ["memoryIds 超上限（101）", { workspace: SCHEMA_WORKSPACE, memoryIds: [...ids100, 101] }],
     ["memoryIds 非整数元素", { workspace: SCHEMA_WORKSPACE, memoryIds: [1.5] }],
     ["memoryIds 字符串元素", { workspace: SCHEMA_WORKSPACE, memoryIds: ["1"] }],
-    ["reason 超上限（4097）", { workspace: SCHEMA_WORKSPACE, memoryIds: [1], reason: "x".repeat(4097) }],
+    [
+      "reason 超上限（4097）",
+      { workspace: SCHEMA_WORKSPACE, memoryIds: [1], reason: "x".repeat(4097) },
+    ],
     ["信封未知键", { workspace: SCHEMA_WORKSPACE, memoryIds: [1], bogus: true }],
   ]) {
     assert.equal(schema.safeParse(bad).success, false, `必须拒绝：${label}`);
@@ -361,7 +406,10 @@ test("T-R1（schema）：list 结果信封——supported 缺省 true、entry st
     true,
     "expiresAt / supersededByMemoryId 为 null 必须放行",
   );
-  assert.equal(schema.safeParse({ ...base, entries: [{ ...entry, archiveReason: "why" }] }).success, true);
+  assert.equal(
+    schema.safeParse({ ...base, entries: [{ ...entry, archiveReason: "why" }] }).success,
+    true,
+  );
   assert.equal(
     schema.safeParse({ ...base, entries: [{ ...entry, supersededByMemoryId: 9 }] }).success,
     true,
@@ -370,7 +418,10 @@ test("T-R1（schema）：list 结果信封——supported 缺省 true、entry st
 
   for (const [label, bad] of [
     ["entry 未知键", { ...base, entries: [{ ...entry, rejectionReason: "ownership" }] }],
-    ["entry 缺 supersededByMemoryId", { ...base, entries: [{ ...entry, supersededByMemoryId: undefined }] }],
+    [
+      "entry 缺 supersededByMemoryId",
+      { ...base, entries: [{ ...entry, supersededByMemoryId: undefined }] },
+    ],
     ["entry 缺 expiresAt", { ...base, entries: [{ ...entry, expiresAt: undefined }] }],
     ["counts 未知键", { ...base, counts: { ...ZERO_COUNTS, bogus: 1 } }],
     ["counts 负数", { ...base, counts: { ...ZERO_COUNTS, merged: -1 } }],
@@ -398,7 +449,10 @@ test("T-R1（schema）：archive 结果信封——outcome 四值直通、bogus 
       true,
       `必须放行 outcome=${outcome}`,
     );
-    assert.equal(schema.safeParse({ ...base, outcomes: [{ id: 1, outcome, message: "m" }] }).success, true);
+    assert.equal(
+      schema.safeParse({ ...base, outcomes: [{ id: 1, outcome, message: "m" }] }).success,
+      true,
+    );
   }
 
   assert.equal(
@@ -407,27 +461,46 @@ test("T-R1（schema）：archive 结果信封——outcome 四值直通、bogus 
     "四值枚举之外必须拒绝",
   );
   assert.equal(
-    schema.safeParse({ ...base, outcomes: [{ id: 1, outcome: "archived", rejectionReason: "ownership" }] })
-      .success,
+    schema.safeParse({
+      ...base,
+      outcomes: [{ id: 1, outcome: "archived", rejectionReason: "ownership" }],
+    }).success,
     false,
     "rejectionReason 是宿主内部子因（工具面选文案用），wire entry strict 直接拒",
   );
   assert.equal(schema.safeParse({ ...base, outcomes: [{ id: 1 }] }).success, false, "outcome 必填");
-  assert.equal(schema.safeParse({ ...base, outcomes: [{ outcome: "archived" }] }).success, false, "id 必填");
+  assert.equal(
+    schema.safeParse({ ...base, outcomes: [{ outcome: "archived" }] }).success,
+    false,
+    "id 必填",
+  );
 });
 
 // ══ B. T-R1 行为侧：列表 / 计数 / 过滤 / 分页 ═════════════════════════════════
 
 test("T-R1：列表三 status 全回（merged 行判定）+ counts 与 getMemoryCountsByStatus 对账", async () => {
   const identity = identityOf(DIRS.list);
-  const active = insertRow(identity, "ARCHITECTURE", "list fixture: the export pipeline retries once.", {
-    importance: 75,
-  });
+  const active = insertRow(
+    identity,
+    "ARCHITECTURE",
+    "list fixture: the export pipeline retries once.",
+    {
+      importance: 75,
+    },
+  );
   const permanent = insertRow(identity, "ARCHITECTURE", "list fixture: indentation is two spaces.");
   setRowStatus(permanent.id, "permanent");
   const config = insertRow(identity, "CONFIG_VALUES", "list fixture: the default port is 4021.");
-  const naming = insertRow(identity, "NAMING", "list fixture: the retry helper is called backoff().");
-  const successor = insertRow(identity, "ARCHITECTURE", "list fixture: successor of the merged row.");
+  const naming = insertRow(
+    identity,
+    "NAMING",
+    "list fixture: the retry helper is called backoff().",
+  );
+  const successor = insertRow(
+    identity,
+    "ARCHITECTURE",
+    "list fixture: successor of the merged row.",
+  );
   const merged = insertRow(identity, "ARCHITECTURE", "list fixture: the merged-away duplicate.");
   markSuperseded(merged.id, successor.id);
   const archived = insertRow(identity, "PROJECT_RULES", "list fixture: a retired project rule.");
@@ -457,7 +530,11 @@ test("T-R1：列表三 status 全回（merged 行判定）+ counts 与 getMemory
   // 含死行）+ merged（superseded，归 merged 桶）+ archived（1 行）——列表回 7 行
   // （死行被 cutoff=0 滤掉），counts 回 8。
   assert.equal(result.entries.length, 7);
-  assert.equal(result.entries.some((entry) => entry.id === dead.id), false, "死行（expires_at=0）不进列表");
+  assert.equal(
+    result.entries.some((entry) => entry.id === dead.id),
+    false,
+    "死行（expires_at=0）不进列表",
+  );
 
   const byId = new Map(result.entries.map((entry) => [entry.id, entry]));
   assert.equal(byId.get(active.id).status, "active");
@@ -490,11 +567,22 @@ test("T-R1：列表三 status 全回（merged 行判定）+ counts 与 getMemory
 
 test("T-R1：跨项目行按身份隔离——不进列表也不计 counts", async () => {
   const own = insertRow(identityOf(DIRS.cross), "ARCHITECTURE", "cross fixture: own project row.");
-  const foreign = insertRow(identityOf(DIRS.foreign), "ARCHITECTURE", "cross fixture: foreign row.");
+  const foreign = insertRow(
+    identityOf(DIRS.foreign),
+    "ARCHITECTURE",
+    "cross fixture: foreign row.",
+  );
 
   const result = await listRpc(DIRS.cross);
-  assert.deepEqual(result.entries.map((entry) => entry.id), [own.id]);
-  assert.equal(result.entries.some((entry) => entry.id === foreign.id), false, "外部项目行不得泄漏");
+  assert.deepEqual(
+    result.entries.map((entry) => entry.id),
+    [own.id],
+  );
+  assert.equal(
+    result.entries.some((entry) => entry.id === foreign.id),
+    false,
+    "外部项目行不得泄漏",
+  );
   assert.deepEqual(result.counts, { total: 1, active: 1, permanent: 0, archived: 0, merged: 0 });
 });
 
@@ -514,7 +602,10 @@ test("T-R1：category 过滤只裁 entries，counts 保持项目级汇总", asyn
     filtered.entries.map((entry) => entry.id).sort((left, right) => left - right),
     [archA.id, archB.id].sort((left, right) => left - right),
   );
-  assert.equal(filtered.entries.every((entry) => entry.category === "ARCHITECTURE"), true);
+  assert.equal(
+    filtered.entries.every((entry) => entry.category === "ARCHITECTURE"),
+    true,
+  );
   assert.equal(filtered.truncated, false);
   assert.deepEqual(filtered.counts, all.counts, "counts 是项目级汇总，不随 category 过滤收窄");
   assert.equal(filtered.counts.total, 3);
@@ -545,11 +636,17 @@ test("T-R1：offset/limit 分页与 truncated 语义（当页取尽 → false）
   setUpdatedAt(third.id, 9_001);
 
   const pageOne = await listRpc(DIRS.page, { limit: 2 });
-  assert.deepEqual(pageOne.entries.map((entry) => entry.id), [first.id, second.id]);
+  assert.deepEqual(
+    pageOne.entries.map((entry) => entry.id),
+    [first.id, second.id],
+  );
   assert.equal(pageOne.truncated, true, "本页之后还有条目 → true");
 
   const pageTwo = await listRpc(DIRS.page, { limit: 2, offset: 2 });
-  assert.deepEqual(pageTwo.entries.map((entry) => entry.id), [third.id]);
+  assert.deepEqual(
+    pageTwo.entries.map((entry) => entry.id),
+    [third.id],
+  );
   assert.equal(pageTwo.truncated, false, "恰好取完 → false");
 
   const exactly = await listRpc(DIRS.page, { limit: 3 });
@@ -583,8 +680,16 @@ test("T-R1：offset/limit 分页与 truncated 语义（当页取尽 → false）
 
 test("T-R2：正常废弃 → archived + mutation 行成对；重复废弃幂等（already-archived、无新行）", async () => {
   const identity = identityOf(DIRS.archive);
-  const firstRow = insertRow(identity, "CONFIG_VALUES", "archive fixture: the legacy flag is retired.");
-  const secondRow = insertRow(identity, "CONFIG_VALUES", "archive fixture: the old queue is retired.");
+  const firstRow = insertRow(
+    identity,
+    "CONFIG_VALUES",
+    "archive fixture: the legacy flag is retired.",
+  );
+  const secondRow = insertRow(
+    identity,
+    "CONFIG_VALUES",
+    "archive fixture: the old queue is retired.",
+  );
 
   const result = await archiveRpc(DIRS.archive, [firstRow.id, secondRow.id], {
     reason: "retention cleanup",
@@ -632,7 +737,11 @@ test("T-R2：正常废弃 → archived + mutation 行成对；重复废弃幂等
     ],
   );
   assert.match(repeated.outcomes[0].message, /already archived/);
-  assert.equal(mutationRowsFor([firstRow.id, secondRow.id]).length, rowsBefore, "重复废弃不得新增 mutation 行");
+  assert.equal(
+    mutationRowsFor([firstRow.id, secondRow.id]).length,
+    rowsBefore,
+    "重复废弃不得新增 mutation 行",
+  );
 
   // 列表侧闭环：archived 行进列表且带 archiveReason；counts 归 archived 桶。
   const listed = await listRpc(DIRS.archive);
@@ -656,12 +765,20 @@ test("T-R2：正常废弃 → archived + mutation 行成对；重复废弃幂等
 test("T-R2：逐 id 四值直通（missing / 跨项目 rejected / superseded rejected / 已归档 already）", async () => {
   const identity = identityOf(DIRS.mix);
   const eligible = insertRow(identity, "ARCHITECTURE", "mix fixture: the one fresh eligible row.");
-  const successor = insertRow(identity, "ARCHITECTURE", "mix fixture: successor of the superseded row.");
+  const successor = insertRow(
+    identity,
+    "ARCHITECTURE",
+    "mix fixture: successor of the superseded row.",
+  );
   const superseded = insertRow(identity, "ARCHITECTURE", "mix fixture: the superseded row.");
   markSuperseded(superseded.id, successor.id);
   const preArchived = insertRow(identity, "ARCHITECTURE", "mix fixture: the pre-archived row.");
   setRowStatus(preArchived.id, "archived");
-  const foreign = insertRow(identityOf(DIRS.foreign), "ARCHITECTURE", "mix fixture: a foreign project row.");
+  const foreign = insertRow(
+    identityOf(DIRS.foreign),
+    "ARCHITECTURE",
+    "mix fixture: a foreign project row.",
+  );
   const missingId = 999_999;
   assert.equal(
     seedDb.prepare("SELECT COUNT(*) AS count FROM memories WHERE id = ?").get(missingId).count,
@@ -740,6 +857,54 @@ test("T-R2：authority 托管项目 → 可读 ProtocolRequestError 且整批回
   assert.equal(mutationRowsFor([firstRow.id, secondRow.id]).length, 0);
 });
 
+test("T-R2 / ZL-6：跨包副本的 authority 错误仍转可读 -32010（instanceof 失效时）", async () => {
+  const identity = identityOf(DIRS.authorityCopy);
+  const row = insertRow(identity, "PROJECT_RULES", "authority cross-copy fixture: a managed row.");
+
+  // 构造「两份包副本」的等价条件：错误对象的 name/code 与真类逐字一致，但原型链
+  // 不是本进程这一份 `ModuleMemoryAuthorityError`——这正是动态 import 跨越两份副本
+  // 时 `instanceof` 的失败形态（旧写法会把 authority 拒绝原文透传成内部报错）。
+  const foreignError = new Error(
+    `memory writes for module-managed project ${identity} must use the Rust ctx_memory module facade`,
+  );
+  foreignError.name = "ModuleMemoryAuthorityError";
+  foreignError.code = "MEMORY_MODULE_AUTHORITY";
+  assert.equal(
+    foreignError instanceof magicContext.ModuleMemoryAuthorityError,
+    false,
+    "构造前提：跨副本时 instanceof 必须为 false（否则测的不是鸭子类型分支）",
+  );
+
+  // 用注入缝把组合函数换成「抛跨副本错误」——handler 的捕获段原样执行。
+  const crossCopyModule = {
+    ...magicContext,
+    archiveProjectMemories() {
+      throw foreignError;
+    },
+  };
+  await assert.rejects(
+    () =>
+      archiveMagicContextMemories(
+        contextWith(),
+        { workspace: workspaceRef(DIRS.authorityCopy), memoryIds: [row.id] },
+        { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: async () => crossCopyModule },
+      ),
+    (error) => {
+      assert.equal(error.name, "ProtocolRequestError");
+      assert.equal(error.code, -32010);
+      assert.match(error.message, /managed by the memory module/i);
+      assert.match(
+        error.message,
+        /MEMORY_MODULE_AUTHORITY/,
+        "message 必须带上稳定的 code 标记（不是 undefined）",
+      );
+      return true;
+    },
+  );
+  // 组合函数在写入前就抛了；跨副本判据只决定「怎么报」，不改变持久化结果。
+  assert.equal(readRow(row.id).status, "active");
+});
+
 // ══ D. 降级：effective 门（关着不建库）与库打不开 ════════════════════════════
 
 test("降级：magicContext 关闭（文件侧）→ available:false，且连库文件都不产生", async () => {
@@ -781,7 +946,11 @@ test("降级：ConfigPort 优先——disabled 短路；文件说 disabled 但 C
     {},
     { context: contextWith(sessionRecord(enabledPort)), configPath: DISABLED_CONFIG },
   );
-  assert.equal(result.available, true, "resident session 的 ConfigPort 才是运行时真正在用的那份配置");
+  assert.equal(
+    result.available,
+    true,
+    "resident session 的 ConfigPort 才是运行时真正在用的那份配置",
+  );
   assert.equal(result.supported, true);
 });
 
@@ -940,6 +1109,303 @@ test("降级：openDatabase 回 null（schema fence）→ list 收敛 unavailabl
     } catch {
       // 关闭失败只影响临时树清理，不改变测试结论。
     }
+  });
+});
+
+// ══ D3. T-MC5 第三态：业务符号（barrel）加载失败 —— ZL-4 注入缝 ═══════════════
+//
+// `magic-context-memories.ts:275-333` 的两条「业务符号取不到」分支此前**无法测试**：
+// 生产路径上包在 manifest 里，`import("@zcode/magic-context")` 不会抛；没有注入点就
+// 只能靠读代码相信它。下面两例经 `dependencies.loadRuntime` 构造该态。
+
+test("降级：业务符号加载失败——list 收敛 unavailable 信封（T-MC5 第三态）", async () => {
+  const drillDbPath = join(TEMP_ROOT, "runtime-load-failed-list.db");
+  await withDatabasePath(drillDbPath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(),
+      { workspace: workspaceRef(DIRS.list) },
+      { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
+    );
+    assert.equal(result.supported, true, "supported 说的是「CLI 有这个能力」，与加载失败无关");
+    assert.equal(result.available, false);
+    assert.equal(
+      result.reason,
+      "unavailable",
+      "业务符号取不到必须是 unavailable 信封而不是 -32603（T-MC5 的口径）",
+    );
+    assert.deepEqual(result.entries, []);
+    assert.deepEqual(result.counts, ZERO_COUNTS);
+    assert.equal(result.truncated, false);
+    assert.equal(result.total, 0);
+    assert.equal(existsSync(drillDbPath), false, "业务符号没取到就在开库之前收敛，不得建库");
+  });
+});
+
+test("降级：业务符号加载失败——archive 抛可读 -32010（T-MC5 第三态）", async () => {
+  const drillDbPath = join(TEMP_ROOT, "runtime-load-failed-archive.db");
+  await withDatabasePath(drillDbPath, async () => {
+    await assert.rejects(
+      () =>
+        archiveMagicContextMemories(
+          contextWith(),
+          { workspace: workspaceRef(DIRS.archive), memoryIds: [1] },
+          { ...DIRECT_OPEN, configPath: ENABLED_CONFIG, loadRuntime: failingRuntime() },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /not installed in this build/i);
+        assert.match(
+          error.message,
+          /simulated: magic-context barrel unavailable/,
+          "底层错误原因必须带上（可读，不是空壳消息）",
+        );
+        assert.equal("outcomes" in error, false, "拒绝必须是错误而不是空 outcomes 结果");
+        return true;
+      },
+    );
+    assert.equal(existsSync(drillDbPath), false, "加载失败发生在开库之前，不得建库");
+  });
+});
+
+// ══ D4. 存储端口（spec phase-zero-load / W2 / 变更点 #11）：装配没装成 → 不自开库 ══
+
+/**
+ * 一个「参与了装配、但没有可用库」的 App，等价于生产上的 db_null / 装配抛错 /
+ * import_failed：端口在场，`getMagicContextStorage()` 回 `null`。
+ */
+function sessionRecordWithStorage(getStorage) {
+  return { app: { getMagicContextStorage: getStorage } };
+}
+
+test("端口：getMagicContextStorage()=null → list 回 unavailable，且不建库、不加载 barrel", async () => {
+  const dbPath = join(TEMP_ROOT, "port-null-list.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(sessionRecordWithStorage(() => null)),
+      { workspace: workspaceRef(DIRS.portNull) },
+      {
+        configPath: ENABLED_CONFIG,
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          throw new Error("the port already answered unavailable; the barrel must not load");
+        },
+      },
+    );
+    assert.equal(result.supported, true, "信封承载「没装成」，绝不冒泡成 -32603");
+    assert.equal(result.available, false);
+    assert.equal(result.reason, "unavailable");
+    assert.deepEqual(result.entries, []);
+    assert.deepEqual(result.counts, ZERO_COUNTS);
+    assert.equal(result.truncated, false);
+    assert.equal(runtimeLoaded, 0, "端口已给 unavailable，连业务符号都不该加载");
+    assert.equal(
+      existsSync(dbPath),
+      false,
+      "**不得创建库文件**：旧行为会在这里 openDatabase（创建 + 迁移）——那正是端口要根治的缺陷",
+    );
+  });
+});
+
+test("端口：getMagicContextStorage()=null → archive 抛可读 -32010，且不建库", async () => {
+  const dbPath = join(TEMP_ROOT, "port-null-archive.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    await assert.rejects(
+      () =>
+        archiveMagicContextMemories(
+          contextWith(sessionRecordWithStorage(() => null)),
+          { workspace: workspaceRef(DIRS.portNull), memoryIds: [1] },
+          {
+            configPath: ENABLED_CONFIG,
+            loadRuntime: async () => {
+              runtimeLoaded += 1;
+              throw new Error("the port already answered unavailable; the barrel must not load");
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /cannot be archived right now/i);
+        // 两条 blocked 文案必须**互不串台**（cr-func 第 3 轮 P2-6）：端口回 null 是
+        // 装配没装成 → 建议重试/重启；说「开会话」在这里是假建议（开了也没用）。
+        assert.match(error.message, /retry in a moment or restart the CLI/i);
+        assert.doesNotMatch(error.message, /open or resume a session in this workspace first/i);
+        assert.doesNotMatch(error.message, /getMagicContextStorage|workspace-level RPC/i);
+        return true;
+      },
+    );
+    assert.equal(runtimeLoaded, 0);
+    assert.equal(existsSync(dbPath), false, "写路径同样不得在装配缺席时把库造出来");
+  });
+});
+
+// ══ D5. absent 的生产可达性（cr-func 第 2 轮 P1-2）════════════════════════════
+//
+// `context.sessions` 构造时为空（server.ts:256）、closeSession 会 delete
+// （server-operations.ts:2581），而这两条 RPC 是 **workspace 级**、不接 sessionId。
+// 于是「冷启动 CLI」或「会话全关后在设置里打开记忆面板」就是 `absent` 态——旧实现
+// 在这一态保留自开库兜底，等于生产上一条只读 RPC 会创建并迁移数据库。
+
+test("absent（零 session，workspace 级 RPC）→ list 回 no-app-port 且不建库、不加载 barrel", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-prod-list.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      // 空 sessions = 生产上「冷启动 / 会话全关」的形态。
+      contextWith(),
+      { workspace: workspaceRef(DIRS.portNull) },
+      {
+        configPath: ENABLED_CONFIG,
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          throw new Error("absent must be rejected before the barrel loads");
+        },
+      },
+    );
+    assert.equal(result.supported, true);
+    assert.equal(result.available, false);
+    assert.equal(
+      result.reason,
+      "no-app-port",
+      "absent 必须单独过线（cr-func 第 3 轮 P1-1）：与「装配没装成」共用 unavailable 时，面板只能写「稍后重试」——而这一态下重试永远不会成功",
+    );
+    assert.deepEqual(result.entries, []);
+    assert.deepEqual(result.counts, ZERO_COUNTS);
+    assert.equal(runtimeLoaded, 0, "absent 门排在 barrel 之前，业务符号一律不加载");
+    assert.equal(
+      existsSync(dbPath),
+      false,
+      "**不得创建库文件**：这是 P1-2 的原始缺陷（冷启动打开记忆面板 = 建库 + 迁移）",
+    );
+    assert.equal(existsSync(`${dbPath}-wal`), false);
+  });
+});
+
+test("absent（零 session）→ archive 抛可读 -32010 且不建库（写路径更不自开库）", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-prod-archive.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(dbPath, async () => {
+    await assert.rejects(
+      () =>
+        archiveMagicContextMemories(
+          contextWith(),
+          { workspace: workspaceRef(DIRS.portNull), memoryIds: [1] },
+          {
+            configPath: ENABLED_CONFIG,
+            loadRuntime: async () => {
+              runtimeLoaded += 1;
+              throw new Error("absent must be rejected before the barrel loads");
+            },
+          },
+        ),
+      (error) => {
+        assert.equal(error.name, "ProtocolRequestError");
+        assert.equal(error.code, -32010);
+        assert.match(error.message, /cannot be archived right now/i);
+        assert.match(
+          error.message,
+          /open or resume a session in this workspace first/i,
+          "absent 的错误必须给出可执行动作（cr-func 第 3 轮 P2-6）：开会话是这一态唯一的解法",
+        );
+        // 用户可见串不得带实现名（旧文案是「no app exposes getMagicContextStorage
+        // (workspace-level RPC with zero live sessions: …)」——嵌套括号、内部机制、不可操作）。
+        assert.doesNotMatch(error.message, /getMagicContextStorage|workspace-level RPC/i);
+        assert.doesNotMatch(
+          error.message,
+          /retry in a moment or restart the CLI/i,
+          "「稍后重试 / 重启」是装配没装成那一条的建议；absent 照抄就是假建议",
+        );
+        return true;
+      },
+    );
+    assert.equal(runtimeLoaded, 0);
+    assert.equal(existsSync(dbPath), false, "absent 的写路径不得把库造出来");
+  });
+});
+
+test("absent + 显式 allowDirectOpen → 才走直构夹具的自开库（口子只剩这一条）", async () => {
+  const dbPath = join(TEMP_ROOT, "absent-direct-open.db");
+  await withDatabasePath(dbPath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      { ...DIRECT_OPEN, configPath: ENABLED_CONFIG },
+    );
+    assert.equal(result.available, true, "显式标记是直构夹具唯一的自开库通路");
+    assert.equal(existsSync(dbPath), true, "显式标记下确实由 handler 自己把库开出来");
+  });
+});
+
+// ══ D6. installed 态：装配层句柄被真正消费（cr-func 第 2 轮 P1-3 / P2-7）══════
+
+test("installed：端口给出的句柄被直接使用——不自开库、不读目标路径", async () => {
+  const identity = identityOf(DIRS.portInstalled);
+  const row = insertRow(
+    identity,
+    "ARCHITECTURE",
+    "port fixture: served from the assembly handle, not from openDatabase().",
+  );
+  const probePath = join(TEMP_ROOT, "installed-should-not-open.db");
+  let runtimeLoaded = 0;
+  await withDatabasePath(probePath, async () => {
+    const result = await listMagicContextMemories(
+      contextWith(sessionRecordWithStorage(() => ({ db: seedDb }))),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      {
+        configPath: ENABLED_CONFIG,
+        // 业务符号仍需加载（列表投影在包内），但**开库**必须用端口句柄。
+        loadRuntime: async () => {
+          runtimeLoaded += 1;
+          return magicContext;
+        },
+      },
+    );
+    assert.equal(result.available, true);
+    assert.equal(runtimeLoaded, 1);
+    assert.deepEqual(
+      result.entries.map((entry) => entry.id),
+      [row.id],
+      "读到的必须是端口句柄那个库里的行（证明 installed 分支被走到）",
+    );
+    assert.equal(
+      existsSync(probePath),
+      false,
+      "installed 态不得再 openDatabase：目标路径连文件都不该出现",
+    );
+  });
+});
+
+test("installed：多个 App 里第一个回 null、第二个有句柄 → 用第二个（任一有句柄即用）", async () => {
+  const identity = identityOf(DIRS.portInstalled);
+  const row = insertRow(
+    identity,
+    "NAMING",
+    "multi-app fixture: the second app's handle must be the one that serves this row.",
+  );
+  const probePath = join(TEMP_ROOT, "multi-app-should-not-open.db");
+  await withDatabasePath(probePath, async () => {
+    const result = await listMagicContextMemories(
+      // 顺序是刻意的：第一个持有端口但回 null（临时 workspace app），第二个才有句柄。
+      contextWith(
+        sessionRecordWithStorage(() => null),
+        sessionRecordWithStorage(() => ({ db: seedDb })),
+      ),
+      { workspace: workspaceRef(DIRS.portInstalled) },
+      { configPath: ENABLED_CONFIG, loadRuntime: async () => magicContext },
+    );
+    assert.equal(
+      result.available,
+      true,
+      "第一个端口回 null 不得让整体判 unavailable——另一个 App 真有句柄（P2-7）",
+    );
+    assert.ok(
+      result.entries.some((entry) => entry.id === row.id),
+      "必须用第二个 App 的句柄读到那一行（证明不是「第一个说了算」）",
+    );
+    assert.equal(existsSync(probePath), false);
   });
 });
 

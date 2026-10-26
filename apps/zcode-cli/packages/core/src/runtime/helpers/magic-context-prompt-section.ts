@@ -27,6 +27,7 @@
 
 import { CTX_REDUCE_TOOL_NAME } from "@zcode/contracts";
 
+import { isMagicContextEffectiveByConfig } from "./magic-context-effective-enabled.js";
 import type { Model } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 
@@ -71,7 +72,7 @@ function isSubagentRuntime(runtime: AgentRuntimeInternal): boolean {
  *
  * 返回 `null` = 不注入。三种情况都会返回 null，且都是**诚实**的而不是兜底：
  *   ① 没有端口（bootstrap 没装 magic-context，或装配期 import 失败）；
- *   ② `magicContext.enabled !== true`；
+ *   ② `magicContext.enabled` 不是 effective true（IM3 投影，缺省方向缺席按关）；
  *   ③ resolver 自己决定不注入（包不可用、配置域读失败、装配异常）；
  * 三条都不该影响其余 context 段——原生 `# Memory` 段按既有规则照常注入。
  */
@@ -81,7 +82,12 @@ export function resolveMagicContextPromptSection(
 ): string | null {
   const resolver = runtime.magicContextPromptSection;
   if (!resolver) return null;
-  if (runtime.config.magicContext?.enabled !== true) return null;
+  // IM3：原表达式是 `!== true`（缺席按关）。缺省方向显式声明，语义逐位不变。
+  if (
+    !isMagicContextEffectiveByConfig(runtime.config.magicContext?.enabled, { whenUnset: false })
+  ) {
+    return null;
+  }
 
   return resolver({
     ...(model ? { modelKey: `${model.providerId}/${model.modelId}` } : {}),

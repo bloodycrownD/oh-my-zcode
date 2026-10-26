@@ -78,7 +78,7 @@ cr_v010:
   m1_blocker_fixed: 终验挖出分发通道缺 @zcode/magic-context（S24-fix 加了 esbuild external 没加 staging）——修在 sea-tui-assets.mjs 单点（**deferred 队列防 zod 根位劫持**：种子进首轮 BFS 会把 magic-context 的 zod4 抢根位挤 contracts 的 zod3，破坏 zod-to-json-schema peer 解析）；install 演练复验全绿（安装树/真实 prompt/Bash 工具/mc 库）
   exempt:
     - "EXEMPT-2a: build:sea --all 在 Windows 解 darwin Node tar 的 symlink 失败（host-only，同 EXEMPT-1 类）"
-    - "EXEMPT-2b: SEA 运行时 No such built-in module: @zcode/magic-context——Node SEA require() 只解析内置模块，裸说明符 staging 修不了；需按 sea-playwright-runtime/tui-runtime-loader 范式补显式路径加载层，把产物实测的 7 处加载点（5 处静态 require + 2 处动态 import）改懒加载（v0.1.1）；内联方案会退化 migration worker/tokenizer 语义已否决"
+    - "EXEMPT-2b: SEA 运行时 No such built-in module: @zcode/magic-context——Node SEA require() 只解析内置模块，裸说明符 staging 修不了；需按 sea-playwright-runtime/tui-runtime-loader 范式补显式路径加载层，把产物实测的加载点改懒加载（v0.1.1）；magic-context-decoupling Step 14 复测：runtime 加载点由 7 处变为 15 处（9 静态 require + 6 文件 / 7 行动态 import；facade 拆分把单体 1 个静态点变成 app/magic-context/ 目录 6 个，core 的 ctx handler 1→3，协议两处静态改惰性，cli 侧经 bootstrap/ctx-commands 后不再直接加载包），明细见 UPSTREAM-SYNC.md 第 5 节 EXEMPT-2b 行；内联方案会退化 migration worker/tokenizer 语义已否决"
   manual_leftovers: M8 GUI 登录/插件安装交互实机；M9 --web UI 冒烟；T-P2 全量人工复核（自动部分已过）
   pending_user:
     - "S31 Batch2 排期决策（ctx_note/ctx_search/ctx_memory/nudge/dreamer/embedding 评估）"

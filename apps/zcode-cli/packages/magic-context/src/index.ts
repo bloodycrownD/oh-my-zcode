@@ -277,6 +277,25 @@ export {
 } from "./core/features/magic-context/compartment-storage.js";
 
 /**
+ * FORK（spec phase-compartment-rewind / C1）：rewind 后的 compartment 失效。
+ *
+ * 为什么必须从包里出：水位标记、缓存对清理（`clearCachedM0M1`）与进程内注入缓存
+ * 清理（`clearInjectionCache`）三者必须**同批**发生，且它们的数据形状（
+ * `end_message` 坐标系、session_meta 列、模块级 LRU）全归包所有。宿主自己写一份
+ * SQL/自己清一个 map 等于抄两套真相，升版必漂。宿主只提供**水位**
+ * （anchorOrdinal，来自 `sessionStore.messages()` 的 1-based 序号，与
+ * `toStoredRows` 同一编号规则），其余全在包内。
+ *
+ * 读侧过滤（`inject-compartments.ts` 的 `readM0Compartments` /
+ * `readNewCompartments` / `prepareCachedM0M1Replay`）与本函数是双保险：host 侧不调
+ * 也能靠读侧不注入；读侧漏了则标记形同虚设——两处都要在。
+ */
+export {
+  invalidateCompartmentsForRewind,
+  type CompartmentRewindInvalidation,
+} from "./core/features/magic-context/rewind-invalidation.js";
+
+/**
  * session_meta 的 usage 读写面（S24）。
  *
  * 上游 OpenCode 的 plugin 由 `message.updated` 事件负责写 `last_*_usage` 三列；

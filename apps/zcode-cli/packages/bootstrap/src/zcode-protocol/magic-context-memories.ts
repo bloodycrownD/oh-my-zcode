@@ -63,7 +63,9 @@
  *   superseded）只在工具面用于选文案，wire 上 message 已是可直显文本（ownership
  *   的 message 在组合函数里就是不透明的「was not found」，防泄漏纪律）。
  * - 组合函数可能抛 `ModuleMemoryAuthorityError`（module authority 托管的项目）：
- *   捕获转可读的 ProtocolRequestError（fail-visible，不是降级）。
+ *   捕获转可读的 ProtocolRequestError（fail-visible，不是降级）。判据用 `code` /
+ *   `name` 字段（见 {@link isModuleMemoryAuthorityError}）——该错误来自动态 import 的
+ *   另一个模块实例，两份包副本时 `instanceof` 会静默失效（ZL-6）。
  * - 开库抛错（如 `SQLITE_BUSY` / `database is locked`）在 archive 侧**原文透传**：
  *   services 的可重试转译靠 message 匹配（Step 5 的 isSqliteBusyError），这里重新
  *   包一层会把可重试信号吃掉；null（确定性打不开）给可读的 -32010。list 侧：开库段
@@ -77,19 +79,8 @@
 
 import { ConfigKey } from "@zcode/contracts";
 import { getDefaultConfigPath, loadFileConfig } from "@zcode/adapters/config";
-import {
-  DEFAULT_MAGIC_CONTEXT_CONFIG,
-  MagicContextConfigSchema,
-  ModuleMemoryAuthorityError,
-  archiveProjectMemories,
-  getMagicContextDatabasePath,
-  getProjectMemoryCountsForAdmin,
-  initializeMagicContextHost,
-  listProjectMemoriesForAdmin,
-  openDatabase,
-  resolveProjectIdentityForSession,
-  type Memory,
-} from "@zcode/magic-context";
+// 只有**类型**留在顶层：`Memory` 是 `import type`，编译后被完全擦除，不产生解析边。
+import type { Memory } from "@zcode/magic-context";
 import {
   zcodeWorkspaceArchiveMagicContextMemoriesParamsSchema,
   zcodeWorkspaceArchiveMagicContextMemoriesResultSchema,
@@ -99,15 +90,114 @@ import {
   type ZCodeWorkspaceListMagicContextMemoriesParams,
   type ZCodeWorkspaceListMagicContextMemoriesResult,
 } from "@zcode/shared";
+import { resolveMagicContextEffectiveEnabled } from "../app/magic-context/effective-enabled.js";
 import {
   parseParams,
   ProtocolRequestError,
   type ZCodeProtocolAgentServerContext,
 } from "./server-types.js";
 
-/** 供单测注入的窄缝；生产路径固定为用户级 `~/.omz/cli/config.json`。 */
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 6）：本模块**不再**在顶层
+ * 从包 barrel 静态值导入 10 个符号（`DEFAULT_MAGIC_CONTEXT_CONFIG` /
+ * `MagicContextConfigSchema` / `ModuleMemoryAuthorityError` / `archiveProjectMemories` /
+ * `getMagicContextDatabasePath` / `getProjectMemoryCountsForAdmin` /
+ * `initializeMagicContextHost` / `listProjectMemoriesForAdmin` / `openDatabase` /
+ * `resolveProjectIdentityForSession`）。
+ *
+ * 原因：本文件经 `server.ts` 静态常驻，顶层 barrel 值导入会让**进程一启动**就解析整棵
+ * MC 图（实测 231 个包内文件），`features.magicContext` 还没被读到就已经付过这份钱
+ * （spec W2 / IM1）。
+ *
+ * 两种导入必须**分列**（混着写会白改）：
+ *   - **判 flag 只需 schema** → 窄子路径 `@zcode/magic-context/host/config/schema`
+ *     （闭包实测 3 文件 + zod，即 M0）。effective 门只用它的 `safeParse`。
+ *   - **业务符号**（存储 / 管理视图 / 组合函数 / authority 错误类）→ 开门之后才
+ *     `await import("@zcode/magic-context")`。业务符号只在确实要读库时才需要。
+ *
+ * 信封语义不可破（spec T-MC5）：list 侧把「schema 取不到」「业务符号取不到」都收敛成
+ * `unavailable` 信封（`supported:true`），绝不抛 `-32603`；archive 侧的结果信封没有
+ * `available` 位，只能抛可读 `-32010`（与开库失败同一处置，见文件头）。
+ *
+ * 「业务符号取不到」这一态生产上不可构造（包在 manifest 里），所以经
+ * `MagicContextMemoriesDependencies.loadRuntime` 留了单测注入缝（ZL-4）——否则它只是
+ * 一页没有测试的代码，回归时会静默变成 `-32603`。
+ *
+ * 登记处：`UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
+ */
+type MagicContextModule = typeof import("@zcode/magic-context");
+/** `openDatabase` 的非空半边（端口里的 `db` 是不透明的 `unknown`，这里窄回来）。 */
+type MagicContextDatabase = NonNullable<ReturnType<MagicContextModule["openDatabase"]>>;
+
+/** 判 flag 只用 schema：窄子路径，闭包 3 文件 + zod。 */
+async function loadMagicContextConfigSchema(): Promise<
+  typeof import("@zcode/magic-context/host/config/schema")
+> {
+  return await import("@zcode/magic-context/host/config/schema");
+}
+
+/** 业务符号：barrel，只在 effective 门放行之后加载。 */
+async function loadMagicContextRuntime(): Promise<MagicContextModule> {
+  return await import("@zcode/magic-context");
+}
+
+/**
+ * 取业务符号模块：注入缝优先（单测专用），否则走真 barrel 动态 import。
+ *
+ * 「怎么加载」可换，「失败怎么办」不可换：异常原样外抛，由调用方按各自信封语义处理。
+ */
+async function resolveMagicContextRuntime(
+  dependencies: MagicContextMemoriesDependencies,
+): Promise<MagicContextModule> {
+  return await (dependencies.loadRuntime ?? loadMagicContextRuntime)();
+}
+
+/**
+ * `ModuleMemoryAuthorityError` 的跨副本判据（ZL-6）。
+ *
+ * 生产路径上这个错误来自**动态 import 的另一个模块实例**：同一个进程里若存在两份
+ * `@zcode/magic-context` 副本（pnpm 嵌套解析、打包/直构混用），`instanceof` 会静默
+ * 失效（两份类的原型链不同），authority 拒绝就会被当普通错误原文透传，用户看到的是
+ * 一句内部报错。该类自带 `code` 与 `name` 两个稳定标记（storage-memory.ts:624-633），
+ * 用它们判据与副本无关；`instanceof` 仍留作第一判据（本地副本时零成本、且能挡住
+ * 恰好同名的无关错误）。
+ */
+function isModuleMemoryAuthorityError(error: unknown): boolean {
+  if (error instanceof Error && error.name === "ModuleMemoryAuthorityError") return true;
+  if (error === null || typeof error !== "object") return false;
+  const { code, name } = error as { code?: unknown; name?: unknown };
+  return code === "MEMORY_MODULE_AUTHORITY" || name === "ModuleMemoryAuthorityError";
+}
+
+/** 供单测注入的窄缝；生产路径固定为用户级 `~/.omz/cli/config.json` 与真 barrel。 */
 export interface MagicContextMemoriesDependencies {
   configPath?: string;
+  /**
+   * 业务符号加载器（ZL-4）：默认（不传）走 {@link loadMagicContextRuntime}。
+   *
+   * 唯一目的是让「包在、但业务符号加载失败」这一态**可测**（spec T-MC5 第三态）：
+   * 生产路径上 `import("@zcode/magic-context")` 抛错是不可构造的（包已在
+   * package.json 里），所以这条分支此前只有代码、没有测试。注入缝只换「怎么加载」，
+   * **不换失败语义**——抛错仍由两个 handler 各自收敛（list → unavailable 信封，
+   * archive → 可读 -32010），与 schema 加载失败同一处置。
+   */
+  loadRuntime?: () => Promise<MagicContextModule>;
+  /**
+   * FORK（magic-context-decoupling / cr-func 第 2 轮 P1-2）：**直构夹具**才允许自己
+   * 开库的显式标记，默认 `false`。
+   *
+   * 为什么必须有这个标记：`absent`（没有任何 session 暴露存储端口）在过去被当成
+   * 「直构/单测夹具形态」，于是保留自开库兜底。但它在**生产上可达**——两条记忆 RPC 是
+   * **workspace 级**（handler 不接 `sessionId`），`context.sessions` 构造时为空
+   * （`server.ts:256`）、`closeSession` 会 `delete`（`server-operations.ts:2581`），
+   * 于是「冷启动 CLI」或「用户把会话全关掉后打开设置里的记忆面板」都会走到 `absent`
+   * → 自开库 → **创建并迁移数据库**。那正是端口要根治的缺陷。
+   *
+   * 判据必须是**显式注入**而不是「端口方法在不在」：方法缺席只说明这个 App 没暴露
+   * 端口（可以是老宿主、也可以是还没装配），推不出「现在可以替它把库造出来」。
+   * `test-magic-context-memories-rpc.mjs` 的直构用例显式传 `allowDirectOpen: true`。
+   */
+  allowDirectOpen?: boolean;
 }
 
 /** 打不开/关着时列表信封的零值计数（字段集与 `getMemoryCountsByStatus` 的 wire 投影一致）。 */
@@ -123,45 +213,164 @@ const ZERO_MEMORY_COUNTS = {
  * effective `magicContext.enabled` 的读取：ConfigPort 优先、文件兜底（config lane
  * 先例，见文件头）。坏域按 schema 缺省（`enabled` 默认 true），不把「文件暂时坏」
  * 伪造成「功能被关」。
+ *
+ * 惰性化（Step 6）：schema 走窄子路径动态 import。**取不到时向外抛**——调用方
+ * （两个 handler）各自把它映射成自己的失败形态：list → `unavailable` 信封，
+ * archive → 可读 -32010。这里不吞错，否则「包被摘除」会被误读成「功能被关」。
  */
-function isMagicContextDisabled(
+async function isMagicContextDisabled(
   context: ZCodeProtocolAgentServerContext,
   configPath: string,
-): boolean {
+): Promise<boolean> {
+  const { MagicContextConfigSchema, DEFAULT_MAGIC_CONTEXT_CONFIG } =
+    await loadMagicContextConfigSchema();
+  const readEnabled = (raw: unknown): boolean => {
+    const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
+    return parsed.success ? parsed.data.enabled : DEFAULT_MAGIC_CONTEXT_CONFIG.enabled;
+  };
+
   for (const record of context.sessions.values()) {
     const configPort = record.app?.getConfigPort?.();
     if (!configPort) continue;
     // ConfigPort 的 MagicContext 域恒有值（注册时把 schema 的 .default() 解析结果
     // 钉进去了），safeParse 是纵深防御而非正常路径。
-    return readMagicContextEnabled(configPort.get(ConfigKey.MagicContext)) === false;
+    return !resolveMagicContextEffectiveEnabled({
+      // feature kill switch 与装配层同源（契约 8）；端口值缺席按缺省 true。
+      featureFlag: configPort.get(ConfigKey.FeatureMagicContext) !== false,
+      domainEnabled: readEnabled(configPort.get(ConfigKey.MagicContext)),
+    });
   }
   const loaded = loadFileConfig(configPath);
-  return readMagicContextEnabled(loaded.config.magicContext) === false;
-}
-
-function readMagicContextEnabled(raw: unknown): boolean {
-  const parsed = MagicContextConfigSchema.safeParse(raw ?? {});
-  return parsed.success ? parsed.data.enabled : DEFAULT_MAGIC_CONTEXT_CONFIG.enabled;
+  return !resolveMagicContextEffectiveEnabled({
+    // 文件里没写 features 段时按缺省 true（config lane 的默认值），不能把
+    // 「没配」读成「关了」。
+    featureFlag: loaded.config.features?.magicContext !== false,
+    domainEnabled: readEnabled(loaded.config.magicContext),
+  });
 }
 
 /**
- * 装载数据库句柄。`initializeMagicContextHost()` 必须在任何 DB 写之前（幂等；
- * 生产路径 create-app 装配层已调过，这里是直构/测试形态的第二保险，与 /ctx-*
- * 命令面的 ensureHostIdentity 同一理由）。
+ * 装载数据库句柄。`initializeMagicContextHost()` 必须在任何 DB 写之前（幂等）。
+ *
+ * **只有直构夹具会走到这里**（`dependencies.allowDirectOpen === true`，见该字段注释）：
+ * 生产装配路径一律用装配层交付的句柄，`absent` 也不再自开库。
  *
  * 返回 null = 确定性打不开（schema fence / 迁移未完成 / pending 竞争）；
  * throw = busy/瞬时类失败（openDatabase 以 `{ cause }` 保留底层错误，message
  * 逐字可用）。
  */
-function initializeAndOpenDatabase(): ReturnType<typeof openDatabase> {
-  initializeMagicContextHost();
-  return openDatabase(getMagicContextDatabasePath());
+function initializeAndOpenDatabase(
+  magicContext: MagicContextModule,
+): ReturnType<MagicContextModule["openDatabase"]> {
+  magicContext.initializeMagicContextHost();
+  return magicContext.openDatabase(magicContext.getMagicContextDatabasePath());
 }
 
-/** 非正常可用态的列表信封（不改 DB、不落盘）。 */
+/**
+ * 装配层交付的库句柄（spec phase-zero-load / W2 / 变更点 #11）。
+ *
+ * 三态与语义（cr-func 第 2 轮 P1-2 修正：`absent` 的生产可达性）：
+ *   · `installed`   → 用装配层**已经开好**的句柄，不再 openDatabase；
+ *   · `unavailable` → 有 App 暴露了端口，但没有任何一个给出句柄（装配抛错 / db_null /
+ *     import 失败，或多个 App 都回 `null`）→ 调用方回 unavailable / `-32010`，
+ *     **绝不自开库**；
+ *   · `absent`      → 没有任何 session 暴露该端口。它**不是**「夹具形态」而是生产可达：
+ *     两条 RPC 是 workspace 级、不接 `sessionId`，`context.sessions` 构造时为空、
+ *     `closeSession` 会 delete——冷启动 CLI 或会话全关时打开记忆面板就是这一态。
+ *     因此同样**不许自开库**，调用方按 unavailable 处理。直构夹具改走显式
+ *     `dependencies.allowDirectOpen`。
+ */
+type InstalledStorage =
+  | { state: "absent" }
+  | { state: "unavailable" }
+  | { state: "installed"; db: MagicContextDatabase };
+
+/**
+ * 逐 session 找**第一个给出句柄**的 App。
+ *
+ * 不能「第一个暴露端口的 App 决定全局」：`ProtocolRuntimeResources` 可能同时持有临时
+ * workspace app 与已登记 app，第一个回 `null` 就整体判 unavailable 会让另一个真有句柄的
+ * App 白等（cr-func 第 2 轮 P2-7）。判据因此是「任一 app 有句柄即用」，一个都没有才
+ * 区分 `absent`（没人暴露端口）与 `unavailable`（暴露了但全回 null）。
+ */
+function readInstalledStorage(context: ZCodeProtocolAgentServerContext): InstalledStorage {
+  let sawPort = false;
+  for (const record of context.sessions.values()) {
+    const getStorage = record.app?.getMagicContextStorage;
+    if (typeof getStorage !== "function") continue;
+    sawPort = true;
+    const handle = getStorage();
+    if (handle === null || handle === undefined) continue;
+    // 端口形状是不透明的 `{ db: unknown }`（宿主保留文件不能 `import type` 被删的包）；
+    // 包在场时这里窄回真实签名——这是刻意的边界转换，见 types.ts 的同名说明。
+    return { state: "installed", db: handle.db as MagicContextDatabase };
+  }
+  return sawPort ? { state: "unavailable" } : { state: "absent" };
+}
+
+/**
+ * 端口门：`absent` 只有显式 `allowDirectOpen` 才放行到自开库，其余一律 blocked。
+ *
+ * 返回 `{ db }` 表示「装配层已交付句柄，直接用」；`{ directOpen: true }` 表示
+ * 「直构夹具显式要求自开库」；否则 blocked，并给出可落日志的原因。
+ */
+function classifyStorageGate(
+  installed: InstalledStorage,
+  dependencies: MagicContextMemoriesDependencies,
+):
+  | { state: "installed"; db: MagicContextDatabase }
+  | { state: "direct-open" }
+  | { state: "blocked"; reason: "storage-not-installed" | "no-app-port" } {
+  if (installed.state === "installed") return { state: "installed", db: installed.db };
+  if (installed.state === "unavailable") {
+    return { state: "blocked", reason: "storage-not-installed" };
+  }
+  return dependencies.allowDirectOpen === true
+    ? { state: "direct-open" }
+    : { state: "blocked", reason: "no-app-port" };
+}
+
+/** blocked 的**内部**可读说明（只进日志，不进用户可见串）。 */
+function describeBlockedStorage(reason: "storage-not-installed" | "no-app-port"): string {
+  return reason === "storage-not-installed"
+    ? "no app exposes a magic-context storage handle (assembly absent / db_null / import failed)"
+    : "no app exposes getMagicContextStorage (workspace-level RPC with zero live sessions: cold start or all sessions closed)";
+}
+
+/**
+ * FORK（magic-context-decoupling / cr-func 第 3 轮 P1-1 + P2-6）：**用户可见**的
+ * blocked 说明，与 {@link describeBlockedStorage} 分列。
+ *
+ * 为什么要分两份而不复用上一份：上一份的两个受众要求相反——日志要实现名
+ * （`getMagicContextStorage` / `workspace-level RPC`）才能定位，用户要**下一步动作**
+ * 而不是内部机制。旧实现把日志措辞直接拼进 `-32010` 的 message，而这条 message 会
+ * 原样进面板 toast：于是用户读到「no app exposes getMagicContextStorage
+ * (workspace-level RPC with zero live sessions: cold start or all sessions closed)」
+ * ——嵌套括号、内部实现名、且不可操作。
+ *
+ * 两态的动作确实不同，所以返回的是**完整的用户句子**（不是从句）：
+ *   · `no-app-port`（零活动会话）→ 用户能自己解决：先在本工作区开会话；
+ *   · `storage-not-installed`（装配没装成）→ 开会话没用，只能重试 / 重启。
+ */
+function describeBlockedStorageForUser(reason: "storage-not-installed" | "no-app-port"): string {
+  return reason === "storage-not-installed"
+    ? "the local memory store is unavailable because the CLI could not attach its storage layer; retry in a moment or restart the CLI"
+    : "project memories live with a session and this workspace has none open; open or resume a session in this workspace first, then try again";
+}
+
+/**
+ * 非正常可用态的列表信封（不改 DB、不落盘）。
+ *
+ * FORK（cr-func 第 3 轮 P1-1）：reason 新增第三个取值 `no-app-port`。此前
+ * `absent`（零活动会话，生产可达：workspace 级 RPC + `closeSession` 会 delete 记录）
+ * 与「装配没装成」共用 `unavailable`，面板只能二选一——于是它对冷启动用户写
+ * 「本机记忆库暂不可用，请稍后重试」，**而这一态下稍后重试永远不会成功**（除非这期间
+ * 开了会话）。wire 字段本身是 `z.string().optional()`，加值不破 schema：
+ * 旧 UI 落到 else 分支（显示 disabled 文案），desktop 与 CLI 同包发布，窗口极短。
+ */
 function unavailableListResult(
   workspace: ZCodeWorkspaceListMagicContextMemoriesParams["workspace"],
-  reason: "disabled" | "unavailable",
+  reason: "disabled" | "unavailable" | "no-app-port",
 ): ZCodeWorkspaceListMagicContextMemoriesResult {
   return zcodeWorkspaceListMagicContextMemoriesResultSchema.parse({
     workspace,
@@ -224,15 +433,70 @@ export async function listMagicContextMemories(
   const configPath = dependencies.configPath ?? getDefaultConfigPath();
 
   // ① effective 门：关着时连 openDatabase 都不发生（「关掉不建库」纪律）。
-  if (isMagicContextDisabled(context, configPath)) {
+  // 惰性取 schema 失败（包缺失 / 子路径被改坏）也收敛成 unavailable 信封：
+  // list 的结果信封承载得了「打不开」，绝不把这类失败冒泡成 -32603（T-MC5）。
+  let disabled: boolean;
+  try {
+    disabled = await isMagicContextDisabled(context, configPath);
+  } catch (error) {
+    context.logger?.warn("magicContext memories list: config schema unavailable", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    return unavailableListResult(params.workspace, "unavailable");
+  }
+  if (disabled) {
     return unavailableListResult(params.workspace, "disabled");
+  }
+
+  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）。**必须排在 barrel 加载之前**：端口
+  // 缺席或全回 null 时连业务符号都不需要（直接回 unavailable 信封），也就不会有任何
+  // openDatabase → 不会创建/迁移库。`absent` 同样拦在这里（cr-func P1-2）：它是生产
+  // 可达的（workspace 级 RPC + 零 session），只有显式 `allowDirectOpen` 的直构夹具才
+  // 放行到自开库。
+  const gate = classifyStorageGate(readInstalledStorage(context), dependencies);
+  if (gate.state === "blocked") {
+    context.logger?.warn("magicContext memories list: storage not installed", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: describeBlockedStorage(gate.reason),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    // FORK（cr-func 第 3 轮 P1-1）：`absent` 单独过线，面板才能给出**可执行**的下一步
+    // （开会话）而不是「稍后重试」这句在该态下永远不成立的承诺。
+    return unavailableListResult(
+      params.workspace,
+      gate.reason === "no-app-port" ? "no-app-port" : "unavailable",
+    );
+  }
+
+  // ①-c 业务符号（barrel）惰性加载。放在门之后：关着时连 barrel 都不碰。
+  let magicContext: MagicContextModule;
+  try {
+    magicContext = await resolveMagicContextRuntime(dependencies);
+  } catch (error) {
+    context.logger?.warn("magicContext memories list: package unavailable", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_unavailable",
+      reason: "unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    return unavailableListResult(params.workspace, "unavailable");
   }
 
   // ② 开库。抛（busy/瞬时）与 null（fence/pending）都收敛成 unavailable——列表
   // 有信封承载「打不开」，不需要把瞬时故障冒泡成 RPC 错误。
-  let db: ReturnType<typeof openDatabase>;
+  //
+  // 生产路径用装配层交付的句柄（同一个进程级单例，不开第二条连接、**不会创建库**）；
+  // 只有显式 `allowDirectOpen` 的直构夹具才落到自开库（`gate.state === "direct-open"`）。
+  let db: ReturnType<MagicContextModule["openDatabase"]>;
   try {
-    db = initializeAndOpenDatabase();
+    db = gate.state === "installed" ? gate.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories list: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -255,21 +519,24 @@ export async function listMagicContextMemories(
   }
 
   // ③ 项目身份：与写入/检索同一空间（git: 身份或缺省 dir: 身份），不做第二份推导。
-  const projectIdentity = resolveProjectIdentityForSession(params.workspace.workspacePath);
+  const projectIdentity = magicContext.resolveProjectIdentityForSession(
+    params.workspace.workspacePath,
+  );
   if (!projectIdentity) {
     context.logger?.warn("magicContext memories list: project identity unresolved", {
       module: "bootstrap.zcode_protocol",
       event: "zcode_protocol.magic_context.memories_unavailable",
       reason: "unavailable",
-      detail: "resolveProjectIdentityForSession returned undefined (home project / git identity paused)",
+      detail:
+        "resolveProjectIdentityForSession returned undefined (home project / git identity paused)",
       workspaceKey: params.workspace.workspaceKey,
     });
     return unavailableListResult(params.workspace, "unavailable");
   }
 
   // ④ 管理视图列表 + 汇总计数（两函数各自口径；面板以列表为准）。
-  const memories = listProjectMemoriesForAdmin(db, projectIdentity);
-  const counts = getProjectMemoryCountsForAdmin(db, projectIdentity);
+  const memories = magicContext.listProjectMemoriesForAdmin(db, projectIdentity);
+  const counts = magicContext.getProjectMemoryCountsForAdmin(db, projectIdentity);
 
   // ⑤ category 过滤（CLI 侧，string 全等；未知分类 → 空列表而不是报错，词表
   // 增删只影响过滤，不影响整表读取）。
@@ -324,18 +591,60 @@ export async function archiveMagicContextMemories(
 
   // ① effective 门：关着时反射式拒绝，不开库（信封无 available 位，静默零值
   // outcomes 会被 UI 读成「什么都没发生」）。
-  if (isMagicContextDisabled(context, configPath)) {
+  // 惰性取 schema / 业务符号失败同样只能抛可读错误：本方法的信封没有 available 位，
+  // 回空 outcomes 等于把「包不在」伪装成「没有可废弃的记忆」（T-MC5 的 archive 侧）。
+  let disabled: boolean;
+  try {
+    disabled = await isMagicContextDisabled(context, configPath);
+  } catch (error) {
+    throw new ProtocolRequestError(
+      -32010,
+      `Magic Context configuration is unavailable (${error instanceof Error ? error.message : String(error)}); memories cannot be archived.`,
+    );
+  }
+  if (disabled) {
     throw new ProtocolRequestError(
       -32010,
       "Magic Context is disabled (magicContext.enabled=false); enable it in Settings before archiving memories.",
     );
   }
 
-  // ② 开库。throw 原文透传（services 的 BUSY 可重试转译按 message 匹配）；
-  // null 是确定性打不开，给可读错误。
-  let db: ReturnType<typeof openDatabase>;
+  // ①-b 装配层的库句柄（spec W2 / 变更点 #11）：端口缺席或全回 null → 可读错误，
+  // **不自开库**（归档是写路径，在装配缺席时更没有理由替它把库造出来）。`absent` 同样
+  // 拦在这里（cr-func P1-2）：生产可达，不是夹具形态。
+  const gate = classifyStorageGate(readInstalledStorage(context), dependencies);
+  if (gate.state === "blocked") {
+    // FORK（cr-func 第 3 轮 P2-6）：-32010 的 message 会**原样进面板 toast**，
+    // 所以用户面用 `describeBlockedStorageForUser`（动作 + 无实现名）；实现级诊断
+    // （getMagicContextStorage / workspace-level RPC）只落日志，不随错误串外泄。
+    context.logger?.warn("magicContext memories archive: storage not installed", {
+      module: "bootstrap.zcode_protocol",
+      event: "zcode_protocol.magic_context.memories_archive_failed",
+      detail: describeBlockedStorage(gate.reason),
+      workspaceKey: params.workspace.workspaceKey,
+    });
+    throw new ProtocolRequestError(
+      -32010,
+      `Memories cannot be archived right now: ${describeBlockedStorageForUser(gate.reason)}.`,
+    );
+  }
+
+  // ①-b 业务符号（barrel）惰性加载。
+  let magicContext: MagicContextModule;
   try {
-    db = initializeAndOpenDatabase();
+    magicContext = await resolveMagicContextRuntime(dependencies);
+  } catch (error) {
+    throw new ProtocolRequestError(
+      -32010,
+      `Magic Context is not installed in this build (${error instanceof Error ? error.message : String(error)}); memories cannot be archived.`,
+    );
+  }
+
+  // ② 开库。throw 原文透传（services 的 BUSY 可重试转译按 message 匹配）；
+  // null 是确定性打不开，给可读错误。生产路径走装配层句柄（不创建库）。
+  let db: ReturnType<MagicContextModule["openDatabase"]>;
+  try {
+    db = gate.state === "installed" ? gate.db : initializeAndOpenDatabase(magicContext);
   } catch (error) {
     context.logger?.warn("magicContext memories archive: storage open failed", {
       module: "bootstrap.zcode_protocol",
@@ -353,7 +662,9 @@ export async function archiveMagicContextMemories(
   }
 
   // ③ 项目身份：解析不出时 fail-visible（回空 outcomes 会误导「废弃成功/不存在」）。
-  const projectIdentity = resolveProjectIdentityForSession(params.workspace.workspacePath);
+  const projectIdentity = magicContext.resolveProjectIdentityForSession(
+    params.workspace.workspacePath,
+  );
   if (!projectIdentity) {
     throw new ProtocolRequestError(
       -32010,
@@ -363,7 +674,12 @@ export async function archiveMagicContextMemories(
 
   // ④ 组合函数（单事务成对写）；authority 拒绝转可读消息，其余错误原文透传。
   try {
-    const outcomes = archiveProjectMemories(db, projectIdentity, params.memoryIds, params.reason);
+    const outcomes = magicContext.archiveProjectMemories(
+      db,
+      projectIdentity,
+      params.memoryIds,
+      params.reason,
+    );
     context.logger?.info("magicContext memories archived", {
       module: "bootstrap.zcode_protocol",
       event: "zcode_protocol.magic_context.memories_archived",
@@ -382,10 +698,14 @@ export async function archiveMagicContextMemories(
       })),
     });
   } catch (error) {
-    if (error instanceof ModuleMemoryAuthorityError) {
+    if (isModuleMemoryAuthorityError(error)) {
+      const authorityCode =
+        typeof (error as { code?: unknown }).code === "string"
+          ? (error as { code: string }).code
+          : "MEMORY_MODULE_AUTHORITY";
       throw new ProtocolRequestError(
         -32010,
-        `Memory archives for this project are managed by the memory module (${error.code}); refusing the TypeScript-side archive.`,
+        `Memory archives for this project are managed by the memory module (${authorityCode}); refusing the TypeScript-side archive.`,
       );
     }
     throw error;

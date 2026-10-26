@@ -2240,6 +2240,8 @@ const enUS: Record<string, string> = {
     "Cross-session project memory is off. Enable it in the Context management section and try again.",
   "settings.memory.management.unavailable.unavailable":
     "The local memory store is unavailable right now. Try again later.",
+  "settings.memory.management.unavailable.noAppPort":
+    "Cross-session project memories are loaded with a session, and this workspace has no open session. Open or resume a session in this workspace, then choose Retry.",
   "settings.memory.management.counts.total": "{count} total",
   "settings.memory.management.counts.active": "{count} active",
   "settings.memory.management.counts.permanent": "{count} permanent",

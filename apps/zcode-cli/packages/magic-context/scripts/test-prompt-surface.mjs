@@ -436,6 +436,56 @@ it("language unset emits no directive; a bad code emits none either", () => {
   );
 });
 
+it("every prompt variant lists `<session-history-invalidated>` among the record markings", () => {
+  // P2-3：rewind 说明块（inject-compartments.ts 的 `<session-history-invalidated>`）不在
+  // records 清单里时，模型会把它当成普通正文，可能模仿输出这个标签。清单有 **8 个**
+  // 变体（4 个 desk 副本 × reduce/no-reduce，subagent 两档，temporal override 一份），
+  // 逐个渲染、逐个断言——只改其中一处时本用例变红。
+  const T = true;
+  const F = false;
+  const variants = {
+    "full + reduce": buildMagicContextSection(null, 0, T),
+    "full + reduce + temporal": buildMagicContextSection(null, 0, T, F, T),
+    "full + no-reduce": buildMagicContextSection(null, 0, F),
+    "light + reduce": buildMagicContextSection(null, 0, T, F, F, F, F, undefined, T, "light"),
+    "light + no-reduce": buildMagicContextSection(null, 0, F, F, F, F, F, undefined, T, "light"),
+    "subagent + reduce": buildMagicContextSection(null, 0, T, F, F, F, T),
+    "subagent + reduce + light": buildMagicContextSection(
+      null,
+      0,
+      T,
+      F,
+      F,
+      F,
+      T,
+      undefined,
+      T,
+      "light",
+    ),
+    // primaryOverride 拥有正文，但 composer 侧的 temporal override 段仍会拼上去——
+    // 那一份也带 records 清单。
+    "primaryOver + temporal": buildMagicContextSection(
+      null,
+      0,
+      T,
+      F,
+      T,
+      F,
+      F,
+      undefined,
+      T,
+      "full",
+      "## Magic Context\n\nuser copy\n",
+    ),
+  };
+  for (const [name, text] of Object.entries(variants)) {
+    assert.ok(
+      text.includes("`<session-history-invalidated>`"),
+      `${name}：records 清单漏了 <session-history-invalidated>（模型会模仿输出该标签）`,
+    );
+  }
+});
+
 it("caveman and temporal arms are off by default and change the text when on", () => {
   const base = buildMagicContextSection(null, 0);
   const caveman = buildMagicContextSection(null, 0, true, false, false, true);

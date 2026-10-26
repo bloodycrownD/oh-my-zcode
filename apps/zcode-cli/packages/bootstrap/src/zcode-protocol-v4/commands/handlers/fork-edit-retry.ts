@@ -146,6 +146,24 @@ async function submitConversationRewind(
   // 成功返回即截断已提交；放在 afterLegacyStateMutation 之前——那次广播失败同样
   // 不能让「历史已回退」退化成「什么都没发生」。
   onCommitted();
+  // FORK（spec phase-compartment-rewind / C1）：rewind 之后让 magic-context 里被裁
+  // 轮次的 compartment 摘要失效——旧摘要活在 M0 的 `<session-history>`，只要库还在
+  // 就会照旧注入，模型因此看得见用户已经撤回的对话。
+  //
+  // 只挂**可选**调用：flag 关 / DB 开不出来时通道不存在，跳过即可（不塞空实现，
+  // 见 `ZCodeApp.invalidateMagicContextCompartments` 的契约）。调用点放在 rewind
+  // 成功之后、重发新文本之前——那一轮 transform 才会读到清理后的状态。
+  //
+  // 顺序（合并时裁定）：onCommitted → 失效 → afterLegacyStateMutation。
+  // ① onCommitted 必须先于广播：广播失败不能让已提交的截断退化成「什么都没发生」；
+  // ② 失效必须先于广播：广播会触发 auto-drain 把队首提升成活跃轮，那一轮的
+  //    transform 会读 M0 —— 晚于广播就仍会读到旧摘要。
+  // 失效器内部整段包了 try/catch（`storage.ts` 的 invalidateCompartmentsAfterRewind），
+  // 不会抛；插件不得有能力打断宿主的重发链路（记忆 #138）。
+  await record.app.invalidateMagicContextCompartments?.({
+    anchorMessageId: result.targetMessageId,
+    keptMessageCount: result.keptMessageCount,
+  });
   await host.afterLegacyStateMutation?.(record, "session_rewound");
 }
 

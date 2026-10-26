@@ -25,9 +25,12 @@
  * 的字符串不受此限。
  *
  * 语义边界（fail-closed 契约不受影响，事件只是可观测性）：
- *   - import_failed：发事件后**照旧 throw**（保留 fail-closed 性状）；
+ *   - import_failed：发事件后**降级**，不再 throw（Step 12 / IM2）。这条路径的全部后果
+ *     只是「没有 magic-context」，与 db_null 同性质；rethrow 等于「包在、只是这次没加载
+ *     起来 = App 起不来」。摘除场景不走这条分支（摘除脚本把 import 点整段删掉）。
  *   - disabled / db_null：发事件后照旧 return undefined 降级；db_null 且
- *     `fail_closed_blocking=true` 时同样**先发事件、再 throw**。
+ *     `fail_closed_blocking=true` 时同样**先发事件、再 throw**——fail-closed 性状由这一档
+ *     承载，不由 import_failed 承载。
  */
 
 /** 事件名常量：消费面（桌面日志/测试）只看这一个名字。 */

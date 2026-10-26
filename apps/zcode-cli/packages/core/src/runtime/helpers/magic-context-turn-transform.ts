@@ -20,13 +20,15 @@
  * turn-loop 的插入点因此只有一行判空，见 `turn-loop.ts` 的
  * `const requestEntries = await runMagicContextTurnTransform(...)`。
  *
- * 本模块**没有任何运行时 import**（全部是 `import type`）。这不只是洁癖：它让这段
- * 门控 + 诊断代码可以被 node 直接加载（Step 19b 的单测就这样跑），而不必把整个
+ * 本模块**没有任何运行期重依赖**：唯一的运行期值 import 是一个零依赖叶子
+ * （`./magic-context-effective-enabled.js`，纯算术、无外部 import）。这不只是洁癖：它让
+ * 这段门控 + 诊断代码可以被 node 直接加载（Step 19b 的单测就这样跑），而不必把整个
  * core 运行时图拉进来。`traceContextToLogContext` 因此由调用方算好传进来。
  */
 
 import type { RuntimeAttachmentEntry, RuntimeMessageEntry } from "../../agent/message-history.js";
 import type { LogContext, Logger, Model, SessionId } from "../deps.js";
+import { isMagicContextEffectiveByConfig } from "./magic-context-effective-enabled.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 端口
@@ -231,7 +233,11 @@ export async function runMagicContextTurnTransform(
   // 版本。后者在场时以它为准，于是设置页把 `enabled` 关掉后，下一个 turn 不再插桩。
   if (!runtime.magicContextTurnTransform) return input.entries;
   if (runtime.magicContextTurnTransform.isEnabled?.() === false) return input.entries;
-  if (runtime.config.magicContext?.enabled === false) return input.entries;
+  // IM3：config 这一半原来写成 `=== false`（缺席按开）。缺省方向显式声明，
+  // 「端口在场 + isEnabled() 优先、config 只做否决」的三段结构与顺序原样保留。
+  if (!isMagicContextEffectiveByConfig(runtime.config.magicContext?.enabled, { whenUnset: true })) {
+    return input.entries;
+  }
 
   const startedAt = performance.now();
   const result = await runtime.magicContextTurnTransform(input);

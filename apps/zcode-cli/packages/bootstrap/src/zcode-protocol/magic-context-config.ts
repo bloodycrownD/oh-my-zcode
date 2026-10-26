@@ -1,6 +1,9 @@
 import { ConfigKey } from "@zcode/contracts";
-import { getDefaultConfigPath, loadFileConfig, updateMagicContextInFileConfig } from "@zcode/adapters/config";
-import { MagicContextConfigSchema } from "@zcode/magic-context";
+import {
+  getDefaultConfigPath,
+  loadFileConfig,
+  updateMagicContextInFileConfig,
+} from "@zcode/adapters/config";
 import {
   zcodeWorkspaceReadMagicContextConfigParamsSchema,
   zcodeWorkspaceReadMagicContextConfigResultSchema,
@@ -14,6 +17,29 @@ import {
   ProtocolRequestError,
   type ZCodeProtocolAgentServerContext,
 } from "./server-types.js";
+
+/**
+ * FORK（magic-context-decoupling / phase-zero-load / Step 6）：本模块**不再**在顶层
+ * 从包 barrel（`@zcode/magic-context`）静态值导入 `MagicContextConfigSchema`。
+ *
+ * 原因：本文件经 `server.ts` 静态常驻（TUI / print / app-server 三种形态都会加载），
+ * 顶层 barrel 值导入会在**进程一启动**就解析整棵 MC 图（实测 231 个包内文件），
+ * `features.magicContext` 还没被读到就已经付了这份钱（spec W2 / IM1）。
+ *
+ * 改法（两处细节都是刻意的）：
+ *   - **走窄子路径** `@zcode/magic-context/host/config/schema`，不是 barrel：handler
+ *     只需要 schema 的 `safeParse`，业务符号一个都不用。子路径闭包实测 3 个文件
+ *     （schema + language + prompt-surface-key）+ zod，即 M0。
+ *   - **handler 内 `await import`**：这两个 RPC 只有设置页会调，进程启动不必加载
+ *     （连 M0 都不必）。两个 handler 本来就是 `async`，改法零签名变化。
+ *
+ * 登记处：`UPSTREAM-SYNC.md` 第 3 节「插件化偏离点（rebase 登记）」。
+ */
+async function loadMagicContextConfigSchema(): Promise<
+  typeof import("@zcode/magic-context/host/config/schema")
+> {
+  return await import("@zcode/magic-context/host/config/schema");
+}
 
 /**
  * FORK（S23 / D-12）：写 `magicContext` 参数域，并让进程内所有已装配的
@@ -86,6 +112,9 @@ export async function readMagicContextConfig(
   }
 
   const loaded = loadFileConfig(configPath);
+  // 惰性取 schema（见文件头 FORK 说明）：只有走到「无 resident session、回落读文件」
+  // 这一支才需要它。解析结果形状与静态导入时逐字相同。
+  const { MagicContextConfigSchema } = await loadMagicContextConfigSchema();
   const result = zcodeWorkspaceReadMagicContextConfigResultSchema.parse({
     workspace: params.workspace,
     path: loaded.path,
@@ -131,6 +160,10 @@ export async function updateMagicContextConfig(
       "Invalid params — config is required and must not be null: 整域替换，缺席或空值等于重置",
     );
   }
+  // 惰性取 schema（见文件头 FORK 说明）。形态与静态导入时逐字相同；取不到时
+  // （包被摘除 / 子路径 exports 被改坏）让错误照原样冒泡——本方法没有任何可回退的
+  // 「可用信封」，静默成功会把「没校验也没写盘」伪装成已保存。
+  const { MagicContextConfigSchema } = await loadMagicContextConfigSchema();
   const parsed = MagicContextConfigSchema.safeParse(params.config);
   if (!parsed.success) {
     throw new ProtocolRequestError(
@@ -180,7 +213,9 @@ export async function updateMagicContextConfig(
   });
 }
 
-function formatIssues(error: { issues: ReadonlyArray<{ path: PropertyKey[]; message: string }> }): string {
+function formatIssues(error: {
+  issues: ReadonlyArray<{ path: PropertyKey[]; message: string }>;
+}): string {
   return error.issues
     .map((issue) => `${issue.path.length > 0 ? issue.path.join(".") : "<root>"}: ${issue.message}`)
     .join("; ");

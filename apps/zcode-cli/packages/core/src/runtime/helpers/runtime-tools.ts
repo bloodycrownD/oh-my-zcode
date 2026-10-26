@@ -26,6 +26,7 @@ import {
   resolveRuntimeDisallowedTools,
   resolveRuntimeDynamicWorkflowToolsIncluded,
 } from "./tool-allowlist.js";
+import { isMagicContextEffectiveByConfig } from "./magic-context-effective-enabled.js";
 import { isStaleBranchRuntimeTaskEvent } from "../methods/runtime-command-generation.js";
 import { resolveEnabledProjectMemoryRoot } from "./project-memory.js";
 import { sessionHasLoadedSkill } from "../../agent/loaded-skills.js";
@@ -120,10 +121,17 @@ function registerRuntimeBuiltInTools(runtime: AgentRuntimeInternal, deps: AgentR
     // node_repl/browser-use 由 ZCode 官方 browser-use 插件启停推导出的 runtimeFeatures 控制。
     includeNodeRepl: nodeReplEnabled,
     includeBrowserUse: browserUseEnabled,
-    // magic-context 上下文回收面：门是 `features.magicContext`（step 28 起默认 true）。
+    // magic-context 上下文回收面：门是 bootstrap 三轴求值后的冷值
+    // （`features.magicContext` × 域值 × override），不是 `features.magicContext` 单轴。
     // ctx handler 是动态 import 包的，所以这道门同时决定了「模型看得见这两个工具吗」
     // 与「整棵 magic-context 模块图进不进内存」——见 handlers/index.ts 的注释。
-    includeMagicContextTools: runtime.config.magicContext?.enabled === true,
+    //
+    // IM3：读的是 bootstrap 唯一口径算出的冷值，缺省方向（缺席按关，原 `=== true`）
+    // 显式写在 whenUnset 上，见 `magic-context-effective-enabled.ts` 的真值表。
+    includeMagicContextTools: isMagicContextEffectiveByConfig(
+      runtime.config.magicContext?.enabled,
+      { whenUnset: false },
+    ),
     embeddedSearchEnabled: resolveRuntimeEmbeddedSearchEnabled(runtime),
     agentProfiles: runtime.config.subagents?.profiles,
     allowedTools: resolveBuiltInToolAllowlist(runtime.config),

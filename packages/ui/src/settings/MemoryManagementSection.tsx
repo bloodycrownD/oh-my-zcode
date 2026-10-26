@@ -551,6 +551,24 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
    */
   const errorWithoutData = loadError !== null && entries.length === 0;
 
+  /**
+   * 占位态文案映射（FORK / cr-func 第 3 轮 P1-1）。
+   *
+   * `no-app-port` = 本工作区没有活动会话（记忆库随会话装配）——这一态下「请稍后重试」
+   * 是**假建议**：除非这期间开了会话，重试永远不会成功。所以它单独一条文案，写的是
+   * 用户能执行的动作（先开会话）。
+   *
+   * 判据刻意**白名单 `disabled`**：未知取值（未来新增的 reason / 旧 CLI 的其它值 /
+   * 缺省）落到中性的「暂不可用，稍后重试」，而不是「被关掉了」——后者对未知原因是
+   * 另一句假话。`unsupported` 走上面的 `supported === false` 分支，不到这里。
+   */
+  const unavailableMessageId =
+    unavailableReason === "no-app-port"
+      ? "settings.memory.management.unavailable.noAppPort"
+      : unavailableReason === "disabled"
+        ? "settings.memory.management.unavailable.disabled"
+        : "settings.memory.management.unavailable.unavailable";
+
   return (
     <div className="space-y-4">
       <div className="text-ui-base font-medium text-foreground-subtle">{sectionDescription}</div>
@@ -577,14 +595,20 @@ export function MemoryManagementSection({ workspacePath }: { workspacePath?: str
       ) : !available ? (
         <div
           data-testid={TID_SETTINGS_MCM_UNAVAILABLE}
-          className="rounded-xl border border-dashed border-border bg-transparent px-4 py-8 text-center text-ui-base text-foreground-subtle"
+          className="flex flex-col items-center gap-3 rounded-xl border border-dashed border-border bg-transparent px-4 py-8 text-center text-ui-base text-foreground-subtle"
         >
-          {intl.formatMessage({
-            id:
-              unavailableReason === "unavailable"
-                ? "settings.memory.management.unavailable.unavailable"
-                : "settings.memory.management.unavailable.disabled",
-          })}
+          <span>{intl.formatMessage({ id: unavailableMessageId })}</span>
+          {/* 重试入口：此前该分支没有任何按钮，用户只能离开设置页再进来（remount）才
+              能重拉——`no-app-port` 下这是唯一可操作项（开完会话回来点一下）。 */}
+          <Button
+            type="button"
+            variant="ghost"
+            size="sm"
+            data-testid={TID_SETTINGS_MCM_REFRESH}
+            onClick={() => void load(0)}
+          >
+            {intl.formatMessage({ id: "common.retry" })}
+          </Button>
         </div>
       ) : (
         <>
