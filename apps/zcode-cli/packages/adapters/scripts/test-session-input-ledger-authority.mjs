@@ -31,7 +31,11 @@
  *    顶层 `payload.attachments` 会被 `TurnSteerQueued` 的重写丢掉，不得读它；
  * 4) F5：`promoteSessionInput` 只接受 status=admitted 的行，已 settle 的行 promote
  *    必须抛错并回滚（不留半截 user message）；
- * 5) legacy 无 intent 行可执行（P1-3），而「字段在但读不出」仍 corrupt。
+ * 5) legacy 无 intent 行可执行（P1-3），而「字段在但读不出」仍 corrupt；
+ * 6) promote 事务里的 shared-context 收口（`session-input-shared-context.ts`）：reserved 条目
+ *    随 promote 变 attached 并记住 attachedMessageId，缺项/已失效一律连带回滚；
+ * 7) `updateSessionInputs` 的 durable 改写（queue edit）：`payload.text` 与
+ *    `conversationInputIntent.text` 都必须变成新文本，且只改 status=admitted 的行。
  *
  * handler 侧的对应断言在 `bootstrap/scripts/test-input-authority.mjs` 的 L4/L5。
  *
@@ -426,4 +430,186 @@ test("9 I2 判据的写侧单点（① admitted）：settle 不得改写已终�
   });
   assert.equal(statusOf("input-settle-cancelled"), "cancelled");
   assert.equal(reasonOf("input-settle-cancelled"), "user_removed");
+});
+
+test("10 promote 事务的 shared-context 收口：reserved → attached，缺项/已失效连带回滚", async () => {
+  // 这条路径过去零覆盖（本轮变异探测暴露的基线缺口）：「promote 事务里 status: "attached"
+  // 改成 "reserved"，三套 authority 测试全绿」。原因是全仓没有任何用例构造过
+  // `v4/shared_context_import` 条目 —— 收口结果只写 session_entry.data 与上下文消息的
+  // metadata，没有任何其他套件会读这两处。
+  //
+  // 生产顺序（`v4-bridge.ts` + `commitSharedContextImportBundle`）：
+  // 导入时落「上下文消息 + v4/shared_context_import 条目(pending)」→ admission 把条目
+  // pending→reserved（delivery != startNow）→ promote 在同一事务里收口成 attached。
+  const CONTEXT_ID = "ctx-shared-1";
+  const GHOST_CONTEXT_ID = "ctx-shared-ghost";
+  const CONTEXT_MESSAGE_ID = "msg-shared-context";
+  const ENTRY_ID = `v4_shared_context_import:${SESSION_ID}:${CONTEXT_ID}`;
+  const sharedRef = { kind: "shared_context_import", context_id: CONTEXT_ID };
+  const messageCount = (id) =>
+    raw.prepare("select count(*) as n from message where id = ?").get(id).n;
+  const entryData = () =>
+    JSON.parse(raw.prepare("select data from session_entry where id = ?").get(ENTRY_ID).data);
+  const contextMetadata = () =>
+    JSON.parse(raw.prepare("select data from message where id = ?").get(CONTEXT_MESSAGE_ID).data)
+      .metadata;
+  const promotedMessage = (id, refs) => ({
+    id,
+    sessionID: SESSION_ID,
+    role: "user",
+    metadata: refs ? { inputIntent: { sharedContextRefs: refs } } : {},
+    time: { created: Date.now() },
+  });
+  const partsOf = (messageId) => [
+    {
+      id: `${messageId}-part`,
+      sessionID: SESSION_ID,
+      messageID: messageId,
+      type: "text",
+      text: "内容",
+      time: { start: Date.now(), end: Date.now() },
+    },
+  ];
+  const setEntryStatus = async (status) =>
+    store.saveSessionEntry({
+      id: ENTRY_ID,
+      sessionID: SESSION_ID,
+      type: "v4/shared_context_import",
+      data: { contextId: CONTEXT_ID, shareUrl: "https://share.example/ctx", status },
+      time: { created: Date.now(), updated: Date.now() },
+    });
+
+  await store.saveMessage({
+    id: CONTEXT_MESSAGE_ID,
+    sessionID: SESSION_ID,
+    role: "user",
+    source: "shared_context",
+    visibility: "model-only",
+    metadata: { contextId: CONTEXT_ID, sharedContextStatus: "reserved" },
+    time: { created: Date.now() },
+  });
+  await setEntryStatus("reserved");
+
+  // 10a 正向：reserved 条目随 promote 一起收口成 attached。
+  insertInput({ id: "input-shared-context" });
+  await store.promoteSessionInput({
+    id: "input-shared-context",
+    sessionID: SESSION_ID,
+    message: promotedMessage("msg-shared-promote", [sharedRef]),
+    parts: partsOf("msg-shared-promote"),
+  });
+  const attached = entryData();
+  assert.equal(
+    attached.status,
+    "attached",
+    "promote 提交即收口：这条导入已经随 user message 进入 transcript，不能停在 reserved",
+  );
+  assert.equal(
+    attached.attachedMessageId,
+    "msg-shared-promote",
+    "必须记住挂在哪条消息上（解绑与展示都只认这个字段）",
+  );
+  assert.equal(attached.contextId, CONTEXT_ID, "收口是改写条目，不许把它的身份键抹掉");
+  const context = contextMetadata();
+  assert.equal(
+    context.sharedContextStatus,
+    "attached",
+    "上下文消息自身的状态位必须同步（UI 的「已附加」读的是这条 metadata）",
+  );
+  assert.equal(context.contextId, CONTEXT_ID, "重写 metadata 不得抹掉 contextId（否则后续再也找不到它）");
+
+  // 10b 已失效的条目不得被 promote 复活：整笔事务回滚，user message/parts 不落盘。
+  await setEntryStatus("discarded");
+  insertInput({ id: "input-shared-stale" });
+  await assert.rejects(
+    () =>
+      store.promoteSessionInput({
+        id: "input-shared-stale",
+        sessionID: SESSION_ID,
+        message: promotedMessage("msg-shared-stale", [sharedRef]),
+        parts: partsOf("msg-shared-stale"),
+      }),
+    /no longer attachable/u,
+    "已 discarded 的导入不得被提升「顺手复活」",
+  );
+  assert.equal(messageCount("msg-shared-stale"), 0, "shared-context 抛错必须连带回滚 user message");
+  assert.equal(entryData().status, "discarded", "失败的 promote 不得改写条目状态");
+
+  // 10c 引用还在、条目不在（缺项）：同样硬失败并回滚，不许静默跳过附带。
+  insertInput({ id: "input-shared-orphan" });
+  await assert.rejects(
+    () =>
+      store.promoteSessionInput({
+        id: "input-shared-orphan",
+        sessionID: SESSION_ID,
+        message: promotedMessage("msg-shared-orphan", [
+          { kind: "shared_context_import", context_id: GHOST_CONTEXT_ID },
+        ]),
+        parts: partsOf("msg-shared-orphan"),
+      }),
+    /is missing/u,
+    "缺项的导入必须硬失败：静默跳过等于让用户以为上下文已带上",
+  );
+  assert.equal(messageCount("msg-shared-orphan"), 0, "缺项同样要回滚 user message");
+
+  // 10d 非导入引用 / 缺 context_id 的引用不触发收口（它们不是 shared_context_import）。
+  insertInput({ id: "input-shared-noop" });
+  await store.promoteSessionInput({
+    id: "input-shared-noop",
+    sessionID: SESSION_ID,
+    message: promotedMessage("msg-shared-noop", [
+      { kind: "attachment", context_id: CONTEXT_ID },
+      { kind: "shared_context_import" },
+    ]),
+    parts: partsOf("msg-shared-noop"),
+  });
+  assert.equal(
+    entryData().status,
+    "discarded",
+    "非导入引用（kind 不符 / 缺 context_id）不得改写导入条目、更不得让 promote 失败",
+  );
+});
+
+test("11 updateSessionInputs：queue edit 必须改写 durable payload.text（重启后不得恢复旧文本）", async () => {
+  // queue edit 的落库链路是 handler → core `editPendingInputById` → `persistSessionInputUpdates`
+  // → 本仓库的 `updateSessionInputs`。写入侧过去零覆盖：本轮变异探测把
+  // 「payload.text 那行关掉」时四个套件全绿。这里直接对真实库读回 durable 结果。
+  const OLD_TEXT = "编辑前的旧文本";
+  const NEW_TEXT = "编辑后的新文本";
+  const payloadOfRow = (id) =>
+    JSON.parse(raw.prepare("select payload from session_input where id = ?").get(id).payload);
+
+  insertInput({ id: "input-edited", behavior: { payload: payloadOf({ text: OLD_TEXT }) } });
+  await store.updateSessionInputs({
+    sessionID: SESSION_ID,
+    updates: [{ id: "input-edited", text: NEW_TEXT }],
+  });
+  const edited = payloadOfRow("input-edited");
+  assert.equal(edited.text, NEW_TEXT, "重启后重建的队列项文本只能来自 payload.text（旧文本会再次被执行）");
+  assert.equal(
+    edited.conversationInputIntent.text,
+    NEW_TEXT,
+    "投影/恢复侧读的是 conversationInputIntent.text，两处必须同时改写",
+  );
+
+  // 只改 admitted 行：已 settled 的输入是执行历史，queue edit 不得回写它。
+  insertInput({
+    id: "input-edit-settled",
+    behavior: { payload: payloadOf({ text: OLD_TEXT }) },
+  });
+  await store.settleSessionInput({
+    id: "input-edit-settled",
+    sessionID: SESSION_ID,
+    status: "discarded",
+    reason: "rewound",
+  });
+  await store.updateSessionInputs({
+    sessionID: SESSION_ID,
+    updates: [{ id: "input-edit-settled", text: NEW_TEXT }],
+  });
+  assert.equal(
+    payloadOfRow("input-edit-settled").text,
+    OLD_TEXT,
+    "终态行的 payload 不得被编辑改写（它已经不是待执行输入）",
+  );
 });
