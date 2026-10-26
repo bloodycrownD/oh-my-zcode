@@ -1366,16 +1366,55 @@ test("K3: 升级路径必须「先删 hydratedSessions 再 forceRebuild」，且
     "升级不得直接 resume/createRecord：必须走激活本体的同一条入口（双 resume = 幽灵 runtime）",
   );
 
-  // 触发点：激活成功之后（不是之前），且只在 flight 的 try 里排一次。
+  // 触发点：两个，且都不能省（Step 15 修的顺序依赖）。
   const readyAt = gatewaySource.indexOf("private ensureRuntimeReady(");
   const readyBody = gatewaySource.slice(readyAt, upgradeAt);
-  const scheduleAt = readyBody.indexOf("this.scheduleProjectionUpgrade(sessionId)");
+  const scheduleAt = readyBody.indexOf(
+    'this.scheduleProjectionUpgrade(sessionId, "runtimeActivated")',
+  );
   const activatedAt = readyBody.indexOf("flight.activated = true");
   assert.ok(scheduleAt > 0, "激活成功必须排升级");
   assert.ok(
     scheduleAt > activatedAt,
     "升级只能排在激活本体成功之后（激活前没有 record，全量读也补不齐）",
   );
+  // 第二个触发点：首屏 hydrate 收口。只在「本次记了降级事实」时才调。
+  const sillAt = gatewaySource.indexOf("private async performHydration(");
+  assert.ok(sillAt > 0);
+  const hydrationBody = gatewaySource.slice(
+    sillAt,
+    gatewaySource.indexOf("private keepProjectionAfterLoadFailure(", sillAt),
+  );
+  const settledAt = hydrationBody.indexOf(
+    'this.scheduleProjectionUpgrade(sessionId, "firstScreenSettled")',
+  );
+  assert.ok(settledAt > 0, "首屏收口必须再排一次：激活先完成的顺序里只有这里能补上升级");
+  assert.ok(
+    hydrationBody.slice(0, settledAt).includes("if (this.degradedFirstScreen.has(sessionId))"),
+    "收口触发点必须由「本次真的记了降级事实」把门（否则每次 hydrate 都多一条早退日志）",
+  );
+  // 幂等边界：先看「在飞 / 无降级 / 激活未就绪」三个早退，再消费 flag 起升级。
+  assert.ok(
+    gatewaySource.includes("if (this.projectionUpgrades.has(sessionId)) {") &&
+      gatewaySource.includes("if (!this.degradedFirstScreen.has(sessionId)) {") &&
+      gatewaySource.includes("if (!this.isRuntimeReady(sessionId)) {"),
+    "三个早退分支缺一不可：在飞（不许重复排）/ 无降级（不欠升级）/ 激活未就绪（等激活来排）",
+  );
+  const scheduleBody = gatewaySource.slice(
+    gatewaySource.indexOf("private scheduleProjectionUpgrade("),
+    gatewaySource.indexOf("private async upgradeProjectionToFull("),
+  );
+  assert.ok(
+    scheduleBody.indexOf("this.degradedFirstScreen.delete(sessionId)") >
+      scheduleBody.indexOf("if (!this.isRuntimeReady(sessionId)) {"),
+    "flag 必须在「激活已就绪」之后才消费——提前删掉就没有人会再排这次升级",
+  );
+  for (const reason of ["reason=inFlight", "reason=notDegraded", "reason=runtimeNotReady"]) {
+    assert.ok(
+      scheduleBody.includes(reason),
+      `早退必须留可检索的信号：${reason}（Step 14 的教训是它完全静默）`,
+    );
+  }
 });
 
 test("K4: 首屏本来就是全量时不做无谓的重读（降级事实是唯一判据）", async () => {
@@ -1421,6 +1460,143 @@ test("K5: 升级不靠 rowSetSignature 作废清单——rehydrate 显式清事�
     skipWindowAt > 0 && planWindowAt > skipWindowAt,
     "planColdWindow 必须被 fullMaterialization 门控",
   );
+});
+
+// ── K6/K7: 升级的顺序独立性与幂等（Step 15 修的 bug）────────────────────────
+//
+// 实测（Step 14 真机）：app 冷启的打开顺序是「**先激活、后窗口化首屏收口**」——
+// journal 读入口 `ensureHostRecordForJournalRead` 在点击前就 await 了 `ensureRuntimeReady`，
+// 于是 `scheduleProjectionUpgrade` 在激活分支读 `degradedFirstScreen` 时集合还是空的，
+// 早退之后没有任何重试入口，6 次打开一条升级都没有（CLI 重起那条顺序相反，3/3 都有）。
+// 判据必须是「谁先跑完」之外的**集合事实**，所以两个触发点都要排。
+
+/** 首屏 hydrate 可悬停的桩：`hold` 那一轮不会自己返回，直到放行。 */
+function gatedDegradedLoadStub() {
+  const options = [];
+  let releaseFirst = () => {};
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let firstDone = false;
+  return {
+    options,
+    release: () => releaseFirst(),
+    load: async (_sessionId, _messages, loadOptions) => {
+      options.push(loadOptions ?? {});
+      if (loadOptions?.fullMaterialization === true) {
+        return { events: [], synthesized: true, sourceEventSeq: 0, branchGeneration: 0 };
+      }
+      if (!firstDone) {
+        firstDone = true;
+        await firstGate;
+      }
+      return {
+        events: [],
+        synthesized: true,
+        sourceEventSeq: 0,
+        branchGeneration: 0,
+        viewOnlyHydration: true,
+      };
+    },
+  };
+}
+
+test("K6: 激活先完成、窗口化首屏后收口——升级仍然必须发生（旧实现在这里永久缺席）", async () => {
+  const { host, calls } = gatewayFixture({ shellPort: true });
+  const stub = gatedDegradedLoadStub();
+  const debugLines = [];
+  host.onDebug = (message) => debugLines.push(String(message));
+  host.loadPersistedEvents = async (sessionId, messages, options) => {
+    calls.load += 1;
+    return await stub.load(sessionId, messages, options);
+  };
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    // 首屏在飞（hydration 悬住）。
+    const subscribePromise = gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-k6a",
+      clientMode: "desktop-continuous",
+    });
+    // send 是独立的激活触发器：这次激活**先于**首屏收口完成（生产冷启的同一顺序）。
+    const sendPromise = gateway.handleCommand(commandEnvelope("sendText", { text: "继续" }));
+    await waitFor(() => calls.resume >= 1, "激活必须先发生（K6 的前提）");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(
+      stub.options.filter((option) => option.fullMaterialization === true).length,
+      0,
+      "激活完成时首屏还没收口 ⇒ 此刻不该有任何升级（降级事实尚未写入）",
+    );
+    assert.ok(
+      debugLines.some((line) => line.includes("reason=notDegraded trigger=runtimeActivated")),
+      "激活分支的早退必须留可检索的信号（旧实现是完全静默）",
+    );
+
+    stub.release();
+    await subscribePromise;
+    await sendPromise;
+    await waitFor(
+      () => stub.options.filter((option) => option.fullMaterialization === true).length === 1,
+      "首屏收口后必须由 second trigger 把升级排上",
+    );
+    await waitFor(
+      () => debugLines.some((line) => line.includes("v4 projection upgrade applied")),
+      "升级必须真的跑完（不只是排队）",
+    );
+    assert.equal(calls.resume, 1, "升级不得二次 resume");
+  } finally {
+    gateway.dispose();
+  }
+});
+
+test("K7: 激活未就绪时首屏收口只登记不排（deferred），激活时补排且只排一次", async () => {
+  const { host, calls } = gatewayFixture({ shellPort: true });
+  const stub = degradedLoadStub();
+  const debugLines = [];
+  host.onDebug = (message) => debugLines.push(String(message));
+  host.loadPersistedEvents = async (sessionId, messages, options) => {
+    calls.load += 1;
+    return await stub.load(sessionId, messages, options);
+  };
+  const gateway = new ConversationV4Gateway(host);
+  try {
+    await gateway.subscribe({
+      topic: `conversation/${SESSION_ID}`,
+      connectionId: "conn-k7a",
+      clientMode: "desktop-continuous",
+    });
+    // 收口时 runtime 还没起（record 只是外壳）→ 只登记，不排。
+    assert.ok(
+      debugLines.some(
+        (line) =>
+          line.includes("v4 projection upgrade deferred") &&
+          line.includes("reason=runtimeNotReady") &&
+          line.includes("trigger=firstScreenSettled"),
+      ),
+      "激活未就绪时必须留下 deferred 信号（这曾经是整条升级消失的时刻）",
+    );
+    assert.equal(
+      stub.options.filter((option) => option.fullMaterialization === true).length,
+      0,
+      "激活未就绪时不得起全量读（读不到 usage/fileChanges，只会换来一份更差的投影）",
+    );
+
+    const fullLoads = () =>
+      stub.options.filter((option) => option.fullMaterialization === true).length;
+    await gateway.handleCommand(commandEnvelope("sendText", { text: "继续" }));
+    await waitFor(() => fullLoads() === 1, "激活成功后必须补排这次升级");
+    // 再发一次：激活已就绪、flag 已消费、升级已完成 ⇒ 不再排第二次。
+    await gateway.handleCommand(commandEnvelope("sendText", { text: "再来" }));
+    await new Promise((resolve) => setTimeout(resolve, 40));
+    assert.equal(fullLoads(), 1, "升级只做一次（flag 消费 + 在飞登记两道幂等，不许重复排）");
+    assert.equal(
+      debugLines.filter((line) => line.includes("v4 projection upgrade applied")).length,
+      1,
+      "applied 只允许出现一次",
+    );
+  } finally {
+    gateway.dispose();
+  }
 });
 
 // ── L: UI 侧（Step 10）──────────────────────────────────────────────────────

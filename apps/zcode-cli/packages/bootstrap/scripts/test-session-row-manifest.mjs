@@ -1853,7 +1853,7 @@ function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManife
     baseTimestampMs,
   };
 
-  const calls = { resume: 0, load: 0, pages: [] };
+  const calls = { resume: 0, load: 0, fullLoads: 0, pages: [] };
   let activated = false;
   const { host, captures } = stubGatewayHost({
     readRowManifest: async () => ({
@@ -1873,8 +1873,12 @@ function pagedGatewayFixture({ turnCount = 10, windowTurns = 3, onPlan, onManife
     activated = true;
     return { status: "resumed" };
   };
-  host.loadPersistedEvents = async () => {
+  host.loadPersistedEvents = async (_sessionId, _messages, loadOptions) => {
     calls.load += 1;
+    // Step 15 起「激活先完成」的顺序也会在首屏收口后排一次全量升级（本夹具的
+    // loadPersistedEvents 对升级返回同一份窗口事件，因此投影不会变成全量）。
+    // 升级不是冷开：断言必须能把「翻页触发的读」和「一次升级读」分开。
+    if (loadOptions?.fullMaterialization === true) calls.fullLoads += 1;
     return {
       events: windowEvents,
       synthesized: true,
@@ -1981,7 +1985,11 @@ test("M1: 冷窗后逐页翻到顶 —— 每页与全量物化逐值相等，�
       "翻到顶后的行集合必须与全量物化的窗口以上部分逐值相等",
     );
     assert.equal(calls.pages.length, 4, "每页一次物化（21 行 / 6 行 = 4 页）");
-    assert.equal(calls.load, 1, "翻页不得触发第二次冷开（loadPersistedEvents 只跑一次）");
+    assert.equal(
+      calls.load - calls.fullLoads,
+      1,
+      "翻页不得触发第二次冷开（只有首屏那一次非升级读）",
+    );
     assert.equal(calls.resume, 1, "翻页不得再激活 runtime");
     const outcome = gateway.getRowPageOutcome(SESSION_ID);
     assert.equal(outcome.applied, true);

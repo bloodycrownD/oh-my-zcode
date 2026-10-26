@@ -4113,7 +4113,7 @@ export class ConversationV4Gateway {
         // **必须在激活本体之后**（激活前没有 record，全量读也拿不到 usage/fileChanges），
         // 且 fire-and-forget（激活的读数是「本体耗时」，不能被这次重读污染；send 类命令
         // 也不该为它多等一份全量正文）。
-        this.scheduleProjectionUpgrade(sessionId);
+        this.scheduleProjectionUpgrade(sessionId, "runtimeActivated");
         return persistedMessages;
       } catch (error) {
         // 失败不驻留：并发加入者手里仍有同一个 promise（看到同一个错误），但表里清掉，
@@ -4136,6 +4136,22 @@ export class ConversationV4Gateway {
    * activateRuntime`），**不得**在这里再 `createRecord` / `app.resume`：那是双 resume
    * 的来源（幽灵 runtime 前科），而本函数只做投影侧的重新水化。
    *
+   * **两个触发点，互不依赖先后**（Step 15 修的 bug）：激活成功分支与
+   * `performHydration` 收口各调一次。旧实现只在激活分支调一次，于是两条顺序里只有
+   * 「先窗口化 hydrate 收口、后激活」会升级；「激活先完成」（app 冷启的最常见路径：
+   * journal 读入口在点击前就 `await ensureRuntimeReady`）时读到的
+   * `degradedFirstScreen` 还是空的，早退之后**没有任何重试入口**，投影永久停在降级窗口
+   * ——不报错、`totalCount` 还由 manifest 给，所以没人会发现。
+   *
+   * 两个幂等边界：
+   *   ① 「欠一次升级」是**集合事实**（`degradedFirstScreen`），谁先到谁消费（`delete`
+   *      之后即不再排）；后到的调用看到 flag 已消费 → 只留一条 debug 行，不重复排；
+   *   ② 升级在飞期间 `projectionUpgrades` 有登记，再次调用直接早退（同一会话同时只允许
+   *      一份升级，否则两次 `forceRebuild` 会互相吞掉）。
+   *
+   * 激活未完成时**不排**、也不消费 flag（升级必须读得到 runtime 侧的 usage/fileChanges，
+   * 激活前读只会得到空全量投影，等于把降级投影换成一份更差的）；等激活分支来排。
+   *
    * fire-and-forget：失败只记账（下一次冷开会按当时的 record 形态重新判定），
    * 绝不把失败回传给已经成功的激活调用方。
    *
@@ -4145,10 +4161,34 @@ export class ConversationV4Gateway {
    *
    * 耗时只进 debug：升级是激活之后的一次全量正文读，不在 `openPhases` 里（`materializeMs`
    * 仍缺席，Step 7 的口径不变），这里是它唯一的读数（Step 14 要量化就看这条行）。
+   * 每一次早退也各留一条 debug（`reason=notDegraded|runtimeNotReady|inFlight`）：
+   * 升级静默缺席过一次，不能再让「没升级」和「不需要升级」只有一个现象。
    */
-  private scheduleProjectionUpgrade(sessionId: string): void {
+  private scheduleProjectionUpgrade(
+    sessionId: string,
+    reason: "runtimeActivated" | "firstScreenSettled",
+  ): void {
     if (this.disposed) return;
-    if (!this.degradedFirstScreen.has(sessionId)) return;
+    if (this.projectionUpgrades.has(sessionId)) {
+      this.host.onDebug?.(
+        `v4 projection upgrade skipped session=${sessionId} reason=inFlight trigger=${reason}`,
+      );
+      return;
+    }
+    if (!this.degradedFirstScreen.has(sessionId)) {
+      // 本次首屏不是降级投影（全量物化 / live publisher 早退）：不欠升级。
+      this.host.onDebug?.(
+        `v4 projection upgrade skipped session=${sessionId} reason=notDegraded trigger=${reason}`,
+      );
+      return;
+    }
+    if (!this.isRuntimeReady(sessionId)) {
+      // flag 保留：激活分支（`trigger=runtimeActivated`）会再来一次。
+      this.host.onDebug?.(
+        `v4 projection upgrade deferred session=${sessionId} reason=runtimeNotReady trigger=${reason}`,
+      );
+      return;
+    }
     // 先消费事实：升级只做一次，失败不自动重试（重试条件应该是「下一次冷开」而不是轮询）。
     this.degradedFirstScreen.delete(sessionId);
     const startedAt = performance.now();
@@ -4458,25 +4498,42 @@ export class ConversationV4Gateway {
         at: Date.now(),
       });
     }
-    publisher.rehydrate(loaded.events, {
-      // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
-      // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
-      // 后续持久 TurnError/TurnComplete，使冷快照停在最后一个可恢复边界。
-      onPayloadTooLarge: (error) =>
-        this.host.onError?.("v4.hydrate.payloadTooLarge", error, {
-          phase: "publisher.rehydrate",
-          sessionId,
-        }),
-      // 冷窗口的 rowId 起点（IS1）：全量物化恒为 1（不出现在这里）。
-      // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
-      // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
-      ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
-      // 窗口的上一轮模型基线：与 rowIdOrigin 同一个播种时机，漏了会让窗首那一轮的
-      // `modelChange` marker 消失（窗内 rowId 整体前移 1）。
-      ...(loaded.synthesisModelBaseline === undefined
-        ? {}
-        : { modelBaseline: loaded.synthesisModelBaseline }),
-    });
+    // Step 15：升级（同一条 active 分支的窗口投影 → 全量投影）不能让读入口在
+    // `rehydrate` 到 `hydrateRowManifest` 之间看到「没有清单」——那段里 `rowsRange` 的
+    // 缺页判定会读到 `facts === null`，于是窗口以上的区间不再走按需物化、直接返回空页
+    // （实测：升级一旦在首屏收口后立刻启动，M1/M4/M5 的翻页全部退化成空页）。
+    // 清单事实是**分支级**的（totalCount / firstRowId / rowId base / turnDirectory），
+    // 升级不换分支、不换代次，所以旧事实在这段过渡里仍然成立；等 `hydrateRowManifest`
+    // 算完新事实再覆盖。只在升级路径带（`forceRebuild` + `fullMaterialization`），
+    // 其它 rehydrate（新代次 / 新会话）必须继续按「旧基线一律失效」清掉。
+    const isUpgrade = forceRebuild === true && loadOptions.fullMaterialization === true;
+    const carriedManifestFacts = isUpgrade ? publisher.getRowManifestFacts() : null;
+    try {
+      publisher.rehydrate(loaded.events, {
+        // 恢复时 transcript/event store 可能仍含运行期已拒绝的超大正文。不能让同一事实
+        // 在 CLI 重启后再次把 subscribe 卡死；跳过该不可传输 projection event，继续归约
+        // 后续持久 TurnError/TurnComplete，使冷快照停在最后一个可恢复边界。
+        onPayloadTooLarge: (error) =>
+          this.host.onError?.("v4.hydrate.payloadTooLarge", error, {
+            phase: "publisher.rehydrate",
+            sessionId,
+          }),
+        // 冷窗口的 rowId 起点（IS1）：全量物化恒为 1（不出现在这里）。
+        // 播种点必须在「候选投影建好、首次 ingest 之前」——rehydrate 内部就是这么做的；
+        // 放到 rehydrate 之后会因「已有行」直接抛错（刻意的失败模式）。
+        ...(coldWindow === undefined ? {} : { rowIdOrigin: coldWindow.rowIdBase }),
+        // 窗口的上一轮模型基线：与 rowIdOrigin 同一个播种时机，漏了会让窗首那一轮的
+        // `modelChange` marker 消失（窗内 rowId 整体前移 1）。
+        ...(loaded.synthesisModelBaseline === undefined
+          ? {}
+          : { modelBaseline: loaded.synthesisModelBaseline }),
+      });
+    } finally {
+      // 抛出时投影没被换掉（候选在 adopt 之前失败）：旧事实必须跟着旧投影一起留下。
+      if (carriedManifestFacts !== null) {
+        publisher.seedRowManifestFacts(carriedManifestFacts);
+      }
+    }
     // 投影重建（全量事件重放）→ openPhases.rehydrateMs。
     phases.rehydrateMs = Math.max(0, Math.round(performance.now() - rehydrateStartedAt));
     // 代次种子放在 rehydrate 之后：rehydrate 会换掉 projection，而 synthesized transcript
@@ -4609,6 +4666,14 @@ export class ConversationV4Gateway {
     this.markViewReady(sessionId);
     this.publishCurrentSummaryToIndex(sessionId);
     phases.finishedAtMs = performance.now();
+    // Step 15：窗口化 / view-only 首屏**收口**是升级的第二个触发点。
+    //
+    // 只在本次真的记了降级事实时才调（`notDegraded` 那条 debug 由激活分支承担，避免每次
+    // hydrate 都刷一行）。激活已完成的顺序（app 冷启：journal 读入口在点击前就激活）在这里
+    // 就能排上升级；激活尚未完成的顺序由激活分支排。fire-and-forget，不进首帧关键路径。
+    if (this.degradedFirstScreen.has(sessionId)) {
+      this.scheduleProjectionUpgrade(sessionId, "firstScreenSettled");
+    }
     return publisher;
   }
 
