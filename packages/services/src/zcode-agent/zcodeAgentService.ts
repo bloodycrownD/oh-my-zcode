@@ -2230,14 +2230,35 @@ export function createZCodeAgentService(
     return false;
   }
 
+  /**
+   * 只读路径「不等控制面同步」的失败计数（按 workspace）。
+   *
+   * 放行只读路径的代价是失败变得不可见：同步在后台失败时，用户只会看到偏好没生效，
+   * 而打开照常成功。所以每次失败都记一条带 workspace 与次数的 error，并且连续失败达到
+   * 上限后退回等待语义——快不能以「悄悄坏掉」为代价。
+   */
+  const controlPlaneSyncFailures = new Map<string, number>();
+  const CONTROL_PLANE_SYNC_FAILURE_LIMIT = 2;
+
   async function getOrStartReadOnlyClient(
     params: ZCodeAgentWorkspaceTarget,
+    options?: { awaitControlPlaneSync?: boolean },
   ): Promise<ActiveWorkspaceClient> {
+    // 控制面同步（交互偏好 + 动态工作流策略）是**真实 RPC 往返**，走同一条 CLI 命令通道，
+    // 冷开时排在会话运行时激活之后——真机实测 `controlPlaneSyncMs` 1239~1775ms，而
+    // `processManager.getClient` 只有 47~200ms。只读订阅等它 = 白等一整个激活；
+    // 同一 workspace 之后每次打开都是 0ms，慢的永远是「本 runtime 上第一次」。
+    //
+    // 只读路径传 false：立即放行，同步继续在后台推进（幂等）。
+    // 写路径保持 true：允许模型执行前必须先追平偏好，这条原有语义不动。
     const workspaceKey = resolveWorkspaceKey(params);
+    const awaitControlPlaneSync =
+      options?.awaitControlPlaneSync !== false ||
+      (controlPlaneSyncFailures.get(workspaceKey) ?? 0) >= CONTROL_PLANE_SYNC_FAILURE_LIMIT;
     const active = activeClientsByWorkspaceKey.get(workspaceKey);
     if (active && isReusableActiveClientEntry(params, active)) {
       active.workspace = params;
-      await active.interactionPreferencesReady;
+      if (awaitControlPlaneSync) await active.interactionPreferencesReady;
       return active;
     }
 
@@ -2249,7 +2270,7 @@ export function createZCodeAgentService(
     const concurrent = activeClientsByWorkspaceKey.get(workspaceKey);
     if (concurrent && isReusableActiveClientEntry(params, concurrent)) {
       concurrent.workspace = params;
-      await concurrent.interactionPreferencesReady;
+      if (awaitControlPlaneSync) await concurrent.interactionPreferencesReady;
       return concurrent;
     }
 
@@ -2297,17 +2318,42 @@ export function createZCodeAgentService(
       interactionPreferencesReady,
       dynamicWorkflowPolicyReady,
     ]).then(() => undefined);
-    try {
-      // 新建或重启 runtime 在允许任何 session 工作前追平缓存；同步期间的新开关
-      // 会因 entry 已登记而进入同一 workspace 串行队列，不会丢失提交顺序。
-      await entry.interactionPreferencesReady;
-    } catch (error) {
-      if (activeClientsByWorkspaceKey.get(workspaceKey) === entry) {
-        activeClientsByWorkspaceKey.delete(workspaceKey);
+    if (awaitControlPlaneSync) {
+      try {
+        // 新建或重启 runtime 在允许任何 session 工作前追平缓存；同步期间的新开关
+        // 会因 entry 已登记而进入同一 workspace 串行队列，不会丢失提交顺序。
+        await entry.interactionPreferencesReady;
+      } catch (error) {
+        if (activeClientsByWorkspaceKey.get(workspaceKey) === entry) {
+          activeClientsByWorkspaceKey.delete(workspaceKey);
+        }
+        throw error;
+      } finally {
+        delete entry.interactionPreferencesReady;
       }
-      throw error;
-    } finally {
-      delete entry.interactionPreferencesReady;
+    } else {
+      // 只读路径：放行本次调用，同步在后台落地。失败语义不变——仍然摘 entry 让下一轮重建，
+      // 只是不再让「打开会话」为它等待；失败会被计数，达到上限后退回等待语义。
+      void entry.interactionPreferencesReady
+        .then(() => {
+          controlPlaneSyncFailures.delete(workspaceKey);
+        })
+        .catch((error: unknown) => {
+          if (activeClientsByWorkspaceKey.get(workspaceKey) === entry) {
+            activeClientsByWorkspaceKey.delete(workspaceKey);
+          }
+          const failures = (controlPlaneSyncFailures.get(workspaceKey) ?? 0) + 1;
+          controlPlaneSyncFailures.set(workspaceKey, failures);
+          logger.error(undefined, "只读会话控制面同步失败（后台），已摘除 entry 以便重建", {
+            consecutiveFailures: failures,
+            errorMessage: error instanceof Error ? error.message : String(error),
+            fellBackToBlocking: failures >= CONTROL_PLANE_SYNC_FAILURE_LIMIT,
+            workspaceKey,
+          });
+        })
+        .finally(() => {
+          delete entry.interactionPreferencesReady;
+        });
     }
     logger.info(undefined, "为只读会话控制面启动 ZCode agent", {
       workspaceKey,
@@ -2403,7 +2449,9 @@ export function createZCodeAgentService(
       });
       return existingClient;
     }
-    return (await getOrStartReadOnlyClient(params)).client;
+    // 只读调用不为控制面同步等待：那两个同步与「这次订阅看到什么」无关，却走同一条
+    // CLI 命令通道、排在冷开激活之后（真机 1239~1775ms）。后台推进即可。
+    return (await getOrStartReadOnlyClient(params, { awaitControlPlaneSync: false })).client;
   }
 
   async function getPluginManagementClient(): Promise<ZCodeProtocolClient> {
