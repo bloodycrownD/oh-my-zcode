@@ -56,6 +56,9 @@ export async function emitControlOnlyUserTurn(
   // /goal 入口可能早于首次 turn 写入 runtime history；如果先 addUser，
   // 后续 lazy context init 会重建 messageHistory 并冲掉这条真实用户 query。
   await this.ensureContextInitialized(traceContext);
+  // IS7 闸门：这条 query 必须落在**历史之后**（否则模型看到「用户先说话、之前什么都没有」）。
+  // 与 `executeTurn` 同一条闸门，位置同样在 init 之后、任何 history 写入之前。
+  await this.hydrateDeferredMessageHistory(traceContext);
   await this.ensureSessionPersisted(options.titleInput, traceContext);
   // 这类入口本身不走普通 submitPrompt，但它承载的是用户真实意图。这里同时写入
   // runtime history 和 session store，让模型上下文、桌面 continuous、手机 replayable snapshot

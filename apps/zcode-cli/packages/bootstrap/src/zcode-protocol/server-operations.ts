@@ -8,7 +8,11 @@ import { resolveEffectiveBashShellSelection } from "@zcode/adapters/exec";
 import { inputIntentMetadata } from "../zcode-protocol-v4/commands/input-intent.js";
 import { createModelExecutionContext } from "./model-execution.js";
 import type { SendInputOptions } from "../app/types.js";
-import { repairPersistedRemoteSessionPaths, type TurnAttachment } from "@zcode/core";
+import {
+  repairPersistedRemoteSessionPaths,
+  type SessionHistoryMode,
+  type TurnAttachment,
+} from "@zcode/core";
 import {
   CoreErrorType,
   SESSION_ENTRY_TARGET_COMPLETION_VERIFICATION,
@@ -1571,7 +1575,15 @@ const runtimeActivationFlights = new WeakMap<
 export async function activateRuntime(
   context: ZCodeProtocolAgentServerContext,
   shell: MaterializedSessionShell,
-  options: { reusePersistedMessages?: boolean; resumeStartedAt?: number } = {},
+  options: {
+    reusePersistedMessages?: boolean;
+    resumeStartedAt?: number;
+    /**
+     * 历史水化模式（Step 12 / IS7）：v4 的 view-only 激活传 `"none"`——激活只付 readFileState
+     * 与标量，provider 历史由首次发轮前的 core 闸门补。缺省 `"full"`（legacy 语义不变）。
+     */
+    historyMode?: SessionHistoryMode;
+  } = {},
 ): Promise<ActivatedSessionForResume> {
   const { record } = shell;
   if (record.runtimeViewOnlyShell !== true) {
@@ -1599,7 +1611,11 @@ export async function activateRuntime(
 async function activateRuntimeOnce(
   context: ZCodeProtocolAgentServerContext,
   shell: MaterializedSessionShell,
-  options: { reusePersistedMessages?: boolean; resumeStartedAt?: number },
+  options: {
+    reusePersistedMessages?: boolean;
+    resumeStartedAt?: number;
+    historyMode?: SessionHistoryMode;
+  },
 ): Promise<ActivatedSessionForResume> {
   const { record } = shell;
   const resumeStartedAt = options.resumeStartedAt ?? Date.now();
@@ -1609,8 +1625,11 @@ async function activateRuntimeOnce(
     : undefined;
   const resumeResult = await runSessionModelConfigMutation(record.app, async () => {
     const result = persistedMessages
-      ? await record.app.resume({ persistedMessages })
-      : await record.app.resume();
+      ? await record.app.resume({
+          persistedMessages,
+          ...(options.historyMode ? { historyMode: options.historyMode } : {}),
+        })
+      : await record.app.resume(options.historyMode ? { historyMode: options.historyMode } : {});
     // 仅用于首次投影种子，包含有效模型+空档位；它不是第二份可执行 Runtime 选择。
     record.restoredModelSelection = result.modelSelection;
     return result;
@@ -1650,7 +1669,11 @@ async function activateRuntimeOnce(
 export async function activateSessionForResume(
   context: ZCodeProtocolAgentServerContext,
   params: ZCodeSessionResumeParams,
-  options: { reusePersistedMessages?: boolean } = {},
+  options: {
+    reusePersistedMessages?: boolean;
+    /** 透传给 `activateRuntime`；v4 的 view-only 激活用 `"none"`（IS7）。 */
+    historyMode?: SessionHistoryMode;
+  } = {},
 ): Promise<ActivatedSessionForResume> {
   const resumeStartedAt = Date.now();
   context.logger?.debug("ZCode Protocol session resume started", {

@@ -144,16 +144,27 @@ export async function resumeFromStore(
     workingDirectory: this.workingDirectory,
     workspaceRoot: this.workspaceRoot,
   });
-  await this.ensureContextInitialized(traceContext);
-  const hydration = await hydrateMessageHistoryFromSession({
-    artifactStore: this.artifactStore,
+  // Step 12（IS7）：eager context 初始化已移除——MCP / 技能发现 / MEMORY.md 的成本从
+  // 「打开会话」挪到「第一次真正需要 context 的入口」。`turn.ts` 在首次发轮前、
+  // `ensureContextInitialized` **之后**过闸门补全量历史（init 会清空 entries）。
+  const rewindBranchInputs = {
     branchCutAfterMessageId,
-    history: this.messageHistory,
-    messages,
     rewindCreatedMessageId,
     rewindKeptMessageIds,
     rewindTargetMessageId,
-  });
+  };
+  // 懒历史：不在 resume 里水化 provider 历史，只在收尾登记待办；标量（turnNumber /
+  // latestAssistant* / mainTurnCacheHitAggregate）仍在这一层按入参正文算好——它们不依赖
+  // 水化产物，且 `executeTurnCommand` 在闸门之前就要读 turnNumber。
+  const historyHydrationDeferred = options?.historyMode === "none";
+  const hydration = historyHydrationDeferred
+    ? { appliedMessageCount: 0, interruptedToolCount: 0, messageCount: 0, partCount: 0 }
+    : await hydrateMessageHistoryFromSession({
+        artifactStore: this.artifactStore,
+        ...rewindBranchInputs,
+        history: this.messageHistory,
+        messages,
+      });
   announceSessionShellEnvironmentNoticeAfterResume(this, {
     persistedEnvInfo,
     restore: shellRestore,
@@ -246,6 +257,12 @@ export async function resumeFromStore(
     HookEventName.SessionStart,
     sessionStartHookResult.additionalContexts,
   );
+  // 懒历史的登记点在**所有** resume 期 history 写入之后：上面三条（shell 环境提醒 /
+  // 目标状态 / SessionStart hook 上下文）此刻已经落在 messageHistory 里，闸门会先
+  // init（清空）再 hydrate，必须靠这份快照把它们按原顺序补回。
+  if (historyHydrationDeferred) {
+    this.deferHistoryHydration(rewindBranchInputs);
+  }
 
   if (messages.length > 0 && activeMessages.length === 0) {
     this.logger?.warn("Session resume produced zero active messages", {
@@ -263,7 +280,12 @@ export async function resumeFromStore(
       rewindTargetMessageId,
     });
   }
-  if (activeMessages.length > 0 && hydration.appliedMessageCount === 0) {
+  // 懒历史下「一条都没应用」是设计本身，不是异常：这条告警只在真的水化了却应用为零时才有意义。
+  if (
+    historyHydrationDeferred === false &&
+    activeMessages.length > 0 &&
+    hydration.appliedMessageCount === 0
+  ) {
     this.logger?.warn("Session resume applied zero history messages", {
       ...traceContextToLogContext(traceContext),
       activeMessageCount: activeMessages.length,
@@ -284,6 +306,10 @@ export async function resumeFromStore(
     appliedMessageCount: hydration.appliedMessageCount,
     directory: session.directory,
     event: "session.resumed",
+    // 懒历史下 messageCount / partCount / appliedMessageCount 均为 0 是**预期**：它们量的是
+    // 「这次 resume 水化了多少」，这一次确实一条都没水化（闸门会在首次发轮前补，另有一条
+    // `session.history.lazy_hydrated` 记账）。判读时不要把它读成「会话没有历史」。
+    historyMode: historyHydrationDeferred ? "none" : "full",
     interruptedToolCount: hydration.interruptedToolCount,
     messageCount: hydration.messageCount,
     module: "core.runtime",

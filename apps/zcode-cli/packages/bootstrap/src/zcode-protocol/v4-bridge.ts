@@ -1678,7 +1678,13 @@ export function createConversationV4Gateway(
           ...(workspace ? { workspace } : {}),
           ...(resumeThoughtLevel ? { thoughtLevel: resumeThoughtLevel } : {}),
         },
-        { reusePersistedMessages: true },
+        {
+          reusePersistedMessages: true,
+          // Step 12（IS7）：v4 的激活只服务「看」与后续命令，provider 历史由首次发轮前的
+          // core 闸门补。这里必须传 `"none"`——否则激活又要付 O(active × parts) 的水化，
+          // 那正是 lazy history 要摘掉的那一段。正文仍读一次（readFileState 与投影都要它）。
+          historyMode: "none",
+        },
       );
       return {
         status: "resumed",

@@ -358,6 +358,38 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 | 与既有口径的关系 | ①升级与首轮 send 的并发（risk 16）本步**没有改变**：升级仍是 fire-and-forget，读入口让路只是让翻页不再等它；②两份 runtime 态读数（risk 17）本步未触碰：`readableViewPublisher` 不读 `conversationState`，不是第三份读数；③live 期间用清单翻页（risk 15 未做部分）仍不在范围内，`hasMore:false` 不变 | 不得把 `readableViewPublisher` 的结论当成 runtime 事实（它只说「投影可读」）；`availability.sessionRuntime` 仍只由 `isRuntimeReady` / `viewReadySessions` 判 |
 | 本步钉住的测试 | `test:view-runtime-split` 40 → **43**（M1：view-only 期三次翻页 + 重订 + 升级后两次翻页，外壳恒 1、正文读 1→2；M2：升级在飞时翻页 <300ms 返回且不起第二份 hydration，并校验 debug 行的 `upgradeMs`；M3：撤销 hydrated 水位后读入口重读）。变异探测 4 项全部按预期打红（两个早退调用点各一项、`∨ projectionUpgrades`、debug 行）并 md5 字节级还原 | 变异探测不得削弱：删任一早退 → M1/M2 红；删 `∨ projectionUpgrades` → M2 红；判定退化成「只看 viewReadySessions」→ M3 红 |
 
+#### Step 12 落地说明（实现后回填，Step 13+ 直接按此接）
+
+| 事项 | 落地形态 | Step 13+ 必须遵守 |
+|---|---|---|
+| `historyMode` 的口径 | `ResumeSessionOptions.historyMode?: "full" \| "none"`，缺省 `"full"`（**行为逐行不变**）。`"none"` 只做两件事的减法：不跑 `hydrateMessageHistoryFromSession`（O(active × parts) + user part 逐条 artifact I/O），并把推迟的输入登记成 `DeferredHistoryHydration`（rewind 四字段 + resume 期已写进 history 的条目快照） | 没有 `"tail"` 档（`init()` 会清 entries，tail 产物必被抹掉）；新增档位前先读 `methods/history-hydration.ts` 的三条顺序约束 |
+| resume 不再 eager 初始化 context | `resume.ts` 删掉 `await this.ensureContextInitialized(traceContext)`（**所有模式**）：MCP 启动 / 技能发现 / MEMORY.md 装载挪到「第一次真正需要 context 的入口」（`turn.ts` 的 `context_initialization`、`getSkillCatalog`、control-only 轮等，各自已有 ensure 调用）。`contextInitialized` 因此在 resume 之后是 `false`，**这是预期** | 任何「resume 完 context 就绪」的假设都不成立；需要 context 的入口必须自己 `ensureContextInitialized`（现有 6 个调用点已覆盖） |
+| `init()` 改为「前置 context 前缀」 | `initializeMessageHistoryFromContext` 不再整份替换：`preserved = messageHistory.toRuntimeEntries()`，`init([...contextEntries, ...preserved])`。理由：不 eager 初始化之后，全量水化的历史（`"full"`）会先落进 history，原语义 `init()` 会把它们清空。`contextInitialized` 守卫保证只发生一次，因此不会出现两份前缀 | 不得退回 `init(contextEntries)`；不得给 `init` 传已含 context 前缀的 entries（会出现两份前缀——现有唯一调用点在 `ensureContextInitialized` 内，受 guard 保护） |
+| 登记点（defer） | resume 收尾、**三条 resume 期 history 写入之后**（shell 环境提醒 / target 状态 / SessionStart hook 上下文）调用 `deferHistoryHydration(rewindBranchInputs)`：快照这批条目后又 `messageHistory.init()` 把它们从活着的 history 里摘掉 | 追加任何 resume 期写 history 的步骤都必须排在 defer 之前（否则那条会留在 `context → 提醒 → 历史` 的错误位置，T-SL13 会红） |
+| 发送闸门 | `history-hydration.ts` 的 `hydrateDeferredMessageHistory(traceContext)`：早退（无待办）→ `ensureContextInitialized`（init 前置 context）→ **重读一次** `sessionStore.messages()` → `hydrateMessageHistoryFromSession` → `addEntries(resumeEntries)` → 清待办 + 一条 info（`session.history.lazy_hydrated`，带 `durationMs` / 计数）。调用点两处：`turn.ts`（`context_initialization` 之后、`session_start_hooks` 之前）与 `emitControlOnlyUserTurn`（init 之后、`addUser` 之前） | 顺序三条不可换：init 早于 hydrate；hydrate 早于 resume 期条目回填；闸门早于 startup hooks。任何新的「把历史交给模型」的入口都必须过闸门（当前 background-notifications / subagent-messages / goal-state-reminder 只能由已起轮或已 live 的 runtime 触发，故不设第三处） |
+| 重读而非复用入参 | 闸门**不复用** resume 的 `persistedMessages`（激活时刻的快照），而是在首次发送时重读 store：语义上「发送才需要完整历史」，代价是首轮多一次全量正文读 | Step 14 必须同时记录「首发送 → 首 token」，否则会把这次读与 eager init 后移的成本藏起来（risk 4） |
+| view-only 接线 | `activateRuntime` / `activateSessionForResume` 新增可选 `historyMode`，透传 `record.app.resume({ persistedMessages, historyMode })`；`v4-bridge.resumePersistedSession` 传 `"none"`（legacy `session/resume` 与 `prepareResume` 保持缺省 `"full"`） | 新增「激活 view-only 会话」的入口必须同样传 `"none"`；反过来 legacy 路径不得传（它返回的 snapshot 立刻要读全文） |
+| rewind 的清理 | `rebuildConversationDerivedState` 自己做完整水化，因此同时 `clearDeferredHistoryHydration()` | 任何新的完整水化路径都要调它，否则首次发轮的闸门会在新分支上再追加一份历史 |
+| resume.ts 的剩余全量输入核对表 | 逐条结论见下表。**改了的两条**：`ensureContextInitialized`（删）、`hydrateMessageHistoryFromSession`（`"none"` 下推迟）；**结论为「不吃 messages / 只吃 info」而保留的**：其余各行 | 新增以全量 messages 为输入的 resume 步骤必须进这张表并写明「保留 / 推迟 / 改窄读」三选一 |
+| 观测口径 | lazy resume 的 `SessionResumed` 与 `session.resumed` 日志里 `messageCount` / `partCount` / `appliedMessageCount` **都是 0**，日志新增 `historyMode: "none"`；闸门补做时有独立的 `session.history.lazy_hydrated`。`openPhases` / `openTiming` 不新增键（ACK 在激活之前，闸门成本不在其中） | 判读时不得把「resume 水化 0 条」读成「会话没有历史」；闸门成本只看 `session.history.lazy_hydrated.durationMs` 与 Step 14 的「首发送 → 首 token」 |
+| 本步钉住的测试 | 新增 `test:lazy-history`（core，8 例）：L1 两条路径的 provider 历史逐字节相等（T-SL13 本地版）、L2 init 不吃已有条目、L3 无待办纯早退、L4 init→读正文→水化顺序、L5 补回顺序 + 待办只消费一次、L5b 完整水化清待办、L6/L7 源码守卫（resume 无 eager init、闸门位置、v4 传 `"none"`）。变异探测 11 项全部按预期打红并 md5 字节级还原 | 变异探测不得削弱：删 `addEntries(resumeEntries)` / 去早退 / 换 init 与 hydrate 顺序 / defer 不摘 history / resume 恢复 eager init / bridge 不传 `"none"` 各对应一条红 |
+
+**Step 12 的 resume.ts 核对表（逐个以全量 messages 为输入的剩余步骤）**
+
+| 步骤 | 输入 | 结论 |
+|---|---|---|
+| 全量 messages 读（`options.persistedMessages ?? store.messages()`） | 正文 | **保留**：readFileState 水化、`envInfo`、下方全部标量、以及 v4 投影都吃这份结果；本步不动读放大（窗口化在 bridge 侧） |
+| `hydrateReadFileStateFromSession` | 正文 | **保留**（spec 明确：readFileState 留在 resume） |
+| `ensureContextInitialized` | 无（但贵） | **删除**（挪到 turn 起点/首个需要 context 的入口） |
+| `hydrateMessageHistoryFromSession` | 正文 + parts | **`"none"` 下推迟**到闸门；`"full"` 下原位不动 |
+| `restoreWorkspaceCheckpointEntries` / `restoreWorkspaceFileRewindEntries` | eventStore（非 messages） | 保留，不在本步范围 |
+| `runSessionStartHooks("resume")` | 无 | 保留（语义是「会话被打开」），其 `additionalContexts` 的 history 写入走 defer 快照 |
+| `turnNumber` / `latestAssistantMessageId` / `latestAssistantTurnId` / `lastAssistantCompletedAtMs` / `latestConversationMessageId` | 正文 `info`（**不读 parts**） | **保留在 resume**：`executeTurnCommand` 在闸门之前就要读 `turnNumber`（`TurnMachine` / trace 属性），推迟会让首轮编号错位 |
+| `mainTurnCacheHitAggregate` | 正文 `info.tokens`（不读 parts） | 保留（同上；它不依赖水化产物） |
+| `discardPersistedPendingSteerInputs` | **不吃 messages**（`rebuildProjection` 读内存事件账本 + `listSessionInputs`） | 不改（核对结论：与全量正文无关） |
+| `syncPersistedSessionTitleForResume` | **不吃 messages**（`restoredEvents` + session 行） | 不改（核对结论） |
+| `extractPersistedEnvInfo` | 首个带 `contextSnapshot.envInfo` 的 user `info` | 保留（不读 parts） |
+
 ### phase-paged-materialization（IS1 + IS2 + IS6）
 
 - **`readSessionMessagesTail` 必须是分支感知的**：签名 `readActiveBranchTail({ sessionId, activeMessageIds, limitBefore })`——先用 manifest + 索引算出 active 序列，再按**消息区间**读正文（message + part 两段查询，避免 N+1）。原设计的「按 `time_created desc` 取 N 条再裁断」对 revert 过的会话会得到空历史或复活旧分支。
@@ -538,6 +570,8 @@ apps/zcode-cli/packages/bootstrap/scripts/
 16. **激活后的全量升级是 fire-and-forget，可能与首轮 send 并发**（Step 10 登记的 new_risk）：`scheduleProjectionUpgrade` 不 await（否则激活的读数和 send 的时延都会被一次全量正文读污染），于是最坏形态是「用户一看到历史就发第一条消息」时，升级的 `rehydrate` 与这一轮事件同时发生。安全性依赖既有的 hydration buffer + `sourceEventSeq` 尾部重放（N/N+1 乱序、已 ingest 事件按 eventId 去重）；现象面只可能是短暂的行重排（订阅者被 resync 成新快照），不会写坏数据。若 Step 13 端到端观测到流式行回退，回退点是把升级从「激活成功即排」改成「首个 turn 结束后再排」（语义上仍满足「激活后补齐」，只是延后）。行为锚点：`test-view-runtime-split` K2（一次全量读、不二次 resume）。
 17. **两份 runtime 态读数并存且语义不同**（Step 10 登记）：协议字段 `availability.sessionRuntime`（网关按 `isRuntimeReady`/`viewReadySessions` 判，view-only 报 `viewOnly`）与 `openTiming.sessionRuntimeState`（`conversationState` 的产物，view-only 报 `"cold"`）。两者的取值域、写入点、消费方都不同；**不得互相校验**，也不得用后者代替前者做 UI 门禁。Step 14 判读时必须注明这一点，避免把「字段说 viewOnly、openTiming 说 cold」当成不一致。
 18. **读入口的早退依赖两个内存事实同时成立**（Step 11 登记）：`readableViewPublisher` = `viewReadySessions` ∧ 投影在 ∧（`hydratedSessions` ∨ 升级在飞）。三者分属三个写入点（`markViewReady` / `publishers` / `scheduleProjectionUpgrade`），将来任何人只清其中一个（例如「为了让下次重读而删 `hydratedSessions`」却顺手把 `viewReadySessions` 也删了）都会让读路径在「可读」与「该重读」之间做出错误判断——现象是翻页 404 或把缺段投影钉住，两者都不报错。升级成本只有一条 debug 行（`v4 projection upgrade applied … upgradeMs=`）：Step 14 若统计不到它，不能据此断定「升级没发生」。行为锚点：`test-view-runtime-split` M1-M3。
+19. **「provider 历史已水化」变成了一个水位，而不是 resume 的副产品**（Step 12 登记，最高）：`historyMode:"none"` 之后，`messageHistory` 在 resume 结束时是**空的**，内容存在 `deferredHistoryHydration` 里等闸门补。因此任何「直接往 history 写/直接读 history」的入口都必须排在闸门之后，否则现象是**静默错序**：新写入的条目落在历史**前面**（模型看到「用户先说话、之后才是历史」）。当前只有两处闸门（`turn.ts`、`emitControlOnlyUserTurn`），其余写点（background-notifications / subagent-messages / goal-state-reminder / turn 内的 hooks / steering / plugin-reference）都只能由「已起轮或已 live」的 runtime 触发。新增入口必须先问：它能在首次发轮之前跑吗？能，就必须过闸门。行为锚点：`test:lazy-history` L1/L4/L5/L7。
+20. **懒历史把成本搬到了首轮，且是两次独立成本**（Step 12 登记）：①eager context init（MCP/技能/MEMORY.md）移到首个需要 context 的入口；②闸门在首次发送时**重读一次全量正文**（不复用激活时的入参）。两者都落在「用户按下发送」到「首 token」之间，而 `openPhases` / `openTiming` 都量不到（ACK 在激活之前）。Step 14 必须同时记录「首发送 → 首 token」，并注意 lazy resume 的 `SessionResumed` / `session.resumed` 里 `messageCount` / `partCount` / `appliedMessageCount` **恒为 0 是预期**（`historyMode:"none"`），不能读成「会话没有历史」。
 
 ### 回滚
 
