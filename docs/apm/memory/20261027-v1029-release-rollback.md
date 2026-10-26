@@ -1,8 +1,8 @@
 ---
-date: 2026-10-27 00:50
-title: v1.0.29 发版：回滚 A/B/C，只保留两项真机验证有效的性能修复
-keywords: v1.0.29, 回滚, 会话打开慢, 文件变更摘要缓存, 控制面同步, 假绿, 陈旧 dist
-abstract: v1.0.28 的三条改造（编辑重发 A / MC 插件化 B / 会话打开 C）被用户否决——A 在真机仍复现原症状，还引入了「排队命令不再自动发送」的确定性回归。最终以 v1.0.27 为基线重做，只带入 C 与两项被真机数据证明有效的性能修复（文件变更摘要持久缓存、只读路径不等控制面同步），main 移到发布提交，全链 466 条 0 红。
+date: 2026-10-27 02:30
+title: v1.0.29 回滚发版，v1.0.30 修掉编辑重发旧文本（MC source 回放）
+keywords: v1.0.29, v1.0.30, 回滚, 会话打开慢, 文件变更摘要缓存, 控制面同步, 编辑重发, magic-context, source_contents, tag 位置身份, 陈旧 dist
+abstract: v1.0.28 的三条改造（编辑重发 A / MC 插件化 B / 会话打开 C）被用户否决——A 在真机仍复现原症状，还引入了「排队命令不再自动发送」的确定性回归。先以 v1.0.27 为基线发 v1.0.29，只带入 C 与两项性能修复。随后用探针查到「编辑后仍发旧消息」的真根因：Magic Context 的 tag 身份是位置、`source_contents` 在 rewind 后回放旧正文。修复后发 v1.0.30。
 ---
 
 user:
@@ -80,3 +80,22 @@ v1.0.29 已发：tag 推送，main 指向发布提交 `7bce4a69`（A/B/C 从 mai
 3. **「只在队列空时复位 autoDrain」把偶发竞态换成了确定性卡死**：stop 且队列非空写 false，而复位点只有四个（删空/手动暂停继续/立即发送/rewind 级联），「用户新发一条」不在其中 → 之后永不自动放行。取舍做错的方向是：闸门该管「谁先起跑」，不该管「能不能起跑」。
 4. **陈旧构建产物会长成假故障**：`packages/shared/dist` 源码改了不重建，症状是「源码有导出、运行期说没有」。
 5. **回滚用整体 diff，不逐个 cherry-pick**：内部自我推翻的提交系列会在每个推翻点制造 modify/delete 冲突。
+
+user:
+恢复记忆，然后修「编辑框发送的消息是历史消息」。还是老方法先打日志。
+
+assistant:
+加了 UI/CLI/core 三层只读探针（文本指纹 + 落库查询），在 dev 版复现拿到证据链：UI 提交、CLI admission、rewind、起轮、落库全是新文本，只有 provider 请求的最后一条 user 是旧文本（带 MC 的 `§N§` 前缀）。根因不在执行侧，也不在 spec A 覆盖的五条不变式：Magic Context 的 tag 身份是位置（宿主投影 `mc<ordinal>`），`source_contents[tagId]` 缓存打 tag 前的原文，每个 pass 无条件回放；编辑重发（rewind）让同一位置换成另一条消息后，新正文被旧缓存覆盖。修复：`tag-messages.ts` 改为「持久原文与入站正文一致才恢复，不一致以入站为准并 upsert 纠正」；补 `test:transform` b5（同位置 `123→789`，断言 wire 为 `§N§ 789`，另加跨 pass 字节稳定对照）。
+
+user:
+没问题，合并后发布吧。
+
+assistant:
+清掉全部探针，只留 MC 修复 + 回归 + spec 根因修订。门禁：MC `test:all` 全绿、根 typecheck、根 lint 0 error、`test:v4-perf` REAL_EXIT=0（0 条 `not ok`、无 `# fail [1-9]`）。发现本地 `main` 还停在回滚前的 77b2ff2a，而 `origin/main` 已到 8669819a——先备份旧 main 到 `backup/main-before-v1030`，再把本地 main 重置到 origin/main 并 ff 合入修复。发布提交 `chore(release): v1.0.30`，tag `v1.0.30` 已推送，`main` 已同步；Release Desktop 工作流 in_progress（v1.0.29 的同一工作流此前 failure：mac 两 job cancelled、资产未挂上，需留意新版本结果）。
+
+## 本轮沉淀
+
+6. **「先打日志」要打到能区分层的粒度**：同一个症状在 UI/CLI/落库/模型四层各打一个文本指纹，一次复现就能判定是哪一层把文本换掉，避免再去猜触发器。
+7. **文本长度不能当判据**：`123` 与 `321` 都是 3 字符，只打 `inputLength` 会把「模型读到旧消息」掩盖成「一切正常」，必须用 hash + 首尾片段。
+8. **根治要找到「谁在覆盖内容」**：spec A 的五条不变式都在保证「哪条输入被执行」，而这次是 MC 在 provider 历史组装阶段用缓存覆盖正文——正确的问题不是「新文本有没有被发出」，而是「模型最终看到的正文来自哪里」。
+9. **本地 main 可能落后于 origin/main**：发布后核对 `git rev-parse main origin/main`，不要假设本地分支跟着走了。
