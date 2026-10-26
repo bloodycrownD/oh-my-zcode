@@ -249,6 +249,20 @@ interface PersistedEventsLoadResult {
   viewOnlyHydration?: boolean;
 }
 
+/**
+ * 「宿主没有持久读取能力」的读结果：**真的没有持久事实**（旧宿主 / 最小夹具）。
+ *
+ * 它与「读失败」在 `events` / `sourceEventSeq` 两个字段上完全同形，语义却相反：
+ * 前者是**权威的空**（没有任何持久事实可读），后者是**未知**（本来该有，但这次没读到）。
+ * 未知不得覆盖已知——两者的分流点只有 `performHydration` 里那一个 `loadFailed` 判定，
+ * 所以这里的常量**只能**用在「确实没有」的位置（`loadPersistedEvents` 缺席）。
+ */
+const NO_PERSISTED_EVENTS: PersistedEventsLoadResult = {
+  events: [],
+  synthesized: false,
+  sourceEventSeq: 0,
+};
+
 type V4GatewayErrorContext = Record<string, unknown>;
 
 /**
@@ -4143,11 +4157,19 @@ export class ConversationV4Gateway {
     void upgrade
       .then(
         () => {
+          const upgradeMs = Math.max(0, Math.round(performance.now() - startedAt));
+          if (!this.hydratedSessions.has(sessionId)) {
+            // 持久读取失败（`keepProjectionAfterLoadFailure` 刻意不登记水位）：投影被**保留**、
+            // 不是被升级。这条行不能说 "applied"——Step 14 的量化只读它，谎报一次「很快的升级」
+            // 会把一次读故障读成一次性能改善。
+            this.host.onDebug?.(
+              `v4 projection upgrade skipped session=${sessionId} reason=loadFailed ` +
+                `upgradeMs=${upgradeMs}`,
+            );
+            return;
+          }
           this.host.onDebug?.(
-            `v4 projection upgrade applied session=${sessionId} upgradeMs=${Math.max(
-              0,
-              Math.round(performance.now() - startedAt),
-            )}`,
+            `v4 projection upgrade applied session=${sessionId} upgradeMs=${upgradeMs}`,
           );
         },
         (error: unknown) => {
@@ -4326,21 +4348,19 @@ export class ConversationV4Gateway {
         `persistedMessages=${String(persistedMessages?.length ?? 0)}`,
     );
     const mergeStartedAt = performance.now();
+    // 读失败必须与「读到空」分开：两者过去共用同一个空结果，于是一次抛错被当成
+    // 「持久事实变少了」——rehydrate 空事件把投影清空、`sourceEventSeq: 0` 把 raw 游标
+    // 打回起点，之后每个 live 事件都卡在「等 seq=1」的 gap 上（静默停摆到重开）。
+    // `loadFailed` 只在本方法内部消费，宿主契约不变。
+    let loadFailed: unknown = null;
     const loaded: PersistedEventsLoadResult = this.host.loadPersistedEvents
       ? await this.host
           .loadPersistedEvents(sessionId, persistedMessages, loadOptions)
-          .catch((error) => {
-            this.host.onError?.("v4.hydrate", error, {
-              durationMs: Math.max(0, Math.round(performance.now() - hydrationStartedAt)),
-              existingPublisherAtStart: existingAtStart !== undefined,
-              liveSessionAtStart,
-              phase: "loadPersistedEvents",
-              persistedMessages: persistedMessages?.length ?? 0,
-              sessionId,
-            });
-            return { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
+          .catch((error: unknown) => {
+            loadFailed = error;
+            return NO_PERSISTED_EVENTS;
           })
-      : { events: [] as SessionEvent[], synthesized: false, sourceEventSeq: 0 };
+      : NO_PERSISTED_EVENTS;
     // 持久事件合并 / transcript 合成 → openPhases.mergeMs。
     phases.mergeMs = Math.max(0, Math.round(performance.now() - mergeStartedAt));
     // 尾窗坐标（Step 6）：宿主声明「本次 events 只覆盖窗口内的整轮」时才存在。
@@ -4356,6 +4376,21 @@ export class ConversationV4Gateway {
 
     if (this.disposed || buffer.cancelled) {
       throw new Error(`v4 hydration cancelled for session ${sessionId}`);
+    }
+
+    if (loadFailed !== null) {
+      // 一次失败的持久读取没有提供任何「事实变少了」的证据，所以这里**不 swap**：
+      // 保留上一次成功水化（或 live 事件喂出来）的投影，并原样保留 raw 游标。
+      // 升级（`forceRebuild` + `fullMaterialization`）是这条分支的主要来源。
+      return this.keepProjectionAfterLoadFailure(sessionId, loadFailed, {
+        durationMs: Math.max(0, Math.round(performance.now() - hydrationStartedAt)),
+        existingPublisherAtStart: existingAtStart !== undefined,
+        forceRebuild,
+        fullMaterialization: loadOptions.fullMaterialization === true,
+        liveSessionAtStart,
+        persistedMessages: persistedMessages?.length ?? 0,
+        phases,
+      });
     }
 
     // assistant 守恒：拒收过正文流的 publisher 不可信——它建立于
@@ -4574,6 +4609,62 @@ export class ConversationV4Gateway {
     this.markViewReady(sessionId);
     this.publishCurrentSummaryToIndex(sessionId);
     phases.finishedAtMs = performance.now();
+    return publisher;
+  }
+
+  /**
+   * 持久读取失败时的**唯一**回落：保留现有投影、原样保留 raw 游标，并记一条可检索的失败。
+   *
+   * 两条不变量（一次读失败绝不允许破坏它们）：
+   *   ① 用户可见的投影行数**不得变少**——读失败不是「历史没了」的证据。过去它带着
+   *      `events: []` 流进 `rehydrate`，现象是用户眼前的历史整段消失；升级路径更糟：
+   *      升级前的降级投影本来是可用（只是不全）的，被换成空投影是纯损失。
+   *   ② live 事件**不得停止前进**——过去同一次回落把 `sourceEventSeq` 交成 0，游标回到
+   *      起点而 live raw 序号已在几百上千，随后每个事件都卡在 `sourceEventSeq + 1` 的 gap 上，
+   *      投影永远停在空/残状态直到用户重开。
+   *
+   * 自愈不在本函数里：调用方照常**不**重新登记 `hydratedSessions`，读入口
+   * `readableViewPublisher` 的第三个条件因此不成立，下一次读/翻页会退回冷路径再读一次
+   * （与「早退不得把缺段的投影钉住」同一条自愈路径）。升级本身仍按 Step 10 的口径只做一次，
+   * 不在这里轮询重试。
+   *
+   * 真冷（本来就没有投影）没有「旧投影」可以保留：空投影是唯一诚实的结果（用户眼前本来
+   * 就没有历史）。那时也没有 raw 游标可归零，两者一致。
+   */
+  private keepProjectionAfterLoadFailure(
+    sessionId: string,
+    error: unknown,
+    context: {
+      durationMs: number;
+      existingPublisherAtStart: boolean;
+      forceRebuild: boolean;
+      fullMaterialization: boolean;
+      liveSessionAtStart: boolean;
+      persistedMessages: number;
+      phases: HydrationPhases;
+    },
+  ): ConversationTopicPublisher {
+    const kept = this.publishers.get(sessionId);
+    const publisher = kept ?? this.ensurePublisher(sessionId);
+    // `kept === undefined`（真冷）时**不建** raw 游标：`.ensurePublisher` 是空投影，游标等到
+    // 第一个 live 事件再惰性创建即可（新会话的真实水位就是 0）。这里唯一不能做的事是
+    // `rawSequenceStates.delete` / 重建成 0——那正是 gap 死锁的来源。
+    this.host.onError?.("v4.hydrate.loadFailed", error, {
+      durationMs: context.durationMs,
+      existingPublisherAtStart: context.existingPublisherAtStart,
+      forceRebuild: context.forceRebuild,
+      fullMaterialization: context.fullMaterialization,
+      // 关键结论：true = 保住了旧投影；false = 本来就没有可保的（真冷）。
+      // 两者必须能在日志里分开，否则「空会话读失败」会被误读成「历史被清空」。
+      keptProjection: kept !== undefined,
+      keptRows: publisher.getSnapshot().rows.window.length,
+      liveSessionAtStart: context.liveSessionAtStart,
+      persistedMessages: context.persistedMessages,
+      phase: "loadPersistedEvents",
+      rawSourceEventSeq: this.rawSequenceStates.get(sessionId)?.sourceEventSeq ?? null,
+      sessionId,
+    });
+    context.phases.finishedAtMs = performance.now();
     return publisher;
   }
 
