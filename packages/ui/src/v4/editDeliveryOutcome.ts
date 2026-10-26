@@ -24,13 +24,31 @@ function explicitDelivery(delivery: unknown): EditDelivery | null {
   return delivery === "startNow" || delivery === "queue" || delivery === "guide" ? delivery : null;
 }
 
-export function resolveEditDelivery(outcome: EditCommandOutcome): EditDelivery | null {
+/**
+ * 信封判定（cr-func P2-5）：`resolveEditDelivery` 与 `resolveRetryDelivery` 必须
+ * 逐字同规则——两条 `rewind → start` 事务的 ACK 形态一致，任何一条放宽（比如允许
+ * `noop`，或漏掉 `typeof object`）都会让「queued 当成功」从另一条悄悄复活。
+ * 所以规则只写一份，两处只提供自己的 `result.type`。
+ *
+ * 三段判据：
+ * 1. `typeof outcome === "object"` 且非 null —— 旧宿主可能回 `false`/`void`；
+ * 2. `status ∈ {accepted, duplicate}` —— 失败/被拒没有投递事实；
+ * 3. `result.type` 精确匹配 —— 不得把别人的结果读成自己的投递态。
+ */
+function deliveryOfAck(
+  outcome: EditCommandOutcome,
+  resultType: "editUserQuery" | "retryTurn",
+): EditDelivery | null {
   if (typeof outcome !== "object" || outcome === null) return null;
   const ack = outcome;
   if (ack.status !== "accepted" && ack.status !== "duplicate") return null;
   const result = ack.result;
-  if (!result || result.type !== "editUserQuery") return null;
+  if (!result || result.type !== resultType) return null;
   return explicitDelivery(result.delivery);
+}
+
+export function resolveEditDelivery(outcome: EditCommandOutcome): EditDelivery | null {
+  return deliveryOfAck(outcome, "editUserQuery");
 }
 
 /**
@@ -38,15 +56,10 @@ export function resolveEditDelivery(outcome: EditCommandOutcome): EditDelivery |
  *
  * retry 与 edit 是同一条 `rewind → start` 事务，`queue` 同样是「没起跑」——
  * 过去 retryTurn 不返回任何结果，客户端只能把 queued 当成功。判定规则与
- * `resolveEditDelivery` 逐字相同，只是结果分支不同。
+ * `resolveEditDelivery` 共用 `deliveryOfAck`（同一份信封判据），只是结果分支不同。
  */
 export function resolveRetryDelivery(outcome: EditCommandOutcome): EditDelivery | null {
-  if (typeof outcome !== "object" || outcome === null) return null;
-  const ack = outcome;
-  if (ack.status !== "accepted" && ack.status !== "duplicate") return null;
-  const result = ack.result;
-  if (!result || result.type !== "retryTurn") return null;
-  return explicitDelivery(result.delivery);
+  return deliveryOfAck(outcome, "retryTurn");
 }
 
 /**

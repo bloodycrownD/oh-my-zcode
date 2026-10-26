@@ -2548,8 +2548,20 @@ export function SessionPane({
 
   const handleRetry = useCallback(
     (target: ConversationRowTarget) => {
-      // 草稿恢复需要 sessionId/workspaceKey（与 handleEdit 同一前置）；缺投影直接不派发。
-      if (!sessionId) return;
+      // 与 handleEdit 同一前置（cr-func P2-5）：没有当前投影就没有 CAS baseRevision。
+      // 过去这里直接派发，靠 `dispatchRetryTurn` 抛错落进 catch 的 logger.warn——
+      // 用户点了「重试」既没发送、也没有任何可见反馈。前置拦下并把同一事实说清楚
+      // （toast 复用 retry 的失败出口，不伪造成功）。
+      const current = snapshotRef.current;
+      if (!sessionId || current === null) {
+        logger.warn("[v4-pane] retry 跳过：缺少当前 session 投影");
+        toast(intl.formatMessage({ id: "chat.retry.notReady" }), {
+          dismissible: true,
+          position: "bottom-center",
+          variant: "warning",
+        });
+        return;
+      }
       void dispatchRetryTurn(target)
         .then((ack) => {
           if (ack.status !== "accepted" && ack.status !== "duplicate") {
@@ -2773,6 +2785,16 @@ export function SessionPane({
       logger.warn(
         `[v4-pane] setQueueItemDelivery 被拒绝: ${queueItemId} ${status} ${reasonCode ?? ""}`,
       ),
+    // cr-func P2-2：车道已切但没内联（held 项物化 fail-closed）。投影只会显示
+    // 「引导中」，用户不点继续就永远等不到内联——必须显式改口，不能只落日志。
+    onDegraded: (queueItemId, degradedReason) => {
+      logger.warn(`[v4-pane] setQueueItemDelivery 未内联: ${queueItemId} ${degradedReason}`);
+      toast(intl.formatMessage({ id: "chat.queue.guideDegraded" }), {
+        dismissible: true,
+        position: "bottom-center",
+        variant: "warning",
+      });
+    },
   });
   // 队列面板行内「引导」：queue→guide（项随后从面板消失转入 pendingGuide 列表）。
   const handleGuideQueueItem = useCallback(

@@ -2621,21 +2621,32 @@ export class ConversationV4Gateway {
     );
   }
 
-  getQueueLength(sessionId: string): number {
-    return this.publishers.get(sessionId)?.getSnapshot().queue.items.length ?? 0;
+  /**
+   * 队列长度（投影事实）。**读不到返回 `undefined`，不再是 0**（cr-func P2-3）：
+   * publisher 未注册/未就绪时 `?? 0` 会伪造「空队列」，而暂停位派生规则
+   * （`deriveQueueAutoDrain`）与 stop 的「拦下后续项」都以「只有明确的 0 才放行」
+   * 为前提——伪造空会让他们把存活项放走。调用方一律按「无法证明为空」处理。
+   */
+  getQueueLength(sessionId: string): number | undefined {
+    return this.publishers.get(sessionId)?.getSnapshot().queue.items.length;
   }
 
   /**
    * 队列暂停位（投影事实）。派生规则需要「当前位」这一输入：`deriveQueueAutoDrain`
    * 只在目标位 ≠ 现值时才写，避免每次结构事件都追加一条同值 `QueueAutoDrainChanged`。
+   *
+   * 读不到返回 `undefined`（不再伪造 `true`）：`?? true` 等于「已放行」，会让
+   * 「读不到就保持现值/不得放行」的规则失效（同一处 fail-open，cr-func P2-3）。
    */
-  getQueueAutoDrain(sessionId: string): boolean {
-    return this.publishers.get(sessionId)?.getSnapshot().queue.autoDrain ?? true;
+  getQueueAutoDrain(sessionId: string): boolean | undefined {
+    return this.publishers.get(sessionId)?.getSnapshot().queue.autoDrain;
   }
 
   /** Resident 回收保护：publisher queue 与 CommandInbox pinned facts 任一存在都不可关闭。 */
   hasResidencyBlockingCommands(sessionId: string): boolean {
-    return this.getQueueLength(sessionId) > 0 || this.inbox.hasPinnedSessionState(sessionId);
+    // 这里保留 `?? 0` 是有意的：publisher 缺席 = 该会话没有可回收的投影队列，
+    // 不是「读不到暂停判据」；回收保护只看「有没有确定存在的项」。
+    return (this.getQueueLength(sessionId) ?? 0) > 0 || this.inbox.hasPinnedSessionState(sessionId);
   }
 
   getQueueHead(sessionId: string): {

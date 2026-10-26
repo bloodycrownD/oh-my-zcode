@@ -23,7 +23,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-const { commandPayloadSchemas, parseCommandEnvelope, COMMANDS_REQUIRING_BASE_REVISION } =
+const { commandAckSchema, commandPayloadSchemas, parseCommandEnvelope, COMMANDS_REQUIRING_BASE_REVISION } =
   await import("@zcode/shared/zcode-protocol-v4");
 const { SessionEventType } = await import("@zcode/contracts");
 // 先载 executor 打通模块图（v4-gateway ↔ handlers/index ↔ queue 存在环，
@@ -81,7 +81,7 @@ test("A2: setQueueItemDelivery 是 CAS 命令（必带 baseRevision）", () => {
 
 // ── B. handler 门 ──────────────────────────────────────────────────────────
 
-function makeHost({ queueItem, appResult = true }) {
+function makeHost({ queueItem, appResult = { changed: true, inlined: true } }) {
   const calls = [];
   return {
     calls,
@@ -148,13 +148,52 @@ function queueItem({ dispatchState = "queued", admitted = "queue" } = {}) {
 
 const runHandler = (host, envelope) => queueHandlers.setQueueItemDelivery(host, envelope);
 
-test("B1: queued 态 queue→guide 驱动 core 改写", async () => {
+/** 最小 accepted ACK 信封：只验证 handler 返回的 result 能被协议 schema 解码（UI 同一入口）。 */
+function makeAck(result) {
+  return {
+    commandId: "cmd-dlv-ack",
+    status: "accepted",
+    revisionAtDecision: 0,
+    ...(result ? { result } : {}),
+  };
+}
+
+test("B1: queued 态 queue→guide 驱动 core 改写，ACK 带 inlined 事实", async () => {
   const host = makeHost({ queueItem: queueItem() });
-  assert.equal(await runHandler(host, makeEnvelope("guide")), undefined);
+  const result = await runHandler(host, makeEnvelope("guide"));
+  // cr-func P2-2：结果必须说清「是否已内联」，否则 fail-closed 时客户端只能看到
+  // accepted，用户以为引导已生效、本轮却永远不会内联它。
+  assert.deepEqual(result, {
+    type: "setQueueItemDelivery",
+    sessionId: SESSION_ID,
+    delivery: "guide",
+    inlined: true,
+  });
+  // ACK 结果必须能被共享层 schema 解码（UI 侧按 discriminatedUnion 分流）。
+  assert.equal(commandAckSchema.parse({ ...makeAck(result) }).result?.inlined, true);
   assert.deepEqual(
     host.calls.filter((call) => call.kind === "app.setQueueItemDelivery"),
     [{ kind: "app.setQueueItemDelivery", pendingInputId: QUEUE_ITEM_ID, delivery: "guide" }],
   );
+});
+
+test("B7: core 上报 fail-closed 时 ACK 带 degradedReason（不再静默成功）", async () => {
+  const host = makeHost({
+    queueItem: queueItem(),
+    appResult: { changed: true, degradedReason: "ledger_capability_absent", inlined: false },
+  });
+  const result = await runHandler(host, makeEnvelope("guide"));
+  assert.deepEqual(result, {
+    type: "setQueueItemDelivery",
+    sessionId: SESSION_ID,
+    delivery: "guide",
+    degradedReason: "ledger_capability_absent",
+    inlined: false,
+  });
+  // 变异探测：handler 恢复 `return undefined`（丢弃 outcome），本断言即红——那正是
+  // 「已切引导但未内联」对客户端完全不可见的形态。
+  assert.equal(result.inlined, false);
+  assert.equal(commandAckSchema.parse(makeAck(result)).result?.degradedReason, "ledger_capability_absent");
 });
 
 test("B2: reserved / promoting 拒绝（guard.queueItemDeliveryLocked）", async () => {
@@ -199,7 +238,10 @@ test("B4: 同值 toggle = noop，不驱动 core", async () => {
 });
 
 test("B5: core 未命中（并发 drain 竞态）时 warn + 显式 rejected（P0-2）", async () => {
-  const host = makeHost({ queueItem: queueItem(), appResult: false });
+  const host = makeHost({
+    queueItem: queueItem(),
+    appResult: { changed: false, inlined: false },
+  });
   await assert.rejects(
     () => runHandler(host, makeEnvelope("guide")),
     (error) => {

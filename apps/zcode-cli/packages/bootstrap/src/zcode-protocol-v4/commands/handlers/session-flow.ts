@@ -344,7 +344,11 @@ async function stop(
     // 先打断 runtime-owned verifier/continuation，再等待 goal pause；否则 verifier 可能在
     // pause RPC 完成前通过并接入下一次 continuation。
     record.activeAbortController?.abort(new Error("v4 session stopped"));
-    if ((host.getQueueLength?.(record.app.sessionId) ?? 0) > 0) {
+    // 读不到队列长度（宿主能力缺席）**不等于**空：与 `deriveQueueAutoDrain` 的
+    // 「无法证明为空」同口径（cr-func P2-3）。过去这里是 `?? 0`，于是在 capability
+    // 缺席时把「停止后拦下后续项」整段跳过——存活项会被 auto-drain 直接放行，
+    // 与 stop 的语义相反。只有明确的 0 才允许不写。
+    if (host.getQueueLength?.(record.app.sessionId) !== 0) {
       try {
         // verifier 已越过普通 turn catch，不能依赖 TurnComplete(cancelled)
         // 翻转 runtime queue gate；显式写入 false，确保 future queue 原位 held。

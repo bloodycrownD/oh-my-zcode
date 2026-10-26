@@ -332,10 +332,10 @@ async function setQueueItemDelivery(
       payload: { queueItemId: payload.queueItemId },
     });
   }
-  const changed = await record.app.setQueueItemDelivery(payload.queueItemId, payload.delivery, {
+  const outcome = await record.app.setQueueItemDelivery(payload.queueItemId, payload.delivery, {
     traceContext: record.traceContext,
   });
-  if (!changed) {
+  if (!outcome.changed) {
     // 并发 drain/reserve 竞态：项已不在可切换集合。显式拒绝（ack rejected）让 UI
     // onRejected 可观测——静默 accepted 会让操作丢失无痕迹（cr-fix-spec P0-2）。
     host.logger?.warn?.("v4 setQueueItemDelivery missed", {
@@ -344,7 +344,16 @@ async function setQueueItemDelivery(
     });
     throw new V4QueueItemDeliveryCoreMissError(payload.queueItemId);
   }
-  return undefined;
+  // cr-func P2-2：fail-closed 物化过去是**静默成功**——事件照发、ACK 只说 accepted，
+  // 用户看到「已切引导」，但该项从未进入内联车道，本轮永远不会内联它。把
+  // `inlined` / `degradedReason` 放进 ACK，UI 才能给一行「未内联、按排队发送」。
+  return {
+    type: "setQueueItemDelivery",
+    sessionId: record.app.sessionId,
+    delivery: payload.delivery,
+    inlined: outcome.inlined,
+    ...(outcome.degradedReason ? { degradedReason: outcome.degradedReason } : {}),
+  };
 }
 
 /**

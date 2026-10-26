@@ -60,6 +60,7 @@ import type {
   McpServerStatus,
   ModelSelection,
   PermissionBrokerPort,
+  PendingInputDeliveryResult,
   PluginLoadOutcome,
   PluginMetadata,
   PluginReferenceCatalog,
@@ -773,12 +774,16 @@ export interface ZCodeApp {
   /**
    * v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。
    * 用户拍板：guide=引导至下一轮工具调用后运行，与「立即」（抢占）语义区分。
+   *
+   * 返回 `PendingInputDeliveryResult`（cr-func P2-2）：`changed` 之外还要给出
+   * `inlined` / `degradedReason`——held 项物化 fail-closed 时车道改了但永不内联，
+   * 命令 ACK 必须能把这个降级告诉客户端。
    */
   setQueueItemDelivery(
     pendingInputId: string,
     delivery: "queue" | "guide",
     options?: { traceContext?: TraceContext },
-  ): Promise<boolean>;
+  ): Promise<PendingInputDeliveryResult>;
   /** v4 heldQueueDisposition=clearQueueAndSend：清空全部排队输入，返回丢弃条数。 */
   clearQueueItems(options?: { traceContext?: TraceContext }): Promise<number>;
   /** v4 setAutoDrain：翻转 queue autoDrain 授权位（会话级配置）。 */

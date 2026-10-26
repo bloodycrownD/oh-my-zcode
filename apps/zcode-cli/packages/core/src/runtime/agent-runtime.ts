@@ -49,6 +49,7 @@ import type {
   ToolArtifactStorePort,
   ToolCallId,
   TraceContext,
+  PendingInputDeliveryResult,
   TurnSteerInput,
   TurnInputIntentMetadata,
   TurnSteerResult,
@@ -479,13 +480,15 @@ export interface AgentRuntime {
   }): Promise<boolean>;
   /**
    * v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。
-   * guide=引导至下一轮工具调用后运行；queue=普通排队。未命中/被 reserve 拒绝 → false。
+   * guide=引导至下一轮工具调用后运行；queue=普通排队。
+   * 未命中/被 reserve 拒绝 → `changed:false`；`inlined`/`degradedReason` 表达
+   * 「已切车道但没内联」（held 项 fail-closed）这个降级事实（cr-func P2-2）。
    */
   setPendingInputDelivery(options: {
     pendingInputId: string;
     delivery: "queue" | "guide";
     traceContext?: TraceContext;
-  }): Promise<boolean>;
+  }): Promise<PendingInputDeliveryResult>;
   /**
    * v4 heldQueueDisposition=clearQueueAndSend 执行件：
    * 清空全部排队输入（active turn 内存项 + held 投影残留），返回丢弃条数。

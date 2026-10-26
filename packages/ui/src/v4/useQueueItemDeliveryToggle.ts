@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import type { CommandAck } from "@zcode/shared/zcode-protocol-v4";
+import { resolveQueueItemDeliveryDegradedReason } from "@/v4/queueItemDeliveryOutcome.js";
 
 /**
  * setQueueItemDelivery 的窄签发面（宿主 SessionPane 的 dispatchCommand 满足之）。
@@ -20,6 +21,11 @@ export interface UseQueueItemDeliveryToggleOptions {
   getRevision: () => number | null;
   /** ACK 拒绝/失败时的观测回调（宿主 logger；UI 不额外弹 toast，行态自然回滚）。 */
   onRejected?: (queueItemId: string, status: string, reasonCode: string | undefined) => void;
+  /**
+   * 已切车道但**没内联**时的观测回调（cr-func P2-2）。fail-closed 物化过去是静默
+   * 成功：投影显示「引导中」，本轮却永远不会内联它。宿主据此给一行提示。
+   */
+  onDegraded?: (queueItemId: string, degradedReason: string) => void;
 }
 
 export interface QueueItemDeliveryToggle {
@@ -88,6 +94,12 @@ export function useQueueItemDeliveryToggle(
           }
           if (ack.status !== "accepted" && ack.status !== "noop" && ack.status !== "duplicate") {
             current.onRejected?.(queueItemId, ack.status, ack.reasonCode);
+          } else {
+            // cr-func P2-2：车道改了但没内联（held 项物化 fail-closed）必须让用户看见，
+            // 否则「已切引导」就是一条永远不会兑现的提示。判据在纯函数里，与 edit/retry
+            // 的投递态判定同样只认显式字段。
+            const degradedReason = resolveQueueItemDeliveryDegradedReason(ack);
+            if (degradedReason) current.onDegraded?.(queueItemId, degradedReason);
           }
         })
         .catch((error: unknown) => {

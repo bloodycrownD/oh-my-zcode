@@ -466,6 +466,36 @@ export const commandResultSchema = z.discriminatedUnion("type", [
     type: z.literal("inputDisposition"),
     delivery: z.enum(["startNow", "queue", "guide"]),
   }),
+  z.object({
+    /**
+     * setQueueItemDelivery（queue ↔ guide toggle）的投递事实（cr-func P2-2）。
+     *
+     * 为什么必须有这个结果：held 项切 guide 时，core 要用 `session_input` 账本才能物化
+     * 出内联项；账本能力缺席 / 读失败 / 非 pending / 附件非空时一律 fail-closed——
+     * 车道照样改写、事件照样发，但该项**从未进入内联车道**，只能在轮结束后当普通排队项
+     * 消费。过去 ACK 只有 accepted，用户看到「已切引导」却永远等不到内联 = 静默成功。
+     *
+     * `inlined` 说「现在就已在内存内联车道」，`degradedReason` 说清为什么没内联
+     * （枚举与 `@zcode/contracts` 的 `PendingInputDeliveryDegradedReason` 同源同值；
+     * shared 不依赖 contracts，两边改动必须同步）。schema 层可不带 `degradedReason`
+     * （`inlined:true` 时本就没有），旧客户端忽略整个新增结果类型即可。
+     */
+    type: z.literal("setQueueItemDelivery"),
+    sessionId: z.string().min(1),
+    delivery: z.enum(["queue", "guide"]),
+    inlined: z.boolean(),
+    degradedReason: z
+      .enum([
+        "ledger_capability_absent",
+        "ledger_read_failed",
+        "ledger_not_pending",
+        "ledger_attachments",
+        "projection_attachments",
+        "reserved",
+        "no_active_turn",
+      ])
+      .optional(),
+  }),
 ]);
 export type CommandResult = z.infer<typeof commandResultSchema>;
 

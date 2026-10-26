@@ -276,6 +276,41 @@ export type TurnSteerSource = "plan_approval_feedback" | "workflow_refine_feedba
 export type TurnSteerDeliveryMode = "guide" | "queue";
 
 /**
+ * `setPendingInputDelivery`（queue ↔ guide toggle）为什么没内联（cr-func P2-2）。
+ *
+ * 每一种都是**可判定的跳过原因**，不是「读失败就宽松」：`resolveHeldGuideInput`
+ * 的每条 fail-closed 出口对应一个值，`reserved` / `projection_attachments` 是
+ * 物化调用点自己的前置条件。
+ */
+export type PendingInputDeliveryDegradedReason =
+  | "ledger_capability_absent"
+  | "ledger_read_failed"
+  | "ledger_not_pending"
+  | "ledger_attachments"
+  | "projection_attachments"
+  | "reserved"
+  | "no_active_turn";
+
+/**
+ * `setPendingInputDelivery` 的执行结果（cr-func P2-2）。
+ *
+ * 过去只返回 boolean，「车道改写了」与「已经内联」被压成同一个 `true`：held 项在
+ * 物化 fail-closed（账本能力缺席 / 读失败 / 非 pending / 附件非空）时仍返回 true 并发
+ * `TurnSteerDeliveryChanged`——投影显示「引导中」，但该项**从未进入内联车道**，
+ * 轮结束后会被当成普通排队项消费。命令 ACK 若只说 accepted，就是一处静默成功
+ * （用户以为「已切引导」，本轮却永远不会内联它）。所以把两个事实分开：
+ *
+ * - `changed`：车道改写是否落账（false = 未命中 / 被 reserve 拒绝，按并发竞态处理）；
+ * - `inlined`：本次返回后该项**是否已在内存内联车道**（只有 guide 才可能 true）；
+ * - `degradedReason`：请求 guide 但没内联的原因；缺省 = 不要求内联或已内联。
+ */
+export interface PendingInputDeliveryResult {
+  changed: boolean;
+  degradedReason?: PendingInputDeliveryDegradedReason;
+  inlined: boolean;
+}
+
+/**
  * 队列暂停位（`queueAutoDrain`）的**唯一派生规则**（spec edit-resend-stale-text；cr-func P2）。
  *
  * ============================================================================

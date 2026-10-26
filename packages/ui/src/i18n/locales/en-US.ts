@@ -4744,6 +4744,8 @@ const enUS: Record<string, string> = {
   "chat.queue.guideRestore": "Back to queue",
   "chat.queue.guideRestore.description":
     "Return to the ordinary queue and send as its own turn after this run",
+  "chat.queue.guideDegraded":
+    "Inline guide is unavailable (the input authority could not be read), so this item stays in the ordinary queue and will be sent as its own turn after this run.",
   "chat.queue.turnSteer.steering": "Steering conversation",
   "chat.queue.paused.stopped": "The queue was paused because you stopped the current response",
   "chat.queue.paused.error": "The queue was paused because the response failed",
@@ -4928,6 +4930,7 @@ const enUS: Record<string, string> = {
     "Retry was rejected; session state may still be restoring. Retry again or send a new message.",
   "chat.retry.queued":
     "Retried message is queued and will be sent automatically after the current reply finishes (not sent yet).",
+  "chat.retry.notReady": "The current conversation isn't ready yet; retry wasn't sent.",
   "chat.ctx.sessionRequired":
     "/ctx-* works on an existing conversation. Send a message first, then try again.",
   "chat.toolbar.mode.label": "Switch mode",

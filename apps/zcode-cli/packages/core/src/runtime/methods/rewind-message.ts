@@ -581,14 +581,15 @@ async function applyConversationRewindPlan(
       targetMessageID: options.targetMessageId,
     },
   });
-  this.branchGeneration = branchGeneration;
-  this.runtimeTaskRegistry.setActiveBranchGeneration?.(branchGeneration);
-
-  // I4 事务边界（spec 变更点 9/10；cr-func P1-2）：`setRevert` 是本原语的提交点，
-  // 之后的级联作废 / 派生状态重建 / RewindTriggered 都可能抛错。一旦越过提交点，
-  // 「历史已截断」就是既定事实——必须抛类型化错误（`committed: true`），不能让它
-  // 以普通异常上行成「什么都没提交」：调用方会因此不写 draftText、不报「历史已回退」。
+  // I4 事务边界（spec 变更点 9/10；cr-func P1-2/P2-1）：`setRevert` 是本原语的提交点，
+  // 之后**每一句**（含下面两行内存/注册表镜像赋值）都可能抛错：`runtimeTaskRegistry`
+  // 的实现来自宿主，`setActiveBranchGeneration` 抛错时历史已经截断，若它在 try 之外，
+  // 异常会以普通错误上行成「什么都没提交」——调用方因此不写 draftText、不报「历史已回退」。
+  // 一旦越过提交点，「历史已截断」就是既定事实，必须抛类型化错误（`committed: true`）。
   try {
+    this.branchGeneration = branchGeneration;
+    this.runtimeTaskRegistry.setActiveBranchGeneration?.(branchGeneration);
+
     // I2（spec 变更点 7/19/20）：截断一旦落账，被截断区间上的未起跑输入就必须同批作废。
     // 位置写死在这里——setRevert 之后（低一级：截断已是事实）、RewindTriggered 之前
     // （让 UI 先看到 queue 项消失再看到历史截断，不留「旧项在空历史里排队」的中间态）。

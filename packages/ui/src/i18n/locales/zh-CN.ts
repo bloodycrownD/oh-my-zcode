@@ -4439,6 +4439,8 @@ const zhCN: Record<string, string> = {
   "chat.queue.guide.description": "引导至下一轮工具调用后运行（内联当前轮，不抢占）",
   "chat.queue.guideRestore": "恢复排队",
   "chat.queue.guideRestore.description": "改回普通排队，本轮结束后独立成轮发送",
+  "chat.queue.guideDegraded":
+    "无法内联引导（引导凭据不可用），该项已按普通排队处理：本轮结束后会独立成轮发送。",
   "chat.queue.turnSteer.steering": "正在引导对话",
   "chat.queue.paused.stopped": "由于你中断了当前响应，队列已暂停",
   "chat.queue.paused.error": "由于当前响应出错，队列已暂停（内容未丢失）",
@@ -4619,6 +4621,7 @@ const zhCN: Record<string, string> = {
   // 重试与编辑共用同一条 rewind→start 事务：拒绝与排队都必须可见（cr-func P1-5）。
   "chat.retry.rejected": "重试被拒绝，会话状态可能未恢复完成，请重试或新发一条消息。",
   "chat.retry.queued": "重试的消息已排队，等当前回复结束后自动发送（未立即发出）。",
+  "chat.retry.notReady": "当前会话尚未就绪，重试未发送。",
   "chat.toolbar.mode.label": "切换模式",
   // CUA 输入框常驻入口按钮
   "chat.toolbar.computerUse.label": "电脑操作",

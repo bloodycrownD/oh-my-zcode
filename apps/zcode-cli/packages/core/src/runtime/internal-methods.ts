@@ -9,6 +9,7 @@ import type {
   ModelToolCall,
   ModelToolContract,
   MessageId,
+  PendingInputDeliveryResult,
   ProjectId,
   SessionEvent,
   SessionEventSink,
@@ -225,12 +226,16 @@ export interface AgentRuntimeCoreMethods {
     beforePendingInputId: string | null;
     traceContext: TraceContext;
   }): Promise<boolean>;
-  /** v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。 */
+  /**
+   * v4 setQueueItemDelivery：排队项投递车道 toggle（queue ↔ guide）。
+   * 返回「车道是否改写」与「是否已内联」两个事实（`PendingInputDeliveryResult`）——
+   * held 项物化 fail-closed 时车道改写但永不内联，调用方必须能看见这个降级。
+   */
   setPendingInputDelivery(options: {
     pendingInputId: string;
     delivery: "queue" | "guide";
     traceContext: TraceContext;
-  }): Promise<boolean>;
+  }): Promise<PendingInputDeliveryResult>;
   setQueueAutoDrain(options: { autoDrain: boolean; traceContext: TraceContext }): Promise<void>;
   completeExternalQueueDrain(): void;
   setFollowupMode(options: { mode: "queue" | "guide"; traceContext: TraceContext }): Promise<void>;

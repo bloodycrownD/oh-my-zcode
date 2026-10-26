@@ -129,6 +129,11 @@ const { V4EditCommittedFailureError, forkEditRetryHandlers } = await import(
     join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "fork-edit-retry.ts"),
   ).href
 );
+// P2-3：stop 的「拦下后续项」判定必须与 deriveQueueAutoDrain 同口径（读不到 ≠ 空）。
+const { sessionFlowHandlers } = await import(
+  pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "handlers", "session-flow.ts"))
+    .href
+);
 // I3 的唯一解析入口：admission 侧（无选择事实）与执行侧（带事实）必须产出同一份结果。
 const { resolveCanonicalInput } = await import(
   pathToFileURL(join(bootstrapSrc, "zcode-protocol-v4", "commands", "input-intent.ts")).href
@@ -177,6 +182,10 @@ const { SqliteSessionStore } = await import(
 // I5 的 UI 判据（纯函数；packages/ui 无 jsdom，与 editFailureComposerRestore 同一层）。
 const { resolveEditDelivery, resolveRetryDelivery, shouldCollapseEditState } = await import(
   pathToFileURL(join(uiV4Src, "editDeliveryOutcome.ts")).href
+);
+// P2-2 的 UI 判据（纯函数）：setQueueItemDelivery ACK 的「已切车道但没内联」。
+const { resolveQueueItemDeliveryDegradedReason } = await import(
+  pathToFileURL(join(uiV4Src, "queueItemDeliveryOutcome.ts")).href
 );
 
 const { SessionEventType, createSessionEvent } = contractsEvents;
@@ -1649,7 +1658,7 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
   // ——级联作废 / 派生状态重建 / RewindTriggered——任一抛错都必须变成类型化事实。
   // 否则 handler 的局部布尔（只在整段成功后翻转）会把这个窗口原样 rethrow 成
   // 「什么都没提交」：历史已截断、无 draftText、无「历史已回退」文案。
-  const makeRuntime = ({ failAppend }) => {
+  const makeRuntime = ({ failAppend, failBranchGeneration = false }) => {
     const userMessage = {
       info: { id: "msg-user-rt1", role: "user", sessionID: SESSION_ID, time: { created: 1 } },
       parts: [
@@ -1693,7 +1702,16 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
       readFileState: new Map(),
       readSessionTargetForContext: async () => null,
       rebuildProjection: async () => ({ pendingSteerInputs: [] }),
-      runtimeTaskRegistry: { all: () => ({}), setActiveBranchGeneration: () => undefined },
+      runtimeTaskRegistry: {
+        all: () => ({}),
+        // cr-func P2-1：宿主实现可以抛错。它在 `setRevert` 之后执行，所以同样是
+        // 「提交后失败」——必须落在 try 内变成 committed 事实。
+        setActiveBranchGeneration: () => {
+          if (failBranchGeneration) {
+            throw new Error("simulated registry failure after commit");
+          }
+        },
+      },
       sessionId: SESSION_ID,
       sessionStore: {
         getSession: async () => ({ revert: undefined }),
@@ -1736,6 +1754,49 @@ test("T-RT2③ 原语在 setRevert 之后失败必须抛 committed:true（真 co
   assert.equal(isConversationRewindCommittedError(failure), true, "必须是带 committed 事实的类型化错误");
   assert.equal(failure.committed, true);
   assert.equal(failing.calls.reverts.length, 1, "提交点是 setRevert —— 它确实已经发生");
+
+  // cr-func P2-1：`branchGeneration` 与 `runtimeTaskRegistry.setActiveBranchGeneration`
+  // 两行内存/注册表镜像赋值也必须在提交点之后。宿主实现一抛错，历史已经截断——
+  // 若这两行在 try 之外，异常会以普通错误上行成「什么都没提交」。
+  // 变异：把 try 上移的那两行放回 try 之前，本条即红。
+  const registryFailing = makeRuntime({ failAppend: false, failBranchGeneration: true });
+  let registryFailure;
+  await assert.rejects(
+    () =>
+      rewindConversationToMessage.call(registryFailing.runtime, {
+        events: [],
+        targetMessageId: "msg-user-rt1",
+        traceContext: TRACE_CONTEXT,
+      }),
+    (error) => {
+      registryFailure = error;
+      return true;
+    },
+  );
+  assert.equal(
+    isConversationRewindCommittedError(registryFailure),
+    true,
+    "setActiveBranchGeneration 抛错同样是「截断已提交」",
+  );
+  assert.equal(registryFailure.committed, true);
+  assert.equal(registryFailing.calls.reverts.length, 1, "setRevert 已落盘");
+});
+
+test("T-RT8（cr-func P2-1）/rewind message 路径必须把 committed 事实写进失败文案", () => {
+  // TUI `/rewind` 与 edit/retry 共用同一个 core 原语，但这条路径没有 ACK/draftText：
+  // 可读文案是唯一的事实载体。过去它被拍平成普通 `Rewind failed`。
+  const source = stripComments(
+    readFileSync(join(coreSrc, "runtime", "methods", "rewind.ts"), "utf8"),
+  );
+  // 变异：删掉 committed 分支（回到 `createTurnFailureError(error, abortSignal, "Rewind failed")`
+  // + 统一 fallbackMessage），前四条断言即红。
+  assert.match(source, /isConversationRewindCommittedError\(error\)/u);
+  assert.match(source, /Rewind committed: [^"']*truncated/u);
+  assert.doesNotMatch(source, /createTurnFailureError\(error, abortSignal, "Rewind failed"\)/u);
+  assert.match(source, /fallbackMessage: failureMessage/u, "TurnError payload 必须拿到同一条文案");
+  assert.match(source, /rewind\.committed_step_failed/u, "日志事件名必须能区分提交后失败");
+  // 主消息不能打 Wrapper role：error-payload 会选择器跳过 wrapper 帧、改读底层 cause。
+  assert.match(source, /createCoreError\(CoreErrorType\.UnknownError, failureMessage/u);
 });
 
 test("T-RT2③ handler 用事实而不是布尔判「已提交」：类型化错误 → draftText + 历史已回退", async () => {
@@ -2065,8 +2126,183 @@ test("T-DA2 UI 接线：SessionPane 只对 queue 提示、ConversationRowView �
   );
 });
 
-// ── P1-5：retryTurn 与 edit 同一条 rewind→start 事务（delivery / draft / 提交后失败）──
+// ── P2-2：toggle 的「已切车道但没内联」必须可观测（不许只在 core 打 warn）──
 
+test("T-DA3（cr-func P2-2）toggle ACK：只有「没内联且有原因」才提示", () => {
+  const ack = (result) => ({
+    commandId: "cmd-dlv",
+    status: "accepted",
+    revisionAtDecision: 0,
+    ...(result ? { result } : {}),
+  });
+  const result = (patch) => ({
+    type: "setQueueItemDelivery",
+    sessionId: SESSION_ID,
+    delivery: "guide",
+    inlined: false,
+    ...patch,
+  });
+  assert.equal(
+    resolveQueueItemDeliveryDegradedReason(ack(result({ degradedReason: "ledger_not_pending" }))),
+    "ledger_not_pending",
+    "fail-closed 的降级必须冒泡到 UI 判据",
+  );
+  // 已内联 → 不提示。
+  assert.equal(resolveQueueItemDeliveryDegradedReason(ack(result({ inlined: true }))), null);
+  // 请求 queue：`inlined` 本就该是 false，但没有 degradedReason——不许当降级，
+  // 否则每次「恢复排队」都会弹一条无意义提示。
+  assert.equal(
+    resolveQueueItemDeliveryDegradedReason(ack({ ...result({}), delivery: "queue" })),
+    null,
+    "回 queue 不是降级",
+  );
+  // 旧 CLI：没有结果 / 结果类型不是它 → 未知，不提示。
+  assert.equal(resolveQueueItemDeliveryDegradedReason(ack(undefined)), null);
+  assert.equal(
+    resolveQueueItemDeliveryDegradedReason(
+      ack({ type: "editUserQuery", disposition: "rewind", sessionId: SESSION_ID }),
+    ),
+    null,
+    "不得把别人的结果读成 toggle 的投递事实",
+  );
+  // 拒绝/失败另有出口；duplicate 仍是投递事实。
+  assert.equal(
+    resolveQueueItemDeliveryDegradedReason({
+      commandId: "cmd-dlv",
+      status: "rejected",
+      result: result({ degradedReason: "reserved" }),
+    }),
+    null,
+  );
+  assert.equal(resolveQueueItemDeliveryDegradedReason(null), null);
+  assert.equal(
+    resolveQueueItemDeliveryDegradedReason({
+      commandId: "cmd-dlv",
+      status: "duplicate",
+      result: result({ degradedReason: "reserved" }),
+    }),
+    "reserved",
+  );
+  // 契约锁步：ACK 结果必须能按共享 schema 解码（UI 走同一入口）。
+  assert.equal(
+    commandAckSchema.parse(ack(result({ degradedReason: "ledger_read_failed" }))).result?.inlined,
+    false,
+  );
+});
+
+test("T-DA3 UI 接线：onDegraded 必须 toast 一行提示（只落 logger = 静默成功）", () => {
+  const paneSource = stripComments(readFileSync(join(uiV4Src, "SessionPane.tsx"), "utf8"));
+  assert.match(
+    paneSource,
+    /onDegraded: \(queueItemId, degradedReason\) => \{[\s\S]{0,500}?toast\(intl\.formatMessage\(\{ id: "chat\.queue\.guideDegraded" \}\)/,
+    "降级必须有用户可见的一行提示",
+  );
+  // P2-5：handleRetry 的前置必须与 handleEdit 同形（缺投影既不发送也不提示是旧形态）。
+  // 变异：删掉这段前置（回到 `if (!sessionId) return;`），本条即红。
+  assert.match(
+    paneSource,
+    /retry 跳过：缺少当前 session 投影[\s\S]{0,600}?chat\.retry\.notReady/,
+    "handleRetry 缺当前投影时必须给用户一行反馈",
+  );
+  assert.doesNotMatch(
+    paneSource,
+    /const handleRetry = useCallback\(\s*\(target: ConversationRowTarget\) => \{\s*\/\/[^\n]*\n\s*if \(!sessionId\) return;/,
+    "旧的「只判 sessionId 就静默 return」形态必须消失",
+  );
+});
+
+// ── P2-5：edit/retry 的投递态判定共用同一份信封规则 ─────────────────────────
+
+test("T-DA4（cr-func P2-5）edit 与 retry 的投递态判据逐条同答", () => {
+  const ackFor = (type, { delivery = "queue", status = "accepted", withResult = true } = {}) => ({
+    commandId: `cmd-${type}`,
+    status,
+    ...(withResult
+      ? {
+          result: {
+            type,
+            sessionId: SESSION_ID,
+            ...(delivery === undefined ? {} : { delivery }),
+          },
+        }
+      : {}),
+  });
+  // ① typeof object 段：旧宿主可能回 false / void / true。
+  for (const [label, outcome] of [
+    ["void", undefined],
+    ["false", false],
+    ["true", true],
+    ["null", null],
+  ]) {
+    assert.equal(resolveEditDelivery(outcome), null, `edit: ${label}`);
+    assert.equal(resolveRetryDelivery(outcome), null, `retry: ${label}`);
+  }
+  // ② status 段：只有 accepted / duplicate 才谈投递态。
+  for (const status of ["rejected", "stale", "noop", "failed"]) {
+    assert.equal(resolveEditDelivery(ackFor("editUserQuery", { status })), null, `edit ${status}`);
+    assert.equal(resolveRetryDelivery(ackFor("retryTurn", { status })), null, `retry ${status}`);
+  }
+  assert.equal(resolveEditDelivery(ackFor("editUserQuery", { status: "duplicate" })), "queue");
+  assert.equal(resolveRetryDelivery(ackFor("retryTurn", { status: "duplicate" })), "queue");
+  // ③ result.type 段：两条入口不得互读对方的结果。
+  assert.equal(resolveEditDelivery(ackFor("retryTurn")), null, "edit 不得读 retryTurn 结果");
+  assert.equal(resolveRetryDelivery(ackFor("editUserQuery")), null, "retry 不得读 editUserQuery 结果");
+  assert.equal(
+    resolveRetryDelivery(ackFor("retryTurn", { withResult: false })),
+    null,
+    "没有 result 就没有投递事实",
+  );
+  // 正向同规则：三值都只认显式值（`later` 等未知值一律 null）。
+  assert.equal(resolveEditDelivery(ackFor("editUserQuery", { delivery: "startNow" })), "startNow");
+  assert.equal(resolveRetryDelivery(ackFor("retryTurn", { delivery: "guide" })), "guide");
+  assert.equal(resolveEditDelivery(ackFor("editUserQuery", { delivery: "later" })), null);
+  assert.equal(resolveRetryDelivery(ackFor("retryTurn", { delivery: "later" })), null);
+});
+
+// ── P2-3：stop 的暂停判定与 deriveQueueAutoDrain 同口径（读不到 ≠ 空）──
+
+test("T-RW9（cr-func P2-3）stop：队列长度读不到时按非空处理，仍拦下后续项", async () => {
+  const cases = [
+    { expectWrite: true, extra: {}, label: "getQueueLength 能力缺席（读不到）" },
+    { expectWrite: true, extra: { getQueueLength: () => 3 }, label: "队列非空" },
+    { expectWrite: false, extra: { getQueueLength: () => 0 }, label: "队列明确为空" },
+  ];
+  for (const { expectWrite, extra, label } of cases) {
+    const writes = [];
+    const record = {
+      activeAbortController: { abort: () => undefined },
+      app: {
+        sessionId: "ses_stop_p23",
+        runtime: {
+          stopActiveForegroundExecution: () => ({
+            foregroundExecutionId: "exec-stop-1",
+            kind: "stopped",
+          }),
+        },
+        readTarget: async () => null,
+        setQueueAutoDrain: async (value) => {
+          writes.push(value);
+        },
+      },
+    };
+    const host = {
+      ...extra,
+      getRecord: (sessionId) => (sessionId === "ses_stop_p23" ? record : undefined),
+      logger: { info: () => undefined, warn: () => undefined },
+    };
+    await sessionFlowHandlers.stop(host, {
+      commandId: "cmd-stop-p23",
+      sessionId: "ses_stop_p23",
+      type: "stop",
+      payload: {},
+    });
+    // 变异探测：把判定改回 `(… ?? 0) > 0`，第一行（读不到 → 必须写 false）即红；
+    // 那条 fail-open 会让存活项被 auto-drain 直接放行，与 stop 语义相反。
+    assert.deepEqual(writes, expectWrite ? [false] : [], label);
+  }
+});
+
+// ── P1-5：retryTurn 与 edit 同一条 rewind→start 事务（delivery / draft / 提交后失败）──
 /** retry 的最小宿主：target 解析、rewind 两态、start 三态（started/queued/throws）。 */
 function createRetryHarness({
   rewindCommittedFailure = false,
@@ -2429,6 +2665,23 @@ test("T-RW7 bridge 读不到队列长度时不得回落 0（P2-1：回落 0 与�
     bridgeSource,
     /getQueueAutoDrain:\s*\(sessionId\)\s*=>\s*context\.v4Gateway\?\.getQueueAutoDrain\(sessionId\)/u,
   );
+  // v4-gateway **自己**也必须如实回 undefined（cr-func P2-3）：gateway 在场而 publisher
+  // 缺席时 `?? 0` / `?? true` 会绕过上面那道接线，同样伪造「空 + 已放行」。
+  // 变异：把任一 `?? 0` / `?? true` 加回这两个方法体，本条即红。
+  // 只看方法体（`hasResidencyBlockingCommands` 的 `?? 0` 是有意的，不能误判）。
+  const gatewaySource = stripComments(
+    readFileSync(join(bootstrapSrc, "zcode-protocol-v4", "v4-gateway.ts"), "utf8"),
+  );
+  const lengthBody =
+    gatewaySource.match(/getQueueLength\([^)]*\): number \| undefined \{([\s\S]*?)\n  \}/u)?.[1] ??
+    "";
+  const autoDrainBody =
+    gatewaySource.match(/getQueueAutoDrain\([^)]*\): boolean \| undefined \{([\s\S]*?)\n  \}/u)?.[1] ??
+    "";
+  assert.notEqual(lengthBody, "", "getQueueLength 必须声明 number | undefined（读不到 = undefined）");
+  assert.notEqual(autoDrainBody, "", "getQueueAutoDrain 必须声明 boolean | undefined");
+  assert.doesNotMatch(lengthBody, /\?\?\s*0/u, "gateway 不许把 publisher 缺席伪造成空队列");
+  assert.doesNotMatch(autoDrainBody, /\?\?\s*true/u, "gateway 不许把 publisher 缺席伪造成「已放行」");
 });
 
 test("T-RW7 当前位读不到时：结构事件不动暂停位，显式请求照常落地", async () => {  // 结构事件（delete）没有「当前位」事实：不写，也不假称已复位。

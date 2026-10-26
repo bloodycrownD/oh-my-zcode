@@ -19,6 +19,8 @@ import type {
   MessageId,
   ModelSelection,
   ModelSelectionOrigin,
+  PendingInputDeliveryDegradedReason,
+  PendingInputDeliveryResult,
   PendingSteerInputInfo,
   PendingTurnInput,
   QueryId,
@@ -1023,6 +1025,11 @@ export async function reorderPendingInput(
   return true;
 }
 
+/** `resolveHeldGuideInput` 的结果：`skipped` 的 reason 必须上报给调用方（cr-func P2-2）。 */
+type HeldGuideInputResolution =
+  | { kind: "resolved"; text: string }
+  | { kind: "skipped"; reason: PendingInputDeliveryDegradedReason };
+
 /**
  * held 项物化前的执行权威读取（spec edit-resend-stale-text / I1；cr-func P1-1）。
  *
@@ -1031,19 +1038,20 @@ export async function reorderPendingInput(
  * `session_input` 账本（`getSessionInputForExecution`，与 sendQueuedNow 同一执行权威），
  * 投影的 `held.input` 退回纯展示。
  *
- * 返回 `undefined` = 本次不物化（**不是**「输入为空字符串」）：
- * - 账本能力缺席（老宿主/夹具）：无法判定，宁可不物化也不拿投影起轮；
- * - 账本非 `pending`（终态/缺失/损坏）：该项本来就不能执行，物化只会把死项种进内存，
- *   且 drain 时会以投影文本起一轮本不该发生的执行；
- * - 账本附件非空而投影看不出附件：物化不携带完整 attachment 载荷，会静默丢附件
- *   （既有行为，保持跳过，由 autoDrain 独立成轮兜底）。
+ * 返回 `skipped`（**不是**「输入为空字符串」）的四种原因都必须能上报给客户端
+ * （cr-func P2-2）：跳过物化 = 该项不会内联、只能等轮结束后当普通排队项消费，
+ * 用户看到「已切引导」却永远等不到内联，是本轮要消灭的静默成功。
+ * - `ledger_capability_absent`：老宿主/夹具没有账本能力，无法判定；
+ * - `ledger_read_failed`：读账本抛错，拿不准文本来源；
+ * - `ledger_not_pending`：账本非 `pending`（终态/缺失/损坏），该项本来就不能执行；
+ * - `ledger_attachments`：账本附件非空而投影看不出附件，物化会静默丢附件。
  *
- * 读账本抛错同样不物化：拿不准文本来源时，唯一安全动作是保持队列投影原样。
+ * 一律不物化：拿不准文本来源时，唯一安全动作是保持队列投影原样。
  */
 async function resolveHeldGuideInput(
   this: AgentRuntimeInternal,
   held: PendingSteerInputInfo,
-): Promise<string | undefined> {
+): Promise<HeldGuideInputResolution> {
   const store = this.sessionStore;
   if (!store?.getSessionInputForExecution) {
     this.logger?.warn("Guide materialization skipped: ledger authority capability absent", {
@@ -1053,7 +1061,7 @@ async function resolveHeldGuideInput(
       reason: "ledger_capability_absent",
       status: "failed",
     });
-    return undefined;
+    return { kind: "skipped", reason: "ledger_capability_absent" };
   }
   let authority: SessionInputExecutionAuthority;
   try {
@@ -1070,7 +1078,7 @@ async function resolveHeldGuideInput(
       reason: "ledger_read_failed",
       status: "failed",
     });
-    return undefined;
+    return { kind: "skipped", reason: "ledger_read_failed" };
   }
   if (authority.state !== "pending") {
     this.logger?.warn("Guide materialization skipped: ledger authority is not pending", {
@@ -1081,7 +1089,7 @@ async function resolveHeldGuideInput(
       pendingInputId: held.pendingInputId,
       status: "failed",
     });
-    return undefined;
+    return { kind: "skipped", reason: "ledger_not_pending" };
   }
   if (authority.attachments.length > 0) {
     // 投影说「无附件」但账本说有：物化会丢掉账本附件（与既有 attachmentRefs 跳过一致）。
@@ -1093,7 +1101,7 @@ async function resolveHeldGuideInput(
       reason: "ledger_attachments",
       status: "completed",
     });
-    return undefined;
+    return { kind: "skipped", reason: "ledger_attachments" };
   }
   if (authority.text !== held.input) {
     // 账本与投影文本漂移：执行必须用账本（I1），但投影漂移要留痕，否则下次排查只看
@@ -1107,7 +1115,7 @@ async function resolveHeldGuideInput(
       status: "completed",
     });
   }
-  return authority.text;
+  return { kind: "resolved", text: authority.text };
 }
 
 /**
@@ -1120,6 +1128,10 @@ async function resolveHeldGuideInput(
  * 最早一项，普通 queue 项不可偷跑。持久化也不在此处直写：appendEvent 进事件汇后
  * 由 events.ts 的集中记账（TurnSteerDeliveryChanged → updateSessionInputs）
  * 落 session_input 账本，与 core fallback 改投共用同一条路径。
+ *
+ * 返回值（cr-func P2-2）：`PendingInputDeliveryResult` 而不是 boolean——「车道改写了」
+ * 与「已经内联」是两个事实。held 项物化 fail-closed 时车道照样改写、事件照样发，
+ * 但该项永远进不了内联车道；只回 true 会让命令 ACK 表现为成功，客户端零反馈。
  */
 export async function setPendingInputDelivery(
   this: AgentRuntimeInternal,
@@ -1128,7 +1140,7 @@ export async function setPendingInputDelivery(
     delivery: "queue" | "guide";
     traceContext: TraceContext;
   },
-): Promise<boolean> {
+): Promise<PendingInputDeliveryResult> {
   const activeTurn = this.activeTurn;
   const pendingInput = activeTurn?.pendingInputs.find((item) => item.id === options.pendingInputId);
   if (!activeTurn || !pendingInput) {
@@ -1138,29 +1150,68 @@ export async function setPendingInputDelivery(
     const held = projection.pendingSteerInputs.find(
       (item) => item.pendingInputId === options.pendingInputId,
     );
-    if (!held) return false;
-    if (held.intent?.admittedDelivery === options.delivery) return true;
-    if (
-      activeTurn &&
-      options.delivery === "guide" &&
-      !this.pendingInputReservations.has(options.pendingInputId)
-    ) {
-      // queue 车道项显式切 guide：仅改投影不够——注入消费侧
-      // （hasInlineGuidePendingInput/drainInlineGuideForNextRequest）只扫内存
-      // pendingInputs，queue 项从不入内存（enqueueDeferredInput 只发事件），导致
-      // v1.0.10「等待引导」只停在 UI、注入从未触发、turn 结束被 autoDrain 当普通
-      // 输入消费。这里把投影项物化进内存（delivery=guide），既有 tool 边界与
-      // text-only 收口两个注入点即可看见并内联执行（用户语义：当前 toolcall 或
-      // content 结束后直接执行引导排队的命令）。reserved 中的项归 promotion 主线，
-      // 不物化（与 sendQueuedNow 抢占互斥）。带附件的项暂不物化（投影不含完整
-      // attachment 载荷，物化会丢附件；保持投影切换、由 autoDrain 独立成轮兜底）。
-      if ((held.intent?.attachmentRefs?.length ?? 0) === 0) {
+    if (!held) return { changed: false, inlined: false };
+    // 同值 toggle = noop。held 项按设计不在内存（activeTurn.pendingInputs），
+    // 所以这里不可能已经是内联态：inlined 恒 false（这也是本轮之前那次切换的结论）。
+    if (held.intent?.admittedDelivery === options.delivery) {
+      return { changed: true, inlined: false };
+    }
+    let degradedReason: PendingInputDeliveryDegradedReason | undefined;
+    // 物化成功后的账本对齐 intent：正文与 `intent.text` 同时取账本（cr-func P1-2），
+    // 事件里也用它——否则账本行长（`updateSessionInputs` 的 `payload.intent` 镜像）
+    // 会保留投影旧文本，与「正文已换账本」自相矛盾。
+    let materializedIntent: NonNullable<PendingTurnInput["intent"]> | undefined;
+    let materialized = false;
+    if (options.delivery === "guide") {
+      if (!activeTurn) {
+        // 没有进行中的轮就没有内联车道可进：项留在投影 guide 车道，轮结束后按普通
+        // 排队消费。如实上报，命令 ACK 不能表现为「已内联」。
+        degradedReason = "no_active_turn";
+      } else if (this.pendingInputReservations.has(options.pendingInputId)) {
+        // reserved/promoting 项归 sendQueuedNow promotion 主线所有（handler 已用
+        // dispatch.state 拒过，这里只可能是竞态到达）：不物化，也不静默成功。
+        degradedReason = "reserved";
+      } else if ((held.intent?.attachmentRefs?.length ?? 0) > 0) {
+        // 带附件的项暂不物化（投影不含完整 attachment 载荷，物化会丢附件；
+        // 保持投影切换、由 autoDrain 独立成轮兜底）——但必须让调用方知道没内联。
+        degradedReason = "projection_attachments";
+        this.logger?.debug("Guide toggle skipped materialization (attachments)", {
+          event: "turn.steer.delivery_toggle.materialize_skipped",
+          module: "core.runtime",
+          pendingInputId: options.pendingInputId,
+          status: "completed",
+        });
+      } else {
+        // queue 车道项显式切 guide：仅改投影不够——注入消费侧
+        // （hasInlineGuidePendingInput/drainInlineGuideForNextRequest）只扫内存
+        // pendingInputs，queue 项从不入内存（enqueueDeferredInput 只发事件），导致
+        // v1.0.10「等待引导」只停在 UI、注入从未触发、turn 结束被 autoDrain 当普通
+        // 输入消费。这里把投影项物化进内存（delivery=guide），既有 tool 边界与
+        // text-only 收口两个注入点即可看见并内联执行（用户语义：当前 toolcall 或
+        // content 结束后直接执行引导排队的命令）。
         // I1（spec edit-resend-stale-text；cr-func P1-1）：物化项 drain 时正文直接
         // 成为 runtime user entry + `persistUserPrompt`，即「文本变成模型内容」。
         // 所以正文只能取 session_input 账本——投影的 `held.input` 是展示模型，
         // 拿它起轮与 RC1 同形。
-        const materializedInput = await resolveHeldGuideInput.call(this, held);
-        if (materializedInput !== undefined) {
+        const resolution = await resolveHeldGuideInput.call(this, held);
+        if (resolution.kind === "resolved") {
+          const materializedInput = resolution.text;
+          materializedIntent = held.intent
+            ? {
+                ...held.intent,
+                admittedDelivery: "guide",
+                fallbackReasonCode: undefined,
+                // I1（cr-func P1-2）：正文换了账本，`intent.text` 必须同批换。
+                // `buildPersistedConversationInputIntent` 是 `text: intent.text ?? text`
+                // （`input-intent-persistence.ts:30`）——只换 `input` 会让落库的
+                // `conversationInputIntent.text` 停在投影旧值，而 `TurnSteerDrained`
+                // 的 `drainedInputs[].intent.text` 又供 `editTarget.intent.text` 重发。
+                // 这正是 `input-intent.ts:74-80` 点名过的 Bug C 形态（content 用新
+                // 文本、intent 用旧文本）。条件无关：`materializedInput` 恒为账本文本，
+                // 相等时覆盖是同值恒等。
+                text: materializedInput,
+              }
+            : undefined;
           activeTurn.pendingInputs.push({
             id: held.pendingInputId,
             input: materializedInput,
@@ -1170,21 +1221,16 @@ export async function setPendingInputDelivery(
             source: held.source,
             inputPresentation: held.inputPresentation,
             delivery: "guide",
-            intent: held.intent
-              ? { ...held.intent, admittedDelivery: "guide", fallbackReasonCode: undefined }
-              : undefined,
+            intent: materializedIntent,
             toolDisallowlist: held.toolDisallowlist,
             turnId: held.targetTurnId,
             materialized: true,
           });
+          materialized = true;
+        } else {
+          // fail-closed：不物化。原因上报给调用方（P2-2），不能只在 core 打 warn。
+          degradedReason = resolution.reason;
         }
-      } else {
-        this.logger?.debug("Guide toggle skipped materialization (attachments)", {
-          event: "turn.steer.delivery_toggle.materialize_skipped",
-          module: "core.runtime",
-          pendingInputId: options.pendingInputId,
-          status: "completed",
-        });
       }
     }
     const event = createSessionEvent(
@@ -1196,7 +1242,14 @@ export async function setPendingInputDelivery(
           held.intent?.requestedDelivery ?? held.intent?.admittedDelivery ?? options.delivery,
         admittedDelivery: options.delivery,
         targetTurnId: held.targetTurnId,
-        ...(held.intent ? { intent: { ...held.intent, admittedDelivery: options.delivery } } : {}),
+        ...(held.intent
+          ? {
+              intent: materializedIntent ?? {
+                ...held.intent,
+                admittedDelivery: options.delivery,
+              },
+            }
+          : {}),
       },
       {
         traceId: options.traceContext.traceId,
@@ -1213,14 +1266,22 @@ export async function setPendingInputDelivery(
       status: "completed",
       targetTurnId: held.targetTurnId,
     });
-    return true;
+    return {
+      changed: true,
+      ...(degradedReason ? { degradedReason } : {}),
+      inlined: materialized,
+    };
   }
   const currentDelivery = pendingInputDelivery(pendingInput);
   // 同值 toggle = noop：幂等返回，不产事件（CommandInbox 重放/客户端重复点击）。
-  if (currentDelivery === options.delivery) return true;
+  if (currentDelivery === options.delivery) {
+    return { changed: true, inlined: currentDelivery === "guide" };
+  }
   // reserved/promoting 中的项归 sendQueuedNow promotion 主线所有；此时切 delivery
   // 会与 reserve/promote 事务抢同一条 pendingInput，拒绝（CLI 侧另有 dispatch 门）。
-  if (this.pendingInputReservations.has(options.pendingInputId)) return false;
+  if (this.pendingInputReservations.has(options.pendingInputId)) {
+    return { changed: false, inlined: false };
+  }
   if (options.delivery === "queue" && pendingInput.materialized) {
     // 反物化：物化项（queue 车道出身）切回 queue 时整体移出内存，权威回到
     // queue 车道投影/事件（由 autoDrain 提升为独立轮）。留在内存会被空闲判定
@@ -1258,7 +1319,8 @@ export async function setPendingInputDelivery(
       status: "completed",
       targetTurnId: activeTurn.turnId,
     });
-    return true;
+    // 反物化后项不在内存内联车道上（车道回到 queue）。
+    return { changed: true, inlined: false };
   }
   const requestedDelivery = pendingInput.intent?.requestedDelivery ?? currentDelivery;
   const intent = pendingInput.intent
@@ -1299,7 +1361,8 @@ export async function setPendingInputDelivery(
     status: "completed",
     targetTurnId: activeTurn.turnId,
   });
-  return true;
+  // 内存项的 guide 车道就是内联车道（drain 时成为 runtime user entry）。
+  return { changed: true, inlined: options.delivery === "guide" };
 }
 
 /**

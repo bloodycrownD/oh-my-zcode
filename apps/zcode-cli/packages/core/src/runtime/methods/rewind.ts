@@ -4,7 +4,9 @@ import {
   RewindStrategy,
   SessionEventType,
   createModelUsageSummaryFromEvents,
+  createCoreError,
   createMessageId,
+  isConversationRewindCommittedError,
   parseWorkspaceCheckpointArtifact,
   evaluateRewindTarget,
   runWithContextAsync,
@@ -153,7 +155,25 @@ export async function executeRewindCommand(
         projection,
       };
     } catch (error) {
-      const coreError = createTurnFailureError(error, abortSignal, "Rewind failed");
+      // I4（spec edit-resend-stale-text；cr-func P2-1）：`/rewind message` 与 edit/retry
+      // 共用同一个 core 原语，`setRevert` 之后的失败抛 `committed: true` 的类型化错误。
+      // 这条路径过去把它拍平成普通 `Rewind failed`：用户看到「回退失败」，实际历史
+      // **已经截断且不可撤销**。TUI 没有 ACK/draftText 出口，可读文案就是唯一的事实
+      // 载体，所以必须按 committed 改口，并换日志事件名让运维能区分两态。
+      const committed = isConversationRewindCommittedError(error);
+      const failureMessage = committed
+        ? "Rewind committed: the conversation was truncated to the target message, but a post-commit step failed. The truncation cannot be undone; resend your input if needed."
+        : "Rewind failed";
+      // committed 事实必须成为**主消息**：`createTurnFailureError` 会给错误打 Wrapper
+      // role，而 `projectExecutionErrorPayload` 的选择器会跳过 wrapper 帧、改用底层
+      // cause 的 message（这里就是 "post-commit step failed"）——「历史已回退」会再次
+      // 消失。所以 committed 分支直接构造不带 wrapper role 的错误。
+      const coreError = committed
+        ? createCoreError(CoreErrorType.UnknownError, failureMessage, {
+            cause: error instanceof Error ? error : undefined,
+            recoverable: false,
+          })
+        : createTurnFailureError(error, abortSignal, failureMessage);
       await appendTurnOutcomeEvent(this, {
         coreError,
         events,
@@ -161,8 +181,8 @@ export async function executeRewindCommand(
         turnPhase: "rewind",
         inputId,
         traceContext: turnTraceContext,
-        fallbackMessage: "Rewind failed",
-        logEvent: "rewind.failed",
+        fallbackMessage: failureMessage,
+        logEvent: committed ? "rewind.committed_step_failed" : "rewind.failed",
         logLabel: "Rewind",
       });
       await recordTurnUsageFact(this, {
