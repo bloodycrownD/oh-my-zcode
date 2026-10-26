@@ -750,7 +750,9 @@ export interface IZCodeAgentService {
    * FORK（mcp-hot-refresh）：MCP 增删改/启停后对 workspace 内全部活跃 session
    * 热刷新 MCP 工具面（core 的 connect replace + 工具 diff 注册/反注册）。
    */
-  refreshMcpSessions(params: ZCodeAgentRefreshMcpSessionsParams): Promise<ZCodeMcpRefreshSessionsResult>;
+  refreshMcpSessions(
+    params: ZCodeAgentRefreshMcpSessionsParams,
+  ): Promise<ZCodeMcpRefreshSessionsResult>;
   listMcpServerStatuses(params: ZCodeAgentListMcpServerStatusesParams): Promise<ZCodeMcpListResult>;
   listPlugins(params: ZCodeAgentPluginViewParams): Promise<ZCodePluginsListResult>;
   /**

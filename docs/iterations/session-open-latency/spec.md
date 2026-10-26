@@ -437,6 +437,41 @@ session_turn_query_manifest:               -- query 级：出目录条目（只�
 
 `bootstrap/scripts/test-cold-open-window.mjs` 承载 T-SL1~T-SL13；新增 `test:v4-perf` 挂载。T-SL8/T-SL9 需要 gateway 级夹具（`V4GatewayHost` 有 30+ 成员，多为 optional），而现有 bootstrap 测试只直接 `new ConversationTopicPublisher`（`test-turn-directory.mjs:52-72`、`test-publisher-buffer-clamp.mjs:26-52`）——**夹具建设单列预算**，或把这两条降级为「publisher + 抽出纯函数闸门」的用例。
 
+#### Step 14 落地说明（2026-10-26 真机实测，数字全在 `after.json`）
+
+同一台机器、同一长会话规模（3012 message / 5255 行）。夹具是真实库的**副本**：`~/.omz/cli/db/db.sqlite` 与 `v2/tasks-index.sqlite` 复制到沙盒后只保留 3 条会话行并把 workspace 改写到沙盒目录（`USERPROFILE/HOME/APPDATA/LOCALAPPDATA/ZCODE_DATA_BASE_DIR` 全指向沙盒，真实 `~/.omz` 只读）。采样器 `scripts/dev/long-session-perf-sample.mjs` 本步未改。
+
+| 场景 | 判据 | 基线（phase-0） | 本次（after） | 结论 |
+|---|---|---|---|---|
+| 冷开（CLI 未起） | 主判 `uiViewReadyMs − hostPrepareMs ≤ 1s` | 6097ms（6055/6112/6097） | **3715ms**（3715/3719/3608） | **未达标**（−39%，仍是门槛 3.7 倍） |
+| 冷开 | 并列 `uiViewReadyMs − cliBootstrapMs` | 不可计算（3/3 缺席） | 仍不可计算（3/3 缺席，`cliProcessState=reused`） | **不可计算** |
+| 冷开 | 总量观察项 ≤ 2.5~3s | 7695ms（含 spawn 1578~1776） | 只能给代理：水化 3718 + 点击前激活 815 ≈ **4533ms**（仍不含 spawn） | **未达标且判不全** |
+| 热开（CLI 已起、会话冷） | `uiViewReadyMs ≤ 800ms` | 不持有 9724 / 持有 133~187 | 不持有 **1844**（1 次，水化；激活 561 在点击前）/ 持有 **118、104** | **分裂**：持有达标，不持有未达标（水化 −81%，端到端代理 ≈2405ms） |
+| 重开同会话（runtime 持有） | 按热开 800ms 观察 | 225 / 154（另有 4128 的卸下态） | **143 / 128 / 138** | **达标**（中位 138ms，3/3 `viewReadyMs=8ms`） |
+| 切回（keep-warm） | 不适用该指标；断言无新 ACK | 无新 ACK 3/3；981/1112/1203 | 无新 ACK 3/3；**409/551/450** | 豁免项；−60%，仍未到 150ms 参考值 |
+
+**读数（三次稳态冷开）**：`uiViewReadyMs` 3718/3723/3611；`hostPrepareMs` 3/4/3；`openPhases.viewReadyMs` 2811/2827/2483（⊃ `mergeMs` 2736/2754/2407 + `rehydrateMs` 49/49/50 + `manifestMs` 6）；`runtimeReadyMs` 815/796/1033；`paintAfterApplyMs` 489/476/469；`snapshotRowCount` 160（尾窗 8 轮），`manifestAdjusted` 3/3 `false`。沙盒库**第一次**打开另记：5048ms（含 0023 迁移 + 清单从零重建 159 轮 / 5255 行，`runtimeReadyMs` 2488）——它是一次性成本，不得混进稳态中位数。
+
+**⚠ 冷启 app 这一档只量到 publisher 水化（实测踩到，先前记错过）**：CLI 日志里一次冷开的全序列是 `cold resume flight created`（08:00:40.418）→ `session shell materialized`（40.568）→ `Session resumed`（41.231）→ **`subscribe conversation … coldResume=false`（41.236）** → `cold window applied`（41.278）→ `v4 hydrate loaded … events=2129 synthesized=true durationMs=2737`（43.973）。也就是说 **`sessionRuntimeState=warm`，那次 815ms 激活发生在点击之前**（app 启动期的 journal/读入口 `ensureHostRecordForJournalRead` 刻意 `await ensureRuntimeReady`，spec 第 42 行登记的既有先例），点击后的 3718ms 全是 publisher 水化。把激活加回来的端到端代理 = `uiViewReadyMs + runtimeReadyMs` ≈ **4533/4519/4644ms**（仍不含 CLI spawn 与 app 就绪等待）。因此：**不得把 3718 当成「冷开总成本」与 baseline 的 7695 相减**；真要做总量判读，必须先补 launch→ACK 打点。同一档的 mergeMs 构成也说明瓶颈不在正文：事件日志仍是全量重放（`events=2129`）+ 每 messageId 一次 artifact 读（60+ 条 `v4 cold file change artifact read failed`），而这些与窗口化无关。
+
+**升级成本（激活后那次全量读）**：只读 debug 行 `v4 projection upgrade applied … upgradeMs=`（`~/.omz/cli/log/zcode-<date>.jsonl`，host.onDebug → logger.debug，生产构建也落盘）。实测长会话 **3226ms**、park 会话 1435/2070ms。`openPhases` / `openTiming` 不新增键，`materializeMs` 仍缺席（Step 7 口径不变）。
+
+**manifest 自洽（IS1/IS5 的直接证据）**：`session_turn_manifest` 159 行、`Σ row_count = 5255`（= baseline 的 `observedTotalRows`）、`row_count_source=cold`、`projection_schema_version=3`；query 清单 103 条。窗口 `ordinal=151 / turnCount=8 / messageCount=115 / rowCount=160 / rowIdBase=5096`，且 `Σ row_count(ordinal<151) = 5095 ⇒ base = 5096`、`Σ(151..158) = 160 ⇒ 末行 rowId = 5255 = totalCount`——窗口 rowId 区间正好收在清单总数上。
+
+**四条判读纪律（本步实测踩到，必须随 Step 14 一起读）**：
+
+1. **`--path cold` 在本树不可用**：dev 实例在 **workspace 激活时就把该 workspace 的 CLI 拉起来**，点击会话时 `cliProcessState` 恒为 `reused`、`hostPrepareMs` 只有 3~4ms（冷启 + `--startup-workspace` 指向别的 workspace 也一样）。`--path cold` 要求 9229 整体关闭且 `cliProcessState === "spawned"`，否则把样本判成 `precondition-violated` 并从汇总里丢掉数值。因此冷开 regime 用「kill 整个 electron 树 → `--open-workspace <目标 workspace>` 冷启 → `--path warm` 采一轮（目标会话未打开）」复现；**副作用是冷开主判的减法已退化成 ≈ `uiViewReadyMs` 本身**（spawn 不在本次 subscribe 内）。
+2. **`viewReadyMs` 与 phase-0 不是同一个量**：Step 12 之后 ACK 里不再有激活耗时（本次 `viewReadyMs` 2483~2827 与 `runtimeReadyMs` 796~1033 是两段独立耗时；reopen 时 `viewReadyMs=8ms` 而 `runtimeReadyMs=853ms` 是上一次激活的读数）。**可比量是 renderer 侧 `uiViewReadyMs` 与 `mergeMs`/`rehydrateMs`**：本次真正降下去的是 `rehydrateMs`（49 vs 217~233）与 `mergeMs`（2407~2754 vs 2867~3083，−10%~−21%），而 `mergeMs` 仍是 `viewReadyMs` 的绝对大头（2.4~2.7s）——它的构成是全量事件重放 + artifact 读，不是消息正文（见上），下一步要压冷开应从这里入手，不是 rowId / 传输。
+3. **lazy resume 的 `messageCount`/`partCount` 恒 0 是预期**（`historyMode:"none"`），不是「会话没有历史」；闸门成本只能看 `session.history.lazy_hydrated.durationMs` 与「首发送 → 首 token」，本步**未发真实 turn**，这两项留在待人工确认。
+4. **两份 runtime 读数不互校**：`availability.sessionRuntime`（UI 门禁）与 `openTiming.sessionRuntimeState`（诊断）是两个量。本次 3 次冷启 app 的 `sessionRuntimeState` 都是 `"warm"`——它是**真实结论**（点击前那次激活已成功），不是误报；而 CLI 重起、record 不存在的两次样本报 `"cold"`。判读时只能当「点击那一刻 conversationState 说了什么」，不能当 `availability.sessionRuntime` 的替代。
+
+**本步新登记的两条风险（编号接风险表 22/23）**：
+
+22. **升级依赖「先窗口水化、后激活」的顺序，并会静默缺席**（Step 14 实测）：CLI 重起后打开的路径是 `cold shell flight → cold window applied → cold resume flight → 激活完成 → 升级`，三次都留了 `v4 projection upgrade applied`（3226/1435/2070ms）；而 **app 冷启的 6 次打开一条都没有**——`scheduleProjectionUpgrade`（`v4-gateway.ts:4116`，在 `ensureRuntimeReady` 成功分支里）读 `degradedFirstScreen` 的时刻早于窗口化 hydrate 收口，`v4-gateway.ts:4151` 的早退之后**没有任何重试入口**，于是该会话的投影停在降级窗口直到下一次冷开。功能上不报错（`totalCount` 由 manifest 给），但「激活后补齐全量」在这些顺序下没有兑现——**待裁定是否按 bug 修**，本步只测未改。
+23. **冷开主判在本树已失去区分度**（Step 14 实测）：预启动把 `hostPrepareMs` 压到 3~4ms 后，`uiViewReadyMs − hostPrepareMs` 既不能证明「spawn 快」也不能证明「没 spawn」；CLI 被杀后重开的样本里 `uiViewReadyMs` 与 `clickToAckMs` 方向还会相反（287 vs 8862；7622 vs 5722），即重建代际把起点重置到最后一次 connect。要继续用这条主判，必须先决定「预启动算不算冷开」，不能直接拿它跟 phase-0 的 6097 比。
+
+**必须人工确认（本步测不到的部分）**：①真机「首发送 → 首 token」与 `session.history.lazy_hydrated` 只出现一次（IS7 / risk 4、20）；②view-only 首屏的 UI 表现（composer 可用、placeholder 文案、edit/fork/retry 禁用、`canStop:false`）；③窗口前沿之外的 `loadOlder` 翻页（IS6：每次翻页 `hasMore` 与行集合正确、不重新冷开）；④激活后补齐 usage / fileChanges / `thoughtLevels` / `permissionGrant`；⑤冷开后立刻发首条消息（risk 16）有没有行回退。
+
 ## 最终项目结构
 
 ```
@@ -523,7 +558,7 @@ apps/zcode-cli/packages/bootstrap/scripts/
 - Step 11 — phase-view-runtime-split — blocking: yes — qa: auto：`rowsRange` 冷路径不复触发冷开；升级路径改 `hydratedSessions.delete()` 先删。
 - Step 12 — phase-lazy-history — blocking: yes — qa: auto：`historyMode`；eager context init 移到 turn；发送闸门在 init **之后**；逐个核对 `resume.ts` 里以全量 messages 为输入的剩余步骤（`turnNumber`/`latestAssistant*`/`mainTurnCacheHitAggregate`/`discardPersistedPendingSteerInputs`/`syncPersistedSessionTitleForResume`）。
 - Step 13 — phase-gates — blocking: yes — qa: auto：`test-cold-open-window.mjs` 覆盖 IS1 逐值一致、IS2 两种事故防护、IS6 翻页不漏、IS7 历史完整。
-- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3（`--path cold|warm|reopen|switchback --iterations 3`），**验收基准读 renderer 侧 `uiViewReadyMs`**（要做首绘再叠加 `paintAfterApplyMs`，缺席时读 `paint_missing` 原因），**按 phase-0 的三档表判**：冷开**主判** `uiViewReadyMs − openTiming.hostPrepareMs ≤ 1s`、并列分解项 `uiViewReadyMs − openTiming.cliBootstrapMs`（修正后）、总量作观察项；热开 `uiViewReadyMs ≤ 800ms`（按 CLI runtime 是否持有会话分 regime）；切回不适用该指标，断言**没有新 ACK** 并单列内存态切回耗时；`openPhases` 只作分解项（`viewReadyMs` 是 CLI 进程内段，不含 host/CLI spawn/RPC/渲染，且各段嵌套不可相加）；**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时；口径是激活本体耗时，不是从 ACK 起算），对照 `baseline.json` 判；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。
+- Step 14 — phase-gates — blocking: no — qa: manual_user：真机四路径 ×3（`--path cold|warm|reopen|switchback --iterations 3`），**验收基准读 renderer 侧 `uiViewReadyMs`**（要做首绘再叠加 `paintAfterApplyMs`，缺席时读 `paint_missing` 原因），**按 phase-0 的三档表判**：冷开**主判** `uiViewReadyMs − openTiming.hostPrepareMs ≤ 1s`、并列分解项 `uiViewReadyMs − openTiming.cliBootstrapMs`（修正后）、总量作观察项；热开 `uiViewReadyMs ≤ 800ms`（按 CLI runtime 是否持有会话分 regime）；切回不适用该指标，断言**没有新 ACK** 并单列内存态切回耗时；`openPhases` 只作分解项（`viewReadyMs` 是 CLI 进程内段，不含 host/CLI spawn/RPC/渲染，且各段嵌套不可相加）；**`runtimeReadyMs` 从 `conversation/runtimeReady` query 读**（`openPhases` 是 ACK 帧，不含激活耗时；口径是激活本体耗时，不是从 ACK 起算），对照 `baseline.json` 判；同时记录「首发送 → 首 token」以暴露 eager init 后移的成本。**（已执行 2026-10-26，数据见 `after.json` 与 phase-gates 的「Step 14 落地说明」。注意 `--path cold` 在本树不可用——app 在 workspace 激活时就预启动 CLI，`cliProcessState` 恒 `reused`；冷开 regime 用「kill 整树 → `--open-workspace <目标 workspace>` 冷启 → `--path warm --iterations N`」复现。）**
 
 ## 测试策略
 
@@ -573,6 +608,8 @@ apps/zcode-cli/packages/bootstrap/scripts/
 19. **「provider 历史已水化」变成了一个水位，而不是 resume 的副产品**（Step 12 登记，最高）：`historyMode:"none"` 之后，`messageHistory` 在 resume 结束时是**空的**，内容存在 `deferredHistoryHydration` 里等闸门补。因此任何「直接往 history 写/直接读 history」的入口都必须排在闸门之后，否则现象是**静默错序**：新写入的条目落在历史**前面**（模型看到「用户先说话、之后才是历史」）。当前只有两处闸门（`turn.ts`、`emitControlOnlyUserTurn`），其余写点（background-notifications / subagent-messages / goal-state-reminder / turn 内的 hooks / steering / plugin-reference）都只能由「已起轮或已 live」的 runtime 触发。新增入口必须先问：它能在首次发轮之前跑吗？能，就必须过闸门。行为锚点：`test:lazy-history` L1/L4/L5/L7。
 20. **懒历史把成本搬到了首轮，且是两次独立成本**（Step 12 登记）：①eager context init（MCP/技能/MEMORY.md）移到首个需要 context 的入口；②闸门在首次发送时**重读一次全量正文**（不复用激活时的入参）。两者都落在「用户按下发送」到「首 token」之间，而 `openPhases` / `openTiming` 都量不到（ACK 在激活之前）。Step 14 必须同时记录「首发送 → 首 token」，并注意 lazy resume 的 `SessionResumed` / `session.resumed` 里 `messageCount` / `partCount` / `appliedMessageCount` **恒为 0 是预期**（`historyMode:"none"`），不能读成「会话没有历史」。
 21. **持久读取失败曾把投影打空、并让 live 静默停摆**（fix-c17 登记，已修）：`performHydration` 过去把「读失败」与「读到空」压成同一个 `{ events: [], synthesized: false, sourceEventSeq: 0 }`，一次抛错同时造成两件事——①空事件流进 `publisher.rehydrate`，用户眼前的历史**整段消失**（升级路径最狠：升级前的降级投影本来可用，被换掉是纯损失）；②`sourceEventSeq` 交 0，raw 游标回到起点而 live 序号已在几百上千，之后每个事件都卡在「等 seq=1」的 gap 上，投影永远停在空/残状态直到重开，**全程无报错**。现在的两条不变量：读失败**不 swap 投影、不动 raw 游标**（`keepProjectionAfterLoadFailure`）——用户可见的投影行数**不得变少**、live 事件**不得停止前进**；失败留一条 `v4.hydrate.loadFailed`（带 `sessionId` / 原因 / `keptProjection` / `keptRows` / `rawSourceEventSeq`），升级收口改写 `v4 projection upgrade skipped reason=loadFailed`（**不得**再谎报 `applied`——那条 debug 行是 Step 14 唯一的升级读数）。「真冷」= `loadPersistedEvents` 缺席或权威返回空，**不走**这条回落（那时没有旧投影可保留，空投影是对的）。两条都**不进** `openPhases` / `openTiming`（Step 7 口径禁令：ACK 在激活之前）。自愈沿用既有路径：失败不登记 `hydratedSessions`，下一次读 / 翻页退回冷路径重试；升级本身仍按 Step 10 只做一次、不轮询重试（**已知取舍**：升级失败后投影停在降级态，直到下一次读触发重读或会话重开）。行为锚点：`test:hydrate-load-failure` F1-F4。
+22. **「激活后全量升级」依赖「先窗口水化、后激活」的顺序，顺序反过来就静默缺席**（Step 14 实测登记）：`scheduleProjectionUpgrade` 在 `ensureRuntimeReady` 成功分支里按 `degradedFirstScreen` 判一遍（`v4-gateway.ts:4116`），而该标记是在**窗口化 hydrate 收口**时才 add 的（`:4437`）。实测：CLI 重起后的打开顺序是 `cold shell flight → cold window applied → cold resume flight → 激活完成 → 升级`，三次都留下 `v4 projection upgrade applied`（3226 / 1435 / 2070ms）；而 app 冷启的 6 次打开（激活在窗口 applied 之前或同一帧）**一条都没有**，`:4151` 的早退之后没有任何重试入口 ⇒ 该会话投影停在降级窗口直到下一次冷开。不报错、`totalCount` 仍由 manifest 给（所以看不出坏了），但「激活后补齐全量」没有兑现。**是否按 bug 修待裁定**；任何调整首屏水位 / 激活顺序的改动都会踩到这条。行为锚点：`test-view-runtime-split` K2/M2（只钉住「先窗口后激活」这一种顺序）。
+23. **冷开主判在本树已失去区分度**（Step 14 实测登记）：dev 实例在 workspace 激活时就预启动 CLI，点击会话时 `hostPrepareMs` 只有 3~4ms、`cliProcessState` 恒为 `reused`，于是 `uiViewReadyMs − hostPrepareMs` 既不能证明「spawn 快」也不能证明「没 spawn」，与 phase-0 的 6097ms 不再是同一口径（`--path cold` 也因此必然判 `precondition-violated`）。更狠的是「杀 CLI 再点开」：重建代际把起点重置到最后一次 connect，`uiViewReadyMs` 与 `clickToAckMs` 方向相反（287 vs 8862；7622 vs 5722），该指标在这种场景下**不可用**。要恢复这条主判，必须先决定「app 的预启动算不算冷开成本」，再谈阈值。数据：`after.json` 的 `aggregates.coldCliRespawn.caveat`。
 
 ### 回滚
 
