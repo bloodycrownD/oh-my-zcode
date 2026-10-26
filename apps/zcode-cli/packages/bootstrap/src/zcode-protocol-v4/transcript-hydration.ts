@@ -77,7 +77,7 @@ interface ParsedSubagentOutput {
   summaryText?: string;
 }
 
-interface SynthesizeOptions {
+interface SynthesizeOptions extends ColdSynthesisContext {
   sessionId: string;
   /**
    * 当前 session 实际选中模型的权威上下文窗口。
@@ -97,6 +97,31 @@ interface SynthesizeOptions {
    * transcript 没有该字段，必须显式注入合成 ModelComplete 才能保持 live/cold 等价。
    */
   fileChangeSummariesByMessageId?: ReadonlyMap<string, TurnFileChangeSummary>;
+}
+
+/**
+ * 窗口化物化的**非零起点上下文**（RC4 / IS1）。
+ *
+ * 全量物化时三项都缺席，行为与旧路径逐字相同；只有「只把 active 分支尾部若干轮喂进合成器」
+ * 时才必须注入——否则同一个逻辑位置会算出与全量物化不同的身份：
+ *  - `initialTurnNumber`：`turnNumber` 从 0 起算会让 `hydrate-turn-N` 整体前移（窗口首轮
+ *    被当成第 1 轮），编号漂移正是「多一轮 / 缺一轮」的直接来源；
+ *  - `initialModelKey`：模型基线是靠「与上一条 ModelSelected 的 key 不同」判出来的，窗口
+ *    没有上一条历史，于是首轮会凭空多一次选型事件；
+ *  - `preface:false`：窗首若是一条 assistant 输出（属于窗口外的那一轮），旧实现会为它合成
+ *    一个 model-only preface 轮——凭空多一轮，且后续 `hydrate-turn-N` 全部错位。
+ *    **只给「不按 manifest 整轮对齐」的窗口用**（按整轮对齐时窗首 assistant 本身就是某一轮的
+ *    起点，全量物化同样会开那一轮，抑制它反而丢一轮）。冷开尾窗 Alignment 由
+ *    `selectColdTailWindow` 保证，故 bridge 不传此项。
+ *
+ * `baseTimestampMs` 必须由调用方给出**整条分支首条消息**的时间（不是窗口首条）：时间基准
+ * 参与 `createdAt` 兜底，窗口起点变了它也得不变。
+ */
+export interface ColdSynthesisContext {
+  initialTurnNumber?: number;
+  initialModelKey?: string | null;
+  preface?: boolean;
+  baseTimestampMs?: number;
 }
 
 function isRealUserTurnStarter(message: MessageWithParts): boolean {
@@ -927,6 +952,39 @@ function hydratedModelKey(modelSelection: ModelSelection): string {
   return `${modelSelection.providerId}\u0000${modelSelection.modelId}\u0000${modelSelection.options?.reasoningLevel ?? ""}`;
 }
 
+/**
+ * 窗口 / 按页物化的 `initialModelKey`：一条历史消息对应的选型（窗口首轮之前的模型基线）。
+ *
+ * 取法必须与合成器建立基线的取法一致：real-user 轮取 user message 的 `modelSelection`
+ * 快照，assistant 开头（preface / 维护轮）取 assistant 自己的 provider/model/reasoningLevel。
+ * 取不到 → null：窗口首轮会多发一次 ModelSelected（hydration trace 不声明种子权威、也不
+ * 标记 `configModelTouchedByEvent`，最终配置值与全量物化相同），只是多一条冗余事件。
+ *
+ * 除了给合成器当 `initialModelKey`，同一份选型还要作为投影的**上一轮模型基线**播种
+ * （`ProductProjection.seedTurnModelBaseline`）：`modelChange` marker 靠「上一轮模型与本轮
+ * config 是否不同」判定，缺了基线会让切换轮少一行、其后 rowId 整体前移。
+ */
+export function hydrationTurnModelSelectionOfMessage(
+  message: MessageWithParts,
+): ModelSelection | null {
+  return turnModelSelectionOfUserMessage(message) ?? assistantModelSelectionOf(message) ?? null;
+}
+
+export function hydrationTurnModelKeyOfMessage(message: MessageWithParts): string | null {
+  const selection = hydrationTurnModelSelectionOfMessage(message);
+  return selection ? hydratedModelKey(selection) : null;
+}
+
+/**
+ * 选型 → 合成器的 `initialModelKey` 口径（`provider\0model\0thought`）。
+ *
+ * 独立导出是为了让「按页物化」不必先拼一条假消息：它已经从 plan 拿到了上一轮的 messageId
+ * 与选型，只需要同一份 key 口径（各写一份 `\0` 拼接迟早分叉）。
+ */
+export function hydrationModelKeyOfSelection(selection: ModelSelection): string {
+  return hydratedModelKey(selection);
+}
+
 function turnModelSelectionOfUserMessage(message: MessageWithParts): ModelSelection | null {
   if (message.info.role !== "user") return null;
   return message.info.modelSelection ?? null;
@@ -1376,7 +1434,7 @@ export function synthesizeEventsFromMessages(
     contextWindow,
   });
 
-  let turnNumber = 0;
+  let turnNumber = Math.max(0, options.initialTurnNumber ?? 0);
   let index = 0;
   const emittedGoalVerifications = new Set<string>();
   let lastTurnId: string | undefined;
@@ -1394,7 +1452,7 @@ export function synthesizeEventsFromMessages(
   // 对比 lastTurnModel 与 config 生成；冷恢复按每轮持久化选型事实在 TurnStarted 前
   // 合成 ModelSelected——普通首轮静默，显式 source-less 与后续 A→B 边界恒重建。
   // 该合成事件带 HYDRATION_TRACE_ID，不声明 种子权威（见 onModelSelected）。
-  let lastSelectedModelKey: string | null = null;
+  let lastSelectedModelKey: string | null = options.initialModelKey ?? null;
   let pendingTimelineModel: HydratedTimelineModel | null = null;
   const selectTurnModel = (selection: HydratedTimelineModel | null): void => {
     if (!selection) return;
@@ -1622,6 +1680,14 @@ export function synthesizeEventsFromMessages(
       // 等非真实用户消息时，其后 assistant 回复刷新后会整段消失。
       // 因此为头部 assistant 输出合成 preface model-only 轮（无可见 user 气泡，
       // 内容照常渲染）。user 角色的非触发型 synthetic context 仍按设计不可见，照旧跳过。
+      //
+      // 窗口化物化例外（`preface:false`）：窗口只覆盖 active 分支的尾部整轮，窗首的
+      // assistant 输出属于**窗口外**那一轮的尾巴。为它造一轮会让窗口凭空多一轮、后续
+      // `hydrate-turn-N` 全部错位；那一轮的行由翻页（`rows/range`）按需物化。
+      if (options.preface === false) {
+        index += 1;
+        continue;
+      }
       if (message.info.role !== "assistant" || !assistantMessageHasSynthesizableContent(message)) {
         index += 1;
         continue;

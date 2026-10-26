@@ -1,0 +1,863 @@
+{
+  "schema": "zcode-session-open-latency-baseline/v1",
+  "generatedAt": "2026-10-25T13:28:45.631Z",
+  "phase": "phase-0-baseline",
+  "spec": "docs/iterations/session-open-latency/spec.md",
+  "sampler": "scripts/dev/long-session-perf-sample.mjs",
+  "repo": {
+    "root": "D:\\worktree\\c-session-open",
+    "branch": "feat/session-open-latency",
+    "head": "03fe7208b1e573ae3e2851a859639ddc84f0dd7f",
+    "headSubject": "fix(v4): 验收阈值分三档 + 采样拒绝缺数"
+  },
+  "environment": {
+    "os": "Windows 10.0.26200 x64",
+    "node": "v22.22.0（mise.toml 要求 24.14.0，install/build 只报 engine 警告）",
+    "build": "dev 构建：vite dev (5174) + tsup 产物 out/main|host|preload + 仓库内 electron",
+    "appName": "omz Dev（未打包 → app.isPackaged=false，固定 remote-debugging-port=9229）",
+    "userData": "%APPDATA%\\omz Dev",
+    "dataRoot": "C:\\Users\\BloodyCrown\\.omz（与正式版共用 appSettings / tasks-index / cli db）",
+    "productEnv": "ZCODE_ENV=production（pnpm dev:desktop 默认）",
+    "worktreeCleanAtCapture": true,
+    "notes": [
+      "采样期 renderer 由 vite dev 提供，dev-only 的 __zcodePerfProbe / __zcodeV4ConversationOpensE2E 才会挂载。",
+      "改动的包已构建：packages/desktop pre-dev（native search 资产）→ scripts/build-desktop-agent-cli.mjs（CLI bundle）→ tsup main/host/preload。"
+    ]
+  },
+  "targets": {
+    "longSession": {
+      "id": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "title": "比较 zcode 与 omz 更新差异",
+      "workspace": "D:\\Dev\\Js\\oh-my-zcode",
+      "messages": 3012,
+      "parts": 10468,
+      "hasRevert": true,
+      "observedTotalRows": 5255,
+      "observedTailWindowRows": 60
+    },
+    "hotSession": {
+      "id": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "title": "排查 omz 系统提示词被丢弃问题",
+      "workspace": "D:\\Dev\\Js\\oh-my-zcode",
+      "messages": 1217,
+      "parts": 4376,
+      "observedTotalRows": 2347
+    },
+    "switchedAwaySession": {
+      "id": "sess_e20b7f31-4905-4639-b1f6-1fdb9170f5e5",
+      "title": "恢复 core-errors Either 脚手架记忆",
+      "workspace": "D:\\Dev\\Js\\novel-master"
+    },
+    "dataSource": "C:\\Users\\BloodyCrown\\.omz\\cli\\db\\db.sqlite（read-only 统计 message/part 行数）+ tasks-index.sqlite（确认未归档、可点开）"
+  },
+  "method": {
+    "driving": "采样脚本不含「打开会话」动作，只读页面窗口面。打开/切换由外部 CDP 驱动完成：点击侧栏 [data-testid=\"task-item-<sessionId>\"] 行（pointerdown/mousedown/pointerup/mouseup/click），再等 ACK 出现。",
+    "ringReset": "每次打开前调用 window.__zcodeV4ConversationOpensE2E.reset() 清空 ACK 环（脚本自身的 reset() 只清 __zcodePerfProbe，不清 ACK 环；不清会读到上一次打开的同 topic 样本）。",
+    "samplerDurationMs": 4000,
+    "samplerScrollSelector": "[data-testid=\"v4-timeline\"]",
+    "visibility": "Chromium 的窗口遮挡检测会把被其他窗口盖住的页面判成 hidden：此时 rAF 被降频（实测同一次打开的 paintAfterApplyMs 从 429ms 变成 93827ms）、timer 被夹到 1s。每次采样前用 CDP Page.setWebLifecycleState(active) + Emulation.setFocusEmulationEnabled(true) + Page.bringToFront 把页面切回 visible。",
+    "titleWorkaround": "采样脚本按 title === \"ZCode\" 找 page target，而本树 renderer/index.html 的 title 与 productName 都是 \"omz\" → 脚本会以退出码 5 失败。采样前把 document.title 改成 \"ZCode\"（纯 target 选择器，不参与任何计时）。这是脚本缺陷，见 findings.samplerTargetTitle。",
+    "coldPathDefinition": "app 与 CLI 都不在：kill 整个 electron 树（CLI agent 以 electron.exe 形态 spawn，随树一起消失）→ 用 --open-workspace D:\\Dev\\Js\\novel-master 冷启（保证目标 workspace 不在启动预热名单内）→ 等 UI 就绪 → 清环 → 点开目标会话。三次冷开各重启一次 app。",
+    "hotPathDefinition": "app 已在、该 workspace 的 CLI 已在，但目标会话在 renderer 侧没有 store（keep-warm 已过期 ≥30s）→ 点开。目标会话 sess_902d4d67；第 1 次是该会话在本 CLI 进程内的首次打开，第 2/3 次是同一会话在 CLI runtime 仍 live 时重开。",
+    "reopenPathDefinition": "同一会话（sess_57cf107c）被打开过 → 切到别的会话 → 等 keep-warm（SESSION_DATA_LAYER_KEEP_WARM_MS=30s）过期 → 再点开。renderer 会新建 store 并重新 subscribe（有 ACK）。",
+    "keepWarmPathDefinition": "同一会话已打开 → 切到别的会话（sess_e20b7f31）→ 2.5s 内切回。命中 SessionDataLayer keep-warm，不发生 subscribe。"
+  },
+  "runs": [
+    {
+      "path": "cold",
+      "runIndex": 1,
+      "run": "cold-1",
+      "samplerExitCode": null,
+      "samplerExitCodeNote": "该次由 cold-sample 直接执行、未落 .out.json；控制台输出为 ok=true exitCode=0，且报告 openProbe.acceptance.verdict=present（脚本对 present 返回 0）",
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 7831,
+        "paintAfterApplyMs": 429,
+        "initialFrameTransportMs": 128,
+        "rendererSnapshotApplyMs": 0
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 1776,
+        "cliRequestMs": 5866,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 3,
+        "initialFrameEncodeMs": 7,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 3121,
+        "mergeMs": 2867,
+        "rehydrateMs": 217,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 2400,
+        "domRowCount": 79,
+        "maxScrollTop": 15227,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": null,
+      "visibilityAtOpen": null,
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\cold-1.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/cold-1.json"
+    },
+    {
+      "path": "cold",
+      "runIndex": 2,
+      "run": "cold-2",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 7695,
+        "paintAfterApplyMs": 461,
+        "initialFrameTransportMs": 129,
+        "rendererSnapshotApplyMs": 0
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 1583,
+        "cliRequestMs": 5917,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 3,
+        "initialFrameEncodeMs": 7,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 3338,
+        "mergeMs": 3067,
+        "rehydrateMs": 233,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 2520,
+        "domRowCount": 79,
+        "maxScrollTop": 15299,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 5255,
+        "window": 60,
+        "maxScrollTop": 5295
+      },
+      "visibilityAtOpen": "visible",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\cold-2.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/cold-2.json"
+    },
+    {
+      "path": "cold",
+      "runIndex": 3,
+      "run": "cold-3",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 7675,
+        "paintAfterApplyMs": 433,
+        "initialFrameTransportMs": 126,
+        "rendererSnapshotApplyMs": 0
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 1578,
+        "cliRequestMs": 5906,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 2,
+        "initialFrameEncodeMs": 7,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 3348,
+        "mergeMs": 3083,
+        "rehydrateMs": 227,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 2400,
+        "domRowCount": 79,
+        "maxScrollTop": 15227,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 5255,
+        "window": 60,
+        "maxScrollTop": 5295
+      },
+      "visibilityAtOpen": "visible",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\cold-3.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/cold-3.json"
+    },
+    {
+      "path": "hot",
+      "runIndex": 1,
+      "run": "hot-1",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "sessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 9724,
+        "paintAfterApplyMs": 209,
+        "initialFrameTransportMs": 25,
+        "rendererSnapshotApplyMs": 0
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 2,
+        "cliRequestMs": 9619,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 2,
+        "initialFrameEncodeMs": 3,
+        "snapshotRowCount": 2347
+      },
+      "openPhases": {
+        "viewReadyMs": 5363,
+        "mergeMs": 5263,
+        "rehydrateMs": 88,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 2347,
+        "windowRowCount": 2347,
+        "domRowCount": 58,
+        "maxScrollTop": 12242,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 2347,
+        "window": 120,
+        "maxScrollTop": 5407
+      },
+      "visibilityAtOpen": "visible",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\hot-1.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/hot-1.json"
+    },
+    {
+      "path": "hot",
+      "runIndex": 2,
+      "run": "hot-2",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "sessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 133,
+        "paintAfterApplyMs": null,
+        "initialFrameTransportMs": 21,
+        "rendererSnapshotApplyMs": 1
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 2,
+        "cliRequestMs": 4,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 1,
+        "initialFrameEncodeMs": 3,
+        "snapshotRowCount": 2347
+      },
+      "openPhases": {
+        "viewReadyMs": 4,
+        "mergeMs": null,
+        "rehydrateMs": null,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 2347,
+        "windowRowCount": 1980,
+        "domRowCount": 58,
+        "maxScrollTop": 32820,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 2347,
+        "window": 120,
+        "maxScrollTop": 5313
+      },
+      "visibilityAtOpen": "hidden",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\hot-2.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/hot-2.json"
+    },
+    {
+      "path": "hot",
+      "runIndex": 3,
+      "run": "hot-3",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "sessionId": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 187,
+        "paintAfterApplyMs": null,
+        "initialFrameTransportMs": 31,
+        "rendererSnapshotApplyMs": 0
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 2,
+        "cliRequestMs": 6,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 1,
+        "initialFrameEncodeMs": 4,
+        "snapshotRowCount": 2347
+      },
+      "openPhases": {
+        "viewReadyMs": 5,
+        "mergeMs": null,
+        "rehydrateMs": null,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 2347,
+        "windowRowCount": 1800,
+        "domRowCount": 58,
+        "maxScrollTop": 31596,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 2347,
+        "window": 120,
+        "maxScrollTop": 5313
+      },
+      "visibilityAtOpen": "hidden",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\hot-3.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/hot-3.json"
+    },
+    {
+      "path": "reopen",
+      "runIndex": 1,
+      "run": "reopen-1",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 4128,
+        "paintAfterApplyMs": null,
+        "initialFrameTransportMs": 168,
+        "rendererSnapshotApplyMs": 1
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 2,
+        "cliRequestMs": 3886,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 2,
+        "initialFrameEncodeMs": 6,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 3225,
+        "mergeMs": 2966,
+        "rehydrateMs": 227,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 1800,
+        "domRowCount": 79,
+        "maxScrollTop": 22981,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 5255,
+        "window": 60,
+        "maxScrollTop": 5295
+      },
+      "visibilityAtOpen": "hidden",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\reopen-1.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/reopen-1.json"
+    },
+    {
+      "path": "reopen",
+      "runIndex": 2,
+      "run": "reopen-2",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 225,
+        "paintAfterApplyMs": null,
+        "initialFrameTransportMs": 48,
+        "rendererSnapshotApplyMs": 1
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 3,
+        "cliRequestMs": 17,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 3,
+        "initialFrameEncodeMs": 12,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 15,
+        "mergeMs": null,
+        "rehydrateMs": null,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 1740,
+        "domRowCount": 79,
+        "maxScrollTop": 22549,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 5255,
+        "window": 60,
+        "maxScrollTop": 5295
+      },
+      "visibilityAtOpen": "hidden",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\reopen-2.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/reopen-2.json"
+    },
+    {
+      "path": "reopen",
+      "runIndex": 3,
+      "run": "reopen-3",
+      "samplerExitCode": 0,
+      "samplerVerdict": "present",
+      "missingReason": null,
+      "targetSessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "sessionId": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "mode": "snapshot",
+      "renderer": {
+        "uiViewReadyMs": 154,
+        "paintAfterApplyMs": null,
+        "initialFrameTransportMs": 48,
+        "rendererSnapshotApplyMs": 1
+      },
+      "openTiming": {
+        "cliBootstrapMs": null,
+        "cliProcessState": "reused",
+        "sessionRuntimeState": "warm",
+        "hostPrepareMs": 3,
+        "cliRequestMs": 12,
+        "providerRegistrySyncMs": 0,
+        "taskMetaReadMs": 3,
+        "initialFrameEncodeMs": 10,
+        "snapshotRowCount": 5255
+      },
+      "openPhases": {
+        "viewReadyMs": 11,
+        "mergeMs": null,
+        "rehydrateMs": null,
+        "manifestMs": null,
+        "materializeMs": null
+      },
+      "longSession": {
+        "ok": true,
+        "totalRowCount": 5255,
+        "windowRowCount": 1920,
+        "domRowCount": 79,
+        "maxScrollTop": 23269,
+        "thresholds": {
+          "minTotalRowCount": 200,
+          "minMaxScrollTop": 1000
+        }
+      },
+      "timelineAtOpen": {
+        "total": 5255,
+        "window": 60,
+        "maxScrollTop": 5295
+      },
+      "visibilityAtOpen": "hidden",
+      "rawReport": "%TEMP%\\c-session-open-qa\\raw\\reopen-3.json",
+      "samplerCommand": "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out raw/reopen-3.json"
+    },
+    {
+      "path": "keepwarm",
+      "runIndex": 1,
+      "run": "keepwarm-1",
+      "samplerExitCode": null,
+      "samplerVerdict": "not-applicable",
+      "missingReason": "keep-warm 命中时 SessionDataLayer.acquire 直接复用 store，不发起 subscribe，ACK 与 uiViewReadyMs 没有生产者",
+      "newAck": null,
+      "switchMs": 981,
+      "visibilityAtOpen": "visible",
+      "measurement": "页面内 performance.now 打点（点击派发前）→ 页面外 25ms 轮询到 pane data-session-id 切换为目标会话且 v4-timeline totalRowCount>0 的那次采样时刻；含同步 React commit 与首屏行渲染，不含点击前的浏览器输入排队",
+      "rawReport": "%TEMP%\\c-session-open-qa\\keepwarm-1.out.json"
+    },
+    {
+      "path": "keepwarm",
+      "runIndex": 2,
+      "run": "keepwarm-2",
+      "samplerExitCode": null,
+      "samplerVerdict": "not-applicable",
+      "missingReason": "keep-warm 命中时 SessionDataLayer.acquire 直接复用 store，不发起 subscribe，ACK 与 uiViewReadyMs 没有生产者",
+      "newAck": null,
+      "switchMs": 1112,
+      "visibilityAtOpen": "visible",
+      "measurement": "页面内 performance.now 打点（点击派发前）→ 页面外 25ms 轮询到 pane data-session-id 切换为目标会话且 v4-timeline totalRowCount>0 的那次采样时刻；含同步 React commit 与首屏行渲染，不含点击前的浏览器输入排队",
+      "rawReport": "%TEMP%\\c-session-open-qa\\keepwarm-2.out.json"
+    },
+    {
+      "path": "keepwarm",
+      "runIndex": 3,
+      "run": "keepwarm-3",
+      "samplerExitCode": null,
+      "samplerVerdict": "not-applicable",
+      "missingReason": "keep-warm 命中时 SessionDataLayer.acquire 直接复用 store，不发起 subscribe，ACK 与 uiViewReadyMs 没有生产者",
+      "newAck": null,
+      "switchMs": 1203,
+      "visibilityAtOpen": "visible",
+      "measurement": "页面内 performance.now 打点（点击派发前）→ 页面外 25ms 轮询到 pane data-session-id 切换为目标会话且 v4-timeline totalRowCount>0 的那次采样时刻；含同步 React commit 与首屏行渲染，不含点击前的浏览器输入排队",
+      "rawReport": "%TEMP%\\c-session-open-qa\\keepwarm-3.out.json"
+    }
+  ],
+  "aggregates": {
+    "cold": {
+      "runs": ["cold-1", "cold-2", "cold-3"],
+      "uiViewReadyMs": [7831, 7695, 7675],
+      "uiViewReadyMsMedian": 7695,
+      "paintAfterApplyMs": [429, 461, 433],
+      "hostPrepareMs": [1776, 1583, 1578],
+      "cliRequestMs": [5866, 5917, 5906],
+      "viewReadyMs": [3121, 3338, 3348],
+      "mergeMs": [2867, 3067, 3083],
+      "rehydrateMs": [217, 233, 227],
+      "transportMs": [128, 129, 126],
+      "cliBootstrapMs": "缺席（全部 3 次）",
+      "cliProcessState": "全部为 reused（见 findings.coldCliBootstrapMissing）",
+      "viewSideProxyDefinition": "uiViewReadyMs - hostPrepareMs：hostPrepareMs ⊇ cliBootstrapMs，因此这是「视图侧」最宽松的下界（把 spawn 与 provider/task meta 全部减掉）",
+      "viewSideProxyMs": [6055, 6112, 6097],
+      "viewSideProxyMsMedian": 6097
+    },
+    "hot": {
+      "splitByRegime": true,
+      "firstOpenInCliProcess": {
+        "runs": ["hot-1"],
+        "uiViewReadyMs": [9724],
+        "uiViewReadyMsMedian": 9724,
+        "paintAfterApplyMs": [209],
+        "hostPrepareMs": [2],
+        "cliRequestMs": [9619],
+        "viewReadyMs": [5363],
+        "mergeMs": [5263],
+        "rehydrateMs": [88],
+        "transportMs": [25]
+      },
+      "liveRuntimeReopen": {
+        "runs": ["hot-2", "hot-3"],
+        "uiViewReadyMs": [133, 187],
+        "uiViewReadyMsMedian": 160,
+        "paintAfterApplyMs": [null, null],
+        "hostPrepareMs": [2, 2],
+        "cliRequestMs": [4, 6],
+        "viewReadyMs": [4, 5],
+        "mergeMs": [null, null],
+        "rehydrateMs": [null, null],
+        "transportMs": [21, 31]
+      },
+      "combined": {
+        "runs": ["hot-1", "hot-2", "hot-3"],
+        "uiViewReadyMs": [9724, 133, 187],
+        "uiViewReadyMsMedian": 187,
+        "paintAfterApplyMs": [209, null, null],
+        "hostPrepareMs": [2, 2, 2],
+        "cliRequestMs": [9619, 4, 6],
+        "viewReadyMs": [5363, 4, 5],
+        "mergeMs": [5263, null, null],
+        "rehydrateMs": [88, null, null],
+        "transportMs": [25, 21, 31]
+      },
+      "note": "hot-1 是该会话在本 CLI 进程内的首次打开（CLI 从未 resume 过它，cliRequestMs=9619）；hot-2/3 是 CLI runtime 仍持有该会话时的重开（cliRequestMs=4/6）。两者相差 70 倍，合并中位数无意义。"
+    },
+    "reopen": {
+      "splitByRegime": true,
+      "firstOpenAfterCliEvicted": {
+        "runs": ["reopen-1"],
+        "uiViewReadyMs": [4128],
+        "uiViewReadyMsMedian": 4128,
+        "paintAfterApplyMs": [null],
+        "hostPrepareMs": [2],
+        "cliRequestMs": [3886],
+        "viewReadyMs": [3225],
+        "mergeMs": [2966],
+        "rehydrateMs": [227],
+        "transportMs": [168]
+      },
+      "liveRuntimeReopen": {
+        "runs": ["reopen-2", "reopen-3"],
+        "uiViewReadyMs": [225, 154],
+        "uiViewReadyMsMedian": 190,
+        "paintAfterApplyMs": [null, null],
+        "hostPrepareMs": [3, 3],
+        "cliRequestMs": [17, 12],
+        "viewReadyMs": [15, 11],
+        "mergeMs": [null, null],
+        "rehydrateMs": [null, null],
+        "transportMs": [48, 48]
+      },
+      "combined": {
+        "runs": ["reopen-1", "reopen-2", "reopen-3"],
+        "uiViewReadyMs": [4128, 225, 154],
+        "uiViewReadyMsMedian": 225,
+        "paintAfterApplyMs": [null, null, null],
+        "hostPrepareMs": [2, 3, 3],
+        "cliRequestMs": [3886, 17, 12],
+        "viewReadyMs": [3225, 15, 11],
+        "mergeMs": [2966, null, null],
+        "rehydrateMs": [227, null, null],
+        "transportMs": [168, 48, 48]
+      },
+      "note": "reopen-1 距上一次打开约 3 分钟，CLI 已把该会话卸下（cliRequestMs=3886）；reopen-2/3 间隔约 35s，runtime 仍 live（cliRequestMs=17/12）。"
+    },
+    "keepwarm": {
+      "switchMs": [],
+      "switchMsMedian": 1112,
+      "newAck": [null, null, null],
+      "note": "三次切回均无新 ACK：keep-warm 命中时不发生 subscribe，uiViewReadyMs 没有生产者（spec:128 的豁免在本基线成立）。"
+    }
+  },
+  "acceptance": [
+    {
+      "scenario": "冷开（CLI 未起）",
+      "criterion": "uiViewReadyMs - openTiming.cliBootstrapMs ≤ 1000ms（视图侧；spawn 单列）",
+      "measured": "uiViewReadyMs 中位 7695ms；cliBootstrapMs 三次全部缺席，判据不可直接计算",
+      "proxy": "uiViewReadyMs - hostPrepareMs（hostPrepareMs ⊇ cliBootstrapMs，故这是最宽松的视图侧下界）中位 6097ms",
+      "total": "总量中位 7695ms（观察项阈值 2.5~3s）",
+      "verdict": "fail",
+      "note": "即使把整段 hostPrepareMs（含 CLI spawn、provider 同步、task meta 读）全部减掉，视图侧仍是 6.1s 级，是 1s 门槛的 6 倍；总量是 2.5~3s 观察上限的 2.6~3 倍。cliBootstrapMs 缺席使 spec 的冷开判据在本树无法按字面执行，见 findings.coldCliBootstrapMissing。"
+    },
+    {
+      "scenario": "热开（CLI 已起、会话冷）",
+      "criterion": "uiViewReadyMs ≤ 800ms",
+      "measured": "分两种 regime：首次在该 CLI 进程内打开该会话 9724ms；同一会话在 CLI runtime 仍 live 时重开 133/187ms",
+      "verdict": "split",
+      "note": "同一「热开」定义下 133ms 与 9724ms 相差 70 倍，判据必须再按「会话是否已在 CLI runtime 内 live」分档，否则任一单次样本都会给出相反结论。800ms 只在 CLI 侧 runtime 仍持有该会话时成立。"
+    },
+    {
+      "scenario": "重开同会话（关掉再打开、CLI 已起）",
+      "criterion": "spec 未单列阈值；按热开 800ms 观察",
+      "measured": "4128ms / 225ms / 154ms（中位 225ms）：第一次重开时 CLI 已把该会话卸下（3 分钟无访问），后两次 runtime 仍 live",
+      "verdict": "split",
+      "note": "与热开同一规律：成本由「CLI runtime 是否仍持有该会话」决定，而不是由 renderer 的 keep-warm 决定。"
+    },
+    {
+      "scenario": "切回（已打开 / keep-warm）",
+      "criterion": "不适用 uiViewReadyMs（无 subscribe、无 ACK）；单列内存态切回观察项",
+      "measured": "三次切回均未产生新 ACK（newAck=null），click→首屏可观测 981/1112/1203ms",
+      "verdict": "exempt",
+      "note": "spec 给的 150ms 参考值在本基线未复现：1.0~1.2s。该数不含任何 RPC，纯 renderer 侧重新挂载目标 pane 的投影与首屏行渲染；不是 uiViewReadyMs 的同义量。"
+    }
+  ],
+  "decomposition": [
+    {
+      "segment": "uiViewReadyMs（验收基准，renderer 总量）",
+      "median": 7695,
+      "scope": "冷开",
+      "nesting": "⊇ 下面所有段"
+    },
+    {
+      "segment": "openTiming.hostPrepareMs（含 CLI spawn）",
+      "median": 1583,
+      "scope": "冷开",
+      "nesting": "⊇ cliBootstrapMs + providerRegistrySyncMs + taskMetaReadMs"
+    },
+    {
+      "segment": "openTiming.cliRequestMs（subscribe RPC 往返）",
+      "median": 5906,
+      "scope": "冷开",
+      "nesting": "⊇ ACK 里的 openPhases.viewReadyMs"
+    },
+    {
+      "segment": "openPhases.viewReadyMs（CLI 进程内视图就绪）",
+      "median": 3338,
+      "scope": "冷开",
+      "nesting": "⊇ mergeMs + rehydrateMs + initialFrameEncodeMs"
+    },
+    {
+      "segment": "openPhases.mergeMs",
+      "median": 3067,
+      "scope": "冷开",
+      "nesting": "被 viewReadyMs 包含"
+    },
+    {
+      "segment": "openPhases.rehydrateMs",
+      "median": 227,
+      "scope": "冷开",
+      "nesting": "被 viewReadyMs 包含"
+    },
+    {
+      "segment": "renderer.initialFrameTransportMs（ACK→首帧传输）",
+      "median": 128,
+      "scope": "冷开",
+      "nesting": "位于 cliRequestMs 之后、snapshot 应用之前"
+    },
+    {
+      "segment": "renderer.rendererSnapshotApplyMs（首帧→应用完成）",
+      "median": 0,
+      "scope": "冷开",
+      "nesting": "被 uiViewReadyMs 包含"
+    },
+    {
+      "segment": "renderer.paintAfterApplyMs（应用完成→2×rAF）",
+      "median": 433,
+      "scope": "冷开（仅 4/9 次采到）",
+      "nesting": "不在 uiViewReadyMs 内，两者相加才是到首绘"
+    },
+    {
+      "segment": "openPhases.manifestMs / materializeMs",
+      "median": null,
+      "scope": "全部路径",
+      "nesting": "本阶段无生产者，恒缺席（缺席≠0）"
+    }
+  ],
+  "readingRules": [
+    "验收基准只有 renderer.uiViewReadyMs（connect 入口 → snapshot 应用完成）。openPhases.viewReadyMs 是 CLI 进程内一段，不含 host 准备 / CLI spawn / RPC 往返 / 首帧传输 / renderer apply，冷开下系统性偏短，不得用它判 1s。",
+    "各段嵌套不可相加：viewReadyMs ⊇ initialFrameEncodeMs、viewReadyMs ⊃ mergeMs + rehydrateMs、hostPrepareMs ⊇ cliBootstrapMs + providerRegistrySyncMs + taskMetaReadMs、cliRequestMs ⊇ viewReadyMs。",
+    "缺席 ≠ 0：manifestMs / materializeMs 本阶段没有生产者；cliBootstrapMs 在本树结构性缺席（见 findings）；paintAfterApplyMs 在部分 regime 缺席。禁止补 0 求「各段之和」。",
+    "uiViewReadyMs 的起点是 SessionDataLayer.acquire，而 acquire 在 useEffect 里执行，比用户点击晚一个 React commit；它天然不含「点击 → 提交」，不是完整点击延迟。",
+    "重试代际只记最后一次：带 runtime recycle 的冷开在 baseline 里会显得很快。本次采样没有单独记录 recycle 次数（ACK 的 mode 全为 snapshot，但 recycle 重入 connect 不改变 mode），因此「某个样本是否夹带 recycle 重试」无法从 ACK 反推——这一项需要在终验里单独打点。"
+  ],
+  "findings": [
+    {
+      "id": "coldCliBootstrapMissing",
+      "severity": "blocking-for-metric",
+      "statement": "本树的冷开无法产出 openTiming.cliBootstrapMs：三次冷开（app 已 kill、9229 已关闭后重新拉起）全部记为 cliProcessState=\"reused\"，但同一 workspace 的 CLI 进程是在这次打开里才起来的。",
+      "evidence": [
+        "hostPrepareMs（= subscribe 入口 → cliRequest 发起）从热开 regime 的 2~3ms 涨到 1578~1776ms，多出来的正是进程启动与握手。",
+        "该 workspace（D:\\Dev\\Js\\oh-my-zcode）不在启动预热名单内：无 --open-workspace 的那次冷启只预热 active + recentProjects 前二（实测 novel-master / greygoo / coding-skills，日志可见），三次冷开样本则用 --open-workspace D:\\Dev\\Js\\novel-master 显式启动（createOpenWorkspaceStartupBootstrap 的 warmup 只含该 workspace）。",
+        "首个冷开实例的 host 日志里，oh-my-zcode 的 ZCode agent spawn preflight 出现在 subscribe 之前 76ms（20:00:36.216 spawn，20:00:44.137 subscribe 以 7845ms 结束），确认 spawn 落在 hostPrepareMs 内而不是 cliBootstrapMs 窗口内。"
+      ],
+      "cause": "packages/services/src/zcode-agent/zcodeAgentService.ts:4404-4414 用 processManager.getExistingClient(params) 判 cliProcessState：只要该 workspace 的 client 对象已存在（由任务列表/workspace init 预建）就记 reused，即使底层进程尚未 spawn；spawn 成本因此落在 hostPrepareMs 内，cliBootstrapMs 被跳过。",
+      "impact": "spec:126 的冷开判据 uiViewReadyMs - cliBootstrapMs ≤ 1s 在本树不可计算；本基线改用 uiViewReadyMs - hostPrepareMs 作最宽松下界。"
+    },
+    {
+      "id": "samplerTargetTitle",
+      "severity": "blocking-for-tooling",
+      "statement": "scripts/dev/long-session-perf-sample.mjs 用 t.title === \"ZCode\" 选 page target，本树 renderer/index.html 的 title 与 packages/desktop 的 productName 都是 \"omz\"，未改标题时脚本以退出码 5 结束（第 1 次 cold-1 与 smoke 运行已实测）。",
+      "workaround": "采样前把 document.title 改成 \"ZCode\"。",
+      "suggestion": "改用「非空 title 且 type=page」或按 productName 识别，别硬编码上游产品名。"
+    },
+    {
+      "id": "paintAfterApplyMissing",
+      "severity": "measurement-gap",
+      "statement": "renderer.paintAfterApplyMs 只在 4/9 次采样里采到（冷开 3 次 + 热开首次 9724ms 那一次）；热开 runtime-live 的 2 次、重开 3 次全部缺席，另做 1 次 2127ms 的热开复测（8s 后读 ACK）仍缺席。",
+      "evidence": "conversationProjectionStore.scheduleOpenPaintSample 用 2×requestAnimationFrame 回填，回调里 this.closed || this.generation !== generation 时直接丢弃；被丢弃后不会再补写。",
+      "impact": "spec 要求「uiViewReadyMs + paintAfterApplyMs 才是体感总量」，因此在快路径 regime 上本基线只能给 uiViewReadyMs，不能给到首绘总量。",
+      "nextStep": "定位 generation 在这 2 帧内被推进的原因（订阅后立即发生重订阅/recycle？）或改为「缺 paint 样本时打点告警」，否则终验会出现同样的空洞。"
+    },
+    {
+      "id": "hiddenWindowThrottling",
+      "severity": "measurement-hazard",
+      "statement": "窗口被其他窗口遮挡时 Chromium 把页面判为 hidden，rAF 被降频、timer 被夹到 1s：同一次打开的 paintAfterApplyMs 实测 93827ms（hidden）vs 429~461ms（visible）；keep-warm 切回在 hidden 下测出 1048ms 且与 1s 定时器夹取不可区分。",
+      "mitigation": "采样前用 CDP Page.setWebLifecycleState(active) + Emulation.setFocusEmulationEnabled(true) + Page.bringToFront。"
+    },
+    {
+      "id": "cliRuntimeResidencyDominates",
+      "severity": "interpretation-critical",
+      "statement": "打开耗时的主导项是「CLI runtime 是否仍持有该会话」：未持有 → resume + 全量水化（冷开 7.7s、热开首次 9.7s、重开首次 4.1s）；持有 → 直接下发快照（133~225ms）。renderer 的 30s keep-warm 只决定是否重新 subscribe，不决定这段成本。",
+      "consequence": "phase-view-runtime-split / phase-lazy-history 的收益必须按这两种 regime 分开验收，否则「优化无效」与「优化极大」都能从同一批数字里各取一半。"
+    },
+    {
+      "id": "listObserverPrewarmsWorkspace",
+      "severity": "design-context",
+      "statement": "启动时 Main 只预热 active + 最近 2 个 workspace（startupWorkspace.ts:151-157，实测预热 novel-master/greygoo/coding-skills），但侧栏任务列表加载时仍会为其他 workspace 建 client（oh-my-zcode 的 spawn 发生在点击时，client 早已存在）→ 这就是 cliProcessState 恒 reused 的来源。"
+    },
+    {
+      "id": "tailWindowRows",
+      "severity": "context",
+      "statement": "冷开时 v4-timeline 的 data-total-row-count=5255、data-window-row-count=60；采样窗口内（scroll 驱动 + 后续追帧）window 行数涨到 2400~3180，说明打开完成后还有持续的行物化/下发，会与 uiViewReadyMs 之后的 paint 争主线程。"
+    }
+  ],
+  "risks": [
+    "本基线在 dev 构建上采（perfProbe 与 __zcodeV4ConversationOpensE2E 都是 dev-only），生产包没有这两个出口，验收只能在 dev 构建复现。",
+    "冷开三次都靠 kill electron 树保证「CLI 未起」，若 CLI 进程脱离树存活（本次未观察到：kill 后无 electron.exe 残留、下次打开 hostPrepareMs 回到 1.5s 级），冷开样本会退化成热开。",
+    "目标会话 sess_57cf107c 带 135895 字符的 revert 载荷（keptMessageIDs），冷路径要先算全序裁断再物化；它比无 revert 的长会话更贵，基线偏保守（更慢）一侧。",
+    "采样脚本的 30s 默认窗口 + 两窗口会把单次采样拉长到 60s；本基线用 --duration-ms 4000 压到 ~8s，窗口内 longSession 判据仍成立（totalRowCount 5255）。",
+    "paintAfterApplyMs 依赖 rAF，只能在前台可见窗口测；CI/无人值守环境必须显式解除遮挡，否则该字段不可用。"
+  ],
+  "reproduction": {
+    "steps": [
+      "pnpm --filter @zcode/desktop pre-dev",
+      "node scripts/build-desktop-agent-cli.mjs",
+      "pnpm dev:desktop（tsup watch + vite + electron），或单独起 vite dev 后自 spawn electron",
+      "把侧栏里未归档的长会话点开前先 window.__zcodeV4ConversationOpensE2E.reset()",
+      "node scripts/dev/long-session-perf-sample.mjs --skip-launch --session <id> --duration-ms 4000 --scroll-selector '[data-testid=\"v4-timeline\"]' --out <report>.json"
+    ],
+    "notes": "本文件的 runs[] 由上述脚本产出的原始报告汇总而成；原始报告落在 %TEMP%\\c-session-open-qa\\raw\\ 与 %TEMP%\\c-session-open-qa\\*.out.json（不随仓库提交）。"
+  }
+}

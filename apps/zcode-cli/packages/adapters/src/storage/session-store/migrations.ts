@@ -929,8 +929,11 @@ export const SQLITE_MIGRATIONS: readonly SqliteMigration[] = [
     appVersion: "0.16.5",
     id: "0024_session_file_change_summaries",
     sql: SESSION_FILE_CHANGE_SUMMARIES_MIGRATION_SQL,
+    id: "0023_session_turn_manifest",
+    sql: SESSION_TURN_MANIFEST_MIGRATION_SQL,
   },
 ];
 import { OFFICIAL_GLM_SELECTION_MIGRATION_SQL } from "./migrations/0021-official-glm-selection.js";
 import { BACKFILLED_SESSION_REASONING_MIGRATION_SQL } from "./migrations/0022-backfilled-session-reasoning.js";
 import { SESSION_FILE_CHANGE_SUMMARIES_MIGRATION_SQL } from "./migrations/0024-session-file-change-summaries.js";
+import { SESSION_TURN_MANIFEST_MIGRATION_SQL } from "./migrations/0023-session-turn-manifest.js";

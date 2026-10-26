@@ -5,12 +5,15 @@ import type {
   MessagePart,
   MessageWithParts,
   PartId,
+  PersistedAssistantSelection,
   SessionId,
+  SessionMessageIndexEntry,
   SessionStorePort,
+  SessionToolPartEntry,
 } from "@zcode/contracts";
 import { decodeMessageRow, decodePartRow, partCreatedAt } from "../codecs.js";
 import { encodeJson } from "../json.js";
-import type { MessageRow, PartRow } from "../rows.js";
+import type { MessageIndexRow, MessageRow, PartRow } from "../rows.js";
 import { touchSession } from "./sessions.js";
 
 // 只补回旧版快照字段，不合并整个 JSON：递归 merge 会让已清空的 metadata/options 残留。
@@ -216,6 +219,278 @@ export async function removePart(
     input.messageID,
     input.sessionID,
   );
+}
+
+/**
+ * 全序消息索引（IS2 的「id 必须全序」读面）：只读排序键，**不读 `data`**。
+ *
+ * 排序必须与 `messages()` 逐字一致（`order by sequence is null, sequence, time_created, rowid`）：
+ * - `sequence is null` 的结果集是 0/1，**null 行排在非空之后**（0015 backfill 的注释也是这个口径）；
+ * - `time_created` 与 `rowid` 是同级 tiebreaker，不能省——sequence 相同的行（旧库/导入）
+ *   否则顺序不稳定，索引序与全量序就会出现「同序但不同列」的静默漂移。
+ *
+ * 不读 `data` 是设计约束（message 表没有 role 列，role 在 data JSON 里）：一旦这里
+ * `select *` 或读 data，冷开就退回全量正文读，Step 5/7 的窗口化收益归零。
+ */
+export async function listSessionMessageIndex(
+  db: DatabaseSync,
+  input: { sessionID: SessionId },
+): Promise<SessionMessageIndexEntry[]> {
+  const rows = db
+    .prepare(
+      `
+      select id, sequence, time_created, rowid as storage_row_id from message
+      where session_id = ?
+      order by sequence is null, sequence, time_created, rowid
+      `,
+    )
+    .all(input.sessionID) as unknown as MessageIndexRow[];
+  return rows.map((row) => ({
+    id: row.id as MessageId,
+    sequence: row.sequence,
+    timeCreated: row.time_created,
+    storageRowId: row.storage_row_id,
+  }));
+}
+
+/**
+ * 首屏 model/mode 的窄读：**最后一条带 mode 的 assistant**（IS3 / Step 9）。
+ *
+ * mode 只落在 assistant 消息的 `data` 上（session_entry 没有承载它的类型），所以首屏种子
+ * 绕不开消息表；但这里只读**一行**、只解 1 条 message 的 JSON，不读 parts、不扫全表——
+ * 与 `messages()` 全量读的差别是 O(1) 对 O(n)。
+ *
+ * 排序键复刻 `messages()` 的权威序（`sequence is null, sequence, time_created, rowid`）的
+ * 反序：取的就是同一序列的最后一条。`mode is not null` 进 SQL 而不是取最后一条再判，
+ * 因为「最后一条 assistant 恰好是旧格式、没有 mode」时应当继续往前找（`derivePersistedSessionMode`
+ * 的倒扫语义）。
+ */
+export async function readLatestAssistantSelection(
+  db: DatabaseSync,
+  input: { sessionID: SessionId },
+): Promise<PersistedAssistantSelection | null> {
+  const row = db
+    .prepare(
+      `
+      select * from message
+      where session_id = ?
+        and json_extract(data, '$.role') = 'assistant'
+        and json_extract(data, '$.mode') is not null
+      order by sequence is null desc, sequence desc, time_created desc, rowid desc
+      limit 1
+      `,
+    )
+    .get(input.sessionID) as unknown as MessageRow | undefined;
+  if (!row) return null;
+  const info = decodeMessageRow(row);
+  if (info.role !== "assistant") return null;
+  const { modelId, providerId, reasoningLevel } = info;
+  return {
+    mode: info.mode,
+    ...(modelId && providerId
+      ? {
+          modelSelection: {
+            providerId: String(providerId),
+            modelId: String(modelId),
+            ...(reasoningLevel ? { options: { reasoningLevel } } : {}),
+          },
+        }
+      : {}),
+  };
+}
+
+/**
+ * 单条 SQL 的 `in (...)` 参数上限。SQLite 默认变量上限 999，500 留一倍余量：
+ * 冷窗口（≤400 行对应的消息）一条语句就够，整条分支最多分几条。
+ */
+const MESSAGE_READ_CHUNK_SIZE = 500;
+function placeholdersFor(count: number): string {
+  return new Array(count).fill("?").join(", ");
+}
+
+function chunksOf<T>(items: readonly T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+/** 尾窗读的输入。`activeMessageIds` 必须是**全序** active 分支 id 序（见函数注释）。 */
+export interface ReadActiveBranchTailInput {
+  sessionID: SessionId;
+  /**
+   * 调用方用「消息索引 + `selectActiveConversationBranchIds`」算出的 active 分支 id 序
+   * （**全序**，不是窗口）。分支归属与顺序都由它决定：本函数不做任何裁断，也不按
+   * `time_created` 自行取 N 条——那两条路都会在 revert 过的会话上复活旧分支或清空历史。
+   */
+  activeMessageIds: readonly MessageId[];
+  /**
+   * 窗口下界（**含**）：该 id 之前（更早）的消息不读。缺省 = 读到分支头部。
+   * 值由 manifest 给出（窗口首轮的首条 messageId，见 `selectColdTailWindow`）。
+   *
+   * 游标不在 `activeMessageIds` 里 = 清单与索引不同步：退化为整条分支（多读，绝不少读）。
+   * 宁可多付一次全量正文读，也不能因为一个找不到的游标让首屏空白。
+   */
+  limitBefore?: MessageId | null;
+  /**
+   * 窗口上界（**不含**）：该 id 及其之后的消息不读。缺省 = 读到分支末尾。
+   *
+   * Step 7 的按需物化靠它把一次翻页的正文读限制在页内的整轮里：`limitBefore` 是页首轮
+   * 首条消息、`limitAfter` 是页末轮之后第一个有消息的轮的首条消息（都由 manifest 给）。
+   * 不传时行为与 Step 5 的尾窗读逐字相同（读到分支末尾）。
+   *
+   * 游标不在 `activeMessageIds` 里 = 清单与索引不同步：退化为读到分支末尾（多读，绝不少读）。
+   */
+  limitAfter?: MessageId | null;
+}
+
+/**
+ * 分支感知的尾窗正文读（IS2 / IS6 的读面，Step 5）。
+ *
+ * 为什么不能是「按 `time_created desc` 取 N 条再裁断」：revert 过的会话里，旧分支的消息
+ * 仍在 append-only store 里，按时间取尾 N 条会把**已回滚分支**当成历史；反过来，若窗口
+ * 里找不到 target/cut，裁断函数会原样返回窗口（复活）或整段清空。分支归属只能由全序 id
+ * 决定，因此本函数吃调用方裁好的 `activeMessageIds`，只负责「按这份序读正文」。
+ *
+ * 两段查询（避免 N+1）：
+ *   1. message 段：`where session_id = ? and id in (...)`，**不带 order by**——顺序由
+ *      `activeMessageIds` 的下标决定（裁断可以给出与 DB 序不同的 kept 顺序）；
+ *   2. part 段：只对**第 1 段真的读到的** messageId 查，ORDER BY 逐字复刻
+ *      `messages()` 的 `order by message_id, sequence is null, sequence, time_created, id`
+ *      （`sequence is null` 的 0/1 让 NULL 行排在非空之后，两个 tiebreaker 不能省）。
+ *
+ * 只读这一窗口的正文：更早消息的 `data` 与 part 一条都不读，这是冷开读放大比的来源。
+ * Step 7 的按需物化额外传 `limitAfter`，把窗口收在页内的整轮里（两端都由 manifest 给），
+ * 于是「翻一页」的正文读与合成成本只与页大小相关，不随页在会话里的位置增长。
+ */
+export async function readActiveBranchTail(
+  db: DatabaseSync,
+  input: ReadActiveBranchTailInput,
+): Promise<MessageWithParts[]> {
+  // 窗口下界：`limitBefore` 是窗口**首条** id（含）。找不到游标 → 读整条分支。
+  const startIndex = input.limitBefore ? input.activeMessageIds.indexOf(input.limitBefore) : 0;
+  const windowIds =
+    startIndex > 0 ? input.activeMessageIds.slice(startIndex) : input.activeMessageIds;
+
+  // 窗口上界（Step 7）：`limitAfter` 是窗口之后一条 id（不含）。找不到游标 → 读到分支末尾。
+  // 上界落在窗口首位（= 两个游标重合）时给出空窗：那是调用方的页计划自相矛盾，
+  // 宁可少读让上层看见「页内没有消息」，也不要静默读掉整条分支。
+  const endIndex = input.limitAfter ? windowIds.indexOf(input.limitAfter) : -1;
+  const boundedIds = endIndex >= 0 ? windowIds.slice(0, endIndex) : windowIds;
+
+  // 同一 id 可能出现两次（rewind 的 kept + cut 后缀可以重叠）：按首现去重但保留给定顺序，
+  // 与 `messages()` 的「一行一条」对齐。
+  const orderedIds: MessageId[] = [];
+  const seen = new Set<string>();
+  for (const messageId of boundedIds) {
+    if (seen.has(messageId)) continue;
+    seen.add(messageId);
+    orderedIds.push(messageId);
+  }
+
+  const positionById = new Map<string, number>();
+  orderedIds.forEach((messageId, index) => positionById.set(messageId, index));
+
+  const messageRows: MessageRow[] = [];
+  for (const chunk of chunksOf(orderedIds, MESSAGE_READ_CHUNK_SIZE)) {
+    messageRows.push(
+      ...(db
+        .prepare(
+          `select * from message where session_id = ? and id in (${placeholdersFor(chunk.length)})`,
+        )
+        .all(input.sessionID, ...chunk) as unknown as MessageRow[]),
+    );
+  }
+  messageRows.sort((left, right) => positionById.get(left.id)! - positionById.get(right.id)!);
+
+  const foundIds = messageRows.map((row) => row.id as MessageId);
+  const partRows: PartRow[] = [];
+  for (const chunk of chunksOf(foundIds, MESSAGE_READ_CHUNK_SIZE)) {
+    partRows.push(
+      ...(db
+        .prepare(
+          `
+          select * from part
+          where session_id = ? and message_id in (${placeholdersFor(chunk.length)})
+          order by message_id, sequence is null, sequence, time_created, id
+          `,
+        )
+        .all(input.sessionID, ...chunk) as unknown as PartRow[]),
+    );
+  }
+  const partsByMessage = new Map<string, MessagePart[]>();
+  for (const row of partRows) {
+    const list = partsByMessage.get(row.message_id) ?? [];
+    list.push(decodePartRow(row));
+    partsByMessage.set(row.message_id, list);
+  }
+
+  return messageRows.map((row) => ({
+    info: decodeMessageRow(row),
+    parts: partsByMessage.get(row.id) ?? [],
+  }));
+}
+
+/**
+ * **按 tool 名**取整条 active 分支的工具调用 part（fix-c19 的窄读）。
+ *
+ * 为什么不是 `messages()`：子会话候选（`Agent` / `Task` / `subagent` 三类 tool part）过去
+ * 由父会话**全量正文读**支撑（长会话 3012 message / 29MB，实测 ~490ms，占窗口化首屏
+ * mergeMs 的 87%），而它只消费这三类 part。
+ *
+ * 读法：`part` 表按 `session_id` 走索引，SQL 侧用 `json_extract(data, '$.tool')` 过滤——
+ * 只把命中的行交给 JS 解码（`data` 是整条 part 的 JSON，未命中的行一个字节都不解）。
+ * 顺序复刻 `messages()` 的 part 序（`message_id, sequence is null, sequence, time_created,
+ * id`）；给了 `activeMessageIds` 时改按**那份序**输出（分支序是调用方的权威序，DB 序不能替
+ * 它决定归属）。
+ *
+ * 不在这里做分支裁断：裁断只有 `selectActiveConversationBranchIds` 一份实现。
+ */
+export async function readActiveBranchToolParts(
+  db: DatabaseSync,
+  input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  },
+): Promise<SessionToolPartEntry[]> {
+  const toolNames = input.toolNames.filter((name) => name.length > 0);
+  if (toolNames.length === 0) return [];
+  const placeholders = placeholdersFor(toolNames.length);
+  const rows = db
+    .prepare(
+      `
+      select id, message_id, session_id, data, sequence, time_created
+      from part
+      where session_id = ?
+        and json_extract(data, '$.type') = 'tool'
+        and json_extract(data, '$.tool') in (${placeholders})
+      order by message_id, sequence is null, sequence, time_created, id
+      `,
+    )
+    .all(input.sessionID, ...toolNames) as unknown as PartRow[];
+
+  const active = input.activeMessageIds;
+  if (active === undefined) {
+    return rows.map((row) => ({
+      messageId: row.message_id as MessageId,
+      part: decodePartRow(row) as SessionToolPartEntry["part"],
+    }));
+  }
+  const positionById = new Map<string, number>();
+  active.forEach((messageId, index) => {
+    if (!positionById.has(messageId)) positionById.set(messageId, index);
+  });
+  // 不在 active 分支里的 part（revert 掉的那一支）直接丢；分支序由 positionById 决定。
+  const kept = rows.filter((row) => positionById.has(row.message_id));
+  kept.sort(
+    (left, right) => positionById.get(left.message_id)! - positionById.get(right.message_id)!,
+  );
+  return kept.map((row) => ({
+    messageId: row.message_id as MessageId,
+    part: decodePartRow(row) as SessionToolPartEntry["part"],
+  }));
 }
 
 export async function messages(

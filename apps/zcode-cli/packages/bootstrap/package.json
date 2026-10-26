@@ -34,6 +34,10 @@
     "test:magic-context-tag-strip": "tsx --test scripts/test-magic-context-tag-strip.mjs",
     "test:held-queue-routing": "tsx --test scripts/test-held-queue-routing.mjs",
     "test:turn-directory": "tsx --test scripts/test-turn-directory.mjs",
+    "test:turn-manifest-entry": "tsx --test scripts/test-turn-manifest-entry.mjs",
+    "test:session-row-manifest": "tsx --test scripts/test-session-row-manifest.mjs",
+    "test:view-runtime-split": "tsx --test scripts/test-view-runtime-split.mjs",
+    "test:cold-open-window": "tsx --test scripts/test-cold-open-window.mjs",
     "test:ask-question-projection": "tsx --test scripts/test-ask-question-projection.mjs",
     "test:queue-item-delivery-command": "tsx --test scripts/test-queue-item-delivery-command.mjs",
     "test:edit-retry": "tsx --test scripts/test-edit-retry.mjs",
@@ -54,7 +58,10 @@
     "test:model-request-slim": "tsx --test scripts/test-model-request-slim.mjs",
     "test:dwf-read-narrowing": "tsx --test scripts/test-dwf-read-narrowing.mjs",
     "test:dwf-journal-contract": "tsx --test scripts/test-dwf-journal-contract.mjs",
-    "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs"
+    "test:attachment-preview-text-plain": "tsx --tsconfig ../../../../packages/ui/tsconfig.json --test scripts/test-attachment-preview-text-plain.mjs",
+    "test:hydrate-load-failure": "tsx --test scripts/test-hydrate-load-failure.mjs",
+    "test:request-timing": "tsx --test scripts/test-request-timing.mjs",
+    "test:command-concurrency": "tsx --test scripts/test-command-concurrency.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",

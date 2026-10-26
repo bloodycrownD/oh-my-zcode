@@ -1054,6 +1054,197 @@ export interface FileChangeSummaryStorePort {
     input: FileChangeSummaryReadInput,
   ): Promise<ReadonlyMap<string, unknown>>;
   upsertFileChangeSummaries(input: FileChangeSummaryWriteInput): Promise<void>;
+// ── 全序消息索引：id 序的唯一窄读面 ────────────────────────────────────────
+//
+// 只读排序键（id / sequence / time_created / rowid），**不读 `data`**：role 在
+// `data` JSON 里，索引不需要它，读它等于回退成全量正文读。排序必须与 `messages()`
+// 逐字一致（`order by sequence is null, sequence, time_created, rowid`）——这是 IS2
+// 的权威序，两条路径不同序会让裁断在索引路径上复活已回滚分支。
+
+/** 消息索引的一行：排序键 + SQLite rowid，不含 role/正文。 */
+export interface SessionMessageIndexEntry {
+  id: MessageId;
+  /** `message.sequence` 原值；null = 迁移前的旧行，排序时排在非空之后。 */
+  sequence: number | null;
+  timeCreated: number;
+  /** SQLite rowid，同序行的最终 tiebreaker。**不是**投影 rowId。 */
+  storageRowId: number;
+}
+
+/**
+ * `readActiveBranchToolParts` 的一条结果：工具调用 part + 它挂在哪条消息上。
+ *
+ * 带上 `messageId` 是为了让调用方按**自己的** id 序（active 分支序）排序/过滤；
+ * 实现侧的顺序只保证「与 `messages()` 同一 part 序」，不保证分支语义。
+ */
+export interface SessionToolPartEntry {
+  messageId: MessageId;
+  part: ToolPart;
+}
+
+/**
+ * 「最后一条带 mode 的 assistant」的窄读结果（首屏 model/mode 种子，IS3 / Step 9）。
+ *
+ * view-only shell 用 `createRecord(resume:false)` 物化 record：runtime 取**默认模型**，
+ * 于是首屏若读 record 就会把默认模型当成历史选型显示出来。首屏种子只能来自持久事实，
+ * 而 mode 只落在 assistant 消息上（没有 session_entry 承载它）。
+ */
+export interface PersistedAssistantSelection {
+  /** 持久化的协作模式原值；调用方必须再过一次 mode 词表校验（旧记录可能有非法值）。 */
+  mode?: string;
+  /** 同一条消息的选型；缺 provider/model 时不伪造（首屏显示空态）。 */
+  modelSelection?: ModelSelection;
+}
+
+// ── turn 行清单（row manifest）：全序计数的持久权威 ─────────────────────────
+//
+// 两张表分工（session_turn_manifest / session_turn_query_manifest）：
+//   turn 级  —— 出 totalCount、firstRowId 与每个 turn 的 rowId base（base =
+//               1 + Σ 前序 active turn 的 rowCount，**不落库**：落库就会成为与投影
+//               规则并存的第二个事实源）；
+//   query 级 —— 出 turnDirectory（只登记 origin === "realUser" 的 query）。
+//
+// 键控坐标是 (sessionID, branchGeneration)：branchGeneration 与
+// `SessionRevert.branchGeneration` 同源，每次 destructive conversation rewind 单调 +1。
+// 空 active 分支在存储里没有任何行，因此与「manifest 缺失」同义；读端按降级处理，
+// 降级后仍需满足 totalCount=0 / firstRowId=null（见 TurnManifestSnapshot）。
+
+/** `rowCount` 的产生路径：live = 活投影终态；cold = 冷物化回写。 */
+export type TurnManifestRowCountSource = "live" | "cold";
+
+export interface TurnManifestTurnRecord {
+  turnId: string;
+  /** active 分支内的 turn 位置（0 起）。决定 rowId base 的累加顺序。 */
+  ordinal: number;
+  /** 该 turn 全部可投影 messageId（按行序、去重）。 */
+  messageIds: string[];
+  firstMessageId: MessageId | null;
+  lastMessageId: MessageId | null;
+  /** 该 turn 在投影里的行数（含 turnHeader 与同 turn 的 steer 行）。 */
+  rowCount: number;
+  rowCountSource: TurnManifestRowCountSource;
+  /** 投影规则版本；不匹配即整表重建，避免 rowId 整体漂移。 */
+  projectionSchemaVersion: number;
+}
+
+export interface TurnManifestQueryRecord {
+  turnId: string;
+  /** 同一 turn 内 realUser query 的序号（0 起）。steer query 各自成条。 */
+  queryOrdinalInTurn: number;
+  /** 该 query 行的 transcript messageId；旧事件可能没有。 */
+  queryMessageId: MessageId | null;
+  queryRowId: number;
+  /**
+   * 该 query 分段的行数：从 query 行自身（含）到下一个 realUser query 行（不含）
+   * 或 turn 末尾为止。turn 起始的 turnHeader 不属于任何分段。
+   */
+  rowCount: number;
+  queryPreview: string;
+  assistantPreview: string;
+  assistantPreviewKind: "text" | "running" | "empty";
+}
+
+export interface TurnManifestWrite {
+  sessionID: SessionId;
+  branchGeneration: number;
+  turn: TurnManifestTurnRecord;
+  /** 该 turn 的全部 realUser query 行（整批替换，不做增量合并）。 */
+  queries: TurnManifestQueryRecord[];
+}
+
+export interface TurnManifestSnapshot {
+  branchGeneration: number;
+  /** 按 ordinal 升序。 */
+  turns: TurnManifestTurnRecord[];
+  /** 按 (turnId 的 turn 顺序, queryOrdinalInTurn) 升序。 */
+  queries: TurnManifestQueryRecord[];
+  /** Σ turn.rowCount；空 active 分支为 0。 */
+  totalCount: number;
+  /** 空 active 分支为 null；否则恒为 1（rowId base 从 1 起）。 */
+  firstRowId: number | null;
+  realUserQueryTotal: number;
+  /** 本次读取是否做过账目修正（就地改 row_count，不重读正文）。 */
+  manifestAdjusted: boolean;
+  adjustedTurnIds: string[];
+}
+
+export type TurnManifestReadResult =
+  | { status: "missing" }
+  | { status: "schemaMismatch"; expectedVersion: number; foundVersions: number[] }
+  /**
+   * manifest 与观察到的会话不一致 → **整表重建**（不做账目修正：修正只处理「已登记
+   * turn 的行数偏差」，这三种是「清单本身缺项/指向不存在的消息」）。
+   *
+   * - `ordinalGap`：已登记 turn 的 ordinal 出现空洞 = 中间某轮从未登记（detached 写入
+   *   丢失）。这是「存在 manifest 未登记的 turn」在 **manifest 内部**可判的一半。
+   * - `unregisteredTurns`：调用方给出的权威 turn（投影/durable 事件）里有未登记的轮次。
+   *   消息索引没有 turn 维度，尾部丢失只能靠这个观察抓。
+   * - `messageIndexMismatch`：manifest 登记的 messageId 不在消息索引里（消息被删/换库）。
+   */
+  | {
+      status: "inconsistent";
+      reason: "ordinalGap" | "unregisteredTurns" | "messageIndexMismatch";
+      /** unregisteredTurns 时给出观察到的、manifest 未登记的 turn。 */
+      turnIds: string[];
+      /** messageIndexMismatch 时给出索引里找不到的 messageId（截断到前 20 条）。 */
+      missingMessageIds: string[];
+    }
+  | { status: "ok"; snapshot: TurnManifestSnapshot };
+
+export interface TurnManifestReadInput {
+  sessionID: SessionId;
+  branchGeneration: number;
+  expectedProjectionSchemaVersion: number;
+  /**
+   * 已物化窗口内 turn → 实际行数。给出时做一次 O(turns) 账目修正：
+   * 只改不一致的 row_count（后续 turn 的 base 因累加而自动平移），不重读正文。
+   */
+  observedRowCounts?: ReadonlyMap<string, number>;
+  /**
+   * 消息索引（`listSessionMessageIndex`）的 id 观察。给出时校验 manifest 的 messageId
+   * 覆盖：引用了索引里不存在的消息 → `inconsistent/messageIndexMismatch`（整表重建）。
+   * 仓储只读 manifest 表本身，索引由调用方读一次传进来（仓储不得回读 message 正文）。
+   */
+  observedMessageIds?: readonly MessageId[];
+  /**
+   * 权威 turn 观察（调用方从投影或 durable 事件得到——**消息索引本身没有 turn 维度**，
+   * 抓不到尾部丢失的轮次）。给出且存在 manifest 未登记的 turn →
+   * `inconsistent/unregisteredTurns`（整表重建；就地补写需要 row_count，等价于物化）。
+   */
+  observedTurnIds?: readonly string[];
+}
+
+export interface TurnManifestBranchRewriteInput {
+  sessionID: SessionId;
+  /** 目标代次（rewind 后 = 事件给出的新代次）。 */
+  branchGeneration: number;
+  /** 复制来源代次；等于目标代次表示原地过滤同一代次。 */
+  sourceGeneration: number;
+  /** 保留的 turn，按 active 分支行序；ordinal 依此重建。 */
+  keptTurnIds: readonly string[];
+}
+
+/**
+ * rewind 分支重写结果。`applied: false` 表示源 manifest 不完整（老会话、gen 不匹配、
+ * 该代次从未写过）——目标代次保持缺失，读端据此降级为全量物化并重建，**不得**把
+ * 「缺行」当成「空分支」。
+ */
+export type TurnManifestBranchRewriteResult =
+  | { applied: true; keptTurnCount: number }
+  | { applied: false; reason: "sourceIncomplete"; missingTurnIds: string[] };
+
+/**
+ * manifest 读写面。实现约束：
+ * - 写入是整 turn 替换（turn 行 upsert + 该 turn 的 query 行整批替换），幂等；
+ * - branchGeneration 变化时只复制保留的 turn，不重算 row_count；
+ * - 读取不得读 message/part 正文。
+ */
+export interface TurnManifestStorePort {
+  upsertTurnManifest(input: TurnManifestWrite): Promise<void>;
+  rewriteTurnManifestBranch(
+    input: TurnManifestBranchRewriteInput,
+  ): Promise<TurnManifestBranchRewriteResult>;
+  readTurnManifest(input: TurnManifestReadInput): Promise<TurnManifestReadResult>;
 }
 
 export interface SessionStorePort {
@@ -1106,11 +1297,70 @@ export interface SessionStorePort {
     messageID: MessageId;
   }): Promise<MessageWithParts | null>;
   messages(input: { sessionID: SessionId }): Promise<MessageWithParts[]>;
+  /**
+   * 全序消息索引：与 `messages()` **同一权威排序**，但不读 `data`、不解码 parts。
+   * 缺席（旧宿主/内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
+   */
+  listSessionMessageIndex?(input: { sessionID: SessionId }): Promise<SessionMessageIndexEntry[]>;
+  /**
+   * 首屏 model/mode 的窄读：**最后一条带 mode 的 assistant**（IS3 / Step 9）。
+   *
+   * 只读一行的 `data`（不解码 parts、不扫全表）。用途是 view-only shell 的首屏种子：
+   * `createRecord(resume:false)` 让 runtime 落到默认模型，`getSessionConfigSeed` 若读 record
+   * 就会把**默认模型**当成历史选型显示出来。
+   *
+   * 缺席（旧宿主 / 内存 store）→ 首屏显示空态，激活后再补齐（spec 的首屏降级清单第 ④ 项）。
+   */
+  readLatestAssistantSelection?(input: {
+    sessionID: SessionId;
+  }): Promise<PersistedAssistantSelection | null>;
+  /**
+   * 分支感知的尾窗正文读（IS2 / IS6 的读面）。
+   *
+   * `activeMessageIds` 是调用方用消息索引 + `selectActiveConversationBranchIds` 算出的
+   * **全序** active 分支 id 序；实现只按这份序取窗口内的 message + part 正文，不做裁断、
+   * 不按时间取尾 N 条（那会在 revert 会话上复活旧分支或清空历史）。
+   * `limitBefore` 是窗口首条 id（含），由 manifest 的窗口首轮给出；缺席或找不到 = 读整条分支。
+   * `limitAfter` 是窗口**之后**一条 id（不含），由 manifest 的「页末轮之后第一个有消息的轮」
+   * 给出；缺席或找不到 = 读到分支末尾。两个游标一起把一次翻页的正文读限制在页内的整轮里
+   * （Step 7 按需物化；不传 `limitAfter` 时行为与 Step 5 逐字相同）。
+   *
+   * 缺席（旧宿主 / 内存 store）= 调用方降级为全量 `messages()`，不得当成空会话。
+   */
+  readActiveBranchTail?(input: {
+    sessionID: SessionId;
+    activeMessageIds: readonly MessageId[];
+    limitBefore?: MessageId | null;
+    limitAfter?: MessageId | null;
+  }): Promise<MessageWithParts[]>;
+  /**
+   * **按 tool 名**取整条 active 分支的工具调用 part（fix-c19 的窄读）。
+   *
+   * 唯一消费者是子会话候选（`listSessionSubagents` → `collectSubagents`）：它只看
+   * `Agent` / `Task` / `subagent` 三类 tool part，而旧实现为此读一次父会话全文
+   * （长会话 3012 message / 29MB，实测 ~490ms）。
+   *
+   * `toolNames` 在 SQL 侧过滤（`json_extract(data, '$.tool')`），不把无关 part 读出来；
+   * `activeMessageIds` 给出时只在**这份序**里取（顺序即返回值顺序），缺席则整会话取。
+   * 实现**不做**分支裁断——裁断仍是 `selectActiveConversationBranchIds` 那一份唯一实现。
+   *
+   * 缺席（旧宿主 / 内存 store）= 调用方降级为全量 `messages()`（窄读是优化，不是语义前提）。
+   */
+  readActiveBranchToolParts?(input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  }): Promise<SessionToolPartEntry[]>;
   saveSessionEntry?(input: SessionEntryInfo): Promise<void>;
   sessionEntries?(input: {
     sessionID: SessionId;
     type?: SessionEntryType | string;
   }): Promise<SessionEntryInfo[]>;
+  /**
+   * turn 行清单读写面（可选：旧宿主/内存 store 不实现）。缺席时投影侧只跳过 manifest
+   * 写入，读取方必须降级为全量物化——不得把「没实现」当成「空分支」。
+   */
+  turnManifest?: TurnManifestStorePort;
   // ── session_input 账本（可选方法，旧宿主可不实现）──
   /** admission：输入已被接受（排队/待注入），durable 记账。幂等（同 id 重入更新 payload）。 */
   saveSessionInput?(input: {

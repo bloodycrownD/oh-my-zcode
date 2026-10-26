@@ -1,0 +1,391 @@
+{
+  "schema": "zcode-session-open-after/v2",
+  "generatedAt": "2026-10-26T10:05:00.000Z",
+  "phase": "Step 15 — fix-c18（升级顺序修复 + mergeMs 治理）真机重测（after2）",
+  "spec": "docs/iterations/session-open-latency/spec.md",
+  "supersedes": "docs/iterations/session-open-latency/after.json（Step 14「改前」证据，原样保留，不修改）",
+  "head": {
+    "sha": "31d75810",
+    "also": ["db10d38a（任务一：升级双触发点）", "3f5b67c7（Step 14 基线提交）"],
+    "branch": "feat/session-open-latency"
+  },
+  "baseline": {
+    "file": "docs/iterations/session-open-latency/baseline.json",
+    "phase": "phase-0-baseline（c 树 8a1352d3，同一台机器，长会话 3012 message / 5255 行）",
+    "notMeasuredAgain": "本文件不重跑 phase-0 基线；与 after.json（Step 14）用同一套夹具、同一采样脚本、同一口径"
+  },
+  "measure_setup": {
+    "fixture": "与 after.json 完全同一份沙盒（%TEMP%\\c-session-open-step14）：真实库副本 3012 message / 5255 行，tasks-index 裁剪到 3 条会话，workspace 改写。**未改动夹具**。注意沙盒没有 .omz/cli/artifacts 目录（Step 14 也是），因此 artifact 读在本夹具里以 ENOENT 快速失败；真实 artifacts 下的成本另用 headless 测量（见 artifact_reads）。",
+    "build": "本分支 HEAD 重编：node scripts/build-desktop-agent-cli.mjs（CLI bundle）+ Step 14 已编好的 packages/desktop/out/*（本步未改 main/host/renderer 代码）+ vite dev (5174)",
+    "sampler": "scripts/dev/long-session-perf-sample.mjs（本步未改）；驱动沿用 Step 14 的 run-matrix 形态（kill 整树 → --open-workspace 冷启 → --path warm 采一轮）",
+    "rounds": {
+      "coldApp": 8,
+      "coldAppSteadyMeasured": 6,
+      "coldAppWarmupDiscarded": 2,
+      "reopen": 6,
+      "switchback": 6,
+      "warmNotHolding": 0,
+      "note": "冷启分两批跑（每批 4 轮 = 1 轮热身 + 3 轮稳态），两批代码相同（31d75810 树），用于给出噪声区间；reopen/switchback 每批 3 次。"
+    },
+    "sandbox": "HOME/USERPROFILE/APPDATA/LOCALAPPDATA/ZCODE_DATA_BASE_DIR 全部指向沙盒；真实 ~/.omz 只读。"
+  },
+  "environment": {
+    "os": "Windows 10.0.26200 x64",
+    "node": "v22.22.0（mise.toml 要求 24.14.0，只报 engine 警告）",
+    "load_note": "本步测量与其它构建/测试并发（同一台机器），两批冷启中位相差 ~200ms；区间 1552~1949 是真实噪声带，不是两套代码。"
+  },
+  "targets": {
+    "longSession": {
+      "id": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "messages": 3012,
+      "observedTotalRows": 5255,
+      "window": {
+        "ordinal": 151,
+        "turnCount": 8,
+        "messageCount": 115,
+        "rowCount": 160,
+        "rowIdBase": 5096
+      },
+      "subagentChildren": 152,
+      "subagentChildMessages": 15813,
+      "workspaceCheckpoints": 687,
+      "checkpointUserMessagesInActiveBranch": 61
+    },
+    "parkSession": {
+      "id": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "messages": 1217,
+      "observedTotalRows": 2347
+    }
+  },
+  "runs": {
+    "coldApp": [
+      {
+        "label": "batch1-cold-app-1",
+        "warmup": true,
+        "uiViewReadyMs": 1567,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 634,
+        "mergeMs": 548,
+        "rehydrateMs": 53,
+        "manifestMs": 10,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm",
+        "runtimeReadyMs": 815
+      },
+      {
+        "label": "batch1-cold-app-2",
+        "uiViewReadyMs": 1552,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 624,
+        "mergeMs": 539,
+        "rehydrateMs": 52,
+        "manifestMs": 9,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch1-cold-app-3",
+        "uiViewReadyMs": 1591,
+        "hostPrepareMs": 4,
+        "viewReadyMs": 604,
+        "mergeMs": 533,
+        "rehydrateMs": 43,
+        "manifestMs": 7,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch1-cold-app-4",
+        "uiViewReadyMs": 1856,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 685,
+        "mergeMs": 597,
+        "rehydrateMs": 55,
+        "manifestMs": 9,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch2-cold-app-1",
+        "warmup": true,
+        "uiViewReadyMs": 1758,
+        "hostPrepareMs": 5,
+        "viewReadyMs": 605,
+        "mergeMs": 539,
+        "rehydrateMs": 42,
+        "manifestMs": 6,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch2-cold-app-2",
+        "uiViewReadyMs": 1712,
+        "hostPrepareMs": 2,
+        "viewReadyMs": 614,
+        "mergeMs": 548,
+        "rehydrateMs": 41,
+        "manifestMs": 6,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch2-cold-app-3",
+        "uiViewReadyMs": 1949,
+        "hostPrepareMs": 5,
+        "viewReadyMs": 702,
+        "mergeMs": 631,
+        "rehydrateMs": 42,
+        "manifestMs": 6,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      },
+      {
+        "label": "batch2-cold-app-4",
+        "uiViewReadyMs": 1870,
+        "hostPrepareMs": 3,
+        "viewReadyMs": 647,
+        "mergeMs": 579,
+        "rehydrateMs": 44,
+        "manifestMs": 6,
+        "snapshotRowCount": 160,
+        "sessionRuntimeState": "warm"
+      }
+    ],
+    "reopen": [
+      { "label": "batch1-reopen-1", "uiViewReadyMs": 138 },
+      { "label": "batch1-reopen-2", "uiViewReadyMs": 146 },
+      { "label": "batch1-reopen-3", "uiViewReadyMs": 130 },
+      { "label": "batch2-reopen-1", "uiViewReadyMs": 172 },
+      { "label": "batch2-reopen-2", "uiViewReadyMs": 144 },
+      { "label": "batch2-reopen-3", "uiViewReadyMs": 148 }
+    ],
+    "switchback": [
+      { "label": "batch1-switchback-1", "switchMs": 1888, "noNewAck": true, "timelineRows": 5255 },
+      { "label": "batch1-switchback-2", "switchMs": 2367, "noNewAck": true, "timelineRows": 5255 },
+      { "label": "batch1-switchback-3", "switchMs": 2315, "noNewAck": true, "timelineRows": 5255 },
+      { "label": "batch2-switchback-1", "switchMs": 1846, "noNewAck": true, "timelineRows": 5255 },
+      { "label": "batch2-switchback-2", "switchMs": 2338, "noNewAck": true, "timelineRows": 5255 },
+      { "label": "batch2-switchback-3", "switchMs": 2136, "noNewAck": true, "timelineRows": 5255 }
+    ],
+    "warmNotHolding": {
+      "measured": false,
+      "reason": "两次尝试都在 run#1 等 ACK 超时（ackCount=0，20s）。CLI 日志证明这次点击**没有产生 subscribe**（最后一次 park subscribe 在 2 分钟前）⇒ 渲染层 keep-warm 命中、复用已有 topic 订阅，采样器的 warm 档把它判成失败。这是驱动口径问题（keep-warm 不产生新 ACK，spec 本身对 switchback 就是这么豁免的），不是产品回归；本步不再花轮次复现。"
+    }
+  },
+  "aggregates": {
+    "coldApp": {
+      "uiViewReadyMs": [1552, 1591, 1856, 1712, 1949, 1870],
+      "uiViewReadyMsMedian": 1784,
+      "uiViewReadyMsRange": [1552, 1949],
+      "afterStep14": { "uiViewReadyMsMedian": 3718, "range": [3611, 3723] },
+      "delta": "−52%（3718 → 1784），主判仍为 fail（门槛 1000）",
+      "hostPrepareMs": [3, 4, 3, 2, 5, 3],
+      "viewReadyMs": [624, 604, 685, 614, 702, 647],
+      "viewReadyMsMedian": 635,
+      "mergeMs": [539, 533, 597, 548, 631, 579],
+      "mergeMsMedian": 564,
+      "rehydrateMs": [52, 43, 55, 41, 42, 44],
+      "rehydrateMsMedian": 43,
+      "manifestMs": [9, 7, 9, 6, 6, 6],
+      "manifestMsMedian": 6,
+      "paintAfterApplyMs": [405, 398, 534, 486, 405, 398],
+      "snapshotRowCount": [160, 160, 160, 160, 160, 160],
+      "manifestAdjusted": [false, false, false, false, false, false],
+      "definition": "app 冷启 + CLI 预启动 + 该会话在点击前已被读入口激活（sessionRuntimeState=warm）⇒ 只量 publisher 水化。与 after.json 的 coldApp 完全同义。"
+    },
+    "reopen": {
+      "uiViewReadyMs": [138, 146, 130, 172, 144, 148],
+      "uiViewReadyMsMedian": 145,
+      "afterStep14": 138,
+      "verdict": "持平（145 vs 138，噪声内）"
+    },
+    "switchback": {
+      "switchMs": [1888, 2367, 2315, 1846, 2338, 2136],
+      "switchMsMedian": 2327,
+      "afterStep14": { "switchMsMedian": 450, "range": [409, 551, 450] },
+      "noNewAck": "6/6",
+      "delta": "**回归 +417%**（450 → 2327）。原因不是切换逻辑变了，而是升级现在真的发生了：keep-warm 的投影从尾窗 160 行变成全量 5255 行（渲染层 memory sample 实测 projection.rows=4747 / heapUsed≈398MB），切回时要重挂这份全量行集合。Step 14 的 450ms 是「升级从未发生」的读数。",
+      "regime_note": "该项在 spec 里是豁免指标（不参与 uiViewReadyMs 判据），150ms 参考值本来就没达到；但 2327ms 是用户能感知的回归，登记为风险 24。"
+    }
+  },
+  "merge_breakdown": {
+    "source": "新增 debug 行 `v4 cold load breakdown`（event=zcode_protocol.v4.cold_load_breakdown），逐段墙钟；不进 openPhases（IS8 键集合不变）。",
+    "windowed_first_screen_ms": {
+      "subagents": [496, 500, 574, 534, 510, 482],
+      "fileChangeSummaries": [5, 5, 7, 5, 7, 4],
+      "materialization": [23, 25, 30, 23, 29, 19],
+      "workflowReplay": [11, 13, 14, 11, 11, 0],
+      "modelBaseline": 1,
+      "usageSeed": [3, 3, 4, 3, 5, 2],
+      "memoryEvents": 0,
+      "backingRecord": 0,
+      "total_merge": [539, 533, 597, 548, 631, 579]
+    },
+    "upgrade_full_materialization_ms": {
+      "subagents": [581, 779, 673, 792, 515, 225],
+      "fileChangeSummaries": [179, 164, 163, 213, 302, 67],
+      "materialization": [480, 413, 378, 593, 594, 201],
+      "workflowReplay": [10, 9, 13, 10, 16, 0]
+    },
+    "wrong_hypothesis": "Step 14 的推断「mergeMs = 全量事件重放（2129 条 / 2737ms）」被证伪：2129 条是**合成结果的事件数**，不是重放成本；`publisher.rehydrate` 是独立分段 `rehydrateMs`（49ms），也不在 mergeMs 里。真实构成如上一节：子会话全量读 95%。",
+    "remaining_after_fix": {
+      "parent_transcript_read": "~490ms —— listSessionSubagents 的候选来源需要整条 active 分支的 Agent tool part；现在仍是一次全量 messages()（3012 message / 29MB 正文，headless 实测 447~537ms）。下一步入口：给 store 加窄读端口（按 tool 名取 launch part），或用 'Agent' 调用索引。",
+      "outside_openPhases": "cliRequestMs − viewReadyMs ≈ 1012 / 1150 / 1127ms（batch2；batch1 ≈ 800ms）。请求在 CLI handler 开始前的排队/传输占大头：临时探针实测 `v4/conversation/subscribe` 的 residency acquire=0ms、CLI 内 dispatch=725ms（≈ viewReady+encode），其余 ~700~1000ms 在 host↔CLI 之间（CLI 刚 resume 完仍在忙：journal/announcement/MCP 等）。与 Phase-0/Step14 同源（Step 14: 3627−2811≈816ms），本步未改。"
+    }
+  },
+  "artifact_reads": {
+    "what_expected": "`buildColdFileChangeSummaries` 读 workspace checkpoint 的 snapshotRef（`zcode-artifact://<sessionId>/<artifactId>`）→ 解析 diff artifact，重建每轮 fileChanges 摘要（ModelComplete.fileChanges）。",
+    "why_failed_in_fixture": "沙盒没有 .omz/cli/artifacts/<sessionId>/ 目录（Step 14 的夹具就没复制它）。`NodeToolArtifactStore.readArtifactFile` 的第一步是 `readdir(sessionDir)`，ENOENT ⇒ 61 个分组全部失败。**不是路径推导错，也不是从没落盘**：真实 ~/.omz/cli/artifacts/<该会话>/ 有 693 个文件 / 29.7MB，headless 实测同样的 code path 685 次读全部成功。",
+    "verdict": "对「窗口化首屏」是**结构性徒劳**：旧实现按整条 active 分支过滤（2978 条 / 61 个带 checkpoint 的 user message），而摘要的唯一消费者是合成器处理 `source.messages`（本次物化的 115 条）时的按 messageId 查表——窗口外 58 个分组的 685 次读没有任何出口。",
+    "fix": "改为 `messageIds: source.messages`（本次真的会被合成的消息）；全量物化时 `source.messages` = 整条 active 分支，与旧口径逐值一致。没有采用批量 IN 查询：这些读本来就一个都不需要。",
+    "measured_effect": {
+      "real_artifacts_headless": "61 组 / 685 次读 / 29.5MB：535~802ms → 3 组 / 16 次读 / 73KB：15~17ms",
+      "sandbox_fixture": "129ms（全失败）→ 4~7ms"
+    }
+  },
+  "upgrade_fix": {
+    "before": "after.json findings.upgradeSkippedWhenActivationPrecedesDegradedHydration：app 冷启 6 次打开 0 条 `upgrade applied`（激活先于窗口化收口，`scheduleProjectionUpgrade` 早退且无重试入口）。",
+    "after": "10/10 冷启打开（长会话，两批 8 次 + 1 次探针轮）+ 2/2 park 打开都留下 `v4 projection upgrade applied`；每次都能先看到一条 `v4 projection upgrade skipped session=… reason=notDegraded trigger=runtimeActivated`，随后由 `trigger=firstScreenSettled` 排上升级。",
+    "appliedUpgradeMs": [1540, 1623, 1553, 1565, 1614, 1512, 1635, 1568, 1897, 1693],
+    "appliedUpgradeMsMedian": 1578,
+    "parkUpgradeMs": [603, 698],
+    "afterStep14UpgradeMs": [3226, 1435, 2070],
+    "note": "升级本身也快了：同一份全量读吃到 merge 侧两项优化（子会话窄读 + 摘要按需），upgradeMs 中位 3226 → 1578。它仍是 fire-and-forget：首屏 ACK 不含它，`openPhases` 键集合不变。"
+  },
+  "acceptance": [
+    {
+      "scenario": "冷开（CLI 未起）主判：uiViewReadyMs − hostPrepareMs ≤ 1000ms",
+      "baseline": "中位 6097ms",
+      "after": "中位 3715ms",
+      "now": "中位 1781ms（1784 − hostPrepare 中位 3；6 个稳态样本 1552~1949）",
+      "verdict": "fail",
+      "delta": "−52%（3715 → 1781），仍是门槛的 1.8 倍",
+      "evidence": "aggregates.coldApp；hostPrepareMs 2~5ms（CLI 由 app 预启动），减法在本树退化成 ≈ uiViewReadyMs 本身（risk 23 未变）。"
+    },
+    {
+      "scenario": "冷开并列分解项：uiViewReadyMs − cliBootstrapMs",
+      "baseline": "不可计算",
+      "now": "仍不可计算（cliBootstrapMs 缺席，cliProcessState=reused 8/8）",
+      "verdict": "not-computable"
+    },
+    {
+      "scenario": "冷开总量观察项（含 spawn）≤ 2.5~3s",
+      "baseline": "中位 7695ms（含 spawn 1578~1776）",
+      "now": "仍不可直接测：spawn 与激活都在点击之前。代理 = uiViewReadyMs + runtimeReadyMs ≈ 2400~3000ms（不含 spawn 与 app 就绪等待）",
+      "verdict": "unknown",
+      "caveat": "代理比 Step 14 的 4533 好，但口径没变（不得与 7695 直接相减）。要判这一条仍需 launch→ACK 打点。"
+    },
+    {
+      "scenario": "热开（CLI 已起、会话冷）：uiViewReadyMs ≤ 800ms",
+      "baseline": "不持有 9724 / 持有 133~187",
+      "now": "持有（reopen）中位 145（130~172）；不持有本次未采到有效样本（keep-warm 复用 ⇒ 无新 ACK，采样器判失败）",
+      "verdict": "split（持有达标；不持有 not-measured）"
+    },
+    {
+      "scenario": "重开同会话（非首次、runtime 持有）",
+      "baseline": "225 / 154（持有）；4128（卸下）",
+      "now": "145（130~172，6 次）",
+      "verdict": "pass",
+      "delta": "与 Step 14 的 138 持平"
+    },
+    {
+      "scenario": "切回（keep-warm，无新 ACK）",
+      "baseline": "无新 ACK 3/3；981/1112/1203",
+      "after": "无新 ACK 3/3；409/551/450",
+      "now": "无新 ACK 6/6；1846~2367（中位 2327）",
+      "verdict": "exempt-but-regressed",
+      "delta": "相对 Step 14 +417%：升级让 keep-warm 投影从 160 行变成 5255 行（见 aggregates.switchback / risk 24）"
+    }
+  ],
+  "invariants": {
+    "IS1": {
+      "claim": "投影身份确定性",
+      "status": "met",
+      "evidence": "snapshotRowCount 6/6 = 160，manifestAdjusted 6/6 false，rowIdBase 5096 / 末行 5255 与 after.json 逐值相同（本步没有改 rowId 路径）"
+    },
+    "IS2": {
+      "claim": "分支裁断/摘要基于全序；窗口 = active 后缀",
+      "status": "met-with-change",
+      "evidence": "窗口仍是整轮后缀；但文件摘要的**过滤集合**从「整条 active 分支」收窄为「本次物化消息」（两者本次物化的行集合完全一致；全量物化时与旧口径相同）。S1/K8 与 D1 覆盖。"
+    },
+    "IS3": {
+      "claim": "命令只在 runtime-ready 后执行；view-ready 只放行读",
+      "status": "met",
+      "evidence": "8/8 冷启仍是 sessionRuntimeState=warm + ACK 不含激活；升级不进 ACK"
+    },
+    "IS4": {
+      "claim": "hasLiveConversation 三态",
+      "status": "met",
+      "evidence": "本步未改该路径；E1/E2 仍绿"
+    },
+    "IS5": {
+      "claim": "totalCount/firstRowId/turnDirectory 只来自 manifest",
+      "status": "met",
+      "evidence": "snapshot 160 行 + totalCount 5255 逐次复现；manifestMs 6~10ms"
+    },
+    "IS6": {
+      "claim": "rows/range 在未物化页上工作",
+      "status": "met-stronger",
+      "evidence": "新增的不变量：升级过渡期间翻页不得因 facts 被清而退化成空页（M1/M4/M5 在首屏收口即升级的时序下全绿）"
+    },
+    "IS7": {
+      "claim": "未水化前禁止发 turn",
+      "status": "untouched",
+      "evidence": "本步未发真实 turn"
+    },
+    "IS8": {
+      "claim": "openTiming 键集合不变、新分段放 ACK 顶层",
+      "status": "met",
+      "evidence": "pnpm test:session-open-observability 14；openPhases 仍只有 viewReadyMs/manifestMs/mergeMs/rehydrateMs/manifestAdjusted；升级成本只在 debug 行"
+    }
+  },
+  "findings": [
+    {
+      "id": "subagentTranscriptsDominatingMerge",
+      "title": "mergeMs 的 95% 是「为 152 个子会话各读一次全量 transcript」，与事件重放无关",
+      "evidence": "v4 cold load breakdown: subagentsMs 482~574（windowed 首屏）；headless 实测 children 全量读 2302~3617ms（152 child / 15813 message），窄读 86~91ms。",
+      "consequence": "Step 14 的「全量事件重放很贵」是错的推断；压冷开的主战场在宿主自己的 N+1 子会话读。"
+    },
+    {
+      "id": "artifactReadsWereOutOfScope",
+      "title": "685 次 artifact 读对窗口化首屏是纯徒劳（摘要只服务本次物化消息）",
+      "evidence": "61 个带 checkpoint 的 active 分支 user message vs 窗口内只有 3 个；headless 真实 artifacts 535~802ms / 29.5MB。",
+      "consequence": "窗口化少读的那部分正文，过去又被摘要读补回去了——而且补在没人看的地方。"
+    },
+    {
+      "id": "upgradeNowHappens",
+      "title": "「激活后补齐全量」在冷启路径上 10/10 兑现（此前 0/6）",
+      "evidence": "upgrade applied ×10（长会话）+ ×2（park），每条前都有 reason=notDegraded trigger=runtimeActivated；upgradeMs 1512~1897。",
+      "consequence": "功能承诺兑现，但把这个设计一直隐藏的成本暴露出来：keep-warm 投影变成全量（risk 24）。"
+    },
+    {
+      "id": "upgradeTransientBrokePaging",
+      "title": "升级的 rehydrate→hydrateRowManifest 之间，清单事实缺席会让翻页退化成空页",
+      "evidence": "首屏收口即升级后，test-session-row-manifest M1/M4/M5 三例同时红（空页 / outcome=null）；补齐「升级路径携带旧清单事实」后全绿，变异探测（去掉携带）三例重新红。",
+      "consequence": "这是把升级修好的**直接副作用**：过去这套时序在生产里不存在（升级没发生），所以从没被观测到。"
+    },
+    {
+      "id": "remainingBottleneckMoved",
+      "title": "1s 目标的瓶颈已从 mergeMs 移到「父会话全文读 ~490ms」与「openPhases 之外的 ~800~1150ms」",
+      "evidence": "batch2: cliRequestMs 1626~1852 vs viewReadyMs 614~702；临时探针实测 subscribe 在 CLI 内的 dispatch=725ms，residency acquire=0。",
+      "consequence": "只修 mergeMs 最多把冷开压到 ~1.2s；要过 1s 必须同时处理「请求在 CLI 就绪前的排队」这条。"
+    }
+  ],
+  "risks": [
+    {
+      "id": "full-projection-client-cost",
+      "status": "新登记（Step 15）",
+      "text": "「激活后补齐全量」兑现后，keep-warm 的投影是整条分支（5255 行），渲染层 memory sample 实测 projection.rows=4747 / heapUsed≈398MB，切回 450→2327ms。该项在 spec 里是豁免指标，但用户可感知。下一步方向（不在本步范围）：让 live 投影保持「尾窗 + manifest 权威」、翻页按需物化，或者把升级延后到「会话空闲」（spec 风险 16 已登记的另一种口径）。"
+    },
+    {
+      "id": "upgrade-transient-manifest-gap",
+      "status": "已修（Step 15）",
+      "text": "升级路径的 rehydrate 会清 manifest 事实，到 hydrateRowManifest 之间 rowsRange 读到 facts=null ⇒ 窗口以上翻页返回空页。现在升级路径把旧清单事实带过这段过渡（分支级事实在升级中不变），非升级 rehydrate 仍一律清。锚点：test-session-row-manifest M1/M4/M5。"
+    },
+    {
+      "id": "warm-sample-blocked-by-keep-warm",
+      "status": "新登记（Step 15，驱动口径）",
+      "text": "warm-not-holding 的 run#1 在 keep-warm 命中时不产生 subscribe/ACK，采样器按 ack-timeout 判失败（CLI 日志证明没有 subscribe）。这与 switchback 是同一类（spec 对 switchback 已豁免指标）。要量「不持有 regime」必须先让采样器显式等 keep-warm 过期，或改判据为「无新 ACK 即复用」。"
+    }
+  ]
+}

@@ -304,6 +304,8 @@ function createPromotionHarness({ queueItem, modelState, sessionId }) {
       markQueueItemPromoting: async () => true,
       removeQueueItem: async () => true,
       releaseQueueItemReservation: async () => true,
+      // 手动提升成功后的恢复语义：handler 硬调用（非可选）。
+      setQueueAutoDrain: async () => undefined,
       sendInput: async (input, options) => {
         captured.sendInput = input;
         captured.sendInputOptions = options;

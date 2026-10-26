@@ -34,6 +34,7 @@ import { readZCodeStdioTapDevState } from "./zcodeStdioTapDevConfig.js";
 import { shouldSpawnInDetachedProcessGroup } from "../process/processTreeTerminator.js";
 import type { RuntimeProcessLifecycleReporter } from "../process/runtimeProcessLifecycle.js";
 import { buildAgentWorkspaceIdentityEnv } from "../runtime-tools/agentProxyEnv.js";
+import type { ZCodeAgentRuntimeSpawnSnapshot } from "./cliBootstrapObservation.js";
 
 export interface ZCodeAgentCommand {
   /** 本地配套 CLI bundle 的存储专用 Worker 入口；远端/自定义命令不推断能力。 */
@@ -855,6 +856,35 @@ export class ZCodeAgentProcessManager {
   }): ZCodeProtocolClient | undefined {
     const managed = this.processesByWorkspaceKey.get(resolveWorkspaceKey(params));
     return managed && !managed.child.killed ? managed.client : undefined;
+  }
+
+  /**
+   * 观测面：读该 workspace 的**进程事实**（不触发 spawn、不改进程池）。
+   *
+   * 与 {@link getExistingClient} 的区别是这条不会把「client 对象已由任务列表预建」误当成
+   * 「进程已就绪」：`spawnedAt`/`generation` 只在进程真的 spawn 后才存在，`startInFlight`
+   * 暴露在途启动。`openTiming.cliBootstrapMs` 的判定只能用这些事实（见
+   * `cliBootstrapObservation.ts`），不能用 client 引用是否存在。
+   *
+   * 两者都没有（无 runtime、无在途启动）时返回 undefined——注意这与「有 runtime 但没有
+   * 时间戳」是两件事，调用方必须区分。
+   */
+  getRuntimeSpawnSnapshot(params: {
+    workspacePath: string;
+    workspaceIdentity?: string;
+  }): ZCodeAgentRuntimeSpawnSnapshot | undefined {
+    const workspaceKey = resolveWorkspaceKey(params);
+    const managed = this.processesByWorkspaceKey.get(workspaceKey);
+    const startInFlight = this.startingByWorkspaceKey.has(workspaceKey);
+    if (!managed) {
+      return startInFlight ? { startInFlight } : undefined;
+    }
+    return {
+      startedAt: managed.startedAt,
+      generation: managed.runtimeIdentity.generation,
+      ...(typeof managed.child.pid === "number" ? { pid: managed.child.pid } : {}),
+      startInFlight,
+    };
   }
 
   /** 资源管理器：当前仍存活的受管 runtime（pid + workspace + client） */

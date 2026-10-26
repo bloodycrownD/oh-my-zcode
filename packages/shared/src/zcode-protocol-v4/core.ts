@@ -74,6 +74,12 @@ export const PROTOCOL_V4_LIMITS = {
   eventRetentionPerSession: 2000,
   snapshotTailWindowRows: 60,
   rowsRangeMaxLimit: 200,
+  // 冷开首屏的正文窗口（phase-paged-materialization）：**双约束取 min**。
+  // turn 数是上界（窗口按整 turn 对齐，toolCall ↔ result 不跨窗），行数是硬上界——
+  // 只限 turn 数时，一个几百 toolCall 的超大 turn 会让「窗口化」失效。
+  // 两者都由 `selectColdTailWindow` 消费，不要在各调用方另写一份。
+  coldWindowTurns: 8,
+  coldWindowMaxRows: 400,
   // turn 目录单页条目上限。目录条目自带 220 字符摘要，500 条 ≈ 一屏可用的导航纵深；
   // 再多客户端也用不完，且传输成本线性涨。
   turnDirectoryMaxEntries: 500,

@@ -284,7 +284,16 @@ export function initializeMessageHistoryFromContext(
 ): void {
   const contextResult = contextBuilder.build();
   this.latestContextBuildResult = contextResult;
-  this.messageHistory.init(buildContextHistoryEntries(contextResult));
+  // Step 12（懒历史）：resume 不再 eager 初始化 context，历史可能已经先落进 messageHistory
+  // （historyMode:"full" 的水化，或 historyMode:"none" 闸门之前写入的提醒条目）。
+  // `init()` 会清空 entries——把已有条目接在 context 前缀之后，结果与既有的
+  // 「先 init 再 hydrate」逐值一致（顺序恒为 context → 历史 → resume 期注入）。
+  const preservedEntries = this.messageHistory.toRuntimeEntries();
+  this.messageHistory.init(
+    preservedEntries.length === 0
+      ? buildContextHistoryEntries(contextResult)
+      : [...buildContextHistoryEntries(contextResult), ...preservedEntries],
+  );
 
   this.logger?.debug("Context built", {
     ...traceContextToLogContext(traceContext),

@@ -1,19 +1,14 @@
 import { requestPluginReferenceCatalog } from "#src/zcode-agent/pluginReferenceCatalogRequest.js";
-import { sessionDebugSnapshotSchema ,
-  zcodeMcpRefreshSessionsResultSchema,
-} from "@zcode/shared";
+import { sessionDebugSnapshotSchema, zcodeMcpRefreshSessionsResultSchema } from "@zcode/shared";
 /* oxlint-disable eslint(max-lines) -- ZCode Protocol transport、通知 wiring 和 app-facing session 方法必须共享同一个 client/emitter 上下文。 */
 import { randomUUID } from "node:crypto";
 import { ensureIndependentPlanSupport } from "./independentPlanSupport.js";
+import { resolveCliBootstrapObservation } from "./cliBootstrapObservation.js";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Emitter } from "@zcode/rpc";
 import type { IDisposable } from "@zcode/rpc";
-import type {
-
-  ModelSelectionView,
-
-} from "@zcode/provider";
+import type { ModelSelectionView } from "@zcode/provider";
 import {
   ZCODE_SESSION_RUNTIME_PREFERENCES_REQUEST_TIMEOUT_MS,
   formatLogPrefix,
@@ -93,7 +88,6 @@ import {
   zcodeWorkspaceReadPromptLanguageResultSchema,
   zcodeWorkspaceUpdatePromptLanguageResultSchema,
   zcodeWorkspaceUpdateModelIoPreferencesResultSchema,
-
   type ZCodeSessionStateSnapshot,
   type ZCodeAutomation,
   type ZCodeAutomationRun,
@@ -202,6 +196,7 @@ import type {
   ZCodeAgentConversationRowsRangeParams,
   ZCodeAgentConversationTurnDirectoryParams,
   ZCodeAgentConversationPlansParams,
+  ZCodeAgentConversationRuntimeReadyParams,
   ZCodeAgentConversationWorkflowRunEventsParams,
   ZCodeAgentConversationWorkflowRunArtifactDataParams,
   ZCodeAgentConversationWorkflowRunArtifactReadParams,
@@ -253,6 +248,7 @@ import {
   v4ConversationRowsRangeResultSchema,
   v4ConversationTurnDirectoryResultSchema,
   v4ConversationPlansResultSchema,
+  v4ConversationRuntimeReadyResultSchema,
   v4ConversationWorkflowRunEventsResultSchema,
   v4ConversationWorkflowRunArtifactDataResultSchema,
   v4ConversationWorkflowRunArtifactReadResultSchema,
@@ -422,11 +418,11 @@ function isProtocolMethodNotFoundError(error: unknown): boolean {
 // better-sqlite3 的 "database is locked"；过线后协议信封只剩 numeric code + message，
 // 因此在 services 出口按 message 识别并转译为可重试提示——否则 UI toast 直显英文
 // 驱动原文，用户不知道「重试」是正确动作。
-const SQLITE_BUSY_MESSAGE_PATTERN = /SQLITE_BUSY|database is locked|writer acquisition remained busy/i;
+const SQLITE_BUSY_MESSAGE_PATTERN =
+  /SQLITE_BUSY|database is locked|writer acquisition remained busy/i;
 
 function isSqliteBusyError(error: unknown): boolean {
-  const message =
-    error instanceof Error ? error.message : typeof error === "string" ? error : "";
+  const message = error instanceof Error ? error.message : typeof error === "string" ? error : "";
   return SQLITE_BUSY_MESSAGE_PATTERN.test(message);
 }
 
@@ -4447,17 +4443,37 @@ export function createZCodeAgentService(
 
     async subscribeConversationV4(params: ZCodeAgentConversationSubscribeParams) {
       const subscribeStartedAt = performance.now();
-      const existingClient = processManager.getExistingClient(params);
-      const cliProcessState: "reused" | "spawned" =
-        existingClient && !existingClient.isDisposed ? "reused" : "spawned";
+      // 观测层修正（phase-0 baseline findings.coldCliBootstrapMissing）：旧实现用
+      // `getExistingClient` 的返回是否非空判 cliProcessState，但侧栏任务列表会**预建**
+      // client 对象（此时进程尚未 spawn），于是「本次 subscribe 才把进程拉起来」的冷开也被
+      // 记成 reused：spawn 成本落进 hostPrepareMs、cliBootstrapMs 结构性缺席。
+      // 现在只按进程事实判定 = acquire 前后的 spawn 时间戳/代次/在途标记之差
+      // （规则与理由见 cliBootstrapObservation.ts）。**这不改进程行为，只改观测诚实度。**
+      const spawnBefore = processManager.getRuntimeSpawnSnapshot(params);
       const cliBootstrapStartedAt = performance.now();
       // 历史 topic 是任务列表点击后的只读事实源。provider/model 未配置时若复用
       // 模型执行门禁，列表虽然能出现但点击后仍无法打开；订阅只启动 CLI，不提升写能力。
       const client = await getReadOnlyClient(params);
-      const cliBootstrapMs =
-        cliProcessState === "spawned"
-          ? Math.max(0, Math.round(performance.now() - cliBootstrapStartedAt))
-          : undefined;
+      const cliAcquireFinishedAt = performance.now();
+      const cliBootstrapObservation = resolveCliBootstrapObservation(
+        spawnBefore,
+        processManager.getRuntimeSpawnSnapshot(params),
+      );
+      const cliProcessState = cliBootstrapObservation.cliProcessState;
+      const cliBootstrapMs = cliBootstrapObservation.spawnObserved
+        ? Math.max(0, Math.round(cliAcquireFinishedAt - cliBootstrapStartedAt))
+        : undefined;
+      // 判据靠「进程事实差」隐含了先后因果，采样对不上时必须能从日志里复原那次判定依据。
+      // 用 info（不是 debug）：一次会话打开只打一条，且这条是 cliBootstrapMs 缺席时唯一的
+      // 解释来源——debug 在 production 构建不落盘，等于把判据证据丢掉。
+      logger.info(undefined, "v4 conversation subscribe cli bootstrap observed", {
+        event: "v4.conversation.subscribe.cli_bootstrap",
+        sessionId: params.sessionId,
+        workspaceIdentity: params.workspaceIdentity ?? null,
+        cliProcessState,
+        cliBootstrapReason: cliBootstrapObservation.reason,
+        ...(cliBootstrapMs !== undefined ? { cliBootstrapMs } : {}),
+      });
       // conversation 冷订阅会在 CLI 内部直接恢复历史 Session 并立即发布首帧。
       // 若 Account Config 尚未到达，首帧会先按缺少 Account Overlay 的 Registry 解析；这里只建立
       // Account Config 顺序屏障，不提升模型执行权限。ZCode Built-in / Personal 仍由 Worker 维护。
@@ -4808,6 +4824,17 @@ export function createZCodeAgentService(
         V4_METHODS.conversationPlans,
         { sessionId: params.sessionId },
         v4ConversationPlansResultSchema,
+      );
+    },
+
+    // runtime 激活耗时观测：同族的只读 query，沿现有 workspace attachment 透传；
+    // 不注入 clientMode（与 clientMode 无关），也不触发激活（激活在 CLI 侧由订阅/发送驱动）。
+    async conversationRuntimeReadyV4(params: ZCodeAgentConversationRuntimeReadyParams) {
+      const client = await getReadOnlyClient(params);
+      return client.request(
+        V4_METHODS.conversationRuntimeReady,
+        { sessionId: params.sessionId },
+        v4ConversationRuntimeReadyResultSchema,
       );
     },
 

@@ -4355,6 +4355,7 @@ const zhCN: Record<string, string> = {
   "chat.placeholder.followUpAsk": "提出后续修改要求",
   "chat.placeholder.followUpQueue": "继续输入以排队后续修改",
   "chat.placeholder.loading": "初始化任务中",
+  "chat.placeholder.runtimeLoading": "正在加载运行环境…",
   "chat.attachments.dragHint": "松开以添加附件",
   "chat.composer.workspaceFileDragHint": "松开以引用此文件或目录",
   "chat.send": "发送",

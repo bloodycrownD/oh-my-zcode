@@ -7,6 +7,7 @@ import type {
   ExpertWorkflowCommandResult,
   PresentationSurface,
   ResumeSessionResult,
+  SessionHistoryMode,
   StartSavedWorkflowRunResult,
   AmendWorkflowRunSettingsInput,
   AmendWorkflowRunSettingsResult,
@@ -313,6 +314,11 @@ export interface ResumeOptions {
   onEvent?: (event: SessionEvent) => void | Promise<void>;
   /** 同一次冷恢复的调用级已物化结果；不进入 app 生命周期缓存。compact 修补后须按返回值刷新。 */
   persistedMessages?: MessageWithParts[];
+  /**
+   * 历史水化模式（IS7）：`"none"` 把 provider 历史推迟到首次发轮前的闸门。
+   * v4 的 view-only 激活用它；legacy resume 保持缺省 `"full"`（返回的 snapshot 立刻要用全文）。
+   */
+  historyMode?: SessionHistoryMode;
 }
 
 export interface ZCodePluginSetResult {

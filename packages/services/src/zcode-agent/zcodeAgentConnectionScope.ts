@@ -745,6 +745,14 @@ export function createZCodeAgentConnectionScope(
         withTrustedConnection(params, forwardedConnection(params)),
       );
     },
+    // runtime 激活耗时观测：与 rowsRange/turnDirectory 同族的只读 query。握手闸门同族
+    // （assertReady），可信连接上下文照旧由 facade 注入、不接受调用方自报。
+    async conversationRuntimeReadyV4(params) {
+      assertReady();
+      return base.conversationRuntimeReadyV4(
+        withTrustedConnection(params, forwardedConnection(params)),
+      );
+    },
     async attachmentBeginV4(params) {
       assertReady();
       const forwarded = forwardedConnection(params);

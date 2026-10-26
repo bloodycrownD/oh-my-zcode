@@ -27,6 +27,7 @@ export type WorkspaceConnectionAgentService = Pick<
   | "conversationRowsRangeV4"
   | "conversationTurnDirectoryV4"
   | "conversationPlansV4"
+  | "conversationRuntimeReadyV4"
   | "conversationWorkflowRunEventsV4"
   | "conversationWorkflowRunsV4"
   | "conversationWorkflowRunArtifactsV4"

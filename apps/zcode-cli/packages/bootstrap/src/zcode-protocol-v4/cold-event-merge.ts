@@ -1,6 +1,7 @@
 import {
   SessionEventType,
   selectActiveConversationBranch,
+  type ActiveConversationBranchRewind,
   type MessageWithParts,
   type SessionEntryInfo,
   type SessionEvent,
@@ -12,17 +13,65 @@ import type { ConversationSnapshot } from "@zcode/shared/zcode-protocol-v4";
 import {
   goalVerificationEntriesFromSessionEntries,
   synthesizeEventsFromMessages,
+  type ColdSynthesisContext,
   type HydratedGoalVerificationEntry,
 } from "./transcript-hydration.js";
+import {
+  SESSION_ENTRY_WORKSPACE_CHECKPOINT,
+  parseCheckpointCreatedPayload,
+} from "@zcode/contracts";
+import type { PersistedWorkspaceCheckpoint } from "./cold-file-change-summaries.js";
+import type {
+  ColdTailWindowFallbackReason,
+  ColdTailWindowPlan,
+  ColdTailWindowReadResult,
+} from "./session-row-manifest.js";
 
 interface ConversationMaterializationSource {
   goalVerificationEntries: HydratedGoalVerificationEntry[];
   memoryEvents: SessionEvent[];
   messages: MessageWithParts[];
+  /**
+   * session_entry 里持久化的**工作区 checkpoint**（fix-c19）。
+   *
+   * `CheckpointCreated` 事件只在 resume 时由 `restoreWorkspaceCheckpointEntries` 回放进
+   * eventStore，而 view-only 首屏没有 resume——所以首屏要的 fileChanges 摘要不能等事件，
+   * 直接从这一份（同一读里已经拿到的 `session_entry`）派生。内存事件里已有的按
+   * checkpointId 去重（resume 过之后两者同源，重复会让同一份改动加两遍）。
+   */
+  persistedWorkspaceCheckpoints: PersistedWorkspaceCheckpoint[];
+  /**
+   * 持久化的分支代次（`SessionRevert.branchGeneration`）。turn 行清单按它键控；
+   * 读不到 store 时只能是 0——此时 manifest 也会走缺失降级，不能当成权威代次。
+   */
+  branchGeneration: number;
   /** shared_context 正文仍是 provider-only；这里只下发脱敏的 handover metadata。 */
   sharedContextImport?: ConversationSnapshot["sharedContextImport"];
   /** 只有成功读取 session_target 后才存在；显式 null 也是持久 authority。 */
   target?: SessionGoal | null;
+  /**
+   * 本次冷开实际用的尾窗坐标（Step 6；缺席 = 全量物化）。
+   * `messages` 已是窗口正文，这里的身份供 `rowIdOrigin` / `initialTurnNumber` / 回写用。
+   */
+  coldWindow?: ColdTailWindowPlan;
+  /**
+   * 没有用窗口的原因。**必须打点**：静默退全量在现象上就是「窗口化没生效」，
+   * 与「清单与索引不同步」无法区分。
+   */
+  coldWindowFallback?: { reason: ColdTailWindowFallbackReason; detail?: string };
+}
+
+/**
+ * 窗口计划的输入：已经读到的持久事实（session / session_entry）。
+ * 计划函数由调用方注入，`cold-event-merge` 不依赖 manifest 读路径。
+ */
+interface ColdWindowPlanFacts {
+  session: Awaited<ReturnType<PersistedConversationMaterializationStore["getSession"]>>;
+  entries: readonly SessionEntryInfo[];
+  branchGeneration: number;
+  /** runtime resume 已读进内存的全量正文（可能缺席）。 */
+  persistedMessages?: readonly MessageWithParts[];
+  rewind: ActiveConversationBranchRewind;
 }
 
 interface PersistedConversationMaterializationStore {
@@ -37,6 +86,15 @@ interface PersistedConversationMaterializationStore {
     };
   } | null>;
   messages(input: { sessionID: import("@zcode/contracts").SessionId }): Promise<MessageWithParts[]>;
+  /**
+   * 单条消息读（Step 9 的 shared_context 窗口兼容）。窗口化时那条 model-only 上下文消息
+   * 通常在窗口之外，不能靠「在窗口正文里 find」；按 id 读一次是 O(1)。
+   * 缺席（旧宿主 / 内存 store）→ 只在窗口正文里找，等价于 Step 6 的行为。
+   */
+  messageWithParts?(input: {
+    sessionID: import("@zcode/contracts").SessionId;
+    messageID: import("@zcode/contracts").MessageId;
+  }): Promise<MessageWithParts | null>;
   readTarget(input: {
     sessionID: import("@zcode/contracts").SessionId;
   }): Promise<SessionGoal | null>;
@@ -44,6 +102,23 @@ interface PersistedConversationMaterializationStore {
     sessionID: import("@zcode/contracts").SessionId;
     type?: string;
   }): Promise<SessionEntryInfo[]>;
+}
+
+/**
+ * shared context 导入的「model-only 上下文消息」判定（唯一判据，窗口内外共用）。
+ *
+ * `commitSharedContextImportBundle` 把它与 session 一起原子落库，且它是 active 分支的
+ * **第一条**消息——这是窗口化路径能按 id 单条确认它的前提。
+ */
+function isSharedContextImportMessage(
+  message: MessageWithParts | null | undefined,
+): message is MessageWithParts {
+  return (
+    message?.info.role === "user" &&
+    message.info.source === "shared_context" &&
+    message.info.semantics?.origin === "import" &&
+    message.info.semantics?.kind === "shared_context"
+  );
 }
 
 /**
@@ -58,37 +133,68 @@ export async function loadPersistedConversationMaterialization(input: {
   persistedMessages?: MessageWithParts[];
   sessionId: string;
   store?: PersistedConversationMaterializationStore;
+  /**
+   * 冷开尾窗计划（Step 6）。给出时**只读窗口正文**（内存里有就切片，否则走
+   * `readActiveBranchTail`），全量 `messages()` 不再参与；返回 `kind:"full"` 时沿用旧路径。
+   */
+  planColdWindow?: (facts: ColdWindowPlanFacts) => Promise<ColdTailWindowReadResult>;
 }): Promise<ConversationMaterializationSource> {
   if (!input.store) {
     // 无 sessionStore 时旧 bridge 人工填 target:null，把“没有读取”误当成
     // “持久层明确清空”，进而压掉唯一的内存 TargetChanged 并强制 synthesized。
     return {
+      branchGeneration: 0,
       goalVerificationEntries: [],
       memoryEvents: [...input.memoryEvents],
       messages: [],
+      persistedWorkspaceCheckpoints: [],
     };
   }
   const sessionID = input.sessionId as import("@zcode/contracts").SessionId;
-  const [session, allMessages, target, entries] = await Promise.all([
+  const [session, target, entries] = await Promise.all([
     input.store.getSession(sessionID),
-    input.persistedMessages ?? input.store.messages({ sessionID }),
     input.store.readTarget({ sessionID }),
     input.store.sessionEntries ? input.store.sessionEntries({ sessionID }) : Promise.resolve([]),
   ]);
-  const messages = selectActiveConversationBranch(allMessages, {
+  const rewind: ActiveConversationBranchRewind = {
     branchCutAfterMessageId: session?.revert?.branchCutAfterMessageID,
     rewindCreatedMessageId: session?.revert?.createdMessageID,
     rewindKeptMessageIds: session?.revert?.keptMessageIDs,
     rewindTargetMessageId: session?.revert?.targetMessageID,
-  });
-  const sharedContextMessage = messages.find(
-    (message) =>
-      message.info.role === "user" &&
-      message.info.source === "shared_context" &&
-      message.info.semantics?.origin === "import" &&
-      message.info.semantics?.kind === "shared_context",
-  );
+  };
+  const plan = input.planColdWindow
+    ? await input.planColdWindow({
+        session,
+        entries,
+        branchGeneration: session?.revert?.branchGeneration ?? 0,
+        ...(input.persistedMessages === undefined
+          ? {}
+          : { persistedMessages: input.persistedMessages }),
+        rewind,
+      })
+    : null;
+  const windowed = plan?.kind === "window" ? plan : null;
+  const messages = windowed
+    ? windowed.messages
+    : selectActiveConversationBranch(
+        input.persistedMessages ?? (await input.store.messages({ sessionID })),
+        rewind,
+      );
   const sharedContextEntry = entries.find((entry) => entry.type === "v4/shared_context_import");
+  // 窗口化（Step 9）：这条 model-only 上下文消息几乎总在窗口之外，`messages.find` 找不到
+  // 会静默丢掉分享导入的展示元数据。它由 `commitSharedContextImportBundle` 与 session
+  // 原子落库、且是 active 分支的第一条消息——按 id 单条读一次即可确认（O(1)，不读正文窗口）。
+  let sharedContextMessage = messages.find((message) => isSharedContextImportMessage(message));
+  if (!sharedContextMessage && windowed && sharedContextEntry && input.store.messageWithParts) {
+    const contextMessageId = windowed.activeMessageIds[0];
+    if (contextMessageId !== undefined) {
+      const candidate = await input.store.messageWithParts({
+        sessionID,
+        messageID: contextMessageId,
+      });
+      if (isSharedContextImportMessage(candidate)) sharedContextMessage = candidate;
+    }
+  }
   const sharedContextData =
     sharedContextEntry?.data && typeof sharedContextEntry.data === "object"
       ? (sharedContextEntry.data as Record<string, unknown>)
@@ -111,13 +217,80 @@ export async function loadPersistedConversationMaterialization(input: {
           }
         : { title: session.title.trim() }
       : undefined;
+  // 窗口坐标（不含正文）：正文已经放进 `messages`，这里只交出身份，避免同一份大数组
+  // 在结果里出现两次。
+  let coldWindow: ColdTailWindowPlan | undefined;
+  if (windowed) {
+    const { messages: _windowMessages, kind: _kind, ...coordinates } = windowed;
+    coldWindow = coordinates;
+  }
   return {
+    branchGeneration: session?.revert?.branchGeneration ?? 0,
     goalVerificationEntries: goalVerificationEntriesFromSessionEntries(entries),
     memoryEvents: [...input.memoryEvents],
     messages,
+    persistedWorkspaceCheckpoints: workspaceCheckpointsFromSessionEntries(
+      entries,
+      input.memoryEvents,
+    ),
     ...(sharedContextImport ? { sharedContextImport } : {}),
     target,
+    ...(coldWindow ? { coldWindow } : {}),
+    ...(plan?.kind === "full"
+      ? {
+          coldWindowFallback: {
+            reason: plan.reason,
+            ...(plan.detail === undefined ? {} : { detail: plan.detail }),
+          },
+        }
+      : {}),
   };
+}
+
+/**
+ * session_entry → 工作区 checkpoint（fix-c19 的窄读：不再等 resume 把同一个 payload 回放
+ * 成事件）。
+ *
+ * 信封形状与 core 的写侧（`workspace-checkpoint-persistence.ts` 的
+ * `persistWorkspaceCheckpoint`）逐字对应：`{ eventId, sequenceNumber, traceId, turnId?,
+ * payload }`。这里只做**读侧**校验，坏条目跳过——一条坏 checkpoint 不能把首屏拖垮。
+ *
+ * 内存事件里已有的 checkpointId 直接丢弃：resume 之后事件与 entry 同源，合并两份会让
+ * 同一份改动计两遍。注意顺序：内存事件才是权威（它可以比 entry 更新）。
+ */
+function workspaceCheckpointsFromSessionEntries(
+  entries: readonly SessionEntryInfo[],
+  memoryEvents: readonly SessionEvent[],
+): PersistedWorkspaceCheckpoint[] {
+  const knownIds = new Set<string>();
+  for (const event of memoryEvents) {
+    if (event.type !== SessionEventType.CheckpointCreated) continue;
+    try {
+      knownIds.add(parseCheckpointCreatedPayload(event.payload).checkpointId);
+    } catch {
+      // 坏事件不参与去重（它本来也进不了摘要）。
+    }
+  }
+  const checkpoints: PersistedWorkspaceCheckpoint[] = [];
+  for (const entry of entries) {
+    if (entry.type !== SESSION_ENTRY_WORKSPACE_CHECKPOINT) continue;
+    const envelope = entry.data;
+    if (!envelope || typeof envelope !== "object" || Array.isArray(envelope)) continue;
+    const record = envelope as Record<string, unknown>;
+    if (!("payload" in record)) continue;
+    try {
+      const checkpoint = parseCheckpointCreatedPayload(record.payload);
+      if (knownIds.has(checkpoint.checkpointId)) continue;
+      knownIds.add(checkpoint.checkpointId);
+      checkpoints.push({
+        checkpoint,
+        turnId: typeof record.turnId === "string" ? record.turnId : null,
+      });
+    } catch {
+      // 旧格式 / 坏 payload：跳过（与 core 的 restore 同一口径）。
+    }
+  }
+  return checkpoints;
 }
 
 interface ColdEventMergeDiagnostic {
@@ -146,6 +319,11 @@ interface MergeInput {
   messages: readonly MessageWithParts[];
   sessionId: string;
   target?: SessionGoal | null;
+  /**
+   * 窗口化物化的非零起点上下文（RC4）：`initialTurnNumber` / `initialModelKey` / `preface` /
+   * `baseTimestampMs`。全量物化时不传，合成结果与旧路径逐字相同。
+   */
+  synthesis?: ColdSynthesisContext;
 }
 
 const MEMORY_ONLY_EVENT_TYPES = new Set<string>([
@@ -716,6 +894,7 @@ export function mergeColdConversationEvents(input: MergeInput): ColdEventMergeRe
     contextWindow: input.contextWindow,
     fileChangeSummariesByMessageId: input.fileChangeSummariesByMessageId,
     goalVerificationEntries: durableGoalEntries,
+    ...(input.synthesis ?? {}),
   });
   const durableEvents = input.target
     ? [

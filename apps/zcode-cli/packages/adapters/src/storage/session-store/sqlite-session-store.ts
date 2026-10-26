@@ -44,6 +44,9 @@ import type {
   SessionInputDelivery,
   SessionInputRecord,
   SessionInputStatus,
+  SessionMessageIndexEntry,
+  SessionToolPartEntry,
+  PersistedAssistantSelection,
   SessionTaskLinkRecord,
   SessionRevert,
   SessionStorePort,
@@ -53,6 +56,7 @@ import type {
   TaskUsageQueryResult,
   TodoItem,
   ToolUsageRecord,
+  TurnManifestStorePort,
   TurnUsageRecord,
   UpsertScriptWorkflowDefinitionInput,
   UpdateScriptWorkflowActivityInput,
@@ -102,6 +106,7 @@ import * as fileChangeSummariesRepository from "./repositories/file-change-summa
 import * as sessionInputRepository from "./repositories/session-inputs.js";
 import * as sessionRepository from "./repositories/sessions.js";
 import * as todoRepository from "./repositories/todos.js";
+import * as turnManifestRepository from "./repositories/turn-manifest.js";
 import * as usageRepository from "./repositories/usage.js";
 
 function forkChildSessionId(entry: SessionEntryInfo): SessionId | null {
@@ -232,6 +237,7 @@ export class SqliteSessionStore
     };
     return this.fileChangeSummaryStore;
   }
+  private turnManifestStore?: TurnManifestStorePort;
 
   constructor(options: SqliteSessionStoreOptions = {}, startupToken?: symbol) {
     this.dbPath = options.dbPath ?? getDefaultSessionDbPath();
@@ -645,6 +651,37 @@ export class SqliteSessionStore
     return messageRepository.messages(this.db, input);
   }
 
+  async listSessionMessageIndex(input: {
+    sessionID: SessionId;
+  }): Promise<SessionMessageIndexEntry[]> {
+    return messageRepository.listSessionMessageIndex(this.db, input);
+  }
+
+  /** 首屏 model/mode 窄读（Step 9）：一行、不读 parts。 */
+  async readLatestAssistantSelection(input: {
+    sessionID: SessionId;
+  }): Promise<PersistedAssistantSelection | null> {
+    return messageRepository.readLatestAssistantSelection(this.db, input);
+  }
+
+  async readActiveBranchTail(input: {
+    sessionID: SessionId;
+    activeMessageIds: readonly MessageId[];
+    limitBefore?: MessageId | null;
+    limitAfter?: MessageId | null;
+  }): Promise<MessageWithParts[]> {
+    return messageRepository.readActiveBranchTail(this.db, input);
+  }
+
+  /** 子会话候选的窄读（fix-c19）：只解码指定 tool 名的 part。 */
+  async readActiveBranchToolParts(input: {
+    sessionID: SessionId;
+    toolNames: readonly string[];
+    activeMessageIds?: readonly MessageId[];
+  }): Promise<SessionToolPartEntry[]> {
+    return messageRepository.readActiveBranchToolParts(this.db, input);
+  }
+
   async saveSessionEntry(input: SessionEntryInfo): Promise<void> {
     this.throwBeforeWrite();
     return sessionEntryRepository.saveSessionEntry(this.db, input);
@@ -655,6 +692,22 @@ export class SqliteSessionStore
     type?: SessionEntryType | string;
   }): Promise<SessionEntryInfo[]> {
     return sessionEntryRepository.sessionEntries(this.db, input);
+  }
+
+  /** turn 行清单读写面：同一连接上的三条窄方法，按需构造一次。 */
+  get turnManifest(): TurnManifestStorePort {
+    this.turnManifestStore ??= {
+      upsertTurnManifest: (input) => {
+        this.throwBeforeWrite();
+        return turnManifestRepository.upsertTurnManifest(this.db, input);
+      },
+      rewriteTurnManifestBranch: (input) => {
+        this.throwBeforeWrite();
+        return turnManifestRepository.rewriteTurnManifestBranch(this.db, input);
+      },
+      readTurnManifest: (input) => turnManifestRepository.readTurnManifest(this.db, input),
+    };
+    return this.turnManifestStore;
   }
 
   // ── session_input 账本──

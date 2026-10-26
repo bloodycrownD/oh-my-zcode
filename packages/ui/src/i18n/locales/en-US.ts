@@ -4656,6 +4656,7 @@ const enUS: Record<string, string> = {
   "chat.placeholder.followUpAsk": "Ask for follow-up changes",
   "chat.placeholder.followUpQueue": "Keep typing to queue follow-up changes",
   "chat.placeholder.loading": "Initializing task...",
+  "chat.placeholder.runtimeLoading": "Loading runtime environment…",
   "chat.attachments.dragHint": "Drop to add attachments",
   "chat.composer.workspaceFileDragHint": "Drop to mention this file or folder",
   "chat.send": "Send",

@@ -373,6 +373,12 @@ interface ConversationComposerProps {
   blockingRequestId?: string | null;
   disabled?: boolean;
   /**
+   * 外部 placeholder 覆盖（IS3 / Step 10）：view-only 首屏只换文案（「正在加载运行环境…」），
+   * **不**禁用输入。composer 是唯一的激活入口——传 `disabled` 会把会话永久钉在 view-only。
+   * 缺省走内部 intl 的动态文案（无历史 / 追问 / 排队三态）。
+   */
+  placeholderOverride?: string;
+  /**
    * 是否在新建任务 / 切换会话 / 挂载后自动把光标聚焦到输入框（默认开）。
    * 竖切多 pane 时由宿主传入 SessionPane.focused，仅焦点 pane 聚焦、后台 pane 不抢焦点。
    */
@@ -478,6 +484,7 @@ function ConversationComposerImpl({
   centered = false,
   blockingRequestId = null,
   disabled = false,
+  placeholderOverride,
   autoFocusEnabled = true,
   workspacePath,
   workspaceIdentity,
@@ -1210,13 +1217,12 @@ function ConversationComposerImpl({
           webElements: currentWebElementContexts,
           pptxElements: currentPptxElementReferences,
         });
-        const contextAttachmentCount =
-          countComposerPromptContexts({
-            codeComments: currentCodeCommentContexts,
-            conversationSelections: currentConversationSelections,
-            webElements: currentWebElementContexts,
-            pptxElements: currentPptxElementReferences,
-          });
+        const contextAttachmentCount = countComposerPromptContexts({
+          codeComments: currentCodeCommentContexts,
+          conversationSelections: currentConversationSelections,
+          webElements: currentWebElementContexts,
+          pptxElements: currentPptxElementReferences,
+        });
         if (trimmed) {
           promptHistoryBeforeSend = readPromptHistoryEntries(workspacePath);
           promptHistoryAfterAppend = appendPromptHistoryEntry(promptHistoryBeforeSend, trimmed);
@@ -1433,13 +1439,16 @@ function ConversationComposerImpl({
 
   // 动态 placeholder（旧 chatViewPlaceholder 语义）：无历史 → newTask；
   // 有历史空闲 → followUpAsk；有历史处理中 → followUpQueue。
-  const placeholder = intl.formatMessage({
-    id: resolveChatPlaceholderKey({
-      hasHistoryMessages: (snapshot?.rows.totalCount ?? 0) > 0,
-      isTaskProcessing: canStop,
-      compactNewTask: false,
-    }),
-  });
+  // 外部覆盖优先（view-only 首屏的「正在加载运行环境…」），只换文案不换可用性。
+  const placeholder =
+    placeholderOverride ??
+    intl.formatMessage({
+      id: resolveChatPlaceholderKey({
+        hasHistoryMessages: (snapshot?.rows.totalCount ?? 0) > 0,
+        isTaskProcessing: canStop,
+        compactNewTask: false,
+      }),
+    });
   const sendTooltipTitle = intl.formatMessage({
     id: mode === "enqueue" ? "chat.queue.enqueue" : "chat.send",
   });

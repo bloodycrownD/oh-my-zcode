@@ -1,0 +1,881 @@
+{
+  "schema": "zcode-session-open-after/v1",
+  "generatedAt": "2026-10-26T08:39:03.283Z",
+  "phase": "Step 14 — phase-gates 真机验收（after）",
+  "spec": "docs/iterations/session-open-latency/spec.md",
+  "head": {
+    "sha": "8c56828248cc3623c1dbc0286d69d43cf6d552fb",
+    "subject": "test(perf): Step 14 真机验收数据 + spec 落地说明（after.json）",
+    "branch": "feat/session-open-latency"
+  },
+  "baseline": {
+    "file": "docs/iterations/session-open-latency/baseline.json",
+    "phase": "phase-0-baseline（c 树 8a1352d3，同一台机器，长会话 3012 message / 5255 行）",
+    "notMeasuredAgain": "本文件不重跑基线：baseline.json 是唯一基准，本次只做 after 侧实测与逐条对照"
+  },
+  "measure_setup": {
+    "fixture": [
+      "长会话夹具 = 真实库 C:\\Users\\BloodyCrown\\.omz\\cli\\db\\db.sqlite 的副本，保留 3 条会话行（目标 sess_57cf107c 3012 message / 5255 行；park sess_902d4d67 1217 message；park sess_e20b7f31 1048 message），其余 tasks 行删除、workspace 字段改写到沙盒 ws 目录。",
+      "tasks-index.sqlite 同样复制后裁剪：只留 3 条 tasks、1 个 project（改名为 step14-fixture）与 1 条 project_roots（改写到 ws）。",
+      "会话内容（message/part/session_entry）逐行原样保留，因此 3012 message / 5255 行的规模与 baseline 的目标会话**完全一致**；workspace 路径换成 %TEMP%\\c-session-open-step14\\ws，避免在真实工作区里跑 resume（工作区路径不参与投影行数）。"
+    ],
+    "sandbox": [
+      "沙盒 HOME=%TEMP%\\c-session-open-step14\\home，内含 .omz/{cli,v2}：db.sqlite、magic-context.db、config.json、provider_config.json、credentials.json、tasks-index.sqlite 等全部是副本；真实 ~/.omz 全程只读。",
+      "USERPROFILE/HOME/APPDATA/LOCALAPPDATA/ZCODE_DATA_BASE_DIR 全部指向沙盒（Electron 的 appData 由 USERPROFILE 派生，实测必须存在 <USERPROFILE>\\AppData\\Roaming 才能解析）。",
+      "<worktree>\\packages\\desktop 的 out/{main,host,preload,scheduler} 与 scripts/build-desktop-agent-cli.mjs 的 CLI bundle 都按本分支 HEAD 重新构建（pnpm --filter @zcode/desktop pre-dev → node scripts/build-desktop-agent-cli.mjs → pnpm --filter @zcode/desktop exec tsup），vite dev 提供 renderer（dev-only 的 __zcodeV4ConversationOpensE2E 才挂载）。"
+    ],
+    "driver": [
+      "采样器：scripts/dev/long-session-perf-sample.mjs（本步未改它）。--path warm/reopen/switchback 原样使用。",
+      "--path cold **不可用**：本树 dev 实例在 workspace 激活时就把该 workspace 的 CLI 拉起来（click 时 cliProcessState=reused、hostPrepareMs=3ms），而该路径要求 9229 整体关闭且 cliProcessState===\"spawned\"，否则把样本判成 precondition-violated 并从汇总里丢掉数值。实测冷启一次（--startup-workspace 指向另一个 workspace）仍是 reused。",
+      "因此 cold regime 用「kill 整个 electron 树 → 用 --open-workspace <目标 workspace> 冷启 → 等 renderer target 就绪 → --path warm 采一轮（目标会话未打开）」复现，语义是「CLI 新起、该 CLI 进程里还没有 publisher」。",
+      "**这个 regime 只量 publisher 水化，不量激活**：CLI 日志实测点击前 0.8s 已有一次 `cold resume flight created → session shell materialized → Session resumed`（app 启动期的 journal/读入口 `ensureHostRecordForJournalRead` 会 await `ensureRuntimeReady`），点击的 subscribe 因此是 `coldResume=false`、`sessionRuntimeState=warm`。所以 3718ms 里不含那次 815ms 激活，也不含 CLI spawn。驱动脚本在 %TEMP%\\c-session-open-step14\\run-matrix.mjs 与 extra.mjs（临时件，不入库）。",
+      "每轮采样前采样器自己调 __zcodeV4ConversationOpensE2E.reset()；每个采样窗口前做 Emulation.setFocusEmulationEnabled + Page.bringToFront + setWebLifecycleState(active)，3 次冷开/3 次 reopen/3 次切回的 visibility.contaminated 均为 false。"
+    ],
+    "rounds": {
+      "coldApp": 3,
+      "reopen": 3,
+      "switchback": 3,
+      "warmNotHolding": 3,
+      "coldCliRespawn": 3,
+      "firstEverCold": 1,
+      "totalAckSamples": 16
+    }
+  },
+  "environment": {
+    "os": "Windows 10.0.26200 x64",
+    "node": "v22.22.0（mise.toml 要求 24.14.0，只报 engine 警告）",
+    "build": "dev：vite dev (5174) + 本分支 HEAD 重编的 tsup out/* 与 CLI bundle",
+    "appName": "omz Dev（未打包 → remote-debugging-port=9229）",
+    "profile": "沙盒 USERPROFILE（真实 ~/.omz 只读；真实 %APPDATA% 不参与）",
+    "note": "沙盒库的 page cache 在第一轮采样前后不同：第一轮（firstEverCold）含 0023 迁移、冷清单重建与 2GB 副本的首次读，单独列出，不混进 3 次稳态冷开。"
+  },
+  "targets": {
+    "longSession": {
+      "id": "sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5",
+      "title": "比较 zcode 与 omz 更新差异",
+      "messages": 3012,
+      "observedTotalRows": 5255,
+      "manifest": {
+        "turns": 159,
+        "sumRowCount": 5255,
+        "queryEntries": 103,
+        "rowCountSource": "cold",
+        "projectionSchemaVersion": 3,
+        "window": {
+          "ordinal": 151,
+          "turnCount": 8,
+          "messageCount": 115,
+          "rowCount": 160,
+          "rowIdBase": 5096,
+          "check": "Σ row_count(ordinal<151)=5095 ⇒ base=5096；Σ(ordinal 151..158)=160 ⇒ 末行 rowId=5255=totalCount"
+        }
+      }
+    },
+    "parkSession": {
+      "id": "sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3",
+      "title": "排查 omz 系统提示词被丢弃问题",
+      "messages": 1217,
+      "observedTotalRows": 2347,
+      "window": {
+        "ordinal": 74,
+        "turnCount": 8,
+        "messageCount": 88,
+        "rowCount": 140,
+        "rowIdBase": 2208
+      }
+    }
+  },
+  "runs": [
+    {
+      "label": "cold-app-1",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 3718,
+      "hostPrepareMs": 3,
+      "cliProcessState": "reused",
+      "cliRequestMs": 3627,
+      "initialFrameTransportMs": 51,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 489,
+      "uiViewReadyToPaintMs": 4207,
+      "clickToAckMs": 3730,
+      "viewReadyMs": 2811,
+      "manifestMs": 6,
+      "mergeMs": 2736,
+      "rehydrateMs": 49,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 815,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "cold-app-2",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 3723,
+      "hostPrepareMs": 4,
+      "cliProcessState": "reused",
+      "cliRequestMs": 3624,
+      "initialFrameTransportMs": 59,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 476,
+      "uiViewReadyToPaintMs": 4199,
+      "clickToAckMs": 3731,
+      "viewReadyMs": 2827,
+      "manifestMs": 6,
+      "mergeMs": 2754,
+      "rehydrateMs": 49,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 796,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "cold-app-3",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 3611,
+      "hostPrepareMs": 3,
+      "cliProcessState": "reused",
+      "cliRequestMs": 3517,
+      "initialFrameTransportMs": 54,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 469,
+      "uiViewReadyToPaintMs": 4080,
+      "clickToAckMs": 3622,
+      "viewReadyMs": 2483,
+      "manifestMs": 6,
+      "mergeMs": 2407,
+      "rehydrateMs": 50,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 1033,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "warm-not-holding",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 1844,
+      "hostPrepareMs": 2,
+      "cliProcessState": "reused",
+      "cliRequestMs": 1766,
+      "initialFrameTransportMs": 25,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 299,
+      "uiViewReadyToPaintMs": 2143,
+      "clickToAckMs": 1893,
+      "viewReadyMs": 1205,
+      "manifestMs": 3,
+      "mergeMs": 1180,
+      "rehydrateMs": 13,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 140,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 561,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "warm-not-holding",
+      "run": 2,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 118,
+      "hostPrepareMs": 2,
+      "cliProcessState": "reused",
+      "cliRequestMs": 5,
+      "initialFrameTransportMs": 64,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 388,
+      "uiViewReadyToPaintMs": 506,
+      "clickToAckMs": 177,
+      "viewReadyMs": 4,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 140,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 561,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "warm-not-holding",
+      "run": 3,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 104,
+      "hostPrepareMs": 1,
+      "cliProcessState": "reused",
+      "cliRequestMs": 4,
+      "initialFrameTransportMs": 55,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 324,
+      "uiViewReadyToPaintMs": 428,
+      "clickToAckMs": 167,
+      "viewReadyMs": 3,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 140,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 561,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "reopen",
+      "run": 1,
+      "path": "reopen",
+      "verdict": "present",
+      "uiViewReadyMs": 143,
+      "hostPrepareMs": 3,
+      "cliProcessState": "reused",
+      "cliRequestMs": 9,
+      "initialFrameTransportMs": 42,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 514,
+      "uiViewReadyToPaintMs": 657,
+      "clickToAckMs": 215,
+      "viewReadyMs": 8,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 853,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "reopen",
+      "run": 2,
+      "path": "reopen",
+      "verdict": "present",
+      "uiViewReadyMs": 128,
+      "hostPrepareMs": 2,
+      "cliProcessState": "reused",
+      "cliRequestMs": 9,
+      "initialFrameTransportMs": 34,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 228,
+      "uiViewReadyToPaintMs": 356,
+      "clickToAckMs": 191,
+      "viewReadyMs": 8,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 853,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "reopen",
+      "run": 3,
+      "path": "reopen",
+      "verdict": "present",
+      "uiViewReadyMs": 138,
+      "hostPrepareMs": 3,
+      "cliProcessState": "reused",
+      "cliRequestMs": 9,
+      "initialFrameTransportMs": 43,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 398,
+      "uiViewReadyToPaintMs": 536,
+      "clickToAckMs": 233,
+      "viewReadyMs": 8,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 853,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "switchback",
+      "run": 1,
+      "path": "switchback",
+      "verdict": "not-applicable",
+      "uiViewReadyMs": null,
+      "hostPrepareMs": null,
+      "cliProcessState": null,
+      "cliRequestMs": null,
+      "initialFrameTransportMs": null,
+      "rendererSnapshotApplyMs": null,
+      "paintAfterApplyMs": null,
+      "uiViewReadyToPaintMs": null,
+      "clickToAckMs": null,
+      "viewReadyMs": null,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": null,
+      "sessionRuntimeState": null,
+      "runtimeReadyMs": null,
+      "switchMs": 409,
+      "noNewAck": true,
+      "contaminated": false
+    },
+    {
+      "label": "switchback",
+      "run": 2,
+      "path": "switchback",
+      "verdict": "not-applicable",
+      "uiViewReadyMs": null,
+      "hostPrepareMs": null,
+      "cliProcessState": null,
+      "cliRequestMs": null,
+      "initialFrameTransportMs": null,
+      "rendererSnapshotApplyMs": null,
+      "paintAfterApplyMs": null,
+      "uiViewReadyToPaintMs": null,
+      "clickToAckMs": null,
+      "viewReadyMs": null,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": null,
+      "sessionRuntimeState": null,
+      "runtimeReadyMs": null,
+      "switchMs": 551,
+      "noNewAck": true,
+      "contaminated": false
+    },
+    {
+      "label": "switchback",
+      "run": 3,
+      "path": "switchback",
+      "verdict": "not-applicable",
+      "uiViewReadyMs": null,
+      "hostPrepareMs": null,
+      "cliProcessState": null,
+      "cliRequestMs": null,
+      "initialFrameTransportMs": null,
+      "rendererSnapshotApplyMs": null,
+      "paintAfterApplyMs": null,
+      "uiViewReadyToPaintMs": null,
+      "clickToAckMs": null,
+      "viewReadyMs": null,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": null,
+      "sessionRuntimeState": null,
+      "runtimeReadyMs": null,
+      "switchMs": 450,
+      "noNewAck": true,
+      "contaminated": false
+    },
+    {
+      "label": "cold-cli-1",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 287,
+      "hostPrepareMs": 2,
+      "cliProcessState": "reused",
+      "cliRequestMs": 212,
+      "initialFrameTransportMs": 61,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 394,
+      "uiViewReadyToPaintMs": 681,
+      "clickToAckMs": 8862,
+      "viewReadyMs": 7,
+      "manifestMs": null,
+      "mergeMs": null,
+      "rehydrateMs": null,
+      "manifestAdjusted": null,
+      "snapshotRowCount": 5255,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 2107,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "cold-cli-2",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 7622,
+      "hostPrepareMs": 1250,
+      "cliProcessState": "reused",
+      "cliRequestMs": 6263,
+      "initialFrameTransportMs": 60,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 256,
+      "uiViewReadyToPaintMs": 7878,
+      "clickToAckMs": 5722,
+      "viewReadyMs": 4507,
+      "manifestMs": 6,
+      "mergeMs": 2375,
+      "rehydrateMs": 38,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "cold",
+      "runtimeReadyMs": 796,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "cold-cli-3",
+      "run": 1,
+      "path": "warm",
+      "verdict": "present",
+      "uiViewReadyMs": 7600,
+      "hostPrepareMs": 1296,
+      "cliProcessState": "reused",
+      "cliRequestMs": 6195,
+      "initialFrameTransportMs": 58,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 254,
+      "uiViewReadyToPaintMs": 7854,
+      "clickToAckMs": 5202,
+      "viewReadyMs": 2384,
+      "manifestMs": 5,
+      "mergeMs": 2203,
+      "rehydrateMs": 38,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "cold",
+      "runtimeReadyMs": 446,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false
+    },
+    {
+      "label": "smoke-cold",
+      "run": 1,
+      "path": "cold",
+      "verdict": "precondition-violated",
+      "uiViewReadyMs": 5048,
+      "hostPrepareMs": 2,
+      "cliProcessState": "reused",
+      "cliRequestMs": 4960,
+      "initialFrameTransportMs": 46,
+      "rendererSnapshotApplyMs": 0,
+      "paintAfterApplyMs": 453,
+      "uiViewReadyToPaintMs": 5501,
+      "clickToAckMs": 5076,
+      "viewReadyMs": 2470,
+      "manifestMs": 6,
+      "mergeMs": 2402,
+      "rehydrateMs": 44,
+      "manifestAdjusted": false,
+      "snapshotRowCount": 160,
+      "sessionRuntimeState": "warm",
+      "runtimeReadyMs": 2488,
+      "switchMs": null,
+      "noNewAck": null,
+      "contaminated": false,
+      "note": "sandbox 库的**第一次**打开：0023 迁移 + 冷清单全量重建都算在里面；3 次稳态冷开不含这些"
+    }
+  ],
+  "aggregates": {
+    "coldApp": {
+      "runs": ["cold-app-1#1", "cold-app-2#1", "cold-app-3#1"],
+      "uiViewReadyMs": [3718, 3723, 3611],
+      "uiViewReadyMsMedian": 3718,
+      "hostPrepareMs": [3, 4, 3],
+      "cliProcessState": ["reused", "reused", "reused"],
+      "viewReadyMs": [2811, 2827, 2483],
+      "viewReadyMsMedian": 2811,
+      "mergeMs": [2736, 2754, 2407],
+      "mergeMsMedian": 2736,
+      "rehydrateMs": [49, 49, 50],
+      "manifestMs": [6, 6, 6],
+      "runtimeReadyMs": [815, 796, 1033],
+      "paintAfterApplyMs": [489, 476, 469],
+      "snapshotRowCount": [160, 160, 160],
+      "manifestAdjusted": [false, false, false],
+      "definition": "app 冷启 + CLI 由 app 在 workspace 激活时预启动；目标会话在该 CLI 进程里还没有 publisher，但 **runtime 已被点击前的一次读入口激活**（`coldResume=false` / `sessionRuntimeState=warm`）⇒ 只量「publisher 水化」这一段",
+      "coldOpenEndToEndProxyMs": [4533, 4519, 4644],
+      "coldOpenEndToEndProxyMsMedian": 4533,
+      "endToEndNote": "uiViewReadyMs + runtimeReadyMs = 点击前那次激活 + 本次水化，仍不含 CLI spawn（预启动）与 app 启动到可点之间的时间；它不是 baseline 的 uiViewReadyMs 同义量。",
+      "viewSideProxyMs": [3715, 3719, 3608],
+      "viewSideProxyMsMedian": 3715,
+      "cliBootstrapMs": "缺席（3/3）：CLI 由 app 预启动，本次 subscribe 没有触发也没有等待 spawn"
+    },
+    "warmNotHolding": {
+      "runs": ["warm-not-holding#1", "warm-not-holding#2", "warm-not-holding#3"],
+      "uiViewReadyMs": [1844, 118, 104],
+      "uiViewReadyMsMedian": 118,
+      "hostPrepareMs": [2, 2, 1],
+      "cliProcessState": ["reused", "reused", "reused"],
+      "viewReadyMs": [1205, 4, 3],
+      "viewReadyMsMedian": 4,
+      "mergeMs": [1180],
+      "mergeMsMedian": 1180,
+      "rehydrateMs": [13],
+      "manifestMs": [3],
+      "runtimeReadyMs": [561, 561, 561],
+      "paintAfterApplyMs": [299, 388, 324],
+      "snapshotRowCount": [140, 140, 140],
+      "manifestAdjusted": [false, null, null],
+      "definition": "同一 app、CLI 已起，第二个会话（1217 message）首次打开：run#1 = publisher 首次水化（runtime 已由 app 启动恢复激活，`sessionRuntimeState=warm`），run#2/#3 = 投影已复用",
+      "splitByRegime": true
+    },
+    "reopen": {
+      "runs": ["reopen#1", "reopen#2", "reopen#3"],
+      "uiViewReadyMs": [143, 128, 138],
+      "uiViewReadyMsMedian": 138,
+      "hostPrepareMs": [3, 2, 3],
+      "cliProcessState": ["reused", "reused", "reused"],
+      "viewReadyMs": [8, 8, 8],
+      "viewReadyMsMedian": 8,
+      "mergeMs": [],
+      "mergeMsMedian": null,
+      "rehydrateMs": [],
+      "manifestMs": [],
+      "runtimeReadyMs": [853, 853, 853],
+      "paintAfterApplyMs": [514, 228, 398],
+      "snapshotRowCount": [160, 160, 160],
+      "manifestAdjusted": [null, null, null],
+      "definition": "同一会话打开过 → 切到 park → 等 keep-warm 31s 过期 → 再点开；CLI runtime 仍持有该会话"
+    },
+    "switchback": {
+      "runs": ["switchback#1", "switchback#2", "switchback#3"],
+      "uiViewReadyMs": [],
+      "uiViewReadyMsMedian": null,
+      "hostPrepareMs": [],
+      "cliProcessState": [null, null, null],
+      "viewReadyMs": [],
+      "viewReadyMsMedian": null,
+      "mergeMs": [],
+      "mergeMsMedian": null,
+      "rehydrateMs": [],
+      "manifestMs": [],
+      "runtimeReadyMs": [],
+      "paintAfterApplyMs": [],
+      "snapshotRowCount": [],
+      "manifestAdjusted": [null, null, null],
+      "definition": "keep-warm 命中（不产生 subscribe/ACK）；switchMs = 点击派发 → pane 绑定且 total-row-count>0",
+      "switchMs": [409, 551, 450],
+      "switchMsMedian": 450,
+      "noNewAck": [true, true, true]
+    },
+    "coldCliRespawn": {
+      "runs": ["cold-cli-1#1", "cold-cli-2#1", "cold-cli-3#1"],
+      "uiViewReadyMs": [287, 7622, 7600],
+      "uiViewReadyMsMedian": 7600,
+      "hostPrepareMs": [2, 1250, 1296],
+      "cliProcessState": ["reused", "reused", "reused"],
+      "viewReadyMs": [7, 4507, 2384],
+      "viewReadyMsMedian": 2384,
+      "mergeMs": [2375, 2203],
+      "mergeMsMedian": 2289,
+      "rehydrateMs": [38, 38],
+      "manifestMs": [6, 5],
+      "runtimeReadyMs": [2107, 796, 446],
+      "paintAfterApplyMs": [394, 256, 254],
+      "snapshotRowCount": [5255, 160, 160],
+      "manifestAdjusted": [null, false, false],
+      "definition": "**诊断样本，不作为冷开验收**：app 存活、只杀 CLI 进程，再点开会话（spec 的「CLI 未起」字面形态）",
+      "caveat": "重建代际把 uiViewReadyMs 的起点重置到最后一次 connect，实测 clickToAckMs 与 uiViewReadyMs 方向不一致（run#1 287ms vs 8862ms；run#2/3 7622/7600 vs 5722/5202），所以这组数只能证明「该指标在 CLI 重起时不可信」，不能当冷开耗时。",
+      "clickToAckMs": [8862, 5722, 5202]
+    },
+    "firstEverCold": {
+      "uiViewReadyMs": 5048,
+      "hostPrepareMs": 2,
+      "viewReadyMs": 2470,
+      "mergeMs": 2402,
+      "rehydrateMs": 44,
+      "runtimeReadyMs": 2488,
+      "paintAfterApplyMs": 453,
+      "note": "含 0023 迁移 + 清单从零重建（159 turn / 5255 行全部现算），属一次性成本"
+    }
+  },
+  "acceptance": [
+    {
+      "scenario": "冷开（CLI 未起）主判：uiViewReadyMs − hostPrepareMs ≤ 1000ms",
+      "baseline": "中位 6097ms（6055/6112/6097）",
+      "now": "中位 3715ms（3715/3719/3608）",
+      "verdict": "fail",
+      "delta": "−39%（6097 → 3715），仍是门槛的 3.7 倍",
+      "evidence": "after.json.aggregates.coldApp.viewSideProxyMs；hostPrepareMs 只有 3~4ms（CLI 由 app 预启动，spawn 不计入本次 subscribe），因此这个减法在本树已经**退化成近似 uiViewReadyMs 本身**。",
+      "caveat": "**这 3715ms 只是 publisher 水化**：点击前 0.8s 已有一次激活（journal/读入口 await ensureRuntimeReady，`sessionRuntimeState=warm`）。把激活算回来的端到端代理 = uiViewReadyMs + runtimeReadyMs ≈ 4517ms（见 aggregates.coldApp.coldOpenEndToEndProxyMsMedian），仍不含 spawn。"
+    },
+    {
+      "scenario": "冷开并列分解项：uiViewReadyMs − cliBootstrapMs",
+      "baseline": "不可计算（cliBootstrapMs 3/3 缺席）",
+      "now": "仍不可计算（cliBootstrapMs 3/3 缺席，cliProcessState=reused）",
+      "verdict": "not-computable",
+      "evidence": "与 baseline 的 findings.coldCliBootstrapMissing 同因：client 被预建 + app 预启动 CLI，本次 subscribe 既没触发也没等待 spawn。"
+    },
+    {
+      "scenario": "冷开总量观察项（含 spawn）≤ 2.5~3s",
+      "baseline": "中位 7695ms（7831/7695/7675，含 spawn 1578~1776）",
+      "now": "不可直接测：spawn 与激活都在点击之前（hostPrepareMs=3ms、sessionRuntimeState=warm）",
+      "verdict": "unknown",
+      "evidence": "点击后可观测的是「水化 3718 + 一次激活 815 ≈ 4.5s」；加上 app 启动到可点、CLI spawn 的不可见部分，冷开总成本只会更大，因此「≤2.5~3s」这条按现有驱动**判不了**，也不能说达标。"
+    },
+    {
+      "scenario": "热开（CLI 已起、会话冷）：uiViewReadyMs ≤ 800ms",
+      "baseline": "按 regime 分裂：runtime 不持有 9724ms / 持有 133~187ms",
+      "now": "不持有 1844ms（1 次）/ 持有 118、104ms；重新打开同会话（reopen，持有）128~143ms",
+      "verdict": "split",
+      "delta": "不持有 −81%（9724 → 1844）；持有持平（118~143 vs 133~187）",
+      "evidence": "after.json.aggregates.warmNotHolding（run#1 1844 = publisher 首次水化，run#2/#3 118/104 = 投影已复用）与 aggregates.reopen（143/128/138）。800ms 只在「runtime 持有 + 投影已在水位里」regime 成立。",
+      "caveat": "1844ms 同样不含激活：该会话的 runtime 由 app 启动恢复在点击前激活（`sessionRuntimeState=warm`、`runtimeReadyMs=561` 是那次激活的读数）。端到端代理 ≈ 1844 + 561 = 2405ms。"
+    },
+    {
+      "scenario": "重开同会话（非首次、runtime 持有）",
+      "baseline": "4128ms（CLI 已卸下）/ 225ms、154ms（持有）",
+      "now": "143 / 128 / 138ms（3/3 持有，中位 138ms）",
+      "verdict": "pass",
+      "delta": "持有 regime −39%（225 → 138）；baseline 那次 4128ms 的不持有形态本次未复现（见 not_done）",
+      "evidence": "after.json.aggregates.reopen；3 次都 viewReadyMs=8ms（没有重新水化）。"
+    },
+    {
+      "scenario": "切回（keep-warm，无新 ACK）",
+      "baseline": "不适用 uiViewReadyMs；无新 ACK 3/3；switchMs 981/1112/1203（中位 1112）",
+      "now": "无新 ACK 3/3；switchMs 409/551/450（中位 450）",
+      "verdict": "exempt",
+      "delta": "−60%（1112 → 450）；spec 的 150ms 参考值仍未达到",
+      "evidence": "after.json.aggregates.switchback；采样器断言 ackCountAfterReset=0 且 newAckAfterSwitch=null。"
+    }
+  ],
+  "decomposition": {
+    "openPhasesShift": {
+      "rule": "viewReadyMs 在 Step 12 之后**不再含激活耗时**，与 phase-0 baseline 不是同一个量，禁止直接比数值。",
+      "baseline": {
+        "viewReadyMs": [3121, 3338, 3348],
+        "mergeMs": [2867, 3067, 3083],
+        "rehydrateMs": [217, 233, 227]
+      },
+      "now": {
+        "viewReadyMs": [2811, 2827, 2483],
+        "mergeMs": [2736, 2754, 2407],
+        "rehydrateMs": [49, 49, 50],
+        "manifestMs": [6, 6, 6],
+        "runtimeReadyMs": [815, 796, 1033],
+        "cliRequestMs": [3627, 3624, 3517]
+      },
+      "alignment": [
+        "可比的量是 renderer 侧 uiViewReadyMs：baseline 中位 7695（含 spawn 1578~1776）→ 本次 3718（不含 spawn）。",
+        "把 baseline 的 hostPrepareMs 减掉后的视图侧代理 6097 → 本次 3715，是同口径可比量。",
+        "新 viewReadyMs（2483~2827）比 baseline 的 3121~3348 小，**但** baseline 的 viewReadyMs 含激活本体（phase-0 激活在 ACK 之前），本次 viewReadyMs 不含激活（runtimeReadyMs 单独由 conversation/runtimeReady 给出 796~1033）。所以这一项的下降不能全部算作优化。",
+        "本次真正压下去的是 mergeMs（2736/2754/2407 vs baseline 2867/3067/3083，−10%~−21%）与 rehydrateMs（49/49/50 vs 217/233/227，−78%）；viewReadyMs 的大头仍是 mergeMs。"
+      ]
+    },
+    "upgradeCost": {
+      "source": "只有一条 debug 行：~/.omz/cli/log/zcode-<date>.jsonl 里 `v4 projection upgrade applied session=… upgradeMs=…`（host.onDebug → logger.debug；生产构建也落盘，实测可见）。",
+      "lines": [
+        {
+          "at": "2026-10-26T08:11:29.754Z",
+          "message": "v4 projection upgrade applied session=sess_57cf107c-ebd5-49f8-bb37-585c3b5452f5 upgradeMs=3226"
+        },
+        {
+          "at": "2026-10-26T08:11:32.513Z",
+          "message": "v4 projection upgrade applied session=sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3 upgradeMs=1435"
+        },
+        {
+          "at": "2026-10-26T08:11:45.815Z",
+          "message": "v4 projection upgrade applied session=sess_902d4d67-5844-43a2-a0a6-2f9988c7c0d3 upgradeMs=2070"
+        }
+      ],
+      "longSessionMs": 3226,
+      "parkSessionMs": [1435, 2070],
+      "note": "升级是激活后的 fire-and-forget 全量重读，不在 openPhases / openTiming 里（ACK 在激活之前）。3 次稳态冷开里只有 1 次捕到该行（其余轮在升级完成前就被进程回收/已不再降级），因此 n=1；数值用于说明「升级是秒级成本」而不是用于求中位。"
+    },
+    "manifest": {
+      "readCostMs": [6, 6, 6],
+      "adjusted": [false, false, false],
+      "evidence": "Σ manifest row_count = 5255 = baseline 的 observedTotalRows；窗口 base 5096 = 1 + Σ(row_count<151)；manifestSchemaVersion=3；query 清单 103 条（只登记 realUser）。"
+    }
+  },
+  "invariants": {
+    "IS1": {
+      "claim": "投影身份确定性（rowId base / turnId / createdAt / ModelSelected 在窗口与全量下逐值一致）",
+      "baseline": "phase-0 没有 manifest，rowId 由全局 nextRowId++ 产生，窗口化不存在 ⇒ 该不变式当时没有承载机制",
+      "now": "manifest 驱动的 rowId base 实测自洽（5096 = 1 + Σ前 150 轮 5095；末行 5255 = totalCount）；3 次冷开 manifestAdjusted=false（无账目漂移）",
+      "met": true,
+      "evidence": [
+        "sqlite: session_turn_manifest(159 行, Σrow_count=5255, source=cold, schema=3)",
+        "cli log: cold_window_applied {ordinal:151, turnCount:8, rowCount:160, rowIdBase:5096}",
+        "test:session-row-manifest 60 / test:turn-manifest-entry 12 / test:cold-open-window 9 / adapters test:turn-manifest-store 18"
+      ]
+    },
+    "IS2": {
+      "claim": "分支裁断/文件摘要/用量永远基于全序；窗口 = active 分支后缀",
+      "baseline": "全量读，不存在窗口",
+      "now": "窗口按整 turn 取 active 分支后缀（ordinal 151/159），四处全量输入保留",
+      "met": true,
+      "evidence": [
+        "test:active-branch-tail 15（D1/D2 窗口不进裁断）",
+        "test:session-message-index 21",
+        "cli log: cold_window_applied 的 limitBefore/messageCount 来自 selectColdTailWindow"
+      ]
+    },
+    "IS3": {
+      "claim": "命令只在 runtime-ready 后执行；view-ready 只放行读；send 是激活触发器",
+      "baseline": "激活在 ACK 之前，没有闸门",
+      "now": "本次实测出现过两种顺序：①冷启 app 档——激活在**点击之前**（journal 读 `ensureHostRecordForJournalRead` 刻意 await `ensureRuntimeReady`），点击的 ACK 里 `coldResume=false`、viewReadyMs 与 runtimeReadyMs 是两段独立耗时；②record 不存在档（冷启 app 失败后的 CLI 重起样本）——ACK 之后才激活。两种都不在 ACK 帧里带 `runtimeReadyMs`",
+      "met": true,
+      "evidence": [
+        "conversation/runtimeReady query 返回 runtimeReady=true + runtimeReadyMs（796/815/1033）",
+        "test:view-runtime-split 43（B1/B2/C1-C6/D4）",
+        "cli log: `subscribe conversation … coldResume=false` 与 `cold resume flight created` 的先后关系证明激活不在订阅的计时段里"
+      ],
+      "caveat": "「读入口只等视图水位」在 conversation 读（rowsRange / turnDirectory / plans / fileChanges）上成立；journal 读入口（`ensureHostRecordForJournalRead`）刻意 await `ensureRuntimeReady`（spec 第 42 行登记的既有先例），所以冷启 app 的首屏之后实际上已经有一次激活被付掉了。"
+    },
+    "IS4": {
+      "claim": "hasLiveConversation 三态 + 不得残留 sessionExists 直判",
+      "baseline": "二态 + 11 处直判",
+      "now": "host.sessionExists 单点（hasHostRecord）；viewReadySessions 承担 viewOnly/absent",
+      "met": true,
+      "evidence": ["test:view-runtime-split 的 E1 源码守卫", "test:cold-open-window 9"]
+    },
+    "IS5": {
+      "claim": "totalCount/firstRowId/realUserQueryTotal/turnDirectory 只来自 manifest",
+      "baseline": "全量行现算",
+      "now": "manifest 给 totalCount=5255 / 103 条 query；本轮只物化尾窗 160 行（snapshotRowCount 语义已改为「本次物化的投影行数」）",
+      "met": true,
+      "evidence": [
+        "sqlite: Σrow_count=5255, query_manifest=103",
+        "openPhases.manifestMs=6ms, manifestAdjusted=false",
+        "test:turn-directory 15 / test:session-row-manifest 60"
+      ]
+    },
+    "IS6": {
+      "claim": "rows/range 能在未物化页上工作且不重复触发冷开",
+      "baseline": "翻页会重走完整冷开（RC3）",
+      "now": "真机观察到按需页物化：冷开 ACK 之后日志出现 `v4 row page materialized`，宿主 rowsRange 调用全部 2~6ms 返回、没有第二次 hydrate/冷开；但没有驱动「连续 loadOlder 到窗口前沿之外到底」",
+      "met": "partial",
+      "evidence": [
+        "test:session-row-manifest L1-L4/M1-M8（单测）",
+        "test:cold-open-window（端到端夹具）",
+        "cli log: `v4 row page materialized` + `conversationRowsRangeV4 OK (1.7~6.7ms)`",
+        "缺：真机连续翻页到顶（hasMore→false）与行集合逐值比对"
+      ]
+    },
+    "IS7": {
+      "claim": "运行时历史未水化前禁止发 turn；闸门在 ensureContextInitialized 之后",
+      "baseline": "resume 里 eager 水化，无闸门",
+      "now": "resume 不再 eager init/水化（resume 期 SessionResumed 的 messageCount 恒 0 是预期）；闸门两处",
+      "met": "partial",
+      "evidence": [
+        "core test:lazy-history 8（L1-L7）",
+        "缺：真机「首发送 → 首 token」与 session.history.lazy_hydrated.durationMs（未发真实 turn）"
+      ]
+    },
+    "IS8": {
+      "claim": "openTiming 不改（.strict()）；新分段放 ack 顶层",
+      "baseline": "openTiming 只有旧键",
+      "now": "ack 顶层 openPhases={version,viewReadyMs,manifestMs,mergeMs,rehydrateMs,manifestAdjusted}；openTiming 键集合未变，materializeMs 仍缺席",
+      "met": true,
+      "evidence": [
+        "pnpm test:session-open-observability 14",
+        "3 次冷开的 ACK 样本键集合：openTiming 无 manifest/materialize 键"
+      ]
+    }
+  },
+  "findings": [
+    {
+      "id": "coldPrewarmMakesSpawnUnmeasurable",
+      "title": "app 在 workspace 激活时就预启动 CLI，冷开的 spawn 段不再落在本次 subscribe 里",
+      "evidence": "3 次冷启（其中一次 --startup-workspace 指向别的 workspace）click 时 cliProcessState 全为 reused、hostPrepareMs=3ms；host 进程树里能看到 zcode.cjs app-server 在点击前已存在。",
+      "consequence": "spec 的冷开主判 `uiViewReadyMs − hostPrepareMs` 在这棵树上退化成 ≈ uiViewReadyMs，spawn 既不加分也不扣分；baseline 的 1578~1776ms spawn 段本次无法用同一口径复现。"
+    },
+    {
+      "id": "retryGenerationUnderreportsCliRespawn",
+      "title": "CLI 被杀后重开：clickToAck 5.2~8.9s，但 uiViewReadyMs 只报 287ms（重建代际重置起点）",
+      "evidence": "cold-cli 3 次：clickToAck 8862/5722/5202，uiViewReadyMs 287/7622/7600（方向不一致即证据）。",
+      "consequence": "任何「杀 CLI 再点开」的样本都不能用 uiViewReadyMs 判；这是 spec 已登记的口径陷阱（重试代际只记最后一次）在 CLI 重起场景下的放大形态。"
+    },
+    {
+      "id": "upgradeSkippedWhenActivationPrecedesDegradedHydration",
+      "title": "降级首屏的升级只在「先窗口水化、后激活」的顺序下发生；激活先完成时 scheduleProjectionUpgrade 早退且不重试",
+      "evidence": "同一沙盒里，CLI 重起后的打开（先 cold shell → 窗口 applied → 再 resume）都有 `v4 projection upgrade applied`（3226/1435/2070ms）；而 app 冷启那 6 次（激活在窗口 applied 之前或同一帧）**一条都没有**，`degradedFirstScreen` 在 scheduleProjectionUpgrade 读取之后才被 add。",
+      "consequence": "该会话的投影会停在降级窗口，直到下一次冷开/重读。功能上不报错（totalCount 由 manifest 给），但「激活后补齐全量」的承诺在这些顺序下没有兑现。**需要产品/架构确认是否按 bug 修**（本步只测不改）。",
+      "suspects": [
+        "v4-gateway.ts:4116 scheduleProjectionUpgrade 在 ensureRuntimeReady 的成功分支里调用，早于首屏 hydrate 收口",
+        "v4-gateway.ts:4151 if (!this.degradedFirstScreen.has(sessionId)) return; 之后没有任何重试入口"
+      ]
+    },
+    {
+      "id": "coldAppMeasuresHydrationOnly",
+      "title": "「冷启 app」这一档量到的只是 publisher 水化：激活已经在点击前被 app 的读入口做掉了",
+      "evidence": "CLI 日志（一次冷开全序列）：08:00:40.418 `cold resume flight created` → 40.568 `session shell materialized` → 41.231 `Session resumed` → 41.236 `subscribe conversation session=… coldResume=false` → 41.278 `cold window applied` → 43.973 `v4 hydrate loaded … events=2129 synthesized=true durationMs=2737`。点击前的这次激活来自 `ensureHostRecordForJournalRead`（journal/读入口刻意 await `ensureRuntimeReady`），因此点击时 `sessionRuntimeState=warm`、ACK 里不含激活（815ms）。",
+      "consequence": "3718ms 只能读成「publisher 水化」；冷开端到端代理 = 3718 + 815 ≈ 4.5s，仍不含 spawn。与 baseline 的 7695（含 spawn 1578~1776 + 视图 3338）不能直接相减。"
+    },
+    {
+      "id": "mergeCostIsEventLogNotBody",
+      "title": "窗口化把正文读降下去了，但 mergeMs 仍被「全量事件日志重放 + artifact 读」占满",
+      "evidence": "同一次冷开：`v4 hydrate loaded … events=2129 synthesized=true … durationMs=2737`（=mergeMs 2734）；随后 60+ 条 `v4 cold file change artifact read failed`（每 messageId 一次 artifact 扫描）；而 `snapshotRowCount` 只有 160 行（尾窗 8 轮）。",
+      "consequence": "下一步压冷开的入口是 `loadPersistedEvents` 的事件日志范围与 `buildColdFileChangeSummaries` 的 artifact 读，而不是消息正文/投影。这也解释了 mergeMs 只从 2867~3083 降到 2407~2754。"
+    },
+    {
+      "id": "mergeMsStillDominatesViewSide",
+      "title": "视图侧剩下的 2.4~2.8s 几乎全在 mergeMs（2700ms 级），rehydrate 已经降到 49ms",
+      "evidence": "3 次冷开 mergeMs 2736/2754/2407；rehydrateMs 49/49/50；manifestMs 6ms；initialFrameTransportMs 46ms。",
+      "consequence": "下一步若还要压冷开，入口是 cold-event-merge（含 8 并发 artifact 读与全序 messageId 过滤），不是 rowId / 投影 / 传输。"
+    }
+  ],
+  "risks": [
+    {
+      "id": "upgrade-order-dependency",
+      "status": "新登记（Step 14）",
+      "text": "见 findings.upgradeSkippedWhenActivationPrecedesDegradedHydration：升级依赖「先窗口水化后激活」的顺序；任何调整首屏水位/激活顺序的改动都可能让升级静默消失（不报错、totalCount 仍对）。"
+    },
+    {
+      "id": "cold-acceptance-metric-drift",
+      "status": "新登记（Step 14）",
+      "text": "hostPrepareMs 在本树被预启动压到 3ms 后，冷开主判已不能区分「spawn 快」与「没 spawn」；若要继续用该判据，必须先决定是否把预启动算进冷开（当前口径是算，但实测它不在 subscribe 内）。"
+    },
+    {
+      "id": "cold-total-needs-launch-to-ack-instrumentation",
+      "status": "新登记（Step 14）",
+      "text": "本轮所有样本都是 click→ACK。冷开的 spawn 与激活都发生在点击之前（预启动 + 读入口激活），因此「app 启动 → 首屏」的总量只能靠 `uiViewReadyMs + runtimeReadyMs` 代理（≈4.5s，仍不含 spawn 与 app 就绪等待）。要判 spec 的 2.5~3s 观察项，必须先补 launch→ACK 的打点，或改成可复现的冷启时序。"
+    },
+    {
+      "id": "metro-fixture-confounds",
+      "status": "说明",
+      "text": "沙盒库是 2GB 副本：第一轮冷开含首次读盘与 0023 迁移（5048ms），稳态后 3718ms。跨机器比较时必须用稳态轮。"
+    }
+  ],
+  "reproduction": {
+    "steps": [
+      "构建：pnpm --filter @zcode/desktop pre-dev && node scripts/build-desktop-agent-cli.mjs && pnpm --filter @zcode/desktop exec tsup（在 packages/desktop 下）",
+      "起 renderer：cd packages/desktop && pnpm exec vite dev",
+      "沙盒：复制 ~/.omz/cli/db/{db.sqlite,magic-context.db}、~/.omz/v2/{*.json,tasks-index.sqlite} 到 %TEMP%\\c-session-open-step14\\home\\.omz\\...，复制 ~/.omz/cli/config.json；把 session.directory / tasks.workspace_* / project_roots 改写到 %TEMP%\\c-session-open-step14\\ws，删掉其余 tasks/projects 行",
+      "启动：USERPROFILE=HOME=APPDATA=LOCALAPPDATA=ZCODE_DATA_BASE_DIR=<sandbox home>；electron.exe . --open-workspace <sandbox ws>",
+      "采样：node scripts/dev/long-session-perf-sample.mjs --skip-launch --workspace <ws> --session sess_57cf107c-… --park-session sess_902d4d67-… --path warm|reopen|switchback --iterations 3 --out <report>.json",
+      "升级成本：直接读 <sandbox home>\\.omz\\cli\\log\\zcode-<date>.jsonl 的 `v4 projection upgrade` 行"
+    ],
+    "rawArtifacts": "%TEMP%\\c-session-open-step14\\raw\\*.json（采样器原始报告，不随仓库提交）"
+  }
+}

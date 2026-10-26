@@ -202,6 +202,15 @@ export async function executeTurnCommand(
         }
         completeTurnPhase("context_initialization", phaseStartedAt);
         throwIfTurnAborted(turnAbortSignal);
+        // IS7 的发送闸门：`historyMode:"none"` 的会话在**首次**发轮前补全量历史。
+        // 位置是硬约束——init 已在上面的分支里跑完（`messageHistory.init()` 会清空 entries），
+        // 而 SessionStart 的 startup hooks 会把上下文追加进 history，闸门必须夹在两者之间。
+        if (this.deferredHistoryHydration) {
+          phaseStartedAt = startTurnPhase("history_hydration");
+          await this.hydrateDeferredMessageHistory(turnTraceContext);
+          completeTurnPhase("history_hydration", phaseStartedAt);
+          throwIfTurnAborted(turnAbortSignal);
+        }
         phaseStartedAt = startTurnPhase("session_start_hooks");
         const sessionStartHookResult = await this.runSessionStartHooks(
           "startup",
