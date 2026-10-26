@@ -41,6 +41,9 @@ export {
   PREVIEW_MIN_MAX_CHARS,
 } from "./previewText.js";
 export * from "./transport.js";
+// C（session-open-latency）新增的 runtimeReady query 参数；显式再导出，避免 barrel 的
+// `export *` 在某些解析器下漏掉它（bootstrap 的 test:model-live 曾因此报缺导出）。
+export { v4ConversationRuntimeReadyParamsSchema } from "./transport.js";
 export * from "./wire.js";
 export * from "./wire-codec.js";
 export * from "./wire-reassembly.js";
