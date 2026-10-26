@@ -11,7 +11,11 @@
  *   2. 删掉宿主侧所有 MC 专属模块（bootstrap 装配门面 / 协议 handler / ctx 命令 /
  *      core 的 ctx 工具与段实现 / UI 的设置分区与用量面板）；
  *   3. 把仍然存活但与 MC 共享的文件里的 MC 段落、导入、类型、注册项逐条删掉
- *      （158 条规则 = sub 121 / del 12 / cut 24 / json 1，见下方 `RULES`；每条都用
+ *      （规则表见下方 `RULES`；**条数不在这里手写**——`json` 规则按
+ *      `PACKAGE_JSON_FILES` 展开成每个文件一个处理单元，所以「字面量声明条数」与
+ *      「运行期处理单元数」是两个数，都由脚本自己统计并在 dry-run / `--apply` 的
+ *      计划头部与 `--help` 里打印。手写数字必然随规则增删漂移：上一版写的
+ *      「158 条」是对的，但它没算展开，实际运行 163 个单元；每条规则都用
  *      「唯一锚点或唯一子串」定位，匹配数不符即中止，不做模糊替换）；
  *   4. 清理 `package.json` 的依赖/脚本/导出、knip 忽略项、构建 external 与
  *      打包种子（`sea-tui-assets` 在没有 MC 包时会直接 throw）；
@@ -53,7 +57,9 @@
  *   5. App 可见命令清单里没有 `ctx-*`；
  *   6. v4 命令面（`placeholder`/`ctxCommand`…）不再导出 ctx 命令符号；
  *   7. UI 设置页不再有 memory / context 两个分区，也不再渲染 MC 组件；
- *   8. 源码里不再有 `@zcode/magic-context` 的**运行期导入**（注释不算）；
+ *   8. 源码里不再有 `@zcode/magic-context` 的**运行期导入**（只有 `from`/`import`
+ *      关键字落在**代码位置**才算：注释里的示例、字符串/正则字面量里的规则锚点都不算；
+ *      摘除脚本自身同上口径——注释/锚点里的命中被排除并打 NOTE，代码位置的命中照旧报红）；
  *   9. MC 包目录与陈留 dist 全部消失。
  *
  * 另外 `--audit` 把**摘除后仍带 MC 痕迹**的文件（kebab / camel / `ctx-` 三种写法）逐文件
@@ -1433,7 +1439,8 @@ const RULES = [
     // 形态」），逐字匹配会让规则随注释措辞一起失效；锚点只认首行与下一个字段名。
     kind: "cut",
     file: BOOTSTRAP_CREATE_APP,
-    start: "      // FORK（spec phase-zero-load / W2 / 变更点 #11）：库句柄端口。**无条件挂**（哪怕",
+    start:
+      "      // FORK（spec phase-zero-load / W2 / 变更点 #11）：库句柄端口。**无条件挂**（哪怕",
     endBefore: "      respondWorkspaceHookReview: (input) =>",
   },
   {
@@ -2109,8 +2116,7 @@ const RULES = [
   {
     kind: "cut",
     file: UI_LOCALE_EN,
-    start:
-      "// /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的",
+    start: "// /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的",
     endBefore: "// 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。",
   },
   {
@@ -2149,8 +2155,7 @@ const RULES = [
     // 中间没有 `chat.edit.rejected` 隔着），所以上一条规则已经一并删掉，不需要第二条。
     kind: "cut",
     file: UI_LOCALE_ZH,
-    start:
-      "// /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的",
+    start: "// /ctx-*：命令本身的输出来自服务端（与 CLI/TUI 逐字相同），这里只补桌面自己才有的",
     endBefore: "// 编辑重发被 CLI 拒绝（restoreWarning / admission 竞态等）；rewind 可能已执行。",
   },
 
@@ -2578,6 +2583,10 @@ const RULES = [
   ...PACKAGE_JSON_FILES.map((file) => ({
     kind: "json",
     file,
+    // 声明只有 1 条 json 规则，运行期按文件展开成 6 个处理单元。打标是为了让
+    // `ruleStats()` 能同时算出「源码声明条数」与「运行期处理单元数」——
+    // 两个数手写在头部注释里必然漂移（旧版写 158 条、实际跑 163 个单元）。
+    expandedFrom: "PACKAGE_JSON_FILES",
     mutate(json) {
       if (json.dependencies) delete json.dependencies["@zcode/magic-context"];
       if (json.devDependencies) delete json.devDependencies["@zcode/magic-context"];
@@ -2622,6 +2631,8 @@ if (hasFlag("--help") || hasFlag("-h")) {
       "  --verify       摘除后自检 9 条（dist import / 工具 / 命令 / UI / 残留）",
       "  --audit        grep 清单对账：未登记的 MC 残留即失败（exit 1；规则表锚点失配 exit 3）",
       "  --restore      git checkout 还原本脚本改过/删过的全部路径",
+      "",
+      formatRuleStats(),
     ].join("\n"),
   );
   process.exit(0);
@@ -2739,6 +2750,55 @@ function applyEdit(rule) {
 }
 
 // ── 计划 ───────────────────────────────────────────────────────────────────
+/**
+ * 规则表条数（**运行期统计**，不在注释里手写）。
+ *
+ * 口径有两层，混用就会漂移：
+ *   - 「字面量声明条数」= `RULES` 数组里手写出来的对象数（每个算一条）；
+ *   - 「运行期处理单元数」= `RULES.length`：`PACKAGE_JSON_FILES.map(...)` 那**一个**
+ *     表达式会按 6 个 package/knip 文件展开成 6 个单元。
+ *
+ * 旧头部手写「158 条 = sub 121 / del 12 / cut 24 / json 1」没有错在字面量上
+ * （157 条 + 1 个 map 表达式 = 158），错在把「声明」当成「实际执行」：运行期是
+ * 163 个单元。文件头因此只写口径不写数字；`dry-run` / `--apply` 计划头部与
+ * `--help` 都打印本函数的输出，增删规则后不需要同步任何注释。
+ */
+function ruleStats() {
+  const literalByKind = { sub: 0, del: 0, cut: 0, json: 0 };
+  let expanded = 0;
+  for (const rule of RULES) {
+    if (rule.expandedFrom === undefined) {
+      literalByKind[rule.kind] = (literalByKind[rule.kind] ?? 0) + 1;
+    } else {
+      expanded += 1;
+    }
+  }
+  const total = (byKind) => Object.values(byKind).reduce((sum, count) => sum + count, 0);
+  return {
+    literal: total(literalByKind),
+    runtime: RULES.length,
+    literalByKind,
+    expanded,
+    expandedFiles: PACKAGE_JSON_FILES.length,
+  };
+}
+
+function formatRuleStats() {
+  const { literal, runtime, literalByKind, expanded, expandedFiles } = ruleStats();
+  const kinds = (byKind) =>
+    ["sub", "del", "cut", "json"]
+      .filter((kind) => byKind[kind] > 0)
+      .map((kind) => `${kind} ${byKind[kind]}`)
+      .join(" / ");
+  return (
+    `规则表：字面量声明 ${literal} 条（${kinds(literalByKind)}）` +
+    (expanded > 0
+      ? ` + json 展开 ${expanded} 个（${expandedFiles} 个 package/knip 文件 × 1）`
+      : "") +
+    ` = 运行期 ${runtime} 个处理单元`
+  );
+}
+
 function expandDedicatedPaths() {
   return DEDICATED_PATHS.filter((relative) => existsSync(abs(relative)));
 }
@@ -2761,6 +2821,7 @@ function runRules() {
 
 function printPlan(deleted, perFile) {
   console.log(`仓库根: ${REPO_ROOT}`);
+  console.log(`\n${formatRuleStats()}`);
   console.log(`\n删整件（${deleted.length}）：`);
   for (const relative of deleted) console.log(`  - ${relative}`);
   console.log(`\n改写共享文件（${perFile.size}）：`);
@@ -2861,15 +2922,288 @@ function restore() {
     stdio: "inherit",
   });
   console.log(`\n还原 ${tracked.length} 个路径（git checkout --）`);
+  // 恢复后立刻跑 dry-run 会看到「陈留 dist 清理：N 个路径」，N 只统计**当前存在**的
+  // 未跟踪构建产物：git checkout 不重建它们，所以那不是「恢复不完整」。
+  console.log(
+    `说明：--apply 清理的 ${STALE_DIST_PATHS.length} 个「陈留 dist」是**未跟踪的构建产物**，` +
+      "git checkout 不会重建。恢复后立刻跑 dry-run 仍会看到「陈留 dist 清理：N 个路径」" +
+      "（N 只统计当前存在的那部分）——那是待清理项，不是恢复遗漏；需要可运行产物时按包重新 build。",
+  );
   return result.status ?? 1;
 }
 
 // ── 摘除后自检 ─────────────────────────────────────────────────────────────
 const MC_IMPORT_RE = /(?:from|import)\s*\(?\s*["']@zcode\/magic-context(?:\/|["'])/;
 
+/**
+ * 摘除脚本自己的仓库相对路径（`git grep` 的输出口径：正斜杠、相对仓库根）。
+ *
+ * 第 8 条检查的扫描面由 `git grep -l "@zcode/magic-context"` 决定，本脚本必然在内：
+ * `RULES` 的锚点与文档注释里满是 MC 字面量。这些字面量是**数据**，不是耦合，与
+ * `--audit` 的 `KEEP_LIST` 对「本脚本」的登记同一口径（见 `KEEP_LIST` 末条）。
+ * 所以按身份排除，而不是指望正则侥幸躲开——旧实现正是这里自匹配，导致这条门禁
+ * 从首个 commit 起恒红（`--verify` 永远 8/9），真故障会被噪声淹掉。
+ *
+ * 排除**只覆盖注释/字面量里的命中**：脚本里真写了 `import "@zcode/magic-context"`
+ * （关键字落在代码位置）照旧报红，摘除工具自己不能有 MC 运行期依赖。
+ */
+const SELF_RELATIVE = relative(REPO_ROOT, fileURLToPath(import.meta.url)).replace(/\\/g, "/");
+
+/** 按扩展名分派：只有 JS/TS 与 YAML 有注释语法，其余（`.json` 等）原文即代码。 */
+const JS_SOURCE_EXT = /\.(?:[cm]?[jt]sx?)$/;
+const YAML_SOURCE_EXT = /\.ya?ml$/;
+
+/** 这些字符之后出现的 `/` 才当正则起点（否则是除号）。`<` `>` 故意不在列（见下）。 */
+const REGEX_ALLOWED_AFTER = new Set([
+  "",
+  "(",
+  ",",
+  "=",
+  ":",
+  "[",
+  "!",
+  "&",
+  "?",
+  "{",
+  "}",
+  ";",
+  "+",
+  "-",
+  "*",
+  "%",
+  "~",
+  "^",
+  "|",
+]);
+
+/**
+ * 扫描 JS/TS 源码，返回「剥掉注释的文本」与「代码位置掩码」。
+ *
+ * 为什么不能直接用正则匹配原文：第 8 条的契约是「运行期导入（注释不算）」（见文件头
+ * 第 8 条），而旧实现直接在原文上跑 `MC_IMPORT_RE`——注释里的示例
+ * `await import("@zcode/magic-context")` 会被当成真导入。正则本身无法区分
+ * 「注释里的 import」「字符串里的 import」与「真的 import」，所以先做一次词法扫描：
+ * 注释内容替换成空格（换行保留，行号不变），字符串/模板/正则体原样保留但标记为
+ * **非代码位置**。判据因此变成「`from`/`import` 关键字落在代码位置」，三件事各归其位：
+ *   - 注释里的示例 → 关键字在注释里 → 不算；
+ *   - 规则锚点 `} from "@zcode/magic-context/..."` 这种字符串字面量 → 关键字在字符串里
+ *     → 不算（这也是本脚本自动排除之外的第二道保险）；
+ *   - `import { x } from "@zcode/magic-context"` / `await import("@zcode/magic-context")`
+ *     → 关键字是代码 → 算，照旧报红。
+ *
+ * 覆盖的形态：
+ *   - `// ...` 行注释 → 到行尾；
+ *   - `/* ... *\/` 块注释（含跨行、含 JSDoc `/** ... *\/`）→ 到闭合；
+ *   - `'...'` / `"..."` → 原样拷贝，`\` 转义照抄：因此 `"http://x"`、`"a//b"` 里的
+ *     `//` **不会**被当成注释起点（这是「字符串里的 // 不误判」的实现方式）；
+ *   - 模板串 `` `...` `` → 原样拷贝；`${ ... }` 回到代码态（花括号可嵌套，模板串可
+ *     嵌套），所以插值里的注释仍会被剥掉，而模板正文里的 `//` 保留；
+ *   - 正则字面量 → 只在前一个有意义字符允许时进入（`(` `,` `=` `:` `[` `!` `&` `?`
+ *     `{` `}` `;` `+` `-` `*` `%` `~` `^` `|` 与行首），体内原样拷贝：否则
+ *     `/["']/` 里的引号会把扫描器带进假字符串态。`<` `>` **不在允许列**——`.tsx` 的
+ *     `</div>` 会被误判成正则起点。
+ *
+ * 守势设计（宁可多剥少判、绝不把真导入藏起来）：
+ *   - 字符串与正则扫描遇到换行即止。JS 的字符串与正则都不能跨行，因此 JSX 文本里的
+ *     撇号（`Don't`）最坏只影响**那一行**，且那些字符仍按原文保留、仍会被匹配。
+ */
+function scanJsSource(source) {
+  const len = source.length;
+  const text = new Array(len);
+  const isCode = new Uint8Array(len);
+  // 帧：code（顶层代码或模板 `${` 内的代码，depth 数花括号）/ template（模板正文）
+  const stack = [{ kind: "code", depth: 0 }];
+  let prev = ""; // 上一个有意义的代码字符（空白与注释不算）
+  let i = 0;
+
+  const copy = (index) => {
+    text[index] = source[index];
+  };
+
+  while (i < len) {
+    const frame = stack[stack.length - 1];
+    const ch = source[i];
+    const next = source[i + 1];
+
+    if (frame.kind === "template") {
+      if (ch === "\\") {
+        copy(i);
+        if (i + 1 < len) copy(i + 1);
+        i += 2;
+      } else if (ch === "`") {
+        copy(i);
+        stack.pop();
+        prev = "`";
+        i += 1;
+      } else if (ch === "$" && next === "{") {
+        copy(i);
+        copy(i + 1);
+        stack.push({ kind: "code", depth: 0 });
+        prev = "{";
+        i += 2;
+      } else {
+        copy(i);
+        i += 1;
+      }
+      continue;
+    }
+
+    // 行注释 → 到行尾（换行留给下一轮，行号不变）
+    if (ch === "/" && next === "/") {
+      while (i < len && source[i] !== "\n") {
+        text[i] = " ";
+        i += 1;
+      }
+      continue;
+    }
+    // 块注释（含跨行、含 JSDoc）
+    if (ch === "/" && next === "*") {
+      text[i] = " ";
+      text[i + 1] = " ";
+      i += 2;
+      while (i < len && !(source[i] === "*" && source[i + 1] === "/")) {
+        text[i] = source[i] === "\n" ? "\n" : " ";
+        i += 1;
+      }
+      if (i < len) {
+        text[i] = " ";
+        text[i + 1] = " ";
+        i += 2;
+      }
+      continue;
+    }
+    // 单/双引号字符串：原样拷贝（`//`、`/*` 在这里都不是注释）
+    if (ch === '"' || ch === "'") {
+      const quote = ch;
+      copy(i);
+      i += 1;
+      while (i < len) {
+        const c = source[i];
+        if (c === "\\") {
+          copy(i);
+          if (i + 1 < len) copy(i + 1);
+          i += 2;
+          continue;
+        }
+        copy(i);
+        i += 1;
+        if (c === quote || c === "\n") break;
+      }
+      prev = quote;
+      continue;
+    }
+    // 模板串起点
+    if (ch === "`") {
+      copy(i);
+      stack.push({ kind: "template" });
+      i += 1;
+      continue;
+    }
+    // 正则字面量（只在允许的位置）
+    if (ch === "/" && REGEX_ALLOWED_AFTER.has(prev)) {
+      copy(i);
+      i += 1;
+      let inClass = false;
+      while (i < len) {
+        const c = source[i];
+        if (c === "\\") {
+          copy(i);
+          if (i + 1 < len) copy(i + 1);
+          i += 2;
+          continue;
+        }
+        copy(i);
+        i += 1;
+        if (c === "\n") break;
+        if (c === "[") inClass = true;
+        else if (c === "]") inClass = false;
+        else if (c === "/" && !inClass) break;
+      }
+      while (i < len && /[a-z]/i.test(source[i])) {
+        copy(i);
+        i += 1;
+      }
+      prev = "/";
+      continue;
+    }
+
+    // 普通代码字符
+    copy(i);
+    isCode[i] = 1;
+    i += 1;
+    if (!/\s/.test(ch)) prev = ch;
+    if (ch === "{") frame.depth += 1;
+    else if (ch === "}") {
+      if (frame.depth === 0 && stack.length > 1) stack.pop();
+      else frame.depth = Math.max(0, frame.depth - 1);
+    }
+  }
+
+  return { text: text.join(""), isCode };
+}
+
+/**
+ * YAML 的 `#` 行注释（扫描面含 `.github/**`）。
+ *
+ * 只认「行首或前面是空白」的 `#`，所以 `https://x#frag`、`"a # b"` 里的 `#` 都保留
+ * （YAML 本身也是这个规则）。同样返回掩码：注释位置不算代码。
+ */
+function scanYamlSource(source) {
+  const text = source.split("");
+  const isCode = new Uint8Array(source.length);
+  let offset = 0;
+  for (const line of source.split("\n")) {
+    let quote = "";
+    let commentAt = -1;
+    for (let i = 0; i < line.length; i += 1) {
+      const ch = line[i];
+      if (quote) {
+        if (ch === quote) quote = "";
+        continue;
+      }
+      if (ch === '"' || ch === "'") {
+        quote = ch;
+        continue;
+      }
+      if (ch === "#" && (i === 0 || /\s/.test(line[i - 1]))) {
+        commentAt = i;
+        break;
+      }
+    }
+    if (commentAt >= 0) {
+      for (let i = commentAt; i < line.length; i += 1) text[offset + i] = " ";
+    } else {
+      for (let i = 0; i < line.length; i += 1) isCode[offset + i] = 1;
+    }
+    offset += line.length + 1; // +1 = 被 split 吃掉的那个 \n
+  }
+  return { text: text.join(""), isCode };
+}
+
+/**
+ * 「运行期导入」的唯一判据：`MC_IMPORT_RE` 的命中里，`from`/`import` 关键字
+ * **落在代码位置**才算。注释与字面量里的命中一律不算（见文件头第 8 条的契约）。
+ */
+function findRuntimeImports(file, source) {
+  const scanned = JS_SOURCE_EXT.test(file)
+    ? scanJsSource(source)
+    : YAML_SOURCE_EXT.test(file)
+      ? scanYamlSource(source)
+      : { text: source, isCode: new Uint8Array(source.length).fill(1) };
+  // 每次新建带 g 的正则：复用会带 lastIndex 状态，漏掉第二条命中。
+  const matcher = new RegExp(MC_IMPORT_RE.source, "g");
+  const hits = [];
+  for (let match = matcher.exec(scanned.text); match !== null; match = matcher.exec(scanned.text)) {
+    if (scanned.isCode[match.index] === 1) hits.push(match.index);
+  }
+  return hits;
+}
+
 async function verifyChild() {
   const moduleUrl = (relative) => new URL(`file://${abs(relative).replace(/\\/g, "/")}`).href;
   const results = [];
+  // 检查器自身缺陷的附注（不是 PASS/FAIL 条目，避免把「9 条」变成 10 条）。
+  const verifyNotes = [];
   const check = async (name, fn) => {
     try {
       results.push({ name, ok: true, detail: await fn() });
@@ -2958,9 +3292,56 @@ async function verifyChild() {
       .trim()
       .split(/\r?\n/)
       .filter(Boolean);
-    const offenders = files.filter((file) => MC_IMPORT_RE.test(readFileSync(abs(file), "utf8")));
-    if (offenders.length > 0) throw new Error(`仍有运行期导入: ${offenders.join(", ")}`);
-    return `${files.length} 个文件仅剩注释/文档引用`;
+    const offenders = [];
+    const dataOnly = [];
+    const selfData = [];
+    const selfCode = [];
+    for (const file of files) {
+      const source = readFileSync(abs(file), "utf8");
+      const hits = findRuntimeImports(file, source);
+      if (hits.length === 0) {
+        // 原文出现过、但关键字不在代码位置 → 只在注释/字面量里，契约明确不算。
+        if (MC_IMPORT_RE.test(source)) {
+          dataOnly.push(file);
+          if (file === SELF_RELATIVE) selfData.push(file);
+        }
+        continue;
+      }
+      // 检查器自身：命中只落在注释/规则锚点里时，上面那条已经把它记进 dataOnly
+      // （PASS + NOTE，口径与 KEEP_LIST 一致）。能走到这里说明关键字在**代码位置**
+      // ——那是脚本里真的写了 MC 导入，摘除工具不该有这个依赖，照旧报红，不开后门。
+      if (file === SELF_RELATIVE) {
+        selfCode.push(file);
+        offenders.push(file);
+        continue;
+      }
+      offenders.push(file);
+    }
+    // 附注先登记：即便下面的 offender 检查抛错，`--verify` 仍会在 PASS/FAIL 之后打印
+    // NOTE（results 与 notes 是两份，互不吞没）。
+    if (selfData.length > 0) {
+      // 「offender 是摘除工具自己」必须显式说出来：它是检查器的数据，不是摘除遗漏。
+      // 不说的话，下一个人看到本文件出现在 grep 结果里又要从头查一遍——这条门禁
+      // 从首个 commit 到 3f03a584 一直恒红，起因就是没人说出这句话。
+      verifyNotes.push(
+        `附注：${selfData.join(", ")} 命中 MC 字面量，但命中只落在注释 / 规则锚点` +
+          `（字符串字面量）里——那是**摘除工具自身的数据**，按 KEEP_LIST 口径排除，` +
+          "不是摘除遗漏，也不是待修项。",
+      );
+    }
+    if (selfCode.length > 0) {
+      verifyNotes.push(
+        `附注：${selfCode.join(", ")} 在**代码位置**出现 MC 引用（真导入，不是注释/锚点），` +
+          "已按普通 offender 报红——摘除工具本身不该在运行期依赖 MC 包。",
+      );
+    }
+    if (offenders.length > 0) {
+      throw new Error(`仍有运行期导入: ${offenders.join(", ")}`);
+    }
+    return (
+      `${files.length} 个文件：${dataOnly.length} 个只在注释/字面量里出现` +
+      `（不算运行期导入，含检查器自身 ${selfData.length} 个）`
+    );
   });
   await check("MC 包与陈留 dist 已消失", async () => {
     const leftovers = [MC_PACKAGE_DIR, ...STALE_DIST_PATHS].filter((relative) =>
@@ -2973,6 +3354,7 @@ async function verifyChild() {
   for (const result of results) {
     console.log(`${result.ok ? "PASS" : "FAIL"} ${result.name} — ${result.detail}`);
   }
+  for (const note of verifyNotes) console.log(`NOTE ${note}`);
   return results.every((result) => result.ok) ? 0 : 1;
 }
 
@@ -3165,7 +3547,8 @@ function auditSelfCheckFailures() {
   const expect = (label, actual, expected) => {
     const actualJson = JSON.stringify(actual);
     const expectedJson = JSON.stringify(expected);
-    if (actualJson !== expectedJson) failures.push(`${label}: 期望 ${expectedJson}，实际 ${actualJson}`);
+    if (actualJson !== expectedJson)
+      failures.push(`${label}: 期望 ${expectedJson}，实际 ${actualJson}`);
   };
 
   expect(
