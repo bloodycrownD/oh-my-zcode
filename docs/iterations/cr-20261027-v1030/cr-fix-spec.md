@@ -247,7 +247,7 @@
 - `tsc --noEmit`：magic-context ✓、bootstrap ✓；根 `pnpm typecheck` ✓
 - MC `test:all` ✓（SMOKE 56 checks / host 30 / TRANSFORM 56 cases / 其余 node --test 段 `# fail 0`）
 - `test:session-row-manifest` 61/61 ✓；`test:cold-open-window` 10/10 ✓；`test:turn-manifest-entry` 12/12 ✓
-- `test:view-runtime-split` 45/46 —— **K8 是既有红**：它断言 `v4-bridge.ts` 含 `const fileChangeSummariesByMessageId = record`，而该文件在 HEAD `ea08001e` 里就是 `let fileChangeSummariesByMessageId: Map<…> | undefined`（`git show HEAD:…v4-bridge.ts` 也搜不到该串）。与本次改动无关，需另立条目修正断言。
+- `test:view-runtime-split` **46/46** ✓ —— 其中 K8 在本轮之前是既有红：它断言 `v4-bridge.ts` 含旧形态 `const fileChangeSummariesByMessageId = record`，而该文件自 v1.0.30 起已把 id 集合抽成 `fileChangeSummaryMessageIds`。断言已跟到现形态并在 `a8c11881` 修好（现在断言的是「id 集合来自本次物化的 `source.messages`」+「不得退回 `windowPlan.activeMessageIds`」两条语义）。
 - 根 `pnpm lint`：**170 warnings / 0 errors**（warnings 全部来自未跟踪的 `.reference/`）；包级 `oxlint src` 有 40 条既有 max-lines 类错误，不是门禁。
 
 ## Fix-Spec Closure
