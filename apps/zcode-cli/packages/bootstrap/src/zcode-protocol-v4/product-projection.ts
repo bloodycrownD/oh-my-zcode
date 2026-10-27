@@ -867,6 +867,17 @@ export class ProductProjection {
    * 分叉（同一逻辑位置算出两个 id），那正是 IS1 禁止的漂移，所以这里直接抛错而不是静默忽略
    * ——忽略会让「窗口化没生效」变成一条只在翻页时显形的错位。
    */
+  /**
+   * 出站快照在 manifest 事实缺席时需要的「分支首行 id」（CR-2）。
+   *
+   * `> 1` ⇔ 窗口化（窗口首行不是分支首行）：此时 `rows.window.length` 只是窗口长度，
+   * 不能冒充总行数。全量投影（含「冷窗口恰好覆盖整条分支、rowIdBase 仍为 1」的退化态）
+   * 仍是 1，口径与改造前一致。
+   */
+  getRowIdOrigin(): number {
+    return this.rowIdOrigin;
+  }
+
   seedRowIdOrigin(origin: number): void {
     if (!Number.isInteger(origin) || origin < 1) {
       throw new RangeError(`rowIdOrigin must be a positive integer, got ${String(origin)}`);

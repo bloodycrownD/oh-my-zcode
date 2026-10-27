@@ -3,7 +3,6 @@ import type { ContextDatabase } from "../../features/magic-context/storage.js";
 import {
     getActiveTagsBySession,
     getMaxTagNumberBySession,
-    replaceSourceContent,
     updateTagDropMode,
     updateTagStatus,
 } from "../../features/magic-context/storage.js";
@@ -117,6 +116,11 @@ export function applyHeuristicCleanup(
     let deduplicatedTools = 0;
     let droppedInjections = 0;
     const droppedTokenReductions: DroppedTokenReduction[] = [];
+    // FORK（source 恒 pristine）：本 pass 被注入剥离整段吃光、已落 dropped 的 message tag。
+    // `tags` 是入口取出的内存快照，status 不会随 updateTagStatus 回写；若不在 caveman 前
+    // 过滤，caveman 会用 pristine source 把刚 drop 的消息以压缩态写回 wire
+    // （此前是靠 source 被写成 "" 才没发生）。
+    const droppedThisPass = new Set<number>();
 
     // ── Tiered target-headroom emergency drop (Phase 2) ──
     // Replaces the old need-blind routine age-drop + `dropAllTools` nuke. Runs
@@ -255,8 +259,11 @@ export function applyHeuristicCleanup(
                     const didReplace =
                         dropResult === "absent" ? target.setContent(replacement) : false;
                     if (dropResult === "removed" || dropResult === "absent") {
-                        replaceSourceContent(db, sessionId, tag.tagNumber, "");
+                        // FORK（source 恒 pristine）：不再把 source 写成 ""。
+                        // source 只存宿主原文；注入剥离由每 pass 的
+                        // replaySystemInjectionStrips 重放，不落库。
                         updateTagStatus(db, sessionId, tag.tagNumber, "dropped");
+                        droppedThisPass.add(tag.tagNumber);
                         if (dropResult === "removed" || didReplace) {
                             droppedInjections++;
                             droppedTokenReductions.push(
@@ -278,7 +285,9 @@ export function applyHeuristicCleanup(
                     // and the reasoning that produced it stay.
                     const didSet = target.setContent(stripped, { keepReasoning: true });
                     if (didSet) {
-                        replaceSourceContent(db, sessionId, tag.tagNumber, strippedSource);
+                        // FORK（source 恒 pristine）：剥离结果只上 wire，不写回 source——
+                        // 写了会让 tagMessages 的「source ≠ 入站 ⇒ 重指」判据误判，
+                        // 也会让 caveman replay 从已压缩文本再压。
                         droppedInjections++;
                         droppedTokenReductions.push({
                             tagNumber: tag.tagNumber,
@@ -373,12 +382,18 @@ export function applyHeuristicCleanup(
     let compressedTextTags = 0;
     let mutatedTextTags = 0;
     if (config.routine !== false && config.caveman?.enabled) {
-        const cavemanResult = applyCavemanCleanup(sessionId, db, targets, tags, {
-            enabled: true,
-            minChars: config.caveman.minChars,
-            wordRules: config.caveman.wordRules,
-            protectedCutoff: config.protectedCutoff,
-        });
+        const cavemanResult = applyCavemanCleanup(
+            sessionId,
+            db,
+            targets,
+            tags.filter((t) => !droppedThisPass.has(t.tagNumber)),
+            {
+                enabled: true,
+                minChars: config.caveman.minChars,
+                wordRules: config.caveman.wordRules,
+                protectedCutoff: config.protectedCutoff,
+            },
+        );
         compressedTextTags =
             cavemanResult.compressedToLite +
             cavemanResult.compressedToFull +

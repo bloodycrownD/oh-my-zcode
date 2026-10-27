@@ -143,6 +143,7 @@ import {
     snapshotTrailingBlankSourceDecisions,
     stripClearedReasoning,
 } from "./strip-content.js";
+import { replaySystemInjectionStrips } from "./system-injection-replay.js";
 import { injectTemporalMarkers } from "./temporal-awareness.js";
 import { createPreAdoptionToolSweepResolver, useScopedToolSweep } from "./tool-sweep-policy.js";
 import { historianJoinFailClosedMessage, runCompartmentPhase } from "./transform-compartment-phase.js";
@@ -2628,6 +2629,12 @@ export function createTransform(deps: TransformDeps) {
             },
         });
         passOutcome.markFinalized();
+        // FORK（source 恒 pristine）：注入剥离改为每 pass 幂等重放，不再写回
+        // source_contents。applyHeuristicCleanup 只在 routine pass 执行，而宿主每
+        // pass 都从 DB 重建消息（入站恒为 pristine 原文）——defer / non-routine
+        // pass 若不在这里兜底，<system-reminder> 就会重新出现在 wire 上。
+        // 必须用 targets 的闭包：setContent/getContent 带 §N§ 前缀与 partialEnd 语义。
+        replaySystemInjectionStrips(targets, activeTags, protectedCutoff);
         // Compaction-off: the emergency/overflow machinery is fully disarmed
         // (derived force-band tiered drop, absolute 95% fail-closed block, overflow-recovery latch).
         // A persisted latch is cleared by the off-transition, never consumed

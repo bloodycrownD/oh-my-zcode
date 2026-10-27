@@ -525,13 +525,14 @@ export class ConversationTopicPublisher {
     // IS5：manifest 在场面时 totalCount / firstRowId 只来自它（禁止由 rows.window 现算）。
     // 缺席（live 会话 / 老会话降级）才回退到窗口现算，两者在「全量物化 + 清单完整」时逐值相等。
     const facts = this.rowManifestFacts;
+    const derived = facts ? null : this.deriveRowsTotals(visibleRows);
     const visibleSnapshot: ConversationSnapshot = this.applyRuntimeBoundary({
       ...snapshot,
       rows: {
         ...snapshot.rows,
         window: visibleRows,
-        totalCount: facts ? facts.totalCount : visibleRows.length,
-        firstRowId: facts ? facts.firstRowId : (visibleRows[0]?.rowId ?? null),
+        totalCount: facts ? facts.totalCount : (derived?.totalCount ?? 0),
+        firstRowId: facts ? facts.firstRowId : (derived?.firstRowId ?? null),
       },
     });
     const limit = PROTOCOL_V4_LIMITS.snapshotTailWindowRows;
@@ -539,6 +540,37 @@ export class ConversationTopicPublisher {
     return {
       ...visibleSnapshot,
       rows: { ...visibleSnapshot.rows, window: visibleRows.slice(-limit) },
+    };
+  }
+
+  /** CR-2：`rowIdOrigin > 1` ⇔ 窗口化投影（窗口首行不是分支首行）。 */
+  private isWindowedProjection(): boolean {
+    return this.projection.getRowIdOrigin() > 1;
+  }
+
+  /**
+   * CR-2：manifest 事实缺席时的 rows 全序量派生口径。
+   *
+   * 窗口化投影下 `window.length` 只是窗口长度：用它冒充 `totalCount` 会让滚动条从真机
+   * 5255 掉到 ≤160、`firstRowId` 退成窗口 base（`hasOlderRows` 随之永久 false）。
+   * 这里改用「末行 rowId = 总行数」（截断后 id 复用、无空洞）、「1 = 分支首行」；
+   * 空窗口（rewind 把窗口首轮删空）取 `origin - 1`，因为 1..origin-1 的行仍在分支里。
+   * 全量投影（`origin === 1`，含冷窗口恰好覆盖整条分支的退化态）保持原口径。
+   */
+  private deriveRowsTotals(visibleRows: readonly ConversationRow[]): {
+    totalCount: number;
+    firstRowId: number | null;
+  } {
+    if (this.isWindowedProjection()) {
+      const origin = this.projection.getRowIdOrigin();
+      return {
+        totalCount: visibleRows[visibleRows.length - 1]?.rowId ?? origin - 1,
+        firstRowId: 1,
+      };
+    }
+    return {
+      totalCount: visibleRows.length,
+      firstRowId: visibleRows[0]?.rowId ?? null,
     };
   }
 
@@ -736,9 +768,13 @@ export class ConversationTopicPublisher {
         ? visibleRows
         : visibleRows.filter((row) => row.rowId < (params.beforeRowId as number));
     const pageRows = eligible.slice(-limit);
+    // CR-2：facts 缺席且投影窗口化时，权威首行是 1（分支首行），不是窗口首行——
+    // 否则 hasMore 在窗口 base 处恒 false，客户端以为再往上没有行。
     const firstRowId = this.rowManifestFacts
       ? this.rowManifestFacts.firstRowId
-      : (snapshot.rows.firstRowId ?? visibleRows[0]?.rowId ?? null);
+      : this.isWindowedProjection()
+        ? 1
+        : (snapshot.rows.firstRowId ?? visibleRows[0]?.rowId ?? null);
     const pageFirstRowId = pageRows[0]?.rowId;
     return {
       rows: pageRows,

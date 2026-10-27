@@ -1594,6 +1594,185 @@ function bestEffortRmSync(path) {
     }
   }
 }
+// --- b6: source_contents 恒 pristine，注入剥离改为每 pass 幂等重放 ----------
+//
+// 方案 A（cr-20261027-v1030 CR-1）：heuristic 不再把剥离结果写回
+// source_contents。source 只存宿主原文——这是 caveman（"compression always
+// starts from the pristine original"）与 tagMessages（source ≠ 入站 ⇒ 重指）
+// 两条契约的共同前提。剥离改由 replaySystemInjectionStrips 每 pass 重放，
+// 覆盖 defer / non-routine pass（那些 pass 根本不跑 heuristic）。
+
+const replayModule = await load("hooks/magic-context/system-injection-replay.js");
+const B6_INJECTED = "hello\n\n<system-reminder>todo reminder</system-reminder>";
+const B6_ONLY_INJECTED = "<system-reminder>only reminder</system-reminder>";
+
+function b6Messages(sessionId, messageId, text) {
+  return [
+    {
+      info: { id: messageId, role: "user", sessionID: sessionId, time: { created: 1000 } },
+      parts: [{ type: "text", text }],
+    },
+  ];
+}
+
+function b6TagNumber(wireText) {
+  const match = /^§(\d+)§ /u.exec(wireText);
+  if (!match) throw new Error(`no tag prefix on the wire: ${JSON.stringify(wireText)}`);
+  return Number(match[1]);
+}
+
+function b6Target(messages, tagNumber, options = {}) {
+  const part = messages[0].parts[0];
+  return {
+    message: messages[0],
+    textPrefix: `§${tagNumber}§ `,
+    getContent: () => part.text,
+    setContent: (next) => {
+      if (part.text === next) return false;
+      part.text = next;
+      return true;
+    },
+    ...(options.drop ? { drop: options.drop } : {}),
+  };
+}
+
+function b6Source(sessionId, tagNumber) {
+  return storage.getSourceContents(b4Db, sessionId, [tagNumber]).get(tagNumber);
+}
+
+test("b6 routine strip leaves source_contents pristine (no derived write-back)", () => {
+  const sessionId = "ses_b6_routine";
+  const messages = b6Messages(sessionId, "mc_b6_routine", B6_INJECTED);
+  tagMessagesB5.tagMessages(sessionId, messages, taggerModule.createTagger(), b4Db);
+  const tagNumber = b6TagNumber(messages[0].parts[0].text);
+
+  const result = heuristicModule.applyHeuristicCleanup(
+    sessionId,
+    b4Db,
+    new Map([[tagNumber, b6Target(messages, tagNumber)]]),
+    new Map(),
+    { protectedTagNumbers: new Set(), protectedCutoff: null, routine: true },
+  );
+
+  if (result.droppedInjections !== 1) {
+    throw new Error(`droppedInjections=${result.droppedInjections} (expected 1)`);
+  }
+  const wire = messages[0].parts[0].text;
+  if (!/^§\d+§ hello$/u.test(wire)) throw new Error(`wire was not stripped: ${wire}`);
+  // 反向验证：把 `replaceSourceContent(strippedSource)` 加回去，这条立刻红。
+  if (b6Source(sessionId, tagNumber) !== B6_INJECTED) {
+    throw new Error(
+      `source_contents is no longer pristine: ${JSON.stringify(b6Source(sessionId, tagNumber))}`,
+    );
+  }
+  // caveman replay 的输入契约（"always from the pristine original"）由此继承：
+  // 同一条 tag 在 heuristic 跑完后仍能读到带注入的原始正文。
+});
+
+test("b6 non-routine pass is covered by replaySystemInjectionStrips", () => {
+  const sessionId = "ses_b6_replay";
+  const messages = b6Messages(sessionId, "mc_b6_replay", B6_INJECTED);
+  tagMessagesB5.tagMessages(sessionId, messages, taggerModule.createTagger(), b4Db);
+  const tagNumber = b6TagNumber(messages[0].parts[0].text);
+  const tag = storageTags.getTagById(b4Db, sessionId, tagNumber);
+  const target = b6Target(messages, tagNumber);
+
+  // 宿主每 pass 从 DB 重建消息：入站仍是 pristine，这一轮 heuristic 不跑。
+  const replayed = replayModule.replaySystemInjectionStrips(
+    new Map([[tagNumber, target]]),
+    [tag],
+    null,
+  );
+  if (replayed !== 1) throw new Error(`replay returned ${replayed} (expected 1)`);
+  const wire = messages[0].parts[0].text;
+  if (!/^§\d+§ hello$/u.test(wire)) throw new Error(`replay did not strip: ${wire}`);
+  if (b6Source(sessionId, tagNumber) !== B6_INJECTED) {
+    throw new Error("replay must not rewrite source_contents");
+  }
+
+  // 幂等：再跑一次既不改 wire，也不报 strip。
+  const before = messages[0].parts[0].text;
+  if (replayModule.replaySystemInjectionStrips(new Map([[tagNumber, target]]), [tag], null) !== 0) {
+    throw new Error("second replay was not a no-op");
+  }
+  if (messages[0].parts[0].text !== before) throw new Error("second replay changed the wire");
+});
+
+test("b6 replay leaves an edited message alone (rewind keeps working)", () => {
+  const sessionId = "ses_b6_edit";
+  const tagger = taggerModule.createTagger();
+  const first = b6Messages(sessionId, "mc_b6_edit", B6_INJECTED);
+  tagMessagesB5.tagMessages(sessionId, first, tagger, b4Db);
+  const tagNumber = b6TagNumber(first[0].parts[0].text);
+  const tag = storageTags.getTagById(b4Db, sessionId, tagNumber);
+
+  // 编辑重发：同一位置换成新正文。
+  const edited = b6Messages(sessionId, "mc_b6_edit", "world");
+  tagMessagesB5.tagMessages(sessionId, edited, tagger, b4Db);
+  if (!/^§\d+§ world$/u.test(edited[0].parts[0].text)) {
+    throw new Error(`edit-resend replayed a stale body: ${edited[0].parts[0].text}`);
+  }
+  if (b6Source(sessionId, tagNumber) !== "world") {
+    throw new Error(`source was not corrected: ${JSON.stringify(b6Source(sessionId, tagNumber))}`);
+  }
+
+  // replay 不得把旧正文或旧派生文本带回 wire。
+  replayModule.replaySystemInjectionStrips(
+    new Map([[tagNumber, b6Target(edited, tagNumber)]]),
+    [tag],
+    null,
+  );
+  if (edited[0].parts[0].text !== `§${tagNumber}§ world`) {
+    throw new Error(`replay disturbed the edited wire: ${edited[0].parts[0].text}`);
+  }
+});
+
+test("b6 drop keeps source pristine and replay never emits an empty part", () => {
+  // ① routine pass：整段只有注入 → heuristic 落 dropped，但 source 仍是原文。
+  const dropSession = "ses_b6_drop";
+  const dropMessages = b6Messages(dropSession, "mc_b6_drop", B6_ONLY_INJECTED);
+  tagMessagesB5.tagMessages(dropSession, dropMessages, taggerModule.createTagger(), b4Db);
+  const dropTag = b6TagNumber(dropMessages[0].parts[0].text);
+  heuristicModule.applyHeuristicCleanup(
+    dropSession,
+    b4Db,
+    new Map([[dropTag, b6Target(dropMessages, dropTag, { drop: () => "absent" })]]),
+    new Map(),
+    { protectedTagNumbers: new Set(), protectedCutoff: null, routine: true },
+  );
+  if (dropMessages[0].parts[0].text !== dropped(dropTag)) {
+    throw new Error(`drop placeholder missing: ${dropMessages[0].parts[0].text}`);
+  }
+  if (storageTags.getTagById(b4Db, dropSession, dropTag)?.status !== "dropped") {
+    throw new Error("the tag was not marked dropped");
+  }
+  if (b6Source(dropSession, dropTag) !== B6_ONLY_INJECTED) {
+    throw new Error("drop must not rewrite source_contents to an empty string");
+  }
+
+  // ② non-routine pass：replay 遇到同样的整段注入必须原样放过——不能写出空串
+  //    或裸 `§N§`，也不能替 heuristic 做 drop。
+  const replaySession = "ses_b6_replay_empty";
+  const replayMessages = b6Messages(replaySession, "mc_b6_replay_empty", B6_ONLY_INJECTED);
+  tagMessagesB5.tagMessages(replaySession, replayMessages, taggerModule.createTagger(), b4Db);
+  const replayTag = b6TagNumber(replayMessages[0].parts[0].text);
+  const before = replayMessages[0].parts[0].text;
+  const replayed = replayModule.replaySystemInjectionStrips(
+    new Map([[replayTag, b6Target(replayMessages, replayTag)]]),
+    [storageTags.getTagById(b4Db, replaySession, replayTag)],
+    null,
+  );
+  if (replayed !== 0) {
+    throw new Error(`replay claimed ${replayed} strips on a whole-injection part`);
+  }
+  if (replayMessages[0].parts[0].text !== before) {
+    throw new Error(`replay rewrote a whole-injection part: ${replayMessages[0].parts[0].text}`);
+  }
+  if (storageTags.getTagById(b4Db, replaySession, replayTag)?.status !== "active") {
+    throw new Error("replay must not drop tags");
+  }
+});
+
 bestEffortRmSync(root);
 bestEffortRmSync(b4DbDir);
 

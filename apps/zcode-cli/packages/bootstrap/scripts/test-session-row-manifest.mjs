@@ -2221,6 +2221,63 @@ test("M8: 窗口化之后来了一条加了行的 live 事件 → 清单作废�
   }
 });
 
+test("N1: facts 作废后窗口化投影用 rowIdOrigin 派生全序量，不拿窗口长度冒充（CR-2）", () => {
+  // 真机症状：窗口化冷开（160 行）+ 一条改行集合的 live 事件让清单事实作废后，
+  // 任何一次快照下发都把 totalCount 报成 ≤160（真值 5255）、firstRowId 报成窗口 base，
+  // 滚动条缩水且 hasOlderRows 永久 false。
+  const messages = transcript(10, { modelChangeAtTurn: 6 });
+  const baseTimestampMs = messages[0].info.time.created;
+  const full = projectEvents(
+    synthesizeEventsFromMessages(messages, { sessionId: SESSION_ID, baseTimestampMs }),
+  );
+  const fullRows = full.getSnapshot().rows.window;
+  const windowBase = full.getTurnManifestRowIdBase("m-8-u");
+  assert.ok(windowBase > 1, "夹具必须是窗口化（否则测不到派生口径）");
+
+  const windowed = projectEvents(
+    synthesizeEventsFromMessages(messages.slice(14), {
+      sessionId: SESSION_ID,
+      baseTimestampMs,
+      initialTurnNumber: 7,
+      initialModelKey: modelKeyOf(MODEL_B),
+    }),
+    { rowIdOrigin: windowBase },
+  );
+  const windowRows = windowed.getSnapshot().rows.window;
+  const lastRowId = windowRows[windowRows.length - 1].rowId;
+  // 必须走 wire 出口（getWireSnapshotForProfile），投影内部快照不经派生口径。
+  const windowSub = windowed.subscribe({
+    topic: `conversation/${SESSION_ID}`,
+    connectionId: "conn-cr2-window",
+    deliveryProfile: "continuous",
+  });
+  const rows = windowSub.reservation.frame.payload.snapshot.rows;
+
+  assert.equal(
+    rows.totalCount,
+    lastRowId,
+    "窗口化的 totalCount 必须是末行 rowId（= 全序），不是窗口长度",
+  );
+  assert.ok(
+    rows.totalCount > windowRows.length,
+    `窗口长度 ${windowRows.length} 必须小于总数 ${rows.totalCount}（否则这条用例没有区分度）`,
+  );
+  assert.equal(rows.totalCount, fullRows.length, "派生的总数必须与全量物化逐值相等");
+  assert.equal(rows.firstRowId, 1, "权威首行是分支首行，不是窗口 base");
+
+  // 空窗口（rewind 把窗口首轮整轮删空）：1..origin-1 的行仍在分支里。
+  const empty = projectEvents([], { rowIdOrigin: 98 });
+  const emptySub = empty.subscribe({
+    topic: `conversation/${SESSION_ID}`,
+    connectionId: "conn-cr2-empty",
+    deliveryProfile: "continuous",
+  });
+  const emptyRows = emptySub.reservation.frame.payload.snapshot.rows;
+  assert.equal(emptyRows.window.length, 0);
+  assert.equal(emptyRows.totalCount, 97, "空窗口的总数 = rowIdOrigin - 1，不能塌成 0");
+  assert.equal(emptyRows.firstRowId, 1);
+});
+
 test("M5: manifest 行数与冷物化不符 → 每页一次的账目校验拦下（不交出平移过的 rowId）", async () => {
   // 清单把**页内那两轮**各多算 1 行（窗口之前的轮次不变）：页 plan 会要 8 行，
   // 而同一批消息冷物化只出 6 行 —— 这正是「live 与 cold 行数分叉」在页上的形态。
