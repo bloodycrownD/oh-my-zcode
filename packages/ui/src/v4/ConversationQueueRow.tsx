@@ -12,6 +12,7 @@ import {
 import type { QueueState } from "@zcode/shared/zcode-protocol-v4";
 import { ArrowUpFromLine, GripVertical, PencilIcon, Trash2Icon, Waypoints } from "lucide-react";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
+import { ConversationUserInputContent } from "@/v4/ConversationUserInputContent.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
@@ -120,7 +121,12 @@ const QueueRow = memo(function QueueRow({
         className="flex min-w-0 flex-1 items-center gap-2 truncate text-ui-base text-foreground"
         title={item.text}
       >
-        <span className="truncate">{item.text}</span>
+        {/* 队列项正文是 prompt markdown（与消息正文同源），直接复用气泡的
+            mention 渲染器：skill / 文件 / 插件引用会显示成胶囊而不是 `[$x](path)` 字面量。
+            外层保留 truncate——队列行窄，长胶囊照旧走省略号。 */}
+        <span className="truncate">
+          <ConversationUserInputContent text={item.text} />
+        </span>
       </span>
       {onSendNow ? (
         <Button
