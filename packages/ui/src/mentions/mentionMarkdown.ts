@@ -1,3 +1,5 @@
+import type { MentionCategory, MentionItemData } from "@/mentions/mentionTypes.js";
+
 const LINK_MENTION_MARKDOWN_PATTERN =
   /\[((?:\\.|[^\\\]])*)\]\((?:<((?:\\.|[^>])*?)>|((?:\\.|[^)])*))\)/g;
 const INLINE_MENTION_TOKEN_PATTERN =
@@ -214,6 +216,157 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
 
   if (cursor < content.length) {
     parts.push(...parseInlineMentionTokens(content.slice(cursor)));
+  }
+
+  return parts;
+}
+
+/**
+ * 恢复进编辑器用的反解结果：与 `MentionTextPart` 同源，但**保留原始片段**。
+ *
+ * `parseMentionMarkdown` 是给消息气泡展示写的，只留 label（链接目标、原始字节都丢了），
+ * 拿它重建 Lexical 节点会让 `getMarkdown()` 无法逐字节往返。这里额外携带 `markdown`
+ * 与 `data`，供编辑器侧 `$createPromptMentionNode` 原样保存。
+ */
+export type MentionMarkdownPart =
+  | { kind: "text"; text: string }
+  | {
+      kind: "mention";
+      category: MentionCategory;
+      label: string;
+      value: string;
+      /** 原始片段（`[...](...)` 或裸 token），节点必须原样保存。 */
+      markdown: string;
+      data?: MentionItemData;
+    };
+
+/** `https:` / `mailto:` 这类外链不是文件 mention，必须留在纯文本里。 */
+const DESTINATION_PROTOCOL_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
+
+function stripLeadingDotSlash(path: string): string {
+  return path.startsWith("./") ? path.slice(2) : path;
+}
+
+function mentionPartFromLink(
+  label: string,
+  destination: string,
+  markdown: string,
+): MentionMarkdownPart | null {
+  if (/^#sess_[a-zA-Z0-9._-]+$/.test(destination)) {
+    return {
+      kind: "mention",
+      category: "sessions",
+      label: label.startsWith("#") ? label.slice(1) : label,
+      value: destination.slice(1),
+      markdown,
+    };
+  }
+
+  if (destination.startsWith("plugin://")) {
+    const pluginId = parsePluginStableId(destination);
+    // 非法 plugin target 保持文本（与气泡层的 display-only 口径一致）。
+    if (!pluginId) return null;
+    return {
+      kind: "mention",
+      category: "plugins",
+      label: label.startsWith("@") ? label.slice(1) : label,
+      value: pluginId,
+      markdown,
+      data: { pluginId },
+    };
+  }
+
+  if (label.startsWith("$") && !DESTINATION_PROTOCOL_PATTERN.test(destination)) {
+    return {
+      kind: "mention",
+      category: "skills",
+      label: label.slice(1),
+      value: label.slice(1),
+      markdown,
+      data: { path: stripLeadingDotSlash(destination) },
+    };
+  }
+
+  if (DESTINATION_PROTOCOL_PATTERN.test(destination)) return null;
+
+  const relativePath = stripLeadingDotSlash(destination);
+  const kind = isDirectoryMentionDestination(destination) ? "directory" : "file";
+  return {
+    kind: "mention",
+    category: "files",
+    label: label.startsWith("@") ? label.slice(1) : label,
+    value: relativePath,
+    markdown,
+    data: { kind, path: relativePath, relativePath },
+  };
+}
+
+function parseInlineMentionTokensAsParts(segment: string): MentionMarkdownPart[] {
+  const parts: MentionMarkdownPart[] = [];
+  INLINE_MENTION_TOKEN_PATTERN.lastIndex = 0;
+  let cursor = 0;
+
+  for (const match of segment.matchAll(INLINE_MENTION_TOKEN_PATTERN)) {
+    const prefix = match[1] ?? "";
+    const token = match[2] ?? "";
+    if (!token) continue;
+    const matchStart = match.index ?? 0;
+    const tokenStart = matchStart + prefix.length;
+    if (tokenStart > cursor) {
+      parts.push({ kind: "text", text: segment.slice(cursor, tokenStart) });
+    }
+
+    const value = token.slice(1);
+    if (token.startsWith("$")) {
+      parts.push({ kind: "mention", category: "skills", label: value, value, markdown: token });
+    } else if (token.startsWith("/")) {
+      parts.push({ kind: "mention", category: "commands", label: value, value, markdown: token });
+    } else if (token.startsWith("@")) {
+      parts.push({ kind: "mention", category: "subagents", label: value, value, markdown: token });
+    } else if (token.startsWith("#")) {
+      parts.push({ kind: "mention", category: "sessions", label: value, value, markdown: token });
+    } else {
+      parts.push({ kind: "text", text: token });
+    }
+
+    cursor = tokenStart + token.length;
+  }
+
+  if (cursor < segment.length) {
+    parts.push({ kind: "text", text: segment.slice(cursor) });
+  }
+
+  return parts;
+}
+
+/**
+ * 把 prompt markdown 反解成「文本段 + mention 段」，供编辑器**恢复胶囊**用。
+ *
+ * 不变式（单测钉住）：把所有段的 `markdown`（mention）或 `text`（文本）按顺序拼回去，
+ * 必须与原串逐字节相等——否则「点一下编辑、内容就被改写」。
+ */
+export function parseMentionMarkdownParts(content: string): MentionMarkdownPart[] {
+  const parts: MentionMarkdownPart[] = [];
+  LINK_MENTION_MARKDOWN_PATTERN.lastIndex = 0;
+  let cursor = 0;
+
+  for (const match of content.matchAll(LINK_MENTION_MARKDOWN_PATTERN)) {
+    const markdown = match[0] ?? "";
+    const label = match[1] ? unescapeMarkdownText(match[1]) : "";
+    const destination = match[2] ?? match[3] ?? "";
+    const matchStart = match.index ?? 0;
+    if (matchStart > cursor) {
+      parts.push(...parseInlineMentionTokensAsParts(content.slice(cursor, matchStart)));
+    }
+
+    const mention = mentionPartFromLink(label, destination, markdown);
+    parts.push(mention ?? { kind: "text", text: markdown });
+
+    cursor = matchStart + markdown.length;
+  }
+
+  if (cursor < content.length) {
+    parts.push(...parseInlineMentionTokensAsParts(content.slice(cursor)));
   }
 
   return parts;

@@ -201,7 +201,7 @@ function restorePersistedComposerDraftIntoInput({
   draft: Pick<V4ComposerDraft, "editorStateJson" | "mention" | "text">;
   inputApi: Pick<
     LexicalChatInputHandle,
-    "getMarkdown" | "setEditorStateJson" | "setMention" | "setText"
+    "getMarkdown" | "setEditorStateJson" | "setMention" | "setTextWithMentions"
   >;
   onEditorStateError?: (error: unknown) => void;
 }): string {
@@ -219,7 +219,7 @@ function restorePersistedComposerDraftIntoInput({
     inputApi.setMention(draft.mention, draft.text.slice(draft.mention.markdown.length));
     return draft.text;
   }
-  inputApi.setText(draft.text);
+  inputApi.setTextWithMentions(draft.text);
   return draft.text;
 }
 
@@ -238,7 +238,7 @@ function applyExternalTextInsertRequestToComposer({
     | "prependMentionIfMissing"
     | "setMention"
     | "setText"
-    | "setTextWithPluginMentions"
+    | "setTextWithMentions"
   > | null;
   request: ExternalTextInsertRequest | null | undefined;
   requestFocus: () => void;
@@ -268,7 +268,7 @@ function applyExternalTextInsertRequestToComposer({
     inputApi.setMention(request.mention, request.text.slice(request.mention.markdown.length));
   } else if (request.text.includes("](plugin://")) {
     // 推荐任务可在正文中组合多个插件；按原位置构造成真实提及节点。
-    inputApi.setTextWithPluginMentions(request.text);
+    inputApi.setTextWithMentions(request.text);
   } else {
     inputApi.setText(request.text);
   }
@@ -305,7 +305,7 @@ function applyComposerRestoreRequestToComposer({
   currentSessionId: string | null;
   currentWorkspaceKey: string;
   hasDraftContent: boolean;
-  inputApi: Pick<LexicalChatInputHandle, "setText"> | null;
+  inputApi: Pick<LexicalChatInputHandle, "setTextWithMentions"> | null;
   request: ComposerRestoreRequest | null | undefined;
   requestFocus: () => void;
   restoreSessionOwnedAttachments: (attachments: readonly AttachmentRef[]) => boolean;
@@ -327,7 +327,7 @@ function applyComposerRestoreRequestToComposer({
   if (!restoreSessionOwnedAttachments(request.attachments)) {
     return appliedRequestId;
   }
-  inputApi.setText(request.text);
+  inputApi.setTextWithMentions(request.text);
   updateText(request.text);
   if (request.config) restoreDraftConfig?.(request.config);
   scheduleDraftPersist();
@@ -1180,7 +1180,7 @@ function ConversationComposerImpl({
           if (submittedDraft.editorStateJson) {
             inputApiRef.current?.setEditorStateJson(submittedDraft.editorStateJson);
           } else {
-            inputApiRef.current?.setText(submittedDraft.text);
+            inputApiRef.current?.setTextWithMentions(submittedDraft.text);
           }
           updateText(submittedDraft.text);
           editorClearedOptimistically = false;

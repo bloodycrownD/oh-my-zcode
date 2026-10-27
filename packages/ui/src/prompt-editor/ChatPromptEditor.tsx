@@ -196,7 +196,10 @@ export function ChatPromptEditor({
       if (resolvedInputApiRef.current?.getMarkdown() === initialValue) {
         return;
       }
-      resolvedInputApiRef.current?.setText(initialValue);
+      // 恢复必须还原胶囊：initialValue 是 prompt markdown，纯文本 setText 会把
+      // `[@a.ts](./a.ts)` / `[$skill](path)` 原样塞成 TextNode——这正是「从消息重新
+      // 编辑后胶囊消失」的原因。
+      resolvedInputApiRef.current?.setTextWithMentions(initialValue);
     });
   }, [initialValue, resolvedInputApiRef, syncInitialValueOnMount]);
 

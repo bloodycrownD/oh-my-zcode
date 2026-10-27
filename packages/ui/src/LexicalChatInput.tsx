@@ -15,6 +15,7 @@
  * 3. mention 面板用 enableMentionPanel 控制；slash command 始终读取 CLI workspace catalog。
  */
 import { $getPromptMarkdown } from "@/mentions/promptSerialization.js";
+import { parseMentionMarkdownParts } from "@/mentions/mentionMarkdown.js";
 import { PromptClipboardPlugin } from "@/mentions/PromptClipboardPlugin.js";
 import {
   resolveComposerKeyAction,
@@ -84,7 +85,7 @@ export interface LexicalChatInputHandle {
   setMention: (mention: ComposerMentionPrefill, trailingText?: string) => void;
   insertMention: (mention: ComposerMentionPrefill, selectionState?: EditorState) => void;
   setText: (text: string) => void;
-  setTextWithPluginMentions: (text: string) => void;
+  setTextWithMentions: (text: string) => void;
   setEditorStateJson: (editorStateJson: string) => void;
   setSkillMention: (skillName: string, markdown?: string, trailingText?: string) => void;
   setSlashCommandMention: (commandName: string, markdown?: string, trailingText?: string) => void;
@@ -205,37 +206,31 @@ function replaceEditorText(editor: LexicalEditor, text: string) {
   );
 }
 
-const INLINE_PLUGIN_MENTION_PATTERN =
-  /\[@((?:\\.|[^\]])+)\]\(plugin:\/\/([a-zA-Z0-9._-]+@[a-zA-Z0-9._-]+)\)/g;
-
-function replaceEditorTextWithPluginMentions(editor: LexicalEditor, text: string) {
+function replaceEditorTextWithMentions(editor: LexicalEditor, text: string) {
   editor.update(
     () => {
       const root = $getRoot();
       root.clear();
       for (const line of text.split("\n\n")) {
         const paragraph = $createParagraphNode();
-        let cursor = 0;
-        for (const match of line.matchAll(INLINE_PLUGIN_MENTION_PATTERN)) {
-          const start = match.index ?? 0;
-          if (start > cursor) paragraph.append($createTextNode(line.slice(cursor, start)));
-          const markdown = match[0];
-          const label = match[1]?.replaceAll("\\]", "]").replaceAll("\\[", "[") ?? "";
-          const pluginId = match[2] ?? "";
+        for (const part of parseMentionMarkdownParts(line)) {
+          if (part.kind === "text") {
+            if (part.text) paragraph.append($createTextNode(part.text));
+            continue;
+          }
           paragraph.append(
             $createPromptMentionNode({
-              id: `plugin:${pluginId}`,
-              category: "plugins",
-              label,
-              value: pluginId,
-              markdown,
-              data: { pluginId },
+              // provider 的 id 形态同为 `category:value`（file: 相对路径 / skill: 名称 /
+              // plugin: 稳定 id）。mentionId 只驱动 data-mention-id 与图标装饰；
+              // 往返权威是 `markdown`——它原样保存，所以 getMarkdown() 逐字节不变。
+              id: `${part.category}:${part.value}`,
+              category: part.category,
+              label: part.label,
+              value: part.value,
+              markdown: part.markdown,
+              ...(part.data ? { data: part.data } : {}),
             }),
           );
-          cursor = start + markdown.length;
-        }
-        if (cursor < line.length || paragraph.getChildrenSize() === 0) {
-          paragraph.append($createTextNode(line.slice(cursor)));
         }
         root.append(paragraph);
       }
@@ -901,8 +896,8 @@ function E2ELexicalInputBridgePlugin({ inputTestId }: { inputTestId?: string }) 
       getEditorState: () => editor.getEditorState(),
       getText: () => getEditorMarkdown(editor.getEditorState()),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithMentions: (text: string) =>
+        replaceEditorTextWithMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
     };
@@ -1282,8 +1277,8 @@ function EditorApiPlugin({
       setMention: (mention, trailingText) =>
         replaceEditorWithMention(editor, mention, trailingText),
       setText: (text: string) => replaceEditorText(editor, text),
-      setTextWithPluginMentions: (text: string) =>
-        replaceEditorTextWithPluginMentions(editor, text),
+      setTextWithMentions: (text: string) =>
+        replaceEditorTextWithMentions(editor, text),
       setEditorStateJson: (editorStateJson: string) =>
         replaceEditorStateJson(editor, editorStateJson),
       setSkillMention: (skillName: string, markdown = `$${skillName}`, trailingText = " ") =>
