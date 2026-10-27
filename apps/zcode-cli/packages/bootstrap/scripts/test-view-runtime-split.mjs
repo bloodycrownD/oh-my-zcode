@@ -1648,15 +1648,23 @@ test("K8: 文件摘要只按本次物化的消息过滤——不得再按整条 
   // Step 14 实测：窗口化首屏按整条 active 分支（2978 条 / 61 个带 checkpoint 的 user message）
   // 过滤，于是为窗口外的轮次读了 685 个 artifact（29.5MB）；而这些摘要的唯一消费者是
   // transcript-hydration 合成 ModelComplete 时的按 messageId 查表，窗口外的轮次本次不合成任何行。
-  const summariesAt = bridgeSource.indexOf("const fileChangeSummariesByMessageId = record");
-  assert.ok(summariesAt > 0, "bridge 的摘要构造块必须存在");
+  // 锚点跟着实现走：摘要构造块自 v1.0.30 起先抽 `source.messages` 派生的 id 集合
+  // （`fileChangeSummaryMessageIds`），再交给批量读与缺项补算——不再有
+  // `const fileChangeSummariesByMessageId = record(...)` 那种旧形态。
+  const summariesAt = bridgeSource.indexOf(
+    "const fileChangeSummaryMessageIds = source.messages.map(",
+  );
+  assert.ok(
+    summariesAt > 0,
+    "bridge 的摘要构造块必须存在，且 messageIds 必须来自本次物化的 source.messages",
+  );
   const summariesBody = bridgeSource.slice(
     summariesAt,
     bridgeSource.indexOf('markPhase("fileChangeSummariesMs")', summariesAt),
   );
   assert.ok(
-    summariesBody.includes("messageIds: source.messages.map((message) => String(message.info.id))"),
-    "摘要的 messageIds 必须是本次真的会被合成的 source.messages",
+    summariesBody.includes("messageIds: fileChangeSummaryMessageIds"),
+    "批量读与缺项补算必须共用同一份 source.messages 派生的 id 集合",
   );
   assert.ok(
     !summariesBody.includes("windowPlan.activeMessageIds"),
