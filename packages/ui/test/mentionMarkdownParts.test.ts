@@ -159,3 +159,35 @@ test("mention parts: plain text without mentions is a single text part", () => {
 test("mention parts: empty input yields no parts", () => {
   assert.deepEqual(parseMentionMarkdownParts(""), []);
 });
+
+// 真机回归（2026-10-27）：Windows 绝对路径的 skill 在编辑态仍是 markdown 字面量。
+// `buildSkillMentionMarkdown` 会 escape destination，落库形态是 `C:\\Users\\...`；
+// 而 `^[a-zA-Z][a-zA-Z\d+.-]*:` 这条协议判据会把盘符 `C:` 误判成 scheme，
+// 于是 skill/file 分支被跳过、整段退化成纯文本。
+test("mention parts: Windows absolute paths are not mistaken for URL schemes", () => {
+  const text =
+    "[$brain-storm](C:\\\\Users\\\\BloodyCrown\\\\.agents\\\\skills\\\\brain-storm\\\\SKILL.md) " +
+    "[$apm-recall](C:\\\\Users\\\\BloodyCrown\\\\.agents\\\\skills\\\\apm-recall\\\\SKILL.md) xxx";
+  const parts = parseMentionMarkdownParts(text);
+
+  assert.equal(rejoin(parts), text, "往返必须逐字节相等");
+  assert.deepEqual(
+    mentions(parts).map((part) => ({
+      category: part.category,
+      label: part.label,
+      path: part.data?.path,
+    })),
+    [
+      {
+        category: "skills",
+        label: "brain-storm",
+        path: "C:\\Users\\BloodyCrown\\.agents\\skills\\brain-storm\\SKILL.md",
+      },
+      {
+        category: "skills",
+        label: "apm-recall",
+        path: "C:\\Users\\BloodyCrown\\.agents\\skills\\apm-recall\\SKILL.md",
+      },
+    ],
+  );
+});

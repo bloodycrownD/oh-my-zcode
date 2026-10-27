@@ -240,8 +240,14 @@ export type MentionMarkdownPart =
       data?: MentionItemData;
     };
 
-/** `https:` / `mailto:` 这类外链不是文件 mention，必须留在纯文本里。 */
-const DESTINATION_PROTOCOL_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:/;
+/**
+ * `https:` / `mailto:` 这类外链不是文件 mention，必须留在纯文本里。
+ *
+ * 协议名要求**至少两个字符**：Windows 盘符 `C:`、`D:` 是单字母 + 冒号，
+ * 若按 `*` 匹配会被当成 scheme，`C:\\Users\\...\\SKILL.md` 这类绝对路径的
+ * skill / 文件 mention 就整体退化成字面量（真机回归 2026-10-27）。
+ */
+const DESTINATION_PROTOCOL_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]+:/;
 
 function stripLeadingDotSlash(path: string): string {
   return path.startsWith("./") ? path.slice(2) : path;
@@ -353,7 +359,9 @@ export function parseMentionMarkdownParts(content: string): MentionMarkdownPart[
   for (const match of content.matchAll(LINK_MENTION_MARKDOWN_PATTERN)) {
     const markdown = match[0] ?? "";
     const label = match[1] ? unescapeMarkdownText(match[1]) : "";
-    const destination = match[2] ?? match[3] ?? "";
+    // destination 与 `escapeMarkdownDestination` 对称反转义：落库形态是
+    // `C:\\Users\\...`（反斜杠被转义），data.path 必须是真实路径。
+    const destination = unescapeMarkdownText(match[2] ?? match[3] ?? "");
     const matchStart = match.index ?? 0;
     if (matchStart > cursor) {
       parts.push(...parseInlineMentionTokensAsParts(content.slice(cursor, matchStart)));
