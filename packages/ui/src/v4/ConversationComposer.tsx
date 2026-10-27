@@ -951,7 +951,7 @@ function ConversationComposerImpl({
           draft,
           inputApi: api,
           onEditorStateError: (error) => {
-            logger.warn(`[v4-composer] 草稿 editorState 恢复失败，退纯文本: ${String(error)}`);
+            logger.warn(`[v4-composer] 草稿 editorState 恢复失败，退 markdown→mention 恢复: ${String(error)}`);
           },
         }),
       );

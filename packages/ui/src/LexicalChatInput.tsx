@@ -206,38 +206,49 @@ function replaceEditorText(editor: LexicalEditor, text: string) {
   );
 }
 
-function replaceEditorTextWithMentions(editor: LexicalEditor, text: string) {
-  editor.update(
-    () => {
-      const root = $getRoot();
-      root.clear();
-      for (const line of text.split("\n\n")) {
-        const paragraph = $createParagraphNode();
-        for (const part of parseMentionMarkdownParts(line)) {
-          if (part.kind === "text") {
-            if (part.text) paragraph.append($createTextNode(part.text));
-            continue;
-          }
-          paragraph.append(
-            $createPromptMentionNode({
-              // provider 的 id 形态同为 `category:value`（file: 相对路径 / skill: 名称 /
-              // plugin: 稳定 id）。mentionId 只驱动 data-mention-id 与图标装饰；
-              // 往返权威是 `markdown`——它原样保存，所以 getMarkdown() 逐字节不变。
-              id: `${part.category}:${part.value}`,
-              category: part.category,
-              label: part.label,
-              value: part.value,
-              markdown: part.markdown,
-              ...(part.data ? { data: part.data } : {}),
-            }),
-          );
-        }
-        root.append(paragraph);
+/**
+ * 把 prompt markdown 写入根节点：段落按 `\n\n` 切分，mention 段建 PromptMentionNode。
+ *
+ * 段落规则必须与 `$getPromptMarkdown`（mentions/promptSerialization.ts）一致——它只在
+ * 非 inline 元素之间插 `\n\n`——否则「编辑前后 markdown 逐字节相等」不成立。
+ *
+ * 所有「把已有 prompt 文本放回编辑器」的入口都走这里（恢复、历史回填、失败回填），
+ * 否则胶囊会在漏掉的那条路径上退化成 `[$x](path)` 字面量。
+ */
+function $replaceRootWithPromptMarkdown(text: string) {
+  const root = $getRoot();
+  root.clear();
+  for (const line of text.split("\n\n")) {
+    const paragraph = $createParagraphNode();
+    for (const part of parseMentionMarkdownParts(line)) {
+      if (part.kind === "text") {
+        if (part.text) paragraph.append($createTextNode(part.text));
+        continue;
       }
-      root.getLastChild()?.selectEnd();
-    },
-    { tag: PROGRAMMATIC_UPDATE_TAG },
-  );
+      paragraph.append(
+        $createPromptMentionNode({
+          // id 是编辑器本地标识，**刻意不复用** provider 的前缀形态
+          // （provider 用单数 `file:` / `skill:` / `plugin:`，此处用 category 复数）。
+          // 唯一消费方是同节点 DOM→节点回查（selectAfterPromptMentionById）；
+          // 往返权威是 `markdown`，它原样保存，所以 getMarkdown() 逐字节不变。
+          id: `${part.category}:${part.value}`,
+          category: part.category,
+          label: part.label,
+          value: part.value,
+          markdown: part.markdown,
+          ...(part.data ? { data: part.data } : {}),
+        }),
+      );
+    }
+    root.append(paragraph);
+  }
+  root.getLastChild()?.selectEnd();
+}
+
+function replaceEditorTextWithMentions(editor: LexicalEditor, text: string) {
+  editor.update(() => $replaceRootWithPromptMarkdown(text), {
+    tag: PROGRAMMATIC_UPDATE_TAG,
+  });
 }
 
 function replaceEditorWithMention(
@@ -1025,16 +1036,9 @@ function PromptHistoryPlugin({
       // 防止回填含 / 的历史条目时面板重新打开并以 COMMAND_PRIORITY_CRITICAL 吞掉后续方向键。
       editor.update(
         () => {
-          const root = $getRoot();
-          root.clear();
-          for (const line of nextValue.split("\n\n")) {
-            const paragraph = $createParagraphNode();
-            if (line) {
-              paragraph.append($createTextNode(line));
-            }
-            root.append(paragraph);
-          }
-          root.getLastChild()?.selectEnd();
+          // 历史条目存的就是编辑器 markdown，必须走同一套 mention 重建，
+          // 否则带胶囊的 prompt 回填后会退化成 `[$x](path)` 字面量。
+          $replaceRootWithPromptMarkdown(nextValue);
         },
         { tag: HISTORY_NAVIGATION_UPDATE_TAG },
       );

@@ -9,7 +9,10 @@
 //   3. **往返逐字节相等**——否则「点一下编辑、内容就被改写」。
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 
 import {
   buildFileMentionMarkdown,
@@ -17,8 +20,11 @@ import {
   buildSessionMentionMarkdown,
   buildSkillMentionMarkdown,
   type MentionMarkdownPart,
+  parseMentionMarkdown,
   parseMentionMarkdownParts,
 } from "../src/mentions/mentionMarkdown.js";
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 type MentionPart = Extract<MentionMarkdownPart, { kind: "mention" }>;
 
@@ -158,6 +164,68 @@ test("mention parts: plain text without mentions is a single text part", () => {
 
 test("mention parts: empty input yields no parts", () => {
   assert.deepEqual(parseMentionMarkdownParts(""), []);
+});
+
+// B-2a：页内锚点与空目标不是 mention。按文件还原会把可见文字从「见上文」改成
+// `#commit-3`（displayLabel 走 resolveFileDisplayDescriptor → getPathLeaf）。
+test("mention parts: page anchors and empty destinations stay plain text", () => {
+  const anchorText = "先说结论：见 [见上文](#commit-3) 这节";
+  const anchorParts = parseMentionMarkdownParts(anchorText);
+
+  assert.equal(mentions(anchorParts).length, 0, "#锚点不得变成文件胶囊");
+  assert.equal(rejoin(anchorParts), anchorText);
+
+  const emptyTarget = "[空目标]()";
+  const emptyParts = parseMentionMarkdownParts(emptyTarget);
+  assert.equal(mentions(emptyParts).length, 0, "空 destination 不得变成胶囊");
+  assert.equal(rejoin(emptyParts), emptyTarget);
+});
+
+// B-2b：气泡层与编辑器层共用同一分类入口，但**兜底不同**：
+// - 编辑器侧：外链 / 锚点 / 空目标一律保持纯文本（不能把 URL 变成 token 节点）；
+// - 气泡侧：外链仍按历史口径显示为 file/directory（改成字面量会让消息变丑且复制丢 URL），
+//   但页内锚点与空目标不再被当成文件（否则可见文字会从「见上文」变成 `#commit-3`）。
+test("mention markdown (bubble layer): page anchors and empty targets are not file mentions", () => {
+  const anchorParts = parseMentionMarkdown("见 [见上文](#commit-3) 这节");
+  assert.equal(
+    anchorParts.some((part) => part.type === "file" || part.type === "directory"),
+    false,
+    "#锚点不得渲染成文件胶囊",
+  );
+
+  const emptyParts = parseMentionMarkdown("[空目标]()");
+  assert.equal(
+    emptyParts.some((part) => part.type === "file" || part.type === "directory"),
+    false,
+    "空 destination 不得渲染成胶囊",
+  );
+
+  // 既有口径：外链在气泡里仍按文件展示（本次不动，见 fix-spec B-2b 的范围说明）。
+  const linkParts = parseMentionMarkdown("[Google](https://google.com)");
+  assert.deepEqual(linkParts, [{ type: "file", label: "Google" }]);
+});
+
+// B-1 源码形状守卫：历史回填必须复用共享的 mention 重建，
+// 否则带胶囊的 prompt 按 ↑ 回填后会退化成 markdown 字面量。
+test("history navigation reuses the mention-aware restore (source guard)", () => {
+  const source = readFileSync(join(here, "../src/LexicalChatInput.tsx"), "utf8");
+  const start = source.indexOf("const applyHistoryEntry");
+  assert.ok(start >= 0, "applyHistoryEntry 必须存在");
+
+  const end = source.indexOf("const handleHistoryNavigation", start);
+  assert.ok(end > start, "applyHistoryEntry 的边界必须可定位");
+
+  const body = source.slice(start, end);
+  assert.match(
+    body,
+    /\$replaceRootWithPromptMarkdown\(nextValue\)/,
+    "历史回填必须走共享的 markdown→mention 重建",
+  );
+  assert.doesNotMatch(
+    body,
+    /\$createTextNode\(line\)/,
+    "历史回填不得再自行拼 TextNode（胶囊会退化成字面量）",
+  );
 });
 
 // 真机回归（2026-10-27）：Windows 绝对路径的 skill 在编辑态仍是 markdown 字面量。

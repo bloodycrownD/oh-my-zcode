@@ -189,27 +189,22 @@ export function parseMentionMarkdown(content: string): MentionTextPart[] {
     if (matchStart > cursor) {
       parts.push(...parseInlineMentionTokens(content.slice(cursor, matchStart)));
     }
-    if (/^#sess_[a-zA-Z0-9._-]+$/.test(destination)) {
-      parts.push({ type: "session", label: label.startsWith("#") ? label.slice(1) : label });
-    } else if (destination.startsWith("plugin://")) {
-      // Plugin 引用链接绝不能落入 file 分支或被当外链处理；
-      // 发送后曾只保留 label，消息层失去 stable ID，只能固定显示兜底图标。
-      // 这里原样保留合法 destination 身份供 UI 与 Session catalog 关联；非法目标仍保持
-      // display-only，不做 label 猜测、percent decode 或 canonical 改写。
-      const pluginId = parsePluginStableId(destination);
-      parts.push({
-        type: "plugin",
-        label: label.startsWith("@") ? label.slice(1) : label,
-        ...(pluginId ? { pluginId } : {}),
-      });
-    } else if (label.startsWith("$")) {
-      parts.push({ type: "skill", label: label.slice(1) });
-    } else if (isDirectoryMentionDestination(destination)) {
-      // 目录 mention 之前只按普通 file 还原，消息回显层拿不到 folder 语义，
-      // 于是文件夹候选在气泡里会继续显示成普通文件图标。这里根据链接目标是否以斜杠结尾恢复目录类型。
-      parts.push({ type: "directory", label: label.startsWith("@") ? label.slice(1) : label });
+    const classified = classifyMentionLink(label, destination);
+    if (classified) {
+      parts.push(toMentionTextPart(classified));
+    } else if (destination !== "" && !destination.startsWith("#")) {
+      // 气泡层保留历史口径：既不是 mention、也不是页内锚点/空目标的链接，仍按
+      // file / directory 展示（`[Google](https://…)` 一直是这样）。
+      // 改成纯文本会让消息里出现 markdown 字面量、复制还会丢 URL——那是另一件事，
+      // 由气泡渲染层单独处理；编辑器侧（mentionPartFromLink）不走这条兜底。
+      const bareLabel = label.startsWith("@") ? label.slice(1) : label;
+      parts.push(
+        isDirectoryMentionDestination(destination)
+          ? { type: "directory", label: bareLabel }
+          : { type: "file", label: bareLabel },
+      );
     } else {
-      parts.push({ type: "file", label: label.startsWith("@") ? label.slice(1) : label });
+      parts.push({ type: "text", text: fullMatch });
     }
     cursor = matchStart + fullMatch.length;
   }
@@ -253,57 +248,111 @@ function stripLeadingDotSlash(path: string): string {
   return path.startsWith("./") ? path.slice(2) : path;
 }
 
+type ClassifiedMentionLink =
+  | { category: "sessions"; label: string; value: string }
+  | { category: "plugins"; label: string; value: string; pluginId?: string }
+  | { category: "skills"; label: string; value: string; data: MentionItemData }
+  | { category: "files"; label: string; value: string; data: MentionItemData };
+
+/**
+ * 链接形态 mention 的**唯一**分类入口：气泡层（`parseMentionMarkdown`）与编辑器恢复
+ * （`parseMentionMarkdownParts`）都必须走这里，避免两套判据各自漂移——历史上气泡层
+ * 没有协议判据，`[Google](https://google.com)` 会被画成文件胶囊。
+ *
+ * 返回 `null` 表示「不是 mention，保持纯文本」：
+ * - 空 destination（`[x]()`）与页内锚点（`[见上文](#commit-3)`）——后者按文件还原会
+ *   把可见文字改成 `#commit-3`（`resolveFileDisplayDescriptor` 取 path leaf）；
+ * - 命中 `DESTINATION_PROTOCOL_PATTERN` 的外链（盘符已被该判据排除）。
+ */
+function classifyMentionLink(label: string, destination: string): ClassifiedMentionLink | null {
+  if (/^#sess_[a-zA-Z0-9._-]+$/.test(destination)) {
+    return {
+      category: "sessions",
+      label: label.startsWith("#") ? label.slice(1) : label,
+      value: destination.slice(1),
+    };
+  }
+
+  if (destination.startsWith("plugin://")) {
+    // Plugin 引用绝不能落入 file 分支或被当外链：合法 stable id 进 value/data，
+    // 非法目标仍保留 plugin 类型（气泡 display-only），但不带 pluginId。
+    const pluginId = parsePluginStableId(destination);
+    return {
+      category: "plugins",
+      label: label.startsWith("@") ? label.slice(1) : label,
+      value: pluginId ?? "",
+      ...(pluginId ? { pluginId } : {}),
+    };
+  }
+
+  if (destination === "" || destination.startsWith("#")) return null;
+  if (DESTINATION_PROTOCOL_PATTERN.test(destination)) return null;
+
+  if (label.startsWith("$")) {
+    return {
+      category: "skills",
+      label: label.slice(1),
+      value: label.slice(1),
+      data: { path: stripLeadingDotSlash(destination) },
+    };
+  }
+
+  const relativePath = stripLeadingDotSlash(destination);
+  // 目录 mention 之前只按普通 file 还原，消息回显层拿不到 folder 语义，
+  // 于是文件夹候选在气泡里会继续显示成普通文件图标；按目标是否以斜杠结尾恢复目录类型。
+  const kind = isDirectoryMentionDestination(destination) ? "directory" : "file";
+  return {
+    category: "files",
+    label: label.startsWith("@") ? label.slice(1) : label,
+    value: relativePath,
+    data: { kind, path: relativePath, relativePath },
+  };
+}
+
+function toMentionTextPart(classified: ClassifiedMentionLink): MentionTextPart {
+  if (classified.category === "sessions") {
+    return { type: "session", label: classified.label };
+  }
+  if (classified.category === "plugins") {
+    return {
+      type: "plugin",
+      label: classified.label,
+      ...(classified.pluginId ? { pluginId: classified.pluginId } : {}),
+    };
+  }
+  if (classified.category === "skills") {
+    return { type: "skill", label: classified.label };
+  }
+  return classified.data.kind === "directory"
+    ? { type: "directory", label: classified.label }
+    : { type: "file", label: classified.label };
+}
+
 function mentionPartFromLink(
   label: string,
   destination: string,
   markdown: string,
 ): MentionMarkdownPart | null {
-  if (/^#sess_[a-zA-Z0-9._-]+$/.test(destination)) {
-    return {
-      kind: "mention",
-      category: "sessions",
-      label: label.startsWith("#") ? label.slice(1) : label,
-      value: destination.slice(1),
-      markdown,
-    };
-  }
+  const classified = classifyMentionLink(label, destination);
+  // 判据与气泡层共用 `classifyMentionLink`，这里只多一条编辑器侧要求：
+  // 没有稳定 pluginId 的 plugin 链接建不出可用的节点，退回文本。
+  if (!classified) return null;
+  if (classified.category === "plugins" && !classified.pluginId) return null;
 
-  if (destination.startsWith("plugin://")) {
-    const pluginId = parsePluginStableId(destination);
-    // 非法 plugin target 保持文本（与气泡层的 display-only 口径一致）。
-    if (!pluginId) return null;
-    return {
-      kind: "mention",
-      category: "plugins",
-      label: label.startsWith("@") ? label.slice(1) : label,
-      value: pluginId,
-      markdown,
-      data: { pluginId },
-    };
-  }
+  const data =
+    classified.category === "plugins"
+      ? { pluginId: classified.value }
+      : "data" in classified
+        ? classified.data
+        : undefined;
 
-  if (label.startsWith("$") && !DESTINATION_PROTOCOL_PATTERN.test(destination)) {
-    return {
-      kind: "mention",
-      category: "skills",
-      label: label.slice(1),
-      value: label.slice(1),
-      markdown,
-      data: { path: stripLeadingDotSlash(destination) },
-    };
-  }
-
-  if (DESTINATION_PROTOCOL_PATTERN.test(destination)) return null;
-
-  const relativePath = stripLeadingDotSlash(destination);
-  const kind = isDirectoryMentionDestination(destination) ? "directory" : "file";
   return {
     kind: "mention",
-    category: "files",
-    label: label.startsWith("@") ? label.slice(1) : label,
-    value: relativePath,
+    category: classified.category,
+    label: classified.label,
+    value: classified.value,
     markdown,
-    data: { kind, path: relativePath, relativePath },
+    ...(data ? { data } : {}),
   };
 }
 
