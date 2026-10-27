@@ -1,3 +1,23 @@
+## [1.0.31](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.30...v1.0.31) (2026-10-28)
+
+编辑态的 skill / 文件胶囊不再退化成 markdown 字面量；同时落地 v1.0.30 之后的两条 P1 修复（Magic Context 派生 source、窗口化快照的全序量）。
+
+### 修复
+
+- **从消息或提示词队列重新编辑，胶囊不再消失**。两条恢复路径原本都走纯文本重建（每个段落塞一个 TextNode），markdown 字面量 `[$skill](path)` / `[@a.ts](./a.ts)` 原样留在编辑器里；唯一的 mention-aware 恢复只认 plugin。现在按 markdown 反解并重建真正的节点，覆盖 skill / 文件 / 目录 / 插件 / 会话 / 子代理 / 命令七类。节点原样保存 markdown，因此「不改字直接提交」的内容逐字节不变。
+- **提示词历史回填（按 ↑）同样修好**。历史条目存的就是编辑器 markdown，原实现自己拼 TextNode，胶囊会二次退化；现在与恢复入口共用同一套重建。
+- **Windows 绝对路径不再被当成 URL 协议**。`C:\Users\...\SKILL.md` 这类目标曾被 `^[a-zA-Z]…:` 误判成 scheme，导致 skill 整段退化成字面量；协议名现在要求至少两个字符（不存在单字母 scheme），盘符与 UNC 路径都能正确还原。
+- **队列项正文显示胶囊**。队列行原先直接渲染原文，skill / 文件引用是字面量；现在复用消息气泡的同一套渲染器。
+- **页内锚点与空目标不再被当成文件引用**。`[见上文](#commit-3)` 曾被还原成文件节点，可见文字会变成 `#commit-3`；`[x]()` 曾生成空值胶囊。链接分类现在收敛成单一入口，气泡层与编辑器层共用，避免两套判据漂移。
+- **Magic Context 的 `source_contents` 恢复单一语义**（CR-1）。此前 heuristic 清理会把「剥离系统注入后的派生文本」写进 source，而 v1.0.30 的新判据把「source ≠ 入站」一律解释成 tag 已重新指向——于是带注入的消息在非 routine pass 会把注入放回 wire、每轮多写两次库、账务虚增。现在 source 始终存 pristine 原文，注入剥离改为每 pass 幂等重放（`replaySystemInjectionStrips`），与 caveman 压缩同构；顺带修掉「已 drop 的消息被 caveman 以压缩态写回 wire」的连带缺陷。**零 schema 改动**。
+- **窗口化快照派生全序量**（CR-2）。facts 被 live ingest 作废后，快照曾用窗口长度冒充 `totalCount` / `firstRowId`（真机 5255 报成 ≤160），滚动条会缩水且 `hasOlderRows` 永久 false。现在在 `origin > 1` 且 facts 缺席时按 `rowIdOrigin` 派生，全量投影语义不变。
+
+### 已知
+
+- 消息气泡里手写的 markdown 外链（`[Google](https://…)`）仍按文件胶囊展示——这是气泡层的历史口径，要改需要先支持链接渲染（否则会显示成 markdown 字面量且复制丢 URL），本次不动；编辑态对同类外链已保持纯文本。
+- 路径里含 `)` 的引用会在构造 markdown 时被截断（`escapeMarkdownDestination` 不转义括号）。往返仍逐字节成立，但编辑态可能出现假胶囊 + 尾部字面量；修它要改落库形态，需兼容旧数据。
+- 白板引用与子代理同形（都是 `@名称`），恢复后一律显示为子代理胶囊；属既有编码歧义。
+
 ## [1.0.30](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.29...v1.0.30) (2026-10-27)
 
 修复 v1.0.29 仍存在的「编辑消息后重发，模型读到的还是旧消息」。
