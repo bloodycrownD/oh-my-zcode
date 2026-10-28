@@ -1,15 +1,5 @@
-/* eslint-disable max-lines -- context 面板聚合 Context windows 与 Magic Context 两段通用展示；后续拆分需要单独梳理弹层状态边界。 */
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
-  useCallback,
-
-  useMemo,
-  useRef,
-  useState,
-
-  type CSSProperties,
-} from "react";
-import {
-  TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT,
   TID_CHAT_CONTEXT_USAGE_TRIGGER,
   type ZCodeContextUsageBreakdownItem,
   type ZCodeProvider,
@@ -23,12 +13,13 @@ import {
 } from "@/components/ai-elements/context.js";
 import { cn } from "@/components/lib/utils.js";
 import { Progress } from "@/components/ui/progress.js";
-import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
-import { isSettingsTab } from "@/store/tabStore.js";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 
-import { buildMagicContextUsageRows } from "@/chat-input-toolbar/magicContextUsageRows.js";
+import {
+  hasMagicContextUsage,
+  MagicContextUsageSection,
+} from "@/chat-input-toolbar/MagicContextUsageSection.js";
 import { formatCompactTokenNumber } from "@/lib/tokenNumberFormat.js";
 
 type ContextUsageBreakdownSource = ZCodeContextUsageBreakdownItem["source"];
@@ -119,20 +110,6 @@ const BREAKDOWN_SOURCE_LABEL_ID: Record<ContextUsageBreakdownSource, string> = {
   system_tool_schemas: "chat.contextUsage.breakdown.systemTools",
   mcp_tool_schemas: "chat.contextUsage.breakdown.mcpTools",
 };
-
-/** D-13：面板里的 magic-context 段是「有就说」，字段缺席时整段不渲染。 */
-const MAGIC_CONTEXT_ROW_LABEL_IDS = {
-  budget: "chat.contextUsage.magicContext.budget",
-  cache: "chat.contextUsage.magicContext.cache",
-  cacheHit: "chat.contextUsage.magicContext.cacheHit",
-  cacheMiss: "chat.contextUsage.magicContext.cacheMiss",
-  // 面板不呈现 `m[0]`/`m[1]` 这两个 SQLite 侧的名字（见 magicContextUsageRows.ts）。
-  cacheSegment1: "chat.contextUsage.magicContext.cacheSegment1",
-  cacheSegment2: "chat.contextUsage.magicContext.cacheSegment2",
-  compartments: "chat.contextUsage.magicContext.compartments",
-  dropped: "chat.contextUsage.magicContext.dropped",
-  used: "chat.contextUsage.magicContext.used",
-} as const;
 
 const BREAKDOWN_SOURCE_ORDER: Record<ContextUsageBreakdownSource, number> = {
   messages: 0,
@@ -270,31 +247,11 @@ export function ChatContextUsage({
       }),
     [locale],
   );
-  const magicContextRows = useMemo(
-    () =>
-      buildMagicContextUsageRows({
-        labels: {
-          budget: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.budget }),
-          cache: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cache }),
-          cacheHit: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheHit }),
-          cacheMiss: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheMiss }),
-          cacheSegment1: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheSegment1 }),
-          cacheSegment2: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.cacheSegment2 }),
-          compartments: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.compartments }),
-          dropped: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.dropped }),
-          used: intl.formatMessage({ id: MAGIC_CONTEXT_ROW_LABEL_IDS.used }),
-        },
-        locale,
-        magicContext,
-      }),
-    [intl, locale, magicContext],
-  );
-
   if (
     (!renderableTaskUsage || !contextUsageLabel) &&
     !hasCodingPlanUsageRemaining &&
     !hasStartPlanBalance &&
-    magicContextRows.length === 0
+    !hasMagicContextUsage(magicContext)
   ) {
     return null;
   }
@@ -438,32 +395,15 @@ export function ChatContextUsage({
               ) : null}
             </>
           ) : null}
-          {/* D-13：magic-context 预算摘要。与上面两段不同，它**不依赖**
-              renderableTaskUsage——provider 窗口还没建起来时它照样有话说，而那正是
-              「为什么我的上下文被裁了」最需要被看见的时刻。字段缺席 → 整段不渲染。 */}
-          {magicContextRows.length > 0 ? (
-            <div
-              aria-label={intl.formatMessage({ id: "chat.contextUsage.magicContext.title" })}
-              className={cn(
-                "space-y-1.5",
-                (renderableTaskUsage || hasCodingPlanUsageRemaining || hasStartPlanBalance) &&
-                  "border-t border-border pt-3",
-              )}
-              data-testid={TID_CHAT_CONTEXT_USAGE_MAGIC_CONTEXT}
-            >
-              <div className="text-ui-sm font-medium text-foreground">
-                {intl.formatMessage({ id: "chat.contextUsage.magicContext.title" })}
-              </div>
-              {magicContextRows.map((row) => (
-                <div className="flex min-w-0 items-center gap-2 text-ui-sm" key={row.id}>
-                  <span className="min-w-0 truncate text-foreground-subtle">{row.label}</span>
-                  <span className="ml-auto min-w-10 shrink-0 text-right font-mono text-ui-sm tabular-nums text-foreground">
-                    {row.value}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
+          {/* D-13：magic-context 预算摘要段由 fork 模块渲染（不依赖 renderableTaskUsage）。 */}
+          <MagicContextUsageSection
+            intl={intl}
+            locale={locale}
+            magicContext={magicContext}
+            separated={Boolean(
+              renderableTaskUsage || hasCodingPlanUsageRemaining || hasStartPlanBalance,
+            )}
+          />
           {/* FORK（D-4）：Coding Plan 剩余额度与 Start Plan 余额面板随订阅面整删；
               context 面板只保留 Context windows / Magic Context / cache / breakdown 通用区。 */}
         </ContextContentBody>
