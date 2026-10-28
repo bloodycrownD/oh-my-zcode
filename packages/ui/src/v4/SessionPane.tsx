@@ -39,7 +39,7 @@ import type {
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 import { toast } from "@/components/ui/toast.js";
-import { useZCodeIntl, type IntlInstance } from "@/i18n/IntlProvider.js";
+import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { DEFAULT_CODE_PREVIEW_SETTINGS } from "@/lib/codePreviewSettings.js";
 import type { CodeViewerSource } from "@/lib/codeViewer.js";
 import type { OpenAutomationsMain } from "@/lib/taskNavigationHistory.js";
@@ -87,6 +87,7 @@ import {
 } from "@/v4/ConversationComposer.js";
 import type { ConversationDropTargetController } from "@/v4/composer/conversationDropTarget.js";
 import { shouldIgnoreEscapeForStopGeneration } from "@/v4/composer/escapeStop.js";
+import { dispatchCtxCommand } from "@/v4/ctxCommandDispatch.js";
 import { ConversationDraftEmptyState } from "@/v4/ConversationDraftEmptyState.js";
 import { ConversationDraftSuggestedPromptsContainer } from "@/v4/ConversationDraftSuggestedPromptsContainer.js";
 import { ConversationHeader, type PaneWorkspaceBadge } from "@/v4/ConversationHeader.js";
@@ -412,45 +413,6 @@ function resolveQueuedComposerRestore(
 
 function shouldRestoreQueuedComposerFromAck(status: CommandAck["status"]): boolean {
   return status === "accepted" || status === "duplicate";
-}
-
-/** `/ctx-reduce|expand|recomp` 的回执只有 1~3 行，给一个够读完的定时。 */
-const CTX_COMMAND_TIMED_NOTICE_MS = 12_000;
-
-/**
- * `/ctx-*` 的结果呈现。
- *
- * 复用**已存在**的 notice toast（`variant="info"` 把首行当标题、余下按 `whitespace-pre-line`
- * 渲染正文，宽度 `min(536px, 100vw-2rem)`），不新造组件。选它而不是插进对话流，是因为这
- * 四个命令的产物就是一段给人读的文本，进历史会污染时间线——CLI/TUI 侧同样只把文本回给
- * 用户，从不落进对话。
- *
- * 时长按「要不要读完」分档：`/ctx-status` 是多行报告，常驻到用户关掉；其余三条是确认，
- * 定时消失。两种都 `dismissible`，常驻的那条也留了关闭按钮。
- */
-function presentCtxCommandAck(
-  ack: CommandAck,
-  intl: IntlInstance,
-  command: Extract<V4VisibleSlashCommand, { kind: "ctxCommand" }>,
-): void {
-  if (ack.status !== "accepted" && ack.status !== "noop") {
-    logger.warn(`[v4-pane] /${command.displayText} 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`);
-    toast(ack.message ?? intl.formatMessage({ id: "chat.ctx.rejected" }), {
-      dismissible: true,
-      position: "bottom-center",
-      variant: "warning",
-    });
-    return;
-  }
-  const response = ack.result?.type === "ctxCommand" ? ack.result.response : undefined;
-  const text = response ?? intl.formatMessage({ id: "chat.ctx.noResponse" });
-  toast(text, {
-    dismissible: true,
-    // 多行报告常驻，其余定时；`durationMs: 0` 是 toast 既有的「不自动消失」语义。
-    durationMs: command.command === "ctxStatus" ? 0 : CTX_COMMAND_TIMED_NOTICE_MS,
-    position: "bottom-center",
-    variant: "info",
-  });
 }
 
 /**
@@ -1931,18 +1893,8 @@ export function SessionPane({
         case "unsupportedGoal":
           logger.warn(`[v4-pane] 暂不支持 /goal ${command.action}`);
           return true;
-        case "ctxCommand":
-          // magic-context 本地控制命令：不经 prompt 通道，服务端就地执行完把一段文本
-          // 回在 ACK 的 `ctxCommand.response` 里。承载它的是**已存在的** notice toast
-          // （variant=info 会把首行当标题、余下按 pre-line 正文渲染），不新造组件。
-          type = command.command;
-          payload =
-            command.command === "ctxReduce"
-              ? { tags: command.range ?? "" }
-              : command.range
-                ? { range: command.range }
-                : {};
-          break;
+        // `/ctx-*` 不在这里：它在 dispatchSendTextAfterConfig 的模型就绪门之前就被
+        // dispatchCtxCommand 消费了；落到这里说明调用方绕过了那条路径，按未知命令丢弃。
         default:
           return false;
       }
@@ -1959,10 +1911,6 @@ export function SessionPane({
       if (ack.reasonCode === "guard.heldQueueConfirmationStale") {
         return "confirmationRequired";
       }
-      if (command.kind === "ctxCommand") {
-        presentCtxCommandAck(ack, intl, command);
-        return true;
-      }
       if (ack.status !== "accepted" && ack.status !== "noop") {
         logger.warn(
           `[v4-pane] slash ${command.kind} 被拒绝: ${ack.status} ${ack.reasonCode ?? ""}`,
@@ -1972,7 +1920,7 @@ export function SessionPane({
       }
       return true;
     },
-    [dispatchCommand, intl, settleCurrentQueueInputs],
+    [dispatchCommand, settleCurrentQueueInputs],
   );
 
   const dispatchSendTextAfterConfig = useCallback(
@@ -2009,25 +1957,14 @@ export function SessionPane({
         if (!slashCommand.task) return "sent" as const;
       }
 
-      // `/ctx-*` 是会话自身的上下文控制面，不起 turn、不入队、不需要模型就绪——所以在
-      // `ensureDraftModelReadyForSend` 之前就地消费：让一条纯本地的读命令不必先备好模型。
-      // 没有会话时（draft 首条）无处可作用，明确提示而不是把 `/ctx-status` 当 prompt 发出去。
+      // `/ctx-*` 的提前拦截与 ACK 呈现见 ctxCommandDispatch（含「需要会话」提示）。
       if (slashCommand?.kind === "ctxCommand") {
-        if (sessionId) {
-          // 这四条不携带 Submission（没有模型/模式/队列语义），因此不受 draft promotion
-          // 与 held-queue choice 影响——它们本来就不进对话。
-          await dispatchSlashCommand(
-            slashCommand,
-            sessionId,
-            snapshotRef.current?.revision,
-            undefined,
-            undefined,
-            undefined,
-          );
-          return "sent" as const;
-        }
-        toast(intl.formatMessage({ id: "chat.ctx.sessionRequired" }));
-        return "blocked" as const;
+        return await dispatchCtxCommand({
+          command: slashCommand,
+          sessionId,
+          intl,
+          dispatch: dispatchCommand,
+        });
       }
 
       if (!(await ensureDraftModelReadyForSend())) {
