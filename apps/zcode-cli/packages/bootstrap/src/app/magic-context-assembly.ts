@@ -1,7 +1,11 @@
 import type { Logger, SessionId } from "@zcode/contracts";
 import type { AgentRuntime } from "@zcode/core";
 import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
-import type { ProviderRegistryModelSource } from "./provider-registry-model-runtime.js";
+import {
+  completeAuxiliaryRegistryModelSelection,
+  resolveRegistryOwnedSelection,
+} from "./provider-registry-selection.js";
+import type { ApiProviderModelRuntime, ProviderRegistryModelSource } from "./provider-registry-model-runtime.js";
 
 type MagicContextAssemblyModule = typeof import("./magic-context-turn-transform.js");
 
@@ -110,4 +114,161 @@ export async function loadMagicContextAssembly(
   });
 
   return { assembly, usageRecorder };
+}
+
+type TurnTransformParams = Parameters<
+  MagicContextAssemblyModule["createMagicContextTurnTransform"]
+>[0];
+
+/** turn transform 工厂里由本模块自行构造、调用方不必提供的两个探针。 */
+type InjectedTurnTransformParam = "registerClose" | "muralVisionProbe" | "createSidecarModel";
+
+/**
+ * 第二阶段装配：加载门通过之后，构造 turn transform、提示词段解析器与工具描述求值器。
+ *
+ * 为什么与 `loadMagicContextAssembly` 分开：加载门与「flag 关也要发 absent 事件」
+ * 的纪律属于第一段；这里全是**已经拿到了模块命名空间之后**的构造，失败语义不同
+ * （不吞错、不降级，装配失败就是启动失败）。分成两段后，调用点读起来就是
+ * 「先开灯，再按灯接线」。
+ *
+ * 参数取自 `createMagicContextTurnTransform` 的签名（`Parameters<...>`），不在这里
+ * 另抄一份类型——那会变成第二份真相，工厂加参数时这里会静默落后。
+ */
+export interface AssembleMagicContextDeps {
+  assembly: MagicContextAssemblyModule;
+  enabled: TurnTransformParams["enabled"];
+  logger: Logger;
+  sessionId: SessionId;
+  workingDirectory: TurnTransformParams["workingDirectory"];
+  configPort: TurnTransformParams["configPort"];
+  configDomain: unknown;
+  sessionStore: TurnTransformParams["sessionStore"];
+  processExitsAfterTurn: TurnTransformParams["processExitsAfterTurn"];
+  onMagicContextUsage?: TurnTransformParams["onMagicContextUsage"];
+  providerRegistry: ProviderRegistryModelSource;
+  modelFactory: ApiProviderModelRuntime["modelFactory"];
+  traceContext: TurnTransformParams["traceContext"];
+  usageRecorder?: ReturnType<MagicContextAssemblyModule["createMagicContextUsageRecorder"]>;
+}
+
+export interface AssembledMagicContext {
+  turnTransform: Awaited<ReturnType<MagicContextAssemblyModule["createMagicContextTurnTransform"]>>;
+  promptSection: ReturnType<MagicContextAssemblyModule["createMagicContextPromptSectionResolver"]>;
+  toolDescription: ReturnType<
+    MagicContextAssemblyModule["createMagicContextToolDescriptionResolver"]
+  >;
+  /** 装配工厂注册回来的关闭钩子；缺席 = 没装成（DB 开不出来等）。 */
+  close?: () => Promise<void>;
+}
+
+export async function assembleMagicContext(
+  deps: AssembleMagicContextDeps,
+): Promise<AssembledMagicContext> {
+  const {
+    assembly,
+    enabled,
+    logger,
+    sessionId,
+    workingDirectory,
+    configPort,
+    configDomain,
+    sessionStore,
+    processExitsAfterTurn,
+    onMagicContextUsage,
+    providerRegistry,
+    modelFactory,
+    traceContext,
+    usageRecorder,
+  } = deps;
+
+  // FORK（MF-05）：magic-context 的关闭钩子由装配工厂**注册**回来，而不是这里
+  // 拿它的内部对象——后者会把 drain/shutdown/dispose 的顺序知识泄到装配层。
+  // 缺席 = 没装 magic-context（DB 开不出来），此时不注入 session facade。
+  let close: (() => Promise<void>) | undefined;
+
+  const turnTransform = await assembly.createMagicContextTurnTransform({
+    // FORK（MF-01）：传**同一次求值**的 effective，而不是硬编码 true。契约 8
+    // 是 `features.magicContext && magicContext.enabled`，这一位与装配门读的是
+    // 同一个字段——门面不接受「装配门认为开着、transform 却认为关着」。
+    enabled,
+    registerClose: (registered) => {
+      close = registered;
+    },
+    // FORK（S23 / D-12）：传本 App 的配置口，config bridge 据此订阅
+    // `ConfigPort.observe(ConfigKey.MagicContext)`，运行中改配置下一 turn
+    // 生效、无需重启（spec Step 16 判据）。`configDomain` 降级为无配置口时
+    // 的静态源，生产路径恒有 `configPort`。
+    configPort,
+    configDomain,
+    sessionId,
+    workingDirectory,
+    // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：进程形态透传。
+    // 三个入口（protocol / TUI / print）各自知道自己是不是长驻，bootstrap 不
+    // 做 argv 嗅探——TUI 与 `-p` 在 argv 上不可区分。缺省 true = 保守，保持
+    // print 与所有未声明形态的现有前台 settle 行为（求值在调用方，这里只透传）。
+    processExitsAfterTurn,
+    sessionStore,
+    logger,
+    // FORK（D-13）：把预算摘要交给协议宿主的投影层。缺席（CLI/TUI）时本条
+    // 推送不存在，magic-context 其余行为逐行不变。
+    ...(onMagicContextUsage === undefined ? {} : { onMagicContextUsage }),
+    // FORK（bugfix-batch-20261011 / Step 15，D5）：mural 的 vision 判定源。
+    // 包内 render-trigger 上游读 models-dev apiCache（本 fork 零生产者、恒
+    // false），判定改走**静态目录** `ModelInputFormatData.supportsImage`
+    // （packages/shared/src/model-config.ts:51-59，与 contracts
+    // media-policy.ts:40 同一源）；「provider/model → properties」的解析只有
+    // provider Registry 做得到。未知模型/catalog 缺字段一律 false（fail-closed，
+    // 与上游「缺失 cache 条目不出图」同向）。冒号 tag 后缀（modelID:tag）与
+    // 上游 `modelSupportsVision` 的 fallback 同款：先整键、再去 tag 试一次。
+    muralVisionProbe: (modelKey: string) => {
+      const separator = modelKey.indexOf("/");
+      if (separator <= 0) return false;
+      const providerId = modelKey.slice(0, separator);
+      const modelId = modelKey.slice(separator + 1);
+      const accepts = (id: string): boolean => {
+        const model = providerRegistry.getModel(providerId, id);
+        return model?.config?.properties?.inputFormat?.supportsImage === true;
+      };
+      if (accepts(modelId)) return true;
+      const colon = modelId.lastIndexOf(":");
+      return colon > 0 ? accepts(modelId.slice(0, colon)) : false;
+    },
+    // FORK（S24 / D-6）：historian 的 sidecar 请求要一个能发请求的 `Model`，而
+    // 「这个模型此刻造不造得出来」这件事只有 provider Registry 知道。
+    // `completeAuxiliaryRegistryModelSelection` 正是为「连通性这类辅助调用」准备
+    // 的（它给未带 reasoning 档位的选择补上最低档），所以旁路请求与主会话选模型
+    // 走的是**同一条**校验，而不是这里再抄一份解析。
+    createSidecarModel: (modelId: string) => {
+      const resolved = resolveRegistryOwnedSelection(providerRegistry, modelId, undefined, {
+        allowMissingReasoning: true,
+      });
+      if (!resolved) return undefined;
+      return modelFactory({
+        selection: completeAuxiliaryRegistryModelSelection(providerRegistry, resolved.selection),
+      });
+    },
+    traceContext,
+    ...(usageRecorder === undefined ? {} : { usageRecorder }),
+  });
+
+  // FORK（bugfix-batch-20261011 / Step 13，D1）：`## Magic Context` agent 提示词段
+  // 的装配端口。core 的 context builder 是同步的且不许静态 import 包，所以 11 参
+  // 装配只能由装配层做。缺席（flag 关）时 context builder 回落原生 `# Memory` 段
+  // （互斥裁定，见 core `context/sections/magic-context.ts`）。
+  const promptSection = assembly.createMagicContextPromptSectionResolver({
+    configPort,
+    configDomain,
+    logger,
+  });
+
+  // FORK（bugfix-batch-20261011 / Step 14）：同一个门注入 preset 分档描述求值器。
+  // 设置页的 `prompt_surface.default` / `models` 经它第一次真正影响模型看得见的
+  // 工具描述（light 档换紧凑文案）；在那之前这两个字段写下去没有任何运行期消费者。
+  const toolDescription = assembly.createMagicContextToolDescriptionResolver({
+    configPort,
+    configDomain,
+    logger,
+  });
+
+  return { turnTransform, promptSection, toolDescription, close };
 }
