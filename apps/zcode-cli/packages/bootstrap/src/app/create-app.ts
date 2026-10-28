@@ -85,7 +85,7 @@ import {
 import { getWorkflowConcurrencyGovernor } from "./workflow-concurrency-governor.js";
 import { createDynamicWorkflowSnippetService } from "./dynamic-workflow-snippet-service.js";
 import { createModelCatalogPort } from "./model-catalog-port.js";
-import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
+import { loadMagicContextAssembly } from "./magic-context-assembly.js";
 import { composeMagicContextUsageSink } from "./magic-context-usage-sink.js";
 import { createDynamicWorkflowRunProgressSink } from "./dynamic-workflow-run-progress-sink.js";
 import { createScriptWorkflowAgentRuntime } from "./script-workflow-child-runtime.js";
@@ -761,82 +761,19 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
       registry: options.providerRegistry,
       currentSelection: () => getRuntime().getSessionModelSelection(),
     });
-    // Step 19b：`features.magicContext` 关闭时，本行连 `import()` 都不发生——于是
-    // 既不加载 magic-context 模块图，也不创建 transform / provider 实例，更不会打开
-    // magic-context.db。用户显式关掉 flag 时的成本就是这一个三元判空。
-    //
-    // 打开时先跑装配工厂：它内部第一句就是 `initializeMagicContextHost()`
-    // （S15 遗留 #6：setHarness("zcode") + project-dir resolver），且在任何 DB 写
-    // 之前——本行的位置就保证了这一点，因为 ZCode 自己的 session store 早在
-    // `openStartupSessionStore` 就已开完，而 magic-context 的 DB 由工厂自己开。
-    //
-    // FORK（S24）：`contextUsageMap` 的**唯一生产者**。上游 OpenCode 的 plugin 在
-    // `message.updated` 事件里写这张表，ZCode 没有 plugin 事件通道，于是这里从
-    // `model_complete` 事件喂——它承载的就是主会话这一次请求的 provider usage。
-    // 不接它等于永久 `percentage=0`：scheduler 一直 defer，drop 与 historian 都不启动。
-    //
-    // 它与 transform 工厂**同一个动态 import**：flag off 时这段代码根本不求值，
-    // 于是 recorder 的模块也不会被加载（flag off 的成本纪律对新增的缝一视同仁）。
-    // ⑤-5b：动态 import 失败当前是**冒泡 throw**（fail-closed 性状），修复只补
-    // 可观测性——发 `magic_context.transform_absent`（reason=import_failed）后
-    // **照旧 rethrow**，不捕获成降级。事件名/reason 词表与工厂侧同源，统一走
-    // `magic-context-absent-event.ts` 这个零依赖 leaf（工厂本模块不能静态 import
-    // ——否则 flag 关时也会把整个 magic-context 模块图拖进启动路径；leaf 没有
-    // 这个成本）。
-    //
-    // ⑤-5a：**disabled 也要发事件**。flag 关时工厂永不执行，`transform_absent`
-    // (reason=disabled) 若只由工厂发就一次都不会出现——「压缩停机」在 disabled
-    // 形态下依旧静默（mc/A-1 收口）。这是生产侧 disabled 的唯一发射点；工厂内
-    // 的 disabled 分支只保留给直构/测试。
-    let magicContextAssembly: typeof import("./magic-context-turn-transform.js") | undefined;
-    if (runtimeConfig.magicContext?.enabled === true) {
-      try {
-        magicContextAssembly = await import("./magic-context-turn-transform.js");
-      } catch (error) {
-        emitMagicContextTransformAbsent(
-          logger,
-          "import_failed",
-          error instanceof Error ? error.message : String(error),
-        );
-        throw error;
-      }
-    } else {
-      emitMagicContextTransformAbsent(
+
+    // magic-context 的加载门、usage recorder 与 transform 装配全部收敛在
+    // `magic-context-assembly.ts`；本文件只留这一处调用与下面的注入点。
+    const { assembly: magicContextAssembly, usageRecorder: magicContextUsageRecorder } =
+      await loadMagicContextAssembly({
+        enabled: runtimeConfig.magicContext?.enabled === true,
         logger,
-        "disabled",
-        "features.magicContext / magicContext.enabled is false; no bridge, no database, no transform",
-      );
-    }
-    const magicContextUsageRecorder = magicContextAssembly?.createMagicContextUsageRecorder(
-      sessionId,
-      logger,
-      {
-        // e2e/R-2 二层兜底：模型自带 `properties.contextWindow` 缺席（用户实证：
-        // 未设置历史/默认模型时 catalog 无窗口）时，解析**会话生效模型**的 registry
-        // 窗口。会话生效模型 = 显式选择（runtime 持有，含 restore 的持久选择）??
-        // 活默认（`readConfiguredDefaultModelSelection`，即 agent/C-1 的
-        // `resolveConfiguredDefaultModelSelectionOf` 同源 accessor，:582）——与子代理
-        // 默认模型继承同范式，无会话/未设置模型也必然有值。
-        //
-        // 闭包只在 turn 期间被调用（recorder 绑定时），那时 runtime 已建；装配期
-        // （本行）不求解。查不到/没runtime 都返回 undefined，由 recorder 的保守默认层
-        // （128k / env 覆盖）收口。
-        resolveFallbackContextWindow: () => {
-          try {
-            const selection =
-              getRuntime().getSessionModelSelection() ?? readConfiguredDefaultModelSelection();
-            if (!selection) return undefined;
-            const registryModel = options.providerRegistry.getModel(
-              selection.providerId,
-              selection.modelId,
-            );
-            return registryModel?.config?.properties?.contextWindow;
-          } catch {
-            return undefined;
-          }
-        },
-      },
-    );
+        sessionId,
+        providerRegistry: options.providerRegistry,
+        getRuntime,
+        readConfiguredDefaultModelSelection,
+      });
+
     // FORK（MF-05）：magic-context 的关闭钩子由装配工厂**注册**回来，而不是这里
     // 拿它的内部对象——后者会把 drain/shutdown/dispose 的顺序知识泄到装配层。
     // 缺席 = 没装 magic-context（flag 关或 DB 开不出来），此时不注入 session facade。
