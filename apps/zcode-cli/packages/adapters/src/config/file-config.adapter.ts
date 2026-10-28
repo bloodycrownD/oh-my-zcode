@@ -7,6 +7,10 @@ import { basename, dirname, join, resolve } from "node:path";
 import type { PromptLanguage, RuntimeConfigPatch, UiLocale } from "@zcode/contracts";
 import { z } from "zod";
 import {
+  type MagicContextPatchResult,
+  writeMagicContextToConfigFile,
+} from "./magic-context-file-config.js";
+import {
   CANONICAL_CUA_PLUGIN_ID,
   canonicalizePluginId,
   LEGACY_CUA_PLUGIN_ID,
@@ -43,19 +47,8 @@ export interface PromptLanguagePatchResult {
   promptLanguage: PromptLanguage;
 }
 
-/**
- * FORK（S23 / D-12）：`magicContext` 参数域写盘的结果。
- *
- * 只回报「写到了哪里」——域值由**协议层**统一回显（`workspace/updateMagicContextConfig`
- * 的 result 带 `config` 字段，取自写盘之后的 `ConfigPort`），写盘层再回显一份就成了
- * 第二份出口：两份出口迟早会分叉，而分叉的那份没人测。这里刻意只给 `path` + `changed`，
- * 调用方要的「写成功 + 后续从 ConfigPort 读到的就是这个值」这条保证由协议层兑现。
- */
-export interface MagicContextPatchResult {
-  path: string;
-  /** 是否真的改动了文件内容（幂等重写返回 false）。 */
-  changed: boolean;
-}
+// FORK（S23 / D-12）：实现搬进 magic-context-file-config.ts，这里只转出结果类型。
+export type { MagicContextPatchResult };
 
 export interface PluginEnabledPatchResult {
   enabled: boolean;
@@ -275,62 +268,19 @@ export async function updatePromptLanguageInFileConfig(
 /**
  * FORK（S23 / D-12）：把整个 `magicContext` 参数域写进用户级 config.json 顶层。
  *
- * 三点与 `updateUiLocaleInFileConfig` 刻意一致：走同一条 `atomicWriteJson`（临时文件
- * + rename，避免半截文件被下一次 `loadFileConfig` 读成非法 JSON）、读改写保留其余
- * 顶层键、不做任何项目级/环境级联写入。
- *
- * 与 locale 的两点差异：
- *   1. **整域替换**而非单字段合并。locale 是 6 个标量之一，逐字段 merge 很便宜；
- *      参数域是 zod 派生的 ~20 字段子树，在写盘层再实现一次 merge 就是把包内
- *      `MagicContextConfigSchema` 的语义复制成第二份——漂移方向不可接受。调用方
- *      （`workspace/updateMagicContextConfig` handler）必须先过 schema，schema 的
- *      `.default()` 保证传进来的是完整域，整域替换因此无损。
- *   2. **幂等短路**：内容相同就不写盘。参数域写盘发生在每次 UI 保存上，重写一个
- *      字节没变的文件只会无谓地更新 mtime——而某些同步工具按 mtime 触发扫描。
- *
- * 未知键（如参考插件遗留的 `compaction`）随整域替换被清掉：`z.object` 在校验时已
- * strip 它们，留着只会让「文件里有、运行时不认」持续误导读者。
+ * 实现与判据（整域替换、幂等短路、保留其余顶层键）见 magic-context-file-config.ts；
+ * 这里只做接线，把本文件既有的 IO 私有件作为端口注入，保证写盘语义只有一份。
  */
 export async function updateMagicContextInFileConfig(
   filePath: string,
   config: unknown,
 ): Promise<MagicContextPatchResult> {
-  const resolvedPath = resolvePath(filePath);
-  const parsed = await readJsonConfigFileOrEmpty(resolvedPath);
-  const next = patchMagicContext(parsed, config);
-  const changed = !isDeepEqualJson(parsed.magicContext, next.magicContext);
-
-  if (changed) {
-    await atomicWriteJson(resolvedPath, next);
-  }
-  return {
-    path: resolvedPath,
-    changed,
-  };
-}
-
-function patchMagicContext(
-  parsed: Record<string, unknown>,
-  config: unknown,
-): Record<string, unknown> {
-  return {
-    ...parsed,
-    magicContext: config,
-  };
-}
-
-/** 键序无关的 JSON 深比较（配置域都是纯 JSON 值）。 */
-function isDeepEqualJson(left: unknown, right: unknown): boolean {
-  if (left === right) return true;
-  if (!isRecord(left) || !isRecord(right)) {
-    return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
-  }
-  const leftKeys = Object.keys(left).sort();
-  const rightKeys = Object.keys(right).sort();
-  if (leftKeys.length !== rightKeys.length) return false;
-  return leftKeys.every(
-    (key, index) => rightKeys[index] === key && isDeepEqualJson(left[key], right[key]),
-  );
+  return writeMagicContextToConfigFile(filePath, config, {
+    atomicWriteJson,
+    isRecord,
+    readJsonConfigFileOrEmpty,
+    resolvePath,
+  });
 }
 
 /**
