@@ -5,10 +5,6 @@
 import {
   AMEND_WORKFLOW_TOOL_NAME,
   CREATE_WORKFLOW_TOOL_NAME,
-  CTX_EXPAND_TOOL_NAME,
-  CTX_MEMORY_TOOL_NAME,
-  CTX_REDUCE_TOOL_NAME,
-  CTX_SEARCH_TOOL_NAME,
   EVAL_WORKFLOW_SNIPPET_TOOL_NAME,
   GET_WORKFLOW_RUN_TOOL_NAME,
   LIST_MODELS_TOOL_NAME,
@@ -61,9 +57,12 @@ import { resolveWorkflowQuestionToolEntry } from "./resolve-workflow-question.js
 import { taskOutputToolEntry } from "./task-output.js";
 import { taskStopToolEntry } from "./task-stop.js";
 import { readSessionContextToolEntry } from "./read-session-context.js";
-import { ctxExpandToolEntry, ctxReduceToolEntry } from "./ctx-context.js";
-import { ctxMemoryToolEntry } from "./ctx-memory.js";
-import { ctxSearchToolEntry } from "./ctx-search.js";
+import {
+  applyMagicContextToolDescription,
+  isMagicContextToolEnabled,
+  magicContextToolEntries,
+} from "./ctx-tools.js";
+import type { MagicContextToolRegistrationOptions } from "./ctx-tools.js";
 import { amendWorkflowToolEntry } from "./amend-workflow.js";
 import { createWorkflowToolEntry } from "./create-workflow.js";
 import { saveWorkflowToolEntry } from "./save-workflow.js";
@@ -109,17 +108,8 @@ export const builtInTools: ToolEntry[] = [
   taskOutputToolEntry,
   taskStopToolEntry,
   readSessionContextToolEntry,
-  // magic-context 上下文回收面（S21）。只有 `features.magicContext` 打开的会话才注册
-  // （见 registerBuiltInTools 的 includeMagicContextTools 过滤）：默认态下模型看到的
-  // 工具表里没有 ctx_*，而包也整棵没被 import。
-  ctxReduceToolEntry,
-  ctxExpandToolEntry,
-  // magic-context 记忆面（Step 10：ctx_search=D4 检索 / ctx_memory=D14 写入）。
-  // 与上面两个同门（includeMagicContextTools）：handler 都是动态 import 包的，
-  // flag 关时整棵模块图不进内存。ctx_search 纯读记忆库，ctx_memory 写本项目
-  // 记忆库一行（幂等，见 handler 注释）。
-  ctxSearchToolEntry,
-  ctxMemoryToolEntry,
+  // FORK：上下文回收面与记忆面的四个工具（注册门与描述换档见 ctx-tools.ts）。
+  ...magicContextToolEntries,
   agentToolEntry,
   taskToolEntry,
   skillToolEntry,
@@ -171,20 +161,7 @@ const DYNAMIC_WORKFLOW_TOOL_NAMES: ReadonlySet<string> = new Set([
   RESOLVE_WORKFLOW_QUESTION_TOOL_NAME,
 ]);
 
-/**
- * FORK（Step 14）：prompt-surface 分档只作用于这四个 ctx_* 工具——它们是 prompt-surface
- * 唯一有 full/light 两份文案的工具族（`ACTIVE_TOOL_IDS` 的同族集合）。
- * 用与注册过滤**同一个**常量集合而不是另写一份名单：漏一个名字意味着那个工具永远拿不到
- * light 描述，而那种偏差在 prompt 面上是静默的。
- */
-const MAGIC_CONTEXT_PROMPT_SURFACE_TOOL_NAMES: ReadonlySet<string> = new Set([
-  CTX_REDUCE_TOOL_NAME,
-  CTX_EXPAND_TOOL_NAME,
-  CTX_SEARCH_TOOL_NAME,
-  CTX_MEMORY_TOOL_NAME,
-]);
-
-interface RegisterBuiltInToolsOptions {
+interface RegisterBuiltInToolsOptions extends MagicContextToolRegistrationOptions {
   bashTimeoutPolicy?: BashTimeoutPolicy;
   includeSkill?: boolean;
   includeAgent?: boolean;
@@ -209,38 +186,8 @@ interface RegisterBuiltInToolsOptions {
   includeDynamicWorkflow?: boolean;
   /** node_repl（js）默认关闭，由官方 browser-use 插件启用。 */
   includeNodeRepl?: boolean;
-  /**
-   * magic-context 上下文回收面与记忆面（`ctx_reduce` / `ctx_expand` /
-   * `ctx_search` / `ctx_memory`）是否注册。
-   *
-   * **跟随 `features.magicContext`**（step 28 起默认开），理由与 `includeNodeRepl`
-   * 同款但更强一层：这四个工具的实现在 `@zcode/magic-context` 里（ctx_search /
-   * ctx_memory 的薄封装在 core），而 handler 是**动态 import** 它的，所以 flag 关时
-   * 包整棵不会被拉进内存（zod schema + sqlite chokepoint + 迁移模块）——用户显式
-   * 关掉后，「零行为」这条不变式（今天记作 D-11）才仍然成立。
-   *
-   * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
-   */
-  includeMagicContextTools?: boolean;
-  /**
-   * FORK（bugfix-batch-20261011 / Step 14）：prompt-surface 的 preset 分档描述求值器。
-   *
-   * `prompt_surface.default` / `prompt_surface.models` 决定当前这届用 full 还是 light
-   * 档 ctx_* 工具描述；light 档的紧凑文案在 `@zcode/magic-context` 的
-   * `light-descriptions` 里（宿主不得自抄），因此这里收一个**求值器**而不是字面量表——
-   * 由 bootstrap 侧（唯一 import 包的地方）把 `createPromptSurfaceRuntime().
-   * resolveRegistration(config, modelKey).descriptionFor` 投影进来。
-   *
-   * 缺席 = 不换档，照原样注册 full 描述。求值器内部已经把「用户 tool_descriptions 覆盖
-   * > light 目录 > full 原文」的优先级排好，注册侧不重复实现这套优先级。
-   */
-  magicContextToolDescription?: (input: {
-    toolId: string;
-    fullDescription: string;
-    modelKey?: string;
-  }) => string;
-  /** preset 路由用的模型 key（`provider/model`）；缺席时只按 configured default 解析。 */
-  magicContextModelKey?: string;
+  // FORK：上下文回收面与记忆面的三项注册选项由 ctx-tools.ts 的
+  // MagicContextToolRegistrationOptions 提供（extends 到本接口）。
   /** browser-use 说明和 agent.browsers 注入由官方 browser-use 插件 + 宿主 browser bridge 共同启用。 */
   includeBrowserUse?: boolean;
   embeddedSearchEnabled?: boolean;
@@ -314,13 +261,7 @@ export function registerBuiltInTools(
     if (entry.metadata.name === "js" && options.includeNodeRepl !== true) {
       continue;
     }
-    if (
-      (entry.metadata.name === CTX_REDUCE_TOOL_NAME ||
-        entry.metadata.name === CTX_EXPAND_TOOL_NAME ||
-        entry.metadata.name === CTX_SEARCH_TOOL_NAME ||
-        entry.metadata.name === CTX_MEMORY_TOOL_NAME) &&
-      options.includeMagicContextTools !== true
-    ) {
+    if (!isMagicContextToolEnabled(entry.metadata.name, options)) {
       continue;
     }
     registry.register(resolveBuiltInToolEntryForBranch(entry, options), {
@@ -369,31 +310,9 @@ function resolveBuiltInToolEntryForBranch(
       browserUseEnabled: options.includeBrowserUse === true,
     });
   }
-  // FORK（Step 14）：ctx_* 四工具的 preset 分档。只换 `metadata.description`，参数
+  // FORK（Step 14）：上下文回收面与记忆面四工具的 preset 分档。只换 `metadata.description`，参数
   // schema / 权限 / 预算 / 超时一律不动——分档是「同一份能力的详简叙述」，不是第二个工具。
   // 与 Agent/Task 的灰度门同款纪律：首次装配与分支刷新走同一个 options 推导，两次产出的
   // 描述必然一致（否则一次刷新就会把换档结果悄悄翻回 full）。
-  if (
-    MAGIC_CONTEXT_PROMPT_SURFACE_TOOL_NAMES.has(entry.metadata.name) &&
-    options.magicContextToolDescription !== undefined
-  ) {
-    const fullDescription = entry.metadata.description;
-    // 没有 description 的工具不参与分档：分档是「同一份文案的详简两版」，
-    // 没有原文就无从简化，也不该凭空造一段。
-    if (fullDescription === undefined) return entry;
-    const description = options.magicContextToolDescription({
-      toolId: entry.metadata.name,
-      fullDescription,
-      ...(options.magicContextModelKey === undefined
-        ? {}
-        : { modelKey: options.magicContextModelKey }),
-    });
-    if (description !== fullDescription) {
-      return {
-        ...entry,
-        metadata: { ...entry.metadata, description },
-      };
-    }
-  }
-  return entry;
+  return applyMagicContextToolDescription(entry, options);
 }
