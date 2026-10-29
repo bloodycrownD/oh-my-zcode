@@ -1,6 +1,6 @@
 {
   "baselineRef": "baseline/v3.14.3",
-  "limit": 76,
+  "limit": 75,
   "files": [
     "apps/zcode-cli/.oxfmtrc.json",
     "apps/zcode-cli/packages/adapters/package.json",
@@ -72,7 +72,6 @@
     "packages/ui/src/lib/settingsNavigation.ts",
     "packages/ui/src/settings/settingsPageConfig.ts",
     "packages/ui/src/v4/ConversationRowView.tsx",
-    "packages/ui/src/v4/SessionPane.tsx",
     "packages/ui/src/v4/composer/V4ComposerToolbar.tsx",
     "packages/ui/src/v4/conversationFindIndex.ts",
     "packages/ui/src/v4/slashCommands.ts",
