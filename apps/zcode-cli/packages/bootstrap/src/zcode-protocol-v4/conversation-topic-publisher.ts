@@ -56,6 +56,7 @@ import {
   turnDirectoryPreview,
   type TurnManifestEntry,
 } from "./turn-manifest-entry.js";
+import { magicContextTopicDeltas } from "./magic-context-topic-publish.js";
 import {
   ProductProjection,
   type StableForkCandidateResolution,
@@ -1013,38 +1014,34 @@ export class ConversationTopicPublisher {
     if (this.rowManifestFacts !== null && this.rowSetSignature() !== rowSetBefore) {
       this.clearRowManifestFacts();
     }
-    this.log.push({ seq: event.sequenceNumber, deltas });
-    while (this.log.length > this.retention) {
-      const evicted = this.log.shift();
-      if (evicted) this.floorSeq = evicted.seq;
-    }
-    if (deltas.length === 0) return;
-    this.fanOutDeltas(deltas);
+    this.appendDeltas(event.sequenceNumber, deltas);
+  }
+
+  /** D-13：magic-context 预算摘要的 side state 推送。语义与契约见 magic-context-topic-publish.ts。 */
+  publishMagicContextUsage(usage: SessionMagicContextUsage | null): void {
+    this.publishSideState(() => magicContextTopicDeltas(this.projection, usage));
   }
 
   /**
-   * D-13：magic-context 预算摘要的 side state 推送。
-   *
-   * 与 {@link ingest} 的差别只有一处：**没有事件**。这份读数来自 `magic-context.db`
-   * （装配层主动读出来推过来），所以它借用事件 delta 的同一条扇出管线与同一份 delta
-   * 日志——记在**当前 seq** 上，于是 (a) 在线订阅者下一帧就看到，(b) 从更早 base 续流的
-   * 订阅者在重放时也拿得到。它不进 `session.events`，所以冷恢复不重放它（新客户端从
-   * snapshot 起就有，之后第一次 pass 会再推一次）。
+   * 无事件 side state：空 delta 短路 → 刷 wire 上界 → 按当前 seq 记账 + 扇出。
+   * 短路理由见 magic-context-topic-publish.ts；上界是 subscriberBufferLimits 的输入，
+   * 漏刷会让 byteLimit 退回 1MiB 下限。
    */
-  publishMagicContextUsage(usage: SessionMagicContextUsage | null): void {
-    const deltas = this.projection.applyMagicContextUsage(usage);
+  private publishSideState(produce: () => ConversationDelta[]): void {
+    const deltas = produce();
     if (deltas.length === 0) return;
     this.wireSnapshotBytesUpperBound = this.measureWireSnapshotBytes(this.getWireSnapshot());
-    this.log.push({ seq: this.currentSeq, deltas });
+    this.appendDeltas(this.currentSeq, deltas);
+  }
+
+  /** 按 seq 记账 + 扇出（与上游 `appendDeltas` 逐段对齐；空 deltas 只记账不打帧）。 */
+  private appendDeltas(seq: number, deltas: ConversationDelta[]): void {
+    this.log.push({ seq, deltas });
     while (this.log.length > this.retention) {
       const evicted = this.log.shift();
       if (evicted) this.floorSeq = evicted.seq;
     }
-    this.fanOutDeltas(deltas);
-  }
-
-  /** delta → 各订阅者 flush buffer。空 delta 直接返回（不打帧）。 */
-  private fanOutDeltas(deltas: ConversationDelta[]): void {
+    if (deltas.length === 0) return;
     for (const subscription of this.subscriptions.values()) {
       if (subscription.resyncRequired) continue;
       const filtered = this.encodeDeltasForSubscription(deltas, subscription);

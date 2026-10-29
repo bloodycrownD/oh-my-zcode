@@ -10,14 +10,14 @@
  * 上界（`wireSnapshotBytesUpperBound`）比它大时，一条合法的 >1MiB 单帧 delta 会被判溢出、订阅者被
  * 降级成 resync——正常的大快照推送于是走成"反复 resync"。修复把上限钳到
  * `logicalFrameAssemblyMaxBytes - 64KiB` 与 snapshot 上界之间，并且**两个调用点统一**：
- *   - `fanOutDeltas`（普通 delta 扇出）；
+ *   - `appendDeltas`（普通 delta 扇出：按 seq 记账 + 扇出）；
  *   - `publishMagicContextUsage`（magic-context 用量推送——红线②共用同一条 delta 扇出）。
  *
  * 断言口径（cr-func-2 探针 6 条的转正版）：
  *   场景 A  ingest 抬升 bound 后，>1MiB 单条 delta 被缓冲（旧 1MiB 硬限会溢出）
  *   场景 B  snapshot 上界 3MiB 时同一条 delta 被缓冲，bufferBytes 突破旧下限
  *   场景 C  上限按 16MiB-64KiB 封顶：逼近 cap 仍缓冲、越过 cap 即溢出（真 cap 断言，非无界缓冲）
- *   场景 D  publishMagicContextUsage 经同一 fanOutDeltas，推送路径未被钳位改动破坏
+ *   场景 D  publishMagicContextUsage 经同一 appendDeltas，推送路径未被钳位改动破坏
  *   场景 E  积压超过当前 bound 时仍溢出降级（上限真实执行，不是无界缓冲）
  *
  * 运行：`npx tsx --test scripts/test-publisher-buffer-clamp.mjs`
@@ -143,13 +143,13 @@ test("场景 C：上界超大时按 16MiB-64KiB 封顶——cap 真实执行（�
   const capBytes = 16 * MiB - 64 * 1024;
   const publisher = makePublisher();
   const subscription = subscribe(publisher, "conn-c");
-  // 白盒：病态大上界。这里必须直连扇出管线（fanOutDeltas），不能换 ingest 灌 delta——ingest
+  // 白盒：病态大上界。这里必须直连扇出管线（appendDeltas），不能换 ingest 灌 delta——ingest
   // 会用精确测量的 wire snapshot 回写 wireSnapshotBytesUpperBound，白盒设的 64MiB 会被覆盖，
   // 钳位上限随即退化成 1MiB 下限，真 cap 这一步就永远测不到。
   publisher.wireSnapshotBytesUpperBound = 64 * MiB;
 
   // 1) 累计 delta 逼近 cap：未到 cap 前必须仍然缓冲（旧 1MiB 硬限会在这里就降级 resync）。
-  publisher.fanOutDeltas([
+  publisher.appendDeltas(publisher.currentSeq, [
     { op: "row.delta", rowId: 1, path: "text", append: "y".repeat(capBytes - 2 * 1024) },
   ]);
   assert.equal(
@@ -165,7 +165,7 @@ test("场景 C：上界超大时按 16MiB-64KiB 封顶——cap 真实执行（�
 
   // 2) 越过 cap 即溢出降级：外层 min(…, 16MiB-64KiB) 钳位若缺失（上限变成 64MiB），
   // 这一步会继续缓冲、resyncRequired 保持 false。
-  publisher.fanOutDeltas([
+  publisher.appendDeltas(publisher.currentSeq, [
     { op: "row.delta", rowId: 2, path: "text", append: "z".repeat(4 * 1024) },
   ]);
   assert.equal(
@@ -175,7 +175,7 @@ test("场景 C：上界超大时按 16MiB-64KiB 封顶——cap 真实执行（�
   );
 });
 
-test("场景 D：publishMagicContextUsage 经同一 fanOutDeltas——钳位路径生效且不抛错", () => {
+test("场景 D：publishMagicContextUsage 经同一 appendDeltas——钳位路径生效且不抛错", () => {
   const publisher = makePublisher();
   const subscription = subscribe(publisher, "conn-d");
   publisher.wireSnapshotBytesUpperBound = 3 * MiB;
