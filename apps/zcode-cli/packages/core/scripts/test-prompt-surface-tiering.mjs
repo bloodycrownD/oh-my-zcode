@@ -70,7 +70,7 @@ const { registerBuiltInTools } = await import(
   new URL("../dist/tool/handlers/index.js", import.meta.url).href
 );
 const { resolveMagicContextPromptSurfaceOptions } = await import(
-  new URL("../dist/runtime/helpers/runtime-tools.js", import.meta.url).href
+  new URL("../dist/runtime/helpers/magic-context-tool-surface.js", import.meta.url).href
 );
 const package_ = await import("@zcode/magic-context");
 

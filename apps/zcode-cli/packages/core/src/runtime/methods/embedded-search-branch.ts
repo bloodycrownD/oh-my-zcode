@@ -6,7 +6,7 @@ import {
   resolveBuiltInToolAllowlist,
   resolveRuntimeDynamicWorkflowToolsIncluded,
 } from "../helpers/tool-allowlist.js";
-import { resolveMagicContextPromptSurfaceOptions } from "../helpers/runtime-tools.js";
+import { resolveMagicContextPromptSurfaceOptions } from "../helpers/magic-context-tool-surface.js";
 import { isToolNameDisallowed } from "../../tool/tool-visibility.js";
 
 export function resolveRuntimeEmbeddedSearchEnabled(runtime: AgentRuntimeInternal): boolean {
@@ -42,7 +42,7 @@ export function refreshBranchAwareBuiltInTools(runtime: AgentRuntimeInternal): v
     allowedTools: resolveBuiltInToolAllowlist(runtime.config),
     disallowedTools: runtime.config.toolDisallowlist,
     // FORK（Step 14）：prompt-surface 分档描述必须与首次装配同源。这里用的是同一个
-    // helper（runtime-tools.ts 的 resolveMagicContextPromptSurfaceOptions），因为本函数
+    // helper（magic-context-tool-surface.ts 的 resolveMagicContextPromptSurfaceOptions），因为本函数
     // 是**第二个**注册入口且只传精简选项集——漏传不会「保持原样」，而会把 light 档描述
     // 静默翻回 full。
     ...resolveMagicContextPromptSurfaceOptions(runtime),

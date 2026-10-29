@@ -78,7 +78,7 @@ export interface MagicContextToolRegistrationOptions {
    * 包整棵不会被拉进内存（zod schema + sqlite chokepoint + 迁移模块）——用户显式
    * 关掉后，「零行为」这条不变式（今天记作 D-11）才仍然成立。
    *
-   * 由 `runtime-tools.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
+   * 由 `runtime/helpers/magic-context-tool-surface.ts` 从 `RuntimeConfig.magicContext.enabled` 推导。
    */
   includeMagicContextTools?: boolean;
   /**

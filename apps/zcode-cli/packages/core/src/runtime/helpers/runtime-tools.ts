@@ -28,9 +28,6 @@ import { isStaleBranchRuntimeTaskEvent } from "../methods/runtime-command-genera
 import { resolveEnabledProjectMemoryRoot } from "./project-memory.js";
 import { sessionHasLoadedSkill } from "../../agent/loaded-skills.js";
 
-// FORK：prompt-surface 推导已搬到 magic-context-tool-surface.ts；分支刷新与测试仍从这里取。
-export { resolveMagicContextPromptSurfaceOptions };
-
 const DEFAULT_SUBAGENT_BACKGROUND_BASH_MAX_MS = 3_600_000;
 
 const EMPTY_RUNTIME_HOOK_CONFIG = {

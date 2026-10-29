@@ -444,7 +444,7 @@ export interface AgentRuntimeDeps {
    * `createPromptSurfaceRuntime().resolveRegistration().descriptionFor` 投影进来。
    *
    * 两个注册入口（首次装配与 embedded-search 分支刷新）共用同一个推导，见
-   * `runtime/helpers/runtime-tools.ts` 的 `resolveMagicContextPromptSurfaceOptions`。
+   * `runtime/helpers/magic-context-tool-surface.ts` 的 `resolveMagicContextPromptSurfaceOptions`。
    */
   magicContextToolDescription?: (input: {
     toolId: string;
