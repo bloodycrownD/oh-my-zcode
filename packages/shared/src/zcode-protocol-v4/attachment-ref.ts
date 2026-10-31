@@ -11,6 +11,7 @@ export const attachmentRefSchema = z
     // 附件来源（clipboard-text = 长粘贴落盘的临时文本）：预览授权闸按它放行 text/plain。
     // 上游同形字段；本仓生产端只发 clipboard-text（见 attachment-source.ts 的 FORK 说明）。
     sourceKind: attachmentSourceKindSchema.optional(),
+    messageCount: z.number().int().nonnegative().optional(),
     previewRef: z.string().optional(),
   })
   .strict();

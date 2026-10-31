@@ -26,6 +26,7 @@ import {
   type ReactNode,
 } from "react";
 import { cn } from "@/components/lib/utils.js";
+// 合并后的 @zcode/shared 顶层未再 re-export test-ids.ts，测试 id 统一走子路径。
 import {
   TID_CHAT_ATTACHMENT_BUTTON,
   TID_CHAT_ATTACHMENT_MENU_ITEM,
@@ -40,9 +41,8 @@ import {
   TID_V4_ATTACHMENT_UPLOAD_RETRY,
   TID_V4_STOP,
   testId,
-  type PlanIdentitySnapshot,
-  type ZCodeProvider,
-} from "@zcode/shared";
+} from "@zcode/shared/test-ids";
+import type { PlanIdentitySnapshot, ZCodeProvider } from "@zcode/shared";
 import type {
   AttachmentRef,
   ConversationSnapshot,
@@ -99,7 +99,7 @@ import {
   type ChatComposerAttachment,
 } from "@/lib/chatAttachments.js";
 import { resolveChatPlaceholderKey } from "@/lib/chatPlaceholder.js";
-import { resolveChatEnterShortcut } from "@/lib/mobileTextInput.js";
+import { resolveChatEnterShortcut, useIsMobileTextInputViewport } from "@/lib/mobileTextInput.js";
 import { appendPromptHistoryEntry } from "@/lib/promptHistory.js";
 import {
   persistPromptHistoryEntries,
@@ -347,6 +347,12 @@ interface ConversationComposerProps {
   skillCatalogSessionId?: string | null;
   /** draft 态无 snapshot，但仍可 createSession 首发。 */
   draftMode?: boolean;
+  /**
+   * FORK(upgrade-316)：手机远控壳信号（SessionPane 的 compactForRemoteControl 透传，
+   * 根源是 WorkspaceShellLayout 的 isWebRemoteControlShell）。目前只供给工具栏的
+   * provider 子菜单窄屏宽度；Enter 提交语义仍按 fork 原判定，不接手机换行档。
+   */
+  isWebRemoteControl?: boolean;
   /** renderer 当前草稿配置意图；只在 draftMode 下覆盖迟到的 prewarm projection。 */
   draftConfig?: Partial<SessionConfigState>;
   /** SessionPane 注入的完整 Draft owner；生产路径不再由编辑器直接覆盖持久记录。 */
@@ -474,6 +480,7 @@ function ConversationComposerImpl({
   sessionId = null,
   skillCatalogSessionId = sessionId,
   draftMode = false,
+  isWebRemoteControl = false,
   draftConfig,
   composerDraft,
   updateComposerContent,
@@ -1063,8 +1070,16 @@ function ConversationComposerImpl({
   }, [workspacePath]);
 
   const mode = snapshot?.inputRouting.mode ?? "startNow";
+  // FORK(upgrade-316)：手机远控视口信号（与上游 ConversationComposer 同源 hook），
+  // 目前只供给工具栏 provider 子菜单的窄屏宽度；下方 Enter 门禁仍按 fork 原语义传 false。
+  const isMobileTextInputViewport = useIsMobileTextInputViewport();
   const modifiedEnterSubmits = shouldEnableModifiedEnterSubmit({
     inputRoutingMode: mode,
+    // FORK (upgrade-316): 上游 v3.16.2 给该门禁加了「手机 Web 远控」维度。fork 的这个
+    // composer 尚未接入 mobile viewport / web-remote 标志，按 fork 原语义
+    // （只有 reject 才禁用修饰键提交）传入 false，保持行为不变。
+    isMobileTextInputViewport: false,
+    isWebRemoteControl: false,
   });
   const canStop = Boolean(snapshot?.control.canStop);
   const modifiedEnterReversesDelivery = modifiedEnterSubmits && canStop;
@@ -1855,6 +1870,8 @@ function ConversationComposerImpl({
             sessionId={sessionId ?? null}
             phase={composerPhase}
             provider={provider}
+            isWebRemoteControl={isWebRemoteControl}
+            isMobileViewport={isMobileTextInputViewport}
             draftMode={draftMode}
             draftConfig={draftConfig}
             usage={composerUsage}
@@ -1915,6 +1932,8 @@ function ConversationComposerImpl({
       handleStopClick,
       handleSendButtonClick,
       handleConfigPickerOpenChange,
+      isMobileTextInputViewport,
+      isWebRemoteControl,
       mode,
       handleSelectModelTrace,
       modelSelectionReload,

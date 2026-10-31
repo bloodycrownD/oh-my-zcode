@@ -32,6 +32,8 @@ export const completeApiKeyAccessDataSchema = apiKeyAccessDataSchema.extend({
   apiKey: nonBlankRequiredString,
 });
 
+// FORK: 官方账号（zhipu-account / coding-plan / off-peak / highspeed）已整体移除，
+// access 只有 api-key 一种形态。
 export const providerAccessDataSchema = apiKeyAccessDataSchema;
 export const completeProviderAccessDataSchema = completeApiKeyAccessDataSchema;
 

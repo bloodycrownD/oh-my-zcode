@@ -58,7 +58,9 @@ import { useWorkspaceHomePath } from "@/hooks/useWorkspaceHomePath.js";
 import { prepareWorkspaceWithZCodeSessionService } from "@/hooks/useWorkspacePrepare.js";
 import { decodeCustomModelValue, encodeCustomModelValue } from "@/lib/zcodeCustomModelValue.js";
 import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
-import { captureComposerRecentSubmission } from "@/lib/composerRecent.js";
+import { prepareComposerRecentReceipt } from "@/lib/composerRecent.js";
+import { resolveComposerScope } from "@/v4/composer/composerDraftStore.js";
+import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import { resolveProviderLabel } from "@/lib/registryProviderView.js";
 import {
   buildDraftCreateConfigPayload,
@@ -78,7 +80,6 @@ import { useDraftModelReadinessGate } from "@/v4/composer/useDraftModelReadiness
 import { useSettings } from "@/hooks/useSettingService.js";
 import { useZCodeStoreWithDefault } from "@/store/StoreProvider.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
-import type { GroupedDraftTaskState } from "@/store/zcodeSessionStoreTypes.js";
 import {
   ConversationComposer,
   type ComposerRestoreRequest,
@@ -242,6 +243,11 @@ export interface SessionPaneProps {
   remoteSessionId?: string | null;
   /** Prompt 模板埋点当前仅覆盖 Desktop；Web / 手机远控保留 UI 行为但不触发该事件。 */
   isDesktop?: boolean;
+  // TODO(upgrade-316): 上游 v3.16 给 SessionPane 加了手机远控紧凑布局（compactForRemoteControl）
+  // 与 allowEscapeStopOutsidePane；这里只补宿主契约让 V4ChatPane/WorkbenchPane/
+  // SubagentSessionSidePane 能编译，fork 的 pane 布局仍走原渲染路径，紧凑布局未移植。
+  compactForRemoteControl?: boolean;
+  allowEscapeStopOutsidePane?: boolean;
   provider?: ZCodeProvider;
   onSessionCreated?: (sessionId: string) => void;
   /** deleteSession：删除当前会话后回到 draft（shell 起新草稿）。 */
@@ -437,12 +443,15 @@ export function SessionPane({
   workspaceIdentity,
   remoteSessionId,
   isDesktop = false,
+  // FORK(upgrade-316)：紧凑布局本体未移植，但该信号是手机远控壳的权威判定，
+  // 透传给 ConversationComposer → 工具栏的 provider 子菜单窄屏宽度修复。
+  compactForRemoteControl = false,
   provider,
   onSessionCreated,
   onSelectionSideChatUnavailable,
   focused = true,
-  onSplitRight,
-  onSplitDown,
+  // 拆分入口已下线：onSplitRight / onSplitDown 仍保留在 props 类型里供调用方兼容，
+  // 但不再透传给 ConversationHeader（其 props 已移除这两个字段）。
   onClosePane,
   workspaceBadge,
   draftComposerHeader,
@@ -821,35 +830,16 @@ export function SessionPane({
   );
   // FORK（D-4）：Start Plan 套餐推荐面已下线，选择原样透传。
   const openSettingsTab = useOptionalTabStore((state) => state.openSettingsTab);
-  const promoteGroupedDraftTask = useZCodeSessionStore((state) => state.promoteGroupedDraftTask);
+  // TODO(upgrade-316): 上游 v3.16 删除了 store 的 groupedDraftTask / promoteGroupedDraftTask，
+  // 改用 PendingCommandClientContext.taskGroupId（project-sidebar 分组模型）。fork 这里原有的
+  // “draft 首发继承分组 placement” 尚未迁移，先只保留 create/promote 的既有收尾。
   const handleDraftSessionCreated = useCallback(
-    (createdSessionId: string, groupedDraftTask: GroupedDraftTaskState | null | undefined) => {
+    (createdSessionId: string) => {
       newlyCreatedSessionIdRef.current = createdSessionId;
       promoteComposerDraft(createdSessionId);
-      // 只有 draft create/promote 的 accepted 边界能继承 grouped placement。
-      // fork 和普通任务导航仍复用 onSessionCreated，但不会污染已有 task 的分组排序。
-      if (groupedDraftTask) {
-        promoteGroupedDraftTask(
-          workspacePath,
-          createdSessionId,
-          groupedDraftTask,
-          workspaceIdentity,
-        );
-        logger.debug("[v4-pane] grouped draft 已显式提升", {
-          createdSessionId,
-          draftId: groupedDraftTask.draftId,
-        });
-      }
       onSessionCreated?.(createdSessionId);
     },
-    [
-      newlyCreatedSessionIdRef,
-      onSessionCreated,
-      promoteComposerDraft,
-      promoteGroupedDraftTask,
-      workspaceIdentity,
-      workspacePath,
-    ],
+    [newlyCreatedSessionIdRef, onSessionCreated, promoteComposerDraft],
   );
   const { settings: sharedSettings } = useSettings();
   const appFollowupMode = resolveAppFollowupMode(sharedSettings);
@@ -881,6 +871,7 @@ export function SessionPane({
     },
     [onSessionCreated, sessionId],
   );
+  const composerClientNamespace = useComposerClientNamespace();
   const dispatchCommand = useCallback(
     async (
       type: CommandType,
@@ -892,8 +883,18 @@ export function SessionPane({
       sessionCreateSource?: SessionCreateSource,
     ): Promise<CommandAck> => {
       const submission = submissionConfigFromCommand(type, payload);
-      const acceptRecent = submission
-        ? captureComposerRecentSubmission(workspacePath, submission, workspaceIdentity)
+      // FORK(upgrade-316)：对齐上游 v2 Recent 语义——发送时把回执登记到 pending 命令，
+      // ACK accepted 后由 pendingCommandRegistry.acceptComposer 写 scope 键（与
+      // useDraftConfigControl 的读侧同键）。旧 captureComposerRecentSubmission 写 v1
+      // 键且已无任何读方，弃用；scope 的 projectId 与读侧同源（workspace 草稿项目）。
+      const workspaceDraftProjectId =
+        useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
+          .draftProjectId;
+      const recentReceipt = submission
+        ? prepareComposerRecentReceipt(
+            resolveComposerScope(workspaceDraftProjectId, workspaceIdentity, composerClientNamespace),
+            { modelSelection: submission.modelSelection, mode: submission.mode },
+          )
         : undefined;
       const acceptSelection =
         submission && (sessionId === null || targetSessionId === sessionId)
@@ -908,11 +909,6 @@ export function SessionPane({
       });
       onEnvelopeCreated?.(envelope);
       // 必须早于第一次上行：transport error/renderer refresh 后仍有可查询线索。
-      const groupedDraftTask =
-        type === "createSession"
-          ? useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-              .groupedDraftTask
-          : null;
       pendingCommandRegistry.record(
         envelope,
         type === "createSession"
@@ -921,7 +917,7 @@ export function SessionPane({
                 workspacePath,
                 ...(workspaceIdentity ? { workspaceIdentity } : {}),
               },
-              ...(groupedDraftTask ? { groupedDraftTask } : {}),
+              ...(recentReceipt ? { composer: recentReceipt } : {}),
               sessionCreateSource:
                 sessionCreateSource ??
                 useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
@@ -959,8 +955,8 @@ export function SessionPane({
       }
       pendingCommandRegistry.applyAck(envelope, ack);
       if (ack.status === "accepted") {
+        // Recent 偏好已随 pending 命令回执在 acceptComposer 内落盘（v2 scope 键）。
         acceptSelection?.();
-        acceptRecent?.();
       }
       if (
         lease?.store &&
@@ -1980,11 +1976,8 @@ export function SessionPane({
       }
       // create/send ACK 期间用户可能切换任务或创建另一份 draft。
       // placement 必须绑定发送开始时的稳定 identity，不能在完成回调里读取当前 workspace 草稿。
-      const groupedDraftTaskAtSend =
-        sessionId === null
-          ? useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-              .groupedDraftTask
-          : null;
+      // TODO(upgrade-316): 上游删除了 workspace 草稿的 groupedDraftTask 快照，分组 placement
+      // 改由 PendingCommandClientContext.taskGroupId 承载；此处暂不补位。
       const selectionSideSlashCommand =
         sessionId && (appSlashCommands?.length ?? 0) > 0
           ? parseSelectionSideSlashCommand(text, readyAttachments, {
@@ -2096,7 +2089,7 @@ export function SessionPane({
             if (consumed) {
               onAcceptedSelection?.();
               prewarm.promote();
-              handleDraftSessionCreated(prewarm.sessionId, groupedDraftTaskAtSend);
+              handleDraftSessionCreated(prewarm.sessionId);
               return;
             }
           } catch (error) {
@@ -2126,7 +2119,7 @@ export function SessionPane({
           throw new Error("createSession 缺少 sessionId");
         }
         const newSessionId = createResult.sessionId;
-        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend);
+        handleDraftSessionCreated(newSessionId);
         await dispatchSlashCommand(
           draftSlashCommand,
           newSessionId,
@@ -2154,7 +2147,7 @@ export function SessionPane({
             );
             if (ack.status === "accepted") {
               prewarm.promote();
-              handleDraftSessionCreated(prewarm.sessionId, groupedDraftTaskAtSend);
+              handleDraftSessionCreated(prewarm.sessionId);
               return;
             }
             // failed ACK 也可能发生在 runtime 已启动、但 TurnStarted projection commit
@@ -2201,7 +2194,7 @@ export function SessionPane({
           if (!result || result.type !== "createSession") {
             throw new Error("createSession 缺少 sessionId");
           }
-          handleDraftSessionCreated(result.sessionId, groupedDraftTaskAtSend);
+          handleDraftSessionCreated(result.sessionId);
           return;
         }
         // 本地 desktop localPath 是零拷贝 ready，不依赖 attachment transaction；极短窗口内
@@ -2232,7 +2225,7 @@ export function SessionPane({
         if (sendAck.status !== "accepted") {
           throw new Error(sendAck.reasonCode ?? "sendText 被拒绝");
         }
-        handleDraftSessionCreated(newSessionId, groupedDraftTaskAtSend);
+        handleDraftSessionCreated(newSessionId);
         return;
       }
       // 附件 ref 已在 composer 预传状态机中收口。
@@ -3349,7 +3342,7 @@ export function SessionPane({
             });
             return;
           }
-          handleDraftSessionCreated(ack.result.sessionId, replay.clientContext?.groupedDraftTask);
+          handleDraftSessionCreated(ack.result.sessionId);
         }
       })
       .catch((error) => {
@@ -3370,6 +3363,7 @@ export function SessionPane({
       // 只给 Skill catalog 下发 effective id，避免 UI 扫到 prewarm runtime 尚未加载的新 Skill。
       skillCatalogSessionId={effectiveSessionId}
       draftMode={isDraft}
+      isWebRemoteControl={compactForRemoteControl}
       draftConfig={draftConfig}
       composerDraft={composerDraft}
       replaceComposerDraft={replaceComposerDraft}
@@ -3540,8 +3534,6 @@ export function SessionPane({
       ) : null}
       <ConversationHeader
         title={snapshot?.meta.title ?? ""}
-        onSplitRight={onSplitRight}
-        onSplitDown={onSplitDown}
         onClosePane={onClosePane}
         workspaceBadge={workspaceBadge}
       />

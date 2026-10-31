@@ -3,16 +3,20 @@ import { useCallback, useEffect, useRef, useState, type ComponentType, type SVGP
 import { CircleCheck, RotateCcw, TriangleAlert } from "lucide-react";
 import {
   AUTOMATION_CREATE_LIMIT,
+  isAutomationCreateLimitError,
+  resolveWorkspaceKey,
+  type ZCodeAutomation,
+} from "@zcode/shared";
+// test-id 常量改从 @zcode/shared/test-ids 子路径导入：上游已把 test-ids 拆成子入口，
+// 走子路径可同时兼容 fork 与上游两种 shared/index 解析结果。
+import {
   TID_AUTOMATION_ACTION_DELETE,
   TID_AUTOMATION_ACTION_TOGGLE,
   TID_AUTOMATION_CARD,
   TID_AUTOMATION_CARD_MENU,
   TID_AUTOMATIONS_LIST,
   TID_AUTOMATIONS_STATUS_FILTER,
-  isAutomationCreateLimitError,
-  resolveWorkspaceKey,
-  type ZCodeAutomation,
-} from "@zcode/shared";
+} from "@zcode/shared/test-ids";
 import { Button } from "@/components/ui/button.js";
 import {
   DropdownMenu,
@@ -135,7 +139,7 @@ function toast(message: string, options?: ToastOptions): number {
 }
 
 /** 创建表单的预填草稿(来自「More ideas」模板)。 */
-interface AutomationDraft {
+export interface AutomationDraft {
   templateId?: string;
   title: string;
   cronExpr: string;
@@ -156,16 +160,18 @@ type AutomationsTab = "scheduled";
 
 const SCHEDULED_ONLY_AUTOMATION_TABS: readonly AutomationsTab[] = ["scheduled"];
 
-function resolveVisibleAutomationTabs({
+export function resolveVisibleAutomationTabs({
   hasAnyTasks,
 }: {
   hasAnyTasks: boolean;
 }): readonly AutomationsTab[] {
   if (!hasAnyTasks) return [];
+  // fork 已整体移除官方 off-peak（闲时）任务，仅保留 scheduled tab；
+  // 上游的 offPeakVisible / resolveAutomationTabAfterOffPeakChange 不吸收。
   return SCHEDULED_ONLY_AUTOMATION_TABS;
 }
 
-function resolveAutomationTabNavigation({
+export function resolveAutomationTabNavigation({
   requestedTab,
   tabsReady,
   visibleTabs,
@@ -181,7 +187,7 @@ function resolveAutomationTabNavigation({
   };
 }
 
-function resolveAutomationTemplateVisibility({
+export function resolveAutomationTemplateVisibility({
   hasAnyTasks,
   tab,
 }: {
@@ -213,15 +219,17 @@ function automationPromptSummary(prompt: string): string {
   return normalized.length > 0 ? normalized : " ";
 }
 
-function canRestartAutomation(automation: Pick<ZCodeAutomation, "lifecycleStatus">): boolean {
+export function canRestartAutomation(
+  automation: Pick<ZCodeAutomation, "lifecycleStatus">,
+): boolean {
   return automation.lifecycleStatus === "failed";
 }
 
-function canToggleAutomation(automation: Pick<ZCodeAutomation, "lifecycleStatus">): boolean {
+export function canToggleAutomation(automation: Pick<ZCodeAutomation, "lifecycleStatus">): boolean {
   return automation.lifecycleStatus !== "completed" && automation.lifecycleStatus !== "failed";
 }
 
-function getAutomationRunNowToastId(
+export function getAutomationRunNowToastId(
   result: AutomationRunNowResult,
 ): "automations.runNowQueued" | "automations.runNowAlreadyRunning" | "automations.runNowFailed" {
   if (result === "queued") return "automations.runNowQueued";
@@ -229,20 +237,20 @@ function getAutomationRunNowToastId(
   return "automations.runNowFailed";
 }
 
-type AutomationActionError = "create" | "update" | "toggle" | "restart" | "delete";
+export type AutomationActionError = "create" | "update" | "toggle" | "restart" | "delete";
 
 /** 原始 Agent/RPC 错误留在 logger；界面只展示当前动作对应的可理解提示。 */
-function getAutomationActionErrorToastId(action: AutomationActionError): string {
+export function getAutomationActionErrorToastId(action: AutomationActionError): string {
   return `automations.error.${action}`;
 }
 
-function getAutomationCreateErrorToastId(error: unknown): string {
+export function getAutomationCreateErrorToastId(error: unknown): string {
   return isAutomationCreateLimitError(error)
     ? "automations.error.createLimit"
     : getAutomationActionErrorToastId("create");
 }
 
-function resolveAutomationDetailTarget(
+export function resolveAutomationDetailTarget(
   automations: readonly ZCodeAutomation[],
   automationId?: string | null,
 ): ZCodeAutomation | null {
@@ -251,7 +259,7 @@ function resolveAutomationDetailTarget(
   return automations.find((automation) => automation.automationId === targetId) ?? null;
 }
 
-function resolveAutomationDetailNavigation(
+export function resolveAutomationDetailNavigation(
   automations: readonly ZCodeAutomation[],
   automationId: string | null | undefined,
   listReady: boolean,
@@ -261,6 +269,8 @@ function resolveAutomationDetailNavigation(
   return target ? { status: "found", target } : { status: "missing" };
 }
 
+// fork 已移除 off-peak 任务面，故不吸收 isOffPeakDetailNavigationId /
+// resolveOffPeakDetailNavigation（ZCodeOffPeakTask 在 fork 中不存在）。
 interface AutomationActionsMenuProps {
   automation: ZCodeAutomation;
   busy: boolean;
@@ -830,6 +840,7 @@ export function AutomationsSection({
     [confirmDialog, deleteAutomation, intl, platform, providerSettingsView, zcodeAgentService],
   );
 
+  // fork 已移除 off-peak 任务面，上游的 handleOffPeak* 系列不吸收。
   if (!workspacePath) {
     return (
       <div className="rounded-lg border border-card-border bg-card px-3 py-2 text-ui-base text-foreground-subtle">
@@ -1228,7 +1239,7 @@ export function AutomationsSection({
               )}
             </div>
 
-            {/* 空态保持唤醒提示条位于大空卡之后。 */}
+            {/* Figma 4798:2443：空态保持唤醒提示条位于大空卡之后。 */}
             {!hasAnyTasks ? (
               <AutomationKeepAwakeNotice
                 checked={sharedSettings?.keepAwakeWhileRunning ?? false}
@@ -1241,7 +1252,7 @@ export function AutomationsSection({
             ) : null}
           </div>
 
-          {/* 真实任务卡与模板不能只靠空白分区：需要分割线；
+          {/* 修复原因：真实任务卡与模板此前只靠空白分区，遗漏了 Figma 4835:5515 的分割线；
              分割线使用 surface 在 Light 下过淡，因此与 Card 统一使用 card-border。
              外层 gap-8 加本容器 py-2，使卡片到线、线到模板标题均保持 40px。 */}
           {showTaskTemplateSeparator ? (
@@ -1255,6 +1266,7 @@ export function AutomationsSection({
           ) : null}
 
           {/* Scheduled task template：Client Scenes 候选目录；点击只预填新建整页。 */}
+          {/* Scheduled task template：Client Scenes 候选目录；点击只预填新建整页。闲时任务 tab 不显示。 */}
           {showScheduledTemplates ? (
             <section
               data-automations-scheduled-templates
@@ -1296,7 +1308,7 @@ export function AutomationsSection({
                             {resolveAutomationTemplateText(template.title, locale)}
                           </span>
                         </div>
-                        {/* 定时模板首次实现时把周期时间拼进标题行，和闲时模板的底部时间层级不一致。 */}
+                        {/* Bug 原因：定时模板首次实现时把周期时间拼进标题行，和闲时模板的底部时间层级不一致。 */}
                         <p className="line-clamp-2 flex-1 text-ui-base font-normal leading-5 text-foreground-subtle">
                           {resolveAutomationTemplateText(template.description, locale)}
                         </p>

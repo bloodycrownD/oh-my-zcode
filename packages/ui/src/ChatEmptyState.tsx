@@ -46,10 +46,9 @@ import {
   type RemoteWorkspaceSessionEntry,
   type WorkspacePurpose,
 } from "@zcode/shared";
-export {
-  getScratchWorkspaceLocationHint,
-  getScratchWorkspaceNameErrorKind,
-} from "@/ChatEmptyScratchWorkspaceDialog.js";
+// 升级 316 说明：上游删除了 scratch workspace 对话框（ChatEmptyScratchWorkspaceDialog），
+// 合并结果里该模块已被移除；它导出的两个纯函数在 fork 里也没有其它消费者，
+// 因此这里不再转出口，避免引用不存在的模块（TS2307）。
 
 // ---------------------------------------------------------------------------
 // Workspace 路径工具函数

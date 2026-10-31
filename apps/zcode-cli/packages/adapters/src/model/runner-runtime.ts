@@ -1,3 +1,4 @@
+import type { RequestVerificationReason } from "@zcode/shared";
 import { generateText as aiGenerateText, streamText as aiStreamText } from "ai";
 import type {
   ModelProperties,
@@ -13,6 +14,15 @@ export type AiSdkStreamTextOptions = Parameters<typeof aiStreamText>[0];
 export type AiSdkStreamTextResult = ReturnType<typeof aiStreamText>;
 export type ResolvedAiSdkModel = AiSdkResolvedModel & {
   properties: ModelProperties;
+  // TODO(upgrade-316): @zcode/shared 已不再导出 ZCodeProviderAccountAccess，而跨分片的
+  // account-request-retry.ts / off-peak-request-auth.ts 仍引用它；下面的结构垫片需与 shared 侧
+  // 的最终结论对齐（要么恢复该类型，要么按 fork 口径删掉那两个上游文件）。
+  /**
+   * FORK：官方账号 / Coding Plan 的 account access 已随登录链整删，`@zcode/shared` 不再导出
+   * `ZCodeProviderAccountAccess`。上游 request-verification / account-retry 代码仍按可选字段读
+   * `mode`，这里保留最小结构形状（fork 运行时不写入，恒为 undefined）。
+   */
+  accountAccess?: { mode?: string };
 };
 
 export interface AiSdkModelRuntime {
@@ -26,8 +36,13 @@ export interface AiSdkModelTextRequest extends ModelTextRequest {
   // Start Plan 的账号鉴权材料按 attempt 刷新；adapter 内部 retry 也是真实模型请求，
   // 必须在每个 attempt 发送前给 core/host 一个刷新机会。
   refreshRuntimeHeadersBeforeAttempt?: (input: {
+    // FORK：上游 account / Coding Plan 派生模式的三个可选入参保留类型形状（运行时不产生），
+    // 以便 upstream 的 account-request-retry 仍按同一契约调用。
+    accountAccess?: { mode?: string };
+    expectedAccountScope?: string;
+    rejectedProjectTokenFingerprint?: string;
     attempt: number;
-    reason?: "model-request";
+    reason?: RequestVerificationReason;
     abortSignal?: AbortSignal;
     providerId: string;
     modelId: string;

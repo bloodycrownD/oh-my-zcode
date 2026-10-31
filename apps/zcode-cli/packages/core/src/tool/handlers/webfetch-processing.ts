@@ -59,6 +59,8 @@ export async function processFetchedContent(
           toolCallId: context.toolCallId,
           toolName: WEBFETCH_TOOL_NAME,
         },
+        // TODO(upgrade-316): 上游改为 telemetry 的 modelCall.operation；该字段随 telemetry 面
+        // 一起被移除，故保留 fork 的 modelRequestSessionType 归因。
         modelRequestSessionType: "other",
         traceContext: traceFromContext(context),
       },

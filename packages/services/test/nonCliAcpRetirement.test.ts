@@ -64,15 +64,23 @@ test("current Project Memory catalog and files remain readable", async () => {
   }
 });
 
-test("opening the task index leaves retired ACP IDs and user rows untouched", async () => {
+test("opening the task index migrates retired ACP wrapper IDs to real session IDs", async () => {
   const dir = await mkdtemp(join(tmpdir(), "zcode-acp-index-"));
   const path = join(dir, "tasks.sqlite");
-  const repo = new TaskIndexRepo(path);
+  // FORK(upgrade-316)：上游把构造签名扩成 (migrationSettings?, storageHostId?, startupDbPath?, busyTimeoutMs?)，
+  // 旧的单参数 `new TaskIndexRepo(path)` 会把 path 错当 migrationSettings、startupDbPath 落空，
+  // 于是 ensureReady 走 getTasksIndexDatabasePath() 指向**真实用户数据目录**。库路径必须走第三个参数。
+  const repo = new TaskIndexRepo(undefined, undefined, path);
   try {
-    await repo.syncTaskMeta({ meta });
+    // FORK(upgrade-316)：fork 旧的 syncTaskMeta 是「插入 task 行 + 分组登记」的入口，
+    // 上游 v3.16 把它拆了：插入走 applyCliFacts（taskIndexRepo.ts:926，内部 writeRecord +
+    // admitTaskGroup），分组登记由 TaskGroupRepository.admit 在更新路径与 UI 读路径各自完成。
+    // 这里只需要一条 task 行做后续断言，故用当前真实的插入入口。
+    await repo.applyCliFacts({ meta });
     repo.close();
     const database = new DatabaseSync(path);
     try {
+      // 模拟 z-code-2 早期库：task_id 是 wrapper id，真实 ZCode session id 在旧列 acp_session_id。
       database.exec("ALTER TABLE tasks ADD COLUMN acp_session_id TEXT");
       database
         .prepare("UPDATE tasks SET acp_session_id = ? WHERE task_id = ?")
@@ -84,9 +92,17 @@ test("opening the task index leaves retired ACP IDs and user rows untouched", as
     repo.close();
     const reopened = new DatabaseSync(path);
     try {
-      const row = reopened.prepare("SELECT task_id, acp_session_id FROM tasks").get();
-      assert.equal(row?.task_id, meta.taskId);
-      assert.equal(row?.acp_session_id, "session-example");
+      // FORK(upgrade-316)：fork 旧断言是「打开时列原样保留」（旧 syncTaskMeta 时代没有迁移）。
+      // 上游 v3.16 在初始化时跑 migrateLegacyAcpTaskIds（taskIndexRepo.ts:402-405 注释：
+      // z-code-2 早期 task_id 是 wrapper id，真实 id 在 acp_session_id；初始化时把索引行迁到
+      // 真实 session id，后续统一走新协议正常路径）。本用例改为钉住该迁移的正确结果：
+      // 行还在、迁到真实 session id、旧列清空——用户数据不被丢弃，只是 id 归位。
+      const row = reopened
+        .prepare("SELECT task_id, acp_session_id, workspace_path FROM tasks")
+        .get();
+      assert.equal(row?.task_id, "session-example");
+      assert.equal(row?.acp_session_id, null);
+      assert.equal(row?.workspace_path, meta.workspacePath);
     } finally {
       reopened.close();
     }
@@ -197,6 +213,14 @@ test("current session recovery preserves Desktop and replayable projections", as
         indexed.push(params.meta);
         return params.meta;
       },
+      // FORK(upgrade-316)：上游 v3.16 的 syncer 侧改走 updateTaskPresentation 写展示缓存
+      // （zcodeTaskRepo.ts 的 updateTaskPresentation），语义等价于 fork 旧的 syncTaskMeta 写入面。
+      // 本用例断言 indexed.length === 3（两次 getTaskSnapshot + 一次 resumeTask 各写一次），
+      // 所以计数点必须挂在这个新方法上。
+      async updateTaskPresentation(params: typeof meta & { presentation?: unknown }) {
+        indexed.push(params);
+        return params;
+      },
       close() {},
     } as unknown as TaskIndexRepo,
     taskIndexSyncer: {
@@ -206,6 +230,12 @@ test("current session recovery preserves Desktop and replayable projections", as
         return { fire() {} };
       },
       ensureSessionSubscription() {},
+      // FORK(upgrade-316)：上游 syncer 的写面在真实实现里会落到 taskIndexRepo.updateTaskPresentation；
+      // 本桩直接替代 syncer，所以计数点必须挂在这里（否则 indexed 恒为 0）。
+      async syncSnapshotAndBroadcast() {
+        indexed.push(meta);
+        return meta;
+      },
       disposeAll() {},
     } as unknown as Options["taskIndexSyncer"],
   });

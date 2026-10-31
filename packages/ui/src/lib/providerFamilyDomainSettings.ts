@@ -1,5 +1,6 @@
 import type { ISettingService } from "@zcode/services";
 import {
+  type AppSettings,
   type ProviderFamilyConnectionSelectionSettings,
   type ProviderFamilyDomain,
 } from "@zcode/shared";
@@ -16,6 +17,9 @@ export async function setProviderFamilyDomain(
   domain: ProviderFamilyDomain,
 ): Promise<void> {
   const currentSettings = await settingService.get();
+  // TODO(upgrade-316): 上游 3.16 给 update() 加了 CAS 期望值（providerFamilyDomain /
+  // providerFamilyConnectionSelections / updatedAt）以避免登录入口与 Composer 并发写覆盖。
+  // fork 账号登录面已整删（D-19），本函数无调用方，先保留 fork 的单参写法。
   await settingService.update({
     providerFamilyDomain: domain,
     providerFamilyDomainUpdatedAt: Date.now(),
@@ -30,7 +34,7 @@ export async function setProviderFamilyDomain(
   });
 }
 
-function buildOAuthProviderFamilySelections(
+export function buildOAuthProviderFamilySelections(
   domain: ProviderFamilyDomain,
   currentSelections: ProviderFamilyConnectionSelectionSettings | null | undefined,
 ): ProviderFamilyConnectionSelectionSettings {
@@ -38,4 +42,16 @@ function buildOAuthProviderFamilySelections(
     ...currentSelections,
     [domain]: { kind: "individual-coding-plan" },
   };
+}
+
+export async function clearProviderFamilyDomain(
+  settingService: Pick<ISettingService, "update">,
+): Promise<void> {
+  await settingService.update({
+    // 清理原因：providerFamilyDomain 通过 RPC 传 undefined 容易被吞掉。
+    // settingService 会把空串归一成 undefined，确保退出/解绑后不会继续过滤到旧 domain。
+    providerFamilyDomain: "" as AppSettings["providerFamilyDomain"],
+    providerFamilyDomainUpdatedAt: Date.now(),
+    providerFamilyDomainMigrated: true,
+  });
 }

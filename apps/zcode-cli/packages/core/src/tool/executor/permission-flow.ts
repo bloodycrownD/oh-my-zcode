@@ -10,7 +10,12 @@ import {
 } from "@zcode/contracts";
 import type { HookRunResult } from "../../hooks/index.js";
 import type { PermissionContext } from "../../permission/service.js";
-import type { ExecutableToolCall, ToolEntry, ToolExecutionResult } from "../types.js";
+import type {
+  ExecutableToolCall,
+  ToolEntry,
+  ToolExecutionResult,
+  ToolRuntimePermissionCapabilityContext,
+} from "../types.js";
 import { normalizeToolExecutionInput } from "../input-normalization.js";
 import { resolveToolApproval } from "./approval-gate.js";
 import {
@@ -37,9 +42,23 @@ import { validateInput } from "./validation.js";
 import { applyMemoryFilePermission } from "./memory-file-permission.js";
 
 type ToolPermissionFlowResult =
-  | { allowed: true; executionInput: unknown; permissionWaitMs?: number }
+  | {
+      allowed: true;
+      executionInput: unknown;
+      permissionWaitMs?: number;
+      /**
+       * 上游 v3.16 的确认窗入参调整结果；本 fork 版本尚未应用调整（见下方
+       * TODO(upgrade-316)），因此永远是 undefined，只是让 caller 的读取保持类型可用。
+       */
+      inputAdjustments?: Readonly<Record<string, unknown>>;
+    }
   | { allowed: false; result: ToolExecutionResult };
 
+// TODO(upgrade-316): 这里保留 fork 的确认流程（doom-loop 门 + permission-responder-race +
+// persistProjectPermissionUpdates），未并入上游 v3.16 的 while-reentry 重写（approvalMode
+// "user-once" 单次确认、请求/响应转换模块、applyGrantedPermissionUpdates、
+// applyPermissionInputAdjustments）。两套流程对「hook 改写输入后是否重新询问」的语义互斥，
+// 需要人工裁定后再合并。
 export async function resolveToolPermission(
   deps: ToolExecutorDeps,
   toolCall: ExecutableToolCall,
@@ -49,6 +68,8 @@ export async function resolveToolPermission(
   mode: CollaborationMode,
   traceContext: TraceContext,
   signal?: AbortSignal,
+  /** 上游 v3.16 新增：已经准备好的运行时权限上下文（Guarded 下带已快照的 cwd）。 */
+  preparedContext?: ToolRuntimePermissionCapabilityContext,
 ): Promise<ToolPermissionFlowResult> {
   const permissionContext: PermissionContext = {
     toolName: toolCall.name,
@@ -58,8 +79,8 @@ export async function resolveToolPermission(
     prePlanMode: deps.sessionModePort?.getPrePlanMode(),
     planEnabled: deps.sessionModePort?.isPlanEnabled?.(),
     // workflow 草稿免确认要按工作目录解析相对路径，见 PermissionService 的
-    // isPreapprovedWorkflowDraftWrite。
-    workingDirectory: deps.getWorkingDirectory(),
+    // isPreapprovedWorkflowDraftWrite。Guarded 下沿用 caller 已快照的 cwd。
+    workingDirectory: preparedContext?.workingDirectory ?? deps.getWorkingDirectory(),
   };
   const runtimePermissionContext = resolveRuntimePermissionContext(deps);
   const rulePolicy = entry.resolvePermissionRulePolicy?.(executionInput, runtimePermissionContext);
@@ -96,8 +117,8 @@ export async function resolveToolPermission(
     executionInput,
     memoryRoot: deps.getMemoryRoot?.(),
     toolName: toolCall.name,
-    workingDirectory: deps.getWorkingDirectory(),
-    workspaceRoot: deps.getWorkspaceRoot(),
+    workingDirectory: preparedContext?.workingDirectory ?? deps.getWorkingDirectory(),
+    workspaceRoot: preparedContext?.workspaceRoot ?? deps.getWorkspaceRoot(),
   });
 
   // Doom loop 门（opencode 式）：同工具+同输入重复调用的第 4 次（事不过三，

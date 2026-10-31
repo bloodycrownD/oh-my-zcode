@@ -50,7 +50,7 @@ export function createProviderProvisioningSource(
         providerFamilyConnectionSelections: settings.providerFamilyConnectionSelections ?? {},
       };
       return providerProvisioningEnvelopeSchema.parse({
-        schemaVersion: 1,
+        schemaVersion: 2,
         syncId,
         personalConfig,
         accountSettings,

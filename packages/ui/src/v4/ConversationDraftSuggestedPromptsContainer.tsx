@@ -37,6 +37,7 @@ import { resolveDraftSuggestedPromptText } from "@/v4/draftSuggestedPromptItems.
 import { DRAFT_SUGGESTED_PROMPT_NAVIGATE_AUTOMATIONS } from "@/v4/draftSuggestedPromptItems.js";
 import {
   resolveDraftSuggestedPluginFlowStage,
+  resolveSuggestedPluginClientBoundary,
   type ConversationDraftSuggestedPromptsContainerProps,
   type DraftSuggestedPluginFlow,
   type DraftSuggestedPluginOperation,
@@ -80,6 +81,8 @@ export function ConversationDraftSuggestedPromptsContainer({
   workspaceIdentity,
   remoteSessionId,
   onOpenAutomations,
+  isDesktop = false,
+  isWebRemoteControl = false,
 }: Props) {
   const { intl, locale } = useZCodeIntl();
   const isOfficeMode = useIsOfficeMode();
@@ -278,7 +281,6 @@ export function ConversationDraftSuggestedPromptsContainer({
   const revalidateAndPrependPlugin = useCallback(
     async (current: DraftSuggestedPluginFlow, requestVersion: number) => {
       await invalidateDeferredDraftSessionForSkillChange({
-        zcodeSessionService: resolution.services.zcodeSessionService,
         workspacePath,
         workspaceIdentity,
         reason: "suggested-prompt-plugin-change",
@@ -287,8 +289,7 @@ export function ConversationDraftSuggestedPromptsContainer({
       const resolved =
         await resolution.services.pluginManagementService.resolveSuggestedPluginReference({
           ...targetParams(),
-          clientMode: "desktop-continuous" as const,
-          deliveryKind: "desktop-continuous" as const,
+          ...resolveSuggestedPluginClientBoundary(isWebRemoteControl),
           stableId: current.plugin.stableId,
           operationId: current.operationId,
         });
@@ -297,9 +298,9 @@ export function ConversationDraftSuggestedPromptsContainer({
       return prependResolvedPlugin(current.plugin, requestVersion, resolved.icon);
     },
     [
+      isWebRemoteControl,
       prependResolvedPlugin,
       resolution.services.pluginManagementService,
-      resolution.services.zcodeSessionService,
       targetParams,
       workspaceIdentity,
       workspacePath,
@@ -417,6 +418,10 @@ export function ConversationDraftSuggestedPromptsContainer({
           let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
           const installRequest = resolution.services.pluginManagementService.installPlugin({
             ...targetParams(),
+            telemetry: {
+              entry: "recommended_prompt",
+              client_kind: isWebRemoteControl ? "mobile" : "desktop",
+            },
             pluginName: flow.result!.pluginName!,
             marketplace: flow.result!.marketplace!,
             scope: "user",
@@ -460,6 +465,10 @@ export function ConversationDraftSuggestedPromptsContainer({
             operation,
             resolution.services.pluginManagementService.setPluginEnabled({
               ...targetParams(),
+              telemetry: {
+                entry: "recommended_prompt",
+                client_kind: isWebRemoteControl ? "mobile" : "desktop",
+              },
               pluginId: flow.plugin.stableId,
               enabled: true,
               operationId: flow.operationId,
@@ -590,8 +599,7 @@ export function ConversationDraftSuggestedPromptsContainer({
           operation,
           resolution.services.pluginManagementService.resolveSuggestedPluginReference({
             ...targetParams(),
-            clientMode: "desktop-continuous" as const,
-            deliveryKind: "desktop-continuous" as const,
+            ...resolveSuggestedPluginClientBoundary(isWebRemoteControl),
             stableId: plugin.stableId,
             operationId: operation.operationId,
           }),
@@ -680,6 +688,8 @@ export function ConversationDraftSuggestedPromptsContainer({
     [
       cancelOperation,
       clearOperationFeedback,
+      isDesktop,
+      isWebRemoteControl,
       locale,
       onOpenAutomations,
       replacePlainPrompt,

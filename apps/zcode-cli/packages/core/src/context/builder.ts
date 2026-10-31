@@ -21,6 +21,7 @@ import { buildRequestUserContextSection } from "./sections/request-user-context.
 import { buildCurrentDateSection } from "./sections/current-date.js";
 import { resolveMemoryVocabularySurfaces } from "./magic-context-memory-vocabulary.js";
 import { buildMemorySection } from "./sections/memory.js";
+import { ACTIVE_PROJECT_MEMORY_RETRIEVAL_BRANCH } from "../memory/project-memory-retrieval-branch.js";
 import { buildDesktopContextSection } from "./sections/desktop.js";
 import {
   buildContextManagementSection,
@@ -144,7 +145,9 @@ export class ContextBuilder {
     // guidance——契约里已把 Report outcomes faithfully 搬过去），保留 memory 与其后各段。
     if (!hasCustomSystemPrompt) {
       if (!isWorkflowActor && this.config.presentationSurface === "zcode_desktop") {
-        sections.push(buildDesktopContextSection(this.config.language));
+        sections.push(
+          buildDesktopContextSection(this.config.genUiOutputDirectory, this.config.language),
+        );
       }
 
       // behaviour part right after stable sp...
@@ -168,14 +171,24 @@ export class ContextBuilder {
         sections.push(memoryVocabulary.entry);
       }
 
-      // Memory
+      // Memory（merge v3.16.2：memoryRoot 仍取 MC 互斥裁定后的版本；上游新增的
+      // retrievalBranch 第二个参数必须带上，memory.ts 已是上游双参签名）
       if (memoryVocabulary.memoryRoot) {
-        const memorySection = buildMemorySection(memoryVocabulary.memoryRoot);
+        const memorySection = buildMemorySection(
+          memoryVocabulary.memoryRoot,
+          ACTIVE_PROJECT_MEMORY_RETRIEVAL_BRANCH,
+        );
         if (memorySection) {
           sections.push(memorySection);
         }
       }
-      sections.push(buildEnvInfoSection(this.config.envInfo, this.config.model));
+      sections.push(
+        buildEnvInfoSection(
+          this.config.envInfo,
+          this.config.model,
+          this.config.additionalDirectories,
+        ),
+      );
 
       // Output Style
       const outputStyleSection = buildOutputStyleSection(activeOutputStyle);
@@ -259,7 +272,6 @@ export class ContextBuilder {
       messages.push({
         role: "system",
         content: cliPrefixContent,
-        cacheControl: EPHEMERAL_CACHE_CONTROL,
       });
     }
 

@@ -10,6 +10,7 @@ import {
   DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES,
   DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS,
   type DynamicWorkflowRunError,
+  type DynamicWorkflowRunHole,
   type DynamicWorkflowRunLogEntry,
   type DynamicWorkflowRunPendingQuestion,
   type DynamicWorkflowRunSessionSummary,
@@ -29,9 +30,14 @@ import type {
 } from "@zcode/dynamic-workflow";
 import { artifactsOf } from "./dynamic-workflow-run-artifact-projection.js";
 import { runLineageActiveMs } from "./dynamic-workflow-run-elapsed.js";
-import { readRunScriptPath, readRunSubagentModel } from "./dynamic-workflow-run-launch-anchor.js";
+import {
+  readRunModelBindings,
+  readRunScriptPath,
+  readRunSubagentModel,
+} from "./dynamic-workflow-run-launch-anchor.js";
 import { resolveDynamicWorkflowRunLabel } from "./dynamic-workflow-run-label.js";
 import { lineageFields, supersededByOf } from "./dynamic-workflow-run-lineage.js";
+import type { CompiledHole } from "./dynamic-workflow-run-holes.js";
 import type { ActorSessionQuiescence } from "./workflow-driver-quiescence.js";
 import type { WorkflowRunControl } from "./workflow-run-control.js";
 
@@ -62,7 +68,7 @@ export interface RunRegistryEntry {
    */
   maxConcurrency?: number;
   /**
-   * 本 run 的活体控制面。与
+   * 本 run 的活体控制面（docs/dynamic-workflow/concurrency.md「The control path」）。与
    * {@link controller} 并列而非合并：那个是「停下这个 run」的唯一通道，这个是「改这个 run 的一项
    * 设置」的唯一通道，两者的收件人（harness 的 signal / 引擎与座位闸门）也不是同一个。
    *
@@ -83,6 +89,12 @@ export interface RunRegistryEntry {
    */
   subagentModel?: string;
   /**
+   * 本 run 脚本点名的模型绑定表（`run-launched` 事件上 `modelBindings` 的内存副本；
+   * docs/dynamic-workflow/launch.md「Models the script names」）。与 {@link subagentModel} 逐条同规：
+   * 三条建条目的路都落值、余生不变，有条目就读条目。缺席即脚本没点名模型。
+   */
+  modelBindings?: Record<string, string>;
+  /**
    * 本 run 的脚本文件（`run-launched` 事件上那个绝对路径的内存副本）。与 {@link subagentModel} 逐条同规：
    * 三条建条目的路都落值（submit / amend 用入参给的那一个，resume 读一次事件头抄过来），
    * 值在建 run 那一世写死、余生不变，所以副本与事件不可能分叉。缺席即这个 run 没有文件。
@@ -90,6 +102,17 @@ export interface RunRegistryEntry {
   scriptPath?: string;
   /** 修订 run 的前驱（`dwf_run.resumed_from` 的内存副本，journal 行出现之前枚举面唯一能读到的地方）。 */
   resumedFrom?: string;
+  /**
+   * **此刻有效脚本**的留白事实表（docs/execution-engine.md「Holes」）：快照的 `type` / `line` 与
+   * 进度载荷的 `type` 读它。三条建条目的路都从编译产物落值；一次补全把它换成有效脚本的表——
+   * 嵌套在函数体里的新留白由此出现。与 `scriptText` 同步换，两者描述的必须是同一份脚本。
+   */
+  holes?: readonly CompiledHole[];
+  /**
+   * 此刻生效的阶段表（留白按名字占位）：submit / amend 抄提交方给的声明表，resume 从事件读回，
+   * 补全后换成有效脚本的表（引擎在 `hole-filled` 上记的同一张）。快照的 before / after 读它。
+   */
+  phaseNames?: readonly string[];
   /**
    * 本 run 的用量起点（前驱结算后的 `spentTokens`）。同一条间隙论证：行落库之前两条读面只能从条目读用量，而修订
    * 一个刚起步的 run 恰好落在那几个微任务里。**只有 amend 路落值**：全新 submit 从零起账，
@@ -134,7 +157,7 @@ export const TERMINAL_RUN_STATUSES: ReadonlySet<RunStatus> = new Set<RunStatus>(
  * `pendingQuestions` 由调用方从**内存的**升级停驻表投影好再传进来（本文件的纪律是无 I/O、
  * 无状态）。传空数组即「此刻没有待答问题」，字段整个缺席——不发空数组。
  *
- * `concurrencyCeiling` 同理由调用方给（读它要探进程核数 = I/O）：缺席即「本次读不判天花板」，
+ * `defaultConcurrency` 同理由调用方给（读它要探进程核数 = I/O）：缺席即「本次读不判默认值」，
  * `maxConcurrency` 整字段不出——见 {@link runConcurrencyField}。
  */
 export function snapshotOf(
@@ -142,7 +165,12 @@ export function snapshotOf(
   runs: Map<string, RunRegistryEntry>,
   journal: JournalStorePort,
   pendingQuestions: readonly DynamicWorkflowRunPendingQuestion[] = [],
-  concurrencyCeiling?: number,
+  defaultConcurrency?: number,
+  /**
+   * 留白（docs/execution-engine.md「The run snapshot」），与 `pendingQuestions` 同规由调用方
+   * 投影好递进来（`waiting` 要读引擎的停驻表，那是 I/O 之外的活状态）；空即整字段缺席。
+   */
+  holes: readonly DynamicWorkflowRunHole[] = [],
 ): DynamicWorkflowRunSnapshot | undefined {
   const entry = runs.get(taskId);
   const record = journal.getRun(taskId);
@@ -164,10 +192,11 @@ export function snapshotOf(
   // 计数（见 {@link reportsOf} 与 artifactsOf）——快照路径上不再有任何全量节点读。
   const settled = status !== "running";
 
-  // lineage 的活动时长：与上面同一道终态闸门、同一条论证。
+  // lineage 的活动时长：与上面同一道终态闸门、同一条论证
+  // （docs/dynamic-workflow/transcript-and-notifications.md「How long it took」）。
   const activeDurationMs = settled ? runLineageActiveMs(journal, taskId) : undefined;
 
-  // 真实终态词 + 停止原因 + 结构化失败：快照基类的
+  // 真实终态词 + 停止原因 + 结构化失败（apps/zcode-cli/packages/dynamic-workflow/docs/execution-engine.md）：快照基类的
   // `status` 是后台任务追踪器的通用词汇（stopped 折成 cancelled、errored 折成 failed），通知
   // 要说真话只能读这三个字段。终态之前不带（还没有可说的终局）。
   const runStatus = synthesizeRunStatus(entry, record?.status);
@@ -192,7 +221,7 @@ export function snapshotOf(
     // 行还不存在，而 AmendWorkflow 的 resolveInput 恰好会在那时读这张快照。
     ...runConcurrencyField(
       entry?.maxConcurrency ?? record?.caps.maxConcurrency,
-      concurrencyCeiling,
+      defaultConcurrency,
     ),
     // 子代理模型：**有条目就读条目**（三条建条目的路都落值，见 RunRegistryEntry.subagentModel），
     // 只有冷行——本进程没有条目——才去扫一次事件头（八条的有界扫描，不是整条 journal）。
@@ -206,12 +235,18 @@ export function snapshotOf(
     ...runScriptPathField(
       entry === undefined ? readRunScriptPath(journal, taskId) : entry.scriptPath,
     ),
+    // 脚本点名的模型：与子代理模型逐条同规。AmendWorkflow 与 GUI「配置」据它让同名的绑定沿用下去。
+    ...runModelBindingsField(
+      entry === undefined ? readRunModelBindings(journal, taskId) : entry.modelBindings,
+    ),
     ...(failure === undefined ? {} : { failure }),
     ...(activeDurationMs === undefined ? {} : { activeDurationMs }),
     ...(entry?.completedAt === undefined ? {} : { completedAt: entry.completedAt }),
     ...(error === undefined ? {} : { error }),
     // 零条时整字段缺席（与 reports 同规）：读侧据此让整块 pending 区消失，不渲染空节。
     ...(pendingQuestions.length === 0 ? {} : { pendingQuestions }),
+    // 留白（docs/execution-engine.md「The run snapshot」）：空即整字段缺席，与 pendingQuestions 同规。
+    ...(holes.length === 0 ? {} : { holes }),
     ...(settled ? reportsOf(taskId, journal) : {}),
     // 用户面产物。⚠ 与紧邻的 `output`
     // （`entry.terminal.artifact` = 脚本顶层返回值，引擎内部也叫 artifact）是**两件不同的东西**：
@@ -219,7 +254,7 @@ export function snapshotOf(
     ...(settled ? artifactsOf(taskId, journal) : {}),
     ...(entry?.terminal?.status === "completed"
       ? { output: entry.terminal.artifact }
-      : // 重启后本进程的注册表是空的，产物只能从 journal 记录取（journal 行的
+      : // 重启后本进程的注册表是空的，产物只能从 journal 记录取（migration 0020 的
         // result_json）。内存终态在上一支里优先——它是本进程刚从引擎手里接过的原值。
         record?.status === "completed" && record.result !== undefined
         ? { output: record.result }
@@ -230,17 +265,19 @@ export function snapshotOf(
 /**
  * 两条读面（`getTask` 快照与 `getRunDetail` 详情）上的 `maxConcurrency`
  *
- * **只在低于当前天花板时在场**：跑在天花板上的 run 没有可说的——它就是默认行为，而每一行都带
- * 一个等于默认值的数，只会让模型把「没设限」读成「设了个限」。天花板缺席（调用方没给）时同样
- * 整字段不出：判据都没有，报一个数就是在猜。
+ * **只在不等于默认并发时在场**（高于、低于都算）：跑在默认值上的 run 没有可说的——它就是默认
+ * 行为，而每一行都带一个等于默认值的数，只会让模型把「没设限」读成「设了个限」。默认值缺席（调用方
+ * 没给）时同样整字段不出：判据都没有，报一个数就是在猜。
  *
- * 一处实现供两条读面共用：两处各判一次，「等于天花板算不算在场」迟早会在某一次调参时分叉。
+ * 一处实现供两条读面共用：两处各判一次，「等于默认算不算在场」迟早会在某一次调参时分叉。
  */
 export function runConcurrencyField(
   applied: number | undefined,
-  ceiling: number | undefined,
+  defaultConcurrency: number | undefined,
 ): { maxConcurrency?: number } {
-  if (applied === undefined || ceiling === undefined || applied >= ceiling) return {};
+  if (applied === undefined || defaultConcurrency === undefined || applied === defaultConcurrency) {
+    return {};
+  }
   return { maxConcurrency: applied };
 }
 
@@ -257,6 +294,15 @@ export function runSubagentModelField(subagentModel: string | undefined): {
   subagentModel?: string;
 } {
   return subagentModel === undefined ? {} : { subagentModel };
+}
+
+/** 两条读面上的 `modelBindings`：与 {@link runSubagentModelField} 同一条规则，记过（且非空）才在场。 */
+export function runModelBindingsField(modelBindings: Record<string, string> | undefined): {
+  modelBindings?: Record<string, string>;
+} {
+  return modelBindings === undefined || Object.keys(modelBindings).length === 0
+    ? {}
+    : { modelBindings };
 }
 
 /**
@@ -297,6 +343,9 @@ function reportsOf(
   taskId: string,
   journal: JournalStorePort,
 ): { reports?: readonly unknown[]; reportCount?: number } {
+  // 上游 v3.16.2 的短路（先问 count(*) 再决定要不要读行）在 fork 里退化成「先窄读再判空」：
+  // 这里的 `countNodes` 是**可选**端口成员（FORK 偏离，见上方注释），没有它就没有可靠的总数
+  // 可以短路。窄读本身已有条数与字节两道界，最坏只多一次有界读。
   const reports = journal
     .listNodes(taskId, {
       kinds: ["report"],

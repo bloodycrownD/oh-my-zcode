@@ -110,6 +110,9 @@ export type {
   LogContext,
   AttachmentStorageMetadata,
   AutomationPort,
+  // v3.16.2 新增的话题附件端口（非计费面），保留。
+  // OffPeakPort 属于 fork 已移除的 official 计费（off-peak）面，contracts 也不再导出。
+  TopicResourcePort,
   BackgroundExecutionSnapshot,
   BackgroundTaskCancelResult,
   BackgroundTaskInfo,

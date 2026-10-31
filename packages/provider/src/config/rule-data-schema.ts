@@ -105,6 +105,7 @@ export const builtinProviderConfigRuleSchema = providerConfigRuleSchema.extend({
     group: providerGroupDataSchema.exclude(["standard-personal"]),
   }),
 });
+// FORK: 官方 Account Provider（providerId 前缀 "account:"）已移除，上游针对它的 access 约束不再适用。
 const personalProviderConfigRuleSchema = providerConfigRuleSchema.extend({
   config: providerConfigDataSchema.omit({ builtinModelIds: true }).extend({
     group: providerGroupDataSchema.extract(["standard-personal"]).nullable().optional(),

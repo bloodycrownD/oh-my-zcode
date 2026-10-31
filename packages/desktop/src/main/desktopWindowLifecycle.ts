@@ -1,16 +1,22 @@
 import { getDatabaseStartupPortPayload } from "./databaseStartupRelay.js";
 import { randomUUID } from "node:crypto";
-import { app, BrowserWindow, Menu, MessageChannelMain } from "electron";
+import { release as readPlatformRelease } from "node:os";
+import { app, BrowserWindow, Menu, MessageChannelMain, nativeImage } from "electron";
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { HostMessageTypes, InternalChannels, PlatformChannels, type Locale } from "@zcode/shared";
 import { createBrowserWindow } from "./desktopWindowChrome.js";
 import type { HostInitMessage, WindowBootstrapOptions } from "./desktopHostProcess.js";
 import type { StartupWorkspaceWarmupTarget } from "./startupWorkspace.js";
+import type { RemoteAssetDirs } from "./desktopRuntimeEnv.js";
 import { handleDarwinWindowCloseRequest } from "./desktopDarwinCloseBehavior.js";
+import { supportsNativeWindowsRoundedCorners } from "./desktopWindowChromeState.js";
+import { applyDesktopTrayUnreadBadge } from "./desktopTray.js";
 import {
+  createWindowsTaskbarOverlayApplier,
+  maxWindowUnreadCounts,
   parseWindowUnreadCount,
-  sumWindowUnreadCounts,
-  syncAppUnreadBadge,
+  renderTaskbarStatusDotPixels,
+  syncUnreadBadgeForPlatform,
 } from "./unreadBadge.js";
 import { attachDesktopWindowSizePersistence, type DesktopWindowSize } from "./desktopWindowSize.js";
 import {
@@ -44,12 +50,15 @@ export function createWindow(options: {
     label: string,
     forceKillDelayMs?: number,
   ) => void;
+  // TODO(upgrade-316): 上游在 createWindow 契约里新增了 auto-updater 同步与 webRemoteControlManager；
+  // fork 无 auto-updater，远控沿用 remoteSessionManager（desktopRemoteSessions），此处不吸收。
   disposeRemoteWorkspaceSessionsForWindow: (windowId: number, reason: string) => void;
   reattachRemoteWorkspaceSessionsForWindow: (win: BrowserWindow, reason: string) => void;
   bootstrap?: WindowBootstrapOptions;
   agentWarmupTargets?: readonly StartupWorkspaceWarmupTarget[];
   agentSpawnFallbackCwd: string;
   deviceMid: string;
+  remoteAssets?: RemoteAssetDirs;
   initialDesktopZoomLevel?: number;
   initialWindowSize?: DesktopWindowSize;
   currentApplicationLocale?: () => Locale;
@@ -190,6 +199,9 @@ export function createWindow(options: {
         // 同一窗口会后台索引所有已恢复 workspace，不只索引启动时的 active workspace。
         // fallback 必须跟随 local Host 生命周期常驻，否则非 active 历史目录被删除后会用失效 cwd 反复 spawn。
         agentSpawnFallbackCwd: options.agentSpawnFallbackCwd,
+        remoteAssets: options.remoteAssets,
+        // Host 的 X-Client-Language 以 Main 的实时界面语言为准；与后续变更消息同端口按序到达。
+        ...(options.currentApplicationLocale ? { locale: options.currentApplicationLocale() } : {}),
       });
       options.windowHostProcessMap.set(wcId, child);
       options.onHostProcessReady?.(wcId);
@@ -299,14 +311,50 @@ export function focusWorkspaceInExistingWindow(
   return { activated: false };
 }
 
+// Windows 任务栏 overlay 的 electron 侧装配：像素渲染在 unreadBadge.ts（纯逻辑，可单测），
+// 这里只负责 BrowserWindow 枚举与 nativeImage 构造。spec 见 docs/desktop/windows-taskbar-unread-badge.md
+const windowsTaskbarOverlayLayout = supportsNativeWindowsRoundedCorners(
+  process.platform,
+  readPlatformRelease(),
+)
+  ? "windows-11"
+  : "windows-10";
+
+const applyWindowsTaskbarOverlay = createWindowsTaskbarOverlayApplier({
+  getAllWindows: () => BrowserWindow.getAllWindows(),
+  // Windows 固定把 overlay 显示为 16×16。直接传硬边 32px 圆再让 Shell 缩放会发糊、
+  // 边缘像缺口；这里提供原生 1x(16px) + 2x(32px) 纯红抗锯齿表示。
+  // label 只用于无障碍 description，屏幕阅读器仍播报具体数量。
+  createBadgeImage: () => {
+    const image = nativeImage.createEmpty();
+    image.addRepresentation({
+      scaleFactor: 1,
+      width: 16,
+      height: 16,
+      buffer: Buffer.from(renderTaskbarStatusDotPixels(1, windowsTaskbarOverlayLayout)),
+    });
+    image.addRepresentation({
+      scaleFactor: 2,
+      width: 32,
+      height: 32,
+      buffer: Buffer.from(renderTaskbarStatusDotPixels(2, windowsTaskbarOverlayLayout)),
+    });
+    return image;
+  },
+});
+
 export function syncApplicationUnreadBadge(windowUnreadCountMap: Map<number, number>) {
-  syncAppUnreadBadge({
+  const totalUnreadCount = maxWindowUnreadCounts(windowUnreadCountMap);
+  syncUnreadBadgeForPlatform({
     platform: process.platform,
-    totalUnreadCount: sumWindowUnreadCounts(windowUnreadCountMap),
+    totalUnreadCount,
     setBadgeCount: (count) => {
       app.setBadgeCount(count);
     },
+    applyOverlay: applyWindowsTaskbarOverlay,
   });
+  // 托盘角标：Windows/Linux 托盘右上角小徽章（macOS 无托盘，由 Dock 角标承担）。
+  applyDesktopTrayUnreadBadge(totalUnreadCount);
 }
 
 export function handleWindowUnreadCountSync(
@@ -353,13 +401,13 @@ export function handleDesktopWindowCloseRequest(options: {
   platform: NodeJS.Platform;
   forceQuit: boolean;
   explicitQuitRequested?: boolean;
-  closeToTrayOnWindows?: boolean;
+  closeToTray?: boolean;
   /**
-   * 托盘实例是否已创建成功（Windows）。
-   * 托盘创建失败（图标缺失 / 会话未就绪抛错）时再把窗口隐藏，用户就没有任何可见入口，
-   * 应用等于失联；因此只有确认托盘就绪才允许隐藏，否则走下面的确认退出路径。
+   * Linux 关闭驻留的托盘能力（spec：docs/desktop/linux-close-to-tray.md）。
+   * GNOME 等无 StatusNotifierWatcher 的桌面托盘不渲染且不报错，必须在隐藏前显式确认能力；
+   * 空值按"不可用"安全默认，走确认退出路径，避免窗口隐藏后失联。
    */
-  desktopTrayReady?: boolean;
+  closeToTraySupported?: boolean;
   isLastWindow: boolean;
   label: string;
   logger: { info: (...args: unknown[]) => void };
@@ -368,15 +416,18 @@ export function handleDesktopWindowCloseRequest(options: {
   requestQuit: () => void;
   hideWindow?: () => void;
 }) {
-  // FORK (upstream-v3.15.1-backport): 对应上游 aac4755 的 handleDesktopWindowCloseRequest——
-  // 把「托盘真实可用」并入隐藏裁决（上游用 closeToTray + closeToTraySupported，并含 Linux 能力探测）。
-  // 落点差异：fork 只保留 Windows-only 语义与 closeToTrayOnWindows 命名，Linux 能力探测不搬；
-  // desktopTrayReady 必须显式 true（fail-closed），否则隐藏窗口即失联，改由确认退出兜底。
+  // 采用上游 3.16 的合并裁决：Windows 侧 closeToTraySupported 由托盘实例创建结果决定，
+  // Linux 侧还要叠加 DBus 能力探测，任一不满足都走确认退出，避免隐藏窗口后失联。
+  // fork 旧版（closeToTrayOnWindows + desktopTrayReady，仅 Windows）已被该超集取代。
   const canHideToTray =
-    options.platform === "win32" &&
-    options.closeToTrayOnWindows &&
-    options.desktopTrayReady === true;
-  if (canHideToTray && !options.forceQuit && !options.explicitQuitRequested) {
+    (options.platform === "win32" || options.platform === "linux") &&
+    options.closeToTraySupported === true;
+  if (
+    canHideToTray &&
+    options.closeToTray &&
+    !options.forceQuit &&
+    !options.explicitQuitRequested
+  ) {
     options.logger.info(`[createWindow] window close hidden to tray (${options.label})`);
     options.hideWindow?.();
     return true;

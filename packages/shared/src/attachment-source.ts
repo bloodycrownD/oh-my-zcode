@@ -2,6 +2,7 @@ import { z } from "zod";
 
 /**
  * 附件来源词汇（UI 生产端 → 协议引用 → CLI 投影 → 预览授权链共用）。
+ * 文本材料只传递文件引用，不能因跨端上传而退回自动全文注入。
  *
  * FORK 说明（对照上游 .reference/ZCode@aac4755 同形保留两支）：
  * fork 自身只生产 `clipboard-text`（长粘贴落盘的临时文本附件，见

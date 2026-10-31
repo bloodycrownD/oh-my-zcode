@@ -47,11 +47,12 @@ export async function uploadComposerAttachment(
   const mime = attachment.mimeType;
   // 附件来源必须随引用一起过协议：预览授权闸（CLI v4-gateway）按 sourceKind 放行
   // text/plain，丢了它长粘贴文本附件在 fork 完全不可预览。
-  // 必须带 `kind === "file"` 收窄——ZCodePromptAttachment 是 5 支联合，
-  // 只有 File 支声明了 sourceKind，照抄谓词会 TS2339。
+  // 必须带 `kind === "file"` 收窄——ZCodePromptAttachment 是多支联合，
+  // 只有 File 支声明了 sourceKind / messageCount，照抄谓词会 TS2339。
+  // 上游新增：topic-history 来源与 messageCount 一并透传，fork 的 clipboard-text 仍走同一路径。
   const source =
-    attachment.kind === "file" && attachment.sourceKind === "clipboard-text"
-      ? { sourceKind: "clipboard-text" as const }
+    attachment.kind === "file" && attachment.sourceKind
+      ? { sourceKind: attachment.sourceKind, messageCount: attachment.messageCount }
       : {};
   // audio 变体无 sizeBytes 字段；统一经窄化读取。
   const sizeBytes =
@@ -87,4 +88,22 @@ export async function uploadComposerAttachment(
     mime,
     bytes: sizeBytes ?? base64ByteLength(dataBase64),
   };
+}
+
+/**
+ * 附件数组 → AttachmentRef[]（顺序保持）。put 失败原样抛出（调用方中止发送，草稿保留）。
+ */
+export async function uploadComposerAttachments(
+  put: AttachmentPutFn,
+  sessionId: string,
+  attachments: readonly ZCodePromptAttachment[],
+): Promise<AttachmentRef[]> {
+  const refs: AttachmentRef[] = [];
+  for (const attachment of attachments) {
+    const ref = await uploadComposerAttachment(put, sessionId, attachment);
+    if (ref) {
+      refs.push(ref);
+    }
+  }
+  return refs;
 }

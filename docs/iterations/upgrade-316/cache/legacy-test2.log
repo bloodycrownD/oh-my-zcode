@@ -1,0 +1,2483 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.7 [39m[90mD:/worktree/upstream-316-gitline[39m
+
+(node:31084) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m各夹具的迟到写入保持在自己的数据库中
+[22m[39m[2026-10-31 09:56:58.539] [pid:31084] [task-index-repo] 读取 task index meta_json 非法 taskId=late-first {
+  formErrors: [],
+  fieldErrors: {
+    provider: [
+      [32m'Invalid option: expected one of "claude"|"opencode"|"gemini"|"codex"|"glm"'[39m
+    ]
+  }
+}
+[2026-10-31 09:56:58.541] [pid:31084] [task-index-repo] 读取 task index meta_json 非法 taskId=late-first {
+  formErrors: [],
+  fieldErrors: {
+    provider: [
+      [32m'Invalid option: expected one of "claude"|"opencode"|"gemini"|"codex"|"glm"'[39m
+    ]
+  }
+}
+[2026-10-31 09:56:58.541] [pid:31084] [task-index-repo] 读取 task index meta_json 非法 taskId=late-first {
+  formErrors: [],
+  fieldErrors: {
+    provider: [
+      [32m'Invalid option: expected one of "claude"|"opencode"|"gemini"|"codex"|"glm"'[39m
+    ]
+  }
+}
+[2026-10-31 09:56:58.542] [pid:31084] [task-index-repo] 读取 task index meta_json 非法 taskId=late-first {
+  formErrors: [],
+  fieldErrors: {
+    provider: [
+      [32m'Invalid option: expected one of "claude"|"opencode"|"gemini"|"codex"|"glm"'[39m
+    ]
+  }
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m各夹具的迟到写入保持在自己的数据库中
+[22m[39m[2026-10-31 09:56:58.543] [pid:31084] [task-index-repo] 读取 task index meta_json 非法 taskId=late-first {
+  formErrors: [],
+  fieldErrors: {
+    provider: [
+      [32m'Invalid option: expected one of "claude"|"opencode"|"gemini"|"codex"|"glm"'[39m
+    ]
+  }
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mwaits for an in-flight topic admission before confirming cancellation (undefined)
+[22m[39m[2026-10-31 09:56:58.655] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not admit an uploaded topic input after cancellation
+[22m[39m[2026-10-31 09:56:58.871] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mexposes task ready only after the indexed session returns to an input-ready phase
+[22m[39m[2026-10-31 09:56:59.058] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mreports the manual automation runId on terminal outcome
+[22m[39m[2026-10-31 09:56:59.110] [pid:31084] [zcode-task-service][trace:automation-1:manual:1700000000000] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m20[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mreports the manual automation runId on terminal outcome
+[22m[39m[2026-10-31 09:56:59.111] [pid:31084] [zcode-task-service][trace:automation-1:manual:1700000000000] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mreports the manual automation runId on terminal outcome
+[22m[39m[2026-10-31 09:56:59.111] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps automation mutation isolation turn-scoped when creating an execution task
+[22m[39m[2026-10-31 09:56:59.155] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mpreserves an explicitly empty frozen directory list across adapter create and resume
+[22m[39m[2026-10-31 09:56:59.196] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps automation mutation isolation turn-scoped when resuming an execution task
+[22m[39m[2026-10-31 09:56:59.277] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps automation mutation isolation turn-scoped when resuming an execution task
+[22m[39m[2026-10-31 09:56:59.277] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks automation execution prompts on v4 sendText commands
+[22m[39m[2026-10-31 09:56:59.324] [pid:31084] [zcode-task-service][trace:trace-automation-run] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m20[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks automation execution prompts on v4 sendText commands
+[22m[39m[2026-10-31 09:56:59.324] [pid:31084] [zcode-task-service][trace:trace-automation-run] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks automation execution prompts on v4 sendText commands
+[22m[39m[2026-10-31 09:56:59.325] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist to a first-run prompt
+[22m[39m[2026-10-31 09:56:59.365] [pid:31084] [zcode-task-service][trace:trace-off-peak-first-run] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m19[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist to a first-run prompt
+[22m[39m[2026-10-31 09:56:59.365] [pid:31084] [zcode-task-service][trace:trace-off-peak-first-run] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist to a first-run prompt
+[22m[39m[2026-10-31 09:56:59.369] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[22m[39m[2026-10-31 09:56:59.412] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[22m[39m[2026-10-31 09:56:59.412] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[22m[39m[2026-10-31 09:56:59.414] [pid:31084] [zcode-task-service][trace:trace-off-peak-resume] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m24[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[22m[39m[2026-10-31 09:56:59.414] [pid:31084] [zcode-task-service][trace:trace-off-peak-resume] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores automation mutation tools for a user turn in a cron-owned session
+[22m[39m[2026-10-31 09:56:59.455] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores automation mutation tools for a user turn in a cron-owned session
+[22m[39m[2026-10-31 09:56:59.455] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores automation mutation tools for a user turn in a cron-owned session
+[22m[39m[2026-10-31 09:56:59.457] [pid:31084] [zcode-task-service][trace:trace-followup] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m13[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores automation mutation tools for a user turn in a cron-owned session
+[22m[39m[2026-10-31 09:56:59.458] [pid:31084] [zcode-task-service][trace:trace-followup] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not hide CronCreate for plain user turns in a normal (non cron-owned) session
+[22m[39m[2026-10-31 09:56:59.497] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not hide CronCreate for plain user turns in a normal (non cron-owned) session
+[22m[39m[2026-10-31 09:56:59.497] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not hide CronCreate for plain user turns in a normal (non cron-owned) session
+[22m[39m[2026-10-31 09:56:59.498] [pid:31084] [zcode-task-service][trace:trace-normal] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m8[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not hide CronCreate for plain user turns in a normal (non cron-owned) session
+[22m[39m[2026-10-31 09:56:59.498] [pid:31084] [zcode-task-service][trace:trace-normal] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2minjects product CUA helper broker config before legacy createTask session creation
+[22m[39m[2026-10-31 09:56:59.538] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprojects user input response to elicitation response in dynamic task fallback subscriptions
+[22m[39m[2026-10-31 09:56:59.630] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprojects structured turn failure codes into dynamic task errors
+[22m[39m[2026-10-31 09:56:59.671] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprojects streaming Write input in dynamic task fallback subscriptions
+[22m[39m[2026-10-31 09:56:59.713] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps background Agent launch acknowledgements in progress in dynamic task streams
+[22m[39m[2026-10-31 09:56:59.753] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps previous and current async Task launch acknowledgements in progress in dynamic task streams
+[22m[39m[2026-10-31 09:56:59.794] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbroadcasts task_created when createTask inserts a new indexed task
+[22m[39m[2026-10-31 09:56:59.834] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbroadcasts explicit task list membership reasons for pin and archive actions
+[22m[39m[2026-10-31 09:56:59.872] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not clear a newer unread marker when the system clock does not advance
+[22m[39m[1970-01-01 08:00:00.100] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not clear a newer unread marker when the system clock does not advance
+[22m[39m[1970-01-01 08:00:00.100] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps task facts unchanged when CLI rejects rename or deletion
+[22m[39m[2026-10-31 09:57:00.002] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdeletes through CLI before mirroring its durable tombstone
+[22m[39m[2026-10-31 09:57:00.044] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses deferred persistence and disables generated titles only for automation sessions
+[22m[39m[2026-10-31 09:57:00.240] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses deferred persistence without cron metadata for headless first-prompt sessions
+[22m[39m[2026-10-31 09:57:00.283] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains an accepted mobile task command after the current turn completes
+[22m[39m[2026-10-31 09:57:00.327] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m5[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains an accepted mobile task command after the current turn completes
+[22m[39m[2026-10-31 09:57:00.327] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains an accepted mobile task command after the current turn completes
+[22m[39m[2026-10-31 09:57:00.328] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains an accepted mobile task command after the current turn completes
+[22m[39m[2026-10-31 09:57:00.330] [pid:31084] [zcode-task-service][trace:input_second] ZCode task command drain 开始 {
+  commandId: [32m'queued_second'[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'session-ready'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.330] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m6[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains an accepted mobile task command after the current turn completes
+[22m[39m[2026-10-31 09:57:00.330] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains automation host command with CronCreate denied
+[22m[39m[2026-10-31 09:57:00.369] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m5[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains automation host command with CronCreate denied
+[22m[39m[2026-10-31 09:57:00.369] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains automation host command with CronCreate denied
+[22m[39m[2026-10-31 09:57:00.370] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains automation host command with CronCreate denied
+[22m[39m[2026-10-31 09:57:00.371] [pid:31084] [zcode-task-service][trace:automation-parent:manual:run-1] ZCode task command drain 开始 {
+  commandId: [32m'queued_automation'[39m,
+  queryId: [32m'automation-parent:manual:run-1'[39m,
+  reason: [32m'session-ready'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.371] [pid:31084] [zcode-task-service][trace:automation-parent:manual:run-1] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'automation-parent:manual:run-1'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m13[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains automation host command with CronCreate denied
+[22m[39m[2026-10-31 09:57:00.371] [pid:31084] [zcode-task-service][trace:automation-parent:manual:run-1] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'automation-parent:manual:run-1'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains a mobile task command when the session syncer observes the ready event
+[22m[39m[2026-10-31 09:57:00.412] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m5[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains a mobile task command when the session syncer observes the ready event
+[22m[39m[2026-10-31 09:57:00.412] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_first'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains a mobile task command when the session syncer observes the ready event
+[22m[39m[2026-10-31 09:57:00.413] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains a mobile task command when the session syncer observes the ready event
+[22m[39m[2026-10-31 09:57:00.414] [pid:31084] [zcode-task-service][trace:input_second] ZCode task command drain 开始 {
+  commandId: [32m'queued_second'[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'session-ready'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.414] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m6[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdrains a mobile task command when the session syncer observes the ready event
+[22m[39m[2026-10-31 09:57:00.414] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_second'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile enqueue command for an older owner run
+[22m[39m[2026-10-31 09:57:00.455] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m7[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile enqueue command for an older owner run
+[22m[39m[2026-10-31 09:57:00.455] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile enqueue command for an older owner run
+[22m[39m[2026-10-31 09:57:00.456] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile enqueue command for an older owner run
+[22m[39m[2026-10-31 09:57:00.457] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile enqueue command for an older owner run
+[22m[39m[2026-10-31 09:57:00.459] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile promote command for an older owner run
+[22m[39m[2026-10-31 09:57:00.497] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m7[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile promote command for an older owner run
+[22m[39m[2026-10-31 09:57:00.497] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile promote command for an older owner run
+[22m[39m[2026-10-31 09:57:00.498] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile promote command for an older owner run
+[22m[39m[2026-10-31 09:57:00.499] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrejects a stale mobile promote command for an older owner run
+[22m[39m[2026-10-31 09:57:00.500] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.537] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m7[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.538] [pid:31084] [zcode-task-service][trace:input_current] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [32m'query_current'[39m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.538] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.538] [pid:31084] [zcode-task-service][trace:input_second] ZCode task command 已取消 {
+  commandId: [32m'queued_second'[39m,
+  status: [32m'accepted'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.539] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mcancels an accepted mobile task command before it drains
+[22m[39m[2026-10-31 09:57:00.540] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.580] [pid:31084] [zcode-task-service][trace:input_running] ZCode task command drain 开始 {
+  commandId: [32m'queued_running'[39m,
+  queryId: [32m'query_running'[39m,
+  reason: [32m'enqueue'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.581] [pid:31084] [zcode-task-service][trace:input_running] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [32m'query_running'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m15[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.581] [pid:31084] [zcode-task-service][trace:input_running] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [32m'query_running'[39m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.581] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.582] [pid:31084] [zcode-task-service][trace:input_running] ZCode task command 已开始运行，跳过取消 {
+  commandId: [32m'queued_running'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.582] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps a running mobile task command when cancel races with drain
+[22m[39m[2026-10-31 09:57:00.583] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[22m[39m[2026-10-31 09:57:00.622] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m5[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[22m[39m[2026-10-31 09:57:00.622] [pid:31084] [zcode-task-service][trace:input_first] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[22m[39m[2026-10-31 09:57:00.622] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[22m[39m[2026-10-31 09:57:00.623] [pid:31084] [zcode-task-service][trace:input_second] ZCode task command drain 开始 {
+  commandId: [32m'queued_second'[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'session-ready'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.623] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m6[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[22m[39m[2026-10-31 09:57:00.624] [pid:31084] [zcode-task-service][trace:input_second] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.672] [pid:31084] [zcode-task-service][trace:input_failed] ZCode task command drain 开始 {
+  commandId: [32m'queued_failed'[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'enqueue'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+[2026-10-31 09:57:00.672] [pid:31084] [zcode-task-service][trace:input_failed] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m9[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.672] [pid:31084] [zcode-task-service][trace:input_failed] ZCode task facade sendPrompt 失败 {
+  durationMs: [33m0[39m,
+  error: [32m'v4 command sendText failed (fault.command.executionFailed): boom — session=sess_1'[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'host-command-drain'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.673] [pid:31084] [zcode-task-service][trace:input_failed] ZCode task command drain 失败 {
+  commandId: [32m'queued_failed'[39m,
+  error: [32m'v4 command sendText failed (fault.command.executionFailed): boom — session=sess_1'[39m,
+  reason: [32m'enqueue'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.674] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.674] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'glm/glm-4.6'[39m,
+  thoughtLevel: [32m'think'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[22m[39m[2026-10-31 09:57:00.675] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps attachment prompts on the legacy session/send fallback
+[22m[39m[2026-10-31 09:57:00.714] [pid:31084] [zcode-task-service][trace:input_attach] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m9[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps attachment prompts on the legacy session/send fallback
+[22m[39m[2026-10-31 09:57:00.715] [pid:31084] [zcode-task-service][trace:input_attach] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps attachment prompts on the legacy session/send fallback
+[22m[39m[2026-10-31 09:57:00.716] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrequires authoritative identity before stopping a running topic
+[22m[39m[2026-10-31 09:57:00.756] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes topic stop through the same workspace and waits for its execution to end
+[22m[39m[2026-10-31 09:57:00.798] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mpreserves the observed execution identity in a topic stop
+[22m[39m[2026-10-31 09:57:00.840] [pid:31084] [zcode-task-service] ZCode task facade stopGeneration 开始 {
+  hasRunId: [33mfalse[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mpreserves the observed execution identity in a topic stop
+[22m[39m[2026-10-31 09:57:00.840] [pid:31084] [zcode-task-service] ZCode task facade stopGeneration ACK {
+  durationMs: [33m0[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mpreserves the observed execution identity in a topic stop
+[22m[39m[2026-10-31 09:57:00.841] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes stopGeneration through the v4 stop command
+[22m[39m[2026-10-31 09:57:00.881] [pid:31084] [zcode-task-service] ZCode task facade stopGeneration 开始 {
+  hasRunId: [33mfalse[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes stopGeneration through the v4 stop command
+[22m[39m[2026-10-31 09:57:00.881] [pid:31084] [zcode-task-service] ZCode task facade stopGeneration ACK {
+  durationMs: [33m0[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes stopGeneration through the v4 stop command
+[22m[39m[2026-10-31 09:57:00.882] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes setMode through the v4 switchCollaborationMode command
+[22m[39m[2026-10-31 09:57:00.928] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mretries a stale switchCollaborationMode ACK with the server revision
+[22m[39m[2026-10-31 09:57:00.969] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps mode=auto on the legacy session/setMode fallback
+[22m[39m[2026-10-31 09:57:01.018] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes thought level config through v4 switchModelConfig with the current model
+[22m[39m[2026-10-31 09:57:01.059] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps setModel on the legacy session/setModel op
+[22m[39m[2026-10-31 09:57:01.099] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes local automation selection through V4 commands without Host runtimeModel
+[22m[39m[2026-10-31 09:57:01.140] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes respondPermission through v4 resolveInteraction keyed by requestId
+[22m[39m[2026-10-31 09:57:01.221] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mroutes respondElicitation through v4 resolveInteraction with action/content
+[22m[39m[2026-10-31 09:57:01.262] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mtreats a noop resolveInteraction ACK as an idempotent success
+[22m[39m[2026-10-31 09:57:01.303] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmerges live subagent tool projection into terminal ZCode snapshots
+[22m[39m[2026-10-31 09:57:01.344] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmerges live subagent tool projection into terminal ZCode snapshots
+[22m[39m[2026-10-31 09:57:01.347] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m3[39m,
+  indexDurationMs: [33m2[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m15[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m2[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mattaches hidden task notification metadata to background Agent tools in restored snapshots
+[22m[39m[2026-10-31 09:57:01.394] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mattaches hidden task notification metadata to background Agent tools in restored snapshots
+[22m[39m[2026-10-31 09:57:01.397] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m3[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m10[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m1[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores a 'failed' background Agent notification without changing unrelated launch semantics
+[22m[39m[2026-10-31 09:57:01.435] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores a 'failed' background Agent notification without changing unrelated launch semantics
+[22m[39m[2026-10-31 09:57:01.438] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m14[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m1[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores a 'stopped' background Agent notification without changing unrelated launch semantics
+[22m[39m[2026-10-31 09:57:01.478] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores a 'stopped' background Agent notification without changing unrelated launch semantics
+[22m[39m[2026-10-31 09:57:01.480] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m14[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m1[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprojects live task notification turns back onto matching background Agent tools
+[22m[39m[2026-10-31 09:57:01.522] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprojects failed live task notifications with the provider error on matching Agent tools
+[22m[39m[2026-10-31 09:57:01.561] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmerges live background job updates with restored replayable snapshot jobs
+[22m[39m[2026-10-31 09:57:01.604] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [32m'remote:ssh:dev:/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not include zero ZCode Protocol context usage in task snapshots
+[22m[39m[2026-10-31 09:57:01.695] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not include zero ZCode Protocol context usage in task snapshots
+[22m[39m[2026-10-31 09:57:01.697] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses runtime context usage when restored projection has no usage yet
+[22m[39m[2026-10-31 09:57:01.744] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses runtime context usage when restored projection has no usage yet
+[22m[39m[2026-10-31 09:57:01.746] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprefers structured projection error code in restored task snapshots
+[22m[39m[2026-10-31 09:57:01.787] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprefers structured projection error code in restored task snapshots
+[22m[39m[2026-10-31 09:57:01.789] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m3[39m,
+  indexDurationMs: [33m2[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores protocol user file parts as task message attachments
+[22m[39m[2026-10-31 09:57:01.831] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores protocol user file parts as task message attachments
+[22m[39m[2026-10-31 09:57:01.833] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m1[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m19[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m1[39m,
+    messages: [33m1[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed model hint for web remote replayable snapshot resume
+[22m[39m[2026-10-31 09:57:01.873] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'default-deepseek/deepseek-v4-flash'[39m,
+  thoughtLevel: [1mnull[22m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'remote_deepseek_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed model hint for web remote replayable snapshot resume
+[22m[39m[2026-10-31 09:57:01.874] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'remote_deepseek_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not backfill indexed model hint for desktop continuous snapshot resume
+[22m[39m[2026-10-31 09:57:01.913] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'desktop-continuous'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'desktop_deepseek_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed model hint when resumeTask omits model
+[22m[39m[2026-10-31 09:57:01.954] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'default-deepseek/deepseek-v4-flash'[39m,
+  thoughtLevel: [1mnull[22m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'resume_deepseek_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed model hint when resumeTask omits model
+[22m[39m[2026-10-31 09:57:01.956] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mstamps offPeakTaskId on normal snapshot resume (D48)
+[22m[39m[2026-10-31 09:57:01.998] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed thought level when resumeTask omits thought level
+[22m[39m[2026-10-31 09:57:02.036] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'bigmodel-api/GLM-5.2'[39m,
+  thoughtLevel: [32m'high'[39m,
+  reason: [32m'resume_task'[39m,
+  taskId: [32m'resume_glm52_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed thought level when resumeTask omits thought level
+[22m[39m[2026-10-31 09:57:02.038] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed thought level for web replayable snapshot resume
+[22m[39m[2026-10-31 09:57:02.080] [pid:31084] [zcode-task-service] 从 task index 回填 ZCode session resume 配置 {
+  model: [32m'bigmodel-api/GLM-5.2'[39m,
+  thoughtLevel: [32m'high'[39m,
+  reason: [32m'replayable_snapshot'[39m,
+  taskId: [32m'replayable_glm52_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mbackfills indexed thought level for web replayable snapshot resume
+[22m[39m[2026-10-31 09:57:02.081] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'replayable_glm52_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mskips indexed model backfill for web replayable ui-resolved snapshot restore
+[22m[39m[2026-10-31 09:57:02.120] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'web-remote-replayable'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'replayable_readonly_unavailable_model'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks idle protocol snapshots with completed assistant turns as completed tasks
+[22m[39m[2026-10-31 09:57:02.160] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks idle protocol snapshots with completed assistant turns as completed tasks
+[22m[39m[2026-10-31 09:57:02.162] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m2[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m4[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m1[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks protocol task snapshots when messageLimit trims older history
+[22m[39m[2026-10-31 09:57:02.202] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmarks protocol task snapshots when messageLimit trims older history
+[22m[39m[2026-10-31 09:57:02.203] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [33m2[39m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m18[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m3[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mtrue[39m,
+    userMessages: [33m2[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores legacy v2 task snapshots when the protocol session is missing
+[22m[39m[2026-10-31 09:57:02.248] [pid:31084] [zcode-task-service] ZCode Protocol session 缺失，已按 legacy task snapshot 恢复 taskId=legacy_task Error: Session not found: legacy_task
+    at D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:4294:54
+    at [90mfile:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:302:11
+    at [90mfile:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:1903:26
+    at [90mfile:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2326:20
+    at new Promise (<anonymous>)
+    at runWithCancel [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2323:10[90m)[39m
+    at [90mfile:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2305:20
+    at new Promise (<anonymous>)
+    at runWithTimeout [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2272:10[90m)[39m
+    at [90mfile:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/runner[24m/dist/chunk-artifact.js:2955:64
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrestores legacy v2 task snapshots when the protocol session is missing
+[22m[39m[2026-10-31 09:57:02.249] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m42[39m,
+  indexDurationMs: [33m0[39m,
+  limitDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  resumeDurationMs: [33m42[39m,
+  snapshotKind: [32m'legacy'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m10[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m1[39m,
+    messages: [33m1[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'legacy_task'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mupgrades legacy imported Claude snapshots to protocol sessions before model switching
+[22m[39m[2026-10-31 09:57:02.297] [pid:31084] [zcode-task-service] legacy Claude 导入 task 已升级为 ZCode session taskId=claude-import-590ccc622ab6db6bd9f1d7bf
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mupgrades legacy imported Claude snapshots to protocol sessions before model switching
+[22m[39m[2026-10-31 09:57:02.298] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m46[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m45[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m22[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'claude-import-590ccc622ab6db6bd9f1d7bf'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrepairs empty protocol snapshots for imported Claude tasks from legacy backups
+[22m[39m[2026-10-31 09:57:02.304] [pid:31084] [zcode-task-service] Claude 导入 protocol session 历史异常，按 legacySnapshot 回填 taskId=claude-import-empty-protocol
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mrepairs empty protocol snapshots for imported Claude tasks from legacy backups
+[22m[39m[2026-10-31 09:57:02.342] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m39[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m38[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m1[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m6[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m2[39m,
+    messages: [33m2[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'claude-import-empty-protocol'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[22m[39m[2026-10-31 09:57:02.398] [pid:31084] [task-index-repo] 已迁移 legacy ACP task_id 到 ZCode session id 数量=1
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[22m[39m[2026-10-31 09:57:02.400] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m9[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m1[39m,
+    messages: [33m1[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m1[39m
+  },
+  taskId: [32m'sess_legacy_real'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[22m[39m[2026-10-31 09:57:02.401] [pid:31084] [zcode-task-service][trace:input_1] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_legacy_real'[39m,
+  textLength: [33m8[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[22m[39m[2026-10-31 09:57:02.401] [pid:31084] [zcode-task-service][trace:input_1] ZCode task facade sendPrompt ACK {
+  durationMs: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_legacy_real'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[22m[39m[2026-10-31 09:57:02.402] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode Protocol context projection events to legacy usage_update
+[22m[39m[2026-10-31 09:57:02.446] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m补齐工具调用后缺失的终态正文且不重复已收到的部分：''
+[22m[39m[2026-10-31 09:57:02.489] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目'
+[22m[39m[2026-10-31 09:57:02.530] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目说明'
+[22m[39m[2026-10-31 09:57:02.568] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2m不同 assistant message 的正文独立核对，不受前言或子代理文字影响
+[22m[39m[2026-10-31 09:57:02.606] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses prompt inputId as per-turn traceId for session stream events
+[22m[39m[2026-10-31 09:57:02.645] [pid:31084] [zcode-task-service][trace:input_turn_1] ZCode task facade sendPrompt 开始 {
+  attachmentCount: [33m0[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  textLength: [33m8[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses prompt inputId as per-turn traceId for session stream events
+[22m[39m[2026-10-31 09:57:02.646] [pid:31084] [zcode-task-service][trace:input_turn_1] ZCode task facade sendPrompt ACK {
+  durationMs: [33m1[39m,
+  queryId: [1mnull[22m,
+  reason: [32m'direct'[39m,
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspaceKey: [32m'/repo'[39m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2muses prompt inputId as per-turn traceId for session stream events
+[22m[39m[2026-10-31 09:57:02.646] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps main turn model usage with context window to legacy usage_update
+[22m[39m[2026-10-31 09:57:02.687] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps aggregate main turn cache hit usage to legacy usage_update
+[22m[39m[2026-10-31 09:57:02.726] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mprefers real main turn model usage over projected context used
+[22m[39m[2026-10-31 09:57:02.764] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mdoes not map sidecar model usage to legacy usage_update
+[22m[39m[2026-10-31 09:57:02.810] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.850] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.852] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m2[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m1[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.853] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m1[39m,
+  indexDurationMs: [33m1[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.854] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.855] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.856] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstdout[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[22m[39m[2026-10-31 09:57:02.857] [pid:31084] [zcode-task-service] [zcode-task-service] 历史快照读取完成 {
+  clientMode: [32m'unknown'[39m,
+  durationMs: [33m0[39m,
+  indexDurationMs: [33m0[39m,
+  messageLimit: [1mnull[22m,
+  projectionDurationMs: [33m0[39m,
+  resumeDurationMs: [33m0[39m,
+  snapshotKind: [32m'session'[39m,
+  stats: {
+    assistantMessages: [33m0[39m,
+    bodyRefs: [33m0[39m,
+    contentChars: [33m0[39m,
+    fileChanges: [33m0[39m,
+    historyTotalMessages: [33m0[39m,
+    messages: [33m0[39m,
+    slashCommands: [33m0[39m,
+    thoughtChars: [33m0[39m,
+    toolCalls: [33m0[39m,
+    toolSliceMessages: [33m0[39m,
+    truncatedBefore: [33mfalse[39m,
+    userMessages: [33m0[39m
+  },
+  taskId: [32m'sess_1'[39m,
+  workspaceIdentity: [1mnull[22m,
+  workspacePath: [32m'/repo'[39m
+}
+
+[90mstderr[2m | packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22m[2mZCode legacy task compat task index[2m > [22m[2mkeeps pinned state in sqlite without resuming the agent session
+[22m[39m[2026-10-31 09:57:02.895] [pid:31084] [zcode-task-index-syncer] 子代理历史列表索引修复失败 workspace=/repo Error: listSessions should not be used for task index lists
+    at Object.<anonymous> (D:/worktree/upstream-316-gitline/packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:333:13)
+    at Object.Mock [as listSessions] [90m(file:///D:/worktree/upstream-316-gitline/[39mnode_modules/[4m@vitest/spy[24m/dist/index.js:332:34[90m)[39m
+    at repairSubagentTaskIndex (D:/worktree/upstream-316-gitline/packages/services/src/task-facts/repairSubagentTaskIndex.ts:18:41)
+
+ [31m❯[39m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts [2m([22m[2m101 tests[22m[2m | [22m[31m101 failed[39m[2m)[22m[33m 4451[2mms[22m[39m
+[31m     [31m×[31m 各夹具的迟到写入保持在自己的数据库中[39m[32m 109[2mms[22m[39m
+[31m     [31m×[31m creates fresh CLI identities for explicit imports instead of overwriting a deleted import[39m[32m 52[2mms[22m[39m
+[31m     [31m×[31m waits for an in-flight topic admission before confirming cancellation (undefined)[39m[32m 110[2mms[22m[39m
+[31m     [31m×[31m waits for an in-flight topic admission before confirming cancellation (ssh://host/repo)[39m[32m 109[2mms[22m[39m
+[31m     [31m×[31m does not admit an uploaded topic input after cancellation[39m[32m 96[2mms[22m[39m
+[31m     [31m×[31m uploads Bot attachments and admits input on the same trusted connection[39m[32m 48[2mms[22m[39m
+[31m     [31m×[31m keeps trusted remote session routing on group admission and rejects a foreign workspace before IO[39m[32m 46[2mms[22m[39m
+[31m     [31m×[31m exposes task ready only after the indexed session returns to an input-ready phase[39m[32m 50[2mms[22m[39m
+[31m     [31m×[31m reports the manual automation runId on terminal outcome[39m[32m 47[2mms[22m[39m
+[31m     [31m×[31m keeps automation mutation isolation turn-scoped when creating an execution task[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m preserves an explicitly empty frozen directory list across adapter create and resume[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m SAT28: 显式恢复 child 只返回详情，不创建主列表索引[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m keeps automation mutation isolation turn-scoped when resuming an execution task[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m marks automation execution prompts on v4 sendText commands[39m[32m 46[2mms[22m[39m
+[31m     [31m×[31m applies a caller-scoped CronCreate denylist to a first-run prompt[39m[32m 45[2mms[22m[39m
+[31m     [31m×[31m applies a caller-scoped CronCreate denylist after resuming a normal session[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m restores automation mutation tools for a user turn in a cron-owned session[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m does not hide CronCreate for plain user turns in a normal (non cron-owned) session[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m injects product CUA helper broker config before legacy createTask session creation[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m restarts only the current workspace agent process[39m[32m 2[2mms[22m[39m
+[31m     [31m×[31m releases workspace preparation through the workspace-scoped agent lifecycle[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m uses structured ModelSelection for a custom model[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m records agent model network status events as HTTP network telemetry[39m[32m 1[2mms[22m[39m
+[31m     [31m×[31m projects user input response to elicitation response in dynamic task fallback subscriptions[39m[32m 46[2mms[22m[39m
+[31m     [31m×[31m projects structured turn failure codes into dynamic task errors[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m projects streaming Write input in dynamic task fallback subscriptions[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m keeps background Agent launch acknowledgements in progress in dynamic task streams[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m keeps previous and current async Task launch acknowledgements in progress in dynamic task streams[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m broadcasts task_created when createTask inserts a new indexed task[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m broadcasts explicit task list membership reasons for pin and archive actions[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m does not clear a newer unread marker when the system clock does not advance[39m[32m 45[2mms[22m[39m
+[31m     [31m×[31m clears the unread marker when expectedUnreadAt still matches[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m keeps task facts unchanged when CLI rejects rename or deletion[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m deletes through CLI before mirroring its durable tombstone[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m renames through CLI while preserving CLI activity time[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m reads the bound Session original selection without filtering unavailable model options[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m creates a Bot draft with the native v4 createSession command[39m[32m 37[2mms[22m[39m
+[31m     [31m×[31m desktop-attached remote Bot draft 只发送 ModelSelection[39m[32m 37[2mms[22m[39m
+[31m     [31m×[31m uses deferred persistence and disables generated titles only for automation sessions[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m uses deferred persistence without cron metadata for headless first-prompt sessions[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m drains an accepted mobile task command after the current turn completes[39m[32m 48[2mms[22m[39m
+[31m     [31m×[31m drains automation host command with CronCreate denied[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m drains a mobile task command when the session syncer observes the ready event[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m rejects a stale mobile enqueue command for an older owner run[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m rejects a stale mobile promote command for an older owner run[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m cancels an accepted mobile task command before it drains[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m keeps a running mobile task command when cancel races with drain[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m keeps mobile clientId on the v4 sendText envelope when draining a host command[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m marks a drained mobile command failed when the v4 sendText ACK is rejected[39m[32m 50[2mms[22m[39m
+[31m     [31m×[31m keeps attachment prompts on the legacy session/send fallback[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m requires authoritative identity before stopping a running topic[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m routes topic stop through the same workspace and waits for its execution to end[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m preserves the observed execution identity in a topic stop[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m routes stopGeneration through the v4 stop command[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m routes setMode through the v4 switchCollaborationMode command[39m[32m 47[2mms[22m[39m
+[31m     [31m×[31m retries a stale switchCollaborationMode ACK with the server revision[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m keeps mode=auto on the legacy session/setMode fallback[39m[32m 49[2mms[22m[39m
+[31m     [31m×[31m routes thought level config through v4 switchModelConfig with the current model[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m keeps setModel on the legacy session/setModel op[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m routes local automation selection through V4 commands without Host runtimeModel[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m routes desktop-attached remote automation with ModelSelection only[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m routes respondPermission through v4 resolveInteraction keyed by requestId[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m routes respondElicitation through v4 resolveInteraction with action/content[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m treats a noop resolveInteraction ACK as an idempotent success[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m merges live subagent tool projection into terminal ZCode snapshots[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m attaches hidden task notification metadata to background Agent tools in restored snapshots[39m[32m 50[2mms[22m[39m
+[31m     [31m×[31m restores a 'failed' background Agent notification without changing unrelated launch semantics[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m restores a 'stopped' background Agent notification without changing unrelated launch semantics[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m projects live task notification turns back onto matching background Agent tools[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m projects failed live task notifications with the provider error on matching Agent tools[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m merges live background job updates with restored replayable snapshot jobs[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m filters non-glm legacy task rows in sqlite-backed lists[39m[32m 49[2mms[22m[39m
+[31m     [31m×[31m does not include zero ZCode Protocol context usage in task snapshots[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m uses runtime context usage when restored projection has no usage yet[39m[32m 49[2mms[22m[39m
+[31m     [31m×[31m prefers structured projection error code in restored task snapshots[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m restores protocol user file parts as task message attachments[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m backfills indexed model hint for web remote replayable snapshot resume[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m does not backfill indexed model hint for desktop continuous snapshot resume[39m[32m 38[2mms[22m[39m
+[31m     [31m×[31m backfills indexed model hint when resumeTask omits model[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m stamps offPeakTaskId on normal snapshot resume (D48)[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m backfills indexed thought level when resumeTask omits thought level[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m backfills indexed thought level for web replayable snapshot resume[39m[32m 43[2mms[22m[39m
+[31m     [31m×[31m skips indexed model backfill for web replayable ui-resolved snapshot restore[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m marks idle protocol snapshots with completed assistant turns as completed tasks[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m marks protocol task snapshots when messageLimit trims older history[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m restores legacy v2 task snapshots when the protocol session is missing[39m[32m 46[2mms[22m[39m
+[31m     [31m×[31m upgrades legacy imported Claude snapshots to protocol sessions before model switching[39m[32m 50[2mms[22m[39m
+[31m     [31m×[31m repairs empty protocol snapshots for imported Claude tasks from legacy backups[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m migrates legacy wrapper task ids to acp_session_id backed protocol sessions[39m[32m 60[2mms[22m[39m
+[31m     [31m×[31m maps ZCode Protocol context projection events to legacy usage_update[39m[32m 44[2mms[22m[39m
+[31m     [31m×[31m 补齐工具调用后缺失的终态正文且不重复已收到的部分：''[39m[32m 42[2mms[22m[39m
+[31m     [31m×[31m 补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目'[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m 补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目说明'[39m[32m 39[2mms[22m[39m
+[31m     [31m×[31m 不同 assistant message 的正文独立核对，不受前言或子代理文字影响[39m[32m 38[2mms[22m[39m
+[31m     [31m×[31m uses prompt inputId as per-turn traceId for session stream events[39m[32m 40[2mms[22m[39m
+[31m     [31m×[31m maps main turn model usage with context window to legacy usage_update[39m[32m 41[2mms[22m[39m
+[31m     [31m×[31m maps aggregate main turn cache hit usage to legacy usage_update[39m[32m 38[2mms[22m[39m
+[31m     [31m×[31m prefers real main turn model usage over projected context used[39m[32m 38[2mms[22m[39m
+[31m     [31m×[31m does not map sidecar model usage to legacy usage_update[39m[32m 46[2mms[22m[39m
+[31m     [31m×[31m maps ZCode model retry status to apiRetry stream events and runtime snapshots[39m[32m 47[2mms[22m[39m
+[31m     [31m×[31m keeps pinned state in sqlite without resuming the agent session[39m[32m 38[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 101 [49m[22m[31m⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22m各夹具的迟到写入保持在自己的数据库中
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mcreates fresh CLI identities for explicit imports instead of overwriting a deleted import
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mwaits for an in-flight topic admission before confirming cancellation (undefined)
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mwaits for an in-flight topic admission before confirming cancellation (ssh://host/repo)
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not admit an uploaded topic input after cancellation
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muploads Bot attachments and admits input on the same trusted connection
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps trusted remote session routing on group admission and rejects a foreign workspace before IO
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mexposes task ready only after the indexed session returns to an input-ready phase
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mreports the manual automation runId on terminal outcome
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps automation mutation isolation turn-scoped when creating an execution task
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mpreserves an explicitly empty frozen directory list across adapter create and resume
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mSAT28: 显式恢复 child 只返回详情，不创建主列表索引
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps automation mutation isolation turn-scoped when resuming an execution task
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmarks automation execution prompts on v4 sendText commands
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mapplies a caller-scoped CronCreate denylist to a first-run prompt
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestores automation mutation tools for a user turn in a cron-owned session
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not hide CronCreate for plain user turns in a normal (non cron-owned) session
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22minjects product CUA helper broker config before legacy createTask session creation
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestarts only the current workspace agent process
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mreleases workspace preparation through the workspace-scoped agent lifecycle
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muses structured ModelSelection for a custom model
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrecords agent model network status events as HTTP network telemetry
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprojects user input response to elicitation response in dynamic task fallback subscriptions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprojects structured turn failure codes into dynamic task errors
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprojects streaming Write input in dynamic task fallback subscriptions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps background Agent launch acknowledgements in progress in dynamic task streams
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps previous and current async Task launch acknowledgements in progress in dynamic task streams
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbroadcasts task_created when createTask inserts a new indexed task
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbroadcasts explicit task list membership reasons for pin and archive actions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not clear a newer unread marker when the system clock does not advance
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mclears the unread marker when expectedUnreadAt still matches
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps task facts unchanged when CLI rejects rename or deletion
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdeletes through CLI before mirroring its durable tombstone
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrenames through CLI while preserving CLI activity time
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mreads the bound Session original selection without filtering unavailable model options
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mcreates a Bot draft with the native v4 createSession command
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdesktop-attached remote Bot draft 只发送 ModelSelection
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muses deferred persistence and disables generated titles only for automation sessions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muses deferred persistence without cron metadata for headless first-prompt sessions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdrains an accepted mobile task command after the current turn completes
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdrains automation host command with CronCreate denied
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdrains a mobile task command when the session syncer observes the ready event
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrejects a stale mobile enqueue command for an older owner run
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrejects a stale mobile promote command for an older owner run
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mcancels an accepted mobile task command before it drains
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps a running mobile task command when cancel races with drain
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps mobile clientId on the v4 sendText envelope when draining a host command
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmarks a drained mobile command failed when the v4 sendText ACK is rejected
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps attachment prompts on the legacy session/send fallback
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrequires authoritative identity before stopping a running topic
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes topic stop through the same workspace and waits for its execution to end
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mpreserves the observed execution identity in a topic stop
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes stopGeneration through the v4 stop command
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes setMode through the v4 switchCollaborationMode command
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mretries a stale switchCollaborationMode ACK with the server revision
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps mode=auto on the legacy session/setMode fallback
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes thought level config through v4 switchModelConfig with the current model
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps setModel on the legacy session/setModel op
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes local automation selection through V4 commands without Host runtimeModel
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes desktop-attached remote automation with ModelSelection only
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes respondPermission through v4 resolveInteraction keyed by requestId
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mroutes respondElicitation through v4 resolveInteraction with action/content
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mtreats a noop resolveInteraction ACK as an idempotent success
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmerges live subagent tool projection into terminal ZCode snapshots
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mattaches hidden task notification metadata to background Agent tools in restored snapshots
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestores a 'failed' background Agent notification without changing unrelated launch semantics
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestores a 'stopped' background Agent notification without changing unrelated launch semantics
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprojects live task notification turns back onto matching background Agent tools
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprojects failed live task notifications with the provider error on matching Agent tools
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmerges live background job updates with restored replayable snapshot jobs
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mfilters non-glm legacy task rows in sqlite-backed lists
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not include zero ZCode Protocol context usage in task snapshots
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muses runtime context usage when restored projection has no usage yet
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprefers structured projection error code in restored task snapshots
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestores protocol user file parts as task message attachments
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbackfills indexed model hint for web remote replayable snapshot resume
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not backfill indexed model hint for desktop continuous snapshot resume
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbackfills indexed model hint when resumeTask omits model
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mstamps offPeakTaskId on normal snapshot resume (D48)
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbackfills indexed thought level when resumeTask omits thought level
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mbackfills indexed thought level for web replayable snapshot resume
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mskips indexed model backfill for web replayable ui-resolved snapshot restore
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmarks idle protocol snapshots with completed assistant turns as completed tasks
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmarks protocol task snapshots when messageLimit trims older history
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrestores legacy v2 task snapshots when the protocol session is missing
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mupgrades legacy imported Claude snapshots to protocol sessions before model switching
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrepairs empty protocol snapshots for imported Claude tasks from legacy backups
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmigrates legacy wrapper task ids to acp_session_id backed protocol sessions
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmaps ZCode Protocol context projection events to legacy usage_update
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22m补齐工具调用后缺失的终态正文且不重复已收到的部分：''
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22m补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目'
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22m补齐工具调用后缺失的终态正文且不重复已收到的部分：'完整项目说明'
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22m不同 assistant message 的正文独立核对，不受前言或子代理文字影响
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22muses prompt inputId as per-turn traceId for session stream events
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmaps main turn model usage with context window to legacy usage_update
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmaps aggregate main turn cache hit usage to legacy usage_update
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mprefers real main turn model usage over projected context used
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mdoes not map sidecar model usage to legacy usage_update
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mmaps ZCode model retry status to apiRetry stream events and runtime snapshots
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mkeeps pinned state in sqlite without resuming the agent session
+[31m[1mTypeError[22m: setNetworkTelemetrySink is not a function[39m
+[36m [2m❯[22m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:[2m66:3[22m[39m
+    [90m 64|[39m afterEach(async () => {
+    [90m 65|[39m   vi.useRealTimers();
+    [90m 66|[39m   setNetworkTelemetrySink(null);
+    [90m   |[39m   [31m^[39m
+    [90m 67|[39m   while (disposables.length > 0) {
+    [90m 68|[39m     disposables.pop()?.disposeAll();
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/104]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mapplies a caller-scoped CronCreate denylist to a first-run prompt
+[31m[1mAssertionError[22m: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ][90m
+
+Received:
+
+[1m  1st vi.fn() call:
+
+[22m[2m  [[22m
+[32m-   ObjectContaining {[90m
+[32m-     "envelope": ObjectContaining {[90m
+[31m+   {[90m
+[31m+     "envelope": {[90m
+[31m+       "clientId": "host-services-01a18fac-a350-7376-9c71-6bb8817a84c6",[90m
+[2m        "commandId": "trace-off-peak-first-run",[22m
+[31m+       "issuedAt": 1793411819365,[90m
+[2m        "payload": {[22m
+[2m          "heldQueueDisposition": "keepQueueAndSend",[22m
+[32m-         "offPeakRunType": "init",[90m
+[32m-         "offPeakTaskId": "offpeak-stable-1",[90m
+[2m          "text": "run off-peak prompt",[22m
+[2m          "toolDisallowlist": [[22m
+[2m            "CronCreate",[22m
+[32m-           "OffPeakCreate",[90m
+[2m          ],[22m
+[2m        },[22m
+[31m+       "sessionId": "sess_1",[90m
+[2m        "type": "sendText",[22m
+[2m      },[22m
+[31m+     "workspaceIdentity": undefined,[90m
+[31m+     "workspacePath": "/repo",[90m
+[2m    },[22m
+[2m  ][22m
+[31m[90m
+
+Number of calls: [1m1[22m
+[31m[39m
+[36m [2m❯[22m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:[2m1159:45[22m[39m
+    [90m1157|[39m     });
+    [90m1158|[39m
+    [90m1159|[39m     expect(agent.sendConversationCommandV4).toHaveBeenCalledWith(
+    [90m   |[39m                                             [31m^[39m
+    [90m1160|[39m       expect.objectContaining({
+    [90m1161|[39m         envelope: expect.objectContaining({
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/104]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mapplies a caller-scoped CronCreate denylist after resuming a normal session
+[31m[1mAssertionError[22m: expected "vi.fn()" to be called with arguments: [ ObjectContaining{…} ][90m
+
+Received:
+
+[1m  1st vi.fn() call:
+
+[22m[2m  [[22m
+[32m-   ObjectContaining {[90m
+[32m-     "envelope": ObjectContaining {[90m
+[31m+   {[90m
+[31m+     "envelope": {[90m
+[31m+       "clientId": "host-services-01a18fac-a350-7376-9c71-6bb8817a84c6",[90m
+[2m        "commandId": "trace-off-peak-resume",[22m
+[31m+       "issuedAt": 1793411819414,[90m
+[2m        "payload": {[22m
+[2m          "heldQueueDisposition": "keepQueueAndSend",[22m
+[32m-         "offPeakRunType": "resume",[90m
+[32m-         "offPeakTaskId": "offpeak-stable-1",[90m
+[2m          "text": "continue off-peak prompt",[22m
+[2m          "toolDisallowlist": [[22m
+[2m            "CronCreate",[22m
+[32m-           "OffPeakCreate",[90m
+[2m          ],[22m
+[2m        },[22m
+[31m+       "sessionId": "sess_1",[90m
+[2m        "type": "sendText",[22m
+[2m      },[22m
+[31m+     "workspaceIdentity": undefined,[90m
+[31m+     "workspacePath": "/repo",[90m
+[2m    },[22m
+[2m  ][22m
+[31m[90m
+
+Number of calls: [1m1[22m
+[31m[39m
+[36m [2m❯[22m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:[2m1199:45[22m[39m
+    [90m1197|[39m     });
+    [90m1198|[39m
+    [90m1199|[39m     expect(agent.sendConversationCommandV4).toHaveBeenCalledWith(
+    [90m   |[39m                                             [31m^[39m
+    [90m1200|[39m       expect.objectContaining({
+    [90m1201|[39m         envelope: expect.objectContaining({
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[3/104]⎯[22m[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts[2m > [22mZCode legacy task compat task index[2m > [22mrecords agent model network status events as HTTP network telemetry
+[31m[1mTypeError[22m: setNetworkTelemetrySink is not a function[39m
+[36m [2m❯[22m packages/services/test/zcodeLegacyTaskCompatTaskIndex.test.ts:[2m1388:5[22m[39m
+    [90m1386|[39m   it("records agent model network status events as HTTP network teleme…
+    [90m1387|[39m     const observations: NetworkObservation[] = [];
+    [90m1388|[39m     setNetworkTelemetrySink((observation) => observations.push(observa…
+    [90m   |[39m     [31m^[39m
+    [90m1389|[39m     const { eventEmitter, service } = createService();
+    [90m1390|[39m     const task = await service.createTask({ workspacePath: "/repo", pr…
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[4/104]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m1 failed[39m[22m[90m (1)[39m
+[2m      Tests [22m [1m[31m101 failed[39m[22m[90m (101)[39m
+[2m   Start at [22m 09:56:56
+[2m   Duration [22m 6.92s[2m (transform 1.72s, setup 43ms, import 2.24s, tests 4.45s, environment 0ms)[22m
+

@@ -18,12 +18,13 @@ import type { PermissionDecisionResult } from "../../permission/service.js";
 import { normalizeToolExecutionInput } from "../input-normalization.js";
 import { runPermissionRequestHooks } from "./hook-flow.js";
 import { recheckPermissionHookModifiedInput } from "./permission-input-recheck.js";
+import { resolveRuntimePermissionContext } from "./permission-capability.js";
 import { validateInput } from "./validation.js";
 import type { ExecutableToolCall, ToolEntry } from "../types.js";
 import type { ToolExecutorDeps } from "./types.js";
 import type { resolveToolApproval } from "./approval-gate.js";
 
-interface PermissionResponderRaceInput {
+export interface PermissionResponderRaceInput {
   /**
    * hook 链应答方。resolve `undefined` 表示无决定（退赛，只剩 broker 单边等待）；
    * 抛错同样按退赛处理并回调 {@link PermissionResponderRaceInput.onHookFailure}——
@@ -45,7 +46,7 @@ interface PermissionResponderRaceInput {
   onHookFailure?: (error: unknown) => void;
 }
 
-interface PermissionResponderRaceOutcome {
+export interface PermissionResponderRaceOutcome {
   result: PermissionBrokerResult;
   source: "hook" | "broker";
 }
@@ -203,21 +204,36 @@ export async function runPermissionAskRace(
     useNormalizedHookModifiedInput = true;
     if (!validateInput(normalizedHookModifiedInput, entry)) {
       // PermissionRequest hook 可以改写目标路径，修改后的输入不能沿用修改前的权限结果。
-      const recheck = await recheckPermissionHookModifiedInput({
+      const recheck = recheckPermissionHookModifiedInput({
+        // 与首次判权同源：无 preparedContext 时按 deps 快照构造（与 fork 旧版 recheck 一致）。
+        context: {
+          ...resolveRuntimePermissionContext(deps),
+          workingDirectory: deps.getWorkingDirectory(),
+          workspaceRoot: deps.getWorkspaceRoot(),
+        },
         deps,
         entry,
         mode,
         modifiedInput: normalizedHookModifiedInput,
         projectRules: options.projectRules,
-        requestId: options.requestId,
-        signal: options.signal,
         toolCall,
-        traceContext,
       });
-      if (recheck.permissionDecision) permissionDecisionNext = recheck.permissionDecision;
-      if (recheck.brokerResult) {
-        brokerResult = recheck.brokerResult;
-        useNormalizedHookModifiedInput = brokerResult.decision === "allow";
+      if (recheck.permissionDecision) {
+        permissionDecisionNext = recheck.permissionDecision;
+        if (recheck.permissionDecision.decision !== "allow") {
+          // FORK TODO(upgrade-316): 上游 v3.16 的 recheck 只重算策略结论（不再自己调 broker），
+          // ask 时由 permission-flow 的 while-reentry 用新输入重新走确认窗。fork 的
+          // runPermissionAskRace 是单次竞速、没有重入点，无法再向 broker 询问改写后的输入。
+          // 这里 fail-closed：改写后的输入若仍被拒绝或仍需审批，一律按 deny 落实竞速结果，
+          // 避免 hook 借改写输入绕过确认窗。是否接入上游 reentry 需人工裁定。
+          brokerResult = {
+            decision: "deny",
+            reason:
+              recheck.permissionDecision.reason ??
+              `Permission hook modified ${toolCall.name} input requires a new approval`,
+          };
+          useNormalizedHookModifiedInput = false;
+        }
       }
     }
   }

@@ -46,6 +46,8 @@
     "test:magic-context-section-ctx-note": "node --test scripts/test-magic-context-section-ctx-note.mjs",
     "test:prompt-surface-tiering": "node --test scripts/test-prompt-surface-tiering.mjs",
     "typecheck": "tsc --noEmit",
+    "test": "vitest tests",
+    "coverage": "vitest run tests --coverage",
     "lint": "oxlint src --no-ignore",
     "lint:fix": "oxlint --fix src --no-ignore",
     "test:e2e-subagent-resume": "tsx --test scripts/test-e2e-subagent-resume.mjs",
@@ -67,6 +69,7 @@
     "yaml": "^2.9.0"
   },
   "devDependencies": {
-    "@types/node": "^24.0.0"
+    "@types/node": "^24.0.0",
+    "vitest": "^4.1.5"
   }
 }

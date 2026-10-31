@@ -3,6 +3,7 @@
 // Subagent Runner
 // ============================================================
 
+import type { GetAgentDefinitions } from "./definitions.js";
 import {
   AgentErrorCode,
   CoreErrorType,
@@ -118,6 +119,7 @@ export interface ExploreSubagentPortOptions {
   enqueueParentTaskNotification?: EnqueueParentTaskNotification;
   outputRootDir?: string;
   profiles?: readonly AgentProfile[];
+  getAgentDefinitions?: GetAgentDefinitions;
   /**
    * 内置子智能体（general-purpose / Explore）的模型 override，两种形态：
    * - 静态值：App 创建时读一次 agents-state.json 冻结的启动快照；
@@ -150,10 +152,15 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
   // 每次 spawn 前重新归一化——内置 override 以 provider 形态现读（bootstrap 侧带
   // 内容缓存，文件未变时零解析成本）；静态值形态逐行保持旧语义（值不变，等于构造期
   // 快照）。用户/插件 profile 来自启动时加载，仍随 options.profiles 原样传入。
-  const resolveProfiles = (): readonly AgentProfile[] =>
-    normalizeAgentProfiles(options.profiles ?? [], {
+  // 上游 3.16 的 getAgentDefinitions 已是「每次现读的完整定义集」，优先使用；
+  // 缺席时回退 fork 的归一化路径（含活读 override provider）。
+  const resolveProfiles = (): readonly AgentProfile[] => {
+    const definitions = options.getAgentDefinitions?.();
+    if (definitions) return definitions.activeAgents;
+    return normalizeAgentProfiles(options.profiles ?? [], {
       builtInModelSelectionOverrides: resolveBuiltInModelSelectionOverrides(options),
     });
+  };
   const autoBackgroundMs = normalizeAutoBackgroundMs(options.autoBackgroundMs);
 
   const port: SubagentPort & { start: NonNullable<SubagentPort["start"]> } = {
@@ -184,6 +191,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         return port.start(executionRequest, {
           signal: launchOptions?.signal,
           ...(launchOptions?.model ? { model: launchOptions.model } : {}),
+          ...(launchOptions?.modelOverride ? { modelOverride: launchOptions.modelOverride } : {}),
         });
       }
       return port.run(executionRequest, launchOptions);
@@ -220,7 +228,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         lifecycle.agentId,
         runOptions?.signal,
       );
-      const hasForegroundModelOverride = runOptions?.modelOverride !== undefined;
+      const hasForegroundModelOverride = runOptions?.modelOverride?.background === "deny";
       if (hasForegroundModelOverride) {
         borrowedForegroundAgentIds.add(lifecycle.agentId);
       }
@@ -542,6 +550,7 @@ export function createExploreSubagentPort(options: ExploreSubagentPortOptions): 
         {
           signal: taskAbort.signal,
           ...(startOptions?.model ? { model: startOptions.model } : {}),
+          ...(startOptions?.modelOverride ? { modelOverride: startOptions.modelOverride } : {}),
         },
         {
           onSessionReady: async () => {
@@ -1020,6 +1029,7 @@ async function sendMessageToLocalAgent(
     task,
     request,
     message,
+    sendOptions,
   );
 }
 
@@ -1050,6 +1060,7 @@ async function resumeTerminalAgentInBackground(
   task: RuntimeTaskSnapshot,
   request: SubagentSendMessageRequest,
   message: RuntimeTaskPendingMessage,
+  sendOptions?: SubagentSendMessageOptions,
 ): Promise<SubagentSendMessageResult> {
   // resume 终态 task 等价于一次新 spawn：活读后的 profiles 决定它用哪个模型。
   const profile = resolveProfiles().find((candidate) => candidate.name === task.agentType);
@@ -1108,7 +1119,11 @@ async function resumeTerminalAgentInBackground(
     resumeRequest,
     lifecycle,
     registry,
-    { signal: taskAbort.signal },
+    {
+      signal: taskAbort.signal,
+      model: sendOptions?.model,
+      modelOverride: sendOptions?.modelOverride,
+    },
     {
       resumeFromStore: true,
       onSessionReady: async () => {
@@ -2118,8 +2133,17 @@ function aggregateModelUsage(events: SessionEvent[]): ModelUsage | undefined {
   let usage: ModelUsage | undefined;
 
   for (const event of events) {
-    if (event.type !== SessionEventType.ModelComplete) continue;
     const payload = event.payload;
+    // 与主 turn 共用失败事件的用量事实，不增加独立汇总状态。
+    if (
+      event.type !== SessionEventType.ModelComplete &&
+      !(
+        event.type === SessionEventType.ModelNetworkStatus &&
+        isRecord(payload) &&
+        payload.type === "model_request_failed"
+      )
+    )
+      continue;
     if (!isRecord(payload) || !isRecord(payload.usage)) {
       continue;
     }

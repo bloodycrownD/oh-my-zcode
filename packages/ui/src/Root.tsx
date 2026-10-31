@@ -1,3 +1,7 @@
+// TODO(upgrade-316): 上游 v3.16.2 重写了 Root 的 provider 栈，并把登录 / 遥测 / 计费 /
+// feedback 接线织进入口；这些能力在 fork 已整体删除，两边改动语义互斥，本次保留 fork 版本。
+// 需人工复核是否吸收 upstream 的 RemoteConnectionProgressProvider /
+// RemoteProjectPresentationProvider / RemoteWorkspaceControllerProvider 等非登录类新增接线。
 /* eslint-disable max-lines -- Root 当前集中编排启动和 workspace shell wiring，先保持入口收口避免跨层状态拆散。 */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { LucideProvider, RefreshCw } from "lucide-react";
@@ -19,7 +23,6 @@ import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { SSHDialog } from "@/SSHDialog.js";
 import { SettingsPage } from "@/SettingsPage.js";
 import { setDefaultFileDisplayBasePath } from "@/lib/fileDisplay.js";
-import { countAllUnreadTasks } from "@/lib/unreadTaskCount.js";
 import {
 
 
@@ -30,7 +33,6 @@ import {
 } from "@/lib/rootStartupGate.js";
 import { StoreProvider, useZCodeStore } from "@/store/StoreProvider.js";
 import { setMcpStorePlatform } from "@/store/mcpStore.js";
-import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { TabStoreProvider, useTabStore, useTabStoreApi } from "@/store/TabStoreProvider.js";
 import { isSettingsTab, isWorkspaceTab, type WorkspaceTabState } from "@/store/tabStore.js";
 import { logger } from "@/logger.js";
@@ -328,9 +330,6 @@ function RootInner({
     }
     return activeTab.workspacePath;
   });
-  const totalUnreadTaskCount = useZCodeSessionStore((state) =>
-    countAllUnreadTasks(state.workspaces),
-  );
   const addTab = useTabStore((state) => state.addTab);
   const activateTabByPath = useTabStore((state) => state.activateTabByPath);
   const tabStoreApi = useTabStoreApi();
@@ -389,7 +388,6 @@ function RootInner({
     handleCreateConversationTask,
     handleOpenWorkspace,
     handleOpenFolderFromWorkspaceMenu,
-    handleCreateScratchWorkspace,
     handleCreateTask,
     handleBackFromSettings,
   } = useRootWorkspaceActions({
@@ -408,6 +406,16 @@ function RootInner({
     updateAppSettings,
     onOpenRemoteConnection: allowRemoteWorkspace ? handleOpenRemoteConnection : undefined,
   });
+  /**
+   * 升级 316 说明：上游把 AppProps.onResolveConversationWorkspace 的返回值从「路径字符串」
+   * 改成了 { workspacePath, workspaceIdentity? }（identity 由 Root 按 Source 归属给出）。
+   * fork 的 useConversationWorkspaceActions 仍返回字符串（内部 ensure/select 也按字符串消费），
+   * 因此在 Root 边界补一层映射，避免改动 hook 的内部调用方。
+   */
+  const resolveConversationWorkspace = useCallback(async () => {
+    const workspacePath = await handleResolveConversationWorkspace();
+    return { workspacePath };
+  }, [handleResolveConversationWorkspace]);
   const handleRemoteWorkspaceActivated = useCallback(
     ({
       workspacePath,
@@ -425,7 +433,9 @@ function RootInner({
     remoteWorkspaceSessions,
     reconnectingRemoteWorkspaceKeys,
     remoteWorkspaceErrorByWorkspaceKey,
-    reconnectingRemoteWorkspaceLogsByWorkspaceKey,
+    // 升级 316 说明：上游 RootWorkspaceContent 的必填 prop 多了这一项（远程会话恢复态投影），
+    // fork 的 useRemoteWorkspaceHistory 本来就在维护同一份状态，这里接出来按原样下发。
+    remoteWorkspaceRecoveryByWorkspaceKey,
     buildPersistedTabPatch,
     restorePersistedSession,
     handleCancelRemoteProject,
@@ -514,7 +524,6 @@ function RootInner({
     activeWorkspaceIdentity,
     reconnectingRemoteWorkspaceKeys,
     remoteWorkspaceErrorByWorkspaceKey,
-    totalUnreadTaskCount,
     hasCompletedFullTabRestore: hasCompletedFullRestore,
     intl,
     isRestoringOAuthSession: isResolvingStartupAuthState || providerStartupSyncPending,
@@ -769,22 +778,19 @@ function RootInner({
             handleReconnectRemoteWorkspace={handleReconnectRemoteWorkspace}
             handleCreateTask={handleCreateTask}
             handleCreateConversationTask={handleCreateConversationTask}
-            handleResolveConversationWorkspace={handleResolveConversationWorkspace}
+            handleResolveConversationWorkspace={resolveConversationWorkspace}
             handleOpenWorkspace={handleOpenWorkspace}
             handleOpenFolderFromWorkspaceMenu={handleOpenFolderFromWorkspaceMenu}
             handleOpenRemoteWorkspace={
               allowRemoteWorkspace ? handleOpenRemoteConnection : undefined
             }
-            handleCreateScratchWorkspace={handleCreateScratchWorkspace}
             remoteConnectionInProgress={remoteConnectionInProgress}
             remoteWorkspaceSessions={remoteWorkspaceSessions}
             allowRemoteWorkspace={allowRemoteWorkspace}
             handleBackFromSettings={handleBackFromSettings}
             reconnectingRemoteWorkspaceKeys={reconnectingRemoteWorkspaceKeys}
             remoteWorkspaceErrorByWorkspaceKey={remoteWorkspaceErrorByWorkspaceKey}
-            reconnectingRemoteWorkspaceLogsByWorkspaceKey={
-              reconnectingRemoteWorkspaceLogsByWorkspaceKey
-            }
+            remoteWorkspaceRecoveryByWorkspaceKey={remoteWorkspaceRecoveryByWorkspaceKey}
             remoteConnectionLogs={remoteConnectionLogs}
             allowOpenWorkspace={allowOpenWorkspace}
             isDesktop={isDesktop}

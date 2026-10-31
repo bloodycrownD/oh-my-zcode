@@ -38,11 +38,12 @@ export function buildRegistryModelSelectGroups(
     }
 
     // FORK（D-13）：账号 access 型整删后没有 accountPresentation 分支，
-    // 分组名直接回落 providerName / providerId。
+    // 分组名直接回落 providerName / providerId；上游新增的 provider logo 透传仍保留。
     return [
       {
         key: `registry-provider:${provider.providerId}`,
         label: provider.providerName?.trim() || provider.providerId,
+        ...(provider.config.logo ? { logo: provider.config.logo } : {}),
         items: provider.models.map(({ modelId, config }) => ({
           key: `registry-provider:${provider.providerId}:${modelId}`,
           value: encodeCustomModelValue(provider.providerId, modelId),

@@ -7,7 +7,9 @@ import { listSSHConfigAliasesFromLocalConfig } from "@zcode/services/node";
 import { DEV_HELPER_APP_NAME, HELPER_APP_NAME } from "@zcode/zcode-cua/broker/helperConstants";
 import {
   ZCODE_APP_VERSION_ENV,
+  ZCODE_BUILD_COMMIT_ID_ENV,
   ZCODE_AGENT_RUNTIME,
+  ZCODE_COMMIT,
   ZCODE_DYNAMIC_WORKFLOW_MODE_ENV,
   ZCODE_ENV,
   ZCODE_PRODUCT_FLAVOR,
@@ -15,13 +17,12 @@ import {
   ZCODE_VERSION,
   buildZCodeToolEnvPassthroughEnv,
   resolveRuntimeZCodeEndpointOrigin,
-  readProductEndpointEnv,
-  pickProductEndpointEnv,
   resolveZaiBusinessBaseUrl,
   resolveZaiOAuthClientId,
   resolveZaiOAuthOrigin,
   normalizeDynamicWorkflowMode,
   sanitizeZCodeRuntimeEnv,
+  type SourceServerArtifactPolicy,
   type ZCodeRuntimeEnv,
 } from "@zcode/shared";
 import { resolvePlatformKeyForPackagedApp } from "../../scripts/target-platform.mjs";
@@ -41,7 +42,8 @@ const isLocalDevelopmentRuntime = !isElectronAppPackaged();
 const desktopRuntimeEnv: ZCodeRuntimeEnv = isLocalDevelopmentRuntime ? "development" : "production";
 // 身份看编译期 flavor 而不是 ZCODE_ENV：ZCODE_PREVIEW_IDENTITY=1 的生产后端构建同样是 Preview，
 // 需要独立的应用名、Electron 数据目录和 Helper 安装子目录才能与正式版并排运行。
-const isPreviewPackagedRuntime = !isLocalDevelopmentRuntime && ZCODE_PRODUCT_FLAVOR === "preview";
+export const isPreviewPackagedRuntime =
+  !isLocalDevelopmentRuntime && ZCODE_PRODUCT_FLAVOR === "preview";
 
 function readRuntimeEnvOverride(name: string): string | undefined {
   return process.env[name]?.trim() || undefined;
@@ -89,7 +91,9 @@ export function getCredentialsDir() {
 export type RemoteAssetDirs = Pick<
   ConnectOptions,
   "mockCdnDir" | "remoteCdnBaseUrl" | "remoteCdnBaseUrls" | "remoteCacheDir"
->;
+> & {
+  sourceServerArtifactPolicy?: SourceServerArtifactPolicy;
+};
 type LocalRuntimeEnv = Record<string, string | undefined>;
 
 export async function isDockerDaemonAvailable(): Promise<boolean> {
@@ -155,6 +159,8 @@ function resolveWorkspaceRootForEnvFiles(): string | null {
 export function loadHostProcessEnvFromLocalFiles(): Record<string, string> {
   // 打包态不读安装目录旁的 .env：环境文件是开发工作流（OAuth 端点等）的配置载体，
   // 安装包场景的连接配置一律由用户机器的运行时环境提供，避免产物目录成为隐式配置面。
+  // 上游在打包态改为返回编译期遥测环境（resolvePackagedAgentTelemetryEnv）；fork 已整体移除遥测，
+  // 打包态保持返回空对象，不引入 OTEL 相关注入面。
   if (isElectronAppPackaged()) return {};
   const desktopRoot = resolve(import.meta.dirname, "../..");
   const workspaceRoot = resolveWorkspaceRootForEnvFiles();
@@ -243,15 +249,16 @@ function resolveEnvValue(envName: string, localEnv: LocalRuntimeEnv = {}): strin
 export function resolveZCodeEndpointEnvBaseOrigin(
   localEnv: LocalRuntimeEnv = {},
 ): string | undefined {
-  const buildEnv = readProductEndpointEnv();
-  // main 进程临时验证更新服务时不会重新写 .env，命令行传入的 endpoint 必须优先于本地文件。
+  const scopedEnvName =
+    ZCODE_ENV === "production" ? "ZCODE_PRODUCTION_BASE_URL" : "ZCODE_TEST_BASE_URL";
+  // Bugfix: main 进程临时验证更新服务时不会重新写 .env，命令行传入的 endpoint 必须优先于本地文件。
   return (
     process.env["ZCODE_BASE_URL"]?.trim() ||
     process.env["ZCODE_ENDPOINT_ORIGIN"]?.trim() ||
+    process.env[scopedEnvName]?.trim() ||
     localEnv.ZCODE_BASE_URL?.trim() ||
     localEnv.ZCODE_ENDPOINT_ORIGIN?.trim() ||
-    buildEnv.ZCODE_BASE_URL?.trim() ||
-    buildEnv.ZCODE_ENDPOINT_ORIGIN?.trim() ||
+    localEnv[scopedEnvName]?.trim() ||
     undefined
   );
 }
@@ -268,13 +275,11 @@ function readDefinedProcessEnv(): Record<string, string> {
 
 function applySelectedZCodeEnvLinks(env: Record<string, string>): Record<string, string> {
   const endpointEnv = {
-    ...readProductEndpointEnv(),
     ...env,
     ZCODE_ENV,
   };
 
   return {
-    ...pickProductEndpointEnv(endpointEnv),
     ...env,
     ZCODE_BASE_URL: env.ZCODE_BASE_URL ?? resolveRuntimeZCodeEndpointOrigin(endpointEnv),
     ZAI_OAUTH_ORIGIN: env.ZAI_OAUTH_ORIGIN ?? resolveZaiOAuthOrigin(endpointEnv),
@@ -322,6 +327,9 @@ export function resolveRemoteAssetDirs(
   const developmentMockCdnDir = resolveAvailableDevelopmentMockCdnDir();
   return {
     ...(developmentMockCdnDir ? { mockCdnDir: developmentMockCdnDir } : {}),
+    // Bug 原因：ZCODE_ENV 表示测试/生产产品环境，dev:desktop 也可能取 production；
+    // 同版本开发制品刷新必须由未打包 Electron 这一运行形态显式授权。
+    sourceServerArtifactPolicy: "development-content-addressed",
     remoteCdnBaseUrl,
     remoteCdnBaseUrls,
     remoteCacheDir: resolveRemoteAssetCacheDir(localEnv),
@@ -414,7 +422,7 @@ function resolveHostProcessBinaryEnv(
   return undefined;
 }
 
-function resolveWindowsAppInstallDirForDataBaseDirGuard(
+export function resolveWindowsAppInstallDirForDataBaseDirGuard(
   options: {
     platform?: NodeJS.Platform | string;
     isPackaged?: boolean;
@@ -446,7 +454,7 @@ function resolveWindowsAppInstallDirForDataBaseDirGuard(
  * Main 是唯一决策者：对这个键只有「写」和「删」两种动作，绝不原样透传，
  * Host 端的 resolveDynamicWorkflowClientConfig 才能无条件相信读到的值。
  */
-function resolveDynamicWorkflowModeHostEnv(options: {
+export function resolveDynamicWorkflowModeHostEnv(options: {
   inheritedValue: string | undefined;
   isPackaged: boolean;
   isPreview: boolean;
@@ -537,6 +545,9 @@ export function buildHostProcessEnv(hostProcessLocalEnv: Record<string, string>)
     // 模型请求默认 header 由 agent 进程构造，过去只继承 shell env 导致桌面启动时拿不到 app 版本。
     // 这里从 main 进程显式下发，agent 子进程继承 host env 后即可稳定写入请求 header。
     [ZCODE_APP_VERSION_ENV]: ZCODE_VERSION,
+    // Telemetry 的构建身份必须来自 Desktop 编译期元数据，不能让 Agent 在运行时读取
+    // 工作树或根据安装路径猜测；否则同一产品版本的不同修复包无法在 ARMS 中区分。
+    [ZCODE_BUILD_COMMIT_ID_ENV]: ZCODE_COMMIT,
     ...(dataBaseDir !== homedir() ? { ZCODE_DATA_BASE_DIR: dataBaseDir } : {}),
     ...(windowsAppInstallDir ? { [ZCODE_WINDOWS_APP_INSTALL_DIR_ENV]: windowsAppInstallDir } : {}),
     ...(bundledCuaHelperAppPath

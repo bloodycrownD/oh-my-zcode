@@ -49,8 +49,8 @@ interface ZCodeProtocolClientRequestOptions {
   timeoutMs?: number;
 }
 
-// FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
-const DEFAULT_ZCODE_PROTOCOL_REQUEST_TIMEOUT_MS = 3 * 60_000;
+// 上游测试（packages/services/test/zcodeProtocolClient.test.ts）按名字引用该常量，保留 export。
+export const DEFAULT_ZCODE_PROTOCOL_REQUEST_TIMEOUT_MS = 3 * 60_000;
 
 class ZCodeProtocolClientError extends Error {
   constructor(

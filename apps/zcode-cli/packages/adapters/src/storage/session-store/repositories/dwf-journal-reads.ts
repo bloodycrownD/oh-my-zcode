@@ -1,10 +1,11 @@
 /**
  * `JournalStorePort` 读面的 SQL（docs/execution-engine.md「Reading the journal」）：kinds / types
- * 过滤、`withResult` 列裁剪、`countNodes`、`reportItems` 剥离、事件页的条数 + 字节两道界，
- * 全部下推 SQLite。
+ * 过滤、`withResult` / `withPersona` 列裁剪、`countNodes`、`sumResultBytes`、`reportItems` 剥离，
+ * 全部下推 SQLite。事件页的条数 + 字节两道界在 dwf-journal-pages.ts（`listEventPage`），
+ * 产物读面在 dwf-journal-artifacts.ts。
  *
- * 拆出原因：dwf-journal.ts 顶到 oxlint max-lines 上限；这几条读各自带着「为什么这样取数」的
- * 论证，与写入路径没有共享状态，只要一个 db 句柄。
+ * 拆出原因：dwf-journal.ts 顶到 oxlint max-lines 上限（400 行）；这几条读各自带着「为什么这样
+ * 取数」的论证，与写入路径没有共享状态，只要一个 db 句柄。
  *
  * 列裁剪用 `null as <列>` 而不是省掉列：解码器（dwf-journal-codecs.ts）对 NULL 一律解成缺席的
  * 键，所以「没读」与「读到 NULL」在行上同形，解码器不必知道这次读选了哪些列。
@@ -12,6 +13,9 @@
 
 import type { DatabaseSync } from "node:sqlite";
 import type {
+  ActorRecord,
+  GetNodeOptions,
+  ListActorsOptions,
   ListEventsOptions,
   ListNodesOptions,
   NodeKind,
@@ -19,8 +23,10 @@ import type {
   StoredEvent,
 } from "@zcode/dynamic-workflow";
 import {
+  decodeActor,
   decodeEvent,
   decodeNode,
+  type DwfActorRow,
   type DwfEventRow,
   type DwfNodeRow,
 } from "./dwf-journal-codecs.js";
@@ -45,6 +51,22 @@ function placeholders(count: number): string {
 
 function limitParam(limit: number | undefined): number {
   return limit === undefined ? UNBOUNDED : Math.max(0, limit);
+}
+
+export function getNodeRow(
+  db: DatabaseSync,
+  runId: string,
+  siteId: string,
+  ordinal: number,
+  opts: GetNodeOptions | undefined,
+): NodeRecord | undefined {
+  const row = db
+    .prepare(
+      `select ${nodeColumns(opts?.withResult ?? true)} from dwf_node
+       where run_id = ? and site_id = ? and ordinal = ?`,
+    )
+    .get(runId, siteId, ordinal) as DwfNodeRow | undefined;
+  return row ? decodeNode(row) : undefined;
 }
 
 export function listNodeRows(
@@ -79,7 +101,7 @@ export function listNodeRows(
 /**
  * `maxResultBytes` 的读法：先在 `octet_length(result_json)` 上开窗算出前缀和，定下哪几行进页，
  * 再只为这几行取整行。`octet_length` 从行头读长度、不碰结果本身，所以没进页的行（包括一条
- * 1 MiB 的报告）一个字节都不读。
+ * 1 MiB 的报告）一个字节都不读——与事件分页（dwf-journal-pages.ts）同一种查询。
  */
 function listNodeRowsWithinBytes(
   db: DatabaseSync,
@@ -127,28 +149,34 @@ export function countNodeRows(db: DatabaseSync, runId: string, kind: NodeKind): 
 }
 
 /**
- * 本 run 打了产物标签的 `report` 行按 `artifact_id` 计数（产物投影的 `itemCount`）。`group by`
- * 下推 SQLite，`dwf_node_artifact_idx (run_id, artifact_id)` 正是这个形状——行一条都不读出来。
- *
- * 修复原因（FORK 偏离上游：上游此查询在宿主的 `dwf-journal-artifacts.ts`，fork 落在引擎端口的
- * 读实现里）：此前宿主把整张节点表连同每条 report item 读进内存再在 JS 里数，一个报了
- * 65,536 条的 run 每查一次产物清单就解码一遍全部 item（docs/execution-engine.md
- * 「Reading the journal」）。未打标签的 report 天然被排除：`artifact_id is not null`。
- *
- * `artifact_id` 非空但恰为空串的行照常计数——那是写入侧的形状问题，不该在读侧静默丢行。
+ * 该 kind 各行 `result_json` 的字节数之和。`octet_length` 让 SQLite 只读行头里记的长度：实测
+ * 1.5 GB 的结果求和 0.7 ms，而 `length()` 要逐字符数、541 ms。resume 恢复报告的 run 级字节
+ * 计数靠它，一条 item 都不读出来。
  */
-export function countTaggedReportRows(
+export function sumResultBytes(db: DatabaseSync, runId: string, kind: NodeKind): number {
+  const row = db
+    .prepare(
+      "select coalesce(sum(octet_length(result_json)), 0) as total from dwf_node where run_id = ? and kind = ?",
+    )
+    .get(runId, kind) as { total: number | bigint } | undefined;
+  return Number(row?.total ?? 0);
+}
+
+export function listActorRows(
   db: DatabaseSync,
   runId: string,
-): ReadonlyMap<string, number> {
+  opts: ListActorsOptions,
+): ActorRecord[] {
+  const persona = opts.withPersona ? "persona_json" : "null as persona_json";
+  const nameFilter = opts.name === undefined ? "" : " and name = ?";
   const rows = db
     .prepare(
-      `select artifact_id, count(*) as total from dwf_node
-       where run_id = ? and kind = 'report' and artifact_id is not null
-       group by artifact_id`,
+      `select id, run_id, site_id, ordinal, name, ${persona}, resolved_model, session_id,
+              time_created, time_updated
+       from dwf_actor where run_id = ?${nameFilter} order by id`,
     )
-    .all(runId) as unknown as { artifact_id: string; total: number | bigint }[];
-  return new Map(rows.map((row) => [row.artifact_id, Number(row.total)]));
+    .all(runId, ...(opts.name === undefined ? [] : [opts.name])) as unknown as DwfActorRow[];
+  return rows.map(decodeActor);
 }
 
 /**
@@ -160,6 +188,8 @@ export function countTaggedReportRows(
  * 进临时表再编号，一个报了 65,536 条的 run 会把约 2 GiB 的载荷抄一遍进 temp store——正是本读面要
  * 避免的那种按总字节付费。分界 sequence 让主查询保持流式，`CASE` 又是惰性的，未剥离的行不会被
  * 解析。
+ *
+ * `opts` 与其中各字段都是可选的（FORK 偏离上游的必填形状）：缺省即全量、带 item。
  */
 export function listEventRows(
   db: DatabaseSync,
@@ -196,7 +226,7 @@ export function listEventRows(
 
 /**
  * report item 的分界 sequence：sequence 大于它的 report 事件剥掉 item。`undefined` = 不剥
- * （`reportItems: "all"` / 缺省，或本 run 的 report 事件不足 N 条）。
+ * （`reportItems: "all"` / 缺省，或本 run 的 report 事件不足 N 条）。N = 0 时分界是 -1：一条不留。
  *
  * 排名按**全 run** 计，与 types / cursor / limit 无关（端口契约）。
  */
@@ -219,73 +249,4 @@ function reportCutoff(
     )
     .get(runId, keep - 1) as { sequence: number } | undefined;
   return row?.sequence;
-}
-
-/**
- * `listEventPage` 的分页袋（cursor 严格大于，两道界同时生效）。形状与引擎端口的
- * `JournalStorePort.listEventPage` 成员逐字段一致——那是唯一契约来源，这里不另立语义。
- */
-export interface DwfEventPageQuery {
-  afterSequence?: number;
-  limit: number;
-  maxBytes: number;
-}
-
-/**
- * 事件日志一页：按 sequence 升序取行，条数到 `limit`、或再加一行就会让本页载荷的字节数超过
- * `maxBytes` 时收尾；**第一条总是带上**（一行超过 `maxBytes` 的载荷自成一页，否则翻页永远
- * 卡住）。`hasMore` 在这里就能说准：收尾时后面那一行存在与否——页可能因字节提前收尾，
- * 「取满 limit」不是判据（详情页审计面读不出大页正是本条修复要解决的故障面）。
- *
- * 为什么是一条带窗口的查询而不是在 JS 里逐行累加：窗口只作用在 `octet_length(payload_json)`
- * 上，而 SQLite 对 `octet_length` 只读行头里的长度、不碰载荷本身。于是「哪几行进页」在不读
- * 任何载荷的前提下就定了；末尾那个 `case` 是惰性的，只有进页的行才真的把载荷读出来——收尾处
- * 那一行（它的存在就是 `hasMore`）连同它可能 1 MiB 的 item 一个字节都不读。与同文件
- * {@link listNodeRowsWithinBytes} 同习语（上游对照 dwf-journal-pages.ts 的
- * `listEventPage` / `pageEventRows`）。
- */
-export function listEventPageRows(
-  db: DatabaseSync,
-  runId: string,
-  page: DwfEventPageQuery,
-): { events: StoredEvent[]; hasMore: boolean } {
-  // limit ≤ 0 是空页：翻页永远有界，没有「-1 = 全量」这种写法（同上游）。
-  if (page.limit <= 0) return { events: [], hasMore: false };
-  const after = page.afterSequence;
-  const cursor = after === undefined ? "" : " and sequence > ?";
-  const found = db
-    .prepare(
-      `with sized as (
-         select sequence, octet_length(payload_json) as bytes
-         from dwf_event
-         where run_id = ?${cursor}
-         order by sequence
-         limit ?
-       ),
-       ranked as (
-         select sequence,
-                row_number() over (order by sequence) as rn,
-                sum(bytes) over (order by sequence rows unbounded preceding) as through
-         from sized
-       )
-       select r.sequence, e.type, e.time_created,
-              case when r.rn = 1 or (r.rn <= ? and r.through <= ?) then e.payload_json end
-                as payload_json
-       from ranked r
-       join dwf_event e on e.run_id = ? and e.sequence = r.sequence
-       order by r.sequence`,
-    )
-    .all(
-      runId,
-      ...(after === undefined ? [] : [after]),
-      // 多取一行：它不进页，它的存在就是 hasMore。
-      page.limit + 1,
-      page.limit,
-      Math.max(0, page.maxBytes),
-      runId,
-    ) as unknown as Array<Omit<DwfEventRow, "payload_json"> & { payload_json: string | null }>;
-  // `through` 单调不减，所以进页的行恰是一段前缀：第一行没有载荷之处就是页尾。
-  const end = found.findIndex((row) => row.payload_json === null);
-  const inPage = end === -1 ? found : found.slice(0, end);
-  return { events: inPage.map((row) => decodeEvent(row as DwfEventRow)), hasMore: end !== -1 };
 }

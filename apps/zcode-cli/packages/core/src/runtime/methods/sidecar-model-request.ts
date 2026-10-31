@@ -21,11 +21,15 @@ import {
 } from "../helpers/index.js";
 import type { RuntimeModelTextResult } from "../types.js";
 
+// FORK: 上游的 compact-summary-model-request 已被 fork 改造成通用 sidecar 请求（原生 compact 移除）。
+// 上游 3.16 新增的 toolSearchEnabled 是需要吸收的请求能力，保留；modelCall 属于遥测侧
+// ModelApiCallObservation 观测字段，fork 已移除该链路，故不引入。
 type SidecarModelRequest = {
   abortSignal?: AbortSignal;
   maxOutputTokens?: number;
   messages: Parameters<Model["generateText"]>[0]["messages"];
   modelRequestSessionType?: ModelInvocationContext["modelRequestSessionType"];
+  toolSearchEnabled?: boolean;
   metadata?: ModelInvocationContext["metadata"];
   preserveProviderStreamBoundaries?: boolean;
   statusSink?: ModelInvocationContext["statusSink"];
@@ -290,6 +294,7 @@ function cleanRequest(request: SidecarModelRequest) {
   return {
     messages: request.messages,
     tools: request.tools,
+    toolSearchEnabled: request.toolSearchEnabled,
     abortSignal: request.abortSignal,
     ...(request.maxOutputTokens !== undefined
       ? { options: { maxOutputTokens: request.maxOutputTokens } }

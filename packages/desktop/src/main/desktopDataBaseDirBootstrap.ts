@@ -3,11 +3,12 @@ import { homedir } from "node:os";
 import { join } from "node:path";
 import { setDataBaseDir } from "@zcode/services/node";
 
-function resolveBootstrapSettingsFile(homePath: string = homedir()): string {
+// fork 使用 omz 数据目录；上游新增 export 供测试直接引用，一并保留。
+export function resolveBootstrapSettingsFile(homePath: string = homedir()): string {
   return join(homePath, ".omz", "v2", "setting.json");
 }
 
-function extractBootstrapDataBaseDir(rawValue: unknown): string | null {
+export function extractBootstrapDataBaseDir(rawValue: unknown): string | null {
   if (!rawValue || typeof rawValue !== "object") {
     return null;
   }

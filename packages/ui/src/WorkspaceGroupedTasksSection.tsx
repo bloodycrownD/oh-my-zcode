@@ -1,6 +1,13 @@
-/* eslint-disable max-lines -- 顶层 grouped task 容器仍集中维护远程 workspace service 解析、group 菜单、task 菜单和列表写回；子行与纯 helper 已拆到 workspace-grouped-tasks 目录。 */
+/* eslint-disable max-lines -- 顶层 grouped task 容器仍集中维护远程 workspace service 解析、group 菜单、task 菜单和列表写回；子行与纯 helper 已拆到 project-sidebar/grouped 目录。 */
+// TODO(upgrade-316): 上游 v3.16 用 project-sidebar/TaskGroupedView 取代了本组件，WorkspaceSidebar 也已
+// 改为 re-export 上游 ProjectSidebar，本组件当前没有引用方。按“不能删”的要求保留，并已把数据面适配到
+// 新 ITaskGroupService + ProjectTask 投影；是否重新接线到侧边栏或移除死代码需人工确认。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, ReactNode } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  ReactNode,
+  SetStateAction,
+} from "react";
 import {
   closestCenter,
   DndContext,
@@ -18,31 +25,41 @@ import type {
   DragStartEvent,
   DropAnimation,
 } from "@dnd-kit/core";
-import type { ZCodeGroupedTaskView, ZCodeTaskGroupColor } from "@zcode/services";
-import { type ZCodeTaskMeta } from "@zcode/shared";
+import type {
+  GroupedDraftTaskPlacement,
+  ZCodeGroupedTaskView,
+  ZCodeGroupedTaskViewNode,
+  ZCodeTaskGroupColor,
+} from "@/project-sidebar/grouped/types.js";
+import type {
+  GroupNode,
+  MoveGroupNode,
+  ProjectTask,
+  TaskGroupStructure,
+} from "@/project-sidebar/contract.js";
+import type { IServiceAccessor, WindowHostControllerTaskListItem } from "@zcode/services";
+import { type ZCodeTaskMeta, remoteHostIdFromWorkspaceIdentity } from "@zcode/shared";
 import { createPortal } from "react-dom";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { TaskRenameDialog } from "@/TaskRenameDialog.js";
-import { shouldHideGroupedTaskContent, useGroupedTaskView } from "@/hooks/useGroupedTaskView.js";
 import type { WorkspaceTabState } from "@/store/tabStore.js";
 import { buildTaskWorkspaceKey } from "@/lib/taskQueryCache.js";
 import { getPathLeaf } from "@/lib/path.js";
-import { resolveTaskFileTreeTargetFromTabs } from "@/lib/taskFileTreeTarget.js";
 import { toast } from "@/components/ui/toast.js";
 import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
+import { useGlobalTaskList } from "@/hooks/useGlobalTaskList.js";
 import { selectWorkspaceZCodeState, useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
 import { useRemoteWorkspaceSessionStore } from "@/store/remoteWorkspaceSessionStore.js";
 import { buildWorkspaceServiceLookup } from "@/lib/workspaceServiceResolver.js";
 import { applyTaskQueryCacheMutation } from "@/store/taskQueryCacheStore.js";
-import { useRemotePinnedTaskStore } from "@/store/remotePinnedTaskStore.js";
-import { useRemoteTimelineTaskStore } from "@/store/remoteTimelineTaskStore.js";
 import { bumpTaskListMembershipVersion } from "@/v4/taskListMembershipVersion.js";
-import { GroupItem, GroupedTaskItem } from "@/workspace-grouped-tasks/items.js";
-import { GroupDragOverlay } from "@/workspace-grouped-tasks/group-drag-overlay.js";
-import { VirtualizedGroupedTopLevelList } from "@/workspace-grouped-tasks/virtualized-top-level-list.js";
-import { GroupedDraftTaskRow } from "@/workspace-grouped-tasks/draft-task-row.js";
-import { StickyGroupHeader } from "@/workspace-grouped-tasks/sticky-group-header.js";
+import { GroupItem } from "@/project-sidebar/grouped/group-item.js";
+import { GroupedTaskItem } from "@/project-sidebar/grouped/task-item.js";
+import { GroupDragOverlay } from "@/project-sidebar/grouped/group-drag-overlay.js";
+import { VirtualizedGroupedTopLevelList } from "@/project-sidebar/grouped/virtualized-top-level-list.js";
+import { GroupedDraftTaskRow } from "@/project-sidebar/grouped/draft-task-row.js";
+import { StickyGroupHeader } from "@/project-sidebar/grouped/sticky-group-header.js";
 import type { CreateTaskRequest } from "@/app-shell/types.js";
 import {
   findTaskInGroupedView,
@@ -58,18 +75,468 @@ import {
   replaceTaskInGroupedView,
   resolveGroupedDraftTaskPlacementForTask,
   taskKey,
-} from "@/workspace-grouped-tasks/shared.js";
-import type { TaskGroupMenuItem } from "@/workspace-grouped-tasks/shared.js";
+} from "@/project-sidebar/grouped/shared.js";
+import type { TaskGroupMenuItem } from "@/project-sidebar/grouped/shared.js";
+import { buildGroupedTaskView } from "@/project-sidebar/grouped/model.js";
+import { groupTaskRef } from "@/project-sidebar/grouped-view.js";
 import type { WorkbenchSessionDragPayload } from "@/v4/workbenchDragDrop.js";
-import {
-  cancelWorkbenchPointerDrag,
-  finishWorkbenchPointerDrag,
-  updateWorkbenchPointerDrag,
-} from "@/v4/workbenchPointerDragDrop.js";
-import {
-  createWorkbenchPointerPositionTracker,
-  type WorkbenchPointerPositionTracker,
-} from "@/v4/workbenchPointerPositionTracker.js";
+import { logger } from "@/logger.js";
+
+type TaskGroupService = NonNullable<IServiceAccessor["taskGroupService"]>;
+
+interface TaskFileTreeTarget {
+  workspacePath: string;
+  workspaceName: string;
+  workspaceIdentity?: string;
+  workspaceRemoteSessionId?: string;
+}
+
+interface WorkbenchPointerPosition {
+  x: number;
+  y: number;
+}
+
+interface WorkbenchPointerPositionTracker {
+  dispose: () => void;
+  getPosition: () => WorkbenchPointerPosition;
+}
+
+const EMPTY_GROUPED_TASK_VIEW: ZCodeGroupedTaskView = { nodes: [] };
+const EMPTY_TASK_GROUP_STRUCTURE: TaskGroupStructure = { groups: [], members: [], order: [] };
+
+// 上游 v3.16 把 task-groups 的读写收敛到 ITaskGroupService（read/save/ungroup/move），
+// 旧 fork 的 zcodeTaskService 分组 API 已不存在。这里按新契约重建原组件需要的
+// view/CRUD 形状，任务事实改由当前唯一 owner（Window Host Controller 列表）投影。
+function resolveGroupedTaskHostId(task: {
+  workspacePath: string;
+  workspaceIdentity?: string;
+}): string {
+  const workspaceKey = task.workspaceIdentity?.trim() || task.workspacePath;
+  return remoteHostIdFromWorkspaceIdentity(workspaceKey) ?? "local";
+}
+
+function toProjectTask(item: WindowHostControllerTaskListItem): ProjectTask {
+  return {
+    ...item,
+    projectId: null,
+    hostId: resolveGroupedTaskHostId(item),
+    // active 列表本身已排除置顶/归档；分组投影只需任务事实。
+    pinned: false,
+    archived: false,
+  };
+}
+
+function resolveTaskFileTreeTarget(
+  task: ZCodeTaskMeta,
+  tab: WorkspaceTabState | undefined,
+): TaskFileTreeTarget | null {
+  // 旧本地 task 没有 workspaceIdentity，key 会回退到 workspacePath；如果同路径
+  // 远程 tab 也缺 identity，仅按 key 会误带远程 session。匹配前必须先保证本地/远程类型一致。
+  const taskIsRemote = Boolean(task.workspaceIdentity?.trim());
+  const tabIsRemote = Boolean(
+    tab?.workspaceIdentity?.trim() || tab?.remoteTarget || tab?.remoteSessionId,
+  );
+  const matchingTab =
+    tab &&
+    buildTaskWorkspaceKey(tab.workspacePath, tab.workspaceIdentity) ===
+      buildTaskWorkspaceKey(task.workspacePath, task.workspaceIdentity) &&
+    taskIsRemote === tabIsRemote
+      ? tab
+      : undefined;
+  if (tab && !matchingTab) {
+    return null;
+  }
+  const isRemoteWorkspace = Boolean(
+    task.workspaceIdentity?.trim() || matchingTab?.remoteTarget || matchingTab?.remoteSessionId,
+  );
+  // 远端 task 的 workspacePath 可能和本地 workspace 相同。缺少对应 remoteSessionId
+  // 时禁止打开文件树，否则文件读取会错误降级到本地 service。
+  if (isRemoteWorkspace && !matchingTab?.remoteSessionId) {
+    return null;
+  }
+
+  return {
+    workspacePath: task.workspacePath,
+    workspaceName: matchingTab?.label || getPathLeaf(task.workspacePath) || task.workspacePath,
+    ...(task.workspaceIdentity?.trim() ? { workspaceIdentity: task.workspaceIdentity } : {}),
+    ...(matchingTab?.remoteSessionId
+      ? { workspaceRemoteSessionId: matchingTab.remoteSessionId }
+      : {}),
+  };
+}
+
+function resolveTaskFileTreeTargetFromTabs(
+  task: ZCodeTaskMeta,
+  tabs: readonly WorkspaceTabState[],
+): TaskFileTreeTarget | null {
+  // 同一路径的本地与旧远程 tab 可能生成相同 key，不能先压成单值 Map；
+  // 必须保留全部候选，再由单 tab 解析器校验 workspace 类型与远程 session。
+  for (const tab of tabs) {
+    const target = resolveTaskFileTreeTarget(task, tab);
+    if (target) {
+      return target;
+    }
+  }
+  // 本地 task 不依赖已打开 tab；所属 workspace 已关闭时仍应按路径打开文件树。
+  // 远程 task 则必须命中 tab 以取得受身份隔离的 remoteSessionId，禁止同样回退。
+  if (!task.workspaceIdentity?.trim()) {
+    return resolveTaskFileTreeTarget(task, undefined);
+  }
+  return null;
+}
+
+function readPointerPosition(event: Event): WorkbenchPointerPosition | null {
+  if (!("clientX" in event) || !("clientY" in event)) {
+    return null;
+  }
+  const { clientX, clientY } = event as Event & {
+    clientX: unknown;
+    clientY: unknown;
+  };
+  return typeof clientX === "number" && typeof clientY === "number"
+    ? { x: clientX, y: clientY }
+    : null;
+}
+
+// 上游 v3.16 删掉了 Workbench split-pane 的 pointer drop target 注册表；
+// 当前代码库已无任何 registerWorkbenchPointerDropTarget 调用方，保留同名 no-op
+// 以避免把分组拖拽接到已移除的落点体系上。
+function createWorkbenchPointerPositionTracker(
+  ownerDocument: Document,
+  activatorEvent: Event,
+): WorkbenchPointerPositionTracker | null {
+  const initialPosition = readPointerPosition(activatorEvent);
+  if (!initialPosition) {
+    return null;
+  }
+  let position: WorkbenchPointerPosition = initialPosition;
+  let disposed = false;
+  const stopObserving = () => {
+    if (disposed) {
+      return;
+    }
+    disposed = true;
+    ownerDocument.removeEventListener("pointermove", handlePointerMove, true);
+    ownerDocument.removeEventListener("pointerup", handlePointerUp, true);
+    ownerDocument.removeEventListener("pointercancel", handlePointerCancel, true);
+  };
+  const handlePointerMove = (event: PointerEvent) => {
+    position = { x: event.clientX, y: event.clientY };
+  };
+  const handlePointerUp = (event: PointerEvent) => {
+    position = { x: event.clientX, y: event.clientY };
+    stopObserving();
+  };
+  const handlePointerCancel = () => {
+    stopObserving();
+  };
+  ownerDocument.addEventListener("pointermove", handlePointerMove, true);
+  ownerDocument.addEventListener("pointerup", handlePointerUp, true);
+  ownerDocument.addEventListener("pointercancel", handlePointerCancel, true);
+  return {
+    dispose: stopObserving,
+    getPosition: () => position,
+  };
+}
+
+function updateWorkbenchPointerDrag(
+  _payload: WorkbenchSessionDragPayload,
+  _clientX: number,
+  _clientY: number,
+): boolean {
+  return false;
+}
+
+function finishWorkbenchPointerDrag(
+  _payload: WorkbenchSessionDragPayload,
+  _clientX: number,
+  _clientY: number,
+): boolean {
+  return false;
+}
+
+function cancelWorkbenchPointerDrag(): void {}
+
+function shouldHideGroupedTaskContent(params: {
+  initialized: boolean;
+  loading: boolean;
+  hasNodes: boolean;
+  /**
+   * 门禁只该拦首屏。已经画出过列表之后再回到隐藏态，就是用户看到的
+   * 「grouped 整块闪一下」——祖先重挂载和后台刷新都会走到这里。
+   * 画过一次之后一律继续渲染上一份列表：旧数据优于空白。
+   */
+  hasPaintedOnce?: boolean;
+}): boolean {
+  if (params.hasPaintedOnce) {
+    return false;
+  }
+  return !params.initialized || (params.loading && !params.hasNodes);
+}
+
+function groupedNodeIdentity(node: ZCodeGroupedTaskViewNode): string {
+  return node.type === "group" ? `group:${node.group.id}` : `task:${taskKey(node.task)}`;
+}
+
+// 行组件仍按 ZCodeTaskMeta 暴露回调，但节点实际来自 ProjectTask 投影；
+// 视图改写函数（上游 v3.16）已把参数收紧为 ProjectTask，这里恢复完整形状。
+function asProjectTask(task: ZCodeTaskMeta): ProjectTask {
+  return task as ProjectTask;
+}
+
+function groupedNodeRef(node: ZCodeGroupedTaskViewNode): GroupNode {
+  return node.type === "group"
+    ? { type: "group", groupId: node.group.id }
+    : { type: "task", task: groupTaskRef(node.task) };
+}
+
+interface GroupedNodePlacement {
+  identity: string;
+  parentId: string | null;
+  index: number;
+}
+
+interface GroupedTargetPlacement extends GroupedNodePlacement {
+  node: GroupNode;
+  previous: GroupNode | null;
+  next: GroupNode | null;
+}
+
+function collectGroupedNodePlacements(view: ZCodeGroupedTaskView): Map<string, GroupedNodePlacement> {
+  const placements = new Map<string, GroupedNodePlacement>();
+  view.nodes.forEach((node, index) => {
+    const identity = groupedNodeIdentity(node);
+    placements.set(identity, { identity, parentId: null, index });
+    if (node.type !== "group") {
+      return;
+    }
+    node.tasks.forEach((task, taskIndex) => {
+      const taskIdentity = `task:${taskKey(task)}`;
+      placements.set(taskIdentity, {
+        identity: taskIdentity,
+        parentId: node.group.id,
+        index: taskIndex,
+      });
+    });
+  });
+  return placements;
+}
+
+function collectGroupedTargetPlacements(view: ZCodeGroupedTaskView): GroupedTargetPlacement[] {
+  const targets: GroupedTargetPlacement[] = [];
+  view.nodes.forEach((node, index) => {
+    targets.push({
+      identity: groupedNodeIdentity(node),
+      parentId: null,
+      index,
+      node: groupedNodeRef(node),
+      previous: view.nodes[index - 1] ? groupedNodeRef(view.nodes[index - 1]!) : null,
+      next: view.nodes[index + 1] ? groupedNodeRef(view.nodes[index + 1]!) : null,
+    });
+    if (node.type !== "group") {
+      return;
+    }
+    node.tasks.forEach((task, taskIndex) => {
+      const previousTask = node.tasks[taskIndex - 1];
+      const nextTask = node.tasks[taskIndex + 1];
+      targets.push({
+        identity: `task:${taskKey(task)}`,
+        parentId: node.group.id,
+        index: taskIndex,
+        node: { type: "task", task: groupTaskRef(task) },
+        previous: previousTask ? { type: "task", task: groupTaskRef(previousTask) } : null,
+        next: nextTask ? { type: "task", task: groupTaskRef(nextTask) } : null,
+      });
+    });
+  });
+  return targets;
+}
+
+/**
+ * 旧 API 一次提交整棵 view 顺序；新 ITaskGroupService 只接受单节点 move。
+ * 这里按目标顺序逐节点下发带锚点的 move，把整表顺序拆成幂等的单节点命令。
+ */
+async function persistGroupedTaskViewOrder(
+  service: TaskGroupService,
+  previousView: ZCodeGroupedTaskView,
+  nextView: ZCodeGroupedTaskView,
+): Promise<void> {
+  const currentPlacements = collectGroupedNodePlacements(previousView);
+  for (const target of collectGroupedTargetPlacements(nextView)) {
+    const current = currentPlacements.get(target.identity);
+    if (current && current.parentId === target.parentId && current.index === target.index) {
+      continue;
+    }
+    const anchor: MoveGroupNode["anchor"] = target.previous
+      ? { node: target.previous, side: "after" }
+      : target.next
+        ? { node: target.next, side: "before" }
+        : undefined;
+    await service.move({
+      node: target.node,
+      sourceGroupId: current?.parentId ?? null,
+      groupId: target.parentId,
+      ...(anchor ? { anchor } : {}),
+    });
+  }
+}
+
+function useGroupedTaskView({ workspaceTabs }: { workspaceTabs: WorkspaceTabState[] }) {
+  const services = useBaseWorkspaceServices();
+  const taskGroupService = services.taskGroupService;
+  const taskGroupServiceRef = useRef<TaskGroupService | undefined>(taskGroupService);
+  taskGroupServiceRef.current = taskGroupService;
+  const globalTaskList = useGlobalTaskList({
+    kind: "active",
+    workspaceTabs,
+    sortBy: "updated",
+    searchQuery: "",
+    expanded: true,
+    collapsedLimit: 0,
+  });
+  const tasks = useMemo<ProjectTask[]>(
+    () => globalTaskList.items.map(toProjectTask),
+    [globalTaskList.items],
+  );
+  const tasksRef = useRef(tasks);
+  tasksRef.current = tasks;
+  const [structure, setStructure] = useState<TaskGroupStructure>(EMPTY_TASK_GROUP_STRUCTURE);
+  const [view, setViewState] = useState<ZCodeGroupedTaskView>(EMPTY_GROUPED_TASK_VIEW);
+  const viewRef = useRef(view);
+  const [loading, setLoading] = useState(true);
+  const [initialized, setInitialized] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const setView = useCallback((next: SetStateAction<ZCodeGroupedTaskView>) => {
+    const resolved = typeof next === "function" ? next(viewRef.current) : next;
+    viewRef.current = resolved;
+    setViewState(resolved);
+  }, []);
+
+  const refresh = useCallback(async () => {
+    const service = taskGroupServiceRef.current;
+    if (!service) {
+      setStructure(EMPTY_TASK_GROUP_STRUCTURE);
+      setView(buildGroupedTaskView(tasksRef.current, EMPTY_TASK_GROUP_STRUCTURE));
+      setInitialized(true);
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    try {
+      const nextStructure = await service.read();
+      setStructure(nextStructure);
+      setView(buildGroupedTaskView(tasksRef.current, nextStructure));
+      setInitialized(true);
+    } catch (error) {
+      logger.error("[WorkspaceGroupedTasksSection] 读取 task group 结构失败", error);
+    } finally {
+      setLoading(false);
+    }
+  }, [setView]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const subscription = services.broadcastService.onMessage((event) => {
+      if (event.channel === "state:task-groups") {
+        void refresh();
+      }
+    });
+    return () => subscription.dispose();
+  }, [refresh, services.broadcastService]);
+
+  // 任务事实（活动/标题）变化时按已接受结构重建展示树，结构本身不在这里改写。
+  useEffect(() => {
+    setView(buildGroupedTaskView(tasks, structure));
+  }, [setView, structure, tasks]);
+
+  const saveGroup = useCallback(
+    async (input: { id?: string; title?: string; color?: ZCodeTaskGroupColor }) => {
+      const service = taskGroupServiceRef.current;
+      if (!service) {
+        throw new Error("task-group.service-unavailable");
+      }
+      setSaving(true);
+      try {
+        const group = await service.save(input);
+        await refresh();
+        return group;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [refresh],
+  );
+
+  const createGroup = useCallback(() => saveGroup({}), [saveGroup]);
+  const renameGroup = useCallback(
+    (groupId: string, title: string) => saveGroup({ id: groupId, title }),
+    [saveGroup],
+  );
+  const updateGroupColor = useCallback(
+    (groupId: string, color: ZCodeTaskGroupColor) => saveGroup({ id: groupId, color }),
+    [saveGroup],
+  );
+
+  const ungroupGroup = useCallback(
+    async (groupId: string) => {
+      const service = taskGroupServiceRef.current;
+      if (!service) {
+        throw new Error("task-group.service-unavailable");
+      }
+      setSaving(true);
+      try {
+        await service.ungroup(groupId);
+        await refresh();
+      } finally {
+        setSaving(false);
+      }
+    },
+    [refresh],
+  );
+
+  const applyOrder = useCallback(
+    async (nextView: ZCodeGroupedTaskView) => {
+      const service = taskGroupServiceRef.current;
+      const previousView = viewRef.current;
+      setView(nextView);
+      if (!service) {
+        setView(previousView);
+        return;
+      }
+      setSaving(true);
+      try {
+        await persistGroupedTaskViewOrder(service, previousView, nextView);
+        await refresh();
+      } catch (error) {
+        // 写入失败回滚本地乐观视图，再刷新收敛到 Host 真相源。
+        setView(previousView);
+        await refresh();
+        logger.error("[WorkspaceGroupedTasksSection] 保存 grouped task 顺序失败", error);
+        throw error;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [refresh, setView],
+  );
+
+  return {
+    view,
+    setView,
+    loading,
+    initialized,
+    saving,
+    refresh,
+    createGroup,
+    renameGroup,
+    updateGroupColor,
+    ungroupGroup,
+    applyOrder,
+  };
+}
 
 function findNearestScrollableAncestor(element: HTMLElement): HTMLElement | null {
   let current = element.parentElement;
@@ -581,17 +1048,19 @@ export function WorkspaceGroupedTasksSection({
     (state) => state.upsertOptimisticTaskListItem,
   );
   const setTaskUnreadIndicator = useZCodeSessionStore((state) => state.setTaskUnreadIndicator);
-  const groupedDraftTask = useZCodeSessionStore(
+  // 上游新草稿模型用 draftTaskGroupId 表达分组意图：undefined = 无 grouped 草稿，
+  // null = 顶部草稿，字符串 = 指定分组草稿。
+  const groupedDraftTaskGroupId = useZCodeSessionStore(
     (state) =>
       selectWorkspaceZCodeState(state, activeWorkspacePath, activeWorkspaceIdentity)
-        .groupedDraftTask,
+        .draftTaskGroupId,
   );
   const groupedDraftFocusVersion = useZCodeSessionStore(
     (state) =>
       selectWorkspaceZCodeState(state, activeWorkspacePath, activeWorkspaceIdentity)
         .draftFocusVersion,
   );
-  const clearGroupedDraftTask = useZCodeSessionStore((state) => state.clearGroupedDraftTask);
+  const clearGroupedDraftTask = useZCodeSessionStore((state) => state.clearDraftTaskGroup);
   const {
     view: authoritativeView,
     setView,
@@ -638,7 +1107,7 @@ export function WorkspaceGroupedTasksSection({
     activeTaskId,
     activeWorkspaceIdentity,
     activeWorkspacePath,
-    groupedDraftPlacement: groupedDraftTask?.placement,
+    groupedDraftTaskGroupId,
     view,
   });
   const groupDragCollapsedSnapshotRef = useRef<Set<string> | null>(null);
@@ -661,7 +1130,9 @@ export function WorkspaceGroupedTasksSection({
       },
     }),
   );
-  const isGroupedDraftActive = Boolean(groupedDraftTask && activeTaskId === null);
+  const isGroupedDraftActive = Boolean(
+    groupedDraftTaskGroupId !== undefined && activeTaskId === null,
+  );
   const handleGroupedPointerDownCapture = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
       // 必须在 dnd-kit 激活前监听，才能捕获越过 6px 阈值的首个
@@ -687,18 +1158,18 @@ export function WorkspaceGroupedTasksSection({
       activeTaskId,
       activeWorkspaceIdentity,
       activeWorkspacePath,
-      groupedDraftPlacement: groupedDraftTask?.placement,
+      groupedDraftTaskGroupId,
       view,
     };
   }, [
     activeTaskId,
     activeWorkspaceIdentity,
     activeWorkspacePath,
-    groupedDraftTask?.placement,
+    groupedDraftTaskGroupId,
     view,
   ]);
   const handleCreateTopDraftTask = useCallback(() => {
-    onCreateTask({ groupedDraftPlacement: { type: "top" } });
+    onCreateTask({ taskGroupId: null });
   }, [onCreateTask]);
   const handleCreateGroupDraftTask = useCallback(
     (groupId: string) => {
@@ -710,7 +1181,7 @@ export function WorkspaceGroupedTasksSection({
         next.delete(groupId);
         return next;
       });
-      onCreateTask({ groupedDraftPlacement: { type: "group", groupId } });
+      onCreateTask({ taskGroupId: groupId });
     },
     [onCollapsedGroupIdsChange, onCreateTask],
   );
@@ -719,7 +1190,7 @@ export function WorkspaceGroupedTasksSection({
       activeTaskId: currentActiveTaskId,
       activeWorkspaceIdentity: currentActiveWorkspaceIdentity,
       activeWorkspacePath: currentActiveWorkspacePath,
-      groupedDraftPlacement,
+      groupedDraftTaskGroupId: currentGroupedDraftTaskGroupId,
       view: currentView,
     } = createDraftContextRef.current;
     const activeTaskKey = currentActiveTaskId
@@ -729,9 +1200,11 @@ export function WorkspaceGroupedTasksSection({
           workspacePath: currentActiveWorkspacePath,
         })
       : null;
-    const draftPlacement = activeTaskKey
+    const draftPlacement: GroupedDraftTaskPlacement = activeTaskKey
       ? resolveGroupedDraftTaskPlacementForTask(currentView, activeTaskKey)
-      : (groupedDraftPlacement ?? { type: "top" });
+      : currentGroupedDraftTaskGroupId === undefined || currentGroupedDraftTaskGroupId === null
+        ? { type: "top" }
+        : { type: "group", groupId: currentGroupedDraftTaskGroupId };
     if (draftPlacement.type === "group") {
       onCollapsedGroupIdsChange((current) => {
         if (!current.has(draftPlacement.groupId)) {
@@ -742,7 +1215,7 @@ export function WorkspaceGroupedTasksSection({
         return next;
       });
     }
-    onCreateTask({ groupedDraftPlacement: draftPlacement });
+    onCreateTask({ taskGroupId: draftPlacement.type === "group" ? draftPlacement.groupId : null });
   }, [onCollapsedGroupIdsChange, onCreateTask]);
   const handleCloseGroupedDraftTask = useCallback(() => {
     // grouped 草稿会在切 workspace 时迁移到目标 workspace。
@@ -754,7 +1227,7 @@ export function WorkspaceGroupedTasksSection({
     return () => onCreateDraftTaskActionChange?.(null);
   }, [handleCreateContextualDraftTask, onCreateDraftTaskActionChange]);
   useEffect(() => {
-    if (groupedDraftTask?.placement.type !== "top") {
+    if (groupedDraftTaskGroupId !== null) {
       return;
     }
     const rootElement = groupedSectionRootRef.current;
@@ -770,7 +1243,7 @@ export function WorkspaceGroupedTasksSection({
     return () => {
       window.cancelAnimationFrame(frameId);
     };
-  }, [groupedDraftFocusVersion, groupedDraftTask]);
+  }, [groupedDraftFocusVersion, groupedDraftTaskGroupId]);
   const groups = useMemo<TaskGroupMenuItem[]>(() => {
     const nextGroups = view.nodes.flatMap((node) =>
       node.type === "group"
@@ -842,7 +1315,7 @@ export function WorkspaceGroupedTasksSection({
     activeDragGroupId,
     activeDragTaskKey,
     collapsedGroupIds,
-    groupedDraftTask?.placement,
+    groupedDraftTaskGroupId,
     view.nodes,
   ]);
   const workspaceTabByKey = useMemo(
@@ -952,7 +1425,7 @@ export function WorkspaceGroupedTasksSection({
     (task: ZCodeTaskMeta, groupId: string | null) => {
       // archivingTaskKeys 过滤后的 view 只用于渲染；若拿它计算并持久化排序，
       // 归档请求失败前的任意结构变更都会把被隐藏任务从权威分组中永久删除。
-      const nextView = moveTaskByMenu(authoritativeView, task, groupId);
+      const nextView = moveTaskByMenu(authoritativeView, asProjectTask(task), groupId);
       if (nextView === authoritativeView) {
         return;
       }
@@ -965,7 +1438,7 @@ export function WorkspaceGroupedTasksSection({
 
   const handleMoveTaskToTop = useCallback(
     (task: ZCodeTaskMeta) => {
-      const nextView = moveTaskToTopByMenu(authoritativeView, task);
+      const nextView = moveTaskToTopByMenu(authoritativeView, asProjectTask(task));
       if (nextView === authoritativeView) {
         return;
       }
@@ -1013,7 +1486,7 @@ export function WorkspaceGroupedTasksSection({
         return;
       }
 
-      setView((currentView) => replaceTaskInGroupedView(currentView, meta));
+      setView((currentView) => replaceTaskInGroupedView(currentView, { ...task, ...meta }));
       upsertOptimisticTaskListItem(task.workspacePath, meta, task.workspaceIdentity);
       applyTaskQueryCacheMutation({
         previousTask: task,
@@ -1054,7 +1527,9 @@ export function WorkspaceGroupedTasksSection({
         })
         .then((meta) => {
           setTaskUnreadIndicator(task.workspacePath, task.taskId, true, task.workspaceIdentity);
-          setView((currentView) => replaceTaskInGroupedView(currentView, meta));
+          setView((currentView) =>
+            replaceTaskInGroupedView(currentView, { ...asProjectTask(task), ...meta }),
+          );
           upsertOptimisticTaskListItem(task.workspacePath, meta, task.workspaceIdentity);
           applyTaskQueryCacheMutation({
             previousTask: task,
@@ -1098,14 +1573,9 @@ export function WorkspaceGroupedTasksSection({
           // 归档成功后主动换代 membership；渲染层在权威列表确认消失前继续屏蔽该 task。
           bumpTaskListMembershipVersion();
           removeTaskState(task.workspacePath, task.taskId, task.workspaceIdentity);
-          if (task.workspaceIdentity) {
-            useRemoteTimelineTaskStore
-              .getState()
-              .removeTask(task.workspacePath, task.taskId, task.workspaceIdentity);
-            useRemotePinnedTaskStore
-              .getState()
-              .removeTask(task.workspacePath, task.taskId, task.workspaceIdentity);
-          }
+          // 旧 fork 的 remotePinnedTaskStore / remoteTimelineTaskStore 已被上游移除；
+          // 远程置顶/时间线列表现在由 Window Host Controller 统一投影，归档后随
+          // membership 换代自动消失，不再有需要单独清理的 renderer 侧缓存。
           applyTaskQueryCacheMutation({
             previousTask: task,
             nextTask: meta,
@@ -1529,10 +1999,7 @@ export function WorkspaceGroupedTasksSection({
             onCloseTask={handleCloseTask}
             onOpenFileTree={onOpenFileTree ? handleOpenTaskFileTree : undefined}
             onCreateTask={() => handleCreateGroupDraftTask(node.group.id)}
-            hasDraftTask={
-              groupedDraftTask?.placement.type === "group" &&
-              groupedDraftTask.placement.groupId === node.group.id
-            }
+            hasDraftTask={groupedDraftTaskGroupId === node.group.id}
             draftTaskActive={isGroupedDraftActive}
             draftWorkspaceLabel={draftWorkspaceLabel}
             onSelectDraftTask={() => handleCreateGroupDraftTask(node.group.id)}
@@ -1588,7 +2055,7 @@ export function WorkspaceGroupedTasksSection({
       draftWorkspaceLabel,
       getTaskRemoteSessionId,
       getTaskWorkspaceLabel,
-      groupedDraftTask?.placement,
+      groupedDraftTaskGroupId,
       groups,
       handleCloseGroupedDraftTask,
       handleCloseTask,
@@ -1706,7 +2173,7 @@ export function WorkspaceGroupedTasksSection({
           onPointerDownCapture={handleGroupedPointerDownCapture}
           className={cn("pb-4", saving && "opacity-90")}
         >
-          {groupedDraftTask?.placement.type === "top" ? (
+          {groupedDraftTaskGroupId === null ? (
             <GroupedDraftTaskRow
               active={isGroupedDraftActive}
               workspaceLabel={draftWorkspaceLabel}
@@ -1719,7 +2186,7 @@ export function WorkspaceGroupedTasksSection({
             isGroupCollapsed={isGroupCollapsed}
             renderNode={renderTopLevelNode}
           />
-          {view.nodes.length === 0 && !groupedDraftTask && !loading ? (
+          {view.nodes.length === 0 && groupedDraftTaskGroupId === undefined && !loading ? (
             <div className="px-3 py-2 text-ui-base text-foreground-subtle">
               {intl.formatMessage({ id: "taskList.noTasks" })}
             </div>

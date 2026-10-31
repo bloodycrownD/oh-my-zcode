@@ -61,6 +61,12 @@ function createHarness() {
       async syncTaskMeta(params: { meta: typeof meta }) {
         return params.meta;
       },
+      // FORK(upgrade-316)：上游 v3.16 在 syncer 侧改走 updateTaskPresentation
+      // （taskIndexRepo.ts:1223，只写展示缓存，不接受 title/time/status/deleted）。
+      // 本用例断言的是流回退路径，展示写入不参与断言，原样返回即可。
+      async updateTaskPresentation(_params: unknown) {
+        return meta;
+      },
       close() {},
     } as unknown as TaskIndexRepo,
     taskIndexSyncer: {
@@ -69,6 +75,11 @@ function createHarness() {
       getWorkspaceEmitter: () => ({ fire() {} }),
       ensureSessionSubscription() {},
       emitWorkspaceTaskListChanged() {},
+      // FORK(upgrade-316)：上游 v3.16 必填端口成员（zcodeTaskIndexSyncer.ts:118），
+      // 返回值会被 rememberIndexedTaskMeta 当 ZCodeTaskMeta 用，不能返回 undefined。
+      async syncSnapshotAndBroadcast() {
+        return meta;
+      },
       disposeAll() {
         disposed.push("syncer");
       },
@@ -301,6 +312,10 @@ async function createLegacyResumeHarness(migrationSource?: "claudeCode") {
       async applyAgentPatch(params: { patch: { status?: string } }) {
         return params;
       },
+      // FORK(upgrade-316)：同上——上游 syncer 走 updateTaskPresentation 写展示缓存。
+      async updateTaskPresentation(_params: unknown) {
+        return null;
+      },
       close() {},
     } as unknown as TaskIndexRepo,
     taskIndexSyncer: {
@@ -309,6 +324,10 @@ async function createLegacyResumeHarness(migrationSource?: "claudeCode") {
       getWorkspaceEmitter: () => ({ fire() {} }),
       ensureSessionSubscription() {},
       emitWorkspaceTaskListChanged() {},
+      // FORK(upgrade-316)：同上。
+      async syncSnapshotAndBroadcast() {
+        return meta;
+      },
       disposeAll() {},
     } as unknown as Options["taskIndexSyncer"],
   });

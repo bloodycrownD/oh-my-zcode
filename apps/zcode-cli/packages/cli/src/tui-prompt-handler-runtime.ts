@@ -2,6 +2,7 @@
 // 「读 dotenv → 定位要恢复的会话 → 装 bootstrap 模块 → 起 Provider Registry
 // 常驻运行时 → 读默认模型选择」这段进程级准备拆到本文件；
 // 公开面仍从 tui-prompt-handler.ts 导出。
+import type { ZCodeAppOptions } from "@zcode/bootstrap";
 import { loadBootstrapModule } from "./bootstrap-loader.js";
 import { loadCliDotenv } from "./env.js";
 import { createCliProviderRefreshReporter } from "./provider-runtime-env.js";
@@ -16,17 +17,22 @@ type ProviderRegistryRuntime = Awaited<
 // 只起一份，只在终态 close 时对称 shutdown。此前是 Prompt Handler 内的 let 闭包变量，
 // 拆文件后收敛成这个显式的运行时状态对象。
 interface TuiProcessRuntimeState {
+  providerEndpointRoutingPort: ZCodeAppOptions["providerEndpointRoutingPort"];
   providerRegistryRuntimePromise: Promise<ProviderRegistryRuntime> | undefined;
 }
 
 export const createTuiProcessRuntimeState = (): TuiProcessRuntimeState => ({
+  providerEndpointRoutingPort: undefined,
   providerRegistryRuntimePromise: undefined,
 });
 
 // 返回值类型交给推断：原地 createApp 里这几个都是推断出来的局部变量，手写接口反而会把
 // 品牌类型（SessionId）和 createZCodeApp 的联合签名收窄错。
+// `version` 是上游 v3.16.2 新增的消费点（endpoint 路由端口的 appVersion）：fork 曾因无人使用
+// 删掉这个参数，本次合并把上游的 `appVersion: version` 用到了一处没有该参数的作用域，故补回。
 export async function prepareTuiAppRuntime(
   deps: RunDependencies,
+  version: string,
   request: CliResumeRequest,
   state: TuiProcessRuntimeState,
 ) {
@@ -68,6 +74,17 @@ export async function prepareTuiAppRuntime(
   const configuredDefaultModelSelection = providerRegistryRuntime?.modelSelectionConfigRepository
     ? await providerRegistryRuntime.modelSelectionConfigRepository.read()
     : providerRegistryRuntime?.configuredDefaultModelSelection;
+  const createProviderEndpointRoutingPort =
+    deps.createProviderEndpointRoutingPort ??
+    bootstrapModule?.createDefaultProviderEndpointRoutingPort;
+  state.providerEndpointRoutingPort ??= createProviderEndpointRoutingPort?.({
+    appVersion: version,
+    env,
+    projectConfigPath: deps.projectConfigPath,
+    skipUserConfig: deps.skipUserConfig,
+    userConfigPath: deps.userConfigPath,
+    workingDirectory,
+  });
 
   return {
     env,

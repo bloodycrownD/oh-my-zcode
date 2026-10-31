@@ -1,4 +1,4 @@
-type SystemReminderDeliveryChannel =
+export type SystemReminderDeliveryChannel =
   | "request_prefix"
   | "current_turn"
   | "tool_result"
@@ -6,7 +6,7 @@ type SystemReminderDeliveryChannel =
   | "mid_turn_event"
   | "real_user";
 
-type SystemReminderLifecycle =
+export type SystemReminderLifecycle =
   | "request_prefix"
   | "per_current_turn"
   | "runtime_local"
@@ -15,11 +15,13 @@ type SystemReminderLifecycle =
   | "mid_turn_event"
   | "real_user";
 
-type SystemReminderProviderVisibility = "provider_visible" | "provider_hidden";
+export type SystemReminderProviderVisibility = "provider_visible" | "provider_hidden";
 
 export const SYSTEM_REMINDER_PREFIX_SOURCES = ["context_prefix", "skills_listing"] as const;
 
 export const SYSTEM_REMINDER_PERSISTED_SOURCES = [
+  "tool_search_announcement",
+  "agent_listing_delta",
   "todo_reminder",
   "task_status",
   "tool_result_warning",
@@ -28,6 +30,7 @@ export const SYSTEM_REMINDER_PERSISTED_SOURCES = [
   "resume_goal_state",
   "goal_state_change",
   "plugin_reference",
+  "bot_topic_context",
   "target_continuation",
   "goal_completion_verification",
   "rewind_notice",
@@ -40,6 +43,8 @@ export const SYSTEM_REMINDER_PERSISTED_SOURCES = [
 export const SYSTEM_REMINDER_PER_REQUEST_SOURCES = [
   "incoming_message",
   "hook_context",
+  "memory_update",
+  "relevant_memory",
   "runtime_mode",
   "plan_mode_exit",
   "output_style",
@@ -66,7 +71,7 @@ export type SystemReminderSource =
   | SystemReminderPersistedSource
   | SystemReminderPerRequestSource;
 
-interface SystemReminderSourceDescriptor {
+export interface SystemReminderSourceDescriptor {
   source: SystemReminderSource;
   channel: SystemReminderDeliveryChannel;
   lifecycle: SystemReminderLifecycle;
@@ -99,10 +104,25 @@ const NON_MID_CONVERSATION_SYSTEM_SOURCES = new Set<SystemReminderSource>([
 ]);
 
 const SYSTEM_REMINDER_DESCRIPTORS: Record<SystemReminderSource, DescriptorShape> = {
+  tool_search_announcement: descriptor(
+    "current_turn",
+    "resume_history",
+    true,
+    "sr.tool_search_announcement",
+  ),
+  agent_listing_delta: descriptor("current_turn", "resume_history", true, "sr.agent_listing_delta"),
   incoming_message: descriptor("mid_turn_event", "mid_turn_event", true, "sr.incoming_message"),
+  bot_topic_context: descriptor(
+    "history_continuity",
+    "resume_history",
+    true,
+    "sr.bot_topic_context",
+  ),
   context_prefix: descriptor("request_prefix", "request_prefix", true, "sr.context_prefix"),
   skills_listing: descriptor("request_prefix", "request_prefix", true, "sr.skills_listing"),
   hook_context: descriptor("current_turn", "per_current_turn", true, "sr.hook_context"),
+  memory_update: descriptor("current_turn", "per_current_turn", true, "sr.memory_update"),
+  relevant_memory: descriptor("current_turn", "per_current_turn", true, "sr.relevant_memory"),
   runtime_mode: descriptor("current_turn", "per_current_turn", true, "sr.runtime_mode"),
   plan_mode_exit: descriptor("current_turn", "runtime_local", true, "sr.plan_mode_exit"),
   output_style: descriptor("current_turn", "per_current_turn", true, "sr.output_style"),
@@ -174,6 +194,7 @@ const SYSTEM_REMINDER_DESCRIPTORS: Record<SystemReminderSource, DescriptorShape>
     "sr.shell_environment_change",
   ),
   diagnostics: descriptor("mid_turn_event", "mid_turn_event", true, "sr.diagnostics"),
+  // 第四批 4a-0（2026-09-12）：原 plugin_ui_state 源已删除，插件给模型的信息改走 ui/update-model-context。
   // Step 19b / R3 显式声明：m[0]/m[1] 必须在 wire 上可见（OpenCode 侧它们是
   // 带 `synthetic: true` part 的真实 user 消息，provider serializer 只过滤
   // `ignored`，不过滤 `synthetic`）。这里 providerVisibility 是它们能被
@@ -204,6 +225,10 @@ export function getSystemReminderDescriptor(
     source,
     ...descriptor,
   };
+}
+
+export function isSystemReminderMetaSource(source: SystemReminderSource): boolean {
+  return getSystemReminderDescriptor(source).isMeta;
 }
 
 export function isMidConversationSystemSource(source: SystemReminderSource): boolean {

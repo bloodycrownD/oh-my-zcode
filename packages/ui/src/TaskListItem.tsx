@@ -1,8 +1,10 @@
+import { RemoteTaskDeviceLabel } from "@/remote-connection/RemoteTaskDeviceLabel.js";
 /* eslint-disable max-lines -- task item 同时承载默认列表和 timeline 两行布局的共享交互，先保持动作链路集中避免归档/置顶回归。 */
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Archive, Clock, CloudUpload, ListTree, LoaderIcon, Pin, Smartphone } from "lucide-react";
 import { isCronTask, type ZCodeTaskMeta } from "@zcode/shared";
-import { TID_TASK_ARCHIVE, TID_TASK_ITEM, testId } from "@zcode/shared";
+// 合并后的 @zcode/shared 顶层未再 re-export test-ids.ts，测试 id 统一走子路径。
+import { TID_TASK_ARCHIVE, TID_TASK_ITEM, testId } from "@zcode/shared/test-ids";
 import { Badge } from "@/components/ui/badge.js";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
@@ -33,6 +35,7 @@ import { useOptionalTabStore } from "@/store/TabStoreProvider.js";
 import { isWorkspaceReadOnly } from "@/store/tabStore.js";
 import { TaskTitleOverflowText } from "@/components/TaskTitleOverflowText.js";
 import { createTaskWorkbenchDragPreview } from "@/lib/taskWorkbenchDragPreview.js";
+import { resolveTaskSourceLabel } from "@/lib/taskSourceAttribution.js";
 import { TaskRowActionButton } from "@/workspace-grouped-tasks/task-row-action-button.js";
 import { TaskWorkflowRunLines } from "@/components/workflow-run-line/TaskWorkflowRunLines.js";
 
@@ -45,8 +48,11 @@ interface TaskListItemProps {
   remoteSessionId?: string;
   task: ZCodeTaskMeta;
   isPinned: boolean;
+  isArchived?: boolean;
   isActive: boolean;
   isMobileActive?: boolean;
+  hoverEnabled?: boolean;
+  connectionOverlay?: "disconnected" | "reconnecting";
   onSelectTask: (taskId: string) => void;
   onArchiveTaskInline: (e: React.MouseEvent, taskId: string) => void;
   onCancelArchiveConfirm: () => void;
@@ -62,6 +68,14 @@ interface TaskListItemProps {
   intl: TaskListItemIntl;
   actionsDisabled?: boolean;
   actionsDisabledReason?: string;
+}
+
+export function shouldShowRemoteConnectionOverlay(params: {
+  workspaceIdentity?: string;
+  connectionOverlay?: "disconnected" | "reconnecting";
+}): boolean {
+  const workspaceIdentity = params.workspaceIdentity?.trim() ?? "";
+  return Boolean(workspaceIdentity.startsWith("remote:") && params.connectionOverlay);
 }
 
 function areJsonFieldsEqual(left: unknown, right: unknown) {
@@ -88,6 +102,7 @@ function areTaskListItemTaskFieldsEqual(left: ZCodeTaskMeta, right: ZCodeTaskMet
     left.unreadAt === right.unreadAt &&
     getTaskAutomationIdentity(left) === getTaskAutomationIdentity(right) &&
     left.status === right.status &&
+    resolveTaskSourceLabel(left) === resolveTaskSourceLabel(right) &&
     areJsonFieldsEqual(left.pendingInteraction, right.pendingInteraction) &&
     areJsonFieldsEqual(getTaskListRowActivity(left), getTaskListRowActivity(right)) &&
     areJsonFieldsEqual(left.changeSummary, right.changeSummary)
@@ -100,8 +115,11 @@ function areTaskListItemPropsEqual(left: TaskListItemProps, right: TaskListItemP
     left.remoteSessionId === right.remoteSessionId &&
     areTaskListItemTaskFieldsEqual(left.task, right.task) &&
     left.isPinned === right.isPinned &&
+    left.isArchived === right.isArchived &&
     left.isActive === right.isActive &&
     left.isMobileActive === right.isMobileActive &&
+    left.hoverEnabled === right.hoverEnabled &&
+    left.connectionOverlay === right.connectionOverlay &&
     left.isArchiveConfirming === right.isArchiveConfirming &&
     left.variant === right.variant &&
     left.showPinAction === right.showPinAction &&
@@ -125,8 +143,11 @@ export const MemoTaskItem = memo(function TaskListItem({
   remoteSessionId,
   task,
   isPinned,
+  isArchived = false,
   isActive,
   isMobileActive = false,
+  hoverEnabled = true,
+  connectionOverlay,
   onSelectTask,
   onArchiveTaskInline,
   onCancelArchiveConfirm,
@@ -230,6 +251,7 @@ export const MemoTaskItem = memo(function TaskListItem({
           { label: taskAttentionLabel, count: String(taskAttention.count) },
         )
       : taskAttentionLabel;
+  const taskSourceLabel = resolveTaskSourceLabel(task);
   const taskTitle =
     task.title ||
     intl.formatMessage({
@@ -244,7 +266,8 @@ export const MemoTaskItem = memo(function TaskListItem({
         event.preventDefault();
         return;
       }
-      event.dataTransfer.effectAllowed = "copy";
+      // 原因：此行同时可复制到分屏、移动到项目；只允许 copy 会让浏览器拒绝项目的 move/drop。
+      event.dataTransfer.effectAllowed = "copyMove";
       const payload = {
         kind: "zcode/session" as const,
         workspacePath,
@@ -258,8 +281,8 @@ export const MemoTaskItem = memo(function TaskListItem({
         serializeWorkbenchSessionDragPayload(payload),
       );
       event.dataTransfer.setData("text/plain", taskTitle);
-      // 浏览器默认 drag preview 背景透明、边界不清晰；保留原行内容，
-      // 只补齐 Grouped drag overlay 使用的背景、边框和阴影。
+      // Bugfix：浏览器默认 drag preview 背景透明、边界不清晰；保留原行内容，
+      // 只补齐拖动 overlay 使用的背景、边框和阴影。
       const cleanupDragPreview = createTaskWorkbenchDragPreview({
         clientX: event.clientX,
         clientY: event.clientY,
@@ -341,15 +364,33 @@ export const MemoTaskItem = memo(function TaskListItem({
   // 手机远控标记和置顶状态共用左侧 leading 槽。
   // 已置顶任务如果继续常显 Pin，会和绝对定位的手机图标重叠；手机激活态默认让手机图标优先，hover 时再显示 Pin 操作。
   const showPinnedState = isPinned && leadingIndicator === "none" && !isMobileActive;
-  const shouldMountWorkspaceTaskActions = hoverActionsVisible || focusActionsVisible || isHoverNone;
-  // hover:none 只代表触屏端需要常驻 action，不代表应永久隐藏时间、状态和变更摘要。
-  // 元信息仅在真实 hover / focus 交互时让位，保持旧触屏布局的“元信息 + action”语义。
-  const shouldSuppressWorkspaceTaskMetadata = hoverActionsVisible || focusActionsVisible;
+  // 修复原因：手机会在 click 前合成 mouseenter/focus；此时切换内容会让首次点击只进入 hover。
+  // 远控入口固定操作区和元信息，避免触摸引发 DOM 切换；桌面仍沿用 hover/focus 展示。
+  const shouldSuppressWorkspaceTaskMetadata =
+    hoverEnabled && (hoverActionsVisible || focusActionsVisible);
+  const shouldMountWorkspaceTaskActions =
+    !hoverEnabled || shouldSuppressWorkspaceTaskMetadata || isHoverNone;
   const taskTimeLabel = formatTaskRelativeTime(task.updatedAt, intl);
   const taskChangeSummary = getTaskChangeSummary(task);
   const isRemoteTask = Boolean(task.workspaceIdentity?.trim());
+  const remoteConnectionUnavailable = shouldShowRemoteConnectionOverlay({
+    workspaceIdentity: task.workspaceIdentity,
+    connectionOverlay,
+  });
+  const remoteConnectionBadge = remoteConnectionUnavailable ? (
+    <Badge
+      data-remote-connection-overlay="true"
+      className="h-5 shrink-0 border-transparent bg-warning-surface px-2 text-ui-xs font-medium text-warning-surface-foreground"
+    >
+      {intl.formatMessage({ id: "taskList.remoteConnectionUnknown" })}
+    </Badge>
+  ) : null;
   const archiveLabel = intl.formatMessage({
-    id: isArchiveConfirming ? "common.confirm" : "taskList.archive",
+    id: isArchiveConfirming
+      ? "common.confirm"
+      : isArchived
+        ? "taskList.unarchive"
+        : "taskList.archive",
   });
   const taskTitleWithChanges = formatTaskTitleWithChanges(taskTitle, taskChangeSummary, intl);
   const workspaceLabel = getPathLeaf(task.workspacePath);
@@ -401,7 +442,7 @@ export const MemoTaskItem = memo(function TaskListItem({
             }}
             onClick={handleArchive}
             data-testid={testId(TID_TASK_ARCHIVE, task.taskId)}
-            // 归档确认态是显式等待用户决策的状态，必须持续显示 destructive 按钮。
+            // Bugfix: 归档确认态是显式等待用户决策的状态，必须持续显示 destructive 按钮。
             className={cn("shrink-0 border-destructive/20 px-2", archiveActionVisibilityClassName)}
             aria-label={archiveLabel}
           >
@@ -409,8 +450,7 @@ export const MemoTaskItem = memo(function TaskListItem({
           </Button>
         </ControlHintTooltip>
       ) : (
-        // Project / Pinned 的普通归档按钮曾覆盖 hover:bg-background/90，
-        // 与同一行文件树 action 不一致；普通态统一复用共享 bg-hover action。
+        // 普通归档态复用共享 action 的 hover 背景、尺寸和提示。
         <TaskRowActionButton
           label={archiveLabel}
           onClick={handleArchive}
@@ -442,8 +482,9 @@ export const MemoTaskItem = memo(function TaskListItem({
             的同一操作视觉不一致。直接复用共享 action，统一 bg-hover、尺寸和 pointer 行为。 */}
         <TaskRowActionButton
           label={intl.formatMessage({ id: "git.action.showTree" })}
-          onClick={handleOpenFileTree}
           showTooltip
+          testId={`task-files-${task.taskId}`}
+          onClick={handleOpenFileTree}
         >
           <ListTree className="size-3.5" />
         </TaskRowActionButton>
@@ -491,9 +532,9 @@ export const MemoTaskItem = memo(function TaskListItem({
       draggable={canDragToWorkbench}
       onDragStart={handleDragStart}
       onDragEnd={handleDragEnd}
-      onMouseEnter={handleMouseEnter}
-      onMouseLeave={handleMouseLeave}
-      onFocusCapture={() => setFocusActionsVisible(true)}
+      onMouseEnter={hoverEnabled ? handleMouseEnter : undefined}
+      onMouseLeave={hoverEnabled ? handleMouseLeave : undefined}
+      onFocusCapture={hoverEnabled ? () => setFocusActionsVisible(true) : undefined}
       onBlurCapture={(event) => {
         if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
           setFocusActionsVisible(false);
@@ -517,10 +558,10 @@ export const MemoTaskItem = memo(function TaskListItem({
           : hasWorkflowRunLines
             ? "items-start"
             : "items-center",
-        isActive ? "bg-selected" : "hover:bg-surface-hover",
+        isActive ? "bg-selected" : hoverEnabled && "hover:bg-surface-hover",
       )}
     >
-      {/* 之前任务列表依赖 divide-y 画分隔线，深色侧栏里每个 item 上下都会出现明显黑线，
+      {/* Bugfix: 之前任务列表依赖 divide-y 画分隔线，深色侧栏里每个 item 上下都会出现明显黑线，
               视觉上像被两条边框夹住。这里改成“列表留白 + item 自己带圆角态”，
               让 hover/active 的层级由卡片背景承担，不再依赖分隔线。 */}
 
@@ -535,21 +576,19 @@ export const MemoTaskItem = memo(function TaskListItem({
           aria-hidden="true"
           className={cn(
             "flex size-4 items-center justify-center transition-opacity",
+            // SVG 自身旋转会逐帧重算样式；让现有 HTML 槽位合成旋转，保留图标与状态语义。
+            leadingIndicator === "loading" && "animate-spin",
             shouldRenderPinAction && "hidden",
             isMobileActive && "invisible",
           )}
         >
+          {/* 无状态只保留对齐槽，不显示代表空闲的占位圆点。 */}
           {leadingIndicator === "error" ? (
             <span data-error-indicator="true" className="h-1.5 w-1.5 rounded-full bg-destructive" />
           ) : leadingIndicator === "unread" ? (
-            <span
-              data-unread-indicator="true"
-              className="h-1.5 w-1.5 rounded-full bg-sky-500 dark:bg-sky-400"
-            />
+            <span data-unread-indicator="true" className="size-[7px] rounded-full bg-icon-blue" />
           ) : leadingIndicator === "loading" ? (
-            <LoaderIcon className="size-4 animate-spin text-foreground-subtle" />
-          ) : showTimelineIdleIndicator ? (
-            <span data-idle-indicator="true" className="h-1.5 w-1.5 rounded-full bg-border" />
+            <LoaderIcon className="size-4 text-foreground-subtle" />
           ) : null}
         </span>
         {shouldRenderPinAction ? (
@@ -589,12 +628,13 @@ export const MemoTaskItem = memo(function TaskListItem({
                 </span>
               </ControlHintTooltip>
             ) : null}
+            {remoteConnectionBadge}
             <TaskTitleOverflowText
               className="text-ui-base text-foreground"
               title={taskTitleWithChanges}
             >
-              {/* workspace/timeline task 标题之前使用 truncate，会在长标题末尾显示省略号；
-                      grouped task 已改为右侧渐隐。这里统一 task 列表标题溢出策略，避免同一侧栏里出现两种截断语义。 */}
+              {/* Bugfix: task 标题之前使用 truncate，会在长标题末尾显示省略号；
+                      这里统一改为右侧渐隐，避免同一侧栏里出现两种截断语义。 */}
               {taskTitle}
             </TaskTitleOverflowText>
             {task.pendingInteraction ? (
@@ -611,7 +651,17 @@ export const MemoTaskItem = memo(function TaskListItem({
           </div>
           <div className="flex min-w-0 items-center justify-between gap-2 text-ui-base text-foreground-subtle h-6">
             <div className="flex min-w-0 items-center gap-1.5">
-              <span className="truncate">{workspaceLabel}</span>
+              <span className="truncate" data-task-workspace-label="true">
+                {workspaceLabel}
+              </span>
+              {taskSourceLabel ? (
+                <>
+                  <span aria-hidden="true" className="text-foreground-subtlest">
+                    ·
+                  </span>
+                  <RemoteTaskDeviceLabel task={task} className="truncate" />
+                </>
+              ) : null}
             </div>
             <div className="ml-auto flex shrink-0 items-center justify-end gap-1.5">
               {!hasPendingInteraction ? (
@@ -631,8 +681,8 @@ export const MemoTaskItem = memo(function TaskListItem({
                     </span>
                   ) : null}
                   {isTaskCron ? (
-                    // 定时任务 icon 不能占用左侧状态槽；未读、运行中、置顶 hover 都会接管那里。
-                    // 放在时间前面，和 grouped task row 的元信息位置一致，状态变化时也不会丢。
+                    // Bugfix: 定时任务 icon 不能占用左侧状态槽；未读、运行中、置顶 hover 都会接管那里。
+                    // 放在时间前面，与其它元信息同列，状态变化时也不会丢。
                     <Clock
                       data-cron-task-icon="true"
                       aria-label={intl.formatMessage({
@@ -667,19 +717,21 @@ export const MemoTaskItem = memo(function TaskListItem({
                       id: "taskList.mobileActive",
                     })}
                   >
-                    {/* mobileViewState 已经能告诉桌面端手机正在看的 task，
+                    {/* Bugfix: mobileViewState 已经能告诉桌面端手机正在看的 task，
                         但列表未消费这个状态，用户会误以为只有桌面端在操作。上一版把图标作为标题前的 flex 子项，
                         会把当前行标题往右挤，造成上下 task 标题不对齐；这里改成绝对定位到原有 leading 槽，
-                        标题文本仍从既有位置开始；同时 hover 时隐藏手机标记，把置顶按钮还给用户。 */}
+                        标题文本仍然从原来的位置开始；同时 hover 时隐藏手机标记，把原来的置顶按钮还给用户。 */}
                     <Smartphone className="size-3.5" />
                   </span>
                 </ControlHintTooltip>
               ) : null}
+              {/* 默认行与 timeline 共用远程断连投影，工作流多行布局不改变连接状态。 */}
+              {remoteConnectionBadge}
               <TaskTitleOverflowText
                 className="text-ui-base text-foreground"
                 title={taskTitleWithChanges}
               >
-                {/* 默认 workspace task item 和 timeline item 共享标题溢出规则；
+                {/* Bugfix: 默认 workspace task item 和 timeline item 共享标题溢出规则；
                         使用 mask 渐隐而不是省略号，和 grouped task row 保持一致。 */}
                 {taskTitle}
               </TaskTitleOverflowText>
@@ -742,10 +794,12 @@ export const MemoTaskItem = memo(function TaskListItem({
 MemoTaskItem.displayName = "MemoTaskItem";
 
 export function TaskListItemContextMenuContent({
+  organizationActions,
   workspacePath,
   remoteSessionId,
   task,
   isPinned,
+  isArchived = false,
   intl,
   onTogglePinTask,
   onStartRenameTask,
@@ -754,10 +808,12 @@ export function TaskListItemContextMenuContent({
   disableTaskActions = false,
   disabledReason,
 }: {
+  organizationActions?: React.ReactNode;
   workspacePath: string;
   remoteSessionId?: string;
   task: ZCodeTaskMeta;
   isPinned: boolean;
+  isArchived?: boolean;
   intl: TaskListItemIntl;
   onTogglePinTask: (taskId: string, pinned: boolean) => void;
   onStartRenameTask: (taskId: string, currentTitle: string) => void;
@@ -773,27 +829,16 @@ export function TaskListItemContextMenuContent({
   const workspaceActionsDisabledReason = workspaceActionsDisabled
     ? (disabledReason ?? intl.formatMessage({ id: "workspaceSidebar.unavailableLocalDirectory" }))
     : undefined;
-  // 收尾：「在分屏打开」仅桌面 shell（context 由 WorkspaceShellLayout 提供；
-  // 手机远控/无 Provider 环境默认 false → 菜单项整体不渲染）。
-  const splitPaneEntry = useV4SplitPaneEntry();
-  const splitPaneEntryEnabled = splitPaneEntry.enabled;
-  const splitPaneTarget = useMemo(
-    () => ({
-      workspacePath,
-      ...(task.workspaceIdentity?.trim() ? { workspaceIdentity: task.workspaceIdentity } : {}),
-      ...(remoteSessionId ? { remoteSessionId } : {}),
-      sessionId: task.taskId,
-    }),
-    [remoteSessionId, task.taskId, task.workspaceIdentity, workspacePath],
-  );
-  // 当前 focused session、已有 group 与 pane 上限统一由 shell owner 裁决；row 不再直接写 layout store。
-  const canOpenInSplitPane = splitPaneEntry.canOpenSession(splitPaneTarget);
+  // 修复原因：合并后 splitPaneEntryContext 只保留拖拽闸门（「在分屏打开」入口已下线），
+  // 这里不再取 canOpenSession/openSession，菜单项整体不渲染。
   const {
     taskSessionFile,
     taskNativeSessionLogFile,
+    providerConfigFile,
     fileManagerLabel,
     handleCopyText,
     handleOpenTaskPathInFileManager,
+    handleOpenProviderConfig,
   } = useTaskListItemContextActions({
     workspacePath,
     remoteSessionId,
@@ -804,6 +849,7 @@ export function TaskListItemContextMenuContent({
     // row 级菜单已收敛为列表级单例，只有菜单真正打开时才挂载此组件。
     // 因此路径探测和 provider 配置探测可以直接随打开态运行，避免每个 idle row 订阅和计算。
     loadTaskPaths: true,
+    loadProviderConfig: true,
   });
   const taskTitle =
     task.title ||
@@ -813,12 +859,15 @@ export function TaskListItemContextMenuContent({
 
   return (
     <TaskListItemContextMenu
+      organizationActions={organizationActions}
       intl={intl}
       isPinned={isPinned}
+      isArchived={isArchived}
       fileManagerLabel={fileManagerLabel}
       taskSessionFile={taskSessionFile}
       activeSessionId={task.taskId}
       taskNativeSessionLogFile={taskNativeSessionLogFile}
+      providerConfigFile={providerConfigFile}
       disableTaskActions={workspaceActionsDisabled}
       disabledReason={workspaceActionsDisabledReason}
       onTogglePinTask={() => {
@@ -833,16 +882,6 @@ export function TaskListItemContextMenuContent({
       onMarkTaskAsUnread={() => {
         onMarkTaskAsUnread(task.taskId);
       }}
-      onOpenInSplitPane={
-        splitPaneEntryEnabled
-          ? () => {
-              // 旧入口直接写 paneLayout，绕过 active group 与 shell navigation，
-              // draft split 后下一次普通点击会把 session 灌进 primary。统一交给 shell controller。
-              splitPaneEntry.openSession(splitPaneTarget);
-            }
-          : undefined
-      }
-      openInSplitPaneDisabled={workspaceActionsDisabled || !canOpenInSplitPane}
       onOpenTaskPathInFileManager={() => {
         void handleOpenTaskPathInFileManager();
       }}
@@ -871,6 +910,9 @@ export function TaskListItemContextMenuContent({
           workspaceKey: task.workspaceIdentity?.trim() || workspacePath,
           title: taskTitle,
         });
+      }}
+      onOpenProviderConfig={() => {
+        void handleOpenProviderConfig();
       }}
     />
   );

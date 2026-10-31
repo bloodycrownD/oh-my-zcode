@@ -1,7 +1,9 @@
+import { OFF_PEAK_EXECUTION_TOOL_DENYLIST } from "@zcode/shared";
 import type {
   MessageId,
   ModelStreamRecoveryStatus,
   Model,
+  ModelSelection,
   OutputStylePromptConfig,
   SessionEvent,
   TraceContext,
@@ -10,7 +12,7 @@ import type {
 } from "../deps.js";
 import type { ActiveTurnSteeringState } from "../types.js";
 import type { SubagentRunOptions } from "@zcode/contracts";
-import type { DrainedPendingInputDiagnostics } from "../types.js";
+import type { DrainedPendingInputDiagnostics, ModelExecutionContext } from "../types.js";
 import type { TurnMachineImpl } from "../deps.js";
 import type { RuntimeMessageEntry } from "../../agent/message-history.js";
 
@@ -18,6 +20,7 @@ export type PendingStreamRecoveryRequest = ModelStreamRecoveryStatus;
 
 export const AUTOMATION_MUTATION_TOOL_NAMES = ["CronCreate", "CronUpdate", "CronDelete"] as const;
 const AUTOMATION_QUERY_ID_PREFIX = "automation-";
+/**
 /**
  * 无值班次派发轮隐藏的工具。
  * - SendMessage / Workflow：会在本轮 modelExecution 之外重新启动子 Agent（SendMessage 续跑
@@ -28,12 +31,21 @@ const AUTOMATION_QUERY_ID_PREFIX = "automation-";
  */
 export const UNATTENDED_DISPATCH_DENIED_TOOL_NAMES = ["SendMessage", "Workflow"] as const;
 
+// TODO(upgrade-316): 上游 3.16 新增的 turn-tool-visibility.ts（getTurnTools）依赖下面两个
+// 闲时派发符号；fork 已整体移除官方闲时执行面，这里只保留判定形状以维持上游文件的类型
+// 闭合，仓内没有任何生产者会触发该分支。若后续删除上游的闲时工具面，应连同本段一起删。
+export const OFF_PEAK_MUTATION_TOOL_NAMES = OFF_PEAK_EXECUTION_TOOL_DENYLIST;
+// 闲时派发 init 段 traceId 无固定前缀，只有 resume 段是 `${offPeakTaskId}:resume:*`
+// （offpeak- 开头）；前缀只是 resume 兜底信号，主信号必须是显式闲时任务身份。
+const OFF_PEAK_QUERY_ID_PREFIX = "offpeak-";
+
 export interface TurnRequestState {
   entries: readonly RuntimeMessageEntry[];
   outputTokenContinuationCount: number;
 }
 
 export interface RegularTurnLoopState {
+  offPeakExecutionId?: string;
   activeTurn?: ActiveTurnSteeringState;
   /** Host admission 显式传入的本轮 automation 身份；不能从持久 task metadata 推断。 */
   automationId?: string;
@@ -48,16 +60,25 @@ export interface RegularTurnLoopState {
   drainedSteerForNextRequest?: DrainedPendingInputDiagnostics;
   events: SessionEvent[];
   input: string;
+  inputId?: string;
   modelResponse: string;
   /** 本轮固定使用的可调用模型；配置变化只影响以后创建的 Loop。 */
   model: Model;
   /** execution 表示当前 Active Model 不能被同 loop 的 guide 改写。 */
   modelSelectionScope?: "execution";
+  /** 本轮执行 Selection 的降级声明；命中一次后清空，退回后的模型不再二次降级。 */
+  selectionFallback?: ModelExecutionContext["selectionFallback"];
+  /** 请求期失败已命中退回声明但无可用退回目标；TurnError 归因据此发布，Renderer 作废匹配卡。 */
+  highspeedFallbackUnavailable?: boolean;
+  /** 仅加速卡过期回退使用的启动快照；不用于闲时换票。 */
+  highspeedFallbackSelection?: ModelSelection;
   /** Core Server 的前台 child Selection override；优先于 profile 与父模型继承。 */
   subagentModelOverride?: SubagentRunOptions["modelOverride"];
   modelStepCount: number;
   /** 当前 query 已成功写入 provider 可见持久历史的 assistant 产物数量。 */
   historyRoundCount: number;
+  /** 上游新增：本轮是否已有一批真实 tool result 完整闭合，用于一次性注入项目记忆召回。 */
+  completedRealToolResultBatch?: boolean;
   repeatedToolCallSignature?: string;
   repeatedToolCallStreakCount: number;
   pendingStreamRecoveryRequest?: PendingStreamRecoveryRequest;
@@ -107,6 +128,15 @@ export function isAutomationMutationRestrictedTurn(state: RegularTurnLoopState):
 export function isUnattendedDispatchTurn(state: RegularTurnLoopState): boolean {
   const disallowedTools = new Set(state.toolDisallowlist ?? []);
   return disallowedTools.has(UNATTENDED_DISPATCH_DENIED_TOOL_NAMES[0]);
+}
+
+// TODO(upgrade-316): 上游 turn-tool-visibility.ts 的 getTurnTools 会调用本判定；fork 没有
+// 闲时执行面，恒 false 之外的信号只做形状保留（见上方 OFF_PEAK_MUTATION_TOOL_NAMES 的说明）。
+export function isOffPeakCreateRestrictedTurn(state: RegularTurnLoopState): boolean {
+  if (state.offPeakExecutionId?.trim()) return true;
+  if (state.turnTraceContext.queryId?.trim().startsWith(OFF_PEAK_QUERY_ID_PREFIX)) return true;
+  const disallowedTools = new Set(state.toolDisallowlist ?? []);
+  return disallowedTools.has(OFF_PEAK_MUTATION_TOOL_NAMES[0]);
 }
 
 export function recordModelHistoryRound(state: RegularTurnLoopState): void {

@@ -49,9 +49,18 @@ const RUN = "run-contract";
 // 夹具：两侧喂同一份记录（只用端口方法写，走各自的编码/解码）
 // ————————————————————————————————————————————————————————————————
 
+// FORK(upgrade-316)：上游 v3.16 把 openStartupSqliteSessionStore 改成异步（返回 Promise，
+// sqlite-session-store.ts:1062-1066）。本脚本的契约夹具是同步形状（contract() 同步跑两侧
+// 对比，13 处调用点不逐个改 async），启动时预热一批 :memory: 实例，createSqliteStore 从池取用。
+// 池大小必须 ≥ createSqliteStore 的总调用数（contract 13 + 前提 1 + b/A-2 页 1 = 15）。
+const SQLITE_POOL = await Promise.all(
+  Array.from({ length: 20 }, () => openStartupSqliteSessionStore({ dbPath: ":memory:" })),
+);
+let sqlitePoolCursor = 0;
+
 /** 真库：构造期即跑迁移（sqlite-session-store.ts 的 ctor → runSqliteSessionMigrations）。 */
 function createSqliteStore() {
-  const session = openStartupSqliteSessionStore({ dbPath: ":memory:" });
+  const session = SQLITE_POOL[sqlitePoolCursor++];
   return { store: session.workflowJournalStore(), close: () => session.close() };
 }
 

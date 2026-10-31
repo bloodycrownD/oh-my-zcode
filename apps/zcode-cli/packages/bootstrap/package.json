@@ -22,6 +22,9 @@
   "scripts": {
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
+    "test": "vitest tests",
+    "test:fault-matrix": "ZCODE_FAULT_MATRIX=full vitest run tests/workflow-fault-matrix tests/fault-matrix-harness.test.ts tests/fake-provider-server.test.ts",
+    "coverage": "vitest run tests --coverage",
     "test:magic-context": "node --test scripts/test-magic-context-turn-transform.mjs",
     "test:settle-background": "node --test scripts/test-settle-background.mjs",
     "test:mural-media-blocks": "node --test scripts/test-mural-media-blocks.mjs",

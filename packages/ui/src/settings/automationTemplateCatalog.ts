@@ -107,6 +107,8 @@ function mapScheduledTemplates(
   return { scheduled, rejectedScheduledTemplateIds };
 }
 
+// fork 已整体移除官方 off-peak 计费任务，故不吸收上游的 off-peak 模板映射与
+// appendLocalCustomizeTemplate（OffPeakAutomationTemplate 类型在 fork 中不存在）。
 export function mapClientScenesToAutomationTemplates(
   scenes: readonly ClientSceneConfig[],
   isValidCronExpr: (cronExpr: string) => boolean,

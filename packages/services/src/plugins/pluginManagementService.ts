@@ -5,7 +5,38 @@
 import type { IZCodeAgentService } from "../zcode-agent/zcodeAgent.js";
 import type { IPluginManagementService } from "./pluginManagement.js";
 
-interface PluginManagementServiceDependencies {
+// FORK (upgrade-316): v4 对话遥测已随 removed-features 整删，@zcode/shared 不再导出
+// collectTelemetryRendererContext / resolveWorkspaceTelemetryDetail / RendererTelemetryEventPayload。
+// 这里保留同名本地类型垫片（形状与删除前的 shared 定义一致），让装配层注入点不变；
+// 采集侧函数退化为 no-op，不会再产生任何遥测内容。
+interface TelemetryRendererContext {
+  clientTimezone: string;
+  clientLanguage: string;
+  screenResolution: string;
+}
+interface RendererTelemetryEventPayload {
+  elementName: string;
+  eventRegion: string;
+  eventType: string;
+  eventText?: string;
+  eventExtraDetail: Record<string, string>;
+  userId?: string;
+  talkId?: string;
+  messageId?: string;
+  context: TelemetryRendererContext;
+}
+/** no-op 垫片：遥测已移除，渲染器上下文字段只用于维持事件形状。 */
+const collectTelemetryRendererContext = (): TelemetryRendererContext => ({
+  clientTimezone: "",
+  clientLanguage: "",
+  screenResolution: "",
+});
+/** no-op 垫片：workspace 归因字段随遥测一起移除。 */
+const resolveWorkspaceTelemetryDetail = (_params: unknown): Record<string, string> => ({});
+
+export interface PluginManagementServiceDependencies {
+  reportTelemetryEvent?: (event: RendererTelemetryEventPayload) => void | Promise<void>;
+  now?: () => number;
   zcodeAgentService: Pick<
     IZCodeAgentService,
     | "listPlugins"
@@ -33,6 +64,137 @@ export function createPluginManagementService(
   dependencies: PluginManagementServiceDependencies,
 ): IPluginManagementService {
   const agent = dependencies.zcodeAgentService;
+  const now = dependencies.now ?? Date.now;
+  type Params =
+    import("../zcode-agent/zcodeAgentPluginParams.js").ZCodeAgentPluginMutationTarget & {
+      pluginId?: string;
+      pluginName?: string;
+      marketplace?: string;
+      scope?: "user" | "workspace";
+      dryRun?: boolean;
+      removeCache?: boolean;
+    };
+  type Result = {
+    diagnostics?: Array<{ severity?: string; code?: string }>;
+    installedPlugins?: Array<{
+      id: string;
+      marketplace: string;
+      version?: string;
+      scope: string;
+      listing?: { publisherType?: string };
+    }>;
+    removedPlugin?: { id: string; marketplace: string; version?: string };
+    pluginId?: string;
+    marketplaces?: unknown[];
+    marketplace?: { id: string };
+    plugin?: { id: string; marketplace: string; source: string; version?: string };
+  };
+  const report = (
+    action: string,
+    params: Params,
+    startedAt: number,
+    result?: Result,
+    error?: unknown,
+  ) => {
+    if (params.dryRun || !dependencies.reportTelemetryEvent) return;
+    const diagnostics = result?.diagnostics ?? [];
+    const hasError = diagnostics.some((item) => item.severity === "error");
+    // JSON-RPC 保留原始异常类型在 data.name；不能用取消请求的 ACK 或错误文案推断。
+    const errorData =
+      error instanceof Error && "data" in error && error.data && typeof error.data === "object"
+        ? (error.data as { name?: unknown; code?: unknown })
+        : undefined;
+    const cancelled =
+      errorData?.name === "AbortError" ||
+      errorData?.code === "plugin_operation_cancelled" ||
+      (error instanceof Error &&
+        (error.name === "AbortError" ||
+          ("code" in error && error.code === "plugin_operation_cancelled"))) ||
+      diagnostics.some((item) => item.code === "plugin_operation_cancelled");
+    const pluginId =
+      params.pluginId ??
+      (params.pluginName && params.marketplace
+        ? `${params.pluginName}@${params.marketplace}`
+        : result?.pluginId);
+    const installed = result?.installedPlugins?.find((item) => item.id === pluginId);
+    const status = cancelled
+      ? "cancelled"
+      : error
+        ? "failure"
+        : hasError
+          ? action === "update" && !params.pluginId && result?.installedPlugins?.length
+            ? "partial"
+            : "failure"
+          : action === "uninstall" && !result?.removedPlugin
+            ? "noop"
+            : action === "install" && !installed
+              ? "failure"
+              : action === "update" && !result?.installedPlugins?.length
+                ? "noop"
+                : "success";
+    const detail: Record<string, string> = {
+      schema_version: "1",
+      action,
+      result: status,
+      duration_ms: String(Math.max(0, now() - startedAt)),
+      entry: params.telemetry?.entry ?? "unknown",
+      trigger: params.telemetry?.trigger ?? "user",
+      client_kind: params.telemetry?.client_kind ?? "unknown",
+      scope: params.scope ?? installed?.scope ?? "unknown",
+      ...resolveWorkspaceTelemetryDetail(params),
+      ...(pluginId || result?.removedPlugin
+        ? { plugin_id: pluginId ?? result!.removedPlugin!.id }
+        : {}),
+      ...(params.marketplace || installed || result?.removedPlugin || result?.marketplace
+        ? {
+            marketplace:
+              params.marketplace ??
+              installed?.marketplace ??
+              result?.removedPlugin?.marketplace ??
+              result!.marketplace!.id,
+          }
+        : {}),
+      ...(installed?.version ? { version_after: installed.version } : {}),
+      ...(result?.removedPlugin?.version ? { version_before: result.removedPlugin.version } : {}),
+      ...(installed?.listing?.publisherType
+        ? { publisher_type: installed.listing.publisherType }
+        : {}),
+      ...(action === "uninstall" ? { remove_cache: String(params.removeCache ?? true) } : {}),
+      ...(status === "failure" || status === "partial" || status === "cancelled"
+        ? { error_category: cancelled ? "cancelled" : hasError ? "diagnostic" : "transport" }
+        : {}),
+    };
+    // 上报只观察最终结果，不等待网络，失败不得改变原业务返回或触发业务重试。
+    try {
+      void Promise.resolve(
+        dependencies.reportTelemetryEvent({
+          elementName: "plugin_lifecycle",
+          eventRegion: "app",
+          eventType: "result",
+          context: collectTelemetryRendererContext(),
+          eventExtraDetail: detail,
+        }),
+      ).catch(() => {});
+    } catch {
+      /* 观测端故障与业务隔离。 */
+    }
+  };
+  const observe = async <T extends Result>(
+    action: string,
+    params: Params,
+    invoke: (clean: Params) => Promise<T>,
+  ): Promise<T> => {
+    const startedAt = now();
+    const { telemetry: _telemetry, ...clean } = params;
+    try {
+      const result = await invoke(clean);
+      report(action, params, startedAt, result);
+      return result;
+    } catch (error) {
+      report(action, params, startedAt, undefined, error);
+      throw error;
+    }
+  };
   return {
     listPlugins: (params) => agent.listPlugins(params),
     getPluginReferenceCatalog: (params) => agent.getPluginReferenceCatalog(params),
@@ -40,18 +202,34 @@ export function createPluginManagementService(
     onDynamicPluginOperationProgress: (operationId) =>
       agent.onDynamicPluginOperationProgress(operationId),
     getPluginsOverview: (params) => agent.getPluginsOverview(params),
-    addPluginMarketplace: (params) => agent.addPluginMarketplace(params),
-    removePluginMarketplace: (params) => agent.removePluginMarketplace(params),
-    updatePluginMarketplace: (params) => agent.updatePluginMarketplace(params),
-    installPlugin: (params) => agent.installPlugin(params),
+    addPluginMarketplace: (params) =>
+      observe("source_add", params, (clean) => agent.addPluginMarketplace(clean as typeof params)),
+    removePluginMarketplace: (params) =>
+      observe("source_remove", params, (clean) =>
+        agent.removePluginMarketplace(clean as typeof params),
+      ),
+    updatePluginMarketplace: (params) =>
+      observe("source_refresh", params, (clean) =>
+        agent.updatePluginMarketplace(clean as typeof params),
+      ),
+    installPlugin: (params) =>
+      observe("install", params, (clean) => agent.installPlugin(clean as typeof params)),
     cancelPluginOperation: (params) => agent.cancelPluginOperation(params),
-    uninstallPlugin: (params) => agent.uninstallPlugin(params),
-    updatePlugin: (params) => agent.updatePlugin(params),
-    restoreBuiltinPlugin: (params) => agent.restoreBuiltinPlugin(params),
-    configurePlugin: (params) => agent.configurePlugin(params),
-    resetPluginConfig: (params) => agent.resetPluginConfig(params),
+    uninstallPlugin: (params) =>
+      observe("uninstall", params, (clean) => agent.uninstallPlugin(clean as typeof params)),
+    updatePlugin: (params) =>
+      observe("update", params, (clean) => agent.updatePlugin(clean as typeof params)),
+    restoreBuiltinPlugin: (params) =>
+      observe("restore", params, (clean) => agent.restoreBuiltinPlugin(clean as typeof params)),
+    configurePlugin: (params) =>
+      observe("configure", params, (clean) => agent.configurePlugin(clean as typeof params)),
+    resetPluginConfig: (params) =>
+      observe("reset_config", params, (clean) => agent.resetPluginConfig(clean as typeof params)),
     validatePlugin: (params) => agent.validatePlugin(params),
     describePlugin: (params) => agent.describePlugin(params),
-    setPluginEnabled: (params) => agent.setPluginEnabled(params),
+    setPluginEnabled: (params) =>
+      observe(params.enabled ? "enable" : "disable", params, (clean) =>
+        agent.setPluginEnabled(clean as typeof params),
+      ),
   };
 }

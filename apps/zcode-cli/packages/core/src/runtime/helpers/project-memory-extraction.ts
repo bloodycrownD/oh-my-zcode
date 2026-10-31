@@ -138,10 +138,15 @@ async function executeProjectMemoryExtraction(
           traceContext: input.snapshot.traceContext,
         }),
       maxTurns: EXTRACTION_MAX_TURNS,
-      messages: providerMessages,
+      // v3.16.2 的 loop 改为消费 request 对象；fork 仍自行构建投影消息，
+      // Memory agent 不启用 ToolSearch（见 project-memory-agent.ts 的过滤注释）。
+      request: {
+        messages: providerMessages,
+        tools: input.snapshot.tools,
+        toolSearchEnabled: false,
+      },
       model: input.snapshot.model,
       rootDir: input.snapshot.memoryRoot,
-      tools: input.snapshot.tools,
       workingDirectory: input.snapshot.workingDirectory,
       workspaceRoot: input.snapshot.workspaceRoot,
     });

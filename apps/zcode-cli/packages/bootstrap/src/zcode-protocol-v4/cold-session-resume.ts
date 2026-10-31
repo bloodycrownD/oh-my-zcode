@@ -13,15 +13,21 @@ import type { MessageWithParts } from "@zcode/contracts";
 import type { ZCodeWorkspaceRef } from "@zcode/shared";
 
 export type ColdSessionResumeOutcome =
-  | { status: "resumed"; persistedMessages?: MessageWithParts[] }
+  | {
+      status: "resumed";
+      persistedMessages?: MessageWithParts[];
+      disposeOnFailure?: () => Promise<void>;
+    }
   | { status: "notFound" };
 
 /** 协调器需要的宿主能力窄面（与 V4GatewayHost 同形，避免循环 import）。 */
-interface ColdSessionResumeHost {
+export interface ColdSessionResumeHost {
   resumePersistedSession?(
     sessionId: string,
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
+    additionalDirectories?: string[],
+    persistedMessages?: MessageWithParts[],
   ): Promise<ColdSessionResumeOutcome>;
   /** view-only 外壳的物化入口（Step 9）；缺席 = 旧宿主，调用方退回「先激活再建投影」。 */
   materializeSessionShell?(
@@ -37,7 +43,7 @@ interface ColdSessionResumeHost {
 export type ColdSessionShellOutcome = { status: "materialized" } | { status: "notFound" };
 
 /** 订阅不可用会话的结构化错误（reasonCode 见文件头）。 */
-class V4SubscribeSessionUnavailableError extends Error {
+export class V4SubscribeSessionUnavailableError extends Error {
   constructor(
     readonly sessionId: string,
     readonly reasonCode: "fault.subscribe.sessionNotFound" | "fault.subscribe.resumeFailed",
@@ -61,6 +67,9 @@ export class ColdSessionResumeCoordinator {
     sessionId: string,
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
+    additionalDirectories?: string[],
+    persistedMessages?: MessageWithParts[],
+    onActivated?: (outcome: Extract<ColdSessionResumeOutcome, { status: "resumed" }>) => void,
   ): Promise<MessageWithParts[] | undefined> {
     const inFlight = this.flights.get(sessionId);
     if (inFlight) {
@@ -68,7 +77,14 @@ export class ColdSessionResumeCoordinator {
       return inFlight;
     }
     this.host.onDebug?.(`cold resume flight created session=${sessionId}`);
-    const flight = this.resume(sessionId, resumeThoughtLevel, workspace).finally(() => {
+    const flight = this.resume(
+      sessionId,
+      resumeThoughtLevel,
+      workspace,
+      additionalDirectories,
+      persistedMessages,
+      onActivated,
+    ).finally(() => {
       this.flights.delete(sessionId);
       this.host.onDebug?.(`cold resume flight cleared session=${sessionId}`);
     });
@@ -145,6 +161,9 @@ export class ColdSessionResumeCoordinator {
     sessionId: string,
     resumeThoughtLevel?: string,
     workspace?: ZCodeWorkspaceRef,
+    additionalDirectories?: string[],
+    persistedMessages?: MessageWithParts[],
+    onActivated?: (outcome: Extract<ColdSessionResumeOutcome, { status: "resumed" }>) => void,
   ): Promise<MessageWithParts[] | undefined> {
     const resume = this.host.resumePersistedSession;
     if (!resume) {
@@ -156,9 +175,14 @@ export class ColdSessionResumeCoordinator {
     }
     let outcome: ColdSessionResumeOutcome;
     try {
-      outcome = workspace
-        ? await resume.call(this.host, sessionId, resumeThoughtLevel, workspace)
-        : await resume.call(this.host, sessionId, resumeThoughtLevel);
+      outcome = await resume.call(
+        this.host,
+        sessionId,
+        resumeThoughtLevel,
+        workspace,
+        additionalDirectories,
+        persistedMessages,
+      );
     } catch (error) {
       this.host.onError?.("v4.subscribe.resume", error, {
         phase: "resumePersistedSession",
@@ -180,6 +204,7 @@ export class ColdSessionResumeCoordinator {
         `Session is not active and not persisted: ${sessionId}`,
       );
     }
+    onActivated?.(outcome);
     return outcome.persistedMessages;
   }
 }

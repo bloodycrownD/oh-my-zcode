@@ -16,6 +16,8 @@ import {
   SESSION_TITLE_QUERY_SOURCE,
   generateTitleCandidate,
   normalizeTitleInput,
+  retainTitleModelContext,
+  type TitleModelContext,
 } from "./title-generation-sidecar.js";
 
 const GENERATED_TITLE_EXPECTED_SOURCES: readonly SessionTitleSource[] = [
@@ -32,10 +34,12 @@ export function maybeStartSessionTitleGeneration(
   traceContext: TraceContext,
   options?: {
     goalSummaryTargetID?: string;
+    offPeakExecutionId?: string;
   },
 ): boolean {
   return maybeStartSessionTitleGenerationFromSeed.call(this, input, {
     goalSummaryTargetID: options?.goalSummaryTargetID,
+    offPeakExecutionId: options?.offPeakExecutionId,
     messageID,
     traceContext,
   });
@@ -46,10 +50,12 @@ export function maybeStartDeferredSessionTitleGeneration(
   input: string,
   messageID: MessageId,
   traceContext: TraceContext,
+  offPeakExecutionId?: string,
 ): boolean {
   return maybeStartSessionTitleGenerationFromSeed.call(this, input, {
     messageID,
     traceContext,
+    offPeakExecutionId,
   });
 }
 
@@ -75,6 +81,7 @@ function maybeStartSessionTitleGenerationFromSeed(
     messageID?: MessageId;
     traceContext: TraceContext;
     bypassShortInputGuard?: boolean;
+    offPeakExecutionId?: string;
   },
 ): boolean {
   if (
@@ -85,9 +92,13 @@ function maybeStartSessionTitleGenerationFromSeed(
     return false;
   }
   this.sessionTitleGenerationAttempted = true;
+  // 标题任务会越过当前 Turn 的生命周期：入队时冻结模型选择并独立保留票据。
+  // FORK: 上游同一处还会捕获 agentTelemetry causation，fork 已移除遥测链路，这里不捕获。
+  const modelContext = retainTitleModelContext(this, options.offPeakExecutionId);
 
   const generation = generateAndPersistSessionTitle
     .call(this, input, options.messageID, options.traceContext, {
+      modelContext,
       goalSummaryTargetID: options.goalSummaryTargetID,
     })
     .catch(async (error) => {
@@ -106,7 +117,8 @@ function maybeStartSessionTitleGenerationFromSeed(
           traceContext: options.traceContext,
         });
       }
-    });
+    })
+    .finally(() => modelContext.release());
   void this.trackResidencyBlockingWork(generation).catch((error) => {
     this.logger?.warn("Session title fallback persistence failed", {
       ...traceContextToLogContext(options.traceContext),
@@ -148,6 +160,7 @@ async function generateAndPersistSessionTitle(
   traceContext: TraceContext,
   options: {
     goalSummaryTargetID?: string;
+    modelContext?: TitleModelContext;
   } = {},
 ): Promise<void> {
   const initialSession = await this.sessionStore?.getSession(this.sessionId);
@@ -188,6 +201,7 @@ async function generateAndPersistSessionTitle(
   }
 
   const generated = await generateTitleCandidate.call(this, input, {
+    modelContext: options.modelContext,
     messageID,
     querySource: SESSION_TITLE_QUERY_SOURCE,
     traceContext,

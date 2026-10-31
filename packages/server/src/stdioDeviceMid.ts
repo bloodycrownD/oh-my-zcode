@@ -1,6 +1,8 @@
-import { ensureDeviceMid as ensureSharedDeviceMid } from "@zcode/services/node";
+// FORK (upgrade-316)：services 侧随遥测面收口把 ensureTelemetryDeviceMid 改名为 ensureDeviceMid
+// （device/deviceMid.ts），职责不变：补写 telemetry-state 里的 deviceMid 并返回。
+import { ensureDeviceMid } from "@zcode/services/node";
 
-interface EnsureRemoteServerDeviceMidOptions {
+export interface EnsureRemoteServerDeviceMidOptions {
   /** 仅测试注入；生产固定使用 services 的 ensureDeviceMid。 */
   ensureDeviceMid?: () => Promise<string>;
   log: (...args: unknown[]) => void;
@@ -21,12 +23,12 @@ interface EnsureRemoteServerDeviceMidOptions {
 export async function ensureRemoteServerDeviceMid(
   options: EnsureRemoteServerDeviceMidOptions,
 ): Promise<string | undefined> {
-  const ensureDeviceMid = options.ensureDeviceMid ?? ensureSharedDeviceMid;
+  const resolveDeviceMid = options.ensureDeviceMid ?? ensureDeviceMid;
   try {
-    return await ensureDeviceMid();
+    return await resolveDeviceMid();
   } catch (error) {
     options.log(
-      "deviceMid 初始化失败，ZCode endpoint 请求将不带 X-Device-Mid:",
+      "telemetry deviceMid 初始化失败，ZCode endpoint 请求将不带 X-Device-Mid:",
       error instanceof Error ? error.message : String(error),
     );
     return undefined;

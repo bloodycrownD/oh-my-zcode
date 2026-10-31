@@ -1,3 +1,4 @@
+import { normalizeRemoteConnectionError, sanitizeRemoteConnectionLog } from "@zcode/shared";
 /* eslint-disable max-lines -- Host 入口集中编排 local/remote service wiring，本次退出保护需要在同一处桥接 host 上报。 */
 /* eslint-disable max-lines -- host process 入口集中维护 local/remote 初始化和资源回收，realtime bridge 接入后先保持同文件收口。 */
 /**
@@ -12,12 +13,23 @@
  * 1. main 进程通过 Electron `utilityProcess.fork()` 创建本进程
  * 2. main 进程只发送一次 init-local 初始化窗口 Host
  * 3. 后续远端 connect / scoped attachment 都由同一 Host 处理
+ *
+ * TODO(upgrade-316): 上游 v3.16.2 用 Source Server 架构（connectServerRemote /
+ * SourceServerConnectionManager / createServerRemoteWorkspaceServiceCollection）取代了 fork
+ * 基线里的进程内 RemoteBackend 远端装配（setupRemoteConnection + createRemoteWorkspaceServiceCollection
+ * + RemoteBackendHostConnection）。合并时旧装配的依赖模块已随上游删除，这里整段采用 Source Server
+ * 实现；SSH/WSL/Docker 语义是否与 fork 期望一致需人工确认。同时按 fork 既有裁剪删除了
+ * off-peak 派发、网络/资源遥测、conversation share、feedback 归档与 client-config 通道。
  */
-import { createHostDatabaseStartup } from "./hostDatabaseStartup.js";
+import { createHostDatabaseStartup } from "./database-startup/hostDatabaseStartup.js";
+import { createHostNetworkCapture } from "./hostNetworkCapture.js";
 import { randomUUID } from "node:crypto";
+import { createPluginSandboxRegistrationBridge } from "./pluginSandbox/index.js";
+import { createWindowTopicResourceRelay } from "./windowTopicResourceRelay.js";
 import {
   MessagePortProtocol,
   ChannelServer,
+  type IDisposable,
   type IChannelServer,
   LoggingChannelServer,
 } from "@zcode/rpc";
@@ -26,11 +38,19 @@ import { materializeBrowserRecordingArtifact } from "./browserRecordingArtifactM
 import {
   ServiceCollection,
   IBotsService,
+  ICredentialService,
   IFileService,
   IMediaPreviewService,
+  IRemoteProjectService,
+  type RemoteProjectHost,
+  IProjectService,
+  ITaskGroupService,
+  IBroadcastService,
   IModelSelectionService,
   ISettingService,
+  ISourceServerManagementService,
   IWindowControllerService,
+  IPromptAttachmentTransferService,
   IZCodeAgentService,
   IZCodeTaskService,
   IZCodeSessionService,
@@ -40,26 +60,38 @@ import {
 } from "@zcode/services";
 import {
   createLocalServices,
+  createProjectWorkspaceNavigation,
+  createRemoteProjectConnectionAdmission,
+  remoteProjectHostIdForProfile,
+  remoteProjectHostIdForTarget,
+  prepareRemoteServerConnection,
+  bindRemoteProjectIdentities,
   disposeServiceResources,
   disposeServiceResourcesAndWait,
   AutomationRepo,
   createServiceLogger,
   createHostApiNetworkTransport,
   createSettingServiceWithMigrations,
+  type BotProjectConnection,
   type HostApiNetworkTransport,
 } from "@zcode/services/node";
 import { createHostResourceUsageResponder } from "./hostResourceUsage.js";
 import {
   HostMessageTypes,
   HostResponseTypes,
-  ZCODE_VERSION,
   formatLogPrefix,
   formatZCodeHostProcessName,
   formatZodError,
   buildRemoteWorkspaceIdentity,
+  buildServerRemoteWorkspaceIdentity,
+  remoteHostIdFromWorkspaceIdentity,
   buildRemoteEnvironmentKey,
   isRemoteWorkspaceIdentity,
+  parseRemoteWorkspaceIdentity,
+  buildRemoteHostWorkspaceIdentity,
   resolveWorkspaceKey,
+  REMOTE_BIND_CANCELED_ERROR_CODE,
+  REMOTE_WORKSPACE_BIND_SESSION_MISSING_ERROR_CODE,
   formatModelPickerValue,
   type ZCodePromptAttachment,
   type ZCodeStreamEvent,
@@ -68,6 +100,7 @@ import {
   type TraceId,
   type ZCodeTaskMode,
   type WindowHostAttachmentScope,
+  type SourceServerArtifactPolicy,
   type ZCodeAutomation,
   type ZCodeAutomationRun,
   type ZCodeAutomationRunOutcome,
@@ -80,15 +113,8 @@ import {
 // remote backend 相关模块延迟加载：ssh2 的 CJS 依赖链（asn1 等）在 asar 打包后路径断裂，
 // 静态 import 会导致 local 模式的 host process 也崩溃。
 // 改为动态 import，仅 remote 模式时才加载。
-import type {
-  ConnectOptions,
-  DeployLockMode,
-  IRemoteBackend,
-  RemoteRuntimeNetworkOptions,
-  RemoteAssetNetworkPort,
-  RemoteConnection,
-} from "@zcode/server/remote";
-import type { RemoteTarget } from "@zcode/shared";
+import type { IRemoteBackend } from "@zcode/server/remote";
+import type { Locale, RemoteTarget } from "@zcode/shared";
 import { wrapElectronPort } from "./electronPort.js";
 import { createTaskRealtimeBridgeForHostInit } from "./taskRealtimeBridge.js";
 import { resolveRpcLogLevel } from "./rpcLogLevel.js";
@@ -99,9 +125,15 @@ import {
 } from "./remoteMediaPreviewProxy.js";
 import { watchCronRunBotDelivery } from "./cronBotDelivery.js";
 import { createHostRemoteWorkspaceProxyState } from "./hostRemoteWorkspaceProxyState.js";
-import { createRemoteWorkspaceServiceCollection } from "./remoteWorkspaceServiceCollection.js";
+import {
+  createServerRemoteWorkspaceServiceCollection,
+  resolveServerProjectService,
+} from "./remoteWorkspaceServiceCollection.js";
 import { getRemoteProviderProvisioningExecutor } from "./remoteProviderProvisioningService.js";
-import { createRemotePromptAttachmentTransferService } from "./promptAttachmentTransferService.js";
+import {
+  createSourceSettingsServiceCollection,
+  shouldDetachSourceSettingsAttachment,
+} from "./sourceSettingsServiceCollection.js";
 import { shouldReportHostConsoleError, stringifyHostLogArg } from "./hostLog.js";
 import { flushHostE2ECoverage } from "./e2eCoverage.js";
 import { runHostShutdownPhases, type HostShutdownResult } from "./hostShutdownPhases.js";
@@ -113,29 +145,67 @@ import {
   settleCronRunTerminalOutcome,
   settleManualDispatchFailureBestEffort,
 } from "./cronRunLifecycle.js";
-import {
-  createRemotePromptAttachmentSessionService,
-  createRemotePromptAttachmentTaskService,
-  materializeRemotePromptAttachments,
-} from "./remotePromptAttachments.js";
+import { connectServerRemote, type ServerRemoteConnection } from "./serverRemoteConnection.js";
+import { bindBotGroupTaskScope } from "./botGroupTaskScope.js";
 import { createWindowHostAttachmentRegistry } from "./windowHostAttachmentRegistry.js";
+import { exposeWindowHostAttachmentServices } from "./windowHostAttachmentRpcPolicy.js";
 import {
   createWindowRemoteConnectionRegistry,
   type WindowRemoteConnectionCloseEvent,
   type WindowRemoteConnectionHandle,
 } from "./windowRemoteConnectionRegistry.js";
+import { pushDynamicWorkflowUserModeToRemoteHosts } from "./remoteDynamicWorkflowUserMode.js";
+import { connectDesktopSourceServer } from "./connectDesktopSourceServer.js";
+import { prepareRemoteWorkspaceIdentity } from "./remoteWorkspacePreparation.js";
 import { createWindowHostControllerRuntime } from "./windowHostControllerService.js";
+import { resolveBotRemoteWorkspace } from "./botRemoteWorkspaceResolver.js";
+import { SourceServerDirectory } from "./sourceServerDirectory.js";
+import { connectSourceServerTarget } from "./connectSourceServerTarget.js";
+import {
+  SourceServerConnectionManager,
+  SourceServerInstallRequiredError,
+  SourceServerUpgradeRequiredError,
+} from "./sourceServerConnectionManager.js";
+import { createSourceServerRecoveryCloseEvent } from "./sourceServerRecoveryPolicy.js";
+import { runStartupReconnectBatch } from "./sourceServerStartupReconnect.js";
+import {
+  createSourceServerManagementService,
+  type SourceServerManagementService,
+} from "./sourceServerManagementService.js";
+import { resolveSourceServerReleaseAsset } from "./sourceServerReleaseResolver.js";
 import { resolveAutomationSubmissionModelSelection } from "./automationModelSelection.js";
 import { createRemoteConnectionProgressContext } from "@zcode/server/remote/remoteConnectionProgressContext.js";
-type RemoteBackendHostConnection = RemoteConnection & {
-  backend: IRemoteBackend;
-};
-type HostRemoteConnection = RemoteBackendHostConnection;
+import {
+  createRemotePromptAttachmentTransferService,
+  type RemotePromptAttachmentTransferService,
+} from "./promptAttachmentTransferService.js";
+type HostRemoteConnection = ServerRemoteConnection;
 interface HostRemoteConnectionCapabilities {
+  promptAttachmentTransferFactory?: (
+    scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>,
+  ) => RemotePromptAttachmentTransferService;
   browserRecordingUploader?: Pick<IRemoteBackend, "upload">;
   remoteMediaPreviewFactory?: (
     scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>,
   ) => RemoteMediaPreviewProxy;
+  sourceServerId?: string;
+  persistentSourceConnection?: boolean;
+  /** underlying 服务实例标识，创建 logical wrapper 不代表物理连接换代。 */
+  physicalOwner?: () => object;
+  profileId?: string;
+  recordWorkspaceOpen?: (input: {
+    workspacePath: string;
+    workspaceIdentity: string;
+    workspacePurpose?: import("@zcode/shared").WorkspacePurpose;
+    legacyWorkspaceIdentity?: string;
+    signal?: AbortSignal;
+  }) => Promise<void>;
+  bindWorkspaceIdentity?: (input: {
+    workspacePath: string;
+    stableWorkspaceIdentity: string;
+    legacyRouteHint?: string;
+    signal?: AbortSignal;
+  }) => Promise<void>;
 }
 
 let activeRemoteMediaRequests = 0;
@@ -153,12 +223,10 @@ const hostRemoteMediaRequestLimiter = {
 const remoteMediaRangePreviewEnabled =
   process.env["ZCODE_REMOTE_MEDIA_RANGE_PREVIEW_ENABLED"] !== "0";
 
-type RemoteAssetDirs = Pick<
-  ConnectOptions,
-  "mockCdnDir" | "remoteCdnBaseUrl" | "remoteCdnBaseUrls" | "remoteCacheDir"
->;
+type RemoteAssetDirs = import("./windowRemoteConnectionRegistry.js").WindowRemoteAssetDirs;
 
 const { parentPort } = process;
+const hostNetworkCapture = createHostNetworkCapture(parentPort);
 
 // 进程检索体验优化：host 由 utilityProcess 拉起时外壳仍是 Electron Helper，
 // 这里根据 main 传入的窗口 label 补一层稳定的 zcode-* title，方便系统进程列表过滤。
@@ -196,6 +264,13 @@ function authorizeLocalMediaPreviewPath(path: string): Promise<string> {
   });
 }
 
+const pluginSandboxRegistrationBridge = createPluginSandboxRegistrationBridge({
+  send: (message) => {
+    if (!parentPort) throw new Error("parentPort unavailable");
+    parentPort.postMessage(message);
+  },
+});
+
 // browser-use host↔main 桥：把 agent 的 browser 命令经 parentPort 转给 main（WebContentsView+CDP）。
 // parentPort 为空（不应发生于 host 进程）时 postToMain 抛错，bridge 自身返回 backend_unavailable。
 const browserControlMainBridge = createBrowserControlMainBridge({
@@ -220,6 +295,11 @@ const browserControlMainBridge = createBrowserControlMainBridge({
         workspacePath: input.workspacePath,
         workspaceIdentity,
       })?.browserRecordingUploader;
+      if (!remoteBackend) {
+        throw new Error(
+          "Source Server browser recording transfer requires the remote resource transaction path",
+        );
+      }
     }
     return materializeBrowserRecordingArtifact({
       ...input,
@@ -295,6 +375,9 @@ interface CronRunDispatchRequest {
   mode?: ZCodeTaskMode;
   workspacePath: string;
   workspaceIdentity?: string;
+  projectId?: string | null;
+  hostId?: string;
+  additionalDirectories?: string[];
 }
 
 function resolveAutomationTargetServices(request: {
@@ -491,8 +574,10 @@ async function dispatchCronRun(request: CronRunDispatchRequest): Promise<{
     const task = request.targetTaskId
       ? { taskId: request.targetTaskId }
       : await zcodeTaskService.createTask({
+          projectId: request.projectId,
           workspacePath: request.workspacePath,
           workspaceIdentity: request.workspaceIdentity,
+          additionalDirectories: request.additionalDirectories,
           model: formatModelPickerValue(submissionModelSelection),
           mode: request.mode,
           thoughtLevel: submissionModelSelection.options?.reasoningLevel,
@@ -509,6 +594,7 @@ async function dispatchCronRun(request: CronRunDispatchRequest): Promise<{
         taskId: task.taskId,
         workspacePath: request.workspacePath,
         workspaceIdentity: request.workspaceIdentity,
+        additionalDirectories: request.additionalDirectories,
         model: formatModelPickerValue(submissionModelSelection),
         thoughtLevel: submissionModelSelection.options?.reasoningLevel,
         automationId: request.automationId,
@@ -526,6 +612,7 @@ async function dispatchCronRun(request: CronRunDispatchRequest): Promise<{
       try {
         await watchCronRunBotDelivery({
           automationId: request.automationId,
+          runId: promptTraceId,
           workspaceKey,
           workspacePath: request.workspacePath,
           ...(request.workspaceIdentity ? { workspaceIdentity: request.workspaceIdentity } : {}),
@@ -595,6 +682,9 @@ async function dispatchManualAutomationRun(params: {
       mode: params.automation.mode,
       workspacePath: params.automation.workspacePath,
       workspaceIdentity: params.automation.workspaceIdentity,
+      projectId: params.automation.projectId,
+      hostId: params.automation.hostId,
+      additionalDirectories: params.automation.additionalDirectories,
     });
   } catch (error) {
     logger.warn(
@@ -1140,19 +1230,19 @@ function formatRemoteTargetForLog(target: RemoteTarget): string {
     }
     case "docker":
       return `docker:${target.container}`;
+    case "server":
+      return `server:${target.name?.trim() || target.url}`;
   }
 }
 
 console.log = (...args: unknown[]) => {
   rawConsole.log(...args);
   reportHostLog("info", args);
-  remoteConnectionProgressContext.report("info", args);
 };
 
 console.warn = (...args: unknown[]) => {
   rawConsole.warn(...args);
   reportHostLog("warn", args);
-  remoteConnectionProgressContext.report("warn", args);
 };
 
 console.error = (...args: unknown[]) => {
@@ -1163,14 +1253,123 @@ console.error = (...args: unknown[]) => {
     return;
   }
   reportHostLog("error", args);
-  remoteConnectionProgressContext.report("error", args);
 };
 
 /** 当前 host 已注册的服务集合，进程退出时用于统一回收本地资源 */
 let databaseStartup: ReturnType<typeof createHostDatabaseStartup> | undefined;
 const pendingStartupAttachments = new Map<string, () => void>();
 let activeServices: ServiceCollection | null = null;
+/**
+ * Main 推送的实时界面语言，供 ZCode endpoint 请求的 X-Client-Language。
+ * 过去 Host 用进程 Intl locale（Dock 启动无 LANG 会回退 en-US）；setting.json 写入可能滞后或失败，
+ * 也不能代表当前界面，所以只认 Main 的 InitLocal 初值与 application-locale-changed 变更。
+ */
+let applicationLocale: Locale | undefined;
 let activeHostApiNetworkTransport: HostApiNetworkTransport | null = null;
+let sourceServerDirectory: SourceServerDirectory | null = null;
+let sourceServerConnectionManager: SourceServerConnectionManager | null = null;
+let sourceServerManagementService: SourceServerManagementService | null = null;
+let sourceServerArtifactPolicy: SourceServerArtifactPolicy = "release-versioned";
+const sourceServerDisplayNameById = new Map<string, string>();
+let sourceSettingsStateSubscription: IDisposable | null = null;
+const activeWorkspaceBindRequestIds = new Set<string>();
+const cancelledWorkspaceBindRequestIds = new Set<string>();
+const workspaceBindAbortControllers = new Map<string, AbortController>();
+const projectNavigationAbortControllers = new Map<string, AbortController>();
+let sourceServerRuntimeInitializeFlight: Promise<SourceServerConnectionManager> | null = null;
+
+function notifyProjectChange(): void {
+  void activeServices
+    ?.get(IBroadcastService)
+    .send({ channel: "state:projects", payload: {} })
+    .catch((error) => logger.warn("failed to notify project change", error));
+}
+
+/** Bot 只取得当前 Source 代际，不拥有连接，也不创建 logical tab。 */
+function resolveBotProjectConnection(hostId: string): BotProjectConnection | undefined {
+  const serverId = parseRemoteWorkspaceIdentity(
+    buildRemoteHostWorkspaceIdentity(hostId, "/"),
+  )?.sourceServerId;
+  if (!serverId) return undefined;
+  const registered = windowRemoteConnectionRegistry.getOnlineSource(serverId);
+  if (registered) {
+    const services = registered.services;
+    return {
+      owner: registered.capabilities?.physicalOwner?.() ?? services,
+      taskService: createControllerRoutedTaskService(services.get(IZCodeTaskService), {
+        kind: "local",
+      }),
+      modelSelectionService: services.get(IModelSelectionService),
+      agentService: services.get(IZCodeAgentService),
+      bindWorkspace: async (target) => {
+        await registered.capabilities?.bindWorkspaceIdentity?.({
+          workspacePath: target.workspacePath,
+          stableWorkspaceIdentity: target.workspaceIdentity,
+          legacyRouteHint: target.workspaceIdentity,
+        });
+      },
+    };
+  }
+  const connection = sourceServerConnectionManager?.getOnlineConnection(serverId);
+  if (!connection) return undefined;
+  return {
+    owner: connection.services,
+    taskService: createControllerRoutedTaskService(connection.services.zcodeTaskService, {
+      kind: "local",
+    }),
+    modelSelectionService: connection.services.modelSelectionService,
+    agentService: connection.services.zcodeAgentService,
+    bindWorkspace: async (target) => {
+      await connection.services.sourceServerWorkspaceService.resolveWorkspace({
+        workspacePath: target.workspacePath,
+        legacyRouteHint: target.workspaceIdentity,
+      });
+    },
+  };
+}
+
+function requireActiveHostApiNetworkTransport(): HostApiNetworkTransport {
+  if (!activeHostApiNetworkTransport) {
+    // Bug 原因：Source Server release 下载若在 Host 网络策略之外回退 global fetch，会绕过设置页代理。
+    throw new Error("Window Host network transport is not initialized");
+  }
+  return activeHostApiNetworkTransport;
+}
+
+async function ensureSourceServerConnectionManager(): Promise<SourceServerConnectionManager> {
+  if (sourceServerConnectionManager) return sourceServerConnectionManager;
+  if (!sourceServerDirectory) throw new Error("Source Server directory 尚未初始化");
+  if (!activeServices) throw new Error("Host services 尚未初始化");
+  const directory = sourceServerDirectory;
+  const remoteProjects = activeServices.get(IRemoteProjectService);
+  sourceServerRuntimeInitializeFlight ??= (async () => {
+    await directory.initialize();
+    if (hasDisposedHostResources || sourceServerDirectory !== directory) {
+      throw new Error("Source Server directory 初始化期间 Host 已释放");
+    }
+    const manager = new SourceServerConnectionManager({
+      directory,
+      admitConnection: createRemoteProjectConnectionAdmission(remoteProjects),
+      onProjectChange: notifyProjectChange,
+      logWarn: (message, error) => logger.warn(message, error),
+      sourceServerArtifactPolicy,
+      connectServer: (options) =>
+        connectDesktopSourceServer(options, {
+          resolveServices: (scope) => windowRemoteConnectionRegistry.resolveScopedServices(scope),
+          getBots: () => activeServices?.getOptional(IBotsService),
+          readDynamicWorkflowMode: async () =>
+            (await activeServices?.get(ISettingService).get())?.dynamicWorkflowMode,
+          onModeSyncError: (error) =>
+            logger.warn("remote dynamic workflow user mode push failed", error),
+        }),
+    });
+    sourceServerConnectionManager = manager;
+    return manager;
+  })().finally(() => {
+    sourceServerRuntimeInitializeFlight = null;
+  });
+  return await sourceServerRuntimeInitializeFlight;
+}
 // 资源管理器采样只在 main 请求时执行一次，Host 不维护任何周期定时器。
 const hostResourceUsageResponder = createHostResourceUsageResponder({
   getAgentService: () => activeServices?.getOptional(IZCodeAgentService),
@@ -1180,147 +1379,313 @@ let activeSessionRealtimePort: ReturnType<typeof createTaskRealtimeBridgeForHost
 let hasDisposedHostResources = false;
 let disposeHostResourcesInFlight: Promise<HostShutdownResult> | null = null;
 
-function requireActiveHostApiNetworkTransport(): HostApiNetworkTransport {
-  if (!activeHostApiNetworkTransport) {
-    // Bug 原因：remote asset 若在 Host 网络策略就绪前回退 global fetch，会绕过设置页显式代理。
-    throw new Error("Window Host network transport is not initialized");
-  }
-  return activeHostApiNetworkTransport;
-}
-
-async function resolveDesktopRemoteRuntimeNetwork(
-  target: RemoteTarget,
-): Promise<RemoteRuntimeNetworkOptions | undefined> {
-  if (target.kind !== "wsl") {
-    return undefined;
-  }
-  const settingService = activeServices?.getOptional(ISettingService);
-  if (!settingService) {
-    return undefined;
-  }
-  try {
-    const settings = await settingService.get();
-    return {
-      authoritative: true,
-      httpProxy: settings.httpProxy,
-      noProxy: settings.httpProxyNoProxy,
-    };
-  } catch {
-    // 设置读取失败时保留原有远程连接行为，不让网络增强把 WSL 工作区直接阻断。
-    return undefined;
-  }
-}
-
 async function disposeHostRemoteConnection(connection: HostRemoteConnection): Promise<void> {
-  await connection.disposeAndWait({ timeoutMs: 5_000 });
+  connection.dispose();
 }
 
 async function createWindowRemoteConnectionHandle(params: {
   target: RemoteTarget;
+  membershipIntent?: "add" | "retain";
+  existingSourceServerId?: string;
   remoteAssets: RemoteAssetDirs;
   signal: AbortSignal;
+  confirmSourceServerInstall?: boolean;
 }): Promise<WindowRemoteConnectionHandle<ServiceCollection, HostRemoteConnectionCapabilities>> {
   if (!activeServices) throw new Error("Local Host services are not initialized.");
   if (params.signal.aborted) {
     throw new Error("远程连接已取消");
   }
   const closeListeners = new Set<(event: WindowRemoteConnectionCloseEvent) => void>();
+  const reconnectListeners = new Set<() => void>();
+  let topicResourceRelay: ReturnType<typeof createWindowTopicResourceRelay> | undefined;
   const notifyClose = (event: WindowRemoteConnectionCloseEvent) => {
+    topicResourceRelay?.dispose();
     for (const listener of closeListeners) {
       listener(event);
     }
   };
-  const connection = await setupRemoteConnection(
-    params.target,
-    params.remoteAssets,
-    { fetch: requireActiveHostApiNetworkTransport().fetch },
-    await resolveDesktopRemoteRuntimeNetwork(params.target),
-    (exitCode) => notifyClose({ exitCode, signal: null }),
-    params.target.kind === "ssh" ? "caller-serialized" : "remote",
-    params.target.kind === "ssh" ? params.signal : undefined,
-  );
+  let connection: HostRemoteConnection;
+  let managedProfile: import("@zcode/shared").ConnectionProfile | undefined;
+  let reusedConnectionTarget: RemoteTarget | undefined;
+  let managerStateSubscription: { dispose(): void } | undefined;
+  let managerConnectionInvalidatedSubscription: { dispose(): void } | undefined;
+  let managerReconnectSubscription: { dispose(): void } | undefined;
+  let services: ServiceCollection;
+  let lastNotifiedRecoveryAttempt = 0;
+  let disposed = false;
+  let sourceClosed = false;
+  let projectSubscription: { dispose(): void } | undefined;
+  const detachOwnSourceSettings = () => {
+    const sourceId = connection?.serverInfo.serverId;
+    if (!sourceId || params.target.kind !== "server") return;
+    const current = windowRemoteConnectionRegistry.getOnlineSource(sourceId);
+    if (!current || current.services === services)
+      windowHostAttachmentRegistry.detachSourceSettingsAttachments(sourceId);
+  };
+  if (params.target.kind === "server") {
+    if (params.existingSourceServerId) throw new Error("project.host-offline");
+    if (!activeServices) throw new Error("Host services 尚未初始化");
+    const admission = await prepareRemoteServerConnection({
+      service: activeServices.get(IRemoteProjectService),
+      credentials: activeServices.get(ICredentialService),
+      target: params.target,
+      intent: params.membershipIntent ?? "add",
+    });
+    params.signal.throwIfAborted();
+    topicResourceRelay = createWindowTopicResourceRelay({
+      getPeerAgentService: () => connection?.services.zcodeAgentService,
+      resolveServices: (scope) => windowRemoteConnectionRegistry.resolveScopedServices(scope),
+      getBots: () => activeServices?.getOptional(IBotsService),
+    });
+    try {
+      connection = await connectServerRemote(admission.target, {
+        signal: params.signal,
+        fetchImpl: requireActiveHostApiNetworkTransport().fetch,
+        commitMembership: admission.commit,
+        topicResourceChannel: topicResourceRelay.channel,
+        onClose: ({ code, reason }) => {
+          sourceClosed = true;
+          detachOwnSourceSettings();
+          notifyClose({ exitCode: code, signal: null, ...(reason ? { error: reason } : {}) });
+        },
+      });
+    } catch (error) {
+      topicResourceRelay.dispose();
+      throw error;
+    }
+  } else {
+    if (!sourceServerDirectory) {
+      throw new Error("Source Server manager 尚未初始化");
+    }
+    const manager = await ensureSourceServerConnectionManager();
+    const existingProfile = params.existingSourceServerId
+      ? (await sourceServerDirectory.snapshot()).profiles.find(
+          (item) => item.sourceServerId === params.existingSourceServerId,
+        )
+      : undefined;
+    const existingConnection = params.existingSourceServerId
+      ? manager.getOnlineConnection(params.existingSourceServerId)
+      : undefined;
+    if (params.existingSourceServerId && (!existingProfile || !existingConnection))
+      throw new Error("project.host-offline");
+    const { profile, connection: managed } =
+      existingProfile && existingConnection
+        ? { profile: existingProfile, connection: existingConnection }
+        : await connectSourceServerTarget(sourceServerDirectory, manager, {
+            membershipIntent: params.membershipIntent,
+            target: params.target,
+            allowInstall: params.confirmSourceServerInstall === true,
+            resolveRelease: async (probe, target, options) =>
+              await resolveSourceServerReleaseAsset(
+                probe,
+                params.remoteAssets,
+                target,
+                {
+                  fetch: requireActiveHostApiNetworkTransport().fetch,
+                },
+                options,
+              ),
+            context: {
+              signal: params.signal,
+              onLog: (event) => {
+                const progress =
+                  event.progress == null
+                    ? ""
+                    : ` ${(Math.max(0, Math.min(1, event.progress)) * 100).toFixed(1)}%`;
+                const message =
+                  event.progress == null || event.message.startsWith("upload progress:")
+                    ? `[source-server:${event.phase}] ${event.message}`
+                    : `[source-server:${event.phase}] upload progress (${event.message}):${progress}`;
+                remoteConnectionProgressContext.report(event.level ?? "info", [message]);
+              },
+            },
+          });
+    managedProfile = profile;
+    reusedConnectionTarget = managed.reusedConnectionTarget;
+    const sourceDirectorySnapshot = await sourceServerDirectory.snapshot();
+    for (const server of sourceDirectorySnapshot.servers) {
+      sourceServerDisplayNameById.set(server.sourceServerId, server.displayName);
+    }
+    managerStateSubscription = manager.onDidChangeState((state) => {
+      if (state.profileId !== profile.profileId) return;
+      if (state.state === "online") {
+        lastNotifiedRecoveryAttempt = 0;
+        return;
+      }
+      const closeEvent = createSourceServerRecoveryCloseEvent(state);
+      if (!closeEvent) return;
+      if (state.state === "retrying" && state.recoveryAttempt === lastNotifiedRecoveryAttempt) {
+        return;
+      }
+      if (state.state === "retrying") {
+        lastNotifiedRecoveryAttempt = state.recoveryAttempt ?? lastNotifiedRecoveryAttempt;
+      }
+      notifyClose(closeEvent);
+    });
+    connection = {
+      serverInfo: managed.serverInfo,
+      services: managed.services,
+      dispose() {
+        // Bug 原因：Window registry handle 是 logical/attachment lease，不是 Source connection owner。
+        // 旧 entry 取消或迟到恢复时若调用 manager.disconnect，会拆掉新 entry 正在共享的
+        // Source。真实物理连接由 SourceServerConnectionManager 在显式断开或 Host shutdown 回收。
+      },
+    };
+    managerConnectionInvalidatedSubscription = manager.onDidInvalidateConnection((event) => {
+      if (event.sourceServerId !== managed.sourceServerId || disposed) return;
+      // Bug 原因：物理 Source connection 被更新或其当前 Profile 被删除时，若不先按
+      // Source 通知 Registry，已有 logical workspace 会继续以 online 状态持有失效 services。
+      // 更新允许恢复；删除当前 Profile 属于用户显式断开，必须发布 terminal close。
+      notifyClose({
+        exitCode: null,
+        signal: null,
+        recoverable: event.reason === "update",
+      });
+    });
+    managerReconnectSubscription = manager.onDidReconnect((reconnected) => {
+      if (reconnected.sourceServerId !== managed.sourceServerId || disposed) return;
+      connection = {
+        serverInfo: reconnected.serverInfo,
+        services: reconnected.services,
+        dispose() {
+          // 同上：只释放当前 wrapper 的订阅，不跨 lease 关闭共享 Source。
+        },
+      };
+      services = createServerRemoteWorkspaceServiceCollection({
+        connectionServices: reconnected.services,
+        virtualProjects: reconnected.serverInfo.capabilities.virtualProjects,
+        serverId: reconnected.serverInfo.serverId,
+        sourceServices: activeServices ?? undefined,
+        targetKind: params.target.kind,
+      });
+      lastNotifiedRecoveryAttempt = 0;
+      for (const listener of reconnectListeners) listener();
+    });
+  }
 
   if (params.signal.aborted) {
+    topicResourceRelay?.dispose();
     await disposeHostRemoteConnection(connection);
     throw new Error("远程连接已取消");
   }
 
-  const backendConnection = connection;
-  const materializePromptAttachments = async (request: {
-    taskId: string;
-    traceId: TraceId | string;
-    content: string;
-    attachments?: ZCodePromptAttachment[];
-  }) => {
-    const result = await materializeRemotePromptAttachments(request, {
-      backend: backendConnection.backend,
-    });
-    return { content: result.content, attachments: result.attachments };
-  };
-  const promptAttachmentTransferService = createRemotePromptAttachmentTransferService(
-    backendConnection.backend,
-    {
-      onJanitorError: (error: unknown) =>
-        logger.warn("remote prompt attachment janitor failed", error),
-    },
-  );
-  const services = createRemoteWorkspaceServiceCollection({
-    connectionServices: backendConnection.services,
+  services = createServerRemoteWorkspaceServiceCollection({
+    connectionServices: connection.services,
+    virtualProjects: connection.serverInfo.capabilities.virtualProjects,
+    serverId: connection.serverInfo.serverId,
+    targetKind: params.target.kind,
     sourceServices: activeServices ?? undefined,
-    parentPort,
-    createRemotePromptAttachmentSessionService: (service) =>
-      createRemotePromptAttachmentSessionService(service, {
-        materializePromptAttachments,
-      }),
-    createRemotePromptAttachmentTaskService: (service) =>
-      createRemotePromptAttachmentTaskService(service, {
-        materializePromptAttachments,
-      }),
-    createReportingRemoteZCodeTaskService: (service) =>
-      createReportingRemoteZCodeTaskService(service, {
-        taskRealtimePort: activeSessionRealtimePort ?? undefined,
-      }),
-    promptAttachmentTransferService,
-    runtimePreferencesBridge: {
-      onError: (error: unknown) => logger.warn("remote runtime preferences bridge failed", error),
-    },
   });
-
-  let disposed = false;
-  const remoteMediaPreviewFactory = !remoteMediaRangePreviewEnabled
-    ? undefined
-    : (scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>) =>
-        createRemoteMediaPreviewProxy({
-          fileService: services.get(IFileService),
-          logger: {
-            debug: (message, metadata) => {
-              if (process.env.NODE_ENV !== "production") logger.info(message, metadata);
+  if (params.target.kind === "server") {
+    projectSubscription = connection.services.broadcastService.onMessage((event) => {
+      if (!disposed && !sourceClosed && event.channel === "state:projects") notifyProjectChange();
+    });
+  }
+  // 桌面 attachment 对远端媒体走 Host loopback Range 数据面；services 会随 Source 重连换代，
+  // 工厂在调用时再取当前 file service。server 直连保持 renderer inline 读取。
+  const remoteMediaPreviewFactory =
+    params.target.kind === "server" || !remoteMediaRangePreviewEnabled
+      ? undefined
+      : (scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>) =>
+          createRemoteMediaPreviewProxy({
+            fileService: services.get(IFileService),
+            logger: {
+              debug: (message, metadata) => {
+                if (process.env.NODE_ENV !== "production") logger.info(message, metadata);
+              },
+              warn: (message, metadata) => logger.warn(message, metadata),
             },
-            warn: (message, metadata) => logger.warn(message, metadata),
-          },
-          scope,
-          requestLimiter: hostRemoteMediaRequestLimiter,
-        });
+            scope,
+            requestLimiter: hostRemoteMediaRequestLimiter,
+          });
+
   return {
-    services,
-    capabilities:
-      "backend" in connection
+    ...(reusedConnectionTarget ? { reusedConnectionTarget } : {}),
+    get services() {
+      return services;
+    },
+    capabilities: {
+      sourceServerId: connection.serverInfo.serverId,
+      physicalOwner: () => connection.services,
+      ...(remoteMediaPreviewFactory ? { remoteMediaPreviewFactory } : {}),
+      persistentSourceConnection: true,
+      ...(managedProfile ? { profileId: managedProfile.profileId } : {}),
+      ...(managedProfile
         ? {
-            browserRecordingUploader: connection.backend,
-            ...(remoteMediaPreviewFactory ? { remoteMediaPreviewFactory } : {}),
+            promptAttachmentTransferFactory: (
+              scope: Extract<WindowHostAttachmentScope, { kind: "remote" }>,
+            ) => {
+              if (!sourceServerConnectionManager) throw new Error("Source Server is unavailable");
+              return createRemotePromptAttachmentTransferService(
+                sourceServerConnectionManager.getFileTransfer(connection.serverInfo.serverId),
+                {
+                  scope,
+                  onJanitorError: (error) => logger.warn("remote attachment janitor failed", error),
+                },
+              );
+            },
           }
-        : {},
+        : {}),
+      ...(managedProfile && sourceServerDirectory
+        ? {
+            bindWorkspaceIdentity: async (input) => {
+              input.signal?.throwIfAborted();
+              const currentRouteHint = buildRemoteWorkspaceIdentity(
+                input.workspacePath,
+                params.target,
+              );
+              const legacyRouteHint = await sourceServerDirectory!.resolveLegacyWorkspaceIdentity({
+                profileId: managedProfile!.profileId,
+                workspacePath: input.workspacePath,
+                fallback: input.legacyRouteHint ?? currentRouteHint,
+              });
+              input.signal?.throwIfAborted();
+              await connection.services.sourceServerWorkspaceService.resolveWorkspace({
+                workspacePath: input.workspacePath,
+                legacyRouteHint,
+              });
+            },
+          }
+        : {
+            bindWorkspaceIdentity: async (input) => {
+              await connection.services.sourceServerWorkspaceService.resolveWorkspace({
+                workspacePath: input.workspacePath,
+              });
+            },
+          }),
+      ...(managedProfile && sourceServerDirectory
+        ? {
+            recordWorkspaceOpen: async (input) => {
+              await sourceServerDirectory?.recordWorkspaceOpen({
+                profileId: managedProfile!.profileId,
+                sourceServerId: connection.serverInfo.serverId,
+                ...input,
+              });
+            },
+          }
+        : {}),
+    },
     onDidClose(listener) {
       closeListeners.add(listener);
       return { dispose: () => closeListeners.delete(listener) };
+    },
+    onDidReconnect(listener) {
+      reconnectListeners.add(listener);
+      return { dispose: () => reconnectListeners.delete(listener) };
     },
     async dispose() {
       if (disposed) {
         return;
       }
       disposed = true;
+      detachOwnSourceSettings();
+      topicResourceRelay?.dispose();
       closeListeners.clear();
-      await disposeServiceResourcesAndWait(services);
+      reconnectListeners.clear();
+      managerStateSubscription?.dispose();
+      managerConnectionInvalidatedSubscription?.dispose();
+      managerReconnectSubscription?.dispose();
+      projectSubscription?.dispose();
       await disposeHostRemoteConnection(connection);
     },
   };
@@ -1332,6 +1697,16 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
 >({
   connect: (request) => createWindowRemoteConnectionHandle(request),
   createId: randomUUID,
+  onConnectionChanged: notifyProjectChange,
+  resolveSourceServerId: (handle) => handle.capabilities?.sourceServerId,
+  shouldKeepConnectionAlive: (handle) => handle.capabilities?.persistentSourceConnection === true,
+  prepareWorkspaceIdentity: async (handle, input) => {
+    await prepareRemoteWorkspaceIdentity(
+      handle.services.get(IFileService),
+      input,
+      handle.capabilities?.bindWorkspaceIdentity,
+    );
+  },
   releaseWorkspace: async (services, context) => {
     await services.get(IZCodeTaskService).releaseWorkspacePreparation({
       workspacePath: context.workspacePath,
@@ -1356,6 +1731,7 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
     if (session?.workspacePath && session.workspaceIdentity) {
       windowHostControllerRuntime.disconnectSource({
         kind: "remote",
+        ...(session.sourceServerId ? { sourceServerId: session.sourceServerId } : {}),
         remoteSessionId: event.remoteSessionId,
         workspacePath: session.workspacePath,
         workspaceIdentity: session.workspaceIdentity,
@@ -1367,9 +1743,90 @@ const windowRemoteConnectionRegistry = createWindowRemoteConnectionRegistry<
       reason: "connection-closed",
       exitCode: event.exitCode,
       signal: event.signal,
+      ...(event.recoverable !== undefined ? { recoverable: event.recoverable } : {}),
       ...(event.error ? { error: event.error } : {}),
+      ...(event.recoveryAttempt ? { recoveryAttempt: event.recoveryAttempt } : {}),
+      ...(event.recoveryLimit ? { recoveryLimit: event.recoveryLimit } : {}),
+      ...(event.recoveryBudgetExhausted !== undefined
+        ? { recoveryBudgetExhausted: event.recoveryBudgetExhausted }
+        : {}),
+      ...(event.reasonCode ? { reasonCode: event.reasonCode } : {}),
+      ...(event.retryable !== undefined ? { retryable: event.retryable } : {}),
     });
     logWindowHostTopology("remote-connection-closed");
+  },
+  onSessionReconnected: async ({
+    previous,
+    current,
+    services: currentServices,
+    isCurrent,
+    commit,
+  }) => {
+    if (
+      !previous.workspacePath ||
+      !previous.workspaceIdentity ||
+      !current.workspacePath ||
+      !current.workspaceIdentity
+    ) {
+      throw new Error("Source 重连换代缺少 workspace scope");
+    }
+    const previousScope = {
+      kind: "remote" as const,
+      ...(previous.sourceServerId ? { sourceServerId: previous.sourceServerId } : {}),
+      remoteSessionId: previous.remoteSessionId,
+      workspacePath: previous.workspacePath,
+      workspaceIdentity: previous.workspaceIdentity,
+    };
+    const currentScope = {
+      kind: "remote" as const,
+      ...(current.sourceServerId ? { sourceServerId: current.sourceServerId } : {}),
+      ...(current.sourceServerId && sourceServerDisplayNameById.get(current.sourceServerId)
+        ? {
+            serverDisplayName: sourceServerDisplayNameById.get(current.sourceServerId),
+          }
+        : {}),
+      remoteSessionId: current.remoteSessionId,
+      workspacePath: current.workspacePath,
+      workspaceIdentity: current.workspaceIdentity,
+    };
+    await windowHostControllerRuntime.replaceDisconnectedSource(
+      previousScope,
+      {
+        scope: currentScope,
+        taskService: currentServices.get(IZCodeTaskService),
+        agentService: currentServices.getOptional(IZCodeAgentService),
+        sourceAvailability: "online",
+      },
+      {
+        canCommit: isCurrent,
+        rollbackOnFailure: true,
+      },
+    );
+    if (!commit()) {
+      throw new Error("Source 重连换代在 Controller 提交后失去 Registry owner");
+    }
+    try {
+      parentPort?.postMessage({
+        type: HostResponseTypes.RemoteWorkspaceReconnected,
+        previousRemoteSessionId: previous.remoteSessionId,
+        descriptor: {
+          ...(current.sourceServerId ? { sourceServerId: current.sourceServerId } : {}),
+          remoteSessionId: current.remoteSessionId,
+          target: current.target,
+          workspacePath: current.workspacePath,
+          workspaceIdentity: current.workspaceIdentity,
+          generation: current.generation,
+        },
+      });
+    } catch (error) {
+      // Controller 已提交新 generation 后不能再让 Registry 回滚；parentPort 失效意味着
+      // Window Host 与 Main 的进程通道正在终止，交给既有 Host shutdown 回收全部 owner。
+      logger.error("failed to publish committed remote workspace replacement", error);
+    }
+    logWindowHostTopology("remote-connection-reconnected");
+  },
+  onSessionReconnectError: (error) => {
+    logger.warn("failed to replace Source Server logical sessions after reconnect", error);
   },
 });
 
@@ -1386,12 +1843,22 @@ const windowHostControllerRuntime = createWindowHostControllerRuntime({
     if (remoteSession?.workspacePath && remoteSession.workspaceIdentity) {
       const controllerScope = {
         kind: "remote" as const,
+        ...(remoteSession.sourceServerId ? { sourceServerId: remoteSession.sourceServerId } : {}),
+        ...(remoteSession.sourceServerId &&
+        sourceServerDisplayNameById.get(remoteSession.sourceServerId)
+          ? {
+              serverDisplayName: sourceServerDisplayNameById.get(remoteSession.sourceServerId),
+            }
+          : {}),
         remoteSessionId: remoteSession.remoteSessionId,
         workspacePath: remoteSession.workspacePath,
         workspaceIdentity: remoteSession.workspaceIdentity,
       };
       if (remoteSession.sourceAvailability !== "online") {
-        return { scope: controllerScope, sourceAvailability: "offline" as const };
+        return {
+          scope: controllerScope,
+          sourceAvailability: "offline" as const,
+        };
       }
       const services = windowRemoteConnectionRegistry.resolveScopedServices(controllerScope);
       return {
@@ -1403,6 +1870,35 @@ const windowHostControllerRuntime = createWindowHostControllerRuntime({
     }
     // 远程 history scope 未连接或已被移除时，绝不能落回本地 tasks-index。
     if (scope.workspaceIdentity && isRemoteWorkspaceIdentity(scope.workspaceIdentity)) {
+      // 项目树不要求打开 workspace tab；列表命令可复用稳定 Source 的现有物理连接，不能伪造 logical session。
+      const identity = parseRemoteWorkspaceIdentity(scope.workspaceIdentity);
+      const connection =
+        identity?.kind === "server" &&
+        identity.sourceServerId &&
+        identity.workspacePath === scope.workspacePath
+          ? sourceServerConnectionManager?.getOnlineConnection(identity.sourceServerId)
+          : undefined;
+      const registered =
+        identity?.kind === "server" &&
+        identity.sourceServerId &&
+        identity.workspacePath === scope.workspacePath
+          ? windowRemoteConnectionRegistry.getOnlineSource(identity.sourceServerId)
+          : undefined;
+      if (identity?.kind === "server" && identity.sourceServerId && (connection || registered))
+        return {
+          scope: {
+            kind: "remote" as const,
+            sourceServerId: identity.sourceServerId,
+            workspacePath: scope.workspacePath,
+            workspaceIdentity: scope.workspaceIdentity,
+          },
+          taskService:
+            connection?.services.zcodeTaskService ?? registered!.services.get(IZCodeTaskService),
+          agentService:
+            connection?.services.zcodeAgentService ??
+            registered!.services.getOptional(IZCodeAgentService),
+          sourceAvailability: "online" as const,
+        };
       return null;
     }
     const taskService = activeServices?.getOptional(IZCodeTaskService);
@@ -1458,7 +1954,10 @@ function createControllerRoutedTaskService(
     get(target, property, receiver) {
       if (property === "setTaskPinned") {
         return async (params: Parameters<IZCodeTaskService["setTaskPinned"]>[0]) => {
-          const meta = await route(params, { kind: "pin", pinned: params.pinned });
+          const meta = await route(params, {
+            kind: "pin",
+            pinned: params.pinned,
+          });
           if (!meta) throw new Error("pin mutation 后 task 投影缺失");
           return meta;
         };
@@ -1527,6 +2026,18 @@ function createControllerRoutedTaskService(
         };
       }
       const value = Reflect.get(target, property, receiver) as unknown;
+      if (
+        typeof value === "function" &&
+        [
+          "getBotGroupTaskBlockReason",
+          "cancelBotGroupInput",
+          "submitBotGroupInput",
+          "readBotTopicSummaries",
+        ].includes(String(property))
+      ) {
+        return (params: Record<string, unknown>) =>
+          value.call(target, bindBotGroupTaskScope(params, attachmentScope));
+      }
       return typeof value === "function" ? value.bind(target) : value;
     },
   });
@@ -1549,17 +2060,28 @@ function exposeServicesOnMessagePort(
   const rawServer = new ChannelServer(protocol, "host", 1000, deferInit);
   const server = new LoggingChannelServer(rawServer, logRpc);
   const agentService = services.getOptional(IZCodeAgentService);
+  const connectionContext = { connectionId: `host-rpc-${randomUUID()}`, clientMode };
   const connectionScope = agentService
-    ? createZCodeAgentConnectionScope(agentService, {
-        connectionId: `host-rpc-${randomUUID()}`,
-        clientMode,
-      })
+    ? createZCodeAgentConnectionScope(agentService, connectionContext)
     : undefined;
   services.register(IWindowControllerService, windowHostControllerRuntime.service);
-  const controllerAttachment = windowHostControllerRuntime.createAttachmentService();
+  // 未读自动写入只归窗口 base renderer；手机和 remote facade 不能重复消费同一完成信号。
+  const controllerAttachment = windowHostControllerRuntime.createAttachmentService(
+    clientMode === "desktop-continuous" && attachmentScope.kind === "local",
+  );
   const overrides = new Map<string, unknown>([
     [IWindowControllerService.channelName, controllerAttachment],
   ]);
+  // 手机可从任意远端 workspace 重建 Root；侧栏组织服务仍归控制端，不能随当前执行 attachment 换库。
+  if (
+    clientMode === "web-remote-replayable" &&
+    attachmentScope.kind === "remote" &&
+    activeServices
+  ) {
+    overrides.set(IProjectService.channelName, activeServices.get(IProjectService));
+    overrides.set(IRemoteProjectService.channelName, activeServices.get(IRemoteProjectService));
+    services.register(ITaskGroupService, activeServices.get(ITaskGroupService));
+  }
   // 远端媒体必须按 attachment 的 clientMode 选择数据面：桌面使用 Host loopback Range，手机保持 inline。
   const remoteMediaPreviewProxy =
     attachmentScope.kind === "remote" && clientMode === "desktop-continuous"
@@ -1567,6 +2089,18 @@ function exposeServicesOnMessagePort(
       : undefined;
   if (remoteMediaPreviewProxy) {
     overrides.set(IMediaPreviewService.channelName, remoteMediaPreviewProxy.service);
+  }
+  // R3 的 Source 本地 transfer 无法读取 Desktop localPath；跨机 staging 必须在 owning
+  // Window Host attachment 注入，复用当前 transport。桌面/手机不另建 runtime 或业务队列。
+  const remotePromptAttachmentTransfer =
+    attachmentScope.kind === "remote"
+      ? capabilities?.promptAttachmentTransferFactory?.(attachmentScope)
+      : undefined;
+  const { dispose: disposePromptAttachmentTransfer, ...promptAttachmentService } =
+    remotePromptAttachmentTransfer ?? {};
+  if (remotePromptAttachmentTransfer) {
+    // dispose 只属于 Host attachment 生命周期，不暴露为 Renderer RPC。
+    overrides.set(IPromptAttachmentTransferService.channelName, promptAttachmentService);
   }
   const taskService = services.getOptional(IZCodeTaskService);
   if (taskService) {
@@ -1578,7 +2112,14 @@ function exposeServicesOnMessagePort(
   if (connectionScope) {
     overrides.set(IZCodeAgentService.channelName, connectionScope.service);
   }
-  services.exposeOnChannelServer(server, overrides);
+  exposeWindowHostAttachmentServices({
+    server,
+    services,
+    overrides,
+    clientMode,
+    attachmentScope,
+    windowServices: activeServices ?? undefined,
+  });
   let disposed = false;
   let flowUpdateChain = Promise.resolve();
   const forwardFlowState = (state: "saturated" | "drained" | "closed") => {
@@ -1605,6 +2146,9 @@ function exposeServicesOnMessagePort(
       disposed = true;
       flowStateDisposable.dispose();
       controllerAttachment.dispose();
+      void disposePromptAttachmentTransfer?.().catch((error: unknown) => {
+        logger.warn("failed to dispose remote attachment transfer", error);
+      });
       void remoteMediaPreviewProxy?.dispose().catch((error: unknown) => {
         logger.warn("failed to dispose remote media preview proxy", error);
       });
@@ -1633,6 +2177,21 @@ const windowHostAttachmentRegistry = createWindowHostAttachmentRegistry<
         throw new Error("local services 尚未初始化");
       }
       return { services: activeServices, generation: 1 };
+    }
+    if (scope.kind === "source-settings") {
+      const connection = sourceServerConnectionManager?.getOnlineConnection(scope.sourceServerId);
+      const registered = windowRemoteConnectionRegistry.getOnlineSource(scope.sourceServerId);
+      const configServices = connection?.services ?? registered?.services;
+      if (!configServices) {
+        throw new Error(`Source Server is offline: ${scope.sourceServerId}`);
+      }
+      return {
+        services: createSourceSettingsServiceCollection(configServices),
+        generation:
+          sourceServerConnectionManager
+            ?.listStates()
+            .find((state) => state.sourceServerId === scope.sourceServerId)?.updatedAt ?? 1,
+      };
     }
     const session = windowRemoteConnectionRegistry.getSession(scope.remoteSessionId);
     if (!session) {
@@ -1672,10 +2231,14 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
     );
   }
   hasDisposedHostResources = true;
+  for (const controller of projectNavigationAbortControllers.values()) controller.abort();
+  projectNavigationAbortControllers.clear();
 
   disposeHostResourcesInFlight = (async () => {
     logger.info(`disposing host resources, reason=${reason}`);
 
+    pluginSandboxRegistrationBridge.dispose();
+    hostNetworkCapture.setCaptureId(null);
     disposeAttachedServicePorts();
     windowHostControllerRuntime.dispose();
     for (const key of Array.from(cronRunSubscriptions.keys())) {
@@ -1697,6 +2260,19 @@ async function disposeHostResources(reason: string): Promise<HostShutdownResult>
           name: "remote-registry-dispose",
           run: () => windowRemoteConnectionRegistry.dispose(),
           timeoutMs: 6_000,
+        },
+        {
+          name: "source-server-manager-dispose",
+          run: async () => {
+            sourceServerConnectionManager?.dispose();
+            sourceServerManagementService?.dispose();
+            sourceSettingsStateSubscription?.dispose();
+            sourceServerConnectionManager = null;
+            sourceServerManagementService = null;
+            sourceSettingsStateSubscription = null;
+            sourceServerDirectory = null;
+          },
+          timeoutMs: 2_000,
         },
         ...(servicesToDispose
           ? [
@@ -1738,6 +2314,8 @@ function disposeHostResourcesBestEffort(reason: string): void {
   hasDisposedHostResources = true;
 
   logger.info(`disposing host resources, reason=${reason}`);
+  pluginSandboxRegistrationBridge.dispose();
+  hostNetworkCapture.setCaptureId(null);
   disposeAttachedServicePorts();
   windowHostControllerRuntime.dispose();
   for (const key of Array.from(cronRunSubscriptions.keys())) {
@@ -1820,11 +2398,105 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
   }
 
   const msg = result.data;
+  // 在任何 await 之前同步赋值：InitLocal 与变更消息同端口按序到达，初值不会覆盖较新的变更。
+  if (msg.type === HostMessageTypes.InitLocal && msg.locale) {
+    applicationLocale = msg.locale;
+  }
+  if (msg.type === HostMessageTypes.ApplicationLocaleChanged) {
+    applicationLocale = msg.locale;
+    return;
+  }
+  if (msg.type === HostMessageTypes.NetworkCapture) {
+    hostNetworkCapture.setCaptureId(msg.control.captureId);
+    return;
+  }
   const port = e.ports[0];
   if (msg.type === HostMessageTypes.DatabaseStartupControl) {
     if (msg.control.action === "snapshot") databaseStartup?.coordinator.publish();
     else if (msg.control.action === "retry")
       void databaseStartup?.coordinator.retry(msg.control.attemptId);
+    return;
+  }
+
+  if (msg.type === HostMessageTypes.PrepareProjectWorkspace) {
+    const controller = new AbortController();
+    if (projectNavigationAbortControllers.has(msg.requestId)) {
+      parentPort.postMessage({
+        type: HostResponseTypes.ProjectWorkspacePrepared,
+        requestId: msg.requestId,
+        result: { ok: false, error: "项目导航 requestId 重复" },
+      });
+      return;
+    }
+    projectNavigationAbortControllers.set(msg.requestId, controller);
+    try {
+      const services = activeServices;
+      if (!services || hasDisposedHostResources) throw new Error("Window Host is unavailable");
+      const assertHost = () => {
+        controller.signal.throwIfAborted();
+        if (activeServices !== services || hasDisposedHostResources)
+          throw new Error("Window Host changed during project navigation");
+      };
+      const navigation = createProjectWorkspaceNavigation({
+        projectService: services.get(IProjectService),
+        remoteProjectService: services.get(IRemoteProjectService),
+        readConnectionOwner: (hostId) => resolveBotProjectConnection(hostId)?.owner,
+        openRemoteWorkspace: async ({ host, directories, owner, assertCurrent }) => {
+          assertHost();
+          const serverId = parseRemoteWorkspaceIdentity(
+            buildRemoteHostWorkspaceIdentity(host.id, directories.workspacePath),
+          )?.sourceServerId;
+          if (!serverId || !host.target) throw new Error("project.host-offline");
+          // 对 Manager-only Source 仅登记现有连接的 wrapper；URL Source 必须已经在 Registry 在线。
+          const registered = await windowRemoteConnectionRegistry.connectSource({
+            target: host.target,
+            remoteAssets: {},
+            membershipIntent: "retain",
+            existingSourceServerId: serverId,
+          });
+          assertHost();
+          if (
+            (registered.handle.capabilities?.physicalOwner?.() ?? registered.handle.services) !==
+            owner
+          )
+            throw new Error("project.navigation-stale");
+          return windowRemoteConnectionRegistry.openWorkspaceOnSource({
+            requestId: msg.requestId,
+            sourceServerId: serverId,
+            workspacePath: directories.workspacePath,
+            workspaceIdentity: directories.workspaceIdentity,
+            workspacePurpose: directories.projectId ? "project" : "conversation",
+            assertCurrent: async () => {
+              assertHost();
+              await assertCurrent();
+              assertHost();
+            },
+          });
+        },
+      });
+      const value = await navigation.prepare({
+        projectId: msg.projectId,
+        hostId: msg.hostId,
+        draftId: msg.draftId,
+        reuseDraft: msg.reuseDraft,
+        ...(msg.task ? { task: msg.task } : {}),
+      });
+      assertHost();
+      parentPort.postMessage({
+        type: HostResponseTypes.ProjectWorkspacePrepared,
+        requestId: msg.requestId,
+        result: { ok: true, value },
+      });
+    } catch (error) {
+      parentPort.postMessage({
+        type: HostResponseTypes.ProjectWorkspacePrepared,
+        requestId: msg.requestId,
+        result: { ok: false, error: error instanceof Error ? error.message : String(error) },
+      });
+    } finally {
+      if (projectNavigationAbortControllers.get(msg.requestId) === controller)
+        projectNavigationAbortControllers.delete(msg.requestId);
+    }
     return;
   }
 
@@ -1860,6 +2532,11 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     } else {
       pending.reject(new Error(msg.error ?? "本地视频预览路径授权失败"));
     }
+    return;
+  }
+
+  if (msg.type === HostMessageTypes.PluginSandboxRegisterResult) {
+    pluginSandboxRegistrationBridge.accept(msg);
     return;
   }
 
@@ -1984,6 +2661,7 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         environmentKey: msg.environmentKey,
         status: "failed",
         error: "Remote Environment registration 已失效",
+        errorCode: "session-unavailable",
       });
       return;
     }
@@ -2012,6 +2690,7 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           environmentKey: msg.environmentKey,
           status: result.status,
           ...(result.errorMessage ? { error: result.errorMessage } : {}),
+          ...(result.errorCode ? { errorCode: result.errorCode } : {}),
         });
       })
       .catch((error: unknown) => {
@@ -2021,13 +2700,16 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           environmentKey: msg.environmentKey,
           status: "failed",
           error: error instanceof Error ? error.message : String(error),
+          errorCode: "host-execution-failed",
         });
       });
     return;
   }
 
   if (msg.type === HostMessageTypes.ConnectRemoteWorkspace) {
-    const workspacePath = msg.workspacePath ?? "/";
+    const workspacePath =
+      msg.workspacePath ??
+      (msg.target.kind === "server" ? msg.target.workspacePath?.trim() || "/" : "/");
     const workspaceIdentity =
       msg.workspaceIdentity ?? buildRemoteWorkspaceIdentity(workspacePath, msg.target);
     logger.info(
@@ -2041,6 +2723,7 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           remoteAssets: msg.remoteAssets,
           workspacePath,
           workspaceIdentity,
+          ...(msg.confirmSourceServerInstall ? { confirmSourceServerInstall: true } : {}),
         }),
       )
       .then(async (descriptor) => {
@@ -2057,12 +2740,14 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           if (replaced.workspacePath && replaced.workspaceIdentity) {
             const previousScope = {
               kind: "remote",
+              ...(replaced.sourceServerId ? { sourceServerId: replaced.sourceServerId } : {}),
               remoteSessionId: replaced.remoteSessionId,
               workspacePath: replaced.workspacePath,
               workspaceIdentity: replaced.workspaceIdentity,
             } as const;
             const nextScope = {
               kind: "remote",
+              ...(descriptor.sourceServerId ? { sourceServerId: descriptor.sourceServerId } : {}),
               remoteSessionId: descriptor.remoteSessionId,
               workspacePath: replaced.workspacePath,
               workspaceIdentity: replaced.workspaceIdentity,
@@ -2098,21 +2783,72 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         logWindowHostTopology("remote-connected");
       })
       .catch((error) => {
+        const failure = normalizeRemoteConnectionError(error);
         parentPort.postMessage({
           type: HostResponseTypes.RemoteWorkspaceConnectFailed,
           requestId: msg.requestId,
-          error: error instanceof Error ? error.message : String(error),
+          error: sanitizeRemoteConnectionLog(failure.message) || "Remote connection failed",
+          reasonCode: failure.code,
+          ...(error instanceof SourceServerUpgradeRequiredError ||
+          error instanceof SourceServerInstallRequiredError
+            ? { profileId: error.profileId }
+            : {}),
+          // 安装和升级等待固定 Main 解析后的 WSL 身份，不能从可编辑 Profile 重建。
+          // 身份来自同一请求，独立于附加安装预览；只回传 WSL 的非敏感连接参数。
+          ...((error instanceof SourceServerInstallRequiredError ||
+            error instanceof SourceServerUpgradeRequiredError) &&
+          msg.target.kind === "wsl"
+            ? { resolvedWslTarget: msg.target }
+            : {}),
+          ...(failure.retryable === undefined ? {} : { retryable: failure.retryable }),
         });
       });
     return;
   }
 
   if (msg.type === HostMessageTypes.CancelRemoteWorkspaceConnect) {
+    projectNavigationAbortControllers.get(msg.requestId)?.abort();
     windowRemoteConnectionRegistry.cancelConnect(msg.requestId);
     return;
   }
 
+  if (msg.type === HostMessageTypes.CancelRemoteWorkspaceBind) {
+    cancelledWorkspaceBindRequestIds.add(msg.requestId);
+    workspaceBindAbortControllers.get(msg.requestId)?.abort();
+    // Bug 原因：bind 可能 join 到已有 Source logical session；取消一个选择目录请求不代表
+    // 该 session 的其他 attachment/owner 都已释放。这里只取消 request，不再连坐 dispose。
+    if (!activeWorkspaceBindRequestIds.has(msg.requestId)) {
+      parentPort.postMessage({
+        type: HostResponseTypes.RemoteWorkspaceContextBindFailed,
+        requestId: msg.requestId,
+        error: "Remote workspace bind was canceled",
+        reasonCode: REMOTE_BIND_CANCELED_ERROR_CODE,
+        retryable: false,
+      });
+      cancelledWorkspaceBindRequestIds.delete(msg.requestId);
+      workspaceBindAbortControllers.delete(msg.requestId);
+    }
+    return;
+  }
+
   if (msg.type === HostMessageTypes.BindRemoteWorkspaceContext) {
+    activeWorkspaceBindRequestIds.add(msg.requestId);
+    const bindAbortController = new AbortController();
+    workspaceBindAbortControllers.set(msg.requestId, bindAbortController);
+    if (cancelledWorkspaceBindRequestIds.has(msg.requestId)) {
+      bindAbortController.abort();
+      parentPort.postMessage({
+        type: HostResponseTypes.RemoteWorkspaceContextBindFailed,
+        requestId: msg.requestId,
+        error: "Remote workspace bind was canceled",
+        reasonCode: REMOTE_BIND_CANCELED_ERROR_CODE,
+        retryable: false,
+      });
+      activeWorkspaceBindRequestIds.delete(msg.requestId);
+      cancelledWorkspaceBindRequestIds.delete(msg.requestId);
+      workspaceBindAbortControllers.delete(msg.requestId);
+      return;
+    }
     const previous = windowRemoteConnectionRegistry.getSession(msg.remoteSessionId);
     let workspaceReady: Promise<void>;
     try {
@@ -2120,12 +2856,32 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         remoteSessionId: msg.remoteSessionId,
         workspacePath: msg.workspacePath,
         workspaceIdentity: msg.workspaceIdentity,
+        ...(msg.workspacePurpose ? { workspacePurpose: msg.workspacePurpose } : {}),
+        ...(msg.legacyRouteHint ? { legacyWorkspaceIdentity: msg.legacyRouteHint } : {}),
+        signal: bindAbortController.signal,
       });
     } catch (error) {
       logger.warn(
         `failed to bind remote workspace context, remoteSessionId=${msg.remoteSessionId}`,
         error,
       );
+      parentPort.postMessage({
+        type: HostResponseTypes.RemoteWorkspaceContextBindFailed,
+        requestId: msg.requestId,
+        error: error instanceof Error ? error.message : String(error),
+        ...(error && typeof error === "object" && "code" in error && typeof error.code === "string"
+          ? { reasonCode: error.code }
+          : {}),
+        ...(error &&
+        typeof error === "object" &&
+        "retryable" in error &&
+        typeof error.retryable === "boolean"
+          ? { retryable: error.retryable }
+          : {}),
+      });
+      activeWorkspaceBindRequestIds.delete(msg.requestId);
+      cancelledWorkspaceBindRequestIds.delete(msg.requestId);
+      workspaceBindAbortControllers.delete(msg.requestId);
       return;
     }
     const current = windowRemoteConnectionRegistry.getSession(msg.remoteSessionId);
@@ -2136,23 +2892,109 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         current.generation,
       );
     }
-    void workspaceReady.catch((error) => {
-      logger.warn(
-        `failed to prepare bound remote workspace, remoteSessionId=${msg.remoteSessionId}`,
-        error,
-      );
-    });
-    if (previous?.workspacePath && previous.workspaceIdentity) {
-      windowHostControllerRuntime.removeSource({
-        kind: "remote",
-        remoteSessionId: msg.remoteSessionId,
-        workspacePath: previous.workspacePath,
-        workspaceIdentity: previous.workspaceIdentity,
+    void workspaceReady
+      .then(async () => {
+        if (cancelledWorkspaceBindRequestIds.has(msg.requestId)) {
+          throw Object.assign(new Error("Remote workspace bind was canceled"), {
+            code: REMOTE_BIND_CANCELED_ERROR_CODE,
+            retryable: false,
+          });
+        }
+        const currentSession = windowRemoteConnectionRegistry.getSession(msg.remoteSessionId);
+        if (!currentSession?.workspaceIdentity) {
+          // Bug 原因：bind 完成前 logical session 可能被并发释放；旧实现直接 return，Main
+          // 永远收不到 ACK。抛入统一失败链，确保每个 requestId 恰好 settle 一次。
+          throw Object.assign(
+            new Error(`远程 workspace bind 完成时 session 已失效: ${msg.remoteSessionId}`),
+            {
+              code: REMOTE_WORKSPACE_BIND_SESSION_MISSING_ERROR_CODE,
+              retryable: true,
+            },
+          );
+        }
+        const scope = {
+          kind: "remote" as const,
+          ...(currentSession.sourceServerId
+            ? { sourceServerId: currentSession.sourceServerId }
+            : {}),
+          remoteSessionId: msg.remoteSessionId,
+          workspacePath: msg.workspacePath,
+          workspaceIdentity: currentSession.workspaceIdentity,
+        };
+        await windowRemoteConnectionRegistry
+          .resolveScopedCapabilities(scope)
+          ?.recordWorkspaceOpen?.({
+            workspacePath: msg.workspacePath,
+            workspaceIdentity: currentSession.workspaceIdentity,
+            ...(msg.workspacePurpose ? { workspacePurpose: msg.workspacePurpose } : {}),
+            ...(msg.legacyRouteHint ? { legacyWorkspaceIdentity: msg.legacyRouteHint } : {}),
+            signal: bindAbortController.signal,
+          });
+        if (cancelledWorkspaceBindRequestIds.has(msg.requestId)) {
+          throw Object.assign(new Error("Remote workspace bind was canceled"), {
+            code: REMOTE_BIND_CANCELED_ERROR_CODE,
+            retryable: false,
+          });
+        }
+        if (previous?.workspacePath && previous.workspaceIdentity) {
+          windowHostControllerRuntime.removeSource({
+            kind: "remote",
+            ...(previous.sourceServerId ? { sourceServerId: previous.sourceServerId } : {}),
+            remoteSessionId: msg.remoteSessionId,
+            workspacePath: previous.workspacePath,
+            workspaceIdentity: previous.workspaceIdentity,
+          });
+        }
+        parentPort.postMessage({
+          type: HostResponseTypes.RemoteWorkspaceContextBound,
+          requestId: msg.requestId,
+          // Bug 原因：首次从旧 route tab 打开 Source workspace 时，Renderer 只拿到 stable
+          // identity 会误认为没有旧 tab，随后 addTab 产生第二个 workspace。把本次 bind
+          // 使用的旧 route 作为一次性 tab rekey 提示返回；它不是任务路由身份，手机端忽略。
+          ...(msg.legacyRouteHint && msg.legacyRouteHint !== currentSession.workspaceIdentity
+            ? { previousWorkspaceIdentity: msg.legacyRouteHint }
+            : {}),
+        });
+        logger.info(
+          `bound remote workspace context, remoteSessionId=${msg.remoteSessionId}, workspacePath=${msg.workspacePath}`,
+        );
+        activeWorkspaceBindRequestIds.delete(msg.requestId);
+        cancelledWorkspaceBindRequestIds.delete(msg.requestId);
+        workspaceBindAbortControllers.delete(msg.requestId);
+      })
+      .catch((error) => {
+        logger.warn(
+          `failed to prepare bound remote workspace, remoteSessionId=${msg.remoteSessionId}`,
+          error,
+        );
+        const normalizedError = cancelledWorkspaceBindRequestIds.has(msg.requestId)
+          ? Object.assign(new Error("Remote workspace bind was canceled"), {
+              code: REMOTE_BIND_CANCELED_ERROR_CODE,
+              retryable: false,
+            })
+          : error;
+        parentPort.postMessage({
+          type: HostResponseTypes.RemoteWorkspaceContextBindFailed,
+          requestId: msg.requestId,
+          error:
+            normalizedError instanceof Error ? normalizedError.message : String(normalizedError),
+          ...(normalizedError &&
+          typeof normalizedError === "object" &&
+          "code" in normalizedError &&
+          typeof normalizedError.code === "string"
+            ? { reasonCode: normalizedError.code }
+            : {}),
+          ...(normalizedError &&
+          typeof normalizedError === "object" &&
+          "retryable" in normalizedError &&
+          typeof normalizedError.retryable === "boolean"
+            ? { retryable: normalizedError.retryable }
+            : {}),
+        });
+        activeWorkspaceBindRequestIds.delete(msg.requestId);
+        cancelledWorkspaceBindRequestIds.delete(msg.requestId);
+        workspaceBindAbortControllers.delete(msg.requestId);
       });
-    }
-    logger.info(
-      `bound remote workspace context, remoteSessionId=${msg.remoteSessionId}, workspacePath=${msg.workspacePath}`,
-    );
     return;
   }
 
@@ -2165,6 +3007,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         if (disposedSession?.workspacePath && disposedSession.workspaceIdentity) {
           windowHostControllerRuntime.removeSource({
             kind: "remote",
+            ...(disposedSession.sourceServerId
+              ? { sourceServerId: disposedSession.sourceServerId }
+              : {}),
             remoteSessionId: msg.remoteSessionId,
             workspacePath: disposedSession.workspacePath,
             workspaceIdentity: disposedSession.workspaceIdentity,
@@ -2186,16 +3031,6 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
     return;
   }
 
-  if (
-    msg.type === HostMessageTypes.BotRemoteWorkspaceReconnectResult ||
-    msg.type === HostMessageTypes.BotRemoteWorkspaceConnectionStatusResult ||
-    msg.type === HostMessageTypes.BotRemoteWorkspaceRuntimePort
-  ) {
-    // Bugfix: Bot bridge 也监听 parentPort，main 回传的 runtime MessagePort 是给 Bot 作为
-    // 远端 RPC client 使用的。host 入口必须跳过这些控制消息，避免误把同一个端口注册成 ChannelServer。
-    return;
-  }
-
   if (msg.type === HostMessageTypes.AttachServicePort) {
     if (!port) {
       logger.error("attach-service-port message missing MessagePort");
@@ -2210,6 +3045,9 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
       return;
     }
     try {
+      if (msg.clientMode === "web-remote-replayable" && msg.scope.kind === "source-settings") {
+        throw new Error("Source settings attachments are Desktop-only");
+      }
       if (msg.scope.kind === "remote") {
         // Bind 与 Attach 共用 parentPort，但 WSL 上一代 workspace release 可能仍在途。
         // 持有已转移 port 等待 Host 内 generation barrier，避免新 attachment 踩过旧 runtime 清理。
@@ -2291,8 +3129,11 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
         activeSessionRealtimePort = createTaskRealtimeBridgeForHostInit(msg, parentPort);
         // 旧 Team 补组织必须与网络代理读取共用同一个 Setting 实例及写队列。
         // 只注入 service 会跳过默认装配分支，导致缺组织的升级用户永远无法恢复连接。
-        const { service: settingService, prepareLegacyAccountConnections } =
-          createSettingServiceWithMigrations();
+        const {
+          service: settingService,
+          prepareLegacyAccountConnections,
+          setWorkspaceProjection,
+        } = createSettingServiceWithMigrations();
         const hostApiNetworkTransport = createHostApiNetworkTransport(async () => {
           const settings = await settingService.get();
           return {
@@ -2306,22 +3147,192 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           log: (message, details) => logger.warn(message, details),
           establishOwner: () => {
             const initializedServices = createLocalServices({
+              resolveBotProjectConnection,
+              resolveBotRemoteWorkspace: (workspace) =>
+                sourceServerDirectory
+                  ? resolveBotRemoteWorkspace(workspace, "lookup", {
+                      directory: sourceServerDirectory,
+                      listSessions: () => windowRemoteConnectionRegistry.listSessions(),
+                    })
+                  : Promise.resolve(null),
+              setWorkspaceProjection,
+              remoteProjectConnection: {
+                connectHost: async (host) => {
+                  if (host.target?.kind === "server") {
+                    const connected = await windowRemoteConnectionRegistry.connectSource({
+                      target: host.target,
+                      remoteAssets: msg.remoteAssets ?? {},
+                      membershipIntent: "retain",
+                    });
+                    return remoteProjectHostIdForTarget(host.target, connected.sourceServerId);
+                  }
+                  if (!sourceServerManagementService)
+                    throw new Error("remote-project.connector-unavailable");
+                  const management = sourceServerManagementService;
+                  const snapshot = await management.getSnapshot();
+                  const profiles = snapshot.profiles.filter(
+                    (profile) =>
+                      profile.lifecycleState !== "retired" &&
+                      remoteProjectHostIdForProfile(profile) === host.id,
+                  );
+                  const preferred = new Set(
+                    snapshot.servers.map((server) => server.preferredProfileId),
+                  );
+                  const profile =
+                    profiles.find((item) => preferred.has(item.profileId)) ?? profiles[0];
+                  if (!profile) throw new Error("remote-project.profile-not-found");
+                  const connected = await management.connectProfile(profile.profileId, {
+                    retainedOnly: true,
+                  });
+                  const resolved = connected.profiles.find(
+                    (item) => item.profileId === profile.profileId,
+                  );
+                  if (
+                    !resolved ||
+                    !connected.states.some(
+                      (state) => state.profileId === resolved.profileId && state.state === "online",
+                    )
+                  )
+                    throw new Error("project.host-offline");
+                  return remoteProjectHostIdForProfile(resolved);
+                },
+                readConnectionStates: async () => {
+                  const result = new Map<
+                    string,
+                    Pick<
+                      RemoteProjectHost,
+                      | "connectionStatus"
+                      | "lastConnectionError"
+                      | "lastConnectionStatus"
+                      | "upgradeTarget"
+                    >
+                  >();
+                  for (const state of windowRemoteConnectionRegistry.listConnections()) {
+                    if (state.target.kind !== "server") continue;
+                    result.set(remoteProjectHostIdForTarget(state.target, state.sourceServerId), {
+                      connectionStatus:
+                        state.state === "online"
+                          ? "online"
+                          : state.state === "connecting"
+                            ? "connecting"
+                            : "offline",
+                    });
+                  }
+                  if (!sourceServerDirectory || !sourceServerConnectionManager) return result;
+                  const snapshot = await sourceServerDirectory.snapshot();
+                  for (const state of sourceServerConnectionManager.listStates()) {
+                    const profile = snapshot.profiles.find(
+                      (item) => item.profileId === state.profileId,
+                    );
+                    if (!profile) continue;
+                    const id = remoteProjectHostIdForProfile(profile);
+                    const value =
+                      state.state === "online"
+                        ? "online"
+                        : ["bootstrapping", "retrying", "updating"].includes(state.state)
+                          ? "connecting"
+                          : "offline";
+                    if (
+                      result.get(id)?.connectionStatus !== "online" &&
+                      (result.get(id)?.connectionStatus !== "connecting" || value === "online")
+                    )
+                      result.set(id, {
+                        connectionStatus: value,
+                        lastConnectionError: state.error,
+                        lastConnectionStatus: state.state,
+                        // 修复原因：投影曾丢掉 upgradeTarget，桌面端过旧时详情入口误显示“更新远端”。
+                        upgradeTarget: state.upgradeTarget,
+                      });
+                  }
+                  return result;
+                },
+              },
+              resolveProjectHostService: async (hostId) => {
+                const serverId = parseRemoteWorkspaceIdentity(
+                  buildRemoteHostWorkspaceIdentity(hostId, "/"),
+                )?.sourceServerId;
+                const registered = serverId
+                  ? windowRemoteConnectionRegistry.getOnlineSource(serverId)
+                  : undefined;
+                if (registered && serverId)
+                  return bindRemoteProjectIdentities(
+                    registered.services.get(IProjectService),
+                    async (workspacePath) => {
+                      const workspaceIdentity = buildServerRemoteWorkspaceIdentity({
+                        serverId,
+                        workspacePath,
+                      });
+                      await registered.capabilities?.bindWorkspaceIdentity?.({
+                        workspacePath,
+                        stableWorkspaceIdentity: workspaceIdentity,
+                      });
+                      return workspaceIdentity;
+                    },
+                  );
+                const source = sourceServerConnectionManager?.listStates().find(
+                  (state) =>
+                    state.sourceServerId &&
+                    remoteHostIdFromWorkspaceIdentity(
+                      buildServerRemoteWorkspaceIdentity({
+                        serverId: state.sourceServerId,
+                        workspacePath: "/",
+                      }),
+                    ) === hostId,
+                );
+                const connection = source?.sourceServerId
+                  ? sourceServerConnectionManager?.getOnlineConnection(source.sourceServerId)
+                  : undefined;
+                if (!connection || !source?.sourceServerId) throw new Error("project.host-offline");
+                const sourceServerId = source.sourceServerId;
+                return bindRemoteProjectIdentities(
+                  resolveServerProjectService({
+                    connectionServices: connection.services,
+                    serverId: sourceServerId,
+                    virtualProjects: connection.serverInfo.capabilities.virtualProjects,
+                    sourceServices: activeServices ?? undefined,
+                  }),
+                  async (workspacePath) => {
+                    await connection.services.sourceServerWorkspaceService.resolveWorkspace({
+                      workspacePath,
+                    });
+                    return buildServerRemoteWorkspaceIdentity({
+                      serverId: sourceServerId,
+                      workspacePath,
+                    });
+                  },
+                );
+              },
               parentPort,
               settingService,
               prepareLegacyAccountConnections,
               hostApiNetworkTransport,
+              resolveClientLanguage: () => applicationLocale,
               authorizeLocalMediaPreviewPath,
+              // launch.md「The user's choice」：本机用户选择变化后，推给本窗口所有在线的远程 Host。
+              forwardDynamicWorkflowUserMode: (mode) => {
+                void pushDynamicWorkflowUserModeToRemoteHosts(
+                  windowRemoteConnectionRegistry
+                    .listReadyConnections()
+                    .map(({ target, services: remoteServices }) => ({
+                      target,
+                      zcodeAgentService: remoteServices.get(IZCodeAgentService),
+                    })),
+                  mode,
+                  (error) => logger.warn("remote dynamic workflow user mode forward failed", error),
+                );
+              },
+              registerPluginSandbox: pluginSandboxRegistrationBridge.register,
               runtimeProcessEnvPatch: msg.runtimeProcessEnvPatch,
-              uiLocale: msg.uiLocale,
-              agentRuntimeContext: {
+              agentTelemetry: {
                 getDeviceMid: () => msg.deviceMid,
                 runtimeSurface: "desktop_local_host",
               },
+              uiLocale: msg.uiLocale,
+              zcodeBuiltinProviderConfigFallbackFilePath:
+                msg.zcodeBuiltinProviderConfigFallbackFilePath,
               serviceAuthorityMode: "desktop-local",
               zcodeAgentSpawnFallbackCwd: msg.agentSpawnFallbackCwd,
               zcodeBuiltinProviderConfigFilePath: msg.zcodeBuiltinProviderConfigFilePath,
-              zcodeBuiltinProviderConfigFallbackFilePath:
-                msg.zcodeBuiltinProviderConfigFallbackFilePath,
               processLifecycleReporter: runtimeProcessLifecycleReporter,
               taskRuntimeReporter: runtimeTaskReporter,
               forwardSessionMessageSendRequested: (request) => {
@@ -2359,6 +3370,71 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           );
           services.register(IZCodeTaskService, reportingZCodeTaskService);
         }
+        sourceServerDirectory = new SourceServerDirectory({
+          settingService: services.get(ISettingService),
+          credentialService: services.get(ICredentialService),
+          // host 域无 debug 日志通道；按 debug 语义仅在非生产输出，生产 no-op 防止刷盘。
+          logDebug: (message) => {
+            if (process.env.NODE_ENV !== "production") logger.info(message);
+          },
+        });
+        sourceServerArtifactPolicy =
+          msg.remoteAssets?.sourceServerArtifactPolicy ?? "release-versioned";
+        // Bug 原因：release resolver 过去只传给 updateSource；启动恢复和 connectProfile 直接调用
+        // Manager，在 development-content-addressed 同版本校验处拿不到本地 archive，必然误报 unavailable。
+        const resolveSourceServerRelease = async (
+          probe: Parameters<typeof resolveSourceServerReleaseAsset>[0],
+          target: Parameters<typeof resolveSourceServerReleaseAsset>[2],
+          options?: { metadataOnly?: boolean },
+        ) =>
+          await resolveSourceServerReleaseAsset(
+            probe,
+            msg.remoteAssets ?? {},
+            target,
+            {
+              fetch: hostApiNetworkTransport.fetch,
+            },
+            options,
+          );
+        sourceServerConnectionManager = new SourceServerConnectionManager({
+          directory: sourceServerDirectory,
+          admitConnection: createRemoteProjectConnectionAdmission(
+            services.get(IRemoteProjectService),
+          ),
+          onProjectChange: notifyProjectChange,
+          logWarn: (message, error) => logger.warn(message, error),
+          sourceServerArtifactPolicy,
+          resolveRelease: resolveSourceServerRelease,
+        });
+        sourceServerManagementService = createSourceServerManagementService({
+          directory: sourceServerDirectory,
+          manager: sourceServerConnectionManager,
+          resolveRelease: resolveSourceServerRelease,
+          onDirectorySnapshot: (snapshot) => {
+            sourceServerDisplayNameById.clear();
+            for (const server of snapshot.servers) {
+              sourceServerDisplayNameById.set(server.sourceServerId, server.displayName);
+            }
+          },
+          onBeforeSourceServerRemoved: async (sourceServerId) => {
+            const hostId = remoteHostIdFromWorkspaceIdentity(
+              buildServerRemoteWorkspaceIdentity({ serverId: sourceServerId, workspacePath: "/" }),
+            );
+            if (!hostId) throw new Error("remote-project.invalid-host-identity");
+            await services.get(IRemoteProjectService).removeHost(hostId);
+            windowHostAttachmentRegistry.detachSourceSettingsAttachments(sourceServerId);
+            sourceServerDisplayNameById.delete(sourceServerId);
+          },
+        });
+        sourceSettingsStateSubscription = sourceServerConnectionManager.onDidChangeState(
+          (state) => {
+            notifyProjectChange();
+            if (state.sourceServerId && shouldDetachSourceSettingsAttachment(state.state)) {
+              windowHostAttachmentRegistry.detachSourceSettingsAttachments(state.sourceServerId);
+            }
+          },
+        );
+        services.register(ISourceServerManagementService, sourceServerManagementService);
         hasDisposedHostResources = false;
         disposeHostResourcesInFlight = null;
         const agentWarmupTargets =
@@ -2372,8 +3448,8 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
                   },
                 ]
               : [];
-        // Main 已按最近使用顺序把启动预热限制为 3 个；Host 必须显式消费这份
-        // 固定名单，不能让后续 task-list observer 再隐式扩大，也不能因单个失败扫描补位。
+        // Main 已把启动预热限制为 active workspace 1 个；Host 必须显式消费这份固定名单，
+        // 不能让后续 task-list observer 再隐式扩大，也不能因失败扫描补位。
         agentWarmupTargets.forEach((target, index) => {
           warmUpZCodeAgent(
             services,
@@ -2392,42 +3468,70 @@ parentPort.on("message", async (e: Electron.MessageEvent) => {
           });
         logWindowHostTopology("base-attachment-ready");
         logger.info("local services ready, all channels registered");
+        // URL Host 复用相同启动开关与 Registry；项目发现不创建 logical workspace/Agent。
+        void runStartupReconnectBatch({
+          getSettings: () => services.get(ISettingService).get(),
+          listCandidates: async () =>
+            (await services.get(IRemoteProjectService).readDirectory()).hosts.filter(
+              (host) => host.kind === "server",
+            ),
+          reconnect: (hosts) =>
+            Promise.all(
+              hosts.map(async (host) => {
+                try {
+                  await services.get(IRemoteProjectService).connectHost(host.id);
+                } catch (error) {
+                  logger.warn("URL Server startup reconnect failed", { hostId: host.id, error });
+                }
+              }),
+            ),
+        }).catch((error) => logger.warn("URL Server startup directory unavailable", error));
+
+        // Bug 原因：Directory 迁移属于远程附加能力，等待它完成会把本地 base attachment 的
+        // 首帧一起拖住。base ready 后再后台初始化；失败 flight 清空，用户显式连接仍可重试。
+        void sourceServerDirectory
+          .initialize()
+          .then(async () =>
+            runStartupReconnectBatch({
+              getSettings: () => services.get(ISettingService).get(),
+              listCandidates: async () => {
+                const retained = new Set(
+                  (await services.get(IRemoteProjectService).readDirectory()).hosts.map(
+                    (host) => host.id,
+                  ),
+                );
+                return (await sourceServerDirectory!.listStartupReconnectCandidates()).filter(
+                  (candidate) => retained.has(remoteProjectHostIdForProfile(candidate.profile)),
+                );
+              },
+              reconnect: (candidates) =>
+                sourceServerConnectionManager!.reconnectOnStartup(candidates),
+            }),
+          )
+          .then((results) => {
+            const online = results.filter((result) => result.status === "online").length;
+            // Bug 原因：过去只记录失败计数，真实 Profile/reason 被吞掉，导致冷启动失败只能靠
+            // 手动重连再次触发。启动批次最多 3 个，逐项 warn 不会形成高频日志。
+            for (const result of results) {
+              if (result.status === "failed") {
+                logger.warn("Source Server startup reconnect failed", {
+                  profileId: result.profileId,
+                  error: result.error,
+                });
+              }
+            }
+            logger.info(
+              `Source Server startup reconnect finished, online=${online}, failed=${results.length - online}`,
+            );
+          })
+          .catch((error) =>
+            logger.warn(
+              "Source Server directory initialization failed; local services remain available",
+              error,
+            ),
+          );
       },
     });
     await databaseStartup.coordinator.start();
   }
 });
-
-async function setupRemoteConnection(
-  target: RemoteTarget,
-  remoteAssets: RemoteAssetDirs,
-  remoteAssetNetwork: RemoteAssetNetworkPort,
-  remoteRuntimeNetwork: RemoteRuntimeNetworkOptions | undefined,
-  onDidRemoteClose: (exitCode: number) => void,
-  deployLockMode: DeployLockMode = "remote",
-  signal?: AbortSignal,
-): Promise<HostRemoteConnection> {
-  // 延迟加载 remote backend，避免 local 模式下因 ssh2 依赖链进入 asar 后崩溃
-  const { createRemoteBackend, connectRemote, pickRemoteRuntimeEnv } =
-    await import("@zcode/server/remote");
-  const backend = await createRemoteBackend(target);
-  const connection = await connectRemote(backend, {
-    ...remoteAssets,
-    remoteAssetNetwork,
-    remoteRuntimeNetwork,
-    signal,
-    // SSH/Docker 远端 server 由 host process 单独启动，不能依赖桌面 main 的环境继承。
-    // 这里显式透传编译期版本，避免漏导入后生成裸 ZCODE_VERSION 引用导致 SSH 初始化直接 ReferenceError。
-    appVersion: ZCODE_VERSION,
-    // 远端 zcode-server/agent 是独立进程，不能继承 host 里的测试/生产 endpoint 选择。
-    // 这里只透传 server 侧白名单允许的公开环境变量，避免把 credential/token 带到远端机器。
-    remoteRuntimeEnv: pickRemoteRuntimeEnv(process.env),
-    assetInstallMode: target.kind === "ssh" ? target.assetInstallMode : undefined,
-    // SSH 由窗口级 registry 串行复用，其余 transport 仍保留远端 connector 自身锁。
-    deployLockMode,
-    onDidRemoteClose: ({ code }) => {
-      onDidRemoteClose(code);
-    },
-  });
-  return { ...connection, backend };
-}

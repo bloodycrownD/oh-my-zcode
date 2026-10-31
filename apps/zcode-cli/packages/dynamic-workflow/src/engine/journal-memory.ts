@@ -8,7 +8,9 @@
 import type {
   ActorRecord,
   Caps,
+  GetNodeOptions,
   JournalStorePort,
+  ListActorsOptions,
   ListEventsOptions,
   ListNodesOptions,
   NodeKind,
@@ -23,6 +25,13 @@ import type {
 /** 结构化深拷贝：隔离存储边界两侧的引用。值均为 JSON 兼容或 PersonaSpec 等纯数据。 */
 function clone<T>(value: T): T {
   return structuredClone(value);
+}
+
+/** 节点行的出库副本；`withResult: false` 与 SQLite 侧不 select `result_json` 同语义（键缺席）。 */
+function nodeCopy(node: NodeRecord, withResult: boolean): NodeRecord {
+  const copy = clone(node);
+  if (!withResult) delete copy.result;
+  return copy;
 }
 
 /** actor / node 的复合键。 */
@@ -121,6 +130,14 @@ export class InMemoryJournalStore implements JournalStorePort {
     r.caps = clone(caps);
   }
 
+  updateRunScript(runId: string, scriptText: string, scriptHash: string): void {
+    const r = this.runs.get(runId);
+    if (r === undefined) throw new Error(`journal: unknown run ${runId}`);
+    // 两列同一笔写（resume 拿哈希对文本），行上其余一切不碰（与 updateRunUsage 同族）。
+    r.scriptText = scriptText;
+    r.scriptHash = scriptHash;
+  }
+
   putActor(record: ActorRecord): void {
     const bucket = this.requireActorBucket(record.runId);
     bucket.set(key(record.siteId, record.ordinal), clone(record));
@@ -131,9 +148,17 @@ export class InMemoryJournalStore implements JournalStorePort {
     return a === undefined ? undefined : clone(a);
   }
 
-  listActors(runId: string): ActorRecord[] {
+  listActors(runId: string, opts: ListActorsOptions): ActorRecord[] {
     const bucket = this.actors.get(runId);
-    return bucket === undefined ? [] : [...bucket.values()].map(clone);
+    if (bucket === undefined) return [];
+    const matched = [...bucket.values()].filter(
+      (actor) => opts.name === undefined || actor.name === opts.name,
+    );
+    return matched.map((actor) => {
+      const copy = clone(actor);
+      if (!opts.withPersona) delete copy.persona;
+      return copy;
+    });
   }
 
   putNode(record: NodeRecord): void {
@@ -141,9 +166,14 @@ export class InMemoryJournalStore implements JournalStorePort {
     bucket.set(key(record.siteId, record.ordinal), clone(record));
   }
 
-  getNode(runId: string, siteId: string, ordinal: number): NodeRecord | undefined {
+  getNode(
+    runId: string,
+    siteId: string,
+    ordinal: number,
+    opts?: GetNodeOptions,
+  ): NodeRecord | undefined {
     const n = this.nodes.get(runId)?.get(key(siteId, ordinal));
-    return n === undefined ? undefined : clone(n);
+    return n === undefined ? undefined : nodeCopy(n, opts?.withResult ?? true);
   }
 
   listNodes(runId: string, opts?: ListNodesOptions): NodeRecord[] {
@@ -151,6 +181,7 @@ export class InMemoryJournalStore implements JournalStorePort {
     if (bucket === undefined) return [];
     // Map 的迭代序 = 首次插入序，与 SQLite 侧的 `order by id` 同语义（upsert 不改 id，也不改
     // Map 里的位置）。
+    // 无 opts = 历史形态：全量、带结果（与 SQLite 侧 listNodeRows 同语义）。
     if (opts === undefined) return [...bucket.values()].map(clone);
     const kinds = opts.kinds;
     const matched = [...bucket.values()].filter(
@@ -159,12 +190,7 @@ export class InMemoryJournalStore implements JournalStorePort {
     const limited = opts.limit === undefined ? matched : matched.slice(0, Math.max(0, opts.limit));
     const budgeted =
       opts.maxResultBytes === undefined ? limited : withinBytes(limited, opts.maxResultBytes);
-    return budgeted.map((node) => {
-      const copy = clone(node);
-      // `withResult: false` 与 SQLite 侧不 select `result_json` 同语义：键缺席，而不是 null。
-      if (!opts.withResult) delete copy.result;
-      return copy;
-    });
+    return budgeted.map((node) => nodeCopy(node, opts.withResult));
   }
 
   countNodes(runId: string, kind: NodeKind): number {
@@ -190,6 +216,14 @@ export class InMemoryJournalStore implements JournalStorePort {
     return counts;
   }
 
+  sumResultBytes(runId: string, kind: NodeKind): number {
+    const bucket = this.nodes.get(runId);
+    if (bucket === undefined) return 0;
+    let bytes = 0;
+    for (const node of bucket.values()) if (node.kind === kind) bytes += resultBytes(node);
+    return bytes;
+  }
+
   appendEvent(runId: string, event: RunEvent): StoredEvent {
     // 孤儿事件（run 尚未 createRun）与 putActor/putNode 一样是契约破坏：静默建桶
     // 会写出一批永远归属不到任何 run 的事件；SQLite 侧有 FK 兜底，内存侧靠这句。
@@ -206,7 +240,7 @@ export class InMemoryJournalStore implements JournalStorePort {
     return clone(stored);
   }
 
-  listEvents(runId: string, opts?: ListEventsOptions): StoredEvent[] {
+  listEvents(runId: string, opts: ListEventsOptions): StoredEvent[] {
     const list = this.events.get(runId);
     if (list === undefined) return [];
     // report 的排名按**全 run** 计（与 types / cursor / limit 无关），所以先在未过滤的序列上

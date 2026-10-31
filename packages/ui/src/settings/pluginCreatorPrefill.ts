@@ -2,10 +2,11 @@ import type { SkillSummary } from "@zcode/shared";
 import type { CreateTaskOptions } from "@/app-shell/types.js";
 import { buildSkillMentionMarkdown } from "@/mentions/mentionMarkdown.js";
 
+// fork 的官方插件市场 id 是 oh-my-zcode-official；保留 fork 版本，不采纳上游的 zcode-plugins-official。
 const PLUGIN_CREATOR_SKILL = "plugin-creator";
 const PLUGIN_CREATOR_ID = "plugin-creator@oh-my-zcode-official";
 
-function buildPluginCreatorPrefill(skills: readonly SkillSummary[]): CreateTaskOptions {
+export function buildPluginCreatorPrefill(skills: readonly SkillSummary[]): CreateTaskOptions {
   // 创建入口只信任官方来源，不让用户目录或同名市场技能截获这项产品动作。
   const skill = skills.find(
     (entry) =>

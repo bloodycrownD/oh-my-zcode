@@ -1,3 +1,4 @@
+import type { RequestVerificationReason } from "@zcode/shared";
 import { AsyncLocalStorage } from "node:async_hooks";
 import type { TraceContext } from "../tracing/tracer.js";
 import type {
@@ -27,8 +28,12 @@ export interface ModelInvocationContext {
   streamRecovery?: ModelStreamRecoveryStatus;
   preserveProviderStreamBoundaries?: boolean;
   refreshRuntimeHeadersBeforeAttempt?: (input: {
+    // TODO(upgrade-316): 上游 v3.16.2 在此透传官方账号 / Coding Plan 的 accountAccess、
+    // expectedAccountScope、rejectedProjectTokenFingerprint。fork 已整体移除官方账号面，这里保留
+    // fork 形状；adapters 的 AiSdkModelTextRequest 仍带这三个字段的本地垫片，其上游调用方
+    // （account-request-retry.ts / off-peak-request-auth.ts）需与 @zcode/shared 的最终结论一起收口。
     attempt: number;
-    reason?: "model-request";
+    reason?: RequestVerificationReason;
     abortSignal?: AbortSignal;
     providerId: string;
     modelId: string;
@@ -41,7 +46,9 @@ export interface ModelInvocationContext {
 
 /** Adapter 为单个物理请求 attempt 使用的动态鉴权材料。 */
 export interface ModelRequestAuth {
+  accountScope?: string;
   apiKey?: string;
+  apiKeyId?: string;
   headers?: Record<string, string>;
 }
 

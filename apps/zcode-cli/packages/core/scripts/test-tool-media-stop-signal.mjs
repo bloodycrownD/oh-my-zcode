@@ -118,17 +118,21 @@ test("T-MEM-2 已落盘（zcode-artifact://）的块不重复写", async () => {
 });
 
 test("T-MEM-2 调用点不再传 signal（源码级防回潮）", () => {
-  const turnTools = readFileSync(
-    new URL("../src/runtime/methods/turn-tools.ts", import.meta.url),
+  // FORK(upgrade-316)：上游 v3.16 把工具结果结算拆成 tool-result-settlement.ts，
+  // persistToolResultMediaAttachments 的唯一调用点随之从 turn-tools.ts 搬到此处
+  // （tool-result-settlement.ts:110）。守卫锚定当前真实位置；防回潮语义不变：
+  // 该调用不得再传 signal（excess property 会编译错，防止修复被回退）。
+  const settlement = readFileSync(
+    new URL("../src/runtime/methods/tool-result-settlement.ts", import.meta.url),
     "utf-8",
   );
-  const callIndex = turnTools.indexOf("persistToolResultMediaAttachments(");
+  const callIndex = settlement.indexOf("persistToolResultMediaAttachments(");
   assert.notEqual(callIndex, -1, "找不到调用点");
   // 取到该调用的结束括号之前的一整段实参。
-  const callTail = turnTools.slice(callIndex, turnTools.indexOf("});", callIndex) + 3);
+  const callTail = settlement.slice(callIndex, settlement.indexOf("});", callIndex) + 3);
   assert.equal(
     /signal:/.test(callTail),
     false,
-    "turn-tools 调用点不得再传 signal（excess property 会编译错，防止修复被回退）",
+    "tool-result-settlement 调用点不得再传 signal（excess property 会编译错，防止修复被回退）",
   );
 });

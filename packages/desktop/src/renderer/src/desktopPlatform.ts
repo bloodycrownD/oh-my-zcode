@@ -1,30 +1,46 @@
 import { buildLocalMediaPreviewUrl, type IPlatformService } from "@zcode/shared";
 
 import { desktopBrowserPlatformBridge } from "./desktopBrowserPlatformBridge.js";
+import { createDesktopPluginSandboxPlatform } from "./plugin-sandbox/desktopPluginSandboxPlatform.js";
 
 export function createDesktopPlatform(options: {
   isLocalDevelopmentRuntime: boolean;
 }): IPlatformService {
   return {
     canSelectFilePath: true,
+    canOpenLocalFiles: true,
+    pluginSandbox: createDesktopPluginSandboxPlatform(),
     createLocalMediaPreviewUrl: buildLocalMediaPreviewUrl,
     isLocalDevelopmentRuntime: options.isLocalDevelopmentRuntime,
     selectDirectory: () => window.zcode.selectDirectory(),
+    selectDirectories: () => window.zcode.selectDirectories(),
     selectFile: () => window.zcode.selectFile(),
     selectFiles: () => window.zcode.selectFiles?.() ?? Promise.resolve([]),
     createTempTextAttachment: (payload) => window.zcode.createTempTextAttachment(payload),
+    materializeWorkflowArtifactFile: (payload) =>
+      window.zcode.materializeWorkflowArtifactFile(payload),
     onRemoteConnectionLog: (handler) => window.zcode.onRemoteConnectionLog(handler),
     onRemoteSessionClosed: (handler) => window.zcode.onRemoteSessionClosed(handler),
-    onBotRemoteWorkspaceReconnected: (handler) =>
-      window.zcode.onBotRemoteWorkspaceReconnected(handler),
+    // Source 自动重连会替换 logical session；统一由 preload bridge 转发换代事件。
+    onRemoteSessionReconnected: (handler) =>
+      window.zcode.onRemoteSessionReconnected?.(handler) ?? (() => {}),
     activateOrSetWorkspace: (path) =>
       window.zcode.activateOrSetWorkspace?.(path) ?? Promise.resolve({ activated: false }),
     connectRemote: (remoteOptions, requestId, context) =>
       window.zcode.connectRemote(remoteOptions, requestId, context),
+    requestSourceSettingsAttachment: (sourceServerId) =>
+      window.zcode.requestSourceSettingsAttachment?.(sourceServerId) ??
+      Promise.reject(new Error("Source settings attachment bridge unavailable")),
     cancelPendingRemoteConnection: (requestId) =>
       window.zcode.cancelPendingRemoteConnection?.(requestId) ?? Promise.resolve(),
     bindRemoteWorkspaceSessionContext: (context) =>
-      window.zcode.bindRemoteWorkspaceSessionContext?.(context) ?? Promise.resolve(),
+      window.zcode.bindRemoteWorkspaceSessionContext?.(context) ??
+      Promise.reject(new Error("Desktop bindRemoteWorkspaceSessionContext bridge unavailable")),
+    startWebRemoteControl: (context) => window.zcode.startWebRemoteControl(context),
+    stopWebRemoteControl: () => window.zcode.stopWebRemoteControl(),
+    getWebRemoteControlStatus: () => window.zcode.getWebRemoteControlStatus(),
+    onWebRemoteControlStatusChanged: (handler) =>
+      window.zcode.onWebRemoteControlStatusChanged?.(handler) ?? (() => {}),
     disposeRemoteSession: (sessionId) => window.zcode.disposeRemoteSession(sessionId),
     isDockerAvailable: () => window.zcode.isDockerAvailable(),
     listWSLDistros: () => window.zcode.listWSLDistros(),
@@ -49,18 +65,40 @@ export function createDesktopPlatform(options: {
     startCuaHelperPermissionDrag: window.zcode.startCuaHelperPermissionDrag
       ? () => window.zcode.startCuaHelperPermissionDrag?.()
       : undefined,
+    // FORK（规则 4）：上游恢复的 Web 远控鉴权通知、OAuth 回调、支付回跳与分享导入桥
+    // 属于 fork 已移除的官方账号/计费链路，这里不接回。
     notifyRendererReady: () => window.zcode.notifyRendererReady(),
     showTaskNotification: (payload) => window.zcode.showTaskNotification(payload),
     syncWindowTabs: (paths) => window.zcode.syncWindowTabs(paths),
+    syncWebRemoteControlWorkspaces: (workspaces) =>
+      window.zcode.syncWebRemoteControlWorkspaces?.(workspaces),
+    onWebRemoteControlReconnectWorkspace: (handler) =>
+      window.zcode.onWebRemoteControlReconnectWorkspace?.(handler) ?? (() => {}),
     syncWindowUnreadCount: (count) => window.zcode.syncWindowUnreadCount(count),
     syncActiveTaskSession: (sessionId) => window.zcode.syncActiveTaskSession(sessionId),
     syncAppSettings: (patch) => window.zcode.syncAppSettings?.(patch),
+    // 桥缺失（旧 preload 升级窗口）时按 supported 兜底，与 Windows 现状一致，设置开关可用。
+    getCloseToTrayCapability: () =>
+      window.zcode.getCloseToTrayCapability?.() ??
+      Promise.resolve({ supported: true, gnomeLikeWithoutTray: false }),
     setShortcutRecordingActive: (active) => window.zcode.setShortcutRecordingActive?.(active),
     onFocusTab: (handler) => window.zcode.onFocusTab(handler),
     onNewTab: (handler) => window.zcode.onNewTab(handler),
     onCloseActiveContextRequest: (handler) =>
       window.zcode.onCloseActiveContextRequest?.(handler) ?? (() => {}),
     onOpenBrowserUrl: (handler) => window.zcode.onOpenBrowserUrl?.(handler) ?? (() => {}),
+    onEmbeddedBrowserPermissionPrompt: (handler) =>
+      window.zcode.onEmbeddedBrowserPermissionPrompt?.(handler) ?? (() => {}),
+    resolveEmbeddedBrowserPermissionPrompt: (request) =>
+      window.zcode.resolveEmbeddedBrowserPermissionPrompt?.(request),
+    getEmbeddedBrowserSitePermissions: () =>
+      window.zcode.getEmbeddedBrowserSitePermissions?.() ?? Promise.resolve({}),
+    setEmbeddedBrowserSitePermission: (request) =>
+      window.zcode.setEmbeddedBrowserSitePermission?.(request) ?? Promise.resolve({}),
+    clearEmbeddedBrowserSitePermissions: () =>
+      window.zcode.clearEmbeddedBrowserSitePermissions?.() ?? Promise.resolve({}),
+    resetEmbeddedBrowserSitePermission: (request) =>
+      window.zcode.resetEmbeddedBrowserSitePermission?.(request) ?? Promise.resolve({}),
     onBrowserViewScreenshotSurfacePrepare: (handler) =>
       window.zcode.onBrowserViewScreenshotSurfacePrepare?.(handler) ?? (() => {}),
     onBrowserViewScreenshotSurfaceRelease: (handler) =>
@@ -103,7 +141,8 @@ export function createDesktopPlatform(options: {
     onSettingsChanged: (callback) => window.zcode.onSettingsChanged?.(callback) ?? (() => {}),
     onApplicationLocaleChanged: (callback) =>
       window.zcode.onApplicationLocaleChanged?.(callback) ?? (() => {}),
-    getInstalledEditors: () => window.zcode.getInstalledEditors(),
+    // FORK：自动更新已移除，上游新增的更新说明/跳过/安装桥不接回。
+    getInstalledEditors: (filePath) => window.zcode.getInstalledEditors(filePath),
     getApplicationIcon: (bundleId) =>
       window.zcode.getApplicationIcon?.(bundleId) ?? Promise.resolve(null),
     openInEditor: (editorId, path, editorOptions) =>

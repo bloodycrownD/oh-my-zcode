@@ -81,10 +81,27 @@ test("tripwire：sendQueuedNow 手动提升成功后恢复 autoDrain（立即发
 });
 
 test("防御面：choice 裁决（applyHeldQueueDisposition）保留为兜底", () => {
-  const source = readFileSync(
+  // 上游 v3.16.2 合并后裁决本体在 input-admission.applyHeldQueueDisposition 里：
+  // 「routing 不是 choice → 放行」「choice 且没给裁决 → V4HeldQueueDispositionRequiredError」。
+  // 两条写面分开钉：sendText 在 session-flow.ts（两个 forceStartNow 分支各一次），
+  // sendGoalCommand 在 goal.ts（applyGoalCommand 内一次）。数 session-flow 的总调用
+  // 恰好被 sendText 自身两分支满足，钉不到 goal 写面——曾因此让 goal 侧 tripwire 失效。
+  const admissionSource = readFileSync(
+    join(srcRoot, "zcode-protocol-v4", "commands", "input-admission.ts"),
+    "utf8",
+  );
+  assert.match(admissionSource, /V4HeldQueueDispositionRequiredError/);
+  assert.match(admissionSource, /routing !== "choice"/);
+  const sendTextSource = readFileSync(
     join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "session-flow.ts"),
     "utf8",
   );
-  assert.match(source, /V4HeldQueueDispositionRequiredError/);
-  assert.match(source, /routing !== "choice"/);
+  const sendTextCalls = sendTextSource.match(/await applyHeldQueueDisposition\(/g) ?? [];
+  assert.ok(sendTextCalls.length >= 2, "sendText 的两个 forceStartNow 分支都必须调裁决兜底");
+  const goalSource = readFileSync(
+    join(srcRoot, "zcode-protocol-v4", "commands", "handlers", "goal.ts"),
+    "utf8",
+  );
+  const goalCalls = goalSource.match(/await applyHeldQueueDisposition\(/g) ?? [];
+  assert.ok(goalCalls.length >= 1, "sendGoalCommand（goal.ts）必须调裁决兜底");
 });

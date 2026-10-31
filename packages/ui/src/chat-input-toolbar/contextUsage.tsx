@@ -1,3 +1,8 @@
+// TODO(upgrade-316): 本文件按 fork 版本整体保留。上游 3.16 把 Context 浮层扩成
+// Context windows + Coding Plan 额度重置（badge/倒计时/撒花）+ Start Plan 余额三段，
+// 并新增 codingPlanQuotaResetUi / CodingPlanContextUsage / StartPlanContextBalance 等模块；
+// fork 已整体移除订阅计费面（见组件内 D-4 注释），只保留通用用量与 Magic Context 区。
+// 若后续要吸收上游的 isWorkspaceVisible tooltip 门控等通用改动，需在此基础上单独移植。
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from "react";
 import {
   TID_CHAT_CONTEXT_USAGE_TRIGGER,

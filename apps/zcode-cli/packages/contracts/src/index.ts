@@ -8,6 +8,7 @@ export * from "./interfaces/execution.port.js";
 export * from "./interfaces/browser-control.port.js";
 export * from "./interfaces/file-system.port.js";
 export * from "./interfaces/context-source.port.js";
+export * from "./interfaces/provider-endpoint-routing.port.js";
 export * from "./interfaces/http-client.port.js";
 export * from "./interfaces/image-processor.port.js";
 export * from "./interfaces/pdf-document.port.js";
@@ -26,6 +27,8 @@ export * from "./interfaces/dynamic-workflow-run.port.js";
 export * from "./interfaces/dynamic-workflow-snippet.port.js";
 export * from "./interfaces/model-catalog.port.js";
 export * from "./interfaces/automation.port.js";
+// FORK：`off-peak.port.js` 属于 fork 已整体移除的官方计费面，不转出；topic-resource 是上游新增能力。
+export * from "./interfaces/topic-resource.port.js";
 export * from "./interfaces/mcp.port.js";
 
 export * from "./interfaces/runtime-input-presentation.js";

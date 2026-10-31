@@ -1,4 +1,8 @@
-/** 构建脚本 desktop-product-identity.mjs 的 TS 侧声明（main/index.ts 与 vite/tsup 配置共用）。 */
+/**
+ * 手写声明的原因：`desktop-product-identity.mjs` 是构建脚本与 main 进程共用的 ESM 模块，
+ * 仓库未开启 allowJs，缺少本文件时 TS 会把它整体当成隐式 any，main 侧调用点就失去类型校验。
+ * 实现把「产品身份 flavor」和「后端环境 artifactSuffix」拆成两轴；改 .mjs 导出时必须同步本文件。
+ */
 export declare const ZCODE_PREVIEW_IDENTITY_ENV = "ZCODE_PREVIEW_IDENTITY";
 
 export declare type DesktopProductFlavor = "production" | "preview";
@@ -9,12 +13,14 @@ export declare interface DesktopProductIdentity {
   readonly productName: string;
   readonly linuxExecutableName: string;
   readonly linuxPackageName: string;
-  readonly cuaHelperInstallVariant: string | null;
+  /** 实现里只有 preview 身份带 Helper 变体，其余为 null。 */
+  readonly cuaHelperInstallVariant: "preview" | null;
 }
 
-export declare const desktopProductIdentities: Readonly<
-  Record<DesktopProductFlavor, DesktopProductIdentity>
->;
+export declare const desktopProductIdentities: Readonly<{
+  production: DesktopProductIdentity;
+  preview: DesktopProductIdentity;
+}>;
 
 export declare function isPreviewIdentityRequested(env?: Record<string, string | undefined>): boolean;
 

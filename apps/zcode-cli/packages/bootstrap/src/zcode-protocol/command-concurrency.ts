@@ -93,6 +93,10 @@ export const COMMAND_CONCURRENCY = {
   [V4_METHODS.controllerSubscribe]: "mutating",
   [V4_METHODS.controllerResync]: "mutating",
   [V4_METHODS.controllerUnsubscribe]: "mutating",
+  // 上游 v3.16.2 新增的两个 v4 方法，均不在冷开路径上，按「拿不准一律变更」登记：
+  // offPeakControl 改驻留 runtime 的闲时执行状态；sessionsIndexReconcile 重写会话索引。
+  [V4_METHODS.offPeakControl]: "mutating",
+  [V4_METHODS.sessionsIndexReconcile]: "mutating",
 
   // ─── legacy session/* 读面（只读持久化 + 已驻留 record）──
   //
@@ -180,6 +184,40 @@ export const COMMAND_CONCURRENCY = {
   [zcodeProtocolMethods.interactionRequestOfficialMcpAuthHeaders]: "mutating",
   [zcodeProtocolMethods.interactionBrowserList]: "mutating",
   [zcodeProtocolMethods.interactionBrowserExecute]: "mutating",
+
+  // ─── 上游 v3.16.2 合并带来的新 legacy 方法：一律变更（保守侧）──
+  // 这些方法都不在冷开路径上，且逐条都能指出写面或「未逐行证明无写」：
+  // - subagents/readRuntimeConfig 是反向方法（host→client），本 server 不接收；
+  // - mcp/readResource 与 mcp/ui* 会激活/注销 MCP 客户端会话、tool-call 认领与资源订阅；
+  // - plugins/listUiSurfaces 每次重新 resolve 工作区插件（与 plugins/list 同族）；
+  // - workflows/save 写工作区文件，workflows/forRun 每次重读定义目录（与 workflows/* 同族）；
+  // - topic/resource/read 读附件事务，bot/channel/reply 与 topic/resource/cancel 写话题状态；
+  // - process/networkCapture 在网络旁路分支里启停抓包。
+  [zcodeProtocolMethods.subagentsReadRuntimeConfig]: "mutating",
+  [zcodeProtocolMethods.mcpReadResource]: "mutating",
+  [zcodeProtocolMethods.mcpUiOpenInstance]: "mutating",
+  [zcodeProtocolMethods.mcpUiCloseInstance]: "mutating",
+  [zcodeProtocolMethods.mcpUiValidateInstance]: "mutating",
+  [zcodeProtocolMethods.mcpUiSampling]: "mutating",
+  [zcodeProtocolMethods.mcpUiCancelSampling]: "mutating",
+  [zcodeProtocolMethods.mcpUiCallTool]: "mutating",
+  [zcodeProtocolMethods.mcpUiCancelCall]: "mutating",
+  [zcodeProtocolMethods.mcpUiReadResource]: "mutating",
+  [zcodeProtocolMethods.mcpUiListResources]: "mutating",
+  [zcodeProtocolMethods.mcpUiListResourceTemplates]: "mutating",
+  [zcodeProtocolMethods.mcpUiSubscribeResource]: "mutating",
+  [zcodeProtocolMethods.mcpUiUnsubscribeResource]: "mutating",
+  [zcodeProtocolMethods.mcpUiRegisterAppTools]: "mutating",
+  [zcodeProtocolMethods.mcpUiUnregisterAppTools]: "mutating",
+  [zcodeProtocolMethods.mcpUiClaimAppToolCall]: "mutating",
+  [zcodeProtocolMethods.mcpUiResolveAppToolCall]: "mutating",
+  [zcodeProtocolMethods.pluginsListUiSurfaces]: "mutating",
+  [zcodeProtocolMethods.workflowsSave]: "mutating",
+  [zcodeProtocolMethods.workflowsForRun]: "mutating",
+  [zcodeProtocolMethods.topicResourceRead]: "mutating",
+  [zcodeProtocolMethods.channelReply]: "mutating",
+  [zcodeProtocolMethods.topicResourceCancel]: "mutating",
+  [zcodeProtocolMethods.processNetworkCapture]: "mutating",
 } as const satisfies Record<V4Method | ZCodeProtocolMethod, CommandConcurrency>;
 
 /**

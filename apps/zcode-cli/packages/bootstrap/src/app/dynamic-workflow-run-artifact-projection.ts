@@ -108,17 +108,20 @@ export function artifactsOf(
 /**
  * 标签 report 行的按 id 计数（`kind = "report" ∧ artifact_id = ?`——看板的数据量）。
  *
- * 首选端口的 `countTaggedReports`（SQLite 下推到 `group by`，一条行都不读）。缺席时（窄测试
+ * 首选 `countTaggedReports`（SQLite 下推到 `group by`，一条行都不读）。缺席时（窄测试
  * 替身、不带该方法的 store）退回读 report 行的**元数据**（`withResult: false`，不碰 item 正文）
  * 在内存里数——两条路给同一个数。修复原因：此前这里把整张节点表连同每条 report item 读进内存
  * 再数（docs/execution-engine.md「Reading the journal」）。
  *
- * **FORK 偏离**（上游同处的探测对象是宿主内省面 `DwfRunIntrospectionQueries.countTaggedReports`，
- * 对引擎的内存实现一律走退回读）：fork 把该计数落在引擎端口的可选方法上，与 `countNodes` 同规，
- * 内存实现也走它。
+ * 能力探测同时覆盖两处落点，运行时是同一个方法：**FORK** 把它落在引擎端口的可选成员
+ * `JournalStorePort.countTaggedReports` 上（与 `countNodes` 同规，内存实现也走它，SQLite 与内存
+ * 两个实现因此同语义）；上游 v3.16.2 把同一能力放在宿主内省面
+ * `DwfRunIntrospectionQueries.countTaggedReports` 上。按内省面收窄探测即可，两种 store 都能命中。
  */
 function tagItemCounts(runId: string, journal: JournalStorePort): ReadonlyMap<string, number> {
-  if (typeof journal.countTaggedReports === "function") return journal.countTaggedReports(runId);
+  const candidate = journal as Partial<DwfRunIntrospectionQueries>;
+  if (typeof candidate.countTaggedReports === "function")
+    return candidate.countTaggedReports(runId);
   const counts = new Map<string, number>();
   for (const node of journal.listNodes(runId, { kinds: ["report"], withResult: false })) {
     if (node.artifactId === undefined) continue;

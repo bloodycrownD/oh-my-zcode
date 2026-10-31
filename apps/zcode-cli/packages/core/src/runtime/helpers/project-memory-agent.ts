@@ -10,7 +10,12 @@ import type { RuntimeMessageEntry } from "../../agent/message-history.js";
 import type { ReadFileStateMap } from "../../tool/types.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import { getSessionShellSelectionFromConfig } from "../methods/session-shell-environment.js";
-import { buildRuntimeProviderRequestMessages } from "./runtime-provider-request-messages.js";
+// fork 的 extraction 走 buildRuntimeProviderRequestMessages；上游 dream 走
+// prepareRuntimeProviderRequest（带 ToolSearch exposure 决策）。两者都保留。
+import {
+  buildRuntimeProviderRequestMessages,
+  prepareRuntimeProviderRequest,
+} from "./runtime-provider-request-messages.js";
 import { createRuntimeModel, withModelInvocationContext } from "../methods/runtime-model.js";
 
 export interface ProjectMemoryAgentContext {
@@ -19,7 +24,9 @@ export interface ProjectMemoryAgentContext {
   midConversationSystem: AgentRuntimeInternal["config"]["midConversationSystem"];
   model: Model;
   /** model-io 的 querySource 维度；只用于本地 transcript 元数据。 */
-  operation: "project_memory_extract";
+  // FORK: 上游此字段是 ModelApiOperation（随遥测面移除）；这里用字面量联合保留
+  // Extraction 与 Dream 两条上游调用链的既有取值。
+  operation: "project_memory_extract" | "project_memory_dream";
   readFileState: ReadFileStateMap;
   tools: readonly ModelToolContract[];
   traceContext: TraceContext;
@@ -33,7 +40,7 @@ export function captureProjectMemoryAgentContext(
     memoryRoot: string;
     /** Extraction 继承产生该工作的 Turn Model。 */
     model?: Model;
-    operation: "project_memory_extract";
+    operation: "project_memory_extract" | "project_memory_dream";
     traceContext: TraceContext;
   },
 ): ProjectMemoryAgentContext {
@@ -50,6 +57,10 @@ export function captureProjectMemoryAgentContext(
       querySource: input.operation,
       skipTranscript: true,
     },
+    // TODO(upgrade-316): 上游把这里的 per-call modelRequestSessionType 换成
+    // modelCall + refreshRuntimeHeadersBeforeAttempt；前者已随遥测面移除（ModelInvocationContext
+    // 无 modelCall 字段），后者依赖的 methods/model-runtime-headers.ts 未进入本 fork 树。
+    // 暂保留 fork 的 "other" 覆写，待人工确认是否改由句柄层 sessionType 统一决定。
     modelRequestSessionType: "other",
     traceContext: input.traceContext,
   }));
@@ -63,13 +74,39 @@ export function captureProjectMemoryAgentContext(
     model,
     operation: input.operation,
     readFileState: new Map(runtime.readFileState),
-    tools: runtime.getTools(model).map((tool) => ({ ...tool })),
+    // Memory 的既有执行策略不允许 ToolSearch；历史引用只在此请求投影中降级。
+    tools: runtime
+      .getTools(model)
+      .filter((tool) => tool.name !== "ToolSearch")
+      .map((tool) => ({ ...tool })),
     traceContext: input.traceContext,
     workingDirectory: runtime.workingDirectory,
     workspaceRoot: runtime.workspaceRoot,
   };
 }
 
+export function prepareProjectMemoryAgentRequest(
+  context: ProjectMemoryAgentContext,
+  prompt: string,
+) {
+  return prepareRuntimeProviderRequest(
+    {
+      config: { midConversationSystem: context.midConversationSystem },
+    },
+    {
+      applyCacheControl: true,
+      entries: context.providerEntries,
+      model: context.model,
+      prompt,
+      tools: context.tools,
+    },
+  ).request;
+}
+
+/**
+ * fork 路径：把 prompt 追加到已捕获的投影条目后，直接渲染 provider 消息。
+ * 与上游 prepareProjectMemoryAgentRequest 并存（extraction 用本函数，dream 用上游那个）。
+ */
 export function buildProjectMemoryAgentProviderMessages(
   runtime: AgentRuntimeInternal,
   context: ProjectMemoryAgentContext,

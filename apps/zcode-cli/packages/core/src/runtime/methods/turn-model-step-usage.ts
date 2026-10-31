@@ -1,3 +1,4 @@
+import { createModelUsageSummaryFromEvents } from "../deps.js";
 import type {
   MessageId,
   MessageWithParts,
@@ -35,6 +36,12 @@ export async function recordMainTurnModelUsage(
   state: RegularTurnLoopState,
   input: RecordMainTurnModelUsageInput,
 ): Promise<void> {
+  // 失败请求的已报告消耗在恢复前结算，成功路径仍使用原有计数。
+  if (!input.result) {
+    state.tokenCount +=
+      createModelUsageSummaryFromEvents(state.events.slice(input.networkEventStartIndex))
+        ?.totalTokens ?? 0;
+  }
   await recordModelUsageFact(runtime, {
     assistantMessageId: input.assistantMessageId,
     error: input.error,

@@ -1,6 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
 import type { ZCodeSessionEndedSubagent } from "@zcode/shared";
-import { testId, TID_V4_BACKGROUND_WORK_CANCEL } from "@zcode/shared";
+import { testId, TID_V4_BACKGROUND_WORK_CANCEL } from "@zcode/shared/test-ids";
 import type { RunningSubagentSummary } from "@zcode/shared/zcode-protocol-v4";
 import {
   BanIcon,
@@ -31,7 +31,7 @@ type DirectoryItem = RunningSubagentSummary | ZCodeSessionEndedSubagent;
 
 const EMPTY_RUNNING: readonly RunningSubagentSummary[] = [];
 
-function buildSubagentDirectoryOpenRequest(
+export function buildSubagentDirectoryOpenRequest(
   tab: SubagentDirectorySidePaneTab,
   item: DirectoryItem,
 ): OpenScopedSubagentSideTabRequest {

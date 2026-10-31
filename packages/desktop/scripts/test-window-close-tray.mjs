@@ -8,7 +8,7 @@
  *
  * 失效形态：窗口关闭时若把窗口隐藏进托盘，而**托盘其实没建起来**（图标缺失 / 会话未就绪抛错 /
  * 平台不支持），用户就再也没有任何可见入口——应用等于失联，只能杀进程。
- * 修复的裁决：`desktopTrayReady` 必须显式 true 才允许隐藏（fail-closed），否则落到「确认退出」
+ * 修复的裁决：`closeToTraySupported` 必须显式 true 才允许隐藏（fail-closed），否则落到「确认退出」
  * 那条路（用户至少知道应用真的退了）。
  *
  * 测试法：desktop 的 main 侧模块整体 import electron（本仓无 desktop 测试基建，也没有 electron
@@ -16,8 +16,8 @@
  * `handleDesktopWindowCloseRequest` 这个纯裁决函数。
  *
  * 同文件另钉 spec §4 T-WIN-3 明文的「fake tray 抛错」口径：用同款替身加载
- * `../src/main/desktopTray.js`，令替身 `Tray` 构造函数抛错 → `createWindowsDesktopTray` 必须返回
- * null（`index.ts:1293` 的 `desktopTrayReady = createWindowsDesktopTray({...}) !== null` 由此拿到
+ * `../src/main/desktopTray.js`，令替身 `Tray` 构造函数抛错 → `createDesktopTray` 必须返回
+ * null（`index.ts:1293` 的 `closeToTraySupported = createDesktopTray({...}) !== null` 由此拿到
  * false，fail-closed 才有输入）。该用例只覆盖返回值契约本身，不覆盖 :1293 的 `!== null` 映射行
  * （反写该映射行仍全绿；打包态由 T-WIN-2 手工验证承担，已在 fix-spec 登记）。
  *
@@ -35,9 +35,11 @@ import test from "node:test";
 // 状态对象挂在 globalThis，替身模块在求值期捕获它的引用，因此重置只能原地清空字段。
 const ELECTRON_STUB = `
 const noop = () => {};
+const mk = () => new Proxy(function () {}, { get: (t, k) => (k === "then" || k === "toJSON" || typeof k === "symbol" ? undefined : mk()), apply: () => mk(), construct: () => mk() });
 const trayStub = globalThis.__zcodeTrayStubState;
 export const app = { on: noop, once: noop, whenReady: () => Promise.resolve(), getPath: () => "", commandLine: { appendSwitch: noop } };
 export const BrowserWindow = class {};
+export const clipboard = { readText: () => "", writeText: noop, writeImage: noop, readImage: () => ({ isEmpty: () => true }) };
 export const Menu = class {
   static buildFromTemplate(template) {
     if (trayStub) trayStub.templates.push(template);
@@ -77,10 +79,19 @@ export const powerSaveBlocker = { start: () => 1, stop: noop, isStarted: () => f
 export const screen = { getPrimaryDisplay: () => ({ bounds: { x: 0, y: 0, width: 1280, height: 800 }, workArea: { x: 0, y: 0, width: 1280, height: 800 }, scaleFactor: 1 }), on: noop };
 export const session = { fromPartition: () => ({ webRequest: { onBeforeSendHeaders: noop } }) };
 export const shell = { openExternal: async () => {} };
+export const systemPreferences = {
+  getMediaAccessStatus: () => "granted",
+  askForMediaAccess: async () => true,
+  getEffectiveAppearance: () => "light",
+  getColor: () => "",
+  on: noop,
+  removeListener: noop,
+};
 export const utilityProcess = { fork: () => ({ on: noop, postMessage: noop, kill: noop }) };
 export const webContents = { getAllWebContents: () => [] };
 export const webFrame = {};
 export const webUtils = { getPathForFile: () => "" };
+export const desktopCapturer = mk();
 export default { app };
 `;
 
@@ -116,7 +127,7 @@ registerHooks({
 });
 
 const { handleDesktopWindowCloseRequest } = await import("../src/main/desktopWindowLifecycle.js");
-const { createWindowsDesktopTray, updateWindowsDesktopTrayMenu } =
+const { createDesktopTray, updateWindowsDesktopTrayMenu } =
   await import("../src/main/desktopTray.js");
 
 /** 记录裁决产生的动作。 */
@@ -127,7 +138,7 @@ function calls() {
     base(overrides = {}) {
       return {
         platform: "win32",
-        closeToTrayOnWindows: true,
+        closeToTray: true,
         isLastWindow: true,
         label: "main",
         logger: { info: () => {} },
@@ -144,20 +155,20 @@ function calls() {
 test("T-WIN-3 托盘未就绪（创建失败）→ 不隐藏窗口，走确认退出", () => {
   const { seen, base } = calls();
   // 用户确认退出：请求退出、不隐藏。
-  const handled = handleDesktopWindowCloseRequest(base({ desktopTrayReady: false }));
+  const handled = handleDesktopWindowCloseRequest(base({ closeToTraySupported: false }));
   assert.equal(handled, true);
   assert.deepEqual(seen, ["quit"]);
 });
 
 test("T-WIN-3 托盘未就绪且用户取消确认 → 什么都不做（窗口仍在）", () => {
   const { seen, base } = calls();
-  handleDesktopWindowCloseRequest(base({ desktopTrayReady: false, confirmQuit: () => false }));
+  handleDesktopWindowCloseRequest(base({ closeToTraySupported: false, confirmQuit: () => false }));
   assert.deepEqual(seen, []);
 });
 
 test("T-WIN-3 托盘就绪才允许隐藏（且必须显式 true）", () => {
   const ready = calls();
-  handleDesktopWindowCloseRequest(ready.base({ desktopTrayReady: true }));
+  handleDesktopWindowCloseRequest(ready.base({ closeToTraySupported: true }));
   assert.deepEqual(ready.seen, ["hide"]);
 
   // 缺省（未声明托盘状态）按 fail-closed 处理：不隐藏。
@@ -169,23 +180,23 @@ test("T-WIN-3 托盘就绪才允许隐藏（且必须显式 true）", () => {
 test("T-WIN-3 托盘就绪但已显式退出 / 强制退出时不隐藏", () => {
   const explicit = calls();
   handleDesktopWindowCloseRequest(
-    explicit.base({ desktopTrayReady: true, explicitQuitRequested: true }),
+    explicit.base({ closeToTraySupported: true, explicitQuitRequested: true }),
   );
   assert.deepEqual(explicit.seen, ["quit"]);
 
   const forced = calls();
-  handleDesktopWindowCloseRequest(forced.base({ desktopTrayReady: true, forceQuit: true }));
+  handleDesktopWindowCloseRequest(forced.base({ closeToTraySupported: true, forceQuit: true }));
   assert.deepEqual(forced.seen, []);
 });
 
 test("T-WIN-3 非 Windows 与多窗口场景不走托盘裁决", () => {
   const darwin = calls();
-  handleDesktopWindowCloseRequest(darwin.base({ platform: "darwin", desktopTrayReady: true }));
+  handleDesktopWindowCloseRequest(darwin.base({ platform: "darwin", closeToTraySupported: true }));
   assert.deepEqual(darwin.seen, []);
 
   const notLastWindow = calls();
   handleDesktopWindowCloseRequest(
-    notLastWindow.base({ isLastWindow: false, desktopTrayReady: false }),
+    notLastWindow.base({ isLastWindow: false, closeToTraySupported: false }),
   );
   assert.deepEqual(notLastWindow.seen, []);
 });
@@ -221,11 +232,11 @@ function trayOptions(warnings) {
 // 模块级缓存用例顺序说明（desktopTray.ts:11 初值、:31-33 早退守卫）：
 // throw 态在 `desktopTray = new Tray(...)` 抛错时不会写缓存（赋值未发生），缓存仍为 null，
 // 因此无需复制临时模块实例——先跑 throw 态、再跑正常态即可各自命中目标分支。
-test("T-WIN-3 fake tray 抛错 → createWindowsDesktopTray 返回 null（desktopTrayReady=false 的来源）", () => {
+test("T-WIN-3 fake tray 抛错 → createDesktopTray 返回 null（closeToTraySupported=false 的来源）", () => {
   const state = resetTrayStubState({ constructorThrows: true });
   const warnings = [];
 
-  const tray = withWin32Platform(() => createWindowsDesktopTray(trayOptions(warnings)));
+  const tray = withWin32Platform(() => createDesktopTray(trayOptions(warnings)));
 
   assert.equal(tray, null);
   assert.equal(state.instances.length, 0);
@@ -237,7 +248,7 @@ test("T-WIN-3 托盘正常创建 → 返回非 null，且上下文菜单/提示�
   const state = resetTrayStubState();
   const warnings = [];
 
-  const tray = withWin32Platform(() => createWindowsDesktopTray(trayOptions(warnings)));
+  const tray = withWin32Platform(() => createDesktopTray(trayOptions(warnings)));
 
   assert.notEqual(tray, null);
   assert.deepEqual(warnings, []);
@@ -259,7 +270,7 @@ test("T-WIN-3 托盘正常创建 → 返回非 null，且上下文菜单/提示�
   assert.equal(state.contextMenuSetCount, 2);
   assert.equal(state.instances.length, 1);
   withWin32Platform(() => {
-    assert.equal(createWindowsDesktopTray(trayOptions([])), tray);
+    assert.equal(createDesktopTray(trayOptions([])), tray);
   });
   assert.equal(state.instances.length, 1);
 });

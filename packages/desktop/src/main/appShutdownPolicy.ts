@@ -1,3 +1,5 @@
+// fork 移除了自动更新链路（autoUpdater / update-install 退出类型），
+// 因此这里保留单一退出策略，不再引入上游的 AppShutdownKind 选择器。
 interface AppShutdownPolicy {
   forceKillDelayMs: number;
   waitTimeoutMs: number;

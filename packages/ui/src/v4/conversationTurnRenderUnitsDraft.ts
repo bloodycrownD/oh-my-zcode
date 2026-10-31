@@ -16,6 +16,7 @@ import type {
   UserInputRow,
   WorkflowLaunchMeta,
 } from "@zcode/shared/zcode-protocol-v4";
+import type { BotTopicPreparation } from "@zcode/shared";
 import type { AssistantWorkRow, ConversationTurnFlowItem } from "./conversationTurnFlowItems.js";
 import {
   isWorkflowLaunchUserInputRow,
@@ -38,6 +39,9 @@ export type {
 } from "./conversationTurnWorkSegments.js";
 
 export interface ConversationTurnRenderUnit {
+  /** FORK (upgrade-316): 上游 v3.16.2 的未接受 Bot 消息展示投影；解冲突时该字段随
+   *  upstream 类型文件一起丢失，导致 topicPreparationRenderUnits 的组装报 TS2353。 */
+  topicPreparations?: readonly BotTopicPreparation[];
   key: string;
   turnId: string;
   header?: TurnHeaderRow;

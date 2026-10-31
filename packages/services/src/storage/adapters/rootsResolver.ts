@@ -6,6 +6,7 @@ import { join, resolve } from "node:path";
 import type { RootsResolverPort } from "../app/ports.js";
 import type { StorageRootSpec } from "@zcode/shared";
 
+// FORK：数据根名是 .omz（上游为 .zcode）；保持非导出，避免扩大公开面。
 const ZCODE_DATA_DIR_NAME = ".omz";
 
 export function resolveStorageRoots(params: {

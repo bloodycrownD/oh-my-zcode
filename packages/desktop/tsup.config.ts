@@ -1,4 +1,3 @@
-import { pickProductEndpointEnv } from "@zcode/shared/zcodeEndpoint";
 import { readFileSync, existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -100,7 +99,10 @@ function createSharedDefines() {
     __ZCODE_COMMIT__: JSON.stringify(buildMetadata.buildCommitId),
     __ZCODE_BUILD_TIME__: JSON.stringify(buildMetadata.buildTime),
     __ZCODE_ENV__: JSON.stringify(zcodeEnv),
-    __ZCODE_ENDPOINT_ENV__: JSON.stringify(pickProductEndpointEnv(env)),
+    // FORK(upgrade-316)：上游重构 zcodeEndpoint.ts 后不再有 pickProductEndpointEnv，
+    // 且全仓已无 __ZCODE_ENDPOINT_ENV__ 的消费者（上游版 endpoint env 改为显式传参，
+    // 默认 {}）。原「构建期注入公开端点 env」机制随之移除。已知差异：fork 用户此前
+    // 依赖 ZCODE_BASE_URL 等 env 覆盖端点的，升级后以新模型的传参方式为准。
     __ZCODE_PRODUCT_FLAVOR__: JSON.stringify(zcodeProductFlavor),
     // Computer Use Helper build identity — helperInstaller 读它决定下载哪个 Helper bundle。
     // 缺失时 installer 抛 "Packaged ZCode is missing its embedded Computer Use Helper build identity"。
@@ -125,6 +127,10 @@ const desktopNodeRuntimeExternals = [
   "node-forge",
   // ZIP 解包器内部依赖 CommonJS require("fs")，不能内联到 ESM main/host 产物。
   "yauzl",
+  // FORK(upgrade-316)：esbuild 打包会把值导入的 `node:sqlite` 说明符重写成裸 "sqlite"
+  // （shared/sqlite-migrations 的 backup/restore.ts），Electron ESM 运行时按裸包名解析即
+  // ERR_MODULE_NOT_FOUND。显式 external 后 esbuild 原样保留 "node:sqlite" 说明符。
+  "node:sqlite",
 ];
 
 function createDevReadyMarkerHook(target: "main" | "host" | "preload"): string {

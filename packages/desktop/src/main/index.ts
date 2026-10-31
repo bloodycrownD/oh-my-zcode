@@ -1,3 +1,4 @@
+import { installRequestSecurityDiagnostics } from "./request-security-edition/index.js";
 /* eslint-disable max-lines */
 import "./desktopEarlyDataBaseDirBootstrap.js";
 import "./desktopEarlyChromiumHardwareAccelerationBootstrap.js";
@@ -28,11 +29,14 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  MessageChannelMain,
   nativeImage,
   protocol,
   session,
+  shell,
   webContents,
 } from "electron";
+import { randomUUID } from "node:crypto";
 import type { UtilityProcess as ElectronUtilityProcess } from "electron";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
@@ -49,14 +53,15 @@ import {
   desktopMenuMessageIds,
   type Locale,
   type AppSettings,
+  type appSettingsPatchSchema,
   PlatformChannels,
   ZCODE_ENV,
   ZCODE_PRODUCT_FLAVOR,
   DEFAULT_ZCODE_ENDPOINT_ORIGIN,
   DEFAULT_LOCALE,
-
   resolveZCodeEndpointOrigin,
   HostMessageTypes,
+  InternalChannels,
 } from "@zcode/shared";
 import { logger } from "./logger.js";
 import { markMainLaunchAppReady } from "./desktopLaunchMarks.js";
@@ -85,7 +90,13 @@ import { applyAppIcon } from "./desktopWindowChrome.js";
 import { resolveWindowsAppUserModelIdForFlavor } from "../../scripts/desktop-product-identity.mjs";
 import type { DesktopWindowSize } from "./desktopWindowSize.js";
 import { maybeWarnArchitectureMismatch } from "./desktopArchitectureGuard.js";
-import { createWindowsDesktopTray, updateWindowsDesktopTrayMenu } from "./desktopTray.js";
+import { createDesktopTray, updateWindowsDesktopTrayMenu } from "./desktopTray.js";
+import {
+  createCloseToTrayCapabilityMonitor,
+  resolveCloseToTrayBootstrapValue,
+  resolveCloseToTrayRuntimeValue,
+  resolveCloseToTraySupported,
+} from "./desktopTraySupport.js";
 import { createWindowsCuaOperationIndicator } from "./windowsCuaOperationIndicator.js";
 import {
   configureDockMenu,
@@ -143,20 +154,26 @@ import {
 import { createRemoteWorkspaceSessionManager } from "./desktopRemoteSessions.js";
 import { resolveCanonicalWslTarget } from "./desktopWslTargetResolver.js";
 import {
-
   setBrowserUseGuestWebContentsIdsProvider,
 } from "./resourceManagerWindow.js";
-
 import { registerPlatformIpcHandlers } from "./desktopMainIpcPlatform.js";
-import {
-
-
-
-} from "./mcpUserDirectory/index.js";
 import { registerRemoteIpcHandlers } from "./desktopMainIpcRemote.js";
+import { registerWebRemoteControlIpcHandlers } from "./desktopWebRemoteControlIpc.js";
+import type { WebRemoteControlIpcManager } from "./desktopWebRemoteControlIpc.js";
 import { applyDesktopChromiumNetworkPolicies } from "./desktopNetworkPolicy.js";
+import { applyEmbeddedBrowserPermissionPolicy } from "./embeddedBrowserPermissionPolicy.js";
+import { createEmbeddedBrowserSitePermissionStore } from "./embeddedBrowserSitePermissionStore.js";
+import {
+  createEmbeddedBrowserPermissionUiBridge,
+  setActiveEmbeddedBrowserPermissionUiBridge,
+} from "./embeddedBrowserPermissionUiBridge.js";
+import {
+  PLUGIN_SANDBOX_PRIVILEGED_SCHEME,
+  getPluginSandboxHost,
+  installPluginSandboxHost,
+} from "./pluginSandbox/index.js";
 
-registerLocalMediaPreviewScheme(protocol);
+registerLocalMediaPreviewScheme(protocol, [PLUGIN_SANDBOX_PRIVILEGED_SCHEME]);
 const localMediaPreviewPathRegistry = createLocalMediaPreviewPathRegistry();
 
 // e2e 由 Chromedriver 管理远程调试端口；如果这里继续固定到 9229，
@@ -201,11 +218,14 @@ const linuxDesktopIntegrationIconPath =
     : iconPath;
 let currentApplicationLocale: Locale = DEFAULT_LOCALE;
 let closeToTrayOnWindows = true;
-// FORK (upstream-v3.15.1-backport): 托盘实例是否创建成功（Windows）。
-// 上游 v3.15.1 用 desktopTrayReady + resolveCloseToTraySupported 把「托盘真实可用」并入
-// 「关闭窗口是否隐藏到托盘」的裁决；fork 只取该裁决，不搬 Linux 能力探测。
-// 托盘创建失败时隐藏窗口=应用失联，必须落到确认退出（见 handleDesktopWindowCloseRequest）。
+// CR-01：托盘实例创建结果（模块级，关窗分支读取）。DBus 能力探测通过不等于 Electron
+// Tray 创建成功；隐藏窗口前必须确认最终用户入口真实存在，否则隐藏即失联。
 let desktopTrayReady = false;
+// 关闭驻留托盘能力 monitor（spec：docs/desktop/linux-close-to-tray.md）。
+// Linux 关窗分支是同步回调，只能读缓存；启动后首次探测完成前按"不可用"安全默认。
+const closeToTrayCapabilityMonitor = createCloseToTrayCapabilityMonitor({
+  platform: process.platform,
+});
 // keep-awake：全局开关 keepAwakeWhileRunning。打开后主进程持有
 // powerSaveBlocker("prevent-app-suspension")，阻止系统闲置休眠（防不了合盖/手动睡眠）。
 // 不再绑定闲时任务活跃计数——设置页「常规」与 Automations 入口镜像同一配置。
@@ -583,7 +603,6 @@ const remoteSessionManager = createRemoteWorkspaceSessionManager({
     resolveRemoteAssetDirs({ locale: currentApplicationLocale }, hostProcessLocalEnv),
   resolveWslTarget: resolveCanonicalWslTarget,
 });
-
 const deviceMid = ensureDesktopDeviceMidSync();
 
 function extractOpenWorkspacePathFromDeepLinkUrl(url: string): string | null {
@@ -668,7 +687,7 @@ function syncCloseToTrayOnWindows(value: unknown) {
   logger.info(`[settings] closeToTrayOnWindows=${value}`);
 }
 
-function syncImmediateAppSettings(patch: Partial<AppSettings>) {
+function syncImmediateAppSettings(patch: ReturnType<typeof appSettingsPatchSchema.parse>) {
   syncCloseToTrayOnWindows(patch.closeToTrayOnWindows);
 
   if (typeof patch.keepAwakeWhileRunning === "boolean") {
@@ -976,9 +995,14 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
         platform: process.platform,
         forceQuit: forceQuitRef.current,
         explicitQuitRequested: explicitQuitRef.current,
-        closeToTrayOnWindows,
-        // 托盘没创建成功时关闭窗口必须走确认退出，不能隐藏成失联状态。
-        desktopTrayReady,
+        closeToTray: closeToTrayOnWindows,
+        // 空缓存按不可用处理：隐藏前兜底确认托盘真的可渲染，防 GNOME 静默失败失联。
+        // CR-01：DBus 探测 ∧ Tray 实例创建成功才可隐藏；任一不满足按不可用走确认退出。
+        closeToTraySupported: resolveCloseToTraySupported({
+          platform: process.platform,
+          desktopTrayReady,
+          capabilitySupported: closeToTrayCapabilityMonitor.getSync()?.supported,
+        }),
         isLastWindow: getMainApplicationWindows().length === 1,
         label,
         logger,
@@ -1018,77 +1042,16 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
           onCronRunResult: forwardCronRunResult,
           onCronSchedulerWakeRequested: wakeCronScheduler,
           authorizeLocalMediaPreviewPath: localMediaPreviewPathRegistry.authorize,
-          // Bugfix: bot service 运行在本地窗口 host 内，/reconnect 必须能从本地 host 请求 main 创建远端 session。
-          handleBotRemoteWorkspaceReconnectRequest: async ({
-            win,
-            requestId,
-            workspacePath,
-            workspaceIdentity,
-            target,
-          }) => {
-            try {
-              const sessionId = await remoteSessionManager.reconnectBotRemoteWorkspaceSession(win, {
-                target,
-                workspacePath,
-                workspaceIdentity,
-                requestId,
-              });
-              if (!win.isDestroyed() && !win.webContents.isDestroyed()) {
-                win.webContents.send(PlatformChannels.BotRemoteWorkspaceReconnected, {
-                  sessionId,
-                  workspacePath,
-                  workspaceIdentity,
-                  target,
-                });
-              }
-              return { ok: true, sessionId };
-            } catch (error) {
-              return {
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
+          // TODO(upgrade-316): 上游 3.16 把 bot 远控三件套（reconnect / connection-status / runtime-port）
+          // 并入了 RemoteSessionReconnected 链路，shared/channels.ts + platform.ts 已按上游收敛；
+          // 若确认 fork 的 bot 链路仍需 host→main 反向请求，需要先在 shared 恢复对应通道再补回。
+          registerPluginSandbox: (input) => {
+            const host = getPluginSandboxHost();
+            if (!host) throw new Error("Plugin UI sandbox host is not installed.");
+            const { requestId: _requestId, ...registerInput } = input;
+            return host.registerFromHost(registerInput);
           },
-          handleBotRemoteWorkspaceConnectionStatusRequest: async ({
-            win,
-            target,
-            workspacePath,
-            workspaceIdentity,
-          }) => ({
-            ok: true,
-            // Bugfix: Bot 远端连接状态必须按 workspaceIdentity/workspacePath 精确隔离。
-            // 只按 SSH target 判断会把同一台机器上的其他目录误判为当前 workspace 已连接。
-            connected: remoteSessionManager.hasRemoteWorkspaceSessionForTarget(win, target, {
-              workspacePath,
-              workspaceIdentity,
-            }),
-          }),
-          handleBotRemoteWorkspaceRuntimePortRequest: async ({
-            win,
-            requestId,
-            workspacePath,
-            workspaceIdentity,
-            target,
-          }) => {
-            try {
-              const port = await remoteSessionManager.createBotRemoteWorkspaceRuntimePort(
-                win,
-                {
-                  target,
-                  workspacePath,
-                  workspaceIdentity,
-                },
-                requestId,
-              );
-              return { ok: true, port };
-            } catch (error) {
-              return {
-                ok: false,
-                error: error instanceof Error ? error.message : String(error),
-              };
-            }
-          },
-          // browser-use：main 用 WebContentsView+CDP 执行命令。
+          // browser-use：main 用 WebContentsView+CDP 执行命令（替换 T4 占位）。
           handleBrowserExecuteRequest: ({ win: browserWin, ...request }) =>
             runBrowserCommandOnView({ win: browserWin, ...request }),
         },
@@ -1126,13 +1089,14 @@ function createWindowInstance(startupBootstrap: StartupWindowBootstrap = {}) {
     // 已恢复 workspace 建立后台索引。始终注入 canonical fallback，才能覆盖非 active 历史目录已删除的情况。
     agentSpawnFallbackCwd: getConversationWorkspaceDir(),
     deviceMid,
+    remoteAssets: resolveRemoteAssetDirs({ locale: currentApplicationLocale }, hostProcessLocalEnv),
     runtimeProcessEnvPatchPromise: runtimeProcessEnvPreparation.patchPromise,
     runtimeProcessEnvFallbackPatch: runtimeProcessEnvPreparation.fallbackPatch,
     initialDesktopZoomLevel: currentDesktopZoomLevel,
     initialWindowSize: currentDesktopWindowSize,
     currentApplicationLocale: () => currentApplicationLocale,
     resolveBrowserViewOwner: (webContentsId) =>
-      browserGuestManager.getTabOwnerByWebContentsId(webContentsId),
+      browserGuestManager.getTabOwnerByWebContentsId(webContentsId) ?? undefined,
     persistWindowSize: async (state) => {
       currentDesktopWindowSize = state;
       await mainSettingService.update({ desktopWindowSize: state });
@@ -1198,8 +1162,26 @@ app.on("second-instance", (_event, argv, _workingDirectory, additionalData) => {
 
 app.whenReady().then(async () => {
   markMainLaunchAppReady();
+  installRequestSecurityDiagnostics(session.defaultSession.webRequest, logger);
   installLocalMediaPreviewProtocol(session.defaultSession.protocol, {
     isPathAuthorized: localMediaPreviewPathRegistry.isAuthorized,
+  });
+  // 插件 UI 沙箱：注册表 + renderer 可调 IPC；scheme 的 privileged 注册已随 zcode-media 在 ready 前完成。
+  installPluginSandboxHost({
+    preloadPath: join(import.meta.dirname, "../preload/pluginSandbox.cjs"),
+    rendererDir: join(import.meta.dirname, "../renderer"),
+    aliasDir: join(import.meta.dirname, "../plugin-sandbox"),
+    // 开发模式 out/renderer 没有 shell 产物，从 renderer dev server 代理（同 cua-permission-panel 的做法）。
+    ...(!app.isPackaged && process.env["ELECTRON_RENDERER_URL"]
+      ? { devServerUrl: process.env["ELECTRON_RENDERER_URL"] }
+      : {}),
+    logger: console,
+    // e2e L05（配额）：只在 e2e run 里允许缩小注册表容量。
+    ...(process.env.ZCODE_E2E_RUN_ID?.trim() &&
+    Number.isInteger(Number(process.env.ZCODE_E2E_PLUGIN_SANDBOX_MAX_ENTRIES)) &&
+    Number(process.env.ZCODE_E2E_PLUGIN_SANDBOX_MAX_ENTRIES) > 0
+      ? { registryMaxEntries: Number(process.env.ZCODE_E2E_PLUGIN_SANDBOX_MAX_ENTRIES) }
+      : {}),
   });
   installBrowserRestoreBootstrapProtocol(
     session.fromPartition(EMBEDDED_BROWSER_PARTITION).protocol,
@@ -1216,7 +1198,36 @@ app.whenReady().then(async () => {
       loadedBootstrapLocale = true;
       currentApplicationLocale = bootstrapSettings.locale;
     }
-    closeToTrayOnWindows = bootstrapSettings.closeToTrayOnWindows ?? true;
+    // Linux 默认值归位迁移（spec：docs/desktop/linux-close-to-tray.md）：shared 迁移无平台
+    // 概念、曾把存量 Linux 用户归为 true，但 Linux 此前无设置入口，存量 true 非用户显式
+    // 选择；首次启动强制归位为默认关并落标记，之后尊重用户选择。
+    const closeToTrayBootstrap = resolveCloseToTrayBootstrapValue({
+      platform: process.platform,
+      stored: bootstrapSettings.closeToTrayOnWindows,
+      linuxMigrationInitialized: bootstrapSettings.closeToTrayLinuxMigrationInitialized,
+    });
+    // CR-02：必须 await 持久化完成再继续启动，renderer 设置页才不会读到文件旧值。
+    // 写失败时不阻断启动，但内存值回退为文件当前值（resolveCloseToTrayRuntimeValue）：
+    // 持久层不可写时维持"文件是唯一可信来源"，避免 main 按 false、设置页显示 true 的
+    // 双数据源；迁移在下次启动重试，失败期间保持迁移未完成的旧行为。
+    let closeToTrayMigrationPersisted = true;
+    if (closeToTrayBootstrap.needsLinuxMigration) {
+      try {
+        await mainSettingService.update({
+          closeToTrayOnWindows: false,
+          closeToTrayLinuxMigrationInitialized: true,
+        });
+      } catch (error) {
+        closeToTrayMigrationPersisted = false;
+        logger.warn("[settings] failed to persist linux close-to-tray default migration", error);
+      }
+    }
+    closeToTrayOnWindows = resolveCloseToTrayRuntimeValue({
+      platform: process.platform,
+      stored: bootstrapSettings.closeToTrayOnWindows,
+      linuxMigrationInitialized: bootstrapSettings.closeToTrayLinuxMigrationInitialized,
+      migrationPersisted: closeToTrayMigrationPersisted,
+    });
     keepAwakeWhileRunning = bootstrapSettings.keepAwakeWhileRunning ?? false;
     currentDesktopZoomLevel = clampDesktopZoomLevel(bootstrapSettings.desktopZoomLevel ?? 0);
     currentDesktopWindowSize = bootstrapSettings.desktopWindowSize;
@@ -1275,6 +1286,26 @@ app.whenReady().then(async () => {
     logger.warn("[desktop-network] Chromium network policy bootstrap failed:", error);
   }
 
+  // 内置浏览器权限闸门（CNVD 未授权访问修复）：必须在任何 guest attach 前完成注册。
+  // 弹窗桥把策略决策点接到主窗口 UI；store 落盘「访问此网站时允许/阻止」的站点同意记录。
+  // 上游同段还包含更新说明/自动更新初始化，fork 已移除自动更新，只保留这层安全闸门。
+  const embeddedBrowserPermissionUiBridge = createEmbeddedBrowserPermissionUiBridge({ logger });
+  embeddedBrowserPermissionUiBridge.registerResolveListener();
+  setActiveEmbeddedBrowserPermissionUiBridge(embeddedBrowserPermissionUiBridge);
+  try {
+    await applyEmbeddedBrowserPermissionPolicy(session.fromPartition(EMBEDDED_BROWSER_PARTITION), {
+      logger,
+      prompt: embeddedBrowserPermissionUiBridge.promptPermission,
+      devicePicker: embeddedBrowserPermissionUiBridge.devicePicker,
+      onDisplayMediaRequest: embeddedBrowserPermissionUiBridge.onDisplayMediaRequest,
+      store: createEmbeddedBrowserSitePermissionStore(
+        join(app.getPath("userData"), "embedded-browser-site-permissions.json"),
+      ),
+    });
+  } catch (error) {
+    logger.warn("[embedded-browser-permission] policy bootstrap failed:", error);
+  }
+
   logWindowsBundledRuntimeIntegrityDiagnostic();
 
   if (process.platform === "darwin" || process.platform === "win32") {
@@ -1290,18 +1321,45 @@ app.whenReady().then(async () => {
       ),
     () => showCurrentWindowFromDock(primaryWindowCoordinator),
   );
-  desktopTrayReady =
-    createWindowsDesktopTray({
-      getLocale: () => currentApplicationLocale,
-      showCurrentWindow: () =>
-        primaryWindowCoordinator.ensurePrimaryWindow("tray-show-current-window"),
-      executeDesktopCommand: executeDesktopCommandForApp,
-      quitApp: () => {
-        markExplicitQuit("tray-quit");
-        app.quit();
-      },
-      logger,
-    }) !== null;
+  const desktopTrayOptions = {
+    getLocale: () => currentApplicationLocale,
+    showCurrentWindow: () =>
+      primaryWindowCoordinator.ensurePrimaryWindow("tray-show-current-window"),
+    executeDesktopCommand: executeDesktopCommandForApp,
+    quitApp: () => {
+      markExplicitQuit("tray-quit");
+      app.quit();
+    },
+    logger,
+  };
+  // CR-01：托盘实例是否创建成功必须成为可隐藏能力的一部分。DBus watcher 只能证明桌面
+  // 可能有 host，new Tray() 仍可能因图标缺失/会话未就绪抛错；此时隐藏窗口会让用户失去
+  // 唯一入口（失联）。trayReady 由创建结果置位，关窗与设置页能力查询都读它。
+  if (process.platform === "win32") {
+    desktopTrayReady = createDesktopTray(desktopTrayOptions) !== null;
+  }
+
+  const ensureLinuxDesktopTray = async (): Promise<void> => {
+    if (process.platform !== "linux" || desktopTrayReady) {
+      return;
+    }
+    // Linux 托盘创建跟随能力而非设置开关（spec：docs/desktop/linux-close-to-tray.md）：
+    // 无 StatusNotifierWatcher 的桌面（GNOME 默认）上 new Tray() 静默失败，注册无人渲染的
+    // DBus name 没有意义；能力探测通过后再创建。用户装扩展后经设置页查询也会走到这里补建。
+    const capability = await closeToTrayCapabilityMonitor.refresh();
+    if (capability.supported) {
+      desktopTrayReady = createDesktopTray({ ...desktopTrayOptions, platform: "linux" }) !== null;
+      // 托盘补建成功时回放当前未读数：创建前已有的未读不能等到下一次计数变化才出现在红点上。
+      if (desktopTrayReady) {
+        syncApplicationUnreadBadge(windowUnreadCountMap);
+      }
+    }
+  };
+  if (process.platform === "linux") {
+    void ensureLinuxDesktopTray().catch((error: unknown) => {
+      logger.warn("[desktop-tray] linux tray capability probe failed", error);
+    });
+  }
 
   registerPlatformIpcHandlers({
     logger,
@@ -1313,8 +1371,8 @@ app.whenReady().then(async () => {
       }
       return result;
     },
-    updateBrowserGuestViewport: (tabId, viewport, windowId, desktopZoomFactor) =>
-      browserGuestManager.updateViewportFromRenderer(tabId, viewport, windowId, desktopZoomFactor),
+    updateBrowserGuestViewport: (tabId, viewport, windowId) =>
+      browserGuestManager.updateViewportFromRenderer(tabId, viewport, windowId),
     reportBrowserScreenshotSurfaceReady: (windowId, senderWebContentsId, payload) => {
       logger.debug("[browser-screenshot-surface] renderer ready", {
         windowId,
@@ -1343,6 +1401,10 @@ app.whenReady().then(async () => {
     },
     applyApplicationLocale: async (locale) => {
       currentApplicationLocale = locale;
+      // Host 的 ZCode endpoint 请求以此为实时语言；setting.json 写入可能滞后或失败，不能作为来源。
+      for (const child of windowHostProcessMap.values()) {
+        child.postMessage({ type: HostMessageTypes.ApplicationLocaleChanged, locale });
+      }
       windowsCuaOperationIndicator.refreshContent();
       rebuildMenu();
       for (const win of getApplicationWindowsExcludingCuaIndicator()) {
@@ -1393,9 +1455,47 @@ app.whenReady().then(async () => {
     getDesktopSessionActivity: () => ({
       runningAgentSessionCount: getRunningAgentSessionCount(),
     }),
+    // fork 没有上游的 webRemoteControlManager（官方账号链路），窗口级 workspace 同步没有接收方。
+    // 保留空实现只为满足 desktopMainIpcPlatform 的注册契约；手机远控走 remoteSessionManager。
+    syncWebRemoteControlWorkspaces: () => {},
     syncAppSettings: syncImmediateAppSettings,
+    // 设置页置灰查询：monitor 带 stale 缓存，装完 AppIndicator 扩展重开设置页即可刷新。
+    // 设置页置灰查询：先确保托盘实例就绪（用户装扩展后首次查询会补建），再返回合并了
+    // trayReady 的最终能力，避免设置页显示可开启但关窗实际走确认退出的不一致（CR-01）。
+    refreshCloseToTrayCapability: async () => {
+      await ensureLinuxDesktopTray();
+      const capability = await closeToTrayCapabilityMonitor.refresh();
+      return {
+        supported: resolveCloseToTraySupported({
+          platform: process.platform,
+          desktopTrayReady,
+          capabilitySupported: capability.supported,
+        }),
+        gnomeLikeWithoutTray: capability.gnomeLikeWithoutTray,
+      };
+    },
     setShortcutRecordingActive,
     deviceMid,
+  });
+
+  // FORK(upgrade-316)：上游 v3.16 的 webRemoteControlManager（桌面侧 relay 主控）依赖官方账号
+  // getLogin 链路，fork 已删除该面，manager 尚未装配（见 desktopMainIpcRemote.ts 顶部 TODO）。
+  // 但上游新 renderer 每 2 秒轮询 GetWebRemoteControlStatus，无 handler 时持续抛原生错误。
+  // 这里先注册降级 handler：状态恒 idle、stop/auth 通知为 no-op、start 返回明确错误。
+  // 完整 manager 的 fork 适配（匿名 relay 形态）是独立工作项，不阻塞本轮真机验证。
+  const webRemoteControlDegradedManager: WebRemoteControlIpcManager = {
+    authorizeStart: (_windowId, _context) => {
+      throw new Error("Web 远程控制的桌面侧中继在本版本尚未接入（fork 适配中）");
+    },
+    startAuthorized: async () => {
+      throw new Error("Web 远程控制的桌面侧中继在本版本尚未接入（fork 适配中）");
+    },
+    notifyAuthStateChanged: async () => {},
+    stop: async () => {},
+    getStatus: (_windowId) => ({ status: "idle" as const }),
+  };
+  registerWebRemoteControlIpcHandlers({
+    webRemoteControlManager: webRemoteControlDegradedManager,
   });
 
   registerRemoteIpcHandlers({
@@ -1406,6 +1506,28 @@ app.whenReady().then(async () => {
       remoteSessionManager.cancelPendingRemoteWorkspaceSessionsForWindow,
     bindRemoteWorkspaceSessionContext: remoteSessionManager.bindRemoteWorkspaceSessionContext,
     confirmRendererAttachmentReady: remoteSessionManager.confirmRendererAttachmentReady,
+    attachSourceSettings: (sender, sourceServerId) => {
+      const child = windowHostProcessMap.get(sender.id);
+      if (!child) throw new Error("Desktop Window Host is unavailable");
+      const { port1, port2 } = new MessageChannelMain();
+      const attachmentId = `source-settings-${randomUUID()}`;
+      child.postMessage(
+        {
+          type: HostMessageTypes.AttachServicePort,
+          requestId: randomUUID(),
+          attachmentId,
+          clientMode: "desktop-continuous",
+          scope: { kind: "source-settings", sourceServerId },
+        },
+        [port2],
+      );
+      sender.postMessage(
+        InternalChannels.SourceSettingsServicePort,
+        { attachmentId, sourceServerId },
+        [port1],
+      );
+      return { attachmentId };
+    },
     isDockerDaemonAvailable,
     listAvailableWSLDistros,
     listAvailableDockerContainers,
@@ -1427,7 +1549,7 @@ app.whenReady().then(async () => {
   });
 
   const protocolUrl = extractDeepLinkUrlFromArgs(process.argv);
-  if (startupDeepLinkConsumptionGate.shouldHandleReadyProtocolUrl(protocolUrl)) {
+  if (protocolUrl && startupDeepLinkConsumptionGate.shouldHandleReadyProtocolUrl(protocolUrl)) {
     handleDeepLink(protocolUrl, logger, {
       confirmationCopy: resolveExternalWorkspaceConfirmationCopy(),
       resolveApplicationWindow: () => getApplicationWindowsExcludingCuaIndicator()[0] ?? null,

@@ -114,6 +114,8 @@ const webSearchHandler: ToolHandler<WebSearchInput, WebSearchOutput> = async (in
           toolName: WEBSEARCH_TOOL_NAME,
           querySource: "web_search_tool",
         },
+        // TODO(upgrade-316): 上游改为 telemetry 的 modelCall.operation；该字段随 telemetry 面
+        // 一起被移除，故保留 fork 的 modelRequestSessionType 归因。
         modelRequestSessionType: "other",
         // statusSink 不在这里设：执行器交出的 context.model 已带默认会话事件出口。
         traceContext: webSearchTraceFromContext(context),
@@ -129,7 +131,9 @@ export const webSearchToolEntry: ToolEntry = {
   ...WEBSEARCH_TOOL_CONTRACT,
   providerNative: undefined,
   metadata: {
+    shouldDefer: true,
     name: WEBSEARCH_TOOL_NAME,
+    searchHint: "search the web for current information",
     // 写死月份会导致模型可见的 WebSearch 描述过期。
     // 每次读取时重新生成，避免长驻进程跨月后继续投递旧月份。
     get description() {

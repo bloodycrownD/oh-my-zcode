@@ -9,9 +9,9 @@ import {
   isDeterministicContentFault,
   parseConversationTopic,
   PROTOCOL_V4_LIMITS,
+  type ConversationDelta,
   SUBSCRIPTION_CONTENT_REJECTED,
   type ConversationRow,
-  type ConversationDelta,
   type ConversationSnapshot,
   type ConversationOpenTiming,
   type ConversationTopicFrame,
@@ -22,6 +22,7 @@ import {
 } from "@zcode/shared/zcode-protocol-v4";
 import { logger } from "@/logger.js";
 import type { ConversationTurnNavigatorHydrationResult } from "@/v4/conversationTurnNavigatorHelpers.js";
+import { ConversationRowPool } from "@/v4/conversationRowSharing.js";
 import type { ConversationTransport } from "@/v4/transport.js";
 import {
   isConversationOpenProbeDevEnabled,
@@ -50,8 +51,12 @@ const RUNTIME_RECYCLE_RETRY_DELAYS_MS = [250, 1_000, 3_000] as const;
  * 路径只相差一个 renderer/network round-trip。把窗口设为 2s 可以覆盖正常 desktop/mobile
  * 延迟，又能尽快从“CLI 继续工作、订阅完全静默”的半开通道自愈。超时只恢复订阅，不重放命令。
  */
-const ACCEPTED_INPUT_PROJECTION_GRACE_MS = 2_000;
-const ACCEPTED_INPUT_COMMAND_TYPES = new Set(["sendText"]);
+export const ACCEPTED_INPUT_PROJECTION_GRACE_MS = 2_000;
+const ACCEPTED_INPUT_COMMAND_TYPES = new Set(["sendText", "editUserQuery"]);
+
+export function requiresAcceptedInputProjection(type: string): boolean {
+  return ACCEPTED_INPUT_COMMAND_TYPES.has(type);
+}
 
 /** 退避耗尽时展示给用户的 lastError（无底层 error 对象可引用的换代路径）。 */
 const RUNTIME_RECYCLED_ERROR = "ZCode agent runtime 已被回收，重连未成功";
@@ -67,7 +72,7 @@ function roundedDuration(startedAt: number, endedAt: number): number {
 /**
  * 是否为 runtime 换代/回收导致的瞬态 subscribe 失败。
  *
- * 三种文案都来自同一次回收：transport 关闭时 ZCodeProtocolClient.rejectAll 打断在途请求
+ * 已知文案都来自同一次回收：transport 关闭时 ZCodeProtocolClient.rejectAll 打断在途请求
  * （transport closed），复用已回收 client 时 assertNotDisposed 早退（client disposed），
  * 以及 runtime 尚未重新拉起时的 fail-fast（runtime is not running）。
  */
@@ -345,6 +350,8 @@ export class ConversationProjectionStore {
   private readonly modelTransitionListeners = new Set<
     (transition: SessionModelTransition) => void
   >();
+  /** live-only 增量（插件资源通知）的旁路监听；只在 delta 帧应用后触发，快照帧不触发。 */
+  private readonly liveDeltaListeners = new Set<(deltas: readonly ConversationDelta[]) => void>();
   private observedModelTransitionEventId: string | null = null;
   // 订阅代际：并发 connect 只认最新一代，过期结果立即退订防服务端悬挂。
   private generation = 0;
@@ -428,6 +435,9 @@ export class ConversationProjectionStore {
   constructor(
     readonly topic: string,
     private readonly transport: ConversationTransport,
+    // 行结构共享池（docs/performance/conversation-row-structural-sharing.md）；
+    // SessionDataLayer 注入跨 store 共享的池，独立构造时退化为 store 内共享。
+    private readonly rowPool: ConversationRowPool = new ConversationRowPool(),
   ) {
     liveProjectionStores.add(this);
     this.offAssemblyFault = transport.onAssemblyFault((fault) => {
@@ -516,6 +526,15 @@ export class ConversationProjectionStore {
     return () => this.listeners.delete(listener);
   }
 
+  /**
+   * 订阅每一帧应用后的增量列表。用途是 live-only 的 `pluginUi.*` 增量（它们不改行、不进快照），
+   * 常规行状态仍以 subscribe + getState 为准。
+   */
+  onLiveDeltas(listener: (deltas: readonly ConversationDelta[]) => void): () => void {
+    this.liveDeltaListeners.add(listener);
+    return () => this.liveDeltaListeners.delete(listener);
+  }
+
   onOnlineModelTransition(listener: (transition: SessionModelTransition) => void): () => void {
     this.modelTransitionListeners.add(listener);
     return () => this.modelTransitionListeners.delete(listener);
@@ -533,6 +552,7 @@ export class ConversationProjectionStore {
   async connect(
     options: {
       forceSnapshot?: boolean;
+      retryInitialization?: string;
       initialOverflowRetry?: boolean;
       rendererPrepareStartedAt?: number;
     } = {},
@@ -567,6 +587,9 @@ export class ConversationProjectionStore {
       const result = await this.transport.subscribe({
         topic: this.topic,
         base: snapshot ? { logEpoch: snapshot.logEpoch, seq: snapshot.seq } : undefined,
+        ...(options.retryInitialization
+          ? { retryInitialization: options.retryInitialization }
+          : {}),
       });
       if (generation !== this.generation || this.closed) {
         // 过期代际：这份订阅已无人消费，立即退订。
@@ -733,7 +756,10 @@ export class ConversationProjectionStore {
   retry(): Promise<void> {
     this.clearRuntimeRecycleRetry();
     this.runtimeRecycleRetryAttempt = 0;
-    return this.connect();
+    const initialization = this.state.snapshot?.runtimeInitialization;
+    return this.connect(
+      initialization?.status === "failed" ? { retryInitialization: initialization.attemptId } : {},
+    );
   }
 
   /** row command/query 的 epoch/entity authority 失效，复用 same-sub recovery 收敛。 */
@@ -976,6 +1002,54 @@ export class ConversationProjectionStore {
     this.reconcileAcceptedInputProjection(next);
     this.observeModelTransition(next, context.online);
     if (context.recovery) this.markRecoveryFrameSeen();
+    for (const listener of this.liveDeltaListeners) listener(frame.payload.deltas);
+  }
+
+  /**
+   * Bug 原因：整份 snapshot 的行全是新反序列化对象，历史 snapshot 被闭包链留住时每份各持
+   * 一套大字符串（同一 inputText 上百份）。这里把值相等的行 / 子值换回池中旧引用。
+   */
+  /** rows/range 补拉的历史行与池中仍存活的旧行共享（冷打开后往上翻时常见）。 */
+  private shareRows(rows: readonly ConversationRow[]): ConversationRow[] {
+    return rows.map((row) => this.rowPool.shareRow(this.topic, row));
+  }
+
+  private shareSnapshotRows(snapshot: ConversationSnapshot): ConversationSnapshot {
+    const window = this.rowPool.shareWindow(
+      this.topic,
+      snapshot.rows.window,
+      this.state.snapshot?.rows.window,
+    );
+    return window === snapshot.rows.window
+      ? snapshot
+      : { ...snapshot, rows: { ...snapshot.rows, window } };
+  }
+
+  /** row.upserted / row.appended 的新行做共享；row.delta 只登记，避免流式逐帧深比较。 */
+  private shareDeltaRows(
+    snapshot: ConversationSnapshot,
+    deltas: readonly ConversationDelta[],
+  ): ConversationSnapshot {
+    const shareIds = new Set<number>();
+    const rememberIds = new Set<number>();
+    for (const delta of deltas) {
+      if (delta.op === "row.upserted" || delta.op === "row.appended") shareIds.add(delta.row.rowId);
+      else if (delta.op === "row.delta") rememberIds.add(delta.rowId);
+    }
+    if (shareIds.size === 0 && rememberIds.size === 0) return snapshot;
+    let window: ConversationRow[] | null = null;
+    snapshot.rows.window.forEach((row, index) => {
+      if (shareIds.has(row.rowId)) {
+        const shared = this.rowPool.shareRow(this.topic, row);
+        if (shared !== row) {
+          window ??= [...snapshot.rows.window];
+          window[index] = shared;
+        }
+      } else if (rememberIds.has(row.rowId)) {
+        this.rowPool.remember(this.topic, row);
+      }
+    });
+    return window === null ? snapshot : { ...snapshot, rows: { ...snapshot.rows, window } };
   }
 
   private observeModelTransition(snapshot: ConversationSnapshot, online: boolean): void {
@@ -1231,7 +1305,7 @@ export class ConversationProjectionStore {
       // 在途期间游标失效（row.removed 截断 / snapshot resync 整体替换）→ 结果作废，
       // 防止把权威侧已移除的历史行复活；下次触发按新窗口重新拉。
       if (current.rows.window[0]?.rowId !== beforeRowId) return;
-      const window = mergeOlderRows(current.rows.window, result.rows);
+      const window = mergeOlderRows(current.rows.window, this.shareRows(result.rows));
       if (window === null) return;
       // window 换了数组 → 行下标全变，必须 rebuild 重建 rowId 索引。
       this.setState({
@@ -1348,7 +1422,7 @@ export class ConversationProjectionStore {
       );
       if (realUserQueryCount < 2) {
         if (preserveIncompleteLeadingTurn) {
-          const window = mergeOlderRows(current.rows.window, olderRows);
+          const window = mergeOlderRows(current.rows.window, this.shareRows(olderRows));
           if (window === null) return stale(initialLogEpoch);
           committed = true;
           this.setState({
@@ -1383,7 +1457,7 @@ export class ConversationProjectionStore {
         this.turnNavigatorHydrationTerminal = result;
         return result;
       }
-      const window = mergeOlderRows(current.rows.window, olderRows);
+      const window = mergeOlderRows(current.rows.window, this.shareRows(olderRows));
       if (window === null) return stale(initialLogEpoch);
       committed = true;
       this.setState({
@@ -1680,7 +1754,7 @@ export class ConversationProjectionStore {
   expectAcceptedInputProjection(commandId: string): void {
     if (this.closed || this.acceptedInputProjectionTimers.has(commandId)) return;
     const command = this.state.optimisticCommands.find((item) => item.commandId === commandId);
-    if (!command || !ACCEPTED_INPUT_COMMAND_TYPES.has(command.type)) return;
+    if (!command || !requiresAcceptedInputProjection(command.type)) return;
     if (hasAcceptedInputProjection(this.state.snapshot, commandId)) {
       this.settleCommand(commandId);
       return;
@@ -1740,7 +1814,7 @@ export class ConversationProjectionStore {
       }
     }
     const remaining = this.state.optimisticCommands.filter((command) =>
-      ACCEPTED_INPUT_COMMAND_TYPES.has(command.type)
+      requiresAcceptedInputProjection(command.type)
         ? !inputProjectionIds.has(command.commandId)
         : !acknowledged.has(command.commandId),
     );

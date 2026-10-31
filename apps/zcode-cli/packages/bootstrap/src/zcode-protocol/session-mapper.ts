@@ -339,7 +339,6 @@ export function mapSessionInfo(input: {
     input.projection?.updatedAt.getTime() ??
     createdAt;
   return {
-    archivedAt: input.session?.time.archived,
     createdAt,
     mode: input.projection?.mode ?? input.app?.getMode?.() ?? "build",
     model: input.app ? optionalModelSelectionFromString(input.app.getModel()) : undefined,
@@ -578,7 +577,7 @@ function mapStreamRecoveryPayload(payload: unknown): Record<string, unknown> {
   };
 }
 
-function mapSessionProjection(projection: SessionProjection): ZCodeSessionProjection {
+export function mapSessionProjection(projection: SessionProjection): ZCodeSessionProjection {
   return {
     activeToolCalls: projection.activeToolCalls.map(mapActiveToolCall),
     backgroundJobs: projection.backgroundTasks.map(mapBackgroundTask),
@@ -875,7 +874,9 @@ function contextCacheUsageFromMessages(
   };
 }
 
-function mapPendingPermission(permission: PendingPermission): ZCodePendingPermission {
+function mapPendingPermission(
+  permission: PendingPermission,
+): ZCodePendingPermission {
   // display / optionsPolicy 刻意不进 legacy v3 输出。
   // 根因不是"扩 schema 只能单向兼容"，而是 strict schema 随 packages/shared 打进每个桌面端
   // 的产物：今天把 zcodePendingPermissionSchema（shared/src/zcode-protocol/index.ts:1139）和
@@ -902,7 +903,9 @@ function mapPendingPermission(permission: PendingPermission): ZCodePendingPermis
   };
 }
 
-function mapPermissionRequestedPayload(payload: unknown): Record<string, unknown> {
+function mapPermissionRequestedPayload(
+  payload: unknown,
+): Record<string, unknown> {
   // 同 mapPendingPermission：这个 payload 是整体 spread 出去的，新字段必须在这里显式解构
   // 剔除，否则会直接漏进 strict 的 zcodePermissionRequestedEventPayloadSchema。
   const { display: _display, optionsPolicy, ...record } = asRecord(payload);
@@ -910,6 +913,7 @@ function mapPermissionRequestedPayload(payload: unknown): Record<string, unknown
   return {
     ...record,
     options: buildProtocolPermissionOptions({
+      approvalMode: record.approvalMode === "user-once" ? "user-once" : undefined,
       input: record.input,
       suggestedPermissionUpdates: Array.isArray(record.suggestedPermissionUpdates)
         ? (record.suggestedPermissionUpdates as PendingPermission["suggestedPermissionUpdates"])

@@ -7,7 +7,9 @@ import { acquireFileLock } from "./atomicFileLock.js";
 const DEFAULT_LOCK_RETRY_DELAYS_MS = [25, 50, 100, 200, 400] as const;
 const DEFAULT_LOCK_OWNERLESS_GRACE_MS = 100;
 const DEFAULT_LOCK_MAX_WAIT_MS = 8_000;
-const DEFAULT_RENAME_RETRY_DELAYS_MS = [50, 100, 200, 400, 800] as const;
+// FORK: Windows 全量测试并行时，杀毒/索引器或并发读者可把 rename 目标占用超过原 5 档
+// 共 ~1.55s（vitest 全量在 todo104-bundled 用例上两轮 EPERM）；补两档至 ~6.4s，语义不变。
+const DEFAULT_RENAME_RETRY_DELAYS_MS = [50, 100, 200, 400, 800, 1600, 3200] as const;
 const processFileLockTails = new Map<string, Promise<void>>();
 
 export interface SharedFileLockOptions {

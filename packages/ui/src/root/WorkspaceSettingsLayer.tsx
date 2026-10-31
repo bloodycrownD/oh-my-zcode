@@ -9,11 +9,13 @@ export function WorkspaceSettingsLayer({
   isDesktop,
   isMacDesktop,
   isWindowsDesktop,
+  isWebRemoteControl,
   windowsWindowControlsRightPaddingPx,
   captionWorkspacePath,
   onBack,
   onCreateTask,
   onOpenWorkspace,
+  onOpenRemoteWorkspace,
   allowOpenWorkspace,
 }: WorkspaceSettingsLayerProps) {
   useEffect(() => {
@@ -31,11 +33,13 @@ export function WorkspaceSettingsLayer({
             isDesktop={isDesktop}
             isMacDesktop={isMacDesktop}
             isWindowsDesktop={isWindowsDesktop}
+            isWebRemoteControl={isWebRemoteControl}
             windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
             captionWorkspacePath={captionWorkspacePath}
             onBack={onBack}
             onCreateTask={onCreateTask}
             onOpenWorkspace={onOpenWorkspace}
+            onOpenRemoteWorkspace={onOpenRemoteWorkspace}
             allowOpenWorkspace={allowOpenWorkspace}
           />
         </ServiceProvider>
@@ -44,11 +48,13 @@ export function WorkspaceSettingsLayer({
           isDesktop={isDesktop}
           isMacDesktop={isMacDesktop}
           isWindowsDesktop={isWindowsDesktop}
+          isWebRemoteControl={isWebRemoteControl}
           windowsWindowControlsRightPaddingPx={windowsWindowControlsRightPaddingPx}
           captionWorkspacePath={captionWorkspacePath}
           onBack={onBack}
           onCreateTask={onCreateTask}
           onOpenWorkspace={onOpenWorkspace}
+          onOpenRemoteWorkspace={onOpenRemoteWorkspace}
           allowOpenWorkspace={allowOpenWorkspace}
         />
       )}

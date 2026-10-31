@@ -131,7 +131,8 @@ const DOCSHOT_ARCHIVE_PATHS = ["docshot-assets"] as const;
 const NON_LOG_STATE_ARCHIVE_PATHS = [
   "agent-config",
   "certs",
-  "repo",
+  "repo-snapshots",
+  "repo-wiki",
   "sessions",
   "session-bindings",
   "checkpoints",
@@ -692,8 +693,10 @@ function isDocshotArchivePath(relativePath: string): boolean {
 
 function isNonLogStateArchivePath(relativePath: string): boolean {
   const normalizedRelativePath = normalizeArchivePath(relativePath);
-  return NON_LOG_STATE_ARCHIVE_PATHS.some((archivePath) =>
-    normalizedRelativePath.startsWith(archivePath),
+  return NON_LOG_STATE_ARCHIVE_PATHS.some(
+    (archivePath) =>
+      normalizedRelativePath === archivePath ||
+      normalizedRelativePath.startsWith(`${archivePath}/`),
   );
 }
 
@@ -931,7 +934,7 @@ async function collectLogArchiveFile(
   files.push({ absolutePath, archivePath });
 }
 
-async function collectLogArchiveFiles(sourceDir: string): Promise<LogArchiveFileEntry[]> {
+export async function collectLogArchiveFiles(sourceDir: string): Promise<LogArchiveFileEntry[]> {
   const files: LogArchiveFileEntry[] = [];
   const visitedDirs = new Set<string>();
   await collectLogArchiveFilesFromDirectory(sourceDir, "", visitedDirs, files);
@@ -939,7 +942,7 @@ async function collectLogArchiveFiles(sourceDir: string): Promise<LogArchiveFile
   return files;
 }
 
-async function createLogArchiveArtifacts(
+export async function createLogArchiveArtifacts(
   sourceDir: string,
   options: CreateLogArchiveArtifactsOptions = {},
 ): Promise<LogArchiveArtifacts> {
@@ -1081,7 +1084,7 @@ function logSkippedLogArchiveFiles(skippedFiles: LogArchiveSkippedFileEntry[]): 
   });
 }
 
-async function writeLogArchiveZip(
+export async function writeLogArchiveZip(
   outputPath: string,
   artifacts: LogArchiveArtifacts,
   options: WriteLogArchiveZipOptions = {},
@@ -1114,7 +1117,7 @@ async function writeLogArchiveZip(
   }
 }
 
-async function writeLogArchiveDirectory(
+export async function writeLogArchiveDirectory(
   outputPath: string,
   artifacts: LogArchiveArtifacts,
 ): Promise<void> {
@@ -1125,6 +1128,8 @@ async function writeLogArchiveDirectory(
   await writeFile(join(outputPath, "about.txt"), artifacts.aboutContent, "utf-8");
 }
 
+// FORK（规则 4）：上游新增的 createFeedbackLogArchiveFromExportLogs 服务于官方反馈上报链路
+// （feedback diagnostic archive），fork 已移除官方账号/反馈上报，这里不吸收该导出。
 export async function exportLogs(
   dependencies: ExportLogsDependencies = {},
 ): Promise<{ success: boolean; path?: string; error?: string }> {

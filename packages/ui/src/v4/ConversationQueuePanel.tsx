@@ -1,3 +1,7 @@
+import { BotChannelMessageContent } from "@/v4/ChannelMentionContent.js";
+import { parsePromptConversationSelections } from "@/lib/conversationSelectionReference.js";
+import { ConversationSelectionReferenceChip } from "@/v4/composer/ConversationSelectionReferenceChip.js";
+import { BotGroupSourceLabel } from "@/v4/BotGroupSourceLabel.js";
 import {
   closestCenter,
   DndContext,
@@ -9,14 +13,19 @@ import {
 } from "@dnd-kit/core";
 import { SortableContext, verticalListSortingStrategy } from "@dnd-kit/sortable";
 import { memo, useCallback, useMemo, useState } from "react";
-import { TID_V4_QUEUE, TID_V4_QUEUE_PAUSED_BANNER, TID_V4_QUEUE_RESUME } from "@zcode/shared";
+// 合并后的 @zcode/shared 顶层未再 re-export test-ids.ts，测试 id 统一走子路径。
+import {
+  TID_V4_QUEUE,
+  TID_V4_QUEUE_PAUSED_BANNER,
+  TID_V4_QUEUE_RESUME,
+} from "@zcode/shared/test-ids";
 import type { QueueState } from "@zcode/shared/zcode-protocol-v4";
 import { Button } from "@/components/ui/button.js";
 import { cn } from "@/components/lib/utils.js";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { QueueRow, type QueueItem } from "@/v4/ConversationQueueRow.js";
 
-interface ConversationQueuePanelProps {
+export interface ConversationQueuePanelProps {
   queue: QueueState;
   /** 删除队列项（deleteQueueItem command）。 */
   onDeleteItem?: (queueItemId: string) => void;
@@ -44,7 +53,7 @@ interface V4QueueReorderAnchor {
   queueItemId: string;
 }
 
-function resolveV4QueueReorderAnchor(
+export function resolveV4QueueReorderAnchor(
   items: readonly QueueItem[],
   activeQueueItemId: string,
   overQueueItemId: string,

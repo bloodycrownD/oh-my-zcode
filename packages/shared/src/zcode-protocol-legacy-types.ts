@@ -14,11 +14,13 @@ const timestampMsSchema = z.number().int().nonnegative();
 export const zcodeDeliveryKindSchema = z.enum(["desktop-continuous", "web-remote-replayable"]);
 export const zcodeMessageVisibilitySchema = z.enum(["user-visible", "model-only"]);
 export const zcodeSyntheticUserMessageSourceSchema = z.enum([
+  "agent_listing_delta",
   "background_task",
   "fork",
   "goal_state_change",
   "goal-continuation",
   "plugin_reference",
+  "bot_topic_context",
   "rewind",
   "selection_side_chat",
   "subagent",
@@ -71,7 +73,7 @@ export const zcodePermissionResponseSchema = z
   })
   .strict();
 export type ZCodePermissionResponse = z.infer<typeof zcodePermissionResponseSchema>;
-export const zcodeSessionModeSchema = z.enum(["plan", "build", "edit", "yolo", "auto"]);
+export const zcodeSessionModeSchema = z.enum(["plan", "build", "edit", "yolo", "guarded", "auto"]);
 export const zcodeSessionStatusSchema = z.enum([
   "idle",
   "running",
@@ -89,6 +91,17 @@ export const zcodeSessionKindSchema = z.enum([
   "subagent_child",
   "nested_workflow_child",
 ]);
+// 修复原因：只识别 subagent_child 会漏掉工作流与辅助对话的父归属、隐藏索引规则。
+// fork 和 workflow_parent 是独立任务，即使有 parentSessionId 也不能沿父链改写项目。
+export function isAuxiliarySessionKind(kind: string | undefined): boolean {
+  return isReadonlyAgentSessionKind(kind) || kind === "selection_side_chat";
+}
+
+// 辅助对话可继续输入；只有由 Agent / 工作流驱动的子会话对用户只读。
+export function isReadonlyAgentSessionKind(kind: string | undefined): boolean {
+  return kind === "subagent_child" || kind === "workflow_child" || kind === "nested_workflow_child";
+}
+
 export const zcodeSessionGoalSchema = z
   .object({
     sessionId: nonEmptyString,
@@ -147,7 +160,6 @@ export const zcodeSessionInfoSchema = z
     target: zcodeSessionGoalSchema.nullable().optional(),
     createdAt: timestampMsSchema,
     updatedAt: timestampMsSchema,
-    archivedAt: timestampMsSchema.optional(),
   })
   .strict();
 export type ZCodeSessionInfo = z.infer<typeof zcodeSessionInfoSchema>;
@@ -310,7 +322,14 @@ const zcodeTimelinePartTimeSchema = z
 export const zcodeTimelinePartSchema = partBaseSchema
   .extend({
     type: z.literal("timeline"),
-    timelineType: z.enum(["goal_verification", "session_fork", "model_change"]),
+    // FORK (upgrade-316): 上游 v3.16.2 的 context compaction 时间线在 timelineType 上新增
+    // context_compaction；解冲突时丢失，按上游 MERGE_HEAD(3c5b2276) 恢复该字面量。
+    timelineType: z.enum([
+      "context_compaction",
+      "goal_verification",
+      "session_fork",
+      "model_change",
+    ]),
     display: z.enum(["separator", "worklog"]),
     status: z.string().optional(),
     anchorMessageId: nonEmptyString.optional(),
@@ -396,6 +415,18 @@ export const zcodeMessagePartSchema = z.discriminatedUnion("type", [
       type: z.literal("patch"),
       hash: nonEmptyString,
       files: z.array(z.string()),
+    })
+    .strict(),
+  // FORK (upgrade-316): 上游 v3.16.2 的 context compaction 协议新增了 compaction part；
+  // 解冲突时整块丢失，导致 zcodeSessionProjection 对 part.type === "compaction" 的
+  // 分支被收窄成 never。这里按上游 MERGE_HEAD(3c5b2276) 原样恢复。
+  partBaseSchema
+    .extend({
+      type: z.literal("compaction"),
+      auto: z.boolean(),
+      reason: z.string().optional(),
+      summaryMessageId: nonEmptyString.optional(),
+      metadata: jsonObjectSchema.optional(),
     })
     .strict(),
   zcodeTimelinePartSchema,

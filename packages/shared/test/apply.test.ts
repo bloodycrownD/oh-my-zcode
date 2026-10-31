@@ -227,6 +227,13 @@ const PATCH_BUILDERS: Record<string, (random: () => number, index: number) => un
     pauseReason: index % 3 === 0 ? "stopped" : undefined,
   }),
   pendingInteractions: () => [],
+  // FORK(upgrade-316)：上游 v3.16 给 statePatchSchema 新增 runtimeInitialization
+  // （snapshot.ts:545 的 discriminatedUnion：initializing/ready/failed），
+  // G-3 键集合守卫随之要求夹具覆盖它。
+  runtimeInitialization: (random, index) =>
+    index % 3 === 0
+      ? { status: "failed" as const, attemptId: `init-${index}`, reasonCode: "runtime-init-error", message: `初始化失败 ${index}` }
+      : { status: (index % 2 === 0 ? "initializing" : "ready") as "initializing" | "ready", attemptId: `init-${index}` },
   pendingCommands: (random, index) => [
     {
       commandId: `cmd-${index}`,

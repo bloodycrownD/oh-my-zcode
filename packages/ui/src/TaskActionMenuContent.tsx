@@ -1,5 +1,3 @@
-import { TID_V4_TASK_OPEN_IN_SPLIT } from "@zcode/shared";
-
 interface TaskActionMenuItemProps {
   children: React.ReactNode;
   "data-testid"?: string;
@@ -15,10 +13,12 @@ interface TaskActionMenuSeparatorProps {
 export function TaskActionMenuContent({
   intl,
   isPinned,
+  isArchived = false,
   fileManagerLabel,
   taskSessionFile,
   activeSessionId,
   taskNativeSessionLogFile,
+  providerConfigFile,
   disableTaskActions = false,
   disableTaskTargetActions = false,
   disablePinTaskAction = false,
@@ -38,11 +38,13 @@ export function TaskActionMenuContent({
   onCopyTaskLogPath,
   onCopySessionId,
   onViewModelTrajectory,
+  onOpenProviderConfig,
 }: {
   intl: {
     formatMessage: (desc: { id: string }, values?: Record<string, string>) => string;
   };
   isPinned: boolean;
+  isArchived?: boolean;
   fileManagerLabel: string;
   taskSessionFile: { loading: boolean; path: string | null; exists: boolean };
   activeSessionId?: string | null;
@@ -51,6 +53,7 @@ export function TaskActionMenuContent({
     path: string | null;
     exists: boolean;
   };
+  providerConfigFile: { loading: boolean; path: string | null; exists: boolean };
   disableTaskActions?: boolean;
   disableTaskTargetActions?: boolean;
   disablePinTaskAction?: boolean;
@@ -72,6 +75,7 @@ export function TaskActionMenuContent({
   onCopyTaskLogPath: () => void;
   onCopySessionId?: () => void;
   onViewModelTrajectory?: () => void;
+  onOpenProviderConfig: () => void;
 }) {
   const taskTargetActionsDisabled = disableTaskActions || disableTaskTargetActions;
 
@@ -108,7 +112,7 @@ export function TaskActionMenuContent({
           }
         }}
       >
-        {intl.formatMessage({ id: "taskList.archive" })}
+        {intl.formatMessage({ id: isArchived ? "taskList.unarchive" : "taskList.archive" })}
       </Item>
       <Item
         disabled={taskTargetActionsDisabled}
@@ -123,7 +127,9 @@ export function TaskActionMenuContent({
       </Item>
       {onOpenInSplitPane ? (
         <Item
-          data-testid={TID_V4_TASK_OPEN_IN_SPLIT}
+          // TODO(upgrade-316): 合并后的 @zcode/shared test-ids 缺少 fork 的 TID_V4_TASK_OPEN_IN_SPLIT 常量，
+          // 这里先写字面量保住 E2E 选择器；补齐常量后改回 testId(TID_V4_TASK_OPEN_IN_SPLIT)。
+          data-testid="v4-task-open-in-split"
           disabled={taskTargetActionsDisabled || openInSplitPaneDisabled}
           onSelect={onOpenInSplitPane}
         >
@@ -167,7 +173,7 @@ export function TaskActionMenuContent({
         title={taskTargetActionsDisabled ? disabledReason : undefined}
         onSelect={onCopyTaskLogPath}
       >
-        {/* ZCode Agent 的日志路径可能先按运行时约定得出，当前日期文件尚未落盘。
+        {/* Bugfix: ZCode Agent 的日志路径可能先按运行时约定得出，当前日期文件尚未落盘。
             复制动作只依赖路径字符串，不能把 exists=false 当成不可复制，否则菜单会表现成“不能点”。 */}
         {intl.formatMessage({ id: "appHeader.copyLogPath" })}
       </Item>
@@ -178,6 +184,23 @@ export function TaskActionMenuContent({
           onSelect={onCopySessionId}
         >
           {intl.formatMessage({ id: "appHeader.copySessionId" })}
+        </Item>
+      ) : null}
+      {!hideMobileUnsupportedActions ? (
+        /* Bugfix: 手机远控运行在浏览器里，无法可靠打开桌面端 provider 配置文件。
+           这里只在远控移动端隐藏入口，桌面端仍沿用“路径已知即可前往配置”的能力。 */
+        <Item
+          disabled={disableTaskActions || providerConfigFile.loading || !providerConfigFile.path}
+          title={disableTaskActions ? disabledReason : undefined}
+          onSelect={() => {
+            if (!disableTaskActions) {
+              onOpenProviderConfig();
+            }
+          }}
+        >
+          <span className="truncate">
+            {intl.formatMessage({ id: "appHeader.goToProviderConfig" })}
+          </span>
         </Item>
       ) : null}
       {onViewModelTrajectory ? (

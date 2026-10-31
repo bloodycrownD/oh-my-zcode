@@ -289,6 +289,9 @@ const EXPECTED_REQUIRE_RUNTIME = [
   "setAssistantFeedback",
   "setAutoDrain",
   "setFollowupMode",
+  // 上游 v3.16.2 新增：handler 经 requireRecord 取 session，但不启动/分叉任何一轮，
+  // 因此是默认档（require-runtime），不是激活触发器。
+  "setHighspeedMetrics",
   "setQueueItemDelivery",
   "stop",
   "switchCollaborationMode",
@@ -1780,18 +1783,23 @@ test("L3: 未知态显示成空态——不把「runtime 才知道」的字段�
   );
   // 关键在「初始化分支」里：那里过去无条件写 `resolveExecutionState(sessionConfig).planEnabled`
   // （= 缺席落 false）。补齐块也带同一个判断，所以必须单独锁初始化分支。
+  // FORK(upgrade-316)：上游 3.16 重写为 `const currentMode = ...`，初始化守卫的实际
+  // 形态是 `sessionRuntime !== "live" && typeof sessionConfig.planEnabled !== "boolean"`
+  // （非 live 且缺席 → 整个 planEnabled 键不写），锚点随之重定位。
   const initAt = draftConfigControlSource.indexOf(
-    'mode: mode.success && mode.data !== "plan" ? mode.data : "build"',
+    'const currentMode = mode.success && mode.data !== "plan" ? mode.data : "build"',
   );
   assert.ok(initAt > 0, "初始化分支必须存在");
+  const initWindowEnd = draftConfigControlSource.indexOf(
+    "modelSelection: draft.mode ? draft.modelSelection : sessionConfig.modelSelection",
+    initAt,
+  );
+  assert.ok(initWindowEnd > initAt, "初始化分支终点锚必须存在");
   assert.ok(
-    draftConfigControlSource
-      .slice(
-        initAt,
-        draftConfigControlSource.indexOf("modelSelection: sessionConfig?.modelSelection", initAt),
-      )
-      .includes('typeof sessionConfig?.planEnabled === "boolean"'),
-    "初始化分支不得把缺席的 planEnabled 写成 false",
+    draftConfigControlSource.slice(initAt, initWindowEnd).includes(
+      'sessionRuntime !== "live" && typeof sessionConfig.planEnabled !== "boolean"',
+    ),
+    "初始化分支不得把缺席的 planEnabled 写成 false（view-only 期缺席即不写该键）",
   );
   assert.ok(
     draftConfigControlSource.includes('sessionRuntime === "live"') &&

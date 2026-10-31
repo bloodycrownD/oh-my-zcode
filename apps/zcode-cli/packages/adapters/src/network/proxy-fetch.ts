@@ -65,7 +65,12 @@ export function createNetworkProxyFetch(options: NetworkProxyFetchOptions): Netw
 }
 
 function hasNetworkFetchPolicy(options: NetworkProxyFetchOptions): boolean {
-  return Boolean(options.caCertFile || options.env || options.httpProxy || options.noProxy);
+  return Boolean(
+    options.caCertFile ||
+      options.env ||
+      options.httpProxy ||
+      options.noProxy,
+  );
 }
 
 function readFetchInputUrl(input: Parameters<NetworkFetch>[0]): URL | undefined {

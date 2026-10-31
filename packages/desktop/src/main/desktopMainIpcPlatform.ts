@@ -1,8 +1,8 @@
+import { decorateRequestSecurityLogArgs } from "./request-security-edition/index.js";
 /* eslint-disable max-lines -- 桌面平台 IPC 集中装配，拆散会让权限边界更难审计；行数随平台能力增长。 */
 import { BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
 import { readZCodeStdioTapDevState } from "@zcode/services/node";
 import {
-  DesktopCommandIds,
   appSettingsPatchSchema,
   formatZodError,
   localeSchema,
@@ -10,6 +10,7 @@ import {
   PlatformChannels,
   rendererLogPayloadSchema,
   stringArraySchema,
+  webRemoteControlWorkspaceTargetsSchema,
   type DesktopCommandId,
   type ApplicationIconRequest,
   type Locale,
@@ -18,6 +19,8 @@ import {
   type OpenInEditorOptions,
   type SaveCliMcpToUserDirectoryRequest,
   type CreateTempTextAttachmentRequest,
+  type MaterializeWorkflowArtifactFileRequest,
+  type WebRemoteControlWorkspaceTarget,
   type WindowControlsOverlayReadyPayload,
 } from "@zcode/shared";
 import { getInstalledEditors } from "./editors.js";
@@ -30,6 +33,7 @@ import {
   setResourceUsageSamplingActive,
 } from "./resourceManagerWindow.js";
 import { registerResourceManagerStorageIpc } from "./resourceManagerStorage.js";
+import { registerResourceManagerNetworkIpc } from "./resourceManagerNetwork.js";
 import { applyWindowsTitleBarTheme, getWindowOverlayTheme } from "./desktopWindowChrome.js";
 import { syncWindowControlsOverlayForZoomLevel } from "./desktopWindowButtonPosition.js";
 import { resolveDesktopZoomLevelFromFactor } from "./desktopZoom.js";
@@ -50,8 +54,10 @@ import {
   saveCliMcpToUserDirectory,
 } from "./mcpUserDirectory/index.js";
 import { createTempTextAttachment } from "./tempTextAttachment.js";
+import { materializeWorkflowArtifactFile } from "./workflowArtifactFile.js";
 import { registerDesktopSaveFileIpcHandler } from "./desktopSaveFile.js";
 import { registerDesktopPrintToPdfIpcHandler } from "./desktopPrintToPdf.js";
+import { registerDesktopCommandIpcHandler } from "./desktopCommandIpc.js";
 import { registerCuaPipActiveSessionIpc } from "./desktopCuaPipIpc.js";
 
 export function registerPlatformIpcHandlers(options: {
@@ -74,11 +80,18 @@ export function registerPlatformIpcHandlers(options: {
   ) => Promise<unknown>;
   syncActiveTaskSession: (windowId: number, sessionId: string | null) => void;
   syncTaskRealtimeWorkspaceKeys: (windowId: number, workspaceKeys: Iterable<string>) => void;
+  // fork 移除了自动更新链路（autoUpdater / update status window），不再暴露更新相关 IPC 依赖。
+  syncWebRemoteControlWorkspaces: (
+    windowId: number,
+    workspaces: WebRemoteControlWorkspaceTarget[],
+  ) => void;
   getDesktopSessionActivity: () => {
     runningAgentSessionCount: number;
   };
-  syncAppSettings: (patch: unknown) => void;
-  /** 快捷键设置页录制态开关：true 时 main 重建菜单摘除可配置 accelerator */
+  syncAppSettings: (patch: ReturnType<typeof appSettingsPatchSchema.parse>) => void;
+  /** 关闭驻留托盘能力查询（spec：docs/desktop/linux-close-to-tray.md）；传入 monitor 的 refresh */
+  refreshCloseToTrayCapability: () => Promise<import("@zcode/shared").DesktopCloseToTrayCapability>;
+  /** 快捷键设置页录制态开关：true 时 main 重建菜单摘除可配置 accelerator（见 shortcut-settings-spec §7） */
   setShortcutRecordingActive?: (active: boolean, ownerWebContentsId?: number | null) => void;
   /** 桌面端设备标识符（基于 userData 路径的 SHA-256） */
   deviceMid: string;
@@ -99,6 +112,13 @@ export function registerPlatformIpcHandlers(options: {
       return null;
     }
     return result.filePaths[0];
+  });
+
+  ipcMain.handle(PlatformChannels.SelectDirectories, async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory", "createDirectory", "multiSelections"],
+    });
+    return result.canceled ? [] : result.filePaths;
   });
 
   ipcMain.handle(PlatformChannels.SelectFile, async () => {
@@ -128,6 +148,13 @@ export function registerPlatformIpcHandlers(options: {
     PlatformChannels.CreateTempTextAttachment,
     async (_event, payload: CreateTempTextAttachmentRequest) => {
       return createTempTextAttachment(payload);
+    },
+  );
+
+  ipcMain.handle(
+    PlatformChannels.MaterializeWorkflowArtifactFile,
+    async (_event, payload: MaterializeWorkflowArtifactFileRequest) => {
+      return materializeWorkflowArtifactFile(payload);
     },
   );
 
@@ -165,10 +192,15 @@ export function registerPlatformIpcHandlers(options: {
   ipcMain.handle(PlatformChannels.GetResourceUsageSnapshot, (event) =>
     getResourceUsageSnapshot(event.sender.id),
   );
+  // 设置页 Linux 置灰判断入口；monitor 带 stale 缓存，用户装完扩展重开设置页即可解除置灰。
+  ipcMain.handle(PlatformChannels.GetCloseToTrayCapability, () =>
+    options.refreshCloseToTrayCapability(),
+  );
   ipcMain.on(PlatformChannels.SetResourceUsageSamplingActive, (event, active: unknown) => {
     if (typeof active === "boolean") setResourceUsageSamplingActive(event.sender.id, active);
   });
   registerResourceManagerStorageIpc();
+  registerResourceManagerNetworkIpc();
   ipcMain.handle(PlatformChannels.GetZCodeStdioTapDevState, () => readZCodeStdioTapDevState());
   ipcMain.on(PlatformChannels.OpenResourceManager, () => {
     openResourceManager();
@@ -239,7 +271,26 @@ export function registerPlatformIpcHandlers(options: {
     if (win) {
       options.windowWorkspaceMap.set(win.id, new Set(result.data));
       options.syncTaskRealtimeWorkspaceKeys(win.id, result.data);
+      // 远控恢复统一由 SyncWebRemoteControlWorkspaces 的完整快照驱动。
     }
+  });
+
+  ipcMain.on(PlatformChannels.SyncWebRemoteControlWorkspaces, (event, payload: unknown) => {
+    const result = webRemoteControlWorkspaceTargetsSchema.safeParse(payload);
+    if (!result.success) {
+      options.logger.warn(
+        "[sync-web-remote-control-workspaces] invalid payload:",
+        formatZodError(result.error),
+      );
+      return;
+    }
+
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win) {
+      return;
+    }
+
+    options.syncWebRemoteControlWorkspaces(win.id, result.data);
   });
 
   ipcMain.on(PlatformChannels.SyncWindowUnreadCount, (event, payload: unknown) => {
@@ -292,7 +343,7 @@ export function registerPlatformIpcHandlers(options: {
     options.setShortcutRecordingActive?.(payload, event.sender.id);
   });
 
-  ipcMain.on(PlatformChannels.Log, (_event, payload: unknown) => {
+  ipcMain.on(PlatformChannels.Log, (event, payload: unknown) => {
     const result = rendererLogPayloadSchema.safeParse(payload);
     if (!result.success) {
       options.logger.warn("[renderer-log] invalid payload:", formatZodError(result.error));
@@ -300,7 +351,10 @@ export function registerPlatformIpcHandlers(options: {
     }
     (
       options.logger as unknown as { fromRenderer(level: string, args: unknown[]): void }
-    ).fromRenderer?.(result.data.level, result.data.args);
+    ).fromRenderer?.(
+      result.data.level,
+      decorateRequestSecurityLogArgs(result.data.args, event.sender.id),
+    );
   });
 
   ipcMain.handle(PlatformChannels.OpenInFileManager, async (_event, rawPath: string) =>
@@ -329,7 +383,9 @@ export function registerPlatformIpcHandlers(options: {
     const senderWindow = BrowserWindow.fromWebContents(event.sender);
     return resolveDesktopWindowChromeState(senderWindow?.isMaximized() ?? false);
   });
-  ipcMain.handle(PlatformChannels.GetInstalledEditors, () => getInstalledEditors());
+  ipcMain.handle(PlatformChannels.GetInstalledEditors, (_event, filePath?: string) =>
+    getInstalledEditors(typeof filePath === "string" ? filePath : undefined),
+  );
   ipcMain.handle(
     PlatformChannels.GetApplicationIcon,
     (_event, request: string | ApplicationIconRequest) => getApplicationIcon(request),
@@ -346,15 +402,8 @@ export function registerPlatformIpcHandlers(options: {
       openInEditor(payload.editorId, payload.path, payload.options),
   );
 
-  ipcMain.handle(PlatformChannels.ExecuteDesktopCommand, async (event, command: string) => {
-    const senderWindow = BrowserWindow.fromWebContents(event.sender);
-    const isKnownCommand = (Object.values(DesktopCommandIds) as string[]).includes(command);
-    if (!isKnownCommand) {
-      options.logger.warn("[desktop-command] invalid command:", command);
-      return;
-    }
-
-    // 返回值直通 renderer 的 executeDesktopCommand promise（GetCuaOsSupport 依赖此行为）。
-    return await options.executeDesktopCommand(command as DesktopCommandId, senderWindow);
+  registerDesktopCommandIpcHandler({
+    executeDesktopCommand: options.executeDesktopCommand,
+    logger: options.logger,
   });
 }

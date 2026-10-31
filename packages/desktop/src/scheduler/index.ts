@@ -169,6 +169,9 @@ function postDispatchRequest(
       : {}),
     ...(automation.mode ? { mode: automation.mode } : {}),
     workspacePath: automation.workspacePath,
+    projectId: automation.projectId,
+    hostId: automation.hostId,
+    additionalDirectories: automation.additionalDirectories,
     ...(automation.workspaceIdentity ? { workspaceIdentity: automation.workspaceIdentity } : {}),
   };
   parentPort?.postMessage(request);
@@ -189,6 +192,8 @@ async function handleClaimedManual(
   postDispatchRequest(automation, run.runId, run.modelSelection);
 }
 
+// FORK（规则 4）：上游把闲时任务（off-peak，官方计费档位）的认领/派发/活跃计数全部搬进了
+// scheduler；fork 已移除官方计费与 off-peak 调度，这里不吸收对应认领与派发逻辑。
 async function settleDispatchResult(
   msg: Extract<MainToSchedulerMessage, { type: "cron-dispatch-result" }>,
 ): Promise<void> {

@@ -2,7 +2,7 @@ import { BUILTIN_ZCODE_SLASH_COMMAND_HELP_ENTRIES, type ZCodeSlashCommand } from
 
 /**
  * App `/` 面板与加号菜单按本顺序展示（UI 不维护排序白名单）。`workflow` 紧随 `goal`：两者都是
- * 「开启一段工作」的入口；它受动态工作流开关约束，
+ * 「开启一段工作」的入口（docs/ui/chat-composer-action-menu.md「工作流入口」）；它受灰度门约束，
  * 由 zcode-protocol/slash-commands.ts 在装配时剔除。
  *
  * `ctx-*` 四条排在 `init` 之后：它们是 magic-context 的上下文控制面，靠后免得挤在
@@ -46,6 +46,9 @@ export const APP_PROTOCOL_APP_ONLY_BUILTIN_SLASH_COMMANDS = [
  *
  * 保留名单与「可见目录」是两份互不干涉的清单：删掉这份名单不会让命令重新出现在 `/`
  * 面板，但会让自定义命令重新抢名。
+ *
+ * 上游 v3.16.2 在可见目录里加了 `compact`、在保留名单里加了 `compress`——两者都属于 fork
+ * 已整体移除的原生上下文压缩（现由 magic-context 接管），因此不吸收。
  */
 const MAGIC_CONTEXT_LOCAL_SLASH_COMMAND_NAMES = [
   "ctx-status",
@@ -67,7 +70,7 @@ const RESERVED_SLASH_COMMAND_NAMES = new Set(
   ]).concat([...EXTRA_RESERVED_SLASH_COMMAND_NAMES]),
 );
 
-function normalizeZCodeSlashCommandName(name: string): string {
+export function normalizeZCodeSlashCommandName(name: string): string {
   return name.trim().replace(/^\/+/, "").toLowerCase();
 }
 

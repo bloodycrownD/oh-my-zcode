@@ -9,6 +9,8 @@ interface AppUsageStatsState {
   error: string | null;
 }
 
+// TODO(upgrade-316): 上游 3.16 新增的 CodingPlanUsageSnapshot 缓存与
+// shouldRefreshCodingPlanUsageOnAccess 属订阅计费面，fork 已整删（见下方 D-4 注释）。
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message || error.name || String(error);

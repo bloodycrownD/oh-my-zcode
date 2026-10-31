@@ -19,6 +19,8 @@ export function generateId(): string {
 }
 
 export const PRESET_SUBSCRIPTION_TIMEOUT_MS = 2 * 60 * 1000;
+// fork 已整体移除官方账号登录 / Coding Plan 购买入口，故不吸收上游的
+// BIGMODEL_REGISTRATION_URL（无消费方）。
 const BIGMODEL_CODING_PLAN_PERSONAL_MANAGE_URL = buildBigModelCodingPlanPersonalManageUrl({
   ZCODE_ENV,
 });

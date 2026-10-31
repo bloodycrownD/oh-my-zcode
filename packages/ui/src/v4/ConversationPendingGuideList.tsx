@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import type { QueueItem, UserInputRow } from "@zcode/shared/zcode-protocol-v4";
-import { TID_V4_QUEUE_ITEM_UNQUEUE_GUIDE, testId } from "@zcode/shared";
+// 合并后的 @zcode/shared 顶层未再 re-export test-ids.ts，测试 id 统一走子路径。
+import { TID_V4_QUEUE_ITEM_UNQUEUE_GUIDE, testId } from "@zcode/shared/test-ids";
 import { Waypoints } from "lucide-react";
 import { useZCodeIntl } from "@/i18n/IntlProvider.js";
 import { Button } from "@/components/ui/button.js";

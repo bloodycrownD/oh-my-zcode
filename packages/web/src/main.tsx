@@ -5,21 +5,46 @@ import {
   Root,
   ZCodeIntlProvider,
   generateMobileDeviceFingerprint,
+  installDocumentHiddenMotionPause,
   playTaskNotificationSound,
   setStreamClientId,
-  type Theme,
 } from "@zcode/ui";
 import "@zcode/ui/styles.css";
 import { connectViaWebSocket } from "@zcode/client";
-import type { IPlatformService, RemoteTarget, ServerRemoteInfo } from "@zcode/shared";
-import { WEB_DEFAULT_THEME, resolveWebInitialTheme } from "./webThemeSeed.js";
+import {
+  isWebRemoteControlThemeSeed,
+  type IPlatformService,
+  type RemoteTarget,
+  type ServerRemoteInfo,
+  type WebRemoteControlStatus,
+  type WebRemoteControlThemeSeed,
+} from "@zcode/shared";
+import {
+  assembleWebRemoteControlRuntime,
+  isWebRemoteControlRoute,
+} from "#src/entry/webRemoteControlRuntime.js";
+import { resolveWebRemoteControlScreenLocale } from "#src/web-remote-control/views.js";
+
+// 测试与断连首页直接消费 home-only 服务面；入口保持唯一 re-export 点，避免调用方深入 entry 内部模块。
+export { createHomeOnlyWebRemoteControlServices } from "#src/entry/homeOnlyWebRemoteControlServices.js";
 
 // Web 标签标题的品牌名单一常量：静态 index.html title 与两条 bootstrap 路径的运行时重写共用，防止漂移。
 const OMZ_WEB_BRAND_NAME = "omz";
 
-function resolveWebThemePreference(defaultTheme: Theme = WEB_DEFAULT_THEME): Theme {
-  const saved = localStorage.getItem("zcode-theme");
-  return resolveWebInitialTheme({ storedTheme: saved, defaultTheme });
+/** Web 端默认主题；与桌面/远控首屏一致，缺省走 Zai dark。 */
+const WEB_DEFAULT_THEME: WebRemoteControlThemeSeed = "zai-dark";
+
+function normalizeWebThemeSeed(theme: WebRemoteControlThemeSeed): WebRemoteControlThemeSeed {
+  if (theme === "dark") return "zai-dark";
+  if (theme === "light") return "zai-light";
+  return theme;
+}
+
+function resolveWebThemePreference(
+  defaultTheme: WebRemoteControlThemeSeed = WEB_DEFAULT_THEME,
+): WebRemoteControlThemeSeed {
+  const stored = localStorage.getItem("zcode-theme");
+  return normalizeWebThemeSeed(isWebRemoteControlThemeSeed(stored) ? stored : defaultTheme);
 }
 
 // 初始化主题：默认 Zai dark，后续由 useTheme hook 接管
@@ -49,12 +74,22 @@ function resolveWebThemePreference(defaultTheme: Theme = WEB_DEFAULT_THEME): The
   document.documentElement.classList.toggle("theme-zai-dark", appliedTheme === "zai-dark");
 }
 
+// 浏览器标签页 / 手机切后台时禁用 CSS 动画，避免 DocumentTimeline 持有已卸载的 DOM 子树。
+installDocumentHiddenMotionPause();
+
 const root = createRoot(document.getElementById("root")!);
 
 // 初始化 Web 端流式 clientId，确保所有 hook 在首次渲染前就使用稳定 ID
 {
   setStreamClientId(generateMobileDeviceFingerprint());
 }
+
+// Web 远控入口运行时：external relay bootstrap、版本护栏与 home-only Root 装配都在其中；
+// 这里只注入唯一 React Root 与 Web 平台服务，远控页面与普通 Web 模式共用挂载点。
+const webRemoteControlRuntime = assembleWebRemoteControlRuntime({
+  renderRoot: (node) => root.render(node),
+  createPlatform: createWebPlatform,
+});
 
 interface WebBootstrapResult {
   wsUrl: string;
@@ -78,7 +113,6 @@ function createWebPlatform(): IPlatformService {
       Promise.reject(new Error("Temporary text attachments require a desktop host")),
     onRemoteConnectionLog: () => () => {},
     onRemoteSessionClosed: () => () => {},
-    onBotRemoteWorkspaceReconnected: () => () => {},
     // Web 端无多窗口管理
     activateOrSetWorkspace: () => Promise.resolve({ activated: false }),
     // TODO(web-remote-workspace): 普通 Web 模式先只保证 server 本地工作区可用。
@@ -91,6 +125,11 @@ function createWebPlatform(): IPlatformService {
       });
     },
     cancelPendingRemoteConnection: (_requestId?: string) => Promise.resolve(),
+    // Web 端不作为 Web 远程控制的发起端，保留显式拒绝以兼容统一平台接口。
+    startWebRemoteControl: () =>
+      Promise.reject(new Error("Web remote control can only be started from desktop")),
+    stopWebRemoteControl: () => Promise.resolve(),
+    getWebRemoteControlStatus: () => Promise.resolve<WebRemoteControlStatus>({ status: "idle" }),
     disposeRemoteSession: () => Promise.resolve(),
     isDockerAvailable: () => Promise.resolve(false),
     listWSLDistros: () => Promise.resolve([]),
@@ -263,6 +302,14 @@ function renderWebBootstrapError(error: unknown): void {
 }
 
 async function bootstrapWebApp() {
+  // Web 远控（/remote、/remote/v3、/remote/v4）优先于普通 Web+Server 模式；
+  // 入口 owner 在远控装配内，登录/回调视图也由它收敛（fork 无官方登录面，渲染 auth-required）。
+  if (isWebRemoteControlRoute()) {
+    document.documentElement.lang = resolveWebRemoteControlScreenLocale(navigator.language);
+    await webRemoteControlRuntime.start();
+    return;
+  }
+
   let bootstrap: WebBootstrapResult;
   try {
     bootstrap = await resolveWebBootstrap();

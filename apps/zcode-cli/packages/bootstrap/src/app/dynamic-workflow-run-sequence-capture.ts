@@ -13,13 +13,17 @@ import type { JournalStorePort, RunEvent, StoredEvent } from "@zcode/dynamic-wor
 export function createJournalSequenceCapture(journal: JournalStorePort): {
   journal: JournalStorePort;
   sequenceOf: (event: RunEvent) => number;
+  /** 同一条事件落库时盖的戳（`StoredEvent.timeCreated`）；引用不相等时不猜，回 `undefined`。 */
+  timeCreatedOf: (event: RunEvent) => number | undefined;
 } {
   let lastStored: StoredEvent | undefined;
-  // 端口上的三个可选方法是**可选**成员（FORK 偏离上游的必填形状；`listEventPage` 见 types.ts
-  // 的偏离声明）。转发必须保留「缺席即没有这个能力」的语义：无条件挂一个
-  // `(runId) => journal.countNodes(runId, …)`，能力探测会以为包装层支持它，真调用时却
+  // 端口上仍有两个**可选**成员（FORK 偏离上游的必填形状；`listEventPage` 见 types.ts 的偏离
+  // 声明）。转发必须保留「缺席即没有这个能力」的语义：无条件挂一个
+  // `(runId) => journal.countTaggedReports(runId)`，能力探测会以为包装层支持它，真调用时却
   // TypeError。`.bind(journal)` 同时把实现的 this 保住。
-  const countNodes = journal.countNodes?.bind(journal);
+  //
+  // `countNodes` 不在此列：上游 v3.16.2 把它做成引擎端口的**必填**成员（resume 恢复报告的 run
+  // 级条数与字节计数直接调用），端口上已不存在「缺席」状态，所以按端口显式转发。
   const countTaggedReports = journal.countTaggedReports?.bind(journal);
   const listEventPage = journal.listEventPage?.bind(journal);
   // 逐方法显式转发而不是 `{...journal, appendEvent}`：两个实现都是 class，展开只拷贝自有属性，
@@ -32,16 +36,27 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
       journal.updateRunStatus(runId, status, settlement),
     updateRunUsage: (runId, spentTokens) => journal.updateRunUsage(runId, spentTokens),
     updateRunCaps: (runId, caps) => journal.updateRunCaps(runId, caps),
+    // 补全把有效脚本写回 run 行（docs/execution-engine.md「Holes」）；与其余写入同样原样转发。
+    updateRunScript: (runId, scriptText, scriptHash) =>
+      journal.updateRunScript(runId, scriptText, scriptHash),
     putActor: (record) => journal.putActor(record),
     getActor: (runId, siteId, ordinal) => journal.getActor(runId, siteId, ordinal),
-    listActors: (runId) => journal.listActors(runId),
+    // 读面选项必须原样转发（docs/execution-engine.md「Reading the journal」）：TS 允许实现的形参
+    // 比签名少，`(runId) => journal.listNodes(runId, <固定选项>)` 这种写法照样编译通过，却把调用方
+    // 的过滤悄悄换掉，引擎的窄读就退化回整表读。
+    listActors: (runId, opts) => journal.listActors(runId, opts),
     putNode: (record) => journal.putNode(record),
-    getNode: (runId, siteId, ordinal) => journal.getNode(runId, siteId, ordinal),
+    // 上游 v3.16.2：`getNode` 多了 `opts`（`withResult: false` 的窄读，引擎 report 路径依赖它），
+    // 必须原样转发——丢掉它会让调用方以为没读结果、实际把整条结果解码进内存。
+    getNode: (runId, siteId, ordinal, opts) => journal.getNode(runId, siteId, ordinal, opts),
     // 读面选项必须原样转发（docs/execution-engine.md「Reading the journal」）：TS 允许实现的形参
     // 比签名少，`(runId) => journal.listNodes(runId, <固定选项>)` 这种写法照样编译通过，却把调用方
     // 的过滤悄悄换掉，引擎的窄读就退化回整表读。
     listNodes: (runId, opts) => journal.listNodes(runId, opts),
-    ...(countNodes === undefined ? {} : { countNodes }),
+    // 上游 v3.16.2 新增的窄读：resume 恢复报告 run 级字节计数时只问字节数，不读结果行。
+    sumResultBytes: (runId, kind) => journal.sumResultBytes(runId, kind),
+    // 必填成员：连同 kind 原样转发，缺失/降级语义不归包装层解释。
+    countNodes: (runId, kind) => journal.countNodes(runId, kind),
     ...(countTaggedReports === undefined ? {} : { countTaggedReports }),
     appendEvent: (runId, event) => {
       const stored = journal.appendEvent(runId, event);
@@ -57,5 +72,8 @@ export function createJournalSequenceCapture(journal: JournalStorePort): {
     journal: wrapped,
     sequenceOf: (event) =>
       lastStored?.event === event ? lastStored.sequence : (lastStored?.sequence ?? 0),
+    // 与 sequenceOf 同一条回落：内存 journal 在存储边界上深拷贝事件（引用不等），而「刚 append 的
+    // 就是正在 emit 的」是引擎 record() 的契约，所以这里按最后一次 append 的戳给。
+    timeCreatedOf: () => lastStored?.timeCreated,
   };
 }

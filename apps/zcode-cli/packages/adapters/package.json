@@ -94,6 +94,8 @@
   "scripts": {
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
+    "test": "vitest tests",
+    "coverage": "vitest run tests --coverage",
     "test:magic-context-domain": "node scripts/test-magic-context-domain.mjs",
     "test:plugin-marketplace-official-alias": "node scripts/test-plugin-marketplace-official-alias.mjs",
     "test:bash-output-limit": "node --test scripts/test-bash-output-limit.mjs",
@@ -137,6 +139,7 @@
   "devDependencies": {
     "@types/node": "^24.0.0",
     "@types/semver": "^7.7.0",
-    "@types/yauzl": "^2.10.3"
+    "@types/yauzl": "^2.10.3",
+    "vitest": "^4.1.5"
   }
 }

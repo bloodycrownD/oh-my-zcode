@@ -7,7 +7,7 @@ import type { ProcessResourceRole } from "@zcode/shared";
 import { roundMetric } from "./resourceMetricsStats.js";
 
 /** getAppMetrics 能覆盖的七个角色；cli_* 与 mcp 由 CLI 样本贡献，不在这里出现。 */
-const CHROMIUM_PROCESS_RESOURCE_ROLES = [
+export const CHROMIUM_PROCESS_RESOURCE_ROLES = [
   "main",
   "renderer_main",
   "renderer_guest",
@@ -17,7 +17,7 @@ const CHROMIUM_PROCESS_RESOURCE_ROLES = [
   "scheduler",
 ] as const satisfies readonly ProcessResourceRole[];
 
-type ChromiumProcessResourceRole = (typeof CHROMIUM_PROCESS_RESOURCE_ROLES)[number];
+export type ChromiumProcessResourceRole = (typeof CHROMIUM_PROCESS_RESOURCE_ROLES)[number];
 
 /** 规整后的单进程采样：CPU 已归一化到整机口径，内存单位 KB。 */
 export interface ChromiumProcessMetricSample {
@@ -52,6 +52,9 @@ export interface ChromiumRoleAggregate {
   uptimeMinutes: number;
 }
 
+// FORK（规则 4）：上游新增的 sumChromiumRoleAggregates 依赖 processResourceAppTotals
+// （AppResourceTotals / createEmptyAppResourceTotals / addAppResourceTotals），
+// 该模块在 fork 的资源统计裁剪中已删除，这里不吸收，避免引入悬空依赖。
 function classifyChromiumProcessRole(
   sample: Pick<ChromiumProcessMetricSample, "pid" | "type">,
   pids: ChromiumProcessRolePids,

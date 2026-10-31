@@ -1,4 +1,5 @@
 import { createConfig } from "@zcode/adapters/config";
+import type { McpElicitationPort, McpNotificationPort } from "@zcode/contracts";
 import { createNodeModelSelectionFacade } from "@zcode/provider-node";
 import { createNodeLoggerFactory } from "@zcode/adapters/logging";
 import {
@@ -25,9 +26,9 @@ import {
 import { closeSessionStore, getSessionDbPath } from "./app/session-store.js";
 import { startProcessProviderRegistryRuntime } from "./app/process-provider-registry-runtime.js";
 import { scheduleStartupLogRetentionCleanup } from "./log-retention.js";
+import { resolveProcessProviderEndpointRoutingPort } from "./provider-endpoint-routing.js";
 import { StartupTimer, startupNow } from "./startup-logging.js";
 import { installZCodeProtocolAiSdkWarningLogger } from "./zcode-protocol/ai-sdk-warning-logger.js";
-import { resolveRuntimeZCodeEndpointOrigin } from "@zcode/shared";
 import { ZCodeProtocolAgentServer } from "./zcode-protocol/server.js";
 import { ZCodeProtocolNdjsonConnection } from "./zcode-protocol/transport.js";
 import { cleanupProtocolRuntime } from "./zcode-protocol/runtime-cleanup.js";
@@ -35,7 +36,7 @@ import { startProtocolResourceSampler } from "./zcode-protocol/resource-sampler.
 import { acquireProtocolStartupResource } from "./zcode-protocol/startup-resource.js";
 import type { ZCodeProcessResourceSampler } from "./process-resource-sampler.js";
 
-function applyProtocolPresentationSurface(
+export function applyProtocolPresentationSurface(
   options: Omit<ZCodeAppOptions, "providerRegistry">,
   presentationSurface: PresentationSurface,
 ): Omit<ZCodeAppOptions, "providerRegistry"> {
@@ -57,7 +58,7 @@ function applyProtocolPresentationSurface(
  * 静态值——桌面是长驻进程，用户在设置里改默认模型后，同一进程内新建的会话必须
  * 拿到新值。registry 侧已订阅 Personal 配置的 onDidChange 并维护同步缓存。
  */
-function applyProtocolProviderRegistry(
+export function applyProtocolProviderRegistry(
   options: Omit<ZCodeAppOptions, "providerRegistry">,
   providerRegistry: ZCodeAppOptions["providerRegistry"],
   resolveConfiguredDefaultModelSelection?: () => ModelSelection | undefined,
@@ -162,10 +163,35 @@ export async function runZCodeProtocolAgent(
             idSalt: traceContext.traceId,
             onResourceSamples: (samples) => mcpResourceSink?.(samples),
           });
+    const providerEndpointRoutingPort =
+      options.providerEndpointRoutingPort ??
+      resolveProcessProviderEndpointRoutingPort({
+        appVersion: options.version,
+        env: options.env,
+        logger,
+        network: configResult.config.network,
+        sourceTitle: "electron",
+      });
+    // MCP elicitation 归属到协议 server 的会话；pool 先于 server 创建，端口延迟绑定。
+    let elicitationServer: {
+      requestMcpElicitation: McpElicitationPort["requestElicitation"];
+      handleMcpNotification: McpNotificationPort["onNotification"];
+    } | null = null;
     mcpConnectionPool =
       configResult.config.features.mcp === false
         ? undefined
         : createMcpAdapterConnectionPool({
+            elicitation: {
+              requestElicitation: (request, elicitationOptions) =>
+                elicitationServer
+                  ? elicitationServer.requestMcpElicitation(request, elicitationOptions)
+                  : Promise.resolve({ action: "decline" as const }),
+            },
+            // server 通知同样延迟绑定到协议 server。
+            notifications: {
+              onNotification: (notification) =>
+                elicitationServer?.handleMcpNotification(notification),
+            },
             clientVersion: options.version ?? "0.0.0",
             env: options.env,
             logger,
@@ -219,6 +245,7 @@ export async function runZCodeProtocolAgent(
                   }),
               }
             : {}),
+          providerEndpointRoutingPort,
           sourceTitle: "electron",
           // FORK（bugfix-batch-20261011 / phase-mc-settle-bg）：stdio 协议宿主是
           // Electron 拉起的**长驻** app-server——进程不随单轮退出，于是 magic-context
@@ -240,6 +267,7 @@ export async function runZCodeProtocolAgent(
       },
       version: options.version,
     }));
+    elicitationServer = server;
     if (configResult.config.features.mcp !== false) {
       nodeReplBrowserBroker = createNodeReplBrowserBroker({
         browserControlPort: server.browserControlPort,

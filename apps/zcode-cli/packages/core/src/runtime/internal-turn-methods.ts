@@ -1,5 +1,5 @@
 import type { BackgroundBashOutputResult } from "@zcode/shared";
-import type { RuntimeInputPresentation } from "@zcode/contracts";
+import type { ModelToolContract, RuntimeInputPresentation } from "@zcode/contracts";
 import type {
   BackgroundExecutionSnapshot,
   BackgroundTaskCancelResult,
@@ -148,6 +148,8 @@ export interface AgentRuntimeTurnMethods {
     copiedMessageCount: number;
     messageIdMap: Map<MessageId, MessageId>;
   }>;
+  // v3.16.2 的 autoCompact / microcompact / reactiveCompact / compactActiveConversation
+  // 属于 fork 已整体移除的原生上下文压缩面（由 MC 侧接管），不保留声明。
   scheduleTools(toolCalls: ToolCall[]): Promise<ToolSchedule>;
   executeTools(
     toolCalls: ToolCall[],
@@ -226,6 +228,7 @@ export interface AgentRuntimeTurnMethods {
     traceContext: TraceContext,
     events: SessionEvent[],
     options?: {
+      persist?: boolean;
       onStatus?: (event: ModelNetworkStatusEvent) => void;
       streamRecovery?: ModelStreamRecoveryStatus;
     },

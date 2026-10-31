@@ -6,11 +6,14 @@ interface ChromiumHardwareAccelerationApp {
   disableHardwareAcceleration(): void;
 }
 
-function resolveChromiumHardwareAccelerationSettingsFile(homePath: string = homedir()): string {
+// fork 使用 omz 数据目录；上游新增 export 供测试直接引用，一并保留。
+export function resolveChromiumHardwareAccelerationSettingsFile(
+  homePath: string = homedir(),
+): string {
   return join(homePath, ".omz", "v2", "setting.json");
 }
 
-function extractBootstrapChromiumHardwareAccelerationEnabled(rawValue: unknown): boolean {
+export function extractBootstrapChromiumHardwareAccelerationEnabled(rawValue: unknown): boolean {
   if (!rawValue || typeof rawValue !== "object" || Array.isArray(rawValue)) {
     return true;
   }

@@ -212,7 +212,7 @@ function transcript(turnCount, { modelChangeAtTurn = 0, startAt = 1_700_000_000_
 /** 真 sqlite store（真迁移链），把 durable transcript 写进去。 */
 async function seededStore({ root, messages, session = {} }) {
   const { revert, ...sessionInput } = session;
-  const store = createSqliteSessionStore({ dbPath: join(root, "sessions.db") });
+  const store = await createSqliteSessionStore({ dbPath: join(root, "sessions.db") });
   await store.createSession({
     id: SESSION_ID,
     projectID: PROJECT_ID,
@@ -2034,7 +2034,7 @@ test("S1: 子会话终态窄读与全量读逐值一致，且不再读 child 的
     new URL("../src/zcode-protocol/subagent-session-query.ts", import.meta.url).href
   );
   const root = mkdtempSync(join(tmpdir(), "zcode-cold-open-window-s1-"));
-  const store = createSqliteSessionStore({ dbPath: join(root, "sessions.db") });
+  const store = await createSqliteSessionStore({ dbPath: join(root, "sessions.db") });
   t.after(async () => {
     await store.close?.();
     rmSync(root, { recursive: true, force: true });

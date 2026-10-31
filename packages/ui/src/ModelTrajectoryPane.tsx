@@ -411,7 +411,10 @@ export function ModelTrajectoryPane({
   );
 }
 
-function getModelTrajectorySourceDirectory(
+// 上游把 resolveTrajectoryInputMessages / resolveTrajectoryTimelineItems 收进
+// ModelTrajectoryTimeline 并在此 re-export；fork 已把这两个纯函数迁到
+// ModelTrajectoryTurns.ts，故不吸收该 re-export（否则模块导出不存在，编译失败）。
+export function getModelTrajectorySourceDirectory(
   sourceFiles: readonly string[] | undefined,
 ): string | null {
   const sourceFile = sourceFiles?.find((path) => path.trim().length > 0);

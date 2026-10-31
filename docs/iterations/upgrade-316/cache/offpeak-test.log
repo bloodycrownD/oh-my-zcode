@@ -1,0 +1,66 @@
+
+[1m[30m[46m RUN [49m[39m[22m [36mv4.1.7 [39m[90mD:/worktree/upstream-316-gitline[39m
+
+(node:16964) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:16964) ExperimentalWarning: SQLite is an experimental feature and might change at any time
+(Use `node --trace-warnings ...` to show where the warning was created)
+ [31m❯[39m [30m[42m unit [49m[39m packages/services/test/taskIndexRepoOffPeakMarker.test.ts [2m([22m[2m0 test[22m[2m)[22m
+ [31m❯[39m [30m[42m unit [49m[39m packages/services/test/taskIndexRepoWorkspaceIdentity.test.ts [2m([22m[2m6 tests[22m[2m | [22m[31m1 failed[39m[2m)[22m[33m 672[2mms[22m[39m
+     [32m✓[39m 归档条件删除只影响相同路径下指定 identity，冷启动仍保留 tombstone[32m 126[2mms[22m[39m
+     [32m✓[39m 以 SQLite remote workspace_key 覆盖 SSH 旧列和 meta_json 中过期的 identity[32m 109[2mms[22m[39m
+     [32m✓[39m WSL 旧行 identity 列为空时从合法 remote workspace_key 恢复[32m 110[2mms[22m[39m
+     [32m✓[39m 相同 path 和 taskId 的不同 SSH identity 仍保持隔离[32m 108[2mms[22m[39m
+[31m     [31m×[31m records project migrations before serving queries and does not import settings again on reopen[39m[32m 108[2mms[22m[39m
+     [32m✓[39m keeps CLI activity times through title, pin and archive mutations and assigns new tasks once[32m 108[2mms[22m[39m
+
+[31m⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Suites 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/taskIndexRepoOffPeakMarker.test.ts[2m [ packages/services/test/taskIndexRepoOffPeakMarker.test.ts ][22m
+[31m[1mError[22m: Cannot find module '#src/session/offPeakTaskRepo.js' imported from D:/worktree/upstream-316-gitline/packages/services/test/taskIndexRepoOffPeakMarker.test.ts[39m
+[36m [2m❯[22m packages/services/test/taskIndexRepoOffPeakMarker.test.ts:[2m13:1[22m[39m
+    [90m 11|[39m [35mimport[39m { [33mTaskGroupRepository[39m } [35mfrom[39m [32m"#src/task-groups/index.js"[39m[33m;[39m
+    [90m 12|[39m [35mimport[39m { [33mTaskIndexRepo[39m } [35mfrom[39m [32m"#src/session/taskIndexRepo.js"[39m[33m;[39m
+    [90m 13|[39m [35mimport[39m { [33mOffPeakTaskRepo[39m } [35mfrom[39m [32m"#src/session/offPeakTaskRepo.js"[39m[33m;[39m
+    [90m   |[39m [31m^[39m
+    [90m 14|[39m
+    [90m 15|[39m [35mlet[39m repo[33m:[39m [33mTaskIndexRepo[39m[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯[22m[39m
+
+
+[31m⎯⎯⎯⎯⎯⎯⎯[39m[1m[41m Failed Tests 1 [49m[22m[31m⎯⎯⎯⎯⎯⎯⎯[39m
+
+[41m[1m FAIL [22m[49m [30m[42m unit [49m[39m packages/services/test/taskIndexRepoWorkspaceIdentity.test.ts[2m > [22mTaskIndexRepo migration startup barrier[2m > [22mrecords project migrations before serving queries and does not import settings again on reopen
+[31m[1mAssertionError[22m: expected [ { id: '0005_projects' }, …(3) ] to deeply equal [ { id: '0005_projects' }, …(2) ][39m
+
+[32m- Expected[39m
+[31m+ Received[39m
+
+[33m@@ -6,6 +6,9 @@[39m
+[2m      "id": "0007_default_workspace_tasks",[22m
+[2m    },[22m
+[2m    {[22m
+[2m      "id": "0008_initial_workspace_order",[22m
+[2m    },[22m
+[31m+   {[39m
+[31m+     "id": "0009_repair_default_workspace_predicate",[39m
+[31m+   },[39m
+[2m  ][22m
+
+[36m [2m❯[22m packages/services/test/taskIndexRepoWorkspaceIdentity.test.ts:[2m231:77[22m[39m
+    [90m229|[39m       { id[33m:[39m [32m"0008_initial_workspace_order"[39m }[33m,[39m
+    [90m230|[39m     ][33m;[39m
+    [90m231|[39m     expect(db.prepare("select id from schema_migration order by id").a…
+    [90m   |[39m                                                                             [31m^[39m
+    [90m232|[39m       expectedMigrations[33m,[39m
+    [90m233|[39m     )[33m;[39m
+
+[31m[2m⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯[22m[39m
+
+
+[2m Test Files [22m [1m[31m2 failed[39m[22m[90m (2)[39m
+[2m      Tests [22m [1m[31m1 failed[39m[22m[2m | [22m[1m[32m5 passed[39m[22m[90m (6)[39m
+[2m   Start at [22m 09:53:02
+[2m   Duration [22m 2.29s[2m (transform 2.04s, setup 84ms, import 1.41s, tests 672ms, environment 0ms)[22m
+

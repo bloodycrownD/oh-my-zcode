@@ -12,6 +12,11 @@ import type {
   DynamicWorkflowRunRetuneResult,
 } from "./dynamic-workflow-run-retune.port.js";
 import type {
+  DynamicWorkflowRunFillHoleRequest,
+  DynamicWorkflowRunHole,
+  FillWorkflowHoleResult,
+} from "./dynamic-workflow-run-hole.port.js";
+import type {
   DynamicWorkflowRunWorkspaceNode,
   DynamicWorkflowRunWorkspaceNodeResult,
   DynamicWorkflowRunWorkspaceNodeResultQuery,
@@ -62,10 +67,10 @@ export interface DynamicWorkflowRunSubmitRequest {
    */
   phaseNames?: string[];
   /**
-   * 本 run 自己的并发上界：同时在飞的
-   * ask 数，落 `dwf_run.caps_max_concurrency`、resume 照用。**缺席即天花板**（机器推导值，
-   * `resolveWorkflowConcurrencyCeiling`）；给了就钳到 `[1, 天花板]`——它只能压低并发，永不抬高。
-   * 工具层在 `resolveInput` 里已经钳过一次（确认窗要显示实际生效的值），这里再钳是端口自己的契约。
+   * 本 run 自己的并发上界（docs/dynamic-workflow/concurrency.md「Two bounds on a run」）：同时在飞的
+   * ask 数，落 `dwf_run.caps_max_concurrency`、resume 照用。**缺席即默认并发**（机器推导值，
+   * `resolveWorkflowDefaultConcurrency`）；给了就向下取整、至少 1，**没有上限**——高于或低于默认都行。
+   * 工具层在 `resolveInput` 里已经取整过一次（确认窗要显示实际生效的值），这里再取整是端口自己的契约。
    */
   maxConcurrency?: number;
   /**
@@ -77,6 +82,13 @@ export interface DynamicWorkflowRunSubmitRequest {
    * 发生」有两个答案。主代理自己不受影响：它恒留在会话模型上。
    */
   subagentModel?: ModelSelection;
+  /**
+   * 脚本里点名的模型（docs/dynamic-workflow/launch.md「Models the script names」）：键是脚本逐字
+   * 写下的名字（运行期 persona 里带的就是它），值是工具层已经对着模型目录解析好的选择。与
+   * {@link subagentModel} 同一条路、同一个理由收结构化选择：随 `run-launched` 记一次（规范串）、
+   * 引擎从不读，宿主建子代理会话时按 persona 的名字查它。脚本没点名任何模型时缺席。
+   */
+  modelBindings?: Record<string, ModelSelection>;
   /**
    * 本 run 的脚本**来自哪个文件**的绝对路径。与 {@link subagentModel} 走同一条路：随 `run-launched` 记一次、引擎从不读、
    * 零 SQL（`dwf_run` 上没有这一列），两条读面再从事件读回。
@@ -144,6 +156,12 @@ export interface DynamicWorkflowRunAmendRequest {
    */
   subagentModel?: ModelSelection;
   /**
+   * **新脚本**点名的模型；语义同 {@link DynamicWorkflowRunSubmitRequest.modelBindings}。「同名沿用
+   * 前驱的绑定」是**工具面**的规则，在 `AmendWorkflow` 的 `resolveInput` 里连同重新解析归一成这里
+   * 的一张表；端口不从前驱继承任何绑定。
+   */
+  modelBindings?: Record<string, ModelSelection>;
+  /**
    * **新脚本**来自哪个文件的绝对路径；语义同 {@link DynamicWorkflowRunSubmitRequest.scriptPath}。
    *
    * 与并发上界、子代理模型不同，它**没有三态**：修订记的永远是这一次修订的脚本来自哪个文件
@@ -197,9 +215,10 @@ export type DynamicWorkflowRunAmendResult =
 export type DynamicWorkflowRunCancelInitiator = "user" | "model" | { superseded: string };
 
 /**
- * 终态快照带的 report item 上限（`reports` 的长度上界）。取 256：比引擎的 run 级 report 上限
- * 宽松，而通知那一节的字符预算（8,000）本来也只容得下几十条。超过此上限的 item 仍在 journal
- * 的 `kind = "report"` 行里，只是不进快照——真实总数由 {@link DynamicWorkflowRunSnapshot.reportCount} 说出。
+ * 终态快照带的 report item 上限（`reports` 的长度上界）。取 256——report 条数上限从 256 提到
+ * 65,536 之前的值（`REPORT_CAPS.maxItemsPerRun`）：报告条数不超过它的 run，快照与通知逐字节不变；
+ * 更大的 run 由 {@link DynamicWorkflowRunSnapshot.reportCount} 说出真实总数。
+ * 完成通知那一节的字符预算（8,000）本来也只容得下几十条。
  */
 export const DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS = 256;
 
@@ -219,7 +238,6 @@ export const DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES = 8 * 1024 * 1024;
  * `kind = "report"` 节点行——那是这些条目的持久家（`workflowRuns.reports` 只是有界的
  * memory-only 展示面）。完成通知据此在 completed / failed / cancelled 三态下一律回投：
  * 一个死在第 12 个 ask 上的 run 仍然做完了 11 个 ask 的活，捞回它正是 `report` 存在的理由。
- *
  * 它只带**前** {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORTS} 条、且至多
  * {@link DYNAMIC_WORKFLOW_SNAPSHOT_MAX_REPORT_BYTES} 字节；真实总数在
  * {@link DynamicWorkflowRunSnapshot.reportCount}。
@@ -253,6 +271,12 @@ export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & 
    */
   subagentModel?: string;
   /**
+   * 本 run 的脚本点名的模型（journal 事件 `run-launched` 上的那张表）：脚本逐字写下的名字 →
+   * 规范串。**只在脚本点名过模型时在场**。`AmendWorkflow` 的 `resolveInput` 与 GUI「配置」据它让
+   * 同名的绑定沿用下去（docs/dynamic-workflow/launch.md「Models the script names」）。
+   */
+  modelBindings?: Record<string, string>;
+  /**
    * 本 run 的脚本文件（绝对路径，journal 事件 `run-launched` 上的那一个）。**只在这个 run 记下过文件时在场**。
    *
    * 终态通知据它把「改好脚本再内联提交」换成「就地编辑那个文件、再 `path` 修订」，所以它必须
@@ -263,7 +287,8 @@ export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & 
   failure?: DynamicWorkflowRunError;
   /**
    * 本 run 及其 lineage 的**活动**时长（毫秒）：本 run 的每一世加上每个前驱的每一世，世与世
-   * 之间的空档不计。完成卡的「时间」格报的就是它。
+   * 之间的空档不计（口径与理由见 docs/dynamic-workflow/transcript-and-notifications.md
+   * 「How long it took」）。完成卡的「时间」格报的就是它。
    *
    * 与 `reports` / `artifacts` 同规**只在终态在场**（`getTask` 被反复轮询，而消费者只有终态
    * 通知），且 journal 说不出话时整字段缺席——不是 0。缺席即读侧退回 `completedAt − startedAt`：
@@ -296,6 +321,12 @@ export type DynamicWorkflowRunSnapshot = Omit<WorkflowTaskSnapshot, "output"> & 
    * 时候都能经既有观察面重新发现待答问题。零条时整字段缺席（不发空数组）。
    */
   pendingQuestions?: readonly DynamicWorkflowRunPendingQuestion[];
+  /**
+   * 本 run 的留白（{@link DynamicWorkflowRunHole}）：到达过的每一处，等着的与补过的。与
+   * `pendingQuestions` 同规——零条整字段缺席、`waiting` 从引擎的停驻表投影而不是单靠事件重放；
+   * 留白通知的发射器与 `FillWorkflowHole` 的 resolveInput 都读它。
+   */
+  holes?: readonly DynamicWorkflowRunHole[];
   /**
    * 本 run 发布的**用户面产物**，按首次出现顺序，来自
    * journal 的 `kind = "artifact"` 行——那是版本历史的持久家（`workflowRuns.artifacts` 只带
@@ -368,14 +399,32 @@ export interface DynamicWorkflowRunArtifactItem {
   sequence: number;
   siteId: string;
   ordinal: number;
-  item: unknown;
+  /** 整条 item；请求点名了 `fields` 时缺席。 */
+  item?: unknown;
+  /** 请求点名了 `fields` 时：路径 → 值，走不通的路径不在表里。 */
+  fields?: Record<string, unknown>;
 }
 
-/** {@link DynamicWorkflowRunPort.listArtifactItems} 的分页袋（cursor = journal sequence，严格大于）。 */
+/**
+ * {@link DynamicWorkflowRunPort.listArtifactItems} 的分页袋（cursor = journal sequence，严格大于）。
+ * 两道界的语义同 {@link DynamicWorkflowRunEventPage}：条数到 `limit`、或再加一条就超过
+ * `maxBytes` 时收尾，第一条总是带上。两者都由调用方（网关）给定，实现方精确兑现、不再钳。
+ */
 export interface DynamicWorkflowRunArtifactItemPage {
   afterSequence?: number;
-  /** 必填；调用方可传「上限 + 1」探测 hasMore，实现方不得再钳。 */
   limit: number;
+  maxBytes: number;
+  /**
+   * 只取这些字段路径（`readWorkflowArtifactField` 的规则，由 SQLite 取出），结果每条带 `fields`
+   * 而不带 `item`，`maxBytes` 按取出的字段值计。缺省 = 整条 item。
+   */
+  fields?: readonly string[];
+}
+
+/** 看板条目的一页。`hasMore` 由存储层判定：页之后是否还有条目。 */
+export interface DynamicWorkflowRunArtifactItemsResult {
+  items: readonly DynamicWorkflowRunArtifactItem[];
+  hasMore: boolean;
 }
 
 /** {@link DynamicWorkflowRunPort.readArtifact} 的返回：某个版本的全部字节。 */
@@ -607,16 +656,18 @@ export interface DynamicWorkflowRunPort {
     options?: DynamicWorkflowRunSubmitOptions,
   ): Promise<DynamicWorkflowRunAmendResult>;
   /**
-   * run 自己并发上界的天花板（`max(1, min(16, availableParallelism() − 2))`，每进程一个值）。同步、无副作用。
+   * 默认并发 D（docs/dynamic-workflow/concurrency.md「Two bounds on a run」：
+   * `max(4, min(16, availableParallelism() − 2))`，每进程一个值）。同步、无副作用。它是**起点**
+   * 不是上限：没设 `max_concurrency` 的 run 跑在它上面，设了的高于低于都行。
    *
-   * 工具层的两个读者：`CreateWorkflow` / `AmendWorkflow` 的 `resolveInput` 把模型给的
-   * `max_concurrency` 钳到它之下（确认窗显示的必须是将要生效的值），`GetWorkflowRun` 据它决定
-   * 一个 run 的上界是否值得一提。**可选成员**（消费方 `typeof` 探测）：端口 stub 不必为它陪跑，
-   * 缺席时工具层不钳、原样下传（端口实现自己还会钳一次）。
+   * 工具层的读者：确认窗与回话（「（默认）」「默认 N」）、`AmendWorkflow` 的同值判定（`null` 要
+   * 折算成数才比得了），以及 `GetWorkflowRun` 据它决定一个 run 的上界是否值得一提（≠ 默认才提）。
+   * **可选成员**（消费方 `typeof` 探测）：端口 stub 不必为它陪跑，缺席时工具层只是不知道默认是几。
    */
-  concurrencyCeiling?(): number;
+  defaultConcurrency?(): number;
   /**
-   * 就地改一个**在飞** run 自己的并发上界：同一个 runId、不铸后继、不 supersede、不导入缓存、在飞 ask 一个不丢。
+   * 就地改一个**在飞** run 自己的并发上界（docs/dynamic-workflow/concurrency.md「Retuning a live
+   * run」）：同一个 runId、不铸后继、不 supersede、不导入缓存、在飞 ask 一个不丢。
    *
    * 与 {@link amend} 并列而非合并：修订换的是**脚本**，代价是停下前驱、铸新 run、从缓存重放；
    * 而「只把这个 run 调慢一点」不该付那笔账。两个调用方（`AmendWorkflow` 的 handler 与 GUI 的
@@ -725,6 +776,19 @@ export interface DynamicWorkflowRunPort {
    */
   resolveQuestion?(qid: string, answer: string): Promise<DynamicWorkflowResolveQuestionResult>;
   /**
+   * 给一个正在等的留白补上函数体（docs/dynamic-workflow/launch.md「The `FillWorkflowHole` tool」；
+   * 引擎文档「The fill service's checks」）。服务 `FillWorkflowHole` 工具。
+   *
+   * 实现侧一条龙：读 run 存档的脚本 → 按站点 id 找到留白调用、把函数体拼成它的最后一个实参 →
+   * 整体编译（诊断 → `compile_failed`，坐标按 `inFill` 分到函数体内 / 脚本）→ 站点稳定性检查
+   * （→ `fill_ids_unstable`）→ 引擎 `fillHole`（→ `hole_not_waiting`）→ 把 run 的草稿就地改写成
+   * 有效脚本。**拒绝即零副作用**：留白照旧在等。
+   *
+   * **可选成员**（消费方 `typeof` 探测），理由同 {@link resolveQuestion}：端口 stub 不必为它陪跑；
+   * 对消费方「端口缺席」与「方法缺席」是同一个业务失败（本会话不能补全留白）。
+   */
+  fillHole?(request: DynamicWorkflowRunFillHoleRequest): Promise<FillWorkflowHoleResult>;
+  /**
    * 本 run 的用户面产物清单（journal `kind = "artifact"` 行按 id 分组、版本升序）。UI 冷恢复与中枢详情的 durable 读法。
    * 未知 runId 返回 `undefined`。**可选成员**，理由同 {@link listRuns}（journal 带产物
    * 读面时才提供；消费方 `typeof` 探测）。
@@ -738,7 +802,7 @@ export interface DynamicWorkflowRunPort {
     runId: string,
     artifactId: string,
     page: DynamicWorkflowRunArtifactItemPage,
-  ): Promise<readonly DynamicWorkflowRunArtifactItem[]>;
+  ): Promise<DynamicWorkflowRunArtifactItemsResult>;
   /**
    * 读某个产物版本的字节：**先**在 journal 里确认 `(runId, artifactId, version)` 有一行
    * `completed` 记录，再按行上的 `uri` 经 tool-artifact store 取——调用方传来的任何 id 都
@@ -942,6 +1006,8 @@ export type * from "./dynamic-workflow-run-roster.port.js";
 // retune（就地改在飞 run 的并发上界）的三个类型住在 dynamic-workflow-run-retune.port.ts，
 // 同上原样再导出。
 export type * from "./dynamic-workflow-run-retune.port.js";
+// 留白（快照条目、fillHole 的请求 / 结果）的类型住在 dynamic-workflow-run-hole.port.ts，同一条拆分先例。
+export type * from "./dynamic-workflow-run-hole.port.js";
 
 // 工作区 transcript 的六个类型住在 dynamic-workflow-run-workspace.port.ts，同上原样再导出。
 export type * from "./dynamic-workflow-run-workspace.port.js";
@@ -960,6 +1026,8 @@ export interface DynamicWorkflowRunDetail extends DynamicWorkflowRunSummary {
    * 很少设置的字段加宽。
    */
   subagentModel?: string;
+  /** 本 run 的脚本点名的模型，语义同 {@link DynamicWorkflowRunSnapshot.modelBindings}。 */
+  modelBindings?: Record<string, string>;
   /**
    * 本 run 的脚本文件，语义同 {@link DynamicWorkflowRunSnapshot.scriptPath}：只在记下过文件时
    * 在场。`GetWorkflowRun` 据它在 `<amendable>` 里把下一步说成「就地编辑这个文件」。
@@ -1007,6 +1075,11 @@ export interface DynamicWorkflowRunDetail extends DynamicWorkflowRunSummary {
    * 缺了它，那两处承诺都会指向一个什么都不返回的工具。
    */
   pendingQuestions?: readonly DynamicWorkflowRunPendingQuestion[];
+  /**
+   * 本 run 的留白，与 {@link DynamicWorkflowRunSnapshot.holes} **同源同投影**（零条整字段缺席），
+   * 只是换了一条读面：本字段服务 `GetWorkflowRun`——留白通知丢失后模型侧唯一的发现面。
+   */
+  holes?: readonly DynamicWorkflowRunHole[];
   /**
    * 本 run 的用户面产物（任意状态都附；journal-backed，与 {@link DynamicWorkflowRunSnapshot.artifacts}
    * 同源）。`GetWorkflowRun` 据此告诉模型「这些已经以卡片呈现给用户了，按标题引用即可」。

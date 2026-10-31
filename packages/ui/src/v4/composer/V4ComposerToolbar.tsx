@@ -18,10 +18,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   BUILTIN_MODEL_PROVIDER_IDS,
-
-
-  TID_V4_MODEL_CONFIG,
-  TID_V4_COMPOSER_INPUT,
   ZCODE_AGENT_PROVIDER,
   type ProviderFamilyConnectionSelection,
   type ProviderFamilyConnectionSelectionSettings,
@@ -30,16 +26,21 @@ import {
   type ZCodeConfigOption,
   type ZCodeProvider,
 } from "@zcode/shared";
+// 合并后的 @zcode/shared 顶层未再 re-export test-ids.ts，测试 id 统一走子路径。
+import { TID_V4_MODEL_CONFIG, TID_V4_COMPOSER_INPUT } from "@zcode/shared/test-ids";
 import type {
   SessionConfigState,
   SessionPhase,
   SessionUsageState,
 } from "@zcode/shared/zcode-protocol-v4";
 import { ModelConfigSelect, type ModelSelectGroup } from "@/ModelConfigSelect.js";
+import type { ComposerModelOptions } from "@/chat-input-toolbar/ComposerModelMenu.js";
 import { Button } from "@/components/ui/button.js";
 import { ChatContextUsage } from "@/chat-input-toolbar/display.js";
-import { ThoughtLevelCycleControl } from "@/chat-input-toolbar/ThoughtLevelCycleControl.js";
-import { getNextThoughtLevelValue } from "@/chat-input-toolbar/thoughtLevelOptions.js";
+import {
+  getNextThoughtLevelValue,
+  getThoughtLevelLabel,
+} from "@/chat-input-toolbar/thoughtLevelOptions.js";
 import type { V4ComposerConfigPicker } from "@/v4/composer/configPickerState.js";
 import { useToolbarShortcutBindings } from "@/v4/composer/toolbarShortcuts.js";
 import {
@@ -144,6 +145,7 @@ export interface V4ComposerToolbarProps {
   phase: SessionPhase | null;
   provider?: ZCodeProvider;
   /** 当前工具条是否运行在 Web 远控壳中。 */
+  isWebRemoteControl?: boolean;
   /** 当前视口是否为手机输入布局。 */
   isMobileViewport?: boolean;
   /** 草稿态（sessionId=null），仅区分新任务呈现，不改变选择来源。 */
@@ -182,6 +184,7 @@ function V4ComposerModelControlsImpl({
   modelSelectionState = MODEL_SELECTION_LOADING_STATE,
   modelSelectionReload,
   provider,
+  isWebRemoteControl = false,
   isMobileViewport = false,
   draftMode = false,
   draftConfig,
@@ -206,7 +209,6 @@ function V4ComposerModelControlsImpl({
     providerSettingsRead.state.status === "ready" ? providerSettingsRead.state.view : null;
   const openSettingsTab = useTabStore((state) => state.openSettingsTab);
   const modelTriggerRef = useRef<HTMLSpanElement | null>(null);
-  const thoughtTriggerRef = useRef<HTMLSpanElement | null>(null);
   // Ctrl+M 热键：递增 openRequestKey 请求 ModelConfigSelect 打开菜单（旧 handleOpenModelMenuShortcut 语义）。
   const [modelMenuOpenRequestKey, setModelMenuOpenRequestKey] = useState(0);
   const [recoveryPending, setRecoveryPending] = useState(false);
@@ -216,12 +218,6 @@ function V4ComposerModelControlsImpl({
   const handleModelPickerOpenChange = useCallback(
     (open: boolean) => {
       onConfigPickerOpenChange("model", open);
-    },
-    [onConfigPickerOpenChange],
-  );
-  const handleThoughtPickerOpenChange = useCallback(
-    (open: boolean) => {
-      onConfigPickerOpenChange("thought", open);
     },
     [onConfigPickerOpenChange],
   );
@@ -276,7 +272,7 @@ function V4ComposerModelControlsImpl({
     });
   }, [draftMode, effectiveConfig, modelSelectionView?.revision]);
 
-  const modelSelectGroups = useMemo<ModelSelectGroup[]>(() => {
+  const modelSelectGroupsLive = useMemo<ModelSelectGroup[]>(() => {
     if (!modelSelectionView) return [];
     return buildRegistryModelSelectGroups(displayProvider, modelSelectionView, {
       apiKeyLabel: intl.formatMessage({ id: "settings.modelProvider.apiKey" }),
@@ -303,6 +299,14 @@ function V4ComposerModelControlsImpl({
       }),
     });
   }, [displayProvider, intl, modelSelectionView]);
+  // FORK(upgrade-316)：调档会触发档位目录短暂重读，groups 空一帧会让模型菜单塌缩
+  // （菜单高度骤降、滑条右移 + disabled 半透明，视觉即拖动闪烁）。上游靠
+  // ModelConfigSelect 的 presentation 冻结护住，但其触发信号 providerMenu.pending
+  // 属 fork 已删面，永不生效；这里在空帧沿用上次非空分组，目录回来后自然覆盖。
+  const modelSelectGroupsRef = useRef(modelSelectGroupsLive);
+  if (modelSelectGroupsLive.length > 0) modelSelectGroupsRef.current = modelSelectGroupsLive;
+  const modelSelectGroups =
+    modelSelectGroupsLive.length > 0 ? modelSelectGroupsLive : modelSelectGroupsRef.current;
 
   // 修复：恢复「管理模型」入口（老版 onManageModels = 打开设置页并定位模型供应商区）。
   const handleOpenModelProviderSettings = useCallback(() => {
@@ -315,8 +319,15 @@ function V4ComposerModelControlsImpl({
   });
 
   // 当前投影模型的编码值：provider 命中目录则按自定义模型编码，否则回落裸 model id。
-  const rawModelValue = useMemo(() => {
-    if (!effectiveConfig || !effectiveConfig.model) return "";
+  // FORK(upgrade-316)：调档触发投影重读，中间态 effectiveConfig.model 可能闪空串
+  // （trigger 缩窄→菜单 popper 重定位→滑条 disabled，视觉即拖动闪烁）。上游靠
+  // 「loading && catalog」信号豁免（catalog 仍在=即将回来），这里把同一信号扩展为
+  // 展示冻结：刷新期间沿用上次模型值，区分真空态（ready 且 model 空→占位语义不变）。
+  const refreshingSelection =
+    modelSelectionState.status === "loading" && Boolean(modelSelectionState.catalog);
+  const rawModelValueLive = useMemo(() => {
+    if (!effectiveConfig) return null;
+    if (!effectiveConfig.model) return "";
     const providerExists = modelSelectionView?.providers.some(
       (candidate) => candidate.providerId === effectiveConfig.provider,
     );
@@ -325,6 +336,9 @@ function V4ComposerModelControlsImpl({
     }
     return effectiveConfig.model;
   }, [effectiveConfig, modelSelectionView]);
+  const rawModelValueRef = useRef(rawModelValueLive ?? "");
+  if (rawModelValueLive !== null && !refreshingSelection) rawModelValueRef.current = rawModelValueLive;
+  const rawModelValue = rawModelValueLive === null || refreshingSelection ? rawModelValueRef.current : rawModelValueLive;
 
   // 触发器显示兜底——`<synthetic>`（Claude SDK 恢复合成模型）或当前模型
   // 不在可选组（失效/下线/退登）→ 回落占位/默认「选择模型」，不直显协议内部占位符或失效
@@ -511,12 +525,49 @@ function V4ComposerModelControlsImpl({
   const thoughtShortcutLabel = useShortcutCommandLabel("cycleThoughtLevel");
   const isModelOptionLocked = useCallback(() => false, []);
 
+  // FORK(upgrade-316)：上游 v3.16 把思考等级主入口从工具栏下拉迁到模型菜单内的
+  // 滑条（ComposerModelMenu 的 composerOptions.levels）。fork 版 toolbar 此前未传
+  // composerOptions，滑条区块整段缺席，用户只看到旧的下拉形态。providerMenu 是
+  // 团队套餐连接切换（fork 已删的商业化面），不搬，其余字段按上游语义补齐。
+  const composerOptionsRef = useRef<ComposerModelOptions | undefined>(undefined);
+  const composerOptions = useMemo<ComposerModelOptions | undefined>(() => {
+    if (!thoughtOption) {
+      // FORK(upgrade-316)：调档会触发档位目录短暂重读（thoughtOption → null 一帧），
+      // 上游靠 ModelConfigSelect 的 presentation 冻结（providerMenu.pending 信号）护住；
+      // fork 无 providerMenu，该冻结分支永不触发，滑条区块会卸载重挂造成拖动闪烁。
+      // 这里沿用上次档位展示（回调已由 React 闭包保持最新），目录回来后自然覆盖。
+      return composerOptionsRef.current;
+    }
+    const next: ComposerModelOptions = {
+      providerLabel: intl.formatMessage({ id: "chat.toolbar.combined.provider" }),
+      modelsLabel: intl.formatMessage({ id: "chat.toolbar.combined.models" }),
+      effortLabel: intl.formatMessage({ id: "chat.toolbar.combined.effort" }),
+      effortShortcutLabel: thoughtShortcutLabel,
+      selectModelLabel: intl.formatMessage({ id: "chat.toolbar.combined.selectModel" }),
+      levels:
+        thoughtOption.options?.map((entry) => ({
+          value: entry.value,
+          label: getThoughtLevelLabel(intl, displayProvider, thoughtOption, entry),
+        })) ?? [],
+      value: String(thoughtOption.currentValue ?? ""),
+      onValueChange: handleThoughtValueChange,
+    };
+    composerOptionsRef.current = next;
+    return next;
+  }, [displayProvider, handleThoughtValueChange, intl, thoughtOption, thoughtShortcutLabel]);
+
   // 键盘热键（旧 useToolbarShortcutBindings）：Ctrl+M 打开模型菜单、Ctrl+T 循环思考深度。
   // 模式循环（Ctrl+Shift+M）由 V4ComposerModeSwitch 单独绑定（modeOption 在彼处）。
   // 模型留空是正常的待选择状态，包括已有会话；不能因为没有已选模型隐藏重选入口。
   // 有可选组时正常显示；无组但有「管理模型」入口时也显示，避免用户零模型入口。
   const modelMenuVisible = modelSelectGroups.length > 0 || showManageModelsAction;
-  const providerSubmenuClassName = undefined;
+  // Bug 根因：手机端固定宽度的二级菜单没有消费 Radix 测得的当前方向可用宽度，
+  // 共享 min-w-32 还会阻止极窄空间继续收缩。保持二级交互，同时把窗口边缘作为硬上限。
+  // （上游 V4ComposerToolbar 同名修复；fork 通过 isWebRemoteControl prop 接入壳层信号。）
+  const providerSubmenuClassName =
+    isWebRemoteControl && isMobileViewport
+      ? "w-40 min-w-0 max-w-(--radix-dropdown-menu-content-available-width)"
+      : undefined;
   useToolbarShortcutBindings({
     hasAnyOption: Boolean(modelOption) || Boolean(thoughtOption),
     toolbarDisabled: disabled || recoveryPending,
@@ -590,6 +641,7 @@ function V4ComposerModelControlsImpl({
           triggerLabel={modelTriggerDisplay.fullLabel}
           triggerLabelPrefix={modelTriggerDisplay.providerPrefix}
           triggerLabelValue={modelTriggerDisplay.modelLabel}
+          composerOptions={composerOptions}
           triggerLabelPrefixClassName="composer-provider-prefix inline group-data-[composer-provider-compact=true]/toolbar:hidden"
           showManageModelsAction={showManageModelsAction}
           manageModelsLabel={manageModelsLabel}
@@ -599,7 +651,15 @@ function V4ComposerModelControlsImpl({
           })}
           isItemLocked={isModelOptionLocked}
           onValueChange={handleModelValueChange}
-          disabled={disabled || recoveryPending || modelSelectionState.status !== "ready"}
+          disabled={
+            disabled ||
+            recoveryPending ||
+            // FORK(upgrade-316)：对齐上游豁免——调档触发投影短暂重读（status → loading，
+            // catalog 仍在）。不豁免会让 ModelConfigSelect 整体 disabled 一帧：菜单内
+            // 滑条半透明 + popper 跟随 trigger 宽度抖动平移，视觉即拖动闪烁。
+            (modelSelectionState.status !== "ready" &&
+              !(modelSelectionState.status === "loading" && modelSelectionState.catalog))
+          }
           tooltipTitle={modelTriggerDisplay.fullLabel}
           shortcutLabel={modelShortcutLabel}
           triggerRef={modelTriggerRef}
@@ -615,23 +675,9 @@ function V4ComposerModelControlsImpl({
           providerSubmenuClassName={providerSubmenuClassName}
         />
       ) : null}
-      {thoughtOption ? (
-        <ThoughtLevelCycleControl
-          composerCollapsePriority={3}
-          labelVisibilityClassName="inline-flex"
-          indicatorClassName="block"
-          option={thoughtOption}
-          onValueChange={handleThoughtValueChange}
-          disabled={disabled || recoveryPending}
-          intl={intl}
-          provider={displayProvider}
-          shortcutLabel={thoughtShortcutLabel}
-          triggerRef={thoughtTriggerRef}
-          open={activeConfigPicker === "thought"}
-          onOpenChange={handleThoughtPickerOpenChange}
-          restoreFocusSelector={V4_COMPOSER_INPUT_SELECTOR}
-        />
-      ) : null}
+      {/* FORK(upgrade-316)：上游 v3.16 将思考等级主入口迁入模型菜单滑条（composerOptions），
+          工具栏 CycleControl 仅在模型锁定/highspeed 呈现场景保留——两者均为 fork 已删面，
+          故正常态不再渲染工具栏下拉；Ctrl+T 循环热键（useToolbarShortcutBindings）不受影响。 */}
     </>
   );
 }

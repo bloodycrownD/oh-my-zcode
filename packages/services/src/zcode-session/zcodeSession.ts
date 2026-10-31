@@ -18,6 +18,7 @@ import type {
   ZCodeWorkspacePresentation,
 } from "@zcode/shared";
 import { createServiceDescriptor } from "#src/descriptors.js";
+import type { ProviderRuntimeHeadersUiResponse } from "#src/zcode-agent/zcodeAgent.js";
 
 export interface ZCodeSessionWorkspaceTarget {
   workspacePath: string;
@@ -56,7 +57,6 @@ export interface ZCodeSessionResumeParams extends ZCodeTaskTarget {
 }
 
 export interface ZCodeSessionListParams extends ZCodeSessionWorkspaceTarget {
-  includeArchived?: boolean;
   limit?: number;
 }
 
@@ -93,6 +93,21 @@ export interface ZCodeSessionSetModeParams extends ZCodeTaskTarget {
   expectedRevision?: number;
 }
 
+export interface ZCodeSessionRespondProviderRuntimeHeadersParams extends ZCodeTaskTarget {
+  requestId: string;
+  response: ProviderRuntimeHeadersUiResponse;
+}
+
+/**
+ * FORK（D-4）：上游 ProviderRuntimeHeadersPort 整族（含 `ZCodeProviderRuntimeHeadersRequestParams`
+ * 与账号鉴权 schema）已随账号面删除，`@zcode/shared` 不再导出该类型。
+ * session 事件仍是通用透传面：adapter 只按 type 早退、不读取请求字段，
+ * 因此这里保留最小请求形状（requestId），不为已删除的账号鉴权面重建 schema 或实现。
+ */
+export interface ZCodeSessionProviderRuntimeHeadersRequest {
+  requestId: string;
+}
+
 export interface ZCodeSessionSubscribeParams extends ZCodeTaskTarget {
   deliveryKind: ZCodeDeliveryKind;
   afterSeq?: number;
@@ -113,6 +128,7 @@ export type ZCodeSessionServiceEvent =
       requestId: string;
       response: ZCodeUserInputResponse;
     }
+  | { type: "providerRuntimeHeaders.request"; request: ZCodeSessionProviderRuntimeHeadersRequest }
   | { type: "snapshot"; snapshot: ZCodeSessionStateSnapshot };
 
 export interface ZCodeSessionInitializeResult {
@@ -152,7 +168,12 @@ export interface IZCodeSessionService {
   setModel(params: ZCodeSessionSetModelParams): Promise<ZCodeSessionStateSnapshot>;
   setThoughtLevel(params: ZCodeSessionSetThoughtLevelParams): Promise<ZCodeSessionStateSnapshot>;
   setMode(params: ZCodeSessionSetModeParams): Promise<ZCodeSessionStateSnapshot>;
-  // renderer 订阅面走 agentService 的 conversation/sessions-index 帧通道。
+  respondProviderRuntimeHeaders(
+    params: ZCodeSessionRespondProviderRuntimeHeadersParams,
+  ): Promise<void>;
+  // M5 删波次 2：onDynamicSessionEvent（旧 session/subscribe 词表的 renderer 订阅面）
+  // 已删除——v4 UI 走 agentService 的 conversation/sessions-index 帧通道，
+  // 该方法在 renderer 侧已无任何调用者（grep packages/ui packages/desktop 为零）。
 }
 
 export const IZCodeSessionService = createServiceDescriptor<IZCodeSessionService>(

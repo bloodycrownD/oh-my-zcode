@@ -35,6 +35,9 @@ import {
   resolveDesktopWindowSize,
   type DesktopWindowSize,
 } from "./desktopWindowSize.js";
+import { getPluginSandboxHost, isPluginSandboxSrc } from "./pluginSandbox/index.js";
+import { installEmbeddedBrowserBluetoothDeviceGuard } from "./embeddedBrowserBluetoothGuard.js";
+import { getEmbeddedBrowserDevicePicker } from "./embeddedBrowserPermissionUiBridge.js";
 // CDP-on-guest pivot：内置浏览器改回 `<webview>` 渲染，宿主 BrowserWindow 需重新开 webviewTag，
 // 并在 will/did-attach-webview 里做 guest 硬化 + URL 白名单 + popup 路由回内部 tab。
 const ALLOWED_EMBEDDED_BROWSER_PROTOCOLS = new Set([
@@ -46,7 +49,6 @@ const ALLOWED_EMBEDDED_BROWSER_PROTOCOLS = new Set([
 ]);
 const ALLOWED_EMBEDDED_BROWSER_NEW_WINDOW_PROTOCOLS = new Set(["http:", "https:"]);
 const EXTERNAL_BROWSER_DISPOSITIONS = new Set(["background-tab"]);
-
 const embeddedBrowserJavaScriptDialogPreloadPath = join(
   import.meta.dirname,
   "../preload/embeddedBrowserJavaScriptDialog.cjs",
@@ -309,6 +311,8 @@ function attachEmbeddedBrowserWindowOpenHandler(options: {
 
   // FORK（D-4/D-6）：Coding Plan 购买 webview 的主 frame 导航守卫整删。
   // `will-attach-webview` 通用钩子本体（下方）与导航白名单校验保持不变。
+  // 上游在 guest 上追加了 Rewards / Coding Plan 两类 will-navigate 守卫；fork 已移除对应付费/邀请页容器，
+  // 这里不注册 will-navigate，导航安全仍由 will-attach-webview 白名单与 popup 路由共同约束。
 }
 
 function buildTextContextMenuTemplate(
@@ -442,6 +446,12 @@ export function createBrowserWindow(options: {
   win.on("maximize", () => syncDesktopWindowChromeState(win));
   win.on("unmaximize", () => syncDesktopWindowChromeState(win));
   attachWindowsWindowRepaint(win);
+  // will-attach 与 did-attach 按顺序配对；队列元素记录 guest 种类，did-attach 据此分派策略。
+  // FORK 差异：上游队列还区分 codingPlan / rewards 两类 guest，fork 已移除这两种容器，只保留
+  // 内置浏览器与插件沙箱两种 kind。
+  const pendingWebviewGuestKinds: Array<
+    { kind: "browser" } | { kind: "pluginSandbox"; sandboxId: string }
+  > = [];
 
   win.webContents.once("did-finish-load", () => {
     // 生产包使用 loadFile(file://...) 导航时，Chromium 可能在页面加载完成后重放
@@ -471,6 +481,26 @@ export function createBrowserWindow(options: {
     // Chromium NSAlert。固定 preload 在每个 frame 调用原生 API 前拦截，且隔离世界只
     // 暴露 alert/confirm 同步桥；网页主世界仍没有 Node 或任意 IPC 能力。
     const targetUrl = params.src ?? "about:blank";
+    // 插件 UI 沙箱 guest：独立分支，不走内置浏览器的 preload / allowpopups / 协议白名单。
+    if (isPluginSandboxSrc(targetUrl)) {
+      const host = getPluginSandboxHost();
+      const decision = host?.configureGuest({
+        webPreferences,
+        params,
+        ownerWebContentsId: win.webContents.id,
+      });
+      if (!decision?.ok) {
+        options.logger.warn(
+          `[plugin-sandbox] blocked webview attach: ${decision ? decision.reason : "host-not-installed"}`,
+        );
+        event.preventDefault();
+        return;
+      }
+      pendingWebviewGuestKinds.push({ kind: "pluginSandbox", sandboxId: decision.sandboxId });
+      return;
+    }
+    // FORK（D-4/D-6）：上游此处按 Coding Plan 官网 / Rewards 邀请页切换专用 preload，
+    // 两类容器在 fork 中已整体移除，其余 webview 一律使用原生 Dialog 桥 preload。
     webPreferences.preload = embeddedBrowserJavaScriptDialogPreloadPath;
     webPreferences.contextIsolation = true;
     webPreferences.nodeIntegration = false;
@@ -496,15 +526,36 @@ export function createBrowserWindow(options: {
       options.logger.warn(`[browser-pane] blocked unsupported webview url: ${targetUrl}`);
       event.preventDefault();
     }
+
+    pendingWebviewGuestKinds.push({ kind: "browser" });
   });
 
   win.webContents.on("did-attach-webview", (_event, guestWebContents) => {
+    const guestKind = pendingWebviewGuestKinds.shift() ?? {
+      kind: "browser" as const,
+    };
+    if (guestKind.kind === "pluginSandbox") {
+      getPluginSandboxHost()?.attachGuest({
+        guest: guestWebContents,
+        hostWebContents: win.webContents,
+        sandboxId: guestKind.sandboxId,
+      });
+      return;
+    }
     attachEmbeddedBrowserWindowOpenHandler({
       guestWebContents,
       hostWebContents: win.webContents,
       resolveBrowserViewOwner: options.resolveBrowserViewOwner,
       logger: options.logger,
     });
+    // 蓝牙设备选择事件挂在 guest WebContents 上（Session 只覆盖 hid/usb/serial）；
+    // 仅内置浏览器 guest 安装守卫，阻断 Electron 未监听时静默授权第一个设备的默认行为。
+    if (guestKind.kind === "browser") {
+      installEmbeddedBrowserBluetoothDeviceGuard(guestWebContents, options.logger.warn, {
+        devicePicker: getEmbeddedBrowserDevicePicker(),
+        hostWebContentsId: win.webContents.id,
+      });
+    }
   });
 
   win.webContents.on("context-menu", (_event, params) => {

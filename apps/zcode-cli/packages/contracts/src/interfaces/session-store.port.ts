@@ -37,15 +37,19 @@ export type SessionTaskType = (typeof SESSION_TASK_TYPES)[number];
 export const SESSION_TITLE_SOURCES = ["default", "first_input", "generated", "custom"] as const;
 export type SessionTitleSource = (typeof SESSION_TITLE_SOURCES)[number];
 
+export type SessionLastOutcome = "completed" | "error" | "interrupted";
+
 export const MESSAGE_VISIBILITIES = ["user-visible", "model-only"] as const;
 export type MessageVisibility = (typeof MESSAGE_VISIBILITIES)[number];
 
 export const SYNTHETIC_USER_MESSAGE_SOURCES = [
+  "agent_listing_delta",
   "background_task",
   "fork",
   "goal_state_change",
   "goal-continuation",
   "plugin_reference",
+  "bot_topic_context",
   "rewind",
   "selection_side_chat",
   "subagent",
@@ -146,6 +150,7 @@ export interface SessionInfo {
   titleSource?: SessionTitleSource;
   titleMessageID?: MessageId;
   version: string;
+  lastOutcome?: SessionLastOutcome;
   shareURL?: string;
   summaryAdditions?: number;
   summaryDeletions?: number;
@@ -158,7 +163,7 @@ export interface SessionInfo {
     updated: number;
     titleUpdated?: number;
     compacting?: number;
-    archived?: number;
+    deleted?: number;
   };
 }
 
@@ -237,6 +242,7 @@ export interface ForkCommitBundle {
 
 export interface UpdateSessionInput {
   id: SessionId;
+  lastOutcome?: SessionLastOutcome;
   directory?: string;
   path?: string | null;
   timeUpdated?: number;
@@ -254,7 +260,6 @@ export interface UpdateSessionInput {
   revert?: SessionRevert | null;
   permission?: PermissionRuleset | null;
   timeCompacting?: number | null;
-  timeArchived?: number | null;
 }
 
 export interface FileDiff {
@@ -292,7 +297,6 @@ export interface ListSessionsInput {
   path?: string;
   roots?: boolean;
   taskTypes?: SessionTaskType[];
-  includeArchived?: boolean;
   limit?: number;
 }
 
@@ -472,6 +476,8 @@ export interface AttachmentStorageMetadata {
   storageKind?: "inline" | "artifact" | "local_ref" | "remote_ref" | "metadata_only";
   artifactUri?: string;
   originalUrl?: string;
+  /** 路径引用首次发送的完整说明；恢复时原样复用，不能用文件内容 preview 代替。 */
+  pathReferenceText?: string;
   recoverability?: "provider_ready" | "rebuildable" | "preview_only" | "metadata_only" | "missing";
   preview?: {
     text?: string;
@@ -749,6 +755,9 @@ export const SESSION_ENTRY_USER_INPUT_AUTO_RESOLUTION =
   "runtime/user_input_auto_resolution" as const;
 export const SESSION_ENTRY_WORKSPACE_CHECKPOINT = "runtime/workspace_checkpoint" as const;
 export const SESSION_ENTRY_WORKSPACE_FILE_REWIND = "runtime/workspace_file_rewind" as const;
+/** 动态工作流工具面已在本会话激活（docs/dynamic-workflow/launch.md「On demand: activation」）。 */
+export const SESSION_ENTRY_DYNAMIC_WORKFLOW_ACTIVATION =
+  "runtime/dynamic_workflow_activation" as const;
 
 export const SESSION_ENTRY_TYPES = [
   SESSION_ENTRY_TARGET_COMPLETION_VERIFICATION,
@@ -758,6 +767,7 @@ export const SESSION_ENTRY_TYPES = [
   SESSION_ENTRY_USER_INPUT_AUTO_RESOLUTION,
   SESSION_ENTRY_WORKSPACE_CHECKPOINT,
   SESSION_ENTRY_WORKSPACE_FILE_REWIND,
+  SESSION_ENTRY_DYNAMIC_WORKFLOW_ACTIVATION,
 ] as const;
 
 export type SessionEntryType = (typeof SESSION_ENTRY_TYPES)[number];
@@ -1271,6 +1281,8 @@ export interface SessionStorePort {
   commitSharedContextImportBundle?(bundle: SharedContextImportCommitBundle): Promise<SessionInfo>;
   transitionSharedContextImport?(input: SharedContextImportTransition): Promise<boolean>;
   updateSession(input: UpdateSessionInput): Promise<SessionInfo>;
+  /** 只写一次删除时间；正文保留，普通列表永不返回软删除行。 */
+  softDeleteSession?(sessionID: SessionId, timeDeleted?: number): Promise<void>;
   getSession(sessionID: SessionId): Promise<SessionInfo | null>;
   listSessions(input?: ListSessionsInput): Promise<SessionInfo[]>;
   /**

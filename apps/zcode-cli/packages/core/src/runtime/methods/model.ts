@@ -79,6 +79,8 @@ export async function runModelTextRequest(
     metadata: traceContextToLogContext(projectedOptions.traceContext),
     modelRequestSessionType: resolveModelRequestSessionTypeFromTaskType(this.config.taskType),
     // 重试预算与准入端口不在这里设：它们是 runtime 层字段，由 createRuntimeModel 绑在句柄上，turn step 与工具内部的模型调用同一来源。
+    // v3.16.2 的 modelCall 元数据依赖 runtime.agentTelemetry 与 ModelInvocationContext.modelCall，
+    // 两者都属于 fork 已移除的遥测面，此处不吸收。
     statusSink: this.createModelStatusSink(projectedOptions.traceContext, projectedOptions.events, {
       ...(projectedOptions.onModelNetworkStatus
         ? { onStatus: projectedOptions.onModelNetworkStatus }
@@ -96,6 +98,7 @@ export async function runModelTextRequest(
   const modelRequest = {
     messages: projectedOptions.messages,
     tools: projectedOptions.tools,
+    toolSearchEnabled: projectedOptions.toolSearchEnabled,
     abortSignal: projectedOptions.abortSignal,
     ...(projectedOptions.maxOutputTokens !== undefined
       ? { options: { maxOutputTokens: projectedOptions.maxOutputTokens } }
@@ -305,6 +308,8 @@ export async function runModelTextRequest(
           break;
         }
 
+        // 原始参数流保留包装结构；目标身份由公共准入产生，再通过工具事件交给展示投影。
+        // 不从参数 delta 推测执行目标，也不为展示身份调整模型流或工具调度时序。
         case "tool_input_start": {
           const toolCallId = event.id as ToolCallId;
           toolInputDeltaBuffers.delete(toolCallId);

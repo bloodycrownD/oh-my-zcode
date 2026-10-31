@@ -21,6 +21,9 @@ import {
   type ProviderSettingsConnectivityTester,
 } from "./providerFacadeServices.js";
 import { createProviderModelLister } from "./providerModelList.js";
+import { createServiceLogger } from "#src/logger/serviceLogger.js";
+
+const log = createServiceLogger("provider-runtime");
 
 export interface ProviderRuntimeOptions extends ProviderConfigRuntimeOptions {
   readonly testConnectivity?: ProviderSettingsConnectivityTester;
@@ -164,11 +167,19 @@ function createSettingsMutationTarget(
       ),
     refresh: (reason) => registryService.refresh(reason),
     refreshSources: async (reason) => {
-      const [sourceResult] = await Promise.allSettled([
+      // FORK（D-4）：账号 Overlay 已整删，Builtin Config 是唯一远端来源。
+      const [builtinResult] = await Promise.allSettled([
         configRuntime.refreshZCodeBuiltin({ force: true }),
       ]);
+      // 远端更新失败不代表本地配置不可用；此前统一抛错会让套餐切换回滚，
+      // 并掩盖真正的账号失败。只降级远端更新，Config/Registry 和权益错误仍保留。
+      if (builtinResult.status === "rejected") {
+        log.warn(undefined, "Builtin 远端更新失败，继续使用本地配置", {
+          reason,
+          error: builtinResult.reason,
+        });
+      }
       const snapshot = await registryService.refresh(reason);
-      if (sourceResult.status === "rejected") throw sourceResult.reason;
       return snapshot;
     },
   };

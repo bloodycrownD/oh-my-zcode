@@ -64,6 +64,13 @@ import { clearBrowserTurnState } from "../../repl/browser-turn-state.js";
 import { applySubmissionExecutionState, createTurnModel } from "./turn-model.js";
 import { rebuildContextPrefix } from "./context-refresh.js";
 
+// TODO(upgrade-316): 上游 v3.16.2 的 turn.ts 把 U4 创建失败语义与原生 compact
+// （parseCompactCommand / executeManualCompact）、off-peak 派发（prepareOffPeakTurn）、
+// turnTelemetry、LocalTtftDetail 准备阶段以及创建期 highspeed 回退
+// （creationFallback / effectiveExecutionSelection）交织在同一段主链里。fork 已整体移除
+// 前四项，故此处保留 fork 版本（U4：创建失败仍保留已接纳输入）；创建期 highspeed 回退
+// 需要重接 matchExecutionSelectionCreationFallback / resolveExecutionFallbackCandidates，
+// 待单独迁移。
 const TARGET_RUN_HEARTBEAT_MS = 15_000;
 // FORK (upstream-v3.16-backport U4): 创建失败轮的终态口径常量（与上游 v3.16.2 对齐）。
 const MODEL_CREATION_FAILED_MESSAGE = "Model creation failed";

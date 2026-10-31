@@ -14,6 +14,8 @@ export const ZCODE_OFFICIAL_PLUGIN_MARKETPLACE = "oh-my-zcode-official";
  * CDN 换发新名后连同 {@link isOfficialMarketplaceId} 的扩集分支一并摘除。
  */
 export const ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE = "zcode-plugins-official";
+/** 上游 v3.16.2 新增：Claude Code 官方市场（GitHub git 源），与 ZCode 官方市场并列。 */
+export const CLAUDE_OFFICIAL_PLUGIN_MARKETPLACE = "claude-plugins-official";
 export const ZCODE_INLINE_PLUGIN_MARKETPLACE = "inline";
 export const ZCODE_PLUGIN_HOST_COMMAND = "__zcode-plugin-host";
 /**
@@ -29,14 +31,18 @@ export const ZCODE_PLUGIN_HOST_COMMAND = "__zcode-plugin-host";
 export const ZCODE_DWF_CHILD_COMMAND = "__zcode-dwf-child";
 
 /**
- * 「该 id 是官方市场」= canonical ∪ legacy 别名。
+ * 「该 id 是官方市场」= canonical ∪ legacy 别名 ∪ Claude 官方市场（上游 v3.16.2 新增）。
  *
  * 扩集方向无害：多认一个旧名只会让旧名声明多产生一条保留诊断，不会让第三方名获得官方待遇。
  * 判定「本次操作是否由 canonical 记录发起的受信任刷新」时必须用
  * {@link isCanonicalOfficialMarketplaceId}，否则受信任刷新会被自己发出的旧名挡下。
  */
 export function isOfficialMarketplaceId(id: string): boolean {
-  return isCanonicalOfficialMarketplaceId(id) || id === ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE;
+  return (
+    isCanonicalOfficialMarketplaceId(id) ||
+    id === ZCODE_LEGACY_OFFICIAL_PLUGIN_MARKETPLACE ||
+    id === CLAUDE_OFFICIAL_PLUGIN_MARKETPLACE
+  );
 }
 
 /** 只认 canonical id；legacy 别名不满足——用于「刷新方是否持有 canonical 身份」的判定。 */
@@ -141,6 +147,8 @@ export interface PluginStoreListing {
   /** icon 图片：https URL 或内置插件的本地资源路径。 */
   icon?: string;
   category?: string;
+  /** 官方市场内的维护归属；不参与执行权限和安装来源判定。 */
+  publisherType?: "official" | "community";
   author?: string;
   authorUrl?: string;
   homepage?: string;
@@ -177,8 +185,27 @@ export interface PluginManifest {
   repository?: string;
   settings?: unknown;
   skills?: unknown;
+  /** 插件 UI：`ui.surfaces[]` 面板入口声明，adapters 解析。 */
+  ui?: unknown;
   userConfig?: Record<string, PluginUserConfigOption>;
   version?: string;
+}
+
+/** 面板生命周期：第一版只接受会话级；`draft` 留待需要时放开。 */
+export type PluginUiSurfaceAvailability = "session";
+/** 标题：单一字符串或按 locale 键的映射（`{ "zh-CN": "...", "en-US": "..." }`）。 */
+export type PluginUiSurfaceTitle = string | Record<string, string>;
+export interface PluginUiSurfaceDefinition {
+  id: string;
+  title: PluginUiSurfaceTitle;
+  icon?: string;
+  /** 运行时 namespaced MCP server 名（`plugin:${name}:${server}`），UI 直接用它调 mcp/uiReadResource。 */
+  server: string;
+  /** 清单里声明的原始 server 键，仅供诊断与展示。 */
+  declaredServer: string;
+  /** 必须以 `ui://` 开头。 */
+  resourceUri: string;
+  availability: PluginUiSurfaceAvailability;
 }
 
 export interface PluginConfig {
@@ -217,6 +244,8 @@ export interface PluginMetadata {
   skillCount: number;
   skillRootCount: number;
   source: PluginSource;
+  /** 清单 `ui.surfaces[]` 解析结果（已校验）；未声明或全部非法时缺省。 */
+  uiSurfaces?: PluginUiSurfaceDefinition[];
   userConfig?: Record<string, PluginUserConfigOption>;
   version?: string;
 }
@@ -260,6 +289,8 @@ export interface PluginReferenceCatalogEntry {
    * 禁止进入 provider reminder 或协议投影——路径不属于 identifiers-only 契约。
    */
   rootPath: string;
+  /** 面板入口声明（A5）；供 host 在 session 冻结 catalog 里查面板定义。 */
+  uiSurfaces?: PluginUiSurfaceDefinition[];
 }
 
 export interface PluginReferenceCatalog {

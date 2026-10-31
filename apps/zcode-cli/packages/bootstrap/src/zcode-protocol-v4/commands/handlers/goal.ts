@@ -12,7 +12,7 @@ import type {
   CommandResult,
 } from "@zcode/shared/zcode-protocol-v4";
 import type { SteerTurnOptions, SubmitPromptOptions } from "../../../app/types.js";
-import { runWithSessionResidencyFinalization } from "../../../zcode-protocol/session-residency.js";
+import { runWithSessionResidencyFinalization } from "../../../session-execution/index.js";
 import { inputIntentMetadata } from "../input-intent.js";
 import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost, V4SessionRecordView } from "../types.js";
@@ -21,7 +21,7 @@ import {
   enqueueDeferredInputForBusyWork,
   resolveSubmittedExecutionState,
   V4InputAdmissionRejectedError,
-} from "./session-flow.js";
+} from "../input-admission.js";
 
 /** goal 组的裁决拒绝（gateway 捕获后进 ACK failed，message 透传给客户端）。 */
 export class V4GoalRejectedError extends Error {

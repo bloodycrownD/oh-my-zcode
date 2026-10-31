@@ -7,8 +7,8 @@ import {
   ContextMenuSubContent,
   ContextMenuSubTrigger,
 } from "@/components/ui/context-menu.js";
-import { TaskGroupColorDot } from "@/workspace-grouped-tasks/colors.js";
-import type { TaskGroupMenuItem } from "@/workspace-grouped-tasks/types.js";
+import { TaskGroupColorDot } from "@/project-sidebar/grouped/colors.js";
+import type { TaskGroupMenuItem } from "@/project-sidebar/grouped/types.js";
 
 export function GroupedTaskContextMenuContent({
   task,

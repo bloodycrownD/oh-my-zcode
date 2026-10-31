@@ -45,6 +45,15 @@ export function createQueryId(): QueryId {
 /** cron 定时任务生成的 session 默认归入的系统分组固定 id。 */
 export const CRON_DEFAULT_GROUP_ID = "zcode-default-group-cron";
 
+/**
+ * 闲时任务（off-peak）派发会话默认归入的系统分组固定 id，与 cron 分组同构。
+ *
+ * omz 闲时任务运行链已退役、新写入恒为空；保留该声明是为了 task-groups 登记面
+ * 对存量 off-peak 任务（冻结 schema 的 off_peak_task_id 列）仍能归类回原系统分组，
+ * 与上游同构。解冲突时该声明被整体丢弃，导致 task-groups / project-sidebar 编译失败。
+ */
+export const OFF_PEAK_DEFAULT_GROUP_ID = "zcode-default-group-off-peak";
+
 type CronTaskIdentity = Pick<ZCodeTaskMeta, "cronAutomationId"> & {
   automationId?: string;
 };
@@ -76,12 +85,38 @@ export interface ZCodeWorkspacePrepareResult {
   slashCommands?: ZCodeSlashCommand[];
 }
 
+/** Codex 预热前的网络连通性检查结果 */
+export interface ZCodeCodexConnectivityCheckResult {
+  /** 当前检查的目标域名 */
+  target: string;
+  /** host 侧是否成功连通目标站点 */
+  reachable: boolean;
+  /** 失败时保留原始错误，供 UI 日志和 toast 诊断 */
+  error?: string;
+}
+
 // ---- Task 元数据 ----
 
 /** createTask 的返回结果；在持久化元信息之外，补充首屏渲染需要的临时初始化数据。 */
 export interface ZCodeTaskCreateResult extends ZCodeTaskMeta {
   /** createTask 时就能拿到的首批 slash commands，避免 UI 订阅建立前丢掉初始化命令。 */
   initialSlashCommands?: ZCodeSlashCommand[];
+}
+
+/** “补齐已有 session”能力的结果，不负责切换当前 active provider。 */
+export interface ZCodeSyncTaskSessionBindingResult {
+  provider: ZCodeProvider;
+  sessionId: string;
+  lastSyncedTurnIndex: number;
+  updated: boolean;
+}
+
+/** `switchAgent` 切换成功后的统一结果。 */
+export interface ZCodeSwitchAgentResult {
+  meta: ZCodeTaskMeta;
+  provider: ZCodeProvider;
+  sessionId: string;
+  reusedBinding: boolean;
 }
 
 /** 外部原生 session 导入的来源 provider；与 agent runtime 的 ZCodeProvider 解耦，当前仅 Claude Code。 */
@@ -175,7 +210,7 @@ export interface ZCodeWorkspaceTaskListChanged {
   workspacePath: string;
   workspaceIdentity?: string;
   taskId?: string;
-  reason: "auto_archive" | "realtime_sync" | TaskRealtimeReason;
+  reason: TaskRealtimeReason;
   taskMeta?: ZCodeTaskMeta;
   /** Host 已确认该终态应制造后台未读；普通 status/resume/snapshot 收敛不得携带。 */
   unreadSignal?: "background_terminal";

@@ -1,11 +1,8 @@
 /* oxlint-disable eslint(max-lines) -- footer 聚合账户、主题、模式和快捷键菜单。 */
 import type { Locale } from "@zcode/shared";
-import { memo, useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   DesktopCommandIds,
-
-
-
   TID_TASK_SETTINGS_BUTTON,
 } from "@zcode/shared";
 import { ControlHintTooltip } from "@/ControlHintTooltip.js";
@@ -58,9 +55,12 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   settingsButtonMode = "settings",
   workspacePath,
   workspaceIdentity,
-
-
+  // 解冲突时丢了这两个解构：类型里仍声明着 workspaceRemoteSessionId / activeTaskId，
+  // 下方 WorkspaceWebRemoteControlTrigger 的透传因此报 TS2304。按 HEAD 版本补回。
+  workspaceRemoteSessionId,
+  activeTaskId,
   isDesktop = false,
+  banner,
   className,
 }: {
   theme: Theme;
@@ -74,6 +74,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   workspaceRemoteSessionId?: string;
   activeTaskId?: string | null;
   isDesktop?: boolean;
+  banner?: ReactNode;
   className?: string;
 }) {
   const { intl } = useZCodeIntl();
@@ -130,6 +131,7 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
   return (
     // footer 被 Settings 复用，页面专属边距由调用方传入，避免修改共享默认样式。
     <footer className={cn("flex shrink-0 flex-col gap-2.5 px-4 pt-2 pb-4", className)}>
+      {banner}
       <div className="flex min-w-0 gap-2">
         <DropdownMenu open={profileMenuOpen} onOpenChange={setProfileMenuOpen}>
           <DropdownMenuTrigger asChild>
@@ -148,7 +150,11 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
             </Button>
           </DropdownMenuTrigger>
           {/* 菜单内容保持挂载，避免每次点击头像菜单都重建 footer 内部状态。*/}
-          <DropdownMenuContent align="start" className="w-max min-w-50" forceMount>
+          <DropdownMenuContent
+            align="start"
+            className="w-max min-w-50 max-w-[calc(100vw-2rem)]"
+            forceMount
+          >
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
                 <Globe className="size-4" />
@@ -263,6 +269,8 @@ export const WorkspaceSidebarFooter = memo(function WorkspaceSidebarFooterCompon
             <WorkspaceWebRemoteControlTrigger
               workspacePath={workspacePath}
               workspaceIdentity={workspaceIdentity}
+              remoteSessionId={workspaceRemoteSessionId}
+              initialTaskId={activeTaskId ?? undefined}
               compact
             />
           ) : null}

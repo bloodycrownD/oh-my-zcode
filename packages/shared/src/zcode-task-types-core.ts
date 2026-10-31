@@ -146,7 +146,18 @@ export interface ZCodeTaskGoalChangedPatch {
 }
 // ---- ZCode task 模式 ----
 
-export type ZCodeTaskMode = "yolo" | "plan" | "edit" | "auto" | "autoEdit" | "build";
+export type ZCodeTaskMode =
+  | "default"
+  | "yolo"
+  | "guarded"
+  | "plan"
+  | "edit"
+  | "acceptEdits"
+  | "auto"
+  | "dontAsk"
+  | "bypassPermissions"
+  | "autoEdit"
+  | "build";
 
 /**
  * 单个自动输入轮的来源归因。
@@ -194,7 +205,8 @@ export interface ZCodePromptFileAttachment {
   mimeType: string;
   sizeBytes: number;
   /** 附件来源；clipboard-text 表示由长文本粘贴落盘生成，agent 只应按临时文件引用处理。 */
-  sourceKind?: "clipboard-text";
+  sourceKind?: "clipboard-text" | "topic-history";
+  messageCount?: number;
   /** 旧版/无路径环境的兼容回退；新桌面 GUI 不再为普通文件发送 base64。 */
   dataBase64?: string;
   /** 无本地路径时的小文本回退；有 localPath 时由 agent 自行读取。 */
@@ -280,6 +292,10 @@ export interface ZCodeTaskMeta {
    * 导致任务列表、快照和日志互相串读。这里补充 workspaceIdentity 参与隔离。
    */
   workspaceIdentity?: string;
+  /** Controller/renderer 任务列表投影使用；不参与 workspace identity 或持久化 key。 */
+  sourceServerId?: string;
+  /** Source directory 的用户可读名称；缺失时 UI 回退 sourceServerId。 */
+  serverDisplayName?: string;
   /** app-owned workspace 分类；缺省为 project，不参与 workspaceKey。 */
   workspacePurpose?: import("./workspacePurpose.js").WorkspacePurpose;
   createdAt: number;
@@ -313,6 +329,14 @@ export interface ZCodeTaskMeta {
    * 共同使用，避免字段已持久化却无法经类型契约访问。
    */
   cronAutomationId?: string;
+  /**
+   * off-peak 闲时任务身份标记（冻结 schema 的 off_peak_task_id 列对应字段）。
+   *
+   * omz 闲时任务运行链已退役，新写入恒为空；保留可选字段是为了 task-groups 登记面
+   * 的 systemKind 分类与冻结 schema 投影保持上游同构，删掉会让旧库存量行无法表述。
+   * 解冲突时该声明被整体丢弃，导致 services/task-groups 与 UI 分组的 Pick 全部报错。
+   */
+  offPeakTaskId?: string;
   /** fork 产物保留来源 taskId，供 UI 做本地化标题兜底和后续追溯。 */
   forkedFromTaskId?: string;
   /** 未读任务记录最近一次标记/产生未读的时间，用于跨重启保留蓝点状态。 */
@@ -328,10 +352,18 @@ export interface ZCodeTaskMeta {
    * 但拿不到错误正文，用户会以为发送没有触发。这里把失败原因随 task meta 一起持久化。
    */
   lastError?: ZCodeTaskLastError;
+  /** task 级历史修复状态，用于避免读 snapshot 时重复执行一次性迁移逻辑。 */
+  repairState?: ZCodeTaskRepairState;
   /** 任务级文件改动摘要，仅用于列表/标题展示，真实回滚仍以 fileChanges 为准 */
   changeSummary?: ZCodeTaskChangeSummary;
   /** zcode-cli /goal 会话目标；null 表示已显式清空。 */
   target?: ZCodeTaskGoal | null;
+}
+export interface ZCodeTaskRepairState {
+  /** Claude 原生日志补齐历史 snapshot assistant 正文的修复版本。 */
+  claudeNativeSnapshotAssistantContentVersion?: number;
+  /** Codex 原生日志补齐历史 snapshot 子 agent 工具块的修复版本。 */
+  codexNativeSnapshotSubagentToolsVersion?: number;
 }
 export interface ZCodeTaskChangeSummary {
   /** 整个任务里涉及过的唯一文件数 */
@@ -429,6 +461,9 @@ export type ZCodeStreamEvent = (
   | ZCodeTaskSnapshotUpdated
 ) & { inputId?: InputId };
 export type ZCodeTurnSteerSource = "plan_approval_feedback" | "workflow_refine_feedback";
+// FORK (upgrade-316): 上游 v3.16.2 为 /compact 新增了 compact 指令种类；fork 的压缩归
+// MC 侧（fork 的上下文管理层）CLI 无 /compact 指令，全树没有生产写入方，协议 schema
+// （zcodeTurnSteerCommandKindSchema）也只认两成员，因此不保留该成员。
 export type ZCodeTurnSteerCommandKind = "sendText" | "sendGoalCommand";
 export interface ZCodeTurnSteerQueued {
   type: "turn_steer_queued";
@@ -485,7 +520,48 @@ export type ZCodeTimelineStatus =
   | "completed"
   | "failed"
   | "interrupted";
-export type ZCodeTimelineMeta = ZCodeGoalVerificationTimelineMeta | ZCodeSessionForkTimelineMeta;
+export type ZCodeTimelineTrigger = "manual" | "auto" | "reactive" | "partial" | "session_memory";
+export type ZCodeContextCompactionTimelinePhase =
+  | "standalone_turn"
+  | "pre_request"
+  | "mid_turn"
+  | "reactive";
+// FORK (upgrade-316): 解 v3.16.2 冲突时整块丢了上游的 context_compaction timeline 声明，
+// 导致 zcodeTimelineIdentity / zcodeSessionProjection 等时间线消费方全部报 never 属性错误。
+// 这里按上游 MERGE_HEAD(3c5b2276) 原样恢复，行为与上游一致。
+export type ZCodeTimelineMeta =
+  | ZCodeContextCompactionTimelineMeta
+  | ZCodeGoalVerificationTimelineMeta
+  | ZCodeSessionForkTimelineMeta;
+export interface ZCodeContextCompactionTimelineMeta {
+  version: 1;
+  kind: "synthetic";
+  type: "context_compaction";
+  operationId: string;
+  status: ZCodeTimelineStatus;
+  trigger: ZCodeTimelineTrigger;
+  display: "separator";
+  /**
+   * `/compact` 本地会先渲染 optimistic 横条，agent lifecycle 事件稍后才到。
+   * 用 inputId 把两者合并，避免同一次压缩先显示“正在压缩”再额外追加一条“已压缩”。
+   */
+  inputId?: InputId;
+  /** 失败后重试需要保留用户原本输入的 `/compact ...` 指令。 */
+  command?: string;
+  replace?: boolean;
+  reason?: string;
+  boundaryId?: string;
+  summaryMessageId?: string;
+  preCompactTokenCount?: number;
+  postCompactTokenCount?: number;
+  truePostCompactTokenCount?: number;
+  attempt?: number;
+  maxAttempts?: number;
+  /** compact 阶段用于区分 mid_turn / pre_request 等真实压缩边界，避免 UI 和 e2e 只能按文案猜。 */
+  phase?: ZCodeContextCompactionTimelinePhase;
+  startedAt?: number;
+  endedAt?: number;
+}
 export interface ZCodeSessionForkTimelineMeta {
   version: 1;
   kind: "synthetic";
@@ -514,8 +590,10 @@ export interface ZCodeToolCall {
   title: string;
   /** agent ToolCall 原始 payload，调试协议字段时以此为准 */
   raw: unknown;
+  pluginMetadata?: { pluginId: string; component: "mcp" };
   /** Skill resolved metadata；只用于 telemetry attribution。 */
   skillMetadata?: {
+    name?: string;
     qualifiedName?: string;
     pluginId?: string;
     source?: "agents" | "zcode" | "bundled" | "plugin" | "remote";
@@ -543,8 +621,10 @@ export interface ZCodeToolCallUpdate {
   error?: string;
   /** agent ToolCallUpdate 原始 payload，调试协议字段时以此为准 */
   raw: unknown;
+  pluginMetadata?: { pluginId: string; component: "mcp" };
   /** Skill resolved metadata；只用于 telemetry attribution。 */
   skillMetadata?: {
+    name?: string;
     qualifiedName?: string;
     pluginId?: string;
     source?: "agents" | "zcode" | "bundled" | "plugin" | "remote";
@@ -652,6 +732,7 @@ export interface ZCodeTaskComplete {
   usage?: ZCodeUsage;
 }
 export interface ZCodeTaskRunStarted {
+  inputOrigin?: "desktop" | "mobile";
   type: "task_run_started";
   taskId: string;
   traceId: TraceId;

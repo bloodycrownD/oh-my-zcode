@@ -1,3 +1,6 @@
+// TODO(upgrade-316): 上游 3.16 的 useDynamicWorkflowUserModeSync（依赖
+// ICodingPlanSubscriptionService + store.reload(service)）随订阅计费面整删；fork 的
+// dynamicWorkflowAvailabilityStore 只有无参 ensureLoaded()/refresh()。
 import { useEffect, useMemo } from "react";
 import {
   useDynamicWorkflowAvailabilityStore,

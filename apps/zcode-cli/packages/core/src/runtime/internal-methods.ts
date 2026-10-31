@@ -291,10 +291,13 @@ export interface AgentRuntimeCoreMethods {
   ): Promise<void>;
   startMcpStartup(traceContext: TraceContext): Promise<McpConnectionSnapshot> | undefined;
   initializeMcp(traceContext: TraceContext): Promise<void>;
+  // fork 的设置页热刷新（全量 servers 替换 + 工具面 diff）与上游 A7 的
+  // tools/list_changed 增量刷新并存，两者各自被 runtime 公开面调用。
   refreshMcpServers(
     servers: Record<string, McpServerConfig>,
     traceContext?: TraceContext,
   ): Promise<{ serverCount: number; registeredToolCount: number; removedToolCount: number }>;
+  refreshMcpToolsIfChanged(traceContext: TraceContext): Promise<void>;
   discoverSkillsForContext(traceContext: TraceContext): Promise<SkillLoadOutcome | undefined>;
   createConfigOnlyContextSnapshot(workingDirectory: string): ContextSourceSnapshot;
   initializeMessageHistoryFromContext(

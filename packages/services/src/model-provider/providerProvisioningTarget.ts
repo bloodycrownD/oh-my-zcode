@@ -12,6 +12,7 @@ import {
   isProviderProvisioningAccountCredentialKey,
   type ProviderProvisioningEnvelope,
   type ProviderProvisioningResult,
+  type ProviderProvisioningErrorCode,
 } from "@zcode/shared";
 import type { ICredentialService } from "../credential/credential.js";
 import type { ISettingService } from "../setting/setting.js";
@@ -61,28 +62,48 @@ export function createProviderProvisioningTarget(
         }
 
         validateCredentialEntries(envelope);
+        // FORK（D-4）：Provisioning 只同步 account-provider 键；oauth-session 随账号面整删。
+        // 旧/手工 Key 留在原 Store，避免升级同步误删其它客户端共享的凭据。
+        const provisioningCredentials = envelope.credentials.filter(
+          (entry) => entry.scope === "account-provider",
+        );
         await options.providerRuntime.start();
         const before = await captureBeforeState(envelope, options);
         const personalUpdate = parsePersonalConfig(envelope);
         const applied: AppliedProvisioningState = {
           settings: false,
           settingsExpected: envelope.accountSettings,
+          settingsVersion: Math.max(
+            Date.now(),
+            (before.settings.providerFamilyDomainUpdatedAt ?? 0) + 1,
+          ),
           credentials: [],
           personalConfig: false,
           personalConfigExpected: personalUpdate,
         };
 
+        let errorCode: ProviderProvisioningErrorCode = "target-write-failed";
         try {
           // 先登记再写入：底层原子写即使在替换完成后才抛错，也必须进入回滚集合。
           applied.settings = true;
-          await options.settingService.update({
-            providerFamilyDomain: envelope.accountSettings.providerFamilyDomain ?? undefined,
-            providerFamilyConnectionSelections:
-              envelope.accountSettings.providerFamilyConnectionSelections,
-          });
+          await options.settingService.update(
+            {
+              providerFamilyDomainUpdatedAt: applied.settingsVersion,
+              providerFamilyDomain: envelope.accountSettings.providerFamilyDomain ?? undefined,
+              providerFamilyConnectionSelections:
+                envelope.accountSettings.providerFamilyConnectionSelections,
+            },
+            {
+              // 原因：Host 同步也与本地连接选择竞争，提交必须比较捕获的完整快照和版本。
+              providerFamilyDomain: before.settings.providerFamilyDomain,
+              providerFamilyConnectionSelections:
+                before.settings.providerFamilyConnectionSelections,
+              providerFamilyDomainUpdatedAt: before.settings.providerFamilyDomainUpdatedAt ?? 0,
+            },
+          );
 
           const incomingCredentials = new Map(
-            envelope.credentials.map((credential) => [credential.key, credential.value]),
+            provisioningCredentials.map((credential) => [credential.key, credential.value]),
           );
           for (const key of before.credentials.keys()) {
             const value = incomingCredentials.get(key);
@@ -102,23 +123,18 @@ export function createProviderProvisioningTarget(
 
           const snapshot =
             await options.providerRuntime.registryService.refresh("provider-provisioning");
-          if (
-            personalUpdate.defaultModelSelection &&
-            !options.providerRuntime.registryService.validateSelection(
-              personalUpdate.defaultModelSelection,
-            ).ok
-          ) {
-            throw new Error("同步后的远端 Registry 不支持本地默认模型");
-          }
+          // 失效默认只是新会话偏好；把它当同步硬条件会让正常 SSH 被旧模型/档位阻断。
+          // 原样保留偏好，由 Host 现有推荐逻辑解析；真实写入/刷新失败仍按事务回滚。
 
           const result = {
             syncId: envelope.syncId,
             status: "applied" as const,
             personalProviderCount: personalUpdate.providers.keys().length,
-            credentialCount: envelope.credentials.length,
+            credentialCount: provisioningCredentials.length,
             configRevision: snapshot.sourceRevisions.config,
             rolledBack: false,
           } satisfies ProviderProvisioningResult;
+          errorCode = "target-commit-failed";
           await writeStateFile(options.stateFilePath, appendStateRecord(previousState, result));
           return result;
         } catch (error) {
@@ -130,8 +146,9 @@ export function createProviderProvisioningTarget(
               syncId: envelope.syncId,
               status: "rollback_failed",
               personalProviderCount: before.personal.providers.keys().length,
-              credentialCount: envelope.credentials.length,
+              credentialCount: provisioningCredentials.length,
               errorMessage: `${formatError(error)}；回滚失败：${formatError(rollbackError)}`,
+              errorCode,
               rolledBack: false,
             } satisfies ProviderProvisioningResult;
           }
@@ -139,8 +156,9 @@ export function createProviderProvisioningTarget(
             syncId: envelope.syncId,
             status: "failed",
             personalProviderCount: before.personal.providers.keys().length,
-            credentialCount: envelope.credentials.length,
+            credentialCount: provisioningCredentials.length,
             errorMessage: formatError(error),
+            errorCode,
             rolledBack: true,
           } satisfies ProviderProvisioningResult;
         }
@@ -158,6 +176,7 @@ interface BeforeState {
 interface AppliedProvisioningState {
   settings: boolean;
   settingsExpected: ProviderProvisioningEnvelope["accountSettings"];
+  settingsVersion: number;
   credentials: Array<{ key: string; value: string | null }>;
   personalConfig: boolean;
   personalConfigExpected: ProviderConfigLayerUpdate;
@@ -241,13 +260,24 @@ async function rollback(
       const previousSettings = toProvisioningAccountSettings(before.settings);
       if (sameAccountSettings(current, previousSettings)) {
         // 写入失败发生在落盘前，目标已经处于回滚前的状态。
-      } else if (!sameAccountSettings(current, applied.settingsExpected)) {
+      } else if (
+        !sameAccountSettings(current, applied.settingsExpected) ||
+        (current.providerFamilyDomainUpdatedAt ?? 0) !== applied.settingsVersion
+      ) {
         errors.push(new Error("Account Settings 在同步期间被其它操作修改，跳过回滚"));
       } else {
-        await options.settingService.update({
-          providerFamilyDomain: before.settings.providerFamilyDomain,
-          providerFamilyConnectionSelections: before.settings.providerFamilyConnectionSelections,
-        });
+        await options.settingService.update(
+          {
+            providerFamilyDomain: before.settings.providerFamilyDomain,
+            providerFamilyConnectionSelections: before.settings.providerFamilyConnectionSelections,
+          },
+          {
+            // 原因：归属检查与写入间仍有竞态，回滚也必须在锁内比较本次提交版本。
+            providerFamilyDomain: current.providerFamilyDomain,
+            providerFamilyConnectionSelections: current.providerFamilyConnectionSelections,
+            providerFamilyDomainUpdatedAt: applied.settingsVersion,
+          },
+        );
       }
     } catch (error) {
       errors.push(error);

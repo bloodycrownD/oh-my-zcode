@@ -17,17 +17,13 @@ import {
   type TurnId,
 } from "@zcode/contracts";
 import { mapAttachmentRefsToTurnAttachments } from "../attachment-refs.js";
+import { commandAdmissionOf } from "../executor.js";
+import { hasPromptInput, V4InputAdmissionRejectedError } from "../input-admission.js";
 import { inputIntentMetadataFromCanonical } from "../input-intent.js";
 import { startPromptTurn } from "../prompt-turn.js";
-import { commandAdmissionOf } from "../executor.js";
 import { requireRecord } from "../record-access.js";
 import type { V4CommandCoreHost, V4SessionRecordView } from "../types.js";
-import {
-  hasActiveTurn,
-  hasPromptInput,
-  preemptActiveTurnAndWait,
-  V4InputAdmissionRejectedError,
-} from "./session-flow.js";
+import { hasActiveTurn, preemptActiveTurnAndWait } from "./session-flow.js";
 import { applyGoalCommand } from "./goal.js";
 import type { ConversationEditTarget } from "../../product-projection.js";
 
@@ -57,7 +53,7 @@ export class V4ForkTargetNotLatestSegmentError extends Error {
   }
 }
 
-class V4ForkTargetGuardError extends Error {
+export class V4ForkTargetGuardError extends Error {
   constructor(
     readonly reasonCode: string,
     targetRowId: number,
@@ -68,7 +64,7 @@ class V4ForkTargetGuardError extends Error {
 }
 
 /** latestQueryEditOnly：旧 row / 非 realUser row / 无投影均直接拒绝，不 stop 当前 turn。 */
-class V4EditTargetNotLatestError extends Error {
+export class V4EditTargetNotLatestError extends Error {
   readonly reasonCode = "guard.latestQueryEditOnly";
 
   constructor(targetRowId: number) {
@@ -78,7 +74,7 @@ class V4EditTargetNotLatestError extends Error {
 }
 
 /** latestAssistantRetryOnly：历史 assistant 回复 retry 会回退 active branch，必须拒绝。 */
-class V4RetryTargetNotLatestError extends Error {
+export class V4RetryTargetNotLatestError extends Error {
   readonly reasonCode = "guard.latestAssistantRetryOnly";
 
   constructor(targetRowId: number) {
@@ -137,11 +133,17 @@ async function editUserQuery(
   const attachmentRefs = payload.attachments ?? stableAttachmentRefs(editTarget);
   // attachments 缺省与 [] 语义不同；必须基于 effective refs 校验，
   // 才能同时允许 attachment-only edit，并在正文和附件都被清空时于 rewind 前拒绝。
-  if (!hasPromptInput(payload.newText, attachmentRefs)) {
+  if (
+    !hasPromptInput(payload.newText, attachmentRefs) &&
+    !(payload.conversationQuotes ?? editTarget.intent.conversationQuotes)?.length
+  ) {
     throw new V4InputAdmissionRejectedError("proto.invalidPayload", "input must not be empty");
   }
   // 附件映射在 rewind 前完成：引用失效要在截断历史之前暴露，避免半程失败。
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, attachmentRefs);
+  // TODO(upgrade-316): 上游把 highspeed 编辑凭据（highspeedEdit）与「破坏性 branch cut 前
+  // preflightCanonicalIntent」搬进 canonical-intent-replay.js；该模块依赖本仓不存在的
+  // goal-compact.js，暂不接入，保留 fork 的 hasActiveTurn 抢占判据。
   // 抢占判据不能只看 Bootstrap activeAbortController：v4 sendText 起的 turn 与
   // 后台通知的 model-only turn 由 Core runtime command 独立持有 foreground
   // authority、不创建 Bootstrap controller。只看外层锁会漏掉这批活跃 turn——
@@ -250,7 +252,7 @@ async function editUserQuery(
 }
 
 /**
- * retryTurn：assistant target → messageId → rewind 截断 + 重发
+ * retryTurn：assistant target → canonical 输入 messageId → rewind 截断 + 重发
  * canonical user intent。intent 在 projection resolver 阶段、rewind **之前**完成解析，
  * 截断后不再回读可见文本或 transcript parent 猜测原输入。
  */
@@ -270,7 +272,10 @@ async function retryTurn(
   }
   const attachmentRefs = stableAttachmentRefs(resolution.editTarget);
   const attachments = await mapAttachmentRefsToTurnAttachments(record.app, attachmentRefs);
-  await submitConversationRewind(host, record, resolution.messageId);
+  // TODO(upgrade-316): 上游在此处新增 preflightCanonicalIntent（branch cut 前预检模型），
+  // 该原语只存在于依赖 goal-compact.js 的 canonical-intent-replay.js，暂按 fork 版本重发。
+  // 从 assistant 就近回溯 user 会误选中途的合成提醒；使用已解析的原始输入边界。
+  await submitConversationRewind(host, record, resolution.editTarget.transcriptMessageId);
   await startCanonicalIntent(
     host,
     record,

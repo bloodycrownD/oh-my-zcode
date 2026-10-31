@@ -1,5 +1,6 @@
 import type {
   BackgroundResultOriginMeta,
+  HighspeedMessageMetadata,
   ModelStreamingPayload,
   SessionEvent,
   SyntheticUserMessageSource,
@@ -10,9 +11,10 @@ import type {
 } from "@zcode/contracts";
 import { SessionEventType } from "@zcode/contracts";
 import type { AttachmentSourceKind } from "@zcode/shared";
+import type { AttachmentRef } from "@zcode/shared/zcode-protocol-v4";
 
-type CanonicalConversationVisibility = "visible" | "modelOnly" | "stateOnly";
-type CanonicalConversationOrigin =
+export type CanonicalConversationVisibility = "visible" | "modelOnly" | "stateOnly";
+export type CanonicalConversationOrigin =
   | "realUser"
   | "backgroundResult"
   | "goalContinuation"
@@ -22,7 +24,7 @@ type CanonicalConversationOrigin =
   | "assistant"
   | "system";
 
-interface CanonicalConversationPlacement {
+export interface CanonicalConversationPlacement {
   lane: "trigger" | "assistantWork" | "stateOnly";
   relation: "withinProductTurn" | "none";
 }
@@ -47,6 +49,9 @@ interface CanonicalConversationFactBase {
 }
 
 export interface CanonicalUserIntentFact extends CanonicalConversationFactBase {
+  inputOrigin?: "desktop" | "mobile";
+  conversationQuotes?: import("@zcode/contracts").TurnInputIntentMetadata["conversationQuotes"];
+  botGroupSource?: import("@zcode/shared").BotGroupInputSource;
   semanticKind: "userIntent";
   visibility: "visible" | "modelOnly";
   origin:
@@ -78,6 +83,7 @@ export interface CanonicalUserIntentFact extends CanonicalConversationFactBase {
   sourceCommandId?: string;
   foregroundExecutionId?: string;
   clientId?: string;
+  highspeed?: HighspeedMessageMetadata;
   attachments?: readonly CanonicalTurnAttachment[];
   queueItemId?: string;
   admissionSeq?: number;
@@ -94,16 +100,17 @@ export interface CanonicalUserIntentFact extends CanonicalConversationFactBase {
     queueItemId?: string;
     clientId?: string;
   };
+  source?: TurnInputIntentMetadata["source"];
 }
 
-export interface CanonicalTurnAttachment {
+export interface CanonicalTurnAttachment extends Omit<AttachmentRef, "ref"> {
   ref?: string;
   fileName: string;
   mime: string;
   bytes: number;
   /**
    * 附件来源（clipboard-text = 长粘贴落盘的临时文本）。
-   * 上游用 `Omit<AttachmentRef, "ref">` 继承；本仓的手写形状需显式登记，
+   * 形状同时按上游 `Omit<AttachmentRef, "ref">` 继承、并在本仓显式登记字段：
    * 否则 normalizeAttachments 的 `{...attachment}` 透传在类型上不可见、
    * 投影行 schema 也拿不到授权依据。
    */
@@ -140,7 +147,7 @@ export type CanonicalConversationFact =
   | CanonicalAssistantSegmentFact
   | CanonicalPassthroughFact;
 
-interface NormalizeConversationEventContext {
+export interface NormalizeConversationEventContext {
   productTurnId?: string;
   openAssistantSegments?: Partial<Record<"text" | "reasoning", CanonicalOpenSegmentIdentity>>;
 }
@@ -241,6 +248,7 @@ function normalizeTurnStarted(
       ? { foregroundExecutionId: payload.foregroundExecutionId }
       : {}),
     ...(payload.intent?.clientId ? { clientId: payload.intent.clientId } : {}),
+    ...(payload.intent?.highspeed ? { highspeed: payload.intent.highspeed } : {}),
     ...(payload.intent?.queueItemId ? { queueItemId: payload.intent.queueItemId } : {}),
     ...(payload.intent?.admissionSeq !== undefined
       ? { admissionSeq: payload.intent.admissionSeq }
@@ -263,7 +271,13 @@ function normalizeTurnStarted(
     ...(payload.intent?.planEnabled !== undefined
       ? { planEnabled: payload.intent.planEnabled }
       : {}),
+    ...(payload.intent?.inputOrigin ? { inputOrigin: payload.intent.inputOrigin } : {}),
+    ...(payload.intent?.conversationQuotes
+      ? { conversationQuotes: payload.intent.conversationQuotes }
+      : {}),
+    ...(payload.intent?.botGroupSource ? { botGroupSource: payload.intent.botGroupSource } : {}),
     ...(payload.intent?.provenance ? { provenance: payload.intent.provenance } : {}),
+    ...(payload.intent?.source ? { source: payload.intent.source } : {}),
     ...normalizeAttachments(payload),
   };
 }

@@ -1,11 +1,12 @@
 /**
- * Replay 的**结算次序闸**。
+ * Replay 的**结算次序闸**（docs/execution-engine.md「Replaying the settle order」）。
  *
  * 站点序号是调用到达时的计数器，所以一条分支在 await **之后**做的每一次 journal 调用，
  * 编号依的是扇出完成的顺序，而不是脚本发起的顺序。那个顺序是墙钟的，节点行里没有任何东西
  * 能复现它：按准入顺序释放缓存结算，重放的 `Promise.all` 会按数组顺序跑续体，join 之后的第一条
  * `report` 于是拿到 journal 给「最先跑完的那条分支」的序号，run 死在自己的防御性校验里
- * （`InputHashMismatch`），即使脚本本身是确定性的，也可能因重放完成顺序不同而失败。
+ * （`InputHashMismatch`），被指认为不确定的却是一个纯脚本。2026-09-17 实盘：五路并行调研，
+ * 完成顺序 1、4、2、5、3，resume 在 report#2@2 上炸。
  *
  * 所以 resume 重放的是**调度**，不只是答案：本闸持有首生的结算次序，命中缓存的结算在释放点
  * 挂起，直到它前面的每一条都已释放。次序表之外的实例直接放行——闸门只约束它有证据的那些，
@@ -13,35 +14,22 @@
  */
 
 import { isArtifactPresetOp } from "../facade/registry.js";
-import type {
-  InstanceRef,
-  JournalStorePort,
-  NodeKind,
-  NodeRecord,
-  RunEvent,
-  RunEventType,
-} from "./types.js";
+import { NODE_KINDS, type RunEventType } from "./journal-read-types.js";
+import type { InstanceRef, JournalStorePort, NodeKind, NodeRecord, RunEvent } from "./types.js";
 import { refToString } from "./types.js";
 
 /**
  * 重放时一定会兑现一个 promise 的节点 kind：除 `report`（void）与 `artifact`（要看成员族，
- * 见 {@link claimsOnReplay}）之外的全部。
+ * 见 {@link claimsOnReplay}）之外的全部。从 {@link NODE_KINDS} 派生：新增的 kind 默认算进来。
  *
- * FORK 偏离上游：上游从 `journal-read-types.ts` 的 `NODE_KINDS` 运行时集派生（新增 kind 默认
- * 算进来），fork 没有那个常量、只有 types.ts 的 `NodeKind` 类型联合，所以这里按联合成员据实
- * 列举（顺序与上游的派生值逐字相同）。上游把本表 export 出去是给它的 testing 包用，fork 没有
- * 那个消费方，按本仓「不新增未使用导出」的惯例保持模块私有。新增 kind 时必须把本表随联合一并
- * 补上，否则 resume 的窄读会漏掉新 kind 的既有行。
+ * FORK 偏离上游：上游把本表 export 出去是给它的 testing 包用，fork 没有那个消费方，按本仓
+ * 「不新增未使用导出」的惯例保持模块私有（与 SETTLE_EVENT_TYPES 同规）。
  */
-const REPLAY_WORK_KINDS: readonly NodeKind[] = ["ask", "world-read", "world-run"];
+const REPLAY_WORK_KINDS: readonly NodeKind[] = NODE_KINDS.filter(
+  (kind) => kind !== "report" && kind !== "artifact",
+);
 
-/**
- * 结算次序只看这三种事件（{@link settledInstanceKey}），其余事件不必读出来。
- *
- * FORK (upstream-v3.15.1-backport)：上游移植——上游 replay-order.ts:30-34 同形常量（模块私有，
- * 未 export）。fork 侧同样不 export：本仓没有上游那个 testing 包消费方，按「不新增未使用导出」
- * 的惯例留在模块内。
- */
+/** 结算次序只看这三种事件（{@link settledInstanceKey}），其余事件不必读出来。 */
 const SETTLE_EVENT_TYPES: readonly RunEventType[] = [
   "node-settled",
   "artifact-published",
@@ -49,12 +37,10 @@ const SETTLE_EVENT_TYPES: readonly RunEventType[] = [
 ];
 
 /**
- * resume 要的节点行（FORK 偏离上游：上游同样形状，住在 `engine-resume.ts` 的
- * `restoreFromJournal` 里；fork 没有那个模块，读形状落在这里）。工作行**不带结果**——结算
- * 次序闸与 ask 行数表只看 kind / status / 坐标；产物行带结果——成员族与版本记录在 `result`
- * 上，而产物行有界（32 个 id × 每 id 16 版）。报告行一条都不读：一个 run 可以有 65,536 条
- * report，恢复它的计数是 `countNodes` 的聚合（或一次元数据窄读兜底，见 engine-report.ts 的
- * `countRecordedReports`），而不是把每条 item 解码进内存。
+ * resume 要的节点行（读形状的消费者是 engine-resume.ts 的 `restoreFromJournal`）。工作行
+ * **不带结果**——结算次序闸与 ask 行数表只看 kind / status / 坐标；产物行带结果——成员族与版本
+ * 记录在 `result` 上，而产物行有界（32 个 id × 每 id 16 版）。报告行一条都不读：一个 run 可以有
+ * 65,536 条 report，恢复它的计数是 `countNodes` 的聚合，而不是把每条 item 解码进内存。
  */
 export function readReplayRows(
   journal: JournalStorePort,
@@ -89,7 +75,7 @@ export class ReplaySettleOrder {
     return new ReplaySettleOrder([]);
   }
 
-  /** 首生的结算次序（用于诊断）。 */
+  /** 首生的结算次序（诊断与测试用）。 */
   recorded(): readonly string[] {
     return this.order;
   }
@@ -136,7 +122,7 @@ export class ReplaySettleOrder {
    * run 结算：闸门永久打开，挂起的按记录次序放完。
    *
    * 不放的后果是脚本那侧的 promise 永远不兑现——在 harness 里沙箱马上就被关掉，但在同进程
-   * 跑脚本的装配（如 `EvalWorkflowSnippet`）里那就是一次挂死。结算之后释放是安全的：
+   * 跑脚本的装配（引擎测试、`EvalWorkflowSnippet`）里那就是一次挂死。结算之后释放是安全的：
    * 引擎已 markSettled，每条 host 路径都以 `isRunSettled()` 开头。
    */
   open(): void {
@@ -207,10 +193,10 @@ export function recoverSettleOrder(
 
   const order: string[] = [];
   const seen = new Set<string>();
-  // FORK (upstream-v3.15.1-backport)：上游移植——按上游 replay-order.ts:189-192 收窄事件读，
-  // 只读三种结算事件类型，`reportItems: { limit: 0 }` 让存储层剥掉全部 report item（一条
-  // 65,536 条的 run 不再把整段事件日志连同 item 解进内存）。收窄与 {@link settledInstanceKey}
-  // 的类型集必须同步，少了哪一种类型都会让次序表悄悄缺项、重放退化成未受闸的释放顺序。
+  // 按上游 replay-order.ts:189-192 收窄事件读，只读三种结算事件类型，`reportItems: { limit: 0 }`
+  // 让存储层剥掉全部 report item（一条 65,536 条的 run 不再把整段事件日志连同 item 解进内存）。
+  // 收窄与 {@link settledInstanceKey} 的类型集必须同步，少了哪一种类型都会让次序表悄悄缺项、
+  // 重放退化成未受闸的释放顺序。
   for (const { event } of journal.listEvents(runId, {
     types: SETTLE_EVENT_TYPES,
     reportItems: { limit: 0 },

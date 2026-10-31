@@ -15,6 +15,9 @@ import {
   type ZCodeProtocolSessionRecord,
 } from "./server-types.js";
 import { runSessionModelConfigMutation } from "../zcode-protocol-v4/model-config-mutation.js";
+// TODO(upgrade-316): 上游新增 providerRuntimeHeadersPort（createProviderRuntimeHeadersPort 来自
+// ./provider-runtime-headers.js），但该模块没有出现在本次合并结果里，fork 也没有这个能力；先不接线，
+// 待确认是否补齐上游模块后在此传入 providerRuntimeHeadersPort。
 
 export async function readWorkspacePresentation(
   context: ZCodeProtocolAgentServerContext,
@@ -71,10 +74,10 @@ export async function createWorkspaceZCodeApp(
   workspace: ZCodeWorkspaceRef,
   options: Omit<ZCodeAppOptions, "providerRegistry">,
 ): Promise<ZCodeApp> {
-const sessionId = options.sessionId;
-return context.deps.createZCodeApp({
+  const sessionId = options.sessionId;
+  return context.deps.createZCodeApp({
     ...options,
-platform: context.deps.platform,
+    platform: context.deps.platform,
     // FORK（D-13）：magic-context 的预算摘要 side state 出口。App 侧每轮 pass /
     // 每次 provider usage 落库后读一次 `magic-context.db` 并推过来，这里接到 v4
     // gateway 的投影层。`sessionId` 缺席的临时 App（模型连通性探测）不装这条——
@@ -85,6 +88,8 @@ platform: context.deps.platform,
           onMagicContextUsage: (usage: SessionMagicContextUsage | null) =>
             context.v4Gateway?.updateMagicContextUsage(sessionId, usage),
         }),
+    // 上游新增：协议会话的插件 skill 目录不隐藏 visualize 插件（该选项与 gate 已随合并进入本仓库）。
+    includeVisualize: true,
     runtimeConfig: {
       ...options.runtimeConfig,
       // createZCodeApp 会把 workingDirectory 规范化为执行 cwd。把协议入口的

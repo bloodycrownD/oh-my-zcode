@@ -24,6 +24,7 @@ import { type CodingPlanLoginOptions } from "./codingPlanPricingCards.js";
 import { useProviderSettingsView } from "@/hooks/useProviderSettingsView.js";
 import type { ProviderSettingsView } from "@zcode/services";
 import type { SavePersonalModelDraftInput } from "@zcode/provider";
+// fork 已整体移除官方 Coding Plan 计费购买面，上游的 plan banner / team plan 查询逻辑不吸收。
 
 export function ModelProviderSectionDetail({
   selectedNavItem,
@@ -171,3 +172,4 @@ export function ModelProviderSectionDetail({
     />
   );
 }
+// fork 已移除官方计费购买链路，上游的 CodingPlanPurchaseChoiceBanners 等购买入口不吸收。

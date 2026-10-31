@@ -2,12 +2,19 @@ import type { ZCodeProvider } from "@zcode/shared";
 
 type SkillSourceType = "glm" | "unknown";
 
-function resolveSkillSourceType(skillPath: string): SkillSourceType {
+export function resolveSkillSourceType(skillPath: string): SkillSourceType {
   const normalized = skillPath.replaceAll("\\", "/").toLowerCase();
+  // FORK(upgrade-316)：目录约定是双轨的——用户级 HOME 在 fork 品牌改名为 `.omz`
+  // （~/.omz/skills、~/.omz/cli/plugins/cache），工作区级 `.zcode/skills` 是仓库内容
+  // 约定、不参与改名（见 skillsService.ts 的目录注释）。此前只认 `.omz` 会让
+  // 工作区 `.zcode/skills` 里没有 `glm:` 前缀 id 的技能被 / $ 面板与设置页过滤掉。
   if (normalized.includes("/.omz/skills/")) {
     return "glm";
   }
   if (normalized.includes("/.omz/cli/plugins/cache/")) {
+    return "glm";
+  }
+  if (normalized.includes("/.zcode/skills/")) {
     return "glm";
   }
   return "unknown";

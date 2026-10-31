@@ -68,7 +68,7 @@ type CodingPlanConnectionNavItem = Extract<
   { type: "codingPlan" | "teamPlan" }
 >;
 
-function resolveCodingPlanProviderSyncAttemptKey({
+export function resolveCodingPlanProviderSyncAttemptKey({
   activeOAuthProvider,
   oauthProviderId,
   providerId,
@@ -84,7 +84,7 @@ function resolveCodingPlanProviderSyncAttemptKey({
   return `${providerId}:${activeOAuthProvider}`;
 }
 
-function shouldRetryUnchangedCodingPlanProviderSync({
+export function shouldRetryUnchangedCodingPlanProviderSync({
   attemptKey,
   attemptStatus,
   modeUnchanged,
@@ -129,7 +129,8 @@ function shouldRefreshCodingPlanEntitlementsAfterSave(
     return false;
   }
 
-  // enabled/name/models 这类 UI 配置不会改变权益查询凭据。
+  // 只比较手工 Key 配置；OAuth account access 不读取旧 Key，由账号/权益事件刷新。
+  // Bugfix: enabled/name/models 这类 UI 配置不会改变权益查询凭据。
   // 之前保存任意 Coding Plan 字段都会刷新状态，导致侧栏短暂进入 loading 并冲掉当前选中。
   return (
     (previousProvider ? getProviderFormApiKey(previousProvider).trim() : "") !==
@@ -195,7 +196,7 @@ function resolveConnectionSelectionForNavItem(
   return isStartPlanModelProviderId(item.presetId) ? null : { kind: "individual-coding-plan" };
 }
 
-function resolveModelProviderSideSelectionKey(
+export function resolveModelProviderSideSelectionKey(
   item: ModelProviderNavGroup["items"][number],
 ): string {
   if (item.type !== "preset" && item.type !== "codingPlan" && item.type !== "teamPlan") {
@@ -552,7 +553,7 @@ export function ModelProviderSection({
       presetSubscriptionCompletionProviderIdRef.current = presetSubscriptionProviderId;
       void (async () => {
         try {
-          // 连接/重新授权成功后 provider apiKey 会先于权益接口结果落盘。
+          // Bugfix: 连接/重新授权成功后账号连接状态会先于本轮权益接口结果就绪。
           // pending 必须等本轮权益刷新完成后再清，否则 Plan Card 会短暂显示旧套餐态或非 loading 状态。
           await refreshProviderPanelAfterAuthChange({});
         } finally {
@@ -777,15 +778,23 @@ export function ModelProviderSection({
         codingPlanStatusSyncAttemptsRef.current.set(planSyncAttemptKey, "inFlight");
       }
       try {
-        await updateSharedSettings({
-          providerFamilyDomain: familySpec.id,
-          providerFamilyDomainUpdatedAt: Date.now(),
-          providerFamilyDomainMigrated: true,
-          providerFamilyConnectionSelections: {
-            ...connectionSelections,
-            [familySpec.id]: selection,
+        await updateSharedSettings(
+          {
+            providerFamilyDomain: familySpec.id,
+            providerFamilyDomainUpdatedAt: Date.now(),
+            providerFamilyDomainMigrated: true,
+            providerFamilyConnectionSelections: {
+              ...sharedSettings?.providerFamilyConnectionSelections,
+              [familySpec.id]: selection,
+            },
           },
-        });
+          {
+            // 原因：页面快照可能落后其它窗口；不能把展示/待提交映射当作锁内预期。
+            providerFamilyDomain: sharedSettings?.providerFamilyDomain,
+            providerFamilyConnectionSelections: sharedSettings?.providerFamilyConnectionSelections,
+            providerFamilyDomainUpdatedAt: sharedSettings?.providerFamilyDomainUpdatedAt ?? 0,
+          },
+        );
         if (item.type === "codingPlan" || item.type === "teamPlan") {
           // 用户动作拥有连接方式 transition：设置落盘后只刷新一次目标 Plan provider。
           await syncCodingPlanProviderOnce(item, {
@@ -810,7 +819,7 @@ export function ModelProviderSection({
     [
       activeOAuthProvider,
       connectionSelections,
-      sharedSettings?.providerFamilyDomain,
+      sharedSettings,
       syncCodingPlanProviderOnce,
       updateSharedSettings,
     ],

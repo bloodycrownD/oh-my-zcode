@@ -29,6 +29,7 @@ import {
   resolveModelStreamIdleTimeoutMs,
 } from "./stream-idle-timeout.js";
 import {
+  createEmptyContextExceededError,
   createStreamDiagnostics,
   isZeroOutputModelCompletion,
   isSuspiciousStreamDiagnostics,
@@ -37,6 +38,7 @@ import {
   logStreamFailureDiagnostics,
   recordStreamChunkDiagnostic,
 } from "./runner-diagnostics.js";
+import { AiSdkModelAdapterError } from "./errors.js";
 import { canRetryEmptyCompletion, scheduleEmptyCompletionRetry } from "./empty-completion-retry.js";
 import { createStreamTextOptions } from "./runner-options.js";
 import {
@@ -54,6 +56,7 @@ import {
 import { toModelStreamEvent } from "./runner-normalization.js";
 import type { EnvRecord } from "./model-execution.js";
 import { detectProviderBusinessFinishError } from "./provider-finish-business-error.js";
+import { createRequestVerificationEmptyStreamError } from "./request-security-edition/recovery.js";
 import {
   calculateRetryDelay,
   logRetryDelayDecision,
@@ -75,6 +78,8 @@ import type {
   AiSdkModelTextRequest,
   ResolvedAiSdkModel,
 } from "./runner-runtime.js";
+import { isRequestVerificationRejection } from "./request-security-edition/recovery.js";
+import { AccountRequestRetry } from "./account-request-retry.js";
 import { resolveModelForAttempt, RuntimeHeadersRefreshError } from "./runner-runtime-headers.js";
 import { retryAllowedByFailurePolicy } from "./workflow-model-failure-policy.js";
 import {
@@ -116,6 +121,7 @@ export async function* runStreamText(input: {
   const isDev = isDevelopmentModelIOEnv(input.env);
   let requestMessages = input.request.messages;
   let signatureRepairAttempted = false;
+  const authRetry = new AccountRequestRetry(input.request, input.resolved, input.logger);
   let emptyCompletionRetryCount = 0;
 
   for (
@@ -123,12 +129,11 @@ export async function* runStreamText(input: {
     retryAttemptLoopContinues(
       retryBudget,
       attempt,
-      input.retry.maxAttempts + Number(signatureRepairAttempted),
+      input.retry.maxAttempts + Number(signatureRepairAttempted) + authRetry.extraAttempts,
     );
     attempt += 1
   ) {
-    const retryBudgetAttempt =
-      attempt - Number(signatureRepairAttempted);
+    const retryBudgetAttempt = attempt - Number(signatureRepairAttempted) - authRetry.extraAttempts;
     const startedAt = Date.now();
     // SSE idle timeout 后的重试如果仍固定首请求窗口，容易被同一段 provider 静默窗口反复打断；
     // core recovery 和 adapter 内部 retry 都统一按重试次数每次增加 30s。
@@ -151,9 +156,7 @@ export async function* runStreamText(input: {
     let statusContext = createAttemptStatusContext(
       {
         ...baseStatusContext,
-        maxAttempts: statusMaxAttempts(
-          Number(signatureRepairAttempted),
-        ),
+        maxAttempts: statusMaxAttempts(Number(signatureRepairAttempted) + authRetry.extraAttempts),
       },
       attempt,
     );
@@ -190,7 +193,7 @@ export async function* runStreamText(input: {
       input.logger?.warn("Retrying model stream after thinking signature rejection", {
         attempt,
         event: "model.reasoning_signature_repair.retry",
-        maxAttempts: input.retry.maxAttempts + 1,
+        maxAttempts: input.retry.maxAttempts + 1 + authRetry.extraAttempts,
         nextAttempt: attempt + 1,
         requestId: statusContext.requestId,
         status: "waiting",
@@ -241,7 +244,8 @@ export async function* runStreamText(input: {
     try {
       resolved = await resolveModelForAttempt({
         attempt,
-        request: attemptRequest,
+        reason: authRetry.takeReason(),
+        request: authRetry.prepareRequest(attemptRequest),
         resolveModel: input.resolveModel,
       });
       const anthropicMetadataUserId = await resolveAnthropicRequestMetadataUserId({
@@ -315,6 +319,7 @@ export async function* runStreamText(input: {
             requestHeaderCount,
             requestHeaders,
             repairThinkingSignatureRejection,
+            canRecoverProjectToken: (error) => authRetry.canRecoverProjectToken(error),
             retryBudgetAttempt,
             startedAt,
             statusContext,
@@ -337,12 +342,24 @@ export async function* runStreamText(input: {
           }
           throw error;
         }
+        if (event.visibleEvents.some((visibleEvent) => visibleEvent.type === "finish")) {
+          const contextError = createEmptyContextExceededError({
+            finishReason: diagnostics.finishReason,
+            rawFinishReason: diagnostics.rawFinishReason,
+            hasAssistantContent: diagnostics.textDeltaChars > 0 || diagnostics.hasReasoningContent,
+            toolCallCount: toolCallAssembler.snapshotNormalizedToolCalls().length,
+            usage: diagnostics.usage,
+          });
+          // 先于 yield finish 进入既有 catch，每个请求只发布一个失败终态。
+          if (contextError) throw contextError;
+        }
         const shouldHoldEmptyCompletionEvents =
           !event.emittedError &&
           event.visibleEvents.some((visibleEvent) => visibleEvent.type === "finish") &&
           input.request.preserveProviderStreamBoundaries !== true &&
           isZeroOutputModelCompletion({
             finishReason: diagnostics.finishReason,
+            rawFinishReason: diagnostics.rawFinishReason,
             reasoningLength: diagnostics.reasoningDeltaChars,
             textLength: diagnostics.textDeltaChars,
             toolCallCount: diagnostics.toolCallCount,
@@ -429,6 +446,8 @@ export async function* runStreamText(input: {
             } satisfies Record<string, unknown>),
         });
         if (hiddenProviderBusinessError) {
+          if (isRequestVerificationRejection(hiddenProviderBusinessError))
+            throw hiddenProviderBusinessError;
           const failure = classifyModelFailure(
             hiddenProviderBusinessError,
             input.request.abortSignal,
@@ -447,12 +466,21 @@ export async function* runStreamText(input: {
         if (isSuspiciousStreamDiagnostics(diagnostics)) {
           // 403 JSON 等业务错误有时不会让 AI SDK 抛出 error chunk，流会以空 completion 结束；
           // 若不在 adapter 层终止，core 会误报 “Model returned no text...”。
-          const streamEndedWithoutOutputError = detectProviderBusinessFinishError({
-            providerId: String(statusContext.providerId),
-            providerKind: statusContext.providerKind,
-            source: diagnostics.lastErrorChunk ?? diagnostics.lastFinishChunk,
-          });
+          const streamEndedWithoutOutputError =
+            detectProviderBusinessFinishError({
+              providerId: String(statusContext.providerId),
+              providerKind: statusContext.providerKind,
+              source: diagnostics.lastErrorChunk ?? diagnostics.lastFinishChunk,
+            }) ??
+            createRequestVerificationEmptyStreamError({
+              accountMode: resolved.accountAccess?.mode,
+              headers: resolved.headers,
+              providerId: String(statusContext.providerId),
+              providerKind: resolved.providerKind,
+            });
           if (streamEndedWithoutOutputError) {
+            if (isRequestVerificationRejection(streamEndedWithoutOutputError))
+              throw streamEndedWithoutOutputError;
             const failure = classifyModelFailure(
               streamEndedWithoutOutputError,
               input.request.abortSignal,
@@ -472,6 +500,7 @@ export async function* runStreamText(input: {
             input.request.preserveProviderStreamBoundaries !== true &&
             isZeroOutputModelCompletion({
               finishReason: diagnostics.finishReason,
+              rawFinishReason: diagnostics.rawFinishReason,
               reasoningLength: diagnostics.reasoningDeltaChars,
               textLength: diagnostics.textDeltaChars,
               toolCallCount: diagnostics.toolCallCount,
@@ -610,7 +639,7 @@ export async function* runStreamText(input: {
       if (retryWithRepairedHistory) {
         statusContext = {
           ...statusContext,
-          maxAttempts: statusMaxAttempts(1),
+          maxAttempts: statusMaxAttempts(1 + authRetry.extraAttempts),
         };
       }
       const classified = classifyModelFailure(error, input.request.abortSignal);
@@ -639,6 +668,24 @@ export async function* runStreamText(input: {
           diagnostics.lastErrorChunk || diagnostics.lastFinishChunk,
         ),
       });
+      const retryWithAuth = authRetry.claim(
+        error,
+        options === undefined ||
+          emittedRetryBoundaryEvent ||
+          streamOutputCommitted ||
+          (input.request.preserveProviderStreamBoundaries === true &&
+            failureDecision.context?.streamFailurePhase === "response_body"),
+      );
+      if (retryWithAuth) {
+        failureDecision.canRetry = true;
+        statusContext = {
+          ...statusContext,
+          maxAttempts: statusMaxAttempts(
+            Number(signatureRepairAttempted) + authRetry.extraAttempts,
+          ),
+        };
+      }
+      // FORK：off-peak 计费已整体移除，不再有排队 429 的预算豁免分支。
       if (retryWithRepairedHistory) {
         failureDecision.canRetry = true;
       }
@@ -673,6 +720,7 @@ export async function* runStreamText(input: {
           ...modelFailureStatusFields(error, failure, errorPhase),
           timestamp: new Date(completedAt).toISOString(),
           type: "model_request_failed",
+          ...(error instanceof AiSdkModelAdapterError && error.usage ? { usage: error.usage } : {}),
         },
         {
           ...statusPublishOptions(input, admission),
@@ -681,6 +729,18 @@ export async function* runStreamText(input: {
       );
       terminalStatusPublished = true;
 
+      if (retryWithAuth) {
+        await publishRetryScheduledStatus(
+          input,
+          statusContext,
+          attempt,
+          0,
+          { ...failure, retryReason: ModelRetryReason.AuthRefresh },
+          requestHeaders,
+          responseHeaders,
+        );
+        continue;
+      }
       if (retryWithRepairedHistory) {
         await publishRetryScheduledStatus(
           input,
@@ -912,6 +972,7 @@ async function handleStreamChunk(input: {
   };
   pendingRetrySafeEvents: ModelStreamEvent[];
   repairThinkingSignatureRejection: (error: unknown) => boolean;
+  canRecoverProjectToken: (error: unknown) => boolean;
   retryBudgetAttempt: number;
   requestHeaderCount: number;
   requestHeaders: Record<string, string>;
@@ -1103,6 +1164,7 @@ async function handleStreamErrorEvent(
   input: Parameters<typeof handleStreamChunk>[0],
   error: unknown,
 ): Promise<Awaited<ReturnType<typeof handleStreamChunk>>> {
+  if (isRequestVerificationRejection(error) || input.canRecoverProjectToken(error)) throw error;
   const retryWithRepairedHistory =
     !input.emittedRetryBoundaryEvent && input.repairThinkingSignatureRejection(error);
   const statusContext = retryWithRepairedHistory
@@ -1443,11 +1505,13 @@ function statusPublishOptions(
   input: {
     logger?: Logger;
     request: AiSdkModelTextRequest;
+    resolved?: Pick<ResolvedAiSdkModel, "requestObservations">;
     statusSink?: ModelStatusSink;
   },
   admission?: AttemptAdmission,
 ) {
   return {
+    requestObservations: input.resolved?.requestObservations,
     logger: input.logger,
     requestStatusSink: input.request.statusSink,
     statusSink: input.statusSink,

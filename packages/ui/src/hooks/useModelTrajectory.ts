@@ -5,7 +5,7 @@ import { useZCodeTaskService } from "@/hooks/useZCodeTaskService.js";
 import { useWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { decideTrajectoryRetry } from "@/ModelTrajectoryRetry.js";
 
-interface ModelTrajectoryState {
+export interface ModelTrajectoryState {
   loading: boolean;
   data: ZCodeModelTrajectory | null;
   error: string | null;

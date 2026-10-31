@@ -17,7 +17,7 @@ import type { ZCodeApp } from "../../app/types.js";
 const URI_REF_PATTERN = /^[a-zA-Z][a-zA-Z\d+.-]*:\/\//;
 const INLINE_TEXT_ATTACHMENT_MAX_BYTES = 64 * 1024;
 
-function isUriAttachmentRef(ref: string): boolean {
+export function isUriAttachmentRef(ref: string): boolean {
   return URI_REF_PATTERN.test(ref);
 }
 
@@ -29,8 +29,9 @@ function displayMetaOf(
     mimeType: ref.mime,
     sizeBytes: ref.bytes,
     // FORK：上游 core 的 TurnAttachment.sourceKind 是 clipboard-text|topic-history，
-    // 本仓 core 只认 clipboard-text（apps/zcode-cli/packages/core/src/agent/turn-state.ts），
-    // 故按字面收窄后再透传；上游专属的 topic-history 不进入 core 输入。
+    // 本仓没有 topic-history 的生产端/消费端（见 packages/shared/src/attachment-source.ts
+    // 的 FORK 说明），故按字面收窄后再透传；上游同批新增的 messageCount 只服务
+    // topic-history 引用，这里不吸收，避免把本仓不消费的材料维度带进 core 输入。
     ...(ref.sourceKind === "clipboard-text" ? { sourceKind: "clipboard-text" as const } : {}),
   };
 }
@@ -74,6 +75,10 @@ async function mapAttachmentRef(app: ZCodeApp, ref: AttachmentRef): Promise<Turn
       type: isImageRef(ref) ? "image" : isPdfRef(ref) ? "pdf" : "file",
       ...displayMeta,
     };
+  }
+  if (ref.sourceKind === "topic-history" || ref.sourceKind === "clipboard-text") {
+    // 文本材料必须保留 durable 引用；按普通小文件解码会重新隐藏注入整份历史。
+    return { content: ref.ref, type: "file", ...displayMeta };
   }
   if (isImageRef(ref)) {
     // 图片 URI ref：content 携带 artifact URI，模型请求阶段由 resolveAttachmentDataUrl

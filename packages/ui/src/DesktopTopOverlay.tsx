@@ -1,3 +1,4 @@
+import { SidebarTooltipProvider } from "@/ControlHintTooltip.js";
 import type { IPlatformService } from "@zcode/shared";
 import { cn } from "@/components/lib/utils.js";
 import {
@@ -61,7 +62,6 @@ export function DesktopTopOverlay({
   canGoForward: _canGoForward,
   showNewTaskButton,
   appLogoUrl,
-
   onToggleSidebar,
   onCreateTask,
   onGoBack,
@@ -95,35 +95,29 @@ export function DesktopTopOverlay({
     : undefined;
 
   return (
-    <div
-      style={topOverlayWidthStyle}
-      className={cn(
-        "@container/topoverlayer pointer-events-none absolute h-14 flex left-0 top-0 z-20 w-fit",
-        // Windows/Linux 主面板新增 4px 留白及 1px 边框，左侧工具组需同步偏移才能对齐 Header 中心线。
-        usesCustomCaptionArea && "top-1 mt-px",
-      )}
-    >
+    <SidebarTooltipProvider>
       <div
-        style={{
-          ...macTopOverlayPaddingStyle,
-          ...windowsTopOverlayPaddingStyle,
-        }}
+        style={topOverlayWidthStyle}
         className={cn(
-          "flex items-center",
-          isMacDesktop && "h-14",
-          usesCustomCaptionArea && "h-12",
-          // Windows/Linux 工具组计入 4px 外沿留白和 1px 边框，较 8px 左边距右移 5px。
-          usesCustomCaptionArea && "pl-3 ml-px",
-          isMacDesktop &&
-            (isMacFullscreen ? (!isSidebarVisible ? "pl-5 pt-1" : "pl-3 pt-1") : "pt-1"),
+          "@container/topoverlayer pointer-events-none absolute h-14 flex left-0 top-0 z-20 w-fit",
+          // 工具组计入各平台顶部留白和 1px 边框，与 Header 中心线对齐。
+          usesCustomCaptionArea && "mt-px",
+          isWindowsDesktop ? "top-1.5" : isLinuxDesktop && "top-1",
         )}
       >
         <div
+          style={{
+            ...macTopOverlayPaddingStyle,
+            ...windowsTopOverlayPaddingStyle,
+          }}
           className={cn(
-            // 顶部浮层按钮虽然单个按钮打了 no-drag，但外层容器本身仍悬在窗口标题区上方。
-            // Electron 在这类覆盖层上会优先按父级命中拖拽区域，导致点击被窗口拖动吞掉。
-            // 这里把整块交互容器一起标成 no-drag，确保展开/收起和新建 task 都能稳定点击。
-            "pointer-events-auto flex items-center gap-1 shrink-0 [app-region:no-drag]",
+            "flex items-center",
+            isMacDesktop && "h-14",
+            usesCustomCaptionArea && "h-12",
+            // Windows/Linux 工具组计入 4px 外沿留白和 1px 边框，较 8px 左边距右移 5px。
+            usesCustomCaptionArea && "pl-3 ml-px",
+            isMacDesktop &&
+              (isMacFullscreen ? (!isSidebarVisible ? "pl-5 pt-1" : "pl-3 pt-1") : "pt-1"),
           )}
         >
           {usesCustomCaptionArea && (
@@ -181,24 +175,33 @@ export function DesktopTopOverlay({
           )}
 
           <div
-            aria-hidden={!isNewTaskButtonVisible}
             className={cn(
-              "inline-flex overflow-hidden transition-[opacity,width] duration-300 ease-out",
-              isNewTaskButtonVisible ? "w-7 opacity-100" : "pointer-events-none w-0 opacity-0",
+              // 顶部浮层按钮虽然单个按钮打了 no-drag，但外层容器本身仍悬在窗口标题区上方。
+              // Electron 在这类覆盖层上会优先按父级命中拖拽区域，导致点击被窗口拖动吞掉。
+              // 这里把整块交互容器一起标成 no-drag，确保展开/收起和新建 task 都能稳定点击。
+              "pointer-events-auto flex items-center gap-1 shrink-0 [app-region:no-drag]",
             )}
           >
-            <DesktopTopOverlayActionButton
-              title={newTaskDisabledReason ?? newTaskTitle}
-              shortcut={newTaskShortcutLabel}
-              ariaLabel={newTaskTitle}
-              disabled={Boolean(newTaskDisabledReason)}
-              onClick={onCreateTask}
+            <div
+              aria-hidden={!isNewTaskButtonVisible}
+              className={cn(
+                "inline-flex overflow-hidden transition-[opacity,width] duration-300 ease-out",
+                isNewTaskButtonVisible ? "w-7 opacity-100" : "pointer-events-none w-0 opacity-0",
+              )}
             >
-              <MessageCirclePlus className="size-4" />
-            </DesktopTopOverlayActionButton>
+              <DesktopTopOverlayActionButton
+                title={newTaskDisabledReason ?? newTaskTitle}
+                shortcut={newTaskShortcutLabel}
+                ariaLabel={newTaskTitle}
+                disabled={Boolean(newTaskDisabledReason)}
+                onClick={onCreateTask}
+              >
+                <MessageCirclePlus className="size-4" />
+              </DesktopTopOverlayActionButton>
+            </div>
           </div>
         </div>
       </div>
-    </div>
+    </SidebarTooltipProvider>
   );
 }
