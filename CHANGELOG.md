@@ -1,3 +1,13 @@
+## [1.1.1](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.0...v1.1.1) (2026-11-01)
+
+v1.1.0 的两条真机修复：侧栏项目归属与 MCP 断连恢复。
+
+### 修复
+
+- **项目下新建会话不再落进「任务」区**。v3.16.2 升级把侧栏任务归属改为按 `tasks.project_id`（上游 `selectProjectRows` 语义），但 v4 建会话链（`session-mgmt.ts` / 草稿预热）不携带 `projectId`，预留行归属落 null；v1.0.31 的旧侧栏按 workspacePath 挂载故无此症状。现在 `reserveCreatedTask` 缺省时按 root 唯一匹配推导归属（遵循上游「创建归属必须先于 CLI 首发」），启动对账幂等回填存量 null 行（default workspace 按语义排除）。
+- **MCP server 重启后同一会话自动恢复，不再需要新开会话**。六层叠加缺陷：懒重连只认 `disconnected`（一次重连失败落 `failed` 即永久死亡）；HTTP/SSE 断连无感知（record 停在 `connected`）；重连成功不 bump `toolListRevision`（core 注册表永不刷新）；4s 冷启动上限的后台连上不补注册；连接池对会话 lease 永不 revalidate（热刷新 no-op）；热刷新遇 failed 的空快照把工具全部 unregister 且救不回来。现在 `failed` 也可重连（指数退避 1s 起封顶 30s）、HTTP 传输错误显式翻转状态、重连/工具集变化时 bump revision、未就绪 server 的既有工具在刷新时保留。真 SDK server（stdio + HTTP）端到端验证：kill server 后同一会话自动重连、工具表恢复、revision 递增。
+- CI：mac runner 类型构建 OOM 显式 8GB 堆（v3.16.2 合并后类型图变大，与本地全量 typecheck 同源）。
+
 ## [1.1.0](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.31...v1.1.0) (2026-10-31)
 
 上游 **ZCode v3.14.3 → v3.16.2** 大版本升级合并，并以真 merge commit 建立上游血缘（第二 parent 直接指向 v3.16.2），此后升级走 `git merge` 即可由 git 定位真实冲突集。533 个合并冲突全部解决；全仓 typecheck 13 工程 0 错、全量 vitest 1245 文件 / 10268 测试全绿、`test:v4-perf` 30 段门禁十一轮全绿、真机验证通过后发版。
