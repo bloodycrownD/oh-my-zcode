@@ -102,7 +102,12 @@ jobs:
       # 生成；CI 全新 checkout 没有，直接 bundle 会在 cli 侧 tsc 阶段报
       # "Cannot find module '@zcode/magic-context'"）。这里显式产出两段：
       # 根 tsc -b 覆盖 packages/*，turbo 覆盖 apps/zcode-cli 全部 27 个包。
+      # v3.16.2 合并后类型图变大，mac runner（7GB）默认 ~4GB 堆会在该步 OOM
+      # （FATAL ERROR: Ineffective mark-compacts near heap limit），与本地全量
+      # typecheck 需 8GB 堆同源；显式抬到 8192 对 win/linux 无害。
       - name: Build workspace type outputs
+        env:
+          NODE_OPTIONS: --max-old-space-size=8192
         run: |
           pnpm typecheck
           pnpm exec turbo --cwd apps/zcode-cli run typecheck --force
