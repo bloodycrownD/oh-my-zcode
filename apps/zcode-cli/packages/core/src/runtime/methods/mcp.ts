@@ -5,6 +5,7 @@ import {
   ZCODE_PLUGIN_ID_ENV_KEY,
 } from "@zcode/shared";
 import { registerMcpTools, traceContextToLogContext } from "../deps.js";
+import { toModelVisibleMcpNamePart } from "../../mcp/name.js";
 import type { McpConnectionSnapshot, McpServerConfig, TraceContext } from "../deps.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import type { McpToolDescriptor, PluginReferenceCatalog } from "@zcode/contracts";
@@ -220,6 +221,11 @@ export async function refreshMcpServers(
 
   const snapshot = await this.mcpPort
     .connectConfiguredServers(servers, {
+      // Bugfix（断连失效根因 E）：热刷新此前不带 revalidate——pool 对已有 entry 直接返回
+      // 首次连接那个早已 resolve 的 promise（可能早已 failed），刷新实际是 no-op；带
+      // revalidate 才会在同一 entry 上探测并原地重连（语义见 McpConnectOptions 注释：
+      // 用户明确要求重新探测的调用必须置位）。
+      revalidate: true,
       oauthAuthorizationTimeoutMs: MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS,
       trace: effectiveTrace,
       workingDirectory: this.workingDirectory,
@@ -246,13 +252,29 @@ export async function refreshMcpServers(
     pluginIdByServerName: buildPluginIdByServerName(this.config.pluginReferenceCatalog),
   });
   const desired = new Set(registered);
+  // Bugfix（断连失效根因 F）：某 server 仍在配置里但连接未就绪（failed/connecting/
+  // OAuth 等待）时，snapshot 里它的 tools 为空——这是「拿不到」不是「工具没了」。此前
+  // 对旧集合中不在新集合的名字一律 unregister，一次失败刷新就把该 server 的全部工具
+  // 从注册表清掉，且死 entry 返回的空 tools 让后续刷新也救不回来。这里保留未就绪
+  // server 的既有注册工具，恢复后由 revision 变化（adapter 重连成功会 bump）走
+  // refreshMcpToolsIfChanged 同步。
+  const notReadyServerPrefixes = Object.entries(snapshot.statuses)
+    .filter(([name, status]) => status.status !== "connected" && servers[name])
+    // 注册名用 sanitize 后的 server 段（toMcpToolName/toModelVisibleMcpNamePart 同构），
+    // 前缀必须走同一清洗，否则含特殊字符的 server 名保护会静默失效。
+    .map(([name]) => `mcp__${toModelVisibleMcpNamePart(name)}__`);
+  const nextRegistered = new Set(desired);
   let removedToolCount = 0;
   for (const name of this.mcpRegisteredToolNames) {
     if (desired.has(name)) continue;
+    if (notReadyServerPrefixes.some((prefix) => name.startsWith(prefix))) {
+      nextRegistered.add(name);
+      continue;
+    }
     this.registry.unregister(name);
     removedToolCount += 1;
   }
-  this.mcpRegisteredToolNames = desired;
+  this.mcpRegisteredToolNames = nextRegistered;
   // A7 基线同步：手动全量刷新后，refreshMcpToolsIfChanged 的签名/revision 基线
   // 若不跟着更新，下一次 tools/list_changed 会拿旧基线做无意义的重注册。
   this.registeredMcpToolNames = registered;
@@ -319,7 +341,23 @@ export async function refreshMcpToolsIfChanged(
   const signature = mcpToolsSignature(descriptors);
   if (this.mcpToolsSignature === signature) return;
   const previous = new Set(this.registeredMcpToolNames ?? []);
-  for (const name of previous) this.registry.unregister(name);
+  // Bugfix（断连失效根因 F 半路径）：listTools 快照里缺席的 server 不一定是「工具没了」
+  // ——更可能是该 server 连接未就绪（failed/connecting），快照天然为空。此前对 previous
+  // 一律全量 unregister，一次部分空快照就把该 server 的工具永久移出注册表（revision 已
+  // 推进，后续不会自动再来一次）。这里保留「配置里存在但快照缺席」的 server 的既有工具，
+  // 待其恢复后（adapter 重连成功会 bump revision）自然同步。
+  const configuredServers = Object.keys(this.config.mcp?.servers ?? {});
+  const presentServers = new Set(descriptors.map((descriptor) => descriptor.serverName));
+  const notReadyPrefixes = configuredServers
+    .filter((name) => !presentServers.has(name))
+    // 与 refreshMcpServers 同构：注册名的 server 段走同一 sanitize，见 toMcpToolName。
+    .map((name) => `mcp__${toModelVisibleMcpNamePart(name)}__`);
+  const retainedNames: string[] = [];
+  for (const name of previous) {
+    if (notReadyPrefixes.some((prefix) => name.startsWith(prefix))) retainedNames.push(name);
+  }
+  const previousConfirmed = [...previous].filter((name) => !retainedNames.includes(name));
+  for (const name of previousConfirmed) this.registry.unregister(name);
   const registered = registerMcpTools(this.registry, mcpPort, descriptors, {
     allowedTools: this.config.toolAllowlist,
     disallowedTools: this.config.toolDisallowlist,
@@ -329,15 +367,16 @@ export async function refreshMcpToolsIfChanged(
     ),
     pluginIdByServerName: buildPluginIdByServerName(this.config.pluginReferenceCatalog),
   });
-  this.registeredMcpToolNames = registered;
+  this.registeredMcpToolNames = [...registered, ...retainedNames];
   this.mcpToolsSignature = signature;
   this.invalidateToolCache();
   this.logger?.info("MCP tools re-registered after list_changed", {
     ...traceContextToLogContext(traceContext),
     event: "mcp.tools.reregistered",
     module: "core.runtime",
-    removedToolCount: previous.size,
+    removedToolCount: previousConfirmed.length,
     registeredToolCount: registered.length,
+    retainedNotReadyToolCount: retainedNames.length,
     status: "completed",
   });
 }
