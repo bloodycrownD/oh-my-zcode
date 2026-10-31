@@ -483,6 +483,7 @@ modules:
     managed: true
     requires:
       - mobile-ui
+      - rpc
       - services
       - shared
       - ui
@@ -637,27 +638,6 @@ modules:
     layers:
       adapters: .
     owner: conversation
-  # conversation-share-interaction：由 architecture:adopt 登记
-  - id: conversation-share-interaction
-    roots:
-      - packages/ui/src/conversation-share-interaction
-    managed: true
-    requires:
-      - services
-      - shared
-      - ui
-    publicEntrypoints:
-      - packages/ui/src/conversation-share-interaction/index.ts
-      - packages/ui/src/conversation-share-interaction/contract.ts
-      - packages/ui/src/conversation-share-interaction/ConversationSharePopover.tsx
-      - packages/ui/src/conversation-share-interaction/ConversationSharePreflightStatus.tsx
-      - packages/ui/src/conversation-share-interaction/conversationSharePopoverActions.ts
-      - packages/ui/src/conversation-share-interaction/conversationSharePreflightRequest.ts
-      - packages/ui/src/conversation-share-interaction/conversationSharePreflightResponse.ts
-    layers:
-      contract: contract.ts
-      ui: .
-    owner: conversation
 
   # workspace-plugin-preview：由 architecture:adopt 登记
   - id: workspace-plugin-preview
@@ -701,22 +681,6 @@ modules:
       - packages/desktop/src/main/embedded-browser-permission-contract/contract.ts
     layers:
       adapters: .
-    owner: desktop
-  # marketing-touch-controller：由 architecture:adopt 登记
-  - id: marketing-touch-controller
-    roots:
-      - packages/ui/src/marketing-touch-contract
-      - packages/ui/src/components/marketing-touch/marketingTouchController.ts
-    managed: true
-    requires:
-      - services
-      - shared
-      - ui
-    publicEntrypoints:
-      - packages/ui/src/components/marketing-touch/marketingTouchController.ts
-      - packages/ui/src/marketing-touch-contract/contract.ts
-    layers:
-      app: .
     owner: desktop
   # side-pane-full-view：由 architecture:adopt 登记
   - id: side-pane-full-view
