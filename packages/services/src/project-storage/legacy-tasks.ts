@@ -112,13 +112,38 @@ export function reconcileLegacy(db: DatabaseSync, ownerHostId?: string): void {
     // Bug 原因：同一台机器上本机桌面与 Source Server 共用 tasks-index；0005 按库只执行一次，
     // 只写入首个打开者的 host 行，后打开的 owner 新建项目触发 projects.host_id 外键失败。
     // 每次启动幂等补齐当前 owner 的 host 行；不改任务 host_id 与项目归属。
-    ensureHost(db, "local", ownerHostId);
+    const hostId = ensureHost(db, "local", ownerHostId);
     initializeLegacyTaskIdentity(db, true, ownerHostId);
     initializeLegacyDefinitions(db, ownerHostId);
     if (tableExists(db, "tasks")) {
       db.exec(`UPDATE tasks SET handoff_pending=handoff_pending | ${HANDOFF_DELETE} WHERE deleted=1 AND coalesce(cli_deleted,0)=0;
         UPDATE tasks SET handoff_pending=handoff_pending | ${HANDOFF_TITLE}
         WHERE title_overridden=1 AND (coalesce(cli_title_source,'')<>'custom' OR coalesce(cli_title,'')<>title);`);
+      // FORK(upgrade-316 修复)：v4 createSession 链曾不带 projectId，预留行归属落 null，
+      // 新建会话显示在侧栏「任务」而非所属项目（写入侧已在 reserveCreatedTask 兜底）。
+      // 这里对本 host 的存量 null 行按 root 唯一匹配幂等回填；匹配不唯一（多项目同 root）
+      // 保持 null 等显式归属。default workspace 语义上无项目归属，其任务本就该留在「任务」
+      // 区，且系统 default 目录可能被手建项目占用——显式排除，不得被 root 命中划走。
+      const isDefaultWorkspacePath = (value: string) => {
+        const normalized = value.replaceAll("\\", "/");
+        return (
+          normalized.endsWith("/.omz/workspace/default") ||
+          normalized.endsWith("/.zcode/workspace/default")
+        );
+      };
+      const nullOwnershipRows = db
+        .prepare(
+          "SELECT workspace_key,workspace_path,task_id FROM tasks WHERE project_id IS NULL AND host_id=?",
+        )
+        .all(hostId) as { workspace_key: string; workspace_path: string; task_id: string }[];
+      const backfill = db.prepare(
+        "UPDATE tasks SET project_id=? WHERE workspace_key=? AND task_id=? AND project_id IS NULL",
+      );
+      for (const row of nullOwnershipRows) {
+        if (isDefaultWorkspacePath(row.workspace_path)) continue;
+        const projectId = uniqueRootProject(db, hostId, row.workspace_path);
+        if (projectId) backfill.run(projectId, row.workspace_key, row.task_id);
+      }
     }
     db.exec("COMMIT");
   } catch (error) {

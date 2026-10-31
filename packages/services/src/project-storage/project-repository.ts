@@ -18,7 +18,7 @@ import type {
   SaveProjectInput,
   VirtualProject,
 } from "#src/project-storage/contract.js";
-import { ensureHost, OWNERSHIP_DECIDED } from "#src/project-storage/legacy-tasks.js";
+import { ensureHost, OWNERSHIP_DECIDED, uniqueRootProject } from "#src/project-storage/legacy-tasks.js";
 import {
   assertRemoteProjectRoots,
   assertRemoteTaskDirectories,
@@ -379,14 +379,22 @@ export class ProjectRepository implements ProjectRepositoryContract {
       const host = ensureHost(this.db, key, this.ownerHostId);
       if (host !== (this.ownerHostId ?? "local")) throw new Error("project.cross-host-move");
       if (!readTask(this.db, input.task)) {
+        // FORK(upgrade-316 修复)：v4 createSession 链（session-mgmt.ts / useDraftSessionPrewarm）
+        // 不携带 projectId，预留行归属会落 null，新建会话显示在侧栏「任务」区而非所属项目
+        //（探针实证：reserveCreatedTask 收到 projectId=null 且 root 唯一命中）。「创建归属
+        // 必须先于 CLI 首发」（见下注释），缺省时按 root 唯一匹配推导；匹配不唯一（多项目
+        // 同 root）保持 null，等显式 moveTask 归属。default workspace 语义上无项目归属，
+        // 无 root 命中，自然保持 null。
+        const projectId =
+          input.projectId ?? uniqueRootProject(this.db, host, input.task.workspacePath);
         assertRemoteTaskDirectories(
           this.ownerHostId,
-          input.projectId ? requireProject(this.db, input.projectId) : null,
+          projectId ? requireProject(this.db, projectId) : null,
           input.task.workspacePath,
           input.additionalDirectories,
         );
-        if (input.projectId) {
-          const project = requireProject(this.db, input.projectId);
+        if (projectId) {
+          const project = requireProject(this.db, projectId);
           if (project.deleted && input.additionalDirectories === undefined)
             throw new Error("project.deleted");
           if (project.hostId !== host) throw new Error("project.cross-host-move");
@@ -407,7 +415,7 @@ export class ProjectRepository implements ProjectRepositoryContract {
             input.task.taskId,
             host,
             input.task.workspacePath,
-            input.projectId,
+            projectId,
             OWNERSHIP_DECIDED,
             input.additionalDirectories === undefined
               ? null
