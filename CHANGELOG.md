@@ -1,3 +1,29 @@
+## [1.1.0](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.31...v1.1.0) (2026-10-31)
+
+上游 **ZCode v3.14.3 → v3.16.2** 大版本升级合并，并以真 merge commit 建立上游血缘（第二 parent 直接指向 v3.16.2），此后升级走 `git merge` 即可由 git 定位真实冲突集。533 个合并冲突全部解决；全仓 typecheck 13 工程 0 错、全量 vitest 1245 文件 / 10268 测试全绿、`test:v4-perf` 30 段门禁十一轮全绿、真机验证通过后发版。
+
+### 升级
+
+- **删除上游商业化面**（fork 早已移除，v3.16.2 合并带回的部分再次整删）：官方账号 / 登录、官方计费（coding plan）、错峰额度入口、会话分享、营销触达、云内容分发、ARMS 遥测——含 613 个上游测试与关联装配，i18n 双向零残留。
+- **保留并适配上游新 UI**：project-sidebar 侧栏架构、任务分组 / 置顶 / cron 分组（服务层 `ITaskGroupService` + UI 侧补登记双写路径）、插件市场 UI、**模型菜单内的思考等级滑条**（含上游 GLM-5.3 / Flash 档位 30 条 builtin 规则与 4 条模板规则；工具栏旧下拉在非高速场景下由上游语义取代）。上游 v3.16 重造的 web 入口（1803 行装配：externalRelay 帧恢复、home-only 服务、版本护栏）按 fork 面裁剪移植，16 条活测试全过。
+- **fork 性能层完整保留**：spec C 窗口化 hydrate、row manifest、keep-warm、投影升级双触发、命令级读写锁——真机实测长会话 CLI 内 viewReady 28ms、keep-warm 命中 182ms、首帧传输 ≤93ms，全部在验收基线内。MC 防腐层三道门禁继续生效，上游接触面 75 → 74 只减不增。
+- **迁移链**：tasks-index 撞号迁移顺延（上游 0006 → 0007/0008）；补编 `0009`（`.omz` 数据根谓词修复，老账本 checksum 冻结不动）、`0010`（connection_hosts 以 `previousIds` 改号，老库严格 no-op）、`0011`/`0012`（上游 remote_entry / session_creation，字节级同 sql，fresh 库等价、老库幂等）。真实用户库首启自动执行，全部幂等安全。
+- **测试基建**：吸收上游 vitest 4.1.7 runner 计时 patch（假 yield → 真 yield）并全量回归；修正运行器口径（fork 的 node:test 文件从 vitest 收集面排除、`node:sqlite` external 插件）；radix-collapsible 测量性能 patch 注册。
+
+### 修复
+
+- **模型请求不再被改写到官方网关**：上游 v3.16 新增的 endpoint routing 在每个模型请求前询问路由端口，fork 内联实现曾恒 `routed:true` 并把请求 origin 强制改写为 `zcode.z.ai`——所有 provider（bigmodel / 第三方）一致 404。fork 无官方计费网关，现改为恒放行（`routed:false`）。
+- **Web 远控状态轮询不再报原生错误**：上游新 renderer 每 2 秒轮询 `get-web-remote-control-status`，fork main 侧无 handler（72 次/分钟原生报错）。注册降级 handler（状态 idle / start 返回明确错误 / stop·auth no-op）；完整 manager 的 fork 适配（匿名 relay 形态）为后续工作项。
+- **任务状态读写口径**：fork 写侧 `task_status` + `meta_json` 与上游 v3.16 读侧 `cli_last_outcome` 派生在合并后劈叉（对账成功但读回 undefined），写侧补写 `cli_last_outcome` 终态。
+- 侧栏调用块补齐上游 6 个漏传 props（远端身份隔离 / 文件定位 / 手机远控 Task Home 三条链路复活）；composer 最近使用键 v1 写 / v2 读劈叉接通（新任务默认模型恢复）；off-peak 任务归类断链五处修复（读兜底 / schema / COALESCE / 启动回填 / resumeTask 盖章）。
+- `zcode-builtin.json` 档位数据与 `composerOptions` 构造修复：思考等级滑条完整回归（v3.16.2 合并时曾整块丢失）。
+
+### 已知
+
+- Web 远控的桌面侧完整中继（`webRemoteControlManager`）尚未装配（依赖官方账号链路，fork 需另做匿名形态），当前状态查询降级为 idle；手机远控其余路径不受影响。
+- 跨 workspace 首开在 dev 模式约 4.5s（agent 即时编译），production 下显著更小；若生产包实测仍超标，将做「预热最近 workspace」优化。
+- 上游已发布 v3.17.1（+216K/−611K 行），下一跳升级在本次发版后单独评估。
+
 ## [1.0.31](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.30...v1.0.31) (2026-10-28)
 
 编辑态的 skill / 文件胶囊不再退化成 markdown 字面量；同时落地 v1.0.30 之后的两条 P1 修复（Magic Context 派生 source、窗口化快照的全序量）。
