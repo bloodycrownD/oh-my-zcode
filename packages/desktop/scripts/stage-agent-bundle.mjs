@@ -155,18 +155,40 @@ export async function stageAgentBundle({ repoRoot, platformKey, log = console.lo
   // Electron 的 Node 模式编译（V8 版本强绑定），所以放在 stage 阶段用本机 electron
   // 生成；生成三件套与 zcode.cjs 同级分发，host 侧优先加载 zcode.bytecode.cjs，
   // loader 缺失时自动回退裸 cjs——这里是纯加速产物，不作为启动的硬依赖。
-  const bytecode = await buildDesktopAgentBytecode({ entryPath: stagedBundlePath });
-  log(
-    `[stage:agent-bundle] staged bytecode ${basename(bytecode.loaderPath)} (${bytecode.metadata.bytecodeBytes} bytes)`,
-  );
+  // 跨架构构建必须跳过字节码：V8 code cache 绑定目标平台的 V8 版本与 arch，
+  // 而这里的编译器只能拿本机 Electron。mac-x64 包在 macos-latest（arm64）上打，
+  // 若照常生成，产出的 .jsc 元数据写着 arch=arm64，目标机 desktop-agent-bytecode-runtime
+  // 校验 arch 不一致即抛错 —— 安装包能装上，但任何会话都起不来 agent。
+  // 架构一致时才编；不一致就退回裸 cjs（慢一些，但能启动）。
+  const hostPlatformKey = `${process.platform}-${process.arch}`;
+  // coverage 构建不产出字节码（buildDesktopAgentBytecode 内部禁止该组合），
+  // 这里提前跳过，避免 test:e2e:all:coverage 在 staging 阶段抛错。
+  const bytecodeAllowed = platformKey === hostPlatformKey && process.env.ZCODE_E2E_COVERAGE !== "1";
+  if (!bytecodeAllowed) {
+    log(
+      `[stage:agent-bundle] 跳过 bytecode：目标 ${platformKey} 与本机 ${hostPlatformKey} 架构不一致`,
+    );
+  }
+  const bytecode = bytecodeAllowed
+    ? await buildDesktopAgentBytecode({ entryPath: stagedBundlePath })
+    : undefined;
+  if (bytecode) {
+    log(
+      `[stage:agent-bundle] staged bytecode ${basename(bytecode.loaderPath)} (${bytecode.metadata.bytecodeBytes} bytes)`,
+    );
+  }
 
   const meta = {
     runtime: "electron-node",
     entry: "zcode.cjs",
-    bytecode: {
-      loader: basename(bytecode.loaderPath),
-      bytecodeFile: bytecode.metadata.bytecodeFile,
-    },
+    ...(bytecode === undefined
+      ? {}
+      : {
+          bytecode: {
+            loader: basename(bytecode.loaderPath),
+            bytecodeFile: bytecode.metadata.bytecodeFile,
+          },
+        }),
     platform: platformKey,
     source: AGENT_BUNDLE_SOURCE_RELATIVE,
   };
@@ -184,7 +206,9 @@ export async function stageAgentBundle({ repoRoot, platformKey, log = console.lo
   });
   // 字节码入口自检：必须用与编译同一份 Electron Node 跑，验证缓存可被真正命中
   // （用系统 node 跑会因 V8 版本不一致静默降级成重新编译，测不出问题）。
-  verifyStagedBytecodeLoader({ loaderPath: bytecode.loaderPath, log });
+  if (bytecode) {
+    verifyStagedBytecodeLoader({ loaderPath: bytecode.loaderPath, log });
+  }
 
   return { stagedBundlePath, stagedMetaPath, bytecode };
 }

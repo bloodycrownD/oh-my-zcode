@@ -146,8 +146,11 @@ export const COMMAND_CONCURRENCY = {
   // 用 supportsHistoryFirst() 先探一次能力（写 historyFirst 字段前必须确认执行端）。
   // 它的 handler 是常量返回 { independentPlanState: true, historyFirst: true }
   // （server.ts 的 runtimeCapabilities case），零副作用、幂等、无次序依赖，三条判据全中。
-  // 留在 mutating 的实测代价：跨项目打开时它排在 update*Preferences / sessionsIndex
-  // reconcile 等变更后面，单次排队 2.1~3.7s，全额计入 hostPrepareMs。
+  // 收益边界（勿夸大）：并发门是写优先 FIFO，readonly 仍会排在已入队的 writer 之后，
+  // 所以它并不会跳过 update*Preferences / sessionsIndex reconcile 的排队；改变的是它
+  // 不再占用独占槽，也不再作为「假 writer」挡住同批其它 reader（subscribe / rowsRange
+  // / sessionList 等冷开期请求）。此项的耗时归因请用 transport.ts 里 dispatchClass +
+  // receivedAt/dispatchedAt/respondedAt 的记录核对，不要凭注释推断。
   [zcodeProtocolMethods.runtimeCapabilities]: "readonly",
   [zcodeProtocolMethods.computerUseOperationEvent]: "mutating",
   [zcodeProtocolMethods.providerTestModelConnectivity]: "mutating",

@@ -1588,13 +1588,15 @@ export class ConversationV4Gateway {
     }
     if (event.type === SessionEventType.TurnComplete || event.type === SessionEventType.TurnError) {
       this.projectionFaultedSessions.delete(sessionId);
-      // hydration 回放的旧终态事件不代表实时 turn 结束，不触发自动提升重评。
-      if (!this.hydrationBuffers.has(sessionId)) {
-        try {
-          this.host.onTurnSettled?.(sessionId, event);
-        } catch (error) {
-          this.host.onError?.("v4.projection.turnSettled", error);
-        }
+      // 无条件触发。原 `!hydrationBuffers.has(sessionId)` 守卫防不住它声称要防的东西：
+      // hydration 回放走 publisher.ingest 直连（见 performHydration 的注释），根本不
+      // 经过这个 hook；反而会吞掉 buffer 存活期间的**真实**终态事件——
+      // waitForPermissionGrantCommit 会对活会话强制 hydrate，buffer 能活几十到几百 ms，
+      // 而这段窗口里的 TurnComplete 正是本 hook 要处理的那一类。
+      try {
+        this.host.onTurnSettled?.(sessionId, event);
+      } catch (error) {
+        this.host.onError?.("v4.projection.turnSettled", error);
       }
     }
     if (event.type === SessionEventType.TurnSteerQueued) {

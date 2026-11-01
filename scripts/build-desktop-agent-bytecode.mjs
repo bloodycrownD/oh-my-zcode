@@ -48,7 +48,7 @@ export async function buildDesktopAgentBytecode({
     // 先写不可变依赖，最后原子替换入口；失败时上次可用的加载器仍能找到自己的字节码。
     await publishImmutable(bytecodePath, await readFile(temporary));
     await publishImmutable(join(directory, runtimeFile), runtimeSource);
-    const loader = `#!/usr/bin/env node\n"use strict";\nconst metadata = ${JSON.stringify(metadata)};\nrequire(${JSON.stringify(`./${runtimeFile}`)}).loadBytecode(metadata, module, require).catch(error => {\n  process.stderr.write(String(error.stack ?? error) + "\\n");\n  process.exitCode = 1;\n});\n`;
+    const loader = `#!/usr/bin/env node\n"use strict";\nconst metadata = ${JSON.stringify(metadata)};\nrequire(${JSON.stringify(`./${runtimeFile}`)}).loadBytecode(metadata, module, require).catch(error => {\n  process.stderr.write("[bytecode] 缓存不可用，退回裸 bundle：" + String(error.stack ?? error) + "\\n");\n  require("./zcode.cjs");\n});\n`;
     await writeFile(`${temporary}.cjs`, loader, { mode: 0o755 });
     await rename(`${temporary}.cjs`, loaderPath);
     return { loaderPath, bytecodePath, metadata };
