@@ -1,4 +1,5 @@
 import { ZCodeStorageStartupGate } from "#src/zcode-agent/zcodeStorageStartupGate.js";
+import { createServiceLogger } from "#src/logger/serviceLogger.js";
 import { Emitter } from "@zcode/rpc";
 import type { IDisposable } from "@zcode/rpc";
 import type {
@@ -15,6 +16,12 @@ import type { ZCodeProtocolTransport } from "./zcodeProtocolTransport.js";
 // FORK (upstream-v3.15.1-backport): 上游此处为 export，fork 无消费方，去 export 以守 knip 零新增门禁。
 /** 客户端可发的方法名：旧 zcodeProtocolMethods + v4/*（M3 起并存，M5 波次 2 收敛为 v4）。 */
 type ZCodeProtocolClientMethod = ZCodeProtocolMethod | V4Method;
+
+// host↔agent RPC 往返探针：只记 ≥200ms 的慢请求，落 host 日志（生产可见）。
+// 与 agent 侧 request.timing 的 receivedAt 相减，可把往返拆成「host 发出→agent 收到」
+// 与「agent 响应→host 收到」两段——打开会话剩余的 0.8~1.9s 差额靠它定位，不靠猜。
+const RPC_TIMING_SLOW_MS = 200;
+const rpcTimingLog = createServiceLogger("zcode-agent");
 
 interface ZCodeProtocolClientOptions {
   requireStorageStartup?: boolean;
@@ -150,8 +157,20 @@ export class ZCodeProtocolClient implements IDisposable {
     resultSchema?: z.ZodType<T>,
     options?: ZCodeProtocolClientRequestOptions,
   ): Promise<T> {
+    const rpcStartedAt = Date.now();
     const requestPromise = this.requestImpl(method, params, resultSchema, options);
     void requestPromise.catch(() => undefined);
+    const logIfSlow = (): void => {
+      const tookMs = Date.now() - rpcStartedAt;
+      if (tookMs < RPC_TIMING_SLOW_MS) return;
+      rpcTimingLog.info("ZCode protocol client slow request", {
+        event: "zcode_protocol_client.request_timing",
+        method,
+        sentAt: rpcStartedAt,
+        tookMs,
+      });
+    };
+    void requestPromise.then(logIfSlow, logIfSlow);
     return requestPromise;
   }
 
