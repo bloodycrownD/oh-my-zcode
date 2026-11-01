@@ -1681,6 +1681,23 @@ export function createConversationV4Gateway(
       return { sessions };
     },
     onDebug: (message) => log?.debug(message),
+    onTurnSettled: (sessionId) => {
+      const record = context.sessions.get(sessionId);
+      if (!record) return;
+      // 异步消息（后台任务完成通知）驱动的 turn 是 core 内部 runtime command，不经过
+      // v4 prompt 的 finally/afterLegacyStateMutation；此前队列里有命令时 autoDrain
+      // 没有任何人重评，助手回合完成后队列永久停摆（用户实测）。这里每个 turn 终态都
+      // detached 触发一次既有 gate（重复触发幂等：head 已变化/已 promote 时直接返回；
+      // core 仍 busy 时 gate 内部会 scheduleAutoDrainRetry 再评）。
+      void Promise.resolve()
+        .then(() => autoDrainV4QueueIfReady(record))
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 auto-drain reevaluation after turn settled failed", {
+            error: error instanceof Error ? error.message : String(error),
+            sessionId,
+          });
+        });
+    },
     onTargetCompleted: (sessionId) => {
       const record = context.sessions.get(sessionId);
       if (!record) return;

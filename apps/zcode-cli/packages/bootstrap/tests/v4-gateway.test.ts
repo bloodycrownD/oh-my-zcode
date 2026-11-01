@@ -134,6 +134,7 @@ interface HostStub {
   resumeOutcome: "resumed" | "notFound";
   projectionTerminations: Array<{ sessionId: string; reasonCode: string }>;
   projectionEvents: Array<{ sessionId: string; event: SessionEvent }>;
+  turnSettledEvents: Array<{ sessionId: string; event: SessionEvent }>;
 }
 
 function makeHost(): HostStub {
@@ -168,6 +169,7 @@ function makeHost(): HostStub {
     resumeOutcome: "notFound",
     projectionTerminations: [],
     projectionEvents: [],
+    turnSettledEvents: [],
   };
 }
 
@@ -184,6 +186,9 @@ function makeGateway(host: HostStub): ConversationV4Gateway {
       emitConversationTelemetryFact: (fact) => host.telemetryFacts.push(fact),
       onTargetCompleted: (sessionId, event) => {
         host.projectionEvents.push({ sessionId, event });
+      },
+      onTurnSettled: (sessionId, event) => {
+        host.turnSettledEvents.push({ sessionId, event });
       },
       executeCommand: async (envelope, admission) => {
         host.executed.push(envelope);
@@ -3412,6 +3417,32 @@ describe("projection event commit waiter", () => {
     gateway.ingest("session-1", targetCompleted);
 
     expect(host.projectionEvents).toEqual([{ sessionId: "session-1", event: targetCompleted }]);
+  });
+
+  it("turn 终态事件通知宿主，供异步消息回合结束后重评 queue gate", () => {
+    const host = makeHost();
+    const gateway = makeGateway(host);
+    const log = new EventLog();
+    const created = sessionCreated(log);
+    const started = log.push(SessionEventType.TurnStarted, { turnId: "turn-notify-1" });
+    // 后台任务完成通知驱动的 turn 不经过 v4 prompt 的 afterLegacyStateMutation，
+    // 队列有命令时 autoDrain 只能靠 turn 终态回调重评（真机 bug 回归）。
+    const completed = log.push(SessionEventType.TurnComplete, { turnId: "turn-notify-1" });
+    const errored = log.push(SessionEventType.TurnError, {
+      error: "boom",
+      turnId: "turn-notify-2",
+    });
+
+    gateway.ingest("session-1", created);
+    gateway.ingest("session-1", started);
+    expect(host.turnSettledEvents).toEqual([]);
+    gateway.ingest("session-1", completed);
+    gateway.ingest("session-1", errored);
+
+    expect(host.turnSettledEvents).toEqual([
+      { sessionId: "session-1", event: completed },
+      { sessionId: "session-1", event: errored },
+    ]);
   });
 
   it("disposeSession/rehydrate 会 reject pending waiter 并清理", async () => {
