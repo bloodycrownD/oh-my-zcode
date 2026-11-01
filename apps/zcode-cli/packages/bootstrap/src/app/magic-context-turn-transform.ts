@@ -312,6 +312,9 @@ export interface MagicContextTurnTransformOptions {
  * 不 await：UI 的用量面板必须永远不等一次 sqlite 读。`sink` 自己抛错也被就地消化
  * ——诊断面不参与这一轮的成败，更不该变成一条 unhandled rejection。
  */
+/** 首轮 pass 预热（tokenizer 词表编译 + git identity）的延迟，挪出打开会话窗口。 */
+const MAGIC_CONTEXT_WARMUP_DELAY_MS = 1_500;
+
 export function pushMagicContextUsageSummary(
   read: () => Promise<SessionMagicContextUsage | null>,
   sink: (usage: SessionMagicContextUsage | null) => void,
@@ -1484,7 +1487,13 @@ export async function createMagicContextTurnTransform(
   // 宏任务（如恰在启动尾已提交的首条消息）先走，预热不插队。不 await——boot 15s
   // 预算不为预热加码；失败不抛（identity 本就是非抛出语义，preloadTokenizer 内部
   // 自带 fallback 告警），未预热成功时首轮 pass 按既有懒加载语义照旧，只是退回原行为。
-  setImmediate(() => {
+  // FORK（冷开优化 2026-11-01）：原 setImmediate 只把这段预热排到宏任务末尾，它仍是
+  // 主线程同步工作，恰压在打开会话请求的窗口上。module.compile.slow 探针实测：
+  // ai-tokenizer 的 claude 词表（claude-DN7U36sf.cjs 2.2MB）编译 1636ms（sinceEntry
+  // 1439ms），同一回调里还有 resolveProjectIdentityForSession 的同步 git 子进程。
+  // 改为 1.5s 延迟（与 MCP 预热 1s 错峰），把这两块彻底挪出打开窗口；预热未完成时
+  // 首轮 pass 仍走既有懒加载语义，行为不变。
+  const warmupTimer = setTimeout(() => {
     try {
       resolveProjectIdentityForSession(options.workingDirectory);
     } catch {
@@ -1493,7 +1502,8 @@ export async function createMagicContextTurnTransform(
     void preloadTokenizer().catch(() => {
       // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断事件循环链。
     });
-  });
+  }, MAGIC_CONTEXT_WARMUP_DELAY_MS);
+  warmupTimer.unref?.();
 
   /**
    * FORK（e2e/R-2）：把本轮实际执行模型绑给两个消费者——后台 protected-tail 边界

@@ -97,6 +97,38 @@ export async function runZCodeProtocolAgent(
     module: "bootstrap.zcode_protocol",
   });
   installZCodeProtocolAiSdkWarningLogger(logger);
+  // 模块编译探针：CPU profile 显示每次 agent 启动都有 ~1.6s 的 wrapSafe self-time
+  // （CJS loader 编译源码），而主 bundle 走 bytecode loader 不经过 wrapSafe。
+  // 这里在 runtime 早期 monkey-patch Module._compile，凡是单模块编译 ≥80ms 就落日志，
+  // 直接给出「到底在编译哪个文件、多少字节」——不靠推断。
+  // 若整段 1.6s 在探针安装之后再没出现，则说明编译发生在主 bundle 自身（loader 前）。
+  {
+    const cjsLoader = require("node:module") as {
+      prototype: { _compile: (content: string, filename: string) => unknown };
+    };
+    const originalCompile = cjsLoader.prototype._compile;
+    const compileStartedAt = Date.now();
+    cjsLoader.prototype._compile = function patchedCompile(content: string, filename: string) {
+      const ownStartedAt = Date.now();
+      try {
+        return originalCompile.call(this, content, filename);
+      } finally {
+        const elapsedMs = Date.now() - ownStartedAt;
+        if (elapsedMs >= 80) {
+          logger.info("ZCode Protocol slow module compile", {
+            context: {
+              bytes: content.length,
+              elapsedMs,
+              filename: String(filename).slice(-120),
+              sinceEntryMs: ownStartedAt - compileStartedAt,
+            },
+            event: "zcode_protocol.module.compile.slow",
+            module: "bootstrap.zcode_protocol",
+          });
+        }
+      }
+    };
+  }
   const startupTimer = new StartupTimer(
     logger,
     {
