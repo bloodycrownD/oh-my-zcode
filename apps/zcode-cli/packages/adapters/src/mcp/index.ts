@@ -97,7 +97,11 @@ const MCP_FAILED_RECONNECT_BACKOFF_INITIAL_MS = 1_000;
 const MCP_FAILED_RECONNECT_BACKOFF_MAX_MS = 30_000;
 // 存活探测只允许占用很短的时间：它挂在设置页刷新的同步路径上，超时即判死并触发重连。
 const MCP_PING_TIMEOUT_MS = 5_000;
-const MAX_MCP_VERSION_PROBE_TIMEOUT_MS = 5_000;
+// 冷开优化：探针超时从 5s 收紧到 1.5s。真 modern server 对本探针 200ms 内就作答
+// （实测 node-repl-host：195ms 回 -32022 并带 supported 列表，corrective 后成功），
+// 5s 只是「不答的 server 白等」的上限；1.5s 仍远高于实测应答时间，且超时在 stdio
+// auto 下依然按 legacy 降级，不会让 server 掉线。
+const MAX_MCP_VERSION_PROBE_TIMEOUT_MS = 1_500;
 const MCP_STDIO_STDERR_LOG_MAX_CHARS = 4_000;
 
 export interface CreateMcpAdapterOptions {

@@ -63,21 +63,30 @@ export class ProcessTreeStdioClientTransport extends StdioClientTransport {
       options.windowsJobObjectFactory ?? attachProcessToWindowsJobObject;
   }
 
-  async terminateWindowsJobObject(): Promise<void> {
+  /**
+   * 终止并释放 Windows Job Object。返回 `true` 表示已由 Job Object 接管整棵进程树
+   * （`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`：`close()` 即触发 kill），调用方据此跳过
+   * 冗余的 `taskkill /T /F`——那次 taskkill 有 2s 上限且压在 MCP 连接关键路径上。
+   * 返回 `false`（无 Job Object / terminate 抛错）时调用方仍需 taskkill 兜底。
+   */
+  async terminateWindowsJobObject(): Promise<boolean> {
     const windowsJobObject = this.windowsJobObject;
     this.windowsJobObject = undefined;
-    if (!windowsJobObject) return;
+    if (!windowsJobObject) return false;
+    let terminated = true;
     try {
       windowsJobObject.terminate();
     } catch {
-      // 继续执行 close 与 taskkill 回退。
-    } finally {
-      try {
-        windowsJobObject.close();
-      } catch {
-        // 句柄关闭失败不能阻断 SDK pipe 清理。
-      }
+      // terminate 抛错时不能声称已接管，交回 taskkill 兜底。
+      terminated = false;
     }
+    try {
+      windowsJobObject.close();
+    } catch {
+      // 句柄关闭失败不能阻断 SDK pipe 清理；此时也回到 taskkill 兜底。
+      terminated = false;
+    }
+    return terminated;
   }
 
   override async send(message: JSONRPCMessage): Promise<void> {
@@ -158,8 +167,11 @@ Object.defineProperty(ProcessTreeStdioClientTransport.prototype, "_dispose", {
   configurable: true,
   async value(this: ProcessTreeStdioClientTransport): Promise<void> {
     const pid = this.pid;
-    await this.terminateWindowsJobObject();
-    if (typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
+    // 冷开优化：Job Object 在场时整棵进程树已由 close() 杀掉，`taskkill /T /F`
+    // （2s 上限，见 process-tree.ts）是纯冗余，而它正好压在 MCP 连接的
+    // sibling 回收关键路径上——它是 connectDurationMs 2.3s 里的主要构成之一。
+    const jobObjectTerminated = await this.terminateWindowsJobObject();
+    if (!jobObjectTerminated && typeof pid === "number" && Number.isInteger(pid) && pid > 0) {
       try {
         await terminateMcpStdioProcessTree(pid);
       } catch {
