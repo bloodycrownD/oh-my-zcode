@@ -39,7 +39,6 @@ import { getAppConfigDir as resolveAppConfigDir } from "./paths.js";
 import {
   buildLocalMediaPreviewUrl,
   type DynamicWorkflowMode,
-  INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY,
   isProviderProvisioningAccountCredentialKey,
   type ProviderProvisioningTrigger,
   ZCODE_ENV,
@@ -1958,11 +1957,12 @@ export function createLocalServices(options: {
         // settings 已在手（见上方 Promise.all），随 env 下发同值；agent 侧优先消费，
         // 缺失才回退 RPC（兼容旧 host）。未配置（undefined）时下发 auto——与 RPC 路径
         // 「无选择 → 不覆盖、按默认解析」语义等价，同时保证 agent 永远不必为此发 RPC。
-        ...{
-          [INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY]: JSON.stringify(
-            settings.integratedTerminalShell ?? { mode: "auto" },
-          ),
-        },
+        // 曾经为省一次 runtime_preferences 往返，在这里把 integratedTerminalShell 随 spawn env
+        // 下发。已回滚：那次往返被实测为 1753ms，但真因是 agent 启动窗口主线程被 ai-tokenizer
+        // 的 2.2MB 词表同步编译占住（详见 magic-context-turn-transform.ts 的 FORK 注释），
+        // RPC 本身在根因修掉后只需 2~3ms（user-execution scope 实测）。用 env 下发会把该设置
+        // 冻结在 agent 进程生命周期内——改设置要重启 agent 才生效，是拿正确性换一个并不存在的
+        // 开销。保持走 RPC，语义与优化前一致。
         // broker 凭据（socket/token）注入 agent spawn env，让内置 zcode-cua plugin 的
         // computer-use MCP server 经 __zcode-plugin-host 恢复 token 后连上 broker。
         ...cuaProductHelperEnv,
