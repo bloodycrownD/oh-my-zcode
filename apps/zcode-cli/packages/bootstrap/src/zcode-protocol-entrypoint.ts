@@ -132,6 +132,86 @@ export async function runZCodeProtocolAgent(
   let providerRegistryRuntime:
     | Awaited<ReturnType<typeof startProcessProviderRegistryRuntime>>
     | undefined;
+  // 主线程阻塞探针：200ms 心跳测定时器漂移，并同时差分成进程 CPU 时间。
+  // 漂移大 + CPU≈漂移 → 同步 CPU 热点；漂移大 + CPU 远小于漂移 → GC/同步等待。
+  // 启动后 12s 自动停，生产可见。
+  {
+    const probeStartedAt = Date.now();
+    let expectedAt = probeStartedAt + 200;
+    let lastCpuUsage = process.cpuUsage();
+    const probe = setInterval(() => {
+      const now = Date.now();
+      const driftMs = now - expectedAt;
+      expectedAt = now + 200;
+      const cpu = process.cpuUsage(lastCpuUsage);
+      lastCpuUsage = process.cpuUsage();
+      const sinceStartMs = now - probeStartedAt;
+      if (driftMs >= 80) {
+        logger.info("ZCode Protocol event loop stall", {
+          context: {
+            cpuSystemMs: Math.round(cpu.system / 1000),
+            cpuUserMs: Math.round(cpu.user / 1000),
+            driftMs,
+            sinceStartMs,
+          },
+          event: "zcode_protocol.event_loop.stall",
+          module: "bootstrap.zcode_protocol",
+        });
+      }
+      if (sinceStartMs > 12_000) clearInterval(probe);
+    }, 200);
+    probe.unref?.();
+  }
+
+  // CPU profile 探针（诊断期无条件尝试）：lag 探针只说明「主线程堵了多久」，
+  // 采样栈说明「堵在哪个函数」。采样 10s 落临时目录；失败写日志而不是静默。
+  {
+    void (async () => {
+      try {
+        const inspector = await import("node:inspector");
+        const fs = await import("node:fs");
+        const os = await import("node:os");
+        const session = new inspector.Session();
+        session.connect();
+        const post = (method: string): Promise<Record<string, unknown>> =>
+          new Promise((resolvePost, rejectPost) => {
+            session.post(method, (error, result) => {
+              if (error) rejectPost(error);
+              else resolvePost((result ?? {}) as Record<string, unknown>);
+            });
+          });
+        await post("Profiler.enable");
+        await post("Profiler.start");
+        setTimeout(() => {
+          void (async () => {
+            try {
+              const { profile } = await post("Profiler.stop");
+              const target = `${os.tmpdir()}/zcode-agent-${process.pid}.cpuprofile`;
+              fs.writeFileSync(target, JSON.stringify(profile));
+              logger.info("ZCode Protocol CPU profile written", {
+                context: { target },
+                event: "zcode_protocol.cpu_profile.written",
+                module: "bootstrap.zcode_protocol",
+              });
+            } catch (error) {
+              logger.warn("ZCode Protocol CPU profile stop failed", {
+                context: { error: error instanceof Error ? error.message : String(error) },
+                event: "zcode_protocol.cpu_profile.failed",
+                module: "bootstrap.zcode_protocol",
+              });
+            }
+          })();
+        }, 10_000);
+      } catch (error) {
+        logger.warn("ZCode Protocol CPU profile start failed", {
+          context: { error: error instanceof Error ? error.message : String(error) },
+          event: "zcode_protocol.cpu_profile.failed",
+          module: "bootstrap.zcode_protocol",
+        });
+      }
+    })();
+  }
+
   try {
     // 数据库准备先于账号、Registry 和遥测，不把远端材料等待混进迁移门禁。
     const configResult = createConfig({ env: options.env });

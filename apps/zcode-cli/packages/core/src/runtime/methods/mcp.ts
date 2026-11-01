@@ -136,7 +136,13 @@ export async function initializeMcp(
   const serverCount = Object.keys(this.config.mcp?.servers ?? {}).length;
 
   try {
+    // 阻塞归属探针：`await startup` 是等 IO（不该占主线程），`registerMcpTools` 是
+    // 同步 CPU（78 个工具的描述/schema/registry 构建，会直接堵事件循环）。冷开期间
+    // 实测事件循环单次漂移 1.6~2.9s，这两段各自贡献多少必须分开量。
+    const startupWaitStartedAt = Date.now();
     const snapshot = await startup;
+    const startupWaitMs = Date.now() - startupWaitStartedAt;
+    const registerStartedAt = Date.now();
     const registered = registerMcpTools(this.registry, mcpPort, snapshot.tools, {
       allowedTools: this.config.toolAllowlist,
       disallowedTools: this.config.toolDisallowlist,
@@ -148,6 +154,16 @@ export async function initializeMcp(
       pluginIdByServerName: buildPluginIdByServerName(this.config.pluginReferenceCatalog),
     });
     this.mcpRegisteredToolNames = new Set(registered);
+    this.logger?.info("MCP tools registration timing", {
+      ...traceContextToLogContext(traceContext),
+      event: "mcp.tools.registration.timing",
+      module: "core.runtime",
+      registerMs: Date.now() - registerStartedAt,
+      registeredToolCount: registered.length,
+      serverCount,
+      startupWaitMs,
+      toolCount: snapshot.tools.length,
+    });
     if (registered.length > 0) {
       this.invalidateToolCache();
     }
