@@ -159,7 +159,6 @@ import {
   MagicContextConfigSchema,
   noteEntry,
   openDatabase,
-  preloadTokenizer,
   projectRuntimeEntries,
   projectStoredMessage,
   promptSurfaceConfigIdentity,
@@ -1499,9 +1498,16 @@ export async function createMagicContextTurnTransform(
     } catch {
       // 非抛出语义下的双保险：任何意外都不许影响启动路径。
     }
-    void preloadTokenizer().catch(() => {
-      // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断事件循环链。
-    });
+    // FORK（冷开优化 2026-11-01，A-B-A 三轮实测）：这里原本还预加载 tokenizer。
+    // 根因证据：ai-tokenizer 的 claude 词表 claude-DN7U36sf.cjs 有 2,333,797 字节，
+    // V8 同步编译 1586~1807ms（module.compile.slow 记录 sinceEntryMs 1339~1439，
+    // 正是本延迟的触发点）。它把同窗口到达的 MCP initialize 应答压住排队，使 stdio
+    // MCP 的 connectDurationMs 常年 2.0~2.5s：
+    //   tokenizer@1.5s -> MCP 2128~2562ms，event loop drift 1598~1786ms
+    //   tokenizer@10s  -> MCP  475~701ms， drift   93~206ms（25 次连接，5 批）
+    //   改回 1.5s      -> MCP 2036~2459ms，drift 1758~1768ms（复现）
+    // 所以不再预热：tokenizer 回到既有懒加载语义，只在首次真正需要 token 计数时加载。
+    // 「挑一个不撞车的延迟值」不是修法——机器与磁盘速度不同，撞车点会漂移。
   }, MAGIC_CONTEXT_WARMUP_DELAY_MS);
   warmupTimer.unref?.();
 
