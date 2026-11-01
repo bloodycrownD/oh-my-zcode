@@ -428,9 +428,17 @@ function resolveElectronRuntimeZCodeAgentCommand(
   if (!bundlePath) {
     return null;
   }
+  // 发布包已带 V8 code cache（desktop 的 stage-agent-bundle 用目标平台 Electron 的
+  // Node 模式编译）：优先加载字节码入口，省掉 14MB zcode.cjs 每次冷启动的完整解析
+  // 编译——真机实测跨项目首次打开 agent 启动 4.45s 的主要构成。loader 缺失或显式
+  // ZCODE_DESKTOP_AGENT_BYTECODE=0 时回退裸 cjs：字节码是纯加速产物，缺失不应
+  // 阻断启动（旧安装包/裁剪包仍可用）。
+  const bytecodeLoaderPath = join(dirname(bundlePath), "zcode.bytecode.cjs");
+  const useBytecode =
+    process.env.ZCODE_DESKTOP_AGENT_BYTECODE !== "0" && existsSync(bytecodeLoaderPath);
   return {
     command: process.execPath,
-    args: [bundlePath, ...ZCODE_AGENT_RUNTIME.spawnArgs],
+    args: [useBytecode ? bytecodeLoaderPath : bundlePath, ...ZCODE_AGENT_RUNTIME.spawnArgs],
     storagePreparationEntry: bundlePath,
     cwd: context.workspacePath,
     // 关键：必须以纯 Node 模式启动，否则子进程会被当成 Electron/Chromium 子进程卡在 GPU 初始化。

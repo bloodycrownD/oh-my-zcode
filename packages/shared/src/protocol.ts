@@ -111,6 +111,14 @@ export interface IntegratedTerminalShellOption {
   source: "system" | "path";
 }
 
+/**
+ * Host → Agent spawn env 键：随进程下发 host 设置里的 `integratedTerminalShell`
+ * （JSON）。会话首开时 agent 原本要为「用户执行作用域」发一次 runtime_preferences
+ * RPC 回读该值，真机实测该往返可达 1.75s 且卡在 resume 关键路径上；env 有值时
+ * agent 直接使用、缺失才回退 RPC（兼容旧 host）。
+ */
+export const INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY = "ZCODE_INTEGRATED_TERMINAL_SHELL_JSON";
+
 /** 默认语言 */
 export const DEFAULT_LOCALE: Locale = "zh-CN";
 

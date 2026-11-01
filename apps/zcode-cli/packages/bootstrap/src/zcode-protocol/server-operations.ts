@@ -1,4 +1,5 @@
 import {
+  INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY,
   isAuxiliarySessionKind,
   isReadonlyAgentSessionKind,
 } from "@zcode/shared";
@@ -3321,6 +3322,36 @@ function resolveProtocolBashShellSelection(
   }).selection;
 }
 
+/**
+ * 解析 spawn env 注入的 shell 选择（host resolveSpawnEnv 写入）。
+ * 宽松校验：任何形状异常都返回 undefined（回退 RPC），绝不因注入值异常中断 resume。
+ */
+function readInjectedIntegratedTerminalShell(
+  env: NodeJS.ProcessEnv,
+): IntegratedTerminalShellSelection | undefined {
+  const raw = env[INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY];
+  if (!raw) return undefined;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (!value || typeof value !== "object") return undefined;
+    const record = value as Record<string, unknown>;
+    if (record.mode === "auto") return { mode: "auto" };
+    if (record.mode !== "shell") return undefined;
+    const { dialect, id, label, path } = record;
+    if (
+      (dialect === "cmd" || dialect === "git-bash") &&
+      typeof id === "string" &&
+      typeof label === "string" &&
+      typeof path === "string"
+    ) {
+      return { mode: "shell", dialect, id, label, path };
+    }
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 async function requestSessionRuntimePreferences(
   context: ZCodeProtocolAgentServerContext,
   sessionId: SessionId,
@@ -3433,6 +3464,13 @@ async function resolveSessionStartupPreferences(
     nativeSearchEnhancementsEnabled: runtimePreferences.nativeSearchEnhancementsEnabled,
     toolSearchMode: runtimePreferences.toolSearchMode,
     resolveInitialBashShellSelection: async () => {
+      // spawn env 已带 host 设置里的 shell 选择（见 host resolveSpawnEnv 的注入）：
+      // 直接解析返回，跳过 runtime_preferences RPC——真机实测该往返可达 1.75s，
+      // 且压在 resume 的 shell_environment 段上。env 缺失时回退 RPC（兼容旧 host）。
+      const injectedShell = readInjectedIntegratedTerminalShell(context.deps.env ?? process.env);
+      if (injectedShell !== undefined) {
+        return resolveProtocolBashShellSelection(context, injectedShell);
+      }
       const executionPreferences = await requestSessionRuntimePreferences(
         context,
         sessionId,

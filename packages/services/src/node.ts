@@ -39,6 +39,7 @@ import { getAppConfigDir as resolveAppConfigDir } from "./paths.js";
 import {
   buildLocalMediaPreviewUrl,
   type DynamicWorkflowMode,
+  INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY,
   isProviderProvisioningAccountCredentialKey,
   type ProviderProvisioningTrigger,
   ZCODE_ENV,
@@ -1928,6 +1929,16 @@ export function createLocalServices(options: {
         // A6：Host 探测到的应用 UI 语言（`zh-CN`/`en-US`）随 spawn 下发，CLI 冷启动据此决定
         // Agent 系统提示词语言；缺席时不产键，保持 env → Intl 的既有回落。
         ...buildUiLocaleSpawnEnv(options?.uiLocale),
+        // 会话首开时 agent 会为「用户执行作用域」的 shell 选择发一次 runtime_preferences
+        // RPC 回读 host 设置，真机实测该往返可达 1.75s 且压在 resume 关键路径上。spawn 时
+        // settings 已在手（见上方 Promise.all），随 env 下发同值；agent 侧优先消费，
+        // 缺失才回退 RPC（兼容旧 host）。未配置（undefined）时下发 auto——与 RPC 路径
+        // 「无选择 → 不覆盖、按默认解析」语义等价，同时保证 agent 永远不必为此发 RPC。
+        ...{
+          [INTEGRATED_TERMINAL_SHELL_SPAWN_ENV_KEY]: JSON.stringify(
+            settings.integratedTerminalShell ?? { mode: "auto" },
+          ),
+        },
         // broker 凭据（socket/token）注入 agent spawn env，让内置 zcode-cua plugin 的
         // computer-use MCP server 经 __zcode-plugin-host 恢复 token 后连上 broker。
         ...cuaProductHelperEnv,

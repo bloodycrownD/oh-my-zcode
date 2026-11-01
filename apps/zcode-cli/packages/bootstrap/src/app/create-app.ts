@@ -561,8 +561,22 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
 
       try {
         const resumeTraceContext = resumeOptions?.traceContext ?? traceContext;
+        // 冷开性能分段：真机实测单次 resume 可达 2.6s（跨项目首次打开会话），此前只有
+        // 总时长、没有分段。每段一条 info 落 agent JSONL（~/.omz/cli/log/zcode-*.jsonl），
+        // durationMs 为距 resume 起点的累计值，便于直接看出各阶段占比。
+        const resumePhaseStartedAt = performance.now();
+        const markResumePhase = (phase: string): void => {
+          logger.info("Session resume phase completed", {
+            durationMs: Math.round(performance.now() - resumePhaseStartedAt),
+            event: "zcode_protocol.resume.phase",
+            phase,
+            sessionId,
+          });
+        };
         const modelSelection = await restorePersistedModelSelection();
+        markResumePhase("restore_model_selection");
         await initializeSessionShellEnvironment();
+        markResumePhase("shell_environment");
         const result = await runtime.resumeFromStore({
           ...(resumeOptions?.abortSignal ? { abortSignal: resumeOptions.abortSignal } : {}),
           // 只传调用方原始 mode；项目/全局默认值不能伪装成 invocation override，
@@ -574,7 +588,9 @@ export async function createZCodeApp(options: ZCodeAppOptions): Promise<ZCodeApp
           // 缺省（legacy resume / prepareResume）保持 "full"。
           ...(resumeOptions?.historyMode ? { historyMode: resumeOptions.historyMode } : {}),
         });
+        markResumePhase("runtime_resume");
         await runtime.activatePausedTargetAfterResume(resumeTraceContext);
+        markResumePhase("activate_paused_target");
         resumePrepared = true;
         return { ...result, modelSelection };
       } finally {

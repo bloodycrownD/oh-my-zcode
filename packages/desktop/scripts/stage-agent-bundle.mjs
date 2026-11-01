@@ -13,6 +13,7 @@ import { spawnSync } from "node:child_process";
 import { cpSync, existsSync, mkdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, resolve } from "node:path";
+import { buildDesktopAgentBytecode } from "../../../scripts/build-desktop-agent-bytecode.mjs";
 import { collectRuntimeModuleClosureEntries } from "./runtime-dependency-closure.mjs";
 
 export const AGENT_BUNDLE_SOURCE_RELATIVE = "apps/zcode-cli/packages/cli/dist/zcode.cjs";
@@ -133,9 +134,9 @@ function verifyStagedBundle({ stagedBundlePath, closureModuleNames, log }) {
 /**
  * 干净重建 glm 目录再拷贝。清空是刻意的：electron-builder 整目录拷贝
  * bundled-agents/<平台> → resources，本地工作树里上一次构建残留的原生二进制
- * （zcode-agent / zcode-acp 等）和旧 meta 会被一并打进安装包（CI 干净检出不会有，本地会）。
+ * （zcode-agent / zcode-acp 等）和旧 meta 会被一并打进安装包（CI 干净检出不会有，本地会有）。
  */
-export function stageAgentBundle({ repoRoot, platformKey, log = console.log }) {
+export async function stageAgentBundle({ repoRoot, platformKey, log = console.log }) {
   const { cliBundlePath, glmDir, stagedBundlePath, stagedMetaPath, stagedRuntimeModulesDir } =
     resolveAgentBundlePaths({
       repoRoot,
@@ -147,14 +148,29 @@ export function stageAgentBundle({ repoRoot, platformKey, log = console.log }) {
   rmSync(glmDir, { recursive: true, force: true });
   mkdirSync(glmDir, { recursive: true });
   cpSync(cliBundlePath, stagedBundlePath);
+  log(`[stage:agent-bundle] staged ${stagedBundlePath}`);
+
+  // 发布包必须带 V8 code cache：14MB 的 zcode.cjs 每次冷启动都要完整解析编译，
+  // 真机实测跨项目首次打开 agent 启动 4.45s 的主要构成。字节码必须由目标平台
+  // Electron 的 Node 模式编译（V8 版本强绑定），所以放在 stage 阶段用本机 electron
+  // 生成；生成三件套与 zcode.cjs 同级分发，host 侧优先加载 zcode.bytecode.cjs，
+  // loader 缺失时自动回退裸 cjs——这里是纯加速产物，不作为启动的硬依赖。
+  const bytecode = await buildDesktopAgentBytecode({ entryPath: stagedBundlePath });
+  log(
+    `[stage:agent-bundle] staged bytecode ${basename(bytecode.loaderPath)} (${bytecode.metadata.bytecodeBytes} bytes)`,
+  );
+
   const meta = {
     runtime: "electron-node",
     entry: "zcode.cjs",
+    bytecode: {
+      loader: basename(bytecode.loaderPath),
+      bytecodeFile: bytecode.metadata.bytecodeFile,
+    },
     platform: platformKey,
     source: AGENT_BUNDLE_SOURCE_RELATIVE,
   };
   writeFileSync(stagedMetaPath, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
-  log(`[stage:agent-bundle] staged ${stagedBundlePath}`);
 
   const closureEntries = stageRuntimeExternalModules({
     repoRoot,
@@ -166,6 +182,31 @@ export function stageAgentBundle({ repoRoot, platformKey, log = console.log }) {
     closureModuleNames: closureEntries.map((entry) => entry.moduleName),
     log,
   });
+  // 字节码入口自检：必须用与编译同一份 Electron Node 跑，验证缓存可被真正命中
+  // （用系统 node 跑会因 V8 版本不一致静默降级成重新编译，测不出问题）。
+  verifyStagedBytecodeLoader({ loaderPath: bytecode.loaderPath, log });
 
-  return { stagedBundlePath, stagedMetaPath };
+  return { stagedBundlePath, stagedMetaPath, bytecode };
+}
+
+function verifyStagedBytecodeLoader({ loaderPath, log }) {
+  const electronPath = createRequire(loaderPath)("electron");
+  const result = spawnSync(electronPath, [loaderPath, "--version"], {
+    cwd: dirname(loaderPath),
+    encoding: "utf8",
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", NODE_OPTIONS: "" },
+    timeout: agentSelfCheckTimeoutMs,
+  });
+  const stderr = result.stderr ?? "";
+  if (result.error) {
+    throw new Error(
+      `[stage:agent-bundle] 字节码入口无法启动 (${loaderPath}): ${result.error.message}`,
+    );
+  }
+  if (result.status !== 0 || /Cannot find module/i.test(stderr)) {
+    throw new Error(
+      `[stage:agent-bundle] 字节码入口自检失败 (exit=${result.status}):\n${stderr.trim().slice(0, 4000)}`,
+    );
+  }
+  log(`[stage:agent-bundle] staged bytecode loader self-check passed (--version)`);
 }
