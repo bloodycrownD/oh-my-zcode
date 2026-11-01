@@ -5143,8 +5143,13 @@ export function createZCodeAgentService(
         0,
         Math.round(performance.now() - providerRegistryStartedAt),
       );
+      const historyFirstStartedAt = performance.now();
       const connection = resolveV4Connection(params);
       const historyFirst = connection.historyFirst === true && (await supportsHistoryFirst(client));
+      const supportsHistoryFirstMs = Math.max(
+        0,
+        Math.round(performance.now() - historyFirstStartedAt),
+      );
       const topic = conversationTopic(params.sessionId);
       const taskMetaStartedAt = performance.now();
       const resumeThoughtLevel = await automationTaskIndexRepo
@@ -5167,6 +5172,7 @@ export function createZCodeAgentService(
           });
           return undefined;
         });
+      const sessionLineageStartedAt = performance.now();
       let directorySessionId = params.sessionId;
       if (options?.resolveSessionDirectories) {
         // 子会话按设计不进主任务索引；直接查 child 的项目会被远端必选项目校验拒绝。
@@ -5196,11 +5202,33 @@ export function createZCodeAgentService(
           directorySessionId = session.parentSessionId;
         }
       }
+      const sessionLineageMs = Math.max(
+        0,
+        Math.round(performance.now() - sessionLineageStartedAt),
+      );
+      const directoriesStartedAt = performance.now();
       const additionalDirectories = await options?.resolveSessionDirectories?.({
         ...params,
         sessionId: directorySessionId,
       });
+      const resolveSessionDirectoriesMs = Math.max(
+        0,
+        Math.round(performance.now() - directoriesStartedAt),
+      );
       const taskMetaReadMs = Math.max(0, Math.round(performance.now() - taskMetaStartedAt));
+      // hostPrepare 黑区拆解：subscribe → cli 请求之间的每一步落 host 日志（生产可见）。
+      // 不进 ACK 的 openTiming——那个 schema 是 strict()，新增键会让旧客户端整帧解析失败。
+      logger.info(undefined, "v4 conversation subscribe host phases", {
+        event: "v4.conversation.subscribe.host_phases",
+        ...(cliBootstrapMs !== undefined ? { cliBootstrapMs } : {}),
+        preTaskMetaMs: Math.max(0, Math.round(taskMetaStartedAt - subscribeStartedAt)),
+        supportsHistoryFirstMs,
+        sessionLineageMs,
+        resolveSessionDirectoriesMs,
+        taskMetaReadMs,
+        sessionId: params.sessionId,
+        workspaceKey: resolveWorkspaceKey(params),
+      });
       const cliRequestStartedAt = performance.now();
       const result = await client.request(
         V4_METHODS.conversationSubscribe,

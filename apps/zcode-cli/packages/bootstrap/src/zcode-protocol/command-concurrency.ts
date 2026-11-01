@@ -142,7 +142,13 @@ export const COMMAND_CONCURRENCY = {
   [zcodeProtocolMethods.workspaceCancelGenerateText]: "mutating", // 旁路执行
 
   // ─── 其余：一律变更（保守侧）。理由统一：不在冷开路径上，且未逐行证明无写。──
-  [zcodeProtocolMethods.runtimeCapabilities]: "mutating",
+  // 例外（实测移出保守侧）：runtimeCapabilities 在**冷开路径上**——host 打开会话时
+  // 用 supportsHistoryFirst() 先探一次能力（写 historyFirst 字段前必须确认执行端）。
+  // 它的 handler 是常量返回 { independentPlanState: true, historyFirst: true }
+  // （server.ts 的 runtimeCapabilities case），零副作用、幂等、无次序依赖，三条判据全中。
+  // 留在 mutating 的实测代价：跨项目打开时它排在 update*Preferences / sessionsIndex
+  // reconcile 等变更后面，单次排队 2.1~3.7s，全额计入 hostPrepareMs。
+  [zcodeProtocolMethods.runtimeCapabilities]: "readonly",
   [zcodeProtocolMethods.computerUseOperationEvent]: "mutating",
   [zcodeProtocolMethods.providerTestModelConnectivity]: "mutating",
   [zcodeProtocolMethods.mcpList]: "mutating",
