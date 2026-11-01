@@ -1,4 +1,32 @@
 {
   "version": 1,
-  "violations": []
+  "violations": [
+    {
+      "rule": "max-public-methods",
+      "file": "packages/web/src/web-remote-control/contract.ts",
+      "module": "web-remote-control",
+      "detail": "14",
+      "message": "契约公开方法超过上限 12",
+      "fingerprint": "4f43023fc189b7b3",
+      "global": false
+    },
+    {
+      "rule": "missing-module-artifact",
+      "file": "packages/services/src/gen-ui",
+      "module": "gen-ui-service",
+      "detail": "contract.test.ts",
+      "message": "模块 gen-ui-service 缺少 contract.test.ts",
+      "fingerprint": "980999b2ff2c0782",
+      "global": false
+    },
+    {
+      "rule": "missing-module-artifact",
+      "file": "packages/services/src/task-groups",
+      "module": "task-groups",
+      "detail": "contract.test.ts",
+      "message": "模块 task-groups 缺少 contract.test.ts",
+      "fingerprint": "bb1caa93af40447d",
+      "global": false
+    }
+  ]
 }
