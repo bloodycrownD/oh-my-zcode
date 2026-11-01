@@ -380,7 +380,22 @@ export class AgentRuntime {
       runtime.initializeMessageHistoryFromContext(this.contextBuilder, this.rootTraceContext);
       this.contextInitialized = true;
     }
-    runtime.startMcpStartup(this.rootTraceContext);
+    // 冷开优化：MCP 预热不再压在 agent 启动瞬间。`spawn()` 的进程创建在主线程同步执行
+    // （Node 官方既知问题 nodejs/node#14917：uv_spawn 不进线程池；argwise 父进程 RSS 越大
+    // 越慢），本仓 CPU profile 实测 12 个 server 合计 ~1.1s self-time，与同窗口 1.6~2.9s
+    // 的事件循环漂移吻合。而 agent 启动后的几十~几百 ms 正是 host 打开会话请求
+    // （subscribe / capabilities / session/list）排队等处理的窗口——预热挪到其后，
+    // 打开路径上就不再发生任何 spawn。
+    // 可用性不变：turn-loop 的 initializeMcp 仍会 await startup，首条消息前工具照旧就绪
+    // （只影响空闲预热时机）。shuttingDown 守卫避免关闭中的 runtime 在延迟到点后拉起
+    // 12 个子进程。
+    // 延迟取 1s：打开会话的 RPC 在 agent 启动后 ~300-400ms 内处理完（关 MCP 对照实测
+    // 队列等待 0.33s），1s 留足余量；此后主线程空闲，12 次 spawn 不再和打开抢线程。
+    const mcpWarmup = setTimeout(() => {
+      if (this.shuttingDown) return;
+      runtime.startMcpStartup(this.rootTraceContext);
+    }, MCP_WARMUP_DELAY_MS);
+    mcpWarmup.unref?.();
   }
 
   async closeBrowserSession(): Promise<void> {
@@ -411,6 +426,9 @@ export class AgentRuntime {
     this.memoryExtractionScheduler?.shutdown();
   }
 }
+
+/** MCP 空闲预热的延迟：让开 agent 启动后 host 打开会话的 RPC 窗口（见构造函数注释）。 */
+const MCP_WARMUP_DELAY_MS = 1_000;
 
 export interface AgentRuntime {
   lastPermissionGrantId?: string;
