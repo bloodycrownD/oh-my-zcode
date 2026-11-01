@@ -673,10 +673,7 @@ describe("createMcpAdapter", () => {
     const statuses = await adapter.status();
     expect(statuses.node_repl?.status).toBe("disconnected");
     expect(statuses.node_repl?.failureKind).toBe("unexpected_disconnect");
-    expect(telemetryEvents.map((event) => [event.kind, event.mcpInstanceId])).toEqual([
-      ["process_start", "mcp-instance-1"],
-      ["process_crash", "mcp-instance-1"],
-    ]);
+    // 遥测面已随 v3.16.2 上游移除，此处不再断言 telemetry 事件。
   });
 
   it("does not report connection_lost when the server is closed deliberately", async () => {
@@ -852,23 +849,36 @@ describe("createMcpAdapter", () => {
     });
 
     const options = capturedStdioOptions[0] as { env?: Record<string, string> };
+    // 代理/NO_PROXY 的键在 win32 上大小写不敏感（setEnvKey 会先按大小写不敏感删除同名键），
+    // 所以 6 个代理变体最终只留下最后设置的 3 个小写键；Linux/macOS 两者共存。
+    const proxyEnv =
+      process.platform === "win32"
+        ? {
+            all_proxy: "http://127.0.0.1:8888",
+            http_proxy: "http://127.0.0.1:8888",
+            https_proxy: "http://127.0.0.1:8888",
+            no_proxy: "localhost,127.0.0.1",
+          }
+        : {
+            ALL_PROXY: "http://127.0.0.1:8888",
+            HTTPS_PROXY: "http://127.0.0.1:8888",
+            HTTP_PROXY: "http://127.0.0.1:8888",
+            NO_PROXY: "localhost,127.0.0.1",
+            all_proxy: "http://127.0.0.1:8888",
+            http_proxy: "http://127.0.0.1:8888",
+            https_proxy: "http://127.0.0.1:8888",
+            no_proxy: "localhost,127.0.0.1",
+          };
     expect(options.env).toMatchObject({
-      ALL_PROXY: "http://127.0.0.1:8888",
       CURL_CA_BUNDLE: "/tmp/root-ca.pem",
       GIT_SSL_CAINFO: "/tmp/root-ca.pem",
-      HTTPS_PROXY: "http://127.0.0.1:8888",
-      HTTP_PROXY: "http://127.0.0.1:8888",
       MCP_TOKEN: "secret",
       NODE_EXTRA_CA_CERTS: "/tmp/root-ca.pem",
-      NO_PROXY: "localhost,127.0.0.1",
       // MCP 会补齐 Node 目录；本测试使用已含 Node 的 PATH，避免依赖测试机的 /bin。
       PATH: dirname(process.execPath),
       REQUESTS_CA_BUNDLE: "/tmp/root-ca.pem",
       SSL_CERT_FILE: "/tmp/root-ca.pem",
-      all_proxy: "http://127.0.0.1:8888",
-      http_proxy: "http://127.0.0.1:8888",
-      https_proxy: "http://127.0.0.1:8888",
-      no_proxy: "localhost,127.0.0.1",
+      ...proxyEnv,
     });
   });
 
