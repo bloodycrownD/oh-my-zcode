@@ -46,6 +46,9 @@ import {
   ZCODE_UI_LOCALE_ENV_KEY,
 } from "@zcode/shared";
 
+// host 侧冷启动分段日志（spawn env 构造各步耗时，落 host 日志、生产可见）。
+const serviceLog = createServiceLogger("zcode-agent");
+
 export {
   materializeZCodeBuiltinProviderConfig,
   ZCODE_BUILTIN_PROVIDER_CONFIG_FILE_ENV,
@@ -1880,9 +1883,25 @@ export function createLocalServices(options: {
     // 设置页的 HTTP 代理、No Proxy + 自定义 CA 按 spawn 时读取注入 agent 子进程 env，
     // 覆盖模型 API / MCP / Bash 出口流量并信任用户显式配置的证书；改动后下次启动 agent 生效。
     resolveSpawnEnv: async (context) => {
+      // 冷启动分段：settings 读（会等设置写队列）、subagent 快照、CUA recipe、
+      // provider 配置启动都挂在 spawn 前的 env 构造上，逐段落 host 日志（生产可见），
+      // 用来确认「spawn 前阻塞」到底占多少，而不是靠环境差异猜。
+      const spawnEnvStartedAt = Date.now();
+      const logStage = (stage: string, since: number): void => {
+        serviceLog.info("ZCode agent spawn env stage", {
+          durationMs: Date.now() - since,
+          stage,
+          totalDurationMs: Date.now() - spawnEnvStartedAt,
+          workspaceKey: context.workspaceKey,
+        });
+      };
+      const settingsStartedAt = Date.now();
       const [settings] = await Promise.all([settingService.get(), providerRuntime.start()]);
+      logStage("settings_and_provider_runtime", settingsStartedAt);
       // 本地 Host 准备解析快照；远程 CLI 继续由自己的文件 loader 读取和迁移配置。
+      const subagentsStartedAt = Date.now();
       if (!isDesktopAttachedRemote) await subagentsService.prepareRuntimeState(context);
+      logStage("subagent_runtime_state", subagentsStartedAt);
       const agentNetwork =
         isDesktopAttachedRemote && options?.remoteAgentNetwork
           ? options.remoteAgentNetwork
@@ -1916,7 +1935,12 @@ export function createLocalServices(options: {
       }
       // Host 是旧配置迁移的唯一写入者。Agent spawn 前等待初始化完成，避免 Worker
       // 先拿到尚不存在的 provider_config.json 并发布短暂空 Registry。
+      const providerConfigStartedAt = Date.now();
       await providerConfigRuntime.start();
+      logStage("provider_config_runtime", providerConfigStartedAt);
+      const endpointOriginStartedAt = Date.now();
+      const endpointOriginEnv = buildAgentEndpointOriginEnv(await resolveCurrentZCodeEndpointOrigin());
+      logStage("endpoint_origin", endpointOriginStartedAt);
       return {
         ...buildAgentRuntimeEnv({
           httpProxy: agentNetwork.httpProxy,
@@ -1925,7 +1949,7 @@ export function createLocalServices(options: {
         }),
         // 把 host 解析出的权威 origin（含 settings 覆盖）下发给 agent，否则 agent 侧只按
         // env 推导，test env + 自定义端点时两侧信任判定的输入分叉、官方 MCP 整体 fail closed。
-        ...buildAgentEndpointOriginEnv(await resolveCurrentZCodeEndpointOrigin()),
+        ...endpointOriginEnv,
         // A6：Host 探测到的应用 UI 语言（`zh-CN`/`en-US`）随 spawn 下发，CLI 冷启动据此决定
         // Agent 系统提示词语言；缺席时不产键，保持 env → Intl 的既有回落。
         ...buildUiLocaleSpawnEnv(options?.uiLocale),

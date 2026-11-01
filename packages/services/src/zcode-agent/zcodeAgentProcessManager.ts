@@ -686,6 +686,13 @@ export class ZCodeAgentProcessManager {
       return;
     }
     managed.readyReported = true;
+    // 冷启动归因：spawn 完成 → agent 就绪（含 Electron 启动、bundle 加载、协议 startup
+    // 与握手）。与 `ZCode agent start stage` 分段、agent 侧 spawnToCodeStartMs 拼成
+    // 完整链路，生产日志可直接读，不用再按环境猜。
+    log("ZCode agent became ready", {
+      startupDurationMs: Math.max(0, managed.readyAt! - managed.startedAt),
+      workspaceKey: resolveWorkspaceKey(managed.workspace),
+    });
     this.reportProcessLifecycle((reporter) =>
       reporter.onReady?.({
         pid: managed.child.pid!,
@@ -958,6 +965,20 @@ export class ZCodeAgentProcessManager {
     admissionSignal: AbortSignal,
   ): Promise<ZCodeProtocolClient> {
     const startStartedAt = Date.now();
+    // 冷启动分段：跨项目首次打开会话时 spawn→首个响应是真机黑区（生产实测 4.45s），
+    // 逐段落 host 日志（生产可见），避免再靠猜把耗时归给某个环境。
+    const startStageLogAt: { stage: string; at: number }[] = [];
+    const markStartStage = (stage: string): void => {
+      const at = Date.now();
+      const previousAt = startStageLogAt.at(-1)?.at ?? startStartedAt;
+      startStageLogAt.push({ stage, at });
+      log("ZCode agent start stage", {
+        stage,
+        sincePreviousMs: at - previousAt,
+        sinceStartMs: at - startStartedAt,
+        workspaceKey,
+      });
+    };
     const resolveCommandStartedAt = Date.now();
     const command = await this.commandResolver({
       ...params,
@@ -979,14 +1000,17 @@ export class ZCodeAgentProcessManager {
       effectiveCommand: effectiveCommand.command,
       resolveCommandDurationMs,
     });
+    markStartStage("resolved_command");
 
     // Helper recovery 可能在 command resolve 期间开始；先等待一次，确保 env 解析使用
     // recovery 后的 broker 凭据，而不是把旧状态带到 spawn 边界。
     await this.waitForSpawnAdmission?.({ ...params, workspaceKey, signal: admissionSignal });
+    markStartStage("spawn_admission_1");
 
     // 设置页代理等运行时 env 在 process.env 之后合入（覆盖继承的同名 shell 变量），
     // 但仍让 command.env（部署特定）保持最高优先级。
     const spawnEnv = (await this.resolveSpawnEnv?.({ ...params, workspaceKey })) ?? {};
+    markStartStage("resolved_spawn_env");
     if (this.disposed) {
       // app 正在关闭时，启动中的 warmup 可能刚完成 command/env resolve。
       // 这时继续 spawn 会绕过 disposeAllAndWait 的快照，重新制造一个无人托管的 agent 进程。
@@ -1003,10 +1027,12 @@ export class ZCodeAgentProcessManager {
       params.workspacePath,
       this.spawnFallbackCwd,
     );
+    markStartStage("spawn_preflight");
     admissionSignal.throwIfAborted();
     // env resolve 本身是异步的，恢复屏障可能在这段时间重新关闭；必须在 spawn 前
     // 再等待并复查代际，不能只依赖第一次 admission。
     await this.waitForSpawnAdmission?.({ ...params, workspaceKey, signal: admissionSignal });
+    markStartStage("spawn_admission_2");
     if (this.disposed) {
       throw new Error("ZCode agent process manager is disposed.");
     }
@@ -1029,6 +1055,9 @@ export class ZCodeAgentProcessManager {
       env: {
         ...sanitizeZCodeRuntimeEnv(process.env),
         [ZCODE_RUNTIME_ENV_KEY]: runtimeEnv,
+        // 冷启动归因：agent 侧用它算「spawn 调用 → agent 代码开始执行」的延迟
+        // （Electron 启动 + bundle 加载的真实耗时），生产日志里可直接读。
+        ZCODE_SPAWN_REQUESTED_AT: String(spawnRequestedAt),
         ...spawnEnv,
         ...effectiveCommand.env,
         // 生成文件根目录由执行端 Host 唯一决定，保证 Agent 写入与 Host 读取授权一致。
@@ -1039,6 +1068,7 @@ export class ZCodeAgentProcessManager {
       },
       stdio: ["pipe", "pipe", "pipe"],
     });
+    markStartStage("spawned");
     const startedAt = Date.now();
     const stderrTail = createAgentStderrTail();
     const transport = new ZCodeStdioTransport(child, {

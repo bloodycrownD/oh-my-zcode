@@ -106,8 +106,17 @@ export async function runZCodeProtocolAgent(
     },
     startupStartedAt,
   );
+  // spawn 调用 → 本进程开始执行代码的延迟（Electron 启动 + bundle 加载的黑区）。
+  // 与 host 侧 `ZCode agent start stage` 分段拼接即为完整冷启动链路，生产日志可读。
+  const spawnRequestedAtEnv = Number(process.env.ZCODE_SPAWN_REQUESTED_AT ?? "");
   startupTimer.start("ZCode Protocol agent startup started", {
-    context: { version: options.version },
+    context: {
+      version: options.version,
+      processUptimeMs: Math.round(process.uptime() * 1000),
+      ...(Number.isFinite(spawnRequestedAtEnv) && spawnRequestedAtEnv > 0
+        ? { spawnToCodeStartMs: Math.max(0, Date.now() - spawnRequestedAtEnv) }
+        : {}),
+    },
     event: "zcode_protocol.startup.started",
     stage: "start",
   });
