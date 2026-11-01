@@ -1,3 +1,30 @@
+## [1.1.2](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.1...v1.1.2) (2026-11-01)
+
+一次性把「打开会话慢」从猜测推进到可复现的根因，并修掉两处会让安装包起不来 agent 的发版阻断。
+
+### 修复
+
+- **后台通知回合结束后命令队列不再停摆**。通知驱动的 turn 走 core 内部 `task-notification` 运行时命令，绕过了 v4 prompt 层的 `afterLegacyStateMutation`，而 autoDrain 的重评钩子全挂在那条路径上，于是队列有命令却永远不会被提升。现在 v4 gateway 在 TurnComplete/TurnError 投影提交后回调宿主 `onTurnSettled`，接到 `autoDrainV4QueueIfReady`（detached、幂等、busy 时重试）。
+- **跨架构构建不再产出目标机无法启动的字节码**。release 的 mac-x64 job 跑在 arm64 主机上，原先用本机 Electron 编 code cache，产出的 `.jsc` 元数据写着 `arch: arm64`；目标机校验不一致即抛错，而 spawn 侧只按 `existsSync` 选 loader —— Intel Mac 装上后任何会话都打不开（CI 之所以绿，是因为自检也用主机 Electron）。现在架构不一致直接跳过字节码；`ZCODE_E2E_COVERAGE=1` 同样跳过（原先会在 staging 阶段直接 throw）。
+- **字节码加载失败退回裸 bundle 而不是让 agent 起不来**。`.jsc` 与运行时不一致（arch、V8 版本、`NODE_OPTIONS` 里的任何 V8 flag、文件损坏）时改为 `require("./zcode.cjs")`；原先直接 `exit 1`，等于用户环境里一个 V8 flag 就能让 agent 永久启动失败且没有逃生口。
+
+### 性能
+
+- **会话打开的 2 秒黑区定位到 ai-tokenizer 的 2.2MB 词表**。`module.compile.slow` 实测 `claude-DN7U36sf.cjs`（2,333,797 字节）被 V8 同步编译 1586~1807ms，编译发生在入口后 1.3~1.4 秒——正好压在会话打开窗口上，把同一时刻到达的 MCP `initialize` 应答全部推迟。A-B-A 三轮对照（`MCP_WARMUP_DELAY_MS` 不变，只切 tokenizer 预热）：1.5s → MCP 2128~2562ms；10s → 475~701ms；改回 1.5s → 2036~2459ms。**改为不再预热**（回到懒加载语义），实测 stdio `connectDurationMs` = 482~654ms（10/10 <900ms），启动窗口 event loop drift 从 1598~1786ms 降到最大 369ms，无新增慢编译。
+- **V8 字节码进入发布链**。14MB agent bundle 每次冷启动都要完整解析编译，打包时按目标平台 Electron 生成 code cache（含自检与回退），实测 1236ms → 823ms。
+- **`runtime/capabilities` 从 mutating 改为 readonly**。它是常量返回、零副作用、幂等的纯查询，却排在独占队列里；改后不再占用独占槽、不再作为「假 writer」挡住同批 reader。
+- **MCP 启动命令去掉 npx 中间层**（用户配置侧验证）：`npx -y @z_ai/mcp-server` 的双层进程让该 server 单次连接 4044ms，改指全局安装入口后 454ms。
+- **版本协商 probe 超时 5s → 1.5s**，并在 Windows Job Object 已接管进程树时跳过冗余的 `taskkill /T /F`。
+
+### 回滚
+
+- **shell 选择改回走 RPC**。上一版为省一次 `runtime_preferences` 往返把它冻结进 spawn env。复查发现那次往返的 1753ms 同样是 tokenizer 阻塞所致：移除 env 注入后该 RPC 实测 2~3ms（同机同脚本）。env 方案会让该设置冻结在 agent 进程生命周期内（主对话通道无空闲超时），改设置要重启 agent 才生效，属于拿真实的行为退化换并不存在的开销。
+
+### 其他
+
+- 新增可长期保留的启动健康指标：`zcode_protocol.event_loop.stall`、`zcode_protocol.module.compile.slow`、MCP `connectDurationMs`、host 侧慢 RPC 往返（≥200ms）。
+- 测试：删掉已随上游移除的遥测面断言、把代理变量断言改为平台感知（Windows 进程环境大小写不敏感，只会保留小写那组）。adapters mcp 37/37、版本协商 3/3、队列竞态 1/1 全绿。
+
 ## [1.1.1](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.0...v1.1.1) (2026-11-01)
 
 v1.1.0 的两条真机修复：侧栏项目归属与 MCP 断连恢复。
