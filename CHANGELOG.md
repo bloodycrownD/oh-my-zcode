@@ -1,3 +1,27 @@
+## [1.0.32](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.31...v1.0.32) (2026-11-04)
+
+Magic Context 的跨会话快照污染从根上修掉，并把此前只存在于 1.1.x 线的防腐层重构收回 1.0.x 基线。**无 UI 变更、无 schema 迁移。**
+
+### 修复
+
+- **子代理会话不再污染父会话的 compaction 账本**。一个 AgentRuntime 进程同时服务父会话与所有子代理，而 turn transform 的 runtime 快照（`currentSnapshot` / `currentRows`）与 provider 注册标记是实例级单例：子代理每跑一轮就把它覆盖掉，异步触发的父会话 historian 于是读到子代理的 entries（子代理数组必然更大），把 `mc<N>` 边界写进父会话的 compartments。父会话此后既解析不到自己的边界（前缀裁剪判为 `refused`），`/ctx-recomp` 也只会返回 0 条，长会话一旦超过上下文窗口就以 MC-H04 拒绝发送。现在快照、持久行、provider 注册三处都按 `sessionId` 隔离（`sessionSnapshots` / `sessionRows` / `registeredSessions`），持久行补齐改为非阻塞，避免把 store 延迟带进 turn 关键路径。
+- **越界账本自愈**。新增 `healUnreachableCompartmentLedger`：当 compactions 的边界 ordinal 超出该会话自己的消息数（即账本是在另一套序号空间里写下的），在 turn 入口清空 compartments 并复位 `prior_boundary_ordinal`、清 M0/M1 缓存——这类账本可证明不自洽，原始消息不受影响。
+
+### 内部
+
+- 收回 18 个 Magic Context 防腐层重构（协议契约独立成文、工具面收进 `magic-context-tool-surface`、`ctx_*` 注册门、4 个 workspace RPC 抽出、usage sink 与加载门收进 assembly、`magic-context-file-config` 适配器、`ctxCommandDispatch`、预算摘要与互斥裁定、memory 词汇表）——这些提交本来就坐落于 v1.0.31 之上，本次 fast-forward 回 1.0.x 线。
+
+### 验证
+
+- 新增 `test-magic-context-session-isolation.mjs`（双会话快照隔离 + 越界自愈两条用例）：在修复前**两条均红**（父会话读到子代理 20 条而自身仅 5 条；越界账本 1 条残留），修复后全绿。
+- 1.0.31 原有 Magic Context 三条门禁（turn transform / historian / lifecycle）保持绿，无回归。
+- 全仓 `tsc -b` 12 个工程 exit 0；桌面 renderer 构建 exit 0。
+
+### 已知
+
+- 1.0.x 线不含 1.1.x 的桌面 E2E 框架（`packages/desktop/test/`），因此本轮真机验证为启动桌面实例人工确认，未做脚本化回归。
+- 1.1.x 线另有 6 处修复属于升级引入（模型选择器空显示、配置不缓存、发送门禁、legacy resume 重复历史、agent 定义重读、manifest model-only 口径），1.0.31 基线不受影响，未回移。
+
 ## [1.0.31](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.30...v1.0.31) (2026-10-28)
 
 编辑态的 skill / 文件胶囊不再退化成 markdown 字面量；同时落地 v1.0.30 之后的两条 P1 修复（Magic Context 派生 source、窗口化快照的全序量）。
