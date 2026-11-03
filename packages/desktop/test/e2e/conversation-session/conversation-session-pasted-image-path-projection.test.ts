@@ -32,6 +32,7 @@ import {
   waitForV4RowAttachments,
 } from "../helpers/v4-conversation.js";
 import { ensureProjectExpanded } from "../helpers/project-sidebar.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const CASE_NAME = "conversation-session-pasted-image-path-projection";
 const VISION_MODEL = "e2e-pasted-image-vision-model";
@@ -50,7 +51,7 @@ const IMAGE_SOURCE_PREFIX = "[Image: source: ";
 const VALID_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACklEQVR4AWMAAQAABQABNtCI3QAAAABJRU5ErkJggg==";
 const paths = getE2EAppDataPaths();
-const imageCacheRoot = join(paths.homeDir, ".zcode", "cli", "image-cache");
+const imageCacheRoot = join(resolveE2EStorageRoot(paths.homeDir), "cli", "image-cache");
 
 let modelProviderReplayServer: Awaited<
   ReturnType<typeof startConversationModelProviderReplayServer>

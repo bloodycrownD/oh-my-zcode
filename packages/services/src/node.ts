@@ -1959,7 +1959,7 @@ export function createLocalServices(options: {
         // 「无选择 → 不覆盖、按默认解析」语义等价，同时保证 agent 永远不必为此发 RPC。
         // 曾经为省一次 runtime_preferences 往返，在这里把 integratedTerminalShell 随 spawn env
         // 下发。已回滚：那次往返被实测为 1753ms，但真因是 agent 启动窗口主线程被 ai-tokenizer
-        // 的 2.2MB 词表同步编译占住（详见 magic-context-turn-transform.ts 的 FORK 注释），
+        // 的 2.2MB 词表同步编译占住（详见 fork 侧 turn-transform 的注释），
         // RPC 本身在根因修掉后只需 2~3ms（user-execution scope 实测）。用 env 下发会把该设置
         // 冻结在 agent 进程生命周期内——改设置要重启 agent 才生效，是拿正确性换一个并不存在的
         // 开销。保持走 RPC，语义与优化前一致。

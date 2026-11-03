@@ -83,7 +83,7 @@ describe(`${CASE_MARKER}: 慢回合中切换模型、fork/edit 与远端历史`,
     });
     const remoteConfig = await runSSHCommand(
       prepared.config,
-      'cat "$HOME/.zcode/v2/provider_config.json"',
+      'cat "$HOME/.omz/v2/provider_config.json"',
     );
     expect(remoteConfig.stdout).toContain(PROVIDER_B_NAME);
 

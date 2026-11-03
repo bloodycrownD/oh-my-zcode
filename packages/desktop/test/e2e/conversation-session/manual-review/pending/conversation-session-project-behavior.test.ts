@@ -4,6 +4,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { waitForWorkspaceApp, DEFAULT_WORKSPACE } from "../../../helpers/desktop-app.js";
 import { loginWithApiKey } from "#e2e/helpers/v4-conversation";
 import { TID_AUTOMATIONS_OPEN } from "@zcode/shared/test-ids";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const projectId = "e2e-project-behavior";
 const name = "E2E_PROJECT_BEHAVIOR";
@@ -30,7 +31,7 @@ describe("虚拟项目旧产品体验", () => {
     const taskRoot = join(root, "task-cwd");
     await mkdir(taskRoot, { recursive: true });
     await writeFile(join(taskRoot, "E2E_PINNED_TASK_FILES.txt"), "task cwd file");
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
     try {
       // 纯列表 fixture：只在隔离库准备已持久化的历史镜像，不声称覆盖模型/CLI 执行。
       db.prepare(
@@ -168,7 +169,7 @@ describe("虚拟项目旧产品体验", () => {
         localStorage.getItem("zcode-project-sidebar-preferences"),
       );
       const db = new DatabaseSync(
-        join(process.env.ZCODE_E2E_HOME_DIR!, ".zcode/v2/tasks-index.sqlite"),
+        join(resolveE2EStorageRoot(process.env.ZCODE_E2E_HOME_DIR!), "v2/tasks-index.sqlite"),
       );
       try {
         await browser.electron.execute((electron) => {
@@ -234,7 +235,7 @@ describe("虚拟项目旧产品体验", () => {
 
   it("VP31：任务分区会话与项目内会话左侧留白一致", async () => {
     const db = new DatabaseSync(
-      join(process.env.ZCODE_E2E_HOME_DIR!, ".zcode/v2/tasks-index.sqlite"),
+      join(resolveE2EStorageRoot(process.env.ZCODE_E2E_HOME_DIR!), "v2/tasks-index.sqlite"),
     );
     const task = $('[data-testid="conversation-section"] [data-testid="task-item-e2e-behavior-6"]');
     const layouts: {
@@ -599,7 +600,7 @@ describe("虚拟项目旧产品体验", () => {
     ).toBe(true);
     expect(await timeline.$$("[data-timeline-date-heading]").length).toBe(2);
     const db = new DatabaseSync(
-      join(process.env.ZCODE_E2E_HOME_DIR!, ".zcode/v2/tasks-index.sqlite"),
+      join(resolveE2EStorageRoot(process.env.ZCODE_E2E_HOME_DIR!), "v2/tasks-index.sqlite"),
     );
     let expected: string[];
     try {
@@ -780,7 +781,7 @@ describe("虚拟项目旧产品体验", () => {
 
   it("VP31：41 个项目拖拽启动保持响应，取消不改顺序", async () => {
     const home = process.env.ZCODE_E2E_HOME_DIR!;
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
     try {
       const insert = db.prepare(
         "INSERT INTO projects(project_id,host_id,name,position,created_at,updated_at) VALUES(?,'local',?,?,1,1)",

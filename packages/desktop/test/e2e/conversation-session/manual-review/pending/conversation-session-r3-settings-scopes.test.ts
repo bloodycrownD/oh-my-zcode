@@ -348,7 +348,7 @@ describe(`${CASE_MARKER}: 远端 Source 在线时设置 scope 与子智能体落
     provider = await createSSHLifecycleProvider(config, CASE_MARKER, { tunnelUsername: "tunnel" });
     await runSSHCommand(
       config,
-      `rm -f "$HOME/.zcode/agents/${AGENT_NAME}.md" "${workspaceA}/.zcode/agents/${AGENT_NAME_PROJECT}.md"`,
+      `rm -f "$HOME/.omz/agents/${AGENT_NAME}.md" "${workspaceA}/.zcode/agents/${AGENT_NAME_PROJECT}.md"`,
     );
 
     // Source 在线，先激活远程项目 B；远程无项目入口已退役。
@@ -414,7 +414,7 @@ describe(`${CASE_MARKER}: 远端 Source 在线时设置 scope 与子智能体落
     await createSubagent(AGENT_NAME, provider.id, SSH_LIFECYCLE_MODEL_ID);
     const remoteConversationFile = await runSSHCommand(
       config,
-      `test -f "${conversation.workspacePath}/.zcode/agents/${AGENT_NAME}.md" && echo FOUND; test ! -f "$HOME/.zcode/agents/${AGENT_NAME}.md" && echo USER_UNCHANGED`,
+      `test -f "${conversation.workspacePath}/.zcode/agents/${AGENT_NAME}.md" && echo FOUND; test ! -f "$HOME/.omz/agents/${AGENT_NAME}.md" && echo USER_UNCHANGED`,
     );
     facts.remoteConversationFile = remoteConversationFile.stdout.trim();
     expect(remoteConversationFile.stdout).toContain("FOUND");
@@ -464,7 +464,7 @@ describe(`${CASE_MARKER}: 远端 Source 在线时设置 scope 与子智能体落
     await browser.pause(3_000);
     const remoteProjectFile = await runSSHCommand(
       config,
-      `test -f "${workspaceA}/.zcode/agents/${AGENT_NAME_PROJECT}.md" && echo FOUND || echo MISSING; find "$HOME/.zcode" "${workspaceA}" -name "${AGENT_NAME_PROJECT}.md" 2>/dev/null`,
+      `test -f "${workspaceA}/.zcode/agents/${AGENT_NAME_PROJECT}.md" && echo FOUND || echo MISSING; find "$HOME/.omz" "${workspaceA}" -name "${AGENT_NAME_PROJECT}.md" 2>/dev/null`,
     );
     facts.remoteProjectAgentFile = remoteProjectFile.stdout.trim().split("\n");
     facts.localProjectAgentFileExists = await localFileExists(

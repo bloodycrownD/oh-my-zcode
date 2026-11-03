@@ -32,6 +32,7 @@ import {
 import { reloadElectronSessionSafely } from "../../../helpers/e2e-electron-reload.js";
 import { UPSTREAM_MODEL, UPSTREAM_PROVIDER_ID } from "../../../helpers/upstream-provider.js";
 import { getUpstreamRequestEvidence } from "../../../helpers/conversation-session-network.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 150_000;
 const AUTOMATION_TITLE = "AUTOMATION_UNREAD_CLEAR_TASK";
@@ -53,7 +54,7 @@ interface AutomationIndexState {
 describe("TSL38：定时任务后台执行完成后点击清除未读", () => {
   afterEach(async function () {
     if (this.currentTest?.state !== "failed") return;
-    const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+    const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
     try {
       console.info("[Todo88 legacy automation]", {
         definitions: database
@@ -177,7 +178,7 @@ async function createScheduledAutomationAndMakeDue(): Promise<string> {
   await clickTestIdByDom(TID_AUTOMATIONS_OPEN);
   // 启动时 scheduler 早于窗口 Host 就绪；到期会进入正常的 no-local-host 退避。
   // 本 case 不测该退避，只在 Host 已就绪后推进调度时间，不再改模型选择或编辑保存。
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     database
       .prepare("update automations set next_run_at = ? where automation_id = ?")
@@ -248,7 +249,7 @@ async function waitForTaskIndexState(
 }
 
 function readTaskIndexState(taskId: string): TaskIndexState | null {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     const row = database
       .prepare(
@@ -264,7 +265,7 @@ function readTaskIndexState(taskId: string): TaskIndexState | null {
 }
 
 function readLatestUnreadTaskIndexState(automationId: string): TaskIndexState | null {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     const row = database
       .prepare(
@@ -295,7 +296,7 @@ async function waitForAutomationByTitle(title: string): Promise<AutomationIndexS
 }
 
 function readAutomationByTitle(title: string): AutomationIndexState | null {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     const row = database
       .prepare(
@@ -310,7 +311,7 @@ function readAutomationByTitle(title: string): AutomationIndexState | null {
 }
 
 function seedLegacyAutomationSelection(automationId: string): void {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     database.exec("PRAGMA busy_timeout = 5000");
     const result = database
@@ -329,7 +330,7 @@ function seedLegacyAutomationSelection(automationId: string): void {
 }
 
 function assertMigratedAutomationSelection(automationId: string): void {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     const row = database
       .prepare(

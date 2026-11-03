@@ -29,7 +29,7 @@ async function readRemoteModelNetwork(config: SSHConnectionConfig, startedAt: st
   const result = await runSSHCommand(
     config,
     // 只回收网络阶段、模型身份和状态；凭据、请求头、prompt 不进入 E2E facts。
-    `cat "$HOME/.zcode/cli/log/"*.jsonl 2>/dev/null | awk -v since="${startedAt}" -F'"timestamp":"' 'substr($2,1,24) >= since' | grep -E '"event":"model\\.network\\.' | while IFS= read -r line; do printf '%s\\n' "$line" | grep -oE '"(timestamp|event|modelId|providerId|providerKind|baseURL|status|statusCode|responseStatus|durationMs|finishReason|errorCode|retryCount)":"?[^,"}]*' | paste -sd '\t' -; done`,
+    `cat "$HOME/.omz/cli/log/"*.jsonl 2>/dev/null | awk -v since="${startedAt}" -F'"timestamp":"' 'substr($2,1,24) >= since' | grep -E '"event":"model\\.network\\.' | while IFS= read -r line; do printf '%s\\n' "$line" | grep -oE '"(timestamp|event|modelId|providerId|providerKind|baseURL|status|statusCode|responseStatus|durationMs|finishReason|errorCode|retryCount)":"?[^,"}]*' | paste -sd '\t' -; done`,
   );
   return result.stdout.trim().split("\n").filter(Boolean);
 }
@@ -99,12 +99,12 @@ describe(`${CASE_MARKER}: 账号 Coding Plan 代表（BigModel Team / glm-5.3-fl
     const startedAt = new Date().toISOString();
     requestStartedAt = startedAt;
     await connectSSHWorkspace({ caseMarker: CASE_MARKER, config, workspacePath: workspaceA });
-    const remoteSettings = await runSSHCommand(config, 'cat "$HOME/.zcode/v2/setting.json"');
+    const remoteSettings = await runSSHCommand(config, 'cat "$HOME/.omz/v2/setting.json"');
     expect(remoteSettings.stdout).toContain('"providerFamilyDomain": "bigmodel"');
     // 远端只保证自带运行时，不要求全局 node；原 tr 会连同键名内部的冒号一起删除。
     const remoteCredentialKeys = await runSSHCommand(
       config,
-      `grep -o '"[^"]*":' "$HOME/.zcode/v2/credentials.json" | sed -E 's/^"//; s/":$//'`,
+      `grep -o '"[^"]*":' "$HOME/.omz/v2/credentials.json" | sed -E 's/^"//; s/":$//'`,
     );
     facts.remoteCredentialKeys = remoteCredentialKeys.stdout.trim().split("\n").filter(Boolean);
     // 当前合同只下发 OAuth 登录态，Team 请求在远端换证；旧 API Key 的落盘断言已过时。

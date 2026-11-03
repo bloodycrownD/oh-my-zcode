@@ -9,6 +9,7 @@ import {
   toolSearchResponseStage,
   type ToolSearchRequest,
 } from "../helpers/toolsearch-provider.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 describe("ToolSearch TUI 真实终端", () => {
   it("TS02-TUI: 强开搜索、resume 默认关闭、continue 再开启恢复真实引用", async function () {
@@ -98,9 +99,9 @@ describe("ToolSearch TUI 真实终端", () => {
     try {
       // TUI 现有登录门槛要求一个有效计划连接；请求仍选择隔离的普通测试 Provider。
       // 只在隔离 HOME 中写虚构身份，不读取或复用本机登录凭据。
-      await mkdir(join(fixture.root, ".zcode", "v2"), { recursive: true });
+      await mkdir(join(resolveE2EStorageRoot(fixture.root), "v2"), { recursive: true });
       await writeFile(
-        join(fixture.root, ".zcode", "v2", "credentials.json"),
+        join(resolveE2EStorageRoot(fixture.root), "v2", "credentials.json"),
         JSON.stringify({
           "account-provider:account:zai-individual-coding-plan:identity": "toolsearch-e2e",
           "account-provider:coding-plan:account:zai-individual-coding-plan:account:toolsearch-e2e:api-key":

@@ -2,7 +2,7 @@ import { assertSubagentListingTrajectory } from "../helpers/subagent-listing-ass
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { clearAppData, DEFAULT_WORKSPACE } from "../helpers/desktop-app.js";
-import { resolveE2EHomeDir } from "../helpers/e2e-runtime-paths.js";
+import { resolveE2EHomeDir, resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 import type {
   E2ENetworkCaptureArtifact,
   E2ENetworkCaptureRecord,
@@ -43,7 +43,7 @@ const ISOLATED_CUSTOM_FINAL_TOKEN = "subagent-prompt-assembly-isolated-done";
 const USER_AGENTS_MARKER = "E2E_SUBAGENT_USER_AGENTS_INSTRUCTION";
 const WORKSPACE_AGENTS_MARKER = "E2E_SUBAGENT_WORKSPACE_AGENTS_INSTRUCTION";
 const TEST_HOME_DIR = resolveE2EHomeDir();
-const USER_AGENTS_PATH = join(TEST_HOME_DIR, ".zcode", "AGENTS.md");
+const USER_AGENTS_PATH = join(resolveE2EStorageRoot(TEST_HOME_DIR), "AGENTS.md");
 const WORKSPACE_AGENTS_PATH = join(DEFAULT_WORKSPACE, "AGENTS.md");
 const CUSTOM_AGENT_PROFILE = `---
 name: ${CUSTOM_AGENT_NAME}
@@ -67,12 +67,12 @@ ${ISOLATED_CUSTOM_AGENT_PROMPT_MARKER}
 Reply only with the requested marker.
 `;
 const CUSTOM_AGENT_PATHS = [
-  join(TEST_HOME_DIR, ".zcode", "agents", `${CUSTOM_AGENT_NAME}.md`),
-  join(TEST_HOME_DIR, ".zcode", "cli", "agents", `${CUSTOM_AGENT_NAME}.md`),
+  join(resolveE2EStorageRoot(TEST_HOME_DIR), "agents", `${CUSTOM_AGENT_NAME}.md`),
+  join(resolveE2EStorageRoot(TEST_HOME_DIR), "cli", "agents", `${CUSTOM_AGENT_NAME}.md`),
 ];
 const ISOLATED_CUSTOM_AGENT_PATHS = [
-  join(TEST_HOME_DIR, ".zcode", "agents", `${ISOLATED_CUSTOM_AGENT_NAME}.md`),
-  join(TEST_HOME_DIR, ".zcode", "cli", "agents", `${ISOLATED_CUSTOM_AGENT_NAME}.md`),
+  join(resolveE2EStorageRoot(TEST_HOME_DIR), "agents", `${ISOLATED_CUSTOM_AGENT_NAME}.md`),
+  join(resolveE2EStorageRoot(TEST_HOME_DIR), "cli", "agents", `${ISOLATED_CUSTOM_AGENT_NAME}.md`),
 ];
 
 describe("会话区 subagent prompt assembly E2E", () => {

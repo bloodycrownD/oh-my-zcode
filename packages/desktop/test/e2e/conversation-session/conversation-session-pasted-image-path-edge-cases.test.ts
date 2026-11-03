@@ -29,6 +29,7 @@ import {
   waitForV4AssistantMessageContaining,
   waitForV4Pane,
 } from "../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const CASE_NAME = "conversation-session-pasted-image-path-edge-cases";
 const UNKNOWN_MODEL = "e2e-image-unknown-capability-model";
@@ -46,8 +47,8 @@ const VALID_PNG_BASE64 =
 // 1x1 24-bit BMP。Jimp/provider 链路可解码，但派生缓存故意不支持 image/bmp。
 const VALID_BMP_BASE64 =
   "Qk06AAAAAAAAADYAAAAoAAAAAQAAAAEAAAABABgAAAAAAAQAAAATCwAAEwsAAAAAAAAAAAAAAAD/AA==";
-const artifactRoot = join(getE2EAppDataPaths().homeDir, ".zcode", "cli", "artifacts");
-const imageCacheRoot = join(getE2EAppDataPaths().homeDir, ".zcode", "cli", "image-cache");
+const artifactRoot = join(resolveE2EStorageRoot(getE2EAppDataPaths().homeDir), "cli", "artifacts");
+const imageCacheRoot = join(resolveE2EStorageRoot(getE2EAppDataPaths().homeDir), "cli", "image-cache");
 
 let modelProviderReplayServer: Awaited<
   ReturnType<typeof startConversationModelProviderReplayServer>

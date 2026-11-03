@@ -10,6 +10,7 @@ import { useBaseWorkspaceServices } from "@/hooks/useWorkspaceServices.js";
 import { useTabStoreApi } from "@/store/TabStoreProvider.js";
 import { isWorkspaceTab } from "@/store/tabStore.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
+import { getWindowControllerTaskListRegistry } from "@/v4/windowControllerTaskListRegistry.js";
 import { onTaskNavigationCommitted } from "@/store/zcodeSessionStoreNavigation.js";
 import { logger } from "@/logger.js";
 
@@ -84,6 +85,21 @@ export function useProjectUnreadSignals(
     // spec: docs/ui/task-unread-state.md 被动标记未读「前台完成的离开补记」。
     // 补写/清除的串行队列与在途标记挂在组件级 ref 上（跨 effect 共享）：effect 重跑
     // 后旧实例未完成的命令由新实例按共享记录继续，不会静默跳过或重复写入。
+    // 运行态权威是 sessions-index 的 live phase（controller registry），不是
+    // tasks-index 的 sticky cli_last_outcome；后者永远到不了 running。
+    const readLivePhase = (target: WindowHostTaskUnreadSignal["address"]) => {
+      const controller = services.windowControllerService;
+      if (!controller) return undefined;
+      const addressKey = target.workspaceIdentity?.trim() || target.workspacePath;
+      const match = getWindowControllerTaskListRegistry(controller)
+        .readActivities()
+        .find(
+          ({ address }) =>
+            address.taskId === target.taskId &&
+            (address.workspaceIdentity?.trim() || address.workspacePath) === addressKey,
+        );
+      return match?.activity.phase;
+    };
     const flushOnLeave = () => {
       const writes: Array<Promise<void>> = [];
       for (const [key, entry] of foregroundCompletions) {
@@ -98,6 +114,10 @@ export function useProjectUnreadSignals(
         const command = enqueueForegroundCommand(entry.target, async () => {
           // 记录已被新信号覆盖/清除时，迟到回包不再驱动状态。
           if (foregroundCompletionsRef.current.get(key) !== entry) return;
+          // 新一轮已经开始（prewarming/running）时不能把上一轮完成补记成未读；
+          // 等这一轮真正结束，后台终态信号会按正常路径写。
+          const livePhase = readLivePhase(entry.target);
+          if (livePhase === "prewarming" || livePhase === "running") return;
           const meta = await mutateProjectTask(
             ports,
             entry.target,

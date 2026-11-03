@@ -14,6 +14,7 @@ import {
 import { installHandoffRpcProbe, callHandoffHost } from "#e2e/helpers/remote-project-handoff-probe";
 import { ServiceChannels, ZCODE_AGENT_PROVIDER } from "@zcode/shared";
 import { TID_TASK_ITEM, testId } from "@zcode/shared/test-ids";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 declare global {
   interface Window {
@@ -499,7 +500,7 @@ describe("任务分组独立视图", () => {
     const home = process.env.ZCODE_E2E_HOME_DIR;
     if (!home || !basename(home).startsWith(".e2e-home-desktop-e2e-") || !cwd)
       throw new Error("隔离 HOME 和真实任务目录 required");
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
     try {
       db.exec("BEGIN IMMEDIATE");
       const task = db.prepare(

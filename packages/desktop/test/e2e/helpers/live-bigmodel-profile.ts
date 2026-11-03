@@ -1,9 +1,10 @@
 import { readFile } from "node:fs/promises";
 import { platform, userInfo } from "node:os";
-import { resolve } from "node:path";
+import { join } from "node:path";
 import { createCredentialService, setDataBaseDir } from "@zcode/services/node";
 import { createCredentialCipherProvider } from "../../../../services/src/credential/providers/credentialCipherProvider.js";
 import { getE2EAppDataPaths } from "#e2e/helpers/desktop-app";
+import { resolveE2EStorageRoot } from "#e2e/helpers/e2e-runtime-paths";
 
 const IMPORT_KEYS = [
   "oauth:bigmodel:access_token",
@@ -43,7 +44,7 @@ export async function importLiveBigModelCredentials(caseMarker: string): Promise
     },
   });
   const original = JSON.parse(
-    await readFile(resolve(sourceHome, ".zcode", "v2", "credentials.json"), "utf8"),
+    await readFile(join(resolveE2EStorageRoot(sourceHome), "v2", "credentials.json"), "utf8"),
   ) as Record<string, string>;
   const values = new Map<string, string>();
   for (const [key, value] of Object.entries(original)) {
@@ -68,7 +69,7 @@ export async function importLiveBigModelCredentials(caseMarker: string): Promise
     );
   }
   const paths = getE2EAppDataPaths();
-  // services 的数据根是 HOME 级目录（其下 .zcode/v2），与 desktop-app helper 的 credentialsFile 同一文件。
+  // services 的数据根是 HOME 级目录（其下 .omz/v2），与 desktop-app helper 的 credentialsFile 同一文件。
   setDataBaseDir(paths.homeDir);
   const targetCipher = createCredentialCipherProvider({
     env: {
@@ -85,7 +86,7 @@ export async function importLiveBigModelCredentials(caseMarker: string): Promise
     if (!(key in written)) throw new Error(`${caseMarker}: 凭据未写入隔离 profile: ${key}`);
   }
   const sourceSettings = JSON.parse(
-    await readFile(resolve(sourceHome, ".zcode", "v2", "setting.json"), "utf8"),
+    await readFile(join(resolveE2EStorageRoot(sourceHome), "v2", "setting.json"), "utf8"),
   ) as Record<string, unknown>;
   const sourceSelection = (
     sourceSettings.providerFamilyConnectionSelections as Record<string, unknown> | undefined

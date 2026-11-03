@@ -68,7 +68,7 @@ describe(`${CASE_MARKER}: SSH 本地下载遵循应用代理`, () => {
     expect(process.env.ZCODE_REMOTE_ASSET_CACHE_DIR).toBe(cacheDir);
     const config = readSSHRuntimeConfig(CASE_MARKER);
     const workspacePath = config.workspacePaths[0];
-    const cleanTarget = await runSSHCommand(config, 'test ! -e "$HOME/.zcode/server/current.json"');
+    const cleanTarget = await runSSHCommand(config, 'test ! -e "$HOME/.omz/server/current.json"');
     expect(cleanTarget.code).toBe(0);
     const { version } = JSON.parse(
       await readFile(resolve(DESKTOP_ROOT, "../../package.json"), "utf8"),
@@ -101,7 +101,7 @@ describe(`${CASE_MARKER}: SSH 本地下载遵循应用代理`, () => {
     const tab = await waitForRemoteTab({ caseMarker: CASE_MARKER, expectedPath: workspacePath });
     expect(tab.remoteSessionId).toBeTruthy();
     expect(tab.secretPersistedInTab).toBe(false);
-    const installed = await runSSHCommand(config, 'cat "$HOME/.zcode/server/current.json"');
+    const installed = await runSSHCommand(config, 'cat "$HOME/.omz/server/current.json"');
     expect(installed.code).toBe(0);
     const current = JSON.parse(installed.stdout) as { archiveSha256: string };
     const archive = descriptor.archives.find((item) => item.sha256 === current.archiveSha256);

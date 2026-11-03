@@ -17,7 +17,7 @@ import {
   getE2EAppDataPaths,
   waitForTestIdByDom,
 } from "../../../helpers/desktop-app.js";
-import { resolveE2ERuntimePath } from "../../../helpers/e2e-runtime-paths.js";
+import { resolveE2ERuntimePath, resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 import { reloadElectronSessionPreservingBrowserProfile } from "#e2e/helpers/e2e-electron-reload";
 import { waitForRendererAfterColdRestart } from "#e2e/helpers/ssh-remote-lifecycle";
 import { prepareV4ConversationE2E } from "../../../helpers/v4-conversation.js";
@@ -88,7 +88,7 @@ describe(`${CASE_MARKER}: 远端激活时桌面设置仍属于本机`, () => {
     const conversation = await completeSSHProjectConnection(config, CASE_MARKER);
     facts.workspaceIdentity = conversation.workspaceIdentity;
     const readSourceSettings = async (): Promise<Record<string, unknown>> => {
-      const result = await runSSHCommand(config, 'cat "$HOME/.zcode/v2/setting.json"');
+      const result = await runSSHCommand(config, 'cat "$HOME/.omz/v2/setting.json"');
       expect(result.code).toBe(0);
       return JSON.parse(result.stdout);
     };
@@ -163,7 +163,7 @@ describe(`${CASE_MARKER}: 远端激活时桌面设置仍属于本机`, () => {
       { timeout: 60_000 },
     );
     expect((await localSettings()).dataBaseDir).toBe(customRoot);
-    expect(await readFile(join(customRoot, ".zcode/v2", canary), "utf8")).toBe(CASE_MARKER);
+    expect(await readFile(join(resolveE2EStorageRoot(customRoot), "v2", canary), "utf8")).toBe(CASE_MARKER);
     const sourceAfter = await readSourceSettings();
     for (const field of [
       "dataBaseDir",
@@ -174,7 +174,7 @@ describe(`${CASE_MARKER}: 远端激活时桌面设置仍属于本机`, () => {
     }
     facts.sourceDesktopSettingsUnchanged = true;
     facts.localCanaryCopied = true;
-    const startupCwd = join(customRoot, ".zcode", "workspace", "default");
+    const startupCwd = join(resolveE2EStorageRoot(customRoot), "workspace", "default");
     // 根因回归：复制 v2 不会创建新根下的存储 cwd，必须由启动 owner 在启动 Worker 前准备。
     await expect(stat(startupCwd)).rejects.toMatchObject({ code: "ENOENT" });
     facts.startupCwdAbsentBeforeRestart = true;

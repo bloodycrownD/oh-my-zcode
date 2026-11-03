@@ -55,14 +55,14 @@ const artifactDir = resolve(process.env.ZCODE_E2E_ARTIFACT_DIR ?? ".e2e-artifact
 async function readInstallFacts(config: SSHConnectionConfig) {
   const result = await runSSHCommand(
     config,
-    'echo "installationId=$(grep -o \'"installationId": *"[^"]*"\' "$HOME/.zcode/server/install.json" 2>/dev/null | grep -oE "[0-9a-f-]{36}")"; ' +
-      'echo "current=$(test -f "$HOME/.zcode/server/current.json" && echo present || echo none)"; ' +
-      'echo "releases=$(ls "$HOME/.zcode/server/releases" 2>/dev/null | tr "\\n" ",")"; ' +
-      'echo "configSentinel=$(cat "$HOME/.zcode/server/config/e2e-sentinel.txt" 2>/dev/null || echo none)"; ' +
-      'echo "legacyAsset=$(test -e "$HOME/.zcode/server/e2e-legacy-asset.bin" && echo present || echo none)"; ' +
-      'echo "userData=$(cat "$HOME/.zcode/e2e-user-data.txt" 2>/dev/null || echo none)"; ' +
-      'echo "serverEntries=$(ls -A "$HOME/.zcode/server" 2>/dev/null | tr "\\n" ",")"; ' +
-      'echo "uninstalledMarker=$(cat "$HOME/.zcode/server/uninstalled.json" 2>/dev/null | tr -d "\\n ")"',
+    'echo "installationId=$(grep -o \'"installationId": *"[^"]*"\' "$HOME/.omz/server/install.json" 2>/dev/null | grep -oE "[0-9a-f-]{36}")"; ' +
+      'echo "current=$(test -f "$HOME/.omz/server/current.json" && echo present || echo none)"; ' +
+      'echo "releases=$(ls "$HOME/.omz/server/releases" 2>/dev/null | tr "\\n" ",")"; ' +
+      'echo "configSentinel=$(cat "$HOME/.omz/server/config/e2e-sentinel.txt" 2>/dev/null || echo none)"; ' +
+      'echo "legacyAsset=$(test -e "$HOME/.omz/server/e2e-legacy-asset.bin" && echo present || echo none)"; ' +
+      'echo "userData=$(cat "$HOME/.omz/e2e-user-data.txt" 2>/dev/null || echo none)"; ' +
+      'echo "serverEntries=$(ls -A "$HOME/.omz/server" 2>/dev/null | tr "\\n" ",")"; ' +
+      'echo "uninstalledMarker=$(cat "$HOME/.omz/server/uninstalled.json" 2>/dev/null | tr -d "\\n ")"',
   );
   return Object.fromEntries(
     result.stdout
@@ -144,8 +144,8 @@ describe(`${CASE_MARKER}: ${variant}，卸载重装与独立环境替换`, () =>
     // 前置：已安装目标；放置 config 哨兵、旧散资产、用户数据哨兵。
     const seed = await runSSHCommand(
       config,
-      'mkdir -p "$HOME/.zcode/server/config" && echo R3_CONFIG_SENTINEL > "$HOME/.zcode/server/config/e2e-sentinel.txt" && ' +
-        'head -c 1024 /dev/zero > "$HOME/.zcode/server/e2e-legacy-asset.bin" && echo R3_USER_DATA > "$HOME/.zcode/e2e-user-data.txt" && echo ok',
+      'mkdir -p "$HOME/.omz/server/config" && echo R3_CONFIG_SENTINEL > "$HOME/.omz/server/config/e2e-sentinel.txt" && ' +
+        'head -c 1024 /dev/zero > "$HOME/.omz/server/e2e-legacy-asset.bin" && echo R3_USER_DATA > "$HOME/.omz/e2e-user-data.txt" && echo ok',
     );
     expect(seed.stdout.trim()).toBe("ok");
     const before = await readInstallFacts(config);
@@ -169,7 +169,7 @@ describe(`${CASE_MARKER}: ${variant}，卸载重装与独立环境替换`, () =>
           container,
           "bash",
           "-lc",
-          '"$HOME/.zcode/server/bin/zcode" uninstall --server-root "$HOME/.zcode/server" --json',
+          '"$HOME/.omz/server/bin/zcode" uninstall --server-root "$HOME/.omz/server" --json',
         ],
         {
           prompts: ["Type DELETE to uninstall ZCode Server: ", "Type DELETE again to confirm: "],
@@ -294,7 +294,7 @@ describe(`${CASE_MARKER}: ${variant}，卸载重装与独立环境替换`, () =>
     // 身份变化只由真正独立的数据环境触发。完整封存旧数据，不能只删 UUID 却共享历史库。
     const replaced = await runSSHCommand(
       config,
-      'test ! -e "$HOME/r3-uninstall-preserved-data" && mv "$HOME/.zcode" "$HOME/r3-uninstall-preserved-data"',
+      'test ! -e "$HOME/r3-uninstall-preserved-data" && mv "$HOME/.omz" "$HOME/r3-uninstall-preserved-data"',
     );
     expect(replaced.code).toBe(0);
     facts.originalDataArchived = true;
@@ -482,7 +482,7 @@ describe(`${CASE_MARKER}: ${variant}，卸载重装与独立环境替换`, () =>
     expect(reinstalled.userData).toBe("none");
     // 真实旧任务保留在封存的数据环境；新环境不能因目录相同而得到旧历史。
     const runtime = JSON.parse(
-      (await runSSHCommand(config, 'cat "$HOME/.zcode/server/current.json"')).stdout,
+      (await runSSHCommand(config, 'cat "$HOME/.omz/server/current.json"')).stdout,
     );
     const history = await runSSHCommand(
       config,

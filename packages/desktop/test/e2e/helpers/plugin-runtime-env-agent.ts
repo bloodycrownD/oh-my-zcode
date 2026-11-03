@@ -3,6 +3,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DEFAULT_PLUGIN_MARKETPLACES } from "@zcode/shared";
 import { getE2EAppDataPaths } from "./desktop-app.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const PLUGIN_RUNTIME_ENV_MARKETPLACE_ID =
   "e2e-plugin-runtime-env-market";
@@ -84,13 +85,8 @@ export async function createPluginRuntimeEnvFixture(
 }
 
 async function primeDefaultPluginMarketplacesForE2E(homeDir: string): Promise<void> {
-  const path = join(
-    homeDir,
-    ".zcode",
-    "cli",
-    "plugins",
-    "known_marketplaces.json",
-  );
+  // 插件存储随 fork 用户数据根走 .omz/cli；写死 .zcode 会让预置静默失效。
+  const path = join(resolveE2EStorageRoot(homeDir), "cli", "plugins", "known_marketplaces.json");
   const existing = await readKnownMarketplaceRecords(path);
   const now = new Date().toISOString();
   const byId = new Map(existing.map((record) => [record.id, record]));

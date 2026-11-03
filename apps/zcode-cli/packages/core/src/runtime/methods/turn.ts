@@ -510,15 +510,27 @@ export async function executeTurnCommand(
                 : { epilogueStart: options.epilogueStart }),
             },
           );
-          // 标题生成以前等主 turn 成功后才启动，用户 stop/cancel 首轮请求时
-          // generated title 永远没有机会发起。首条 query 持久化后即可异步生成，避免被主链路取消拖死。
-          const titleGenerationStarted = maybeStartSessionTitleGeneration.call(
-            this,
-            displayInput,
-            userMessageId,
-            turnTraceContext,
-          );
-          shouldRetryTitleGenerationAfterTurn = !titleGenerationStarted;
+        }
+        if (!creationFailure) {
+          // 每轮重新读一次子代理定义：Settings 改完 agent 模型后，下一次 spawn 必须用新值。
+          // 位置固定在用户输入持久化之后、标题生成与首次模型请求之前；读取失败时
+          // 不启动标题、不发任何模型请求，但已落库的用户消息保留。
+          await this.prepareAgentDefinitions({
+            signal: turnAbortSignal,
+            traceContext: turnTraceContext,
+          });
+          throwIfTurnAborted(turnAbortSignal);
+          if (options?.skipInputRecord !== true && options?.inputVisibility !== "model-only") {
+            // 标题生成以前等主 turn 成功后才启动，用户 stop/cancel 首轮请求时
+            // generated title 永远没有机会发起。首条 query 持久化后即可异步生成，避免被主链路取消拖死。
+            const titleGenerationStarted = maybeStartSessionTitleGeneration.call(
+              this,
+              displayInput,
+              userMessageId,
+              turnTraceContext,
+            );
+            shouldRetryTitleGenerationAfterTurn = !titleGenerationStarted;
+          }
         }
         // Plugin reminder 必须在对应 user 消息写入历史和 session store 后再追加：
         // provider 形态因此稳定为 user → system，cold hydration 也按同一因果顺序恢复。

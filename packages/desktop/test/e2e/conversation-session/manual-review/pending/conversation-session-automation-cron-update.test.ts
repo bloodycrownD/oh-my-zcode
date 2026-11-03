@@ -39,6 +39,7 @@ import {
   waitForV4Pane,
   waitForV4TimelineContaining,
 } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 // 与同名 upstream fixture 对齐：CronList 返回 UI 创建任务的真实 automationId，
 // replay server 再把该 ID 注入 CronUpdate，禁止用固定或猜测的 ID 绕过查询链路。
@@ -192,7 +193,7 @@ interface AutomationRecord {
 }
 
 function automationDatabasePath(): string {
-  return join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
+  return join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite");
 }
 
 function readAutomationRecordById(

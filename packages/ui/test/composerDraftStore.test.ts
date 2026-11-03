@@ -203,6 +203,22 @@ describe("Composer Draft 持久选择", () => {
     expect(read("other")?.text).toBe("keep");
   });
 
+  it("空正文即使只带 Plan=false、分组或切换的模式也不落草稿（配置由 config store 负责）", () => {
+    const key = getV4ComposerDraftStorageKey(workspace);
+    for (const empty of [
+      { text: "", planEnabled: false },
+      { text: "", taskGroupId: "group" },
+      { text: "", mode: "yolo" as const, modelSelection: selection },
+    ]) {
+      const write = vi.spyOn(storage, "setItem");
+      persistV4ComposerDraft(workspace, undefined, V4_DRAFT_SCOPE_ROOT, empty);
+      expect(read(V4_DRAFT_SCOPE_ROOT)).toBeNull();
+      expect(write).not.toHaveBeenCalled();
+      expect(storage.getItem(key)).toBeNull();
+      write.mockRestore();
+    }
+  });
+
   it("分组 placement 独立保留，切项目/改正文不丢失，提升后不保留副本", () => {
     persistV4ComposerDraft(workspace, undefined, V4_DRAFT_SCOPE_ROOT, {
       text: "draft",
@@ -282,7 +298,7 @@ describe("Composer Draft 持久选择", () => {
     expect(read()?.modelSelection).toBeUndefined();
   });
 
-  it("发送后清空正文也删除持久配置", () => {
+  it("发送后清空正文也删除文字草稿（配置由 config store 保留）", () => {
     const draft = { text: "prompt", mode: "plan" as const, modelSelection: selection };
     persistV4ComposerDraft(workspace, undefined, "session-a", draft);
     persistV4ComposerDraft(workspace, undefined, "session-a", { ...draft, text: "" });

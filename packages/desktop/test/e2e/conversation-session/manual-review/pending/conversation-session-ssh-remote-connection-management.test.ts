@@ -379,7 +379,7 @@ describe(`${MARKER}: 编辑、多连接默认值与移除`, () => {
     );
     const remote = await runSSHCommand(
       config,
-      `cat '${config.workspacePaths[0]}/guide-remove-sentinel.txt'; test -f "$HOME/.zcode/server/current.json"`,
+      `cat '${config.workspacePaths[0]}/guide-remove-sentinel.txt'; test -f "$HOME/.omz/server/current.json"`,
     );
     expect(remote.code).toBe(0);
     expect(remote.stdout).toBe("GUIDE_KEEP_REMOTE");

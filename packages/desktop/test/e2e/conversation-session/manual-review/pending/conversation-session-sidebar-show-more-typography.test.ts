@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_WORKSPACE, waitForWorkspaceApp } from "../../../helpers/desktop-app.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const projectId = "E2E_SHOW_MORE";
 const project = `[data-project-id="${projectId}"]`;
@@ -16,7 +17,7 @@ async function seedRows() {
     throw new Error("需要本 case 的隔离 HOME");
   const root = join(DEFAULT_WORKSPACE, ".zcode-e2e", "show-more");
   await mkdir(root, { recursive: true });
-  const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+  const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
   try {
     const now = Date.now();
     db.exec("BEGIN IMMEDIATE");

@@ -188,7 +188,7 @@ async function readHistoryStore(
   await writeFile(
     script,
     `import { DatabaseSync } from 'node:sqlite';
-const db = new DatabaseSync(process.env.HOME+'/.zcode/v2/tasks-index.sqlite');
+const db = new DatabaseSync(process.env.HOME + '/.omz/v2/tasks-index.sqlite');
 db.exec('PRAGMA busy_timeout=5000');
 if(process.argv[2]==='conflict') {
  const first=db.prepare('SELECT * FROM tasks WHERE task_id=?').get(process.argv[3]);
@@ -225,7 +225,7 @@ db.close();process.stdout.write(JSON.stringify(result));\n`,
   // 冲突必须在旧程序停止后、当前程序启动前注入；旧主链没有 Server runtime，不能先偷跑迁移。
   const node = mode.startsWith("conflict")
     ? await prepareSSHHistoryFixtureNode(config, remoteRoot)
-    : `${JSON.parse((await runSSHCommand(config, 'cat "$HOME/.zcode/server/current.json"')).stdout).releaseDir}/runtime/node`;
+    : `${JSON.parse((await runSSHCommand(config, 'cat "$HOME/.omz/server/current.json"')).stdout).releaseDir}/runtime/node`;
   const result = await runSSHCommand(
     config,
     `'${node}' '${remoteRoot}/history-store.mjs' '${mode}' '${firstId}' '${secondId}'`,
@@ -252,7 +252,7 @@ db.close();process.stdout.write(JSON.stringify(result));\n`,
 async function listMigrationBackups(config: SSHConnectionConfig): Promise<string> {
   const result = await runSSHCommand(
     config,
-    'find "$HOME/.zcode/server/migration-backups" -name tasks-index.sqlite -type f 2>/dev/null || true',
+    'find "$HOME/.omz/server/migration-backups" -name tasks-index.sqlite -type f 2>/dev/null || true',
   );
   return result.stdout.trim();
 }
@@ -589,7 +589,7 @@ describe(`${MARKER}: staging 自然历史升级与回退`, () => {
       expect(store.ledgers.some((ledger) => ledger.status === "completed")).toBe(true);
       const backups = await runSSHCommand(
         prepared.config,
-        'find "$HOME/.zcode/server/migration-backups" -name tasks-index.sqlite -type f',
+        'find "$HOME/.omz/server/migration-backups" -name tasks-index.sqlite -type f',
       );
       expect(backups.stdout.trim()).not.toBe("");
       facts.mergeLedgerAndBackups = store;

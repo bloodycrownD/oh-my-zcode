@@ -16,6 +16,7 @@ import {
 } from "../helpers/desktop-app.js";
 // 正式用例已迁移到 V4，旧初始化在设置页返回后仍等待已移除的聊天入口。
 import { prepareV4ConversationE2E } from "../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 180_000;
 const MODERN_SERVER_NAME = "e2e_modern_728";
@@ -23,7 +24,7 @@ const LEGACY_SERVER_NAME = "e2e_legacy_2025";
 const PINNED_LEGACY_SERVER_NAME = "e2e_pinned_legacy";
 const BUILT_IN_NODE_REPL_SERVER_NAME = "node_repl";
 const E2E_PATHS = getE2EAppDataPaths();
-// 修复原因：WDIO 为每轮运行注入隔离 HOME，但 CLI 数据根实际是 HOME/.zcode。
+// 修复原因：WDIO 为每轮运行注入隔离 HOME，但 CLI 数据根实际是 HOME/.omz。
 // 这里沿用 desktop-app 的 storageRoot 合同；直接从 homeDir 再拼 .zcode 会在
 // 当前 fixture layout 下绕过 runner 已创建的 .zcode/cli，导致写入前 ENOENT。
 const CLI_CONFIG_FILE = join(E2E_PATHS.storageRoot, "cli", "config.json");
@@ -261,7 +262,7 @@ async function waitForConnectedLogs(
 
 async function readConnectedLogs(): Promise<Map<string, McpConnectedLog>> {
   const logDir =
-    process.env.ZCODE_LOG_DIR?.trim() || join(E2E_PATHS.homeDir, ".zcode", "cli", "log");
+    process.env.ZCODE_LOG_DIR?.trim() || join(resolveE2EStorageRoot(E2E_PATHS.homeDir), "cli", "log");
   const result = new Map<string, McpConnectedLog>();
   const files = await readdir(logDir).catch(() => []);
   for (const file of files) {

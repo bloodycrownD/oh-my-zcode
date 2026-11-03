@@ -140,7 +140,7 @@ describe(`${CASE_MARKER}: 远端 session 的手动 compact 与 goal 暂停/继�
     facts.afterCompactTurnUsesSummary = true;
     const remoteCompact = await runSSHCommand(
       prepared.config,
-      'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); grep -c "compact" "$F" || true',
+      'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); grep -c "compact" "$F" || true',
     );
     facts.remoteLogCompactMentions = Number.parseInt(remoteCompact.stdout.trim() || "0", 10);
 

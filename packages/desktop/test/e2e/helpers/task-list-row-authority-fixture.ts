@@ -4,6 +4,7 @@ import {
   PROVIDER_READINESS_HISTORY_SESSION_ID,
   seedProviderReadinessHistoryFixture,
 } from "./provider-readiness-history-fixture.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const TASK_INDEX_ROW_AUTHORITY_TOTAL = 25;
 export const TASK_INDEX_ROW_AUTHORITY_MISSING_SUMMARY_ID = "sess_e2e_task_index_only_24";
@@ -36,7 +37,9 @@ export async function seedTaskIndexRowAuthorityFixture(
 
   // Node 当前内置 SQLite 只提供 DatabaseSync；fixture 在 Electron/Host 启动前执行，
   // 没有与产品进程争用句柄，写完立即关闭。
-  const database = new DatabaseSync(join(options.e2eHomeDir, ".zcode", "v2", "tasks-index.sqlite"));
+  const database = new DatabaseSync(
+    join(resolveE2EStorageRoot(options.e2eHomeDir), "v2", "tasks-index.sqlite"),
+  );
   const insert = database.prepare(`
     INSERT INTO tasks (
       workspace_key, workspace_path, workspace_identity, task_id, title, task_status,

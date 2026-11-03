@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { DEFAULT_WORKSPACE } from "../../../helpers/desktop-app.js";
 
 import { loginWithApiKey, prepareV4ConversationE2E } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 /** 仅验证离线入口与真实侧栏交互；SSH 执行和手机 shared-host 使用各自链路用例。 */
 describe("远程单目录项目展示", () => {
@@ -21,7 +22,7 @@ describe("远程单目录项目展示", () => {
       (!basename(home).startsWith("zcode-remote-project-policy-e2e-") && !isolatedRunnerHome)
     )
       throw new Error("isolated HOME required");
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
     try {
       db.exec("BEGIN IMMEDIATE");
       db.prepare(

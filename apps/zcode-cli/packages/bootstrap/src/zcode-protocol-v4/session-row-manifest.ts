@@ -928,13 +928,41 @@ export async function readColdRowPageMaterialization(input: {
     };
   }
 
-  const messages = await store.readActiveBranchTail({
+  let messages = await store.readActiveBranchTail({
     sessionID: input.sessionID,
     activeMessageIds,
     limitBefore: input.plan.limitBefore,
     ...(input.plan.limitAfter === null ? {} : { limitAfter: input.plan.limitAfter }),
   });
   if (messages.length === 0) return { kind: "unavailable", reason: "emptyPage" };
+
+  // 分支头页（ordinal 0）额外补 timeline_event 合成消息：`timeline:model_change` part
+  // 挂在 `msg_part_*_message` 上，它们不在 active 分支序里，`readActiveBranchTail`
+  // 会漏掉；全量物化能拿到，页路径拿不到就会少一行 marker，整页被对齐守卫拒收。
+  // 只在顶部页付一次全量消息读，换正确性；非顶部页仍走 O(page) 尾窗。
+  if (input.plan.ordinal === 0 && store.messages) {
+    const lastMessageId = String(messages[messages.length - 1]!.info.id);
+    try {
+      const all = await store.messages({ sessionID: input.sessionID });
+      // 不能按时间过滤：合成消息的 sequence 可能比页首更早（本次早 7ms），但全量序里
+      // 它属于页首边界，投影正是靠它生成下一轮的 modelChange marker。按全量序取
+      // 「≤ 页末消息」的 timeline_event，顺序与全量物化一致。
+      const lastIndex = all.findIndex((message) => String(message.info.id) === lastMessageId);
+      const keep = new Set(messages.map((message) => String(message.info.id)));
+      if (lastIndex >= 0) {
+        for (let index = 0; index <= lastIndex; index += 1) {
+          const message = all[index]!;
+          if (message.info.semantics?.kind === "timeline_event") {
+            keep.add(String(message.info.id));
+          }
+        }
+      }
+      messages = all.filter((message) => keep.has(String(message.info.id)));
+    } catch {
+      // 补读失败时保留尾窗结果；最坏情况退回原有的「顶部页可能少 marker」，
+      // 不能把整页判成 unavailable。
+    }
+  }
 
   // 时间基准取**整条分支**首条消息（不是页首条）：合成器用它推导 createdAt，
   // 取页首条会让同一行在冷窗口与翻页里算出两个时间（IS1 破）。

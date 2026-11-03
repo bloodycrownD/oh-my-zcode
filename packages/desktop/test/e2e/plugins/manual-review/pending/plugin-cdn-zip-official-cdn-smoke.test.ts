@@ -13,6 +13,7 @@ import {
   requirePluginManualReview,
   waitForPluginCard,
 } from "../../../helpers/plugin-management-lifecycle.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const OFFICIAL_CDN_MARKETPLACE_ID = "zcode-plugins-official";
 const OFFICIAL_CDN_PLUGIN_NAME = "example-plugin";
@@ -49,8 +50,7 @@ describe("PLM-LC-007b Desktop real official CDN ZIP smoke", () => {
     await installPluginThroughUi(OFFICIAL_CDN_PLUGIN_ID);
 
     const cacheRoot = join(
-      getE2EAppDataPaths().homeDir,
-      ".zcode",
+      resolveE2EStorageRoot(getE2EAppDataPaths().homeDir),
       "cli",
       "plugins",
       "cache",
@@ -61,7 +61,7 @@ describe("PLM-LC-007b Desktop real official CDN ZIP smoke", () => {
     expect(existsSync(join(cacheRoot, ".claude-plugin", "plugin.json"))).toBe(true);
     const installedState = JSON.parse(
       readFileSync(
-        join(getE2EAppDataPaths().homeDir, ".zcode", "cli", "plugins", "installed_plugins.json"),
+        join(resolveE2EStorageRoot(getE2EAppDataPaths().homeDir), "cli", "plugins", "installed_plugins.json"),
         "utf-8",
       ),
     ) as {

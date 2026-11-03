@@ -19,6 +19,7 @@ import {
   waitForWorkspaceApp,
   DEFAULT_WORKSPACE,
 } from "../../../helpers/desktop-app.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 describe("虚拟项目 Composer 候选", () => {
   after(async () => {
@@ -246,7 +247,7 @@ describe("虚拟项目 Composer 候选", () => {
       }
     });
     const readOwnership = () => {
-      const db = new DatabaseSync(join(home, ".zcode", "v2", "tasks-index.sqlite"), {
+      const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2", "tasks-index.sqlite"), {
         readOnly: true,
       });
       try {

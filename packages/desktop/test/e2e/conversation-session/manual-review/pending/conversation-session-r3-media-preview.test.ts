@@ -300,7 +300,7 @@ describe(`${CASE_MARKER}: 远端媒体附件的预览读取、断线后访问与
     const remoteImagePath = JSON.stringify(imageRequest?.requestJson).match(
       /\[Image: source: ([^\]]+)\]/u,
     )?.[1];
-    expect(remoteImagePath).toMatch(/^\/home\/dev\/\.zcode\/cli\/image-cache\/[A-Za-z0-9_./-]+$/u);
+    expect(remoteImagePath).toMatch(/^\/home\/dev\/\.omz\/cli\/image-cache\/[A-Za-z0-9_./-]+$/u);
     const remoteHash = await runSSHCommand(prepared.config, `sha256sum -- '${remoteImagePath}'`);
     expect(remoteHash.code).toBe(0);
     const expectedImageHash = createHash("sha256")

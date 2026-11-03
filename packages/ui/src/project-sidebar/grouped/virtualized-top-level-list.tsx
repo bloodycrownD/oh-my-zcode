@@ -98,6 +98,17 @@ function VirtualizedGroupedTopLevelList({
     }
     setScrollMargin(resolveScrollMargin(listElement, nextScrollElement));
   }, []);
+  // pinned 区/上方内容高度变化会移动列表在共享滚动容器里的位置，但列表自身尺寸不变，
+  // ResizeObserver 不会触发；滚动锚定会同步改 scrollTop，用滚动事件重算 margin，
+  // 避免虚拟窗口与真实滚动位置静默错位。
+  const scrollMarginFrameRef = useRef<number | null>(null);
+  const scheduleScrollMarginUpdate = useCallback(() => {
+    if (scrollMarginFrameRef.current !== null) return;
+    scrollMarginFrameRef.current = window.requestAnimationFrame(() => {
+      scrollMarginFrameRef.current = null;
+      updateScrollMargin();
+    });
+  }, [updateScrollMargin]);
   const resolveInitialScrollOffset = useCallback(() => {
     const listElement = listRef.current;
     const currentScrollElement =
@@ -128,6 +139,19 @@ function VirtualizedGroupedTopLevelList({
       resizeObserver?.disconnect();
     };
   }, [nodes.length, shouldVirtualize, updateScrollMargin]);
+
+  useLayoutEffect(() => {
+    if (!scrollElement) return undefined;
+    const onScroll = () => scheduleScrollMarginUpdate();
+    scrollElement.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scrollElement.removeEventListener("scroll", onScroll);
+      if (scrollMarginFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollMarginFrameRef.current);
+        scrollMarginFrameRef.current = null;
+      }
+    };
+  }, [scrollElement, scheduleScrollMarginUpdate]);
 
   const rowVirtualizer = useVirtualizer({
     count: shouldVirtualize ? nodes.length : 0,

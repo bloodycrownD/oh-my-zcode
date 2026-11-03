@@ -166,7 +166,7 @@ describe(`${CASE_MARKER}: 激活远端 workspace 时模型设置连通性测试�
     await selectV4TaskById(taskA.taskId);
     const remoteLogBefore = await runSSHCommand(
       prepared.config,
-      'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
+      'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
     );
 
     // ① 远端 workspace 激活 + 本地默认 workspace tab 存在：测试 Upstream E2E（本机回放可达）→ 本地执行。
@@ -177,7 +177,7 @@ describe(`${CASE_MARKER}: 激活远端 workspace 时模型设置连通性测试�
     const requestsAfter = await getUpstreamRequestRecordCount();
     const remoteLogAfter = await runSSHCommand(
       prepared.config,
-      'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
+      'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
     );
     facts.withLocalWorkspace = {
       ...withLocal,
@@ -275,7 +275,7 @@ describe(`${CASE_MARKER}: 激活远端 workspace 时模型设置连通性测试�
     const requestsAfter2 = await getUpstreamRequestRecordCount();
     const remoteLogAfter2 = await runSSHCommand(
       prepared.config,
-      'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
+      'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); grep -c "model.network" "$F" || true',
     );
     facts.withoutLocalWorkspace = {
       ...withoutLocal,

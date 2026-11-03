@@ -5,7 +5,8 @@
 // 旧键清理仍归 chatComposerDraftStorage 的 janitor。
 // 语义：scope = sessionId（draft 态 = "__draft__"）；保存 text + editorStateJson，外部预填在
 // Lexical 尚未挂载时额外保存 mention（保证重挂载不降级为纯文本）。
-// 仅有非空白正文才持久化；mode/modelSelection 随正文保存，删空后删除整个 scope。
+// 仅有非空白正文才持久化；删空后删除整个 scope。mode/modelSelection 仍随正文保存，仅用于
+// 兼容旧记录；新的配置持久化由 composerConfigStore 独立负责（空正文也有配置）。
 // 附件不入草稿（objectUrl/File 不可序列化，localPath 附件重启后归属难校验——
 // 与「v4 composer 不做附件草稿持久化」的裁决一致）。
 import { logger } from "@/logger.js";
@@ -251,6 +252,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
+/** 非空白正文才构成可恢复的文字草稿；只改配置不算草稿（见 composerConfigStore）。 */
 function readDraft(value: unknown): V4ComposerDraft | null {
   if (!isRecord(value) || typeof value.text !== "string" || !value.text.trim()) return null;
   const mode = submissionModeSchema.safeParse(value.mode);
@@ -368,7 +370,8 @@ export function persistV4ComposerDraft(
     delete next.projectId;
     delete next.taskGroupId;
   }
-  // 空白页配置只留在 Composer 内存；不存在记录时也不执行无意义写盘。
+  // 只有非空白正文构成文字草稿；空正文删除记录。mode/模型/Plan 的独立持久化在
+  // composerConfigStore，因此清空正文不会丢配置，也不会留下空草稿行。
   if (!next.text.trim()) {
     delete file.scopes[scopeId];
   } else {

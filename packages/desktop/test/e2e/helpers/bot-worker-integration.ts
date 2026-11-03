@@ -22,6 +22,7 @@ import {
 import { TaskIndexRepo } from "../../../../services/src/session/taskIndexRepo.js";
 import { createZCodeTaskIndexSyncer } from "../../../../services/src/zcode-agent/zcodeTaskIndexSyncer.js";
 import { getE2EAppDataPaths } from "./desktop-app.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 import {
   createBotsServiceHarness,
   createFeishuConfig,
@@ -47,7 +48,7 @@ export async function createBotWorkerIntegration(baseUrl: string, dropTextContai
     if (errors.length) throw new AggregateError(errors, "Bot worker fixture cleanup failed");
   };
   try {
-    const personalFilePath = join(home, ".zcode/v2/provider_config.json");
+    const personalFilePath = join(resolveE2EStorageRoot(home), "v2/provider_config.json");
     const modelSelection = {
       providerId: "e2e-bot-worker",
       modelId: "e2e-bot-model",

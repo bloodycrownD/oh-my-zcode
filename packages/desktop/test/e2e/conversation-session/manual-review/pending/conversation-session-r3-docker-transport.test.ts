@@ -158,7 +158,7 @@ describe(`${CASE_MARKER}: Desktop Docker transport 首装、首发与关闭重�
     facts.containerUser = (
       await dockerSh(
         container,
-        "id -un; test -e ~/.zcode/server/current.json && echo installed || echo fresh",
+        "id -un; test -e ~/.omz/server/current.json && echo installed || echo fresh",
       )
     ).trim();
     await prepareV4ConversationE2E({ skipProvider: true });
@@ -177,7 +177,7 @@ describe(`${CASE_MARKER}: Desktop Docker transport 首装、首发与关闭重�
     // 且每段 grep 兜底 || true，保证命令 exit 0 时 stdout 不被丢弃。
     const installState = await dockerSh(
       container,
-      'grep -o \'"archiveSha256": *"[0-9a-f]*"\' ~/.zcode/server/current.json || true; cat ~/.zcode/server/run/status.json | tr -d "\\n "; echo; grep -o "\\"providerName\\": *\\"[^\\"]*\\"" ~/.zcode/v2/provider_config.json || true',
+      'grep -o \'"archiveSha256": *"[0-9a-f]*"\' ~/.omz/server/current.json || true; cat ~/.omz/server/run/status.json | tr -d "\\n "; echo; grep -o "\\"providerName\\": *\\"[^\\"]*\\"" ~/.omz/v2/provider_config.json || true',
     );
     facts.remoteAfterConnect = installState.split("\n").filter(Boolean).slice(0, 8);
     expect(installState).toContain("archiveSha256");
@@ -222,7 +222,7 @@ describe(`${CASE_MARKER}: Desktop Docker transport 首装、首发与关闭重�
     expect(await getUpstreamRequestRecordCount()).toBe(replayBefore);
     const remoteRequests = await dockerSh(
       container,
-      'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); grep -c "model.network.completed" "$F" || true; grep -o "\\"baseURL\\":\\"[^\\"]*\\"" "$F" | sort | uniq -c',
+      'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); grep -c "model.network.completed" "$F" || true; grep -o "\\"baseURL\\":\\"[^\\"]*\\"" "$F" | sort | uniq -c',
     );
     facts.remoteModelNetwork = remoteRequests.trim().split("\n");
     expect(remoteRequests).toContain(seeded.baseURL);
@@ -235,7 +235,7 @@ describe(`${CASE_MARKER}: Desktop Docker transport 首装、首发与关闭重�
 
     const daemonAfterDisconnect = await dockerSh(
       container,
-      'cat ~/.zcode/server/run/status.json | tr -d "\\n " | cut -c1-120',
+      'cat ~/.omz/server/run/status.json | tr -d "\\n " | cut -c1-120',
     );
     expect(daemonAfterDisconnect).toContain('"state":"ready"');
     await reconnectRemoteProject(ready.identity, CASE_MARKER);

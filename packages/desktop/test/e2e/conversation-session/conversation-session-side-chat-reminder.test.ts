@@ -29,6 +29,7 @@ import {
   UPSTREAM_PROVIDER_ID,
   ensureUpstreamModelForE2E,
 } from "../helpers/upstream-provider.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const SCENARIOS = [
   { name: "non-mcs", model: UPSTREAM_MODEL, useMidConversationSystem: false },
@@ -215,7 +216,7 @@ async function openEmptySideChat(): Promise<void> {
 function readMessages(sessionId: string): unknown[] {
   // Node SQLite 只提供同步 API；只读隔离 E2E DB，不改写运行中的 session。
   const db = new DatabaseSync(
-    join(getE2EAppDataPaths().homeDir, ".zcode", "cli", "db", "db.sqlite"),
+    join(resolveE2EStorageRoot(getE2EAppDataPaths().homeDir), "cli", "db", "db.sqlite"),
     { readOnly: true },
   );
   try {

@@ -996,6 +996,8 @@ export class ProductProjection {
     if (turnRows.length === 0) return null;
     return buildTurnManifestEntry({
       turnId,
+      // 正常 turn 的 turnId 就是触发消息 id；cold-hydrate 的 hydrate-turn-* 不是消息。
+      triggerMessageId: turnId.startsWith("msg_") ? turnId : null,
       ordinal: ordinalOffset + ordinal,
       rows: turnRows,
       messageIdForRow: (rowId) => this.messageIdByRowId.get(rowId) as MessageId | undefined,

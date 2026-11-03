@@ -453,3 +453,50 @@ export function getSessionFacts(db: Database, sessionId: string): SessionFact[] 
         .filter(isSessionFactRow);
     return rows.map(toSessionFact);
 }
+
+// ── FORK（MC 跨会话污染修复）：compaction 账本的重建入口 ─────────────────────────
+//
+// 背景：一个 AgentRuntime 进程同时服务父会话与其派生的子代理会话，历史上一份进程级
+// 快照被子代理覆盖，父会话的 historian 于是按子代理的 ordinal 空间写 compartments，
+// 边界（如 `mc1246`）远远超出父会话自己的消息数（如 445）。此后前缀裁剪永远解析不
+// 到边界（`refused`），未裁剪请求超过窗口即抛 MC-H04，而 `/ctx-recomp` 只是再跑一次
+// 增量 pass（offset = 边界 + 1 > 消息数 → 0 条），无法自愈。
+//
+// 判据是**可证明的不自洽**：compartment 覆盖到的 ordinal 大于该会话自己的消息数。
+// 这种账本不可能描述当前会话，唯一正确的恢复是丢掉它、让 historian 从未压缩状态重建
+// （原始消息不受影响，丢掉的只是可再生的摘要）。
+
+/**
+ * 丢掉一个会话的 compaction 账本：compartments + 保护尾边界 + M0/M1 缓存。
+ * 只由 `healUnreachableCompartmentLedger` 在判据成立时调用；不提供给普通路径。
+ */
+export function resetCompartmentLedger(db: Database, sessionId: string): void {
+    db.prepare("DELETE FROM compartments WHERE session_id = ?").run(sessionId);
+    db.prepare(
+        `UPDATE session_meta
+            SET prior_boundary_ordinal = 1,
+                cached_m0_bytes = NULL,
+                cached_m0_max_compartment_seq = NULL,
+                cached_m0_last_baseline_end_message_id = NULL,
+                cached_m1_bytes = NULL
+          WHERE session_id = ?`,
+    ).run(sessionId);
+}
+
+/**
+ * 边界越界时重建账本，返回被丢掉的越界 ordinal（没有越界则 null）。
+ *
+ * `rawMessageCount` 必须是该会话**全量**原始消息数（live 与持久两侧取大者），否则一次
+ * 窗口化输入会把合法账本误判成越界。
+ */
+export function healUnreachableCompartmentLedger(
+    db: Database,
+    sessionId: string,
+    rawMessageCount: number,
+): number | null {
+    if (!Number.isFinite(rawMessageCount) || rawMessageCount <= 0) return null;
+    const endOrdinal = getLastCompartmentEndMessage(db, sessionId);
+    if (endOrdinal <= 0 || endOrdinal <= rawMessageCount) return null;
+    resetCompartmentLedger(db, sessionId);
+    return endOrdinal;
+}

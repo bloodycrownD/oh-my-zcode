@@ -8,6 +8,7 @@ import {
   LEGACY_PINNED_TASK_IDS,
   CURRENT_IMPORTED_TASK_ID,
 } from "#e2e/helpers/project-upgrade-order-fixture";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 describe("虚拟项目升级顺序", () => {
   it("VP28：仅迁移旧设置保留的项目，历史任务不建项目，刷新保留", async function () {
@@ -29,7 +30,7 @@ describe("虚拟项目升级顺序", () => {
     );
     const home = process.env.ZCODE_E2E_HOME_DIR;
     if (!home) throw new Error("isolated E2E HOME required");
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"), { readOnly: true });
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"), { readOnly: true });
     try {
       expect(db.prepare("SELECT id FROM schema_migration").all()).toEqual([
         { id: "0005_projects" },
@@ -44,7 +45,7 @@ describe("虚拟项目升级顺序", () => {
           .get(),
       ).toEqual({
         project_id: null,
-        workspace_path: join(home, ".zcode/workspace/default"),
+        workspace_path: join(resolveE2EStorageRoot(home), "workspace/default"),
         archived: 0,
       });
       expect(
@@ -157,7 +158,7 @@ describe("虚拟项目升级顺序", () => {
     await unpinned.$('button[data-testid^="task-archive-"]').click();
     await unpinned.waitForExist({ reverse: true });
     const db = new DatabaseSync(
-      join(process.env.ZCODE_E2E_HOME_DIR!, ".zcode/v2/tasks-index.sqlite"),
+      join(resolveE2EStorageRoot(process.env.ZCODE_E2E_HOME_DIR!), "v2/tasks-index.sqlite"),
       { readOnly: true },
     );
     try {

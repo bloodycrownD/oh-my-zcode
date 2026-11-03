@@ -283,7 +283,7 @@ describe(`${CASE_MARKER}: 远端 tab 候选读目标远端（离线不 fallback 
     expect(hasLocalOnly(remoteOffline)).toBe(false);
     const remoteConfigOffline = await runSSHCommand(
       prepared.config,
-      `grep -c "${LOCAL_ONLY_PROVIDER_ID}" "$HOME/.zcode/v2/provider_config.json" || true`,
+      `grep -c "${LOCAL_ONLY_PROVIDER_ID}" "$HOME/.omz/v2/provider_config.json" || true`,
     );
     const remoteConfigHasLocalOnlyWhileOffline =
       Number.parseInt(remoteConfigOffline.stdout.trim() || "0", 10) > 0;
@@ -322,7 +322,7 @@ describe(`${CASE_MARKER}: 远端 tab 候选读目标远端（离线不 fallback 
       async () => {
         const result = await runSSHCommand(
           prepared.config,
-          `grep -c "${LOCAL_ONLY_PROVIDER_ID}" "$HOME/.zcode/v2/provider_config.json" || true`,
+          `grep -c "${LOCAL_ONLY_PROVIDER_ID}" "$HOME/.omz/v2/provider_config.json" || true`,
         );
         return Number.parseInt(result.stdout.trim() || "0", 10) > 0;
       },

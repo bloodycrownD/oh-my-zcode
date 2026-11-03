@@ -9,6 +9,7 @@ import {
   waitForWorkspaceApp,
 } from "../../../helpers/desktop-app.js";
 import { PROVIDER_READINESS_HISTORY_SESSION_ID } from "../../../helpers/provider-readiness-history-fixture.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const DELETE_ALL = "delete-all-archived-tasks";
 const ARCHIVED_ACTIONS = "archived-tasks-actions";
@@ -96,7 +97,7 @@ async function clickArchiveActions() {
 }
 
 function readCounts() {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"), {
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"), {
     readOnly: true,
   });
   try {
@@ -114,7 +115,7 @@ function readCounts() {
 }
 
 function readCliSessionCount() {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), {
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite"), {
     readOnly: true,
   });
   try {

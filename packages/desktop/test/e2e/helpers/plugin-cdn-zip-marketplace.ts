@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { dirname, join } from "node:path";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const PLUGIN_CDN_ZIP_MARKETPLACE_SPEC = "plugin-cdn-zip-marketplace-install.test.ts";
 export const PLUGIN_STORE_AUTO_REFRESH_THROTTLED_SPEC =
@@ -103,7 +104,7 @@ export function seedPluginCdnZipMarketplaceFixture(input: {
   server: PluginCdnZipFixtureServer;
   lastUpdated?: string;
 }): void {
-  const pluginStorageRoot = join(input.e2eHomeDir, ".zcode", "cli", "plugins");
+  const pluginStorageRoot = join(resolveE2EStorageRoot(input.e2eHomeDir), "cli", "plugins");
   const marketplaceSourceRoot = join(
     input.e2eHomeDir,
     "fixtures",

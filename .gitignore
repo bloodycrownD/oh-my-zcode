@@ -84,3 +84,8 @@ packages/desktop/.e2e-network-capture/
 # 本地 e2e 临时产物（隔离 profile / 截图 / 日志）
 .zcode/e2e/
 .zcode-runtime
+# 仓库根的用户级 CLI 数据目录（agent 运行时 / 本地调试产物），不是 workspace 级
+# <workspace>/.zcode 配置；只忽略根目录，避免误伤项目内的 hooks/config。
+/.zcode/
+# 上游/参考仓库的本地检出，不入库
+/.reference/

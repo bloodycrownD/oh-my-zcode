@@ -18,6 +18,7 @@ import {
   waitForQueueContaining,
   waitForUserMessageContaining,
 } from "../../../helpers/conversation-session.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 180000;
 
@@ -149,7 +150,7 @@ function setSessionTargetForE2E(
   objective: string,
   status: GoalStatusForE2E,
 ) {
-  const dbPath = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+  const dbPath = join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite");
   const db = new DatabaseSync(dbPath);
   const now = Date.now();
   const targetId = `target_e2e_${randomUUID()}`;
@@ -234,7 +235,7 @@ function readTaskIndexMetaForE2E(
 }
 
 function taskIndexDbPath() {
-  return join(homedir(), ".zcode", "v2", "tasks-index.sqlite");
+  return join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite");
 }
 
 async function injectRendererTaskMetaTargetForE2E(

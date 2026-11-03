@@ -4,6 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { startToolSearchTerminal } from "../helpers/toolsearch-terminal.js";
 import { createToolSearchCliFixture } from "../helpers/toolsearch-cli-process.js";
 import { toolSearchBlocks, type ToolSearchRequest } from "../helpers/toolsearch-provider.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 describe("Local ToolSearch CLI 请求与恢复", () => {
   it("TS10-TUI: Local 真实终端搜索和包装调用", async function () {
@@ -11,9 +12,9 @@ describe("Local ToolSearch CLI 请求与恢复", () => {
     const fixture = await createToolSearchCliFixture("conversation-session-toolsearch-local");
     let terminal: ReturnType<typeof startToolSearchTerminal> | undefined;
     try {
-      await mkdir(join(fixture.root, ".zcode", "v2"), { recursive: true });
+      await mkdir(join(resolveE2EStorageRoot(fixture.root), "v2"), { recursive: true });
       await writeFile(
-        join(fixture.root, ".zcode", "v2", "credentials.json"),
+        join(resolveE2EStorageRoot(fixture.root), "v2", "credentials.json"),
         JSON.stringify({
           "account-provider:account:zai-individual-coding-plan:identity": "toolsearch-e2e",
           "account-provider:coding-plan:account:zai-individual-coding-plan:account:toolsearch-e2e:api-key":

@@ -1817,6 +1817,8 @@ export function createConversationV4Gateway(
         },
       );
       // 页首轮的模型基线 = 页前一轮首条消息的选型（与冷窗口同一取法）。
+      // 分支头页不额外播种：页前没有 turn，但全量序里的 timeline_event 合成消息
+      // 已经携带了 model_change；再播种会在页首轮多发一个 marker（68≠67）。
       const baseline = plan.precedingTurnFirstMessageId
         ? await readHydrationTurnModelSelection(store, sessionId, plan.precedingTurnFirstMessageId)
         : null;

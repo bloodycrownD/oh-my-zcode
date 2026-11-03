@@ -4,6 +4,7 @@ import { promisify } from "node:util";
 import { existsSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 const exec = promisify(execFile);
 
@@ -74,7 +75,8 @@ export async function seedProviderReadinessHistoryFixture(
     windowsHide: true,
   });
 
-  const databasePath = join(options.e2eHomeDir, ".zcode", "cli", "db", "db.sqlite");
+  // 用户级数据根固定走 .omz；写死 .zcode 时 CLI 会初始化到另一处，DB 检查直接失败。
+  const databasePath = join(resolveE2EStorageRoot(options.e2eHomeDir), "cli", "db", "db.sqlite");
   if (!existsSync(databasePath)) {
     throw new Error(`provider readiness history fixture 没有初始化 CLI DB: ${databasePath}`);
   }
@@ -211,7 +213,7 @@ function writeTaskIndex(
   timestamps: ProviderReadinessHistoryTimestamps,
   history: ProviderReadinessHistoryFixture,
 ): void {
-  const appConfigDir = join(options.e2eHomeDir, ".zcode", "v2");
+  const appConfigDir = join(resolveE2EStorageRoot(options.e2eHomeDir), "v2");
   mkdirSync(appConfigDir, { recursive: true });
   const database = new DatabaseSync(join(appConfigDir, "tasks-index.sqlite"));
   const meta = {

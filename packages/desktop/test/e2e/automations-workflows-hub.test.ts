@@ -52,6 +52,7 @@ import {
 import { getV4ComposerBackgroundWorkCounts } from "./helpers/v4-conversation.js";
 import { readDynamicWorkflowGrayMockStatus } from "#e2e/helpers/dynamic-workflow-gray";
 import { startDraftFromProject } from "#e2e/helpers/project-sidebar";
+import { resolveE2EStorageRoot } from "./helpers/e2e-runtime-paths.js";
 
 const WORKFLOW_NAME = "release-check";
 const WORKFLOWS_DIR = join(DEFAULT_WORKSPACE, ".zcode", "workflows");
@@ -278,10 +279,10 @@ describe("已保存工作流中枢 E2E", () => {
 
 // ── 全局工作流：置顶「全局」组 + 全局→项目搬文件 + 项目→全局 AI 概括（docs/dynamic-workflow/launch.md）──
 // E2E_HOME_DIR 由 wdio 配置设为隔离目录并写进 HOME（wdio.conf.ts:520），app / agent 进程都继承它，
-// 因此 agent 的 os.homedir() 解析到这里，全局根 = `<E2E_HOME>/.zcode/workflows/`。
+// 因此 agent 的 os.homedir() 解析到这里，全局根 = `<E2E_HOME>/.omz/workflows/`。
 const E2E_HOME = dirname(DEFAULT_WORKSPACE);
 const GLOBAL_WORKFLOW_NAME = "global-note";
-const GLOBAL_WORKFLOWS_DIR = join(E2E_HOME, ".zcode", "workflows");
+const GLOBAL_WORKFLOWS_DIR = join(resolveE2EStorageRoot(E2E_HOME), "workflows");
 const GLOBAL_WORKFLOW_FILE = join(GLOBAL_WORKFLOWS_DIR, `${GLOBAL_WORKFLOW_NAME}.dwf.ts`);
 const GLOBAL_PROJECT_WORKFLOWS_DIR = join(DEFAULT_WORKSPACE, ".zcode", "workflows");
 const GLOBAL_PROJECT_WORKFLOW_FILE = join(

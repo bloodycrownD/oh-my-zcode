@@ -4,6 +4,7 @@ import { readFile, writeFile } from "node:fs/promises";
 import { TID_TASK_SETTINGS_BUTTON, TID_SETTINGS_BACK_BUTTON } from "@zcode/shared/test-ids";
 import { DEFAULT_WORKSPACE, waitForWorkspaceApp } from "../../../helpers/desktop-app.js";
 import { restartIntoWorkspacePreservingProfile } from "#e2e/helpers/model-provider-restart-runtime";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const home = process.env.ZCODE_E2E_HOME_DIR!;
 const DAY = 86_400_000;
@@ -29,7 +30,7 @@ const recent = fixtures[4].id;
 const item = (id: string) => $(`[data-testid="task-item-${id}"]`);
 const header = () => $('[data-testid="workspace-header"]');
 function facts(id: string) {
-  const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"), { readOnly: true });
+  const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"), { readOnly: true });
   try {
     return db
       .prepare("SELECT archived,pinned,unread_at,cli_title FROM tasks WHERE task_id=?")
@@ -65,8 +66,8 @@ describe("当前任务元数据与自动归档", () => {
     if (!home || !basename(home).startsWith("zcode-active-task-e2e-"))
       throw new Error("isolated active-task HOME required");
     await waitForWorkspaceApp(DEFAULT_WORKSPACE, 45_000);
-    const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
-    const cli = new DatabaseSync(join(home, ".zcode/cli/db/db.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
+    const cli = new DatabaseSync(join(resolveE2EStorageRoot(home), "cli/db/db.sqlite"));
     try {
       const projectId = db
         .prepare("SELECT project_id FROM project_roots WHERE root_path=? LIMIT 1")
@@ -150,7 +151,7 @@ describe("当前任务元数据与自动归档", () => {
     // 旧 Host 退出后再写升级输入，避免退出时的设置持久化覆盖 fixture。
     await restartIntoWorkspacePreservingProfile(DEFAULT_WORKSPACE, {
       afterElectronProcessExit: async () => {
-        const file = join(home, ".zcode/v2/setting.json");
+        const file = join(resolveE2EStorageRoot(home), "v2/setting.json");
         const settings = JSON.parse(await readFile(file, "utf8"));
         delete settings.taskAutoArchiveResetVersion;
         await writeFile(
@@ -168,7 +169,7 @@ describe("当前任务元数据与自动归档", () => {
     const toggle = $('[data-testid="archive-auto-archive-switch"]');
     await toggle.waitForDisplayed();
     expect(await toggle.getAttribute("aria-checked")).toBe("false");
-    expect(JSON.parse(await readFile(join(home, ".zcode/v2/setting.json"), "utf8"))).toMatchObject({
+    expect(JSON.parse(await readFile(join(resolveE2EStorageRoot(home), "v2/setting.json"), "utf8"))).toMatchObject({
       taskAutoArchiveEnabled: false,
       taskAutoArchiveOlderThanDays: 7,
       taskAutoArchiveResetVersion: 1,
@@ -181,7 +182,7 @@ describe("当前任务元数据与自动归档", () => {
     await toggle.click();
     await browser.waitUntil(
       async () =>
-        JSON.parse(await readFile(join(home, ".zcode/v2/setting.json"), "utf8"))
+        JSON.parse(await readFile(join(resolveE2EStorageRoot(home), "v2/setting.json"), "utf8"))
           .taskAutoArchiveEnabled === true,
     );
     // 设置变更触发 Host 补扫：28 天前的已读与未读任务都归档，置顶与保留期内的不动。
@@ -231,7 +232,7 @@ describe("当前任务元数据与自动归档", () => {
     expect(
       await $('[data-testid="archive-auto-archive-switch"]').getAttribute("aria-checked"),
     ).toBe("true");
-    expect(JSON.parse(await readFile(join(home, ".zcode/v2/setting.json"), "utf8"))).toMatchObject({
+    expect(JSON.parse(await readFile(join(resolveE2EStorageRoot(home), "v2/setting.json"), "utf8"))).toMatchObject({
       taskAutoArchiveEnabled: true,
       taskAutoArchiveResetVersion: 1,
     });

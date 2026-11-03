@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DEFAULT_WORKSPACE } from "./desktop-app.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const PERMISSION_HOOK_RACE_MARKER = "E2E_PERMISSION_HOOK_RACE";
 export const PERMISSION_HOOK_RACE_FINAL_MARKER =
@@ -14,7 +15,7 @@ const BLOCKING_HOOK_SLEEP_MS = 120000;
 const BLOCKING_HOOK_TIMEOUT_MS = 130000;
 
 const WORKSPACE_ZCODE_DIR = join(DEFAULT_WORKSPACE, ".zcode");
-const USER_CONFIG_DIR = join(dirname(DEFAULT_WORKSPACE), ".zcode", "cli");
+const USER_CONFIG_DIR = join(resolveE2EStorageRoot(dirname(DEFAULT_WORKSPACE)), "cli");
 const CONFIG_PATH = join(USER_CONFIG_DIR, "config.json");
 const BLOCKER_PATH = join(
   WORKSPACE_ZCODE_DIR,

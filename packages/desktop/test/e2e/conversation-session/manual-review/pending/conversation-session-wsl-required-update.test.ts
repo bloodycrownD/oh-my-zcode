@@ -194,7 +194,7 @@ function createPump(scenario: WslScenario, input: RemoteTarget, editedTarget?: R
                     installPreview: {
                       version: "3.15.1",
                       sizeBytes: 1048576,
-                      installPath: "/home/dev/.zcode/server",
+                      installPath: "/home/dev/.omz/server",
                     },
                   }
                 : {}),
@@ -447,7 +447,7 @@ describe(`${marker}: WSL 默认参数与连接目标`, () => {
           return browser.execute(
             () =>
               document.querySelector('[data-testid="remote-install-path"]')?.textContent ===
-              "/home/dev/.zcode/server",
+              "/home/dev/.omz/server",
           );
         },
         { timeout: 30_000, timeoutMsg: "实际安装预览未出现" },

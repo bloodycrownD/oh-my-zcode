@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { seedProviderReadinessHistoryFixture } from "./provider-readiness-history-fixture.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -103,7 +104,7 @@ async function seedHistory(
 }
 
 function appUsageDatabasePath(e2eHomeDir: string): string {
-  return join(e2eHomeDir, ".zcode", "cli", "db", "db.sqlite");
+  return join(resolveE2EStorageRoot(e2eHomeDir), "cli", "db", "db.sqlite");
 }
 
 function insertUsage(

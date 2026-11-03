@@ -1,6 +1,7 @@
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { DEFAULT_WORKSPACE } from "./desktop-app.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const HOOKS_CASE_MARKERS = {
   earlyFailures: "E2E_HOOKS_EARLY_FAILURES",
@@ -64,7 +65,7 @@ export const HOOKS_RELATIVE_PATHS = {
 const HOOKS_CASE_ROOT = join(DEFAULT_WORKSPACE, "hooks-full-e2e");
 
 const WORKSPACE_ZCODE_DIR = join(DEFAULT_WORKSPACE, ".zcode");
-const USER_CONFIG_DIR = join(dirname(DEFAULT_WORKSPACE), ".zcode", "cli");
+const USER_CONFIG_DIR = join(resolveE2EStorageRoot(dirname(DEFAULT_WORKSPACE)), "cli");
 const CONFIG_PATH = join(USER_CONFIG_DIR, "config.json");
 const RECORDER_PATH = join(WORKSPACE_ZCODE_DIR, "hooks-full-e2e-recorder.mjs");
 const TRACE_PATH = join(WORKSPACE_ZCODE_DIR, "hooks-full-e2e-trace.jsonl");

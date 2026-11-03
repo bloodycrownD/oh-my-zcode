@@ -85,7 +85,7 @@ const artifactDir = resolve(
 const REMOTE_SYNC_TIMEOUT_MS = 90_000;
 
 async function readRemotePersonalConfig(config: SSHConnectionConfig): Promise<string> {
-  const result = await runSSHCommand(config, 'cat "$HOME/.zcode/v2/provider_config.json"');
+  const result = await runSSHCommand(config, 'cat "$HOME/.omz/v2/provider_config.json"');
   return result.code === 0 ? result.stdout : "";
 }
 
@@ -216,7 +216,7 @@ async function assertManagementAvailableBeforeHold(sourceId: string): Promise<vo
 async function readAppliedSyncCount(config: SSHConnectionConfig): Promise<number> {
   const result = await runSSHCommand(
     config,
-    'cat "$HOME/.zcode/v2/runtime/provider/provisioning.json"',
+    'cat "$HOME/.omz/v2/runtime/provider/provisioning.json"',
   );
   expect(result.code).toBe(0);
   const journal = JSON.parse(result.stdout) as {
@@ -259,7 +259,7 @@ async function assertConnectedSyncFailureRecovery(options: {
     `test "$(id -u)" -ne 0 && test "$(id -u)" = "$(stat -c %u /proc/${core.pid})"`,
   );
   expect(owner.code).toBe(0);
-  const mode = await runSSHCommand(config, 'stat -c %a "$HOME/.zcode/v2"');
+  const mode = await runSSHCommand(config, 'stat -c %a "$HOME/.omz/v2"');
   expect(mode.code).toBe(0);
   const originalMode = mode.stdout.trim();
   expect(originalMode).toMatch(/^[0-7]{3,4}$/u);
@@ -271,7 +271,7 @@ async function assertConnectedSyncFailureRecovery(options: {
     // 修改文件本身的 mode 不足以阻止同目录原子 rename，因此控制父目录写权限。
     const denied = await runSSHCommand(
       config,
-      'set -eu; d="$HOME/.zcode/v2"; test ! -e "$d/.r3-write-denial-probe"; chmod 0555 "$d"; if touch "$d/.r3-write-denial-probe" 2>/dev/null; then rm "$d/.r3-write-denial-probe"; exit 74; fi; printf WRITE_DENIED',
+      'set -eu; d="$HOME/.omz/v2"; test ! -e "$d/.r3-write-denial-probe"; chmod 0555 "$d"; if touch "$d/.r3-write-denial-probe" 2>/dev/null; then rm "$d/.r3-write-denial-probe"; exit 74; fi; printf WRITE_DENIED',
     );
     expect(denied.code).toBe(0);
     expect(denied.stdout.trim()).toBe("WRITE_DENIED");
@@ -432,7 +432,7 @@ async function assertConnectedSyncFailureRecovery(options: {
         delete view.__r3ProvisioningFeedback;
       })
       .catch(() => undefined);
-    const restored = await runSSHCommand(config, `chmod ${originalMode} "$HOME/.zcode/v2"`);
+    const restored = await runSSHCommand(config, `chmod ${originalMode} "$HOME/.omz/v2"`);
     expect(restored.code).toBe(0);
   }
 

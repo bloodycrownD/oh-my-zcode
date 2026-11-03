@@ -273,6 +273,8 @@ export { createTagger, type Tagger } from "./core/features/magic-context/tagger.
  */
 export {
   getCompartments,
+  healUnreachableCompartmentLedger,
+  resetCompartmentLedger,
   type Compartment,
 } from "./core/features/magic-context/compartment-storage.js";
 

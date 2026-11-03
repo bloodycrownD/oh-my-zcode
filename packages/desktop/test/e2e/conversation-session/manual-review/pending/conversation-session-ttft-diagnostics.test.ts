@@ -13,7 +13,7 @@ import {
   readSettings,
   waitForWorkspaceApp,
 } from "../../../helpers/desktop-app.js";
-import { resolveE2ERuntimePath } from "../../../helpers/e2e-runtime-paths.js";
+import { resolveE2ERuntimePath, resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 import {
   waitForV4PausedQueueSendDialog,
   clickV4QueueItemSendNow,
@@ -126,7 +126,7 @@ async function setInteractionBehavior(behavior: "queue" | "guide") {
 }
 
 describe("TTFT02 真实发送诊断到最终 OTLP", () => {
-  const configPath = join(dirname(DEFAULT_WORKSPACE), ".zcode", "cli", "config.json");
+  const configPath = join(resolveE2EStorageRoot(dirname(DEFAULT_WORKSPACE)), "cli", "config.json");
   let originalConfig: string | undefined;
   const runtimeEvidence: unknown[] = [];
   beforeEach(async () => {

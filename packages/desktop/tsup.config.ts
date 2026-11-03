@@ -211,7 +211,13 @@ export default defineConfig([
     name: "host",
     entry: {
       "host/index": "src/host/index.ts",
-      "host/tasksStorageWorker": "src/host/tasksStorageWorker.ts",
+      // 升级 v3.16.2 时该 entry 仍指向 merge 前 fork 的 legacy worker，构建产物没有
+      // createSettingService 接线；Worker 准备 tasks-index 时拿不到 settings，
+      // projectStorage.migrate 的 0005_projects 按空 settings 落账，Host 后续无法重放，
+      // 项目侧栏为空。上游 entry 指向 database-startup/ 下带 settings 的同一 Worker，
+      // 这里跟随上游，legacy 文件已删除。storagePreparationProcesses 以
+      // `new URL("./tasksStorageWorker.js", import.meta.url)` 加载本产物，路径不变。
+      "host/tasksStorageWorker": "src/host/database-startup/tasksStorageWorker.ts",
     },
     outDir: "out",
     format: "esm",

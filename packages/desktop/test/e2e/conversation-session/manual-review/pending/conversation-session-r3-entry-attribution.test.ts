@@ -52,7 +52,7 @@ const artifactDir = resolve(
 async function readProvisioningApplied(config: SSHConnectionConfig): Promise<number> {
   const result = await runSSHCommand(
     config,
-    'cat "$HOME/.zcode/v2/runtime/provider/provisioning.json"',
+    'cat "$HOME/.omz/v2/runtime/provider/provisioning.json"',
   );
   // 旧路径不存在时 before/after 都变成 0，会让整个同步断言假通过。
   expect(result.code).toBe(0);
@@ -283,7 +283,7 @@ describe(`${CASE_MARKER}: 两个 Source 下全局新建/项目入口的目标归
     const appliedBAfter = await readProvisioningApplied(targetB);
     const coreB = await runSSHCommand(
       targetB,
-      'tr -d "\\n " < "$HOME/.zcode/server/run/status.json" | cut -c1-200; pgrep -fc "app-server --stdio" || true',
+      'tr -d "\\n " < "$HOME/.omz/server/run/status.json" | cut -c1-200; pgrep -fc "app-server --stdio" || true',
     );
     facts.secondProjectOnB = {
       identity: projectB.workspaceIdentity,

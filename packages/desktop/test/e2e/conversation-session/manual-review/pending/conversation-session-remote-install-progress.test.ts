@@ -77,7 +77,7 @@ describe(`${CASE_MARKER}: 远端安装真实阶段`, () => {
     });
     const sourceId = parseRemoteWorkspaceIdentity(initial.workspaceIdentity!)?.sourceServerId;
     if (!sourceId) throw new Error(`${CASE_MARKER}: 首装缺少 Source 身份`);
-    const installed = await runSSHCommand(config, 'cat "$HOME/.zcode/server/current.json"');
+    const installed = await runSSHCommand(config, 'cat "$HOME/.omz/server/current.json"');
     const oldSha = JSON.parse(installed.stdout).archiveSha256 as string;
     await disconnectRemoteSource(sourceId, CASE_MARKER);
     const update = await prepareSourceServerUpdateArchive(oldSha, CASE_MARKER);

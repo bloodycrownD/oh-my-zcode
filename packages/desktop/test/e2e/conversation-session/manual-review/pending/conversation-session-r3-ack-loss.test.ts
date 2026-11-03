@@ -263,7 +263,7 @@ describe(`${CASE_MARKER}: command 已 admitted 但 ACK 经代理丢失后的唯�
     expect(replayRecords).toBe(1);
     const remoteStatus = await runSSHCommand(
       direct,
-      'tr -d "\\n " < "$HOME/.zcode/server/run/status.json" | cut -c1-120',
+      'tr -d "\\n " < "$HOME/.omz/server/run/status.json" | cut -c1-120',
     );
     facts.remoteStatus = remoteStatus.stdout.trim();
   });

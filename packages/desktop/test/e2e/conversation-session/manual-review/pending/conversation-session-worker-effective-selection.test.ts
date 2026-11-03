@@ -24,6 +24,7 @@ import {
   switchV4Model,
   waitForV4AssistantMessageContaining,
 } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const profileName = "e2e-worker-account-reviewer";
 const parentMarker = "E2E_W99_EXPLICIT_PARENT";
@@ -146,7 +147,7 @@ describe("Todo99 Worker 有效选择真实执行", () => {
           },
           text,
         });
-      const debugDir = join(host.home, ".zcode/cli/debug");
+      const debugDir = join(resolveE2EStorageRoot(host.home), "cli/debug");
       async function waitRequest(marker: string) {
         let result: ModelIoRecord | undefined;
         await browser.waitUntil(
@@ -317,7 +318,7 @@ describe("Todo99 Worker 有效选择真实执行", () => {
         timeoutMsg: "桌面 V4 没有收到执行错误",
       });
       expect(
-        (await readModelIoRecords(join(host.home, ".zcode/cli/debug"))).some((record) =>
+        (await readModelIoRecords(join(resolveE2EStorageRoot(host.home), "cli/debug"))).some((record) =>
           JSON.stringify(record.request).includes("E2E_W99_LAG_REJECT"),
         ),
       ).toBe(false);
@@ -334,7 +335,7 @@ describe("Todo99 Worker 有效选择真实执行", () => {
       let records: ModelIoRecord[] = [];
       await browser.waitUntil(
         async () => {
-          records = await readModelIoRecords(join(host.home, ".zcode/cli/debug"));
+          records = await readModelIoRecords(join(resolveE2EStorageRoot(host.home), "cli/debug"));
           return records.some(
             (record) =>
               record.querySource === "main_turn" &&

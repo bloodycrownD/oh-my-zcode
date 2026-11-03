@@ -143,7 +143,7 @@ async function readRemoteModelRequests(
 ): Promise<RemoteModelRequestRecord[]> {
   const result = await runSSHCommand(
     config,
-    `F=$(ls -t "$HOME/.zcode/cli/log/"*.jsonl | head -n1); awk -v since="${sinceIso}" -F'"timestamp":"' 'substr($2,1,24) >= since' "$F" | grep -E '"event":"model\\.(request|network)\\.(completed|failed)"|"event":"model\\.response\\.diagnostics"'`,
+    `F=$(ls -t "$HOME/.omz/cli/log/"*.jsonl | head -n1); awk -v since="${sinceIso}" -F'"timestamp":"' 'substr($2,1,24) >= since' "$F" | grep -E '"event":"model\\.(request|network)\\.(completed|failed)"|"event":"model\\.response\\.diagnostics"'`,
   );
   return result.stdout
     .split("\n")
@@ -223,7 +223,7 @@ describe(`${CASE_MARKER}: API Key 代表（ZAPI / GLM-5.3）经 Provisioning 到
       workspacePath: workspaceA,
     });
     // 同步后的远端 Personal 配置必须含该 provider 与 baseURL；secret 不落入本记录。
-    const remoteConfig = await runSSHCommand(config, 'cat "$HOME/.zcode/v2/provider_config.json"');
+    const remoteConfig = await runSSHCommand(config, 'cat "$HOME/.omz/v2/provider_config.json"');
     expect(remoteConfig.stdout).toContain(LIVE_PROVIDER_NAME);
     expect(remoteConfig.stdout).toContain(seeded.baseURL);
     facts.remoteConfigHasProvider = true;

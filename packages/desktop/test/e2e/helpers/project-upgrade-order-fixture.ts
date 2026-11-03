@@ -1,6 +1,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const PROJECT_UPGRADE_ORDER_SPEC = "conversation-session-project-upgrade-order.test.ts";
 export const SAVED_PROJECT_NAMES = ["z-saved", "b-saved", "empty-saved"];
@@ -42,7 +43,8 @@ export function seedLegacyProviderTasks(db: DatabaseSync, workspacePath: string)
 export async function seedProjectUpgradeOrderFixture(home: string, settingsFile: string) {
   const workspace = join(home, "ZCodeProject");
   const root = join(workspace, ".zcode-e2e", "project-upgrade-order");
-  const defaultPath = join(home, ".zcode", "workspace", "default");
+  const storageRoot = resolveE2EStorageRoot(home);
+  const defaultPath = join(storageRoot, "workspace", "default");
   await mkdir(defaultPath, { recursive: true });
   const paths = [
     ...SAVED_PROJECT_NAMES,
@@ -83,7 +85,7 @@ export async function seedProjectUpgradeOrderFixture(home: string, settingsFile:
     }),
   );
   // node:sqlite 仅有同步连接；此时 app/Host 尚未启动，数据库没有并发写者。
-  const db = new DatabaseSync(join(home, ".zcode", "v2", "tasks-index.sqlite"));
+  const db = new DatabaseSync(join(storageRoot, "v2", "tasks-index.sqlite"));
   try {
     db.exec(`CREATE TABLE tasks (
       workspace_key TEXT NOT NULL, workspace_path TEXT NOT NULL, workspace_identity TEXT,

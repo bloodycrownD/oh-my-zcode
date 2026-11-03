@@ -2,6 +2,13 @@
 // 当前编辑由 Composer 持有；进入已有 Session 从当前快照恢复权限/Plan，在线只响应新变化。
 // 菜单点击立即保存 Renderer 意图，Prewarm 与 Submission 只消费它，不反向覆盖。
 //
+// 2026-11-03 CR 修复（B1/B2/B3）：
+// - draft 只保存用户原意图；失效模型/档位的修复只体现在派生的 resolvedSelection，
+//   不再在 render 阶段写回 draft，也不会被自动持久化。
+// - 文字草稿（composerDraftStore）仍要求非空正文；mode/modelSelection/planEnabled 走
+//   composerConfigStore，两者分开写，清空正文不会产生幽灵草稿行、也不会丢配置。
+// - Session 的失效修复不再依赖 firstSnapshot：每次 render 按当前 View 重新派生。
+//
 // Workspace presentation 水合只提供 mode 与 slash commands；模型候选、能力和首选值
 // 统一来自目标 Host ModelSelectionView。
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -27,7 +34,6 @@ import { prepareWorkspaceWithZCodeSessionService } from "@/hooks/useWorkspacePre
 import { useZCodeSessionService } from "@/hooks/useZCodeSessionService.js";
 import { useSettings } from "@/hooks/useSettingService.js";
 import { parseModelPickerValue } from "@/lib/zcodeSessionProjection.js";
-import { resolveDraftInitialModelSelection } from "@/lib/composerRecent.js";
 import { initializeNewTaskDraft } from "@/v4/composer/newTaskDraft.js";
 import { useComposerClientNamespace } from "@/hooks/useServices.js";
 import { resolveComposerScope, composerScopeKey } from "@/v4/composer/composerDraftStore.js";
@@ -38,6 +44,12 @@ import {
   V4_DRAFT_SCOPE_ROOT,
   type V4ComposerDraft,
 } from "@/v4/composer/composerDraftStore.js";
+import {
+  readV4ComposerConfig,
+  persistV4ComposerConfig,
+  clearV4ComposerConfig,
+} from "@/v4/composer/composerConfigStore.js";
+import { resolveComposerSelection } from "@/v4/composer/resolveComposerSelection.js";
 import { resolveAppFollowupMode } from "@/v4/composer/followupModeSettings.js";
 import { logger } from "@/logger.js";
 import { useZCodeSessionStore } from "@/store/zcodeSessionStore.js";
@@ -106,9 +118,10 @@ export interface DraftConfigControl {
 interface ComposerState {
   scopeKey: string;
   workspaceKey: string;
+  /** Root 草稿的 New Task 代际；用于区分「同一草稿重进」与「显式新建」。 */
+  draftFocusVersion?: number;
   draft: V4ComposerDraft;
   initialization: "new-task" | "session" | "promotion";
-  observedConfig?: { permissionGrantId?: string; planTransitionId?: string };
   promotedSessionId?: string;
 }
 
@@ -154,14 +167,14 @@ export function useDraftConfigControl(params: {
     () => resolveComposerScope(draftProjectId, workspaceIdentity, clientNamespace),
     [draftProjectId, workspaceIdentity, clientNamespace],
   );
-  const draftFocusVersion = useZCodeSessionStore((state) =>
-    sessionId === null ? (state.workspaces[workspaceKey]?.draftFocusVersion ?? 0) : 0,
+  const draftFocusVersion = useZCodeSessionStore(
+    (state) => state.workspaces[workspaceKey]?.draftFocusVersion ?? 0,
   );
   // New Task 可以复用同一个 pane；无文字时必须重新取 Recent，不能只清磁盘留旧内存。
   const scopeKey = JSON.stringify([
     workspaceKey,
     scopeId,
-    draftFocusVersion,
+    sessionId === null ? draftFocusVersion : null,
     sessionId === null ? composerScopeKey(rootScope) : null,
   ]);
   const navigationInitialization = useZCodeSessionStore((state) => {
@@ -171,17 +184,55 @@ export function useDraftConfigControl(params: {
       ? workspace.composerInitialization
       : undefined;
   });
-  const loadedScope = useMemo<ComposerState>(() => {
-    const saved = readV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, rootScope);
-    return {
-      scopeKey,
-      workspaceKey,
-      draft: saved ?? { text: "", updatedAt: 0, ...navigationInitialization?.config },
-      initialization:
-        sessionId === null || (!saved && navigationInitialization) ? "new-task" : "session",
+  const loadedScopes = useMemo(() => {
+    const build = (restoreConfigWithoutText: boolean): ComposerState => {
+      const saved = readV4ComposerDraft(workspacePath, workspaceIdentity, scopeId, rootScope);
+      const persistedConfig = readV4ComposerConfig(
+        workspacePath,
+        workspaceIdentity,
+        scopeId,
+        rootScope,
+      );
+      // 文字草稿里的旧配置优先（兼容旧记录）；config store 补齐空正文场景的配置。
+      // 显式 New Task 且没有文字草稿时回到默认来源（Recent/目录首选），不恢复上一代的
+      // 空正文配置；文字草稿本身就携带配置，仍按草稿恢复。
+      const restoreConfig = Boolean(saved) || restoreConfigWithoutText;
+      const config: Pick<V4ComposerDraft, "mode" | "planEnabled" | "modelSelection"> = restoreConfig
+        ? {
+            mode: saved?.mode ?? persistedConfig?.mode,
+            planEnabled: saved?.planEnabled ?? persistedConfig?.planEnabled,
+            modelSelection: saved?.modelSelection ?? persistedConfig?.modelSelection,
+          }
+        : {};
+      const draft: V4ComposerDraft = saved
+        ? { ...saved }
+        : { text: "", updatedAt: 0, ...navigationInitialization?.config };
+      // 持久配置是用户显式意图，Root 与 Session 都恢复；Session 没有表达的字段
+      // 由下方 resolved* 从当前 Snapshot 补齐，Snapshot 派生值不写回 draft/config。
+      if (config.mode) draft.mode = config.mode;
+      if (config.planEnabled !== undefined) draft.planEnabled = config.planEnabled;
+      if (config.modelSelection) draft.modelSelection = config.modelSelection;
+      return {
+        scopeKey,
+        workspaceKey,
+        draftFocusVersion,
+        draft,
+        initialization:
+          sessionId === null || (!saved && navigationInitialization) ? "new-task" : "session",
+      };
     };
+    return { restore: build(true), fresh: build(false) };
   }, [scopeKey]);
+  const loadedScope = loadedScopes.restore;
   const [storedState, setStoredState] = useState(loadedScope);
+  // 显式 New Task 会递增 draftFocusVersion；同一 mounted pane 内从旧代际切换过来时，
+  // 上一代的空正文配置不能被当成当前草稿的配置。
+  const switchedDraftGeneration =
+    sessionId === null &&
+    storedState.workspaceKey === workspaceKey &&
+    storedState.scopeKey !== scopeKey &&
+    storedState.draftFocusVersion !== undefined &&
+    storedState.draftFocusVersion !== draftFocusVersion;
   // 首发是同一 pane 的地址迁移，保持其间的新编辑；换页或卸载不保留第二份配置。
   let currentState: ComposerState =
     storedState.scopeKey === scopeKey
@@ -191,10 +242,11 @@ export function useDraftConfigControl(params: {
             ...storedState,
             scopeKey,
             initialization: "promotion",
-            observedConfig: undefined,
             promotedSessionId: undefined,
           }
-        : loadedScope;
+        : switchedDraftGeneration
+          ? loadedScopes.fresh
+          : loadedScope;
   let draft = currentState.draft;
   const modelSelectionRead = useModelSelectionServiceView(
     modelSelectionService,
@@ -206,6 +258,8 @@ export function useDraftConfigControl(params: {
   );
   const modelSelectionView =
     modelSelectionRead.state.status === "ready" ? modelSelectionRead.state.view : null;
+  // 初始化只发生在「本次 New Task 还没有任何配置意图」时；失效修复与 Session 恢复
+  // 不再写 draft，而是由下方 resolved* 派生，避免把用户临时不可用的选择固化。
   if (currentState.initialization === "new-task" && !draft.mode && modelSelectionView) {
     draft = initializeNewTaskDraft(
       draft,
@@ -215,96 +269,46 @@ export function useDraftConfigControl(params: {
       rootScope,
     );
   }
-  // 空配置先初始化了权限，旧逻辑便因已有 mode 永久跳过模型初始化。
-  // 仅为无模型原意图的 Root 草稿补齐首次可用选择；不重置正文、权限或 Plan，
-  // 也不替换失效的旧选择、已有 Session 或分享导入的配置。
-  if (sessionId === null && !draft.modelSelection && modelSelectionView) {
-    const selection = resolveDraftInitialModelSelection(modelSelectionView, null).selection;
-    if (selection) draft = { ...draft, modelSelection: selection };
-  }
-  if (sessionId && sessionConfig) {
-    const previous = currentState.observedConfig;
-    const observedConfig = {
-      permissionGrantId: sessionConfig.permissionGrant?.interactionId,
-      planTransitionId: sessionConfig.planTransition?.toolCallId,
-    };
-    const firstSnapshot = !previous;
-    const mode = submissionModeSchema.safeParse(sessionConfig.mode);
-    const currentMode = mode.success && mode.data !== "plan" ? mode.data : "build";
-    const currentPlan = resolveExecutionState(sessionConfig).planEnabled;
-    if (firstSnapshot && currentState.initialization === "session") {
-      // 历史授权曾被当成新指令重放，覆盖最新确认模式。恢复直接采用当前事实，文字只恢复模型。
-      // TODO(upgrade-316): 上游 3.16 重写了初始化状态机（initialization / observedConfig），
-      // fork 的 initializeFromNewTask + composerPlanTransition/composerPermissionGrant 已被合并删除；
-      // 这里按 fork 的 IS3 语义补回「view-only 期不知道 planEnabled 时不要写成 false」的守卫。
-      draft = {
-        ...draft,
-        mode: currentMode,
-        ...(sessionRuntime !== "live" && typeof sessionConfig.planEnabled !== "boolean"
-          ? {}
-          : { planEnabled: currentPlan }),
-        modelSelection: draft.mode ? draft.modelSelection : sessionConfig.modelSelection,
-      };
-    } else if (previous) {
-      // 只处理本次打开后出现的新关联；使用最新快照值，不能从历史事件推导固定 yolo/Plan。
-      const permissionChanged =
-        observedConfig.permissionGrantId &&
-        observedConfig.permissionGrantId !== previous.permissionGrantId;
-      const planChanged =
-        observedConfig.planTransitionId &&
-        observedConfig.planTransitionId !== previous.planTransitionId;
-      if (permissionChanged || planChanged)
-        draft = {
-          ...draft,
-          ...(permissionChanged ? { mode: currentMode } : {}),
-          ...(planChanged ? { planEnabled: currentPlan } : {}),
-        };
-    }
-    if (
-      firstSnapshot ||
-      observedConfig.permissionGrantId !== previous.permissionGrantId ||
-      observedConfig.planTransitionId !== previous.planTransitionId
-    ) {
-      currentState = { ...currentState, observedConfig };
-    }
-  }
-  // FORK（IS3 / Step 10）：激活后补齐一次——view-only 期不知道的 planEnabled 由全量种子给出。
-  // 只在草稿从未表达过该选择（undefined）时补，绝不覆盖用户显式切换。
-  if (
-    sessionRuntime === "live" &&
-    draft.planEnabled === undefined &&
-    typeof sessionConfig?.planEnabled === "boolean"
-  ) {
-    draft = { ...draft, planEnabled: sessionConfig.planEnabled };
-  }
   if (draft !== currentState.draft) currentState = { ...currentState, draft };
   if (currentState !== storedState) setStoredState(currentState);
   const stateRef = useRef(currentState);
   stateRef.current = currentState;
-  // 原因：按 revision 清草稿会把短暂不可用永久写成空选择。这里只派生当前结果，
-  // 正文/模式自动保存继续保存 draft 中的原意图；读取未就绪时保留展示，提交由 View 门禁阻断。
-  const effectiveSelection = modelSelectionView
-    ? (modelSelectionView.effectiveSelection ?? undefined)
-    : draft.modelSelection;
+  // 原因：只派生展示/提交结果，保留 draft 原意图。View 迟到 ready（含 Session 首次快照）
+  // 都会在下一次 render 重新解析，不再依赖 firstSnapshot 的一次性状态。
+  const resolvedSelection = useMemo(
+    () =>
+      resolveComposerSelection({
+        view: modelSelectionView,
+        draftSelection: draft.modelSelection,
+        sessionSelection: sessionId ? sessionConfig?.modelSelection : undefined,
+      }).selection,
+    [modelSelectionView, draft.modelSelection, sessionId, sessionConfig?.modelSelection],
+  );
+  // 用户显式表达过的 mode/Plan 优先；Session 没有表达时由当前 Snapshot 补齐。
+  // 真实新授权/Plan 变化会清掉本地覆盖（见上方观察 effect），重新回到 Snapshot。
+  const sessionMode = sessionConfig
+    ? (() => {
+        const parsed = submissionModeSchema.safeParse(sessionConfig.mode);
+        return parsed.success && parsed.data !== "plan" ? parsed.data : "build";
+      })()
+    : undefined;
+  // view-only 种子不知道 planEnabled 时不写成 false，等激活后的全量种子。
+  const sessionPlanEnabled =
+    sessionConfig && (sessionRuntime === "live" || typeof sessionConfig.planEnabled === "boolean")
+      ? resolveExecutionState(sessionConfig).planEnabled
+      : undefined;
+  const resolvedMode = draft.mode ?? sessionMode;
+  const resolvedPlanEnabled = draft.planEnabled ?? sessionPlanEnabled ?? false;
   const draftConfig = useMemo<Partial<SessionConfigState>>(
     () => ({
-      mode:
-        currentState.initialization === "session" && !currentState.observedConfig
-          ? undefined
-          : draft.mode,
-      planEnabled: draft.planEnabled ?? false,
-      modelSelection: effectiveSelection,
-      provider: effectiveSelection?.providerId ?? "",
-      model: effectiveSelection?.modelId ?? "",
-      thought: effectiveSelection?.options?.reasoningLevel ?? "",
+      mode: resolvedMode,
+      planEnabled: resolvedPlanEnabled,
+      modelSelection: resolvedSelection,
+      provider: resolvedSelection?.providerId ?? "",
+      model: resolvedSelection?.modelId ?? "",
+      thought: resolvedSelection?.options?.reasoningLevel ?? "",
     }),
-    [
-      draft.mode,
-      draft.planEnabled,
-      effectiveSelection,
-      currentState.initialization,
-      currentState.observedConfig,
-    ],
+    [resolvedMode, resolvedPlanEnabled, resolvedSelection],
   );
   const draftConfigRef = useRef(draftConfig);
   draftConfigRef.current = draftConfig;
@@ -356,57 +360,117 @@ export function useDraftConfigControl(params: {
           .draftFocusVersion ?? 0) === draftFocusVersion),
     [scopeKey, sessionId, workspacePath, workspaceIdentity, draftFocusVersion],
   );
-  const lastPersistedDraftRef = useRef<V4ComposerDraft | null>(null);
+  // 配置与文字草稿分开持久化：这里的写入只来自用户动作/New Task 初始化/accepted 回执，
+  // Session Snapshot 的派生修复不落盘。
+  const persistConfig = useCallback(
+    (value: V4ComposerDraft) => {
+      return persistV4ComposerConfig(
+        workspacePath,
+        workspaceIdentity,
+        // 首发已绑定但 React 尚未切换地址时，配置也属于已创建的会话。
+        stateRef.current.promotedSessionId ?? scopeId,
+        {
+          mode: value.mode,
+          planEnabled: value.planEnabled,
+          modelSelection: value.modelSelection,
+        },
+        scopeId === V4_DRAFT_SCOPE_ROOT ? rootScope : undefined,
+      );
+    },
+    [workspacePath, workspaceIdentity, scopeId, rootScope],
+  );
+  const commitDraft = useCallback(
+    (next: V4ComposerDraft, options: { persistConfig?: boolean } = {}) => {
+      const nextState = { ...stateRef.current, draft: next };
+      stateRef.current = nextState;
+      setStoredState(nextState);
+      // 文字草稿只写非空白正文；配置写入独立键，不会留下空正文草稿行。
+      persistDraft(next);
+      if (options.persistConfig) persistConfig(next);
+    },
+    [persistConfig, persistDraft],
+  );
+  // 用户未改配置时，本次 New Task 的初始化结果（mode + Recent 模型）也要落 config store，
+  // 否则空正文草稿切回会丢；scopeKey 保证每个 New Task 生命周期只写一次。
+  const initializedConfigScopeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (
-      draft.mode &&
-      draft !== lastPersistedDraftRef.current &&
-      stateRef.current.draft === draft &&
-      stateRef.current.scopeKey === scopeKey
-    ) {
-      persistDraft(draft);
-      lastPersistedDraftRef.current = draft;
-    }
-  }, [draft, scopeKey, persistDraft]);
+    if (!isCurrentScope() || currentState.initialization !== "new-task" || !draft.mode) return;
+    if (initializedConfigScopeRef.current === scopeKey) return;
+    initializedConfigScopeRef.current = scopeKey;
+    persistConfig(draft);
+  }, [currentState.initialization, draft, isCurrentScope, persistConfig, scopeKey]);
+  // 真实新授权/Plan 工具变化按最新 Snapshot 更新对应字段：只清掉本次打开期间的本地覆盖，
+  // 派生值随即回到 Snapshot；这是事件同步，不是 render 阶段的失效修复。
+  const observedSessionConfigRef = useRef<{
+    scopeKey: string;
+    permissionGrantId?: string;
+    planTransitionId?: string;
+  } | null>(null);
+  useEffect(() => {
+    if (sessionId === null || !sessionConfig) return;
+    const next = {
+      scopeKey,
+      permissionGrantId: sessionConfig.permissionGrant?.interactionId,
+      planTransitionId: sessionConfig.planTransition?.toolCallId,
+    };
+    const previous = observedSessionConfigRef.current;
+    observedSessionConfigRef.current = next;
+    // 首次快照只建立观察基线，不重放历史授权。
+    if (!previous || previous.scopeKey !== scopeKey) return;
+    const clearField = (field: "mode" | "planEnabled") => {
+      const current = stateRef.current;
+      if (current.scopeKey !== scopeKey || current.draft[field] === undefined) return;
+      const nextDraft = { ...current.draft };
+      delete nextDraft[field];
+      const nextState = { ...current, draft: nextDraft };
+      stateRef.current = nextState;
+      setStoredState(nextState);
+    };
+    if (next.permissionGrantId && next.permissionGrantId !== previous.permissionGrantId)
+      clearField("mode");
+    if (next.planTransitionId && next.planTransitionId !== previous.planTransitionId)
+      clearField("planEnabled");
+  }, [
+    scopeKey,
+    sessionId,
+    sessionConfig?.permissionGrant?.interactionId,
+    sessionConfig?.planTransition?.toolCallId,
+  ]);
   const updateComposerDraft = useCallback(
     (update: (current: V4ComposerDraft) => V4ComposerDraft) => {
       // 旧 scope 的延迟编辑器回调不能写入刚切换到的会话。
       if (!isCurrentScope()) return;
-      const previous = stateRef.current.draft;
-      const next = update(previous);
-      const nextState = { ...stateRef.current, draft: next };
-      stateRef.current = nextState;
-      const selection =
-        next.modelSelection === previous.modelSelection
-          ? draftConfigRef.current.modelSelection
-          : next.modelSelection;
+      commitDraft(update(stateRef.current.draft), { persistConfig: true });
+    },
+    [commitDraft, isCurrentScope],
+  );
+  const updateDraftConfig = useCallback(
+    (update: (current: Partial<SessionConfigState>) => Partial<SessionConfigState>) => {
+      if (!isCurrentScope()) return;
+      const current = stateRef.current.draft;
+      const nextConfig = update(draftConfigRef.current);
+      const parsedMode = submissionModeSchema.safeParse(nextConfig.mode);
+      // 导入等待目录期间的显式选择也是有效选择，不能再被默认初始化覆盖。
+      const mode = parsedMode.success ? parsedMode.data : (current.mode ?? "build");
+      const next: V4ComposerDraft = {
+        ...current,
+        mode,
+        modelSelection: nextConfig.modelSelection,
+      };
+      commitDraft(next, { persistConfig: true });
+      // 同一事件内随后提交时不必等待 re-render 的派生结果。
+      const selection = next.modelSelection;
       draftConfigRef.current = {
         mode: next.mode,
-        planEnabled: next.planEnabled ?? false,
+        // 只改模型/档位时保留当前派生 Plan（Session 的 Plan 可能来自 Snapshot）。
+        planEnabled: nextConfig.planEnabled ?? next.planEnabled ?? false,
         modelSelection: selection,
         provider: selection?.providerId ?? "",
         model: selection?.modelId ?? "",
         thought: selection?.options?.reasoningLevel ?? "",
       };
-      setStoredState(nextState);
-      persistDraft(next);
-      lastPersistedDraftRef.current = next;
     },
-    [isCurrentScope, persistDraft],
-  );
-  const updateDraftConfig = useCallback(
-    (update: (current: Partial<SessionConfigState>) => Partial<SessionConfigState>) => {
-      const next = update(draftConfigRef.current);
-      const mode = submissionModeSchema.safeParse(next.mode);
-      updateComposerDraft((current) => ({
-        ...current,
-        mode: mode.success ? mode.data : current.mode,
-        modelSelection: next.modelSelection,
-        // 导入等待目录期间的显式选择也是有效选择，不能再被默认初始化覆盖。
-        ...(current.mode ? {} : { mode: mode.success ? mode.data : "build" }),
-      }));
-    },
-    [updateComposerDraft],
+    [commitDraft, isCurrentScope],
   );
   const captureAcceptedModelSelection = useCallback(
     (selection: ModelSelection, expectedSelection: ModelSelection = selection): (() => void) => {
@@ -442,20 +506,24 @@ export function useDraftConfigControl(params: {
 
   const updateComposerContent = useCallback(
     (content: Pick<V4ComposerDraft, "text" | "editorStateJson" | "mention">) => {
-      updateComposerDraft((current) => ({
-        ...current,
+      if (!isCurrentScope()) return;
+      // 只改正文：config store 不参与，避免普通键入/发送清空正文时重写配置。
+      commitDraft({
+        ...stateRef.current.draft,
         editorStateJson: undefined,
         mention: undefined,
         ...content,
-      }));
+      });
     },
-    [updateComposerDraft],
+    [commitDraft, isCurrentScope],
   );
   const replaceComposerDraft = useCallback(
     (replacement: Omit<V4ComposerDraft, "updatedAt">) => {
-      updateComposerDraft(() => ({ ...replacement, updatedAt: Date.now() }));
+      if (!isCurrentScope()) return;
+      // 撤回/恢复携带独立 Submission 配置，属于用户意图，需要同步 config store。
+      commitDraft({ ...replacement, updatedAt: Date.now() }, { persistConfig: true });
     },
-    [updateComposerDraft],
+    [commitDraft, isCurrentScope],
   );
 
   const promoteComposerDraft = useCallback(
@@ -471,6 +539,14 @@ export function useDraftConfigControl(params: {
         stateRef.current.draft,
       );
       if (!written) return;
+      // Root→session 迁移配置：新会话从自己的 scope 读回，不依赖 Root 残留。
+      persistV4ComposerConfig(
+        workspacePath,
+        workspaceIdentity,
+        targetSessionId,
+        stateRef.current.draft,
+      );
+      clearV4ComposerConfig(workspacePath, workspaceIdentity, V4_DRAFT_SCOPE_ROOT, rootScope);
       const next = { ...stateRef.current, promotedSessionId: targetSessionId };
       stateRef.current = next;
       setStoredState(next);
@@ -630,23 +706,34 @@ export function useDraftConfigControl(params: {
 
   const handleDraftSwitchMode = useCallback(
     (mode: string) => {
+      if (!isCurrentScope()) return;
+      const current = stateRef.current.draft;
+      let next: V4ComposerDraft;
       if (mode === "plan" || mode === "plan-off") {
-        updateComposerDraft((current) => ({
+        const resolvedMode = submissionModeSchema.safeParse(draftConfigRef.current.mode);
+        next = {
           ...current,
-          mode: current.mode === "plan" ? "build" : (current.mode ?? "build"),
+          // Session 的当前权限来自 Snapshot（draft.mode 可能为空），不能回退成 build。
+          mode:
+            current.mode === "plan"
+              ? "build"
+              : (current.mode ?? (resolvedMode.success ? resolvedMode.data : "build")),
           planEnabled: mode === "plan",
-        }));
-        return;
+        };
+      } else {
+        // 模式与模型同属当前 scope；不再写全局偏好，避免别的任务反向覆盖。
+        const parsed = submissionModeSchema.safeParse(mode);
+        if (!parsed.success) return;
+        next = { ...current, mode: parsed.data };
       }
-      // 模式与模型同属当前 scope；不再写全局偏好，避免别的任务反向覆盖。
-      const parsed = submissionModeSchema.safeParse(mode);
-      if (parsed.success)
-        updateComposerDraft((current) => ({
-          ...current,
-          mode: parsed.data,
-        }));
+      commitDraft(next, { persistConfig: true });
+      draftConfigRef.current = {
+        ...draftConfigRef.current,
+        mode: next.mode,
+        planEnabled: next.planEnabled ?? false,
+      };
     },
-    [updateComposerDraft],
+    [commitDraft, isCurrentScope],
   );
 
   return {

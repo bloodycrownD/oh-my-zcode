@@ -64,7 +64,7 @@ describe(`${marker}: Provider 首连与远端项目对话`, () => {
       // 凭据材料,按脱敏原则只断言存在性、不读内容不比对。
       const remote = await ssh.runSSHCommand(
         config,
-        'test -f "$HOME/.zcode/v2/provider_config.json" && echo provisioned',
+        'test -f "$HOME/.omz/v2/provider_config.json" && echo provisioned',
       );
       expect(remote.stdout).toContain("provisioned");
       // 本地同样只有 provider_config.json(round 41 取证:本地 v2/ 与远端一致,

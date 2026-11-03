@@ -83,11 +83,14 @@ export async function ensureContextInitialized(
     memoryIndexContent: this.memoryIndexContent,
     model,
   });
-  // Bug 根因：模型创建失败轮会在 Context 首次可初始化前接纳并持久化用户输入。
-  // init 会替换全部内存历史，因此先保留这些权威运行条目，再接到新建的 Context 前缀之后。
-  const preContextEntries = [...this.messageHistory.borrowReadOnlyRuntimeEntries()];
+  // CR-B1 修复：保留「Context 首次可初始化前已存在条目」的语义已由
+  // initializeMessageHistoryFromContext 内部等价实现——它先取
+  // messageHistory.toRuntimeEntries()，再把它们接在 context 前缀之后，结果与
+  // 「先 init 再水化」逐值一致。这里再取一次 preContextEntries 并 addEntries，
+  // 等于把同一批条目追加两遍：resume 水化出的历史、以及模型创建失败轮已接纳的
+  // 用户输入都会整段重复（test-cold-open-window C3：lazy 11 条 vs full 17 条，
+  // 3 轮 6 条消息完整重复）。因此不再单独快照/追加。
   this.initializeMessageHistoryFromContext(this.contextBuilder, traceContext);
-  this.messageHistory.addEntries(preContextEntries);
   this.contextInitialized = true;
 }
 

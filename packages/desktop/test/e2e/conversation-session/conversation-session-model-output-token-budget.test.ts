@@ -13,6 +13,7 @@ import {
   waitForV4CompactMarker,
   waitForV4Pane,
 } from "../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const PROVIDER_ID = "output-token-budget-e2e";
 const PROVIDER_NAME = "Output Token Budget E2E";
@@ -250,7 +251,7 @@ async function waitForSuccessfulModelIo(input: {
   querySource: "compact" | "main_turn";
   sessionId?: string;
 }): Promise<ModelIoMatch> {
-  const debugDir = join(paths.homeDir, ".zcode", "cli", "debug");
+  const debugDir = join(resolveE2EStorageRoot(paths.homeDir), "cli", "debug");
   let matched: ModelIoMatch | null = null;
   await browser.waitUntil(
     async () => {
@@ -301,7 +302,7 @@ async function waitForSuccessfulModelIo(input: {
 }
 
 async function waitForAutoCompactDecision(sessionId: string): Promise<Record<string, unknown>> {
-  const logDir = process.env.ZCODE_LOG_DIR?.trim() || join(paths.homeDir, ".zcode", "cli", "log");
+  const logDir = process.env.ZCODE_LOG_DIR?.trim() || join(resolveE2EStorageRoot(paths.homeDir), "cli", "log");
   let matched: Record<string, unknown> | null = null;
   await browser.waitUntil(
     async () => {

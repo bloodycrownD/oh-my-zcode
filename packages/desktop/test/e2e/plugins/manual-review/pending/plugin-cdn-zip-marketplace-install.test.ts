@@ -19,6 +19,7 @@ import {
   requirePluginManualReview,
   waitForPluginCard,
 } from "../../../helpers/plugin-management-lifecycle.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const ZIP_PLUGIN_INSTALL_TIMEOUT_MS = 180000;
 
@@ -52,7 +53,7 @@ describe("PLM-LC-007 Desktop official CDN ZIP plugin UI lifecycle", () => {
     await installPluginThroughUi(PLUGIN_CDN_ZIP_ID);
 
     const paths = getE2EAppDataPaths();
-    const pluginStorageRoot = join(paths.homeDir, ".zcode", "cli", "plugins");
+    const pluginStorageRoot = join(resolveE2EStorageRoot(paths.homeDir), "cli", "plugins");
     const cacheRoot = join(
       pluginStorageRoot,
       "cache",

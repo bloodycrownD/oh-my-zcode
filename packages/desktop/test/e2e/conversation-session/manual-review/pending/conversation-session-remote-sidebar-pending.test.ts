@@ -60,7 +60,7 @@ async function readRemoteCurrentSha(): Promise<string> {
       container,
       "bash",
       "-lc",
-      'grep -o \'"archiveSha256": *"[0-9a-f]*"\' "$HOME/.zcode/server/current.json" | grep -o "[0-9a-f]\\{64\\}"',
+      'grep -o \'"archiveSha256": *"[0-9a-f]*"\' "$HOME/.omz/server/current.json" | grep -o "[0-9a-f]\\{64\\}"',
     ],
     { timeout: 30_000 },
   );

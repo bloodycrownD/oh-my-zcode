@@ -30,7 +30,7 @@ const HOOK_MARKER = "R3_DEV08_USER_PROMPT_HOOK";
 
 const REMOTE_CONFIG_PATCH = `python3 - <<'PY'
 import json,os
-p=os.path.expanduser("~/.zcode/cli/config.json")
+p=os.path.expanduser("~/.omz/cli/config.json")
 os.makedirs(os.path.dirname(p),exist_ok=True)
 try:
     j=json.load(open(p))
@@ -63,7 +63,7 @@ describe(`${CASE_MARKER}: 远端 user-scope Hook 只在目标 Source 执行且�
     await clearAppData();
   });
 
-  it("R3A-DEV-08 远端 ~/.zcode/cli/config.json 的 UserPromptSubmit hook 在远端回合执行（marker 落远端），本机无 marker；切回本机 Source 后本机不执行；Provider 同步不覆盖 hooks 配置", async function () {
+  it("R3A-DEV-08 远端 ~/.omz/cli/config.json 的 UserPromptSubmit hook 在远端回合执行（marker 落远端），本机无 marker；切回本机 Source 后本机不执行；Provider 同步不覆盖 hooks 配置", async function () {
     this.timeout(30 * 60_000);
     const prepared = await prepareSSHLifecycle(CASE_MARKER, { tunnelUsername: "tunnel" });
     provider = prepared.provider;
@@ -134,7 +134,7 @@ describe(`${CASE_MARKER}: 远端 user-scope Hook 只在目标 Source 执行且�
     // Provider 同步（连接与首连已发生）后 hooks 配置仍在远端 config.json。
     const remoteConfig = await runSSHCommand(
       prepared.config,
-      'grep -c "UserPromptSubmit" "$HOME/.zcode/cli/config.json"; grep -c "R3_DEV08_USER_PROMPT_HOOK" "$HOME/.zcode/cli/config.json"',
+      'grep -c "UserPromptSubmit" "$HOME/.omz/cli/config.json"; grep -c "R3_DEV08_USER_PROMPT_HOOK" "$HOME/.omz/cli/config.json"',
     );
     facts.remoteHooksConfigSurvived = remoteConfig.stdout.trim().split("\n");
     expect(
@@ -182,7 +182,7 @@ describe(`${CASE_MARKER}: 远端 user-scope Hook 只在目标 Source 执行且�
     // 清理远端 hooks 配置，避免影响后续用例。
     await runSSHCommand(
       prepared.config,
-      `python3 - <<'PY'\nimport json,os\np=os.path.expanduser("~/.zcode/cli/config.json")\nj=json.load(open(p)); j.pop("hooks",None); open(p,"w").write(json.dumps(j,indent=2))\nPY`,
+      `python3 - <<'PY'\nimport json,os\np=os.path.expanduser("~/.omz/cli/config.json")\nj=json.load(open(p)); j.pop("hooks",None); open(p,"w").write(json.dumps(j,indent=2))\nPY`,
     );
   });
 });

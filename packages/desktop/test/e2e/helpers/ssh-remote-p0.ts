@@ -845,7 +845,7 @@ export function readRemoteTabSnapshot(
   );
 }
 
-/** 等待 SSH Source 的 conversation workspace（~/.zcode/workspace/default）进入可用状态。 */
+/** 等待 SSH Source 的 conversation workspace（~/.omz/workspace/default）进入可用状态。 */
 export async function waitForSSHConversation(
   config: SSHConnectionConfig,
   caseMarker: string,
@@ -874,12 +874,12 @@ export async function waitForSSHConversation(
           ).__zcodeTabStoreE2E;
           const state = store?.getState?.();
           // dual target 场景下,先连接的设备在表单提交时也会自动打开自己的设备级
-          // conversation(路径同为 ~/.zcode/workspace/default)。只按路径匹配会把 A 的
+          // conversation(路径同为 ~/.omz/workspace/default)。只按路径匹配会把 A 的
           // conversation 错认成 B 的(entry-attribution 实锤:sourceB 被解析成 A 的
           // sourceServerId)。必须同时校验 tab 的连接 target(host+port)。
           const tab = state?.tabs?.find((candidate) => {
             if (
-              !candidate.workspacePath?.replace(/\\/gu, "/").endsWith("/.zcode/workspace/default")
+              !candidate.workspacePath?.replace(/\\/gu, "/").endsWith("/.omz/workspace/default")
             ) {
               return false;
             }

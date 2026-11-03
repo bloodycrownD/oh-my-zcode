@@ -201,7 +201,7 @@ describe(`${CASE_MARKER}: 远端项目激活时钩子按选中的 scope 落盘`,
     expect(localConfig).toContain(LOCAL_MARKER);
     const remoteAfterLocal = await runSSHCommand(
       config,
-      `grep -rl "${LOCAL_MARKER}" "$HOME/.zcode" "${workspaceA}" 2>/dev/null; echo END`,
+      `grep -rl "${LOCAL_MARKER}" "$HOME/.omz" "${workspaceA}" 2>/dev/null; echo END`,
     );
     facts.remoteAfterLocal = remoteAfterLocal.stdout.trim();
     expect(remoteAfterLocal.stdout.trim()).toBe("END");

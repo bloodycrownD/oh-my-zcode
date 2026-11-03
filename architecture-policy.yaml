@@ -850,3 +850,9 @@ exceptions:
       - packages/ui/src/settings/DynamicWorkflowModeSetting.tsx
       - packages/ui/src/store/dynamicWorkflowAvailabilityStore.ts
     reason: Admitted upstream files edited only to let the user's dynamic workflow mode choice always win and keep the settings row visible; adopting packages/shared/src and packages/ui/src needs a separate module boundary refactor.
+  - id: composer-config-store-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - packages/ui/src/v4/composer/composerConfigStore.ts
+      - packages/ui/src/v4/composer/resolveComposerSelection.ts
+    reason: 2026-11-03 CR 修复在既有 v4/composer 草稿 owner 内拆出配置存储与派生选择纯函数；两者只依赖 shared/provider/services 与同目录草稿工具，不新增跨层边界。v4/composer 的模块登记需要对整个 composer owner 做 contract 梳理，不在本次缺陷修复范围内。

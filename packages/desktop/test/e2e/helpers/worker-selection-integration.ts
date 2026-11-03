@@ -20,6 +20,7 @@ import { BUILTIN_MODEL_PROVIDER_IDS } from "@zcode/shared";
 import { TaskIndexRepo } from "../../../../services/src/session/taskIndexRepo.js";
 import { createZCodeTaskIndexSyncer } from "../../../../services/src/zcode-agent/zcodeTaskIndexSyncer.js";
 import { getE2EAppDataPaths } from "./desktop-app.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 /** 独立测试 Host + 真实 stdio Worker；仅账号上游和模型 HTTP 使用隔离 fixture。 */
 export async function createWorkerSelectionIntegration() {
@@ -34,7 +35,7 @@ export async function createWorkerSelectionIntegration() {
   let deliveryPaused = false;
   const runtimePaths = {
     zcodeBuiltinFilePath: resolve("../../config/provider/zcode-builtin.json"),
-    personalFilePath: join(home, ".zcode/v2/provider_config.json"),
+    personalFilePath: join(resolveE2EStorageRoot(home), "v2/provider_config.json"),
   };
   const runtime = new NodeProviderRegistryRuntime({
     ...runtimePaths,

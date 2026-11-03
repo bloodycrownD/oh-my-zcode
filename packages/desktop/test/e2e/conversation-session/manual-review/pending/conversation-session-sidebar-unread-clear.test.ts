@@ -13,6 +13,7 @@ import {
   waitForV4TimelineContaining,
 } from "../../../helpers/v4-conversation.js";
 import { ensureUpstreamProviderForE2E } from "../../../helpers/upstream-provider.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 120_000;
 const SEED_MARKER = "E2E_SIDEBAR_UNREAD_CLEAR_SEED";
@@ -161,7 +162,7 @@ async function waitForTaskIndexUnread(
 }
 
 function readTaskIndexUnread(taskId: string): number | null | undefined {
-  const db = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"));
+  const db = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"));
   try {
     const row = db.prepare("select unread_at from tasks where task_id = ?").get(taskId) as
       | { unread_at?: number | null }

@@ -911,17 +911,25 @@ export function SessionPane({
       // 必须早于第一次上行：transport error/renderer refresh 后仍有可查询线索。
       pendingCommandRegistry.record(
         envelope,
-        type === "createSession"
+        // sendText/sendGoalCommand 的 payload 也带 mode/modelSelection；常规发送路径同样要
+        // 登记 composer 回执，否则 accepted 后 Recent 永远不写，New Task 只能回落第一项。
+        type === "createSession" || recentReceipt
           ? {
               workspace: {
                 workspacePath,
                 ...(workspaceIdentity ? { workspaceIdentity } : {}),
               },
               ...(recentReceipt ? { composer: recentReceipt } : {}),
-              sessionCreateSource:
-                sessionCreateSource ??
-                useZCodeSessionStore.getState().getWorkspaceState(workspacePath, workspaceIdentity)
-                  .draftCreateSource,
+              ...(type === "createSession"
+                ? {
+                    sessionCreateSource:
+                      sessionCreateSource ??
+                      useZCodeSessionStore
+                        .getState()
+                        .getWorkspaceState(workspacePath, workspaceIdentity)
+                        .draftCreateSource,
+                  }
+                : {}),
             }
           : undefined,
       );

@@ -107,7 +107,8 @@ export function TaskGroupedView({
   const draftFocusVersion = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.draftFocusVersion,
   );
-  // 空正文不再持久化；分组行订阅现有内存草稿，不能靠 localStorage 或手动重绘维持归属。
+  // 文字草稿仍只保存非空白正文；mode/模型/Plan 在独立 config store，不会制造空草稿行。
+  // 分组行订阅现有内存草稿，不能靠 localStorage 或手动重绘维持归属。
   const currentDraftGroupId = useZCodeSessionStore(
     (state) => state.workspaces[workspaceKey]?.draftTaskGroupId,
   );

@@ -103,6 +103,17 @@ export function VirtualizedGroupedTaskList({
     }
     setScrollMargin(resolveScrollMargin(listElement, nextScrollElement));
   }, []);
+  // 上方 group 展开/收起、行高变化会移动列表在共享滚动容器里的位置，但列表自身尺寸
+  // 不变，ResizeObserver 不会触发。滚动锚定会同步改 scrollTop，所以滚动事件是这次
+  // 位移的重算信号；不重算就会让可见窗口整体偏移，留下空白带。
+  const scrollMarginFrameRef = useRef<number | null>(null);
+  const scheduleScrollMarginUpdate = useCallback(() => {
+    if (scrollMarginFrameRef.current !== null) return;
+    scrollMarginFrameRef.current = window.requestAnimationFrame(() => {
+      scrollMarginFrameRef.current = null;
+      updateScrollMargin();
+    });
+  }, [updateScrollMargin]);
   const resolveInitialScrollOffset = useCallback(() => {
     const listElement = listRef.current;
     const currentScrollElement =
@@ -133,6 +144,19 @@ export function VirtualizedGroupedTaskList({
       resizeObserver?.disconnect();
     };
   }, [groupId, shouldVirtualize, tasks.length, updateScrollMargin]);
+
+  useLayoutEffect(() => {
+    if (!scrollElement) return undefined;
+    const onScroll = () => scheduleScrollMarginUpdate();
+    scrollElement.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      scrollElement.removeEventListener("scroll", onScroll);
+      if (scrollMarginFrameRef.current !== null) {
+        window.cancelAnimationFrame(scrollMarginFrameRef.current);
+        scrollMarginFrameRef.current = null;
+      }
+    };
+  }, [scrollElement, scheduleScrollMarginUpdate]);
 
   const rowVirtualizer = useVirtualizer({
     count: shouldVirtualize ? tasks.length : 0,

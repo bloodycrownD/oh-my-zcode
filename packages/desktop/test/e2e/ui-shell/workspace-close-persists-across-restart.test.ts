@@ -18,7 +18,7 @@ import {
 } from "../helpers/project-sidebar.js";
 
 describe("project removal persists across restart E2E", () => {
-  const { homeDir } = getE2EAppDataPaths();
+  const { homeDir, appDataDir } = getE2EAppDataPaths();
   const closedWorkspacePath = join(homeDir, "ZCodeProjectClosed");
 
   after(async () => {
@@ -46,7 +46,7 @@ describe("project removal persists across restart E2E", () => {
     await waitForProjectRowGone(closedWorkspacePath);
 
     const readDeletedProject = () => {
-      const db = new DatabaseSync(join(homeDir, ".zcode/v2/tasks-index.sqlite"), {
+      const db = new DatabaseSync(join(appDataDir, "tasks-index.sqlite"), {
         readOnly: true,
       });
       try {

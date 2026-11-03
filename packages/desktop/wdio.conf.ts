@@ -216,8 +216,8 @@ const E2E_HOME_DIR = resolve(
 const E2E_PACKAGED_APP_BINARY_PATH = process.env.ZCODE_E2E_PACKAGED_APP_PATH?.trim()
   ? resolve(process.env.ZCODE_E2E_PACKAGED_APP_PATH)
   : null;
-// 目录隔离已回滚：所有 Desktop E2E 继续使用历史 ~/.zcode 布局。
-const E2E_STORAGE_ROOT = resolve(E2E_HOME_DIR, ".zcode");
+// 目录隔离已回滚：所有 Desktop E2E 继续使用隔离 HOME；fork 的用户数据根是 ~/.omz。
+const E2E_STORAGE_ROOT = resolve(E2E_HOME_DIR, ".omz");
 const E2E_APP_CONFIG_DIR = resolve(E2E_STORAGE_ROOT, "v2");
 const E2E_APP_SETTINGS_FILE = resolve(E2E_APP_CONFIG_DIR, "setting.json");
 const E2E_APP_CREDENTIALS_FILE = resolve(E2E_APP_CONFIG_DIR, "credentials.json");
@@ -3316,9 +3316,9 @@ function seedE2EPluginCdnZipMarketplace(specs: string[] = []) {
 }
 
 // 把插件 MCP skill lifecycle spec 需要的 installed_plugins.json 写到
-// `~/.zcode/cli/plugins/installed_plugins.json`；仅在 spec 命中且 state != not-installed
-// 时执行。注意 storageRoot 在 agent 视角是 `<home>/.zcode`，而 pluginStorageRoot
-// 是 `<home>/.zcode/cli/plugins`，installed_plugins.json 必须落在后者下面才会被
+// `~/.omz/cli/plugins/installed_plugins.json`；仅在 spec 命中且 state != not-installed
+// 时执行。注意 storageRoot 在 agent 视角是 `<home>/.omz`，而 pluginStorageRoot
+// 是 `<home>/.omz/cli/plugins`，installed_plugins.json 必须落在后者下面才会被
 // bootstrap 的 `listInstalledPluginRecords(pluginStorageRoot)` 读到（见
 // `apps/zcode-cli/packages/adapters/src/plugins/marketplace.ts:347`）。
 function seedE2EPluginMcpSkillInstalledPlugins(specs: string[] = []) {
@@ -3331,7 +3331,7 @@ function seedE2EPluginMcpSkillInstalledPlugins(specs: string[] = []) {
   const fixturePath = resolve(DESKTOP_DIR, "test/e2e/fixtures/plugin-mcp-skill", templateName);
   const pluginRoot = resolve(DESKTOP_DIR, "test/e2e/fixtures/plugin-mcp-skill/e2e-plugin-mcp-ping");
   const template = readFileSync(fixturePath, "utf-8").replaceAll("__INSTALL_PATH__", pluginRoot);
-  // pluginStorageRoot = <home>/.zcode/cli/plugins
+  // pluginStorageRoot = <home>/.omz/cli/plugins
   const targetDir = resolve(E2E_STORAGE_ROOT, "cli/plugins");
   mkdirSync(targetDir, { recursive: true });
   writeFileSync(resolve(targetDir, "installed_plugins.json"), template, "utf-8");
@@ -3695,7 +3695,7 @@ function resolvePluginMcpSkillState(
 
 // 状态 A 不需要写任何文件；B/C 才落 fixture。
 // 这一段必须在 `seedUpstreamE2EModelConfig` 之后调用，因为它要 patch
-// 我们刚写好的 `~/.zcode/cli/config.json`，把 `plugins.enabledPlugins[id]`
+// 我们刚写好的 `~/.omz/cli/config.json`，把 `plugins.enabledPlugins[id]`
 // 置为 false 以表达"已安装但关闭"。
 function seedE2EPluginMcpSkillState(specs: string[] = []) {
   const state = resolvePluginMcpSkillState(specs);
@@ -4315,6 +4315,11 @@ async function seedUpstreamE2EModelConfig(specs: string[] = []) {
   );
   const subagentProviderRegistryColdStartSpec = isSubagentProviderRegistryColdStartSpec(specs);
   const builtInSubagentModelOverridesSpec = isBuiltInSubagentModelSelectionOverridesSpec(specs);
+  // SHR01-SHR03 回归使用 user 级 profile 的 low/high 档位，默认 env preset 只声明
+  // high/max；该 case 需要 low 出现在表单，并把 reasoningLevel 真正映射到 wire。
+  const subagentRuntimeRefreshSpec = specs.some((spec) =>
+    spec.includes("conversation-session-subagent-runtime-refresh.test.ts"),
+  );
   const settingsSubagentCreateEditPersistenceSpec =
     isSettingsSubagentCreateEditPersistenceSpec(specs);
   const exposeSubagentReasoningMetadata =
@@ -4325,6 +4330,7 @@ async function seedUpstreamE2EModelConfig(specs: string[] = []) {
       ),
     ) ||
     builtInSubagentModelOverridesSpec ||
+    subagentRuntimeRefreshSpec ||
     settingsSubagentCreateEditPersistenceSpec ||
     specs.some((spec) => spec.includes("plugin-subagent-override-cold.test.ts")) ||
     isSubagentCodingPlanLoginCatalogStaleSpec(specs);
@@ -4459,7 +4465,7 @@ async function seedUpstreamE2EModelConfig(specs: string[] = []) {
         e2eProviderPresetName === "env" ||
           e2eProviderPresetName === "stagingmodel" ||
           composerToolbarSpec
-        ? builtInSubagentModelOverridesSpec
+        ? builtInSubagentModelOverridesSpec || subagentRuntimeRefreshSpec
           ? ["off", "low", "high", "max"]
           : ["high", "max"]
         : ["disabled"],
@@ -4880,7 +4886,7 @@ export const config: WebdriverIO.Config = {
     });
   },
   async beforeSession(_config, capabilities, specs, cid) {
-    // Bugfix: 现有 e2e 会读写 ~/.zcode/v2；如果多个 spec 复用真实 HOME，
+    // Bugfix: 现有 e2e 会读写 ~/.omz/v2；如果多个 spec 复用真实 HOME，
     // 上一个 spec 的凭据、最近项目和 localStorage 会串到下一个 spec，
     // 既污染开发者本机数据，也让“首次启动”类断言变得随机。
     // 这里为 e2e 单独准备隔离 HOME，并在每个 session 启动前重置，保证每个 spec 都从干净环境开始。
@@ -4917,7 +4923,7 @@ export const config: WebdriverIO.Config = {
       !E2E_PACKAGED_APP_BINARY_PATH &&
       (storageDiagnostics ||
         specs.some((spec) =>
-          /conversation-session-subagent-(context-boundaries|multi-workspace|cross-host)\.test\.ts/.test(
+          /conversation-session-subagent-(context-boundaries|multi-workspace|cross-host|runtime-refresh)\.test\.ts/.test(
             spec,
           ),
         ))
@@ -4931,7 +4937,9 @@ export const config: WebdriverIO.Config = {
           ? "packages/desktop/test/e2e/helpers/storage-worker-diagnostics.mjs"
           : "packages/desktop/test/e2e/helpers/subagent-config-proxy.mjs",
       );
-      const preload = `--import=${JSON.stringify(proxy)}`;
+      // Windows 的 --import 只接受 file:// URL；绝对路径会在 Host/CLI 子进程启动时
+      // 报 ERR_UNSUPPORTED_ESM_URL_SCHEME 并直接退出，代理形同未装。
+      const preload = `--import=${JSON.stringify(pathToFileURL(proxy).href)}`;
       const diagnostics = storageDiagnostics
         ? `process.env.ZCODE_E2E_STORAGE_WORKER_DIAGNOSTICS_DIR = ${JSON.stringify(resolve(e2eReporter.artifactDir, "storage-workers"))};\n`
         : "";

@@ -1,6 +1,6 @@
 {
   "baselineRef": "baseline/v3.14.3",
-  "limit": 75,
+  "limit": 74,
   "files": [
     "apps/zcode-cli/.oxfmtrc.json",
     "apps/zcode-cli/packages/adapters/package.json",
@@ -75,7 +75,6 @@
     "packages/ui/src/v4/composer/V4ComposerToolbar.tsx",
     "packages/ui/src/v4/conversationFindIndex.ts",
     "packages/ui/src/v4/slashCommands.ts",
-    "scripts/build-desktop-agent-cli.mjs",
-    "third-party/inventory.json"
+    "scripts/build-desktop-agent-cli.mjs"
   ]
 }

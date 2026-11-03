@@ -19,6 +19,7 @@ import {
   waitForV4Pane,
   waitForV4TimelineContaining,
 } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 180_000;
 const PARENT_MARKER = "E2E_FORK_COLD_START_PROJECT_ROW";
@@ -146,7 +147,7 @@ async function waitForSingleProjectRow(
 function readWorkspaceTaskIds(): string[] {
   // Node 当前内置 SQLite 只提供 DatabaseSync；E2E 轮询每次都立即关闭只读句柄。
   const database = new DatabaseSync(
-    join(homedir(), ".zcode", "v2", "tasks-index.sqlite"),
+    join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"),
     {
       readOnly: true,
     },
@@ -176,7 +177,7 @@ function readCliSession(sessionId: string): {
 } | null {
   // Node 当前内置 SQLite 只提供 DatabaseSync；E2E 只读一次并立即关闭句柄。
   const database = new DatabaseSync(
-    join(homedir(), ".zcode", "cli", "db", "db.sqlite"),
+    join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite"),
     {
       readOnly: true,
     },

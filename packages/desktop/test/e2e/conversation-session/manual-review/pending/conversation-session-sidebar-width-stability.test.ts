@@ -2,6 +2,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { DEFAULT_WORKSPACE, waitForWorkspaceApp } from "../../../helpers/desktop-app.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const projectId = "E2E_SIDEBAR_WIDTH";
 const projectSelector = `[data-project-id="${projectId}"]`;
@@ -14,7 +15,7 @@ async function seedTaskRows() {
     throw new Error("隔离 HOME required");
   const root = join(home, "E2E_SIDEBAR_WIDTH_ROOT");
   await mkdir(root, { recursive: true });
-  const db = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
+  const db = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
   try {
     const now = Date.now();
     db.exec("BEGIN IMMEDIATE");

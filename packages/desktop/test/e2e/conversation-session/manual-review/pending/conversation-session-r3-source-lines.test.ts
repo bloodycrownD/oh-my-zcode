@@ -165,7 +165,7 @@ describe(`${CASE_MARKER}: 同一 Source 经两条线路/alias 与 symlink 打开
     facts.environmentSyncs = { expectedKeys: keys, completions, aliasProject };
     const journal = await runSSHCommand(
       config,
-      'cat "$HOME/.zcode/v2/runtime/provider/provisioning.json"',
+      'cat "$HOME/.omz/v2/runtime/provider/provisioning.json"',
     );
     expect(journal.code).toBe(0);
     const results = (JSON.parse(journal.stdout).records as Array<{ result: unknown }>).map(
@@ -175,7 +175,7 @@ describe(`${CASE_MARKER}: 同一 Source 经两条线路/alias 与 symlink 打开
     expect(results.filter((result) => result.status === "applied").length).toBeGreaterThanOrEqual(
       2,
     );
-    const remoteConfig = await runSSHCommand(config, 'cat "$HOME/.zcode/v2/provider_config.json"');
+    const remoteConfig = await runSSHCommand(config, 'cat "$HOME/.omz/v2/provider_config.json"');
     expect(remoteConfig.stdout).toContain(UPSTREAM_PROVIDER_NAME);
     const sidebar = await browser.execute(() => document.body?.innerText ?? "");
     facts.deviceRowsShowingPort = (

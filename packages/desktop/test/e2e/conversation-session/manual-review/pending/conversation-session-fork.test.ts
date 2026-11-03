@@ -28,6 +28,7 @@ import {
   waitForQueueCount,
   waitForUserMessageContaining,
 } from "../../../helpers/conversation-session.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 describe("会话区 Fork E2E", () => {
   after(async () => {
@@ -320,7 +321,7 @@ async function setSessionTargetForE2E(
   objective: string,
   status: "active" | "paused" | "budget_limited" | "complete",
 ) {
-  const dbPath = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+  const dbPath = join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite");
   const db = new DatabaseSync(dbPath);
   const now = Date.now();
   const targetId = `target_e2e_${randomUUID()}`;
@@ -573,7 +574,7 @@ async function injectRendererQueuedPromptForE2E(
 function readSessionTargetForE2E(
   sessionId: string,
 ): { objective: string; status: string } | null {
-  const dbPath = join(homedir(), ".zcode", "cli", "db", "db.sqlite");
+  const dbPath = join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite");
   const db = new DatabaseSync(dbPath);
   try {
     return (

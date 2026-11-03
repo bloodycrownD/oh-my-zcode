@@ -36,8 +36,13 @@ import type {
  * 比投影实际行数少 N，冷窗口按这份累加做 rowIdOrigin 会让窗口内 rowId 整体前移 N——只能
  * 整表重建，不能用账目修正补（修正只改已登记 turn 的计数，而 v2 的偏差恰恰是「迟到的
  * 那几行没有任何 turn 认领」）。
+ *
+ * v4（Step 6 修复）：`firstMessageId` 必须包含触发该 turn 的消息。model-only 轮
+ * （background_task/goal continuation）的触发 user 消息没有可见 userInput 行，
+ * v3 只从行反推 messageIds，firstMessageId 落到轮内 assistant，页游标从轮中间开始，
+ * 整页被 alignment 守卫拒收后表现为历史停住。v3 清单已经按错口径落盘，必须整表重建。
  */
-export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 3;
+export const TURN_MANIFEST_PROJECTION_SCHEMA_VERSION = 4;
 
 /** 没有正文可摘时的 fallback：客户端按 `assistantPreviewKind` 填 i18n，服务端不下发文案。 */
 export const TURN_DIRECTORY_EMPTY_PREVIEW = "";
@@ -77,6 +82,8 @@ export interface TurnManifestEntry {
  */
 export function buildTurnManifestEntry(input: {
   turnId: string;
+  /** 触发该 turn 的真实消息 id；cold-hydrate 的 `hydrate-turn-*` 传 null。 */
+  triggerMessageId?: string | null;
   ordinal: number;
   rows: readonly ConversationRow[];
   messageIdForRow: (rowId: number) => MessageId | undefined;
@@ -109,6 +116,12 @@ export function buildTurnManifestEntry(input: {
 
   const messageIds: MessageId[] = [];
   const seenMessageIds = new Set<string>();
+  // 触发消息优先：model-only 轮的 user 消息没有可见行，只能从 turn 身份补回来。
+  // 正常轮的首个 userInput 行会给出同一个 messageId，这里去重即可。
+  if (input.triggerMessageId && !seenMessageIds.has(input.triggerMessageId)) {
+    seenMessageIds.add(input.triggerMessageId);
+    messageIds.push(input.triggerMessageId as MessageId);
+  }
   for (const row of turnRows) {
     const messageId = input.messageIdForRow(row.rowId);
     if (!messageId || seenMessageIds.has(messageId)) continue;

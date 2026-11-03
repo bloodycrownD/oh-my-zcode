@@ -200,7 +200,7 @@ describe(`${CASE_MARKER}: Desktop continuous + Mobile replayable 同时运行的
         (
           await runSSHCommand(
             prepared.config,
-            'F=$(ls -t ~/.zcode/cli/log/*.jsonl | head -n1); stat -c %s "$F"',
+            'F=$(ls -t ~/.omz/cli/log/*.jsonl | head -n1); stat -c %s "$F"',
           )
         ).stdout.trim() || "0",
         10,

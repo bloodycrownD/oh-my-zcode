@@ -1,24 +1,46 @@
 # Composer 仅持久化文字草稿
 
 > 2026-10-16 当前实现：新建草稿与 Recent 按项目/未归类任务归属，未发送任务复用执行目录；详见 [统一生命周期](project-task-draft-lifecycle.md)。下文 2026-10-14 的 workspace Root/Recent 与手机暂缓条款记录原实现，当前行为以新规格及其验证记录为准；正式 Session 恢复与非空文字规则继续适用。
+>
+> 2026-11-03（CR）：配置持久化与文字草稿分离。文字草稿仍要求非空正文（本规则不变）；`mode` / `modelSelection` / `planEnabled` 改由 `composerConfigStore.ts` 独立保存，清空正文不会产生空草稿行，也不会丢用户配置。
 
 ## 规则与范围
 
 2026-10-14：用户确认“没有输入文字就不算草稿，不做持久化”。本文替代 Todo71 中空正文保留配置的规则。
 正文以 `text.trim().length > 0` 判定；键入、粘贴和模板预填等价，空格、换行、空 editor JSON、仅改模型/权限不构成可持久化草稿。引用 chip 的显示正文沿用编辑器现有文本序列化，不新增附件序列化。
 
-有文字时保存正文、编辑器状态、权限、Plan、完整 ModelSelection；删空时删除记录。发送沿用既有乐观清空：先冻结 Submission，再清空正文和记录；失败且未被后续编辑取代时恢复，接纳后更新 Recent。读取旧版本空草稿时只过滤，显式写入时清理，不让旧配置继续阻挡默认值。
-当前输入框的配置仍由 `useDraftConfigControl` 的内存态唯一持有；不因不写盘而在普通 render、目录刷新或 Snapshot 到达时回退。重新进入空白新建页使用当前 workspace Recent，已有 Session 始终从当前 Snapshot 恢复权限与 Plan，有文字草稿时只恢复其中的正文与模型。显式 New Task 即使复用当前 pane，也开启新的空白编辑生命周期；有文字的草稿继续恢复。
+有文字时保存正文、编辑器状态、权限、Plan、完整 ModelSelection；删空时删除文字记录。发送沿用既有乐观清空：先冻结 Submission，再清空正文和记录；失败且未被后续编辑取代时恢复，接纳后更新 Recent。读取旧版本空草稿时只过滤，显式写入时清理，不让旧配置继续阻挡默认值。
+当前输入框的配置仍由 `useDraftConfigControl` 统一收口；2026-11-03 起用户显式改动的 mode/模型/Plan 会写入独立 config store，普通 render、目录刷新或 Snapshot 到达仍不得回退当前编辑。重新进入空白新建页使用当前 workspace Recent；已有 Session 恢复草稿里显式表达的选择，未表达的字段由当前 Snapshot 补齐。有文字草稿时恢复其中的正文与模型。显式 New Task 即使复用当前 pane，也开启新的空白编辑生命周期；有文字的草稿继续恢复。
 
 ```mermaid
 flowchart LR
-    A[空白输入框：内存配置] -->|输入文字| B[持久文字草稿]
+    A[空白输入框：内存意图 + config store] -->|输入文字| B[持久文字草稿]
     B -->|删空| A
     B -->|提交| C[冻结 Submission，乐观清空正文与记录]
     C -->|accepted| D[更新 Recent]
     C -->|失败且未被新编辑取代| B
     D -->|再次新建且无文字草稿| E[读取最新 Recent]
 ```
+
+## 配置独立持久化与派生选择（2026-11-03 CR）
+
+`composerConfigStore.ts` 只保存用户显式选择的 `mode` / `modelSelection` / `planEnabled`：
+
+- 键空间 `zcode-v4-composer-config:v1:<scope>`，文件结构同为 `version + scopes`；scopeId 是
+  `__draft__` 或 session id，workspace identity 隔离；项目 Root 按项目 scope 隔离。
+- 写入边界：用户改 mode/模型/Plan、New Task 初始化、撤回恢复以及 accepted 回执。Session
+  Snapshot 的派生修复、普通 render、打开 Session 都不写 config。
+- 清空正文只删除文字草稿记录，不清 config；Root→session 首发迁移 config 并清理 Root scope。
+- 显式 New Task 且没有文字草稿时回到 Recent/目录首选，不恢复上一代空正文配置；文字草稿
+  本身仍携带配置，按草稿恢复。
+- 载入时文字草稿的旧配置优先于 config store；Session 已表达的 mode/Plan 视为用户意图，
+  未表达的字段由当前 Snapshot 补齐。真实新授权/Plan 变化会清掉本次打开期间的本地覆盖。
+
+`draft` 只保存用户原意图。展示与提交使用 `resolveComposerSelection` 派生的 resolved 选择：
+有效选择原样保留；`reasoning-level-*` 用 `completeNewModelSelection` 补同模型最高有效档；
+`provider-not-found` / `model-not-found` 依次回退 Session 有效选择、`preferredSelection`；
+Session 草稿无选择时用 SessionConfig 选择。派生结果不写回 `draft`，因此 View 迟到 ready
+（含 Session 首次快照之后才 ready）仍会在下一次 render 修复，不再依赖 firstSnapshot。
 
 ## 首个 Provider 就绪后的模型补选
 
@@ -27,9 +49,10 @@ flowchart LR
 owner 自动补选该完整模型。补选只写模型，保留正文、编辑器状态、权限和 Plan；不更新 Recent，
 不发送模型请求，也不启动第二个 Agent。不新增同步定时器或第二份状态。
 
-已有选择（包括失效模型或失效 reasoning）不补选；已有 Session 和分享导入不应用此 Root
-规则。后续目录变化不得覆盖已补选或用户显式选择的模型。仍按 workspace identity 隔离，
-桌面与手机使用同一 Hook，不改变 continuous/replayable 的传输边界。
+已有选择（包括失效模型或失效 reasoning）不补选；失效选择只按上节规则派生 resolved 结果
+用于展示/提交，不回写 `draft`。已有 Session 和分享导入不应用此 Root 规则。后续目录变化
+不得覆盖已补选或用户显式选择的模型。仍按 workspace identity 隔离，桌面与手机使用同一 Hook，
+不改变 continuous/replayable 的传输边界。
 
 ```mermaid
 flowchart LR
@@ -44,13 +67,13 @@ Agent；Hook 单测覆盖本地/远端 identity、权限/Plan 保留、已选/�
 
 ## 状态归属与影响面
 
-| 场景 / 入口                  | 唯一 owner / 提交路径                                   | 持久化与初始化                                                     | 影响级别       |
-| ---------------------------- | ------------------------------------------------------- | ------------------------------------------------------------------ | -------------- |
-| 新建 / 当前 Session 输入框   | useDraftConfigControl → Submission → CLI admission      | composerDraftStore 只保存文字；Recent 仅 accepted 更新             | must-inspect   |
-| New Task / 项目与分组菜单    | workspace UI store 的 draftProjectId / draftTaskGroupId | 当前创建意图留内存；有文字时随草稿保存，手机冷恢复只读取有文字草稿 | must-inspect   |
-| 分享首次导入                 | 导航参数 → Composer owner                               | 一次初始化配置仅内存；不伪造磁盘草稿、不修改 Recent                | must-inspect   |
-| 离线页与刷新                 | composerDraftStore 的只读结果                           | 只恢复有文字草稿，不新增离线队列                                   | should-inspect |
-| 自动化、子智能体、已接受队列 | 原有 record / CLI owner                                 | 不消费 Composer 草稿、不更改冻结的 Submission                      | invariant-only |
+| 场景 / 入口                  | 唯一 owner / 提交路径                                   | 持久化与初始化                                                                         | 影响级别       |
+| ---------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- | -------------- |
+| 新建 / 当前 Session 输入框   | useDraftConfigControl → Submission → CLI admission      | composerDraftStore 只保存非空文字；配置在 composerConfigStore；Recent 仅 accepted 更新 | must-inspect   |
+| New Task / 项目与分组菜单    | workspace UI store 的 draftProjectId / draftTaskGroupId | 当前创建意图留内存；有文字时随草稿保存，手机冷恢复只读取有文字草稿                     | must-inspect   |
+| 分享首次导入                 | 导航参数 → Composer owner                               | 一次初始化配置仅内存；不伪造磁盘草稿、不修改 Recent                                    | must-inspect   |
+| 离线页与刷新                 | composerDraftStore 的只读结果                           | 只恢复有文字草稿，不新增离线队列                                                       | should-inspect |
+| 自动化、子智能体、已接受队列 | 原有 record / CLI owner                                 | 不消费 Composer 草稿、不更改冻结的 Submission                                          | invariant-only |
 
 共享行为是草稿读写与有效模型解析；新建读 Recent，已有 Session 读自身 Snapshot，两者不统一为全局配置。权限/Plan 恢复以当前 Session Snapshot 为准；历史授权只用于本次打开周期内识别新变化，不存入草稿。
 工作区隔离始终使用 `workspaceIdentity?.trim() || workspacePath`；桌面 continuous 与手机 replayable 的传输、shared-host、owner/lease 和队列协议不变。没有新增 Host/Agent 状态或同步定时器。
@@ -66,16 +89,16 @@ Recent 的作用域不变：同一项目/工作区内新建继承最近已接纳
 
 ## 用例与剪枝
 
-| ID   | 前置与操作                                                              | 断言                                                                    | 层次 / 状态                                     |
-| ---- | ----------------------------------------------------------------------- | ----------------------------------------------------------------------- | ----------------------------------------------- |
-| TD01 | 全新输入框只选 yolo + A，然后切走/刷新                                  | 内存当前选择可用；localStorage 无草稿，重开按默认来源初始化             | storage + Hook / accepted                       |
-| TD02 | 首发 yolo + A；打开一次空白页；回原 Session 改 build + B 并提交；再新建 | Recent 为 build + B；新页同值、无空白持久记录；真实按钮和模型切换       | Desktop E2E / accepted pending                  |
-| TD03 | 输入文字并改权限模型，切 Session 后返回/刷新                            | 恢复文字及模型，已有 Session 权限/Plan 采用当前快照；不改 Recent        | Hook + Desktop E2E / accepted pending           |
-| TD04 | 文字删空或只剩空格后重新新建                                            | 旧持久记录删除，新页按最新 Recent；同 pane 的重复 New Task 不保留空配置 | storage + Hook + Desktop E2E / accepted pending |
-| TD05 | 发送成功、失败、ACK 迟到且用户已输入下一条                              | 成功只清原提交；失败保留正文配置；旧 ACK 不覆盖新 scope/新文字          | existing submission tests + Hook / accepted     |
-| TD06 | 存量空记录与同路径不同远端的有文字记录                                  | 仅清空记录；远端身份隔离、有文字坏模型保留待修正                        | storage / accepted                              |
-| TD07 | 未输入时选择项目/分组，随后输入并首发                                   | 空页面不写盘，首发仍进入所选项目/分组；有文字可冷恢复                   | store + navigation tests / accepted             |
-| TD08 | 首次分享导入、View 延迟、已有 Session reused                            | 导航初始化不写空草稿，导入仍遵循新建初始化；用户改选优先，reused 不重置 | Hook / accepted                                 |
+| ID   | 前置与操作                                                              | 断言                                                                              | 层次 / 状态                                     |
+| ---- | ----------------------------------------------------------------------- | --------------------------------------------------------------------------------- | ----------------------------------------------- |
+| TD01 | 全新输入框只选 yolo + A，然后切走/刷新                                  | 内存当前选择可用；文字草稿无记录、配置在独立 config store，新任务按默认来源初始化 | storage + Hook / accepted                       |
+| TD02 | 首发 yolo + A；打开一次空白页；回原 Session 改 build + B 并提交；再新建 | Recent 为 build + B；新页同值、无空白持久记录；真实按钮和模型切换                 | Desktop E2E / accepted pending                  |
+| TD03 | 输入文字并改权限模型，切 Session 后返回/刷新                            | 恢复文字及模型；Session 未表达的权限/Plan 采用当前快照，显式草稿配置优先          | Hook + Desktop E2E / accepted pending           |
+| TD04 | 文字删空或只剩空格后重新新建                                            | 旧持久记录删除，新页按最新 Recent；同 pane 的重复 New Task 不保留空配置           | storage + Hook + Desktop E2E / accepted pending |
+| TD05 | 发送成功、失败、ACK 迟到且用户已输入下一条                              | 成功只清原提交；失败保留正文配置；旧 ACK 不覆盖新 scope/新文字                    | existing submission tests + Hook / accepted     |
+| TD06 | 存量空记录与同路径不同远端的有文字记录                                  | 仅清空记录；远端身份隔离、有文字坏模型保留待修正                                  | storage / accepted                              |
+| TD07 | 未输入时选择项目/分组，随后输入并首发                                   | 空页面不写盘，首发仍进入所选项目/分组；有文字可冷恢复                             | store + navigation tests / accepted             |
+| TD08 | 首次分享导入、View 延迟、已有 Session reused                            | 导航初始化不写空草稿，导入仍遵循新建初始化；用户改选优先，reused 不重置           | Hook / accepted                                 |
 
 纯样式、主题和国际化没有变化，沿用共享控件，不枚举全套外观叉乘。模型使用同 provider 两个合法模型作为代表；权限使用 yolo/build。队列 admission 与执行配置保持冻结，只验证发送草稿边界，不扩展队列功能。附件目前没有跨重启草稿持久化，不增加此能力。
 

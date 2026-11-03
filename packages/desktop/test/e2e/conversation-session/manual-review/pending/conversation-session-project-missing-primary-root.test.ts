@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { mkdir, rename, rm, stat } from "node:fs/promises";
 import { join } from "node:path";
 import { DEFAULT_WORKSPACE, waitForWorkspaceApp } from "../../../helpers/desktop-app.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const PROJECT = '[data-project-name="E2E_MISSING_PRIMARY"]';
 const SINGLE_PROJECT = '[data-project-name="E2E_SINGLE_PRIMARY"]';
@@ -386,8 +387,8 @@ function seedHistory(workspacePath: string) {
   // 只写 runner 的隔离 HOME；复用真实 Host/CLI 两库数据合同，不 mock 消息或目录状态。
   const home = process.env.ZCODE_E2E_HOME_DIR;
   if (!home || !DEFAULT_WORKSPACE.startsWith(home)) throw new Error("isolated HOME required");
-  const app = new DatabaseSync(join(home, ".zcode/v2/tasks-index.sqlite"));
-  const cli = new DatabaseSync(join(home, ".zcode/cli/db/db.sqlite"));
+  const app = new DatabaseSync(join(resolveE2EStorageRoot(home), "v2/tasks-index.sqlite"));
+  const cli = new DatabaseSync(join(resolveE2EStorageRoot(home), "cli/db/db.sqlite"));
   try {
     const projectId = app
       .prepare("SELECT project_id FROM project_roots WHERE root_path=? LIMIT 1")

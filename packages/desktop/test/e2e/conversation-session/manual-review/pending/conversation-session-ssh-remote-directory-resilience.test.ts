@@ -99,7 +99,7 @@ describe(`${MARKER}: 单个目录失效不影响设备与其他项目`, () => {
       facts.directoryAccessAfterMutation = (
         await runSSHCommand(
           config,
-          `id -u; test -r '${pathA}' && test -x '${pathA}' && printf ACCESSIBLE || printf INACCESSIBLE; printf '\\n'; ls '${pathA}' >/dev/null 2>&1 && printf READ_OK || printf READ_DENIED; printf '\\n'; p=$(sed -nE 's/.*"pid": *([0-9]+).*/\\1/p' "$HOME/.zcode/server/run/status.json" | head -1); test -z "$p" || awk '/^Uid:/ {print "core " $0}' /proc/$p/status`,
+          `id -u; test -r '${pathA}' && test -x '${pathA}' && printf ACCESSIBLE || printf INACCESSIBLE; printf '\\n'; ls '${pathA}' >/dev/null 2>&1 && printf READ_OK || printf READ_DENIED; printf '\\n'; p=$(sed -nE 's/.*"pid": *([0-9]+).*/\\1/p' "$HOME/.omz/server/run/status.json" | head -1); test -z "$p" || awk '/^Uid:/ {print "core " $0}' /proc/$p/status`,
         )
       ).stdout;
       if (failure === "denied") {

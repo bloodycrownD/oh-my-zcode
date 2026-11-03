@@ -35,6 +35,7 @@ import {
   callHandoffHost,
   restoreHandoffProbes,
 } from "#e2e/helpers/remote-project-handoff-probe";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const SAVED_REMOTE_HOST = "remote:server:e2e-mobile-saved-device";
 
@@ -97,7 +98,7 @@ describe("虚拟项目手机 shared-host 导航", () => {
     await promisify(execFile)("git", ["init", "--initial-branch=main", cwd]);
     await writeFile(join(cwd, "E2E_VP13_FILES.txt"), "file-only target");
     // 在项目登记目录前准备已迁移数据，避免直写绕过事件后 Controller 仍持有旧列表。
-    const db = new DatabaseSync(join(testHome, ".zcode/v2/tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(testHome), "v2/tasks-index.sqlite"));
     try {
       seedLegacyProviderTasks(db, cwd);
       db.prepare(`UPDATE tasks SET host_id='local',root_path=workspace_path,
@@ -727,7 +728,7 @@ describe("虚拟项目手机 shared-host 导航", () => {
       const globalDraft = await readDraft();
       expect(globalDraft.projectId).toBeNull();
       expect(await page.getByTestId("composer-edit-project").count()).toBe(0);
-      expect(globalDraft.path).toContain(join(testHome, ".zcode/workspace"));
+      expect(globalDraft.path).toContain(join(resolveE2EStorageRoot(testHome), "workspace"));
       enterStage("PD01/02/10 mobile pending task directory and draft recovery");
       const taskInput = page.getByTestId(TID_V4_COMPOSER_INPUT);
       await taskInput.fill("E2E_PD_MOBILE_DRAFT");

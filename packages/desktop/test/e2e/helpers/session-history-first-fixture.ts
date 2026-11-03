@@ -2,6 +2,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { seedProviderReadinessHistoryFixture } from "./provider-readiness-history-fixture.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 
 export const HISTORY_FIRST_SESSION = "sess_e2e_history_first";
 export const HISTORY_FIRST_FAILED_SESSION = "sess_e2e_history_first_failed";
@@ -35,7 +36,9 @@ export async function seedSessionHistoryFirstFixture(options: {
       },
     });
     // 通用 fixture 用于测试缺失 provider；此处补齐正式会话的 durable 模型选择，验证 ready 后续发。
-    const database = new DatabaseSync(join(options.e2eHomeDir, ".zcode", "cli", "db", "db.sqlite"));
+    const database = new DatabaseSync(
+      join(resolveE2EStorageRoot(options.e2eHomeDir), "cli", "db", "db.sqlite"),
+    );
     try {
       database
         .prepare(`INSERT INTO session_entry (id, session_id, type, time_created, time_updated, data)
@@ -79,7 +82,7 @@ await new Promise((resolve, reject) => {
 process.stdout.write('{}');
 `,
   );
-  const config = join(options.e2eHomeDir, ".zcode", "cli", "config.json");
+  const config = join(resolveE2EStorageRoot(options.e2eHomeDir), "cli", "config.json");
   const settings = JSON.parse(await readFile(config, "utf8").catch(() => "{}"));
   await writeFile(
     config,

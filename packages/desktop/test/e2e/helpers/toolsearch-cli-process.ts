@@ -8,6 +8,7 @@ import {
   seedPersonalDefaultModelSelection,
   seedPersonalProviderConfig,
 } from "./model-provider-restart-config.js";
+import { resolveE2EStorageRoot } from "./e2e-runtime-paths.js";
 import {
   loadToolSearchResponses,
   toolSearchResponseStage,
@@ -27,7 +28,8 @@ export async function createToolSearchCliFixture(
   const repoRoot = resolve(process.cwd(), "../..");
   const root = await mkdtemp(join(tmpdir(), "zcode-toolsearch-process-"));
   const workspace = join(root, "workspace");
-  const configPath = join(root, ".zcode", "cli", "config.json");
+  // fork 的用户数据根是 ~/.omz；写死 .zcode 会让 CLI 读不到这里的 config（静默失效）。
+  const configPath = join(resolveE2EStorageRoot(root), "cli", "config.json");
   const personalPath = join(root, "provider.json");
   const requests: CliWireRequest[] = [];
   const active = new Set<ReturnType<typeof spawn>>();
@@ -59,7 +61,7 @@ export async function createToolSearchCliFixture(
   if (!address || typeof address === "string") throw new Error("CLI fixture failed to listen");
   const port = address.port;
   await mkdir(workspace, { recursive: true });
-  await mkdir(join(root, ".zcode", "cli"), { recursive: true });
+  await mkdir(join(resolveE2EStorageRoot(root), "cli"), { recursive: true });
   let config = {
     features: { memory: false, skill: false, mcp: false, subagent: false },
     permission: { mode: "yolo", allowedTools: [] as string[], disallowedTools: [] as string[] },

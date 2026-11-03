@@ -25,6 +25,7 @@ import {
 import { restartIntoWorkspacePreservingProfile } from "../helpers/model-provider-restart-runtime.js";
 
 import { skipOccupationOnboardingIfPresent } from "../helpers/occupation-onboarding.js";
+import { resolveE2EStorageRoot } from "../helpers/e2e-runtime-paths.js";
 
 const CASE_NAME = "conversation-session-composer-compression";
 const evidence = join(
@@ -192,7 +193,7 @@ describe("Composer 五档压缩", () => {
             localePreference: "zh-CN",
           }),
         );
-        const configFile = join(paths.homeDir, ".zcode", "cli", "config.json");
+        const configFile = join(resolveE2EStorageRoot(paths.homeDir), "cli", "config.json");
         const config = JSON.parse(
           await readFile(configFile, "utf8").catch((error: NodeJS.ErrnoException) => {
             if (error.code === "ENOENT") return "{}";

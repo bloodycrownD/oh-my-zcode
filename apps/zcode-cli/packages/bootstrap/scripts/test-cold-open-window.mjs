@@ -1521,9 +1521,11 @@ test("C3 (T-SL13): 真 store 上的首次发送，provider 收到的历史与 hi
       "assistant",
       "user",
       "assistant",
+      // resume 期注入：agent 清单以 <system-reminder> 用户消息落在正文之后、本轮输入之前。
+      "user",
       "user",
     ],
-    "历史三段必须按 context → 持久正文 → 本轮输入 的顺序出现",
+    "历史三段必须按 context → 持久正文 → resume 期注入 → 本轮输入 的顺序出现",
   );
   assert.ok(
     JSON.stringify(lazyMessages).includes("问 1") && JSON.stringify(lazyMessages).includes("答 3"),

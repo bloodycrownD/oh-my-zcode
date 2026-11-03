@@ -13,6 +13,7 @@ import {
   waitForV4TimelineContaining,
 } from "../../../helpers/v4-conversation.js";
 import { ensureProjectExpanded } from "../../../helpers/project-sidebar.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 180_000;
 const PENDING_COMMAND_STORAGE_KEY = "zcode-v4-pending-commands:v1";
@@ -108,7 +109,7 @@ async function waitForSessionInput(
 }
 
 function readSessionInput(sessionId: string): SessionInputRow | null {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), {
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite"), {
     readOnly: true,
   });
   try {

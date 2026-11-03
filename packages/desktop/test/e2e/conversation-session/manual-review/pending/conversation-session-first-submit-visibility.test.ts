@@ -10,6 +10,7 @@ import {
   waitForV4AssistantMessageContaining,
   waitForV4ConversationState,
 } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 describe("草稿首发列表与详情同步", () => {
   for (const scope of ["global", "project"] as const) {
@@ -110,7 +111,7 @@ describe("草稿首发列表与详情同步", () => {
           .every((frame) => frame.newRows === 0),
       ).toBe(true);
       const db = new DatabaseSync(
-        join(process.env.ZCODE_E2E_HOME_DIR!, ".zcode/v2/tasks-index.sqlite"),
+        join(resolveE2EStorageRoot(process.env.ZCODE_E2E_HOME_DIR!), "v2/tasks-index.sqlite"),
         { readOnly: true },
       );
       try {

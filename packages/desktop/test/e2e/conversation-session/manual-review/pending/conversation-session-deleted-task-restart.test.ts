@@ -24,6 +24,7 @@ import {
   waitForV4TimelineContaining,
 } from "../../../helpers/v4-conversation.js";
 import { ensureProjectExpanded } from "../../../helpers/project-sidebar.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 const CASE_TIMEOUT_MS = 180_000;
 const PROMPT_MARKER = "E2E_DELETED_TASK_RESTART";
@@ -214,7 +215,7 @@ function readTaskIndexState(taskId: string): {
   title: string;
 } | null {
   // Node 当前内置 SQLite 只提供 DatabaseSync；E2E 每次只读一行并立即关闭句柄。
-  const database = new DatabaseSync(join(homedir(), ".zcode", "v2", "tasks-index.sqlite"), {
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "v2", "tasks-index.sqlite"), {
     readOnly: true,
   });
   try {
@@ -231,7 +232,7 @@ function readTaskIndexState(taskId: string): {
 }
 
 function readCliSessionCount(taskId: string): number {
-  const database = new DatabaseSync(join(homedir(), ".zcode", "cli", "db", "db.sqlite"), {
+  const database = new DatabaseSync(join(resolveE2EStorageRoot(homedir()), "cli", "db", "db.sqlite"), {
     readOnly: true,
   });
   try {

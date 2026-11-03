@@ -40,6 +40,7 @@ import {
 
 import { waitForUpstreamNetworkCapture } from "../../../helpers/upstream-capture.js";
 import { loginWithApiKey, prepareV4ConversationE2E } from "../../../helpers/v4-conversation.js";
+import { resolveE2EStorageRoot } from "../../../helpers/e2e-runtime-paths.js";
 
 describe("虚拟项目", () => {
   before(async () => {
@@ -225,7 +226,7 @@ describe("虚拟项目", () => {
     const project = $('[data-project-name="E2E_PROJECT_EDITOR"]');
     await project.waitForDisplayed();
     const id = await project.getAttribute("data-project-id");
-    const db = new DatabaseSync(join(testHome, ".zcode", "v2", "tasks-index.sqlite"), {
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(testHome), "v2", "tasks-index.sqlite"), {
       readOnly: true,
     });
     const primary = () =>
@@ -322,7 +323,7 @@ describe("虚拟项目", () => {
       if (!projectId) throw new Error("项目 ID 缺失");
       ids.push(projectId);
     }
-    const configPath = join(testHome, ".zcode/v2/bot-config.v3.json");
+    const configPath = join(resolveE2EStorageRoot(testHome), "v2/bot-config.v3.json");
     await writeFile(
       configPath,
       JSON.stringify({
@@ -403,8 +404,8 @@ describe("虚拟项目", () => {
     if (!testHome || !basename(testHome).startsWith("zcode-virtual-project-e2e-"))
       throw new Error("isolated temporary E2E HOME required");
     for (const [path, migrationId] of [
-      [join(testHome, ".zcode", "v2", "tasks-index.sqlite"), "0005_projects"],
-      [join(testHome, ".zcode", "cli", "db", "db.sqlite"), "0023_session_soft_delete_outcome"],
+      [join(resolveE2EStorageRoot(testHome), "v2", "tasks-index.sqlite"), "0005_projects"],
+      [join(resolveE2EStorageRoot(testHome), "cli", "db", "db.sqlite"), "0023_session_soft_delete_outcome"],
     ] as const) {
       const db = new DatabaseSync(path, { readOnly: true });
       try {
@@ -422,7 +423,7 @@ describe("虚拟项目", () => {
     const testHome = process.env.ZCODE_E2E_HOME_DIR;
     if (!testHome || !basename(testHome).startsWith("zcode-virtual-project-e2e-"))
       throw new Error("isolated temporary E2E HOME required");
-    const db = new DatabaseSync(join(testHome, ".zcode", "v2", "tasks-index.sqlite"));
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(testHome), "v2", "tasks-index.sqlite"));
     try {
       // 只在隔离 HOME 注入离线缓存，不接触真实设备、网络或用户目录。
       db.prepare("INSERT INTO hosts(host_id,kind,target_json,membership_id) VALUES(?,?,?,?)").run(
@@ -481,7 +482,7 @@ describe("虚拟项目", () => {
       throw new Error(String(error) + JSON.stringify(geometry));
     }
     const readSettings = async () =>
-      JSON.parse(await readFile(join(testHome, ".zcode/v2/setting.json"), "utf8"));
+      JSON.parse(await readFile(join(resolveE2EStorageRoot(testHome), "v2/setting.json"), "utf8"));
     await browser.waitUntil(async () =>
       (await readSettings()).lastWorkspaceSession.some(
         (entry: { workspacePath: string }) => entry.workspacePath === "/e2e/offline-root",
@@ -507,7 +508,7 @@ describe("虚拟项目", () => {
     await browser.refresh();
     await $('[data-testid="project-section"]').waitForDisplayed({ timeout: 30_000 });
     expect(await offline.isExisting()).toBe(false);
-    const check = new DatabaseSync(join(testHome, ".zcode", "v2", "tasks-index.sqlite"), {
+    const check = new DatabaseSync(join(resolveE2EStorageRoot(testHome), "v2", "tasks-index.sqlite"), {
       readOnly: true,
     });
     try {
@@ -529,7 +530,7 @@ describe("虚拟项目", () => {
     if (!testHome || !basename(testHome).startsWith("zcode-virtual-project-e2e-"))
       throw new Error("isolated E2E HOME required");
     const serverHome = join(testHome, "url-server");
-    await mkdir(join(serverHome, ".zcode", "v2"), { recursive: true });
+    await mkdir(join(resolveE2EStorageRoot(serverHome), "v2"), { recursive: true });
     const child = spawn(
       process.execPath,
       ["--import", "tsx", "test/e2e/fixtures/virtual-project/server.ts"],
@@ -577,7 +578,7 @@ describe("虚拟项目", () => {
           }
         });
       });
-      const dbPath = join(testHome, ".zcode/v2/tasks-index.sqlite");
+      const dbPath = join(resolveE2EStorageRoot(testHome), "v2/tasks-index.sqlite");
       const db = new DatabaseSync(dbPath);
       try {
         db.prepare("INSERT INTO hosts(host_id,kind,target_json,membership_id) VALUES(?,?,?,?)").run(
@@ -672,7 +673,7 @@ describe("虚拟项目", () => {
       await $('[data-testid="virtual-project-save"]').click();
       const renamed = $('[data-project-name="E2E_VP08_URL_RENAMED"]');
       await renamed.waitForDisplayed();
-      const remoteDb = new DatabaseSync(join(serverHome, ".zcode/v2/tasks-index.sqlite"), {
+      const remoteDb = new DatabaseSync(join(resolveE2EStorageRoot(serverHome), "v2/tasks-index.sqlite"), {
         readOnly: true,
       });
       try {
@@ -777,7 +778,7 @@ describe("虚拟项目", () => {
       expect(JSON.stringify(captured.requestJson).includes("E2E_VP17_REMOTE_EXTRA_SKILL")).toBe(
         true,
       );
-      const remoteFacts = new DatabaseSync(join(serverHome, ".zcode/v2/tasks-index.sqlite"), {
+      const remoteFacts = new DatabaseSync(join(resolveE2EStorageRoot(serverHome), "v2/tasks-index.sqlite"), {
         readOnly: true,
       });
       let remoteTaskId: string;
@@ -879,7 +880,7 @@ describe("虚拟项目", () => {
       await $('//*[normalize-space(.)="E2E_VP18_READY" and not(*)]').waitForDisplayed({
         reverse: true,
       });
-      const archiveFacts = new DatabaseSync(join(serverHome, ".zcode/v2/tasks-index.sqlite"), {
+      const archiveFacts = new DatabaseSync(join(resolveE2EStorageRoot(serverHome), "v2/tasks-index.sqlite"), {
         readOnly: true,
       });
       try {
@@ -897,7 +898,7 @@ describe("虚拟项目", () => {
       await waitForWorkspaceApp(DEFAULT_WORKSPACE, 30_000);
       await removeRemoteProjectEntryForRow('[data-project-name="E2E_VP08_URL_RENAMED"]');
       await renamed.waitForDisplayed({ reverse: true });
-      const cliDb = new DatabaseSync(join(serverHome, ".zcode", "cli", "db", "db.sqlite"), {
+      const cliDb = new DatabaseSync(join(resolveE2EStorageRoot(serverHome), "cli", "db", "db.sqlite"), {
         readOnly: true,
       });
       try {
@@ -932,7 +933,7 @@ describe("虚拟项目", () => {
           await once(child, "exit");
         }
       }
-      const factsDb = new DatabaseSync(join(serverHome, ".zcode/v2/tasks-index.sqlite"), {
+      const factsDb = new DatabaseSync(join(resolveE2EStorageRoot(serverHome), "v2/tasks-index.sqlite"), {
         readOnly: true,
       });
       try {
@@ -1006,7 +1007,7 @@ describe("虚拟项目", () => {
     expect(second.path).not.toBe(first.path);
     const testHome = process.env.ZCODE_E2E_HOME_DIR!;
     await browser.waitUntil(async () => {
-      const settings = JSON.parse(await readFile(join(testHome, ".zcode/v2/setting.json"), "utf8"));
+      const settings = JSON.parse(await readFile(join(resolveE2EStorageRoot(testHome), "v2/setting.json"), "utf8"));
       return settings.lastActiveWorkspace?.workspacePath === second.path;
     });
     await browser.refresh();
@@ -1178,7 +1179,7 @@ describe("虚拟项目", () => {
     await $(`[data-testid="${TID_AUTOMATIONS_LIST}"]`).waitForDisplayed({ timeout: 15_000 });
     const testHome = process.env.ZCODE_E2E_HOME_DIR;
     if (!testHome) throw new Error("isolated E2E HOME required");
-    const db = new DatabaseSync(join(testHome, ".zcode", "v2", "tasks-index.sqlite"), {
+    const db = new DatabaseSync(join(resolveE2EStorageRoot(testHome), "v2", "tasks-index.sqlite"), {
       readOnly: true,
     });
     try {
@@ -1196,7 +1197,7 @@ describe("虚拟项目", () => {
         .prepare("SELECT root_path FROM project_roots WHERE project_id=? AND is_primary=1")
         .get(secondId);
       expect(row?.workspace_path).toBe(root?.root_path);
-      expect(String(row?.workspace_path).startsWith(join(testHome, ".zcode", "workspace"))).toBe(
+      expect(String(row?.workspace_path).startsWith(join(resolveE2EStorageRoot(testHome), "workspace"))).toBe(
         true,
       );
     } finally {
