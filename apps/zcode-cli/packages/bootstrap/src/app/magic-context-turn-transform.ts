@@ -151,6 +151,7 @@ import {
   getMagicContextDatabasePath,
   getMigrationOnOpenRefusal,
   getSchemaFenceRejection,
+  healUnreachableCompartmentLedger,
   initializeMagicContextHost,
   isFailClosedBlockingError,
   isTransientSqliteError,
@@ -1564,6 +1565,7 @@ export async function createMagicContextTurnTransform(
   const port = createZCodeMagicContextTurnTransformPort(transform, {
     getConfig: () => bridge.getSnapshot().effective ?? DEFAULT_MAGIC_CONTEXT_CONFIG,
     options,
+    db,
     // e2e/R-2：**turn 开始即绑定**实际执行模型（pass 之前）。门控与
     // `onPassSucceeded` 同源：两个消费者（historian 边界 + usage recorder）
     // 任一在场就挂。historian 的 `noteLiveModel` 只记一个数，runnable=false 时盲记
@@ -1976,6 +1978,12 @@ export function createZCodeMagicContextTurnTransformPort(
      * 层保持单一形态，将来不会出现「装配说不等、端口还在等」的分叉。
      */
     settleScheduledPass?: () => Promise<void>;
+    /**
+     * FORK（MC 跨会话污染修复）：magic-context 的库句柄。端口用它做一次入口自愈——
+     * compartments 的边界 ordinal 超出会话自身消息数时清掉账本（可证明不自洽，
+     * 见 `healUnreachableCompartmentLedger`）。缺席（Step 19b 的纯桩路径）时跳过。
+     */
+    db?: ContextDatabase;
   },
 ): MagicContextTurnTransform {
   const { options } = port;
@@ -1984,66 +1992,71 @@ export function createZCodeMagicContextTurnTransformPort(
   // 之前有界地等完（本批改动之前的逐行行为）。`false`（stdio 协议宿主 / TUI）=
   // 长驻进程：两处都不等，见下方调用点与 `settleInFlightHistorianInBackground`。
   const settlesInForeground = port.options.processExitsAfterTurn !== false;
-  // 持久历史快照的缓存键：同一 turn 内 live entries 长度不变，因此整个 turn 只读
-  // 一次 session store；跨 turn 长度增长时自然失效。
-  let cachedRows: { liveLength: number; rows: StoredRow[] } | undefined;
+  // 持久历史快照的缓存键：同一会话内 live entries 长度不变，因此整个 turn 只读一次
+  // session store；跨 turn 长度增长时自然失效。按 sessionId 分开存——一个进程会服务
+  // 多个会话（见下面 provider 的说明）。
+  const cachedRowsBySession = new Map<string, { liveLength: number; rows: StoredRow[] }>();
 
-  async function resolveStoredRows(liveLength: number): Promise<StoredRow[]> {
-    if (cachedRows?.liveLength === liveLength) return cachedRows.rows;
-    if (!options.sessionStore) {
-      cachedRows = { liveLength, rows: [] };
-      return cachedRows.rows;
+  async function resolveStoredRows(sessionId: string, liveLength: number): Promise<StoredRow[]> {
+    const cached = cachedRowsBySession.get(sessionId);
+    if (cached?.liveLength === liveLength) return cached.rows;
+    let rows: StoredRow[] = [];
+    if (options.sessionStore) {
+      try {
+        const persisted = await options.sessionStore.messages({
+          sessionID: sessionId as never,
+        });
+        rows = toStoredRows(persisted, sessionId);
+      } catch {
+        // 读不到持久历史不是致命错误：provider 会回落到内存 borrow。
+        rows = [];
+      }
     }
-    try {
-      const persisted = await options.sessionStore.messages({
-        sessionID: options.sessionId as never,
-      });
-      cachedRows = { liveLength, rows: toStoredRows(persisted, options.sessionId) };
-    } catch {
-      // 读不到持久历史不是致命错误：provider 会回落到内存 borrow。
-      cachedRows = { liveLength, rows: [] };
-    }
-    return cachedRows.rows;
+    cachedRowsBySession.set(sessionId, { liveLength, rows });
+    return rows;
   }
 
-  // FORK（S24-fix2）：provider 的生命周期是**整个进程**，不是「一次 transform」。
+  // FORK（MC 跨会话污染修复）：provider 的生命周期是**整个进程**，而一个
+  // AgentRuntime 进程既服务父会话，也服务它派生的每个子代理会话——`input.sessionId`
+  // 逐轮不同。历史上这里只有一份 `currentSnapshot` / `currentRows` 和一个
+  // `providerRegistered` 布尔，于是：
   //
-  // 上游（OpenCode）是长驻进程 + 每事件注册，所以「transform 作用域」≈「进程」；
-  // 本 fork 是「一进程 = 一轮 prompt」，把注册绑在 transform 上就让**同一轮里的
-  // 其它消费者**读不到原始历史：
+  //   ① 子代理的 transform 会覆盖父会话的快照。historian 的 pass 是异步触发的，
+  //      父会话那一次 pass 读到的是子代理的 entries（子代理历史 = 父历史 + 子代理
+  //      新增，必然更长），据此把 `mc<N>` 边界写进父会话的 compartments。父会话
+  //      自己的消息数远小于 N，边界再也解析不到 → 前缀裁剪 `refused` → 未裁剪请求
+  //      超过窗口时抛 MC-H04（请求未发出）。实测：父会话 445 条消息、compartments
+  //      压到 end_message=1246，且那些 publish 时刻父会话根本没有 turn。
+  //   ② provider 只给第一个 sessionId 注册，其余会话永远读不到原始历史（子代理
+  //      compartments 恒为 0）。
   //
-  //   - historian 的 publish 前边界校验（`hasRawSessionMessageById`）——于是模型已经
-  //     产出的 compartment 被 `reason=dangling_boundary` 丢掉；
-  //   - `/ctx-flush`、`/ctx-status` 这类命令；
-  //   - **`ctx_expand` 按 tag 恢复原文**——`renderItemByTag` 走
-  //     `readRawSessionMessageById(tag.toolOwnerMessageId)`，owner 是 `mc<N>`，
-  //     没有 provider 就回落到 OpenCode 的库（ZCode 上不存在），于是每一个被 drop
-  //     的 tag 都回答「original tool owner is no longer in stored history」（T-M3）。
-  //
-  // 于是这里注册一次、之后每轮只**换内容**：deps 闭包读下面这两个 holder，provider
-  // 对象本身不变。进程退出即失效（CLI 一进程一轮），不留跨进程状态。
-  let currentSnapshot: readonly ZCodeRuntimeEntry[] = [];
-  let currentRows: StoredRow[] = [];
-  let providerRegistered = false;
+  // 现在按 sessionId 各自保存快照/持久行，并各自注册一次 provider；进程退出即失效。
+  const sessionSnapshots = new Map<string, readonly ZCodeRuntimeEntry[]>();
+  const sessionRows = new Map<string, StoredRow[]>();
+  const registeredSessions = new Set<string>();
+  const rowsOf = (sessionId: string): StoredRow[] => sessionRows.get(sessionId) ?? [];
 
   function ensureProviderRegistered(sessionId: string): void {
-    if (providerRegistered) return;
+    if (registeredSessions.has(sessionId)) return;
     setRawMessageProvider(
       sessionId,
       createRawMessageProvider({
         sessionId,
-        borrowRuntimeEntries: () => currentSnapshot,
-        readStoredMessagePage: ({ afterOrdinal, limit, finalWatermark }) => ({
-          messages: pageFromRows(currentRows, afterOrdinal, limit, finalWatermark),
-          storedCount: currentRows.length,
-        }),
-        getStoredMessageCount: () => currentRows.length,
+        borrowRuntimeEntries: () => sessionSnapshots.get(sessionId) ?? [],
+        readStoredMessagePage: ({ afterOrdinal, limit, finalWatermark }) => {
+          const rows = rowsOf(sessionId);
+          return {
+            messages: pageFromRows(rows, afterOrdinal, limit, finalWatermark),
+            storedCount: rows.length,
+          };
+        },
+        getStoredMessageCount: () => rowsOf(sessionId).length,
         readStoredMessageById: (messageId) => {
-          const row = currentRows.find((candidate) => candidate.id === messageId);
+          const row = rowsOf(sessionId).find((candidate) => candidate.id === messageId);
           return row ? withOrdinal(row) : null;
         },
         readStoredOrdinalPage: (after, limit) =>
-          currentRows
+          rowsOf(sessionId)
             .filter(
               (row) =>
                 after === null ||
@@ -2059,7 +2072,7 @@ export function createZCodeMagicContextTurnTransformPort(
             })),
       }),
     );
-    providerRegistered = true;
+    registeredSessions.add(sessionId);
   }
 
   return async (
@@ -2082,9 +2095,47 @@ export function createZCodeMagicContextTurnTransformPort(
       if (typeof id === "string" && original) originals.set(id, original);
     });
 
-    currentSnapshot = snapshot;
-    currentRows = await resolveStoredRows(input.entries.length);
+    sessionSnapshots.set(sessionId, snapshot);
+    // FORK（MC 跨会话污染修复）：持久行按会话分别补，但**不阻塞本轮 pass**。
+    // resume / 冷启会话的 store 查询原先只发生在「首个会话注册」那一刻，改成每个
+    // 会话都 await 会把 store 的延迟（乃至桥接端不响应）带进 turn 的关键路径，
+    // 表现为这一轮永远不结束、composer 停在不可发送。provider 读取时按需取表，
+    // 补齐前返回空列表即可——子代理会话本来就没有持久行。
+    if (!sessionRows.has(sessionId)) {
+      void resolveStoredRows(sessionId, snapshot.length)
+        .then((rows) => {
+          sessionRows.set(sessionId, rows);
+        })
+        .catch((error: unknown) => {
+          sessionRows.set(sessionId, []);
+          options.logger.warn("Magic context stored rows unavailable for session", {
+            sessionId,
+            detail: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
     ensureProviderRegistered(sessionId);
+    // FORK（MC 跨会话污染修复 / 数据自愈）：compactions 的边界 ordinal 若超出该会话
+    // 自己的消息数，说明这份账本是在另一套 ordinal 空间里写下的（旧版本跨会话快照
+    // 污染），既不能注入也不能裁剪，`/ctx-recomp` 的增量 pass 也只会返回 0 条。
+    // 这类账本可证明不自洽，直接重建；原始消息不受影响。
+    if (port.db !== undefined) {
+      const healEndOrdinal = healUnreachableCompartmentLedger(
+        port.db,
+        sessionId,
+        snapshot.length,
+      );
+      if (healEndOrdinal !== null) {
+        options.logger.warn(
+          "Magic context compartment ledger reset: boundary beyond history",
+          {
+            sessionId,
+            endOrdinal: healEndOrdinal,
+            liveMessages: snapshot.length,
+          },
+        );
+      }
+    }
 
     try {
       await transform({}, { messages: projected });
