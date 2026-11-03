@@ -1,3 +1,27 @@
+## [1.1.3](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.2...v1.1.3) (2026-11-03)
+
+### 升级与迁移
+
+- **turn manifest 投影规则 v3 → v4：只重建，不就地迁移**。v3 清单里 model-only 轮（后台任务 / goal continuation）的 `firstMessageId` 落在轮内 assistant，页游标从轮中间开始，整页被 alignment 守卫拒收后表现为历史停住。读端命中 `schemaMismatch` 即走既有的全量物化 + manifest 重建，不需要手工 SQL，也不需要删库；回滚到 v3 构建同样命中 `schemaMismatch` 并按 v3 口径重建一次——正文不丢，但 rowId 会重排，客户端页锚点可能跳变。两个方向都是整表重建，不存在半迁移状态。
+
+### 修复
+
+- **模型选择器不再空显示，发送按钮/Enter 也不会因此一起失效**。会话首帧在 `draft.modelSelection` 缺失或已硬失效（`provider-not-found` / `model-not-found`）时回落到 `sessionConfig.modelSelection`，再退到目录 preferred；自动补选只改派生值，不再写回草稿。瞬时 loading 与 reasoning-level 失效不触发替换，避免把正在生效的选择顶掉。
+- **模式/模型配置与文字草稿分开持久化**。空正文不再让整份 composer 配置读不到：配置走新的 `composerConfigStore`（`new-task` 与 per-session 两条键），文字草稿仍由 `composerDraftStore` 负责且只有正文非空才算草稿。发送后 `sendText` 清草稿不再连带丢选择，New Task 正确回落 `build` 与该目录第一项。
+- **前台完成记录后任务重新运行时不再补写未读**。`mark-unread` 的补写改读 `sessions-index` 的当前 activity，任务已重新运行时跳过；指示器改为 running 优先于 unread，蓝点不再顶掉转圈。
+- **左侧分组列表在纵向位移后不再整体错位**。`scrollMargin` 的重算条件补上列表自身位移（此前只在尺寸 / `tasks.length` / window resize 时重算），行位置与点击命中重新对齐。
+- **agent 模型配置改完下一轮就生效**。每轮在用户输入落库之后、标题生成与首次模型请求之前重新读取一次子代理定义；读取失败不启动标题、不发模型请求，但已落库的用户消息保留。
+- **长会话不再停在中间**。manifest v4 把「触发该 turn 的消息」纳入 `firstMessageId`，model-only 轮的页游标从轮首开始，alignment 守卫不再整页拒收（迁移见上节）。
+- **恢复会话的首轮不再把历史发两遍**。`legacy resume`（`session/resume` → 默认 `full`）下 `ensureContextInitialized` 先快照 `preContextEntries`、调用 `initializeMessageHistoryFromContext`（它已把现存条目接在 context 前缀之后）后又 `addEntries` 一次，3 轮 6 条消息整段重复；保留语义由前者等价承担，删除重复追加后冷开端到端回归 C3 从「lazy 11 条 vs full 17 条」转为逐字节相等。
+- **magic-context 的原始历史快照按会话隔离（MC-H04：请求未发出）**。一个 AgentRuntime 进程同时服务父会话与它派生的每个子代理会话，而原始历史 provider 只有一份进程级 `currentSnapshot` 加一个 `providerRegistered` 布尔：子代理每轮 transform 都会覆盖父会话的快照，异步触发的父会话 historian 于是按子代理的序号空间写 compartments（实测父会话 445 条消息、边界写到 `mc1246`，且那些 publish 时刻父会话根本没有 turn）。此后前缀裁剪永远解析不到边界（`refused`），未裁剪请求一旦超过窗口就以 MC-H04 拒绝发送——而错误提示里的 `/ctx-recomp` 只是再跑一次增量 pass，`offset = 边界 + 1 > 消息数`，必然返回 0 条，无法自愈。现在快照与持久行按 `sessionId` 分开保存、provider 按会话各自注册（子代理也终于能读到自己的原始历史）；另加一条入口自愈：边界序号超出该会话自身消息数时（可证明不自洽，两侧取 live 与持久的大者以免误判窗口化输入）清掉 compartments、保护尾边界与 M0/M1 缓存，让 historian 从未压缩状态重建，原始消息不受影响。
+
+### 测试
+
+- 新增 `repro/` 复现套件（`pnpm test:repro`，4 个 bug 族 / 10 个用例），每个用例都是「缺陷在时真实失败、修复后转绿」，并记录了突变验证的做法与结果；该目录不在默认 vitest include 内，不进常规 CI。
+- 新增 `test-magic-context-session-isolation`：同一进程先跑父会话、再跑更大的子代理会话，断言父会话 provider 仍返回自己的条数、子代理也拿到自己的 provider；第二条用例注入一条覆盖到 ordinal 999 的分区，断言入口自愈清账本并复位边界与 M0 基线。两条都在旧实现上验证过会红。
+- 冷开端到端 10/10（含 C3 历史逐字节相等）、`test:v4-perf` 全段、全仓 `tsc -b` 13 工程 0 错。
+- 真机 E2E：模型选择器（18/18）与发送门禁（S/T/K）两条在合并本轮改动后重跑通过；其余 5 条 spec 未能在本机重跑——本机 WMI/CIM 损坏（`Get-CimInstance` 返回 0x80004005）且没有 `pwsh`，`e2e-process-cleanup` 的进程扫描必然失败，走它的 spec 会在 beforeAll 直接 infra failure。同一环境缺陷也说明「一次跑完 7 spec」必须在 WMI 正常的机器上做。
+
 ## [1.1.2](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.1...v1.1.2) (2026-11-01)
 
 一次性把「打开会话慢」从猜测推进到可复现的根因，并修掉两处会让安装包起不来 agent 的发版阻断。
