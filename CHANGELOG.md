@@ -1,3 +1,20 @@
+## [1.0.33](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.32...v1.0.33) (2026-11-04)
+
+冷开路径不再预载 2.2MB 的 claude tokenizer，打开会话窗口内少一次主线程同步编译。
+
+### 性能
+
+- **会话打开路径不再预载 tokenizer**（回移自 1.1.x `30803e4f`）。`preloadTokenizer()` 把 2.2MB 的 claude 词表交给 V8 同步编译，本机 1.0.32 实测 **1579.7ms**（上游记录 1586~1807ms）；编译期间占住主线程，同窗口到达的 host RPC 全部排队——这正是「打开会话后一段时间没反应」的直接来源。删掉后 tokenizer 退回既有懒加载语义：首个真正需要计数的 pass 才编译。
+
+### 验证
+
+- `preloadTokenizer` 的 import 与调用点均已移除（grep 0 命中）；`bootstrap` 包 `tsc -b` exit 0。
+- Magic Context 会话隔离回归 `test-magic-context-session-isolation.mjs` 2/2 绿（本改动不触碰该路径，作为回归护栏保留）。
+
+### 已知
+
+- 本版**没有"冷开总时长下降多少"的实测差值**：tokenizer 预载发生在 agent 子进程内，而 1.0.x 缺少 agent 侧的事件循环停顿埋点（1.1.x 由 `fc1975cc` / `100019ec` / `870f6115` 三个提交补齐），且 agent 的 stdout/stderr 不进桌面日志。函数级耗时（1579.7ms）与上游记录吻合，判定为同一份成本。
+
 ## [1.0.32](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.31...v1.0.32) (2026-11-04)
 
 Magic Context 的跨会话快照污染从根上修掉，并把此前只存在于 1.1.x 线的防腐层重构收回 1.0.x 基线。**无 UI 变更、无 schema 迁移。**
