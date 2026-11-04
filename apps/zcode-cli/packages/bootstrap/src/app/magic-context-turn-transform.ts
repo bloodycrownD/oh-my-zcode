@@ -160,7 +160,6 @@ import {
   MagicContextConfigSchema,
   noteEntry,
   openDatabase,
-  preloadTokenizer,
   projectRuntimeEntries,
   projectStoredMessage,
   promptSurfaceConfigIdentity,
@@ -1480,20 +1479,23 @@ export async function createMagicContextTurnTransform(
   //      库上为 0，真实仓库上数百 ms）。
   // 两者原本都发生在「会话第一条消息」的 model step 前置段，直接计入首 token 延迟。
   //
-  // 这里在工厂建完后异步预热：把成本搬进 app 启动窗口（desktop 长驻进程在用户
-  // 建会话/输入前有充裕空闲）。用 setImmediate 而非 queueMicrotask：让已排队的
-  // 宏任务（如恰在启动尾已提交的首条消息）先走，预热不插队。不 await——boot 15s
-  // 预算不为预热加码；失败不抛（identity 本就是非抛出语义，preloadTokenizer 内部
-  // 自带 fallback 告警），未预热成功时首轮 pass 按既有懒加载语义照旧，只是退回原行为。
+  // 这里在工厂建完后异步预热 git/目录身份：把成本搬进 app 启动窗口（desktop 长驻
+  // 进程在用户建会话/输入前有充裕空闲）。用 setImmediate 而非 queueMicrotask：让已
+  // 排队的宏任务（如恰在启动尾已提交的首条消息）先走，预热不插队。不 await——boot
+  // 15s 预算不为预热加码；失败不抛（identity 本就是非抛出语义），未预热成功时首轮
+  // pass 按既有懒加载语义照旧，只是退回原行为。
+  //
+  // FORK（冷开优化，回移自 1.1.x `30803e4f`）：这里原本还 `preloadTokenizer()`。
+  // 那是 2.2MB 的 claude 词表，V8 同步编译实测 1579.7ms（本机 1.0.32 实测；上游
+  // 记录 1586~1807ms），编译期间占住主线程，把同窗口到达的 host RPC 全部压在队列
+  // 里——正是"打开会话后一段时间没反应"的直接来源。删掉后 tokenizer 退回既有懒
+  // 加载语义：首个真正需要计数的 pass 才编译，冷开窗口内不再付这笔钱。
   setImmediate(() => {
     try {
       resolveProjectIdentityForSession(options.workingDirectory);
     } catch {
       // 非抛出语义下的双保险：任何意外都不许影响启动路径。
     }
-    void preloadTokenizer().catch(() => {
-      // 载入失败已由包内 fallback 告警；这里吞掉是为了不打断事件循环链。
-    });
   });
 
   /**
