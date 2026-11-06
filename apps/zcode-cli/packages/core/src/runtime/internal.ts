@@ -119,6 +119,13 @@ export interface AgentRuntimeInternal
   mcpToolsRegistered: boolean;
   /** 当前注册在 registry 的 MCP 工具名集合；refreshMcpServers 据此 diff 反注册。 */
   mcpRegisteredToolNames: Set<string>;
+  /**
+   * 启动快照是在部分 server 仍 connecting 时返回的（会话只等 15s，授权类 server 常驻此列）。
+   * 置位后 initializeMcp 不再一次性门闩直接返回，而是在下一回合边界补注册一次。
+   */
+  mcpToolSettlePending?: boolean;
+  /** 已补注册次数，避免长期 connecting 的 server 每回合都跑一次工具面 diff。 */
+  mcpToolSettleAttempts?: number;
   subagentPort?: SubagentPort;
   dynamicWorkflowRunPort?: DynamicWorkflowRunPort;
   modelCatalogPort?: ModelCatalogPort;

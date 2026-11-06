@@ -11,6 +11,30 @@ import type { AgentRuntimeInternal } from "../internal.js";
 const MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS = 15_000;
 
 /**
+ * startup 快照不完整时，补注册最多尝试的回合数。
+ *
+ * 触发场景：会话启动只等 15s（authorization_code 类 server 会在这段时间里一直 connecting），
+ * 快照返回时 tools 为空；一次性门闩 `mcpToolsRegistered` 会把这份空工具面永久固化，
+ * 此后 server 连上了也没有任何路径把它注册进 registry —— 表现就是「会话里看不到 MCP 工具」。
+ *
+ * 补注册挂在 turn 边界（turn-loop 每回合都会 await initializeMcp），只做 registry diff、
+ * 不重新连接，所以单次成本是一次 status() + listTools()。上限存在的意义是：server 真的坏掉时
+ * 不能每回合都去摸一遍；到上限后回到原来的一次性语义，设置页热刷新仍然可以救回来。
+ */
+const MCP_TOOL_SETTLE_MAX_ATTEMPTS = 5;
+
+/** 快照里还有 server 停在 connecting（或压根没拿到状态）时，工具面就还不是终态。 */
+function mcpSnapshotStillConnecting(
+  snapshot: McpConnectionSnapshot,
+  serverCount: number,
+): boolean {
+  if (serverCount === 0) return false;
+  const statuses = Object.values(snapshot.statuses ?? {});
+  if (statuses.length === 0) return true;
+  return statuses.some((status) => status.status === "connecting");
+}
+
+/**
  * 只有同时携带 resolver 注入的官方 plugin id 和本进程私有 authority 的 server 才能共享
  * Computer Use 项目授权。server 名、tool 名和 manifest env 都可被第三方仿造，不能单独作为信任依据。
  */
@@ -119,11 +143,109 @@ export function startMcpStartup(
   return this.mcpStartupPromise;
 }
 
+/**
+ * 把一份连接快照投影到 registry。
+ *
+ * `replace: true` 是设置页热刷新的语义：以本次快照为准，消失的工具反注册（diff 基线随之替换）。
+ * `replace: false` 是启动与补注册的语义：只增不减——补注册拿到的快照可能来自半连接状态，
+ * 拿它当「权威集合」会把已经注册好的工具误删。
+ */
+function applyMcpToolSurface(
+  this: AgentRuntimeInternal,
+  snapshot: McpConnectionSnapshot,
+  servers: Record<string, McpServerConfig>,
+  options: { replace: boolean },
+): { registered: string[]; removed: number } {
+  const mcpPort = this.mcpPort;
+  if (!mcpPort) return { registered: [], removed: 0 };
+
+  const registered = registerMcpTools(this.registry, mcpPort, snapshot.tools ?? [], {
+    allowedTools: this.config.toolAllowlist,
+    disallowedTools: this.config.toolDisallowlist,
+    officialCuaServerNames: computeOfficialCuaServerNames(
+      servers,
+      new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
+    ),
+  });
+
+  let removed = 0;
+  if (options.replace) {
+    const desired = new Set(registered);
+    for (const name of this.mcpRegisteredToolNames) {
+      if (desired.has(name)) continue;
+      this.registry.unregister(name);
+      removed += 1;
+    }
+    this.mcpRegisteredToolNames = desired;
+  } else {
+    this.mcpRegisteredToolNames = new Set([...this.mcpRegisteredToolNames, ...registered]);
+  }
+
+  // 有新增或有反注册都必须让下一轮模型请求重新取工具表；只有「两个都为 0」时缓存仍然有效。
+  if (registered.length > 0 || removed > 0) {
+    this.invalidateToolCache();
+  }
+  return { registered, removed };
+}
+
+/**
+ * 启动快照不完整时的一次补注册：只重新读 status/listTools，不重连、不动 config。
+ * 由 turn 边界驱动（turn-loop 每回合 await initializeMcp），工具到齐后自然落定。
+ */
+async function settleMcpTools(
+  this: AgentRuntimeInternal,
+  traceContext: TraceContext,
+): Promise<void> {
+  const attempts = (this.mcpToolSettleAttempts ?? 0) + 1;
+  this.mcpToolSettleAttempts = attempts;
+
+  const mcpPort = this.mcpPort;
+  const servers = this.config.mcp?.servers ?? {};
+  const serverCount = Object.keys(servers).length;
+  if (!mcpPort || serverCount === 0) {
+    this.mcpToolSettlePending = false;
+    return;
+  }
+
+  try {
+    const [statuses, tools] = await Promise.all([mcpPort.status(), mcpPort.listTools()]);
+    const snapshot: McpConnectionSnapshot = { statuses, tools };
+    const { registered } = applyMcpToolSurface.call(this, snapshot, servers, { replace: false });
+    const stillConnecting = mcpSnapshotStillConnecting(snapshot, serverCount);
+    this.mcpToolSettlePending = stillConnecting && attempts < MCP_TOOL_SETTLE_MAX_ATTEMPTS;
+    if (registered.length > 0) {
+      this.logger?.info("MCP tools settled", {
+        ...traceContextToLogContext(traceContext),
+        attempt: attempts,
+        event: "mcp.tools.settled",
+        module: "core.runtime",
+        registeredToolCount: registered.length,
+        serverCount,
+        status: "completed",
+        stillConnecting,
+      });
+    }
+  } catch (error) {
+    this.mcpToolSettlePending = attempts < MCP_TOOL_SETTLE_MAX_ATTEMPTS;
+    this.logger?.warn("MCP tool settle failed", {
+      ...traceContextToLogContext(traceContext),
+      attempt: attempts,
+      error: error instanceof Error ? error.message : String(error),
+      event: "mcp.tools.settle.failed",
+      module: "core.runtime",
+      status: "failed",
+    });
+  }
+}
+
 export async function initializeMcp(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
 ): Promise<void> {
-  if (this.mcpToolsRegistered) return;
+  if (this.mcpToolsRegistered) {
+    if (this.mcpToolSettlePending) await settleMcpTools.call(this, traceContext);
+    return;
+  }
 
   const startup = this.startMcpStartup(traceContext);
   const mcpPort = this.mcpPort;
@@ -131,22 +253,14 @@ export async function initializeMcp(
     this.mcpToolsRegistered = true;
     return;
   }
-  const serverCount = Object.keys(this.config.mcp?.servers ?? {}).length;
+  const servers = this.config.mcp?.servers ?? {};
+  const serverCount = Object.keys(servers).length;
 
   try {
     const snapshot = await startup;
-    const registered = registerMcpTools(this.registry, mcpPort, snapshot.tools, {
-      allowedTools: this.config.toolAllowlist,
-      disallowedTools: this.config.toolDisallowlist,
-      officialCuaServerNames: computeOfficialCuaServerNames(
-        this.config.mcp?.servers ?? {},
-        new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
-      ),
-    });
-    this.mcpRegisteredToolNames = new Set(registered);
-    if (registered.length > 0) {
-      this.invalidateToolCache();
-    }
+    const { registered } = applyMcpToolSurface.call(this, snapshot, servers, { replace: false });
+    // 快照返回时还有 server 停在 connecting：工具面不是终态，交给下一回合补注册。
+    this.mcpToolSettlePending = mcpSnapshotStillConnecting(snapshot, serverCount);
     this.logger?.info("MCP tools registered", {
       ...traceContextToLogContext(traceContext),
       event: "mcp.tools.registered",
@@ -154,6 +268,7 @@ export async function initializeMcp(
       registeredToolCount: registered.length,
       serverCount,
       status: "completed",
+      stillConnecting: this.mcpToolSettlePending,
     });
   } catch (error) {
     this.mcpToolsRegistered = true;
@@ -229,23 +344,12 @@ export async function refreshMcpServers(
       return { statuses: {}, tools: [] } satisfies McpConnectionSnapshot;
     });
 
-  const registered = registerMcpTools(this.registry, this.mcpPort, snapshot.tools, {
-    allowedTools: this.config.toolAllowlist,
-    disallowedTools: this.config.toolDisallowlist,
-    officialCuaServerNames: computeOfficialCuaServerNames(
-      servers,
-      new Set(this.config.mcp?.trustedOfficialCuaServerNames ?? []),
-    ),
+  const { registered, removed: removedToolCount } = applyMcpToolSurface.call(this, snapshot, servers, {
+    replace: true,
   });
-  const desired = new Set(registered);
-  let removedToolCount = 0;
-  for (const name of this.mcpRegisteredToolNames) {
-    if (desired.has(name)) continue;
-    this.registry.unregister(name);
-    removedToolCount += 1;
-  }
-  this.mcpRegisteredToolNames = desired;
-  this.invalidateToolCache();
+  // 设置页刷新是权威快照：它把工具面重新定死，补注册的残余状态随之作废。
+  this.mcpToolSettlePending = false;
+  this.mcpToolSettleAttempts = 0;
   this.logger?.info("MCP tools refreshed", {
     ...traceContextToLogContext(effectiveTrace),
     event: "mcp.tools.refreshed",
