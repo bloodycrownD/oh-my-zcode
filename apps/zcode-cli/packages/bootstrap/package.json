@@ -63,7 +63,8 @@
     "test:hydrate-load-failure": "tsx --test scripts/test-hydrate-load-failure.mjs",
     "test:request-timing": "tsx --test scripts/test-request-timing.mjs",
     "test:command-concurrency": "tsx --test scripts/test-command-concurrency.mjs",
-    "test:v4-turn-settled": "tsx --test scripts/test-v4-turn-settled-autodrain.mjs"
+    "test:v4-turn-settled": "tsx --test scripts/test-v4-turn-settled-autodrain.mjs",
+    "test:mcp-live-recovery": "tsx --test scripts/test-mcp-live-recovery.mjs"
   },
   "dependencies": {
     "@zcode/adapters": "workspace:*",
