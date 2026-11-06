@@ -146,6 +146,13 @@ import { disposeNodeReplSession } from "../tool/handlers/node-repl.js";
 import { cloneModelSelection } from "./model-selection.js";
 import type { McpServerConfig } from "./deps.js";
 
+// SB-B7：以下两个类型工具只服务于 mcpStartupRevisionAtStart 的编译期断言，不产生运行时代码。
+// `Equal` 做严格同一性比较（`number` 与 `number | undefined` 不相等），`Expect<true>` 让
+// 不成立的比较直接编译失败。
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Expect<T extends true> = T;
+
 // oxlint-disable typescript-eslint/no-unsafe-declaration-merging
 export class AgentRuntime {
   controlOffPeakExecution(
@@ -218,6 +225,33 @@ export class AgentRuntime {
   private residencyBlockingWorkCount = 0;
   private mcpInitialized = false;
   private mcpToolsRegistered = false;
+  /**
+   * MCP 工具面基线 revision（与上面两个门闩同生命周期，只在 startMcpStartup 开闸时采样一次）。
+   * 类型与可空性直接取 `AgentRuntimeInternal` 的成员：internal.ts 是该字段的唯一权威解释，
+   * 类侧不再重复声明一份带注释的 `?: number`（两侧漂移无编译期约束）。
+   * `declare` 不产生运行时初始化，也禁止写 `= 0` —— `undefined`（端口不支持 toolListRevision
+   * → 永不刷新）与 `0`（真实基线）语义相反，写成 0 会静默吞掉首回合的首次 bump。
+   */
+  declare private mcpStartupRevisionAtStart?: AgentRuntimeInternal["mcpStartupRevisionAtStart"];
+  /**
+   * SB-B7 编译期断言（`tsc -b packages/core` 检查，运行时零成本、不产出任何字段）：
+   *   ① `AgentRuntimeInternal` 的成员必须严格等于 `number | undefined`——改回必填 `number`
+   *      或换成别的类型都编译失败；
+   *   ② 上面的类字段类型必须与接口成员是同一个类型——去掉 `declare` 换成 `= 0` 之类的初始化
+   *      会让字段推断成 `number`，同样编译失败。
+   * `undefined`（端口不支持 toolListRevision → 永不刷新）与 `0`（真实基线）语义相反，
+   * 靠注释守不住，只能让编译期守住；类型与语义的唯一权威仍是 internal.ts 的那份声明。
+   */
+  declare private static readonly mcpStartupRevisionAtStartTypePin?: [
+    Expect<Equal<AgentRuntimeInternal["mcpStartupRevisionAtStart"], number | undefined>>,
+    Expect<
+      Equal<
+        AgentRuntime["mcpStartupRevisionAtStart"],
+        AgentRuntimeInternal["mcpStartupRevisionAtStart"]
+      >
+    >,
+  ];
+
   // fork 的 refreshMcpServers 用 Set 做「注册集合 diff」；上游 A7 的
   // refreshMcpToolsIfChanged 另用数组 + 签名 + revision 判 tools/list_changed。
   // initializeMcp 同时维护两套（见 methods/mcp.ts），两个方法各自消费自己的那套。

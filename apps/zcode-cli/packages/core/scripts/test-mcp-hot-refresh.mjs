@@ -3,7 +3,8 @@
  * FORK（mcp-hot-refresh）core 单测：refreshMcpServers 的工具面 diff 语义。
  *
  * 覆盖：新增 server 的工具注册并 invalidateToolCache / 消失 server 的工具反注册 /
- * config.mcp.servers 权威替换 / mcp 未启用时 no-op。
+ * config.mcp.servers 权威替换 / mcp 未启用时 no-op / refresh 的 revision 基线（SB-B1
+ * connect 期间晚到的 bump 不被吞）与 refreshMcpToolsIfChanged 的收敛。
  * 协议层（mcp/refreshSessions 遍历 resident sessions）与 UI 触发链由门禁型
  * typecheck 覆盖，此处只钉 core diff 契约。
  *
@@ -12,7 +13,7 @@
 
 import assert from "node:assert/strict";
 import test from "node:test";
-import { refreshMcpServers } from "../src/runtime/methods/mcp.ts";
+import { refreshMcpServers, refreshMcpToolsIfChanged } from "../src/runtime/methods/mcp.ts";
 import { registerMcpTools } from "../src/mcp/index.ts";
 
 function makeToolDescriptor(serverName, toolName) {
@@ -245,11 +246,66 @@ test("invalidate 幂等：连续两次同配置 refresh 均失效工具缓存", 
   assert.equal(runtime.invalidateToolCacheCalls, 2, "每次 refresh 均失效一次");
 });
 
+// cr-fix-spec SB-B1：refresh 的 revision 基线必须在 connectConfiguredServers **之前**采样。
+// connect 返回的快照是连接器当下能拿到的（新 server 常还在 connecting），后台连接完成会
+// 在同一个 await 窗口内 bump revision；若等注册完成后再现读，这次 bump 会被当成「已消费」，
+// 该 server 直到下一次 bump 或手动刷新前一直 no-op。
+test("基线采样：connect 期间晚到的 revision bump 不被吞", async () => {
+  let revision = 0;
+  let connectCalls = 0;
+  let listToolsCalls = 0;
+  let tools = [];
+  const port = {
+    connectConfiguredServers: async () => {
+      connectCalls += 1;
+      // 后台连接在本次 await 内完成：工具就绪并 bump，但返回给 refresh 的快照仍是空 tools。
+      tools = [makeToolDescriptor("late", "lookup")];
+      revision += 1;
+      return {
+        statuses: {
+          late: { status: "connecting", transport: "stdio", toolCount: 0, updatedAt: "now" },
+        },
+        tools: [],
+      };
+    },
+    listTools: async () => {
+      listToolsCalls += 1;
+      return tools;
+    },
+    toolListRevision: () => revision,
+  };
+  const runtime = makeRuntime(port);
+  const servers = { late: { type: "http", url: "https://mcp.example/late" } };
+
+  const result = await refreshMcpServers.call(runtime, servers, trace);
+  // makeRuntime 的 initializeMcp 是 stub（不 connect），所以 connectConfiguredServers 只被
+  // refresh 自己调用一次；若将来改用真实 initializeMcp，这里应变成 2（按调用序号断言）。
+  assert.equal(connectCalls, 1, "只有 refresh 自己发起的 connect");
+  assert.equal(result.registeredToolCount, 0, "本次快照为空（server 仍 connecting）");
+  assert.equal(
+    runtime.mcpToolListRevision,
+    revision - 1,
+    "基线取 connect 之前的采样值，而不是 connect 之后的现值",
+  );
+
+  // 下一回合的 refreshMcpToolsIfChanged 拿到活列表并补注册。
+  await refreshMcpToolsIfChanged.call(runtime, trace);
+  assert.equal(listToolsCalls, 1, "revision 变了才 listTools");
+  assert.ok(
+    runtime.registry.names().some((n) => n.includes("lookup")),
+    "晚到的工具已注册",
+  );
+
+  // 收敛：revision 未再变，不重复 listTools。
+  await refreshMcpToolsIfChanged.call(runtime, trace);
+  assert.equal(listToolsCalls, 1, "第二回合不再 listTools");
+});
+
 process.on("exit", (code) => {
   console.log("");
   console.log(
     code === 0
-      ? "TEST PASS — MCP 热刷新（diff 注册/反注册/替换/no-op/连接失败降级）"
+      ? "TEST PASS — MCP 热刷新（diff 注册/反注册/替换/no-op/连接失败降级/基线采样）"
       : `TEST FAIL — MCP 热刷新 (exit code ${code})`,
   );
 });

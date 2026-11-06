@@ -130,6 +130,20 @@ export interface AgentRuntimeInternal
   residencyBlockingWorkCount: number;
   mcpInitialized: boolean;
   mcpToolsRegistered: boolean;
+  /**
+   * MCP 工具面基线 revision —— `startMcpStartup` 开闸那一刻采样，与上面两个门闩同生命周期。
+   * 这里是该字段类型与语义的唯一权威：类侧用 `declare` 从本成员取类型，不再重复声明。
+   *
+   * 为什么必须在开闸时采：`connectConfiguredServers` 的快照是**启动期**抓的（分离式启动会在
+   * server 还 connecting 时返回空/半份 tools），后台连接完成随后才 bump revision。若等到
+   * `await initializeMcp(...)` 之后再现读，这次 bump 会被当成「已消费」，
+   * `refreshMcpToolsIfChanged` 之后永远 no-op，会话整场拿不到 MCP 工具
+   * （现场：sess_6b69c667，12 server 全 connecting、registeredToolCount=0）。
+   *
+   * `undefined` = 端口未实现 `toolListRevision`（mock / 静态 server）→ 永不刷新；`0` 是真实
+   * 基线值，两者语义相反，所以类侧不允许写成 `= 0`（`declare` 天然禁止初始化）。
+   */
+  mcpStartupRevisionAtStart?: number;
   /** 当前注册在 registry 的 MCP 工具名集合；refreshMcpServers 据此 diff 反注册。 */
   mcpRegisteredToolNames: Set<string>;
   /** 初始化 / 上次刷新时注册的 MCP 工具名与集合签名（上游 A7 list_changed 判据）。 */

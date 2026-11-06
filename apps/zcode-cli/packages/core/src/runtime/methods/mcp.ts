@@ -45,6 +45,11 @@ export function startMcpStartup(
 ): Promise<McpConnectionSnapshot> | undefined {
   if (this.mcpInitialized) return this.mcpStartupPromise;
   this.mcpInitialized = true;
+  // 开闸这一刻采样基线 revision：为什么必须在这里采、以及 `undefined` 的语义见
+  // internal.ts 的 mcpStartupRevisionAtStart（唯一权威解释，这里只留短引用）。
+  // 生命周期与 mcpInitialized / mcpToolsRegistered 绑定：将来若新增「重置 MCP 启动态」的
+  // 入口，必须把这个字段一并清空，否则下一轮启动会沿用上一轮的基线。
+  this.mcpStartupRevisionAtStart = this.mcpPort?.toolListRevision?.();
 
   if (!this.mcpPort || this.config.mcp?.enabled === false) {
     this.mcpToolsRegistered = true;
@@ -154,12 +159,18 @@ export async function initializeMcp(
       pluginIdByServerName: buildPluginIdByServerName(this.config.pluginReferenceCatalog),
     });
     this.mcpRegisteredToolNames = new Set(registered);
+    // N4：注册日志带两个 revision 数值——AtStart 是本轮基线来源（启动点采样），Now 是注册
+    // 完成时端口的真实值。两者不等就说明注册期间已经发生过 bump，下一回合边界会被 refresh
+    // 看见；sess_6b69c667 那类「基线被吞」再发生时，只有这组数值能复盘。
+    const revisionNow = mcpPort.toolListRevision?.();
     this.logger?.info("MCP tools registration timing", {
       ...traceContextToLogContext(traceContext),
       event: "mcp.tools.registration.timing",
       module: "core.runtime",
       registerMs: Date.now() - registerStartedAt,
       registeredToolCount: registered.length,
+      revisionAtStart: this.mcpStartupRevisionAtStart,
+      revisionNow,
       serverCount,
       startupWaitMs,
       toolCount: snapshot.tools.length,
@@ -170,12 +181,22 @@ export async function initializeMcp(
     // A7：记住注册集合与签名，回合边界 refreshMcpToolsIfChanged 据此判断是否重注册。
     this.registeredMcpToolNames = registered;
     this.mcpToolsSignature = mcpToolsSignature(snapshot.tools);
-    this.mcpToolListRevision = mcpPort.toolListRevision?.();
+    // 基线直接取启动点采样，不再「await 之后现读」（SB-B6：能走到这里说明端口已经过上面的
+    // 判空并提前 return，端口不实现 toolListRevision 时 `现读` 与 `启动点` 同为 undefined，
+    // 原来的 `??` 右操作数是死分支，留着只会掩盖将来把它挪回 await 之后的回归）。
+    // 值为什么必须来自启动点见 internal.ts 的唯一解释。
+    //
+    // SB-B2：基线故意取启动点而不是「注册完成时」，代价是首回合必然多一次 listTools ——
+    // 新 lease 的 revision 求和为 0，任一 server 首连成功都会 bump，refreshMcpToolsIfChanged
+    // 第一回合必然进一次 listTools；它在签名比较之后推进基线，因此只多这一次，不会反复重注册。
+    this.mcpToolListRevision = this.mcpStartupRevisionAtStart;
     this.logger?.info("MCP tools registered", {
       ...traceContextToLogContext(traceContext),
       event: "mcp.tools.registered",
       module: "core.runtime",
       registeredToolCount: registered.length,
+      revisionAtStart: this.mcpStartupRevisionAtStart,
+      revisionNow,
       serverCount,
       status: "completed",
     });
@@ -228,6 +249,19 @@ export async function refreshMcpServers(
   if (!this.mcpToolsRegistered) {
     await this.initializeMcp(effectiveTrace);
   }
+  // SB-B1：基线必须在「等初始化落定之后、发起 connectConfiguredServers 之前」采样。
+  // connectConfiguredServers 给出的只是连接器当下能拿到的一份快照——新 server 常仍在
+  // connecting、慢 server 会被 MCP_CONNECT_DEADLINE_MS 掐掉，而 pool.snapshot() 逐 entry
+  // await status/listTools 是真实 IO 窗口，后台连接完成后会 bump revision。若像此前那样
+  // 等注册完成后再现读，落在 connect 期间的 bump 会被当成「已消费」，该 server 直到下一次
+  // bump 或手动刷新前一直是 no-op。
+  // 残余窗口：真正可能被吞的 bump 发生在「initializeMcp 内部取到工具快照之后」到「本行采样」
+  // 之间——既包含 initializeMcp 返回前的各次 await（等待 startup、注册期间），也包含返回后到
+  // 本行的同步段。基线一旦取本行现读值，这些 bump 就被当成已消费，而它们对应的工具不在
+  // initializeMcp 的注册结果里，后续 refreshMcpToolsIfChanged 不会再补。这段窗口远小于
+  // connect 的 IO 窗口，概率低；根治是端口级「快照自带 revision」，届时直接取 snapshot 上
+  // 同一次读到的值。
+  const revisionBeforeConnect = this.mcpPort.toolListRevision?.();
   this.config.mcp = {
     ...this.config.mcp,
     servers,
@@ -295,7 +329,9 @@ export async function refreshMcpServers(
   // 若不跟着更新，下一次 tools/list_changed 会拿旧基线做无意义的重注册。
   this.registeredMcpToolNames = registered;
   this.mcpToolsSignature = mcpToolsSignature(snapshot.tools);
-  this.mcpToolListRevision = this.mcpPort.toolListRevision?.();
+  // 基线用 connect 之前采样的值（SB-B1）：注册结果只覆盖到那一刻的工具面，之后的 bump 必须
+  // 留给下一回合的 refreshMcpToolsIfChanged，否则本次刷新的快照会把它永久吞掉。
+  this.mcpToolListRevision = revisionBeforeConnect;
   this.invalidateToolCache();
   this.logger?.info("MCP tools refreshed", {
     ...traceContextToLogContext(effectiveTrace),
@@ -303,6 +339,8 @@ export async function refreshMcpServers(
     module: "core.runtime",
     registeredToolCount: registered.length,
     removedToolCount,
+    revisionBeforeConnect,
+    revisionNow: this.mcpPort.toolListRevision?.(),
     serverCount: Object.keys(servers).length,
     status: "completed",
   });
@@ -353,9 +391,22 @@ export async function refreshMcpToolsIfChanged(
   } catch {
     return;
   }
+  const previousRevision = this.mcpToolListRevision;
   this.mcpToolListRevision = revision;
   const signature = mcpToolsSignature(descriptors);
-  if (this.mcpToolsSignature === signature) return;
+  if (this.mcpToolsSignature === signature) {
+    // N4：revision 推进了但工具签名没变（adapter 重拉后结果一致，或 bump 来自本端尚未观察到
+    // 的 server）。这条 debug 是「基线被吞 / 反复重注册」类问题唯一可自查的痕迹。
+    this.logger?.debug("MCP tool list revision advanced without signature change", {
+      ...traceContextToLogContext(traceContext),
+      event: "mcp.tools.revision_advanced_without_change",
+      module: "core.runtime",
+      previousRevision,
+      revision,
+      toolCount: descriptors.length,
+    });
+    return;
+  }
   const previous = new Set(this.registeredMcpToolNames ?? []);
   // Bugfix（断连失效根因 F 半路径）：listTools 快照里缺席的 server 不一定是「工具没了」
   // ——更可能是该 server 连接未就绪（failed/connecting），快照天然为空。此前对 previous
