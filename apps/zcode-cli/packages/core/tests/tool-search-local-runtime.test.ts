@@ -5,7 +5,6 @@ import { expect, it, vi } from "vitest";
 import {
   createProjectId,
   createSessionId,
-  createRootTraceContext,
   type MessagePart,
   type ModelRequest,
   type ModelResult,
@@ -25,7 +24,7 @@ import { hydrateMessageHistoryFromSession } from "../src/agent/session-history-h
 import { buildProviderRequestMessages } from "../src/runtime/helpers/provider-request-messages.js";
 
 it.each(["off", "on"] as const)(
-  "persists one target lifecycle and restores wrapper history through fork, modes and compact (stream=%s)",
+  "persists one target lifecycle and restores wrapper history through fork and modes (stream=%s)",
   async (modelStreaming) => {
     const root = await mkdtemp(join(tmpdir(), "zcode-local-search-"));
     const dbPath = join(root, "session.sqlite");
@@ -291,63 +290,34 @@ it.each(["off", "on"] as const)(
         }
         await cold.closeBrowserSession();
       }
-      const compacted = makeRuntime("local", forkedId);
-      await compacted.resumeFromStore();
-      await (compacted as unknown as AgentRuntimeInternal).compactActiveConversation(
-        undefined,
-        createRootTraceContext({ sessionId: forkedId }),
-        [],
-        {},
-      );
-      await compacted.executeTurn("Continue after compact.");
-      expect(JSON.stringify(requests.at(-1)!.messages)).not.toContain("<functions>");
-      expect(requests.at(-1)!.tools?.some((t) => t.name === "Lookup")).toBe(true);
-      expect(
-        requests.at(-1)!.tools?.find((t) => t.name === "Lookup")?.deferLoading,
-      ).toBeUndefined();
-      await compacted.closeBrowserSession();
+      // FORK：compact 产品面已删（`compactActiveConversation` 不存在），这里只保留
+      // 「fork 出的会话冷恢复后仍能解析 ToolSearch 历史」+「从该分支再 fork 一次」两条链路。
       store.close();
       store = await createSqliteSessionStore({ dbPath });
-      const coldCompacted = makeRuntime("local", forkedId);
-      await coldCompacted.resumeFromStore();
-      await coldCompacted.executeTurn("Resume the compacted branch.");
-      expect(requests.at(-1)!.tools?.find((t) => t.name === "Lookup")).toBeDefined();
-      expect(
-        requests.at(-1)!.tools?.find((t) => t.name === "Lookup")?.deferLoading,
-      ).toBeUndefined();
-      const compactedRows = await store.messages({ sessionID: forkedId });
+      const branch = makeRuntime("local", forkedId);
+      await branch.resumeFromStore();
+      await branch.executeTurn("Resume the forked branch.");
+      // 原断言「compact 后 Lookup 提升为原生工具」随 compact 面删除；这里只确认冷恢复后
+      // 会话仍能继续推进，历史解析不再报错。
+      const branchRows = await store.messages({ sessionID: forkedId });
       const promotedForkId = createSessionId("local-promoted-fork");
-      await forkStableConversationAtMessage.call(coldCompacted as unknown as AgentRuntimeInternal, {
+      await forkStableConversationAtMessage.call(branch as unknown as AgentRuntimeInternal, {
         forkedSessionId: promotedForkId,
         sourceCommandId: "fork-promoted",
         goalBoundary: { kind: "none" },
         target: {
           productTurnId: "promoted-turn",
           transcriptTurnId: "promoted-transcript",
-          orderedMessageIds: compactedRows.map((row) => String(row.info.id)),
-          boundaryMessageId: String(compactedRows.at(-1)!.info.id),
+          orderedMessageIds: branchRows.map((row) => String(row.info.id)),
+          boundaryMessageId: String(branchRows.at(-1)!.info.id),
         },
       });
-      const rewoundBeforeCompact = new MessageHistoryImpl();
-      await hydrateMessageHistoryFromSession({
-        history: rewoundBeforeCompact,
-        messages: compactedRows,
-        rewindTargetMessageId: compactedRows[0]!.info.id,
-        branchCutAfterMessageId: compactedRows.at(-1)!.info.id,
-      });
-      expect(
-        rewoundBeforeCompact.toRuntimeEntries().some((entry) => entry.metadata?.compactBoundary),
-      ).toBe(false);
-      await coldCompacted.closeBrowserSession();
+      await branch.closeBrowserSession();
       store.close();
       store = await createSqliteSessionStore({ dbPath });
       const promotedFork = makeRuntime("local", promotedForkId);
       await promotedFork.resumeFromStore();
       await promotedFork.executeTurn("Continue from the promoted fork.");
-      expect(requests.at(-1)!.tools?.find((t) => t.name === "Lookup")).toBeDefined();
-      expect(
-        requests.at(-1)!.tools?.find((t) => t.name === "Lookup")?.deferLoading,
-      ).toBeUndefined();
       await promotedFork.closeBrowserSession();
       // 同一真实 part 重存中间/失败状态，重开 SQLite 后仍恢复原始模型包装调用。
       const completedPart = parts.find((part) => part.callID === "invoke")!;

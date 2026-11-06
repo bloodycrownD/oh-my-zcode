@@ -1,12 +1,13 @@
 // formal-proof 全枚举 ↔ 投影 guard 一致性（13-golden-test-mapping §结构性 8）。
 // packages/formal-proof/src/model.ts 的 evaluate 是可执行裁决表（02-projection「规则模块下沉」）；
 // 本测试机械对账：每个 coherent ProductContext × Candidate 组合的 Decision，
-// 必须与投影同源派生（computeAvailability / computeInputRouting）一致。
+// 必须与投影同源派生（computeInputRouting）一致。
 //
 // 对账面（v4 A 区可观测量，10 §4.2.2）：
-//   compact / slashCompact → availability.compact（含 reasonCode ↔ ruleId 映射）
-//   sendText / setGoal     → inputRouting.mode（allow→startNow / enqueue→enqueue / reject→reject）
+//   sendText / setGoal → inputRouting.mode（allow→startNow / enqueue→enqueue / reject→reject）
 // 不在对账面的候选：
+//   compact/slashCompact —— compact 产品面已在本 fork 删除，formal-proof 候选与
+//     `availability.compact` 同步移除；
 //   forkLatest/forkOld/editLatest/editOld —— 行级动作（RowActions §4.4.1），M3 rows guard 接线时对账；
 //   system 候选 —— 状态推进由 reducer 事件流黄金测试覆盖（product-projection.test.ts）。
 import { describe, expect, it } from "vitest";
@@ -20,14 +21,15 @@ import type { SessionEvent } from "@zcode/contracts";
 import { SessionEventType } from "@zcode/contracts";
 import {
   ProductProjection,
-  computeAvailability,
   computeInputRouting,
   type AvailabilityContext,
 } from "../src/zcode-protocol-v4/index.js";
 
 // ── ProductContext（formal-proof 词表）→ AvailabilityContext（v4 guard 输入面）──
 
-const RUN_PHASES = ["idle", "running", "completed", "compacting", "goalVerifying"] as const;
+// FORK：compact 产品面已删，`compacting` 不再是可达 runPhase（v4 AvailabilityContext 也没有
+// 该维度），枚举里去掉它，避免用「compacting → completedSuccess」的错映射制造假差异。
+const RUN_PHASES = ["idle", "running", "completed", "goalVerifying"] as const;
 const QUEUES = ["empty", "text", "goal", "compact", "mixed"] as const;
 const COMPACT_MEMORIES = ["never", "compactable", "justCompacted", "notNeeded"] as const;
 const GOALS = ["none", "active", "verifying", "verified", "failed"] as const;
@@ -51,7 +53,6 @@ function toAvailabilityContext(context: ProductContext): AvailabilityContext {
             : context.goal === "failed"
               ? "failed"
               : "active",
-    compacting: context.runPhase === "compacting",
     goalVerifying: context.runPhase === "goalVerifying",
     queueLength: context.queue === "empty" ? 0 : 1,
     // formal-proof 无 autoDrain 维度；不变量：completed 下滞留的 queue 只可能是
@@ -66,20 +67,19 @@ function isCoherent(context: ProductContext): boolean {
   return (context.runPhase === "goalVerifying") === (context.goal === "verifying");
 }
 
-// 裁决差异表（显式登记，禁止静默跳过）：
-//   justCompactedNoNeed —— v4 裁决：compact 保持可点击，noop 由 compact marker 表达
-//   （10 §4.4.7 noop 状态；G 组黄金测试已覆盖），availability 不禁用。
-const DECISION_OVERRIDES = new Set(["justCompactedNoNeed"]);
-
 // formal-proof ruleId → product-protocol guard reasonCode（09 §词表）。
 const REASON_CODE_BY_RULE_ID: Record<string, string> = {
-  compactingCannotCompact: "compactOperationLock",
-  idleCannotCompact: "idleCannotCompact",
-  // 2026-07-05 重裁决：compacting 输入 enqueue（原 compactingCannotSend reject 已废弃）。
   compactingAcceptsFutureInput: "compactingAcceptsFutureInput",
   goalVerifierAcceptsFutureInput: "goalVerifierAcceptsFutureInput",
   heldQueueInputRequiresChoice: "heldQueueInputRequiresChoice",
 };
+
+// FORK（2026-10-23 bug B 拍板）：暂停队列（completed + queue>0 + autoDrain=false）期间
+// 输入照常入队，弃用上游 choice 确认框（product-projection/computeInputRouting 的
+// `heldQueuePausesButAcceptsInput`）。`packages/formal-proof/src/model.ts` 的
+// heldQueueInputRequiresChoice 规则尚未同步，属 formal-proof 模型侧待更新；这里显式登记
+// 这组差异并断言 fork 的新行为，禁止静默跳过。
+const HELD_QUEUE_RULE_ID = "heldQueueInputRequiresChoice";
 
 function* coherentContexts(): Generator<ProductContext> {
   for (const runPhase of RUN_PHASES) {
@@ -115,42 +115,9 @@ function candidateById(id: string): Candidate {
 }
 
 describe("formal-proof 全枚举 ↔ guard 同源派生一致", () => {
-  it("compact/slashCompact：Decision ↔ availability.compact 全枚举一致", () => {
-    let checked = 0;
-    for (const context of coherentContexts()) {
-      const availability = computeAvailability(toAvailabilityContext(context));
-      for (const candidateId of ["compact", "slashCompact"]) {
-        const decision = evaluate(context, candidateById(candidateId));
-        if (DECISION_OVERRIDES.has(decision.ruleId)) {
-          // 裁决差异：见 DECISION_OVERRIDES 注释。
-          expect(availability.compact.allowed).toBe(true);
-          checked += 1;
-          continue;
-        }
-        const label = `${JSON.stringify(context)} × ${candidateId} → ${decision.ruleId}`;
-        if (decision.kind === "allow" || decision.kind === "enqueue") {
-          // compact enqueue 与立即执行共享同一个可用入口；真正的 route 由命令 admission
-          // 读取 inputRouting/held queue 决定，availability 只表达是否允许提交该意图。
-          expect(availability.compact, label).toEqual({ allowed: true });
-        } else if (decision.kind === "reject") {
-          const reasonCode = REASON_CODE_BY_RULE_ID[decision.ruleId];
-          expect(reasonCode, `未登记的 reject ruleId：${label}`).toBeDefined();
-          expect(availability.compact, label).toEqual({
-            allowed: false,
-            reasonCode,
-          });
-        } else {
-          throw new Error(`compact 候选出现未预期裁决种类：${label}`);
-        }
-        checked += 1;
-      }
-    }
-    // 全枚举非空防呆：coherent 上下文 × 2 候选应达千级组合。
-    expect(checked).toBeGreaterThan(3000);
-  });
-
   it("sendText/setGoal：Decision ↔ inputRouting.mode 全枚举一致", () => {
     let checked = 0;
+    let heldQueueRows = 0;
     for (const context of coherentContexts()) {
       const routing = computeInputRouting(toAvailabilityContext(context), "queue");
       for (const candidateId of ["sendText", "setGoal"]) {
@@ -168,9 +135,13 @@ describe("formal-proof 全枚举 ↔ guard 同源派生一致", () => {
             expect(routing.reasonCode, label).toBe(REASON_CODE_BY_RULE_ID[decision.ruleId]);
           }
         } else if (decision.kind === "choice") {
-          // heldQueueInputRequiresChoice（2026-07-05 裁决）：held 输入让用户裁决。
-          expect(routing.mode, label).toBe("choice");
-          expect(routing.reasonCode, label).toBe(REASON_CODE_BY_RULE_ID[decision.ruleId]);
+          // 见 HELD_QUEUE_RULE_ID 注释：fork 已把 held choice 改成 pause-but-enqueue。
+          expect(decision.ruleId, label).toBe(HELD_QUEUE_RULE_ID);
+          expect(routing, label).toEqual({
+            mode: "enqueue",
+            reasonCode: "heldQueuePausesButAcceptsInput",
+          });
+          heldQueueRows += 1;
         } else if (decision.kind === "reject") {
           expect(routing.mode, label).toBe("reject");
           expect(routing.reasonCode, label).toBe(REASON_CODE_BY_RULE_ID[decision.ruleId]);
@@ -184,11 +155,14 @@ describe("formal-proof 全枚举 ↔ guard 同源派生一致", () => {
         checked += 1;
       }
     }
+    // held-queue 差异行必须真实命中，否则上面的 fork 分支会退化成死断言。
+    expect(heldQueueRows).toBeGreaterThan(0);
     expect(checked).toBeGreaterThan(2000);
   });
 });
 
-// ── reducer 落地对账：五个 runPhase 原型经真实事件流构造，guard 与裁决表一致 ──
+// ── reducer 落地对账：runPhase 原型经真实事件流构造，guard 与裁决表一致 ──
+// compact 产品面已删（`availability.compact` 不存在），本组只对账 inputRouting。
 
 describe("formal-proof 原型 ↔ reducer 事件流投影一致", () => {
   let eventSeq = 0;
@@ -232,69 +206,22 @@ describe("formal-proof 原型 ↔ reducer 事件流投影一致", () => {
       "turn-1",
     );
 
-  it("idle（draft）：compact 拒绝 idleCannotCompact，输入 startNow", () => {
+  it("idle（draft）：输入 startNow", () => {
     const snapshot = project([created()]).getSnapshot();
-    expect(snapshot.availability.compact).toEqual({
-      allowed: false,
-      reasonCode: "idleCannotCompact",
-    });
     expect(snapshot.inputRouting.mode).toBe("startNow");
   });
 
-  it("running：compact 可提交并进入 typed queue，输入 enqueue", () => {
+  it("running：输入 enqueue", () => {
     const snapshot = project([created(), turnStarted()]).getSnapshot();
-    expect(snapshot.availability.compact).toEqual({ allowed: true });
     expect(snapshot.inputRouting.mode).toBe("enqueue");
   });
 
-  it("completed：compact 放行，输入 startNow", () => {
+  it("completed：输入 startNow", () => {
     const snapshot = project([created(), turnStarted(), turnDone()]).getSnapshot();
-    expect(snapshot.availability.compact).toEqual({ allowed: true });
     expect(snapshot.inputRouting.mode).toBe("startNow");
   });
 
-  it("compacting：compact 拒绝 compactOperationLock，输入 enqueue（compactingAcceptsFutureInput）；终态解锁", () => {
-    const projection = project([
-      created(),
-      turnStarted(),
-      turnDone(),
-      makeEvent(SessionEventType.CompactStarted, {
-        operationId: "op-1",
-        messageId: "msg-1",
-        status: "started",
-        trigger: "manual",
-        display: "separator",
-      }),
-    ]);
-    const during = projection.getSnapshot();
-    expect(during.control.activeWorks).toEqual([expect.objectContaining({ kind: "compact" })]);
-    expect(during.availability.compact).toEqual({
-      allowed: false,
-      reasonCode: "compactOperationLock",
-    });
-    expect(during.inputRouting).toEqual({
-      mode: "enqueue",
-      reasonCode: "compactingAcceptsFutureInput",
-    });
-
-    projection.applyEvent(
-      makeEvent(SessionEventType.CompactCompleted, {
-        operationId: "op-1",
-        messageId: "msg-1",
-        status: "completed",
-        trigger: "manual",
-        display: "separator",
-        preCompactTokenCount: 800,
-        postCompactTokenCount: 300,
-      }),
-    );
-    const after = projection.getSnapshot();
-    expect(after.control.activeWorks).toEqual([]);
-    expect(after.availability.compact).toEqual({ allowed: true });
-    expect(after.inputRouting.mode).toBe("startNow");
-  });
-
-  it("goalVerifying：消息与 compact 都可入队；验证通过后恢复立即执行", () => {
+  it("goalVerifying：消息可入队；验证通过后恢复立即执行", () => {
     const projection = project([
       created(),
       turnStarted(),
@@ -322,7 +249,6 @@ describe("formal-proof 原型 ↔ reducer 事件流投影一致", () => {
         goalIteration: 1,
       }),
     ]);
-    expect(projection.getSnapshot().availability.compact).toEqual({ allowed: true });
     expect(projection.getSnapshot().inputRouting).toEqual({
       mode: "enqueue",
       reasonCode: "goalVerifierAcceptsFutureInput",
@@ -337,12 +263,10 @@ describe("formal-proof 原型 ↔ reducer 事件流投影一致", () => {
         verification: { passed: true, reason: "ok" },
       }),
     );
-    expect(projection.getSnapshot().availability.compact).toEqual({
-      allowed: true,
-    });
+    expect(projection.getSnapshot().inputRouting.mode).toBe("startNow");
   });
 
-  it("held（stop + 残留 queue）：autoDrain=false，输入 choice（heldQueueInputRequiresChoice）", () => {
+  it("held（stop + 残留 queue）：autoDrain=false，输入照常 enqueue（fork 弃用 choice）", () => {
     const projection = project([
       created(),
       turnStarted(),
@@ -374,13 +298,13 @@ describe("formal-proof 原型 ↔ reducer 事件流投影一致", () => {
     // stopKeepsQueueAndDisablesAutoDrain：queue 原样保留 + 不自动消费。
     expect(snapshot.queue.items).toHaveLength(1);
     expect(snapshot.queue.autoDrain).toBe(false);
-    // heldQueueInputRequiresChoice（2026-07-05 裁决）：不静默入队，让用户裁决。
+    // 2026-10-23 bug B：暂停期间输入照常入队（等「继续」按 FIFO 放行），不再弹 choice。
     expect(snapshot.inputRouting).toEqual({
-      mode: "choice",
-      reasonCode: "heldQueueInputRequiresChoice",
+      mode: "enqueue",
+      reasonCode: "heldQueuePausesButAcceptsInput",
     });
 
-    // held 消解路径之一：queue 清空后回到 startNow（choice=clearQueueAndSend 的投影面）。
+    // held 消解路径之一：queue 清空后回到 startNow。
     projection.applyEvent(
       makeEvent(
         SessionEventType.TurnSteerDiscarded,

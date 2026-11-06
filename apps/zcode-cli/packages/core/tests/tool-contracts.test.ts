@@ -112,7 +112,7 @@ const SOURCE_DERIVED_SEND_MESSAGE_DESCRIPTION = [
   '{"to": "agent_<uuid>", "summary": "assign task 1", "message": "start on task #1"}',
   "```",
   "",
-  "Your plain text output is NOT visible to other agents — to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. Refer to local agents by the `agentId` returned in the Agent spawn result. To resume a completed agent, use its `agentId`; it resumes in the background and you'll be notified when it finishes.",
+  "Your plain text output is NOT visible to other agents — to communicate, you MUST call this tool. Messages from agents are delivered automatically; you don't check an inbox. Refer to local agents by the `agentId` returned in the Agent spawn result. To resume an agent that has finished or was stopped, use its `agentId` within the current session; it resumes in the background and you'll be notified when it finishes.",
 ].join("\n");
 
 function getSchemaPath(schema: unknown, path: readonly string[]): unknown {
@@ -490,7 +490,9 @@ describe("tool contract declarations", () => {
     expect(providerOutputSchema).toContain("canReadOutputFile");
     expect(providerOutputSchema).not.toContain("isAsync");
     expect(providerOutputSchema).not.toContain("agentType");
-    expect(providerOutputSchema).not.toContain("childSessionId");
+    // childSessionId 是**有意**透出的（handlers/agent.ts:65/104：与 AgentCompletedOutputSchema /
+    // AgentBackgroundedOutputSchema 对齐，父模型要能看到子会话 id），不再是 runtime-only 字段。
+    expect(providerOutputSchema).toContain("childSessionId");
     expect(providerOutputSchema).not.toContain("backgroundTaskId");
   });
 
@@ -526,6 +528,7 @@ describe("tool contract declarations", () => {
         agentType: "code-reviewer",
         description: "review diff",
         prompt: "review the diff",
+        childSessionId: "sess_done",
         content: [{ type: "text", text: "Found one issue." }],
         totalToolUseCount: 2,
         totalDurationMs: 33,
@@ -550,6 +553,7 @@ describe("tool contract declarations", () => {
         agentType: "code-reviewer",
         description: "review diff",
         prompt: "review the diff",
+        childSessionId: "sess_done",
         content: [{ type: "text", text: "Found one issue." }],
         totalToolUseCount: 2,
         totalDurationMs: 33,
@@ -571,6 +575,7 @@ describe("tool contract declarations", () => {
         agentType: "code-reviewer",
         description: "review diff",
         prompt: "review the diff",
+        childSessionId: "sess_done",
         content: [{ type: "text", text: "" }],
         totalToolUseCount: 0,
         totalDurationMs: 33,

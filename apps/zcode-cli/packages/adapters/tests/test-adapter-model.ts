@@ -9,7 +9,10 @@ import {
 } from "@zcode/contracts";
 import type { TestAiSdkModelAdapter } from "./test-provider-config.js";
 import { createTestModelProperties } from "./test-model-format.js";
-import type { ZhipuAccountMode } from "@zcode/provider";
+
+// FORK（D-4）：`ZhipuAccountMode` 已随 zhipu-account 面删除；这里只需要旧用例传入的
+// 模式字符串来驱动 requestAuth 注入，不再参与 Access Config。
+type ZhipuAccountMode = string;
 
 type TestModelTextRequest = ModelTextRequest & {
   properties?: ModelProperties;

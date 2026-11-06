@@ -1,10 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import {
-  ProviderConfig,
-  ProviderConfigMap,
-  ZhipuAccountAccessConfig,
-  type ModelSelectionView,
-} from "@zcode/provider";
+import type { ModelSelectionView } from "@zcode/provider";
 import { zcodeProtocolMethods } from "@zcode/shared";
 import { V4_METHODS } from "@zcode/shared/zcode-protocol-v4";
 

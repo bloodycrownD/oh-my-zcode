@@ -8,10 +8,8 @@ import {
   ModelPropertiesConfig,
   ProviderApiConfig,
   ProviderConfig,
-  ZhipuAccountAccessConfig,
   type RegistryModelConfig,
   type RegistryProviderConfig,
-  type ZhipuAccountMode,
 } from "@zcode/provider";
 import {
   AiSdkModelAdapter as ProductionAiSdkModelAdapter,
@@ -30,12 +28,19 @@ interface LegacyTestProviderConfig {
   readonly apiKey?: string;
   readonly baseURL?: string;
   readonly createLanguageModel?: (modelId: string) => unknown;
-  readonly accountMode?: ZhipuAccountMode;
+  readonly accountMode?: TestAccountMode;
   readonly headers?: Readonly<Record<string, string>>;
   readonly kind: "anthropic" | "custom" | "openai" | "openai-compatible";
   readonly name?: string;
   readonly providerOptions?: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * FORK（D-4）：账号 Overlay 已随 zhipu-account 计费面整删，产品侧不再有 `ZhipuAccountMode`。
+ * 这里保留旧测试传进来的模式字符串，仅用于驱动「请求期鉴权（requestAuth）」这类仍然 live 的
+ * 链路，不参与 Access Config 构造。
+ */
+type TestAccountMode = string;
 
 interface LegacyTestRegistryConfig extends AiSdkModelExecutionConfig {
   readonly defaultProvider?: string;
@@ -43,7 +48,7 @@ interface LegacyTestRegistryConfig extends AiSdkModelExecutionConfig {
 }
 
 interface TestCreateModelOptions {
-  readonly accountMode?: ZhipuAccountMode;
+  readonly accountMode?: TestAccountMode;
   readonly displayName?: string;
   readonly providerId: string;
   readonly modelId: string;
@@ -75,13 +80,13 @@ export class TestProviderConfigFixture {
     this.execution = new AiSdkModelExecution(this.executionConfig(), this.executionOptions);
   }
 
-  resolveConfig(selection: ModelSelection | string, accountMode?: ZhipuAccountMode) {
+  resolveConfig(selection: ModelSelection | string) {
     const resolvedSelection = parseTestSelection(selection, this.config.defaultProvider);
     const source = this.config.providers[resolvedSelection.providerId];
     if (!source) throw new Error(`Unknown test provider: ${resolvedSelection.providerId}`);
     return {
       modelId: resolvedSelection.modelId,
-      providerConfig: toRegistryProviderConfig(resolvedSelection.providerId, source, accountMode),
+      providerConfig: toRegistryProviderConfig(resolvedSelection.providerId, source),
       providerId: resolvedSelection.providerId,
     };
   }
@@ -126,10 +131,10 @@ export class TestAiSdkModelAdapter extends ProductionAiSdkModelAdapter {
     if ("providerConfig" in options) return super.createModel(options);
     const fixture = this.testProviderConfigs;
     if (!fixture) throw new Error("Test Provider Config fixture is required");
-    const resolved = fixture.resolveConfig(
-      { providerId: options.providerId, modelId: options.modelId },
-      options.accountMode ?? (options.requestDependencies?.requestAuth ? "off-peak" : undefined),
-    );
+    const resolved = fixture.resolveConfig({
+      providerId: options.providerId,
+      modelId: options.modelId,
+    });
     const requestDependencies =
       options.requestDependencies ??
       (options.accountMode === "off-peak"
@@ -239,24 +244,17 @@ function enumOptionMap(mapping: Readonly<Record<string, unknown>>): string {
 function toRegistryProviderConfig(
   providerId: string,
   source: LegacyTestProviderConfig,
-  accountMode?: ZhipuAccountMode,
 ): RegistryProviderConfig {
-  const effectiveAccountMode = accountMode ?? source.accountMode;
   const apiType =
     source.kind === "anthropic"
       ? "anthropic-messages"
       : source.kind === "openai"
         ? "openai-responses"
         : "openai-chat-completions";
+  // FORK（D-4）：Access Config 只保留 api-key；账号模式只影响请求期 requestAuth，
+  // 不再构造 zhipu-account Access Config（该类型已随计费面删除）。
   return new ProviderConfig({
-    access: effectiveAccountMode
-      ? new ZhipuAccountAccessConfig({
-          accountType: "zai",
-          mode: effectiveAccountMode,
-        })
-      : source.apiKey
-        ? new ApiKeyAccessConfig({ apiKey: source.apiKey })
-        : new ApiKeyAccessConfig({ apiKey: "test-api-key" }),
+    access: new ApiKeyAccessConfig({ apiKey: source.apiKey ?? "test-api-key" }),
     api: new ProviderApiConfig({
       baseUrl: source.baseURL ?? "https://adapter.test/v1",
       headers: source.headers,

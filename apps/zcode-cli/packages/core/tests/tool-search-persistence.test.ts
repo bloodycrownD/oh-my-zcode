@@ -5,7 +5,6 @@ import { expect, it } from "vitest";
 import {
   createProjectId,
   createSessionId,
-  createRootTraceContext,
   type Model,
   type ModelRequest,
   type ModelResult,
@@ -231,48 +230,26 @@ it.each([
           (cold as unknown as AgentRuntimeInternal).messageHistory.borrowReadOnlyRuntimeEntries(),
         ),
       ]).toEqual(["WebFetch", "TodoWrite"]);
-      const internals = cold as unknown as AgentRuntimeInternal;
-      const compact = await internals.compactActiveConversation(
-        undefined,
-        createRootTraceContext({ sessionId }),
-        [],
-        {},
-      );
-      expect(compact.outcome).toBe("compacted");
-      const compactRows = await store.messages({ sessionID: sessionId });
-      expect(
-        compactRows
-          .flatMap((row) => row.parts)
-          .find((part) => part.type === "compaction" && part.compactBoundary),
-      ).toMatchObject({
-        compactBoundary: { preCompactDiscoveredTools: ["WebFetch", "TodoWrite"] },
-      });
-      expect([
-        ...collectDiscoveredTools(internals.messageHistory.borrowReadOnlyRuntimeEntries()),
-      ]).toEqual(["WebFetch", "TodoWrite"]);
       await cold.closeBrowserSession();
       store.close();
       store = await createSqliteSessionStore({ dbPath });
+      // FORK：compact 面已删（`compactActiveConversation` / compaction part 不存在）。
+      // 原「compact 后切回 coding plan」的公告去重断言改挂在普通冷恢复分支上：
+      // 重启 + 重新启用 toolSearch 后，续跑的多条请求各自只带 1 条公告，历史里也只留 1 条。
       codingPlan = true;
-      const afterCompact = makeRuntime();
-      await afterCompact.resumeFromStore();
+      const resumed = makeRuntime();
+      await resumed.resumeFromStore();
       const entries = (
-        afterCompact as unknown as AgentRuntimeInternal
+        resumed as unknown as AgentRuntimeInternal
       ).messageHistory.borrowReadOnlyRuntimeEntries();
       expect([...collectDiscoveredTools(entries)]).toEqual(["WebFetch", "TodoWrite"]);
-      expect(
-        entries.some((entry) =>
-          entry.metadata?.compactBoundary?.preCompactDiscoveredTools?.includes("WebFetch"),
-        ),
-      ).toBe(true);
       const coldRequestStart = requests.length;
       continuations = 3;
-      await afterCompact.executeTurn("Continue after compact and provider upgrade.");
+      await resumed.executeTurn("Continue after provider upgrade.");
       expect(requests.at(-1)?.tools?.find((tool) => tool.name === "WebFetch")?.deferLoading).toBe(
         true,
       );
-      expect(JSON.stringify(requests.at(-1)?.messages)).not.toContain("preCompactDiscoveredTools");
-      await afterCompact.executeTurn("Next turn after resumed continuation.");
+      await resumed.executeTurn("Next turn after resumed continuation.");
       expect(
         requests
           .slice(coldRequestStart)
@@ -284,21 +261,11 @@ it.each([
           ),
       ).toEqual([1, 1, 1, 1, 1]);
       expect(
-        (afterCompact as unknown as AgentRuntimeInternal).messageHistory
+        (resumed as unknown as AgentRuntimeInternal).messageHistory
           .toRuntimeEntries()
           .filter((entry) => entry.metadata?.toolSearchAnnouncement),
       ).toHaveLength(1);
-      // 全库只保留 compact 前后的两条真实公告，三次 Continue 和下一轮输入都不能额外落盘。
-      expect(
-        (await store.messages({ sessionID: sessionId }))
-          .flatMap((row) => row.parts)
-          .filter(
-            (part) =>
-              part.type === "text" &&
-              part.text.includes("The following deferred tools are now available via ToolSearch."),
-          ),
-      ).toHaveLength(2);
-      await afterCompact.closeBrowserSession();
+      await resumed.closeBrowserSession();
     } finally {
       store.close();
       await rm(root, { recursive: true, force: true });

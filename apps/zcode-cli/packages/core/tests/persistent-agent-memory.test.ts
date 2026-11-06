@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
@@ -18,6 +18,10 @@ const fixture = readFileSync(
   "utf8",
 ).replace(/\n$/u, "");
 
+/** 记忆根走平台 path 归一；期望值取同一形态，Windows 上才不会比 `\storage` 与 `/storage`。 */
+const p = (posixPath: string): string =>
+  process.platform === "win32" ? posixPath.replaceAll("/", "\\") : posixPath;
+
 const scopeGuidance = JSON.parse(
   readFileSync(
     new URL("./fixtures/memory/custom-agent-scope-guidance.json", import.meta.url),
@@ -32,17 +36,23 @@ describe("persistent custom-agent memory", () => {
     expect(sanitizePersistentAgentMemoryKey("!!!")).toBe("---");
     expect(sanitizePersistentAgentMemoryKey("")).toBe("unknown");
 
-    expect(root("user")).toBe("/storage/agent-memory/reviewer-a-b");
-    expect(root("project")).toBe("/workspace/app/.zcode/agent-memory/reviewer-a-b");
-    expect(root("local")).toBe("/workspace/app/.zcode/agent-memory-local/reviewer-a-b");
+    expect(root("user")).toBe(p("/storage/agent-memory/reviewer-a-b"));
+    expect(root("project")).toBe(
+      join(resolve("/workspace/app"), ".zcode", "agent-memory", "reviewer-a-b"),
+    );
+    expect(root("local")).toBe(
+      join(resolve("/workspace/app"), ".zcode", "agent-memory-local", "reviewer-a-b"),
+    );
   });
 
   it.each(["user", "project", "local"] as const)(
     "renders the exact empty %s-scope provider prompt",
     (scope) => {
       const memoryRoot = root(scope);
+      // fixture 写的是 `<MEMORY_ROOT>/`；产品用平台分隔符渲染，替换时保持同一形态。
+      const sep = process.platform === "win32" ? "\\" : "/";
       const expected = fixture
-        .replace("<MEMORY_ROOT>", memoryRoot)
+        .replace("<MEMORY_ROOT>/", `${memoryRoot}${sep}`)
         .replace("<SCOPE_GUIDANCE>", scopeGuidance[scope]);
 
       expect(
@@ -166,7 +176,7 @@ describe("persistent custom-agent memory", () => {
       workspaceRoot: "/workspace/app",
     });
 
-    expect(loaded?.rootDir).toBe("/storage/agent-memory/reviewer-a-b");
+    expect(loaded?.rootDir).toBe(p("/storage/agent-memory/reviewer-a-b"));
     expect(loaded?.prompt).toContain("# Persistent Agent Memory");
   });
 });

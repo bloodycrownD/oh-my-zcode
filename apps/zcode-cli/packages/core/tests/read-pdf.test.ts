@@ -16,7 +16,9 @@ import { readHandler, readToolEntry } from "../src/tool/handlers/read.js";
 import type { ToolExecutionContext } from "../src/tool/types.js";
 import { createTestRuntimeModel } from "./test-runtime-model.js";
 
-const PDF_PATH = "/tmp/report.pdf";
+// 产品按平台归一 filePath（win32 下 `/tmp/report.pdf` → `\tmp\report.pdf`）；常量取同一形态，
+// 装配与断言就不会在 Windows 上劈叉。
+const PDF_PATH = process.platform === "win32" ? "\\tmp\\report.pdf" : "/tmp/report.pdf";
 
 describe("Read PDF handling", () => {
   it("returns the page summary followed by ordered prepared page images", async () => {

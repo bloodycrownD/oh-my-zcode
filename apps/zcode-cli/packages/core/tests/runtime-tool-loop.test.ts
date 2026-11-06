@@ -77,6 +77,14 @@ type TestBashBackgroundLifecycleExecutionPort = BashBackgroundLifecycleExecution
   ): Promise<BackgroundExecutionSnapshot | undefined>;
 };
 
+/**
+ * 工作目录会被 runtime 按平台归一（win32 下 `/tmp/x` → `\tmp\x`）。测试里当路径常量用，
+ * 断言与装配取同一形态，免得在 Windows 上拿 POSIX 字面量去比归一后的值。
+ */
+function platformCwd(posixPath: string): string {
+  return process.platform === "win32" ? posixPath.replaceAll("/", "\\") : posixPath;
+}
+
 function providerContentToText(content: unknown): string {
   if (typeof content === "string") return content;
   if (Array.isArray(content)) {
@@ -2588,8 +2596,8 @@ describe("AgentRuntime tool loop", () => {
   it("persists successful foreground Bash cwd across tool calls", async () => {
     const sessionId = createSessionId("runtime-bash-cwd-persistence");
     const eventStore = createTestSessionEventStore();
-    const initialCwd = "/tmp/zcode-runtime-initial";
-    const nextCwd = "/tmp/zcode-runtime-initial/next";
+    const initialCwd = platformCwd("/tmp/zcode-runtime-initial");
+    const nextCwd = platformCwd("/tmp/zcode-runtime-initial/next");
     const requests: Parameters<ExecutionPort["run"]>[0][] = [];
     const rootObservations: string[] = [];
     const registry = createToolRegistry();
@@ -2716,8 +2724,8 @@ describe("AgentRuntime tool loop", () => {
   it("resets Bash cwd to workspace root after a successful command leaves the workspace", async () => {
     const sessionId = createSessionId("runtime-bash-cwd-reset-reminder");
     const eventStore = createTestSessionEventStore();
-    const workspaceRoot = "/tmp/zcode-bash-root";
-    const outsideCwd = "/tmp/zcode-bash-outside";
+    const workspaceRoot = platformCwd("/tmp/zcode-bash-root");
+    const outsideCwd = platformCwd("/tmp/zcode-bash-outside");
     const requests: Parameters<ExecutionPort["run"]>[0][] = [];
     let secondRequestMessages: Array<{ content?: unknown }> = [];
     const now = new Date();
@@ -2813,8 +2821,8 @@ describe("AgentRuntime tool loop", () => {
     const sessionId = createSessionId("runtime-bash-cwd-stable-message-root");
     const eventStore = createTestSessionEventStore();
     const sessionStore = new RecordingSessionStore();
-    const initialCwd = "/tmp/zcode-runtime-root";
-    const nextCwd = "/tmp/zcode-runtime-root/subdir";
+    const initialCwd = platformCwd("/tmp/zcode-runtime-root");
+    const nextCwd = platformCwd("/tmp/zcode-runtime-root/subdir");
     const now = new Date();
     const executionPort: ExecutionPort = {
       async run() {
@@ -11738,9 +11746,14 @@ describe("AgentRuntime tool loop", () => {
     const registry = createToolRegistry();
     const artifactStore = new RecordingArtifactStore();
     const sessionStore = new RecordingSessionStore();
+    // 产品按平台归一工作目录与 checkpoint 路径；常量取同一形态，Windows 上才不会
+    // 出现「checkpoint 记的是 \work\src\a.ts、内存文件系统键是 /work/src/a.ts」的假 external_modified。
+    const workspaceDir = platformCwd("/work");
+    const aPath = platformCwd("/work/src/a.ts");
+    const bPath = platformCwd("/work/src/b.ts");
     const fileSystemPort = new MemoryFileSystem({
-      "/work/src/a.ts": "a1\n",
-      "/work/src/b.ts": "b1\n",
+      [aPath]: "a1\n",
+      [bPath]: "b1\n",
     });
     let modelCallCount = 0;
 
@@ -11777,7 +11790,7 @@ describe("AgentRuntime tool loop", () => {
 
     const runtime = createTestAgentRuntime(
       sessionId,
-      { mode: "yolo", workingDirectory: "/work" },
+      { mode: "yolo", workingDirectory: workspaceDir },
       {
         artifactStore,
         eventStore,
@@ -11796,7 +11809,7 @@ describe("AgentRuntime tool loop", () => {
                   {
                     id: "write-a",
                     name: "WriteLike",
-                    input: { path: "/work/src/a.ts", before: "a1\n", after: "a2\n" },
+                    input: { path: aPath, before: "a1\n", after: "a2\n" },
                   },
                 ],
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -11811,7 +11824,7 @@ describe("AgentRuntime tool loop", () => {
                   {
                     id: "write-b",
                     name: "WriteLike",
-                    input: { path: "/work/src/b.ts", before: "b1\n", after: "b2\n" },
+                    input: { path: bPath, before: "b1\n", after: "b2\n" },
                   },
                 ],
                 usage: { inputTokens: 1, outputTokens: 1, totalTokens: 2 },
@@ -11833,8 +11846,8 @@ describe("AgentRuntime tool loop", () => {
       .filter((message) => message.info.role === "assistant")
       .map((message) => message.info.id as MessageId);
     expect(assistants.length).toBeGreaterThanOrEqual(2);
-    expect(fileSystemPort.files.get("/work/src/a.ts")).toBe("a2\n");
-    expect(fileSystemPort.files.get("/work/src/b.ts")).toBe("b2\n");
+    expect(fileSystemPort.files.get(aPath)).toBe("a2\n");
+    expect(fileSystemPort.files.get(bPath)).toBe("b2\n");
 
     const preview = await runtime.previewWorkspaceFileRewind({
       targetMessageIds: assistants.slice(0, 2),
@@ -11843,16 +11856,15 @@ describe("AgentRuntime tool loop", () => {
       targetMessageIds: assistants.slice(0, 2),
     });
 
-    expect(preview.safeFiles.map((file) => file.path).sort()).toEqual([
-      "/work/src/a.ts",
-      "/work/src/b.ts",
-    ]);
+    expect(preview.safeFiles.map((file) => file.path).sort()).toEqual(
+      [aPath, bPath].sort(),
+    );
     expect(applied.applied).toBe(true);
-    expect(fileSystemPort.files.get("/work/src/a.ts")).toBe("a1\n");
-    expect(fileSystemPort.files.get("/work/src/b.ts")).toBe("b1\n");
+    expect(fileSystemPort.files.get(aPath)).toBe("a1\n");
+    expect(fileSystemPort.files.get(bPath)).toBe("b1\n");
 
-    fileSystemPort.files.set("/work/src/a.ts", "a2\n");
-    fileSystemPort.files.set("/work/src/b.ts", "b2\n");
+    fileSystemPort.files.set(aPath, "a2\n");
+    fileSystemPort.files.set(bPath, "b2\n");
     const rejected = await runtime.applyWorkspaceFileRewind({
       targetMessageIds: assistants.slice(0, 2),
       commitAfterApply: async () => {
@@ -11867,8 +11879,8 @@ describe("AgentRuntime tool loop", () => {
         expect.objectContaining({ message: "conversation admission rejected" }),
       ]),
     );
-    expect(fileSystemPort.files.get("/work/src/a.ts")).toBe("a2\n");
-    expect(fileSystemPort.files.get("/work/src/b.ts")).toBe("b2\n");
+    expect(fileSystemPort.files.get(aPath)).toBe("a2\n");
+    expect(fileSystemPort.files.get(bPath)).toBe("b2\n");
   });
 
   // Bugfix 回归：message 目标 fork 曾恢复目标回合自身 checkpoint 的 beforeContent，

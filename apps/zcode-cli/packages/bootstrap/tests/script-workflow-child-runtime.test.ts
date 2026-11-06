@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createNodeFileSystemAdapter } from "@zcode/adapters/fs";
 import { createInMemorySessionEventStore, createSqliteSessionStore } from "@zcode/adapters/storage";
 import { type AgentRuntime, PermissionService, defaultPermissionConfig } from "@zcode/core";
-import { createModelTelemetry } from "@zcode/telemetry";
 import {
   createRootTraceContext,
   createSessionId,
@@ -107,7 +106,6 @@ describe("script workflow child runtime — actor transcript 直播通道", () =
 
   function makeDeps(): ScriptWorkflowAgentRuntimeDeps {
     return {
-      agentTelemetry: createModelTelemetry().agentExecution,
       appOptions: { env: process.env },
       appVersion: "0.0.0-test",
       configResult: {
@@ -364,7 +362,6 @@ describe("script workflow child runtime — 与父会话共享 model factory", (
 
   async function baseDeps(parentRuntime: AgentRuntime): Promise<ScriptWorkflowAgentRuntimeDeps> {
     return {
-      agentTelemetry: createModelTelemetry().agentExecution,
       appOptions: { env: {} },
       appVersion: "0.0.0-test",
       configResult: {
@@ -508,25 +505,14 @@ describe("script workflow child runtime — 对外交互端口由父 runtime 铸
 
   let tempRoot: string;
   let parentRuntime: AgentRuntime;
-  let refreshes: Array<{ providerId: string; routedSessionId?: string }>;
   let permissionRequests: Array<{ sessionId: string; origin?: unknown }>;
 
   beforeEach(async () => {
     tempRoot = await mkdtemp(join(tmpdir(), "zcode-actor-routing-"));
-    refreshes = [];
     permissionRequests = [];
     parentRuntime = createTestAgentRuntime(parentSessionId, { workingDirectory: tempRoot }, {
       eventStore: createInMemorySessionEventStore(),
       fileSystemPort: createNodeFileSystemAdapter(),
-      // 主 runtime 的端口：每次调用报自己的 sessionId；child 拿到的是父 runtime 派生的实例，
-      // 派生层把 sessionId 改写成父会话（core 的 child-client-ports.ts）。
-      providerRuntimeHeadersPort: {
-        shouldRefreshBeforeModelRequest: () => true,
-        async refreshBeforeModelRequest(input) {
-          refreshes.push({ providerId: input.providerId, routedSessionId: input.sessionId });
-          return { headersApplied: true };
-        },
-      },
       modelFactory: routingModelFactory,
       permissionBroker: {
         async requestPermission(request) {
@@ -557,7 +543,6 @@ describe("script workflow child runtime — 对外交互端口由父 runtime 铸
 
   async function makeActorRuntime(): Promise<AgentRuntime> {
     const deps = {
-      agentTelemetry: createModelTelemetry().agentExecution,
       appOptions: { env: process.env },
       appVersion: "0.0.0-test",
       configResult: {
@@ -589,14 +574,10 @@ describe("script workflow child runtime — 对外交互端口由父 runtime 铸
     });
   }
 
-  it("actor 的 provider runtime headers 刷新以父会话为路由身份", async () => {
-    const actorRuntime = await makeActorRuntime();
-    await actorRuntime.executeTurn("go");
-
-    expect(refreshes.length).toBeGreaterThan(0);
-    // 端口入参里的 sessionId 必须是父会话：桌面只订阅父 task 的会话，带子会话去问没人应答。
-    expect(refreshes.every((entry) => entry.routedSessionId === parentSessionId)).toBe(true);
-  });
+  // FORK（D-4）：上游的「actor 的 provider runtime headers 刷新以父会话为路由身份」用例
+  // 依赖已经整条删除的账号面刷新链路——`createRefreshRuntimeHeadersBeforeModelAttempt`
+  // 在本 fork 恒返回 undefined（见 core/src/runtime/methods/model-runtime-headers.ts），
+  // 该断言对应的产品行为不存在，故不再保留。
 
   it("父 runtime 铸造的 permission broker 带父会话身份与子代理 origin", async () => {
     // 这正是 createScriptWorkflowAgentRuntime 装进 actor deps 的那一份（见实现里的
@@ -713,7 +694,6 @@ describe("script workflow child runtime — 子代理经父 broker 请求权限�
     subagentPermissionMode: WorkflowSubagentPermissionMode | undefined,
   ): Promise<AgentRuntime> {
     const deps = {
-      agentTelemetry: createModelTelemetry().agentExecution,
       appOptions: { env: process.env, executionPort: { run: execute } },
       appVersion: "0.0.0-test",
       configResult: {
@@ -1029,7 +1009,6 @@ describe("script workflow child runtime — 子代理的 Browser Use", () => {
     >[0]["browserControlPort"],
   ): Promise<AgentRuntime> {
     const deps = {
-      agentTelemetry: createModelTelemetry().agentExecution,
       appOptions: { env: process.env },
       appVersion: "0.0.0-test",
       configResult: {

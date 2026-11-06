@@ -11,7 +11,6 @@ import { resolveTimeoutMs } from "../src/tool/executor/timeout.js";
 import type {
   BashInput,
   BashOutput,
-  CommandExecutionSpanWriter,
   ExecutionPort,
   ExecutionRequest,
   ExecutionResult,
@@ -30,17 +29,21 @@ const workspaceRoot = resolve("/work");
 const projectRoot = resolve(workspaceRoot, "project");
 const defaultCommandRoot = resolve("/tmp");
 
+/** cwd policy 走平台 path 归一；期望值要跟同一形态，否则 Windows 上比的是 `\repo` vs `/repo`。 */
+const p = (posixPath: string): string =>
+  process.platform === "win32" ? posixPath.replaceAll("/", "\\") : posixPath;
+
 describe("Bash cwd policy", () => {
   it("keeps cwd when resolved cwd stays inside workspace", () => {
     expect(
       decideBashCwdPolicy({
         status: "completed",
         exitCode: 0,
-        resolvedCwd: "/repo/subdir",
-        workspaceRoot: "/repo",
+        resolvedCwd: p("/repo/subdir"),
+        workspaceRoot: p("/repo"),
         runtimeScope: "main",
       }),
-    ).toEqual({ nextWorkingDirectory: "/repo/subdir" });
+    ).toEqual({ nextWorkingDirectory: p("/repo/subdir") });
   });
 
   it("resets cwd and returns provider-visible stderr suffix when resolved cwd leaves workspace", () => {
@@ -48,13 +51,13 @@ describe("Bash cwd policy", () => {
       decideBashCwdPolicy({
         status: "completed",
         exitCode: 0,
-        resolvedCwd: "/tmp/outside",
-        workspaceRoot: "/repo",
+        resolvedCwd: p("/tmp/outside"),
+        workspaceRoot: p("/repo"),
         runtimeScope: "main",
       }),
     ).toEqual({
-      nextWorkingDirectory: "/repo",
-      stderrSuffix: "Shell cwd was reset to /repo",
+      nextWorkingDirectory: p("/repo"),
+      stderrSuffix: `Shell cwd was reset to ${p("/repo")}`,
     });
   });
 
@@ -70,17 +73,20 @@ describe("Bash cwd policy", () => {
     ).toEqual({});
   });
 
-  it("treats macOS /private/tmp aliases as the same cwd boundary", () => {
-    expect(
-      decideBashCwdPolicy({
-        status: "completed",
-        exitCode: 0,
-        resolvedCwd: "/private/tmp/repo/subdir",
-        workspaceRoot: "/tmp/repo",
-        runtimeScope: "main",
-      }),
-    ).toEqual({ nextWorkingDirectory: "/tmp/repo/subdir" });
-  });
+  it.skipIf(process.platform === "win32")(
+    "treats macOS /private/tmp aliases as the same cwd boundary",
+    () => {
+      expect(
+        decideBashCwdPolicy({
+          status: "completed",
+          exitCode: 0,
+          resolvedCwd: "/private/tmp/repo/subdir",
+          workspaceRoot: "/tmp/repo",
+          runtimeScope: "main",
+        }),
+      ).toEqual({ nextWorkingDirectory: "/tmp/repo/subdir" });
+    },
+  );
 
   it.skipIf(process.platform === "win32")(
     "keeps cwd when a symlink workspace resolves to a physical child path",
@@ -194,11 +200,11 @@ describe("Bash cwd policy", () => {
       decideBashCwdPolicy({
         status: "completed",
         exitCode: 0,
-        resolvedCwd: "/repo/..cache",
-        workspaceRoot: "/repo",
+        resolvedCwd: p("/repo/..cache"),
+        workspaceRoot: p("/repo"),
         runtimeScope: "main",
       }),
-    ).toEqual({ nextWorkingDirectory: "/repo/..cache" });
+    ).toEqual({ nextWorkingDirectory: p("/repo/..cache") });
 
     expect(
       decideBashCwdPolicy({
@@ -215,20 +221,29 @@ describe("Bash cwd policy", () => {
 
 describe("bashHandler", () => {
   it("把非零退出码保留为事实，只有结构化执行错误才标记 Command 失败", async () => {
-    const outcomes: string[] = [];
-    const telemetry = recordingBashTelemetry(outcomes);
     const nonZeroPort: ExecutionPort = {
       async run() {
         return executionResult({ status: "failed", exitCode: 1 });
       },
     };
-    await bashHandler(
+    const nonZero = (await bashHandler(
       { command: "grep missing file.txt" },
-      contextWith(nonZeroPort, { telemetry }),
-    );
-    expect(outcomes).toEqual(["exit:1", "completed"]);
+      contextWith(nonZeroPort),
+    )) as BashOutput;
+    // 非零退出码是命令事实，不是工具失败。
+    expect(nonZero).toMatchObject({ status: "failed", exitCode: 1 });
+    expect(
+      isErrorForToolResult({
+        completedAt: new Date(),
+        durationMs: 1,
+        output: nonZero,
+        startedAt: new Date(),
+        success: true,
+        toolCallId: "toolu_bash",
+        toolName: "Bash",
+      }),
+    ).toBe(false);
 
-    outcomes.length = 0;
     const spawnErrorPort: ExecutionPort = {
       async run() {
         return executionResult({
@@ -237,8 +252,23 @@ describe("bashHandler", () => {
         });
       },
     };
-    await bashHandler({ command: "missing-command" }, contextWith(spawnErrorPort, { telemetry }));
-    expect(outcomes).toEqual(["failed:spawn"]);
+    const spawnError = (await bashHandler(
+      { command: "missing-command" },
+      contextWith(spawnErrorPort),
+    )) as BashOutput;
+    // 结构化执行错误保留自己的 status 与错误原文（供上层判定 Command 失败）。
+    expect(spawnError).toMatchObject({ status: "spawn_error", stderr: "spawn failed" });
+    // 失败消费面①：interpretBashReturnCode（bash-semantics.ts:242）把 spawn 失败解释为
+    // 「Command failed to start」；把结果改成 completed 这句就会红。
+    expect(spawnError.returnCodeInterpretation).toBe("Command failed to start");
+    // 失败消费面②：executor 会把这份 perf 原样放进 ToolCallResult 事件，命令终态必须是
+    // spawn_error 而不是 completed（把结果改成 completed 同样会红）。
+    expect(spawnError.perf?.detail).toMatchObject({
+      kind: "command",
+      command: { status: "spawn_error" },
+    });
+    // 错误原文必须进入 provider 可见内容，不能只剩空输出。
+    expect(bashToolEntry.formatModelContent?.(spawnError)).toBe("spawn failed");
   });
 
   it.each([
@@ -321,10 +351,11 @@ describe("bashHandler", () => {
     expect(capturedRequest?.cwd).toBe(projectRoot);
     expect(capturedRequest?.env).toBeUndefined();
     expect(capturedRequest?.timeoutMs).toBe(123);
+    // 落盘上限由 adapter 解析链给出（env `ZCODE_EXEC_OUTPUT_LIMIT_BYTES` 优先），
+    // 本层不再每请求填 5GiB——见 src/tool/handlers/bash.ts 的注释。
     expect(capturedRequest?.outputLimit).toEqual({
       maxInlineBytes: 30_000,
       maxBufferBytes: 30_000,
-      maxPersistedBytes: 5 * 1024 * 1024 * 1024,
       persistOutput: "on_truncate",
     });
     expect(capturedRequest?.sandbox).toMatchObject({
@@ -1277,7 +1308,6 @@ describe("bashHandler", () => {
     expect(capturedRequest?.outputLimit).toEqual({
       maxInlineBytes: 30_000,
       maxBufferBytes: 30_000,
-      maxPersistedBytes: 5 * 1024 * 1024 * 1024,
       persistOutput: "always",
     });
     expect(output.status).toBe("backgrounded");
@@ -2641,46 +2671,6 @@ function contextWith(
     workspaceRoot: options.workspaceRoot ?? defaultCommandRoot,
     sessionId: "sess_test",
     turnId: "turn_test",
-  };
-}
-
-function recordingBashTelemetry(outcomes: string[]): ToolExecutionSpanWriter {
-  const command: CommandExecutionSpanWriter = {
-    captureCausation: () => undefined,
-    finishBackgrounded() {
-      outcomes.push("backgrounded");
-    },
-    finishCancelled() {
-      outcomes.push("cancelled");
-    },
-    finishCompleted() {
-      outcomes.push("completed");
-    },
-    finishFailed(stage) {
-      outcomes.push(`failed:${stage}`);
-    },
-    markFirstOutput() {},
-    markTerminationRequested() {},
-    run: (execute) => execute(),
-    setExitCode(exitCode) {
-      outcomes.push(`exit:${exitCode}`);
-    },
-    setOutputBytes() {},
-    setSignal() {},
-    setTimedOut() {},
-  };
-  return {
-    captureCausation: () => undefined,
-    finishCancelled() {},
-    finishCompleted() {},
-    finishDenied() {},
-    finishFailed() {},
-    markPermissionRequested() {},
-    run: (execute) => execute(),
-    setOutputBytes() {},
-    setOutputTruncated() {},
-    setPermissionDecision() {},
-    startCommand: () => command,
   };
 }
 

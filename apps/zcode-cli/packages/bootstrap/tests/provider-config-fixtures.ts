@@ -2,10 +2,8 @@ import {
   ApiKeyAccessConfig,
   ProviderApiConfig,
   ProviderConfig,
-  ZhipuAccountAccessConfig,
   type ModelId,
   type ProviderApiType,
-  type ZhipuAccountMode,
 } from "@zcode/provider";
 
 interface CommonProviderFixtureInput {
@@ -33,25 +31,8 @@ export function createApiKeyProviderConfig(
   });
 }
 
-export function createAccountProviderConfig(
-  input: CommonProviderFixtureInput & {
-    readonly family?: "zai" | "bigmodel" | null;
-    readonly mode?: ZhipuAccountMode | null;
-  } = {},
-): ProviderConfig {
-  return new ProviderConfig({
-    label: input.label,
-    access: new ZhipuAccountAccessConfig({
-      family: input.family ?? "zai",
-      mode: input.mode ?? "individual-coding-plan",
-    }),
-    api: createProviderApi(input),
-    builtinModelIds: input.models,
-    personalModelIds: [],
-    enabled: input.enabled ?? true,
-    visibility: "visible",
-  });
-}
+// FORK（D-4）：账号 Overlay 已随 zhipu-account 计费面整删，本夹具不再提供
+// createAccountProviderConfig；测试统一走 api-key 形态。
 
 function createProviderApi(input: CommonProviderFixtureInput): ProviderApiConfig | undefined {
   return input.apiFormat !== undefined || input.baseURL !== undefined || input.headers !== undefined
