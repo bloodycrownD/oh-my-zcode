@@ -99,21 +99,12 @@ describe("AiSdkModelAdapter Provider Config creation", () => {
       { apiFormat: "openai-responses" },
     ]);
     expect(model.options).toEqual({ maxOutputTokens: 128_000, reasoningLevel: "max" });
-    expect(
-      statusEvents
-        .filter((event) => event.type === "model_request_started")
-        .map((event) => event.modelCall.reasoning),
-    ).toEqual([
-      expect.objectContaining({
-        requestedControl: "provider_default",
-        requestedLevel: "max",
-        requestedState: "provider_default",
-      }),
-      expect.objectContaining({
-        requestedControl: "provider_default",
-        requestedLevel: "none",
-        requestedState: "provider_default",
-      }),
-    ]);
+    // `modelCall` 观测字段已随遥测链路从 contracts 移除（d6fc8e61 删掉
+    // ModelNetworkStatusBase.modelCall，reasoning 控制信息不再进状态事件）；
+    // 这里只钉住 adapter 级 statusSink 在两个请求上都实际收到了事件。
+    expect(statusEvents.filter((event) => event.type === "model_request_started")).toHaveLength(2);
+    expect(statusEvents.filter((event) => event.type === "model_request_completed")).toHaveLength(
+      2,
+    );
   });
 });

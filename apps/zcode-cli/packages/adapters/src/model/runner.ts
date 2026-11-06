@@ -14,6 +14,7 @@ import type {
   ModelOptions,
   ModelRequestAuth,
   ModelRequestDependencies,
+  ModelStatusSink,
   ModelStreamEvent,
   ModelTextResult,
 } from "@zcode/contracts";
@@ -65,6 +66,7 @@ export interface AiSdkModelAdapterOptions {
   debugDir?: string;
   logger?: Logger;
   retry?: AiSdkModelRetryOptions;
+  statusSink?: ModelStatusSink;
   streamIdleTimeoutMs?: number;
   modelIoFullRetentionEnabled?: boolean;
 }
@@ -86,6 +88,11 @@ export class AiSdkModelAdapter {
   private readonly debugDir?: string;
   private readonly logger?: Logger;
   private readonly retry: ResolvedAiSdkModelRetryOptions;
+  /** 对外出口：叶子只有一个时就是叶子本身，多个时是 `mergeStatusSinks` 合成的 fan-out。 */
+  private statusSink?: ModelStatusSink;
+  /** 叶子集合只增不减；同一实例重复加入按 Set 身份去重，避免嵌套合成导致双投。 */
+  private readonly statusSinkLeaves: ModelStatusSink[] = [];
+  private readonly statusSinkLeafIds = new Set<ModelStatusSink>();
   private readonly streamIdleTimeoutMs: number;
   private modelIoFullRetentionEnabled: boolean;
 
@@ -111,12 +118,35 @@ export class AiSdkModelAdapter {
     this.debugDir = options.debugDir;
     this.logger = options.logger;
     this.retry = resolveAiSdkModelRetryOptions(options.retry, this.env);
+    if (options.statusSink) this.addStatusSinkLeaf(options.statusSink);
     this.streamIdleTimeoutMs = options.streamIdleTimeoutMs ?? DEFAULT_MODEL_STREAM_IDLE_TIMEOUT_MS;
     this.modelIoFullRetentionEnabled = options.modelIoFullRetentionEnabled ?? false;
   }
 
   setModelIoFullRetentionEnabled(enabled: boolean): void {
     this.modelIoFullRetentionEnabled = enabled;
+  }
+
+  /**
+   * 追加一个状态出口：与已有 sink 并行投递，任一失败不影响另一个。
+   *
+   * 生产遥测已按 119113f2 移除：`create-app` 不再装配进程级 sink，
+   * `CreateModelAdapterBaseOptions` / `bootstrap/src/model-factory.ts` 也没有 `statusSink` 透传入口，
+   * 因此本方法当前的生产调用数为 0，仅供测试注入（fault-matrix 的 statusEvents 断言需要多条出口）。
+   * 恢复生产遥测时必须连同 create-app 的装配一起改，不能只在这里补一个调用。
+   */
+  addStatusSink(sink: ModelStatusSink): void {
+    // 同一实例重复添加只投一次：身份去重挡在叶子集合这一层，嵌套合成对象会让
+    // `runner-status` 的 `requestStatusSink !== statusSink` 也看不穿。
+    if (this.statusSinkLeafIds.has(sink)) return;
+    this.addStatusSinkLeaf(sink);
+  }
+
+  /** 登记叶子并重建无状态 fan-out：叶子只增不减，所以发布器每次重建即与集合一致。 */
+  private addStatusSinkLeaf(sink: ModelStatusSink): void {
+    this.statusSinkLeafIds.add(sink);
+    this.statusSinkLeaves.push(sink);
+    this.statusSink = mergeStatusSinks(this.statusSinkLeaves);
   }
 
   createModel(options: CreateAiSdkModelOptions): Model {
@@ -236,6 +266,7 @@ export class AiSdkModelAdapter {
       resolved,
       retry: resolveRetryOptionsForBudget(this.retry, projectedRequest.modelRetryBudget),
       runtime: this.runtime,
+      statusSink: this.statusSink,
       modelIoFullRetentionEnabled: this.modelIoFullRetentionEnabled,
     });
   }
@@ -256,6 +287,7 @@ export class AiSdkModelAdapter {
       // single-attempt 预算（带 selectionFallback 的执行作用域句柄）把 maxAttempts 收敛为 1。
       retry: resolveRetryOptionsForBudget(this.retry, projectedRequest.modelRetryBudget),
       runtime: this.runtime,
+      statusSink: this.statusSink,
       streamIdleTimeoutMs: this.streamIdleTimeoutMs,
       modelIoFullRetentionEnabled: this.modelIoFullRetentionEnabled,
     });
@@ -296,4 +328,48 @@ function projectRequestHistory(
     modelId: resolved.modelId,
   });
   return messages === request.messages ? request : { ...request, messages };
+}
+
+/**
+ * 由叶子集合构造无状态 fan-out 出口：发布器只持有构造时的叶子快照，不累积任何跨事件状态。
+ * 叶子只有一个时直接返回叶子本身——`runner-status` 用 `requestStatusSink !== statusSink` 做身份去重，
+ * 套一层合成对象会让「同一 sink 既是 adapter 出口又是 request 出口」投递两次。
+ */
+function mergeStatusSinks(leaves: readonly ModelStatusSink[]): ModelStatusSink {
+  if (leaves.length === 1) return leaves[0];
+  const targets = [...leaves];
+  return {
+    async publish(event) {
+      await deliverToStatusSinks(targets, (leaf) => leaf.publish(event));
+    },
+    // 与 `runner-status` 同一条纪律：有 `publishFailure` 的 sink 拿原始异常，
+    // 没有的退回 `publish(event)`，不让原始异常污染只消费事件的出口。
+    async publishFailure(event, error) {
+      await deliverToStatusSinks(targets, (leaf) =>
+        leaf.publishFailure ? leaf.publishFailure(event, error) : leaf.publish(event),
+      );
+    },
+  };
+}
+
+/**
+ * 逐 sink 投递并用 `allSettled` 隔离：任一 sink 抛错不影响其它 sink 的投递。
+ * 全部失败时没有可代表的单一原因，用 AggregateError 汇总上抛（调用方只记一条 warn）；
+ * 部分失败保留第一个 rejection 的原始异常，不额外包一层。
+ */
+async function deliverToStatusSinks(
+  leaves: readonly ModelStatusSink[],
+  deliver: (leaf: ModelStatusSink) => void | Promise<void>,
+): Promise<void> {
+  const results = await Promise.allSettled(
+    leaves.map((leaf) => Promise.resolve().then(() => deliver(leaf))),
+  );
+  const failures = results
+    .filter((result): result is PromiseRejectedResult => result.status === "rejected")
+    .map((result) => result.reason);
+  if (failures.length === 0) return;
+  if (failures.length === leaves.length) {
+    throw new AggregateError(failures, "Model status sink 全部投递失败");
+  }
+  throw failures[0];
 }
