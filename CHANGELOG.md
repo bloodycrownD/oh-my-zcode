@@ -1,3 +1,22 @@
+## [1.1.4](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.3...v1.1.4) (2026-11-06)
+
+这一版是三件事：MCP 工具在会话里「看不见」的根因、workflow 挂死的重试风暴、以及权限闸门上一组「该拦的没拦」的加固。
+
+### 修复
+
+- **MCP 工具不再在会话里丢失**。会话里看不到 `web-search-prime` 这类 MCP 工具，根因不在 server 也不在配置：`initializeMcp` 是在 `await startMcpStartup()` **之后**才读 `toolListRevision()`，而背景连接在这段 await 里已经把 revision +1，读完就置位 latch，之后的 `refreshMcpToolsIfChanged` 只看 revision 变化 → 永久 no-op。实测该会话 12 个 server 全部 `connecting` 时拿到空快照、注册 0 个工具，当天 `mcp.tools.reregistered` 计数为 0。现在基线在**发起连接之前**采样，晚到的 bump 在下一回合边界仍可见并补注册；`refreshMcpServers` 是同一 bug 的另一半，同步修掉。
+- **子代理能看到父会话后到的 MCP 工具**。借用端口原先把 `listTools()`/`status()` 冻结在创建时，父端口后到的工具永远进不来（只补 revision 没用）。现在每次实时向父端口取，作用域仍是创建时的 allowlist/deny——放开的只有工具集，不是可见范围。
+- **workflow 不再无限重试到挂死**。`AiSdkModelAdapter` 的 `statusSink` 字段、`addStatusSink()` 与两处向 `runGenerateText`/`runStreamText` 的转发在合并上游时整段丢失，而 runner 一直在等 `input.statusSink`，于是 `model_retry_scheduled` 既发不出去、重试也没有观测点，本地端口一断就是 316MB/60s 的输出风暴。顺带修 `addStatusSink` 的三个缺陷：合成 sink 缺 `publishFailure`、多 sink 串行 publish 一个抛错会掐断其余（改 `allSettled` 隔离）、同一 sink 重复添加会重复投递。
+- **Plan 模式不再把「只读但需审批」的工具直接放行**。Plan 从「比基础模式更宽」改成「只在当前模式之上再收紧」：非 destructive MCP 改 ask 且不给「始终允许」，guarded 下的危险命令直接 deny（审批不能解除 Plan 限制）。同时补上 guarded 的 `mode` 透传——此前 `mode === "guarded"` 永不成立，`rm -rf`、`git clean -f` 这类危险命令在 guarded 模式下**根本不弹确认窗**。
+- **PreToolUse hook 不能再替用户应答单次确认**，也不能拿改写前的批准去执行改写后的输入：改写后重判为 deny 一律 fail-closed，重判为 ask 则按新输入重问（新 requestId，最多一次）；doom 循环的会话豁免此前因谓词恒 false 是死代码，现已生效。
+- **`sed` 只读判定从黑名单改为白名单**。原先只挡已知危险参数，`sed 's/x/y/e'`（执行命令）、`1e whoami`、`s///w`（写文件）都能被当只读放行。现在只认完整安全语法。**注意这是有意收窄**：`sed 's/a/b/' file`（不带 `-i`、只写 stdout）也要确认了；要免确认请用 `sed -n 's/a/b/p' file`。
+
+### 测试
+
+- 清掉 33 个测「已不存在功能」的用例（compact、off-peak、账号通道、遥测端口——这些能力在更早的版本里已经移除，用例一直红着），并**恢复 7 个被误删但产品路径仍活的用例**（`script-workflow-child-runtime`、`process-provider-registry-runtime`、两条 conversation-telemetry、`formal-proof-consistency`、两条 tool-search）。误删的诱因是「引用了不存在的符号」，实际缺的是几个账号符号而不是整个包——这个判断错误已写进 `SUMMARY.md`。
+- 权限面 14 个文件全绿（guarded-approval 117、permission-responder-race 19、permission-response 4），每条新断言都做过「改坏产品代码 → 确实红 → 逐字节还原」的红验证。两个安全脚本接入根 `test:v4-perf`（`sed` 那条含在临时目录跑真实 `sed` 的端到端探针）。
+- `tsc -b` 五个包 0 错。bootstrap 全量仍有 60 个文件红，抽样用 `git stash` 回退到 HEAD 复跑确认全部既有——集中在已删功能与 Windows 环境差异，不属本版引入。
+
 ## [1.1.3](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.1.2...v1.1.3) (2026-11-03)
 
 ### 升级与迁移
