@@ -77,6 +77,13 @@ import {
 } from "./timeout.js";
 
 const DEFAULT_MCP_TIMEOUT_MS = 30_000;
+/**
+ * `failed` 状态懒重连的指数退避（回移 3ef91590）：从 1s 起每次失败翻倍、封顶 30s。
+ * server 短暂重启（systemd 几秒）后下一次调用就能重试成功；持续不可达的 server
+ * 重试频率快速收敛到半分钟一次，不会让每次工具调用都全额等待一次连接超时。
+ */
+const MCP_FAILED_RECONNECT_BACKOFF_INITIAL_MS = 1_000;
+const MCP_FAILED_RECONNECT_BACKOFF_MAX_MS = 30_000;
 // 存活探测只允许占用很短的时间：它挂在设置页刷新的同步路径上，超时即判死并触发重连。
 const MCP_PING_TIMEOUT_MS = 5_000;
 const MAX_MCP_VERSION_PROBE_TIMEOUT_MS = 5_000;
@@ -152,6 +159,14 @@ class NodeMcpAdapter implements McpPort {
   private readonly connectionGenerations = new Map<string, number>();
   private credentialStore?: SharedZCodeCredentialStore;
   private readonly records = new Map<string, McpServerRecord>();
+  /**
+   * `failed` 状态懒重连的退避状态（回移 3ef91590）：serverName → 上次尝试时间与连续失败次数。
+   * 连接成功后清零（见 openServerConnection 里的 records.set）。
+   */
+  private readonly failedReconnectState = new Map<
+    string,
+    { attempts: number; lastAttemptAt: number }
+  >();
   private readonly workingDirectory?: string;
 
   constructor(options: CreateMcpAdapterOptions) {
@@ -385,14 +400,39 @@ class NodeMcpAdapter implements McpPort {
     // 连接只在 session 创建时建立一次，session resume 也不重建，该会话的工具从此永远失败。
     // 这里在调用前对已断连的 record 重连一次；server 进程内状态（如 REPL 变量）不可恢复，
     // 但工具本身恢复可用。
-    const disconnected = this.records.get(request.serverName);
-    if (disconnected && disconnected.status.status === "disconnected") {
-      await waitWithinMcpDeadline(
-        this.reconnectForCall(request.serverName, disconnected.config),
-        deadline,
-        timeoutMessage,
-        options.signal,
-      );
+    //
+    // 回移 3ef91590：此前只认 "disconnected"——重连失败一次落到 "failed" 后该会话永久死亡
+    // （没有任何自动或手动路径再试，只有新会话能恢复）。failed 也走重连，配指数退避防止
+    // server 长时间不可达时每次工具调用都全额重试；disconnected（onclose/传输错误明确翻转）
+    // 保持原有的立即重连语义。
+    const reconnectable = this.records.get(request.serverName);
+    if (
+      reconnectable &&
+      (reconnectable.status.status === "disconnected" ||
+        reconnectable.status.status === "failed")
+    ) {
+      const state = this.failedReconnectState.get(request.serverName);
+      const backoffMs = state
+        ? Math.min(
+            MCP_FAILED_RECONNECT_BACKOFF_INITIAL_MS * 2 ** state.attempts,
+            MCP_FAILED_RECONNECT_BACKOFF_MAX_MS,
+          )
+        : 0;
+      const withinBackoff = state !== undefined && Date.now() - state.lastAttemptAt < backoffMs;
+      if (reconnectable.status.status === "disconnected" || !withinBackoff) {
+        if (reconnectable.status.status === "failed") {
+          this.failedReconnectState.set(request.serverName, {
+            attempts: (state?.attempts ?? -1) + 1,
+            lastAttemptAt: Date.now(),
+          });
+        }
+        await waitWithinMcpDeadline(
+          this.reconnectForCall(request.serverName, reconnectable.config),
+          deadline,
+          timeoutMessage,
+          options.signal,
+        );
+      }
     }
 
     const record = this.records.get(request.serverName);
@@ -865,6 +905,7 @@ class NodeMcpAdapter implements McpPort {
         await this.closeClientAndTransport(name, client, transport);
         return this.records.get(name)?.status ?? status;
       }
+      const previousStatus = this.records.get(name)?.status.status;
       this.records.set(name, {
         client,
         config,
@@ -872,6 +913,12 @@ class NodeMcpAdapter implements McpPort {
         tools,
         transport,
       });
+      // 懒重连成功（含后台完成的重连）：清零 failed 退避计数，下次失败从头退避。
+      // 1.0.x 没有 toolListRevision，core 侧靠「status 变化 → 下一回合补注册」发现新工具，
+      // 所以这里只需要把状态落对，不需要额外的 revision 信号。
+      if (previousStatus !== "connected") {
+        this.failedReconnectState.delete(name);
+      }
       const mcpTransportPid = getStdioTransportPid(transport);
       const mcpProcessIdentity =
         mcpTransportPid != null && this.connectionContext
@@ -916,6 +963,38 @@ class NodeMcpAdapter implements McpPort {
           });
         }
       };
+      // 回移 3ef91590：HTTP/SSE transport 的断流只走 SDK 内部重连与 transport.onerror，
+      // 永远不会派发 client.onclose（后者仅在显式 close() 时触发）。不挂 onerror 时
+      // record 会一直停在 "connected"，懒重连分支永远进不去，会话内工具永久失效。
+      // 这里把传输级错误显式翻转成 disconnected（不换 generation——transport 可能只是
+      // SSE 读流断了、POST 仍可用，真正死亡由下次调用前的重连路径判定）。
+      if (config.type !== "stdio") {
+        (
+          transport as {
+            onerror?: ((error: unknown) => void) | undefined;
+          }
+        ).onerror = (error) => {
+          if (!this.isCurrentConnection(name, generation)) return;
+          const current = this.records.get(name);
+          if (!current || current.client !== client) return;
+          if (current.status.status === "disconnected") return;
+          const message =
+            error instanceof Error ? error.message : String(error ?? "transport error");
+          current.status = this.createStatus(current.config, "disconnected", {
+            error: message,
+            failureKind: "unexpected_disconnect",
+          });
+          this.logger?.warn("MCP HTTP transport error; marked disconnected", {
+            ...this.connectionContext,
+            error: message,
+            event: "mcp.server.connection_lost",
+            mcpServerName: name,
+            ...(mcpTransportPid != null ? { mcpTransportPid } : {}),
+            status: "failed",
+            transport: current.config.type,
+          });
+        };
+      }
       // 此前连接日志只记录 transport，auto 协商后无法判断实际走 modern 还是 legacy。
       // 同时记录配置策略和 SDK 握手结果，避免把 `auto` 误当成最终协议版本。
       // 连接池上下文和 stdio transport PID 过去未进入同一事件，无法关联 session、
@@ -1303,6 +1382,13 @@ class NodeMcpAdapter implements McpPort {
     const mcpTransportPid = getStdioTransportPid(transport);
     // 主动关闭前先摘掉 connection_lost 监听，避免正常回收被误报为意外断连。
     if (client) client.onclose = undefined;
+    if (transport) {
+      (
+        transport as {
+          onerror?: ((error: unknown) => void) | undefined;
+        }
+      ).onerror = undefined;
+    }
     // MCP SDK close 只保证直接 stdio 子进程退出，npx/npm wrapper 拉起的 MCP server
     // 或 chrome-devtools-mcp watchdog 可能残留；这里先按进程树显式回收，再走 SDK close 清理协议状态。
     await this.terminateStdioProcessTree(name, transport);

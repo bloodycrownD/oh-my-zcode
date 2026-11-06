@@ -126,6 +126,11 @@ export interface AgentRuntimeInternal
   mcpToolSettlePending?: boolean;
   /** 已补注册次数，避免长期 connecting 的 server 每回合都跑一次工具面 diff。 */
   mcpToolSettleAttempts?: number;
+  /**
+   * 上次观测到的 `serverName:status` 指纹。断开/重连会改变指纹，据此重新武装补注册——
+   * 1.0.x 没有 toolListRevision，这是「重连后工具要重新注册」的替代信号。
+   */
+  mcpToolStatusSignature?: string;
   subagentPort?: SubagentPort;
   dynamicWorkflowRunPort?: DynamicWorkflowRunPort;
   modelCatalogPort?: ModelCatalogPort;

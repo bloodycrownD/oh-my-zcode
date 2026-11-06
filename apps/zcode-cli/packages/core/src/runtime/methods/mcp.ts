@@ -35,6 +35,19 @@ function mcpSnapshotStillConnecting(
 }
 
 /**
+ * `serverName:status` 指纹（回移 3ef91590 的替代品）。
+ *
+ * 1.1.x 靠 adapter 的 `toolListRevision` 让 core 发现「工具面变了」；1.0.x 没有这个信号，
+ * 于是用连接状态指纹：断开、重连成功、被停用都会改变指纹，据此重新武装一次补注册。
+ */
+function mcpStatusSignature(statuses: Record<string, { status: string }>): string {
+  return Object.entries(statuses)
+    .map(([name, status]) => `${name}:${status.status}`)
+    .sort()
+    .join("|");
+}
+
+/**
  * 只有同时携带 resolver 注入的官方 plugin id 和本进程私有 authority 的 server 才能共享
  * Computer Use 项目授权。server 名、tool 名和 manifest env 都可被第三方仿造，不能单独作为信任依据。
  */
@@ -210,6 +223,7 @@ async function settleMcpTools(
   try {
     const [statuses, tools] = await Promise.all([mcpPort.status(), mcpPort.listTools()]);
     const snapshot: McpConnectionSnapshot = { statuses, tools };
+    this.mcpToolStatusSignature = mcpStatusSignature(statuses);
     const { registered } = applyMcpToolSurface.call(this, snapshot, servers, { replace: false });
     const stillConnecting = mcpSnapshotStillConnecting(snapshot, serverCount);
     this.mcpToolSettlePending = stillConnecting && attempts < MCP_TOOL_SETTLE_MAX_ATTEMPTS;
@@ -238,12 +252,52 @@ async function settleMcpTools(
   }
 }
 
+/**
+ * 已落定之后，只在连接状态指纹变化时才重新武装补注册（回移 3ef91590 的 core 侧等价物）。
+ *
+ * 场景：会话中途 server 掉线 → adapter 把 record 翻成 failed/disconnected（或 transport 报错
+ * 直接翻转），下次工具调用前的懒重连成功后 record.tools 已刷新。1.0.x 没有 revision 信号，
+ * 这里用状态指纹发现「连接面变了」，然后补一次工具面 diff，把重连后回来的工具重新注册上。
+ *
+ * 成本：每回合一次 status()（adapter 侧是内存读取）。健康且指纹不变时完全不碰工具面。
+ */
+async function rearmSettleAfterStatusChange(
+  this: AgentRuntimeInternal,
+  traceContext: TraceContext,
+): Promise<void> {
+  const mcpPort = this.mcpPort;
+  if (!mcpPort) return;
+  if (Object.keys(this.config.mcp?.servers ?? {}).length === 0) return;
+
+  let signature: string;
+  try {
+    signature = mcpStatusSignature(await mcpPort.status());
+  } catch {
+    // 状态读取失败不影响本回合；下一回合边界再判。
+    return;
+  }
+  if (this.mcpToolStatusSignature === undefined) {
+    this.mcpToolStatusSignature = signature;
+    return;
+  }
+  if (signature === this.mcpToolStatusSignature) return;
+
+  this.mcpToolStatusSignature = signature;
+  this.mcpToolSettleAttempts = 0;
+  this.mcpToolSettlePending = true;
+  await settleMcpTools.call(this, traceContext);
+}
+
 export async function initializeMcp(
   this: AgentRuntimeInternal,
   traceContext: TraceContext,
 ): Promise<void> {
   if (this.mcpToolsRegistered) {
-    if (this.mcpToolSettlePending) await settleMcpTools.call(this, traceContext);
+    if (this.mcpToolSettlePending) {
+      await settleMcpTools.call(this, traceContext);
+      return;
+    }
+    await rearmSettleAfterStatusChange.call(this, traceContext);
     return;
   }
 
@@ -258,6 +312,7 @@ export async function initializeMcp(
 
   try {
     const snapshot = await startup;
+    this.mcpToolStatusSignature = mcpStatusSignature(snapshot.statuses ?? {});
     const { registered } = applyMcpToolSurface.call(this, snapshot, servers, { replace: false });
     // 快照返回时还有 server 停在 connecting：工具面不是终态，交给下一回合补注册。
     this.mcpToolSettlePending = mcpSnapshotStillConnecting(snapshot, serverCount);
@@ -328,6 +383,10 @@ export async function refreshMcpServers(
 
   const snapshot = await this.mcpPort
     .connectConfiguredServers(servers, {
+      // 回移 3ef91590：热刷新此前不带 revalidate——连接池对已有 entry 直接返回首次连接那个
+      // 早已 resolve 的 promise（可能早已 failed），刷新实际是 no-op；带 revalidate 才会在
+      // 同一 entry 上探测并原地重连。
+      revalidate: true,
       oauthAuthorizationTimeoutMs: MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS,
       trace: effectiveTrace,
       workingDirectory: this.workingDirectory,

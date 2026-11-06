@@ -52,6 +52,8 @@ function createHarness({ servers, settleSnapshots, startupSnapshot }) {
   let currentSnapshot = null;
   let connectSnapshot = startupSnapshot;
   let settleIndex = 0;
+  let statusOverride = null;
+  let toolsOverride = null;
 
   // status() 与 listTools() 属于同一轮快照：Promise.all 的数组字面量从左到右求值，
   // status() 先跑并推进索引，listTools() 复用同一份（测试专用简化，不是产品语义）。
@@ -96,12 +98,15 @@ function createHarness({ servers, settleSnapshots, startupSnapshot }) {
       },
       async listTools() {
         calls.listTools += 1;
+        if (toolsOverride) return toolsOverride;
         const snapshot = currentSnapshot ?? advance();
         return snapshot.tools;
       },
       async status() {
         calls.status += 1;
-        return advance().statuses;
+        if (statusOverride) return statusOverride;
+        const snapshot = currentSnapshot ?? advance();
+        return snapshot.statuses;
       },
     },
     mcpRegisteredToolNames: new Set(),
@@ -137,6 +142,10 @@ function createHarness({ servers, settleSnapshots, startupSnapshot }) {
     runtime,
     setConnectSnapshot(snapshot) {
       connectSnapshot = snapshot;
+    },
+    setMcpState({ statuses, tools }) {
+      if (statuses) statusOverride = statuses;
+      if (tools) toolsOverride = tools;
     },
   };
 }
@@ -290,4 +299,39 @@ test("设置页热刷新仍是 replace 语义，并清掉补注册的残留状�
   assert.equal(result.registeredToolCount, 1);
   assert.equal(result.removedToolCount, 1);
   assert.equal(harness.runtime.mcpToolSettlePending, false, "权威快照落定后不再补注册");
+});
+
+test("掉线后重连成功，下一回合把重连回来的工具补注册（回移 3ef91590 的 core 侧）", async () => {
+  const CONNECTED = {
+    s1: status("s1", "connected"),
+    s2: status("s2", "connected"),
+  };
+  const harness = createHarness({
+    servers: SERVERS,
+    settleSnapshots: [{ statuses: CONNECTED, tools: [descriptor("s1", "lookup")] }],
+    startupSnapshot: { statuses: CONNECTED, tools: [descriptor("s1", "lookup")] },
+  });
+
+  await initializeMcp.call(harness.runtime, TRACE);
+  assert.deepEqual(harness.names(), ["lookup"]);
+  assert.equal(harness.runtime.mcpToolSettlePending, false, "启动快照完整 → 已落定");
+
+  // 会话中途 server 掉线：adapter 把 record 翻成 failed（或 transport.onerror 直接翻转）
+  harness.setMcpState({ statuses: { ...CONNECTED, s1: status("s1", "failed") } });
+  await initializeMcp.call(harness.runtime, TRACE);
+  assert.deepEqual(harness.names(), ["lookup"], "掉线瞬间不应凭空删掉已注册工具");
+
+  // 懒重连成功：record 回到 connected，且工具集已刷新（多了一个 fetch）
+  harness.setMcpState({
+    statuses: CONNECTED,
+    tools: [descriptor("s1", "lookup"), descriptor("s1", "fetch")],
+  });
+  await initializeMcp.call(harness.runtime, TRACE);
+
+  assert.deepEqual(
+    [...harness.names()].sort(),
+    ["fetch", "lookup"],
+    "重连后回来的工具必须在下一回合被重新注册（1.0.x 没有 revision，靠状态指纹发现）",
+  );
+  assert.equal(harness.runtime.mcpToolSettlePending, false, "重连补注册后重新落定");
 });
