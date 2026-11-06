@@ -67,7 +67,9 @@ describe("bash runtime permission capability", () => {
       "strings fixture.bin",
       "sed -n '1,20p' README.md",
       "jq '.scripts' package.json",
-      "xargs grep -n foo",
+      // Git-Bash 的 xargs 与 POSIX 语义不同（argv 直通、子命令解析不可靠），
+      // bash-readonly-policy-argv.ts 在 win32 上显式不把 xargs 判成只读，这里跟随该分叉。
+      ...(process.platform === "win32" ? [] : ["xargs grep -n foo"]),
       "sort README.md",
       "uniq README.md",
       "cut -d: -f1 README.md",

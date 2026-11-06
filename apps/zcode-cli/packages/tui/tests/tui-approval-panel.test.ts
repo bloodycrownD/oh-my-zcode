@@ -10,11 +10,41 @@ test("guarded renders only once/deny and rejects a forged project decision", () 
   const approval = approvalPrompt({ command: "rm -rf fixture" });
   approval.request.approvalMode = "user-once";
   const lines = collectTextNodes(ApprovalPanel({ approval, contentWidth: 60 }));
-  assert.ok(lines.some(line => line.text.includes("Allow once")));
-  assert.ok(!lines.some(line => line.text.includes("Always allow")));
+  assert.ok(lines.some((line) => line.text.includes("Allow once")));
+  assert.ok(!lines.some((line) => line.text.includes("Always allow")));
   assert.deepEqual(decisionsForApproval(approval.request), ["allow_once", "deny"]);
   assert.equal(createApprovalResult(approval.request, "allow_project").decision, "deny");
   assert.equal(createApprovalResult(approval.request, "allow_once").permissionUpdates, undefined);
+});
+
+test("no-always-allow renders only once/deny and downgrades a forged project decision", () => {
+  // N3：Plan+MCP 的 ask 带 optionsPolicy:"no-always-allow"（approvalMode 仍不是 user-once）。
+  // 只裁展示不够——TUI 若仍返回 allow_project，会把一条在 Plan 下永远不生效的规则写进项目规则。
+  const approval = approvalPrompt({ command: "mcp__local__lookup" });
+  approval.request.optionsPolicy = "no-always-allow";
+  approval.request.suggestedPermissionUpdates = [
+    {
+      behavior: "allow",
+      rules: [{ ruleContent: "mcp__local__lookup", toolName: "mcp__local__lookup" }],
+      type: "addRules",
+    },
+  ];
+  assert.equal(approval.request.approvalMode, undefined);
+
+  const lines = collectTextNodes(ApprovalPanel({ approval, contentWidth: 60 }));
+  assert.ok(lines.some((line) => line.text.includes("Allow once")));
+  assert.ok(!lines.some((line) => line.text.includes("Always allow")));
+  assert.deepEqual(decisionsForApproval(approval.request), ["allow_once", "deny"]);
+
+  // 伪造/旧快捷键绕过选项列表也必须降级：不能返回 allow，更不能把 CLI 给的规则回传成项目规则。
+  const forged = createApprovalResult(approval.request, "allow_project");
+  assert.equal(forged.decision, "deny");
+  assert.equal(forged.permissionUpdates, undefined);
+
+  // allow_once 仍然放行，且不携带任何项目级规则。
+  const once = createApprovalResult(approval.request, "allow_once");
+  assert.equal(once.decision, "allow");
+  assert.equal(once.permissionUpdates, undefined);
 });
 
 test("renders approval prompts with wrapping-friendly layout", () => {

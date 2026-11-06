@@ -33,16 +33,50 @@ function resolveOptionsPolicy(
   }
 }
 
+/** 越严格越大。undefined 表示没有限制，可以给出项目级「始终允许」。 */
+const OPTIONS_POLICY_STRICTNESS: Record<PermissionOptionsPolicy, number> = {
+  "session-always-allow": 1,
+  "no-always-allow": 2,
+};
+
+/**
+ * 工具声明的策略与权限判定要求的策略取更严的一方。
+ * 判定侧只会用它收窄（例如 Plan 下记住的规则本就不生效，所以不提供始终允许），
+ * 不会把工具声明的「不允许始终允许」放宽回来。
+ */
+function narrowOptionsPolicy(
+  declared: PermissionOptionsPolicy | undefined,
+  required: PermissionOptionsPolicy | undefined,
+): PermissionOptionsPolicy | undefined {
+  if (!declared) return required;
+  if (!required) return declared;
+  return OPTIONS_POLICY_STRICTNESS[required] >= OPTIONS_POLICY_STRICTNESS[declared]
+    ? required
+    : declared;
+}
+
 export function resolveToolApproval(
   deps: ToolExecutorDeps,
   toolCall: ExecutableToolCall,
   entry: ToolEntry,
   executionInput: unknown,
   traceContext: TraceContext,
+  requiredOptionsPolicy?: PermissionOptionsPolicy,
+  /** 判定为单次确认（guarded 危险命令）：只允许用户本人应答，连预览钩子都不该跑。 */
+  singleUseApproval?: boolean,
 ): ResolvedToolApproval {
   // `permission` 类型上是必填，但 executor 也会被只声明了一部分字段的 entry 驱动
   // （测试桩、动态注册的工具）。周边代码靠 spread 而不是读字段来容忍这一点，gate 同理。
-  const optionsPolicy = resolveOptionsPolicy(entry.permission?.askOptions?.allowAlways);
+  const optionsPolicy = narrowOptionsPolicy(
+    resolveOptionsPolicy(entry.permission?.askOptions?.allowAlways),
+    requiredOptionsPolicy,
+  );
+
+  // 单次确认是「这一次必须由用户点头」的语义：工具预览返回 proceed 就等于替用户点了确认，
+  // 所以这里连钩子都不调用，直接按 ask 走。
+  if (singleUseApproval) {
+    return { gate: "ask", ...(optionsPolicy ? { optionsPolicy } : {}) };
+  }
 
   if (!entry.prepareApproval) {
     return { gate: "ask", ...(optionsPolicy ? { optionsPolicy } : {}) };

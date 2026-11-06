@@ -57,6 +57,9 @@ export async function runPermissionRequestHooks(
   signal?: AbortSignal,
 ): Promise<PermissionBrokerResult | undefined> {
   if (!deps.hookRunner) return undefined;
+  // 单次确认（guarded 危险命令）只由用户本人应答：PermissionRequest hook 连问都不该问，
+  // 否则它的一句 allow 就替用户点了确认。PreToolUse hook 已经在判权之前跑过、仍有否决权。
+  if (permissionDecision.approvalMode === "user-once") return undefined;
   const hookResult = await deps.hookRunner.run(
     {
       cwd: deps.getWorkingDirectory(),
@@ -201,10 +204,13 @@ export function applyPreToolPermissionDecision(
   // alwaysAsk 声明出来的确认（如 workflow 运行确认）不能被 PreToolUse hook
   // 的整体 allow 悄悄抹掉——那等于给"任何模式都要问"开了一个静默后门。自动化仍有正规出口：
   // PermissionRequest hook 可以应答这次弹窗（见 runPermissionRequestHooks）。
+  // user-once 同理：guarded 的危险命令单次确认只有「用户本人应答」这一种解法，
+  // hook 的整体 allow 若把它抹成放行，guarded 的危险命令闸门等于不存在。
   if (
     hookResult.permissionBehavior === "allow" &&
     permissionDecision.decision === "ask" &&
-    !permissionDecision.alwaysAsk
+    !permissionDecision.alwaysAsk &&
+    permissionDecision.approvalMode !== "user-once"
   ) {
     return {
       ...permissionDecision,

@@ -42,6 +42,13 @@ export function resolveRuntimePermissionContext(
   deps: ToolExecutorDeps,
 ): ToolRuntimePermissionCapabilityContext {
   return {
+    // 工具的运行时能力判定要按当前模式分叉：Bash 的 guarded 危险命令单次确认
+    // （resolveBashPermissionCapability 的 `context?.mode === "guarded"`）与只读判定
+    // 都靠这里。缺了 mode 会让 guarded 静默退回 YOLO——危险命令直接执行、不弹确认。
+    mode: deps.getMode(),
+    // 静态声明与 getter 并存：只声明 bashShellSelection 的 createToolExecutor 用法
+    // 此前会退回 POSIX 文法（Windows 的 rd /S /Q、del /Q 匹配不到危险规则 → 直接放行）。
+    bashShellSelection: deps.getBashShellSelection?.() ?? deps.bashShellSelection,
     runtimeScope: deps.runtimeScope,
     workingDirectory: deps.getWorkingDirectory(),
     workspaceRoot: deps.getWorkspaceRoot(),

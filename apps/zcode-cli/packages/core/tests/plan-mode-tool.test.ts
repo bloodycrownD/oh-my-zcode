@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import {
   SessionEventType,
   createFileSystemError,
@@ -145,7 +146,10 @@ describe("plan mode tools", () => {
     expect(result.modelContent).toContain("User has approved your plan");
     expect(result.modelContent).toContain("## Approved Plan");
     expect(
-      fileSystemPort.files["/workspace/project/.zcode/plans/plan-sess_exit-plan-mode.md"],
+      // 计划文件路径由 node:path 拼，Windows 上就是反斜杠；用 join 造期望值而不是写死 POSIX 分隔符。
+      fileSystemPort.files[
+        join("/workspace/project", ".zcode", "plans", "plan-sess_exit-plan-mode.md")
+      ],
     ).toBe("\n  1. Update the service boundary\n2. Add tests\n\n");
     expect(mode).toBe("build");
     expect(prePlanMode).toBeUndefined();

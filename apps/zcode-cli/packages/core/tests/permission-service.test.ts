@@ -313,7 +313,7 @@ describe("PermissionService mode policy", () => {
     }
   });
 
-  it("allows non-destructive MCP tools in plan mode without requiring readOnly metadata", () => {
+  it("asks for non-destructive MCP tools in plan mode without requiring readOnly metadata", () => {
     const service = new PermissionService();
 
     const decision = service.checkPermission(
@@ -326,12 +326,34 @@ describe("PermissionService mode policy", () => {
       mcpCapability,
     );
 
+    // Plan 曾经比基础模式更宽：非 destructive 的 MCP 工具直接放行，而 EnterPlanMode 本身免确认，
+    // 等于给了一条「先进 Plan 再随便调 MCP」的免审批通道。现在只过闸，仍要用户确认，
+    // 且 Plan 下记住的 allow 规则不生效，所以不提供始终允许。
     expect(decision).toMatchObject({
-      allowed: true,
-      decision: "allow",
+      allowed: false,
+      decision: "ask",
+      optionsPolicy: "no-always-allow",
       ruleId: "mode.plan.mcp",
       sideEffectScope: "network",
     });
+  });
+
+  it("keeps yolo's own decision for non-destructive MCP tools while plan is on", () => {
+    const service = new PermissionService();
+
+    const decision = service.checkPermission(
+      {
+        input: { query: "current simulator state" },
+        mode: "yolo",
+        planEnabled: true,
+        riskLevel: "medium",
+        toolName: "mcp__ios_simulator__status",
+      },
+      mcpCapability,
+    );
+
+    // Plan 闸门只收紧不放宽：yolo 本来就不问，这里不能被 Plan 改写成询问。
+    expect(decision).toMatchObject({ allowed: true, decision: "allow", ruleId: "mode.yolo" });
   });
 
   it("denies destructive MCP tools in plan mode", () => {

@@ -6,6 +6,7 @@
 // 确认窗永久死亡。本文件钉住新契约：通道先建立、双方竞速、先到者胜、败者被 abort。
 import { describe, expect, it, vi } from "vitest";
 import {
+  CoreErrorType,
   createRootTraceContext,
   createSessionId,
   createToolCallId,
@@ -16,6 +17,7 @@ import {
   type SessionEvent,
 } from "@zcode/contracts";
 import { PermissionService, defaultPermissionConfig } from "../src/permission/service.js";
+import { createManualPermissionBroker } from "../src/permission/broker.js";
 import { racePermissionResponders } from "../src/tool/executor/permission-responder-race.js";
 import { createToolExecutor } from "../src/tool/executor.js";
 import { createToolRegistry } from "../src/tool/registry.js";
@@ -192,12 +194,34 @@ describe("racePermissionResponders (unit)", () => {
     await expect(racePromise).rejects.toThrow("cancelled by turn");
     expect(hookSignal?.aborted).toBe(true);
   });
+
+  // SA-G15：broker 的实现可能完全不理会 signal（登记挂死、桥接程序无响应）。旧实现
+  // 「先让 broker 用自己的拒绝收口」就变成永久挂起；竞速必须在一个宏任务后补 ToolCancelled。
+  it("falls back to ToolCancelled when the broker ignores the outer abort", async () => {
+    const outer = new AbortController();
+    let hookSignal: AbortSignal | undefined;
+    const racePromise = racePermissionResponders({
+      runHooks: (signal) => {
+        hookSignal = signal;
+        return new Promise(() => {});
+      },
+      requestBroker: () => new Promise(() => {}),
+      signal: outer.signal,
+    });
+    outer.abort();
+    await expect(racePromise).rejects.toMatchObject({ type: CoreErrorType.ToolCancelled });
+    expect(hookSignal?.aborted).toBe(true);
+  });
 });
 
 describe("permission responder race (executor integration)", () => {
   function createApprovalExecutorHarness(options: {
     hookRun: (input: unknown, runOptions?: { signal?: AbortSignal }) => Promise<HookRunResult>;
     broker?: PermissionBrokerPort;
+    /** 权限请求超时：SA-B13 用它验证「登记承诺永不结算」不会让请求挂死。 */
+    permissionTimeoutMs?: number;
+    /** 外层 turn 取消信号：SA-G15 的 abort 兜底路径。 */
+    signal?: AbortSignal;
   }) {
     // 提供的 hookRun 只作用于 PermissionRequest 事件；PreToolUse / PostToolUse 等
     // 其余事件返回空结果，避免把与竞速无关的阶段也挂起。
@@ -238,6 +262,9 @@ describe("permission responder race (executor integration)", () => {
       hookRunner: { run: scopedHookRun },
       mode: "build",
       ...(options.broker ? { permissionBroker: options.broker } : {}),
+      ...(options.permissionTimeoutMs === undefined
+        ? {}
+        : { permissionTimeoutMs: options.permissionTimeoutMs }),
       permissionService: new PermissionService(defaultPermissionConfig),
       registry,
       sessionId,
@@ -247,7 +274,10 @@ describe("permission responder race (executor integration)", () => {
     const execute = () =>
       executor.execute(
         { id: createToolCallId("race-call"), input: { file_path: "demo.txt" }, name: "WriteLike" },
-        { traceContext },
+        {
+          traceContext,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        },
       );
     return { events, execute, handled };
   }
@@ -399,5 +429,59 @@ describe("permission responder race (executor integration)", () => {
     expect(result.error?.type).toBe("permission_denied");
     expect(result.error?.message).toContain("No permission client configured");
     expect(hookSignal?.aborted).toBe(true);
+  });
+
+  // SA-B13：`registered` 是挂在 requestPermission 返回值上的独立承诺，第三方 broker 可能
+  // 永不结算它。它必须和 pending 一样由 permissionTimeoutMs 收口，否则请求永久挂起。
+  it("times out instead of hanging when the broker's registered promise never settles", async () => {
+    const neverRegistered = new Promise<void>(() => {});
+    const manual = createManualPermissionBroker();
+    const harness = createApprovalExecutorHarness({
+      hookRun: async () => EMPTY_HOOK_RESULT,
+      permissionTimeoutMs: 20,
+      broker: {
+        requestPermission: (request, requestOptions) =>
+          Object.assign(manual.requestPermission(request, requestOptions), {
+            registered: neverRegistered,
+          }),
+      },
+    });
+    const result = await harness.execute();
+    expect(result.success).toBe(false);
+    expect(result.error?.type).toBe(CoreErrorType.PermissionTimeout);
+    expect(harness.handled).toEqual([]);
+    // 登记承诺从未兑现 = 确认窗从未发布：不能留一条没有前驱的 PermissionResolved。
+    expect(
+      harness.events.filter((event) => event.type === SessionEventType.PermissionRequested),
+    ).toHaveLength(0);
+    expect(
+      harness.events.filter((event) => event.type === SessionEventType.PermissionResolved),
+    ).toHaveLength(0);
+    // pending 由 broker 自己的 timeoutMs 收口清理，超时后不得残留。
+    await vi.waitFor(() => expect(manual.listPendingRequests()).toEqual([]));
+  });
+
+  // SA-G15：turn 取消时 broker 可能完全不理会 signal（桥接程序挂死）。旧实现的
+  // 「让 broker 用自己的拒绝收口」在这里就是永久挂起；executor 必须以 ToolCancelled 收口。
+  it("fails with ToolCancelled when the broker ignores the turn abort", async () => {
+    const controller = new AbortController();
+    const brokerCalled = createDeferred<void>();
+    const harness = createApprovalExecutorHarness({
+      hookRun: () => new Promise(() => {}),
+      signal: controller.signal,
+      broker: {
+        requestPermission: () => {
+          brokerCalled.resolve();
+          return new Promise(() => {});
+        },
+      },
+    });
+    const pending = harness.execute();
+    await brokerCalled.promise;
+    controller.abort();
+    const result = await pending;
+    expect(result.success).toBe(false);
+    expect(result.error?.type).toBe(CoreErrorType.ToolCancelled);
+    expect(harness.handled).toEqual([]);
   });
 });

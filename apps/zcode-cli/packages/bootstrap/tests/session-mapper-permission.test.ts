@@ -10,7 +10,11 @@ import {
   type ToolCallId,
   type TraceId,
 } from "@zcode/contracts";
-import { zcodeSessionEventSchema, zcodeSessionProjectionSchema } from "@zcode/shared";
+import {
+  zcodePermissionRequestedEventPayloadSchema,
+  zcodeSessionEventSchema,
+  zcodeSessionProjectionSchema,
+} from "@zcode/shared";
 import {
   mapSessionEvent,
   mapSessionProjection,
@@ -125,6 +129,47 @@ describe("legacy permission.requested 映射", () => {
     const options = (mapped.payload as { options: { optionId: string; kind: string }[] }).options;
     expect(options.map((option) => option.optionId)).toEqual(["allow_once", "deny"]);
     expect(options.some((option) => option.kind === "allow_session")).toBe(false);
+  });
+
+  // N5：v4 侧给普通 ask 注入 fullAccessSupported（supportsPermissionFullAccess 为真时），
+  // 而 legacy 的 zcodePermissionRequestedEventPayloadSchema 是 strict 且没有这个字段。
+  // mapper 漏剔除 → 旧桌面 safeParse 失败 → 整条 permission.requested 被丢弃，确认窗消失。
+  it("普通 ask 携带 fullAccessSupported 时仍通过 v3 strict payload schema", () => {
+    const mapped = mapSessionEvent(
+      permissionRequestedEvent({
+        ...basePayload,
+        toolName: "Bash",
+        input: { command: "ls" },
+        fullAccessSupported: true,
+      }),
+    );
+
+    expect(
+      zcodePermissionRequestedEventPayloadSchema.safeParse(mapped.payload).success,
+    ).toBe(true);
+    // legacy 的选项只由 buildProtocolPermissionOptions 决定，能力位本身不跨版本透传。
+    expect(mapped.payload).not.toHaveProperty("fullAccessSupported");
+  });
+
+  // guarded 的危险命令是单次确认（user-once）：legacy 必须保住 approvalMode 并只投放
+  // 允许一次 + 拒绝，旧桌面才既不会弹「始终允许」也不会把应答夹带成规则。
+  it("guarded 的 user-once ask 过 v3 strict payload schema 且只有允许一次 + 拒绝", () => {
+    const mapped = mapSessionEvent(
+      permissionRequestedEvent({
+        ...basePayload,
+        toolName: "Bash",
+        input: { command: "rm -rf build" },
+        riskLevel: "high",
+        approvalMode: "user-once",
+      }),
+    );
+
+    expect(
+      zcodePermissionRequestedEventPayloadSchema.safeParse(mapped.payload).success,
+    ).toBe(true);
+    expect(mapped.payload.approvalMode).toBe("user-once");
+    const options = (mapped.payload as { options: { optionId: string }[] }).options;
+    expect(options.map((option) => option.optionId)).toEqual(["allow_once", "deny"]);
   });
 
   it("未声明策略的工具保持默认三个选项", () => {

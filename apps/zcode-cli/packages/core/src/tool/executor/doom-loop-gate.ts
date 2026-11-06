@@ -1,4 +1,9 @@
-import { CoreErrorType, createCoreError, type CollaborationMode } from "@zcode/contracts";
+import {
+  CoreErrorType,
+  createCoreError,
+  type CollaborationMode,
+  type PermissionUpdate,
+} from "@zcode/contracts";
 import type { ToolExecutionResult } from "../types.js";
 import type { ExecutableToolCall } from "../types.js";
 import { createErrorResult } from "./errors.js";
@@ -111,6 +116,8 @@ export function interveneDoomLoopGate(
   toolCall: ExecutableToolCall,
   executionInput: unknown,
   collaborationMode: CollaborationMode,
+  /** 本次调用原本的确认语义（guarded 危险命令是 user-once）；只影响确认窗文案。 */
+  approvalMode?: "user-once",
 ): DoomLoopGateIntervention {
   const streak = recordDoomLoopStreak(state, toolCall.name, executionInput);
   const verdict = evaluateDoomLoopGate(state, mode, toolCall.name, streak.count);
@@ -122,7 +129,7 @@ export function interveneDoomLoopGate(
         toolCall,
         toolCall.name,
         streak.count,
-        buildDoomLoopReason(toolCall.name, streak.count),
+        buildDoomLoopDenyReason(toolCall.name, streak.count),
       ),
     };
   }
@@ -130,14 +137,47 @@ export function interveneDoomLoopGate(
     return {
       verdict,
       count: streak.count,
-      askDecision: buildDoomLoopAskDecision(toolCall.name, streak.count, collaborationMode),
+      askDecision: buildDoomLoopAskDecision(
+        toolCall.name,
+        streak.count,
+        collaborationMode,
+        approvalMode,
+      ),
     };
   }
   return { verdict, count: streak.count };
 }
 
-export function buildDoomLoopReason(toolName: string, count: number): string {
-  return `Doom loop detected: ${toolName} has been called ${count} times in a row with identical input. Allow once, always allow this tool in this session, or deny to stop the turn.`;
+function doomLoopHead(toolName: string, count: number): string {
+  return (
+    `Doom loop detected: ${toolName} has been called ${count} times in a row ` +
+    "with identical input."
+  );
+}
+
+export function buildDoomLoopReason(
+  toolName: string,
+  count: number,
+  approvalMode?: "user-once",
+): string {
+  const head = doomLoopHead(toolName, count);
+  // 文案必须与实际可选的应答一致：user-once 的确认窗只有「允许一次 / 拒绝」，
+  // 承诺「本会话总是允许」既点不到、应答也会被单次确认校验判非法。
+  return approvalMode === "user-once"
+    ? `${head} Allow once or deny to stop the turn.`
+    : `${head} Allow once, always allow this tool in this session, or deny to stop the turn.`;
+}
+
+/**
+ * deny 模式（`doomLoopCheck: "deny"`）的拦截文案：这条路径没有确认窗，也就没有
+ * 「允许一次」或「本会话总是允许」可选，不得沿用 ask 的措辞（见 buildDoomLoopReason）。
+ * 用户要放行只能先改设置里的 doomLoopCheck 再重试。
+ */
+export function buildDoomLoopDenyReason(toolName: string, count: number): string {
+  return (
+    `${doomLoopHead(toolName, count)} Doom loop protection is set to "deny"; ` +
+    "change doomLoopCheck in settings and retry if this repetition is intentional."
+  );
 }
 
 /** ask：改写 permissionDecision 为 doom_loop ask，走 permission flow 既有确认窗链路。 */
@@ -145,13 +185,14 @@ export function buildDoomLoopAskDecision(
   toolName: string,
   count: number,
   mode: CollaborationMode,
+  approvalMode?: "user-once",
 ) {
   return {
     allowed: false,
     decision: "ask" as const,
     escalated: false,
     mode,
-    reason: buildDoomLoopReason(toolName, count),
+    reason: buildDoomLoopReason(toolName, count, approvalMode),
     riskLevel: "medium" as const,
     ruleId: "doom_loop",
   };
@@ -197,18 +238,22 @@ export function withDoomLoopTurnStop(result: ToolExecutionResult): ToolExecution
 
 /**
  * 权限卡 allow 且携带 sessionPermissionUpdates（「本会话总是允许」）时登记豁免。
- * 判定宽松匹配：任何针对 ruleId=doom_loop 的 allow 更新即豁免该工具。
+ * 入参就是 broker 合成的 `PermissionUpdate[]`（`{type:"addRules", behavior, rules}`）：
+ * 只要有一条 allow 更新的规则命中当前工具名，就豁免该工具。
+ * 旧实现按 ruleId/decision/effect 判定（PermissionUpdate 没有这些字段），谓词恒 false，
+ * 整条会话豁免是死代码；要更精确的标记应由 broker 侧携带，而不是在消费侧猜字段。
  */
 export function applyDoomLoopSessionUpdates(
   state: DoomLoopGateState,
   toolName: string,
-  sessionUpdates: Array<{ ruleId?: string; decision?: string; effect?: string }> | undefined,
+  sessionUpdates: PermissionUpdate[] | undefined,
 ): void {
   if (!sessionUpdates?.length) return;
-  const doomAllow = sessionUpdates.some(
+  const exempted = sessionUpdates.some(
     (update) =>
-      update.ruleId === "doom_loop" &&
-      (update.decision === "allow" || update.effect === "allow"),
+      update.behavior === "allow" &&
+      Array.isArray(update.rules) &&
+      update.rules.some((rule) => rule.toolName === toolName),
   );
-  if (doomAllow) state.exemptTools.add(toolName);
+  if (exempted) state.exemptTools.add(toolName);
 }

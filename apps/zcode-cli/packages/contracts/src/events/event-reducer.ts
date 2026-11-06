@@ -521,6 +521,13 @@ export class EventReducer {
       return {
         ...p,
         pendingPermissions: [...p.pendingPermissions, newPending],
+        // hook 改写输入会先合成一条 PermissionResolved(deny) 把工具行收口成 denied，
+        // 随后才发起重问。工具此刻并没有失败，仍在等用户重答，故这里复位为 pending
+        // （ToolCallStatus 没有 waiting，pending 才是「等待中」），否则重问期间
+        // 确认窗还在、工具行却显示已拒绝。
+        activeToolCalls: p.activeToolCalls.map((tc) =>
+          tc.toolCallId === payload.toolCallId ? { ...tc, status: "pending" } : tc,
+        ),
         updatedAt: e.timestamp,
       };
     },

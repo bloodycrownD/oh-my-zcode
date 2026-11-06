@@ -908,7 +908,15 @@ function mapPermissionRequestedPayload(
 ): Record<string, unknown> {
   // 同 mapPendingPermission：这个 payload 是整体 spread 出去的，新字段必须在这里显式解构
   // 剔除，否则会直接漏进 strict 的 zcodePermissionRequestedEventPayloadSchema。
-  const { display: _display, optionsPolicy, ...record } = asRecord(payload);
+  // fullAccessSupported 同理：v4 用它投放 Full access 选项，v3 schema 没有该字段，
+  // 漏进去会让旧桌面 safeParse 失败并整条丢弃 permission.requested——确认窗直接消失，
+  // 属于 gate 降级；legacy 的选项只由 buildProtocolPermissionOptions 决定。
+  const {
+    display: _display,
+    fullAccessSupported: _fullAccessSupported,
+    optionsPolicy,
+    ...record
+  } = asRecord(payload);
   const toolName = stringValue(record.toolName) ?? "unknown";
   return {
     ...record,

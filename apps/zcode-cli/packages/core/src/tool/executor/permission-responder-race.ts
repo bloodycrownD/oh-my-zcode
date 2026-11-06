@@ -13,6 +13,8 @@ import type {
   PermissionUpdate,
   TraceContext,
 } from "@zcode/contracts";
+import { traceContextToLogContext } from "@zcode/contracts";
+import { CoreErrorType, createCoreError } from "@zcode/contracts";
 import { linkAbortSignal } from "./timeout.js";
 import type { PermissionDecisionResult } from "../../permission/service.js";
 import { normalizeToolExecutionInput } from "../input-normalization.js";
@@ -20,7 +22,11 @@ import { runPermissionRequestHooks } from "./hook-flow.js";
 import { recheckPermissionHookModifiedInput } from "./permission-input-recheck.js";
 import { resolveRuntimePermissionContext } from "./permission-capability.js";
 import { validateInput } from "./validation.js";
-import type { ExecutableToolCall, ToolEntry } from "../types.js";
+import type {
+  ExecutableToolCall,
+  ToolEntry,
+  ToolRuntimePermissionCapabilityContext,
+} from "../types.js";
 import type { ToolExecutorDeps } from "./types.js";
 import type { resolveToolApproval } from "./approval-gate.js";
 
@@ -61,8 +67,32 @@ export async function racePermissionResponders(
 
   let settled = false;
   let brokerClaimed = false;
+  let rejectRace: ((error: unknown) => void) | undefined;
+  let abortFallback: ReturnType<typeof setTimeout> | undefined;
+  // 外层 turn 取消：两个应答方都 abort 之后，若 broker 自己的实现不理会 signal
+  // （注册尚未完成、或桥接程序挂死），竞速会一直挂着。先让 broker 用它自己的拒绝收口
+  // （它更清楚原因），一个宏任务后仍无人收口才由竞速补一个 ToolCancelled。
+  const onOuterAbort = () => {
+    if (settled || abortFallback !== undefined) return;
+    abortFallback = setTimeout(() => {
+      abortFallback = undefined;
+      if (settled) return;
+      settled = true;
+      rejectRace?.(
+        createCoreError(CoreErrorType.ToolCancelled, "Permission request was cancelled", {
+          recoverable: true,
+        }),
+      );
+    }, 0);
+  };
   try {
     return await new Promise<PermissionResponderRaceOutcome>((resolve, reject) => {
+      rejectRace = reject;
+      if (input.signal?.aborted) {
+        onOuterAbort();
+        return;
+      }
+      input.signal?.addEventListener("abort", onOuterAbort, { once: true });
       const settle = (action: () => void, abortLoser: AbortController) => {
         if (settled) return;
         settled = true;
@@ -103,11 +133,70 @@ export async function racePermissionResponders(
       );
     });
   } finally {
+    if (abortFallback !== undefined) clearTimeout(abortFallback);
+    input.signal?.removeEventListener("abort", onOuterAbort);
     unlinkHook();
     unlinkBroker();
   }
 }
 
+
+/**
+ * `registered` 是挂在 requestPermission 返回值上的独立 promise：broker 自己的
+ * timeoutMs / abort 只收口 pending，不保证这份登记承诺一定会结算。这里按同样的
+ * 超时与取消兜底，否则第三方 broker 返回一个永不结算的 registered 会让请求永久挂起。
+ * 取消不在这里造错误——交给 broker 自己的拒绝收口（它更清楚原因）。
+ */
+async function waitForBrokerRegistration(
+  registered: Promise<void>,
+  signal: AbortSignal,
+  timeoutMs: number | undefined,
+  context: { requestId: string; toolName: string },
+): Promise<void> {
+  if (signal.aborted) return;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    function finish(action: () => void): void {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      signal.removeEventListener("abort", onAbort);
+      action();
+    }
+    function onAbort(): void {
+      finish(resolve);
+    }
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (timeoutMs !== undefined) {
+      timer = setTimeout(() => {
+        finish(() =>
+          reject(
+            createCoreError(
+              CoreErrorType.PermissionTimeout,
+              `Permission request timed out after ${timeoutMs}ms`,
+              { context, recoverable: true },
+            ),
+          ),
+        );
+      }, timeoutMs);
+    }
+    // 登记失败原样上抛（与 await registered 旧语义一致）；成功只负责结束等待。
+    registered.then(
+      () => finish(resolve),
+      (error) => finish(() => reject(error)),
+    );
+  });
+}
+
+/** 改写前后是否同一份输入（用于识别"hook 改写了个寂寞"）。 */
+function isSamePermissionInput(next: unknown, current: unknown): boolean {
+  try {
+    return JSON.stringify(next) === JSON.stringify(current);
+  } catch {
+    return false;
+  }
+}
 
 export interface PermissionAskRaceOptions {
   deps: ToolExecutorDeps;
@@ -122,6 +211,15 @@ export interface PermissionAskRaceOptions {
   projectRules: PermissionRuleset | null;
   traceContext: TraceContext;
   signal?: AbortSignal;
+  /** broker 已登记应答方、确认窗即将可见：此时才发布 PermissionRequested 事件。 */
+  onBrokerRegistered?: () => Promise<void> | void;
+  /** 重判后的重问：hook 已经在上一轮表态过，这一轮只等用户本人。 */
+  skipHooks?: boolean;
+  /**
+   * 首次判权用的运行时上下文（mode / bashShellSelection / cwd 快照）。
+   * hook 改写后的重判必须与首次判权同源，否则会按另一套 shell 文法或工作目录得出结论。
+   */
+  permissionContext?: ToolRuntimePermissionCapabilityContext;
 }
 
 export interface PermissionAskRaceOutcome {
@@ -129,6 +227,16 @@ export interface PermissionAskRaceOutcome {
   normalizedHookModifiedInput?: unknown;
   useNormalizedHookModifiedInput: boolean;
   permissionDecision: PermissionDecisionResult;
+  /**
+   * hook 把输入改写成仍需审批的内容：调用方要关掉这次请求、拿新输入重新走确认窗。
+   * 存在时 brokerResult 只是 fail-closed 的占位（不会被采用）。
+   */
+  rewriteInput?: unknown;
+  /**
+   * 重判后按改写后的输入重算的「始终允许」落盘建议；缺省表示沿用调用方入口算出的一份
+   * （原始输入），调用方只能在字段存在时覆盖，避免把改写前的命令写进项目规则。
+   */
+  suggestedPermissionUpdates?: PermissionUpdate[];
 }
 
 /**
@@ -141,9 +249,14 @@ export async function runPermissionAskRace(
   options: PermissionAskRaceOptions,
 ): Promise<PermissionAskRaceOutcome> {
   const { deps, toolCall, entry, executionInput, permissionDecision, mode, traceContext } = options;
+  // 首次判权 / 重判共用同一份上下文：caller 已准备好的那份（含 bashShellSelection 与
+  // guarded 的 cwd 快照）优先，缺省才按 deps 现算。
+  const runtimePermissionContext =
+    options.permissionContext ?? resolveRuntimePermissionContext(deps);
   const raceOutcome = await racePermissionResponders({
     onHookFailure: (error) => {
       deps.logger?.warn("PermissionRequest hook chain failed; waiting for client decision", {
+        ...traceContextToLogContext(traceContext),
         errorMessage: error instanceof Error ? error.message : String(error),
         event: "tool.permission.hook_race_forfeited",
         module: "core.tool.executor",
@@ -153,8 +266,8 @@ export async function runPermissionAskRace(
         toolName: toolCall.name,
       });
     },
-    requestBroker: (brokerSignal, claimResponse) =>
-      deps.permissionBroker.requestPermission(
+    requestBroker: async (brokerSignal, claimResponse) => {
+      const pending = deps.permissionBroker.requestPermission(
         {
           input: executionInput,
           mode,
@@ -166,6 +279,11 @@ export async function runPermissionAskRace(
           sessionId: deps.sessionId,
           sideEffectScope: permissionDecision.sideEffectScope,
           suggestedPermissionUpdates: options.suggestedPermissionUpdates,
+          // 单次确认要标在请求上：客户端据此只给「允许一次 / 拒绝」，
+          // 不带出去就会变成一次普通 ask（可始终允许）。
+          ...(permissionDecision.approvalMode
+            ? { approvalMode: permissionDecision.approvalMode }
+            : {}),
           ...(options.approval.optionsPolicy
             ? { optionsPolicy: options.approval.optionsPolicy }
             : {}),
@@ -175,9 +293,30 @@ export async function runPermissionAskRace(
           turnId: traceContext.turnId ?? deps.turnId,
         },
         { signal: brokerSignal, claimResponse, timeoutMs: deps.permissionTimeoutMs },
-      ),
-    runHooks: (hookSignal) =>
-      runPermissionRequestHooks(
+      );
+      // broker 的实现可能在登记时就同步 reject（signal 已 abort），而调用方要等到
+      // await registered 之后才回到这里；先挂一个空 catch，避免这段窗口里被判成未处理拒绝。
+      void pending.catch(() => {});
+      // requestPermission 内部同步登记应答 deferred，所以到这里确认窗才第一次可见；
+      // 事件必须在登记之后再发，否则用户点得快会点在尚未登记的请求上（点击被幂等丢弃）。
+      // 有些 broker 的登记是延迟的（返回的 promise 上挂 registered），要等它兑现再发；
+      // 期间被取消就不再发布——取消后的确认窗不该出现在用户眼前。
+      const registered = pending.registered;
+      if (registered) {
+        await waitForBrokerRegistration(registered, brokerSignal, deps.permissionTimeoutMs, {
+          requestId: options.requestId,
+          toolName: toolCall.name,
+        });
+      }
+      if (brokerSignal.aborted) return pending;
+      await options.onBrokerRegistered?.();
+      return pending;
+    },
+    runHooks: async (hookSignal) => {
+      // 重问轮：hook 上一轮已经表过态（正是它把输入改写成现在这份），再问一次只会
+      // 得到同一个改写。这一轮直接退赛，把确认窗留给用户。
+      if (options.skipHooks) return undefined;
+      const hookDecision = await runPermissionRequestHooks(
         deps,
         toolCall,
         executionInput,
@@ -186,7 +325,35 @@ export async function runPermissionAskRace(
         mode,
         traceContext,
         hookSignal,
-      ),
+      );
+      // hook 把输入"改写"成当前这份输入 = 没有新信息。此时若按改写再问一轮，
+      // 每轮都会得到同一个改写，确认窗永远轮不完；让 hook 退赛、由 broker 回答。
+      // 比较要用规范化之后的形状：hook 交回来的是原始 input，和解析后的 executionInput
+      // 直接比会永远不等，于是每轮都判成"又改了"。
+      if (hookDecision?.decision === "modify") {
+        const normalizedRewrite = normalizeToolExecutionInput({
+          entry,
+          input: hookDecision.modifiedInput ?? executionInput,
+          logger: deps.logger,
+          source: "permission",
+        });
+        if (isSamePermissionInput(normalizedRewrite, executionInput)) {
+          // 这条分支没有事件可发（hook 主动退赛），只留日志：否则"hook 改了但等于没改"
+          // 在日志里完全静默，排查确认窗为什么没重问时无从下手。
+          deps.logger?.debug("Permission hook rewrote the input to the current input; ignoring", {
+            ...traceContextToLogContext(traceContext),
+            event: "tool.permission.hook_rewrite_ignored",
+            module: "core.tool.executor",
+            requestId: options.requestId,
+            status: "waiting",
+            toolCallId: toolCall.id,
+            toolName: toolCall.name,
+          });
+          return undefined;
+        }
+      }
+      return hookDecision;
+    },
     ...(options.signal === undefined ? {} : { signal: options.signal }),
   });
   let brokerResult = raceOutcome.result;
@@ -205,11 +372,12 @@ export async function runPermissionAskRace(
     if (!validateInput(normalizedHookModifiedInput, entry)) {
       // PermissionRequest hook 可以改写目标路径，修改后的输入不能沿用修改前的权限结果。
       const recheck = recheckPermissionHookModifiedInput({
-        // 与首次判权同源：无 preparedContext 时按 deps 快照构造（与 fork 旧版 recheck 一致）。
+        // 与首次判权同源：沿用同一份运行时上下文，无 preparedContext 时按 deps 快照构造。
         context: {
-          ...resolveRuntimePermissionContext(deps),
-          workingDirectory: deps.getWorkingDirectory(),
-          workspaceRoot: deps.getWorkspaceRoot(),
+          ...runtimePermissionContext,
+          workingDirectory:
+            runtimePermissionContext.workingDirectory ?? deps.getWorkingDirectory(),
+          workspaceRoot: runtimePermissionContext.workspaceRoot ?? deps.getWorkspaceRoot(),
         },
         deps,
         entry,
@@ -220,17 +388,33 @@ export async function runPermissionAskRace(
       });
       if (recheck.permissionDecision) {
         permissionDecisionNext = recheck.permissionDecision;
-        if (recheck.permissionDecision.decision !== "allow") {
-          // FORK TODO(upgrade-316): 上游 v3.16 的 recheck 只重算策略结论（不再自己调 broker），
-          // ask 时由 permission-flow 的 while-reentry 用新输入重新走确认窗。fork 的
-          // runPermissionAskRace 是单次竞速、没有重入点，无法再向 broker 询问改写后的输入。
-          // 这里 fail-closed：改写后的输入若仍被拒绝或仍需审批，一律按 deny 落实竞速结果，
-          // 避免 hook 借改写输入绕过确认窗。是否接入上游 reentry 需人工裁定。
+        if (recheck.permissionDecision.decision === "ask") {
+          // 改写后的输入仍要用户点头：交回调用方重新走确认窗（新 requestId）。
+          // 不能拿改写前的批准去执行改写后的输入。
+          return {
+            brokerResult: {
+              decision: "deny",
+              reason:
+                recheck.permissionDecision.reason ??
+                `Permission hook modified ${toolCall.name} input requires a new approval`,
+            },
+            normalizedHookModifiedInput,
+            useNormalizedHookModifiedInput: false,
+            permissionDecision: permissionDecisionNext,
+            rewriteInput: normalizedHookModifiedInput,
+            ...(recheck.suggestedPermissionUpdates === undefined
+              ? {}
+              : { suggestedPermissionUpdates: recheck.suggestedPermissionUpdates }),
+          };
+        }
+        if (recheck.permissionDecision.decision === "deny") {
+          // 改写后的输入被拒（项目 deny / memory-file deny）必须 fail-closed：
+          // 降级成可点的确认窗等于把被 deny 的输入交回用户「允许一次」执行。
           brokerResult = {
             decision: "deny",
             reason:
               recheck.permissionDecision.reason ??
-              `Permission hook modified ${toolCall.name} input requires a new approval`,
+              `Permission hook modified ${toolCall.name} input is denied`,
           };
           useNormalizedHookModifiedInput = false;
         }

@@ -12,7 +12,15 @@ const COMMAND_INPUT_FIELD = "command";
 const DESCRIPTION_INPUT_FIELD = "description";
 
 export function decisionsForApproval(request: PermissionBrokerRequest): ApprovalDecision[] {
-  return request.approvalMode === "user-once" ? ["allow_once", "deny"] : approvalDecisions;
+  // user-once（guarded 单次确认）与 no-always-allow（Plan+MCP 等规则本就不生效的场景）
+  // 都表示「本次询问不提供始终允许」。只裁展示不够：TUI 仍给出 allow_project 时，
+  // 用户点下去要么被 core 的应答校验判成 InvalidInput，要么把一条永远不会生效的
+  // 规则永久写进项目规则——用户以为已授权，实际下次仍被拦。
+  return projectAllowUnavailable(request) ? ["allow_once", "deny"] : approvalDecisions;
+}
+
+function projectAllowUnavailable(request: PermissionBrokerRequest): boolean {
+  return request.approvalMode === "user-once" || request.optionsPolicy === "no-always-allow";
 }
 
 export function handleApprovalKey(
@@ -128,10 +136,10 @@ export function createApprovalResult(
   request: PermissionBrokerRequest,
   decision: ApprovalDecision,
 ): PermissionBrokerResult {
-  if (
-    decision === "deny" ||
-    (decision === "allow_project" && request.approvalMode === "user-once")
-  ) {
+  // 与 decisionsForApproval 同一判据：这两个模式下 allow_project 不可用，
+  // 即便调用方绕过选项列表硬塞（例如旧快捷键/伪造应答）也必须降级为拒绝，
+  // 不能让 TUI 成为写项目规则的旁路（core 侧也会以 InvalidInput 拒绝该组合）。
+  if (decision === "deny" || (decision === "allow_project" && projectAllowUnavailable(request))) {
     return {
       decision: "deny",
       reason: "Denied in TUI",

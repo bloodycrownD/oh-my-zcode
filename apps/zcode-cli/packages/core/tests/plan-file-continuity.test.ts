@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { join } from "node:path";
 import {
   createRootTraceContext,
   createSessionId,
@@ -69,7 +70,8 @@ describe("plan file continuity", () => {
   it("returns a model-only plan_file_reference entry when the plan file exists", async () => {
     const sessionId = createSessionId("plan-file-reference");
     const fileSystemPort = new MemoryFileSystem({
-      "/workspace/project/.zcode/plans/plan-sess_plan-file-reference.md":
+      // 路径由 node:path 拼，Windows 上是反斜杠；用 join 造键而不是写死 POSIX 分隔符。
+      [join("/workspace/project", ".zcode", "plans", "plan-sess_plan-file-reference.md")]:
         "1. Preserve plan marker E2E_PLAN_FILE_CONTINUITY",
     });
 
