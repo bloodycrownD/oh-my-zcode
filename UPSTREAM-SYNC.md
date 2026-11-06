@@ -10,11 +10,12 @@ oh-my-zcode 是 [ZCode](https://github.com/zai-org/ZCode)（Apache-2.0）的 for
 
 参照快照在**本仓库根目录下的 `.reference/`**（`<repo>/.reference/`），只读，禁止从本仓库反向写入。
 
-| 路径                       | 内容                                        | 本 fork 当前基线                          |
-| -------------------------- | ------------------------------------------- | ----------------------------------------- |
-| `.reference/ZCode`         | 上游 zai-org/ZCode 源码树                   | v3.15.1 @ `aac47556`                      |
-| `.reference/magic-context` | 上游 `@cortexkit/opencode-magic-context`    | 0.44.4                                    |
-| `.reference/pi`            | 上游 Pi harness（magic-context 的宿主之一） | 随 magic-context 版本走                   |
+| 路径                               | 内容                                             | 本 fork 当前基线        |
+| ---------------------------------- | ------------------------------------------------ | ----------------------- |
+| `.reference/ZCode`                 | 上游 zai-org/ZCode 源码树（本地快照）            | v3.16.2 @ `3c5b2276`    |
+| 分支 `vendor/zcode`（未 checkout） | 上游 zai-org/ZCode 只读基线（只做 fast-forward） | v3.17.2 @ `a9fe401e`    |
+| `.reference/magic-context`         | 上游 `@cortexkit/opencode-magic-context`         | 0.44.4                  |
+| `.reference/pi`                    | 上游 Pi harness（magic-context 的宿主之一）      | 随 magic-context 版本走 |
 
 更新方式：把整个目录替换为目标上游版本的干净 checkout（例如 `git clone` 后 `git checkout <tag>` / `git checkout <commit>`），不要在旧快照上增量改。随后记下 commit，写进本文件的基线表格。
 

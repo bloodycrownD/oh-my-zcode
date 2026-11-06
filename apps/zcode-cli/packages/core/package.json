@@ -27,6 +27,8 @@
     "build": "tsc",
     "clean": "node ../../scripts/clean-dist.mjs",
     "test:prompt-language-context": "node --test scripts/test-prompt-language-context.mjs",
+    "test:bash-sed-readonly-policy": "tsx --test scripts/test-bash-sed-readonly-policy.mjs",
+    "test:permission-plan-gate": "tsx --test scripts/test-permission-plan-gate.mjs",
     "test:ask-question-display": "tsx --test scripts/test-ask-question-display.mjs",
     "test:subagent-sync-dispatch": "tsx --test scripts/test-subagent-sync-dispatch.mjs",
     "test:subagent-notification-resume-hint": "tsx --test scripts/test-subagent-notification-resume-hint.mjs",

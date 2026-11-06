@@ -89,3 +89,6 @@ packages/desktop/.e2e-network-capture/
 /.zcode/
 # 上游/参考仓库的本地检出，不入库
 /.reference/
+# SQLite 迁移备份目录（migration-runner 以 `<dataRoot>/backup` 落盘；dataRoot 被指到
+# 仓库根时会在根下生成 cli-<ts>-<uuid>/{backup.json,tables.sqlite}，属用户数据，禁止入库）。
+/backup/
