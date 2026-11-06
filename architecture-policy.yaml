@@ -856,3 +856,9 @@ exceptions:
       - packages/ui/src/v4/composer/composerConfigStore.ts
       - packages/ui/src/v4/composer/resolveComposerSelection.ts
     reason: 2026-11-03 CR 修复在既有 v4/composer 草稿 owner 内拆出配置存储与派生选择纯函数；两者只依赖 shared/provider/services 与同目录草稿工具，不新增跨层边界。v4/composer 的模块登记需要对整个 composer owner 做 contract 梳理，不在本次缺陷修复范围内。
+  - id: guarded-single-use-approval-unmanaged-files
+    rule: unmanaged-new-file
+    paths:
+      - apps/zcode-cli/packages/core/src/permission/risk.ts
+      - apps/zcode-cli/packages/core/src/tool/executor/permission-response.ts
+    reason: risk.ts 是权限风险序（low<medium<high<critical）的纯函数模块，doom 循环合并升级时两个判定侧都要用它，没有更小的既有 owner 可放；permission-response.ts 是已准入的上游文件被裁到只剩 validatePermissionResponse（单次确认应答校验），裁剪后不再与 upstream snapshot 逐字节一致，因此按「新文件」计。两者都只依赖同目录/同层模块，不新增跨层边界；把 core 的 permission 与 tool/executor 两个目录登记为 managed 需要对整个 core 做 contract 梳理，不在本次安全修复范围内。
