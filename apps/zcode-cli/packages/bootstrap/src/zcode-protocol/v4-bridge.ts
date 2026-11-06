@@ -1492,6 +1492,21 @@ export function createConversationV4Gateway(
           });
         });
     },
+    onTurnSettled: (sessionId) => {
+      const record = context.sessions.get(sessionId);
+      if (!record) return;
+      // 每个 turn 终态都补一次既有 gate：异步消息驱动的 turn 不经过 v4 prompt 的
+      // finally/afterLegacyStateMutation，没有别的地方会重评队列。重复触发幂等
+      // （head 未变/已 promote 直接返回；core 仍 busy 时 gate 自己会排重试）。
+      void Promise.resolve()
+        .then(() => autoDrainV4QueueIfReady(record))
+        .catch((error: unknown) => {
+          context.logger?.warn("v4 auto-drain reevaluation after turn settled failed", {
+            error: error instanceof Error ? error.message : String(error),
+            sessionId,
+          });
+        });
+    },
     // ── turn 行清单（row manifest）持久化 ─────────────
     // 投影只交出「这一轮定稿了多少行」；落库在这里，且必须 detached——manifest 是
     // 冷开快路径，它的失败只能降级为全量物化，绝不能影响 ingest 与帧发送。

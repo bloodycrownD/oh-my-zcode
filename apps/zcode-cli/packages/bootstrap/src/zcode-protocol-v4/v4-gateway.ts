@@ -421,6 +421,15 @@ export interface V4GatewayHost {
   /** canonical goal complete 已进入 projection；宿主副作用必须 detached，禁止阻塞 ingest。 */
   onTargetCompleted?(sessionId: string, event: SessionEvent): void;
   /**
+   * turn 终态事件（TurnComplete/TurnError）投影提交后回调。
+   *
+   * 异步消息（后台任务完成通知）驱动的 turn 走 core 内部 runtime command，不经过 v4
+   * prompt 命令层的 `afterLegacyStateMutation`，队列里有命令时 autoDrain 没人重评，
+   * 于是助手回合结束后排队命令永久停摆（onTargetCompleted 只覆盖 goal 完成，覆盖不到这里）。
+   * 宿主必须 detached 处理，禁止阻塞 ingest。
+   */
+  onTurnSettled?(sessionId: string, event: SessionEvent): void;
+  /**
    * turn 终态的行清单写入（`onTurnComplete` / `onTurnError` 两处）。实现必须持久、幂等，
    * 且不得阻塞 ingest——投影侧只负责把 entry 交出来。缺席（旧宿主/测试桩）时只跳过
    * manifest，投影与协议行为不变。
@@ -1452,6 +1461,14 @@ export class ConversationV4Gateway {
     }
     if (event.type === SessionEventType.TurnComplete || event.type === SessionEventType.TurnError) {
       this.projectionFaultedSessions.delete(sessionId);
+      // hydration 回放的旧终态事件不代表实时 turn 结束，不触发自动提升重评。
+      if (!this.hydrationBuffers.has(sessionId)) {
+        try {
+          this.host.onTurnSettled?.(sessionId, event);
+        } catch (error) {
+          this.host.onError?.("v4.projection.turnSettled", error);
+        }
+      }
     }
     if (event.type === SessionEventType.TurnSteerQueued) {
       const queueItemId = (event.payload as { pendingInputId?: string }).pendingInputId;
