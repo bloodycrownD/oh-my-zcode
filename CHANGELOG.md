@@ -1,3 +1,25 @@
+## [1.0.34](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.33...v1.0.34) (2026-11-06)
+
+三条「早就该修、但只修在 1.1.x 线」的缺陷收回 1.0.x：会话里看不到 MCP 工具、MCP 断连后该会话永久失效、异步消息回合结束后排队命令不弹。**无 UI 变更、无 schema 迁移。**
+
+### 修复
+
+- **会话里看不到 MCP 工具（启动快照不完整）**。会话启动只等 15s（`MCP_SESSION_OAUTH_AUTHORIZATION_TIMEOUT_MS`），授权类 server 常驻 `connecting`，`connectConfiguredServers` 于是带着 `tools: []` 返回；`initializeMcp` 按这份空快照注册 0 个工具后把一次性门闩 `mcpToolsRegistered` 置 true，此后每回合都在第一行 return——server 后来连上了也没有任何路径注册，只有重开会话能恢复。现在注册后判断快照是否仍不完整（有 server 停在 connecting 或压根没拿到状态），是则置待补注册，在下一回合边界补一次（`settleMcpTools`：只重读 status/listTools，不重连），且**只增不减**——半连接快照不能当权威集合反注册已注册的工具。
+- **MCP server 断连后该会话永久失效**（回移 1.1.x `3ef91590`）。① 此前只有 `disconnected` 会在调用前重连，重连失败一次落到 `failed` 就永久死亡，没有任何自动/手动路径再试；现在 `failed` 也重连，配 1s→30s 指数退避，连上清零。② SDK 的 `client.onclose` 只在显式 close 时派发，HTTP/SSE 断流只走 `transport.onerror`——不挂它状态会一直停在 `connected`，上面那条懒重连永远进不去；现在非 stdio 连接挂 `onerror` 并把状态翻成 `disconnected`。③ 设置页热刷新带 `revalidate`，连接池不再对已有 entry 直接返回那个早已 resolve（可能早已 failed）的 promise。④ 重连成功后工具面重新装配：1.0.x 没有 1.1.x 的 `toolListRevision`，改用 `serverName:status` 指纹，指纹变化（掉线/重连/停用）时补一次工具面 diff。
+- **异步消息回合结束后排队命令不弹**（回移 1.1.x `1301dbb5`）。后台任务完成通知驱动的 turn 走 core 内部 `task-notification` runtime command，既不经过 v4 prompt 的 `afterLegacyStateMutation`，也不是 `onTargetCompleted`（后者只覆盖 canonical goal complete），于是队列里有命令却没有人重评。现在 gateway 在 TurnComplete/TurnError 投影提交后回调宿主 `onTurnSettled`，接到既有的 `autoDrainV4QueueIfReady`（detached、幂等；core 仍 busy 时 gate 自己排重试）；hydration 回放的旧终态事件跳过。
+
+### 验证
+
+- **真子进程 E2E** `test-mcp-live-recovery.mjs`（真 MCP stdio 协议 + 真 adapter，非假 transport）：两条用例在 **v1.0.33 原状上实跑全红**，打上本版改动后 2/2 绿；单独退回上一提交时 E1 仍绿、E2 红，说明「启动快照」与「failed 重连」两条链路各自独立成立。
+- `test-mcp-tool-surface-settle.mjs` 6/6：启动快照不完整 → 下一回合补注册、完整快照不触发、半连接不误删、长期 connecting 有上限、热刷新仍 replace、掉线重连后重装配。
+- `test-v4-turn-settled-autodrain.mjs` 3/3：TurnComplete/TurnError 回调、TurnStart 不回调。
+- `tsc -b contracts/shared-types/core/adapters/bootstrap`：0 新增错误（既有错误与这些改动无关，改动前后条数一致）。
+
+### 已知
+
+- adapter 侧的失败退避**节奏**（1s→30s 翻倍）没有钉时间的用例：E2E 覆盖的是「failed 之后能重连成功」，不是退避间隔本身。
+- 本版不含 1.1.x 的桌面 E2E 框架，UI 层未做脚本化验证。
+
 ## [1.0.33](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.32...v1.0.33) (2026-11-04)
 
 冷开路径不再预载 2.2MB 的 claude tokenizer，打开会话窗口内少一次主线程同步编译。
