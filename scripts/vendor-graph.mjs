@@ -158,7 +158,7 @@ if (seedDir) {
   };
   walk(seedDir.replace(/\\/g, "/"));
 }
-if (seeds.length === 0) {
+if (seeds.length === 0 && !args.includes("--partition")) {
   console.error("缺 --seed 或 --seed-dir");
   process.exit(2);
 }
@@ -211,6 +211,131 @@ if (withIncoming) {
       for (const target of edgesOf(rel, root)) consider(target);
     }
   }
+}
+
+// ── barrel 识别：`index.ts` 只做 re-export 的文件会把所有东西焊在一起 ──
+const barrelCache = new Map();
+function isBarrel(rel, root) {
+  if (!/\/index\.(ts|tsx)$/.test(rel)) return false;
+  const key = `${root}\u0000${rel}`;
+  const cached = barrelCache.get(key);
+  if (cached !== undefined) return cached;
+  const abs = path.join(root, rel);
+  if (!existsSync(abs) || !isFile(root, rel)) {
+    barrelCache.set(key, false);
+    return false;
+  }
+  const lines = readFileSync(abs, "utf8")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line && !line.startsWith("//") && !line.startsWith("*") && !line.startsWith("/*"));
+  const reExports = lines.filter((line) => /^export\s+(\*|\{[^}]*\}\s*from|type\s+\{)/.test(line)).length;
+  const other = lines.filter((line) => !/^(export|import)\b/.test(line)).length;
+  const verdict = reExports >= 5 && other <= 3;
+  barrelCache.set(key, verdict);
+  return verdict;
+}
+
+// ── partition：把整个变动集 C 按依赖咬合关系切成互不相交的岛 ────────
+if (args.includes("--partition")) {
+  const nodes = [...changed.keys()];
+  const parent = new Map(nodes.map((n) => [n, n]));
+  const find = (x) => {
+    let root = x;
+    while (parent.get(root) !== root) root = parent.get(root);
+    while (parent.get(x) !== root) {
+      const next = parent.get(x);
+      parent.set(x, root);
+      x = next;
+    }
+    return root;
+  };
+  const union = (a, b) => {
+    const ra = find(a);
+    const rb = find(b);
+    if (ra !== rb) parent.set(ra, rb);
+  };
+
+  const withBarrels = args.includes("--with-barrels");
+  const isGlue = (rel) => !withBarrels && (isBarrel(rel, theirsRoot) || isBarrel(rel, oursRoot));
+
+  let parsed = 0;
+  for (const rel of nodes) {
+    parsed += 1;
+    if (parsed % 1000 === 0) console.error(`  已解析 ${parsed}/${nodes.length}`);
+    if (isGlue(rel)) continue;
+    const outgoing = new Set([...edgesOf(rel, theirsRoot), ...edgesOf(rel, oursRoot)]);
+    for (const target of outgoing) {
+      if (!changed.has(target) || isGlue(target)) continue;
+      union(rel, target);
+    }
+  }
+  // 补一次反向合并（用正向边表反推，避免二次全量解析）
+  const reverseEdges = new Map();
+  for (const rel of nodes) {
+    if (isGlue(rel)) continue;
+    for (const target of new Set([...edgesOf(rel, theirsRoot), ...edgesOf(rel, oursRoot)])) {
+      if (!changed.has(target) || isGlue(target)) continue;
+      const list = reverseEdges.get(target) ?? [];
+      list.push(rel);
+      reverseEdges.set(target, list);
+    }
+  }
+  for (const [target, importers] of reverseEdges) {
+    for (const importer of importers) union(target, importer);
+  }
+
+  const islands = new Map();
+  for (const rel of nodes) {
+    const root = find(rel);
+    const list = islands.get(root) ?? [];
+    list.push(rel);
+    islands.set(root, list);
+  }
+
+  const summary = [...islands.values()]
+    .map((files) => {
+      const buckets = new Map();
+      for (const file of files) {
+        const cli = /^apps\/zcode-cli\/packages\/([^/]+)\//.exec(file);
+        const pkg = /^packages\/([^/]+)\//.exec(file);
+        const key = cli ? `cli/${cli[1]}` : pkg ? `pkgs/${pkg[1]}` : file.split("/")[0];
+        buckets.set(key, (buckets.get(key) ?? 0) + 1);
+      }
+      return { files: files.sort(), buckets, size: files.length };
+    })
+    .sort((a, b) => b.size - a.size);
+
+  const top = Number(flag("top", "30"));
+  console.log(`\n岛屿总数：${summary.length}（覆盖 ${nodes.length} 个变动源文件）`);
+  console.log(`前 ${top} 大：\n`);
+  for (const [index, island] of summary.slice(0, top).entries()) {
+    const composition = [...island.buckets.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([key, count]) => `${key}:${count}`)
+      .join(" ");
+    console.log(`${String(index + 1).padStart(3)}. ${String(island.size).padStart(4)} 文件  ${composition}`);
+    if (args.includes("--examples")) {
+      for (const file of island.files.slice(0, 3)) console.log(`        ${file.replace("apps/zcode-cli/packages/", "cli/")}`);
+    }
+  }
+  if (jsonOut) {
+    writeFileSync(
+      jsonOut,
+      `${JSON.stringify(
+        summary.map((island, index) => ({
+          index: index + 1,
+          size: island.size,
+          composition: Object.fromEntries(island.buckets),
+          files: island.files,
+        })),
+        null,
+        2,
+      )}\n`,
+    );
+    console.log(`\n已写入 ${jsonOut}`);
+  }
+  process.exit(0);
 }
 
 // ── 报告 ───────────────────────────────────────────────────
