@@ -38,6 +38,7 @@ import type {
   WorkspaceRewindRestoredFile,
   WorkspaceRewindResult,
 } from "../types.js";
+import { rebaseRuntimeTasksOntoBranch } from "../../runtime-task/registry.js";
 import type { AgentRuntimeInternal } from "../internal.js";
 import { rebuildContextPrefix } from "./context-refresh.js";
 import { mainTurnCacheHitAggregateFromMessages } from "./turn-model-step-usage.js";
@@ -572,6 +573,20 @@ async function applyConversationRewindPlan(
   });
   this.branchGeneration = branchGeneration;
   this.runtimeTaskRegistry.setActiveBranchGeneration?.(branchGeneration);
+  // 被裁轮次的任务已经在上一步停过；此刻仍 running 的任务都属于保留分支，必须重盖代际，
+  // 否则它们后续的 completion / escalation 通知会被 stale-branch fence 静默丢弃。
+  const rebasedTaskCount = rebaseRuntimeTasksOntoBranch(this.runtimeTaskRegistry, branchGeneration, {
+    fencedTurnIds: new Set(removedTurnIds),
+  });
+  if (rebasedTaskCount > 0) {
+    this.logger?.info("Rebased running background tasks onto the rewound branch", {
+      ...traceContextToLogContext(options.traceContext),
+      branchGeneration,
+      count: rebasedTaskCount,
+      event: "rewind.background_tasks.rebased",
+      module: "core.runtime",
+    });
+  }
 
   await rebuildConversationDerivedState.call(this, {
     branchCutAfterMessageId,

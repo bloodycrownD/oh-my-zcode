@@ -291,6 +291,36 @@ export function hasRunningBackgroundRuntimeTask(registry: RuntimeTaskRegistry): 
   );
 }
 
+/**
+ * rewind 后把**启动轮仍保留**的任务重盖到新分支代。
+ *
+ * 为什么需要：{@link rewind-message} 的 `cancelRemovedBranchBackgroundTasks` 只停掉启动轮
+ * 被裁掉的任务；启动轮保留的任务会继续跑（workflow run 更是独立于对话继续烧 token），但
+ * registry 条目上的 `branchGeneration` 仍是旧值。任务事件与后台通知在入队、出队两处都按
+ * 代际 fence，不重盖就会在 rewind 之后静默丢失——completion 与 escalation 的丢弃日志都是
+ * debug 级，日志里看不见，而 parked 的 workflow actor 会永远等不到回答。
+ *
+ * **终态任务也要重盖**：通知可能已经入队、正卡在一个长回合后面等待出队。只改 running
+ * 会留下「任务在 rewind 前一刻完成」这一整类丢失。
+ *
+ * `fencedTurnIds` 里的任务不重盖：它们的启动轮已经被裁掉，即使因停止失败仍在 running，
+ * 也不该把通知带回新分支。
+ */
+export function rebaseRuntimeTasksOntoBranch(
+  registry: RuntimeTaskRegistry,
+  branchGeneration: number,
+  options: { fencedTurnIds?: ReadonlySet<string> } = {},
+): number {
+  let rebased = 0;
+  for (const task of Object.values(registry.all())) {
+    if (task.branchGeneration === branchGeneration) continue;
+    if (task.turnId !== undefined && options.fencedTurnIds?.has(String(task.turnId))) continue;
+    registry.update(task.taskId, (current) => ({ ...current, branchGeneration }));
+    rebased += 1;
+  }
+  return rebased;
+}
+
 function abortReason(signal: AbortSignal): unknown {
   return signal.reason ?? new Error("Runtime task wait aborted");
 }

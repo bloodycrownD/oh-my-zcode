@@ -31,7 +31,8 @@ export function enqueueBackgroundTaskNotification(
   const task = notification.taskId ? this.runtimeTaskRegistry.get(notification.taskId) : undefined;
   const branchGeneration = task?.branchGeneration ?? this.branchGeneration;
   if (branchGeneration !== this.branchGeneration) {
-    this.logger?.debug("Dropped stale-branch background task notification", {
+    // info 而不是 debug：这是「通知永久丢失」的唯一静默路径，必须能在常规日志里看见。
+    this.logger?.info("Dropped stale-branch background task notification", {
       ...traceContextToLogContext(notification.traceContext),
       branchGeneration,
       currentBranchGeneration: this.branchGeneration,
