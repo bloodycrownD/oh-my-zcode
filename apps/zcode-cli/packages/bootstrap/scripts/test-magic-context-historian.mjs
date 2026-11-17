@@ -232,7 +232,7 @@ test("historian.model 缺省（inherit）：无条件装 executor、哨兵不过
   assert.ok(host.historianScheduler, "后台调度器必须在场");
   // 未绑定期：保守窗口回退（128k）与缺省输出上限。
   assert.equal(host.getHistorianChunkTokens(), 32_000);
-  assert.equal(host.historianMaxOutputTokens, 8_192);
+  assert.equal(host.historianMaxOutputTokens, 128_000);
   host.shutdown();
 });
 
@@ -297,7 +297,7 @@ test("inherit：绑不到 Model 时退回保守回退而不是把窗口清零", 
   // 归零，比「偏保守」危险得多。
   assert.equal(host.getHistorianModel(), "zcode/gone");
   assert.equal(host.getHistorianChunkTokens(), 32_000);
-  assert.equal(host.historianMaxOutputTokens, 8_192);
+  assert.equal(host.historianMaxOutputTokens, 128_000);
   host.shutdown();
 });
 
@@ -357,7 +357,7 @@ test('inherit 缺省配置同样装 executor：与显式写 "inherit" 逐位等�
     assert.equal(host.historianModel, undefined);
     assert.equal(host.getHistorianModel(), undefined);
     assert.equal(host.getHistorianChunkTokens(), 32_000);
-    assert.equal(host.historianMaxOutputTokens, 8_192);
+    assert.equal(host.historianMaxOutputTokens, 128_000);
     host.shutdown();
   }
 });

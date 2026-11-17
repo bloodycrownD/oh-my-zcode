@@ -30,7 +30,7 @@ date: 2026-11-17
 
 ### R3 配置：historian 输出上限
 
-用户环境 `~/.omz/cli/config.json` 的 `magicContext.historian.maxTokens` 设为 `128000`（仓库外配置，由运行时按模型 `optionSpecs.maxOutputTokens.max` 夹紧）。仓库内默认值保持 8192：未配置用户的成本保护不变，修复只保证「预算不足」能被正确诊断而不是误报空输出。
+用户环境 `~/.omz/cli/config.json` 的 `magicContext.historian.maxTokens` 设为 `128000`（仓库外配置）。仓库内缺省值同步改为 `DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS = 128_000`：**发版默认即 128K**，未配置用户与显式配置走同一条「按模型 `optionSpecs.maxOutputTokens.max` 夹紧」的路径，小输出模型不会被要求超过它声明的上限；128K 是上限而非强制写满。
 
 ## 行为契约
 

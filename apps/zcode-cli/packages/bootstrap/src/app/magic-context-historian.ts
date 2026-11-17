@@ -186,8 +186,13 @@ const UNKNOWN_HISTORIAN_CONTEXT_LIMIT = 128_000;
  *
  * 缺省值按模型自己声明的上限夹紧（`optionSpecs.maxOutputTokens.max`），因此小输出
  * 模型永远不会被要求超过它接受的值；用户显式配的值同样走这条夹紧。
+ *
+ * 2026-11-17 用户要求：发版默认就是 128K。此前缺省 8192 的由来只是「建请求必须带一个
+ * 合法值」，但 historian 的 chunk 在积压后可达 50K 输入（146 条消息），推理模型会把
+ * 8192 全部用于 reasoning，正文为空并触发误报；128K 是上限而非强制写满，代价由模型
+ * 与 provider 的实际输出决定。
  */
-const DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS = 8_192;
+const DEFAULT_HISTORIAN_MAX_OUTPUT_TOKENS = 128_000;
 
 /**
  * `magicContext.historian.maxTokens` 的解析：按模型自己声明的上限夹紧。
