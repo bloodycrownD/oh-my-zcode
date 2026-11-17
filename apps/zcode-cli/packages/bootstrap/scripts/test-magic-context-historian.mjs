@@ -121,6 +121,11 @@ function fakeModel(observed, options = {}) {
       observed.abortSignals.push(request.abortSignal);
       observed.invocations.push(observed.currentInvocation?.() ?? null);
       yield { type: "start" };
+      if (options.reasoning !== undefined) {
+        yield { type: "reasoning_start", id: "r0" };
+        yield { type: "reasoning_delta", id: "r0", text: options.reasoning };
+        yield { type: "reasoning_end", id: "r0" };
+      }
       yield { type: "text_start", id: "b0" };
       yield { type: "text_delta", id: "b0", text: options.reply ?? "SUMMARY" };
       yield { type: "text_end", id: "b0" };
@@ -409,6 +414,36 @@ test("sidecarModelCall：两段消息（system + user）、usage 与 finishReaso
   assert.equal(observed.messages[0][0].content, "historian system prompt");
   assert.equal(observed.messages[0][1].content, "<new_messages>raw history</new_messages>");
   assert.equal(observed.abortSignals[0], controller.signal, "abortSignal 必须原样传到底层");
+});
+
+test("sidecarModelCall：reasoning-only 回复把 reasoning 透传，lengthCapped 反映输出截断", async () => {
+  const observed = { messages: [], abortSignals: [], invocations: [] };
+  const model = fakeModel(observed, {
+    reply: "",
+    reasoning: "reasoning spent the whole output budget",
+    finishReason: "length",
+    usage: { inputTokens: 40, outputTokens: 8_000, totalTokens: 8_040 },
+  });
+  const call = createZCodeSidecarModelCall({
+    logger: NOOP_LOGGER,
+    createSidecarModel: () => model,
+  });
+
+  const controller = new AbortController();
+  const result = await call(
+    {
+      run: makeRun(),
+      prompt: "<new_messages>raw history</new_messages>",
+      abortSignal: controller.signal,
+    },
+    { preserveProviderStreamBoundaries: true },
+  );
+
+  // 只映射 text 会把这一段误报成「Historian returned no assistant output.」，
+  // 于是 historianReasoningBudgetDiagnostic 永远走不到。
+  assert.equal(result.text, "");
+  assert.equal(result.reasoning, "reasoning spent the whole output budget");
+  assert.equal(result.lengthCapped, true, "finishReason=length 且 text 为空必须标记为输出截断");
 });
 
 test("sidecarModelCall：以 true 把 preserveProviderStreamBoundaries 交到 provider 调用面", async () => {

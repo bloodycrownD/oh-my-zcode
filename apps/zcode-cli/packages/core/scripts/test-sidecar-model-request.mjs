@@ -342,3 +342,26 @@ test("已经提交之后再抛错：不退回 non-stream（避免重发已提交
   await assert.rejects(() => call(model, {}, logger), /tail error after commit/);
   assert.equal(observed.generateTextCalls.length, 0, "已提交的内容块绝不能被第二种 transport 重放");
 });
+
+test("reasoning-only 响应：推理文本随结果回传，text 保持为空", async () => {
+  const observed = observe();
+  const model = fakeModel(observed, {
+    script: [
+      { type: "start" },
+      { type: "reasoning_start", id: "r0" },
+      { type: "reasoning_delta", id: "r0", text: "thinking about the chunk" },
+      { type: "reasoning_delta", id: "r0", text: " and the output budget" },
+      { type: "reasoning_end", id: "r0" },
+      finishEvent({ finishReason: "length" }),
+    ],
+  });
+
+  const result = await call(model);
+
+  // historian 侧据此区分「推理耗尽输出预算」与「模型真的没有输出」；丢掉 reasoning
+  // 会让 length-capped 的推理回复被误报成空输出并无限重试。
+  assert.equal(result.text, "");
+  assert.deepEqual(result.reasoning, [
+    { type: "reasoning", text: "thinking about the chunk and the output budget" },
+  ]);
+});

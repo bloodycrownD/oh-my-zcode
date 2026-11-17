@@ -42,10 +42,16 @@ interface SidecarFinish {
 
 interface SidecarStreamState {
   committedText: string;
+  // FORK（historian-output-diagnosis）：此前 reasoning 只在事件里被略过，结果对象
+  // 不带任何推理内容。historian 在 text 为空时用 reasoning 区分「推理耗尽输出预算」
+  // 与「模型真的没有输出」，丢掉它会把前一种情况误报成空输出、重试也永远救不回来。
+  committedReasoning: string;
+  currentReasoningBlockId?: string;
   committedContentBlock: boolean;
   currentTextBlockId?: string;
   finish?: SidecarFinish;
   pendingTextById: Map<string | undefined, string>;
+  pendingReasoningById: Map<string | undefined, string>;
   providerContentBlockTypes: Map<number, string>;
   providerMessageProtocolObserved: boolean;
   providerResponseStarted: boolean;
@@ -105,8 +111,12 @@ function applySidecarStreamEvent(
 ): void {
   switch (event.type) {
     case "start":
-    case "reasoning_start":
     case "tool_input_start":
+      return;
+
+    case "reasoning_start":
+      state.currentReasoningBlockId = event.id;
+      state.pendingReasoningById.set(event.id, "");
       return;
 
     case "compact_stream_boundary":
@@ -143,11 +153,26 @@ function applySidecarStreamEvent(
       commitNormalizedContentBlock(state);
       return;
 
-    case "reasoning_delta":
+    case "reasoning_delta": {
       state.sawDelta = true;
+      const reasoningBlockId = event.id ?? state.currentReasoningBlockId;
+      state.pendingReasoningById.set(
+        reasoningBlockId,
+        (state.pendingReasoningById.get(reasoningBlockId) ?? "") + event.text,
+      );
       return;
+    }
 
     case "reasoning_end":
+      state.committedReasoning +=
+        state.pendingReasoningById.get(event.id) ??
+        state.pendingReasoningById.get(undefined) ??
+        "";
+      state.pendingReasoningById.delete(event.id);
+      state.pendingReasoningById.delete(undefined);
+      if (state.currentReasoningBlockId === event.id) {
+        state.currentReasoningBlockId = undefined;
+      }
       commitNormalizedContentBlock(state);
       return;
 
@@ -341,6 +366,10 @@ function sidecarStreamResult(
     finishReason: finish.finishReason,
     providerMetadata: finish.providerMetadata,
     text: state.committedText,
+    reasoning:
+      state.committedReasoning.length > 0
+        ? [{ type: "reasoning", text: state.committedReasoning }]
+        : undefined,
     toolCalls: state.toolCalls.length > 0 ? state.toolCalls : undefined,
     usage: finish.usage,
   };
@@ -393,8 +422,10 @@ function isProviderContentBlockDeltaCompatible(
 function createSidecarStreamState(): SidecarStreamState {
   return {
     committedText: "",
+    committedReasoning: "",
     committedContentBlock: false,
     pendingTextById: new Map(),
+    pendingReasoningById: new Map(),
     providerContentBlockTypes: new Map(),
     providerMessageProtocolObserved: false,
     providerResponseStarted: false,

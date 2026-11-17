@@ -302,8 +302,16 @@ export function createZCodeSidecarModelCall(deps: {
     }
 
     const finishReason = raw.finishReason ?? "";
+    // FORK（historian-output-diagnosis）：reasoning 必须随结果回传。historian 在
+    // text 为空时依赖它区分「推理耗尽输出预算」（可提示调 historian.maxTokens）与
+    // 「模型真的没有输出」；只映射 text 会让前者被误报成后者并无限重试。
+    const reasoningText = (raw.reasoning ?? [])
+      .map((block) => block.text)
+      .filter((text) => text.length > 0)
+      .join("\n\n");
     const result: SidecarModelCallResult = {
       text: raw.text,
+      reasoning: reasoningText.length > 0 ? reasoningText : null,
       usage: raw.usage,
       finishReason,
       // 输出被 cap 截断且一个字都没吐时，historian 必须把它当成一个**不同的失败**
