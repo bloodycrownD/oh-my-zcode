@@ -1,3 +1,23 @@
+## [1.0.35](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.34...v1.0.35) (2026-11-17)
+
+Magic Context 的 historian 在长会话里连续失败、压缩停滞：sidecar 层丢掉 reasoning 内容，把「推理耗尽输出预算」误报成「模型没有输出」；同时缺省输出上限只有 8192，积压后 50K 输入的 chunk 根本写不完。**无 UI 变更、无 schema 迁移。**
+
+### 修复
+
+- **sidecar 保留 reasoning 并回传**。`runSidecarModelRequest` 此前对 `reasoning_start` / `reasoning_delta` / `reasoning_end` 只记 `sawDelta`、不累积内容，`sidecarStreamResult` 也不填 `reasoning`；`createZCodeSidecarModelCall` 同样只映射 `text`。推理模型把 8192 输出预算全部用于 thinking 时，historian 判定为 `!text && !reasoning` 的「Historian returned no assistant output.」，`historianReasoningBudgetDiagnostic` 永远走不到，重试只会重复同一次截断。现在 reasoning 文本随结果回传，`text` 为空且 `lengthCapped` 时给出「调大 `historian.maxTokens`」的明确诊断。
+- **historian 缺省输出上限 8192 → 128K**。积压后单次 chunk 可达 146 条消息 / 50K 输入，8192 不足以写完 compartment XML（实测 12K 字符后截断，尾部缺 `<unprocessed_from>` 而 validation 失败）。缺省值仍按模型 `optionSpecs.maxOutputTokens.max` 夹紧，小输出模型不会被要求超过自己的上限；128K 是上限而非强制写满。
+
+### 验证
+
+- `test-sidecar-model-request.mjs` 7/7（新增 reasoning-only 用例：reasoning 随结果回传、`text` 为空）。
+- `test-magic-context-historian.mjs` 12/12（新增 reasoning 透传 + `lengthCapped` 用例；缺省输出上限断言改为 128000）。
+- `@zcode/magic-context test:historian` 18/18。
+- CLI turbo typecheck 27/27、根 `pnpm typecheck` exit 0、`pnpm lint` 0 errors、`pnpm architecture:check --changed` 0 violations。
+
+### 已知
+
+- 本版不改 validation 的 repair 策略（`<unprocessed_from>` 强制补齐），也不改 historian 的 drain 预算阈值；128K 下先观察是否自然消失。
+
 ## [1.0.34](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.33...v1.0.34) (2026-11-06)
 
 三条「早就该修、但只修在 1.1.x 线」的缺陷收回 1.0.x：会话里看不到 MCP 工具、MCP 断连后该会话永久失效、异步消息回合结束后排队命令不弹。**无 UI 变更、无 schema 迁移。**
