@@ -1,3 +1,23 @@
+## [1.0.36](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.35...v1.0.36) (2026-11-18)
+
+rewind 之后启动轮仍保留的 workflow run 收不到完成/升级通知：任务条目带着旧 `branchGeneration`，通知在入队与出队两处都被 stale-branch fence 静默丢弃（日志为 debug，表现为「完全不来」）。**无 UI 变更、无 schema 迁移。**
+
+### 修复
+
+- **rewind 后重盖任务代际**。`cancelRemovedBranchBackgroundTasks` 只停掉启动轮被裁的任务；启动轮保留的 run 会继续跑，但 registry 条目仍是旧代际。现在 rewind 提交后由 `rebaseRuntimeTasksOntoBranch` 把保留任务（含终态——通知可能还卡在队列里）重盖到新代际，被裁轮次的任务保持旧代际。
+- **出队 fence 按任务当前代际判定**。`isStaleBranchRuntimeCommand` 对 `task-notification` 不再只看命令入队时的代际，覆盖「通知已入队、出队前又发生 rewind」的竞态。
+- **丢弃不再静默**。入队处的 stale-branch 丢弃升到 info；出队处的 `task-notification` 丢弃升到 info，其余 mode 保持 debug。
+
+### 验证
+
+- 新增 `test-runtime-task-branch-rebase.mjs` 7/7：重盖（running / 终态）、fenced turn、无 turnId、已在新代际，以及出队 fence 的两个方向。
+- `@zcode/core` build、CLI turbo typecheck 27/27、根 `pnpm typecheck`、`pnpm lint` 0 errors、`pnpm architecture:check --changed` 0 violations。
+
+### 已知
+
+- 未做真机 E2E：rewind 只能由用户触发，单测覆盖的是代际判定与重盖；现场验证信号为 `rewind.background_tasks.rebased` 与后续 `runtime_enqueued` / `batch_started`。
+- 通知回合排队在前一个长回合之后造成的延迟（实测 14 分钟）不在本版范围。
+
 ## [1.0.35](https://github.com/bloodycrownD/oh-my-zcode/compare/v1.0.34...v1.0.35) (2026-11-17)
 
 Magic Context 的 historian 在长会话里连续失败、压缩停滞：sidecar 层丢掉 reasoning 内容，把「推理耗尽输出预算」误报成「模型没有输出」；同时缺省输出上限只有 8192，积压后 50K 输入的 chunk 根本写不完。**无 UI 变更、无 schema 迁移。**
