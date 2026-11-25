@@ -374,10 +374,26 @@ export function appendCompartments(
     compartments: CompartmentInput[],
 ): void {
     if (compartments.length === 0) return;
-    const now = Date.now();
     db.transaction(() => {
-        insertCompartmentRows(db, sessionId, compartments, now);
+        appendCompartmentsInTransaction(db, sessionId, compartments);
     }).immediate();
+}
+
+/**
+ * 在调用方已经开启的事务内追加 compartment 行。
+ *
+ * FORK（magic-context-fork-inherit）：fork 子会话的继承要把 tags 与 compartments
+ * 放进同一个 `BEGIN IMMEDIATE`（见 `session-inheritance.ts`），而 SQLite 不允许
+ * 嵌套事务，`appendCompartments` 自带的事务在这里开不出来，所以把写行部分单独出口。
+ * 调用方负责事务边界。
+ */
+export function appendCompartmentsInTransaction(
+    db: Database,
+    sessionId: string,
+    compartments: CompartmentInput[],
+): void {
+    if (compartments.length === 0) return;
+    insertCompartmentRows(db, sessionId, compartments, Date.now());
 }
 
 /** Verbatim: `compartment-storage.ts:852-864`. */

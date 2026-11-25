@@ -116,6 +116,7 @@ import { createProtocolBrowserControlBroker } from "./browser-control-broker.js"
 import { mapComputerUseOperationEvent } from "./computer-use-operation-event.js";
 import { protocolMcpServersToRuntimeMcpConfig } from "./protocol-mcp-config.js";
 import { projectIdFromDirectory } from "../app/paths.js";
+import { noteForkedSession } from "../app/session-fork-registry.js";
 import {
   paginateEndedSubagents,
   projectSessionSubagents,
@@ -2398,6 +2399,11 @@ export async function registerForkedSession(
   });
   if (options.inheritLatestTarget) {
     await inheritForkedSessionTarget(context, record, forkRecord, fork.forkedSessionId);
+  }
+  // 子会话是从父会话 fork 出来的这一事实要留给子会话的首轮使用（magic-context 的
+  // 折叠状态继承）。`resume()` 之前登记：resume 之后子会话随时可能开始第一轮。
+  if (fork.parentSessionId) {
+    noteForkedSession(fork.parentSessionId, fork.forkedSessionId);
   }
   await forkRecord.app.resume();
   return {

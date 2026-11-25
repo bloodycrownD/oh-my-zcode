@@ -187,6 +187,7 @@ import {
 } from "./magic-context-historian.js";
 import { emitMagicContextTransformAbsent } from "./magic-context-absent-event.js";
 import { readMagicContextUsageSummary } from "./magic-context-usage-summary.js";
+import { inheritForkedSessionStateAtTurnStart } from "./magic-context-fork-inherit.js";
 
 /** 包内 `createTransform` 的返回值形状（单测用桩实现替换它）。 */
 export type ZCodeMagicContextTransform = (
@@ -2036,6 +2037,9 @@ export function createZCodeMagicContextTurnTransformPort(
   const sessionSnapshots = new Map<string, readonly ZCodeRuntimeEntry[]>();
   const sessionRows = new Map<string, StoredRow[]>();
   const registeredSessions = new Set<string>();
+  // FORK（magic-context-fork-inherit）：每个会话在本进程内被观测到的最大 live 条目数，
+  // 供 turn 入口的 heal 当「全量原始消息数」用（见调用处的说明）。
+  const maxLiveEntriesBySession = new Map<string, number>();
   const rowsOf = (sessionId: string): StoredRow[] => sessionRows.get(sessionId) ?? [];
 
   function ensureProviderRegistered(sessionId: string): void {
@@ -2117,15 +2121,38 @@ export function createZCodeMagicContextTurnTransformPort(
         });
     }
     ensureProviderRegistered(sessionId);
+    // FORK（magic-context-fork-inherit）：fork 子会话首轮——在 transform 给全部历史打上
+    // active 的 tag 之前，把父会话的折叠状态与摘要继承过来。必须在 heal 之前：heal
+    // 随后校验的就是最终状态，实现若写出越界数值，heal 正好充当安全网。没有 fork
+    // 登记（非 fork 会话、子代理会话、已继承过）时这是一次纯查表，零副作用。
+    if (port.db !== undefined) {
+      await inheritForkedSessionStateAtTurnStart({
+        db: port.db,
+        sessionId,
+        childMessages: projected,
+        sessionStore: options.sessionStore,
+        logger: options.logger,
+      });
+    }
     // FORK（MC 跨会话污染修复 / 数据自愈）：compactions 的边界 ordinal 若超出该会话
     // 自己的消息数，说明这份账本是在另一套 ordinal 空间里写下的（旧版本跨会话快照
     // 污染），既不能注入也不能裁剪，`/ctx-recomp` 的增量 pass 也只会返回 0 条。
     // 这类账本可证明不自洽，直接重建；原始消息不受影响。
     if (port.db !== undefined) {
+      // FORK（magic-context-fork-inherit）：heal 的判据是「边界 > 全量原始消息数」，而
+      // 交给这里的 `snapshot.length` 只是**这一次调用**看到的条目数。同一轮里 transform
+      // 可能被再次调用，拿到的已经是上一次折叠之后的请求条目（续写、重试路径），
+      // 长会话会从近万条缩到几百条——拿它当「全量」就会把一份完全自洽的账本清掉
+      // （实测：fork 子会话首轮 8890 → 3787 条，1175 个 compartment 被清空）。
+      // canonical 历史在一个进程内只增不减，所以取本进程内观测到的最大值：它才是
+      // 「全量」的可靠下界，折叠后的短数组不会再触发误清账。
+      const previousMax = maxLiveEntriesBySession.get(sessionId) ?? 0;
+      const liveMessagesForHeal = Math.max(previousMax, snapshot.length);
+      maxLiveEntriesBySession.set(sessionId, liveMessagesForHeal);
       const healEndOrdinal = healUnreachableCompartmentLedger(
         port.db,
         sessionId,
-        snapshot.length,
+        liveMessagesForHeal,
       );
       if (healEndOrdinal !== null) {
         options.logger.warn(
@@ -2133,7 +2160,7 @@ export function createZCodeMagicContextTurnTransformPort(
           {
             sessionId,
             endOrdinal: healEndOrdinal,
-            liveMessages: snapshot.length,
+            liveMessages: liveMessagesForHeal,
           },
         );
       }

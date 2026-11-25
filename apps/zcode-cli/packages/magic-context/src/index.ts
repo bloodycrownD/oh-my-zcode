@@ -279,6 +279,21 @@ export {
 } from "./core/features/magic-context/compartment-storage.js";
 
 /**
+ * fork 子会话继承父会话的折叠状态与摘要（magic-context-fork-inherit）。
+ *
+ * 对齐规则、tags/compartments 的列语义、数值区间的连续性校验都在包内；宿主只判断
+ * 「这是 fork 子会话的首轮」并调用。宿主另写一份 SQL 或自己拼 `CompartmentInput`
+ * 迟早与包内语义漂移（同 `healUnreachableCompartmentLedger` 的出口理由）。
+ */
+export {
+  inheritForkedSessionState,
+  type InheritForkedSessionStateInput,
+  type InheritForkedSessionStateResult,
+  type InheritedMessageLike,
+  type ParentToolOutput,
+} from "./core/features/magic-context/session-inheritance.js";
+
+/**
  * session_meta 的 usage 读写面（S24）。
  *
  * 上游 OpenCode 的 plugin 由 `message.updated` 事件负责写 `last_*_usage` 三列；
