@@ -26,8 +26,12 @@ const getTagNumberByMessageIdStatements = new WeakMap<Database, PreparedStatemen
 const getAssignableTagNumberByMessageIdStatements = new WeakMap<Database, PreparedStatement>();
 const hasPiFallbackMessageTagStatements = new WeakMap<Database, PreparedStatement>();
 
-const WHITESPACE_ASSISTANT_INERT_MESSAGE_PREFIX = "__mc_whitespace_assistant_inert__:";
 const WHITESPACE_ASSISTANT_INERT_FINGERPRINT_PREFIX = "mc:whitespace-assistant:";
+// FORK（tag-drift-content-verify）：导出给 tag-messages 的漂移预扫描——posIdx 的
+// 过滤条件与 getAssignableTagNumberByMessageId 同口径，需要同一个前缀字面量，
+// 避免两处硬编码漂移。
+export const WHITESPACE_ASSISTANT_INERT_MESSAGE_PREFIX =
+    "__mc_whitespace_assistant_inert__:";
 
 function getInsertTagStatement(db: Database): PreparedStatement {
     let stmt = insertTagStatements.get(db);
@@ -1099,6 +1103,133 @@ export function updateTagMessageId(
     messageId: string,
 ): void {
     getUpdateTagMessageIdStatement(db).run(messageId, sessionId, tagId);
+}
+
+// FORK（tag-drift-content-verify）：墓碑键是 ZCode fork 对 `tags.message_id`
+// 的一个新取值——上游没有「位置键退役」的概念。重启平移后 tag-messages 的内容
+// 校验会把被让出的位置键改成 `__mc_drifted__:<tag_number>`：只挪位置键、不改
+// status（被主人认领回去时 dropped 状态要原样重放），这样旧代码读到墓碑键只是
+// 等值/LIKE 查不到（getAssignableTagNumberByMessageId、deleteTagsByMessageId、
+// markTagsCompactedByMessageIds 的模式都匹配不到），不会报错。已逐一核对消费方：
+// pending ops 按 tag_number、fork 继承按内容对齐 + /^mc(\d+)/、
+// getMinMessageTagNumberForRawId 的半开区间扫描均不受影响。墓碑行不被
+// message.removed 清理路径回收，随会话留存——已知限制，写入 spec。
+export const DRIFTED_TAG_MESSAGE_PREFIX = "__mc_drifted__:";
+
+export interface SessionTagRow {
+    tagNumber: number;
+    messageId: string;
+    status: string;
+    messageRole: string | null;
+    type: string;
+    /** 与 getAssignableTagNumberByMessageId 同口径的过滤要用这一列。 */
+    entryFingerprint: string | null;
+}
+
+function isSessionTagRow(row: unknown): row is Record<string, unknown> {
+    if (row === null || typeof row !== "object") return false;
+    const r = row as Record<string, unknown>;
+    return (
+        typeof r.tag_number === "number" &&
+        typeof r.message_id === "string" &&
+        typeof r.status === "string" &&
+        typeof r.type === "string" &&
+        (r.message_role === null || typeof r.message_role === "string") &&
+        (r.entry_fingerprint === null || typeof r.entry_fingerprint === "string")
+    );
+}
+
+const listTagRowsBySessionStatements = new WeakMap<Database, PreparedStatement>();
+
+/**
+ * 本会话全部 tags 行的窄投影（变更点 #6）：tag-messages 的漂移预扫描据此自建
+ * `posIdx`（messageId -> 行）与 `rowByTag`（tagNumber -> 行）两个索引。
+ *
+ * FORK（tag-drift-content-verify）：上游每次只做等值/区间点查，从不按会话整表
+ * 读 tags；ZCode 的内容校验需要会话级快照来判定「位置候选的类型/status/role/
+ * message_id」与「认领候选是否满足过滤条件」。`ORDER BY tag_number ASC` 保证
+ * 同一 message_id 挂多行时调用方取最小 tag_number 的行为确定。不走
+ * TAG_SELECT_COLUMNS：预扫描只需要六列，窄投影省掉长会话数千行的多余列拷贝；
+ * entry_fingerprint 必须带出——posIdx 的过滤条件与
+ * getAssignableTagNumberByMessageId（storage-tags.ts:784-804）一致：排除
+ * status='compacted' 且 entry_fingerprint 为 whitespace-inert 前缀的行。
+ */
+export function listTagRowsBySession(db: Database, sessionId: string): SessionTagRow[] {
+    let stmt = listTagRowsBySessionStatements.get(db);
+    if (!stmt) {
+        stmt = db.prepare(
+            `SELECT tag_number, message_id, status, message_role, type, entry_fingerprint
+             FROM tags WHERE session_id = ? ORDER BY tag_number ASC`,
+        );
+        listTagRowsBySessionStatements.set(db, stmt);
+    }
+    return (stmt.all(sessionId) as unknown[])
+        .filter(isSessionTagRow)
+        .map((row) => ({
+            tagNumber: row.tag_number as number,
+            messageId: row.message_id as string,
+            status: row.status as string,
+            messageRole: (row.message_role as string | null) ?? null,
+            type: row.type as string,
+            entryFingerprint: (row.entry_fingerprint as string | null) ?? null,
+        }));
+}
+
+/**
+ * 带围栏的 message_id 重绑（变更点 #6）：把 tagId 的位置键从 fromKeys 中的任一
+ * 旧值改成 toMessageId。返回 `changes > 0`；围栏未命中（并发改键）返回 false，
+ * 调用方按漂移分支同口径处置，不抛错。
+ *
+ * FORK（tag-drift-content-verify）：上游只有无条件改键（updateTagMessageId）与
+ * Pi fallback 专属的 adoptFallbackTagMessageId / adoptPiFallbackMessageTag；内容
+ * 校验的认领动作要求「预扫描时的旧键 + 墓碑键」都可作为 WHERE 命中值——均匀平移
+ * 的链里，位置 N 的 part 先把 T 墓碑化，位置 N+d 的 part（T 的主人）随后要把 T
+ * 认领回去，此时 T 的旧键已经是墓碑键。写法仿 adoptFallbackTagMessageId：trigger
+ * 写入可能虚增 changes，只有 0 与非 0 之别。
+ */
+export function rebindTagMessageIdFenced(
+    db: Database,
+    sessionId: string,
+    tagId: number,
+    fromKeys: readonly string[],
+    toMessageId: string,
+): boolean {
+    if (fromKeys.length === 0) return false;
+    const placeholders = fromKeys.map(() => "?").join(", ");
+    const result = db
+        .prepare(
+            `UPDATE tags SET message_id = ?
+             WHERE session_id = ? AND tag_number = ? AND message_id IN (${placeholders})`,
+        )
+        .run(toMessageId, sessionId, tagId, ...fromKeys);
+    return (result.changes ?? 0) > 0;
+}
+
+/**
+ * 墓碑化一个 tag 的位置键（变更点 #6）：`message_id -> __mc_drifted__:<tag>`，
+ * status 不动。expectedKeys 是调用方在预扫描时记录的旧键（当前实现只有
+ * `{contentId}`）；WHERE 围栏保证并发改键时 changes=0 而不是覆盖别人的键。
+ * changes=0 视为已被本 pass 的其他步骤处理，返回 false，调用方不报错。
+ *
+ * FORK（tag-drift-content-verify）：见 DRIFTED_TAG_MESSAGE_PREFIX 的注释——
+ * 上游没有这个动作；不改 status 是硬要求，动了 status 会让平移后的消息从
+ * dropped 变回 active，上下文膨胀。
+ */
+export function tombstoneTagMessageId(
+    db: Database,
+    sessionId: string,
+    tagId: number,
+    expectedKeys: readonly string[],
+): boolean {
+    if (expectedKeys.length === 0) return false;
+    const placeholders = expectedKeys.map(() => "?").join(", ");
+    const result = db
+        .prepare(
+            `UPDATE tags SET message_id = ?
+             WHERE session_id = ? AND tag_number = ? AND message_id IN (${placeholders})`,
+        )
+        .run(`${DRIFTED_TAG_MESSAGE_PREFIX}${tagId}`, sessionId, tagId, ...expectedKeys);
+    return (result.changes ?? 0) > 0;
 }
 
 /** Return whether this session has any message tag bound to a fallback Pi id. */

@@ -1222,10 +1222,17 @@ test("T-G10 heuristic routine leaves a fully injected system message alone", () 
 });
 
 test("T-G11 tagMessages backfills message_role on existing content-id tags", () => {
+  // 2026-11-26 trim-integrity 起入站 system 行只沿用自身 message_role='system'
+  // 的位置命中 tag；角色为空的存量行按 spec 问题三墓碑化换号（不再被 stamp 纠正
+  // ——NULL 行可能是无关对话的 tag，沿用会把对话原文换成 system prompt）。
+  // 本用例夹具随之预置 role='system'，断言的「沿用 system tag」语义不变。
+  // 依据：docs/iterations/magic-context-trim-integrity/spec.md:133-136（NULL-role
+  // 存量行列为漂移误命中情形、沿用判据收紧为 message_role==='system'）。
   // ① 生产路径：tagMessages 前先 initFromDb（transform.ts 同款），resolver 经
   //    contentId 精确命中已有的 message_id='msg:...:p0' 行。
   const productionSession = "ses_tg11_production";
   insertTag(b4Db, productionSession, "msg_tg11a:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, productionSession, 1, "system");
   const productionTagger = taggerModule.createTagger();
   productionTagger.initFromDb(productionSession, b4Db);
   const productionMessages = [guardMessage("msg_tg11a", "system", "system prompt body")];
@@ -1243,6 +1250,7 @@ test("T-G11 tagMessages backfills message_role on existing content-id tags", () 
   // ② 冷 tagger：不 initFromDb，assignTag 的 dbExistingLookup 收养同一行。
   const coldSession = "ses_tg11_cold";
   insertTag(b4Db, coldSession, "msg_tg11b:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, coldSession, 1, "system");
   const coldTagger = taggerModule.createTagger();
   const coldMessages = [guardMessage("msg_tg11b", "system", "system prompt body")];
   tagMessagesModule.tagMessages(coldSession, coldMessages, coldTagger, b4Db);
@@ -1564,6 +1572,377 @@ test("oqfix/4 storage-clone copies message_role with every other tag column", ()
   if (JSON.stringify(clonedRow) !== JSON.stringify(expected)) {
     throw new Error(
       `cloned tag columns drifted:\n  expected=${JSON.stringify(expected)}\n  actual  =${JSON.stringify(clonedRow)}`,
+    );
+  }
+});
+
+// --- b5b: tag 坐标重启后漂移（trim-integrity 问题三，spec T-T*） --------------
+//
+// tag 身份是位置字符串 `mc<N>:p<下标>`，重启后 context 前缀长度变化会让整个窗口
+// 平移，位置命中不再比对内容。这一组用例驱动真实持久层（复用 b4 的临时库，每个
+// 用例独立 session id，不碰用户真实库），覆盖：
+//   T-T1  漂移保号（平移后三条消息沿用 pass 1 的 tag 号，幂等）；
+//   T-T3  墓碑化（位置命中的 part 换新号，S(T)/status 不动，message_id 变墓碑键）；
+//   T-T4a 编辑重发退化桶（原文不在入站 → 沿用并覆盖，与 b5 同形）；
+//   T-T4b 样板多候选（不认领、不漂移，确定性退化）；
+//   T-T6  无存量原文（无法判定 → 与修复前一致）；
+//   T-T7  认领候选过滤逐项（dropped / compacted / system / NULL / file）；
+//   T-T8  同消息双文本片段（漂移屏蔽 scoped fallback，兄弟 part 不被抢占）；
+//   T-T9  入站 system 行专门规则（非 system 旧 tag 墓碑化拿新号；system 旧 tag 沿用）。
+// 既有 b5（T-T2）保持不变：同位置换内容、旧原文不在入站、新文本反查无命中 →
+// 沿用原号并覆盖原文。
+//
+// 预置 tag 的号手动指定；「新分配」断言写成 ∉ 预置号集合，不与 allocateTag 的
+// counter/dbMax 细节耦合（tagger.ts 的分配循环每次取 max(内存, DB max)+1）。
+
+const b5bSource = (sessionId, tagNumber) =>
+  storage.getSourceContents(b4Db, sessionId, [tagNumber]).get(tagNumber);
+
+const b5bWireTag = (text) => {
+  const m = /^§(\d+)§ /u.exec(text);
+  if (!m) throw new Error(`wire has no §N§ prefix: ${JSON.stringify(text)}`);
+  return Number(m[1]);
+};
+
+/** OpenCode 形状的消息；texts 依次成为该消息的多个 text part。 */
+function b5bMessage(sessionId, id, role, ...texts) {
+  return {
+    info: { id, role, sessionID: sessionId, time: { created: 1000 } },
+    parts: texts.map((text) => ({ type: "text", text })),
+  };
+}
+
+test("b5b T-T1 漂移保号：平移后三条消息沿用 pass 1 的 tag 号", () => {
+  const sessionId = "ses_tt1_drift_keep_number";
+  const tagger = taggerModule.createTagger();
+  const mkPass = (ids) =>
+    ids.map((id, i) => b5bMessage(sessionId, id, "user", ...["alpha-text", "beta-text", "gamma-text"].slice(i, i + 1)));
+
+  const pass1 = mkPass(["mc1", "mc2", "mc3"]);
+  tagMessagesB5.tagMessages(sessionId, pass1, tagger, b4Db);
+  const firstTags = pass1.map((m) => b5bWireTag(m.parts[0].text));
+  if (JSON.stringify(firstTags) !== JSON.stringify([1, 2, 3])) {
+    throw new Error(`unexpected pass-1 tags: ${JSON.stringify(firstTags)}`);
+  }
+
+  // pass 2：同样三条消息平移到 mc2..mc4（模拟重启后前缀增长）。内容认领让
+  // 唯一文本的编号保持稳定——含落在没有位置命中的 mc4 上的第三条。
+  const pass2 = mkPass(["mc2", "mc3", "mc4"]);
+  tagMessagesB5.tagMessages(sessionId, pass2, tagger, b4Db);
+  const secondTags = pass2.map((m) => b5bWireTag(m.parts[0].text));
+  if (JSON.stringify(secondTags) !== JSON.stringify(firstTags)) {
+    throw new Error(
+      `drifted tags changed across restart: ${JSON.stringify(secondTags)} !== ${JSON.stringify(firstTags)}`,
+    );
+  }
+  const sources = secondTags.map((n) => b5bSource(sessionId, n));
+  if (JSON.stringify(sources) !== JSON.stringify(["alpha-text", "beta-text", "gamma-text"])) {
+    throw new Error(`source_contents drifted: ${JSON.stringify(sources)}`);
+  }
+
+  // pass 3：重复 pass 2，结果逐字节相同（幂等）。
+  const pass3 = mkPass(["mc2", "mc3", "mc4"]);
+  tagMessagesB5.tagMessages(sessionId, pass3, tagger, b4Db);
+  const pass2Wire = pass2.map((m) => m.parts[0].text);
+  const pass3Wire = pass3.map((m) => m.parts[0].text);
+  if (JSON.stringify(pass3Wire) !== JSON.stringify(pass2Wire)) {
+    throw new Error(
+      `third pass is not byte-identical: ${JSON.stringify(pass3Wire)} !== ${JSON.stringify(pass2Wire)}`,
+    );
+  }
+});
+
+test("b5b T-T3 漂移墓碑化：位置命中的 part 换新号，S(T) 与 status 不动", () => {
+  const sessionId = "ses_tt3_drift_tombstone";
+  // 预置 T：tag 1 @mc1:p0，原文 P，dropped（原主人已被折叠）。
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "drift-original-P");
+  updateTagStatus(b4Db, sessionId, 1, "dropped");
+  // mc2:p0 预置 active tag 2（无存量原文）：P 所在 part 位置命中的「别的 tag」。
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 2);
+
+  const tagger = taggerModule.createTagger();
+  const messages = [
+    // X ≠ P，反查无候选；P 的主人（tag 1）已被裁出窗口之外 → 漂移成立。
+    b5bMessage(sessionId, "mc1", "user", "drift-new-X"),
+    b5bMessage(sessionId, "mc2", "user", "drift-original-P"),
+  ];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+
+  const xTag = b5bWireTag(messages[0].parts[0].text);
+  if (xTag === 1) throw new Error(`X reused the drifted tag: ${xTag}`);
+  if (b5bSource(sessionId, 1) !== "drift-original-P") {
+    throw new Error(`S(T) was overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`);
+  }
+  const t1 = getTagById(b4Db, sessionId, 1);
+  if (t1?.messageId !== "__mc_drifted__:1") {
+    throw new Error(`tombstone key missing: ${JSON.stringify(t1?.messageId)}`);
+  }
+  if (t1?.status !== "dropped") {
+    throw new Error(`tombstoning changed status: ${JSON.stringify(t1?.status)}`);
+  }
+  const row1 = storageTags
+    .listTagRowsBySession(b4Db, sessionId)
+    .find((row) => row.tagNumber === 1);
+  if (row1?.messageId !== "__mc_drifted__:1" || row1?.status !== "dropped") {
+    throw new Error(`listTagRowsBySession disagrees: ${JSON.stringify(row1)}`);
+  }
+});
+
+test("b5b T-T4a 退化为现状（编辑重发桶）：原文不在入站时沿用并覆盖", () => {
+  const sessionId = "ses_tt4a_edit_resend_fallback";
+  // 夹具用非 mc1 的位置（mc2:p0）。
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "resend-original-P");
+  const tagger = taggerModule.createTagger();
+  const messages = [b5bMessage(sessionId, "mc2", "user", "resend-edited-X")];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+  if (b5bWireTag(messages[0].parts[0].text) !== 1) {
+    throw new Error(`edit-resend did not reuse tag 1: ${messages[0].parts[0].text}`);
+  }
+  if (b5bSource(sessionId, 1) !== "resend-edited-X") {
+    throw new Error(`source was not overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.messageId !== "mc2:p0") {
+    throw new Error(`edit-resend path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`);
+  }
+});
+
+test("b5b T-T4b 样板多候选：不认领、不漂移，确定性退化", () => {
+  const sessionId = "ses_tt4b_boilerplate_multi";
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "boiler-P");
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 2);
+  saveSourceContent(b4Db, sessionId, 2, "boiler-P");
+  insertTag(b4Db, sessionId, "mc7:p0", "message", 16, 3);
+  saveSourceContent(b4Db, sessionId, 3, "boiler-S");
+  insertTag(b4Db, sessionId, "mc8:p0", "message", 16, 4);
+  saveSourceContent(b4Db, sessionId, 4, "boiler-S");
+
+  const tagger = taggerModule.createTagger();
+  const mkRun = () => [
+    b5bMessage(sessionId, "mc1", "user", "boiler-S"),
+    b5bMessage(sessionId, "mc2", "user", "boiler-S"),
+    b5bMessage(sessionId, "mc3", "user", "boiler-P"), // mc3 上没有任何 tag
+  ];
+  const run1 = mkRun();
+  tagMessagesB5.tagMessages(sessionId, run1, tagger, b4Db);
+  const tags1 = run1.map((m) => b5bWireTag(m.parts[0].text));
+  // S 的两个 part 各自位置命中原文为 P 的 tag1/tag2：sourceIdx[S] 有两个候选 →
+  // 不认领；sourceIdx[P] 不唯一 → 不走漂移；落入编辑重发桶沿用原号。
+  if (tags1[0] !== 1 || tags1[1] !== 2) {
+    throw new Error(`boilerplate S parts moved: ${JSON.stringify(tags1)}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.messageId !== "mc1:p0") {
+    throw new Error(`tag 1 was tombstoned: ${getTagById(b4Db, sessionId, 1)?.messageId}`);
+  }
+  if (getTagById(b4Db, sessionId, 2)?.messageId !== "mc2:p0") {
+    throw new Error(`tag 2 was tombstoned: ${getTagById(b4Db, sessionId, 2)?.messageId}`);
+  }
+  // mc3 的 P part 认领不成立（多候选）→ 正常分配新号。
+  if ([1, 2, 3, 4].includes(tags1[2])) {
+    throw new Error(`mc3 P part did not get a fresh tag: ${tags1[2]}`);
+  }
+  // 整段结果确定：跑两遍逐字节相同。
+  const run2 = mkRun();
+  tagMessagesB5.tagMessages(sessionId, run2, tagger, b4Db);
+  const run1Wire = run1.map((m) => m.parts[0].text);
+  const run2Wire = run2.map((m) => m.parts[0].text);
+  if (JSON.stringify(run2Wire) !== JSON.stringify(run1Wire)) {
+    throw new Error(`result is not deterministic: ${JSON.stringify(run2Wire)} !== ${JSON.stringify(run1Wire)}`);
+  }
+});
+
+test("b5b T-T6 无存量原文：无法判定，行为与修复前一致", () => {
+  const sessionId = "ses_tt6_no_source";
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 1); // 不写 source_contents
+  const tagger = taggerModule.createTagger();
+  const messages = [b5bMessage(sessionId, "mc2", "user", "nosource-X")];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+  if (b5bWireTag(messages[0].parts[0].text) !== 1) {
+    throw new Error(`tag without source was not reused: ${messages[0].parts[0].text}`);
+  }
+  if (b5bSource(sessionId, 1) !== "nosource-X") {
+    throw new Error(`first write did not land: ${JSON.stringify(b5bSource(sessionId, 1))}`);
+  }
+  if (getTagById(b4Db, sessionId, 1)?.messageId !== "mc2:p0") {
+    throw new Error(`no-source path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`);
+  }
+});
+
+test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）", () => {
+  const scenarios = [
+    { id: "dropped", label: "status=dropped", status: "dropped", mutate: (s) => updateTagStatus(b4Db, s, 2, "dropped") },
+    { id: "compacted", label: "status=compacted", status: "compacted", mutate: (s) => updateTagStatus(b4Db, s, 2, "compacted") },
+    { id: "role_system", label: "role=system", status: "active", mutate: (s) => stampTagMessageRole(b4Db, s, 2, "system") },
+    // insertTag 不写 message_role → NULL（v10000 升级前的存量行同形）。
+    { id: "role_null", label: "role=NULL", status: "active", mutate: () => {} },
+    { id: "type_file", label: "type=file", status: "active", file: true, mutate: () => {} },
+  ];
+  for (const sc of scenarios) {
+    const sessionId = `ses_tt7_${sc.id}`;
+    // T：tag 1 @mc1:p0，原文 P（active）。R：tag 2 持有 X 的原文，但过滤不通过。
+    insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+    saveSourceContent(b4Db, sessionId, 1, "claim-original-P");
+    const candidateId = sc.file ? "mc9:file0" : "mc9:p0";
+    insertTag(b4Db, sessionId, candidateId, sc.file ? "file" : "message", 16, 2);
+    saveSourceContent(b4Db, sessionId, 2, "claim-candidate-X");
+    sc.mutate(sessionId);
+
+    const tagger = taggerModule.createTagger();
+    const messages = [b5bMessage(sessionId, "mc1", "user", "claim-candidate-X")];
+    tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+
+    // X 所在 part 按其余规则处置：P 不在入站 → 漂移不成立 → 编辑重发 → 沿用
+    // tag1 并覆盖原文；R 的 message_id、status、原文均不变。
+    if (b5bWireTag(messages[0].parts[0].text) !== 1) {
+      throw new Error(`[${sc.label}] X part did not reuse T: ${messages[0].parts[0].text}`);
+    }
+    if (b5bSource(sessionId, 1) !== "claim-candidate-X") {
+      throw new Error(`[${sc.label}] T source was not overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`);
+    }
+    const r = getTagById(b4Db, sessionId, 2);
+    if (r?.messageId !== candidateId) {
+      throw new Error(`[${sc.label}] candidate was re-keyed: ${JSON.stringify(r?.messageId)}`);
+    }
+    if (r?.status !== sc.status) {
+      throw new Error(`[${sc.label}] candidate status changed: ${JSON.stringify(r?.status)}`);
+    }
+    if (b5bSource(sessionId, 2) !== "claim-candidate-X") {
+      throw new Error(`[${sc.label}] candidate source changed: ${JSON.stringify(b5bSource(sessionId, 2))}`);
+    }
+  }
+});
+
+test("b5b T-T8 同消息双文本片段：漂移屏蔽 scoped fallback，兄弟 part 不被抢占", () => {
+  const sessionId = "ses_tt8_sibling_parts";
+  const tagger = taggerModule.createTagger();
+  // pass 1：一条 assistant 消息两个 text part，各拿 tag 1、2。
+  const pass1 = [b5bMessage(sessionId, "mc1", "assistant", "sibling-X0", "sibling-X1")];
+  tagMessagesB5.tagMessages(sessionId, pass1, tagger, b4Db);
+  if (b5bWireTag(pass1[0].parts[0].text) !== 1 || b5bWireTag(pass1[0].parts[1].text) !== 2) {
+    throw new Error(
+      `unexpected pass-1 tags: ${pass1[0].parts[0].text} / ${pass1[0].parts[1].text}`,
+    );
+  }
+  // X0 的原主转 dropped：认领不成立（内容回到窗口但原 tag 已 dropped → 拿新号）。
+  updateTagStatus(b4Db, sessionId, 1, "dropped");
+  // 预置 tagT=3 @mc2:p0（原文 P，role=user）：平移后 mc2:p0 位置命中的它者。
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 3);
+  saveSourceContent(b4Db, sessionId, 3, "sibling-P");
+  stampTagMessageRole(b4Db, sessionId, 3, "user");
+
+  // pass 2：消息平移到 mc2；另有一条 user 消息文本 = P（漂移判据的「另一个 part」）。
+  const pass2 = [
+    b5bMessage(sessionId, "mc2", "assistant", "sibling-X0", "sibling-X1"),
+    b5bMessage(sessionId, "mc3", "user", "sibling-P"),
+  ];
+  tagMessagesB5.tagMessages(sessionId, pass2, tagger, b4Db);
+
+  // p0 判为漂移：拿新号（不是 1/2/3 中的任何一个）。
+  const p0Tag = b5bWireTag(pass2[0].parts[0].text);
+  if (p0Tag === 1 || p0Tag === 2 || p0Tag === 3) {
+    throw new Error(`p0 did not get a fresh tag: ${p0Tag}`);
+  }
+  // 兄弟 p1 的 tag 号与原文 X1 不变（没有被 p0 经 scoped fallback 抢占）。
+  if (b5bWireTag(pass2[0].parts[1].text) !== 2) {
+    throw new Error(`sibling p1 lost its tag: ${pass2[0].parts[1].text}`);
+  }
+  if (b5bSource(sessionId, 2) !== "sibling-X1") {
+    throw new Error(`sibling p1 source was overwritten: ${JSON.stringify(b5bSource(sessionId, 2))}`);
+  }
+  // P 未被覆盖；P 的主人（tagT=3）被 mc3:p0 认领回去（围栏含墓碑键）。
+  if (b5bSource(sessionId, 3) !== "sibling-P") {
+    throw new Error(`P was overwritten: ${JSON.stringify(b5bSource(sessionId, 3))}`);
+  }
+  if (b5bWireTag(pass2[1].parts[0].text) !== 3) {
+    throw new Error(`P's owner was not reclaimed: ${pass2[1].parts[0].text}`);
+  }
+});
+
+test("b5b T-T9 入站 system 行：非 system 旧 tag 墓碑化拿新号；system 旧 tag 沿用", () => {
+  // 主组：T=tag1（dropped、role=user、原文 P）@mc1:p0；入站 mc1 是 system 消息
+  // （文本 X = system prompt，P 不在入站里）。
+  const sessionId = "ses_tt9_system_drift";
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "sysdrift-P");
+  updateTagStatus(b4Db, sessionId, 1, "dropped");
+  stampTagMessageRole(b4Db, sessionId, 1, "user");
+  const tagger = taggerModule.createTagger();
+  const messages = [b5bMessage(sessionId, "mc1", "system", "sysdrift-system-prompt")];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+
+  const t1 = getTagById(b4Db, sessionId, 1);
+  if (b5bSource(sessionId, 1) !== "sysdrift-P") {
+    throw new Error(`system row overwrote S(T): ${JSON.stringify(b5bSource(sessionId, 1))}`);
+  }
+  if (t1?.status !== "dropped" || t1?.messageRole !== "user") {
+    throw new Error(`T status/role changed: ${JSON.stringify(t1)}`);
+  }
+  if (t1?.messageId !== "__mc_drifted__:1") {
+    throw new Error(`T was not tombstoned: ${JSON.stringify(t1?.messageId)}`);
+  }
+  const sysTag = b5bWireTag(messages[0].parts[0].text);
+  if (sysTag === 1) throw new Error(`system row reused the foreign tag: ${sysTag}`);
+  if (getTagById(b4Db, sessionId, sysTag)?.messageRole !== "system") {
+    throw new Error(`new system tag was not stamped: ${JSON.stringify(getTagById(b4Db, sessionId, sysTag)?.messageRole)}`);
+  }
+
+  // 对照组：T 的 message_role = 'system' → 沿用 T 并覆盖原文（system 槽位换内容
+  // 的正常情形）。
+  const ctlSession = "ses_tt9_system_keep";
+  insertTag(b4Db, ctlSession, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, ctlSession, 1, "syskeep-P");
+  stampTagMessageRole(b4Db, ctlSession, 1, "system");
+  const ctlTagger = taggerModule.createTagger();
+  const ctlMessages = [b5bMessage(ctlSession, "mc1", "system", "syskeep-new-prompt")];
+  tagMessagesB5.tagMessages(ctlSession, ctlMessages, ctlTagger, b4Db);
+  if (b5bWireTag(ctlMessages[0].parts[0].text) !== 1) {
+    throw new Error(`control did not reuse the system tag: ${ctlMessages[0].parts[0].text}`);
+  }
+  if (b5bSource(ctlSession, 1) !== "syskeep-new-prompt") {
+    throw new Error(`control source was not overwritten: ${JSON.stringify(b5bSource(ctlSession, 1))}`);
+  }
+  if (getTagById(b4Db, ctlSession, 1)?.messageId !== "mc1:p0") {
+    throw new Error(`control must not tombstone: ${getTagById(b4Db, ctlSession, 1)?.messageId}`);
+  }
+});
+
+test("b5b T-T10 入站 system 行落在 NULL-role 存量 tag 上：墓碑化换号", () => {
+  // T-T9 的 NULL-role 补充（spec 问题三专门规则的明确要求）：NULL-role 存量行
+  // （v10000 升级前的行、provider 未给 role 的行）可能是无关对话的 tag，system
+  // 行沿用它会把对话原文换成 system prompt——必须墓碑化换号而不是沿用回填。
+  // 依据：docs/iterations/magic-context-trim-integrity/spec.md:133-136。
+  const sessionId = "ses_tt10_system_null_role";
+  // 预置 T：tag 1 @mc1:p0，原文 P，status=active，message_role=NULL（insertTag 不写 role）。
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "nulldrift-P");
+  const tagger = taggerModule.createTagger();
+  const messages = [b5bMessage(sessionId, "mc1", "system", "nulldrift-system-prompt")];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+
+  // T 被墓碑化：键换墓碑、status 不变、role 保持 NULL、原文未被改写。
+  const t1 = getTagById(b4Db, sessionId, 1);
+  if (t1?.messageId !== "__mc_drifted__:1") {
+    throw new Error(`NULL-role tag was not tombstoned: ${JSON.stringify(t1?.messageId)}`);
+  }
+  if (t1?.status !== "active") {
+    throw new Error(`tombstoning changed status: ${JSON.stringify(t1?.status)}`);
+  }
+  if (t1?.messageRole !== null) {
+    throw new Error(`tombstoning changed message_role: ${JSON.stringify(t1?.messageRole)}`);
+  }
+  if (b5bSource(sessionId, 1) !== "nulldrift-P") {
+    throw new Error(
+      `NULL-role tag source was overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`,
+    );
+  }
+  // system 行拿到新号，且其 message_role='system'。
+  const sysTag = b5bWireTag(messages[0].parts[0].text);
+  if (sysTag === 1) throw new Error(`system row reused the NULL-role tag: ${sysTag}`);
+  if (getTagById(b4Db, sessionId, sysTag)?.messageRole !== "system") {
+    throw new Error(
+      `new system tag was not stamped: ${JSON.stringify(getTagById(b4Db, sessionId, sysTag)?.messageRole)}`,
     );
   }
 });

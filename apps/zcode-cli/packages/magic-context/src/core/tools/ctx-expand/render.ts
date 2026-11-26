@@ -1,13 +1,18 @@
 /**
  * 逐字移植自 `.reference/magic-context/packages/plugin/src/tools/ctx-expand/render.ts`
- * （363 行，import 路径加 `.js` 后缀）。逻辑零改动。
+ * （363 行，import 路径加 `.js` 后缀）。
  *
  * MIT, Copyright (c) 2025 Ufuk Altinok (magic-context). Modified for oh-my-zcode.
+ *
+ * FORK 偏差清单（tag-drift-content-verify，其余逻辑零改动）：
+ *  - renderItemByTag 文本分支：message 型 tag 优先返回 source_contents 存量原文
+ *    （经 renderPartFull 保持现有输出形态），未命中回落位置读。理由见改动点注释
+ *    ——ZCode 的 tag 身份是位置串，重启平移后位置读会取到错位的消息。
  */
 
 import { createHash } from "node:crypto";
 
-import { type ContextDatabase, getTagById } from "../../features/magic-context/storage.js";
+import { type ContextDatabase, getTagById, getSourceContents } from "../../features/magic-context/storage.js";
 import {
     readRawSessionMessageById,
     readRawSessionMessages,
@@ -321,6 +326,20 @@ export function renderItemByTag(
     }
     const scoped = /^(.*):p(\d+)$/.exec(tag.messageId);
     const derived = /^(.*):mc-text-v1:([a-f0-9]+):([a-f0-9]+):o(\d+)$/.exec(tag.messageId);
+    // FORK（tag-drift-content-verify）：上游按位置 id 读当前条目——tag 身份在
+    // ZCode 是位置串 `mc<N>:p<下标>`，重启后前缀长度变化会让整个窗口平移，位置读
+    // 直接取到错位的消息（本迭代修的正是这个漂移）。文本 tag 优先返回它自己的
+    // 存量原文（source_contents 是打标时落库的权威原文），经 renderPartFull 保持
+    // 现有输出形态（`  [text]\n<原文>`，不带 §N§）；未命中（原文已被裁掉/折叠时
+    // 删除、或墓碑 tag）回落现有的位置读，含「no longer in stored history」文案。
+    // file tag（messageId 形如 `mcN:fileK`，原文是同消息文本的去章拼接）与
+    // mc-text-v1 内容寻址分支本就内容寻址或行为不变，均不走这条捷径。
+    if (tag.type === "message" && !derived) {
+        const stored = getSourceContents(db, sessionId, [number]).get(number);
+        if (stored !== undefined) {
+            return renderPartFull({ type: "text", text: stored }) ?? "";
+        }
+    }
     const owner = scoped?.[1] ?? derived?.[1] ?? tag.messageId;
     const message = readRawSessionMessageById(sessionId, owner);
     if (!message) return `Tag ${number}'s original text is no longer in stored history.`;
