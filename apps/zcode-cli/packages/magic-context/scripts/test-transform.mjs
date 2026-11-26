@@ -1947,6 +1947,51 @@ test("b5b T-T10 入站 system 行落在 NULL-role 存量 tag 上：墓碑化换�
   }
 });
 
+// --- b5b T-T5（ctx_expand 读侧，trim-integrity 问题三） ----------------------
+//
+// spec T-T5：tag 模式的 ctx_expand 在该 tag 有存量原文时按现有包装格式返回存量
+// 原文（而不是按位置 id 读当前条目——重启平移后位置读会取到错位的消息）；没有
+// 存量原文时回落现有位置读。落点依据 spec 测试策略「T-T* 落在
+// test-transform.mjs」。renderItemByTag 的位置读默认读 OpenCode 的 session DB，
+// 包内临时库没有 session 数据；这里用 setRawMessageProvider 注册最小 provider
+// （接口只要求 readMessages(): RawMessage[]），让「回落位置读」的正路径也可断言。
+const ctxExpandRender = await load("tools/ctx-expand/render.js");
+const readSessionChunkModule = await load("hooks/magic-context/read-session-chunk.js");
+
+test("b5b T-T5 ctx_expand tag 模式：有存量原文按包装格式返回，无存量原文回落位置读", () => {
+  const sessionId = "ses_tt5_expand_source_read";
+  // ① 有存量原文：返回 `  [text]\n<原文>`（renderPartFull 的现有包装格式，不带
+  //    §N§），且不依赖任何 raw session 数据。
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  saveSourceContent(b4Db, sessionId, 1, "expand-stored-source");
+  const stored = ctxExpandRender.renderItemByTag(b4Db, sessionId, 1);
+  if (stored !== "  [text]\nexpand-stored-source") {
+    throw new Error(`stored-source render format drifted: ${JSON.stringify(stored)}`);
+  }
+
+  // ② 无存量原文：回落位置读。tag 2 @mc2:p0 无 source_contents；provider 提供
+  //    位置上的消息，回落读必须拿到 mc2 的 part 文本（该 tag 自己的位置），
+  //    而不是其他 tag 的存量原文。
+  insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 2);
+  const unregisterProvider = readSessionChunkModule.setRawMessageProvider(sessionId, {
+    readMessages: () => [
+      { id: "mc1", role: "user", ordinal: 1, parts: [{ type: "text", text: "position-mc1-body" }] },
+      { id: "mc2", role: "user", ordinal: 2, parts: [{ type: "text", text: "position-mc2-body" }] },
+    ],
+  });
+  try {
+    const fallback = ctxExpandRender.renderItemByTag(b4Db, sessionId, 2);
+    if (fallback !== "  [text]\nposition-mc2-body") {
+      throw new Error(`fallback did not read the tag's own position: ${JSON.stringify(fallback)}`);
+    }
+    if (fallback.includes("expand-stored-source")) {
+      throw new Error("fallback leaked another tag's stored source");
+    }
+  } finally {
+    unregisterProvider();
+  }
+});
+
 // --- T-S7：裁前缀保留 system 段的退化输入（trim-integrity 问题一） ----------
 //
 // 经导出的 injectM0M1 的 preparedPrefix 路径驱动（不为测试新增导出）。夹具把
