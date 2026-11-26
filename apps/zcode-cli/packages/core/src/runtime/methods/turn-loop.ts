@@ -166,7 +166,6 @@ export async function runRegularTurnLoop(
       latestRealUserMessageIndex: providerProjection.diagnostics.latestRealUserMessageIndex,
       messages,
       sourceEntries: providerProjection.sourceEntries,
-      requestEntries,
       recordedMessages: recordableProjection.messages,
       tools,
     });
