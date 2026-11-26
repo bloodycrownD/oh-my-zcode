@@ -1009,7 +1009,7 @@ const cavemanCleanupModule = await load("hooks/magic-context/caveman-cleanup.js"
 const executeFlushModule = await load("hooks/magic-context/execute-flush.js");
 const cloneStorageModule = await load("features/magic-context/storage-clone.js");
 
-const { getTagById, insertTag, stampTagMessageRole, updateCavemanDepth, updateTagStatus } =
+const { getTagById, insertTag, markWhitespaceAssistantTagInert, stampTagMessageRole, updateCavemanDepth, updateTagStatus } =
   storageTags;
 const { getActiveTagsBySession, getPendingOps, queuePendingOp, saveSourceContent } = storage;
 
@@ -2016,9 +2016,10 @@ test("b5b T-T11 整体平移层：d* = −1 时按位置找回真身，样板与
   // C@mc13→tag5@mc14:p0、D@mc16:p0→tag8@mc17:p0、D2@mc16:p1→tag9@mc17:p1、
   // E@mc17→tag10@mc18:p0 各给 −1；P/S 的持有者多于一个不产候选、SYS 是 system
   // part 被排除、NEW 无存量原文）；score(−1)=9（mc10..mc17 的 9 个 part 在
-  // mc11..mc18 上逐一原文相等）；score(0) 与 score(+1) 按 spec 公式复核为 3 与
-  // 1（mc15:S、mc16:p1:D2、mc17:E 恰在原位原文相等；mc12:P 对 mc11:p0 的 tag2
-  // 相等——spec 手稿记 1/1，以公式复核为准），判定不变：d* = −1（9 是唯一最
+  // mc11..mc18 上逐一原文相等）；score(0)=1、score(+1)=1——score(0) 逐 part 核对
+  // 后唯一原位相符的是 mc15:S 对 tag6（shift-S）；mc16:p1 在 posIdx 没有键、
+  // mc17:p0 原位是 tag8 的 shift-D（E≠D），都不计入；score(+1) 唯一相符的是
+  // mc12:P 对 mc11:p0 的 tag2（shift-P），判定不变：d* = −1（9 是唯一最
   // 大且 ≥ 3）→ 本用例属 (b) 类，被平移相符接管，断言按 v2 语义逐项给出。
   const sessionId = "ses_tt11_shift_layer";
   const preset = [
@@ -2126,6 +2127,121 @@ test("b5b T-T11 整体平移层：d* = −1 时按位置找回真身，样板与
   if (JSON.stringify(secondWire) !== JSON.stringify(firstWire)) {
     throw new Error(
       `second run is not byte-identical: ${JSON.stringify(secondWire)} !== ${JSON.stringify(firstWire)}`,
+    );
+  }
+});
+
+test("b5b T-T12 system 行落上 inert 绑定：墓碑化后无条件解绑，system 行拿新号", () => {
+  // CR-3（trim-integrity）：system-assign 分支原本只墓碑化位置上的旧 tag M，不
+  // 解绑 contentId 的内存绑定。可达入口是内存快路径——pass 开头的 inert 重放
+  // （tag-messages.ts 把 inert 行的 contentId bindTag 进内存）会先把 mc1:p0 绑到
+  // inert 行 N，随后 system 行走 assignTag 时内存快路径直接返回 N，system prompt
+  // 被 replaceSourceContent 写进 N 的原文。修复：墓碑化之后无条件 unbind(c)，
+  // 与漂移分支同款。区分度：补 unbind 之前 system 行拿到 N、N 出现 source 行。
+  const sessionId = "ses_tt12_system_inert_unbind";
+  // pass 1：预置 inert 行 N（tag 2，指纹位置 mc1:p0）；入站 mc1 是只有空白 text
+  // part 的 assistant 消息 → wire 重放 §2§，同时让 tagger 内存把 mc1:p0 绑到 N。
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 2);
+  markWhitespaceAssistantTagInert(b4Db, sessionId, 2, "mc1:p0");
+  const tagger = taggerModule.createTagger();
+  const pass1 = [b5bMessage(sessionId, "mc1", "assistant", "   ")];
+  tagMessagesB5.tagMessages(sessionId, pass1, tagger, b4Db);
+  if (b5bWireTag(pass1[0].parts[0].text) !== 2) {
+    throw new Error(`pass 1 did not replay the inert tag 2: ${pass1[0].parts[0].text}`);
+  }
+
+  // pass 2：同一 tagger、同一库。预置旧 tag M（tag 1 < N，role=user）挂在
+  // mc1:p0；入站 mc1 换成 role=system 的非空消息 → system-assign（墓碑化 M）。
+  insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
+  stampTagMessageRole(b4Db, sessionId, 1, "user");
+  const pass2 = [b5bMessage(sessionId, "mc1", "system", "tt12-system-prompt")];
+  tagMessagesB5.tagMessages(sessionId, pass2, tagger, b4Db);
+
+  // system 行拿到不在 {M, N} 里的新号：未修复时内存快路径把它绑回 N=2。
+  const sysTag = b5bWireTag(pass2[0].parts[0].text);
+  if (sysTag === 1 || sysTag === 2) {
+    throw new Error(`system row reused a stale in-memory binding: ${sysTag}`);
+  }
+  // M 已墓碑化。
+  if (getTagById(b4Db, sessionId, 1)?.messageId !== "__mc_drifted__:1") {
+    throw new Error(
+      `M was not tombstoned: ${JSON.stringify(getTagById(b4Db, sessionId, 1)?.messageId)}`,
+    );
+  }
+  // N（inert 行）原样：没有 source_contents 行、entry_fingerprint 与 status 不动
+  // ——system prompt 不得写进 inert 行的原文。
+  if (b5bSource(sessionId, 2) !== undefined) {
+    throw new Error(
+      `inert row N grew a source_contents row: ${JSON.stringify(b5bSource(sessionId, 2))}`,
+    );
+  }
+  const inertRow = getTagById(b4Db, sessionId, 2);
+  if (inertRow?.status !== "compacted") {
+    throw new Error(`inert row status changed: ${JSON.stringify(inertRow?.status)}`);
+  }
+  // getTagById 的 TagEntry 不含指纹字段（toTagEntry 未映射 entry_fingerprint），
+  // 指纹经 listTagRowsBySession 的行对象断言（T-T3 同款）。
+  const inertRowFull = storageTags
+    .listTagRowsBySession(b4Db, sessionId)
+    .find((row) => row.tagNumber === 2);
+  if (inertRowFull?.entryFingerprint !== "mc:whitespace-assistant:mc1:p0") {
+    throw new Error(
+      `inert row fingerprint changed: ${JSON.stringify(inertRowFull?.entryFingerprint)}`,
+    );
+  }
+});
+
+test("b5b T-T13 user 消息的空白 text part 不参与平移层", () => {
+  // CR-10（trim-integrity）：计划循环里空白判断原本排在平移分支之后，而主循环的
+  // 空白豁免只对 assistant 生效（whitespaceOnlyAssistant 要求 role=assistant），
+  // 平移成立时 user 消息的空白 part 会消费平移计划、被判成平移落空（墓碑化位置
+  // 上的旧号）或平移不符。修复：空白判断挪到 system 规则之后、平移分支之前。
+  // 区分度：修复前 mc5:p0 的空白 part 墓碑化 tag4 并拿新号；修复后沿用位置命中。
+  const sessionId = "ses_tt13_blank_user_part";
+  // 预置：A/B/C 三个唯一原文专供平移候选与计分（唯一持有者各给 d=+1）；tag4
+  // 挂在空白 part 的位置 mc5:p0 上（原文 W，与空白正文不同）。
+  const preset = [
+    [1, "mc1:p0", "tt13-A"],
+    [2, "mc2:p0", "tt13-B"],
+    [3, "mc3:p0", "tt13-C"],
+    [4, "mc5:p0", "tt13-W"],
+  ];
+  for (const [tagNumber, messageId, source] of preset) {
+    insertTag(b4Db, sessionId, messageId, "message", source.length, tagNumber);
+    saveSourceContent(b4Db, sessionId, tagNumber, source);
+    stampTagMessageRole(b4Db, sessionId, tagNumber, "user");
+  }
+  const tagger = taggerModule.createTagger();
+  const messages = [
+    b5bMessage(sessionId, "mc2", "user", "tt13-A"),
+    b5bMessage(sessionId, "mc3", "user", "tt13-B"),
+    b5bMessage(sessionId, "mc4", "user", "tt13-C"),
+    // 空白 part 的宿主消息：两个 text part——p0 位置命中 tag4（沿用其号），
+    // p1 位置无命中（新分配）。
+    b5bMessage(sessionId, "mc5", "user", "   ", "   "),
+  ];
+  tagMessagesB5.tagMessages(sessionId, messages, tagger, b4Db);
+
+  // 平移 d*=+1 成立（score(+1)=3 ≥ 3 且唯一最大）：三个带正文的 part 按位置
+  // 找回 tag1/2/3——证明夹具确实进入了平移相符分支。
+  const shifted = messages.slice(0, 3).map((m) => b5bWireTag(m.parts[0].text));
+  if (JSON.stringify(shifted) !== JSON.stringify([1, 2, 3])) {
+    throw new Error(`the shift layer did not land on the owners: ${JSON.stringify(shifted)}`);
+  }
+  // 空白 part p0 沿用其位置命中的既有号 4。
+  const blankKept = b5bWireTag(messages[3].parts[0].text);
+  if (blankKept !== 4) {
+    throw new Error(`the blank part did not keep the position-hit tag 4: ${blankKept}`);
+  }
+  // 空白 part p1 位置无命中 → 新分配（∉ 预置号集合）。
+  const blankFresh = b5bWireTag(messages[3].parts[1].text);
+  if ([1, 2, 3, 4].includes(blankFresh)) {
+    throw new Error(`the position-miss blank part did not get a fresh tag: ${blankFresh}`);
+  }
+  // 空白 part 位置上的旧 tag 没有被墓碑化。
+  if (getTagById(b4Db, sessionId, 4)?.messageId !== "mc5:p0") {
+    throw new Error(
+      `tag 4 was tombstoned by the blank part: ${JSON.stringify(getTagById(b4Db, sessionId, 4)?.messageId)}`,
     );
   }
 });
@@ -2268,18 +2384,102 @@ test("T-S7 退化输入：裁剪点落在 system 段内时拒绝裁剪（prefixT
   assertNotTrimmed(s4Messages, s4SystemRefs, "S4 branch");
 });
 
-// --- run -------------------------------------------------------------------
+// --- T-S9：S3/S4 的 applied 路径保留开头 system 段（trim-integrity 问题一） ----
+//
+// T-S7 只覆盖退化输入（裁剪点落在 system 段内 → refused）；「裁剪边界在 system
+// 段之后、applied 生效时开头 system 段以同一引用保留在头部」没有任何用例——与
+// 上轮「system 段被裁、超窗拒发」缺陷同族的回归护栏。夹具：system 段 k=2
+// （mc1、mc2）+ mc3（裁剪边界，非 system）+ mc4，preparedTrimBoundaryId=mc3。
 
-let failures = 0;
-for (const [name, fn] of cases) {
-  try {
-    await fn();
-    console.log(`  ok    ${name}`);
-  } catch (error) {
-    failures += 1;
-    console.log(`  FAIL  ${name}\n        ${error && error.message}`);
+test("T-S9 applied 路径：S3/S4 裁剪后开头 system 段以同一引用保留在头部", () => {
+  const sessionId = "ses_ts9_applied_system_run";
+  const makeMessages = () => [
+    {
+      info: { id: "mc1", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line one" }],
+    },
+    {
+      info: { id: "mc2", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line two" }],
+    },
+    {
+      info: { id: "mc3", role: "user", sessionID: sessionId },
+      parts: [{ type: "text", text: "user message" }],
+    },
+    {
+      info: { id: "mc4", role: "user", sessionID: sessionId },
+      parts: [{ type: "text", text: "second user message" }],
+    },
+  ];
+  // preparedMessages 会被 structuredClone 后 unshift 到最前（T-S7 同款）。
+  const head = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "m[0]/m[1] head", synthetic: true }] },
+  ];
+  const preparedPrefix = {
+    injected: true,
+    prependedMessageCount: 0,
+    m0RematerializedThisPass: false,
+    materializationContentionRetryExhausted: true,
+    decision: { value: false, reason: "cache_hit" },
+    m0Bytes: null,
+    m1Text: null,
+    preparedMessages: head,
+    preparedTrimBoundaryId: "mc3",
+  };
+  const baseOptions = {
+    db: b4Db,
+    sessionId,
+    state: { sessionId, cachedM0Bytes: null, cachedM1Bytes: null },
+    compactionOff: false,
+    isCacheBustingPass: false,
+  };
+  // 「applied 且 system 段保留」的统一断言：数组 = head(1) + mc1 + mc2 + mc4，
+  // 两条 system 行以同一引用保留在头部（引用相等证明没有被重建），裁剪边界
+  // mc3 被裁掉，mc4 保留。
+  const assertAppliedKeepsSystemRun = (messages, refs, label) => {
+    if (messages.length !== 4) {
+      throw new Error(
+        `${label}: messages.length=${messages.length} (expected 4 = head + 2 system + mc4)`,
+      );
+    }
+    if (messages[1] !== refs.mc1 || messages[2] !== refs.mc2) {
+      throw new Error(`${label}: the leading system run did not survive with the same references`);
+    }
+    if (messages.some((message) => message === refs.mc3)) {
+      throw new Error(`${label}: mc3 (the trim boundary) survived the trim`);
+    }
+    if (!messages.includes(refs.mc4)) {
+      throw new Error(`${label}: mc4 was dropped by the trim`);
+    }
+  };
+
+  // ① S4 分支（source-order）：带 capturePrefixTrimSourceOrder。
+  const s4Messages = makeMessages();
+  const s4Refs = { mc1: s4Messages[0], mc2: s4Messages[1], mc3: s4Messages[2], mc4: s4Messages[3] };
+  const s4 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s4Messages,
+    prefixTrimSourceOrder: injectCompartmentsModule.capturePrefixTrimSourceOrder(s4Messages),
+    preparedPrefix,
+  });
+  if (s4.prefixTrimStatus !== "applied") {
+    throw new Error(`S4 branch: prefixTrimStatus=${s4.prefixTrimStatus} (expected "applied")`);
   }
-}
+  assertAppliedKeepsSystemRun(s4Messages, s4Refs, "S4 branch");
+
+  // ② S3 分支（id-lookup 兜底）：不带 sourceOrder，同一夹具同一形态。
+  const s3Messages = makeMessages();
+  const s3Refs = { mc1: s3Messages[0], mc2: s3Messages[1], mc3: s3Messages[2], mc4: s3Messages[3] };
+  const s3 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s3Messages,
+    preparedPrefix,
+  });
+  if (s3.prefixTrimStatus !== "applied") {
+    throw new Error(`S3 branch: prefixTrimStatus=${s3.prefixTrimStatus} (expected "applied")`);
+  }
+  assertAppliedKeepsSystemRun(s3Messages, s3Refs, "S3 branch");
+});
 
 // Windows 宿主（杀软/索引器）可能在测试退出后仍短暂持有编译缓存目录的句柄，
 // EPERM 清理失败不应把全绿的测试判成失败；残留目录由下次运行复用前清掉。
@@ -2472,6 +2672,25 @@ test("b6 drop keeps source pristine and replay never emits an empty part", () =>
     throw new Error("replay must not drop tags");
   }
 });
+
+// --- run -------------------------------------------------------------------
+//
+// FORK（magic-context-trim-integrity CR-12）：执行循环原先注册在 b6 系列**之前**
+// ——带顶层 await 的循环在此暂停模块执行，b6 四条用例随后才 push 进 cases，永不
+// 被执行（末尾打印的 cases.length 却把它们计入，「PASS — N cases」失真）。循环
+// 必须位于全部用例注册之后、bestEffortRmSync 清理之前：用例直接读写 b4Db 这个
+// 临时库，清理先跑的话执行时库已被删（Windows 上常因文件被占用删不掉才碰巧能跑）。
+
+let failures = 0;
+for (const [name, fn] of cases) {
+  try {
+    await fn();
+    console.log(`  ok    ${name}`);
+  } catch (error) {
+    failures += 1;
+    console.log(`  FAIL  ${name}\n        ${error && error.message}`);
+  }
+}
 
 bestEffortRmSync(root);
 bestEffortRmSync(b4DbDir);
