@@ -3693,7 +3693,13 @@ function isHostCompactionHeadRow(message: MessageLike): boolean {
 }
 
 function firstPersistedLiveId(messages: readonly MessageLike[]): string | null {
-    for (const message of messages) {
+    // FORK: 上游这里取数组里第一条带 id 的持久消息。本仓库裁前缀豁免了开头的
+    // system 段（见 leadingSystemRunLength），所以裁剪之后数组头部可能仍是
+    // system 行（mc1 起），摘要边界永远排不到它前面——会被误判成「边界不存在」
+    // 而拒绝裁剪。豁免段不参与「窗口从哪里开始」的比较。
+    const systemRunLength = leadingSystemRunLength(messages);
+    for (let index = systemRunLength; index < messages.length; index += 1) {
+        const message = messages[index];
         const id = message.info.id;
         if (typeof id !== "string" || id.length === 0) continue;
         if (isHostRenderedSystemMessage(message) || isHostCompactionHeadRow(message)) continue;

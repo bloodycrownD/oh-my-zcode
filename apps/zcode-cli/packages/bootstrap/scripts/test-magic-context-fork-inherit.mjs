@@ -683,6 +683,97 @@ test("输入开头没有 system 段时，裁剪与修复前逐条相同", async 
     );
 });
 
+// T-S8（回归守卫，守住 inject-compartments.ts firstPersistedLiveId 的缺陷）：
+// firstPersistedLiveId 曾取数组里第一条带 id 的持久消息；裁前缀豁免开头 system 段
+// 之后，裁剪过的数组头部仍是 system 行（mc1 起），classifyAbsentBoundary 拿它和
+// 摘要边界比先后永远得到「边界不在窗口之前」→ 返回 refused → 请求不裁，超窗时被
+// MC-H04 拒发（真实库 e2e 抓到的形态）。修复让它跳过开头的 system 段（豁免段不
+// 参与「窗口从哪里开始」的比较）。本用例用真实端口钉死：裁剪发生、boundary 被
+// 本轮裁掉的会话，absent-boundary 分类必须走「边界在窗口之前」分支
+// （boundary-precedes-window，日志 "precedes the first remaining message"），
+// 不得退回 refused（日志 "absent from current messages"）。
+test("T-S8 裁前缀后的 absent-boundary 分类跳过开头 system 段（firstPersistedLiveId 回归）", async (t) => {
+    clearForkRegistryForTests();
+    const parentId = "ses_fork_inherit_absent_parent";
+    const childId = "ses_fork_inherit_absent_child";
+    // 600 条对话，父会话折叠到第 150 条对话（父数组 mc151）：末端 450 条足够长，
+    // 摘要边界（compartments 的 mc 序号）在子会话投影里可解析。
+    const longConversation = Array.from({ length: 600 }, (_, index) => ({
+        kind: "message",
+        message: {
+            role: index % 2 === 0 ? "user" : "assistant",
+            content: `long ${index % 2 === 0 ? "user" : "assistant"} message number ${index + 1}`,
+        },
+    }));
+    const parentEntries = [
+        { kind: "message", message: { role: "system", content: "you are the parent" } },
+        ...longConversation,
+    ];
+    const store = parentStore(parentId, parentEntries);
+    const parent = await makePort(parentId, recordingLogger(), store);
+    const childLogger = recordingLogger();
+    const child = await makePort(childId, childLogger, store);
+    t.after(async () => {
+        await parent.close();
+        await child.close();
+    });
+
+    await runPort(parent.port, parentId, parentEntries);
+    const db = openDatabase(getMagicContextDatabasePath());
+    foldParentThrough(db, parentId, 1, 151);
+
+    // 子夹具以带 id 的 system 行起头：mc1 = system、mc(i+1) = 对话 i、question = mc602。
+    const childEntries = [
+        { kind: "message", message: { role: "system", content: "you are the child" } },
+        ...longConversation,
+        { kind: "message", message: { role: "user", content: "child new question" } },
+    ];
+    noteForkedSession(parentId, childId);
+    // transform 必须成功返回（MC-H04 / UnresolvedHistoryBoundaryError 不得抛出）：
+    // 缺陷形态下 delivery 的 prefix trim 被 refused，若请求超窗就会在这里炸。
+    // doesNotReject 完成时 resolve undefined，所以用闭包把结果带出来。
+    let result;
+    await assert.doesNotReject(async () => {
+        result = await runPort(child.port, childId, childEntries);
+    });
+    assert.ok(result, "transform 必须成功返回");
+
+    const inherit = childLogger.lines.find((line) => line.message.includes("fork inherit"));
+    assert.equal(inherit?.context?.trims, true, "夹具：必须触发裁前缀");
+    // 602 条 − 末端 450 − 余量 100 = 第 52 条（mc52 = 对话 51）是裁剪位置；boundary
+    // 行被本轮 S1 切片裁掉，随后的 m[0]/m[1] delivery 正是 absent-boundary 场景。
+    assert.equal(inherit?.context?.boundaryOrdinal, 52);
+    assert.equal(getCompartments(db, childId).at(-1).endMessageId, "mc52");
+
+    // 请求形态：system 段起头（豁免生效），边界 mc52 之后的条目保留。
+    assert.equal(result.entries.length, 1 + 2 + (childEntries.length - 52));
+    assert.equal(result.entries[0]?.message?.role, "system", "请求必须以 system 段起头");
+    const text = textOfEntries(result.entries);
+    // 边界 mc51 之前的对话（1..50）被裁掉；51..150 是继承的 dropped 占位符。
+    assert.ok(!/number (?:[1-9]|[1-9]\d|1[0-4]\d|150)(?!\d)/.test(text), "边界之前的对话条目必须被裁掉");
+    assert.ok(text.includes("number 400"), "边界之后未折叠的消息必须保留");
+    assert.ok(text.includes("child new question"), "新问题必须保留");
+
+    // 核心回归判据：absent-boundary 分类必须走 precedes 分支（豁免段不参与比较，
+    // firstLiveId = mc53），不得退回 refused 分支。只看本会话的日志行，避免其它
+    // 用例的日志干扰。包内 logger 是带缓冲的写（FLUSH_INTERVAL_MS=500ms 定时落盘），
+    // 先等一个 flush 周期再读，否则本 pass 的 prefix trim 行还在内存缓冲里。
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const sessionLogText = readFileSync(join(TEST_HOME, "magic-context.log"), "utf8")
+        .split("\n")
+        .filter((line) => line.includes(`[magic-context][${childId}]`))
+        .join("\n");
+    assert.match(
+        sessionLogText,
+        /prefix trim: boundary mc52 precedes the first remaining message mc53/,
+        "absent-boundary 分类必须以裁剪位置之后的首条消息（mc53）判定出「边界在窗口之前」",
+    );
+    assert.ok(
+        !sessionLogText.includes("prefix trim: boundary mc52 absent from current messages"),
+        "不得退回 refused 分支（firstLiveId 若取到 system 行 mc1，这里就会误判 degraded）",
+    );
+});
+
 test("稳定 fork 改写了 callID，工具结果仍按内容继承", async (t) => {
     clearForkRegistryForTests();
     const parentId = "ses_fork_inherit_tool_parent";
