@@ -1970,15 +1970,30 @@ export function createTransform(deps: TransformDeps) {
                 deps.experimentalTemporalAwareness,
             );
             if (messagesBeforeInitialPrepare) {
-                const skippedVisibleMessages =
-                    pendingCompartmentInjection?.skippedVisibleMessages ?? 0;
-                trimmedMessagesAtCompactionBoundary = messagesBeforeInitialPrepare.slice(
-                    0,
-                    skippedVisibleMessages,
-                );
+                // FORK（magic-context-trim-integrity 问题一 / 变更点 #2）：上游按
+                // 「前 skippedVisibleMessages 条」切出被移出的消息（等价于
+                // slice(0, skipped)）。ZCode 豁免开头 system 段后该等式不再成立：
+                // skippedVisibleMessages 只剩「实际移出条数」语义，前 N 条会混入
+                // 仍在服役的 system 行——这些行还在线上请求里，若落进本切片，
+                // 每次 cache-busting + deferred pending 的 pass 都会把它们的 tag
+                // 持久翻成 compacted。本仓库优先由 prefixTrimRemovedMessageIds
+                // 显式列表映射回消息得到切片；列表缺席（旧缓存对象、S0 回放）时
+                // 才回退按「前 N 条」切，该回退只在豁免段 k = 0 时与显式列表等价。
+                // filter 保持原数组顺序（被移除行是连续前缀段）。
+                const removedIds = pendingCompartmentInjection?.prefixTrimRemovedMessageIds;
+                const removedIdSet = removedIds ? new Set(removedIds) : null;
+                const removedMessages: MessageLike[] = removedIdSet
+                    ? messagesBeforeInitialPrepare.filter((message) => {
+                          const id = message.info.id;
+                          return typeof id === "string" && removedIdSet.has(id);
+                      })
+                    : messagesBeforeInitialPrepare.slice(
+                          0,
+                          pendingCompartmentInjection?.skippedVisibleMessages ?? 0,
+                      );
+                trimmedMessagesAtCompactionBoundary = removedMessages;
                 hiddenMessagesAtCompactionSeam = selectHiddenMessagesAtCompactionSeam(
-                    messagesBeforeInitialPrepare,
-                    skippedVisibleMessages,
+                    removedMessages,
                 );
             }
             logTransformTiming(sessionId, "prepareCompartmentInjection", tInj);

@@ -87,6 +87,16 @@ export interface PreparedCompartmentInjection {
     compartmentEndMessageId: string | null;
     compartmentCount: number;
     skippedVisibleMessages: number;
+    /**
+     * FORK（magic-context-trim-integrity 问题一 / 变更点 #2）：本次裁剪实际移出
+     * 请求的消息 id 列表（不含开头 system 豁免段）。与 skippedVisibleMessages
+     * 并行的显式通道：豁免后 skippedVisibleMessages 只剩「实际移出条数」的计数
+     * 语义，下游切「压缩边界之前的消息」不能再按「前 N 条」切，必须按这个列表
+     * 取。仅在 rebuild 分支（S1/S2 切片点）产出；字段缺席（旧缓存对象、S0 回放）
+     * 时消费方回退按「前 skippedVisibleMessages 条」切片，该回退只在豁免段
+     * k = 0 时与显式列表等价。
+     */
+    prefixTrimRemovedMessageIds?: string[];
     factCount: number;
     memoryCount: number;
     rebuiltFromDb: boolean;
@@ -396,24 +406,69 @@ export function trimMemoriesToBudget(
     return result;
 }
 
+// FORK（magic-context-trim-integrity 问题一，新增 helper）：上游 Pi 宿主把
+// system prompt 放在消息数组之外（session_meta.system_prompt_tokens 列，由宿主
+// 单独注入），消息数组头部没有 system 行，所以上游对头部「整体裁剪」从不波及
+// system 段。ZCode 投影把 system prompt 作为带 mc<序号> id 的消息行放进数组
+// 头部（apps/zcode-cli/packages/desktop 宿主投影 host/types.ts），头部整体裁剪
+// 会把它一并裁掉，长会话的请求从此没有 system prompt。包内豁免的理由：宿主在
+// 包外补回会破坏 LKG 字节记账与 token 估算（system 计 0 的低估），core 补回会
+// 与包内裁剪叠加成双 system；只有 transform 在自己的数组上豁免才能让 LKG 捕获、
+// token 估算、MC-H04 判定与线上请求保持自洽。
+//
+// k 只计「role === "system" 且带 id」的行：带 id 才是 ZCode 持久化的 system
+// prompt 行；无 id 的 host-rendered system 消息（isHostRenderedSystemMessage）
+// 不是持久行、位置跟随邻居，走既有豁免逻辑，不在此列。
+function leadingSystemRunLength(messages: readonly MessageLike[]): number {
+    let count = 0;
+    for (const message of messages) {
+        const id = message.info.id;
+        if (message.info.role === "system" && typeof id === "string" && id.length > 0) {
+            count += 1;
+        } else {
+            break;
+        }
+    }
+    return count;
+}
+
+/**
+ * FORK（magic-context-trim-integrity 问题一）：退化输入判定——裁剪点以
+ * 「实际将移出的条数」计落在开头 system 段内（0 < removedCount < k）。此时
+ * 豁免段与被裁段重叠：slice/重建模式会重复 system 行，splice 模式会让裁剪
+ * 静默失效，必须整体放弃本次切片。现实中不可达（裁剪边界是摘要覆盖边界的
+ * 会话行 id，位于前缀之后），属防御；调用方记 debug 日志。
+ */
+function isDegenerateLeadingSystemTrim(
+    systemRunLength: number,
+    removedCount: number,
+): boolean {
+    return systemRunLength > 0 && removedCount > 0 && removedCount < systemRunLength;
+}
+
 /**
  * Return only rows between OpenCode's marker boundary and the in-memory trim
  * boundary. filterCompacted requires a user marker row, so an assistant-ended
  * compartment can temporarily re-expose the assistant suffix after that user.
+ *
+ * FORK（magic-context-trim-integrity 问题一 / 变更点 #2）：入参从
+ * `(messagesBeforeTrim, skippedVisibleMessages)` 改为显式的「被移出请求的
+ * 消息列表」。上游（Pi）语义是「前 skippedVisibleMessages 条即被移出条数」，
+ * 在豁免 system 段之后该等式不再成立：前 N 条会混入仍在服役的 system 行，
+ * 窗口尾部少 k 行会改变 user marker 判定，进而改变占位符中和与打标窗口的
+ * 坐标。切片来源改由调用方用 prefixTrimRemovedMessageIds 显式给出。
  */
 export function selectHiddenMessagesAtCompactionSeam(
-    messagesBeforeTrim: MessageLike[],
-    skippedVisibleMessages: number,
+    removedMessages: readonly MessageLike[],
 ): MessageLike[] {
-    const trimmed = messagesBeforeTrim.slice(0, skippedVisibleMessages);
     let markerBoundaryIndex = -1;
-    for (let index = trimmed.length - 1; index >= 0; index -= 1) {
-        if (trimmed[index]?.info.role === "user") {
+    for (let index = removedMessages.length - 1; index >= 0; index -= 1) {
+        if (removedMessages[index]?.info.role === "user") {
             markerBoundaryIndex = index;
             break;
         }
     }
-    return markerBoundaryIndex < 0 ? [] : trimmed.slice(markerBoundaryIndex + 1);
+    return markerBoundaryIndex < 0 ? [] : removedMessages.slice(markerBoundaryIndex + 1);
 }
 
 export function prepareCompartmentInjection(
@@ -460,17 +515,34 @@ export function prepareCompartmentInjection(
                     prepared.compartmentEndMessageId,
                 );
                 if (cutoffIndex >= 0) {
-                    const remaining = messages.slice(
+                    const removedCount =
                         cutoffIndex +
-                            (isPartialCompartmentEnd(
-                                db,
-                                sessionId,
-                                prepared.compartmentEndMessageId,
-                            )
-                                ? 0
-                                : 1),
-                    );
-                    messages.splice(0, messages.length, ...remaining);
+                        (isPartialCompartmentEnd(
+                            db,
+                            sessionId,
+                            prepared.compartmentEndMessageId,
+                        )
+                            ? 0
+                            : 1);
+                    // FORK（magic-context-trim-integrity 问题一 / S0 缓存注入回放
+                    // 分支）：上游语义是把缓存边界之前的头部整体裁掉（boundary 之前
+                    // 的历史已折叠进 <session-history>）。ZCode 差异：头部前 k 条是
+                    // 带 id 的 system prompt 行（见 leadingSystemRunLength），整体裁
+                    // 剪会把仍在服役的 system prompt 裁出请求。本仓库改为保留开头
+                    // system 段、只移除 [k, removedCount) 区间（等价于裁掉 boundary
+                    // 之前的非豁免行）。这是缓存安全的 defer pass（稳态大多数 pass）
+                    // 的常态路径，每轮新投影都会重新走到，最容易漏。
+                    // 退化输入（裁剪点落在 system 段内，现实中不可达）不切片照常
+                    // 返回：此时豁免段与被裁段重叠，切片会重复 system 行。
+                    const systemRunLength = leadingSystemRunLength(messages);
+                    if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
+                        sessionLog(
+                            sessionId,
+                            `compartment injection: cached boundary ${prepared.compartmentEndMessageId} falls inside the leading system run (${systemRunLength} messages); skipping cached splice (degenerate input)`,
+                        );
+                    } else {
+                        messages.splice(systemRunLength, removedCount - systemRunLength);
+                    }
                 } else {
                     // Boundary message not in array — covered messages were already
                     // trimmed by OpenCode (compaction, old history not sent). The splice
@@ -598,6 +670,8 @@ export function prepareCompartmentInjection(
             compartmentEndMessageId: "",
             compartmentCount: 0,
             skippedVisibleMessages: 0,
+            // FORK（magic-context-trim-integrity 问题一）：未切片，移出列表为空。
+            prefixTrimRemovedMessageIds: [],
             factCount: facts.length,
             memoryCount,
             rebuiltFromDb: true,
@@ -658,6 +732,8 @@ export function prepareCompartmentInjection(
             compartmentEndMessageId: "",
             compartmentCount: compartments.length,
             skippedVisibleMessages: 0,
+            // FORK（magic-context-trim-integrity 问题一）：未切片，移出列表为空。
+            prefixTrimRemovedMessageIds: [],
             factCount: facts.length,
             memoryCount,
             rebuiltFromDb: true,
@@ -667,6 +743,10 @@ export function prepareCompartmentInjection(
     }
 
     let skippedVisibleMessages = 0;
+    // FORK（magic-context-trim-integrity 问题一 / 变更点 #2）：与
+    // skippedVisibleMessages 并行的显式移出列表（见接口注释）。豁免段不计入，
+    // 下游切「压缩边界之前的消息」必须按列表取而非按「前 N 条」切。
+    let prefixTrimRemovedMessageIds: string[] = [];
     let needsFreshMaterialization = false;
     let resultEndMessage: number = lastEnd;
     let resultEndMessageId: string | null = null;
@@ -675,11 +755,33 @@ export function prepareCompartmentInjection(
         // Natural boundary is visible — normal splice, and any degraded-mode
         // bookkeeping from earlier passes is cleared.
         clearDegradedRebuild(sessionId);
-        skippedVisibleMessages =
+        // FORK（magic-context-trim-integrity 问题一 / S1 rebuild 分支主切片）：
+        // 上游语义是「boundary 之前的可见头部整体被折叠摘要覆盖，整体移出」，
+        // skippedVisibleMessages 即被移出条数。ZCode 差异：头部前 k 条是带 id
+        // 的 system prompt 行（见 leadingSystemRunLength），整体移出会让长会话
+        // 请求失去 system prompt。本仓库改为只移除 [k, removedCount) 区间：
+        // skippedVisibleMessages 的语义随之收窄为「实际移出请求的条数（不含
+        // k 条豁免行）」，被移出条目按 id 显式记录进 prefixTrimRemovedMessageIds
+        // 供下游切片；移除动作用一次 splice 完成（等价于裁掉 boundary 之前的
+        // 非豁免行）。退化输入（裁剪点落在 system 段内，现实中不可达）不切片
+        // 照常返回：skipped / endMessageId / 移出列表都保持空值，本 pass 不裁剪。
+        const systemRunLength = leadingSystemRunLength(messages);
+        const removedCount =
             cutoffIndex + (isPartialCompartmentEnd(db, sessionId, trimEndMessageId) ? 0 : 1);
-        const remaining = messages.slice(skippedVisibleMessages);
-        messages.splice(0, messages.length, ...remaining);
-        resultEndMessageId = trimEndMessageId;
+        if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
+            sessionLog(
+                sessionId,
+                `compartment injection: boundary ${trimEndMessageId} falls inside the leading system run (${systemRunLength} messages); skipping rebuild splice (degenerate input)`,
+            );
+        } else {
+            prefixTrimRemovedMessageIds = messages
+                .slice(systemRunLength, removedCount)
+                .map((message) => message.info.id)
+                .filter((id): id is string => typeof id === "string" && id.length > 0);
+            skippedVisibleMessages = removedCount - systemRunLength;
+            messages.splice(systemRunLength, removedCount - systemRunLength);
+            resultEndMessageId = trimEndMessageId;
+        }
     } else {
         // Degraded: the natural boundary message is not in the visible window.
         const degradedCount = noteDegradedRebuild(sessionId);
@@ -709,20 +811,41 @@ export function prepareCompartmentInjection(
                     reAnchorCompartment.endMessageId,
                 );
                 if (reAnchorCutoff >= 0) {
-                    skippedVisibleMessages =
+                    // FORK（magic-context-trim-integrity 问题一 / S2 degraded
+                    // re-anchor 切片）：与 S1 同构——上游把 re-anchor 边界之前的
+                    // 头部整体移出；ZCode 差异是头部带 id 的 system prompt 行必须
+                    // 豁免（见 leadingSystemRunLength）。本仓库只移除
+                    // [k, removedCount) 区间，skippedVisibleMessages 记「实际移出
+                    // 条数」，移出条目按 id 记入 prefixTrimRemovedMessageIds。
+                    // 退化输入（re-anchor 裁剪点落在 system 段内，现实中不可达）
+                    // 不切片：保持 reAnchored = false，交由下方
+                    // needsFreshMaterialization 请求重新切基线，本 pass 不裁剪。
+                    const systemRunLength = leadingSystemRunLength(messages);
+                    const removedCount =
                         reAnchorCutoff +
                         (isPartialCompartmentEnd(db, sessionId, reAnchorCompartment.endMessageId)
                             ? 0
                             : 1);
-                    const remaining = messages.slice(skippedVisibleMessages);
-                    messages.splice(0, messages.length, ...remaining);
-                    resultEndMessage = reAnchorCompartment.endMessage;
-                    resultEndMessageId = reAnchorCompartment.endMessageId;
-                    reAnchored = true;
-                    logReanchorOnce(
-                        sessionId,
-                        `compartment injection re-anchored: natural boundary ${trimEndMessageId} not visible for ${degradedCount} passes; splicing at visible compartment boundary ${resultEndMessageId} (ordinal ${resultEndMessage})`,
-                    );
+                    if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
+                        sessionLog(
+                            sessionId,
+                            `compartment injection: re-anchor boundary ${reAnchorCompartment.endMessageId} falls inside the leading system run (${systemRunLength} messages); skipping re-anchor splice (degenerate input)`,
+                        );
+                    } else {
+                        prefixTrimRemovedMessageIds = messages
+                            .slice(systemRunLength, removedCount)
+                            .map((message) => message.info.id)
+                            .filter((id): id is string => typeof id === "string" && id.length > 0);
+                        skippedVisibleMessages = removedCount - systemRunLength;
+                        messages.splice(systemRunLength, removedCount - systemRunLength);
+                        resultEndMessage = reAnchorCompartment.endMessage;
+                        resultEndMessageId = reAnchorCompartment.endMessageId;
+                        reAnchored = true;
+                        logReanchorOnce(
+                            sessionId,
+                            `compartment injection re-anchored: natural boundary ${trimEndMessageId} not visible for ${degradedCount} passes; splicing at visible compartment boundary ${resultEndMessageId} (ordinal ${resultEndMessage})`,
+                        );
+                    }
                 }
             }
             if (!reAnchored) {
@@ -749,6 +872,9 @@ export function prepareCompartmentInjection(
         compartmentEndMessageId: resultEndMessageId,
         compartmentCount: compartments.length,
         skippedVisibleMessages,
+        // FORK（magic-context-trim-integrity 问题一 / 变更点 #1）：S1/S2 切片点
+        // 显式产出的被移出消息 id 列表；未切片（degraded / 退化输入）时为空。
+        prefixTrimRemovedMessageIds,
         factCount: facts.length,
         memoryCount,
         rebuiltFromDb: true,
@@ -3795,59 +3921,101 @@ function trimToPreparedPrefix(
                 if (boundaryPosition === undefined) {
                     status = refuse("boundary absent from immutable source order");
                 } else {
-                    let lastSourcePosition = -1;
-                    let sawPersistedRow = false;
-                    let liveOrderError: string | null = null;
-                    const retained: MessageLike[] = [];
-                    for (const [index, message] of options.messages.entries()) {
-                        const id = message.info.id;
-                        if (isHostRenderedSystemMessage(message)) {
-                            // Belongs to the rows around its persisted neighbours:
-                            // kept exactly when the row before it is kept or is the
-                            // boundary, the same cut the id-lookup trim makes.
-                            if (lastSourcePosition >= boundaryPosition) retained.push(message);
-                            continue;
+                    // FORK（magic-context-trim-integrity 问题一 / S4 source-order
+                    // 分支退化输入）：裁剪点（boundary 在 source order 中的位置）
+                    // 落在开头 system 豁免段内（现实中不可达，属防御）。豁免段
+                    // 无条件保留会让 boundary 行也存活、裁剪静默失效，必须按既有
+                    // 「裁剪被拒」语义 refused，随后的 fail-closed 判定照常生效。
+                    const leadingSystemCount = leadingSystemRunLength(options.messages);
+                    if (leadingSystemCount > 0 && boundaryPosition < leadingSystemCount) {
+                        status = refuse(
+                            `boundary ${boundary} falls inside the leading system run (${leadingSystemCount} messages)`,
+                        );
+                    } else {
+                        let lastSourcePosition = -1;
+                        let sawPersistedRow = false;
+                        let liveOrderError: string | null = null;
+                        const retained: MessageLike[] = [];
+                        for (const [index, message] of options.messages.entries()) {
+                            const id = message.info.id;
+                            if (index < leadingSystemCount) {
+                                // FORK（magic-context-trim-integrity 问题一 / S4
+                                // source-order 分支）：上游按 source position 逐行
+                                // 裁掉 boundary 之前的行；ZCode 头部前 k 条是带 id
+                                // 的 system prompt 行（见 leadingSystemRunLength），
+                                // 裁掉它们会让长会话请求失去 system prompt。豁免行
+                                // 直接保留：不参与 position 检查、不更新
+                                // lastSourcePosition——开头段在 source order 最前，
+                                // 其后第一个保留行的 position 必然大于它，不会触发
+                                // 下方 immutable source order 检查，与
+                                // isHostRenderedSystemMessage 的既有豁免同构。
+                                retained.push(message);
+                                continue;
+                            }
+                            if (isHostRenderedSystemMessage(message)) {
+                                // Belongs to the rows around its persisted neighbours:
+                                // kept exactly when the row before it is kept or is the
+                                // boundary, the same cut the id-lookup trim makes.
+                                if (lastSourcePosition >= boundaryPosition) retained.push(message);
+                                continue;
+                            }
+                            if (typeof id !== "string" || id.length === 0) {
+                                if (!sawPersistedRow && isSyntheticPrefixHead(message)) continue;
+                                liveOrderError = `live message at index ${index} has no stable id outside the synthetic head`;
+                                break;
+                            }
+                            sawPersistedRow = true;
+                            const position = sourcePosition.get(id);
+                            if (position === undefined) {
+                                liveOrderError = `live message ${id} is absent from immutable source order`;
+                                break;
+                            }
+                            if (position <= lastSourcePosition) {
+                                liveOrderError = `live message ${id} violates immutable source order`;
+                                break;
+                            }
+                            lastSourcePosition = position;
+                            if (
+                                position > boundaryPosition ||
+                                (position === boundaryPosition &&
+                                    isPartialCompartmentEnd(options.db, options.sessionId, boundary))
+                            )
+                                retained.push(message);
                         }
-                        if (typeof id !== "string" || id.length === 0) {
-                            if (!sawPersistedRow && isSyntheticPrefixHead(message)) continue;
-                            liveOrderError = `live message at index ${index} has no stable id outside the synthetic head`;
-                            break;
+                        if (liveOrderError) status = refuse(liveOrderError);
+                        else {
+                            options.messages.splice(0, options.messages.length, ...retained);
+                            status = "applied";
                         }
-                        sawPersistedRow = true;
-                        const position = sourcePosition.get(id);
-                        if (position === undefined) {
-                            liveOrderError = `live message ${id} is absent from immutable source order`;
-                            break;
-                        }
-                        if (position <= lastSourcePosition) {
-                            liveOrderError = `live message ${id} violates immutable source order`;
-                            break;
-                        }
-                        lastSourcePosition = position;
-                        if (
-                            position > boundaryPosition ||
-                            (position === boundaryPosition &&
-                                isPartialCompartmentEnd(options.db, options.sessionId, boundary))
-                        )
-                            retained.push(message);
-                    }
-                    if (liveOrderError) status = refuse(liveOrderError);
-                    else {
-                        options.messages.splice(0, options.messages.length, ...retained);
-                        status = "applied";
                     }
                 }
             }
         } else {
             const index = findBoundaryIndex(options.sessionId, options.messages, boundary);
             if (index >= 0) {
-                options.messages.splice(
-                    0,
+                // FORK（magic-context-trim-integrity 问题一 / S3 findBoundaryIndex
+                // 兜底分支）：上游语义是从头部 splice 掉 boundary 之前的全部行；
+                // ZCode 差异是头部前 k 条为带 id 的 system prompt 行（见
+                // leadingSystemRunLength），整体 splice 会把仍在服役的 system
+                // prompt 一并裁出请求。本仓库改为从位置 k 起删除 [k, removedCount)
+                // 区间，开头 system 段原位保留在最前。退化输入（裁剪点落在
+                // system 段内，现实中不可达）不裁剪并按既有「裁剪被拒」语义返回
+                // refused——随后的 fail-closed 判定（超窗即 MC-H04）照常生效。
+                const systemRunLength = leadingSystemRunLength(options.messages);
+                const removedCount =
                     index +
-                        (isPartialCompartmentEnd(options.db, options.sessionId, boundary) ? 0 : 1),
-                );
-                resetPrefixTrimFallbackState(options.sessionId);
-                status = "applied";
+                    (isPartialCompartmentEnd(options.db, options.sessionId, boundary) ? 0 : 1);
+                if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
+                    sessionLog(
+                        options.sessionId,
+                        `prefix trim: boundary ${boundary}; pass=${options.isCacheBustingPass ? "priced" : "defer"}; trim refused: boundary falls inside the leading system run (${systemRunLength} messages); no in-pass trim applied (degenerate input)`,
+                    );
+                    status = "refused";
+                } else {
+                    options.messages.splice(systemRunLength, removedCount - systemRunLength);
+                    resetPrefixTrimFallbackState(options.sessionId);
+                    status = "applied";
+                }
             } else {
                 status = classifyAbsentBoundary(options, options.messages, boundary);
             }
