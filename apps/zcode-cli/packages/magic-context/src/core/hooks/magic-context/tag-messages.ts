@@ -540,16 +540,17 @@ function buildTagContentPlans(
             if (!posIdx.has(row.messageId)) posIdx.set(row.messageId, row);
         }
 
-        const sourceOfTagCache = new Map<number, string | undefined>();
-        const sourceOfTag = (tagNumber: number): string | undefined => {
-            if (!sourceOfTagCache.has(tagNumber)) {
-                sourceOfTagCache.set(
-                    tagNumber,
-                    getSourceContents(db, sessionId, [tagNumber]).get(tagNumber),
-                );
-            }
-            return sourceOfTagCache.get(tagNumber);
-        };
+        // FORK（magic-context-trim-integrity CR-11）：sourceOfTag 不再逐 tag 点查
+        // getSourceContents——该函数每次调用都 db.prepare 且无语句缓存，计分对每个
+        // 候选 × 每个位置命中都会触达不同 tag，点查数随窗口膨胀。本会话的全部
+        // source_contents 行已由上方 getSourceContentIndexBySession 一次性载入
+        // （同表同列、按 tag_id 升序），且 (session_id, tag_id) 唯一，反转成
+        // 「tag 号 → 原文」与单查语义等价：查不到的 tag 同样得到 undefined。
+        const sourceByTag = new Map<number, string>();
+        for (const [content, holderTags] of sourceIdx) {
+            for (const holderTag of holderTags) sourceByTag.set(holderTag, content);
+        }
+        const sourceOfTag = (tagNumber: number): string | undefined => sourceByTag.get(tagNumber);
 
         const findClaimCandidate = (
             text: string,
@@ -660,9 +661,19 @@ function buildTagContentPlans(
                     });
                     continue;
                 }
+                // FORK（magic-context-trim-integrity CR-10）：空白判断必须先于平移
+                // 分支——主循环的空白豁免只对 assistant 生效（whitespaceOnlyAssistant
+                // 要求 role === 'assistant'），user 消息的空白 part 若先落进平移层，
+                // 平移成立时会被消费成认领或漂移计划（墓碑化位置上的旧号 / 沿用错误
+                // 真身）。任何非 system role 的空白 part 都不参与计划，照旧走既有分支；
+                // system 规则保持在最前——spec 要求 system 行无论是否空白都走专门规则。
+                if (text.trim().length === 0) {
+                    plans.set(contentId, { kind: "existing" });
+                    continue;
+                }
                 if (driftShift !== 0) {
-                    // —— v2 平移层三分支（优先于 v1 的表；whitespace-only 的非
-                    // system part 主循环有专属分支、不消费这里的计划，与 v1 同口径）——
+                    // —— v2 平移层三分支（优先于 v1 的表；能走到这里的都已是带正文
+                    // 的非 system 文本 part——system 行与空白 part 在上方已分别分流）——
                     const keyMatch = POSITION_KEY.exec(contentId);
                     const primeRow = keyMatch
                         ? posIdx.get(
@@ -703,11 +714,6 @@ function buildTagContentPlans(
                     }
                     // 平移不符：T′ 不动；T 存在则墓碑化；新号；不覆盖任何原文。
                     plans.set(contentId, { kind: "drift", tombstoneTarget: positionTag });
-                    continue;
-                }
-                // whitespace-only 的非 system part 不参与计划，照旧走既有分支。
-                if (text.trim().length === 0) {
-                    plans.set(contentId, { kind: "existing" });
                     continue;
                 }
                 if (positionTag === undefined) {
@@ -1399,9 +1405,18 @@ export function tagMessages(
                             // ——不调用 resolve，scoped fallback 自然无从触发；不以默
                             // 认 accept 调用（mc1:* 桶里可能挂着上一代 synthetic head
                             // 的旧 tag，回退匹配会把它重绑到 system 行上）。
+                            // FORK（magic-context-trim-integrity CR-3）：墓碑化之后
+                            // 无条件 unbind(contentId)，与上方漂移分支同款——墓碑化的
+                            // 内存侧只是条件解绑（仅 getTag(c) === T 时才放），挡不住
+                            // assignTag 的内存快路径：本 pass 早前 inert 重放（pass 开头
+                            // 把 inert 行的 contentId bindTag 进内存）或空白 assistant
+                            // 分支已把该 contentId 绑到别的旧号上时，assignTag 会直接
+                            // 返回那个旧号，随后 replaceSourceContent 把 system prompt
+                            // 写进它的原文——正是专门规则要防的行为。
                             if (plan.tombstoneTarget !== undefined) {
                                 tombstonePositionTag(plan.tombstoneTarget, contentId);
                             }
+                            tagger.unbindTag(sessionId, contentId);
                         }
                     } else {
                         existingTagId = resolver.resolve(
