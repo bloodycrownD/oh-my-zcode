@@ -368,6 +368,10 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
     console.log(
         `  输入对话自身的弧形态（既有基线）：有调用没结果 ${conversationShape.missingResults.length}，有结果没调用 ${conversationShape.orphanResults.length}`,
     );
+    // 存量基线：跑任何 pass 之前 system tag 的状态。真实库里已有被旧缺陷翻成
+    // compacted 的 system tag（拷贝源里就存在），本次修复只防止新的损坏、不修存量，
+    // 所以 E2.4 断言的是「没有任何 system tag 新变成 compacted」。
+    const sysBaseline = systemTagRows();
     const v0 = await runPass("V0", build());
     const v1 = await runPass("V1", build(sysEntry));
     const snapA = snapshotSources();
@@ -550,11 +554,13 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
         `${sysAfter.length} 行（message_role='system'）`,
     );
     const compactedSystem = sysAfter.filter((r) => r.st === "compacted");
+    const baselineStatus = new Map(sysBaseline.map((r) => [r.n, r.st]));
+    const newlyCompacted = compactedSystem.filter((r) => baselineStatus.get(r.n) !== "compacted");
     check(
         `${s8}·E2.4`,
-        "system 条目的 tag 没有被置为 compacted",
-        sysAfter.length > 0 && compactedSystem.length === 0,
-        `compacted ${compactedSystem.length}`,
+        "没有任何 system 条目的 tag 新被置为 compacted",
+        sysAfter.length > 0 && newlyCompacted.length === 0,
+        `新 compacted ${newlyCompacted.length}；存量 compacted ${compactedSystem.length - newlyCompacted.length}（拷贝源里已存在，基线共 ${sysBaseline.length} 行）`,
     );
 
     // ── T-E3 ────────────────────────────────────────────────────────────────
