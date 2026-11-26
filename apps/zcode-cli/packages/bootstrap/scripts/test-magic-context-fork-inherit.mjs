@@ -22,7 +22,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { registerHooks } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -337,6 +337,9 @@ test("fork 子会话首轮继承 dropped 状态与摘要块", async (t) => {
         childEntries.length + 2,
         "子会话首轮请求应保留全部条目，外加两个摘要头",
     );
+    // T-S3：不触发裁前缀的会话（末端不足 MIN_TAIL_FOR_TRIM 的退路）行为不变——
+    // 请求仍以 system 段起头，context 前缀 attachment 与 system 都在。
+    assert.equal(result.entries[0]?.message?.role, "system", "不裁剪时请求必须以 system 段起头");
     assert.ok(
         result.entries.some((entry) => entry.message?.role === "system"),
         "子会话的 system prompt 必须留在请求里",
@@ -416,6 +419,7 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
     const parentId = "ses_fork_inherit_trim_parent";
     const childId = "ses_fork_inherit_trim_child";
     // 600 条对话，父会话已折叠到第 150 条对话（父数组里是第 151 条）：末端 = 601 − 151 = 450 条，足够长。
+    // 子夹具头部（裁剪边界之前）补一条 attachment（T-S2）：它在裁剪范围内、不随请求发出。
     const longConversation = Array.from({ length: 600 }, (_, index) => ({
         kind: "message",
         message: {
@@ -442,6 +446,7 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
 
     const childEntries = [
         { kind: "message", message: { role: "system", content: "you are the child" } },
+        { kind: "attachment", content: "trim fixture attachment", metadata: { source: "shell" } },
         ...longConversation,
         { kind: "message", message: { role: "user", content: "child new question" } },
     ];
@@ -451,23 +456,73 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
     const inherit = childLogger.lines.find((line) => line.message.includes("fork inherit"));
     assert.equal(inherit?.context?.kind, "inherited");
     assert.equal(inherit?.context?.trims, true, "父会话末端足够长时必须裁前缀");
-    // 602 条 − 末端 450 − 余量 100 = 第 52 条是裁剪位置。
-    assert.equal(inherit?.context?.boundaryOrdinal, 52);
+    // 603 条 − 末端 450 − 余量 100 = 第 53 条是裁剪位置。mc53 = 对话 51（mc1 是
+    // system、mc2 是夹具 attachment，对话 i 在 mc(i+2)）；末端 450 由父会话折叠
+    // 边界按内容对齐换算，attachment 不改变它。
+    assert.equal(inherit?.context?.boundaryOrdinal, 53);
     const compartments = getCompartments(db, childId);
     assert.equal(compartments.length, 3, "摘要块必须继承");
-    assert.equal(compartments.at(-1).endMessageId, "mc52", "末舱边界必须是子会话坐标");
+    assert.equal(compartments.at(-1).endMessageId, "mc53", "末舱边界必须是子会话坐标");
     assertContiguousFromOne(compartments);
 
     const text = textOfEntries(result.entries);
+    // number 1..150 = 父会话折叠上限内的对话原文：1..51 被裁掉（裁剪边界 mc53 = 对话
+    // 51），52..150 是 dropped 占位符。这个上限锚定父会话的折叠范围，不随 mc 序号
+    // 前移；对话 151 是 active、原文必须出现在请求里，所以不得把 151 加进正则。
     assert.ok(!/number (?:[1-9]|[1-9]\d|1[0-4]\d|150)(?!\d)/.test(text), "裁剪范围内的原文不得留在请求里");
     assert.ok(text.includes("parent compartment body"), "请求必须带上继承的摘要");
     assert.ok(text.includes("number 400"), "末端未折叠的消息必须保留");
     assert.ok(text.includes("child new question"), "新问题必须保留");
-    assert.equal(
-        result.entries.length,
-        2 + (childEntries.length - 52),
-        "请求 = 两个摘要头 + 裁剪位置之后的全部条目",
+    // T-S1（顺序 + 条数）：请求的前 k 条是输入里的 system 条目，其后依次是 m[0]、
+    // m[1]，再其后是裁剪点之后的全部条目。k = 1（一条 system）。
+    assert.equal(result.entries.length, 1 + 2 + (childEntries.length - 53),
+        "请求 = system 段(k=1) + 两个摘要头 + 裁剪位置之后的全部条目");
+    assert.equal(result.entries[0]?.message?.role, "system", "请求必须以 system 段起头");
+    // system 行照常参与打标（wire 上带 §N§ 前缀）；rebuild 后 content 是 parts
+    // 数组形态，正文去前缀后必须与输入一致。
+    const systemWireText = Array.isArray(result.entries[0]?.message?.content)
+        ? result.entries[0].message.content[0]?.text
+        : result.entries[0]?.message?.content;
+    assert.match(
+        String(systemWireText ?? ""),
+        /^§\d+§ you are the child$/,
+        "system 段正文必须原样保留（§N§ 是打标前缀）",
     );
+    assert.equal(result.entries[1]?.metadata?.source, "magic_context", "system 段之后必须是 m[0] 摘要头");
+    assert.equal(result.entries[2]?.metadata?.source, "magic_context", "m[0] 之后必须是 m[1] 摘要头");
+    // T-S2：夹具 attachment（裁剪边界之前）不随请求发出，与修复前一致。
+    assert.ok(!text.includes("trim fixture attachment"), "裁剪范围内的 attachment 不得随请求发出");
+    // 裁剪位置之后的条目：active 原文条目由 transform 复用原对象（isUnchanged），
+    // 逐项引用相等；继承的 dropped 条目（对话 52..150）wire 被中和成占位符、条目
+    // 被重建，引用相等不成立——按 spec T-S1 的处置，对这些条目断言位置 + role +
+    // 占位符文本。
+    const kept = result.entries.slice(3);
+    const expectedKept = childEntries.slice(53);
+    assert.equal(kept.length, expectedKept.length, "保留段条数必须一致");
+    const asWireText = (entry) =>
+        Array.isArray(entry?.message?.content)
+            ? entry.message.content[0]?.text
+            : entry?.message?.content;
+    // 条目被重建（引用不等）只有两种合法形态：继承的 dropped 占位符，或 active
+    // 原文被 §N§ 打标改写（正文不变）。
+    const stripTag = (text) => text.replace(/^§\d+§ /, "");
+    for (let index = 0; index < kept.length; index += 1) {
+        if (kept[index] === expectedKept[index]) continue;
+        assert.equal(
+            kept[index]?.message?.role,
+            expectedKept[index]?.message?.role,
+            `保留条目 ${index} 的 role 必须与输入一致`,
+        );
+        const wire = String(asWireText(kept[index]) ?? "");
+        const inputText = expectedKept[index].message?.content;
+        const isPlaceholder = /^\[dropped(?: §\d+§)?\]$/.test(wire);
+        const isTaggedOriginal =
+            typeof inputText === "string" && stripTag(wire) === inputText;
+        assert.ok(
+            isPlaceholder || isTaggedOriginal,
+            `被重建的保留条目 ${index} 既不是 dropped 占位符也不是打标原文：${wire}`,
+        );
+    }
 
     // 父会话在同样条件（缓存作废后的冷重建）下也是这样裁的：形态一致。
     db.prepare(
@@ -490,6 +545,52 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
         .get(childId).count;
     assert.ok(inheritedSources > 0, "被裁掉的继承 tag 必须带着父会话的原文");
 
+    // T-S5：缓存回放分支（S0）的切片。第一轮的 m[0]/m[1] 首渲染（first_render）
+    // 会清掉包内 injection 缓存，所以全量 childEntries 要再进两次：第一次在缓存
+    // 空的情况下走 rebuild 分支并重建缓存（m[0]/m[1] 已落库、走 cache_hit 不再清
+    // 缓存），第二次才落入缓存回放分支，且缓存边界 mc53 在全量投影里可解析——
+    // S0 的 splice 真正执行。下方「折叠产物重进」喂的是已折叠条目，投影重编号后
+    // 缓存边界不再指向裁剪位置，不能作为 S0 裁剪断言的载体（spec T-S5）。
+    const replayWarmup = await runPort(child.port, childId, childEntries);
+    const replay = await runPort(child.port, childId, childEntries);
+    assert.ok(replay, "S0 回放轮必须成功");
+    assert.equal(
+        replay.entries.length,
+        replayWarmup.entries.length,
+        "S0 回放轮与 rebuild 轮的输出条数必须一致（豁免行为同构）",
+    );
+    assert.equal(replay.entries.length, result.entries.length, "S0 回放轮不得改变请求条数");
+    assert.equal(replay.entries[0]?.message?.role, "system", "S0 切片后请求仍以 system 段起头");
+    assert.equal(replay.entries[1]?.metadata?.source, "magic_context", "S0 切片后 system 段之后是 m[0]");
+    assert.equal(replay.entries[2]?.metadata?.source, "magic_context", "S0 切片后 m[0] 之后是 m[1]");
+    // S0 的「缓存边界不可解析」子分支会记 "cached boundary ... not in messages"；
+    // 它不出现说明本轮真正执行了 splice，而不是走了不切片的旁路。
+    const logText = readFileSync(join(TEST_HOME, "magic-context.log"), "utf8");
+    assert.ok(
+        logText.includes("reason=cache_hit"),
+        "夹具前置：m[0]/m[1] 必须已命中落库缓存（cache_hit）——否则 prepared 路径不清 injection 缓存的前提不成立，S0 到不了",
+    );
+    assert.ok(
+        !logText.includes("cached boundary"),
+        "S0 必须真的执行了缓存边界的切片（日志不得出现边界不可解析的旁路记录）",
+    );
+
+    // T-S6：system 行照常打标，且没有被持久翻成 compacted。豁免后 system 行仍在
+    // 每轮请求里；若它落进「压缩边界之前的消息」切片，每次 cache-busting +
+    // deferred pending 的 pass 都会把它的 tag 翻成 compacted。先断言存在，否则
+    // 「不是 compacted」恒真、空转通过。
+    const systemTags = db
+        .prepare(
+            `SELECT tag_number AS tagNumber, status FROM tags
+             WHERE session_id = ? AND message_id LIKE 'mc1:%' AND type = 'message'`,
+        )
+        .all(childId);
+    assert.ok(systemTags.length > 0, "system 条目的 message tag 必须存在（否则下面的断言空转）");
+    assert.ok(
+        systemTags.every((tag) => tag.status !== "compacted"),
+        `system tag 不得被置为 compacted：${JSON.stringify(systemTags)}`,
+    );
+
     // 同一轮里再次进入 transform（续写、重试路径）拿的是折叠后的条目：heal 不得据此清账。
     const again = await runPort(child.port, childId, result.entries);
     assert.ok(again, "再次进入必须成功");
@@ -497,6 +598,88 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
         getCompartments(db, childId).length,
         3,
         "用折叠后的条目再次进入时不得清掉继承来的账本",
+    );
+});
+
+// T-S4：输入开头没有 system 段（k = 0）时，裁剪行为与修复前逐条相同——豁免逻辑
+// 在 k = 0 时退化为上游原样（从头部整体裁掉边界之前的条目），请求形态不得漂移。
+test("输入开头没有 system 段时，裁剪与修复前逐条相同", async (t) => {
+    clearForkRegistryForTests();
+    const parentId = "ses_fork_inherit_nosys_parent";
+    const childId = "ses_fork_inherit_nosys_child";
+    const longConversation = Array.from({ length: 600 }, (_, index) => ({
+        kind: "message",
+        message: {
+            role: index % 2 === 0 ? "user" : "assistant",
+            content: `long ${index % 2 === 0 ? "user" : "assistant"} message number ${index + 1}`,
+        },
+    }));
+    const parentEntries = [
+        { kind: "message", message: { role: "system", content: "you are the parent" } },
+        ...longConversation,
+    ];
+    const store = parentStore(parentId, parentEntries);
+    const parent = await makePort(parentId, recordingLogger(), store);
+    const childLogger = recordingLogger();
+    const child = await makePort(childId, childLogger, store);
+    t.after(async () => {
+        await parent.close();
+        await child.close();
+    });
+
+    await runPort(parent.port, parentId, parentEntries);
+    const db = openDatabase(getMagicContextDatabasePath());
+    foldParentThrough(db, parentId, 1, 151);
+
+    // 子会话没有 system 段：对话直接开头，mc(i) = 对话 i，question 是 mc601。
+    const childEntries = [
+        ...longConversation,
+        { kind: "message", message: { role: "user", content: "child new question" } },
+    ];
+    noteForkedSession(parentId, childId);
+    const result = await runPort(child.port, childId, childEntries);
+
+    const inherit = childLogger.lines.find((line) => line.message.includes("fork inherit"));
+    assert.equal(inherit?.context?.trims, true, "夹具：必须触发裁前缀");
+    // 601 条 − 末端 450 − 余量 100 = 第 51 条（mc51 = 对话 51）是裁剪位置；boundary
+    // 行本身被裁（非 partial），保留从 mc52 = 对话 52 起。
+    assert.equal(inherit?.context?.boundaryOrdinal, 51);
+    assert.equal(getCompartments(db, childId).at(-1).endMessageId, "mc51");
+    // k = 0：请求 = 两个摘要头 + 裁剪位置之后的全部条目（与修复前同值同形）。
+    assert.equal(result.entries.length, 2 + (childEntries.length - 51));
+    assert.equal(result.entries[0]?.metadata?.source, "magic_context", "没有 system 段时摘要头直接在最前");
+    assert.equal(result.entries[1]?.metadata?.source, "magic_context");
+    // 裁剪窗口与修复前一致：从对话 52 起逐条保留。active 原文条目引用相等；
+    // 继承的 dropped 条目（对话 52..150）被中和成占位符并重建，按位置 + role +
+    // 占位符文本断言（「与修复前逐条相同」的可操作形态）。
+    const kept = result.entries.slice(2);
+    const expectedKept = childEntries.slice(51);
+    assert.equal(kept.length, expectedKept.length);
+    const asWireText = (entry) =>
+        Array.isArray(entry?.message?.content)
+            ? entry.message.content[0]?.text
+            : entry?.message?.content;
+    // 条目被重建（引用不等）只有两种合法形态：dropped 占位符，或 active 原文被
+    // §N§ 打标改写（正文不变）——「与修复前逐条相同」的可操作形态。
+    const stripTag = (text) => text.replace(/^§\d+§ /, "");
+    for (let index = 0; index < kept.length; index += 1) {
+        if (kept[index] === expectedKept[index]) continue;
+        assert.equal(kept[index]?.message?.role, expectedKept[index]?.message?.role);
+        const wire = String(asWireText(kept[index]) ?? "");
+        const inputText = expectedKept[index].message?.content;
+        const isPlaceholder = /^\[dropped(?: §\d+§)?\]$/.test(wire);
+        const isTaggedOriginal = typeof inputText === "string" && stripTag(wire) === inputText;
+        assert.ok(
+            isPlaceholder || isTaggedOriginal,
+            `被重建的保留条目 ${index} 既不是 dropped 占位符也不是打标原文：${wire}`,
+        );
+    }
+    const text = textOfEntries(result.entries);
+    assert.ok(!/number (?:[1-9]|[1-9]\d|1[0-4]\d|150)(?!\d)/.test(text), "折叠与裁剪范围内的原文不得出现");
+    assert.ok(text.includes("number 400"), "末端未折叠的消息必须保留");
+    assert.ok(
+        !result.entries.some((entry) => entry.message?.role === "system"),
+        "输入没有 system 段时请求也不得凭空出现 system 条目",
     );
 });
 

@@ -1947,6 +1947,99 @@ test("b5b T-T10 入站 system 行落在 NULL-role 存量 tag 上：墓碑化换�
   }
 });
 
+// --- T-S7：裁前缀保留 system 段的退化输入（trim-integrity 问题一） ----------
+//
+// 经导出的 injectM0M1 的 preparedPrefix 路径驱动（不为测试新增导出）。夹具把
+// preparedTrimBoundaryId 指向开头 system 段内（裁剪点落在 system 段内，现实中
+// 不可达、属防御）：S3（id-lookup 兜底）与 S4（source-order）两条分支都必须
+// 拒绝裁剪并返回 prefixTrimStatus="refused"，且 messages 不被裁剪——随后的
+// fail-closed 判定（超窗即 MC-H04）在 transform 层照常生效，不在本用例范围。
+// isPartialCompartmentEnd 对无 compartments 行的会话恒 false，所以 S3 分支的
+// 实际移出条数 = cutoffIndex + 1。
+const injectCompartmentsModule = await load("hooks/magic-context/inject-compartments.js");
+
+test("T-S7 退化输入：裁剪点落在 system 段内时拒绝裁剪（prefixTrimStatus=refused）", () => {
+  const sessionId = "ses_ts7_degenerate";
+  const makeMessages = () => [
+    {
+      info: { id: "mc1", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line one" }],
+    },
+    {
+      info: { id: "mc2", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line two" }],
+    },
+    {
+      info: { id: "mc3", role: "user", sessionID: sessionId },
+      parts: [{ type: "text", text: "user message" }],
+    },
+  ];
+  // preparedMessages 会被 structuredClone 后 unshift 到最前（injectM0M1 的既有
+  // 行为，与本用例无关）；给一条最小 synthetic head 即可。
+  const head = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "m[0]/m[1] head", synthetic: true }] },
+  ];
+  const preparedPrefix = {
+    injected: true,
+    prependedMessageCount: 0,
+    m0RematerializedThisPass: false,
+    materializationContentionRetryExhausted: true,
+    decision: { value: false, reason: "cache_hit" },
+    m0Bytes: null,
+    m1Text: null,
+    preparedMessages: head,
+    preparedTrimBoundaryId: "mc1",
+  };
+  const baseOptions = {
+    db: b4Db,
+    sessionId,
+    state: { sessionId, cachedM0Bytes: null, cachedM1Bytes: null },
+    compactionOff: false,
+    isCacheBustingPass: false,
+  };
+  // 「不裁剪」的统一断言：system 段两条原对象仍在（引用相等证明没有被重建），
+  // 数组 = head(1) + 原三条，user 行未丢。
+  const assertNotTrimmed = (messages, systemRefs, label) => {
+    if (messages.length !== 4) {
+      throw new Error(`${label}: messages were trimmed (${messages.length} !== 4)`);
+    }
+    const systems = messages.filter((message) => message.info.role === "system");
+    if (systems.length !== 2 || systems[0] !== systemRefs[0] || systems[1] !== systemRefs[1]) {
+      throw new Error(`${label}: the leading system run did not survive intact`);
+    }
+    if (!messages.includes(systemRefs[2])) {
+      throw new Error(`${label}: the non-system rows were dropped`);
+    }
+  };
+
+  // ① S3 分支：不带 prefixTrimSourceOrder，走 findBoundaryIndex 兜底切片。
+  const s3Messages = makeMessages();
+  const s3SystemRefs = [...s3Messages];
+  const s3 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s3Messages,
+    preparedPrefix,
+  });
+  if (s3.prefixTrimStatus !== "refused") {
+    throw new Error(`S3 branch: prefixTrimStatus=${s3.prefixTrimStatus} (expected "refused")`);
+  }
+  assertNotTrimmed(s3Messages, s3SystemRefs, "S3 branch");
+
+  // ② S4 分支：带 prefixTrimSourceOrder，boundaryPosition(0) 落在豁免段 k=2 内。
+  const s4Messages = makeMessages();
+  const s4SystemRefs = [...s4Messages];
+  const s4 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s4Messages,
+    prefixTrimSourceOrder: injectCompartmentsModule.capturePrefixTrimSourceOrder(s4Messages),
+    preparedPrefix,
+  });
+  if (s4.prefixTrimStatus !== "refused") {
+    throw new Error(`S4 branch: prefixTrimStatus=${s4.prefixTrimStatus} (expected "refused")`);
+  }
+  assertNotTrimmed(s4Messages, s4SystemRefs, "S4 branch");
+});
+
 // --- run -------------------------------------------------------------------
 
 let failures = 0;
