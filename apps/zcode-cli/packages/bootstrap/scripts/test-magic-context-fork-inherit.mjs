@@ -565,7 +565,15 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
     assert.equal(replay.entries[2]?.metadata?.source, "magic_context", "S0 切片后 m[0] 之后是 m[1]");
     // S0 的「缓存边界不可解析」子分支会记 "cached boundary ... not in messages"；
     // 它不出现说明本轮真正执行了 splice，而不是走了不切片的旁路。
-    const logText = readFileSync(join(TEST_HOME, "magic-context.log"), "utf8");
+    // CR-6 修复：包内 logger 是缓冲写（每 500ms 定时落盘），先等一个 flush 周期再读，
+    // 否则缺陷回归时本 pass 的日志行还在内存缓冲里，负断言会假绿；再按本用例的会话 id
+    // 过滤日志行——全量日志里任何更早用例触发同样的记录都会把负断言误判失败。
+    // 与同文件 T-S8 的读日志方式同构（先等 flush、按会话过滤，断言语义不变）。
+    await new Promise((resolve) => setTimeout(resolve, 600));
+    const logText = readFileSync(join(TEST_HOME, "magic-context.log"), "utf8")
+        .split("\n")
+        .filter((line) => line.includes(`[magic-context][${childId}]`))
+        .join("\n");
     assert.ok(
         logText.includes("reason=cache_hit"),
         "夹具前置：m[0]/m[1] 必须已命中落库缓存（cache_hit）——否则 prepared 路径不清 injection 缓存的前提不成立，S0 到不了",
@@ -749,7 +757,7 @@ test("T-S8 裁前缀后的 absent-boundary 分类跳过开头 system 段（first
     assert.equal(result.entries.length, 1 + 2 + (childEntries.length - 52));
     assert.equal(result.entries[0]?.message?.role, "system", "请求必须以 system 段起头");
     const text = textOfEntries(result.entries);
-    // 边界 mc51 之前的对话（1..50）被裁掉；51..150 是继承的 dropped 占位符。
+    // 裁剪边界 mc52（对话 51）随裁：对话 1..51 被裁掉，52..150 是继承的 dropped 占位符。
     assert.ok(!/number (?:[1-9]|[1-9]\d|1[0-4]\d|150)(?!\d)/.test(text), "边界之前的对话条目必须被裁掉");
     assert.ok(text.includes("number 400"), "边界之后未折叠的消息必须保留");
     assert.ok(text.includes("child new question"), "新问题必须保留");

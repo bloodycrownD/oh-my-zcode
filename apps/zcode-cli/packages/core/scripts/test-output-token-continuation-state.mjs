@@ -167,8 +167,10 @@ function requestOnlyAttachment() {
   };
 }
 
-function assertPrefixByReference(entriesAfter, entriesBefore, label) {
-  assert.equal(entriesAfter.length, entriesBefore.length + (label === "T-C5" ? 1 : 2), label);
+function assertPrefixByReference(entriesAfter, entriesBefore, label, expectedAppended) {
+  // 期望追加条数由调用点显式传入：用 label 字符串推断分支，会让换了标签的新用例
+  // 按错误的条数断言（CR-8）。
+  assert.equal(entriesAfter.length, entriesBefore.length + expectedAppended, label);
   for (let i = 0; i < entriesBefore.length; i += 1) {
     assert.ok(
       entriesAfter[i] === entriesBefore[i],
@@ -194,7 +196,7 @@ test("T-C1: 续写后 entries 前缀引用不变，尾部恰为 assistant + 续�
 
   assert.equal(stepResult, "output_continuation", "续写分支必须返回 output_continuation");
   const entriesAfter = state.turnRequestState.entries;
-  assertPrefixByReference(entriesAfter, entriesBefore, "T-C1");
+  assertPrefixByReference(entriesAfter, entriesBefore, "T-C1", 2);
 
   const assistantEntry = entriesAfter[entriesBefore.length];
   assert.equal(assistantEntry.message.role, "assistant", "倒数第二条是 assistant 条目");
@@ -269,7 +271,7 @@ test("T-C5: 部分输出为空且无 reasoning 时，entries 只追加续写条�
 
   assert.equal(stepResult, "output_continuation", "空部分输出同样进入续写分支");
   const entriesAfter = state.turnRequestState.entries;
-  assertPrefixByReference(entriesAfter, entriesBefore, "T-C5");
+  assertPrefixByReference(entriesAfter, entriesBefore, "T-C5", 1);
 
   const continuationEntry = entriesAfter[entriesAfter.length - 1];
   assert.equal(continuationEntry.message.role, "user", "只追加续写 user 条目");
