@@ -371,7 +371,7 @@ function collectRelevantSourceTagIds(
 // FORK（tag-drift-content-verify）：tag 身份是位置字符串 `mc<N>:p<下标>`，重启后
 // context 前缀长度变化 d 会让整个窗口平移，而 resolver 精确命中（tag-id-fallback.ts
 // 的 assignments.get）与 DB fast path（getAssignableTagNumberByMessageId）都只按
-// 位置、不比对内容——位置 N 上的新消息文本会被 :923-931 的 replaceSourceContent
+// 位置、不比对内容——位置 N 上的新消息文本会被原文比对处的 replaceSourceContent
 // 写进旧 tag 的原文（「同一位置换成另一条消息 → 以入站为准」是编辑重发刻意修的
 // 行为，位置身份在结构上无法区分「用户改了这条消息」与「重启漂移」，必须用内容
 // 信号区分）。
@@ -384,26 +384,38 @@ function collectRelevantSourceTagIds(
 //     按位置、accept 只挡 inert；若先 resolve，T 已被当成 existingTagId 捕获，
 //     后面的墓碑化与内存重绑全部白做，流程会继续用 X 覆盖 S(T)，恰好复现要禁止
 //     的行为。
-//  2. 漂移分支（以及认领围栏未命中后的同口径处置）以 accept: () => false 调用
-//     resolve 屏蔽 scoped fallback——不屏蔽的话，c 在同消息桶里让出的空位会让
-//     兄弟 text part 的旧 tag 落到当前 part 上（claimedContentIds 只挡本 pass 已
-//     resolve 过的 part，挡不住同消息后序 part 的旧绑定），当前 part 抢到兄弟的
-//     号并覆盖兄弟的原文。
+//  2. 漂移类分支（v1 漂移、平移不符 / 平移落空、认领围栏未命中）以
+//     accept: () => false 调用 resolve 屏蔽 scoped fallback——不屏蔽的话，c 在同
+//     消息桶里让出的空位会让兄弟 text part 的旧 tag 落到当前 part 上
+//     （claimedContentIds 只挡本 pass 已 resolve 过的 part，挡不住同消息后序 part
+//     的旧绑定），当前 part 抢到兄弟的号并覆盖兄弟的原文。
 // 判定域：只给「带正文的文本 part」与「入站 system 行（无论空白与否）」制定计划；
 // whitespace-only assistant part 与 file part 照旧走各自分支。inbound 覆盖全部带
-// message id 的文本 part（与打标入口 :787 的口径一致，否则「X 只出现一次」会因
-// 口径漂移）。
+// message id 的文本 part（与打标入口的口径一致，否则「X 只出现一次」会因口径
+// 漂移）。
+//
+// v2 修订（真实数据 e2e 后新增）：v1 的逐条判据在真实库上只能识别 2.0%–4.1% 的
+// 漂移——「sourceIdx[S(T)] 恰为 [T]」要求原文全库唯一持有，而真实会话里子代理
+// 通知、措辞相近的报告大量重复；「S(T) 还活在入站里」在裁剪形态下对窗口外 tag
+// 恒不成立。识别不了的全部落「编辑重发」桶覆盖原文（实测一次平移改写 92 条）。
+// 因此预扫描先识别窗口整体平移 d*（候选集、计分、判定，见 buildTagContentPlans），
+// 平移成立时对每个非 system 文本 part 按「位置 − d*」找回真身（平移相符 /
+// 平移不符 / 平移落空三分支，优先于 v1 的表）；d* = 0 时完全按 v1 判定。system
+// 行不进平移层（system 段在 canonical 头部，跨代位置稳定，仍走专门规则）。
 interface TagContentPlan {
     kind: "existing" | "claim" | "drift" | "system-assign";
-    /** drift / system-assign / claim-with-position-hit：需要墓碑化的位置命中 tag。 */
+    /**
+     * drift / system-assign / claim-with-position-hit：需要墓碑化的位置命中 tag。
+     * v2 平移不符 / 平移落空允许缺省（位置上没有任何 tag 时不墓碑化，直接拿新号）。
+     */
     tombstoneTarget?: number;
-    /** claim：认领的 tag 号（即 rebindTagMessageIdFenced 的 tagId）。 */
+    /** claim（含 v2 平移相符，T′ 视作 R）：rebindTagMessageIdFenced 的 tagId。 */
     claimTagNumber?: number;
     /** claim：WHERE 围栏旧键 = { 预扫描时的 message_id, 墓碑键 }。 */
     claimFromKeys?: string[];
     /** claim：预扫描时认领目标的旧 contentId，内存侧仅当 getTag(旧键) === R 才 unbind。 */
     claimOldContentId?: string;
-    /** claim：判定时的入站文本；认领的前提就是存量原文与它相等，据此跳过幂等重写。 */
+    /** claim：判定时的入站文本；认领/平移相符的原文与它恒相等，据此跳过幂等重写。 */
     claimText?: string;
 }
 
@@ -414,9 +426,40 @@ const DRIFT_PLAN_KINDS: ReadonlySet<TagContentPlan["kind"]> = new Set([
 ]);
 
 /**
- * 问题三（b）：为每个参与判定的入站文本 part 制定计划（纯内存计算）。
+ * 问题三：为每个参与判定的入站文本 part 制定计划（纯内存计算）。
  *
- * 情形表（spec 问题三）：
+ * v2 先识别窗口整体平移 d*（spec 问题三 (b′)，优先于逐条判据）：
+ *  - 候选集：0，加每个满足「sourceIdx[X] 恰有一个 type='message' 持有者 R，且
+ *    R.messageId 是同 part 下标的位置键 mc<q>:p<i>」的非 system 文本 part 的
+ *    d = p − q（候选由数据给出，不设固定范围）。
+ *  - 计分：score(d) = 非 system 文本 part 中「posIdx[mc<p−d>:p<i>] 存在且其
+ *    S === X」的个数（按内容在平移后的位置上验证，重复样板只增加真阳性）。
+ *  - 判定：取 score 最大的 d*；score 相同取 |d| 小者，再相同取正者（确定性）。
+ *    score(d*) ≥ 3 且 d* ≠ 0 才算平移成立；否则 d = 0。窗口里能验证的 part 不足
+ *    3 个（极短窗口）或候选集只有 0（全样板窗口）时识别不出 → v1，写入已知限制。
+ *  - 位置键必须匹配 ^mc(\d+):p(\d+)$：file 键（mc9:file0）不是位置键——fork 继
+ *    承用的 /^mc(\d+)/ 会把 file 键也匹配进来，不能照搬（T-T7 的 type_file 场景
+ *    依赖此口径）。
+ *
+ * 平移成立时，对每个非 system 文本 part（c、X；位置候选 T = posIdx[c]；真身
+ * T′ = posIdx[mc<p−d*>:p<i>]）三分支：
+ *  - 平移相符：T′ 存在、不是 whitespace-inert 行（inert 行从不写原文，「S 不存
+ *    在」不能把它当成真身）、且 S(T′) 不存在或 === X → 绑定到 T′（结构上与认领
+ *    R 同款）：T 存在且 ≠ T′ 时先墓碑化 T；rebindTagMessageIdFenced(T′, {预扫描
+ *    时 T′ 的 message_id, 墓碑键(T′)} → c)；changes > 0 才 bindTag；不改 status
+ *    （dropped 的主人平移后仍是 dropped，未裁剪形态的会话不会因此解折叠）。
+ *  - 平移不符：T′ 存在且（是 inert 行或 S(T′) 有定义且 ≠ X）→ T′ 不动；T 存在
+ *    则墓碑化；accept: () => false 的 resolve 后 assignTag 新号；不覆盖任何原文。
+ *  - 平移落空：T′ 不存在（含 c 不是 mc 位置键）→ 同平移不符。**不跳过
+ *    resolve**：跳过意味着该 contentId 不进 resolver 闭包私有的 claimedContentIds
+ *    集合；这样调用零成本，且与「认领围栏未命中」「v1 漂移」两个先例同构。
+ *  三个分支都不写 source_contents：平移相符的原文与 X 恒相等（claimedSourceEcho
+ *  跳过幂等写），其余两个分支不沿用任何旧号（新号的原文由主循环既有写入路径新增，
+ *  不触碰存量行）。墓碑化 T 时 changes = 0（T 已被它自己的主人——位置
+ *  mc<p+d*>:p<i> 上的 part——重绑走）视为已被处理、不报错，且这正是正确行为：
+ *  T 已归位，不该再墓碑化。
+ *
+ * d = 0 时按 v1 的表逐条判定：
  *  - 相符：位置候选 T 不存在；或 T 存在且 S(T) 不存在 / S(T) === X / X 去章后空白
  *    → 沿用今天的行为（existing，主循环走既有 resolve 流程）。
  *  - 内容认领：存在唯一候选 R（sourceIdx[X] 恰一个元素、X 在 inbound 值里只出现
@@ -431,24 +474,26 @@ const DRIFT_PLAN_KINDS: ReadonlySet<TagContentPlan["kind"]> = new Set([
  *  - 编辑重发：T 存在、S(T) ≠ X、非空白，以上都不成立 → 保持 b5：沿用 T、覆盖
  *    原文（existing，交回既有流程）。
  *
- * 入站 system 行的专门规则（问题一的前缀豁免让 system 行可能孤悬窗口最前）：位置
- * 命中的 T 只有在 T 自己的 messageRole === 'system' 时才可沿用（内容不同也沿用并
- * 覆盖——system 槽位换内容是正常情形）；否则视为没有位置候选：墓碑化 T（只挪位
- * 置键、不改 status、不改 T 的 role）、跳过 resolver.resolve 直接 assignTag 新号。
- * 不跳过 resolve 的话 scoped fallback 可能把 mc1:* 桶里上一代 synthetic head 的旧
- * tag 重绑到 system 行上。代价（写入已知限制）：system 行的旧号以 active 搁浅，
- * 上界约为「触发次数 × system 段条数」。
+ * 入站 system 行的专门规则（两个档位共用，不进平移层——system 段在 canonical 头
+ * 部，跨代位置稳定）：位置命中的 T 只有在 T 自己的 messageRole === 'system' 时才
+ * 可沿用（内容不同也沿用并覆盖——system 槽位换内容是正常情形）；否则视为没有位
+ * 置候选：墓碑化 T（只挪位置键、不改 status、不改 T 的 role）、跳过
+ * resolver.resolve 直接 assignTag 新号。不跳过 resolve 的话 scoped fallback 可
+ * 能把 mc1:* 桶里上一代 synthetic head 的旧 tag 重绑到 system 行上。代价（写入
+ * 已知限制）：system 行的旧号以 active 搁浅，上界约为「触发次数 × system 段条数」。
  *
- * S(T) 经 getSourceContents 单查并缓存；认领只取 active 候选的理由：dropped 被认
- * 领等于把活消息交给折叠状态（applyFlushedStatuses 会折成占位符）、compacted 是退
- * 役号、system / NULL-role 行可能是 system prompt 且 stampTagMessageRole 会改写它
- * 们的 role、type='file' 的原文是同消息文本 part 的去章拼接（fork 继承扩大了反查
- * 集合，这层过滤不可省）。
+ * S(T) 经 getSourceContents 单查并缓存；v1 认领只取 active 候选的理由：dropped
+ * 被认领等于把活消息交给折叠状态（applyFlushedStatuses 会折成占位符）、compacted
+ * 是退役号、system / NULL-role 行可能是 system prompt 且 stampTagMessageRole 会
+ * 改写它们的 role、type='file' 的原文是同消息文本 part 的去章拼接（fork 继承扩
+ * 大了反查集合，这层过滤不可省）。v2 平移相符不受这层过滤约束——T′ 由位置直接
+ * 给出（「按位置找回」正是 v2 的核心），dropped 保 status 是明确要求。
  */
 function buildTagContentPlans(
     sessionId: string,
     messages: MessageLike[],
     db: ContextDatabase,
+    inertTagNumbers: ReadonlySet<number>,
 ): Map<string, TagContentPlan> {
     const plans = new Map<string, TagContentPlan>();
     const tScan = performance.now();
@@ -527,6 +572,65 @@ function buildTagContentPlans(
             return row;
         };
 
+        // —— v2：整体平移识别（纯内存，pass 级一次性；见上方 JSDoc）——
+        // 位置键正则要求 :p<数字> 分隔；file 键不是位置键。候选采集与计分都排除
+        // role=system 的入站 part（system prompt 有存量原文时会产出垃圾候选）。
+        const POSITION_KEY = /^mc(\d+):p(\d+)$/;
+        const shiftScoredParts: Array<{ contentId: string; text: string; p: number; i: number }> =
+            [];
+        const shiftCandidates = new Set<number>([0]);
+        for (const message of messages) {
+            if (message.info.role === "system") continue;
+            const id = message.info.id;
+            if (typeof id !== "string") continue;
+            for (let partIndex = 0; partIndex < message.parts.length; partIndex += 1) {
+                if (!isTextPart(message.parts[partIndex])) continue;
+                const contentId = `${id}:p${partIndex}`;
+                const keyMatch = POSITION_KEY.exec(contentId);
+                if (!keyMatch) continue;
+                const p = Number(keyMatch[1]);
+                const i = Number(keyMatch[2]);
+                shiftScoredParts.push({ contentId, text: inbound.get(contentId) ?? "", p, i });
+                const holders = sourceIdx.get(inbound.get(contentId) ?? "");
+                if (!holders || holders.length !== 1) continue;
+                const holder = rowByTag.get(holders[0] ?? -1);
+                if (!holder || holder.type !== "message") continue;
+                const holderKey = POSITION_KEY.exec(holder.messageId);
+                if (!holderKey || Number(holderKey[2]) !== i) continue;
+                shiftCandidates.add(p - Number(holderKey[1]));
+            }
+        }
+        let driftShift = 0;
+        if (shiftScoredParts.length > 0) {
+            const scores = new Map<number, number>();
+            for (const d of shiftCandidates) scores.set(d, 0);
+            for (const d of shiftCandidates) {
+                let score = 0;
+                for (const part of shiftScoredParts) {
+                    const prime = posIdx.get(`mc${part.p - d}:p${part.i}`);
+                    if (prime !== undefined && sourceOfTag(prime.tagNumber) === part.text) {
+                        score += 1;
+                    }
+                }
+                scores.set(d, score);
+            }
+            // argmax：score 最大；tie 取 |d| 小者，再相同取正者——排序 |d| 升序、
+            // 同 |d| 正者在前，遍历时严格大于才替换，保证同分时保留排序更前者。
+            const ordered = [...scores.keys()].sort(
+                (left, right) => Math.abs(left) - Math.abs(right) || right - left,
+            );
+            let best = ordered[0] ?? 0;
+            let bestScore = scores.get(best) ?? 0;
+            for (const d of ordered) {
+                const s = scores.get(d) ?? 0;
+                if (s > bestScore) {
+                    best = d;
+                    bestScore = s;
+                }
+            }
+            if (bestScore >= 3 && best !== 0) driftShift = best;
+        }
+
         for (const message of messages) {
             const id = message.info.id;
             if (typeof id !== "string") continue;
@@ -554,6 +658,51 @@ function buildTagContentPlans(
                                 ? positionTag
                                 : undefined,
                     });
+                    continue;
+                }
+                if (driftShift !== 0) {
+                    // —— v2 平移层三分支（优先于 v1 的表；whitespace-only 的非
+                    // system part 主循环有专属分支、不消费这里的计划，与 v1 同口径）——
+                    const keyMatch = POSITION_KEY.exec(contentId);
+                    const primeRow = keyMatch
+                        ? posIdx.get(
+                              `mc${Number(keyMatch[1]) - driftShift}:p${Number(keyMatch[2])}`,
+                          )
+                        : undefined;
+                    const primeTag = primeRow?.tagNumber;
+                    const primeIsInert =
+                        primeTag !== undefined &&
+                        (inertTagNumbers.has(primeTag) ||
+                            primeRow?.entryFingerprint?.startsWith("mc:whitespace-assistant:") ===
+                                true);
+                    if (primeRow === undefined || primeTag === undefined || primeIsInert) {
+                        // 平移落空（或 T′ 是 inert 行）：T′ 不动；T 存在则墓碑化；
+                        // accept: () => false 的 resolve 后 assignTag 新号。
+                        plans.set(contentId, { kind: "drift", tombstoneTarget: positionTag });
+                        continue;
+                    }
+                    const primeStored = sourceOfTag(primeTag);
+                    if (primeStored === undefined || primeStored === text) {
+                        // 平移相符：绑定到 T′（claim 执行结构，R = T′）；T 存在且
+                        // ≠ T′ 时先墓碑化 T；不改 status。
+                        plans.set(contentId, {
+                            kind: "claim",
+                            tombstoneTarget:
+                                positionTag !== undefined && positionTag !== primeTag
+                                    ? positionTag
+                                    : undefined,
+                            claimTagNumber: primeTag,
+                            claimFromKeys: [
+                                primeRow.messageId,
+                                `${DRIFTED_TAG_MESSAGE_PREFIX}${primeTag}`,
+                            ],
+                            claimOldContentId: primeRow.messageId,
+                            claimText: text,
+                        });
+                        continue;
+                    }
+                    // 平移不符：T′ 不动；T 存在则墓碑化；新号；不覆盖任何原文。
+                    plans.set(contentId, { kind: "drift", tombstoneTarget: positionTag });
                     continue;
                 }
                 // whitespace-only 的非 system part 不参与计划，照旧走既有分支。
@@ -821,7 +970,12 @@ export function tagMessages(
     // ——见 buildTagContentPlans 注释里的硬契约。
     let tagContentPlans: Map<string, TagContentPlan> | undefined;
     const getTagContentPlans = (): Map<string, TagContentPlan> =>
-        (tagContentPlans ??= buildTagContentPlans(sessionId, messages, db));
+        (tagContentPlans ??= buildTagContentPlans(
+            sessionId,
+            messages,
+            db,
+            inertWhitespaceTagNumbers,
+        ));
     // 认领成功的 tag：其存量原文与入站文本恒相等（认领前提就是 sourceIdx[X] 含 R）。
     // pass 级的 sourceContents map 由 collectRelevantSourceTagIds 按「预扫描时的
     // assignments ∩ 当前消息 id」裁剪，窗口外的被认领 tag 不在 map 里，下方的
@@ -1218,12 +1372,19 @@ export function tagMessages(
                                 textOrdinal,
                             );
                         } else if (plan.kind === "drift") {
-                            // 墓碑化 T 后无条件 unbind(contentId)：不屏蔽的话 scoped
-                            // fallback 会把同消息桶里让出的空位对应的兄弟旧 tag 落到
-                            // 当前 part 上；accept 恒为 false 使精确命中与 fallback 都
-                            // 不放行，resolve 必然返回 undefined，随后走 assignTag，
-                            // DB 与内存两层对 contentId 都已查不到 T，正常分配。
-                            tombstonePositionTag(plan.tombstoneTarget ?? -1, contentId);
+                            // 墓碑化 T（若有）后无条件 unbind(contentId)：不屏蔽的话
+                            // scoped fallback 会把同消息桶里让出的空位对应的兄弟旧
+                            // tag 落到当前 part 上；accept 恒为 false 使精确命中与
+                            // fallback 都不放行，resolve 必然返回 undefined，随后走
+                            // assignTag，DB 与内存两层对 contentId 都已查不到 T，
+                            // 正常分配。无条件 unbind 是硬要求——墓碑化的内存侧只是
+                            // 条件 unbind（仅 getTag(c) === T 时），内存与 DB 不一致
+                            // 的防御场景下挡不住 assignTag 的内存快路径把 c 上残留
+                            // 的旧号送回来、再把 X 写进那个号的原文。v2 的平移不符 /
+                            // 平移落空与本分支同构（位置上没有 tag 时不墓碑化）。
+                            if (plan.tombstoneTarget !== undefined) {
+                                tombstonePositionTag(plan.tombstoneTarget, contentId);
+                            }
                             tagger.unbindTag(sessionId, contentId);
                             existingTagId = resolver.resolve(
                                 messageId,
@@ -1238,7 +1399,9 @@ export function tagMessages(
                             // ——不调用 resolve，scoped fallback 自然无从触发；不以默
                             // 认 accept 调用（mc1:* 桶里可能挂着上一代 synthetic head
                             // 的旧 tag，回退匹配会把它重绑到 system 行上）。
-                            tombstonePositionTag(plan.tombstoneTarget ?? -1, contentId);
+                            if (plan.tombstoneTarget !== undefined) {
+                                tombstonePositionTag(plan.tombstoneTarget, contentId);
+                            }
                         }
                     } else {
                         existingTagId = resolver.resolve(

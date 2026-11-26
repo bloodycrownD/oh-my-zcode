@@ -1613,6 +1613,15 @@ function b5bMessage(sessionId, id, role, ...texts) {
 }
 
 test("b5b T-T1 漂移保号：平移后三条消息沿用 pass 1 的 tag 号", () => {
+  // v2 手算（spec 问题三 (b′)）：pass 1 是全新会话，source_contents 为空 → 候选集
+  // {0}、score(0)=0 → argmax=0，(a) 类，走 v1 正常分配。pass 2：候选集 {0,+1}
+  // ——A@mc2:p0 的唯一持有者 tag1@mc1:p0、B@mc3:p0 的 tag2@mc2:p0、C@mc4:p0 的
+  // tag3@mc3:p0 各给出 +1；score(+1)=3（A/B/C 在 mc1/mc2/mc3 上原文相等）、
+  // score(0)=0 → d*=+1 平移成立 → 本用例属 (b) 类，平移相符分支接管：三个 part
+  // 全部平移相符（按位置找回 tag1/2/3，号与原文不变、status 不动），结果与 v1
+  // 内容认领路径的断言逐项相容 →「双路径相容」，原断言保留不变。pass 3：三个
+  // 持有者已被重绑到入站同位键（mc2/mc3/mc4），候选集退化为 {0}，score(0)=3 但
+  // d*=0 → v1 精确命中沿用，逐字节相同。
   const sessionId = "ses_tt1_drift_keep_number";
   const tagger = taggerModule.createTagger();
   const mkPass = (ids) =>
@@ -1625,8 +1634,9 @@ test("b5b T-T1 漂移保号：平移后三条消息沿用 pass 1 的 tag 号", (
     throw new Error(`unexpected pass-1 tags: ${JSON.stringify(firstTags)}`);
   }
 
-  // pass 2：同样三条消息平移到 mc2..mc4（模拟重启后前缀增长）。内容认领让
-  // 唯一文本的编号保持稳定——含落在没有位置命中的 mc4 上的第三条。
+  // pass 2：同样三条消息平移到 mc2..mc4（模拟重启后前缀增长）。内容认领（v1）
+  // 与平移相符（v2，双路径相容）都让唯一文本的编号保持稳定——含落在没有位置
+  // 命中的 mc4 上的第三条。
   const pass2 = mkPass(["mc2", "mc3", "mc4"]);
   tagMessagesB5.tagMessages(sessionId, pass2, tagger, b4Db);
   const secondTags = pass2.map((m) => b5bWireTag(m.parts[0].text));
@@ -1653,6 +1663,10 @@ test("b5b T-T1 漂移保号：平移后三条消息沿用 pass 1 的 tag 号", (
 });
 
 test("b5b T-T3 漂移墓碑化：位置命中的 part 换新号，S(T) 与 status 不动", () => {
+  // v2 手算（spec 问题三 (b′)）：候选集 {0, +1}——P@mc2:p0 的唯一持有者
+  // tag1@mc1:p0 给出 +1（X 的反查无持有者、不产候选）；score(+1)=1（P 在
+  // mc1:p0 上对齐 tag1）、score(0)=0 → 最高分 1 < 3 → d = 0，留在 v1 分支 →
+  // (a) 类，断言不变。
   const sessionId = "ses_tt3_drift_tombstone";
   // 预置 T：tag 1 @mc1:p0，原文 P，dropped（原主人已被折叠）。
   insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
@@ -1690,6 +1704,9 @@ test("b5b T-T3 漂移墓碑化：位置命中的 part 换新号，S(T) 与 statu
 });
 
 test("b5b T-T4a 退化为现状（编辑重发桶）：原文不在入站时沿用并覆盖", () => {
+  // v2 手算（spec 问题三 (b′)）：X 无存量原文（反查无持有者、不产候选），候选集
+  // {0}；score(0)=0（X 在原位对齐 tag1 但 S(tag1)=P ≠ X）→ argmax=0，(a) 类，
+  // 留在 v1 分支，断言不变。
   const sessionId = "ses_tt4a_edit_resend_fallback";
   // 夹具用非 mc1 的位置（mc2:p0）。
   insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 1);
@@ -1709,6 +1726,9 @@ test("b5b T-T4a 退化为现状（编辑重发桶）：原文不在入站时沿�
 });
 
 test("b5b T-T4b 样板多候选：不认领、不漂移，确定性退化", () => {
+  // v2 手算（spec 问题三 (b′)）：S 的持有者 {tag3, tag4}、P 的持有者 {tag1, tag2}
+  // 都多于一个，均不产候选 → 候选集 {0}；score(0)=0（两个 S part 原位对齐的是
+  // 原文 P 的 tag，P part 原位无 tag）→ argmax=0，(a) 类，留在 v1 分支，断言不变。
   const sessionId = "ses_tt4b_boilerplate_multi";
   insertTag(b4Db, sessionId, "mc1:p0", "message", 16, 1);
   saveSourceContent(b4Db, sessionId, 1, "boiler-P");
@@ -1754,6 +1774,8 @@ test("b5b T-T4b 样板多候选：不认领、不漂移，确定性退化", () =
 });
 
 test("b5b T-T6 无存量原文：无法判定，行为与修复前一致", () => {
+  // v2 手算（spec 问题三 (b′)）：X 无存量原文 → 候选集 {0}；score(0)=0（tag1
+  // 没有原文可对齐）→ argmax=0，(a) 类，留在 v1 分支，断言不变。
   const sessionId = "ses_tt6_no_source";
   insertTag(b4Db, sessionId, "mc2:p0", "message", 16, 1); // 不写 source_contents
   const tagger = taggerModule.createTagger();
@@ -1771,6 +1793,13 @@ test("b5b T-T6 无存量原文：无法判定，行为与修复前一致", () =>
 });
 
 test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）", () => {
+  // v2 手算（spec 问题三 (b′)）：message 型候选场景里 X@mc1:p0 的唯一持有者
+  // R@mc9:p0 给出候选 d = 1 − 9 = −8；score(−8)=1（X 在 mc9:p0 上对齐 R）、
+  // score(0)=0 → 最高分 1 < 3 → d = 0，留在 v1 分支 → (a) 类，断言不变。
+  // type=file 场景：候选采集要求持有者 type='message' 且 message_id 匹配
+  // ^mc(\d+):p(\d+)$——file 键（mc9:file0）不是位置键、file 持有者不产候选，
+  // 候选集 {0}、score(0)=0 → 同样 (a) 类。这正是「不能照搬 /^mc(\d+)/」口径
+  // 的守护点。
   const scenarios = [
     { id: "dropped", label: "status=dropped", status: "dropped", mutate: (s) => updateTagStatus(b4Db, s, 2, "dropped") },
     { id: "compacted", label: "status=compacted", status: "compacted", mutate: (s) => updateTagStatus(b4Db, s, 2, "compacted") },
@@ -1815,6 +1844,16 @@ test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）",
 });
 
 test("b5b T-T8 同消息双文本片段：漂移屏蔽 scoped fallback，兄弟 part 不被抢占", () => {
+  // v2 手算（spec 问题三 (b′)）：候选集 {0, +1, +3}——X0@mc2:p0 的唯一持有者
+  // tag1@mc1:p0 给出 +1，X1@mc2:p1 的 tag2@mc1:p1 给出 +1，P@mc5:p0 的唯一持有
+  // 者 tag3@mc2:p0 给出 +3；score(+1)=2（X0、X1 在 mc1 上原文相等）、
+  // score(+3)=1（P 在 mc2:p0 上对齐 tag3）、score(0)=0，最高分 2 < 3 →
+  // d = 0，留在 v1 分支 → 本用例属 (a) 类（argmax ≠ 0 但最高分 < 3，v1 断言
+  // 不变）。v1 夹具曾把 P 放在 mc3：P@mc3:p0 的 tag3@mc2:p0 恰好给出 +1，凑成
+  // score(+1)=3 被扳进平移相符分支（p0 会保回 tag1 的号）——v2 修订把它挪到
+  // mc5（保留在入站、只挪出平移对齐位；不能删——P 不在入站的话 v1 漂移判据
+  // 不成立，p0 会落编辑重发桶收编 tag3 并覆盖 P）。平移相符分支对同消息双片段
+  // 的覆盖由 T-T11 承担。
   const sessionId = "ses_tt8_sibling_parts";
   const tagger = taggerModule.createTagger();
   // pass 1：一条 assistant 消息两个 text part，各拿 tag 1、2。
@@ -1832,11 +1871,12 @@ test("b5b T-T8 同消息双文本片段：漂移屏蔽 scoped fallback，兄弟 
   saveSourceContent(b4Db, sessionId, 3, "sibling-P");
   stampTagMessageRole(b4Db, sessionId, 3, "user");
 
-  // pass 2：消息平移到 mc2；另有一条 user 消息文本 = P（漂移判据的「另一个 part」）。
-  const pass2 = [
+  // pass 2：消息平移到 mc2；P 的 part 放在 mc5（v2 修订，见上方手算）。
+  const mkPass2 = () => [
     b5bMessage(sessionId, "mc2", "assistant", "sibling-X0", "sibling-X1"),
-    b5bMessage(sessionId, "mc3", "user", "sibling-P"),
+    b5bMessage(sessionId, "mc5", "user", "sibling-P"),
   ];
+  const pass2 = mkPass2();
   tagMessagesB5.tagMessages(sessionId, pass2, tagger, b4Db);
 
   // p0 判为漂移：拿新号（不是 1/2/3 中的任何一个）。
@@ -1851,16 +1891,30 @@ test("b5b T-T8 同消息双文本片段：漂移屏蔽 scoped fallback，兄弟 
   if (b5bSource(sessionId, 2) !== "sibling-X1") {
     throw new Error(`sibling p1 source was overwritten: ${JSON.stringify(b5bSource(sessionId, 2))}`);
   }
-  // P 未被覆盖；P 的主人（tagT=3）被 mc3:p0 认领回去（围栏含墓碑键）。
+  // P 未被覆盖；P 的主人（tagT=3）被 mc5:p0 经含墓碑键的围栏认领回去。
   if (b5bSource(sessionId, 3) !== "sibling-P") {
     throw new Error(`P was overwritten: ${JSON.stringify(b5bSource(sessionId, 3))}`);
   }
   if (b5bWireTag(pass2[1].parts[0].text) !== 3) {
     throw new Error(`P's owner was not reclaimed: ${pass2[1].parts[0].text}`);
   }
+  // 再跑一遍同样输入，结果逐字节相同（d* 仍为 0：X0 第二轮反查已多候选，候选集
+  // 只有 {0}，score(0)=3 但 d*=0 → v1 精确命中沿用）。
+  const pass2Again = mkPass2();
+  tagMessagesB5.tagMessages(sessionId, pass2Again, tagger, b4Db);
+  const firstWire = pass2.map((m) => m.parts.map((p) => p.text));
+  const secondWire = pass2Again.map((m) => m.parts.map((p) => p.text));
+  if (JSON.stringify(secondWire) !== JSON.stringify(firstWire)) {
+    throw new Error(
+      `second run is not byte-identical: ${JSON.stringify(secondWire)} !== ${JSON.stringify(firstWire)}`,
+    );
+  }
 });
 
 test("b5b T-T9 入站 system 行：非 system 旧 tag 墓碑化拿新号；system 旧 tag 沿用", () => {
+  // v2 手算（spec 问题三 (b′)）：候选采集与计分都排除 role=system 的入站 part
+  // （与「system 行不进平移层」同口径）→ 候选集 {0}、score(0)=0 → argmax=0，
+  // (a) 类，留在 v1 分支，断言不变。
   // 主组：T=tag1（dropped、role=user、原文 P）@mc1:p0；入站 mc1 是 system 消息
   // （文本 X = system prompt，P 不在入站里）。
   const sessionId = "ses_tt9_system_drift";
@@ -1909,6 +1963,8 @@ test("b5b T-T9 入站 system 行：非 system 旧 tag 墓碑化拿新号；syste
 });
 
 test("b5b T-T10 入站 system 行落在 NULL-role 存量 tag 上：墓碑化换号", () => {
+  // v2 手算（spec 问题三 (b′)）：与 T-T9 同口径——候选采集与计分排除 system part
+  // → 候选集 {0}、score(0)=0 → argmax=0，(a) 类，留在 v1 分支，断言不变。
   // T-T9 的 NULL-role 补充（spec 问题三专门规则的明确要求）：NULL-role 存量行
   // （v10000 升级前的行、provider 未给 role 的行）可能是无关对话的 tag，system
   // 行沿用它会把对话原文换成 system prompt——必须墓碑化换号而不是沿用回填。
@@ -1943,6 +1999,133 @@ test("b5b T-T10 入站 system 行落在 NULL-role 存量 tag 上：墓碑化换�
   if (getTagById(b4Db, sessionId, sysTag)?.messageRole !== "system") {
     throw new Error(
       `new system tag was not stamped: ${JSON.stringify(getTagById(b4Db, sessionId, sysTag)?.messageRole)}`,
+    );
+  }
+});
+
+test("b5b T-T11 整体平移层：d* = −1 时按位置找回真身，样板与窗口外老 tag 都保号", () => {
+  // v2 核心用例（spec 问题三 (b′) 与 T-T11 夹具表，10 个预置文本 tag 全部
+  // type='message'、message_role='user'）。夹具必须含主人已被裁出窗口的老 tag
+  // （tag1 的 U）与重复样板（P/S 各两个、其中两个 dropped）——真实数据上原文被
+  // 改写的机制正是「位置命中主人不在窗口的老 tag + 认领失败（样板）→ 编辑重发
+  // 桶」，纯均匀平移的夹具 v1 自己就能兜住，不构成区分度；区分点是 U 与四个
+  // 样板 part（B、C、D、D2、E 在 v1 下也会被内容认领判对）。
+  //
+  // v2 手算：入站对话 mc10..mc18 依次为 P、B、P、C、S、S、{D,D2}、E、NEW，整体
+  // 平移 d = −1（上一代在 mc<p+1>）。候选集 {0, −1}（B@mc11→tag3@mc12:p0、
+  // C@mc13→tag5@mc14:p0、D@mc16:p0→tag8@mc17:p0、D2@mc16:p1→tag9@mc17:p1、
+  // E@mc17→tag10@mc18:p0 各给 −1；P/S 的持有者多于一个不产候选、SYS 是 system
+  // part 被排除、NEW 无存量原文）；score(−1)=9（mc10..mc17 的 9 个 part 在
+  // mc11..mc18 上逐一原文相等）；score(0) 与 score(+1) 按 spec 公式复核为 3 与
+  // 1（mc15:S、mc16:p1:D2、mc17:E 恰在原位原文相等；mc12:P 对 mc11:p0 的 tag2
+  // 相等——spec 手稿记 1/1，以公式复核为准），判定不变：d* = −1（9 是唯一最
+  // 大且 ≥ 3）→ 本用例属 (b) 类，被平移相符接管，断言按 v2 语义逐项给出。
+  const sessionId = "ses_tt11_shift_layer";
+  const preset = [
+    [1, "mc10:p0", "shift-U", "active"],
+    [2, "mc11:p0", "shift-P", "active"],
+    [3, "mc12:p0", "shift-B", "active"],
+    [4, "mc13:p0", "shift-P", "dropped"],
+    [5, "mc14:p0", "shift-C", "active"],
+    [6, "mc15:p0", "shift-S", "active"],
+    [7, "mc16:p0", "shift-S", "dropped"],
+    [8, "mc17:p0", "shift-D", "active"],
+    [9, "mc17:p1", "shift-D2", "active"],
+    [10, "mc18:p0", "shift-E", "active"],
+  ];
+  for (const [tagNumber, messageId, source, status] of preset) {
+    insertTag(b4Db, sessionId, messageId, "message", source.length, tagNumber);
+    saveSourceContent(b4Db, sessionId, tagNumber, source);
+    stampTagMessageRole(b4Db, sessionId, tagNumber, "user");
+    if (status !== "active") updateTagStatus(b4Db, sessionId, tagNumber, status);
+  }
+
+  const mkPass = () => [
+    b5bMessage(sessionId, "mc1", "system", "shift-SYS"),
+    b5bMessage(sessionId, "mc10", "user", "shift-P"),
+    b5bMessage(sessionId, "mc11", "user", "shift-B"),
+    b5bMessage(sessionId, "mc12", "user", "shift-P"),
+    b5bMessage(sessionId, "mc13", "user", "shift-C"),
+    b5bMessage(sessionId, "mc14", "user", "shift-S"),
+    b5bMessage(sessionId, "mc15", "user", "shift-S"),
+    b5bMessage(sessionId, "mc16", "user", "shift-D", "shift-D2"),
+    b5bMessage(sessionId, "mc17", "user", "shift-E"),
+    b5bMessage(sessionId, "mc18", "user", "shift-NEW"),
+  ];
+  const pass1 = mkPass();
+  tagMessagesB5.tagMessages(sessionId, pass1, taggerModule.createTagger(), b4Db);
+
+  // (2) mc10..mc17 的 9 个 part 的 tag 号与真身逐一相同：P、S 四个样板 part 按
+  // 位置而非唯一性找回 tag2/4/6/7，双片段的两个 part 都回到 8、9。
+  const expectedNumbers = [2, 3, 4, 5, 6, 7, 8, 9, 10];
+  const actualNumbers = pass1.slice(1, 9).flatMap((m) => m.parts.map((p) => b5bWireTag(p.text)));
+  if (JSON.stringify(actualNumbers) !== JSON.stringify(expectedNumbers)) {
+    throw new Error(
+      `shifted parts did not land on their owners: ${JSON.stringify(actualNumbers)} !== ${JSON.stringify(expectedNumbers)}`,
+    );
+  }
+  // 平移相符不改 status：dropped 的主人平移后仍是 dropped。
+  if (getTagById(b4Db, sessionId, 4)?.status !== "dropped") {
+    throw new Error(`tag 4 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 4)?.status)}`);
+  }
+  if (getTagById(b4Db, sessionId, 7)?.status !== "dropped") {
+    throw new Error(`tag 7 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 7)?.status)}`);
+  }
+
+  const sysTag = b5bWireTag(pass1[0].parts[0].text);
+  const newTag = b5bWireTag(pass1[9].parts[0].text);
+  if ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(sysTag)) {
+    throw new Error(`SYS did not get a fresh tag: ${sysTag}`);
+  }
+  // (3) mc18 的 NEW 平移落空（posIdx[mc19:p0] 为空），拿到不在 {1..10} 里的新号。
+  if ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10].includes(newTag)) {
+    throw new Error(`NEW did not get a fresh tag: ${newTag}`);
+  }
+
+  // (1) 预置的 10 行 source_contents 逐字节不变——尤其是 tag1 的 U（v1 在同一
+  // 夹具上会把它改写成 P）；新增的行只允许是 SYS 与 NEW 两个新号各一行。
+  const sourceRows = b4Db
+    .prepare("SELECT tag_id, content FROM source_contents WHERE session_id = ? ORDER BY tag_id")
+    .all(sessionId);
+  if (sourceRows.length !== 12) {
+    throw new Error(
+      `source_contents row count drifted: ${sourceRows.length} (expected 12 = 10 preset + SYS + NEW)`,
+    );
+  }
+  for (const [tagNumber, , source] of preset) {
+    const row = sourceRows.find((r) => r.tag_id === tagNumber);
+    if (!row) throw new Error(`preset tag ${tagNumber} lost its source row`);
+    if (row.content !== source) {
+      throw new Error(
+        `preset tag ${tagNumber} source was rewritten: ${JSON.stringify(row.content)} !== ${JSON.stringify(source)}`,
+      );
+    }
+  }
+  const sysRow = sourceRows.find((r) => r.tag_id === sysTag);
+  if (!sysRow || sysRow.content !== "shift-SYS") {
+    throw new Error(`SYS source row wrong: ${JSON.stringify(sysRow)}`);
+  }
+  const newRow = sourceRows.find((r) => r.tag_id === newTag);
+  if (!newRow || newRow.content !== "shift-NEW") {
+    throw new Error(`NEW source row wrong: ${JSON.stringify(newRow)}`);
+  }
+  const strayRows = sourceRows.filter(
+    (r) =>
+      ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, sysTag, newTag].includes(r.tag_id),
+  );
+  if (strayRows.length > 0) {
+    throw new Error(`unexpected extra source rows: ${JSON.stringify(strayRows)}`);
+  }
+
+  // (4) 再跑一遍同样输入，结果逐字节相同：第一轮后持有者已重绑到入站同位键，
+  // 候选集退化为 {0}、score(0)=10 但 d*=0 → v1 精确命中沿用。
+  const pass2 = mkPass();
+  tagMessagesB5.tagMessages(sessionId, pass2, taggerModule.createTagger(), b4Db);
+  const firstWire = pass1.map((m) => m.parts.map((p) => p.text));
+  const secondWire = pass2.map((m) => m.parts.map((p) => p.text));
+  if (JSON.stringify(secondWire) !== JSON.stringify(firstWire)) {
+    throw new Error(
+      `second run is not byte-identical: ${JSON.stringify(secondWire)} !== ${JSON.stringify(firstWire)}`,
     );
   }
 });
