@@ -4,6 +4,8 @@ date: 2026-11-26
 
 # magic-context-trim-integrity 技术规格（SPEC）
 
+> **v3（2026-11-26，评审后同步）**：按 cr-fix-spec（CR-1、CR-4）补记两处「实现已落、spec 未跟上」的内容——边界判定的连带修复（`firstPersistedLiveId` 跳过豁免的 system 段，见问题一「连带修复」段）与 e2e 两处断言口径的改写（T-E1 同会话 V0 对照、T-E2 以存量状态为基线）；并把本轮评审的用例登记进测试策略（T-S8 为既有用例补登记，T-S9、T-T12、T-T13 为新增用例）。问题一的表格行号保留原值并补现行锚点，问题三的行号说明保留原样，实现时以函数名为准。
+
 ## 需求来源
 
 用户口述（2026-11-26）：v1.0.37 发布完成后，修复 magic-context-fork-inherit 迭代中用真实数据复现出来的三个既有问题，走 spec → check → dev → cr → e2e 流程。背景见 `docs/iterations/magic-context-fork-inherit/spec.md` 末尾「实现过程中发现的既有问题」。
@@ -42,6 +44,8 @@ date: 2026-11-26
 | S3 | `:3841-3853` | `trimToPreparedPrefix` 的 findBoundaryIndex 兜底分支（`splice(0, index+1)`） |
 | S4 | `:3776-3840` | `trimToPreparedPrefix` 的 source-order 分支 |
 
+> **行号说明（v3，2026-11-26 核验）**：本表行号冻结于实现之前；v1 落地后 `inject-compartments.ts` 因插入豁免与退化判定代码整体下移。现行锚点：`leadingSystemRunLength` 在 `:422`、退化判定 `isDegenerateLeadingSystemTrim` 在 `:442`；S0 缓存回放切片 `:510-545`（splice `:544`）、S1 rebuild 主切片 `:753-784`（splice `:782`）、S2 re-anchor 切片 `:813-843`（splice `:840`）、S3 findBoundaryIndex 兜底 `:3999-4028`（splice `:4021`）、S4 source-order `:3909-3998`（retained 收集 + splice `:3993`）。实现时以函数与分支名为准。
+
 唯一的豁免 `isHostRenderedSystemMessage`（`host-served-rows.ts:104-109`）只认**无 id** 的 system 消息；ZCode 投影给 system 条目也发了 `mc<序号>` id（`host/types.ts:363`），所以豁免够不到。上游宿主把 system prompt 放在消息数组之外（`session_meta.system_prompt_tokens` 列，ZCode 从不写，`storage-meta-shared.ts:324-325`），上游因此没有这个问题。
 
 **方案（包内豁免）**：新增 helper `leadingSystemRunLength(messages)`，返回数组开头连续的 `role === "system"` 且带 id 的消息条数 k（k 可为 0）。五处切片在裁剪时保留这 k 条，并把它们放在裁剪结果的最前。裁剪之后的顺序与今天未裁剪的短会话一致：包内 `injectM0M1`（`:3903-3917`）把 m[0]/m[1] 头 unshift 到最前 → bootstrap 的 `hoistHeadsAfterSystemPrefix`（`magic-context-turn-transform.ts:851-877`）把头挪回 system 段之后 → 最终请求 = `[system..., m0, m1, 末端消息...]`。
@@ -63,6 +67,8 @@ date: 2026-11-26
 - core 补回：core 对 magic-context 零感知，无法知道包是否有意裁掉；包内修复后会出现双 system。
 
 **包内豁免的自洽性**：豁免发生在 transform 自己的消息数组上，输出含 system → LKG 捕获的字节含 system → `foldBustsServedPrefix`（`transform-postprocess-phase.ts:1879-1891`）比较的 m0/m1 字节不受影响；token 估算（`final-wire-token-estimate.ts:234-302`）逐条遍历消息数组，system 行按对话行计入（顺带修掉今天 system 计 0 的低估）；MC-H04 判定作用在裁剪后的数组上。system 条目照常参与打标（它们本来就有 tag，system-prompt-guard 的四道防线管的是 tag 状态，与本改动正交）；但 system 行留在打标窗口里会与问题三的判定链相互作用，专门规则写在问题三的「入站 system 行的专门规则」。另：legacy / 兜底路径下 `renderCompartmentInjection`（`:793-843`）会把 `<session-history>` 块并入 `messages[0]` 的正文，豁免后 `messages[0]` 由「裁剪点后首行」变成 system 行——这与未裁剪的短会话今天的行为同形，属预期，CR / E2E 不要误判。
+
+**连带修复（absent-boundary 分类跳过豁免段，提交 3577a02f）**：豁免让裁剪后的数组头部仍是 system 行，而 `firstPersistedLiveId`（`inject-compartments.ts:3695-3709`）原本取「数组里第一条带 id 的持久消息」当窗口起点，会把豁免段首行（`mc1`）当成首条持久行。它的消费方 `classifyAbsentBoundary`（`inject-compartments.ts:3796-3838`）在摘要边界不在本轮消息数组里时（S3 兜底的 `:4026` 调用点）用它判定「边界是否排在窗口之前」：排在之前返回 `boundary-precedes-window` 并记日志 `prefix trim: boundary <边界> precedes the first remaining message <首条持久行>; …; nothing to cut`；否则进入 degraded 计数并返回 `refused`，记 `prefix trim: boundary <边界> absent from current messages; …`。失败形态：若不跳过豁免段，`mc1` 恒排在边界之后 → absent-boundary 分类恒 `refused` → 请求不裁 → 超窗时被 fail-closed 判定拒发（MC-H04）——真实库 e2e 抓到的形态。修复：`firstPersistedLiveId` 先经 `leadingSystemRunLength` 取豁免段长度，从豁免段之后起扫描，并沿用原有的 `isHostRenderedSystemMessage` / `isHostCompactionHeadRow` 过滤（`:3705`）；豁免段不参与「窗口从哪里开始」的比较。回归守卫见 T-S8。
 
 ### 问题二：折叠后的条目再次进入 transform
 
@@ -257,7 +263,7 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
 
 | # | 文件 | 改动 |
 |---|---|---|
-| 1 | `magic-context/.../hooks/magic-context/inject-compartments.ts` | 新增 `leadingSystemRunLength(messages)`；S0/S1/S2/S3 切片后把开头 system 段放回最前；S4 source-order 分支对豁免行 `retained.push + continue`、不参与 position 检查；退化输入不裁剪（S3/S4 返回 refused）；S1/S2 产出 `prefixTrimRemovedMessageIds`，`skippedVisibleMessages` 改为实际移出条数；五处 FORK 注释 |
+| 1 | `magic-context/.../hooks/magic-context/inject-compartments.ts` | 新增 `leadingSystemRunLength(messages)`；S0/S1/S2/S3 切片后把开头 system 段放回最前；S4 source-order 分支对豁免行 `retained.push + continue`、不参与 position 检查；退化输入不裁剪（S3/S4 返回 refused）；S1/S2 产出 `prefixTrimRemovedMessageIds`，`skippedVisibleMessages` 改为实际移出条数；五处 FORK 注释。**连带修复（提交 3577a02f）**：`firstPersistedLiveId`（`:3695-3709`）按 `leadingSystemRunLength` 跳过豁免段再取首个持久行——豁免让裁剪后的数组头部仍是 system 行，不跳过则 absent-boundary 分类恒 refused、请求不裁、超窗被拒发（T-S8 守卫） |
 | 2 | `magic-context/.../hooks/magic-context/transform.ts`、`inject-compartments.ts`（`selectHiddenMessagesAtCompactionSeam`） | `transform.ts:1975-1978` 与 `:1979-1982` 两个按「前 N 条」切片的消费方都改为用 `prefixTrimRemovedMessageIds`；`selectHiddenMessagesAtCompactionSeam` 改为接收显式的被移除消息列表；postprocess `:2885` 的日志消费方不改（FORK 注释） |
 | 3 | `core/.../methods/turn-model-step.ts` | 删除 `:574` 写回与 `:572-573` 注释；`runModelBackedTurnStep` options 去掉 `requestEntries`（`:88`）；留一句约束注释 |
 | 4 | `core/.../methods/turn-loop.ts` | `:169` 不再传 `requestEntries` |
@@ -303,6 +309,8 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
 - T-S5 — blocking: yes — 缓存回放分支 S0 的切片本身：T-S1 之后用**全量** `childEntries`（而不是第一遍的 `result.entries`）再次调用端口，使缓存边界可解析、`inject-compartments.ts:473` 的 splice 真正执行。断言：请求仍以 system 段起头，其后是 m[0]、m[1]。前提是该 pass 不是 cache-busting（否则走 rebuild 分支而不是 S0）；实现时实测确认，若为 cache-busting 则调整夹具使之落入 S0。夹具里 `:494` 现有的第二次 `runPort` 喂的是折叠产物、缓存边界不在数组里，走的是 `:474-484` 不切片的子分支，不能作为 T-S5。
 - T-S6 — blocking: yes — 跑完 T-S1 / T-S5 后查临时库：先断言 system 条目对应的 tag **存在**（否则「不是 compacted」恒真、空转通过），再断言它的 status 不是 `compacted`。
 - T-S7 — blocking: yes — 退化输入（裁剪点落在 system 段内）：包内单测，经导出的 `injectM0M1` 的 preparedPrefix 路径驱动；断言不裁剪、`prefixTrimStatus === "refused"`。
+- T-S8 — blocking: yes — **回归守卫：`firstPersistedLiveId`（`inject-compartments.ts:3695-3709`）在 absent-boundary 分类里必须跳过豁免的开头 system 段**（本轮登记进 spec；用例已在 fork-inherit 套件里，守住提交 3577a02f 修复的缺陷）。bootstrap 层真实端口（`test-magic-context-fork-inherit.mjs`，`test("T-S8 裁前缀后的 absent-boundary 分类跳过开头 system 段（firstPersistedLiveId 回归）", …)`）：600 条对话，父会话折叠到第 150 条对话（`foldParentThrough(db, parentId, 1, 151)`），fork 出的子会话夹具以带 id 的 system 行起头（mc1 = system、mc(i+1) = 对话 i），裁剪边界 mc52（对话 51 随裁），边界行被本轮 S1 切片裁掉，随后的 delivery 正是 absent-boundary 场景。断言：transform 成功返回（缺陷形态下 prefix trim 被 `refused`，超窗会抛 MC-H04）；请求以 system 段起头、条数 = k + 2 +（边界 mc52 之后的条数）；日志先等一个 flush 周期（包内 logger 为缓冲写，500ms 落盘）再按会话 id 过滤行，出现 `prefix trim: boundary mc52 precedes the first remaining message mc53`，且不出现 `prefix trim: boundary mc52 absent from current messages`。
+- T-S9 — blocking: yes — **S3/S4 的 applied 路径保留开头 system 段**（评审新增；与上轮拒发缺陷同族的护栏——「开头 system 段在 S3/S4 applied 时被保留」此前无用例，回归时全套件仍会绿）。包内单测（`test-transform.mjs`，T-S7 之后追加一例），驱动方式与 T-S7 相同（导出的 `injectM0M1` + `preparedPrefix`，不为测试新增导出）。夹具：system 段 k = 2（mc1、mc2）+ mc3（摘要边界，非 system）+ mc4，`preparedTrimBoundaryId = mc3`。①带 `capturePrefixTrimSourceOrder`（S4 source-order 分支）：断言 `prefixTrimStatus === "applied"`、两条 system 行以同一引用保留在结果头部、mc3 被裁、mc4 保留；②不带 `prefixTrimSourceOrder`（S3 findBoundaryIndex 兜底分支）：同样的形态。
 
 问题二（续写输入）
 
@@ -341,17 +349,19 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
   | 10 | `mc18:p0` | E | active（唯一文本） |
 
   入站：`mc1` = system（文本 SYS，无存量原文）；对话 `mc10` 到 `mc18` 依次为 P、B、P、C、S、S、{D, D2}（一条消息两个 text part）、E、NEW（新追加）。整体平移 d = −1（上一代在 `mc<p+1>`）。手算：候选集 {0, −1}（B、C、D、D2、E 给出 −1），`score(−1) = 9`（`mc10`–`mc17` 的 9 个 part 在 `mc11`–`mc18` 上逐一原文相等）、`score(0) = 1`、`score(+1) = 1` → d* = −1。断言：(1) 预置的 10 行 `source_contents` 逐字节不变——尤其是 tag1 的 U（v1 在同一夹具上会把它改写成 P）；新增的行只允许是 SYS 与 NEW 两个新号各一行；(2) `mc10`–`mc17` 的 9 个 part 的 tag 号与真身逐一相同：P、S 四个样板 part 按位置而非唯一性找回 tag2/4/6/7，tag4、tag7 仍是 dropped，双片段的两个 part 都回到 8、9；(3) `mc18` 的 NEW 平移落空（`posIdx[mc19:p0]` 为空），拿到不在 {1..10} 里的新号；(4) 再跑一遍同样输入，结果逐字节相同。区分度说明：B、C、D、D2、E 在 v1 下也会被内容认领判对，它们不是区分点；区分点是 U 与四个样板 part。
+- T-T12 — blocking: yes — **system 行落到旧的非 system tag 上时的无条件解绑**（评审新增；与执行次序图「system：墓碑化 T → unbind(c) → 跳过 resolve → assignTag 新号」对齐的护栏）。可达入口是 `assignTag` 的**内存快路径**（`tagger.ts:402-407`）：tag-messages 在 pass 开头就把 inert 行的 contentId 绑进内存（按入站消息 id 做 inert 重放），墓碑化的内存侧只是条件 unbind，挡不住这条快路径把 c 上残留的旧号送回来、再经 replaceSourceContent 把 system prompt 写进那个号的原文。夹具（双 pass、同一个 tagger、同一个临时库）：pass 1 预置 whitespace-inert 行 N（`insertTag` 后 `markWhitespaceAssistantTagInert`，指纹位置 mc1:p0），入站 mc1 是一条只有空白 text part 的 assistant 消息，断言 wire 上重放出 §N§（这一步让 tagger 的内存把 mc1:p0 绑到 N）；pass 2 在同一 tagger 下再预置一条挂在 mc1:p0、`message_role = 'user'`、号比 N 小的旧 tag M，入站 mc1 换成一条 `role = 'system'` 的非空消息。断言：system 行在 wire 上拿到不在 {M, N} 里的新号；M 的 `message_id` 已变成墓碑键；N 没有 `source_contents` 行，`entry_fingerprint` 与 status 不变。**注册位置**：`test(...)` 必须注册在既有 b5b 用例区（T-T11 之后）、执行循环之前——注册在执行循环之后的用例不会被执行；`test-transform.mjs` 既有的解构 import 里没有 `markWhitespaceAssistantTagInert`，夹具要从 storage-tags 的解构里补这个名字。**区分度要求**：在补无条件 `tagger.unbindTag(sessionId, contentId)` 之前的当前实现上这条用例必须红（system 行拿到 N、N 出现原文行）；当前实现上也绿说明夹具没走到内存快路径，停下报告，不得改断言迁就。既有 T-T9 / T-T10 / T-T11 仍绿。
+- T-T13 — blocking: yes — **user 消息的空白 text part 豁免出平移层**（评审新增；v1/v2 口径不一致——计划循环里空白判断原本排在平移分支之后，而主循环的空白豁免只对 assistant 生效，user 消息的空白 part 会消费平移计划，平移成立时被判成认领或漂移；现行实现已把空白判断挪到 system 规则之后、平移分支之前，`tag-messages.ts:670-673`，system 规则保持最先）。**独立**用例：不要往 T-T11 的夹具里加东西——它的手算注释和 `slice(1, 9)` 断言写死了 part 数量；同样注册在既有 b5b 用例区、执行循环之前。夹具：自建一个平移成立的场景（至少 3 个能验证平移的 part）+ 一条带空白 text part 的 user 消息。断言：空白 part 沿用其位置命中的既有号（位置无命中时新分配）；其位置上的旧 tag 没有被墓碑化。T-T1、T-T11 原样仍绿。
 
 问题四（真实数据）
 
-- T-E1 — blocking: yes — 两个最长的**处于裁剪形态**的真实会话（`session_meta.cached_m0_last_baseline_end_message_id` 非 null；v2 修订：初版按 tags 总数选会话，选中了状态已知的 fork 子会话，未裁剪形态的对照没有意义）：父会话自身的首轮请求以 system prompt 起头（`system在=true`），条数相对 fork-inherit e2e 记录的基线只多出 system 段的条数（±0），不抛 MC-H04 / 超窗。
-- T-E2 — blocking: yes — 同上两个会话：摘要块数不变；heal 没有清账；system 条目的 tag 没有被置为 compacted；工具弧成对性与**同一会话的 V0 对照**（k = 0，修复前形态）相比不出现新的孤立调用（V0 自身可能因位置裁剪劈弧而有 1 个孤立结果或孤立调用，见已知限制——这是既有的，不算本次引入）。
+- T-E1 — blocking: yes — 两个最长的**处于裁剪形态**的真实会话（`session_meta.cached_m0_last_baseline_end_message_id` 非 null；v2 修订：初版按 tags 总数选会话，选中了状态已知的 fork 子会话，未裁剪形态的对照没有意义）。**同会话跑两个 pass 对照**（v3 同步 e2e E1.0 ~ E1.3 的实际断言；初版写的「相对 fork-inherit e2e 记录的基线只多出 system 段条数」已改为同会话 V0 对照，跨会话的旧基线只作打印参照）：V0（k = 0，不带 system 条目，修复前形态的当时代理）与 V1（豁免生效）。断言：V0、V1 都成功发出、不抛 MC-H04 / 超窗；V1 请求以 system prompt 起头（首条 message `role = 'system'` 且正文含 system marker，`system在=true`）；**条数与对话序列都取同会话 V0 对照**——裁点按绝对位置切（compartments 边界 / cached baseline 的位置串），头部插入 system 段会把至多 1 条边缘对话条目拖进保留窗口（既有位置语义，非本次引入），所以裁剪形态断言「V1 相对 V0 的对话条目差 = 拖入的边缘条数 L∈{0,1}」且「V1 对话序列 = 边缘条目（≤1）+ V0 对话序列逐条相等」（对照键剥掉 `§N§` 前缀与 `[dropped §N§]` 占位符号、归一化空白 text part 与 content 形态后逐条比对），钉死修复的增量恰为 system 段、没有任何别的差异；两轮折叠投影形态不一致时（dropped 占位符计数不等，合成全量重放的固有噪声）逐条对照会被投影噪声淹没，退回条数断言「V1 条数 = V0 条数 + system 段条数（k = 1，±0）」。不裁剪形态（无裁点可解析）没有边缘条目拖入，同样走这条条数断言。
+- T-E2 — blocking: yes — 同上两个会话：摘要块数不变；heal 没有清账（初始无摘要块时无账可清）；system 条目的 tag **先断言存在**（`message_role = 'system'` 的行至少 1 行，否则「不是 compacted」恒真、空转通过），再断言**没有任何 system tag 新被置为 compacted**——以跑任何 pass 之前采集的 system tag 状态为基线（v3 同步 e2e E2.3 / E2.4 的实际断言；初版的绝对断言「system 条目的 tag 没有被置为 compacted」在含存量损坏的真实库拷贝上不可满足：拷贝源里已有被旧缺陷翻成 compacted 的行，本次修复只防新损坏、不修存量，与之同口径）；工具弧成对性与**同一会话的 V0 对照**（k = 0，修复前形态）相比不出现新的孤立调用（V0 自身可能因位置裁剪劈弧而有孤立结果或孤立调用，见已知限制——这是既有的，不算本次引入）。
 - T-E3 — blocking: yes — 模拟重启平移：在输入的 system 段之后、第一条对话条目之前多插入一条 role = user 的 context 附件条目（与真实的前缀重建同形；system 段仍是开头的连续段），之后连续跑两个 pass。断言：第二个 pass 之后，**有任何存量原文的文本 tag**中被改写的数量为 0（比对 pass 前后的 `source_contents` 快照；v2 把范围从「文本唯一的 tag」扩大到全部有原文的文本 tag——初版把重复样板排除在外，恰好漏掉了真实数据上主要的失效面）；没有任何存量原文被改写成 system prompt 的文本。观察项（不作断言，打印数值）：平移被识别出的 d、平移相符 / 不符 / 落空三个分支各自的 part 数、平移后窗口内保号的 part 占比、请求里工具弧的成对情况（孤立调用 / 孤立结果各几个，与 V0 对照并列）。顺带记录 system 行因平移拿到新号的个数、以及搁浅的旧 system tag 数。
 - T-E4 — blocking: yes — 抽样至多 30 个有存量原文的 dropped tag（不足则全采；为 0 时跳过并记录），`ctx_expand` 的 tag 模式返回的内容解析掉 `[text]` 包装后与该 tag 的存量原文相等。
 
 ### 测试落点
 
-- T-S1 ~ T-S6：`apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-fork-inherit.mjs`（复用其裁前缀夹具与真实端口；运行方式见该脚本头注）。T-S7：包内单测，落在 `test-transform.mjs`（同属 `pnpm test:transform`）。
+- T-S1 ~ T-S6、T-S8：`apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-fork-inherit.mjs`（复用其裁前缀夹具与真实端口；运行方式见该脚本头注）。T-S7、T-S9：包内单测，落在 `test-transform.mjs`（同属 `pnpm test:transform`；T-S9 在 T-S7 之后追加一例）。
 - T-C1、T-C2、T-C5：`apps/zcode-cli/packages/core/scripts/test-output-token-continuation-state.mjs`（`npx tsx --test`，直接 import src）。T-C3、T-C4：`apps/zcode-cli/packages/bootstrap/scripts/test-magic-context-continuation-input.mjs`（真实端口）。
 - T-T*：`apps/zcode-cli/packages/magic-context/scripts/test-transform.mjs`（沿用 `load("hooks/magic-context/tag-messages.js")` 与 `b4Db` 临时库；`insertTag` / `updateTagStatus` / `saveSourceContent` / `stampTagMessageRole` 已在该脚本 import，`test-transform.mjs:1012-1014`——`insertTag` 不写 `message_role`，T-T7 的 role 用 `stampTagMessageRole` 写入；不登记新的 SUBJECT）。
 - T-E*：`docs/iterations/magic-context-trim-integrity/e2e/e2e-trim-integrity.mjs`（真实库只读拷贝到临时目录，含 WAL；真实 store + hydrator + port；做法与约束仿 `docs/iterations/magic-context-fork-inherit/e2e/e2e-fork-inherit.mjs`）。
