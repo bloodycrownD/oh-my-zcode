@@ -17,23 +17,42 @@
  *   P4  平移 pass 2：同 P3 输入再跑一遍，与 P3 构成「连续两个 pass」。
  *   E4  T-E4：抽 ≤30 个有存量原文的 dropped tag，ctx_expand tag 模式逐字比对。
  *
- * 断言与 spec 的对应：
- *   T-E1  V1 请求以 system prompt 起头（system在=true）；修复的增量恰为 system 段——
- *         基线取同会话的 V0（k=0 时修复前后逐条相同，即修复前形态的当时代理）。
- *         裁剪形态下裁点是位置串（compartments 边界 / cached baseline），按绝对位置
- *         切：头部平移会把边缘对话条目拖进保留窗口（既有位置语义，fork-inherit 记忆
- *         :116 书面确认），所以裁剪形态断言「V1 对话序列 = ≤1 条边缘条目 + V0 对话
- *         序列逐条相等（剥 §N§/占位符号）」，未裁剪形态断言条数差恰为 k。fork-inherit
- *         e2e 记录的历史基线（父 389 / 853，docs/apm/memory/20261125-magic-context-
- *         fork-inherit.md:124）打印对照，不作为机器可比断言（真实库此后仍有写入，
- *         历史绝对值不可复现）。两轮折叠投影形态不一致时（占位符计数不等，dropped
- *         错位重放的合成噪声）内容对照不可测，退条数断言。V1 不抛 MC-H04 / 超窗。
- *   T-E2  V1 请求工具弧成对（0/0）；摘要块数不变；heal 没有清账；system 条目的 tag
- *         存在且没有被置为 compacted（先断言存在，T-S6 的教训）。
- *   T-E3  P4 之后：文本唯一的 tag 的存量原文零改写（V1 后 vs P4 后 source_contents
- *         快照）；没有任何存量原文被改写成 system prompt 文本；P3 / P4 请求工具弧成对。
- *         观察项（不作断言）：system 行因平移拿到新号的个数、搁浅的旧 system tag 数。
+ * 断言与 spec 的对应（v2 修订）：
+ *   T-E1  两个最长的**裁剪形态**真实会话（先按 session_meta.cached_m0_last_baseline_
+ *         end_message_id 非空过滤，再按 tags 总数取前二；不足两个时如实记录、不悄悄
+ *         换口径——未裁剪形态的对照没有意义）：父会话自身的首轮请求以 system prompt
+ *         起头（system在=true）；修复的增量恰为 system 段——基线取同会话的 V0（k=0
+ *         时修复前后逐条相同，即修复前形态的当时代理）。裁剪形态下裁点是位置串，
+ *         按绝对位置切：头部平移会把边缘对话条目拖进保留窗口（既有位置语义，fork-
+ *         inherit 记忆 :116 书面确认），所以裁剪且投影稳定时断言「V1 对话序列 =
+ *         ≤1 条边缘条目 + V0 对话序列逐条相等（剥 §N§/占位符号）」，其余形态断言
+ *         条数差恰为 k。fork-inherit 记录的历史基线（父 389 / 853，
+ *         docs/apm/memory/20261125-magic-context-fork-inherit.md:124）打印对照。
+ *         V1 不抛 MC-H04 / 超窗。
+ *   T-E2  摘要块数不变；heal 没有清账；system 条目的 tag 存在且没有被置为 compacted
+ *         （先断言存在，T-S6 的教训）；工具弧改为「V1 相对 V0 没有新增的孤立调用」
+ *         （V0 自身可能因既有「位置裁剪劈弧」带孤立调用/孤立结果——见 spec 已知
+ *         限制，单独立项，不算本次引入）。
+ *   T-E3  模拟重启平移（system 段后插一条 role=user 的 context 条目）连续两个 pass：
+ *         **硬闸门**——第二个 pass 之后，全部有存量原文的文本 tag 中被改写的数量
+ *         为 0（V1 后 vs P4 后 source_contents 快照；v2 把范围从「文本唯一的 tag」
+ *         扩大到全部有原文的 tag——v1 的唯一性过滤恰好漏掉真实数据上主要的失效
+ *         面，初版实测 1/1445 与 92/662，不能以「比修复前好」放过）；没有任何存量
+ *         原文被改写成 system prompt 文本。P3/P4 的工具弧成对降为观察项（与 V0
+ *         对照并列打印）。观察项（不作断言）：识别出的 d*、平移相符 / 不符 / 落空
+ *         三分支各自的 part 数、平移后窗口内保号的 part 占比、system 行因平移拿到
+ *         新号的个数、搁浅的旧 system tag 数。
  *   T-E4  ctx_expand 输出剥掉 `  [text]\n` 包装后与该 tag 存量原文逐字相等。
+ *
+ * 平移观察项的取数（MC_TRIM_E2E_SHIFT=1 开启）：包内没有 d* 与三分支计数的可读
+ * 出口——port 返回值只有 { entries, outcome, syntheticHeadPositions }
+ * （bootstrap/src/app/magic-context-turn-transform.ts:2215/2279/2311）；d*
+ * （driftShift）是 buildTagContentPlans 的闭包局部变量，三分支计划只在内部消费；
+ * sessionLog 仅输出防御 warn（tag-messages.ts:1018/1035）。脚本侧也无法按
+ * spec (b′) 复算：posIdx 查表需要包内打标输入的绝对 mc 坐标（m0/m1 注入后的
+ * 编号不经 port 暴露），坐标对不齐则查表错位。故 d* 与三分支计数按任务约定以
+ * 0 占位并注明不可得；保号占比由脚本侧按请求 wire 的 §N§ 对比计算（以剥章文本
+ * 为键、跳过样板歧义键的宽松口径，见 keptRatio）。
  *
  * 约束（仿 docs/iterations/magic-context-fork-inherit/e2e/e2e-fork-inherit.mjs）：
  *   - 真实库只作为 copyFileSync 的源，绝不打开、绝不写入；
@@ -41,7 +60,9 @@
  *   - 不调用任何模型；可重复执行，每次 mkdtemp 独立目录；跑完删除（Windows 上 sqlite
  *     句柄未释放时 EPERM，残留目录在 tmpdir 下，交给 OS 回收）。
  *   - MC_TRIM_E2E_KEEP=1 保留现场；MC_TRIM_E2E_REUSE=<目录> 复用已拷贝的库（迭代用）；
- *     MC_TRIM_E2E_DUMP=1 把每次 pass 的请求条目清单写进现场目录（失败诊断用）。
+ *     MC_TRIM_E2E_DUMP=1 把每次 pass 的请求条目清单写进现场目录（失败诊断用）；
+ *     MC_TRIM_E2E_SHIFT=1 输出 v2 平移观察项（d* / 三分支计数 / 保号占比，见上文
+ *     「平移观察项的取数」）。
  *
  * 用法（编排脚本从仓库根运行）：
  *   node --import tsx docs/iterations/magic-context-trim-integrity/e2e/e2e-trim-integrity.mjs
@@ -65,6 +86,7 @@ import { fileURLToPath } from "node:url";
 const KEEP = process.env.MC_TRIM_E2E_KEEP === "1";
 const REUSE = process.env.MC_TRIM_E2E_REUSE ?? "";
 const DUMP = process.env.MC_TRIM_E2E_DUMP === "1";
+const SHIFT = process.env.MC_TRIM_E2E_SHIFT === "1";
 const WORK =
     REUSE !== "" && existsSync(REUSE) ? REUSE : mkdtempSync(join(tmpdir(), "zcode-mc-e2e-trim-"));
 process.env.MAGIC_CONTEXT_DB_DIR = WORK;
@@ -155,7 +177,6 @@ function textOf(entries) {
 }
 
 const clone = (entry) => structuredClone(entry);
-const pairOk = (p) => p.ok && p.shape.missingResults.length === 0 && p.shape.orphanResults.length === 0;
 const isOverWindow = (p) =>
     !p.ok && (p.error.includes("MC-H04") || p.error.includes("UNMANAGED_OVER_WINDOW"));
 
@@ -208,16 +229,33 @@ async function main() {
     const db = mc.openDatabase(mc.getMagicContextDatabasePath());
     const store = adapters.createSqliteSessionStore({ dbPath: join(WORK, "db.sqlite") });
 
-    // ── 选会话：按 tags 总数取最长的两个真实会话（排除本 e2e 家族的合成会话）──
+    // ── 选会话（v2）：先按裁剪形态过滤——session_meta.cached_m0_last_baseline_
+    //    end_message_id 非空（存在可解析的基线边界，即真实运行裁过前缀）——再按
+    //    tags 总数取前两个。spec T-E1 v2 修订：未裁剪形态的对照没有意义。找不到
+    //    两个时如实记录（check 失败 + 打印候选），不悄悄换回旧口径。
     const sessions = db
         .prepare(
-            `SELECT session_id AS id, COUNT(*) AS tags, SUM(status = 'dropped') AS dropped
-               FROM tags WHERE session_id NOT LIKE 'sess_e2e%' AND session_id NOT LIKE 'sess_dwf-%'
-             GROUP BY session_id ORDER BY tags DESC LIMIT 2`,
+            `SELECT t.session_id AS id, COUNT(*) AS tags, SUM(t.status = 'dropped') AS dropped
+               FROM tags t
+              WHERE t.session_id IN (
+                        SELECT session_id FROM session_meta
+                         WHERE cached_m0_last_baseline_end_message_id IS NOT NULL
+                           AND cached_m0_last_baseline_end_message_id != ''
+                    )
+                AND t.session_id NOT LIKE 'sess_e2e%' AND t.session_id NOT LIKE 'sess_dwf-%'
+              GROUP BY t.session_id ORDER BY tags DESC LIMIT 2`,
         )
         .all();
     console.log(
-        `\n最长两个会话（按 tags 总数）：${sessions.map((s) => `${s.id}（tags=${s.tags} dropped=${s.dropped}）`).join("、")}`,
+        `\n最长两个裁剪形态会话（基线边界非空，按 tags 总数）：${sessions.map((s) => `${s.id}（tags=${s.tags} dropped=${s.dropped}）`).join("、") || "无"}`,
+    );
+    check(
+        "pick",
+        "按裁剪形态过滤后找到两个最长会话",
+        sessions.length === 2,
+        sessions.length === 2
+            ? sessions.map((s) => s.id).join("、")
+            : `只找到 ${sessions.length} 个，不回退旧口径，仅跑找到的`,
     );
 
     const closeHooks = [];
@@ -317,11 +355,6 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
         };
         writeFileSync(join(WORK, `dump-${s8}-${label}.txt`), entries.map(describe).join("\n"), "utf8");
     };
-    const uniqueIdsOf = (snap) => {
-        const freq = new Map();
-        for (const c of snap.values()) freq.set(c, (freq.get(c) ?? 0) + 1);
-        return new Set([...snap].filter(([, c]) => freq.get(c) === 1).map(([id]) => id));
-    };
     const systemTagRows = () =>
         db
             .prepare(
@@ -338,7 +371,6 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
     const v0 = await runPass("V0", build());
     const v1 = await runPass("V1", build(sysEntry));
     const snapA = snapshotSources();
-    const uniqueA = uniqueIdsOf(snapA);
     const sysBefore = systemTagRows();
     const p3 = await runPass("P3", build(sysEntry, ctxEntry));
     const p4 = await runPass("P4", build(sysEntry, ctxEntry));
@@ -468,15 +500,21 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
     );
 
     // ── T-E2 ────────────────────────────────────────────────────────────────
-    const arcDetail = (p) =>
+    // 工具弧的绝对成对性是既有「位置裁剪劈弧」（spec 已知限制：裁点按绝对位置取，
+    // 落在调用与结果之间时请求里出现孤立调用或孤立结果；单独立项「裁剪边界的工具
+    // 弧完整性」）——V0 自身就可能带孤立调用/孤立结果，不算本次引入。v2 硬断言只
+    // 要求 V1 相对 V0 没有新增的孤立调用；P3/P4 的成对性降为观察项（见 T-E3 段）。
+    const arcCounts = (p) =>
         p.ok
-            ? `缺失结果 ${p.shape.missingResults.slice(0, 3).map((x) => x.slice(0, 14)).join(",") || "无"}；孤儿结果 ${p.shape.orphanResults.slice(0, 3).map((x) => x.slice(0, 14)).join(",") || "无"}`
-            : "pass 失败";
+            ? { missing: p.shape.missingResults.length, orphan: p.shape.orphanResults.length }
+            : null;
     check(
         `${s8}·E2.0`,
-        "V1 请求工具弧成对（有调用没结果=0，有结果没调用=0）",
-        pairOk(v1),
-        arcDetail(v1),
+        "V1 相对 V0 没有新增的孤立调用（有调用没结果不增加）",
+        v1.ok && v0.ok && v1.shape.missingResults.length <= v0.shape.missingResults.length,
+        v1.ok && v0.ok
+            ? `孤立调用 V1=${v1.shape.missingResults.length} vs V0=${v0.shape.missingResults.length}（孤立结果 V1=${v1.shape.orphanResults.length} / V0=${v0.shape.orphanResults.length}）`
+            : "pass 失败",
     );
     const compartmentsAfterV1 = db
         .prepare(`SELECT COUNT(*) AS n FROM compartments WHERE session_id = ?`)
@@ -524,8 +562,11 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
     check(`${s8}·E3.1`, "P4 平移 pass 成功发出", p4.ok, p4.ok ? `${p4.count} 条` : p4.error);
     let rewritten = 0;
     const rewriteSamples = [];
+    // v2 硬闸门：范围从「文本唯一的 tag」扩大到全部有存量原文的 tag（快照全表，
+    // 不再按唯一性过滤——v1 的唯一性过滤恰好漏掉真实数据上主要的失效面，初版
+    // 实测 1/1445 与 92/662，不能以「比修复前好」放过）。新增行（新号落库）不算
+    // 改写，只比对快照 A 中已有 tag 的原文是否变化。
     for (const [tagId, before] of snapA) {
-        if (!uniqueA.has(tagId)) continue;
         const after = snapB.get(tagId);
         if (after !== before) {
             rewritten += 1;
@@ -535,11 +576,16 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
                 );
         }
     }
+    // 空转防护：P3/P4 被拒发时打标根本没跑，快照比对恒为「零改写」——这个 ok
+    // 不构成 v2 硬闸门的证据（T-S6 的同款教训），pass 失败时本断言一并失败。
+    const shiftPassesRan = p3.ok && p4.ok;
     check(
         `${s8}·E3.2`,
-        "平移两个 pass 后，文本唯一 tag 的存量原文零改写",
-        rewritten === 0,
-        `${rewritten} / 唯一文本 tag ${uniqueA.size}${rewriteSamples.length ? `；${rewriteSamples.join("；")}` : ""}`,
+        "平移两个 pass 后，有存量原文的文本 tag 零改写（v2 硬闸门：全部有原文的 tag）",
+        shiftPassesRan && rewritten === 0,
+        shiftPassesRan
+            ? `${rewritten} / ${snapA.size}${rewriteSamples.length ? `；${rewriteSamples.join("；")}` : ""}`
+            : `P3/P4 被拒发（打标未执行），零改写未获验证——不可计为通过`,
     );
     const rewrittenToSystem = [...snapA]
         .filter(([tagId, before]) => before !== SYSTEM_MARKER && snapB.get(tagId) === SYSTEM_MARKER)
@@ -547,11 +593,91 @@ async function verifySession({ mc, core, db, store, sessionId, closeHooks, creat
     check(
         `${s8}·E3.3`,
         "没有任何存量原文被改写成 system prompt 的文本",
-        rewrittenToSystem.length === 0,
-        `${rewrittenToSystem.length} 行${rewrittenToSystem.length ? `：${rewrittenToSystem.slice(0, 5).join(",")}` : ""}`,
+        shiftPassesRan && rewrittenToSystem.length === 0,
+        shiftPassesRan
+            ? `${rewrittenToSystem.length} 行${rewrittenToSystem.length ? `：${rewrittenToSystem.slice(0, 5).join(",")}` : ""}`
+            : "P3/P4 被拒发，未获验证",
     );
-    check(`${s8}·E3.4`, "P3 请求工具弧成对", pairOk(p3), arcDetail(p3));
-    check(`${s8}·E3.5`, "P4 请求工具弧成对", pairOk(p4), arcDetail(p4));
+    // P3/P4 的工具弧成对性：既有「位置裁剪劈弧」（spec 已知限制——裁点按绝对位置
+    // 取，落在调用与结果之间时请求里出现孤立调用或孤立结果；孤立调用会被模型拒收。
+    // 单独立项「裁剪边界的工具弧完整性」，三项修复都不处理它），v2 修订降为观察项：
+    // 与 V0（修复前形态）对照并列打印，不作断言。
+    const arcLine = (label, p) => {
+        const c = arcCounts(p);
+        return c ? `${label} 孤立调用 ${c.missing} / 孤立结果 ${c.orphan}` : `${label} pass 失败`;
+    };
+    console.log(
+        `  观察项（既有「位置裁剪劈弧」，单独立项「裁剪边界的工具弧完整性」，不作断言）：` +
+            [arcLine("V0", v0), arcLine("V1", v1), arcLine("P3", p3), arcLine("P4", p4)].join("；") +
+            "——V0 是修复前形态的对照基线",
+    );
+    // ── v2 平移观察项（不作断言；MC_TRIM_E2E_SHIFT=1 输出）──
+    // d* 与三分支计数（平移相符 / 不符 / 落空的 part 数）：包内没有可读出口——
+    // port 返回值只有 { entries, outcome, syntheticHeadPositions }；driftShift 是
+    // buildTagContentPlans 的闭包局部变量；sessionLog 只输出防御 warn。脚本侧也无法
+    // 按 spec (b′) 复算：posIdx 查表需要包内打标输入的绝对 mc 坐标（m0/m1 注入后的
+    // 编号不经 port 暴露，坐标对不齐查表会错位）。按任务约定以 0 占位并注明不可得。
+    // 保号占比脚本侧可测：对比两个 pass 请求 wire 的 §N§——以剥章文本为键、跳过
+    // 样板歧义键（同文本多号）的宽松口径，样板键的高估被歧义跳过抵消大半。
+    const tagNumbersByText = (run) => {
+        const map = new Map();
+        for (const entry of run.entries ?? []) {
+            const message = entry.message;
+            if (!message) continue;
+            const texts =
+                typeof message.content === "string"
+                    ? [message.content]
+                    : Array.isArray(message.content)
+                      ? message.content
+                            .filter((b) => b && b.type === "text" && typeof b.text === "string")
+                            .map((b) => b.text)
+                      : [];
+            for (const raw of texts) {
+                const tag = /§(\d+)§/.exec(raw);
+                if (!tag) continue;
+                const key = stripTagPrefix(raw);
+                if (!map.has(key)) map.set(key, new Set());
+                map.get(key).add(Number(tag[1]));
+            }
+        }
+        return map;
+    };
+    const keptRatio = (baseRun, targetRun) => {
+        const base = tagNumbersByText(baseRun);
+        let comparable = 0;
+        let kept = 0;
+        let ambiguous = 0;
+        for (const [text, numbers] of tagNumbersByText(targetRun)) {
+            const baseNumbers = base.get(text);
+            if (!baseNumbers || baseNumbers.size === 0) continue;
+            if (baseNumbers.size !== 1 || numbers.size !== 1) {
+                ambiguous += 1;
+                continue;
+            }
+            comparable += 1;
+            if ([...baseNumbers][0] === [...numbers][0]) kept += 1;
+        }
+        return {
+            comparable,
+            kept,
+            ambiguous,
+            ratio: comparable > 0 ? `${kept}/${comparable} = ${((kept / comparable) * 100).toFixed(1)}%` : "无可比键",
+        };
+    };
+    if (SHIFT) {
+        const shifted = keptRatio(v1, p3);
+        const stable = keptRatio(p3, p4);
+        console.log(
+            `  平移观察项（不作断言）：识别出的 d* = 0（占位——包内无可读出口，见上方注释）；` +
+                `平移相符 / 不符 / 落空 = 0 / 0 / 0（占位，同前）；` +
+                `保号占比 P3 相对 V1（平移一轮）= ${shifted.ratio}（跳过歧义键 ${shifted.ambiguous}）；` +
+                `P4 相对 P3（同输入稳定性）= ${stable.ratio}（跳过歧义键 ${stable.ambiguous}）`,
+        );
+    } else {
+        console.log(
+            `  平移观察项：未开启 MC_TRIM_E2E_SHIFT=1——d* / 三分支计数 / 保号占比未采集（包内无 d* 出口，开启后 d* 与三分支仍以 0 占位，仅保号占比按 wire §N§ 实算）`,
+        );
+    }
     const newSystemTags = sysAfter.filter((r) => !sysBefore.some((b) => b.n === r.n));
     const stranded = sysAfter.filter((r) => r.st === "active" && !/^mc1:p/.test(r.mid ?? ""));
     console.log(
