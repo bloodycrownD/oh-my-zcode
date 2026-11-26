@@ -235,6 +235,8 @@ id 前缀（`system-B-1` 等），下表保留来源 id 以便对照。主代理
 | dag_version / review_round | 5 / 5 |
 | review-global 每轮参与 | yes |
 | 末轮 review-final | 通过（未写入的开放 must-fix 为 0） |
+
+执行后记（2026-11-26）：12 条已执行并提交（cdfa3ca0、5699a783、394f4066、f8fe1bc4）。全量检查与换人功能小检通过；小检只带回两条行号漂移的 nit（spec 里 classifyAbsentBoundary 的起始行、本文件 CR-3 引用的漂移分支行号），前者已顺手改正，后者是本文件落盘时点的行号、保留不改。先红后绿由主代理回退 tag-messages.ts 实测：71 cases / 2 failures。
 | P0 / P1 / P2（已写入 fix-spec） | 0 / 5 / 7 |
 | 未写入的开放 must-fix | 0 |
 | spec_deviations | none |
