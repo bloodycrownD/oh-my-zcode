@@ -416,14 +416,30 @@ export function trimMemoriesToBudget(
 // 与包内裁剪叠加成双 system；只有 transform 在自己的数组上豁免才能让 LKG 捕获、
 // token 估算、MC-H04 判定与线上请求保持自洽。
 //
-// k 只计「role === "system" 且带 id」的行：带 id 才是 ZCode 持久化的 system
-// prompt 行；无 id 的 host-rendered system 消息（isHostRenderedSystemMessage）
-// 不是持久行、位置跟随邻居，走既有豁免逻辑，不在此列。
-function leadingSystemRunLength(messages: readonly MessageLike[]): number {
+// FORK（裁前缀只裁对话）：豁免段从「开头 system 段」扩大为「开头到第一条对话
+// 消息之前的全部宿主上下文行」。ZCode 投影还把 skills 列表、日期、环境信息等
+// 附加上下文（host/types.ts 的附件投影：role "user" + syntheticHead + 带 id）
+// 放在同一个头部；它们和 system prompt 一样是每轮都在服役的宿主输入、没有摘要
+// 补位，裁掉后模型在长会话里就看不到可用技能与环境。实测这部分只占长会话
+// 请求的约 5%。认法只用既有字段、不加新标记：
+//   - role === "system" 且带 id：持久化的 system prompt 行；
+//   - syntheticHead === true 且带 id：宿主的附加上下文行。
+// 包自己每轮前插的 m0/m1 无 id，不在此列（它们在前插时本来就不参与裁剪）。
+// 无 id 的 host-rendered system 消息（isHostRenderedSystemMessage）不是持久行、
+// 位置跟随邻居，走既有豁免逻辑。
+//
+// 所有切片点都只删 [k, removedCount) 区间，豁免行不进被裁清单，所以下游按
+// 清单归档折叠标记时不会误伤仍在服役的头部行。
+function leadingHostContextRunLength(messages: readonly MessageLike[]): number {
     let count = 0;
     for (const message of messages) {
-        const id = message.info.id;
-        if (message.info.role === "system" && typeof id === "string" && id.length > 0) {
+        const info = message.info as { id?: unknown; syntheticHead?: unknown; role?: unknown };
+        const id = info.id;
+        if (
+            typeof id === "string" &&
+            id.length > 0 &&
+            (info.role === "system" || info.syntheticHead === true)
+        ) {
             count += 1;
         } else {
             break;
@@ -534,7 +550,7 @@ export function prepareCompartmentInjection(
                     // 的常态路径，每轮新投影都会重新走到，最容易漏。
                     // 退化输入（裁剪点落在 system 段内，现实中不可达）不切片照常
                     // 返回：此时豁免段与被裁段重叠，切片会重复 system 行。
-                    const systemRunLength = leadingSystemRunLength(messages);
+                    const systemRunLength = leadingHostContextRunLength(messages);
                     if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
                         sessionLog(
                             sessionId,
@@ -765,7 +781,7 @@ export function prepareCompartmentInjection(
         // 供下游切片；移除动作用一次 splice 完成（等价于裁掉 boundary 之前的
         // 非豁免行）。退化输入（裁剪点落在 system 段内，现实中不可达）不切片
         // 照常返回：skipped / endMessageId / 移出列表都保持空值，本 pass 不裁剪。
-        const systemRunLength = leadingSystemRunLength(messages);
+        const systemRunLength = leadingHostContextRunLength(messages);
         const removedCount =
             cutoffIndex + (isPartialCompartmentEnd(db, sessionId, trimEndMessageId) ? 0 : 1);
         if (isDegenerateLeadingSystemTrim(systemRunLength, removedCount)) {
@@ -820,7 +836,7 @@ export function prepareCompartmentInjection(
                     // 退化输入（re-anchor 裁剪点落在 system 段内，现实中不可达）
                     // 不切片：保持 reAnchored = false，交由下方
                     // needsFreshMaterialization 请求重新切基线，本 pass 不裁剪。
-                    const systemRunLength = leadingSystemRunLength(messages);
+                    const systemRunLength = leadingHostContextRunLength(messages);
                     const removedCount =
                         reAnchorCutoff +
                         (isPartialCompartmentEnd(db, sessionId, reAnchorCompartment.endMessageId)
@@ -3697,7 +3713,7 @@ function firstPersistedLiveId(messages: readonly MessageLike[]): string | null {
     // system 段（见 leadingSystemRunLength），所以裁剪之后数组头部可能仍是
     // system 行（mc1 起），摘要边界永远排不到它前面——会被误判成「边界不存在」
     // 而拒绝裁剪。豁免段不参与「窗口从哪里开始」的比较。
-    const systemRunLength = leadingSystemRunLength(messages);
+    const systemRunLength = leadingHostContextRunLength(messages);
     for (let index = systemRunLength; index < messages.length; index += 1) {
         const message = messages[index];
         const id = message.info.id;
@@ -3932,10 +3948,10 @@ function trimToPreparedPrefix(
                     // 落在开头 system 豁免段内（现实中不可达，属防御）。豁免段
                     // 无条件保留会让 boundary 行也存活、裁剪静默失效，必须按既有
                     // 「裁剪被拒」语义 refused，随后的 fail-closed 判定照常生效。
-                    const leadingSystemCount = leadingSystemRunLength(options.messages);
-                    if (leadingSystemCount > 0 && boundaryPosition < leadingSystemCount) {
+                    const leadingHeadCount = leadingHostContextRunLength(options.messages);
+                    if (leadingHeadCount > 0 && boundaryPosition < leadingHeadCount) {
                         status = refuse(
-                            `boundary ${boundary} falls inside the leading system run (${leadingSystemCount} messages)`,
+                            `boundary ${boundary} falls inside the leading system run (${leadingHeadCount} messages)`,
                         );
                     } else {
                         let lastSourcePosition = -1;
@@ -3944,7 +3960,7 @@ function trimToPreparedPrefix(
                         const retained: MessageLike[] = [];
                         for (const [index, message] of options.messages.entries()) {
                             const id = message.info.id;
-                            if (index < leadingSystemCount) {
+                            if (index < leadingHeadCount) {
                                 // FORK（magic-context-trim-integrity 问题一 / S4
                                 // source-order 分支）：上游按 source position 逐行
                                 // 裁掉 boundary 之前的行；ZCode 头部前 k 条是带 id
@@ -4007,7 +4023,7 @@ function trimToPreparedPrefix(
                 // 区间，开头 system 段原位保留在最前。退化输入（裁剪点落在
                 // system 段内，现实中不可达）不裁剪并按既有「裁剪被拒」语义返回
                 // refused——随后的 fail-closed 判定（超窗即 MC-H04）照常生效。
-                const systemRunLength = leadingSystemRunLength(options.messages);
+                const systemRunLength = leadingHostContextRunLength(options.messages);
                 const removedCount =
                     index +
                     (isPartialCompartmentEnd(options.db, options.sessionId, boundary) ? 0 : 1);

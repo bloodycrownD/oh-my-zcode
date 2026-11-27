@@ -2481,6 +2481,106 @@ test("T-S9 applied 路径：S3/S4 裁剪后开头 system 段以同一引用保�
   assertAppliedKeepsSystemRun(s3Messages, s3Refs, "S3 branch");
 });
 
+// --- T-S10：裁前缀只裁对话，宿主附加上下文行与 system 段一并保留 -------------
+//
+// ZCode 把 skills 列表、日期、环境信息投影成 role "user" + syntheticHead + 带 id
+// 的附件行，紧跟 system 段、排在第一条对话消息之前。裁前缀只应裁对话：夹具
+// system k=2（mc1、mc2）+ 附件 mc3（syntheticHead）+ mc4（裁剪边界，对话）+ mc5。
+// 断言裁后 = head + mc1 + mc2 + mc3 + mc5，前三条以同一引用保留在头部。
+
+test("T-S10 裁前缀只裁对话：开头 system 段与宿主附加上下文行（syntheticHead + id）都保留", () => {
+  const sessionId = "ses_ts10_head_context_run";
+  const makeMessages = () => [
+    {
+      info: { id: "mc1", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line one" }],
+    },
+    {
+      info: { id: "mc2", role: "system", sessionID: sessionId },
+      parts: [{ type: "text", text: "system prompt line two" }],
+    },
+    {
+      // 宿主附件投影的形状（host/types.ts）：role "user" + syntheticHead + 带 id。
+      info: { id: "mc3", role: "user", syntheticHead: true, sessionID: sessionId },
+      parts: [{ type: "text", text: "The following skills are available for use with the Skill tool: ..." }],
+    },
+    {
+      info: { id: "mc4", role: "user", sessionID: sessionId },
+      parts: [{ type: "text", text: "first user message (trim boundary)" }],
+    },
+    {
+      info: { id: "mc5", role: "user", sessionID: sessionId },
+      parts: [{ type: "text", text: "second user message" }],
+    },
+  ];
+  const head = [
+    { info: { role: "user" }, parts: [{ type: "text", text: "m[0]/m[1] head", synthetic: true }] },
+  ];
+  const preparedPrefix = {
+    injected: true,
+    prependedMessageCount: 0,
+    m0RematerializedThisPass: false,
+    materializationContentionRetryExhausted: true,
+    decision: { value: false, reason: "cache_hit" },
+    m0Bytes: null,
+    m1Text: null,
+    preparedMessages: head,
+    preparedTrimBoundaryId: "mc4",
+  };
+  const baseOptions = {
+    db: b4Db,
+    sessionId,
+    state: { sessionId, cachedM0Bytes: null, cachedM1Bytes: null },
+    compactionOff: false,
+    isCacheBustingPass: false,
+  };
+  const assertAppliedKeepsHeadContext = (messages, refs, label) => {
+    if (messages.length !== 5) {
+      throw new Error(
+        `${label}: messages.length=${messages.length} (expected 5 = head + 2 system + attachment + mc5)`,
+      );
+    }
+    if (messages[1] !== refs.mc1 || messages[2] !== refs.mc2 || messages[3] !== refs.mc3) {
+      throw new Error(
+        `${label}: the leading host-context run (system + syntheticHead attachment) did not survive with the same references`,
+      );
+    }
+    if (messages.some((message) => message === refs.mc4)) {
+      throw new Error(`${label}: mc4 (the trim boundary) survived the trim`);
+    }
+    if (!messages.includes(refs.mc5)) {
+      throw new Error(`${label}: mc5 was dropped by the trim`);
+    }
+  };
+
+  // ① S4 分支（source-order）。
+  const s4Messages = makeMessages();
+  const s4Refs = { mc1: s4Messages[0], mc2: s4Messages[1], mc3: s4Messages[2], mc4: s4Messages[3], mc5: s4Messages[4] };
+  const s4 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s4Messages,
+    prefixTrimSourceOrder: injectCompartmentsModule.capturePrefixTrimSourceOrder(s4Messages),
+    preparedPrefix,
+  });
+  if (s4.prefixTrimStatus !== "applied") {
+    throw new Error(`S4 branch: prefixTrimStatus=${s4.prefixTrimStatus} (expected "applied")`);
+  }
+  assertAppliedKeepsHeadContext(s4Messages, s4Refs, "S4 branch");
+
+  // ② S3 分支（id-lookup 兜底）。
+  const s3Messages = makeMessages();
+  const s3Refs = { mc1: s3Messages[0], mc2: s3Messages[1], mc3: s3Messages[2], mc4: s3Messages[3], mc5: s3Messages[4] };
+  const s3 = injectCompartmentsModule.injectM0M1({
+    ...baseOptions,
+    messages: s3Messages,
+    preparedPrefix,
+  });
+  if (s3.prefixTrimStatus !== "applied") {
+    throw new Error(`S3 branch: prefixTrimStatus=${s3.prefixTrimStatus} (expected "applied")`);
+  }
+  assertAppliedKeepsHeadContext(s3Messages, s3Refs, "S3 branch");
+});
+
 // Windows 宿主（杀软/索引器）可能在测试退出后仍短暂持有编译缓存目录的句柄，
 // EPERM 清理失败不应把全绿的测试判成失败；残留目录由下次运行复用前清掉。
 function bestEffortRmSync(path) {

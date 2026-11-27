@@ -419,7 +419,8 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
     const parentId = "ses_fork_inherit_trim_parent";
     const childId = "ses_fork_inherit_trim_child";
     // 600 条对话，父会话已折叠到第 150 条对话（父数组里是第 151 条）：末端 = 601 − 151 = 450 条，足够长。
-    // 子夹具头部（裁剪边界之前）补一条 attachment（T-S2）：它在裁剪范围内、不随请求发出。
+    // 子夹具头部（第一条对话之前）补一条 attachment：裁前缀只裁对话，宿主附加上下文行
+    // 与 system 段一并保留，随请求发出（v1.0.38 只豁免 system 段，其后扩大）。
     const longConversation = Array.from({ length: 600 }, (_, index) => ({
         kind: "message",
         message: {
@@ -473,10 +474,11 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
     assert.ok(text.includes("parent compartment body"), "请求必须带上继承的摘要");
     assert.ok(text.includes("number 400"), "末端未折叠的消息必须保留");
     assert.ok(text.includes("child new question"), "新问题必须保留");
-    // T-S1（顺序 + 条数）：请求的前 k 条是输入里的 system 条目，其后依次是 m[0]、
-    // m[1]，再其后是裁剪点之后的全部条目。k = 1（一条 system）。
-    assert.equal(result.entries.length, 1 + 2 + (childEntries.length - 53),
-        "请求 = system 段(k=1) + 两个摘要头 + 裁剪位置之后的全部条目");
+    // T-S1（顺序 + 条数）：请求的前 k 条是输入里第一条对话之前的宿主上下文条目
+    // （system 段 + 头部 attachment），其后依次是 m[0]、m[1]，再其后是裁剪点之后的
+    // 全部条目。k = 2（一条 system + 一条 attachment）。
+    assert.equal(result.entries.length, 2 + 2 + (childEntries.length - 53),
+        "请求 = 头部宿主上下文(k=2) + 两个摘要头 + 裁剪位置之后的全部条目");
     assert.equal(result.entries[0]?.message?.role, "system", "请求必须以 system 段起头");
     // system 行照常参与打标（wire 上带 §N§ 前缀）；rebuild 后 content 是 parts
     // 数组形态，正文去前缀后必须与输入一致。
@@ -488,15 +490,14 @@ test("父会话末端足够长时，子会话像父会话一样裁前缀", async
         /^§\d+§ you are the child$/,
         "system 段正文必须原样保留（§N§ 是打标前缀）",
     );
-    assert.equal(result.entries[1]?.metadata?.source, "magic_context", "system 段之后必须是 m[0] 摘要头");
-    assert.equal(result.entries[2]?.metadata?.source, "magic_context", "m[0] 之后必须是 m[1] 摘要头");
-    // T-S2：夹具 attachment（裁剪边界之前）不随请求发出，与修复前一致。
-    assert.ok(!text.includes("trim fixture attachment"), "裁剪范围内的 attachment 不得随请求发出");
+    assert.ok(text.includes("trim fixture attachment"), "头部 attachment 必须随请求发出（裁前缀只裁对话）");
+    assert.equal(result.entries[2]?.metadata?.source, "magic_context", "头部宿主上下文之后必须是 m[0] 摘要头");
+    assert.equal(result.entries[3]?.metadata?.source, "magic_context", "m[0] 之后必须是 m[1] 摘要头");
     // 裁剪位置之后的条目：active 原文条目由 transform 复用原对象（isUnchanged），
     // 逐项引用相等；继承的 dropped 条目（对话 52..150）wire 被中和成占位符、条目
     // 被重建，引用相等不成立——按 spec T-S1 的处置，对这些条目断言位置 + role +
     // 占位符文本。
-    const kept = result.entries.slice(3);
+    const kept = result.entries.slice(4);
     const expectedKept = childEntries.slice(53);
     assert.equal(kept.length, expectedKept.length, "保留段条数必须一致");
     const asWireText = (entry) =>
