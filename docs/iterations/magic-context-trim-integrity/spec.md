@@ -6,6 +6,8 @@ date: 2026-11-26
 
 > **v3（2026-11-26，评审后同步）**：按 cr-fix-spec（CR-1、CR-4）补记两处「实现已落、spec 未跟上」的内容——边界判定的连带修复（`firstPersistedLiveId` 跳过豁免的 system 段，见问题一「连带修复」段）与 e2e 两处断言口径的改写（T-E1 同会话 V0 对照、T-E2 以存量状态为基线）；并把本轮评审的用例登记进测试策略（T-S8 为既有用例补登记，T-S9、T-T12、T-T13 为新增用例）。问题一的表格行号保留原值并补现行锚点，问题三的行号说明保留原样，实现时以函数名为准。
 
+> **v4（2026-11-27，发布 1.0.38 之后）**：豁免段从「开头 system 段」扩大为「开头到第一条对话消息之前的全部宿主内容」。根因是宿主适配偏离上游契约（上游 system prompt 在数组外，从不参与裁剪），不是上游裁剪逻辑的问题。实现只改 `inject-compartments.ts` 的一个判定（`leadingSystemRunLength` → `leadingHostContextRunLength`），切片点、被裁清单、`firstPersistedLiveId` 全部沿用同一个计数，豁免行不进被裁清单，下游归档不会误伤。位置编号不动，折叠状态 / `ctx_expand` / fork 继承不受影响。
+
 ## 需求来源
 
 用户口述（2026-11-26）：v1.0.37 发布完成后，修复 magic-context-fork-inherit 迭代中用真实数据复现出来的三个既有问题，走 spec → check → dev → cr → e2e 流程。背景见 `docs/iterations/magic-context-fork-inherit/spec.md` 末尾「实现过程中发现的既有问题」。
@@ -27,7 +29,7 @@ date: 2026-11-26
 
 复述闸门时向用户提了两个问题，未收到回答，先按推荐项成文：
 
-- **前缀范围**：只豁免 system prompt。附加上下文（当天日期、skills 列表、用户环境信息）保持现状（随前缀裁掉）。若用户选「也保留」，改动集中在同一段 helper 与同一个判据（见 Step 2 的扩展点）。
+- **前缀范围**：~~只豁免 system prompt~~ → **第一条对话消息之前的全部宿主内容**（v4，2026-11-26 用户裁定「裁剪逻辑本身不合理，正常只应裁对话内容」）：system 段 + 宿主附件行（skills 列表、日期、环境信息；投影形状 role `user` + `syntheticHead` + 带 id）。认法只用既有字段、不加新标记；包自己前插的 m0/m1 无 id，不在此列。实测这部分约占长会话请求的 5%。
 - **tag 漂移的档位**：本次做「位置命中时校验内容 + 内容认领」；「给条目稳定身份」列为后续迭代，不在本 spec 范围。**v2 追认项**：真实数据证明上面的逐条判据只覆盖 2%–4%，本次范围实际扩大为「先识别窗口整体平移，再按位置找回真身」（问题三的（b′）），仍在包内、仍不做稳定身份、仍不迁移数据。另有一项需要用户知情：**位置裁剪会从工具调用与结果中间切开**是既有缺陷，本次不修、单独立项（见已知限制）；孤立调用会被模型拒收。
 
 ## 总体方案
@@ -310,6 +312,7 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
 - T-S6 — blocking: yes — 跑完 T-S1 / T-S5 后查临时库：先断言 system 条目对应的 tag **存在**（否则「不是 compacted」恒真、空转通过），再断言它的 status 不是 `compacted`。
 - T-S7 — blocking: yes — 退化输入（裁剪点落在 system 段内）：包内单测，经导出的 `injectM0M1` 的 preparedPrefix 路径驱动；断言不裁剪、`prefixTrimStatus === "refused"`。
 - T-S8 — blocking: yes — **回归守卫：`firstPersistedLiveId`（`inject-compartments.ts:3695-3709`）在 absent-boundary 分类里必须跳过豁免的开头 system 段**（本轮登记进 spec；用例已在 fork-inherit 套件里，守住提交 3577a02f 修复的缺陷）。bootstrap 层真实端口（`test-magic-context-fork-inherit.mjs`，`test("T-S8 裁前缀后的 absent-boundary 分类跳过开头 system 段（firstPersistedLiveId 回归）", …)`）：600 条对话，父会话折叠到第 150 条对话（`foldParentThrough(db, parentId, 1, 151)`），fork 出的子会话夹具以带 id 的 system 行起头（mc1 = system、mc(i+1) = 对话 i），裁剪边界 mc52（对话 51 随裁），边界行被本轮 S1 切片裁掉，随后的 delivery 正是 absent-boundary 场景。断言：transform 成功返回（缺陷形态下 prefix trim 被 `refused`，超窗会抛 MC-H04）；请求以 system 段起头、条数 = k + 2 +（边界 mc52 之后的条数）；日志先等一个 flush 周期（包内 logger 为缓冲写，500ms 落盘）再按会话 id 过滤行，出现 `prefix trim: boundary mc52 precedes the first remaining message mc53`，且不出现 `prefix trim: boundary mc52 absent from current messages`。
+- T-S10 ─ blocking: yes ─ **裁前缀只裁对话**：system 段（k=2）之后、第一条对话之前放一条宿主附件行（role user + syntheticHead + id），裁剪边界落在对话上；S3/S4 两条分支都断言 system 段与附件行以同一引用保留在头部、边界行被裁。fork-inherit「父会话末端足够长」用例同步改为 k=2（system + 头部 attachment 随请求发出，m[0]/m[1] 顺延到第 3、4 条）。
 - T-S9 — blocking: yes — **S3/S4 的 applied 路径保留开头 system 段**（评审新增；与上轮拒发缺陷同族的护栏——「开头 system 段在 S3/S4 applied 时被保留」此前无用例，回归时全套件仍会绿）。包内单测（`test-transform.mjs`，T-S7 之后追加一例），驱动方式与 T-S7 相同（导出的 `injectM0M1` + `preparedPrefix`，不为测试新增导出）。夹具：system 段 k = 2（mc1、mc2）+ mc3（摘要边界，非 system）+ mc4，`preparedTrimBoundaryId = mc3`。①带 `capturePrefixTrimSourceOrder`（S4 source-order 分支）：断言 `prefixTrimStatus === "applied"`、两条 system 行以同一引用保留在结果头部、mc3 被裁、mc4 保留；②不带 `prefixTrimSourceOrder`（S3 findBoundaryIndex 兜底分支）：同样的形态。
 
 问题二（续写输入）
@@ -373,7 +376,7 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
 | 风险 | 说明 | 处置 |
 |---|---|---|
 | system 段回到请求里增加 token | 长会话每轮多出 system prompt 的 token；窗口已接近上限的会话可能从「刚好装下」变成超窗 | 包内的超窗判定与 fail-closed 逻辑作用在包含 system 段的数组上，自洽；e2e 记录两个最长会话的条数与字符量作为基线 |
-| 附加上下文仍然丢失 | 日期、skills 列表在长会话里不可见，与现状相同 | 已列为待用户确认的选择；若选择保留，按 Step 2 的扩展点实施并补用例 |
+| ~~附加上下文仍然丢失~~ | ~~日期、skills 列表在长会话里不可见，与现状相同~~ | 已解除（v4）：system 段之后的宿主附件行（syntheticHead + id）进入豁免段，`leadingHostContextRunLength` 一处判定，切片点与 `firstPersistedLiveId` 不变 |
 | 删除写回后注释声称的动机成立 | 若确实存在只出现在请求里的条目，续写请求会少掉它 | T-C2 逐项断言；若失败则改为写回 pre-transform 数组（`providerEntries`）而非删除，并回到审查 |
 | core 层用例的 fake runtime 构造不出来 | Step 6 依赖一个尚不存在的最小 fake runtime | 规定不得静默降级；不可行时写实现注并回审查，由 bootstrap 层模拟 + typecheck + 审查 + 真机兜底 |
 | 续写重复投影的性能 | 每次续写都从全量重新投影并重折叠（最多 3 次） | 行为正确；e2e 记录耗时基线 |
@@ -390,7 +393,7 @@ core 只改 `turn-model-step.ts` 与 `turn-loop.ts` 两处，不新增对 magic-
 
 ## 已知限制
 
-- 附加上下文（日期、skills 列表、用户环境信息）在裁前缀后仍然不随请求发送。
+- ~~附加上下文（日期、skills 列表、用户环境信息）在裁前缀后仍然不随请求发出。~~ 2026-11-27 已解除：豁免段扩大到第一条对话消息之前的全部宿主内容，见文首 v4。
 - tool tag 在重启平移后仍会得到第二个编号。
 - 存量库里已经错位的 tag 不自动修复。
 - 内容校验只覆盖有存量原文的文本 tag；原文已被裁掉或折叠时删除的 tag 无法判定（v1 的限制；（b′）的整体平移层不依赖原文是否在窗口里，但依赖窗口内至少 3 个 part 能在平移后的位置上验证内容）。
