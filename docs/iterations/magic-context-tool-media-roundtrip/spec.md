@@ -122,7 +122,7 @@ apps/zcode-cli/packages/magic-context/
   src/index.ts                              # 导出 toolResultContentOf
   src/core/hooks/magic-context/lkg-slot.ts  # 指纹对 data URL 占位（FORK 登记）
   scripts/test-host.mjs                     # T-M1 ~ T-M3、T-M6
-  scripts/test-transform.mjs                # T-M4、T-M5
+  scripts/test-transform.mjs                # T-M4、T-M5、T-M7
 apps/zcode-cli/packages/bootstrap/
   src/app/magic-context-turn-transform.ts   # isUnchanged / rebuildEntry 改用 toolResultContentOf
   scripts/test-tool-result-media-roundtrip.mjs   # 新建，T-H1 ~ T-H5
@@ -142,7 +142,7 @@ docs/
 | `magic-context/src/host/types.ts` | `ToolLikePart.state` 增 `attachments?`、`mediaLayout?`；新增类型别名 `ZCodeToolResultContent`；`toolResultToPart` 用新 helper 拆 content；新增 `toolResultContentOf`；每个改动点带 `FORK（magic-context-tool-media-roundtrip / Step N）` 注释说明为什么不能进 output |
 | `magic-context/src/index.ts` | barrel 导出 `toolResultContentOf` 与 `ZCodeToolResultContent` |
 | `magic-context/scripts/test-host.mjs` | T-M1 ~ T-M3、T-M6 |
-| `magic-context/scripts/test-transform.mjs` | T-M4、T-M5（注册在末尾循环之前） |
+| `magic-context/scripts/test-transform.mjs` | T-M4、T-M5、T-M7（注册在末尾循环之前） |
 | `magic-context/src/core/hooks/magic-context/lkg-slot.ts` | `lkgContentFields` 的 string 分支加 data URL 占位；文件内 FORK 注释块（源位置 / 上游语义 / ZCode 差异 / 改动面） |
 | `bootstrap/src/app/magic-context-turn-transform.ts` | 删 `toolOutputOf`；`isUnchanged` tool 分支与 `rebuildEntry` tool 分支改用 `toolResultContentOf`；FORK 行内注释 |
 | `bootstrap/scripts/test-tool-result-media-roundtrip.mjs` | 新建；结构仿 `test-mural-media-blocks.mjs`（dist 驱动、临时目录隔离、`MAGIC_CONTEXT_DB_DIR`） |
@@ -157,7 +157,7 @@ docs/
 - Step 5 — phase-tests-bootstrap — blocking: yes — qa: auto：新建 `test-tool-result-media-roundtrip.mjs` 与 script；覆盖 T-H1 ~ T-H5。依赖先 build `@zcode/magic-context`、`@zcode/core`、`@zcode/bootstrap`。
 - Step 6 — phase-adapters-regression — blocking: no — qa: auto：新建 `test-tool-result-media-projection.mjs`（T-A1），锁定「anthropic → image-data、openai-chat-completions → 后置 user、supportsImage=false → omitted 文本、video → 强制 textify」的既有契约。adapters 源码不改。
 - Step 7 — phase-gates — blocking: yes — qa: auto：`pnpm --filter @zcode/magic-context build` 等三包 build → `pnpm --dir apps/zcode-cli exec node ../../node_modules/turbo/bin/turbo run typecheck` → 根 `pnpm typecheck` / `pnpm lint`（warning 数不高于当前基线、0 error）→ apps/zcode-cli 包内 oxfmt（改动文件零新增不合规，`src/core/` 豁免）→ 改动文件归一 LF → 回归：magic-context `test:all`、bootstrap `test:magic-context`、`test:mural-media-blocks`、新建的 `test:tool-result-media-roundtrip`，以及 `cd apps/zcode-cli/packages/bootstrap && node --test scripts/test-magic-context-fork-inherit.mjs`（该文件没有 npm script 入口，直跑）。
-- Step 8 — phase-real-verify — blocking: no — qa: manual_user：桌面真机（记忆 #302 / #315 的隔离与启动要点）：用支持图片的模型让它 Read 一张 PNG，确认模型能描述图片内容；查 `~/.omz/cli/debug/model-io-<sessionId>.jsonl` 末条请求的 `request.body.messages`，`tool_result` 的 content 里应出现 `[data omitted from model-io: image/png, N chars]`，修复前该处只有空文本。先确认该模型配置 `properties.inputFormat.supportsImage === true`。
+- Step 8 — phase-real-verify — blocking: no — qa: manual_user：桌面真机（记忆 #302 / #315 的隔离与启动要点）：用支持图片的模型让它 Read 一张 PNG，确认模型能描述图片内容；查 `~/.omz/cli/debug/model-io-<sessionId>.jsonl` 末条请求的 `request.body.messages`，`tool_result` 的 content 里应出现 `[data omitted from model-io: image/png, N chars]`，修复前该处只有空文本。先确认该模型配置 `properties.inputFormat.supportsImage === true`。**必须一并核对 drop 衔接**（自动化用例没有覆盖真实链路：宿主侧 T-H1 ~ T-H5 全走桩 transform，T-M5 只在 core 层验证 drop 清空 attachments，两半的衔接只靠读代码确认）：把上下文压到触发 ctx_reduce、让带图的工具结果被 drop（可在 `magic-context.db` 里确认该 call 的 tag 行 drop 模式为 `skeleton_stripped`，表名以 `apply-operations.ts` 的 `updateTagDropMode` 实际写入为准），再看末条请求里对应 `tool_result` 的 content 应**只有** `[dropped §N§]` 文本、不再出现 `image/png` 的 media 条目；同时连续两轮查看同一请求，未被改写的带图条目不应每轮都重建（`magic_context.wire` 的 outcome 不应恒为 `applied`）。
 
 ## 测试策略
 
@@ -174,6 +174,7 @@ docs/
 
 - T-M4 — blocking: yes — 手工构造带 `attachments` 的 tool part 走完打标（锚定既有行为，HEAD 上即绿）：`output` 带 `§N§` 前缀，`attachments` 与 `mediaLayout` 原样保留；同一 pass 内构造第二个同文本、无附件的 tool part（fixture 的附件用 `image/*` mime，只有图片会计 token），前者的 `token_count` 大于后者；`tags` 与 `source_contents` 表里没有任何 base64 片段。（Step 4）
 - T-M5 — blocking: yes — 手工构造带 `attachments` 的 tool part 被真实 drop 路径处理后 `state.attachments` 为 `[]`、`state.output` 为 `[dropped §N§]`（还原断言在 T-M6）。LKG：fixture 用长度超过 1024 的 data URL（在合法 PNG base64 末尾填充后拼成，或直接用一张真实小截图）；`lkgContentFields` 对两张不同的图给出不同指纹、同一张给出相同指纹，且返回的 fields 数组里没有任何以 `data:image` 开头的长字符串；长度 ≤ 1024 的 `data:` 字符串（如 1×1 PNG）不占位、原样进 fields；`buildLkgPrefix` 的 `jsonPrefix` 解析后仍含完整 dataUrl。（Step 2、Step 4）
+- T-M7 — blocking: no — 锚定既有行为 / 已知限制（见风险表「媒体在 drop 之后仍可能上路」）：持久化 drop 模式为 `skeleton_real` / `edit_marker` 的 tool tag 回放时不 strip，存量已 drop 的媒体仍随条目上路。它锁定的是现状，不是期望；若后续立项修回放臂，这条用例随之改写。
 
 宿主侧（`bootstrap/scripts/test-tool-result-media-roundtrip.mjs`，吃 dist，桩 transform）：
 
@@ -191,7 +192,7 @@ adapters（`adapters/scripts/test-tool-result-media-projection.mjs`，吃 dist�
 
 真机：
 
-- T-E1 — blocking: no — qa: manual_user — Step 8 的桌面验收。
+- T-E1 — blocking: no — qa: manual_user — Step 8 的桌面验收：模型能描述 Read 的图片；model-io 里 `tool_result` 带媒体；被 drop 的带图工具结果只剩 `[dropped §N§]`、媒体不再出现（drop 模式应为 `skeleton_stripped`）；未改写的带图条目跨轮复用、outcome 不恒为 `applied`。
 
 ## 风险与回滚方案
 
@@ -200,7 +201,7 @@ adapters（`adapters/scripts/test-tool-result-media-projection.mjs`，吃 dist�
 | 改后 `isUnchanged` 仍判不等，每 pass rebuild、outcome 恒 `applied` | 承载形状里 block 保留 `dataUrl` 键位（v2 的根因修复）；T-H1 / T-H4 断言返回条目 `===` 原对象（transform 未改动时），所有等值断言用 `JSON.stringify` |
 | 打标后 output 为 `"§N§ "` 这类近空文本进模型 | 与今天文本结果被打标的形态一致；模型看到章号后紧跟图片，属预期（已核实 `isToolPartWithOutput` 不要求非空，纯图片结果会打标） |
 | `jsonPrefix`（重放输出）带完整媒体（`mediaLayout[].block.dataUrl` 是 null，base64 只在 `attachments[].url` 出现一份），撑大 LKG 槽 | 受既有 24MB/槽、64MB 总量预算约束，超限走既有失效路径；不占位，否则重放丢图。真机若观察到 LKG 频繁失效再单独立项 |
-| legacy `truncateToolPart`（`tool-drop-target.ts:163-187`）不清 attachments | 存量 legacy 被裁条目的媒体会随还原重新上路（`apply-operations.ts:101-103` 注释自陈 older skeleton modes still replay their media）；新 drop 全部按 `hasAttachments()` 传 strip，不产生新增 |
+| 媒体在 drop 之后仍可能上路（存量 tag 行回放与 legacy 转换不 strip） | 四处，全部只在**存量** tag 行上触发，本改动后的新 drop 不产生新增（首次 drop 一律按 `hasAttachments()` 传 strip 并持久化为 `skeleton_stripped`，回放走 `apply-operations.ts:575` 的 `skeleton_stripped` 臂）：① legacy `truncateToolPart`（`tool-drop-target.ts:163-187`）不清 attachments，`apply-operations.ts:583` 的 `truncated` 臂回放它；② `apply-operations.ts:578-579` 的 `skeleton_real` 臂与 `:260`（`renderConvertedToolSkeletons`）调 `skeletonReal` 时不传 strip；③ `apply-operations.ts:242` 的 legacy 转换把 `full` 换成 `skeleton_real` 时同样不 strip；④ `tool-drop-target.ts:510` 的 `drop()` 在会搁浅对话结尾时直接返回 `skeletonReal()`（首 pass 由 `apply-operations.ts:102-104` 按 `hasAttachments()` 补成 `skeleton_stripped`，不留存量）。效果：这些条目的 output 已是 `[dropped §N§]`、attachments 仍非空，反投影走 `state.output !== base` 分支还原成「占位文本 + 媒体」——图片对已被 drop 的工具重新上路并计费。成因是修复前的投影根本不带 attachments，这些 tag 行落库时 `hasAttachments()` 恒假。属安全方向（不丢数据、不产生孤立调用），本次不改；真机若观察到已 drop 工具的图片重复上路，再单独立项让回放臂按 `hasAttachments()` 补 strip |
 | fork 继承锚点区分度下降（纯图片结果 output 为 `""`） | 已知限制，本次不改；`session-inheritance` 命中率若明显下降在 `test-magic-context-fork-inherit.mjs` 里可见 |
 | 旧会话 | 冷恢复靠 artifact store + `modelContentLayout`，与本次改动无关；缺 layout 的存量行仍只能拿到占位文本 |
 | LKG 指纹占位改变存量会话的输入指纹 | 属安全失效：旧槽匹配不上，走一次完整 transform 后重建 |
