@@ -1,0 +1,19 @@
+# 20261128 magic-context-tool-media-roundtrip
+
+## 需求来源
+
+用户口述（2026-11-28）：支持图片的模型用 Read 工具读图片后仍然读不到图，只能靠发消息的附件传图。目标产出是一份可确认的 spec，然后按 spec 实现。
+
+## 轮次
+
+- 2026-11-28 定位：不是模型能力问题。Read 工具正确返回了 image 块，丢在 magic-context 宿主适配层的往返投影——包侧 `host/types.ts` 的 `toolResultToPart` 只抽 text 块，bootstrap `magic-context-turn-transform.ts` 的 `toolOutputOf` / `isUnchanged` / `rebuildEntry` 只认字符串 output，纯图片结果变成空字符串。用户附件走 `contentToParts` / `contentBlocksOf` 和 attachment 的 `mediaBlocks` 通道，是对称的，所以附件能传图。adapters、core 类型、持久化、冷恢复都完好；transform 关闭时不丢图。
+- 2026-11-28 探索（brain-storm，三份只读报告）：
+  - 上游有媒体契约：v1 是 `state.attachments: [{mime, url}]`，移植版里估 token（按像素）和 drop 时清空都现成；v2 和 Pi 宿主用 content 数组。`state.output` 只认 string 是上游有意设计，移植版 `tool-drop-target.ts:289` 靠它判定结果已到，output 变数组会劈开工具弧。
+  - 受影响的不止 Read：视频、PDF 分页、Bash 图片输出、node_repl、MCP 图片都在同一处丢。带媒体的结果现在每 pass 都被误判为「已改写」。
+  - 反投影三条路径（正常、passthrough、LKG 重放）都过 `rebuildEntry`；`isUnchanged` 是它的严格镜像，必须同提交改。LKG 的 `jsonPrefix` 是重放输出，不能占位，只有输入指纹可以。
+  - 测试落点：包侧 `scripts/test-host.mjs` 与 `test-transform.mjs`（吃 dist / 现场编译）；宿主侧仿 `test-mural-media-blocks.mjs`；adapters 的 `image-data` 投影没有测试。
+- 2026-11-28 用户拍板：方案一（往返对称）；不改 ZCode 的 core / contracts / adapters；承载用 `state.attachments` + 还原信息；LKG 输入指纹对 base64 占位；视频同批修。确认是 fork 接线漏了（s17 的 `toolResultToPart`），不是上游没考虑。
+- 2026-11-28 spec 落盘（待用户确认）：docs/iterations/magic-context-tool-media-roundtrip/spec.md。tool part 增 `state.attachments` 与 `state.mediaLayout`（与原 content 一一对应、保持原序），还原函数 `toolResultContentOf` 唯一实现在包的 host 层，bootstrap 的 `isUnchanged` / `rebuildEntry` 改调它；`src/core` 只动 `lkg-slot.ts` 的输入指纹。8 步，用例 T-M1~M5、T-H1~H4、T-A1、T-E1。已知限制不处理：fork 继承锚点区分度下降、视频与 PDF 不计 token、`jsonPrefix` 带完整媒体。
+- 2026-11-28 spec 第 1 轮审查（1 全局 judge + 包侧、bootstrap 侧两个模块审查者，互盲）：No-Go，3 个 P0、6 个 P1，全是文档问题，方案方向通过。最要紧的一条是 v1 的承载形状会自相矛盾：layout 里把 dataUrl 整个去掉再在还原时尾插，键序就变了，而 bootstrap 的 sameContent 用 JSON.stringify 逐字节比较，于是每 pass 都会被误判成「已改写」。其余：引用的 attachment 不存在时「条目省略」和「跳过该项」两处写法打架（条目省略会留下孤立工具调用）；T-M5 的 1×1 PNG fixture 短于占位阈值；还原函数签名与 bootstrap 的宽松 ToolPart 类型不兼容；媒体判据漏了 file + video/* 块；回归门禁引用了没有 npm script 的 fork-inherit 测试；T-M4 在 HEAD 上本来就绿。已直改为 v2：layout 每项保留原块（媒体块 dataUrl 键保留、值置 null，还原时同键覆写），等值断言一律用 JSON.stringify，新增 T-H5（error 与非 string output 的回退链）。第 2 轮审查在跑。
+- 2026-11-28 spec 第 2 轮审查：全局 judge No-Go、bootstrap 侧 ready、包侧 no；上轮条目全部闭合，但三人独立指出我在 v2 引入的同一个新错——layout 写成「原块对象本身 + 值置 null」，而 entry 是零拷贝借用，照做会就地改写 canonical 历史、第二个 pass 起媒体永久消失。已改 v3：layout 存原块的浅拷贝，明文禁止突变宿主数据，T-M1 加不可变断言。另修：还原函数返回的 readonly 数组在 bootstrap 调用点须经 unknown 过渡；T-M5 里依赖 host 层的断言挪到 test-host（新 T-M6）；媒体判据改为与 contracts 逐字同构；lint 门禁不写具体基线数字。教训：修「键序」这类问题时，先查数据是不是借用引用，再决定能不能就地改值。第 3 轮审查在跑。
+- 2026-11-28 spec 第 3～5 轮审查：第 3 轮三人 Go / ready / ready，无 P0、P1；之后按 P2 钉死运行时收窄口径、video 判据与 contracts 完全同构、补 tail-hygiene-walk 消费方与测试脚本清单，并修掉我自己两次脚本替换留下的问题（风险表行被改坏、行首管道符丢失）和 T-M2 的 fixture 分组写反（唯一一个 P1）。第 4 轮 Go / ready；第 5 轮终态认证全局 judge Go、包侧 ready，发生在最后一次修改之后——spec 达到 execute-ready，共 5 轮、累计修掉 4 个 P0、10 个 P1。遗留三个 P2 未改（设计目标「不改 adapters」与新增测试脚本的措辞张力；T-M2 的 [text, video] 括注与 read.ts 真实形态 [video] 不符；partHasCompletedResult 描述漏了 error 臂），都属行文精度，可在实施时顺手带。停在开工闸门：等用户确认 spec 后再动代码。
