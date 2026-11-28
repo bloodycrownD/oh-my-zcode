@@ -1,5 +1,37 @@
 import { createHash } from "node:crypto";
 
+// FORK（magic-context-tool-media-roundtrip / Step 2）—— 上游逐字移植件的偏离登记。
+//
+// 源位置：上游 `hooks/magic-context/lkg-slot.ts` 的 `lkgContentFields`，string 分支
+// （本文件 `visit` 内 `typeof child === "string"` 一句）。改动面只有这一处分支与
+// 它用到的 `lkgStringField` / `LKG_DATA_URL_PLACEHOLDER_MIN_LENGTH`；同文件的
+// `messageContentFields` / `signatureForFields` 是签名侧，刻意不动。
+//
+// 上游语义：把消息树全字段扁平化成带类型的 token 数组，字符串原样进数组（不深拷贝），
+// 供输入指纹（`lkgContentDigestFromFields`）与「可复用前缀」比较使用。
+//
+// ZCode 差异：host 投影（host/types.ts 的 `toolResultToPart`）把工具结果里的媒体块
+// 收进 `state.attachments[].url`，值是完整的 base64 data URL，一张图就是 MB 级字符串。
+// 原样进 fields 会让每条输入的 token 数组被 base64 撑大，而 per-session priors
+// （lkg-replay.ts，64MB 上限）持有的正是这个数组的产物。于是对以 `data:` 开头且
+// 长度超过 1024 的字符串，指纹里只记 `data:<sha256(全文)>`：不同图片指纹不同、
+// 同一图片指纹稳定，原文不展开。≤1024 的短 `data:` 字符串（如 1×1 PNG，约 114
+// 字符）原样保留，行为与上游一致。
+//
+// 消费面全集（改这里前先核对）：`lkgContentFields` 只用于**输入**指纹 ——
+// `lkg-replay.ts` 的 per-session priors 构造与 `lkgContentDigest`（`noteEntry` 经它）。
+// `buildLkgPrefix` 的 `jsonPrefix` 是**重放输出**的序列化，不经过本函数，仍带完整
+// 媒体（占位会让重放丢图），受既有 24MB/槽、64MB 总量预算约束。存量会话的输入指纹
+// 会因此改变：旧槽匹配不上，走一次完整 transform 后重建，属安全失效。
+const LKG_DATA_URL_PLACEHOLDER_MIN_LENGTH = 1024;
+
+function lkgStringField(value: string): string {
+    if (value.length <= LKG_DATA_URL_PLACEHOLDER_MIN_LENGTH || !value.startsWith("data:")) {
+        return value;
+    }
+    return `data:${createHash("sha256").update(value).digest("hex")}`;
+}
+
 import { BoundedSessionMap } from "../../shared/bounded-session-map.js";
 import { sessionLog } from "../../shared/logger.js";
 import type { MessageLike } from "./transform-operations.js";
@@ -231,7 +263,8 @@ export function lkgContentFields(value: unknown): LkgContentField[] | null {
     const seen = new WeakSet<object>();
     const visit = (child: unknown): void => {
         if (child === null) fields.push(LKG_SNAPSHOT_NULL);
-        else if (typeof child === "string") fields.push(LKG_SNAPSHOT_STRING, child);
+        // FORK（magic-context-tool-media-roundtrip / Step 2）：长 data URL 占位，见文件头登记。
+        else if (typeof child === "string") fields.push(LKG_SNAPSHOT_STRING, lkgStringField(child));
         else if (typeof child === "number") fields.push(LKG_SNAPSHOT_NUMBER, child);
         else if (typeof child === "boolean") fields.push(LKG_SNAPSHOT_BOOLEAN, child);
         else if (child === undefined || typeof child === "function" || typeof child === "symbol") {

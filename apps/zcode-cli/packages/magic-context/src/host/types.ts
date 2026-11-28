@@ -267,8 +267,49 @@ export interface ToolLikePart {
     title?: string;
     metadata?: Record<string, unknown>;
     time?: { start?: number; end?: number };
+    /**
+     * FORK（magic-context-tool-media-roundtrip / Step 1）：工具结果里的媒体块
+     * （Read 图片/视频/PDF、Bash 图片输出、MCP 图片）。`output` 必须保持 string
+     * （tag-part-guards / tag-messages 对它直接做 byteSize 与 §N§ 前后缀），媒体
+     * 没有位置可放，于是沿用上游 v1 的 `state.attachments` 形状承载；上游的
+     * `estimateToolAttachmentImageTokens`、tool-drop 的 `stripAttachments` 已按这个
+     * 字段工作，`src/core` 不需要新增 drop 改动。本实现不写 `filename`。
+     */
+    attachments?: ToolResultAttachment[];
+    /**
+     * FORK（magic-context-tool-media-roundtrip / Step 1）：与原始 content 的块
+     * 一一对应、保持原序的还原信息，让反投影（`toolResultContentOf`）逐字节还原
+     * 宿主条目。含媒体块或非 text 块的结果才写（纯文本结果的投影形状逐字节不变）。
+     */
+    mediaLayout?: ToolResultMediaLayoutItem[];
   };
 }
+
+/** FORK（magic-context-tool-media-roundtrip / Step 1）：上游 v1 同形 `{mime, url, filename?}`。 */
+export interface ToolResultAttachment {
+  mime: string;
+  url: string;
+  filename?: string;
+}
+
+/**
+ * FORK（magic-context-tool-media-roundtrip / Step 1）：`block` 是原块的**浅拷贝**
+ * （保键序），绝不与宿主 message.content 的块共享引用——runtime entry 是零拷贝借用，
+ * 就地改写会污染 canonical 历史。媒体项的拷贝上 `dataUrl` 的值置 null（键保留），
+ * 真实 dataUrl 只在 `attachments[i].url` 出现一份；保留键位是为了还原时同键覆写后
+ * `JSON.stringify` 与原块逐字节相同（bootstrap 的 `sameContent` 键序敏感）。
+ * 非媒体项不写 `attachment` 键。
+ */
+export interface ToolResultMediaLayoutItem {
+  attachment?: number;
+  block: Record<string, unknown>;
+}
+
+/**
+ * FORK（magic-context-tool-media-roundtrip / Step 1）：`toolResultContentOf` 的返回
+ * 类型——未被 transform 改写的条目还原为原始 content（字符串或块数组）。
+ */
+export type ZCodeToolResultContent = string | readonly ZCodeModelMessageContentBlock[];
 
 function contentBlocks(content: ZCodeModelInputMessage["content"]): readonly unknown[] {
   return typeof content === "string" ? [{ type: "text", text: content }] : content;
@@ -319,33 +360,168 @@ function toolCallsToParts(toolCalls: readonly ZCodeModelToolCall[] | undefined):
   });
 }
 
+/**
+ * 单块文本抽取（与改前 `contentText` 逐分支相同）；无文本的块返回 undefined。
+ * 正投影（`splitToolResultContent`）与反投影（`toolResultContentOf`）共用同一谓词，
+ * 这样还原侧算出的 `base` 恒等于投影时的 `state.output`。
+ */
+function blockText(block: Record<string, unknown>): string | undefined {
+  if (block.type === "text" && typeof block.text === "string") return block.text;
+  if (typeof block.content === "string") return block.content;
+  if (typeof block.text === "string") return block.text;
+  return undefined;
+}
+
+/**
+ * FORK（magic-context-tool-media-roundtrip / Step 1）：媒体判据与
+ * `contracts/src/model/media-policy.ts` 逐字同构（包内不 import contracts）。
+ * 候选门比 contracts 多一条：`dataUrl` 须为非空 string（空 dataUrl 的块 provider 侧
+ * 本就会报错，不收）。
+ */
+function isToolResultMediaBlock(block: Record<string, unknown>): boolean {
+  const mediaType = block.mediaType;
+  const dataUrl = block.dataUrl;
+  if (typeof mediaType !== "string") return false;
+  if (typeof dataUrl !== "string" || dataUrl.length === 0) return false;
+  if (block.type === "image") return true;
+  if (
+    block.type === "file" &&
+    mediaType.split(";", 1)[0]?.trim().toLowerCase() === "application/pdf"
+  ) {
+    const text = block.text;
+    if (text === undefined || (text as { length?: number } | undefined)?.length === 0) return true;
+  }
+  if (block.type === "video" || block.type === "file") {
+    if (mediaType.toLowerCase().startsWith("video/")) return true;
+  }
+  return false;
+}
+
+/**
+ * FORK（magic-context-tool-media-roundtrip / Step 1）：把工具结果的 content 拆成
+ * `{text, attachments?, mediaLayout?}`，正投影与反投影共用这一份口径。非记录块跳过、
+ * 不进 layout。只有收进媒体时才写 `attachments`；`mediaLayout` 在有媒体块、或有
+ * 非 `type:"text"` 的块（无 dataUrl 的 image、resource_link、带文本的 file 等）时才写
+ * ——没有 layout 它们只能还原成字符串，无法与原始数组逐字节等值。纯文本结果
+ * （字符串 / 全是 text 块）两者都不写，投影形状与改前逐字节相同。
+ */
+function splitToolResultContent(
+  content: ZCodeModelInputMessage["content"],
+  isError: boolean,
+): {
+  text: string;
+  attachments?: ToolResultAttachment[];
+  mediaLayout?: ToolResultMediaLayoutItem[];
+} {
+  if (typeof content === "string") return { text: content };
+  const chunks: string[] = [];
+  const attachments: ToolResultAttachment[] = [];
+  const mediaLayout: ToolResultMediaLayoutItem[] = [];
+  // 非 `type:"text"` 的块（带文本的 file 块也算）：它们的文本并进了 output，但没有
+  // layout 就只能还原成字符串，无法与原始数组逐字节等值。
+  let hasNonTextBlock = false;
+  for (const block of contentBlocks(content)) {
+    if (!isRecord(block)) continue;
+    const text = blockText(block);
+    if (text !== undefined) chunks.push(text);
+    const mediaType = block.mediaType;
+    // `isToolResultMediaBlock` 已保证候选块的 dataUrl 是非空 string（同一字符串引用，不复制）。
+    if (!isError && typeof mediaType === "string" && isToolResultMediaBlock(block)) {
+      attachments.push({ mime: mediaType, url: block.dataUrl as string });
+      mediaLayout.push({ attachment: attachments.length - 1, block: { ...block, dataUrl: null } });
+      continue;
+    }
+    if (block.type !== "text") hasNonTextBlock = true;
+    mediaLayout.push({ block: { ...block } });
+  }
+  const text = chunks.join("\n\n");
+  // error 结果整体文本化（adapters 同口径）：既不收媒体，也不为非 text 块留 layout。
+  if (isError || (attachments.length === 0 && !hasNonTextBlock)) return { text };
+  return {
+    text,
+    ...(attachments.length === 0 ? {} : { attachments }),
+    mediaLayout,
+  };
+}
+
 /** Tool result part for a `role: "tool"` entry (OpenCode's tool-result shape). */
 function toolResultToPart(message: ZCodeModelInputMessage): ToolLikePart | null {
   if (typeof message.toolCallId !== "string" || message.toolCallId.length === 0) return null;
-  const output =
-    typeof message.content === "string" ? message.content : contentText(message.content);
+  const isError = message.isError === true;
+  // FORK（magic-context-tool-media-roundtrip / Step 1）：媒体进 state.attachments 而不是
+  // output（见 ToolLikePart.state 上的说明）。error 结果照旧只投影 error 文本。
+  const {
+    text: output,
+    attachments,
+    mediaLayout,
+  } = splitToolResultContent(message.content, isError);
   const part: ToolLikePart = {
     type: "tool",
     callID: message.toolCallId,
     tool: message.toolName ?? "",
     state: {
-      status: message.isError === true ? "error" : "completed",
+      status: isError ? "error" : "completed",
       output,
-      ...(message.isError === true ? { error: output } : {}),
+      ...(isError ? { error: output } : {}),
+      ...(attachments === undefined ? {} : { attachments }),
+      ...(mediaLayout === undefined ? {} : { mediaLayout }),
     },
   };
   return part;
 }
 
-function contentText(content: ZCodeModelInputMessage["content"]): string {
-  const chunks: string[] = [];
-  for (const block of contentBlocks(content)) {
-    if (!isRecord(block)) continue;
-    if (block.type === "text" && typeof block.text === "string") chunks.push(block.text);
-    else if (typeof block.content === "string") chunks.push(block.content);
-    else if (typeof block.text === "string") chunks.push(block.text);
+/**
+ * FORK（magic-context-tool-media-roundtrip / Step 1）：工具结果 part 的反投影——
+ * `toolResultToPart` 的逆，bootstrap 的 `isUnchanged` / `rebuildEntry` 是仅有的调用方。
+ * 参数是最小结构类型（调用方手里的字段都是 unknown），运行时收窄在这里一次做完：
+ *   - 块先过 `isRecord` 与 `blockText`（与改前 `contentText` 同谓词），非记录块不进 layout；
+ *   - layout 项是否媒体只看 `typeof item.attachment === "number"`；引用的 attachment
+ *     不存在（`attachments` 不是数组、`attachments[i].url` 不是 string）时只省略该
+ *     媒体项，条目与文本照常保留——`role:"tool"` 条目绝不能整条消失，否则留下
+ *     孤立的工具调用；
+ *   - `mediaLayout` 不是数组、或它存在时 `state.output` 不是 string → 走无 layout 回退。
+ */
+export function toolResultContentOf(part: {
+  state?: { output?: unknown; error?: unknown; attachments?: unknown; mediaLayout?: unknown };
+}): ZCodeToolResultContent {
+  const state = isRecord(part.state) ? part.state : {};
+  const output = state.output;
+  const error = state.error;
+  if (!Array.isArray(state.mediaLayout) || typeof output !== "string") {
+    if (typeof output === "string") return output;
+    return typeof error === "string" ? error : "";
   }
-  return chunks.join("\n\n");
+  const attachments = Array.isArray(state.attachments) ? state.attachments : [];
+  const items: Array<{ media: boolean; block: ZCodeModelMessageContentBlock }> = [];
+  const chunks: string[] = [];
+  for (const item of state.mediaLayout as readonly unknown[]) {
+    if (!isRecord(item) || !isRecord(item.block)) continue;
+    const text = blockText(item.block);
+    if (text !== undefined) chunks.push(text);
+    if (typeof item.attachment === "number") {
+      const attachment = attachments[item.attachment];
+      if (!isRecord(attachment) || typeof attachment.url !== "string") continue;
+      items.push({
+        media: true,
+        block: {
+          ...item.block,
+          dataUrl: attachment.url,
+        } as unknown as ZCodeModelMessageContentBlock,
+      });
+      continue;
+    }
+    items.push({
+      media: false,
+      block: item.block as unknown as ZCodeModelMessageContentBlock,
+    });
+  }
+  if (output === chunks.join("\n\n")) return items.map((item) => item.block);
+  // 被 transform 改写（打上 §N§ 前缀或被 drop）：output 已并入全部文本，非媒体块不再
+  // 单独出现，只把存活的媒体项按原序接在文本之后。
+  return [
+    { type: "text", text: output },
+    ...items.filter((item) => item.media).map((item) => item.block),
+  ];
 }
 
 /**

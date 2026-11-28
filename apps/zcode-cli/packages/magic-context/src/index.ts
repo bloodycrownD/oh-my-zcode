@@ -664,6 +664,12 @@ export {
   projectRuntimeEntry,
   projectStoredMessage,
   snapshotRuntimeEntries,
+  /**
+   * FORK（magic-context-tool-media-roundtrip / Step 1）：工具结果 part 的反投影。
+   * bootstrap 的 `isUnchanged` / `rebuildEntry` 必须用它而不是自己读 `state.output`
+   * ——媒体块的还原口径（mediaLayout / attachments）只在这里有一份。
+   */
+  toolResultContentOf,
   type MessageLike,
   type MessageInfo as MagicContextMessageInfo,
   type RawMessage,
@@ -673,8 +679,11 @@ export {
   type RuntimeProjectionOptions,
   type ThinkingLikePart,
   type ToolLikePart,
+  type ToolResultAttachment,
+  type ToolResultMediaLayoutItem,
   type ZCodeModelInputMessage,
   type ZCodeModelMessageContentBlock,
+  type ZCodeToolResultContent,
   type ZCodeModelToolCall,
   type ZCodeRuntimeAttachmentEntry,
   type ZCodeRuntimeEntry,
