@@ -24,7 +24,7 @@ date: 2026-11-28
 - 未被 transform 改写的工具结果条目在反投影后与原始条目内容逐字节等值并复用原对象；无媒体的工具结果条目的投影形状逐字节不变。唯一的例外是 `isError` 的结果（照旧只保留 error 文本）。
 - 工具结果被 ctx_reduce 丢弃后媒体一并消失，不再发图、不再计费。
 - 媒体按上游既有口径计入 token 估算；base64 不进 tags / source_contents，不进 LKG 输入指纹。
-- 不改 `packages/core`、`packages/contracts`、`packages/adapters`；`magic-context/src/core`（上游逐字移植件）只动 LKG 指纹一处并登记 FORK 偏离。
+- 不改 `packages/core`、`packages/contracts`、`packages/adapters` 的生产源码（adapters 下只新增一个非阻塞的回归测试脚本）；`magic-context/src/core`（上游逐字移植件）只动 LKG 指纹一处并登记 FORK 偏离。
 
 ## 现状与根因
 
@@ -41,7 +41,7 @@ date: 2026-11-28
 
 **不可动的边界（探索得出）**：
 
-- `state.output` 必须保持 string。`tool-drop-target.ts:289` 的 `partHasCompletedResult` 以 `typeof output === "string"` 判定结果已到；`tag-part-guards.ts:32` 只给 string output 打标；`tag-messages.ts:1575/1584/1603` 对 output 直接做 `byteSize` / `stripTagPrefix` / `prependTag`。上游参照源的 `tag-part-guards.ts` 与移植版逐字相同。
+- `state.output` 必须保持 string。`tool-drop-target.ts:289` 的 `partHasCompletedResult` 以 `typeof output === "string" || state.status === "error"` 判定结果已到；`tag-part-guards.ts:32` 只给 string output 打标；`tag-messages.ts:1575/1584/1603` 对 output 直接做 `byteSize` / `stripTagPrefix` / `prependTag`。上游参照源的 `tag-part-guards.ts` 与移植版逐字相同。
 - 上游 v1 的媒体契约就是 `state.attachments: [{mime, url, filename?}]`，移植版里已有配套：`image-token-estimate.ts` 的 `estimateToolAttachmentImageTokens` 按像素估 token（`tag-messages.ts:1585`、`final-wire-token-estimate.ts` 的 tool 分支、`tail-hygiene-walk.ts:740` 三处都调用）；`tool-drop-target.ts` 的 `skeletonRealToolPart`（139）与 `editMarkerToolPart`（206）在 `stripAttachments` 时置 `state.attachments = []`，`apply-operations.ts:94/104/414` 在 `hasAttachments()` 为真时传入 strip。
 - tool tag 从不写 `source_contents`（`tag-messages.ts` 只在 1501、1649 行写 text 与 file）。
 - `isUnchanged` 是 `rebuildEntry` 的严格镜像（doc 注释 727-738），两处必须同一提交改，否则每 pass 误判「已改写」，outcome 恒为 `applied`。
@@ -166,7 +166,7 @@ docs/
 包侧（`magic-context/scripts/test-host.mjs`，吃 dist）。所有「等值」断言用 `JSON.stringify` 逐字节比较，`deepStrictEqual` 对键序不敏感、会放过 v1 的键序缺陷：
 
 - T-M1 — blocking: yes — `projectRuntimeEntry` 输入 `role:"tool"`、content 为单个 image 块（键序 `type, mediaType, dataUrl, source`）：`parts[0].state.output === ""`，`state.attachments` 为 `[{mime, url: dataUrl}]`，`state.mediaLayout` 为 `[{attachment: 0, block}]` 且 `block.dataUrl === null`、`block` 的键序与原块相同（`Object.keys` 相等、`block !== 原块`）；投影后原 entry 的 `JSON.stringify` 不变；`toolResultContentOf` 的 `JSON.stringify` 结果与原 content 相同。（Step 1）
-- T-M2 — blocking: yes — content 为 `[text, file(application/pdf, dataUrl), image]`：output 等于 text 块，attachments 顺序为 `[pdf, image]`，layout 三项与原序一致；`toolResultContentOf` 的 `JSON.stringify` 结果与原 content 相同。另覆盖两组形态，每组都断言 attachments 的内容与 `toolResultContentOf` 的逐字节等值。（1）**收进 attachments**：`[image, text, text]`（node_repl 形态）、`[text, video]`（Read 视频，`read.ts:120-129`）、`file` + `video/*` 块、`mediaType: "Application/PDF; charset=binary"` 的 file 块（大小写与分号不敏感，命中 pdf 臂）。（2）**留在 layout、不进 attachments**：无 `dataUrl` 的 image 块、`dataUrl` 为空串的 file 块、`mediaType` 为 `audio/mp4` 的 video 块、带非空 `text` 的 pdf file 块。（Step 1）
+- T-M2 — blocking: yes — content 为 `[text, file(application/pdf, dataUrl), image]`：output 等于 text 块，attachments 顺序为 `[pdf, image]`，layout 三项与原序一致；`toolResultContentOf` 的 `JSON.stringify` 结果与原 content 相同。另覆盖两组形态，每组都断言 attachments 的内容与 `toolResultContentOf` 的逐字节等值。（1）**收进 attachments**：`[image, text, text]`（node_repl 形态）、`[video]`（Read 视频，`read.ts:120-133`，单个 video 块）、`file` + `video/*` 块、`mediaType: "Application/PDF; charset=binary"` 的 file 块（大小写与分号不敏感，命中 pdf 臂）。（2）**留在 layout、不进 attachments**：无 `dataUrl` 的 image 块、`dataUrl` 为空串的 file 块、`mediaType` 为 `audio/mp4` 的 video 块、带非空 `text` 的 pdf file 块。（Step 1）
 - T-M6 — blocking: yes — 手工构造带 `mediaLayout` 与 `attachments` 的 part，把 `state.output` 换成 `[dropped §N§]`、`attachments` 置 `[]`：`toolResultContentOf` 结果为 `[{type:"text", text:"[dropped §N§]"}]`，不含任何媒体块。（Step 1、Step 4）
 - T-M3 — blocking: yes — content 为 string、以及 `[text, text]`：part 上没有 `attachments` / `mediaLayout` 键，`JSON.stringify(part)` 与改前快照相同；`toolResultContentOf` 返回字符串 output。（Step 1）
 
