@@ -1009,8 +1009,14 @@ const cavemanCleanupModule = await load("hooks/magic-context/caveman-cleanup.js"
 const executeFlushModule = await load("hooks/magic-context/execute-flush.js");
 const cloneStorageModule = await load("features/magic-context/storage-clone.js");
 
-const { getTagById, insertTag, markWhitespaceAssistantTagInert, stampTagMessageRole, updateCavemanDepth, updateTagStatus } =
-  storageTags;
+const {
+  getTagById,
+  insertTag,
+  markWhitespaceAssistantTagInert,
+  stampTagMessageRole,
+  updateCavemanDepth,
+  updateTagStatus,
+} = storageTags;
 const { getActiveTagsBySession, getPendingOps, queuePendingOp, saveSourceContent } = storage;
 
 /** OpenCode 形状的单条消息：`info.role` 是 strip/heuristic/caveman 的判据面。 */
@@ -1625,7 +1631,14 @@ test("b5b T-T1 漂移保号：平移后三条消息沿用 pass 1 的 tag 号", (
   const sessionId = "ses_tt1_drift_keep_number";
   const tagger = taggerModule.createTagger();
   const mkPass = (ids) =>
-    ids.map((id, i) => b5bMessage(sessionId, id, "user", ...["alpha-text", "beta-text", "gamma-text"].slice(i, i + 1)));
+    ids.map((id, i) =>
+      b5bMessage(
+        sessionId,
+        id,
+        "user",
+        ...["alpha-text", "beta-text", "gamma-text"].slice(i, i + 1),
+      ),
+    );
 
   const pass1 = mkPass(["mc1", "mc2", "mc3"]);
   tagMessagesB5.tagMessages(sessionId, pass1, tagger, b4Db);
@@ -1695,9 +1708,7 @@ test("b5b T-T3 漂移墓碑化：位置命中的 part 换新号，S(T) 与 statu
   if (t1?.status !== "dropped") {
     throw new Error(`tombstoning changed status: ${JSON.stringify(t1?.status)}`);
   }
-  const row1 = storageTags
-    .listTagRowsBySession(b4Db, sessionId)
-    .find((row) => row.tagNumber === 1);
+  const row1 = storageTags.listTagRowsBySession(b4Db, sessionId).find((row) => row.tagNumber === 1);
   if (row1?.messageId !== "__mc_drifted__:1" || row1?.status !== "dropped") {
     throw new Error(`listTagRowsBySession disagrees: ${JSON.stringify(row1)}`);
   }
@@ -1721,7 +1732,9 @@ test("b5b T-T4a 退化为现状（编辑重发桶）：原文不在入站时沿�
     throw new Error(`source was not overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`);
   }
   if (getTagById(b4Db, sessionId, 1)?.messageId !== "mc2:p0") {
-    throw new Error(`edit-resend path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`);
+    throw new Error(
+      `edit-resend path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`,
+    );
   }
 });
 
@@ -1769,7 +1782,9 @@ test("b5b T-T4b 样板多候选：不认领、不漂移，确定性退化", () =
   const run1Wire = run1.map((m) => m.parts[0].text);
   const run2Wire = run2.map((m) => m.parts[0].text);
   if (JSON.stringify(run2Wire) !== JSON.stringify(run1Wire)) {
-    throw new Error(`result is not deterministic: ${JSON.stringify(run2Wire)} !== ${JSON.stringify(run1Wire)}`);
+    throw new Error(
+      `result is not deterministic: ${JSON.stringify(run2Wire)} !== ${JSON.stringify(run1Wire)}`,
+    );
   }
 });
 
@@ -1788,7 +1803,9 @@ test("b5b T-T6 无存量原文：无法判定，行为与修复前一致", () =>
     throw new Error(`first write did not land: ${JSON.stringify(b5bSource(sessionId, 1))}`);
   }
   if (getTagById(b4Db, sessionId, 1)?.messageId !== "mc2:p0") {
-    throw new Error(`no-source path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`);
+    throw new Error(
+      `no-source path must not tombstone: ${getTagById(b4Db, sessionId, 1)?.messageId}`,
+    );
   }
 });
 
@@ -1801,9 +1818,24 @@ test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）",
   // 候选集 {0}、score(0)=0 → 同样 (a) 类。这正是「不能照搬 /^mc(\d+)/」口径
   // 的守护点。
   const scenarios = [
-    { id: "dropped", label: "status=dropped", status: "dropped", mutate: (s) => updateTagStatus(b4Db, s, 2, "dropped") },
-    { id: "compacted", label: "status=compacted", status: "compacted", mutate: (s) => updateTagStatus(b4Db, s, 2, "compacted") },
-    { id: "role_system", label: "role=system", status: "active", mutate: (s) => stampTagMessageRole(b4Db, s, 2, "system") },
+    {
+      id: "dropped",
+      label: "status=dropped",
+      status: "dropped",
+      mutate: (s) => updateTagStatus(b4Db, s, 2, "dropped"),
+    },
+    {
+      id: "compacted",
+      label: "status=compacted",
+      status: "compacted",
+      mutate: (s) => updateTagStatus(b4Db, s, 2, "compacted"),
+    },
+    {
+      id: "role_system",
+      label: "role=system",
+      status: "active",
+      mutate: (s) => stampTagMessageRole(b4Db, s, 2, "system"),
+    },
     // insertTag 不写 message_role → NULL（v10000 升级前的存量行同形）。
     { id: "role_null", label: "role=NULL", status: "active", mutate: () => {} },
     { id: "type_file", label: "type=file", status: "active", file: true, mutate: () => {} },
@@ -1828,7 +1860,9 @@ test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）",
       throw new Error(`[${sc.label}] X part did not reuse T: ${messages[0].parts[0].text}`);
     }
     if (b5bSource(sessionId, 1) !== "claim-candidate-X") {
-      throw new Error(`[${sc.label}] T source was not overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`);
+      throw new Error(
+        `[${sc.label}] T source was not overwritten: ${JSON.stringify(b5bSource(sessionId, 1))}`,
+      );
     }
     const r = getTagById(b4Db, sessionId, 2);
     if (r?.messageId !== candidateId) {
@@ -1838,7 +1872,9 @@ test("b5b T-T7 唯一候选不满足认领条件时不认领（逐项过滤）",
       throw new Error(`[${sc.label}] candidate status changed: ${JSON.stringify(r?.status)}`);
     }
     if (b5bSource(sessionId, 2) !== "claim-candidate-X") {
-      throw new Error(`[${sc.label}] candidate source changed: ${JSON.stringify(b5bSource(sessionId, 2))}`);
+      throw new Error(
+        `[${sc.label}] candidate source changed: ${JSON.stringify(b5bSource(sessionId, 2))}`,
+      );
     }
   }
 });
@@ -1889,7 +1925,9 @@ test("b5b T-T8 同消息双文本片段：漂移屏蔽 scoped fallback，兄弟 
     throw new Error(`sibling p1 lost its tag: ${pass2[0].parts[1].text}`);
   }
   if (b5bSource(sessionId, 2) !== "sibling-X1") {
-    throw new Error(`sibling p1 source was overwritten: ${JSON.stringify(b5bSource(sessionId, 2))}`);
+    throw new Error(
+      `sibling p1 source was overwritten: ${JSON.stringify(b5bSource(sessionId, 2))}`,
+    );
   }
   // P 未被覆盖；P 的主人（tagT=3）被 mc5:p0 经含墓碑键的围栏认领回去。
   if (b5bSource(sessionId, 3) !== "sibling-P") {
@@ -1939,7 +1977,9 @@ test("b5b T-T9 入站 system 行：非 system 旧 tag 墓碑化拿新号；syste
   const sysTag = b5bWireTag(messages[0].parts[0].text);
   if (sysTag === 1) throw new Error(`system row reused the foreign tag: ${sysTag}`);
   if (getTagById(b4Db, sessionId, sysTag)?.messageRole !== "system") {
-    throw new Error(`new system tag was not stamped: ${JSON.stringify(getTagById(b4Db, sessionId, sysTag)?.messageRole)}`);
+    throw new Error(
+      `new system tag was not stamped: ${JSON.stringify(getTagById(b4Db, sessionId, sysTag)?.messageRole)}`,
+    );
   }
 
   // 对照组：T 的 message_role = 'system' → 沿用 T 并覆盖原文（system 槽位换内容
@@ -1955,7 +1995,9 @@ test("b5b T-T9 入站 system 行：非 system 旧 tag 墓碑化拿新号；syste
     throw new Error(`control did not reuse the system tag: ${ctlMessages[0].parts[0].text}`);
   }
   if (b5bSource(ctlSession, 1) !== "syskeep-new-prompt") {
-    throw new Error(`control source was not overwritten: ${JSON.stringify(b5bSource(ctlSession, 1))}`);
+    throw new Error(
+      `control source was not overwritten: ${JSON.stringify(b5bSource(ctlSession, 1))}`,
+    );
   }
   if (getTagById(b4Db, ctlSession, 1)?.messageId !== "mc1:p0") {
     throw new Error(`control must not tombstone: ${getTagById(b4Db, ctlSession, 1)?.messageId}`);
@@ -2067,10 +2109,14 @@ test("b5b T-T11 整体平移层：d* = −1 时按位置找回真身，样板与
   }
   // 平移相符不改 status：dropped 的主人平移后仍是 dropped。
   if (getTagById(b4Db, sessionId, 4)?.status !== "dropped") {
-    throw new Error(`tag 4 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 4)?.status)}`);
+    throw new Error(
+      `tag 4 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 4)?.status)}`,
+    );
   }
   if (getTagById(b4Db, sessionId, 7)?.status !== "dropped") {
-    throw new Error(`tag 7 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 7)?.status)}`);
+    throw new Error(
+      `tag 7 status changed: ${JSON.stringify(getTagById(b4Db, sessionId, 7)?.status)}`,
+    );
   }
 
   const sysTag = b5bWireTag(pass1[0].parts[0].text);
@@ -2111,8 +2157,7 @@ test("b5b T-T11 整体平移层：d* = −1 时按位置找回真身，样板与
     throw new Error(`NEW source row wrong: ${JSON.stringify(newRow)}`);
   }
   const strayRows = sourceRows.filter(
-    (r) =>
-      ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, sysTag, newTag].includes(r.tag_id),
+    (r) => ![1, 2, 3, 4, 5, 6, 7, 8, 9, 10, sysTag, newTag].includes(r.tag_id),
   );
   if (strayRows.length > 0) {
     throw new Error(`unexpected extra source rows: ${JSON.stringify(strayRows)}`);
@@ -2502,7 +2547,12 @@ test("T-S10 裁前缀只裁对话：开头 system 段与宿主附加上下文行
     {
       // 宿主附件投影的形状（host/types.ts）：role "user" + syntheticHead + 带 id。
       info: { id: "mc3", role: "user", syntheticHead: true, sessionID: sessionId },
-      parts: [{ type: "text", text: "The following skills are available for use with the Skill tool: ..." }],
+      parts: [
+        {
+          type: "text",
+          text: "The following skills are available for use with the Skill tool: ...",
+        },
+      ],
     },
     {
       info: { id: "mc4", role: "user", sessionID: sessionId },
@@ -2555,7 +2605,13 @@ test("T-S10 裁前缀只裁对话：开头 system 段与宿主附加上下文行
 
   // ① S4 分支（source-order）。
   const s4Messages = makeMessages();
-  const s4Refs = { mc1: s4Messages[0], mc2: s4Messages[1], mc3: s4Messages[2], mc4: s4Messages[3], mc5: s4Messages[4] };
+  const s4Refs = {
+    mc1: s4Messages[0],
+    mc2: s4Messages[1],
+    mc3: s4Messages[2],
+    mc4: s4Messages[3],
+    mc5: s4Messages[4],
+  };
   const s4 = injectCompartmentsModule.injectM0M1({
     ...baseOptions,
     messages: s4Messages,
@@ -2569,7 +2625,13 @@ test("T-S10 裁前缀只裁对话：开头 system 段与宿主附加上下文行
 
   // ② S3 分支（id-lookup 兜底）。
   const s3Messages = makeMessages();
-  const s3Refs = { mc1: s3Messages[0], mc2: s3Messages[1], mc3: s3Messages[2], mc4: s3Messages[3], mc5: s3Messages[4] };
+  const s3Refs = {
+    mc1: s3Messages[0],
+    mc2: s3Messages[1],
+    mc3: s3Messages[2],
+    mc4: s3Messages[3],
+    mc5: s3Messages[4],
+  };
   const s3 = injectCompartmentsModule.injectM0M1({
     ...baseOptions,
     messages: s3Messages,
@@ -2770,6 +2832,338 @@ test("b6 drop keeps source pristine and replay never emits an empty part", () =>
   }
   if (storageTags.getTagById(b4Db, replaySession, replayTag)?.status !== "active") {
     throw new Error("replay must not drop tags");
+  }
+});
+
+// --- T-M4 / T-M5: magic-context-tool-media-roundtrip -------------------------
+//
+// 工具结果的媒体块正投影到 tool part 的 `state.attachments`（base64 在
+// `attachments[].url`）与 `state.mediaLayout`（原块浅拷贝，dataUrl 置 null）。
+// T-M4 锚定既有打标/计费行为；T-M5 钉 drop 清空与 LKG 输入指纹占位。
+// 依据：docs/iterations/magic-context-tool-media-roundtrip/spec.md「测试用例」。
+
+const TM_PNG_BASE64 =
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const TM_PNG_URL = `data:image/png;base64,${TM_PNG_BASE64}`;
+// 超过 LKG 占位阈值（1024）的 data URL：合法 PNG base64 末尾填充而成。
+// `estimateImageTokensFromDataUrl` 只解码前 512 字符读 IHDR，尾部填充不影响估 token。
+const tmLongDataUrl = (fill) => `data:image/png;base64,${TM_PNG_BASE64}${fill.repeat(1200)}`;
+
+function tmImageLayout() {
+  return [
+    {
+      attachment: 0,
+      block: {
+        type: "image",
+        mediaType: "image/png",
+        dataUrl: null,
+        source: { id: "read-image", placeholder: "Read image" },
+      },
+    },
+  ];
+}
+
+/** ZCode 形态的一轮：assistant 上的调用 + user 消息上的结果 part（各带 `attachments`）。 */
+function tmToolMessages(sessionId, results) {
+  const assistant = {
+    info: { id: "msg_tm_asst", role: "assistant", sessionID: sessionId, time: { created: 1000 } },
+    parts: results
+      .map((result, index) =>
+        result === null
+          ? null
+          : {
+              type: "tool",
+              callID: `call_tm_${index}`,
+              tool: "Read",
+              state: { status: "running", input: { filePath: `shot-${index}.png` } },
+            },
+      )
+      .filter(Boolean),
+  };
+  const user = {
+    info: { id: "msg_tm_tool", role: "user", sessionID: sessionId, time: { created: 2000 } },
+    parts: results.map((result, index) => ({
+      type: "tool",
+      callID: `call_tm_${index}`,
+      tool: "Read",
+      state: {
+        status: "completed",
+        output: result.text,
+        ...(result.withImage
+          ? {
+              attachments: [{ mime: "image/png", url: TM_PNG_URL }],
+              mediaLayout: tmImageLayout(),
+            }
+          : {}),
+      },
+    })),
+  };
+  return [assistant, user];
+}
+
+/** 单条承载工具结果（带一张图）的 user 消息。 */
+function tmResultMessage(sessionId, url) {
+  return {
+    info: { id: "msg_tm_tool", role: "user", sessionID: sessionId, time: { created: 2000 } },
+    parts: [
+      {
+        type: "tool",
+        callID: "call_tm_0",
+        tool: "Read",
+        state: {
+          status: "completed",
+          output: "shot",
+          attachments: [{ mime: "image/png", url }],
+          mediaLayout: tmImageLayout(),
+        },
+      },
+    ],
+  };
+}
+
+function tmTagNumber(wireText) {
+  const match = /^§(\d+)§ /u.exec(wireText);
+  if (!match) throw new Error(`no tag prefix on the wire: ${JSON.stringify(wireText)}`);
+  return Number(match[1]);
+}
+
+test("T-M4 打标保留 attachments / mediaLayout，图片计 token，base64 不进 tags 与 source_contents", () => {
+  const sessionId = "ses_tm4_tag";
+  const messages = tmToolMessages(sessionId, [{ text: "shot", withImage: true }, { text: "shot" }]);
+  const before = messages[1].parts.map((part) => ({
+    attachments: JSON.stringify(part.state.attachments),
+    mediaLayout: JSON.stringify(part.state.mediaLayout),
+  }));
+  tagMessagesModule.tagMessages(sessionId, messages, taggerModule.createTagger(), b4Db);
+  const withImageTag = tmTagNumber(messages[1].parts[0].state.output);
+  const plainTag = tmTagNumber(messages[1].parts[1].state.output);
+  const [withImage, plain] = messages[1].parts;
+
+  if (withImage.state.output !== `${SECTION}${withImageTag}${SECTION} shot`) {
+    throw new Error(`image result was not tagged: ${JSON.stringify(withImage.state.output)}`);
+  }
+  if (JSON.stringify(withImage.state.attachments) !== before[0].attachments) {
+    throw new Error("tagging rewrote attachments");
+  }
+  if (JSON.stringify(withImage.state.mediaLayout) !== before[0].mediaLayout) {
+    throw new Error("tagging rewrote mediaLayout");
+  }
+  if ("attachments" in plain.state || "mediaLayout" in plain.state) {
+    throw new Error("the no-attachment control grew media keys");
+  }
+
+  const withTokens = getTagById(b4Db, sessionId, withImageTag)?.tokenCount;
+  const plainTokens = getTagById(b4Db, sessionId, plainTag)?.tokenCount;
+  if (typeof withTokens !== "number" || typeof plainTokens !== "number") {
+    throw new Error(`token_count missing: with=${withTokens} plain=${plainTokens}`);
+  }
+  if (!(withTokens > plainTokens)) {
+    throw new Error(`image result must cost more: with=${withTokens} plain=${plainTokens}`);
+  }
+
+  const tagsRows = b4Db.prepare("SELECT * FROM tags WHERE session_id = ?").all(sessionId);
+  const sourceRows = b4Db
+    .prepare("SELECT * FROM source_contents WHERE session_id = ?")
+    .all(sessionId);
+  if (tagsRows.length < 2) throw new Error(`tags rows=${tagsRows.length}`);
+  for (const [table, rows] of [
+    ["tags", tagsRows],
+    ["source_contents", sourceRows],
+  ]) {
+    const dumped = JSON.stringify(rows);
+    if (dumped.includes(TM_PNG_BASE64.slice(0, 64))) {
+      throw new Error(`${table} leaked the image base64`);
+    }
+    if (/[A-Za-z0-9+/]{200,}/u.test(dumped)) {
+      throw new Error(`${table} holds a long base64 run`);
+    }
+  }
+});
+
+test("T-M5 drop 清空 attachments；LKG 输入指纹对长 data URL 占位，jsonPrefix 保留完整媒体", () => {
+  // ① 真实 drop 路径：带附件的 tool part 走 skeletonStripped。
+  {
+    const sessionId = "ses_tm5_drop";
+    const messages = tmToolMessages(sessionId, [{ text: "shot", withImage: true }]);
+    const part = messages[1].parts[0];
+    const originalOutput = part.state.output;
+    const originalAttachments = JSON.stringify(part.state.attachments);
+    const compositeKey = `msg_tm_tool\u0000call_tm_0`;
+    const index = new Map([
+      [
+        compositeKey,
+        {
+          occurrences: [{ message: messages[1], part, kind: "result" }],
+          hasResult: true,
+        },
+      ],
+    ]);
+    const batch = new toolDropTarget.ToolMutationBatch(messages);
+    const target = toolDropTarget.createToolDropTarget(compositeKey, [], index, batch, 7);
+    const outcome = applyOps.applyNewToolDrop(target, { inWindow: true });
+    if (outcome.mode !== "skeleton_stripped" || outcome.result !== "truncated") {
+      throw new Error(`drop outcome=${JSON.stringify(outcome)}`);
+    }
+    const served = messages[1].parts[0];
+    if (served.state.output !== dropped(7)) {
+      throw new Error(`dropped output=${JSON.stringify(served.state.output)}`);
+    }
+    if (JSON.stringify(served.state.attachments) !== "[]") {
+      throw new Error(`attachments survived the drop: ${JSON.stringify(served.state.attachments)}`);
+    }
+    // 宿主原 part 不被 drop 改写（clamp 作用于 clone）。
+    if (
+      part.state.output !== originalOutput ||
+      JSON.stringify(part.state.attachments) !== originalAttachments
+    ) {
+      throw new Error("drop mutated the host part in place");
+    }
+  }
+
+  // ② LKG 输入指纹。
+  const urlA = tmLongDataUrl("A");
+  const urlB = tmLongDataUrl("B");
+  if (!(urlA.length > 1024)) throw new Error("fixture must exceed the 1024 placeholder threshold");
+  const digestOf = (url) => {
+    const fields = lkgSlot.lkgContentFields(tmResultMessage("ses_tm5_digest", url));
+    if (!fields) throw new Error("lkgContentFields returned null");
+    return { fields, digest: lkgSlot.lkgContentDigestFromFields(fields) };
+  };
+  const a1 = digestOf(urlA);
+  const a2 = digestOf(urlA);
+  const b = digestOf(urlB);
+  if (a1.digest !== a2.digest) throw new Error("same image produced different digests");
+  if (a1.digest === b.digest) throw new Error("two different images produced the same digest");
+
+  const leaked = a1.fields.filter(
+    (field) => typeof field === "string" && field.startsWith("data:image") && field.length > 1024,
+  );
+  if (leaked.length > 0) {
+    throw new Error(
+      `fingerprint fields carry ${leaked.length} raw data URL(s), longest ${leaked.reduce((m, s) => Math.max(m, s.length), 0)} chars`,
+    );
+  }
+
+  // ≤1024 的 `data:` 字符串不占位、原样进 fields。
+  const shortFields = lkgSlot.lkgContentFields(TM_PNG_URL);
+  if (!shortFields.includes(TM_PNG_URL)) {
+    throw new Error("a short data: string must stay verbatim in the fields");
+  }
+
+  // jsonPrefix 是重放输出，必须仍带完整 dataUrl。
+  const lkgSession = "ses_tm5_lkg_input";
+  const input = [
+    lkgMessage("msg_tm5_1", "user", "look at this", 1000),
+    lkgMessage("msg_tm5_2", "assistant", "reading", 2000),
+    tmResultMessage(lkgSession, urlA),
+  ];
+  const built = lkgReplay.buildLkgPrefix(input, lkgPass(input));
+  if (!built) throw new Error("buildLkgPrefix refused a well-formed pass");
+  const replayed = JSON.parse(built.jsonPrefix);
+  const replayedUrl = replayed[2]?.parts?.[0]?.state?.attachments?.[0]?.url;
+  if (replayedUrl !== urlA) {
+    throw new Error(
+      `jsonPrefix lost the media: ${typeof replayedUrl === "string" ? `${replayedUrl.length} chars` : JSON.stringify(replayedUrl)}`,
+    );
+  }
+});
+
+test("T-M7 锚定已知限制：持久化 skeleton_real / edit_marker 回放不 strip，存量被 drop 的媒体仍随条目上路", () => {
+  // 锚定既有行为 / 已知限制（MF-1），不是期望行为。修复前已被 ctx_reduce 丢弃并持久化为
+  // drop_mode = skeleton_real / edit_marker 的带媒体工具结果，每 pass 经
+  // apply-operations.ts 的回放分支调 target.skeletonReal() / target.editMarker()（不带
+  // strip；legacy 转换走 renderConvertedToolSkeletons 同理），attachments 原样保留，
+  // 反投影还原成 [{text: "[dropped §N§]"}, image]。修复后新产生的 drop 在
+  // hasAttachments() 为真时走 stripped 变体（T-M5 ① 钉住），不会复现。
+  const sessionId = "ses_tm7_replay";
+  const messages = tmToolMessages(sessionId, [{ text: "shot", withImage: true }]);
+  const part = messages[1].parts[0];
+  const originalAttachments = JSON.stringify(part.state.attachments);
+  const compositeKey = `msg_tm_tool\u0000call_tm_0`;
+  const index = new Map([
+    [
+      compositeKey,
+      { occurrences: [{ message: messages[1], part, kind: "result" }], hasResult: true },
+    ],
+  ]);
+  const tagNumber = 7;
+  const makeTarget = () =>
+    toolDropTarget.createToolDropTarget(
+      compositeKey,
+      [],
+      index,
+      new toolDropTarget.ToolMutationBatch(messages),
+      tagNumber,
+    );
+
+  // ① skeleton_real 回放（apply-operations.ts 的 `tag.dropMode === "skeleton_real"` 分支）。
+  {
+    const target = makeTarget();
+    if (target.skeletonReal() !== "truncated") throw new Error("skeletonReal did not truncate");
+    const served = messages[1].parts[0];
+    if (served.state.output !== dropped(tagNumber)) {
+      throw new Error(`skeleton replay output=${JSON.stringify(served.state.output)}`);
+    }
+    if (JSON.stringify(served.state.attachments) !== originalAttachments) {
+      throw new Error(
+        "skeletonReal() stripped attachments: the known limitation changed, update this test and the spec risk table",
+      );
+    }
+  }
+
+  // ② legacy 转换当 pass 的渲染（renderConvertedToolSkeletons 的 skeleton_real 臂）。
+  {
+    const target = makeTarget();
+    const mutated = applyOps.renderConvertedToolSkeletons(
+      new Map([[tagNumber, target]]),
+      new Map([[tagNumber, "skeleton_real"]]),
+    );
+    if (!mutated) throw new Error("renderConvertedToolSkeletons did not mutate");
+    const served = messages[1].parts[0];
+    if (
+      JSON.stringify({ output: served.state.output, attachments: served.state.attachments }) !==
+      JSON.stringify({ output: dropped(tagNumber), attachments: JSON.parse(originalAttachments) })
+    ) {
+      throw new Error("legacy conversion render diverged from the skeleton_real replay");
+    }
+  }
+
+  // ③ edit_marker 回放（`tag.dropMode === "edit_marker"` 分支）同理。
+  {
+    const target = makeTarget();
+    if (target.editMarker() !== "truncated") throw new Error("editMarker did not truncate");
+    const served = messages[1].parts[0];
+    if (served.state.output !== dropped(tagNumber)) {
+      throw new Error(`edit-marker replay output=${JSON.stringify(served.state.output)}`);
+    }
+    if (JSON.stringify(served.state.attachments) !== originalAttachments) {
+      throw new Error(
+        "editMarker() stripped attachments: the known limitation changed, update this test and the spec risk table",
+      );
+    }
+  }
+
+  // ③ 对照：stripped 变体确实清空 attachments（修复后新 drop 走的那条）。
+  {
+    const target = makeTarget();
+    if (target.hasAttachments() !== true) throw new Error("hasAttachments() must see the media");
+    if (target.skeletonStripped() !== "truncated")
+      throw new Error("skeletonStripped did not truncate");
+    const served = messages[1].parts[0];
+    if (
+      served.state.output !== dropped(tagNumber) ||
+      JSON.stringify(served.state.attachments) !== "[]"
+    ) {
+      throw new Error("skeletonStripped() must empty attachments");
+    }
+  }
+
+  // 宿主原 part 不被任何回放改写。
+  if (
+    JSON.stringify(part.state.attachments) !== originalAttachments ||
+    part.state.output !== "shot"
+  ) {
+    throw new Error("replay mutated the host part in place");
   }
 });
 

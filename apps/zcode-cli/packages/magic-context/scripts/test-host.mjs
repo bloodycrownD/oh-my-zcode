@@ -57,6 +57,7 @@ const {
   projectRuntimeEntries,
   projectStoredMessage,
   snapshotRuntimeEntries,
+  toolResultContentOf,
 } = await import(host("types.js"));
 const { createRawMessageProvider } = await import(host("raw-message-provider.js"));
 const {
@@ -974,6 +975,222 @@ await it("smoke: the real store was not modified", (t) => {
   }
   assert.equal(existsSync(SESSION_DB), true);
   assert.equal(dirname(SESSION_DB), join(homedir(), ".omz", "cli", "db"));
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// magic-context-tool-media-roundtrip（T-M1 / T-M2 / T-M3 / T-M6）
+//
+// 工具结果里的媒体块在往返投影中对称存活：正投影把媒体收进
+// `state.attachments`、在 `state.mediaLayout` 里留原块的浅拷贝，反投影
+// `toolResultContentOf` 还原出逐字节相同的 content。等值断言一律比
+// `JSON.stringify`：`deepStrictEqual` 对键序不敏感，会放过键序缺陷。
+// 依据：docs/iterations/magic-context-tool-media-roundtrip/spec.md「测试用例」。
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PNG_1X1 =
+  "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+const text = (value) => ({ type: "text", text: value });
+const image = (dataUrl = PNG_1X1) => ({
+  type: "image",
+  mediaType: "image/png",
+  dataUrl,
+  source: { id: "read-image", placeholder: "Read image" },
+});
+const file = (mediaType, extra = {}) => ({ type: "file", mediaType, dataUrl: PNG_1X1, ...extra });
+const video = (mediaType = "video/mp4") => ({ type: "video", mediaType, dataUrl: PNG_1X1 });
+const json = (value) => JSON.stringify(value);
+const layoutOrder = (part) => part.state.mediaLayout.map((item) => item.attachment);
+/**
+ * layout 的期望形状：与原 content 同序、同键序的浅拷贝，媒体项（order 里给了下标的）
+ * 只在拷贝上把 `dataUrl` 的值置 null（键保留）——spec「承载形状」。真实 dataUrl 只在
+ * `attachments[].url` 出现一份，由 `toolResultContentOf` 的往返断言覆盖。
+ */
+const expectedLayout = (content, order) =>
+  content.map((block, index) => (order[index] === undefined ? block : { ...block, dataUrl: null }));
+
+/** 投影单条 `role:"tool"` 条目，返回其唯一的 tool part。 */
+function projectToolPart(content, message = {}) {
+  const [projected] = projectRuntimeEntries([
+    { message: { role: "tool", content, toolCallId: "call_m", toolName: "Read", ...message } },
+  ]);
+  assert.equal(projected.parts.length, 1);
+  return projected.parts[0];
+}
+
+/** `expected === undefined` 表示 state 上不得出现 attachments 键。 */
+function assertAttachments(state, expected, label) {
+  if (expected === undefined) {
+    assert.equal("attachments" in state, false, `${label}: 不得写 attachments 键`);
+    return;
+  }
+  assert.equal(json(state.attachments), json(expected), `${label}: attachments`);
+}
+
+await it("T-M1 Read 图片结果：投影带 attachments + mediaLayout，还原逐字节等值且不突变原条目", () => {
+  const content = [image()];
+  const originalBlock = content[0];
+  const entry = {
+    message: { role: "tool", content, toolCallId: "call_m", toolName: "Read", isError: false },
+  };
+  const entryBefore = json(entry);
+
+  const part = projectToolPart(content);
+  // 先取还原结果：新导出缺失时用例红在这里（TypeError），而不是红在投影形状上。
+  const restored = json(toolResultContentOf(part));
+  const { state } = part;
+
+  assert.equal(state.output, "");
+  assert.equal(json(state.attachments), json([{ mime: "image/png", url: PNG_1X1 }]));
+  assert.equal(Array.isArray(state.mediaLayout), true, "mediaLayout 缺失");
+  assert.equal(state.mediaLayout.length, 1);
+  const [item] = state.mediaLayout;
+  assert.equal(item.attachment, 0);
+  assert.equal(item.block.dataUrl, null);
+  assert.equal(item.block !== originalBlock, true, "layout.block 不得与原块共享引用");
+  assert.equal(json(Object.keys(item.block)), json(Object.keys(originalBlock)));
+  assert.equal(state.attachments[0].url === originalBlock.dataUrl, true, "url 须是原字符串引用");
+
+  assert.equal(json(entry), entryBefore, "投影改写了宿主 entry");
+  assert.equal(restored, json(content));
+});
+
+await it("T-M2 混合内容：媒体判据、顺序与逐字节往返", () => {
+  // 主形态：text + pdf + image。
+  {
+    const content = [text("page 1 says hello"), file("application/pdf"), image()];
+    const part = projectToolPart(content);
+    const restored = json(toolResultContentOf(part));
+    assert.equal(part.state.output, "page 1 says hello");
+    assertAttachments(part.state, [
+      { mime: "application/pdf", url: PNG_1X1 },
+      { mime: "image/png", url: PNG_1X1 },
+    ]);
+    assert.equal(json(layoutOrder(part)), json([undefined, 0, 1]));
+    assert.equal(
+      json(part.state.mediaLayout.map((item) => item.block)),
+      json(expectedLayout(content, [undefined, 0, 1])),
+    );
+    assert.equal(restored, json(content));
+  }
+
+  // （1）收进 attachments。
+  const collected = [
+    {
+      label: "[image, text, text]（node_repl 形态）",
+      content: [image(), text("emitted"), text("done")],
+      output: "emitted\n\ndone",
+      attachments: [{ mime: "image/png", url: PNG_1X1 }],
+      order: [0, undefined, undefined],
+    },
+    {
+      label: "[video]（Read 视频）",
+      content: [video()],
+      output: "",
+      attachments: [{ mime: "video/mp4", url: PNG_1X1 }],
+      order: [0],
+    },
+    {
+      label: "file + video/*",
+      content: [file("video/mp4")],
+      output: "",
+      attachments: [{ mime: "video/mp4", url: PNG_1X1 }],
+      order: [0],
+    },
+    {
+      label: "pdf 臂大小写与分号不敏感",
+      content: [file("Application/PDF; charset=binary")],
+      output: "",
+      attachments: [{ mime: "Application/PDF; charset=binary", url: PNG_1X1 }],
+      order: [0],
+    },
+  ];
+  // （2）留在 layout、不进 attachments。
+  const layoutOnly = [
+    {
+      label: "无 dataUrl 的 image",
+      block: { type: "image", mediaType: "image/png", source: { id: "read-image" } },
+    },
+    { label: "dataUrl 为空串的 pdf file", block: file("application/pdf", { dataUrl: "" }) },
+    { label: "mediaType 为 audio/mp4 的 video", block: video("audio/mp4") },
+    {
+      label: "带非空 text 的 pdf file",
+      block: file("application/pdf", { text: "extracted text" }),
+    },
+  ];
+
+  for (const { label, content, output, attachments, order } of collected) {
+    const part = projectToolPart(content);
+    const restored = json(toolResultContentOf(part));
+    assert.equal(part.state.output, output, `${label}: output`);
+    assertAttachments(part.state, attachments, label);
+    assert.equal(json(layoutOrder(part)), json(order), `${label}: 顺序`);
+    assert.equal(
+      json(part.state.mediaLayout.map((item) => item.block)),
+      json(expectedLayout(content, order)),
+      `${label}: layout`,
+    );
+    assert.equal(restored, json(content), `${label}: 往返`);
+  }
+  for (const { label, block } of layoutOnly) {
+    const content = [block];
+    const part = projectToolPart(content);
+    const restored = json(toolResultContentOf(part));
+    assertAttachments(part.state, undefined, label);
+    assert.equal(json(layoutOrder(part)), json([undefined]), `${label}: 顺序`);
+    assert.equal(
+      json(part.state.mediaLayout.map((item) => item.block)),
+      json(content),
+      `${label}: layout`,
+    );
+    assert.equal(restored, json(content), `${label}: 往返`);
+  }
+});
+
+await it("T-M3 纯文本结果：投影形状逐字节不变，还原返回字符串", () => {
+  const snapshots = [
+    {
+      content: "a.ts\nb.ts",
+      part: {
+        type: "tool",
+        callID: "call_m",
+        tool: "Bash",
+        state: { status: "completed", output: "a.ts\nb.ts" },
+      },
+    },
+    {
+      content: [text("first"), text("second")],
+      part: {
+        type: "tool",
+        callID: "call_m",
+        tool: "Bash",
+        state: { status: "completed", output: "first\n\nsecond" },
+      },
+    },
+  ];
+  for (const { content, part: snapshot } of snapshots) {
+    const part = projectToolPart(content, { toolName: "Bash" });
+    const restored = toolResultContentOf(part);
+    assert.equal("attachments" in part.state, false, "纯文本结果不得写 attachments");
+    assert.equal("mediaLayout" in part.state, false, "纯文本结果不得写 mediaLayout");
+    assert.equal(json(part), json(snapshot));
+    assert.equal(restored, snapshot.state.output);
+  }
+});
+
+await it("T-M6 被丢弃的媒体结果：还原只剩 [dropped §N§] 文本，不含媒体块", () => {
+  const dropped = "[dropped §7§]";
+  const part = {
+    type: "tool",
+    callID: "call_m",
+    tool: "Read",
+    state: {
+      status: "completed",
+      output: dropped,
+      attachments: [],
+      mediaLayout: [{ attachment: 0, block: { ...image(), dataUrl: null } }],
+    },
+  };
+  assert.equal(json(toolResultContentOf(part)), json([text(dropped)]));
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
