@@ -89,7 +89,11 @@ const PNG_DATA_URL =
 const MP4_DATA_URL = "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28y";
 const PDF_DATA_URL = "data:application/pdf;base64,JVBERi0xLjcK";
 
-/** Read 图片的原始块：键序 `type, mediaType, dataUrl, source`（core read.ts formatReadImageOutput）。 */
+/**
+ * Read 图片的原始块：键序 `type, mediaType, dataUrl, source`（core read.ts formatReadImageOutput）。
+ * source 只保留 `id`、`placeholder` 两键的简化形状（真实形状还有 `kind`、`mimeType`、`sizeBytes`），
+ * 还原对 source 的键数不敏感，不影响断言。
+ */
 function readImageBlock(dataUrl = PNG_DATA_URL) {
   return {
     type: "image",

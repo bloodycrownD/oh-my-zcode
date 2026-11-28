@@ -68,7 +68,7 @@ state.mediaLayout?: Array<{ attachment?: number; block: object }>
 
 **为什么 block 保留 `dataUrl` 键而只置值**：bootstrap 的 `sameContent`（`magic-context-turn-transform.ts:712-720`）用 `JSON.stringify` 逐字节比较块，键序敏感。Read 图片原块键序是 `type, mediaType, dataUrl, source`（`read.ts:100-112`）；若把 dataUrl 整个删掉再在还原时尾插，键序变成 `type, mediaType, source, dataUrl`，`isUnchanged` 恒假，每 pass 重建、outcome 恒 `applied`。保留键位、同键覆写，还原出的对象与原块逐字节相同。
 
-- 没有媒体块的工具结果：不写 `attachments`、不写 `mediaLayout`，投影形状与今天逐字节相同。
+- 纯文本结果（字符串，或全部为 text 块）：不写 `attachments`、不写 `mediaLayout`，投影形状与今天逐字节相同。含非 text 块的结果即使没有可收集的媒体，也写 `mediaLayout`（见下「其余块」一条）。
 - `isError` 的工具结果：`toolResultToPart` 按 `message.isError === true` 跳过媒体收集，照旧只投影 error 文本，不写 `attachments` / `mediaLayout`（adapters 对 error 结果整体文本化）。
 - 媒体判据对齐 `contracts/src/model/media-policy.ts:17-34`（包内不 import contracts）。只有一处刻意加严：候选门要求 `dataUrl` 为非空 string（contracts 的 image 臂不查 dataUrl，file 臂只查 `!== undefined`；空 dataUrl 的块 provider 侧本就会报错，不收）。候选块三条任一成立即媒体：
   - `type === "image"`；
@@ -108,7 +108,7 @@ toolResultContentOf(part: {
 ### 涉及但不改的既有行为（写进预期，避免被当回归）
 
 - 图片在后续每一轮都随历史重发，直到被 core 的 40MiB 媒体预算挤出，或模型 `inputFormat.supportsImage` 为 false 时被 `adapters/src/model/media-transform-policy.ts` 的 `unsupportedInputMediaText` 换成占位文本。这与 transform 关闭时一致。
-- `session-inheritance.ts` 的 `toolKey(tool, output)`：纯图片结果 output 为 `""`，fork 继承时这类调用的锚点区分度下降。本次不处理，列为已知限制。
+- `session-inheritance.ts` 的 `toolKey(tool, output)`：纯图片结果 output 为 `""`，fork 继承时这类调用的锚点区分度下降。这是改前就有的形态（原先图片被丢、output 也是 `""`），本改动不改善也不恶化；本次不处理，列为已知限制。
 - 视频与 PDF 文件在 `estimateToolAttachmentImageTokens` 里不计 token（上游口径：只计 `image/*`）。本次不处理。
 - `raw-message-provider.ts:186` 的读路径同样走 `projectRuntimeEntries`，historian 看到的 tool part 从此带 attachments，相关 token 估算会上升——媒体真的会上路，属正确行为。`tail-hygiene-walk.ts:740` 同理。
 - LKG 的 per-session priors（64MB 上限，`lkg-replay.ts:74/111`）持有的正是 `lkgContentFields` 的产物（`lkg-replay.ts:78-81`、`:97-119`）。改动后投影里开始出现 base64，但 Step 2 的占位让超过 1024 的 `data:` 字符串不再进 fields，所以 priors 基本不会被 base64 撑大；≤1024 的短 `data:` 字符串仍原样保留，有界。
@@ -119,7 +119,7 @@ toolResultContentOf(part: {
 ```
 apps/zcode-cli/packages/magic-context/
   src/host/types.ts                         # ToolLikePart 增字段；toolResultToPart 带媒体；新增 toolResultContentOf
-  src/index.ts                              # 导出 toolResultContentOf
+  src/index.ts                              # 导出 toolResultContentOf 等类型
   src/core/hooks/magic-context/lkg-slot.ts  # 指纹对 data URL 占位（FORK 登记）
   scripts/test-host.mjs                     # T-M1 ~ T-M3、T-M6
   scripts/test-transform.mjs                # T-M4、T-M5、T-M7
@@ -132,6 +132,7 @@ apps/zcode-cli/packages/adapters/
   package.json                              # test:tool-result-media-projection
 docs/
   iterations/magic-context-tool-media-roundtrip/spec.md
+  iterations/magic-context-tool-media-roundtrip/e2e/e2e-tool-media.mjs  # 真实链路 e2e，T-E1 ~ T-E3
   apm/memory/20261128-magic-context-tool-media-roundtrip.md
 ```
 
@@ -140,13 +141,14 @@ docs/
 | 文件 | 改动 |
 |---|---|
 | `magic-context/src/host/types.ts` | `ToolLikePart.state` 增 `attachments?`、`mediaLayout?`；新增类型别名 `ZCodeToolResultContent`；`toolResultToPart` 用新 helper 拆 content；新增 `toolResultContentOf`；每个改动点带 `FORK（magic-context-tool-media-roundtrip / Step N）` 注释说明为什么不能进 output |
-| `magic-context/src/index.ts` | barrel 导出 `toolResultContentOf` 与 `ZCodeToolResultContent` |
+| `magic-context/src/index.ts` | barrel 导出 `toolResultContentOf`、`ZCodeToolResultContent`、`ToolResultAttachment`、`ToolResultMediaLayoutItem` |
 | `magic-context/scripts/test-host.mjs` | T-M1 ~ T-M3、T-M6 |
 | `magic-context/scripts/test-transform.mjs` | T-M4、T-M5、T-M7（注册在末尾循环之前） |
 | `magic-context/src/core/hooks/magic-context/lkg-slot.ts` | `lkgContentFields` 的 string 分支加 data URL 占位；文件内 FORK 注释块（源位置 / 上游语义 / ZCode 差异 / 改动面） |
 | `bootstrap/src/app/magic-context-turn-transform.ts` | 删 `toolOutputOf`；`isUnchanged` tool 分支与 `rebuildEntry` tool 分支改用 `toolResultContentOf`；FORK 行内注释 |
 | `bootstrap/scripts/test-tool-result-media-roundtrip.mjs` | 新建；结构仿 `test-mural-media-blocks.mjs`（dist 驱动、临时目录隔离、`MAGIC_CONTEXT_DB_DIR`） |
 | `adapters/scripts/test-tool-result-media-projection.mjs` | 新建；结构仿 `test-tool-result-cache-control.mjs` |
+| `docs/iterations/magic-context-tool-media-roundtrip/e2e/e2e-tool-media.mjs` | 新增；不调模型的真实链路 e2e（T-E1 ~ T-E3），Step 8 的自动化版本 |
 
 ## 详细实现步骤
 
@@ -208,7 +210,7 @@ adapters（`adapters/scripts/test-tool-result-media-projection.mjs`，吃 dist�
 | 打标后 output 为 `"§N§ "` 这类近空文本进模型 | 与今天文本结果被打标的形态一致；模型看到章号后紧跟图片，属预期（已核实 `isToolPartWithOutput` 不要求非空，纯图片结果会打标） |
 | `jsonPrefix`（重放输出）带完整媒体（`mediaLayout[].block.dataUrl` 是 null，base64 只在 `attachments[].url` 出现一份），撑大 LKG 槽 | 受既有 24MB/槽、64MB 总量预算约束，超限走既有失效路径；不占位，否则重放丢图。真机若观察到 LKG 频繁失效再单独立项 |
 | 媒体在 drop 之后仍可能上路（存量 tag 行回放与 legacy 转换不 strip） | 四处，全部只在**存量** tag 行上触发，本改动后的新 drop 不产生新增（首次 drop 一律按 `hasAttachments()` 传 strip 并持久化为 `skeleton_stripped`，回放走 `apply-operations.ts:575` 的 `skeleton_stripped` 臂）：① legacy `truncateToolPart`（`tool-drop-target.ts:163-187`）不清 attachments，`apply-operations.ts:583` 的 `truncated` 臂回放它；② `apply-operations.ts:578-579` 的 `skeleton_real` 臂与 `:260`（`renderConvertedToolSkeletons`）调 `skeletonReal` 时不传 strip；③ `apply-operations.ts:242` 的 legacy 转换把 `full` 换成 `skeleton_real` 时同样不 strip；④ `tool-drop-target.ts:510` 的 `drop()` 在会搁浅对话结尾时直接返回 `skeletonReal()`（首 pass 由 `apply-operations.ts:102-104` 按 `hasAttachments()` 补成 `skeleton_stripped`，不留存量）。效果：这些条目的 output 已是 `[dropped §N§]`、attachments 仍非空，反投影走 `state.output !== base` 分支还原成「占位文本 + 媒体」——图片对已被 drop 的工具重新上路并计费。成因是修复前的投影根本不带 attachments，这些 tag 行落库时 `hasAttachments()` 恒假。属安全方向（不丢数据、不产生孤立调用），本次不改；真机若观察到已 drop 工具的图片重复上路，再单独立项让回放臂按 `hasAttachments()` 补 strip |
-| fork 继承锚点区分度下降（纯图片结果 output 为 `""`） | 已知限制，本次不改；`session-inheritance` 命中率若明显下降在 `test-magic-context-fork-inherit.mjs` 里可见 |
+| fork 继承锚点区分度下降（纯图片结果 output 为 `""`） | 改前既有形态，本改动不改善也不恶化；已知限制，本次不改；`session-inheritance` 命中率若明显下降在 `test-magic-context-fork-inherit.mjs` 里可见 |
 | 旧会话 | 冷恢复靠 artifact store + `modelContentLayout`，与本次改动无关；缺 layout 的存量行仍只能拿到占位文本 |
 | LKG 指纹占位改变存量会话的输入指纹 | 属安全失效：旧槽匹配不上，走一次完整 transform 后重建 |
 

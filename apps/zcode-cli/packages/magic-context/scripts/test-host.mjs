@@ -1177,7 +1177,7 @@ await it("T-M3 纯文本结果：投影形状逐字节不变，还原返回字�
   }
 });
 
-await it("T-M6 被丢弃的媒体结果：还原只剩 [dropped §N§] 文本，不含媒体块", () => {
+await it("T-M6（tool-media-roundtrip）被丢弃的媒体结果：还原只剩 [dropped §N§] 文本，不含媒体块", () => {
   const dropped = "[dropped §7§]";
   const part = {
     type: "tool",
