@@ -157,7 +157,7 @@ docs/
 - Step 5 — phase-tests-bootstrap — blocking: yes — qa: auto：新建 `test-tool-result-media-roundtrip.mjs` 与 script；覆盖 T-H1 ~ T-H5。依赖先 build `@zcode/magic-context`、`@zcode/core`、`@zcode/bootstrap`。
 - Step 6 — phase-adapters-regression — blocking: no — qa: auto：新建 `test-tool-result-media-projection.mjs`（T-A1），锁定「anthropic → image-data、openai-chat-completions → 后置 user、supportsImage=false → omitted 文本、video → 强制 textify」的既有契约。adapters 源码不改。
 - Step 7 — phase-gates — blocking: yes — qa: auto：`pnpm --filter @zcode/magic-context build` 等三包 build → `pnpm --dir apps/zcode-cli exec node ../../node_modules/turbo/bin/turbo run typecheck` → 根 `pnpm typecheck` / `pnpm lint`（warning 数不高于当前基线、0 error）→ apps/zcode-cli 包内 oxfmt（改动文件零新增不合规，`src/core/` 豁免）→ 改动文件归一 LF → 回归：magic-context `test:all`、bootstrap `test:magic-context`、`test:mural-media-blocks`、新建的 `test:tool-result-media-roundtrip`，以及 `cd apps/zcode-cli/packages/bootstrap && node --test scripts/test-magic-context-fork-inherit.mjs`（该文件没有 npm script 入口，直跑）。
-- Step 8 — phase-real-verify — blocking: no — qa: manual_user：桌面真机（记忆 #302 / #315 的隔离与启动要点）：用支持图片的模型让它 Read 一张 PNG，确认模型能描述图片内容；查 `~/.omz/cli/debug/model-io-<sessionId>.jsonl` 末条请求的 `request.body.messages`，`tool_result` 的 content 里应出现 `[data omitted from model-io: image/png, N chars]`，修复前该处只有空文本。先确认该模型配置 `properties.inputFormat.supportsImage === true`。**必须一并核对 drop 衔接**（自动化用例没有覆盖真实链路：宿主侧 T-H1 ~ T-H5 全走桩 transform，T-M5 只在 core 层验证 drop 清空 attachments，两半的衔接只靠读代码确认）：把上下文压到触发 ctx_reduce、让带图的工具结果被 drop（可在 `magic-context.db` 里确认该 call 的 tag 行 drop 模式为 `skeleton_stripped`，表名以 `apply-operations.ts` 的 `updateTagDropMode` 实际写入为准），再看末条请求里对应 `tool_result` 的 content 应**只有** `[dropped §N§]` 文本、不再出现 `image/png` 的 media 条目；同时连续两轮查看同一请求，未被改写的带图条目不应每轮都重建（`magic_context.wire` 的 outcome 不应恒为 `applied`）。
+- Step 8 — phase-real-verify — blocking: no — qa: manual_user：桌面真机（记忆 #302 / #315 的隔离与启动要点）：用支持图片的模型让它 Read 一张 PNG，确认模型能描述图片内容；查 `~/.omz/cli/debug/model-io-<sessionId>.jsonl` 末条请求的 `request.body.messages`，`tool_result` 的 content 里应出现 `[data omitted from model-io: image/png, N chars]`，修复前该处只有空文本。先确认该模型配置 `properties.inputFormat.supportsImage === true`。**必须一并核对 drop 衔接**（自动化用例没有覆盖真实链路：宿主侧 T-H1 ~ T-H5 全走桩 transform，T-M5 只在 core 层验证 drop 清空 attachments，两半的衔接只靠读代码确认）：把上下文压到触发 ctx_reduce、让带图的工具结果被 drop（可在 `magic-context.db` 里确认该 call 的 tag 行 drop 模式为 `skeleton_stripped`，表名以 `apply-operations.ts` 的 `updateTagDropMode` 实际写入为准），再看末条请求里对应 `tool_result` 的 content 应**只有** `[dropped §N§]` 文本、不再出现 `image/png` 的 media 条目；打标会给 output 加 `§N§` 前缀，所以带图条目每轮都会重建、outcome 恒为 `applied` 是常态（文本结果同理），真机要核对的是同一请求连续两轮该条目内容逐字节稳定。drop 衔接已由不调模型的 e2e `docs/iterations/magic-context-tool-media-roundtrip/e2e/e2e-tool-media.mjs` 自动覆盖（T-E1~T-E3），真机只需确认它在桌面运行形态下同样成立。
 
 ## 测试策略
 
@@ -192,7 +192,13 @@ adapters（`adapters/scripts/test-tool-result-media-projection.mjs`，吃 dist�
 
 真机：
 
-- T-E1 — blocking: no — qa: manual_user — Step 8 的桌面验收：模型能描述 Read 的图片；model-io 里 `tool_result` 带媒体；被 drop 的带图工具结果只剩 `[dropped §N§]`、媒体不再出现（drop 模式应为 `skeleton_stripped`）；未改写的带图条目跨轮复用、outcome 不恒为 `applied`。
+- T-E1 — blocking: no — qa: manual_user — Step 8 的桌面验收（drop 衔接的自动化版本见下方 e2e 的 T-E1~T-E3）：模型能描述 Read 的图片；model-io 里 `tool_result` 带媒体；被 drop 的带图工具结果只剩 `[dropped §N§]`、媒体不再出现（drop 模式应为 `skeleton_stripped`）；未改写的带图条目跨轮内容逐字节稳定（每轮重建、outcome 恒为 `applied` 是常态）。
+
+不调模型的真实链路 e2e（`docs/iterations/magic-context-tool-media-roundtrip/e2e/e2e-tool-media.mjs`，真实 port + 真实 transform + 真实 sqlite，占用读数自报、不装 historian）：
+
+- e2e T-E1 — 上路：Read 图片的 tool_result 在发给模型的内容里带 image 块，与原块逐字节相同（修复前此处是字符串 `"§3§ "`）。
+- e2e T-E2 — 复用：同一输入再跑一遍，该条目上路内容与上一轮逐字节相同。
+- e2e T-E3 — drop：占用压到 95% 并排一条 pending drop 后，上路只剩 `[dropped §3§]` 文本、没有媒体，tags 行 drop 模式为 `skeleton_stripped`，再跑一遍仍是 drop 形态（修复前是 `skeleton_real`）。
 
 ## 风险与回滚方案
 
