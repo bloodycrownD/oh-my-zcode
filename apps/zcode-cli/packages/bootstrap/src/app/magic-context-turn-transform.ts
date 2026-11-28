@@ -170,6 +170,7 @@ import {
   setMuralVisionProbe,
   setRawMessageProvider,
   snapshotRuntimeEntries,
+  toolResultContentOf,
   updateSessionMeta,
   type ContextDatabase,
   type MagicContextConfig,
@@ -719,11 +720,6 @@ function sameContent(left: ModelMessageContent, right: ModelMessageContent): boo
   });
 }
 
-function toolOutputOf(part: ToolPart): string {
-  if (typeof part.state?.output === "string") return part.state.output;
-  return typeof part.state?.error === "string" ? part.state.error : "";
-}
-
 /**
  * 重建后的消息与原始 entry 等价时**复用原始 entry 对象**。
  *
@@ -760,7 +756,10 @@ function isUnchanged(message: MessageLike, original: RuntimeMessageEntry): boole
     const only = toolResults[0]!;
     if ((only.state?.status === "error") !== (source.isError === true)) return false;
     if (only.callID !== source.toolCallId || only.tool !== (source.toolName ?? "")) return false;
-    return sameContent(toolOutputOf(only), source.content);
+    // FORK（magic-context-tool-media-roundtrip / Step 3）：还原的唯一实现在包的
+    // `toolResultContentOf`；本函数与 `rebuildEntry` 必须同源，否则带媒体的条目每 pass
+    // 都被判成「已改写」。readonly 块数组与 contracts 的闭合联合不兼容，经 unknown 过渡。
+    return sameContent(toolResultContentOf(only) as unknown as ModelMessageContent, source.content);
   }
 
   if (message.info.role !== source.role) return false;
@@ -796,7 +795,7 @@ function rebuildEntry(
     return {
       message: {
         role: "tool",
-        content: toolOutputOf(only),
+        content: toolResultContentOf(only) as unknown as ModelMessageContent,
         toolCallId: typeof only.callID === "string" ? only.callID : "",
         toolName: typeof only.tool === "string" ? only.tool : "",
         ...(failed ? { isError: true } : {}),
@@ -2155,14 +2154,11 @@ export function createZCodeMagicContextTurnTransformPort(
         liveMessagesForHeal,
       );
       if (healEndOrdinal !== null) {
-        options.logger.warn(
-          "Magic context compartment ledger reset: boundary beyond history",
-          {
-            sessionId,
-            endOrdinal: healEndOrdinal,
-            liveMessages: liveMessagesForHeal,
-          },
-        );
+        options.logger.warn("Magic context compartment ledger reset: boundary beyond history", {
+          sessionId,
+          endOrdinal: healEndOrdinal,
+          liveMessages: liveMessagesForHeal,
+        });
       }
     }
 
